@@ -25,18 +25,17 @@ _Static_assert(sizeof(rae_Mat4) == 16 * sizeof(float),
 #endif
 
 int64_t rae_gb_prepare(void){ return 0; }
-int64_t rae_gb_frame_uniform(rae_Mat4* viewProj, float clearR, float clearG, float clearB){
-    (void)viewProj; (void)clearR; (void)clearG; (void)clearB; return 0;
+/* #906: the frame uniform data (36 floats) — never written without a device. */
+int64_t rae_gb_frame_data(rae_Mat4* viewProj, float clearR, float clearG, float clearB,
+                          int64_t w, int64_t h, void* out){
+    (void)viewProj; (void)clearR; (void)clearG; (void)clearB; (void)w; (void)h; (void)out; return 0;
 }
-void rae_gb_set_frame_ubuf(void* buf)   { (void)buf; }
-void rae_gb_set_draws_buffer(void* buf) { (void)buf; }
 int64_t rae_gb_offscreen_w(void)        { return 0; }
 int64_t rae_gb_offscreen_h(void)        { return 0; }
-int64_t rae_gb_targets_match(int64_t w, int64_t h) { (void)w; (void)h; return 0; }
-int64_t rae_gb_targets_ready(void)      { return 0; }
-void rae_gb_release_targets_ext(void)   {}
-void rae_gb_set_target(int64_t idx, void* tex, void* view) { (void)idx; (void)tex; (void)view; }
-void rae_gb_commit_targets(int64_t w, int64_t h) { (void)w; (void)h; }
+void rae_gb_commit_targets(int64_t w, int64_t h, void* a, void* b, void* c, void* depth) {
+    (void)w; (void)h; (void)a; (void)b; (void)c; (void)depth;
+}
+void rae_gb_forget_targets(void)        {}
 int64_t rae_gb_targets_gen(void)        { return 0; }
 const char* rae_gb_wgsl(void)      { return ""; }
 const char* rae_gb_skin_wgsl(void) { return ""; }
@@ -45,17 +44,12 @@ void* rae_gb_view_b(void)     { return (void*)0; }
 void* rae_gb_view_c(void)     { return (void*)0; }
 void* rae_gb_view_depth(void) { return (void*)0; }
 float rae_gb_motion_zero(void){ return 128.0f / 255.0f; }
-void rae_gb_set_frame(void* enc, void* pass){ (void)enc; (void)pass; }
+void rae_gb_set_frame_open(int64_t open){ (void)open; }
 /* The static AND skinned single draws, plus the instanced draw, now run in Rae
  * (lib/gbuffer.rae: draw / drawSkinned / drawRecords, #502/#503); they call
  * these context accessors, so builds without the real geometry pass need no-op
  * versions. mesh_ready / skin_ready return 0, so the Rae draws early-return and
  * issue no GPU work. */
-void* rae_gb_pass(void)                 { return (void*)0; }
-void* rae_gb_draws_buffer(void)         { return (void*)0; }
-int64_t rae_gb_max_draws(void)          { return 0; }
-int64_t rae_gb_draw_count(void)         { return 0; }
-void rae_gb_advance_draws(int64_t count){ (void)count; }
 void* rae_gb_skin_palette(void)         { return (void*)0; }
 int64_t rae_gb_skin_palette_size(void)  { return 0; }
 int64_t rae_gb_skin_palette_ready(void) { return 0; }
@@ -63,13 +57,7 @@ int64_t rae_gb_skin_ready(int64_t mesh) { (void)mesh; return 0; }
 void* rae_gb_skin_vbuf(int64_t mesh)    { (void)mesh; return (void*)0; }
 void* rae_gb_skin_ibuf(int64_t mesh)    { (void)mesh; return (void*)0; }
 int64_t rae_gb_skin_icount(int64_t mesh){ (void)mesh; return 0; }
-void* rae_gb_encoder(void)              { return (void*)0; }
-void rae_gb_clear_frame(void)           {}
-int64_t rae_gb_frame_active(void)       { return 0; }
 void rae_gb_submit(void* cmd)           { (void)cmd; }
-void* rae_gb_frame_ubuf(void)           { return (void*)0; }
-int64_t rae_gb_frame_bytes(void)        { return 0; }
-int64_t rae_gb_draws_size(void)         { return 0; }
 int64_t rae_gb_sdf_prepare(void* packedBalls, int64_t count, void* packedColors,
                            float smoothing, float camX, float camY, float camZ,
                            float metallic, float roughness,
@@ -81,7 +69,6 @@ int64_t rae_gb_sdf_prepare(void* packedBalls, int64_t count, void* packedColors,
 void* rae_gb_sdf_pipeline(void)   { return (void*)0; }
 void* rae_gb_sdf_bind(int64_t gi) { (void)gi; return (void*)0; }
 void rae_ext_Gbuffer_sdfShutdown(void) {}
-int64_t rae_ext_Gbuffer_drawCount(void) { return 0; }
 const char* rae_gb_view_wgsl(void)  { return ""; }
 int64_t rae_g2d_format(void)        { return 0; }
 void rae_ext_Gbuffer_present(void* texture, int64_t width, int64_t height) { (void)texture; (void)width; (void)height; }

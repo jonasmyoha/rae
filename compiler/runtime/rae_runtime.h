@@ -871,7 +871,6 @@ void* rae_gt_get(int64_t i);
  * bindings). Declared here — not by a WebGPU header — so the generated C sees
  * real prototypes and does not truncate the 64-bit handle pointers. Unguarded:
  * the stub build (no real geometry pass) provides no-op versions too. */
-void* rae_gb_pass(void);
 void  rae_gb_bump_terrain_tex_gen(void);
 int64_t rae_gb_terrain_tex_gen(void);
 void* rae_gb_terrain_array_view(void);   /* #912: the C material array's 2d-array view, adopted by Rae */
@@ -881,10 +880,6 @@ void* rae_gb_sprite_array_view(void);
 int64_t rae_gb_sprite_tex_gen(void);
 void rae_gb_sprite_array_init(int64_t w, int64_t h, int64_t layers);
 void rae_gb_sprite_array_write(int64_t layer, const int64_t* pixels, int64_t w, int64_t h);
-void* rae_gb_draws_buffer(void);
-int64_t rae_gb_max_draws(void);
-int64_t rae_gb_draw_count(void);
-void rae_gb_advance_draws(int64_t count);
 /* G-buffer metaball draw in Rae (#504). */
 int64_t rae_gb_sdf_prepare(void* packedBalls, int64_t count, void* packedColors,
                            float smoothing, float camX, float camY, float camZ,
@@ -899,31 +894,27 @@ int64_t rae_gb_skin_icount(int64_t mesh);
 void* rae_gb_skin_palette(void);
 int64_t rae_gb_skin_palette_size(void);
 int64_t rae_gb_skin_palette_ready(void);
-/* Geometry-pass finish/submit ported to Rae (#503). */
-void* rae_gb_encoder(void);
-void rae_gb_clear_frame(void);
-int64_t rae_gb_frame_active(void);
+/* One-command-buffer submit for the raw-encoder passes (shadow, fullscreen,
+ * transparent, the legacy GpuTiming): a general FFI gap, not renderer state. */
 void rae_gb_submit(void* cmd);
-/* Geometry-pass begin ported to Rae (#503): C preps pipelines+targets, Rae
- * creates buffers/bind groups and builds the render pass, then C uploads the
- * frame uniform. rae_Mat4 is forward-declared (defined later in the generated
- * C, after this header) — only a pointer is needed. */
+/* #906: the geometry frame is the Rae GbufferCache's (manager targets, frame
+ * uniform, draws buffer, a Recording per frame). C keeps the frame-derived
+ * uniform math (rae_gb_frame_data writes 36 floats into a Rae buffer), a
+ * "pass open" flag for the metaball prep, and BORROWS the target views + size
+ * for its still-C post passes. rae_Mat4 is forward-declared (defined later in
+ * the generated C, after this header) — only a pointer is needed. */
 struct rae_Mat4;
 int64_t rae_gb_prepare(void);
-int64_t rae_gb_frame_uniform(struct rae_Mat4* viewProj, float clearR, float clearG, float clearB);
-void rae_gb_set_frame_ubuf(void* buf);
-void rae_gb_set_draws_buffer(void* buf);
-/* Target textures/views created in Rae (#503). */
+int64_t rae_gb_frame_data(struct rae_Mat4* viewProj, float clearR, float clearG, float clearB,
+                          int64_t w, int64_t h, void* out);
+void rae_gb_set_frame_open(int64_t open);
 int64_t rae_gb_offscreen_w(void);
 int64_t rae_gb_offscreen_h(void);
 /* Dynamic resolution (#530). */
 void   rae_gb_set_render_scale(double s);
 double rae_gb_render_scale(void);
-int64_t rae_gb_targets_match(int64_t w, int64_t h);
-int64_t rae_gb_targets_ready(void);
-void rae_gb_release_targets_ext(void);
-void rae_gb_set_target(int64_t idx, void* tex, void* view);
-void rae_gb_commit_targets(int64_t w, int64_t h);
+void rae_gb_commit_targets(int64_t w, int64_t h, void* a, void* b, void* c, void* depth);
+void rae_gb_forget_targets(void);
 int64_t rae_gb_targets_gen(void);
 /* Render pipelines + WGSL shader modules created in Rae (#503). */
 const char* rae_gb_wgsl(void);
@@ -1029,7 +1020,6 @@ void* rae_gb_view_b(void);
 void* rae_gb_view_c(void);
 void* rae_gb_view_depth(void);
 float rae_gb_motion_zero(void);
-void rae_gb_set_frame(void* enc, void* pass);
 /* Forward renderer (#514): frame prepare + handle accessors for the Rae-side
  * forward render pass (gpu3d.beginForward). Mirrors the rae_gb_* deferred set. */
 int   rae_g3d_frame_prepare(const float* frame, int64_t count);
@@ -1090,9 +1080,5 @@ void* rae_g3d_skin_bind(void);
 void* rae_g3d_skin_vbuf(int64_t mesh);
 void* rae_g3d_skin_ibuf(int64_t mesh);
 int64_t rae_g3d_skin_icount(int64_t mesh);
-/* Static bind group creation moved to Rae (#503). */
-void* rae_gb_frame_ubuf(void);
-int64_t rae_gb_frame_bytes(void);
-int64_t rae_gb_draws_size(void);
 
 #endif

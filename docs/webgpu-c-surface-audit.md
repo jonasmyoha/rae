@@ -373,3 +373,43 @@ palette (`g3d_skin_vbuf/ibuf`, `rae_gb_skin_*`, `rae_ext_Gpu3d_setPalette`,
 the palette storage buffer the skin bind groups and shadow casters read) —
 they are one subsystem with the C skin pipeline and move together.
 
+
+**#906 update (shared renderer slice 3a — the geometry FRAME):** the deferred
+geometry frame is the Rae `GbufferCache`'s (`lib/Gbuffer.rae`,
+`lib/GbufferResources.rae`), on the DeferredRenderer-owned manager. The four
+G-buffer targets (A rgb10a2, B/C rgba8, depth32) + their views are manager
+`TextureId`/`TextureViewId`s rebuilt by `ensureTargets` to the offscreen size
+(`rae_gb_offscreen_w/h` — the surface at the render scale, C glue) with a Rae
+`targetsGen`; the frame uniform and the draws storage buffer are manager
+`BufferId`s (`ensureGbBuffers`, `gbufferMaxDraws = 4096`,
+`gbufferFrameFloats = 36`) with the draw cursor `drawCount` in Rae; each frame
+is a manager `Recording` opened with the new multi-attachment
+`gpu/GpuRenderPass.beginRenderPassMulti` over a `RenderTargetSet` (three
+colour views + depth, per-attachment clear colours) and submitted TRACKED by
+`end(cache:, resources:)` (pipelines + binds recorded as uses; `inFlight`
+polled per frame, drained by `gbufferShutdown`). Every G-buffer draw — static,
+skinned, instanced, terrain, sprite, grass, transparent — writes its records
+with `writeBufferFromPtr` into `cache.draws` at the cursor and records into
+`cache.pass`. The terrain, sprite and transparent binds name the frame
+buffers by ID (no adoption); grass and water live in the App's manager and
+BORROW the frame uniform / depth view handles across managers (a Rae-owned
+external now, no C accessor). C keeps: the WGSL sources; the frame-derived
+uniform MATH (`rae_gb_frame_data(viewProj, clear, w, h, out)` fills the 36
+floats and remembers the jittered / previous view-projection + clear colour
+for the still-C SSAO / lighting / SDF uploads — the `rae_g2d_xform(out)`
+pattern); `rae_gb_set_frame_open` (the metaball prep's "pass open" check);
+and it BORROWS the four views + size (`rae_gb_commit_targets(w, h, a, b, c,
+depth)` / `rae_gb_forget_targets`) for the pyramid's mip-0 read and the size
+its lit / AO / TAA / pyramid targets are built to (`rae_gb_view_a/b/c/depth`,
+`rae_gb_targets_gen` still read by the post passes). Removed from C:
+`gb_a/b/c/depth_tex`, `gb_frame_ubuf`, `gb_draw_sbuf`, `gb_draw_count`,
+`gb_enc`, `gb_pass`, `rae_gb_set_target / targets_match / targets_ready /
+release_targets_ext / set_frame_ubuf / set_draws_buffer / frame_ubuf /
+draws_buffer / frame_bytes / draws_size / max_draws / draw_count /
+advance_draws / frame_uniform / set_frame / pass / encoder / clear_frame /
+frame_active` and the gated `rae_ext_Gbuffer_drawCount` (allowlist −1, gate
+13). `rae_ext_Gbuffer_shutdown` only forgets the borrowed views and resets
+the frame math now. Still C, filed as follow-ups: the shadow maps
+(`rae_sm_*`) + the SDF prepare (slice 3b) and the owner-teardown replacement
+of `Gbuffer.shutdownAll()` + the legacy `lib/GpuTiming` fold + the lit / AO /
+TAA / pyramid targets and their post-pass adoptions (slice 3c).

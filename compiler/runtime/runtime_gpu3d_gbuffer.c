@@ -60,14 +60,15 @@
 #define GB_VIEW_MATERIAL 3
 #define GB_VIEW_DEPTH    4
 
-static WGPUTexture     gb_a_tex = NULL;   /* rgb10a2unorm oct-normal + mode */
-static WGPUTextureView gb_a_view = NULL;
-static WGPUTexture     gb_b_tex = NULL;   /* rgba8unorm   albedo + roughness */
-static WGPUTextureView gb_b_view = NULL;
-static WGPUTexture     gb_c_tex = NULL;   /* rgba8unorm   motion + metallic + ao/emissive */
-static WGPUTextureView gb_c_view = NULL;
-static WGPUTexture     gb_depth_tex = NULL;    /* depth32float, sampleable */
-static WGPUTextureView gb_depth_view = NULL;
+/* #906: the G-buffer targets are Rae manager textures owned by the
+ * DeferredRenderer's GbufferCache (lib/GbufferResources.rae ensureTargets).
+ * C BORROWS the four views (rae_gb_commit_targets) for the passes that are
+ * still C — the depth pyramid's mip-0 read and the size the lit / AO / TAA /
+ * pyramid targets are built to — and forgets them at renderer shutdown. */
+static WGPUTextureView gb_a_view = NULL;       /* rgb10a2unorm oct-normal + mode (borrowed) */
+static WGPUTextureView gb_b_view = NULL;       /* rgba8unorm   albedo + roughness (borrowed) */
+static WGPUTextureView gb_c_view = NULL;       /* rgba8unorm   motion + metallic + ao/emissive (borrowed) */
+static WGPUTextureView gb_depth_view = NULL;   /* depth32float, sampleable (borrowed) */
 static int             gb_target_w = 0, gb_target_h = 0;
 /* Bumped every time the G-buffer textures are recreated. Anything holding
  * a bind group that references those views (the inspector, the pyramid,
@@ -77,18 +78,16 @@ static int             gb_target_w = 0, gb_target_h = 0;
 static int             gb_targets_gen = 0;
 
 /* #912: the static / skin / terrain pipelines and bind groups are manager IDs
- * on the Rae side (lib/Gbuffer.rae, lib/GbufferTerrain.rae); C keeps the frame
- * uniform + draws buffer (adopted there) and the WGSL sources. */
-static WGPUBuffer         gb_frame_ubuf = NULL;
-static WGPUBuffer         gb_draw_sbuf = NULL;
-static int                gb_draw_count = 0;
+ * on the Rae side (lib/Gbuffer.rae, lib/GbufferTerrain.rae); #906: so are the
+ * frame uniform, the draws buffer, the draw cursor and the frame's command
+ * encoder / render pass (a manager Recording per frame). C keeps the WGSL
+ * sources, the frame-derived uniform MATH below and a "pass open" flag for
+ * the metaball prep, which still runs here. */
 /* Metaball cluster slots are PER FRAME (#392). Declared here because the
  * reset belongs beside every other per-frame counter, while the buffers
  * live in runtime_gpu3d_gbuffer_sdf.c, which is included after this. */
 static int                gb_sdf_group;
-
-static WGPUCommandEncoder    gb_enc = NULL;
-static WGPURenderPassEncoder gb_pass = NULL;
+static int                gb_frame_open = 0;   /* 1 between the Rae begin and end */
 
 /* This frame's view-projection and clear colour, kept for the LIGHTING
  * pass. Lighting reconstructs world position from depth, which needs the
@@ -567,15 +566,11 @@ GB_OCT_WGSL
 "  return vec4<f32>(pow(c, vec3<f32>(1.0 / 2.2)), 1.0);\n"
 "}\n";
 
+/* Forget the borrowed target views (the Rae owner retired them). Releases
+ * nothing: C never owned them (#906). */
 static void gb_release_targets(void) {
-    if (gb_a_view) { wgpuTextureViewRelease(gb_a_view); gb_a_view = NULL; }
-    if (gb_a_tex)  { wgpuTextureRelease(gb_a_tex); gb_a_tex = NULL; }
-    if (gb_b_view) { wgpuTextureViewRelease(gb_b_view); gb_b_view = NULL; }
-    if (gb_b_tex)  { wgpuTextureRelease(gb_b_tex); gb_b_tex = NULL; }
-    if (gb_c_view) { wgpuTextureViewRelease(gb_c_view); gb_c_view = NULL; }
-    if (gb_c_tex)  { wgpuTextureRelease(gb_c_tex); gb_c_tex = NULL; }
-    if (gb_depth_view)   { wgpuTextureViewRelease(gb_depth_view); gb_depth_view = NULL; }
-    if (gb_depth_tex)    { wgpuTextureRelease(gb_depth_tex); gb_depth_tex = NULL; }
+    gb_a_view = NULL; gb_b_view = NULL; gb_c_view = NULL; gb_depth_view = NULL;
+    gb_target_w = 0; gb_target_h = 0;
 }
 
 /* The G-buffer is sized to the offscreen target, and reallocated on
@@ -607,12 +602,9 @@ const char* rae_gb_skin_wgsl(void) { return GB_SKIN_WGSL; }
  * Rae with the biome + noise chunks) and lib/grass_render.wgsl; the grass GPU objects
  * are typed IDs in the App-owned manager, so the C slot store is gone too. */
 
-/* Accessors + setters for the Rae-side buffer / bind-group creation (#503). */
-void* rae_gb_frame_ubuf(void)      { return (void*)gb_frame_ubuf; }
-int64_t rae_gb_frame_bytes(void)   { return (int64_t)GB_FRAME_BYTES; }
-int64_t rae_gb_draws_size(void)    { return (int64_t)((uint64_t)GB_MAX_DRAWS * GB_DRAW_FLOATS * sizeof(float)); }
-void rae_gb_set_frame_ubuf(void* buf)   { gb_frame_ubuf = (WGPUBuffer)buf; }
-void rae_gb_set_draws_buffer(void* buf) { gb_draw_sbuf = (WGPUBuffer)buf; }
+/* #906: the frame uniform + draws buffer are manager buffers on the Rae
+ * GbufferCache (lib/GbufferResources.rae ensureGbBuffers); rae_gb_frame_ubuf /
+ * draws_buffer / frame_bytes / draws_size and their setters are gone. */
 
 /* The G-buffer inspector (pipeline + uniform + bind group + the fullscreen
  * pass) is built in Rae (lib/GbufferInspector.rae, #503) and, since #904, its
@@ -681,34 +673,27 @@ static int rae_gb_scale_dim(int full) {
 /* #920: the presentable target is the canvas's, built to the surface size. */
 int64_t rae_gb_offscreen_w(void)  { return (int64_t)rae_gb_scale_dim(g_sdl_w); }
 int64_t rae_gb_offscreen_h(void)  { return (int64_t)rae_gb_scale_dim(g_sdl_h); }
-int64_t rae_gb_targets_match(int64_t w, int64_t h) {
-    return (gb_depth_view && (int)w == gb_target_w && (int)h == gb_target_h) ? 1 : 0;
-}
-int64_t rae_gb_targets_ready(void) {
-    return (gb_a_view && gb_b_view && gb_c_view && gb_depth_view) ? 1 : 0;
-}
-void rae_gb_release_targets_ext(void) { gb_release_targets(); }
-void rae_gb_set_target(int64_t idx, void* tex, void* view) {
-    switch ((int)idx) {
-        case 0: gb_a_tex = (WGPUTexture)tex;     gb_a_view = (WGPUTextureView)view;     break;
-        case 1: gb_b_tex = (WGPUTexture)tex;     gb_b_view = (WGPUTextureView)view;     break;
-        case 2: gb_c_tex = (WGPUTexture)tex;     gb_c_view = (WGPUTextureView)view;     break;
-        case 3: gb_depth_tex = (WGPUTexture)tex; gb_depth_view = (WGPUTextureView)view; break;
-        default: break;
-    }
-}
-void rae_gb_commit_targets(int64_t w, int64_t h) {
+/* #906: Rae created the targets in its manager; C borrows the four views +
+ * the size for its still-C passes, and bumps the generation the post-passes
+ * (and the C deferred targets) re-fit on. */
+void rae_gb_commit_targets(int64_t w, int64_t h, void* a, void* b, void* c, void* depth) {
+    gb_a_view = (WGPUTextureView)a; gb_b_view = (WGPUTextureView)b;
+    gb_c_view = (WGPUTextureView)c; gb_depth_view = (WGPUTextureView)depth;
     gb_target_w = (int)w; gb_target_h = (int)h; gb_targets_gen++;
 }
+void rae_gb_forget_targets(void) { gb_release_targets(); }
 /* Bumped whenever the targets are recreated (resize). The inspector rebuilds
  * its bind group when this changes, since it samples the G-buffer views. */
 int64_t rae_gb_targets_gen(void) { return (int64_t)gb_targets_gen; }
 
-/* Reset the per-frame counters and build+upload the TAA-jittered frame uniform
- * (stateful CPU math that stays C). Needs the Rae-created frame uniform buffer. */
-int64_t rae_gb_frame_uniform(rae_Mat4* viewProj, float clearR, float clearG, float clearB) {
-    if (!viewProj || !gb_frame_ubuf) return 0;
-    gb_draw_count = 0;
+/* The frame-derived uniform DATA (#906, the rae_g2d_xform(out) pattern): the
+ * TAA-jittered frame uniform's 36 floats written to `out` for Rae to upload
+ * into its manager buffer, plus the stateful CPU math that the still-C passes
+ * read (the jittered / previous view-projection, the clear colour) and the
+ * per-frame metaball slot reset. Returns 1 when written. */
+int64_t rae_gb_frame_data(rae_Mat4* viewProj, float clearR, float clearG, float clearB,
+                          int64_t w, int64_t h, void* out) {
+    if (!viewProj || !out) return 0;
     /* Without this the counter climbs past GB_SDF_MAX_GROUPS after a few
      * frames and every later cluster is silently dropped — metaballs that
      * render for two frames and then vanish, with no error anywhere. The
@@ -730,10 +715,10 @@ int64_t rae_gb_frame_uniform(rae_Mat4* viewProj, float clearR, float clearG, flo
      * un-resolved image, so suppress it — matching the forward path, which also
      * zeroes jitter when its TAA is disabled. */
     float jx = 0.0f, jy = 0.0f;
-    if (gb_target_w > 0 && gb_target_h > 0 && rae_gb_taa_is_enabled()) {
+    if (w > 0 && h > 0 && rae_gb_taa_is_enabled()) {
         const int hi = (gb_jitter_frame % 16) + 1;
-        jx = (g3d_halton(hi, 2) - 0.5f) * 2.0f / (float)gb_target_w;
-        jy = (g3d_halton(hi, 3) - 0.5f) * 2.0f / (float)gb_target_h;
+        jx = (g3d_halton(hi, 2) - 0.5f) * 2.0f / (float)w;
+        jy = (g3d_halton(hi, 3) - 0.5f) * 2.0f / (float)h;
     }
     gb_jitter_frame++;
 
@@ -746,13 +731,12 @@ int64_t rae_gb_frame_uniform(rae_Mat4* viewProj, float clearR, float clearG, flo
         gb_viewproj_jittered[c * 4 + 1] += jy * gb_viewproj_jittered[c * 4 + 3];
     }
 
-    float fu[36];
-    memset(fu, 0, sizeof(fu));
+    float* fu = (float*)out;
+    memset(fu, 0, GB_FRAME_BYTES);
     memcpy(fu, viewProj->m.v, 16 * sizeof(float));
     memcpy(fu + 16, gb_prev_viewproj, 16 * sizeof(float));
     fu[32] = jx; fu[33] = jy;
-    wgpuQueueWriteBuffer(g_wgpu_queue, gb_frame_ubuf, 0, fu, GB_FRAME_BYTES);
-    /* Remember for NEXT frame, after this frame's copy is on the GPU. */
+    /* Remember for NEXT frame, after this frame's copy is handed over. */
     memcpy(gb_prev_viewproj, viewProj->m.v, 16 * sizeof(float));
     return 1;
 }
@@ -767,12 +751,10 @@ void* rae_gb_view_depth(void) { return (void*)gb_depth_view; }
 /* The biased zero the motion channel clears to (128/255); Rae uses it for the
  * C-target clear so a static background reads as "not moving". */
 float rae_gb_motion_zero(void) { return GB_MOTION_ZERO; }
-/* Store the Rae-created command encoder + render pass so the draws and the C
- * metaball path see the live frame, and end() can finish it. */
-void rae_gb_set_frame(void* enc, void* pass) {
-    gb_enc = (WGPUCommandEncoder)enc;
-    gb_pass = (WGPURenderPassEncoder)pass;
-}
+/* #906: the frame's encoder + pass are the Rae GbufferCache's (a manager
+ * Recording); C only learns whether a geometry pass is open, for the metaball
+ * prep and the skin readiness check. */
+void rae_gb_set_frame_open(int64_t open) { gb_frame_open = open ? 1 : 0; }
 
 /* Queue one mesh into the G-buffer. `model` arrives as a Mat4 by value —
  * 16 floats the caller already had on the stack — and is memcpy'd into a
@@ -802,7 +784,7 @@ int64_t rae_gb_skin_palette_ready(void){ return g3d_skin_palette_sbuf ? 1 : 0; }
 int64_t rae_gb_skin_ready(int64_t mesh) {
     int slot = (int)mesh - 1;
     /* #912: the skin pipeline / bind are manager objects checked on the Rae side. */
-    if (!gb_pass) return 0;
+    if (!gb_frame_open) return 0;
     if (slot < 0 || slot >= g3d_skin_mesh_n) return 0;
     if (!g3d_skin_vbuf[slot] || !g3d_skin_ibuf[slot]) return 0;
     return 1;
@@ -824,7 +806,7 @@ int64_t rae_gb_skin_icount(int64_t mesh){ int s=(int)mesh-1; return (s>=0 && s<g
  * its slice at [base .. base+count) and advances the cursor, exactly as the old
  * C drawRecords did. The static vertex shader indexes draws[instance_index], so
  * instanceCount=N / firstInstance=base gives each instance its own record. */
-void* rae_gb_pass(void)          { return (void*)gb_pass; }
+/* #906: rae_gb_pass is gone — the open pass is GbufferCache.pass in Rae. */
 /* #533/#9/#14 textured terrain: the terrain-splat pipeline, its bind group, the
  * repeat sampler and the blend amount are manager objects / cache fields on the
  * Rae side since #912 (lib/GbufferTerrain.rae). C keeps the material ARRAY as an
@@ -948,15 +930,9 @@ void rae_gb_sprite_array_write(int64_t layer, const int64_t* pixels, int64_t w, 
     free(rgba);
 }
 
-void* rae_gb_draws_buffer(void)  { return (void*)gb_draw_sbuf; }
-int64_t rae_gb_max_draws(void)   { return (int64_t)GB_MAX_DRAWS; }
-int64_t rae_gb_draw_count(void)  { return (int64_t)gb_draw_count; }
-void rae_gb_advance_draws(int64_t count) {
-    if (count <= 0) return;
-    if (gb_draw_count + (int)count > GB_MAX_DRAWS) gb_draw_count = GB_MAX_DRAWS;
-    else gb_draw_count += (int)count;
-}
-/* #905: rae_gb_mesh_* are gone — the Rae MeshStore owns the meshes. */
+/* #905: rae_gb_mesh_* are gone — the Rae MeshStore owns the meshes.
+ * #906: rae_gb_draws_buffer / max_draws / draw_count / advance_draws are gone —
+ * the draw cursor is GbufferCache.drawCount in Rae (gbufferMaxDraws). */
 
 /* Finish and submit the geometry pass. Uniform data uploads once here, not
  * per draw. */
@@ -965,11 +941,6 @@ void rae_gb_advance_draws(int64_t count) {
  * encoder and let it clear the encoder/pass globals once the pass is submitted,
  * so the C metaball path and the draws see a live pass during the frame and a
  * cleared one after. */
-void* rae_gb_encoder(void) { return (void*)gb_enc; }
-void rae_gb_clear_frame(void) { gb_pass = NULL; gb_enc = NULL; }
-/* 1 while a geometry pass is open (between begin and end), so Rae can guard
- * end() without null-testing an opaque Ptr. */
-int64_t rae_gb_frame_active(void) { return gb_pass ? 1 : 0; }
 /* Submit exactly one command buffer. wgpuQueueSubmit takes a POINTER to an
  * array of command buffers; Rae has no way yet to take the address of a single
  * handle (and List(Ptr) — Ptr being Buffer(void) — nests wrongly in the
@@ -979,8 +950,6 @@ void rae_gb_submit(void* cmd) {
     WGPUCommandBuffer c = (WGPUCommandBuffer)cmd;
     wgpuQueueSubmit(g_wgpu_queue, 1, &c);
 }
-
-int64_t rae_ext_Gbuffer_drawCount(void) { return (int64_t)gb_draw_count; }
 
 /* Write one G-buffer channel into the presentable target. */
 /* The debug-view pass moved to Rae (lib/gbuffer_inspector.rae debugView, #503). */
@@ -993,9 +962,12 @@ void rae_ext_Gbuffer_present(void* texture, int64_t width, int64_t height) {
     rae_g3d_present_offscreen((WGPUTexture)texture, (int)width, (int)height);
 }
 
+/* #906: C owns nothing of the geometry frame any more; this forgets the
+ * borrowed target views and resets the frame-derived math so a renderer
+ * created afterwards starts from a clean first frame. */
 void rae_ext_Gbuffer_shutdown(void) {
     gb_release_targets();
-    if (gb_draw_sbuf)     { wgpuBufferRelease(gb_draw_sbuf); gb_draw_sbuf = NULL; }
-    if (gb_frame_ubuf)    { wgpuBufferRelease(gb_frame_ubuf); gb_frame_ubuf = NULL; }
-    gb_target_w = 0; gb_target_h = 0;
+    gb_have_prev_vp = false;
+    gb_jitter_frame = 0;
+    gb_frame_open = 0;
 }

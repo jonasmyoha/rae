@@ -782,7 +782,12 @@ func main() ret Int {
                 resources: resources
                 world: asset1.world
               )
-              renderSdfGbuffer(world: asset1.world, tags: clusters1, camera: camera)
+              renderSdfGbuffer(
+                cache: renderer.passes.gbuffer
+                world: asset1.world
+                tags: clusters1
+                camera: camera
+              )
             }
             if uiState.activeScene is 2 {
               GbufferWorld.renderSceneWorld(
@@ -790,7 +795,12 @@ func main() ret Int {
                 resources: resources
                 world: asset2.world
               )
-              renderSdfGbuffer(world: asset2.world, tags: clusters2, camera: camera)
+              renderSdfGbuffer(
+                cache: renderer.passes.gbuffer
+                world: asset2.world
+                tags: clusters2
+                camera: camera
+              )
             }
             if uiState.activeScene is 3 {
               GbufferWorld.renderSceneWorld(
@@ -798,9 +808,14 @@ func main() ret Int {
                 resources: resources
                 world: asset3.world
               )
-              renderSdfGbuffer(world: asset3.world, tags: clusters3, camera: camera)
+              renderSdfGbuffer(
+                cache: renderer.passes.gbuffer
+                world: asset3.world
+                tags: clusters3
+                camera: camera
+              )
             }
-            Gbuffer.endPass()
+            Gbuffer.endPass(cache: renderer.passes.gbuffer, resources: resources)
           }
         }
         if tag is RenderTag.ssao or tag is RenderTag.depthPyramid or tag is RenderTag.lighting or tag is RenderTag.transparentForward or tag is RenderTag.taa or tag is RenderTag.composite {

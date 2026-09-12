@@ -10,6 +10,7 @@
 # (drawSpriteInstances has no active-example caller today; it keeps the
 # resource shape so a future sprite pass threads a cache like every other pass.)
 open Gbuffer
+open GbufferResources
 open Scene3d
 open webgpu/Webgpu
 open webgpu/Context
@@ -18,6 +19,7 @@ open gpu/GpuResources
 open gpu/GpuLifetime
 open gpu/GpuRender
 open gpu/GpuRenderPass
+open gpu/GpuRenderTransfer
 open gpu/GpuArgs
 open gpu/GpuIds
 
@@ -36,18 +38,6 @@ func gbSpriteArrayWrite(
   h: Int
 ) unsafe extern("rae_gb_sprite_array_write")
 
-func gbFrameUbuf() unsafe extern("rae_gb_frame_ubuf") ret Ptr
-
-func gbDrawsBuffer() unsafe extern("rae_gb_draws_buffer") ret Ptr
-
-func gbPass() unsafe extern("rae_gb_pass") ret Ptr
-
-func gbDrawCount() unsafe extern("rae_gb_draw_count") ret Int
-
-func gbMaxDraws() unsafe extern("rae_gb_max_draws") ret Int
-
-func gbAdvanceDraws(count: Int) unsafe extern("rae_gb_advance_draws")
-
 type SpriteCache {
   pipeMade: Bool
   bindGen: Int
@@ -56,8 +46,6 @@ type SpriteCache {
   uniform: BufferId
   sampler: SamplerId
   arrayView: ExternalId
-  frameUniform: ExternalId
-  draws: ExternalId
 }
 
 func createSpriteCache() ret SpriteCache {
@@ -69,8 +57,6 @@ func createSpriteCache() ret SpriteCache {
     uniform: noBufferId()
     sampler: noSamplerId()
     arrayView: noExternalId()
-    frameUniform: noExternalId()
-    draws: noExternalId()
   }
 }
 
@@ -142,7 +128,11 @@ func ensureSpriteDefaults(cache: mod SpriteCache, resources: mod GpuResources) {
   }
 }
 
-func ensureSpritePipeline(cache: mod SpriteCache, resources: mod GpuResources) {
+func ensureSpritePipeline(
+  cache: mod SpriteCache
+  resources: mod GpuResources
+  gbuffer: view GbufferCache
+) {
   if not cache.pipeMade {
     cache.pipeMade = true
     var composed: String = ""
@@ -168,16 +158,12 @@ func ensureSpritePipeline(cache: mod SpriteCache, resources: mod GpuResources) {
     ret
   }
   cache.bindGen = gen
-  # The array view changed generation: re-adopt the externals and rebuild the
+  # The array view changed generation: re-adopt the external and rebuild the
   # bind group (the old one retires behind any frame still drawing with it).
   retireBindGroup(resources: resources, id: cache.bindGroup)
   cache.bindGroup = noBindGroupId()
   releaseExternal(resources: resources, id: cache.arrayView)
-  releaseExternal(resources: resources, id: cache.frameUniform)
-  releaseExternal(resources: resources, id: cache.draws)
   cache.arrayView = noExternalId()
-  cache.frameUniform = noExternalId()
-  cache.draws = noExternalId()
   unsafe {
     if let arrayView: ExternalId = adoptExternalTextureView(
       resources: resources
@@ -185,19 +171,10 @@ func ensureSpritePipeline(cache: mod SpriteCache, resources: mod GpuResources) {
     ) {
       cache.arrayView = arrayView
     }
-    if let frameUniform: ExternalId = adoptExternalBuffer(
-      resources: resources
-      handle: gbFrameUbuf()
-    ) {
-      cache.frameUniform = frameUniform
-    }
-    if let draws: ExternalId = adoptExternalBuffer(resources: resources, handle: gbDrawsBuffer()) {
-      cache.draws = draws
-    }
   }
   let entries: List(ResourceRef) = List.create(ResourceRef, cap: 5)
-  entries.add(value: externalRef(id: cache.frameUniform))
-  entries.add(value: externalRef(id: cache.draws))
+  entries.add(value: bufferRef(id: gbuffer.frameUniform))
+  entries.add(value: bufferRef(id: gbuffer.draws))
   entries.add(value: bufferRef(id: cache.uniform))
   entries.add(value: externalRef(id: cache.arrayView))
   entries.add(value: samplerRef(id: cache.sampler))
@@ -254,27 +231,30 @@ func spriteSetParams(
 func drawSpriteInstances(
   cache: mod SpriteCache
   resources: mod GpuResources
+  gbuffer: mod GbufferCache
   records: copy Ptr
   count: copy Int
 ) unsafe {
   if count <= 0 {
     ret
   }
-  ensurePipelineForDraw(cache: cache, resources: resources)
+  ensurePipelineForDraw(cache: cache, resources: resources, gbuffer: gbuffer)
   unsafe {
-    let base: Int = gbDrawCount()
-    if base + count > gbMaxDraws() {
+    let base: Int = gbDrawCount(cache: gbuffer)
+    if base + count > gbufferMaxDraws {
       ret
     }
     let strideBytes: Int = spriteRecordFloats * 4
-    wgpuQueueWriteBuffer(
-      queue: webgpuQueue()
-      buffer: gbDrawsBuffer()
-      bufferOffset: (base * strideBytes) as UInt64
+    if not writeBufferFromPtr(
+      resources: resources
+      id: gbuffer.draws
+      offset: base * strideBytes
       data: records
-      size: (count * strideBytes) as UInt64
-    )
-    let pass: Ptr = gbPass()
+      size: count * strideBytes
+    ) {
+      ret
+    }
+    let pass: Ptr = gbuffer.pass
     if pass is webgpuNull() {
       ret
     }
@@ -289,13 +269,17 @@ func drawSpriteInstances(
       firstVertex: 0
       firstInstance: base
     ) {
-      gbAdvanceDraws(count: count)
+      gbAdvanceDraws(cache: gbuffer, count: count)
     }
   }
 }
 
-func ensurePipelineForDraw(cache: mod SpriteCache, resources: mod GpuResources) {
-  ensureSpritePipeline(cache: cache, resources: resources)
+func ensurePipelineForDraw(
+  cache: mod SpriteCache
+  resources: mod GpuResources
+  gbuffer: view GbufferCache
+) {
+  ensureSpritePipeline(cache: cache, resources: resources, gbuffer: gbuffer)
 }
 
 # Retire the pass's GPU objects (renderer shutdown); the array texture is the
@@ -306,7 +290,5 @@ func spriteShutdown(cache: mod SpriteCache, resources: mod GpuResources) {
   retireBuffer(resources: resources, id: cache.uniform)
   retireSampler(resources: resources, id: cache.sampler)
   releaseExternal(resources: resources, id: cache.arrayView)
-  releaseExternal(resources: resources, id: cache.frameUniform)
-  releaseExternal(resources: resources, id: cache.draws)
   cache = createSpriteCache()
 }

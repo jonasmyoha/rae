@@ -1,9 +1,9 @@
 # GbufferResources — the geometry pass's manager-object setup (#918 split of
-# Gbuffer for the 1000-line cap): the offscreen targets (makeTarget /
-# ensureTargets over the C surface size), the frame + draws buffers, the
-# static and skinned bind groups, the attachment views, the SDF prepare and
-# the pipeline specs. Gbuffer's frame API calls these each begin; nothing here
-# is app-facing.
+# Gbuffer for the 1000-line cap; manager-owned frame since #906): the four
+# G-buffer targets (createTarget / ensureTargets to the C offscreen size, the
+# views borrowed by C's remaining passes), the frame + draws buffers, the
+# static and skinned bind groups and the pipeline specs. Gbuffer's frame API
+# calls these each begin; nothing here is app-facing.
 import Math
 import String
 open SkyHosek
@@ -23,138 +23,188 @@ open gpu/GpuIds
 open GbufferNative
 open Gbuffer
 
-# One G-buffer attachment: a 2D texture (render target + sampleable) and its
-# full view. mipLevelCount/sampleCount are 1, so an explicit single-mip 2D view
-# is the default view — equivalent to the null-descriptor the C path used.
-func makeTarget(
-  idx: copy Int
+# The G-buffer's four attachments (A, B, C, depth) and their formats.
+const gbufferTargetCount: Int = 4
+
+const gbufferTargetA: Int = 0  # rgb10a2unorm: oct(normal).xy, reserved, shading mode
+
+const gbufferTargetB: Int = 1  # rgba8unorm: albedo.rgb, roughness
+
+const gbufferTargetC: Int = 2  # rgba8unorm: motion.xy, metallic, occlusion-or-emissive
+
+const gbufferTargetDepth: Int = 3  # depth32float, reverse-Z, sampleable
+
+# The frame uniform: viewProj + prevViewProj + jitter (36 floats, #390/#397).
+const gbufferFrameFloats: Int = 36
+
+# The draws storage buffer holds this many DrawU records per frame (was C's
+# GB_MAX_DRAWS); every draw path clamps to it.
+const gbufferMaxDraws: Int = 4096
+
+func gbufferTargetFormat(index: copy Int) ret Int32 {
+  if index is gbufferTargetA {
+    ret WGPUTextureFormat_RGB10A2Unorm
+  }
+  if index is gbufferTargetDepth {
+    ret WGPUTextureFormat_Depth32Float
+  }
+  ret WGPUTextureFormat_RGBA8Unorm
+}
+
+func gbufferTargetView(cache: view GbufferCache, index: copy Int) ret TextureViewId {
+  if let id: TextureViewId = cache.targetViews.copyAt(index: index) {
+    ret id
+  }
+  ret noTextureViewId()
+}
+
+# A target view as a pass / bind-group entry.
+func gbufferTargetRef(cache: view GbufferCache, index: copy Int) ret ResourceRef {
+  ret textureViewRef(id: gbufferTargetView(cache: cache, index: index))
+}
+
+func gbufferTargetsReady(cache: view GbufferCache, resources: view GpuResources) ret Bool {
+  loop var i: Int = 0, i < gbufferTargetCount, ++i {
+    if not isValidTextureView(resources: resources, id: gbufferTargetView(cache: cache, index: i)) {
+      ret false
+    }
+  }
+  ret true
+}
+
+# One G-buffer attachment (#906: a manager texture + view): render target +
+# sampleable, single mip, the manager's default 2D view.
+func createTarget(
+  cache: mod GbufferCache
+  resources: mod GpuResources
+  index: copy Int
   w: copy Int
   h: copy Int
-  format: copy Int32
-) {
-  unsafe {
-    let td: WGPUTextureDescriptor = {
-      usage: WGPUTextureUsage_RenderAttachment + WGPUTextureUsage_TextureBinding
-      dimension: WGPUTextureDimension_2D
-      size: { width: w as UInt32, height: h as UInt32, depthOrArrayLayers: 1 as UInt32 }
-      format: format
-      mipLevelCount: 1 as UInt32
-      sampleCount: 1 as UInt32
+) ret Bool {
+  if let texture: TextureId = createTexture(
+    resources: resources
+    width: w
+    height: h
+    format: gbufferTargetFormat(index: index)
+    usage: WGPUTextureUsage_RenderAttachment + WGPUTextureUsage_TextureBinding
+  ) {
+    if let textureView: TextureViewId = createTextureView(resources: resources, texture: texture) {
+      cache.targets.set(index: index, value: texture)
+      cache.targetViews.set(index: index, value: textureView)
+      ret true
     }
-    let tex: Ptr = wgpuDeviceCreateTexture(device: webgpuDevice(), descriptor: td)
-    let vd: WGPUTextureViewDescriptor = {
-      format: format
-      dimension: WGPUTextureViewDimension_2D
-      baseMipLevel: 0 as UInt32
-      mipLevelCount: 1 as UInt32
-      baseArrayLayer: 0 as UInt32
-      arrayLayerCount: 1 as UInt32
-      aspect: WGPUTextureAspect_All
-    }
-    let texView: Ptr = wgpuTextureCreateView(texture: tex, descriptor: vd)
-    gbSetTarget(idx: idx, tex: tex, texView: texView)
+    retireTexture(resources: resources, id: texture)
   }
+  ret false
 }
 
-# (Re)create the three colour targets + depth when the offscreen size changes.
-func ensureTargets() {
+# Retire the four targets (a rebuild or shutdown); the manager releases them
+# once no in-flight frame uses them. C forgets its borrowed views.
+func retireTargets(cache: mod GbufferCache, resources: mod GpuResources) {
+  loop var i: Int = 0, i < gbufferTargetCount, ++i {
+    if let textureView: TextureViewId = cache.targetViews.copyAt(index: i) {
+      retireTextureView(resources: resources, id: textureView)
+    }
+    if let texture: TextureId = cache.targets.copyAt(index: i) {
+      retireTexture(resources: resources, id: texture)
+    }
+    cache.targetViews.set(index: i, value: noTextureViewId())
+    cache.targets.set(index: i, value: noTextureId())
+  }
+  cache.targetWidth = 0
+  cache.targetHeight = 0
+  gbForgetTargets()
+}
+
+# (Re)create the three colour targets + depth when the offscreen size (the
+# surface at the render scale, C glue) changes; the borrowed views + size go
+# to C for the post passes that are still there, and the generation bumps so
+# every consumer re-fits its bind groups.
+func ensureTargets(cache: mod GbufferCache, resources: mod GpuResources) {
   let w: Int = gbOffscreenW()
   let h: Int = gbOffscreenH()
-  if w <= 0 {
+  if w <= 0 or h <= 0 {
     ret
   }
-  if h <= 0 {
+  if w is cache.targetWidth and h is cache.targetHeight and gbufferTargetsReady(
+    cache: cache
+    resources: resources
+  ) {
     ret
   }
-  if gbTargetsMatch(w: w, h: h) is 1 {
+  retireTargets(cache: cache, resources: resources)
+  var made: Bool = true
+  loop var i: Int = 0, i < gbufferTargetCount, ++i {
+    if not createTarget(
+      cache: cache
+      resources: resources
+      index: i
+      w: w
+      h: h
+    ) {
+      made = false
+    }
+  }
+  if not made {
+    retireTargets(cache: cache, resources: resources)
     ret
   }
-  gbReleaseTargets()
-  makeTarget(
-    idx: 0
-    w: w
-    h: h
-    format: WGPUTextureFormat_RGB10A2Unorm
-  )
-  makeTarget(
-    idx: 1
-    w: w
-    h: h
-    format: WGPUTextureFormat_RGBA8Unorm
-  )
-  makeTarget(
-    idx: 2
-    w: w
-    h: h
-    format: WGPUTextureFormat_RGBA8Unorm
-  )
-  makeTarget(
-    idx: 3
-    w: w
-    h: h
-    format: WGPUTextureFormat_Depth32Float
-  )
-  gbCommitTargets(w: w, h: h)
+  cache.targetWidth = w
+  cache.targetHeight = h
+  cache.targetsGen = cache.targetsGen + 1
+  unsafe {
+    gbCommitTargets(
+      w: w
+      h: h
+      a: refHandle(resources: resources, ref: gbufferTargetRef(cache: cache, index: gbufferTargetA))
+      b: refHandle(resources: resources, ref: gbufferTargetRef(cache: cache, index: gbufferTargetB))
+      c: refHandle(resources: resources, ref: gbufferTargetRef(cache: cache, index: gbufferTargetC))
+      depth: refHandle(
+        resources: resources
+        ref: gbufferTargetRef(cache: cache, index: gbufferTargetDepth)
+      )
+    )
+  }
 }
 
-func ensureGbBuffers(cache: mod GbufferCache) {
-  unsafe {
-    if cache.buffersMade {
-      ret
-    }
-    cache.buffersMade = true
-    let uDesc: WGPUBufferDescriptor = {
+# The frame uniform + draws storage buffers, created once in the manager
+# (they survive resizes). Distinct flag bits, so `+` is the flag union.
+func ensureGbBuffers(cache: mod GbufferCache, resources: mod GpuResources) {
+  if not isValidBuffer(resources: resources, id: cache.frameUniform) {
+    if let frameUniform: BufferId = createBuffer(
+      resources: resources
+      size: gbufferFrameFloats * 4
       usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst
-      size: gbFrameBytes() as UInt64
+    ) {
+      cache.frameUniform = frameUniform
     }
-    gbSetFrameUbuf(buf: wgpuDeviceCreateBuffer(device: webgpuDevice(), descriptor: uDesc))
-    let sDesc: WGPUBufferDescriptor = {
+  }
+  if not isValidBuffer(resources: resources, id: cache.draws) {
+    if let draws: BufferId = createBuffer(
+      resources: resources
+      size: gbufferMaxDraws * instanceRecordFloats * 4
       usage: WGPUBufferUsage_Storage + WGPUBufferUsage_CopyDst
-      size: gbDrawsSize() as UInt64
+    ) {
+      cache.draws = draws
     }
-    gbSetDrawsBuffer(buf: wgpuDeviceCreateBuffer(device: webgpuDevice(), descriptor: sDesc))
   }
 }
 
 # Create the static geometry bind group once (frame uniform @0, draws storage
-# @1 — both created once and surviving resizes, adopted here). Safe to call
-# only after gbPrepare returned 1 and the buffers exist.
+# @1 — manager buffers, created once and surviving resizes).
 func ensureStaticBind(cache: mod GbufferCache, resources: mod GpuResources) {
   if bindGroupIsUsable(resources: resources, id: cache.staticBind) {
     ret
   }
   let entries: List(ResourceRef) = List.create(ResourceRef, cap: 2)
-  unsafe {
-    entries.add(
-      value: adoptBufferRef(resources: resources, adopted: cache.adopted, handle: gbFrameUbuf())
-    )
-    entries.add(
-      value: adoptBufferRef(resources: resources, adopted: cache.adopted, handle: gbDrawsBuffer())
-    )
-  }
-  var made: Bool = false
+  entries.add(value: bufferRef(id: cache.frameUniform))
+  entries.add(value: bufferRef(id: cache.draws))
   if let bind: BindGroupId = createRenderBindGroup(
     resources: resources
     pipeline: cache.staticPipeline
     entries: entries
   ) {
     cache.staticBind = bind
-    made = true
-  }
-  # A failed build drops this attempt's adoptions so a retry does not accumulate slots.
-  if not made {
-    releaseExternalIds(resources: resources, list: cache.adopted)
-  }
-}
-
-# Placeholder entries carry one explicit (zeroed) field — an empty {} is not a
-# valid C initializer. They are rewritten in full by begin() every frame.
-func ensureGbAttachments(cache: mod GbufferCache) {
-  loop cache.colorAtts.length < 3 {
-    cache.colorAtts.add(value: { depthSlice: 0 as UInt32 })
-  }
-  loop cache.depthAtt.length < 1 {
-    cache.depthAtt.add(value: { depthReadOnly: 0 as UInt32 })
   }
 }
 
@@ -215,13 +265,9 @@ func ensureSkinBind(cache: mod GbufferCache, resources: mod GpuResources) {
     ret
   }
   let entries: List(ResourceRef) = List.create(ResourceRef, cap: 3)
+  entries.add(value: bufferRef(id: cache.frameUniform))
+  entries.add(value: bufferRef(id: cache.draws))
   unsafe {
-    entries.add(
-      value: adoptBufferRef(resources: resources, adopted: cache.adopted, handle: gbFrameUbuf())
-    )
-    entries.add(
-      value: adoptBufferRef(resources: resources, adopted: cache.adopted, handle: gbDrawsBuffer())
-    )
     entries.add(
       value: adoptBufferRef(resources: resources, adopted: cache.adopted, handle: gbSkinPalette())
     )
