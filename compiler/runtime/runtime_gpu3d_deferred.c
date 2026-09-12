@@ -1202,7 +1202,7 @@ int64_t rae_gb_deferred_prepare(void) {
     if (!g_wgpu_dev) return 0;
     gb_deferred_init_pipelines();
     gb_deferred_ensure();
-    return (gb_lit_view && g_g2d_off_view) ? 1 : 0;
+    return (gb_lit_view && g_g2d_surface) ? 1 : 0;
 }
 const char* rae_gb_composite_wgsl(void)  { return GB_COMPOSITE_WGSL; }
 void* rae_gb_composite_source_view(void) {

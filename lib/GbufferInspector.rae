@@ -8,6 +8,7 @@
 # externals per targets generation); the pass itself is opened through
 # GbufferPasses' fullscreen helpers and submitted on the shared queue.
 open Gbuffer
+open Gpu2dCanvas
 open GbufferPasses
 open GbufferFullscreen
 open webgpu/Webgpu
@@ -20,14 +21,6 @@ open gpu/GpuIds
 
 # C exposes the inspector WGSL and the presentable format/view.
 func gbViewWgsl() unsafe extern("rae_gb_view_wgsl") ret Buffer(Any)
-
-func nativeG2dOffViewReady() unsafe extern("rae_g2d_off_view_ready") ret Int
-
-func g2dOffViewReady() ret Int {
-  unsafe {
-    ret nativeG2dOffViewReady()
-  }
-}
 
 # #764: the inspector's state was module-level globals; it is per-frame state a
 # deferred renderer owns, so it lives in ViewPassCache on RenderPasses. #904:
@@ -131,11 +124,12 @@ func ensureViewBind(cache: mod ViewPassCache, resources: mod GpuResources) {
 func debugView(
   cache: mod ViewPassCache
   resources: mod GpuResources
+  canvas: mod Gpu2dCanvas
   mode: copy Int
   zNear: copy Float
   zFar: copy Float
 ) pub {
-  if g2dOffViewReady() is 0 {
+  if not canvasEnsureOffscreen(canvas: canvas) {
     ret
   }
   ensureViewPipeline(cache: cache, resources: resources)
@@ -165,7 +159,7 @@ func debugView(
       resources: resources
       pipeline: cache.pipeline
       bind: cache.bindGroup
-      target: g2dOffView()
+      target: canvasOffscreenView(canvas: canvas)
     )
   }
 }
@@ -174,6 +168,7 @@ func debugView(
 func inspect(
   cache: mod ViewPassCache
   resources: mod GpuResources
+  canvas: mod Gpu2dCanvas
   mode: view Int
   zNear: view Float
   zFar: view Float
@@ -181,6 +176,7 @@ func inspect(
   debugView(
     cache: cache
     resources: resources
+    canvas: canvas
     mode: mode
     zNear: zNear
     zFar: zFar

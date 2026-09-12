@@ -768,12 +768,13 @@ func renderDeferredPassWorld(
   light: view Light3d
   aspect: view Float
 ) pub {
-  # Present is still C-driven (#906) and needs no manager.
+  # Present copies the canvas's offscreen target into the drawable (C glue,
+  # #920); with a UI the 2D endFrame does it after the overlay.
   if tag is RenderTag.present {
     if renderer.hasUi {
       Gpu2d.endFrame(canvas: renderer.canvas)
     } else {
-      presentFrame()
+      presentFrame(canvas: renderer.canvas)
     }
     ret
   }
@@ -851,6 +852,7 @@ func renderDeferredPassWith(
       compositePassGraded(
         cache: renderer.passes.composite
         resources: resources
+        canvas: renderer.canvas
         exposure: light.exposure
         grade: renderer.grade
       )
@@ -858,6 +860,7 @@ func renderDeferredPassWith(
       inspect(
         cache: renderer.passes.inspect
         resources: resources
+        canvas: renderer.canvas
         mode: renderer.debugView
         zNear: camera.nearZ
         zFar: camera.farZ

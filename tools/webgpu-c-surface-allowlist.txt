@@ -39,6 +39,10 @@
 #   viewport_uniform, rae_g2d_text_{floats,count,data,clip_at,reset} and the
 #   rae_ext_Gpu2d_{pushClipRect,pushClipRoundedRect,popClipRect,drawGlyph,drawGlyphEx} entry points
 #   are gone; rae_g2d_xform(out) is the one addition (frame-derived uniform data) — for the record.)
+# (#920: the offscreen presentable target is the canvas's texture; rae_g2d_off_view/off_view_ready
+#   and rae_g2d_present_and_cleanup are gone; rae_g2d_present(texture, w, h) / rae_g3d_present_frame(...)
+#   / rae_ext_Gbuffer_present(...) BORROW the texture for the drawable copy + headless readback, and
+#   rae_g2d_surface_ready/width/height report the configured surface — surface glue, for the record.)
 # (#912 removed the geometry-pass slots the same way: rae_gb_{set_,}{pipeline,skin_pipeline,static_bind,
 #   skin_bind,terrain_pipeline,terrain_bind,terrain_tex_view,terrain_sampler,terrain_blend} and
 #   rae_gb_entry_{vs,fs}; the C material array's view is read via rae_gb_terrain_array_view.)
@@ -48,7 +52,8 @@
 rae_ext_Gbuffer_deferredShutdown
 rae_ext_Gbuffer_drawCount
 # present: no-UI final blit to the swapchain; reached from Rae as
-# gbuffer.present() -> presentFrame() -> renderDeferredPass. Platform copy-to-drawable.
+# gbuffer.present(canvas:) -> presentFrame(canvas:) -> renderDeferredPass. Platform copy-to-drawable
+# of the CANVAS-owned offscreen texture it is handed (#920); C owns nothing of the target.
 rae_ext_Gbuffer_present
 rae_ext_Gbuffer_pyramidMips
 rae_ext_Gbuffer_sdfShutdown
