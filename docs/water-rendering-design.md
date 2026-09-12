@@ -51,7 +51,24 @@ the surface under the camera = `waterHeightAt` (Gerstner) for toon water, the #8
 readback cache (`sampleFftSurface`, 0.5 s max age) for FFT water falling back to the
 STILL level when the sample is unavailable or stale (first frames, a tier change that
 invalidated the cache, a non-primary FFT body); overlap = the body the camera is
-deepest under; crossing = a 3 cm hysteresis band. Caustics are #860. #849 (slice 2) is in: `lib/water/waterFft.wgsl` bakes, once per sea state, the
+deepest under; crossing = a 3 cm hysteresis band. Caustics are #860. Desktop SSR is in
+(#854): `waterSurface.wgsl` `ssrTrace` marches the reflected view ray (from a normal
+flattened 60% toward up, so the mirror is not shattered by the FFT facets) in world space
+with quadratically growing steps, projects each step through the frame's view-projection
+and compares its view depth with the G-buffer depth; the first step behind the scene is
+bisected (6 halvings) and accepted when the refined point is within the thickness
+(`waterSsrThickness` 0.6 m, growing with distance) — so a thick object like the island is
+a hit even when a step landed inside it; the opaque lit snapshot (litCopy, the frame
+before the water) is sampled there and blended over the stylised sky by an edge + ray-
+length fade; misses, rays leaving the screen or going down keep the sky. Composition is
+unchanged (the reflection term still goes through Fresnel over the refracted body). The
+switch is `WaterBody.ssr` / `ssrSteps` (on, 24 steps, for `createOceanRealistic`; off on
+`useMobileWaterTier` and for toon lakes); 119 takes `RAE_WATER_SSR=0/1` and
+`RAE_WATER_CALM=1` (a 2 m/s sea, the mirrored island plain to see). Cost, measured with
+`RAE_WATER_PERF=1` through the new render-pass timestamps (`recordDrawIndexedTimed`,
+`WaterSystem.surfacePerf`) at 2560x1600, 3 cascades of 256, matched camera and sea state:
+the surface draw goes from ~3.6 ms to ~6.0 ms GPU (about +2.4 ms), the FFT compute is
+unchanged (~4 ms). #849 (slice 2) is in: `lib/water/waterFft.wgsl` bakes, once per sea state, the
 h0 spectrum per cascade (JONSWAP with the TMA depth factor, Hasselmann directional
 spreading, the k-plane Jacobian, hash-seeded Gaussians, packed as (h0(k), h0(-k)),
 per-cascade k bands handed over where the next, finer tile resolves a wave with ~6

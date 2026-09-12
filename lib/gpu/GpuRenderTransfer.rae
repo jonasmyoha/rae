@@ -29,6 +29,35 @@ func recordDrawIndexed(
   indexBuffer: view ResourceRef
   indexCount: view Int
 ) ret Bool {
+  unsafe {
+    ret recordDrawIndexedTimed(
+      recording: recording
+      resources: resources
+      target: target
+      pipeline: pipeline
+      bindGroup: bindGroup
+      vertexBuffer: vertexBuffer
+      indexBuffer: indexBuffer
+      indexCount: indexCount
+      timestampWrites: webgpuNull()
+    )
+  }
+}
+
+# recordDrawIndexed with the pass's `timestampWrites` (gpu/GpuTiming
+# timingWrites, or null for an untimed pass) — the capture-only GPU timing of a
+# render pass (#854 measures the water surface draw with it).
+func recordDrawIndexedTimed(
+  recording: mod Recording
+  resources: view GpuResources
+  target: view RenderTarget
+  pipeline: view RenderPipelineId
+  bindGroup: view BindGroupId
+  vertexBuffer: view ResourceRef
+  indexBuffer: view ResourceRef
+  indexCount: view Int
+  timestampWrites: copy Ptr
+) unsafe ret Bool {
   if recordingIsOpen(recording: recording, resources: resources) is false {
     ret false
   }
@@ -132,6 +161,7 @@ func recordDrawIndexed(
         colorAttachmentCount: 1 as UInt64
         colorAttachments: colorAttachments.data
         depthStencilAttachment: depthAttachments.data
+        timestampWrites: timestampWrites
       }
       pass = wgpuCommandEncoderBeginRenderPass(
         commandEncoder: recording.encoder
@@ -141,6 +171,7 @@ func recordDrawIndexed(
       let descriptor: WGPURenderPassDescriptor = {
         colorAttachmentCount: 1 as UInt64
         colorAttachments: colorAttachments.data
+        timestampWrites: timestampWrites
       }
       pass = wgpuCommandEncoderBeginRenderPass(
         commandEncoder: recording.encoder
