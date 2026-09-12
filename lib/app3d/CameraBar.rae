@@ -44,12 +44,15 @@ open ecs/Entity
 # The action the mode button emits. Exposed so an app can respond to it
 # without duplicating the string that lives in the scene file.
 const cameraBarModeAction: String = "camera.mode"
+
 const cameraBarSmoothMouseAction: String = "camera.smoothMouse"
+
 const cameraBarSmoothKeysAction: String = "camera.smoothKeys"
 
 # The on/off palette slots, matching the control panel's so a toggle
 # reads the same wherever it appears.
 const cameraBarSlotOn: String = "accent"
+
 const cameraBarSlotOff: String = "surfaceAlt"
 
 # Readouts, widest-optional-first in DISPLAY order. Truncation walks this
@@ -58,9 +61,15 @@ const cameraBarSlotOff: String = "surfaceAlt"
 const cameraBarReadoutCount: Int = 4
 
 func readoutId(index: view Int) ret String {
-  if index is 0 { ret "CameraFovLabel" }
-  if index is 1 { ret "CameraPositionLabel" }
-  if index is 2 { ret "CameraYawLabel" }
+  if index is 0 {
+    ret "CameraFovLabel"
+  }
+  if index is 1 {
+    ret "CameraPositionLabel"
+  }
+  if index is 2 {
+    ret "CameraYawLabel"
+  }
   ret "CameraPitchLabel"
 }
 
@@ -97,7 +106,10 @@ func mountCameraBar(world: mod UiWorld, res: view Gpu2dUi, hostNodeId: view Stri
   }
   let overrides: List(SceneOverride) = List.create(SceneOverride, cap: 0)
   let root: EntityId = mountSceneInstance(
-    world: world, mountEntity: host, scene: scene, overrides: overrides
+    world: world
+    mountEntity: host
+    scene: scene
+    overrides: overrides
   )
   if isNone(this: root) {
     ret false
@@ -122,14 +134,21 @@ func syncCameraBar(world: mod UiWorld, rig: view CameraRig, camera: view Camera3
   # without a click ever happening, and a button that tracked its own
   # boolean would then show the opposite of what the camera is doing.
   var mouseSlot: String = cameraBarSlotOff
-  if rig.smoothMouse { mouseSlot = cameraBarSlotOn }
+  if rig.smoothMouse {
+    mouseSlot = cameraBarSlotOn
+  }
   var keysSlot: String = cameraBarSlotOff
-  if rig.smoothKeys { keysSlot = cameraBarSlotOn }
+  if rig.smoothKeys {
+    keysSlot = cameraBarSlotOn
+  }
   setNodeFillSlot(world: world, nodeId: "CameraSmoothMouseButton", slot: mouseSlot)
   setNodeFillSlot(world: world, nodeId: "CameraSmoothKeysButton", slot: keysSlot)
   setNodeText(world: world, nodeId: "CameraFovLabel", value: "FOV {camera.fovYDeg.toInt()}°")
-  setNodeText(world: world, nodeId: "CameraPositionLabel",
-              value: "Position {camera.position.x.toInt()}, {camera.position.y.toInt()}, {camera.position.z.toInt()}")
+  setNodeText(
+    world: world
+    nodeId: "CameraPositionLabel"
+    value: "Position {camera.position.x.toInt()}, {camera.position.y.toInt()}, {camera.position.z.toInt()}"
+  )
   setNodeText(world: world, nodeId: "CameraYawLabel", value: "Yaw {yawDeg}°")
   setNodeText(world: world, nodeId: "CameraPitchLabel", value: "Pitch {pitchDeg}°")
 }
@@ -141,8 +160,12 @@ func syncCameraBar(world: mod UiWorld, rig: view CameraRig, camera: view Camera3
 # alone. Predicting them here would mean two copies of every number, and
 # the copy in the code is the one that silently goes stale when someone
 # edits the scene.
-func fitCameraBar(world: mod UiWorld, res: view Gpu2dUi, hostNodeId: view String,
-                  availW: view Float) pub {
+func fitCameraBar(
+  world: mod UiWorld
+  res: view Gpu2dUi
+  hostNodeId: view String
+  availW: view Float
+) pub {
   var visible: Int = cameraBarReadoutCount
   var i: Int = 0
   loop i < cameraBarReadoutCount {

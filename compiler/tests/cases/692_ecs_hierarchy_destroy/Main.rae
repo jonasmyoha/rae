@@ -8,7 +8,6 @@ open ecs/hierarchySystem/HierarchySystem
 # a dangling hierarchy edge (a Parent pointing at a dead entity, or a Children
 # list still listing one). Phase A exercises destroySubtree (whole subtree dies);
 # Phase B exercises detachForDestroy (one node dies, children are orphaned).
-
 func main() {
   var alloc: EntityAllocator = createEntityAllocator()
   var parents: ComponentTable(Parent) = ComponentTable.create(Parent)
@@ -20,13 +19,38 @@ func main() {
   let b: EntityId = allocEntity(this: alloc)
   let a1: EntityId = allocEntity(this: alloc)
   let a2: EntityId = allocEntity(this: alloc)
-  setParent(parents: parents, childrens: childrens, child: a, parent: r)
-  setParent(parents: parents, childrens: childrens, child: b, parent: r)
-  setParent(parents: parents, childrens: childrens, child: a1, parent: a)
-  setParent(parents: parents, childrens: childrens, child: a2, parent: a)
+  setParent(
+    parents: parents
+    childrens: childrens
+    child: a
+    parent: r
+  )
+  setParent(
+    parents: parents
+    childrens: childrens
+    child: b
+    parent: r
+  )
+  setParent(
+    parents: parents
+    childrens: childrens
+    child: a1
+    parent: a
+  )
+  setParent(
+    parents: parents
+    childrens: childrens
+    child: a2
+    parent: a
+  )
   log("A alive before: {allocatorAliveCount(this: alloc)}")
 
-  destroySubtree(allocator: alloc, parents: parents, childrens: childrens, root: r)
+  destroySubtree(
+    allocator: alloc
+    parents: parents
+    childrens: childrens
+    root: r
+  )
   log("A alive after: {allocatorAliveCount(this: alloc)}")
   log("A r alive: {allocatorIsAlive(this: alloc, entity: r)}")
   log("A a1 alive: {allocatorIsAlive(this: alloc, entity: a1)}")
@@ -38,9 +62,24 @@ func main() {
   let m: EntityId = allocEntity(this: alloc)
   let c1: EntityId = allocEntity(this: alloc)
   let c2: EntityId = allocEntity(this: alloc)
-  setParent(parents: parents, childrens: childrens, child: m, parent: p)
-  setParent(parents: parents, childrens: childrens, child: c1, parent: m)
-  setParent(parents: parents, childrens: childrens, child: c2, parent: m)
+  setParent(
+    parents: parents
+    childrens: childrens
+    child: m
+    parent: p
+  )
+  setParent(
+    parents: parents
+    childrens: childrens
+    child: c1
+    parent: m
+  )
+  setParent(
+    parents: parents
+    childrens: childrens
+    child: c2
+    parent: m
+  )
 
   detachForDestroy(parents: parents, childrens: childrens, entity: m)
   # m is gone from the hierarchy; p no longer lists it; c1/c2 are orphaned roots.

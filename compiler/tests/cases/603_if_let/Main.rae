@@ -3,16 +3,27 @@
 # relationship — the reference already names storage that exists elsewhere.
 # Narrowing an optional reference costs nothing: both are the same pointer.
 # (Produced OWNED optionals are taken with `=` instead — test 607.)
-type Track { title: String, seconds: Int }
-type Library { current: Track, hasCurrent: Bool }
+type Track {
+  title: String
+  seconds: Int
+}
+
+type Library {
+  current: Track
+  hasCurrent: Bool
+}
 
 func selected(lib: view Library) ret opt view Track {
-  if lib.hasCurrent is false { ret none }
+  if lib.hasCurrent is false {
+    ret none
+  }
   ret view lib.current
 }
 
 func bumpable(lib: mod Library) ret opt mod Track {
-  if lib.hasCurrent is false { ret none }
+  if lib.hasCurrent is false {
+    ret none
+  }
   ret mod lib.current
 }
 

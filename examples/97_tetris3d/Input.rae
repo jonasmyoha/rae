@@ -4,15 +4,25 @@ import Sdl3
 
 # SDL-compatible key codes (no enum because they're sparse and not 0..N).
 const keyLeft: Int = 263
+
 const keyRight: Int = 262
+
 const keyDown: Int = 264
+
 const keyUp: Int = 265
+
 const keyA: Int = 65
+
 const keyD: Int = 68
+
 const keyS: Int = 83
+
 const keyW: Int = 87
+
 const keySpace: Int = 32
+
 const keyP: Int = 80
+
 const keyR: Int = 82
 
 type InputEdges {
@@ -23,12 +33,7 @@ type InputEdges {
 }
 
 func createInputEdges() ret InputEdges {
-  ret InputEdges {
-    restart: false
-    pause: false
-    rotate: false
-    hardDrop: false
-  }
+  ret InputEdges { restart: false, pause: false, rotate: false, hardDrop: false }
 }
 
 # SDL pressed edges last for one rendered frame, while gameplay advances on a
@@ -57,7 +62,12 @@ func clearInputEdges(edges: mod InputEdges) {
 }
 
 func tryMove(world: mod World, dx: view Int, dr: view Int) {
-  if canMove(world: world, dx: dx, dy: 0, dr: dr) is 1 {
+  if canMove(
+    world: world
+    dx: dx
+    dy: 0
+    dr: dr
+  ) is 1 {
     world.currentPiece.x = world.currentPiece.x + dx
     var newRot: Int = (world.currentPiece.rotation + dr) % 4
     if newRot < 0 {
@@ -69,30 +79,60 @@ func tryMove(world: mod World, dx: view Int, dr: view Int) {
 }
 
 func tryRotate(world: mod World) {
-  if canMove(world: world, dx: 0, dy: 0, dr: 1) is 1 {
+  if canMove(
+    world: world
+    dx: 0
+    dy: 0
+    dr: 1
+  ) is 1 {
     tryMove(world: world, dx: 0, dr: 1)
     ret
   }
-  if canMove(world: world, dx: 1, dy: 0, dr: 1) is 1 {
+  if canMove(
+    world: world
+    dx: 1
+    dy: 0
+    dr: 1
+  ) is 1 {
     tryMove(world: world, dx: 1, dr: 1)
     ret
   }
-  if canMove(world: world, dx: -1, dy: 0, dr: 1) is 1 {
+  if canMove(
+    world: world
+    dx: -1
+    dy: 0
+    dr: 1
+  ) is 1 {
     tryMove(world: world, dx: -1, dr: 1)
     ret
   }
-  if canMove(world: world, dx: 2, dy: 0, dr: 1) is 1 {
+  if canMove(
+    world: world
+    dx: 2
+    dy: 0
+    dr: 1
+  ) is 1 {
     tryMove(world: world, dx: 2, dr: 1)
     ret
   }
-  if canMove(world: world, dx: -2, dy: 0, dr: 1) is 1 {
+  if canMove(
+    world: world
+    dx: -2
+    dy: 0
+    dr: 1
+  ) is 1 {
     tryMove(world: world, dx: -2, dr: 1)
   }
 }
 
 # Hard drop: slam to the bottom and lock immediately.
 func hardDrop(world: mod World) {
-  loop canMove(world: world, dx: 0, dy: 1, dr: 0) is 1 {
+  loop canMove(
+    world: world
+    dx: 0
+    dy: 1
+    dr: 0
+  ) is 1 {
     world.currentPiece.y = world.currentPiece.y + 1
     world.score = world.score + 2
   }
@@ -154,7 +194,12 @@ func inputSystem(world: mod World, edges: view InputEdges) {
 
   # Soft drop (down arrow / S) — falls one row each frame, +1 point per row.
   if Sdl3.isKeyDown(key: keyDown) or Sdl3.isKeyDown(key: keyS) {
-    if canMove(world: world, dx: 0, dy: 1, dr: 0) is 1 {
+    if canMove(
+      world: world
+      dx: 0
+      dy: 1
+      dr: 0
+    ) is 1 {
       world.currentPiece.y = world.currentPiece.y + 1
       world.score = world.score + 1
       world.fallTimer = 0

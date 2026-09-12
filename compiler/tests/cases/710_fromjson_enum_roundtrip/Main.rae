@@ -1,12 +1,27 @@
 # #767: a synthesized fromJson must round-trip enum fields. toJson writes the
 # enum member NAME; fromJson maps the name back to the ordinal.
-enum Dir { up down left right }
-enum Kind { alpha beta gamma }
-type Cell { d: Dir, n: Int }
-type Multi { first: Dir, mid: Int, last: Kind, name: String }
+enum Dir { up, down, left, right }
+
+enum Kind { alpha, beta, gamma }
+
+type Cell {
+  d: Dir
+  n: Int
+}
+
+type Multi {
+  first: Dir
+  mid: Int
+  last: Kind
+  name: String
+}
 
 func check(label: view String, ok: copy Bool) {
-  if ok { log("{label}: ok") } else { log("{label}: FAIL") }
+  if ok {
+    log("{label}: ok")
+  } else {
+    log("{label}: FAIL")
+  }
 }
 
 # round a Dir through a struct's toJson/fromJson and hand back the decoded enum

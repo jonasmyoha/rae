@@ -3,7 +3,9 @@ import ui/Components
 open Gpu2dCanvas
 
 const mouseButtonLeft: Int = 0
+
 const mouseButtonRight: Int = 1
+
 const mouseButtonMiddle: Int = 2
 
 func colorChannel(v: view Int) ret Float {
@@ -14,14 +16,24 @@ func uiInitWindow(width: view Int, height: view Int, title: view String) pub {
   Gpu2d.initWindow(width: width, height: height, title: title)
 }
 
-func uiSetConfigFlags(flags: view Int) pub {}
-func uiSetMouseScale(scaleX: view Float, scaleY: view Float) pub {}
+func uiSetConfigFlags(flags: view Int) pub {
+}
+
+func uiSetMouseScale(scaleX: view Float, scaleY: view Float) pub {
+}
+
 func uiSetMouseCursor(kind: view Int) pub {
   Gpu2d.setMouseCursor(kind: kind)
 }
-func uiInstallWindowCloseWaker() pub {}
-func uiInstallMouseButtonHook() pub {}
-func uiDisableAppNap() pub {}
+
+func uiInstallWindowCloseWaker() pub {
+}
+
+func uiInstallMouseButtonHook() pub {
+}
+
+func uiDisableAppNap() pub {
+}
 
 func uiSetDesignResolution(width: view Float, height: view Float, fit: view Int) pub {
   Gpu2d.setDesignResolution(width: width, height: height, fit: fit)
@@ -37,11 +49,12 @@ func uiCloseWindow() pub {
 
 func uiBeginFrame(canvas: mod Gpu2dCanvas, clear: view RgbaColor) pub {
   Gpu2d.beginFrame(
-    canvas: canvas,
-    r: colorChannel(v: clear.r),
-    g: colorChannel(v: clear.g),
-    b: colorChannel(v: clear.b),
-    a: colorChannel(v: clear.a))
+    canvas: canvas
+    r: colorChannel(v: clear.r)
+    g: colorChannel(v: clear.g)
+    b: colorChannel(v: clear.b)
+    a: colorChannel(v: clear.a)
+  )
 }
 
 func uiEndFrame(canvas: mod Gpu2dCanvas) pub {
@@ -135,9 +148,17 @@ func uiPointerButtonReleased(button: view Int) pub ret Bool {
   ret false
 }
 
-func uiMouseHookActive() pub ret Bool { ret false }
-func uiMouseHookDrainPressed() pub ret Bool { ret false }
-func uiMouseHookDrainReleased() pub ret Bool { ret false }
+func uiMouseHookActive() pub ret Bool {
+  ret false
+}
+
+func uiMouseHookDrainPressed() pub ret Bool {
+  ret false
+}
+
+func uiMouseHookDrainReleased() pub ret Bool {
+  ret false
+}
 
 func uiCurrentMonitor() pub ret Int {
   ret 0

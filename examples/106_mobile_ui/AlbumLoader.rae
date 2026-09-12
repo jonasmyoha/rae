@@ -36,7 +36,6 @@ import Json
 func rae_ext_rae_sys_read_file(path: String) unsafe extern ret String
 
 # ----- types ---------------------------------------------------------
-
 type Track {
   number: Int
   title: String
@@ -95,10 +94,7 @@ type MediaLibrarySystem {
 # Loader write path: take ownership of the freshly loaded catalog and
 # wrap it as the library system's initial state.
 func createMediaLibrary(albums: own List(Album)) pub ret MediaLibrarySystem {
-  ret MediaLibrarySystem {
-    albums: albums
-    revision: 0
-  }
+  ret MediaLibrarySystem { albums: albums, revision: 0 }
 }
 
 # ----- accessors ----------------------------------------------------

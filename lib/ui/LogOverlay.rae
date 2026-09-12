@@ -28,29 +28,36 @@ open SdfText
 open Gpu2dCanvas
 
 const logTrace: Int = 0
+
 const logDebug: Int = 1
+
 const logInfo: Int = 2
+
 const logWarn: Int = 3
+
 const logError: Int = 4
 
 # Anchor corners. Left-hand corners only for now: log lines read
 # left-to-right, so a right-anchored block would need per-line measuring
 # (see the performance note above).
 const logAnchorTopLeft: Int = 0
+
 const logAnchorBottomLeft: Int = 1
+
 # Right-hand variants, added because an app with a bottom-left control
 # panel has no free corner on that side. The panel is right-ALIGNED, not
 # mirrored: text still reads left to right inside it.
 const logAnchorTopRight: Int = 2
+
 const logAnchorBottomRight: Int = 3
 
 type LogOverlay {
-  texts: List(String)   # ring buffer of `capacity` slots
+  texts: List(String)  # ring buffer of `capacity` slots
   levels: List(Int)
-  head: Int             # next slot to write
-  filled: Int           # valid entries, saturates at capacity
+  head: Int  # next slot to write
+  filled: Int  # valid entries, saturates at capacity
   capacity: Int
-  minLevel: Int         # entries below this are dropped at append time
+  minLevel: Int  # entries below this are dropped at append time
   visible: Bool
   anchor: Int
   fontSize: Float
@@ -61,15 +68,22 @@ type LogOverlay {
   # know about device insets to stay out of their way.
   marginX: Float
   marginY: Float
-  revision: Int         # bumped on every accepted append
+  revision: Int  # bumped on every accepted append
 }
 
 # `capacity` is the scrollback kept in memory; `maxLines` is how many are
 # drawn. Keeping more than are shown costs a little memory and means a
 # larger window can reveal more history without losing lines.
-func createLogOverlay(capacity: view Int, maxLines: view Int, anchor: view Int, fontSize: view Float) pub ret LogOverlay {
+func createLogOverlay(
+  capacity: view Int
+  maxLines: view Int
+  anchor: view Int
+  fontSize: view Float
+) pub ret LogOverlay {
   var cap: Int = capacity
-  if cap < 1 { cap = 1 }
+  if cap < 1 {
+    cap = 1
+  }
   let t: List(String) = List.create(String, cap: cap)
   let l: List(Int) = List.create(Int, cap: cap)
   var i: Int = 0
@@ -79,19 +93,19 @@ func createLogOverlay(capacity: view Int, maxLines: view Int, anchor: view Int, 
     i = i + 1
   }
   ret LogOverlay {
-    texts: own t,
-    levels: own l,
-    head: 0,
-    filled: 0,
-    capacity: cap,
-    minLevel: logTrace,
-    visible: true,
-    anchor: anchor,
-    fontSize: fontSize,
-    lineGap: 4.0,
-    maxLines: maxLines,
-    marginX: 12.0,
-    marginY: 12.0,
+    texts: own t
+    levels: own l
+    head: 0
+    filled: 0
+    capacity: cap
+    minLevel: logTrace
+    visible: true
+    anchor: anchor
+    fontSize: fontSize
+    lineGap: 4.0
+    maxLines: maxLines
+    marginX: 12.0
+    marginY: 12.0
     revision: 0
   }
 }
@@ -148,10 +162,18 @@ func logErrorLine(ov: mod LogOverlay, text: view String) pub {
 # `info` are dimmed so ordinary output stays the thing you read first.
 # 0xAARRGGBB.
 func logLevelColor(level: view Int) ret Int {
-  if level is logError { ret 0xFFFF5A52 }
-  if level is logWarn { ret 0xFFFFC53D }
-  if level is logDebug { ret 0xFFAFBACC }
-  if level is logTrace { ret 0xFF8A93A3 }
+  if level is logError {
+    ret 0xFFFF5A52
+  }
+  if level is logWarn {
+    ret 0xFFFFC53D
+  }
+  if level is logDebug {
+    ret 0xFFAFBACC
+  }
+  if level is logTrace {
+    ret 0xFF8A93A3
+  }
   ret 0xFFFFFFFF
 }
 
@@ -159,20 +181,32 @@ func logLevelColor(level: view Int) ret Int {
 # what has been logged, by `maxLines`, and by the half-height budget.
 func visibleCount(ov: view LogOverlay, screenH: view Float) pub ret Int {
   var n: Int = ov.filled
-  if n > ov.maxLines { n = ov.maxLines }
+  if n > ov.maxLines {
+    n = ov.maxLines
+  }
   let budget: Float = screenH * 0.5
   let lineH: Float = lineHeight(ov: ov)
   if lineH > 0.0 {
     let fits: Int = (budget / lineH).toInt()
-    if n > fits { n = fits }
+    if n > fits {
+      n = fits
+    }
   }
-  if n < 0 { n = 0 }
+  if n < 0 {
+    n = 0
+  }
   ret n
 }
 
 # Draw the overlay. Call AFTER the app's own UI so it sits on top, and
 # pass the window's logical size (the same units the UI lays out in).
-func drawLogOverlay(ov: view LogOverlay, canvas: mod Gpu2dCanvas, font: view SdfFont, screenW: view Float, screenH: view Float) pub {
+func drawLogOverlay(
+  ov: view LogOverlay
+  canvas: mod Gpu2dCanvas
+  font: view SdfFont
+  screenW: view Float
+  screenH: view Float
+) pub {
   if ov.visible is false {
     ret
   }
@@ -186,8 +220,12 @@ func drawLogOverlay(ov: view LogOverlay, canvas: mod Gpu2dCanvas, font: view Sdf
   let lineH: Float = lineHeight(ov: ov)
   let blockH: Float = n.toFloat() * lineH
   var panelW: Float = screenW * 0.5
-  if panelW > 620.0 { panelW = 620.0 }
-  if panelW > screenW - marginX - marginX { panelW = screenW - marginX - marginX }
+  if panelW > 620.0 {
+    panelW = 620.0
+  }
+  if panelW > screenW - marginX - marginX {
+    panelW = screenW - marginX - marginX
+  }
 
   # `top` is the panel's top edge; text baselines step down from it.
   var top: Float = marginY
@@ -198,9 +236,16 @@ func drawLogOverlay(ov: view LogOverlay, canvas: mod Gpu2dCanvas, font: view Sdf
   if ov.anchor is logAnchorTopRight or ov.anchor is logAnchorBottomRight {
     left = screenW - marginX - panelW
   }
-  Gpu2d.drawBox(canvas: canvas, 
-    x: left, y: top, w: panelW, h: blockH + pad + pad, radius: 8.0,
-    fill: 0xB2050A12, borderWidth: 0.0, border: 0x00000000
+  Gpu2d.drawBox(
+    canvas: canvas
+    x: left
+    y: top
+    w: panelW
+    h: blockH + pad + pad
+    radius: 8.0
+    fill: 0xB2050A12
+    borderWidth: 0.0
+    border: 0x00000000
   )
 
   # Oldest of the visible window first, so the newest line is nearest the
@@ -214,9 +259,13 @@ func drawLogOverlay(ov: view LogOverlay, canvas: mod Gpu2dCanvas, font: view Sdf
         # +fontSize because drawText takes a baseline, not a top edge.
         let baseline: Float = top + pad + ov.fontSize + i.toFloat() * lineH
         Gpu2dText.drawText(
-          canvas: canvas,
-          font: font, text: text, x: left + pad, y: baseline,
-          sizePx: ov.fontSize, color: logLevelColor(level: level)
+          canvas: canvas
+          font: font
+          text: text
+          x: left + pad
+          y: baseline
+          sizePx: ov.fontSize
+          color: logLevelColor(level: level)
         )
       }
     }

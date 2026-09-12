@@ -11,7 +11,7 @@ open Scene3d
 open Sky
 open Math3d
 open GbufferRecord
-open ecs/Entity          # #793: World3d render path reads entities/components
+open ecs/Entity  # #793: World3d render path reads entities/components
 open ecs/ComponentTable
 open webgpu/Webgpu
 open webgpu/Context
@@ -24,13 +24,32 @@ open Gbuffer
 func nativeGbPrepare() unsafe extern("rae_gb_prepare") ret Int
 
 func gbPrepare() ret Int {
-  unsafe { ret nativeGbPrepare() }
+  unsafe {
+    ret nativeGbPrepare()
+  }
 }
 
-func nativeGbFrameUniform(viewProj: view Mat4, clearR: Float, clearG: Float, clearB: Float) unsafe extern("rae_gb_frame_uniform") ret Int
+func nativeGbFrameUniform(
+  viewProj: view Mat4
+  clearR: Float
+  clearG: Float
+  clearB: Float
+) unsafe extern("rae_gb_frame_uniform") ret Int
 
-func gbFrameUniform(viewProj: view Mat4, clearR: copy Float, clearG: copy Float, clearB: copy Float) ret Int {
-  unsafe { ret nativeGbFrameUniform(viewProj: viewProj, clearR: clearR, clearG: clearG, clearB: clearB) }
+func gbFrameUniform(
+  viewProj: view Mat4
+  clearR: copy Float
+  clearG: copy Float
+  clearB: copy Float
+) ret Int {
+  unsafe {
+    ret nativeGbFrameUniform(
+      viewProj: viewProj
+      clearR: clearR
+      clearG: clearG
+      clearB: clearB
+    )
+  }
 }
 
 func gbSetFrameUbuf(buf: Ptr) unsafe extern("rae_gb_set_frame_ubuf")
@@ -42,19 +61,25 @@ func gbSetDrawsBuffer(buf: Ptr) unsafe extern("rae_gb_set_draws_buffer")
 func nativeGbOffscreenW() unsafe extern("rae_gb_offscreen_w") ret Int
 
 func gbOffscreenW() ret Int {
-  unsafe { ret nativeGbOffscreenW() }
+  unsafe {
+    ret nativeGbOffscreenW()
+  }
 }
 
 func nativeGbOffscreenH() unsafe extern("rae_gb_offscreen_h") ret Int
 
 func gbOffscreenH() ret Int {
-  unsafe { ret nativeGbOffscreenH() }
+  unsafe {
+    ret nativeGbOffscreenH()
+  }
 }
 
 func nativeGbTargetsMatch(w: Int, h: Int) unsafe extern("rae_gb_targets_match") ret Int
 
 func gbTargetsMatch(w: copy Int, h: copy Int) ret Int {
-  unsafe { ret nativeGbTargetsMatch(w: w, h: h) }
+  unsafe {
+    ret nativeGbTargetsMatch(w: w, h: h)
+  }
 }
 
 func nativeGbTargetsReady() unsafe extern("rae_gb_targets_ready") ret Int
@@ -62,7 +87,9 @@ func nativeGbTargetsReady() unsafe extern("rae_gb_targets_ready") ret Int
 func nativeGbReleaseTargets() unsafe extern("rae_gb_release_targets_ext")
 
 func gbReleaseTargets() {
-  unsafe { nativeGbReleaseTargets() }
+  unsafe {
+    nativeGbReleaseTargets()
+  }
 }
 
 func gbSetTarget(idx: Int, tex: Ptr, texView: Ptr) unsafe extern("rae_gb_set_target")
@@ -70,7 +97,9 @@ func gbSetTarget(idx: Int, tex: Ptr, texView: Ptr) unsafe extern("rae_gb_set_tar
 func nativeGbCommitTargets(w: Int, h: Int) unsafe extern("rae_gb_commit_targets")
 
 func gbCommitTargets(w: copy Int, h: copy Int) {
-  unsafe { nativeGbCommitTargets(w: w, h: h) }
+  unsafe {
+    nativeGbCommitTargets(w: w, h: h)
+  }
 }
 
 # Shared by the inspector and the deferred post-passes (declared here so both
@@ -83,7 +112,9 @@ func nativeGbTargetsGen() unsafe extern("rae_gb_targets_gen") ret Int
 func nativeGbMotionZero() unsafe extern("rae_gb_motion_zero") ret Float
 
 func gbMotionZero() ret Float {
-  unsafe { ret nativeGbMotionZero() }
+  unsafe {
+    ret nativeGbMotionZero()
+  }
 }
 
 func gbSetFrame(enc: Ptr, pass: Ptr) unsafe extern("rae_gb_set_frame")
@@ -91,13 +122,17 @@ func gbSetFrame(enc: Ptr, pass: Ptr) unsafe extern("rae_gb_set_frame")
 func nativeGbFrameBytes() unsafe extern("rae_gb_frame_bytes") ret Int
 
 func gbFrameBytes() ret Int {
-  unsafe { ret nativeGbFrameBytes() }
+  unsafe {
+    ret nativeGbFrameBytes()
+  }
 }
 
 func nativeGbDrawsSize() unsafe extern("rae_gb_draws_size") ret Int
 
 func gbDrawsSize() ret Int {
-  unsafe { ret nativeGbDrawsSize() }
+  unsafe {
+    ret nativeGbDrawsSize()
+  }
 }
 
 # ----- render pipelines + WGSL shader modules (#503) -------------------------
@@ -113,15 +148,24 @@ func nativeGbReadWgsl(path: String) unsafe extern("rae_ext_rae_sys_read_file") r
 # depth (write, Greater), back-face culled, over the caller's vertex layout.
 # The static and terrain pipelines use the 32-byte layout; skin adds the joint
 # indices/weights (80 bytes).
-func gbufferPipelineSpec(stride: copy Int, attributes: own List(VertexAttributeSpec)) pub ret RenderPipelineSpec {
+func gbufferPipelineSpec(
+  stride: copy Int
+  attributes: own List(VertexAttributeSpec)
+) pub ret RenderPipelineSpec {
   let colorFormats: List(Int32) = List.create(Int32, cap: 3)
   colorFormats.add(value: WGPUTextureFormat_RGB10A2Unorm)
   colorFormats.add(value: WGPUTextureFormat_RGBA8Unorm)
   colorFormats.add(value: WGPUTextureFormat_RGBA8Unorm)
   ret RenderPipelineSpec {
-    vertexStride: stride, attributes: own attributes, colorFormats: own colorFormats,
-    alphaBlend: false, premultiplied: false, depthFormat: WGPUTextureFormat_Depth32Float, depthWrite: true,
-    depthCompare: WGPUCompareFunction_Greater, cullMode: WGPUCullMode_Back
+    vertexStride: stride
+    attributes: own attributes
+    colorFormats: own colorFormats
+    alphaBlend: false
+    premultiplied: false
+    depthFormat: WGPUTextureFormat_Depth32Float
+    depthWrite: true
+    depthCompare: WGPUCompareFunction_Greater
+    cullMode: WGPUCullMode_Back
   }
 }
 
@@ -141,7 +185,9 @@ func nativeGbMeshIcount(mesh: Int) unsafe extern("rae_gb_mesh_icount") ret Int
 func nativeGbSkinReady(mesh: Int) unsafe extern("rae_gb_skin_ready") ret Int
 
 func gbSkinReady(mesh: copy Int) ret Int {
-  unsafe { ret nativeGbSkinReady(mesh: mesh) }
+  unsafe {
+    ret nativeGbSkinReady(mesh: mesh)
+  }
 }
 
 func gbSkinVbuf(mesh: Int) unsafe extern("rae_gb_skin_vbuf") ret Ptr
@@ -151,7 +197,9 @@ func gbSkinIbuf(mesh: Int) unsafe extern("rae_gb_skin_ibuf") ret Ptr
 func nativeGbSkinIcount(mesh: Int) unsafe extern("rae_gb_skin_icount") ret Int
 
 func gbSkinIcount(mesh: copy Int) ret Int {
-  unsafe { ret nativeGbSkinIcount(mesh: mesh) }
+  unsafe {
+    ret nativeGbSkinIcount(mesh: mesh)
+  }
 }
 
 func nativeGbSkinPaletteSize() unsafe extern("rae_gb_skin_palette_size") ret Int
@@ -164,7 +212,20 @@ func nativeGbSkinPaletteReady() unsafe extern("rae_gb_skin_palette_ready") ret I
 # C does the dense per-cluster prep (inverse-viewProj frame uniform, ball/colour
 # uploads, params, bind) and returns the group index; Rae issues the draw into
 # the pass and restores the static pipeline after, like drawSkinned does.
-func gbSdfPrepare(packedBalls: Ptr, count: Int, packedColors: Ptr, smoothing: Float, camX: Float, camY: Float, camZ: Float, metallic: Float, roughness: Float, emR: Float, emG: Float, emB: Float) unsafe extern("rae_gb_sdf_prepare") ret Int
+func gbSdfPrepare(
+  packedBalls: Ptr
+  count: Int
+  packedColors: Ptr
+  smoothing: Float
+  camX: Float
+  camY: Float
+  camZ: Float
+  metallic: Float
+  roughness: Float
+  emR: Float
+  emG: Float
+  emB: Float
+) unsafe extern("rae_gb_sdf_prepare") ret Int
 
 func gbSdfPipeline() unsafe extern("rae_gb_sdf_pipeline") ret Ptr
 
@@ -173,7 +234,9 @@ func gbSdfBind(gi: Int) unsafe extern("rae_gb_sdf_bind") ret Ptr
 func nativeSdfShutdown() unsafe extern("rae_ext_Gbuffer_sdfShutdown")
 
 func sdfShutdown() {
-  unsafe { nativeSdfShutdown() }
+  unsafe {
+    nativeSdfShutdown()
+  }
 }
 
 # Geometry-pass finish/submit accessors (#503). The pass encoding (end/finish/
@@ -183,13 +246,17 @@ func gbEncoder() unsafe extern("rae_gb_encoder") ret Ptr
 func nativeGbClearFrame() unsafe extern("rae_gb_clear_frame")
 
 func gbClearFrame() {
-  unsafe { nativeGbClearFrame() }
+  unsafe {
+    nativeGbClearFrame()
+  }
 }
 
 func nativeGbFrameActive() unsafe extern("rae_gb_frame_active") ret Int
 
 func gbFrameActive() ret Int {
-  unsafe { ret nativeGbFrameActive() }
+  unsafe {
+    ret nativeGbFrameActive()
+  }
 }
 
 func nativeDrawCount() unsafe extern("rae_ext_Gbuffer_drawCount") ret Int
@@ -197,11 +264,15 @@ func nativeDrawCount() unsafe extern("rae_ext_Gbuffer_drawCount") ret Int
 func nativePyramidMips() unsafe extern("rae_ext_Gbuffer_pyramidMips") ret Int
 
 func pyramidMips() ret Int {
-  unsafe { ret nativePyramidMips() }
+  unsafe {
+    ret nativePyramidMips()
+  }
 }
 
 func nativeDeferredShutdown() unsafe extern("rae_ext_Gbuffer_deferredShutdown")
 
 func deferredShutdown() {
-  unsafe { nativeDeferredShutdown() }
+  unsafe {
+    nativeDeferredShutdown()
+  }
 }

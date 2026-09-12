@@ -61,8 +61,8 @@ func saveHistoryToJson(history: view PlayHistory, path: view String) pub {
   unsafe {
     ensureAppCacheDirs()
 
-    let openBrace: String = "\u{007B}"
-    let closeBrace: String = "\u{007D}"
+    let openBrace: String = "\{"
+    let closeBrace: String = "\}"
     let openBracket: String = "["
     let closeBracket: String = "]"
     let nl: String = "\n"
@@ -72,7 +72,9 @@ func saveHistoryToJson(history: view PlayHistory, path: view String) pub {
     var content: String = ""
     content = content.concat(other: openBrace).concat(other: nl)
     content = content.concat(other: "  ").concat(other: q).concat(other: "entries").concat(other: q)
-    content = content.concat(other: colon).concat(other: " ").concat(other: openBracket).concat(other: nl)
+    content = content.concat(other: colon).concat(other: " ").concat(other: openBracket).concat(
+      other: nl
+    )
 
     let comma: String = ","
     let n: Int = history.entries.length
@@ -93,14 +95,44 @@ func saveHistoryToJson(history: view PlayHistory, path: view String) pub {
       let atStr: String = "{e.playedAt}"
 
       content = content.concat(other: "    ").concat(other: openBrace).concat(other: nl)
-      content = content.concat(other: "      ").concat(other: q).concat(other: "trackName").concat(other: q).concat(other: colon).concat(other: " ").concat(other: q).concat(other: tn).concat(other: q).concat(other: comma).concat(other: nl)
-      content = content.concat(other: "      ").concat(other: q).concat(other: "artistName").concat(other: q).concat(other: colon).concat(other: " ").concat(other: q).concat(other: an).concat(other: q).concat(other: comma).concat(other: nl)
-      content = content.concat(other: "      ").concat(other: q).concat(other: "albumName").concat(other: q).concat(other: colon).concat(other: " ").concat(other: q).concat(other: alb).concat(other: q).concat(other: comma).concat(other: nl)
-      content = content.concat(other: "      ").concat(other: q).concat(other: "albumStem").concat(other: q).concat(other: colon).concat(other: " ").concat(other: q).concat(other: stem).concat(other: q).concat(other: comma).concat(other: nl)
-      content = content.concat(other: "      ").concat(other: q).concat(other: "artworkUrl").concat(other: q).concat(other: colon).concat(other: " ").concat(other: q).concat(other: url).concat(other: q).concat(other: comma).concat(other: nl)
-      content = content.concat(other: "      ").concat(other: q).concat(other: "textureKey").concat(other: q).concat(other: colon).concat(other: " ").concat(other: q).concat(other: tk).concat(other: q).concat(other: comma).concat(other: nl)
-      content = content.concat(other: "      ").concat(other: q).concat(other: "durationSec").concat(other: q).concat(other: colon).concat(other: " ").concat(other: durStr).concat(other: comma).concat(other: nl)
-      content = content.concat(other: "      ").concat(other: q).concat(other: "playedAt").concat(other: q).concat(other: colon).concat(other: " ").concat(other: atStr).concat(other: nl)
+      content = content.concat(other: "      ").concat(other: q).concat(other: "trackName").concat(
+        other: q
+      ).concat(other: colon).concat(other: " ").concat(other: q).concat(other: tn).concat(other: q).concat(
+        other: comma
+      ).concat(other: nl)
+      content = content.concat(other: "      ").concat(other: q).concat(other: "artistName").concat(
+        other: q
+      ).concat(other: colon).concat(other: " ").concat(other: q).concat(other: an).concat(other: q).concat(
+        other: comma
+      ).concat(other: nl)
+      content = content.concat(other: "      ").concat(other: q).concat(other: "albumName").concat(
+        other: q
+      ).concat(other: colon).concat(other: " ").concat(other: q).concat(other: alb).concat(other: q).concat(
+        other: comma
+      ).concat(other: nl)
+      content = content.concat(other: "      ").concat(other: q).concat(other: "albumStem").concat(
+        other: q
+      ).concat(other: colon).concat(other: " ").concat(other: q).concat(other: stem).concat(
+        other: q
+      ).concat(other: comma).concat(other: nl)
+      content = content.concat(other: "      ").concat(other: q).concat(other: "artworkUrl").concat(
+        other: q
+      ).concat(other: colon).concat(other: " ").concat(other: q).concat(other: url).concat(other: q).concat(
+        other: comma
+      ).concat(other: nl)
+      content = content.concat(other: "      ").concat(other: q).concat(other: "textureKey").concat(
+        other: q
+      ).concat(other: colon).concat(other: " ").concat(other: q).concat(other: tk).concat(other: q).concat(
+        other: comma
+      ).concat(other: nl)
+      content = content.concat(other: "      ").concat(other: q).concat(other: "durationSec").concat(
+        other: q
+      ).concat(other: colon).concat(other: " ").concat(other: durStr).concat(other: comma).concat(
+        other: nl
+      )
+      content = content.concat(other: "      ").concat(other: q).concat(other: "playedAt").concat(
+        other: q
+      ).concat(other: colon).concat(other: " ").concat(other: atStr).concat(other: nl)
       content = content.concat(other: "    ").concat(other: closeBrace)
       if i < n - 1 {
         content = content.concat(other: comma)
@@ -118,7 +150,11 @@ func saveHistoryToJson(history: view PlayHistory, path: view String) pub {
   }
 }
 
-func restoreHistoryFromSource(history: mod PlayHistory, source: view String, loadPath: view String) {
+func restoreHistoryFromSource(
+  history: mod PlayHistory
+  source: view String
+  loadPath: view String
+) {
   let doc: JsonDoc = Json.parseJson(source: source)
   if doc.ok is false {
     log("[history] parse error in {loadPath} at byte {doc.errorPos}")
@@ -147,10 +183,22 @@ func restoreHistoryFromSource(history: mod PlayHistory, source: view String, loa
     let atIdx: Int = Json.field(doc: doc, this: v, key: "playedAt")
     let tn: String = Json.jsonString(this: Json.jsonValueAt(doc: doc, idx: tnIdx), fallback: empty)
     let an: String = Json.jsonString(this: Json.jsonValueAt(doc: doc, idx: anIdx), fallback: empty)
-    let alb: String = Json.jsonString(this: Json.jsonValueAt(doc: doc, idx: albIdx), fallback: empty)
-    let stem: String = Json.jsonString(this: Json.jsonValueAt(doc: doc, idx: stemIdx), fallback: empty)
-    let url: String = Json.jsonString(this: Json.jsonValueAt(doc: doc, idx: urlIdx), fallback: empty)
-    let tex: String = Json.jsonString(this: Json.jsonValueAt(doc: doc, idx: texIdx), fallback: empty)
+    let alb: String = Json.jsonString(
+      this: Json.jsonValueAt(doc: doc, idx: albIdx)
+      fallback: empty
+    )
+    let stem: String = Json.jsonString(
+      this: Json.jsonValueAt(doc: doc, idx: stemIdx)
+      fallback: empty
+    )
+    let url: String = Json.jsonString(
+      this: Json.jsonValueAt(doc: doc, idx: urlIdx)
+      fallback: empty
+    )
+    let tex: String = Json.jsonString(
+      this: Json.jsonValueAt(doc: doc, idx: texIdx)
+      fallback: empty
+    )
     let dur: Float = Json.jsonFloat(this: Json.jsonValueAt(doc: doc, idx: durIdx), fallback: 0.0)
     let at: Float = Json.jsonFloat(this: Json.jsonValueAt(doc: doc, idx: atIdx), fallback: 0.0)
     let entry: PlayHistoryEntry = {
@@ -186,7 +234,11 @@ func restoreHistory(history: mod PlayHistory, path: view String, loader: mod His
     }
     let legacySource: String = rae_ext_rae_sys_read_file(path: legacyHistoryFilePath)
     if legacySource.length() > 0 {
-      restoreHistoryFromSource(history: history, source: legacySource, loadPath: legacyHistoryFilePath)
+      restoreHistoryFromSource(
+        history: history
+        source: legacySource
+        loadPath: legacyHistoryFilePath
+      )
       normalizePlayHistoryArtwork(history: history)
       saveHistoryToJson(history: history, path: path)
       ret
@@ -241,7 +293,11 @@ func refetchHistoryArt(history: view PlayHistory, reg: mod TextureRegistry) pub 
 # fetch (the caller keeps the frame loop ticking). Idempotent via TextureRegistry;
 # entries with a failed/empty url are skipped and count toward the budget so the
 # scan makes progress.
-func refetchHistoryArtChunk(history: view PlayHistory, reg: mod TextureRegistry, budget: view Int) pub ret Bool {
+func refetchHistoryArtChunk(
+  history: view PlayHistory
+  reg: mod TextureRegistry
+  budget: view Int
+) pub ret Bool {
   unsafe {
     let prefix: String = "spotify-art:"
     let pLen: Int = prefix.length()
@@ -284,7 +340,12 @@ func refetchHistoryArtChunk(history: view PlayHistory, reg: mod TextureRegistry,
 # boot must re-register cached files before recently-played thumbs can draw.
 # Cached files are loaded immediately; missing files are fetched by the runtime
 # async curl queue and registered on a later frame when ready.
-func loadCachedHistoryArtChunk(history: view PlayHistory, reg: mod TextureRegistry, budget: view Int, loader: mod HistoryArtLoader) pub ret Bool {
+func loadCachedHistoryArtChunk(
+  history: view PlayHistory
+  reg: mod TextureRegistry
+  budget: view Int
+  loader: mod HistoryArtLoader
+) pub ret Bool {
   unsafe {
     let prefix: String = "spotify-art:"
     let pLen: Int = prefix.length()

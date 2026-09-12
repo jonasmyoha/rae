@@ -21,19 +21,20 @@ func uploadMeshData(meshData: view MeshData) ret MeshHandle {
 # The character's locomotion clips (idle=0 … run=3). clipIndex stays an Int for
 # storage/serialisation; this enum drives the exhaustive `match`es that dispatch
 # on it, and the panel button id is just `.toString()` so no index->name table.
-enum ClipKind {
-  idle
-  walk
-  walkFast   # the walk clip at 1.6x, not a fourth asset
-  run
-}
+enum ClipKind { idle, walk, walkFast, run }
+
+# the walk clip at 1.6x, not a fourth asset
 
 # The locomotion clip a controller's movement implies: idle when stopped, walk
 # with the walk modifier, else run. Shared by the hero and any controlled crowd
 # member (#546) so switching control does not change how movement reads.
 func locomotionClipFor(controller: view ThirdPersonController) ret Int {
-  if not controller.moving { ret ClipKind.idle as Int }
-  if controller.walking { ret ClipKind.walk as Int }
+  if not controller.moving {
+    ret ClipKind.idle as Int
+  }
+  if controller.walking {
+    ret ClipKind.walk as Int
+  }
   ret ClipKind.run as Int
 }
 
@@ -41,25 +42,35 @@ func locomotionClipFor(controller: view ThirdPersonController) ret Int {
 # independently of the player, so the roster reads as distinct characters.
 func crowdClipFor(index: view Int) ret Int {
   let pick: Int = index % 3
-  if pick is 0 { ret ClipKind.walk as Int }
-  if pick is 1 { ret ClipKind.run as Int }
+  if pick is 0 {
+    ret ClipKind.walk as Int
+  }
+  if pick is 1 {
+    ret ClipKind.run as Int
+  }
   ret ClipKind.idle as Int
 }
 
 # Playback rate for a clip: walkFast is the walk clip at 1.6x, everything else
 # plays at authored speed.
 func clipPlaybackRate(clipIndex: view Int) ret Float {
-  if clipIndex is ClipKind.walkFast { ret 1.6 }
+  if clipIndex is ClipKind.walkFast {
+    ret 1.6
+  }
   ret 1.0
 }
 
 func walkerFloatAt(values: view List(Float), index: view Int) ret Float {
-  if let value: Float = values.copyAt(index: index) { ret value }
+  if let value: Float = values.copyAt(index: index) {
+    ret value
+  }
   ret 0.0
 }
 
 func walkerIntAt(values: view List(Int), index: view Int) ret Int {
-  if let value: Int = values.copyAt(index: index) { ret value }
+  if let value: Int = values.copyAt(index: index) {
+    ret value
+  }
   ret 0
 }
 
@@ -67,13 +78,25 @@ func walkerIntAt(values: view List(Int), index: view Int) ret Int {
 # (#547). Used to build a DISTINCT pose per crowd member — the skeleton is scratch
 # here, re-posed each call; the hero's palette is built separately, before this
 # runs, so re-posing does not disturb it.
-func poseCharacterPalette(characterSystem: mod CharacterSystem, clipIndex: copy Int, animTime: copy Float) ret List(Float) {
+func poseCharacterPalette(
+  characterSystem: mod CharacterSystem
+  clipIndex: copy Int
+  animTime: copy Float
+) ret List(Float) {
   applySkeletonPose(sk: characterSystem.skeleton, pose: characterSystem.bindPose)
   match clipIndex {
-    case ClipKind.idle { applyClip(sk: characterSystem.skeleton, c: characterSystem.idleClip, time: animTime) }
-    case ClipKind.walk { applyClip(sk: characterSystem.skeleton, c: characterSystem.walkClip, time: animTime) }
-    case ClipKind.walkFast { applyClip(sk: characterSystem.skeleton, c: characterSystem.walkClip, time: animTime) }
-    case ClipKind.run { applyClip(sk: characterSystem.skeleton, c: characterSystem.runClip, time: animTime) }
+    case ClipKind.idle {
+      applyClip(sk: characterSystem.skeleton, c: characterSystem.idleClip, time: animTime)
+    }
+    case ClipKind.walk {
+      applyClip(sk: characterSystem.skeleton, c: characterSystem.walkClip, time: animTime)
+    }
+    case ClipKind.walkFast {
+      applyClip(sk: characterSystem.skeleton, c: characterSystem.walkClip, time: animTime)
+    }
+    case ClipKind.run {
+      applyClip(sk: characterSystem.skeleton, c: characterSystem.runClip, time: animTime)
+    }
   }
   ret buildPalette(sk: characterSystem.skeleton)
 }

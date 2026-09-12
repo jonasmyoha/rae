@@ -70,7 +70,12 @@ func copyAt(T: type, this: view List(T), index: view Int) ret opt T {
 # `copyAtFallback` returns the caller's own value out of range — the #642
 # rule (the else branch is a value the PROGRAMMER wrote). Prefer it when a
 # meaningful sentinel exists.
-func copyAtFallback(T: type, this: view List(T), index: view Int, fallback: T) ret T {
+func copyAtFallback(
+  T: type
+  this: view List(T)
+  index: view Int
+  fallback: T
+) ret T {
   unsafe {
     if index < 0 or index >= this.length {
       ret fallback
@@ -119,7 +124,12 @@ func modAt(T: type, this: mod List(T), index: view Int) ret opt mod T {
   }
 }
 
-func set(T: type, this: mod List(T), index: view Int, value: own T) {
+func set(
+  T: type
+  this: mod List(T)
+  index: view Int
+  value: own T
+) {
   unsafe {
     if index < 0 or index >= this.length {
       ret
@@ -129,7 +139,12 @@ func set(T: type, this: mod List(T), index: view Int, value: own T) {
   }
 }
 
-func insert(T: type, this: mod List(T), index: view Int, value: own T) {
+func insert(
+  T: type
+  this: mod List(T)
+  index: view Int
+  value: own T
+) {
   unsafe {
     if index < 0 or index > this.length {
       ret
@@ -278,10 +293,19 @@ func drop(T: type, this: mod List(T)) {
   }
 }
 
-func swap(T: type, this: mod List(T), i: view Int, j: view Int) {
+func swap(
+  T: type
+  this: mod List(T)
+  i: view Int
+  j: view Int
+) {
   unsafe {
     let temp: T = rae_ext_rae_buf_get(buf: this.data, index: i)
-    rae_ext_rae_buf_set(buf: this.data, index: i, value: rae_ext_rae_buf_get(buf: this.data, index: j))
+    rae_ext_rae_buf_set(
+      buf: this.data
+      index: i
+      value: rae_ext_rae_buf_get(buf: this.data, index: j)
+    )
     rae_ext_rae_buf_set(buf: this.data, index: j, value: temp)
   }
 }
@@ -376,4 +400,3 @@ func indexOf(T: type, this: view List(T), value: view T) ret Int {
     ret -1
   }
 }
-

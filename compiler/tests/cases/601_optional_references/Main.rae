@@ -9,9 +9,15 @@
 #
 # The representation is a nullable pointer, so `none` costs nothing and an
 # optional reference is not boxed.
+type Track {
+  title: String
+  seconds: Int
+}
 
-type Track { title: String, seconds: Int }
-type Library { current: Track, hasCurrent: Bool }
+type Library {
+  current: Track
+  hasCurrent: Bool
+}
 
 func describe(t: opt view Track) ret String {
   if t is none {

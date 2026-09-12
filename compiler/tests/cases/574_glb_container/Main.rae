@@ -20,7 +20,12 @@
 open Gltf
 
 # Build a byte list from four little-endian bytes of a known float.
-func bytesOf(b0: view Int, b1: view Int, b2: view Int, b3: view Int) ret List(Int) {
+func bytesOf(
+  b0: view Int
+  b1: view Int
+  b2: view Int
+  b3: view Int
+) ret List(Int) {
   let out: List(Int) = List.create(Int, cap: 4)
   out.add(value: b0)
   out.add(value: b1)
@@ -31,18 +36,66 @@ func bytesOf(b0: view Int, b1: view Int, b2: view Int, b3: view Int) ret List(In
 
 func main() {
   # 1.0f  = 0x3F800000, so little-endian bytes are 00 00 80 3F.
-  log("one={readF32(b: bytesOf(b0: 0, b1: 0, b2: 128, b3: 63), pos: 0)}")
+  log("one={readF32(
+    b: bytesOf(
+      b0: 0
+      b1: 0
+      b2: 128
+      b3: 63
+    )
+    pos: 0
+  )}")
   # -2.5f = 0xC0200000 -> 00 00 20 C0
-  log("negTwoAndHalf={readF32(b: bytesOf(b0: 0, b1: 0, b2: 32, b3: 192), pos: 0)}")
+  log("negTwoAndHalf={readF32(
+    b: bytesOf(
+      b0: 0
+      b1: 0
+      b2: 32
+      b3: 192
+    )
+    pos: 0
+  )}")
   # 0.0f  = 0x00000000. Exercises the exponent-0 branch, which is the one
   # that would otherwise produce a denormal instead of a clean zero.
-  log("zero={readF32(b: bytesOf(b0: 0, b1: 0, b2: 0, b3: 0), pos: 0)}")
+  log("zero={readF32(
+    b: bytesOf(
+      b0: 0
+      b1: 0
+      b2: 0
+      b3: 0
+    )
+    pos: 0
+  )}")
   # 0.5f  = 0x3F000000 -> 00 00 00 3F
-  log("half={readF32(b: bytesOf(b0: 0, b1: 0, b2: 0, b3: 63), pos: 0)}")
+  log("half={readF32(
+    b: bytesOf(
+      b0: 0
+      b1: 0
+      b2: 0
+      b3: 63
+    )
+    pos: 0
+  )}")
 
   # Little-endian integer assembly.
-  log("u16={readU16(b: bytesOf(b0: 1, b1: 2, b2: 0, b3: 0), pos: 0)}")
-  log("u32={readU32(b: bytesOf(b0: 1, b1: 2, b2: 3, b3: 4), pos: 0)}")
+  log("u16={readU16(
+    b: bytesOf(
+      b0: 1
+      b1: 2
+      b2: 0
+      b3: 0
+    )
+    pos: 0
+  )}")
+  log("u32={readU32(
+    b: bytesOf(
+      b0: 1
+      b1: 2
+      b2: 3
+      b3: 4
+    )
+    pos: 0
+  )}")
 
   # Rejection paths. A loader that reads past the end of a malformed file
   # is worse than one that refuses it, so these are the guarantee.

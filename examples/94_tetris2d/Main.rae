@@ -10,6 +10,7 @@ open ui/renderSystem/RenderSystem
 open Gpu2dCanvas
 
 const canvasW: Float = 800.0
+
 const canvasH: Float = 600.0
 
 enum GameState { menu, playing, paused, gameOver }
@@ -130,7 +131,12 @@ func isOccupied(game: view Game, x: view Int, y: view Int) ret Int {
 }
 
 # Simple shape definitions (4x4 max)
-func getShapeCell(kind: TetrominoKind, rot: view Int, px: view Int, py: view Int) ret Int {
+func getShapeCell(
+  kind: TetrominoKind
+  rot: view Int
+  px: view Int
+  py: view Int
+) ret Int {
   if kind is TetrominoKind.i {
     if rot is 0 or rot is 2 {
       if px is 1 {
@@ -253,7 +259,12 @@ func getShapeCell(kind: TetrominoKind, rot: view Int, px: view Int, py: view Int
   ret 0
 }
 
-func canMove(game: view Game, dx: view Int, dy: view Int, dr: view Int) ret Int {
+func canMove(
+  game: view Game
+  dx: view Int
+  dy: view Int
+  dr: view Int
+) ret Int {
   let cp: view Piece => game.currentPiece
   let pos: view Position => cp.pos
   let newX: Int = pos.x + dx
@@ -266,7 +277,12 @@ func canMove(game: view Game, dx: view Int, dy: view Int, dr: view Int) ret Int 
   loop py < 4 {
     var px: Int = 0
     loop px < 4 {
-      if getShapeCell(kind: cp.kind, rot: newRot, px: px, py: py) is 1 {
+      if getShapeCell(
+        kind: cp.kind
+        rot: newRot
+        px: px
+        py: py
+      ) is 1 {
         if isOccupied(game: game, x: newX + px, y: newY + py) is 1 {
           ret 0
         }
@@ -287,7 +303,12 @@ func lockPiece(game: mod Game) {
   loop py < 4 {
     var px: Int = 0
     loop px < 4 {
-      if getShapeCell(kind: cp.kind, rot: cp.rotation, px: px, py: py) is 1 {
+      if getShapeCell(
+        kind: cp.kind
+        rot: cp.rotation
+        px: px
+        py: py
+      ) is 1 {
         let gx: Int = pos.x + px
         let gy: Int = pos.y + py
         if gy >= 0 and gy < game.height {
@@ -347,7 +368,7 @@ func checkLines(game: mod Game) {
     let newLevel: Int = game.lines + 1
     if (newLevel > game.level) {
       game.level = newLevel
-      # GRADUAL FRANTIC SPEED: 
+      # GRADUAL FRANTIC SPEED:
       # Level 1: ~21 frames, Level 15: 2 frames (Max Speed)
       game.moveDelay = 22 - (game.level * 4 / 3)
       if (game.moveDelay < 2) {
@@ -392,7 +413,12 @@ func spawnPiece(game: mod Game) {
   game.lockTimer = 0
   game.maxLockTimer = 0
   game.moveTimer = 0
-  if canMove(game: game, dx: 0, dy: 0, dr: 0) is 0 {
+  if canMove(
+    game: game
+    dx: 0
+    dy: 0
+    dr: 0
+  ) is 0 {
     game.state = GameState.gameOver
   }
 }
@@ -416,7 +442,7 @@ func initGame(game: mod Game) {
   game.lockDelay = 30
   # Max cumulative lock delay (e.g. 2s)
   game.maxLockTimer = 0
-  
+
   game.nextPieceKind = randomKind()
 
   # Initialize grid with 0s
@@ -430,17 +456,62 @@ func initGame(game: mod Game) {
   spawnPiece(game)
 }
 
-func drawFrame(canvas: mod Gpu2dCanvas, x: view Float, y: view Float, w: view Float, h: view Float) {
-  Gpu2d.drawRect(canvas: canvas, x: x, y: y, w: w, h: 2.0, color: 0xFFB4B4FF)
-  Gpu2d.drawRect(canvas: canvas, x: x, y: y + h - 2.0, w: w, h: 2.0, color: 0xFFB4B4FF)
-  Gpu2d.drawRect(canvas: canvas, x: x, y: y, w: 2.0, h: h, color: 0xFFB4B4FF)
-  Gpu2d.drawRect(canvas: canvas, x: x + w - 2.0, y: y, w: 2.0, h: h, color: 0xFFB4B4FF)
+func drawFrame(
+  canvas: mod Gpu2dCanvas
+  x: view Float
+  y: view Float
+  w: view Float
+  h: view Float
+) {
+  Gpu2d.drawRect(
+    canvas: canvas
+    x: x
+    y: y
+    w: w
+    h: 2.0
+    color: 0xFFB4B4FF
+  )
+  Gpu2d.drawRect(
+    canvas: canvas
+    x: x
+    y: y + h - 2.0
+    w: w
+    h: 2.0
+    color: 0xFFB4B4FF
+  )
+  Gpu2d.drawRect(
+    canvas: canvas
+    x: x
+    y: y
+    w: 2.0
+    h: h
+    color: 0xFFB4B4FF
+  )
+  Gpu2d.drawRect(
+    canvas: canvas
+    x: x + w - 2.0
+    y: y
+    w: 2.0
+    h: h
+    color: 0xFFB4B4FF
+  )
 }
 
-func drawCell(canvas: mod Gpu2dCanvas, x: view Float, y: view Float, size: view Float, colorId: view Int) {
-  Gpu2d.drawRect(canvas: canvas, 
-    x: x, y: y, w: size - 1.0, h: size - 1.0
-    color: getModernColor(index: colorId))
+func drawCell(
+  canvas: mod Gpu2dCanvas
+  x: view Float
+  y: view Float
+  size: view Float
+  colorId: view Int
+) {
+  Gpu2d.drawRect(
+    canvas: canvas
+    x: x
+    y: y
+    w: size - 1.0
+    h: size - 1.0
+    color: getModernColor(index: colorId)
+  )
 }
 
 func shouldFillTestCell(row: view Int, column: view Int) ret Bool {
@@ -504,19 +575,33 @@ func drawGame(canvas: mod Gpu2dCanvas, game: view Game) {
   let cellSize: Float = 22.0
   let offsetX: Float = 290.0
   let offsetY: Float = 80.0
-  Gpu2d.drawGradientRect(canvas: canvas, 
-    x: 0.0, y: 0.0, w: canvasW, h: canvasH, radius: 0.0
-    from: 0xFF111827, to: 0xFF07101B, angleDeg: 90.0)
-  Gpu2d.drawRoundedRect(canvas: canvas, 
-    x: offsetX - 12.0, y: offsetY - 12.0
+  Gpu2d.drawGradientRect(
+    canvas: canvas
+    x: 0.0
+    y: 0.0
+    w: canvasW
+    h: canvasH
+    radius: 0.0
+    from: 0xFF111827
+    to: 0xFF07101B
+    angleDeg: 90.0
+  )
+  Gpu2d.drawRoundedRect(
+    canvas: canvas
+    x: offsetX - 12.0
+    y: offsetY - 12.0
     w: game.width.toFloat() * cellSize + 24.0
     h: game.height.toFloat() * cellSize + 24.0
-    radius: 10.0, color: 0x661B2538)
+    radius: 10.0
+    color: 0x661B2538
+  )
   drawFrame(
     canvas: canvas
-    x: offsetX - 2.0, y: offsetY - 2.0
+    x: offsetX - 2.0
+    y: offsetY - 2.0
     w: game.width.toFloat() * cellSize + 4.0
-    h: game.height.toFloat() * cellSize + 4.0)
+    h: game.height.toFloat() * cellSize + 4.0
+  )
   var y: Int = 0
   loop y < game.height {
     var x: Int = 0
@@ -544,7 +629,12 @@ func drawGame(canvas: mod Gpu2dCanvas, game: view Game) {
   loop py < 4 {
     var px: Int = 0
     loop px < 4 {
-      if getShapeCell(kind: cp.kind, rot: cp.rotation, px: px, py: py) is 1 {
+      if getShapeCell(
+        kind: cp.kind
+        rot: cp.rotation
+        px: px
+        py: py
+      ) is 1 {
         drawCell(
           canvas: canvas
           x: (pos.x + px).toFloat() * cellSize + offsetX
@@ -562,15 +652,23 @@ func drawGame(canvas: mod Gpu2dCanvas, game: view Game) {
   let previewOffsetY: Float = offsetY + cellSize * 2.0
   drawFrame(
     canvas: canvas
-    x: previewOffsetX - 5.0, y: previewOffsetY - 5.0
-    w: cellSize * 4.0 + 10.0, h: cellSize * 4.0 + 10.0)
+    x: previewOffsetX - 5.0
+    y: previewOffsetY - 5.0
+    w: cellSize * 4.0 + 10.0
+    h: cellSize * 4.0 + 10.0
+  )
 
   let nextKindId: Int = getKindId(kind: game.nextPieceKind)
   py = 0
   loop py < 4 {
     var px: Int = 0
     loop px < 4 {
-      if getShapeCell(kind: game.nextPieceKind, rot: 0, px: px, py: py) is 1 {
+      if getShapeCell(
+        kind: game.nextPieceKind
+        rot: 0
+        px: px
+        py: py
+      ) is 1 {
         drawCell(
           canvas: canvas
           x: previewOffsetX + px.toFloat() * cellSize
@@ -601,12 +699,22 @@ func handleInput(game: mod Game) {
     if game.hMoveTimer is 0 {
       # First press: move immediately
       if moveLeft {
-        if canMove(game: game, dx: -1, dy: 0, dr: 0) is 1 {
+        if canMove(
+          game: game
+          dx: -1
+          dy: 0
+          dr: 0
+        ) is 1 {
           pos.x = pos.x - 1
           moved = 1
         }
       } else {
-        if canMove(game: game, dx: 1, dy: 0, dr: 0) is 1 {
+        if canMove(
+          game: game
+          dx: 1
+          dy: 0
+          dr: 0
+        ) is 1 {
           pos.x = pos.x + 1
           moved = 1
         }
@@ -617,12 +725,22 @@ func handleInput(game: mod Game) {
       if game.hMoveTimer >= game.dasDelay {
         if (game.hMoveTimer - game.dasDelay) % game.hMoveDelay is 0 {
           if moveLeft {
-            if canMove(game: game, dx: -1, dy: 0, dr: 0) is 1 {
+            if canMove(
+              game: game
+              dx: -1
+              dy: 0
+              dr: 0
+            ) is 1 {
               pos.x = pos.x - 1
               moved = 1
             }
           } else {
-            if canMove(game: game, dx: 1, dy: 0, dr: 0) is 1 {
+            if canMove(
+              game: game
+              dx: 1
+              dy: 0
+              dr: 0
+            ) is 1 {
               pos.x = pos.x + 1
               moved = 1
             }
@@ -635,8 +753,15 @@ func handleInput(game: mod Game) {
   }
 
   # Rotate (still single-press)
-  if Sdl3.isKeyPressed(key: Keys.keySpace) or Sdl3.isKeyPressed(key: Keys.keyUp) or Sdl3.isKeyPressed(key: Keys.keyW) {
-    if canMove(game: game, dx: 0, dy: 0, dr: 1) is 1 {
+  if Sdl3.isKeyPressed(key: Keys.keySpace) or Sdl3.isKeyPressed(key: Keys.keyUp) or Sdl3.isKeyPressed(
+    key: Keys.keyW
+  ) {
+    if canMove(
+      game: game
+      dx: 0
+      dy: 0
+      dr: 1
+    ) is 1 {
       cp.rotation = (cp.rotation + 1) % 4
       moved = 1
     }
@@ -644,7 +769,12 @@ func handleInput(game: mod Game) {
 
   # Reset lock timer if piece moved or rotated while touching bottom
   if moved is 1 {
-    if canMove(game: game, dx: 0, dy: 1, dr: 0) is 0 {
+    if canMove(
+      game: game
+      dx: 0
+      dy: 1
+      dr: 0
+    ) is 0 {
       game.lockTimer = 0
     }
   }
@@ -658,7 +788,12 @@ func handleInput(game: mod Game) {
   # Gravity & Lock Delay
   game.moveTimer = game.moveTimer + 1
   if game.moveTimer >= effectiveDelay {
-    if canMove(game: game, dx: 0, dy: 1, dr: 0) is 1 {
+    if canMove(
+      game: game
+      dx: 0
+      dy: 1
+      dr: 0
+    ) is 1 {
       pos.y = pos.y + 1
       game.moveTimer = 0
       # Reset lock timers on successful gravity move
@@ -666,12 +801,17 @@ func handleInput(game: mod Game) {
       game.maxLockTimer = 0
     } else {
       # Can't move down, handled by lock delay below
-      game.moveTimer = effectiveDelay # keep it at threshold
+      game.moveTimer = effectiveDelay  # keep it at threshold
     }
   }
 
   # Handle Lock Delay if touching bottom
-  if canMove(game: game, dx: 0, dy: 1, dr: 0) is 0 {
+  if canMove(
+    game: game
+    dx: 0
+    dy: 1
+    dr: 0
+  ) is 0 {
     game.lockTimer = game.lockTimer + 1
     game.maxLockTimer = game.maxLockTimer + 1
     if game.lockTimer >= game.lockDelay or game.maxLockTimer >= 120 {
@@ -684,22 +824,28 @@ func handleInput(game: mod Game) {
 
 func main() ret Int {
   Gpu2d.initWindow(width: canvasW.toInt(), height: canvasH.toInt(), title: "Rae Tetris 2D — GPU2D")
-  var canvas: Gpu2dCanvas = createGpu2dCanvas()   # #907: the app-owned 2D canvas (box + image passes)
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()  # #907: the app-owned 2D canvas (box + image passes)
   Gpu2d.setDesignResolution(width: canvasW, height: canvasH, fit: 0)
   let uiResources: Gpu2dUi = loadUiAssets(
     dir: "examples/104_ui_hello/assets/"
     textFontName: "Roboto-Regular"
     iconFontName: ""
-    themeFile: "theme.raescene")
+    themeFile: "theme.raescene"
+  )
   var dbg: DebugOverlay = createDebugOverlay(
-    button: true, fps: true, memory: true, heartbeat: false)
+    button: true
+    fps: true
+    memory: true
+    heartbeat: false
+  )
   var world: UiWorld = create()
   # #764: install the app's theme (palette + scene tokens) onto this world.
   seedWorldTheme(world: world, res: uiResources)
   let uiRoot: EntityId = mountUiScene(
     world: world
     path: "examples/94_tetris2d/assets/ui.raescene"
-    res: uiResources)
+    res: uiResources
+  )
   let game: Game = {
     state: GameState.menu
     grid: List.create(Int, cap: 200)
@@ -733,8 +879,12 @@ func main() ret Int {
   loop not Gpu2d.pollClose() {
     let now: Float64 = Gpu2d.nowSeconds()
     if updateDebugOverlay(
-      d: dbg, screenW: Gpu2d.designWidth(), screenH: Gpu2d.designHeight()
-      now: now, didRealWork: true) {
+      d: dbg
+      screenW: Gpu2d.designWidth()
+      screenH: Gpu2d.designHeight()
+      now: now
+      didRealWork: true
+    ) {
     }
     let resized: Bool = resizeUiToWindow(world: world, res: uiResources)
     # Input: Global (Menu/GameOver)
@@ -771,10 +921,21 @@ func main() ret Int {
     setNodeActive(world: world, nodeId: "GameOverPanel", value: game.state is GameState.gameOver)
     runUiSystems(world: world, res: uiResources)
 
-    Gpu2d.beginFrame(canvas: canvas, r: 0.03, game: 0.05, b: 0.09, a: 1.0)
+    Gpu2d.beginFrame(
+      canvas: canvas
+      r: 0.03
+      game: 0.05
+      b: 0.09
+      a: 1.0
+    )
     drawGame(canvas: canvas, game: game)
     renderSystemGpu2d(world: world, res: uiResources, canvas: canvas)
-    drawDebugOverlay(debugOverlay: dbg, canvas: canvas, font: uiResources.textFont, didRealWork: true)
+    drawDebugOverlay(
+      debugOverlay: dbg
+      canvas: canvas
+      font: uiResources.textFont
+      didRealWork: true
+    )
     Gpu2d.endFrame(canvas: canvas)
   }
   canvasShutdown(canvas: canvas)

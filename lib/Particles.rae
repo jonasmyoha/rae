@@ -25,9 +25,9 @@ type Particle {
   vx: Float
   vy: Float
   vz: Float
-  life: Float       # seconds remaining
+  life: Float  # seconds remaining
   maxLife: Float
-  size: Float       # world-unit cube edge at birth
+  size: Float  # world-unit cube edge at birth
   r: Float
   g: Float
   b: Float
@@ -36,45 +36,98 @@ type Particle {
 type ParticleSystem {
   list: List(Particle)
   mesh: MeshHandle
-  gravity: Float    # downward accel (world units / s^2)
+  gravity: Float  # downward accel (world units / s^2)
   cap: Int
 }
 
 func createParticleSystem(cap: copy Int, gravity: copy Float) pub ret ParticleSystem {
   let box: MeshData = makeBox(size: 1.0)
-  let mesh: MeshHandle = uploadMesh(verts: box.verts, vertCount: box.vertCount, indices: box.indices)
-  ret ParticleSystem { list: List.create(Particle, cap: cap), mesh: mesh, gravity: gravity, cap: cap }
+  let mesh: MeshHandle = uploadMesh(
+    verts: box.verts
+    vertCount: box.vertCount
+    indices: box.indices
+  )
+  ret ParticleSystem {
+    list: List.create(Particle, cap: cap)
+    mesh: mesh
+    gravity: gravity
+    cap: cap
+  }
 }
 
 # Emit one particle. Drops the oldest if the pool is full, so emission never grows
 # unbounded and recent particles always win.
-func particleEmit(sys: mod ParticleSystem, x: copy Float, y: copy Float, z: copy Float,
-                  vx: copy Float, vy: copy Float, vz: copy Float,
-                  life: copy Float, size: copy Float,
-                  r: copy Float, g: copy Float, b: copy Float) pub {
+func particleEmit(
+  sys: mod ParticleSystem
+  x: copy Float
+  y: copy Float
+  z: copy Float
+  vx: copy Float
+  vy: copy Float
+  vz: copy Float
+  life: copy Float
+  size: copy Float
+  r: copy Float
+  g: copy Float
+  b: copy Float
+) pub {
   if sys.list.length >= sys.cap {
     sys.list.removeAt(index: 0)
   }
-  sys.list.add(value: { x: x, y: y, z: z, vx: vx, vy: vy, vz: vz,
-    life: life, maxLife: life, size: size, r: r, g: g, b: b })
+  sys.list.add(value: {
+    x: x
+    y: y
+    z: z
+    vx: vx
+    vy: vy
+    vz: vz
+    life: life
+    maxLife: life
+    size: size
+    r: r
+    g: g
+    b: b
+  })
 }
 
 # Emit a BURST of `count` particles from (x,y,z): each thrown up + outward with a
 # spread, so it reads as a splash / puff. `hVel`/`upVel` set the outward/upward speed;
 # the fan angle spreads deterministically by index (no RNG, so callers stay
 # lockstep-safe if they emit from a fixed-step path).
-func particleBurst(sys: mod ParticleSystem, x: copy Float, y: copy Float, z: copy Float,
-                   count: copy Int, hVel: copy Float, upVel: copy Float,
-                   life: copy Float, size: copy Float,
-                   r: copy Float, g: copy Float, b: copy Float, phase: copy Float) pub {
+func particleBurst(
+  sys: mod ParticleSystem
+  x: copy Float
+  y: copy Float
+  z: copy Float
+  count: copy Int
+  hVel: copy Float
+  upVel: copy Float
+  life: copy Float
+  size: copy Float
+  r: copy Float
+  g: copy Float
+  b: copy Float
+  phase: copy Float
+) pub {
   var i: Int = 0
   loop i < count {
     let a: Float = phase + i.toFloat() * 2.399963
     let spd: Float = hVel * (0.55 + 0.45 * Math.sin(x: a * 1.7))
     let up: Float = upVel * (0.7 + 0.5 * Math.abs(value: Math.cos(x: a * 0.9)))
-    particleEmit(sys: sys, x: x, y: y, z: z,
-      vx: Math.cos(x: a) * spd, vy: Math.sin(x: a) * spd, vz: up,
-      life: life, size: size, r: r, g: g, b: b)
+    particleEmit(
+      sys: sys
+      x: x
+      y: y
+      z: z
+      vx: Math.cos(x: a) * spd
+      vy: Math.sin(x: a) * spd
+      vz: up
+      life: life
+      size: size
+      r: r
+      g: g
+      b: b
+    )
     i = i + 1
   }
 }
@@ -111,15 +164,26 @@ func particleDraw(sys: view ParticleSystem, transparent: mod TransparentPassCach
   loop i < sys.list.length {
     if let p: Particle = sys.list.copyAt(index: i) {
       var alpha: Float = p.life / p.maxLife
-      if alpha < 0.0 { alpha = 0.0 }
-      if alpha > 1.0 { alpha = 1.0 }
+      if alpha < 0.0 {
+        alpha = 0.0
+      }
+      if alpha > 1.0 {
+        alpha = 1.0
+      }
       let t: Transform3d = {
-        position: Vec3.create(x: p.x, y: p.y, z: p.z),
-        rotation: Vec3.create(x: 0.0, y: 0.0, z: 0.0),
+        position: Vec3.create(x: p.x, y: p.y, z: p.z)
+        rotation: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
         scale: Vec3.create(x: p.size, y: p.size, z: p.size)
       }
-      addTransparentInstance(cache: transparent, mesh: sys.mesh, transform: t,
-        r: p.r, g: p.g, b: p.b, alpha: alpha)
+      addTransparentInstance(
+        cache: transparent
+        mesh: sys.mesh
+        transform: t
+        r: p.r
+        g: p.g
+        b: p.b
+        alpha: alpha
+      )
     }
     i = i + 1
   }

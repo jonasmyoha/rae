@@ -8,7 +8,6 @@
 # its dependencies for its lifetime; retire bumps the generation at once (no
 # new use) and releases only when the last pin drops; an unsubmitted recording
 # is simply dropped (no manager access, nothing to unpin).
-
 type IdIssuer {
   nextTag: Int
 }
@@ -42,6 +41,7 @@ type SubmissionId {
 }
 
 const kindBuffer: Int = 0
+
 const kindBindGroup: Int = 1
 
 type Table {
@@ -77,7 +77,9 @@ func createTable(capacity: view Int) ret Table {
 }
 
 func intAt(list: view List(Int), index: view Int) ret Int {
-  if let value: Int = list.copyAt(index: index) { ret value }
+  if let value: Int = list.copyAt(index: index) {
+    ret value
+  }
   ret 0
 }
 
@@ -93,7 +95,9 @@ type Manager {
 }
 
 func create(issuer: mod IdIssuer, capacity: view Int) ret opt Manager {
-  if capacity < 1 { ret none }
+  if capacity < 1 {
+    ret none
+  }
   let tag: Int = issue(this: issuer)
   ret Manager {
     managerTag: tag
@@ -110,25 +114,40 @@ func create(issuer: mod IdIssuer, capacity: view Int) ret opt Manager {
 func findFree(table: view Table, capacity: view Int) ret Int {
   var slot: Int = 0
   loop slot < capacity {
-    if intAt(list: table.live, index: slot) is 0 and intAt(list: table.retired, index: slot) is 0 { ret slot }
+    if intAt(list: table.live, index: slot) is 0 and intAt(list: table.retired, index: slot) is 0 {
+      ret slot
+    }
     slot = slot + 1
   }
   ret 0 - 1
 }
 
-func isLive(table: view Table, capacity: view Int, slot: view Int, generation: view Int) ret Bool {
-  if slot < 0 or slot >= capacity { ret false }
-  if intAt(list: table.live, index: slot) is 0 { ret false }
+func isLive(
+  table: view Table
+  capacity: view Int
+  slot: view Int
+  generation: view Int
+) ret Bool {
+  if slot < 0 or slot >= capacity {
+    ret false
+  }
+  if intAt(list: table.live, index: slot) is 0 {
+    ret false
+  }
   ret intAt(list: table.generations, index: slot) is generation
 }
 
 func tableFor(manager: view Manager, kind: view Int) ret view Table {
-  if kind is kindBuffer { ret manager.buffers }
+  if kind is kindBuffer {
+    ret manager.buffers
+  }
   ret manager.bindGroups
 }
 
 func kindName(kind: view Int) ret String {
-  if kind is kindBuffer { ret "buffer" }
+  if kind is kindBuffer {
+    ret "buffer"
+  }
   ret "bind group"
 }
 
@@ -146,21 +165,41 @@ func freeSlot(manager: mod Manager, kind: view Int, slot: view Int) {
 
 func retireSlot(manager: mod Manager, kind: view Int, slot: view Int) {
   if kind is kindBuffer {
-    manager.buffers.generations.set(index: slot, value: intAt(list: manager.buffers.generations, index: slot) + 1)
+    manager.buffers.generations.set(
+      index: slot
+      value: intAt(list: manager.buffers.generations, index: slot) + 1
+    )
     manager.buffers.live.set(index: slot, value: 0)
-    if intAt(list: manager.buffers.useCount, index: slot) is 0 { freeSlot(manager: manager, kind: kind, slot: slot) } else { manager.buffers.retired.set(index: slot, value: 1) }
+    if intAt(list: manager.buffers.useCount, index: slot) is 0 {
+      freeSlot(manager: manager, kind: kind, slot: slot)
+    } else {
+      manager.buffers.retired.set(index: slot, value: 1)
+    }
   } else {
-    manager.bindGroups.generations.set(index: slot, value: intAt(list: manager.bindGroups.generations, index: slot) + 1)
+    manager.bindGroups.generations.set(
+      index: slot
+      value: intAt(list: manager.bindGroups.generations, index: slot) + 1
+    )
     manager.bindGroups.live.set(index: slot, value: 0)
-    if intAt(list: manager.bindGroups.useCount, index: slot) is 0 { freeSlot(manager: manager, kind: kind, slot: slot) } else { manager.bindGroups.retired.set(index: slot, value: 1) }
+    if intAt(list: manager.bindGroups.useCount, index: slot) is 0 {
+      freeSlot(manager: manager, kind: kind, slot: slot)
+    } else {
+      manager.bindGroups.retired.set(index: slot, value: 1)
+    }
   }
 }
 
 func pin(manager: mod Manager, kind: view Int, slot: view Int) {
   if kind is kindBuffer {
-    manager.buffers.useCount.set(index: slot, value: intAt(list: manager.buffers.useCount, index: slot) + 1)
+    manager.buffers.useCount.set(
+      index: slot
+      value: intAt(list: manager.buffers.useCount, index: slot) + 1
+    )
   } else {
-    manager.bindGroups.useCount.set(index: slot, value: intAt(list: manager.bindGroups.useCount, index: slot) + 1)
+    manager.bindGroups.useCount.set(
+      index: slot
+      value: intAt(list: manager.bindGroups.useCount, index: slot) + 1
+    )
   }
 }
 
@@ -168,18 +207,29 @@ func unpin(manager: mod Manager, kind: view Int, slot: view Int) {
   if kind is kindBuffer {
     let remaining: Int = intAt(list: manager.buffers.useCount, index: slot) - 1
     manager.buffers.useCount.set(index: slot, value: remaining)
-    if remaining is 0 and intAt(list: manager.buffers.retired, index: slot) is 1 { freeSlot(manager: manager, kind: kind, slot: slot) }
+    if remaining is 0 and intAt(list: manager.buffers.retired, index: slot) is 1 {
+      freeSlot(manager: manager, kind: kind, slot: slot)
+    }
   } else {
     let remaining: Int = intAt(list: manager.bindGroups.useCount, index: slot) - 1
     manager.bindGroups.useCount.set(index: slot, value: remaining)
-    if remaining is 0 and intAt(list: manager.bindGroups.retired, index: slot) is 1 { freeSlot(manager: manager, kind: kind, slot: slot) }
+    if remaining is 0 and intAt(list: manager.bindGroups.retired, index: slot) is 1 {
+      freeSlot(manager: manager, kind: kind, slot: slot)
+    }
   }
 }
 
 func sliceIsLive(manager: view Manager, start: view Int, count: view Int) ret Bool {
   var i: Int = start
   loop i < start + count {
-    if isLive(table: tableFor(manager: manager, kind: intAt(list: manager.depKinds, index: i)), capacity: manager.capacity, slot: intAt(list: manager.depSlots, index: i), generation: intAt(list: manager.depGenerations, index: i)) is false { ret false }
+    if isLive(
+      table: tableFor(manager: manager, kind: intAt(list: manager.depKinds, index: i))
+      capacity: manager.capacity
+      slot: intAt(list: manager.depSlots, index: i)
+      generation: intAt(list: manager.depGenerations, index: i)
+    ) is false {
+      ret false
+    }
     i = i + 1
   }
   ret true
@@ -188,7 +238,11 @@ func sliceIsLive(manager: view Manager, start: view Int, count: view Int) ret Bo
 func pinSlice(manager: mod Manager, start: view Int, count: view Int) {
   var i: Int = start
   loop i < start + count {
-    pin(manager: manager, kind: intAt(list: manager.depKinds, index: i), slot: intAt(list: manager.depSlots, index: i))
+    pin(
+      manager: manager
+      kind: intAt(list: manager.depKinds, index: i)
+      slot: intAt(list: manager.depSlots, index: i)
+    )
     i = i + 1
   }
 }
@@ -196,7 +250,11 @@ func pinSlice(manager: mod Manager, start: view Int, count: view Int) {
 func unpinSlice(manager: mod Manager, start: view Int, count: view Int) {
   var i: Int = start
   loop i < start + count {
-    unpin(manager: manager, kind: intAt(list: manager.depKinds, index: i), slot: intAt(list: manager.depSlots, index: i))
+    unpin(
+      manager: manager
+      kind: intAt(list: manager.depKinds, index: i)
+      slot: intAt(list: manager.depSlots, index: i)
+    )
     i = i + 1
   }
 }
@@ -205,7 +263,10 @@ func pendingReleases(manager: view Manager) ret Int {
   var count: Int = 0
   var slot: Int = 0
   loop slot < manager.capacity {
-    count = count + intAt(list: manager.buffers.retired, index: slot) + intAt(list: manager.bindGroups.retired, index: slot)
+    count = count + intAt(list: manager.buffers.retired, index: slot) + intAt(
+      list: manager.bindGroups.retired
+      index: slot
+    )
     slot = slot + 1
   }
   ret count
@@ -213,27 +274,46 @@ func pendingReleases(manager: view Manager) ret Int {
 
 func createBuffer(manager: mod Manager) ret opt BufferId {
   let slot: Int = findFree(table: manager.buffers, capacity: manager.capacity)
-  if slot < 0 { ret none }
+  if slot < 0 {
+    ret none
+  }
   manager.buffers.live.set(index: slot, value: 1)
-  ret BufferId { managerTag: manager.managerTag, slot: slot, generation: intAt(list: manager.buffers.generations, index: slot) }
+  ret BufferId {
+    managerTag: manager.managerTag
+    slot: slot
+    generation: intAt(list: manager.buffers.generations, index: slot)
+  }
 }
 
 func isValidBuffer(manager: view Manager, id: view BufferId) ret Bool {
-  if id.managerTag is not manager.managerTag { ret false }
-  ret isLive(table: manager.buffers, capacity: manager.capacity, slot: id.slot, generation: id.generation)
+  if id.managerTag is not manager.managerTag {
+    ret false
+  }
+  ret isLive(
+    table: manager.buffers
+    capacity: manager.capacity
+    slot: id.slot
+    generation: id.generation
+  )
 }
 
 func retireBuffer(manager: mod Manager, id: view BufferId) ret Bool {
-  if isValidBuffer(manager: manager, id: id) is false { ret false }
+  if isValidBuffer(manager: manager, id: id) is false {
+    ret false
+  }
   retireSlot(manager: manager, kind: kindBuffer, slot: id.slot)
   ret true
 }
 
 # A bind group over one buffer: pins it for the group's lifetime.
 func createBindGroup(manager: mod Manager, buffer: view BufferId) ret opt BindGroupId {
-  if isValidBuffer(manager: manager, id: buffer) is false { ret none }
+  if isValidBuffer(manager: manager, id: buffer) is false {
+    ret none
+  }
   let slot: Int = findFree(table: manager.bindGroups, capacity: manager.capacity)
-  if slot < 0 { ret none }
+  if slot < 0 {
+    ret none
+  }
   let start: Int = manager.depKinds.length
   manager.depKinds.add(value: kindBuffer)
   manager.depSlots.add(value: buffer.slot)
@@ -242,21 +322,40 @@ func createBindGroup(manager: mod Manager, buffer: view BufferId) ret opt BindGr
   manager.bindGroups.depStart.set(index: slot, value: start)
   manager.bindGroups.depCount.set(index: slot, value: 1)
   pinSlice(manager: manager, start: start, count: 1)
-  ret BindGroupId { managerTag: manager.managerTag, slot: slot, generation: intAt(list: manager.bindGroups.generations, index: slot) }
+  ret BindGroupId {
+    managerTag: manager.managerTag
+    slot: slot
+    generation: intAt(list: manager.bindGroups.generations, index: slot)
+  }
 }
 
 func isValidBindGroup(manager: view Manager, id: view BindGroupId) ret Bool {
-  if id.managerTag is not manager.managerTag { ret false }
-  ret isLive(table: manager.bindGroups, capacity: manager.capacity, slot: id.slot, generation: id.generation)
+  if id.managerTag is not manager.managerTag {
+    ret false
+  }
+  ret isLive(
+    table: manager.bindGroups
+    capacity: manager.capacity
+    slot: id.slot
+    generation: id.generation
+  )
 }
 
 func bindGroupIsUsable(manager: view Manager, id: view BindGroupId) ret Bool {
-  if isValidBindGroup(manager: manager, id: id) is false { ret false }
-  ret sliceIsLive(manager: manager, start: intAt(list: manager.bindGroups.depStart, index: id.slot), count: intAt(list: manager.bindGroups.depCount, index: id.slot))
+  if isValidBindGroup(manager: manager, id: id) is false {
+    ret false
+  }
+  ret sliceIsLive(
+    manager: manager
+    start: intAt(list: manager.bindGroups.depStart, index: id.slot)
+    count: intAt(list: manager.bindGroups.depCount, index: id.slot)
+  )
 }
 
 func retireBindGroup(manager: mod Manager, id: view BindGroupId) ret Bool {
-  if isValidBindGroup(manager: manager, id: id) is false { ret false }
+  if isValidBindGroup(manager: manager, id: id) is false {
+    ret false
+  }
   let start: Int = intAt(list: manager.bindGroups.depStart, index: id.slot)
   let count: Int = intAt(list: manager.bindGroups.depCount, index: id.slot)
   retireSlot(manager: manager, kind: kindBindGroup, slot: id.slot)
@@ -274,16 +373,32 @@ type Recording {
 }
 
 func beginRecording(manager: view Manager) ret Recording {
-  ret Recording { managerTag: manager.managerTag, open: 1, useKinds: List.create(Int, cap: 4), useSlots: List.create(Int, cap: 4), useGenerations: List.create(Int, cap: 4) }
+  ret Recording {
+    managerTag: manager.managerTag
+    open: 1
+    useKinds: List.create(Int, cap: 4)
+    useSlots: List.create(Int, cap: 4)
+    useGenerations: List.create(Int, cap: 4)
+  }
 }
 
 func drop(this: mod Recording) {
-  if this.open is 1 { log("  recording abandoned (encoder released)") }
+  if this.open is 1 {
+    log("  recording abandoned (encoder released)")
+  }
 }
 
-func recordUse(recording: mod Recording, manager: view Manager, bindGroup: view BindGroupId) ret Bool {
-  if recording.open is 0 or recording.managerTag is not manager.managerTag { ret false }
-  if bindGroupIsUsable(manager: manager, id: bindGroup) is false { ret false }
+func recordUse(
+  recording: mod Recording
+  manager: view Manager
+  bindGroup: view BindGroupId
+) ret Bool {
+  if recording.open is 0 or recording.managerTag is not manager.managerTag {
+    ret false
+  }
+  if bindGroupIsUsable(manager: manager, id: bindGroup) is false {
+    ret false
+  }
   recording.useKinds.add(value: kindBindGroup)
   recording.useSlots.add(value: bindGroup.slot)
   recording.useGenerations.add(value: bindGroup.generation)
@@ -299,14 +414,25 @@ func recordUse(recording: mod Recording, manager: view Manager, bindGroup: view 
 }
 
 func submit(manager: mod Manager, recording: mod Recording) ret opt SubmissionId {
-  if recording.open is 0 or recording.managerTag is not manager.managerTag { ret none }
+  if recording.open is 0 or recording.managerTag is not manager.managerTag {
+    ret none
+  }
   var i: Int = 0
   loop i < recording.useKinds.length {
-    if isLive(table: tableFor(manager: manager, kind: intAt(list: recording.useKinds, index: i)), capacity: manager.capacity, slot: intAt(list: recording.useSlots, index: i), generation: intAt(list: recording.useGenerations, index: i)) is false { ret none }
+    if isLive(
+      table: tableFor(manager: manager, kind: intAt(list: recording.useKinds, index: i))
+      capacity: manager.capacity
+      slot: intAt(list: recording.useSlots, index: i)
+      generation: intAt(list: recording.useGenerations, index: i)
+    ) is false {
+      ret none
+    }
     i = i + 1
   }
   let slot: Int = findFree(table: manager.submissions, capacity: manager.capacity)
-  if slot < 0 { ret none }
+  if slot < 0 {
+    ret none
+  }
   let start: Int = manager.depKinds.length
   i = 0
   loop i < recording.useKinds.length {
@@ -321,27 +447,53 @@ func submit(manager: mod Manager, recording: mod Recording) ret opt SubmissionId
   manager.submissions.depStart.set(index: slot, value: start)
   manager.submissions.depCount.set(index: slot, value: recording.useKinds.length)
   pinSlice(manager: manager, start: start, count: recording.useKinds.length)
-  ret SubmissionId { managerTag: manager.managerTag, slot: slot, generation: intAt(list: manager.submissions.generations, index: slot) }
+  ret SubmissionId {
+    managerTag: manager.managerTag
+    slot: slot
+    generation: intAt(list: manager.submissions.generations, index: slot)
+  }
 }
 
 func isValidSubmission(manager: view Manager, id: view SubmissionId) ret Bool {
-  if id.managerTag is not manager.managerTag { ret false }
-  ret isLive(table: manager.submissions, capacity: manager.capacity, slot: id.slot, generation: id.generation)
+  if id.managerTag is not manager.managerTag {
+    ret false
+  }
+  ret isLive(
+    table: manager.submissions
+    capacity: manager.capacity
+    slot: id.slot
+    generation: id.generation
+  )
 }
 
 # Stands in for a poll that observed completion: -1 invalid, 1 completed.
 func complete(manager: mod Manager, id: view SubmissionId) ret Int {
-  if isValidSubmission(manager: manager, id: id) is false { ret 0 - 1 }
-  if intAt(list: manager.submissions.completed, index: id.slot) is 1 { ret 1 }
+  if isValidSubmission(manager: manager, id: id) is false {
+    ret 0 - 1
+  }
+  if intAt(list: manager.submissions.completed, index: id.slot) is 1 {
+    ret 1
+  }
   manager.submissions.completed.set(index: id.slot, value: 1)
-  unpinSlice(manager: manager, start: intAt(list: manager.submissions.depStart, index: id.slot), count: intAt(list: manager.submissions.depCount, index: id.slot))
+  unpinSlice(
+    manager: manager
+    start: intAt(list: manager.submissions.depStart, index: id.slot)
+    count: intAt(list: manager.submissions.depCount, index: id.slot)
+  )
   ret 1
 }
 
 func retireSubmission(manager: mod Manager, id: view SubmissionId) ret Bool {
-  if isValidSubmission(manager: manager, id: id) is false { ret false }
-  if intAt(list: manager.submissions.completed, index: id.slot) is 0 { ret false }
-  manager.submissions.generations.set(index: id.slot, value: intAt(list: manager.submissions.generations, index: id.slot) + 1)
+  if isValidSubmission(manager: manager, id: id) is false {
+    ret false
+  }
+  if intAt(list: manager.submissions.completed, index: id.slot) is 0 {
+    ret false
+  }
+  manager.submissions.generations.set(
+    index: id.slot
+    value: intAt(list: manager.submissions.generations, index: id.slot) + 1
+  )
   manager.submissions.live.set(index: id.slot, value: 0)
   ret true
 }
@@ -379,10 +531,20 @@ func main() {
             # --- old bind group: its dependency is retired ---
             log("old bind group usable: {bindGroupIsUsable(manager: managerA, id: group)}")
             var late: Recording = beginRecording(manager: managerA)
-            log("record with old bind group: {recordUse(recording: late, manager: managerA, bindGroup: group)}")
+            log(
+              "record with old bind group: {recordUse(
+                recording: late
+                manager: managerA
+                bindGroup: group
+              )}"
+            )
             log("complete: {complete(manager: managerA, id: submission)}")
             log("complete again: {complete(manager: managerA, id: submission)}")
-            log("pending after completion (still pinned by the group): {pendingReleases(manager: managerA)}")
+            log(
+              "pending after completion (still pinned by the group): {pendingReleases(
+                manager: managerA
+              )}"
+            )
             log("retire bind group: {retireBindGroup(manager: managerA, id: group)}")
             log("pending after group retired: {pendingReleases(manager: managerA)}")
             log("retire submission: {retireSubmission(manager: managerA, id: submission)}")
@@ -421,7 +583,12 @@ func main() {
               log("round {round}: submission slot {submission.slot} gen {submission.generation}")
               # --- independent managers: unknown to the other manager ---
               log("  complete in the other manager: {complete(manager: managerA, id: submission)}")
-              log("  complete: {complete(manager: managerB, id: submission)} retire: {retireSubmission(manager: managerB, id: submission)}")
+              log(
+                "  complete: {complete(manager: managerB, id: submission)} retire: {retireSubmission(
+                  manager: managerB
+                  id: submission
+                )}"
+              )
             }
             round = round + 1
           }

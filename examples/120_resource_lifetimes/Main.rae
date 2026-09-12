@@ -13,9 +13,10 @@
 #
 # Headless CLI: prints the mixer's bookkeeping and ends with the line the
 # example gate asserts, `[lifetimes] live voices: 0`.
-
 func mixerAcquire() unsafe extern ret Int
+
 func mixerRelease(slot: Int) unsafe extern
+
 func mixerLive() unsafe extern ret Int
 
 # A voice: the mixer slot it holds and the note it plays.
@@ -57,8 +58,8 @@ func drop(this: mod Chord) {
 }
 
 func playChord(name: view String) ret Chord {
-  var chord: Chord = { name: name, voices: create(cap: 3) }   # List(Voice) from the field type
-  chord.voices.add(value: create(note: 60))                    # Voice from the parameter type
+  var chord: Chord = { name: name, voices: create(cap: 3) }  # List(Voice) from the field type
+  chord.voices.add(value: create(note: 60))  # Voice from the parameter type
   chord.voices.add(value: create(note: 64))
   chord.voices.add(value: create(note: 67))
   ret chord

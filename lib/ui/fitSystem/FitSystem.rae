@@ -42,7 +42,14 @@ func fitDiffers(a: view Float, b: view Float) ret Bool {
 
 # Change-gated ComputedRect write. Only touches entities layout has
 # already produced a ComputedRect for.
-func fitWriteRect(world: mod UiWorld, entity: view EntityId, x: view Float, y: view Float, w: view Float, h: view Float) {
+func fitWriteRect(
+  world: mod UiWorld
+  entity: view EntityId
+  x: view Float
+  y: view Float
+  w: view Float
+  h: view Float
+) {
   if componentHas(this: world.computedRects, entity: entity) is false {
     ret
   }
@@ -85,7 +92,14 @@ func fitScaleSubtree(world: mod UiWorld, entity: view EntityId, s: view Float) {
       let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
       if componentHas(this: world.rects, entity: cid) {
         let r: Rect = componentGet(this: world.rects, entity: cid)
-        fitWriteRect(world: world, entity: cid, x: r.position.x * s, y: r.position.y * s, w: r.size.x * s, h: r.size.y * s)
+        fitWriteRect(
+          world: world
+          entity: cid
+          x: r.position.x * s
+          y: r.position.y * s
+          w: r.size.x * s
+          h: r.size.y * s
+        )
       }
       fitScaleSubtree(world: world, entity: cid, s: s)
       i = i + 1
@@ -148,7 +162,14 @@ func fitApplyOne(world: mod UiWorld, entity: view EntityId, mode: view FitMode) 
   let h: Float = design.size.y * s
   let x: Float = padL + (availW - w) / 2.0
   let y: Float = padT + (availH - h) / 2.0
-  fitWriteRect(world: world, entity: entity, x: x, y: y, w: w, h: h)
+  fitWriteRect(
+    world: world
+    entity: entity
+    x: x
+    y: y
+    w: w
+    h: h
+  )
   fitScaleSubtree(world: world, entity: entity, s: s)
 }
 

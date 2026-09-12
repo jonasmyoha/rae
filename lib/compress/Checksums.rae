@@ -8,34 +8,34 @@
 # values never exceed 32 bits and only ever shift right, so a 64-bit signed Int
 # holds them without masking.
 func crc32(data: view List(Int), len: view Int) ret Int {
-    var crc: Int = 4294967295            # 0xFFFFFFFF
-    var i: Int = 0
-    loop i < len {
-        crc = crc bitxor data.copyAt(index: i)
-        var k: Int = 0
-        loop k < 8 {
-            if crc bitand 1 is 1 {
-                crc = (crc shr 1) bitxor 3988292384   # 0xEDB88320
-            } else {
-                crc = crc shr 1
-            }
-            k = k + 1
-        }
-        i = i + 1
+  var crc: Int = 4294967295  # 0xFFFFFFFF
+  var i: Int = 0
+  loop i < len {
+    crc = crc bitxor data.copyAt(index: i)
+    var k: Int = 0
+    loop k < 8 {
+      if crc bitand 1 is 1 {
+        crc = (crc shr 1) bitxor 3988292384  # 0xEDB88320
+      } else {
+        crc = crc shr 1
+      }
+      k = k + 1
     }
-    ret crc bitxor 4294967295
+    i = i + 1
+  }
+  ret crc bitxor 4294967295
 }
 
 # Adler-32 as used by the zlib stream trailer. Two rolling sums mod 65521,
 # packed as (b << 16) | a.
 func adler32(data: view List(Int), len: view Int) ret Int {
-    var a: Int = 1
-    var b: Int = 0
-    var i: Int = 0
-    loop i < len {
-        a = (a + data.copyAt(index: i)) % 65521
-        b = (b + a) % 65521
-        i = i + 1
-    }
-    ret (b shl 16) bitor a
+  var a: Int = 1
+  var b: Int = 0
+  var i: Int = 0
+  loop i < len {
+    a = (a + data.copyAt(index: i)) % 65521
+    b = (b + a) % 65521
+    i = i + 1
+  }
+  ret (b shl 16) bitor a
 }

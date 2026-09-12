@@ -17,7 +17,12 @@ func isOccupied(world: view World, x: view Int, y: view Int) ret Int {
   ret 0
 }
 
-func canMove(world: view World, dx: view Int, dy: view Int, dr: view Int) ret Int {
+func canMove(
+  world: view World
+  dx: view Int
+  dy: view Int
+  dr: view Int
+) ret Int {
   let cp: view Piece => world.currentPiece
   let newX: Int = cp.x + dx
   let newY: Int = cp.y + dy
@@ -29,7 +34,12 @@ func canMove(world: view World, dx: view Int, dy: view Int, dr: view Int) ret In
   loop py < 4 {
     var px: Int = 0
     loop px < 4 {
-      if getShapeCell(kind: cp.kind, rot: newRot, px: px, py: py) is 1 {
+      if getShapeCell(
+        kind: cp.kind
+        rot: newRot
+        px: px
+        py: py
+      ) is 1 {
         if isOccupied(world: world, x: newX + px, y: newY + py) is 1 {
           ret 0
         }
@@ -48,11 +58,21 @@ func lockPiece(world: mod World) {
   loop py < 4 {
     var px: Int = 0
     loop px < 4 {
-      if getShapeCell(kind: cp.kind, rot: cp.rotation, px: px, py: py) is 1 {
+      if getShapeCell(
+        kind: cp.kind
+        rot: cp.rotation
+        px: px
+        py: py
+      ) is 1 {
         let gx: Int = cp.x + px
         let gy: Int = cp.y + py
         if gy >= 0 and gy < gridHeight {
-          gridSet(world: world, x: gx, y: gy, value: kindId)
+          gridSet(
+            world: world
+            x: gx
+            y: gy
+            value: kindId
+          )
         }
       }
       px = px + 1
@@ -83,14 +103,24 @@ func checkLines(world: mod World) {
         var tx: Int = 0
         loop tx < gridWidth {
           let above: Int = gridGet(world: world, x: tx, y: ty - 1)
-          gridSet(world: world, x: tx, y: ty, value: above)
+          gridSet(
+            world: world
+            x: tx
+            y: ty
+            value: above
+          )
           tx = tx + 1
         }
         ty = ty - 1
       }
       var tx: Int = 0
       loop tx < gridWidth {
-        gridSet(world: world, x: tx, y: 0, value: 0)
+        gridSet(
+          world: world
+          x: tx
+          y: 0
+          value: 0
+        )
         tx = tx + 1
       }
       # Re-check the same row index since rows shifted down.
@@ -124,15 +154,15 @@ func checkLines(world: mod World) {
 }
 
 func spawnNextPiece(world: mod World) {
-  let p: Piece = {
-    kind: world.nextKind
-    x: 3
-    y: 0
-    rotation: 0
-  }
+  let p: Piece = { kind: world.nextKind, x: 3, y: 0, rotation: 0 }
   world.currentPiece = p
   world.nextKind = randomKind()
-  if canMove(world: world, dx: 0, dy: 0, dr: 0) is 0 {
+  if canMove(
+    world: world
+    dx: 0
+    dy: 0
+    dr: 0
+  ) is 0 {
     world.state = GameState.gameOver
   }
 }
@@ -161,7 +191,12 @@ func physicsSystem(world: mod World) {
     ret
   }
 
-  var grounded: Bool = canMove(world: world, dx: 0, dy: 1, dr: 0) is 0
+  var grounded: Bool = canMove(
+    world: world
+    dx: 0
+    dy: 1
+    dr: 0
+  ) is 0
 
   # Gravity tick.
   world.fallTimer = world.fallTimer + 1
@@ -169,7 +204,12 @@ func physicsSystem(world: mod World) {
     world.fallTimer = 0
     if not grounded {
       world.currentPiece.y = world.currentPiece.y + 1
-      grounded = canMove(world: world, dx: 0, dy: 1, dr: 0) is 0
+      grounded = canMove(
+        world: world
+        dx: 0
+        dy: 1
+        dr: 0
+      ) is 0
     }
   }
 

@@ -10,53 +10,53 @@
 import Math
 
 type Vec3 {
-    x: Float
-    y: Float
-    z: Float
+  x: Float
+  y: Float
+  z: Float
 }
 
 func create(x: view Float, y: view Float, z: view Float) ret Vec3 {
-    ret Vec3 { x: x, y: y, z: z }
+  ret Vec3 { x: x, y: y, z: z }
 }
 
 func vadd(a: view Vec3, b: view Vec3) ret Vec3 {
-    ret Vec3 { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z }
+  ret Vec3 { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z }
 }
 
 func vsub(a: view Vec3, b: view Vec3) ret Vec3 {
-    ret Vec3 { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z }
+  ret Vec3 { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z }
 }
 
 func vscale(a: view Vec3, s: view Float) ret Vec3 {
-    ret Vec3 { x: a.x * s, y: a.y * s, z: a.z * s }
+  ret Vec3 { x: a.x * s, y: a.y * s, z: a.z * s }
 }
 
 # Component-wise multiply (e.g. colour * attenuation).
 func vmul(a: view Vec3, b: view Vec3) ret Vec3 {
-    ret Vec3 { x: a.x * b.x, y: a.y * b.y, z: a.z * b.z }
+  ret Vec3 { x: a.x * b.x, y: a.y * b.y, z: a.z * b.z }
 }
 
 func vneg(a: view Vec3) ret Vec3 {
-    ret Vec3 { x: 0.0 - a.x, y: 0.0 - a.y, z: 0.0 - a.z }
+  ret Vec3 { x: 0.0 - a.x, y: 0.0 - a.y, z: 0.0 - a.z }
 }
 
 func vdot(a: view Vec3, b: view Vec3) ret Float {
-    ret a.x * b.x + a.y * b.y + a.z * b.z
+  ret a.x * b.x + a.y * b.y + a.z * b.z
 }
 
 func vcross(a: view Vec3, b: view Vec3) ret Vec3 {
-    ret Vec3 { x: a.y * b.z - a.z * b.y, y: a.z * b.x - a.x * b.z, z: a.x * b.y - a.y * b.x }
+  ret Vec3 { x: a.y * b.z - a.z * b.y, y: a.z * b.x - a.x * b.z, z: a.x * b.y - a.y * b.x }
 }
 
 func vlenSq(a: view Vec3) ret Float {
-    ret a.x * a.x + a.y * a.y + a.z * a.z
+  ret a.x * a.x + a.y * a.y + a.z * a.z
 }
 
 func vlen(a: view Vec3) ret Float {
-    ret Math.sqrt(x: Vec3.vlenSq(a: a))
+  ret Math.sqrt(x: Vec3.vlenSq(a: a))
 }
 
 func vnorm(a: view Vec3) ret Vec3 {
-    let l: Float = Vec3.vlen(a: a)
-    ret Vec3 { x: a.x / l, y: a.y / l, z: a.z / l }
+  let l: Float = Vec3.vlen(a: a)
+  ret Vec3 { x: a.x / l, y: a.y / l, z: a.z / l }
 }

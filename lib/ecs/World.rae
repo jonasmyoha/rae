@@ -32,9 +32,9 @@ open ecs/ComponentTable
 import ecs/ListHelpers
 
 type EntityAllocator {
-  generations: List(Int)   # generations[index] = the slot's current generation
-  freeList: List(Int)      # indices freed by destroy, available for reuse
-  nextIndex: Int           # next never-used index (when the free list is empty)
+  generations: List(Int)  # generations[index] = the slot's current generation
+  freeList: List(Int)  # indices freed by destroy, available for reuse
+  nextIndex: Int  # next never-used index (when the free list is empty)
   # The live-entity set (#705): `alive` is the dense list every system iterates
   # once per frame; `aliveSlot[index]` is that entity's position in `alive`
   # (-1 = not alive), which makes destroy an O(1) swap-remove instead of a scan.

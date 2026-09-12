@@ -16,25 +16,32 @@ import Vec3
 
 type GrassViewSettings {
   enabled: Bool
-  extent: Float           # candidate-grid span / render distance (world units)
-  windDirX: Float         # coherent wind direction (unit-ish)
+  extent: Float  # candidate-grid span / render distance (world units)
+  windDirX: Float  # coherent wind direction (unit-ish)
   windDirY: Float
-  windStrength: Float     # 1.0 = the tuned baseline sway
-  windGust: Float         # extra gust amplitude multiplier
-  bladeHeightScale: Float # scales the per-blade height (top-down wants shorter)
+  windStrength: Float  # 1.0 = the tuned baseline sway
+  windGust: Float  # extra gust amplitude multiplier
+  bladeHeightScale: Float  # scales the per-blade height (top-down wants shorter)
   bladeWidthScale: Float  # scales blade width (top-down wants wider for coverage)
-  densityScale: Float     # 0..1 fraction of candidate blades kept
-  groundColor: Vec3       # gradient bottom = terrain ground colour
-  tipLighten: Float       # gradient top multiplier (>1 lighter)
+  densityScale: Float  # 0..1 fraction of candidate blades kept
+  groundColor: Vec3  # gradient bottom = terrain ground colour
+  tipLighten: Float  # gradient top multiplier (>1 lighter)
 }
 
 # Third-person: the tuned baseline — tall, dense, detailed blades close to camera.
 func grassThirdPersonSettings(groundColor: copy Vec3) pub ret GrassViewSettings {
   ret GrassViewSettings {
-    enabled: true, extent: 40.0,
-    windDirX: 0.82, windDirY: 0.57, windStrength: 1.0, windGust: 1.0,
-    bladeHeightScale: 1.0, bladeWidthScale: 1.0, densityScale: 1.0,
-    groundColor: groundColor, tipLighten: 1.8
+    enabled: true
+    extent: 40.0
+    windDirX: 0.82
+    windDirY: 0.57
+    windStrength: 1.0
+    windGust: 1.0
+    bladeHeightScale: 1.0
+    bladeWidthScale: 1.0
+    densityScale: 1.0
+    groundColor: groundColor
+    tipLighten: 1.8
   }
 }
 
@@ -43,9 +50,16 @@ func grassThirdPersonSettings(groundColor: copy Vec3) pub ret GrassViewSettings 
 # reach much further, and thin the density since near-camera detail is wasted.
 func grassTopDownSettings(groundColor: copy Vec3) pub ret GrassViewSettings {
   ret GrassViewSettings {
-    enabled: true, extent: 80.0,
-    windDirX: 0.82, windDirY: 0.57, windStrength: 0.6, windGust: 0.8,
-    bladeHeightScale: 0.7, bladeWidthScale: 1.4, densityScale: 0.7,
-    groundColor: groundColor, tipLighten: 1.5
+    enabled: true
+    extent: 80.0
+    windDirX: 0.82
+    windDirY: 0.57
+    windStrength: 0.6
+    windGust: 0.8
+    bladeHeightScale: 0.7
+    bladeWidthScale: 1.4
+    densityScale: 0.7
+    groundColor: groundColor
+    tipLighten: 1.5
   }
 }

@@ -1,4 +1,5 @@
 open HotReload
+
 # Hot-reload state preservation for the mobile UI demo.
 #
 # Wires the app to the Phase 2-6 hot-reload protocol so that
@@ -76,23 +77,49 @@ func screenToInt(s: view Screen) ret Int {
   # forward-compatible. Add new screens with new int codes; do not
   # reuse or reorder. Pre-redesign builds wrote 0/1/2/3 for the four
   # screens that existed then; those still mean the same screens.
-  if s is Screen.player { ret 0 }
-  if s is Screen.album      { ret 1 }
-  if s is Screen.search     { ret 2 }
-  if s is Screen.library    { ret 3 }
-  if s is Screen.home       { ret 4 }
-  if s is Screen.profile    { ret 5 }
-  if s is Screen.history    { ret 6 }
+  if s is Screen.player {
+    ret 0
+  }
+  if s is Screen.album {
+    ret 1
+  }
+  if s is Screen.search {
+    ret 2
+  }
+  if s is Screen.library {
+    ret 3
+  }
+  if s is Screen.home {
+    ret 4
+  }
+  if s is Screen.profile {
+    ret 5
+  }
+  if s is Screen.history {
+    ret 6
+  }
   ret 4
 }
 
 func intToScreen(value: view Int) ret Screen {
-  if value is 0 { ret Screen.player }
-  if value is 1 { ret Screen.album }
-  if value is 2 { ret Screen.search }
-  if value is 3 { ret Screen.library }
-  if value is 5 { ret Screen.profile }
-  if value is 6 { ret Screen.history }
+  if value is 0 {
+    ret Screen.player
+  }
+  if value is 1 {
+    ret Screen.album
+  }
+  if value is 2 {
+    ret Screen.search
+  }
+  if value is 3 {
+    ret Screen.library
+  }
+  if value is 5 {
+    ret Screen.profile
+  }
+  if value is 6 {
+    ret Screen.history
+  }
   ret Screen.home
 }
 
@@ -100,10 +127,7 @@ func intToScreen(value: view Int) ret Screen {
 # so a missing or partial state file leaves the running app on its
 # own startup defaults.
 func defaultRestoredState() pub ret RestoredState {
-  ret RestoredState {
-    screen: Screen.home
-    scrollY: 0.0
-  }
+  ret RestoredState { screen: Screen.home, scrollY: 0.0 }
 }
 
 # Read `.rae/state.json` (if present), parse the semicolon-form,
@@ -116,10 +140,7 @@ func loadRestoredState(fallback: view RestoredState) pub ret RestoredState {
   if prior.length() is 0 {
     ret fallback
   }
-  let result: RestoredState = {
-    screen: fallback.screen
-    scrollY: fallback.scrollY
-  }
+  let result: RestoredState = { screen: fallback.screen, scrollY: fallback.scrollY }
   let trimmed: String = prior.trim()
   let parts: List(String) = trimmed.split(sep: ";")
   loop let kv: view String in parts {

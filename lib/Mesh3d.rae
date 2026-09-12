@@ -17,7 +17,17 @@ type MeshData {
   vertCount: Int
 }
 
-func pushVert(verts: mod List(Float), px: view Float, py: view Float, pz: view Float, nx: view Float, ny: view Float, nz: view Float, u: view Float, value: view Float) {
+func pushVert(
+  verts: mod List(Float)
+  px: view Float
+  py: view Float
+  pz: view Float
+  nx: view Float
+  ny: view Float
+  nz: view Float
+  u: view Float
+  value: view Float
+) {
   verts.add(value: px)
   verts.add(value: py)
   verts.add(value: pz)
@@ -31,12 +41,16 @@ func pushVert(verts: mod List(Float), px: view Float, py: view Float, pz: view F
 # Flat-buffer reads below go through these helpers so the `opt Float` from
 # `.get` is unwrapped in one place; an out-of-range index yields 0.0.
 func sampleHeight(heights: view List(Float), index: copy Int) ret Float {
-  if let value: Float = heights.copyAt(index: index) { ret value }
+  if let value: Float = heights.copyAt(index: index) {
+    ret value
+  }
   ret 0.0
 }
 
 func vertComponent(verts: view List(Float), index: copy Int) ret Float {
-  if let value: Float = verts.copyAt(index: index) { ret value }
+  if let value: Float = verts.copyAt(index: index) {
+    ret value
+  }
   ret 0.0
 }
 
@@ -47,7 +61,7 @@ func makeSphere(rings: view Int, segments: view Int) pub ret MeshData {
   let pi: Float = 3.141592653589793
   var r: Int = 0
   loop r <= rings {
-    let phi: Float = pi * r.toFloat() / rings.toFloat()   # 0..pi from +Z pole
+    let phi: Float = pi * r.toFloat() / rings.toFloat()  # 0..pi from +Z pole
     let z: Float = Math.cos(x: phi)
     let ringRad: Float = Math.sin(x: phi)
     var s: Int = 0
@@ -55,7 +69,17 @@ func makeSphere(rings: view Int, segments: view Int) pub ret MeshData {
       let theta: Float = 2.0 * pi * s.toFloat() / segments.toFloat()
       let x: Float = ringRad * Math.cos(x: theta)
       let y: Float = ringRad * Math.sin(x: theta)
-      pushVert(verts: verts, px: x, py: y, pz: z, nx: x, ny: y, nz: z, u: s.toFloat() / segments.toFloat(), value: r.toFloat() / rings.toFloat())
+      pushVert(
+        verts: verts
+        px: x
+        py: y
+        pz: z
+        nx: x
+        ny: y
+        nz: z
+        u: s.toFloat() / segments.toFloat()
+        value: r.toFloat() / rings.toFloat()
+      )
       s = s + 1
     }
     r = r + 1
@@ -105,7 +129,17 @@ func makePlane(size: view Float, segments: view Int) pub ret MeshData {
     var xi: Int = 0
     loop xi <= segments {
       let vx: Float = xi.toFloat() / segments.toFloat()
-      pushVert(verts: verts, px: (vx - 0.5) * size, py: (vy - 0.5) * size, pz: 0.0, nx: 0.0, ny: 0.0, nz: 1.0, u: vx, value: vy)
+      pushVert(
+        verts: verts
+        px: (vx - 0.5) * size
+        py: (vy - 0.5) * size
+        pz: 0.0
+        nx: 0.0
+        ny: 0.0
+        nz: 1.0
+        u: vx
+        value: vy
+      )
       xi = xi + 1
     }
     yi = yi + 1
@@ -134,7 +168,14 @@ func makePlane(size: view Float, segments: view Int) pub ret MeshData {
 # Static CPU-generated terrain. Noise is sampled once into a height grid;
 # smooth normals then reuse neighboring heights instead of reevaluating FBM.
 # Animated or very dense displacement should use lib/noise.wgsl on the GPU.
-func makeFbmTerrain(size: view Float, segments: view Int, heightScale: view Float, frequency: view Float, octaves: view Int, seed: view Int) pub ret MeshData {
+func makeFbmTerrain(
+  size: view Float
+  segments: view Int
+  heightScale: view Float
+  frequency: view Float
+  octaves: view Int
+  seed: view Int
+) pub ret MeshData {
   let stride: Int = segments + 1
   let vertCount: Int = stride * stride
   let heights: List(Float) = List.create(Float, cap: vertCount)
@@ -149,7 +190,14 @@ func makeFbmTerrain(size: view Float, segments: view Int, heightScale: view Floa
       let vx: Float = xi.toFloat() / segments.toFloat()
       let px: Float = (vx - 0.5) * size
       let py: Float = (vy - 0.5) * size
-      let height: Float = Noise.fbm2(x: px * frequency, y: py * frequency, octaves: octaves, lacunarity: 2.0, gain: 0.5, seed: seed) * heightScale
+      let height: Float = Noise.fbm2(
+        x: px * frequency
+        y: py * frequency
+        octaves: octaves
+        lacunarity: 2.0
+        gain: 0.5
+        seed: seed
+      ) * heightScale
       heights.add(value: height)
       xi = xi + 1
     }
@@ -167,10 +215,18 @@ func makeFbmTerrain(size: view Float, segments: view Int, heightScale: view Floa
       var rightX: Int = xi + 1
       var downY: Int = yi - 1
       var upY: Int = yi + 1
-      if leftX < 0 { leftX = 0 }
-      if rightX > segments { rightX = segments }
-      if downY < 0 { downY = 0 }
-      if upY > segments { upY = segments }
+      if leftX < 0 {
+        leftX = 0
+      }
+      if rightX > segments {
+        rightX = segments
+      }
+      if downY < 0 {
+        downY = 0
+      }
+      if upY > segments {
+        upY = segments
+      }
       let center: Float = sampleHeight(heights: heights, index: yi * stride + xi)
       let left: Float = sampleHeight(heights: heights, index: yi * stride + leftX)
       let right: Float = sampleHeight(heights: heights, index: yi * stride + rightX)
@@ -182,10 +238,15 @@ func makeFbmTerrain(size: view Float, segments: view Int, heightScale: view Floa
       let slopeY: Float = (up - down) / dy
       let normalLen: Float = Math.sqrt(x: slopeX * slopeX + slopeY * slopeY + 1.0)
       pushVert(
-        verts: verts,
-        px: (vx - 0.5) * size, py: (vy - 0.5) * size, pz: center,
-        nx: (0.0 - slopeX) / normalLen, ny: (0.0 - slopeY) / normalLen, nz: 1.0 / normalLen,
-        u: vx, value: vy
+        verts: verts
+        px: (vx - 0.5) * size
+        py: (vy - 0.5) * size
+        pz: center
+        nx: (0.0 - slopeX) / normalLen
+        ny: (0.0 - slopeY) / normalLen
+        nz: 1.0 / normalLen
+        u: vx
+        value: vy
       )
       xi = xi + 1
     }
@@ -231,35 +292,275 @@ func makeBox(size: view Float) pub ret MeshData {
   # Per face: outward normal, then the four corners in counter-clockwise
   # order seen from OUTSIDE along that normal.
   # +X
-  pushVert(verts: verts, px: h, py: 0.0 - h, pz: 0.0 - h, nx: 1.0, ny: 0.0, nz: 0.0, u: 0.0, value: 0.0)
-  pushVert(verts: verts, px: h, py: h, pz: 0.0 - h, nx: 1.0, ny: 0.0, nz: 0.0, u: 1.0, value: 0.0)
-  pushVert(verts: verts, px: h, py: h, pz: h, nx: 1.0, ny: 0.0, nz: 0.0, u: 1.0, value: 1.0)
-  pushVert(verts: verts, px: h, py: 0.0 - h, pz: h, nx: 1.0, ny: 0.0, nz: 0.0, u: 0.0, value: 1.0)
+  pushVert(
+    verts: verts
+    px: h
+    py: 0.0 - h
+    pz: 0.0 - h
+    nx: 1.0
+    ny: 0.0
+    nz: 0.0
+    u: 0.0
+    value: 0.0
+  )
+  pushVert(
+    verts: verts
+    px: h
+    py: h
+    pz: 0.0 - h
+    nx: 1.0
+    ny: 0.0
+    nz: 0.0
+    u: 1.0
+    value: 0.0
+  )
+  pushVert(
+    verts: verts
+    px: h
+    py: h
+    pz: h
+    nx: 1.0
+    ny: 0.0
+    nz: 0.0
+    u: 1.0
+    value: 1.0
+  )
+  pushVert(
+    verts: verts
+    px: h
+    py: 0.0 - h
+    pz: h
+    nx: 1.0
+    ny: 0.0
+    nz: 0.0
+    u: 0.0
+    value: 1.0
+  )
   # -X
-  pushVert(verts: verts, px: 0.0 - h, py: h, pz: 0.0 - h, nx: 0.0 - 1.0, ny: 0.0, nz: 0.0, u: 0.0, value: 0.0)
-  pushVert(verts: verts, px: 0.0 - h, py: 0.0 - h, pz: 0.0 - h, nx: 0.0 - 1.0, ny: 0.0, nz: 0.0, u: 1.0, value: 0.0)
-  pushVert(verts: verts, px: 0.0 - h, py: 0.0 - h, pz: h, nx: 0.0 - 1.0, ny: 0.0, nz: 0.0, u: 1.0, value: 1.0)
-  pushVert(verts: verts, px: 0.0 - h, py: h, pz: h, nx: 0.0 - 1.0, ny: 0.0, nz: 0.0, u: 0.0, value: 1.0)
+  pushVert(
+    verts: verts
+    px: 0.0 - h
+    py: h
+    pz: 0.0 - h
+    nx: 0.0 - 1.0
+    ny: 0.0
+    nz: 0.0
+    u: 0.0
+    value: 0.0
+  )
+  pushVert(
+    verts: verts
+    px: 0.0 - h
+    py: 0.0 - h
+    pz: 0.0 - h
+    nx: 0.0 - 1.0
+    ny: 0.0
+    nz: 0.0
+    u: 1.0
+    value: 0.0
+  )
+  pushVert(
+    verts: verts
+    px: 0.0 - h
+    py: 0.0 - h
+    pz: h
+    nx: 0.0 - 1.0
+    ny: 0.0
+    nz: 0.0
+    u: 1.0
+    value: 1.0
+  )
+  pushVert(
+    verts: verts
+    px: 0.0 - h
+    py: h
+    pz: h
+    nx: 0.0 - 1.0
+    ny: 0.0
+    nz: 0.0
+    u: 0.0
+    value: 1.0
+  )
   # +Y
-  pushVert(verts: verts, px: h, py: h, pz: 0.0 - h, nx: 0.0, ny: 1.0, nz: 0.0, u: 0.0, value: 0.0)
-  pushVert(verts: verts, px: 0.0 - h, py: h, pz: 0.0 - h, nx: 0.0, ny: 1.0, nz: 0.0, u: 1.0, value: 0.0)
-  pushVert(verts: verts, px: 0.0 - h, py: h, pz: h, nx: 0.0, ny: 1.0, nz: 0.0, u: 1.0, value: 1.0)
-  pushVert(verts: verts, px: h, py: h, pz: h, nx: 0.0, ny: 1.0, nz: 0.0, u: 0.0, value: 1.0)
+  pushVert(
+    verts: verts
+    px: h
+    py: h
+    pz: 0.0 - h
+    nx: 0.0
+    ny: 1.0
+    nz: 0.0
+    u: 0.0
+    value: 0.0
+  )
+  pushVert(
+    verts: verts
+    px: 0.0 - h
+    py: h
+    pz: 0.0 - h
+    nx: 0.0
+    ny: 1.0
+    nz: 0.0
+    u: 1.0
+    value: 0.0
+  )
+  pushVert(
+    verts: verts
+    px: 0.0 - h
+    py: h
+    pz: h
+    nx: 0.0
+    ny: 1.0
+    nz: 0.0
+    u: 1.0
+    value: 1.0
+  )
+  pushVert(
+    verts: verts
+    px: h
+    py: h
+    pz: h
+    nx: 0.0
+    ny: 1.0
+    nz: 0.0
+    u: 0.0
+    value: 1.0
+  )
   # -Y
-  pushVert(verts: verts, px: 0.0 - h, py: 0.0 - h, pz: 0.0 - h, nx: 0.0, ny: 0.0 - 1.0, nz: 0.0, u: 0.0, value: 0.0)
-  pushVert(verts: verts, px: h, py: 0.0 - h, pz: 0.0 - h, nx: 0.0, ny: 0.0 - 1.0, nz: 0.0, u: 1.0, value: 0.0)
-  pushVert(verts: verts, px: h, py: 0.0 - h, pz: h, nx: 0.0, ny: 0.0 - 1.0, nz: 0.0, u: 1.0, value: 1.0)
-  pushVert(verts: verts, px: 0.0 - h, py: 0.0 - h, pz: h, nx: 0.0, ny: 0.0 - 1.0, nz: 0.0, u: 0.0, value: 1.0)
+  pushVert(
+    verts: verts
+    px: 0.0 - h
+    py: 0.0 - h
+    pz: 0.0 - h
+    nx: 0.0
+    ny: 0.0 - 1.0
+    nz: 0.0
+    u: 0.0
+    value: 0.0
+  )
+  pushVert(
+    verts: verts
+    px: h
+    py: 0.0 - h
+    pz: 0.0 - h
+    nx: 0.0
+    ny: 0.0 - 1.0
+    nz: 0.0
+    u: 1.0
+    value: 0.0
+  )
+  pushVert(
+    verts: verts
+    px: h
+    py: 0.0 - h
+    pz: h
+    nx: 0.0
+    ny: 0.0 - 1.0
+    nz: 0.0
+    u: 1.0
+    value: 1.0
+  )
+  pushVert(
+    verts: verts
+    px: 0.0 - h
+    py: 0.0 - h
+    pz: h
+    nx: 0.0
+    ny: 0.0 - 1.0
+    nz: 0.0
+    u: 0.0
+    value: 1.0
+  )
   # +Z (top)
-  pushVert(verts: verts, px: 0.0 - h, py: 0.0 - h, pz: h, nx: 0.0, ny: 0.0, nz: 1.0, u: 0.0, value: 0.0)
-  pushVert(verts: verts, px: h, py: 0.0 - h, pz: h, nx: 0.0, ny: 0.0, nz: 1.0, u: 1.0, value: 0.0)
-  pushVert(verts: verts, px: h, py: h, pz: h, nx: 0.0, ny: 0.0, nz: 1.0, u: 1.0, value: 1.0)
-  pushVert(verts: verts, px: 0.0 - h, py: h, pz: h, nx: 0.0, ny: 0.0, nz: 1.0, u: 0.0, value: 1.0)
+  pushVert(
+    verts: verts
+    px: 0.0 - h
+    py: 0.0 - h
+    pz: h
+    nx: 0.0
+    ny: 0.0
+    nz: 1.0
+    u: 0.0
+    value: 0.0
+  )
+  pushVert(
+    verts: verts
+    px: h
+    py: 0.0 - h
+    pz: h
+    nx: 0.0
+    ny: 0.0
+    nz: 1.0
+    u: 1.0
+    value: 0.0
+  )
+  pushVert(
+    verts: verts
+    px: h
+    py: h
+    pz: h
+    nx: 0.0
+    ny: 0.0
+    nz: 1.0
+    u: 1.0
+    value: 1.0
+  )
+  pushVert(
+    verts: verts
+    px: 0.0 - h
+    py: h
+    pz: h
+    nx: 0.0
+    ny: 0.0
+    nz: 1.0
+    u: 0.0
+    value: 1.0
+  )
   # -Z (bottom)
-  pushVert(verts: verts, px: 0.0 - h, py: h, pz: 0.0 - h, nx: 0.0, ny: 0.0, nz: 0.0 - 1.0, u: 0.0, value: 0.0)
-  pushVert(verts: verts, px: h, py: h, pz: 0.0 - h, nx: 0.0, ny: 0.0, nz: 0.0 - 1.0, u: 1.0, value: 0.0)
-  pushVert(verts: verts, px: h, py: 0.0 - h, pz: 0.0 - h, nx: 0.0, ny: 0.0, nz: 0.0 - 1.0, u: 1.0, value: 1.0)
-  pushVert(verts: verts, px: 0.0 - h, py: 0.0 - h, pz: 0.0 - h, nx: 0.0, ny: 0.0, nz: 0.0 - 1.0, u: 0.0, value: 1.0)
+  pushVert(
+    verts: verts
+    px: 0.0 - h
+    py: h
+    pz: 0.0 - h
+    nx: 0.0
+    ny: 0.0
+    nz: 0.0 - 1.0
+    u: 0.0
+    value: 0.0
+  )
+  pushVert(
+    verts: verts
+    px: h
+    py: h
+    pz: 0.0 - h
+    nx: 0.0
+    ny: 0.0
+    nz: 0.0 - 1.0
+    u: 1.0
+    value: 0.0
+  )
+  pushVert(
+    verts: verts
+    px: h
+    py: 0.0 - h
+    pz: 0.0 - h
+    nx: 0.0
+    ny: 0.0
+    nz: 0.0 - 1.0
+    u: 1.0
+    value: 1.0
+  )
+  pushVert(
+    verts: verts
+    px: 0.0 - h
+    py: 0.0 - h
+    pz: 0.0 - h
+    nx: 0.0
+    ny: 0.0
+    nz: 0.0 - 1.0
+    u: 0.0
+    value: 1.0
+  )
 
   var f: Int = 0
   loop f < 6 {
@@ -275,7 +576,12 @@ func makeBox(size: view Float) pub ret MeshData {
   ret MeshData { verts: own verts, indices: own indices, vertCount: 24 }
 }
 
-func makeTorus(majorR: view Float, minorR: view Float, majorSegs: view Int, minorSegs: view Int) pub ret MeshData {
+func makeTorus(
+  majorR: view Float
+  minorR: view Float
+  majorSegs: view Int
+  minorSegs: view Int
+) pub ret MeshData {
   let verts: List(Float) = List.create(Float, cap: (majorSegs + 1) * (minorSegs + 1) * 8)
   let indices: List(Int) = List.create(Int, cap: majorSegs * minorSegs * 6)
   let pi: Float = 3.141592653589793
@@ -295,7 +601,17 @@ func makeTorus(majorR: view Float, minorR: view Float, majorSegs: view Int, mino
       let nx: Float = cv * cu
       let ny: Float = cv * su
       let nz: Float = sv
-      pushVert(verts: verts, px: px, py: py, pz: pz, nx: nx, ny: ny, nz: nz, u: i.toFloat() / majorSegs.toFloat(), value: j.toFloat() / minorSegs.toFloat())
+      pushVert(
+        verts: verts
+        px: px
+        py: py
+        pz: pz
+        nx: nx
+        ny: ny
+        nz: nz
+        u: i.toFloat() / majorSegs.toFloat()
+        value: j.toFloat() / minorSegs.toFloat()
+      )
       j = j + 1
     }
     i = i + 1
@@ -385,9 +701,15 @@ func smoothMeshNormals(meshData: view MeshData, angleDeg: view Float) pub ret Me
       var dx: Float = qx - px
       var dy: Float = qy - py
       var dz: Float = qz - pz
-      if dx < 0.0 { dx = 0.0 - dx }
-      if dy < 0.0 { dy = 0.0 - dy }
-      if dz < 0.0 { dz = 0.0 - dz }
+      if dx < 0.0 {
+        dx = 0.0 - dx
+      }
+      if dy < 0.0 {
+        dy = 0.0 - dy
+      }
+      if dz < 0.0 {
+        dz = 0.0 - dz
+      }
       if dx <= eps and dy <= eps and dz <= eps {
         let mx: Float = vertComponent(verts: meshData.verts, index: j * 8 + 3)
         let my: Float = vertComponent(verts: meshData.verts, index: j * 8 + 4)

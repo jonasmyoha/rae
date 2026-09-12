@@ -39,9 +39,10 @@ func bezierPoint(spline: view RiverSpline, t: copy Float) pub ret Vec3 {
   let c: Float = 3.0 * u * t * t
   let d: Float = t * t * t
   ret Vec3.create(
-    x: a * spline.p0.x + b * spline.p1.x + c * spline.p2.x + d * spline.p3.x,
-    y: a * spline.p0.y + b * spline.p1.y + c * spline.p2.y + d * spline.p3.y,
-    z: a * spline.p0.z + b * spline.p1.z + c * spline.p2.z + d * spline.p3.z)
+    x: a * spline.p0.x + b * spline.p1.x + c * spline.p2.x + d * spline.p3.x
+    y: a * spline.p0.y + b * spline.p1.y + c * spline.p2.y + d * spline.p3.y
+    z: a * spline.p0.z + b * spline.p1.z + c * spline.p2.z + d * spline.p3.z
+  )
 }
 
 # Unit tangent in the ground plane (rivers flow horizontally).
@@ -50,18 +51,30 @@ func bezierTangent(spline: view RiverSpline, t: copy Float) pub ret Vec3 {
   let dx: Float = 3.0 * u * u * (spline.p1.x - spline.p0.x) + 6.0 * u * t * (spline.p2.x - spline.p1.x) + 3.0 * t * t * (spline.p3.x - spline.p2.x)
   let dy: Float = 3.0 * u * u * (spline.p1.y - spline.p0.y) + 6.0 * u * t * (spline.p2.y - spline.p1.y) + 3.0 * t * t * (spline.p3.y - spline.p2.y)
   var length: Float = Math.sqrt(x: dx * dx + dy * dy)
-  if length < 0.000001 { ret Vec3.create(x: 1.0, y: 0.0, z: 0.0) }
+  if length < 0.000001 {
+    ret Vec3.create(x: 1.0, y: 0.0, z: 0.0)
+  }
   ret Vec3.create(x: dx / length, y: dy / length, z: 0.0)
 }
 
 # `heights` holds 3 floats per sample: left bank, surface centre, right bank
 # (metres, world z), samples * 3 entries. `across` >= 1 quads across the width.
-func bakeRiverMesh(spline: view RiverSpline, width: copy Float, samples: copy Int, across: copy Int,
-                   heights: view List(Float), bankMargin: copy Float) pub ret MeshData {
+func bakeRiverMesh(
+  spline: view RiverSpline
+  width: copy Float
+  samples: copy Int
+  across: copy Int
+  heights: view List(Float)
+  bankMargin: copy Float
+) pub ret MeshData {
   var rows: Int = samples
-  if rows < 2 { rows = 2 }
+  if rows < 2 {
+    rows = 2
+  }
   var cols: Int = across
-  if cols < 1 { cols = 1 }
+  if cols < 1 {
+    cols = 1
+  }
   let verts: List(Float) = List.create(Float, cap: rows * (cols + 1) * 8)
   let indices: List(Int) = List.create(Int, cap: (rows - 1) * cols * 6)
   var arc: Float = 0.0
@@ -87,15 +100,23 @@ func bakeRiverMesh(spline: view RiverSpline, width: copy Float, samples: copy In
       let step: Float = Math.sqrt(x: dx * dx + dy * dy)
       if step > 0.000001 {
         foam = Math.sqrt(x: turnX * turnX + turnY * turnY) / step * width * 1.5
-        if foam > 1.0 { foam = 1.0 }
+        if foam > 1.0 {
+          foam = 1.0
+        }
       }
     }
     var leftBank: Float = centre.z
     var surface: Float = centre.z
     var rightBank: Float = centre.z
-    if let hl: Float = heights.copyAt(index: row * 3) { leftBank = hl }
-    if let hc: Float = heights.copyAt(index: row * 3 + 1) { surface = hc }
-    if let hr: Float = heights.copyAt(index: row * 3 + 2) { rightBank = hr }
+    if let hl: Float = heights.copyAt(index: row * 3) {
+      leftBank = hl
+    }
+    if let hc: Float = heights.copyAt(index: row * 3 + 1) {
+      surface = hc
+    }
+    if let hr: Float = heights.copyAt(index: row * 3 + 2) {
+      rightBank = hr
+    }
     # Across the river: v from -width/2 (left) to +width/2 (right).
     let sideX: Float = 0.0 - tangent.y
     let sideY: Float = tangent.x
@@ -104,15 +125,26 @@ func bakeRiverMesh(spline: view RiverSpline, width: copy Float, samples: copy In
       let v: Float = (across01 - 0.5) * width
       var z: Float = surface
       if col is 0 {
-        if leftBank - bankMargin < surface { z = leftBank - bankMargin }
+        if leftBank - bankMargin < surface {
+          z = leftBank - bankMargin
+        }
       }
       if col is cols {
-        if rightBank - bankMargin < surface { z = rightBank - bankMargin }
+        if rightBank - bankMargin < surface {
+          z = rightBank - bankMargin
+        }
       }
-      pushVert(verts: verts,
-        px: centre.x + sideX * v, py: centre.y + sideY * v, pz: z,
-        nx: tangent.x, ny: tangent.y, nz: foam,
-        u: arc, value: v)
+      pushVert(
+        verts: verts
+        px: centre.x + sideX * v
+        py: centre.y + sideY * v
+        pz: z
+        nx: tangent.x
+        ny: tangent.y
+        nz: foam
+        u: arc
+        value: v
+      )
     }
     previous = centre
     previousTangent = tangent

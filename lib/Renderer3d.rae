@@ -29,24 +29,30 @@ open Scene3d
 open Gpu3d
 
 # ----- pass tags (renderer-owned; opaque to the graph) ----------------
-const tagScenePass: Int = 1    # 3D raster + depth-integrated SDF geometry
-const tagPresent: Int = 2      # resolve/screenshot/present the frame
-const tagUiOverlay: Int = 3    # load-preserving 2D UI painted over the 3D frame
-const tagTonemap: Int = 4      # HDR -> LDR resolve (#334); last radiometric op
-const tagTaa: Int = 5          # temporal resolve (#335); HDR in, HDR out
-const tagSsao: Int = 6         # ambient occlusion (#337); modifies hdrColor
-const tagShadow: Int = 7       # sun cascade depth (#382); the scene pass reads it
+const tagScenePass: Int = 1  # 3D raster + depth-integrated SDF geometry
+
+const tagPresent: Int = 2  # resolve/screenshot/present the frame
+
+const tagUiOverlay: Int = 3  # load-preserving 2D UI painted over the 3D frame
+
+const tagTonemap: Int = 4  # HDR -> LDR resolve (#334); last radiometric op
+
+const tagTaa: Int = 5  # temporal resolve (#335); HDR in, HDR out
+
+const tagSsao: Int = 6  # ambient occlusion (#337); modifies hdrColor
+
+const tagShadow: Int = 7  # sun cascade depth (#382); the scene pass reads it
 
 type Renderer3d {
   graph: RenderGraph
-  sceneColor: Int   # resource id (LDR offscreen the window presents)
-  hdrColor: Int     # rgba16f linear scene radiance (#334); GI/TAA read/write THIS
+  sceneColor: Int  # resource id (LDR offscreen the window presents)
+  hdrColor: Int  # rgba16f linear scene radiance (#334); GI/TAA read/write THIS
   sceneDepth: Int
-  sceneNormal: Int    # rgba16f world normals (#333 prepass output)
+  sceneNormal: Int  # rgba16f world normals (#333 prepass output)
   sceneVelocity: Int  # rg16f UV-space motion vectors (#333)
-  scenePass: Int    # pass id
+  scenePass: Int  # pass id
   presentPass: Int
-  uiPass: Int       # -1 when the frame has no UI overlay
+  uiPass: Int  # -1 when the frame has no UI overlay
   hasUi: Bool
 }
 
@@ -70,68 +76,251 @@ func createRenderer3d() pub ret Renderer3d {
   # Since #334 the scene pass writes LINEAR HDR into hdrColor; tonemap is
   # the only writer of sceneColor. Lighting passes (SSAO/GI) slot between
   # scene and tonemap, operating on radiance, never on tonemapped values.
-  let colorId: Int = addResource(renderGraph: renderGraph, name: "sceneColor", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeExternal)
-  let hdrId: Int = addResource(renderGraph: renderGraph, name: "hdrColor", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
-  let depthId: Int = addResource(renderGraph: renderGraph, name: "sceneDepth", kind: resDepth, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+  let colorId: Int = addResource(
+    renderGraph: renderGraph
+    name: "sceneColor"
+    kind: resTexture2d
+    format: 0
+    sizing: sizeFull
+    lifetime: lifeExternal
+  )
+  let hdrId: Int = addResource(
+    renderGraph: renderGraph
+    name: "hdrColor"
+    kind: resTexture2d
+    format: 0
+    sizing: sizeFull
+    lifetime: lifeTransient
+  )
+  let depthId: Int = addResource(
+    renderGraph: renderGraph
+    name: "sceneDepth"
+    kind: resDepth
+    format: 0
+    sizing: sizeFull
+    lifetime: lifeTransient
+  )
   # #333 prepass outputs: written by the scene pass, unread until SSAO/TAA/GI
   # land. Declaring them now keeps the graph a truthful description of the
   # frame rather than a subset of it.
-  let normalId: Int = addResource(renderGraph: renderGraph, name: "sceneNormal", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
-  let velocityId: Int = addResource(renderGraph: renderGraph, name: "sceneVelocity", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+  let normalId: Int = addResource(
+    renderGraph: renderGraph
+    name: "sceneNormal"
+    kind: resTexture2d
+    format: 0
+    sizing: sizeFull
+    lifetime: lifeTransient
+  )
+  let velocityId: Int = addResource(
+    renderGraph: renderGraph
+    name: "sceneVelocity"
+    kind: resTexture2d
+    format: 0
+    sizing: sizeFull
+    lifetime: lifeTransient
+  )
   # TAA history is PERSISTENT: it is read next frame, not this one. This is
   # the lifetime class #331 insisted on having in v1 precisely so temporal
   # techniques could be declared truthfully instead of hidden in C statics.
-  let taaId: Int = addResource(renderGraph: renderGraph, name: "taaColor", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifePersistent)
+  let taaId: Int = addResource(
+    renderGraph: renderGraph
+    name: "taaColor"
+    kind: resTexture2d
+    format: 0
+    sizing: sizeFull
+    lifetime: lifePersistent
+  )
   # Ambient (indirect) is its own target so AO can attenuate it without
   # touching direct light; aoTex is HALF resolution (#337).
-  let ambientId: Int = addResource(renderGraph: renderGraph, name: "sceneAmbient", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
-  let aoId: Int = addResource(renderGraph: renderGraph, name: "aoTex", kind: resTexture2d, format: 0, sizing: sizeHalf, lifetime: lifeTransient)
+  let ambientId: Int = addResource(
+    renderGraph: renderGraph
+    name: "sceneAmbient"
+    kind: resTexture2d
+    format: 0
+    sizing: sizeFull
+    lifetime: lifeTransient
+  )
+  let aoId: Int = addResource(
+    renderGraph: renderGraph
+    name: "aoTex"
+    kind: resTexture2d
+    format: 0
+    sizing: sizeHalf
+    lifetime: lifeTransient
+  )
   # Sun cascades (#382). Fixed-size rather than screen-relative: shadow
   # resolution is a quality tier, not a function of the window.
-  let shadowId: Int = addResource(renderGraph: renderGraph, name: "shadowMap", kind: resDepth, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+  let shadowId: Int = addResource(
+    renderGraph: renderGraph
+    name: "shadowMap"
+    kind: resDepth
+    format: 0
+    sizing: sizeFull
+    lifetime: lifeTransient
+  )
 
   # Present declared FIRST, scene SECOND — the graph must still order them
   # scene-then-present, because present reads what scene writes.
-  let present: Int = addPass(renderGraph: renderGraph, name: "present", kind: passRaster, tag: tagPresent)
-  let tonemap: Int = addPass(renderGraph: renderGraph, name: "tonemap", kind: passRaster, tag: tagTonemap)
-  let ssao: Int = addPass(renderGraph: renderGraph, name: "ssao", kind: passRaster, tag: tagSsao)
-  let taa: Int = addPass(renderGraph: renderGraph, name: "taa", kind: passRaster, tag: tagTaa)
-  let scene: Int = addPass(renderGraph: renderGraph, name: "scene3d", kind: passRaster, tag: tagScenePass)
-  let shadow: Int = addPass(renderGraph: renderGraph, name: "shadow", kind: passRaster, tag: tagShadow)
+  let present: Int = addPass(
+    renderGraph: renderGraph
+    name: "present"
+    kind: passRaster
+    tag: tagPresent
+  )
+  let tonemap: Int = addPass(
+    renderGraph: renderGraph
+    name: "tonemap"
+    kind: passRaster
+    tag: tagTonemap
+  )
+  let ssao: Int = addPass(
+    renderGraph: renderGraph
+    name: "ssao"
+    kind: passRaster
+    tag: tagSsao
+  )
+  let taa: Int = addPass(
+    renderGraph: renderGraph
+    name: "taa"
+    kind: passRaster
+    tag: tagTaa
+  )
+  let scene: Int = addPass(
+    renderGraph: renderGraph
+    name: "scene3d"
+    kind: passRaster
+    tag: tagScenePass
+  )
+  let shadow: Int = addPass(
+    renderGraph: renderGraph
+    name: "shadow"
+    kind: passRaster
+    tag: tagShadow
+  )
 
   # The scene pass READS the cascades, so the graph derives shadow-then-
   # scene ordering rather than anyone asserting it.
-  passWrites(renderGraph: renderGraph, pass: shadow, resource: shadowId, access: accAttachmentWrite)
-  passReads(renderGraph: renderGraph, pass: scene, resource: shadowId, access: accSampledRead)
-  passWrites(renderGraph: renderGraph, pass: scene, resource: hdrId, access: accAttachmentWrite)
-  passWrites(renderGraph: renderGraph, pass: scene, resource: depthId, access: accAttachmentWrite)
-  passWrites(renderGraph: renderGraph, pass: scene, resource: normalId, access: accAttachmentWrite)
-  passWrites(renderGraph: renderGraph, pass: scene, resource: velocityId, access: accAttachmentWrite)
-  passWrites(renderGraph: renderGraph, pass: scene, resource: ambientId, access: accAttachmentWrite)
+  passWrites(
+    renderGraph: renderGraph
+    pass: shadow
+    resource: shadowId
+    access: accAttachmentWrite
+  )
+  passReads(
+    renderGraph: renderGraph
+    pass: scene
+    resource: shadowId
+    access: accSampledRead
+  )
+  passWrites(
+    renderGraph: renderGraph
+    pass: scene
+    resource: hdrId
+    access: accAttachmentWrite
+  )
+  passWrites(
+    renderGraph: renderGraph
+    pass: scene
+    resource: depthId
+    access: accAttachmentWrite
+  )
+  passWrites(
+    renderGraph: renderGraph
+    pass: scene
+    resource: normalId
+    access: accAttachmentWrite
+  )
+  passWrites(
+    renderGraph: renderGraph
+    pass: scene
+    resource: velocityId
+    access: accAttachmentWrite
+  )
+  passWrites(
+    renderGraph: renderGraph
+    pass: scene
+    resource: ambientId
+    access: accAttachmentWrite
+  )
   # SSAO reads the prepass, writes half-res AO, then MODIFIES hdrColor by
   # adding ambient*AO — a read-modify-write the graph can state honestly.
-  passReads(renderGraph: renderGraph, pass: ssao, resource: depthId, access: accSampledRead)
-  passReads(renderGraph: renderGraph, pass: ssao, resource: normalId, access: accSampledRead)
-  passReads(renderGraph: renderGraph, pass: ssao, resource: ambientId, access: accSampledRead)
-  passWrites(renderGraph: renderGraph, pass: ssao, resource: aoId, access: accAttachmentWrite)
-  passModifies(renderGraph: renderGraph, pass: ssao, resource: hdrId, access: accAttachmentRead)
-  passReads(renderGraph: renderGraph, pass: taa, resource: hdrId, access: accSampledRead)
-  passReads(renderGraph: renderGraph, pass: taa, resource: velocityId, access: accSampledRead)
-  passWrites(renderGraph: renderGraph, pass: taa, resource: taaId, access: accAttachmentWrite)
-  passReads(renderGraph: renderGraph, pass: tonemap, resource: taaId, access: accSampledRead)
-  passWrites(renderGraph: renderGraph, pass: tonemap, resource: colorId, access: accAttachmentWrite)
-  passReads(renderGraph: renderGraph, pass: present, resource: colorId, access: accAttachmentRead)
+  passReads(
+    renderGraph: renderGraph
+    pass: ssao
+    resource: depthId
+    access: accSampledRead
+  )
+  passReads(
+    renderGraph: renderGraph
+    pass: ssao
+    resource: normalId
+    access: accSampledRead
+  )
+  passReads(
+    renderGraph: renderGraph
+    pass: ssao
+    resource: ambientId
+    access: accSampledRead
+  )
+  passWrites(
+    renderGraph: renderGraph
+    pass: ssao
+    resource: aoId
+    access: accAttachmentWrite
+  )
+  passModifies(
+    renderGraph: renderGraph
+    pass: ssao
+    resource: hdrId
+    access: accAttachmentRead
+  )
+  passReads(
+    renderGraph: renderGraph
+    pass: taa
+    resource: hdrId
+    access: accSampledRead
+  )
+  passReads(
+    renderGraph: renderGraph
+    pass: taa
+    resource: velocityId
+    access: accSampledRead
+  )
+  passWrites(
+    renderGraph: renderGraph
+    pass: taa
+    resource: taaId
+    access: accAttachmentWrite
+  )
+  passReads(
+    renderGraph: renderGraph
+    pass: tonemap
+    resource: taaId
+    access: accSampledRead
+  )
+  passWrites(
+    renderGraph: renderGraph
+    pass: tonemap
+    resource: colorId
+    access: accAttachmentWrite
+  )
+  passReads(
+    renderGraph: renderGraph
+    pass: present
+    resource: colorId
+    access: accAttachmentRead
+  )
 
   ret Renderer3d {
-    graph: own renderGraph,
-    sceneColor: colorId,
-    hdrColor: hdrId,
-    sceneDepth: depthId,
-    sceneNormal: normalId,
-    sceneVelocity: velocityId,
-    scenePass: scene,
-    presentPass: present,
-    uiPass: 0 - 1,
+    graph: own renderGraph
+    sceneColor: colorId
+    hdrColor: hdrId
+    sceneDepth: depthId
+    sceneNormal: normalId
+    sceneVelocity: velocityId
+    scenePass: scene
+    presentPass: present
+    uiPass: 0 - 1
     hasUi: false
   }
 }
@@ -143,65 +332,258 @@ func createRenderer3d() pub ret Renderer3d {
 # order it after the scene — `passModifies` is what states it truthfully.
 func createRenderer3dWithUi() pub ret Renderer3d {
   var renderGraph: RenderGraph = createRenderGraph()
-  let colorId: Int = addResource(renderGraph: renderGraph, name: "sceneColor", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeExternal)
-  let hdrId: Int = addResource(renderGraph: renderGraph, name: "hdrColor", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
-  let depthId: Int = addResource(renderGraph: renderGraph, name: "sceneDepth", kind: resDepth, format: 0, sizing: sizeFull, lifetime: lifeTransient)
-  let normalId: Int = addResource(renderGraph: renderGraph, name: "sceneNormal", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
-  let velocityId: Int = addResource(renderGraph: renderGraph, name: "sceneVelocity", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
-  let taaId: Int = addResource(renderGraph: renderGraph, name: "taaColor", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifePersistent)
+  let colorId: Int = addResource(
+    renderGraph: renderGraph
+    name: "sceneColor"
+    kind: resTexture2d
+    format: 0
+    sizing: sizeFull
+    lifetime: lifeExternal
+  )
+  let hdrId: Int = addResource(
+    renderGraph: renderGraph
+    name: "hdrColor"
+    kind: resTexture2d
+    format: 0
+    sizing: sizeFull
+    lifetime: lifeTransient
+  )
+  let depthId: Int = addResource(
+    renderGraph: renderGraph
+    name: "sceneDepth"
+    kind: resDepth
+    format: 0
+    sizing: sizeFull
+    lifetime: lifeTransient
+  )
+  let normalId: Int = addResource(
+    renderGraph: renderGraph
+    name: "sceneNormal"
+    kind: resTexture2d
+    format: 0
+    sizing: sizeFull
+    lifetime: lifeTransient
+  )
+  let velocityId: Int = addResource(
+    renderGraph: renderGraph
+    name: "sceneVelocity"
+    kind: resTexture2d
+    format: 0
+    sizing: sizeFull
+    lifetime: lifeTransient
+  )
+  let taaId: Int = addResource(
+    renderGraph: renderGraph
+    name: "taaColor"
+    kind: resTexture2d
+    format: 0
+    sizing: sizeFull
+    lifetime: lifePersistent
+  )
   # Ambient (indirect) is its own target so AO can attenuate it without
   # touching direct light; aoTex is HALF resolution (#337).
-  let ambientId: Int = addResource(renderGraph: renderGraph, name: "sceneAmbient", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
-  let aoId: Int = addResource(renderGraph: renderGraph, name: "aoTex", kind: resTexture2d, format: 0, sizing: sizeHalf, lifetime: lifeTransient)
+  let ambientId: Int = addResource(
+    renderGraph: renderGraph
+    name: "sceneAmbient"
+    kind: resTexture2d
+    format: 0
+    sizing: sizeFull
+    lifetime: lifeTransient
+  )
+  let aoId: Int = addResource(
+    renderGraph: renderGraph
+    name: "aoTex"
+    kind: resTexture2d
+    format: 0
+    sizing: sizeHalf
+    lifetime: lifeTransient
+  )
   # Sun cascades (#382). Fixed-size rather than screen-relative: shadow
   # resolution is a quality tier, not a function of the window.
-  let shadowId: Int = addResource(renderGraph: renderGraph, name: "shadowMap", kind: resDepth, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+  let shadowId: Int = addResource(
+    renderGraph: renderGraph
+    name: "shadowMap"
+    kind: resDepth
+    format: 0
+    sizing: sizeFull
+    lifetime: lifeTransient
+  )
 
   # Declared present -> ui -> tonemap -> scene, i.e. exactly backwards.
   # The UI overlay modifies the LDR target AFTER tonemap: UI colours are
   # authored in display space and must not be tone-curved.
-  let present: Int = addPass(renderGraph: renderGraph, name: "present", kind: passRaster, tag: tagPresent)
-  let ui: Int = addPass(renderGraph: renderGraph, name: "uiOverlay", kind: passRaster, tag: tagUiOverlay)
-  let tonemap: Int = addPass(renderGraph: renderGraph, name: "tonemap", kind: passRaster, tag: tagTonemap)
-  let ssao: Int = addPass(renderGraph: renderGraph, name: "ssao", kind: passRaster, tag: tagSsao)
-  let taa: Int = addPass(renderGraph: renderGraph, name: "taa", kind: passRaster, tag: tagTaa)
-  let scene: Int = addPass(renderGraph: renderGraph, name: "scene3d", kind: passRaster, tag: tagScenePass)
-  let shadow: Int = addPass(renderGraph: renderGraph, name: "shadow", kind: passRaster, tag: tagShadow)
+  let present: Int = addPass(
+    renderGraph: renderGraph
+    name: "present"
+    kind: passRaster
+    tag: tagPresent
+  )
+  let ui: Int = addPass(
+    renderGraph: renderGraph
+    name: "uiOverlay"
+    kind: passRaster
+    tag: tagUiOverlay
+  )
+  let tonemap: Int = addPass(
+    renderGraph: renderGraph
+    name: "tonemap"
+    kind: passRaster
+    tag: tagTonemap
+  )
+  let ssao: Int = addPass(
+    renderGraph: renderGraph
+    name: "ssao"
+    kind: passRaster
+    tag: tagSsao
+  )
+  let taa: Int = addPass(
+    renderGraph: renderGraph
+    name: "taa"
+    kind: passRaster
+    tag: tagTaa
+  )
+  let scene: Int = addPass(
+    renderGraph: renderGraph
+    name: "scene3d"
+    kind: passRaster
+    tag: tagScenePass
+  )
+  let shadow: Int = addPass(
+    renderGraph: renderGraph
+    name: "shadow"
+    kind: passRaster
+    tag: tagShadow
+  )
 
   # The scene pass READS the cascades, so the graph derives shadow-then-
   # scene ordering rather than anyone asserting it.
-  passWrites(renderGraph: renderGraph, pass: shadow, resource: shadowId, access: accAttachmentWrite)
-  passReads(renderGraph: renderGraph, pass: scene, resource: shadowId, access: accSampledRead)
-  passWrites(renderGraph: renderGraph, pass: scene, resource: hdrId, access: accAttachmentWrite)
-  passWrites(renderGraph: renderGraph, pass: scene, resource: depthId, access: accAttachmentWrite)
-  passWrites(renderGraph: renderGraph, pass: scene, resource: normalId, access: accAttachmentWrite)
-  passWrites(renderGraph: renderGraph, pass: scene, resource: velocityId, access: accAttachmentWrite)
-  passWrites(renderGraph: renderGraph, pass: scene, resource: ambientId, access: accAttachmentWrite)
+  passWrites(
+    renderGraph: renderGraph
+    pass: shadow
+    resource: shadowId
+    access: accAttachmentWrite
+  )
+  passReads(
+    renderGraph: renderGraph
+    pass: scene
+    resource: shadowId
+    access: accSampledRead
+  )
+  passWrites(
+    renderGraph: renderGraph
+    pass: scene
+    resource: hdrId
+    access: accAttachmentWrite
+  )
+  passWrites(
+    renderGraph: renderGraph
+    pass: scene
+    resource: depthId
+    access: accAttachmentWrite
+  )
+  passWrites(
+    renderGraph: renderGraph
+    pass: scene
+    resource: normalId
+    access: accAttachmentWrite
+  )
+  passWrites(
+    renderGraph: renderGraph
+    pass: scene
+    resource: velocityId
+    access: accAttachmentWrite
+  )
+  passWrites(
+    renderGraph: renderGraph
+    pass: scene
+    resource: ambientId
+    access: accAttachmentWrite
+  )
   # SSAO reads the prepass, writes half-res AO, then MODIFIES hdrColor by
   # adding ambient*AO — a read-modify-write the graph can state honestly.
-  passReads(renderGraph: renderGraph, pass: ssao, resource: depthId, access: accSampledRead)
-  passReads(renderGraph: renderGraph, pass: ssao, resource: normalId, access: accSampledRead)
-  passReads(renderGraph: renderGraph, pass: ssao, resource: ambientId, access: accSampledRead)
-  passWrites(renderGraph: renderGraph, pass: ssao, resource: aoId, access: accAttachmentWrite)
-  passModifies(renderGraph: renderGraph, pass: ssao, resource: hdrId, access: accAttachmentRead)
-  passReads(renderGraph: renderGraph, pass: taa, resource: hdrId, access: accSampledRead)
-  passReads(renderGraph: renderGraph, pass: taa, resource: velocityId, access: accSampledRead)
-  passWrites(renderGraph: renderGraph, pass: taa, resource: taaId, access: accAttachmentWrite)
-  passReads(renderGraph: renderGraph, pass: tonemap, resource: taaId, access: accSampledRead)
-  passWrites(renderGraph: renderGraph, pass: tonemap, resource: colorId, access: accAttachmentWrite)
-  passModifies(renderGraph: renderGraph, pass: ui, resource: colorId, access: accAttachmentRead)
-  passReads(renderGraph: renderGraph, pass: present, resource: colorId, access: accAttachmentRead)
+  passReads(
+    renderGraph: renderGraph
+    pass: ssao
+    resource: depthId
+    access: accSampledRead
+  )
+  passReads(
+    renderGraph: renderGraph
+    pass: ssao
+    resource: normalId
+    access: accSampledRead
+  )
+  passReads(
+    renderGraph: renderGraph
+    pass: ssao
+    resource: ambientId
+    access: accSampledRead
+  )
+  passWrites(
+    renderGraph: renderGraph
+    pass: ssao
+    resource: aoId
+    access: accAttachmentWrite
+  )
+  passModifies(
+    renderGraph: renderGraph
+    pass: ssao
+    resource: hdrId
+    access: accAttachmentRead
+  )
+  passReads(
+    renderGraph: renderGraph
+    pass: taa
+    resource: hdrId
+    access: accSampledRead
+  )
+  passReads(
+    renderGraph: renderGraph
+    pass: taa
+    resource: velocityId
+    access: accSampledRead
+  )
+  passWrites(
+    renderGraph: renderGraph
+    pass: taa
+    resource: taaId
+    access: accAttachmentWrite
+  )
+  passReads(
+    renderGraph: renderGraph
+    pass: tonemap
+    resource: taaId
+    access: accSampledRead
+  )
+  passWrites(
+    renderGraph: renderGraph
+    pass: tonemap
+    resource: colorId
+    access: accAttachmentWrite
+  )
+  passModifies(
+    renderGraph: renderGraph
+    pass: ui
+    resource: colorId
+    access: accAttachmentRead
+  )
+  passReads(
+    renderGraph: renderGraph
+    pass: present
+    resource: colorId
+    access: accAttachmentRead
+  )
 
   ret Renderer3d {
-    graph: own renderGraph,
-    sceneColor: colorId,
-    hdrColor: hdrId,
-    sceneDepth: depthId,
-    sceneNormal: normalId,
-    sceneVelocity: velocityId,
-    scenePass: scene,
-    presentPass: present,
-    uiPass: ui,
+    graph: own renderGraph
+    sceneColor: colorId
+    hdrColor: hdrId
+    sceneDepth: depthId
+    sceneNormal: normalId
+    sceneVelocity: velocityId
+    scenePass: scene
+    presentPass: present
+    uiPass: ui
     hasUi: true
   }
 }
@@ -217,13 +599,25 @@ func compileRenderer(r: mod Renderer3d) pub ret Int {
 # The scene pass fills from the World3d ECS queries (Gpu3d.renderSceneWorld); every
 # other tag is scene-independent post-processing. Per-pass inputs arrive through
 # this call rather than captured state, because passes cannot carry closures.
-func renderFrameWorld(r: view Renderer3d, world: view World3d, camera: view Camera3d, light: view Light3d, aspect: view Float, time: view Float) pub {
+func renderFrameWorld(
+  r: view Renderer3d
+  world: view World3d
+  camera: view Camera3d
+  light: view Light3d
+  aspect: view Float
+  time: view Float
+) pub {
   var i: Int = 0
   loop i < r.graph.order.length {
     let p: Int = graphIntAt(values: r.graph.order, index: i)
     let tag: Int = graphPassAt(values: r.graph.passes, index: p).tag
     if tag is tagScenePass {
-      beginScene(camera: camera, light: light, aspect: aspect, time: time)
+      beginScene(
+        camera: camera
+        light: light
+        aspect: aspect
+        time: time
+      )
       renderSceneWorld(world: world)
     }
     if tag is tagSsao {

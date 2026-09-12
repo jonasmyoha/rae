@@ -27,8 +27,12 @@ func predictInterceptY(
   }
 
   var travelTime: Float = (760.0 - ballRadius - ballX) / ballDx
-  if travelTime < 0.0 { travelTime = 0.0 }
-  if travelTime > 3.0 { travelTime = 3.0 }
+  if travelTime < 0.0 {
+    travelTime = 0.0
+  }
+  if travelTime > 3.0 {
+    travelTime = 3.0
+  }
 
   let top: Float = ballRadius
   let bottom: Float = fieldH - ballRadius
@@ -53,8 +57,11 @@ func updateAiTarget(
   let paddleHeight: Float = paddleH
   if ballVelocity.dx > 0.0 {
     let interceptY: Float = predictInterceptY(
-      ballX: ballX, ballY: ballY
-      ballDx: ballVelocity.dx, ballDy: ballVelocity.dy)
+      ballX: ballX
+      ballY: ballY
+      ballDx: ballVelocity.dx
+      ballDy: ballVelocity.dy
+    )
     let errorStep: Int = (ai.sampleCount * 17 + ballY.toInt()) % 31 - 15
     let aimError: Float = errorStep.toFloat() * 3.0
     ai.targetY = interceptY - paddleHeight * 0.5 + aimError
@@ -64,7 +71,9 @@ func updateAiTarget(
     ai.targetY = (fieldH - paddleHeight) * 0.5
   }
 
-  if ai.targetY < 0.0 { ai.targetY = 0.0 }
+  if ai.targetY < 0.0 {
+    ai.targetY = 0.0
+  }
   if ai.targetY > fieldH - paddleHeight {
     ai.targetY = fieldH - paddleHeight
   }
@@ -83,8 +92,11 @@ func paddleAiSystem(
   if ai.reactionTimer >= ai.reactionDelay {
     ai.reactionTimer = 0.0
     updateAiTarget(
-      ai: ai, ballX: ballPosition.x, ballY: ballPosition.y
-      ballVelocity: ballVelocity)
+      ai: ai
+      ballX: ballPosition.x
+      ballY: ballPosition.y
+      ballVelocity: ballVelocity
+    )
   }
 
   let speed: Float = 285.0
@@ -92,17 +104,25 @@ func paddleAiSystem(
   let deadZone: Float = 8.0
   let distance: Float = ai.targetY - paddleY
   var desiredVelocity: Float = 0.0
-  if distance > deadZone { desiredVelocity = speed }
-  if distance < 0.0 - deadZone { desiredVelocity = 0.0 - speed }
+  if distance > deadZone {
+    desiredVelocity = speed
+  }
+  if distance < 0.0 - deadZone {
+    desiredVelocity = 0.0 - speed
+  }
 
   let velocityStep: Float = acceleration * deltaTime
   if ai.velocityY < desiredVelocity {
     ai.velocityY = ai.velocityY + velocityStep
-    if ai.velocityY > desiredVelocity { ai.velocityY = desiredVelocity }
+    if ai.velocityY > desiredVelocity {
+      ai.velocityY = desiredVelocity
+    }
   }
   if ai.velocityY > desiredVelocity {
     ai.velocityY = ai.velocityY - velocityStep
-    if ai.velocityY < desiredVelocity { ai.velocityY = desiredVelocity }
+    if ai.velocityY < desiredVelocity {
+      ai.velocityY = desiredVelocity
+    }
   }
 
   paddleY = paddleY + ai.velocityY * deltaTime

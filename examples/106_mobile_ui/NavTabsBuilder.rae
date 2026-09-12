@@ -19,7 +19,9 @@ open ecs/ComponentTable
 open ui/Layer
 
 const tabIconSize: Float = 69.39759036144578
+
 const floatingDockInset: Float = 52.04819277108433
+
 const floatingDockRadius: Float = 69.39759036144578
 
 # Texture-registry key for the nav-tab band's frosted-glass blur.
@@ -48,7 +50,12 @@ func dockBlurKey() pub ret String {
 # Attach a fullscreen Sprite to `entity` (used for the blurred-
 # backdrop texture). Kept local so this module doesn't depend on the
 # debug helpers.
-func setDockSprite(world: mod UiWorld, entity: view EntityId, key: view String, tint: view RgbaColor) {
+func setDockSprite(
+  world: mod UiWorld
+  entity: view EntityId
+  key: view String
+  tint: view RgbaColor
+) {
   let sp: Sprite = {
     textureKey: key
     tint: tint
@@ -73,7 +80,12 @@ func mountNavTab(
   active: view Bool
 ) pub ret EntityId {
   let tab: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: tab, w: w, h: navTabsH)
+  setRectFixed(
+    world: world
+    entity: tab
+    w: w
+    h: navTabsH
+  )
 
   # Data-oriented widget tags (#220): identity, selected state, and the
   # action binding as queryable component data. Tagged BEFORE the
@@ -82,14 +94,23 @@ func mountNavTab(
   # scene overrides (tabs re-mount on switch); the selected flag makes
   # the active tab visible to systems without parsing styles.
   let navKind: String = "navTab"
-  setWidgetIdentity(world: world, entity: tab, id: actionId, kind: navKind)
-  setWidgetState(world: world, entity: tab, enabled: true, selected: active, loading: false, error: false)
+  setWidgetIdentity(
+    world: world
+    entity: tab
+    id: actionId
+    kind: navKind
+  )
+  setWidgetState(
+    world: world
+    entity: tab
+    enabled: true
+    selected: active
+    loading: false
+    error: false
+  )
   let bindId: String = "{actionId}"
   let bindRole: String = "primary"
-  let binding: ActionBinding = {
-    actionId: own bindId
-    role: own bindRole
-  }
+  let binding: ActionBinding = { actionId: own bindId, role: own bindRole }
   componentSet(this: world.actionBindings, entity: tab, data: own binding)
 
   let overrides: List(SceneOverride) = emptyOverrides()
@@ -111,11 +132,25 @@ func mountNavTab(
   addOnClickActionOverride(list: overrides, nodeId: labelNode, value: actionId)
 
   if active {
-    addSpriteTintOverride(list: overrides, nodeId: iconNode, r: 30, g: 30, b: 36, a: 255)
+    addSpriteTintOverride(
+      list: overrides
+      nodeId: iconNode
+      r: 30
+      g: 30
+      b: 36
+      a: 255
+    )
     let activeStyle: String = "tabActive"
     addTextStyleOverride(list: overrides, nodeId: labelNode, value: activeStyle)
   } else {
-    addSpriteTintOverride(list: overrides, nodeId: iconNode, r: 130, g: 130, b: 140, a: 255)
+    addSpriteTintOverride(
+      list: overrides
+      nodeId: iconNode
+      r: 130
+      g: 130
+      b: 140
+      a: 255
+    )
     let inactiveStyle: String = "tabInactive"
     addTextStyleOverride(list: overrides, nodeId: labelNode, value: inactiveStyle)
   }
@@ -148,13 +183,34 @@ func buildNavTabsForScreen(
   # Modern iOS-style floating tab bar: inset from the screen edges and
   # rounded into a capsule instead of painting a sharp full-width strip.
   let barW: Float = world.layoutW - floatingDockInset * 2.0
-  setRectFixed(world: world, entity: bar, w: barW, h: navTabsH)
-  let barFill: RgbaColor = { r: paletteSurface(theme: world.theme.active).r, g: paletteSurface(theme: world.theme.active).g, b: paletteSurface(theme: world.theme.active).b, a: 238 }
-  setShapeRounded(world: world, entity: bar, fill: barFill, radius: floatingDockRadius)
+  setRectFixed(
+    world: world
+    entity: bar
+    w: barW
+    h: navTabsH
+  )
+  let barFill: RgbaColor = {
+    r: paletteSurface(theme: world.theme.active).r
+    g: paletteSurface(theme: world.theme.active).g
+    b: paletteSurface(theme: world.theme.active).b
+    a: 238
+  }
+  setShapeRounded(
+    world: world
+    entity: bar
+    fill: barFill
+    radius: floatingDockRadius
+  )
   # Do not attach BackdropImage here yet: gpu2d currently draws it as
   # an unclipped rectangle, which leaks a sharp grey slab under the
   # rounded capsule. Re-enable only after rounded backdrop clipping exists.
-  setLayout(world: world, entity: bar, kind: LayoutType.horizontal, gap: 0.0, alignCross: AlignKind.center)
+  setLayout(
+    world: world
+    entity: bar
+    kind: LayoutType.horizontal
+    gap: 0.0
+    alignCross: AlignKind.center
+  )
 
   # Four base tabs: Home / Library / Search / Profile. Player is
   # NOT a tab — it's reached by tapping the mini-player above this
@@ -254,7 +310,12 @@ func mountBackButtonOverlay(world: mod UiWorld, state: view AppState) pub ret En
   let size: Float = 121.44578313253011
   let margin: Float = 34.69879518072289
   let button: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: button, w: size, h: size)
+  setRectFixed(
+    world: world
+    entity: button
+    w: size
+    h: size
+  )
   var copiedId: String = ""
   copiedId = copiedId.concat(other: backButtonPageId)
   let pr: PageRoot = { id: own copiedId }
@@ -274,16 +335,32 @@ func mountBackButtonOverlay(world: mod UiWorld, state: view AppState) pub ret En
   componentSet(this: world.shapes, entity: button, data: sh)
   let layS: LayoutType = LayoutType.stack
   let alignC: AlignKind = AlignKind.center
-  setLayout(world: world, entity: button, kind: layS, gap: 0.0, alignCross: alignC)
+  setLayout(
+    world: world
+    entity: button
+    kind: layS
+    gap: 0.0
+    alignCross: alignC
+  )
   let backAction: String = "nav.back"
   setOnClick(world: world, entity: button, actionId: backAction)
 
   let iconSize: Float = 69.39759036144578
   let icon: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: icon, w: iconSize, h: iconSize)
+  setRectFixed(
+    world: world
+    entity: icon
+    w: iconSize
+    h: iconSize
+  )
   let iconKey: String = "mat:chevron_left"
   let iconTintC: RgbaColor = { r: 246, g: 246, b: 248, a: 255 }
-  setSprite(world: world, entity: icon, key: iconKey, tint: iconTintC)
+  setSprite(
+    world: world
+    entity: icon
+    key: iconKey
+    tint: iconTintC
+  )
 
   let kids: List(EntityId) = List.create(EntityId, cap: 1)
   kids.add(value: icon)
@@ -346,12 +423,23 @@ func mountBottomDockOverlay(
   # desktop), not the phone content column. ExtentAnchor.fill makes the
   # layout place it at x=0 with width = world.layoutW; the rect width is
   # set to match so it's correct even before layout resolves.
-  setRectFixed(world: world, entity: dock, w: world.layoutW, h: dockH)
+  setRectFixed(
+    world: world
+    entity: dock
+    w: world.layoutW
+    h: dockH
+  )
   let dockAnchor: ExtentAnchor = { h: HExtent.fill }
   componentSet(this: world.extentAnchors, entity: dock, data: dockAnchor)
   let layV: LayoutType = LayoutType.vertical
   let alignC: AlignKind = AlignKind.center
-  setLayout(world: world, entity: dock, kind: layV, gap: 0.0 - miniOverlap, alignCross: alignC)
+  setLayout(
+    world: world
+    entity: dock
+    kind: layV
+    gap: 0.0 - miniOverlap
+    alignCross: alignC
+  )
   let dockPad: Padding = { insets: Insets { l: 0.0, t: dockBgExtend, r: 0.0, b: 0.0 } }
   componentSet(this: world.paddings, entity: dock, data: dockPad)
   # Position the whole dock so its bottom edge hits the active Viewport
@@ -405,7 +493,14 @@ func mountBottomDockOverlay(
   )
   if componentHas(this: world.paddings, entity: mini) {
     let curPad: Padding = componentGet(this: world.paddings, entity: mini)
-    let grownPad: Padding = { insets: Insets { l: curPad.insets.l, t: curPad.insets.t, r: curPad.insets.r, b: curPad.insets.b + miniOverlap } }
+    let grownPad: Padding = {
+      insets: Insets {
+        l: curPad.insets.l
+        t: curPad.insets.t
+        r: curPad.insets.r
+        b: curPad.insets.b + miniOverlap
+      }
+    }
     componentSet(this: world.paddings, entity: mini, data: grownPad)
   } else {
     let freshPad: Padding = { insets: Insets { l: 0.0, t: 0.0, r: 0.0, b: miniOverlap } }

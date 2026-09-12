@@ -36,7 +36,9 @@ open water/WaterFftDiagnose
 open ecs/Entity
 
 const lakeExtent: Float = 400.0
-const bedDepth: Float = 6.0      # the bed sits this far under the surface
+
+const bedDepth: Float = 6.0  # the bed sits this far under the surface
+
 const cubeCount: Int = 3
 
 func uploadMeshData(meshData: view MeshData) ret MeshHandle {
@@ -51,11 +53,19 @@ func buildScene(box: view MeshHandle, ground: view MeshHandle) ret World3d {
   let noRotation: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
   let sand: Material3d = {
     baseColor: Vec3.create(x: 0.62, y: 0.52, z: 0.34)
-    metallic: 0.0, roughness: 0.9, emission: noEmission, toon: true }
+    metallic: 0.0
+    roughness: 0.9
+    emission: noEmission
+    toon: true
+  }
   let bedEntity: EntityId = world3dAddMeshInstance(
-    world: sceneWorld, mesh: ground, material: sand
+    world: sceneWorld
+    mesh: ground
+    material: sand
     position: Vec3.create(x: 0.0, y: 0.0, z: 0.0 - bedDepth)
-    rotation: noRotation, scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0))
+    rotation: noRotation
+    scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
+  )
   loop var i: Int = 0, i < cubeCount, ++i {
     let angle: Float = i.toFloat() * 2.1 + 0.6
     let radius: Float = 26.0 + i.toFloat() * 9.0
@@ -63,10 +73,17 @@ func buildScene(box: view MeshHandle, ground: view MeshHandle) ret World3d {
     # Centre a little under the surface: the top face pokes out by ~1 m, the
     # sides run down to the bed, so depth goes 0 -> bedDepth around each island.
     let islandEntity: EntityId = world3dAddMeshInstance(
-      world: sceneWorld, mesh: box, material: sand
-      position: Vec3.create(x: Math.cos(x: angle) * radius, y: Math.sin(x: angle) * radius, z: 0.0 - bedDepth * 0.5 + 0.5)
+      world: sceneWorld
+      mesh: box
+      material: sand
+      position: Vec3.create(
+        x: Math.cos(x: angle) * radius
+        y: Math.sin(x: angle) * radius
+        z: 0.0 - bedDepth * 0.5 + 0.5
+      )
       rotation: Vec3.create(x: 0.0, y: 0.0, z: angle)
-      scale: Vec3.create(x: size, y: size * 0.7, z: bedDepth + 1.0))
+      scale: Vec3.create(x: size, y: size * 0.7, z: bedDepth + 1.0)
+    )
   }
 
   # Low, untextured brown island: its sloping sides cross the waterline.
@@ -74,11 +91,19 @@ func buildScene(box: view MeshHandle, ground: view MeshHandle) ret World3d {
   let islandMesh: MeshHandle = uploadMeshData(meshData: islandData)
   let earth: Material3d = {
     baseColor: Vec3.create(x: 0.38, y: 0.19, z: 0.075)
-    metallic: 0.0, roughness: 0.95, emission: noEmission, toon: true }
+    metallic: 0.0
+    roughness: 0.95
+    emission: noEmission
+    toon: true
+  }
   let island: EntityId = world3dAddMeshInstance(
-    world: sceneWorld, mesh: islandMesh, material: earth
+    world: sceneWorld
+    mesh: islandMesh
+    material: earth
     position: Vec3.create(x: 0.0, y: 0.0, z: -4.0)
-    rotation: noRotation, scale: Vec3.create(x: 18.0, y: 14.0, z: 8.0))
+    rotation: noRotation
+    scale: Vec3.create(x: 18.0, y: 14.0, z: 8.0)
+  )
   log("[water comparison] 1 brown island, 3 boxes")
   ret sceneWorld
 }
@@ -92,8 +117,13 @@ func skyForHour(hour: copy Float) ret Sky {
   let sunColor: Vec3 = Vec3.create(x: 1.0, y: 0.92 - 0.35 * warm, z: 0.85 - 0.6 * warm)
   let zenith: Vec3 = Vec3.create(x: 0.18 + 0.1 * warm, y: 0.42, z: 0.85 - 0.25 * warm)
   let horizon: Vec3 = Vec3.create(x: 0.75 + 0.2 * warm, y: 0.8, z: 0.9 - 0.3 * warm)
-  ret createSkyStylised(sunDir: sunDir, sunColor: Vec3.vscale(a: sunColor, s: 2.5 + 3.0 * height),
-    zenith: zenith, horizon: horizon, bands: 4.0)
+  ret createSkyStylised(
+    sunDir: sunDir
+    sunColor: Vec3.vscale(a: sunColor, s: 2.5 + 3.0 * height)
+    zenith: zenith
+    horizon: horizon
+    bands: 4.0
+  )
 }
 
 func main() ret Int {
@@ -118,7 +148,9 @@ func main() ret Int {
   var hour: Float = 10.5
   var sky: Sky = skyForHour(hour: hour)
   # Reuse the existing shared-widget font atlas; no per-example asset copies.
-  var debugHud: DebugHud = createDebugHud(fontBase: "examples/114_walker_character/assets/Roboto-Regular")
+  var debugHud: DebugHud = createDebugHud(
+    fontBase: "examples/114_walker_character/assets/Roboto-Regular"
+  )
   var renderer: DeferredRenderer = createDeferredRendererWithUi()
   setRendererSky(renderer: renderer, sky: sky)
   let graphStatus: Int = compileDeferred(renderer: renderer)
@@ -133,7 +165,9 @@ func main() ret Int {
   # shallow -> deep colour. RAE_WATER_REFRACTION=1 shows the refracting path
   # (the ocean example's default) on this lake instead.
   lake.refraction = 0
-  if Sys.getEnv(name: "RAE_WATER_REFRACTION") is "1" { lake.refraction = 1 }
+  if Sys.getEnv(name: "RAE_WATER_REFRACTION") is "1" {
+    lake.refraction = 1
+  }
   var waterSystem: WaterSystem = createWaterSystem(body: lake)
   # The App-owned GPU manager (#873): water's pipelines, maps and readbacks are
   # typed IDs in it, passed explicitly to every water operation.
@@ -151,27 +185,45 @@ func main() ret Int {
   pond.waves.first.amplitude = 0.02
   waterAddBody(waterSystem: waterSystem, body: pond)
 
-  log("[water example] W/A/S/D move, Q/E down/up, shift boost, mouse-drag look; comma/period move the sun")
+  log(
+    "[water example] W/A/S/D move, Q/E down/up, shift boost, mouse-drag look; comma/period move the sun"
+  )
   let fixedTestFrame: Bool = Sys.getEnv(name: "RAE_WATER_TEST_FRAME").length() > 0
   let fftDiag: Bool = Sys.getEnv(name: "RAE_WATER_FFT_DIAG") is "1"
   # TAA is opt-in (FXAA is the default); RAE_WATER_TAA=1 turns it on for the
   # #832 interaction check — the surface must not smear or ghost under it.
-  if Sys.getEnv(name: "RAE_WATER_TAA") is "1" { gbSetTaaEnabled(on: 1) }
+  if Sys.getEnv(name: "RAE_WATER_TAA") is "1" {
+    gbSetTaaEnabled(on: 1)
+  }
   var lastTime: Float64 = Gpu2d.nowSeconds()
   var waterFrames: Int = 0
   loop not Gpu2d.pollClose() {
     let now: Float64 = Gpu2d.nowSeconds()
     var deltaTime: Float = (now - lastTime) as Float
     lastTime = now
-    if deltaTime > 0.1 { deltaTime = 0.1 }
-    if fixedTestFrame { deltaTime = 0.0 }
+    if deltaTime > 0.1 {
+      deltaTime = 0.1
+    }
+    if fixedTestFrame {
+      deltaTime = 0.0
+    }
 
     # Time of day on the keys: a scrub, not a clock, so a frame is repeatable.
     var hourChanged: Bool = false
-    if Sdl3.isKeyDown(key: Keys.keyComma) { hour = hour - deltaTime * 1.5 hourChanged = true }
-    if Sdl3.isKeyDown(key: Keys.keyPeriod) { hour = hour + deltaTime * 1.5 hourChanged = true }
-    if hour < 0.0 { hour = hour + 24.0 }
-    if hour >= 24.0 { hour = hour - 24.0 }
+    if Sdl3.isKeyDown(key: Keys.keyComma) {
+      hour = hour - deltaTime * 1.5
+      hourChanged = true
+    }
+    if Sdl3.isKeyDown(key: Keys.keyPeriod) {
+      hour = hour + deltaTime * 1.5
+      hourChanged = true
+    }
+    if hour < 0.0 {
+      hour = hour + 24.0
+    }
+    if hour >= 24.0 {
+      hour = hour - 24.0
+    }
     if hourChanged {
       sky = skyForHour(hour: hour)
       setRendererSky(renderer: renderer, sky: sky)
@@ -181,7 +233,12 @@ func main() ret Int {
 
     let renderFrame: Bool = Gpu2d.renderGate()
     let debugInputTaken: Bool = updateDebugHud(debugHud: debugHud, now: now, rendered: renderFrame)
-    let cameraMoved: Bool = updateCameraRig(rig: cameraRig, camera: camera, allowInput: not fixedTestFrame and not debugInputTaken, deltaTime: deltaTime)
+    let cameraMoved: Bool = updateCameraRig(
+      rig: cameraRig
+      camera: camera
+      allowInput: not fixedTestFrame and not debugInputTaken
+      deltaTime: deltaTime
+    )
     applyCameraRig(rig: cameraRig, camera: camera)
 
     let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
@@ -195,7 +252,10 @@ func main() ret Int {
             # #849: read the baked spectrum back once and check it (blocking; test only).
             if fftDiag and waterFrames is 2 {
               let ok: Bool = waterFftDiagnose(waterSystem: waterSystem, resources: resources)
-              let ifftOk: Bool = waterFftDiagnoseIfft(waterSystem: waterSystem, resources: resources)
+              let ifftOk: Bool = waterFftDiagnoseIfft(
+                waterSystem: waterSystem
+                resources: resources
+              )
             }
           }
         }
@@ -203,15 +263,29 @@ func main() ret Int {
           # Snapshot the opaque frame, the lake refracts it, then the transparent pass.
           transparentSnapshot(cache: renderer.passes.transparent)
           if let resources: mod GpuResources => gpuManager {
-            waterDraw(waterSystem: waterSystem, resources: resources, camera: camera, light: light,
-              sky: renderer.sky, hasSky: renderer.hasSky, deltaTime: deltaTime)
+            waterDraw(
+              waterSystem: waterSystem
+              resources: resources
+              camera: camera
+              light: light
+              sky: renderer.sky
+              hasSky: renderer.hasSky
+              deltaTime: deltaTime
+            )
           }
           waterFrames = waterFrames + 1
         }
-        if tag is RenderTag.uiOverlay { drawDebugHud(debugHud: debugHud, canvas: renderer.canvas) }
+        if tag is RenderTag.uiOverlay {
+          drawDebugHud(debugHud: debugHud, canvas: renderer.canvas)
+        }
         renderDeferredPassWorld(
-          renderer: renderer, tag: tag, world: sceneWorld
-          camera: camera, light: light, aspect: aspect)
+          renderer: renderer
+          tag: tag
+          world: sceneWorld
+          camera: camera
+          light: light
+          aspect: aspect
+        )
         passIndex = passIndex + 1
       }
       world3dPrevTransformSystem(world: sceneWorld)
@@ -219,13 +293,15 @@ func main() ret Int {
   }
 
   if fixedTestFrame {
-    log("[water example] deterministic deferred frame rendered: hour {hour}, 1 island, {cubeCount} boxes, {waterFrames} water frames")
+    log(
+      "[water example] deterministic deferred frame rendered: hour {hour}, 1 island, {cubeCount} boxes, {waterFrames} water frames"
+    )
   }
   if let resources: mod GpuResources => gpuManager {
     waterShutdown(waterSystem: waterSystem, resources: resources)
     shutdown(resources: resources)
   }
-  shutdownDeferredRenderer(renderer: renderer)   # #904: the renderer-owned GPU manager, before the C shutdown
+  shutdownDeferredRenderer(renderer: renderer)  # #904: the renderer-owned GPU manager, before the C shutdown
   Gbuffer.shutdownAll()
   Gpu2d.closeWindow()
   ret 0

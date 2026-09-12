@@ -18,6 +18,7 @@ func rae_str_to_f64(s: String) unsafe extern ret Float
 func rae_str_to_i64(s: String) unsafe extern ret Int
 
 func rae_ext_rae_str_from_cstr(s: view Buffer(Any)) unsafe extern ret String
+
 func rae_ext_rae_str_to_cstr(s: String) unsafe extern ret Buffer(Any)
 
 # Deep-copy a String into a fresh owned heap allocation. Use this
@@ -29,50 +30,67 @@ func rae_ext_rae_str_to_cstr(s: String) unsafe extern ret Buffer(Any)
 func rae_ext_rae_string_copy(string: view String) unsafe extern ret String
 
 func stringCopy(string: view String) ret String {
-  unsafe { ret rae_ext_rae_string_copy(string: string) }
+  unsafe {
+    ret rae_ext_rae_string_copy(string: string)
+  }
 }
 
 # Adopts a raw C string pointer whose validity and NUL-termination the caller
 # must guarantee — an unchecked lifetime obligation, so the wrapper is unsafe.
 func fromCStr(s: view Buffer(Any)) unsafe ret String {
-    unsafe { ret rae_ext_rae_str_from_cstr(s: s) }
+  unsafe {
+    ret rae_ext_rae_str_from_cstr(s: s)
+  }
 }
 
 # Hands out a raw pointer aliasing this String's storage; the caller must not
 # let it outlive the String. Delegates that obligation, so it is unsafe.
 func toCStr(this: view String) unsafe ret Buffer(Any) {
-    unsafe { ret rae_ext_rae_str_to_cstr(s: this) }
+  unsafe {
+    ret rae_ext_rae_str_to_cstr(s: this)
+  }
 }
 
 func rae_ext_rae_str_at(s: String, index: Int) unsafe extern ret Char32
 
 func at(this: view String, index: view Int) ret Char32 {
-    unsafe { ret rae_ext_rae_str_at(s: this, index: index) }
+  unsafe {
+    ret rae_ext_rae_str_at(s: this, index: index)
+  }
 }
 
 # Stage 5: read-only String helpers take `view String` so callers
 # never have to pay a deep-copy at the call site. The externs they
 # wrap still take `rae_String` by value at the C level; the codegen
 # auto-derefs the view when emitting the call.
-
 func length(this: view String) ret Int {
-  unsafe { ret rae_str_len(s: this) }
+  unsafe {
+    ret rae_str_len(s: this)
+  }
 }
 
 func compare(this: view String, other: view String) ret Int {
-  unsafe { ret rae_str_compare(a: this, b: other) }
+  unsafe {
+    ret rae_str_compare(a: this, b: other)
+  }
 }
 
 func hash(this: view String) ret Int {
-  unsafe { ret rae_str_hash(s: this) }
+  unsafe {
+    ret rae_str_hash(s: this)
+  }
 }
 
 func concat(this: view String, other: view String) ret String {
-  unsafe { ret rae_str_concat(a: this, b: other) }
+  unsafe {
+    ret rae_str_concat(a: this, b: other)
+  }
 }
 
 func sub(this: view String, start: view Int, len: view Int) ret String {
-  unsafe { ret rae_str_sub(s: this, start: start, len: len) }
+  unsafe {
+    ret rae_str_sub(s: this, start: start, len: len)
+  }
 }
 
 func contains(this: view String, sub: view String) ret Bool {
@@ -154,32 +172,84 @@ func lastIndexOf(this: view String, sub: view String) ret Int {
 
 func lowerAsciiByte(ch: view String) ret String {
   let c: Char32 = ch.at(index: 0)
-  if c is 'A' { ret "a" }
-  if c is 'B' { ret "b" }
-  if c is 'C' { ret "c" }
-  if c is 'D' { ret "d" }
-  if c is 'E' { ret "e" }
-  if c is 'F' { ret "f" }
-  if c is 'G' { ret "g" }
-  if c is 'H' { ret "h" }
-  if c is 'I' { ret "i" }
-  if c is 'J' { ret "j" }
-  if c is 'K' { ret "k" }
-  if c is 'L' { ret "l" }
-  if c is 'M' { ret "m" }
-  if c is 'N' { ret "n" }
-  if c is 'O' { ret "o" }
-  if c is 'P' { ret "p" }
-  if c is 'Q' { ret "q" }
-  if c is 'R' { ret "r" }
-  if c is 'S' { ret "s" }
-  if c is 'T' { ret "t" }
-  if c is 'U' { ret "u" }
-  if c is 'V' { ret "v" }
-  if c is 'W' { ret "w" }
-  if c is 'X' { ret "x" }
-  if c is 'Y' { ret "y" }
-  if c is 'Z' { ret "z" }
+  if c is 'A' {
+    ret "a"
+  }
+  if c is 'B' {
+    ret "b"
+  }
+  if c is 'C' {
+    ret "c"
+  }
+  if c is 'D' {
+    ret "d"
+  }
+  if c is 'E' {
+    ret "e"
+  }
+  if c is 'F' {
+    ret "f"
+  }
+  if c is 'G' {
+    ret "g"
+  }
+  if c is 'H' {
+    ret "h"
+  }
+  if c is 'I' {
+    ret "i"
+  }
+  if c is 'J' {
+    ret "j"
+  }
+  if c is 'K' {
+    ret "k"
+  }
+  if c is 'L' {
+    ret "l"
+  }
+  if c is 'M' {
+    ret "m"
+  }
+  if c is 'N' {
+    ret "n"
+  }
+  if c is 'O' {
+    ret "o"
+  }
+  if c is 'P' {
+    ret "p"
+  }
+  if c is 'Q' {
+    ret "q"
+  }
+  if c is 'R' {
+    ret "r"
+  }
+  if c is 'S' {
+    ret "s"
+  }
+  if c is 'T' {
+    ret "t"
+  }
+  if c is 'U' {
+    ret "u"
+  }
+  if c is 'V' {
+    ret "v"
+  }
+  if c is 'W' {
+    ret "w"
+  }
+  if c is 'X' {
+    ret "x"
+  }
+  if c is 'Y' {
+    ret "y"
+  }
+  if c is 'Z' {
+    ret "z"
+  }
   ret "{ch}"
 }
 
@@ -285,9 +355,13 @@ func join(this: view List(String), sep: view String) ret String {
 }
 
 func toFloat(this: view String) ret Float {
-  unsafe { ret rae_str_to_f64(s: this) }
+  unsafe {
+    ret rae_str_to_f64(s: this)
+  }
 }
 
 func toInt(this: view String) ret Int {
-  unsafe { ret rae_str_to_i64(s: this) }
+  unsafe {
+    ret rae_str_to_i64(s: this)
+  }
 }

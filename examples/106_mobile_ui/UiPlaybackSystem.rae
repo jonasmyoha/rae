@@ -52,11 +52,25 @@ func createUiPlaybackSystem(observedRevision: view Int) pub ret UiPlaybackSystem
 # playback widgets, then advance the observe cache. Returns whether anything
 # changed (so callers can trigger a repaint). Bumps this UI system's own
 # revision eagerly on change. Never writes PlaybackState — reads only.
-func uiPlaybackObserve(this: mod UiPlaybackSystem, world: mod UiWorld, playback: view PlaybackState, reg: view TextureRegistry) pub ret Bool {
+func uiPlaybackObserve(
+  this: mod UiPlaybackSystem
+  world: mod UiWorld
+  playback: view PlaybackState
+  reg: view TextureRegistry
+) pub ret Bool {
   let oldIcon: Int = this.observedRevision
   let oldArt: Int = this.observedNowPlayingRevision
-  this.observedRevision = refreshPlaybackViewsIfNeeded(world: world, playback: playback, cachedRevision: this.observedRevision)
-  this.observedNowPlayingRevision = refreshPlaybackCoversIfNeeded(world: world, playback: playback, reg: reg, cachedRevision: this.observedNowPlayingRevision)
+  this.observedRevision = refreshPlaybackViewsIfNeeded(
+    world: world
+    playback: playback
+    cachedRevision: this.observedRevision
+  )
+  this.observedNowPlayingRevision = refreshPlaybackCoversIfNeeded(
+    world: world
+    playback: playback
+    reg: reg
+    cachedRevision: this.observedNowPlayingRevision
+  )
   if this.observedRevision is not oldIcon {
     this.revision = this.revision + 1
     ret true
@@ -85,7 +99,11 @@ func uiPlaybackObserve(this: mod UiPlaybackSystem, world: mod UiWorld, playback:
 # cover (boot-loaded), then the browsed stem. All three are candidate covers;
 # the first LOADED one wins, so the widget never falls to the grey placeholder
 # when a real cover exists.
-func coverKeyResolved(reg: view TextureRegistry, playback: view PlaybackState, browsedStem: view String) pub ret String {
+func coverKeyResolved(
+  reg: view TextureRegistry
+  playback: view PlaybackState
+  browsedStem: view String
+) pub ret String {
   if playback.nowPlayingArtKey.length() > 0 and textureHas(reg: reg, key: playback.nowPlayingArtKey) {
     ret "{playback.nowPlayingArtKey}"
   }
@@ -95,11 +113,21 @@ func coverKeyResolved(reg: view TextureRegistry, playback: view PlaybackState, b
   ret "{browsedStem}"
 }
 
-func nowPlayingCoverSeed(reg: view TextureRegistry, playback: view PlaybackState, browsedStem: view String) pub ret String {
+func nowPlayingCoverSeed(
+  reg: view TextureRegistry
+  playback: view PlaybackState
+  browsedStem: view String
+) pub ret String {
   ret coverKeyResolved(reg: reg, playback: playback, browsedStem: browsedStem)
 }
 
-func tagPlaybackCoverDependency(world: mod UiWorld, pageId: view String, nodeId: view String, observedRevision: view Int, artKey: view String) pub {
+func tagPlaybackCoverDependency(
+  world: mod UiWorld
+  pageId: view String
+  nodeId: view String
+  observedRevision: view Int
+  artKey: view String
+) pub {
   var raw: Int = -1
   if let value: Int = findNodeInPage(world: world, pageId: pageId, nodeId: nodeId) {
     raw = value
@@ -112,7 +140,13 @@ func tagPlaybackCoverDependency(world: mod UiWorld, pageId: view String, nodeId:
   }
   let playbackSource: DataResourceId = dataResourcePlayback()
   let coverField: DataFieldId = dataFieldNowPlayingArt()
-  setDataDependency(world: world, entity: entity, resource: playbackSource, field: coverField, observedRevision: observedRevision)
+  setDataDependency(
+    world: world
+    entity: entity
+    resource: playbackSource
+    field: coverField
+    observedRevision: observedRevision
+  )
 }
 
 # Re-point one cover Sprite's textureKey by identity, preserving every
@@ -138,7 +172,12 @@ func repointCoverSprite(world: mod UiWorld, entity: view EntityId, artKey: view 
 # to `playback.nowPlayingArtKey` and advance its observed revision. This is
 # the generic replacement for `rebindAlbumCoversToSpotify` — no per-frame
 # sprite walk keyed on a stale browsed stem. Reads PlaybackState only.
-func refreshPlaybackCoversIfNeeded(world: mod UiWorld, playback: view PlaybackState, reg: view TextureRegistry, cachedRevision: view Int) pub ret Int {
+func refreshPlaybackCoversIfNeeded(
+  world: mod UiWorld
+  playback: view PlaybackState
+  reg: view TextureRegistry
+  cachedRevision: view Int
+) pub ret Int {
   if playback.nowPlayingRevision is cachedRevision {
     ret cachedRevision
   }
@@ -160,10 +199,20 @@ func refreshPlaybackCoversIfNeeded(world: mod UiWorld, playback: view PlaybackSt
             # Repoint to a LOADED key, not the raw now-playing art: if that
             # art isn't in the registry (failed Spotify fetch), show the
             # playing track's local cover instead of a grey rect.
-            let coverKey: String = coverKeyResolved(reg: reg, playback: playback, browsedStem: playback.playingAlbumStem)
+            let coverKey: String = coverKeyResolved(
+              reg: reg
+              playback: playback
+              browsedStem: playback.playingAlbumStem
+            )
             repointCoverSprite(world: world, entity: entity, artKey: coverKey)
           }
-          setDataDependency(world: world, entity: entity, resource: playbackSource, field: coverField, observedRevision: playback.nowPlayingRevision)
+          setDataDependency(
+            world: world
+            entity: entity
+            resource: playbackSource
+            field: coverField
+            observedRevision: playback.nowPlayingRevision
+          )
         }
       }
     }
@@ -176,7 +225,12 @@ func refreshPlaybackCoversIfNeeded(world: mod UiWorld, playback: view PlaybackSt
 # record the observed revision. The visual swap (play_arrow <-> pause)
 # happens in `widgetStyleSystem` from the entity's StateStyle — no
 # sprite patching here.
-func refreshPlaybackIconEntity(world: mod UiWorld, entity: view EntityId, isPlaying: view Bool, revision: view Int) {
+func refreshPlaybackIconEntity(
+  world: mod UiWorld
+  entity: view EntityId
+  isPlaying: view Bool
+  revision: view Int
+) {
   setWidgetSelected(world: world, entity: entity, selected: isPlaying)
   if componentHas(this: world.dataDependencies, entity: entity) {
     # A value COPY, not a view: the componentSet below mutates this same table,
@@ -193,7 +247,8 @@ func refreshPlaybackIconEntity(world: mod UiWorld, entity: view EntityId, isPlay
 
 # Refresh UI nodes that declare a dependency on PlaybackState when the playback
 # data revision changes. The dependency is now ECS data, not hard-coded node ids:
-# any widget that carries DataDependency{resource:dataResourcePlayback(), field:dataFieldIsPlaying()}
+# any widget that carries DataDependency{resource:dataResourcePlayback(),
+# field:dataFieldIsPlaying()}
 # can be patched here without adding another bespoke refresh path.
 func refreshPlaybackViewsIfNeeded(
   world: mod UiWorld
@@ -214,7 +269,12 @@ func refreshPlaybackViewsIfNeeded(
     if dep.resource is playbackSource {
       if dep.field is playbackField {
         if dep.observedRevision is not playback.revision {
-          refreshPlaybackIconEntity(world: world, entity: entity, isPlaying: playback.isPlaying, revision: playback.revision)
+          refreshPlaybackIconEntity(
+            world: world
+            entity: entity
+            isPlaying: playback.isPlaying
+            revision: playback.revision
+          )
         }
       }
     }

@@ -11,7 +11,9 @@ open water/WaterSystem
 open water/River
 
 const riverWidth: Float = 4.0
+
 const riverSamples: Int = 48
+
 const riverAcross: Int = 4
 
 # The river rides 35 cm above the local ground so it has a visible channel; the
@@ -21,9 +23,9 @@ func addMeadowRiver(waterSystem: mod WaterSystem, groundZ: copy Float) {
   let spline: RiverSpline = {
     # Starts at the shore, not out at sea: the seabed drops below the water
     # plane (#857), so a ribbon carried past the coast would ride under the sea.
-    p0: Vec3.create(x: 0.0 - 27.0, y: 42.0, z: 0.0),
-    p1: Vec3.create(x: 0.0 - 18.0, y: 32.0, z: 0.0),
-    p2: Vec3.create(x: 14.0, y: 26.0, z: 0.0),
+    p0: Vec3.create(x: 0.0 - 27.0, y: 42.0, z: 0.0)
+    p1: Vec3.create(x: 0.0 - 18.0, y: 32.0, z: 0.0)
+    p2: Vec3.create(x: 14.0, y: 26.0, z: 0.0)
     p3: Vec3.create(x: 38.0, y: 0.0 - 22.0, z: 0.0)
   }
   var heights: List(Float) = List.create(Float, cap: riverSamples * 3)
@@ -35,13 +37,35 @@ func addMeadowRiver(waterSystem: mod WaterSystem, groundZ: copy Float) {
     let sideY: Float = tangent.x
     let half: Float = riverWidth * 0.5
     let surface: Float = terrainHeightAt(x: centre.x, y: centre.y, groundZ: groundZ) + 0.35
-    heights.add(value: terrainHeightAt(x: centre.x - sideX * half, y: centre.y - sideY * half, groundZ: groundZ))
+    heights.add(
+      value: terrainHeightAt(
+        x: centre.x - sideX * half
+        y: centre.y - sideY * half
+        groundZ: groundZ
+      )
+    )
     heights.add(value: surface)
-    heights.add(value: terrainHeightAt(x: centre.x + sideX * half, y: centre.y + sideY * half, groundZ: groundZ))
+    heights.add(
+      value: terrainHeightAt(
+        x: centre.x + sideX * half
+        y: centre.y + sideY * half
+        groundZ: groundZ
+      )
+    )
   }
-  let ribbon: MeshData = bakeRiverMesh(spline: spline, width: riverWidth, samples: riverSamples,
-    across: riverAcross, heights: heights, bankMargin: 0.3)
-  let mesh: MeshHandle = uploadMesh(verts: ribbon.verts, vertCount: ribbon.vertCount, indices: ribbon.indices)
+  let ribbon: MeshData = bakeRiverMesh(
+    spline: spline
+    width: riverWidth
+    samples: riverSamples
+    across: riverAcross
+    heights: heights
+    bankMargin: 0.3
+  )
+  let mesh: MeshHandle = uploadMesh(
+    verts: ribbon.verts
+    vertCount: ribbon.vertCount
+    indices: ribbon.indices
+  )
   var river: WaterBody = createRiverToon(mesh: mesh, flowSpeed: 1.6)
   # Saturated on purpose: over snow a pale teal disappears.
   river.shallowColor = Vec3.create(x: 0.2, y: 0.55, z: 0.62)

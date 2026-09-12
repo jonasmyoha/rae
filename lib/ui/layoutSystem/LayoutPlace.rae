@@ -56,7 +56,14 @@ func seedRoot(world: mod UiWorld, entity: view EntityId) {
       rootX = slack / 2.0
     }
   }
-  writeComputedRect(world: world, entity: entity, localX: rootX, localY: 0.0, ownW: rootW, ownH: resolved.y)
+  writeComputedRect(
+    world: world
+    entity: entity
+    localX: rootX
+    localY: 0.0
+    ownW: rootW
+    ownH: resolved.y
+  )
 }
 
 # Place `entity`'s active children into its content box. `entity`'s own
@@ -161,7 +168,6 @@ func placeChildren(world: mod UiWorld, entity: view EntityId) {
 # -----------------------------------------------------------------
 # Container-specific placement
 # -----------------------------------------------------------------
-
 func placeHorizontal(
   world: mod UiWorld
   kids: view List(EntityId)
@@ -482,10 +488,13 @@ func placeStack(
 # loop reaches them. Roots are gated on `rects` to match the old
 # root condition (alive, no Parent, has Rect).
 # -----------------------------------------------------------------
-
 func computeLinear(world: mod UiWorld) {
   unsafe {
-    let order: view List(EntityId) => depthOrder(state: world.hierarchyOrder, parents: world.parents, childrens: world.childrens)
+    let order: view List(EntityId) => depthOrder(
+      state: world.hierarchyOrder
+      parents: world.parents
+      childrens: world.childrens
+    )
     loop var i: Int = 0, i < order.length, ++i {
       if let entity: EntityId = order.copyAt(index: i) {
         if layoutActive(world: world, entity: entity) {

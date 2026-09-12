@@ -35,6 +35,7 @@ func setProfileCircleShape(world: mod UiWorld, entity: view EntityId, fill: view
 }
 
 const profileAvatarSize: Float = 260.2409638554217
+
 const profileAvatarIconSize: Float = 173.49397590361446
 
 func profileAvatarLoaded(reg: view TextureRegistry, key: view String) ret Bool {
@@ -43,7 +44,12 @@ func profileAvatarLoaded(reg: view TextureRegistry, key: view String) ret Bool {
 
 func buildProfileAvatar(world: mod UiWorld, reg: view TextureRegistry) ret EntityId {
   let avatar: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: avatar, w: profileAvatarSize, h: profileAvatarSize)
+  setRectFixed(
+    world: world
+    entity: avatar
+    w: profileAvatarSize
+    h: profileAvatarSize
+  )
 
   let avatarKey: String = profileAvatarKey()
   if profileAvatarLoaded(reg: reg, key: avatarKey) {
@@ -51,7 +57,12 @@ func buildProfileAvatar(world: mod UiWorld, reg: view TextureRegistry) ret Entit
     # (`loadCircleCroppedTexture`). The alpha mask on the underlying
     # texture handles the round shape; no background Shape needed.
     let whiteTint: RgbaColor = { r: 255, g: 255, b: 255, a: 255 }
-    setSprite(world: world, entity: avatar, key: avatarKey, tint: whiteTint)
+    setSprite(
+      world: world
+      entity: avatar
+      key: avatarKey
+      tint: whiteTint
+    )
     let cr: CornerRadius = { radius: profileAvatarSize / 2.0 }
     componentSet(this: world.cornerRadiuses, entity: avatar, data: cr)
   } else {
@@ -59,12 +70,28 @@ func buildProfileAvatar(world: mod UiWorld, reg: view TextureRegistry) ret Entit
     setProfileCircleShape(world: world, entity: avatar, fill: accentBg)
     let layS: LayoutType = LayoutType.stack
     let alignC: AlignKind = AlignKind.center
-    setLayout(world: world, entity: avatar, kind: layS, gap: 0.0, alignCross: alignC)
+    setLayout(
+      world: world
+      entity: avatar
+      kind: layS
+      gap: 0.0
+      alignCross: alignC
+    )
 
     let icon: EntityId = createEntity(world: world)
-    setRectFixed(world: world, entity: icon, w: profileAvatarIconSize, h: profileAvatarIconSize)
+    setRectFixed(
+      world: world
+      entity: icon
+      w: profileAvatarIconSize
+      h: profileAvatarIconSize
+    )
     let personKey: String = "mat:person"
-    setSprite(world: world, entity: icon, key: personKey, tint: paletteLightText(theme: world.theme.active))
+    setSprite(
+      world: world
+      entity: icon
+      key: personKey
+      tint: paletteLightText(theme: world.theme.active)
+    )
 
     let kids: List(EntityId) = List.create(EntityId, cap: 1)
     kids.add(value: icon)
@@ -74,24 +101,59 @@ func buildProfileAvatar(world: mod UiWorld, reg: view TextureRegistry) ret Entit
 }
 
 # Stat column: big number on top, small label below.
-func buildProfileStatColumn(world: mod UiWorld, value: view String, label: view String) ret EntityId {
+func buildProfileStatColumn(
+  world: mod UiWorld
+  value: view String
+  label: view String
+) ret EntityId {
   let col: EntityId = createEntity(world: world)
   let colW: Float = 238.55421686746988
   let colH: Float = 121.44578313253011
-  setRectFixed(world: world, entity: col, w: colW, h: colH)
+  setRectFixed(
+    world: world
+    entity: col
+    w: colW
+    h: colH
+  )
   let layV: LayoutType = LayoutType.vertical
   let alignC: AlignKind = AlignKind.center
-  setLayout(world: world, entity: col, kind: layV, gap: 2.0, alignCross: alignC)
+  setLayout(
+    world: world
+    entity: col
+    kind: layV
+    gap: 2.0
+    alignCross: alignC
+  )
 
   let valueText: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: valueText, w: colW, h: 28.0)
+  setRectFixed(
+    world: world
+    entity: valueText
+    w: colW
+    h: 28.0
+  )
   let valueStyle: String = "topBarTitle"
-  setText(world: world, entity: valueText, text: value, styleId: valueStyle)
+  setText(
+    world: world
+    entity: valueText
+    text: value
+    styleId: valueStyle
+  )
 
   let labelText: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: labelText, w: colW, h: 18.0)
+  setRectFixed(
+    world: world
+    entity: labelText
+    w: colW
+    h: 18.0
+  )
   let labelStyle: String = "muted"
-  setText(world: world, entity: labelText, text: label, styleId: labelStyle)
+  setText(
+    world: world
+    entity: labelText
+    text: label
+    styleId: labelStyle
+  )
 
   let kids: List(EntityId) = List.create(EntityId, cap: 2)
   kids.add(value: valueText)
@@ -107,10 +169,22 @@ func buildProfileStatsRow(world: mod UiWorld, state: view AppState) ret EntityId
     let row: EntityId = createEntity(world: world)
     let rowW: Float = phoneFrameW - outerPad * 2.0
     let rowH: Float = 130.12048192771084
-    setRectFixed(world: world, entity: row, w: rowW, h: rowH)
+    setRectFixed(
+      world: world
+      entity: row
+      w: rowW
+      h: rowH
+    )
     let layH: LayoutType = LayoutType.horizontal
     let alignC: AlignKind = AlignKind.center
-    setLayout(world: world, entity: row, kind: layH, gap: 52.04819277108433, alignCross: alignC)  # spaceXL (full-precision literal; token is 6-dec)
+    setLayout(
+      world: world
+      entity: row
+      kind: layH
+      gap: 52.04819277108433
+      alignCross: alignC
+    )
+    # spaceXL (full-precision literal; token is 6-dec)
 
     let albumCount: Int = state.mediaLibrary.albums.length
     var trackCount: Int = 0
@@ -130,9 +204,21 @@ func buildProfileStatsRow(world: mod UiWorld, state: view AppState) ret EntityId
     let tracksLabel: String = "Tracks"
     let hoursLabel: String = "Listening"
 
-    let albumsCol: EntityId = buildProfileStatColumn(world: world, value: albumsStr, label: albumsLabel)
-    let tracksCol: EntityId = buildProfileStatColumn(world: world, value: tracksStr, label: tracksLabel)
-    let hoursCol: EntityId = buildProfileStatColumn(world: world, value: hoursStr, label: hoursLabel)
+    let albumsCol: EntityId = buildProfileStatColumn(
+      world: world
+      value: albumsStr
+      label: albumsLabel
+    )
+    let tracksCol: EntityId = buildProfileStatColumn(
+      world: world
+      value: tracksStr
+      label: tracksLabel
+    )
+    let hoursCol: EntityId = buildProfileStatColumn(
+      world: world
+      value: hoursStr
+      label: hoursLabel
+    )
 
     let kids: List(EntityId) = List.create(EntityId, cap: 3)
     kids.add(value: albumsCol)
@@ -153,25 +239,52 @@ func buildSpotifyStatusCard(world: mod UiWorld) ret EntityId {
   let card: EntityId = createEntity(world: world)
   let cardW: Float = phoneFrameW - outerPad * 2.0
   let cardH: Float = 182.16867469879517
-  setRectFixed(world: world, entity: card, w: cardW, h: cardH)
+  setRectFixed(
+    world: world
+    entity: card
+    w: cardW
+    h: cardH
+  )
   let bg: RgbaColor = { r: 30, g: 200, b: 130, a: 255 }
   setShapeRect(world: world, entity: card, fill: bg)
   let layV: LayoutType = LayoutType.vertical
   let alignS: AlignKind = AlignKind.start
-  setLayout(world: world, entity: card, kind: layV, gap: 8.674698795180722, alignCross: alignS)  # spaceXS (full-precision literal; token is 6-dec)
+  setLayout(
+    world: world
+    entity: card
+    kind: layV
+    gap: 8.674698795180722
+    alignCross: alignS
+  )
+  # spaceXS (full-precision literal; token is 6-dec)
   # 14 sits between spaceM (12) and spaceL (16) — deliberate non-token
   # to fit the card chrome's exact 84-px height. Don't widen the scale
   # for one site.
   setPaddingAll(world: world, entity: card, n: 30.361445783132528)
 
   let title: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: title, w: cardW - 28.0, h: 24.0)
+  setRectFixed(
+    world: world
+    entity: title
+    w: cardW - 28.0
+    h: 24.0
+  )
   let titleStyle: String = "topBarTitle"
   let titleText: String = "Spotify"
-  setText(world: world, entity: title, text: titleText, styleId: titleStyle)
+  setText(
+    world: world
+    entity: title
+    text: titleText
+    styleId: titleStyle
+  )
 
   let line: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: line, w: cardW - 28.0, h: 22.0)
+  setRectFixed(
+    world: world
+    entity: line
+    w: cardW - 28.0
+    h: 22.0
+  )
   let bodyStyle: String = "trackArtist"
   var line1: String = ""
   if spotifyEnabled is false {
@@ -193,7 +306,12 @@ func buildSpotifyStatusCard(world: mod UiWorld) ret EntityId {
       }
     }
   }
-  setText(world: world, entity: line, text: line1, styleId: bodyStyle)
+  setText(
+    world: world
+    entity: line
+    text: line1
+    styleId: bodyStyle
+  )
 
   let kids: List(EntityId) = List.create(EntityId, cap: 2)
   kids.add(value: title)
@@ -209,30 +327,71 @@ func buildSettingsRow(world: mod UiWorld, iconKey: view String, label: view Stri
   let row: EntityId = createEntity(world: world)
   let rowW: Float = phoneFrameW - outerPad * 2.0
   let rowH: Float = 121.44578313253011
-  setRectFixed(world: world, entity: row, w: rowW, h: rowH)
+  setRectFixed(
+    world: world
+    entity: row
+    w: rowW
+    h: rowH
+  )
   let layH: LayoutType = LayoutType.horizontal
   let alignC: AlignKind = AlignKind.center
   # Settings-row icon→label spacing stays at 14 (between spaceM and L)
   # to match the hand-tuned 28-px icon size; don't widen the scale.
-  setLayout(world: world, entity: row, kind: layH, gap: 14.0, alignCross: alignC)
+  setLayout(
+    world: world
+    entity: row
+    kind: layH
+    gap: 14.0
+    alignCross: alignC
+  )
   setPaddingAll(world: world, entity: row, n: 17.349397590361445)
 
   let iconSize: Float = 60.722891566265055
   let icon: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: icon, w: iconSize, h: iconSize)
-  setSprite(world: world, entity: icon, key: "{iconKey}", tint: paletteIconTint(theme: world.theme.active))
+  setRectFixed(
+    world: world
+    entity: icon
+    w: iconSize
+    h: iconSize
+  )
+  setSprite(
+    world: world
+    entity: icon
+    key: "{iconKey}"
+    tint: paletteIconTint(theme: world.theme.active)
+  )
 
   let labelW: Float = rowW - iconSize - 14.0 - 24.0 - 14.0 - 16.0
   let labelEnt: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: labelEnt, w: labelW, h: 24.0)
+  setRectFixed(
+    world: world
+    entity: labelEnt
+    w: labelW
+    h: 24.0
+  )
   let labelStyle: String = "trackTitle"
-  setText(world: world, entity: labelEnt, text: label, styleId: labelStyle)
+  setText(
+    world: world
+    entity: labelEnt
+    text: label
+    styleId: labelStyle
+  )
 
   let chev: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: chev, w: 24.0, h: 24.0)
+  setRectFixed(
+    world: world
+    entity: chev
+    w: 24.0
+    h: 24.0
+  )
   let chevKey: String = "mat:chevron_right"
   let chevTint: RgbaColor = paletteHero(theme: world.theme.active)
-  setSprite(world: world, entity: chev, key: chevKey, tint: chevTint)
+  setSprite(
+    world: world
+    entity: chev
+    key: chevKey
+    tint: chevTint
+  )
 
   let kids: List(EntityId) = List.create(EntityId, cap: 3)
   kids.add(value: icon)
@@ -249,10 +408,21 @@ func buildSettingsList(world: mod UiWorld) ret EntityId {
   let gap: Float = 8.674698795180722
   let rowCount: Int = 4
   let listH: Float = rowH * rowCount.toFloat() + gap * (rowCount - 1).toFloat()
-  setRectFixed(world: world, entity: list, w: listW, h: listH)
+  setRectFixed(
+    world: world
+    entity: list
+    w: listW
+    h: listH
+  )
   let layV: LayoutType = LayoutType.vertical
   let alignS: AlignKind = AlignKind.start
-  setLayout(world: world, entity: list, kind: layV, gap: gap, alignCross: alignS)
+  setLayout(
+    world: world
+    entity: list
+    kind: layV
+    gap: gap
+    alignCross: alignS
+  )
 
   let r1: EntityId = buildSettingsRow(world: world, iconKey: "mat:tune", label: "Audio quality")
   let r2: EntityId = buildSettingsRow(world: world, iconKey: "mat:equalizer", label: "Equalizer")
@@ -277,10 +447,21 @@ func buildProfileBody(
   let body: EntityId = createEntity(world: world)
   let bodyW: Float = phoneFrameW - outerPad * 2.0
   let bodyH: Float = phoneFrameH - topBarH - navTabsH - outerGap * 4.0 - outerPad * 2.0
-  setRectFixed(world: world, entity: body, w: bodyW, h: bodyH)
+  setRectFixed(
+    world: world
+    entity: body
+    w: bodyW
+    h: bodyH
+  )
   let layV: LayoutType = LayoutType.vertical
   let alignC: AlignKind = AlignKind.center
-  setLayout(world: world, entity: body, kind: layV, gap: outerGap, alignCross: alignC)
+  setLayout(
+    world: world
+    entity: body
+    kind: layV
+    gap: outerGap
+    alignCross: alignC
+  )
   let off: Offset = { delta: Vec2 { x: 0.0, y: scrollY } }
   componentSet(this: world.offsets, entity: body, data: off)
 
@@ -290,16 +471,36 @@ func buildProfileBody(
   let avatar: EntityId = buildProfileAvatar(world: world, reg: reg)
 
   let handle: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: handle, w: bodyW, h: 28.0)
+  setRectFixed(
+    world: world
+    entity: handle
+    w: bodyW
+    h: 28.0
+  )
   let handleStyle: String = "topBarTitle"
   let handleText: String = "@violet.tapes"
-  setText(world: world, entity: handle, text: handleText, styleId: handleStyle)
+  setText(
+    world: world
+    entity: handle
+    text: handleText
+    styleId: handleStyle
+  )
 
   let bio: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: bio, w: bodyW, h: 18.0)
+  setRectFixed(
+    world: world
+    entity: bio
+    w: bodyW
+    h: 18.0
+  )
   let bioStyle: String = "muted"
   let bioText: String = "indie pop · dream-punk · playlist lover"
-  setText(world: world, entity: bio, text: bioText, styleId: bioStyle)
+  setText(
+    world: world
+    entity: bio
+    text: bioText
+    styleId: bioStyle
+  )
 
   let card: EntityId = buildSpotifyStatusCard(world: world)
   let stats: EntityId = buildProfileStatsRow(world: world, state: state)
@@ -326,10 +527,21 @@ func mountProfilePage(
   viewport: view Viewport
 ) pub ret EntityId {
   let root: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: root, w: viewport.areaDuW, h: viewport.areaDuH)
+  setRectFixed(
+    world: world
+    entity: root
+    w: viewport.areaDuW
+    h: viewport.areaDuH
+  )
   let layV: LayoutType = LayoutType.vertical
   let alignS: AlignKind = AlignKind.start
-  setLayout(world: world, entity: root, kind: layV, gap: outerGap, alignCross: alignS)
+  setLayout(
+    world: world
+    entity: root
+    kind: layV
+    gap: outerGap
+    alignCross: alignS
+  )
   setPaddingAll(world: world, entity: root, n: outerPad)
 
   var copiedId: String = ""
@@ -338,13 +550,23 @@ func mountProfilePage(
   componentSet(this: world.pageRoots, entity: root, data: own pr)
 
   let topBar: EntityId = buildPageTopBar(world: world, title: "Profile")
-  let body: EntityId = buildProfileBody(world: world, reg: reg, state: state, scrollY: scrollY)
+  let body: EntityId = buildProfileBody(
+    world: world
+    reg: reg
+    state: state
+    scrollY: scrollY
+  )
 
   let kids: List(EntityId) = List.create(EntityId, cap: 2)
   kids.add(value: topBar)
   kids.add(value: body)
   attachChildren(world: world, parent: root, kids: kids)
-  attachSafeAreaEdges(world: world, entity: root, top: 1.0, bottom: 0.0)
+  attachSafeAreaEdges(
+    world: world
+    entity: root
+    top: 1.0
+    bottom: 0.0
+  )
 
   ret root
 }
@@ -363,7 +585,13 @@ func buildProfileWorld(
   let world: UiWorld = create()
   seedWorldThemeFrom(world: world, src: state.theme)  # #764: theme from AppState
   applyViewportExtent(world: world, viewport: viewport)
-  let page: EntityId = mountProfilePage(world: world, reg: reg, state: state, scrollY: scrollY, viewport: viewport)
+  let page: EntityId = mountProfilePage(
+    world: world
+    reg: reg
+    state: state
+    scrollY: scrollY
+    viewport: viewport
+  )
   let dock: EntityId = mountBottomDockOverlay(
     world: world
     activeTab: state.tab

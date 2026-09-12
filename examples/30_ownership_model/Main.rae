@@ -22,8 +22,6 @@
 #
 # The final block stress-tests the cascade drop pipeline so an RSS
 # check can verify there's no per-iteration leak.
-
-
 type Profile {
   name: String
   email: String
@@ -55,11 +53,7 @@ func renameProfile(p: mod Profile, newName: own String) {
 func makeTeam(leadName: own String, leadEmail: own String, motto: own String) ret Team {
   let lead: Profile = { name: leadName, email: leadEmail }
   let members: List(Profile) = List.create(Profile, cap: 4)
-  ret Team {
-    lead: lead
-    members: members
-    motto: motto
-  }
+  ret Team { lead: lead, members: members, motto: motto }
 }
 
 func scenario1BorrowVsTake() {
@@ -114,11 +108,7 @@ func scenario5CascadeDrop() {
   let warmups: Int = 100
   var i: Int = 0
   loop i < warmups {
-    let t: Team = makeTeam(
-      leadName: "warmup-{i}"
-      leadEmail: "w{i}@rae"
-      motto: "warming up"
-    )
+    let t: Team = makeTeam(leadName: "warmup-{i}", leadEmail: "w{i}@rae", motto: "warming up")
     if t.motto.length() < 0 {
       log("never")
     }
@@ -128,11 +118,7 @@ func scenario5CascadeDrop() {
   let iterations: Int = 5000
   i = 0
   loop i < iterations {
-    let t: Team = makeTeam(
-      leadName: "lead-{i}"
-      leadEmail: "{i}@rae"
-      motto: "iterate {i}"
-    )
+    let t: Team = makeTeam(leadName: "lead-{i}", leadEmail: "{i}@rae", motto: "iterate {i}")
     if t.motto.length() < 0 {
       log("never")
     }

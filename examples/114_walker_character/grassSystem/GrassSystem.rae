@@ -32,8 +32,11 @@ open Scene3d
 open Mesh3d
 
 const grassPerCell: Int = 10
+
 const grassBladeCount: Int = 490
-const grassRecordFloats: Int = 19600   # grassBladeCount * GbufferRecord.instanceRecordFloats (40)
+
+const grassRecordFloats: Int = 19600  # grassBladeCount * GbufferRecord.instanceRecordFloats (40)
+
 const grassWindTau: Float = 6.283185307179586
 
 # One clump descriptor, stored as a per-blade COMPONENT: the planted base it
@@ -64,8 +67,13 @@ type GrassSystem {
 # Deterministic scatter for clump `slotInCell` within absolute cell (cellX,
 # cellY). Same cell -> same clumps, which is what makes the wrap invisible.
 # `slot` is the blade's global pool slot, carried through into the component.
-func placeGrassBlade(cellX: view Int, cellY: view Int, slotInCell: view Int,
-                     groundZ: view Float, slot: view Int) ret GrassBlade {
+func placeGrassBlade(
+  cellX: view Int
+  cellY: view Int
+  slotInCell: view Int
+  groundZ: view Float
+  slot: view Int
+) ret GrassBlade {
   let hx: Float = Noise.hash2(x: cellX, y: cellY, seed: 200 + slotInCell)
   let hy: Float = Noise.hash2(x: cellX, y: cellY, seed: 400 + slotInCell)
   let hyaw: Float = Noise.hash2(x: cellX, y: cellY, seed: 600 + slotInCell)
@@ -75,10 +83,12 @@ func placeGrassBlade(cellX: view Int, cellY: view Int, slotInCell: view Int,
   let baseY: Float = (cellY.toFloat() + hy) * terrainCellSize - terrainCellSize * 0.5
   let baseZ: Float = terrainHeightAt(x: baseX, y: baseY, groundZ: groundZ)
   ret GrassBlade {
-    baseX: baseX, baseY: baseY, baseZ: baseZ,
-    yaw: hyaw * grassWindTau,
-    phase: hphase * grassWindTau,
-    scale: 0.28 + hscale * 0.34,
+    baseX: baseX
+    baseY: baseY
+    baseZ: baseZ
+    yaw: hyaw * grassWindTau
+    phase: hphase * grassWindTau
+    scale: 0.28 + hscale * 0.34
     slot: slot
   }
 }
@@ -87,8 +97,11 @@ func placeGrassBlade(cellX: view Int, cellY: view Int, slotInCell: view Int,
 # of cells now around the player. Returns true when it re-placed. Each blade's
 # own `slot` fixes its cell + clump, so iterating the component table in any
 # order re-places the whole field correctly.
-func updateGrassField(grassSystem: mod GrassSystem, world: mod GameWorld,
-                      playerPosition: view Vec3) ret Bool {
+func updateGrassField(
+  grassSystem: mod GrassSystem
+  world: mod GameWorld
+  playerPosition: view Vec3
+) ret Bool {
   let cellX: Int = Math.floor(x: playerPosition.x / terrainCellSize).toInt()
   let cellY: Int = Math.floor(x: playerPosition.y / terrainCellSize).toInt()
   if cellX is grassSystem.centreCellX and cellY is grassSystem.centreCellY {
@@ -103,11 +116,17 @@ func updateGrassField(grassSystem: mod GrassSystem, world: mod GameWorld,
     let slotInCell: Int = blade.slot % grassPerCell
     let column: Int = cellIndex % terrainGridSide
     let row: Int = cellIndex / terrainGridSide
-    componentSet(this: world.grassBlades, entity: entity,
+    componentSet(
+      this: world.grassBlades
+      entity: entity
       data: placeGrassBlade(
-        cellX: cellX + column - terrainHalfGrid,
-        cellY: cellY + row - terrainHalfGrid,
-        slotInCell: slotInCell, groundZ: grassSystem.groundZ, slot: blade.slot))
+        cellX: cellX + column - terrainHalfGrid
+        cellY: cellY + row - terrainHalfGrid
+        slotInCell: slotInCell
+        groundZ: grassSystem.groundZ
+        slot: blade.slot
+      )
+    )
   }
   ret true
 }
@@ -115,55 +134,105 @@ func updateGrassField(grassSystem: mod GrassSystem, world: mod GameWorld,
 # The wind lean at `time`: two sines at incommensurate rates plus the clump's
 # own phase, so the field ripples rather than pulsing together.
 func grassGust(phase: view Float, baseX: view Float, time: view Float) ret Float {
-  ret 0.16 * Math.sin(x: time * 1.7 + phase)
-    + 0.06 * Math.sin(x: time * 3.9 + phase * 1.7 + baseX * 0.15)
+  ret 0.16 * Math.sin(x: time * 1.7 + phase) + 0.06 * Math.sin(
+    x: time * 3.9 + phase * 1.7 + baseX * 0.15
+  )
 }
 
 # Build one DrawU record per blade — this frame's sway and last frame's sway
 # (so TAA gets correct motion while the field waves), plus a per-blade green —
 # then one instanced draw for the whole field. The matrices and the record
 # layout are gbuffer's Rae helpers; nothing here touches raw float offsets.
-func drawGrassField(cache: mod GbufferCache, resources: mod GpuResources, grassSystem: mod GrassSystem, world: view GameWorld,
-                    time: view Float, deltaTime: view Float, toon: view Int) {
+func drawGrassField(
+  cache: mod GbufferCache
+  resources: mod GpuResources
+  grassSystem: mod GrassSystem
+  world: view GameWorld
+  time: view Float
+  deltaTime: view Float
+  toon: view Int
+) {
   loop var index: Int = 0, index < componentCount(this: world.grassBlades), ++index {
     let blade: GrassBlade = componentDataAt(this: world.grassBlades, i: index)
     let gust: Float = grassGust(phase: blade.phase, baseX: blade.baseX, time: time)
     let prevGust: Float = grassGust(phase: blade.phase, baseX: blade.baseX, time: time - deltaTime)
     let model: Mat4 = GbufferRecord.swayModel(
-      x: blade.baseX, y: blade.baseY, z: blade.baseZ, yaw: blade.yaw,
-      tiltX: gust * 0.6, tiltY: gust, scale: blade.scale)
+      x: blade.baseX
+      y: blade.baseY
+      z: blade.baseZ
+      yaw: blade.yaw
+      tiltX: gust * 0.6
+      tiltY: gust
+      scale: blade.scale
+    )
     let prevModel: Mat4 = GbufferRecord.swayModel(
-      x: blade.baseX, y: blade.baseY, z: blade.baseZ, yaw: blade.yaw,
-      tiltX: prevGust * 0.6, tiltY: prevGust, scale: blade.scale)
+      x: blade.baseX
+      y: blade.baseY
+      z: blade.baseZ
+      yaw: blade.yaw
+      tiltX: prevGust * 0.6
+      tiltY: prevGust
+      scale: blade.scale
+    )
     # Per-blade green: a small deterministic spread off the base colour.
     let cvar: Float = blade.phase / grassWindTau
-    GbufferRecord.packInstanceRecord(records: grassSystem.records, slot: index,
-      model: model, prevModel: prevModel,
-      r: 0.13 + cvar * 0.09, g: 0.33 + cvar * 0.16, b: 0.05 + cvar * 0.05,
-      metallic: 0.0, roughness: 0.95, emissive: 0.0, toon: toon, paletteBase: 0)
+    GbufferRecord.packInstanceRecord(
+      records: grassSystem.records
+      slot: index
+      model: model
+      prevModel: prevModel
+      r: 0.13 + cvar * 0.09
+      g: 0.33 + cvar * 0.16
+      b: 0.05 + cvar * 0.05
+      metallic: 0.0
+      roughness: 0.95
+      emissive: 0.0
+      toon: toon
+      paletteBase: 0
+    )
   }
-  Gbuffer.drawRecords(cache: cache, resources: resources, mesh: grassSystem.meshId, records: grassSystem.records.data,
-                      count: grassBladeCount)
+  Gbuffer.drawRecords(
+    cache: cache
+    resources: resources
+    mesh: grassSystem.meshId
+    records: grassSystem.records.data
+    count: grassBladeCount
+  )
 }
 
-func createGrassSystem(world: mod GameWorld, assets: view String,
-                      groundZ: view Float) ret GrassSystem {
+func createGrassSystem(
+  world: mod GameWorld
+  assets: view String
+  groundZ: view Float
+) ret GrassSystem {
   let grassMesh: MeshHandle = terrainMesh(path: "{assets}environment/grass.glb")
   # One blade entity per pool slot; the first updateGrassField wrap re-places
   # them onto the cells around the player.
   loop var slot: Int = 0, slot < grassBladeCount, ++slot {
     let entity: EntityId = gameWorldAddEntity(world: world)
-    componentSet(this: world.grassBlades, entity: entity, data: GrassBlade {
-      baseX: 0.0, baseY: 0.0, baseZ: groundZ, yaw: 0.0, phase: 0.0, scale: 0.3, slot: slot
-    })
+    componentSet(
+      this: world.grassBlades
+      entity: entity
+      data: GrassBlade {
+        baseX: 0.0
+        baseY: 0.0
+        baseZ: groundZ
+        yaw: 0.0
+        phase: 0.0
+        scale: 0.3
+        slot: slot
+      }
+    )
   }
   let records: List(Float) = List.create(Float, cap: grassRecordFloats)
   loop var floatIndex: Int = 0, floatIndex < grassRecordFloats, ++floatIndex {
     records.add(value: 0.0)
   }
   ret GrassSystem {
-    centreCellX: 1000000000, centreCellY: 1000000000,
-    groundZ: groundZ, meshId: grassMesh.id,
+    centreCellX: 1000000000
+    centreCellY: 1000000000
+    groundZ: groundZ
+    meshId: grassMesh.id
     records: own records
   }
 }

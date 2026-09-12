@@ -7,18 +7,21 @@ type Track {
   title: String
   seconds: Int
 }
+
 func getTrack(want: view Bool) ret opt Track {
   if want is false {
     ret none
   }
   ret Track { title: "Fresh", seconds: 7 }
 }
+
 func getSeconds(want: view Bool) ret opt Int {
   if want is false {
     ret none
   }
   ret 42
 }
+
 func main() {
   if let track: Track = getTrack(want: true) {
     log("owned narrowing: {track.title} / {track.seconds}")

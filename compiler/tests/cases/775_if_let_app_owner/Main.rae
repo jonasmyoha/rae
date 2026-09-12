@@ -20,7 +20,9 @@ type App {
 func create(id: view Int, succeed: view Bool) ret opt App {
   let resources: GpuResources = { id: id, frames: 0 }
   log("acquire {id}")
-  if not succeed { ret none }
+  if not succeed {
+    ret none
+  }
   ret App { renderSystem: { resources: own resources } }
 }
 

@@ -67,10 +67,16 @@ func dirFromThetaGamma(theta: view Float, gamma: view Float, elevationRad: view 
   if sunX > 0.0001 {
     x = (cosGamma - sunZ * cosTheta) / sunX
   }
-  if x > sinTheta { x = sinTheta }
-  if x < 0.0 - sinTheta { x = 0.0 - sinTheta }
+  if x > sinTheta {
+    x = sinTheta
+  }
+  if x < 0.0 - sinTheta {
+    x = 0.0 - sinTheta
+  }
   var ySq: Float = sinTheta * sinTheta - x * x
-  if ySq < 0.0 { ySq = 0.0 }
+  if ySq < 0.0 {
+    ySq = 0.0
+  }
   ret Vec3.create(x: x, y: Math.sqrt(x: ySq), z: cosTheta)
 }
 
@@ -87,8 +93,12 @@ func main() {
   } else {
     log("ok   dataset loaded")
   }
-  let sky: HosekSky = createHosekSky(data: data, turbidity: turbidity, albedo: albedo,
-                                     solarElevationRad: elevation)
+  let sky: HosekSky = createHosekSky(
+    data: data
+    turbidity: turbidity
+    albedo: albedo
+    solarElevationRad: elevation
+  )
 
   # 1. The cooked coefficients, straight from the dataset. If the Bezier or the
   #    albedo/turbidity blend is wrong, everything downstream is wrong in a way
@@ -112,16 +122,24 @@ func main() {
   var i: Int = 0
   loop i < gammas.length {
     var gamma: Float = 0.0
-    if let value: Float = gammas.copyAt(index: i) { gamma = value }
+    if let value: Float = gammas.copyAt(index: i) {
+      gamma = value
+    }
     let r: Float = hosekChannelRadiance(c: sky.r, theta: theta, gamma: gamma) * sky.r.radiance
     let g: Float = hosekChannelRadiance(c: sky.g, theta: theta, gamma: gamma) * sky.g.radiance
     let b: Float = hosekChannelRadiance(c: sky.b, theta: theta, gamma: gamma) * sky.b.radiance
     var wantRValue: Float = 0.0
-    if let value: Float = wantR.copyAt(index: i) { wantRValue = value }
+    if let value: Float = wantR.copyAt(index: i) {
+      wantRValue = value
+    }
     var wantGValue: Float = 0.0
-    if let value: Float = wantG.copyAt(index: i) { wantGValue = value }
+    if let value: Float = wantG.copyAt(index: i) {
+      wantGValue = value
+    }
     var wantBValue: Float = 0.0
-    if let value: Float = wantB.copyAt(index: i) { wantBValue = value }
+    if let value: Float = wantB.copyAt(index: i) {
+      wantBValue = value
+    }
     check(label: "radiance R at gamma {gamma}", got: r, want: wantRValue)
     check(label: "radiance G at gamma {gamma}", got: g, want: wantGValue)
     check(label: "radiance B at gamma {gamma}", got: b, want: wantBValue)
@@ -157,8 +175,18 @@ func main() {
 
   # Ground albedo feeds back into the sky: brighter ground, brighter sky. This
   # is the axis Preetham does not have at all.
-  let dark: HosekSky = createHosekSky(data: data, turbidity: turbidity, albedo: 0.0, solarElevationRad: elevation)
-  let bright: HosekSky = createHosekSky(data: data, turbidity: turbidity, albedo: 0.9, solarElevationRad: elevation)
+  let dark: HosekSky = createHosekSky(
+    data: data
+    turbidity: turbidity
+    albedo: 0.0
+    solarElevationRad: elevation
+  )
+  let bright: HosekSky = createHosekSky(
+    data: data
+    turbidity: turbidity
+    albedo: 0.9
+    solarElevationRad: elevation
+  )
   let dl: Vec3 = hosekRadiance(sky: dark, dir: zenith, sunDir: toSun)
   let bl: Vec3 = hosekRadiance(sky: bright, dir: zenith, sunDir: toSun)
   if bl.y > dl.y {
@@ -168,5 +196,9 @@ func main() {
   }
 
   # Sun elevation from a direction, the input the cook actually takes.
-  check(label: "sunElevationRad recovers elevation", got: sunElevationRad(sunDir: sunDir), want: elevation)
+  check(
+    label: "sunElevationRad recovers elevation"
+    got: sunElevationRad(sunDir: sunDir)
+    want: elevation
+  )
 }

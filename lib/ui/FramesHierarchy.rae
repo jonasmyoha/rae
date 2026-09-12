@@ -53,7 +53,12 @@ func haveHierarchyDirectives(scene: view Scene, frames: view FrameSet) ret Bool 
 # cycle? Walks the candidate's ancestor chain in the CURRENT parent
 # map; also trips defensively if the walk exceeds nodeCount hops
 # (a pre-existing cycle upstream).
-func hierarchyWouldCycle(parentIdxs: view List(Int), nodeIdx: view Int, candidateParent: view Int, nodeCount: view Int) ret Bool {
+func hierarchyWouldCycle(
+  parentIdxs: view List(Int)
+  nodeIdx: view Int
+  candidateParent: view Int
+  nodeCount: view Int
+) ret Bool {
   var cur: Int = candidateParent
   var steps: Int = 0
   loop cur >= 0 {
@@ -84,7 +89,13 @@ func hierarchyWouldCycle(parentIdxs: view List(Int), nodeIdx: view Int, candidat
 # a directive with `order: o` gets `o - 0.5` (+ a per-directive
 # epsilon for declared-order stability), landing BEFORE the authored
 # child at index o; a Parent directive without `order` appends.
-func deriveActiveHierarchy(world: mod UiWorld, scene: view Scene, frames: view FrameSet, frameIdx: view Int, pageId: view String) {
+func deriveActiveHierarchy(
+  world: mod UiWorld
+  scene: view Scene
+  frames: view FrameSet
+  frameIdx: view Int
+  pageId: view String
+) {
   let doc: view JsonDoc => scene.doc
   let nodeCount: Int = scene.nodes.length
   let rootIdx: Int = sceneNodeIndex(this: scene, nodeId: scene.rootNodeId)
@@ -181,8 +192,12 @@ func deriveActiveHierarchy(world: mod UiWorld, scene: view Scene, frames: view F
       if detachRaw >= 0 {
         let detachEntity: EntityId = id(v: detachRaw)
         if componentHas(this: world.parents, entity: detachEntity) {
-          setParent(parents: world.parents, childrens: world.childrens,
-                    child: detachEntity, parent: noEntity())
+          setParent(
+            parents: world.parents
+            childrens: world.childrens
+            child: detachEntity
+            parent: noEntity()
+          )
         }
       }
     }
@@ -255,8 +270,12 @@ func deriveActiveHierarchy(world: mod UiWorld, scene: view Scene, frames: view F
           # #726: link via setParent. The children are visited in sort-key order,
           # so setParent's append rebuilds the derived Children cache in exactly
           # that order — matching the old hand-built, hand-sorted list.
-          setParent(parents: world.parents, childrens: world.childrens,
-                    child: childEntity, parent: parentEntity)
+          setParent(
+            parents: world.parents
+            childrens: world.childrens
+            child: childEntity
+            parent: parentEntity
+          )
           t = t + 1
         }
       }
@@ -319,7 +338,12 @@ func applyHierarchyDirective(
   }
 
   if hasParentDirective {
-    if hierarchyWouldCycle(parentIdxs: parentIdxs, nodeIdx: nodeIdx, candidateParent: newParentIdx, nodeCount: nodeCount) {
+    if hierarchyWouldCycle(
+      parentIdxs: parentIdxs
+      nodeIdx: nodeIdx
+      candidateParent: newParentIdx
+      nodeCount: nodeCount
+    ) {
       log("[frames] Parent directive on '{dirNodeId}' would create a cycle — skipped")
       ret
     }

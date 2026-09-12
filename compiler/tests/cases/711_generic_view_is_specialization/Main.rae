@@ -1,16 +1,25 @@
 # #758: generic value-type `view T` specialization — `is`/contains/indexOf must
 # work for String AND struct element types. `contains`/`indexOf` (lib/core.rae)
 # do `cur is value` over `view T`; `same` is a generic `a is b` directly.
-type Point { x: Int, y: Int }
+type Point {
+  x: Int
+  y: Int
+}
 
-func same(T: type, a: view T, b: view T) ret Bool { ret a is b }
+func same(T: type, a: view T, b: view T) ret Bool {
+  ret a is b
+}
 
 func main() {
   # List(String): contains + indexOf, found and not-found
   let xs: List(String) = List.create(String, cap: 4)
   xs.add(value: "a")
   xs.add(value: "b")
-  log("str: contains b={xs.contains(value: "b")} contains z={xs.contains(value: "z")} idxB={xs.indexOf(value: "b")} idxZ={xs.indexOf(value: "z")}")
+  log(
+    "str: contains b={xs.contains(value: "b")} contains z={xs.contains(value: "z")} idxB={xs.indexOf(
+      value: "b"
+    )} idxZ={xs.indexOf(value: "z")}"
+  )
 
   # List(struct): value equality
   let ps: List(Point) = List.create(Point, cap: 4)
@@ -19,7 +28,11 @@ func main() {
   ps.add(value: p1)
   ps.add(value: p2)
   let miss: Point = { x: 9, y: 9 }
-  log("pt: contains p2={ps.contains(value: p2)} contains miss={ps.contains(value: miss)} idxP2={ps.indexOf(value: p2)}")
+  log(
+    "pt: contains p2={ps.contains(value: p2)} contains miss={ps.contains(value: miss)} idxP2={ps.indexOf(
+      value: p2
+    )}"
+  )
 
   # generic `a is b` (view T) — value equality for String and struct
   log("same str: eq={same(T: String, a: "x", b: "x")} neq={same(T: String, a: "x", b: "y")}")

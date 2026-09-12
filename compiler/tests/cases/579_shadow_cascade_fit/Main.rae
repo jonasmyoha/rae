@@ -29,12 +29,22 @@ func fitAt(camX: view Float, yaw: view Float) ret ShadowCascades {
   let pos: Vec3 = Vec3.create(x: camX, y: 0.0 - 12.0, z: 5.0)
   # Target derived from yaw so "rotate in place" is a real rotation.
   let target: Vec3 = Vec3.create(
-    x: camX + Math.sin(x: yaw), y: 0.0 - 12.0 + Math.cos(x: yaw), z: 4.0
+    x: camX + Math.sin(x: yaw)
+    y: 0.0 - 12.0 + Math.cos(x: yaw)
+    z: 4.0
   )
   ret fitShadowCascades(
-    camPos: pos, camTarget: target, fovYDeg: 50.0, aspect: 1.6,
-    near: 0.1, far: 60.0, sunDir: Vec3.create(x: 0.3, y: 0.4, z: 0.0 - 0.86),
-    count: 3, resolution: res, lambda: 0.7, backExtent: 20.0
+    camPos: pos
+    camTarget: target
+    fovYDeg: 50.0
+    aspect: 1.6
+    near: 0.1
+    far: 60.0
+    sunDir: Vec3.create(x: 0.3, y: 0.4, z: 0.0 - 0.86)
+    count: 3
+    resolution: res
+    lambda: 0.7
+    backExtent: 20.0
   )
 }
 
@@ -49,17 +59,23 @@ func absF(value: view Float) ret Float {
 # Flat-buffer reads go through these so the `opt Float` from `.at` is
 # unwrapped explicitly; an out-of-range index yields 0.0.
 func viewProjAt(cascades: view ShadowCascades, index: copy Int) ret Float {
-  if let value: Float = cascades.viewProj.copyAt(index: index) { ret value }
+  if let value: Float = cascades.viewProj.copyAt(index: index) {
+    ret value
+  }
   ret 0.0
 }
 
 func splitFarAt(cascades: view ShadowCascades, index: copy Int) ret Float {
-  if let value: Float = cascades.splitFar.copyAt(index: index) { ret value }
+  if let value: Float = cascades.splitFar.copyAt(index: index) {
+    ret value
+  }
   ret 0.0
 }
 
 func texelWorldAt(cascades: view ShadowCascades, index: copy Int) ret Float {
-  if let value: Float = cascades.texelWorld.copyAt(index: index) { ret value }
+  if let value: Float = cascades.texelWorld.copyAt(index: index) {
+    ret value
+  }
   ret 0.0
 }
 
@@ -78,10 +94,21 @@ func maxGridDelta(a: view ShadowCascades, b: view ShadowCascades, index: view In
   var k: Int = 0
   loop k < 4 {
     var slot: Int = 0
-    if k is 1 { slot = 5 }
-    if k is 2 { slot = 12 }
-    if k is 3 { slot = 13 }
-    let d: Float = absF(value: viewProjAt(cascades: a, index: index * 16 + slot) - viewProjAt(cascades: b, index: index * 16 + slot))
+    if k is 1 {
+      slot = 5
+    }
+    if k is 2 {
+      slot = 12
+    }
+    if k is 3 {
+      slot = 13
+    }
+    let d: Float = absF(
+      value: viewProjAt(cascades: a, index: index * 16 + slot) - viewProjAt(
+        cascades: b
+        index: index * 16 + slot
+      )
+    )
     if d > worst {
       worst = d
     }
@@ -142,7 +169,9 @@ func main() {
   var texelStable: Bool = true
   var k: Int = 0
   loop k < base.count {
-    let d: Float = absF(value: texelWorldAt(cascades: base, index: k) - texelWorldAt(cascades: turned, index: k))
+    let d: Float = absF(
+      value: texelWorldAt(cascades: base, index: k) - texelWorldAt(cascades: turned, index: k)
+    )
     if d > texelWorldAt(cascades: base, index: k) * 0.001 {
       texelStable = false
     }

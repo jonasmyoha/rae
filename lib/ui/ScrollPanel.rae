@@ -33,19 +33,24 @@ open ecs/ComponentTable
 # Wheel notches are small integers; this turns one into a useful jump without
 # making a trackpad flick fly past the whole panel.
 const scrollWheelStep: Float = 48.0
+
 # Rubber-band spring back to the bound after an overshoot. Per-frame coefficients
 # (~60 fps). tension 0.08 + friction 0.56 is a NEAR-CRITICALLY-DAMPED spring
 # (ζ ≈ 0.99): a soft eased return that settles AT the bound WITHOUT overshooting
 # back past it (an underdamped spring would fling the offset back into range and
 # scroll away from where the finger left it). Matches 106's tuned scroll feel.
 const springTension: Float = 0.08
+
 const springFriction: Float = 0.56
+
 # Momentum fling decay per frame while inside the bounds — a long, smooth glide.
 const momentumFriction: Float = 0.97
+
 # Below these, momentum/spring is settled and snapped to rest. 1 px / 0.3 px·frame
 # is just under human perception on a 60 Hz display, so it cuts the asymptotic tail
 # with no visible jump.
 const scrollVelEps: Float = 0.3
+
 const scrollPosEps: Float = 1.0
 
 func scrollAbs(value: view Float) ret Float {
@@ -67,7 +72,11 @@ func scrollNodeEntity(world: view UiWorld, nodeId: view String) ret EntityId {
 # viewport entity. Returns the viewport entity (the panel handle passed back to
 # updateScrollPanel), or noEntity() when either node isn't mounted. Call AFTER the
 # scene is loaded (the nodes must exist).
-func createScrollPanel(world: mod UiWorld, viewportId: view String, contentId: view String) pub ret EntityId {
+func createScrollPanel(
+  world: mod UiWorld
+  viewportId: view String
+  contentId: view String
+) pub ret EntityId {
   let viewport: EntityId = scrollNodeEntity(world: world, nodeId: viewportId)
   let content: EntityId = scrollNodeEntity(world: world, nodeId: contentId)
   if isNone(this: viewport) or isNone(this: content) {
@@ -119,8 +128,12 @@ func dim(world: view UiWorld, viewport: view EntityId) ret Float {
 # from ComputedRect — ComputedRect is PARENT-LOCAL, so a panel nested three deep
 # reports x=12 while sitting at x=952 on screen; testing against the local rect
 # would silently make it inert (app3d/slider carries the same note).
-func pointInViewport(world: view UiWorld, viewport: view EntityId,
-                                x: view Float, y: view Float) ret Bool {
+func pointInViewport(
+  world: view UiWorld
+  viewport: view EntityId
+  x: view Float
+  y: view Float
+) ret Bool {
   if componentHas(this: world.computedRects, entity: viewport) is false {
     ret false
   }
@@ -165,7 +178,11 @@ func applyScrollOffset(world: mod UiWorld, content: view EntityId, offset: view 
 # only on frames that scrolled (including every momentum/spring frame). The whole
 # ScrollPanelState is read into a local, stepped, and written back — no mod-borrow
 # is held across the read-only geometry queries.
-func updateScrollPanel(world: mod UiWorld, viewport: view EntityId, input: view UiInput) pub ret Bool {
+func updateScrollPanel(
+  world: mod UiWorld
+  viewport: view EntityId
+  input: view UiInput
+) pub ret Bool {
   if isNone(this: viewport) {
     ret false
   }
@@ -190,8 +207,12 @@ func updateScrollPanel(world: mod UiWorld, viewport: view EntityId, input: view 
   }
 
   let dim: Float = dim(world: world, viewport: viewport)
-  let inside: Bool = pointInViewport(world: world, viewport: viewport,
-                                                x: input.pointer.x, y: input.pointer.y)
+  let inside: Bool = pointInViewport(
+    world: world
+    viewport: viewport
+    x: input.pointer.x
+    y: input.pointer.y
+  )
 
   # ----- press / release -----
   if input.pointer.pressed and inside {
@@ -214,7 +235,13 @@ func updateScrollPanel(world: mod UiWorld, viewport: view EntityId, input: view 
   let wheel: Float = Gpu2d.wheelMove()
   if inside and wheel is not 0.0 {
     let raw: Float = 0.0 - wheel * scrollWheelStep
-    state.offset = state.offset + dampedDelta(current: state.offset, delta: raw, low: 0.0, high: range, dim: dim)
+    state.offset = state.offset + dampedDelta(
+      current: state.offset
+      delta: raw
+      low: 0.0
+      high: range
+      dim: dim
+    )
   }
 
   if state.dragging {
@@ -223,7 +250,13 @@ func updateScrollPanel(world: mod UiWorld, viewport: view EntityId, input: view 
     # DECREASES; hence delta = -(pointer delta). Rubber-band-damp it near a bound.
     let rawDy: Float = input.pointer.y - state.lastPointerY
     state.lastPointerY = input.pointer.y
-    let damped: Float = dampedDelta(current: state.offset, delta: 0.0 - rawDy, low: 0.0, high: range, dim: dim)
+    let damped: Float = dampedDelta(
+      current: state.offset
+      delta: 0.0 - rawDy
+      low: 0.0
+      high: range
+      dim: dim
+    )
     state.offset = state.offset + damped
     # Keep the last three damped deltas; release velocity is picked from them.
     state.d2 = state.d1
@@ -232,7 +265,13 @@ func updateScrollPanel(world: mod UiWorld, viewport: view EntityId, input: view 
   } else {
     # ----- momentum + rubber-band spring (not dragging) -----
     if state.offset < 0.0 {
-      state.velocity = springStepVelocity(pos: state.offset, velocity: state.velocity, target: 0.0, tension: springTension, friction: springFriction)
+      state.velocity = springStepVelocity(
+        pos: state.offset
+        velocity: state.velocity
+        target: 0.0
+        tension: springTension
+        friction: springFriction
+      )
       state.offset = state.offset + state.velocity
       if scrollAbs(value: state.offset) < scrollPosEps and scrollAbs(value: state.velocity) < scrollVelEps {
         state.offset = 0.0
@@ -240,9 +279,17 @@ func updateScrollPanel(world: mod UiWorld, viewport: view EntityId, input: view 
       }
     } else {
       if state.offset > range {
-        state.velocity = springStepVelocity(pos: state.offset, velocity: state.velocity, target: range, tension: springTension, friction: springFriction)
+        state.velocity = springStepVelocity(
+          pos: state.offset
+          velocity: state.velocity
+          target: range
+          tension: springTension
+          friction: springFriction
+        )
         state.offset = state.offset + state.velocity
-        if scrollAbs(value: state.offset - range) < scrollPosEps and scrollAbs(value: state.velocity) < scrollVelEps {
+        if scrollAbs(value: state.offset - range) < scrollPosEps and scrollAbs(
+          value: state.velocity
+        ) < scrollVelEps {
           state.offset = range
           state.velocity = 0.0
         }

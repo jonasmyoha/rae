@@ -2,16 +2,15 @@
 # (docs/match-and-sum-types.md Proposal A). The String locals below are
 # heap-owned; a leak or double-free on the break/continue paths would show
 # up under RAE_MEM_STATS, and the drop machinery is the whole point of #623.
-
-enum Cmd {
-  go
-  skip
-  stop
-}
+enum Cmd { go, skip, stop }
 
 func cmdAt(i: view Int) ret Cmd {
-  if i is 2 { ret Cmd.skip }
-  if i is 4 { ret Cmd.stop }
+  if i is 2 {
+    ret Cmd.skip
+  }
+  if i is 4 {
+    ret Cmd.stop
+  }
   ret Cmd.go
 }
 
@@ -19,14 +18,18 @@ func main() {
   # break out of a condition loop
   var i: Int = 0
   loop i < 10 {
-    if i is 3 { break }
+    if i is 3 {
+      break
+    }
     log("count {i}")
     i = i + 1
   }
 
   # continue in a C-style loop: skip evens
   loop var j: Int = 0, j < 6, ++j {
-    if j % 2 is 0 { continue }
+    if j % 2 is 0 {
+      continue
+    }
     log("odd {j}")
   }
 

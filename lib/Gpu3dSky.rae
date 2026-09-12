@@ -9,7 +9,7 @@ import Math
 open Vec3
 open Scene3d
 open Math3d
-open ecs/Entity          # #793: World3d shadow path reads entities/components
+open ecs/Entity  # #793: World3d shadow path reads entities/components
 open ecs/ComponentTable
 open webgpu/Webgpu
 open webgpu/Context
@@ -35,32 +35,86 @@ open Gpu3d
 func nativeSkyHosekPush(index: Int, value: Float) unsafe extern("rae_ext_Gpu3d_skyHosekPush")
 
 func skyHosekPush(index: copy Int, value: copy Float) {
-  unsafe { nativeSkyHosekPush(index: index, value: value) }
+  unsafe {
+    nativeSkyHosekPush(index: index, value: value)
+  }
 }
 
-func skyDraw(skyKind: copy Float, turbidity: copy Float, skyExposure: copy Float, sunSizeRad: copy Float,
-             sunX: copy Float, sunY: copy Float, sunZ: copy Float,
-             sunR: copy Float, sunG: copy Float, sunB: copy Float,
-             zenR: copy Float, zenG: copy Float, zenB: copy Float, bands: copy Float,
-             horR: copy Float, horG: copy Float, horB: copy Float, discI: copy Float,
-             clearR: copy Float, clearG: copy Float, clearB: copy Float) {
+func skyDraw(
+  skyKind: copy Float
+  turbidity: copy Float
+  skyExposure: copy Float
+  sunSizeRad: copy Float
+  sunX: copy Float
+  sunY: copy Float
+  sunZ: copy Float
+  sunR: copy Float
+  sunG: copy Float
+  sunB: copy Float
+  zenR: copy Float
+  zenG: copy Float
+  zenB: copy Float
+  bands: copy Float
+  horR: copy Float
+  horG: copy Float
+  horB: copy Float
+  discI: copy Float
+  clearR: copy Float
+  clearG: copy Float
+  clearB: copy Float
+) {
   unsafe {
-    let ok: Int = g3dSkyPrepare(skyKind: skyKind, turbidity: turbidity, skyExposure: skyExposure, sunSizeRad: sunSizeRad,
-      sunX: sunX, sunY: sunY, sunZ: sunZ, sunR: sunR, sunG: sunG, sunB: sunB,
-      zenR: zenR, zenG: zenG, zenB: zenB, bands: bands,
-      horR: horR, horG: horG, horB: horB, discI: discI,
-      clearR: clearR, clearG: clearG, clearB: clearB)
-    if ok is 0 { ret }
+    let ok: Int = g3dSkyPrepare(
+      skyKind: skyKind
+      turbidity: turbidity
+      skyExposure: skyExposure
+      sunSizeRad: sunSizeRad
+      sunX: sunX
+      sunY: sunY
+      sunZ: sunZ
+      sunR: sunR
+      sunG: sunG
+      sunB: sunB
+      zenR: zenR
+      zenG: zenG
+      zenB: zenB
+      bands: bands
+      horR: horR
+      horG: horG
+      horB: horB
+      discI: discI
+      clearR: clearR
+      clearG: clearG
+      clearB: clearB
+    )
+    if ok is 0 {
+      ret
+    }
     let pass: Ptr = g3dPass()
     wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: g3dSkyPipeline())
-    wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
-      group: g3dSkyBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
-    wgpuRenderPassEncoderDraw(renderPassEncoder: pass, vertexCount: 3 as UInt32,
-      instanceCount: 1 as UInt32, firstVertex: 0 as UInt32, firstInstance: 0 as UInt32)
+    wgpuRenderPassEncoderSetBindGroup(
+      renderPassEncoder: pass
+      groupIndex: 0 as UInt32
+      group: g3dSkyBind()
+      dynamicOffsetCount: 0 as UInt64
+      dynamicOffsets: webgpuNull()
+    )
+    wgpuRenderPassEncoderDraw(
+      renderPassEncoder: pass
+      vertexCount: 3 as UInt32
+      instanceCount: 1 as UInt32
+      firstVertex: 0 as UInt32
+      firstInstance: 0 as UInt32
+    )
     # Restore the geometry pipeline/bind so the scene draws after the sky are correct.
     wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: g3dPipeline())
-    wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
-      group: g3dBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+    wgpuRenderPassEncoderSetBindGroup(
+      renderPassEncoder: pass
+      groupIndex: 0 as UInt32
+      group: g3dBind()
+      dynamicOffsetCount: 0 as UInt64
+      dynamicOffsets: webgpuNull()
+    )
   }
 }
 
@@ -94,16 +148,28 @@ func drawSky(sky: view Sky, light: view Light3d) pub {
   pushForwardHosekChannel(c: sky.hosek.g, base: 12)
   pushForwardHosekChannel(c: sky.hosek.b, base: 24)
   skyDraw(
-    skyKind: kindCode(sky: sky), turbidity: sky.turbidity,
-    skyExposure: sky.exposure, sunSizeRad: sky.sunAngularRadius,
-    sunX: light.sunDir.x, sunY: light.sunDir.y, sunZ: light.sunDir.z,
-    sunR: light.sunColor.x, sunG: light.sunColor.y, sunB: light.sunColor.z,
-    zenR: sky.zenithColor.x, zenG: sky.zenithColor.y, zenB: sky.zenithColor.z,
-    bands: sky.bands,
-    horR: sky.horizonColor.x, horG: sky.horizonColor.y, horB: sky.horizonColor.z,
-    discI: sky.sunDiscIntensity,
+    skyKind: kindCode(sky: sky)
+    turbidity: sky.turbidity
+    skyExposure: sky.exposure
+    sunSizeRad: sky.sunAngularRadius
+    sunX: light.sunDir.x
+    sunY: light.sunDir.y
+    sunZ: light.sunDir.z
+    sunR: light.sunColor.x
+    sunG: light.sunColor.y
+    sunB: light.sunColor.z
+    zenR: sky.zenithColor.x
+    zenG: sky.zenithColor.y
+    zenB: sky.zenithColor.z
+    bands: sky.bands
+    horR: sky.horizonColor.x
+    horG: sky.horizonColor.y
+    horB: sky.horizonColor.z
+    discI: sky.sunDiscIntensity
     # Kind 0 shows this and nothing else, so an app can bind a `none` sky and
     # get exactly the background it had before it called this at all.
-    clearR: sky.clearColor.x, clearG: sky.clearColor.y, clearB: sky.clearColor.z
+    clearR: sky.clearColor.x
+    clearG: sky.clearColor.y
+    clearB: sky.clearColor.z
   )
 }

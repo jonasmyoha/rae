@@ -28,14 +28,20 @@ func main() ret Int {
 
   # Umlauts before hex-digit letters: ä before 'e', ü before 'ß'.
   let umlauts: String = "Grüße"
-  check(label: "u-umlaut and sharp s survive", ok: umlauts.at(index: 2).toInt() is 252 and umlauts.at(index: 4).toInt() is 223)
+  check(
+    label: "u-umlaut and sharp s survive"
+    ok: umlauts.at(index: 2).toInt() is 252 and umlauts.at(index: 4).toInt() is 223
+  )
   let nordic: String = "Hyvää yötä"
   check(label: "a-umlaut decodes", ok: nordic.at(index: 3).toInt() is 228)
   check(label: "o-umlaut decodes", ok: nordic.at(index: 9).toInt() is 246)
   let ring: String = "Ångström"
   check(label: "a-ring decodes", ok: ring.at(index: 0).toInt() is 197)
   let upper: String = "ÄÖÅÜŠ"
-  check(label: "uppercase forms decode", ok: upper.at(index: 0).toInt() is 196 and upper.at(index: 8).toInt() is 352)
+  check(
+    label: "uppercase forms decode"
+    ok: upper.at(index: 0).toInt() is 196 and upper.at(index: 8).toInt() is 352
+  )
   let deg: String = "60.2°N"
   check(label: "degree sign decodes", ok: deg.at(index: 4).toInt() is 176)
 

@@ -22,7 +22,9 @@ open Math
 # multiple of 128 (1750000000 is one) round-trips perfectly and hides the
 # whole problem. Real clock readings are not so considerate.
 const epochNow: Float64 = 1750000037.0
+
 const frameSec: Float64 = 0.0166666
+
 const pollIntervalSec: Float64 = 1.0
 
 func absF64(x: view Float64) ret Float64 {
@@ -87,6 +89,9 @@ func main() {
   # either way it is nowhere near the intended rate. Asserting "not ~3"
   # rather than an exact number keeps the test honest about which side of
   # the 128 s bucket this particular constant lands on.
-  check(label: "f32 throttle does not fire at the intended rate", ok: squashed > 10 or squashed <= 1)
+  check(
+    label: "f32 throttle does not fire at the intended rate"
+    ok: squashed > 10 or squashed <= 1
+  )
   log("polls: wide={wide} narrowed={squashed} of {frames} frames")
 }

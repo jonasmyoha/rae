@@ -1,9 +1,10 @@
+cheader "stdlib.h"
+
 # Ptr is an internal C-interoperability primitive. It lowers to void* as a
 # value, void** through mod, and void** as List(Ptr)'s element storage. A Ptr
 # field must also remain printable through its owner's generated formatter.
-cheader "stdlib.h"
-
 func allocate(byteCount: copy UInt64) unsafe extern("malloc") ret Ptr
+
 func release(pointer: copy Ptr) unsafe extern("free")
 
 type NativeOwner {
@@ -13,13 +14,15 @@ type NativeOwner {
 
 func drop(this: mod NativeOwner) {
   log("drop {this.marker}")
-  unsafe { release(pointer: this.pointer) }
+  unsafe {
+    release(pointer: this.pointer)
+  }
 }
 
 func replace(pointer: mod Ptr, replacement: copy Ptr) {
   unsafe {
-      release(pointer: pointer)
-      pointer = replacement
+    release(pointer: pointer)
+    pointer = replacement
   }
 }
 
@@ -28,18 +31,19 @@ func pointerCount(pointers: copy List(Ptr)) ret Int {
 }
 
 func makeOwner(byteCount: copy UInt64, marker: copy Int) ret NativeOwner {
-  unsafe { ret NativeOwner { pointer: allocate(byteCount: byteCount), marker: marker } }
+  unsafe {
+    ret NativeOwner { pointer: allocate(byteCount: byteCount), marker: marker }
+  }
 }
 
 func main() {
   var owner: NativeOwner = makeOwner(byteCount: 8 as UInt64, marker: 7)
-  unsafe { log("owner {owner}") }
+  unsafe {
+    log("owner {owner}")
+  }
 
   unsafe {
-    replace(
-      pointer: owner.pointer
-      replacement: allocate(byteCount: 16 as UInt64)
-    )
+    replace(pointer: owner.pointer, replacement: allocate(byteCount: 16 as UInt64))
   }
 
   var pointers: List(Ptr) = List.create(Ptr, cap: 2)

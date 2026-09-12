@@ -7,9 +7,13 @@ open ecs/Query
 # pos has 3 entities and vel has 2, so query2 walks vel (the smaller) and probes
 # pos. The loop reads vel.v through a view ref and adds it to pos.x through a mod
 # ref; the write must alias table storage and be visible on read-back.
+type Position {
+  x: Int
+}
 
-type Position { x: Int }
-type Velocity { v: Int }
+type Velocity {
+  v: Int
+}
 
 func posOf(table: view ComponentTable(Position), entity: view EntityId) ret Int {
   if componentHas(this: table, entity: entity) {

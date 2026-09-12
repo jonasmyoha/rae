@@ -58,8 +58,12 @@ type Query2Match {
 
 # Entities present in BOTH tables. Iterates the smaller table and probes the
 # other by index.
-func query2(A: type, B: type,
-            tableA: view ComponentTable(A), tableB: view ComponentTable(B)) ret List(Query2Match) {
+func query2(
+  A: type
+  B: type
+  tableA: view ComponentTable(A)
+  tableB: view ComponentTable(B)
+) ret List(Query2Match) {
   let countA: Int = componentCount(this: tableA)
   let countB: Int = componentCount(this: tableB)
   let matches: List(Query2Match) = List.create(Query2Match, cap: 16)
@@ -84,7 +88,6 @@ func query2(A: type, B: type,
 }
 
 # ----- query3 ----------------------------------------------------------------
-
 type Query3Match {
   entity: EntityId
   indexA: Int
@@ -94,9 +97,14 @@ type Query3Match {
 
 # Entities present in ALL THREE tables. Iterates whichever table is smallest and
 # probes the other two by index, so the join stays O(min of the three).
-func query3(A: type, B: type, C: type,
-            tableA: view ComponentTable(A), tableB: view ComponentTable(B),
-            tableC: view ComponentTable(C)) ret List(Query3Match) {
+func query3(
+  A: type
+  B: type
+  C: type
+  tableA: view ComponentTable(A)
+  tableB: view ComponentTable(B)
+  tableC: view ComponentTable(C)
+) ret List(Query3Match) {
   let countA: Int = componentCount(this: tableA)
   let countB: Int = componentCount(this: tableB)
   let countC: Int = componentCount(this: tableC)
@@ -166,7 +174,6 @@ func forEach(T: type, table: view ComponentTable(T)) ret List(QueryMatch) {
 # queried table's generation exactly as it found it. One per query slot, so a
 # system reads `query2ViewA(tableA, hit)` without threading which index field
 # maps to which table.
-
 func query2ViewA(A: type, tableA: view ComponentTable(A), hit: view Query2Match) ret view A {
   unsafe {
     ret view rae_ext_rae_buf_get(buf: tableA.denseData.data, index: hit.indexA)
@@ -214,13 +221,16 @@ func forEachView(T: type, table: view ComponentTable(T), hit: view QueryMatch) r
 # It reuses the smallest-table probe, so a small tag set is walked rather than the
 # whole data table. This is how a tag replaces a `kind`-field if-ladder: instead
 # of scanning all units and branching on kind, query only the tagged ones.
-func tagged(D: type, T: type, dataTable: view ComponentTable(D),
-                 tagTable: view ComponentTable(T)) ret List(Query2Match) {
+func tagged(
+  D: type
+  T: type
+  dataTable: view ComponentTable(D)
+  tagTable: view ComponentTable(T)
+) ret List(Query2Match) {
   ret query2(tableA: dataTable, tableB: tagTable)
 }
 
 # ----- query4 (#807) --------------------------------------------------------
-
 type Query4Match {
   entity: EntityId
   indexA: Int
@@ -232,9 +242,16 @@ type Query4Match {
 # Entities present in ALL FOUR tables. Same smallest-table probe as query3:
 # iterate whichever table is smallest and probe the other three by index, so the
 # join stays O(min of the four) regardless of how big the others are.
-func query4(A: type, B: type, C: type, D: type,
-            tableA: view ComponentTable(A), tableB: view ComponentTable(B),
-            tableC: view ComponentTable(C), tableD: view ComponentTable(D)) ret List(Query4Match) {
+func query4(
+  A: type
+  B: type
+  C: type
+  D: type
+  tableA: view ComponentTable(A)
+  tableB: view ComponentTable(B)
+  tableC: view ComponentTable(C)
+  tableD: view ComponentTable(D)
+) ret List(Query4Match) {
   let countA: Int = componentCount(this: tableA)
   let countB: Int = componentCount(this: tableB)
   let countC: Int = componentCount(this: tableC)
@@ -247,7 +264,13 @@ func query4(A: type, B: type, C: type, D: type,
       let idxC: Int = componentIndexOf(this: tableC, entity: entity)
       let idxD: Int = componentIndexOf(this: tableD, entity: entity)
       if idxB >= 0 and idxC >= 0 and idxD >= 0 {
-        matches.add(value: Query4Match { entity: entity, indexA: i, indexB: idxB, indexC: idxC, indexD: idxD })
+        matches.add(value: Query4Match {
+          entity: entity
+          indexA: i
+          indexB: idxB
+          indexC: idxC
+          indexD: idxD
+        })
       }
     }
   } else if countB <= countA and countB <= countC and countB <= countD {
@@ -257,7 +280,13 @@ func query4(A: type, B: type, C: type, D: type,
       let idxC: Int = componentIndexOf(this: tableC, entity: entity)
       let idxD: Int = componentIndexOf(this: tableD, entity: entity)
       if idxA >= 0 and idxC >= 0 and idxD >= 0 {
-        matches.add(value: Query4Match { entity: entity, indexA: idxA, indexB: i, indexC: idxC, indexD: idxD })
+        matches.add(value: Query4Match {
+          entity: entity
+          indexA: idxA
+          indexB: i
+          indexC: idxC
+          indexD: idxD
+        })
       }
     }
   } else if countC <= countA and countC <= countB and countC <= countD {
@@ -267,7 +296,13 @@ func query4(A: type, B: type, C: type, D: type,
       let idxB: Int = componentIndexOf(this: tableB, entity: entity)
       let idxD: Int = componentIndexOf(this: tableD, entity: entity)
       if idxA >= 0 and idxB >= 0 and idxD >= 0 {
-        matches.add(value: Query4Match { entity: entity, indexA: idxA, indexB: idxB, indexC: i, indexD: idxD })
+        matches.add(value: Query4Match {
+          entity: entity
+          indexA: idxA
+          indexB: idxB
+          indexC: i
+          indexD: idxD
+        })
       }
     }
   } else {
@@ -277,7 +312,13 @@ func query4(A: type, B: type, C: type, D: type,
       let idxB: Int = componentIndexOf(this: tableB, entity: entity)
       let idxC: Int = componentIndexOf(this: tableC, entity: entity)
       if idxA >= 0 and idxB >= 0 and idxC >= 0 {
-        matches.add(value: Query4Match { entity: entity, indexA: idxA, indexB: idxB, indexC: idxC, indexD: i })
+        matches.add(value: Query4Match {
+          entity: entity
+          indexA: idxA
+          indexB: idxB
+          indexC: idxC
+          indexD: i
+        })
       }
     }
   }
@@ -309,7 +350,6 @@ func query4ViewD(D: type, tableD: view ComponentTable(D), hit: view Query4Match)
 }
 
 # ----- query5 (#807) --------------------------------------------------------
-
 type Query5Match {
   entity: EntityId
   indexA: Int
@@ -321,10 +361,18 @@ type Query5Match {
 
 # Entities present in ALL FIVE tables — the top of the fixed ladder. Iterates the
 # smallest table and probes the other four, O(min of the five).
-func query5(A: type, B: type, C: type, D: type, E: type,
-            tableA: view ComponentTable(A), tableB: view ComponentTable(B),
-            tableC: view ComponentTable(C), tableD: view ComponentTable(D),
-            tableE: view ComponentTable(E)) ret List(Query5Match) {
+func query5(
+  A: type
+  B: type
+  C: type
+  D: type
+  E: type
+  tableA: view ComponentTable(A)
+  tableB: view ComponentTable(B)
+  tableC: view ComponentTable(C)
+  tableD: view ComponentTable(D)
+  tableE: view ComponentTable(E)
+) ret List(Query5Match) {
   let countA: Int = componentCount(this: tableA)
   let countB: Int = componentCount(this: tableB)
   let countC: Int = componentCount(this: tableC)
@@ -339,7 +387,14 @@ func query5(A: type, B: type, C: type, D: type, E: type,
       let idxD: Int = componentIndexOf(this: tableD, entity: entity)
       let idxE: Int = componentIndexOf(this: tableE, entity: entity)
       if idxB >= 0 and idxC >= 0 and idxD >= 0 and idxE >= 0 {
-        matches.add(value: Query5Match { entity: entity, indexA: i, indexB: idxB, indexC: idxC, indexD: idxD, indexE: idxE })
+        matches.add(value: Query5Match {
+          entity: entity
+          indexA: i
+          indexB: idxB
+          indexC: idxC
+          indexD: idxD
+          indexE: idxE
+        })
       }
     }
   } else if countB <= countA and countB <= countC and countB <= countD and countB <= countE {
@@ -350,7 +405,14 @@ func query5(A: type, B: type, C: type, D: type, E: type,
       let idxD: Int = componentIndexOf(this: tableD, entity: entity)
       let idxE: Int = componentIndexOf(this: tableE, entity: entity)
       if idxA >= 0 and idxC >= 0 and idxD >= 0 and idxE >= 0 {
-        matches.add(value: Query5Match { entity: entity, indexA: idxA, indexB: i, indexC: idxC, indexD: idxD, indexE: idxE })
+        matches.add(value: Query5Match {
+          entity: entity
+          indexA: idxA
+          indexB: i
+          indexC: idxC
+          indexD: idxD
+          indexE: idxE
+        })
       }
     }
   } else if countC <= countA and countC <= countB and countC <= countD and countC <= countE {
@@ -361,7 +423,14 @@ func query5(A: type, B: type, C: type, D: type, E: type,
       let idxD: Int = componentIndexOf(this: tableD, entity: entity)
       let idxE: Int = componentIndexOf(this: tableE, entity: entity)
       if idxA >= 0 and idxB >= 0 and idxD >= 0 and idxE >= 0 {
-        matches.add(value: Query5Match { entity: entity, indexA: idxA, indexB: idxB, indexC: i, indexD: idxD, indexE: idxE })
+        matches.add(value: Query5Match {
+          entity: entity
+          indexA: idxA
+          indexB: idxB
+          indexC: i
+          indexD: idxD
+          indexE: idxE
+        })
       }
     }
   } else if countD <= countA and countD <= countB and countD <= countC and countD <= countE {
@@ -372,7 +441,14 @@ func query5(A: type, B: type, C: type, D: type, E: type,
       let idxC: Int = componentIndexOf(this: tableC, entity: entity)
       let idxE: Int = componentIndexOf(this: tableE, entity: entity)
       if idxA >= 0 and idxB >= 0 and idxC >= 0 and idxE >= 0 {
-        matches.add(value: Query5Match { entity: entity, indexA: idxA, indexB: idxB, indexC: idxC, indexD: i, indexE: idxE })
+        matches.add(value: Query5Match {
+          entity: entity
+          indexA: idxA
+          indexB: idxB
+          indexC: idxC
+          indexD: i
+          indexE: idxE
+        })
       }
     }
   } else {
@@ -383,7 +459,14 @@ func query5(A: type, B: type, C: type, D: type, E: type,
       let idxC: Int = componentIndexOf(this: tableC, entity: entity)
       let idxD: Int = componentIndexOf(this: tableD, entity: entity)
       if idxA >= 0 and idxB >= 0 and idxC >= 0 and idxD >= 0 {
-        matches.add(value: Query5Match { entity: entity, indexA: idxA, indexB: idxB, indexC: idxC, indexD: idxD, indexE: i })
+        matches.add(value: Query5Match {
+          entity: entity
+          indexA: idxA
+          indexB: idxB
+          indexC: idxC
+          indexD: idxD
+          indexE: i
+        })
       }
     }
   }
@@ -438,8 +521,12 @@ func query5ViewE(E: type, tableE: view ComponentTable(E), hit: view Query5Match)
 # Entities in `dataTable` that are NOT present in `tagTable`. Each match's
 # `index` is the entity's dense slot in the DATA table (read/write it via
 # forEachView / queryModAt by index); the tag has no payload.
-func without(D: type, T: type, dataTable: view ComponentTable(D),
-             tagTable: view ComponentTable(T)) ret List(QueryMatch) {
+func without(
+  D: type
+  T: type
+  dataTable: view ComponentTable(D)
+  tagTable: view ComponentTable(T)
+) ret List(QueryMatch) {
   let count: Int = componentCount(this: dataTable)
   let matches: List(QueryMatch) = List.create(QueryMatch, cap: 16)
   loop var i: Int = 0, i < count, ++i {
@@ -462,7 +549,11 @@ func without(D: type, T: type, dataTable: view ComponentTable(D),
 # This complements Schedule's TABLE-level skip ("did any input change?") with
 # the ENTITY-level filter ("which ones?"). O(n) over the table with no sparse
 # lookups — the stamps are dense, aligned 1:1 with the data.
-func changedSince(T: type, table: view ComponentTable(T), sinceGeneration: view Int) ret List(QueryMatch) {
+func changedSince(
+  T: type
+  table: view ComponentTable(T)
+  sinceGeneration: view Int
+) ret List(QueryMatch) {
   unsafe {
     let count: Int = componentCount(this: table)
     let matches: List(QueryMatch) = List.create(QueryMatch, cap: 16)

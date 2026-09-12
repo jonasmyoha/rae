@@ -13,8 +13,8 @@
 # Deliberately dependency-free: the monitor-refresh helper that used to sit
 # beside this lives with its backend accessor instead, so lib/ui does not
 # have to know how a window reports its refresh rate.
-
 const watcherPollSec: Float = 0.05
+
 const idleCapSec: Float = 30.0
 
 # How long to block in waitEvents before waking on our own.
@@ -33,9 +33,17 @@ func nextWaitTimeoutSec(
   frameSec: view Float
   heartbeatSec: view Float
 ) pub ret Float {
-  if animating { ret frameSec }
-  if mouseDown { ret frameSec }
-  if pollWatcher { ret watcherPollSec }
-  if heartbeatSec > 0.0 { ret heartbeatSec }
+  if animating {
+    ret frameSec
+  }
+  if mouseDown {
+    ret frameSec
+  }
+  if pollWatcher {
+    ret watcherPollSec
+  }
+  if heartbeatSec > 0.0 {
+    ret heartbeatSec
+  }
   ret idleCapSec
 }

@@ -28,6 +28,7 @@ open Math3d
 # Shift makes the WASD camera 4x FASTER, Control makes it 4x SLOWER (for fine framing).
 # Applied to translation only — boosting the turn rate as well makes the view hard to aim.
 const cameraRigBoost: Float = 4.0
+
 const cameraRigSlow: Float = 0.25
 
 func speedScale() ret Float {
@@ -40,11 +41,7 @@ func speedScale() ret Float {
   ret 1.0
 }
 
-enum CameraRigMode {
-  orbit
-  free
-  character
-}
+enum CameraRigMode { orbit, free, character }
 
 type CameraRig {
   mode: CameraRigMode
@@ -122,9 +119,14 @@ type CameraRig {
 # grab is what makes the two complementary; id-hold is what makes ownership
 # sticky. rig.camTouchOn stays false until set, so other rigs (110/113) keep the
 # plain-mouse behaviour.
-
-func setCameraTouch(rig: mod CameraRig, excludeId: copy Int, joystickActive: copy Bool,
-                    zoneX: copy Float, zoneY: copy Float, zoneR: copy Float) pub {
+func setCameraTouch(
+  rig: mod CameraRig
+  excludeId: copy Int
+  joystickActive: copy Bool
+  zoneX: copy Float
+  zoneY: copy Float
+  zoneR: copy Float
+) pub {
   rig.camTouchOn = true
   rig.camExcludeId = excludeId
   rig.camJoyActive = joystickActive
@@ -136,7 +138,9 @@ func setCameraTouch(rig: mod CameraRig, excludeId: copy Int, joystickActive: cop
 # True when the point is outside the joystick zone (or no zone is set), i.e. the
 # camera is allowed to start a grab there.
 func pointerOutsideCamZone(rig: view CameraRig, x: view Float, y: view Float) ret Bool {
-  if rig.camZoneR < 0.0 { ret true }
+  if rig.camZoneR < 0.0 {
+    ret true
+  }
   let dx: Float = x - rig.camZoneX
   let dy: Float = y - rig.camZoneY
   ret dx * dx + dy * dy > rig.camZoneR * rig.camZoneR
@@ -166,15 +170,20 @@ func resolveCameraPointer(rig: mod CameraRig) {
       # A hold is never a fresh press — drop it here so the grab below re-decides
       # by region. Without this the camera and stick fight over one finger and
       # never release it (the "input goes to both" bug).
-      if rig.camGrabId >= 0 and id is rig.camGrabId and pressed { rig.camGrabId = 0 - 1 }
+      if rig.camGrabId >= 0 and id is rig.camGrabId and pressed {
+        rig.camGrabId = 0 - 1
+      }
       if rig.camGrabId >= 0 and id is rig.camGrabId {
         # Hold: keep our finger wherever it goes, even into the joystick zone.
         rig.camPointerX = tx
         rig.camPointerY = ty
         found = true
       }
-      if rig.camGrabId < 0 and pressed
-        and id is not rig.camExcludeId and pointerOutsideCamZone(rig: rig, x: tx, y: ty) {
+      if rig.camGrabId < 0 and pressed and id is not rig.camExcludeId and pointerOutsideCamZone(
+        rig: rig
+        x: tx
+        y: ty
+      ) {
         rig.camGrabId = id
         rig.camPointerX = tx
         rig.camPointerY = ty
@@ -182,7 +191,9 @@ func resolveCameraPointer(rig: mod CameraRig) {
       }
       index = index + 1
     }
-    if found is false { rig.camGrabId = 0 - 1 }
+    if found is false {
+      rig.camGrabId = 0 - 1
+    }
     rig.camPointerDown = found
   } else {
     # Desktop mouse: skip while the joystick owns the mouse.
@@ -275,8 +286,12 @@ func clampRigPitch(rig: view CameraRig, pitch: view Float) pub ret Float {
 # forever and an idle-aware render loop would never get to sleep.
 const rigSmoothEpsilon: Float = 0.00001
 
-func smoothTowards(current: view Float, target: view Float,
-                   rate: view Float, deltaTime: view Float) pub ret Float {
+func smoothTowards(
+  current: view Float
+  target: view Float
+  rate: view Float
+  deltaTime: view Float
+) pub ret Float {
   if rate <= 0.0 {
     ret target
   }
@@ -385,8 +400,12 @@ func toggleCameraRigMode(rig: mod CameraRig, camera: mod Camera3d) pub {
 # `allowInput` is false when the UI has captured the pointer, so pressing
 # a button does not also spin the camera. Note that it gates the KEYBOARD
 # too: a text field would otherwise steer the view while being typed in.
-func updateCameraRig(rig: mod CameraRig, camera: mod Camera3d,
-                     allowInput: view Bool, deltaTime: view Float) pub ret Bool {
+func updateCameraRig(
+  rig: mod CameraRig
+  camera: mod Camera3d
+  allowInput: view Bool
+  deltaTime: view Float
+) pub ret Bool {
   let yaw0: Float = rig.yaw
   let orbitPitch0: Float = rig.orbitPitch
   let freePitch0: Float = rig.freePitch
@@ -441,23 +460,47 @@ func updateCameraRig(rig: mod CameraRig, camera: mod Camera3d,
     mouseDist = 0.0 - Gpu2d.wheelMove() * rig.wheelSpeed
     let boost: Float = speedScale()
     if rig.mode is CameraRigMode.orbit {
-      if Sdl3.isKeyDown(key: Keys.keyW) { keyDist = keyDist - deltaTime * rig.moveSpeed * boost }
-      if Sdl3.isKeyDown(key: Keys.keyS) { keyDist = keyDist + deltaTime * rig.moveSpeed * boost }
-      if Sdl3.isKeyDown(key: Keys.keyA) { keyYaw = keyYaw - deltaTime * rig.keyTurnSpeed }
-      if Sdl3.isKeyDown(key: Keys.keyD) { keyYaw = keyYaw + deltaTime * rig.keyTurnSpeed }
-      if Sdl3.isKeyDown(key: Keys.keyQ) { keyOrbitPitch = keyOrbitPitch - deltaTime * rig.keyTurnSpeed }
-      if Sdl3.isKeyDown(key: Keys.keyE) { keyOrbitPitch = keyOrbitPitch + deltaTime * rig.keyTurnSpeed }
+      if Sdl3.isKeyDown(key: Keys.keyW) {
+        keyDist = keyDist - deltaTime * rig.moveSpeed * boost
+      }
+      if Sdl3.isKeyDown(key: Keys.keyS) {
+        keyDist = keyDist + deltaTime * rig.moveSpeed * boost
+      }
+      if Sdl3.isKeyDown(key: Keys.keyA) {
+        keyYaw = keyYaw - deltaTime * rig.keyTurnSpeed
+      }
+      if Sdl3.isKeyDown(key: Keys.keyD) {
+        keyYaw = keyYaw + deltaTime * rig.keyTurnSpeed
+      }
+      if Sdl3.isKeyDown(key: Keys.keyQ) {
+        keyOrbitPitch = keyOrbitPitch - deltaTime * rig.keyTurnSpeed
+      }
+      if Sdl3.isKeyDown(key: Keys.keyE) {
+        keyOrbitPitch = keyOrbitPitch + deltaTime * rig.keyTurnSpeed
+      }
     } else if rig.mode is CameraRigMode.free {
       let step: Float = deltaTime * rig.moveSpeed * boost
       let forward: Vec3 = cameraRigForward(rig: rig)
       let right: Vec3 = right(rig: rig)
       let up: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
-      if Sdl3.isKeyDown(key: Keys.keyW) { keyMove = Vec3.vadd(a: keyMove, b: Vec3.vscale(a: forward, s: step)) }
-      if Sdl3.isKeyDown(key: Keys.keyS) { keyMove = Vec3.vsub(a: keyMove, b: Vec3.vscale(a: forward, s: step)) }
-      if Sdl3.isKeyDown(key: Keys.keyA) { keyMove = Vec3.vsub(a: keyMove, b: Vec3.vscale(a: right, s: step)) }
-      if Sdl3.isKeyDown(key: Keys.keyD) { keyMove = Vec3.vadd(a: keyMove, b: Vec3.vscale(a: right, s: step)) }
-      if Sdl3.isKeyDown(key: Keys.keyQ) { keyMove = Vec3.vsub(a: keyMove, b: Vec3.vscale(a: up, s: step)) }
-      if Sdl3.isKeyDown(key: Keys.keyE) { keyMove = Vec3.vadd(a: keyMove, b: Vec3.vscale(a: up, s: step)) }
+      if Sdl3.isKeyDown(key: Keys.keyW) {
+        keyMove = Vec3.vadd(a: keyMove, b: Vec3.vscale(a: forward, s: step))
+      }
+      if Sdl3.isKeyDown(key: Keys.keyS) {
+        keyMove = Vec3.vsub(a: keyMove, b: Vec3.vscale(a: forward, s: step))
+      }
+      if Sdl3.isKeyDown(key: Keys.keyA) {
+        keyMove = Vec3.vsub(a: keyMove, b: Vec3.vscale(a: right, s: step))
+      }
+      if Sdl3.isKeyDown(key: Keys.keyD) {
+        keyMove = Vec3.vadd(a: keyMove, b: Vec3.vscale(a: right, s: step))
+      }
+      if Sdl3.isKeyDown(key: Keys.keyQ) {
+        keyMove = Vec3.vsub(a: keyMove, b: Vec3.vscale(a: up, s: step))
+      }
+      if Sdl3.isKeyDown(key: Keys.keyE) {
+        keyMove = Vec3.vadd(a: keyMove, b: Vec3.vscale(a: up, s: step))
+      }
     }
   }
 
@@ -490,17 +533,54 @@ func updateCameraRig(rig: mod CameraRig, camera: mod Camera3d,
   # Close whatever gap the smoothed sources left. With both toggles off
   # every gap is already zero and each of these is the identity.
   let rotRate: Float = rigRotationRate(rig: rig)
-  rig.viewYaw = smoothTowards(current: rig.viewYaw, target: rig.yaw, rate: rotRate, deltaTime: deltaTime)
-  rig.viewOrbitPitch = smoothTowards(current: rig.viewOrbitPitch, target: rig.orbitPitch, rate: rotRate, deltaTime: deltaTime)
-  rig.viewFreePitch = smoothTowards(current: rig.viewFreePitch, target: rig.freePitch, rate: rotRate, deltaTime: deltaTime)
-  rig.viewDistance = smoothTowards(current: rig.viewDistance, target: rig.distance, rate: rotRate, deltaTime: deltaTime)
+  rig.viewYaw = smoothTowards(
+    current: rig.viewYaw
+    target: rig.yaw
+    rate: rotRate
+    deltaTime: deltaTime
+  )
+  rig.viewOrbitPitch = smoothTowards(
+    current: rig.viewOrbitPitch
+    target: rig.orbitPitch
+    rate: rotRate
+    deltaTime: deltaTime
+  )
+  rig.viewFreePitch = smoothTowards(
+    current: rig.viewFreePitch
+    target: rig.freePitch
+    rate: rotRate
+    deltaTime: deltaTime
+  )
+  rig.viewDistance = smoothTowards(
+    current: rig.viewDistance
+    target: rig.distance
+    rate: rotRate
+    deltaTime: deltaTime
+  )
   # Position is keyboard-driven only, so it follows that toggle alone.
   var moveRate: Float = 0.0
-  if rig.smoothKeys { moveRate = rig.keySmoothRate }
+  if rig.smoothKeys {
+    moveRate = rig.keySmoothRate
+  }
   rig.viewPosition = Vec3.create(
-    x: smoothTowards(current: rig.viewPosition.x, target: rig.freePosition.x, rate: moveRate, deltaTime: deltaTime),
-    y: smoothTowards(current: rig.viewPosition.y, target: rig.freePosition.y, rate: moveRate, deltaTime: deltaTime),
-    z: smoothTowards(current: rig.viewPosition.z, target: rig.freePosition.z, rate: moveRate, deltaTime: deltaTime)
+    x: smoothTowards(
+      current: rig.viewPosition.x
+      target: rig.freePosition.x
+      rate: moveRate
+      deltaTime: deltaTime
+    )
+    y: smoothTowards(
+      current: rig.viewPosition.y
+      target: rig.freePosition.y
+      rate: moveRate
+      deltaTime: deltaTime
+    )
+    z: smoothTowards(
+      current: rig.viewPosition.z
+      target: rig.freePosition.z
+      rate: moveRate
+      deltaTime: deltaTime
+    )
   )
   # A snapshot restored under different limits, or a target clamped after
   # the display already passed the old bound, must not leave the visible
@@ -513,23 +593,11 @@ func updateCameraRig(rig: mod CameraRig, camera: mod Camera3d,
   # after the last event, and a loop that only watched the target would
   # drop to its idle rate mid-glide and show the smoothing as a stutter —
   # the same starvation trap documented for every other animation source.
-  if rig.viewYaw is not viewYaw0
-    or rig.viewOrbitPitch is not viewOrbit0
-    or rig.viewFreePitch is not viewFree0
-    or rig.viewDistance is not viewDist0
-    or rig.viewPosition.x is not viewPos0.x
-    or rig.viewPosition.y is not viewPos0.y
-    or rig.viewPosition.z is not viewPos0.z {
+  if rig.viewYaw is not viewYaw0 or rig.viewOrbitPitch is not viewOrbit0 or rig.viewFreePitch is not viewFree0 or rig.viewDistance is not viewDist0 or rig.viewPosition.x is not viewPos0.x or rig.viewPosition.y is not viewPos0.y or rig.viewPosition.z is not viewPos0.z {
     ret true
   }
 
-  ret rig.yaw is not yaw0
-    or rig.orbitPitch is not orbitPitch0
-    or rig.freePitch is not freePitch0
-    or rig.distance is not dist0
-    or rig.freePosition.x is not pos0.x
-    or rig.freePosition.y is not pos0.y
-    or rig.freePosition.z is not pos0.z
+  ret rig.yaw is not yaw0 or rig.orbitPitch is not orbitPitch0 or rig.freePitch is not freePitch0 or rig.distance is not dist0 or rig.freePosition.x is not pos0.x or rig.freePosition.y is not pos0.y or rig.freePosition.z is not pos0.z
 }
 
 # Derive the camera from the rig. Pure in the rig: calling it twice with
@@ -538,8 +606,12 @@ func updateCameraRig(rig: mod CameraRig, camera: mod Camera3d,
 func applyCameraRig(rig: view CameraRig, camera: mod Camera3d) pub {
   if rig.mode is not CameraRigMode.free {
     camera.position = orbitEye(
-      targetX: camera.target.x, targetY: camera.target.y, targetZ: camera.target.z,
-      yaw: rig.viewYaw, pitch: rig.viewOrbitPitch, dist: rig.viewDistance
+      targetX: camera.target.x
+      targetY: camera.target.y
+      targetZ: camera.target.z
+      yaw: rig.viewYaw
+      pitch: rig.viewOrbitPitch
+      dist: rig.viewDistance
     )
   } else {
     let forward: Vec3 = cameraRigForward(rig: rig)
@@ -576,18 +648,28 @@ func snapCameraRigView(rig: mod CameraRig) pub {
 const cameraRigFields: Int = 12
 
 func part(parts: view List(String), index: view Int) ret String {
-  if let value: String = parts.copyAt(index: index) { ret value }
+  if let value: String = parts.copyAt(index: index) {
+    ret value
+  }
   ret ""
 }
 
 func stateString(rig: view CameraRig, camera: view Camera3d) pub ret String {
   var modeNum: Int = 0
-  if rig.mode is CameraRigMode.free { modeNum = 1 }
-  if rig.mode is CameraRigMode.character { modeNum = 2 }
+  if rig.mode is CameraRigMode.free {
+    modeNum = 1
+  }
+  if rig.mode is CameraRigMode.character {
+    modeNum = 2
+  }
   var smoothM: Int = 0
-  if rig.smoothMouse { smoothM = 1 }
+  if rig.smoothMouse {
+    smoothM = 1
+  }
   var smoothK: Int = 0
-  if rig.smoothKeys { smoothK = 1 }
+  if rig.smoothKeys {
+    smoothK = 1
+  }
   ret "{modeNum} {rig.yaw} {rig.orbitPitch} {rig.freePitch} {rig.distance} {rig.freePosition.x} {rig.freePosition.y} {rig.freePosition.z} {camera.target.x} {camera.target.y} {smoothM} {smoothK}"
 }
 
@@ -595,8 +677,12 @@ func stateString(rig: view CameraRig, camera: view Camera3d) pub ret String {
 # already-split snapshot. Returns false — changing nothing — when the
 # fields are not all present, so a truncated line cannot leave the rig
 # half-restored.
-func applyCameraRigState(parts: view List(String), offset: view Int,
-                         rig: mod CameraRig, camera: mod Camera3d) pub ret Bool {
+func applyCameraRigState(
+  parts: view List(String)
+  offset: view Int
+  rig: mod CameraRig
+  camera: mod Camera3d
+) pub ret Bool {
   if parts.length < offset + cameraRigFields {
     ret false
   }
@@ -613,15 +699,15 @@ func applyCameraRigState(parts: view List(String), offset: view Int,
   rig.freePitch = part(parts: parts, index: offset + 3).trim().toFloat()
   rig.distance = part(parts: parts, index: offset + 4).trim().toFloat()
   rig.freePosition = Vec3.create(
-    x: part(parts: parts, index: offset + 5).trim().toFloat(),
-    y: part(parts: parts, index: offset + 6).trim().toFloat(),
+    x: part(parts: parts, index: offset + 5).trim().toFloat()
+    y: part(parts: parts, index: offset + 6).trim().toFloat()
     z: part(parts: parts, index: offset + 7).trim().toFloat()
   )
   # Orbit needs the target restored too, or the camera returns to the
   # right angle around the wrong point.
   camera.target = Vec3.create(
-    x: part(parts: parts, index: offset + 8).trim().toFloat(),
-    y: part(parts: parts, index: offset + 9).trim().toFloat(),
+    x: part(parts: parts, index: offset + 8).trim().toFloat()
+    y: part(parts: parts, index: offset + 9).trim().toFloat()
     z: camera.target.z
   )
   rig.smoothMouse = part(parts: parts, index: offset + 10).trim().toInt() is 1

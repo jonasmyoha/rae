@@ -22,9 +22,17 @@ open ecs/World
 # Append `child` to `parent`'s authoritative Children list, creating the list if
 # this is the parent's first child. Internal — Children is only ever grown
 # through here / insertChildAt, never by callers.
-func addChildTo(childrens: mod ComponentTable(Children), parent: view EntityId, child: view EntityId) {
+func addChildTo(
+  childrens: mod ComponentTable(Children)
+  parent: view EntityId
+  child: view EntityId
+) {
   if componentHas(this: childrens, entity: parent) is false {
-    componentSet(this: childrens, entity: parent, data: Children { ids: List.create(EntityId, cap: 4) })
+    componentSet(
+      this: childrens
+      entity: parent
+      data: Children { ids: List.create(EntityId, cap: 4) }
+    )
   }
   let cache: mod Children => componentMod(this: childrens, entity: parent)
   cache.ids.add(value: child)
@@ -32,10 +40,18 @@ func addChildTo(childrens: mod ComponentTable(Children), parent: view EntityId, 
 
 # Insert `child` into `parent`'s Children list at `index` (clamped to
 # [0, length], so an out-of-range index appends). Internal.
-func insertChildAt(childrens: mod ComponentTable(Children), parent: view EntityId,
-                   child: view EntityId, index: view Int) {
+func insertChildAt(
+  childrens: mod ComponentTable(Children)
+  parent: view EntityId
+  child: view EntityId
+  index: view Int
+) {
   if componentHas(this: childrens, entity: parent) is false {
-    componentSet(this: childrens, entity: parent, data: Children { ids: List.create(EntityId, cap: 4) })
+    componentSet(
+      this: childrens
+      entity: parent
+      data: Children { ids: List.create(EntityId, cap: 4) }
+    )
   }
   let cache: mod Children => componentMod(this: childrens, entity: parent)
   var at: Int = index
@@ -51,7 +67,11 @@ func insertChildAt(childrens: mod ComponentTable(Children), parent: view EntityI
 # Remove `child` from `parent`'s Children list (ordered remove, so surviving
 # siblings keep their relative order). No-op if the parent has no list or the
 # child isn't in it. Internal.
-func removeChildFrom(childrens: mod ComponentTable(Children), parent: view EntityId, child: view EntityId) {
+func removeChildFrom(
+  childrens: mod ComponentTable(Children)
+  parent: view EntityId
+  child: view EntityId
+) {
   if componentHas(this: childrens, entity: parent) is false {
     ret
   }
@@ -69,8 +89,11 @@ func removeChildFrom(childrens: mod ComponentTable(Children), parent: view Entit
 # Unlink `child` from whatever parent it currently has (via the Parent index),
 # so every mutation entry converges on "a child is in exactly ONE Children list".
 # Internal.
-func unlinkFromCurrent(parents: mod ComponentTable(Parent), childrens: mod ComponentTable(Children),
-                       child: view EntityId) {
+func unlinkFromCurrent(
+  parents: mod ComponentTable(Parent)
+  childrens: mod ComponentTable(Children)
+  child: view EntityId
+) {
   if componentHas(this: parents, entity: child) {
     let current: Parent = componentGet(this: parents, entity: child)
     removeChildFrom(childrens: childrens, parent: current.parent, child: child)
@@ -83,8 +106,12 @@ func unlinkFromCurrent(parents: mod ComponentTable(Parent), childrens: mod Compo
 # `noEntity()` as `parent` DETACHES the child (unlinks it from its old parent's
 # list and drops its Parent). Re-parenting first unlinks from the old parent, so a
 # child is never listed under two parents.
-func setParent(parents: mod ComponentTable(Parent), childrens: mod ComponentTable(Children),
-               child: view EntityId, parent: view EntityId) {
+func setParent(
+  parents: mod ComponentTable(Parent)
+  childrens: mod ComponentTable(Children)
+  child: view EntityId
+  parent: view EntityId
+) {
   unlinkFromCurrent(parents: parents, childrens: childrens, child: child)
   if isNone(this: parent) {
     componentRemove(this: parents, entity: child)
@@ -98,16 +125,29 @@ func setParent(parents: mod ComponentTable(Parent), childrens: mod ComponentTabl
 # Children list (clamped; past-the-end appends). Same invariants: unlinks from
 # any current parent first, keeps Parent in lock-step. Use it when sibling order
 # matters at insertion time (layout/paint order) instead of append-then-shuffle.
-func insertChild(parents: mod ComponentTable(Parent), childrens: mod ComponentTable(Children),
-                 parent: view EntityId, child: view EntityId, index: view Int) {
+func insertChild(
+  parents: mod ComponentTable(Parent)
+  childrens: mod ComponentTable(Children)
+  parent: view EntityId
+  child: view EntityId
+  index: view Int
+) {
   unlinkFromCurrent(parents: parents, childrens: childrens, child: child)
   componentSet(this: parents, entity: child, data: Parent { parent: parent })
-  insertChildAt(childrens: childrens, parent: parent, child: child, index: index)
+  insertChildAt(
+    childrens: childrens
+    parent: parent
+    child: child
+    index: index
+  )
 }
 
 # The children of `parent`, in order — a COPY, so a caller can iterate freely
 # without being able to corrupt the authoritative list. Empty when `parent` has none.
-func getChildren(childrens: view ComponentTable(Children), parent: view EntityId) ret List(EntityId) {
+func getChildren(
+  childrens: view ComponentTable(Children)
+  parent: view EntityId
+) ret List(EntityId) {
   let out: List(EntityId) = List.create(EntityId, cap: 4)
   if componentHas(this: childrens, entity: parent) {
     let cache: view Children => componentView(this: childrens, entity: parent)
@@ -127,8 +167,10 @@ func getChildren(childrens: view ComponentTable(Children), parent: view EntityId
 # Children is never rewritten, only read. Enforces the single-parent invariant: a
 # child that shows up in a SECOND list (a corrupt/hand-edited snapshot) keeps its
 # first parent and is dropped from the later list, so the result is always a tree.
-func rebuildParentsFromChildren(parents: mod ComponentTable(Parent),
-                                childrens: mod ComponentTable(Children)) {
+func rebuildParentsFromChildren(
+  parents: mod ComponentTable(Parent)
+  childrens: mod ComponentTable(Children)
+) {
   loop componentCount(this: parents) > 0 {
     let stale: EntityId = componentEntityAt(this: parents, i: 0)
     componentRemove(this: parents, entity: stale)
@@ -164,7 +206,6 @@ func rebuildParentsFromChildren(parents: mod ComponentTable(Parent),
 # componentSet/componentMod/componentRemove, which bump it — so `depthOrder`
 # rebuilds only when the tree actually changed and otherwise returns the cached
 # list untouched.
-
 type HierarchyOrder {
   order: List(EntityId)
   # The Children table generation the cached order was built at; -1 = never built,
@@ -180,7 +221,11 @@ func createHierarchyOrder() ret HierarchyOrder {
 # parent always lands before its descendants. Reads the Children cache only (no
 # mutation), and is only ever entered from a ROOT, so a (malformed) parent cycle
 # can never be walked into an infinite loop.
-func emitSubtree(state: mod HierarchyOrder, childrens: view ComponentTable(Children), node: view EntityId) {
+func emitSubtree(
+  state: mod HierarchyOrder
+  childrens: view ComponentTable(Children)
+  node: view EntityId
+) {
   state.order.add(value: node)
   if componentHas(this: childrens, entity: node) {
     let cache: view Children => componentView(this: childrens, entity: node)
@@ -198,8 +243,11 @@ func emitSubtree(state: mod HierarchyOrder, childrens: view ComponentTable(Child
 # and each node's children in their authoritative order, so the result is
 # deterministic. Entities in no hierarchy
 # (no Parent and no Children) are correctly absent.
-func rebuildDepthOrder(state: mod HierarchyOrder, parents: view ComponentTable(Parent),
-                       childrens: view ComponentTable(Children)) {
+func rebuildDepthOrder(
+  state: mod HierarchyOrder
+  parents: view ComponentTable(Parent)
+  childrens: view ComponentTable(Children)
+) {
   state.order.clear()
   loop var i: Int = 0, i < componentCount(this: childrens), ++i {
     let candidate: EntityId = componentEntityAt(this: childrens, i: i)
@@ -212,8 +260,11 @@ func rebuildDepthOrder(state: mod HierarchyOrder, parents: view ComponentTable(P
 # The cached parent-before-child order. Rebuilds only when the Children table's
 # generation moved since the last build (dirty tracking); otherwise hands back
 # the cached list. Returned as a `view` so a system iterates it with no copy.
-func depthOrder(state: mod HierarchyOrder, parents: view ComponentTable(Parent),
-                childrens: view ComponentTable(Children)) ret view List(EntityId) {
+func depthOrder(
+  state: mod HierarchyOrder
+  parents: view ComponentTable(Parent)
+  childrens: view ComponentTable(Children)
+) ret view List(EntityId) {
   let gen: Int = componentTableGeneration(this: childrens)
   if state.builtGeneration is not gen {
     rebuildDepthOrder(state: state, parents: parents, childrens: childrens)
@@ -233,8 +284,11 @@ func depthOrder(state: mod HierarchyOrder, parents: view ComponentTable(Parent),
 
 # Append `node` then every descendant (pre-order) into `out`. Reads the Children
 # cache only. Used to gather a whole subtree before tearing it down.
-func collectSubtree(childrens: view ComponentTable(Children), node: view EntityId,
-                    out: mod List(EntityId)) {
+func collectSubtree(
+  childrens: view ComponentTable(Children)
+  node: view EntityId
+  out: mod List(EntityId)
+) {
   out.add(value: node)
   if componentHas(this: childrens, entity: node) {
     let cache: view Children => componentView(this: childrens, entity: node)
@@ -254,8 +308,11 @@ func collectSubtree(childrens: view ComponentTable(Children), node: view EntityI
 # anywhere references `entity`, and `entity` references nothing. The caller then
 # removes the entity's other components and frees it. Use destroySubtree instead
 # when the children should die with the entity.
-func detachForDestroy(parents: mod ComponentTable(Parent), childrens: mod ComponentTable(Children),
-                      entity: view EntityId) {
+func detachForDestroy(
+  parents: mod ComponentTable(Parent)
+  childrens: mod ComponentTable(Children)
+  entity: view EntityId
+) {
   if componentHas(this: parents, entity: entity) {
     let link: Parent = componentGet(this: parents, entity: entity)
     removeChildFrom(childrens: childrens, parent: link.parent, child: entity)
@@ -277,8 +334,12 @@ func detachForDestroy(parents: mod ComponentTable(Parent), childrens: mod Compon
 # After this no subtree entity is alive and no surviving Parent/Children edge
 # references any of them — no dangling refs. (The entities' OTHER components are
 # the owning World's concern; this is the hierarchy + entity-lifetime teardown.)
-func destroySubtree(allocator: mod EntityAllocator, parents: mod ComponentTable(Parent),
-                    childrens: mod ComponentTable(Children), root: view EntityId) {
+func destroySubtree(
+  allocator: mod EntityAllocator
+  parents: mod ComponentTable(Parent)
+  childrens: mod ComponentTable(Children)
+  root: view EntityId
+) {
   let subtree: List(EntityId) = List.create(EntityId, cap: 16)
   collectSubtree(childrens: childrens, node: root, out: subtree)
   # Unlink the root from its parent's Children so the (surviving) parent doesn't

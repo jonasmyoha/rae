@@ -32,21 +32,22 @@ open SkyHosek
 open Scene3d
 
 enum SkyKind {
-  # The authored two-colour hemisphere. Not a placeholder to be deleted:
-  # it stays as the fallback for a scene that binds no sky, and as the
-  # reference the other kinds are compared against.
   none
-  # Equirectangular HDR photograph (#402).
   hdri
-  # Analytic physical sky from a sun direction (#400).
   procedural
-  # Composited layers — gradient, clouds, sun, silhouettes (#404).
   stylised
-  # Hosek-Wilkie: the fitted physical model (#400). Distinct from `procedural`
-  # rather than replacing it so a scene can pick the table-free Preetham
-  # fallback deliberately, and so the two stay comparable.
   hosek
 }
+
+# The authored two-colour hemisphere. Not a placeholder to be deleted:
+# it stays as the fallback for a scene that binds no sky, and as the
+# reference the other kinds are compared against.
+# Equirectangular HDR photograph (#402).
+# Analytic physical sky from a sun direction (#400).
+# Composited layers — gradient, clouds, sun, silhouettes (#404).
+# Hosek-Wilkie: the fitted physical model (#400). Distinct from `procedural`
+# rather than replacing it so a scene can pick the table-free Preetham
+# fallback deliberately, and so the two stay comparable.
 
 # Ordinary vegetated ground. Named rather than repeated as 0.25 in each
 # constructor, because it is the value a reader has to recognise to know that a
@@ -112,10 +113,18 @@ type Sky {
 # exists, so adding a kind cannot leave the GPU and CPU disagreeing about
 # which is which.
 func kindCode(sky: view Sky) pub ret Float {
-  if sky.kind is SkyKind.hdri { ret 1.0 }
-  if sky.kind is SkyKind.procedural { ret 2.0 }
-  if sky.kind is SkyKind.stylised { ret 3.0 }
-  if sky.kind is SkyKind.hosek { ret 4.0 }
+  if sky.kind is SkyKind.hdri {
+    ret 1.0
+  }
+  if sky.kind is SkyKind.procedural {
+    ret 2.0
+  }
+  if sky.kind is SkyKind.stylised {
+    ret 3.0
+  }
+  if sky.kind is SkyKind.hosek {
+    ret 4.0
+  }
   ret 0.0
 }
 
@@ -127,9 +136,13 @@ func kindCode(sky: view Sky) pub ret Float {
 # was chosen independently disagrees with the character's shadow tint,
 # which the toon path takes from the sky ambient. Passing the same
 # colours to both is what keeps them in step.
-func createSkyStylised(sunDir: view Vec3, sunColor: view Vec3,
-                       zenith: view Vec3, horizon: view Vec3,
-                       bands: view Float) pub ret Sky {
+func createSkyStylised(
+  sunDir: view Vec3
+  sunColor: view Vec3
+  zenith: view Vec3
+  horizon: view Vec3
+  bands: view Float
+) pub ret Sky {
   ret Sky {
     kind: SkyKind.stylised
     exposure: 1.0
@@ -137,7 +150,6 @@ func createSkyStylised(sunDir: view Vec3, sunColor: view Vec3,
     sunDir: sunDir
     sunColor: sunColor
     ambSky: zenith
-
     ambientSaturation: 1.0
     ambGround: horizon
     clearColor: horizon
@@ -167,8 +179,13 @@ func createSkyStylised(sunDir: view Vec3, sunColor: view Vec3,
 # `turbidity` is haze: 2 is an exceptionally clear day, 3-6 ordinary, above 10
 # fog. `groundAlbedo` is how much light the ground bounces back up: ~0.1 dark
 # rock, 0.25 grass, 0.8 fresh snow.
-func createSkyHosek(data: view HosekDataset, sunDir: view Vec3, sunColor: view Vec3,
-                    turbidity: view Float, groundAlbedo: view Float) pub ret Sky {
+func createSkyHosek(
+  data: view HosekDataset
+  sunDir: view Vec3
+  sunColor: view Vec3
+  turbidity: view Float
+  groundAlbedo: view Float
+) pub ret Sky {
   ret Sky {
     kind: SkyKind.hosek
     exposure: 1.0
@@ -180,7 +197,6 @@ func createSkyHosek(data: view HosekDataset, sunDir: view Vec3, sunColor: view V
     # authored ambient as any other while its BACKGROUND is the fitted model.
     # Leaving them zero would light the scene from nothing.
     ambSky: Vec3.create(x: 0.32, y: 0.45, z: 0.62)
-
     ambientSaturation: 1.0
     ambGround: Vec3.create(x: 0.18, y: 0.16, z: 0.13)
     clearColor: Vec3.create(x: 0.32, y: 0.45, z: 0.62)
@@ -188,8 +204,12 @@ func createSkyHosek(data: view HosekDataset, sunDir: view Vec3, sunColor: view V
     sunAngularRadius: 0.00465
     sunDiscIntensity: 12.0
     groundAlbedo: groundAlbedo
-    hosek: createHosekSky(data: data, turbidity: turbidity, albedo: groundAlbedo,
-                          solarElevationRad: sunElevationRad(sunDir: sunDir))
+    hosek: createHosekSky(
+      data: data
+      turbidity: turbidity
+      albedo: groundAlbedo
+      solarElevationRad: sunElevationRad(sunDir: sunDir)
+    )
     # Below the horizon the fit is undefined, so the shader fades to
     # horizonColor there. A dark ground tone read as a band of mud wherever the
     # scene's own ground stopped short of the horizon, which is most cameras;
@@ -204,9 +224,7 @@ func createSkyHosek(data: view HosekDataset, sunDir: view Vec3, sunColor: view V
 # Pull a colour toward its own luminance. sat 1 leaves it alone, 0 makes it grey.
 func desaturate(c: view Vec3, sat: view Float) pub ret Vec3 {
   let l: Float = c.x * 0.2126 + c.y * 0.7152 + c.z * 0.0722
-  ret Vec3.create(x: l + (c.x - l) * sat,
-                  y: l + (c.y - l) * sat,
-                  z: l + (c.z - l) * sat)
+  ret Vec3.create(x: l + (c.x - l) * sat, y: l + (c.y - l) * sat, z: l + (c.z - l) * sat)
 }
 
 func createSkyNone(light: view Light3d, clearColor: view Vec3) pub ret Sky {
@@ -217,7 +235,6 @@ func createSkyNone(light: view Light3d, clearColor: view Vec3) pub ret Sky {
     sunDir: light.sunDir
     sunColor: light.sunColor
     ambSky: light.ambSky
-
     ambientSaturation: 1.0
     ambGround: light.ambGround
     clearColor: clearColor
@@ -237,8 +254,11 @@ func createSkyNone(light: view Light3d, clearColor: view Vec3) pub ret Sky {
 # all. `sunDir` points toward the scene, matching Light3d, and is
 # negated internally: the model is expressed from the surface toward the
 # sun, and having one convention at the boundary beats two everywhere.
-func createSkyProcedural(sunDir: view Vec3, sunColor: view Vec3,
-                         turbidity: view Float) pub ret Sky {
+func createSkyProcedural(
+  sunDir: view Vec3
+  sunColor: view Vec3
+  turbidity: view Float
+) pub ret Sky {
   ret Sky {
     kind: SkyKind.procedural
     exposure: 1.0
@@ -249,7 +269,6 @@ func createSkyProcedural(sunDir: view Vec3, sunColor: view Vec3,
     # would make a mis-dispatch render black rather than merely wrong,
     # and black is harder to trace than "the old ambient".
     ambSky: Vec3.create(x: 0.25, y: 0.30, z: 0.40)
-
     ambientSaturation: 1.0
     ambGround: Vec3.create(x: 0.12, y: 0.10, z: 0.09)
     clearColor: Vec3.create(x: 0.02, y: 0.02, z: 0.03)
@@ -272,12 +291,11 @@ func createSkyProcedural(sunDir: view Vec3, sunColor: view Vec3,
 # disagreement is known and tracked, and this is the correct one. Every
 # future sky kind reduces to a function of the same normal, so the
 # convention is fixed here once rather than per implementation.
-func hemisphereIrradiance(ambSky: view Vec3, ambGround: view Vec3,
-                          n: view Vec3) pub ret Vec3 {
+func hemisphereIrradiance(ambSky: view Vec3, ambGround: view Vec3, n: view Vec3) pub ret Vec3 {
   let t: Float = n.z * 0.5 + 0.5
   ret Vec3.create(
-    x: ambGround.x + (ambSky.x - ambGround.x) * t,
-    y: ambGround.y + (ambSky.y - ambGround.y) * t,
+    x: ambGround.x + (ambSky.x - ambGround.x) * t
+    y: ambGround.y + (ambSky.y - ambGround.y) * t
     z: ambGround.z + (ambSky.z - ambGround.z) * t
   )
 }
@@ -295,7 +313,11 @@ func irradiance(sky: view Sky, normal: view Vec3) pub ret Vec3 {
     # the sky over the hemisphere; that is #401's SH9, and it will
     # replace this function's body rather than sit beside it.
     let up: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
-    let toSun: Vec3 = Vec3.create(x: 0.0 - sky.sunDir.x, y: 0.0 - sky.sunDir.y, z: 0.0 - sky.sunDir.z)
+    let toSun: Vec3 = Vec3.create(
+      x: 0.0 - sky.sunDir.x
+      y: 0.0 - sky.sunDir.y
+      z: 0.0 - sky.sunDir.z
+    )
     # Away from the sun, just above the horizon, so the anchor is sky
     # rather than sun glow.
     let horiz: Vec3 = Vec3.create(x: 0.0 - toSun.x, y: 0.0 - toSun.y, z: 0.08)
@@ -309,7 +331,11 @@ func irradiance(sky: view Sky, normal: view Vec3) pub ret Vec3 {
     # CHOSEN ambient — the toon path tints shadows toward this value, so
     # it has to be the palette the artist picked, not whatever averaging
     # a gradient produces.
-    let blended: Vec3 = hemisphereIrradiance(ambSky: sky.zenithColor, ambGround: sky.horizonColor, normal: normal)
+    let blended: Vec3 = hemisphereIrradiance(
+      ambSky: sky.zenithColor
+      ambGround: sky.horizonColor
+      normal: normal
+    )
     ret Vec3.vscale(a: blended, s: sky.exposure)
   }
   var c: Vec3 = hemisphereIrradiance(ambSky: sky.ambSky, ambGround: sky.ambGround, normal: normal)
@@ -339,11 +365,19 @@ func radiance(sky: view Sky, dir: view Vec3) pub ret Vec3 {
   if sky.kind is SkyKind.stylised {
     let up: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
     let t: Float = dir.z * 0.5 + 0.5
-    let c: Vec3 = hemisphereIrradiance(ambSky: sky.zenithColor, ambGround: sky.horizonColor, n: Vec3.create(x: 0.0, y: 0.0, z: dir.z))
+    let c: Vec3 = hemisphereIrradiance(
+      ambSky: sky.zenithColor
+      ambGround: sky.horizonColor
+      n: Vec3.create(x: 0.0, y: 0.0, z: dir.z)
+    )
     ret Vec3.vscale(a: c, s: sky.exposure)
   }
   if sky.kind is SkyKind.procedural {
-    let toSun: Vec3 = Vec3.create(x: 0.0 - sky.sunDir.x, y: 0.0 - sky.sunDir.y, z: 0.0 - sky.sunDir.z)
+    let toSun: Vec3 = Vec3.create(
+      x: 0.0 - sky.sunDir.x
+      y: 0.0 - sky.sunDir.y
+      z: 0.0 - sky.sunDir.z
+    )
     let c: Vec3 = preethamRadiance(dir: dir, sunDir: toSun, turbidity: sky.turbidity)
     ret Vec3.vscale(a: c, s: sky.exposure)
   }
@@ -385,7 +419,6 @@ func isFallback(sky: view Sky) pub ret Bool {
 #
 # TURBIDITY is haze: 2 is an exceptionally clear day, 3-6 is ordinary,
 # above 10 is fog. It is the one dial worth exposing.
-
 type PreethamCoeffs {
   a: Float
   b: Float
@@ -435,8 +468,7 @@ func preethamF(c: view PreethamCoeffs, cosTheta: view Float, gamma: view Float) 
     ct = 0.01
   }
   let cosGamma: Float = Math.cos(x: gamma)
-  ret (1.0 + c.a * Math.exp(x: c.b / ct))
-     * (1.0 + c.c * Math.exp(x: c.d * gamma) + c.e * cosGamma * cosGamma)
+  ret (1.0 + c.a * Math.exp(x: c.b / ct)) * (1.0 + c.c * Math.exp(x: c.d * gamma) + c.e * cosGamma * cosGamma)
 }
 
 # xyY -> linear sRGB. Two conversions, kept together because they are one
@@ -452,8 +484,8 @@ func xyYToLinearRgb(x: view Float, y: view Float, bigY: view Float) pub ret Vec3
   # wrong; clamping is left to the caller so a wide-gamut path can keep
   # them if it ever wants to.
   ret Vec3.create(
-    x: 3.2406 * bigX - 1.5372 * bigY - 0.4986 * bigZ,
-    y: 0.0 - 0.9689 * bigX + 1.8758 * bigY + 0.0415 * bigZ,
+    x: 3.2406 * bigX - 1.5372 * bigY - 0.4986 * bigZ
+    y: 0.0 - 0.9689 * bigX + 1.8758 * bigY + 0.0415 * bigZ
     z: 0.0557 * bigX - 0.2040 * bigY + 1.0570 * bigZ
   )
 }
@@ -466,16 +498,21 @@ func xyYToLinearRgb(x: view Float, y: view Float, bigY: view Float) pub ret Vec3
 # the same expression makes the whole function's dynamic range about the
 # disc; and the disc's size and colour are things a stylised sky wants
 # to control independently. It is added by the caller.
-func preethamRadiance(dir: view Vec3, sunDir: view Vec3,
-                      turbidity: view Float) pub ret Vec3 {
+func preethamRadiance(dir: view Vec3, sunDir: view Vec3, turbidity: view Float) pub ret Vec3 {
   let cosTheta: Float = dir.z
   var cosGamma: Float = dir.x * sunDir.x + dir.y * sunDir.y + dir.z * sunDir.z
-  if cosGamma > 1.0 { cosGamma = 1.0 }
-  if cosGamma < 0.0 - 1.0 { cosGamma = 0.0 - 1.0 }
+  if cosGamma > 1.0 {
+    cosGamma = 1.0
+  }
+  if cosGamma < 0.0 - 1.0 {
+    cosGamma = 0.0 - 1.0
+  }
   let gamma: Float = Math.acos(x: cosGamma)
 
   var sunCosTheta: Float = sunDir.z
-  if sunCosTheta < 0.01 { sunCosTheta = 0.01 }
+  if sunCosTheta < 0.01 {
+    sunCosTheta = 0.01
+  }
   let thetaSun: Float = Math.acos(x: sunCosTheta)
 
   let cy: PreethamCoeffs = preethamY(t: turbidity)
@@ -486,12 +523,21 @@ func preethamRadiance(dir: view Vec3, sunDir: view Vec3,
   # channel is divided by its own value looking straight up with the sun
   # where it is. Without this the sky's absolute brightness swings with
   # turbidity for no physical reason a viewer would accept.
-  let fy: Float = preethamF(c: cy, cosTheta: cosTheta, gamma: gamma)
-     / preethamF(c: cy, cosTheta: 1.0, gamma: thetaSun)
-  let fx: Float = preethamF(c: cx, cosTheta: cosTheta, gamma: gamma)
-     / preethamF(c: cx, cosTheta: 1.0, gamma: thetaSun)
-  let fz: Float = preethamF(c: cz, cosTheta: cosTheta, gamma: gamma)
-     / preethamF(c: cz, cosTheta: 1.0, gamma: thetaSun)
+  let fy: Float = preethamF(c: cy, cosTheta: cosTheta, gamma: gamma) / preethamF(
+    c: cy
+    cosTheta: 1.0
+    gamma: thetaSun
+  )
+  let fx: Float = preethamF(c: cx, cosTheta: cosTheta, gamma: gamma) / preethamF(
+    c: cx
+    cosTheta: 1.0
+    gamma: thetaSun
+  )
+  let fz: Float = preethamF(c: cz, cosTheta: cosTheta, gamma: gamma) / preethamF(
+    c: cz
+    cosTheta: 1.0
+    gamma: thetaSun
+  )
 
   # Zenith chromaticity and luminance for this sun elevation, from the
   # same paper. These are what turn a relative distribution into an
@@ -505,14 +551,8 @@ func preethamRadiance(dir: view Vec3, sunDir: view Vec3,
   if zenithY < 0.0 {
     zenithY = 0.0
   }
-  let zenithX: Float =
-      (0.00166 * ts3 - 0.00375 * ts2 + 0.00209 * ts) * t * t
-    + (0.0 - 0.02903 * ts3 + 0.06377 * ts2 - 0.03202 * ts + 0.00394) * t
-    + (0.11693 * ts3 - 0.21196 * ts2 + 0.06052 * ts + 0.25886)
-  let zenithYc: Float =
-      (0.00275 * ts3 - 0.00610 * ts2 + 0.00317 * ts) * t * t
-    + (0.0 - 0.04214 * ts3 + 0.08970 * ts2 - 0.04153 * ts + 0.00516) * t
-    + (0.15346 * ts3 - 0.26756 * ts2 + 0.06670 * ts + 0.26688)
+  let zenithX: Float = (0.00166 * ts3 - 0.00375 * ts2 + 0.00209 * ts) * t * t + (0.0 - 0.02903 * ts3 + 0.06377 * ts2 - 0.03202 * ts + 0.00394) * t + (0.11693 * ts3 - 0.21196 * ts2 + 0.06052 * ts + 0.25886)
+  let zenithYc: Float = (0.00275 * ts3 - 0.00610 * ts2 + 0.00317 * ts) * t * t + (0.0 - 0.04214 * ts3 + 0.08970 * ts2 - 0.04153 * ts + 0.00516) * t + (0.15346 * ts3 - 0.26756 * ts2 + 0.06670 * ts + 0.26688)
 
   # cd/m^2 down to something a renderer's exposure expects. Purely a unit
   # choice; the shape of the sky is above.
@@ -552,7 +592,9 @@ const skyPi: Float = 3.14159265358979
 # the interesting default: the sun never climbs far, so the low-sun behaviour the
 # sky models are most stressed by is what you see without touching anything.
 const skyDefaultLatitudeDeg: Float = 60.17
+
 const skyLatitudeMin: Float = 0.0 - 90.0
+
 const skyLatitudeMax: Float = 90.0
 
 # Sun DIRECTION OF TRAVEL — the way light moves, which is what Light3d.sunDir
@@ -589,14 +631,25 @@ func solarDeclinationRad(dayOfYear: view Int) pub ret Float {
 # degrees, and the latitude slider goes to 90 — need no special case: the sun
 # simply never crosses. Two authored constants for a 06:00-18:00 day used to sit
 # in this file and are gone, because they were only correct at the equinox.
-func sunDirForDeclination(hour: view Float, declinationRad: view Float,
-                          latitudeDeg: view Float) pub ret Vec3 {
+func sunDirForDeclination(
+  hour: view Float
+  declinationRad: view Float
+  latitudeDeg: view Float
+) pub ret Vec3 {
   var h: Float = hour
-  if h < 0.0 { h = 0.0 }
-  if h > 24.0 { h = 24.0 }
+  if h < 0.0 {
+    h = 0.0
+  }
+  if h > 24.0 {
+    h = 24.0
+  }
   var lat: Float = latitudeDeg
-  if lat < skyLatitudeMin { lat = skyLatitudeMin }
-  if lat > skyLatitudeMax { lat = skyLatitudeMax }
+  if lat < skyLatitudeMin {
+    lat = skyLatitudeMin
+  }
+  if lat > skyLatitudeMax {
+    lat = skyLatitudeMax
+  }
   # Hour angle: 0 at solar noon, negative in the morning. The value keeps going
   # outside the lit hours so dusk and dawn stay continuous rather than snapping.
   let hourAngle: Float = (h - 12.0) * skyPi / 12.0
@@ -613,11 +666,12 @@ func sunDirForDeclination(hour: view Float, declinationRad: view Float,
 }
 
 # The sun for a date and a place — what an app actually wants.
-func sunDirForDate(hour: view Float, dayOfYear: view Int,
-                   latitudeDeg: view Float) pub ret Vec3 {
-  ret sunDirForDeclination(hour: hour,
-                           declinationRad: solarDeclinationRad(dayOfYear: dayOfYear),
-                           latitudeDeg: latitudeDeg)
+func sunDirForDate(hour: view Float, dayOfYear: view Int, latitudeDeg: view Float) pub ret Vec3 {
+  ret sunDirForDeclination(
+    hour: hour
+    declinationRad: solarDeclinationRad(dayOfYear: dayOfYear)
+    latitudeDeg: latitudeDeg
+  )
 }
 
 # The equinox at a given latitude.
@@ -635,18 +689,25 @@ func sunDirForHour(hour: view Float) pub ret Vec3 {
 # How high the sun is, 0 at the horizon and 1 at the zenith. Below the horizon
 # reads 0 rather than negative: callers use it to fade light down, and a
 # negative multiplier would light the scene from underneath.
-func sunHeightForDate(hour: view Float, dayOfYear: view Int,
-                      latitudeDeg: view Float) pub ret Float {
+func sunHeightForDate(
+  hour: view Float
+  dayOfYear: view Int
+  latitudeDeg: view Float
+) pub ret Float {
   let d: Vec3 = sunDirForDate(hour: hour, dayOfYear: dayOfYear, latitudeDeg: latitudeDeg)
   var up: Float = 0.0 - d.z
-  if up < 0.0 { up = 0.0 }
+  if up < 0.0 {
+    up = 0.0
+  }
   ret up
 }
 
 func sunHeightForHourAt(hour: view Float, latitudeDeg: view Float) pub ret Float {
   let d: Vec3 = sunDirForHourAt(hour: hour, latitudeDeg: latitudeDeg)
   var up: Float = 0.0 - d.z
-  if up < 0.0 { up = 0.0 }
+  if up < 0.0 {
+    up = 0.0
+  }
   ret up
 }
 
@@ -657,8 +718,11 @@ func sunHeightForHour(hour: view Float) pub ret Float {
 # How far the sun is above the horizon, SIGNED: +1 at the zenith, negative once
 # it has set. `sunHeightForHour` clamps at 0 because callers scale light by it;
 # this one keeps going, which is what a twilight fade needs.
-func sunHeightSignedForDate(hour: view Float, dayOfYear: view Int,
-                            latitudeDeg: view Float) pub ret Float {
+func sunHeightSignedForDate(
+  hour: view Float
+  dayOfYear: view Int
+  latitudeDeg: view Float
+) pub ret Float {
   ret 0.0 - sunDirForDate(hour: hour, dayOfYear: dayOfYear, latitudeDeg: latitudeDeg).z
 }
 
@@ -678,9 +742,14 @@ func sunHeightSignedForHour(hour: view Float) pub ret Float {
 # reddest, horizon-hugging look all night, which reads as the horizon burning
 # rather than as darkness. Fading the whole environment is honest about what the
 # model can say: nothing about night.
-func daylightFactorForDate(hour: view Float, dayOfYear: view Int,
-                           latitudeDeg: view Float) pub ret Float {
-  ret daylightFactorForElevation(up: sunHeightSignedForDate(hour: hour, dayOfYear: dayOfYear, latitudeDeg: latitudeDeg))
+func daylightFactorForDate(
+  hour: view Float
+  dayOfYear: view Int
+  latitudeDeg: view Float
+) pub ret Float {
+  ret daylightFactorForElevation(
+    up: sunHeightSignedForDate(hour: hour, dayOfYear: dayOfYear, latitudeDeg: latitudeDeg)
+  )
 }
 
 # The curve itself, taking a SIGNED elevation. Pulled out so the date-aware and
@@ -709,9 +778,10 @@ func daylightFactorForHour(hour: view Float) pub ret Float {
 # Warm at the horizon, neutral overhead. Not a fit to anything — the Hosek
 # model already reddens the SKY at low sun on its own; this is the KEY LIGHT,
 # which otherwise stays white through a sunset and looks wrong against it.
-func sunColorForDate(hour: view Float, dayOfYear: view Int,
-                     latitudeDeg: view Float) pub ret Vec3 {
-  ret sunColorForHeight(up: sunHeightForDate(hour: hour, dayOfYear: dayOfYear, latitudeDeg: latitudeDeg))
+func sunColorForDate(hour: view Float, dayOfYear: view Int, latitudeDeg: view Float) pub ret Vec3 {
+  ret sunColorForHeight(
+    up: sunHeightForDate(hour: hour, dayOfYear: dayOfYear, latitudeDeg: latitudeDeg)
+  )
 }
 
 # The curve itself, taking a clamped height. Shared for the same reason as

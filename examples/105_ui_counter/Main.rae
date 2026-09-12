@@ -50,6 +50,7 @@ open Gpu2dCanvas
 # Phone-shaped, and the same numbers the scene was authored against so nothing
 # has to be scaled at load.
 const designW: Int = 440
+
 const designH: Int = 880
 
 # How many history rows the scene contains. The pool is FIXED and authored, and
@@ -81,11 +82,7 @@ type CounterState {
 }
 
 func createCounterState() ret CounterState {
-  ret CounterState {
-    value: 0
-    step: 1
-    history: own List.create(Int, cap: historyRows)
-  }
+  ret CounterState { value: 0, step: 1, history: own List.create(Int, cap: historyRows) }
 }
 
 # Record a value as the newest entry, dropping the oldest when full.
@@ -184,15 +181,18 @@ func applyActions(state: mod CounterState, input: view UiInput) ret Bool {
 
 func main() ret Int {
   Gpu2d.initWindow(width: designW, height: designH, title: "Rae UI — Counter")
-  var canvas: Gpu2dCanvas = createGpu2dCanvas()   # #907: the app-owned 2D canvas (box + image passes)
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()  # #907: the app-owned 2D canvas (box + image passes)
 
   let base: String = "examples/105_ui_counter/assets/"
   # Fonts and theme in one call. The theme's palette is bridged into the active
   # theme here, which is what makes the slot names in the .raescene ("surface",
   # "accent") resolve to real colours at paint time.
-  let gpuUi: Gpu2dUi = loadUiAssets(dir: base, textFontName: "Roboto-Regular",
-                                    iconFontName: "MaterialIconsRound-Regular",
-                                    themeFile: "theme.raescene")
+  let gpuUi: Gpu2dUi = loadUiAssets(
+    dir: base
+    textFontName: "Roboto-Regular"
+    iconFontName: "MaterialIconsRound-Regular"
+    themeFile: "theme.raescene"
+  )
 
   var world: UiWorld = create()
   # #764: install the app's theme (palette + scene tokens) onto this world.
@@ -226,7 +226,9 @@ func main() ret Int {
   let demo: String = getEnv(name: "RAE_UI_COUNTER_DEMO")
   if demo.length() > 0 {
     var presses: Int = demo.toInt()
-    if presses > 24 { presses = 24 }
+    if presses > 24 {
+      presses = 24
+    }
     var press: Int = 0
     loop press < presses {
       state.value = state.value + state.step
@@ -295,7 +297,13 @@ func main() ret Int {
     wokeUp = false
 
     if Gpu2d.shouldRenderFrame(appNeedsRender: needsRender) {
-      Gpu2d.beginFrame(canvas: canvas, r: 0.03, g: 0.05, b: 0.08, a: 1.0)
+      Gpu2d.beginFrame(
+        canvas: canvas
+        r: 0.03
+        g: 0.05
+        b: 0.08
+        a: 1.0
+      )
       renderSystemGpu2d(world: world, res: gpuUi, canvas: canvas)
       Gpu2d.endFrame(canvas: canvas)
       renderedOnce = true
@@ -307,8 +315,12 @@ func main() ret Int {
       # passes animating: true and gets a frame-length wait instead. See
       # docs/ui-render-loop-performance.md.
       Gpu2d.waitEvents(timeoutSec: nextWaitTimeoutSec(
-        animating: false, mouseDown: false, pollWatcher: false,
-        frameSec: 0.016667, heartbeatSec: idleHeartbeatSec))
+        animating: false
+        mouseDown: false
+        pollWatcher: false
+        frameSec: 0.016667
+        heartbeatSec: idleHeartbeatSec
+      ))
       wokeUp = true
     }
   }

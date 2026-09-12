@@ -27,6 +27,7 @@ open TransparentForward
 open ecs/Entity
 
 const alphaCubeCount: Int = 9
+
 const opaqueCubeCount: Int = 4
 
 func uploadMeshData(meshData: view MeshData) ret MeshHandle {
@@ -42,24 +43,42 @@ func buildScene(box: view MeshHandle, ground: view MeshHandle) ret World3d {
   let unitScale: Vec3 = Vec3.create(x: 1.0, y: 1.0, z: 1.0)
   let groundMaterial: Material3d = {
     baseColor: Vec3.create(x: 0.16, y: 0.2, z: 0.27)
-    metallic: 0.0, roughness: 0.82, emission: noEmission, toon: false }
+    metallic: 0.0
+    roughness: 0.82
+    emission: noEmission
+    toon: false
+  }
   let groundEntity: EntityId = world3dAddMeshInstance(
-    world: sceneWorld, mesh: ground, material: groundMaterial
+    world: sceneWorld
+    mesh: ground
+    material: groundMaterial
     position: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
-    rotation: noRotation, scale: unitScale)
+    rotation: noRotation
+    scale: unitScale
+  )
   loop var i: Int = 0, i < opaqueCubeCount, ++i {
     # i 0,1 sit in front of the row (y = -3); i 2,3 behind it (y = +3).
     let front: Bool = i < 2
     var y: Float = 3.0
-    if front { y = 0.0 - 3.0 }
+    if front {
+      y = 0.0 - 3.0
+    }
     let x: Float = (i % 2).toFloat() * 4.0 - 2.0
     let cubeMaterial: Material3d = {
       baseColor: Vec3.create(x: 0.85, y: 0.35 + (i.toFloat() * 0.15), z: 0.2)
-      metallic: 0.05, roughness: 0.55, emission: noEmission, toon: false }
+      metallic: 0.05
+      roughness: 0.55
+      emission: noEmission
+      toon: false
+    }
     let cubeEntity: EntityId = world3dAddMeshInstance(
-      world: sceneWorld, mesh: box, material: cubeMaterial
+      world: sceneWorld
+      mesh: box
+      material: cubeMaterial
       position: Vec3.create(x: x, y: y, z: 0.75)
-      rotation: noRotation, scale: Vec3.create(x: 1.5, y: 1.5, z: 1.5))
+      rotation: noRotation
+      scale: Vec3.create(x: 1.5, y: 1.5, z: 1.5)
+    )
   }
   ret sceneWorld
 }
@@ -73,17 +92,33 @@ func queueTransparents(transparent: mod TransparentPassCache, box: view MeshHand
     let cube: Transform3d = {
       position: Vec3.create(x: x, y: 0.0, z: 2.2)
       rotation: noRotation
-      scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0) }
-    addTransparentInstance(cache: transparent, mesh: box, transform: cube,
-      r: 0.25, g: 0.65, b: 1.0, alpha: alpha)
+      scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
+    }
+    addTransparentInstance(
+      cache: transparent
+      mesh: box
+      transform: cube
+      r: 0.25
+      g: 0.65
+      b: 1.0
+      alpha: alpha
+    )
   }
   # Half-sunk: centre at z = 0, so the lower half is below the ground plane.
   let sunk: Transform3d = {
     position: Vec3.create(x: 0.0, y: 1.5, z: 0.0)
     rotation: noRotation
-    scale: Vec3.create(x: 1.6, y: 1.6, z: 1.6) }
-  addTransparentInstance(cache: transparent, mesh: box, transform: sunk,
-    r: 1.0, g: 0.9, b: 0.3, alpha: 0.6)
+    scale: Vec3.create(x: 1.6, y: 1.6, z: 1.6)
+  }
+  addTransparentInstance(
+    cache: transparent
+    mesh: box
+    transform: sunk
+    r: 1.0
+    g: 0.9
+    b: 0.3
+    alpha: 0.6
+  )
 }
 
 func main() ret Int {
@@ -120,8 +155,13 @@ func main() ret Int {
           transparentFrames = transparentFrames + 1
         }
         renderDeferredPassWorld(
-          renderer: renderer, tag: tag, world: sceneWorld
-          camera: camera, light: light, aspect: aspect)
+          renderer: renderer
+          tag: tag
+          world: sceneWorld
+          camera: camera
+          light: light
+          aspect: aspect
+        )
         passIndex = passIndex + 1
       }
       world3dPrevTransformSystem(world: sceneWorld)
@@ -129,9 +169,11 @@ func main() ret Int {
   }
 
   if fixedTestFrame {
-    log("[transparent] deterministic deferred frame rendered: {alphaCubeCount + 1} alpha instances over {opaqueCubeCount} opaque, {transparentFrames} transparent frames")
+    log(
+      "[transparent] deterministic deferred frame rendered: {alphaCubeCount + 1} alpha instances over {opaqueCubeCount} opaque, {transparentFrames} transparent frames"
+    )
   }
-  shutdownDeferredRenderer(renderer: renderer)   # #904: the renderer-owned GPU manager, before the C shutdown
+  shutdownDeferredRenderer(renderer: renderer)  # #904: the renderer-owned GPU manager, before the C shutdown
   Gbuffer.shutdownAll()
   Gpu2d.closeWindow()
   ret 0

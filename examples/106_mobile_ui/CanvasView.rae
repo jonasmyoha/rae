@@ -57,7 +57,11 @@ func applyCanvasState(world: mod UiWorld, scenes: view AlbumScenes, state: view 
 # Mount the canvas overlay page once (idempotent — a resident page
 # survives screen switches, so subsequent calls just re-apply state).
 # Called from mountBottomDockOverlay so every screen build has it.
-func mountCanvasOverlay(world: mod UiWorld, scenes: view AlbumScenes, state: view AppState) pub ret EntityId {
+func mountCanvasOverlay(
+  world: mod UiWorld
+  scenes: view AlbumScenes
+  state: view AppState
+) pub ret EntityId {
   let existing: EntityId = findPageRootEntity(world: world, pageId: canvasPageId)
   if isNone(this: existing) is false {
     applyCanvasState(world: world, scenes: scenes, state: state)
