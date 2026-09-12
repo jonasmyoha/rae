@@ -1,0 +1,28 @@
+# #928: the unsafe-boundary diagnostic for constructing a value with raw Ptr
+# storage (#877) used to point at the literal without saying WHICH field
+# carries the Ptr — on a struct several types deep the reader had to grep
+# lib/ for `: Ptr` to find it. It now names the dotted field path and the
+# site the Ptr field is declared at: "field renderer.cache.handle is Ptr
+# (declared .../Main.rae:N)".
+type GbufferCache {
+  handle: opt Ptr
+  width: Int
+}
+
+type DeferredRenderer {
+  cache: GbufferCache
+  frameCount: Int
+}
+
+type App {
+  renderer: DeferredRenderer
+  name: String
+}
+
+func makeApp() ret App {
+  ret App { renderer: { cache: { handle: none, width: 0 }, frameCount: 0 }, name: "demo" }
+}
+
+func main() {
+  log("unreachable")
+}

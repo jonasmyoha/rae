@@ -85,6 +85,63 @@ static bool sema_type_contains_ptr(const TypeInfo* type, int depth) {
     return false;
 }
 
+// #928: locate the dotted FIELD PATH to the first raw Ptr found inside
+// `type`, so the unsafe-boundary diagnostics below can say which field to
+// wrap instead of making the reader grep lib/ for `: Ptr`. Walks the same
+// shape as sema_type_contains_ptr (ref/opt/array transparently, then struct
+// fields) but tracks the chain of field names and the innermost field's own
+// declared site. Returns false — leaving `out_path` untouched — when no
+// NAMED field reaches the Ptr: `Array(Ptr, cap: N)` and `List(Ptr)` hold
+// their Ptr as a container ELEMENT type (sema_type_contains_ptr's separate
+// generic_args fallback), not a struct field, so there is nothing to name;
+// the original, shorter message is still accurate for those.
+static bool sema_find_ptr_field_path(const TypeInfo* type, int depth,
+                                     char* out_path, size_t out_cap,
+                                     const char** out_file, size_t* out_line) {
+    if (!type || depth > 32 || out_cap == 0) return false;
+    while (type->kind == TYPE_REF) type = type->as.ref.base;
+    if (sema_is_raw_ptr_type(type)) { out_path[0] = '\0'; return true; }
+    if (type->kind == TYPE_OPT)
+        return sema_find_ptr_field_path(type->as.opt.base, depth + 1, out_path, out_cap, out_file, out_line);
+    if (type->kind == TYPE_ARRAY)
+        return sema_find_ptr_field_path(type->as.array.base, depth + 1, out_path, out_cap, out_file, out_line);
+    if ((type->kind == TYPE_STRUCT || type->kind == TYPE_GENERIC_INST) && type->as.structure.decl) {
+        for (const AstTypeField* field = type->as.structure.decl->as.type_decl.fields;
+             field; field = field->next) {
+            TypeInfo* field_type = field->type ? field->type->resolved_type : NULL;
+            if (!field_type || !sema_type_contains_ptr(field_type, depth + 1)) continue;
+            char sub[256];
+            if (!sema_find_ptr_field_path(field_type, depth + 1, sub, sizeof sub, out_file, out_line)) continue;
+            if (sub[0])
+                snprintf(out_path, out_cap, "%.*s.%s", (int)field->name.len, field->name.data, sub);
+            else {
+                // This field's OWN type (after ref/opt/array unwrap) is the
+                // raw Ptr — the innermost hit, so its declared site is the
+                // one to report (a deeper struct hit already set it below).
+                snprintf(out_path, out_cap, "%.*s", (int)field->name.len, field->name.data);
+                if (out_file) *out_file = type->as.structure.decl->origin_file;
+                if (out_line) *out_line = field->type->line;
+            }
+            return true;
+        }
+    }
+    return false;
+}
+
+// Appends "; field <path> is Ptr (declared <file>:<line>)" to `base_message`
+// when `sema_find_ptr_field_path` names one; otherwise `msg_out` is exactly
+// `base_message` (an unnamed container element still gets the plain message).
+static void sema_unsafe_ptr_message(const TypeInfo* type, const char* base_message,
+                                    char* msg_out, size_t msg_cap) {
+    char path[256]; const char* file = NULL; size_t line = 0;
+    if (type && sema_find_ptr_field_path(type, 0, path, sizeof path, &file, &line) && path[0]) {
+        snprintf(msg_out, msg_cap, "%s; field %s is Ptr (declared %s:%zu)",
+                 base_message, path, file ? diag_simplify_path(file) : "?", line);
+    } else {
+        snprintf(msg_out, msg_cap, "%s", base_message);
+    }
+}
+
 static bool sema_default_constructs_ptr(const TypeInfo* type, int depth) {
     if (!type || depth > 32) return false;
     while (type->kind == TYPE_REF) type = type->as.ref.base;
@@ -3174,8 +3231,11 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                     && sema_type_contains_ptr(t, 0) && !sema_is_ptr_value_type(t)
                     && !sema_typeinfo_uncopyable(ctx, t)
                     && (t->name.len == 0 || find_user_copy_for(ctx, t->name) == NULL)) {
-                    sema_unsafe_error(module, stmt->line, stmt->column,
-                        "copying a value with raw Ptr storage requires an enclosing 'unsafe { ... }' block or a safe factory");
+                    char ptr_msg[512];
+                    sema_unsafe_ptr_message(t,
+                        "copying a value with raw Ptr storage requires an enclosing 'unsafe { ... }' block or a safe factory",
+                        ptr_msg, sizeof ptr_msg);
+                    sema_unsafe_error(module, stmt->line, stmt->column, ptr_msg);
                 }
             }
             if (!stmt->as.let_stmt.value && t && sema_default_constructs_ptr(t, 0)) {
@@ -4253,8 +4313,11 @@ static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr*
         // but this implicit box is minted here and never re-analysed, so guard
         // it at the point of insertion (a no-op inside an `unsafe { ... }`).
         if (sema_type_contains_ptr(expr->resolved_type, 0)) {
-            sema_unsafe_error(s_current_module, expr->line, expr->column,
-                "erasing a value containing raw Ptr storage into Any requires an enclosing 'unsafe { ... }' block");
+            char ptr_msg[512];
+            sema_unsafe_ptr_message(expr->resolved_type,
+                "erasing a value containing raw Ptr storage into Any requires an enclosing 'unsafe { ... }' block",
+                ptr_msg, sizeof ptr_msg);
+            sema_unsafe_error(s_current_module, expr->line, expr->column, ptr_msg);
         }
         AstExpr* box = arena_alloc(ctx->ast_arena, sizeof(AstExpr));
         *box = (AstExpr){.kind = AST_EXPR_BOX, .resolved_type = expected, .line = expr->line, .column = expr->column};
@@ -5616,8 +5679,11 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                 "reading, writing, copying or producing a raw Ptr requires an enclosing 'unsafe { ... }' block");
         } else if (expr->kind == AST_EXPR_OBJECT
                    && sema_type_contains_ptr(expr->resolved_type, 0)) {
-            sema_unsafe_error(module, expr->line, expr->column,
-                "constructing a value with raw Ptr storage requires an enclosing 'unsafe { ... }' block or a safe factory");
+            char ptr_msg[512];
+            sema_unsafe_ptr_message(expr->resolved_type,
+                "constructing a value with raw Ptr storage requires an enclosing 'unsafe { ... }' block or a safe factory",
+                ptr_msg, sizeof ptr_msg);
+            sema_unsafe_error(module, expr->line, expr->column, ptr_msg);
         } else if (expr->kind == AST_EXPR_CALL && expr->as.call.callee
                    && expr->as.call.callee->kind == AST_EXPR_IDENT
                    && str_eq_cstr(expr->as.call.callee->as.ident, "Array")
@@ -5627,12 +5693,18 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
             // it produces raw Ptr storage and needs the same guard as an object
             // literal. User factory functions returning a Ptr aggregate stay
             // safe: only the built-in Array constructor is caught here.
-            sema_unsafe_error(module, expr->line, expr->column,
-                "constructing a value with raw Ptr storage requires an enclosing 'unsafe { ... }' block or a safe factory");
+            char ptr_msg[512];
+            sema_unsafe_ptr_message(expr->resolved_type,
+                "constructing a value with raw Ptr storage requires an enclosing 'unsafe { ... }' block or a safe factory",
+                ptr_msg, sizeof ptr_msg);
+            sema_unsafe_error(module, expr->line, expr->column, ptr_msg);
         } else if (expr->kind == AST_EXPR_BOX && expr->as.unary.operand
                    && sema_type_contains_ptr(expr->as.unary.operand->resolved_type, 0)) {
-            sema_unsafe_error(module, expr->line, expr->column,
-                "erasing a value containing raw Ptr storage into Any requires an enclosing 'unsafe { ... }' block");
+            char ptr_msg[512];
+            sema_unsafe_ptr_message(expr->as.unary.operand->resolved_type,
+                "erasing a value containing raw Ptr storage into Any requires an enclosing 'unsafe { ... }' block",
+                ptr_msg, sizeof ptr_msg);
+            sema_unsafe_error(module, expr->line, expr->column, ptr_msg);
         }
     }
 }
