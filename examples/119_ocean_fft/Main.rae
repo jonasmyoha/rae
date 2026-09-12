@@ -41,13 +41,22 @@ const bedDepth: Float = 6.0
 
 const cubeCount: Int = 3
 
-func uploadMeshData(meshData: view MeshData) ret MeshHandle {
-  ret uploadMesh(verts: meshData.verts, vertCount: meshData.vertCount, indices: meshData.indices)
+func uploadMeshData(renderer: mod DeferredRenderer, meshData: view MeshData) ret MeshHandle {
+  ret uploadMesh(
+    renderer: renderer
+    verts: meshData.verts
+    vertCount: meshData.vertCount
+    indices: meshData.indices
+  )
 }
 
 # Identical comparison geometry in 118 and 119: a bed, three boxes and a
 # central island with sloping shores. Keep this fixture synchronized.
-func buildScene(box: view MeshHandle, ground: view MeshHandle) ret World3d {
+func buildScene(
+  renderer: mod DeferredRenderer
+  box: view MeshHandle
+  ground: view MeshHandle
+) ret World3d {
   var sceneWorld: World3d = create()
   let noEmission: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
   let noRotation: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
@@ -88,7 +97,8 @@ func buildScene(box: view MeshHandle, ground: view MeshHandle) ret World3d {
 
   # Low, untextured brown island: its sloping sides cross the waterline.
   let islandData: MeshData = makeSphere(rings: 24, segments: 48)
-  let islandMesh: MeshHandle = uploadMeshData(meshData: islandData)
+
+  let islandMesh: MeshHandle = uploadMeshData(renderer: renderer, meshData: islandData)
   let earth: Material3d = {
     baseColor: Vec3.create(x: 0.38, y: 0.19, z: 0.075)
     metallic: 0.0
@@ -130,10 +140,11 @@ func main() ret Int {
 
   # Match the lake's depth and shoreline fixture; extend the bed to the horizon.
   let planeData: MeshData = makePlane(size: 6000.0, segments: 1)
-  let ground: MeshHandle = uploadMeshData(meshData: planeData)
+  var renderer: DeferredRenderer = createDeferredRendererWithUi()
+  let ground: MeshHandle = uploadMeshData(renderer: renderer, meshData: planeData)
   let boxData: MeshData = makeBox(size: 1.0)
-  let box: MeshHandle = uploadMeshData(meshData: boxData)
-  var sceneWorld: World3d = buildScene(box: box, ground: ground)
+  let box: MeshHandle = uploadMeshData(renderer: renderer, meshData: boxData)
+  var sceneWorld: World3d = buildScene(renderer: renderer, box: box, ground: ground)
   let buoyancyDemo: Bool = Sys.getEnv(name: "RAE_WATER_BUOYANCY") is "1"
   let buoyEntity: EntityId = world3dAddEntity(world: sceneWorld)
   if buoyancyDemo {
@@ -172,7 +183,6 @@ func main() ret Int {
   var debugHud: DebugHud = createDebugHud(
     fontBase: "examples/114_walker_character/assets/Roboto-Regular"
   )
-  var renderer: DeferredRenderer = createDeferredRendererWithUi()
   setRendererSky(renderer: renderer, sky: sky)
   let graphStatus: Int = compileDeferred(renderer: renderer)
   if graphStatus is not 0 {
@@ -187,7 +197,7 @@ func main() ret Int {
     firstCell: 1.0
     growth: 1.09
   )
-  let gridMesh: MeshHandle = uploadMeshData(meshData: grid)
+  let gridMesh: MeshHandle = uploadMeshData(renderer: renderer, meshData: grid)
   var ocean: WaterBody = createOceanRealistic(surfaceZ: 0.0)
   ocean.meshId = gridMesh.id
   if Sys.getEnv(name: "RAE_WATER_MOBILE") is "1" {
@@ -206,13 +216,16 @@ func main() ret Int {
     ocean.updateRate = rateSetting.toInt()
   }
   normalizeWaterTier(body: ocean)
-  var waterSystem: WaterSystem = createWaterSystem(body: ocean)
+  var waterSystem: WaterSystem = createWaterSystem(renderer: renderer, body: ocean)
   # The App-owned GPU manager (#873): water's pipelines, maps and readbacks are
   # typed IDs in it, passed explicitly to every water operation. Sized for two
   # simultaneously active water systems (the tier check runs a twin).
   var idIssuer: IdIssuer = IdIssuer.create()
   var gpuManager: opt GpuResources = GpuResources.create(issuer: idIssuer, capacity: 160)
-  var twin: WaterSystem = createWaterSystem(body: createOceanRealistic(surfaceZ: 0.0))
+  var twin: WaterSystem = createWaterSystem(
+    renderer: renderer
+    body: createOceanRealistic(surfaceZ: 0.0)
+  )
   var twinActive: Bool = false
 
   waterSystem.performance.enabled = Sys.getEnv(name: "RAE_WATER_PERF").length() > 0
@@ -345,15 +358,19 @@ func main() ret Int {
         if tag is RenderTag.transparentForward {
           transparentSnapshot(cache: renderer.passes.transparent)
           if let resources: mod GpuResources => gpuManager {
-            waterDraw(
-              waterSystem: waterSystem
-              resources: resources
-              camera: camera
-              light: light
-              sky: renderer.sky
-              hasSky: renderer.hasSky
-              deltaTime: 0.0
-            )
+            if let meshResources: view GpuResources => renderer.gpuResources {
+              waterDraw(
+                waterSystem: waterSystem
+                resources: resources
+                meshes: renderer.passes.gbuffer.meshes
+                meshResources: meshResources
+                camera: camera
+                light: light
+                sky: renderer.sky
+                hasSky: renderer.hasSky
+                deltaTime: 0.0
+              )
+            }
           }
           oceanFrames = waterSystem.drawCount
         }

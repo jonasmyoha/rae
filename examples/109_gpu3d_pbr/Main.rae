@@ -34,8 +34,13 @@ open RendererDeferred
 open Math3d
 open Mesh3d
 
-func uploadMeshData(meshData: view MeshData) ret MeshHandle {
-  ret uploadMesh(verts: meshData.verts, vertCount: meshData.vertCount, indices: meshData.indices)
+func uploadMeshData(renderer: mod DeferredRenderer, meshData: view MeshData) ret MeshHandle {
+  ret uploadMesh(
+    renderer: renderer
+    verts: meshData.verts
+    vertCount: meshData.vertCount
+    indices: meshData.indices
+  )
 }
 
 # Build the material-study scene: a metallic x roughness sphere grid, an
@@ -129,9 +134,11 @@ func main() ret Int {
     majorSegs: 96
     minorSegs: 48
   )
-  let sphere: MeshHandle = uploadMeshData(meshData: sphereData)
-  let ground: MeshHandle = uploadMeshData(meshData: planeData)
-  let torus: MeshHandle = uploadMeshData(meshData: torusData)
+  var renderer: DeferredRenderer = createDeferredRenderer()
+
+  let sphere: MeshHandle = uploadMeshData(renderer: renderer, meshData: sphereData)
+  let ground: MeshHandle = uploadMeshData(renderer: renderer, meshData: planeData)
+  let torus: MeshHandle = uploadMeshData(renderer: renderer, meshData: torusData)
 
   var world: World3d = buildScene(sphere: sphere, torus: torus, ground: ground)
   # The torus is the last-but-one instance; remember its entity so the
@@ -156,7 +163,6 @@ func main() ret Int {
   # The frame is a render graph (#331/#332): passes declare what they read
   # and write, and execution order is DERIVED from those declarations
   # rather than from the order of calls written below.
-  var renderer: DeferredRenderer = createDeferredRenderer()
   let gs: Int = compileDeferred(renderer: renderer)
   if gs is not 0 {
     log("render graph invalid: {gs}")

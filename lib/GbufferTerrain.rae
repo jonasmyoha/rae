@@ -277,7 +277,7 @@ func drawTerrainMesh(
 ) pub {
   unsafe {
     ensureTerrainPipeline(cache: cache, resources: resources)
-    if gbMeshReady(mesh: mesh) is 0 {
+    if gbMeshReady(cache: cache, resources: resources, mesh: mesh) is 0 {
       ret
     }
     let base: Int = gbDrawCount()
@@ -311,9 +311,9 @@ func drawTerrainMesh(
       pass: gbPass()
       pipeline: cache.terrainPipeline
       bind: cache.terrainBind
-      vbuf: gbMeshVbuf(mesh: mesh)
-      ibuf: gbMeshIbuf(mesh: mesh)
-      icount: gbMeshIcount(mesh: mesh)
+      vbuf: gbMeshVbuf(cache: cache, resources: resources, mesh: mesh)
+      ibuf: gbMeshIbuf(cache: cache, resources: resources, mesh: mesh)
+      icount: gbMeshIcount(cache: cache, mesh: mesh)
       base: base
       count: 1
       records: cache.drawScratch.data

@@ -16,41 +16,6 @@ open webgpu/Webgpu
 open webgpu/Context
 open Gpu3d
 
-func nativeMeshCreate(
-  verts: view Buffer(Float)
-  vertCount: Int
-  indices: view Buffer(Int)
-  indexCount: Int
-) unsafe extern("rae_ext_Gpu3d_meshCreate") ret Int
-
-func meshCreate(
-  verts: view Buffer(Float)
-  vertCount: copy Int
-  indices: view Buffer(Int)
-  indexCount: copy Int
-) ret Int {
-  unsafe {
-    ret nativeMeshCreate(
-      verts: verts
-      vertCount: vertCount
-      indices: indices
-      indexCount: indexCount
-    )
-  }
-}
-
-func nativeMeshUpdate(
-  mesh: Int
-  verts: view Buffer(Float)
-  vertCount: Int
-) unsafe extern("rae_ext_Gpu3d_meshUpdate")
-
-func meshUpdate(mesh: copy Int, verts: view Buffer(Float), vertCount: copy Int) {
-  unsafe {
-    nativeMeshUpdate(mesh: mesh, verts: verts, vertCount: vertCount)
-  }
-}
-
 # Frame prepare (#514): C packs+uploads the per-frame uniform and returns 1 when
 # the device/targets are ready; the render pass is then built in Rae below.
 func nativeG3dFramePrepare(
@@ -128,18 +93,6 @@ func g3dPushDrawRecord(
       emB: emB
       roughness: roughness
     )
-  }
-}
-
-func g3dMeshVbuf(mesh: Int) unsafe extern("rae_g3d_mesh_vbuf") ret Ptr
-
-func g3dMeshIbuf(mesh: Int) unsafe extern("rae_g3d_mesh_ibuf") ret Ptr
-
-func nativeG3dMeshIcount(mesh: Int) unsafe extern("rae_g3d_mesh_icount") ret Int
-
-func g3dMeshIcount(mesh: copy Int) ret Int {
-  unsafe {
-    ret nativeG3dMeshIcount(mesh: mesh)
   }
 }
 
@@ -365,11 +318,29 @@ func shadowBegin(
   depthRange: view Buffer(Float)
 ) unsafe extern("rae_sm_begin")
 
-func nativeShadowDraw(mesh: Int, model: view Mat4) unsafe extern("rae_sm_queue_mesh")
+func nativeShadowDraw(
+  mesh: Int
+  vbuf: Ptr
+  ibuf: Ptr
+  icount: Int
+  model: view Mat4
+) unsafe extern("rae_sm_queue_mesh")
 
-func shadowDraw(mesh: copy Int, model: view Mat4) {
+func shadowDraw(
+  mesh: copy Int
+  vbuf: copy Ptr
+  ibuf: copy Ptr
+  icount: copy Int
+  model: view Mat4
+) {
   unsafe {
-    nativeShadowDraw(mesh: mesh, model: model)
+    nativeShadowDraw(
+      mesh: mesh
+      vbuf: vbuf
+      ibuf: ibuf
+      icount: icount
+      model: model
+    )
   }
 }
 

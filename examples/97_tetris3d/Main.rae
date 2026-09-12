@@ -80,10 +80,10 @@ func main() ret Int {
   }
   initWorld(world: game)
 
-  var renderState: TetrisRenderState = createTetrisRenderState()
+  var renderer: DeferredRenderer = createDeferredRendererWithUi()
+  var renderState: TetrisRenderState = createTetrisRenderState(renderer: renderer)
   let camera: Camera3d = forWorld(world: game)
   let light: Light3d = defaultLight3d()
-  var renderer: DeferredRenderer = createDeferredRendererWithUi()
   let graphStatus: Int = compileDeferred(renderer: renderer)
   if graphStatus is not 0 {
     log("deferred graph invalid: {statusName(status: graphStatus)}")

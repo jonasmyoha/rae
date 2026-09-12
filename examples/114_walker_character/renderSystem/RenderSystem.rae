@@ -96,7 +96,11 @@ func renderShadowPass(
   uploadPalette(rows: palette, jointCount: jointCount(sk: characterSystem.skeleton))
   if inputSystem.settings.shadows {
     beginShadowPass(c: cascades)
-    drawTerrainPropsShadow(terrainSystem: terrainSystem, world: world)
+    drawTerrainPropsShadow(
+      renderer: renderSystem.renderer
+      terrainSystem: terrainSystem
+      world: world
+    )
     # Each caster's shadow samples the SAME palette slot its G-buffer instance
     # does (#547), so a crowd member casts its own pose. Hero = slot 0.
     let jc: Int = jointCount(sk: characterSystem.skeleton)
@@ -456,15 +460,19 @@ func renderApp(
         # Opaque snapshot BEFORE the water so a refracting surface can read it (#832),
         # then the toon lake (#830), then the splash droplets blend OVER it.
         transparentSnapshot(cache: renderSystem.renderer.passes.transparent)
-        waterDraw(
-          waterSystem: waterSystem
-          resources: resources
-          camera: cameraSystem.camera
-          light: cameraSystem.light
-          sky: renderSystem.renderer.sky
-          hasSky: renderSystem.renderer.hasSky
-          deltaTime: deltaTime
-        )
+        if let meshResources: view GpuResources => renderSystem.renderer.gpuResources {
+          waterDraw(
+            waterSystem: waterSystem
+            resources: resources
+            meshes: renderSystem.renderer.passes.gbuffer.meshes
+            meshResources: meshResources
+            camera: cameraSystem.camera
+            light: cameraSystem.light
+            sky: renderSystem.renderer.sky
+            hasSky: renderSystem.renderer.hasSky
+            deltaTime: deltaTime
+          )
+        }
         # Splash droplets fade by alpha through the transparent pass (#844).
         particleDraw(sys: splashes, transparent: renderSystem.renderer.passes.transparent)
         renderDeferredPassWorld(
