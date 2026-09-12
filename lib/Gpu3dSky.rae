@@ -1,0 +1,109 @@
+# Gpu3dSky — the forward renderer's sky pass (#918 split of Gpu3d for the
+# 1000-line cap): the Hosek coefficient push, the sky draw over the C sky
+# pipeline and the app-facing drawSky. Gpu3d opens this module, so callers that
+# `open Gpu3d` reach drawSky through `open Gpu3dSky` as well.
+open Shadow3d
+import GbufferShadow
+open Sky
+import Math
+open Vec3
+open Scene3d
+open Math3d
+open ecs/Entity          # #793: World3d shadow path reads entities/components
+open ecs/ComponentTable
+open webgpu/Webgpu
+open webgpu/Context
+open Gpu3dNative
+open Gpu3d
+
+# ----- the sky (#418) -------------------------------------------------
+#
+# The background, for the FORWARD frame. The deferred path gets its sky from
+# gbuffer.lightingPassSky, which can compute it for every pixel the G-buffer
+# left empty; there is no G-buffer here, so the same shader runs as a
+# fullscreen draw at the start of the scene pass instead. One shader, shared in
+# runtime_sky_wgsl.h — examples 111 and 112 are the same scene under the two
+# renderers, and they must not disagree about what the sky looks like.
+#
+# OPT IN, one line, between beginScene and the geometry:
+#
+#     beginScene(camera: camera, light: light, aspect: aspect, time: t)
+#     drawSky(sky: sky, light: light)
+#     renderScene(scene: scene)
+#
+# An app that does not write that line keeps the flat clear colour.
+func nativeSkyHosekPush(index: Int, value: Float) unsafe extern("rae_ext_Gpu3d_skyHosekPush")
+
+func skyHosekPush(index: copy Int, value: copy Float) {
+  unsafe { nativeSkyHosekPush(index: index, value: value) }
+}
+
+func skyDraw(skyKind: copy Float, turbidity: copy Float, skyExposure: copy Float, sunSizeRad: copy Float,
+             sunX: copy Float, sunY: copy Float, sunZ: copy Float,
+             sunR: copy Float, sunG: copy Float, sunB: copy Float,
+             zenR: copy Float, zenG: copy Float, zenB: copy Float, bands: copy Float,
+             horR: copy Float, horG: copy Float, horB: copy Float, discI: copy Float,
+             clearR: copy Float, clearG: copy Float, clearB: copy Float) {
+  unsafe {
+    let ok: Int = g3dSkyPrepare(skyKind: skyKind, turbidity: turbidity, skyExposure: skyExposure, sunSizeRad: sunSizeRad,
+      sunX: sunX, sunY: sunY, sunZ: sunZ, sunR: sunR, sunG: sunG, sunB: sunB,
+      zenR: zenR, zenG: zenG, zenB: zenB, bands: bands,
+      horR: horR, horG: horG, horB: horB, discI: discI,
+      clearR: clearR, clearG: clearG, clearB: clearB)
+    if ok is 0 { ret }
+    let pass: Ptr = g3dPass()
+    wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: g3dSkyPipeline())
+    wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
+      group: g3dSkyBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+    wgpuRenderPassEncoderDraw(renderPassEncoder: pass, vertexCount: 3 as UInt32,
+      instanceCount: 1 as UInt32, firstVertex: 0 as UInt32, firstInstance: 0 as UInt32)
+    # Restore the geometry pipeline/bind so the scene draws after the sky are correct.
+    wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: g3dPipeline())
+    wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
+      group: g3dBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+  }
+}
+
+# Three vec4 per channel: [A B C D][E F G H][I radiance _ _], matching `hosek`
+# in the WGSL. The deferred path has the same walk in lib/gbuffer.rae, and the
+# two stay separate because a Rae extern's C name follows its module — they
+# land in the ONE table in runtime_sky_state.h, so the duplication is in how
+# the values are handed over, never in the values themselves.
+func pushForwardHosekChannel(c: view HosekChannel, base: view Int) {
+  skyHosekPush(index: base + 0, value: c.a)
+  skyHosekPush(index: base + 1, value: c.b)
+  skyHosekPush(index: base + 2, value: c.c)
+  skyHosekPush(index: base + 3, value: c.d)
+  skyHosekPush(index: base + 4, value: c.e)
+  skyHosekPush(index: base + 5, value: c.f)
+  skyHosekPush(index: base + 6, value: c.g)
+  skyHosekPush(index: base + 7, value: c.h)
+  skyHosekPush(index: base + 8, value: c.i)
+  skyHosekPush(index: base + 9, value: c.radiance)
+}
+
+# The SUN comes from the light, not from the sky, which is the same choice
+# lightingPassSky makes: the disc the camera sees and the shadows on the ground
+# then come from one direction by construction. A sky whose own sunDir differs
+# is telling the renderer where its HDRI's sun is (#403), not where to put the
+# shadows.
+func drawSky(sky: view Sky, light: view Light3d) pub {
+  # Before the draw: the pass copies whatever is in the table, so pushing
+  # afterwards would show last frame's sky.
+  pushForwardHosekChannel(c: sky.hosek.r, base: 0)
+  pushForwardHosekChannel(c: sky.hosek.g, base: 12)
+  pushForwardHosekChannel(c: sky.hosek.b, base: 24)
+  skyDraw(
+    skyKind: kindCode(sky: sky), turbidity: sky.turbidity,
+    skyExposure: sky.exposure, sunSizeRad: sky.sunAngularRadius,
+    sunX: light.sunDir.x, sunY: light.sunDir.y, sunZ: light.sunDir.z,
+    sunR: light.sunColor.x, sunG: light.sunColor.y, sunB: light.sunColor.z,
+    zenR: sky.zenithColor.x, zenG: sky.zenithColor.y, zenB: sky.zenithColor.z,
+    bands: sky.bands,
+    horR: sky.horizonColor.x, horG: sky.horizonColor.y, horB: sky.horizonColor.z,
+    discI: sky.sunDiscIntensity,
+    # Kind 0 shows this and nothing else, so an app can bind a `none` sky and
+    # get exactly the background it had before it called this at all.
+    clearR: sky.clearColor.x, clearG: sky.clearColor.y, clearB: sky.clearColor.z
+  )
+}

@@ -15,6 +15,7 @@ open Gltf
 open Mesh3d
 open Math3d
 open Quat
+open GltfSkinMesh
 
 # ----- checked flat-buffer reads (#642) --------------------------------
 #
@@ -84,120 +85,6 @@ func loadSkinnedPrimitive(glb: view Glb, meshIndex: view Int, primIndex: view In
                                    smoothAngleDeg: meshSmoothAngleDefault)
 }
 
-# The authored normals, untouched.
-func loadSkinnedPrimitiveFlat(glb: view Glb, meshIndex: view Int, primIndex: view Int) pub ret SkinnedMeshData {
-  # A negative angle merges nothing, so this shares one code path with
-  # the smoothed case rather than duplicating the whole loader.
-  ret loadSkinnedPrimitiveSmoothed(glb: glb, meshIndex: meshIndex, primIndex: primIndex,
-                                   smoothAngleDeg: 0.0 - 1.0)
-}
-
-func loadSkinnedPrimitiveSmoothed(glb: view Glb, meshIndex: view Int, primIndex: view Int,
-                                  smoothAngleDeg: view Float) pub ret SkinnedMeshData {
-  let verts: List(Float) = List.create(Float, cap: 0)
-  let indices: List(Int) = List.create(Int, cap: 0)
-  if glb.ok is false {
-    ret SkinnedMeshData { verts: own verts, indices: own indices, vertCount: 0 }
-  }
-  let root: JsonValue = root(doc: glb.doc)
-  let meshes: JsonValue = arrayField(glb: glb, obj: root, key: "meshes")
-  let mesh: JsonValue = arrayAt(doc: glb.doc, this: meshes, idx: meshIndex)
-  let prims: JsonValue = arrayField(glb: glb, obj: mesh, key: "primitives")
-  let prim: JsonValue = arrayAt(doc: glb.doc, this: prims, idx: primIndex)
-  let attrs: JsonValue = objField(glb: glb, obj: prim, key: "attributes")
-
-  # Geometry comes from the existing loader so the two paths cannot
-  # disagree about positions, generated normals or index rebasing.
-  var base: MeshData = loadPrimitive(glb: glb, meshIndex: meshIndex, primIndex: primIndex)
-  if smoothAngleDeg > 0.0 {
-    base = smoothMeshNormals(meshData: base, angleDeg: smoothAngleDeg)
-  }
-  if base.vertCount is 0 {
-    ret SkinnedMeshData { verts: own verts, indices: own indices, vertCount: 0 }
-  }
-
-  let jointAcc: Int = intField(glb: glb, obj: attrs, key: "JOINTS_0", fallback: 0 - 1)
-  let weightAcc: Int = intField(glb: glb, obj: attrs, key: "WEIGHTS_0", fallback: 0 - 1)
-  # readInts, not readFloats: joint indices are INDICES, and readFloats
-  # normalises unsigned integer types to [0,1], which would turn joint 37
-  # into 0.145 and silently bind every vertex to joint 0.
-  let joints: List(Int) = readInts(glb: glb, index: jointAcc)
-  let weights: List(Float) = readFloats(glb: glb, index: weightAcc)
-  let hasSkin: Bool = joints.length >= base.vertCount * 4 and weights.length >= base.vertCount * 4
-
-  var i: Int = 0
-  loop i < base.vertCount {
-    var c: Int = 0
-    loop c < 8 {
-      verts.add(value: floatAt(list: base.verts, index: i * 8 + c))
-      c = c + 1
-    }
-    if hasSkin {
-      var k: Int = 0
-      loop k < 4 {
-        verts.add(value: intAt(list: joints, index: i * 4 + k, fallback: 0).toFloat())
-        k = k + 1
-      }
-      # Renormalise: glTF requires the four weights to sum to 1, but
-      # quantised exports drift, and an un-normalised set scales the whole
-      # vertex toward or away from the origin instead of merely posing it.
-      var sum: Float = 0.0
-      var w: Int = 0
-      loop w < 4 {
-        sum = sum + floatAt(list: weights, index: i * 4 + w)
-        w = w + 1
-      }
-      if sum <= 0.0 {
-        sum = 1.0
-      }
-      w = 0
-      loop w < 4 {
-        verts.add(value: floatAt(list: weights, index: i * 4 + w) / sum)
-        w = w + 1
-      }
-    } else {
-      # Unskinned primitive inside a skinned model — props parented to a
-      # bone rather than weighted. Bind it rigidly to joint 0 with full
-      # weight, which is what "follows the root" means in palette terms.
-      verts.add(value: 0.0)
-      verts.add(value: 0.0)
-      verts.add(value: 0.0)
-      verts.add(value: 0.0)
-      verts.add(value: 1.0)
-      verts.add(value: 0.0)
-      verts.add(value: 0.0)
-      verts.add(value: 0.0)
-    }
-    # Vertex colour: white, i.e. the material's base colour unmodified.
-    # `withAtlasColors` overwrites this when the model has a palette.
-    verts.add(value: 1.0)
-    verts.add(value: 1.0)
-    verts.add(value: 1.0)
-    verts.add(value: 1.0)
-    i = i + 1
-  }
-  var k2: Int = 0
-  loop k2 < base.indices.length {
-    indices.add(value: intAt(list: base.indices, index: k2, fallback: 0))
-    k2 = k2 + 1
-  }
-  ret SkinnedMeshData { verts: own verts, indices: own indices, vertCount: base.vertCount }
-}
-
-# ----- palette-atlas colour baking (#378) ------------------------------
-
-# sRGB transfer function, inverted. Texture bytes are sRGB-encoded and the
-# renderer works in linear radiance, so skipping this makes every mid-tone
-# roughly 20% too bright — a difference that reads as "washed out" rather
-# than as a bug, which is why it is spelled out rather than approximated
-# with a 2.2 power.
-func srgbToLinear(c: view Float) ret Float {
-  if c <= 0.04045 {
-    ret c / 12.92
-  }
-  ret Math.pow(base: (c + 0.055) / 1.055, exp: 2.4)
-}
-
 # Return a copy of `m` whose vertex colour channel is the atlas colour at
 # each vertex's UV. `atlas` is 0xAARRGGBB pixels, row-major from the TOP.
 #
@@ -255,18 +142,6 @@ func withAtlasColors(m: view SkinnedMeshData, atlas: view List(Int),
   }
   ret SkinnedMeshData { verts: own out, indices: own copyIndices(src: m.indices), vertCount: m.vertCount }
 }
-
-func copyIndices(src: view List(Int)) ret List(Int) {
-  let out: List(Int) = List.create(Int, cap: src.length)
-  var i: Int = 0
-  loop i < src.length {
-    out.add(value: intAt(list: src, index: i, fallback: 0))
-    i = i + 1
-  }
-  ret own out
-}
-
-# ----- skeleton and joint palette (#375) -------------------------------
 
 # A skin's skeleton, flattened for per-frame palette evaluation.
 #
