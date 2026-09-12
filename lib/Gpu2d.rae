@@ -402,11 +402,19 @@ func g2dFrameReset() {
   }
 }
 
-func nativeG2dPresentCleanup() unsafe extern("rae_g2d_present_and_cleanup")
+# Present (#920): C copies the canvas's offscreen texture into the surface
+# drawable, presents and polls (skipped while the window is dark — no drawable
+# is acquired), and in a headless run reads the texture back for the
+# RAE_GPU2D_SCREENSHOT capture. The texture is the canvas's; C only borrows it.
+func nativeG2dPresent(texture: Ptr, width: Int, height: Int) unsafe extern("rae_g2d_present")
 
-func g2dPresentCleanup() {
+func g2dPresent(canvas: view Gpu2dCanvas) {
   unsafe {
-    nativeG2dPresentCleanup()
+    let texture: Ptr = canvasOffscreenTexture(canvas: canvas)
+    if texture is webgpuNull() {
+      ret
+    }
+    nativeG2dPresent(texture: texture, width: canvas.offscreenWidth, height: canvas.offscreenHeight)
   }
 }
 
@@ -415,14 +423,6 @@ func nativeG2dTick() unsafe extern("rae_g2d_tick")
 func g2dTick() {
   unsafe {
     nativeG2dTick()
-  }
-}
-
-func nativeG2dOffViewReady() unsafe extern("rae_g2d_off_view_ready") ret Int
-
-func g2dOffViewReady() ret Int {
-  unsafe {
-    ret nativeG2dOffViewReady()
   }
 }
 
@@ -439,9 +439,6 @@ func beginFrame(
 ) {
   g2dFrameReset()
   canvasFrameBegin(canvas: canvas)
-  if g2dOffViewReady() is 0 {
-    ret
-  }
   canvasOpenFrame(
     canvas: canvas
     clear: true
@@ -458,9 +455,6 @@ func beginFrame(
 func beginFrameLoad(canvas: mod Gpu2dCanvas) {
   g2dFrameReset()
   canvasFrameBegin(canvas: canvas)
-  if g2dOffViewReady() is 0 {
-    ret
-  }
   canvasOpenFrame(
     canvas: canvas
     clear: false
@@ -483,7 +477,7 @@ func endFrame(canvas: mod Gpu2dCanvas) {
   }
   flush(canvas: canvas)
   canvasCloseFrame(canvas: canvas)
-  g2dPresentCleanup()
+  g2dPresent(canvas: canvas)
   boxFrameEnd(canvas: canvas)
 }
 

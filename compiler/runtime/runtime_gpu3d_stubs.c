@@ -66,7 +66,7 @@ int rae_g3d_push_metaball_cluster(const float* packedBalls, int64_t count,
 }
 void* rae_g3d_sdf_pipeline(void) { return (void*)0; }
 void* rae_g3d_sdf_bind(int64_t slot){ (void)slot; return (void*)0; }
-void rae_g3d_present_frame(void) {}
+void rae_g3d_present_frame(void* texture, int64_t width, int64_t height) { (void)texture; (void)width; (void)height; }
 void* rae_g3d_encoder(void) { return (void*)0; }
 int64_t rae_g3d_frame_active(void) { return 0; }
 void rae_g3d_clear_frame(void) {}

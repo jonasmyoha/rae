@@ -41,10 +41,15 @@ open Gpu2dCanvasClip
 
 func nativeG2dBoxFormat() unsafe extern("rae_g2d_format") ret Int
 
-# The C offscreen presentable target's view (recreated on surface configure /
-# resize — re-adopted when the handle changes) and the design->physical
-# transform (window size, design resolution + fit mode: platform state).
-func g2dOffscreenView() unsafe extern("rae_g2d_off_view") ret Ptr
+# The configured surface (#920): ready once the device + surface exist, its
+# physical size (the offscreen presentable target the canvas owns is rebuilt
+# to it) and the design->physical transform (window size, design resolution +
+# fit mode: platform state).
+func nativeG2dSurfaceReady() unsafe extern("rae_g2d_surface_ready") ret Int
+
+func nativeG2dSurfaceWidth() unsafe extern("rae_g2d_surface_width") ret Int
+
+func nativeG2dSurfaceHeight() unsafe extern("rae_g2d_surface_height") ret Int
 
 func nativeG2dXform(out: view Buffer(Float)) unsafe extern("rae_g2d_xform")
 
@@ -147,8 +152,11 @@ type Gpu2dCanvas {
   recording: opt Recording  # the open frame's manager recording (none between frames)
   framePass: Ptr  # the open frame's render pass into the offscreen target
   inFlight: List(SubmissionId)  # submitted frames not yet retired
-  offscreen: ExternalId  # the C offscreen presentable view, adopted (re-adopted when it changes)
-  offscreenHandle: Ptr
+  # --- the offscreen presentable target (#920: was C's g_g2d_off_tex) ---
+  offscreenTexture: TextureId  # RenderAttachment | CopySrc, the surface format, rebuilt on resize
+  offscreenView: TextureViewId
+  offscreenWidth: Int
+  offscreenHeight: Int
   viewport: BufferId  # the 2 x vec4 design->physical transform every 2D pipeline binds at @0
   xform: List(Float)  # its 8 floats (physW, physH, scaleX, scaleY, offX, offY, 0, 0)
   clipUniforms: List(BufferId)  # per-run 32-byte clip uniforms, slot = run index in the frame
@@ -211,8 +219,10 @@ func createGpu2dCanvas() ret Gpu2dCanvas {
       recording: none
       framePass: webgpuNull()
       inFlight: List.create(SubmissionId, cap: 4)
-      offscreen: noExternalId()
-      offscreenHandle: webgpuNull()
+      offscreenTexture: noTextureId()
+      offscreenView: noTextureViewId()
+      offscreenWidth: 0
+      offscreenHeight: 0
       viewport: noBufferId()
       xform: List.create(Float, cap: 8)
       clipUniforms: List.create(BufferId, cap: 64)
@@ -413,6 +423,95 @@ func boxFlushBuffer(
 func canvasFrameActive(canvas: view Gpu2dCanvas) ret Bool {
   unsafe {
     ret canvas.framePass is not webgpuNull()
+  }
+}
+
+# ----- offscreen presentable target (#920) ------------------------------------
+# The frame renders into a canvas-owned texture, not the surface drawable:
+# present copies it into the drawable (C, best effort), the headless
+# screenshot reads it back, and the 3D renderer's tonemap / composite passes
+# target its view before the 2D overlay. Rebuilt when the configured surface
+# size changes (wgpu keeps the old texture alive for in-flight command buffers,
+# exactly as the C release did).
+func retireOffscreen(canvas: mod Gpu2dCanvas, resources: mod GpuResources) {
+  retireTextureView(resources: resources, id: canvas.offscreenView)
+  retireTexture(resources: resources, id: canvas.offscreenTexture)
+  canvas.offscreenView = noTextureViewId()
+  canvas.offscreenTexture = noTextureId()
+  canvas.offscreenWidth = 0
+  canvas.offscreenHeight = 0
+}
+
+# True when the surface is configured and the target matches its size.
+func canvasEnsureOffscreen(canvas: mod Gpu2dCanvas) ret Bool {
+  var ready: Int = 0
+  var width: Int = 0
+  var height: Int = 0
+  unsafe {
+    ready = nativeG2dSurfaceReady()
+    width = nativeG2dSurfaceWidth()
+    height = nativeG2dSurfaceHeight()
+  }
+  if ready is 0 or width < 1 or height < 1 {
+    ret false
+  }
+  ensureBoxResources(canvas: canvas)
+  if let resources: mod GpuResources => canvas.gpuResources {
+    if width is canvas.offscreenWidth and height is canvas.offscreenHeight and isValidTextureView(
+      resources: resources
+      id: canvas.offscreenView
+    ) {
+      ret true
+    }
+    retireOffscreen(canvas: canvas, resources: resources)
+    var format: Int32 = 0 as Int32
+    unsafe {
+      format = nativeG2dBoxFormat() as Int32
+    }
+    if let texture: TextureId = createTexture(
+      resources: resources
+      width: width
+      height: height
+      format: format
+      usage: WGPUTextureUsage_RenderAttachment + WGPUTextureUsage_CopySrc
+    ) {
+      if let created: TextureViewId = createTextureView(resources: resources, texture: texture) {
+        canvas.offscreenTexture = texture
+        canvas.offscreenView = created
+        canvas.offscreenWidth = width
+        canvas.offscreenHeight = height
+        ret true
+      }
+      retireTexture(resources: resources, id: texture)
+    }
+  }
+  ret false
+}
+
+# The raw view handle for a pass that targets the offscreen image (the 3D
+# renderer's tonemap / composite / inspector fullscreen passes); null when no
+# surface is configured yet.
+func canvasOffscreenView(canvas: mod Gpu2dCanvas) unsafe ret Ptr {
+  unsafe {
+    if not canvasEnsureOffscreen(canvas: canvas) {
+      ret webgpuNull()
+    }
+    if let resources: view GpuResources => canvas.gpuResources {
+      ret refHandle(resources: resources, ref: textureViewRef(id: canvas.offscreenView))
+    }
+    ret webgpuNull()
+  }
+}
+
+# The raw texture handle present copies from (null when there is none).
+func canvasOffscreenTexture(canvas: view Gpu2dCanvas) unsafe ret Ptr {
+  unsafe {
+    if let resources: view GpuResources => canvas.gpuResources {
+      if isValidTexture(resources: resources, id: canvas.offscreenTexture) {
+        ret slotHandle(table: resources.textures, slot: canvas.offscreenTexture.slot)
+      }
+    }
+    ret webgpuNull()
   }
 }
 
@@ -732,7 +831,7 @@ func boxFlushWith(canvas: mod Gpu2dCanvas, resources: mod GpuResources) {
 func canvasShutdown(canvas: mod Gpu2dCanvas) {
   if let resources: mod GpuResources => canvas.gpuResources {
     drainSubmissions(inFlight: canvas.inFlight, resources: resources)
-    releaseExternal(resources: resources, id: canvas.offscreen)
+    retireOffscreen(canvas: canvas, resources: resources)
     retireBuffer(resources: resources, id: canvas.viewport)
     retireBindGroupIds(resources: resources, list: canvas.frameBinds)
     canvas.frameBinds.clear()
@@ -774,10 +873,6 @@ func canvasShutdown(canvas: mod Gpu2dCanvas) {
   canvas.gpuResources = none
   canvas.pipeline = noRenderPipelineId()
   canvas.viewport = noBufferId()
-  canvas.offscreen = noExternalId()
-  unsafe {
-    canvas.offscreenHandle = webgpuNull()
-  }
   canvas.recording = none
   canvas.pipeMade = false
   canvas.flushIndex = 0

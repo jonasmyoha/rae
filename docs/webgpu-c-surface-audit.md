@@ -321,3 +321,31 @@ replaced by owner teardown — is NOT in this slice: it needs the in-flight
 teardown equivalence check in a window run (RAE_WGPU_REPORT live-object counts
 across 120 frames, occluded and headless), filed as #920.
 
+**#920 update (2D renderer slice 4c — owner teardown of the presentable
+target, closes #875):** the offscreen presentable target is a canvas texture +
+view (`Gpu2dCanvas.offscreenTexture/offscreenView`, RenderAttachment |
+CopySrc in the surface format), built and rebuilt by `canvasEnsureOffscreen`
+to the configured surface size (`rae_g2d_surface_ready/width/height` — C only
+configures the surface now; `rae_g2d_configure` creates no texture). The 2D
+frame's pass targets `textureViewRef(id: canvas.offscreenView)` (no external
+adoption), and the 3D passes that write the LDR image take the canvas:
+`Gpu3d.tonemapPass(canvas:)` / `end(canvas:)` / `endFrame(canvas:)`,
+`GbufferPasses.composite / compositePass / compositePassGraded(canvas:)`,
+`GbufferInspector.debugView / inspect(canvas:)`, `Gbuffer.present /
+presentFrame(canvas:)`, `Renderer3d.renderFrameWorld(canvas:)` —
+`RendererDeferred` passes `renderer.canvas`. Present stays C but BORROWS the
+texture: `rae_g2d_present(texture, w, h)` (was `rae_g2d_present_and_cleanup`),
+`rae_g3d_present_frame(texture, w, h)` and `rae_ext_Gbuffer_present(texture, w,
+h)` do the drawable acquire + copy (clamped to the smaller of target and
+surface) + present + poll and the headless `RAE_GPU2D_SCREENSHOT` readback
+(`rae_g2d_save_screenshot(path, tex, w, h)`); the occluded-window skip is
+unchanged. `Gpu2d.closeWindow` releases no Rae-owned object any more (surface
++ cursors only); `canvasShutdown` retires the target after draining the
+in-flight submissions. Removed from C: `g_g2d_off_tex/off_view/off_w/off_h`,
+`rae_g2d_off_view`, `rae_g2d_off_view_ready`, `rae_g2d_present_and_cleanup`;
+`rae_gb_offscreen_w/h`, the forward prepass target size and the deferred /
+tonemap readiness checks read the surface instead. Teardown equivalence
+(RAE_WGPU_REPORT live-object counts flat across 120 frames, the occluded path,
+the headless screenshot path) is a window run the queue cannot do — it is the
+user's confirmation the task waits on.
+
