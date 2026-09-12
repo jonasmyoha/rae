@@ -32,6 +32,8 @@ open GbufferResources
 open GbufferInstanced
 open GbufferRecord
 open GbufferPasses
+open GbufferTargets
+open gpu/GpuTextures
 open Scene3d
 open webgpu/Webgpu
 open webgpu/Context
@@ -42,19 +44,8 @@ open gpu/GpuRenderPass
 open gpu/GpuRenderTransfer
 open gpu/GpuIds
 
-func gbLitTexture() unsafe extern("rae_gb_lit_texture") ret Ptr
-
-func gbLitCopyTexture() unsafe extern("rae_gb_lit_copy_texture") ret Ptr
-
-func gbLitCopyView() unsafe extern("rae_gb_lit_copy_view") ret Ptr
-
-func nativeGbLitFormat() unsafe extern("rae_gb_lit_format") ret Int
-
-func gbLitFormat() ret Int {
-  unsafe {
-    ret nativeGbLitFormat()
-  }
-}
+# The lit HDR target, its opaque snapshot (litCopy) and their format are the
+# renderer's DeferredTargets since #923 (GbufferTargets.rae).
 
 # Per-renderer state (#764: no module globals). `batch` is sized once at
 # creation and refilled in place each frame — zero per-frame allocation.
@@ -119,9 +110,11 @@ func addTransparentInstance(
   cache.batch.count = cache.batch.count + 1
 }
 
-func copyOpaqueRadiance() {
+func copyOpaqueRadiance(resources: view GpuResources, targets: view DeferredTargets) {
   unsafe {
-    if gbDeferredPrepare() is 0 {
+    let texture: Ptr = textureHandle(resources: resources, id: targets.lit)
+    let copyTexture: Ptr = textureHandle(resources: resources, id: targets.litCopy)
+    if texture is webgpuNull() or copyTexture is webgpuNull() {
       ret
     }
     # Geometry has already submitted its encoder. Like the fullscreen post
@@ -131,10 +124,9 @@ func copyOpaqueRadiance() {
       device: webgpuDevice()
       descriptor: encoderDescriptor
     )
-    let texture: Ptr = gbLitTexture()
     let source: WGPUTexelCopyTextureInfo = { texture: texture, aspect: WGPUTextureAspect_All }
     let destination: WGPUTexelCopyTextureInfo = {
-      texture: gbLitCopyTexture()
+      texture: copyTexture
       aspect: WGPUTextureAspect_All
     }
     let extent: WGPUExtent3D = {
@@ -162,13 +154,13 @@ func copyOpaqueRadiance() {
 # The blend pipeline: the geometry pass's vertex layout and group-0 bindings,
 # ONE colour target in the lit HDR format with straight alpha blending, and a
 # depth state that TESTS reverse-Z (Greater, like the G-buffer) but never writes.
-# Built lazily after the first deferred prepare, so gbLitFormat is the format
-# the targets were actually created with (rg11b10 or the rgba16f fallback).
+# Built lazily after the targets exist, so the format is the one the lit
+# target was actually created with (rg11b10 or the rgba16f fallback).
 # No culling: a transparent surface (water sheet, a fading particle seen from
 # inside its splash) is meaningful from both sides.
-func transparentPipelineSpec() ret RenderPipelineSpec {
+func transparentPipelineSpec(litFormat: copy Int32) ret RenderPipelineSpec {
   let colorFormats: List(Int32) = List.create(Int32, cap: 1)
-  colorFormats.add(value: gbLitFormat() as Int32)
+  colorFormats.add(value: litFormat)
   let attributes: List(VertexAttributeSpec) = List.create(VertexAttributeSpec, cap: 3)
   attributes.add(value: { format: WGPUVertexFormat_Float32x3, offset: 0, location: 0 })
   attributes.add(value: { format: WGPUVertexFormat_Float32x3, offset: 12, location: 1 })
@@ -186,7 +178,11 @@ func transparentPipelineSpec() ret RenderPipelineSpec {
   }
 }
 
-func ensureTransparentPipeline(cache: mod TransparentPassCache, resources: mod GpuResources) {
+func ensureTransparentPipeline(
+  cache: mod TransparentPassCache
+  resources: mod GpuResources
+  litFormat: copy Int32
+) {
   if cache.pipeMade {
     ret
   }
@@ -210,7 +206,7 @@ func ensureTransparentPipeline(cache: mod TransparentPassCache, resources: mod G
     wgsl: source
     vertexEntry: "vs"
     fragmentEntry: "fs"
-    spec: transparentPipelineSpec()
+    spec: transparentPipelineSpec(litFormat: litFormat)
   ) {
     cache.pipeline = pipeline
   }
@@ -250,6 +246,7 @@ func drawTransparentBatch(
   cache: mod TransparentPassCache
   resources: mod GpuResources
   gbuffer: mod GbufferCache
+  targets: view DeferredTargets
 ) {
   unsafe {
     let mesh: Int = cache.batch.meshId
@@ -289,7 +286,7 @@ func drawTransparentBatch(
     )
     colorAtts.add(
       value: {
-        view_: gbLitView()
+        view_: textureViewHandle(resources: resources, id: targets.litView)
         depthSlice: WGPU_DEPTH_SLICE_UNDEFINED as UInt32
         loadOp: WGPULoadOp_Load
         storeOp: WGPUStoreOp_Store
@@ -347,11 +344,15 @@ func drawTransparentBatch(
 # draws and reads litCopy. An app that draws refracting surfaces calls this
 # first, then its draws, then transparentPass; an app without them just calls
 # transparentPass, which snapshots on its own.
-func transparentSnapshot(cache: mod TransparentPassCache) pub {
-  if gbDeferredPrepare() is 0 {
+func transparentSnapshot(
+  cache: mod TransparentPassCache
+  resources: view GpuResources
+  targets: view DeferredTargets
+) pub {
+  if not targetsReady(targets: targets, resources: resources) {
     ret
   }
-  copyOpaqueRadiance()
+  copyOpaqueRadiance(resources: resources, targets: targets)
   cache.snapshotDone = true
 }
 
@@ -359,19 +360,26 @@ func transparentPass(
   cache: mod TransparentPassCache
   resources: mod GpuResources
   gbuffer: mod GbufferCache
+  targets: view DeferredTargets
 ) pub {
-  if gbDeferredPrepare() is 0 {
+  if not targetsReady(targets: targets, resources: resources) {
+    cache.batch.count = 0
     ret
   }
   if not cache.snapshotDone {
-    copyOpaqueRadiance()
+    copyOpaqueRadiance(resources: resources, targets: targets)
   }
   cache.snapshotDone = false
   if cache.batch.count > 0 {
-    ensureTransparentPipeline(cache: cache, resources: resources)
+    ensureTransparentPipeline(cache: cache, resources: resources, litFormat: targets.litFormat)
     if isValidRenderPipeline(resources: resources, id: cache.pipeline) {
       ensureTransparentBind(cache: cache, resources: resources, gbuffer: gbuffer)
-      drawTransparentBatch(cache: cache, resources: resources, gbuffer: gbuffer)
+      drawTransparentBatch(
+        cache: cache
+        resources: resources
+        gbuffer: gbuffer
+        targets: targets
+      )
     }
   }
   cache.batch.count = 0
