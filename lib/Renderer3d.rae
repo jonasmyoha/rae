@@ -27,6 +27,9 @@
 open Rendergraph
 open Scene3d
 open Gpu2dCanvas
+open MeshStore
+open gpu/GpuResources
+open gpu/GpuIds
 open Gpu3d
 
 # ----- pass tags (renderer-owned; opaque to the graph) ----------------
@@ -55,6 +58,65 @@ type Renderer3d {
   presentPass: Int
   uiPass: Int  # -1 when the frame has no UI overlay
   hasUi: Bool
+  # #905: the forward renderer owns its meshes — a manager + the MeshStore the
+  # forward draws and shadow casters resolve MeshHandles in.
+  idIssuer: IdIssuer
+  gpuResources: opt GpuResources
+  meshes: MeshStore
+}
+
+const forwardManagerCapacity: Int = 512
+
+func ensureRenderer3dResources(r: mod Renderer3d) pub {
+  if let existing: view GpuResources => r.gpuResources {
+    ret
+  }
+  r.gpuResources = GpuResources.create(issuer: r.idIssuer, capacity: forwardManagerCapacity)
+}
+
+# Upload a static mesh into the renderer's store.
+func uploadMesh(
+  r: mod Renderer3d
+  verts: view List(Float)
+  vertCount: view Int
+  indices: view List(Int)
+) pub ret MeshHandle {
+  ensureRenderer3dResources(r: r)
+  if let resources: mod GpuResources => r.gpuResources {
+    ret meshStoreUpload(
+      store: r.meshes
+      resources: resources
+      verts: verts
+      vertCount: vertCount
+      indices: indices
+    )
+  }
+  ret meshHandleNone()
+}
+
+# The forward world walkers over this renderer's mesh store (#905): the scene
+# draws and the shadow casters resolve MeshHandles here.
+func renderSceneWorldWith(r: mod Renderer3d, world: view World3d) pub {
+  ensureRenderer3dResources(r: r)
+  if let resources: view GpuResources => r.gpuResources {
+    renderSceneWorld(meshes: r.meshes, resources: resources, world: world)
+  }
+}
+
+func renderSceneShadowWorldWith(r: mod Renderer3d, world: view World3d) pub {
+  ensureRenderer3dResources(r: r)
+  if let resources: view GpuResources => r.gpuResources {
+    renderSceneShadowWorld(meshes: r.meshes, resources: resources, world: world)
+  }
+}
+
+# Retire the meshes and drop the manager (app shutdown, BEFORE Gpu3d.shutdown).
+func shutdownRenderer3d(r: mod Renderer3d) pub {
+  if let resources: mod GpuResources => r.gpuResources {
+    meshStoreShutdown(store: r.meshes, resources: resources)
+    meshStoreDropManager(resources: resources)
+  }
+  r.gpuResources = none
 }
 
 # Declare the frame. Passes are declared in a deliberately arbitrary order
@@ -312,17 +374,22 @@ func createRenderer3d() pub ret Renderer3d {
     access: accAttachmentRead
   )
 
-  ret Renderer3d {
-    graph: own renderGraph
-    sceneColor: colorId
-    hdrColor: hdrId
-    sceneDepth: depthId
-    sceneNormal: normalId
-    sceneVelocity: velocityId
-    scenePass: scene
-    presentPass: present
-    uiPass: 0 - 1
-    hasUi: false
+  unsafe {
+    ret Renderer3d {
+      graph: own renderGraph
+      sceneColor: colorId
+      hdrColor: hdrId
+      sceneDepth: depthId
+      sceneNormal: normalId
+      sceneVelocity: velocityId
+      scenePass: scene
+      presentPass: present
+      uiPass: 0 - 1
+      hasUi: false
+      idIssuer: IdIssuer.create()
+      gpuResources: none
+      meshes: createMeshStore()
+    }
   }
 }
 
@@ -575,17 +642,22 @@ func createRenderer3dWithUi() pub ret Renderer3d {
     access: accAttachmentRead
   )
 
-  ret Renderer3d {
-    graph: own renderGraph
-    sceneColor: colorId
-    hdrColor: hdrId
-    sceneDepth: depthId
-    sceneNormal: normalId
-    sceneVelocity: velocityId
-    scenePass: scene
-    presentPass: present
-    uiPass: ui
-    hasUi: true
+  unsafe {
+    ret Renderer3d {
+      graph: own renderGraph
+      sceneColor: colorId
+      hdrColor: hdrId
+      sceneDepth: depthId
+      sceneNormal: normalId
+      sceneVelocity: velocityId
+      scenePass: scene
+      presentPass: present
+      uiPass: ui
+      hasUi: true
+      idIssuer: IdIssuer.create()
+      gpuResources: none
+      meshes: createMeshStore()
+    }
   }
 }
 
@@ -620,7 +692,9 @@ func renderFrameWorld(
         aspect: aspect
         time: time
       )
-      renderSceneWorld(world: world)
+      if let resources: view GpuResources => r.gpuResources {
+        renderSceneWorld(meshes: r.meshes, resources: resources, world: world)
+      }
     }
     if tag is tagSsao {
       ssaoPass()

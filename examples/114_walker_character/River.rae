@@ -2,6 +2,7 @@
 # spline, its banks and surface sampled from the terrain heightfield, baked
 # ONCE into a ribbon mesh and added to the water system as a river body.
 # Siblings merge into one module, so terrainHeightAt resolves cross-file.
+import RendererDeferred
 import Vec3
 open Mesh3d
 open Gpu3d
@@ -19,7 +20,11 @@ const riverAcross: Int = 4
 # The river rides 35 cm above the local ground so it has a visible channel; the
 # banks are the ground half a width to each side, so a bank higher than the
 # surface hides the edge behind terrain and a lower one gets tucked under.
-func addMeadowRiver(waterSystem: mod WaterSystem, groundZ: copy Float) {
+func addMeadowRiver(
+  renderer: mod DeferredRenderer
+  waterSystem: mod WaterSystem
+  groundZ: copy Float
+) {
   let spline: RiverSpline = {
     # Starts at the shore, not out at sea: the seabed drops below the water
     # plane (#857), so a ribbon carried past the coast would ride under the sea.
@@ -61,7 +66,8 @@ func addMeadowRiver(waterSystem: mod WaterSystem, groundZ: copy Float) {
     heights: heights
     bankMargin: 0.3
   )
-  let mesh: MeshHandle = uploadMesh(
+  let mesh: MeshHandle = RendererDeferred.uploadMesh(
+    renderer: renderer
     verts: ribbon.verts
     vertCount: ribbon.vertCount
     indices: ribbon.indices

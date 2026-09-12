@@ -33,6 +33,7 @@ import Gpu2d
 open Rendergraph
 open Math3d
 open Scene3d
+open MeshStore
 open Gbuffer
 open GbufferWorld
 open GbufferTerrain
@@ -157,6 +158,46 @@ func ensureRendererResources(renderer: mod DeferredRenderer) pub {
   )
 }
 
+# #905: upload a static mesh into the renderer's MeshStore (the geometry pass
+# cache owns it; every deferred pass resolves MeshHandles there).
+func uploadMesh(
+  renderer: mod DeferredRenderer
+  verts: view List(Float)
+  vertCount: view Int
+  indices: view List(Int)
+) pub ret MeshHandle {
+  ensureRendererResources(renderer: renderer)
+  if let resources: mod GpuResources => renderer.gpuResources {
+    ret meshStoreUpload(
+      store: renderer.passes.gbuffer.meshes
+      resources: resources
+      verts: verts
+      vertCount: vertCount
+      indices: indices
+    )
+  }
+  ret meshHandleNone()
+}
+
+# Rewrite a mesh's vertex data in place (pooled geometry, e.g. recycled
+# terrain tiles); the index buffer and vertex count stay.
+func updateMeshVerts(
+  renderer: mod DeferredRenderer
+  mesh: view MeshHandle
+  verts: view List(Float)
+  vertCount: view Int
+) pub {
+  if let resources: view GpuResources => renderer.gpuResources {
+    meshStoreUpdateVerts(
+      store: renderer.passes.gbuffer.meshes
+      resources: resources
+      mesh: mesh
+      verts: verts
+      vertCount: vertCount
+    )
+  }
+}
+
 # Retire every manager object the passes hold and drop the manager. Call BEFORE
 # Gbuffer.shutdownAll() / Gpu3d.shutdown(): the adopted C-owned handles must
 # still be valid while their bind groups are released, and the device must
@@ -175,6 +216,7 @@ func shutdownDeferredRenderer(renderer: mod DeferredRenderer) pub {
     transparentShutdown(cache: renderer.passes.transparent, resources: resources)
     gbufferShutdown(cache: renderer.passes.gbuffer, resources: resources)
     terrainShutdown(cache: renderer.passes.gbuffer, resources: resources)
+    meshStoreShutdown(store: renderer.passes.gbuffer.meshes, resources: resources)
     shutdown(resources: resources)
   }
   renderer.gpuResources = none
@@ -843,7 +885,11 @@ func renderDeferredPassWith(
     taaPass(cache: renderer.passes.taa, resources: resources)
   }
   if tag is RenderTag.transparentForward {
-    transparentPass(cache: renderer.passes.transparent, resources: resources)
+    transparentPass(
+      cache: renderer.passes.transparent
+      resources: resources
+      meshes: renderer.passes.gbuffer.meshes
+    )
   }
   # waterFft is dispatched by the app that owns a WaterSystem (waterFftStep);
   # an app without water simply has nothing to do at this tag.

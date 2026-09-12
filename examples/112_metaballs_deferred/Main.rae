@@ -77,8 +77,24 @@ type DemoUiResource {
   appliedRevision: Int
 }
 
-func uploadMeshData(mesh: view MeshData) ret MeshHandle {
-  ret uploadMesh(verts: mesh.verts, vertCount: mesh.vertCount, indices: mesh.indices)
+# The shadow casters resolve their meshes in the renderer's store (#905).
+func renderSceneShadowWorldWith(renderer: mod DeferredRenderer, world: view World3d) {
+  if let resources: view GpuResources => renderer.gpuResources {
+    Gpu3d.renderSceneShadowWorld(
+      meshes: renderer.passes.gbuffer.meshes
+      resources: resources
+      world: world
+    )
+  }
+}
+
+func uploadMeshData(renderer: mod DeferredRenderer, mesh: view MeshData) ret MeshHandle {
+  ret uploadMesh(
+    renderer: renderer
+    verts: mesh.verts
+    vertCount: mesh.vertCount
+    indices: mesh.indices
+  )
 }
 
 func main() ret Int {
@@ -118,10 +134,13 @@ func main() ret Int {
   # three face normals). Scene 1 uses it for the voxel mountains and the
   # two spinning cubes.
   let boxData: MeshData = makeBox(size: 1.0)
-  let sphere: MeshHandle = uploadMeshData(mesh: sphereData)
-  let torus: MeshHandle = uploadMeshData(mesh: torusData)
-  let ground: MeshHandle = uploadMeshData(mesh: planeData)
-  let boxMesh: MeshHandle = uploadMeshData(mesh: boxData)
+  # #905: the renderer owns the mesh store, so it exists before the uploads; the
+  # sky is applied below once the settings are loaded.
+  var renderer: DeferredRenderer = createDeferredRendererWithUi()
+  let sphere: MeshHandle = uploadMeshData(renderer: renderer, mesh: sphereData)
+  let torus: MeshHandle = uploadMeshData(renderer: renderer, mesh: torusData)
+  let ground: MeshHandle = uploadMeshData(renderer: renderer, mesh: planeData)
+  let boxMesh: MeshHandle = uploadMeshData(renderer: renderer, mesh: boxData)
   let base: String = "examples/112_metaballs_deferred/assets/"
   var meshRegistry: MeshRegistry3d = createMeshRegistry3d()
   registerMesh3d(reg: meshRegistry, key: "sphere", handle: sphere)
@@ -335,12 +354,13 @@ func main() ret Int {
   let hosekData: HosekDataset = loadDefaultHosekDataset()
   let skyTurbidity: Float = 2.5
   let skyGroundAlbedo: Float = 0.25
-  var renderer: DeferredRenderer = createDeferredRendererWithUiSky(sky: settingsBuildSky(
+  renderer.sky = settingsBuildSky(
     settingsState: settings
     data: hosekData
     turbidity: skyTurbidity
     groundAlbedo: skyGroundAlbedo
-  ))
+  )
+  renderer.hasSky = true
   # The sun the sky was built for drives the shadows too, or the visible sun and
   # the cast shadows disagree.
   light.sunDir = settingsSunDir(settingsState: settings)
@@ -720,15 +740,15 @@ func main() ret Int {
           # not doing the work, with no renderer flag to thread through.
           if settings.shadows {
             if uiState.activeScene is 1 {
-              Gpu3d.renderSceneShadowWorld(world: asset1.world)
+              renderSceneShadowWorldWith(renderer: renderer, world: asset1.world)
               renderSdfShadow(world: asset1.world, tags: clusters1)
             }
             if uiState.activeScene is 2 {
-              Gpu3d.renderSceneShadowWorld(world: asset2.world)
+              renderSceneShadowWorldWith(renderer: renderer, world: asset2.world)
               renderSdfShadow(world: asset2.world, tags: clusters2)
             }
             if uiState.activeScene is 3 {
-              Gpu3d.renderSceneShadowWorld(world: asset3.world)
+              renderSceneShadowWorldWith(renderer: renderer, world: asset3.world)
               renderSdfShadow(world: asset3.world, tags: clusters3)
             }
           }

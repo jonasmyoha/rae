@@ -16,8 +16,13 @@ open ui/Ecs
 open ui/renderSystem/RenderSystem
 open Gpu2dCanvas
 
-func uploadMeshData(meshData: view MeshData) ret MeshHandle {
-  ret uploadMesh(verts: meshData.verts, vertCount: meshData.vertCount, indices: meshData.indices)
+func uploadMeshData(renderer: mod DeferredRenderer, meshData: view MeshData) ret MeshHandle {
+  ret uploadMesh(
+    renderer: renderer
+    verts: meshData.verts
+    vertCount: meshData.vertCount
+    indices: meshData.indices
+  )
 }
 
 func buildScene(sphere: view MeshHandle, ground: view MeshHandle) ret World3d {
@@ -64,8 +69,10 @@ func main() ret Int {
 
   let sphereData: MeshData = makeSphere(rings: 32, segments: 48)
   let planeData: MeshData = makePlane(size: 30.0, segments: 1)
-  let sphere: MeshHandle = uploadMeshData(meshData: sphereData)
-  let ground: MeshHandle = uploadMeshData(meshData: planeData)
+  var renderer: DeferredRenderer = createDeferredRendererWithUi()
+
+  let sphere: MeshHandle = uploadMeshData(renderer: renderer, meshData: sphereData)
+  let ground: MeshHandle = uploadMeshData(renderer: renderer, meshData: planeData)
   var sceneWorld: World3d = buildScene(sphere: sphere, ground: ground)
   # The ball is the first mesh added (dense position 0); the easing below
   # animates its transform in place.
@@ -90,7 +97,6 @@ func main() ret Int {
     res: uiResources
   )
 
-  var renderer: DeferredRenderer = createDeferredRendererWithUi()
   let graphStatus: Int = compileDeferred(renderer: renderer)
   if graphStatus is not 0 {
     log("deferred graph invalid: {statusName(status: graphStatus)}")

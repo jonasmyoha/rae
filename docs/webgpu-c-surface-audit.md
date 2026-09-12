@@ -349,3 +349,27 @@ tonemap readiness checks read the surface instead. Teardown equivalence
 the headless screenshot path) is a window run the queue cannot do — it is the
 user's confirmation the task waits on.
 
+**#905 update (shared renderer slice 2a — the mesh store):** static meshes
+are Rae: `lib/MeshStore.rae` holds one `MeshEntry { vbuf, ibuf, indexCount,
+vertexCount }` of manager `BufferId`s per 1-based `MeshHandle` id, owned by
+the renderer object — `DeferredRenderer.passes.gbuffer.meshes` (the
+`GbufferCache` the geometry-pass draws already take) and a new manager +
+`Renderer3d.meshes` for the forward path. Uploads are
+`RendererDeferred.uploadMesh / updateMeshVerts(renderer:, …)` and
+`Renderer3d.uploadMesh(r:, …)` (`meshStoreUpload` narrows the Rae Int indices
+to u32 and `writeBufferFromPtr`s both buffers); the geometry / terrain /
+transparent / forward passes resolve a handle to raw buffer handles with
+`meshStoreVbufHandle / IbufHandle` (`refHandle` over `bufferRef`), the water
+system BORROWS them as externals into its own manager (`adoptMeshExternals`
+takes the store + the renderer's manager), and a static shadow caster is queued
+by its handles (`rae_sm_queue_mesh(mesh, vbuf, ibuf, icount, model)` — the
+queue is still C, #906's scope; the mesh id stays as the batching key).
+`shutdownDeferredRenderer` / `shutdownRenderer3d` retire the buffers.
+Removed from C: `g3d_mesh_vbuf/ibuf/icount/n`, `rae_ext_Gpu3d_meshCreate /
+meshUpdate`, `rae_gb_mesh_ready/vbuf/ibuf/icount`, `rae_g3d_mesh_vbuf/ibuf/
+icount`; `rae_g3d_push_draw_record` no longer validates the mesh slot (the
+store did). Still C, filed as #921 (slice 2b): the SKINNED meshes + the joint
+palette (`g3d_skin_vbuf/ibuf`, `rae_gb_skin_*`, `rae_ext_Gpu3d_setPalette`,
+the palette storage buffer the skin bind groups and shadow casters read) —
+they are one subsystem with the C skin pipeline and move together.
+

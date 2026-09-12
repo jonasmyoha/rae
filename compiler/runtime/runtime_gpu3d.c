@@ -66,14 +66,11 @@ static WGPUBuffer      g3d_sm_frame_ubuf;
 #define G3D_SHADOW_DEFAULT_RES 2048
 #define G3D_SHADOW_DEFAULT_CASCADES 3
 
-#define G3D_MAX_MESHES 256
 #define G3D_MAX_DRAWS  4096
 #define G3D_DRAW_FLOATS 40  /* mat4 model + mat4 prevModel + baseColor+metallic + emissive+roughness */
 
-static WGPUBuffer   g3d_mesh_vbuf[G3D_MAX_MESHES];
-static WGPUBuffer   g3d_mesh_ibuf[G3D_MAX_MESHES];
-static uint32_t     g3d_mesh_icount[G3D_MAX_MESHES];
-static int          g3d_mesh_n = 0;
+/* #905: the mesh store (vertex/index buffers per mesh id) is the Rae
+ * MeshStore owned by the renderer; C no longer holds meshes. */
 
 static WGPUTexture     g3d_hdr_tex = NULL;       /* rgba16f linear scene colour (#334) */
 static WGPUTextureView g3d_hdr_view = NULL;
@@ -795,55 +792,6 @@ static void g3d_ensure_targets(void) {
     g3d_target_w = w; g3d_target_h = h;
 }
 
-/* Create an immutable mesh. verts = interleaved pos3/nrm3/uv2 as Rae
- * Floats (doubles), 8 per vertex; indices as Rae Ints. Converted to
- * float32 / uint32 on upload. Returns handle > 0, or 0 on failure. */
-int64_t rae_ext_Gpu3d_meshCreate(const float* verts, int64_t vertCount,
-                                 const int64_t* indices, int64_t indexCount){
-    if (!g_wgpu_dev || !verts || !indices) return 0;
-    if (vertCount <= 0 || indexCount <= 0 || g3d_mesh_n >= G3D_MAX_MESHES) return 0;
-    size_t vfloats = (size_t)vertCount * 8;
-    /* Rae `Float` is f32, so `verts` is ALREADY the f32 layout the GPU wants:
-     * upload straight from it. The temporary buffer that used to live here
-     * existed only to narrow the old f64 default down to float. Indices still
-     * need converting — Rae `Int` is i64 and the index buffer is u32. */
-    uint32_t* ix = (uint32_t*)malloc((size_t)indexCount * sizeof(uint32_t));
-    if (!ix) return 0;
-    for (int64_t i = 0; i < indexCount; i++) ix[i] = (uint32_t)indices[i];
-
-    WGPUBufferDescriptor bd; memset(&bd, 0, sizeof(bd));
-    bd.size = vfloats * sizeof(float);
-    bd.usage = WGPUBufferUsage_Vertex | WGPUBufferUsage_CopyDst;
-    WGPUBuffer vb = wgpuDeviceCreateBuffer(g_wgpu_dev, &bd);
-    wgpuQueueWriteBuffer(g_wgpu_queue, vb, 0, verts, bd.size);
-    /* Index buffer sizes must be 4-byte multiples (uint32 already is). */
-    bd.size = (uint64_t)indexCount * sizeof(uint32_t);
-    bd.usage = WGPUBufferUsage_Index | WGPUBufferUsage_CopyDst;
-    WGPUBuffer ib = wgpuDeviceCreateBuffer(g_wgpu_dev, &bd);
-    wgpuQueueWriteBuffer(g_wgpu_queue, ib, 0, ix, bd.size);
-    free(ix);
-    if (!vb || !ib) return 0;
-    int slot = g3d_mesh_n++;
-    g3d_mesh_vbuf[slot] = vb;
-    g3d_mesh_ibuf[slot] = ib;
-    g3d_mesh_icount[slot] = (uint32_t)indexCount;
-    return (int64_t)(slot + 1);
-}
-
-/* Rewrite an existing mesh's VERTEX data in place (positions/normals/uvs;
- * topology and index buffer stay). vertCount must equal the count the mesh
- * was created with — the GPU buffer is fixed-size, so a larger write is
- * clamped to nothing rather than overflowing. Exists for pooled geometry
- * whose shape depends on world position (the walker's terrain tiles get
- * their heights rewritten when a pool slot is recycled onto a new cell). */
-void rae_ext_Gpu3d_meshUpdate(int64_t mesh, const float* verts, int64_t vertCount){
-    if (!g_wgpu_dev || !verts || vertCount <= 0) return;
-    int slot = (int)mesh - 1;
-    if (slot < 0 || slot >= g3d_mesh_n || !g3d_mesh_vbuf[slot]) return;
-    wgpuQueueWriteBuffer(g_wgpu_queue, g3d_mesh_vbuf[slot], 0, verts,
-                         (size_t)vertCount * 8 * sizeof(float));
-}
-
 /* Begin the 3D frame. `frame` packs the camera/light state as 36 Floats:
  *   [0..15] viewProj (column-major)
  *   [16..18] camPos            [19] time
@@ -982,8 +930,7 @@ int rae_g3d_push_draw_record(int64_t mesh, rae_Mat4* model, rae_Mat4* prevModel,
                              float r, float g, float b, float metallic,
                              float emR, float emG, float emB, float roughness){
     if (!model) return -1;
-    int slot = (int)mesh - 1;
-    if (slot < 0 || slot >= g3d_mesh_n) return -1;
+    if (mesh < 1) return -1;   /* the Rae MeshStore validated the buffers (#905) */
     if (g3d_draw_count >= g3d_draw_limit) {
         if (!g3d_draw_overflow_reported) {
             fprintf(stderr,
@@ -1015,30 +962,12 @@ int rae_g3d_push_draw_record(int64_t mesh, rae_Mat4* model, rae_Mat4* prevModel,
 
 /* Forward mesh-buffer handle accessors (ungated), keyed by the 1-based mesh
  * handle. Rae reads these to bind the vertex/index buffers for a draw. */
-void* rae_g3d_mesh_vbuf(int64_t mesh){
-    int slot = (int)mesh - 1;
-    if (slot < 0 || slot >= g3d_mesh_n) return (void*)0;
-    return (void*)g3d_mesh_vbuf[slot];
-}
-void* rae_g3d_mesh_ibuf(int64_t mesh){
-    int slot = (int)mesh - 1;
-    if (slot < 0 || slot >= g3d_mesh_n) return (void*)0;
-    return (void*)g3d_mesh_ibuf[slot];
-}
-int64_t rae_g3d_mesh_icount(int64_t mesh){
-    int slot = (int)mesh - 1;
-    if (slot < 0 || slot >= g3d_mesh_n) return 0;
-    return (int64_t)g3d_mesh_icount[slot];
-}
-
-/* Finish and submit the 3D pass. The caller decides whether to present now or
- * append a load-preserving gpu2d/UI pass first. */
 static int rae_g3d_finish_pass(void) {
     if (getenv("RAE_GPU3D_DEBUG")) {
         static int logged = 0;
         if (!logged) {
-            fprintf(stderr, "[gpu3d] end: pass=%p draws=%d meshes=%d target=%dx%d\n",
-                    (void*)g3d_pass, g3d_draw_count, g3d_mesh_n, g3d_target_w, g3d_target_h);
+            fprintf(stderr, "[gpu3d] end: pass=%p draws=%d target=%dx%d\n",
+                    (void*)g3d_pass, g3d_draw_count, g3d_target_w, g3d_target_h);
             if (g3d_draw_count > 0) {
                 float* d = g3d_draw_cpu;
                 fprintf(stderr, "[gpu3d] draw0 model col3=(%.2f,%.2f,%.2f,%.2f) color=(%.2f,%.2f,%.2f) m=%.2f r=%.2f\n",
@@ -1207,11 +1136,6 @@ void rae_ext_Gpu3d_shutdown(void) {
     g3d_sdf_shutdown();
     g3d_sky_shutdown();
     g3d_ssao_shutdown();
-    for (int i = 0; i < g3d_mesh_n; i++) {
-        if (g3d_mesh_vbuf[i]) { wgpuBufferRelease(g3d_mesh_vbuf[i]); g3d_mesh_vbuf[i] = NULL; }
-        if (g3d_mesh_ibuf[i]) { wgpuBufferRelease(g3d_mesh_ibuf[i]); g3d_mesh_ibuf[i] = NULL; }
-    }
-    g3d_mesh_n = 0;
     if (g3d_bind) { wgpuBindGroupRelease(g3d_bind); g3d_bind = NULL; }
     if (g3d_draw_sbuf) { wgpuBufferRelease(g3d_draw_sbuf); g3d_draw_sbuf = NULL; }
     if (g3d_frame_ubuf) { wgpuBufferRelease(g3d_frame_ubuf); g3d_frame_ubuf = NULL; }

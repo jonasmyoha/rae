@@ -56,8 +56,13 @@ static WGPUBuffer   g3d_sm_palette_base_sbuf = NULL;
 /* The shadow pass keeps its OWN draw list rather than sharing the scene
  * pass's: it runs first, so the scene list does not exist yet. */
 static float g3d_sm_model_cpu[G3D_SHADOW_MAX_DRAWS * 16];
-static int   g3d_sm_draw_mesh[G3D_SHADOW_MAX_DRAWS];
+static int   g3d_sm_draw_mesh[G3D_SHADOW_MAX_DRAWS];      /* skin slot (skinned) or the Rae mesh id (static; the batching key) */
 static int   g3d_sm_draw_skinned[G3D_SHADOW_MAX_DRAWS];
+/* #905: static meshes live in the Rae MeshStore; a queued static caster
+ * carries its buffer handles (borrowed for the pass) instead of a C slot. */
+static WGPUBuffer g3d_sm_draw_vbuf[G3D_SHADOW_MAX_DRAWS];
+static WGPUBuffer g3d_sm_draw_ibuf[G3D_SHADOW_MAX_DRAWS];
+static uint32_t   g3d_sm_draw_icount[G3D_SHADOW_MAX_DRAWS];
 static int   g3d_sm_draw_count = 0;
 static int   g3d_sm_cascade_count = 0;
 static float g3d_sm_cascade_vp[G3D_SHADOW_MAX_CASCADES * 16];
@@ -562,12 +567,24 @@ static void g3d_shadow_queue(int64_t mesh, rae_Mat4* model, int skinned, int64_t
     for (int i = 0; i < 16; i++) d[i] = model->m.v[i];
     g3d_sm_draw_mesh[g3d_sm_draw_count] = slot;
     g3d_sm_draw_skinned[g3d_sm_draw_count] = skinned;
+    g3d_sm_draw_vbuf[g3d_sm_draw_count] = NULL;
+    g3d_sm_draw_ibuf[g3d_sm_draw_count] = NULL;
+    g3d_sm_draw_icount[g3d_sm_draw_count] = 0;
     g3d_sm_palette_base_cpu[g3d_sm_draw_count] = paletteBase < 0 ? 0u : (uint32_t)paletteBase;
     g3d_sm_draw_count++;
 }
 
-void rae_sm_queue_mesh(int64_t mesh, rae_Mat4* model) {
+/* Queue a static caster by its buffers (#905): `mesh` is the Rae mesh id,
+ * used only as the batching key. */
+void rae_sm_queue_mesh(int64_t mesh, void* vbuf, void* ibuf, int64_t icount, rae_Mat4* model) {
+    if (!vbuf || !ibuf || icount <= 0) return;
+    int at = g3d_sm_draw_count;
     g3d_shadow_queue(mesh, model, 0, 0);
+    if (g3d_sm_draw_count == at + 1) {
+        g3d_sm_draw_vbuf[at] = (WGPUBuffer)vbuf;
+        g3d_sm_draw_ibuf[at] = (WGPUBuffer)ibuf;
+        g3d_sm_draw_icount[at] = (uint32_t)icount;
+    }
 }
 
 void rae_sm_queue_skinned(int64_t mesh, rae_Mat4* model, int64_t paletteBase) {
@@ -606,8 +623,8 @@ int64_t rae_sm_caster_ready(int64_t i, int64_t c) {
         if (slot >= g3d_skin_mesh_n || !g3d_sm_pipeline_skin || !g3d_sm_bind_skin[c]) return 0;
         return (g3d_skin_vbuf[slot] && g3d_skin_ibuf[slot] && g3d_skin_icount[slot]) ? 1 : 0;
     }
-    if (slot >= g3d_mesh_n || !g3d_sm_bind[c]) return 0;
-    return (g3d_mesh_vbuf[slot] && g3d_mesh_ibuf[slot] && g3d_mesh_icount[slot]) ? 1 : 0;
+    if (!g3d_sm_bind[c]) return 0;
+    return (g3d_sm_draw_vbuf[i] && g3d_sm_draw_ibuf[i] && g3d_sm_draw_icount[i]) ? 1 : 0;
 }
 void* rae_sm_caster_pipeline(int64_t i) {
     if (i < 0 || i >= g3d_sm_draw_count) return NULL;
@@ -620,17 +637,17 @@ void* rae_sm_caster_bind(int64_t i, int64_t c) {
 void* rae_sm_caster_vbuf(int64_t i) {
     if (i < 0 || i >= g3d_sm_draw_count) return NULL;
     int slot = g3d_sm_draw_mesh[i];
-    return g3d_sm_draw_skinned[i] ? (void*)g3d_skin_vbuf[slot] : (void*)g3d_mesh_vbuf[slot];
+    return g3d_sm_draw_skinned[i] ? (void*)g3d_skin_vbuf[slot] : (void*)g3d_sm_draw_vbuf[i];
 }
 void* rae_sm_caster_ibuf(int64_t i) {
     if (i < 0 || i >= g3d_sm_draw_count) return NULL;
     int slot = g3d_sm_draw_mesh[i];
-    return g3d_sm_draw_skinned[i] ? (void*)g3d_skin_ibuf[slot] : (void*)g3d_mesh_ibuf[slot];
+    return g3d_sm_draw_skinned[i] ? (void*)g3d_skin_ibuf[slot] : (void*)g3d_sm_draw_ibuf[i];
 }
 int64_t rae_sm_caster_icount(int64_t i) {
     if (i < 0 || i >= g3d_sm_draw_count) return 0;
     int slot = g3d_sm_draw_mesh[i];
-    return g3d_sm_draw_skinned[i] ? (int64_t)g3d_skin_icount[slot] : (int64_t)g3d_mesh_icount[slot];
+    return g3d_sm_draw_skinned[i] ? (int64_t)g3d_skin_icount[slot] : (int64_t)g3d_sm_draw_icount[i];
 }
 /* A batching KEY identifying this caster's pipeline+geometry: (skinned, mesh slot).
  * Consecutive casters with the same key share pipeline / vbuf / ibuf / bind, and the

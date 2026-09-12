@@ -74,8 +74,13 @@ func drawTextureSwatches(canvas: mod Gpu2dCanvas) {
   }
 }
 
-func uploadMeshData(meshData: view MeshData) ret MeshHandle {
-  ret uploadMesh(verts: meshData.verts, vertCount: meshData.vertCount, indices: meshData.indices)
+func uploadMeshData(renderer: mod DeferredRenderer, meshData: view MeshData) ret MeshHandle {
+  ret uploadMesh(
+    renderer: renderer
+    verts: meshData.verts
+    vertCount: meshData.vertCount
+    indices: meshData.indices
+  )
 }
 
 func buildScene(
@@ -175,6 +180,7 @@ func main() ret Int {
 
   # Five rock variants: vary seed, slice count, irregularity.
   var rocks: List(Int) = List.create(Int, cap: 5)
+  var renderer: DeferredRenderer = createDeferredRendererWithUi()
   loop var ri: Int = 0, ri < 5, ++ri {
     let rockMesh: MeshData = generateRock(
       subdivision: 5
@@ -183,7 +189,7 @@ func main() ret Int {
       seed: 1000 + ri * 37
       irregularity: 0.28 + ri.toFloat() * 0.05
     )
-    rocks.add(value: uploadMeshData(meshData: rockMesh).id)
+    rocks.add(value: uploadMeshData(renderer: renderer, meshData: rockMesh).id)
   }
 
   # Five tree variants: vary seed, branch depth, canopy size.
@@ -198,12 +204,12 @@ func main() ret Int {
       leafDensity: 1 + ti % 3
       seed: 500 + ti * 53
     )
-    trunks.add(value: uploadMeshData(meshData: tree.trunk).id)
-    canopies.add(value: uploadMeshData(meshData: tree.canopy).id)
+    trunks.add(value: uploadMeshData(renderer: renderer, meshData: tree.trunk).id)
+    canopies.add(value: uploadMeshData(renderer: renderer, meshData: tree.canopy).id)
   }
 
   let groundData: MeshData = makePlane(size: 40.0, segments: 1)
-  let ground: MeshHandle = uploadMeshData(meshData: groundData)
+  let ground: MeshHandle = uploadMeshData(renderer: renderer, meshData: groundData)
 
   # Five procedural material textures (grass/sand/rock/mud/water), generated in
   # Rae and registered as gpu2d images (shown as swatches along the bottom).
@@ -227,7 +233,6 @@ func main() ret Int {
   var lastY: Float = 0.0
   var dragging: Bool = false
 
-  var renderer: DeferredRenderer = createDeferredRendererWithUi()
   let gs: Int = compileDeferred(renderer: renderer)
   if gs is not 0 {
     log("render graph invalid: {gs}")

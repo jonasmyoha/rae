@@ -61,6 +61,7 @@ open gpu/GpuRender
 open gpu/GpuRenderPass
 open gpu/GpuIds
 open Gpu2dCanvas
+open MeshStore
 open GbufferNative
 open GbufferResources
 
@@ -133,6 +134,7 @@ type GbufferCache {
   terrainSampler: SamplerId
   terrainAdopted: List(ExternalId)
   terrainBlend: Float
+  meshes: MeshStore  # #905: the static mesh store (vertex/index buffers per MeshHandle)
 }
 
 func createGbufferCache() pub ret GbufferCache {
@@ -155,6 +157,7 @@ func createGbufferCache() pub ret GbufferCache {
       terrainSampler: noSamplerId()
       terrainAdopted: List.create(ExternalId, cap: 4)
       terrainBlend: 0.0
+      meshes: createMeshStore()
     }
   }
 }
@@ -314,7 +317,7 @@ func drawRecords(
   count: copy Int
 ) pub {
   unsafe {
-    if gbMeshReady(mesh: mesh) is 0 {
+    if gbMeshReady(cache: cache, resources: resources, mesh: mesh) is 0 {
       ret
     }
     let base: Int = gbDrawCount()
@@ -331,9 +334,9 @@ func drawRecords(
       pass: gbPass()
       pipeline: cache.staticPipeline
       bind: cache.staticBind
-      vbuf: gbMeshVbuf(mesh: mesh)
-      ibuf: gbMeshIbuf(mesh: mesh)
-      icount: gbMeshIcount(mesh: mesh)
+      vbuf: gbMeshVbuf(cache: cache, resources: resources, mesh: mesh)
+      ibuf: gbMeshIbuf(cache: cache, resources: resources, mesh: mesh)
+      icount: gbMeshIcount(cache: cache, mesh: mesh)
       base: base
       count: n
       records: records
@@ -365,20 +368,40 @@ func gbAdvanceDraws(count: copy Int) {
   }
 }
 
-func gbMeshReady(mesh: copy Int) ret Int {
+# #905: mesh lookups go to the cache's MeshStore. "Ready to draw" also needs
+# the geometry pass open (the C rae_gb_mesh_ready folded that in).
+func gbMeshReady(cache: view GbufferCache, resources: view GpuResources, mesh: copy Int) ret Int {
+  if gbFrameActive() is 0 {
+    ret 0
+  }
+  if meshStoreReady(store: cache.meshes, resources: resources, mesh: mesh) {
+    ret 1
+  }
+  ret 0
+}
+
+func gbMeshVbuf(
+  cache: view GbufferCache
+  resources: view GpuResources
+  mesh: copy Int
+) unsafe ret Ptr {
   unsafe {
-    ret nativeGbMeshReady(mesh: mesh)
+    ret meshStoreVbufHandle(store: cache.meshes, resources: resources, mesh: mesh)
   }
 }
 
-func gbMeshVbuf(mesh: Int) unsafe extern("rae_gb_mesh_vbuf") ret Ptr
-
-func gbMeshIbuf(mesh: Int) unsafe extern("rae_gb_mesh_ibuf") ret Ptr
-
-func gbMeshIcount(mesh: copy Int) ret Int {
+func gbMeshIbuf(
+  cache: view GbufferCache
+  resources: view GpuResources
+  mesh: copy Int
+) unsafe ret Ptr {
   unsafe {
-    ret nativeGbMeshIcount(mesh: mesh)
+    ret meshStoreIbufHandle(store: cache.meshes, resources: resources, mesh: mesh)
   }
+}
+
+func gbMeshIcount(cache: view GbufferCache, mesh: copy Int) ret Int {
+  ret meshStoreIndexCount(store: cache.meshes, mesh: mesh)
 }
 
 # Skin bind group creation (#503): built in Rae from the skin pipeline's layout
@@ -570,7 +593,7 @@ func draw(
   toon: copy Int
 ) pub {
   unsafe {
-    if gbMeshReady(mesh: mesh) is 0 {
+    if gbMeshReady(cache: cache, resources: resources, mesh: mesh) is 0 {
       ret
     }
     let base: Int = gbDrawCount()
@@ -597,9 +620,9 @@ func draw(
       pass: gbPass()
       pipeline: cache.staticPipeline
       bind: cache.staticBind
-      vbuf: gbMeshVbuf(mesh: mesh)
-      ibuf: gbMeshIbuf(mesh: mesh)
-      icount: gbMeshIcount(mesh: mesh)
+      vbuf: gbMeshVbuf(cache: cache, resources: resources, mesh: mesh)
+      ibuf: gbMeshIbuf(cache: cache, resources: resources, mesh: mesh)
+      icount: gbMeshIcount(cache: cache, mesh: mesh)
       base: base
       count: 1
       records: cache.drawScratch.data
