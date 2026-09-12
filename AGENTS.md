@@ -504,6 +504,16 @@ The compiler has one version, `compiler/VERSION` — a single semver line
   Between tags, `rae --version` reports the NEXT version (the current
   `compiler/VERSION` content) suffixed `-dev.N` for N commits since the last
   tag, and `+dirty` on an uncommitted tree.
+- **Projects declare which Rae they need (#931).** A `.raepack` may carry
+  `rae: { version: "0.1" }` (bare = caret, `>=0.1.0 <0.2.0`; or an explicit
+  `">=A <B"` range). `rae run`/`build`/`watch` check it against this compiler
+  BEFORE the format preflight and fail with the repair if it does not match; a
+  between-tags `-dev` build counts as its base version (so co-developing Rae
+  and a project on `main` does not trip it). `RAE_TOOLCHAIN_CHECK=off` skips the
+  non-strict check; `--check-toolchain` is the strict CI form (requires a tagged
+  release, cannot be silenced by the env var). No pack, or a pack without a
+  `rae` block, means no check. A verified build writes the project's `rae.lock`
+  `toolchain { version commit }` block. `rae init` scaffolds the requirement.
 
 ---
 ## Interaction rules
