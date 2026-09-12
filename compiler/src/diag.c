@@ -22,6 +22,10 @@ static const char* simplify_path(const char* path) {
   return path;
 }
 
+const char* diag_simplify_path(const char* path) {
+  return simplify_path(path);
+}
+
 static bool g_diag_quiet = false;
 
 void diag_set_quiet(bool quiet) {

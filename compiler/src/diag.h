@@ -29,4 +29,9 @@ void diag_reset(void);
  * parses a file before the build does and must not report twice. */
 void diag_set_quiet(bool quiet);
 
+// The same CWD-relative shortening diag_error/diag_report apply to a
+// location's file before printing it, exposed so a diagnostic MESSAGE that
+// embeds a second file:line (e.g. "declared <file>:<line>") can match (#928).
+const char* diag_simplify_path(const char* path);
+
 #endif /* DIAG_H */
