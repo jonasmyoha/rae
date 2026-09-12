@@ -150,11 +150,13 @@ func readChannel(
 # known bug comparing those against `none`; lib/hot_reload declares the same raw
 # extern for the same reason. `rae_sys_read_file_text` is not a substitute — it
 # takes a byte RANGE, so it reads nothing without a length.
-func rae_ext_rae_sys_read_file(path: String) unsafe extern ret String
+# The dataset is a stdlib asset (lib/data/...), so it goes through the
+# toolchain-aware reader like the stdlib shaders and scenes (#937).
+func nativeHosekReadFile(path: String) unsafe extern("rae_ext_rae_gb_read_shader") ret String
 
 func loadHosekDataset(path: view String) pub ret HosekDataset {
   unsafe {
-    let raw: String = rae_ext_rae_sys_read_file(path: path)
+    let raw: String = nativeHosekReadFile(path: path)
     if raw.length() is 0 {
       ret emptyHosekDataset()
     }

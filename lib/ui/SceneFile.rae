@@ -3,12 +3,15 @@ import ui/Scene
 
 # The runtime returns an empty String on failure. Keep this non-optional bridge
 # until the C backend's opt-String return path is representation-safe.
-func rae_ext_rae_sys_read_file(path: String) unsafe extern ret String
+# Stdlib scenes (lib/app3d/scenes/*.raescene) are read through the same
+# toolchain-aware reader as the stdlib shaders: the path as given first, then
+# $RAE_STDLIB for a "lib/..." path, and a loud diagnostic on a miss (#937).
+func nativeSceneReadFile(path: String) unsafe extern("rae_ext_rae_gb_read_shader") ret String
 
 func loadSceneFile(path: view String) pub ret Scene {
   var source: String = ""
   unsafe {
-    source = rae_ext_rae_sys_read_file(path: path)
+    source = nativeSceneReadFile(path: path)
   }
   ret parseScene(source: source)
 }

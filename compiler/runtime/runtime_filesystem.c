@@ -99,14 +99,14 @@ rae_String rae_ext_rae_gb_read_shader(rae_String path) {
    *    WGPU shader-module creation staring at an empty source. */
   if (stdlib && stdlib[0]) {
     fprintf(stderr,
-            "error: could not read shader asset '%s' (also tried $RAE_STDLIB=%s). "
-            "The Rae stdlib shaders are missing here; set RAE_STDLIB to the "
+            "error: could not read stdlib asset '%s' (also tried $RAE_STDLIB=%s). "
+            "The Rae stdlib files are missing here; set RAE_STDLIB to the "
             "toolchain's lib/ directory.\n", p, stdlib);
   } else {
     fprintf(stderr,
-            "error: could not read shader asset '%s', and $RAE_STDLIB is unset. "
+            "error: could not read stdlib asset '%s', and $RAE_STDLIB is unset. "
             "Run through `rae run`, or set RAE_STDLIB to the toolchain's lib/ "
-            "directory so stdlib shaders resolve without a local lib/ copy.\n", p);
+            "directory so stdlib assets resolve without a local lib/ copy.\n", p);
   }
   return (rae_String){NULL, 0, 0, 0};
 }
