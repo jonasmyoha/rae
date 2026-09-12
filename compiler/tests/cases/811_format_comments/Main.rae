@@ -1,0 +1,54 @@
+# Leading file comment. The blank line below it is kept (at most one).
+
+# Comments attach to what follows them; a trailing comment stays on its
+# statement's line when the statement stays on one line.
+import String
+
+
+# Two blank lines above collapse to one.
+func short(a: Int, b: Int) ret Int {
+  ret a + b # trailing on ret
+}
+
+# A comment line that is far longer than one hundred columns gets wrapped at a space so that the result fits in the width the policy sets, and continuation lines keep the hash prefix.
+func long(
+  # about a
+  a: Int
+  # about b
+  b: Int
+  c: Int
+  d: Int
+) ret Int {
+  let sum: Int = a + b # trailing comment on a one-line statement
+
+  # blank line above is kept; the one below the call is kept too
+  let total: Int = long(a: sum, b: sum, c: sum, d: sum) # a trailing comment on a call that goes vertical
+
+  let p: Point = { x: 1, y: 2 } # trailing on an object literal
+  let v: List(Int) = [
+    1
+    # inside a vertical list literal
+    2
+    3
+    4
+    5
+  ]
+  if total > 0 {
+    log("positive")
+    # last comment inside the block stays inside
+  }
+  # comment between statements
+  ret total + p.x + v.length()
+  # comment after the last statement of the function
+}
+
+type Point {
+  # x first
+  x: Int
+  y: Int # trailing on a field
+}
+
+func main() {
+  log("{short(a: 1, b: 2)}")
+}
+# comment at the very end of the file

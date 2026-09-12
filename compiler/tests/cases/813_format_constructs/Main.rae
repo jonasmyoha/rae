@@ -1,0 +1,85 @@
+# #916: every construct the parser desugars or the old printer dropped must
+# print back as written: open/import (with alias), if let, else if, own, as,
+# taskScope, parallelLoop, query loops, field defaults, extern symbols,
+# generic parameters, or-patterns, defer, unsafe, destructuring, globals.
+open Math
+import String as Text
+import ecs/Query
+
+const maxRetries: Int = 5
+let title: String = "Rae"
+alias Size = Vec2
+
+type Vec2 {
+  x: Float = 0.0
+  y: Float = 0.0
+}
+
+type Pos {
+  x: Float
+}
+
+type Vel {
+  x: Float
+}
+
+func nativeSum(a: Int, b: Int) unsafe extern("rae_sum") ret Int
+
+func first(T: type, items: view List(T)) ret opt T {
+  ret items.first()
+}
+
+func classify(value: Int) ret Int {
+  match value {
+    case 1, 2, 3 {
+      ret 1
+    }
+    case 4 {
+      ret 2
+    }
+    default {
+      ret 0
+    }
+  }
+}
+
+func pair() ret a: Int, b: Int {
+  ret a: 1, b: 2
+}
+
+func main() {
+  var maybe: opt Int = none
+  if let n: Int = maybe {
+    log("{n}")
+  } else if maxRetries > 3 {
+    log("many")
+  } else {
+    log("few")
+  }
+  let owned: List(Int) = own List.create(Int, cap: 4)
+  let f: Float = 3 as Float * 2.0
+  let shifted: Int = (1 shl 4) bitor 2
+  let keep: Int = (1 + 2) * 3
+  let a: a, let b: b = pair()
+  let size: Size = { x: 1.0, y: 2.0 }
+  taskScope {
+    log("scoped")
+  }
+  parallelLoop var i: Int = 0, i < 4, ++i {
+    log("{i}")
+  }
+  var positions: List(Pos) = List.create(Pos, cap: 4)
+  var velocities: List(Vel) = List.create(Vel, cap: 4)
+  loop let entity: EntityId, p: mod Pos, v: view Vel in query2(tableA: positions, tableB: velocities) {
+    p.x = p.x + v.x
+  }
+  defer {
+    log("done")
+  }
+  unsafe {
+    let s: Int = nativeSum(a: 1, b: 2)
+    log("{s}")
+  }
+  let m: Int = match a { case 1 => 10, default => 0 }
+  log("{owned.length()} {f} {shifted} {keep} {b} {size.x} {m} {title} {classify(value: 2)}")
+}
