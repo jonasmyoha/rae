@@ -9,20 +9,18 @@
 # A row always carries the (albumStem, trackIndex) of the real song it
 # points at, so playback works identically whether the rows came from a
 # single album or a playlist that mixes songs from many albums.
-
-
 type CollectionRow {
-  number: Int        # 1-based display number
+  number: Int  # 1-based display number
   title: String
-  subtitle: String   # "Artist · 3:21"
+  subtitle: String  # "Artist · 3:21"
   albumStem: String  # album the song lives in (drives playback)
-  trackIndex: Int    # index within that album
+  trackIndex: Int  # index within that album
 }
 
 type CollectionView {
   title: String
-  caption: String    # "Album · 11 songs · 2016" | "Playlist · 5 songs"
-  artist: String     # header artist line ("" for playlists)
+  caption: String  # "Album · 11 songs · 2016" | "Playlist · 5 songs"
+  artist: String  # header artist line ("" for playlists)
   coverStem: String  # album stem backing the hero cover
   rows: List(CollectionRow)
 }
@@ -32,7 +30,12 @@ type CollectionView {
 # stem isn't in the catalog or the index is out of range — a stale
 # playlist reference just drops out of the list rather than rendering a
 # blank row.
-func collectionAppendSong(rows: mod List(CollectionRow), albums: view List(Album), stem: view String, trackIndex: view Int) {
+func collectionAppendSong(
+  rows: mod List(CollectionRow)
+  albums: view List(Album)
+  stem: view String
+  trackIndex: view Int
+) {
   unsafe {
     let ai: Int = findAlbumIndex(albums: albums, stem: stem)
     if ai < 0 {
@@ -114,7 +117,10 @@ func collectionFromAlbum(album: view Album) pub ret CollectionView {
 # Resolve a playlist's items to song rows. `track` items add their one
 # song; `album` items expand to all of that album's tracks; `playlist`
 # links are skipped (no recursion — avoids cycles).
-func collectionFromPlaylist(playlist: view Playlist, albums: view List(Album)) pub ret CollectionView {
+func collectionFromPlaylist(
+  playlist: view Playlist
+  albums: view List(Album)
+) pub ret CollectionView {
   unsafe {
     let rows: List(CollectionRow) = List.create(CollectionRow, cap: playlist.items.length)
     let n: Int = playlist.items.length
@@ -124,7 +130,12 @@ func collectionFromPlaylist(playlist: view Playlist, albums: view List(Album)) p
       let isTrack: Bool = it.kind is "track"
       let isAlbum: Bool = it.kind is "album"
       if isTrack {
-        collectionAppendSong(rows: rows, albums: albums, stem: it.albumStem, trackIndex: it.trackIndex)
+        collectionAppendSong(
+          rows: rows
+          albums: albums
+          stem: it.albumStem
+          trackIndex: it.trackIndex
+        )
       }
       if isAlbum {
         let ai: Int = findAlbumIndex(albums: albums, stem: it.albumStem)
@@ -133,7 +144,12 @@ func collectionFromPlaylist(playlist: view Playlist, albums: view List(Album)) p
           let tn: Int = a.tracks.length
           var tj: Int = 0
           loop tj < tn {
-            collectionAppendSong(rows: rows, albums: albums, stem: it.albumStem, trackIndex: tj)
+            collectionAppendSong(
+              rows: rows
+              albums: albums
+              stem: it.albumStem
+              trackIndex: tj
+            )
             tj = tj + 1
           }
         }

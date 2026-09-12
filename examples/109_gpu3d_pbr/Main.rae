@@ -40,7 +40,11 @@ func uploadMeshData(meshData: view MeshData) ret MeshHandle {
 
 # Build the material-study scene: a metallic x roughness sphere grid, an
 # emissive torus above it, and a ground plane.
-func buildScene(sphere: view MeshHandle, torus: view MeshHandle, ground: view MeshHandle) ret World3d {
+func buildScene(
+  sphere: view MeshHandle
+  torus: view MeshHandle
+  ground: view MeshHandle
+) ret World3d {
   var world: World3d = create()
   let noEmit: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
   let noRot: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
@@ -54,20 +58,63 @@ func buildScene(sphere: view MeshHandle, torus: view MeshHandle, ground: view Me
       if roughness < 0.05 {
         roughness = 0.05
       }
-      let mat: Material3d = { baseColor: Vec3.create(x: 0.9, y: 0.25, z: 0.2), metallic: metallic, roughness: roughness, emission: noEmit, toon: false }
+      let mat: Material3d = {
+        baseColor: Vec3.create(x: 0.9, y: 0.25, z: 0.2)
+        metallic: metallic
+        roughness: roughness
+        emission: noEmit
+        toon: false
+      }
       # Z-up: the grid spreads across X (right) and Y (forward), lifted on Z.
-      let pos: Vec3 = Vec3.create(x: (col.toFloat() - 2.0) * 2.4, y: (row.toFloat() - 2.0) * 2.4, z: 0.5)
-      let e: EntityId = world3dAddMeshInstance(world: world, mesh: sphere, material: mat, position: pos, rotation: noRot, scale: unit)
+      let pos: Vec3 = Vec3.create(
+        x: (col.toFloat() - 2.0) * 2.4
+        y: (row.toFloat() - 2.0) * 2.4
+        z: 0.5
+      )
+      let e: EntityId = world3dAddMeshInstance(
+        world: world
+        mesh: sphere
+        material: mat
+        position: pos
+        rotation: noRot
+        scale: unit
+      )
     }
   }
 
   # Emissive metallic torus hovering above the grid (+Z is up).
-  let torusMat: Material3d = { baseColor: Vec3.create(x: 0.85, y: 0.86, z: 0.9), metallic: 1.0, roughness: 0.18, emission: Vec3.create(x: 0.05, y: 0.12, z: 0.3), toon: false }
-  let torusE: EntityId = world3dAddMeshInstance(world: world, mesh: torus, material: torusMat, position: Vec3.create(x: 0.0, y: 0.0, z: 3.6), rotation: noRot, scale: unit)
+  let torusMat: Material3d = {
+    baseColor: Vec3.create(x: 0.85, y: 0.86, z: 0.9)
+    metallic: 1.0
+    roughness: 0.18
+    emission: Vec3.create(x: 0.05, y: 0.12, z: 0.3)
+    toon: false
+  }
+  let torusE: EntityId = world3dAddMeshInstance(
+    world: world
+    mesh: torus
+    material: torusMat
+    position: Vec3.create(x: 0.0, y: 0.0, z: 3.6)
+    rotation: noRot
+    scale: unit
+  )
 
   # Ground plane just below the spheres.
-  let groundMat: Material3d = { baseColor: Vec3.create(x: 0.42, y: 0.43, z: 0.45), metallic: 0.0, roughness: 0.9, emission: noEmit, toon: false }
-  let groundE: EntityId = world3dAddMeshInstance(world: world, mesh: ground, material: groundMat, position: Vec3.create(x: 0.0, y: 0.0, z: 0.0 - 0.7), rotation: noRot, scale: unit)
+  let groundMat: Material3d = {
+    baseColor: Vec3.create(x: 0.42, y: 0.43, z: 0.45)
+    metallic: 0.0
+    roughness: 0.9
+    emission: noEmit
+    toon: false
+  }
+  let groundE: EntityId = world3dAddMeshInstance(
+    world: world
+    mesh: ground
+    material: groundMat
+    position: Vec3.create(x: 0.0, y: 0.0, z: 0.0 - 0.7)
+    rotation: noRot
+    scale: unit
+  )
   ret world
 }
 
@@ -76,7 +123,12 @@ func main() ret Int {
 
   let sphereData: MeshData = makeSphere(rings: 32, segments: 48)
   let planeData: MeshData = makePlane(size: 40.0, segments: 1)
-  let torusData: MeshData = makeTorus(majorR: 1.0, minorR: 0.35, majorSegs: 96, minorSegs: 48)
+  let torusData: MeshData = makeTorus(
+    majorR: 1.0
+    minorR: 0.35
+    majorSegs: 96
+    minorSegs: 48
+  )
   let sphere: MeshHandle = uploadMeshData(meshData: sphereData)
   let ground: MeshHandle = uploadMeshData(meshData: planeData)
   let torus: MeshHandle = uploadMeshData(meshData: torusData)
@@ -85,7 +137,10 @@ func main() ret Int {
   # The torus is the last-but-one instance; remember its entity so the
   # animation below can spin it in place. Its dense position in the
   # meshRenderers table is count-2 (the ground plane is the last add).
-  let torusEntity: EntityId = world3dMeshRendererEntityAt(world: world, i: world3dMeshRendererCount(world: world) - 2)
+  let torusEntity: EntityId = world3dMeshRendererEntityAt(
+    world: world
+    i: world3dMeshRendererCount(world: world) - 2
+  )
 
   var camera: Camera3d = defaultCamera3d()
   var light: Light3d = defaultLight3d()
@@ -144,7 +199,14 @@ func main() ret Int {
     # Elapsed seconds: the subtraction happens in Float64 (full epoch
     # precision) and only the small delta is narrowed, explicitly.
     let t: Float = (Gpu2d.nowSeconds() - startT) as Float
-    camera.position = orbitEye(targetX: camera.target.x, targetY: camera.target.y, targetZ: camera.target.z, yaw: yaw, pitch: pitch, dist: dist)
+    camera.position = orbitEye(
+      targetX: camera.target.x
+      targetY: camera.target.y
+      targetZ: camera.target.z
+      yaw: yaw
+      pitch: pitch
+      dist: dist
+    )
 
     # Slowly orbiting sun keeps the specular highlight sweeping. Z-up: the
     # sun points downward (-Z) and circles in XY. The -Y bias keeps the
@@ -152,7 +214,11 @@ func main() ret Int {
     # the viewer — without it the highlights face away and the material
     # grid reads flat.
     let sunA: Float = t * 0.15
-    light.sunDir = Vec3.create(x: 0.0 - Math.cos(x: sunA) * 0.6, y: 0.0 - 0.7 - Math.sin(x: sunA) * 0.3, z: 0.0 - 1.0)
+    light.sunDir = Vec3.create(
+      x: 0.0 - Math.cos(x: sunA) * 0.6
+      y: 0.0 - 0.7 - Math.sin(x: sunA) * 0.3
+      z: 0.0 - 1.0
+    )
 
     # Spin the torus about +Z and tumble it about +X.
     var torusT: Transform3d = world3dGetTransform(world: world, entity: torusEntity)
@@ -161,12 +227,18 @@ func main() ret Int {
 
     let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
     if Gpu2d.renderGate() {
-      renderDeferredFrameWorld(renderer: renderer, world: world, camera: camera, light: light, aspect: aspect)
+      renderDeferredFrameWorld(
+        renderer: renderer
+        world: world
+        camera: camera
+        light: light
+        aspect: aspect
+      )
       # Frame history for motion vectors (#336): current becomes previous.
       world3dPrevTransformSystem(world: world)
     }
   }
-  shutdownDeferredRenderer(renderer: renderer)   # #904: the renderer-owned GPU manager, before the C shutdown
+  shutdownDeferredRenderer(renderer: renderer)  # #904: the renderer-owned GPU manager, before the C shutdown
   shutdown()
   Gpu2d.closeWindow()
   ret 0

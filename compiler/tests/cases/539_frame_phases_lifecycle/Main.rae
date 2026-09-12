@@ -9,8 +9,13 @@
 open ui/Ecs
 open ecs/Queue
 
-type AddCmd { amount: Int }
-type SetCmd { value: Int }
+type AddCmd {
+  amount: Int
+}
+
+type SetCmd {
+  value: Int
+}
 
 # Source system: an integer counter with an inbox of AddCmds.
 type SysA {
@@ -19,6 +24,7 @@ type SysA {
   ticks: Int
   inbox: Queue(AddCmd)
 }
+
 # Mirror system: mirrors SysA.value, driven by SetCmds in its inbox.
 type SysB {
   revision: Int
@@ -32,8 +38,13 @@ type Observe {
   dirty: Bool
 }
 
-func createSysA() ret SysA { ret SysA { revision: 0, value: 0, ticks: 0, inbox: createQueue(AddCmd) } }
-func createSysB() ret SysB { ret SysB { revision: 0, mirrored: 0, inbox: createQueue(SetCmd) } }
+func createSysA() ret SysA {
+  ret SysA { revision: 0, value: 0, ticks: 0, inbox: createQueue(AddCmd) }
+}
+
+func createSysB() ret SysB {
+  ret SysB { revision: 0, mirrored: 0, inbox: createQueue(SetCmd) }
+}
 
 # --- lifecycle: processCommands — drain OWN inbox, mutate OWN tables ---
 func processCommandsA(this: mod SysA) {

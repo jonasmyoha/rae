@@ -32,9 +32,13 @@
 
 # ----- resource kinds -------------------------------------------------
 const resTexture2d: Int = 0
+
 const resTexture3d: Int = 1
+
 const resDepth: Int = 2
+
 const resStorageBuffer: Int = 3
+
 const resUniformBuffer: Int = 4
 
 # ----- lifetime classes -----------------------------------------------
@@ -45,7 +49,9 @@ const resUniformBuffer: Int = 4
 #              express them is wrong rather than merely unoptimised.
 # External   — owned elsewhere (swapchain, the gpu2d offscreen target).
 const lifeTransient: Int = 0
+
 const lifePersistent: Int = 1
+
 const lifeExternal: Int = 2
 
 # ----- access intent --------------------------------------------------
@@ -53,28 +59,41 @@ const lifeExternal: Int = 2
 # ordering. Barrier inference later needs intent, and retrofitting it
 # would mean revisiting every pass author.
 const accAttachmentWrite: Int = 0
+
 const accAttachmentRead: Int = 1
+
 const accSampledRead: Int = 2
+
 const accStorageRead: Int = 3
+
 const accStorageWrite: Int = 4
+
 const accUniformRead: Int = 5
 
 # ----- pass kinds -----------------------------------------------------
 # Raster and compute are peer node kinds. This is NOT a technique tag.
 const passRaster: Int = 0
+
 const passCompute: Int = 1
 
 # ----- validation status ----------------------------------------------
 const graphOk: Int = 0
-const graphErrUnwritten: Int = 1     # a pass reads a resource nobody writes
-const graphErrDoubleWrite: Int = 2   # two passes write the same resource
-const graphErrCycle: Int = 3         # dependencies form a cycle
+
+const graphErrUnwritten: Int = 1  # a pass reads a resource nobody writes
+
+const graphErrDoubleWrite: Int = 2  # two passes write the same resource
+
+const graphErrCycle: Int = 3  # dependencies form a cycle
 
 # Sizing is a policy, resolved against the frame target by the renderer.
 const sizeFull: Int = 0
+
 const sizeHalf: Int = 1
+
 const sizeQuarter: Int = 2
+
 const sizeFixed: Int = 3
+
 const sizeVolume: Int = 4
 
 # ----- data -----------------------------------------------------------
@@ -82,14 +101,14 @@ const sizeVolume: Int = 4
 # String lists (see the Rae List(Struct) note in the header).
 type ResourceDesc {
   kind: Int
-  format: Int      # backend-specific format id; the graph never inspects it
+  format: Int  # backend-specific format id; the graph never inspects it
   sizing: Int
   lifetime: Int
 }
 
 type PassDesc {
-  kind: Int        # passRaster | passCompute
-  tag: Int         # OPAQUE to this module — the renderer's dispatch key
+  kind: Int  # passRaster | passCompute
+  tag: Int  # OPAQUE to this module — the renderer's dispatch key
 }
 
 # One declaration that pass `pass` touches resource `resource`.
@@ -98,7 +117,7 @@ type Edge {
   resource: Int
   access: Int
   isWrite: Bool
-  isModify: Bool   # read-then-write (load-preserving attachment, ping-pong)
+  isModify: Bool  # read-then-write (load-preserving attachment, ping-pong)
 }
 
 type RenderGraph {
@@ -107,70 +126,102 @@ type RenderGraph {
   passNames: List(String)
   passes: List(PassDesc)
   edges: List(Edge)
-  order: List(Int)      # topologically sorted pass indices; empty until compiled
+  order: List(Int)  # topologically sorted pass indices; empty until compiled
   status: Int
-  errorPass: Int        # pass index implicated by a validation failure, else -1
-  errorResource: Int    # resource index implicated, else -1
+  errorPass: Int  # pass index implicated by a validation failure, else -1
+  errorResource: Int  # resource index implicated, else -1
 }
 
 # Internal invariant reads. Graph construction keeps these parallel lists in
 # range; malformed state still produces defined defaults rather than an
 # unchecked memory access.
 func graphEdgeAt(edges: view List(Edge), index: view Int) ret Edge {
-  if let edge: Edge = edges.copyAt(index: index) { ret edge }
-  ret Edge { pass: -1, resource: -1, access: 0, isWrite: false, isModify: false }
+  if let edge: Edge = edges.copyAt(index: index) {
+    ret edge
+  }
+  ret Edge {
+    pass: -1
+    resource: -1
+    access: 0
+    isWrite: false
+    isModify: false
+  }
 }
 
 func graphIntAt(values: view List(Int), index: view Int) ret Int {
-  if let value: Int = values.copyAt(index: index) { ret value }
+  if let value: Int = values.copyAt(index: index) {
+    ret value
+  }
   ret -1
 }
 
 func graphBoolAt(values: view List(Bool), index: view Int) ret Bool {
-  if let value: Bool = values.copyAt(index: index) { ret value }
+  if let value: Bool = values.copyAt(index: index) {
+    ret value
+  }
   ret false
 }
 
 func graphResourceAt(values: view List(ResourceDesc), index: view Int) ret ResourceDesc {
-  if let value: ResourceDesc = values.copyAt(index: index) { ret value }
+  if let value: ResourceDesc = values.copyAt(index: index) {
+    ret value
+  }
   ret ResourceDesc { kind: 0, format: 0, sizing: 0, lifetime: lifeTransient }
 }
 
 func graphPassAt(values: view List(PassDesc), index: view Int) ret PassDesc {
-  if let value: PassDesc = values.copyAt(index: index) { ret value }
+  if let value: PassDesc = values.copyAt(index: index) {
+    ret value
+  }
   ret PassDesc { kind: passRaster, tag: -1 }
 }
 
 func graphStringAt(values: view List(String), index: view Int) ret String {
-  if let value: String = values.copyAt(index: index) { ret value }
+  if let value: String = values.copyAt(index: index) {
+    ret value
+  }
   ret ""
 }
 
 func createRenderGraph() pub ret RenderGraph {
   ret RenderGraph {
-    resourceNames: List.create(String, cap: 16),
-    resources: List.create(ResourceDesc, cap: 16),
-    passNames: List.create(String, cap: 16),
-    passes: List.create(PassDesc, cap: 16),
-    edges: List.create(Edge, cap: 64),
-    order: List.create(Int, cap: 16),
-    status: graphOk,
-    errorPass: 0 - 1,
+    resourceNames: List.create(String, cap: 16)
+    resources: List.create(ResourceDesc, cap: 16)
+    passNames: List.create(String, cap: 16)
+    passes: List.create(PassDesc, cap: 16)
+    edges: List.create(Edge, cap: 64)
+    order: List.create(Int, cap: 16)
+    status: graphOk
+    errorPass: 0 - 1
     errorResource: 0 - 1
   }
 }
 
 # ----- declaration ----------------------------------------------------
-func addResource(renderGraph: mod RenderGraph, name: view String, kind: view Int, format: view Int, sizing: view Int, lifetime: view Int) pub ret Int {
+func addResource(
+  renderGraph: mod RenderGraph
+  name: view String
+  kind: view Int
+  format: view Int
+  sizing: view Int
+  lifetime: view Int
+) pub ret Int {
   let id: Int = renderGraph.resources.length
   # A COPY: the graph owns resourceNames and drops it, and `name` is a
   # view we do not own. Storing the borrow would free the caller's buffer.
   renderGraph.resourceNames.add(value: "{name}")
-  renderGraph.resources.add(value: ResourceDesc { kind: kind, format: format, sizing: sizing, lifetime: lifetime })
+  renderGraph.resources.add(
+    value: ResourceDesc { kind: kind, format: format, sizing: sizing, lifetime: lifetime }
+  )
   ret id
 }
 
-func addPass(renderGraph: mod RenderGraph, name: view String, kind: view Int, tag: view Int) pub ret Int {
+func addPass(
+  renderGraph: mod RenderGraph
+  name: view String
+  kind: view Int
+  tag: view Int
+) pub ret Int {
   let id: Int = renderGraph.passes.length
   # Copy for the same reason as addResource above.
   renderGraph.passNames.add(value: "{name}")
@@ -178,12 +229,34 @@ func addPass(renderGraph: mod RenderGraph, name: view String, kind: view Int, ta
   ret id
 }
 
-func passReads(renderGraph: mod RenderGraph, pass: view Int, resource: view Int, access: view Int) pub {
-  renderGraph.edges.add(value: Edge { pass: pass, resource: resource, access: access, isWrite: false, isModify: false })
+func passReads(
+  renderGraph: mod RenderGraph
+  pass: view Int
+  resource: view Int
+  access: view Int
+) pub {
+  renderGraph.edges.add(value: Edge {
+    pass: pass
+    resource: resource
+    access: access
+    isWrite: false
+    isModify: false
+  })
 }
 
-func passWrites(renderGraph: mod RenderGraph, pass: view Int, resource: view Int, access: view Int) pub {
-  renderGraph.edges.add(value: Edge { pass: pass, resource: resource, access: access, isWrite: true, isModify: false })
+func passWrites(
+  renderGraph: mod RenderGraph
+  pass: view Int
+  resource: view Int
+  access: view Int
+) pub {
+  renderGraph.edges.add(value: Edge {
+    pass: pass
+    resource: resource
+    access: access
+    isWrite: true
+    isModify: false
+  })
 }
 
 # Read-modify-write: the pass consumes the resource's current contents and
@@ -197,8 +270,19 @@ func passWrites(renderGraph: mod RenderGraph, pass: view Int, resource: view Int
 # "who paints over whom" is a semantic decision by the frame author, not
 # something a dependency graph can infer. Ordering BETWEEN the chain and
 # every other pass is still derived normally.
-func passModifies(renderGraph: mod RenderGraph, pass: view Int, resource: view Int, access: view Int) pub {
-  renderGraph.edges.add(value: Edge { pass: pass, resource: resource, access: access, isWrite: true, isModify: true })
+func passModifies(
+  renderGraph: mod RenderGraph
+  pass: view Int
+  resource: view Int
+  access: view Int
+) pub {
+  renderGraph.edges.add(value: Edge {
+    pass: pass
+    resource: resource
+    access: access
+    isWrite: true
+    isModify: true
+  })
 }
 
 # ----- queries --------------------------------------------------------
@@ -221,7 +305,11 @@ func writerOf(renderGraph: view RenderGraph, resource: view Int) ret Int {
 }
 
 # The producer immediately before `edgeIndex` in `resource`'s chain, or -1.
-func producerBefore(renderGraph: view RenderGraph, resource: view Int, edgeIndex: view Int) ret Int {
+func producerBefore(
+  renderGraph: view RenderGraph
+  resource: view Int
+  edgeIndex: view Int
+) ret Int {
   var prev: Int = 0 - 1
   var i: Int = 0
   loop i < edgeIndex {
@@ -259,21 +347,21 @@ func compile(renderGraph: mod RenderGraph) pub ret Int {
     let a: Edge = graphEdgeAt(edges: renderGraph.edges, index: i)
     if a.isWrite {
       if not a.isModify {
-      var j: Int = i + 1
-      loop j < renderGraph.edges.length {
-        let b: Edge = graphEdgeAt(edges: renderGraph.edges, index: j)
-        if b.isWrite {
-          if not b.isModify {
-          if b.resource is a.resource {
-            renderGraph.status = graphErrDoubleWrite
-            renderGraph.errorPass = b.pass
-            renderGraph.errorResource = b.resource
-            ret renderGraph.status
+        var j: Int = i + 1
+        loop j < renderGraph.edges.length {
+          let b: Edge = graphEdgeAt(edges: renderGraph.edges, index: j)
+          if b.isWrite {
+            if not b.isModify {
+              if b.resource is a.resource {
+                renderGraph.status = graphErrDoubleWrite
+                renderGraph.errorPass = b.pass
+                renderGraph.errorResource = b.resource
+                ret renderGraph.status
+              }
+            }
           }
-          }
+          j = j + 1
         }
-        j = j + 1
-      }
       }
     }
     i = i + 1

@@ -36,14 +36,29 @@ open water/WaterFftDiagnose
 # shader samples. rgba16float is enough for displacement in metres and unit
 # normals; the Jacobian map uses the same format for one path.
 const cascadeMapUsage: UInt64 = WGPUTextureUsage_StorageBinding + WGPUTextureUsage_TextureBinding
+
 # rgba32float storage textures: h0 packs (h0(k), h0(-k)); the butterfly packs
 # (twiddle re, twiddle im, read index a, read index b) per (stage, index).
 const float4StorageUsage: UInt64 = WGPUTextureUsage_StorageBinding + WGPUTextureUsage_TextureBinding + WGPUTextureUsage_CopySrc
 
 # Creates a texture + its view and stores both at `index` of the lists.
-func createMap(resources: mod GpuResources, width: view Int, height: view Int, format: view Int32, usage: view UInt64,
-               textures: mod List(TextureId), views: mod List(TextureViewId), index: view Int) ret Bool {
-  if let texture: TextureId = createTexture(resources: resources, width: width, height: height, format: format, usage: usage) {
+func createMap(
+  resources: mod GpuResources
+  width: view Int
+  height: view Int
+  format: view Int32
+  usage: view UInt64
+  textures: mod List(TextureId)
+  views: mod List(TextureViewId)
+  index: view Int
+) ret Bool {
+  if let texture: TextureId = createTexture(
+    resources: resources
+    width: width
+    height: height
+    format: format
+    usage: usage
+  ) {
     if let textureView: TextureViewId = createTextureView(resources: resources, texture: texture) {
       textures.set(index: index, value: texture)
       views.set(index: index, value: textureView)
@@ -73,7 +88,9 @@ func waterFftStep(waterSystem: mod WaterSystem, resources: mod GpuResources) {
   waterSystem.fftLastUpdates = 0
   waterPollSubmissions(waterSystem: waterSystem, resources: resources)
   collectWaterPerf(performance: waterSystem.performance, resources: resources)
-  if gbDeferredPrepare() is 0 { ret }
+  if gbDeferredPrepare() is 0 {
+    ret
+  }
   let body: WaterBody = primaryBody(waterSystem: waterSystem)
   if waterSystem.cascadesMade and (body.fftSize is not waterSystem.fftAllocatedSize or body.cascadeCount is not waterSystem.fftAllocatedCount) {
     resetWaterFft(waterSystem: waterSystem, resources: resources)
@@ -81,15 +98,25 @@ func waterFftStep(waterSystem: mod WaterSystem, resources: mod GpuResources) {
   if not waterSystem.cascadesMade {
     loop var cascade: Int = 0, cascade < body.cascadeCount, ++cascade {
       loop var map: Int = 0, map < waterCascadeMaps, ++map {
-        createMap(resources: resources, width: body.fftSize, height: body.fftSize, format: WGPUTextureFormat_RGBA16Float, usage: cascadeMapUsage,
-          textures: waterSystem.cascades.textures, views: waterSystem.cascades.views, index: waterCascadeIndex(cascade: cascade, map: map))
+        createMap(
+          resources: resources
+          width: body.fftSize
+          height: body.fftSize
+          format: WGPUTextureFormat_RGBA16Float
+          usage: cascadeMapUsage
+          textures: waterSystem.cascades.textures
+          views: waterSystem.cascades.views
+          index: waterCascadeIndex(cascade: cascade, map: map)
+        )
       }
     }
     waterSystem.cascadesMade = true
     waterSystem.fftAllocatedSize = body.fftSize
     waterSystem.fftAllocatedCount = body.cascadeCount
     waterSystem.fftNeedsRefresh = true
-    log("[water] fft cascades: {body.cascadeCount} x {body.fftSize}x{body.fftSize}, update rate {body.updateRate}")
+    log(
+      "[water] fft cascades: {body.cascadeCount} x {body.fftSize}x{body.fftSize}, update rate {body.updateRate}"
+    )
   }
   if not sameWaterSpectrum(previous: waterSystem.fftSeaState, current: body) {
     waterFftInvalidate(waterSystem: waterSystem, resources: resources)
@@ -104,12 +131,15 @@ func waterFftStep(waterSystem: mod WaterSystem, resources: mod GpuResources) {
 }
 
 # ----- FFT spectrum + butterfly (#849) ----------------------------------------
-const fftUniformFloats: Int = 12   # three vec4 (see waterFft.wgsl `FftU`)
+const fftUniformFloats: Int = 12  # three vec4 (see waterFft.wgsl `FftU`)
 
 func log2Int(n: view Int) ret Int {
   var stages: Int = 0
   var v: Int = n
-  loop v > 1 { v = v / 2 stages = stages + 1 }
+  loop v > 1 {
+    v = v / 2
+    stages = stages + 1
+  }
   ret stages
 }
 
@@ -121,30 +151,85 @@ func fftWgsl() ret String {
 # point gets its own pipeline AND bind group: wgpu derives a layout from the
 # bindings an entry point actually uses, so the two cannot share one.
 func ensureFftGpu(waterSystem: mod WaterSystem, resources: mod GpuResources) {
-  if waterSystem.fftGpuMade { ret }
+  if waterSystem.fftGpuMade {
+    ret
+  }
   let source: String = fftWgsl()
   if source.length() is 0 {
-    log("[water fft] lib/water/waterFft.wgsl not readable from the working directory — run from the repo root; the spectrum is not baked")
+    log(
+      "[water fft] lib/water/waterFft.wgsl not readable from the working directory — run from the repo root; the spectrum is not baked"
+    )
     waterSystem.fftGpuMade = true
     ret
   }
   let body: WaterBody = primaryBody(waterSystem: waterSystem)
   let size: Int = body.fftSize
-  if let spectrumPipeline: PipelineId = createComputePipeline(resources: resources, wgsl: source, entryPoint: "spectrum") { waterSystem.fft.spectrumPipeline = spectrumPipeline }
-  if let butterflyPipeline: PipelineId = createComputePipeline(resources: resources, wgsl: source, entryPoint: "butterfly") { waterSystem.fft.butterflyPipeline = butterflyPipeline }
-  if let uniform: BufferId = createBuffer(resources: resources, size: fftUniformFloats * 4, usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst) { waterSystem.fft.uniform = uniform }
-  if let butterfly: TextureId = createTexture(resources: resources, width: log2Int(n: size), height: size, format: WGPUTextureFormat_RGBA32Float, usage: float4StorageUsage) {
-    waterSystem.fft.butterflyTexture = butterfly
-    if let butterflyView: TextureViewId = createTextureView(resources: resources, texture: butterfly) { waterSystem.fft.butterflyView = butterflyView }
+  if let spectrumPipeline: PipelineId = createComputePipeline(
+    resources: resources
+    wgsl: source
+    entryPoint: "spectrum"
+  ) {
+    waterSystem.fft.spectrumPipeline = spectrumPipeline
   }
-  if let readback: BufferId = createBuffer(resources: resources, size: size * size * 16, usage: WGPUBufferUsage_CopyDst + WGPUBufferUsage_MapRead) { waterSystem.fft.readback = readback }
+  if let butterflyPipeline: PipelineId = createComputePipeline(
+    resources: resources
+    wgsl: source
+    entryPoint: "butterfly"
+  ) {
+    waterSystem.fft.butterflyPipeline = butterflyPipeline
+  }
+  if let uniform: BufferId = createBuffer(
+    resources: resources
+    size: fftUniformFloats * 4
+    usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst
+  ) {
+    waterSystem.fft.uniform = uniform
+  }
+  if let butterfly: TextureId = createTexture(
+    resources: resources
+    width: log2Int(n: size)
+    height: size
+    format: WGPUTextureFormat_RGBA32Float
+    usage: float4StorageUsage
+  ) {
+    waterSystem.fft.butterflyTexture = butterfly
+    if let butterflyView: TextureViewId = createTextureView(
+      resources: resources
+      texture: butterfly
+    ) {
+      waterSystem.fft.butterflyView = butterflyView
+    }
+  }
+  if let readback: BufferId = createBuffer(
+    resources: resources
+    size: size * size * 16
+    usage: WGPUBufferUsage_CopyDst + WGPUBufferUsage_MapRead
+  ) {
+    waterSystem.fft.readback = readback
+  }
   loop var cascade: Int = 0, cascade < body.cascadeCount, ++cascade {
-    createMap(resources: resources, width: size, height: size, format: WGPUTextureFormat_RGBA32Float, usage: float4StorageUsage,
-      textures: waterSystem.fft.h0Textures, views: waterSystem.fft.h0Views, index: cascade)
+    createMap(
+      resources: resources
+      width: size
+      height: size
+      format: WGPUTextureFormat_RGBA32Float
+      usage: float4StorageUsage
+      textures: waterSystem.fft.h0Textures
+      views: waterSystem.fft.h0Views
+      index: cascade
+    )
     let entries: List(ResourceRef) = List.create(ResourceRef, cap: 2)
     entries.add(value: bufferRef(id: waterSystem.fft.uniform))
-    entries.add(value: textureViewRef(id: waterSystem.fft.h0Views.copyAtFallback(index: cascade, fallback: noTextureViewId())))
-    if let bind: BindGroupId = createComputeBindGroupOrdered(resources: resources, pipeline: waterSystem.fft.spectrumPipeline, entries: entries) {
+    entries.add(
+      value: textureViewRef(
+        id: waterSystem.fft.h0Views.copyAtFallback(index: cascade, fallback: noTextureViewId())
+      )
+    )
+    if let bind: BindGroupId = createComputeBindGroupOrdered(
+      resources: resources
+      pipeline: waterSystem.fft.spectrumPipeline
+      entries: entries
+    ) {
       waterSystem.fft.spectrumBinds.set(index: cascade, value: bind)
     }
   }
@@ -154,15 +239,23 @@ func ensureFftGpu(waterSystem: mod WaterSystem, resources: mod GpuResources) {
   butterflyEntries.add(value: bufferRef(id: waterSystem.fft.uniform))
   butterflyEntries.add(value: skipRef())
   butterflyEntries.add(value: textureViewRef(id: waterSystem.fft.butterflyView))
-  if let butterflyBind: BindGroupId = createComputeBindGroupOrdered(resources: resources, pipeline: waterSystem.fft.butterflyPipeline, entries: butterflyEntries) {
+  if let butterflyBind: BindGroupId = createComputeBindGroupOrdered(
+    resources: resources
+    pipeline: waterSystem.fft.butterflyPipeline
+    entries: butterflyEntries
+  ) {
     waterSystem.fft.butterflyBind = butterflyBind
   }
   waterSystem.fftGpuMade = true
 }
 
 func cascadeTile(body: view WaterBody, cascade: view Int) ret Float {
-  if cascade is 0 { ret body.cascadeTile0 }
-  if cascade is 1 { ret body.cascadeTile1 }
+  if cascade is 0 {
+    ret body.cascadeTile0
+  }
+  if cascade is 1 {
+    ret body.cascadeTile1
+  }
   ret body.cascadeTile2
 }
 
@@ -176,22 +269,60 @@ func cascadeTile(body: view WaterBody, cascade: view Int) ret Float {
 const cascadeBandBins: Float = 6.0
 
 func cascadeBandHigh(body: view WaterBody, cascade: view Int) ret Float {
-  if cascade >= body.cascadeCount - 1 { ret 1000000.0 }
+  if cascade >= body.cascadeCount - 1 {
+    ret 1000000.0
+  }
   ret cascadeBandBins * 6.28318530718 / cascadeTile(body: body, cascade: cascade + 1)
 }
 
-func uploadFftUniform(waterSystem: mod WaterSystem, resources: view GpuResources, body: view WaterBody, cascade: view Int) {
-  loop waterSystem.fftUniform.length < fftUniformFloats { waterSystem.fftUniform.add(value: 0.0) }
+func uploadFftUniform(
+  waterSystem: mod WaterSystem
+  resources: view GpuResources
+  body: view WaterBody
+  cascade: view Int
+) {
+  loop waterSystem.fftUniform.length < fftUniformFloats {
+    waterSystem.fftUniform.add(value: 0.0)
+  }
   let tile: Float = cascadeTile(body: body, cascade: cascade)
   var kLow: Float = 0.0
-  if cascade > 0 { kLow = cascadeBandHigh(body: body, cascade: cascade - 1) }
+  if cascade > 0 {
+    kLow = cascadeBandHigh(body: body, cascade: cascade - 1)
+  }
   let kHigh: Float = cascadeBandHigh(body: body, cascade: cascade)
-  put4(uniform: waterSystem.fftUniform, base: 0, x: body.fftSize.toFloat(), y: tile, z: body.windSpeed, w: body.windDirRad)
-  put4(uniform: waterSystem.fftUniform, base: 4, x: body.fetch, y: 9.81, z: body.waterDepth, w: 1337.0 + cascade.toFloat() * 101.0)
+  put4(
+    uniform: waterSystem.fftUniform
+    base: 0
+    x: body.fftSize.toFloat()
+    y: tile
+    z: body.windSpeed
+    w: body.windDirRad
+  )
+  put4(
+    uniform: waterSystem.fftUniform
+    base: 4
+    x: body.fetch
+    y: 9.81
+    z: body.waterDepth
+    w: 1337.0 + cascade.toFloat() * 101.0
+  )
   var testMode: Float = 0.0
-  if waterSystem.fftTestMode { testMode = 1.0 }
-  put4(uniform: waterSystem.fftUniform, base: 8, x: kLow, y: kHigh, z: cascade.toFloat(), w: testMode)
-  uploadFloats(resources: resources, buffer: waterSystem.fft.uniform, floats: waterSystem.fftUniform)
+  if waterSystem.fftTestMode {
+    testMode = 1.0
+  }
+  put4(
+    uniform: waterSystem.fftUniform
+    base: 8
+    x: kLow
+    y: kHigh
+    z: cascade.toFloat()
+    w: testMode
+  )
+  uploadFloats(
+    resources: resources
+    buffer: waterSystem.fft.uniform
+    floats: waterSystem.fftUniform
+  )
 }
 
 func workgroups(extent: view Int) ret Int {
@@ -201,8 +332,21 @@ func workgroups(extent: view Int) ret Int {
 # One compute dispatch of `pipeline` with `bind` over a width x height grid of
 # 8x8 workgroups, SUBMITTED at once (the uniform it read was queued just before,
 # and the next cascade rewrites that same buffer).
-func dispatchFft(waterSystem: mod WaterSystem, resources: mod GpuResources, pipeline: view PipelineId, bind: view BindGroupId, width: view Int, height: view Int) {
-  let command: ComputeCommand = computeCommand(pipeline: pipeline, bindGroup: bind, workgroupsX: workgroups(extent: width), workgroupsY: workgroups(extent: height), workgroupsZ: 1)
+func dispatchFft(
+  waterSystem: mod WaterSystem
+  resources: mod GpuResources
+  pipeline: view PipelineId
+  bind: view BindGroupId
+  width: view Int
+  height: view Int
+) {
+  let command: ComputeCommand = computeCommand(
+    pipeline: pipeline
+    bindGroup: bind
+    workgroupsX: workgroups(extent: width)
+    workgroupsY: workgroups(extent: height)
+    workgroupsZ: 1
+  )
   if let recording: Recording = beginRecording(resources: resources) {
     if recordComputeCommand(recording: recording, resources: resources, command: command) {
       waterSubmit(waterSystem: waterSystem, resources: resources, recording: recording)
@@ -213,20 +357,46 @@ func dispatchFft(waterSystem: mod WaterSystem, resources: mod GpuResources, pipe
 # Bake h0 for every cascade + the butterfly table. Runs ONCE; call
 # waterFftInvalidate when the sea state or the resolution changes.
 func bakeFftSpectrum(waterSystem: mod WaterSystem, resources: mod GpuResources) {
-  if waterSystem.fftBaked { ret }
-  if not isValidPipeline(resources: resources, id: waterSystem.fft.spectrumPipeline) { ret }
+  if waterSystem.fftBaked {
+    ret
+  }
+  if not isValidPipeline(resources: resources, id: waterSystem.fft.spectrumPipeline) {
+    ret
+  }
   let body: WaterBody = primaryBody(waterSystem: waterSystem)
   let size: Int = body.fftSize
   loop var cascade: Int = 0, cascade < body.cascadeCount, ++cascade {
-    uploadFftUniform(waterSystem: waterSystem, resources: resources, body: body, cascade: cascade)
-    dispatchFft(waterSystem: waterSystem, resources: resources, pipeline: waterSystem.fft.spectrumPipeline,
-      bind: waterSystem.fft.spectrumBinds.copyAtFallback(index: cascade, fallback: noBindGroupId()), width: size, height: size)
+    uploadFftUniform(
+      waterSystem: waterSystem
+      resources: resources
+      body: body
+      cascade: cascade
+    )
+    dispatchFft(
+      waterSystem: waterSystem
+      resources: resources
+      pipeline: waterSystem.fft.spectrumPipeline
+      bind: waterSystem.fft.spectrumBinds.copyAtFallback(index: cascade, fallback: noBindGroupId())
+      width: size
+      height: size
+    )
   }
   # The butterfly only needs N; the last uniform upload carries it.
-  dispatchFft(waterSystem: waterSystem, resources: resources, pipeline: waterSystem.fft.butterflyPipeline, bind: waterSystem.fft.butterflyBind, width: log2Int(n: size), height: size)
+  dispatchFft(
+    waterSystem: waterSystem
+    resources: resources
+    pipeline: waterSystem.fft.butterflyPipeline
+    bind: waterSystem.fft.butterflyBind
+    width: log2Int(n: size)
+    height: size
+  )
   waterSystem.fftBaked = true
   waterSystem.fftNeedsRefresh = true
-  log("[water fft] spectrum baked: {body.cascadeCount} cascades of {size}x{size}, wind {body.windSpeed} m/s, fetch {body.fetch} m, depth {body.waterDepth} m; butterfly {log2Int(n: size)} stages")
+  log(
+    "[water fft] spectrum baked: {body.cascadeCount} cascades of {size}x{size}, wind {body.windSpeed} m/s, fetch {body.fetch} m, depth {body.waterDepth} m; butterfly {log2Int(
+      n: size
+    )} stages"
+  )
 }
 
 # Sea state or resolution changed: re-bake next frame.
@@ -262,27 +432,78 @@ func evolveIndex(cascade: view Int, field: view Int) ret Int {
 }
 
 func ensureFftFrameGpu(waterSystem: mod WaterSystem, resources: mod GpuResources) {
-  if waterSystem.fftFrameMade { ret }
-  if not isValidPipeline(resources: resources, id: waterSystem.fft.spectrumPipeline) { ret }
+  if waterSystem.fftFrameMade {
+    ret
+  }
+  if not isValidPipeline(resources: resources, id: waterSystem.fft.spectrumPipeline) {
+    ret
+  }
   let source: String = fftWgsl()
-  if source.length() is 0 { waterSystem.fftFrameMade = true ret }
+  if source.length() is 0 {
+    waterSystem.fftFrameMade = true
+    ret
+  }
   let body: WaterBody = primaryBody(waterSystem: waterSystem)
   let size: Int = body.fftSize
   let stages: Int = log2Int(n: size)
-  if let evolvePipeline: PipelineId = createComputePipeline(resources: resources, wgsl: source, entryPoint: "evolve") { waterSystem.fft.evolvePipeline = evolvePipeline }
-  if let stockhamPipeline: PipelineId = createComputePipeline(resources: resources, wgsl: source, entryPoint: "stockham") { waterSystem.fft.stockhamPipeline = stockhamPipeline }
-  if let transposePipeline: PipelineId = createComputePipeline(resources: resources, wgsl: source, entryPoint: "transpose") { waterSystem.fft.transposePipeline = transposePipeline }
-  if let fieldOutPipeline: PipelineId = createComputePipeline(resources: resources, wgsl: source, entryPoint: "fieldOut") { waterSystem.fft.fieldOutPipeline = fieldOutPipeline }
-  if let postPipeline: PipelineId = createComputePipeline(resources: resources, wgsl: source, entryPoint: "post") { waterSystem.fft.postPipeline = postPipeline }
+  if let evolvePipeline: PipelineId = createComputePipeline(
+    resources: resources
+    wgsl: source
+    entryPoint: "evolve"
+  ) {
+    waterSystem.fft.evolvePipeline = evolvePipeline
+  }
+  if let stockhamPipeline: PipelineId = createComputePipeline(
+    resources: resources
+    wgsl: source
+    entryPoint: "stockham"
+  ) {
+    waterSystem.fft.stockhamPipeline = stockhamPipeline
+  }
+  if let transposePipeline: PipelineId = createComputePipeline(
+    resources: resources
+    wgsl: source
+    entryPoint: "transpose"
+  ) {
+    waterSystem.fft.transposePipeline = transposePipeline
+  }
+  if let fieldOutPipeline: PipelineId = createComputePipeline(
+    resources: resources
+    wgsl: source
+    entryPoint: "fieldOut"
+  ) {
+    waterSystem.fft.fieldOutPipeline = fieldOutPipeline
+  }
+  if let postPipeline: PipelineId = createComputePipeline(
+    resources: resources
+    wgsl: source
+    entryPoint: "post"
+  ) {
+    waterSystem.fft.postPipeline = postPipeline
+  }
   # Working textures: P, Q, R0..R3.
   loop var which: Int = 0, which < fftWorkTextures, ++which {
-    createMap(resources: resources, width: size, height: size, format: WGPUTextureFormat_RGBA32Float, usage: float4StorageUsage,
-      textures: waterSystem.fft.workTextures, views: waterSystem.fft.workViews, index: which)
+    createMap(
+      resources: resources
+      width: size
+      height: size
+      format: WGPUTextureFormat_RGBA32Float
+      usage: float4StorageUsage
+      textures: waterSystem.fft.workTextures
+      views: waterSystem.fft.workViews
+      index: which
+    )
   }
   # Stage uniforms (static) + stage binds for both ping-pong directions.
-  loop waterSystem.stageUniform.length < 4 { waterSystem.stageUniform.add(value: 0 as Int32) }
+  loop waterSystem.stageUniform.length < 4 {
+    waterSystem.stageUniform.add(value: 0 as Int32)
+  }
   loop var stage: Int = 0, stage < stages, ++stage {
-    if let stageUniform: BufferId = createBuffer(resources: resources, size: 16, usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst) {
+    if let stageUniform: BufferId = createBuffer(
+      resources: resources
+      size: 16
+      usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst
+    ) {
       waterSystem.fft.stageUniforms.set(index: stage, value: stageUniform)
       waterSystem.stageUniform.set(index: 0, value: stage as Int32)
       uploadInts(resources: resources, buffer: stageUniform, values: waterSystem.stageUniform)
@@ -291,8 +512,14 @@ func ensureFftFrameGpu(waterSystem: mod WaterSystem, resources: mod GpuResources
         entries.add(value: bufferRef(id: stageUniform))
         entries.add(value: textureViewRef(id: waterSystem.fft.butterflyView))
         entries.add(value: textureViewRef(id: workView(waterSystem: waterSystem, which: direction)))
-        entries.add(value: textureViewRef(id: workView(waterSystem: waterSystem, which: 1 - direction)))
-        if let bind: BindGroupId = createComputeBindGroupOrdered(resources: resources, pipeline: waterSystem.fft.stockhamPipeline, entries: entries) {
+        entries.add(
+          value: textureViewRef(id: workView(waterSystem: waterSystem, which: 1 - direction))
+        )
+        if let bind: BindGroupId = createComputeBindGroupOrdered(
+          resources: resources
+          pipeline: waterSystem.fft.stockhamPipeline
+          entries: entries
+        ) {
           waterSystem.fft.stageBinds.set(index: stage * 2 + direction, value: bind)
         }
       }
@@ -302,8 +529,14 @@ func ensureFftFrameGpu(waterSystem: mod WaterSystem, resources: mod GpuResources
   loop var direction2: Int = 0, direction2 < 2, ++direction2 {
     let entries: List(ResourceRef) = List.create(ResourceRef, cap: 2)
     entries.add(value: textureViewRef(id: workView(waterSystem: waterSystem, which: direction2)))
-    entries.add(value: textureViewRef(id: workView(waterSystem: waterSystem, which: 1 - direction2)))
-    if let bind: BindGroupId = createComputeBindGroupOrdered(resources: resources, pipeline: waterSystem.fft.transposePipeline, entries: entries) {
+    entries.add(
+      value: textureViewRef(id: workView(waterSystem: waterSystem, which: 1 - direction2))
+    )
+    if let bind: BindGroupId = createComputeBindGroupOrdered(
+      resources: resources
+      pipeline: waterSystem.fft.transposePipeline
+      entries: entries
+    ) {
       waterSystem.fft.transposeBinds.set(index: direction2, value: bind)
     }
   }
@@ -313,7 +546,11 @@ func ensureFftFrameGpu(waterSystem: mod WaterSystem, resources: mod GpuResources
       let entries: List(ResourceRef) = List.create(ResourceRef, cap: 2)
       entries.add(value: textureViewRef(id: workView(waterSystem: waterSystem, which: source2)))
       entries.add(value: textureViewRef(id: fieldView(waterSystem: waterSystem, field: field2)))
-      if let bind: BindGroupId = createComputeBindGroupOrdered(resources: resources, pipeline: waterSystem.fft.fieldOutPipeline, entries: entries) {
+      if let bind: BindGroupId = createComputeBindGroupOrdered(
+        resources: resources
+        pipeline: waterSystem.fft.fieldOutPipeline
+        entries: entries
+      ) {
         waterSystem.fft.fieldOutBinds.set(index: field2 * 2 + source2, value: bind)
       }
     }
@@ -321,34 +558,77 @@ func ensureFftFrameGpu(waterSystem: mod WaterSystem, resources: mod GpuResources
   # Evolve uniforms + binds per (cascade, field); post binds per cascade.
   loop var cascade: Int = 0, cascade < body.cascadeCount, ++cascade {
     loop var field3: Int = 0, field3 < fftFields, ++field3 {
-      if let evolveUniform: BufferId = createBuffer(resources: resources, size: evolveUniformFloats * 4, usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst) {
-        waterSystem.fft.evolveUniforms.set(index: evolveIndex(cascade: cascade, field: field3), value: evolveUniform)
+      if let evolveUniform: BufferId = createBuffer(
+        resources: resources
+        size: evolveUniformFloats * 4
+        usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst
+      ) {
+        waterSystem.fft.evolveUniforms.set(
+          index: evolveIndex(cascade: cascade, field: field3)
+          value: evolveUniform
+        )
         let entries: List(ResourceRef) = List.create(ResourceRef, cap: 3)
         entries.add(value: bufferRef(id: evolveUniform))
         entries.add(value: textureViewRef(id: h0View(waterSystem: waterSystem, cascade: cascade)))
         entries.add(value: textureViewRef(id: workView(waterSystem: waterSystem, which: 0)))
-        if let bind: BindGroupId = createComputeBindGroupOrdered(resources: resources, pipeline: waterSystem.fft.evolvePipeline, entries: entries) {
-          waterSystem.fft.evolveBinds.set(index: evolveIndex(cascade: cascade, field: field3), value: bind)
+        if let bind: BindGroupId = createComputeBindGroupOrdered(
+          resources: resources
+          pipeline: waterSystem.fft.evolvePipeline
+          entries: entries
+        ) {
+          waterSystem.fft.evolveBinds.set(
+            index: evolveIndex(cascade: cascade, field: field3)
+            value: bind
+          )
         }
       }
     }
     let postEntries: List(ResourceRef) = List.create(ResourceRef, cap: 8)
-    postEntries.add(value: bufferRef(id: waterSystem.fft.evolveUniforms.copyAtFallback(index: evolveIndex(cascade: cascade, field: 0), fallback: noBufferId())))
+    postEntries.add(
+      value: bufferRef(
+        id: waterSystem.fft.evolveUniforms.copyAtFallback(
+          index: evolveIndex(cascade: cascade, field: 0)
+          fallback: noBufferId()
+        )
+      )
+    )
     loop var field4: Int = 0, field4 < fftFields, ++field4 {
       postEntries.add(value: textureViewRef(id: fieldView(waterSystem: waterSystem, field: field4)))
     }
-    postEntries.add(value: textureViewRef(id: cascadeView(waterSystem: waterSystem, cascade: cascade, map: 0)))
-    postEntries.add(value: textureViewRef(id: cascadeView(waterSystem: waterSystem, cascade: cascade, map: 1)))
-    postEntries.add(value: textureViewRef(id: cascadeView(waterSystem: waterSystem, cascade: cascade, map: 2)))
-    if let postBind: BindGroupId = createComputeBindGroupOrdered(resources: resources, pipeline: waterSystem.fft.postPipeline, entries: postEntries) {
+    postEntries.add(
+      value: textureViewRef(id: cascadeView(waterSystem: waterSystem, cascade: cascade, map: 0))
+    )
+    postEntries.add(
+      value: textureViewRef(id: cascadeView(waterSystem: waterSystem, cascade: cascade, map: 1))
+    )
+    postEntries.add(
+      value: textureViewRef(id: cascadeView(waterSystem: waterSystem, cascade: cascade, map: 2))
+    )
+    if let postBind: BindGroupId = createComputeBindGroupOrdered(
+      resources: resources
+      pipeline: waterSystem.fft.postPipeline
+      entries: postEntries
+    ) {
       waterSystem.fft.postBinds.set(index: cascade, value: postBind)
     }
   }
   waterSystem.fftFrameMade = true
 }
 
-func addDispatch(commands: mod List(ComputeCommand), pipeline: view PipelineId, bind: view BindGroupId, width: view Int, height: view Int) {
-  commands.add(value: computeCommand(pipeline: pipeline, bindGroup: bind, workgroupsX: workgroups(extent: width), workgroupsY: workgroups(extent: height), workgroupsZ: 1))
+func addDispatch(
+  commands: mod List(ComputeCommand)
+  pipeline: view PipelineId
+  bind: view BindGroupId
+  width: view Int
+  height: view Int
+) {
+  commands.add(value: computeCommand(
+    pipeline: pipeline
+    bindGroup: bind
+    workgroupsX: workgroups(extent: width)
+    workgroupsY: workgroups(extent: height)
+    workgroupsZ: 1
+  ))
 }
 
 # Evolve every cascade to `time` and inverse-transform it into its maps: ONE
@@ -356,13 +636,22 @@ func addDispatch(commands: mod List(ComputeCommand), pipeline: view PipelineId, 
 # row stages ping-ponging P/Q; transpose; the same stages again for the
 # columns; fieldOut un-transposes into R_f. Then post writes the maps.
 func waterFftUpdate(waterSystem: mod WaterSystem, resources: mod GpuResources, time: copy Float) {
-  if not waterSystem.fftBaked { ret }
+  if not waterSystem.fftBaked {
+    ret
+  }
   ensureFftFrameGpu(waterSystem: waterSystem, resources: resources)
-  if not isValidPipeline(resources: resources, id: waterSystem.fft.postPipeline) { ret }
+  if not isValidPipeline(resources: resources, id: waterSystem.fft.postPipeline) {
+    ret
+  }
   let body: WaterBody = primaryBody(waterSystem: waterSystem)
   waterSystem.fftLastUpdates = 0
   loop var cascade: Int = 0, cascade < body.cascadeCount, ++cascade {
-    if waterCascadeDue(frame: waterSystem.fftFrame, cascade: cascade, updateRate: body.updateRate, refreshAll: waterSystem.fftNeedsRefresh) {
+    if waterCascadeDue(
+      frame: waterSystem.fftFrame
+      cascade: cascade
+      updateRate: body.updateRate
+      refreshAll: waterSystem.fftNeedsRefresh
+    ) {
       waterSystem.fftLastUpdates = waterSystem.fftLastUpdates + 1
     }
   }
@@ -373,51 +662,151 @@ func waterFftUpdate(waterSystem: mod WaterSystem, resources: mod GpuResources, t
   }
   let size: Int = body.fftSize
   let stages: Int = log2Int(n: size)
-  loop waterSystem.evolveUniform.length < evolveUniformFloats { waterSystem.evolveUniform.add(value: 0.0) }
+  loop waterSystem.evolveUniform.length < evolveUniformFloats {
+    waterSystem.evolveUniform.add(value: 0.0)
+  }
   # All uniforms first (flushed writes land before the submit below).
   loop var cascade: Int = 0, cascade < body.cascadeCount, ++cascade {
-    if not waterCascadeDue(frame: waterSystem.fftFrame, cascade: cascade, updateRate: body.updateRate, refreshAll: waterSystem.fftNeedsRefresh) { continue }
+    if not waterCascadeDue(
+      frame: waterSystem.fftFrame
+      cascade: cascade
+      updateRate: body.updateRate
+      refreshAll: waterSystem.fftNeedsRefresh
+    ) {
+      continue
+    }
     loop var field: Int = 0, field < fftFields, ++field {
-      put4(uniform: waterSystem.evolveUniform, base: 0, x: size.toFloat(), y: cascadeTile(body: body, cascade: cascade), z: 9.81, w: body.waterDepth)
-      put4(uniform: waterSystem.evolveUniform, base: 4, x: time, y: field.toFloat(), z: body.choppiness, w: 0.0)
-      uploadFloats(resources: resources, buffer: waterSystem.fft.evolveUniforms.copyAtFallback(index: evolveIndex(cascade: cascade, field: field), fallback: noBufferId()), floats: waterSystem.evolveUniform)
+      put4(
+        uniform: waterSystem.evolveUniform
+        base: 0
+        x: size.toFloat()
+        y: cascadeTile(body: body, cascade: cascade)
+        z: 9.81
+        w: body.waterDepth
+      )
+      put4(
+        uniform: waterSystem.evolveUniform
+        base: 4
+        x: time
+        y: field.toFloat()
+        z: body.choppiness
+        w: 0.0
+      )
+      uploadFloats(
+        resources: resources
+        buffer: waterSystem.fft.evolveUniforms.copyAtFallback(
+          index: evolveIndex(cascade: cascade, field: field)
+          fallback: noBufferId()
+        )
+        floats: waterSystem.evolveUniform
+      )
     }
   }
   let commands: List(ComputeCommand) = List.create(ComputeCommand, cap: 64)
   loop var cascade2: Int = 0, cascade2 < body.cascadeCount, ++cascade2 {
-    if not waterCascadeDue(frame: waterSystem.fftFrame, cascade: cascade2, updateRate: body.updateRate, refreshAll: waterSystem.fftNeedsRefresh) { continue }
+    if not waterCascadeDue(
+      frame: waterSystem.fftFrame
+      cascade: cascade2
+      updateRate: body.updateRate
+      refreshAll: waterSystem.fftNeedsRefresh
+    ) {
+      continue
+    }
     loop var field2: Int = 0, field2 < fftFields, ++field2 {
-      addDispatch(commands: commands, pipeline: waterSystem.fft.evolvePipeline,
-        bind: waterSystem.fft.evolveBinds.copyAtFallback(index: evolveIndex(cascade: cascade2, field: field2), fallback: noBindGroupId()), width: size, height: size)
+      addDispatch(
+        commands: commands
+        pipeline: waterSystem.fft.evolvePipeline
+        bind: waterSystem.fft.evolveBinds.copyAtFallback(
+          index: evolveIndex(cascade: cascade2, field: field2)
+          fallback: noBindGroupId()
+        )
+        width: size
+        height: size
+      )
       # Rows: the data starts in P (current = 0).
       var current: Int = 0
       loop var stage: Int = 0, stage < stages, ++stage {
-        addDispatch(commands: commands, pipeline: waterSystem.fft.stockhamPipeline,
-          bind: waterSystem.fft.stageBinds.copyAtFallback(index: stage * 2 + current, fallback: noBindGroupId()), width: size, height: size)
+        addDispatch(
+          commands: commands
+          pipeline: waterSystem.fft.stockhamPipeline
+          bind: waterSystem.fft.stageBinds.copyAtFallback(
+            index: stage * 2 + current
+            fallback: noBindGroupId()
+          )
+          width: size
+          height: size
+        )
         current = 1 - current
       }
-      addDispatch(commands: commands, pipeline: waterSystem.fft.transposePipeline,
-        bind: waterSystem.fft.transposeBinds.copyAtFallback(index: current, fallback: noBindGroupId()), width: size, height: size)
+      addDispatch(
+        commands: commands
+        pipeline: waterSystem.fft.transposePipeline
+        bind: waterSystem.fft.transposeBinds.copyAtFallback(
+          index: current
+          fallback: noBindGroupId()
+        )
+        width: size
+        height: size
+      )
       current = 1 - current
       loop var stage2: Int = 0, stage2 < stages, ++stage2 {
-        addDispatch(commands: commands, pipeline: waterSystem.fft.stockhamPipeline,
-          bind: waterSystem.fft.stageBinds.copyAtFallback(index: stage2 * 2 + current, fallback: noBindGroupId()), width: size, height: size)
+        addDispatch(
+          commands: commands
+          pipeline: waterSystem.fft.stockhamPipeline
+          bind: waterSystem.fft.stageBinds.copyAtFallback(
+            index: stage2 * 2 + current
+            fallback: noBindGroupId()
+          )
+          width: size
+          height: size
+        )
         current = 1 - current
       }
-      addDispatch(commands: commands, pipeline: waterSystem.fft.fieldOutPipeline,
-        bind: waterSystem.fft.fieldOutBinds.copyAtFallback(index: field2 * 2 + current, fallback: noBindGroupId()), width: size, height: size)
+      addDispatch(
+        commands: commands
+        pipeline: waterSystem.fft.fieldOutPipeline
+        bind: waterSystem.fft.fieldOutBinds.copyAtFallback(
+          index: field2 * 2 + current
+          fallback: noBindGroupId()
+        )
+        width: size
+        height: size
+      )
     }
-    addDispatch(commands: commands, pipeline: waterSystem.fft.postPipeline,
-      bind: waterSystem.fft.postBinds.copyAtFallback(index: cascade2, fallback: noBindGroupId()), width: size, height: size)
+    addDispatch(
+      commands: commands
+      pipeline: waterSystem.fft.postPipeline
+      bind: waterSystem.fft.postBinds.copyAtFallback(index: cascade2, fallback: noBindGroupId())
+      width: size
+      height: size
+    )
   }
   let timed: Bool = beginWaterPerf(performance: waterSystem.performance, resources: resources)
   var submitted: Bool = false
   if let recording: Recording = beginRecording(resources: resources) {
-    if recordWaterCompute(recording: recording, resources: resources, commands: commands, performance: waterSystem.performance, timed: timed) {
-      if timed { resolveWaterPerf(performance: waterSystem.performance, recording: recording, resources: resources) }
-      if let submission: SubmissionId = waterSubmit(waterSystem: waterSystem, resources: resources, recording: recording) {
+    if recordWaterCompute(
+      recording: recording
+      resources: resources
+      commands: commands
+      performance: waterSystem.performance
+      timed: timed
+    ) {
+      if timed {
+        resolveWaterPerf(
+          performance: waterSystem.performance
+          recording: recording
+          resources: resources
+        )
+      }
+      if let submission: SubmissionId = waterSubmit(
+        waterSystem: waterSystem
+        resources: resources
+        recording: recording
+      ) {
         submitted = true
-        if timed { noteWaterPerfSubmission(performance: waterSystem.performance, submission: submission) }
+        if timed {
+          noteWaterPerfSubmission(performance: waterSystem.performance, submission: submission)
+        }
       }
     }
   }
@@ -426,8 +815,15 @@ func waterFftUpdate(waterSystem: mod WaterSystem, resources: mod GpuResources, t
     ret
   }
   loop var cascade: Int = 0, cascade < body.cascadeCount, ++cascade {
-    if waterCascadeDue(frame: waterSystem.fftFrame, cascade: cascade, updateRate: body.updateRate, refreshAll: waterSystem.fftNeedsRefresh) {
-      if let count: Int = waterSystem.fftUpdateCounts.copyAt(index: cascade) { waterSystem.fftUpdateCounts.set(index: cascade, value: count + 1) }
+    if waterCascadeDue(
+      frame: waterSystem.fftFrame
+      cascade: cascade
+      updateRate: body.updateRate
+      refreshAll: waterSystem.fftNeedsRefresh
+    ) {
+      if let count: Int = waterSystem.fftUpdateCounts.copyAt(index: cascade) {
+        waterSystem.fftUpdateCounts.set(index: cascade, value: count + 1)
+      }
       waterSystem.fftSampleTimes.set(index: cascade, value: time)
     }
   }
@@ -437,7 +833,9 @@ func waterFftUpdate(waterSystem: mod WaterSystem, resources: mod GpuResources, t
 
 # ----- release: retire this system's IDs (deferred behind in-flight work) -----
 func releaseFftFrameGpu(waterSystem: mod WaterSystem, resources: mod GpuResources) {
-  if not waterSystem.fftFrameMade { ret }
+  if not waterSystem.fftFrameMade {
+    ret
+  }
   waterSystem.fftFrameMade = false
   retireBindGroupIds(resources: resources, list: waterSystem.fft.stageBinds)
   retireBindGroupIds(resources: resources, list: waterSystem.fft.transposeBinds)
@@ -461,7 +859,9 @@ func releaseFftFrameGpu(waterSystem: mod WaterSystem, resources: mod GpuResource
 }
 
 func releaseFftGpu(waterSystem: mod WaterSystem, resources: mod GpuResources) {
-  if not waterSystem.fftGpuMade { ret }
+  if not waterSystem.fftGpuMade {
+    ret
+  }
   waterSystem.fftGpuMade = false
   waterSystem.fftBaked = false
   retireBindGroupIds(resources: resources, list: waterSystem.fft.spectrumBinds)
@@ -484,7 +884,9 @@ func releaseFftGpu(waterSystem: mod WaterSystem, resources: mod GpuResources) {
 }
 
 func releaseCascades(waterSystem: mod WaterSystem, resources: mod GpuResources) {
-  if not waterSystem.cascadesMade { ret }
+  if not waterSystem.cascadesMade {
+    ret
+  }
   waterSystem.cascadesMade = false
   retireTextureViewIds(resources: resources, list: waterSystem.cascades.views)
   retireTextureIds(resources: resources, list: waterSystem.cascades.textures)

@@ -20,14 +20,14 @@ open Vec3
 open Math3d
 
 type Quat {
-    x: Float
-    y: Float
-    z: Float
-    w: Float
+  x: Float
+  y: Float
+  z: Float
+  w: Float
 }
 
 func identity() ret Quat {
-    ret Quat { x: 0.0, y: 0.0, z: 0.0, w: 1.0 }
+  ret Quat { x: 0.0, y: 0.0, z: 0.0, w: 1.0 }
 }
 
 # Mirrors vec2/vec3/vec4's `create`. This used to have to be called
@@ -35,123 +35,130 @@ func identity() ret Quat {
 # mangler encoded parameters but not the defining module, so the two
 # collided at the C level. Fixed in #362 — symbols are module-qualified now,
 # so parallel value-type APIs can share the obvious names.
-func create(x: view Float, y: view Float, z: view Float, w: view Float) ret Quat {
-    ret Quat { x: x, y: y, z: z, w: w }
+func create(
+  x: view Float
+  y: view Float
+  z: view Float
+  w: view Float
+) ret Quat {
+  ret Quat { x: x, y: y, z: z, w: w }
 }
 
 # `axis` must be unit length; `angle` is in radians.
 func fromAxisAngle(axis: view Vec3, angle: view Float) ret Quat {
-    let h: Float = angle * 0.5
-    let s: Float = Math.sin(x: h)
-    ret Quat { x: axis.x * s, y: axis.y * s, z: axis.z * s, w: Math.cos(x: h) }
+  let h: Float = angle * 0.5
+  let s: Float = Math.sin(x: h)
+  ret Quat { x: axis.x * s, y: axis.y * s, z: axis.z * s, w: Math.cos(x: h) }
 }
 
 # Hamilton product: `qmul(a, b)` applies b FIRST, then a — the same
 # composition order as math3d.mat4Mul, so the two agree.
 func qmul(a: view Quat, b: view Quat) ret Quat {
-    ret Quat {
-        x: a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
-        y: a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
-        z: a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
-        w: a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z
-    }
+  ret Quat {
+    x: a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y
+    y: a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x
+    z: a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w
+    w: a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z
+  }
 }
 
 # For a UNIT quaternion the conjugate is the inverse, which is the usual
 # case and avoids a divide.
 func conjugate(a: view Quat) ret Quat {
-    ret Quat { x: 0.0 - a.x, y: 0.0 - a.y, z: 0.0 - a.z, w: a.w }
+  ret Quat { x: 0.0 - a.x, y: 0.0 - a.y, z: 0.0 - a.z, w: a.w }
 }
 
 func qdot(a: view Quat, b: view Quat) ret Float {
-    ret a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w
+  ret a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w
 }
 
 func qlen(a: view Quat) ret Float {
-    ret Math.sqrt(x: Quat.qdot(a: a, b: a))
+  ret Math.sqrt(x: Quat.qdot(a: a, b: a))
 }
 
 func qnorm(a: view Quat) ret Quat {
-    let l: Float = Quat.qlen(a: a)
-    ret Quat { x: a.x / l, y: a.y / l, z: a.z / l, w: a.w / l }
+  let l: Float = Quat.qlen(a: a)
+  ret Quat { x: a.x / l, y: a.y / l, z: a.z / l, w: a.w / l }
 }
 
 # Rotate a vector: v' = q * v * q^-1, expanded to avoid building the
 # intermediate quaternions.
 func rotate(q: view Quat, v: view Vec3) ret Vec3 {
-    let ux: Float = q.x
-    let uy: Float = q.y
-    let uz: Float = q.z
-    let dotUV: Float = ux * v.x + uy * v.y + uz * v.z
-    let dotUU: Float = ux * ux + uy * uy + uz * uz
-    let cx: Float = uy * v.z - uz * v.y
-    let cy: Float = uz * v.x - ux * v.z
-    let cz: Float = ux * v.y - uy * v.x
-    ret Vec3 {
-        x: 2.0 * dotUV * ux + (q.w * q.w - dotUU) * v.x + 2.0 * q.w * cx,
-        y: 2.0 * dotUV * uy + (q.w * q.w - dotUU) * v.y + 2.0 * q.w * cy,
-        z: 2.0 * dotUV * uz + (q.w * q.w - dotUU) * v.z + 2.0 * q.w * cz
-    }
+  let ux: Float = q.x
+  let uy: Float = q.y
+  let uz: Float = q.z
+  let dotUV: Float = ux * v.x + uy * v.y + uz * v.z
+  let dotUU: Float = ux * ux + uy * uy + uz * uz
+  let cx: Float = uy * v.z - uz * v.y
+  let cy: Float = uz * v.x - ux * v.z
+  let cz: Float = ux * v.y - uy * v.x
+  ret Vec3 {
+    x: 2.0 * dotUV * ux + (q.w * q.w - dotUU) * v.x + 2.0 * q.w * cx
+    y: 2.0 * dotUV * uy + (q.w * q.w - dotUU) * v.y + 2.0 * q.w * cy
+    z: 2.0 * dotUV * uz + (q.w * q.w - dotUU) * v.z + 2.0 * q.w * cz
+  }
 }
 
 # Column-major rotation matrix for a UNIT quaternion.
 func toMat4(q: view Quat) ret Mat4 {
-    var m: Mat4 = mat4Identity()
-    let xx: Float = q.x * q.x
-    let yy: Float = q.y * q.y
-    let zz: Float = q.z * q.z
-    let xy: Float = q.x * q.y
-    let xz: Float = q.x * q.z
-    let yz: Float = q.y * q.z
-    let wx: Float = q.w * q.x
-    let wy: Float = q.w * q.y
-    let wz: Float = q.w * q.z
-    m.m[0] = 1.0 - 2.0 * (yy + zz)
-    m.m[1] = 2.0 * (xy + wz)
-    m.m[2] = 2.0 * (xz - wy)
-    m.m[4] = 2.0 * (xy - wz)
-    m.m[5] = 1.0 - 2.0 * (xx + zz)
-    m.m[6] = 2.0 * (yz + wx)
-    m.m[8] = 2.0 * (xz + wy)
-    m.m[9] = 2.0 * (yz - wx)
-    m.m[10] = 1.0 - 2.0 * (xx + yy)
-    ret m
+  var m: Mat4 = mat4Identity()
+  let xx: Float = q.x * q.x
+  let yy: Float = q.y * q.y
+  let zz: Float = q.z * q.z
+  let xy: Float = q.x * q.y
+  let xz: Float = q.x * q.z
+  let yz: Float = q.y * q.z
+  let wx: Float = q.w * q.x
+  let wy: Float = q.w * q.y
+  let wz: Float = q.w * q.z
+  m.m[0] = 1.0 - 2.0 * (yy + zz)
+  m.m[1] = 2.0 * (xy + wz)
+  m.m[2] = 2.0 * (xz - wy)
+  m.m[4] = 2.0 * (xy - wz)
+  m.m[5] = 1.0 - 2.0 * (xx + zz)
+  m.m[6] = 2.0 * (yz + wx)
+  m.m[8] = 2.0 * (xz + wy)
+  m.m[9] = 2.0 * (yz - wx)
+  m.m[10] = 1.0 - 2.0 * (xx + yy)
+  ret m
 }
 
 # Shortest-arc spherical interpolation. Falls back to a normalised lerp
 # when the inputs are nearly parallel, where sin(theta) underflows and the
 # spherical form loses all precision.
 func slerp(a: view Quat, b: view Quat, t: view Float) ret Quat {
-    var cosTheta: Float = Quat.qdot(a: a, b: b)
-    var bx: Float = b.x
-    var by: Float = b.y
-    var bz: Float = b.z
-    var bw: Float = b.w
-    # q and -q are the same rotation; pick the nearer one so the path taken
-    # is the short way round.
-    if cosTheta < 0.0 {
-        bx = 0.0 - bx
-        by = 0.0 - by
-        bz = 0.0 - bz
-        bw = 0.0 - bw
-        cosTheta = 0.0 - cosTheta
-    }
-    if cosTheta > 0.9995 {
-        ret Quat.qnorm(a: Quat {
-            x: a.x + (bx - a.x) * t,
-            y: a.y + (by - a.y) * t,
-            z: a.z + (bz - a.z) * t,
-            w: a.w + (bw - a.w) * t
-        })
-    }
-    let theta: Float = Math.acos(x: cosTheta)
-    let sinTheta: Float = Math.sin(x: theta)
-    let wa: Float = Math.sin(x: (1.0 - t) * theta) / sinTheta
-    let wb: Float = Math.sin(x: t * theta) / sinTheta
-    ret Quat {
-        x: a.x * wa + bx * wb,
-        y: a.y * wa + by * wb,
-        z: a.z * wa + bz * wb,
-        w: a.w * wa + bw * wb
-    }
+  var cosTheta: Float = Quat.qdot(a: a, b: b)
+  var bx: Float = b.x
+  var by: Float = b.y
+  var bz: Float = b.z
+  var bw: Float = b.w
+  # q and -q are the same rotation; pick the nearer one so the path taken
+  # is the short way round.
+  if cosTheta < 0.0 {
+    bx = 0.0 - bx
+    by = 0.0 - by
+    bz = 0.0 - bz
+    bw = 0.0 - bw
+    cosTheta = 0.0 - cosTheta
+  }
+  if cosTheta > 0.9995 {
+    ret Quat.qnorm(
+      a: Quat {
+        x: a.x + (bx - a.x) * t
+        y: a.y + (by - a.y) * t
+        z: a.z + (bz - a.z) * t
+        w: a.w + (bw - a.w) * t
+      }
+    )
+  }
+  let theta: Float = Math.acos(x: cosTheta)
+  let sinTheta: Float = Math.sin(x: theta)
+  let wa: Float = Math.sin(x: (1.0 - t) * theta) / sinTheta
+  let wb: Float = Math.sin(x: t * theta) / sinTheta
+  ret Quat {
+    x: a.x * wa + bx * wb
+    y: a.y * wa + by * wb
+    z: a.z * wa + bz * wb
+    w: a.w * wa + bw * wb
+  }
 }

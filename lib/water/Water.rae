@@ -13,6 +13,7 @@ import Math
 import Vec3
 
 enum WaterKind { ocean, lake, river }
+
 enum WaterStyle { toon, realistic }
 
 # One Gerstner wave: travels along (dirX, dirY); `steepness` 0..1 sharpens
@@ -20,10 +21,10 @@ enum WaterStyle { toon, realistic }
 type GerstnerWave {
   dirX: Float
   dirY: Float
-  amplitude: Float   # world units
+  amplitude: Float  # world units
   wavelength: Float  # world units crest to crest
-  steepness: Float   # 0 = pure sine, 1 = maximum crest sharpening
-  speed: Float       # world units / s along the direction
+  steepness: Float  # 0 = pure sine, 1 = maximum crest sharpening
+  speed: Float  # world units / s along the direction
 }
 
 # The 1-2 waves the toon surface sums in the vertex shader.
@@ -35,24 +36,24 @@ type WaterWaves {
 type WaterBody {
   kind: WaterKind
   style: WaterStyle
-  centre: Vec3          # still-surface centre; centre.z IS the water level
-  extent: Float         # side of the square surface, world units
-  shallowColor: Vec3    # colour where the ground is just under the surface
-  deepColor: Vec3       # colour once the water is `depthMax` deep
-  depthMax: Float       # water depth (view-depth difference) at which deepColor saturates
-  absorb: Float         # 0..1 opacity scale of the deep water
-  foamDistance: Float   # water shallower than this gets shoreline foam
-  rippleScale: Float    # noise cells per world unit for the toon ripples
-  rippleSpeed: Float    # ripple pan speed, world units / s
-  rippleCutoff: Float   # posterise threshold (0..1) of the ripple noise in deep water
-  distortion: Float     # strength of the second noise octave that warps the ripples
+  centre: Vec3  # still-surface centre; centre.z IS the water level
+  extent: Float  # side of the square surface, world units
+  shallowColor: Vec3  # colour where the ground is just under the surface
+  deepColor: Vec3  # colour once the water is `depthMax` deep
+  depthMax: Float  # water depth (view-depth difference) at which deepColor saturates
+  absorb: Float  # 0..1 opacity scale of the deep water
+  foamDistance: Float  # water shallower than this gets shoreline foam
+  rippleScale: Float  # noise cells per world unit for the toon ripples
+  rippleSpeed: Float  # ripple pan speed, world units / s
+  rippleCutoff: Float  # posterise threshold (0..1) of the ripple noise in deep water
+  distortion: Float  # strength of the second noise octave that warps the ripples
   highlightStep: Float  # specular threshold for the stepped toon sun highlight
-  highlightPower: Float # specular exponent before the step
+  highlightPower: Float  # specular exponent before the step
   waves: WaterWaves
   # Toon tier knobs (#847): the grid the surface is drawn on and how many of
   # the Gerstner waves the vertex shader sums (1 on mobile, 2 on desktop).
-  gridSegments: Int     # quads per side of the unit grid (48 mobile, 96 desktop)
-  waveCount: Int        # 1 or 2
+  gridSegments: Int  # quads per side of the unit grid (48 mobile, 96 desktop)
+  waveCount: Int  # 1 or 2
   # Refraction (#832): 1 = read the opaque scene through the surface (the #842
   # litCopy) offset by the normal, depth-masked, with Beer-Lambert absorption;
   # 0 = plain alpha blend (the mobile tier). absorbColor is per-channel 1/m:
@@ -73,15 +74,15 @@ type WaterBody {
   meshMode: Int
   # Sea state for the FFT spectrum (#849): a JONSWAP/TMA sea is defined by the
   # wind speed at 10 m, its direction, the fetch it blew over, and the depth.
-  windSpeed: Float      # m/s
-  windDirRad: Float     # radians, direction the wind blows TOWARD
-  fetch: Float          # metres of open water the wind acted on (~250 km)
-  waterDepth: Float     # metres; the TMA factor damps long waves in shallow water
-  choppiness: Float     # lateral Gerstner-style displacement scale for the FFT surface (~1.2)
+  windSpeed: Float  # m/s
+  windDirRad: Float  # radians, direction the wind blows TOWARD
+  fetch: Float  # metres of open water the wind acted on (~250 km)
+  waterDepth: Float  # metres; the TMA factor damps long waves in shallow water
+  choppiness: Float  # lateral Gerstner-style displacement scale for the FFT surface (~1.2)
   # FFT size and active cascade count; the toon surface skips these samples.
-  fftSize: Int          # 128 / 256 / 512 texels per cascade side
-  cascadeCount: Int     # 1..3 cascades summed by the surface shader
-  cascadeTile0: Float   # world metres one cascade tile covers (~250 / 60 / 8)
+  fftSize: Int  # 128 / 256 / 512 texels per cascade side
+  cascadeCount: Int  # 1..3 cascades summed by the surface shader
+  cascadeTile0: Float  # world metres one cascade tile covers (~250 / 60 / 8)
   cascadeTile1: Float
   cascadeTile2: Float
   # N frames per cascade update: cascade i runs when frame % N == i % N.
@@ -94,24 +95,58 @@ type WaterBody {
 # blue body, soft foam at the banks, two small crossing Gerstner waves.
 func createLakeToon(surfaceZ: copy Float, extent: copy Float) ret WaterBody {
   ret WaterBody {
-    kind: WaterKind.lake, style: WaterStyle.toon,
-    centre: Vec3.create(x: 0.0, y: 0.0, z: surfaceZ), extent: extent,
-    shallowColor: Vec3.create(x: 0.2, y: 0.72, z: 0.75),
-    deepColor: Vec3.create(x: 0.02, y: 0.18, z: 0.45),
-    depthMax: 4.0, absorb: 0.96,
-    foamDistance: 1.6,
-    rippleScale: 0.5, rippleSpeed: 0.25, rippleCutoff: 0.9, distortion: 0.7,
-    highlightStep: 0.7, highlightPower: 64.0,
+    kind: WaterKind.lake
+    style: WaterStyle.toon
+    centre: Vec3.create(x: 0.0, y: 0.0, z: surfaceZ)
+    extent: extent
+    shallowColor: Vec3.create(x: 0.2, y: 0.72, z: 0.75)
+    deepColor: Vec3.create(x: 0.02, y: 0.18, z: 0.45)
+    depthMax: 4.0
+    absorb: 0.96
+    foamDistance: 1.6
+    rippleScale: 0.5
+    rippleSpeed: 0.25
+    rippleCutoff: 0.9
+    distortion: 0.7
+    highlightStep: 0.7
+    highlightPower: 64.0
     waves: {
-      first:  { dirX: 1.0, dirY: 0.35, amplitude: 0.08, wavelength: 6.0, steepness: 0.35, speed: 1.4 },
-      second: { dirX: 0.0 - 0.4, dirY: 1.0, amplitude: 0.05, wavelength: 3.2, steepness: 0.3, speed: 1.0 }
-    },
-    gridSegments: 96, waveCount: 2,
-    refraction: 0, refractStrength: 0.02, absorbColor: Vec3.create(x: 0.45, y: 0.16, z: 0.08),
-    meshId: 0, flowSpeed: 0.0, meshMode: 0,
-    windSpeed: 9.0, windDirRad: 0.7, fetch: 250000.0, waterDepth: 50.0,
-    choppiness: 1.2,
-    fftSize: 256, cascadeCount: 3, cascadeTile0: 250.0, cascadeTile1: 60.0, cascadeTile2: 8.0, updateRate: 1
+      first: {
+        dirX: 1.0
+        dirY: 0.35
+        amplitude: 0.08
+        wavelength: 6.0
+        steepness: 0.35
+        speed: 1.4
+      }
+      second: {
+        dirX: 0.0 - 0.4
+        dirY: 1.0
+        amplitude: 0.05
+        wavelength: 3.2
+        steepness: 0.3
+        speed: 1.0
+      }
+    }
+    gridSegments: 96
+    waveCount: 2
+    refraction: 0
+    refractStrength: 0.02
+    absorbColor: Vec3.create(x: 0.45, y: 0.16, z: 0.08)
+    meshId: 0
+    flowSpeed: 0.0
+    meshMode: 0
+    windSpeed: 9.0
+    windDirRad: 0.7
+    fetch: 250000.0
+    waterDepth: 50.0
+    choppiness: 1.2
+    fftSize: 256
+    cascadeCount: 3
+    cascadeTile0: 250.0
+    cascadeTile1: 60.0
+    cascadeTile2: 8.0
+    updateRate: 1
   }
 }
 
@@ -119,20 +154,30 @@ func createLakeToon(surfaceZ: copy Float, extent: copy Float) ret WaterBody {
 # One Gerstner wave's displacement at grid point (px, py) — the CPU mirror of
 # waterSurface.wgsl's `gerstner`, same maths, same constants. Returns (dx, dy,
 # dz) in world units.
-func gerstnerDisplacement(wave: view GerstnerWave, px: view Float, py: view Float, t: view Float) ret Vec3 {
+func gerstnerDisplacement(
+  wave: view GerstnerWave
+  px: view Float
+  py: view Float
+  t: view Float
+) ret Vec3 {
   var length: Float = Math.sqrt(x: wave.dirX * wave.dirX + wave.dirY * wave.dirY)
-  if length < 0.0001 { length = 1.0 }
+  if length < 0.0001 {
+    length = 1.0
+  }
   let dx: Float = wave.dirX / length
   let dy: Float = wave.dirY / length
   var wavelength: Float = wave.wavelength
-  if wavelength < 0.01 { wavelength = 0.01 }
+  if wavelength < 0.01 {
+    wavelength = 0.01
+  }
   let k: Float = 6.28318530718 / wavelength
   let f: Float = k * (dx * px + dy * py - wave.speed * t)
   let c: Float = Math.cos(x: f)
   ret Vec3.create(
-    x: wave.steepness * wave.amplitude * dx * c,
-    y: wave.steepness * wave.amplitude * dy * c,
-    z: wave.amplitude * Math.sin(x: f))
+    x: wave.steepness * wave.amplitude * dx * c
+    y: wave.steepness * wave.amplitude * dy * c
+    z: wave.amplitude * Math.sin(x: f)
+  )
 }
 
 # A wave shorter than ~2 grid cells cannot be sampled by the vertex grid: it
@@ -141,24 +186,50 @@ func gerstnerDisplacement(wave: view GerstnerWave, px: view Float, py: view Floa
 # so a big lake on a coarse grid goes calm instead of striped. The cell is the
 # body's own extent / gridSegments (the lake grid tier knob, #847).
 func waveGridFactor(body: view WaterBody, wavelength: view Float) ret Float {
-  if body.meshMode is not 0 or body.gridSegments < 1 { ret 1.0 }
+  if body.meshMode is not 0 or body.gridSegments < 1 {
+    ret 1.0
+  }
   let cell: Float = body.extent / body.gridSegments.toFloat()
-  if cell <= 0.0 { ret 1.0 }
+  if cell <= 0.0 {
+    ret 1.0
+  }
   let ratio: Float = wavelength / cell
-  if ratio <= 2.0 { ret 0.0 }
-  if ratio >= 4.0 { ret 1.0 }
+  if ratio <= 2.0 {
+    ret 0.0
+  }
+  if ratio >= 4.0 {
+    ret 1.0
+  }
   let x: Float = (ratio - 2.0) / 2.0
   ret x * x * (3.0 - 2.0 * x)
 }
 
-func wavesDisplacement(body: view WaterBody, px: view Float, py: view Float, t: view Float) ret Vec3 {
+func wavesDisplacement(
+  body: view WaterBody
+  px: view Float
+  py: view Float
+  t: view Float
+) ret Vec3 {
   var first: GerstnerWave = body.waves.first
   first.amplitude = first.amplitude * waveGridFactor(body: body, wavelength: first.wavelength)
-  var total: Vec3 = gerstnerDisplacement(wave: first, px: px, py: py, t: t)
+  var total: Vec3 = gerstnerDisplacement(
+    wave: first
+    px: px
+    py: py
+    t: t
+  )
   if body.waveCount > 1 {
     var second: GerstnerWave = body.waves.second
     second.amplitude = second.amplitude * waveGridFactor(body: body, wavelength: second.wavelength)
-    total = Vec3.vadd(a: total, b: gerstnerDisplacement(wave: second, px: px, py: py, t: t))
+    total = Vec3.vadd(
+      a: total
+      b: gerstnerDisplacement(
+        wave: second
+        px: px
+        py: py
+        t: t
+      )
+    )
   }
   ret total
 }
@@ -169,17 +240,32 @@ func wavesDisplacement(body: view WaterBody, px: view Float, py: view Float, t: 
 # (x, y) started somewhere else; two fixed-point iterations of p = (x, y) -
 # displacementXY(p) recover it to well under a centimetre for the steepness
 # values these bodies use. (FFT queries use FftSurfaceCache.sampleFftSurface, #858.)
-func waterHeightAt(body: view WaterBody, x: copy Float, y: copy Float, t: copy Float) ret Float {
+func waterHeightAt(
+  body: view WaterBody
+  x: copy Float
+  y: copy Float
+  t: copy Float
+) ret Float {
   var px: Float = x
   var py: Float = y
   var i: Int = 0
   loop i < 2 {
-    let d: Vec3 = wavesDisplacement(body: body, px: px, py: py, t: t)
+    let d: Vec3 = wavesDisplacement(
+      body: body
+      px: px
+      py: py
+      t: t
+    )
     px = x - d.x
     py = y - d.y
     i = i + 1
   }
-  let d: Vec3 = wavesDisplacement(body: body, px: px, py: py, t: t)
+  let d: Vec3 = wavesDisplacement(
+    body: body
+    px: px
+    py: py
+    t: t
+  )
   ret body.centre.z + d.z
 }
 

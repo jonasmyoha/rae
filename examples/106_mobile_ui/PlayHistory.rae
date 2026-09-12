@@ -11,7 +11,6 @@
 # Entries are append-only with a soft cap (`history.cap`). Cover art is tracked
 # via the local-catalog `albumStem` for local picks and via an app-cache
 # `spotify-art:<imageHash>` key for Spotify entries.
-
 type PlayHistoryEntry {
   trackName: String
   artistName: String
@@ -43,13 +42,14 @@ type PlayHistory {
 }
 
 func createPlayHistory(cap: view Int) pub ret PlayHistory {
-  ret PlayHistory {
-    entries: List.create(PlayHistoryEntry, cap: cap)
-    cap: cap
-  }
+  ret PlayHistory { entries: List.create(PlayHistoryEntry, cap: cap), cap: cap }
 }
 
-func copyHistoryEntryWithArt(entry: view PlayHistoryEntry, artworkUrl: view String, textureKey: view String) ret PlayHistoryEntry {
+func copyHistoryEntryWithArt(
+  entry: view PlayHistoryEntry
+  artworkUrl: view String
+  textureKey: view String
+) ret PlayHistoryEntry {
   unsafe {
     ret PlayHistoryEntry {
       trackName: rae_ext_rae_string_copy(s: entry.trackName)
@@ -122,12 +122,20 @@ func normalizePlayHistoryArtwork(history: mod PlayHistory) pub ret Bool {
         }
       }
       if bestUrl is e.artworkUrl is false {
-        let updated: PlayHistoryEntry = copyHistoryEntryWithArt(entry: e, artworkUrl: bestUrl, textureKey: bestKey)
+        let updated: PlayHistoryEntry = copyHistoryEntryWithArt(
+          entry: e
+          artworkUrl: bestUrl
+          textureKey: bestKey
+        )
         history.entries.set(index: i, value: own updated)
         changed = true
       } else {
         if bestKey is e.textureKey is false {
-          let updated: PlayHistoryEntry = copyHistoryEntryWithArt(entry: e, artworkUrl: bestUrl, textureKey: bestKey)
+          let updated: PlayHistoryEntry = copyHistoryEntryWithArt(
+            entry: e
+            artworkUrl: bestUrl
+            textureKey: bestKey
+          )
           history.entries.set(index: i, value: own updated)
           changed = true
         }
@@ -144,7 +152,11 @@ func normalizePlayHistoryArtwork(history: mod PlayHistory) pub ret Bool {
 # insensitive comparison would catch more matches but the local
 # catalogue is small and titles are author-controlled, so the strict
 # `.equals` is fine for v1.
-func historyMatchLocalStem(albums: view List(Album), trackName: view String, artistName: view String) pub ret String {
+func historyMatchLocalStem(
+  albums: view List(Album)
+  trackName: view String
+  artistName: view String
+) pub ret String {
   unsafe {
     var i: Int = 0
     loop i < albums.length {

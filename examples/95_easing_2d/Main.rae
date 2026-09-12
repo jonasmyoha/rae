@@ -8,11 +8,12 @@ open ui/renderSystem/RenderSystem
 open Gpu2dCanvas
 
 const canvasW: Float = 800.0
+
 const canvasH: Float = 450.0
 
 func main() ret Int {
   Gpu2d.initWindow(width: canvasW.toInt(), height: canvasH.toInt(), title: "Rae Easing 2D — GPU2D")
-  var canvas: Gpu2dCanvas = createGpu2dCanvas()   # #907: the app-owned 2D canvas (box + image passes)
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()  # #907: the app-owned 2D canvas (box + image passes)
   Gpu2d.setDesignResolution(width: canvasW, height: canvasH, fit: 0)
 
   # The shared font/theme fixture keeps this example small; its authored UI is
@@ -53,21 +54,57 @@ func main() ret Int {
     let currentX: Float = 150.0 + 500.0 * eased
     let huePhase: Int = (phase * 5.0).toInt()
     var ballColor: Int = 0xFF42A5F5
-    if huePhase is 1 { ballColor = 0xFF26C6DA }
-    if huePhase is 2 { ballColor = 0xFF66BB6A }
-    if huePhase is 3 { ballColor = 0xFFFFCA28 }
-    if huePhase >= 4 { ballColor = 0xFFEC407A }
+    if huePhase is 1 {
+      ballColor = 0xFF26C6DA
+    }
+    if huePhase is 2 {
+      ballColor = 0xFF66BB6A
+    }
+    if huePhase is 3 {
+      ballColor = 0xFFFFCA28
+    }
+    if huePhase >= 4 {
+      ballColor = 0xFFEC407A
+    }
 
-    Gpu2d.beginFrame(canvas: canvas, r: 0.06, g: 0.09, b: 0.15, a: 1.0)
-    Gpu2d.drawGradientRect(canvas: canvas, 
-      x: 0.0, y: 0.0, w: canvasW, h: canvasH, radius: 0.0
-      from: 0xFF141E30, to: 0xFF243B55, angleDeg: 90.0)
-    Gpu2d.drawRoundedRect(canvas: canvas, 
-      x: currentX - 35.0, y: 195.0, w: 80.0, h: 80.0
-      radius: 40.0, color: 0x44000000)
-    Gpu2d.drawGradientRect(canvas: canvas, 
-      x: currentX - 40.0, y: 185.0, w: 80.0, h: 80.0
-      radius: 40.0, from: 0xFFFFFFFF, to: ballColor, angleDeg: 45.0)
+    Gpu2d.beginFrame(
+      canvas: canvas
+      r: 0.06
+      g: 0.09
+      b: 0.15
+      a: 1.0
+    )
+    Gpu2d.drawGradientRect(
+      canvas: canvas
+      x: 0.0
+      y: 0.0
+      w: canvasW
+      h: canvasH
+      radius: 0.0
+      from: 0xFF141E30
+      to: 0xFF243B55
+      angleDeg: 90.0
+    )
+    Gpu2d.drawRoundedRect(
+      canvas: canvas
+      x: currentX - 35.0
+      y: 195.0
+      w: 80.0
+      h: 80.0
+      radius: 40.0
+      color: 0x44000000
+    )
+    Gpu2d.drawGradientRect(
+      canvas: canvas
+      x: currentX - 40.0
+      y: 185.0
+      w: 80.0
+      h: 80.0
+      radius: 40.0
+      from: 0xFFFFFFFF
+      to: ballColor
+      angleDeg: 45.0
+    )
     renderSystemGpu2d(world: world, res: uiResources, canvas: canvas)
     Gpu2d.endFrame(canvas: canvas)
   }

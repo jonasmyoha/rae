@@ -2,7 +2,6 @@ open Json
 
 # #718: lib/json can now WRITE JSON. Build a doc with the JsonBuilder, then
 # round-trip parse -> stringify -> parse and confirm the values survive.
-
 func main() {
   let dash: String = "?"
 
@@ -38,7 +37,10 @@ func main() {
   let nameVal: JsonValue = jsonValueAt(doc: doc2, idx: field(doc: doc2, this: root2, key: "name"))
   let countVal: JsonValue = jsonValueAt(doc: doc2, idx: field(doc: doc2, this: root2, key: "count"))
   let flagVal: JsonValue = jsonValueAt(doc: doc2, idx: field(doc: doc2, this: root2, key: "flag"))
-  let nestedVal: JsonValue = jsonValueAt(doc: doc2, idx: field(doc: doc2, this: root2, key: "nested"))
+  let nestedVal: JsonValue = jsonValueAt(
+    doc: doc2
+    idx: field(doc: doc2, this: root2, key: "nested")
+  )
   let listVal: JsonValue = jsonValueAt(doc: doc2, idx: field(doc: doc2, this: root2, key: "list"))
 
   let xVal: JsonValue = jsonValueAt(doc: doc2, idx: field(doc: doc2, this: nestedVal, key: "x"))

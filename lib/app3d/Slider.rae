@@ -36,9 +36,13 @@ type Slider {
   dragging: Bool
 }
 
-func createSlider(trackId: view String, fillId: view String,
-                  minValue: view Float, maxValue: view Float,
-                  value: view Float) pub ret Slider {
+func createSlider(
+  trackId: view String
+  fillId: view String
+  minValue: view Float
+  maxValue: view Float
+  value: view Float
+) pub ret Slider {
   ret Slider {
     trackId: "{trackId}"
     fillId: "{fillId}"
@@ -169,10 +173,12 @@ func applySliderFill(s: view Slider, world: mod UiWorld) pub {
   if delta <= 0.05 {
     ret
   }
-  let next: ComputedRect = { position: { x: fr.position.x, y: fr.position.y }, size: { x: want, y: fr.size.y } }
+  let next: ComputedRect = {
+    position: { x: fr.position.x, y: fr.position.y }
+    size: { x: want, y: fr.size.y }
+  }
   componentSet(this: world.computedRects, entity: fill, data: next)
 }
-
 
 # ----- node-based slider ----------------------------------------------
 #
@@ -181,7 +187,6 @@ func applySliderFill(s: view Slider, world: mod UiWorld) pub {
 # convenience when the caller already has the node ids. (A Slider stored inside
 # another struct also updates fine now: nested-field `mod` write-back is
 # guaranteed, locked by compiler test 707_nested_mod_writeback, #762.)
-
 func nodeComputedRect(world: view UiWorld, nodeId: view String, out: mod ComputedRect) ret Bool {
   let entity: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
   if isNone(this: entity) {
@@ -231,8 +236,12 @@ func nodeScreenY(world: view UiWorld, entity: view EntityId) ret Float {
   ret wt.position.y
 }
 
-func pointInNode(world: view UiWorld, nodeId: view String,
-                 x: view Float, y: view Float) pub ret Bool {
+func pointInNode(
+  world: view UiWorld
+  nodeId: view String
+  x: view Float
+  y: view Float
+) pub ret Bool {
   let entity: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
   if isNone(this: entity) {
     ret false
@@ -273,8 +282,12 @@ func fractionAcrossNode(world: view UiWorld, nodeId: view String, x: view Float)
 # Resize `fillId` to a fraction of `trackId`. Writes only on a real change:
 # componentSet bumps the table generation either way, and a per-frame write to
 # an unchanged width keeps the render cache permanently dirty (#407).
-func setNodeFractionWidth(world: mod UiWorld, trackId: view String,
-                          fillId: view String, fraction: view Float) pub {
+func setNodeFractionWidth(
+  world: mod UiWorld
+  trackId: view String
+  fillId: view String
+  fraction: view Float
+) pub {
   let te: EntityId = nodeEntityFor(world: world, nodeId: trackId)
   let fe: EntityId = nodeEntityFor(world: world, nodeId: fillId)
   if isNone(this: te) or isNone(this: fe) {
@@ -296,19 +309,29 @@ func setNodeFractionWidth(world: mod UiWorld, trackId: view String,
   if delta <= 0.05 {
     ret
   }
-  let next: ComputedRect = { position: { x: tr.position.x, y: fr.position.y }, size: { x: want, y: fr.size.y } }
+  let next: ComputedRect = {
+    position: { x: tr.position.x, y: fr.position.y }
+    size: { x: want, y: fr.size.y }
+  }
   componentSet(this: world.computedRects, entity: fe, data: next)
   if componentHas(this: world.rects, entity: fe) {
     let ar: Rect = componentGet(this: world.rects, entity: fe)
-    let nextAuthored: Rect = { position: { x: ar.position.x, y: ar.position.y }, size: { x: want, y: ar.size.y } }
+    let nextAuthored: Rect = {
+      position: { x: ar.position.x, y: ar.position.y }
+      size: { x: want, y: ar.size.y }
+    }
     componentSet(this: world.rects, entity: fe, data: nextAuthored)
   }
 }
 
 # Centre `handleId` on a fraction along `trackId` — the moving circle that makes
 # the control read as a slider rather than as a progress bar.
-func centreNodeAtFraction(world: mod UiWorld, trackId: view String,
-                          handleId: view String, fraction: view Float) pub {
+func centreNodeAtFraction(
+  world: mod UiWorld
+  trackId: view String
+  handleId: view String
+  fraction: view Float
+) pub {
   let te: EntityId = nodeEntityFor(world: world, nodeId: trackId)
   let he: EntityId = nodeEntityFor(world: world, nodeId: handleId)
   if isNone(this: te) or isNone(this: he) {
@@ -341,12 +364,18 @@ func centreNodeAtFraction(world: mod UiWorld, trackId: view String,
   # computed one is what this frame draws, and writing only the authored rect
   # leaves the knob a frame behind — or not moving at all where layout does not
   # re-derive it.
-  let next: Rect = { position: { x: wantX, y: hr.position.y }, size: { x: hr.size.x, y: hr.size.y } }
+  let next: Rect = {
+    position: { x: wantX, y: hr.position.y }
+    size: { x: hr.size.x, y: hr.size.y }
+  }
   componentSet(this: world.rects, entity: he, data: next)
   if componentHas(this: world.computedRects, entity: he) {
     let cr: ComputedRect = componentGet(this: world.computedRects, entity: he)
     let trc: ComputedRect = componentGet(this: world.computedRects, entity: te)
-    let nextC: ComputedRect = { position: { x: trc.position.x + wantX, y: cr.position.y }, size: { x: cr.size.x, y: cr.size.y } }
+    let nextC: ComputedRect = {
+      position: { x: trc.position.x + wantX, y: cr.position.y }
+      size: { x: cr.size.x, y: cr.size.y }
+    }
     componentSet(this: world.computedRects, entity: he, data: nextC)
   }
 }
@@ -361,8 +390,12 @@ func centreNodeAtFraction(world: mod UiWorld, trackId: view String,
 #
 #   wasDragging — whether a drag was already running
 #   pressedInside — a press edge landed on the track this frame
-func dragActive(wasDragging: view Bool, pressedInside: view Bool,
-                      down: view Bool, released: view Bool) pub ret Bool {
+func dragActive(
+  wasDragging: view Bool
+  pressedInside: view Bool
+  down: view Bool
+  released: view Bool
+) pub ret Bool {
   if released {
     ret false
   }

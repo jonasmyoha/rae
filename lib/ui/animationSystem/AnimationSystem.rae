@@ -22,7 +22,13 @@ open ecs/ComponentTable
 # Move `current` toward `target` by an exponential ease at `speed`
 # units per second. Snaps to `target` when `|target - current|` is
 # below `epsilon` so the system can stop reporting "in flight".
-func easeTowards(current: view Float, target: view Float, speed: view Float, deltaTime: view Float, epsilon: view Float) ret Float {
+func easeTowards(
+  current: view Float
+  target: view Float
+  speed: view Float
+  deltaTime: view Float
+  epsilon: view Float
+) ret Float {
   let delta: Float = target - current
   var absDelta: Float = delta
   if absDelta < 0.0 {
@@ -98,7 +104,11 @@ func subtreeHoverPaintRank(world: view UiWorld, entity: view EntityId) pub ret I
 # child covers so the whole thumbnail scales as one — the hit-test only
 # ever reports the single OnClick entity, never its decorative children.
 # Depth-guarded against malformed cycles.
-func hoverScaleContains(world: view UiWorld, entity: view EntityId, ancestor: view EntityId) ret Bool {
+func hoverScaleContains(
+  world: view UiWorld
+  entity: view EntityId
+  ancestor: view EntityId
+) ret Bool {
   if entity is ancestor {
     ret true
   }
@@ -121,7 +131,11 @@ func hoverScaleContains(world: view UiWorld, entity: view EntityId, ancestor: vi
 # Step every HoverScale entity by one frame. `hovered` is the
 # topmost cursor-hit entity (use `noEntity()` when nothing is
 # hovered). Returns true if any entity is still animating.
-func hoverScaleSystem(world: mod UiWorld, hovered: view EntityId, deltaTime: view Float) pub ret Bool {
+func hoverScaleSystem(
+  world: mod UiWorld
+  hovered: view EntityId
+  deltaTime: view Float
+) pub ret Bool {
   # Clamp the frame delta. When the event loop has been idle (the
   # cursor sat still off-screen for several seconds, say), the
   # very first tick after a mouse-move arrives with a huge dt and
@@ -145,7 +159,13 @@ func hoverScaleSystem(world: mod UiWorld, hovered: view EntityId, deltaTime: vie
     if hoverScaleContains(world: world, entity: entity, ancestor: hovered) {
       target = hs.hoverScale
     }
-    let next: Float = easeTowards(current: hs.current, target: target, speed: hs.speed, deltaTime: frameDt, epsilon: 0.001)
+    let next: Float = easeTowards(
+      current: hs.current
+      target: target
+      speed: hs.speed
+      deltaTime: frameDt
+      epsilon: 0.001
+    )
     if next is not hs.current or target is not hs.target {
       # Per-frame animation state is a mutable component update, not a
       # replace/drop cycle. Updating in place avoids allocator churn in the

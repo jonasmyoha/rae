@@ -20,6 +20,7 @@ const playerLocal: Int = 0
 # lib/keys.rae. 1 / Page Up go to the previous character, 2 / Page Down to the
 # next (Page Up/Down are used via keys.keyPageUp/keyPageDown at the call site).
 const keyPrevChar: Int = Keys.key1
+
 const keyNextChar: Int = Keys.key2
 
 # The local player's control mapping. `count` is the total number of controllable
@@ -40,7 +41,9 @@ func rosterControlledIsHero(roster: view PlayerRoster) ret Bool {
 # The crowd-member index (into CharacterSystem.crowd) the local player controls,
 # or -1 when the hero is controlled.
 func rosterControlledCrowdIndex(roster: view PlayerRoster) ret Int {
-  if roster.controlledIndex is 0 { ret 0 - 1 }
+  if roster.controlledIndex is 0 {
+    ret 0 - 1
+  }
   ret roster.controlledIndex - 1
 }
 
@@ -48,21 +51,32 @@ func rosterControlledCrowdIndex(roster: view PlayerRoster) ret Int {
 # entity, or the crowd member entity for the controlled index. This is the
 # roster's ECS view — the same kind of character-entity handle a NetPlayer
 # points at via `controlled`, so local and remote control resolve identically.
-func rosterControlledEntity(players: view PlayerRoster, characterSystem: view CharacterSystem) ret EntityId {
-  if rosterControlledIsHero(roster: players) { ret characterSystem.heroEntity }
+func rosterControlledEntity(
+  players: view PlayerRoster
+  characterSystem: view CharacterSystem
+) ret EntityId {
+  if rosterControlledIsHero(roster: players) {
+    ret characterSystem.heroEntity
+  }
   let idx: Int = rosterControlledCrowdIndex(roster: players)
-  if let entity: EntityId = characterSystem.crowdEntities.copyAt(index: idx) { ret entity }
+  if let entity: EntityId = characterSystem.crowdEntities.copyAt(index: idx) {
+    ret entity
+  }
   ret characterSystem.heroEntity
 }
 
 # Cycle to the next / previous controllable character (wraps). No-op with one
 # character, so a roster of just the hero behaves exactly as before.
 func rosterSwitchNext(roster: mod PlayerRoster) {
-  if roster.count <= 1 { ret }
+  if roster.count <= 1 {
+    ret
+  }
   roster.controlledIndex = (roster.controlledIndex + 1) % roster.count
 }
 
 func rosterSwitchPrev(roster: mod PlayerRoster) {
-  if roster.count <= 1 { ret }
+  if roster.count <= 1 {
+    ret
+  }
   roster.controlledIndex = (roster.controlledIndex + roster.count - 1) % roster.count
 }

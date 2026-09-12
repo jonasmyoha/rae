@@ -24,203 +24,293 @@ import Camera
 import Render
 
 func main() {
-    # preview (fast) and final (sharp) internal resolutions; both are 16:9.
-    let prevW: Int = 320
-    let prevH: Int = 180
-    let finalW: Int = 960
-    let finalH: Int = 540
-    let winW: Int = 1280
-    let winH: Int = 720
-    let prevDepth: Int = 8
-    let finalDepth: Int = 20
-    let maxSamples: Int = 600
+  # preview (fast) and final (sharp) internal resolutions; both are 16:9.
+  let prevW: Int = 320
+  let prevH: Int = 180
+  let finalW: Int = 960
+  let finalH: Int = 540
+  let winW: Int = 1280
+  let winH: Int = 720
+  let prevDepth: Int = 8
+  let finalDepth: Int = 20
+  let maxSamples: Int = 600
 
-    let world: List(Sphere) = buildScene()
+  let world: List(Sphere) = buildScene()
 
-    # accumulator + framebuffer sized for the largest (final) resolution; in
-    # preview mode only the first width*height entries are used.
-    let maxPixels: Int = finalW * finalH
-    let accum: List(Float) = List.create(Float, cap: maxPixels * 3)
-    var i: Int = 0
-    loop i < maxPixels * 3 {
-        accum.add(value: 0.0)
-        i = i + 1
+  # accumulator + framebuffer sized for the largest (final) resolution; in
+  # preview mode only the first width*height entries are used.
+  let maxPixels: Int = finalW * finalH
+  let accum: List(Float) = List.create(Float, cap: maxPixels * 3)
+  var i: Int = 0
+  loop i < maxPixels * 3 {
+    accum.add(value: 0.0)
+    i = i + 1
+  }
+  let fb: List(Int) = List.create(Int, cap: maxPixels)
+  i = 0
+  loop i < maxPixels {
+    fb.add(value: 0)
+    i = i + 1
+  }
+
+  Sdl3.initWindow(width: winW, height: winH, title: "Rae raytracer — step 5 (emissive lights)")
+  Sdl3.setTargetFPS(fps: 60)
+
+  # camera state (Z-up): position + yaw (about +Z) + pitch (about +X).
+  var camPos: Vec3 = Vec3.create(x: 0.0, y: -2.2, z: 0.7)
+  var yaw: Float = pi / 2.0
+  var pitch: Float = -0.12
+  let moveStep: Float = 0.08
+  let rotStep: Float = 0.03
+  let mouseSens: Float = 0.005
+  let worldUp: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
+  let aspect: Float = finalW.toFloat() / finalH.toFloat()
+
+  var fwd: Vec3 = Vec3.create(
+    x: Math.cos(x: pitch) * Math.cos(x: yaw)
+    y: Math.cos(x: pitch) * Math.sin(x: yaw)
+    z: Math.sin(x: pitch)
+  )
+  var cam: Camera = buildCamera(
+    pos: camPos
+    target: Vec3.vadd(a: camPos, b: fwd)
+    vfovDeg: 50.0
+    aperture: 0.0
+    aspect: aspect
+  )
+
+  var hiQ: Bool = false
+  var width: Int = prevW
+  var height: Int = prevH
+  var maxDepth: Int = prevDepth
+
+  var sampleCount: Int = 0
+  var prevMouseX: Int = Sdl3.getMouseX()
+  var prevMouseY: Int = Sdl3.getMouseY()
+
+  loop not Sdl3.shouldClose() {
+    if Sdl3.isKeyPressed(key: Keys.keyF2) {
+      let s: Bool = Image.savePng(
+        path: Filesystem.renderPath(stem: "rae_render")
+        pixels: fb.data
+        width: width
+        height: height
+      )
     }
-    let fb: List(Int) = List.create(Int, cap: maxPixels)
-    i = 0
-    loop i < maxPixels {
-        fb.add(value: 0)
-        i = i + 1
+
+    var moved: Bool = false
+
+    # quality toggle (P) — fires once per press
+    if Sdl3.isKeyPressed(key: Keys.keyP) {
+      hiQ = not hiQ
+      if hiQ {
+        width = finalW
+        height = finalH
+        maxDepth = finalDepth
+      } else {
+        width = prevW
+        height = prevH
+        maxDepth = prevDepth
+      }
+      sampleCount = 0
     }
 
-    Sdl3.initWindow(width: winW, height: winH, title: "Rae raytracer — step 5 (emissive lights)")
-    Sdl3.setTargetFPS(fps: 60)
-
-    # camera state (Z-up): position + yaw (about +Z) + pitch (about +X).
-    var camPos: Vec3 = Vec3.create(x: 0.0, y: -2.2, z: 0.7)
-    var yaw: Float = pi / 2.0
-    var pitch: Float = -0.12
-    let moveStep: Float = 0.08
-    let rotStep: Float = 0.03
-    let mouseSens: Float = 0.005
-    let worldUp: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
-    let aspect: Float = finalW.toFloat() / finalH.toFloat()
-
-    var fwd: Vec3 = Vec3.create(x: Math.cos(x: pitch) * Math.cos(x: yaw), y: Math.cos(x: pitch) * Math.sin(x: yaw), z: Math.sin(x: pitch))
-    var cam: Camera = buildCamera(pos: camPos, target: Vec3.vadd(a: camPos, b: fwd), vfovDeg: 50.0, aperture: 0.0, aspect: aspect)
-
-    var hiQ: Bool = false
-    var width: Int = prevW
-    var height: Int = prevH
-    var maxDepth: Int = prevDepth
-
-    var sampleCount: Int = 0
-    var prevMouseX: Int = Sdl3.getMouseX()
-    var prevMouseY: Int = Sdl3.getMouseY()
-
-    loop not Sdl3.shouldClose() {
-        if Sdl3.isKeyPressed(key: Keys.keyF2) { let s: Bool = Image.savePng(path: Filesystem.renderPath(stem: "rae_render"), pixels: fb.data, width: width, height: height) }
-
-        var moved: Bool = false
-
-        # quality toggle (P) — fires once per press
-        if Sdl3.isKeyPressed(key: Keys.keyP) {
-            hiQ = not hiQ
-            if hiQ {
-                width = finalW
-                height = finalH
-                maxDepth = finalDepth
-            } else {
-                width = prevW
-                height = prevH
-                maxDepth = prevDepth
-            }
-            sampleCount = 0
-        }
-
-        # reset camera (R)
-        if Sdl3.isKeyPressed(key: Keys.keyR) {
-            camPos = Vec3.create(x: 0.0, y: -2.2, z: 0.7)
-            yaw = pi / 2.0
-            pitch = -0.12
-            moved = true
-        }
-
-        # keyboard movement
-        if Sdl3.isKeyDown(key: Keys.keyW) {
-            camPos = Vec3.vadd(a: camPos, b: Vec3.vscale(a: fwd, s: moveStep))
-            moved = true
-        }
-        if Sdl3.isKeyDown(key: Keys.keyS) {
-            camPos = Vec3.vsub(a: camPos, b: Vec3.vscale(a: fwd, s: moveStep))
-            moved = true
-        }
-        let rgt: Vec3 = Vec3.vnorm(a: Vec3.vcross(a: fwd, b: worldUp))
-        if Sdl3.isKeyDown(key: Keys.keyD) {
-            camPos = Vec3.vadd(a: camPos, b: Vec3.vscale(a: rgt, s: moveStep))
-            moved = true
-        }
-        if Sdl3.isKeyDown(key: Keys.keyA) {
-            camPos = Vec3.vsub(a: camPos, b: Vec3.vscale(a: rgt, s: moveStep))
-            moved = true
-        }
-        if Sdl3.isKeyDown(key: Keys.keyE) {
-            camPos = Vec3.vadd(a: camPos, b: Vec3.vscale(a: worldUp, s: moveStep))
-            moved = true
-        }
-        if Sdl3.isKeyDown(key: Keys.keyQ) {
-            camPos = Vec3.vsub(a: camPos, b: Vec3.vscale(a: worldUp, s: moveStep))
-            moved = true
-        }
-
-        # arrow keys: look
-        if Sdl3.isKeyDown(key: Keys.keyRight) {
-            yaw = yaw - rotStep
-            moved = true
-        }
-        if Sdl3.isKeyDown(key: Keys.keyLeft) {
-            yaw = yaw + rotStep
-            moved = true
-        }
-        if Sdl3.isKeyDown(key: Keys.keyUp) {
-            pitch = pitch + rotStep
-            moved = true
-        }
-        if Sdl3.isKeyDown(key: Keys.keyDown) {
-            pitch = pitch - rotStep
-            moved = true
-        }
-
-        # mouse drag (hold left button) to look
-        let mx: Int = Sdl3.getMouseX()
-        let my: Int = Sdl3.getMouseY()
-        let dragging: Bool = Sdl3.isMouseButtonDown(button: 0)
-        if dragging {
-            let dx: Int = mx - prevMouseX
-            let dy: Int = my - prevMouseY
-            if dx > 0 or dx < 0 {
-                yaw = yaw - dx.toFloat() * mouseSens
-                moved = true
-            }
-            if dy > 0 or dy < 0 {
-                pitch = pitch - dy.toFloat() * mouseSens
-                moved = true
-            }
-        }
-        prevMouseX = mx
-        prevMouseY = my
-
-        if moved {
-            if pitch > 1.5 {
-                pitch = 1.5
-            }
-            if pitch < -1.5 {
-                pitch = -1.5
-            }
-            fwd = Vec3.create(x: Math.cos(x: pitch) * Math.cos(x: yaw), y: Math.cos(x: pitch) * Math.sin(x: yaw), z: Math.sin(x: pitch))
-            cam = buildCamera(pos: camPos, target: Vec3.vadd(a: camPos, b: fwd), vfovDeg: 50.0, aperture: 0.0, aspect: aspect)
-            sampleCount = 0
-        }
-
-        # one progressive sample pass, split across four band workers
-        if sampleCount < maxSamples {
-            var overwrite: Bool = false
-            if sampleCount is 0 {
-                overwrite = true
-            }
-            let qh: Int = height / 4
-            let ya: Int = 0
-            let yb: Int = qh
-            let yc: Int = qh * 2
-            let yd: Int = qh * 3
-            let ta: Task(List(Float)) = spawn renderSampleBand(world: world, cam: cam, width: width, height: height, y0: ya, y1: yb, maxDepth: maxDepth, sampleIndex: sampleCount)
-            let tb: Task(List(Float)) = spawn renderSampleBand(world: world, cam: cam, width: width, height: height, y0: yb, y1: yc, maxDepth: maxDepth, sampleIndex: sampleCount)
-            let tc: Task(List(Float)) = spawn renderSampleBand(world: world, cam: cam, width: width, height: height, y0: yc, y1: yd, maxDepth: maxDepth, sampleIndex: sampleCount)
-            let td: Task(List(Float)) = spawn renderSampleBand(world: world, cam: cam, width: width, height: height, y0: yd, y1: height, maxDepth: maxDepth, sampleIndex: sampleCount)
-            let pa: List(Float) = ta.get()
-            let pb: List(Float) = tb.get()
-            let pc: List(Float) = tc.get()
-            let pd: List(Float) = td.get()
-            mergeBand(accum: accum, tile: pa, off: ya * width * 3, overwrite: overwrite)
-            mergeBand(accum: accum, tile: pb, off: yb * width * 3, overwrite: overwrite)
-            mergeBand(accum: accum, tile: pc, off: yc * width * 3, overwrite: overwrite)
-            mergeBand(accum: accum, tile: pd, off: yd * width * 3, overwrite: overwrite)
-            sampleCount = sampleCount + 1
-        }
-
-        if sampleCount > 0 {
-            buildDisplay(fb: fb, accum: accum, pixels: width * height, sampleCount: sampleCount)
-        }
-        # Upload the active framebuffer; the texture resizes itself when the
-        # preview/final resolution toggles, and stretches to fill the window.
-        Sdl3.updatePixels(pixels: fb.data, w: width, h: height)
-        Sdl3.present()
-
-        var qlabel: String = "PREVIEW"
-        if hiQ {
-            qlabel = "FINAL"
-        }
-        Sdl3.setTitle(title: "Rae step 5 (SDL3) | {qlabel} {width}x{height} | {sampleCount} spp | P quality  R reset  WASD/E-Q move  arrows/LMB-drag look")
+    # reset camera (R)
+    if Sdl3.isKeyPressed(key: Keys.keyR) {
+      camPos = Vec3.create(x: 0.0, y: -2.2, z: 0.7)
+      yaw = pi / 2.0
+      pitch = -0.12
+      moved = true
     }
-    Sdl3.closeWindow()
+
+    # keyboard movement
+    if Sdl3.isKeyDown(key: Keys.keyW) {
+      camPos = Vec3.vadd(a: camPos, b: Vec3.vscale(a: fwd, s: moveStep))
+      moved = true
+    }
+    if Sdl3.isKeyDown(key: Keys.keyS) {
+      camPos = Vec3.vsub(a: camPos, b: Vec3.vscale(a: fwd, s: moveStep))
+      moved = true
+    }
+    let rgt: Vec3 = Vec3.vnorm(a: Vec3.vcross(a: fwd, b: worldUp))
+    if Sdl3.isKeyDown(key: Keys.keyD) {
+      camPos = Vec3.vadd(a: camPos, b: Vec3.vscale(a: rgt, s: moveStep))
+      moved = true
+    }
+    if Sdl3.isKeyDown(key: Keys.keyA) {
+      camPos = Vec3.vsub(a: camPos, b: Vec3.vscale(a: rgt, s: moveStep))
+      moved = true
+    }
+    if Sdl3.isKeyDown(key: Keys.keyE) {
+      camPos = Vec3.vadd(a: camPos, b: Vec3.vscale(a: worldUp, s: moveStep))
+      moved = true
+    }
+    if Sdl3.isKeyDown(key: Keys.keyQ) {
+      camPos = Vec3.vsub(a: camPos, b: Vec3.vscale(a: worldUp, s: moveStep))
+      moved = true
+    }
+
+    # arrow keys: look
+    if Sdl3.isKeyDown(key: Keys.keyRight) {
+      yaw = yaw - rotStep
+      moved = true
+    }
+    if Sdl3.isKeyDown(key: Keys.keyLeft) {
+      yaw = yaw + rotStep
+      moved = true
+    }
+    if Sdl3.isKeyDown(key: Keys.keyUp) {
+      pitch = pitch + rotStep
+      moved = true
+    }
+    if Sdl3.isKeyDown(key: Keys.keyDown) {
+      pitch = pitch - rotStep
+      moved = true
+    }
+
+    # mouse drag (hold left button) to look
+    let mx: Int = Sdl3.getMouseX()
+    let my: Int = Sdl3.getMouseY()
+    let dragging: Bool = Sdl3.isMouseButtonDown(button: 0)
+    if dragging {
+      let dx: Int = mx - prevMouseX
+      let dy: Int = my - prevMouseY
+      if dx > 0 or dx < 0 {
+        yaw = yaw - dx.toFloat() * mouseSens
+        moved = true
+      }
+      if dy > 0 or dy < 0 {
+        pitch = pitch - dy.toFloat() * mouseSens
+        moved = true
+      }
+    }
+    prevMouseX = mx
+    prevMouseY = my
+
+    if moved {
+      if pitch > 1.5 {
+        pitch = 1.5
+      }
+      if pitch < -1.5 {
+        pitch = -1.5
+      }
+      fwd = Vec3.create(
+        x: Math.cos(x: pitch) * Math.cos(x: yaw)
+        y: Math.cos(x: pitch) * Math.sin(x: yaw)
+        z: Math.sin(x: pitch)
+      )
+      cam = buildCamera(
+        pos: camPos
+        target: Vec3.vadd(a: camPos, b: fwd)
+        vfovDeg: 50.0
+        aperture: 0.0
+        aspect: aspect
+      )
+      sampleCount = 0
+    }
+
+    # one progressive sample pass, split across four band workers
+    if sampleCount < maxSamples {
+      var overwrite: Bool = false
+      if sampleCount is 0 {
+        overwrite = true
+      }
+      let qh: Int = height / 4
+      let ya: Int = 0
+      let yb: Int = qh
+      let yc: Int = qh * 2
+      let yd: Int = qh * 3
+      let ta: Task(List(Float)) = spawn renderSampleBand(
+        world: world
+        cam: cam
+        width: width
+        height: height
+        y0: ya
+        y1: yb
+        maxDepth: maxDepth
+        sampleIndex: sampleCount
+      )
+      let tb: Task(List(Float)) = spawn renderSampleBand(
+        world: world
+        cam: cam
+        width: width
+        height: height
+        y0: yb
+        y1: yc
+        maxDepth: maxDepth
+        sampleIndex: sampleCount
+      )
+      let tc: Task(List(Float)) = spawn renderSampleBand(
+        world: world
+        cam: cam
+        width: width
+        height: height
+        y0: yc
+        y1: yd
+        maxDepth: maxDepth
+        sampleIndex: sampleCount
+      )
+      let td: Task(List(Float)) = spawn renderSampleBand(
+        world: world
+        cam: cam
+        width: width
+        height: height
+        y0: yd
+        y1: height
+        maxDepth: maxDepth
+        sampleIndex: sampleCount
+      )
+      let pa: List(Float) = ta.get()
+      let pb: List(Float) = tb.get()
+      let pc: List(Float) = tc.get()
+      let pd: List(Float) = td.get()
+      mergeBand(
+        accum: accum
+        tile: pa
+        off: ya * width * 3
+        overwrite: overwrite
+      )
+      mergeBand(
+        accum: accum
+        tile: pb
+        off: yb * width * 3
+        overwrite: overwrite
+      )
+      mergeBand(
+        accum: accum
+        tile: pc
+        off: yc * width * 3
+        overwrite: overwrite
+      )
+      mergeBand(
+        accum: accum
+        tile: pd
+        off: yd * width * 3
+        overwrite: overwrite
+      )
+      sampleCount = sampleCount + 1
+    }
+
+    if sampleCount > 0 {
+      buildDisplay(
+        fb: fb
+        accum: accum
+        pixels: width * height
+        sampleCount: sampleCount
+      )
+    }
+    # Upload the active framebuffer; the texture resizes itself when the
+    # preview/final resolution toggles, and stretches to fill the window.
+    Sdl3.updatePixels(pixels: fb.data, w: width, h: height)
+    Sdl3.present()
+
+    var qlabel: String = "PREVIEW"
+    if hiQ {
+      qlabel = "FINAL"
+    }
+    Sdl3.setTitle(
+      title: "Rae step 5 (SDL3) | {qlabel} {width}x{height} | {sampleCount} spp | P quality  R reset  WASD/E-Q move  arrows/LMB-drag look"
+    )
+  }
+  Sdl3.closeWindow()
 }

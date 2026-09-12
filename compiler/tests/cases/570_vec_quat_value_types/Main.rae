@@ -33,14 +33,20 @@ func main() {
 
   # slerp: midpoint is exactly 45 degrees, and t=1 reproduces the target.
   let i: Quat = Quat.identity()
-  let mid: Vec3 = Quat.rotate(q: Quat.slerp(a: i, b: q, t: 0.5), v: Vec3.create(x: 1.0, y: 0.0, z: 0.0))
+  let mid: Vec3 = Quat.rotate(
+    q: Quat.slerp(a: i, b: q, t: 0.5)
+    v: Vec3.create(x: 1.0, y: 0.0, z: 0.0)
+  )
   log("slerp mid=({mid.x} {mid.y})")
   let endq: Quat = Quat.slerp(a: i, b: q, t: 1.0)
   log("slerp end w={endq.w} target={q.w}")
 
   # Composition order matches mat4Mul: qmul(a, b) applies b first.
   let half: Quat = Quat.fromAxisAngle(axis: Vec3.create(x: 0.0, y: 0.0, z: 1.0), angle: 0.78539815)
-  let composed: Vec3 = Quat.rotate(q: Quat.qmul(a: half, b: half), v: Vec3.create(x: 1.0, y: 0.0, z: 0.0))
+  let composed: Vec3 = Quat.rotate(
+    q: Quat.qmul(a: half, b: half)
+    v: Vec3.create(x: 1.0, y: 0.0, z: 0.0)
+  )
   log("half*half y={composed.y} zeroish={composed.x < 0.001}")
 
   # Conjugate inverts a unit quaternion.

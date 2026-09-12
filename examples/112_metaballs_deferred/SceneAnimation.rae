@@ -21,13 +21,26 @@ open ecs/Query
 # exists — the shared renderer groups fused surfaces by it — but the animation
 # never reads it: buildClusterTags does the one-time cluster:Int -> tag
 # classification (the migration bridge; a native-ECS scene would author the tag).
-type Cluster0Tag {}
-type Cluster1Tag {}
-type Cluster2Tag {}
-type Cluster3Tag {}
-type Cluster4Tag {}
-type Cluster5Tag {}
-type Cluster6Tag {}
+type Cluster0Tag {
+}
+
+type Cluster1Tag {
+}
+
+type Cluster2Tag {
+}
+
+type Cluster3Tag {
+}
+
+type Cluster4Tag {
+}
+
+type Cluster5Tag {
+}
+
+type Cluster6Tag {
+}
 
 type ClusterTags {
   c0: ComponentTable(Cluster0Tag)
@@ -56,13 +69,27 @@ func buildClusterTags(world: view World3d) ret ClusterTags {
   loop var i: Int = 0, i < world3dSdfCount(world: world), ++i {
     let entity: EntityId = world3dSdfEntityAt(world: world, i: i)
     let sdf: SdfPrimitive = world3dSdfDataAt(world: world, i: i)
-    if sdf.cluster is 0 { addTag(table: tags.c0, entity: entity) }
-    if sdf.cluster is 1 { addTag(table: tags.c1, entity: entity) }
-    if sdf.cluster is 2 { addTag(table: tags.c2, entity: entity) }
-    if sdf.cluster is 3 { addTag(table: tags.c3, entity: entity) }
-    if sdf.cluster is 4 { addTag(table: tags.c4, entity: entity) }
-    if sdf.cluster is 5 { addTag(table: tags.c5, entity: entity) }
-    if sdf.cluster is 6 { addTag(table: tags.c6, entity: entity) }
+    if sdf.cluster is 0 {
+      addTag(table: tags.c0, entity: entity)
+    }
+    if sdf.cluster is 1 {
+      addTag(table: tags.c1, entity: entity)
+    }
+    if sdf.cluster is 2 {
+      addTag(table: tags.c2, entity: entity)
+    }
+    if sdf.cluster is 3 {
+      addTag(table: tags.c3, entity: entity)
+    }
+    if sdf.cluster is 4 {
+      addTag(table: tags.c4, entity: entity)
+    }
+    if sdf.cluster is 5 {
+      addTag(table: tags.c5, entity: entity)
+    }
+    if sdf.cluster is 6 {
+      addTag(table: tags.c6, entity: entity)
+    }
   }
   ret tags
 }
@@ -71,7 +98,12 @@ func buildClusterTags(world: view World3d) ret ClusterTags {
 # "escape" keyed off the ball's global index (hit.indexA), plus the shrink
 # factor while away. Keyed off the index so it is identical to the old
 # per-ball computation regardless of which cluster loop reaches the ball.
-type LabPulse { phase: Float, escape: Float, away: Float }
+type LabPulse {
+  phase: Float
+  escape: Float
+  away: Float
+}
+
 func labPulse(time: view Float, i: view Int) ret LabPulse {
   let phase: Float = i.toFloat() * 0.7853981
   let idx: Float = i.toFloat()
@@ -89,13 +121,18 @@ func animateScene(world: mod World3d, sceneId: view Int, time: view Float) {
     let entity: EntityId = world3dMeshRendererEntityAt(world: world, i: i)
     var transform: Transform3d = world3dGetTransform(world: world, entity: entity)
     let phase: Float = i.toFloat() * 0.173 + sceneId.toFloat()
-    transform.rotation = Vec3.create(x: time * (0.08 + sceneId.toFloat() * 0.04), y: Math.sin(x: time * 0.18 + phase) * 0.28, z: time * (0.12 + (i % 5).toFloat() * 0.025))
+    transform.rotation = Vec3.create(
+      x: time * (0.08 + sceneId.toFloat() * 0.04)
+      y: Math.sin(x: time * 0.18 + phase) * 0.28
+      z: time * (0.12 + (i % 5).toFloat() * 0.025)
+    )
     world3dWriteTransform(world: world, entity: entity, transform: transform)
     i = i + 1
   }
 }
 
-# The metaball lab, now living in SCENE 2 alongside its meshes. Seven clusters, 24 balls, every one of them an SDF
+# The metaball lab, now living in SCENE 2 alongside its meshes. Seven clusters, 24 balls, every one
+# of them an SDF
 # sphere; the only mesh in the scene is the ground for shadows to land on.
 #
 # BUDGETED FOR 60 FPS, and the budget is in BALLS, not clusters. Measured on an
@@ -132,8 +169,8 @@ func animateMetaballLab(world: mod World3d, tags: view ClusterTags, time: view F
     var transform: Transform3d = world3dGetTransform(world: world, entity: hit.entity)
     let t: Float = time * 0.46
     transform.position = Vec3.create(
-      x: 0.0 - 6.0 + Math.cos(x: t + p.phase) * (1.9 + p.escape * 4.4),
-      y: 2.4 + Math.sin(x: t * 0.73 + p.phase * 1.4) * (1.7 + p.escape * 2.1),
+      x: 0.0 - 6.0 + Math.cos(x: t + p.phase) * (1.9 + p.escape * 4.4)
+      y: 2.4 + Math.sin(x: t * 0.73 + p.phase * 1.4) * (1.7 + p.escape * 2.1)
       z: 1.5 + Math.sin(x: t * 1.05 + p.phase * 0.6) * 0.9 + p.escape * 2.6
     )
     let r: Float = (0.30 + Math.sin(x: time * 0.9 + p.phase) * 0.09) * p.away
@@ -148,8 +185,8 @@ func animateMetaballLab(world: mod World3d, tags: view ClusterTags, time: view F
     var transform: Transform3d = world3dGetTransform(world: world, entity: hit.entity)
     let t: Float = time * 0.21
     transform.position = Vec3.create(
-      x: Math.cos(x: t + p.phase) * 1.35,
-      y: 6.6 + Math.sin(x: t * 0.8 + p.phase * 1.2) * 0.75,
+      x: Math.cos(x: t + p.phase) * 1.35
+      y: 6.6 + Math.sin(x: t * 0.8 + p.phase * 1.2) * 0.75
       z: 2.4 + Math.sin(x: t * 1.3 + p.phase) * 0.55
     )
     let r: Float = 1.85 + Math.sin(x: time * 0.37 + p.phase * 1.9) * 0.42
@@ -164,8 +201,8 @@ func animateMetaballLab(world: mod World3d, tags: view ClusterTags, time: view F
     var transform: Transform3d = world3dGetTransform(world: world, entity: hit.entity)
     let t: Float = time * 0.63
     transform.position = Vec3.create(
-      x: 6.4 + Math.cos(x: t * 0.9 + p.phase * 1.7) * (2.6 + p.escape * 3.2),
-      y: 2.2 + Math.sin(x: t + p.phase) * (2.4 + p.escape * 2.6),
+      x: 6.4 + Math.cos(x: t * 0.9 + p.phase * 1.7) * (2.6 + p.escape * 3.2)
+      y: 2.2 + Math.sin(x: t + p.phase) * (2.4 + p.escape * 2.6)
       z: 1.2 + Math.sin(x: t * 1.4 + p.phase * 2.2) * 1.1 + p.escape * 3.1
     )
     let r: Float = (0.27 + Math.sin(x: time * 1.5 + p.phase * 2.6) * 0.09) * p.away
@@ -179,8 +216,8 @@ func animateMetaballLab(world: mod World3d, tags: view ClusterTags, time: view F
     var transform: Transform3d = world3dGetTransform(world: world, entity: hit.entity)
     let t: Float = time * 1.45
     transform.position = Vec3.create(
-      x: 0.0 - 2.6 + Math.cos(x: t + p.phase * 1.3) * (1.3 + p.escape * 3.0),
-      y: 0.0 - 1.8 + Math.sin(x: t * 0.62 + p.phase) * (1.1 + p.escape * 1.9),
+      x: 0.0 - 2.6 + Math.cos(x: t + p.phase * 1.3) * (1.3 + p.escape * 3.0)
+      y: 0.0 - 1.8 + Math.sin(x: t * 0.62 + p.phase) * (1.1 + p.escape * 1.9)
       z: 1.1 + Math.sin(x: t * 0.9 + p.phase * 1.8) * 0.6 + p.escape * 2.2
     )
     let r: Float = (0.62 + Math.sin(x: t * 0.7 + p.phase * 2.1) * 0.26) * p.away
@@ -195,8 +232,8 @@ func animateMetaballLab(world: mod World3d, tags: view ClusterTags, time: view F
     var transform: Transform3d = world3dGetTransform(world: world, entity: hit.entity)
     let t: Float = time * 0.38
     transform.position = Vec3.create(
-      x: 3.2 + Math.cos(x: t + p.phase) * (1.2 + p.escape * 4.8),
-      y: 0.0 - 2.2 + Math.sin(x: t * 1.1 + p.phase * 1.6) * (1.0 + p.escape * 1.4),
+      x: 3.2 + Math.cos(x: t + p.phase) * (1.2 + p.escape * 4.8)
+      y: 0.0 - 2.2 + Math.sin(x: t * 1.1 + p.phase * 1.6) * (1.0 + p.escape * 1.4)
       z: 1.6 + Math.sin(x: t * 0.8 + p.phase) * 0.7 + p.escape * 3.4
     )
     let r: Float = (0.78 + Math.sin(x: time * 0.5 + p.phase) * 0.20) * p.away
@@ -212,8 +249,8 @@ func animateMetaballLab(world: mod World3d, tags: view ClusterTags, time: view F
     let t: Float = time * 0.55
     let ring: Float = 2.2 + Math.sin(x: time * 0.33) * 0.9
     transform.position = Vec3.create(
-      x: 0.2 + Math.cos(x: p.phase * 2.0 + t * 0.4) * (ring + p.escape * 3.6),
-      y: 1.2 + Math.sin(x: p.phase * 2.0 + t * 0.4) * (ring * 0.7 + p.escape * 2.0),
+      x: 0.2 + Math.cos(x: p.phase * 2.0 + t * 0.4) * (ring + p.escape * 3.6)
+      y: 1.2 + Math.sin(x: p.phase * 2.0 + t * 0.4) * (ring * 0.7 + p.escape * 2.0)
       z: 0.9 + Math.sin(x: t * 1.2 + p.phase) * 0.5 + p.escape * 2.4
     )
     let r: Float = (0.44 + Math.sin(x: t + p.phase * 1.5) * 0.14) * p.away
@@ -228,8 +265,8 @@ func animateMetaballLab(world: mod World3d, tags: view ClusterTags, time: view F
     var transform: Transform3d = world3dGetTransform(world: world, entity: hit.entity)
     let t: Float = time * 0.16
     transform.position = Vec3.create(
-      x: 0.0 - 4.4 + Math.cos(x: t + p.phase) * 0.85,
-      y: 0.0 - 3.0 + Math.sin(x: t * 0.9 + p.phase * 1.1) * 0.6,
+      x: 0.0 - 4.4 + Math.cos(x: t + p.phase) * 0.85
+      y: 0.0 - 3.0 + Math.sin(x: t * 0.9 + p.phase * 1.1) * 0.6
       z: 2.2 + Math.sin(x: t * 1.4 + p.phase) * 0.45
     )
     let r: Float = 1.05 + Math.sin(x: time * 0.24 + p.phase * 1.3) * 0.18
@@ -274,8 +311,8 @@ func animateScene3(world: mod World3d, time: view Float) {
     let swirl: Float = phase + t * (0.6 + lead * 0.5)
     let ring: Float = 2.2 + Math.sin(x: time * 0.23 + phase) * 0.7 + escape * 3.2
     transform.position = Vec3.create(
-      x: Math.cos(x: swirl) * ring,
-      y: 1.4 + Math.sin(x: swirl) * ring * 0.8 - escape * 1.2,
+      x: Math.cos(x: swirl) * ring
+      y: 1.4 + Math.sin(x: swirl) * ring * 0.8 - escape * 1.2
       z: 1.9 + Math.sin(x: t * 1.1 + phase) * 0.8 + escape * 2.4
     )
     # The authored radius is the base; breathing is proportional so the size
@@ -291,7 +328,14 @@ func animateScene3(world: mod World3d, time: view Float) {
 
 # The cube/torus entities are resolved once at load (nodeId -> EntityId) and
 # passed in, so this animator is pure World3d — no Scene3dAsset / nodeId lookup.
-func animateScene1(world: mod World3d, cubeA: view EntityId, cubeB: view EntityId, torus: view EntityId, tags: view ClusterTags, time: view Float) {
+func animateScene1(
+  world: mod World3d
+  cubeA: view EntityId
+  cubeB: view EntityId
+  torus: view EntityId
+  tags: view ClusterTags
+  time: view Float
+) {
   # Two free cubes tumbling on different axes at different rates. Boxes are
   # the useful shape to watch here: a sphere looks identical under any
   # rotation, so it cannot show a wrong rotation order or a skewed normal
@@ -335,8 +379,8 @@ func animateScene1(world: mod World3d, cubeA: view EntityId, cubeB: view EntityI
     var transform: Transform3d = world3dGetTransform(world: world, entity: hit.entity)
     let slow: Float = time * 0.34
     transform.position = Vec3.create(
-      x: 0.0 - 5.25 + Math.cos(x: slow + phase) * 0.62,
-      y: 2.15 + Math.sin(x: slow * 0.7 + phase * 1.3) * 0.30,
+      x: 0.0 - 5.25 + Math.cos(x: slow + phase) * 0.62
+      y: 2.15 + Math.sin(x: slow * 0.7 + phase * 1.3) * 0.30
       z: 0.46 + Math.sin(x: slow * 1.1 + phase) * 0.20
     )
     let obsidianR: Float = 0.82 + Math.sin(x: time * 0.29 + phase * 1.7) * 0.14
@@ -351,8 +395,8 @@ func animateScene1(world: mod World3d, cubeA: view EntityId, cubeB: view EntityI
     var transform: Transform3d = world3dGetTransform(world: world, entity: hit.entity)
     let fast: Float = time * 1.35
     transform.position = Vec3.create(
-      x: 0.0 - 0.35 + Math.cos(x: fast + phase * 1.4) * 1.18,
-      y: 5.25 + Math.sin(x: fast * 0.55 + phase) * 0.40,
+      x: 0.0 - 0.35 + Math.cos(x: fast + phase * 1.4) * 1.18
+      y: 5.25 + Math.sin(x: fast * 0.55 + phase) * 0.40
       z: 0.75 + Math.sin(x: fast * 0.85 + phase * 1.9) * 0.25
     )
     let emberR: Float = 0.78 + Math.sin(x: fast * 0.62 + phase * 2.3) * 0.42
@@ -370,16 +414,18 @@ func animateScene1(world: mod World3d, cubeA: view EntityId, cubeB: view EntityI
     var transform: Transform3d = world3dGetTransform(world: world, entity: hit.entity)
     var excursion: Float = 0.0
     if i % 3 is 0 {
-    var pulse: Float = Math.sin(x: time * 0.26 + phase * 3.1)
-    if pulse < 0.0 {
-      pulse = 0.0
-    }
-    excursion = pulse * pulse * pulse * 6.0
+      var pulse: Float = Math.sin(x: time * 0.26 + phase * 3.1)
+      if pulse < 0.0 {
+        pulse = 0.0
+      }
+      excursion = pulse * pulse * pulse * 6.0
     }
     transform.position = Vec3.create(
-    x: 4.55 + Math.cos(x: time * 0.72 + phase) * (1.05 + (i % 2).toFloat() * 0.24) - 0.8 * Math.cos(x: phase) * excursion,
-    y: 2.25 + Math.sin(x: time * 0.41 + phase * 1.7) * 0.45 - excursion,
-    z: 1.21 + Math.sin(x: time * 0.83 + phase) * 0.30 + 0.25 * excursion
+      x: 4.55 + Math.cos(x: time * 0.72 + phase) * (1.05 + (i % 2).toFloat() * 0.24) - 0.8 * Math.cos(
+        x: phase
+      ) * excursion
+      y: 2.25 + Math.sin(x: time * 0.41 + phase * 1.7) * 0.45 - excursion
+      z: 1.21 + Math.sin(x: time * 0.83 + phase) * 0.30 + 0.25 * excursion
     )
     let radius: Float = 1.45 + Math.sin(x: time * 0.67 + phase * 2.0) * 0.16 - 0.08 * excursion
     transform.scale = Vec3.create(x: radius, y: radius, z: radius)

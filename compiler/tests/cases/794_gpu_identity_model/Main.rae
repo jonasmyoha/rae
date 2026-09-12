@@ -61,7 +61,12 @@ func create(issuer: mod IdIssuer, capacity: view Int) ret opt Resources {
   }
   let tag: Int = issue(this: issuer)
   log("manager {tag} created (capacity {capacity})")
-  ret Resources { managerTag: tag, capacity: capacity, generations: own generations, live: own live }
+  ret Resources {
+    managerTag: tag
+    capacity: capacity
+    generations: own generations
+    live: own live
+  }
 }
 
 func drop(this: mod Resources) {
@@ -71,10 +76,16 @@ func drop(this: mod Resources) {
 # Validation order: owner tag, slot range, live slot, generation. A rejected ID
 # is a plain `false`; it never reaches the slot record.
 func isValid(resources: view Resources, id: view TextureId) ret Bool {
-  if id.managerTag is not resources.managerTag { ret false }
-  if id.slot < 0 or id.slot >= resources.capacity { ret false }
+  if id.managerTag is not resources.managerTag {
+    ret false
+  }
+  if id.slot < 0 or id.slot >= resources.capacity {
+    ret false
+  }
   if let liveFlag: Int = resources.live.copyAt(index: id.slot) {
-    if liveFlag is 0 { ret false }
+    if liveFlag is 0 {
+      ret false
+    }
   } else {
     ret false
   }
@@ -106,7 +117,9 @@ func createTexture(resources: mod Resources) ret opt TextureId {
 # once, and frees the slot. Retiring an invalid/stale/foreign ID is a `false`,
 # not a crash, so a double retire is harmless.
 func retireTexture(resources: mod Resources, id: view TextureId) ret Bool {
-  if isValid(resources: resources, id: id) is false { ret false }
+  if isValid(resources: resources, id: id) is false {
+    ret false
+  }
   if let generation: Int = resources.generations.copyAt(index: id.slot) {
     resources.generations.set(index: id.slot, value: generation + 1)
   }
@@ -139,7 +152,9 @@ func main() {
         if let idB: TextureId = createTexture(resources: managerB) {
           log("A: {describe(id: idA)}")
           log("B: {describe(id: idB)}")
-          log("slots and generations match: {idA.slot is idB.slot and idA.generation is idB.generation}")
+          log(
+            "slots and generations match: {idA.slot is idB.slot and idA.generation is idB.generation}"
+          )
           log("A id valid in A: {isValid(resources: managerA, id: idA)}")
           log("A id valid in B (wrong owner): {isValid(resources: managerB, id: idA)}")
           log("B id valid in A (wrong owner): {isValid(resources: managerA, id: idB)}")
@@ -186,7 +201,9 @@ func main() {
   if let fresh: Resources = Resources.create(issuer: issuer, capacity: 1) {
     if let freshId: TextureId = createTexture(resources: fresh) {
       log("fresh: {describe(id: freshId)}")
-      log("same slot and generation as escaped: {stale.slot is freshId.slot and stale.generation is freshId.generation}")
+      log(
+        "same slot and generation as escaped: {stale.slot is freshId.slot and stale.generation is freshId.generation}"
+      )
       log("escaped valid in recreated manager: {isValid(resources: fresh, id: stale)}")
       log("fresh valid: {isValid(resources: fresh, id: freshId)}")
     }

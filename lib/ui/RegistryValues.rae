@@ -161,18 +161,51 @@ func parseTextFormat(text: view String) ret TextFormat {
 # -----------------------------------------------------------------
 # Sub-type deserialisers
 # -----------------------------------------------------------------
-
 func deserInsets(doc: view JsonDoc, theme: view UiTheme, val: view JsonValue) ret Insets {
-  let l: Float = optFloatOrToken(doc: doc, theme: theme, container: val, key: "l", fallback: 0.0)
-  let t: Float = optFloatOrToken(doc: doc, theme: theme, container: val, key: "t", fallback: 0.0)
-  let r: Float = optFloatOrToken(doc: doc, theme: theme, container: val, key: "r", fallback: 0.0)
-  let b: Float = optFloatOrToken(doc: doc, theme: theme, container: val, key: "b", fallback: 0.0)
+  let l: Float = optFloatOrToken(
+    doc: doc
+    theme: theme
+    container: val
+    key: "l"
+    fallback: 0.0
+  )
+  let t: Float = optFloatOrToken(
+    doc: doc
+    theme: theme
+    container: val
+    key: "t"
+    fallback: 0.0
+  )
+  let r: Float = optFloatOrToken(
+    doc: doc
+    theme: theme
+    container: val
+    key: "r"
+    fallback: 0.0
+  )
+  let b: Float = optFloatOrToken(
+    doc: doc
+    theme: theme
+    container: val
+    key: "b"
+    fallback: 0.0
+  )
   ret Insets { l: l, t: t, r: r, b: b }
 }
 
 func deserVec2(doc: view JsonDoc, val: view JsonValue) ret Vec2 {
-  let x: Float = optFloat(doc: doc, container: val, key: "x", fallback: 0.0)
-  let y: Float = optFloat(doc: doc, container: val, key: "y", fallback: 0.0)
+  let x: Float = optFloat(
+    doc: doc
+    container: val
+    key: "x"
+    fallback: 0.0
+  )
+  let y: Float = optFloat(
+    doc: doc
+    container: val
+    key: "y"
+    fallback: 0.0
+  )
   ret Vec2 { x: x, y: y }
 }
 
@@ -189,18 +222,53 @@ func deserRgba(doc: view JsonDoc, theme: view UiTheme, val: view JsonValue) ret 
   if asStr.length() > 0 {
     ret colorByName(theme: theme.active, name: asStr)
   }
-  let r: Int = optInt(doc: doc, container: val, key: "r", fallback: 0)
-  let g: Int = optInt(doc: doc, container: val, key: "g", fallback: 0)
-  let b: Int = optInt(doc: doc, container: val, key: "b", fallback: 0)
-  let a: Int = optInt(doc: doc, container: val, key: "a", fallback: 255)
+  let r: Int = optInt(
+    doc: doc
+    container: val
+    key: "r"
+    fallback: 0
+  )
+  let g: Int = optInt(
+    doc: doc
+    container: val
+    key: "g"
+    fallback: 0
+  )
+  let b: Int = optInt(
+    doc: doc
+    container: val
+    key: "b"
+    fallback: 0
+  )
+  let a: Int = optInt(
+    doc: doc
+    container: val
+    key: "a"
+    fallback: 255
+  )
   ret RgbaColor { r: r, g: g, b: b, a: a }
 }
 
 func deserSizeAxis(doc: view JsonDoc, val: view JsonValue) ret SizeAxis {
-  let modeStr: String = optString(doc: doc, container: val, key: "mode", fallback: "Fixed")
+  let modeStr: String = optString(
+    doc: doc
+    container: val
+    key: "mode"
+    fallback: "Fixed"
+  )
   let mode: SizeMode = parseSizeMode(text: modeStr)
-  let minV: Int = optInt(doc: doc, container: val, key: "min", fallback: -1)
-  let maxV: Int = optInt(doc: doc, container: val, key: "max", fallback: -1)
+  let minV: Int = optInt(
+    doc: doc
+    container: val
+    key: "min"
+    fallback: -1
+  )
+  let maxV: Int = optInt(
+    doc: doc
+    container: val
+    key: "max"
+    fallback: -1
+  )
   ret SizeAxis { mode: mode, min: minV, max: maxV }
 }
 
@@ -210,17 +278,36 @@ func deserSizeAxis(doc: view JsonDoc, val: view JsonValue) ret SizeAxis {
 # component bag (e.g. `{"x":0,"w":100}`) and produces the typed
 # component.
 # -----------------------------------------------------------------
-
 func deserRect(doc: view JsonDoc, val: view JsonValue) ret Rect {
   # Wire format stays flat {x,y,w,h}; bridge into the Vec2 position/size pair.
   ret Rect {
     position: {
-      x: optFloat(doc: doc, container: val, key: "x", fallback: 0.0)
-      y: optFloat(doc: doc, container: val, key: "y", fallback: 0.0)
+      x: optFloat(
+        doc: doc
+        container: val
+        key: "x"
+        fallback: 0.0
+      )
+      y: optFloat(
+        doc: doc
+        container: val
+        key: "y"
+        fallback: 0.0
+      )
     }
     size: {
-      x: optFloat(doc: doc, container: val, key: "w", fallback: 0.0)
-      y: optFloat(doc: doc, container: val, key: "h", fallback: 0.0)
+      x: optFloat(
+        doc: doc
+        container: val
+        key: "w"
+        fallback: 0.0
+      )
+      y: optFloat(
+        doc: doc
+        container: val
+        key: "h"
+        fallback: 0.0
+      )
     }
   }
 }
@@ -242,22 +329,48 @@ func deserSize(doc: view JsonDoc, val: view JsonValue) ret Size {
 }
 
 func dataResourceIdFromString(name: view String) ret DataResourceId {
-  if name is "albums" { ret DataResourceId.albums }
-  if name is "history" { ret DataResourceId.history }
-  if name is "library" { ret DataResourceId.library }
-  if name is "playback" { ret DataResourceId.playback }
-  if name is "playlists" { ret DataResourceId.playlists }
-  if name is "spotify" { ret DataResourceId.spotify }
-  if name is "settings" { ret DataResourceId.settings }
-  if name is "debug" { ret DataResourceId.debug }
+  if name is "albums" {
+    ret DataResourceId.albums
+  }
+  if name is "history" {
+    ret DataResourceId.history
+  }
+  if name is "library" {
+    ret DataResourceId.library
+  }
+  if name is "playback" {
+    ret DataResourceId.playback
+  }
+  if name is "playlists" {
+    ret DataResourceId.playlists
+  }
+  if name is "spotify" {
+    ret DataResourceId.spotify
+  }
+  if name is "settings" {
+    ret DataResourceId.settings
+  }
+  if name is "debug" {
+    ret DataResourceId.debug
+  }
   ret DataResourceId.none
 }
 
 func dataFieldIdFromString(name: view String) ret DataFieldId {
-  if name is "all" { ret DataFieldId.all }
-  if name is "isPlaying" { ret DataFieldId.isPlaying }
-  if name is "likedTrack" { ret DataFieldId.likedTrack }
-  if name is "playingTrack" { ret DataFieldId.playingTrack }
-  if name is "debugToggle" { ret DataFieldId.debugToggle }
+  if name is "all" {
+    ret DataFieldId.all
+  }
+  if name is "isPlaying" {
+    ret DataFieldId.isPlaying
+  }
+  if name is "likedTrack" {
+    ret DataFieldId.likedTrack
+  }
+  if name is "playingTrack" {
+    ret DataFieldId.playingTrack
+  }
+  if name is "debugToggle" {
+    ret DataFieldId.debugToggle
+  }
   ret DataFieldId.none
 }

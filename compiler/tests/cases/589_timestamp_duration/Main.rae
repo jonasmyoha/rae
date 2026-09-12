@@ -68,14 +68,20 @@ func main() {
 
   var cursor: Timestamp = earlier
   cursor = base
-  check(label: "assignment within one type", ok: near(a: cursor.epochSeconds(), b: base.epochSeconds()))
+  check(
+    label: "assignment within one type"
+    ok: near(a: cursor.epochSeconds(), b: base.epochSeconds())
+  )
 
   cursor = cursor.advance(by: gap)
   check(label: "advance moves forward", ok: near(a: cursor.epochSeconds(), b: 1750000040.0))
   cursor = cursor.rewind(by: gap)
   check(label: "rewind moves back", ok: near(a: cursor.epochSeconds(), b: 1750000037.5))
 
-  check(label: "isBefore / isAfter", ok: earlier.isBefore(other: base) and base.isAfter(other: earlier))
+  check(
+    label: "isBefore / isAfter"
+    ok: earlier.isBefore(other: base) and base.isAfter(other: earlier)
+  )
   check(label: "never is never", ok: never().isNever() and base.isNever() is false)
 
   # Duration operations.
@@ -85,7 +91,10 @@ func main() {
   check(label: "scaled", ok: near(a: gap.scaled(by: 2.0).inSeconds(), b: 5.0))
   check(label: "ratio is a plain number", ok: near(a: twice.ratio(to: gap), b: 2.0))
   check(label: "ratio guards zero", ok: near(a: gap.ratio(to: zero()), b: 0.0))
-  check(label: "isLongerThan / isShorterThan", ok: twice.isLongerThan(other: gap) and gap.isShorterThan(other: twice))
+  check(
+    label: "isLongerThan / isShorterThan"
+    ok: twice.isLongerThan(other: gap) and gap.isShorterThan(other: twice)
+  )
 
   # Chaining reads naturally, which is the reason for the `this` convention.
   let chained: Timestamp = base.advance(by: seconds(n: 1.0).plus(other: millis(n: 500.0)))
@@ -97,5 +106,8 @@ func main() {
   let first: Bool = due(p: p, moment: base)
   let immediately: Bool = due(p: p, moment: base)
   let afterWait: Bool = due(p: p, moment: base.advance(by: seconds(n: 2.0)))
-  check(label: "poller fires, throttles, fires again", ok: first and immediately is false and afterWait)
+  check(
+    label: "poller fires, throttles, fires again"
+    ok: first and immediately is false and afterWait
+  )
 }

@@ -9,11 +9,21 @@ open ecs/Serialize
 # adding a ComponentTable field needs NO edit to snapshot/restore. `tags` here is
 # "the newly added table": snapshot/restore never name any table, so it is picked
 # up by the loop with zero edits; `notes` proves the registry flag still gates.
+type Position {
+  x: Int
+}
 
-type Position { x: Int }
-type Velocity { dx: Int }
-type Tag { on: Int }
-type Note { n: Int }
+type Velocity {
+  dx: Int
+}
+
+type Tag {
+  on: Int
+}
+
+type Note {
+  n: Int
+}
 
 type Mini {
   allocator: EntityAllocator
@@ -25,10 +35,10 @@ type Mini {
 
 func createMini() ret Mini {
   ret Mini {
-    allocator: createEntityAllocator(),
-    poss: ComponentTable.create(Position),
-    vels: ComponentTable.create(Velocity),
-    tags: ComponentTable.create(Tag),
+    allocator: createEntityAllocator()
+    poss: ComponentTable.create(Position)
+    vels: ComponentTable.create(Velocity)
+    tags: ComponentTable.create(Tag)
     notes: ComponentTable.create(Note)
   }
 }
@@ -37,13 +47,24 @@ func createMini() ret Mini {
 func snapshot(world: view Mini, reg: view ComponentRegistry) ret String {
   var writer: WorldJson = createWorldJson()
   loop let table: view ComponentTable(any) in fields(world) {
-    addComponentTable(writer: writer, table: table, name: fieldName(table), registry: reg)
+    addComponentTable(
+      writer: writer
+      table: table
+      name: fieldName(table)
+      registry: reg
+    )
   }
   ret finishWorldJson(writer: writer)
 }
+
 func restore(world: mod Mini, reg: view ComponentRegistry, doc: view JsonDoc) {
   loop let table: mod ComponentTable(any) in fields(world) {
-    loadComponentTable(table: table, name: fieldName(table), registry: reg, doc: doc)
+    loadComponentTable(
+      table: table
+      name: fieldName(table)
+      registry: reg
+      doc: doc
+    )
   }
 }
 
@@ -73,7 +94,11 @@ func main() {
   let doc: JsonDoc = parseJson(source: s1)
   var restored: Mini = createMini()
   restore(world: restored, reg: reg, doc: doc)
-  log("counts pos={componentCount(this: restored.poss)} vel={componentCount(this: restored.vels)} tag={componentCount(this: restored.tags)} note={componentCount(this: restored.notes)}")
+  log(
+    "counts pos={componentCount(this: restored.poss)} vel={componentCount(this: restored.vels)} tag={componentCount(
+      this: restored.tags
+    )} note={componentCount(this: restored.notes)}"
+  )
 
   let s2: String = snapshot(world: restored, reg: reg)
   log("roundtrip identical: {s1 is s2}")

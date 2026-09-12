@@ -29,11 +29,13 @@ open Gpu2dCanvas
 # the theme file; RAE_UI_THEME=light picks the light palette.
 func loadGpuUi() ret Gpu2dUi {
   let gpuTextFont: SdfFont = SdfText.loadSdfFont(
-    jsonPath: "examples/106_mobile_ui/assets/Roboto-Regular.mtsdf.json",
-    rawAtlasPath: "examples/106_mobile_ui/assets/Roboto-Regular.mtsdf.raw")
+    jsonPath: "examples/106_mobile_ui/assets/Roboto-Regular.mtsdf.json"
+    rawAtlasPath: "examples/106_mobile_ui/assets/Roboto-Regular.mtsdf.raw"
+  )
   let gpuIconFont: SdfFont = SdfText.loadSdfFont(
-    jsonPath: "examples/106_mobile_ui/assets/MaterialIconsRound-Regular.mtsdf.json",
-    rawAtlasPath: "examples/106_mobile_ui/assets/MaterialIconsRound-Regular.mtsdf.raw")
+    jsonPath: "examples/106_mobile_ui/assets/MaterialIconsRound-Regular.mtsdf.json"
+    rawAtlasPath: "examples/106_mobile_ui/assets/MaterialIconsRound-Regular.mtsdf.raw"
+  )
   let themeScene: Scene = loadSceneFile(path: themePath)
   let uiTheme: ResolvedTheme = parseTheme(scene: themeScene)
   let themeEnv: String = getEnv(name: "RAE_UI_THEME")
@@ -42,7 +44,12 @@ func loadGpuUi() ret Gpu2dUi {
   if themeEnv is lightKey {
     chosenTheme = lightTheme()
   }
-  ret Gpu2dUi { textFont: gpuTextFont, iconFont: gpuIconFont, theme: uiTheme, activeTheme: chosenTheme }
+  ret Gpu2dUi {
+    textFont: gpuTextFont
+    iconFont: gpuIconFont
+    theme: uiTheme
+    activeTheme: chosenTheme
+  }
 }
 
 # #764: the theme is no longer a global — it lives on AppState (built from the
@@ -84,7 +91,9 @@ func setupSpotify(isHeadless: view Bool) ret SpotifyState {
 func autoExitSeconds(isHeadless: view Bool) ret Float {
   let autoExitEnv: String = getEnv(name: "RAE_AUTO_EXIT_SEC")
   var autoExitSec: Float = 0.0
-  if autoExitEnv.length() > 0 { autoExitSec = autoExitEnv.toFloat() }
+  if autoExitEnv.length() > 0 {
+    autoExitSec = autoExitEnv.toFloat()
+  }
   autoExitSec = headlessApplyAutoExitDefault(headless: isHeadless, current: autoExitSec)
   ret autoExitSec
 }
@@ -98,16 +107,25 @@ func autoExitSeconds(isHeadless: view Bool) ret Float {
 func restoreStartState() ret RestoredState {
   let startScreenEnv: String = getEnv(name: "RAE_UI_SCREEN")
   var startScreen: Screen = Screen.home
-  if startScreenEnv is "library" { startScreen = Screen.library }
-  if startScreenEnv is "album"   { startScreen = Screen.album }
-  if startScreenEnv is "player"  { startScreen = Screen.player }
-  if startScreenEnv is "search"  { startScreen = Screen.search }
-  if startScreenEnv is "profile" { startScreen = Screen.profile }
-  if startScreenEnv is "history" { startScreen = Screen.history }
-  let restoredDefault: RestoredState = {
-    screen: startScreen
-    scrollY: 0.0
+  if startScreenEnv is "library" {
+    startScreen = Screen.library
   }
+  if startScreenEnv is "album" {
+    startScreen = Screen.album
+  }
+  if startScreenEnv is "player" {
+    startScreen = Screen.player
+  }
+  if startScreenEnv is "search" {
+    startScreen = Screen.search
+  }
+  if startScreenEnv is "profile" {
+    startScreen = Screen.profile
+  }
+  if startScreenEnv is "history" {
+    startScreen = Screen.history
+  }
+  let restoredDefault: RestoredState = { screen: startScreen, scrollY: 0.0 }
   ret loadRestoredState(fallback: restoredDefault)
 }
 

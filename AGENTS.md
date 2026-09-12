@@ -437,12 +437,17 @@ style configuration. The policy (full design: `docs/rae-format-design.md`):
   sorted, follows no symlinks, and skips `.git` / `build` / `.rae` dirs. The
   in-memory `rae_format_source` (src/rae_format.{c,h}) is the ONE formatter the
   CLI, tests and the #919 build preflight all call.
-- Until #918–#919 land, do NOT bulk-format the tree by hand — the migration is
-  one mechanical commit (#918), after the over-cap files are split, and the
-  build does not yet format/check automatically (#919). The formatter is
-  idempotent and AST-preserving on every active `.rae` (the #916 survey: 0
-  crashes, 0 non-idempotent files, 0 AST differences). When you edit a `.rae`
-  file, keep it within the policy above by hand in the meantime.
+- The tree IS canonical since #918: every active `.rae` under `lib/`,
+  `examples/` (legacy excluded) and `compiler/tests/cases` is formatted, and
+  the 21 modules whose canonical form exceeded the cap were split into domain
+  siblings. The only deliberately non-canonical inputs are the format fixtures
+  (200–208, 568, 786, 810–813, 829, 830), the expected-parse-error fixtures,
+  the lexer fixtures whose token columns are the test (006, 015, 019) and the
+  CRLF / missing-final-newline fixtures (345, 346, 348); the generated
+  `lib/webgpu` bindings are a file-wide `# raefmt: off` region (bindgen emits
+  it). Until #919 lands the build does not format/check automatically, so run
+  `rae format <file>` on what you edit (it writes in place) — or keep to the
+  policy by hand; do not leave a file non-canonical.
 
 ---
 

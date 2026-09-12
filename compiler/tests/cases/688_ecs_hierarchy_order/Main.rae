@@ -7,7 +7,6 @@ open ecs/hierarchySystem/HierarchySystem
 # systems iterate one flat List instead of chasing the tree. This checks the
 # order is valid (every parent precedes its children) and that it rebuilds when
 # the hierarchy changes (dirty-tracked by the Parent table generation).
-
 func printOrder(order: view List(EntityId), label: view String) {
   var line: String = ""
   loop var i: Int = 0, i < order.length, ++i {
@@ -22,7 +21,10 @@ func printOrder(order: view List(EntityId), label: view String) {
 }
 
 # True iff every entity with a Parent appears AFTER that parent in the order.
-func parentsBeforeChildren(order: view List(EntityId), parents: view ComponentTable(Parent)) ret Bool {
+func parentsBeforeChildren(
+  order: view List(EntityId)
+  parents: view ComponentTable(Parent)
+) ret Bool {
   loop var i: Int = 0, i < order.length, ++i {
     if let child: EntityId = order.copyAt(index: i) {
       if componentHas(this: parents, entity: child) {
@@ -59,17 +61,42 @@ func main() {
   let c: EntityId = { index: 3, generation: 0 }
 
   # r1 -> {a -> {a1}, b}, r2 -> {c}
-  setParent(parents: parents, childrens: childrens, child: a, parent: r1)
-  setParent(parents: parents, childrens: childrens, child: b, parent: r1)
-  setParent(parents: parents, childrens: childrens, child: a1, parent: a)
-  setParent(parents: parents, childrens: childrens, child: c, parent: r2)
+  setParent(
+    parents: parents
+    childrens: childrens
+    child: a
+    parent: r1
+  )
+  setParent(
+    parents: parents
+    childrens: childrens
+    child: b
+    parent: r1
+  )
+  setParent(
+    parents: parents
+    childrens: childrens
+    child: a1
+    parent: a
+  )
+  setParent(
+    parents: parents
+    childrens: childrens
+    child: c
+    parent: r2
+  )
 
   let order: view List(EntityId) => depthOrder(state: ord, parents: parents, childrens: childrens)
   printOrder(order: order, label: "order")
   log("valid: {parentsBeforeChildren(order: order, parents: parents)}")
 
   # Reparent a1 from a to r2: the cached order must rebuild and stay valid.
-  setParent(parents: parents, childrens: childrens, child: a1, parent: r2)
+  setParent(
+    parents: parents
+    childrens: childrens
+    child: a1
+    parent: r2
+  )
   let order2: view List(EntityId) => depthOrder(state: ord, parents: parents, childrens: childrens)
   printOrder(order: order2, label: "order after reparent")
   log("valid after reparent: {parentsBeforeChildren(order: order2, parents: parents)}")

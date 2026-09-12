@@ -46,8 +46,22 @@ func main() {
   # the first's entries.
   let pageA: String = "page-a"
   let pageB: String = "page-b"
-  var rootA: EntityId = mountPage(world: world, pageId: pageA, scene: sceneA, overrides: noOverrides, w: 300.0, h: 400.0)
-  var rootB: EntityId = mountPage(world: world, pageId: pageB, scene: sceneB, overrides: noOverrides, w: 300.0, h: 400.0)
+  var rootA: EntityId = mountPage(
+    world: world
+    pageId: pageA
+    scene: sceneA
+    overrides: noOverrides
+    w: 300.0
+    h: 400.0
+  )
+  var rootB: EntityId = mountPage(
+    world: world
+    pageId: pageB
+    scene: sceneB
+    overrides: noOverrides
+    w: 300.0
+    h: 400.0
+  )
   log("rootA={rootA.index} rootB={rootB.index}")
 
   # Page-root discovery
@@ -81,7 +95,12 @@ func main() {
   log("isPageActive(A) initial={isPageActive(world: world, pageId: pageA)}")
   setPageActive(world: world, pageId: pageA, active: true)
   setPageActive(world: world, pageId: pageB, active: false)
-  log("isPageActive(A)={isPageActive(world: world, pageId: pageA)} isPageActive(B)={isPageActive(world: world, pageId: pageB)}")
+  log(
+    "isPageActive(A)={isPageActive(world: world, pageId: pageA)} isPageActive(B)={isPageActive(
+      world: world
+      pageId: pageB
+    )}"
+  )
 
   # An id with no resident page is a no-op (no crash, no mutation).
   let ghostId: String = "ghost"

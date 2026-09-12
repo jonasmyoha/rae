@@ -21,11 +21,7 @@ import Vec2
 # bespoke scalar struct. Import pulls the module into the build graph.
 import ecs/Transform
 
-enum SizeMode {
-  fixed
-  hug
-  fill
-}
+enum SizeMode { fixed, hug, fill }
 
 # Per-axis sizing policy. `min` and `max` are signed; -1 means "no
 # clamp" since Rae lacks an inline `opt Int` literal.
@@ -51,11 +47,7 @@ enum AlignKind {
   stretch
 }
 
-enum OverflowMode {
-  none
-  clip
-  scaleToFitY
-}
+enum OverflowMode { none, clip, scaleToFitY }
 
 # Horizontal placement of a layout ROOT within the layout extent
 # (world.layoutW). Lets a phone-width app stay a centered column on a
@@ -65,45 +57,19 @@ enum OverflowMode {
 #            via their own Offset)
 #   center — root centered: x = (extentW - ownW) / 2 (the content column)
 #   fill   — root spans the full extent: width = extentW, x = 0
-enum HExtent {
-  left
-  center
-  fill
-}
+enum HExtent { left, center, fill }
 
-enum ShapeKind {
-  rect
-  roundedRect
-  circle
-}
+enum ShapeKind { rect, roundedRect, circle }
 
-enum ScaleMode {
-  fit
-  fill
-  stretch
-}
+enum ScaleMode { fit, fill, stretch }
 
-enum WrapWidthMode {
-  none
-  nodeWidth
-}
+enum WrapWidthMode { none, nodeWidth }
 
-enum HitAreaKind {
-  rect
-  roundedRect
-}
+enum HitAreaKind { rect, roundedRect }
 
-enum MaskKind {
-  circle
-  roundedRect
-}
+enum MaskKind { circle, roundedRect }
 
-enum ResolverMode {
-  fixed
-  random
-  hash
-  direct
-}
+enum ResolverMode { fixed, random, hash, direct }
 
 enum TextFormat {
   plain
@@ -113,15 +79,9 @@ enum TextFormat {
   handRank
 }
 
-enum DataMode {
-  top
-  aroundSelf
-}
+enum DataMode { top, aroundSelf }
 
-enum AccountIdSource {
-  none
-  activeAccountId
-}
+enum AccountIdSource { none, activeAccountId }
 
 # A 4-sided box: padding, margin, etc.
 type Insets {
@@ -191,10 +151,7 @@ type SafeArea {
 # Art direction (§10 S6). FitMode mirrors CSS object-fit vocabulary:
 # contain letterboxes (whole content visible), cover crops (content
 # fills the box).
-enum FitMode {
-  contain
-  cover
-}
+enum FitMode { contain, cover }
 
 # Post-layout aspect lock: height is derived from resolved width as
 # `h = w / ratio` (ratio = w/h). Applied by fitSystem AFTER layout,
@@ -245,7 +202,6 @@ type ExtentAnchor {
 }
 
 # Visual / interaction
-
 type TransformFx {
   scaleX: Float
   scaleY: Float
@@ -563,12 +519,12 @@ enum DataFieldId {
   isPlaying
   likedTrack
   playingTrack
-  # Currently-playing cover art key — the now-playing / mini-player cover
-  # widgets observe this to re-point their Sprite.textureKey by identity.
   nowPlayingArt
   debugToggle
 }
 
+# Currently-playing cover art key — the now-playing / mini-player cover
+# widgets observe this to re-point their Sprite.textureKey by identity.
 type DataDependency {
   resource: DataResourceId
   field: DataFieldId
@@ -631,7 +587,6 @@ type StateStyle {
 }
 
 # Identity / metadata
-
 type Name {
   label: String
 }
@@ -653,7 +608,6 @@ type RuntimeOnly {
 }
 
 # Dynamic scene + data binding
-
 type SceneInstance {
   sceneId: String
   # Per-field overrides captured at deserialization. Same shape as
@@ -724,7 +678,6 @@ type ListView {
 
 # Effects / motion (declared so .raescene can carry them; runtime
 # systems for these arrive in later phases).
-
 type BackgroundPan {
   speedX: Float
   speedY: Float
@@ -780,7 +733,6 @@ type WobbleFx {
 # -----------------------------------------------------------------
 # Derived / runtime-only components
 # -----------------------------------------------------------------
-
 type MeasuredSize {
   w: Float
   h: Float
@@ -828,7 +780,6 @@ type AnimState {
 # Authored .raescene files may omit fields. Phase 1c's deserialiser
 # starts from these defaults and overlays whatever the JSON specifies.
 # -----------------------------------------------------------------
-
 func defaultSizeAxis() ret SizeAxis {
   ret SizeAxis { mode: SizeMode.fixed, min: -1, max: -1 }
 }
@@ -858,12 +809,7 @@ func defaultPadding() ret Padding {
 }
 
 func defaultAlign() ret Align {
-  ret Align {
-    x: AlignKind.start
-    y: AlignKind.start
-    hasX: false
-    hasY: false
-  }
+  ret Align { x: AlignKind.start, y: AlignKind.start, hasX: false, hasY: false }
 }
 
 func defaultTransformFx() ret TransformFx {

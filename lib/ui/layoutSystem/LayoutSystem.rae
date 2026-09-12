@@ -242,7 +242,6 @@ func activeChildren(world: view UiWorld, entity: view EntityId) ret List(EntityI
 # MeasuredSize is the authored rect (set so the parent's measure
 # can still fall back to a real number).
 # -----------------------------------------------------------------
-
 func measureNode(world: mod UiWorld, entity: view EntityId) {
   unsafe {
     let kids: List(EntityId) = activeChildren(world: world, entity: entity)
@@ -333,7 +332,11 @@ func measureNode(world: mod UiWorld, entity: view EntityId) {
 # measure them directly so a lone root still gets a MeasuredSize for compute.
 func measureLinear(world: mod UiWorld) {
   unsafe {
-    let order: view List(EntityId) => depthOrder(state: world.hierarchyOrder, parents: world.parents, childrens: world.childrens)
+    let order: view List(EntityId) => depthOrder(
+      state: world.hierarchyOrder
+      parents: world.parents
+      childrens: world.childrens
+    )
     var i: Int = order.length - 1
     loop i >= 0 {
       if let entity: EntityId = order.copyAt(index: i) {
@@ -444,7 +447,6 @@ func resolveOwnSize(
 # cached depth order (#713): measure bottom-up (reverse), compute
 # top-down (forward). No per-frame tree recursion.
 # -----------------------------------------------------------------
-
 func layoutSystem(world: mod UiWorld) {
   measureLinear(world: world)
   computeLinear(world: world)

@@ -21,7 +21,11 @@ open ecs/ComponentTable
 # (#736) that 112/114 open-coded in their RenderSystems, lifted into lib so every
 # 3D example shares one renderer. Order-independent for the deferred G-buffer
 # (depth-resolved), so query order vs the old list order does not change the image.
-func renderSceneWorld(cache: mod GbufferCache, resources: mod GpuResources, world: view World3d) pub {
+func renderSceneWorld(
+  cache: mod GbufferCache
+  resources: mod GpuResources
+  world: view World3d
+) pub {
   loop var j: Int = 0, j < componentCount(this: world.meshRenderers), ++j {
     let entity: EntityId = componentEntityAt(this: world.meshRenderers, i: j)
     let renderer: MeshRenderer = componentGet(this: world.meshRenderers, entity: entity)
@@ -29,7 +33,14 @@ func renderSceneWorld(cache: mod GbufferCache, resources: mod GpuResources, worl
       let t: Transform3d = componentGet(this: world.transforms, entity: entity)
       let pt: Transform3d = componentGet(this: world.prevTransforms, entity: entity)
       let m: Material3d = componentGet(this: world.materials, entity: entity)
-      drawInstance(cache: cache, resources: resources, mesh: renderer.mesh, transform: t, prevTransform: pt, material: m)
+      drawInstance(
+        cache: cache
+        resources: resources
+        mesh: renderer.mesh
+        transform: t
+        prevTransform: pt
+        material: m
+      )
     }
   }
 }
@@ -53,7 +64,9 @@ func renderSceneSdfWorld(world: view World3d, camera: view Camera3d) pub {
       let priorEntity: EntityId = componentEntityAt(this: world.sdfs, i: back)
       let prior: SdfPrimitive = componentGet(this: world.sdfs, entity: priorEntity)
       if prior.shape is 0 {
-        if prior.cluster is head.cluster { alreadyDrawn = true }
+        if prior.cluster is head.cluster {
+          alreadyDrawn = true
+        }
       }
     }
     if head.shape is 0 {
@@ -83,11 +96,18 @@ func renderSceneSdfWorld(world: view World3d, camera: view Camera3d) pub {
         if ballCount > 0 {
           let material: Material3d = componentGet(this: world.materials, entity: headEntity)
           drawMetaballs(
-            packedBalls: packed.data, count: ballCount,
-            packedColors: colors.data, smoothing: head.smoothing,
-            camX: camera.position.x, camY: camera.position.y, camZ: camera.position.z,
-            metallic: material.metallic, roughness: material.roughness,
-            emR: material.emission.x, emG: material.emission.y, emB: material.emission.z
+            packedBalls: packed.data
+            count: ballCount
+            packedColors: colors.data
+            smoothing: head.smoothing
+            camX: camera.position.x
+            camY: camera.position.y
+            camZ: camera.position.z
+            metallic: material.metallic
+            roughness: material.roughness
+            emR: material.emission.x
+            emG: material.emission.y
+            emB: material.emission.z
           )
         }
       }

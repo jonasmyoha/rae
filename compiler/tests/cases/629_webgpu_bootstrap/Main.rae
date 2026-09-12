@@ -21,16 +21,19 @@ func main() {
     let device: Ptr = webgpuDevice()
     let queue: Ptr = webgpuQueue()
 
-    let desc: WGPUBufferDescriptor = {
-      usage: WGPUBufferUsage_CopyDst,
-      size: 16
-    }
+    let desc: WGPUBufferDescriptor = { usage: WGPUBufferUsage_CopyDst, size: 16 }
     let buf: Ptr = wgpuDeviceCreateBuffer(device: device, descriptor: desc)
 
     # Four tightly-packed 4-byte ints — the real GPU layout. List(Int32) (#507)
     # gives a byte-accurate int32_t[4] block; .data crosses zero-copy.
     let payload: List(Int32) = { 1, 2, 3, 4 }
-    wgpuQueueWriteBuffer(queue: queue, buffer: buf, bufferOffset: 0, data: payload.data, size: 16)
+    wgpuQueueWriteBuffer(
+      queue: queue
+      buffer: buf
+      bufferOffset: 0
+      data: payload.data
+      size: 16
+    )
     webgpuPoll(wait: 1)
     log("wrote 16 bytes")
   }

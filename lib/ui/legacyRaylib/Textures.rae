@@ -1,5 +1,6 @@
 open Raylib
 open Gpu2dCanvas
+
 # Texture registry — lazy-loaded raylib textures keyed by string.
 #
 # `Sprite.textureKey` carries a logical name (e.g. "icon-back"); the
@@ -12,7 +13,6 @@ open Gpu2dCanvas
 # The registry stores textures in two parallel lists; lookup is a
 # linear scan. UIs typically have a few dozen textures total — a hash
 # map would be over-engineering.
-
 type TextureEntry {
   key: String
   texture: Texture
@@ -21,15 +21,12 @@ type TextureEntry {
 
 type TextureRegistry {
   entries: List(TextureEntry)
-  canvas: Gpu2dCanvas   # the gpu2d backend's 2D canvas (#913): boxes/images/text batch here
+  canvas: Gpu2dCanvas  # the gpu2d backend's 2D canvas (#913): boxes/images/text batch here
 }
 
 func createTextureRegistry() ret TextureRegistry {
   unsafe {
-    ret TextureRegistry {
-      entries: List.create(TextureEntry, cap: 16)
-      canvas: createGpu2dCanvas()
-    }
+    ret TextureRegistry { entries: List.create(TextureEntry, cap: 16), canvas: createGpu2dCanvas() }
   }
 }
 
@@ -39,11 +36,7 @@ func createTextureRegistry() ret TextureRegistry {
 func textureLoad(reg: mod TextureRegistry, key: own String, path: own String) ret Texture {
   unsafe {
     let tex: Texture = loadTexture(fileName: path)
-    let entry: TextureEntry = {
-      key: key
-      texture: tex
-      path: path
-    }
+    let entry: TextureEntry = { key: key, texture: tex, path: path }
     reg.entries.add(value: entry)
     ret tex
   }
@@ -77,7 +70,13 @@ func textureGet(reg: view TextureRegistry, key: view String) ret Texture {
   unsafe {
     let idx: Int = textureIndex(reg: reg, key: key)
     if idx < 0 {
-      let empty: Texture = { id: 0, width: 0, height: 0, mipmaps: 0, format: 0 }
+      let empty: Texture = {
+        id: 0
+        width: 0
+        height: 0
+        mipmaps: 0
+        format: 0
+      }
       ret empty
     }
     let e: TextureEntry = rae_ext_rae_buf_get(buf: reg.entries.data, index: idx)
@@ -88,11 +87,7 @@ func textureGet(reg: view TextureRegistry, key: view String) ret Texture {
 
 # Bulk loader: takes parallel `keys` and `paths` lists and registers
 # each pair. Order in `keys`/`paths` must match.
-func textureLoadBatch(
-  reg: mod TextureRegistry
-  keys: view List(String)
-  paths: view List(String)
-) {
+func textureLoadBatch(reg: mod TextureRegistry, keys: view List(String), paths: view List(String)) {
   let n: Int = keys.length
   let m: Int = paths.length
   var count: Int = n
@@ -124,11 +119,7 @@ func textureRegisterDirect(reg: mod TextureRegistry, key: own String, tex: view 
       reg.entries.remove(index: idx)
     }
     let emptyPath: String = ""
-    let entry: TextureEntry = {
-      key: key
-      texture: tex
-      path: emptyPath
-    }
+    let entry: TextureEntry = { key: key, texture: tex, path: emptyPath }
     reg.entries.add(value: entry)
   }
 }

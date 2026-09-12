@@ -13,7 +13,6 @@
 #
 # (Queue(T) in ecs/queue.rae stays for its existing command-inbox users; this is
 # the formalized event channel new ECS code should reach for.)
-
 type EventQueue(T: type) {
   # This frame's events: producers append, consumers read.
   events: List(T)
@@ -22,10 +21,7 @@ type EventQueue(T: type) {
 }
 
 func createEventQueue(T: type) pub ret EventQueue(T) {
-  ret EventQueue(T) {
-    events: List.create(T, cap: 16),
-    reserve: List.create(T, cap: 16)
-  }
+  ret EventQueue(T) { events: List.create(T, cap: 16), reserve: List.create(T, cap: 16) }
 }
 
 func drop(T: type, this: mod EventQueue(T)) {

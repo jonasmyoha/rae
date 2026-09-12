@@ -24,15 +24,14 @@ type MaterialRegistry3d {
 }
 
 func createMaterialRegistry3d() ret MaterialRegistry3d {
-  ret MaterialRegistry3d {
-    keys: List.create(String, cap: 8)
-    indices: List.create(Int, cap: 8)
-  }
+  ret MaterialRegistry3d { keys: List.create(String, cap: 8), indices: List.create(Int, cap: 8) }
 }
 
 func registerMaterial3d(reg: mod MaterialRegistry3d, key: view String, index: view Int) {
   var keyCopy: String = ""
-  unsafe { keyCopy = rae_ext_rae_string_copy(s: key) }
+  unsafe {
+    keyCopy = rae_ext_rae_string_copy(s: key)
+  }
   reg.keys.add(value: keyCopy)
   reg.indices.add(value: index)
 }
@@ -42,7 +41,9 @@ func materialRegistry3dGet(reg: view MaterialRegistry3d, key: view String) ret I
   loop i < reg.keys.length {
     if let candidate: String = reg.keys.copyAt(index: i) {
       if candidate is key {
-        if let index: Int = reg.indices.copyAt(index: i) { ret index }
+        if let index: Int = reg.indices.copyAt(index: i) {
+          ret index
+        }
       }
     }
     i = i + 1
@@ -51,17 +52,16 @@ func materialRegistry3dGet(reg: view MaterialRegistry3d, key: view String) ret I
 }
 
 func createMeshRegistry3d() pub ret MeshRegistry3d {
-  ret MeshRegistry3d {
-    keys: List.create(String, cap: 8)
-    handles: List.create(MeshHandle, cap: 8)
-  }
+  ret MeshRegistry3d { keys: List.create(String, cap: 8), handles: List.create(MeshHandle, cap: 8) }
 }
 
 func meshRegistry3dIndex(reg: view MeshRegistry3d, key: view String) pub ret Int {
   var i: Int = 0
   loop i < reg.keys.length {
     if let candidate: String = reg.keys.copyAt(index: i) {
-      if candidate is key { ret i }
+      if candidate is key {
+        ret i
+      }
     }
     i = i + 1
   }
@@ -75,15 +75,21 @@ func registerMesh3d(reg: mod MeshRegistry3d, key: view String, handle: view Mesh
     ret
   }
   var keyCopy: String = ""
-  unsafe { keyCopy = rae_ext_rae_string_copy(s: key) }
+  unsafe {
+    keyCopy = rae_ext_rae_string_copy(s: key)
+  }
   reg.keys.add(value: keyCopy)
   reg.handles.add(value: handle)
 }
 
 func meshRegistry3dGet(reg: view MeshRegistry3d, key: view String) pub ret MeshHandle {
   let idx: Int = meshRegistry3dIndex(reg: reg, key: key)
-  if idx < 0 { ret meshHandleNone() }
-  if let handle: MeshHandle = reg.handles.copyAt(index: idx) { ret handle }
+  if idx < 0 {
+    ret meshHandleNone()
+  }
+  if let handle: MeshHandle = reg.handles.copyAt(index: idx) {
+    ret handle
+  }
   ret meshHandleNone()
 }
 
@@ -119,7 +125,9 @@ func emptyWorld3dAsset() ret World3dAsset {
 
 func failWorld3dAsset(asset: mod World3dAsset, message: view String) {
   asset.ok = false
-  unsafe { asset.errorMsg = rae_ext_rae_string_copy(s: message) }
+  unsafe {
+    asset.errorMsg = rae_ext_rae_string_copy(s: message)
+  }
 }
 
 # nodeId -> the renderable's DENSE transform index. Because entities are created
@@ -128,7 +136,9 @@ func failWorld3dAsset(asset: mod World3dAsset, message: view String) {
 # world3dEntityAt — the same mapping the Scene3d asset used.
 func addWorldAssetEntity(asset: mod World3dAsset, nodeId: view String, entity: view Int) {
   var nodeIdCopy: String = ""
-  unsafe { nodeIdCopy = rae_ext_rae_string_copy(s: nodeId) }
+  unsafe {
+    nodeIdCopy = rae_ext_rae_string_copy(s: nodeId)
+  }
   asset.nodeIds.add(value: nodeIdCopy)
   asset.entityIds.add(value: entity)
 }
@@ -159,13 +169,29 @@ func parseWorld3dAsset(source: view String, meshes: view MeshRegistry3d) pub ret
     if nodeHasComponent(doc: doc, node: node, name: "Material3d") {
       let value: JsonValue = nodeComponent(doc: doc, node: node, name: "Material3d")
       if material3dValid(doc: doc, value: value) is false {
-        failWorld3dAsset(asset: asset, message: "Material3d must define baseColor, metallic, roughness and emission")
+        failWorld3dAsset(
+          asset: asset
+          message: "Material3d must define baseColor, metallic, roughness and emission"
+        )
         ret asset
       }
-      let metallic: Float = readNumberField(doc: doc, object: value, key: "metallic", fallback: 0.0)
-      let roughness: Float = readNumberField(doc: doc, object: value, key: "roughness", fallback: 0.5)
+      let metallic: Float = readNumberField(
+        doc: doc
+        object: value
+        key: "metallic"
+        fallback: 0.0
+      )
+      let roughness: Float = readNumberField(
+        doc: doc
+        object: value
+        key: "roughness"
+        fallback: 0.5
+      )
       if metallic < 0.0 or metallic > 1.0 or roughness < 0.0 or roughness > 1.0 {
-        failWorld3dAsset(asset: asset, message: "Material3d metallic and roughness must be between 0 and 1")
+        failWorld3dAsset(
+          asset: asset
+          message: "Material3d metallic and roughness must be between 0 and 1"
+        )
         ret asset
       }
       registerMaterial3d(reg: materials, key: node.nodeId, index: materialValues.length)
@@ -191,7 +217,10 @@ func parseWorld3dAsset(source: view String, meshes: view MeshRegistry3d) pub ret
     let hasMesh: Bool = nodeHasComponent(doc: doc, node: node, name: "MeshRenderer")
     let hasSdf: Bool = nodeHasComponent(doc: doc, node: node, name: "SdfPrimitive")
     if hasMesh and hasSdf {
-      failWorld3dAsset(asset: asset, message: "a 3D node cannot contain both MeshRenderer and SdfPrimitive")
+      failWorld3dAsset(
+        asset: asset
+        message: "a 3D node cannot contain both MeshRenderer and SdfPrimitive"
+      )
       ret asset
     }
     if hasMesh or hasSdf {
@@ -201,22 +230,34 @@ func parseWorld3dAsset(source: view String, meshes: view MeshRegistry3d) pub ret
       }
       let transformValue: JsonValue = nodeComponent(doc: doc, node: node, name: "Transform3d")
       if transform3dValid(doc: doc, value: transformValue) is false {
-        failWorld3dAsset(asset: asset, message: "Transform3d must define numeric position, rotation and scale vectors")
+        failWorld3dAsset(
+          asset: asset
+          message: "Transform3d must define numeric position, rotation and scale vectors"
+        )
         ret asset
       }
       let transform: Transform3d = readTransform3d(doc: doc, value: transformValue)
       if hasMesh {
         let renderer: JsonValue = nodeComponent(doc: doc, node: node, name: "MeshRenderer")
         if renderer.kind is not JsonKind.object {
-          failWorld3dAsset(asset: asset, message: "MeshRenderer requires string mesh and material keys")
+          failWorld3dAsset(
+            asset: asset
+            message: "MeshRenderer requires string mesh and material keys"
+          )
           ret asset
         }
         if stringFieldValid(doc: doc, object: renderer, key: "mesh") is false {
-          failWorld3dAsset(asset: asset, message: "MeshRenderer requires string mesh and material keys")
+          failWorld3dAsset(
+            asset: asset
+            message: "MeshRenderer requires string mesh and material keys"
+          )
           ret asset
         }
         if stringFieldValid(doc: doc, object: renderer, key: "material") is false {
-          failWorld3dAsset(asset: asset, message: "MeshRenderer requires string mesh and material keys")
+          failWorld3dAsset(
+            asset: asset
+            message: "MeshRenderer requires string mesh and material keys"
+          )
           ret asset
         }
         let meshKey: String = readStringField(doc: doc, object: renderer, key: "mesh")
@@ -228,7 +269,10 @@ func parseWorld3dAsset(source: view String, meshes: view MeshRegistry3d) pub ret
         }
         let materialIdx: Int = materialRegistry3dGet(reg: materials, key: materialKey)
         if materialIdx < 0 {
-          failWorld3dAsset(asset: asset, message: "MeshRenderer references an unknown material node")
+          failWorld3dAsset(
+            asset: asset
+            message: "MeshRenderer references an unknown material node"
+          )
           ret asset
         }
         var visible: Bool = true
@@ -241,9 +285,16 @@ func parseWorld3dAsset(source: view String, meshes: view MeshRegistry3d) pub ret
         # The MeshRenderer's legacy entity/material Int fields are ignored by the
         # World3d renderer (it reads the entity + the Material3d component); they
         # carry the dense index / material index for parity with the old bridge.
-        world3dSetMeshRenderer(world: asset.world, entity: entity, renderer: MeshRenderer {
-          entity: entityIndex, mesh: mesh, material: materialIdx, visible: visible
-        })
+        world3dSetMeshRenderer(
+          world: asset.world
+          entity: entity
+          renderer: MeshRenderer {
+            entity: entityIndex
+            mesh: mesh
+            material: materialIdx
+            visible: visible
+          }
+        )
         if let material: Material3d = materialValues.copyAt(index: materialIdx) {
           world3dSetMaterial(world: asset.world, entity: entity, material: material)
         }
@@ -252,22 +303,37 @@ func parseWorld3dAsset(source: view String, meshes: view MeshRegistry3d) pub ret
       } else {
         let sdf: JsonValue = nodeComponent(doc: doc, node: node, name: "SdfPrimitive")
         if sdf.kind is not JsonKind.object {
-          failWorld3dAsset(asset: asset, message: "SdfPrimitive requires string shape and material keys")
+          failWorld3dAsset(
+            asset: asset
+            message: "SdfPrimitive requires string shape and material keys"
+          )
           ret asset
         }
         if stringFieldValid(doc: doc, object: sdf, key: "shape") is false {
-          failWorld3dAsset(asset: asset, message: "SdfPrimitive requires string shape and material keys")
+          failWorld3dAsset(
+            asset: asset
+            message: "SdfPrimitive requires string shape and material keys"
+          )
           ret asset
         }
         if stringFieldValid(doc: doc, object: sdf, key: "material") is false {
-          failWorld3dAsset(asset: asset, message: "SdfPrimitive requires string shape and material keys")
+          failWorld3dAsset(
+            asset: asset
+            message: "SdfPrimitive requires string shape and material keys"
+          )
           ret asset
         }
         let shapeName: String = readStringField(doc: doc, object: sdf, key: "shape")
         var shape: Int = -1
-        if shapeName is "sphere" { shape = 0 }
-        if shapeName is "box" { shape = 1 }
-        if shapeName is "torus" { shape = 2 }
+        if shapeName is "sphere" {
+          shape = 0
+        }
+        if shapeName is "box" {
+          shape = 1
+        }
+        if shapeName is "torus" {
+          shape = 2
+        }
         if shape < 0 {
           failWorld3dAsset(asset: asset, message: "SdfPrimitive shape must be sphere, box or torus")
           ret asset
@@ -275,26 +341,43 @@ func parseWorld3dAsset(source: view String, meshes: view MeshRegistry3d) pub ret
         let materialKey: String = readStringField(doc: doc, object: sdf, key: "material")
         let materialIdx: Int = materialRegistry3dGet(reg: materials, key: materialKey)
         if materialIdx < 0 {
-          failWorld3dAsset(asset: asset, message: "SdfPrimitive references an unknown material node")
+          failWorld3dAsset(
+            asset: asset
+            message: "SdfPrimitive references an unknown material node"
+          )
           ret asset
         }
         var noise: Float = 0.0
         let noiseValue: JsonValue = objectField(doc: doc, object: sdf, key: "noise")
-        if noiseValue.kind is JsonKind.number { noise = noiseValue.asNumber }
+        if noiseValue.kind is JsonKind.number {
+          noise = noiseValue.asNumber
+        }
         # Optional: which blob this primitive belongs to, and how sticky that blob
         # is. Defaults keep single-cluster scenes rendering exactly as before.
         var cluster: Int = 0
         let clusterValue: JsonValue = objectField(doc: doc, object: sdf, key: "cluster")
-        if clusterValue.kind is JsonKind.number { cluster = clusterValue.asNumber.toInt() }
+        if clusterValue.kind is JsonKind.number {
+          cluster = clusterValue.asNumber.toInt()
+        }
         var smoothing: Float = 0.62
         let smoothingValue: JsonValue = objectField(doc: doc, object: sdf, key: "smoothing")
-        if smoothingValue.kind is JsonKind.number { smoothing = smoothingValue.asNumber }
+        if smoothingValue.kind is JsonKind.number {
+          smoothing = smoothingValue.asNumber
+        }
         let entity: EntityId = world3dAddEntity(world: asset.world)
         world3dSetTransform(world: asset.world, entity: entity, transform: transform)
-        world3dSetSdf(world: asset.world, entity: entity, sdf: SdfPrimitive {
-          entity: entityIndex, shape: shape, material: materialIdx,
-          noise: noise, cluster: cluster, smoothing: smoothing
-        })
+        world3dSetSdf(
+          world: asset.world
+          entity: entity
+          sdf: SdfPrimitive {
+            entity: entityIndex
+            shape: shape
+            material: materialIdx
+            noise: noise
+            cluster: cluster
+            smoothing: smoothing
+          }
+        )
         if let material: Material3d = materialValues.copyAt(index: materialIdx) {
           world3dSetMaterial(world: asset.world, entity: entity, material: material)
         }
@@ -310,11 +393,29 @@ func parseWorld3dAsset(source: view String, meshes: view MeshRegistry3d) pub ret
         failWorld3dAsset(asset: asset, message: "scene requires exactly one valid Camera3d")
         ret asset
       }
-      let fovYDeg: Float = readNumberField(doc: doc, object: value, key: "fovYDeg", fallback: 50.0)
-      let nearZ: Float = readNumberField(doc: doc, object: value, key: "nearZ", fallback: 0.1)
-      let farZ: Float = readNumberField(doc: doc, object: value, key: "farZ", fallback: 200.0)
+      let fovYDeg: Float = readNumberField(
+        doc: doc
+        object: value
+        key: "fovYDeg"
+        fallback: 50.0
+      )
+      let nearZ: Float = readNumberField(
+        doc: doc
+        object: value
+        key: "nearZ"
+        fallback: 0.1
+      )
+      let farZ: Float = readNumberField(
+        doc: doc
+        object: value
+        key: "farZ"
+        fallback: 200.0
+      )
       if fovYDeg <= 0.0 or fovYDeg >= 180.0 or nearZ <= 0.0 or farZ <= nearZ {
-        failWorld3dAsset(asset: asset, message: "Camera3d requires 0 < fovYDeg < 180 and 0 < nearZ < farZ")
+        failWorld3dAsset(
+          asset: asset
+          message: "Camera3d requires 0 < fovYDeg < 180 and 0 < nearZ < farZ"
+        )
         ret asset
       }
       asset.camera = Camera3d {
@@ -332,7 +433,12 @@ func parseWorld3dAsset(source: view String, meshes: view MeshRegistry3d) pub ret
         failWorld3dAsset(asset: asset, message: "scene requires exactly one valid Light3d")
         ret asset
       }
-      let exposure: Float = readNumberField(doc: doc, object: value, key: "exposure", fallback: 1.0)
+      let exposure: Float = readNumberField(
+        doc: doc
+        object: value
+        key: "exposure"
+        fallback: 1.0
+      )
       if exposure < 0.0 {
         failWorld3dAsset(asset: asset, message: "Light3d exposure cannot be negative")
         ret asset
@@ -363,7 +469,9 @@ func parseWorld3dAsset(source: view String, meshes: view MeshRegistry3d) pub ret
 
 func loadWorld3dFile(path: view String, meshes: view MeshRegistry3d) pub ret World3dAsset {
   var source: String = ""
-  unsafe { source = rae_ext_rae_sys_read_file(path: path) }
+  unsafe {
+    source = rae_ext_rae_sys_read_file(path: path)
+  }
   ret parseWorld3dAsset(source: source, meshes: meshes)
 }
 
@@ -402,7 +510,9 @@ func objectField(doc: view JsonDoc, object: view JsonValue, key: view String) re
 
 func vec3FieldValid(doc: view JsonDoc, object: view JsonValue, key: view String) ret Bool {
   let value: JsonValue = objectField(doc: doc, object: object, key: key)
-  if value.kind is not JsonKind.object { ret false }
+  if value.kind is not JsonKind.object {
+    ret false
+  }
   let x: JsonValue = objectField(doc: doc, object: value, key: "x")
   let y: JsonValue = objectField(doc: doc, object: value, key: "y")
   let z: JsonValue = objectField(doc: doc, object: value, key: "z")
@@ -431,7 +541,12 @@ func stringFieldValid(doc: view JsonDoc, object: view JsonValue, key: view Strin
   ret value.kind is JsonKind.string
 }
 
-func readNumberField(doc: view JsonDoc, object: view JsonValue, key: view String, fallback: view Float) ret Float {
+func readNumberField(
+  doc: view JsonDoc
+  object: view JsonValue
+  key: view String
+  fallback: view Float
+) ret Float {
   let value: JsonValue = objectField(doc: doc, object: object, key: key)
   ret Json.jsonFloat(this: value, fallback: fallback)
 }
@@ -442,10 +557,18 @@ func readStringField(doc: view JsonDoc, object: view JsonValue, key: view String
 }
 
 func transform3dValid(doc: view JsonDoc, value: view JsonValue) ret Bool {
-  if value.kind is not JsonKind.object { ret false }
-  if vec3FieldValid(doc: doc, object: value, key: "position") is false { ret false }
-  if vec3FieldValid(doc: doc, object: value, key: "rotation") is false { ret false }
-  if vec3FieldValid(doc: doc, object: value, key: "scale") is false { ret false }
+  if value.kind is not JsonKind.object {
+    ret false
+  }
+  if vec3FieldValid(doc: doc, object: value, key: "position") is false {
+    ret false
+  }
+  if vec3FieldValid(doc: doc, object: value, key: "rotation") is false {
+    ret false
+  }
+  if vec3FieldValid(doc: doc, object: value, key: "scale") is false {
+    ret false
+  }
   ret true
 }
 
@@ -458,32 +581,68 @@ func readTransform3d(doc: view JsonDoc, value: view JsonValue) ret Transform3d {
 }
 
 func material3dValid(doc: view JsonDoc, value: view JsonValue) ret Bool {
-  if value.kind is not JsonKind.object { ret false }
-  if vec3FieldValid(doc: doc, object: value, key: "baseColor") is false { ret false }
-  if numberFieldValid(doc: doc, object: value, key: "metallic") is false { ret false }
-  if numberFieldValid(doc: doc, object: value, key: "roughness") is false { ret false }
-  if vec3FieldValid(doc: doc, object: value, key: "emission") is false { ret false }
+  if value.kind is not JsonKind.object {
+    ret false
+  }
+  if vec3FieldValid(doc: doc, object: value, key: "baseColor") is false {
+    ret false
+  }
+  if numberFieldValid(doc: doc, object: value, key: "metallic") is false {
+    ret false
+  }
+  if numberFieldValid(doc: doc, object: value, key: "roughness") is false {
+    ret false
+  }
+  if vec3FieldValid(doc: doc, object: value, key: "emission") is false {
+    ret false
+  }
   ret true
 }
 
 func camera3dValid(doc: view JsonDoc, value: view JsonValue) ret Bool {
-  if value.kind is not JsonKind.object { ret false }
-  if vec3FieldValid(doc: doc, object: value, key: "position") is false { ret false }
-  if vec3FieldValid(doc: doc, object: value, key: "target") is false { ret false }
-  if numberFieldValid(doc: doc, object: value, key: "fovYDeg") is false { ret false }
-  if numberFieldValid(doc: doc, object: value, key: "nearZ") is false { ret false }
-  if numberFieldValid(doc: doc, object: value, key: "farZ") is false { ret false }
+  if value.kind is not JsonKind.object {
+    ret false
+  }
+  if vec3FieldValid(doc: doc, object: value, key: "position") is false {
+    ret false
+  }
+  if vec3FieldValid(doc: doc, object: value, key: "target") is false {
+    ret false
+  }
+  if numberFieldValid(doc: doc, object: value, key: "fovYDeg") is false {
+    ret false
+  }
+  if numberFieldValid(doc: doc, object: value, key: "nearZ") is false {
+    ret false
+  }
+  if numberFieldValid(doc: doc, object: value, key: "farZ") is false {
+    ret false
+  }
   ret true
 }
 
 func light3dValid(doc: view JsonDoc, value: view JsonValue) ret Bool {
-  if value.kind is not JsonKind.object { ret false }
-  if vec3FieldValid(doc: doc, object: value, key: "sunDir") is false { ret false }
-  if vec3FieldValid(doc: doc, object: value, key: "sunColor") is false { ret false }
-  if vec3FieldValid(doc: doc, object: value, key: "ambSky") is false { ret false }
-  if vec3FieldValid(doc: doc, object: value, key: "ambGround") is false { ret false }
-  if numberFieldValid(doc: doc, object: value, key: "exposure") is false { ret false }
-  if vec3FieldValid(doc: doc, object: value, key: "clearColor") is false { ret false }
+  if value.kind is not JsonKind.object {
+    ret false
+  }
+  if vec3FieldValid(doc: doc, object: value, key: "sunDir") is false {
+    ret false
+  }
+  if vec3FieldValid(doc: doc, object: value, key: "sunColor") is false {
+    ret false
+  }
+  if vec3FieldValid(doc: doc, object: value, key: "ambSky") is false {
+    ret false
+  }
+  if vec3FieldValid(doc: doc, object: value, key: "ambGround") is false {
+    ret false
+  }
+  if numberFieldValid(doc: doc, object: value, key: "exposure") is false {
+    ret false
+  }
+  if vec3FieldValid(doc: doc, object: value, key: "clearColor") is false {
+    ret false
+  }
   ret true
 }
 

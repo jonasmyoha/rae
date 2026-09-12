@@ -3,6 +3,7 @@ open ecs/Entity
 open ecs/ComponentTable
 open ui/layoutSystem/LayoutSystem
 open ui/Transform
+
 # Persistent-world screen-switch handler. Called from the inner loop
 # once per frame after `dispatchActions` has chosen `nextScreen`:
 #   * willSwitch=true  → unmount the affected pages, re-mount with
@@ -14,7 +15,6 @@ open ui/Transform
 # Returns a `ScreenSwitchResult` the caller copies back into its
 # locals — `currentScreen`, cached album/track values, scrollTarget,
 # hero pending flags, and the outer-rebuild `switching` signal.
-
 type ScreenSwitchResult {
   newScreen: Screen
   newScrollTarget: EntityId
@@ -77,9 +77,23 @@ func handleScreenSwitch(
   # tracks (and hence the highlight target) are new too.
   if stemChangedNow {
     unmountPage(world: world, pageId: albumPageId)
-    let freshAlbum: EntityId = mountAlbumPage(world: world, scenes: scenes, state: appState, playback: playback, scrollY: 0.0, viewport: viewport)
+    let freshAlbum: EntityId = mountAlbumPage(
+      world: world
+      scenes: scenes
+      state: appState
+      playback: playback
+      scrollY: 0.0
+      viewport: viewport
+    )
     unmountPage(world: world, pageId: playerPageId)
-    let freshNP: EntityId = mountNowPlayingPage(world: world, scenes: scenes, playback: playback, state: appState, reg: reg, viewport: viewport)
+    let freshNP: EntityId = mountNowPlayingPage(
+      world: world
+      scenes: scenes
+      playback: playback
+      state: appState
+      reg: reg
+      viewport: viewport
+    )
     rebindHero(world: world, fromKey: "albumCover", toKey: appState.currentAlbumStem)
     # Dock stays mounted; its MiniThumb cover now follows the nowPlaying
     # instance revision via the UiPlaybackSystem observer (#268) rather
@@ -101,9 +115,23 @@ func handleScreenSwitch(
       # them.
       let preservedScrollY: Float = scrollFsm.scrollY
       unmountPage(world: world, pageId: albumPageId)
-      let freshAlbum: EntityId = mountAlbumPage(world: world, scenes: scenes, state: appState, playback: playback, scrollY: preservedScrollY, viewport: viewport)
+      let freshAlbum: EntityId = mountAlbumPage(
+        world: world
+        scenes: scenes
+        state: appState
+        playback: playback
+        scrollY: preservedScrollY
+        viewport: viewport
+      )
       unmountPage(world: world, pageId: playerPageId)
-      let freshNP: EntityId = mountNowPlayingPage(world: world, scenes: scenes, playback: playback, state: appState, reg: reg, viewport: viewport)
+      let freshNP: EntityId = mountNowPlayingPage(
+        world: world
+        scenes: scenes
+        playback: playback
+        state: appState
+        reg: reg
+        viewport: viewport
+      )
       rebindHero(world: world, fromKey: "albumCover", toKey: appState.currentAlbumStem)
       setPageActive(world: world, pageId: albumPageId, active: false)
       setPageActive(world: world, pageId: playerPageId, active: false)
@@ -143,17 +171,33 @@ func handleScreenSwitch(
   # mount) and the boot-mounted instance has stale empty data.
   if nextScreen is Screen.home {
     unmountPage(world: world, pageId: homePageId)
-    let freshHome: EntityId = mountHomePage(world: world, scenes: scenes, state: appState, scrollY: 0.0, viewport: viewport)
+    let freshHome: EntityId = mountHomePage(
+      world: world
+      scenes: scenes
+      state: appState
+      scrollY: 0.0
+      viewport: viewport
+    )
   }
   if nextScreen is Screen.history {
     unmountPage(world: world, pageId: historyPageId)
-    let freshHist: EntityId = mountHistoryPage(world: world, state: appState, scrollY: 0.0, viewport: viewport)
+    let freshHist: EntityId = mountHistoryPage(
+      world: world
+      state: appState
+      scrollY: 0.0
+      viewport: viewport
+    )
   }
   if nextScreen is Screen.library {
     # Re-mount with the current library filter — albums removed
     # via the bottom-sheet drop out of the grid here.
     unmountPage(world: world, pageId: libraryPageId)
-    let freshLib: EntityId = mountLibraryPage(world: world, state: appState, scrollY: 0.0, viewport: viewport)
+    let freshLib: EntityId = mountLibraryPage(
+      world: world
+      state: appState
+      scrollY: 0.0
+      viewport: viewport
+    )
   }
   setPageActive(world: world, pageId: incomingPageId, active: true)
 
@@ -187,14 +231,34 @@ func handleScreenSwitch(
   # flush gives the freshly-mounted target page a valid WorldTransform2D
   # before we read its rect.
   let heroKey: String = appState.currentAlbumStem
-  let gotSrc: Bool = captureHeroSourceOnPage(anim: anim, world: world, pageId: outgoingPageId, key: heroKey)
+  let gotSrc: Bool = captureHeroSourceOnPage(
+    anim: anim
+    world: world
+    pageId: outgoingPageId
+    key: heroKey
+  )
   if gotSrc {
     ifDirty(world: world, cache: layoutCache)
     systemIfDirty(world: world, cache: transformCache)
-    let gotDst: Bool = captureHeroTargetOnPage(anim: anim, world: world, pageId: incomingPageId, key: heroKey)
+    let gotDst: Bool = captureHeroTargetOnPage(
+      anim: anim
+      world: world
+      pageId: incomingPageId
+      key: heroKey
+    )
     if gotDst {
-      setHeroVisibleOnPage(world: world, pageId: incomingPageId, key: heroKey, visible: false)
-      startHeroTransition(anim: anim, key: heroKey, durationSec: heroDuration, now: uiNowSeconds())
+      setHeroVisibleOnPage(
+        world: world
+        pageId: incomingPageId
+        key: heroKey
+        visible: false
+      )
+      startHeroTransition(
+        anim: anim
+        key: heroKey
+        durationSec: heroDuration
+        now: uiNowSeconds()
+      )
       result.pendingSrc = true
       result.pendingHeroTargetPageId = "{incomingPageId}"
     }

@@ -8,10 +8,17 @@ open ecs/Query
 # and vel. Only e2 is present in all three, so the join yields exactly e2. The
 # loop mutates pos.x and tag.t through storage-aliasing mod refs; both writes
 # must be visible on read-back.
+type Position {
+  x: Int
+}
 
-type Position { x: Int }
-type Velocity { v: Int }
-type Tag { t: Int }
+type Velocity {
+  v: Int
+}
+
+type Tag {
+  t: Int
+}
 
 func main() {
   var pos: ComponentTable(Position) = ComponentTable.create(Position)

@@ -8,10 +8,19 @@ open ecs/Serialize
 # reconstruct the original world, using each component's compiler fromJson via a
 # GENERIC loader (no hand-written per-name switch). Cache components (no
 # serialize flag) are neither written nor loaded.
+type Position {
+  x: Int
+  y: Int
+}
 
-type Position { x: Int, y: Int }
-type Velocity { dx: Int, dy: Int }
-type WorldCache { w: Int }
+type Velocity {
+  dx: Int
+  dy: Int
+}
+
+type WorldCache {
+  w: Int
+}
 
 type MiniWorld {
   positions: ComponentTable(Position)
@@ -21,25 +30,55 @@ type MiniWorld {
 
 func emptyWorld() ret MiniWorld {
   ret MiniWorld {
-    positions: ComponentTable.create(Position),
-    velocities: ComponentTable.create(Velocity),
+    positions: ComponentTable.create(Position)
+    velocities: ComponentTable.create(Velocity)
     caches: ComponentTable.create(WorldCache)
   }
 }
 
 func worldToJson(world: view MiniWorld, registry: view ComponentRegistry) ret String {
   var writer: WorldJson = createWorldJson()
-  addComponentTable(writer: writer, table: world.positions, name: "Position", registry: registry)
-  addComponentTable(writer: writer, table: world.velocities, name: "Velocity", registry: registry)
-  addComponentTable(writer: writer, table: world.caches, name: "WorldCache", registry: registry)
+  addComponentTable(
+    writer: writer
+    table: world.positions
+    name: "Position"
+    registry: registry
+  )
+  addComponentTable(
+    writer: writer
+    table: world.velocities
+    name: "Velocity"
+    registry: registry
+  )
+  addComponentTable(
+    writer: writer
+    table: world.caches
+    name: "WorldCache"
+    registry: registry
+  )
   ret finishWorldJson(writer: writer)
 }
 
 # Registry-driven load: one uniform call per table, no per-name parse switch.
 func worldFromJson(world: mod MiniWorld, registry: view ComponentRegistry, doc: view JsonDoc) {
-  loadComponentTable(table: world.positions, name: "Position", registry: registry, doc: doc)
-  loadComponentTable(table: world.velocities, name: "Velocity", registry: registry, doc: doc)
-  loadComponentTable(table: world.caches, name: "WorldCache", registry: registry, doc: doc)
+  loadComponentTable(
+    table: world.positions
+    name: "Position"
+    registry: registry
+    doc: doc
+  )
+  loadComponentTable(
+    table: world.velocities
+    name: "Velocity"
+    registry: registry
+    doc: doc
+  )
+  loadComponentTable(
+    table: world.caches
+    name: "WorldCache"
+    registry: registry
+    doc: doc
+  )
 }
 
 func main() {

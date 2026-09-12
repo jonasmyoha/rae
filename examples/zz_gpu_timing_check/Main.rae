@@ -10,9 +10,15 @@ func main() ret Int {
   unsafe {
     let profiler: Profiler = Profile.createProfiler()
     var timing: GpuTiming = GpuTiming.createGpuTiming()
-    if webgpuBootstrap() is 0 { log("no wgpu device") ret 1 }
+    if webgpuBootstrap() is 0 {
+      log("no wgpu device")
+      ret 1
+    }
     log("have_timestamp={webgpuHaveTimestamp()}")
-    if GpuTiming.init(timing: timing) is false { log("gpu timing DISABLED (adapter lacks feature)") ret 0 }
+    if GpuTiming.init(timing: timing) is false {
+      log("gpu timing DISABLED (adapter lacks feature)")
+      ret 0
+    }
     log("gpu timing enabled")
     # A throwaway capture so counter has somewhere to record.
     Profile.startCapture(profiler: profiler, seconds: 3600.0, outPath: "/tmp/gt_selftest.json")
@@ -26,39 +32,55 @@ func main() ret Int {
     # Metal timestampWrites limitation to run down (or needs MTLCounterSampleBuffer
     # directly). Kept as the harness for that investigation.
     let texDesc: WGPUTextureDescriptor = {
-      usage: WGPUTextureUsage_RenderAttachment, dimension: WGPUTextureDimension_2D,
-      size: { width: 1024 as UInt32, height: 1024 as UInt32, depthOrArrayLayers: 1 as UInt32 },
-      format: WGPUTextureFormat_RGBA8Unorm, mipLevelCount: 1 as UInt32, sampleCount: 1 as UInt32
+      usage: WGPUTextureUsage_RenderAttachment
+      dimension: WGPUTextureDimension_2D
+      size: { width: 1024 as UInt32, height: 1024 as UInt32, depthOrArrayLayers: 1 as UInt32 }
+      format: WGPUTextureFormat_RGBA8Unorm
+      mipLevelCount: 1 as UInt32
+      sampleCount: 1 as UInt32
     }
     let tex: Ptr = wgpuDeviceCreateTexture(device: webgpuDevice(), descriptor: texDesc)
     let viewDesc: WGPUTextureViewDescriptor = {
-      format: WGPUTextureFormat_RGBA8Unorm, dimension: WGPUTextureViewDimension_2D,
-      baseMipLevel: 0 as UInt32, mipLevelCount: 1 as UInt32,
-      baseArrayLayer: 0 as UInt32, arrayLayerCount: 1 as UInt32, aspect: WGPUTextureAspect_All
+      format: WGPUTextureFormat_RGBA8Unorm
+      dimension: WGPUTextureViewDimension_2D
+      baseMipLevel: 0 as UInt32
+      mipLevelCount: 1 as UInt32
+      baseArrayLayer: 0 as UInt32
+      arrayLayerCount: 1 as UInt32
+      aspect: WGPUTextureAspect_All
     }
     let texView: Ptr = wgpuTextureCreateView(texture: tex, descriptor: viewDesc)
-    let atts: List(WGPURenderPassColorAttachment) = List.create(WGPURenderPassColorAttachment, cap: 1)
+    let atts: List(WGPURenderPassColorAttachment) = List.create(
+      WGPURenderPassColorAttachment
+      cap: 1
+    )
     atts.add(value: { depthSlice: 0 as UInt32 })
 
     var frame: Int = 0
     loop frame < 5 {
       GpuTiming.frameBegin(timing: timing)
       let tsIdx: Int = GpuTiming.passBegin(timing: timing, name: "clear")
-      let encDesc: WGPUCommandEncoderDescriptor = { }
+      let encDesc: WGPUCommandEncoderDescriptor = {}
       let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
-      atts.set(index: 0, value: {
-        view_: texView, depthSlice: WGPU_DEPTH_SLICE_UNDEFINED as UInt32,
-        loadOp: WGPULoadOp_Clear, storeOp: WGPUStoreOp_Store,
-        clearValue: { r: 0.1 as Float64, g: 0.2 as Float64, b: 0.3 as Float64, a: 1.0 as Float64 }
-      })
+      atts.set(
+        index: 0
+        value: {
+          view_: texView
+          depthSlice: WGPU_DEPTH_SLICE_UNDEFINED as UInt32
+          loadOp: WGPULoadOp_Clear
+          storeOp: WGPUStoreOp_Store
+          clearValue: { r: 0.1 as Float64, g: 0.2 as Float64, b: 0.3 as Float64, a: 1.0 as Float64 }
+        }
+      )
       let rpDesc: WGPURenderPassDescriptor = {
-        colorAttachmentCount: 1 as UInt64, colorAttachments: atts.data,
+        colorAttachmentCount: 1 as UInt64
+        colorAttachments: atts.data
         timestampWrites: GpuTiming.writesPtr(timing: timing)
       }
       let pass: Ptr = wgpuCommandEncoderBeginRenderPass(commandEncoder: enc, descriptor: rpDesc)
       wgpuRenderPassEncoderEnd(renderPassEncoder: pass)
       GpuTiming.resolve(timing: timing, enc: enc, idx: tsIdx)
-      let cbDesc: WGPUCommandBufferDescriptor = { }
+      let cbDesc: WGPUCommandBufferDescriptor = {}
       let cmd: Ptr = wgpuCommandEncoderFinish(commandEncoder: enc, descriptor: cbDesc)
       gtSubmitTest(cmd: cmd)
       GpuTiming.collect(timing: timing, profiler: profiler)

@@ -34,18 +34,44 @@ func filledBytes(count: view Int, stride: view Int) ret List(UInt8) {
 }
 
 func checkKnownContents(resources: mod GpuResources) ret Bool {
-  if let buffer: BufferId = createBuffer(resources: resources, size: 32, usage: WGPUBufferUsage_CopyDst + WGPUBufferUsage_MapRead) {
-    if bufferSize(resources: resources, id: buffer) is not 32 { ret fail(message: "size not authoritative") }
+  if let buffer: BufferId = createBuffer(
+    resources: resources
+    size: 32
+    usage: WGPUBufferUsage_CopyDst + WGPUBufferUsage_MapRead
+  ) {
+    if bufferSize(resources: resources, id: buffer) is not 32 {
+      ret fail(message: "size not authoritative")
+    }
     let bytes: List(UInt8) = filledBytes(count: 32, stride: 3)
-    if writeBuffer(resources: resources, id: buffer, offset: 0, bytes: bytes) is false { ret fail(message: "write refused") }
-    if let request: ReadRequest = readBuffer(resources: resources, id: buffer, offset: 0, size: 32) {
-      if waitForRead(request: request) is not 1 { ret fail(message: "read did not complete") }
+    if writeBuffer(
+      resources: resources
+      id: buffer
+      offset: 0
+      bytes: bytes
+    ) is false {
+      ret fail(message: "write refused")
+    }
+    if let request: ReadRequest = readBuffer(
+      resources: resources
+      id: buffer
+      offset: 0
+      size: 32
+    ) {
+      if waitForRead(request: request) is not 1 {
+        ret fail(message: "read did not complete")
+      }
       let out: List(UInt8) = filledBytes(count: 32, stride: 0)
-      if copyToBytes(this: request, destination: out) is false { ret fail(message: "copy refused") }
+      if copyToBytes(this: request, destination: out) is false {
+        ret fail(message: "copy refused")
+      }
       var checked: Int = 0
       loop checked < 32 {
         if let value: UInt8 = out.copyAt(index: checked) {
-          if value is not ((checked * 3) as UInt8) { ret fail(message: "byte {checked} wrong: got {value as Int} expected {(checked * 3) as UInt8 as Int}") }
+          if value is not ((checked * 3) as UInt8) {
+            ret fail(
+              message: "byte {checked} wrong: got {value as Int} expected {(checked * 3) as UInt8 as Int}"
+            )
+          }
         }
         checked = checked + 1
       }
@@ -54,12 +80,46 @@ func checkKnownContents(resources: mod GpuResources) ret Bool {
     }
     # Misuse is refused before native state: unaligned, out of range, no usage.
     let small: List(UInt8) = filledBytes(count: 4, stride: 1)
-    if writeBuffer(resources: resources, id: buffer, offset: 2, bytes: small) { ret fail(message: "unaligned write accepted") }
-    if bufferRangeIsValid(resources: resources, id: buffer, offset: 16, size: 32) { ret fail(message: "overflowing range accepted") }
-    if bufferRangeIsValid(resources: resources, id: buffer, offset: 0, size: 32) is false { ret fail(message: "full range refused") }
-    if let noMap: BufferId = createBuffer(resources: resources, size: 16, usage: WGPUBufferUsage_CopyDst) {
-      if let bad: ReadRequest = readBuffer(resources: resources, id: noMap, offset: 0, size: 16) { ret fail(message: "readback without MapRead accepted") }
-      if retireBuffer(resources: resources, id: noMap) is false { ret fail(message: "retire noMap") }
+    if writeBuffer(
+      resources: resources
+      id: buffer
+      offset: 2
+      bytes: small
+    ) {
+      ret fail(message: "unaligned write accepted")
+    }
+    if bufferRangeIsValid(
+      resources: resources
+      id: buffer
+      offset: 16
+      size: 32
+    ) {
+      ret fail(message: "overflowing range accepted")
+    }
+    if bufferRangeIsValid(
+      resources: resources
+      id: buffer
+      offset: 0
+      size: 32
+    ) is false {
+      ret fail(message: "full range refused")
+    }
+    if let noMap: BufferId = createBuffer(
+      resources: resources
+      size: 16
+      usage: WGPUBufferUsage_CopyDst
+    ) {
+      if let bad: ReadRequest = readBuffer(
+        resources: resources
+        id: noMap
+        offset: 0
+        size: 16
+      ) {
+        ret fail(message: "readback without MapRead accepted")
+      }
+      if retireBuffer(resources: resources, id: noMap) is false {
+        ret fail(message: "retire noMap")
+      }
     } else {
       ret fail(message: "second buffer failed")
     }
@@ -71,29 +131,75 @@ func checkKnownContents(resources: mod GpuResources) ret Bool {
 func checkIdentity(issuer: mod IdIssuer) ret Bool {
   if let managerA: GpuResources = GpuResources.create(issuer: issuer, capacity: 2) {
     if let managerB: GpuResources = GpuResources.create(issuer: issuer, capacity: 2) {
-      if let idA: BufferId = createBuffer(resources: managerA, size: 16, usage: WGPUBufferUsage_CopyDst) {
-        if let idB: BufferId = createBuffer(resources: managerB, size: 16, usage: WGPUBufferUsage_CopyDst) {
-          if not (idA.slot is idB.slot and idA.generation is idB.generation) { ret fail(message: "expected matching slots") }
-          if isValidBuffer(resources: managerB, id: idA) { ret fail(message: "wrong owner accepted (A in B)") }
-          if isValidBuffer(resources: managerA, id: idB) { ret fail(message: "wrong owner accepted (B in A)") }
-          if bufferSize(resources: managerB, id: idA) is not (0 - 1) { ret fail(message: "wrong owner size leaked") }
+      if let idA: BufferId = createBuffer(
+        resources: managerA
+        size: 16
+        usage: WGPUBufferUsage_CopyDst
+      ) {
+        if let idB: BufferId = createBuffer(
+          resources: managerB
+          size: 16
+          usage: WGPUBufferUsage_CopyDst
+        ) {
+          if not (idA.slot is idB.slot and idA.generation is idB.generation) {
+            ret fail(message: "expected matching slots")
+          }
+          if isValidBuffer(resources: managerB, id: idA) {
+            ret fail(message: "wrong owner accepted (A in B)")
+          }
+          if isValidBuffer(resources: managerA, id: idB) {
+            ret fail(message: "wrong owner accepted (B in A)")
+          }
+          if bufferSize(resources: managerB, id: idA) is not (0 - 1) {
+            ret fail(message: "wrong owner size leaked")
+          }
           let copied: BufferId = idA
-          if retireBuffer(resources: managerA, id: idA) is false { ret fail(message: "retire idA") }
-          if isValidBuffer(resources: managerA, id: copied) { ret fail(message: "stale copy accepted") }
-          if retireBuffer(resources: managerA, id: idA) { ret fail(message: "double retire accepted") }
-          if let reused: BufferId = createBuffer(resources: managerA, size: 16, usage: WGPUBufferUsage_CopyDst) {
-            if reused.slot is not idA.slot or reused.generation is not 1 { ret fail(message: "reuse did not bump generation") }
+          if retireBuffer(resources: managerA, id: idA) is false {
+            ret fail(message: "retire idA")
+          }
+          if isValidBuffer(resources: managerA, id: copied) {
+            ret fail(message: "stale copy accepted")
+          }
+          if retireBuffer(resources: managerA, id: idA) {
+            ret fail(message: "double retire accepted")
+          }
+          if let reused: BufferId = createBuffer(
+            resources: managerA
+            size: 16
+            usage: WGPUBufferUsage_CopyDst
+          ) {
+            if reused.slot is not idA.slot or reused.generation is not 1 {
+              ret fail(message: "reuse did not bump generation")
+            }
           } else {
             ret fail(message: "reuse create failed")
           }
-          if let second: BufferId = createBuffer(resources: managerA, size: 16, usage: WGPUBufferUsage_CopyDst) {
-            if let third: BufferId = createBuffer(resources: managerA, size: 16, usage: WGPUBufferUsage_CopyDst) {
+          if let second: BufferId = createBuffer(
+            resources: managerA
+            size: 16
+            usage: WGPUBufferUsage_CopyDst
+          ) {
+            if let third: BufferId = createBuffer(
+              resources: managerA
+              size: 16
+              usage: WGPUBufferUsage_CopyDst
+            ) {
               ret fail(message: "exhaustion not detected")
             }
-            if liveBufferCount(resources: managerA) is not 2 { ret fail(message: "live count") }
-            if retireBuffer(resources: managerA, id: second) is false { ret fail(message: "retire second") }
-            if let again: BufferId = createBuffer(resources: managerA, size: 16, usage: WGPUBufferUsage_CopyDst) {
-              if again.slot is not second.slot { ret fail(message: "freed slot not reused") }
+            if liveBufferCount(resources: managerA) is not 2 {
+              ret fail(message: "live count")
+            }
+            if retireBuffer(resources: managerA, id: second) is false {
+              ret fail(message: "retire second")
+            }
+            if let again: BufferId = createBuffer(
+              resources: managerA
+              size: 16
+              usage: WGPUBufferUsage_CopyDst
+            ) {
+              if again.slot is not second.slot {
+                ret fail(message: "freed slot not reused")
+              }
             } else {
               ret fail(message: "free slot not reusable")
             }
@@ -101,17 +207,45 @@ func checkIdentity(issuer: mod IdIssuer) ret Bool {
             ret fail(message: "second create failed")
           }
           # Textures, views and samplers share the same rules.
-          if let texture: TextureId = createTexture(resources: managerA, width: 8, height: 4, format: WGPUTextureFormat_RGBA8Unorm, usage: WGPUTextureUsage_TextureBinding + WGPUTextureUsage_CopyDst) {
-            if textureWidth(resources: managerA, id: texture) is not 8 or textureHeight(resources: managerA, id: texture) is not 4 { ret fail(message: "texture size not authoritative") }
-            if let textureView: TextureViewId = createTextureView(resources: managerA, texture: texture) {
+          if let texture: TextureId = createTexture(
+            resources: managerA
+            width: 8
+            height: 4
+            format: WGPUTextureFormat_RGBA8Unorm
+            usage: WGPUTextureUsage_TextureBinding + WGPUTextureUsage_CopyDst
+          ) {
+            if textureWidth(resources: managerA, id: texture) is not 8 or textureHeight(
+              resources: managerA
+              id: texture
+            ) is not 4 {
+              ret fail(message: "texture size not authoritative")
+            }
+            if let textureView: TextureViewId = createTextureView(
+              resources: managerA
+              texture: texture
+            ) {
               if let sampler: SamplerId = createSampler(resources: managerA) {
-                if isValidTexture(resources: managerB, id: texture) { ret fail(message: "wrong owner texture accepted") }
-                if retireTexture(resources: managerA, id: texture) is false { ret fail(message: "retire texture") }
-                if isValidTexture(resources: managerA, id: texture) { ret fail(message: "stale texture accepted") }
-                if isValidTextureView(resources: managerA, id: textureView) is false { ret fail(message: "view lost when texture retired") }
-                if retireTextureView(resources: managerA, id: textureView) is false { ret fail(message: "retire view") }
-                if retireSampler(resources: managerA, id: sampler) is false { ret fail(message: "retire sampler") }
-                if retireSampler(resources: managerA, id: sampler) { ret fail(message: "double retire sampler accepted") }
+                if isValidTexture(resources: managerB, id: texture) {
+                  ret fail(message: "wrong owner texture accepted")
+                }
+                if retireTexture(resources: managerA, id: texture) is false {
+                  ret fail(message: "retire texture")
+                }
+                if isValidTexture(resources: managerA, id: texture) {
+                  ret fail(message: "stale texture accepted")
+                }
+                if isValidTextureView(resources: managerA, id: textureView) is false {
+                  ret fail(message: "view lost when texture retired")
+                }
+                if retireTextureView(resources: managerA, id: textureView) is false {
+                  ret fail(message: "retire view")
+                }
+                if retireSampler(resources: managerA, id: sampler) is false {
+                  ret fail(message: "retire sampler")
+                }
+                if retireSampler(resources: managerA, id: sampler) {
+                  ret fail(message: "double retire sampler accepted")
+                }
               } else {
                 ret fail(message: "createSampler failed")
               }
@@ -130,12 +264,32 @@ func checkIdentity(issuer: mod IdIssuer) ret Bool {
 }
 
 func checkFailures(issuer: mod IdIssuer) ret Bool {
-  if let rejected: GpuResources = GpuResources.create(issuer: issuer, capacity: 0) { ret fail(message: "capacity 0 accepted") }
+  if let rejected: GpuResources = GpuResources.create(issuer: issuer, capacity: 0) {
+    ret fail(message: "capacity 0 accepted")
+  }
   if let manager: GpuResources = GpuResources.create(issuer: issuer, capacity: 1) {
-    if let badSize: BufferId = createBuffer(resources: manager, size: 0, usage: WGPUBufferUsage_CopyDst) { ret fail(message: "size 0 accepted") }
-    if let badUsage: BufferId = createBuffer(resources: manager, size: 8, usage: 0 as UInt64) { ret fail(message: "no usage accepted") }
-    if let badWidth: TextureId = createTexture(resources: manager, width: 0, height: 4, format: WGPUTextureFormat_RGBA8Unorm, usage: WGPUTextureUsage_TextureBinding) { ret fail(message: "width 0 accepted") }
-    if liveBufferCount(resources: manager) is not 0 or liveTextureCount(resources: manager) is not 0 { ret fail(message: "failed creates consumed slots") }
+    if let badSize: BufferId = createBuffer(
+      resources: manager
+      size: 0
+      usage: WGPUBufferUsage_CopyDst
+    ) {
+      ret fail(message: "size 0 accepted")
+    }
+    if let badUsage: BufferId = createBuffer(resources: manager, size: 8, usage: 0 as UInt64) {
+      ret fail(message: "no usage accepted")
+    }
+    if let badWidth: TextureId = createTexture(
+      resources: manager
+      width: 0
+      height: 4
+      format: WGPUTextureFormat_RGBA8Unorm
+      usage: WGPUTextureUsage_TextureBinding
+    ) {
+      ret fail(message: "width 0 accepted")
+    }
+    if liveBufferCount(resources: manager) is not 0 or liveTextureCount(resources: manager) is not 0 {
+      ret fail(message: "failed creates consumed slots")
+    }
     ret true
   }
   ret fail(message: "manager creation failed")
@@ -145,7 +299,11 @@ func checkFailures(issuer: mod IdIssuer) ret Bool {
 # is rejected by a recreated manager even with a matching slot and generation.
 func escapedId(issuer: mod IdIssuer) ret BufferId {
   if let shortLived: GpuResources = GpuResources.create(issuer: issuer, capacity: 1) {
-    if let id: BufferId = createBuffer(resources: shortLived, size: 16, usage: WGPUBufferUsage_CopyDst) {
+    if let id: BufferId = createBuffer(
+      resources: shortLived
+      size: 16
+      usage: WGPUBufferUsage_CopyDst
+    ) {
       ret id
     }
   }
@@ -154,11 +312,21 @@ func escapedId(issuer: mod IdIssuer) ret BufferId {
 
 func checkScopeExit(issuer: mod IdIssuer) ret Bool {
   let stale: BufferId = escapedId(issuer: issuer)
-  if stale.managerTag is 0 { ret fail(message: "escaped id not created") }
+  if stale.managerTag is 0 {
+    ret fail(message: "escaped id not created")
+  }
   if let fresh: GpuResources = GpuResources.create(issuer: issuer, capacity: 1) {
-    if let freshId: BufferId = createBuffer(resources: fresh, size: 16, usage: WGPUBufferUsage_CopyDst) {
-      if not (stale.slot is freshId.slot and stale.generation is freshId.generation) { ret fail(message: "expected matching slot") }
-      if isValidBuffer(resources: fresh, id: stale) { ret fail(message: "escaped id accepted by recreated manager") }
+    if let freshId: BufferId = createBuffer(
+      resources: fresh
+      size: 16
+      usage: WGPUBufferUsage_CopyDst
+    ) {
+      if not (stale.slot is freshId.slot and stale.generation is freshId.generation) {
+        ret fail(message: "expected matching slot")
+      }
+      if isValidBuffer(resources: fresh, id: stale) {
+        ret fail(message: "escaped id accepted by recreated manager")
+      }
       ret isValidBuffer(resources: fresh, id: freshId)
     }
   }
@@ -173,7 +341,9 @@ func main() ret Int {
     }
     var issuer: IdIssuer = IdIssuer.create()
     if let resources: GpuResources = GpuResources.create(issuer: issuer, capacity: 4) {
-      if checkKnownContents(resources: resources) is false { ret 1 }
+      if checkKnownContents(resources: resources) is false {
+        ret 1
+      }
       if liveBufferCount(resources: resources) is not 0 {
         log("FAIL: buffers leaked")
         ret 1
@@ -183,11 +353,17 @@ func main() ret Int {
       ret 1
     }
     log("known contents, authoritative size, refused misuse OK")
-    if checkIdentity(issuer: issuer) is false { ret 1 }
+    if checkIdentity(issuer: issuer) is false {
+      ret 1
+    }
     log("two managers, wrong owner, stale copies, reuse, exhaustion, textures/views/samplers OK")
-    if checkFailures(issuer: issuer) is false { ret 1 }
+    if checkFailures(issuer: issuer) is false {
+      ret 1
+    }
     log("construction and descriptor failures OK")
-    if checkScopeExit(issuer: issuer) is false { ret 1 }
+    if checkScopeExit(issuer: issuer) is false {
+      ret 1
+    }
     log("scope-exit cleanup and recreation OK")
     ret 0
   }

@@ -29,7 +29,9 @@ func f32Word(value: view Float) ret Int {
   var word: Int = 0
   var i: Int = 3
   loop i >= 0 {
-    if let b: UInt8 = writer.bytes.copyAt(index: i) { word = word * 256 + (b as Int) }
+    if let b: UInt8 = writer.bytes.copyAt(index: i) {
+      word = word * 256 + (b as Int)
+    }
     i = i - 1
   }
   ret word
@@ -39,7 +41,9 @@ func word(bytes: view List(UInt8), index: view Int) ret Int {
   var value: Int = 0
   var i: Int = 3
   loop i >= 0 {
-    if let b: UInt8 = bytes.copyAt(index: index * 4 + i) { value = value * 256 + (b as Int) }
+    if let b: UInt8 = bytes.copyAt(index: index * 4 + i) {
+      value = value * 256 + (b as Int)
+    }
     i = i - 1
   }
   ret value
@@ -78,60 +82,160 @@ func main() ret Int {
       pushF32(writer: writer, value: 1.0)
       pushVec2F(writer: writer, x: 2.0, y: 3.0)
       pushF32(writer: writer, value: 4.0)
-      pushVec3F(writer: writer, x: 5.0, y: 6.0, z: 7.0)
+      pushVec3F(
+        writer: writer
+        x: 5.0
+        y: 6.0
+        z: 7.0
+      )
       pushF32(writer: writer, value: 8.0)
-      pushVec4F(writer: writer, x: 9.0, y: 10.0, z: 11.0, w: 12.0)
+      pushVec4F(
+        writer: writer
+        x: 9.0
+        y: 10.0
+        z: 11.0
+        w: 12.0
+      )
       let identity: List(Float) = List.create(Float, cap: 16)
       var mi: Int = 0
       loop mi < 16 {
-        if mi is 0 or mi is 5 or mi is 10 or mi is 15 { identity.add(value: 1.0) } else { identity.add(value: 0.0) }
+        if mi is 0 or mi is 5 or mi is 10 or mi is 15 {
+          identity.add(value: 1.0)
+        } else {
+          identity.add(value: 0.0)
+        }
         mi = mi + 1
       }
       pushMat4(writer: writer, columns: identity)
       pushU32(writer: writer, value: 305419896)
       finalizeArgs(writer: writer)
-      if argsLength(writer: writer) is not 144 { ret fail(message: "packed size {argsLength(writer: writer)}") }
+      if argsLength(writer: writer) is not 144 {
+        ret fail(message: "packed size {argsLength(writer: writer)}")
+      }
 
-      if let uniform: BufferId = createBuffer(resources: resources, size: 144, usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst) {
-        if uploadArgs(writer: writer, resources: resources, buffer: uniform, offset: 0) is false { ret fail(message: "upload") }
-        if let storage: BufferId = createBuffer(resources: resources, size: 64, usage: WGPUBufferUsage_Storage + WGPUBufferUsage_CopySrc) {
-          if let readback: BufferId = createBuffer(resources: resources, size: 64, usage: WGPUBufferUsage_MapRead + WGPUBufferUsage_CopyDst) {
-            if let pipeline: PipelineId = createComputePipeline(resources: resources, wgsl: shaderSource(), entryPoint: "main") {
+      if let uniform: BufferId = createBuffer(
+        resources: resources
+        size: 144
+        usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst
+      ) {
+        if uploadArgs(
+          writer: writer
+          resources: resources
+          buffer: uniform
+          offset: 0
+        ) is false {
+          ret fail(message: "upload")
+        }
+        if let storage: BufferId = createBuffer(
+          resources: resources
+          size: 64
+          usage: WGPUBufferUsage_Storage + WGPUBufferUsage_CopySrc
+        ) {
+          if let readback: BufferId = createBuffer(
+            resources: resources
+            size: 64
+            usage: WGPUBufferUsage_MapRead + WGPUBufferUsage_CopyDst
+          ) {
+            if let pipeline: PipelineId = createComputePipeline(
+              resources: resources
+              wgsl: shaderSource()
+              entryPoint: "main"
+            ) {
               let buffers: List(BufferId) = List.create(BufferId, cap: 2)
               buffers.add(value: uniform)
               buffers.add(value: storage)
               let noViews: List(TextureViewId) = List.create(TextureViewId, cap: 1)
               let noSamplers: List(SamplerId) = List.create(SamplerId, cap: 1)
-              if let bindGroup: BindGroupId = createBindGroup(resources: resources, pipeline: pipeline, buffers: buffers, textureViews: noViews, samplers: noSamplers) {
+              if let bindGroup: BindGroupId = createBindGroup(
+                resources: resources
+                pipeline: pipeline
+                buffers: buffers
+                textureViews: noViews
+                samplers: noSamplers
+              ) {
                 # A snapshotted compute command; recorded over #870's checked path.
-                let command: ComputeCommand = computeCommand(pipeline: pipeline, bindGroup: bindGroup, workgroupsX: 1, workgroupsY: 1, workgroupsZ: 1)
+                let command: ComputeCommand = computeCommand(
+                  pipeline: pipeline
+                  bindGroup: bindGroup
+                  workgroupsX: 1
+                  workgroupsY: 1
+                  workgroupsZ: 1
+                )
                 if let recording: Recording = beginRecording(resources: resources) {
-                  if recordComputeCommand(recording: recording, resources: resources, command: command) is false { ret fail(message: "record") }
-                  if recordCopyBuffer(recording: recording, resources: resources, source: storage, sourceOffset: 0, destination: readback, destinationOffset: 0, size: 64) is false { ret fail(message: "copy") }
-                  if let submission: SubmissionId = submit(resources: resources, recording: recording) {
-                    if awaitSubmission(resources: resources, id: submission) is not 1 { ret fail(message: "submission") }
+                  if recordComputeCommand(
+                    recording: recording
+                    resources: resources
+                    command: command
+                  ) is false {
+                    ret fail(message: "record")
+                  }
+                  if recordCopyBuffer(
+                    recording: recording
+                    resources: resources
+                    source: storage
+                    sourceOffset: 0
+                    destination: readback
+                    destinationOffset: 0
+                    size: 64
+                  ) is false {
+                    ret fail(message: "copy")
+                  }
+                  if let submission: SubmissionId = submit(
+                    resources: resources
+                    recording: recording
+                  ) {
+                    if awaitSubmission(resources: resources, id: submission) is not 1 {
+                      ret fail(message: "submission")
+                    }
                     retireSubmission(resources: resources, id: submission)
-                    if let read: ReadbackId = startReadback(resources: resources, buffer: readback, offset: 0, size: 64) {
-                      if awaitReadback(resources: resources, id: read) is not 1 { ret fail(message: "readback") }
+                    if let read: ReadbackId = startReadback(
+                      resources: resources
+                      buffer: readback
+                      offset: 0
+                      size: 64
+                    ) {
+                      if awaitReadback(resources: resources, id: read) is not 1 {
+                        ret fail(message: "readback")
+                      }
                       let out: List(UInt8) = List.create(UInt8, cap: 64)
                       var z: Int = 0
-                      loop z < 64 { out.add(value: 0 as UInt8) z = z + 1 }
-                      if copyReadback(resources: resources, id: read, destination: out) is false { ret fail(message: "copy readback") }
+                      loop z < 64 {
+                        out.add(value: 0 as UInt8)
+                        z = z + 1
+                      }
+                      if copyReadback(resources: resources, id: read, destination: out) is false {
+                        ret fail(message: "copy readback")
+                      }
                       retireReadback(resources: resources, id: read)
                       # Compare each field the shader read to the packed bit pattern.
                       let expected: List(Float) = List.create(Float, cap: 16)
-                      expected.add(value: 1.0)  expected.add(value: 2.0)  expected.add(value: 3.0)  expected.add(value: 4.0)
-                      expected.add(value: 5.0)  expected.add(value: 6.0)  expected.add(value: 7.0)  expected.add(value: 8.0)
-                      expected.add(value: 9.0)  expected.add(value: 10.0) expected.add(value: 11.0) expected.add(value: 12.0)
-                      expected.add(value: 1.0)  expected.add(value: 1.0)  expected.add(value: 1.0)
+                      expected.add(value: 1.0)
+                      expected.add(value: 2.0)
+                      expected.add(value: 3.0)
+                      expected.add(value: 4.0)
+                      expected.add(value: 5.0)
+                      expected.add(value: 6.0)
+                      expected.add(value: 7.0)
+                      expected.add(value: 8.0)
+                      expected.add(value: 9.0)
+                      expected.add(value: 10.0)
+                      expected.add(value: 11.0)
+                      expected.add(value: 12.0)
+                      expected.add(value: 1.0)
+                      expected.add(value: 1.0)
+                      expected.add(value: 1.0)
                       var k: Int = 0
                       loop k < 15 {
                         if let ev: Float = expected.copyAt(index: k) {
-                          if word(bytes: out, index: k) is not f32Word(value: ev) { ret fail(message: "field {k} mismatch") }
+                          if word(bytes: out, index: k) is not f32Word(value: ev) {
+                            ret fail(message: "field {k} mismatch")
+                          }
                         }
                         k = k + 1
                       }
-                      if word(bytes: out, index: 15) is not 305419896 { ret fail(message: "u32 field {word(bytes: out, index: 15)}") }
+                      if word(bytes: out, index: 15) is not 305419896 {
+                        ret fail(message: "u32 field {word(bytes: out, index: 15)}")
+                      }
                       log("scalar/vec2/vec3/vec4/mat4/u32 round trip through WGSL std140 layout OK")
                       ret 0
                     }

@@ -17,7 +17,12 @@ type IntMap(V: type) {
 
 func createInt64Map(V: type, cap: view Int) ret IntMap(V) {
   unsafe {
-    ret IntMap(V) { data: rae_ext_rae_buf_alloc(size: cap, elemSize: sizeof(IntMapEntry(V))), length: 0, cap: cap, isGrowing: false }
+    ret IntMap(V) {
+      data: rae_ext_rae_buf_alloc(size: cap, elemSize: sizeof(IntMapEntry(V)))
+      length: 0
+      cap: cap
+      isGrowing: false
+    }
   }
 }
 
@@ -30,7 +35,12 @@ func create(V: type, cap: view Int) ret IntMap(V) {
   ret IntMap.create(V, cap: cap)
 }
 
-func set(V: type, this: mod IntMap(V), k: view Int, value: own V) {
+func set(
+  V: type
+  this: mod IntMap(V)
+  k: view Int
+  value: own V
+) {
   unsafe {
     if this.cap is 0 {
       this.cap = 8
@@ -240,7 +250,7 @@ func growInt64Map(V: type, this: mod IntMap(V)) {
     }
     this.data = rae_ext_rae_buf_alloc(size: this.cap, elemSize: sizeof(IntMapEntry(V)))
     this.length = 0
-  
+
     var i: Int = 0
     loop i < oldCap {
       let entry: IntMapEntry(V) = rae_ext_rae_buf_get(buf: oldData, index: i)

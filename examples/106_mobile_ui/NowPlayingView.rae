@@ -40,10 +40,21 @@ func mountNowPlayingPage(
   let track: Track = trackAt(album: album, idx: state.currentTrackIndex)
 
   let root: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: root, w: viewport.areaDuW, h: viewport.areaDuH)
+  setRectFixed(
+    world: world
+    entity: root
+    w: viewport.areaDuW
+    h: viewport.areaDuH
+  )
   let layV: LayoutType = LayoutType.vertical
   let alignS: AlignKind = AlignKind.start
-  setLayout(world: world, entity: root, kind: layV, gap: outerGap, alignCross: alignS)
+  setLayout(
+    world: world
+    entity: root
+    kind: layV
+    gap: outerGap
+    alignCross: alignS
+  )
   setPaddingAll(world: world, entity: root, n: outerPad)
 
   var copiedId: String = ""
@@ -61,7 +72,12 @@ func mountNowPlayingPage(
   let npH: Float = phoneFrameH - outerPad * 2.0 - topBarH - outerGap - miniPlayerH - navTabsH - bottomGap
   let npW: Float = phoneFrameW - outerPad * 2.0
   let np: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: np, w: npW, h: npH)
+  setRectFixed(
+    world: world
+    entity: np
+    w: npW
+    h: npH
+  )
 
   let npOverrides: List(SceneOverride) = emptyOverrides()
   let playIconId: String = "PlayIcon"
@@ -101,15 +117,38 @@ func mountNowPlayingPage(
     paintErrorBlock(world: world, entity: np, label: npLabel)
   }
   let playWidgetId: String = "player.playIcon"
-  tagPlaybackIconDependency(world: world, pageId: playerPageId, nodeId: playIconId, widgetId: playWidgetId, observedRevision: playback.revision, playing: playback.isPlaying)
+  tagPlaybackIconDependency(
+    world: world
+    pageId: playerPageId
+    nodeId: playIconId
+    widgetId: playWidgetId
+    observedRevision: playback.revision
+    playing: playback.isPlaying
+  )
   # Cover observes the nowPlaying instance revision (#268): the big Hero
   # cover re-points by identity on a track change without a re-mount.
   let heroCoverNode: String = "Hero"
-  let heroCoverSeed: String = nowPlayingCoverSeed(reg: reg, playback: playback, browsedStem: state.currentAlbumStem)
-  tagPlaybackCoverDependency(world: world, pageId: playerPageId, nodeId: heroCoverNode, observedRevision: playback.nowPlayingRevision, artKey: heroCoverSeed)
+  let heroCoverSeed: String = nowPlayingCoverSeed(
+    reg: reg
+    playback: playback
+    browsedStem: state.currentAlbumStem
+  )
+  tagPlaybackCoverDependency(
+    world: world
+    pageId: playerPageId
+    nodeId: heroCoverNode
+    observedRevision: playback.nowPlayingRevision
+    artKey: heroCoverSeed
+  )
   let heartNode: String = "HeartButton"
   let heartWidgetId: String = "player.likeButton"
-  tagLikedHeart(world: world, pageId: playerPageId, nodeId: heartNode, widgetId: heartWidgetId, observedRevision: 0)
+  tagLikedHeart(
+    world: world
+    pageId: playerPageId
+    nodeId: heartNode
+    widgetId: heartWidgetId
+    observedRevision: 0
+  )
 
   # Gate the big album-cover corner radius on the same AppSettings
   # flag that drives Library / Home / History. The Now Playing hero
@@ -130,16 +169,34 @@ func mountNowPlayingPage(
   kids.add(value: topBar)
   kids.add(value: np)
   attachChildren(world: world, parent: root, kids: kids)
-  attachSafeAreaEdges(world: world, entity: root, top: 1.0, bottom: 0.0)
+  attachSafeAreaEdges(
+    world: world
+    entity: root
+    top: 1.0
+    bottom: 0.0
+  )
 
   ret root
 }
 
-func buildNowPlayingWorld(scenes: view AlbumScenes, playback: view PlaybackState, state: view AppState, reg: view TextureRegistry, viewport: view Viewport) pub ret UiWorld {
+func buildNowPlayingWorld(
+  scenes: view AlbumScenes
+  playback: view PlaybackState
+  state: view AppState
+  reg: view TextureRegistry
+  viewport: view Viewport
+) pub ret UiWorld {
   let world: UiWorld = create()
   seedWorldThemeFrom(world: world, src: state.theme)  # #764: theme from AppState
   applyViewportExtent(world: world, viewport: viewport)
-  let page: EntityId = mountNowPlayingPage(world: world, scenes: scenes, playback: playback, state: state, reg: reg, viewport: viewport)
+  let page: EntityId = mountNowPlayingPage(
+    world: world
+    scenes: scenes
+    playback: playback
+    state: state
+    reg: reg
+    viewport: viewport
+  )
   let dock: EntityId = mountBottomDockOverlay(
     world: world
     activeTab: state.tab
@@ -216,21 +273,62 @@ func buildMiniPlayerInstance(
   )
   let miniRootId: String = "miniPlayer.root"
   let miniRootKind: String = "miniPlayer"
-  setWidgetIdentity(world: world, entity: mount, id: miniRootId, kind: miniRootKind)
-  setWidgetState(world: world, entity: mount, enabled: true, selected: false, loading: false, error: false)
+  setWidgetIdentity(
+    world: world
+    entity: mount
+    id: miniRootId
+    kind: miniRootKind
+  )
+  setWidgetState(
+    world: world
+    entity: mount
+    enabled: true
+    selected: false
+    loading: false
+    error: false
+  )
   let playbackSource: DataResourceId = dataResourcePlayback()
   let playingField: DataFieldId = dataFieldPlayingTrack()
-  setDataDependency(world: world, entity: mount, resource: playbackSource, field: playingField, observedRevision: playback.revision)
+  setDataDependency(
+    world: world
+    entity: mount
+    resource: playbackSource
+    field: playingField
+    observedRevision: playback.revision
+  )
   let miniWidgetId: String = "miniPlayer.playIcon"
-  tagPlaybackIconDependency(world: world, pageId: miniPlayerPageId, nodeId: miniIconId, widgetId: miniWidgetId, observedRevision: playback.revision, playing: playback.isPlaying)
+  tagPlaybackIconDependency(
+    world: world
+    pageId: miniPlayerPageId
+    nodeId: miniIconId
+    widgetId: miniWidgetId
+    observedRevision: playback.revision
+    playing: playback.isPlaying
+  )
   # Cover observes the nowPlaying instance revision (#268): the persistent
   # dock's MiniThumb re-points by identity on a track change — this is the
   # widget the motivating bug left stuck on the first album (§1).
-  let miniThumbCoverSeed: String = nowPlayingCoverSeed(reg: reg, playback: playback, browsedStem: state.currentAlbumStem)
-  tagPlaybackCoverDependency(world: world, pageId: miniPlayerPageId, nodeId: "MiniThumb", observedRevision: playback.nowPlayingRevision, artKey: miniThumbCoverSeed)
+  let miniThumbCoverSeed: String = nowPlayingCoverSeed(
+    reg: reg
+    playback: playback
+    browsedStem: state.currentAlbumStem
+  )
+  tagPlaybackCoverDependency(
+    world: world
+    pageId: miniPlayerPageId
+    nodeId: "MiniThumb"
+    observedRevision: playback.nowPlayingRevision
+    artKey: miniThumbCoverSeed
+  )
   let miniHeartNode: String = "MiniHeartButton"
   let miniHeartWidgetId: String = "miniPlayer.likeButton"
-  tagLikedHeart(world: world, pageId: miniPlayerPageId, nodeId: miniHeartNode, widgetId: miniHeartWidgetId, observedRevision: 0)
+  tagLikedHeart(
+    world: world
+    pageId: miniPlayerPageId
+    nodeId: miniHeartNode
+    widgetId: miniHeartWidgetId
+    observedRevision: 0
+  )
   # Frames S3 (#210): select + overlay the scene's frame. The forced
   # id comes from the S2 device simulator (activeDeviceFrame folds
   # RAE_UI_FRAME + RAE_UI_DEVICE; the default iPhone preset forces
@@ -246,7 +344,13 @@ func buildMiniPlayerInstance(
   let deviceFrame: DeviceFrame = activeDeviceFrame()
   let forcedName: String = frameIdName(id: deviceFrame.forcedFrameId)
   let framePtW: Float = world.layoutW / unitScale
-  let frameIdx: Int = applySceneFramesToPage(world: world, scene: scene, pageId: miniPlayerPageId, windowPtW: framePtW, forcedFrameId: forcedName)
+  let frameIdx: Int = applySceneFramesToPage(
+    world: world
+    scene: scene
+    pageId: miniPlayerPageId
+    windowPtW: framePtW
+    forcedFrameId: forcedName
+  )
   # Frames S4 (#211): MiniArtist is frame-overridden (the Desktop
   # frame reparents it into the root row), so reset-to-base just
   # replayed its authored placeholder text on every frame. Re-apply
@@ -257,7 +361,17 @@ func buildMiniPlayerInstance(
   # into addTextOverride above.
   let miniTitleText: String = "{track.title}"
   let miniArtistText: String = "{album.artist}"
-  updateNodeText(world: world, pageId: miniPlayerPageId, nodeId: "MiniTitle", value: miniTitleText)
-  updateNodeText(world: world, pageId: miniPlayerPageId, nodeId: "MiniArtist", value: miniArtistText)
+  updateNodeText(
+    world: world
+    pageId: miniPlayerPageId
+    nodeId: "MiniTitle"
+    value: miniTitleText
+  )
+  updateNodeText(
+    world: world
+    pageId: miniPlayerPageId
+    nodeId: "MiniArtist"
+    value: miniArtistText
+  )
   ret mount
 }

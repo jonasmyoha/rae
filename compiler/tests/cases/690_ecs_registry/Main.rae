@@ -2,7 +2,6 @@ open ecs/Registry
 
 # #717: register components with serialize/replicate/editor flags (a bitmask, no
 # language annotations), then look them up and flag-test.
-
 func main() {
   let nT: String = "Transform3D"
   let nW: String = "WorldTransform3D"
@@ -11,7 +10,7 @@ func main() {
 
   var reg: ComponentRegistry = createComponentRegistry()
   registerComponent(reg: reg, name: nT, flags: serialize bitor replicate)
-  registerComponent(reg: reg, name: nW, flags: 0)   # derived cache: registered, not serialized
+  registerComponent(reg: reg, name: nW, flags: 0)  # derived cache: registered, not serialized
   registerComponent(reg: reg, name: nE, flags: editorOnly)
 
   log("count: {registeredCount(reg: reg)}")

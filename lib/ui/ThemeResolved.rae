@@ -42,7 +42,9 @@ const themeMaxExtendsDepth: Int = 4
 
 # Align codes stored in textAligns: 0 start, 1 center, 2 end.
 const themeAlignStart: Int = 0
+
 const themeAlignCenter: Int = 1
+
 const themeAlignEnd: Int = 2
 
 # Padding token result — a plain 4-float struct so this module needs
@@ -160,8 +162,11 @@ func createResolvedTheme() pub ret ResolvedTheme {
 # Lookups (linear; tens of entries). Consumers that resolve per frame
 # should cache the index/result by id.
 # -----------------------------------------------------------------
-
-func themeSpaceValue(theme: view ResolvedTheme, name: view String, fallback: view Float) pub ret Float {
+func themeSpaceValue(
+  theme: view ResolvedTheme
+  name: view String
+  fallback: view Float
+) pub ret Float {
   unsafe {
     var i: Int = 0
     loop i < theme.spaceNames.length {
@@ -177,7 +182,11 @@ func themeSpaceValue(theme: view ResolvedTheme, name: view String, fallback: vie
   }
 }
 
-func themeRadiusValue(theme: view ResolvedTheme, name: view String, fallback: view Float) pub ret Float {
+func themeRadiusValue(
+  theme: view ResolvedTheme
+  name: view String
+  fallback: view Float
+) pub ret Float {
   unsafe {
     var i: Int = 0
     loop i < theme.radiusNames.length {
@@ -288,10 +297,18 @@ func themePaddingInsets(theme: view ResolvedTheme, name: view String) pub ret Th
         var t: Float = 0.0
         var r: Float = 0.0
         var b: Float = 0.0
-        if let padLVal: Float = theme.padL.copyAt(index: i) { l = padLVal }
-        if let padTVal: Float = theme.padT.copyAt(index: i) { t = padTVal }
-        if let padRVal: Float = theme.padR.copyAt(index: i) { r = padRVal }
-        if let padBVal: Float = theme.padB.copyAt(index: i) { b = padBVal }
+        if let padLVal: Float = theme.padL.copyAt(index: i) {
+          l = padLVal
+        }
+        if let padTVal: Float = theme.padT.copyAt(index: i) {
+          t = padTVal
+        }
+        if let padRVal: Float = theme.padR.copyAt(index: i) {
+          r = padRVal
+        }
+        if let padBVal: Float = theme.padB.copyAt(index: i) {
+          b = padBVal
+        }
         ret ThemeInsets { l: l, t: t, r: r, b: b }
       }
       i = i + 1
@@ -348,10 +365,18 @@ func applyResolvedTokens(dst: mod ResolvedTheme, src: view ResolvedTheme) pub {
       var t: Float = 0.0
       var r: Float = 0.0
       var b: Float = 0.0
-      if let padLVal: Float = src.padL.copyAt(index: i) { l = padLVal }
-      if let padTVal: Float = src.padT.copyAt(index: i) { t = padTVal }
-      if let padRVal: Float = src.padR.copyAt(index: i) { r = padRVal }
-      if let padBVal: Float = src.padB.copyAt(index: i) { b = padBVal }
+      if let padLVal: Float = src.padL.copyAt(index: i) {
+        l = padLVal
+      }
+      if let padTVal: Float = src.padT.copyAt(index: i) {
+        t = padTVal
+      }
+      if let padRVal: Float = src.padR.copyAt(index: i) {
+        r = padRVal
+      }
+      if let padBVal: Float = src.padB.copyAt(index: i) {
+        b = padBVal
+      }
       dst.padNames.add(value: n)
       dst.padL.add(value: l)
       dst.padT.add(value: t)

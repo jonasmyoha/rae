@@ -145,10 +145,10 @@ type SdfPrimitive {
 # Blender front view: camera on -Y looking toward +Y, world-up +Z.
 func defaultCamera3d() pub ret Camera3d {
   ret Camera3d {
-    position: Vec3.create(x: 0.0, y: 0.0 - 12.0, z: 4.0),
-    target: Vec3.create(x: 0.0, y: 0.0, z: 0.5),
-    fovYDeg: 50.0,
-    nearZ: 0.1,
+    position: Vec3.create(x: 0.0, y: 0.0 - 12.0, z: 4.0)
+    target: Vec3.create(x: 0.0, y: 0.0, z: 0.5)
+    fovYDeg: 50.0
+    nearZ: 0.1
     farZ: 200.0
   }
 }
@@ -156,11 +156,11 @@ func defaultCamera3d() pub ret Camera3d {
 # Sun from above-front (Z-up: the -Z component points the light downward).
 func defaultLight3d() pub ret Light3d {
   ret Light3d {
-    sunDir: Vec3.create(x: 0.0 - 0.4, y: 0.3, z: 0.0 - 1.0),
-    sunColor: Vec3.create(x: 3.2, y: 3.0, z: 2.7),
-    ambSky: Vec3.create(x: 0.25, y: 0.3, z: 0.4),
-    ambGround: Vec3.create(x: 0.12, y: 0.1, z: 0.09),
-    exposure: 1.0,
+    sunDir: Vec3.create(x: 0.0 - 0.4, y: 0.3, z: 0.0 - 1.0)
+    sunColor: Vec3.create(x: 3.2, y: 3.0, z: 2.7)
+    ambSky: Vec3.create(x: 0.25, y: 0.3, z: 0.4)
+    ambGround: Vec3.create(x: 0.12, y: 0.1, z: 0.09)
+    exposure: 1.0
     clearColor: Vec3.create(x: 0.02, y: 0.02, z: 0.03)
   }
 }
@@ -232,7 +232,11 @@ func world3dSetMaterial(world: mod World3d, entity: view EntityId, material: vie
   componentSet(this: world.materials, entity: entity, data: material)
 }
 
-func world3dSetMeshRenderer(world: mod World3d, entity: view EntityId, renderer: view MeshRenderer) {
+func world3dSetMeshRenderer(
+  world: mod World3d
+  entity: view EntityId
+  renderer: view MeshRenderer
+) {
   componentSet(this: world.meshRenderers, entity: entity, data: renderer)
 }
 
@@ -245,11 +249,26 @@ func world3dSetSdf(world: mod World3d, entity: view EntityId, sdf: view SdfPrimi
 # World3d in code (#794). The MeshRenderer's legacy `entity`/`material` Int fields
 # are ignored by the World3d renderer (renderSceneWorld reads the ECS entity + the
 # Material3d component), so they carry placeholders.
-func world3dAddMeshInstance(world: mod World3d, mesh: view MeshHandle, material: view Material3d, position: view Vec3, rotation: view Vec3, scale: view Vec3) ret EntityId {
+func world3dAddMeshInstance(
+  world: mod World3d
+  mesh: view MeshHandle
+  material: view Material3d
+  position: view Vec3
+  rotation: view Vec3
+  scale: view Vec3
+) ret EntityId {
   let entity: EntityId = world3dAddEntity(world: world)
-  world3dSetTransform(world: world, entity: entity, transform: Transform3d { position: position, rotation: rotation, scale: scale })
+  world3dSetTransform(
+    world: world
+    entity: entity
+    transform: Transform3d { position: position, rotation: rotation, scale: scale }
+  )
   world3dSetMaterial(world: world, entity: entity, material: material)
-  world3dSetMeshRenderer(world: world, entity: entity, renderer: MeshRenderer { entity: 0 - 1, mesh: mesh, material: 0 - 1, visible: true })
+  world3dSetMeshRenderer(
+    world: world
+    entity: entity
+    renderer: MeshRenderer { entity: 0 - 1, mesh: mesh, material: 0 - 1, visible: true }
+  )
   ret entity
 }
 

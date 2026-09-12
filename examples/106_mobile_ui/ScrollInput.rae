@@ -1,5 +1,6 @@
 open ui/Ecs
 open ui/ScrollPhysics
+
 # iOS-style drag + trackpad/wheel scroll physics for the Profile and
 # Album screens.
 #
@@ -20,7 +21,6 @@ open ui/ScrollPhysics
 #   * `dragJustReleased`    suppresses the release-click on the frame a
 #                           drag ended (otherwise the lift would fire
 #                           an OnClick on whatever's under the cursor).
-
 type ScrollFsm {
   # Logical scroll Y (more-negative = content shifted up). The
   # ECS `Offset` and `ScrollState` components on `scrollTarget`
@@ -31,11 +31,11 @@ type ScrollFsm {
   velocity: Float
 
   # Drag finite-state machine.
-  prevDown: Bool       # mouse button state on the previous frame
-  active: Bool         # crossed the 10-pt activation distance
-  startX: Float        # mouse position at press
+  prevDown: Bool  # mouse button state on the previous frame
+  active: Bool  # crossed the 10-pt activation distance
+  startX: Float  # mouse position at press
   startY: Float
-  mouseY: Float        # last frame's mouse Y for delta math
+  mouseY: Float  # last frame's mouse Y for delta math
 
   # Last-3-frames y-delta ring buffer; averaged at release-time
   # to give the momentum-fling its initial velocity.
@@ -132,11 +132,7 @@ func applyDragPhysics(
   } else {
     if fsm.prevDown {
       if fsm.active {
-        fsm.velocity = pickReleaseVelocity(
-          d0: fsm.delta0
-          d1: fsm.delta1
-          d2: fsm.delta2
-        )
+        fsm.velocity = pickReleaseVelocity(d0: fsm.delta0, d1: fsm.delta1, d2: fsm.delta2)
         dragJustReleased = true
       }
       fsm.active = false

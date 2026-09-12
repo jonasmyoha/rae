@@ -25,15 +25,23 @@ open GltfSkinMesh
 # fallback only covers indices this code already treats as unreachable.
 # Shared with gltfRetarget.rae via `open gltf_skin`.
 func floatAt(list: view List(Float), index: copy Int) ret Float {
-  if let value: Float = list.copyAt(index: index) { ret value }
+  if let value: Float = list.copyAt(index: index) {
+    ret value
+  }
   ret 0.0
 }
+
 func intAt(list: view List(Int), index: copy Int, fallback: copy Int) ret Int {
-  if let value: Int = list.copyAt(index: index) { ret value }
+  if let value: Int = list.copyAt(index: index) {
+    ret value
+  }
   ret fallback
 }
+
 func boolAt(list: view List(Bool), index: copy Int, fallback: copy Bool) ret Bool {
-  if let value: Bool = list.copyAt(index: index) { ret value }
+  if let value: Bool = list.copyAt(index: index) {
+    ret value
+  }
   ret fallback
 }
 
@@ -80,9 +88,17 @@ type SkinnedMeshData {
 # never what was intended, least of all under a cel shader, which turns
 # every facet into a distinct region. Callers that genuinely want the
 # authored normals ask for them with `loadSkinnedPrimitiveFlat`.
-func loadSkinnedPrimitive(glb: view Glb, meshIndex: view Int, primIndex: view Int) pub ret SkinnedMeshData {
-  ret loadSkinnedPrimitiveSmoothed(glb: glb, meshIndex: meshIndex, primIndex: primIndex,
-                                   smoothAngleDeg: meshSmoothAngleDefault)
+func loadSkinnedPrimitive(
+  glb: view Glb
+  meshIndex: view Int
+  primIndex: view Int
+) pub ret SkinnedMeshData {
+  ret loadSkinnedPrimitiveSmoothed(
+    glb: glb
+    meshIndex: meshIndex
+    primIndex: primIndex
+    smoothAngleDeg: meshSmoothAngleDefault
+  )
 }
 
 # Return a copy of `m` whose vertex colour channel is the atlas colour at
@@ -109,8 +125,12 @@ func loadSkinnedPrimitive(glb: view Glb, meshIndex: view Int, primIndex: view In
 # COLOR_0 IS DELIBERATELY NOT USED. This model carries one, but it is
 # Blender's vertex paint, not the palette; multiplying both sources would
 # darken twice. The atlas is the model's albedo, so it is the one source.
-func withAtlasColors(m: view SkinnedMeshData, atlas: view List(Int),
-                     width: view Int, height: view Int) pub ret SkinnedMeshData {
+func withAtlasColors(
+  m: view SkinnedMeshData
+  atlas: view List(Int)
+  width: view Int
+  height: view Int
+) pub ret SkinnedMeshData {
   let out: List(Float) = List.create(Float, cap: m.verts.length)
   var i: Int = 0
   loop i < m.verts.length {
@@ -118,7 +138,11 @@ func withAtlasColors(m: view SkinnedMeshData, atlas: view List(Int),
     i = i + 1
   }
   if width <= 0 or height <= 0 or atlas.length < width * height {
-    ret SkinnedMeshData { verts: own out, indices: own copyIndices(src: m.indices), vertCount: m.vertCount }
+    ret SkinnedMeshData {
+      verts: own out
+      indices: own copyIndices(src: m.indices)
+      vertCount: m.vertCount
+    }
   }
   var v: Int = 0
   loop v < m.vertCount {
@@ -129,10 +153,18 @@ func withAtlasColors(m: view SkinnedMeshData, atlas: view List(Int),
     # rounding on a swatch edge, and wrapping would fetch the colour from
     # the opposite side of the atlas — a vivid wrong pixel instead of the
     # right one.
-    if x < 0 { x = 0 }
-    if y < 0 { y = 0 }
-    if x >= width { x = width - 1 }
-    if y >= height { y = height - 1 }
+    if x < 0 {
+      x = 0
+    }
+    if y < 0 {
+      y = 0
+    }
+    if x >= width {
+      x = width - 1
+    }
+    if y >= height {
+      y = height - 1
+    }
     let px: Int = intAt(list: atlas, index: y * width + x, fallback: 0)
     out.set(index: base + 16, value: srgbToLinear(c: ((px shr 16) bitand 255).toFloat() / 255.0))
     out.set(index: base + 17, value: srgbToLinear(c: ((px shr 8) bitand 255).toFloat() / 255.0))
@@ -140,7 +172,11 @@ func withAtlasColors(m: view SkinnedMeshData, atlas: view List(Int),
     out.set(index: base + 19, value: 1.0)
     v = v + 1
   }
-  ret SkinnedMeshData { verts: own out, indices: own copyIndices(src: m.indices), vertCount: m.vertCount }
+  ret SkinnedMeshData {
+    verts: own out
+    indices: own copyIndices(src: m.indices)
+    vertCount: m.vertCount
+  }
 }
 
 # A skin's skeleton, flattened for per-frame palette evaluation.
@@ -180,9 +216,14 @@ type SkeletonPose {
 
 func emptySkeleton() ret Skeleton {
   ret Skeleton {
-    ok: false, jointNodes: List.create(Int, cap: 0), inverseBind: List.create(Float, cap: 0),
-    nodeCount: 0, parent: List.create(Int, cap: 0), nodeNames: List.create(String, cap: 0),
-    localT: List.create(Float, cap: 0), localR: List.create(Float, cap: 0),
+    ok: false
+    jointNodes: List.create(Int, cap: 0)
+    inverseBind: List.create(Float, cap: 0)
+    nodeCount: 0
+    parent: List.create(Int, cap: 0)
+    nodeNames: List.create(String, cap: 0)
+    localT: List.create(Float, cap: 0)
+    localR: List.create(Float, cap: 0)
     localS: List.create(Float, cap: 0)
   }
 }
@@ -202,10 +243,17 @@ func loadSkeleton(glb: view Glb, skinIndex: view Int) pub ret Skeleton {
   let jointNodes: List(Int) = List.create(Int, cap: jointCount)
   var i: Int = 0
   loop i < jointCount {
-    jointNodes.add(value: jsonInt(this: arrayAt(doc: glb.doc, this: jointsArr, idx: i), fallback: 0))
+    jointNodes.add(
+      value: jsonInt(this: arrayAt(doc: glb.doc, this: jointsArr, idx: i), fallback: 0)
+    )
     i = i + 1
   }
-  let ibmAcc: Int = intField(glb: glb, obj: skin, key: "inverseBindMatrices", fallback: 0 - 1)
+  let ibmAcc: Int = intField(
+    glb: glb
+    obj: skin
+    key: "inverseBindMatrices"
+    fallback: 0 - 1
+  )
   let inverseBind: List(Float) = readFloats(glb: glb, index: ibmAcc)
 
   let nodes: JsonValue = arrayField(glb: glb, obj: root, key: "nodes")
@@ -237,13 +285,19 @@ func loadSkeleton(glb: view Glb, skinIndex: view Int) pub ret Skeleton {
   n = 0
   loop n < nodeCount {
     let node: JsonValue = arrayAt(doc: glb.doc, this: nodes, idx: n)
-    nodeNames.set(index: n, value: jsonString(this: objField(glb: glb, obj: node, key: "name"), fallback: ""))
+    nodeNames.set(
+      index: n
+      value: jsonString(this: objField(glb: glb, obj: node, key: "name"), fallback: "")
+    )
     let tIdx: Int = field(doc: glb.doc, this: node, key: "translation")
     if tIdx >= 0 {
       let tv: JsonValue = valueAt(doc: glb.doc, idx: tIdx)
       var c: Int = 0
       loop c < 3 {
-        localT.set(index: n * 3 + c, value: jsonFloat(this: arrayAt(doc: glb.doc, this: tv, idx: c), fallback: 0.0))
+        localT.set(
+          index: n * 3 + c
+          value: jsonFloat(this: arrayAt(doc: glb.doc, this: tv, idx: c), fallback: 0.0)
+        )
         c = c + 1
       }
     }
@@ -252,7 +306,10 @@ func loadSkeleton(glb: view Glb, skinIndex: view Int) pub ret Skeleton {
       let rv: JsonValue = valueAt(doc: glb.doc, idx: rIdx)
       var c: Int = 0
       loop c < 4 {
-        localR.set(index: n * 4 + c, value: jsonFloat(this: arrayAt(doc: glb.doc, this: rv, idx: c), fallback: 0.0))
+        localR.set(
+          index: n * 4 + c
+          value: jsonFloat(this: arrayAt(doc: glb.doc, this: rv, idx: c), fallback: 0.0)
+        )
         c = c + 1
       }
     }
@@ -261,7 +318,10 @@ func loadSkeleton(glb: view Glb, skinIndex: view Int) pub ret Skeleton {
       let sv: JsonValue = valueAt(doc: glb.doc, idx: sIdx)
       var c: Int = 0
       loop c < 3 {
-        localS.set(index: n * 3 + c, value: jsonFloat(this: arrayAt(doc: glb.doc, this: sv, idx: c), fallback: 1.0))
+        localS.set(
+          index: n * 3 + c
+          value: jsonFloat(this: arrayAt(doc: glb.doc, this: sv, idx: c), fallback: 1.0)
+        )
         c = c + 1
       }
     }
@@ -281,9 +341,15 @@ func loadSkeleton(glb: view Glb, skinIndex: view Int) pub ret Skeleton {
     n = n + 1
   }
   ret Skeleton {
-    ok: true, jointNodes: own jointNodes, inverseBind: own inverseBind,
-    nodeCount: nodeCount, parent: own parent, nodeNames: own nodeNames,
-    localT: own localT, localR: own localR, localS: own localS
+    ok: true
+    jointNodes: own jointNodes
+    inverseBind: own inverseBind
+    nodeCount: nodeCount
+    parent: own parent
+    nodeNames: own nodeNames
+    localT: own localT
+    localR: own localR
+    localS: own localS
   }
 }
 
@@ -331,8 +397,12 @@ func applySkeletonPose(sk: mod Skeleton, pose: view SkeletonPose) {
 # Translation and scale lerp component-wise; rotations use shortest-path SLERP.
 func blendSkeletonPose(sk: mod Skeleton, from: view SkeletonPose, weight: view Float) {
   var amount: Float = weight
-  if amount < 0.0 { amount = 0.0 }
-  if amount > 1.0 { amount = 1.0 }
+  if amount < 0.0 {
+    amount = 0.0
+  }
+  if amount > 1.0 {
+    amount = 1.0
+  }
 
   var index: Int = 0
   loop index < sk.localT.length and index < from.localT.length {
@@ -352,12 +422,16 @@ func blendSkeletonPose(sk: mod Skeleton, from: view SkeletonPose, weight: view F
   var node: Int = 0
   loop node * 4 + 3 < sk.localR.length and node * 4 + 3 < from.localR.length {
     let source: Quat = Quat.create(
-      x: floatAt(list: from.localR, index: node * 4), y: floatAt(list: from.localR, index: node * 4 + 1),
-      z: floatAt(list: from.localR, index: node * 4 + 2), w: floatAt(list: from.localR, index: node * 4 + 3)
+      x: floatAt(list: from.localR, index: node * 4)
+      y: floatAt(list: from.localR, index: node * 4 + 1)
+      z: floatAt(list: from.localR, index: node * 4 + 2)
+      w: floatAt(list: from.localR, index: node * 4 + 3)
     )
     let target: Quat = Quat.create(
-      x: floatAt(list: sk.localR, index: node * 4), y: floatAt(list: sk.localR, index: node * 4 + 1),
-      z: floatAt(list: sk.localR, index: node * 4 + 2), w: floatAt(list: sk.localR, index: node * 4 + 3)
+      x: floatAt(list: sk.localR, index: node * 4)
+      y: floatAt(list: sk.localR, index: node * 4 + 1)
+      z: floatAt(list: sk.localR, index: node * 4 + 2)
+      w: floatAt(list: sk.localR, index: node * 4 + 3)
     )
     let blended: Quat = Quat.slerp(a: source, b: target, t: amount)
     sk.localR.set(index: node * 4, value: blended.x)
@@ -375,20 +449,20 @@ func blendSkeletonPose(sk: mod Skeleton, from: view SkeletonPose, weight: view F
 # node around the parent's origin instead of its own.
 func nodeLocalMatrix(sk: view Skeleton, node: view Int) ret Mat4 {
   let t: Mat4 = mat4Translate(
-    x: floatAt(list: sk.localT, index: node * 3),
-    y: floatAt(list: sk.localT, index: node * 3 + 1),
+    x: floatAt(list: sk.localT, index: node * 3)
+    y: floatAt(list: sk.localT, index: node * 3 + 1)
     z: floatAt(list: sk.localT, index: node * 3 + 2)
   )
   let q: Quat = Quat.create(
-    x: floatAt(list: sk.localR, index: node * 4),
-    y: floatAt(list: sk.localR, index: node * 4 + 1),
-    z: floatAt(list: sk.localR, index: node * 4 + 2),
+    x: floatAt(list: sk.localR, index: node * 4)
+    y: floatAt(list: sk.localR, index: node * 4 + 1)
+    z: floatAt(list: sk.localR, index: node * 4 + 2)
     w: floatAt(list: sk.localR, index: node * 4 + 3)
   )
   let r: Mat4 = Quat.toMat4(q: q)
   let s: Mat4 = mat4ScaleXYZ(
-    x: floatAt(list: sk.localS, index: node * 3),
-    y: floatAt(list: sk.localS, index: node * 3 + 1),
+    x: floatAt(list: sk.localS, index: node * 3)
+    y: floatAt(list: sk.localS, index: node * 3 + 1)
     z: floatAt(list: sk.localS, index: node * 3 + 2)
   )
   ret mat4Mul(a: t, b: mat4Mul(a: r, b: s))
@@ -439,7 +513,10 @@ func buildPaletteInto(sk: view Skeleton, out: mod List(Float)) pub {
   }
   var j: Int = 0
   loop j < sk.jointNodes.length {
-    let world: Mat4 = nodeWorldMatrix(sk: sk, node: intAt(list: sk.jointNodes, index: j, fallback: 0))
+    let world: Mat4 = nodeWorldMatrix(
+      sk: sk
+      node: intAt(list: sk.jointNodes, index: j, fallback: 0)
+    )
     var ib: Mat4 = mat4Identity()
     if sk.inverseBind.length >= (j + 1) * 16 {
       var c: Int = 0
@@ -473,12 +550,14 @@ func jointCount(sk: view Skeleton) pub ret Int {
 }
 
 # ----- animation clips (#376) ------------------------------------------
-
 const pathTranslation: Int = 0
+
 const pathRotation: Int = 1
+
 const pathScale: Int = 2
 
 const interpLinear: Int = 0
+
 const interpStep: Int = 1
 
 # One animation, flattened into parallel arrays.
@@ -504,11 +583,17 @@ type Clip {
 
 func emptyClip() ret Clip {
   ret Clip {
-    ok: false, name: "", duration: 0.0,
-    targetNode: List.create(Int, cap: 0), path: List.create(Int, cap: 0),
-    interp: List.create(Int, cap: 0), timeStart: List.create(Int, cap: 0),
-    timeCount: List.create(Int, cap: 0), times: List.create(Float, cap: 0),
-    valueStart: List.create(Int, cap: 0), values: List.create(Float, cap: 0)
+    ok: false
+    name: ""
+    duration: 0.0
+    targetNode: List.create(Int, cap: 0)
+    path: List.create(Int, cap: 0)
+    interp: List.create(Int, cap: 0)
+    timeStart: List.create(Int, cap: 0)
+    timeCount: List.create(Int, cap: 0)
+    times: List.create(Float, cap: 0)
+    valueStart: List.create(Int, cap: 0)
+    values: List.create(Float, cap: 0)
   }
 }
 
@@ -518,7 +603,9 @@ func nodeByName(sk: view Skeleton, name: view String) ret Int {
   var i: Int = 0
   loop i < sk.nodeNames.length {
     if let nodeName: String = sk.nodeNames.copyAt(index: i) {
-      if nodeName is name { ret i }
+      if nodeName is name {
+        ret i
+      }
     }
     i = i + 1
   }
@@ -567,32 +654,71 @@ func loadClip(glb: view Glb, animIndex: view Int, sk: view Skeleton) pub ret Cli
   loop c < arrayLen(this: channels) {
     let ch: JsonValue = arrayAt(doc: glb.doc, this: channels, idx: c)
     let target: JsonValue = objField(glb: glb, obj: ch, key: "target")
-    let clipNode: Int = intField(glb: glb, obj: target, key: "node", fallback: 0 - 1)
-    let pathName: String = jsonString(this: objField(glb: glb, obj: target, key: "path"), fallback: "")
+    let clipNode: Int = intField(
+      glb: glb
+      obj: target
+      key: "node"
+      fallback: 0 - 1
+    )
+    let pathName: String = jsonString(
+      this: objField(glb: glb, obj: target, key: "path")
+      fallback: ""
+    )
     var p: Int = 0 - 1
-    if pathName is "translation" { p = pathTranslation }
-    if pathName is "rotation" { p = pathRotation }
-    if pathName is "scale" { p = pathScale }
+    if pathName is "translation" {
+      p = pathTranslation
+    }
+    if pathName is "rotation" {
+      p = pathRotation
+    }
+    if pathName is "scale" {
+      p = pathScale
+    }
     # "weights" targets morph targets, which this loader does not do. Skip
     # rather than misinterpret it as a transform channel.
     if p >= 0 and clipNode >= 0 {
       let clipNodeObj: JsonValue = arrayAt(doc: glb.doc, this: nodes, idx: clipNode)
-      let clipName: String = jsonString(this: objField(glb: glb, obj: clipNodeObj, key: "name"), fallback: "")
+      let clipName: String = jsonString(
+        this: objField(glb: glb, obj: clipNodeObj, key: "name")
+        fallback: ""
+      )
       let skNode: Int = nodeByName(sk: sk, name: clipName)
       if skNode >= 0 {
-        let samplerIdx: Int = intField(glb: glb, obj: ch, key: "sampler", fallback: 0 - 1)
+        let samplerIdx: Int = intField(
+          glb: glb
+          obj: ch
+          key: "sampler"
+          fallback: 0 - 1
+        )
         let sampler: JsonValue = arrayAt(doc: glb.doc, this: samplers, idx: samplerIdx)
-        let interpName: String = jsonString(this: objField(glb: glb, obj: sampler, key: "interpolation"), fallback: "LINEAR")
+        let interpName: String = jsonString(
+          this: objField(glb: glb, obj: sampler, key: "interpolation")
+          fallback: "LINEAR"
+        )
         var ip: Int = interpLinear
-        if interpName is "STEP" { ip = interpStep }
+        if interpName is "STEP" {
+          ip = interpStep
+        }
         # CUBICSPLINE stores tangents either side of each value, so a
         # LINEAR read of it would treat tangents as keyframes. Falling
         # back to STEP is visibly wrong rather than subtly wrong, which is
         # the right failure for a format this loader does not implement.
-        if interpName is "CUBICSPLINE" { ip = interpStep }
+        if interpName is "CUBICSPLINE" {
+          ip = interpStep
+        }
 
-        let inAcc: Int = intField(glb: glb, obj: sampler, key: "input", fallback: 0 - 1)
-        let outAcc: Int = intField(glb: glb, obj: sampler, key: "output", fallback: 0 - 1)
+        let inAcc: Int = intField(
+          glb: glb
+          obj: sampler
+          key: "input"
+          fallback: 0 - 1
+        )
+        let outAcc: Int = intField(
+          glb: glb
+          obj: sampler
+          key: "output"
+          fallback: 0 - 1
+        )
         let t: List(Float) = readFloats(glb: glb, index: inAcc)
         let v: List(Float) = readFloats(glb: glb, index: outAcc)
         if t.length > 0 and v.length > 0 {
@@ -621,10 +747,17 @@ func loadClip(glb: view Glb, animIndex: view Int, sk: view Skeleton) pub ret Cli
     c = c + 1
   }
   ret Clip {
-    ok: true, name: "{name}", duration: duration,
-    targetNode: own targetNode, path: own pathList, interp: own interpList,
-    timeStart: own timeStart, timeCount: own timeCount, times: own times,
-    valueStart: own valueStart, values: own values
+    ok: true
+    name: "{name}"
+    duration: duration
+    targetNode: own targetNode
+    path: own pathList
+    interp: own interpList
+    timeStart: own timeStart
+    timeCount: own timeCount
+    times: own times
+    valueStart: own valueStart
+    values: own values
   }
 }
 
@@ -677,18 +810,26 @@ func applyClip(sk: mod Skeleton, c: view Clip, time: view Float) pub {
     var alpha: Float = 0.0
     if intAt(list: c.interp, index: ci, fallback: interpStep) is interpLinear and t1 > t0 {
       alpha = (t - t0) / (t1 - t0)
-      if alpha < 0.0 { alpha = 0.0 }
-      if alpha > 1.0 { alpha = 1.0 }
+      if alpha < 0.0 {
+        alpha = 0.0
+      }
+      if alpha > 1.0 {
+        alpha = 1.0
+      }
     }
 
     if p is pathRotation {
       let qa: Quat = Quat.create(
-        x: floatAt(list: c.values, index: vs + k * 4), y: floatAt(list: c.values, index: vs + k * 4 + 1),
-        z: floatAt(list: c.values, index: vs + k * 4 + 2), w: floatAt(list: c.values, index: vs + k * 4 + 3)
+        x: floatAt(list: c.values, index: vs + k * 4)
+        y: floatAt(list: c.values, index: vs + k * 4 + 1)
+        z: floatAt(list: c.values, index: vs + k * 4 + 2)
+        w: floatAt(list: c.values, index: vs + k * 4 + 3)
       )
       let qb: Quat = Quat.create(
-        x: floatAt(list: c.values, index: vs + k1 * 4), y: floatAt(list: c.values, index: vs + k1 * 4 + 1),
-        z: floatAt(list: c.values, index: vs + k1 * 4 + 2), w: floatAt(list: c.values, index: vs + k1 * 4 + 3)
+        x: floatAt(list: c.values, index: vs + k1 * 4)
+        y: floatAt(list: c.values, index: vs + k1 * 4 + 1)
+        z: floatAt(list: c.values, index: vs + k1 * 4 + 2)
+        w: floatAt(list: c.values, index: vs + k1 * 4 + 3)
       )
       # SLERP, not a component-wise lerp. Lerping quaternions shortens the
       # result, which shows up as limbs subtly shrinking mid-swing, and it

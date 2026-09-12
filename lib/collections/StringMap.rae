@@ -1,6 +1,5 @@
 # collections/StringMap.rae — StringMap(V), an open-addressing string-keyed map.
 # A collections-package module: NOT in the prelude — `import collections/StringMap`.
-
 type StringMapEntry(V: type) {
   k: String
   value: V
@@ -16,7 +15,12 @@ type StringMap(V: type) {
 
 func createStringMap(V: type, cap: view Int) ret StringMap(V) {
   unsafe {
-    ret StringMap(V) { data: rae_ext_rae_buf_alloc(size: cap, elemSize: sizeof(StringMapEntry(V))), length: 0, cap: cap, isGrowing: false }
+    ret StringMap(V) {
+      data: rae_ext_rae_buf_alloc(size: cap, elemSize: sizeof(StringMapEntry(V)))
+      length: 0
+      cap: cap
+      isGrowing: false
+    }
   }
 }
 
@@ -25,7 +29,12 @@ func create(V: type, cap: view Int) ret StringMap(V) {
   ret StringMap.create(V, cap: cap)
 }
 
-func set(V: type, this: mod StringMap(V), k: view String, value: own V) {
+func set(
+  V: type
+  this: mod StringMap(V)
+  k: view String
+  value: own V
+) {
   unsafe {
     if this.cap is 0 {
       this.cap = 8
@@ -50,7 +59,11 @@ func set(V: type, this: mod StringMap(V), k: view String, value: own V) {
         # (Phase 2) does this automatically for non-generic structs
         # but not yet for generic StringMapEntry(V).
         let keyCopy: String = rae_ext_rae_string_copy(s: k)
-        rae_ext_rae_buf_set(buf: this.data, index: idx, value: { k: keyCopy, value: value, occupied: true })
+        rae_ext_rae_buf_set(
+          buf: this.data
+          index: idx
+          value: { k: keyCopy, value: value, occupied: true }
+        )
         this.length = this.length + 1
         ret
       }
@@ -234,7 +247,7 @@ func growStringMap(V: type, this: mod StringMap(V)) {
     }
     this.data = rae_ext_rae_buf_alloc(size: this.cap, elemSize: sizeof(StringMapEntry(V)))
     this.length = 0
-  
+
     var i: Int = 0
     loop i < oldCap {
       let entry: StringMapEntry(V) = rae_ext_rae_buf_get(buf: oldData, index: i)

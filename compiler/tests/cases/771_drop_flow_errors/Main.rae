@@ -16,13 +16,13 @@ func afterBranch(flag: view Bool) {
   if flag {
     slot.drop()
   }
-  log("{slot.id}")           # ERROR: dropped on the `flag` path
+  log("{slot.id}")  # ERROR: dropped on the `flag` path
 }
 
 func nextIteration() {
   var slot: Slot = create(id: 2)
   loop var i: Int = 0, i < 2, ++i {
-    log("{slot.id}")         # ERROR: dropped at the end of the previous iteration
+    log("{slot.id}")  # ERROR: dropped at the end of the previous iteration
     slot.drop()
   }
 }
@@ -30,14 +30,14 @@ func nextIteration() {
 func twice() {
   var slot: Slot = create(id: 3)
   slot.drop()
-  slot.drop()                # ERROR: dropping a dropped value is a use
+  slot.drop()  # ERROR: dropping a dropped value is a use
 }
 
 func fine(flag: view Bool) {
   var slot: Slot = create(id: 4)
   if flag {
     slot.drop()
-    slot = create(id: 5)     # reinitialised on that path: no error below
+    slot = create(id: 5)  # reinitialised on that path: no error below
   }
   log("{slot.id}")
 }

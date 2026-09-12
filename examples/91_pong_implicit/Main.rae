@@ -8,9 +8,13 @@ open ui/renderSystem/RenderSystem
 open Gpu2dCanvas
 
 const fieldW: Float = 800.0
+
 const fieldH: Float = 450.0
+
 const paddleW: Float = 20.0
+
 const paddleH: Float = 100.0
+
 const ballRadius: Float = 10.0
 
 type PaddleTransform {
@@ -43,9 +47,10 @@ func paddleCollisionSystem(
   paddlePosition: view PaddleTransform
   leftSide: view Bool
 ) {
-  let insideY: Bool = ballPosition.y > paddlePosition.y and
-    ballPosition.y < paddlePosition.y + paddleH
-  if insideY is false { ret }
+  let insideY: Bool = ballPosition.y > paddlePosition.y and ballPosition.y < paddlePosition.y + paddleH
+  if insideY is false {
+    ret
+  }
 
   if leftSide {
     if ballPosition.x - ballRadius < paddlePosition.x + paddleW and ballVelocity.dx < 0.0 {
@@ -66,8 +71,12 @@ func paddleInputSystem(position: mod PaddleTransform, deltaTime: view Float) {
   if Sdl3.isKeyDown(key: Keys.keyS) or Sdl3.isKeyDown(key: Keys.keyDown) {
     position.y = position.y + speed * deltaTime
   }
-  if position.y < 0.0 { position.y = 0.0 }
-  if position.y > fieldH - paddleH { position.y = fieldH - paddleH }
+  if position.y < 0.0 {
+    position.y = 0.0
+  }
+  if position.y > fieldH - paddleH {
+    position.y = fieldH - paddleH
+  }
 }
 
 func drawGame(
@@ -76,22 +85,53 @@ func drawGame(
   cpuPosition: view PaddleTransform
   ballPosition: view PaddleTransform
 ) {
-  Gpu2d.drawGradientRect(canvas: canvas, 
-    x: 0.0, y: 0.0, w: fieldW, h: fieldH, radius: 0.0
-    from: 0xFF101622, to: 0xFF071019, angleDeg: 90.0)
-  Gpu2d.drawRoundedRect(canvas: canvas, 
-    x: fieldW * 0.5 - 2.0, y: 78.0, w: 4.0, h: fieldH - 100.0
-    radius: 2.0, color: 0x4458E0D0)
-  Gpu2d.drawRoundedRect(canvas: canvas, 
-    x: playerPosition.x, y: playerPosition.y, w: paddleW, h: paddleH
-    radius: 10.0, color: 0xFFF4F8FF)
-  Gpu2d.drawRoundedRect(canvas: canvas, 
-    x: cpuPosition.x, y: cpuPosition.y, w: paddleW, h: paddleH
-    radius: 10.0, color: 0xFFF4F8FF)
-  Gpu2d.drawRoundedRect(canvas: canvas, 
-    x: ballPosition.x - ballRadius, y: ballPosition.y - ballRadius
-    w: ballRadius * 2.0, h: ballRadius * 2.0
-    radius: ballRadius, color: 0xFF19E6D0)
+  Gpu2d.drawGradientRect(
+    canvas: canvas
+    x: 0.0
+    y: 0.0
+    w: fieldW
+    h: fieldH
+    radius: 0.0
+    from: 0xFF101622
+    to: 0xFF071019
+    angleDeg: 90.0
+  )
+  Gpu2d.drawRoundedRect(
+    canvas: canvas
+    x: fieldW * 0.5 - 2.0
+    y: 78.0
+    w: 4.0
+    h: fieldH - 100.0
+    radius: 2.0
+    color: 0x4458E0D0
+  )
+  Gpu2d.drawRoundedRect(
+    canvas: canvas
+    x: playerPosition.x
+    y: playerPosition.y
+    w: paddleW
+    h: paddleH
+    radius: 10.0
+    color: 0xFFF4F8FF
+  )
+  Gpu2d.drawRoundedRect(
+    canvas: canvas
+    x: cpuPosition.x
+    y: cpuPosition.y
+    w: paddleW
+    h: paddleH
+    radius: 10.0
+    color: 0xFFF4F8FF
+  )
+  Gpu2d.drawRoundedRect(
+    canvas: canvas
+    x: ballPosition.x - ballRadius
+    y: ballPosition.y - ballRadius
+    w: ballRadius * 2.0
+    h: ballRadius * 2.0
+    radius: ballRadius
+    color: 0xFF19E6D0
+  )
 }
 
 func runPhysicsSelfTest() ret Bool {
@@ -99,34 +139,41 @@ func runPhysicsSelfTest() ret Bool {
   var velocity: Velocity = { dx: 240.0, dy: 0.0 - 240.0 }
   movementSystem(position: position, velocity: velocity, deltaTime: 0.02)
   bounceSystem(position: position, velocity: velocity)
-  if velocity.dy <= 0.0 { ret false }
+  if velocity.dy <= 0.0 {
+    ret false
+  }
 
   let paddle: PaddleTransform = { x: 20.0, y: 175.0 }
   position = { x: 29.0, y: 225.0 }
   velocity = { dx: 0.0 - 240.0, dy: 0.0 }
   paddleCollisionSystem(
-    ballPosition: position, ballVelocity: velocity
-    paddlePosition: paddle, leftSide: true)
+    ballPosition: position
+    ballVelocity: velocity
+    paddlePosition: paddle
+    leftSide: true
+  )
   ret velocity.dx > 0.0
 }
 
 func main() ret Int {
   Gpu2d.initWindow(width: fieldW.toInt(), height: fieldH.toInt(), title: "Rae Pong — GPU2D")
-  var canvas: Gpu2dCanvas = createGpu2dCanvas()   # #907: the app-owned 2D canvas (box + image passes)
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()  # #907: the app-owned 2D canvas (box + image passes)
   Gpu2d.setDesignResolution(width: fieldW, height: fieldH, fit: 0)
 
   let uiResources: Gpu2dUi = loadUiAssets(
     dir: "examples/104_ui_hello/assets/"
     textFontName: "Roboto-Regular"
     iconFontName: ""
-    themeFile: "theme.raescene")
+    themeFile: "theme.raescene"
+  )
   var world: UiWorld = create()
   # #764: install the app's theme (palette + scene tokens) onto this world.
   seedWorldTheme(world: world, res: uiResources)
   let uiRoot: EntityId = mountUiScene(
     world: world
     path: "examples/91_pong_implicit/assets/ui.raescene"
-    res: uiResources)
+    res: uiResources
+  )
 
   var playerPosition: PaddleTransform = { x: 20.0, y: 175.0 }
   var cpuPosition: PaddleTransform = { x: 760.0, y: 175.0 }
@@ -157,7 +204,9 @@ func main() ret Int {
     let now: Float64 = Gpu2d.nowSeconds()
     var deltaTime: Float = (now - previousTime) as Float
     previousTime = now
-    if deltaTime > 0.05 { deltaTime = 0.05 }
+    if deltaTime > 0.05 {
+      deltaTime = 0.05
+    }
 
     if testMode is false and Sdl3.isKeyPressed(key: Keys.keyR) {
       playerPosition = { x: 20.0, y: 175.0 }
@@ -173,16 +222,26 @@ func main() ret Int {
     if testMode is false and winner is 0 {
       paddleInputSystem(position: playerPosition, deltaTime: deltaTime)
       cpuPosition.y = paddleAiSystem(
-        ai: aiState, ballPosition: ballPosition, ballVelocity: ballVelocity
-        paddleY: cpuPosition.y, deltaTime: deltaTime)
+        ai: aiState
+        ballPosition: ballPosition
+        ballVelocity: ballVelocity
+        paddleY: cpuPosition.y
+        deltaTime: deltaTime
+      )
       movementSystem(position: ballPosition, velocity: ballVelocity, deltaTime: deltaTime)
       bounceSystem(position: ballPosition, velocity: ballVelocity)
       paddleCollisionSystem(
-        ballPosition: ballPosition, ballVelocity: ballVelocity
-        paddlePosition: playerPosition, leftSide: true)
+        ballPosition: ballPosition
+        ballVelocity: ballVelocity
+        paddlePosition: playerPosition
+        leftSide: true
+      )
       paddleCollisionSystem(
-        ballPosition: ballPosition, ballVelocity: ballVelocity
-        paddlePosition: cpuPosition, leftSide: false)
+        ballPosition: ballPosition
+        ballVelocity: ballVelocity
+        paddlePosition: cpuPosition
+        leftSide: false
+      )
 
       if ballPosition.x < 0.0 {
         cpuScore = cpuScore + 1
@@ -194,8 +253,12 @@ func main() ret Int {
         ballPosition = { x: 400.0, y: 225.0 }
         ballVelocity.dx = 0.0 - 240.0
       }
-      if playerScore >= 3 { winner = 1 }
-      if cpuScore >= 3 { winner = 2 }
+      if playerScore >= 3 {
+        winner = 1
+      }
+      if cpuScore >= 3 {
+        winner = 2
+      }
     }
 
     if playerScore is not displayedPlayerScore or cpuScore is not displayedCpuScore {
@@ -204,19 +267,32 @@ func main() ret Int {
       displayedCpuScore = cpuScore
     }
     if winner is not displayedWinner {
-      if winner is 0 { setNodeText(world: world, nodeId: "WinnerText", value: "") }
-      if winner is 1 { setNodeText(world: world, nodeId: "WinnerText", value: "YOU WIN") }
-      if winner is 2 { setNodeText(world: world, nodeId: "WinnerText", value: "CPU WINS") }
+      if winner is 0 {
+        setNodeText(world: world, nodeId: "WinnerText", value: "")
+      }
+      if winner is 1 {
+        setNodeText(world: world, nodeId: "WinnerText", value: "YOU WIN")
+      }
+      if winner is 2 {
+        setNodeText(world: world, nodeId: "WinnerText", value: "CPU WINS")
+      }
       displayedWinner = winner
     }
     runUiSystems(world: world, res: uiResources)
 
-    Gpu2d.beginFrame(canvas: canvas, r: 0.03, g: 0.05, b: 0.08, a: 1.0)
+    Gpu2d.beginFrame(
+      canvas: canvas
+      r: 0.03
+      g: 0.05
+      b: 0.08
+      a: 1.0
+    )
     drawGame(
       canvas: canvas
       playerPosition: playerPosition
       cpuPosition: cpuPosition
-      ballPosition: ballPosition)
+      ballPosition: ballPosition
+    )
     renderSystemGpu2d(world: world, res: uiResources, canvas: canvas)
     Gpu2d.endFrame(canvas: canvas)
   }

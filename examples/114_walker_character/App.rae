@@ -102,7 +102,7 @@ type InputSystem {
   gpuUi: Gpu2dUi
   clipPanel: ControlPanel
   transport: ControlPanel
-  charPanel: ControlPanel   # prev/next character-switch buttons (#546)
+  charPanel: ControlPanel  # prev/next character-switch buttons (#546)
   settings: SettingsState
   panelScroll: EntityId
   dbg: DebugOverlay
@@ -169,45 +169,67 @@ type App {
   terrainSystem: TerrainSystem
   grassSystem: GrassSystem
   renderSystem: RenderSystem
-  profiler: Profiler   # #764: was lib/profile.rae gProf* globals
-  grassCompute: GrassCompute   # #764: was lib/GrassCompute.rae gGrass* globals
-  physicsSystem: PhysicsSystem   # fixed-step sim seam (physics.rae, #553)
-  netSystem: NetSystem           # multiplayer seam (net.rae, #554)
-  players: PlayerRoster   # who the local player controls (players.rae, #546)
+  profiler: Profiler  # #764: was lib/profile.rae gProf* globals
+  grassCompute: GrassCompute  # #764: was lib/GrassCompute.rae gGrass* globals
+  physicsSystem: PhysicsSystem  # fixed-step sim seam (physics.rae, #553)
+  netSystem: NetSystem  # multiplayer seam (net.rae, #554)
+  players: PlayerRoster  # who the local player controls (players.rae, #546)
   persist: PersistState
-  splashes: ParticleSystem   # water-splash droplets when the character wades (splash.rae, #84)
-  waterSystem: WaterSystem   # the toon lake at the biome water plane (lib/water, #830)
-  idIssuer: IdIssuer         # the root's shared ID issuer (#869)
-  gpuResources: opt GpuResources   # the App-owned GPU manager water's IDs live in (#873)
+  splashes: ParticleSystem  # water-splash droplets when the character wades (splash.rae, #84)
+  waterSystem: WaterSystem  # the toon lake at the biome water plane (lib/water, #830)
+  idIssuer: IdIssuer  # the root's shared ID issuer (#869)
+  gpuResources: opt GpuResources  # the App-owned GPU manager water's IDs live in (#873)
   ok: Bool
 }
 
 # ----- setup ---------------------------------------------------------------
 func createApp() ret App {
   unsafe {
-    Gpu2d.initWindow(width: 1280, height: 800, title: "Rae 3D — walker character (animated) [{rendererPathName()}]")
+    Gpu2d.initWindow(
+      width: 1280
+      height: 800
+      title: "Rae 3D — walker character (animated) [{rendererPathName()}]"
+    )
     var idIssuer: IdIssuer = IdIssuer.create()
     var windowGeom: WindowGeometry = createWindowGeometry(
-      dir: dir(), name: "window.{state114AppId}.geometry")
+      dir: dir()
+      name: "window.{state114AppId}.geometry"
+    )
     restoreWindowGeometry(g: windowGeom)
     let extentW: Float = windowExtentW()
     let extentH: Float = windowExtentH()
     Gpu2d.setDesignResolution(width: extentW, height: extentH, fit: 0)
 
     var moveStick: VirtualJoystick = createVirtualJoystick(
-      padFracX: 0.06, padFracY: 0.11, radiusFrac: 0.14)
+      padFracX: 0.06
+      padFracY: 0.11
+      radiusFrac: 0.14
+    )
 
     let assets: String = "examples/114_walker_character/assets/"
-    let gpuUi: Gpu2dUi = loadUiAssets(dir: assets, textFontName: "Roboto-Regular",
-                                      iconFontName: "", themeFile: "theme.raescene")
+    let gpuUi: Gpu2dUi = loadUiAssets(
+      dir: assets
+      textFontName: "Roboto-Regular"
+      iconFontName: ""
+      themeFile: "theme.raescene"
+    )
     var uiWorld: UiWorld = create()
     # #764: install the app's theme (palette + scene tokens) onto this world.
     seedWorldTheme(world: uiWorld, res: gpuUi)
     let uiRoot: EntityId = mountUiScene(world: uiWorld, path: "{assets}ui.raescene", res: gpuUi)
     var uiInput: UiInput = createUiInput()
-    var logView: LogOverlay = createLogOverlay(capacity: 64, maxLines: 8, anchor: logAnchorBottomLeft, fontSize: 14.0)
-    var dbg: DebugOverlay = createDebugOverlay(button: true, fps: true,
-                                               memory: true, heartbeat: true)
+    var logView: LogOverlay = createLogOverlay(
+      capacity: 64
+      maxLines: 8
+      anchor: logAnchorBottomLeft
+      fontSize: 14.0
+    )
+    var dbg: DebugOverlay = createDebugOverlay(
+      button: true
+      fps: true
+      memory: true
+      heartbeat: true
+    )
     let reloadGen: Int = nextReloadGeneration()
     logInfoLine(ov: logView, text: "hot reload {reloadGen}")
 
@@ -253,7 +275,11 @@ func createApp() ret App {
     let walkClip: Clip = loadClip(glb: walkGlb, animIndex: 0, sk: sk)
     let runClip: Clip = loadClip(glb: runGlb, animIndex: 0, sk: sk)
     let bindPose: SkeletonPose = captureSkeletonPose(sk: sk)
-    log("[anim] idle {clipChannelCount(c: idleClip)} ch / {idleClip.duration}s, walk {clipChannelCount(c: walkClip)} ch / {walkClip.duration}s, run {clipChannelCount(c: runClip)} ch / {runClip.duration}s")
+    log(
+      "[anim] idle {clipChannelCount(c: idleClip)} ch / {idleClip.duration}s, walk {clipChannelCount(
+        c: walkClip
+      )} ch / {walkClip.duration}s, run {clipChannelCount(c: runClip)} ch / {runClip.duration}s"
+    )
 
     var emptyWorld: World3d = create()
     let groundZ: Float = 0.0 - 1.0
@@ -267,21 +293,29 @@ func createApp() ret App {
     # (T*R*S) matches the old modelMatrix for this single-axis case exactly.
     let partTransform: Transform3D = {
       position: Vec3.create(
-        x: 0.0 - midX * modelScale,
-        y: 0.0 - midZ * modelScale,
+        x: 0.0 - midX * modelScale
+        y: 0.0 - midZ * modelScale
         z: groundZ - footY * modelScale
-      ),
-      rotation: Quat.fromAxisAngle(axis: Vec3.create(x: 1.0, y: 0.0, z: 0.0), angle: 1.5707963),
+      )
+      rotation: Quat.fromAxisAngle(axis: Vec3.create(x: 1.0, y: 0.0, z: 0.0), angle: 1.5707963)
       scale: Vec3.create(x: modelScale, y: modelScale, z: modelScale)
     }
     let basePartModel: Mat4 = transform3dToMatrix(t: partTransform)
     groundWalker(controller: characterController, groundZ: groundZ)
-    var partModel: Mat4 = walkerWorldModel(baseModel: basePartModel, controller: characterController)
+    var partModel: Mat4 = walkerWorldModel(
+      baseModel: basePartModel
+      controller: characterController
+    )
 
     let pngBytes: List(Int) = Sys.readFileBytes(path: "{assets}walker_palette.png")
     var atlasW: Int = 0
     var atlasH: Int = 0
-    let atlas: List(Int) = decodePng(png: pngBytes, len: pngBytes.length, width: atlasW, height: atlasH)
+    let atlas: List(Int) = decodePng(
+      png: pngBytes
+      len: pngBytes.length
+      width: atlasW
+      height: atlasH
+    )
     if atlasW is 0 {
       log("[png] walker_palette.png did not decode — parts will render untinted")
     } else {
@@ -303,13 +337,24 @@ func createApp() ret App {
       loop var pi: Int = 0, pi < primitiveCount(glb: g, meshIndex: mi), ++pi {
         let raw: SkinnedMeshData = loadSkinnedPrimitive(glb: g, meshIndex: mi, primIndex: pi)
         if raw.vertCount > 0 {
-          let part: SkinnedMeshData = withAtlasColors(m: raw, atlas: atlas, width: atlasW, height: atlasH)
-          let handle: MeshHandle = uploadSkinnedMesh(verts: part.verts, vertCount: part.vertCount, indices: part.indices)
+          let part: SkinnedMeshData = withAtlasColors(
+            m: raw
+            atlas: atlas
+            width: atlasW
+            height: atlasH
+          )
+          let handle: MeshHandle = uploadSkinnedMesh(
+            verts: part.verts
+            vertCount: part.vertCount
+            indices: part.indices
+          )
           if meshHandleIsValid(h: handle) {
             let partEntity: EntityId = gameWorldAddEntity(world: gameWorld)
-            gameWorldSetPartRoughness(world: gameWorld, entity: partEntity, part: PartRoughness {
-              meshId: handle.id, roughness: rough
-            })
+            gameWorldSetPartRoughness(
+              world: gameWorld
+              entity: partEntity
+              part: PartRoughness { meshId: handle.id, roughness: rough }
+            )
             if haveFirstPart is false {
               firstPartId = handle.id
               haveFirstPart = true
@@ -326,7 +371,11 @@ func createApp() ret App {
       Sys.exit(code: 1)
     }
 
-    var terrainSystem: TerrainSystem = createTerrainSystem(world: gameWorld, assets: assets, groundZ: groundZ)
+    var terrainSystem: TerrainSystem = createTerrainSystem(
+      world: gameWorld
+      assets: assets
+      groundZ: groundZ
+    )
     var grass: GrassSystem = createGrassSystem(world: gameWorld, assets: assets, groundZ: groundZ)
 
     let cloneCount: Int = 5
@@ -339,12 +388,13 @@ func createApp() ret App {
     let hosekData: HosekDataset = loadDefaultHosekDataset()
     camera.target = Vec3.create(x: 0.0, y: 0.0, z: groundZ + targetHeight * 0.5)
 
-    var renderer: DeferredRenderer = createDeferredRendererWithUiSky(
-      sky: createSkyStylised(
-        sunDir: light.sunDir, sunColor: light.sunColor,
-        zenith: Vec3.create(x: 0.16, y: 0.34, z: 0.62),
-        horizon: Vec3.create(x: 0.74, y: 0.80, z: 0.72),
-        bands: 3.0))
+    var renderer: DeferredRenderer = createDeferredRendererWithUiSky(sky: createSkyStylised(
+      sunDir: light.sunDir
+      sunColor: light.sunColor
+      zenith: Vec3.create(x: 0.16, y: 0.34, z: 0.62)
+      horizon: Vec3.create(x: 0.74, y: 0.80, z: 0.72)
+      bands: 3.0
+    ))
     let gs: Int = compileDeferred(renderer: renderer)
     if gs is not 0 {
       log("render graph invalid: {statusName(status: gs)}")
@@ -361,7 +411,10 @@ func createApp() ret App {
     rig.minDistance = 1.2
     rig.maxDistance = 20.0
     rig.wheelSpeed = 0.4
-    camera.target = thirdPersonCameraTarget(controller: characterController, focusZ: characterFocusZ)
+    camera.target = thirdPersonCameraTarget(
+      controller: characterController
+      focusZ: characterFocusZ
+    )
     snapCameraRigView(rig: rig)
     # Screenshot camera (#857): RAE_WALKER_CAMERA holds the twelve space-separated
     # values of CameraRig.stateString, so a headless frame can look at the river
@@ -369,7 +422,12 @@ func createApp() ret App {
     let cameraOverride: String = Sys.getEnv(name: "RAE_WALKER_CAMERA")
     if cameraOverride.length() > 0 {
       let overrideParts: List(String) = cameraOverride.split(sep: " ")
-      if applyCameraRigState(parts: overrideParts, offset: 0, rig: rig, camera: camera) {
+      if applyCameraRigState(
+        parts: overrideParts
+        offset: 0
+        rig: rig
+        camera: camera
+      ) {
         log("[camera] RAE_WALKER_CAMERA applied: {cameraOverride}")
       }
     }
@@ -383,10 +441,34 @@ func createApp() ret App {
     var toonShading: Bool = true
 
     var clipPanel: ControlPanel = createControlPanel(hostNodeId: "ClipRow")
-    addPanelButton(panel: clipPanel, id: "idle", label: "Idle", actionId: "clip.idle", group: 1)
-    addPanelButton(panel: clipPanel, id: "walk", label: "Walk", actionId: "clip.walk", group: 1)
-    addPanelButton(panel: clipPanel, id: "walkFast", label: "Walk fast", actionId: "clip.walkFast", group: 1)
-    addPanelButton(panel: clipPanel, id: "run", label: "Run", actionId: "clip.run", group: 1)
+    addPanelButton(
+      panel: clipPanel
+      id: "idle"
+      label: "Idle"
+      actionId: "clip.idle"
+      group: 1
+    )
+    addPanelButton(
+      panel: clipPanel
+      id: "walk"
+      label: "Walk"
+      actionId: "clip.walk"
+      group: 1
+    )
+    addPanelButton(
+      panel: clipPanel
+      id: "walkFast"
+      label: "Walk fast"
+      actionId: "clip.walkFast"
+      group: 1
+    )
+    addPanelButton(
+      panel: clipPanel
+      id: "run"
+      label: "Run"
+      actionId: "clip.run"
+      group: 1
+    )
     buildControlPanel(panel: clipPanel, world: uiWorld, res: gpuUi)
 
     var transport: ControlPanel = createControlPanel(hostNodeId: "TransportRow")
@@ -397,20 +479,47 @@ func createApp() ret App {
     # the same as Page Up/Down and keys 1/2. Momentary (group 0), not a selection.
     var charPanel: ControlPanel = createControlPanel(hostNodeId: "CharacterRow")
     charPanel.buttonW = 84.0
-    addPanelButton(panel: charPanel, id: "prev", label: "< Prev", actionId: "char.prev", group: 0)
-    addPanelButton(panel: charPanel, id: "next", label: "Next >", actionId: "char.next", group: 0)
+    addPanelButton(
+      panel: charPanel
+      id: "prev"
+      label: "< Prev"
+      actionId: "char.prev"
+      group: 0
+    )
+    addPanelButton(
+      panel: charPanel
+      id: "next"
+      label: "Next >"
+      actionId: "char.next"
+      group: 0
+    )
     buildControlPanel(panel: charPanel, world: uiWorld, res: gpuUi)
-    setNodeText(world: uiWorld, nodeId: "CharacterReadout", value: "Controlling 1 / {1 + cloneCount}")
+    setNodeText(
+      world: uiWorld
+      nodeId: "CharacterReadout"
+      value: "Controlling 1 / {1 + cloneCount}"
+    )
 
-    let headless: Bool = Sys.getEnv(name: "RAE_SDL_HEADLESS_MS").length() > 0
-      or Sys.getEnv(name: "RAE_HEADLESS_FRAMES").length() > 0
+    let headless: Bool = Sys.getEnv(name: "RAE_SDL_HEADLESS_MS").length() > 0 or Sys.getEnv(
+      name: "RAE_HEADLESS_FRAMES"
+    ).length() > 0
     if not headless {
       let saved: String = readHotReloadStateFor(appId: state114AppId)
-      if restore114State(raw: saved, clipIndex: clipIndex, playing: playing, speed: speed,
-                         toon: toonShading, controller: characterController,
-                         rig: rig, camera: camera) {
+      if restore114State(
+        raw: saved
+        clipIndex: clipIndex
+        playing: playing
+        speed: speed
+        toon: toonShading
+        controller: characterController
+        rig: rig
+        camera: camera
+      ) {
         let pctR: Int = speedPercent(value: speed)
-        logInfoLine(ov: logView, text: "state restored: clip {clipIndex}, speed {pctR}%, camera and window kept")
+        logInfoLine(
+          ov: logView
+          text: "state restored: clip {clipIndex}, speed {pctR}%, camera and window kept"
+        )
       }
     }
 
@@ -424,7 +533,11 @@ func createApp() ret App {
     # transitions); only the controller moves into the world.
     let heroEntity: EntityId = gameWorldAddEntity(world: gameWorld)
     gameWorldSetController(world: gameWorld, entity: heroEntity, controller: characterController)
-    gameWorldSetTransform(world: gameWorld, entity: heroEntity, transform: controllerTransform3D(controller: characterController))
+    gameWorldSetTransform(
+      world: gameWorld
+      entity: heroEntity
+      transform: controllerTransform3D(controller: characterController)
+    )
 
     loop var cloneIndex: Int = 0, cloneIndex < cloneCount, ++cloneIndex {
       let spiralAngle: Float = cloneIndex.toFloat() * 2.3999632
@@ -446,58 +559,117 @@ func createApp() ret App {
       # the controller (walkerWorldModel) at draw time, so no stored model.
       let cloneEntity: EntityId = gameWorldAddEntity(world: gameWorld)
       gameWorldSetController(world: gameWorld, entity: cloneEntity, controller: cloneController)
-      gameWorldSetAnim(world: gameWorld, entity: cloneEntity, anim: AnimationState {
-        clipIndex: crowdClipFor(index: cloneIndex), animTime: cloneIndex.toFloat() * 0.4
-      })
-      gameWorldSetTransform(world: gameWorld, entity: cloneEntity, transform: controllerTransform3D(controller: cloneController))
+      gameWorldSetAnim(
+        world: gameWorld
+        entity: cloneEntity
+        anim: AnimationState {
+          clipIndex: crowdClipFor(index: cloneIndex)
+          animTime: cloneIndex.toFloat() * 0.4
+        }
+      )
+      gameWorldSetTransform(
+        world: gameWorld
+        entity: cloneEntity
+        transform: controllerTransform3D(controller: cloneController)
+      )
       crowdEntities.add(value: cloneEntity)
     }
-    updateInfiniteTerrain(terrainSystem: terrainSystem, world: gameWorld, playerPosition: characterController.position)
+    updateInfiniteTerrain(
+      terrainSystem: terrainSystem
+      world: gameWorld
+      playerPosition: characterController.position
+    )
     updateGrassField(field: grass, world: gameWorld, playerPosition: characterController.position)
     # #746: exercise the physics/net ECS seams once at startup — spawn/despawn via
     # generational entities, iterate a physics body. Leaves the world untouched.
     seamSelfTest(world: gameWorld)
     if rig.mode is CameraRigMode.character {
-      camera.target = thirdPersonCameraTarget(controller: characterController, focusZ: characterFocusZ)
+      camera.target = thirdPersonCameraTarget(
+        controller: characterController
+        focusZ: characterFocusZ
+      )
     }
 
-    setPanelSelection(panel: clipPanel, world: uiWorld, group: 1, id: (clipIndex as ClipKind).toString())
-    setPanelButtonOn(panel: transport, world: uiWorld, id: "play", on: playing)
-    setPanelButtonOn(panel: transport, world: uiWorld, id: "toon", on: toonShading)
+    setPanelSelection(
+      panel: clipPanel
+      world: uiWorld
+      group: 1
+      id: (clipIndex as ClipKind).toString()
+    )
+    setPanelButtonOn(
+      panel: transport
+      world: uiWorld
+      id: "play"
+      on: playing
+    )
+    setPanelButtonOn(
+      panel: transport
+      world: uiWorld
+      id: "toon"
+      on: toonShading
+    )
     var playLabel0: String = "Pause"
     if not playing {
       playLabel0 = "Play"
     }
-    setPanelButtonLabel(panel: transport, world: uiWorld, id: "play", label: playLabel0)
+    setPanelButtonLabel(
+      panel: transport
+      world: uiWorld
+      id: "play"
+      label: playLabel0
+    )
     let pct0: Int = speedPercent(value: speed)
     setNodeText(world: uiWorld, nodeId: "SpeedLabel", value: "Speed {pct0}%")
     runUiSystems(world: uiWorld, res: gpuUi)
 
-    var panelScroll: EntityId = createScrollPanel(world: uiWorld, viewportId: "SidePanelBody", contentId: "SidePanelContent")
+    var panelScroll: EntityId = createScrollPanel(
+      world: uiWorld
+      viewportId: "SidePanelBody"
+      contentId: "SidePanelContent"
+    )
     # The menu button is an ECS node in the same top row as the camera bar, so the
     # two hug to one height and resize together (lib/ui/CornerMenuButton).
-    let menuOk: Bool = mountCornerMenuButton(world: uiWorld, res: gpuUi, hostNodeId: "CornerMenuSlot")
+    let menuOk: Bool = mountCornerMenuButton(
+      world: uiWorld
+      res: gpuUi
+      hostNodeId: "CornerMenuSlot"
+    )
     if menuOk is false {
       logWarnLine(ov: logView, text: "corner menu button failed to mount")
     }
     let barOk: Bool = mountCameraBar(world: uiWorld, res: gpuUi, hostNodeId: "CameraBarSlot")
     walkerHideCameraChrome(world: uiWorld)
-    var settings: SettingsState = createSettingsState(scene: 1, sceneCount: 1,
-                                                      speed: speed, toon: toonShading,
-                                                      hour: 12.0,
-                                                      skyModel: SettingsSkyModel.preetham)
-    setTaaEnabled(on: settings.taa)   # default FXAA; the settings pane toggles TAA
-    let settingsOk: Bool = mountSettingsDialog(world: uiWorld, res: gpuUi, hostNodeId: "SettingsDialogSlot")
+    var settings: SettingsState = createSettingsState(
+      scene: 1
+      sceneCount: 1
+      speed: speed
+      toon: toonShading
+      hour: 12.0
+      skyModel: SettingsSkyModel.preetham
+    )
+    setTaaEnabled(on: settings.taa)  # default FXAA; the settings pane toggles TAA
+    let settingsOk: Bool = mountSettingsDialog(
+      world: uiWorld
+      res: gpuUi
+      hostNodeId: "SettingsDialogSlot"
+    )
     if settingsOk is false {
       logWarnLine(ov: logView, text: "settings dialog failed to mount")
     }
     settingsApplyToWorld(settingsState: settings, world: uiWorld)
     settings.open = false
     applyWalkerPanel(world: uiWorld, open: settings.open)
-    renderer.sky = settingsBuildSky(settingsState: settings, data: hosekData, turbidity: 3.0, groundAlbedo: 0.30)
+    renderer.sky = settingsBuildSky(
+      settingsState: settings
+      data: hosekData
+      turbidity: 3.0
+      groundAlbedo: 0.30
+    )
     light.sunDir = settingsSunDir(settingsState: settings)
     light.sunColor = settingsSunColor(settingsState: settings)
-    log("[ui] panel buttons: {clipPanel.buttonEntities.length} clip, {transport.buttonEntities.length} transport, camera bar {barOk}")
+    log(
+      "[ui] panel buttons: {clipPanel.buttonEntities.length} clip, {transport.buttonEntities.length} transport, camera bar {barOk}"
+    )
 
     let startT: Float64 = Gpu2d.nowSeconds()
     var drs: RenderScaleController = createRenderScaleController(targetFps: 60.0)
@@ -506,30 +678,65 @@ func createApp() ret App {
       emptyWorld: own emptyWorld
       world: own gameWorld
       frame: {
-        deltaTime: 0.0, now: startT, startT: startT, prevT: startT, time: 0.0, aspect: 1.0,
-        needsRender: true, dbgDidWork: true, taaSettleFrames: 0, renderedOnce: false,
+        deltaTime: 0.0
+        now: startT
+        startT: startT
+        prevT: startT
+        time: 0.0
+        aspect: 1.0
+        needsRender: true
+        dbgDidWork: true
+        taaSettleFrames: 0
+        renderedOnce: false
         headless: headless
       }
       inputSystem: {
-        moveStick: own moveStick, ui: own uiInput, world: own uiWorld, gpuUi: gpuUi,
-        clipPanel: own clipPanel, transport: own transport, charPanel: own charPanel, settings: own settings,
-        panelScroll: panelScroll, dbg: own dbg, logView: own logView, lastLogRevision: 0 - 1
+        moveStick: own moveStick
+        ui: own uiInput
+        world: own uiWorld
+        gpuUi: gpuUi
+        clipPanel: own clipPanel
+        transport: own transport
+        charPanel: own charPanel
+        settings: own settings
+        panelScroll: panelScroll
+        dbg: own dbg
+        logView: own logView
+        lastLogRevision: 0 - 1
       }
-      cameraSystem: { camera: camera, rig: own rig, light: light, hosek: hosekData,
-             rigEntity: rigLink.rigEntity, camEntity: rigLink.camEntity }
+      cameraSystem: {
+        camera: camera
+        rig: own rig
+        light: light
+        hosek: hosekData
+        rigEntity: rigLink.rigEntity
+        camEntity: rigLink.camEntity
+      }
       characterSystem: {
-        skeleton: own sk, idleClip: idleClip, walkClip: walkClip, runClip: runClip,
-        bindPose: bindPose, transitionFrom: bindPose, transitionElapsed: clipTransitionDuration,
-        heroEntity: heroEntity, clipIndex: clipIndex, playing: playing,
-        speed: speed, animTime: 0.0, toon: toonShading,
-        basePartModel: basePartModel,
-        model: partModel, prevModel: partModel, crowdEntities: own crowdEntities,
-        crowdBatch: own characterClones, groundZ: groundZ
+        skeleton: own sk
+        idleClip: idleClip
+        walkClip: walkClip
+        runClip: runClip
+        bindPose: bindPose
+        transitionFrom: bindPose
+        transitionElapsed: clipTransitionDuration
+        heroEntity: heroEntity
+        clipIndex: clipIndex
+        playing: playing
+        speed: speed
+        animTime: 0.0
+        toon: toonShading
+        basePartModel: basePartModel
+        model: partModel
+        prevModel: partModel
+        crowdEntities: own crowdEntities
+        crowdBatch: own characterClones
+        groundZ: groundZ
       }
       terrainSystem: own terrainSystem
       grassSystem: own grass
       renderSystem: { renderer: own renderer, drs: own drs, shadowLogged: false }
-      profiler: Profile.createProfiler(),
+      profiler: Profile.createProfiler()
       grassCompute: createGrassCompute()
       physicsSystem: { accumulator: 0.0, worldHandle: 0 }
       netSystem: { role: 0, tick: 0 }
@@ -552,7 +759,11 @@ func runWalkerApp() ret Int {
   # #739/#740/#741: the GameWorld holds the hero + crowd (controllers), the
   # skinned body parts (PartRoughness), and the terrain props + heightfield tiles
   # (PropKind) — all recycled ECS entities.
-  log("[ecs] GameWorld: {gameWorldEntityCount(world: app.world)} entities ({gameWorldPartCount(world: app.world)} parts + hero + crowd + terrain + grass)")
+  log(
+    "[ecs] GameWorld: {gameWorldEntityCount(world: app.world)} entities ({gameWorldPartCount(
+      world: app.world
+    )} parts + hero + crowd + terrain + grass)"
+  )
   Profile.maybeAutoStart(profiler: app.profiler)
   loop not Gpu2d.pollClose() {
     frameBegin(app: app)
@@ -560,12 +771,29 @@ func runWalkerApp() ret Int {
     if Gpu2d.shouldRenderFrame(appNeedsRender: app.frame.needsRender) is false {
       # Park until the OS has something to say (shared policy, lib/ui/event_loop).
       Gpu2d.waitEvents(timeoutSec: nextWaitTimeoutSec(
-        animating: false, mouseDown: false, pollWatcher: false,
-        frameSec: 0.016667, heartbeatSec: 1.0
+        animating: false
+        mouseDown: false
+        pollWatcher: false
+        frameSec: 0.016667
+        heartbeatSec: 1.0
       ))
     } else {
       if let resources: mod GpuResources => app.gpuResources {
-        renderApp(cameraSystem: app.cameraSystem, characterSystem: app.characterSystem, frame: app.frame, inputSystem: app.inputSystem, renderSystem: app.renderSystem, emptyWorld: app.emptyWorld, world: app.world, terrainSystem: app.terrainSystem, splashes: app.splashes, waterSystem: app.waterSystem, resources: resources, profiler: app.profiler, grassCompute: app.grassCompute)
+        renderApp(
+          cameraSystem: app.cameraSystem
+          characterSystem: app.characterSystem
+          frame: app.frame
+          inputSystem: app.inputSystem
+          renderSystem: app.renderSystem
+          emptyWorld: app.emptyWorld
+          world: app.world
+          terrainSystem: app.terrainSystem
+          splashes: app.splashes
+          waterSystem: app.waterSystem
+          resources: resources
+          profiler: app.profiler
+          grassCompute: app.grassCompute
+        )
       }
     }
   }
@@ -574,7 +802,7 @@ func runWalkerApp() ret Int {
     waterShutdown(waterSystem: app.waterSystem, resources: resources)
     shutdown(resources: resources)
   }
-  shutdownDeferredRenderer(renderer: app.renderSystem.renderer)   # #904: the renderer-owned GPU manager, before the C shutdown
+  shutdownDeferredRenderer(renderer: app.renderSystem.renderer)  # #904: the renderer-owned GPU manager, before the C shutdown
   skinShutdown()
   shutdown()
   Gpu2d.closeWindow()

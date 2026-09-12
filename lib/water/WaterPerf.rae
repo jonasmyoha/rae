@@ -22,8 +22,12 @@ type WaterPerf {
 func createWaterPerf() ret WaterPerf {
   unsafe {
     ret WaterPerf {
-      enabled: false, timing: none, timingMade: false, samples: 0,
-      resolvePending: false, submission: { managerTag: 0, slot: 0 - 1, generation: 0 },
+      enabled: false
+      timing: none
+      timingMade: false
+      samples: 0
+      resolvePending: false
+      submission: { managerTag: 0, slot: 0 - 1, generation: 0 }
       passTimes: List.create(Int, cap: 2)
     }
   }
@@ -36,18 +40,24 @@ func makeWaterTiming(resources: mod GpuResources) ret opt GpuTiming {
 # Claims the timing for the FFT submission about to be recorded. true when the
 # pass should carry timestamps (timing available and no sample in flight).
 func beginWaterPerf(performance: mod WaterPerf, resources: mod GpuResources) ret Bool {
-  if not performance.enabled { ret false }
+  if not performance.enabled {
+    ret false
+  }
   if not performance.timingMade {
     performance.timing = makeWaterTiming(resources: resources)
     performance.timingMade = true
   }
   if let timing: mod GpuTiming => performance.timing {
     if not timingAvailable(timing: timing) {
-      if performance.samples is 0 { log("[water perf] GPU timestamps unavailable; configured cadence unchanged") }
+      if performance.samples is 0 {
+        log("[water perf] GPU timestamps unavailable; configured cadence unchanged")
+      }
       performance.samples = performance.samples + 1
       ret false
     }
-    if timingSampleInFlight(timing: timing) or performance.resolvePending { ret false }
+    if timingSampleInFlight(timing: timing) or performance.resolvePending {
+      ret false
+    }
     beginTimingFrame(timing: timing)
     ret timedPass(timing: timing) >= 0
   }
@@ -55,7 +65,11 @@ func beginWaterPerf(performance: mod WaterPerf, resources: mod GpuResources) ret
 }
 
 # After the timed pass, before submit: resolve the timestamps on the recording.
-func resolveWaterPerf(performance: view WaterPerf, recording: mod Recording, resources: view GpuResources) {
+func resolveWaterPerf(
+  performance: view WaterPerf
+  recording: mod Recording
+  resources: view GpuResources
+) {
   if let timing: view GpuTiming => performance.timing {
     recordTimingResolve(timing: timing, recording: recording, resources: resources)
   }
@@ -69,7 +83,9 @@ func noteWaterPerfSubmission(performance: mod WaterPerf, submission: view Submis
 # Nonblocking, once per FFT step: starts the readback once the timed submission
 # completed, and logs the sample once the readback landed.
 func collectWaterPerf(performance: mod WaterPerf, resources: mod GpuResources) {
-  if not performance.enabled { ret }
+  if not performance.enabled {
+    ret
+  }
   if let timing: mod GpuTiming => performance.timing {
     if timingSampleInFlight(timing: timing) {
       if collectTiming(timing: timing, resources: resources, out: performance.passTimes) {
@@ -79,7 +95,10 @@ func collectWaterPerf(performance: mod WaterPerf, resources: mod GpuResources) {
       ret
     }
     # A retired (-1) submission was completed before it was retired.
-    if performance.resolvePending and pollSubmission(resources: resources, id: performance.submission) is not 0 {
+    if performance.resolvePending and pollSubmission(
+      resources: resources
+      id: performance.submission
+    ) is not 0 {
       performance.resolvePending = false
       startTimingSample(timing: timing, resources: resources)
     }
@@ -97,7 +116,9 @@ func releaseWaterPerf(performance: mod WaterPerf, resources: mod GpuResources) {
 
 # Empty schedule slots cost no dispatch or readback and count as zero GPU work.
 func idleWaterPerf(performance: mod WaterPerf) {
-  if not performance.enabled { ret }
+  if not performance.enabled {
+    ret
+  }
   log("[water perf] sample {performance.samples}: fft GPU 0 us (idle)")
   performance.samples = performance.samples + 1
 }

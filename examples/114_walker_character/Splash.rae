@@ -19,9 +19,11 @@ open ecs/Entity
 open ecs/ComponentTable
 open app3d/CharacterController
 
-const splashMinDepth: Float = 0.03    # world units of water under a unit before it splashes
-const splashPerBurst: Int = 3         # droplets per splash
-const splashCrowdStride: Int = 3      # a crowd member splashes every Nth frame it wades
+const splashMinDepth: Float = 0.03  # world units of water under a unit before it splashes
+
+const splashPerBurst: Int = 3  # droplets per splash
+
+const splashCrowdStride: Int = 3  # a crowd member splashes every Nth frame it wades
 
 # The sea around the meadow (#830): 700 m on a 256 grid, so its 2.7 m cells
 # can still carry the 6 m shore wave (Water.waveGridFactor fades the rest, #857).
@@ -44,35 +46,71 @@ func lakeSurfaceZ(groundZ: copy Float) ret Float {
 }
 
 # Pale blue-white water droplet colour (splash spray).
-func colorR() ret Float { ret 0.82 }
-func colorG() ret Float { ret 0.90 }
-func colorB() ret Float { ret 0.99 }
+func colorR() ret Float {
+  ret 0.82
+}
+
+func colorG() ret Float {
+  ret 0.90
+}
+
+func colorB() ret Float {
+  ret 0.99
+}
 
 # One splash burst at the WATER SURFACE under a unit. `waterZ` is the flat water
 # plane in WORLD space (worldWaterZ) — NOT the controller's ground-relative z,
 # which stands ~1 unit high and would spray droplets from the chest. Droplets rise
 # UP from just above the surface so they read.
-func emitSplashAt(sys: mod ParticleSystem, x: copy Float, y: copy Float, waterZ: copy Float) {
-  particleBurst(sys: sys, x: x, y: y, z: waterZ + 0.05,
-    count: splashPerBurst, hVel: 1.7, upVel: 3.6, life: 0.5, size: 0.22,
-    r: colorR(), g: colorG(), b: colorB(), phase: x * 0.7 + y * 0.31)
+func emitSplashAt(
+  sys: mod ParticleSystem
+  x: copy Float
+  y: copy Float
+  waterZ: copy Float
+) {
+  particleBurst(
+    sys: sys
+    x: x
+    y: y
+    z: waterZ + 0.05
+    count: splashPerBurst
+    hVel: 1.7
+    upVel: 3.6
+    life: 0.5
+    size: 0.22
+    r: colorR()
+    g: colorG()
+    b: colorB()
+    phase: x * 0.7 + y * 0.31
+  )
 }
 
 # Advance + emit splashes for everything wading this frame. Call once per frame.
-func splashStep(characterSystem: mod CharacterSystem, splashes: mod ParticleSystem, world: mod GameWorld, deltaTime: copy Float) {
+func splashStep(
+  characterSystem: mod CharacterSystem
+  splashes: mod ParticleSystem
+  world: mod GameWorld
+  deltaTime: copy Float
+) {
   particleUpdate(sys: splashes, deltaTime: deltaTime)
   world.splashTick = world.splashTick + 1
   # The flat water plane in WORLD space — every splash sprays up from HERE, not
   # from the unit's (ground-relative, chest-high) position z.
   let waterZ: Float = worldWaterZ(groundZ: characterSystem.groundZ, cfg: defaultBiomeConfig())
   # The hero (always evaluated — the character the player is watching).
-  let heroCtrl: ThirdPersonController = controllerOf(world: world, entity: characterSystem.heroEntity)
+  let heroCtrl: ThirdPersonController = controllerOf(
+    world: world
+    entity: characterSystem.heroEntity
+  )
   if heroCtrl.moving {
-    let heroDepth: Float = terrainWaterDepth(
-      x: heroCtrl.position.x, y: heroCtrl.position.y)
+    let heroDepth: Float = terrainWaterDepth(x: heroCtrl.position.x, y: heroCtrl.position.y)
     if heroDepth > splashMinDepth {
-      emitSplashAt(sys: splashes, x: heroCtrl.position.x,
-        y: heroCtrl.position.y, waterZ: waterZ)
+      emitSplashAt(
+        sys: splashes
+        x: heroCtrl.position.x
+        y: heroCtrl.position.y
+        waterZ: waterZ
+      )
     }
   }
   # Every moving crowd member in water, strided so the pool is not swamped.
@@ -80,11 +118,14 @@ func splashStep(characterSystem: mod CharacterSystem, splashes: mod ParticleSyst
     if let member: EntityId = characterSystem.crowdEntities.copyAt(index: i) {
       let ctrl: ThirdPersonController = componentGet(this: world.controllers, entity: member)
       if ctrl.moving and (world.splashTick + i) % splashCrowdStride is 0 {
-        let depth: Float = terrainWaterDepth(
-          x: ctrl.position.x, y: ctrl.position.y)
+        let depth: Float = terrainWaterDepth(x: ctrl.position.x, y: ctrl.position.y)
         if depth > splashMinDepth {
-          emitSplashAt(sys: splashes, x: ctrl.position.x,
-            y: ctrl.position.y, waterZ: waterZ)
+          emitSplashAt(
+            sys: splashes
+            x: ctrl.position.x
+            y: ctrl.position.y
+            waterZ: waterZ
+          )
         }
       }
     }

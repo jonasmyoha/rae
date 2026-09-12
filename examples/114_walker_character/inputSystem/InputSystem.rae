@@ -71,8 +71,11 @@ type InputIntent {
   actions: Int
 }
 
-func inputUpdate(moveStick: view VirtualJoystick, joyActive: view Bool,
-                 allowKeys: view Bool) ret InputIntent {
+func inputUpdate(
+  moveStick: view VirtualJoystick
+  joyActive: view Bool
+  allowKeys: view Bool
+) ret InputIntent {
   if joyActive {
     ret InputIntent { moveX: moveStick.valueX, moveY: moveStick.valueY, walking: false, actions: 0 }
   }
@@ -80,10 +83,18 @@ func inputUpdate(moveStick: view VirtualJoystick, joyActive: view Bool,
   var moveY: Float = 0.0
   var walking: Bool = false
   if allowKeys {
-    if Sdl3.isKeyDown(key: Keys.keyD) or Sdl3.isKeyDown(key: Keys.keyRight) { moveX = moveX + 1.0 }
-    if Sdl3.isKeyDown(key: Keys.keyA) or Sdl3.isKeyDown(key: Keys.keyLeft) { moveX = moveX - 1.0 }
-    if Sdl3.isKeyDown(key: Keys.keyW) or Sdl3.isKeyDown(key: Keys.keyUp) { moveY = moveY + 1.0 }
-    if Sdl3.isKeyDown(key: Keys.keyS) or Sdl3.isKeyDown(key: Keys.keyDown) { moveY = moveY - 1.0 }
+    if Sdl3.isKeyDown(key: Keys.keyD) or Sdl3.isKeyDown(key: Keys.keyRight) {
+      moveX = moveX + 1.0
+    }
+    if Sdl3.isKeyDown(key: Keys.keyA) or Sdl3.isKeyDown(key: Keys.keyLeft) {
+      moveX = moveX - 1.0
+    }
+    if Sdl3.isKeyDown(key: Keys.keyW) or Sdl3.isKeyDown(key: Keys.keyUp) {
+      moveY = moveY + 1.0
+    }
+    if Sdl3.isKeyDown(key: Keys.keyS) or Sdl3.isKeyDown(key: Keys.keyDown) {
+      moveY = moveY - 1.0
+    }
     walking = Sdl3.isKeyDown(key: Keys.keyLShift)
   }
   ret InputIntent { moveX: moveX, moveY: moveY, walking: walking, actions: 0 }

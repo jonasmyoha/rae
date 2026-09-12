@@ -20,7 +20,6 @@
 #
 # Both Compiled (C backend) and Live (bytecode VM) targets call into
 # the same `fileModTime` native, so the watcher behaves identically.
-
 type WatchEntry {
   path: String
   # Epoch seconds — Float64 so a ~1.7e9 timestamp keeps sub-second
@@ -38,7 +37,11 @@ type FileWatcher {
 # Take a snapshot of the current mtimes for every path. Subsequent
 # `checkForChanges` calls compare against this baseline, so the first
 # poll after construction does not spuriously fire.
-func createFileWatcher(paths: view List(String), enabled: view Bool, intervalSec: view Float) ret FileWatcher {
+func createFileWatcher(
+  paths: view List(String)
+  enabled: view Bool
+  intervalSec: view Float
+) ret FileWatcher {
   let entries: List(WatchEntry) = List.create(WatchEntry, cap: paths.length)
   var i: Int = 0
   loop i < paths.length {

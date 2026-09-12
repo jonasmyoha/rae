@@ -21,12 +21,24 @@ func main() ret Int {
   check(label: "1900 is not leap (century)", ok: isLeapYear(year: 1900) is false)
   check(label: "2000 is leap (400)", ok: isLeapYear(year: 2000))
   check(label: "2400 is leap (400)", ok: isLeapYear(year: 2400))
-  check(label: "1800 and 2100 are not leap", ok: isLeapYear(year: 1800) is false and isLeapYear(year: 2100) is false)
+  check(
+    label: "1800 and 2100 are not leap"
+    ok: isLeapYear(year: 1800) is false and isLeapYear(year: 2100) is false
+  )
   check(label: "year lengths", ok: daysInYear(year: 2024) is 366 and daysInYear(year: 2025) is 365)
 
-  check(label: "February follows the leap rule", ok: daysInMonth(year: 2024, month: 2) is 29 and daysInMonth(year: 2025, month: 2) is 28)
-  check(label: "thirty days hath September", ok: daysInMonth(year: 2025, month: 9) is 30 and daysInMonth(year: 2025, month: 4) is 30)
-  check(label: "and the rest have thirty-one", ok: daysInMonth(year: 2025, month: 1) is 31 and daysInMonth(year: 2025, month: 12) is 31)
+  check(
+    label: "February follows the leap rule"
+    ok: daysInMonth(year: 2024, month: 2) is 29 and daysInMonth(year: 2025, month: 2) is 28
+  )
+  check(
+    label: "thirty days hath September"
+    ok: daysInMonth(year: 2025, month: 9) is 30 and daysInMonth(year: 2025, month: 4) is 30
+  )
+  check(
+    label: "and the rest have thirty-one"
+    ok: daysInMonth(year: 2025, month: 1) is 31 and daysInMonth(year: 2025, month: 12) is 31
+  )
 
   # Day 60 is the one that moves: 29 February in a leap year, 1 March otherwise.
   let leap60: CalendarDate = dateFromDayOfYear(year: 2024, dayOfYear: 60)
@@ -44,11 +56,23 @@ func main() ret Int {
   let high: CalendarDate = dateFromDayOfYear(year: 2025, dayOfYear: 400)
   check(label: "below range clamps to 1 Jan", ok: low.month is 1 and low.day is 1)
   check(label: "above range clamps to 31 Dec", ok: high.month is 12 and high.day is 31)
-  check(label: "day 366 clamps in a plain year", ok: clampDayOfYear(year: 2025, dayOfYear: 366) is 365)
-  check(label: "day 366 is valid in a leap year", ok: clampDayOfYear(year: 2024, dayOfYear: 366) is 366)
+  check(
+    label: "day 366 clamps in a plain year"
+    ok: clampDayOfYear(year: 2025, dayOfYear: 366) is 365
+  )
+  check(
+    label: "day 366 is valid in a leap year"
+    ok: clampDayOfYear(year: 2024, dayOfYear: 366) is 366
+  )
 
-  check(label: "formats a date", ok: formatCalendarDate(date: dateFromDayOfYear(year: 2026, dayOfYear: 172)) is "21 Jun 2026")
-  check(label: "formats without the year", ok: formatDayMonth(date: dateFromDayOfYear(year: 2026, dayOfYear: 1)) is "1 Jan")
+  check(
+    label: "formats a date"
+    ok: formatCalendarDate(date: dateFromDayOfYear(year: 2026, dayOfYear: 172)) is "21 Jun 2026"
+  )
+  check(
+    label: "formats without the year"
+    ok: formatDayMonth(date: dateFromDayOfYear(year: 2026, dayOfYear: 1)) is "1 Jan"
+  )
 
   # Rolling a day cannot be done without the year, so both move together.
   var y: Int = 2024

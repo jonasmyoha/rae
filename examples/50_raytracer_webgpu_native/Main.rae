@@ -23,70 +23,99 @@ import Camera
 func rae_ext_rae_sys_read_file(path: String) unsafe extern ret String
 
 func pushVec3(buf: mod List(Float), a: view Vec3) {
-    buf.add(value: a.x)
-    buf.add(value: a.y)
-    buf.add(value: a.z)
+  buf.add(value: a.x)
+  buf.add(value: a.y)
+  buf.add(value: a.z)
 }
 
 func main() {
   unsafe {
-      let width: Int = 768
-      let height: Int = 432
-      let samples: Int = 32
-      let maxDepth: Int = 12
+    let width: Int = 768
+    let height: Int = 432
+    let samples: Int = 32
+    let maxDepth: Int = 12
 
-      let aspect: Float = width.toFloat() / height.toFloat()
-      let camPos: Vec3 = Vec3.create(x: -1.6, y: -1.2, z: 0.6)
-      let camTarget: Vec3 = Vec3.create(x: 0.0, y: 1.0, z: 0.0)
-      let cam: Camera = buildCamera(pos: camPos, target: camTarget, vfovDeg: 45.0, aperture: 0.06, aspect: aspect)
+    let aspect: Float = width.toFloat() / height.toFloat()
+    let camPos: Vec3 = Vec3.create(x: -1.6, y: -1.2, z: 0.6)
+    let camTarget: Vec3 = Vec3.create(x: 0.0, y: 1.0, z: 0.0)
+    let cam: Camera = buildCamera(
+      pos: camPos
+      target: camTarget
+      vfovDeg: 45.0
+      aperture: 0.06
+      aspect: aspect
+    )
 
-      # Pack the scene as f32-as-Float: camera(19) then per sphere center(3)
-      # radius albedo(3) kind fuzz ior (10) — exactly what raytrace.wgsl reads.
-      let sceneBuf: List(Float) = List.create(Float, cap: 64)
-      pushVec3(buf: sceneBuf, a: cam.origin)
-      pushVec3(buf: sceneBuf, a: cam.lowerLeft)
-      pushVec3(buf: sceneBuf, a: cam.horizontal)
-      pushVec3(buf: sceneBuf, a: cam.vertical)
-      pushVec3(buf: sceneBuf, a: cam.right)
-      pushVec3(buf: sceneBuf, a: cam.up)
-      sceneBuf.add(value: cam.lensRadius)
-      let world: List(Sphere) = buildScene()
-      loop let sphere: view Sphere in world {
-          pushVec3(buf: sceneBuf, a: sphere.center)
-          sceneBuf.add(value: sphere.radius)
-          pushVec3(buf: sceneBuf, a: sphere.material.albedo)
-          sceneBuf.add(value: sphere.material.kind.toFloat())
-          sceneBuf.add(value: sphere.material.fuzz)
-          sceneBuf.add(value: sphere.material.ior)
+    # Pack the scene as f32-as-Float: camera(19) then per sphere center(3)
+    # radius albedo(3) kind fuzz ior (10) — exactly what raytrace.wgsl reads.
+    let sceneBuf: List(Float) = List.create(Float, cap: 64)
+    pushVec3(buf: sceneBuf, a: cam.origin)
+    pushVec3(buf: sceneBuf, a: cam.lowerLeft)
+    pushVec3(buf: sceneBuf, a: cam.horizontal)
+    pushVec3(buf: sceneBuf, a: cam.vertical)
+    pushVec3(buf: sceneBuf, a: cam.right)
+    pushVec3(buf: sceneBuf, a: cam.up)
+    sceneBuf.add(value: cam.lensRadius)
+    let world: List(Sphere) = buildScene()
+    loop let sphere: view Sphere in world {
+      pushVec3(buf: sceneBuf, a: sphere.center)
+      sceneBuf.add(value: sphere.radius)
+      pushVec3(buf: sceneBuf, a: sphere.material.albedo)
+      sceneBuf.add(value: sphere.material.kind.toFloat())
+      sceneBuf.add(value: sphere.material.fuzz)
+      sceneBuf.add(value: sphere.material.ior)
+    }
+
+    # Load the shared WGSL kernel (same file as the browser example). Read
+    # relative to the repo root (how `rae run` / the dashboard invoke examples).
+    let wgsl: String = rae_ext_rae_sys_read_file(
+      path: "examples/50_raytracer_webgpu_native/raytrace.wgsl"
+    )
+
+    let fb: List(Int) = List.create(Int, cap: width * height)
+    var i: Int = 0
+    loop i < width * height {
+      fb.add(value: 0)
+      i = i + 1
+    }
+
+    Sdl3.initWindow(
+      width: width
+      height: height
+      title: "Rae raytracer — native WebGPU (wgpu-native)"
+    )
+    Sdl3.setTargetFPS(fps: 60)
+
+    # Render once on the GPU, then present the framebuffer until the window closes.
+    let t0: Int = nowMs()
+    Webgpu.raytrace(
+      scene: sceneBuf.data
+      sceneLen: sceneBuf.length
+      fb: fb.data
+      width: width
+      height: height
+      samples: samples
+      maxDepth: maxDepth
+      wgsl: wgsl
+    )
+    let ms: Int = nowMs() - t0
+    Sdl3.setTitle(
+      title: "Rae native WebGPU | {width}x{height} | {samples} spp | rendered in {ms}ms"
+    )
+
+    loop not Sdl3.shouldClose() {
+      if Sdl3.isKeyPressed(key: Keys.keyF2) {
+        let s: Bool = Image.savePng(
+          path: Filesystem.renderPath(stem: "rae_render")
+          pixels: fb.data
+          width: width
+          height: height
+        )
       }
 
-      # Load the shared WGSL kernel (same file as the browser example). Read
-      # relative to the repo root (how `rae run` / the dashboard invoke examples).
-      let wgsl: String = rae_ext_rae_sys_read_file(path: "examples/50_raytracer_webgpu_native/raytrace.wgsl")
-
-      let fb: List(Int) = List.create(Int, cap: width * height)
-      var i: Int = 0
-      loop i < width * height {
-          fb.add(value: 0)
-          i = i + 1
-      }
-
-      Sdl3.initWindow(width: width, height: height, title: "Rae raytracer — native WebGPU (wgpu-native)")
-      Sdl3.setTargetFPS(fps: 60)
-
-      # Render once on the GPU, then present the framebuffer until the window closes.
-      let t0: Int = nowMs()
-      Webgpu.raytrace(scene: sceneBuf.data, sceneLen: sceneBuf.length, fb: fb.data,
-                     width: width, height: height, samples: samples, maxDepth: maxDepth, wgsl: wgsl)
-      let ms: Int = nowMs() - t0
-      Sdl3.setTitle(title: "Rae native WebGPU | {width}x{height} | {samples} spp | rendered in {ms}ms")
-
-      loop not Sdl3.shouldClose() {
-          if Sdl3.isKeyPressed(key: Keys.keyF2) { let s: Bool = Image.savePng(path: Filesystem.renderPath(stem: "rae_render"), pixels: fb.data, width: width, height: height) }
-
-          Sdl3.updatePixels(pixels: fb.data, w: width, h: height)
-          Sdl3.present()
-      }
-      Sdl3.closeWindow()
+      Sdl3.updatePixels(pixels: fb.data, w: width, h: height)
+      Sdl3.present()
+    }
+    Sdl3.closeWindow()
   }
 }

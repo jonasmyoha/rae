@@ -10,30 +10,58 @@ import Math
 open Vec3
 open Scene3d
 open Math3d
-open ecs/Entity          # #793: World3d shadow path reads entities/components
+open ecs/Entity  # #793: World3d shadow path reads entities/components
 open ecs/ComponentTable
 open webgpu/Webgpu
 open webgpu/Context
 open Gpu3d
 
-func nativeMeshCreate(verts: view Buffer(Float), vertCount: Int, indices: view Buffer(Int), indexCount: Int) unsafe extern("rae_ext_Gpu3d_meshCreate") ret Int
+func nativeMeshCreate(
+  verts: view Buffer(Float)
+  vertCount: Int
+  indices: view Buffer(Int)
+  indexCount: Int
+) unsafe extern("rae_ext_Gpu3d_meshCreate") ret Int
 
-func meshCreate(verts: view Buffer(Float), vertCount: copy Int, indices: view Buffer(Int), indexCount: copy Int) ret Int {
-  unsafe { ret nativeMeshCreate(verts: verts, vertCount: vertCount, indices: indices, indexCount: indexCount) }
+func meshCreate(
+  verts: view Buffer(Float)
+  vertCount: copy Int
+  indices: view Buffer(Int)
+  indexCount: copy Int
+) ret Int {
+  unsafe {
+    ret nativeMeshCreate(
+      verts: verts
+      vertCount: vertCount
+      indices: indices
+      indexCount: indexCount
+    )
+  }
 }
 
-func nativeMeshUpdate(mesh: Int, verts: view Buffer(Float), vertCount: Int) unsafe extern("rae_ext_Gpu3d_meshUpdate")
+func nativeMeshUpdate(
+  mesh: Int
+  verts: view Buffer(Float)
+  vertCount: Int
+) unsafe extern("rae_ext_Gpu3d_meshUpdate")
 
 func meshUpdate(mesh: copy Int, verts: view Buffer(Float), vertCount: copy Int) {
-  unsafe { nativeMeshUpdate(mesh: mesh, verts: verts, vertCount: vertCount) }
+  unsafe {
+    nativeMeshUpdate(mesh: mesh, verts: verts, vertCount: vertCount)
+  }
 }
 
 # Frame prepare (#514): C packs+uploads the per-frame uniform and returns 1 when
 # the device/targets are ready; the render pass is then built in Rae below.
-func nativeG3dFramePrepare(frame: view Buffer(Float), count: Int) unsafe extern("rae_g3d_frame_prepare") ret Int
+func nativeG3dFramePrepare(
+  frame: view Buffer(Float)
+  count: Int
+) unsafe extern("rae_g3d_frame_prepare") ret Int
 
 func g3dFramePrepare(frame: view Buffer(Float), count: copy Int) ret Int {
-  unsafe { ret nativeG3dFramePrepare(frame: frame, count: count) }
+  unsafe {
+    ret nativeG3dFramePrepare(frame: frame, count: count)
+  }
 }
 
 # Forward target-view + pipeline handle accessors (ungated platform ABI,
@@ -59,10 +87,48 @@ func g3dSetFrame(enc: Ptr, pass: Ptr) unsafe extern("rae_g3d_set_frame")
 # Forward mesh draw (#514): C does the shared CPU bookkeeping (validate mesh +
 # draw limit, pack the 40-float record, return the firstInstance slot or -1);
 # Rae encodes the instanced DrawIndexed below.
-func nativeG3dPushDrawRecord(mesh: Int, model: view Mat4, prevModel: view Mat4, r: Float, g: Float, b: Float, metallic: Float, emR: Float, emG: Float, emB: Float, roughness: Float) unsafe extern("rae_g3d_push_draw_record") ret Int
+func nativeG3dPushDrawRecord(
+  mesh: Int
+  model: view Mat4
+  prevModel: view Mat4
+  r: Float
+  g: Float
+  b: Float
+  metallic: Float
+  emR: Float
+  emG: Float
+  emB: Float
+  roughness: Float
+) unsafe extern("rae_g3d_push_draw_record") ret Int
 
-func g3dPushDrawRecord(mesh: copy Int, model: view Mat4, prevModel: view Mat4, r: copy Float, g: copy Float, b: copy Float, metallic: copy Float, emR: copy Float, emG: copy Float, emB: copy Float, roughness: copy Float) ret Int {
-  unsafe { ret nativeG3dPushDrawRecord(mesh: mesh, model: model, prevModel: prevModel, r: r, g: g, b: b, metallic: metallic, emR: emR, emG: emG, emB: emB, roughness: roughness) }
+func g3dPushDrawRecord(
+  mesh: copy Int
+  model: view Mat4
+  prevModel: view Mat4
+  r: copy Float
+  g: copy Float
+  b: copy Float
+  metallic: copy Float
+  emR: copy Float
+  emG: copy Float
+  emB: copy Float
+  roughness: copy Float
+) ret Int {
+  unsafe {
+    ret nativeG3dPushDrawRecord(
+      mesh: mesh
+      model: model
+      prevModel: prevModel
+      r: r
+      g: g
+      b: b
+      metallic: metallic
+      emR: emR
+      emG: emG
+      emB: emB
+      roughness: roughness
+    )
+  }
 }
 
 func g3dMeshVbuf(mesh: Int) unsafe extern("rae_g3d_mesh_vbuf") ret Ptr
@@ -72,7 +138,9 @@ func g3dMeshIbuf(mesh: Int) unsafe extern("rae_g3d_mesh_ibuf") ret Ptr
 func nativeG3dMeshIcount(mesh: Int) unsafe extern("rae_g3d_mesh_icount") ret Int
 
 func g3dMeshIcount(mesh: copy Int) ret Int {
-  unsafe { ret nativeG3dMeshIcount(mesh: mesh) }
+  unsafe {
+    ret nativeG3dMeshIcount(mesh: mesh)
+  }
 }
 
 # The current scene pass (set by beginForward via g3dSetFrame). draw() reads it
@@ -82,10 +150,42 @@ func g3dPass() unsafe extern("rae_g3d_pass") ret Ptr
 # Metaball cluster (#514): C ensures the SDF pipeline, takes a per-frame group
 # slot, packs+uploads the balls/colors/params, and returns the slot (or -1);
 # Rae encodes the SDF fullscreen draw and restores the geometry pipeline/bind.
-func nativeG3dPushMetaballCluster(packedBalls: view Buffer(Float), count: Int, packedColors: view Buffer(Float), smoothing: Float, metallic: Float, roughness: Float, emR: Float, emG: Float, emB: Float) unsafe extern("rae_g3d_push_metaball_cluster") ret Int
+func nativeG3dPushMetaballCluster(
+  packedBalls: view Buffer(Float)
+  count: Int
+  packedColors: view Buffer(Float)
+  smoothing: Float
+  metallic: Float
+  roughness: Float
+  emR: Float
+  emG: Float
+  emB: Float
+) unsafe extern("rae_g3d_push_metaball_cluster") ret Int
 
-func g3dPushMetaballCluster(packedBalls: view Buffer(Float), count: copy Int, packedColors: view Buffer(Float), smoothing: copy Float, metallic: copy Float, roughness: copy Float, emR: copy Float, emG: copy Float, emB: copy Float) ret Int {
-  unsafe { ret nativeG3dPushMetaballCluster(packedBalls: packedBalls, count: count, packedColors: packedColors, smoothing: smoothing, metallic: metallic, roughness: roughness, emR: emR, emG: emG, emB: emB) }
+func g3dPushMetaballCluster(
+  packedBalls: view Buffer(Float)
+  count: copy Int
+  packedColors: view Buffer(Float)
+  smoothing: copy Float
+  metallic: copy Float
+  roughness: copy Float
+  emR: copy Float
+  emG: copy Float
+  emB: copy Float
+) ret Int {
+  unsafe {
+    ret nativeG3dPushMetaballCluster(
+      packedBalls: packedBalls
+      count: count
+      packedColors: packedColors
+      smoothing: smoothing
+      metallic: metallic
+      roughness: roughness
+      emR: emR
+      emG: emG
+      emB: emB
+    )
+  }
 }
 
 func g3dSdfPipeline() unsafe extern("rae_g3d_sdf_pipeline") ret Ptr
@@ -100,13 +200,17 @@ func g3dEncoder() unsafe extern("rae_g3d_encoder") ret Ptr
 func nativeG3dFrameActive() unsafe extern("rae_g3d_frame_active") ret Int
 
 func g3dFrameActive() ret Int {
-  unsafe { ret nativeG3dFrameActive() }
+  unsafe {
+    ret nativeG3dFrameActive()
+  }
 }
 
 func nativeG3dClearFrame() unsafe extern("rae_g3d_clear_frame")
 
 func g3dClearFrame() {
-  unsafe { nativeG3dClearFrame() }
+  unsafe {
+    nativeG3dClearFrame()
+  }
 }
 
 func g3dSubmitCmd(cmd: Ptr) unsafe extern("rae_g3d_submit_cmd")
@@ -117,7 +221,9 @@ func g3dSubmitCmd(cmd: Ptr) unsafe extern("rae_g3d_submit_cmd")
 func nativeG3dTonemapPrepare() unsafe extern("rae_g3d_tonemap_prepare") ret Int
 
 func g3dTonemapPrepare() ret Int {
-  unsafe { ret nativeG3dTonemapPrepare() }
+  unsafe {
+    ret nativeG3dTonemapPrepare()
+  }
 }
 
 func g3dTonemapPipeline() unsafe extern("rae_g3d_tonemap_pipeline") ret Ptr
@@ -127,13 +233,17 @@ func g3dTonemapBind(slot: Int) unsafe extern("rae_g3d_tonemap_bind") ret Ptr
 func nativeG3dTonemapPending() unsafe extern("rae_g3d_tonemap_pending") ret Int
 
 func g3dTonemapPending() ret Int {
-  unsafe { ret nativeG3dTonemapPending() }
+  unsafe {
+    ret nativeG3dTonemapPending()
+  }
 }
 
 func nativeG3dPresentFrame() unsafe extern("rae_g3d_present_frame")
 
 func g3dPresentFrame() {
-  unsafe { nativeG3dPresentFrame() }
+  unsafe {
+    nativeG3dPresentFrame()
+  }
 }
 
 # TAA (#514): C ensures the pipeline/bind, uploads the blend params, flips
@@ -142,7 +252,9 @@ func g3dPresentFrame() {
 func nativeG3dTaaPrepare() unsafe extern("rae_g3d_taa_prepare") ret Int
 
 func g3dTaaPrepare() ret Int {
-  unsafe { ret nativeG3dTaaPrepare() }
+  unsafe {
+    ret nativeG3dTaaPrepare()
+  }
 }
 
 func g3dTaaPipeline() unsafe extern("rae_g3d_taa_pipeline") ret Ptr
@@ -157,19 +269,25 @@ func g3dTaaView(slot: Int) unsafe extern("rae_g3d_taa_view") ret Ptr
 func nativeG3dSsaoPrepare() unsafe extern("rae_g3d_ssao_prepare") ret Int
 
 func g3dSsaoPrepare() ret Int {
-  unsafe { ret nativeG3dSsaoPrepare() }
+  unsafe {
+    ret nativeG3dSsaoPrepare()
+  }
 }
 
 func nativeG3dSsaoEnabled() unsafe extern("rae_g3d_ssao_enabled") ret Int
 
 func g3dSsaoEnabled() ret Int {
-  unsafe { ret nativeG3dSsaoEnabled() }
+  unsafe {
+    ret nativeG3dSsaoEnabled()
+  }
 }
 
 func nativeG3dAoDebugOn() unsafe extern("rae_g3d_ao_debug_on") ret Int
 
 func g3dAoDebugOn() ret Int {
-  unsafe { ret nativeG3dAoDebugOn() }
+  unsafe {
+    ret nativeG3dAoDebugOn()
+  }
 }
 
 func g3dSsaoPipeline() unsafe extern("rae_g3d_ssao_pipeline") ret Ptr
@@ -189,18 +307,37 @@ func g3dAoDebugBind() unsafe extern("rae_g3d_ao_debug_bind") ret Ptr
 func nativeG3dClearAo() unsafe extern("rae_g3d_clear_ao")
 
 func g3dClearAo() {
-  unsafe { nativeG3dClearAo() }
+  unsafe {
+    nativeG3dClearAo()
+  }
 }
 
 # Sky (#514): C ensures the pipeline, packs+uploads the sky uniform (with the
 # Hosek table Rae pushed), returns 1 to proceed / 0 to skip; Rae encodes the
 # fullscreen sky draw into the scene pass and restores the geometry pipeline.
-func g3dSkyPrepare(skyKind: Float, turbidity: Float, skyExposure: Float, sunSizeRad: Float,
-                   sunX: Float, sunY: Float, sunZ: Float,
-                   sunR: Float, sunG: Float, sunB: Float,
-                   zenR: Float, zenG: Float, zenB: Float, bands: Float,
-                   horR: Float, horG: Float, horB: Float, discI: Float,
-                   clearR: Float, clearG: Float, clearB: Float) unsafe extern("rae_g3d_sky_prepare") ret Int
+func g3dSkyPrepare(
+  skyKind: Float
+  turbidity: Float
+  skyExposure: Float
+  sunSizeRad: Float
+  sunX: Float
+  sunY: Float
+  sunZ: Float
+  sunR: Float
+  sunG: Float
+  sunB: Float
+  zenR: Float
+  zenG: Float
+  zenB: Float
+  bands: Float
+  horR: Float
+  horG: Float
+  horB: Float
+  discI: Float
+  clearR: Float
+  clearG: Float
+  clearB: Float
+) unsafe extern("rae_g3d_sky_prepare") ret Int
 
 func g3dSkyPipeline() unsafe extern("rae_g3d_sky_pipeline") ret Ptr
 
@@ -214,59 +351,128 @@ func g3dSkyBind() unsafe extern("rae_g3d_sky_bind") ret Ptr
 # encoder — the shadow render itself is in Rae (GbufferShadow.shadowEnd, #504).
 # So these bind the shadow-map C helpers under the rae_sm_* prefix (#514), the
 # same prefix the shadow accessors already use.
-func shadowBegin(cascades: view Buffer(Float), count: Int, resolution: Int,
-                 splits: view Buffer(Float), texelWorld: view Buffer(Float),
-                 depthRange: view Buffer(Float)) unsafe extern("rae_sm_begin")
+func shadowBegin(
+  cascades: view Buffer(Float)
+  count: Int
+  resolution: Int
+  splits: view Buffer(Float)
+  texelWorld: view Buffer(Float)
+  depthRange: view Buffer(Float)
+) unsafe extern("rae_sm_begin")
 
 func nativeShadowDraw(mesh: Int, model: view Mat4) unsafe extern("rae_sm_queue_mesh")
 
 func shadowDraw(mesh: copy Int, model: view Mat4) {
-  unsafe { nativeShadowDraw(mesh: mesh, model: model) }
+  unsafe {
+    nativeShadowDraw(mesh: mesh, model: model)
+  }
 }
 
-func nativeShadowDrawSkinned(mesh: Int, model: view Mat4, paletteBase: Int) unsafe extern("rae_sm_queue_skinned")
+func nativeShadowDrawSkinned(
+  mesh: Int
+  model: view Mat4
+  paletteBase: Int
+) unsafe extern("rae_sm_queue_skinned")
 
 func shadowDrawSkinned(mesh: copy Int, model: view Mat4, paletteBase: copy Int) {
-  unsafe { nativeShadowDrawSkinned(mesh: mesh, model: model, paletteBase: paletteBase) }
+  unsafe {
+    nativeShadowDrawSkinned(mesh: mesh, model: model, paletteBase: paletteBase)
+  }
 }
 
-func nativeShadowMetaballs(packedBalls: view Buffer(Float), count: Int, smoothing: Float) unsafe extern("rae_sm_record_metaballs")
+func nativeShadowMetaballs(
+  packedBalls: view Buffer(Float)
+  count: Int
+  smoothing: Float
+) unsafe extern("rae_sm_record_metaballs")
 
 func nativeShadowDrawCount() unsafe extern("rae_sm_draw_count") ret Int
 
 func shadowDrawCount() ret Int {
-  unsafe { ret nativeShadowDrawCount() }
+  unsafe {
+    ret nativeShadowDrawCount()
+  }
 }
 
 func nativeShadowShutdown() unsafe extern("rae_sm_shutdown")
 
 func shadowShutdown() {
-  unsafe { nativeShadowShutdown() }
+  unsafe {
+    nativeShadowShutdown()
+  }
 }
 
 # ----- skinned meshes (#374) ------------------------------------------
 # A second vertex format and pipeline for skeletally animated geometry.
 # Separate from the static path because a ground plane should not carry
 # joint indices it can never read — see runtime_gpu3d_skin.c.
-func nativeSkinnedMeshCreate(verts: view Buffer(Float), vertCount: Int, indices: view Buffer(Int), indexCount: Int) unsafe extern("rae_ext_Gpu3d_skinnedMeshCreate") ret Int
+func nativeSkinnedMeshCreate(
+  verts: view Buffer(Float)
+  vertCount: Int
+  indices: view Buffer(Int)
+  indexCount: Int
+) unsafe extern("rae_ext_Gpu3d_skinnedMeshCreate") ret Int
 
-func skinnedMeshCreate(verts: view Buffer(Float), vertCount: copy Int, indices: view Buffer(Int), indexCount: copy Int) ret Int {
-  unsafe { ret nativeSkinnedMeshCreate(verts: verts, vertCount: vertCount, indices: indices, indexCount: indexCount) }
+func skinnedMeshCreate(
+  verts: view Buffer(Float)
+  vertCount: copy Int
+  indices: view Buffer(Int)
+  indexCount: copy Int
+) ret Int {
+  unsafe {
+    ret nativeSkinnedMeshCreate(
+      verts: verts
+      vertCount: vertCount
+      indices: indices
+      indexCount: indexCount
+    )
+  }
 }
 
-func nativeSetPalette(rows: view Buffer(Float), jointCount: Int) unsafe extern("rae_ext_Gpu3d_setPalette")
+func nativeSetPalette(
+  rows: view Buffer(Float)
+  jointCount: Int
+) unsafe extern("rae_ext_Gpu3d_setPalette")
 
 func setPalette(rows: view Buffer(Float), jointCount: copy Int) {
-  unsafe { nativeSetPalette(rows: rows, jointCount: jointCount) }
+  unsafe {
+    nativeSetPalette(rows: rows, jointCount: jointCount)
+  }
 }
 
 # Skinned draw (#514): C validates the mesh + draw limit, uploads the per-frame
 # palette (if dirty) and the per-draw record, and returns the firstInstance slot
 # (or -1); Rae encodes the instanced DrawIndexed below.
-func nativeG3dPushSkinnedDraw(mesh: Int, model: view Mat4, r: Float, g: Float, b: Float, metallic: Float, roughness: Float) unsafe extern("rae_g3d_push_skinned_draw") ret Int
+func nativeG3dPushSkinnedDraw(
+  mesh: Int
+  model: view Mat4
+  r: Float
+  g: Float
+  b: Float
+  metallic: Float
+  roughness: Float
+) unsafe extern("rae_g3d_push_skinned_draw") ret Int
 
-func g3dPushSkinnedDraw(mesh: copy Int, model: view Mat4, r: copy Float, g: copy Float, b: copy Float, metallic: copy Float, roughness: copy Float) ret Int {
-  unsafe { ret nativeG3dPushSkinnedDraw(mesh: mesh, model: model, r: r, g: g, b: b, metallic: metallic, roughness: roughness) }
+func g3dPushSkinnedDraw(
+  mesh: copy Int
+  model: view Mat4
+  r: copy Float
+  g: copy Float
+  b: copy Float
+  metallic: copy Float
+  roughness: copy Float
+) ret Int {
+  unsafe {
+    ret nativeG3dPushSkinnedDraw(
+      mesh: mesh
+      model: model
+      r: r
+      g: g
+      b: b
+      metallic: metallic
+      roughness: roughness
+    )
+  }
 }
 
 func g3dSkinPipeline() unsafe extern("rae_g3d_skin_pipeline") ret Ptr
@@ -280,19 +486,25 @@ func g3dSkinIbuf(mesh: Int) unsafe extern("rae_g3d_skin_ibuf") ret Ptr
 func nativeG3dSkinIcount(mesh: Int) unsafe extern("rae_g3d_skin_icount") ret Int
 
 func g3dSkinIcount(mesh: copy Int) ret Int {
-  unsafe { ret nativeG3dSkinIcount(mesh: mesh) }
+  unsafe {
+    ret nativeG3dSkinIcount(mesh: mesh)
+  }
 }
 
 func nativeSkinFrameBegin() unsafe extern("rae_ext_Gpu3d_skinFrameBegin")
 
 func skinFrameBegin() {
-  unsafe { nativeSkinFrameBegin() }
+  unsafe {
+    nativeSkinFrameBegin()
+  }
 }
 
 func nativeSkinDrawCount() unsafe extern("rae_ext_Gpu3d_skinDrawCount") ret Int
 
 func skinDrawCount() ret Int {
-  unsafe { ret nativeSkinDrawCount() }
+  unsafe {
+    ret nativeSkinDrawCount()
+  }
 }
 
 func nativeSkinShutdown() unsafe extern("rae_ext_Gpu3d_skinShutdown")

@@ -39,7 +39,9 @@ func renderSceneSdfWorld(world: view World3d) pub {
       if otherEntity.index < headEntity.index {
         let other: SdfPrimitive = componentGet(this: world.sdfs, entity: otherEntity)
         if other.shape is 0 {
-          if other.cluster is head.cluster { isHead = false }
+          if other.cluster is head.cluster {
+            isHead = false
+          }
         }
       }
     }
@@ -70,10 +72,15 @@ func renderSceneSdfWorld(world: view World3d) pub {
         if ballCount > 0 {
           let material: Material3d = componentGet(this: world.materials, entity: headEntity)
           drawMetaballs(
-            packedBalls: packed.data, count: ballCount,
-            packedColors: colors.data, smoothing: head.smoothing,
-            metallic: material.metallic, roughness: material.roughness,
-            emR: material.emission.x, emG: material.emission.y, emB: material.emission.z
+            packedBalls: packed.data
+            count: ballCount
+            packedColors: colors.data
+            smoothing: head.smoothing
+            metallic: material.metallic
+            roughness: material.roughness
+            emR: material.emission.x
+            emG: material.emission.y
+            emB: material.emission.z
           )
         }
       }
@@ -103,7 +110,9 @@ func renderSceneShadowSdfWorld(world: view World3d) pub {
       if otherEntity.index < headEntity.index {
         let other: SdfPrimitive = componentGet(this: world.sdfs, entity: otherEntity)
         if other.shape is 0 {
-          if other.cluster is head.cluster { isHead = false }
+          if other.cluster is head.cluster {
+            isHead = false
+          }
         }
       }
     }

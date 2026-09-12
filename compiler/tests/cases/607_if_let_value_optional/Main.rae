@@ -6,9 +6,15 @@
 #
 # The `opt T` FIELD case stays: viewing into a stored optional is legal, the
 # payload's storage is the place itself.
+type Track {
+  title: String
+  seconds: Int
+}
 
-type Track { title: String, seconds: Int }
-type Player { name: String, nowPlaying: opt Track }
+type Player {
+  name: String
+  nowPlaying: opt Track
+}
 
 func find(tracks: view List(Track), title: view String) ret opt Track {
   loop let track: view Track in tracks {

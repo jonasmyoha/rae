@@ -58,7 +58,11 @@ func uploadMeshData(meshData: view MeshData) ret MeshHandle {
 # same material study as 109: the G-buffer's whole job is to carry these
 # two parameters to the lighting pass intact, so a scene that sweeps both
 # is what makes a wrong material channel visible rather than plausible.
-func buildScene(sphere: view MeshHandle, ground: view MeshHandle, torus: view MeshHandle) ret World3d {
+func buildScene(
+  sphere: view MeshHandle
+  ground: view MeshHandle
+  torus: view MeshHandle
+) ret World3d {
   var world: World3d = create()
   let noEmit: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
   let noRot: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
@@ -74,11 +78,29 @@ func buildScene(sphere: view MeshHandle, ground: view MeshHandle, torus: view Me
       # Hue varies across the grid so the albedo channel is legible as
       # something other than one flat colour.
       let mat: Material3d = {
-        baseColor: Vec3.create(x: 0.85, y: 0.2 + row.toFloat() * 0.15, z: 0.25 + col.toFloat() * 0.15),
-        metallic: metallic, roughness: roughness, emission: noEmit, toon: false
+        baseColor: Vec3.create(
+          x: 0.85
+          y: 0.2 + row.toFloat() * 0.15
+          z: 0.25 + col.toFloat() * 0.15
+        )
+        metallic: metallic
+        roughness: roughness
+        emission: noEmit
+        toon: false
       }
-      let pos: Vec3 = Vec3.create(x: (col.toFloat() - 2.0) * 2.4, y: (row.toFloat() - 2.0) * 2.4, z: 0.5)
-      let e: EntityId = world3dAddMeshInstance(world: world, mesh: sphere, material: mat, position: pos, rotation: noRot, scale: unit)
+      let pos: Vec3 = Vec3.create(
+        x: (col.toFloat() - 2.0) * 2.4
+        y: (row.toFloat() - 2.0) * 2.4
+        z: 0.5
+      )
+      let e: EntityId = world3dAddMeshInstance(
+        world: world
+        mesh: sphere
+        material: mat
+        position: pos
+        rotation: noRot
+        scale: unit
+      )
     }
   }
 
@@ -88,11 +110,37 @@ func buildScene(sphere: view MeshHandle, ground: view MeshHandle, torus: view Me
   # albedo, so an emitter is authored by setting both. A value above 1
   # is the point: it proves the log encoding carries HDR range that a
   # plain 8-bit channel could not.
-  let emitMat: Material3d = { baseColor: Vec3.create(x: 0.35, y: 0.7, z: 1.0), metallic: 0.0, roughness: 0.5, emission: Vec3.create(x: 4.0, y: 4.0, z: 4.0), toon: false }
-  let torusE: EntityId = world3dAddMeshInstance(world: world, mesh: torus, material: emitMat, position: Vec3.create(x: 0.0, y: 0.0, z: 3.6), rotation: noRot, scale: unit)
+  let emitMat: Material3d = {
+    baseColor: Vec3.create(x: 0.35, y: 0.7, z: 1.0)
+    metallic: 0.0
+    roughness: 0.5
+    emission: Vec3.create(x: 4.0, y: 4.0, z: 4.0)
+    toon: false
+  }
+  let torusE: EntityId = world3dAddMeshInstance(
+    world: world
+    mesh: torus
+    material: emitMat
+    position: Vec3.create(x: 0.0, y: 0.0, z: 3.6)
+    rotation: noRot
+    scale: unit
+  )
 
-  let groundMat: Material3d = { baseColor: Vec3.create(x: 0.42, y: 0.43, z: 0.45), metallic: 0.0, roughness: 0.9, emission: noEmit, toon: false }
-  let groundE: EntityId = world3dAddMeshInstance(world: world, mesh: ground, material: groundMat, position: Vec3.create(x: 0.0, y: 0.0, z: 0.0 - 0.7), rotation: noRot, scale: unit)
+  let groundMat: Material3d = {
+    baseColor: Vec3.create(x: 0.42, y: 0.43, z: 0.45)
+    metallic: 0.0
+    roughness: 0.9
+    emission: noEmit
+    toon: false
+  }
+  let groundE: EntityId = world3dAddMeshInstance(
+    world: world
+    mesh: ground
+    material: groundMat
+    position: Vec3.create(x: 0.0, y: 0.0, z: 0.0 - 0.7)
+    rotation: noRot
+    scale: unit
+  )
   ret world
 }
 
@@ -117,7 +165,12 @@ func main() ret Int {
 
   let sphereData: MeshData = makeSphere(rings: 32, segments: 48)
   let planeData: MeshData = makePlane(size: 40.0, segments: 1)
-  let torusData: MeshData = makeTorus(majorR: 1.0, minorR: 0.35, majorSegs: 96, minorSegs: 48)
+  let torusData: MeshData = makeTorus(
+    majorR: 1.0
+    minorR: 0.35
+    majorSegs: 96
+    minorSegs: 48
+  )
   let sphere: MeshHandle = uploadMeshData(meshData: sphereData)
   let ground: MeshHandle = uploadMeshData(meshData: planeData)
   let torus: MeshHandle = uploadMeshData(meshData: torusData)
@@ -172,14 +225,27 @@ func main() ret Int {
     }
 
     let t: Float = (Gpu2d.nowSeconds() - startT) as Float
-    camera.position = orbitEye(targetX: camera.target.x, targetY: camera.target.y, targetZ: camera.target.z, yaw: yaw, pitch: pitch, dist: dist)
+    camera.position = orbitEye(
+      targetX: camera.target.x
+      targetY: camera.target.y
+      targetZ: camera.target.z
+      yaw: yaw
+      pitch: pitch
+      dist: dist
+    )
 
     let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
     if Gpu2d.renderGate() {
-      renderDeferredFrameWorld(renderer: renderer, world: world, camera: camera, light: light, aspect: aspect)
+      renderDeferredFrameWorld(
+        renderer: renderer
+        world: world
+        camera: camera
+        light: light
+        aspect: aspect
+      )
     }
   }
-  shutdownDeferredRenderer(renderer: renderer)   # #904: the renderer-owned GPU manager, before the C shutdown
+  shutdownDeferredRenderer(renderer: renderer)  # #904: the renderer-owned GPU manager, before the C shutdown
   Gbuffer.shutdownAll()
   Gpu2d.closeWindow()
   ret 0

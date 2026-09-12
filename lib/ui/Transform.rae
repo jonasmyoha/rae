@@ -87,8 +87,12 @@ func runtimeOffsetOf(world: view UiWorld, entity: view EntityId) ret Vec2 {
 # Active / TransformFx into a WorldVisual. Clamped to [0,1]. Roots start from
 # parentAlpha=1 / parentVisible=true. (Alpha/visible are the UI-specific concern
 # the general geometry TransformSystem does not track — see accumulateVisibility.)
-func composeVisual(world: view UiWorld, entity: view EntityId,
-                   parentAlpha: view Float, parentVisible: view Bool) ret WorldVisual {
+func composeVisual(
+  world: view UiWorld
+  entity: view EntityId
+  parentAlpha: view Float
+  parentVisible: view Bool
+) ret WorldVisual {
   let fx: TransformFx = fxOf(world: world, entity: entity)
   var visible: Bool = parentVisible
   if active(world: world, entity: entity) is false {
@@ -136,18 +140,32 @@ func accumulateVisibility(world: mod UiWorld) {
   loop var i: Int = 0, i < componentCount(this: world.localTransforms), ++i {
     let entity: EntityId = componentEntityAt(this: world.localTransforms, i: i)
     if componentHas(this: world.parents, entity: entity) is false {
-      let wv: WorldVisual = composeVisual(world: world, entity: entity, parentAlpha: 1.0, parentVisible: true)
+      let wv: WorldVisual = composeVisual(
+        world: world
+        entity: entity
+        parentAlpha: 1.0
+        parentVisible: true
+      )
       componentSet(this: world.worldVisuals, entity: entity, data: wv)
     }
   }
   # Parented entities, parent before child.
-  let order: view List(EntityId) => depthOrder(state: world.hierarchyOrder, parents: world.parents, childrens: world.childrens)
+  let order: view List(EntityId) => depthOrder(
+    state: world.hierarchyOrder
+    parents: world.parents
+    childrens: world.childrens
+  )
   loop var i: Int = 0, i < order.length, ++i {
     if let entity: EntityId = order.copyAt(index: i) {
       if componentHas(this: world.parents, entity: entity) {
         let link: Parent = componentGet(this: world.parents, entity: entity)
         let parentWv: WorldVisual = worldVisualOf(world: world, entity: link.parent)
-        let wv: WorldVisual = composeVisual(world: world, entity: entity, parentAlpha: parentWv.alpha, parentVisible: parentWv.visible)
+        let wv: WorldVisual = composeVisual(
+          world: world
+          entity: entity
+          parentAlpha: parentWv.alpha
+          parentVisible: parentWv.visible
+        )
         componentSet(this: world.worldVisuals, entity: entity, data: wv)
       }
     }

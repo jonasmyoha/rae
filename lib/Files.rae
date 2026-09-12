@@ -33,7 +33,6 @@
 #     distinguish "missing folder" from "empty folder" should pair
 #     `listDir` with `Sys.exists` first.
 
-
 # ----- File -----------------------------------------------------------
 
 # A single directory entry. Construct via `listDir`, not by hand —
@@ -112,7 +111,9 @@ func rae_sys_list_dir(folder: String) unsafe extern ret String
 # ordering.
 func listDir(folder: view String) pub ret List(File) {
   var raw: String = ""
-  unsafe { raw = rae_sys_list_dir(folder: folder) }
+  unsafe {
+    raw = rae_sys_list_dir(folder: folder)
+  }
   let lines: List(String) = raw.split(sep: "\n")
   let result: List(File) = List.create(File, cap: lines.length)
   var i: Int = 0

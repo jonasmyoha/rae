@@ -15,19 +15,34 @@ type TetrisHudState {
 
 func createTetrisHudState() ret TetrisHudState {
   ret TetrisHudState {
-    score: 0 - 1, lines: 0 - 1, level: 0 - 1
-    nextKind: 0 - 1, gameState: 0 - 1
+    score: 0 - 1
+    lines: 0 - 1
+    level: 0 - 1
+    nextKind: 0 - 1
+    gameState: 0 - 1
   }
 }
 
 func previewColor(kind: TetrominoKind) ret Int {
   let colorId: Int = getKindId(kind: kind)
-  if colorId is 1 { ret 0xFF64E6FF }
-  if colorId is 2 { ret 0xFF78A0FF }
-  if colorId is 3 { ret 0xFFFFB478 }
-  if colorId is 4 { ret 0xFFFFE678 }
-  if colorId is 5 { ret 0xFF78FFA0 }
-  if colorId is 6 { ret 0xFFC8A0FF }
+  if colorId is 1 {
+    ret 0xFF64E6FF
+  }
+  if colorId is 2 {
+    ret 0xFF78A0FF
+  }
+  if colorId is 3 {
+    ret 0xFFFFB478
+  }
+  if colorId is 4 {
+    ret 0xFFFFE678
+  }
+  if colorId is 5 {
+    ret 0xFF78FFA0
+  }
+  if colorId is 6 {
+    ret 0xFFC8A0FF
+  }
   ret 0xFFFF788C
 }
 
@@ -40,12 +55,21 @@ func drawNextPiecePreview(kind: TetrominoKind, canvas: mod Gpu2dCanvas) {
   loop pieceY < 4 {
     var pieceX: Int = 0
     loop pieceX < 4 {
-      if getShapeCell(kind: kind, rot: 0, px: pieceX, py: pieceY) is 1 {
-        Gpu2d.drawRoundedRect(canvas: canvas, 
+      if getShapeCell(
+        kind: kind
+        rot: 0
+        px: pieceX
+        py: pieceY
+      ) is 1 {
+        Gpu2d.drawRoundedRect(
+          canvas: canvas
           x: previewX + pieceX.toFloat() * cellSize
           y: previewY + pieceY.toFloat() * cellSize
-          world: cellSize - 1.0, h: cellSize - 1.0
-          radius: 3.0, color: color)
+          world: cellSize - 1.0
+          h: cellSize - 1.0
+          radius: 3.0
+          color: color
+        )
       }
       pieceX = pieceX + 1
     }
@@ -56,9 +80,15 @@ func drawNextPiecePreview(kind: TetrominoKind, canvas: mod Gpu2dCanvas) {
 func syncTetrisHud(uiWorld: mod UiWorld, game: view World, state: mod TetrisHudState) {
   let nextKindId: Int = getKindId(kind: game.nextKind)
   var stateId: Int = 0
-  if game.state is GameState.playing { stateId = 1 }
-  if game.state is GameState.paused { stateId = 2 }
-  if game.state is GameState.gameOver { stateId = 3 }
+  if game.state is GameState.playing {
+    stateId = 1
+  }
+  if game.state is GameState.paused {
+    stateId = 2
+  }
+  if game.state is GameState.gameOver {
+    stateId = 3
+  }
   if game.score is not state.score {
     setNodeText(world: uiWorld, nodeId: "ScoreValue", value: "{game.score}")
     state.score = game.score

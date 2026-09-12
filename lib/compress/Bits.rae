@@ -12,127 +12,138 @@
 # every call site. `bufAt` falls back to 0 (byte/code/table values); `chainAt`
 # falls back to -1 (the "no candidate" sentinel used by the LZ77 hash chains).
 func bufAt(list: view List(Int), index: view Int) ret Int {
-    if let value: Int = list.copyAt(index: index) { ret value }
-    ret 0
+  if let value: Int = list.copyAt(index: index) {
+    ret value
+  }
+  ret 0
 }
+
 func chainAt(list: view List(Int), index: view Int) ret Int {
-    if let value: Int = list.copyAt(index: index) { ret value }
-    ret -1
+  if let value: Int = list.copyAt(index: index) {
+    ret value
+  }
+  ret -1
 }
 
 type BitReader {
-    data: List(Int)   # source bytes (each 0..255)
-    len: Int          # number of valid bytes
-    pos: Int          # next byte index
-    bit: Int          # next bit within data[pos], 0..7 (LSB-first)
-    overrun: Bool     # set true if a read ran past the end (truncated stream)
+  data: List(Int)  # source bytes (each 0..255)
+  len: Int  # number of valid bytes
+  pos: Int  # next byte index
+  bit: Int  # next bit within data[pos], 0..7 (LSB-first)
+  overrun: Bool  # set true if a read ran past the end (truncated stream)
 }
 
 func newBitReader(data: own List(Int), len: view Int) ret BitReader {
-    ret BitReader { data: data, len: len, pos: 0, bit: 0, overrun: false }
+  ret BitReader {
+    data: data
+    len: len
+    pos: 0
+    bit: 0
+    overrun: false
+  }
 }
 
 # Read a single bit (LSB-first). Advances the cursor.
 func getBit(this: mod BitReader) ret Int {
-    if this.pos >= this.len {
-        this.overrun = true
-        ret 0
-    }
-    if let byte: Int = this.data.copyAt(index: this.pos) {
-        let bitValue: Int = (byte shr this.bit) bitand 1
-        this.bit = this.bit + 1
-        if this.bit is 8 {
-            this.bit = 0
-            this.pos = this.pos + 1
-        }
-        ret bitValue
-    }
+  if this.pos >= this.len {
+    this.overrun = true
     ret 0
+  }
+  if let byte: Int = this.data.copyAt(index: this.pos) {
+    let bitValue: Int = (byte shr this.bit) bitand 1
+    this.bit = this.bit + 1
+    if this.bit is 8 {
+      this.bit = 0
+      this.pos = this.pos + 1
+    }
+    ret bitValue
+  }
+  ret 0
 }
 
 # Read n bits (LSB-first: the first bit read is the least significant).
 func getBits(this: mod BitReader, count: view Int) ret Int {
-    var result: Int = 0
-    var i: Int = 0
-    loop i < count {
-        result = result bitor (getBit(this: this) shl i)
-        i = i + 1
-    }
-    ret result
+  var result: Int = 0
+  var i: Int = 0
+  loop i < count {
+    result = result bitor (getBit(this: this) shl i)
+    i = i + 1
+  }
+  ret result
 }
 
 # Discard any remaining bits in the current byte, aligning to the next byte
 # boundary (used before a stored/uncompressed block).
 func alignToByte(this: mod BitReader) {
-    if this.bit is not 0 {
-        this.bit = 0
-        this.pos = this.pos + 1
-    }
+  if this.bit is not 0 {
+    this.bit = 0
+    this.pos = this.pos + 1
+  }
 }
 
 # Read one whole byte directly (the cursor must be byte-aligned).
 func getByte(this: mod BitReader) ret Int {
-    if this.pos >= this.len {
-        this.overrun = true
-        ret 0
-    }
-    if let byte: Int = this.data.copyAt(index: this.pos) {
-        this.pos = this.pos + 1
-        ret byte
-    }
+  if this.pos >= this.len {
+    this.overrun = true
     ret 0
+  }
+  if let byte: Int = this.data.copyAt(index: this.pos) {
+    this.pos = this.pos + 1
+    ret byte
+  }
+  ret 0
 }
 
 # LSB-first bit writer for DEFLATE deflate: accumulates bits into a partial
 # byte and flushes completed bytes into `out`. Plain values are written
 # LSB-first; Huffman codes are written MSB-first (see writeCode).
 type BitWriter {
-    out: List(Int)   # completed bytes
-    acc: Int         # partial byte being filled
-    nbits: Int       # number of valid bits in acc (0..7)
+  out: List(Int)  # completed bytes
+  acc: Int  # partial byte being filled
+  nbits: Int  # number of valid bits in acc (0..7)
 }
 
 func newBitWriter() ret BitWriter {
-    ret BitWriter { out: List.create(Int, cap: 256), acc: 0, nbits: 0 }
+  ret BitWriter { out: List.create(Int, cap: 256), acc: 0, nbits: 0 }
 }
 
 # Append one bit at the next (increasing) bit position of the current byte.
 func putBit(this: mod BitWriter, bit: view Int) {
-    this.acc = this.acc bitor ((bit bitand 1) shl this.nbits)
-    this.nbits = this.nbits + 1
-    if this.nbits is 8 {
-        this.out.add(value: this.acc)
-        this.acc = 0
-        this.nbits = 0
-    }
+  this.acc = this.acc bitor ((bit bitand 1) shl this.nbits)
+  this.nbits = this.nbits + 1
+  if this.nbits is 8 {
+    this.out.add(value: this.acc)
+    this.acc = 0
+    this.nbits = 0
+  }
 }
 
 # Write `n` bits of `value`, least-significant bit first (for headers, lengths,
 # and DEFLATE "extra bits").
 func putBits(this: mod BitWriter, value: view Int, count: view Int) {
-    var i: Int = 0
-    loop i < count {
-        putBit(this: this, bit: (value shr i) bitand 1)
-        i = i + 1
-    }
+  var i: Int = 0
+  loop i < count {
+    putBit(this: this, bit: (value shr i) bitand 1)
+    i = i + 1
+  }
 }
 
 # Write a Huffman code of `len` bits, most-significant bit first (RFC 1951
 # §3.1.1: Huffman codes are packed starting with the MSB of the code).
 func putCode(this: mod BitWriter, code: view Int, len: view Int) {
-    var i: Int = len - 1
-    loop i >= 0 {
-        putBit(this: this, bit: (code shr i) bitand 1)
-        i = i - 1
-    }
+  var i: Int = len - 1
+  loop i >= 0 {
+    putBit(this: this, bit: (code shr i) bitand 1)
+    i = i - 1
+  }
 }
 
 # Flush any partial byte (zero-padded) and return the completed byte list.
 func finishWriter(this: mod BitWriter) ret List(Int) {
-    if this.nbits > 0 {
-        this.out.add(value: this.acc)
-        this.acc = 0
-        this.nbits = 0
-    }
-    ret this.out
+  if this.nbits > 0 {
+    this.out.add(value: this.acc)
+    this.acc = 0
+    this.nbits = 0
+  }
+  ret this.out
 }

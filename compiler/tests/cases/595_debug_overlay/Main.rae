@@ -12,9 +12,16 @@ func check(label: view String, ok: view Bool) {
 }
 
 func main() ret Int {
-  var d: DebugOverlay = createDebugOverlay(button: true, fps: true,
-                                           memory: true, heartbeat: false)
-  check(label: "features are opted into individually", ok: d.wantButton and d.wantFps and d.wantMemory and d.wantHeartbeat is false)
+  var d: DebugOverlay = createDebugOverlay(
+    button: true
+    fps: true
+    memory: true
+    heartbeat: false
+  )
+  check(
+    label: "features are opted into individually"
+    ok: d.wantButton and d.wantFps and d.wantMemory and d.wantHeartbeat is false
+  )
   check(label: "dialog starts closed", ok: d.open is false)
 
   # FPS over a moving WINDOW, not 1/dt: one slow frame should not make the
@@ -26,7 +33,10 @@ func main() ret Int {
     t = t + 0.01
     i = i + 1
   }
-  check(label: "steady 10ms frames read as 100 fps", ok: debugOverlayFps(debugOverlay: d) > 99.0 and debugOverlayFps(debugOverlay: d) < 101.0)
+  check(
+    label: "steady 10ms frames read as 100 fps"
+    ok: debugOverlayFps(debugOverlay: d) > 99.0 and debugOverlayFps(debugOverlay: d) < 101.0
+  )
 
   # A frame that did NO work must not count, or an idle app parked in
   # waitEvents would report a healthy frame rate it is not achieving.

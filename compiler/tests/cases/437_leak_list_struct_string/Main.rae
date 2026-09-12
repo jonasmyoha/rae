@@ -33,12 +33,18 @@ func buildList() {
   # (including its String field) into the list. Without pool_take
   # on the makeEntity call site, the surrounding statement's
   # pool_flush would free those heaps and crash on list drop.
-  xs.add(value: makeEntity(entId: "id-".concat(other: "root"),
-                           entKind: "kind-".concat(other: "container")))
-  xs.add(value: makeEntity(entId: "id-".concat(other: "title"),
-                           entKind: "kind-".concat(other: "text")))
-  xs.add(value: makeEntity(entId: "id-".concat(other: "track"),
-                           entKind: "kind-".concat(other: "row")))
+  xs.add(
+    value: makeEntity(
+      entId: "id-".concat(other: "root")
+      entKind: "kind-".concat(other: "container")
+    )
+  )
+  xs.add(
+    value: makeEntity(entId: "id-".concat(other: "title"), entKind: "kind-".concat(other: "text"))
+  )
+  xs.add(
+    value: makeEntity(entId: "id-".concat(other: "track"), entKind: "kind-".concat(other: "row"))
+  )
   if xs.length < 0 {
     log("never")
   }

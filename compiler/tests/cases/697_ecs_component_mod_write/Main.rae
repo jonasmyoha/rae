@@ -5,8 +5,10 @@ open ecs/ComponentTable
 # storage — gameplay code mutates a component in place, no copy-mutate-set. This
 # proves the write persists without componentSet, that a componentGet COPY does
 # NOT, and that in-place integration over a loop accumulates.
-
-type Velocity { dx: Int, dy: Int }
+type Velocity {
+  dx: Int
+  dy: Int
+}
 
 func main() {
   var vels: ComponentTable(Velocity) = ComponentTable.create(Velocity)

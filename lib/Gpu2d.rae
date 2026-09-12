@@ -26,64 +26,109 @@ open webgpu/Context
 # configure its swapchain. Replaces sdl3.initWindow for the GPU render path —
 # do not also call sdl3.initWindow (that one attaches an SDL_Renderer that
 # fights wgpu for the drawable).
-func nativeInitWindow(width: Int, height: Int, title: String) unsafe extern("rae_ext_Gpu2d_initWindow")
+func nativeInitWindow(
+  width: Int
+  height: Int
+  title: String
+) unsafe extern("rae_ext_Gpu2d_initWindow")
+
 func initWindow(width: copy Int, height: copy Int, title: copy String) {
-  unsafe { nativeInitWindow(width: width, height: height, title: title) }
+  unsafe {
+    nativeInitWindow(width: width, height: height, title: title)
+  }
 }
 
 # Pump the OS event queue; returns true once the user has asked to close the
 # window (or a headless time budget elapsed). Call once per frame.
 func nativePollClose() unsafe extern("rae_ext_Gpu2d_pollClose") ret Bool
+
 func pollClose() ret Bool {
-  unsafe { ret nativePollClose() }
+  unsafe {
+    ret nativePollClose()
+  }
 }
 
 # Drawable size in physical pixels (HiDPI-aware; may exceed the logical size).
 func nativeWindowWidth() unsafe extern("rae_ext_Gpu2d_windowWidth") ret Int
+
 func windowWidth() ret Int {
-  unsafe { ret nativeWindowWidth() }
+  unsafe {
+    ret nativeWindowWidth()
+  }
 }
+
 func nativeWindowHeight() unsafe extern("rae_ext_Gpu2d_windowHeight") ret Int
+
 func windowHeight() ret Int {
-  unsafe { ret nativeWindowHeight() }
+  unsafe {
+    ret nativeWindowHeight()
+  }
 }
+
 func nativeSetWindowPosition(x: Int, y: Int) unsafe extern("rae_ext_Gpu2d_setWindowPosition")
+
 func setWindowPosition(x: copy Int, y: copy Int) {
-  unsafe { nativeSetWindowPosition(x: x, y: y) }
+  unsafe {
+    nativeSetWindowPosition(x: x, y: y)
+  }
 }
+
 func nativeSetWindowSize(w: Int, h: Int) unsafe extern("rae_ext_Gpu2d_setWindowSize")
+
 func setWindowSize(w: copy Int, h: copy Int) {
-  unsafe { nativeSetWindowSize(w: w, h: h) }
+  unsafe {
+    nativeSetWindowSize(w: w, h: h)
+  }
 }
+
 func nativeWindowPositionX() unsafe extern("rae_ext_Gpu2d_windowPositionX") ret Int
+
 func windowPositionX() ret Int {
-  unsafe { ret nativeWindowPositionX() }
+  unsafe {
+    ret nativeWindowPositionX()
+  }
 }
+
 func nativeWindowPositionY() unsafe extern("rae_ext_Gpu2d_windowPositionY") ret Int
+
 func windowPositionY() ret Int {
-  unsafe { ret nativeWindowPositionY() }
+  unsafe {
+    ret nativeWindowPositionY()
+  }
 }
+
 # True once after the OS reports a window resize (edge-triggered; the flag
 # is cleared on read). The app recomputes its viewport/extent and rebuilds.
 func nativeWindowResized() unsafe extern("rae_ext_Gpu2d_windowResized") ret Bool
+
 func windowResized() ret Bool {
-  unsafe { ret nativeWindowResized() }
+  unsafe {
+    ret nativeWindowResized()
+  }
 }
+
 # One-shot, like windowResized: reading it clears it. Persisting where the user
 # put the window is built ON these in Rae (lib/ui/WindowGeometry.rae), not down
 # in the runtime.
 func nativeWindowMoved() unsafe extern("rae_ext_Gpu2d_windowMoved") ret Bool
+
 func windowMoved() ret Bool {
-  unsafe { ret nativeWindowMoved() }
+  unsafe {
+    ret nativeWindowMoved()
+  }
 }
+
 # False while the window is hidden / minimized / occluded (app switched away or
 # fully covered). Apps should skip their render and park in waitEvents when this
 # is false: rendering while dark wastes power and, on macOS, leaks GPU memory
 # (the Metal layer stops recycling drawables while backgrounded). Not edge-
 # triggered — reflects the current state every call.
 func nativeWindowVisible() unsafe extern("rae_g2d_window_visible") ret Bool
+
 func windowVisible() ret Bool {
-  unsafe { ret nativeWindowVisible() }
+  unsafe {
+    ret nativeWindowVisible()
+  }
 }
 
 # The universal per-frame render decision, so no app has to hand-roll it. Render
@@ -97,7 +142,9 @@ func windowVisible() ret Bool {
 # being a per-app footgun — the engine present path refuses to present while dark
 # as a hard backstop, but skipping the whole render is what avoids the waste.
 func shouldRenderFrame(appNeedsRender: view Bool) ret Bool {
-  if windowVisible() is false { ret false }
+  if windowVisible() is false {
+    ret false
+  }
   ret appNeedsRender
 }
 
@@ -108,7 +155,9 @@ func shouldRenderFrame(appNeedsRender: view Bool) ret Bool {
 # no else branch. Event-driven loops that already compute a needsRender should
 # use shouldRenderFrame + their own waitEvents instead.
 func renderGate() ret Bool {
-  if windowVisible() { ret true }
+  if windowVisible() {
+    ret true
+  }
   waitEvents(timeoutSec: 0.25)
   ret false
 }
@@ -122,26 +171,43 @@ func renderGate() ret Bool {
 #   design units  --(scale + offset / fit)-->  physical px  --> clip space.
 # fit: 0 = fit (contain, letterboxed), 1 = fill (cover, cropped), 2 = stretch.
 # Pass width/height <= 0 to return to identity (physical-pixel) coordinates.
-func nativeSetDesignResolution(width: Float, height: Float, fit: Int) unsafe extern("rae_ext_Gpu2d_setDesignResolution")
+func nativeSetDesignResolution(
+  width: Float
+  height: Float
+  fit: Int
+) unsafe extern("rae_ext_Gpu2d_setDesignResolution")
+
 func setDesignResolution(width: copy Float, height: copy Float, fit: copy Int) {
-  unsafe { nativeSetDesignResolution(width: width, height: height, fit: fit) }
+  unsafe {
+    nativeSetDesignResolution(width: width, height: height, fit: fit)
+  }
 }
 
 # Current design-canvas size in design units (the window's physical size when
 # no design resolution is set). Lay out against these.
 func nativeDesignWidth() unsafe extern("rae_ext_Gpu2d_designWidth") ret Float
+
 func designWidth() ret Float {
-  unsafe { ret nativeDesignWidth() }
+  unsafe {
+    ret nativeDesignWidth()
+  }
 }
+
 func nativeDesignHeight() unsafe extern("rae_ext_Gpu2d_designHeight") ret Float
+
 func designHeight() ret Float {
-  unsafe { ret nativeDesignHeight() }
+  unsafe {
+    ret nativeDesignHeight()
+  }
 }
 
 # Device pixel ratio: physical pixels per logical point (2.0 on retina).
 func nativeDpr() unsafe extern("rae_ext_Gpu2d_dpr") ret Float
+
 func dpr() ret Float {
-  unsafe { ret nativeDpr() }
+  unsafe {
+    ret nativeDpr()
+  }
 }
 
 # --- Input (valid after pollClose each frame) ----------------------------
@@ -149,88 +215,155 @@ func dpr() ret Float {
 # so these read this frame's input. Coordinates are in DESIGN units (the same
 # space drawRect etc. take), so hit-testing lines up with what was drawn.
 func nativePointerX() unsafe extern("rae_ext_Gpu2d_pointerX") ret Float
+
 func pointerX() ret Float {
-  unsafe { ret nativePointerX() }
+  unsafe {
+    ret nativePointerX()
+  }
 }
+
 func nativePointerY() unsafe extern("rae_ext_Gpu2d_pointerY") ret Float
+
 func pointerY() ret Float {
-  unsafe { ret nativePointerY() }
+  unsafe {
+    ret nativePointerY()
+  }
 }
+
 # Multitouch (#526): active finger count + per-finger position in design units.
 # On desktop this is 0 (use the mouse pointer); on iOS every touch is reported so
 # a UI can drive a joystick with one finger and the camera with another.
 func nativeTouchCount() unsafe extern("rae_ext_Gpu2d_touchCount") ret Int
+
 func touchCount() ret Int {
-  unsafe { ret nativeTouchCount() }
+  unsafe {
+    ret nativeTouchCount()
+  }
 }
+
 func nativeTouchX(index: Int) unsafe extern("rae_ext_Gpu2d_touchX") ret Float
+
 func touchX(index: copy Int) ret Float {
-  unsafe { ret nativeTouchX(index: index) }
+  unsafe {
+    ret nativeTouchX(index: index)
+  }
 }
+
 func nativeTouchY(index: Int) unsafe extern("rae_ext_Gpu2d_touchY") ret Float
+
 func touchY(index: copy Int) ret Float {
-  unsafe { ret nativeTouchY(index: index) }
+  unsafe {
+    ret nativeTouchY(index: index)
+  }
 }
+
 # Stable finger id (grab a finger at press, hold it for the whole drag) + whether
 # it went down this frame (edge). id is -1 out of range.
 func nativeTouchId(index: Int) unsafe extern("rae_ext_Gpu2d_touchId") ret Int
+
 func touchId(index: copy Int) ret Int {
-  unsafe { ret nativeTouchId(index: index) }
+  unsafe {
+    ret nativeTouchId(index: index)
+  }
 }
+
 func nativeTouchPressed(index: Int) unsafe extern("rae_ext_Gpu2d_touchPressed") ret Bool
+
 func touchPressed(index: copy Int) ret Bool {
-  unsafe { ret nativeTouchPressed(index: index) }
+  unsafe {
+    ret nativeTouchPressed(index: index)
+  }
 }
+
 # OS safe-area insets (notch / home indicator / rounded corners) in design units.
 # 0 on platforms without insets. Lay HUD + UI chrome inside these.
 func nativeSafeTop() unsafe extern("rae_ext_Gpu2d_safeTop") ret Float
+
 func safeTop() ret Float {
-  unsafe { ret nativeSafeTop() }
+  unsafe {
+    ret nativeSafeTop()
+  }
 }
+
 func nativeSafeBottom() unsafe extern("rae_ext_Gpu2d_safeBottom") ret Float
+
 func safeBottom() ret Float {
-  unsafe { ret nativeSafeBottom() }
+  unsafe {
+    ret nativeSafeBottom()
+  }
 }
+
 func nativeSafeLeft() unsafe extern("rae_ext_Gpu2d_safeLeft") ret Float
+
 func safeLeft() ret Float {
-  unsafe { ret nativeSafeLeft() }
+  unsafe {
+    ret nativeSafeLeft()
+  }
 }
+
 func nativeSafeRight() unsafe extern("rae_ext_Gpu2d_safeRight") ret Float
+
 func safeRight() ret Float {
-  unsafe { ret nativeSafeRight() }
+  unsafe {
+    ret nativeSafeRight()
+  }
 }
+
 # Left mouse button held this frame.
 func nativePointerDown() unsafe extern("rae_ext_Gpu2d_pointerDown") ret Bool
+
 func pointerDown() ret Bool {
-  unsafe { ret nativePointerDown() }
+  unsafe {
+    ret nativePointerDown()
+  }
 }
+
 func nativePointerPressed() unsafe extern("rae_ext_Gpu2d_pointerPressed") ret Bool
+
 func pointerPressed() ret Bool {
-  unsafe { ret nativePointerPressed() }
+  unsafe {
+    ret nativePointerPressed()
+  }
 }
+
 func nativePointerReleased() unsafe extern("rae_ext_Gpu2d_pointerReleased") ret Bool
+
 func pointerReleased() ret Bool {
-  unsafe { ret nativePointerReleased() }
+  unsafe {
+    ret nativePointerReleased()
+  }
 }
+
 # Per-frame mouse-wheel / trackpad delta (positive = scrolled up), matching
 # raylib's getMouseWheelMove semantics.
 func nativeWheelMove() unsafe extern("rae_ext_Gpu2d_wheelMove") ret Float
+
 func wheelMove() ret Float {
-  unsafe { ret nativeWheelMove() }
+  unsafe {
+    ret nativeWheelMove()
+  }
 }
+
 # Desktop cursor kind. 0=arrow, 1=pointer/hand, 2=text, 3=horizontal resize,
 # 4=vertical resize, 5=crosshair, 6=not-allowed.
 func nativeSetMouseCursor(kind: Int) unsafe extern("rae_ext_Gpu2d_setMouseCursor")
+
 func setMouseCursor(kind: copy Int) {
-  unsafe { nativeSetMouseCursor(kind: kind) }
+  unsafe {
+    nativeSetMouseCursor(kind: kind)
+  }
 }
+
 # Monotonic wall-clock seconds since process start (for scroll/animation timing).
 # Epoch seconds. Float64 deliberately: as f32 two calls one frame apart
 # return the SAME value (~1.7e9 has ~128s granularity), so every frame delta
 # would be exactly 0.0. See docs/primitive-types.md.
 func nativeNowSeconds() unsafe extern("rae_ext_Gpu2d_nowSeconds") ret Float64
+
 func nowSeconds() ret Float64 {
-  unsafe { ret nativeNowSeconds() }
+  unsafe {
+    ret nativeNowSeconds()
+  }
 }
 
 # --- Idle wait (hybrid loop) ---------------------------------------------
@@ -239,14 +372,20 @@ func nowSeconds() ret Float64 {
 # Park here when idle so the app sits at ~0% CPU; busy-render (timeout 0) while
 # animating. See docs/ui-render-loop-performance.md.
 func nativeWaitEvents(timeoutSec: Float) unsafe extern("rae_ext_Gpu2d_waitEvents")
+
 func waitEvents(timeoutSec: copy Float) {
-  unsafe { nativeWaitEvents(timeoutSec: timeoutSec) }
+  unsafe {
+    nativeWaitEvents(timeoutSec: timeoutSec)
+  }
 }
 
 # Release the surface + window. The wgpu device stays cached for reuse.
 func nativeCloseWindow() unsafe extern("rae_ext_Gpu2d_closeWindow")
+
 func closeWindow() {
-  unsafe { nativeCloseWindow() }
+  unsafe {
+    nativeCloseWindow()
+  }
 }
 
 # --- Frame ---------------------------------------------------------------
@@ -256,31 +395,61 @@ func closeWindow() {
 # screenshot tail back to C. C keeps the present-flag reset (g2dFrameReset),
 # owns the persistent offscreen colour target and does the present tail.
 func nativeG2dFrameReset() unsafe extern("rae_g2d_frame_reset")
+
 func g2dFrameReset() {
-  unsafe { nativeG2dFrameReset() }
+  unsafe {
+    nativeG2dFrameReset()
+  }
 }
+
 func nativeG2dPresentCleanup() unsafe extern("rae_g2d_present_and_cleanup")
+
 func g2dPresentCleanup() {
-  unsafe { nativeG2dPresentCleanup() }
+  unsafe {
+    nativeG2dPresentCleanup()
+  }
 }
+
 func nativeG2dTick() unsafe extern("rae_g2d_tick")
+
 func g2dTick() {
-  unsafe { nativeG2dTick() }
+  unsafe {
+    nativeG2dTick()
+  }
 }
+
 func nativeG2dOffViewReady() unsafe extern("rae_g2d_off_view_ready") ret Int
+
 func g2dOffViewReady() ret Int {
-  unsafe { ret nativeG2dOffViewReady() }
+  unsafe {
+    ret nativeG2dOffViewReady()
+  }
 }
 
 # Acquire the offscreen target and begin a render pass that clears it to the
 # given linear RGBA colour (components 0..1). Must be paired with endFrame.
 # #915: the frame is a manager Recording on the canvas — its pass stays open
 # for the flushes, endFrame submits it through the manager (tracked).
-func beginFrame(canvas: mod Gpu2dCanvas, r: copy Float, g: copy Float, b: copy Float, a: copy Float) {
+func beginFrame(
+  canvas: mod Gpu2dCanvas
+  r: copy Float
+  g: copy Float
+  b: copy Float
+  a: copy Float
+) {
   g2dFrameReset()
   canvasFrameBegin(canvas: canvas)
-  if g2dOffViewReady() is 0 { ret }
-  canvasOpenFrame(canvas: canvas, clear: true, r: r, g: g, b: b, a: a)
+  if g2dOffViewReady() is 0 {
+    ret
+  }
+  canvasOpenFrame(
+    canvas: canvas
+    clear: true
+    r: r
+    g: g
+    b: b
+    a: a
+  )
 }
 
 # Begin a 2D/UI overlay pass that preserves the persistent offscreen color
@@ -289,8 +458,17 @@ func beginFrame(canvas: mod Gpu2dCanvas, r: copy Float, g: copy Float, b: copy F
 func beginFrameLoad(canvas: mod Gpu2dCanvas) {
   g2dFrameReset()
   canvasFrameBegin(canvas: canvas)
-  if g2dOffViewReady() is 0 { ret }
-  canvasOpenFrame(canvas: canvas, clear: false, r: 0.0, g: 0.0, b: 0.0, a: 0.0)
+  if g2dOffViewReady() is 0 {
+    ret
+  }
+  canvasOpenFrame(
+    canvas: canvas
+    clear: false
+    r: 0.0
+    g: 0.0
+    b: 0.0
+    a: 0.0
+  )
 }
 
 # Finish the render pass, submit the frame through the manager, present it
@@ -300,7 +478,9 @@ func beginFrameLoad(canvas: mod Gpu2dCanvas) {
 func endFrame(canvas: mod Gpu2dCanvas) {
   # Advance the deterministic clock every frame, even one with no drawable yet.
   g2dTick()
-  if not canvasFrameActive(canvas: canvas) { ret }
+  if not canvasFrameActive(canvas: canvas) {
+    ret
+  }
   flush(canvas: canvas)
   canvasCloseFrame(canvas: canvas)
   g2dPresentCleanup()
@@ -311,8 +491,11 @@ func endFrame(canvas: mod Gpu2dCanvas) {
 # Startup can render offscreen before the OS has a drawable; apps that skip idle
 # frames should keep their first frame dirty until this reports true.
 func nativeLastPresentOk() unsafe extern("rae_ext_Gpu2d_lastPresentOk") ret Bool
+
 func lastPresentOk() ret Bool {
-  unsafe { ret nativeLastPresentOk() }
+  unsafe {
+    ret nativeLastPresentOk()
+  }
 }
 
 # Flush queued primitives into the active render pass without ending the
@@ -333,31 +516,117 @@ func flush(canvas: mod Gpu2dCanvas) {
 # Filled axis-aligned rectangle.
 # The primitives are queued on the app's Gpu2dCanvas (#913) — the CPU batch
 # and its GPU pass both live there; these are the Gpu2d-spelled entry points.
-func drawRect(canvas: mod Gpu2dCanvas, x: copy Float, y: copy Float, w: copy Float, h: copy Float, color: copy Int) {
-  canvasDrawRect(canvas: canvas, x: x, y: y, w: w, h: h, color: color)
+func drawRect(
+  canvas: mod Gpu2dCanvas
+  x: copy Float
+  y: copy Float
+  w: copy Float
+  h: copy Float
+  color: copy Int
+) {
+  canvasDrawRect(
+    canvas: canvas
+    x: x
+    y: y
+    w: w
+    h: h
+    color: color
+  )
 }
 
 # Filled rounded rectangle (uniform corner radius).
-func drawRoundedRect(canvas: mod Gpu2dCanvas, x: copy Float, y: copy Float, w: copy Float, h: copy Float, radius: copy Float, color: copy Int) {
-  canvasDrawRoundedRect(canvas: canvas, x: x, y: y, w: w, h: h, radius: radius, color: color)
+func drawRoundedRect(
+  canvas: mod Gpu2dCanvas
+  x: copy Float
+  y: copy Float
+  w: copy Float
+  h: copy Float
+  radius: copy Float
+  color: copy Int
+) {
+  canvasDrawRoundedRect(
+    canvas: canvas
+    x: x
+    y: y
+    w: w
+    h: h
+    radius: radius
+    color: color
+  )
 }
 
 # Rounded rectangle with a fill and a stroked border `borderWidth` px wide
 # (drawn inset from the edge). radius 0 gives a sharp-cornered box.
-func drawBox(canvas: mod Gpu2dCanvas, x: copy Float, y: copy Float, w: copy Float, h: copy Float, radius: copy Float, fill: copy Int, borderWidth: copy Float, border: copy Int) {
-  canvasDrawBox(canvas: canvas, x: x, y: y, w: w, h: h, radius: radius, fill: fill, borderWidth: borderWidth, border: border)
+func drawBox(
+  canvas: mod Gpu2dCanvas
+  x: copy Float
+  y: copy Float
+  w: copy Float
+  h: copy Float
+  radius: copy Float
+  fill: copy Int
+  borderWidth: copy Float
+  border: copy Int
+) {
+  canvasDrawBox(
+    canvas: canvas
+    x: x
+    y: y
+    w: w
+    h: h
+    radius: radius
+    fill: fill
+    borderWidth: borderWidth
+    border: border
+  )
 }
 
 # Filled rounded rectangle with a linear gradient. `angleDeg` follows the UI
 # GradientFill convention: 0 = left-to-right, 90 = top-to-bottom.
-func drawGradientRect(canvas: mod Gpu2dCanvas, x: copy Float, y: copy Float, w: copy Float, h: copy Float, radius: copy Float, from: copy Int, to: copy Int, angleDeg: copy Float) {
-  canvasDrawGradientRect(canvas: canvas, x: x, y: y, w: w, h: h, radius: radius, from: from, to: to, angleDeg: angleDeg)
+func drawGradientRect(
+  canvas: mod Gpu2dCanvas
+  x: copy Float
+  y: copy Float
+  w: copy Float
+  h: copy Float
+  radius: copy Float
+  from: copy Int
+  to: copy Int
+  angleDeg: copy Float
+) {
+  canvasDrawGradientRect(
+    canvas: canvas
+    x: x
+    y: y
+    w: w
+    h: h
+    radius: radius
+    from: from
+    to: to
+    angleDeg: angleDeg
+  )
 }
 
 # Antialiased line from (x0,y0) to (x1,y1), `thickness` units wide, with
 # rounded caps (a rotated capsule). Works at any angle.
-func drawLine(canvas: mod Gpu2dCanvas, x0: copy Float, y0: copy Float, x1: copy Float, y1: copy Float, thickness: copy Float, color: copy Int) {
-  canvasDrawLine(canvas: canvas, x0: x0, y0: y0, x1: x1, y1: y1, thickness: thickness, color: color)
+func drawLine(
+  canvas: mod Gpu2dCanvas
+  x0: copy Float
+  y0: copy Float
+  x1: copy Float
+  y1: copy Float
+  thickness: copy Float
+  color: copy Int
+) {
+  canvasDrawLine(
+    canvas: canvas
+    x0: x0
+    y0: y0
+    x1: x1
+    y1: y1
+    thickness: thickness
+    color: color
+  )
 }
 
 # --- Clipping (#144, axis-aligned scissor) -------------------------------
@@ -368,16 +637,45 @@ func drawLine(canvas: mod Gpu2dCanvas, x0: copy Float, y0: copy Float, x1: copy 
 # draws, preserving the box→image→text batch order. `popClipRect` restores
 # the previous region; an unmatched pop clears to no-clip. The stack lives on
 # the canvas (#915).
-func pushClipRect(canvas: mod Gpu2dCanvas, x: copy Float, y: copy Float, w: copy Float, h: copy Float) {
-  canvasPushClip(canvas: canvas, x: x, y: y, w: w, h: h, radius: 0.0)
+func pushClipRect(
+  canvas: mod Gpu2dCanvas
+  x: copy Float
+  y: copy Float
+  w: copy Float
+  h: copy Float
+) {
+  canvasPushClip(
+    canvas: canvas
+    x: x
+    y: y
+    w: w
+    h: h
+    radius: 0.0
+  )
 }
+
 # Rounded clip (#118): same as pushClipRect but the corners are rounded by
 # `radius` (design units). The box pipeline rounds the corners via a
 # fragment-shader SDF; the axis-aligned scissor still bounds every pipeline
 # to the clip bbox. Use for a rounded card that contains a scroll list.
-func pushClipRoundedRect(canvas: mod Gpu2dCanvas, x: copy Float, y: copy Float, w: copy Float, h: copy Float, radius: copy Float) {
-  canvasPushClip(canvas: canvas, x: x, y: y, w: w, h: h, radius: radius)
+func pushClipRoundedRect(
+  canvas: mod Gpu2dCanvas
+  x: copy Float
+  y: copy Float
+  w: copy Float
+  h: copy Float
+  radius: copy Float
+) {
+  canvasPushClip(
+    canvas: canvas
+    x: x
+    y: y
+    w: w
+    h: h
+    radius: radius
+  )
 }
+
 func popClipRect(canvas: mod Gpu2dCanvas) {
   canvasPopClip(canvas: canvas)
 }
@@ -398,8 +696,11 @@ func loadImage(canvas: mod Gpu2dCanvas, path: copy String) ret Int {
 # assets can be validated from tooling. 1 = decodes, 0 = failed
 # (with the standard stderr line). Compiled target only.
 func nativeDecodeImageProbe(path: String) unsafe extern("rae_ext_Gpu2d_decodeImageProbe") ret Int
+
 func decodeImageProbe(path: copy String) ret Int {
-  unsafe { ret nativeDecodeImageProbe(path: path) }
+  unsafe {
+    ret nativeDecodeImageProbe(path: path)
+  }
 }
 
 # Decode+upload `path` and register it under `key` (returns the handle, 0 on
@@ -408,31 +709,104 @@ func decodeImageProbe(path: copy String) ret Int {
 func loadImageKey(canvas: mod Gpu2dCanvas, key: copy String, path: copy String) ret Int {
   ret canvasLoadImageKey(canvas: canvas, key: key, path: path)
 }
+
 # Register an image straight from RGBA pixels generated in Rae (#539) — no file.
 # `pixels` is one packed int per pixel: r | g<<8 | b<<16 | a<<24 (order R,G,B,A).
-func registerImageRgba(canvas: mod Gpu2dCanvas, key: copy String, pixels: view Buffer(Int), w: copy Int, h: copy Int) pub ret Int {
-  let handle: Int = canvasRegisterImageRgba(canvas: canvas, pixels: pixels, width: w, height: h)
-  if handle > 0 { canvasRegisterImageKey(canvas: canvas, key: key, handle: handle) }
+func registerImageRgba(
+  canvas: mod Gpu2dCanvas
+  key: copy String
+  pixels: view Buffer(Int)
+  w: copy Int
+  h: copy Int
+) pub ret Int {
+  let handle: Int = canvasRegisterImageRgba(
+    canvas: canvas
+    pixels: pixels
+    width: w
+    height: h
+  )
+  if handle > 0 {
+    canvasRegisterImageKey(canvas: canvas, key: key, handle: handle)
+  }
   ret handle
 }
+
 func hasImageKey(canvas: view Gpu2dCanvas, key: copy String) ret Bool {
   ret canvasHasImageKey(canvas: canvas, key: key)
 }
-func drawImageKey(canvas: mod Gpu2dCanvas, key: copy String, x: copy Float, y: copy Float, w: copy Float, h: copy Float, radius: copy Float, tint: copy Int) {
-  canvasDrawImageKey(canvas: canvas, key: key, x: x, y: y, w: w, h: h, radius: radius, tint: tint)
+
+func drawImageKey(
+  canvas: mod Gpu2dCanvas
+  key: copy String
+  x: copy Float
+  y: copy Float
+  w: copy Float
+  h: copy Float
+  radius: copy Float
+  tint: copy Int
+) {
+  canvasDrawImageKey(
+    canvas: canvas
+    key: key
+    x: x
+    y: y
+    w: w
+    h: h
+    radius: radius
+    tint: tint
+  )
 }
+
 # Draw a registered image with ScaleMode semantics:
 # 0 = fit, 1 = fill/cover-crop, 2 = stretch.
-func drawImageKeyScaled(canvas: mod Gpu2dCanvas, key: copy String, x: copy Float, y: copy Float, w: copy Float, h: copy Float, radius: copy Float, tint: copy Int, scaleMode: copy Int) {
-  canvasDrawImageKeyScaled(canvas: canvas, key: key, x: x, y: y, w: w, h: h, radius: radius, tint: tint, scaleMode: scaleMode)
+func drawImageKeyScaled(
+  canvas: mod Gpu2dCanvas
+  key: copy String
+  x: copy Float
+  y: copy Float
+  w: copy Float
+  h: copy Float
+  radius: copy Float
+  tint: copy Int
+  scaleMode: copy Int
+) {
+  canvasDrawImageKeyScaled(
+    canvas: canvas
+    key: key
+    x: x
+    y: y
+    w: w
+    h: h
+    radius: radius
+    tint: tint
+    scaleMode: scaleMode
+  )
 }
 
 # Draw image `handle` into the rect at (x,y) sized w×h, with optional corner
 # `radius`. `tint` is 0xAARRGGBB applied multiplicatively — 0xFFFFFFFF draws
 # the image unchanged; a solid color tints a white/alpha icon to that color.
 # Submitted between beginFrame/endFrame; drawn above boxes, below text.
-func drawImage(canvas: mod Gpu2dCanvas, x: copy Float, y: copy Float, w: copy Float, h: copy Float, radius: copy Float, handle: copy Int, tint: copy Int) {
-  canvasDrawImage(canvas: canvas, x: x, y: y, w: w, h: h, radius: radius, handle: handle, tint: tint)
+func drawImage(
+  canvas: mod Gpu2dCanvas
+  x: copy Float
+  y: copy Float
+  w: copy Float
+  h: copy Float
+  radius: copy Float
+  handle: copy Int
+  tint: copy Int
+) {
+  canvasDrawImage(
+    canvas: canvas
+    x: x
+    y: y
+    w: w
+    h: h
+    radius: radius
+    handle: handle
+    tint: tint
+  )
 }
 
 # --- Text (#111, MSDF glyph quads) ---------------------------------------
@@ -441,15 +815,69 @@ func drawImage(canvas: mod Gpu2dCanvas, x: copy Float, y: copy Float, w: copy Fl
 # into the atlas; `atlas` is the SdfText.loadAtlas handle (1-based); `pxRange`
 # is the screen-space px range (atlas pxRange * onScreenSize / atlasGlyphSize);
 # colour is 0xAARRGGBB. Layout helper: lib/Gpu2dText.rae drawText.
-func drawGlyph(canvas: mod Gpu2dCanvas, sx0: copy Float, sy0: copy Float, sx1: copy Float, sy1: copy Float,
-               u0: copy Float, v0: copy Float, u1: copy Float, v1: copy Float,
-               atlas: copy Int, pxRange: copy Float, color: copy Int) {
-  canvasDrawGlyph(canvas: canvas, sx0: sx0, sy0: sy0, sx1: sx1, sy1: sy1, u0: u0, v0: v0, u1: u1, v1: v1, atlas: atlas, pxRange: pxRange, color: color)
+func drawGlyph(
+  canvas: mod Gpu2dCanvas
+  sx0: copy Float
+  sy0: copy Float
+  sx1: copy Float
+  sy1: copy Float
+  u0: copy Float
+  v0: copy Float
+  u1: copy Float
+  v1: copy Float
+  atlas: copy Int
+  pxRange: copy Float
+  color: copy Int
+) {
+  canvasDrawGlyph(
+    canvas: canvas
+    sx0: sx0
+    sy0: sy0
+    sx1: sx1
+    sy1: sy1
+    u0: u0
+    v0: v0
+    u1: u1
+    v1: v1
+    atlas: atlas
+    pxRange: pxRange
+    color: color
+  )
 }
+
 # With an outline (width px + colour) and softness (edge falloff px; 1 = crisp).
-func drawGlyphEx(canvas: mod Gpu2dCanvas, sx0: copy Float, sy0: copy Float, sx1: copy Float, sy1: copy Float,
-                 u0: copy Float, v0: copy Float, u1: copy Float, v1: copy Float,
-                 atlas: copy Int, pxRange: copy Float, color: copy Int,
-                 outlineWidth: copy Float, outlineColor: copy Int, softness: copy Float) {
-  canvasDrawGlyphEx(canvas: canvas, sx0: sx0, sy0: sy0, sx1: sx1, sy1: sy1, u0: u0, v0: v0, u1: u1, v1: v1, atlas: atlas, pxRange: pxRange, color: color, outlineWidth: outlineWidth, outlineColor: outlineColor, softness: softness)
+func drawGlyphEx(
+  canvas: mod Gpu2dCanvas
+  sx0: copy Float
+  sy0: copy Float
+  sx1: copy Float
+  sy1: copy Float
+  u0: copy Float
+  v0: copy Float
+  u1: copy Float
+  v1: copy Float
+  atlas: copy Int
+  pxRange: copy Float
+  color: copy Int
+  outlineWidth: copy Float
+  outlineColor: copy Int
+  softness: copy Float
+) {
+  canvasDrawGlyphEx(
+    canvas: canvas
+    sx0: sx0
+    sy0: sy0
+    sx1: sx1
+    sy1: sy1
+    u0: u0
+    v0: v0
+    u1: u1
+    v1: v1
+    atlas: atlas
+    pxRange: pxRange
+    color: color
+    outlineWidth: outlineWidth
+    outlineColor: outlineColor
+    softness: softness
+  )
 }

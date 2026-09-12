@@ -14,17 +14,55 @@ open ui/Registry
 open ui/RegistryValues
 
 func deserLayout(doc: view JsonDoc, theme: view UiTheme, val: view JsonValue) ret Layout {
-  let typeStr: String = optString(doc: doc, container: val, key: "type", fallback: "None")
-  let alignMainStr: String = optString(doc: doc, container: val, key: "alignMain", fallback: "Start")
-  let alignCrossStr: String = optString(doc: doc, container: val, key: "alignCross", fallback: "Start")
+  let typeStr: String = optString(
+    doc: doc
+    container: val
+    key: "type"
+    fallback: "None"
+  )
+  let alignMainStr: String = optString(
+    doc: doc
+    container: val
+    key: "alignMain"
+    fallback: "Start"
+  )
+  let alignCrossStr: String = optString(
+    doc: doc
+    container: val
+    key: "alignCross"
+    fallback: "Start"
+  )
   ret Layout {
     kind: parseLayoutType(text: typeStr)
-    gap: optFloatOrToken(doc: doc, theme: theme, container: val, key: "gap", fallback: 0.0)
+    gap: optFloatOrToken(
+      doc: doc
+      theme: theme
+      container: val
+      key: "gap"
+      fallback: 0.0
+    )
     alignMain: parseAlignKind(text: alignMainStr)
     alignCross: parseAlignKind(text: alignCrossStr)
-    columns: optInt(doc: doc, container: val, key: "columns", fallback: 0)
-    rowGap: optFloatOrToken(doc: doc, theme: theme, container: val, key: "rowGap", fallback: 0.0)
-    columnGap: optFloatOrToken(doc: doc, theme: theme, container: val, key: "columnGap", fallback: 0.0)
+    columns: optInt(
+      doc: doc
+      container: val
+      key: "columns"
+      fallback: 0
+    )
+    rowGap: optFloatOrToken(
+      doc: doc
+      theme: theme
+      container: val
+      key: "rowGap"
+      fallback: 0.0
+    )
+    columnGap: optFloatOrToken(
+      doc: doc
+      theme: theme
+      container: val
+      key: "columnGap"
+      fallback: 0.0
+    )
   }
 }
 
@@ -60,24 +98,27 @@ func deserAlign(doc: view JsonDoc, val: view JsonValue) ret Align {
     let s: String = Json.jsonString(this: yv, fallback: "Start")
     yK = parseAlignKind(text: s)
   }
-  ret Align {
-    x: xK
-    y: yK
-    hasX: xIdx >= 0
-    hasY: yIdx >= 0
-  }
+  ret Align { x: xK, y: yK, hasX: xIdx >= 0, hasY: yIdx >= 0 }
 }
 
 func deserOffset(doc: view JsonDoc, val: view JsonValue) ret Offset {
-  ret Offset {
-    delta: deserVec2(doc: doc, val: val)
-  }
+  ret Offset { delta: deserVec2(doc: doc, val: val) }
 }
 
 func deserSprite(doc: view JsonDoc, theme: view UiTheme, val: view JsonValue) ret Sprite {
   let s: Sprite = defaultSprite()
-  s.textureKey = optString(doc: doc, container: val, key: "textureKey", fallback: "")
-  let scaleModeStr: String = optString(doc: doc, container: val, key: "scaleMode", fallback: "Fit")
+  s.textureKey = optString(
+    doc: doc
+    container: val
+    key: "textureKey"
+    fallback: ""
+  )
+  let scaleModeStr: String = optString(
+    doc: doc
+    container: val
+    key: "scaleMode"
+    fallback: "Fit"
+  )
   s.scaleMode = parseScaleMode(text: scaleModeStr)
   let tintIdx: Int = Json.field(doc: doc, this: val, key: "tint")
   if tintIdx >= 0 {
@@ -92,17 +133,28 @@ func deserSprite(doc: view JsonDoc, theme: view UiTheme, val: view JsonValue) re
 }
 
 func deserText(doc: view JsonDoc, val: view JsonValue) ret Text {
-  let txt: String = optString(doc: doc, container: val, key: "text", fallback: "")
-  let style: String = optString(doc: doc, container: val, key: "styleId", fallback: "")
-  let wrapStr: String = optString(doc: doc, container: val, key: "wrapWidthMode", fallback: "None")
+  let txt: String = optString(
+    doc: doc
+    container: val
+    key: "text"
+    fallback: ""
+  )
+  let style: String = optString(
+    doc: doc
+    container: val
+    key: "styleId"
+    fallback: ""
+  )
+  let wrapStr: String = optString(
+    doc: doc
+    container: val
+    key: "wrapWidthMode"
+    fallback: "None"
+  )
   # `own`: each local is consumed by the returned struct, no further
   # uses. Avoids the wasted Phase 2 deep-copy + auto-drop pair that
   # would otherwise allocate one extra heap per field per call.
-  ret Text {
-    text: own txt
-    styleId: own style
-    wrapWidthMode: parseWrapWidthMode(text: wrapStr)
-  }
+  ret Text { text: own txt, styleId: own style, wrapWidthMode: parseWrapWidthMode(text: wrapStr) }
 }
 
 # Sparse tier-2 style override (#236, theme §7). Parsed from the
@@ -110,12 +162,21 @@ func deserText(doc: view JsonDoc, val: view JsonValue) ret Text {
 # the resolved style — `size` (Float du) and `color` (literal RGBA
 # object OR a palette slot string, mirroring deserRgba). Absent keys
 # leave their `has*` flag false so the base style value shows through.
-func deserStyleOverride(doc: view JsonDoc, theme: view UiTheme, val: view JsonValue) ret StyleOverride {
+func deserStyleOverride(
+  doc: view JsonDoc
+  theme: view UiTheme
+  val: view JsonValue
+) ret StyleOverride {
   var so: StyleOverride = defaultStyleOverride()
   let sizeIdx: Int = Json.field(doc: doc, this: val, key: "size")
   if sizeIdx >= 0 {
     so.hasSize = true
-    so.size = optFloat(doc: doc, container: val, key: "size", fallback: 0.0)
+    so.size = optFloat(
+      doc: doc
+      container: val
+      key: "size"
+      fallback: 0.0
+    )
   }
   let colorIdx: Int = Json.field(doc: doc, this: val, key: "color")
   if colorIdx >= 0 {
@@ -130,9 +191,24 @@ func deserStyleOverride(doc: view JsonDoc, theme: view UiTheme, val: view JsonVa
 
 func deserTextShadow(doc: view JsonDoc, theme: view UiTheme, val: view JsonValue) ret TextShadow {
   var shadow: TextShadow = defaultTextShadow()
-  shadow.offset.x = optFloat(doc: doc, container: val, key: "offsetX", fallback: 0.0)
-  shadow.offset.y = optFloat(doc: doc, container: val, key: "offsetY", fallback: 0.0)
-  shadow.softness = optFloat(doc: doc, container: val, key: "softness", fallback: 1.0)
+  shadow.offset.x = optFloat(
+    doc: doc
+    container: val
+    key: "offsetX"
+    fallback: 0.0
+  )
+  shadow.offset.y = optFloat(
+    doc: doc
+    container: val
+    key: "offsetY"
+    fallback: 0.0
+  )
+  shadow.softness = optFloat(
+    doc: doc
+    container: val
+    key: "softness"
+    fallback: 1.0
+  )
   let colorIdx: Int = Json.field(doc: doc, this: val, key: "color")
   if colorIdx >= 0 {
     let cv: JsonValue = Json.jsonValueAt(doc: doc, idx: colorIdx)
@@ -142,11 +218,27 @@ func deserTextShadow(doc: view JsonDoc, theme: view UiTheme, val: view JsonValue
 }
 
 func deserShape(doc: view JsonDoc, theme: view UiTheme, val: view JsonValue) ret Shape {
-  let kindStr: String = optString(doc: doc, container: val, key: "kind", fallback: "Rect")
+  let kindStr: String = optString(
+    doc: doc
+    container: val
+    key: "kind"
+    fallback: "Rect"
+  )
   let s: Shape = defaultShape()
   s.kind = parseShapeKind(text: kindStr)
-  s.strokeWidth = optFloat(doc: doc, container: val, key: "strokeWidth", fallback: 0.0)
-  s.radius = optRadiusOrToken(doc: doc, theme: theme, container: val, key: "radius", fallback: 0.0)
+  s.strokeWidth = optFloat(
+    doc: doc
+    container: val
+    key: "strokeWidth"
+    fallback: 0.0
+  )
+  s.radius = optRadiusOrToken(
+    doc: doc
+    theme: theme
+    container: val
+    key: "radius"
+    fallback: 0.0
+  )
   let fillIdx: Int = Json.field(doc: doc, this: val, key: "fill")
   if fillIdx >= 0 {
     let fv: JsonValue = Json.jsonValueAt(doc: doc, idx: fillIdx)
@@ -165,53 +257,113 @@ func deserShape(doc: view JsonDoc, theme: view UiTheme, val: view JsonValue) ret
 }
 
 func deserActive(doc: view JsonDoc, val: view JsonValue) ret Active {
-  ret Active {
-    value: optBool(doc: doc, container: val, key: "value", fallback: true)
-  }
+  ret Active { value: optBool(
+    doc: doc
+    container: val
+    key: "value"
+    fallback: true
+  ) }
 }
 
 func deserOpacity(doc: view JsonDoc, val: view JsonValue) ret Opacity {
-  ret Opacity {
-    value: optFloat(doc: doc, container: val, key: "value", fallback: 1.0)
-  }
+  ret Opacity { value: optFloat(
+    doc: doc
+    container: val
+    key: "value"
+    fallback: 1.0
+  ) }
 }
 
 func deserOnClick(doc: view JsonDoc, val: view JsonValue) ret OnClick {
   ret OnClick {
-    actionId: optString(doc: doc, container: val, key: "actionId", fallback: "")
-    actionIdDouble: optString(doc: doc, container: val, key: "actionIdDouble", fallback: "")
-    actionIdTriple: optString(doc: doc, container: val, key: "actionIdTriple", fallback: "")
-    maxDelayMs: optInt(doc: doc, container: val, key: "maxDelayMs", fallback: 250)
+    actionId: optString(
+      doc: doc
+      container: val
+      key: "actionId"
+      fallback: ""
+    )
+    actionIdDouble: optString(
+      doc: doc
+      container: val
+      key: "actionIdDouble"
+      fallback: ""
+    )
+    actionIdTriple: optString(
+      doc: doc
+      container: val
+      key: "actionIdTriple"
+      fallback: ""
+    )
+    maxDelayMs: optInt(
+      doc: doc
+      container: val
+      key: "maxDelayMs"
+      fallback: 250
+    )
   }
 }
 
 func deserButton(doc: view JsonDoc, val: view JsonValue) ret Button {
-  ret Button { role: optString(doc: doc, container: val, key: "role", fallback: "") }
+  ret Button { role: optString(
+    doc: doc
+    container: val
+    key: "role"
+    fallback: ""
+  ) }
 }
 
 func deserName(doc: view JsonDoc, val: view JsonValue) ret Name {
-  ret Name { label: optString(doc: doc, container: val, key: "label", fallback: "") }
+  ret Name { label: optString(
+    doc: doc
+    container: val
+    key: "label"
+    fallback: ""
+  ) }
 }
 
 func deserHeroWidget(doc: view JsonDoc, val: view JsonValue) ret HeroWidget {
   # `key` is reserved in Rae, so it can't appear directly after a
   # type-prefixed struct literal in `ret`. Bind to a typed local first.
-  let k: String = optString(doc: doc, container: val, key: "key", fallback: "")
+  let k: String = optString(
+    doc: doc
+    container: val
+    key: "key"
+    fallback: ""
+  )
   let r: HeroWidget = { key: own k }
   ret r
 }
 
-func deserCornerRadius(doc: view JsonDoc, theme: view UiTheme, val: view JsonValue) ret CornerRadius {
-  let r: Float = optRadiusOrToken(doc: doc, theme: theme, container: val, key: "radius", fallback: 0.0)
+func deserCornerRadius(
+  doc: view JsonDoc
+  theme: view UiTheme
+  val: view JsonValue
+) ret CornerRadius {
+  let r: Float = optRadiusOrToken(
+    doc: doc
+    theme: theme
+    container: val
+    key: "radius"
+    fallback: 0.0
+  )
   ret CornerRadius { radius: r }
 }
 
 func deserBackdropImage(doc: view JsonDoc, val: view JsonValue) ret BackdropImage {
-  let k: String = optString(doc: doc, container: val, key: "textureKey", fallback: "")
+  let k: String = optString(
+    doc: doc
+    container: val
+    key: "textureKey"
+    fallback: ""
+  )
   ret BackdropImage { textureKey: own k }
 }
 
-func deserGradientFill(doc: view JsonDoc, theme: view UiTheme, val: view JsonValue) ret GradientFill {
+func deserGradientFill(
+  doc: view JsonDoc
+  theme: view UiTheme
+  val: view JsonValue
+) ret GradientFill {
   let fromIdx: Int = Json.field(doc: doc, this: val, key: "from")
   let toIdx: Int = Json.field(doc: doc, this: val, key: "to")
   let zero: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
@@ -223,17 +375,52 @@ func deserGradientFill(doc: view JsonDoc, theme: view UiTheme, val: view JsonVal
   if toIdx >= 0 {
     toCol = deserRgba(doc: doc, theme: theme, val: Json.jsonValueAt(doc: doc, idx: toIdx))
   }
-  let angle: Float = optFloat(doc: doc, container: val, key: "angle", fallback: 90.0)
+  let angle: Float = optFloat(
+    doc: doc
+    container: val
+    key: "angle"
+    fallback: 90.0
+  )
   ret GradientFill { from: fromCol, to: toCol, angle: angle }
 }
 
 func deserOpticalAlign(doc: view JsonDoc, val: view JsonValue) ret OpticalAlign {
-  let enabled: Bool = optBool(doc: doc, container: val, key: "enabled", fallback: true)
-  let centerX: Bool = optBool(doc: doc, container: val, key: "centerX", fallback: true)
-  let centerY: Bool = optBool(doc: doc, container: val, key: "centerY", fallback: true)
-  let biasX: Float = optFloat(doc: doc, container: val, key: "biasX", fallback: 0.0)
-  let biasY: Float = optFloat(doc: doc, container: val, key: "biasY", fallback: 0.0)
-  ret OpticalAlign { enabled: enabled, centerX: centerX, centerY: centerY, bias: Vec2 { x: biasX, y: biasY } }
+  let enabled: Bool = optBool(
+    doc: doc
+    container: val
+    key: "enabled"
+    fallback: true
+  )
+  let centerX: Bool = optBool(
+    doc: doc
+    container: val
+    key: "centerX"
+    fallback: true
+  )
+  let centerY: Bool = optBool(
+    doc: doc
+    container: val
+    key: "centerY"
+    fallback: true
+  )
+  let biasX: Float = optFloat(
+    doc: doc
+    container: val
+    key: "biasX"
+    fallback: 0.0
+  )
+  let biasY: Float = optFloat(
+    doc: doc
+    container: val
+    key: "biasY"
+    fallback: 0.0
+  )
+  ret OpticalAlign {
+    enabled: enabled
+    centerX: centerX
+    centerY: centerY
+    bias: Vec2 { x: biasX, y: biasY }
+  }
 }
 
 func deserSafeArea(doc: view JsonDoc, theme: view UiTheme, val: view JsonValue) ret SafeArea {
@@ -241,7 +428,12 @@ func deserSafeArea(doc: view JsonDoc, theme: view UiTheme, val: view JsonValue) 
   # device inset on that edge; 0.0 = ignore it). `extra` is an
   # additive per-edge gutter in design units. Both reuse the standard
   # Insets shape so a scene author can write partial objects.
-  let enabled: Bool = optBool(doc: doc, container: val, key: "enabled", fallback: true)
+  let enabled: Bool = optBool(
+    doc: doc
+    container: val
+    key: "enabled"
+    fallback: true
+  )
   var apply: Insets = { l: 1.0, t: 1.0, r: 1.0, b: 1.0 }
   let applyIdx: Int = Json.field(doc: doc, this: val, key: "apply")
   if applyIdx >= 0 {
@@ -256,8 +448,18 @@ func deserSafeArea(doc: view JsonDoc, theme: view UiTheme, val: view JsonValue) 
 }
 
 func deserLayerRoot(doc: view JsonDoc, val: view JsonValue) ret LayerRoot {
-  let id: String = optString(doc: doc, container: val, key: "id", fallback: "")
-  let ord: Int = optInt(doc: doc, container: val, key: "order", fallback: 0)
+  let id: String = optString(
+    doc: doc
+    container: val
+    key: "id"
+    fallback: ""
+  )
+  let ord: Int = optInt(
+    doc: doc
+    container: val
+    key: "order"
+    fallback: 0
+  )
   ret LayerRoot { id: own id, order: ord }
 }
 
@@ -270,62 +472,171 @@ func deserDebugAnchor(doc: view JsonDoc, val: view JsonValue) ret DebugAnchor {
 }
 
 func deserPageRoot(doc: view JsonDoc, val: view JsonValue) ret PageRoot {
-  let id: String = optString(doc: doc, container: val, key: "id", fallback: "")
+  let id: String = optString(
+    doc: doc
+    container: val
+    key: "id"
+    fallback: ""
+  )
   let r: PageRoot = { id: own id }
   ret r
 }
 
 func deserScrollState(doc: view JsonDoc, val: view JsonValue) ret ScrollState {
-  let y: Float = optFloat(doc: doc, container: val, key: "y", fallback: 0.0)
-  let velocity: Float = optFloat(doc: doc, container: val, key: "velocity", fallback: 0.0)
+  let y: Float = optFloat(
+    doc: doc
+    container: val
+    key: "y"
+    fallback: 0.0
+  )
+  let velocity: Float = optFloat(
+    doc: doc
+    container: val
+    key: "velocity"
+    fallback: 0.0
+  )
   ret ScrollState { y: y, velocity: velocity }
 }
 
 func deserWidgetId(doc: view JsonDoc, val: view JsonValue) ret WidgetId {
-  let id: String = optString(doc: doc, container: val, key: "id", fallback: "")
-  let kind: String = optString(doc: doc, container: val, key: "kind", fallback: "")
+  let id: String = optString(
+    doc: doc
+    container: val
+    key: "id"
+    fallback: ""
+  )
+  let kind: String = optString(
+    doc: doc
+    container: val
+    key: "kind"
+    fallback: ""
+  )
   ret WidgetId { id: own id, kind: own kind }
 }
 
 func deserWidgetState(doc: view JsonDoc, val: view JsonValue) ret WidgetState {
   ret WidgetState {
-    enabled: optBool(doc: doc, container: val, key: "enabled", fallback: true)
-    selected: optBool(doc: doc, container: val, key: "selected", fallback: false)
-    loading: optBool(doc: doc, container: val, key: "loading", fallback: false)
-    error: optBool(doc: doc, container: val, key: "error", fallback: false)
+    enabled: optBool(
+      doc: doc
+      container: val
+      key: "enabled"
+      fallback: true
+    )
+    selected: optBool(
+      doc: doc
+      container: val
+      key: "selected"
+      fallback: false
+    )
+    loading: optBool(
+      doc: doc
+      container: val
+      key: "loading"
+      fallback: false
+    )
+    error: optBool(
+      doc: doc
+      container: val
+      key: "error"
+      fallback: false
+    )
   }
 }
 
 func deserDataDependency(doc: view JsonDoc, val: view JsonValue) ret DataDependency {
-  let sourceKey: String = optString(doc: doc, container: val, key: "sourceKey", fallback: "")
-  let fieldKey: String = optString(doc: doc, container: val, key: "fieldKey", fallback: "")
-  let rev: Int = optInt(doc: doc, container: val, key: "observedRevision", fallback: 0)
-  ret DataDependency { resource: dataResourceIdFromString(name: sourceKey), field: dataFieldIdFromString(name: fieldKey), observedRevision: rev }
+  let sourceKey: String = optString(
+    doc: doc
+    container: val
+    key: "sourceKey"
+    fallback: ""
+  )
+  let fieldKey: String = optString(
+    doc: doc
+    container: val
+    key: "fieldKey"
+    fallback: ""
+  )
+  let rev: Int = optInt(
+    doc: doc
+    container: val
+    key: "observedRevision"
+    fallback: 0
+  )
+  ret DataDependency {
+    resource: dataResourceIdFromString(name: sourceKey)
+    field: dataFieldIdFromString(name: fieldKey)
+    observedRevision: rev
+  }
 }
 
 func deserActionBinding(doc: view JsonDoc, val: view JsonValue) ret ActionBinding {
-  let actionId: String = optString(doc: doc, container: val, key: "actionId", fallback: "")
-  let role: String = optString(doc: doc, container: val, key: "role", fallback: "")
+  let actionId: String = optString(
+    doc: doc
+    container: val
+    key: "actionId"
+    fallback: ""
+  )
+  let role: String = optString(
+    doc: doc
+    container: val
+    key: "role"
+    fallback: ""
+  )
   ret ActionBinding { actionId: own actionId, role: own role }
 }
 
 func deserRefreshRegion(doc: view JsonDoc, val: view JsonValue) ret RefreshRegion {
-  let regionKey: String = optString(doc: doc, container: val, key: "regionKey", fallback: "")
-  let sourceKey: String = optString(doc: doc, container: val, key: "sourceKey", fallback: "")
-  let rev: Int = optInt(doc: doc, container: val, key: "observedRevision", fallback: 0)
-  let dirty: Bool = optBool(doc: doc, container: val, key: "dirty", fallback: true)
-  ret RefreshRegion { regionKey: own regionKey, resource: dataResourceIdFromString(name: sourceKey), observedRevision: rev, dirty: dirty }
+  let regionKey: String = optString(
+    doc: doc
+    container: val
+    key: "regionKey"
+    fallback: ""
+  )
+  let sourceKey: String = optString(
+    doc: doc
+    container: val
+    key: "sourceKey"
+    fallback: ""
+  )
+  let rev: Int = optInt(
+    doc: doc
+    container: val
+    key: "observedRevision"
+    fallback: 0
+  )
+  let dirty: Bool = optBool(
+    doc: doc
+    container: val
+    key: "dirty"
+    fallback: true
+  )
+  ret RefreshRegion {
+    regionKey: own regionKey
+    resource: dataResourceIdFromString(name: sourceKey)
+    observedRevision: rev
+    dirty: dirty
+  }
 }
 
 func deserPrimaryType(doc: view JsonDoc, val: view JsonValue) ret PrimaryType {
-  ret PrimaryType { typeName: optString(doc: doc, container: val, key: "typeName", fallback: "") }
+  ret PrimaryType { typeName: optString(
+    doc: doc
+    container: val
+    key: "typeName"
+    fallback: ""
+  ) }
 }
 
 func deserNodeId(doc: view JsonDoc, val: view JsonValue) ret NodeId {
   # `id` is a reserved keyword in Rae, so it can't appear after a
   # type-prefixed struct literal in `ret`. Drop the type prefix by
   # binding to a typed local first, then return the local.
-  let nid: String = optString(doc: doc, container: val, key: "id", fallback: "")
+  let nid: String = optString(
+    doc: doc
+    container: val
+    key: "id"
+    fallback: ""
+  )
   let r: NodeId = { id: own nid }
   ret r
 }
@@ -341,7 +652,12 @@ func deserSceneInstance(doc: view JsonDoc, val: view JsonValue) ret SceneInstanc
   # `componentGet(world.sceneInstances, e)` round-trip doesn't have to
   # copy a List-of-structs (the C backend's struct-by-list-index
   # path still corrupts those).
-  let sid: String = optString(doc: doc, container: val, key: "sceneId", fallback: "")
+  let sid: String = optString(
+    doc: doc
+    container: val
+    key: "sceneId"
+    fallback: ""
+  )
   let nodeIds: List(String) = List.create(String, cap: 0)
   let components: List(String) = List.create(String, cap: 0)
   let fields: List(String) = List.create(String, cap: 0)
@@ -358,10 +674,30 @@ func deserSceneInstance(doc: view JsonDoc, val: view JsonValue) ret SceneInstanc
       loop i < n {
         let elem: JsonValue = Json.arrayAt(doc: doc, this: arr, idx: i)
         let empty: String = ""
-        let n2: String = optString(doc: doc, container: elem, key: "nodeId", fallback: empty)
-        let c2: String = optString(doc: doc, container: elem, key: "component", fallback: empty)
-        let f2: String = optString(doc: doc, container: elem, key: "field", fallback: empty)
-        let v2: String = optString(doc: doc, container: elem, key: "value", fallback: empty)
+        let n2: String = optString(
+          doc: doc
+          container: elem
+          key: "nodeId"
+          fallback: empty
+        )
+        let c2: String = optString(
+          doc: doc
+          container: elem
+          key: "component"
+          fallback: empty
+        )
+        let f2: String = optString(
+          doc: doc
+          container: elem
+          key: "field"
+          fallback: empty
+        )
+        let v2: String = optString(
+          doc: doc
+          container: elem
+          key: "value"
+          fallback: empty
+        )
         nodeIds.add(value: n2)
         components.add(value: c2)
         fields.add(value: f2)
@@ -382,26 +718,56 @@ func deserSceneInstance(doc: view JsonDoc, val: view JsonValue) ret SceneInstanc
 
 func deserTextBinding(doc: view JsonDoc, val: view JsonValue) ret TextBinding {
   # `key` is also a reserved keyword. Same workaround.
-  let formatStr: String = optString(doc: doc, container: val, key: "format", fallback: "Plain")
-  let bk: String = optString(doc: doc, container: val, key: "key", fallback: "")
-  let bp: String = optString(doc: doc, container: val, key: "prefix", fallback: "")
-  let bs: String = optString(doc: doc, container: val, key: "suffix", fallback: "")
+  let formatStr: String = optString(
+    doc: doc
+    container: val
+    key: "format"
+    fallback: "Plain"
+  )
+  let bk: String = optString(
+    doc: doc
+    container: val
+    key: "key"
+    fallback: ""
+  )
+  let bp: String = optString(
+    doc: doc
+    container: val
+    key: "prefix"
+    fallback: ""
+  )
+  let bs: String = optString(
+    doc: doc
+    container: val
+    key: "suffix"
+    fallback: ""
+  )
   let bf: TextFormat = parseTextFormat(text: formatStr)
-  let r: TextBinding = {
-    key: own bk
-    format: bf
-    prefix: own bp
-    suffix: own bs
-  }
+  let r: TextBinding = { key: own bk, format: bf, prefix: own bp, suffix: own bs }
   ret r
 }
 
 func deserMaskShape(doc: view JsonDoc, val: view JsonValue) ret MaskShape {
-  let kindStr: String = optString(doc: doc, container: val, key: "kind", fallback: "Circle")
+  let kindStr: String = optString(
+    doc: doc
+    container: val
+    key: "kind"
+    fallback: "Circle"
+  )
   ret MaskShape {
     kind: parseMaskKind(text: kindStr)
-    sourceNodeId: optString(doc: doc, container: val, key: "sourceNodeId", fallback: "")
-    radius: optFloat(doc: doc, container: val, key: "radius", fallback: 0.0)
+    sourceNodeId: optString(
+      doc: doc
+      container: val
+      key: "sourceNodeId"
+      fallback: ""
+    )
+    radius: optFloat(
+      doc: doc
+      container: val
+      key: "radius"
+      fallback: 0.0
+    )
   }
 }
 

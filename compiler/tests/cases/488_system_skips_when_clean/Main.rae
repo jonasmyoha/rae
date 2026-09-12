@@ -27,7 +27,12 @@ func main() {
 
   let r1: Rect = { position: { x: 0.0, y: 0.0 }, size: { x: 10.0, y: 10.0 } }
   let e1: EntityId = id(v: 1)
-  componentSet(Rect, this: rects, entity: e1, data: r1)
+  componentSet(
+    Rect
+    this: rects
+    entity: e1
+    data: r1
+  )
 
   let did1: Bool = runLayoutIfDirty(cache: cache, rects: rects)
   log("first={did1} runs={cache.runs}")
@@ -36,7 +41,12 @@ func main() {
   log("idle={did2} runs={cache.runs}")
 
   let r2: Rect = { position: { x: 5.0, y: 5.0 }, size: { x: 20.0, y: 20.0 } }
-  componentSet(Rect, this: rects, entity: e1, data: r2)
+  componentSet(
+    Rect
+    this: rects
+    entity: e1
+    data: r2
+  )
 
   let did3: Bool = runLayoutIfDirty(cache: cache, rects: rects)
   log("after-mut={did3} runs={cache.runs}")

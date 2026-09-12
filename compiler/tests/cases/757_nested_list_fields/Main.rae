@@ -20,14 +20,26 @@ func checkState() ret Bool {
     let before: Int = rae_ext_rae_mem_stats_buf_outstanding()
     let counterState: CounterState = createCounterState()
     # Prove accounting is active and both returned buffers are still owned.
-    if rae_ext_rae_mem_stats_buf_outstanding() is not before + 2 { ret false }
+    if rae_ext_rae_mem_stats_buf_outstanding() is not before + 2 {
+      ret false
+    }
     let localState: CounterState = createLocalState()
-    if localState.counts.length is not 3 or localState.times.length is not 1 { ret false }
-    loop let count: Int in localState.counts { if count is not 0 { ret false } }
+    if localState.counts.length is not 3 or localState.times.length is not 1 {
+      ret false
+    }
+    loop let count: Int in localState.counts {
+      if count is not 0 {
+        ret false
+      }
+    }
     var copiedState: CounterState = counterState
     copiedState.counts.add(value: 11)
-    if copiedState.counts.length is not 4 { ret false }
-    if counterState.counts.length is not 3 or counterState.times.length is not 3 { ret false }
+    if copiedState.counts.length is not 4 {
+      ret false
+    }
+    if counterState.counts.length is not 3 or counterState.times.length is not 3 {
+      ret false
+    }
     var total: Int = 0
     var weight: Int = 1
     loop let count: Int in counterState.counts {
@@ -44,13 +56,19 @@ func checkState() ret Bool {
 
 func main() {
   unsafe {
-    if checkState() { log("returned Int and Float contents and independent copy OK") }
+    if checkState() {
+      log("returned Int and Float contents and independent copy OK")
+    }
     let baseline: Int = rae_ext_rae_mem_stats_buf_outstanding()
     var i: Int = 0
     loop i < 1000 {
-      if not checkState() { log("bad returned contents") }
+      if not checkState() {
+        log("bad returned contents")
+      }
       i = i + 1
     }
-    if rae_ext_rae_mem_stats_buf_outstanding() is baseline { log("cleanup OK") }
+    if rae_ext_rae_mem_stats_buf_outstanding() is baseline {
+      log("cleanup OK")
+    }
   }
 }

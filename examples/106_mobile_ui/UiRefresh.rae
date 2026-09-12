@@ -17,7 +17,11 @@ type UiRefreshResult {
   sheetChanged: Bool
 }
 
-func createUiRefreshCache(historyLen: view Int, playbackRevision: view Int, sheetEpoch: view Int) pub ret UiRefreshCache {
+func createUiRefreshCache(
+  historyLen: view Int
+  playbackRevision: view Int
+  sheetEpoch: view Int
+) pub ret UiRefreshCache {
   ret UiRefreshCache {
     historyLen: historyLen
     uiPlayback: createUiPlaybackSystem(observedRevision: playbackRevision)
@@ -38,9 +42,25 @@ func refreshMountedUi(
   let oldHistory: Int = cache.historyLen
   let oldSheet: Int = cache.sheetEpoch
 
-  cache.historyLen = refreshHistoryViewsIfNeeded(world: world, scenes: scenes, state: state, visible: visible, cachedLen: cache.historyLen, viewport: viewport)
-  let playbackChanged: Bool = uiPlaybackObserve(this: cache.uiPlayback, world: world, playback: playback, reg: reg)
-  cache.sheetEpoch = refreshBottomSheetIfNeeded(world: world, sheet: state.bottomSheet, cachedEpoch: cache.sheetEpoch)
+  cache.historyLen = refreshHistoryViewsIfNeeded(
+    world: world
+    scenes: scenes
+    state: state
+    visible: visible
+    cachedLen: cache.historyLen
+    viewport: viewport
+  )
+  let playbackChanged: Bool = uiPlaybackObserve(
+    this: cache.uiPlayback
+    world: world
+    playback: playback
+    reg: reg
+  )
+  cache.sheetEpoch = refreshBottomSheetIfNeeded(
+    world: world
+    sheet: state.bottomSheet
+    cachedEpoch: cache.sheetEpoch
+  )
 
   ret UiRefreshResult {
     historyChanged: cache.historyLen is not oldHistory

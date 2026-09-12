@@ -12,63 +12,145 @@
 
 # --- Buffers (handles) ---------------------------------------------------
 # Read-only storage buffer filled from a Float[] (narrowed to f32).
-func nativeStorageF32(data: view Buffer(Float), count: Int) unsafe extern("rae_ext_Gpu_storageF32") ret Int
+func nativeStorageF32(
+  data: view Buffer(Float)
+  count: Int
+) unsafe extern("rae_ext_Gpu_storageF32") ret Int
+
 func storageF32(data: view Buffer(Float), count: copy Int) ret Int {
-  unsafe { ret nativeStorageF32(data: data, count: count) }
+  unsafe {
+    ret nativeStorageF32(data: data, count: count)
+  }
 }
+
 # Read-write storage buffer of `count` f32, also copyable for readback.
 func nativeAllocF32(count: Int) unsafe extern("rae_ext_Gpu_allocF32") ret Int
+
 func allocF32(count: copy Int) ret Int {
-  unsafe { ret nativeAllocF32(count: count) }
+  unsafe {
+    ret nativeAllocF32(count: count)
+  }
 }
+
 # Uniform buffer filled from an Int[] (narrowed to u32) — e.g. params.
-func nativeUniformU32(data: view Buffer(Int), count: Int) unsafe extern("rae_ext_Gpu_uniformU32") ret Int
+func nativeUniformU32(
+  data: view Buffer(Int)
+  count: Int
+) unsafe extern("rae_ext_Gpu_uniformU32") ret Int
+
 func uniformU32(data: view Buffer(Int), count: copy Int) ret Int {
-  unsafe { ret nativeUniformU32(data: data, count: count) }
+  unsafe {
+    ret nativeUniformU32(data: data, count: count)
+  }
 }
+
 # Read-write storage buffer of `count` u32, copyable for readback.
 func nativeAllocU32(count: Int) unsafe extern("rae_ext_Gpu_allocU32") ret Int
+
 func allocU32(count: copy Int) ret Int {
-  unsafe { ret nativeAllocU32(count: count) }
+  unsafe {
+    ret nativeAllocU32(count: count)
+  }
 }
 
 # Overwrite an existing buffer's contents (same element count) — for per-frame
 # updates (e.g. a moving camera, a frame counter) without reallocating, so an
 # interactive/progressive loop reuses persistent GPU buffers.
-func nativeWriteF32(buf: Int, data: view Buffer(Float), count: Int) unsafe extern("rae_ext_Gpu_writeF32")
+func nativeWriteF32(
+  buf: Int
+  data: view Buffer(Float)
+  count: Int
+) unsafe extern("rae_ext_Gpu_writeF32")
+
 func writeF32(buf: copy Int, data: view Buffer(Float), count: copy Int) {
-  unsafe { nativeWriteF32(buf: buf, data: data, count: count) }
+  unsafe {
+    nativeWriteF32(buf: buf, data: data, count: count)
+  }
 }
-func nativeWriteU32(buf: Int, data: view Buffer(Int), count: Int) unsafe extern("rae_ext_Gpu_writeU32")
+
+func nativeWriteU32(
+  buf: Int
+  data: view Buffer(Int)
+  count: Int
+) unsafe extern("rae_ext_Gpu_writeU32")
+
 func writeU32(buf: copy Int, data: view Buffer(Int), count: copy Int) {
-  unsafe { nativeWriteU32(buf: buf, data: data, count: count) }
+  unsafe {
+    nativeWriteU32(buf: buf, data: data, count: count)
+  }
 }
 
 # --- Kernel + dispatch ---------------------------------------------------
 # Compile a WGSL compute kernel; `entry` is the @compute function name.
 func nativeKernel(wgsl: view String, entry: view String) unsafe extern("rae_ext_Gpu_kernel") ret Int
+
 func kernel(wgsl: view String, entry: view String) ret Int {
-  unsafe { ret nativeKernel(wgsl: wgsl, entry: entry) }
+  unsafe {
+    ret nativeKernel(wgsl: wgsl, entry: entry)
+  }
 }
+
 # Bind `bufCount` buffer handles to @binding(0..n) in order and dispatch a
 # gx*gy*gz grid of workgroups. Blocks until the GPU finishes.
-func nativeRun(kernel: Int, bufs: view Buffer(Int), bufCount: Int, gx: Int, gy: Int, gz: Int) unsafe extern("rae_ext_Gpu_run")
-func run(kernel: copy Int, bufs: view Buffer(Int), bufCount: copy Int, gx: copy Int, gy: copy Int, gz: copy Int) {
-  unsafe { nativeRun(kernel: kernel, bufs: bufs, bufCount: bufCount, gx: gx, gy: gy, gz: gz) }
+func nativeRun(
+  kernel: Int
+  bufs: view Buffer(Int)
+  bufCount: Int
+  gx: Int
+  gy: Int
+  gz: Int
+) unsafe extern("rae_ext_Gpu_run")
+
+func run(
+  kernel: copy Int
+  bufs: view Buffer(Int)
+  bufCount: copy Int
+  gx: copy Int
+  gy: copy Int
+  gz: copy Int
+) {
+  unsafe {
+    nativeRun(
+      kernel: kernel
+      bufs: bufs
+      bufCount: bufCount
+      gx: gx
+      gy: gy
+      gz: gz
+    )
+  }
 }
 
 # --- Readback ------------------------------------------------------------
-func nativeDownloadF32(buf: Int, out: mod Buffer(Float), count: Int) unsafe extern("rae_ext_Gpu_downloadF32")
+func nativeDownloadF32(
+  buf: Int
+  out: mod Buffer(Float)
+  count: Int
+) unsafe extern("rae_ext_Gpu_downloadF32")
+
 func downloadF32(buf: copy Int, out: mod Buffer(Float), count: copy Int) {
-  unsafe { nativeDownloadF32(buf: buf, out: out, count: count) }
+  unsafe {
+    nativeDownloadF32(buf: buf, out: out, count: count)
+  }
 }
-func nativeDownloadU32(buf: Int, out: mod Buffer(Int), count: Int) unsafe extern("rae_ext_Gpu_downloadU32")
+
+func nativeDownloadU32(
+  buf: Int
+  out: mod Buffer(Int)
+  count: Int
+) unsafe extern("rae_ext_Gpu_downloadU32")
+
 func downloadU32(buf: copy Int, out: mod Buffer(Int), count: copy Int) {
-  unsafe { nativeDownloadU32(buf: buf, out: out, count: count) }
+  unsafe {
+    nativeDownloadU32(buf: buf, out: out, count: count)
+  }
 }
 
 # Release every buffer + kernel handle (device stays cached for reuse).
 func nativeReset() unsafe extern("rae_ext_Gpu_reset")
+
 func reset() {
-  unsafe { nativeReset() }
+  unsafe {
+    nativeReset()
+  }
 }

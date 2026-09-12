@@ -36,16 +36,12 @@ func main() {
     name: "Golden Statue"
     pos: { x: 100.0, y: 5.5, z: -20.0 }
     size: { width: 2.0, height: 5.0 }
-    style: {
-      color: { r: 255, g: 215, b: 0, a: 255 }
-      visible: true
-      opacity: 0.9
-    }
+    style: { color: { r: 255, g: 215, b: 0, a: 255 }, visible: true, opacity: 0.9 }
   }
-  
+
   log("--- 1. Original Entity ---")
   log("Name: {e.name}, Position: {e.pos.x}, {e.pos.y}, {e.pos.z}")
-  
+
   log("--- 2. To JSON ---")
   let json: String = e.toJson()
   log(json)
@@ -57,7 +53,7 @@ func main() {
   log("Decoded Position: {e2.pos.x}, {e2.pos.y}, {e2.pos.z}")
   log("Decoded Style Visible: {e2.style.visible}")
   log("Decoded Style Opacity: {e2.style.opacity}")
-  
+
   # The nested color proves that user-defined structs round-trip too.
   log("Decoded Color R: {e2.style.color.r}")
 }

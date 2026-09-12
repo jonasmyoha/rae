@@ -17,20 +17,29 @@ open ecs/ComponentTable
 # under `SlotA`; the `Desktop` frame reparents it to `SlotB`. Applying frames
 # back and forth must move it cleanly each time — the detach-then-relink rebuild
 # must never leave `Mover` lingering in its old parent's derived Children list.
-
 func buildScene() ret String {
   var s: String = ""
   s = s.concat(other: "\{")
-  s = s.concat(other: "\"type\":\"Scene\",\"version\":2,\"sceneId\":\"reparent-test\",\"root\":\"Root\",")
+  s = s.concat(
+    other: "\"type\":\"Scene\",\"version\":2,\"sceneId\":\"reparent-test\",\"root\":\"Root\","
+  )
   s = s.concat(other: "\"nodes\":\{")
-  s = s.concat(other: "\"Root\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":600,\"h\":1300\},\"Layout\":\{\"type\":\"Vertical\"\},\"Children\":[\"SlotA\",\"SlotB\"]\},")
-  s = s.concat(other: "\"SlotA\":\{\"Layout\":\{\"type\":\"Vertical\"\},\"Children\":[\"Mover\"]\},")
+  s = s.concat(
+    other: "\"Root\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":600,\"h\":1300\},\"Layout\":\{\"type\":\"Vertical\"\},\"Children\":[\"SlotA\",\"SlotB\"]\},"
+  )
+  s = s.concat(
+    other: "\"SlotA\":\{\"Layout\":\{\"type\":\"Vertical\"\},\"Children\":[\"Mover\"]\},"
+  )
   s = s.concat(other: "\"SlotB\":\{\"Layout\":\{\"type\":\"Vertical\"\},\"Children\":[]\},")
-  s = s.concat(other: "\"Mover\":\{\"Shape\":\{\"kind\":\"RoundedRect\",\"radius\":8,\"fill\":\{\"r\":0,\"g\":0,\"b\":0,\"a\":255\}\}\}")
+  s = s.concat(
+    other: "\"Mover\":\{\"Shape\":\{\"kind\":\"RoundedRect\",\"radius\":8,\"fill\":\{\"r\":0,\"g\":0,\"b\":0,\"a\":255\}\}\}"
+  )
   s = s.concat(other: "\},")
   s = s.concat(other: "\"frames\":\{")
   s = s.concat(other: "\"Phone\":\{\"default\":true,\"nodes\":\{\}\},")
-  s = s.concat(other: "\"Desktop\":\{\"when\":\{\"minPtW\":700\},\"nodes\":\{\"Mover\":\{\"Parent\":\"SlotB\"\}\}\}")
+  s = s.concat(
+    other: "\"Desktop\":\{\"when\":\{\"minPtW\":700\},\"nodes\":\{\"Mover\":\{\"Parent\":\"SlotB\"\}\}\}"
+  )
   s = s.concat(other: "\}")
   s = s.concat(other: "\}")
   ret s
@@ -91,14 +100,32 @@ func main() {
   dump(world: world, pageId: pageId, label: "load")
 
   # Phone (default, no reparent) — Mover stays under SlotA.
-  let phoneIdx: Int = applySceneFramesToPage(world: world, scene: scene, pageId: pageId, windowPtW: 400.0, forcedFrameId: "")
+  let phoneIdx: Int = applySceneFramesToPage(
+    world: world
+    scene: scene
+    pageId: pageId
+    windowPtW: 400.0
+    forcedFrameId: ""
+  )
   dump(world: world, pageId: pageId, label: "phone")
 
   # Desktop (minPtW 700) reparents Mover -> SlotB.
-  let deskIdx: Int = applySceneFramesToPage(world: world, scene: scene, pageId: pageId, windowPtW: 800.0, forcedFrameId: "")
+  let deskIdx: Int = applySceneFramesToPage(
+    world: world
+    scene: scene
+    pageId: pageId
+    windowPtW: 800.0
+    forcedFrameId: ""
+  )
   dump(world: world, pageId: pageId, label: "desktop")
 
   # Back to Phone — Mover must return to SlotA and NOT linger under SlotB.
-  let phone2Idx: Int = applySceneFramesToPage(world: world, scene: scene, pageId: pageId, windowPtW: 400.0, forcedFrameId: "")
+  let phone2Idx: Int = applySceneFramesToPage(
+    world: world
+    scene: scene
+    pageId: pageId
+    windowPtW: 400.0
+    forcedFrameId: ""
+  )
   dump(world: world, pageId: pageId, label: "phone2")
 }

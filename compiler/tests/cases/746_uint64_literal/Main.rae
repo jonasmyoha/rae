@@ -1,4 +1,3 @@
-
 # #817: a UInt64 literal above INT64_MAX, and arithmetic that overflows int64
 # but fits uint64, in BOTH the const-folded (module const) and the plain
 # expression (local) paths. Every value used to come out wrong: the const
@@ -6,7 +5,9 @@
 # an out-of-range `LL` literal (read back as -1), the product overflowed in
 # int64, and UInt64 -> String formatted through the signed path.
 const big: UInt64 = 18446744073709551615
+
 const prod: UInt64 = 4294967295 * 4294967295
+
 const half: UInt64 = big / 2
 
 func main() {

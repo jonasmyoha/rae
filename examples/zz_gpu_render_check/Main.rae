@@ -47,7 +47,9 @@ func awaitReadback(resources: mod GpuResources, id: view ReadbackId) ret Int {
 }
 
 func byteAt(bytes: view List(UInt8), index: view Int) ret Int {
-  if let b: UInt8 = bytes.copyAt(index: index) { ret b as Int }
+  if let b: UInt8 = bytes.copyAt(index: index) {
+    ret b as Int
+  }
   ret 0 - 1
 }
 
@@ -61,12 +63,27 @@ type Adopter {
 func createAdopter() ret Adopter {
   let handles: List(Ptr) = List.create(Ptr, cap: 1)
   unsafe {
-    let descriptor: WGPUBufferDescriptor = { size: 16 as UInt64, usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst }
+    let descriptor: WGPUBufferDescriptor = {
+      size: 16 as UInt64
+      usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst
+    }
     let buffer: Ptr = wgpuDeviceCreateBuffer(device: webgpuDevice(), descriptor: descriptor)
     var colour: ArgWriter = createArgs(uniform: true)
-    pushVec4F(writer: colour, x: 0.2, y: 0.4, z: 0.6, w: 1.0)
+    pushVec4F(
+      writer: colour
+      x: 0.2
+      y: 0.4
+      z: 0.6
+      w: 1.0
+    )
     finalizeArgs(writer: colour)
-    wgpuQueueWriteBuffer(queue: webgpuQueue(), buffer: buffer, bufferOffset: 0 as UInt64, data: colour.bytes.data, size: 16 as UInt64)
+    wgpuQueueWriteBuffer(
+      queue: webgpuQueue()
+      buffer: buffer
+      bufferOffset: 0 as UInt64
+      data: colour.bytes.data
+      size: 16 as UInt64
+    )
     wgpuQueueSubmit(queue: webgpuQueue(), commandCount: 0 as UInt64, commands: webgpuNull())
     handles.add(value: buffer)
     ret Adopter { handles: own handles }
@@ -75,17 +92,26 @@ func createAdopter() ret Adopter {
 
 # Hands the adopter's buffer to the manager by adoption (non-owning).
 func adoptColourBuffer(adopter: view Adopter, resources: mod GpuResources) ret opt ExternalId {
-  unsafe { ret adoptExternalBuffer(resources: resources, handle: rae_ext_rae_buf_get(V: Ptr, buf: adopter.handles.data, index: 0)) }
+  unsafe {
+    ret adoptExternalBuffer(
+      resources: resources
+      handle: rae_ext_rae_buf_get(V: Ptr, buf: adopter.handles.data, index: 0)
+    )
+  }
 }
 
 # The adopter releases its own buffer: the manager never touched it.
 func releaseAdopter(adopter: view Adopter) {
-  unsafe { wgpuBufferRelease(buffer: rae_ext_rae_buf_get(V: Ptr, buf: adopter.handles.data, index: 0)) }
+  unsafe {
+    wgpuBufferRelease(buffer: rae_ext_rae_buf_get(V: Ptr, buf: adopter.handles.data, index: 0))
+  }
 }
 
 func main() ret Int {
   var booted: Int = 0
-  unsafe { booted = webgpuBootstrap() }
+  unsafe {
+    booted = webgpuBootstrap()
+  }
   if booted is not 1 {
     log("no GPU")
     ret 1
@@ -101,14 +127,49 @@ func main() ret Int {
     pushU32(writer: indices, value: 0)
     pushU32(writer: indices, value: 1)
     pushU32(writer: indices, value: 2)
-    if let vertexBuffer: BufferId = createBuffer(resources: resources, size: 24, usage: WGPUBufferUsage_Vertex + WGPUBufferUsage_CopyDst) {
-      if let indexBuffer: BufferId = createBuffer(resources: resources, size: 12, usage: WGPUBufferUsage_Index + WGPUBufferUsage_CopyDst) {
-        if uploadArgs(writer: vertices, resources: resources, buffer: vertexBuffer, offset: 0) is false { ret 1 }
-        if uploadArgs(writer: indices, resources: resources, buffer: indexBuffer, offset: 0) is false { ret 1 }
+    if let vertexBuffer: BufferId = createBuffer(
+      resources: resources
+      size: 24
+      usage: WGPUBufferUsage_Vertex + WGPUBufferUsage_CopyDst
+    ) {
+      if let indexBuffer: BufferId = createBuffer(
+        resources: resources
+        size: 12
+        usage: WGPUBufferUsage_Index + WGPUBufferUsage_CopyDst
+      ) {
+        if uploadArgs(
+          writer: vertices
+          resources: resources
+          buffer: vertexBuffer
+          offset: 0
+        ) is false {
+          ret 1
+        }
+        if uploadArgs(
+          writer: indices
+          resources: resources
+          buffer: indexBuffer
+          offset: 0
+        ) is false {
+          ret 1
+        }
         # Target: a 4x4 RGBA8 manager texture + view; a readback buffer of 4 rows of 256 bytes.
-        if let texture: TextureId = createTexture(resources: resources, width: 4, height: 4, format: WGPUTextureFormat_RGBA8Unorm, usage: WGPUTextureUsage_RenderAttachment + WGPUTextureUsage_CopySrc) {
-          if let textureView: TextureViewId = createTextureView(resources: resources, texture: texture) {
-            if let pixels: BufferId = createBuffer(resources: resources, size: 1024, usage: WGPUBufferUsage_MapRead + WGPUBufferUsage_CopyDst) {
+        if let texture: TextureId = createTexture(
+          resources: resources
+          width: 4
+          height: 4
+          format: WGPUTextureFormat_RGBA8Unorm
+          usage: WGPUTextureUsage_RenderAttachment + WGPUTextureUsage_CopySrc
+        ) {
+          if let textureView: TextureViewId = createTextureView(
+            resources: resources
+            texture: texture
+          ) {
+            if let pixels: BufferId = createBuffer(
+              resources: resources
+              size: 1024
+              usage: WGPUBufferUsage_MapRead + WGPUBufferUsage_CopyDst
+            ) {
               # The adopted external uniform.
               let adopter: Adopter = createAdopter()
               var adopted: ExternalId = { managerTag: 0, slot: 0 - 1, generation: 0 }
@@ -117,31 +178,98 @@ func main() ret Int {
                 adopted = id
                 adoptedOk = true
               }
-              if adoptedOk is false { ret 1 }
-              if liveExternalCount(resources: resources) is not 1 { ret 1 }
+              if adoptedOk is false {
+                ret 1
+              }
+              if liveExternalCount(resources: resources) is not 1 {
+                ret 1
+              }
               # Pipeline: float32x2 position at location 0, RGBA8 target, no blend, no depth.
               let attributes: List(VertexAttributeSpec) = List.create(VertexAttributeSpec, cap: 1)
               attributes.add(value: { format: WGPUVertexFormat_Float32x2, offset: 0, location: 0 })
               let colorFormats: List(Int32) = List.create(Int32, cap: 1)
               colorFormats.add(value: WGPUTextureFormat_RGBA8Unorm)
-              let spec: RenderPipelineSpec = { vertexStride: 8, attributes: own attributes, colorFormats: own colorFormats, alphaBlend: false, premultiplied: false, depthFormat: 0 as Int32, depthWrite: false, depthCompare: WGPUCompareFunction_Always, cullMode: WGPUCullMode_None }
-              if let pipeline: RenderPipelineId = createRenderPipeline(resources: resources, wgsl: shaderSource(), vertexEntry: "vs", fragmentEntry: "fs", spec: spec) {
+              let spec: RenderPipelineSpec = {
+                vertexStride: 8
+                attributes: own attributes
+                colorFormats: own colorFormats
+                alphaBlend: false
+                premultiplied: false
+                depthFormat: 0 as Int32
+                depthWrite: false
+                depthCompare: WGPUCompareFunction_Always
+                cullMode: WGPUCullMode_None
+              }
+              if let pipeline: RenderPipelineId = createRenderPipeline(
+                resources: resources
+                wgsl: shaderSource()
+                vertexEntry: "vs"
+                fragmentEntry: "fs"
+                spec: spec
+              ) {
                 let entries: List(ResourceRef) = List.create(ResourceRef, cap: 1)
                 entries.add(value: externalRef(id: adopted))
-                if let bindGroup: BindGroupId = createRenderBindGroup(resources: resources, pipeline: pipeline, entries: entries) {
-                  let target: RenderTarget = renderTarget(colorView: textureViewRef(id: textureView), clear: true, r: 0.0, g: 0.0, b: 0.0, a: 1.0)
+                if let bindGroup: BindGroupId = createRenderBindGroup(
+                  resources: resources
+                  pipeline: pipeline
+                  entries: entries
+                ) {
+                  let target: RenderTarget = renderTarget(
+                    colorView: textureViewRef(id: textureView)
+                    clear: true
+                    r: 0.0
+                    g: 0.0
+                    b: 0.0
+                    a: 1.0
+                  )
                   if let recording: Recording = beginRecording(resources: resources) {
-                    if recordDrawIndexed(recording: recording, resources: resources, target: target, pipeline: pipeline, bindGroup: bindGroup, vertexBuffer: bufferRef(id: vertexBuffer), indexBuffer: bufferRef(id: indexBuffer), indexCount: 3) is false { ret 1 }
-                    if recordCopyTextureToBuffer(recording: recording, resources: resources, texture: texture, buffer: pixels, bytesPerRow: 256) is false { ret 1 }
-                    if let submission: SubmissionId = submit(resources: resources, recording: recording) {
-                      if awaitSubmission(resources: resources, id: submission) is not 1 { ret 1 }
+                    if recordDrawIndexed(
+                      recording: recording
+                      resources: resources
+                      target: target
+                      pipeline: pipeline
+                      bindGroup: bindGroup
+                      vertexBuffer: bufferRef(id: vertexBuffer)
+                      indexBuffer: bufferRef(id: indexBuffer)
+                      indexCount: 3
+                    ) is false {
+                      ret 1
+                    }
+                    if recordCopyTextureToBuffer(
+                      recording: recording
+                      resources: resources
+                      texture: texture
+                      buffer: pixels
+                      bytesPerRow: 256
+                    ) is false {
+                      ret 1
+                    }
+                    if let submission: SubmissionId = submit(
+                      resources: resources
+                      recording: recording
+                    ) {
+                      if awaitSubmission(resources: resources, id: submission) is not 1 {
+                        ret 1
+                      }
                       retireSubmission(resources: resources, id: submission)
-                      if let read: ReadbackId = startReadback(resources: resources, buffer: pixels, offset: 0, size: 1024) {
-                        if awaitReadback(resources: resources, id: read) is not 1 { ret 1 }
+                      if let read: ReadbackId = startReadback(
+                        resources: resources
+                        buffer: pixels
+                        offset: 0
+                        size: 1024
+                      ) {
+                        if awaitReadback(resources: resources, id: read) is not 1 {
+                          ret 1
+                        }
                         let bytes: List(UInt8) = List.create(UInt8, cap: 1024)
                         var z: Int = 0
-                        loop z < 1024 { bytes.add(value: 0 as UInt8) z = z + 1 }
-                        if copyReadback(resources: resources, id: read, destination: bytes) is false { ret 1 }
+                        loop z < 1024 {
+                          bytes.add(value: 0 as UInt8)
+                          z = z + 1
+                        }
+                        if copyReadback(resources: resources, id: read, destination: bytes) is false {
+                          ret 1
+                        }
                         retireReadback(resources: resources, id: read)
                         # Every pixel of the 4x4 target is the uniform colour (51,102,153,255).
                         var row: Int = 0
@@ -149,32 +277,87 @@ func main() ret Int {
                           var column: Int = 0
                           loop column < 4 {
                             let base: Int = row * 256 + column * 4
-                            if byteAt(bytes: bytes, index: base) is not 51 or byteAt(bytes: bytes, index: base + 1) is not 102 or byteAt(bytes: bytes, index: base + 2) is not 153 or byteAt(bytes: bytes, index: base + 3) is not 255 {
-                              log("FAIL: pixel {column},{row} = {byteAt(bytes: bytes, index: base)},{byteAt(bytes: bytes, index: base + 1)},{byteAt(bytes: bytes, index: base + 2)},{byteAt(bytes: bytes, index: base + 3)}")
+                            if byteAt(bytes: bytes, index: base) is not 51 or byteAt(
+                              bytes: bytes
+                              index: base + 1
+                            ) is not 102 or byteAt(bytes: bytes, index: base + 2) is not 153 or byteAt(
+                              bytes: bytes
+                              index: base + 3
+                            ) is not 255 {
+                              log(
+                                "FAIL: pixel {column},{row} = {byteAt(bytes: bytes, index: base)},{byteAt(
+                                  bytes: bytes
+                                  index: base + 1
+                                )},{byteAt(bytes: bytes, index: base + 2)},{byteAt(
+                                  bytes: bytes
+                                  index: base + 3
+                                )}"
+                              )
                               ret 1
                             }
                             column = column + 1
                           }
                           row = row + 1
                         }
-                        log("render pipeline, adopted external uniform, indexed draw, texture copy and pixel readback OK")
-                        # Lifetime: retire the pipeline (bind group keeps its own reference), release the external.
-                        if retireRenderPipeline(resources: resources, id: pipeline) is false { ret 1 }
-                        if isValidRenderPipeline(resources: resources, id: pipeline) { ret 1 }
-                        if retireBindGroup(resources: resources, id: bindGroup) is false { ret 1 }
-                        if releaseExternal(resources: resources, id: adopted) is false { ret 1 }
-                        if isValidExternal(resources: resources, id: adopted) { ret 1 }
-                        if liveExternalCount(resources: resources) is not 0 { ret 1 }
-                        # The adopter still owns and releases its buffer: the manager never touched it.
+                        log(
+                          "render pipeline, adopted external uniform, indexed draw, texture copy and pixel readback OK"
+                        )
+                        # Lifetime: retire the pipeline (bind group keeps its own reference),
+                        # release the external.
+                        if retireRenderPipeline(resources: resources, id: pipeline) is false {
+                          ret 1
+                        }
+                        if isValidRenderPipeline(resources: resources, id: pipeline) {
+                          ret 1
+                        }
+                        if retireBindGroup(resources: resources, id: bindGroup) is false {
+                          ret 1
+                        }
+                        if releaseExternal(resources: resources, id: adopted) is false {
+                          ret 1
+                        }
+                        if isValidExternal(resources: resources, id: adopted) {
+                          ret 1
+                        }
+                        if liveExternalCount(resources: resources) is not 0 {
+                          ret 1
+                        }
+                        # The adopter still owns and releases its buffer: the manager never touched
+                        # it.
                         releaseAdopter(adopter: adopter)
                         # Refusals: a released external cannot be bound, a stale pipeline cannot
                         # take a bind group, and a draw with a too-small index buffer is refused.
                         let staleEntries: List(ResourceRef) = List.create(ResourceRef, cap: 1)
                         staleEntries.add(value: externalRef(id: adopted))
-                        if let stale: BindGroupId = createRenderBindGroup(resources: resources, pipeline: pipeline, entries: staleEntries) { ret 1 }
+                        if let stale: BindGroupId = createRenderBindGroup(
+                          resources: resources
+                          pipeline: pipeline
+                          entries: staleEntries
+                        ) {
+                          ret 1
+                        }
                         if let recording2: Recording = beginRecording(resources: resources) {
-                          if recordDrawIndexed(recording: recording2, resources: resources, target: target, pipeline: pipeline, bindGroup: bindGroup, vertexBuffer: bufferRef(id: vertexBuffer), indexBuffer: bufferRef(id: indexBuffer), indexCount: 3) { ret 1 }
-                          if recordCopyTextureToBuffer(recording: recording2, resources: resources, texture: texture, buffer: pixels, bytesPerRow: 100) { ret 1 }
+                          if recordDrawIndexed(
+                            recording: recording2
+                            resources: resources
+                            target: target
+                            pipeline: pipeline
+                            bindGroup: bindGroup
+                            vertexBuffer: bufferRef(id: vertexBuffer)
+                            indexBuffer: bufferRef(id: indexBuffer)
+                            indexCount: 3
+                          ) {
+                            ret 1
+                          }
+                          if recordCopyTextureToBuffer(
+                            recording: recording2
+                            resources: resources
+                            texture: texture
+                            buffer: pixels
+                            bytesPerRow: 100
+                          ) {
+                            ret 1
+                          }
                         }
                         log("retire, external release, adopter ownership and refusals OK")
                         ret 0

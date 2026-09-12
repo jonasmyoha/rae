@@ -30,7 +30,11 @@ const menuToggleActionId: String = "menu.toggle"
 # Mount the button into an app-authored host node (a slot in the top row, right
 # before the camera bar's slot). Returns false when the host id is not in the
 # world or the scene file is missing — the two mistakes worth reporting.
-func mountCornerMenuButton(world: mod UiWorld, res: view Gpu2dUi, hostNodeId: view String) ret Bool {
+func mountCornerMenuButton(
+  world: mod UiWorld
+  res: view Gpu2dUi
+  hostNodeId: view String
+) ret Bool {
   let host: EntityId = nodeEntityFor(world: world, nodeId: hostNodeId)
   if isNone(this: host) {
     ret false
@@ -41,7 +45,10 @@ func mountCornerMenuButton(world: mod UiWorld, res: view Gpu2dUi, hostNodeId: vi
   }
   let overrides: List(SceneOverride) = List.create(SceneOverride, cap: 0)
   let root: EntityId = mountSceneInstance(
-    world: world, mountEntity: host, scene: scene, overrides: overrides
+    world: world
+    mountEntity: host
+    scene: scene
+    overrides: overrides
   )
   if isNone(this: root) {
     ret false
@@ -53,7 +60,9 @@ func mountCornerMenuButton(world: mod UiWorld, res: view Gpu2dUi, hostNodeId: vi
 # True on a frame whose UI actions include the mounted button's press.
 func menuToggleTapped(input: view UiInput) ret Bool {
   loop var i: Int = 0, i < uiActionCount(input: input), ++i {
-    if uiActionAt(input: input, index: i) is menuToggleActionId { ret true }
+    if uiActionAt(input: input, index: i) is menuToggleActionId {
+      ret true
+    }
   }
   ret false
 }
@@ -61,9 +70,17 @@ func menuToggleTapped(input: view UiInput) ret Bool {
 # ----- immediate-mode overlay form ------------------------------------------
 
 # Square side, and top-left origin (safe-area aware) in gpu2d design units.
-func cornerMenuButtonSize() pub ret Float { ret Gpu2d.designWidth() * 0.085 }
-func cornerMenuButtonX() pub ret Float { ret Gpu2d.safeLeft() + Gpu2d.designWidth() * 0.045 }
-func y() pub ret Float { ret Gpu2d.safeTop() + Gpu2d.designHeight() * 0.03 }
+func cornerMenuButtonSize() pub ret Float {
+  ret Gpu2d.designWidth() * 0.085
+}
+
+func cornerMenuButtonX() pub ret Float {
+  ret Gpu2d.safeLeft() + Gpu2d.designWidth() * 0.045
+}
+
+func y() pub ret Float {
+  ret Gpu2d.safeTop() + Gpu2d.designHeight() * 0.03
+}
 
 # Draw the rounded panel + three bars. Call inside the 2D overlay pass, last, so
 # it draws over the ECS UI world and the settings panel.
@@ -71,18 +88,52 @@ func drawCornerMenuButton(canvas: mod Gpu2dCanvas) pub {
   let size: Float = cornerMenuButtonSize()
   let bx: Float = cornerMenuButtonX()
   let by: Float = y()
-  Gpu2d.drawRoundedRect(canvas: canvas, x: bx, y: by, w: size, h: size, radius: size * 0.24, color: 0xC01A2028)
+  Gpu2d.drawRoundedRect(
+    canvas: canvas
+    x: bx
+    y: by
+    w: size
+    h: size
+    radius: size * 0.24
+    color: 0xC01A2028
+  )
   let barW: Float = size * 0.5
   let barH: Float = size * 0.09
   let barX: Float = bx + size * 0.25
-  Gpu2d.drawRoundedRect(canvas: canvas, x: barX, y: by + size * 0.31, w: barW, h: barH, radius: barH * 0.5, color: 0xF0FFFFFF)
-  Gpu2d.drawRoundedRect(canvas: canvas, x: barX, y: by + size * 0.455, w: barW, h: barH, radius: barH * 0.5, color: 0xF0FFFFFF)
-  Gpu2d.drawRoundedRect(canvas: canvas, x: barX, y: by + size * 0.60, w: barW, h: barH, radius: barH * 0.5, color: 0xF0FFFFFF)
+  Gpu2d.drawRoundedRect(
+    canvas: canvas
+    x: barX
+    y: by + size * 0.31
+    w: barW
+    h: barH
+    radius: barH * 0.5
+    color: 0xF0FFFFFF
+  )
+  Gpu2d.drawRoundedRect(
+    canvas: canvas
+    x: barX
+    y: by + size * 0.455
+    w: barW
+    h: barH
+    radius: barH * 0.5
+    color: 0xF0FFFFFF
+  )
+  Gpu2d.drawRoundedRect(
+    canvas: canvas
+    x: barX
+    y: by + size * 0.60
+    w: barW
+    h: barH
+    radius: barH * 0.5
+    color: 0xF0FFFFFF
+  )
 }
 
 # True on the frame the button is pressed (a pointer-press inside its square).
 func tapped() pub ret Bool {
-  if not Gpu2d.pointerPressed() { ret false }
+  if not Gpu2d.pointerPressed() {
+    ret false
+  }
   let size: Float = cornerMenuButtonSize()
   let bx: Float = cornerMenuButtonX()
   let by: Float = y()

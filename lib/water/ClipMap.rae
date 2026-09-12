@@ -14,14 +14,33 @@ open Mesh3d
 # rings * segments + 1 vertices; the first ring at `firstCell` metres, each ring
 # `growth` times farther than the previous step. rings=64, segments=96,
 # firstCell=1, growth=1.09 reaches ~2.5 km with ~6k vertices.
-func createRadialGridMesh(rings: copy Int, segments: copy Int, firstCell: copy Float, growth: copy Float) pub ret MeshData {
+func createRadialGridMesh(
+  rings: copy Int
+  segments: copy Int
+  firstCell: copy Float
+  growth: copy Float
+) pub ret MeshData {
   var ringCount: Int = rings
-  if ringCount < 1 { ringCount = 1 }
+  if ringCount < 1 {
+    ringCount = 1
+  }
   var segmentCount: Int = segments
-  if segmentCount < 3 { segmentCount = 3 }
+  if segmentCount < 3 {
+    segmentCount = 3
+  }
   let verts: List(Float) = List.create(Float, cap: (ringCount * segmentCount + 1) * 8)
   let indices: List(Int) = List.create(Int, cap: ringCount * segmentCount * 6)
-  pushVert(verts: verts, px: 0.0, py: 0.0, pz: 0.0, nx: 0.0, ny: 0.0, nz: 1.0, u: 0.0, value: 0.0)
+  pushVert(
+    verts: verts
+    px: 0.0
+    py: 0.0
+    pz: 0.0
+    nx: 0.0
+    ny: 0.0
+    nz: 1.0
+    u: 0.0
+    value: 0.0
+  )
   var radius: Float = 0.0
   var cell: Float = firstCell
   loop var ring: Int = 0, ring < ringCount, ++ring {
@@ -29,8 +48,17 @@ func createRadialGridMesh(rings: copy Int, segments: copy Int, firstCell: copy F
     cell = cell * growth
     loop var segment: Int = 0, segment < segmentCount, ++segment {
       let angle: Float = segment.toFloat() / segmentCount.toFloat() * 6.28318530718
-      pushVert(verts: verts, px: Math.cos(x: angle) * radius, py: Math.sin(x: angle) * radius, pz: 0.0,
-        nx: 0.0, ny: 0.0, nz: 1.0, u: 0.0, value: 0.0)
+      pushVert(
+        verts: verts
+        px: Math.cos(x: angle) * radius
+        py: Math.sin(x: angle) * radius
+        pz: 0.0
+        nx: 0.0
+        ny: 0.0
+        nz: 1.0
+        u: 0.0
+        value: 0.0
+      )
     }
   }
   # Centre fan.
