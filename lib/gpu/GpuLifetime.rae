@@ -1,9 +1,10 @@
 # gpu/GpuLifetime — recording and submission lifetime over gpu/GpuResources
 # (#870): PipelineId, BindGroupId, SubmissionId, a `Recording` owner, and
-# nonblocking completion polling. Pure Rae over the generated bindings: a
-# submission's completion is tracked with wgpu's submission index
-# (`wgpuQueueSubmitForIndex` + `wgpuDevicePoll(wait: 0)`), so there are no
-# callbacks and no callback-reachable state in this layer.
+# nonblocking completion polling. A submission's completion is tracked by
+# wgpu's submission index: `wgpuQueueSubmitForIndex` hands it out, the runtime
+# watches it with `wgpuQueueOnSubmittedWorkDone`, and `pollSubmission` asks
+# the runtime nonblockingly whether that index is done (#938). Nothing in this
+# layer is callback-reachable — the callback only records an index in C.
 #
 # Retention has two levels. NATIVELY, a command encoder and a bind group hold
 # references to everything they record or bind, and wgpu keeps a submission's
@@ -741,6 +742,7 @@ func submit(resources: mod GpuResources, recording: mod Recording) ret opt Submi
       commands: commands.data
     ) as Int
     wgpuCommandBufferRelease(commandBuffer: commandBuffer)
+    webgpuWatchSubmission(index: nativeIndex as UInt64)
     storeHandle(table: resources.submissions, slot: slot, handle: webgpuNull())
   }
   resources.submissions.nativeIndex.set(index: slot, value: nativeIndex)
@@ -765,14 +767,13 @@ func pollSubmission(resources: mod GpuResources, id: view SubmissionId) ret Int 
   if intAt(list: resources.submissions.completed, index: id.slot) is 1 {
     ret 1
   }
+  # Not `wgpuDevicePoll`: its return value is "the queue is empty", which a
+  # consumer submitting every frame next to a busy renderer never sees, so its
+  # submissions never retired and its manager slots filled up (#938).
   var done: UInt32 = 0 as UInt32
   unsafe {
-    var indexList: List(UInt64) = List.create(UInt64, cap: 1)
-    indexList.add(value: intAt(list: resources.submissions.nativeIndex, index: id.slot) as UInt64)
-    done = wgpuDevicePoll(
-      device: webgpuDevice()
-      wait: 0 as UInt32
-      submissionIndex: indexList.data
+    done = webgpuSubmissionDone(
+      index: intAt(list: resources.submissions.nativeIndex, index: id.slot) as UInt64
     )
   }
   if done is (0 as UInt32) {

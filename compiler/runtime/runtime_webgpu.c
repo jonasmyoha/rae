@@ -128,6 +128,44 @@ void* rae_wgpu_ctx_adapter(void)    { return (void*)g_wgpu_adapter; }
 void* rae_wgpu_ctx_instance(void)   { return (void*)g_wgpu_inst; }
 /* Advance the device's event queue (map/submit callbacks). wait!=0 blocks. */
 void  rae_wgpu_ctx_poll(int wait)   { rae_wgpu_poll(wait); }
+
+/* Per-submission completion (#938). wgpuDevicePoll's return value means "the
+ * queue is EMPTY", not "that submission index finished" (wgpu.h says so), so
+ * a consumer that submits every frame while another keeps the GPU busy never
+ * saw its own work retire: its manager slots filled, submit failed, and the
+ * grass field vanished until the queue happened to drain. The honest signal
+ * is wgpuQueueOnSubmittedWorkDone, which fires once everything submitted
+ * before the call is done; indices are monotonic on the one queue, so the
+ * highest index whose callback fired bounds every completed submission. The
+ * index rides in userdata1 — no allocation per frame, nothing to free. */
+static uint64_t g_wgpu_done_index = 0;
+static void rae_wgpu_on_work_done(WGPUQueueWorkDoneStatus st, WGPUStringView m, void* u1, void* u2) {
+    (void)st; (void)m; (void)u2;
+    uint64_t index = (uint64_t)(uintptr_t)u1;
+    if (index > g_wgpu_done_index) g_wgpu_done_index = index;
+}
+void rae_wgpu_watch_submission(uint64_t index) {
+    if (!g_wgpu_queue) return;
+    WGPUQueueWorkDoneCallbackInfo ci; memset(&ci, 0, sizeof(ci));
+    ci.mode = WGPUCallbackMode_AllowProcessEvents;
+    ci.callback = rae_wgpu_on_work_done;
+    ci.userdata1 = (void*)(uintptr_t)index;
+    wgpuQueueOnSubmittedWorkDone(g_wgpu_queue, ci);
+}
+/* Nonblocking: pumps callbacks, then answers for this index. The queue-empty
+ * flag stays as a second yes — when nothing at all is in flight, everything
+ * is done regardless of whether its callback has been observed yet. */
+uint32_t rae_wgpu_submission_done(uint64_t index) {
+    uint32_t queueEmpty = 0;
+#ifdef __EMSCRIPTEN__
+    if (g_wgpu_inst) wgpuInstanceProcessEvents(g_wgpu_inst);
+#else
+    if (g_wgpu_dev) queueEmpty = (uint32_t)wgpuDevicePoll(g_wgpu_dev, 0, NULL);
+    if (g_wgpu_inst) wgpuInstanceProcessEvents(g_wgpu_inst);
+#endif
+    if (index <= g_wgpu_done_index) return 1;
+    return queueEmpty;
+}
 /* A null opaque pointer, for WebGPU params that take an optional pointer/array
  * (e.g. dynamicOffsets when the count is 0). Rae has no null-Ptr literal yet. */
 void* rae_wgpu_null_ptr(void)       { return (void*)0; }
