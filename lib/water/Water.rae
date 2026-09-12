@@ -89,6 +89,11 @@ type WaterBody {
   # 1 updates all every frame; mobile defaults to 2. Initialization/invalidation
   # refresh all maps once. Wave time always follows real elapsed time, not updates.
   updateRate: Int
+  # Screen-space reflections (#854, the desktop quality switch): 1 = march the
+  # reflected view ray against the G-buffer depth and mirror the opaque lit
+  # scene where it hits (the sky stays the fallback); 0 = sky only (mobile).
+  ssr: Int
+  ssrSteps: Int  # march steps per pixel (24 desktop); more = longer, finer rays
 }
 
 # A stylised lake with the surface at `surfaceZ`: pale turquoise shallows, a deep
@@ -147,6 +152,8 @@ func createLakeToon(surfaceZ: copy Float, extent: copy Float) ret WaterBody {
     cascadeTile1: 60.0
     cascadeTile2: 8.0
     updateRate: 1
+    ssr: 0
+    ssrSteps: 0
   }
 }
 
@@ -284,5 +291,7 @@ func createOceanRealistic(surfaceZ: copy Float) ret WaterBody {
   body.foamDistance = 0.6
   body.highlightPower = 180.0
   body.waveCount = 0
+  body.ssr = 1
+  body.ssrSteps = 24
   ret body
 }
