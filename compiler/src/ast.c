@@ -509,6 +509,24 @@ static void dump_if_stmt(const AstStmt* stmt, FILE* out, int indent) {
 static void dump_loop_stmt(const AstStmt* stmt, FILE* out, int indent) {
   print_indent(out, indent);
   fputs(stmt->as.loop_stmt.is_parallel ? "parallelLoop" : "loop", out);
+  if (stmt->as.loop_stmt.query_bindings) {
+    /* The ECS query-loop sugar: dump the SOURCE bindings + iterable, not the
+     * hoisted-let expansion (whose hidden names vary run to run). */
+    fputs(" let ", out);
+    bool first = true;
+    for (const AstQueryLoopBinding* qb = stmt->as.loop_stmt.query_bindings; qb; qb = qb->next) {
+      if (!first) fputs(", ", out);
+      print_str(out, qb->name);
+      fputs(": ", out);
+      dump_type_ref(qb->type, out);
+      first = false;
+    }
+    fputs(" in ", out);
+    dump_expr(stmt->as.loop_stmt.query_iterable, out);
+    fputc('\n', out);
+    dump_block(stmt->as.loop_stmt.body, out, indent + 1);
+    return;
+  }
   if (stmt->as.loop_stmt.init) {
     if (stmt->as.loop_stmt.init->kind == AST_STMT_LET) {
       fputc(' ', out);
@@ -602,6 +620,11 @@ static void dump_block(const AstBlock* block, FILE* out, int indent) {
   }
   const AstStmt* stmt = block->first;
   while (stmt) {
+    /* Parser-generated statements (query-loop desugaring, #916/#917) are not
+     * source and carry non-deterministic hidden names; the loop that owns them
+     * dumps its source-level bindings instead, so they are skipped here to keep
+     * the dump a stable oracle for AST equivalence. */
+    if (stmt->is_synthetic) { stmt = stmt->next; continue; }
     switch (stmt->kind) {
       case AST_STMT_LET:
         dump_let_stmt(stmt, out, indent);

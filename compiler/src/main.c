@@ -35,6 +35,7 @@
 #include "parser.h"
 #include "ast.h"
 #include "pretty.h"
+#include "rae_format.h"
 #include "c_backend.h"
 #include "sema.h"
 #include "mangler.h"
@@ -49,12 +50,6 @@
 #include "sys_thread.h"
 #include "vm_natives_core.h"
 #include "../runtime/rae_runtime.h"
-
-typedef struct {
-  const char* input_path;
-  const char* output_path;
-  bool write_in_place;
-} FormatOptions;
 
 typedef struct {
   const char* input_path;
@@ -196,49 +191,6 @@ static int run_vm_file(const RunOptions* run_opts, const char* project_root);
 static int run_compiled_file(const RunOptions* run_opts, const char* project_root);
 static int run_vm_watch(const RunOptions* run_opts, const char* project_root);
 
-static void format_options_init(FormatOptions* opts) {
-  opts->input_path = NULL;
-  opts->output_path = NULL;
-  opts->write_in_place = false;
-}
-
-static bool parse_format_args(int argc, char** argv, FormatOptions* opts) {
-  format_options_init(opts);
-  int i = 0;
-  while (i < argc) {
-    const char* arg = argv[i];
-    if (strcmp(arg, "--write") == 0 || strcmp(arg, "-w") == 0) {
-      opts->write_in_place = true;
-      i += 1;
-    } else if (strcmp(arg, "-o") == 0 || strcmp(arg, "--output") == 0) {
-      if (i + 1 >= argc) {
-        fprintf(stderr, "error: %s expects a file path\n", arg);
-        return false;
-      }
-      opts->output_path = argv[i + 1];
-      i += 2;
-    } else if (arg[0] == '-') {
-      fprintf(stderr, "error: unknown format option '%s'\n", arg);
-      return false;
-    } else {
-      if (opts->input_path) {
-        fprintf(stderr, "error: multiple input files provided ('%s' and '%s')\n", opts->input_path, arg);
-        return false;
-      }
-      opts->input_path = arg;
-      i += 1;
-    }
-  }
-  if (!opts->input_path) {
-    fprintf(stderr, "error: format command requires a file argument\n");
-    return false;
-  }
-  if (opts->write_in_place && opts->output_path) {
-    fprintf(stderr, "error: --write and --output cannot be used together\n");
-    return false;
-  }
-  return true;
-}
 
 static bool file_exists(const char* path);  // defined below
 
@@ -2252,7 +2204,10 @@ static void print_usage(const char* prog) {
   fprintf(stderr, "\nCommands:\n");
   fprintf(stderr, "  lex <file>      Tokenize Rae source file\n");
   fprintf(stderr, "  parse <file>    Parse Rae source file and dump AST\n");
-  fprintf(stderr, "  format <file>   Parse Rae source file and pretty-print it\n");
+  fprintf(stderr, "  format <files|dirs>\n");
+  fprintf(stderr, "                  Canonically format Rae source, in place by default.\n");
+  fprintf(stderr, "                  Options: --check (list unformatted, non-zero exit),\n");
+  fprintf(stderr, "                  --stdout, --write/-w, --stdin, --json, --rules --json.\n");
   fprintf(stderr, "  run [opts] [file]\n");
   fprintf(stderr, "                  Build and run Rae source. With no file, infers\n");
   fprintf(stderr, "                  the entry from the current folder (Main.rae, or a\n");
@@ -3875,7 +3830,6 @@ static int run_command(const char* cmd, int argc, char** argv) {
   char* source = NULL;
   Arena* arena = NULL;
   const char* file_path = NULL;
-  FormatOptions format_opts;
   bool is_format = (strcmp(cmd, "format") == 0);
   bool is_run = (strcmp(cmd, "run") == 0);
   bool is_build = (strcmp(cmd, "build") == 0);
@@ -3927,11 +3881,7 @@ static int run_command(const char* cmd, int argc, char** argv) {
   }
 
   if (is_format) {
-    if (!parse_format_args(argc, argv, &format_opts)) {
-      print_usage(cmd);
-      return 1;
-    }
-    file_path = format_opts.input_path;
+    return rae_format_cli(argc, argv);
   } else if (strcmp(cmd, "lex") == 0 || strcmp(cmd, "parse") == 0) {
     if (argc < 1) {
       fprintf(stderr, "error: %s command requires a file argument\n", cmd);
@@ -4088,54 +4038,6 @@ static int run_command(const char* cmd, int argc, char** argv) {
   } else if (strcmp(cmd, "parse") == 0) {
     AstModule* module = parse_module(arena, file_path, tokens);
     ast_dump_module(module, stdout);
-  } else if (is_format) {
-    bool is_raepack = strstr(format_opts.input_path, ".raepack") != NULL;
-    if (is_raepack) {
-      RaePack pack;
-      if (!raepack_parse_file(format_opts.input_path, &pack, false)) {
-        free(source);
-        arena_destroy(arena);
-        return 1;
-      }
-      const char* output_path = format_opts.write_in_place ? format_opts.input_path : format_opts.output_path;
-      if (output_path) {
-        FILE* out = fopen(output_path, "w");
-        if (!out) {
-          fprintf(stderr, "error: could not open '%s' for writing: %s\n", output_path, strerror(errno));
-          raepack_free(&pack);
-          free(source);
-          arena_destroy(arena);
-          return 1;
-        }
-        raepack_pretty_print(&pack, out);
-        fclose(out);
-      } else {
-        raepack_pretty_print(&pack, stdout);
-      }
-      raepack_free(&pack);
-    } else {
-      AstModule* module = parse_module(arena, format_opts.input_path, tokens);
-      if (diag_error_count() > 0) {
-          fprintf(stderr, "error: formatting failed due to previous errors\n");
-          arena_destroy(arena);
-          free(source);
-          return 1;
-      }
-      if (format_opts.write_in_place || format_opts.output_path) {
-        const char* output_path = format_opts.write_in_place ? format_opts.input_path : format_opts.output_path;
-        FILE* out = fopen(output_path, "w");
-        if (!out) {
-          fprintf(stderr, "error: could not open '%s' for writing: %s\n", output_path, strerror(errno));
-          arena_destroy(arena);
-          free(source);
-          return 1;
-        }
-        pretty_print_module(module, source, out);
-        fclose(out);
-      } else {
-        pretty_print_module(module, source, stdout);
-      }
-    }
   }
 
   arena_destroy(arena);
