@@ -142,6 +142,36 @@ idempotence + AST-equivalence checks on every `format` case):
   aliases, if-let bindings, cast targets, field defaults, extern symbols,
   `var`/`const`, raw strings) so it can serve as the AST-equivalence oracle.
 
+### #917 result (the project formatter)
+
+`src/rae_format.{c,h}` is the ONE formatter: `rae_format_source(path, source,
+len, check_ast, result)` renders a module to a malloc'd buffer and verifies it
+— the output re-parses cleanly, stays under the 1,000-line cap, and (with
+`check_ast`) dumps the same AST as the input. The CLI, the tests, and the #919
+build preflight all call it, so there is never a second layout authority. The
+AST-equivalence guard forced two supporting fixes: `parse_module`'s
+query-loop desugaring uses a static counter that yields different hidden names
+each in-process parse, so `ast_dump_module` now SKIPS parser-synthetic
+statements (`AstStmt.is_synthetic`) and dumps the loop from its source-level
+`query_bindings` — the dump is a deterministic oracle again.
+
+`rae format <files|dirs>` formats IN PLACE by default (atomic temp+rename,
+`stat`+`chmod` to preserve the mode, unchanged files never touched so their
+mtime holds); `--check` lists differing files and exits non-zero; `--stdout`
+prints; `--write`/`-w` are aliases for the default; `--stdin` formats stdin;
+`--json` emits `[{path, changed, formatted, overCap, ok, message}]`; `--rules
+--json` prints the indent/width/cap/threshold rules straight from the binary's
+constants. Directory traversal collects `.rae` + `.raepack` sorted at each
+level, follows no symlinks (lstat), and skips `.git` / `build` / `.rae` dirs; a
+parse failure is reported per file and the walk continues; an over-cap
+canonical form is refused with `would expand X from N to M lines; split the
+module` and is a `--check` failure. Fixtures: `829_format_over_cap` and
+`830_format_check_json` (harness-visible), plus `tools/test-format-cli.sh`
+(traversal order, `--check`/`--json` contracts, unchanged-mtime, permission
+preservation, atomic write, over-cap, per-file parse-failure) run at the end of
+a full suite. The pre-#917 `format --output <path> <src>` / `format --write
+<src>` single-target spellings still work (the 203/204 fixtures).
+
 ### Task map
 
 - **#916** formatter correctness: the char-literal crash, comment attachment
