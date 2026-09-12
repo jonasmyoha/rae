@@ -172,14 +172,9 @@ void rae_wgpu_report(const char* tag) {
     fflush(stderr);
 }
 
-/* #528: a small handle store for lib/gpu_timing.rae (query set + 2 buffers).
- * Rae cannot hold a WGPU handle in a module-level Ptr var (no null literal to
- * seed it) nor in a List(Ptr) (the emitter has no rae_Ptr element type yet), so
- * — exactly as the grass compute path stores its handles in C — a tiny indexed
- * void* array is the seam. Generic (rae_gt_*), not a renderer helper. */
-static void* g_gt_handles[8];
-void  rae_gt_set(int64_t i, void* p) { if (i >= 0 && i < 8) g_gt_handles[i] = p; }
-void* rae_gt_get(int64_t i)          { return (i >= 0 && i < 8) ? g_gt_handles[i] : (void*)0; }
+/* #528's handle store for lib/GpuTiming.rae (query set + 2 buffers) is gone
+ * (#923): the Rae GpuTiming owner holds its handles as fields. No global GPU
+ * slot table is left in the runtime. */
 
 /* #528: blocking read of a MapRead buffer's [0,size) into `dst`. This is the
  * ONE piece that must stay in C: wgpuBufferMapAsync needs a C callback pointer,
