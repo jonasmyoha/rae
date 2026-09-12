@@ -1,0 +1,23 @@
+# #927: an unknown MODULE-QUALIFIED call `Math.noSuchFunction(...)` and an
+# unknown method on a TYPE NAME used as a namespace `Ptr.null()` used to pass
+# sema and die in the emitted C as `undeclared function 'rae_noSuchFunction'`
+# plus a nonsense `undeclared identifier 'Math'`. The bare form already got
+# #751's diagnostic; this extends it to the qualified forms, naming the
+# module/type and the missing function and suggesting the closest loaded name.
+import Math
+
+func usesMath() ret Float {
+  ret Math.noSuchFunction(value: 1.0)
+}
+
+func nearMiss() ret Float {
+  ret Math.maxx(a: 1.0, b: 2.0)
+}
+
+func usesPtr() ret Ptr {
+  ret Ptr.null()
+}
+
+func main() {
+  log("unreachable")
+}
