@@ -763,35 +763,8 @@ void rae_gb_set_frame_open(int64_t open) { gb_frame_open = open ? 1 : 0; }
  * and the storage buffer with the static path — the layouts are identical
  * — and switches pipeline for the duration of the draw, then hands the
  * pass back so a following static draw is unaffected. */
-/* ---- Skinned draw: context accessors for the Rae port (#503) ---------------
- *
- * The single static AND skinned draws now run in Rae (lib/gbuffer.rae: draw /
- * drawSkinned), each building its one DrawU record with packInstanceRecord and
- * going through the same Rae upload+draw path as the instanced drawRecords.
- * These accessors hand Rae the skin pipeline / bind group / mesh buffers.
- * The skin bind group is still created here (lazily): it needs the pipeline's
- * layout plus the palette storage buffer, genuine resource creation that stays
- * C for now (its Rae migration is later in #503/#504). */
-/* The joint palette storage buffer + its byte size, for the Rae-built skin bind
- * group. It comes up asynchronously with the first skinned upload, so a
- * readiness check lets Rae defer creating the bind until it exists. */
-void* rae_gb_skin_palette(void)      { return (void*)g3d_skin_palette_sbuf; }
-int64_t rae_gb_skin_palette_size(void){ return (int64_t)((uint64_t)G3D_SKIN_MAX_JOINTS * 12 * G3D_SKIN_MAX_PALETTES * sizeof(float)); }
-int64_t rae_gb_skin_palette_ready(void){ return g3d_skin_palette_sbuf ? 1 : 0; }
-/* 1 if a skinned draw of `mesh` can proceed (pass open, skin pipeline + bind
- * available, mesh slot valid) else 0. The bind is created by Rae's
- * ensureSkinBind before this is checked. */
-int64_t rae_gb_skin_ready(int64_t mesh) {
-    int slot = (int)mesh - 1;
-    /* #912: the skin pipeline / bind are manager objects checked on the Rae side. */
-    if (!gb_frame_open) return 0;
-    if (slot < 0 || slot >= g3d_skin_mesh_n) return 0;
-    if (!g3d_skin_vbuf[slot] || !g3d_skin_ibuf[slot]) return 0;
-    return 1;
-}
-void* rae_gb_skin_vbuf(int64_t mesh)  { int s=(int)mesh-1; return (s>=0 && s<g3d_skin_mesh_n)?(void*)g3d_skin_vbuf[s]:NULL; }
-void* rae_gb_skin_ibuf(int64_t mesh)  { int s=(int)mesh-1; return (s>=0 && s<g3d_skin_mesh_n)?(void*)g3d_skin_ibuf[s]:NULL; }
-int64_t rae_gb_skin_icount(int64_t mesh){ int s=(int)mesh-1; return (s>=0 && s<g3d_skin_mesh_n)?(int64_t)g3d_skin_icount[s]:0; }
+/* #921: the skinned meshes + joint palette are the Rae SkinStore's; the
+ * rae_gb_skin_* accessors are gone. */
 
 /* ---- Instanced draw: context accessors for the Rae port (#502) -------------
  *

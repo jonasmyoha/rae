@@ -63,6 +63,7 @@ open gpu/GpuRenderTransfer
 open gpu/GpuIds
 open Gpu2dCanvas
 open MeshStore
+open SkinStore
 open GbufferNative
 open GbufferResources
 
@@ -112,8 +113,8 @@ func gbTargetsGen() ret Int {
 # manager — the static / skin / terrain pipelines and their bind groups.
 # #906: so are the frame itself — the four targets (A, B, C, depth) + views,
 # the frame uniform, the draws buffer with its per-frame cursor, and the open
-# frame's Recording / raw pass + the tracked in-flight submissions. Only the
-# skin palette (C, until #921) is still adopted in `adopted`.
+# frame's Recording / raw pass + the tracked in-flight submissions. #921: and
+# the skinned meshes + joint palette (`skins`); nothing is adopted any more.
 type GbufferCache {
   targets: List(TextureId)  # A, B, C, depth (index 0..3)
   targetViews: List(TextureViewId)
@@ -132,7 +133,6 @@ type GbufferCache {
   skinPipeline: RenderPipelineId
   staticBind: BindGroupId
   skinBind: BindGroupId
-  adopted: List(ExternalId)
   drawScratch: List(Float)
   # terrain-splat pass pipeline/bind cache (#764: was gbuffer_terrain gTerrain* globals)
   terrainPipeMade: Bool
@@ -143,6 +143,7 @@ type GbufferCache {
   terrainAdopted: List(ExternalId)
   terrainBlend: Float
   meshes: MeshStore  # #905: the static mesh store (vertex/index buffers per MeshHandle)
+  skins: SkinStore  # #921: the skinned meshes + the joint palette buffer
 }
 
 func createGbufferCache() pub ret GbufferCache {
@@ -165,7 +166,6 @@ func createGbufferCache() pub ret GbufferCache {
       skinPipeline: noRenderPipelineId()
       staticBind: noBindGroupId()
       skinBind: noBindGroupId()
-      adopted: List.create(ExternalId, cap: 6)
       drawScratch: List.create(Float, cap: instanceRecordFloats)
       terrainPipeMade: false
       terrainBindGen: 0 - 1
@@ -175,6 +175,7 @@ func createGbufferCache() pub ret GbufferCache {
       terrainAdopted: List.create(ExternalId, cap: 4)
       terrainBlend: 0.0
       meshes: createMeshStore()
+      skins: createSkinStore()
     }
   }
 }
@@ -458,23 +459,6 @@ func gbMeshIcount(cache: view GbufferCache, mesh: copy Int) ret Int {
   ret meshStoreIndexCount(store: cache.meshes, mesh: mesh)
 }
 
-# Skin bind group creation (#503): built in Rae from the skin pipeline's layout
-# + the frame uniform, draws buffer and joint palette. The palette comes up
-# asynchronously, so a readiness check defers creation until it exists.
-func gbSkinPalette() unsafe extern("rae_gb_skin_palette") ret Ptr
-
-func gbSkinPaletteSize() ret Int {
-  unsafe {
-    ret nativeGbSkinPaletteSize()
-  }
-}
-
-func gbSkinPaletteReady() ret Int {
-  unsafe {
-    ret nativeGbSkinPaletteReady()
-  }
-}
-
 func drawMetaballs(
   cache: view GbufferCache
   packedBalls: copy Ptr
@@ -682,106 +666,6 @@ func draw(
   }
 }
 
-# One skinned mesh instance (#503, was the C `drawSkinned`). Same DrawU record
-# and G-buffer layout as a static draw; only the pipeline differs (the skin
-# vertex stage poses the mesh by the joint palette). After issuing, the static
-# pipeline/bind are restored so a following static draw is unaffected.
-func drawSkinned(
-  cache: mod GbufferCache
-  resources: mod GpuResources
-  mesh: copy Int
-  model: view Mat4
-  prevModel: view Mat4
-  r: copy Float
-  g: copy Float
-  b: copy Float
-  metallic: copy Float
-  roughness: copy Float
-  emissive: copy Float
-  toon: copy Int
-) pub {
-  unsafe {
-    ensureSkinBind(cache: cache, resources: resources)
-    if gbSkinReady(mesh: mesh) is 0 {
-      ret
-    }
-    let base: Int = gbDrawCount(cache: cache)
-    if base >= gbufferMaxDraws {
-      ret
-    }
-    ensureDrawScratch(cache: cache)
-    packInstanceRecord(
-      records: cache.drawScratch
-      slot: 0
-      model: model
-      prevModel: prevModel
-      r: r
-      g: g
-      b: b
-      metallic: metallic
-      roughness: roughness
-      emissive: emissive
-      toon: toon
-      paletteBase: 0
-    )
-    gbIssueInstanced(
-      cache: cache
-      resources: resources
-      pipeline: cache.skinPipeline
-      bind: cache.skinBind
-      vbuf: gbSkinVbuf(mesh: mesh)
-      ibuf: gbSkinIbuf(mesh: mesh)
-      icount: gbSkinIcount(mesh: mesh)
-      base: base
-      count: 1
-      records: cache.drawScratch.data
-    )
-  }
-}
-
-# Instanced SKINNED draw (grass epic #485): `count` copies of one skinned mesh
-# in a single DrawIndexed. Every copy is posed by the ONE shared joint palette
-# (the skin path has no per-instance palette), so all copies share the same pose
-# — the per-instance `model` in each DrawU only places/orients the copy. Used for
-# crowds playing the same animation. `records` is `count` DrawU entries built by
-# packInstanceRecord, exactly like drawRecords. Restores the static pipeline after,
-# as drawSkinned does.
-func drawSkinnedRecords(
-  cache: mod GbufferCache
-  resources: mod GpuResources
-  mesh: copy Int
-  records: copy Ptr
-  count: copy Int
-) pub {
-  unsafe {
-    ensureSkinBind(cache: cache, resources: resources)
-    if gbSkinReady(mesh: mesh) is 0 {
-      ret
-    }
-    let base: Int = gbDrawCount(cache: cache)
-    let remaining: Int = gbufferMaxDraws - base
-    var n: Int = count
-    if n > remaining {
-      n = remaining
-    }
-    if n <= 0 {
-      ret
-    }
-    gbIssueInstanced(
-      cache: cache
-      resources: resources
-      pipeline: cache.skinPipeline
-      bind: cache.skinBind
-      vbuf: gbSkinVbuf(mesh: mesh)
-      ibuf: gbSkinIbuf(mesh: mesh)
-      icount: gbSkinIcount(mesh: mesh)
-      base: base
-      count: n
-      records: records
-    )
-  }
-}
-
 func drawInstance(
   cache: mod GbufferCache
   resources: mod GpuResources
@@ -822,44 +706,8 @@ func drawInstance(
   )
 }
 
-# Queue a SKINNED mesh (#391). Same materials and the same G-buffer
-# layout as a static draw; the difference is only that the vertex stage
-# poses the mesh by the joint palette first. The palette is uploaded once
-# per frame by Gpu3d.uploadPalette and shared by every pipeline that
-# reads it.
-func drawSkinnedInstance(
-  cache: mod GbufferCache
-  resources: mod GpuResources
-  mesh: view MeshHandle
-  model: view Mat4
-  prevModel: view Mat4
-  material: view Material3d
-) pub {
-  if not meshHandleIsValid(h: mesh) {
-    ret
-  }
-  var emissive: Float = material.emission.x
-  if material.emission.y > emissive {
-    emissive = material.emission.y
-  }
-  if material.emission.z > emissive {
-    emissive = material.emission.z
-  }
-  drawSkinned(
-    cache: cache
-    resources: resources
-    mesh: mesh.id
-    model: model
-    prevModel: prevModel
-    r: material.baseColor.x
-    g: material.baseColor.y
-    b: material.baseColor.z
-    metallic: material.metallic
-    roughness: material.roughness
-    emissive: emissive
-    toon: toonFlag(material: material)
-  )
-}
+# The skinned draws (drawSkinned / drawSkinnedRecords / drawSkinnedInstance)
+# live in GbufferSkinned.rae since #921, over the cache's SkinStore.
 
 # Finish and submit the geometry pass (#503; a manager submission since #906):
 # end the pass, record the pass's own pipelines + bind groups as uses (so the
@@ -962,8 +810,8 @@ func shutdownAll() pub {
   shutdown()
 }
 
-# Retire the geometry pass's manager objects (renderer shutdown, BEFORE the C
-# shutdown releases the adopted palette buffer): drain the in-flight frames,
+# Retire the geometry pass's manager objects (renderer shutdown): drain the
+# in-flight frames,
 # then the binds, pipelines, frame buffers and targets (C forgets its borrowed
 # views). The terrain objects are GbufferTerrain's; the renderer shutdown
 # retires them there.
@@ -974,7 +822,6 @@ func gbufferShutdown(cache: mod GbufferCache, resources: mod GpuResources) pub {
   drainSubmissions(inFlight: cache.inFlight, resources: resources)
   retireBindGroup(resources: resources, id: cache.staticBind)
   retireBindGroup(resources: resources, id: cache.skinBind)
-  releaseExternalIds(resources: resources, list: cache.adopted)
   retireRenderPipeline(resources: resources, id: cache.staticPipeline)
   retireRenderPipeline(resources: resources, id: cache.skinPipeline)
   retireBuffer(resources: resources, id: cache.frameUniform)

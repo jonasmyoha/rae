@@ -344,15 +344,37 @@ func shadowDraw(
   }
 }
 
+# #921: a skinned caster by its SkinStore handles; `palette` is the store's
+# palette buffer, borrowed by the C shadow pass for its skin bind.
 func nativeShadowDrawSkinned(
   mesh: Int
+  vbuf: Ptr
+  ibuf: Ptr
+  icount: Int
+  palette: Ptr
   model: view Mat4
   paletteBase: Int
 ) unsafe extern("rae_sm_queue_skinned")
 
-func shadowDrawSkinned(mesh: copy Int, model: view Mat4, paletteBase: copy Int) {
+func shadowDrawSkinned(
+  mesh: copy Int
+  vbuf: copy Ptr
+  ibuf: copy Ptr
+  icount: copy Int
+  palette: copy Ptr
+  model: view Mat4
+  paletteBase: copy Int
+) unsafe {
   unsafe {
-    nativeShadowDrawSkinned(mesh: mesh, model: model, paletteBase: paletteBase)
+    nativeShadowDrawSkinned(
+      mesh: mesh
+      vbuf: vbuf
+      ibuf: ibuf
+      icount: icount
+      palette: palette
+      model: model
+      paletteBase: paletteBase
+    )
   }
 }
 
@@ -381,44 +403,13 @@ func shadowShutdown() {
 # ----- skinned meshes (#374) ------------------------------------------
 # A second vertex format and pipeline for skeletally animated geometry.
 # Separate from the static path because a ground plane should not carry
-# joint indices it can never read — see runtime_gpu3d_skin.c.
-func nativeSkinnedMeshCreate(
-  verts: view Buffer(Float)
-  vertCount: Int
-  indices: view Buffer(Int)
-  indexCount: Int
-) unsafe extern("rae_ext_Gpu3d_skinnedMeshCreate") ret Int
-
-func skinnedMeshCreate(
-  verts: view Buffer(Float)
-  vertCount: copy Int
-  indices: view Buffer(Int)
-  indexCount: copy Int
-) ret Int {
-  unsafe {
-    ret nativeSkinnedMeshCreate(
-      verts: verts
-      vertCount: vertCount
-      indices: indices
-      indexCount: indexCount
-    )
-  }
-}
-
-func nativeSetPalette(
-  rows: view Buffer(Float)
-  jointCount: Int
-) unsafe extern("rae_ext_Gpu3d_setPalette")
-
-func setPalette(rows: view Buffer(Float), jointCount: copy Int) {
-  unsafe {
-    nativeSetPalette(rows: rows, jointCount: jointCount)
-  }
-}
-
-# Skinned draw (#514): C validates the mesh + draw limit, uploads the per-frame
-# palette (if dirty) and the per-draw record, and returns the firstInstance slot
-# (or -1); Rae encodes the instanced DrawIndexed below.
+# joint indices it can never read — see runtime_gpu3d_skin.c. #921: the
+# meshes + the palette are the renderer's SkinStore; C keeps the forward
+# skin pipeline and its per-draw record buffer.
+# Skinned draw (#514): C validates the draw limit, uploads the per-draw record
+# and returns the firstInstance slot (or -1); Rae encodes the instanced
+# DrawIndexed. `palette` is the SkinStore's palette handle (#921), borrowed for
+# the C skin bind (rebuilt when it changes).
 func nativeG3dPushSkinnedDraw(
   mesh: Int
   model: view Mat4
@@ -427,6 +418,7 @@ func nativeG3dPushSkinnedDraw(
   b: Float
   metallic: Float
   roughness: Float
+  palette: Ptr
 ) unsafe extern("rae_g3d_push_skinned_draw") ret Int
 
 func g3dPushSkinnedDraw(
@@ -437,7 +429,8 @@ func g3dPushSkinnedDraw(
   b: copy Float
   metallic: copy Float
   roughness: copy Float
-) ret Int {
+  palette: copy Ptr
+) unsafe ret Int {
   unsafe {
     ret nativeG3dPushSkinnedDraw(
       mesh: mesh
@@ -447,6 +440,7 @@ func g3dPushSkinnedDraw(
       b: b
       metallic: metallic
       roughness: roughness
+      palette: palette
     )
   }
 }
@@ -454,18 +448,6 @@ func g3dPushSkinnedDraw(
 func g3dSkinPipeline() unsafe extern("rae_g3d_skin_pipeline") ret Ptr
 
 func g3dSkinBind() unsafe extern("rae_g3d_skin_bind") ret Ptr
-
-func g3dSkinVbuf(mesh: Int) unsafe extern("rae_g3d_skin_vbuf") ret Ptr
-
-func g3dSkinIbuf(mesh: Int) unsafe extern("rae_g3d_skin_ibuf") ret Ptr
-
-func nativeG3dSkinIcount(mesh: Int) unsafe extern("rae_g3d_skin_icount") ret Int
-
-func g3dSkinIcount(mesh: copy Int) ret Int {
-  unsafe {
-    ret nativeG3dSkinIcount(mesh: mesh)
-  }
-}
 
 func nativeSkinFrameBegin() unsafe extern("rae_ext_Gpu3d_skinFrameBegin")
 

@@ -28,6 +28,7 @@ open Rendergraph
 open Scene3d
 open Gpu2dCanvas
 open MeshStore
+open SkinStore
 open gpu/GpuResources
 open gpu/GpuIds
 open Gpu3d
@@ -63,6 +64,7 @@ type Renderer3d {
   idIssuer: IdIssuer
   gpuResources: opt GpuResources
   meshes: MeshStore
+  skins: SkinStore  # #921: the skinned meshes + joint palette of the forward path
 }
 
 const forwardManagerCapacity: Int = 512
@@ -94,6 +96,41 @@ func uploadMesh(
   ret meshHandleNone()
 }
 
+# A skinned mesh (20 Floats per vertex) into the forward renderer's SkinStore
+# (#921); Gpu3d.drawSkinnedInstance(skins: r.skins, …) draws it.
+func uploadSkinnedMesh(
+  r: mod Renderer3d
+  verts: view List(Float)
+  vertCount: view Int
+  indices: view List(Int)
+) pub ret MeshHandle {
+  ensureRenderer3dResources(r: r)
+  if let resources: mod GpuResources => r.gpuResources {
+    ret skinStoreUpload(
+      store: r.skins
+      resources: resources
+      verts: verts
+      vertCount: vertCount
+      indices: indices
+    )
+  }
+  ret meshHandleNone()
+}
+
+# The joint palette for this frame (slot 0; 12 Floats per joint).
+func uploadPalette(r: mod Renderer3d, rows: view List(Float), jointCount: view Int) pub {
+  ensureRenderer3dResources(r: r)
+  if let resources: mod GpuResources => r.gpuResources {
+    let wrote: Bool = skinStoreWritePalette(
+      store: r.skins
+      resources: resources
+      rows: rows
+      jointCount: jointCount
+      baseRow: 0
+    )
+  }
+}
+
 # The forward world walkers over this renderer's mesh store (#905): the scene
 # draws and the shadow casters resolve MeshHandles here.
 func renderSceneWorldWith(r: mod Renderer3d, world: view World3d) pub {
@@ -114,6 +151,7 @@ func renderSceneShadowWorldWith(r: mod Renderer3d, world: view World3d) pub {
 func shutdownRenderer3d(r: mod Renderer3d) pub {
   if let resources: mod GpuResources => r.gpuResources {
     meshStoreShutdown(store: r.meshes, resources: resources)
+    skinStoreShutdown(store: r.skins, resources: resources)
     meshStoreDropManager(resources: resources)
   }
   r.gpuResources = none
@@ -389,6 +427,7 @@ func createRenderer3d() pub ret Renderer3d {
       idIssuer: IdIssuer.create()
       gpuResources: none
       meshes: createMeshStore()
+      skins: createSkinStore()
     }
   }
 }
@@ -657,6 +696,7 @@ func createRenderer3dWithUi() pub ret Renderer3d {
       idIssuer: IdIssuer.create()
       gpuResources: none
       meshes: createMeshStore()
+      skins: createSkinStore()
     }
   }
 }

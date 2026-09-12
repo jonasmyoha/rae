@@ -55,7 +55,27 @@ func meshStoreUpload(
   vertCount: copy Int
   indices: view List(Int)
 ) ret MeshHandle {
-  if vertCount < 1 or indices.length < 1 or verts.length < vertCount * meshVertexFloats {
+  ret meshStoreUploadStride(
+    store: store
+    resources: resources
+    verts: verts
+    vertCount: vertCount
+    indices: indices
+    vertexFloats: meshVertexFloats
+  )
+}
+
+# The same over another vertex layout: the skinned meshes (SkinStore, #921)
+# carry 20 Floats per vertex (pos3 / nrm3 / uv2 / joints4 / weights4 / rgba).
+func meshStoreUploadStride(
+  store: mod MeshStore
+  resources: mod GpuResources
+  verts: view List(Float)
+  vertCount: copy Int
+  indices: view List(Int)
+  vertexFloats: copy Int
+) ret MeshHandle {
+  if vertCount < 1 or indices.length < 1 or vertexFloats < 1 or verts.length < vertCount * vertexFloats {
     ret meshHandleNone()
   }
   store.indexScratch.clear()
@@ -64,7 +84,7 @@ func meshStoreUpload(
       store.indexScratch.add(value: index as Int32)
     }
   }
-  let vertexBytes: Int = vertCount * meshVertexFloats * 4
+  let vertexBytes: Int = vertCount * vertexFloats * 4
   let indexBytes: Int = indices.length * 4
   if let vbuf: BufferId = createBuffer(
     resources: resources

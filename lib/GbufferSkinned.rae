@@ -1,0 +1,198 @@
+# GbufferSkinned — the skinned draws of the deferred geometry pass (#921 split
+# of Gbuffer for the 1000-line cap): the skin bind group over the cache's
+# frame buffers + its SkinStore palette, and the single / instanced skinned
+# draws that resolve a MeshHandle in that store. The palette is written by
+# uploadPalette (RendererDeferred) / uploadPaletteAt / uploadPaletteSlot
+# (GbufferInstanced) into the same buffer the bind reads.
+import Math
+open Scene3d
+open Math3d
+open GbufferRecord
+open webgpu/Webgpu
+open webgpu/Context
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuRender
+open gpu/GpuRenderPass
+open gpu/GpuIds
+open MeshStore
+open SkinStore
+open Gbuffer
+open GbufferResources
+
+# Skin bind group: frame uniform @0, draws @1, the joint palette @2 — all the
+# cache's manager buffers. The palette exists from the first upload on, so a
+# skinned draw before any palette write waits (draws nothing).
+func ensureSkinBind(cache: mod GbufferCache, resources: mod GpuResources) {
+  if bindGroupIsUsable(resources: resources, id: cache.skinBind) {
+    ret
+  }
+  if not isValidBuffer(resources: resources, id: cache.frameUniform) {
+    ret
+  }
+  if not skinStorePaletteReady(store: cache.skins, resources: resources) {
+    ret
+  }
+  let entries: List(ResourceRef) = List.create(ResourceRef, cap: 3)
+  entries.add(value: bufferRef(id: cache.frameUniform))
+  entries.add(value: bufferRef(id: cache.draws))
+  entries.add(value: bufferRef(id: cache.skins.palette))
+  if let bind: BindGroupId = createRenderBindGroup(
+    resources: resources
+    pipeline: cache.skinPipeline
+    entries: entries
+  ) {
+    cache.skinBind = bind
+  }
+}
+
+# "May this skinned mesh draw into the CURRENT pass": the pass is open, the
+# bind exists and the mesh's buffers are live.
+func gbSkinReady(cache: view GbufferCache, resources: view GpuResources, mesh: copy Int) ret Bool {
+  if not gbufferFrameActive(cache: cache) {
+    ret false
+  }
+  if not bindGroupIsUsable(resources: resources, id: cache.skinBind) {
+    ret false
+  }
+  ret skinStoreReady(store: cache.skins, resources: resources, mesh: mesh)
+}
+
+# One skinned mesh instance (#503, was the C `drawSkinned`). Same DrawU record
+# and G-buffer layout as a static draw; only the pipeline differs (the skin
+# vertex stage poses the mesh by the joint palette). After issuing, the static
+# pipeline/bind are restored so a following static draw is unaffected.
+func drawSkinned(
+  cache: mod GbufferCache
+  resources: mod GpuResources
+  mesh: copy Int
+  model: view Mat4
+  prevModel: view Mat4
+  r: copy Float
+  g: copy Float
+  b: copy Float
+  metallic: copy Float
+  roughness: copy Float
+  emissive: copy Float
+  toon: copy Int
+) pub {
+  unsafe {
+    ensureSkinBind(cache: cache, resources: resources)
+    if not gbSkinReady(cache: cache, resources: resources, mesh: mesh) {
+      ret
+    }
+    let base: Int = gbDrawCount(cache: cache)
+    if base >= gbufferMaxDraws {
+      ret
+    }
+    ensureDrawScratch(cache: cache)
+    packInstanceRecord(
+      records: cache.drawScratch
+      slot: 0
+      model: model
+      prevModel: prevModel
+      r: r
+      g: g
+      b: b
+      metallic: metallic
+      roughness: roughness
+      emissive: emissive
+      toon: toon
+      paletteBase: 0
+    )
+    gbIssueInstanced(
+      cache: cache
+      resources: resources
+      pipeline: cache.skinPipeline
+      bind: cache.skinBind
+      vbuf: skinStoreVbufHandle(store: cache.skins, resources: resources, mesh: mesh)
+      ibuf: skinStoreIbufHandle(store: cache.skins, resources: resources, mesh: mesh)
+      icount: skinStoreIndexCount(store: cache.skins, mesh: mesh)
+      base: base
+      count: 1
+      records: cache.drawScratch.data
+    )
+  }
+}
+
+# Instanced SKINNED draw (grass epic #485): `count` copies of one skinned mesh
+# in a single DrawIndexed. Every copy is posed by the ONE shared joint palette
+# (the skin path has no per-instance palette), so all copies share the same pose
+# — the per-instance `model` in each DrawU only places/orients the copy. Used for
+# crowds playing the same animation. `records` is `count` DrawU entries built by
+# packInstanceRecord, exactly like drawRecords. Restores the static pipeline after,
+# as drawSkinned does.
+func drawSkinnedRecords(
+  cache: mod GbufferCache
+  resources: mod GpuResources
+  mesh: copy Int
+  records: copy Ptr
+  count: copy Int
+) pub {
+  unsafe {
+    ensureSkinBind(cache: cache, resources: resources)
+    if not gbSkinReady(cache: cache, resources: resources, mesh: mesh) {
+      ret
+    }
+    let base: Int = gbDrawCount(cache: cache)
+    let remaining: Int = gbufferMaxDraws - base
+    var n: Int = count
+    if n > remaining {
+      n = remaining
+    }
+    if n <= 0 {
+      ret
+    }
+    gbIssueInstanced(
+      cache: cache
+      resources: resources
+      pipeline: cache.skinPipeline
+      bind: cache.skinBind
+      vbuf: skinStoreVbufHandle(store: cache.skins, resources: resources, mesh: mesh)
+      ibuf: skinStoreIbufHandle(store: cache.skins, resources: resources, mesh: mesh)
+      icount: skinStoreIndexCount(store: cache.skins, mesh: mesh)
+      base: base
+      count: n
+      records: records
+    )
+  }
+}
+
+# Queue a SKINNED mesh (#391). Same materials and the same G-buffer
+# layout as a static draw; the difference is only that the vertex stage
+# poses the mesh by the joint palette first. The palette is uploaded once
+# per frame by Gpu3d.uploadPalette and shared by every pipeline that
+# reads it.
+func drawSkinnedInstance(
+  cache: mod GbufferCache
+  resources: mod GpuResources
+  mesh: view MeshHandle
+  model: view Mat4
+  prevModel: view Mat4
+  material: view Material3d
+) pub {
+  if not meshHandleIsValid(h: mesh) {
+    ret
+  }
+  var emissive: Float = material.emission.x
+  if material.emission.y > emissive {
+    emissive = material.emission.y
+  }
+  if material.emission.z > emissive {
+    emissive = material.emission.z
+  }
+  drawSkinned(
+    cache: cache
+    resources: resources
+    mesh: mesh.id
+    model: model
+    prevModel: prevModel
+    r: material.baseColor.x
+    g: material.baseColor.y
+    b: material.baseColor.z
+    metallic: material.metallic
+    roughness: material.roughness
+    emissive: emissive
+    toon: toonFlag(material: material)
+  )
+}
