@@ -462,7 +462,12 @@ func renderDeferredPassWith(
     )
     # Metaballs go into the SAME pass as the triangles, so the two kinds
     # depth-test against each other rather than compositing (#392).
-    renderSceneSdfWorld(cache: renderer.passes.gbuffer, world: world, camera: camera)
+    renderSceneSdfWorld(
+      cache: renderer.passes.gbuffer
+      resources: resources
+      world: world
+      camera: camera
+    )
     endPass(cache: renderer.passes.gbuffer, resources: resources)
   }
   if tag is RenderTag.depthPyramid {
