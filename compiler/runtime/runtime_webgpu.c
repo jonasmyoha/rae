@@ -141,6 +141,21 @@ int rae_wgpu_have_timestamp(void)   { return g_wgpu_have_timestamp; }
  * own alloc tracking can't see (it does not track wgpu objects). Env-gated
  * (RAE_WGPU_REPORT) and dumped periodically from the present path, like
  * RAE_MEM_STATS — off by default, a diagnostic for the next leak hunt. */
+/* Periodic live-object report from the present paths (2D and 3D), every 120
+ * frames. ON by default for now (#920: the in-flight teardown equivalence is
+ * being confirmed from devtools runs); RAE_WGPU_REPORT=0 silences it. */
+void rae_wgpu_report_periodic(void) {
+    static int enabled = -1; static long frame = 0;
+    if (enabled < 0) {
+        const char* env = getenv("RAE_WGPU_REPORT");
+        enabled = (env && (strcmp(env, "0") == 0 || strcmp(env, "off") == 0)) ? 0 : 1;
+    }
+    if (enabled && (frame++ % 120) == 0) {
+        char tag[24]; snprintf(tag, sizeof(tag), "f%ld", frame - 1);
+        rae_wgpu_report(tag);
+    }
+}
+
 void rae_wgpu_report(const char* tag) {
     if (!g_wgpu_inst) return;
     WGPUGlobalReport r; memset(&r, 0, sizeof(r));

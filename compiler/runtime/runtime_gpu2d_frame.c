@@ -160,15 +160,7 @@ void rae_g2d_tick(void) { rae_g2d_tick_virtual_clock(); }
 void rae_g2d_present(void* texture, int64_t width, int64_t height) {
     WGPUTexture tex = (WGPUTexture)texture;
     if (!tex || !g_wgpu_dev) return;
-    /* Optional: periodic live wgpu object counts (RAE_WGPU_REPORT), for leak
-     * hunts. Off by default; harmless like RAE_MEM_STATS. */
-    { static int g_wgpu_report = -1; static long g_wgpu_report_frame = 0;
-      if (g_wgpu_report < 0) g_wgpu_report = getenv("RAE_WGPU_REPORT") ? 1 : 0;
-      if (g_wgpu_report && (g_wgpu_report_frame++ % 120) == 0) {
-          char tag[24]; snprintf(tag, sizeof(tag), "f%ld", g_wgpu_report_frame - 1);
-          rae_wgpu_report(tag);
-      }
-    }
+    rae_wgpu_report_periodic();
     /* Per-frame GPU objects (bind groups, clip uniforms) are the Rae canvas's
      * (#907-#910) and are retired there at frame end. */
 
