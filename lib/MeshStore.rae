@@ -1,0 +1,224 @@
+# MeshStore — the renderer-owned mesh store (#905): every static mesh's vertex
+# and index buffers are manager buffers with typed IDs, indexed by the 1-based
+# MeshHandle id the scene code already carries. Was C's g3d_mesh_vbuf/ibuf/
+# icount tables (rae_ext_Gpu3d_meshCreate / meshUpdate and the rae_gb_mesh_* /
+# rae_g3d_mesh_* accessors). The owner is the renderer object (DeferredRenderer
+# and Renderer3d each hold one): uploads go through it, every geometry /
+# shadow / transparent / water pass resolves a handle to its BufferIds here,
+# and the renderer's shutdown retires the buffers with everything else.
+#
+# Vertex layout is the renderer's: 8 Floats per vertex (pos3 / nrm3 / uv2),
+# uploaded as f32 straight from the Rae list; indices are Rae Ints narrowed to
+# u32 on upload (the GPU index format is Uint32).
+open gpu/GpuResources
+open gpu/GpuIds
+open gpu/GpuLifetime
+open gpu/GpuRender
+open gpu/GpuRenderTransfer
+open webgpu/Webgpu
+open webgpu/Context
+open webgpu/WebgpuEnums
+open webgpu/WebgpuTypes
+open Scene3d
+
+const meshVertexFloats: Int = 8
+
+type MeshEntry {
+  vbuf: BufferId
+  ibuf: BufferId
+  indexCount: Int
+  vertexCount: Int
+}
+
+type MeshStore {
+  entries: List(MeshEntry)  # index = MeshHandle.id - 1
+  indexScratch: List(Int32)  # the u32 narrowing of one upload's indices
+}
+
+func createMeshStore() ret MeshStore {
+  ret MeshStore {
+    entries: List.create(MeshEntry, cap: 64)
+    indexScratch: List.create(Int32, cap: 1024)
+  }
+}
+
+func meshStoreCount(store: view MeshStore) ret Int {
+  ret store.entries.length
+}
+
+# Upload an immutable mesh; returns a valid handle, or the none handle when the
+# device is not up or the data is empty.
+func meshStoreUpload(
+  store: mod MeshStore
+  resources: mod GpuResources
+  verts: view List(Float)
+  vertCount: copy Int
+  indices: view List(Int)
+) ret MeshHandle {
+  if vertCount < 1 or indices.length < 1 or verts.length < vertCount * meshVertexFloats {
+    ret meshHandleNone()
+  }
+  store.indexScratch.clear()
+  loop var i: Int = 0, i < indices.length, ++i {
+    if let index: Int = indices.copyAt(index: i) {
+      store.indexScratch.add(value: index as Int32)
+    }
+  }
+  let vertexBytes: Int = vertCount * meshVertexFloats * 4
+  let indexBytes: Int = indices.length * 4
+  if let vbuf: BufferId = createBuffer(
+    resources: resources
+    size: vertexBytes
+    usage: WGPUBufferUsage_Vertex + WGPUBufferUsage_CopyDst
+  ) {
+    if let ibuf: BufferId = createBuffer(
+      resources: resources
+      size: indexBytes
+      usage: WGPUBufferUsage_Index + WGPUBufferUsage_CopyDst
+    ) {
+      unsafe {
+        let wroteVerts: Bool = writeBufferFromPtr(
+          resources: resources
+          id: vbuf
+          offset: 0
+          data: verts.data
+          size: vertexBytes
+        )
+        let wroteIndices: Bool = writeBufferFromPtr(
+          resources: resources
+          id: ibuf
+          offset: 0
+          data: store.indexScratch.data
+          size: indexBytes
+        )
+      }
+      store.entries.add(
+        value: MeshEntry {
+          vbuf: vbuf
+          ibuf: ibuf
+          indexCount: indices.length
+          vertexCount: vertCount
+        }
+      )
+      ret meshHandle(id: store.entries.length, generation: 0)
+    }
+    retireBuffer(resources: resources, id: vbuf)
+  }
+  ret meshHandleNone()
+}
+
+# Rewrite a mesh's vertex data in place (positions/normals/uvs; the index
+# buffer and vertex count stay). A larger write than the mesh was created
+# with is clamped to the created size rather than overflowing.
+func meshStoreUpdateVerts(
+  store: view MeshStore
+  resources: view GpuResources
+  mesh: view MeshHandle
+  verts: view List(Float)
+  vertCount: copy Int
+) {
+  if let entry: MeshEntry = meshStoreEntry(store: store, mesh: mesh.id) {
+    var count: Int = vertCount
+    if count > entry.vertexCount {
+      count = entry.vertexCount
+    }
+    if count < 1 or verts.length < count * meshVertexFloats {
+      ret
+    }
+    unsafe {
+      let wrote: Bool = writeBufferFromPtr(
+        resources: resources
+        id: entry.vbuf
+        offset: 0
+        data: verts.data
+        size: count * meshVertexFloats * 4
+      )
+    }
+  }
+}
+
+func meshStoreEntry(store: view MeshStore, mesh: copy Int) ret opt MeshEntry {
+  if mesh < 1 or mesh > store.entries.length {
+    ret none
+  }
+  ret store.entries.copyAt(index: mesh - 1)
+}
+
+# True when the handle names an uploaded mesh whose buffers are live.
+func meshStoreReady(store: view MeshStore, resources: view GpuResources, mesh: copy Int) ret Bool {
+  if let entry: MeshEntry = meshStoreEntry(store: store, mesh: mesh) {
+    ret isValidBuffer(resources: resources, id: entry.vbuf) and isValidBuffer(
+      resources: resources
+      id: entry.ibuf
+    )
+  }
+  ret false
+}
+
+func meshStoreIndexCount(store: view MeshStore, mesh: copy Int) ret Int {
+  if let entry: MeshEntry = meshStoreEntry(store: store, mesh: mesh) {
+    ret entry.indexCount
+  }
+  ret 0
+}
+
+func meshStoreVbuf(store: view MeshStore, mesh: copy Int) ret BufferId {
+  if let entry: MeshEntry = meshStoreEntry(store: store, mesh: mesh) {
+    ret entry.vbuf
+  }
+  ret noBufferId()
+}
+
+func meshStoreIbuf(store: view MeshStore, mesh: copy Int) ret BufferId {
+  if let entry: MeshEntry = meshStoreEntry(store: store, mesh: mesh) {
+    ret entry.ibuf
+  }
+  ret noBufferId()
+}
+
+# The raw buffer handles for a pass that binds them directly (the geometry,
+# shadow, transparent and forward passes set vertex/index buffers on a raw
+# pass encoder); null when the mesh is not ready.
+func meshStoreVbufHandle(
+  store: view MeshStore
+  resources: view GpuResources
+  mesh: copy Int
+) unsafe ret Ptr {
+  unsafe {
+    if not meshStoreReady(store: store, resources: resources, mesh: mesh) {
+      ret webgpuNull()
+    }
+    ret refHandle(resources: resources, ref: bufferRef(id: meshStoreVbuf(store: store, mesh: mesh)))
+  }
+}
+
+func meshStoreIbufHandle(
+  store: view MeshStore
+  resources: view GpuResources
+  mesh: copy Int
+) unsafe ret Ptr {
+  unsafe {
+    if not meshStoreReady(store: store, resources: resources, mesh: mesh) {
+      ret webgpuNull()
+    }
+    ret refHandle(resources: resources, ref: bufferRef(id: meshStoreIbuf(store: store, mesh: mesh)))
+  }
+}
+
+# Retire every mesh (renderer shutdown, before the manager itself shuts down).
+func meshStoreShutdown(store: mod MeshStore, resources: mod GpuResources) {
+  loop var i: Int = 0, i < store.entries.length, ++i {
+    if let entry: MeshEntry = store.entries.copyAt(index: i) {
+      retireBuffer(resources: resources, id: entry.vbuf)
+      retireBuffer(resources: resources, id: entry.ibuf)
+    }
+  }
+  store.entries.clear()
+}
+
+# Drop a renderer's manager after its meshes are retired (a wrapper so a
+# renderer module that also opens Gbuffer/Gpu3d — each with its own bare
+# `shutdown()` — reaches the manager's unambiguously).
+func meshStoreDropManager(resources: mod GpuResources) {
+  shutdownManager(resources: resources)
+}

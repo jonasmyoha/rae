@@ -10,6 +10,7 @@
 #
 # The pool is allocated once; crossing a cell boundary re-places those same
 # entities onto the square of world cells around the character.
+import RendererDeferred
 import Math
 import Noise
 open WorldBiome
@@ -145,14 +146,19 @@ type TerrainSystem {
   tallCrownProp: PropInstancer
 }
 
-func terrainMesh(path: view String) ret MeshHandle {
+func terrainMesh(renderer: mod DeferredRenderer, path: view String) ret MeshHandle {
   let model: Glb = loadGlb(path: path)
   let mesh: MeshData = loadAllPrimitives(glb: model)
   if mesh.vertCount < 1 {
     log("[terrain] no mesh data in {path}")
     ret meshHandleNone()
   }
-  ret uploadMesh(verts: mesh.verts, vertCount: mesh.vertCount, indices: mesh.indices)
+  ret RendererDeferred.uploadMesh(
+    renderer: renderer
+    verts: mesh.verts
+    vertCount: mesh.vertCount
+    indices: mesh.indices
+  )
 }
 
 func terrainHash(cellX: view Int, cellY: view Int, seed: view Int) ret Float {
@@ -323,6 +329,7 @@ func slotCellY(centreCellY: view Int, slot: view Int) ret Int {
 # cell it now covers. Normals from central differences of the height function.
 func reshapeTerrainTile(
   terrainSystem: mod TerrainSystem
+  renderer: mod DeferredRenderer
   meshId: view Int
   cellX: view Int
   cellY: view Int
@@ -365,7 +372,8 @@ func reshapeTerrainTile(
       terrainSystem.scratchVerts.set(index: base + 7, value: fy)
     }
   }
-  updateMeshVerts(
+  RendererDeferred.updateMeshVerts(
+    renderer: renderer
     mesh: meshHandle(id: meshId, generation: 0)
     verts: terrainSystem.scratchVerts
     vertCount: terrainTileVerts
@@ -378,6 +386,7 @@ func reshapeTerrainTile(
 # per-kind list bookkeeping.
 func updateInfiniteTerrain(
   terrainSystem: mod TerrainSystem
+  renderer: mod DeferredRenderer
   world: mod GameWorld
   playerPosition: view Vec3
 ) ret Bool {
@@ -398,6 +407,7 @@ func updateInfiniteTerrain(
       let tile: TileMesh = componentGet(this: world.tileMeshes, entity: entity)
       reshapeTerrainTile(
         terrainSystem: terrainSystem
+        renderer: renderer
         meshId: tile.meshId
         cellX: ccx
         cellY: ccy
@@ -533,38 +543,49 @@ func drawTerrainGround(
   }
 }
 
-func castKind(mesh: view MeshHandle, model: view Mat4) {
-  drawShadowCaster(mesh: mesh, model: model)
+func castKind(renderer: mod DeferredRenderer, mesh: view MeshHandle, model: view Mat4) {
+  if let resources: view GpuResources => renderer.gpuResources {
+    drawShadowCaster(
+      meshes: renderer.passes.gbuffer.meshes
+      resources: resources
+      mesh: mesh
+      model: model
+    )
+  }
 }
 
-func drawTerrainPropsShadow(terrainSystem: view TerrainSystem, world: view GameWorld) {
+func drawTerrainPropsShadow(
+  renderer: mod DeferredRenderer
+  terrainSystem: view TerrainSystem
+  world: view GameWorld
+) {
   loop var i: Int = 0, i < componentCount(this: world.propKinds), ++i {
     let entity: EntityId = componentEntityAt(this: world.propKinds, i: i)
     let pk: PropKind = componentDataAt(this: world.propKinds, i: i)
     if pk.active and pk.kind is not kindTile {
       let model: Mat4 = transform3dToMatrix(t: componentGet(this: world.transforms, entity: entity))
       if pk.kind is kindRock {
-        castKind(mesh: terrainSystem.rockProp.mesh, model: model)
+        castKind(renderer: renderer, mesh: terrainSystem.rockProp.mesh, model: model)
       }
       if pk.kind is kindBush {
-        castKind(mesh: terrainSystem.bushProp.mesh, model: model)
+        castKind(renderer: renderer, mesh: terrainSystem.bushProp.mesh, model: model)
       }
       if pk.kind is kindFlower {
-        castKind(mesh: terrainSystem.flowerProp.mesh, model: model)
+        castKind(renderer: renderer, mesh: terrainSystem.flowerProp.mesh, model: model)
       }
       if pk.kind is kindGrassA {
-        castKind(mesh: terrainSystem.grassProp.mesh, model: model)
+        castKind(renderer: renderer, mesh: terrainSystem.grassProp.mesh, model: model)
       }
       if pk.kind is kindGrassB {
-        castKind(mesh: terrainSystem.grassProp.mesh, model: model)
+        castKind(renderer: renderer, mesh: terrainSystem.grassProp.mesh, model: model)
       }
       if pk.kind is kindTree {
         if componentGet(this: world.treeVariants, entity: entity).broad {
-          castKind(mesh: terrainSystem.broadTrunkProp.mesh, model: model)
-          castKind(mesh: terrainSystem.broadCrownProp.mesh, model: model)
+          castKind(renderer: renderer, mesh: terrainSystem.broadTrunkProp.mesh, model: model)
+          castKind(renderer: renderer, mesh: terrainSystem.broadCrownProp.mesh, model: model)
         } else {
-          castKind(mesh: terrainSystem.tallTrunkProp.mesh, model: model)
-          castKind(mesh: terrainSystem.tallCrownProp.mesh, model: model)
+          castKind(renderer: renderer, mesh: terrainSystem.tallTrunkProp.mesh, model: model)
+          castKind(renderer: renderer, mesh: terrainSystem.tallCrownProp.mesh, model: model)
         }
       }
     }
@@ -613,19 +634,35 @@ func spawnProp(world: mod GameWorld, kind: view Int, slot: view Int) ret EntityI
 }
 
 func createTerrainSystem(
+  renderer: mod DeferredRenderer
   world: mod GameWorld
   assets: view String
   groundZ: view Float
 ) ret TerrainSystem {
   let tilePlane: MeshData = makePlane(size: terrainCellSize + 0.04, segments: terrainTileSegments)
-  let broadTrunk: MeshHandle = terrainMesh(path: "{assets}environment/tree_broad_trunk.glb")
-  let broadCrown: MeshHandle = terrainMesh(path: "{assets}environment/tree_broad_crown.glb")
-  let tallTrunk: MeshHandle = terrainMesh(path: "{assets}environment/tree_tall_trunk.glb")
-  let tallCrown: MeshHandle = terrainMesh(path: "{assets}environment/tree_tall_crown.glb")
-  let rockMesh: MeshHandle = terrainMesh(path: "{assets}environment/rock.glb")
-  let bushMesh: MeshHandle = terrainMesh(path: "{assets}environment/bush.glb")
-  let flowerMesh: MeshHandle = terrainMesh(path: "{assets}environment/flower.glb")
-  let grassMesh: MeshHandle = terrainMesh(path: "{assets}environment/grass.glb")
+  let broadTrunk: MeshHandle = terrainMesh(
+    renderer: renderer
+    path: "{assets}environment/tree_broad_trunk.glb"
+  )
+  let broadCrown: MeshHandle = terrainMesh(
+    renderer: renderer
+    path: "{assets}environment/tree_broad_crown.glb"
+  )
+  let tallTrunk: MeshHandle = terrainMesh(
+    renderer: renderer
+    path: "{assets}environment/tree_tall_trunk.glb"
+  )
+  let tallCrown: MeshHandle = terrainMesh(
+    renderer: renderer
+    path: "{assets}environment/tree_tall_crown.glb"
+  )
+  let rockMesh: MeshHandle = terrainMesh(renderer: renderer, path: "{assets}environment/rock.glb")
+  let bushMesh: MeshHandle = terrainMesh(renderer: renderer, path: "{assets}environment/bush.glb")
+  let flowerMesh: MeshHandle = terrainMesh(
+    renderer: renderer
+    path: "{assets}environment/flower.glb"
+  )
+  let grassMesh: MeshHandle = terrainMesh(renderer: renderer, path: "{assets}environment/grass.glb")
 
   let trunkMat: Material3d = terrainMaterial(
     color: Vec3.create(x: 0.205, y: 0.090, z: 0.032)
@@ -660,7 +697,7 @@ func createTerrainSystem(
   # One entity per pool slot per kind: a tile (with its own heightfield mesh) plus
   # tree/rock/bush/flower/grassA/grassB. Recycled every stream, placed by query.
   loop var slot: Int = 0, slot < terrainCellCount, ++slot {
-    let tileMesh: MeshHandle = uploadMeshDataForTerrain(mesh: tilePlane)
+    let tileMesh: MeshHandle = uploadMeshDataForTerrain(renderer: renderer, mesh: tilePlane)
     let tileEntity: EntityId = gameWorldAddEntity(world: world)
     componentSet(this: world.transforms, entity: tileEntity, data: createTransform3D())
     componentSet(
@@ -721,6 +758,11 @@ func createTerrainSystem(
   ret own terrainSystem
 }
 
-func uploadMeshDataForTerrain(mesh: view MeshData) ret MeshHandle {
-  ret uploadMesh(verts: mesh.verts, vertCount: mesh.vertCount, indices: mesh.indices)
+func uploadMeshDataForTerrain(renderer: mod DeferredRenderer, mesh: view MeshData) ret MeshHandle {
+  ret RendererDeferred.uploadMesh(
+    renderer: renderer
+    verts: mesh.verts
+    vertCount: mesh.vertCount
+    indices: mesh.indices
+  )
 }

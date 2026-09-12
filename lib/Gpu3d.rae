@@ -60,6 +60,8 @@ open ecs/ComponentTable
 open webgpu/Webgpu
 open webgpu/Context
 open Gpu2dCanvas
+open MeshStore
+open gpu/GpuResources
 open Gpu3dNative
 open Gpu3dSky
 
@@ -282,6 +284,8 @@ func beginForward(
 # binds the mesh buffers and issues the draw. firstInstance = slot lets the
 # shader pick its per-draw record, the same trick the deferred path uses.
 func draw(
+  meshes: view MeshStore
+  resources: view GpuResources
   mesh: copy Int
   model: view Mat4
   prevModel: view Mat4
@@ -312,9 +316,12 @@ func draw(
       ret
     }
     let pass: Ptr = g3dPass()
-    let vbuf: Ptr = g3dMeshVbuf(mesh: mesh)
-    let ibuf: Ptr = g3dMeshIbuf(mesh: mesh)
-    let icount: Int = g3dMeshIcount(mesh: mesh)
+    let vbuf: Ptr = meshStoreVbufHandle(store: meshes, resources: resources, mesh: mesh)
+    let ibuf: Ptr = meshStoreIbufHandle(store: meshes, resources: resources, mesh: mesh)
+    let icount: Int = meshStoreIndexCount(store: meshes, mesh: mesh)
+    if vbuf is webgpuNull() or ibuf is webgpuNull() or icount <= 0 {
+      ret
+    }
     wgpuRenderPassEncoderSetVertexBuffer(
       renderPassEncoder: pass
       slot: 0 as UInt32
@@ -462,6 +469,8 @@ func modelMatrix(t: view Transform3d) pub ret Mat4 {
 # where the instance was LAST frame; it drives per-object motion vectors
 # for TAA (#335). Pass the same transform when an object did not move.
 func drawInstance(
+  meshes: view MeshStore
+  resources: view GpuResources
   mesh: view MeshHandle
   transform: view Transform3d
   prevTransform: view Transform3d
@@ -473,6 +482,8 @@ func drawInstance(
   let model: Mat4 = modelMatrix(t: transform)
   let prevModel: Mat4 = modelMatrix(t: prevTransform)
   draw(
+    meshes: meshes
+    resources: resources
     mesh: mesh.id
     model: model
     prevModel: prevModel
@@ -490,13 +501,22 @@ func drawInstance(
 # #793: the World3d twin of renderSceneShadow — the shadow-caster pass over a
 # World3d, reading each mesh entity's Transform3d through ECS queries. Lifted
 # from 112/114's open-coded renderMeshShadow (#736) into shared lib.
-func renderSceneShadowWorld(world: view World3d) pub {
+func renderSceneShadowWorld(
+  meshes: view MeshStore
+  resources: view GpuResources
+  world: view World3d
+) pub {
   loop var j: Int = 0, j < componentCount(this: world.meshRenderers), ++j {
     let entity: EntityId = componentEntityAt(this: world.meshRenderers, i: j)
     let renderer: MeshRenderer = componentGet(this: world.meshRenderers, entity: entity)
     if renderer.visible {
       let t: Transform3d = componentGet(this: world.transforms, entity: entity)
-      drawShadowCaster(mesh: renderer.mesh, model: modelMatrix(t: t))
+      drawShadowCaster(
+        meshes: meshes
+        resources: resources
+        mesh: renderer.mesh
+        model: modelMatrix(t: t)
+      )
     }
   }
 }
@@ -506,7 +526,11 @@ func renderSceneShadowWorld(world: view World3d) pub {
 # Mesh-only: the mesh-only 3D examples migrated in #794 (e.g. 113) have no SDF
 # entities. Forward-path SDF metaballs from a World3d follow with the SDF example
 # migration (#795); the deferred path's renderSceneSdfWorld already covers those.
-func renderSceneWorld(world: view World3d) pub {
+func renderSceneWorld(
+  meshes: view MeshStore
+  resources: view GpuResources
+  world: view World3d
+) pub {
   loop var j: Int = 0, j < componentCount(this: world.meshRenderers), ++j {
     let entity: EntityId = componentEntityAt(this: world.meshRenderers, i: j)
     let renderer: MeshRenderer = componentGet(this: world.meshRenderers, entity: entity)
@@ -515,6 +539,8 @@ func renderSceneWorld(world: view World3d) pub {
       let pt: Transform3d = componentGet(this: world.prevTransforms, entity: entity)
       let m: Material3d = componentGet(this: world.materials, entity: entity)
       drawInstance(
+        meshes: meshes
+        resources: resources
         mesh: renderer.mesh
         transform: t
         prevTransform: pt
@@ -671,28 +697,45 @@ func taaPass() pub {
 }
 
 # Upload interleaved mesh data and get a typed handle back.
+# #905: meshes live in the renderer's MeshStore (DeferredRenderer.passes.
+# gbuffer.meshes / Renderer3d.meshes); RendererDeferred.uploadMesh and
+# Renderer3d.uploadMesh are the app-facing wrappers over these.
 func uploadMesh(
+  meshes: mod MeshStore
+  resources: mod GpuResources
   verts: view List(Float)
   vertCount: view Int
   indices: view List(Int)
 ) pub ret MeshHandle {
-  let raw: Int = meshCreate(
-    verts: verts.data
+  ret meshStoreUpload(
+    store: meshes
+    resources: resources
+    verts: verts
     vertCount: vertCount
-    indices: indices.data
-    indexCount: indices.length
+    indices: indices
   )
-  ret meshHandle(id: raw, generation: 0)
 }
 
 # Rewrite an existing mesh's vertex data in place; the index buffer and vertex
 # count stay as created. For pooled geometry whose shape depends on where in
 # the world it currently sits (recycled terrain tiles).
-func updateMeshVerts(mesh: view MeshHandle, verts: view List(Float), vertCount: view Int) pub {
+func updateMeshVerts(
+  meshes: view MeshStore
+  resources: view GpuResources
+  mesh: view MeshHandle
+  verts: view List(Float)
+  vertCount: view Int
+) pub {
   if not meshHandleIsValid(h: mesh) {
     ret
   }
-  meshUpdate(mesh: mesh.id, verts: verts.data, vertCount: vertCount)
+  meshStoreUpdateVerts(
+    store: meshes
+    resources: resources
+    mesh: mesh
+    verts: verts
+    vertCount: vertCount
+  )
 }
 
 func shadowMetaballs(packedBalls: view Buffer(Float), count: copy Int, smoothing: copy Float) {
@@ -716,11 +759,26 @@ func beginShadowPass(c: view ShadowCascades) pub {
   }
 }
 
-func drawShadowCaster(mesh: view MeshHandle, model: view Mat4) pub {
+# The shadow queue is C (rae_sm_*, #906); a static caster is queued by its
+# buffer handles, borrowed from the store for the pass (#905).
+func drawShadowCaster(
+  meshes: view MeshStore
+  resources: view GpuResources
+  mesh: view MeshHandle
+  model: view Mat4
+) pub {
   if not meshHandleIsValid(h: mesh) {
     ret
   }
-  shadowDraw(mesh: mesh.id, model: model)
+  unsafe {
+    shadowDraw(
+      mesh: mesh.id
+      vbuf: meshStoreVbufHandle(store: meshes, resources: resources, mesh: mesh.id)
+      ibuf: meshStoreIbufHandle(store: meshes, resources: resources, mesh: mesh.id)
+      icount: meshStoreIndexCount(store: meshes, mesh: mesh.id)
+      model: model
+    )
+  }
 }
 
 # `paletteBase` is this caster's start offset into the shared skin palette buffer
