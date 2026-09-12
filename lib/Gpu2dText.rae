@@ -9,17 +9,18 @@
 # Compiled-target only (pulls in gpu2d → wgpu-native + SDL3).
 import SdfText
 import Gpu2d
+open Gpu2dCanvas
 
 # Lay out one run of `text` at baseline (x, y), emitting a glyph quad per
 # character with an optional outline (outlineWidth px of outlineColor). Returns
 # the pen x advance. drawText / drawTextEx build on this.
-func emitRun(font: view SdfFont, text: view String, x: copy Float, y: copy Float, sizePx: copy Float, color: copy Int, outlineWidth: copy Float, outlineColor: copy Int, softness: copy Float) ret Float {
-    ret emitRange(font: font, text: text, start: 0, end: text.length(), x: x, y: y, sizePx: sizePx,
+func emitRun(canvas: mod Gpu2dCanvas, font: view SdfFont, text: view String, x: copy Float, y: copy Float, sizePx: copy Float, color: copy Int, outlineWidth: copy Float, outlineColor: copy Int, softness: copy Float) ret Float {
+    ret emitRange(canvas: canvas, font: font, text: text, start: 0, end: text.length(), x: x, y: y, sizePx: sizePx,
                   color: color, outlineWidth: outlineWidth, outlineColor: outlineColor, softness: softness)
 }
 
 # Allocation-free subset emitter used by word wrapping. `end` is exclusive.
-func emitRange(font: view SdfFont, text: view String, start: copy Int, end: copy Int, x: copy Float, y: copy Float, sizePx: copy Float, color: copy Int, outlineWidth: copy Float, outlineColor: copy Int, softness: copy Float) ret Float {
+func emitRange(canvas: mod Gpu2dCanvas, font: view SdfFont, text: view String, start: copy Int, end: copy Int, x: copy Float, y: copy Float, sizePx: copy Float, color: copy Int, outlineWidth: copy Float, outlineColor: copy Int, softness: copy Float) ret Float {
   unsafe {
       let scale: Float = sizePx / font.emSize
       let aw: Float = font.atlasWidth
@@ -46,7 +47,7 @@ func emitRange(font: view SdfFont, text: view String, start: copy Int, end: copy
                   var spr: Float = 1.0
                   if glyphH > 0.0 { spr = font.pxRange * (sy1 - sy0) / glyphH }
                   if spr < 1.0 { spr = 1.0 }
-                  Gpu2d.drawGlyphEx(sx0: sx0, sy0: sy0, sx1: sx1, sy1: sy1,
+                  Gpu2d.drawGlyphEx(canvas: canvas, sx0: sx0, sy0: sy0, sx1: sx1, sy1: sy1,
                                     u0: u0, v0: v0, u1: u1, v1: v1,
                                     atlas: font.atlas, pxRange: spr, color: color,
                                     outlineWidth: outlineWidth, outlineColor: outlineColor, softness: softness)
@@ -70,12 +71,12 @@ func glyphAdvance(font: view SdfFont, cp: view Int, sizePx: view Float) ret Floa
 
 # Draw allocation-free word-wrapped text. Wrapping occurs at spaces where
 # possible and falls back to a character boundary for a single long word.
-func drawTextWrappedEx(font: view SdfFont, text: view String, x: copy Float, y: copy Float,
+func drawTextWrappedEx(canvas: mod Gpu2dCanvas, font: view SdfFont, text: view String, x: copy Float, y: copy Float,
                        sizePx: copy Float, color: copy Int, maxWidth: copy Float,
                        lineHeight: copy Float, outlineWidth: copy Float,
                        outlineColor: copy Int) ret Int {
     if maxWidth <= 0.0 {
-        emitRun(font: font, text: text, x: x, y: y, sizePx: sizePx, color: color,
+        emitRun(canvas: canvas, font: font, text: text, x: x, y: y, sizePx: sizePx, color: color,
                 outlineWidth: outlineWidth, outlineColor: outlineColor, softness: 1.0)
         ret 1
     }
@@ -89,7 +90,7 @@ func drawTextWrappedEx(font: view SdfFont, text: view String, x: copy Float, y: 
     loop i < n {
         let cp: Int = text.at(index: i).toInt()
         if cp is 10 {
-            emitRange(font: font, text: text, start: lineStart, end: i, x: x, y: baseline,
+            emitRange(canvas: canvas, font: font, text: text, start: lineStart, end: i, x: x, y: baseline,
                       sizePx: sizePx, color: color, outlineWidth: outlineWidth,
                       outlineColor: outlineColor, softness: 1.0)
             lines = lines + 1
@@ -108,7 +109,7 @@ func drawTextWrappedEx(font: view SdfFont, text: view String, x: copy Float, y: 
                     lineEnd = lastSpace
                     nextStart = lastSpace + 1
                 }
-                emitRange(font: font, text: text, start: lineStart, end: lineEnd, x: x, y: baseline,
+                emitRange(canvas: canvas, font: font, text: text, start: lineStart, end: lineEnd, x: x, y: baseline,
                           sizePx: sizePx, color: color, outlineWidth: outlineWidth,
                           outlineColor: outlineColor, softness: 1.0)
                 lines = lines + 1
@@ -124,7 +125,7 @@ func drawTextWrappedEx(font: view SdfFont, text: view String, x: copy Float, y: 
         }
     }
     if lineStart < n {
-        emitRange(font: font, text: text, start: lineStart, end: n, x: x, y: baseline,
+        emitRange(canvas: canvas, font: font, text: text, start: lineStart, end: n, x: x, y: baseline,
                   sizePx: sizePx, color: color, outlineWidth: outlineWidth,
                   outlineColor: outlineColor, softness: 1.0)
         lines = lines + 1
@@ -135,8 +136,8 @@ func drawTextWrappedEx(font: view SdfFont, text: view String, x: copy Float, y: 
 # Draw `text` with baseline pen at (x, y) in pixels, `sizePx` tall em,
 # colour 0xAARRGGBB. Submit between Gpu2d.beginFrame and Gpu2d.endFrame.
 # Returns the pen x advance (end position), like a text cursor.
-func drawText(font: view SdfFont, text: view String, x: copy Float, y: copy Float, sizePx: copy Float, color: copy Int) ret Float {
-    ret emitRun(font: font, text: text, x: x, y: y, sizePx: sizePx, color: color, outlineWidth: 0.0, outlineColor: 0, softness: 1.0)
+func drawText(canvas: mod Gpu2dCanvas, font: view SdfFont, text: view String, x: copy Float, y: copy Float, sizePx: copy Float, color: copy Int) ret Float {
+    ret emitRun(canvas: canvas, font: font, text: text, x: x, y: y, sizePx: sizePx, color: color, outlineWidth: 0.0, outlineColor: 0, softness: 1.0)
 }
 
 # Draw `text` with an outline and/or a drop-shadow — the GPU equivalent of
@@ -144,7 +145,7 @@ func drawText(font: view SdfFont, text: view String, x: copy Float, y: copy Floa
 # glyph edge (MSDF dilation). A shadow is drawn first when `shadowColor`'s
 # alpha > 0: the run offset by (shadowOffX, shadowOffY), dilated by
 # `shadowSoftness` for a softer edge (softness 1 = sharp). Colours 0xAARRGGBB.
-func drawTextEx(font: view SdfFont, text: view String, x: copy Float, y: copy Float, sizePx: copy Float,
+func drawTextEx(canvas: mod Gpu2dCanvas, font: view SdfFont, text: view String, x: copy Float, y: copy Float, sizePx: copy Float,
                 color: copy Int, outlineColor: copy Int, outlineWidth: copy Float,
                 shadowColor: copy Int, shadowOffX: copy Float, shadowOffY: copy Float, shadowSoftness: copy Float) ret Float {
     let shadowA: Int = (shadowColor shr 24) bitand 255
@@ -153,10 +154,10 @@ func drawTextEx(font: view SdfFont, text: view String, x: copy Float, y: copy Fl
         # dilated hard copy. softness 1 = sharp; larger = softer/blurrier.
         var soft: Float = shadowSoftness
         if soft < 1.0 { soft = 1.0 }
-        emitRun(font: font, text: text, x: x + shadowOffX, y: y + shadowOffY, sizePx: sizePx,
+        emitRun(canvas: canvas, font: font, text: text, x: x + shadowOffX, y: y + shadowOffY, sizePx: sizePx,
                 color: shadowColor, outlineWidth: 0.0, outlineColor: 0, softness: soft)
     }
-    ret emitRun(font: font, text: text, x: x, y: y, sizePx: sizePx, color: color,
+    ret emitRun(canvas: canvas, font: font, text: text, x: x, y: y, sizePx: sizePx, color: color,
                 outlineWidth: outlineWidth, outlineColor: outlineColor, softness: 1.0)
 }
 

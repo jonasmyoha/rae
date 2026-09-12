@@ -1,4 +1,4 @@
-/* gpu2d platform/window/input, design-coordinate, clip, and offscreen-target state. Raw SDL3/WebGPU calls stay C; app/window policy can migrate later.
+/* gpu2d platform/window/input, design-coordinate, and offscreen-target state. Raw SDL3/WebGPU calls stay C; app/window policy can migrate later.
  *
  * Split from rae_runtime.c by runtime migration task #288.
  * This module is included by rae_runtime.c into one translation unit.
@@ -73,140 +73,9 @@ static void rae_g2d_compute_xform(float* out) {
     out[0] = physW; out[1] = physH; out[2] = scaleX; out[3] = scaleY;
     out[4] = offX;  out[5] = offY;  out[6] = 0.0f;   out[7] = 0.0f;
 }
-/* per-frame transient handles */
-
-/* ---- Clip / scissor (#144) --------------------------------------------
- * A clip-rect stack in DESIGN units. Each queued box primitive, glyph, and
- * image records the current clip index (parallel arrays); at flush we set
- * the render-pass scissor per contiguous run of same-clip draws, so a run
- * is drawn with wgpuRenderPassEncoderDraw's firstInstance offset. Index 0
- * is the sentinel "no clip" (full framebuffer). pushClipRect intersects
- * with the parent so nested clips compose (a rounded card holding a scroll
- * list clips to the intersection). Reset each beginFrame. The rounded /
- * per-instance clip variant is #118; this is the axis-aligned fast path. */
-#define RAE_G2D_MAX_CLIPS 256
-typedef struct { float x, y, w, h, radius; int full; } RaeG2dClip;
-static RaeG2dClip g_g2d_clips[RAE_G2D_MAX_CLIPS];
-static int g_g2d_clip_count = 1;         /* [0] = full sentinel */
-static int g_g2d_clip_stack[RAE_G2D_MAX_CLIPS];
-static int g_g2d_clip_sp = 0;            /* stack depth */
-static int g_g2d_cur_clip = 0;           /* current clip index */
-/* parallel clip index per box primitive */
-/* #908: the Rae image queue tags each draw with the clip active at queue time. */
-int64_t rae_g2d_current_clip(void) { return (int64_t)g_g2d_cur_clip; }
-/* parallel clip index per glyph, per atlas */
-static int* g_g2d_text_clip[RAE_SDF_MAX_ATLAS];
-static int  g_g2d_text_clip_cap[RAE_SDF_MAX_ATLAS];
-
-static float rae_g2d_maxf(float a, float b) { return a > b ? a : b; }
-static float rae_g2d_minf(float a, float b) { return a < b ? a : b; }
-
-static void rae_g2d_clip_reset(void) {
-    g_g2d_clips[0].full = 1;
-    g_g2d_clips[0].x = 0.0f; g_g2d_clips[0].y = 0.0f;
-    g_g2d_clips[0].w = 0.0f; g_g2d_clips[0].h = 0.0f;
-    g_g2d_clips[0].radius = 0.0f;
-    g_g2d_clip_count = 1;
-    g_g2d_clip_sp = 0;
-    g_g2d_cur_clip = 0;
-}
-
-
-static void rae_g2d_text_clip_ensure(int ai, int glyphs) {
-    if (glyphs <= g_g2d_text_clip_cap[ai]) return;
-    int cap = g_g2d_text_clip_cap[ai] ? g_g2d_text_clip_cap[ai] : 256;
-    while (cap < glyphs) cap *= 2;
-    g_g2d_text_clip[ai] = (int*)realloc(g_g2d_text_clip[ai], (size_t)cap * sizeof(int));
-    g_g2d_text_clip_cap[ai] = cap;
-}
-
-/* Resolve a clip index to a framebuffer-pixel scissor rect (via the design→
- * physical xform) and set it on the active pass, clamped to the attachment. */
-static void rae_g2d_set_scissor(int clipidx, WGPURenderPassEncoder pass) {
-    if (!pass) return;
-    float xf[8]; rae_g2d_compute_xform(xf);
-    float physW = xf[0], physH = xf[1], sx = xf[2], sy = xf[3], ox = xf[4], oy = xf[5];
-    float x0, y0, x1, y1;
-    if (clipidx <= 0 || clipidx >= g_g2d_clip_count || g_g2d_clips[clipidx].full) {
-        x0 = 0.0f; y0 = 0.0f; x1 = physW; y1 = physH;
-    } else {
-        RaeG2dClip* c = &g_g2d_clips[clipidx];
-        x0 = c->x * sx + ox;            y0 = c->y * sy + oy;
-        x1 = (c->x + c->w) * sx + ox;   y1 = (c->y + c->h) * sy + oy;
-    }
-    x0 = rae_g2d_maxf(0.0f, x0); y0 = rae_g2d_maxf(0.0f, y0);
-    x1 = rae_g2d_minf(physW, x1); y1 = rae_g2d_minf(physH, y1);
-    if (x1 < x0) x1 = x0;
-    if (y1 < y0) y1 = y0;
-    uint32_t ix = (uint32_t)(x0 + 0.5f), iy = (uint32_t)(y0 + 0.5f);
-    uint32_t iw = (uint32_t)(x1 - x0 + 0.5f), ih = (uint32_t)(y1 - y0 + 0.5f);
-    uint32_t pw = (uint32_t)(physW + 0.5f), ph = (uint32_t)(physH + 0.5f);
-    if (ix > pw) ix = pw;
-    if (iy > ph) iy = ph;
-    if (ix + iw > pw) iw = pw - ix;
-    if (iy + ih > ph) ih = ph - iy;
-    wgpuRenderPassEncoderSetScissorRect(pass, ix, iy, iw, ih);
-}
-
-static void rae_g2d_push_clip(double x, double y, double w, double h, double radius) {
-    RaeG2dClip child; child.full = 0; child.radius = (float)radius;
-    RaeG2dClip* parent = &g_g2d_clips[g_g2d_cur_clip];
-    if (parent->full) {
-        child.x = (float)x; child.y = (float)y; child.w = (float)w; child.h = (float)h;
-    } else {
-        float px0 = rae_g2d_maxf(parent->x, (float)x);
-        float py0 = rae_g2d_maxf(parent->y, (float)y);
-        float px1 = rae_g2d_minf(parent->x + parent->w, (float)(x + w));
-        float py1 = rae_g2d_minf(parent->y + parent->h, (float)(y + h));
-        child.x = px0; child.y = py0;
-        child.w = rae_g2d_maxf(0.0f, px1 - px0);
-        child.h = rae_g2d_maxf(0.0f, py1 - py0);
-        /* Keep the larger of the two radii — a rounded child inside a
-         * rectangular parent still wants its own rounding; the scissor
-         * bbox already enforces the parent's straight edges. */
-        child.radius = rae_g2d_maxf((float)radius, parent->radius);
-    }
-    int idx = g_g2d_cur_clip;
-    if (g_g2d_clip_count < RAE_G2D_MAX_CLIPS) {
-        idx = g_g2d_clip_count++;
-        g_g2d_clips[idx] = child;
-    }
-    if (g_g2d_clip_sp < RAE_G2D_MAX_CLIPS) g_g2d_clip_stack[g_g2d_clip_sp++] = g_g2d_cur_clip;
-    g_g2d_cur_clip = idx;
-}
-
-/* Fill an 8-float box-clip uniform: [x,y,w,h] design units + [radius,enabled].
- * `enabled` is set only for a rounded clip — a rectangular clip is handled by
- * the scissor alone, so its SDF stays off. */
-static void rae_g2d_fill_clip_uniform(int clipidx, float* cu) {
-    if (clipidx > 0 && clipidx < g_g2d_clip_count
-        && !g_g2d_clips[clipidx].full && g_g2d_clips[clipidx].radius > 0.0f) {
-        RaeG2dClip* c = &g_g2d_clips[clipidx];
-        cu[0] = c->x; cu[1] = c->y; cu[2] = c->w; cu[3] = c->h;
-        cu[4] = c->radius; cu[5] = 1.0f; cu[6] = 0.0f; cu[7] = 0.0f;
-    } else {
-        for (int i = 0; i < 8; i++) cu[i] = 0.0f;
-    }
-}
-
-void rae_ext_Gpu2d_pushClipRect(float x, float y, float w, float h){
-    rae_g2d_push_clip(x, y, w, h, 0.0);
-}
-
-/* #118: rounded clip. The box pipeline applies the rounded-rect SDF in the
- * fragment shader (analytic AA on the corners); the axis-aligned scissor
- * (#144) still bounds all pipelines to the clip bbox. */
-void rae_ext_Gpu2d_pushClipRoundedRect(float x, float y, float w, float h, float radius){
-    rae_g2d_push_clip(x, y, w, h, radius);
-}
-
-void rae_ext_Gpu2d_popClipRect(void) {
-    if (g_g2d_clip_sp > 0) {
-        g_g2d_cur_clip = g_g2d_clip_stack[--g_g2d_clip_sp];
-    } else {
-        g_g2d_cur_clip = 0;
-    }
-}
+/* #915: the clip stack, per-run scissor and the rounded-clip uniform live on
+ * the Rae canvas (lib/Gpu2dCanvas.rae); C only exposes the transform. */
+void rae_g2d_xform(float* out) { if (out) rae_g2d_compute_xform(out); }
 
 /* Frames render to this persistent OFFSCREEN texture, not directly to the
  * surface drawable. At endFrame we read it back for screenshots and copy it to

@@ -1,0 +1,122 @@
+# Gpu2dCanvasFrame — the 2D frame lifecycle over the canvas (#915): a manager
+# Recording per frame with a render pass over the adopted C offscreen target
+# held open for the flushes, the whole flush (viewport upload, then boxes,
+# images, text in painter order), and the frame end that retires the per-frame
+# bind groups behind the TRACKED submission (pollSubmissions on the canvas's
+# in-flight list — no reliance on wgpu's own tracking). Gpu2d.beginFrame /
+# flush / endFrame are the app-facing wrappers over these.
+import String
+import Math
+open webgpu/Webgpu
+open webgpu/Context
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuRender
+open gpu/GpuIds
+open Gpu2dCanvas
+open Gpu2dCanvasText
+
+# ----- frame (#915) ----------------------------------------------------------
+
+# Frame start: reset the clip stack and drop anything queued by a frame that
+# never got a pass (no drawable yet) so it cannot pile up across skipped frames.
+func canvasFrameBegin(canvas: mod Gpu2dCanvas) {
+  clearBoxBatch(canvas: canvas)
+  clearImageQueue(canvas: canvas)
+  clearTextBatches(canvas: canvas)
+  clipReset(canvas: canvas)
+}
+
+# Open the frame: a manager recording, the C offscreen target adopted (re-adopted
+# when configure replaced it), a pass over it held open for the flushes.
+func canvasOpenFrame(canvas: mod Gpu2dCanvas, clear: copy Bool, r: copy Float, g: copy Float, b: copy Float, a: copy Float) {
+  ensureBoxResources(canvas: canvas)
+  if let resources: mod GpuResources => canvas.gpuResources {
+    unsafe {
+      let offscreenView: Ptr = g2dOffscreenView()
+      if offscreenView is webgpuNull() { ret }
+      if offscreenView is not canvas.offscreenHandle or not isValidExternal(resources: resources, id: canvas.offscreen) {
+        releaseExternal(resources: resources, id: canvas.offscreen)
+        canvas.offscreen = noExternalId()
+        if let adopted: ExternalId = adoptExternalTextureView(resources: resources, handle: offscreenView) { canvas.offscreen = adopted }
+        canvas.offscreenHandle = offscreenView
+      }
+    }
+    if not isValidExternal(resources: resources, id: canvas.offscreen) { ret }
+    if let recording: Recording = beginRecording(resources: resources) {
+      var opened: Recording = own recording
+      let target: RenderTarget = renderTarget(colorView: externalRef(id: canvas.offscreen), clear: clear, r: r, g: g, b: b, a: a)
+      unsafe { canvas.framePass = beginRenderPass(recording: opened, resources: resources, target: target) }
+      canvas.recording = own opened
+    }
+  }
+}
+
+# Close the frame: end the pass, record every per-frame group and the
+# pipelines as uses (so the submission pins them and retiring them below is
+# deferred until the GPU is done — no reliance on wgpu's own tracking), submit,
+# then retire the frame's groups, poll earlier frames and compact the arena.
+func canvasCloseFrame(canvas: mod Gpu2dCanvas) {
+  if let resources: mod GpuResources => canvas.gpuResources {
+    unsafe {
+      endRenderPass(pass: canvas.framePass)
+      canvas.framePass = webgpuNull()
+    }
+    if let recording: mod Recording => canvas.recording {
+      loop var i: Int = 0, i < canvas.frameBinds.length, ++i {
+        if let bind: BindGroupId = canvas.frameBinds.copyAt(index: i) { recordBindGroupUse(recording: recording, resources: resources, id: bind) }
+      }
+      loop var i: Int = 0, i < canvas.imageBinds.length, ++i {
+        if let bind: BindGroupId = canvas.imageBinds.copyAt(index: i) { recordBindGroupUse(recording: recording, resources: resources, id: bind) }
+      }
+      recordRenderPipelineUse(recording: recording, resources: resources, id: canvas.pipeline)
+      recordRenderPipelineUse(recording: recording, resources: resources, id: canvas.imagePipeline)
+      recordRenderPipelineUse(recording: recording, resources: resources, id: canvas.textPipeline)
+      let tracked: opt SubmissionId = trackSubmission(inFlight: canvas.inFlight, resources: resources, recording: recording)
+    }
+    canvas.recording = none
+  }
+}
+
+
+# The whole flush (Gpu2d.flush): the viewport transform for this flush, then
+# boxes, images, text — the painter order the C flush had.
+func canvasFlush(canvas: mod Gpu2dCanvas) {
+  if not canvasFrameActive(canvas: canvas) { ret }
+  ensureBoxResources(canvas: canvas)
+  if let resources: mod GpuResources => canvas.gpuResources {
+    uploadViewport(canvas: canvas, resources: resources)
+    boxFlushWith(canvas: canvas, resources: resources)
+    imageFlushWith(canvas: canvas, resources: resources)
+    textFlushWith(canvas: canvas, resources: resources)
+  }
+}
+
+# Frame end (after the frame's command buffer was submitted): retire this
+# frame's per-run bind groups and clip adoptions (wgpu keeps the natives alive
+# until the submission completes), reset the flush slot cursor and compact the
+# manager's dependency arena so per-frame groups cannot grow it.
+func boxFrameEnd(canvas: mod Gpu2dCanvas) {
+  if let resources: mod GpuResources => canvas.gpuResources {
+    # Pinned by this frame's submission (canvasCloseFrame), so the retire is
+    # deferred until pollSubmissions sees the GPU finish — no wgpu-side reliance.
+    retireBindGroupIds(resources: resources, list: canvas.frameBinds)
+    canvas.frameBinds.clear()
+    pollSubmissions(inFlight: canvas.inFlight, resources: resources)
+    let compacted: Bool = compactDependencies(resources: resources)
+  }
+  clearBoxBatch(canvas: canvas)
+  canvas.flushIndex = 0
+  canvas.clipCursor = 0
+  canvas.imageDrawCursor = 0
+  loop var ai: Int = 0, ai < canvas.textAtlases.length, ++ai {
+    if let atlas: Gpu2dTextAtlas = canvas.textAtlases.copyAt(index: ai) {
+      var reset: Gpu2dTextAtlas = own atlas
+      reset.flushIndex = 0
+      canvas.textAtlases.set(index: ai, value: own reset)
+    }
+  }
+}
+
+# Retire every manager object and drop the manager (app shutdown, BEFORE
+# Gpu2d.closeWindow releases the adopted C viewport uniform).

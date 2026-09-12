@@ -241,7 +241,7 @@ func paintSpriteG(world: view UiWorld, entity: view EntityId, wt: view WorldTran
         }
       }
     }
-    Gpu2dText.drawText(font: res.iconFont, text: glyph, x: gx, y: gy, sizePx: sz, color: g2dColor(color: tint))
+    Gpu2dText.drawText(canvas: canvas, font: res.iconFont, text: glyph, x: gx, y: gy, sizePx: sz, color: g2dColor(color: tint))
     ret
   }
   let radius: Float = g2dRadius(world: world, entity: entity, fallback: 0.0)
@@ -254,7 +254,7 @@ func paintSpriteG(world: view UiWorld, entity: view EntityId, wt: view WorldTran
   Gpu2d.drawRoundedRect(canvas: canvas, x: drawX, y: drawY, w: drawW, h: drawH, radius: fallbackRadius * hoverMul, color: g2dColor(color: fallback))
 }
 
-func paintTextG(world: view UiWorld, entity: view EntityId, wt: view WorldTransform2D, cr: view ComputedRect, chain255: view Int, res: view Gpu2dUi) {
+func paintTextG(world: view UiWorld, entity: view EntityId, wt: view WorldTransform2D, cr: view ComputedRect, chain255: view Int, res: view Gpu2dUi, canvas: mod Gpu2dCanvas) {
   let t: view Text => componentView(this: world.texts, entity: entity)
   if t.text.length() is 0 { ret }
   var size: Float = resolveTextSize(theme: res.theme, styleId: t.styleId)
@@ -306,6 +306,7 @@ func paintTextG(world: view UiWorld, entity: view EntityId, wt: view WorldTransf
   if t.wrapWidthMode is WrapWidthMode.nodeWidth {
     let lineHeight: Float = size * resolveTextLineHeight(theme: res.theme, styleId: t.styleId)
     Gpu2dText.drawTextWrappedEx(
+      canvas: canvas
       font: res.textFont
       text: t.text
       x: drawX
@@ -362,6 +363,7 @@ func paintTextG(world: view UiWorld, entity: view EntityId, wt: view WorldTransf
   if hasShadow {
     let shChained: RgbaColor = g2dChain(color: shCol, chain255: chain255)
     Gpu2dText.drawTextEx(
+      canvas: canvas
       font: res.textFont
       text: t.text
       x: drawX
@@ -378,12 +380,12 @@ func paintTextG(world: view UiWorld, entity: view EntityId, wt: view WorldTransf
     ret
   }
   if boldWidth > 0.0 {
-    Gpu2dText.drawTextEx(font: res.textFont, text: t.text, x: drawX, y: drawY, sizePx: size,
+    Gpu2dText.drawTextEx(canvas: canvas, font: res.textFont, text: t.text, x: drawX, y: drawY, sizePx: size,
                           color: g2dColor(color: col), outlineColor: g2dColor(color: col),
                           outlineWidth: boldWidth, shadowColor: 0, shadowOffX: 0.0,
                           shadowOffY: 0.0, shadowSoftness: 1.0)
   } else {
-    Gpu2dText.drawText(font: res.textFont, text: t.text, x: drawX, y: drawY, sizePx: size, color: g2dColor(color: col))
+    Gpu2dText.drawText(canvas: canvas, font: res.textFont, text: t.text, x: drawX, y: drawY, sizePx: size, color: g2dColor(color: col))
   }
 }
 
@@ -410,7 +412,7 @@ func paintEntityG(world: view UiWorld, entity: view EntityId, res: view Gpu2dUi,
     paintSpriteG(world: world, entity: entity, wt: wt, cr: cr, chain255: chain255, res: res, canvas: canvas)
   }
   if componentHas(this: world.texts, entity: entity) {
-    paintTextG(world: world, entity: entity, wt: wt, cr: cr, chain255: chain255, res: res)
+    paintTextG(world: world, entity: entity, wt: wt, cr: cr, chain255: chain255, res: res, canvas: canvas)
   }
   # gpu2d has separate box/image/text pipelines. Flush per entity so later
   # entities can correctly paint over earlier images/text, matching raylib's
@@ -447,9 +449,9 @@ func paintSubtreeG(world: view UiWorld, entity: view EntityId, res: view Gpu2dUi
           let cwt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: entity)
           let crad: Float = g2dRadius(world: world, entity: entity, fallback: 0.0)
           if crad > 0.0 {
-            Gpu2d.pushClipRoundedRect(x: cwt.position.x, y: cwt.position.y, w: ccr.size.x, h: ccr.size.y, radius: crad)
+            Gpu2d.pushClipRoundedRect(canvas: canvas, x: cwt.position.x, y: cwt.position.y, w: ccr.size.x, h: ccr.size.y, radius: crad)
           } else {
-            Gpu2d.pushClipRect(x: cwt.position.x, y: cwt.position.y, w: ccr.size.x, h: ccr.size.y)
+            Gpu2d.pushClipRect(canvas: canvas, x: cwt.position.x, y: cwt.position.y, w: ccr.size.x, h: ccr.size.y)
           }
           clipped = true
         }
@@ -470,7 +472,7 @@ func paintSubtreeG(world: view UiWorld, entity: view EntityId, res: view Gpu2dUi
       pass = pass + 1
     }
     if clipped {
-      Gpu2d.popClipRect()
+      Gpu2d.popClipRect(canvas: canvas)
     }
   }
 }
