@@ -39,6 +39,7 @@ struct Water {
   absorb: vec4<f32>,        // rgb = Beer-Lambert absorption per metre
   cascades: vec4<f32>,      // xyz = cascade tile sizes (m), w = realistic path (1) / toon (0)
   centre: vec4<f32>,        // xy = camera position snapped to metres (mesh mode 2), z = cascade count, w = grid cell (m, lakes)
+  ssr: vec4<f32>,           // x = screen-space reflections on (1) / off (0), y = march steps, z = hit thickness (m), w = max ray distance (m)
 };
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var<uniform> W: Water;
@@ -184,6 +185,72 @@ fn linearDepth(ndc: f32) -> f32 {
   return near * far / (ndc * (far - near) + near);
 }
 
+// Screen-space reflection (#854, desktop only): march the reflected ray in
+// WORLD space, project each step through the frame's view-projection and
+// compare its view depth (clip.w) with the G-buffer depth under that pixel.
+// A step that lands behind the scene by less than the thickness is a hit,
+// refined by a short bisection and sampled from the opaque lit snapshot
+// (litCopy, the frame BEFORE the water — reflections are of the opaque scene,
+// never of the water itself). Returns rgb + a confidence: 0 for a miss, a ray
+// leaving the screen or going down, fading toward the screen edges so the
+// sky fallback takes over smoothly instead of cutting.
+fn ssrProject(p: vec3<f32>) -> vec3<f32> {
+  // (uv, view depth) of a world point; depth <= 0 means behind the camera.
+  let clip = F.viewProj * vec4<f32>(p, 1.0);
+  let ndc = clip.xy / max(clip.w, 0.001);
+  return vec3<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5, clip.w);
+}
+
+fn ssrSceneDepth(uv: vec2<f32>, depthDims: vec2<f32>) -> f32 {
+  let px = clamp(vec2<i32>(uv * depthDims), vec2<i32>(0), vec2<i32>(depthDims) - vec2<i32>(1));
+  return linearDepth(textureLoad(depthTex, px, 0));
+}
+
+fn ssrTrace(origin: vec3<f32>, dir: vec3<f32>) -> vec4<f32> {
+  if (W.ssr.x < 0.5 || dir.z <= 0.0) { return vec4<f32>(0.0); }
+  let steps = i32(max(W.ssr.y, 4.0));
+  let thickness = max(W.ssr.z, 0.05);
+  let maxDistance = max(W.ssr.w, 1.0);
+  let depthDims = vec2<f32>(textureDimensions(depthTex));
+  var prevT = 0.0;
+  var crossT = -1.0;
+  for (var k = 1; k <= steps; k = k + 1) {
+    // Steps grow quadratically: fine near the surface, coarse far away.
+    let f = f32(k) / f32(steps);
+    let t = maxDistance * f * f;
+    let proj = ssrProject(origin + dir * t);
+    if (proj.z <= 0.05) { return vec4<f32>(0.0); }
+    if (proj.x < 0.0 || proj.x > 1.0 || proj.y < 0.0 || proj.y > 1.0) { return vec4<f32>(0.0); }
+    // The first step that is BEHIND the scene marks a crossing; the bisection
+    // below finds where the ray actually entered, so a thick object (the
+    // island) is a hit even when this step landed deep inside it.
+    if (proj.z > ssrSceneDepth(proj.xy, depthDims) + 0.02) {
+      crossT = t;
+      break;
+    }
+    prevT = t;
+  }
+  if (crossT < 0.0) { return vec4<f32>(0.0); }
+  var lo = prevT;
+  var hi = crossT;
+  for (var b = 0; b < 6; b = b + 1) {
+    let mid = (lo + hi) * 0.5;
+    let proj = ssrProject(origin + dir * mid);
+    if (proj.z > ssrSceneDepth(proj.xy, depthDims) + 0.02) { hi = mid; } else { lo = mid; }
+  }
+  let hit = ssrProject(origin + dir * hi);
+  let sceneLinear = ssrSceneDepth(hit.xy, depthDims);
+  // A ray that passed BEHIND something (the refined point still floats well
+  // off the surface) is a miss, not a smear of that thing.
+  if (hit.z - sceneLinear > thickness * (1.0 + hi * 0.05)) { return vec4<f32>(0.0); }
+  // Fade at the screen edges and with ray length so a hit never pops.
+  let edge = min(min(hit.x, 1.0 - hit.x), min(hit.y, 1.0 - hit.y));
+  let edgeFade = smoothstep(0.0, 0.08, edge);
+  let lengthFade = 1.0 - smoothstep(maxDistance * 0.7, maxDistance, hi);
+  let colour = textureSampleLevel(litCopyTex, litSampler, hit.xy, 0.0).rgb;
+  return vec4<f32>(colour, edgeFade * lengthFade);
+}
+
 @fragment
 fn fs(i: VsOut) -> @location(0) vec4<f32> {
   let px = vec2<i32>(i32(i.pos.x), i32(i.pos.y));
@@ -250,7 +317,18 @@ fn fs(i: VsOut) -> @location(0) vec4<f32> {
   if (!realisticPath) { n = normalize(mix(n, vec3<f32>(0.0, 0.0, 1.0), 1.0 - crestFade)); }
   let toCamera = normalize(W.camera.xyz - i.world);
   let r = reflect(-toCamera, n);
-  let skyTint = mix(W.horizon.rgb, W.zenith.rgb, clamp(r.z, 0.0, 1.0));
+  var skyTint = mix(W.horizon.rgb, W.zenith.rgb, clamp(r.z, 0.0, 1.0));
+  // Desktop SSR (#854): a mirrored opaque scene where the reflected ray hits
+  // it on screen; the stylised sky stays the fallback for misses, rays that
+  // leave the screen and the mobile tier (W.ssr.x = 0 skips the march).
+  if (W.ssr.x > 0.5) {
+    // Trace from a normal flattened toward up: the full FFT normal scatters
+    // the mirror into per-pixel speckle, a calmer ray keeps the reflected
+    // object readable while the shading normal still carries the waves.
+    let nReflect = normalize(mix(n, vec3<f32>(0.0, 0.0, 1.0), 0.6));
+    let hit = ssrTrace(i.world + nReflect * 0.02, reflect(-toCamera, nReflect));
+    skyTint = mix(skyTint, hit.rgb, hit.a);
+  }
   let ndv = clamp(dot(n, toCamera), 0.0, 1.0);
   let fresnel = 0.02 + 0.98 * pow(1.0 - ndv, 5.0);
 
