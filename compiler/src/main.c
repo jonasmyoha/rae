@@ -2275,6 +2275,9 @@ static void print_usage(const char* prog) {
           "                  current directory and download Roboto-Regular.ttf into\n");
   fprintf(stderr,
           "                  assets/. Idempotent — never overwrites existing files.\n");
+  fprintf(stderr, "  toolchain <status|use|list>\n");
+  fprintf(stderr, "                  Inspect/switch the Rae toolchain (version check,\n");
+  fprintf(stderr, "                  `use <req>` checks out + rebuilds a matching tag)\n");
   fprintf(stderr, "  --version, -v   Print the compiler version (--json for tooling)\n");
 }
 
@@ -4522,6 +4525,244 @@ static int cmd_init(int argc, char** argv) {
   return 0;
 }
 
+/* ---- `rae toolchain` (#932, docs/versioning-and-toolchain.md §3) ---- */
+
+/* The git checkout this compiler was built from: $RAE_ROOT when set, else the
+ * parent of the stdlib dir (the binary lives at <root>/compiler/bin/rae and
+ * the stdlib at <root>/lib). Returns false when it cannot be determined. */
+static bool rae_checkout_root(char* out, size_t out_len) {
+  const char* env = getenv("RAE_ROOT");
+  if (env && env[0]) {
+    char probe[PATH_MAX];
+    snprintf(probe, sizeof(probe), "%s/compiler", env);
+    if (directory_exists(probe)) {
+      snprintf(out, out_len, "%s", env);
+      return true;
+    }
+  }
+  const char* lib = compiler_stdlib_dir();
+  if (!lib) return false;
+  char root[PATH_MAX];
+  snprintf(root, sizeof(root), "%s", lib);
+  char* slash = strrchr(root, '/');
+  if (!slash || slash == root) return false;
+  *slash = '\0';  /* strip trailing "/lib" -> checkout root */
+  snprintf(out, out_len, "%s", root);
+  return true;
+}
+
+/* Run `git -C <root> <args>` capturing stdout into `out` (newline-trimmed).
+ * Returns the command's success (exit 0). */
+static bool git_capture(const char* root, const char* args, char* out, size_t out_len) {
+  char cmd[PATH_MAX + 256];
+  snprintf(cmd, sizeof(cmd), "git -C \"%s\" %s 2>/dev/null", root, args);
+  FILE* pipe = popen(cmd, "r");
+  if (!pipe) return false;
+  size_t n = fread(out, 1, out_len - 1, pipe);
+  out[n] = '\0';
+  while (n > 0 && (out[n - 1] == '\n' || out[n - 1] == '\r')) out[--n] = '\0';
+  int rc = pclose(pipe);
+  return rc == 0;
+}
+
+/* Tracked-file changes only (matches `git describe --dirty` / #930's dirty
+ * rule): untracked files do not count, so a stray build/ output or an
+ * uncommitted metrics file does not block a toolchain switch. */
+static bool checkout_is_dirty(const char* root) {
+  char cmd[2 * PATH_MAX + 128];
+  snprintf(cmd, sizeof(cmd),
+           "git -C \"%s\" diff --quiet && git -C \"%s\" diff --cached --quiet",
+           root, root);
+  return system(cmd) != 0;
+}
+
+/* Print the semver tags (v*.*.* only) newest-first, marking the current one. */
+static void toolchain_list_tags(const char* root) {
+  char tags[8192];
+  if (!git_capture(root,
+                   "tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname",
+                   tags, sizeof(tags)) ||
+      tags[0] == '\0') {
+    printf("no release tags in %s\n", root);
+    return;
+  }
+  const char* current = RAE_IS_RELEASE ? RAE_GIT_TAG : "";
+  char* saveptr = NULL;
+  for (char* line = strtok_r(tags, "\n", &saveptr); line;
+       line = strtok_r(NULL, "\n", &saveptr)) {
+    bool is_current = current[0] && strcmp(line, current) == 0;
+    printf("%s %s%s\n", is_current ? "*" : " ", line,
+           is_current ? "  (current)" : "");
+  }
+}
+
+/* Resolve requirement `req` (leading 'v' tolerated) to the newest v*.*.* tag
+ * that satisfies it. Copies the tag into `out`; returns false if none match. */
+static bool toolchain_resolve_tag(const char* root, const char* req, char* out,
+                                  size_t out_len) {
+  if (req[0] == 'v' || req[0] == 'V') req += 1;
+  char tags[8192];
+  if (!git_capture(root, "tag --list 'v[0-9]*.[0-9]*.[0-9]*'", tags, sizeof(tags)) ||
+      tags[0] == '\0') {
+    return false;
+  }
+  bool found = false;
+  RaeSemver best = {0, 0, 0};
+  char* saveptr = NULL;
+  for (char* line = strtok_r(tags, "\n", &saveptr); line;
+       line = strtok_r(NULL, "\n", &saveptr)) {
+    RaeSemver candidate;
+    if (!rae_semver_parse(line[0] == 'v' ? line + 1 : line, &candidate)) continue;
+    bool bad_req = false;
+    if (!rae_toolchain_satisfies(req, candidate, /*is_dev=*/false,
+                                 /*strict=*/false, &bad_req)) {
+      if (bad_req) return false;  /* the requirement itself is malformed */
+      continue;
+    }
+    bool newer = !found ||
+                 candidate.major > best.major ||
+                 (candidate.major == best.major && candidate.minor > best.minor) ||
+                 (candidate.major == best.major && candidate.minor == best.minor &&
+                  candidate.patch > best.patch);
+    if (newer) {
+      best = candidate;
+      snprintf(out, out_len, "%s", line);
+      found = true;
+    }
+  }
+  return found;
+}
+
+static int toolchain_status(const char* root) {
+  char version[160];
+  build_compiler_version_string(version, sizeof(version));
+  printf("rae %s (%s %s)\n", version, RAE_GIT_COMMIT, RAE_GIT_DATE);
+  printf("checkout: %s\n", root ? root : "(unknown)");
+
+  char cwd[PATH_MAX];
+  if (!getcwd(cwd, sizeof(cwd))) return 0;
+  char pack_path[PATH_MAX];
+  if (!find_project_pack(NULL, cwd, pack_path)) {
+    printf("project: no .raepack here (zero-config; no toolchain requirement)\n");
+    return 0;
+  }
+  RaePack pack;
+  diag_set_quiet(true);
+  bool parsed = raepack_parse_file(pack_path, &pack, false);
+  diag_set_quiet(false);
+  if (!parsed || pack.rae_version.len == 0) {
+    if (parsed) raepack_free(&pack);
+    printf("project: %s (no rae requirement)\n", pack_path);
+    return 0;
+  }
+  char* req = str_to_cstr(pack.rae_version);
+  bool bad_req = false;
+  bool ok = rae_toolchain_satisfies(req, compiler_semver(), /*is_dev=*/!RAE_IS_RELEASE,
+                                    /*strict=*/false, &bad_req);
+  printf("project: %s requires Rae %s\n", pack_path, req);
+  if (bad_req) {
+    printf("verdict: malformed requirement\n");
+    free(req);
+    raepack_free(&pack);
+    return 1;
+  }
+  printf("verdict: %s\n", ok ? "satisfied" : "UNSATISFIED — run: rae toolchain use");
+  free(req);
+  raepack_free(&pack);
+  return ok ? 0 : 1;
+}
+
+static int toolchain_use(const char* root, const char* req) {
+  bool to_main = strcmp(req, "main") == 0;
+  char target[128];
+  if (to_main) {
+    snprintf(target, sizeof(target), "main");
+  } else {
+    /* Pull tags first (best-effort: offline still resolves against local
+     * tags). fetch touches only .git, so it is safe on a dirty tree. */
+    char scratch[256];
+    git_capture(root, "fetch --tags --quiet", scratch, sizeof(scratch));
+    if (!toolchain_resolve_tag(root, req, target, sizeof(target))) {
+      fprintf(stderr,
+              "error: no release tag in %s satisfies \"%s\".\n"
+              "       Available tags:\n", root, req);
+      toolchain_list_tags(root);
+      return 1;
+    }
+  }
+
+  if (checkout_is_dirty(root)) {
+    fprintf(stderr,
+            "error: the Rae checkout %s has uncommitted changes; refusing to\n"
+            "       switch toolchain (your in-flight work would be left on a\n"
+            "       detached HEAD). Commit or stash it, then retry.\n",
+            root);
+    return 1;
+  }
+
+  printf("rae toolchain: checking out %s in %s\n", target, root);
+  char cmd[PATH_MAX + 128];
+  snprintf(cmd, sizeof(cmd), "git -C \"%s\" checkout %s", root, target);
+  if (system(cmd) != 0) {
+    fprintf(stderr, "error: git checkout %s failed\n", target);
+    return 1;
+  }
+  printf("rae toolchain: rebuilding compiler (make -C %s/compiler build)\n", root);
+  snprintf(cmd, sizeof(cmd), "make -C \"%s/compiler\" build", root);
+  if (system(cmd) != 0) {
+    fprintf(stderr, "error: rebuilding the compiler failed\n");
+    return 1;
+  }
+  printf("rae toolchain: now on %s. Run 'rae --version' to confirm.\n", target);
+  return 0;
+}
+
+static void toolchain_usage(void) {
+  fprintf(stderr, "Usage: rae toolchain <status|use|list>\n");
+  fprintf(stderr, "  status        Print this compiler's version + checkout and,\n");
+  fprintf(stderr, "                inside a project, the pack's requirement + verdict\n");
+  fprintf(stderr, "  use <req>     Check out the newest tag matching <req> (a version\n");
+  fprintf(stderr, "                like 0.3, or 'main' for the development head) and\n");
+  fprintf(stderr, "                rebuild the compiler; refuses on a dirty checkout\n");
+  fprintf(stderr, "  list          List release tags, marking the current one\n");
+}
+
+static int cmd_toolchain(int argc, char** argv) {
+  char root[PATH_MAX];
+  bool have_root = rae_checkout_root(root, sizeof(root));
+
+  const char* sub = argc >= 1 ? argv[0] : "status";
+  if (strcmp(sub, "status") == 0) {
+    return toolchain_status(have_root ? root : NULL);
+  }
+  if (strcmp(sub, "list") == 0) {
+    if (!have_root) {
+      fprintf(stderr, "error: cannot locate the Rae checkout (set $RAE_ROOT)\n");
+      return 1;
+    }
+    toolchain_list_tags(root);
+    return 0;
+  }
+  if (strcmp(sub, "use") == 0) {
+    if (argc < 2) {
+      fprintf(stderr, "error: 'rae toolchain use' needs a version or 'main'\n");
+      return 1;
+    }
+    if (!have_root) {
+      fprintf(stderr, "error: cannot locate the Rae checkout (set $RAE_ROOT)\n");
+      return 1;
+    }
+    return toolchain_use(root, argv[1]);
+  }
+  if (strcmp(sub, "-h") == 0 || strcmp(sub, "--help") == 0) {
+    toolchain_usage();
+    return 0;
+  }
+  fprintf(stderr, "error: unknown toolchain subcommand '%s'\n", sub);
+  toolchain_usage();
+  return 1;
+}
+
 int main(int argc, char** argv) {
   if (argc < 2) {
     print_usage(argv[0]);
@@ -4550,6 +4791,9 @@ int main(int argc, char** argv) {
   }
   if (strcmp(cmd, "init") == 0) {
     return cmd_init(argc - 2, argv + 2);
+  }
+  if (strcmp(cmd, "toolchain") == 0) {
+    return cmd_toolchain(argc - 2, argv + 2);
   }
   if (strcmp(cmd, "bindgen") == 0) {
     return bindgen_run(argc - 2, argv + 2);
