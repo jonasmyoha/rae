@@ -307,6 +307,17 @@ func createApp() ret App {
       controller: characterController
     )
 
+    var light: Light3d = defaultLight3d()
+    # #905/#921: the renderer owns the mesh + skin stores the walker parts,
+    # terrain / grass / water meshes are uploaded into, so it exists first.
+    var renderer: DeferredRenderer = createDeferredRendererWithUiSky(sky: createSkyStylised(
+      sunDir: light.sunDir
+      sunColor: light.sunColor
+      zenith: Vec3.create(x: 0.16, y: 0.34, z: 0.62)
+      horizon: Vec3.create(x: 0.74, y: 0.80, z: 0.72)
+      bands: 3.0
+    ))
+
     let pngBytes: List(Int) = Sys.readFileBytes(path: "{assets}walker_palette.png")
     var atlasW: Int = 0
     var atlasH: Int = 0
@@ -344,6 +355,7 @@ func createApp() ret App {
             height: atlasH
           )
           let handle: MeshHandle = uploadSkinnedMesh(
+            renderer: renderer
             verts: part.verts
             vertCount: part.vertCount
             indices: part.indices
@@ -371,16 +383,6 @@ func createApp() ret App {
       Sys.exit(code: 1)
     }
 
-    var light: Light3d = defaultLight3d()
-    # #905: the renderer owns the mesh store the terrain / grass / water meshes
-    # are uploaded into, so it exists before those systems are built.
-    var renderer: DeferredRenderer = createDeferredRendererWithUiSky(sky: createSkyStylised(
-      sunDir: light.sunDir
-      sunColor: light.sunColor
-      zenith: Vec3.create(x: 0.16, y: 0.34, z: 0.62)
-      horizon: Vec3.create(x: 0.74, y: 0.80, z: 0.72)
-      bands: 3.0
-    ))
     var terrainSystem: TerrainSystem = createTerrainSystem(
       renderer: renderer
       world: gameWorld

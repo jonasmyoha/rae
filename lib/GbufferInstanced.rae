@@ -18,6 +18,8 @@
 # (packInstanceRecord), never add() — so an instanced field stays inside the
 # walker's zero-alloc frame budget (test 573).
 open Gbuffer
+open SkinStore
+open GbufferSkinned
 open GbufferRecord
 open gpu/GpuResources
 open Scene3d
@@ -140,13 +142,9 @@ type PaletteArena {
 const paletteRowsPerJoint: Int = 3
 
 func createPaletteArena() pub ret PaletteArena {
-  # gbSkinPaletteSize is the byte size of the whole shared buffer; a vec4 row is
-  # four floats. Read it rather than duplicating the C-side cap here.
-  var rows: Int = 0
-  if gbSkinPaletteReady() is not 0 {
-    rows = gbSkinPaletteSize() / 16
-  }
-  ret PaletteArena { cursor: 0, capacity: rows, overflow: false }
+  # The palette buffer's size is the SkinStore's constant (#921), so the
+  # capacity is known before the first upload.
+  ret PaletteArena { cursor: 0, capacity: skinPaletteRows, overflow: false }
 }
 
 # Call once per frame, before reserving. Poses are rewritten every frame, so the
@@ -154,11 +152,6 @@ func createPaletteArena() pub ret PaletteArena {
 func resetPaletteArena(arena: mod PaletteArena) pub {
   arena.cursor = 0
   arena.overflow = false
-  # The buffer is created lazily by the first upload, so capacity may only
-  # become known after the first frame.
-  if arena.capacity is 0 and gbSkinPaletteReady() is not 0 {
-    arena.capacity = gbSkinPaletteSize() / 16
-  }
 }
 
 # Reserve room for one posed skeleton. Returns the vec4 row to upload at and to
@@ -177,26 +170,23 @@ func paletteReserve(arena: mod PaletteArena, jointCount: copy Int) pub ret Int {
   ret base
 }
 
-# Upload one posed skeleton at an explicit vec4 row offset (from paletteReserve).
-# `rows` is jointCount * 12 Floats — three vec4 rows per joint. A vec4 row is 16
-# bytes, which is what turns baseRow into the write offset.
-func uploadPaletteAt(rows: view List(Float), jointCount: copy Int, baseRow: copy Int) pub {
-  unsafe {
-    if gbSkinPaletteReady() is 0 {
-      ret
-    }
-    if baseRow < 0 {
-      ret
-    }
-    let paletteFloats: Int = jointCount * 12
-    wgpuQueueWriteBuffer(
-      queue: webgpuQueue()
-      buffer: gbSkinPalette()
-      bufferOffset: (baseRow * 16) as UInt64
-      data: rows.data
-      size: (paletteFloats * 4) as UInt64
-    )
-  }
+# Upload one posed skeleton at an explicit vec4 row offset (from paletteReserve)
+# into the cache's palette buffer (#921). `rows` is jointCount * 12 Floats —
+# three vec4 rows per joint.
+func uploadPaletteAt(
+  cache: mod GbufferCache
+  resources: mod GpuResources
+  rows: view List(Float)
+  jointCount: copy Int
+  baseRow: copy Int
+) pub {
+  let wrote: Bool = skinStoreWritePalette(
+    store: cache.skins
+    resources: resources
+    rows: rows
+    jointCount: jointCount
+    baseRow: baseRow
+  )
 }
 
 # Upload one character's joint palette into the shared skin palette buffer at a
@@ -204,23 +194,22 @@ func uploadPaletteAt(rows: view List(Float), jointCount: copy Int, baseRow: copy
 # the draws buffer already uses. `rows` is jointCount * 12 Floats (three vec4 rows
 # per joint). Slot 0 is the base palette uploadPalette writes; slots 1..N-1 hold
 # the other characters so ONE instanced skinned draw can give each a distinct
-# pose (the instance's paletteBase = characterPaletteBase(slot, jointCount)). The
-# buffer is created lazily by the first uploadPalette, so call that (slot 0) once
-# before uploading higher slots.
-func uploadPaletteSlot(rows: view List(Float), jointCount: copy Int, slot: copy Int) pub {
-  unsafe {
-    if gbSkinPaletteReady() is 0 {
-      ret
-    }
-    let paletteFloats: Int = jointCount * 12
-    wgpuQueueWriteBuffer(
-      queue: webgpuQueue()
-      buffer: gbSkinPalette()
-      bufferOffset: (slot * paletteFloats * 4) as UInt64
-      data: rows.data
-      size: (paletteFloats * 4) as UInt64
-    )
-  }
+# pose (the instance's paletteBase = characterPaletteBase(slot, jointCount)).
+# The buffer is the cache's SkinStore palette, created by the first write.
+func uploadPaletteSlot(
+  cache: mod GbufferCache
+  resources: mod GpuResources
+  rows: view List(Float)
+  jointCount: copy Int
+  slot: copy Int
+) pub {
+  let wrote: Bool = skinStoreWritePalette(
+    store: cache.skins
+    resources: resources
+    rows: rows
+    jointCount: jointCount
+    baseRow: characterPaletteBase(slot: slot, jointCount: jointCount)
+  )
 }
 
 # Append one SKINNED instance that samples its OWN joint palette (#547): the same

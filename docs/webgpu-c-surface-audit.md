@@ -413,3 +413,31 @@ the frame math now. Still C, filed as follow-ups: the shadow maps
 (`rae_sm_*`) + the SDF prepare (slice 3b) and the owner-teardown replacement
 of `Gbuffer.shutdownAll()` + the legacy `lib/GpuTiming` fold + the lit / AO /
 TAA / pyramid targets and their post-pass adoptions (slice 3c).
+
+**#921 update (shared renderer slice 2b — the skinned meshes + joint palette):**
+`lib/SkinStore.rae` — a `MeshStore` over the 20-float skinned vertex layout
+(`meshStoreUploadStride`) plus ONE manager `BufferId` for the joint palette
+(256 joints x 12 floats x 64 palettes, created on the first write) — is owned
+by the renderer: `GbufferCache.skins` for the deferred frame and
+`Renderer3d.skins` for the forward path. Uploads are
+`RendererDeferred.uploadSkinnedMesh / uploadPalette(renderer:, …)` and
+`Renderer3d.uploadSkinnedMesh / uploadPalette(r:, …)`; the per-character
+slots are `GbufferInstanced.uploadPaletteAt / uploadPaletteSlot(cache:,
+resources:, …)` (`skinStoreWritePalette`, `writeBufferFromPtr` at a vec4 row),
+and `PaletteArena` sizes itself from the store's constant. The deferred skin
+bind (`GbufferSkinned.ensureSkinBind`, split out of Gbuffer for the line cap
+with `drawSkinned / drawSkinnedRecords / drawSkinnedInstance`) names the frame
+uniform, draws and palette by ID — the last adopted external on the
+GbufferCache is gone. The still-C readers BORROW the palette handle per call:
+`rae_sm_queue_skinned(mesh, vbuf, ibuf, icount, palette, model, paletteBase)`
+queues a skinned shadow caster by its handles like a static one (the C skin
+binds are rebuilt when the palette handle changes; `rae_sm_caster_*` read one
+unified queue) and `rae_g3d_push_skinned_draw(…, palette)` gives the forward
+skin pipeline's bind its palette the same way. Removed from C: the
+`g3d_skin_vbuf/ibuf/icount/mesh_n` tables, `g3d_skin_palette_sbuf` + the CPU
+palette copy, `rae_ext_Gpu3d_skinnedMeshCreate / setPalette` (allowlist −2,
+gate 11), `rae_gb_skin_{ready,vbuf,ibuf,icount,palette,palette_size,
+palette_ready}` and `rae_g3d_skin_{vbuf,ibuf,icount}`. Still C: the forward
+skin pipeline + its per-draw record buffer (`rae_g3d_skin_pipeline/bind`,
+`skinFrameBegin/skinDrawCount/skinShutdown`) and the shadow skin pipeline —
+#922's scope with the rest of the shadow maps.

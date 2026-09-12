@@ -256,32 +256,3 @@ func ensurePipelines(cache: mod GbufferCache, resources: mod GpuResources) {
     attributes: skinAttributes
   )
 }
-
-func ensureSkinBind(cache: mod GbufferCache, resources: mod GpuResources) {
-  if bindGroupIsUsable(resources: resources, id: cache.skinBind) {
-    ret
-  }
-  if gbSkinPaletteReady() is 0 {
-    ret
-  }
-  let entries: List(ResourceRef) = List.create(ResourceRef, cap: 3)
-  entries.add(value: bufferRef(id: cache.frameUniform))
-  entries.add(value: bufferRef(id: cache.draws))
-  unsafe {
-    entries.add(
-      value: adoptBufferRef(resources: resources, adopted: cache.adopted, handle: gbSkinPalette())
-    )
-  }
-  var made: Bool = false
-  if let bind: BindGroupId = createRenderBindGroup(
-    resources: resources
-    pipeline: cache.skinPipeline
-    entries: entries
-  ) {
-    cache.skinBind = bind
-    made = true
-  }
-  if not made {
-    releaseExternalIds(resources: resources, list: cache.adopted)
-  }
-}
