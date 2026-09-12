@@ -60,23 +60,9 @@
 #define GB_VIEW_MATERIAL 3
 #define GB_VIEW_DEPTH    4
 
-/* #906: the G-buffer targets are Rae manager textures owned by the
- * DeferredRenderer's GbufferCache (lib/GbufferResources.rae ensureTargets).
- * C BORROWS the four views (rae_gb_commit_targets) for the passes that are
- * still C — the depth pyramid's mip-0 read and the size the lit / AO / TAA /
- * pyramid targets are built to — and forgets them at renderer shutdown. */
-static WGPUTextureView gb_a_view = NULL;       /* rgb10a2unorm oct-normal + mode (borrowed) */
-static WGPUTextureView gb_b_view = NULL;       /* rgba8unorm   albedo + roughness (borrowed) */
-static WGPUTextureView gb_c_view = NULL;       /* rgba8unorm   motion + metallic + ao/emissive (borrowed) */
-static WGPUTextureView gb_depth_view = NULL;   /* depth32float, sampleable (borrowed) */
-static int             gb_target_w = 0, gb_target_h = 0;
-/* Bumped every time the G-buffer textures are recreated. Anything holding
- * a bind group that references those views (the inspector, the pyramid,
- * lighting) compares against this and rebuilds — a bind group outliving
- * its texture is a use-after-free the validation layer catches only
- * sometimes, and a stale one silently samples the pre-resize image. */
-static int             gb_targets_gen = 0;
-
+/* #906/#923: the G-buffer targets are Rae manager textures owned by the
+ * DeferredRenderer's GbufferCache (lib/GbufferResources.rae) and every reader
+ * binds them by ID; C keeps none of them. */
 /* #912: the static / skin / terrain pipelines and bind groups are manager IDs
  * on the Rae side (lib/Gbuffer.rae, lib/GbufferTerrain.rae); #906: so are the
  * frame uniform, the draws buffer, the draw cursor and the frame's command
@@ -84,27 +70,9 @@ static int             gb_targets_gen = 0;
  * sources, the frame-derived uniform MATH below and a "pass open" flag for
  * the metaball prep, which still runs here. */
 
-/* This frame's view-projection and clear colour, kept for the LIGHTING
- * pass. Lighting reconstructs world position from depth, which needs the
- * inverse of exactly the matrix the geometry pass rendered with — deriving
- * it from a camera the app might have moved since would put the lighting a
- * frame out of step with the depth it is reading. */
-static float gb_viewproj[16];
-/* The matrix the geometry was actually RASTERISED with, jitter included.
- * Reconstruction from depth must invert this one, not the clean matrix:
- * the depth at a pixel came from the jittered ray, and inverting the
- * unjittered projection would place every reconstructed world position
- * off by up to half a pixel — small, but it is the input to AO and to
- * lighting. */
-static float gb_viewproj_jittered[16];
-static int   gb_jitter_frame = 0;
-/* Last frame's view-projection, for motion vectors (#390). First frame
- * reuses this frame's, which yields zero motion — correct, and better
- * than an uninitialised matrix projecting every pixel to the origin. */
-static float gb_prev_viewproj[16];
-static bool  gb_have_prev_vp = false;
-static float gb_clear[3];
-
+/* #923: the frame-derived matrices (viewProj, the jittered one, the previous
+ * frame's, the clear colour) live on the Rae GbufferCache; nothing in C
+ * reconstructs positions any more. */
 /* #904: the inspector pipeline / uniform / bind are manager IDs on the Rae
  * side (lib/GbufferInspector.rae); C exposes only the inspector WGSL. */
 
@@ -561,13 +529,6 @@ GB_OCT_WGSL
 "  return vec4<f32>(pow(c, vec3<f32>(1.0 / 2.2)), 1.0);\n"
 "}\n";
 
-/* Forget the borrowed target views (the Rae owner retired them). Releases
- * nothing: C never owned them (#906). */
-static void gb_release_targets(void) {
-    gb_a_view = NULL; gb_b_view = NULL; gb_c_view = NULL; gb_depth_view = NULL;
-    gb_target_w = 0; gb_target_h = 0;
-}
-
 /* The G-buffer is sized to the offscreen target, and reallocated on
  * resize. These are the deferred frame's OWN textures: the graph declares
  * gAlbedo/gNormal/gMaterial/gDepth as transient resources of this frame,
@@ -668,79 +629,9 @@ static int rae_gb_scale_dim(int full) {
 /* #920: the presentable target is the canvas's, built to the surface size. */
 int64_t rae_gb_offscreen_w(void)  { return (int64_t)rae_gb_scale_dim(g_sdl_w); }
 int64_t rae_gb_offscreen_h(void)  { return (int64_t)rae_gb_scale_dim(g_sdl_h); }
-/* #906: Rae created the targets in its manager; C borrows the four views +
- * the size for its still-C passes, and bumps the generation the post-passes
- * (and the C deferred targets) re-fit on. */
-void rae_gb_commit_targets(int64_t w, int64_t h, void* a, void* b, void* c, void* depth) {
-    gb_a_view = (WGPUTextureView)a; gb_b_view = (WGPUTextureView)b;
-    gb_c_view = (WGPUTextureView)c; gb_depth_view = (WGPUTextureView)depth;
-    gb_target_w = (int)w; gb_target_h = (int)h; gb_targets_gen++;
-}
-void rae_gb_forget_targets(void) { gb_release_targets(); }
-/* Bumped whenever the targets are recreated (resize). The inspector rebuilds
- * its bind group when this changes, since it samples the G-buffer views. */
-int64_t rae_gb_targets_gen(void) { return (int64_t)gb_targets_gen; }
+/* #923: the frame uniform data (jitter, previous view-projection) is Rae math
+ * on the GbufferCache; rae_gb_frame_data is gone. */
 
-/* The frame-derived uniform DATA (#906, the rae_g2d_xform(out) pattern): the
- * TAA-jittered frame uniform's 36 floats written to `out` for Rae to upload
- * into its manager buffer, plus the stateful CPU math that the still-C passes
- * read (the jittered / previous view-projection, the clear colour) and the
- * per-frame metaball slot reset. Returns 1 when written. */
-int64_t rae_gb_frame_data(rae_Mat4* viewProj, float clearR, float clearG, float clearB,
-                          int64_t w, int64_t h, void* out) {
-    if (!viewProj || !out) return 0;
-    memcpy(gb_viewproj, viewProj->m.v, 16 * sizeof(float));
-    gb_clear[0] = clearR; gb_clear[1] = clearG; gb_clear[2] = clearB;
-    /* First frame has no previous view-projection; reusing this one gives
-     * zero motion, which is right — an uninitialised matrix would project
-     * every pixel to the origin and read as the whole screen streaking. */
-    if (!gb_have_prev_vp) {
-        memcpy(gb_prev_viewproj, viewProj->m.v, 16 * sizeof(float));
-        gb_have_prev_vp = true;
-    }
-    /* Halton(2,3), the same low-discrepancy sequence the forward path
-     * uses. Index 0 is skipped so no frame lands on a zero offset, which
-     * would be a frame that contributes nothing new. */
-    /* Jitter only feeds TAA. With TAA off (#20) it would just shimmer the
-     * un-resolved image, so suppress it — matching the forward path, which also
-     * zeroes jitter when its TAA is disabled. */
-    float jx = 0.0f, jy = 0.0f;
-    if (w > 0 && h > 0 && rae_gb_taa_is_enabled()) {
-        const int hi = (gb_jitter_frame % 16) + 1;
-        jx = (g3d_halton(hi, 2) - 0.5f) * 2.0f / (float)w;
-        jy = (g3d_halton(hi, 3) - 0.5f) * 2.0f / (float)h;
-    }
-    gb_jitter_frame++;
-
-    /* The rasterised matrix = jitter * viewProj. A clip-space xy offset
-     * proportional to w is exactly adding jx*(row 3) to row 0 and
-     * jy*(row 3) to row 1; column-major, row r of column c is m[c*4+r]. */
-    memcpy(gb_viewproj_jittered, viewProj->m.v, 16 * sizeof(float));
-    for (int c = 0; c < 4; c++) {
-        gb_viewproj_jittered[c * 4 + 0] += jx * gb_viewproj_jittered[c * 4 + 3];
-        gb_viewproj_jittered[c * 4 + 1] += jy * gb_viewproj_jittered[c * 4 + 3];
-    }
-
-    float* fu = (float*)out;
-    memset(fu, 0, GB_FRAME_BYTES);
-    memcpy(fu, viewProj->m.v, 16 * sizeof(float));
-    memcpy(fu + 16, gb_prev_viewproj, 16 * sizeof(float));
-    fu[32] = jx; fu[33] = jy;
-    /* Remember for NEXT frame, after this frame's copy is handed over. */
-    memcpy(gb_prev_viewproj, viewProj->m.v, 16 * sizeof(float));
-    return 1;
-}
-
-/* G-buffer target views for the Rae-built render pass (#503). Valid after a
- * frame prep returned 1. The clear values / attachment layout live in Rae now;
- * these just hand over the opaque view handles. */
-void* rae_gb_view_a(void)     { return (void*)gb_a_view; }
-void* rae_gb_view_b(void)     { return (void*)gb_b_view; }
-void* rae_gb_view_c(void)     { return (void*)gb_c_view; }
-void* rae_gb_view_depth(void) { return (void*)gb_depth_view; }
-/* The biased zero the motion channel clears to (128/255); Rae uses it for the
- * C-target clear so a static background reads as "not moving". */
-float rae_gb_motion_zero(void) { return GB_MOTION_ZERO; }
 /* #906/#922: the frame's encoder + pass are the Rae GbufferCache's; nothing
  * in C needs to know whether a geometry pass is open any more. */
 
@@ -926,8 +817,11 @@ void rae_ext_Gbuffer_present(void* texture, int64_t width, int64_t height) {
 /* #906: C owns nothing of the geometry frame any more; this forgets the
  * borrowed target views and resets the frame-derived math so a renderer
  * created afterwards starts from a clean first frame. */
+/* #923: C owns nothing of the deferred frame; this releases the asset-upload
+ * arrays (terrain materials, sprites) the still-C upload ABI created. */
 void rae_ext_Gbuffer_shutdown(void) {
-    gb_release_targets();
-    gb_have_prev_vp = false;
-    gb_jitter_frame = 0;
+    if (gb_terrain_tex_view) { wgpuTextureViewRelease(gb_terrain_tex_view); gb_terrain_tex_view = NULL; }
+    if (gb_terrain_array_tex) { wgpuTextureRelease(gb_terrain_array_tex); gb_terrain_array_tex = NULL; }
+    if (gb_sprite_array_view) { wgpuTextureViewRelease(gb_sprite_array_view); gb_sprite_array_view = NULL; }
+    if (gb_sprite_array_tex) { wgpuTextureRelease(gb_sprite_array_tex); gb_sprite_array_tex = NULL; }
 }

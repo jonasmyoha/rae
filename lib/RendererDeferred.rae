@@ -44,6 +44,7 @@ open GbufferPasses
 open GbufferFullscreen
 open TransparentForward
 open GbufferUnderwater
+open GbufferTargets
 open RendererDeferredGraph
 open Sky
 open gpu/GpuResources
@@ -136,6 +137,7 @@ type RenderPasses {
   gbuffer: GbufferCache
   transparent: TransparentPassCache
   underwater: UnderwaterPassCache
+  targets: DeferredTargets  # #923: the post-pass targets, uniforms, pipelines + frame state
 }
 
 func createRenderPasses() ret RenderPasses {
@@ -150,6 +152,7 @@ func createRenderPasses() ret RenderPasses {
       gbuffer: createGbufferCache()
       transparent: createTransparentPassCache(capacity: 256)
       underwater: createUnderwaterPassCache()
+      targets: createDeferredTargets()
     }
   }
 }
@@ -293,6 +296,7 @@ func shutdownDeferredRenderer(renderer: mod DeferredRenderer) pub {
     inspectorShutdown(cache: renderer.passes.inspect, resources: resources)
     transparentShutdown(cache: renderer.passes.transparent, resources: resources)
     underwaterShutdown(cache: renderer.passes.underwater, resources: resources)
+    deferredTargetsShutdown(targets: renderer.passes.targets, resources: resources)
     gbufferShutdown(cache: renderer.passes.gbuffer, resources: resources)
     terrainShutdown(cache: renderer.passes.gbuffer, resources: resources)
     meshStoreShutdown(store: renderer.passes.gbuffer.meshes, resources: resources)
@@ -330,12 +334,13 @@ func setDebugView(renderer: mod DeferredRenderer, mode: view Int) pub {
 # suppressed. TAA is opt-in (the shared settings pane has a toggle) because the
 # current resolve blurs/ghosts on detailed top-down terrain and crowd motion;
 # its quality fixes are POSTPONED queue tasks.
-func setTaaEnabled(on: copy Bool) pub {
-  if on {
-    gbSetTaaEnabled(on: 1)
-  } else {
-    gbSetTaaEnabled(on: 0)
-  }
+func setTaaEnabled(renderer: mod DeferredRenderer, on: copy Bool) pub {
+  renderer.passes.targets.taaEnabled = on
+  renderer.passes.gbuffer.taaEnabled = on  # the geometry jitter follows the switch
+}
+
+func taaIsEnabled(renderer: view DeferredRenderer) pub ret Bool {
+  ret renderer.passes.targets.taaEnabled
 }
 
 # Distance fog (#57, per-app). Fades geometry to `color` (LINEAR HDR — the same
@@ -343,26 +348,20 @@ func setTaaEnabled(on: copy Bool) pub {
 # units from the camera, and paints that colour as the background so a far
 # ground/sea plane dissolves into the horizon with no far-clip seam. Off by
 # default; every deferred example that never calls this keeps its sky.
-func setFog(color: copy Vec3, start: copy Float, end: copy Float) pub {
-  gbSetFog(
-    on: 1
-    renderer: color.x
-    renderGraph: color.y
-    b: color.z
-    start: start
-    end: end
-  )
+func setFog(
+  renderer: mod DeferredRenderer
+  color: copy Vec3
+  start: copy Float
+  end: copy Float
+) pub {
+  renderer.passes.targets.fogOn = true
+  renderer.passes.targets.fogColor = color
+  renderer.passes.targets.fogStart = start
+  renderer.passes.targets.fogEnd = end
 }
 
-func setFogDisabled() pub {
-  gbSetFog(
-    on: 0
-    renderer: 0.0
-    renderGraph: 0.0
-    b: 0.0
-    start: 0.0
-    end: 0.0
-  )
+func setFogDisabled(renderer: mod DeferredRenderer) pub {
+  renderer.passes.targets.fogOn = false
 }
 
 func compileDeferred(renderer: mod DeferredRenderer) pub ret Int {
@@ -471,10 +470,21 @@ func renderDeferredPassWith(
     endPass(cache: renderer.passes.gbuffer, resources: resources)
   }
   if tag is RenderTag.depthPyramid {
-    buildDepthPyramid(cache: renderer.passes.pyr, resources: resources)
+    buildDepthPyramid(
+      cache: renderer.passes.pyr
+      resources: resources
+      targets: renderer.passes.targets
+      gbuffer: renderer.passes.gbuffer
+    )
   }
   if tag is RenderTag.ssao {
-    ssaoPass(cache: renderer.passes.ao, resources: resources, camera: camera)
+    ssaoPass(
+      cache: renderer.passes.ao
+      resources: resources
+      targets: renderer.passes.targets
+      gbuffer: renderer.passes.gbuffer
+      camera: camera
+    )
   }
   if tag is RenderTag.lighting {
     var sky: Sky = createSkyNone(light: light, clearColor: light.clearColor)
@@ -484,19 +494,27 @@ func renderDeferredPassWith(
     lightingPassSky(
       cache: renderer.passes.light
       resources: resources
+      targets: renderer.passes.targets
+      gbuffer: renderer.passes.gbuffer
       camera: camera
       light: light
       sky: sky
     )
   }
   if tag is RenderTag.taa {
-    taaPass(cache: renderer.passes.taa, resources: resources)
+    taaPass(
+      cache: renderer.passes.taa
+      resources: resources
+      targets: renderer.passes.targets
+      gbuffer: renderer.passes.gbuffer
+    )
   }
   if tag is RenderTag.transparentForward {
     transparentPass(
       cache: renderer.passes.transparent
       resources: resources
       gbuffer: renderer.passes.gbuffer
+      targets: renderer.passes.targets
     )
   }
   if tag is RenderTag.underwater {
@@ -504,6 +522,7 @@ func renderDeferredPassWith(
       cache: renderer.passes.underwater
       resources: resources
       gbuffer: renderer.passes.gbuffer
+      targets: renderer.passes.targets
       camera: camera
       aspect: aspect
       params: renderer.underwater
@@ -516,6 +535,8 @@ func renderDeferredPassWith(
       compositePassGraded(
         cache: renderer.passes.composite
         resources: resources
+        targets: renderer.passes.targets
+        gbuffer: renderer.passes.gbuffer
         canvas: renderer.canvas
         exposure: light.exposure
         grade: renderer.grade
@@ -524,6 +545,7 @@ func renderDeferredPassWith(
       inspect(
         cache: renderer.passes.inspect
         resources: resources
+        gbuffer: renderer.passes.gbuffer
         canvas: renderer.canvas
         mode: renderer.debugView
         zNear: camera.nearZ
@@ -563,7 +585,7 @@ func deferredDrawCount(renderer: view DeferredRenderer) pub ret Int {
 
 # Mip levels in the depth pyramid built by the last frame.
 func deferredPyramidMips(renderer: view DeferredRenderer) pub ret Int {
-  ret depthPyramidMips()
+  ret renderer.passes.targets.pyramidMips
 }
 
 # The underwater pass's parameters for this frame (#855): set by the water
@@ -574,6 +596,19 @@ func setUnderwater(renderer: mod DeferredRenderer, params: view UnderwaterParams
 
 func rendererIsUnderwater(renderer: view DeferredRenderer) pub ret Bool {
   ret renderer.underwater.active
+}
+
+# The opaque snapshot BEFORE a refracting surface draws (#832): apps call this
+# at the transparentForward tag before their water, then the renderer's pass.
+func snapshotOpaque(renderer: mod DeferredRenderer) pub {
+  ensureRendererResources(renderer: renderer)
+  if let resources: view GpuResources => renderer.gpuResources {
+    transparentSnapshot(
+      cache: renderer.passes.transparent
+      resources: resources
+      targets: renderer.passes.targets
+    )
+  }
 }
 
 # Bind an environment. The frame's background and its ambient both come

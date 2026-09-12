@@ -135,6 +135,7 @@ void* rae_wgpu_null_ptr(void)       { return (void*)0; }
 /* #528: did the device get the timestamp-query features? Rae skips GPU timing
  * when 0 (e.g. an adapter that doesn't offer them). */
 int rae_wgpu_have_timestamp(void)   { return g_wgpu_have_timestamp; }
+int rae_wgpu_have_rg11b10(void)     { return g_wgpu_have_rg11b10; }   /* #923: the Rae lit target picks its format */
 
 /* Live wgpu-native object counts per type. numAllocated is what the backend
  * currently holds; a per-frame climb pinpoints a leaked resource type that Rae's
