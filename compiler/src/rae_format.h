@@ -45,4 +45,28 @@ void rae_format_result_free(RaeFormatResult* result);
  * --check mode, an over-cap refusal, a parse failure, or a write error). */
 int rae_format_cli(int argc, char** argv);
 
+/* ---- the build preflight (#919) ----
+ * `rae run` / `rae build` / `rae watch` canonicalise every `.rae` in the
+ * program's transitive source closure BEFORE lexing it: the module loader
+ * hands each file's bytes to rae_preflight_source, which rewrites a changed
+ * file in place (atomic) and returns the canonical bytes for the build to
+ * read. Mode: RAE_FORMAT=check (or --check-format) refuses to write and
+ * records the file; RAE_FORMAT=off skips the preflight (the CRLF / missing-
+ * newline fixtures need their bytes untouched). An over-cap canonical form
+ * fails the build with the split message; a file that does not parse is left
+ * to the build's own diagnostics. */
+typedef enum { RAE_PREFLIGHT_WRITE, RAE_PREFLIGHT_CHECK, RAE_PREFLIGHT_OFF } RaePreflightMode;
+void rae_preflight_set_mode(RaePreflightMode mode);
+RaePreflightMode rae_preflight_mode(void);
+/* Returns false only when the build must stop (over-cap). `*source` / `*len`
+ * are replaced by the canonical bytes (malloc'd) when the file was formatted. */
+bool rae_preflight_source(const char* path, char** source, size_t* len);
+/* After the closure is loaded: in check mode print the non-canonical files +
+ * the repair command; returns their count (non-zero = the build fails). */
+int rae_preflight_report(void);
+/* Files the preflight rewrote in this process (write mode), for `rae watch`
+ * to ignore the mtime events of its own writes. */
+int rae_preflight_rewritten_count(void);
+const char* rae_preflight_rewritten_path(int index);
+
 #endif /* RAE_FORMAT_H */
