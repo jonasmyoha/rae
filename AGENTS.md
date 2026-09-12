@@ -437,17 +437,23 @@ style configuration. The policy (full design: `docs/rae-format-design.md`):
   sorted, follows no symlinks, and skips `.git` / `build` / `.rae` dirs. The
   in-memory `rae_format_source` (src/rae_format.{c,h}) is the ONE formatter the
   CLI, tests and the #919 build preflight all call.
-- The tree IS canonical since #918: every active `.rae` under `lib/`,
-  `examples/` (legacy excluded) and `compiler/tests/cases` is formatted, and
-  the 21 modules whose canonical form exceeded the cap were split into domain
-  siblings. The only deliberately non-canonical inputs are the format fixtures
-  (200–208, 568, 786, 810–813, 829, 830), the expected-parse-error fixtures,
-  the lexer fixtures whose token columns are the test (006, 015, 019) and the
-  CRLF / missing-final-newline fixtures (345, 346, 348); the generated
-  `lib/webgpu` bindings are a file-wide `# raefmt: off` region (bindgen emits
-  it). Until #919 lands the build does not format/check automatically, so run
-  `rae format <file>` on what you edit (it writes in place) — or keep to the
-  policy by hand; do not leave a file non-canonical.
+- The tree IS canonical since #918 and STAYS so by construction since #919:
+  the build's format preflight (`rae run` / `build` / `watch`) canonicalises
+  every `.rae` in the program's source closure before lexing it, `rae watch`
+  ignores the mtime events of its own writes, and the test suite, the tree
+  check (`compiler/tools/format-check-tree.sh`, run first on every full suite
+  run) and the example gate all run in CHECK mode (`RAE_FORMAT=check`) — an
+  unformatted file fails them instead of being rewritten under the runner.
+  The only deliberately non-canonical inputs are the format fixtures (200–208,
+  568, 786, 810–813, 829, 830), the expected-parse-error fixtures, the lexer
+  fixtures whose token columns are the test (006, 015, 019) and the CRLF /
+  missing-final-newline fixtures (345, 346, 348 — the runner sets
+  `RAE_FORMAT=off` for them); the generated `lib/webgpu` bindings are a
+  file-wide `# raefmt: off` region (bindgen emits it). `rae init` writes this
+  section into new projects; the VS Code extension (`tools/editor/vscode`)
+  formats on save through `rae format --stdin --stdout`. The preflight costs
+  ~0.5 s on the largest example (106_mobile_ui: 8.0 s → 8.6 s emit; ~130
+  modules re-rendered and compared in memory) — no content cache is needed.
 
 ---
 

@@ -1,8 +1,10 @@
 # Rae Format: Canonical Source Formatting
 
-**Status:** Adopted design (#911, 2026-09-12); implementation tracked as queue
-tasks #916–#919. The sections below this decision record are the original
-proposal (2026-08-30) and remain the detailed rationale.
+**Status:** Adopted design (#911, 2026-09-12) and IMPLEMENTED (#916–#919,
+2026-09-12): the formatter is correct, the CLI is the project formatter, the
+tree is canonical, and the build enforces it. The sections below this decision
+record are the original proposal (2026-08-30) and remain the detailed
+rationale.
 **Date:** 2026-08-30, decisions 2026-09-12
 
 ## Decisions (#911)
@@ -194,6 +196,38 @@ excluded by #919's check mode: the format fixtures' inputs (200–208, 568, 786,
 whose token columns are the test (006, 015, 019 — the formatter also moves an
 inline `#[ ]#` block comment to the statement end, which 019 exists to lex)
 and the CRLF / missing-final-newline fixtures (345, 346, 348).
+
+### #919 result (default enforcement — closes #911)
+
+The build formats FIRST. The module loader hands every `.rae` in the program's
+transitive closure to `rae_preflight_source` before lexing it: a changed file
+is rewritten in place (atomic temp+rename, mode preserved) and the build lexes
+the canonical bytes; `--check-format` (on `rae run` / `rae build`) or
+`RAE_FORMAT=check` refuse to write and, once the closure is loaded, fail with
+the file list and `run: rae format .`; `RAE_FORMAT=off` skips the preflight
+(only the CRLF / missing-newline fixtures need it); an over-cap canonical form
+fails the build with the split message; a file that does not parse is left to
+the build's own diagnostics (the preflight's parse is silent). `rae watch`
+builds through the emit subprocess, which records the rewritten files in a
+`<c>.formatted` sidecar; the supervisor re-stamps those files' (and their
+directories') mtimes after each rebuild, so its own writes never trigger a
+second build (verified: one edit, one rebuild). Measured on the largest
+example (106_mobile_ui, ~130 modules): emit 8.0 s → 8.6 s with the preflight —
+an in-memory render + compare per module; no content cache is warranted.
+
+Enforcement: the test runner exports `RAE_FORMAT=check` per case (`off` for
+345/346/348), `tools/format-check-tree.sh` runs `rae format --check` over the
+whole active tree before every full suite run (excluding the format fixtures'
+inputs, the lexer fixtures 006/015/019, the CRLF fixtures and — since they do
+not parse — the expected-parse-error fixtures), and `run_examples.sh` runs the
+gate in check mode. `tools/test-format-cli.sh` proves the integration: a dirty
+project is rejected by `rae build --check-format`, formatted by a plain build,
+and passes the check afterwards; an over-cap source fails the build untouched.
+Discoverability: `rae init` writes an AGENTS.md carrying the formatting
+section, `docs/rae_syntax.json` has a versioned `format` section, README and
+docs/SYNTAX_RULES.md carry the canonical examples, and the VS Code extension
+registers a document formatter over `rae format --stdin --stdout` with
+format-on-save for Rae files.
 
 ### Task map
 

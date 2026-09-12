@@ -83,5 +83,34 @@ cp "$WORK/Clean.rae" "$WORK/CleanCopy.rae"; messy recopy > "$WORK/CleanCopy.rae"
 "$BIN" format --check "$WORK/CleanCopy.rae" >/dev/null 2>&1
 [ $? -eq 0 ] && ok parse_failure_continues || bad parse_failure_continues "sibling not formatted"
 
+# 9. (#919) the build preflight: a dirty project is REJECTED by
+#    `rae build --check-format` (list + repair command, file untouched), a plain
+#    `rae build` formats it in place first and then builds, and the check passes
+#    afterwards. RAE_FORMAT is forced off the environment so the suite's own
+#    check mode does not pre-empt the flag under test.
+mkdir -p "$WORK/proj"
+printf 'func add(a: copy Int,b: copy Int)ret Int{\nret a+b\n}\n\nfunc main() {\n  log("{add(a: 1, b: 2)}")\n}\n' > "$WORK/proj/Main.rae"
+cp "$WORK/proj/Main.rae" "$WORK/proj/Main.bak"
+OUT=$(env -u RAE_FORMAT "$BIN" build --target compiled --emit-c --out "$WORK/proj.c" --check-format "$WORK/proj/Main.rae" 2>&1); RC=$?
+if [ $RC -ne 0 ] && echo "$OUT" | grep -q "not canonically formatted" && echo "$OUT" | grep -q "run: rae format" && cmp -s "$WORK/proj/Main.rae" "$WORK/proj/Main.bak"; then
+  ok preflight_check_rejects
+else
+  bad preflight_check_rejects "rc=$RC out=[$OUT]"
+fi
+OUT=$(RAE_FORMAT=check "$BIN" build --target compiled --emit-c --out "$WORK/proj.c" "$WORK/proj/Main.rae" 2>&1); RC=$?
+[ $RC -ne 0 ] && echo "$OUT" | grep -q "not canonically formatted" && ok preflight_env_check_rejects || bad preflight_env_check_rejects "rc=$RC"
+env -u RAE_FORMAT "$BIN" build --target compiled --emit-c --out "$WORK/proj.c" "$WORK/proj/Main.rae" >/dev/null 2>&1; RC=$?
+if [ $RC -eq 0 ] && ! cmp -s "$WORK/proj/Main.rae" "$WORK/proj/Main.bak" && grep -q "^func add(a: copy Int, b: copy Int) ret Int {" "$WORK/proj/Main.rae" && grep -qx "$(cd "$WORK/proj" && pwd -P)/Main.rae" "$WORK/proj.c.formatted"; then
+  ok preflight_formats_then_builds
+else
+  bad preflight_formats_then_builds "rc=$RC"
+fi
+env -u RAE_FORMAT "$BIN" build --target compiled --emit-c --out "$WORK/proj.c" --check-format "$WORK/proj/Main.rae" >/dev/null 2>&1
+[ $? -eq 0 ] && ok preflight_check_passes_after_format || bad preflight_check_passes_after_format "expected exit 0"
+# over-cap source fails the build with the split message (never rewritten)
+cp "$WORK/Over.rae" "$WORK/proj/Over.rae"; cp "$WORK/Over.rae" "$WORK/Over.bak2"
+OUT=$(env -u RAE_FORMAT "$BIN" build --target compiled --emit-c --out "$WORK/proj.c" "$WORK/proj/Main.rae" 2>&1); RC=$?
+if [ $RC -ne 0 ] && echo "$OUT" | grep -q "split the module" && cmp -s "$WORK/proj/Over.rae" "$WORK/Over.bak2"; then ok preflight_over_cap_fails_build; else bad preflight_over_cap_fails_build "rc=$RC"; fi
+
 echo "format-cli: $PASS passed, $FAIL failed"
 [ $FAIL -eq 0 ]

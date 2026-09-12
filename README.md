@@ -397,7 +397,38 @@ from there.
 `rae run` builds and runs; `rae build --target wasm --out app.html …` produces a
 browser bundle; `rae watch` rebuilds and restarts on save, and an app using
 `lib/hot_reload` keeps its state across the restart. `rae init` scaffolds a
-project. `rae format` pretty-prints.
+project.
+
+### One layout: the compiler formats first
+
+Rae has one canonical source layout and the compiler is its authority — there
+is no style configuration. `rae run`, `rae build` and `rae watch` rewrite the
+program's `.rae` files canonically (atomic, in place) before compiling them;
+`--check-format` or `RAE_FORMAT=check` refuse to write and fail with the file
+list instead, which is what CI and the test suite use. `rae format <files|dirs>`
+does the same on demand (`--check`, `--stdout`, `--stdin`, `--json`,
+`--rules --json`). The rules in one screen: 2-space indent, 100 columns, LF, one
+final newline; parameters and arguments share a line up to three items when the
+whole call fits, and go one per line (no commas, `)` at the declaration's
+indent) from four or when they do not; object/collection literals and enum
+members the same from five; a `type` body is always one field per line; a file
+is capped at 1,000 lines and is refused, never auto-split.
+
+```rae
+func clamp(value: copy Float, low: copy Float, high: copy Float) ret Float {
+  ret Math.max(a: low, b: Math.min(a: value, b: high))
+}
+
+func createRenderer(
+  device: view Device
+  window: mod Window
+  settings: view RendererSettings
+  diagnostics: mod Diagnostics
+) ret Renderer {
+  let material: Material3d = { baseColor: color, metallic: 0.1, roughness: 0.65 }
+  ret Renderer { device: device, material: material }
+}
+```
 
 Run the test suite with `make -C compiler test` — 318 cases.
 

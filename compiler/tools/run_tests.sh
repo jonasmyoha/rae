@@ -57,6 +57,15 @@ if [ "$TARGET_FILTER" = "live" ] || [ "$TARGET_FILTER" = "hybrid" ]; then
 fi
 TARGETS=("compiled")
 
+# #919: on a full run, `rae format --check` over the whole active tree comes
+# BEFORE the compiler suite — an unformatted lib/example/fixture file fails
+# the run outright (tools/format-check-tree.sh lists the exclusions).
+TREE_CHECK_FAILED=0
+if [ -z "$TEST_NAME_FILTER" ] && [ -f "tools/format-check-tree.sh" ]; then
+  if ! bash tools/format-check-tree.sh; then TREE_CHECK_FAILED=1; fi
+  echo
+fi
+
 for TARGET in "${TARGETS[@]}"; do
   echo "Testing target: $TARGET"
   echo "------------------------"
@@ -74,6 +83,14 @@ for TARGET in "${TARGETS[@]}"; do
     # Test name is the directory name
     TEST_NAME=$(basename "$TEST_DIRNAME")
     TEST_NUMBER="${TEST_NAME%%_*}"
+    # #919: the build's format preflight runs in CHECK mode under the suite —
+    # a fixture whose source is not canonical fails instead of being rewritten
+    # under the runner's feet. The CRLF / missing-final-newline fixtures test
+    # the strict lexer on their exact bytes, so the preflight is OFF for them.
+    case "$TEST_NAME" in
+      345_*|346_*|348_*) export RAE_FORMAT=off ;;
+      *) export RAE_FORMAT=check ;;
+    esac
 
     # Apply name filter if provided
     if [ -n "$TEST_NAME_FILTER" ]; then
@@ -437,6 +454,7 @@ if [ -z "$TEST_NAME_FILTER" ] && [ -f "tools/test-format-cli.sh" ]; then
   if ! bash tools/test-format-cli.sh; then FAILED=$((FAILED+1)); fi
 fi
 
+if [ "$TREE_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ $FAILED -gt 0 ]; then
   exit 1
 fi
