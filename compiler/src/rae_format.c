@@ -602,3 +602,90 @@ int rae_format_cli(int argc, char** argv) {
   (void)formatted;
   return 0;
 }
+
+/* ------------------------------------------------------------------ */
+/* Build preflight (#919)                                              */
+/* ------------------------------------------------------------------ */
+
+static RaePreflightMode g_preflight_mode = RAE_PREFLIGHT_WRITE;
+static bool g_preflight_mode_set = false;
+static PathList g_preflight_unformatted = {0};
+static PathList g_preflight_rewritten = {0};
+static int g_preflight_over_cap = 0;
+
+void rae_preflight_set_mode(RaePreflightMode mode) {
+  g_preflight_mode = mode;
+  g_preflight_mode_set = true;
+}
+
+RaePreflightMode rae_preflight_mode(void) {
+  if (!g_preflight_mode_set) {
+    const char* env = getenv("RAE_FORMAT");
+    if (env && strcmp(env, "check") == 0) g_preflight_mode = RAE_PREFLIGHT_CHECK;
+    else if (env && (strcmp(env, "off") == 0 || strcmp(env, "0") == 0)) g_preflight_mode = RAE_PREFLIGHT_OFF;
+    else g_preflight_mode = RAE_PREFLIGHT_WRITE;
+    g_preflight_mode_set = true;
+  }
+  return g_preflight_mode;
+}
+
+bool rae_preflight_source(const char* path, char** source, size_t* len) {
+  if (rae_preflight_mode() == RAE_PREFLIGHT_OFF) return true;
+  if (!has_extension(path, ".rae")) return true;
+  /* A file-wide `# raefmt: off` copies verbatim — still formatted, just equal. */
+  RaeFormatResult result;
+  diag_set_quiet(true);
+  bool ok = rae_format_source(path, *source, *len, /*check_ast=*/true, &result);
+  diag_set_quiet(false);
+  if (!ok) {
+    if (result.over_cap) {
+      fprintf(stderr, "error: %s\n", result.message);
+      g_preflight_over_cap++;
+      rae_format_result_free(&result);
+      return false;
+    }
+    /* Parse error (the build reports it itself) or an internal formatter
+     * failure (the build proceeds on the bytes as written). */
+    rae_format_result_free(&result);
+    return true;
+  }
+  if (!result.changed) {
+    rae_format_result_free(&result);
+    return true;
+  }
+  if (rae_preflight_mode() == RAE_PREFLIGHT_CHECK) {
+    path_list_add(&g_preflight_unformatted, path);
+    rae_format_result_free(&result);
+    return true;
+  }
+  if (!write_file_atomic(path, result.output, result.output_len)) {
+    fprintf(stderr, "warning: could not rewrite '%s' canonically; building the file as written\n", path);
+    rae_format_result_free(&result);
+    return true;
+  }
+  path_list_add(&g_preflight_rewritten, path);
+  free(*source);
+  *source = result.output;   /* the build lexes the canonical bytes */
+  *len = result.output_len;
+  result.output = NULL;
+  return true;
+}
+
+int rae_preflight_report(void) {
+  if (g_preflight_unformatted.count == 0) return 0;
+  fprintf(stderr, "error: %d Rae file%s not canonically formatted\n",
+          g_preflight_unformatted.count, g_preflight_unformatted.count == 1 ? " is" : "s are");
+  for (int i = 0; i < g_preflight_unformatted.count; i++) {
+    fprintf(stderr, "  %s\n", g_preflight_unformatted.paths[i]);
+  }
+  fprintf(stderr, "run: rae format .\n");
+  return g_preflight_unformatted.count;
+}
+
+int rae_preflight_rewritten_count(void) {
+  return g_preflight_rewritten.count;
+}
+
+const char* rae_preflight_rewritten_path(int index) {
+  return (index >= 0 && index < g_preflight_rewritten.count) ? g_preflight_rewritten.paths[index] : NULL;
+}
