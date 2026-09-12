@@ -35,6 +35,7 @@ open Sky
 open TransparentForward
 open water/Water
 open water/WaterPerf
+open gpu/GpuTiming
 open water/WaterSchedule
 open water/WaterGpuIds
 open water/WaterGpuBridge
@@ -50,7 +51,14 @@ open webgpu/Webgpu
 open webgpu/WebgpuEnums
 open webgpu/Context
 
-const waterUniformFloats: Int = 72  # eighteen vec4 (see waterSurface.wgsl `Water`)
+const waterUniformFloats: Int = 76  # nineteen vec4 (see waterSurface.wgsl `Water`)
+
+# SSR march tuning (#854): a hit counts when the ray is behind the scene by
+# less than this many metres (grown with distance in the shader), and rays
+# stop after this many metres (the fade starts at 70% of it).
+const waterSsrThickness: Float = 0.6
+
+const waterSsrMaxDistance: Float = 80.0
 
 # The FFT cascade maps (#831; WaterFft.rae fills them): cascade c, map m (0
 # displacement+Jacobian, 1 normal, 2 foam). The surface binds them here.
@@ -96,6 +104,7 @@ type WaterSystem {
   evolveUniform: List(Float)
   stageUniform: List(Int32)
   performance: WaterPerf
+  surfacePerf: WaterPerf  # #854: capture-only timing of the primary body's surface draw
   fftAllocatedSize: Int
   fftAllocatedCount: Int
   fftSeaState: WaterBody
@@ -166,6 +175,7 @@ func createWaterSystem(renderer: mod DeferredRenderer, body: view WaterBody) ret
       evolveUniform: List.create(Float, cap: 8)
       stageUniform: List.create(Int32, cap: 4)
       performance: createWaterPerf()
+      surfacePerf: createWaterPerfLabeled(label: "surface")
       fftAllocatedSize: 0
       fftAllocatedCount: 0
       fftSeaState: body
@@ -567,6 +577,20 @@ func uploadWaterUniform(
       z: fftBody.cascadeCount.toFloat()
       w: gridCell
     )
+    # Screen-space reflections (#854): on/off, steps, hit thickness (m) and
+    # the longest ray traced (m) — the desktop switch is the body's `ssr`.
+    var ssrOn: Float = 0.0
+    if body.ssr > 0 {
+      ssrOn = 1.0
+    }
+    put4(
+      uniform: waterSystem.uniform
+      base: 72
+      x: ssrOn
+      y: body.ssrSteps.toFloat()
+      z: waterSsrThickness
+      w: waterSsrMaxDistance
+    )
     uploadFloats(
       resources: resources
       buffer: waterSystem.surface.uniform
@@ -653,18 +677,48 @@ func drawWaterBody(
     depthView: externalRef(id: waterSystem.surface.frame.depthView)
     depthReadOnly: true
   )
+  # #854: the surface draw is timed like the FFT step (RAE_WATER_PERF) —
+  # one sample in flight, resolved on this recording, read back later — so
+  # the reflection cost (SSR on vs off) is measured apart from the compute.
+  let timed: Bool = beginWaterPerf(performance: waterSystem.surfacePerf, resources: resources)
   if let recording: Recording = beginRecording(resources: resources) {
-    if recordDrawIndexed(
-      recording: recording
-      resources: resources
-      target: target
-      pipeline: waterSystem.surface.pipeline
-      bindGroup: waterSystem.surface.bindGroup
-      vertexBuffer: externalRef(id: meshGpu.vertex)
-      indexBuffer: externalRef(id: meshGpu.index)
-      indexCount: meshGpu.indexCount
-    ) {
-      waterSubmit(waterSystem: waterSystem, resources: resources, recording: recording)
+    var recorded: Bool = false
+    unsafe {
+      var timestampWrites: Ptr = webgpuNull()
+      if timed {
+        if let timing: view GpuTiming => waterSystem.surfacePerf.timing {
+          timestampWrites = timingWrites(timing: timing)
+        }
+      }
+      recorded = recordDrawIndexedTimed(
+        recording: recording
+        resources: resources
+        target: target
+        pipeline: waterSystem.surface.pipeline
+        bindGroup: waterSystem.surface.bindGroup
+        vertexBuffer: externalRef(id: meshGpu.vertex)
+        indexBuffer: externalRef(id: meshGpu.index)
+        indexCount: meshGpu.indexCount
+        timestampWrites: timestampWrites
+      )
+    }
+    if recorded {
+      if timed {
+        resolveWaterPerf(
+          performance: waterSystem.surfacePerf
+          recording: recording
+          resources: resources
+        )
+      }
+      if let submission: SubmissionId = waterSubmit(
+        waterSystem: waterSystem
+        resources: resources
+        recording: recording
+      ) {
+        if timed {
+          noteWaterPerfSubmission(performance: waterSystem.surfacePerf, submission: submission)
+        }
+      }
     }
   }
 }
@@ -684,6 +738,7 @@ func waterDraw(
 ) {
   waterSystem.time = waterSystem.time + deltaTime
   waterPollSubmissions(waterSystem: waterSystem, resources: resources)
+  collectWaterPerf(performance: waterSystem.surfacePerf, resources: resources)
   if gbDeferredPrepare() is 0 {
     ret
   }

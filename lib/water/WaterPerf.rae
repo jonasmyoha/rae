@@ -11,6 +11,7 @@ open gpu/GpuIds
 
 type WaterPerf {
   enabled: Bool
+  label: String  # what the timed pass is ("fft", "surface") in the log line
   timing: opt GpuTiming
   timingMade: Bool
   samples: Int
@@ -20,9 +21,14 @@ type WaterPerf {
 }
 
 func createWaterPerf() ret WaterPerf {
+  ret createWaterPerfLabeled(label: "fft")
+}
+
+func createWaterPerfLabeled(label: copy String) ret WaterPerf {
   unsafe {
     ret WaterPerf {
       enabled: false
+      label: label
       timing: none
       timingMade: false
       samples: 0
@@ -89,7 +95,11 @@ func collectWaterPerf(performance: mod WaterPerf, resources: mod GpuResources) {
   if let timing: mod GpuTiming => performance.timing {
     if timingSampleInFlight(timing: timing) {
       if collectTiming(timing: timing, resources: resources, out: performance.passTimes) {
-        log("[water perf] sample {performance.samples}: fft GPU {lastTotalUs(timing: timing)} us")
+        log(
+          "[water perf] sample {performance.samples}: {performance.label} GPU {lastTotalUs(
+            timing: timing
+          )} us"
+        )
         performance.samples = performance.samples + 1
       }
       ret
@@ -119,6 +129,6 @@ func idleWaterPerf(performance: mod WaterPerf) {
   if not performance.enabled {
     ret
   }
-  log("[water perf] sample {performance.samples}: fft GPU 0 us (idle)")
+  log("[water perf] sample {performance.samples}: {performance.label} GPU 0 us (idle)")
   performance.samples = performance.samples + 1
 }
