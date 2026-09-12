@@ -477,6 +477,35 @@ timestamps, a new pass), reach it **through the bindings** — do NOT add a new
   allowlist. Full rationale + classification: `docs/webgpu-c-surface-audit.md`.
 
 ---
+
+## Compiler versioning (#930 — docs/versioning-and-toolchain.md §1)
+
+The compiler has one version, `compiler/VERSION` — a single semver line
+(`0.1.0`), baked into the binary at build time together with `git describe`
+(`tools/gen-version-header.sh` -> `build/version_gen.h`, included by
+`main.c`). `rae --version` (or `-v`) prints it; `rae --version --json` prints
+`{ version, tag, commit, date, dirty }` for tooling.
+
+- **Pre-1.0 semver, MINOR is the breaking axis.** While the version is `0.x`:
+  a **MINOR** bump means a breaking change to the language, the compiler CLI,
+  or `lib/` (a function signature moved, a keyword changed, a module
+  renamed); a **PATCH** bump is compatible (fixes, additions, new
+  diagnostics). `1.0.0` is deferred until the language stops moving.
+- **Bump discipline: in the SAME commit as the change, not after.** A commit
+  that changes a `lib/` signature or CLI behaviour bumps `compiler/VERSION`'s
+  MINOR component in that same commit and says so in the commit message. A
+  compatible fix/addition bumps PATCH the same way when it's the kind of
+  change users should be able to tell apart from the last release (routine
+  queue work does not need a bump on every commit — use judgement: bump when
+  the change is release-notes-worthy, not for every diagnostic tweak).
+- **A release is a tag, nothing else.** `git tag -a v0.1.0` on the commit
+  that bumps `compiler/VERSION` to `0.1.0` — no release branches, no build
+  artifacts; the toolchain is a source checkout, so the tag IS the release.
+  Between tags, `rae --version` reports the NEXT version (the current
+  `compiler/VERSION` content) suffixed `-dev.N` for N commits since the last
+  tag, and `+dirty` on an uncommitted tree.
+
+---
 ## Interaction rules
 
 - Assume the human may not be at the keyboard
