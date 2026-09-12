@@ -23,6 +23,8 @@ open water/FftSurfaceCache
 # down retires only its own IDs.
 import Math
 import Vec3
+import RendererDeferred
+open MeshStore
 open Gbuffer
 open GbufferPasses
 open Gpu3d
@@ -109,7 +111,9 @@ type WaterSystem {
   inFlight: List(SubmissionId)  # this system's submissions, polled every step
 }
 
-func createWaterSystem(body: view WaterBody) ret WaterSystem {
+# The unit grid mesh is uploaded into the RENDERER's mesh store (#905): the
+# water pass borrows it from there like every other mesh it draws.
+func createWaterSystem(renderer: mod DeferredRenderer, body: view WaterBody) ret WaterSystem {
   unsafe {
     # A unit grid (-0.5..0.5) the vertex shader scales to each body's extent, so
     # one mesh serves every body; its density is the first body's tier knob.
@@ -118,7 +122,8 @@ func createWaterSystem(body: view WaterBody) ret WaterSystem {
       segments = 4
     }
     let grid: MeshData = makePlane(size: 1.0, segments: segments)
-    let mesh: MeshHandle = uploadMesh(
+    let mesh: MeshHandle = RendererDeferred.uploadMesh(
+      renderer: renderer
       verts: grid.verts
       vertCount: grid.vertCount
       indices: grid.indices
@@ -555,6 +560,8 @@ func uploadWaterUniform(
 func meshExternals(
   waterSystem: mod WaterSystem
   resources: mod GpuResources
+  meshes: view MeshStore
+  meshResources: view GpuResources
   mesh: view Int
 ) ret WaterMeshExternals {
   loop var i: Int = 0, i < waterSystem.surface.meshes.length, ++i {
@@ -564,7 +571,12 @@ func meshExternals(
       }
     }
   }
-  let adopted: WaterMeshExternals = adoptMeshExternals(resources: resources, mesh: mesh)
+  let adopted: WaterMeshExternals = adoptMeshExternals(
+    resources: resources
+    meshes: meshes
+    meshResources: meshResources
+    mesh: mesh
+  )
   if adopted.valid {
     waterSystem.surface.meshes.add(value: adopted)
   }
@@ -578,6 +590,8 @@ func meshExternals(
 func drawWaterBody(
   waterSystem: mod WaterSystem
   resources: mod GpuResources
+  meshes: view MeshStore
+  meshResources: view GpuResources
   body: view WaterBody
   camera: view Camera3d
   light: view Light3d
@@ -597,12 +611,14 @@ func drawWaterBody(
   if body.meshId > 0 {
     mesh = body.meshId  # a baked river ribbon instead of the unit grid
   }
-  if gbMeshIcount(mesh: mesh) <= 0 {
+  if meshStoreIndexCount(store: meshes, mesh: mesh) <= 0 {
     ret
   }
   let meshGpu: WaterMeshExternals = meshExternals(
     waterSystem: waterSystem
     resources: resources
+    meshes: meshes
+    meshResources: meshResources
     mesh: mesh
   )
   if not meshGpu.valid {
@@ -639,6 +655,8 @@ func drawWaterBody(
 func waterDraw(
   waterSystem: mod WaterSystem
   resources: mod GpuResources
+  meshes: view MeshStore
+  meshResources: view GpuResources
   camera: view Camera3d
   light: view Light3d
   sky: view Sky
@@ -668,6 +686,8 @@ func waterDraw(
       drawWaterBody(
         waterSystem: waterSystem
         resources: resources
+        meshes: meshes
+        meshResources: meshResources
         body: body
         camera: camera
         light: light

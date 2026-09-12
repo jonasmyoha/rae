@@ -3,6 +3,7 @@
 # outside the view instead of reallocating scene resources each frame.
 import Vec3
 open Gpu3d
+open RendererDeferred
 open Math3d
 open Mesh3d
 open Scene3d
@@ -15,8 +16,13 @@ type TetrisRenderState {
   particleBase: Int
 }
 
-func uploadTetrisMesh(meshData: view MeshData) ret MeshHandle {
-  ret uploadMesh(verts: meshData.verts, vertCount: meshData.vertCount, indices: meshData.indices)
+func uploadTetrisMesh(renderer: mod DeferredRenderer, meshData: view MeshData) ret MeshHandle {
+  ret uploadMesh(
+    renderer: renderer
+    verts: meshData.verts
+    vertCount: meshData.vertCount
+    indices: meshData.indices
+  )
 }
 
 # The Material3d for a tetromino kind color (colorIdx 0..6 -> kind ids 1..7).
@@ -63,9 +69,9 @@ func setEntityMaterial(world: mod World3d, entity: view Int, colorIdx: view Int)
 # pre-allocated entity, plus the static backing panel — and hand it to the
 # TetrisRenderState. `world` is a named owning local at its last use in the return
 # struct literal, so it MOVES into the field (#798); no helper split is needed.
-func createTetrisRenderState() ret TetrisRenderState {
+func createTetrisRenderState(renderer: mod DeferredRenderer) ret TetrisRenderState {
   let cubeData: MeshData = makeBox(size: 1.0)
-  let cube: MeshHandle = uploadTetrisMesh(meshData: cubeData)
+  let cube: MeshHandle = uploadTetrisMesh(renderer: renderer, meshData: cubeData)
   var world: World3d = create()
   let hidden: Transform3d = hiddenTransform()
   var slot: Int = 0

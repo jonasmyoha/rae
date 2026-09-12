@@ -43,6 +43,9 @@
 #   and rae_g2d_present_and_cleanup are gone; rae_g2d_present(texture, w, h) / rae_g3d_present_frame(...)
 #   / rae_ext_Gbuffer_present(...) BORROW the texture for the drawable copy + headless readback, and
 #   rae_g2d_surface_ready/width/height report the configured surface — surface glue, for the record.)
+# (#905: the static mesh store is the Rae MeshStore (lib/MeshStore.rae) owned by the renderer;
+#   rae_ext_Gpu3d_meshCreate/meshUpdate and the rae_gb_mesh_*/rae_g3d_mesh_* accessors are gone;
+#   rae_sm_queue_mesh takes the caster's buffer handles (borrowed for the pass) — for the record.)
 # (#912 removed the geometry-pass slots the same way: rae_gb_{set_,}{pipeline,skin_pipeline,static_bind,
 #   skin_bind,terrain_pipeline,terrain_bind,terrain_tex_view,terrain_sampler,terrain_blend} and
 #   rae_gb_entry_{vs,fs}; the C material array's view is read via rae_gb_terrain_array_view.)
@@ -59,8 +62,6 @@ rae_ext_Gbuffer_pyramidMips
 rae_ext_Gbuffer_sdfShutdown
 rae_ext_Gbuffer_shutdown
 rae_ext_Gbuffer_skyHosekPush
-rae_ext_Gpu3d_meshCreate
-rae_ext_Gpu3d_meshUpdate
 rae_ext_Gpu3d_setPalette
 rae_ext_Gpu3d_shutdown
 rae_ext_Gpu3d_skinDrawCount

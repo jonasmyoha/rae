@@ -371,23 +371,9 @@ func createApp() ret App {
       Sys.exit(code: 1)
     }
 
-    var terrainSystem: TerrainSystem = createTerrainSystem(
-      world: gameWorld
-      assets: assets
-      groundZ: groundZ
-    )
-    var grass: GrassSystem = createGrassSystem(world: gameWorld, assets: assets, groundZ: groundZ)
-
-    let cloneCount: Int = 5
-    var crowdEntities: List(EntityId) = List.create(EntityId, cap: cloneCount)
-    let firstPart: MeshHandle = meshHandle(id: firstPartId, generation: 1)
-    var characterClones: InstanceBatch = createInstanceBatch(mesh: firstPart, capacity: cloneCount)
-
-    var camera: Camera3d = defaultCamera3d()
     var light: Light3d = defaultLight3d()
-    let hosekData: HosekDataset = loadDefaultHosekDataset()
-    camera.target = Vec3.create(x: 0.0, y: 0.0, z: groundZ + targetHeight * 0.5)
-
+    # #905: the renderer owns the mesh store the terrain / grass / water meshes
+    # are uploaded into, so it exists before those systems are built.
     var renderer: DeferredRenderer = createDeferredRendererWithUiSky(sky: createSkyStylised(
       sunDir: light.sunDir
       sunColor: light.sunColor
@@ -395,6 +381,28 @@ func createApp() ret App {
       horizon: Vec3.create(x: 0.74, y: 0.80, z: 0.72)
       bands: 3.0
     ))
+    var terrainSystem: TerrainSystem = createTerrainSystem(
+      renderer: renderer
+      world: gameWorld
+      assets: assets
+      groundZ: groundZ
+    )
+    var grass: GrassSystem = createGrassSystem(
+      renderer: renderer
+      world: gameWorld
+      assets: assets
+      groundZ: groundZ
+    )
+
+    let cloneCount: Int = 5
+    var crowdEntities: List(EntityId) = List.create(EntityId, cap: cloneCount)
+    let firstPart: MeshHandle = meshHandle(id: firstPartId, generation: 1)
+    var characterClones: InstanceBatch = createInstanceBatch(mesh: firstPart, capacity: cloneCount)
+
+    var camera: Camera3d = defaultCamera3d()
+    let hosekData: HosekDataset = loadDefaultHosekDataset()
+    camera.target = Vec3.create(x: 0.0, y: 0.0, z: groundZ + targetHeight * 0.5)
+
     let gs: Int = compileDeferred(renderer: renderer)
     if gs is not 0 {
       log("render graph invalid: {statusName(status: gs)}")
@@ -576,6 +584,7 @@ func createApp() ret App {
     }
     updateInfiniteTerrain(
       terrainSystem: terrainSystem
+      renderer: renderer
       world: gameWorld
       playerPosition: characterController.position
     )
@@ -674,6 +683,13 @@ func createApp() ret App {
     let startT: Float64 = Gpu2d.nowSeconds()
     var drs: RenderScaleController = createRenderScaleController(targetFps: 60.0)
 
+    # #905: the renderer owns the mesh store the water grid and the particle
+    # box are uploaded into, so both systems are built before it moves into App.
+    let splashes: ParticleSystem = createParticleSystem(renderer: renderer, cap: 256, gravity: 24.0)
+    let waterSystem: WaterSystem = createWaterSystem(
+      renderer: renderer
+      body: walkerLake(groundZ: groundZ)
+    )
     ret App {
       emptyWorld: own emptyWorld
       world: own gameWorld
@@ -742,8 +758,8 @@ func createApp() ret App {
       netSystem: { role: 0, tick: 0 }
       players: createPlayerRoster(count: 1 + cloneCount)
       persist: { windowGeom: own windowGeom, lastStateSave: startT, stateDirty: false }
-      splashes: own createParticleSystem(cap: 256, gravity: 24.0)
-      waterSystem: own createWaterSystem(body: walkerLake(groundZ: groundZ))
+      splashes: own splashes
+      waterSystem: own waterSystem
       idIssuer: own idIssuer
       gpuResources: GpuResources.create(issuer: idIssuer, capacity: 96)
       ok: true
@@ -755,7 +771,11 @@ func createApp() ret App {
 func runWalkerApp() ret Int {
   var app: App = createApp()
   # A stream through the meadow (#833), baked once against the terrain.
-  addMeadowRiver(waterSystem: app.waterSystem, groundZ: app.characterSystem.groundZ)
+  addMeadowRiver(
+    renderer: app.renderSystem.renderer
+    waterSystem: app.waterSystem
+    groundZ: app.characterSystem.groundZ
+  )
   # #739/#740/#741: the GameWorld holds the hero + crowd (controllers), the
   # skinned body parts (PartRoughness), and the terrain props + heightfield tiles
   # (PropKind) — all recycled ECS entities.

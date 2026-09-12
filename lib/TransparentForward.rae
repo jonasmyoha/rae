@@ -25,6 +25,7 @@
 #   addTransparentInstance(cache, mesh, transform, r, g, b, alpha)   # per instance
 # The pass draws whatever was added this frame and resets the batch, so callers
 # never reset it themselves. Adding after the pass ran shows up next frame.
+open MeshStore
 open Gbuffer
 open GbufferInstanced
 open GbufferRecord
@@ -252,13 +253,17 @@ func ensureTransparentBind(cache: mod TransparentPassCache, resources: mod GpuRe
 # buffers, after uploading the records into the draws buffer at the running
 # cursor. The cursor is per frame and only resets at the next Gbuffer.begin,
 # so these records land after the geometry pass's and never overlap them.
-func drawTransparentBatch(cache: mod TransparentPassCache, resources: mod GpuResources) {
+func drawTransparentBatch(
+  cache: mod TransparentPassCache
+  resources: mod GpuResources
+  meshes: view MeshStore
+) {
   unsafe {
     let mesh: Int = cache.batch.meshId
     # NOT gbMeshReady: that answers "may I draw into the CURRENT geometry pass"
     # (it is 0 once Gbuffer.end cleared the pass), and this pass runs after it.
     # An uploaded mesh has a non-zero index count; an invalid/unset id has 0.
-    if gbMeshIcount(mesh: mesh) <= 0 {
+    if meshStoreIndexCount(store: meshes, mesh: mesh) <= 0 {
       ret
     }
     let base: Int = gbDrawCount()
@@ -316,9 +321,9 @@ func drawTransparentBatch(cache: mod TransparentPassCache, resources: mod GpuRes
       pass: pass
       pipeline: cache.pipeline
       bindGroup: cache.bindGroup
-      vertexBuffer: gbMeshVbuf(mesh: mesh)
-      indexBuffer: gbMeshIbuf(mesh: mesh)
-      indexCount: gbMeshIcount(mesh: mesh)
+      vertexBuffer: meshStoreVbufHandle(store: meshes, resources: resources, mesh: mesh)
+      indexBuffer: meshStoreIbufHandle(store: meshes, resources: resources, mesh: mesh)
+      indexCount: meshStoreIndexCount(store: meshes, mesh: mesh)
       instanceCount: count
       firstInstance: base
     ) {
@@ -349,7 +354,11 @@ func transparentSnapshot(cache: mod TransparentPassCache) pub {
   cache.snapshotDone = true
 }
 
-func transparentPass(cache: mod TransparentPassCache, resources: mod GpuResources) pub {
+func transparentPass(
+  cache: mod TransparentPassCache
+  resources: mod GpuResources
+  meshes: view MeshStore
+) pub {
   if gbDeferredPrepare() is 0 {
     ret
   }
@@ -361,7 +370,7 @@ func transparentPass(cache: mod TransparentPassCache, resources: mod GpuResource
     ensureTransparentPipeline(cache: cache, resources: resources)
     if isValidRenderPipeline(resources: resources, id: cache.pipeline) {
       ensureTransparentBind(cache: cache, resources: resources)
-      drawTransparentBatch(cache: cache, resources: resources)
+      drawTransparentBatch(cache: cache, resources: resources, meshes: meshes)
     }
   }
   cache.batch.count = 0

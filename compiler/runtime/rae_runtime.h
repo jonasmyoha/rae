@@ -885,10 +885,6 @@ void* rae_gb_draws_buffer(void);
 int64_t rae_gb_max_draws(void);
 int64_t rae_gb_draw_count(void);
 void rae_gb_advance_draws(int64_t count);
-int64_t rae_gb_mesh_ready(int64_t mesh);
-void* rae_gb_mesh_vbuf(int64_t mesh);
-void* rae_gb_mesh_ibuf(int64_t mesh);
-int64_t rae_gb_mesh_icount(int64_t mesh);
 /* G-buffer metaball draw in Rae (#504). */
 int64_t rae_gb_sdf_prepare(void* packedBalls, int64_t count, void* packedColors,
                            float smoothing, float camX, float camY, float camZ,
@@ -992,7 +988,7 @@ void* rae_gb_pyr_rt_view(int64_t i);
  * is shadow-map bookkeeping, reclassified from rae_ext_Gpu3d_shadow* (#514). */
 void rae_sm_begin(const float* cascades, int64_t count, int64_t resolution,
                   const float* splits, const float* texelWorld, const float* depthRange);
-void rae_sm_queue_mesh(int64_t mesh, struct rae_Mat4* model);
+void rae_sm_queue_mesh(int64_t mesh, void* vbuf, void* ibuf, int64_t icount, struct rae_Mat4* model);
 void rae_sm_queue_skinned(int64_t mesh, struct rae_Mat4* model, int64_t paletteBase);
 void rae_sm_record_metaballs(const float* packedBalls, int64_t count, float smoothing);
 void rae_sm_shutdown(void);
@@ -1081,9 +1077,6 @@ void* rae_g3d_sky_bind(void);
 int   rae_g3d_push_draw_record(int64_t mesh, struct rae_Mat4* model, struct rae_Mat4* prevModel,
                                float r, float g, float b, float metallic,
                                float emR, float emG, float emB, float roughness);
-void* rae_g3d_mesh_vbuf(int64_t mesh);
-void* rae_g3d_mesh_ibuf(int64_t mesh);
-int64_t rae_g3d_mesh_icount(int64_t mesh);
 int   rae_g3d_push_metaball_cluster(const float* packedBalls, int64_t count,
                                     const float* packedColors, float smoothing,
                                     float metallic, float roughness,
