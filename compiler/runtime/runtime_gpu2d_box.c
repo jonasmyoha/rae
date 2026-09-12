@@ -9,16 +9,5 @@
  * Since #907/#913 the whole box pass — shader (lib/gpu2d_box.wgsl), pipeline,
  * batch, instance buffers, draw — is Rae (lib/Gpu2dCanvas.rae). */
 
-/* What remains here is the shared viewport uniform every 2D pipeline binds at
- * @binding(0) (adopted by the canvas as an external, #907). */
-static WGPUBuffer    g_g2d_uniform = NULL;
-/* The shared viewport uniform (2 x vec4: physW, physH, scaleX, scaleY /
- * offsetX, offsetY, ..). Created on first use; the image and text bind groups
- * reference it at binding 0 and the Rae box pass adopts it as an external. */
-static void rae_g2d_ensure_viewport_uniform(void) {
-    if (g_g2d_uniform) return;
-    WGPUBufferDescriptor ud; memset(&ud, 0, sizeof(ud));
-    ud.size = 32; ud.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;  /* 2*vec4 xform */
-    g_g2d_uniform = wgpuDeviceCreateBuffer(g_wgpu_dev, &ud);
-}
-void* rae_g2d_viewport_uniform(void) { rae_g2d_ensure_viewport_uniform(); return (void*)g_g2d_uniform; }
+/* #915: the shared viewport uniform is a canvas buffer too (written from
+ * rae_g2d_xform per flush); nothing of the box pass remains in C. */

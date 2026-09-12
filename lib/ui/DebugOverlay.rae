@@ -277,7 +277,7 @@ func drawDebugToggleRow(debugOverlay: view DebugOverlay, canvas: mod Gpu2dCanvas
                         label: view String, on: view Bool) {
   let x: Float = debugDialogX(debugOverlay: debugOverlay)
   let y: Float = debugDialogRowY(debugOverlay: debugOverlay, index: index)
-  Gpu2dText.drawText(font: font, text: label, x: x + 16.0, y: y + 24.0,
+  Gpu2dText.drawText(canvas: canvas, font: font, text: label, x: x + 16.0, y: y + 24.0,
                       sizePx: 14.0, color: debugAmber)
   var fill: Int = debugOffFill
   if on {
@@ -303,7 +303,7 @@ func drawDebugDialog(debugOverlay: view DebugOverlay, canvas: mod Gpu2dCanvas, f
   let y: Float = debugDialogY(debugOverlay: debugOverlay)
   Gpu2d.drawBox(canvas: canvas, x: x, y: y, w: debugDialogW, h: debugDialogH(), radius: 10.0,
                 fill: debugPanelFill, borderWidth: 1.0, border: debugPanelBorder)
-  Gpu2dText.drawText(font: font, text: "Debug", x: x + 16.0, y: y + 28.0,
+  Gpu2dText.drawText(canvas: canvas, font: font, text: "Debug", x: x + 16.0, y: y + 28.0,
                       sizePx: 16.0, color: debugAmber)
   drawDebugToggleRow(debugOverlay: debugOverlay, canvas: canvas, font: font, index: 0, label: "FPS", on: debugOverlay.wantFps)
   drawDebugToggleRow(debugOverlay: debugOverlay, canvas: canvas, font: font, index: 1, label: "Memory", on: debugOverlay.wantMemory)
@@ -349,11 +349,11 @@ func drawDebugButton(debugOverlay: view DebugOverlay, canvas: mod Gpu2dCanvas, f
   let bearing: Float = glyphSize * 0.09
   let gx: Float = x + (debugOverlay.buttonSize - glyphW) * 0.5 - bearing
   let gy: Float = debugOverlay.margin + debugOverlay.buttonSize * 0.5 + glyphSize * 0.36
-  Gpu2dText.drawText(font: font, text: "D", x: gx, y: gy,
+  Gpu2dText.drawText(canvas: canvas, font: font, text: "D", x: gx, y: gy,
                       sizePx: glyphSize, color: glyph)
 }
 
-func drawDebugReadouts(debugOverlay: view DebugOverlay, font: view SdfFont) {
+func drawDebugReadouts(debugOverlay: view DebugOverlay, canvas: mod Gpu2dCanvas, font: view SdfFont) {
   let fontSize: Float = 14.0
   let lineH: Float = 18.0
   let rightEdge: Float = debugButtonX(debugOverlay: debugOverlay) + debugOverlay.buttonSize
@@ -365,21 +365,21 @@ func drawDebugReadouts(debugOverlay: view DebugOverlay, font: view SdfFont) {
   }
   if debugOverlay.wantFps {
     let text: String = formatDebugFps(fps: debugOverlay.lastFps)
-    Gpu2dText.drawText(font: font, text: text,
+    Gpu2dText.drawText(canvas: canvas, font: font, text: text,
                         x: rightEdge - debugTextWidth(text: text, sizePx: fontSize),
                         y: y, sizePx: fontSize, color: debugAmber)
     y = y + lineH
   }
   if debugOverlay.wantMemory {
     let text: String = formatDebugMem(kb: debugOverlay.lastRssKb)
-    Gpu2dText.drawText(font: font, text: text,
+    Gpu2dText.drawText(canvas: canvas, font: font, text: text,
                         x: rightEdge - debugTextWidth(text: text, sizePx: fontSize),
                         y: y, sizePx: fontSize, color: debugAmber)
     y = y + lineH
   }
   # Opt-in custom line under the fps/mem readouts — same amber as the rest.
   if debugOverlay.customLine.length() > 0 {
-    Gpu2dText.drawText(font: font, text: debugOverlay.customLine,
+    Gpu2dText.drawText(canvas: canvas, font: font, text: debugOverlay.customLine,
                         x: rightEdge - debugTextWidth(text: debugOverlay.customLine, sizePx: fontSize),
                         y: y, sizePx: fontSize, color: debugAmber)
   }
@@ -395,7 +395,7 @@ func drawDebugOverlay(debugOverlay: mod DebugOverlay, canvas: mod Gpu2dCanvas, f
   if debugOverlay.wantButton {
     drawDebugButton(debugOverlay: debugOverlay, canvas: canvas, font: font)
   }
-  drawDebugReadouts(debugOverlay: debugOverlay, font: font)
+  drawDebugReadouts(debugOverlay: debugOverlay, canvas: canvas, font: font)
   if debugOverlay.open {
     drawDebugDialog(debugOverlay: debugOverlay, canvas: canvas, font: font)
   }

@@ -1010,25 +1010,16 @@ void rae_sm_draw_metaballs(int64_t c, void* passptr);
 void rae_g2d_frame_reset(void);
 void rae_g2d_present_and_cleanup(void);
 void rae_g2d_tick(void);
-/* #907: the box pass runs in Rae (lib/Gpu2dBox.rae) over a manager; C keeps the
- * CPU batch + the shared viewport uniform + the per-run clip uniform/scissor. */
-void* rae_g2d_viewport_uniform(void);
-void rae_g2d_scissor(int64_t clip, void* pass);
-void rae_g2d_clip_uniform_at(int64_t clip, float* out);
-void rae_g2d_prepare_flush(int64_t pending);
-int64_t rae_g2d_current_clip(void);
+/* #915: the design->physical transform (8 floats = 2*vec4) the canvas writes
+ * into its viewport uniform each flush; batches, clips and scissor are Rae. */
+void rae_g2d_xform(float* out);
 /* #908: CPU image decode for the Rae image pass (textures + upload are manager objects). */
 void* rae_g2d_decode_image(rae_String path);
 int64_t rae_g2d_decoded_width(void);
 int64_t rae_g2d_decoded_height(void);
 void rae_g2d_decode_free(void* rgba);
-/* #909: the text pass is Rae; C keeps the per-atlas glyph batch + the CPU atlas pixels. */
+/* #909/#915: the text pass + glyph batch are Rae; C keeps the CPU atlas pixels. */
 int64_t rae_g2d_text_atlas_max(void);
-int64_t rae_g2d_text_floats(void);
-int64_t rae_g2d_text_count(int64_t ai);
-void* rae_g2d_text_data(int64_t ai);
-int64_t rae_g2d_text_clip_at(int64_t ai, int64_t i);
-void rae_g2d_text_reset(int64_t ai);
 void* rae_sdf_atlas_pixels(int64_t handle);
 int64_t rae_sdf_atlas_width(int64_t handle);
 int64_t rae_sdf_atlas_height(int64_t handle);

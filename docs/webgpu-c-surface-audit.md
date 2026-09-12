@@ -286,3 +286,38 @@ drawLine` entry points; `rae_g2d_prepare_flush(pending)` now takes the canvas's
 box + image count. Still C behind a stateless API: the text glyph batch
 (`drawGlyph` / `drawGlyphEx`) and the clip stack — both #915.
 
+**#915 update (2D renderer slice 4b — the frame as a Recording, clips, text
+batch):** (a) the 2D frame is a manager `Recording` on the canvas
+(`lib/Gpu2dCanvasFrame.rae`): `canvasOpenFrame` adopts the C offscreen view
+(re-adopted when surface configure replaced it), `beginRecording`s and opens a
+pass over it with the new `GpuRender.beginRenderPass(recording, resources,
+target)` (raw pass held for the `recordDrawInPass` family, `endRenderPass` to
+close); `canvasCloseFrame` records every per-frame bind group and the three
+pipelines as uses (`recordBindGroupUse` / `recordRenderPipelineUse`) and
+`trackSubmission`s the frame into `canvas.inFlight`, so `boxFrameEnd`'s retire
+of the per-frame groups is deferred behind the tracked submission
+(`pollSubmissions`) instead of leaning on wgpu's own tracking; `canvasShutdown`
+`drainSubmissions` first. (b) The clip stack (`clipX/Y/W/H/Radius`, `clipFull`,
+`clipStack`, `currentClip`), the per-run scissor (`g2dScissor` over
+`setScissorInPass`, the same design→physical clamp math), the rounded-clip
+uniform fill (`clipUniformFor`) and the viewport uniform (`canvas.viewport`, a
+manager buffer written per flush from `rae_g2d_xform`) are Rae;
+`Gpu2d.pushClipRect / pushClipRoundedRect / popClipRect` take the canvas. The
+text glyph batch moved with them (`Gpu2dCanvasText.rae`, `glyphs: List(Float)`
+20 floats per glyph + `glyphClips` per atlas — it needed the canvas's clip
+index), so `Gpu2d.drawGlyph / drawGlyphEx` and the whole `Gpu2dText.drawText`
+family take the canvas. Removed from C: the clip stack + `rae_g2d_set_scissor` /
+`push_clip` / `fill_clip_uniform` / `clip_reset` / `current_clip`, the
+`rae_ext_Gpu2d_pushClipRect / pushClipRoundedRect / popClipRect` entry points,
+`rae_g2d_scissor` / `clip_uniform_at` / `prepare_flush`, the viewport uniform
+(`rae_g2d_viewport_uniform`), the glyph batch + `rae_g2d_text_floats / count /
+data / clip_at / reset` and `rae_ext_Gpu2d_drawGlyph / drawGlyphEx`. Added:
+`rae_g2d_xform(out)` (the surface-derived transform; frame-derived uniform data,
+the allowed class). `Gpu2dCanvas.rae` was split for the 1000-line cap into
+`Gpu2dCanvas.rae` (type, box + image passes, clips, shutdown),
+`Gpu2dCanvasText.rae` and `Gpu2dCanvasFrame.rae`. (c) — the offscreen
+presentable target as a canvas texture and `rae_g2d_present_and_cleanup`
+replaced by owner teardown — is NOT in this slice: it needs the in-flight
+teardown equivalence check in a window run (RAE_WGPU_REPORT live-object counts
+across 120 frames, occluded and headless), filed as #920.
+

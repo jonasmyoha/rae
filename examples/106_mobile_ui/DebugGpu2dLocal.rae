@@ -762,7 +762,7 @@ func drawDebugHeartbeatGpu2d(debug: mod DebugSystem, canvas: mod Gpu2dCanvas, di
   Gpu2d.drawBox(canvas: canvas, x: debug.heartbeatX, y: 0.0, w: 8.674698795180722, h: 8.674698795180722, radius: 0.0, fill: 0xFFFFBF00, borderWidth: 0.0, border: 0x00000000)
 }
 
-func drawDebugLabelsGpu2d(debug: view DebugSystem, font: view SdfFont) {
+func drawDebugLabelsGpu2d(debug: view DebugSystem, canvas: mod Gpu2dCanvas, font: view SdfFont) {
   let fpsText: String = formatFpsGpu2d(fps: debug.lastFps)
   let memText: String = "mem: {formatMemMBGpu2d(kb: debug.lastRssKb)}"
   let fontSize: Float = 30.361445783132528
@@ -782,8 +782,8 @@ func drawDebugLabelsGpu2d(debug: view DebugSystem, font: view SdfFont) {
     memX = rightEdge - memText.length().toFloat() * fontSize * 0.52
   }
   let amber: Int = 0xFFFFBF00
-  Gpu2dText.drawText(font: font, text: fpsText, x: fpsX, y: fpsY, sizePx: fontSize, color: amber)
-  Gpu2dText.drawText(font: font, text: memText, x: memX, y: memY, sizePx: fontSize, color: amber)
+  Gpu2dText.drawText(canvas: canvas, font: font, text: fpsText, x: fpsX, y: fpsY, sizePx: fontSize, color: amber)
+  Gpu2dText.drawText(canvas: canvas, font: font, text: memText, x: memX, y: memY, sizePx: fontSize, color: amber)
   if debug.showInputOutlines {
     var lb: Int = 0
     if Gpu2d.pointerDown() { lb = 1 }
@@ -794,14 +794,14 @@ func drawDebugLabelsGpu2d(debug: view DebugSystem, font: view SdfFont) {
       let rightEdge: Float = debug.buttonX + debug.buttonSize
       buttonX = rightEdge - buttonText.length().toFloat() * fontSize * 0.52
     }
-    Gpu2dText.drawText(font: font, text: buttonText, x: buttonX, y: buttonY, sizePx: fontSize, color: amber)
+    Gpu2dText.drawText(canvas: canvas, font: font, text: buttonText, x: buttonX, y: buttonY, sizePx: fontSize, color: amber)
   }
 }
 
 func updateAndRenderDebugOverlayGpu2d(debug: mod DebugSystem, canvas: mod Gpu2dCanvas, now: view Float64, didRealWork: view Bool, font: view SdfFont) pub {
   recordDebugFrame(debug: debug, now: now, didRealWork: didRealWork)
   if debug.showLabels {
-    drawDebugLabelsGpu2d(debug: debug, font: font)
+    drawDebugLabelsGpu2d(debug: debug, canvas: canvas, font: font)
     drawDebugHeartbeatGpu2d(debug: debug, canvas: canvas, didRealWork: didRealWork)
   }
 }
