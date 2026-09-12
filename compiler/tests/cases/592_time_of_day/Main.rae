@@ -50,10 +50,16 @@ func main() {
   # Height rises to noon and falls symmetrically.
   check(label: "height peaks at noon", ok: sunHeightForHour(hour: 12.0) > 0.99)
   check(label: "height zero at sunrise", ok: sunHeightForHour(hour: 6.0) < 0.01)
-  check(label: "morning and afternoon match", ok: absF(x: sunHeightForHour(hour: 9.0) - sunHeightForHour(hour: 15.0)) < 0.001)
+  check(
+    label: "morning and afternoon match"
+    ok: absF(x: sunHeightForHour(hour: 9.0) - sunHeightForHour(hour: 15.0)) < 0.001
+  )
   # Below the horizon clamps to zero rather than going negative: callers scale
   # light by this, and a negative would light the scene from underneath.
-  check(label: "night clamps to zero", ok: sunHeightForHour(hour: 2.0) is 0.0 and sunHeightForHour(hour: 23.0) is 0.0)
+  check(
+    label: "night clamps to zero"
+    ok: sunHeightForHour(hour: 2.0) is 0.0 and sunHeightForHour(hour: 23.0) is 0.0
+  )
 
   # The key light warms toward the horizon. The sky model reddens on its own;
   # this is the direct light, which would otherwise stay white through a sunset.
@@ -66,19 +72,44 @@ func main() {
   let summerNoon: Float = sunHeightForDate(hour: 12.0, dayOfYear: 172, latitudeDeg: hel)
   check(label: "summer noon is far higher than winter noon", ok: summerNoon > winterNoon * 5.0)
   check(label: "winter noon is low but up", ok: winterNoon > 0.05 and winterNoon < 0.2)
-  check(label: "declination is zero-ish at the equinox", ok: absF(x: solarDeclinationRad(dayOfYear: 80)) < 0.03)
-  check(label: "declination peaks at the solstices", ok: solarDeclinationRad(dayOfYear: 172) > 0.4 and solarDeclinationRad(dayOfYear: 355) < 0.0 - 0.4)
+  check(
+    label: "declination is zero-ish at the equinox"
+    ok: absF(x: solarDeclinationRad(dayOfYear: 80)) < 0.03
+  )
+  check(
+    label: "declination peaks at the solstices"
+    ok: solarDeclinationRad(dayOfYear: 172) > 0.4 and solarDeclinationRad(dayOfYear: 355) < 0.0 - 0.4
+  )
 
   # POLAR DAY AND NIGHT, reachable above 66.56 degrees and so reachable on the
   # latitude slider. Nothing special-cases them: the sun simply never crosses
   # the horizon, which is what falls out of the geometry.
-  check(label: "midnight sun at 78N in June", ok: sunHeightSignedForDate(hour: 0.0, dayOfYear: 172, latitudeDeg: 78.0) > 0.0)
-  check(label: "polar night at 78N in December", ok: sunHeightSignedForDate(hour: 12.0, dayOfYear: 355, latitudeDeg: 78.0) < 0.0)
-  check(label: "polar night is dark at noon", ok: daylightFactorForDate(hour: 12.0, dayOfYear: 355, latitudeDeg: 78.0) < 0.1)
-  check(label: "midnight sun is lit at midnight", ok: daylightFactorForDate(hour: 0.0, dayOfYear: 172, latitudeDeg: 78.0) > 0.9)
+  check(
+    label: "midnight sun at 78N in June"
+    ok: sunHeightSignedForDate(hour: 0.0, dayOfYear: 172, latitudeDeg: 78.0) > 0.0
+  )
+  check(
+    label: "polar night at 78N in December"
+    ok: sunHeightSignedForDate(hour: 12.0, dayOfYear: 355, latitudeDeg: 78.0) < 0.0
+  )
+  check(
+    label: "polar night is dark at noon"
+    ok: daylightFactorForDate(hour: 12.0, dayOfYear: 355, latitudeDeg: 78.0) < 0.1
+  )
+  check(
+    label: "midnight sun is lit at midnight"
+    ok: daylightFactorForDate(hour: 0.0, dayOfYear: 172, latitudeDeg: 78.0) > 0.9
+  )
 
   # The southern hemisphere is the mirror, not a special case.
-  check(label: "seasons invert south of the equator", ok: sunHeightForDate(hour: 12.0, dayOfYear: 355, latitudeDeg: 0.0 - hel) > sunHeightForDate(hour: 12.0, dayOfYear: 172, latitudeDeg: 0.0 - hel))
+  check(
+    label: "seasons invert south of the equator"
+    ok: sunHeightForDate(hour: 12.0, dayOfYear: 355, latitudeDeg: 0.0 - hel) > sunHeightForDate(
+      hour: 12.0
+      dayOfYear: 172
+      latitudeDeg: 0.0 - hel
+    )
+  )
 
   let midday: Vec3 = sunColorForHour(hour: 12.0)
   let sunset: Vec3 = sunColorForHour(hour: 18.0)
@@ -92,10 +123,21 @@ func main() {
   if data.loaded is false {
     log("FAIL hosek dataset did not load")
   } else {
-    let high: HosekSky = createHosekSky(data: data, turbidity: 3.0, albedo: 0.25,
-                                        solarElevationRad: sunElevationRad(sunDir: noon))
-    let low: HosekSky = createHosekSky(data: data, turbidity: 3.0, albedo: 0.25,
-                                       solarElevationRad: sunElevationRad(sunDir: sunDirForHour(hour: 7.0)))
-    check(label: "time of day changes the cooked sky", ok: absF(x: high.r.radiance - low.r.radiance) > 0.001)
+    let high: HosekSky = createHosekSky(
+      data: data
+      turbidity: 3.0
+      albedo: 0.25
+      solarElevationRad: sunElevationRad(sunDir: noon)
+    )
+    let low: HosekSky = createHosekSky(
+      data: data
+      turbidity: 3.0
+      albedo: 0.25
+      solarElevationRad: sunElevationRad(sunDir: sunDirForHour(hour: 7.0))
+    )
+    check(
+      label: "time of day changes the cooked sky"
+      ok: absF(x: high.r.radiance - low.r.radiance) > 0.001
+    )
   }
 }

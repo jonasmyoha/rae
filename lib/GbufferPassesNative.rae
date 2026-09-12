@@ -28,28 +28,41 @@ func gbCompositeSourceView() unsafe extern("rae_gb_composite_source_view") ret P
 func nativeGbCompositeSourceIndex() unsafe extern("rae_gb_composite_source_index") ret Int
 
 func gbCompositeSourceIndex() ret Int {
-  unsafe { ret nativeGbCompositeSourceIndex() }
+  unsafe {
+    ret nativeGbCompositeSourceIndex()
+  }
 }
 
 # TAA on/off (#20). Off routes composite to raw lit and turns on FXAA instead.
 func nativeGbTaaIsEnabled() unsafe extern("rae_gb_taa_is_enabled") ret Int
 
 func gbTaaIsEnabled() ret Int {
-  unsafe { ret nativeGbTaaIsEnabled() }
+  unsafe {
+    ret nativeGbTaaIsEnabled()
+  }
 }
 
 func nativeGbSetTaaEnabled(on: Int) unsafe extern("rae_gb_set_taa_enabled")
 
 # Distance fog (#57, per-app). on=1 fades geometry to (r,g,b) over [start,end]
 # world units and paints that colour as the background; on=0 keeps the sky.
-func nativeGbSetFog(on: Int, r: Float, g: Float, b: Float, start: Float, end: Float) unsafe extern("rae_gb_set_fog")
+func nativeGbSetFog(
+  on: Int
+  r: Float
+  g: Float
+  b: Float
+  start: Float
+  end: Float
+) unsafe extern("rae_gb_set_fog")
 
 # Dynamic resolution (#530): the current render scale (the upscale sampler is
 # a manager sampler on the composite cache).
 func nativeGbRenderScale() unsafe extern("rae_gb_render_scale") ret Float64
 
 func gbRenderScale() ret Float64 {
-  unsafe { ret nativeGbRenderScale() }
+  unsafe {
+    ret nativeGbRenderScale()
+  }
 }
 
 # ----- SSAO: screen-space ambient occlusion (#504) ---------------------------
@@ -59,7 +72,9 @@ func gbRenderScale() ret Float64 {
 func nativeGbSsaoUpload(camX: Float, camY: Float, camZ: Float) unsafe extern("rae_gb_ssao_upload")
 
 func gbSsaoUpload(camX: copy Float, camY: copy Float, camZ: copy Float) {
-  unsafe { nativeGbSsaoUpload(camX: camX, camY: camY, camZ: camZ) }
+  unsafe {
+    nativeGbSsaoUpload(camX: camX, camY: camY, camZ: camZ)
+  }
 }
 
 func gbAoWgsl() unsafe extern("rae_gb_ao_wgsl") ret Buffer(Any)
@@ -71,7 +86,9 @@ func gbLightUbuf() unsafe extern("rae_gb_light_ubuf") ret Ptr
 func nativeGbLightBytes() unsafe extern("rae_gb_light_bytes") ret Int
 
 func gbLightBytes() ret Int {
-  unsafe { ret nativeGbLightBytes() }
+  unsafe {
+    ret nativeGbLightBytes()
+  }
 }
 
 # ----- lighting: the deferred shading pass (#504) ----------------------------
@@ -80,10 +97,99 @@ func gbLightBytes() ret Int {
 # sun/sky params + the Rae-cooked Hosek state) is C frame-math, uploaded by
 # gbLightUpload; Rae builds the 9-entry bind and runs the pass. The lighting
 # pipeline stays C for now (its creation guards the shared init block).
-func nativeGbLightUpload(camX: Float, camY: Float, camZ: Float, exposure: Float, sunX: Float, sunY: Float, sunZ: Float, sunR: Float, sunG: Float, sunB: Float, skyR: Float, skyG: Float, skyB: Float, gndR: Float, gndG: Float, gndB: Float, skyKind: Float, turbidity: Float, skyExposure: Float, sunSizeRad: Float, zenR: Float, zenG: Float, zenB: Float, bands: Float, horR: Float, horG: Float, horB: Float, discI: Float) unsafe extern("rae_gb_light_upload")
+func nativeGbLightUpload(
+  camX: Float
+  camY: Float
+  camZ: Float
+  exposure: Float
+  sunX: Float
+  sunY: Float
+  sunZ: Float
+  sunR: Float
+  sunG: Float
+  sunB: Float
+  skyR: Float
+  skyG: Float
+  skyB: Float
+  gndR: Float
+  gndG: Float
+  gndB: Float
+  skyKind: Float
+  turbidity: Float
+  skyExposure: Float
+  sunSizeRad: Float
+  zenR: Float
+  zenG: Float
+  zenB: Float
+  bands: Float
+  horR: Float
+  horG: Float
+  horB: Float
+  discI: Float
+) unsafe extern("rae_gb_light_upload")
 
-func gbLightUpload(camX: copy Float, camY: copy Float, camZ: copy Float, exposure: copy Float, sunX: copy Float, sunY: copy Float, sunZ: copy Float, sunR: copy Float, sunG: copy Float, sunB: copy Float, skyR: copy Float, skyG: copy Float, skyB: copy Float, gndR: copy Float, gndG: copy Float, gndB: copy Float, skyKind: copy Float, turbidity: copy Float, skyExposure: copy Float, sunSizeRad: copy Float, zenR: copy Float, zenG: copy Float, zenB: copy Float, bands: copy Float, horR: copy Float, horG: copy Float, horB: copy Float, discI: copy Float) {
-  unsafe { nativeGbLightUpload(camX: camX, camY: camY, camZ: camZ, exposure: exposure, sunX: sunX, sunY: sunY, sunZ: sunZ, sunR: sunR, sunG: sunG, sunB: sunB, skyR: skyR, skyG: skyG, skyB: skyB, gndR: gndR, gndG: gndG, gndB: gndB, skyKind: skyKind, turbidity: turbidity, skyExposure: skyExposure, sunSizeRad: sunSizeRad, zenR: zenR, zenG: zenG, zenB: zenB, bands: bands, horR: horR, horG: horG, horB: horB, discI: discI) }
+func gbLightUpload(
+  camX: copy Float
+  camY: copy Float
+  camZ: copy Float
+  exposure: copy Float
+  sunX: copy Float
+  sunY: copy Float
+  sunZ: copy Float
+  sunR: copy Float
+  sunG: copy Float
+  sunB: copy Float
+  skyR: copy Float
+  skyG: copy Float
+  skyB: copy Float
+  gndR: copy Float
+  gndG: copy Float
+  gndB: copy Float
+  skyKind: copy Float
+  turbidity: copy Float
+  skyExposure: copy Float
+  sunSizeRad: copy Float
+  zenR: copy Float
+  zenG: copy Float
+  zenB: copy Float
+  bands: copy Float
+  horR: copy Float
+  horG: copy Float
+  horB: copy Float
+  discI: copy Float
+) {
+  unsafe {
+    nativeGbLightUpload(
+      camX: camX
+      camY: camY
+      camZ: camZ
+      exposure: exposure
+      sunX: sunX
+      sunY: sunY
+      sunZ: sunZ
+      sunR: sunR
+      sunG: sunG
+      sunB: sunB
+      skyR: skyR
+      skyG: skyG
+      skyB: skyB
+      gndR: gndR
+      gndG: gndG
+      gndB: gndB
+      skyKind: skyKind
+      turbidity: turbidity
+      skyExposure: skyExposure
+      sunSizeRad: sunSizeRad
+      zenR: zenR
+      zenG: zenG
+      zenB: zenB
+      bands: bands
+      horR: horR
+      horG: horG
+      horB: horB
+      discI: discI
+    )
+  }
 }
 
 func gbLightPipeline() unsafe extern("rae_gb_light_pipeline") ret Ptr
@@ -93,7 +199,9 @@ func gbShadowFrameUbuf() unsafe extern("rae_gb_shadow_frame_ubuf") ret Ptr
 func nativeGbShadowFrameBytes() unsafe extern("rae_gb_shadow_frame_bytes") ret Int
 
 func gbShadowFrameBytes() ret Int {
-  unsafe { ret nativeGbShadowFrameBytes() }
+  unsafe {
+    ret nativeGbShadowFrameBytes()
+  }
 }
 
 func gbShadowArrayView() unsafe extern("rae_gb_shadow_array_view") ret Ptr
@@ -108,19 +216,25 @@ func gbShadowSampler() unsafe extern("rae_gb_shadow_sampler") ret Ptr
 func nativeGbTaaReady() unsafe extern("rae_gb_taa_ready") ret Int
 
 func gbTaaReady() ret Int {
-  unsafe { ret nativeGbTaaReady() }
+  unsafe {
+    ret nativeGbTaaReady()
+  }
 }
 
 func nativeGbTaaBegin() unsafe extern("rae_gb_taa_begin") ret Int
 
 func gbTaaBegin() ret Int {
-  unsafe { ret nativeGbTaaBegin() }
+  unsafe {
+    ret nativeGbTaaBegin()
+  }
 }
 
 func nativeGbTaaEnd() unsafe extern("rae_gb_taa_end")
 
 func gbTaaEnd() {
-  unsafe { nativeGbTaaEnd() }
+  unsafe {
+    nativeGbTaaEnd()
+  }
 }
 
 func gbTaaPipeline() unsafe extern("rae_gb_taa_pipeline") ret Ptr
@@ -139,7 +253,9 @@ func gbTaaHistoryView() unsafe extern("rae_gb_taa_history_view") ret Ptr
 func nativeGbPyramidReady() unsafe extern("rae_gb_pyramid_ready") ret Int
 
 func gbPyramidReady() ret Int {
-  unsafe { ret nativeGbPyramidReady() }
+  unsafe {
+    ret nativeGbPyramidReady()
+  }
 }
 
 func gbPyrFromDepthPipeline() unsafe extern("rae_gb_pyr_from_depth_pipeline") ret Ptr
@@ -153,5 +269,7 @@ func gbPyrRtView(i: Int) unsafe extern("rae_gb_pyr_rt_view") ret Ptr
 func nativeGbPyramidMips() unsafe extern("rae_ext_Gbuffer_pyramidMips") ret Int
 
 func gbPyramidMips() ret Int {
-  unsafe { ret nativeGbPyramidMips() }
+  unsafe {
+    ret nativeGbPyramidMips()
+  }
 }

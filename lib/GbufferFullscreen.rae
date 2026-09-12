@@ -27,16 +27,34 @@ func fullscreenPipelineSpec(format: copy Int32) ret RenderPipelineSpec {
   colorFormats.add(value: format)
   let attributes: List(VertexAttributeSpec) = List.create(VertexAttributeSpec, cap: 1)
   ret RenderPipelineSpec {
-    vertexStride: 0, attributes: own attributes, colorFormats: own colorFormats,
-    alphaBlend: false, premultiplied: false, depthFormat: 0 as Int32, depthWrite: false,
-    depthCompare: WGPUCompareFunction_Always, cullMode: WGPUCullMode_None
+    vertexStride: 0
+    attributes: own attributes
+    colorFormats: own colorFormats
+    alphaBlend: false
+    premultiplied: false
+    depthFormat: 0 as Int32
+    depthWrite: false
+    depthCompare: WGPUCompareFunction_Always
+    cullMode: WGPUCullMode_None
   }
 }
 
-func createFullscreenPipeline(resources: mod GpuResources, wgsl: view Buffer(Any), format: copy Int32) ret RenderPipelineId {
+func createFullscreenPipeline(
+  resources: mod GpuResources
+  wgsl: view Buffer(Any)
+  format: copy Int32
+) ret RenderPipelineId {
   var source: String = ""
-  unsafe { source = String.fromCStr(s: wgsl) }
-  if let pipeline: RenderPipelineId = createRenderPipeline(resources: resources, wgsl: source, vertexEntry: "vs", fragmentEntry: "fs", spec: fullscreenPipelineSpec(format: format)) {
+  unsafe {
+    source = String.fromCStr(s: wgsl)
+  }
+  if let pipeline: RenderPipelineId = createRenderPipeline(
+    resources: resources
+    wgsl: source
+    vertexEntry: "vs"
+    fragmentEntry: "fs"
+    spec: fullscreenPipelineSpec(format: format)
+  ) {
     ret pipeline
   }
   ret noRenderPipelineId()
@@ -46,13 +64,21 @@ func beginFullscreen(target: copy Ptr) unsafe ret FullscreenPass {
   unsafe {
     let encDesc: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
     let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
-    var atts: List(WGPURenderPassColorAttachment) = List.create(WGPURenderPassColorAttachment, cap: 1)
-    atts.add(value: {
-      view_: target, depthSlice: WGPU_DEPTH_SLICE_UNDEFINED as UInt32,
-      loadOp: WGPULoadOp_Clear, storeOp: WGPUStoreOp_Store
-    })
+    var atts: List(WGPURenderPassColorAttachment) = List.create(
+      WGPURenderPassColorAttachment
+      cap: 1
+    )
+    atts.add(
+      value: {
+        view_: target
+        depthSlice: WGPU_DEPTH_SLICE_UNDEFINED as UInt32
+        loadOp: WGPULoadOp_Clear
+        storeOp: WGPUStoreOp_Store
+      }
+    )
     let rpDesc: WGPURenderPassDescriptor = {
-      colorAttachmentCount: 1 as UInt64, colorAttachments: atts.data
+      colorAttachmentCount: 1 as UInt64
+      colorAttachments: atts.data
     }
     let pass: Ptr = wgpuCommandEncoderBeginRenderPass(commandEncoder: enc, descriptor: rpDesc)
     ret FullscreenPass { encoder: enc, pass: pass }
@@ -71,59 +97,128 @@ func endFullscreen(fullscreen: view FullscreenPass) unsafe {
   }
 }
 
-func runFullscreen(resources: view GpuResources, pipeline: view RenderPipelineId, bind: view BindGroupId, target: copy Ptr) {
+func runFullscreen(
+  resources: view GpuResources
+  pipeline: view RenderPipelineId
+  bind: view BindGroupId
+  target: copy Ptr
+) {
   unsafe {
-    if target is webgpuNull() { ret }
+    if target is webgpuNull() {
+      ret
+    }
     let fullscreen: FullscreenPass = beginFullscreen(target: target)
-    let drawn: Bool = recordDrawInPass(resources: resources, pass: fullscreen.pass, pipeline: pipeline, bindGroup: bind, vertexCount: 3, instanceCount: 1, firstVertex: 0, firstInstance: 0)
+    let drawn: Bool = recordDrawInPass(
+      resources: resources
+      pass: fullscreen.pass
+      pipeline: pipeline
+      bindGroup: bind
+      vertexCount: 3
+      instanceCount: 1
+      firstVertex: 0
+      firstInstance: 0
+    )
     endFullscreen(fullscreen: fullscreen)
   }
 }
 
-func runFullscreenExternal(resources: view GpuResources, pipeline: view ExternalId, bind: view BindGroupId, target: copy Ptr) {
+func runFullscreenExternal(
+  resources: view GpuResources
+  pipeline: view ExternalId
+  bind: view BindGroupId
+  target: copy Ptr
+) {
   unsafe {
-    if target is webgpuNull() { ret }
+    if target is webgpuNull() {
+      ret
+    }
     let fullscreen: FullscreenPass = beginFullscreen(target: target)
-    let drawn: Bool = recordDrawInPassExternal(resources: resources, pass: fullscreen.pass, pipeline: pipeline, bindGroup: bind, vertexCount: 3, instanceCount: 1, firstVertex: 0, firstInstance: 0)
+    let drawn: Bool = recordDrawInPassExternal(
+      resources: resources
+      pass: fullscreen.pass
+      pipeline: pipeline
+      bindGroup: bind
+      vertexCount: 3
+      instanceCount: 1
+      firstVertex: 0
+      firstInstance: 0
+    )
     endFullscreen(fullscreen: fullscreen)
   }
 }
 
 func createCompositePassCache() ret CompositePassCache {
   ret CompositePassCache {
-    pipeMade: false, pipeline: noRenderPipelineId(), uniform: noBufferId(), sampler: noSamplerId(),
-    binds: fillBindGroupIds(count: 3), adopted: List.create(ExternalId, cap: 4), bindGen: 0 - 1,
+    pipeMade: false
+    pipeline: noRenderPipelineId()
+    uniform: noBufferId()
+    sampler: noSamplerId()
+    binds: fillBindGroupIds(count: 3)
+    adopted: List.create(ExternalId, cap: 4)
+    bindGen: 0 - 1
     args: createArgs(uniform: true)
   }
 }
 
 func createAoPassCache() ret AoPassCache {
-  ret AoPassCache { pipeMade: false, pipeline: noRenderPipelineId(), bindGroup: noBindGroupId(), adopted: List.create(ExternalId, cap: 4), bindGen: 0 - 1 }
+  ret AoPassCache {
+    pipeMade: false
+    pipeline: noRenderPipelineId()
+    bindGroup: noBindGroupId()
+    adopted: List.create(ExternalId, cap: 4)
+    bindGen: 0 - 1
+  }
 }
 
 func createLightPassCache() ret LightPassCache {
-  ret LightPassCache { pipeline: noExternalId(), bindGroup: noBindGroupId(), adopted: List.create(ExternalId, cap: 10), bindGen: 0 - 1 }
+  ret LightPassCache {
+    pipeline: noExternalId()
+    bindGroup: noBindGroupId()
+    adopted: List.create(ExternalId, cap: 10)
+    bindGen: 0 - 1
+  }
 }
 
 func createTaaPassCache() ret TaaPassCache {
-  ret TaaPassCache { pipeline: noExternalId(), binds: fillBindGroupIds(count: 2), adopted: List.create(ExternalId, cap: 10), bindGen: 0 - 1 }
+  ret TaaPassCache {
+    pipeline: noExternalId()
+    binds: fillBindGroupIds(count: 2)
+    adopted: List.create(ExternalId, cap: 10)
+    bindGen: 0 - 1
+  }
 }
 
 func createPyrPassCache() ret PyrPassCache {
-  ret PyrPassCache { fromDepth: noExternalId(), reduce: noExternalId(), binds: List.create(BindGroupId, cap: 16), adopted: List.create(ExternalId, cap: 20), bindGen: 0 - 1 }
+  ret PyrPassCache {
+    fromDepth: noExternalId()
+    reduce: noExternalId()
+    binds: List.create(BindGroupId, cap: 16)
+    adopted: List.create(ExternalId, cap: 20)
+    bindGen: 0 - 1
+  }
 }
 
 # A failed bind build (a C input not up yet) resets the pass's generation
 # state — binds retired, adoptions released — so the retry next frame starts
 # clean instead of accumulating adopted slots.
-func failPassGeneration(resources: mod GpuResources, binds: mod List(BindGroupId), adopted: mod List(ExternalId)) {
+func failPassGeneration(
+  resources: mod GpuResources
+  binds: mod List(BindGroupId)
+  adopted: mod List(ExternalId)
+) {
   retireBindGroupIds(resources: resources, list: binds)
   releaseExternalIds(resources: resources, list: adopted)
 }
 
 # A bind slot is usable when its group is live AND its adopted inputs still
 # are (the generation check above retires both together).
-func bindSlotUsable(resources: view GpuResources, binds: view List(BindGroupId), idx: copy Int) ret Bool {
-  if let bind: BindGroupId = binds.copyAt(index: idx) { ret bindGroupIsUsable(resources: resources, id: bind) }
+func bindSlotUsable(
+  resources: view GpuResources
+  binds: view List(BindGroupId)
+  idx: copy Int
+) ret Bool {
+  if let bind: BindGroupId = binds.copyAt(index: idx) {
+    ret bindGroupIsUsable(resources: resources, id: bind)
+  }
   ret false
 }

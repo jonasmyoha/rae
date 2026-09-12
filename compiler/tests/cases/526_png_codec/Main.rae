@@ -3,39 +3,68 @@ open compress/Deflate
 open compress/Inflate
 
 func main() {
-    let data: List(Int) = List.create(Int, cap: 500)
-    var i: Int = 0
-    loop i < 500 { data.add(value: 65 + ((i / 9) % 7) + (i % 2)) i = i + 1 }
-    let comp: List(Int) = deflateRaw(data: data, value: data.length)
-    let back: List(Int) = inflateRaw(data: comp, len: comp.length)
-    var m1: Int = 0
-    if back.length is not data.length { m1 = 1 }
-    i = 0
-    loop i < data.length and i < back.length { if back.copyAt(index: i) is not data.copyAt(index: i) { m1 = m1 + 1 } i = i + 1 }
-    log(m1)
-
-    let w: Int = 12
-    let h: Int = 8
-    let img: List(Int) = List.create(Int, cap: w * h)
-    var y: Int = 0
-    loop y < h {
-        var x: Int = 0
-        loop x < w {
-            let r: Int = (x * 20) % 256
-            let g: Int = (y * 30) % 256
-            let bl: Int = (x + y) % 256
-            img.add(value: (255 shl 24) bitor (r shl 16) bitor (g shl 8) bitor bl)
-            x = x + 1
-        }
-        y = y + 1
+  let data: List(Int) = List.create(Int, cap: 500)
+  var i: Int = 0
+  loop i < 500 {
+    data.add(value: 65 + ((i / 9) % 7) + (i % 2))
+    i = i + 1
+  }
+  let comp: List(Int) = deflateRaw(data: data, value: data.length)
+  let back: List(Int) = inflateRaw(data: comp, len: comp.length)
+  var m1: Int = 0
+  if back.length is not data.length {
+    m1 = 1
+  }
+  i = 0
+  loop i < data.length and i < back.length {
+    if back.copyAt(index: i) is not data.copyAt(index: i) {
+      m1 = m1 + 1
     }
-    let pngBytes: List(Int) = encodePng(pixels: img, width: w, height: h, hasAlpha: true)
-    var ow: Int = 0
-    var oh: Int = 0
-    let dec: List(Int) = decodePng(png: pngBytes, len: pngBytes.length, width: ow, height: oh)
-    var m2: Int = 0
-    if (ow is not w or oh is not h) { m2 = 1 }
-    i = 0
-    loop i < img.length and i < dec.length { if dec.copyAt(index: i) is not img.copyAt(index: i) { m2 = m2 + 1 } i = i + 1 }
-    log(ow) log(oh) log(m2)
+    i = i + 1
+  }
+  log(m1)
+
+  let w: Int = 12
+  let h: Int = 8
+  let img: List(Int) = List.create(Int, cap: w * h)
+  var y: Int = 0
+  loop y < h {
+    var x: Int = 0
+    loop x < w {
+      let r: Int = (x * 20) % 256
+      let g: Int = (y * 30) % 256
+      let bl: Int = (x + y) % 256
+      img.add(value: (255 shl 24) bitor (r shl 16) bitor (g shl 8) bitor bl)
+      x = x + 1
+    }
+    y = y + 1
+  }
+  let pngBytes: List(Int) = encodePng(
+    pixels: img
+    width: w
+    height: h
+    hasAlpha: true
+  )
+  var ow: Int = 0
+  var oh: Int = 0
+  let dec: List(Int) = decodePng(
+    png: pngBytes
+    len: pngBytes.length
+    width: ow
+    height: oh
+  )
+  var m2: Int = 0
+  if (ow is not w or oh is not h) {
+    m2 = 1
+  }
+  i = 0
+  loop i < img.length and i < dec.length {
+    if dec.copyAt(index: i) is not img.copyAt(index: i) {
+      m2 = m2 + 1
+    }
+    i = i + 1
+  }
+  log(ow)
+  log(oh)
+  log(m2)
 }

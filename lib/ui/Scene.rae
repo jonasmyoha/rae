@@ -202,11 +202,7 @@ func parseScene(source: view String) ret Scene {
     # we want to remember so component deserialisers can look up keys
     # on this node later without re-scanning the parent.
     let valueIdx: Int = Json.field(doc: doc, this: nodesVal, key: nodeId)
-    let n: SceneNode = {
-      nodeId: nodeId
-      componentsValueIdx: valueIdx
-      childrenIds: kids
-    }
+    let n: SceneNode = { nodeId: nodeId, componentsValueIdx: valueIdx, childrenIds: kids }
     nodesList.add(value: n)
     i = i + 1
   }
@@ -239,4 +235,3 @@ func parseScene(source: view String) ret Scene {
   scene.ok = true
   ret scene
 }
-

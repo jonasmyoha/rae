@@ -13,19 +13,37 @@ type DebugHud {
 
 func createDebugHud(fontBase: view String) ret DebugHud {
   ret DebugHud {
-    debugOverlay: createDebugOverlay(button: true, fps: true, memory: true, heartbeat: true),
-    font: SdfText.loadSdfFont(jsonPath: "{fontBase}.mtsdf.json", rawAtlasPath: "{fontBase}.mtsdf.raw")
+    debugOverlay: createDebugOverlay(
+      button: true
+      fps: true
+      memory: true
+      heartbeat: true
+    )
+    font: SdfText.loadSdfFont(
+      jsonPath: "{fontBase}.mtsdf.json"
+      rawAtlasPath: "{fontBase}.mtsdf.raw"
+    )
   }
 }
 
 # A visible dialog owns input until dismissed; the dismissing press is consumed.
 func updateDebugHud(debugHud: mod DebugHud, now: copy Float64, rendered: copy Bool) ret Bool {
-  let tookPointer: Bool = updateDebugOverlay(debugOverlay: debugHud.debugOverlay,
-    screenW: Gpu2d.designWidth(), screenH: Gpu2d.designHeight(), now: now, didRealWork: rendered)
+  let tookPointer: Bool = updateDebugOverlay(
+    debugOverlay: debugHud.debugOverlay
+    screenW: Gpu2d.designWidth()
+    screenH: Gpu2d.designHeight()
+    now: now
+    didRealWork: rendered
+  )
   ret tookPointer or debugHud.debugOverlay.open
 }
 
 func drawDebugHud(debugHud: mod DebugHud, canvas: mod Gpu2dCanvas) {
   Gpu2d.beginFrameLoad(canvas: canvas)
-  drawDebugOverlay(debugOverlay: debugHud.debugOverlay, canvas: canvas, font: debugHud.font, didRealWork: true)
+  drawDebugOverlay(
+    debugOverlay: debugHud.debugOverlay
+    canvas: canvas
+    font: debugHud.font
+    didRealWork: true
+  )
 }

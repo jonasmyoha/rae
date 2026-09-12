@@ -21,100 +21,131 @@ import Camera
 import Bvh
 
 type GpuRT {
-    sceneBuf: Int
-    boxBuf: Int
-    triBuf: Int
-    bvhBuf: Int
-    refBuf: Int
-    accumBuf: Int
-    outBuf: Int
-    paramsBuf: Int
-    kernel: Int
+  sceneBuf: Int
+  boxBuf: Int
+  triBuf: Int
+  bvhBuf: Int
+  refBuf: Int
+  accumBuf: Int
+  outBuf: Int
+  paramsBuf: Int
+  kernel: Int
 }
 
 # primRef encoding: a sphere is its index; a triangle is TRI_BASE + index.
-func triBase() ret Int { ret 1000000 }
+func triBase() ret Int {
+  ret 1000000
+}
 
 # Pack triangles into f32 (v0 v1 v2 albedo kind fuzz ior = 15 each). Dummy when
 # empty so the storage binding is never zero-size.
 func triFloats(tris: view List(Triangle)) ret List(Float) {
   unsafe {
-      let f: List(Float) = List.create(Float, cap: 16)
-      var i: Int = 0
-      loop i < tris.length {
-          let t: Triangle = rae_ext_rae_buf_get(buf: tris.data, index: i)
-          f.add(value: t.v0.x)  f.add(value: t.v0.y)  f.add(value: t.v0.z)
-          f.add(value: t.v1.x)  f.add(value: t.v1.y)  f.add(value: t.v1.z)
-          f.add(value: t.v2.x)  f.add(value: t.v2.y)  f.add(value: t.v2.z)
-          f.add(value: t.n0.x)  f.add(value: t.n0.y)  f.add(value: t.n0.z)
-          f.add(value: t.n1.x)  f.add(value: t.n1.y)  f.add(value: t.n1.z)
-          f.add(value: t.n2.x)  f.add(value: t.n2.y)  f.add(value: t.n2.z)
-          f.add(value: t.material.albedo.x)  f.add(value: t.material.albedo.y)  f.add(value: t.material.albedo.z)
-          f.add(value: t.material.kind.toFloat())
-          f.add(value: t.material.fuzz)
-          f.add(value: t.material.ior)
-          i = i + 1
+    let f: List(Float) = List.create(Float, cap: 16)
+    var i: Int = 0
+    loop i < tris.length {
+      let t: Triangle = rae_ext_rae_buf_get(buf: tris.data, index: i)
+      f.add(value: t.v0.x)
+      f.add(value: t.v0.y)
+      f.add(value: t.v0.z)
+      f.add(value: t.v1.x)
+      f.add(value: t.v1.y)
+      f.add(value: t.v1.z)
+      f.add(value: t.v2.x)
+      f.add(value: t.v2.y)
+      f.add(value: t.v2.z)
+      f.add(value: t.n0.x)
+      f.add(value: t.n0.y)
+      f.add(value: t.n0.z)
+      f.add(value: t.n1.x)
+      f.add(value: t.n1.y)
+      f.add(value: t.n1.z)
+      f.add(value: t.n2.x)
+      f.add(value: t.n2.y)
+      f.add(value: t.n2.z)
+      f.add(value: t.material.albedo.x)
+      f.add(value: t.material.albedo.y)
+      f.add(value: t.material.albedo.z)
+      f.add(value: t.material.kind.toFloat())
+      f.add(value: t.material.fuzz)
+      f.add(value: t.material.ior)
+      i = i + 1
+    }
+    if tris.length is 0 {
+      var z: Int = 0
+      loop z < 24 {
+        f.add(value: 0.0)
+        z = z + 1
       }
-      if tris.length is 0 {
-          var z: Int = 0
-          loop z < 24 { f.add(value: 0.0)  z = z + 1 }
-      }
-      ret f
+    }
+    ret f
   }
 }
 
 # Flattened sphere BVH (nodes) + the reordered sphere-index list (refs), ready
 # to upload. Rebuilt only when the scene changes (not per frame/resolution).
 type SceneGpu {
-    nodes: List(Float)
-    refs: List(Float)
+  nodes: List(Float)
+  refs: List(Float)
 }
 
 func buildSceneBvh(world: view List(Sphere), tris: view List(Triangle)) ret SceneGpu {
   unsafe {
-      let prims: List(PrimRec) = List.create(PrimRec, cap: world.length + tris.length + 1)
-      var i: Int = 0
-      loop i < world.length {
-          let s: Sphere = rae_ext_rae_buf_get(buf: world.data, index: i)
-          prims.add(value: {
-              mnx: s.center.x - s.radius, mny: s.center.y - s.radius, mnz: s.center.z - s.radius,
-              mxx: s.center.x + s.radius, mxy: s.center.y + s.radius, mxz: s.center.z + s.radius,
-              cx: s.center.x, cy: s.center.y, cz: s.center.z, ref: i
-          })
-          i = i + 1
+    let prims: List(PrimRec) = List.create(PrimRec, cap: world.length + tris.length + 1)
+    var i: Int = 0
+    loop i < world.length {
+      let s: Sphere = rae_ext_rae_buf_get(buf: world.data, index: i)
+      prims.add(value: {
+        mnx: s.center.x - s.radius
+        mny: s.center.y - s.radius
+        mnz: s.center.z - s.radius
+        mxx: s.center.x + s.radius
+        mxy: s.center.y + s.radius
+        mxz: s.center.z + s.radius
+        cx: s.center.x
+        cy: s.center.y
+        cz: s.center.z
+        ref: i
+      })
+      i = i + 1
+    }
+    var k: Int = 0
+    loop k < tris.length {
+      let t: Triangle = rae_ext_rae_buf_get(buf: tris.data, index: k)
+      prims.add(value: {
+        mnx: fmin(a: t.v0.x, b: fmin(a: t.v1.x, b: t.v2.x))
+        mny: fmin(a: t.v0.y, b: fmin(a: t.v1.y, b: t.v2.y))
+        mnz: fmin(a: t.v0.z, b: fmin(a: t.v1.z, b: t.v2.z))
+        mxx: fmax(a: t.v0.x, b: fmax(a: t.v1.x, b: t.v2.x))
+        mxy: fmax(a: t.v0.y, b: fmax(a: t.v1.y, b: t.v2.y))
+        mxz: fmax(a: t.v0.z, b: fmax(a: t.v1.z, b: t.v2.z))
+        cx: (t.v0.x + t.v1.x + t.v2.x) / 3.0
+        cy: (t.v0.y + t.v1.y + t.v2.y) / 3.0
+        cz: (t.v0.z + t.v1.z + t.v2.z) / 3.0
+        ref: triBase() + k
+      })
+      k = k + 1
+    }
+    let nodes: List(Float) = buildBvh(prims: prims, leafSize: 4)
+    let refs: List(Float) = List.create(Float, cap: prims.length + 1)
+    i = 0
+    loop i < prims.length {
+      let p: PrimRec = rae_ext_rae_buf_get(buf: prims.data, index: i)
+      refs.add(value: p.ref.toFloat())
+      i = i + 1
+    }
+    # storage bindings can't be zero-size — pad empty buffers with a dummy entry
+    if refs.length is 0 {
+      refs.add(value: 0.0)
+    }
+    if nodes.length is 0 {
+      var z: Int = 0
+      loop z < 8 {
+        nodes.add(value: 0.0)
+        z = z + 1
       }
-      var k: Int = 0
-      loop k < tris.length {
-          let t: Triangle = rae_ext_rae_buf_get(buf: tris.data, index: k)
-          prims.add(value: {
-              mnx: fmin(a: t.v0.x, b: fmin(a: t.v1.x, b: t.v2.x)),
-              mny: fmin(a: t.v0.y, b: fmin(a: t.v1.y, b: t.v2.y)),
-              mnz: fmin(a: t.v0.z, b: fmin(a: t.v1.z, b: t.v2.z)),
-              mxx: fmax(a: t.v0.x, b: fmax(a: t.v1.x, b: t.v2.x)),
-              mxy: fmax(a: t.v0.y, b: fmax(a: t.v1.y, b: t.v2.y)),
-              mxz: fmax(a: t.v0.z, b: fmax(a: t.v1.z, b: t.v2.z)),
-              cx: (t.v0.x + t.v1.x + t.v2.x) / 3.0,
-              cy: (t.v0.y + t.v1.y + t.v2.y) / 3.0,
-              cz: (t.v0.z + t.v1.z + t.v2.z) / 3.0,
-              ref: triBase() + k
-          })
-          k = k + 1
-      }
-      let nodes: List(Float) = buildBvh(prims: prims, leafSize: 4)
-      let refs: List(Float) = List.create(Float, cap: prims.length + 1)
-      i = 0
-      loop i < prims.length {
-          let p: PrimRec = rae_ext_rae_buf_get(buf: prims.data, index: i)
-          refs.add(value: p.ref.toFloat())
-          i = i + 1
-      }
-      # storage bindings can't be zero-size — pad empty buffers with a dummy entry
-      if refs.length is 0 { refs.add(value: 0.0) }
-      if nodes.length is 0 {
-          var z: Int = 0
-          loop z < 8 { nodes.add(value: 0.0)  z = z + 1 }
-      }
-      ret SceneGpu { nodes: nodes, refs: refs }
+    }
+    ret SceneGpu { nodes: nodes, refs: refs }
   }
 }
 
@@ -123,295 +154,530 @@ func buildSceneBvh(world: view List(Sphere), tris: view List(Triangle)) ret Scen
 # means the kernel never reads it).
 func boxFloats(boxes: view List(Box)) ret List(Float) {
   unsafe {
-      let f: List(Float) = List.create(Float, cap: 16)
-      var i: Int = 0
-      loop i < boxes.length {
-          let bx: Box = rae_ext_rae_buf_get(buf: boxes.data, index: i)
-          f.add(value: bx.lo.x)  f.add(value: bx.lo.y)  f.add(value: bx.lo.z)
-          f.add(value: bx.hi.x)  f.add(value: bx.hi.y)  f.add(value: bx.hi.z)
-          f.add(value: bx.material.albedo.x)  f.add(value: bx.material.albedo.y)  f.add(value: bx.material.albedo.z)
-          f.add(value: bx.material.kind.toFloat())
-          f.add(value: bx.material.fuzz)
-          f.add(value: bx.material.ior)
-          i = i + 1
+    let f: List(Float) = List.create(Float, cap: 16)
+    var i: Int = 0
+    loop i < boxes.length {
+      let bx: Box = rae_ext_rae_buf_get(buf: boxes.data, index: i)
+      f.add(value: bx.lo.x)
+      f.add(value: bx.lo.y)
+      f.add(value: bx.lo.z)
+      f.add(value: bx.hi.x)
+      f.add(value: bx.hi.y)
+      f.add(value: bx.hi.z)
+      f.add(value: bx.material.albedo.x)
+      f.add(value: bx.material.albedo.y)
+      f.add(value: bx.material.albedo.z)
+      f.add(value: bx.material.kind.toFloat())
+      f.add(value: bx.material.fuzz)
+      f.add(value: bx.material.ior)
+      i = i + 1
+    }
+    if boxes.length is 0 {
+      var k: Int = 0
+      loop k < 12 {
+        f.add(value: 0.0)
+        k = k + 1
       }
-      if boxes.length is 0 {
-          var k: Int = 0
-          loop k < 12 { f.add(value: 0.0)  k = k + 1 }
-      }
-      ret f
+    }
+    ret f
   }
 }
 
 func pushVec3(buf: mod List(Float), a: view Vec3) {
-    buf.add(value: a.x)
-    buf.add(value: a.y)
-    buf.add(value: a.z)
+  buf.add(value: a.x)
+  buf.add(value: a.y)
+  buf.add(value: a.z)
 }
 
 func sceneFloats(cam: view Camera, world: view List(Sphere)) ret List(Float) {
-    let s: List(Float) = List.create(Float, cap: 64)
-    pushVec3(buf: s, a: cam.origin)
-    pushVec3(buf: s, a: cam.lowerLeft)
-    pushVec3(buf: s, a: cam.horizontal)
-    pushVec3(buf: s, a: cam.vertical)
-    pushVec3(buf: s, a: cam.right)
-    pushVec3(buf: s, a: cam.up)
-    s.add(value: cam.lensRadius)
-    loop let sphere: view Sphere in world {
-        pushVec3(buf: s, a: sphere.center)
-        s.add(value: sphere.radius)
-        pushVec3(buf: s, a: sphere.material.albedo)
-        s.add(value: sphere.material.kind.toFloat())
-        s.add(value: sphere.material.fuzz)
-        s.add(value: sphere.material.ior)
-    }
-    ret s
+  let s: List(Float) = List.create(Float, cap: 64)
+  pushVec3(buf: s, a: cam.origin)
+  pushVec3(buf: s, a: cam.lowerLeft)
+  pushVec3(buf: s, a: cam.horizontal)
+  pushVec3(buf: s, a: cam.vertical)
+  pushVec3(buf: s, a: cam.right)
+  pushVec3(buf: s, a: cam.up)
+  s.add(value: cam.lensRadius)
+  loop let sphere: view Sphere in world {
+    pushVec3(buf: s, a: sphere.center)
+    s.add(value: sphere.radius)
+    pushVec3(buf: s, a: sphere.material.albedo)
+    s.add(value: sphere.material.kind.toFloat())
+    s.add(value: sphere.material.fuzz)
+    s.add(value: sphere.material.ior)
+  }
+  ret s
 }
 
-func buildGpuRT(wgsl: view String, scene: view List(Float), boxes: view List(Float), tris: view List(Float),
-                nodes: view List(Float), refs: view List(Float), params: view List(Int), pixels: view Int) ret GpuRT {
-    Gpu.reset()
-    ret GpuRT {
-        sceneBuf: Gpu.storageF32(data: scene.data, count: scene.length),
-        boxBuf: Gpu.storageF32(data: boxes.data, count: boxes.length),
-        triBuf: Gpu.storageF32(data: tris.data, count: tris.length),
-        bvhBuf: Gpu.storageF32(data: nodes.data, count: nodes.length),
-        refBuf: Gpu.storageF32(data: refs.data, count: refs.length),
-        accumBuf: Gpu.allocF32(count: pixels * 4),
-        outBuf: Gpu.allocU32(count: pixels),
-        paramsBuf: Gpu.uniformU32(data: params.data, count: 12),
-        kernel: Gpu.kernel(wgsl: wgsl, entry: "main")
-    }
+func buildGpuRT(
+  wgsl: view String
+  scene: view List(Float)
+  boxes: view List(Float)
+  tris: view List(Float)
+  nodes: view List(Float)
+  refs: view List(Float)
+  params: view List(Int)
+  pixels: view Int
+) ret GpuRT {
+  Gpu.reset()
+  ret GpuRT {
+    sceneBuf: Gpu.storageF32(data: scene.data, count: scene.length)
+    boxBuf: Gpu.storageF32(data: boxes.data, count: boxes.length)
+    triBuf: Gpu.storageF32(data: tris.data, count: tris.length)
+    bvhBuf: Gpu.storageF32(data: nodes.data, count: nodes.length)
+    refBuf: Gpu.storageF32(data: refs.data, count: refs.length)
+    accumBuf: Gpu.allocF32(count: pixels * 4)
+    outBuf: Gpu.allocU32(count: pixels)
+    paramsBuf: Gpu.uniformU32(data: params.data, count: 12)
+    kernel: Gpu.kernel(wgsl: wgsl, entry: "main")
+  }
 }
 
 # White label with a subtle dark drop-shadow, so it stays readable over both the
 # dim (lit) and bright (sky) scenes.
-func drawLabel(fb: mod Buffer(Int), w: view Int, h: view Int, font: view SdfFont,
-               text: view String, x: view Float, y: view Float, px: view Float) {
-    let sh: Float = px * 0.06 + 1.0
-    sdfDrawText(fb: fb, fbW: w, fbH: h, font: font, text: text, x: x + sh, y: y + sh, sizePx: px, rgb: 0)
-    sdfDrawText(fb: fb, fbW: w, fbH: h, font: font, text: text, x: x, y: y, sizePx: px, rgb: 16777215)
+func drawLabel(
+  fb: mod Buffer(Int)
+  w: view Int
+  h: view Int
+  font: view SdfFont
+  text: view String
+  x: view Float
+  y: view Float
+  px: view Float
+) {
+  let sh: Float = px * 0.06 + 1.0
+  sdfDrawText(
+    fb: fb
+    fbW: w
+    fbH: h
+    font: font
+    text: text
+    x: x + sh
+    y: y + sh
+    sizePx: px
+    rgb: 0
+  )
+  sdfDrawText(
+    fb: fb
+    fbW: w
+    fbH: h
+    font: font
+    text: text
+    x: x
+    y: y
+    sizePx: px
+    rgb: 16777215
+  )
 }
 
 func rae_ext_rae_sys_read_file(path: String) unsafe extern ret String
 
 func main() {
   unsafe {
-      let maxDepth: Int = 8
-      # Scene switching (number keys 1/2), ported from the C++ rae_ray demo.
-      var sceneId: Int = 1
-      var world: List(Sphere) = buildSceneOne()
-      var boxes: List(Box) = buildSceneOneBoxes()
-      var tris: List(Triangle) = List.create(Triangle, cap: 0)
-      var skyMode: Int = 1
+    let maxDepth: Int = 8
+    # Scene switching (number keys 1/2), ported from the C++ rae_ray demo.
+    var sceneId: Int = 1
+    var world: List(Sphere) = buildSceneOne()
+    var boxes: List(Box) = buildSceneOneBoxes()
+    var tris: List(Triangle) = List.create(Triangle, cap: 0)
+    var skyMode: Int = 1
 
-      # Initial view: from the north-east and above, looking down at the cube
-      # (at the origin) and the surrounding balls — a diagonal 3/4 framing, on
-      # the opposite side from where the scene used to be viewed. yaw/pitch are
-      # derived from the look target so the angle stays correct if the position
-      # is retuned; WASD / arrows / mouse drive them from here.
-      var camPos: Vec3 = Vec3.create(x: 2.4, y: 2.4, z: 1.85)
-      let lookTarget: Vec3 = Vec3.create(x: -0.3, y: -0.1, z: 0.15)
-      let toTarget: Vec3 = Vec3.vsub(a: lookTarget, b: camPos)
-      var yaw: Float = Math.atan2(y: toTarget.y, x: toTarget.x)
-      var pitch: Float = Math.atan2(y: toTarget.z, x: Math.sqrt(x: toTarget.x * toTarget.x + toTarget.y * toTarget.y))
-      let moveStep: Float = 0.08
-      let rotStep: Float = 0.03
-      let mouseSens: Float = 0.005
-      let worldUp: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
-      var fwd: Vec3 = Vec3.create(x: Math.cos(x: pitch) * Math.cos(x: yaw), y: Math.cos(x: pitch) * Math.sin(x: yaw), z: Math.sin(x: pitch))
+    # Initial view: from the north-east and above, looking down at the cube
+    # (at the origin) and the surrounding balls — a diagonal 3/4 framing, on
+    # the opposite side from where the scene used to be viewed. yaw/pitch are
+    # derived from the look target so the angle stays correct if the position
+    # is retuned; WASD / arrows / mouse drive them from here.
+    var camPos: Vec3 = Vec3.create(x: 2.4, y: 2.4, z: 1.85)
+    let lookTarget: Vec3 = Vec3.create(x: -0.3, y: -0.1, z: 0.15)
+    let toTarget: Vec3 = Vec3.vsub(a: lookTarget, b: camPos)
+    var yaw: Float = Math.atan2(y: toTarget.y, x: toTarget.x)
+    var pitch: Float = Math.atan2(
+      y: toTarget.z
+      x: Math.sqrt(x: toTarget.x * toTarget.x + toTarget.y * toTarget.y)
+    )
+    let moveStep: Float = 0.08
+    let rotStep: Float = 0.03
+    let mouseSens: Float = 0.005
+    let worldUp: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
+    var fwd: Vec3 = Vec3.create(
+      x: Math.cos(x: pitch) * Math.cos(x: yaw)
+      y: Math.cos(x: pitch) * Math.sin(x: yaw)
+      z: Math.sin(x: pitch)
+    )
 
-      let dir: String = "examples/53_raytracer_webgpu_text/"
-      let wgsl: String = rae_ext_rae_sys_read_file(path: "{dir}accum.wgsl")
-      let font: SdfFont = loadSdfFont(jsonPath: "{dir}assets/Roboto-Regular.mtsdf.json", rawAtlasPath: "{dir}assets/Roboto-Regular.mtsdf.raw")
+    let dir: String = "examples/53_raytracer_webgpu_text/"
+    let wgsl: String = rae_ext_rae_sys_read_file(path: "{dir}accum.wgsl")
+    let font: SdfFont = loadSdfFont(
+      jsonPath: "{dir}assets/Roboto-Regular.mtsdf.json"
+      rawAtlasPath: "{dir}assets/Roboto-Regular.mtsdf.raw"
+    )
 
-      Sdl3.initWindow(width: 1280, height: 720, title: "Rae raytracer — interactive GPU + MTSDF text")
-      Sdl3.setTargetFPS(fps: 0)
+    Sdl3.initWindow(width: 1280, height: 720, title: "Rae raytracer — interactive GPU + MTSDF text")
+    Sdl3.setTargetFPS(fps: 0)
 
-      let aspect: Float = 16.0 / 9.0
-      var cam: Camera = buildCamera(pos: camPos, target: Vec3.vadd(a: camPos, b: fwd), vfovDeg: 50.0, aperture: 0.0, aspect: aspect)
+    let aspect: Float = 16.0 / 9.0
+    var cam: Camera = buildCamera(
+      pos: camPos
+      target: Vec3.vadd(a: camPos, b: fwd)
+      vfovDeg: 50.0
+      aperture: 0.0
+      aspect: aspect
+    )
 
-      var hiRes: Bool = true
-      var width: Int = 1920
-      var height: Int = 1080
+    var hiRes: Bool = true
+    var width: Int = 1920
+    var height: Int = 1080
 
-      let params: List(Int) = List.create(Int, cap: 12)
-      var pinit: Int = 0
-      loop pinit < 12 { params.add(value: 0)  pinit = pinit + 1 }
-      params.set(index: 0, value: width)
-      params.set(index: 1, value: height)
-      params.set(index: 3, value: maxDepth)
-      params.set(index: 4, value: world.length)
-      params.set(index: 7, value: skyMode)
-      params.set(index: 8, value: boxes.length)
+    let params: List(Int) = List.create(Int, cap: 12)
+    var pinit: Int = 0
+    loop pinit < 12 {
+      params.add(value: 0)
+      pinit = pinit + 1
+    }
+    params.set(index: 0, value: width)
+    params.set(index: 1, value: height)
+    params.set(index: 3, value: maxDepth)
+    params.set(index: 4, value: world.length)
+    params.set(index: 7, value: skyMode)
+    params.set(index: 8, value: boxes.length)
 
-      var sceneGpu: SceneGpu = buildSceneBvh(world: world, tris: tris)
-      var rt: GpuRT = buildGpuRT(wgsl: wgsl, scene: sceneFloats(cam: cam, world: world), boxes: boxFloats(boxes: boxes), tris: triFloats(tris: tris), nodes: sceneGpu.nodes, refs: sceneGpu.refs, params: params, pixels: width * height)
-      var fb: List(Int) = List.create(Int, cap: width * height)
-      var fbi: Int = 0
-      loop fbi < width * height { fb.add(value: 0)  fbi = fbi + 1 }
+    var sceneGpu: SceneGpu = buildSceneBvh(world: world, tris: tris)
+    var rt: GpuRT = buildGpuRT(
+      wgsl: wgsl
+      scene: sceneFloats(cam: cam, world: world)
+      boxes: boxFloats(boxes: boxes)
+      tris: triFloats(tris: tris)
+      nodes: sceneGpu.nodes
+      refs: sceneGpu.refs
+      params: params
+      pixels: width * height
+    )
+    var fb: List(Int) = List.create(Int, cap: width * height)
+    var fbi: Int = 0
+    loop fbi < width * height {
+      fb.add(value: 0)
+      fbi = fbi + 1
+    }
 
-      var sampleIndex: Int = 0
-      var frame: Int = 0
-      var prevMouseX: Int = Sdl3.getMouseX()
-      var prevMouseY: Int = Sdl3.getMouseY()
-      var lastMs: Int = nowMs()
-      var fps: Float = 0.0
-      var spp: Int = 1               # adaptive samples/frame (no hard cap; see below)
-      let helper: String = "WASD/E-Q move   arrows/drag look   1-6 scene   P quality   F2 save PNG"
-      var saveRequested: Bool = false
+    var sampleIndex: Int = 0
+    var frame: Int = 0
+    var prevMouseX: Int = Sdl3.getMouseX()
+    var prevMouseY: Int = Sdl3.getMouseY()
+    var lastMs: Int = nowMs()
+    var fps: Float = 0.0
+    var spp: Int = 1  # adaptive samples/frame (no hard cap; see below)
+    let helper: String = "WASD/E-Q move   arrows/drag look   1-6 scene   P quality   F2 save PNG"
+    var saveRequested: Bool = false
 
-      loop not Sdl3.shouldClose() {
-          var moved: Bool = false
+    loop not Sdl3.shouldClose() {
+      var moved: Bool = false
 
-          # F2 saves the current frame as a PNG. Defer the actual save to just
-          # after the GPU download (below), while fb still holds the raw raytraced
-          # image — saving here would capture the PREVIOUS frame with the text
-          # overlay composited in.
-          if Sdl3.isKeyPressed(key: Keys.keyF2) { saveRequested = true }
-
-          # Scene switch — number keys. 1 = Scene One (lights + cube), 2 = Book
-          # (~480 spheres), 3 = bunny mesh (~4968 tris via BVH), and the original
-          # step scenes: 4 = diffuse (steps 1-2), 5 = materials (step 3),
-          # 6 = lights (step 5). Rebuild geometry + reset accumulation.
-          var newScene: Int = sceneId
-          if Sdl3.isKeyPressed(key: Keys.key1) { newScene = 1 }
-          if Sdl3.isKeyPressed(key: Keys.key2) { newScene = 2 }
-          if Sdl3.isKeyPressed(key: Keys.key3) { newScene = 3 }
-          if Sdl3.isKeyPressed(key: Keys.key4) { newScene = 4 }
-          if Sdl3.isKeyPressed(key: Keys.key5) { newScene = 5 }
-          if Sdl3.isKeyPressed(key: Keys.key6) { newScene = 6 }
-          if newScene > sceneId or newScene < sceneId {
-              sceneId = newScene
-              boxes = List.create(Box, cap: 0)
-              tris = List.create(Triangle, cap: 0)
-              if sceneId is 1 {
-                  world = buildSceneOne()  boxes = buildSceneOneBoxes()  skyMode = 1
-              } else { if sceneId is 2 {
-                  world = buildSceneBook()  skyMode = 0
-              } else { if sceneId is 3 {
-                  world = buildSceneOne()  skyMode = 1
-                  let bunnyMat: Material = { kind: 0, albedo: { x: 0.8, y: 0.3, z: 0.3 }, fuzz: 0.0, ior: 0.0 }
-                  tris = loadObjTriangles(path: "{dir}assets/bunny.obj", scale: 4.0, ox: 0.0, oy: 3.6, oz: 0.9, yaw180: true, mat: bunnyMat)
-              } else { if sceneId is 4 {
-                  world = buildSceneDiffuse()  skyMode = 0
-              } else { if sceneId is 5 {
-                  world = buildScene()  skyMode = 0
-              } else {
-                  world = buildSceneLights()  skyMode = 1
-              } } } } }
-              params.set(index: 4, value: world.length)
-              params.set(index: 7, value: skyMode)
-              params.set(index: 8, value: boxes.length)
-              sceneGpu = buildSceneBvh(world: world, tris: tris)
-              rt = buildGpuRT(wgsl: wgsl, scene: sceneFloats(cam: cam, world: world), boxes: boxFloats(boxes: boxes), tris: triFloats(tris: tris), nodes: sceneGpu.nodes, refs: sceneGpu.refs, params: params, pixels: width * height)
-              sampleIndex = 0
-              spp = 1
-          }
-
-          # P toggles half-res <-> Full HD; rebuild buffers + framebuffer, reset.
-          if Sdl3.isKeyPressed(key: Keys.keyP) {
-              hiRes = not hiRes
-              if hiRes { width = 1920  height = 1080 } else { width = 960  height = 540 }
-              params.set(index: 0, value: width)
-              params.set(index: 1, value: height)
-              rt = buildGpuRT(wgsl: wgsl, scene: sceneFloats(cam: cam, world: world), boxes: boxFloats(boxes: boxes), tris: triFloats(tris: tris), nodes: sceneGpu.nodes, refs: sceneGpu.refs, params: params, pixels: width * height)
-              fb = List.create(Int, cap: width * height)
-              fbi = 0
-              loop fbi < width * height { fb.add(value: 0)  fbi = fbi + 1 }
-              sampleIndex = 0
-              spp = 1            # re-ramp from scratch at the new resolution
-          }
-
-          if Sdl3.isKeyDown(key: Keys.keyW) { camPos = Vec3.vadd(a: camPos, b: Vec3.vscale(a: fwd, s: moveStep))  moved = true }
-          if Sdl3.isKeyDown(key: Keys.keyS) { camPos = Vec3.vsub(a: camPos, b: Vec3.vscale(a: fwd, s: moveStep))  moved = true }
-          let rgt: Vec3 = Vec3.vnorm(a: Vec3.vcross(a: fwd, b: worldUp))
-          if Sdl3.isKeyDown(key: Keys.keyD) { camPos = Vec3.vadd(a: camPos, b: Vec3.vscale(a: rgt, s: moveStep))  moved = true }
-          if Sdl3.isKeyDown(key: Keys.keyA) { camPos = Vec3.vsub(a: camPos, b: Vec3.vscale(a: rgt, s: moveStep))  moved = true }
-          if Sdl3.isKeyDown(key: Keys.keyE) { camPos = Vec3.vadd(a: camPos, b: Vec3.vscale(a: worldUp, s: moveStep))  moved = true }
-          if Sdl3.isKeyDown(key: Keys.keyQ) { camPos = Vec3.vsub(a: camPos, b: Vec3.vscale(a: worldUp, s: moveStep))  moved = true }
-          if Sdl3.isKeyDown(key: Keys.keyRight) { yaw = yaw - rotStep  moved = true }
-          if Sdl3.isKeyDown(key: Keys.keyLeft) { yaw = yaw + rotStep  moved = true }
-          if Sdl3.isKeyDown(key: Keys.keyUp) { pitch = pitch + rotStep  moved = true }
-          if Sdl3.isKeyDown(key: Keys.keyDown) { pitch = pitch - rotStep  moved = true }
-
-          let mx: Int = Sdl3.getMouseX()
-          let my: Int = Sdl3.getMouseY()
-          if Sdl3.isMouseButtonDown(button: 0) {
-              let dx: Int = mx - prevMouseX
-              let dy: Int = my - prevMouseY
-              if dx > 0 or dx < 0 { yaw = yaw - dx.toFloat() * mouseSens  moved = true }
-              if dy > 0 or dy < 0 { pitch = pitch - dy.toFloat() * mouseSens  moved = true }
-          }
-          prevMouseX = mx
-          prevMouseY = my
-
-          if moved {
-              if pitch > 1.5 { pitch = 1.5 }
-              if pitch < -1.5 { pitch = -1.5 }
-              fwd = Vec3.create(x: Math.cos(x: pitch) * Math.cos(x: yaw), y: Math.cos(x: pitch) * Math.sin(x: yaw), z: Math.sin(x: pitch))
-              cam = buildCamera(pos: camPos, target: Vec3.vadd(a: camPos, b: fwd), vfovDeg: 50.0, aperture: 0.0, aspect: aspect)
-              Gpu.writeF32(buf: rt.sceneBuf, data: sceneFloats(cam: cam, world: world).data, count: 19 + world.length * 10)
-              sampleIndex = 0
-          }
-
-          params.set(index: 2, value: sampleIndex)
-          params.set(index: 5, value: frame)
-          params.set(index: 6, value: spp)
-          Gpu.writeU32(buf: rt.paramsBuf, data: params.data, count: 8)
-
-          let bufs: List(Int) = List.create(Int, cap: 8)
-          bufs.add(value: rt.paramsBuf)
-          bufs.add(value: rt.sceneBuf)
-          bufs.add(value: rt.accumBuf)
-          bufs.add(value: rt.outBuf)
-          bufs.add(value: rt.boxBuf)
-          bufs.add(value: rt.bvhBuf)
-          bufs.add(value: rt.refBuf)
-          bufs.add(value: rt.triBuf)
-          Gpu.run(kernel: rt.kernel, bufs: bufs.data, bufCount: 8, gx: (width + 7) / 8, gy: (height + 7) / 8, gz: 1)
-          Gpu.downloadU32(buf: rt.outBuf, out: fb.data, count: width * height)
-
-          # F2 (requested above): save the raw raytraced image now, before any text
-          # overlay is composited into fb — so the PNG is the clean rendered frame.
-          if saveRequested {
-              let saved: Bool = Image.savePng(path: Filesystem.renderPath(stem: "rae_render"), pixels: fb.data, width: width, height: height)
-              saveRequested = false
-          }
-
-          # FPS (exponential smoothing) + MTSDF text overlay, composited into fb.
-          let now: Int = nowMs()
-          let deltaTime: Int = now - lastMs
-          lastMs = now
-          if deltaTime > 0 {
-              let inst: Float = 1000.0 / deltaTime.toFloat()
-              fps = fps * 0.9 + inst * 0.1
-          }
-          # Adaptive samples/frame, NO hard cap: while the camera is still the
-          # accumulation buffer keeps summing (sampleIndex grows without bound), so
-          # the image converges to ground truth indefinitely. spp just paces how
-          # fast — push it up while there's headroom (>70 fps), back off below 50.
-          # The fps band self-limits spp, so it never runs away.
-          if fps > 70.0 { spp = spp + 1 }
-          else { if fps < 50.0 and spp > 1 { spp = spp - 1 } }
-
-          let textPx: Float = height.toFloat() * 0.030
-          let baseY: Float = textPx + 8.0
-          drawLabel(fb: fb.data, w: width, h: height, font: font, text: helper, x: 12.0, y: baseY, px: textPx)
-          # Accumulated samples = the total averaged into the current still image
-          # (grows without limit while the camera holds — infinitely refining).
-          let totalSamples: Int = sampleIndex + spp
-          let fpsStr: String = "{fps.toInt()} FPS   {spp} spp/f   {totalSamples} samples"
-          let fpsW: Float = sdfMeasureText(font: font, text: fpsStr, sizePx: textPx)
-          drawLabel(fb: fb.data, w: width, h: height, font: font, text: fpsStr, x: width.toFloat() - fpsW - 12.0, y: baseY, px: textPx)
-
-          Sdl3.updatePixels(pixels: fb.data, w: width, h: height)
-          Sdl3.present()
-          sampleIndex = sampleIndex + spp
-          frame = frame + 1
+      # F2 saves the current frame as a PNG. Defer the actual save to just
+      # after the GPU download (below), while fb still holds the raw raytraced
+      # image — saving here would capture the PREVIOUS frame with the text
+      # overlay composited in.
+      if Sdl3.isKeyPressed(key: Keys.keyF2) {
+        saveRequested = true
       }
-      Gpu.reset()
-      Sdl3.closeWindow()
+
+      # Scene switch — number keys. 1 = Scene One (lights + cube), 2 = Book
+      # (~480 spheres), 3 = bunny mesh (~4968 tris via BVH), and the original
+      # step scenes: 4 = diffuse (steps 1-2), 5 = materials (step 3),
+      # 6 = lights (step 5). Rebuild geometry + reset accumulation.
+      var newScene: Int = sceneId
+      if Sdl3.isKeyPressed(key: Keys.key1) {
+        newScene = 1
+      }
+      if Sdl3.isKeyPressed(key: Keys.key2) {
+        newScene = 2
+      }
+      if Sdl3.isKeyPressed(key: Keys.key3) {
+        newScene = 3
+      }
+      if Sdl3.isKeyPressed(key: Keys.key4) {
+        newScene = 4
+      }
+      if Sdl3.isKeyPressed(key: Keys.key5) {
+        newScene = 5
+      }
+      if Sdl3.isKeyPressed(key: Keys.key6) {
+        newScene = 6
+      }
+      if newScene > sceneId or newScene < sceneId {
+        sceneId = newScene
+        boxes = List.create(Box, cap: 0)
+        tris = List.create(Triangle, cap: 0)
+        if sceneId is 1 {
+          world = buildSceneOne()
+          boxes = buildSceneOneBoxes()
+          skyMode = 1
+        } else {
+          if sceneId is 2 {
+            world = buildSceneBook()
+            skyMode = 0
+          } else {
+            if sceneId is 3 {
+              world = buildSceneOne()
+              skyMode = 1
+              let bunnyMat: Material = {
+                kind: 0
+                albedo: { x: 0.8, y: 0.3, z: 0.3 }
+                fuzz: 0.0
+                ior: 0.0
+              }
+              tris = loadObjTriangles(
+                path: "{dir}assets/bunny.obj"
+                scale: 4.0
+                ox: 0.0
+                oy: 3.6
+                oz: 0.9
+                yaw180: true
+                mat: bunnyMat
+              )
+            } else {
+              if sceneId is 4 {
+                world = buildSceneDiffuse()
+                skyMode = 0
+              } else {
+                if sceneId is 5 {
+                  world = buildScene()
+                  skyMode = 0
+                } else {
+                  world = buildSceneLights()
+                  skyMode = 1
+                }
+              }
+            }
+          }
+        }
+        params.set(index: 4, value: world.length)
+        params.set(index: 7, value: skyMode)
+        params.set(index: 8, value: boxes.length)
+        sceneGpu = buildSceneBvh(world: world, tris: tris)
+        rt = buildGpuRT(
+          wgsl: wgsl
+          scene: sceneFloats(cam: cam, world: world)
+          boxes: boxFloats(boxes: boxes)
+          tris: triFloats(tris: tris)
+          nodes: sceneGpu.nodes
+          refs: sceneGpu.refs
+          params: params
+          pixels: width * height
+        )
+        sampleIndex = 0
+        spp = 1
+      }
+
+      # P toggles half-res <-> Full HD; rebuild buffers + framebuffer, reset.
+      if Sdl3.isKeyPressed(key: Keys.keyP) {
+        hiRes = not hiRes
+        if hiRes {
+          width = 1920
+          height = 1080
+        } else {
+          width = 960
+          height = 540
+        }
+        params.set(index: 0, value: width)
+        params.set(index: 1, value: height)
+        rt = buildGpuRT(
+          wgsl: wgsl
+          scene: sceneFloats(cam: cam, world: world)
+          boxes: boxFloats(boxes: boxes)
+          tris: triFloats(tris: tris)
+          nodes: sceneGpu.nodes
+          refs: sceneGpu.refs
+          params: params
+          pixels: width * height
+        )
+        fb = List.create(Int, cap: width * height)
+        fbi = 0
+        loop fbi < width * height {
+          fb.add(value: 0)
+          fbi = fbi + 1
+        }
+        sampleIndex = 0
+        spp = 1  # re-ramp from scratch at the new resolution
+      }
+
+      if Sdl3.isKeyDown(key: Keys.keyW) {
+        camPos = Vec3.vadd(a: camPos, b: Vec3.vscale(a: fwd, s: moveStep))
+
+        moved = true
+      }
+      if Sdl3.isKeyDown(key: Keys.keyS) {
+        camPos = Vec3.vsub(a: camPos, b: Vec3.vscale(a: fwd, s: moveStep))
+        moved = true
+      }
+      let rgt: Vec3 = Vec3.vnorm(a: Vec3.vcross(a: fwd, b: worldUp))
+      if Sdl3.isKeyDown(key: Keys.keyD) {
+        camPos = Vec3.vadd(a: camPos, b: Vec3.vscale(a: rgt, s: moveStep))
+        moved = true
+      }
+      if Sdl3.isKeyDown(key: Keys.keyA) {
+        camPos = Vec3.vsub(a: camPos, b: Vec3.vscale(a: rgt, s: moveStep))
+        moved = true
+      }
+      if Sdl3.isKeyDown(key: Keys.keyE) {
+        camPos = Vec3.vadd(a: camPos, b: Vec3.vscale(a: worldUp, s: moveStep))
+        moved = true
+      }
+      if Sdl3.isKeyDown(key: Keys.keyQ) {
+        camPos = Vec3.vsub(a: camPos, b: Vec3.vscale(a: worldUp, s: moveStep))
+        moved = true
+      }
+      if Sdl3.isKeyDown(key: Keys.keyRight) {
+        yaw = yaw - rotStep
+        moved = true
+      }
+      if Sdl3.isKeyDown(key: Keys.keyLeft) {
+        yaw = yaw + rotStep
+        moved = true
+      }
+      if Sdl3.isKeyDown(key: Keys.keyUp) {
+        pitch = pitch + rotStep
+        moved = true
+      }
+      if Sdl3.isKeyDown(key: Keys.keyDown) {
+        pitch = pitch - rotStep
+        moved = true
+      }
+
+      let mx: Int = Sdl3.getMouseX()
+      let my: Int = Sdl3.getMouseY()
+      if Sdl3.isMouseButtonDown(button: 0) {
+        let dx: Int = mx - prevMouseX
+        let dy: Int = my - prevMouseY
+        if dx > 0 or dx < 0 {
+          yaw = yaw - dx.toFloat() * mouseSens
+          moved = true
+        }
+        if dy > 0 or dy < 0 {
+          pitch = pitch - dy.toFloat() * mouseSens
+          moved = true
+        }
+      }
+      prevMouseX = mx
+      prevMouseY = my
+
+      if moved {
+        if pitch > 1.5 {
+          pitch = 1.5
+        }
+        if pitch < -1.5 {
+          pitch = -1.5
+        }
+        fwd = Vec3.create(
+          x: Math.cos(x: pitch) * Math.cos(x: yaw)
+          y: Math.cos(x: pitch) * Math.sin(x: yaw)
+          z: Math.sin(x: pitch)
+        )
+        cam = buildCamera(
+          pos: camPos
+          target: Vec3.vadd(a: camPos, b: fwd)
+          vfovDeg: 50.0
+          aperture: 0.0
+          aspect: aspect
+        )
+        Gpu.writeF32(
+          buf: rt.sceneBuf
+          data: sceneFloats(cam: cam, world: world).data
+          count: 19 + world.length * 10
+        )
+        sampleIndex = 0
+      }
+
+      params.set(index: 2, value: sampleIndex)
+      params.set(index: 5, value: frame)
+      params.set(index: 6, value: spp)
+      Gpu.writeU32(buf: rt.paramsBuf, data: params.data, count: 8)
+
+      let bufs: List(Int) = List.create(Int, cap: 8)
+      bufs.add(value: rt.paramsBuf)
+      bufs.add(value: rt.sceneBuf)
+      bufs.add(value: rt.accumBuf)
+      bufs.add(value: rt.outBuf)
+      bufs.add(value: rt.boxBuf)
+      bufs.add(value: rt.bvhBuf)
+      bufs.add(value: rt.refBuf)
+      bufs.add(value: rt.triBuf)
+      Gpu.run(
+        kernel: rt.kernel
+        bufs: bufs.data
+        bufCount: 8
+        gx: (width + 7) / 8
+        gy: (height + 7) / 8
+        gz: 1
+      )
+      Gpu.downloadU32(buf: rt.outBuf, out: fb.data, count: width * height)
+
+      # F2 (requested above): save the raw raytraced image now, before any text
+      # overlay is composited into fb — so the PNG is the clean rendered frame.
+      if saveRequested {
+        let saved: Bool = Image.savePng(
+          path: Filesystem.renderPath(stem: "rae_render")
+          pixels: fb.data
+          width: width
+          height: height
+        )
+        saveRequested = false
+      }
+
+      # FPS (exponential smoothing) + MTSDF text overlay, composited into fb.
+      let now: Int = nowMs()
+      let deltaTime: Int = now - lastMs
+      lastMs = now
+      if deltaTime > 0 {
+        let inst: Float = 1000.0 / deltaTime.toFloat()
+        fps = fps * 0.9 + inst * 0.1
+      }
+      # Adaptive samples/frame, NO hard cap: while the camera is still the
+      # accumulation buffer keeps summing (sampleIndex grows without bound), so
+      # the image converges to ground truth indefinitely. spp just paces how
+      # fast — push it up while there's headroom (>70 fps), back off below 50.
+      # The fps band self-limits spp, so it never runs away.
+      if fps > 70.0 {
+        spp = spp + 1
+      } else {
+        if fps < 50.0 and spp > 1 {
+          spp = spp - 1
+        }
+      }
+
+      let textPx: Float = height.toFloat() * 0.030
+      let baseY: Float = textPx + 8.0
+      drawLabel(
+        fb: fb.data
+        w: width
+        h: height
+        font: font
+        text: helper
+        x: 12.0
+        y: baseY
+        px: textPx
+      )
+      # Accumulated samples = the total averaged into the current still image
+      # (grows without limit while the camera holds — infinitely refining).
+      let totalSamples: Int = sampleIndex + spp
+      let fpsStr: String = "{fps.toInt()} FPS   {spp} spp/f   {totalSamples} samples"
+      let fpsW: Float = sdfMeasureText(font: font, text: fpsStr, sizePx: textPx)
+      drawLabel(
+        fb: fb.data
+        w: width
+        h: height
+        font: font
+        text: fpsStr
+        x: width.toFloat() - fpsW - 12.0
+        y: baseY
+        px: textPx
+      )
+
+      Sdl3.updatePixels(pixels: fb.data, w: width, h: height)
+      Sdl3.present()
+      sampleIndex = sampleIndex + spp
+      frame = frame + 1
+    }
+    Gpu.reset()
+    Sdl3.closeWindow()
   }
 }

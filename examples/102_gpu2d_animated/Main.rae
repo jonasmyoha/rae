@@ -23,27 +23,36 @@ open ui/DebugOverlay
 open Gpu2dCanvas
 
 # --- Design canvas -----------------------------------------------------------
-
 const canvasW: Float = 1280.0
+
 const canvasH: Float = 800.0
 
 # --- Palette (0xAARRGGBB) ----------------------------------------------------
+const ink: Int = 0xFF0B0E14  # page background, dark
 
-const ink: Int = 0xFF0B0E14          # page background, dark
-const panelFill: Int = 0xFF121826    # card body
-const panelEdge: Int = 0xFF263350    # card border
-const mist: Int = 0xFF8899B4         # muted lines
+const panelFill: Int = 0xFF121826  # card body
+
+const panelEdge: Int = 0xFF263350  # card border
+
+const mist: Int = 0xFF8899B4  # muted lines
 
 const red: Int = 0xFFEF5350
+
 const blue: Int = 0xFF42A5F5
+
 const green: Int = 0xFF66BB6A
+
 const amber: Int = 0xFFFFCA28
+
 const violet: Int = 0xFFAB47BC
+
 const cyan: Int = 0xFF26C6DA
+
 const pink: Int = 0xFFEC407A
 
 # Low 24 bits of the accent colours, for re-packing with an animated alpha.
 const cyanRgb: Int = 0x26C6DA
+
 const pinkRgb: Int = 0xEC407A
 
 # --- Small maths helpers -----------------------------------------------------
@@ -99,7 +108,12 @@ func clampUnit(value: view Float) ret Float {
 # HSV -> 0xAARRGGBB. Same hue geometry as hueColor, then desaturated toward
 # white by (1 - sat) and scaled by val. Lower saturation gives a richer,
 # tinted colour instead of a pure-RGB neon primary — nicer for the visualizer.
-func hsv(hue: view Float, sat: view Float, val: view Float, alpha: view Int) ret Int {
+func hsv(
+  hue: view Float
+  sat: view Float
+  val: view Float
+  alpha: view Int
+) ret Int {
   let wrapped: Float = frac(value: hue)
   let hue6: Float = wrapped * 6.0
   let pureR: Float = clampUnit(value: Math.abs(value: hue6 - 3.0) - 1.0)
@@ -116,52 +130,209 @@ func hsv(hue: view Float, sat: view Float, val: view Float, alpha: view Int) ret
 
 # A card with a soft drop shadow, a filled body and a hairline border, plus a
 # top-left accent bar whose width breathes so even a still panel has a pulse.
-func panel(canvas: mod Gpu2dCanvas, x: view Float, y: view Float, w: view Float, h: view Float, accent: view Int, t: view Float) {
-  Gpu2d.drawRoundedRect(canvas: canvas, x: x + 6.0, y: y + 8.0, w: w, h: h, radius: 22.0, color: 0x40000000)
-  Gpu2d.drawBox(canvas: canvas, x: x, y: y, w: w, h: h, radius: 22.0, fill: panelFill, borderWidth: 1.5, border: panelEdge)
+func panel(
+  canvas: mod Gpu2dCanvas
+  x: view Float
+  y: view Float
+  w: view Float
+  h: view Float
+  accent: view Int
+  t: view Float
+) {
+  Gpu2d.drawRoundedRect(
+    canvas: canvas
+    x: x + 6.0
+    y: y + 8.0
+    w: w
+    h: h
+    radius: 22.0
+    color: 0x40000000
+  )
+  Gpu2d.drawBox(
+    canvas: canvas
+    x: x
+    y: y
+    w: w
+    h: h
+    radius: 22.0
+    fill: panelFill
+    borderWidth: 1.5
+    border: panelEdge
+  )
   let barW: Float = 40.0 + 30.0 * wave(phase: t * 2.0)
-  Gpu2d.drawRoundedRect(canvas: canvas, x: x + 22.0, y: y + 20.0, w: barW, h: 8.0, radius: 4.0, color: accent)
+  Gpu2d.drawRoundedRect(
+    canvas: canvas
+    x: x + 22.0
+    y: y + 20.0
+    w: barW
+    h: 8.0
+    radius: 4.0
+    color: accent
+  )
 }
 
 # --- Panel 1: rotating gradients ---------------------------------------------
-
-func panelGradients(canvas: mod Gpu2dCanvas, x: view Float, y: view Float, w: view Float, h: view Float, t: view Float) {
-  panel(canvas: canvas, x: x, y: y, w: w, h: h, accent: blue, t: t)
+func panelGradients(
+  canvas: mod Gpu2dCanvas
+  x: view Float
+  y: view Float
+  w: view Float
+  h: view Float
+  t: view Float
+) {
+  panel(
+    canvas: canvas
+    x: x
+    y: y
+    w: w
+    h: h
+    accent: blue
+    t: t
+  )
   let ix: Float = x + 28.0
   let iy: Float = y + 52.0
   # Each gradient bar spins its angle at its own rate and direction.
-  Gpu2d.drawGradientRect(canvas: canvas, x: ix, y: iy, w: 96.0, h: 168.0, radius: 16.0, from: 0xFF1D2B64, to: 0xFFF89B29, angleDeg: t * 45.0)
-  Gpu2d.drawGradientRect(canvas: canvas, x: ix + 116.0, y: iy, w: 96.0, h: 168.0, radius: 16.0, from: 0xFF2AF598, to: 0xFF009EFD, angleDeg: -t * 60.0 + 45.0)
-  Gpu2d.drawGradientRect(canvas: canvas, x: ix + 232.0, y: iy, w: 96.0, h: 168.0, radius: 16.0, from: 0xFFEE0979, to: 0xFFFF6A00, angleDeg: t * 35.0 + 90.0)
+  Gpu2d.drawGradientRect(
+    canvas: canvas
+    x: ix
+    y: iy
+    w: 96.0
+    h: 168.0
+    radius: 16.0
+    from: 0xFF1D2B64
+    to: 0xFFF89B29
+    angleDeg: t * 45.0
+  )
+  Gpu2d.drawGradientRect(
+    canvas: canvas
+    x: ix + 116.0
+    y: iy
+    w: 96.0
+    h: 168.0
+    radius: 16.0
+    from: 0xFF2AF598
+    to: 0xFF009EFD
+    angleDeg: -t * 60.0 + 45.0
+  )
+  Gpu2d.drawGradientRect(
+    canvas: canvas
+    x: ix + 232.0
+    y: iy
+    w: 96.0
+    h: 168.0
+    radius: 16.0
+    from: 0xFFEE0979
+    to: 0xFFFF6A00
+    angleDeg: t * 35.0 + 90.0
+  )
   # The bottom pill sweeps its gradient the other way.
-  Gpu2d.drawGradientRect(canvas: canvas, x: ix, y: iy + 186.0, w: 328.0, h: 48.0, radius: 24.0, from: 0xFF6A11CB, to: 0xFF2575FC, angleDeg: -t * 75.0)
+  Gpu2d.drawGradientRect(
+    canvas: canvas
+    x: ix
+    y: iy + 186.0
+    w: 328.0
+    h: 48.0
+    radius: 24.0
+    from: 0xFF6A11CB
+    to: 0xFF2575FC
+    angleDeg: -t * 75.0
+  )
 }
 
 # --- Panel 2: breathing corners ----------------------------------------------
-
-func panelCorners(canvas: mod Gpu2dCanvas, x: view Float, y: view Float, w: view Float, h: view Float, t: view Float) {
-  panel(canvas: canvas, x: x, y: y, w: w, h: h, accent: green, t: t)
+func panelCorners(
+  canvas: mod Gpu2dCanvas
+  x: view Float
+  y: view Float
+  w: view Float
+  h: view Float
+  t: view Float
+) {
+  panel(
+    canvas: canvas
+    x: x
+    y: y
+    w: w
+    h: h
+    accent: green
+    t: t
+  )
   let ix: Float = x + 28.0
   var cy: Float = y + 56.0
   # Three bars whose corner radius breathes square <-> pill, out of phase.
-  Gpu2d.drawRoundedRect(canvas: canvas, x: ix, y: cy, w: 300.0, h: 44.0, radius: 22.0 * wave(phase: t * 1.6), color: 0xFF2E7D32)
+  Gpu2d.drawRoundedRect(
+    canvas: canvas
+    x: ix
+    y: cy
+    w: 300.0
+    h: 44.0
+    radius: 22.0 * wave(phase: t * 1.6)
+    color: 0xFF2E7D32
+  )
   cy = cy + 56.0
-  Gpu2d.drawRoundedRect(canvas: canvas, x: ix, y: cy, w: 300.0, h: 44.0, radius: 22.0 * wave(phase: t * 1.6 + 1.0), color: 0xFF388E3C)
+  Gpu2d.drawRoundedRect(
+    canvas: canvas
+    x: ix
+    y: cy
+    w: 300.0
+    h: 44.0
+    radius: 22.0 * wave(phase: t * 1.6 + 1.0)
+    color: 0xFF388E3C
+  )
   cy = cy + 56.0
-  Gpu2d.drawRoundedRect(canvas: canvas, x: ix, y: cy, w: 300.0, h: 44.0, radius: 22.0 * wave(phase: t * 1.6 + 2.0), color: 0xFF43A047)
+  Gpu2d.drawRoundedRect(
+    canvas: canvas
+    x: ix
+    y: cy
+    w: 300.0
+    h: 44.0
+    radius: 22.0 * wave(phase: t * 1.6 + 2.0)
+    color: 0xFF43A047
+  )
   cy = cy + 56.0
   # A steady circle beside a pill whose length breathes.
-  Gpu2d.drawRoundedRect(canvas: canvas, x: ix, y: cy, w: 44.0, h: 44.0, radius: 22.0, color: amber)
+  Gpu2d.drawRoundedRect(
+    canvas: canvas
+    x: ix
+    y: cy
+    w: 44.0
+    h: 44.0
+    radius: 22.0
+    color: amber
+  )
   let pillW: Float = 200.0 + 36.0 * wave(phase: t * 2.2)
-  Gpu2d.drawRoundedRect(canvas: canvas, x: ix + 64.0, y: cy, w: pillW, h: 44.0, radius: 22.0, color: green)
+  Gpu2d.drawRoundedRect(
+    canvas: canvas
+    x: ix + 64.0
+    y: cy
+    w: pillW
+    h: 44.0
+    radius: 22.0
+    color: green
+  )
 }
 
 # --- Panel 3: sonar rings ----------------------------------------------------
 
 # Ring outlines expand outward from the centre and fade as they grow — a radar
 # sweep. Drawn as transparent-fill boxes so only the border shows.
-func panelRings(canvas: mod Gpu2dCanvas, x: view Float, y: view Float, w: view Float, h: view Float, t: view Float) {
-  panel(canvas: canvas, x: x, y: y, w: w, h: h, accent: cyan, t: t)
+func panelRings(
+  canvas: mod Gpu2dCanvas
+  x: view Float
+  y: view Float
+  w: view Float
+  h: view Float
+  t: view Float
+) {
+  panel(
+    canvas: canvas
+    x: x
+    y: y
+    w: w
+    h: h
+    accent: cyan
+    t: t
+  )
   let cx: Float = x + w * 0.5
   let cy: Float = y + h * 0.5 + 14.0
   let maxR: Float = 120.0
@@ -169,38 +340,122 @@ func panelRings(canvas: mod Gpu2dCanvas, x: view Float, y: view Float, w: view F
   loop i < 5 {
     let phase: Float = frac(value: t * 0.35 + i.toFloat() * 0.2)
     let radius: Float = 12.0 + phase * (maxR - 12.0)
-    let alpha: Int = chan(value: 1.0 - phase)   # bright when small, gone when large
+    let alpha: Int = chan(value: 1.0 - phase)  # bright when small, gone when large
     let col: Int = withAlpha(rgb: cyanRgb, alpha: alpha)
-    Gpu2d.drawBox(canvas: canvas, x: cx - radius, y: cy - radius, w: radius * 2.0, h: radius * 2.0, radius: radius,
-                  fill: 0x00000000, borderWidth: 3.0, border: col)
+    Gpu2d.drawBox(
+      canvas: canvas
+      x: cx - radius
+      y: cy - radius
+      w: radius * 2.0
+      h: radius * 2.0
+      radius: radius
+      fill: 0x00000000
+      borderWidth: 3.0
+      border: col
+    )
     i = i + 1
   }
   # A pulsing pip at the centre.
   let pip: Float = 6.0 + 4.0 * wave(phase: t * 4.0)
-  Gpu2d.drawRoundedRect(canvas: canvas, x: cx - pip, y: cy - pip, w: pip * 2.0, h: pip * 2.0, radius: pip, color: pink)
+  Gpu2d.drawRoundedRect(
+    canvas: canvas
+    x: cx - pip
+    y: cy - pip
+    w: pip * 2.0
+    h: pip * 2.0
+    radius: pip
+    color: pink
+  )
 }
 
 # --- Panel 4: pulsing borders ------------------------------------------------
-
-func panelBorders(canvas: mod Gpu2dCanvas, x: view Float, y: view Float, w: view Float, h: view Float, t: view Float) {
-  panel(canvas: canvas, x: x, y: y, w: w, h: h, accent: amber, t: t)
+func panelBorders(
+  canvas: mod Gpu2dCanvas
+  x: view Float
+  y: view Float
+  w: view Float
+  h: view Float
+  t: view Float
+) {
+  panel(
+    canvas: canvas
+    x: x
+    y: y
+    w: w
+    h: h
+    accent: amber
+    t: t
+  )
   let ix: Float = x + 28.0
   let iy: Float = y + 56.0
   let bw1: Float = 2.0 + 5.0 * wave(phase: t * 3.0)
   let bw2: Float = 2.0 + 8.0 * wave(phase: t * 3.0 + 1.5)
-  Gpu2d.drawBox(canvas: canvas, x: ix, y: iy, w: 148.0, h: 96.0, radius: 16.0, fill: 0xFF15233F, borderWidth: bw1, border: blue)
-  Gpu2d.drawBox(canvas: canvas, x: ix + 180.0, y: iy, w: 148.0, h: 96.0, radius: 12.0, fill: 0xFF1F3026, borderWidth: bw2, border: green)
-  Gpu2d.drawBox(canvas: canvas, x: ix, y: iy + 120.0, w: 148.0, h: 96.0, radius: 48.0, fill: 0xFF3A2233, borderWidth: bw2, border: pink)
+  Gpu2d.drawBox(
+    canvas: canvas
+    x: ix
+    y: iy
+    w: 148.0
+    h: 96.0
+    radius: 16.0
+    fill: 0xFF15233F
+    borderWidth: bw1
+    border: blue
+  )
+  Gpu2d.drawBox(
+    canvas: canvas
+    x: ix + 180.0
+    y: iy
+    w: 148.0
+    h: 96.0
+    radius: 12.0
+    fill: 0xFF1F3026
+    borderWidth: bw2
+    border: green
+  )
+  Gpu2d.drawBox(
+    canvas: canvas
+    x: ix
+    y: iy + 120.0
+    w: 148.0
+    h: 96.0
+    radius: 48.0
+    fill: 0xFF3A2233
+    borderWidth: bw2
+    border: pink
+  )
   # An outline-only ring whose border colour cycles through the spectrum.
   let ringCol: Int = hueColor(hue: t * 0.15, alpha: 255)
-  Gpu2d.drawBox(canvas: canvas, x: ix + 180.0, y: iy + 120.0, w: 148.0, h: 96.0, radius: 48.0,
-                fill: 0x00000000, borderWidth: 4.0, border: ringCol)
+  Gpu2d.drawBox(
+    canvas: canvas
+    x: ix + 180.0
+    y: iy + 120.0
+    w: 148.0
+    h: 96.0
+    radius: 48.0
+    fill: 0x00000000
+    borderWidth: 4.0
+    border: ringCol
+  )
 }
 
 # --- Panel 5: spinning starburst + travelling ramp ---------------------------
-
-func panelLines(canvas: mod Gpu2dCanvas, x: view Float, y: view Float, w: view Float, h: view Float, t: view Float) {
-  panel(canvas: canvas, x: x, y: y, w: w, h: h, accent: violet, t: t)
+func panelLines(
+  canvas: mod Gpu2dCanvas
+  x: view Float
+  y: view Float
+  w: view Float
+  h: view Float
+  t: view Float
+) {
+  panel(
+    canvas: canvas
+    x: x
+    y: y
+    w: w
+    h: h
+    accent: violet
+    t: t
+  )
   let cx: Float = x + w * 0.5
   let cy: Float = y + 116.0
   # A fan of lines that rotates as a whole, each spoke hue-cycling.
@@ -211,7 +466,15 @@ func panelLines(canvas: mod Gpu2dCanvas, x: view Float, y: view Float, w: view F
     let ex: Float = cx + Math.cos(x: angle) * radius
     let ey: Float = cy + Math.sin(x: angle) * radius * 0.62
     let col: Int = hueColor(hue: i.toFloat() / 16.0 + t * 0.1, alpha: 255)
-    Gpu2d.drawLine(canvas: canvas, x0: cx, y0: cy, x1: ex, y1: ey, thickness: 2.5, color: col)
+    Gpu2d.drawLine(
+      canvas: canvas
+      x0: cx
+      y0: cy
+      x1: ex
+      y1: ey
+      thickness: 2.5
+      color: col
+    )
     i = i + 1
   }
   # A stack of lines whose thickness rolls through as a travelling wave.
@@ -219,7 +482,15 @@ func panelLines(canvas: mod Gpu2dCanvas, x: view Float, y: view Float, w: view F
   var row: Int = 0
   loop row < 5 {
     let thick: Float = 1.5 + 5.0 * wave(phase: t * 3.5 - row.toFloat() * 0.7)
-    Gpu2d.drawLine(canvas: canvas, x0: x + 28.0, y0: ty, x1: x + w - 28.0, y1: ty, thickness: thick, color: mist)
+    Gpu2d.drawLine(
+      canvas: canvas
+      x0: x + 28.0
+      y0: ty
+      x1: x + w - 28.0
+      y1: ty
+      thickness: thick
+      color: mist
+    )
     ty = ty + 18.0
     row = row + 1
   }
@@ -238,7 +509,7 @@ func panelLines(canvas: mod Gpu2dCanvas, x: view Float, y: view Float, w: view F
 # no flicker) and is larger for bass than treble, so the peaks stay calm.
 # Returns 0..1.
 func barLevel(index: view Int, bars: view Int, t: view Float) ret Float {
-  let p: Float = index.toFloat() / (bars.toFloat() - 1.0)   # 0 = bass, 1 = treble
+  let p: Float = index.toFloat() / (bars.toFloat() - 1.0)  # 0 = bass, 1 = treble
   # Bass hump near p=0; a vocal / presence hump near p=0.8.
   let bass: Float = 0.38 * Math.exp(x: 0.0 - (p * p) / 0.06)
   let vocalD: Float = p - 0.80
@@ -246,8 +517,9 @@ func barLevel(index: view Int, bars: view Int, t: view Float) ret Float {
   let base: Float = 0.20 + bass + vocal
   # Small oscillation, bigger for bass and smaller for treble.
   let amp: Float = 0.045 * (1.0 - p) + 0.025
-  let osc: Float = amp * (0.62 * Math.sin(x: t * 7.0 + index.toFloat() * 1.7)
-                        + 0.38 * Math.sin(x: t * 11.0 + index.toFloat() * 2.3))
+  let osc: Float = amp * (0.62 * Math.sin(x: t * 7.0 + index.toFloat() * 1.7) + 0.38 * Math.sin(
+    x: t * 11.0 + index.toFloat() * 2.3
+  ))
   var level: Float = base + osc
   if level < 0.06 {
     level = 0.06
@@ -258,7 +530,14 @@ func barLevel(index: view Int, bars: view Int, t: view Float) ret Float {
   ret level
 }
 
-func soundBars(canvas: mod Gpu2dCanvas, x: view Float, y: view Float, w: view Float, h: view Float, t: view Float) {
+func soundBars(
+  canvas: mod Gpu2dCanvas
+  x: view Float
+  y: view Float
+  w: view Float
+  h: view Float
+  t: view Float
+) {
   let bars: Int = 10
   let areaLeft: Float = x + 30.0
   let areaW: Float = w - 60.0
@@ -276,27 +555,87 @@ func soundBars(canvas: mod Gpu2dCanvas, x: view Float, y: view Float, w: view Fl
     # the highs, with a slow drift for a little shimmer.
     let hue: Float = 0.92 - 0.38 * p + t * 0.02
     # Dark unlit track behind the bar.
-    Gpu2d.drawRoundedRect(canvas: canvas, x: barX, y: baseline - maxH, w: barW, h: maxH, radius: 3.0, color: 0x55070B12)
+    Gpu2d.drawRoundedRect(
+      canvas: canvas
+      x: barX
+      y: baseline - maxH
+      w: barW
+      h: maxH
+      radius: 3.0
+      color: 0x55070B12
+    )
     # Lit portion: a flashy vertical gradient in the bar's own hue (richer at
     # the bottom, a lighter hue-shifted highlight at the top), clipped to the
     # current height so taller bars reveal more of the highlight.
-    let topCol: Int = hsv(hue: hue - 0.06, sat: 0.68, val: 1.0, alpha: 255)
-    let botCol: Int = hsv(hue: hue, sat: 0.88, val: 0.82, alpha: 255)
-    Gpu2d.pushClipRect(canvas: canvas, x: barX, y: baseline - barH, w: barW, h: barH)
-    Gpu2d.drawGradientRect(canvas: canvas, x: barX, y: baseline - maxH, w: barW, h: maxH, radius: 3.0,
-                           from: topCol, to: botCol, angleDeg: 90.0)
+    let topCol: Int = hsv(
+      hue: hue - 0.06
+      sat: 0.68
+      val: 1.0
+      alpha: 255
+    )
+    let botCol: Int = hsv(
+      hue: hue
+      sat: 0.88
+      val: 0.82
+      alpha: 255
+    )
+    Gpu2d.pushClipRect(
+      canvas: canvas
+      x: barX
+      y: baseline - barH
+      w: barW
+      h: barH
+    )
+    Gpu2d.drawGradientRect(
+      canvas: canvas
+      x: barX
+      y: baseline - maxH
+      w: barW
+      h: maxH
+      radius: 3.0
+      from: topCol
+      to: botCol
+      angleDeg: 90.0
+    )
     Gpu2d.popClipRect(canvas: canvas)
     # Bright, hue-tinted peak marker.
-    let capCol: Int = hsv(hue: hue - 0.06, sat: 0.30, val: 1.0, alpha: 255)
-    Gpu2d.drawRoundedRect(canvas: canvas, x: barX, y: baseline - barH - 4.0, w: barW, h: 4.0, radius: 2.0, color: capCol)
+    let capCol: Int = hsv(
+      hue: hue - 0.06
+      sat: 0.30
+      val: 1.0
+      alpha: 255
+    )
+    Gpu2d.drawRoundedRect(
+      canvas: canvas
+      x: barX
+      y: baseline - barH - 4.0
+      w: barW
+      h: 4.0
+      radius: 2.0
+      color: capCol
+    )
     i = i + 1
   }
 }
 
 # --- Panel 6: orbiting translucent discs -------------------------------------
-
-func panelGlass(canvas: mod Gpu2dCanvas, x: view Float, y: view Float, w: view Float, h: view Float, t: view Float) {
-  panel(canvas: canvas, x: x, y: y, w: w, h: h, accent: pink, t: t)
+func panelGlass(
+  canvas: mod Gpu2dCanvas
+  x: view Float
+  y: view Float
+  w: view Float
+  h: view Float
+  t: view Float
+) {
+  panel(
+    canvas: canvas
+    x: x
+    y: y
+    w: w
+    h: h
+    accent: pink
+    t: t
+  )
   let cx: Float = x + w * 0.5
   let cy: Float = y + h * 0.5 + 16.0
   let radius: Float = 74.0
@@ -304,7 +643,7 @@ func panelGlass(canvas: mod Gpu2dCanvas, x: view Float, y: view Float, w: view F
   # Three translucent discs orbiting a common centre, so their overlap shifts.
   var k: Int = 0
   loop k < 3 {
-    let ang: Float = t * 0.8 + k.toFloat() * 2.0944   # 120 degrees apart
+    let ang: Float = t * 0.8 + k.toFloat() * 2.0944  # 120 degrees apart
     let dx: Float = Math.cos(x: ang) * orbit
     let dy: Float = Math.sin(x: ang) * orbit
     var col: Int = 0x99EF5350
@@ -314,30 +653,87 @@ func panelGlass(canvas: mod Gpu2dCanvas, x: view Float, y: view Float, w: view F
     if k is 2 {
       col = 0x9966BB6A
     }
-    Gpu2d.drawRoundedRect(canvas: canvas, x: cx + dx - radius, y: cy + dy - radius, w: radius * 2.0, h: radius * 2.0, radius: radius, color: col)
+    Gpu2d.drawRoundedRect(
+      canvas: canvas
+      x: cx + dx - radius
+      y: cy + dy - radius
+      w: radius * 2.0
+      h: radius * 2.0
+      radius: radius
+      color: col
+    )
     k = k + 1
   }
   # A bright sheen sweeping left-to-right across the overlap.
   let sheenW: Float = 120.0
   let sheenX: Float = x + 24.0 + (w - 48.0 - sheenW) * wave(phase: t * 1.2)
-  Gpu2d.drawGradientRect(canvas: canvas, x: sheenX, y: cy - 10.0, w: sheenW, h: 22.0, radius: 11.0, from: 0x00FFFFFF, to: 0x66FFFFFF, angleDeg: 0.0)
+  Gpu2d.drawGradientRect(
+    canvas: canvas
+    x: sheenX
+    y: cy - 10.0
+    w: sheenW
+    h: 22.0
+    radius: 11.0
+    from: 0x00FFFFFF
+    to: 0x66FFFFFF
+    angleDeg: 0.0
+  )
   # A tracker-style sound visualizer over the venn — bars bouncing like audio.
-  soundBars(canvas: canvas, x: x, y: y, w: w, h: h, t: t)
+  soundBars(
+    canvas: canvas
+    x: x
+    y: y
+    w: w
+    h: h
+    t: t
+  )
 }
 
 # --- Scrolling hero band -----------------------------------------------------
 
 # A full-width header whose diagonal stripes scroll, dots pulse, and a bright
 # marker bounces across — all clipped to a rounded rectangle.
-func heroBand(canvas: mod Gpu2dCanvas, x: view Float, y: view Float, w: view Float, h: view Float, t: view Float) {
-  Gpu2d.pushClipRoundedRect(canvas: canvas, x: x, y: y, w: w, h: h, radius: 20.0)
-  Gpu2d.drawGradientRect(canvas: canvas, x: x, y: y, w: w, h: h, radius: 0.0, from: 0xFF141E30, to: 0xFF243B55, angleDeg: 0.0)
+func heroBand(
+  canvas: mod Gpu2dCanvas
+  x: view Float
+  y: view Float
+  w: view Float
+  h: view Float
+  t: view Float
+) {
+  Gpu2d.pushClipRoundedRect(
+    canvas: canvas
+    x: x
+    y: y
+    w: w
+    h: h
+    radius: 20.0
+  )
+  Gpu2d.drawGradientRect(
+    canvas: canvas
+    x: x
+    y: y
+    w: w
+    h: h
+    radius: 0.0
+    from: 0xFF141E30
+    to: 0xFF243B55
+    angleDeg: 0.0
+  )
   # Diagonal stripes marching across (scroll by a fraction of the spacing).
   let spacing: Float = 46.0
   let scroll: Float = frac(value: t * 0.25) * spacing
   var sx: Float = x - h + scroll
   loop sx < x + w {
-    Gpu2d.drawLine(canvas: canvas, x0: sx, y0: y + h, x1: sx + h, y1: y, thickness: 10.0, color: 0x14FFFFFF)
+    Gpu2d.drawLine(
+      canvas: canvas
+      x0: sx
+      y0: y + h
+      x1: sx + h
+      y1: y
+      thickness: 10.0
+      color: 0x14FFFFFF
+    )
     sx = sx + spacing
   }
   # Four dots on the left, each breathing on its own phase.
@@ -355,35 +751,70 @@ func heroBand(canvas: mod Gpu2dCanvas, x: view Float, y: view Float, w: view Flo
     }
     let dotR: Float = 6.0 + 4.0 * wave(phase: t * 3.0 + k.toFloat() * 0.8)
     let dotX: Float = x + 35.0 + k.toFloat() * 26.0
-    Gpu2d.drawRoundedRect(canvas: canvas, x: dotX - dotR, y: y + h * 0.5 - dotR, w: dotR * 2.0, h: dotR * 2.0, radius: dotR, color: dotCol)
+    Gpu2d.drawRoundedRect(
+      canvas: canvas
+      x: dotX - dotR
+      y: y + h * 0.5 - dotR
+      w: dotR * 2.0
+      h: dotR * 2.0
+      radius: dotR
+      color: dotCol
+    )
     k = k + 1
   }
   # A bright marker bouncing across the band with a gentle vertical bob.
   let markX: Float = x + 150.0 + (w - 400.0) * wave(phase: t * 0.9)
   let markY: Float = y + h * 0.5 + 14.0 * Math.sin(x: t * 3.2)
-  Gpu2d.drawRoundedRect(canvas: canvas, x: markX - 11.0, y: markY - 11.0, w: 22.0, h: 22.0, radius: 11.0, color: 0xFFFFFFFF)
+  Gpu2d.drawRoundedRect(
+    canvas: canvas
+    x: markX - 11.0
+    y: markY - 11.0
+    w: 22.0
+    h: 22.0
+    radius: 11.0
+    color: 0xFFFFFFFF
+  )
   # A gradient pill on the right whose sweep rotates.
-  Gpu2d.drawGradientRect(canvas: canvas, x: x + w - 220.0, y: y + h * 0.5 - 18.0, w: 190.0, h: 36.0, radius: 18.0, from: 0xFF6A11CB, to: 0xFF2575FC, angleDeg: t * 60.0)
+  Gpu2d.drawGradientRect(
+    canvas: canvas
+    x: x + w - 220.0
+    y: y + h * 0.5 - 18.0
+    w: 190.0
+    h: 36.0
+    radius: 18.0
+    from: 0xFF6A11CB
+    to: 0xFF2575FC
+    angleDeg: t * 60.0
+  )
   Gpu2d.popClipRect(canvas: canvas)
 }
 
 func main() ret Int {
   Gpu2d.initWindow(width: 1280, height: 800, title: "Rae 2D — animated vector shapes")
-  var canvas: Gpu2dCanvas = createGpu2dCanvas()   # #907: the app-owned 2D canvas (box + image passes)
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()  # #907: the app-owned 2D canvas (box + image passes)
   # Remember the window's size and position across restarts (the name carries
   # this app's id, since the dir ".rae" is shared with every other app).
-  var windowGeom: WindowGeometry = createWindowGeometry(dir: ".rae", name: "window.gpu2dAnimated.geometry")
+  var windowGeom: WindowGeometry = createWindowGeometry(
+    dir: ".rae"
+    name: "window.gpu2dAnimated.geometry"
+  )
   restoreWindowGeometry(g: windowGeom)
   Gpu2d.setDesignResolution(width: canvasW, height: canvasH, fit: 0)
 
   let dir: String = "examples/102_gpu2d_animated/"
   let font: SdfFont = SdfText.loadSdfFont(
-    jsonPath: "{dir}assets/Roboto-Regular.mtsdf.json",
-    rawAtlasPath: "{dir}assets/Roboto-Regular.mtsdf.raw")
+    jsonPath: "{dir}assets/Roboto-Regular.mtsdf.json"
+    rawAtlasPath: "{dir}assets/Roboto-Regular.mtsdf.raw"
+  )
 
   # The shared FPS debug widget from the 3D renderer examples: amber button
   # top-right, FPS readout, click for the toggle dialog.
-  var dbg: DebugOverlay = createDebugOverlay(button: true, fps: true, memory: true, heartbeat: false)
+  var dbg: DebugOverlay = createDebugOverlay(
+    button: true
+    fps: true
+    memory: true
+    heartbeat: false
+  )
 
   let start: Float64 = Gpu2d.nowSeconds()
 
@@ -394,13 +825,35 @@ func main() ret Int {
     let resized: Bool = Gpu2d.windowResized()
     let t: Float = (now - start) as Float
 
-    Gpu2d.beginFrame(canvas: canvas, r: 0.043, g: 0.055, b: 0.078, a: 1.0)
+    Gpu2d.beginFrame(
+      canvas: canvas
+      r: 0.043
+      g: 0.055
+      b: 0.078
+      a: 1.0
+    )
 
     # A slowly breathing full-canvas gradient behind everything.
-    Gpu2d.drawGradientRect(canvas: canvas, x: 0.0, y: 0.0, w: canvasW, h: canvasH, radius: 0.0,
-                           from: ink, to: 0xFF10151F, angleDeg: 90.0 + 12.0 * Math.sin(x: t * 0.2))
+    Gpu2d.drawGradientRect(
+      canvas: canvas
+      x: 0.0
+      y: 0.0
+      w: canvasW
+      h: canvasH
+      radius: 0.0
+      from: ink
+      to: 0xFF10151F
+      angleDeg: 90.0 + 12.0 * Math.sin(x: t * 0.2)
+    )
 
-    heroBand(canvas: canvas, x: 32.0, y: 28.0, w: canvasW - 64.0, h: 96.0, t: t)
+    heroBand(
+      canvas: canvas
+      x: 32.0
+      y: 28.0
+      w: canvasW - 64.0
+      h: 96.0
+      t: t
+    )
 
     # A 3 x 2 grid of animated demo panels filling the rest of the canvas.
     let marginX: Float = 32.0
@@ -414,18 +867,70 @@ func main() ret Int {
     let row0: Float = top
     let row1: Float = top + rowH + gap
 
-    panelGradients(canvas: canvas, x: col0, y: row0, w: colW, h: rowH, t: t)
-    panelCorners(canvas: canvas, x: col1, y: row0, w: colW, h: rowH, t: t)
-    panelRings(canvas: canvas, x: col2, y: row0, w: colW, h: rowH, t: t)
-    panelBorders(canvas: canvas, x: col0, y: row1, w: colW, h: rowH, t: t)
-    panelLines(canvas: canvas, x: col1, y: row1, w: colW, h: rowH, t: t)
-    panelGlass(canvas: canvas, x: col2, y: row1, w: colW, h: rowH, t: t)
+    panelGradients(
+      canvas: canvas
+      x: col0
+      y: row0
+      w: colW
+      h: rowH
+      t: t
+    )
+    panelCorners(
+      canvas: canvas
+      x: col1
+      y: row0
+      w: colW
+      h: rowH
+      t: t
+    )
+    panelRings(
+      canvas: canvas
+      x: col2
+      y: row0
+      w: colW
+      h: rowH
+      t: t
+    )
+    panelBorders(
+      canvas: canvas
+      x: col0
+      y: row1
+      w: colW
+      h: rowH
+      t: t
+    )
+    panelLines(
+      canvas: canvas
+      x: col1
+      y: row1
+      w: colW
+      h: rowH
+      t: t
+    )
+    panelGlass(
+      canvas: canvas
+      x: col2
+      y: row1
+      w: colW
+      h: rowH
+      t: t
+    )
 
     # FPS widget — every frame does real work, so the readout is the true rate.
-    if updateDebugOverlay(debugOverlay: dbg, screenW: Gpu2d.designWidth(), screenH: Gpu2d.designHeight(),
-                          now: now, didRealWork: true) {
+    if updateDebugOverlay(
+      debugOverlay: dbg
+      screenW: Gpu2d.designWidth()
+      screenH: Gpu2d.designHeight()
+      now: now
+      didRealWork: true
+    ) {
     }
-    drawDebugOverlay(debugOverlay: dbg, canvas: canvas, font: font, didRealWork: true)
+    drawDebugOverlay(
+      debugOverlay: dbg
+      canvas: canvas
+      font: font
+      didRealWork: true
+    )
 
     Gpu2d.endFrame(canvas: canvas)
     updateWindowGeometry(g: windowGeom, now: now, resized: resized)

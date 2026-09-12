@@ -34,6 +34,7 @@ open ui/Theme
 open ui/Transform
 open ui/animationSystem/AnimationSystem
 open Gpu2dCanvas
+
 func main() {
   let backendEnv: String = "gpu2d"
   # `RAE_UI_HEADLESS=1`: see headless.rae.
@@ -46,7 +47,9 @@ func main() {
   # dir() is ".rae" for every app, so a shared name is a shared window
   # and the 3D examples were restoring this phone-shaped one. See lib/ui.
   var windowGeom: WindowGeometry = createWindowGeometry(
-    dir: dir(), name: "window.106_mobile_ui.geometry")
+    dir: dir()
+    name: "window.106_mobile_ui.geometry"
+  )
   restoreWindowGeometry(g: windowGeom)
   # Backend-agnostic window/input hooks are no-ops on GPU2D when the SDL3
   # backend already owns the corresponding event state.
@@ -59,7 +62,7 @@ func main() {
   var bootTheme: UiTheme = createBootTheme(gpuUi: gpuUi)
 
   var scenes: AlbumScenes = loadAllScenes()
-  var texReg: TextureRegistry = createTextureRegistry()   # owns the app's Gpu2dCanvas (#907/#908)
+  var texReg: TextureRegistry = createTextureRegistry()  # owns the app's Gpu2dCanvas (#907/#908)
   ensureAppCacheDirs()
   # Album catalogue (cheap json parse). Per-cover textures are NOT
   # loaded here — the interactive loop streams them in via
@@ -90,7 +93,10 @@ func main() {
   # albums are visible by default. Subsequent launches load the
   # curated subset and stems that aren't in the catalog any more
   # are dropped silently.
-  appState.library = loadLibraryFromJson(albums: appState.mediaLibrary.albums, path: libraryFilePath)
+  appState.library = loadLibraryFromJson(
+    albums: appState.mediaLibrary.albums
+    path: libraryFilePath
+  )
   appState.liked = loadDefaultLiked()
 
   # Log the requested window against the current display. `phoneFrameW/phoneFrameH`
@@ -110,13 +116,20 @@ func main() {
   # bottom-left). First line makes hot reloads visible: a rebuilt binary
   # that failed to relaunch looks identical to one that reloaded and
   # changed nothing, so the generation number is the proof.
-  var logView: LogOverlay = createLogOverlay(capacity: 64, maxLines: 10, anchor: logAnchorTopLeft, fontSize: 13.0)
+  var logView: LogOverlay = createLogOverlay(
+    capacity: 64
+    maxLines: 10
+    anchor: logAnchorTopLeft
+    fontSize: 13.0
+  )
   # Clear the status bar / safe-area inset rather than drawing under it.
   logView.marginY = 44.0
   let reloadGen: Int = nextReloadGeneration()
   logInfoLine(ov: logView, text: "hot reload {reloadGen}")
 
-  log("[viewport] windowPt={viewport.windowPtW}x{viewport.windowPtH} fbPx={viewport.framebufferPxW}x{viewport.framebufferPxH} dpr={viewport.dpr} unitScale={viewport.unitScale} layout={viewport.layoutW}x{viewport.layoutH} deviceActive={viewport.devicePresetActive} frame={frameName} safe={viewport.safeInsetsDu.l},{viewport.safeInsetsDu.t},{viewport.safeInsetsDu.r},{viewport.safeInsetsDu.b}")
+  log(
+    "[viewport] windowPt={viewport.windowPtW}x{viewport.windowPtH} fbPx={viewport.framebufferPxW}x{viewport.framebufferPxH} dpr={viewport.dpr} unitScale={viewport.unitScale} layout={viewport.layoutW}x{viewport.layoutH} deviceActive={viewport.devicePresetActive} frame={frameName} safe={viewport.safeInsetsDu.l},{viewport.safeInsetsDu.t},{viewport.safeInsetsDu.r},{viewport.safeInsetsDu.b}"
+  )
 
   # Spotify-mode integration. ON by default; opt out with
   # RAE_UI_NO_SPOTIFY=1 or RAE_UI_HEADLESS=1 (would focus Spotify).
@@ -136,7 +149,12 @@ func main() {
   if runStressMode(scenes: scenes, appState: appState, gpuUi: gpuUi) {
     ret
   }
-  if runScreenshotMode(scenes: scenes, appState: appState, texReg: texReg, bg: palettePageBg(theme: appState.theme.active)) is false {
+  if runScreenshotMode(
+    scenes: scenes
+    appState: appState
+    texReg: texReg
+    bg: palettePageBg(theme: appState.theme.active)
+  ) is false {
     # Interactive mode: outer loop owns the world for the *current*
     # screen; the inner loop runs frames until either the user closes
     # the window or a `dispatchActions` call returns a different
@@ -240,7 +258,11 @@ func main() {
     # history / freshly (re)mounted; the trigger seeds it without an extra
     # rebuild, then rewindows in place only when the window actually shifts.
     var cachedHistoryWindow: Int = 0 - 1
-    let uiRefresh: UiRefreshCache = createUiRefreshCache(historyLen: 0, playbackRevision: playback.revision, sheetEpoch: 0)
+    let uiRefresh: UiRefreshCache = createUiRefreshCache(
+      historyLen: 0
+      playbackRevision: playback.revision
+      sheetEpoch: 0
+    )
     var lastHoverAnimDirty: Bool = false
     # Absolute timestamps -> Float64 (see docs/primitive-types.md).
     var lastFrameTime: Float64 = 0.0
@@ -310,7 +332,14 @@ func main() {
 
       # Persistent-world build: mounts every screen page + dock /
       # back overlays once; setPageActive flips visibility per nav.
-      let world: UiWorld = buildAppWorld(scenes: scenes, playback: playback, state: appState, texReg: texReg, scrollY: scrollFsm.scrollY, viewport: viewport)
+      let world: UiWorld = buildAppWorld(
+        scenes: scenes
+        playback: playback
+        state: appState
+        texReg: texReg
+        scrollY: scrollFsm.scrollY
+        viewport: viewport
+      )
       uiRefresh.historyLen = appState.playHistory.entries.length
       uiRefresh.uiPlayback.observedRevision = playback.revision
       # Apply the gpu2d design-resolution transform together with the
@@ -382,7 +411,11 @@ func main() {
       # paint it. We DON'T start the clock here — that waits until
       # the first frame actually runs (see `transitionArmed` below).
       if pendingDst {
-        let captured: Bool = captureHeroTarget(anim: anim, world: world, key: appState.currentAlbumStem)
+        let captured: Bool = captureHeroTarget(
+          anim: anim
+          world: world
+          key: appState.currentAlbumStem
+        )
         if captured {
           setHeroVisible(world: world, key: appState.currentAlbumStem, visible: false)
           transitionArmed = true
@@ -409,7 +442,11 @@ func main() {
         # physics step only runs once per OS event wake.
         var scrollAnimating: Bool = false
         # Per-frame scroll bounds. Wrong floor → spring never settles.
-        let sb: ScrollBounds = scrollBoundsForScreen(screen: currentScreen, appState: appState, cachedAlbumScrollFloor: cachedAlbumScrollFloor)
+        let sb: ScrollBounds = scrollBoundsForScreen(
+          screen: currentScreen
+          appState: appState
+          cachedAlbumScrollFloor: cachedAlbumScrollFloor
+        )
         let scrollOnThisScreen: Bool = sb.scrollable
         let scrollFloor: Float = sb.floor
         let scrollOOB: Bool = scrollFsm.scrollY > 0.0 or scrollFsm.scrollY < scrollFloor
@@ -417,7 +454,9 @@ func main() {
         if velAbs < 0.0 {
           velAbs = 0.0 - velAbs
         }
-        # Recent-wheel (0.25s) counts as animating: wheel scroll drives scrollY per-event with velocity==0, so without it the loop idles at the ~20Hz watcher poll between wheel events (still-mouse scroll caps ~20-34fps; mouse-move wakes masked it).
+        # Recent-wheel (0.25s) counts as animating: wheel scroll drives scrollY per-event with
+        # velocity==0, so without it the loop idles at the ~20Hz watcher poll between wheel events
+        # (still-mouse scroll caps ~20-34fps; mouse-move wakes masked it).
         if velAbs > 0.05 or scrollOOB or ((uiNowSeconds() - scrollFsm.lastWheelTime) < 0.25) {
           scrollAnimating = true
         }
@@ -432,11 +471,21 @@ func main() {
             playbackAnimating = true
           }
         }
-        # Interaction/transition motion → busy-render: poll (timeout 0), paint every frame as fast as the machine allows (no FPS cap). Playback alone stays on the throttled 60Hz path so a playing song doesn't peg a core. Idle → blocking event-wait (~0% CPU).
-        let busyAnimating: Bool = anim.active or scrollAnimating or lastHoverAnimDirty or assetsLoading or uiPointerButtonDown(button: mouseButtonLeft)
+        # Interaction/transition motion → busy-render: poll (timeout 0), paint every frame as fast
+        # as the machine allows (no FPS cap). Playback alone stays on the throttled 60Hz path so a
+        # playing song doesn't peg a core. Idle → blocking event-wait (~0% CPU).
+        let busyAnimating: Bool = anim.active or scrollAnimating or lastHoverAnimDirty or assetsLoading or uiPointerButtonDown(
+          button: mouseButtonLeft
+        )
         var timeout: Float = 0.0
         if busyAnimating is false {
-          timeout = nextWaitTimeoutSec(animating: playbackAnimating or uiNowSeconds() < renderUntil, mouseDown: false, pollWatcher: true, frameSec: targetFrameSec, heartbeatSec: 0.0)
+          timeout = nextWaitTimeoutSec(
+            animating: playbackAnimating or uiNowSeconds() < renderUntil
+            mouseDown: false
+            pollWatcher: true
+            frameSec: targetFrameSec
+            heartbeatSec: 0.0
+          )
         }
         # Heartbeat: prints once per frame BEFORE the wait. If this
         # line stops appearing in the log, the loop has stalled
@@ -446,7 +495,9 @@ func main() {
         if loopDebugEnabled {
           loopDebugFrame = loopDebugFrame + 1
           let mouseDown: Bool = uiPointerButtonDown(button: mouseButtonLeft)
-          log("[loop {loopDebugFrame}] screen={screenToInt(s: currentScreen)} scrollY={scrollFsm.scrollY} vel={scrollFsm.velocity} animA={anim.active} animP={playback.isPlaying} animS={scrollAnimating} mouse={mouseDown} timeout={timeout}")
+          log(
+            "[loop {loopDebugFrame}] screen={screenToInt(s: currentScreen)} scrollY={scrollFsm.scrollY} vel={scrollFsm.velocity} animA={anim.active} animP={playback.isPlaying} animS={scrollAnimating} mouse={mouseDown} timeout={timeout}"
+          )
         }
         # When RAE_AUTO_EXIT_SEC is set, clamp the wait so the deadline
         # actually fires on time — otherwise an idle iteration could
@@ -531,7 +582,10 @@ func main() {
               scrollFsm.scrollY = 0.0
             } else {
               if componentHas(this: world.scrollStates, entity: scrollTarget) {
-                let activeScroll: ScrollState = componentGet(this: world.scrollStates, entity: scrollTarget)
+                let activeScroll: ScrollState = componentGet(
+                  this: world.scrollStates
+                  entity: scrollTarget
+                )
                 scrollFsm.scrollY = activeScroll.y
               } else {
                 scrollFsm.scrollY = 0.0
@@ -718,7 +772,13 @@ func main() {
                 cachedHistoryWindow = fvNow
               } else {
                 if fvNow is not cachedHistoryWindow {
-                  rewindowHistoryBody(world: world, body: histBody, history: appState.playHistory, rounded: appState.settings.roundedAlbumCovers, scrollY: scrollFsm.scrollY)
+                  rewindowHistoryBody(
+                    world: world
+                    body: histBody
+                    history: appState.playHistory
+                    rounded: appState.settings.roundedAlbumCovers
+                    scrollY: scrollFsm.scrollY
+                  )
                   cachedHistoryWindow = fvNow
                 }
               }
@@ -743,7 +803,13 @@ func main() {
           # refreshHistoryViewsIfNeeded) so its notch reserve survives.
           # Dock rebuilds that happen in-place are lifted by the code that
           # remounted them; full-world rebuilds handle the same in buildAppWorld.
-          runFrameLayoutTransform(world: world, viewport: viewport, layoutCache: layoutCache, transformCache: transformCache, gpuUi: gpuUi)
+          runFrameLayoutTransform(
+            world: world
+            viewport: viewport
+            layoutCache: layoutCache
+            transformCache: transformCache
+            gpuUi: gpuUi
+          )
 
           let animResult: FrameAnimationResult = runFrameAnimation(
             world: world
@@ -777,11 +843,19 @@ func main() {
           let currentHovered: EntityId = activeDecision.currentHovered
           let currentMouseButtons: Int = activeDecision.currentMouseButtons
           syncDesktopCursor(world: world, hovered: currentHovered, lastKind: lastCursorKind)
-          lastHoverAnimDirty = hoverScaleSystem(world: world, hovered: currentHovered, deltaTime: (now - lastFrameTime) as Float)
+          lastHoverAnimDirty = hoverScaleSystem(
+            world: world
+            hovered: currentHovered
+            deltaTime: (now - lastFrameTime) as Float
+          )
           lastFrameTime = now
-          if lastHoverAnimDirty { active = true }
+          if lastHoverAnimDirty {
+            active = true
+          }
           # Any activity this frame extends the active-render window.
-          if active { renderUntil = now + 0.5 }
+          if active {
+            renderUntil = now + 0.5
+          }
           lastHoveredEntity = currentHovered
           lastMouseButtons = currentMouseButtons
           lastPressed = input.pressedEntity
@@ -795,7 +869,9 @@ func main() {
             # Print the parts: `active` is the OR of the decideActive
             # verdict, asset loading and hover easing, which have
             # very different fixes.
-            log("[loop {loopDebugFrame}] input.events={input.events.length} pressed={input.pressedEntity.index} animating={animating} active={active} decide={activeDecision.active} assets={assetsLoading} hover={lastHoverAnimDirty}")
+            log(
+              "[loop {loopDebugFrame}] input.events={input.events.length} pressed={input.pressedEntity.index} animating={animating} active={active} decide={activeDecision.active} assets={assetsLoading} hover={lastHoverAnimDirty}"
+            )
           }
 
           # GPU2D render phase. With wait-events, dirty detection

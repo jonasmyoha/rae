@@ -39,20 +39,26 @@ type ExternalId {
 }
 
 const externalBuffer: Int = 0
+
 const externalTextureView: Int = 1
+
 # #904: the deferred post-passes bind C-owned samplers and build bind groups
 # over C-owned pipelines (lighting / taa / depth pyramid), so those are
 # adoptable too. A pipeline external is a LAYOUT source and a draw pipeline,
 # never a bind entry.
 const externalRenderPipeline: Int = 2
+
 const externalSampler: Int = 3
 
 # ----- resource references (ordered bind entries and attachments) --------
-
 const refBuffer: Int = 0
+
 const refTextureView: Int = 1
+
 const refSampler: Int = 2
+
 const refExternal: Int = 3
+
 # A placeholder entry: consumes a binding number without binding anything, for
 # a layout whose entry point leaves a binding unused (wgpu derives layouts from
 # the bindings an entry point actually touches).
@@ -68,19 +74,39 @@ type ResourceRef {
 }
 
 func bufferRef(id: view BufferId) ret ResourceRef {
-  ret ResourceRef { refKind: refBuffer, managerTag: id.managerTag, slot: id.slot, generation: id.generation }
+  ret ResourceRef {
+    refKind: refBuffer
+    managerTag: id.managerTag
+    slot: id.slot
+    generation: id.generation
+  }
 }
 
 func textureViewRef(id: view TextureViewId) ret ResourceRef {
-  ret ResourceRef { refKind: refTextureView, managerTag: id.managerTag, slot: id.slot, generation: id.generation }
+  ret ResourceRef {
+    refKind: refTextureView
+    managerTag: id.managerTag
+    slot: id.slot
+    generation: id.generation
+  }
 }
 
 func samplerRef(id: view SamplerId) ret ResourceRef {
-  ret ResourceRef { refKind: refSampler, managerTag: id.managerTag, slot: id.slot, generation: id.generation }
+  ret ResourceRef {
+    refKind: refSampler
+    managerTag: id.managerTag
+    slot: id.slot
+    generation: id.generation
+  }
 }
 
 func externalRef(id: view ExternalId) ret ResourceRef {
-  ret ResourceRef { refKind: refExternal, managerTag: id.managerTag, slot: id.slot, generation: id.generation }
+  ret ResourceRef {
+    refKind: refExternal
+    managerTag: id.managerTag
+    slot: id.slot
+    generation: id.generation
+  }
 }
 
 func skipRef() ret ResourceRef {
@@ -93,108 +119,184 @@ func noRef() ret ResourceRef {
 
 # The slot-table kind a reference pins and validates against.
 func refDepKind(ref: view ResourceRef) ret Int {
-  if ref.refKind is refBuffer { ret kindBuffer }
-  if ref.refKind is refTextureView { ret kindTextureView }
-  if ref.refKind is refSampler { ret kindSampler }
+  if ref.refKind is refBuffer {
+    ret kindBuffer
+  }
+  if ref.refKind is refTextureView {
+    ret kindTextureView
+  }
+  if ref.refKind is refSampler {
+    ret kindSampler
+  }
   ret kindExternal
 }
 
 func isValidRef(resources: view GpuResources, ref: view ResourceRef) ret Bool {
-  if ref.managerTag is not resources.managerTag { ret false }
-  ret slotIsLive(table: tableFor(resources: resources, kind: refDepKind(ref: ref)), capacity: resources.capacity, slot: ref.slot, generation: ref.generation)
+  if ref.managerTag is not resources.managerTag {
+    ret false
+  }
+  ret slotIsLive(
+    table: tableFor(resources: resources, kind: refDepKind(ref: ref))
+    capacity: resources.capacity
+    slot: ref.slot
+    generation: ref.generation
+  )
 }
 
 # An external's sub-kind (buffer or texture view); -1 when not an external.
 func externalKind(resources: view GpuResources, ref: view ResourceRef) ret Int {
-  if ref.refKind is not refExternal { ret 0 - 1 }
+  if ref.refKind is not refExternal {
+    ret 0 - 1
+  }
   ret intAt(list: resources.externals.nativeIndex, index: ref.slot)
 }
 
 func refIsBuffer(resources: view GpuResources, ref: view ResourceRef) ret Bool {
-  if ref.refKind is refBuffer { ret true }
+  if ref.refKind is refBuffer {
+    ret true
+  }
   ret externalKind(resources: resources, ref: ref) is externalBuffer
 }
 
 func refIsTextureView(resources: view GpuResources, ref: view ResourceRef) ret Bool {
-  if ref.refKind is refTextureView { ret true }
+  if ref.refKind is refTextureView {
+    ret true
+  }
   ret externalKind(resources: resources, ref: ref) is externalTextureView
 }
 
 # The raw native handle behind a reference — an unchecked pointer, so this is
 # unsafe and only used inside unsafe blocks after validation.
 func refHandle(resources: view GpuResources, ref: view ResourceRef) unsafe ret Ptr {
-  unsafe { ret slotHandle(table: tableFor(resources: resources, kind: refDepKind(ref: ref)), slot: ref.slot) }
+  unsafe {
+    ret slotHandle(
+      table: tableFor(resources: resources, kind: refDepKind(ref: ref))
+      slot: ref.slot
+    )
+  }
 }
 
 # The authoritative native size of a buffer reference (manager or external).
 func refBufferSize(resources: view GpuResources, ref: view ResourceRef) ret Int {
-  if refIsBuffer(resources: resources, ref: ref) is false { ret 0 - 1 }
-  unsafe { ret wgpuBufferGetSize(buffer: refHandle(resources: resources, ref: ref)) as Int }
+  if refIsBuffer(resources: resources, ref: ref) is false {
+    ret 0 - 1
+  }
+  unsafe {
+    ret wgpuBufferGetSize(buffer: refHandle(resources: resources, ref: ref)) as Int
+  }
 }
 
 func refBufferUsage(resources: view GpuResources, ref: view ResourceRef) ret UInt64 {
-  if refIsBuffer(resources: resources, ref: ref) is false { ret 0 as UInt64 }
-  unsafe { ret wgpuBufferGetUsage(buffer: refHandle(resources: resources, ref: ref)) }
+  if refIsBuffer(resources: resources, ref: ref) is false {
+    ret 0 as UInt64
+  }
+  unsafe {
+    ret wgpuBufferGetUsage(buffer: refHandle(resources: resources, ref: ref))
+  }
 }
 
 # Records a reference (and a manager view's parent texture, indirectly) as a
 # dependency in the arena.
 func appendRefDep(resources: mod GpuResources, ref: view ResourceRef) {
-  appendDep(resources: resources, kind: refDepKind(ref: ref), slot: ref.slot, generation: ref.generation)
+  appendDep(
+    resources: resources
+    kind: refDepKind(ref: ref)
+    slot: ref.slot
+    generation: ref.generation
+  )
   if ref.refKind is refTextureView {
     let parent: Int = intAt(list: resources.textureViews.parentSlot, index: ref.slot)
     if parent >= 0 {
-      appendDep(resources: resources, kind: kindTexture, slot: parent, generation: intAt(list: resources.textureViews.parentGeneration, index: ref.slot))
+      appendDep(
+        resources: resources
+        kind: kindTexture
+        slot: parent
+        generation: intAt(list: resources.textureViews.parentGeneration, index: ref.slot)
+      )
     }
   }
 }
 
 # ----- adopted externals ----------------------------------------------
-
 func isValidExternal(resources: view GpuResources, id: view ExternalId) ret Bool {
-  if id.managerTag is not resources.managerTag { ret false }
-  ret slotIsLive(table: resources.externals, capacity: resources.capacity, slot: id.slot, generation: id.generation)
+  if id.managerTag is not resources.managerTag {
+    ret false
+  }
+  ret slotIsLive(
+    table: resources.externals
+    capacity: resources.capacity
+    slot: id.slot
+    generation: id.generation
+  )
 }
 
 func liveExternalCount(resources: view GpuResources) ret Int {
   ret liveCount(table: resources.externals, capacity: resources.capacity)
 }
 
-func adoptExternal(resources: mod GpuResources, handle: copy Ptr, subKind: view Int) unsafe ret opt ExternalId {
+func adoptExternal(
+  resources: mod GpuResources
+  handle: copy Ptr
+  subKind: view Int
+) unsafe ret opt ExternalId {
   let slot: Int = findFreeSlot(table: resources.externals, capacity: resources.capacity)
-  if slot < 0 { ret none }
+  if slot < 0 {
+    ret none
+  }
   unsafe {
-    if handle is webgpuNull() { ret none }
+    if handle is webgpuNull() {
+      ret none
+    }
     storeHandle(table: resources.externals, slot: slot, handle: handle)
   }
   resources.externals.nativeIndex.set(index: slot, value: subKind)
-  ret ExternalId { managerTag: resources.managerTag, slot: slot, generation: slotGeneration(table: resources.externals, slot: slot) }
+  ret ExternalId {
+    managerTag: resources.managerTag
+    slot: slot
+    generation: slotGeneration(table: resources.externals, slot: slot)
+  }
 }
 
 # Adopts a native buffer the adopter owns and keeps valid while adopted.
 func adoptExternalBuffer(resources: mod GpuResources, handle: copy Ptr) unsafe ret opt ExternalId {
-  unsafe { ret adoptExternal(resources: resources, handle: handle, subKind: externalBuffer) }
+  unsafe {
+    ret adoptExternal(resources: resources, handle: handle, subKind: externalBuffer)
+  }
 }
 
 # Adopts a native texture view the adopter owns and keeps valid while adopted.
-func adoptExternalTextureView(resources: mod GpuResources, handle: copy Ptr) unsafe ret opt ExternalId {
-  unsafe { ret adoptExternal(resources: resources, handle: handle, subKind: externalTextureView) }
+func adoptExternalTextureView(
+  resources: mod GpuResources
+  handle: copy Ptr
+) unsafe ret opt ExternalId {
+  unsafe {
+    ret adoptExternal(resources: resources, handle: handle, subKind: externalTextureView)
+  }
 }
 
 # Adopts a native sampler the adopter owns and keeps valid while adopted.
 func adoptExternalSampler(resources: mod GpuResources, handle: copy Ptr) unsafe ret opt ExternalId {
-  unsafe { ret adoptExternal(resources: resources, handle: handle, subKind: externalSampler) }
+  unsafe {
+    ret adoptExternal(resources: resources, handle: handle, subKind: externalSampler)
+  }
 }
 
 # Adopts a native RENDER PIPELINE the adopter owns (a C-created deferred pass
 # pipeline): usable as the layout source of createRenderBindGroupExternal and
 # as the pipeline of recordDrawInPassExternal.
-func adoptExternalRenderPipeline(resources: mod GpuResources, handle: copy Ptr) unsafe ret opt ExternalId {
-  unsafe { ret adoptExternal(resources: resources, handle: handle, subKind: externalRenderPipeline) }
+func adoptExternalRenderPipeline(
+  resources: mod GpuResources
+  handle: copy Ptr
+) unsafe ret opt ExternalId {
+  unsafe {
+    ret adoptExternal(resources: resources, handle: handle, subKind: externalRenderPipeline)
+  }
 }
 
 func isExternalRenderPipeline(resources: view GpuResources, id: view ExternalId) ret Bool {
-  if isValidExternal(resources: resources, id: id) is false { ret false }
+  if isValidExternal(resources: resources, id: id) is false {
+    ret false
+  }
   ret intAt(list: resources.externals.nativeIndex, index: id.slot) is externalRenderPipeline
 }
 
@@ -203,7 +305,11 @@ func isExternalRenderPipeline(resources: view GpuResources, id: view ExternalId)
 # (so releaseExternalIds can drop the whole generation at once) and returns
 # the bind entry for it. A null handle yields a dead reference, so the bind
 # group creation fails closed instead of binding nothing.
-func adoptBufferRef(resources: mod GpuResources, adopted: mod List(ExternalId), handle: copy Ptr) unsafe ret ResourceRef {
+func adoptBufferRef(
+  resources: mod GpuResources
+  adopted: mod List(ExternalId)
+  handle: copy Ptr
+) unsafe ret ResourceRef {
   unsafe {
     if let id: ExternalId = adoptExternalBuffer(resources: resources, handle: handle) {
       adopted.add(value: id)
@@ -213,7 +319,11 @@ func adoptBufferRef(resources: mod GpuResources, adopted: mod List(ExternalId), 
   ret noRef()
 }
 
-func adoptTextureViewRef(resources: mod GpuResources, adopted: mod List(ExternalId), handle: copy Ptr) unsafe ret ResourceRef {
+func adoptTextureViewRef(
+  resources: mod GpuResources
+  adopted: mod List(ExternalId)
+  handle: copy Ptr
+) unsafe ret ResourceRef {
   unsafe {
     if let id: ExternalId = adoptExternalTextureView(resources: resources, handle: handle) {
       adopted.add(value: id)
@@ -223,7 +333,11 @@ func adoptTextureViewRef(resources: mod GpuResources, adopted: mod List(External
   ret noRef()
 }
 
-func adoptSamplerRef(resources: mod GpuResources, adopted: mod List(ExternalId), handle: copy Ptr) unsafe ret ResourceRef {
+func adoptSamplerRef(
+  resources: mod GpuResources
+  adopted: mod List(ExternalId)
+  handle: copy Ptr
+) unsafe ret ResourceRef {
   unsafe {
     if let id: ExternalId = adoptExternalSampler(resources: resources, handle: handle) {
       adopted.add(value: id)
@@ -237,7 +351,9 @@ func adoptSamplerRef(resources: mod GpuResources, adopted: mod List(ExternalId),
 # adoptions, dropped after the bind groups over them were retired).
 func releaseExternalIds(resources: mod GpuResources, list: mod List(ExternalId)) {
   loop var i: Int = 0, i < list.length, ++i {
-    if let id: ExternalId = list.copyAt(index: i) { releaseExternal(resources: resources, id: id) }
+    if let id: ExternalId = list.copyAt(index: i) {
+      releaseExternal(resources: resources, id: id)
+    }
   }
   list.clear()
 }
@@ -245,16 +361,31 @@ func releaseExternalIds(resources: mod GpuResources, list: mod List(ExternalId))
 # Drops the reference: the generation bumps (no new use) and the slot frees
 # once nothing pins it. The native handle is NOT released — it never was ours.
 func releaseExternal(resources: mod GpuResources, id: view ExternalId) ret Bool {
-  if isValidExternal(resources: resources, id: id) is false { ret false }
-  unsafe { retireSlot(table: resources.externals, slot: id.slot, kind: kindExternal, empty: webgpuNull()) }
+  if isValidExternal(resources: resources, id: id) is false {
+    ret false
+  }
+  unsafe {
+    retireSlot(
+      table: resources.externals
+      slot: id.slot
+      kind: kindExternal
+      empty: webgpuNull()
+    )
+  }
   ret true
 }
 
 # ----- render pipelines -------------------------------------------------
-
 func isValidRenderPipeline(resources: view GpuResources, id: view RenderPipelineId) ret Bool {
-  if id.managerTag is not resources.managerTag { ret false }
-  ret slotIsLive(table: resources.renderPipelines, capacity: resources.capacity, slot: id.slot, generation: id.generation)
+  if id.managerTag is not resources.managerTag {
+    ret false
+  }
+  ret slotIsLive(
+    table: resources.renderPipelines
+    capacity: resources.capacity
+    slot: id.slot
+    generation: id.generation
+  )
 }
 
 func liveRenderPipelineCount(resources: view GpuResources) ret Int {
@@ -290,46 +421,103 @@ type RenderPipelineSpec {
   cullMode: Int32
 }
 
-func createRenderPipeline(resources: mod GpuResources, wgsl: view String, vertexEntry: view String, fragmentEntry: view String, spec: view RenderPipelineSpec) ret opt RenderPipelineId {
-  if wgsl.length() is 0 or vertexEntry.length() is 0 or fragmentEntry.length() is 0 { ret none }
-  if spec.attributes.length > 0 and spec.vertexStride < 1 { ret none }
-  if spec.colorFormats.length < 1 { ret none }
+func createRenderPipeline(
+  resources: mod GpuResources
+  wgsl: view String
+  vertexEntry: view String
+  fragmentEntry: view String
+  spec: view RenderPipelineSpec
+) ret opt RenderPipelineId {
+  if wgsl.length() is 0 or vertexEntry.length() is 0 or fragmentEntry.length() is 0 {
+    ret none
+  }
+  if spec.attributes.length > 0 and spec.vertexStride < 1 {
+    ret none
+  }
+  if spec.colorFormats.length < 1 {
+    ret none
+  }
   let slot: Int = findFreeSlot(table: resources.renderPipelines, capacity: resources.capacity)
-  if slot < 0 { ret none }
+  if slot < 0 {
+    ret none
+  }
   unsafe {
     let sourceC: Buffer(Any) = wgsl.toCStr()
     var sourceList: List(WGPUShaderSourceWGSL) = List.create(WGPUShaderSourceWGSL, cap: 1)
-    sourceList.add(value: { chain: { sType: WGPUSType_ShaderSourceWGSL }, code: { data: sourceC, length: WGPU_STRLEN } })
+    sourceList.add(
+      value: {
+        chain: { sType: WGPUSType_ShaderSourceWGSL }
+        code: { data: sourceC, length: WGPU_STRLEN }
+      }
+    )
     let moduleDescriptor: WGPUShaderModuleDescriptor = { nextInChain: sourceList.data }
-    let shaderModule: Ptr = wgpuDeviceCreateShaderModule(device: webgpuDevice(), descriptor: moduleDescriptor)
-    if shaderModule is webgpuNull() { ret none }
-    var attributes: List(WGPUVertexAttribute) = List.create(WGPUVertexAttribute, cap: spec.attributes.length)
+    let shaderModule: Ptr = wgpuDeviceCreateShaderModule(
+      device: webgpuDevice()
+      descriptor: moduleDescriptor
+    )
+    if shaderModule is webgpuNull() {
+      ret none
+    }
+    var attributes: List(WGPUVertexAttribute) = List.create(
+      WGPUVertexAttribute
+      cap: spec.attributes.length
+    )
     var i: Int = 0
     loop i < spec.attributes.length {
       if let attribute: VertexAttributeSpec = spec.attributes.copyAt(index: i) {
-        attributes.add(value: { format: attribute.format, offset: attribute.offset as UInt64, shaderLocation: attribute.location as UInt32 })
+        attributes.add(
+          value: {
+            format: attribute.format
+            offset: attribute.offset as UInt64
+            shaderLocation: attribute.location as UInt32
+          }
+        )
       }
       i = i + 1
     }
     var layouts: List(WGPUVertexBufferLayout) = List.create(WGPUVertexBufferLayout, cap: 1)
     var bufferCount: Int = 0
     if attributes.length > 0 {
-      layouts.add(value: { stepMode: WGPUVertexStepMode_Vertex, arrayStride: spec.vertexStride as UInt64, attributeCount: attributes.length as UInt64, attributes: attributes.data })
+      layouts.add(
+        value: {
+          stepMode: WGPUVertexStepMode_Vertex
+          arrayStride: spec.vertexStride as UInt64
+          attributeCount: attributes.length as UInt64
+          attributes: attributes.data
+        }
+      )
       bufferCount = 1
     }
     var sourceFactor: Int32 = WGPUBlendFactor_SrcAlpha
-    if spec.premultiplied { sourceFactor = WGPUBlendFactor_One }
+    if spec.premultiplied {
+      sourceFactor = WGPUBlendFactor_One
+    }
     var blends: List(WGPUBlendState) = List.create(WGPUBlendState, cap: 1)
-    blends.add(value: {
-      color: { operation: WGPUBlendOperation_Add, srcFactor: sourceFactor, dstFactor: WGPUBlendFactor_OneMinusSrcAlpha }
-      alpha: { operation: WGPUBlendOperation_Add, srcFactor: WGPUBlendFactor_One, dstFactor: WGPUBlendFactor_OneMinusSrcAlpha }
-    })
-    var targets: List(WGPUColorTargetState) = List.create(WGPUColorTargetState, cap: spec.colorFormats.length)
+    blends.add(
+      value: {
+        color: {
+          operation: WGPUBlendOperation_Add
+          srcFactor: sourceFactor
+          dstFactor: WGPUBlendFactor_OneMinusSrcAlpha
+        }
+        alpha: {
+          operation: WGPUBlendOperation_Add
+          srcFactor: WGPUBlendFactor_One
+          dstFactor: WGPUBlendFactor_OneMinusSrcAlpha
+        }
+      }
+    )
+    var targets: List(WGPUColorTargetState) = List.create(
+      WGPUColorTargetState
+      cap: spec.colorFormats.length
+    )
     var target: Int = 0
     loop target < spec.colorFormats.length {
       if let colorFormat: Int32 = spec.colorFormats.copyAt(index: target) {
         if spec.alphaBlend {
-          targets.add(value: { format: colorFormat, blend: blends.data, writeMask: WGPUColorWriteMask_All })
+          targets.add(
+            value: { format: colorFormat, blend: blends.data, writeMask: WGPUColorWriteMask_All }
+          )
         } else {
           targets.add(value: { format: colorFormat, writeMask: WGPUColorWriteMask_All })
         }
@@ -339,32 +527,69 @@ func createRenderPipeline(resources: mod GpuResources, wgsl: view String, vertex
     let vertexC: Buffer(Any) = vertexEntry.toCStr()
     let fragmentC: Buffer(Any) = fragmentEntry.toCStr()
     var fragments: List(WGPUFragmentState) = List.create(WGPUFragmentState, cap: 1)
-    fragments.add(value: { module: shaderModule, entryPoint: { data: fragmentC, length: WGPU_STRLEN }, targetCount: targets.length as UInt64, targets: targets.data })
+    fragments.add(
+      value: {
+        module: shaderModule
+        entryPoint: { data: fragmentC, length: WGPU_STRLEN }
+        targetCount: targets.length as UInt64
+        targets: targets.data
+      }
+    )
     var depths: List(WGPUDepthStencilState) = List.create(WGPUDepthStencilState, cap: 1)
     var writeFlag: Int32 = WGPUOptionalBool_False
-    if spec.depthWrite { writeFlag = WGPUOptionalBool_True }
+    if spec.depthWrite {
+      writeFlag = WGPUOptionalBool_True
+    }
     depths.add(value: {
       format: spec.depthFormat
       depthWriteEnabled: writeFlag
       depthCompare: spec.depthCompare
-      stencilFront: { compare: WGPUCompareFunction_Always, failOp: WGPUStencilOperation_Keep, depthFailOp: WGPUStencilOperation_Keep, passOp: WGPUStencilOperation_Keep }
-      stencilBack: { compare: WGPUCompareFunction_Always, failOp: WGPUStencilOperation_Keep, depthFailOp: WGPUStencilOperation_Keep, passOp: WGPUStencilOperation_Keep }
+      stencilFront: {
+        compare: WGPUCompareFunction_Always
+        failOp: WGPUStencilOperation_Keep
+        depthFailOp: WGPUStencilOperation_Keep
+        passOp: WGPUStencilOperation_Keep
+      }
+      stencilBack: {
+        compare: WGPUCompareFunction_Always
+        failOp: WGPUStencilOperation_Keep
+        depthFailOp: WGPUStencilOperation_Keep
+        passOp: WGPUStencilOperation_Keep
+      }
       stencilReadMask: 4294967295 as UInt32
       stencilWriteMask: 4294967295 as UInt32
     })
     var handle: Ptr = webgpuNull()
     if spec.depthFormat is (0 as Int32) {
       let descriptor: WGPURenderPipelineDescriptor = {
-        vertex: { module: shaderModule, entryPoint: { data: vertexC, length: WGPU_STRLEN }, bufferCount: bufferCount as UInt64, buffers: layouts.data }
-        primitive: { topology: WGPUPrimitiveTopology_TriangleList, frontFace: WGPUFrontFace_CCW, cullMode: spec.cullMode }
+        vertex: {
+          module: shaderModule
+          entryPoint: { data: vertexC, length: WGPU_STRLEN }
+          bufferCount: bufferCount as UInt64
+          buffers: layouts.data
+        }
+        primitive: {
+          topology: WGPUPrimitiveTopology_TriangleList
+          frontFace: WGPUFrontFace_CCW
+          cullMode: spec.cullMode
+        }
         multisample: { count: 1 as UInt32, mask: 4294967295 as UInt32 }
         fragment: fragments.data
       }
       handle = wgpuDeviceCreateRenderPipeline(device: webgpuDevice(), descriptor: descriptor)
     } else {
       let descriptor: WGPURenderPipelineDescriptor = {
-        vertex: { module: shaderModule, entryPoint: { data: vertexC, length: WGPU_STRLEN }, bufferCount: bufferCount as UInt64, buffers: layouts.data }
-        primitive: { topology: WGPUPrimitiveTopology_TriangleList, frontFace: WGPUFrontFace_CCW, cullMode: spec.cullMode }
+        vertex: {
+          module: shaderModule
+          entryPoint: { data: vertexC, length: WGPU_STRLEN }
+          bufferCount: bufferCount as UInt64
+          buffers: layouts.data
+        }
+        primitive: {
+          topology: WGPUPrimitiveTopology_TriangleList
+          frontFace: WGPUFrontFace_CCW
+          cullMode: spec.cullMode
+        }
         depthStencil: depths.data
         multisample: { count: 1 as UInt32, mask: 4294967295 as UInt32 }
         fragment: fragments.data
@@ -372,15 +597,30 @@ func createRenderPipeline(resources: mod GpuResources, wgsl: view String, vertex
       handle = wgpuDeviceCreateRenderPipeline(device: webgpuDevice(), descriptor: descriptor)
     }
     wgpuShaderModuleRelease(shaderModule: shaderModule)
-    if handle is webgpuNull() { ret none }
+    if handle is webgpuNull() {
+      ret none
+    }
     storeHandle(table: resources.renderPipelines, slot: slot, handle: handle)
   }
-  ret RenderPipelineId { managerTag: resources.managerTag, slot: slot, generation: slotGeneration(table: resources.renderPipelines, slot: slot) }
+  ret RenderPipelineId {
+    managerTag: resources.managerTag
+    slot: slot
+    generation: slotGeneration(table: resources.renderPipelines, slot: slot)
+  }
 }
 
 func retireRenderPipeline(resources: mod GpuResources, id: view RenderPipelineId) ret Bool {
-  if isValidRenderPipeline(resources: resources, id: id) is false { ret false }
-  unsafe { retireSlot(table: resources.renderPipelines, slot: id.slot, kind: kindRenderPipeline, empty: webgpuNull()) }
+  if isValidRenderPipeline(resources: resources, id: id) is false {
+    ret false
+  }
+  unsafe {
+    retireSlot(
+      table: resources.renderPipelines
+      slot: id.slot
+      kind: kindRenderPipeline
+      empty: webgpuNull()
+    )
+  }
   ret true
 }
 
@@ -388,20 +628,39 @@ func retireRenderPipeline(resources: mod GpuResources, id: view RenderPipelineId
 
 # Appends `entries` (binding i = entry i, skips consume a number) as native
 # bind-group entries and as dependencies in the arena. false if any is dead.
-func appendOrderedEntries(resources: mod GpuResources, entries: view List(ResourceRef), nativeEntries: mod List(WGPUBindGroupEntry)) ret Bool {
+func appendOrderedEntries(
+  resources: mod GpuResources
+  entries: view List(ResourceRef)
+  nativeEntries: mod List(WGPUBindGroupEntry)
+) ret Bool {
   var i: Int = 0
   loop i < entries.length {
     if let entry: ResourceRef = entries.copyAt(index: i) {
       if entry.refKind is not refSkip {
-        if isValidRef(resources: resources, ref: entry) is false { ret false }
+        if isValidRef(resources: resources, ref: entry) is false {
+          ret false
+        }
         appendRefDep(resources: resources, ref: entry)
         unsafe {
           if refIsBuffer(resources: resources, ref: entry) {
-            nativeEntries.add(value: { binding: i as UInt32, buffer: refHandle(resources: resources, ref: entry), size: refBufferSize(resources: resources, ref: entry) as UInt64 })
+            nativeEntries.add(
+              value: {
+                binding: i as UInt32
+                buffer: refHandle(resources: resources, ref: entry)
+                size: refBufferSize(resources: resources, ref: entry) as UInt64
+              }
+            )
           } else if refIsTextureView(resources: resources, ref: entry) {
-            nativeEntries.add(value: { binding: i as UInt32, textureView: refHandle(resources: resources, ref: entry) })
+            nativeEntries.add(
+              value: {
+                binding: i as UInt32
+                textureView: refHandle(resources: resources, ref: entry)
+              }
+            )
           } else {
-            nativeEntries.add(value: { binding: i as UInt32, sampler: refHandle(resources: resources, ref: entry) })
+            nativeEntries.add(
+              value: { binding: i as UInt32, sampler: refHandle(resources: resources, ref: entry) }
+            )
           }
         }
       }
@@ -414,41 +673,85 @@ func appendOrderedEntries(resources: mod GpuResources, entries: view List(Resour
 # Finishes a bind group over `layout` (consumed: released here) whose
 # dependencies were appended from `start`: creates the native group, stores
 # it in `slot`, pins the dependency slice.
-func finishBindGroup(resources: mod GpuResources, slot: view Int, start: view Int, layout: copy Ptr, nativeEntries: view List(WGPUBindGroupEntry)) ret opt BindGroupId {
+func finishBindGroup(
+  resources: mod GpuResources
+  slot: view Int
+  start: view Int
+  layout: copy Ptr
+  nativeEntries: view List(WGPUBindGroupEntry)
+) ret opt BindGroupId {
   let count: Int = resources.depKinds.length - start
   if sliceIsLive(resources: resources, start: start, count: count) is false {
-    unsafe { wgpuBindGroupLayoutRelease(bindGroupLayout: layout) }
+    unsafe {
+      wgpuBindGroupLayoutRelease(bindGroupLayout: layout)
+    }
     ret none
   }
   unsafe {
-    let descriptor: WGPUBindGroupDescriptor = { layout: layout, entryCount: nativeEntries.length as UInt64, entries: nativeEntries.data }
+    let descriptor: WGPUBindGroupDescriptor = {
+      layout: layout
+      entryCount: nativeEntries.length as UInt64
+      entries: nativeEntries.data
+    }
     let handle: Ptr = wgpuDeviceCreateBindGroup(device: webgpuDevice(), descriptor: descriptor)
     wgpuBindGroupLayoutRelease(bindGroupLayout: layout)
-    if handle is webgpuNull() { ret none }
+    if handle is webgpuNull() {
+      ret none
+    }
     storeHandle(table: resources.bindGroups, slot: slot, handle: handle)
   }
   resources.bindGroups.depStart.set(index: slot, value: start)
   resources.bindGroups.depCount.set(index: slot, value: count)
   pinSlice(resources: resources, start: start, count: count)
-  ret BindGroupId { managerTag: resources.managerTag, slot: slot, generation: slotGeneration(table: resources.bindGroups, slot: slot) }
+  ret BindGroupId {
+    managerTag: resources.managerTag
+    slot: slot
+    generation: slotGeneration(table: resources.bindGroups, slot: slot)
+  }
 }
 
 # Group 0 of `pipeline` with `entries` bound at consecutive binding numbers in
 # list order (buffers bound whole). Every entry must be live; the group pins
 # each entry (and a manager view's texture) for its lifetime, exactly like the
 # compute bind groups, and is a BindGroupId usable by recordDrawIndexed.
-func createRenderBindGroup(resources: mod GpuResources, pipeline: view RenderPipelineId, entries: view List(ResourceRef)) ret opt BindGroupId {
-  if isValidRenderPipeline(resources: resources, id: pipeline) is false { ret none }
-  if entries.length < 1 { ret none }
+func createRenderBindGroup(
+  resources: mod GpuResources
+  pipeline: view RenderPipelineId
+  entries: view List(ResourceRef)
+) ret opt BindGroupId {
+  if isValidRenderPipeline(resources: resources, id: pipeline) is false {
+    ret none
+  }
+  if entries.length < 1 {
+    ret none
+  }
   let slot: Int = findFreeSlot(table: resources.bindGroups, capacity: resources.capacity)
-  if slot < 0 { ret none }
+  if slot < 0 {
+    ret none
+  }
   let start: Int = resources.depKinds.length
-  appendDep(resources: resources, kind: kindRenderPipeline, slot: pipeline.slot, generation: pipeline.generation)
+  appendDep(
+    resources: resources
+    kind: kindRenderPipeline
+    slot: pipeline.slot
+    generation: pipeline.generation
+  )
   var nativeEntries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: entries.length)
-  if appendOrderedEntries(resources: resources, entries: entries, nativeEntries: nativeEntries) is false { ret none }
+  if appendOrderedEntries(resources: resources, entries: entries, nativeEntries: nativeEntries) is false {
+    ret none
+  }
   unsafe {
-    let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: slotHandle(table: resources.renderPipelines, slot: pipeline.slot), groupIndex: 0 as UInt32)
-    ret finishBindGroup(resources: resources, slot: slot, start: start, layout: layout, nativeEntries: nativeEntries)
+    let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(
+      renderPipeline: slotHandle(table: resources.renderPipelines, slot: pipeline.slot)
+      groupIndex: 0 as UInt32
+    )
+    ret finishBindGroup(
+      resources: resources
+      slot: slot
+      start: start
+      layout: layout
+      nativeEntries: nativeEntries
+    )
   }
 }
 
@@ -456,36 +759,88 @@ func createRenderBindGroup(resources: mod GpuResources, pipeline: view RenderPip
 # with `entries` in binding order; the group pins the external pipeline slot
 # like a manager pipeline, so releasing the external behind a live group is
 # deferred the same way.
-func createRenderBindGroupExternal(resources: mod GpuResources, pipeline: view ExternalId, entries: view List(ResourceRef)) ret opt BindGroupId {
-  if isExternalRenderPipeline(resources: resources, id: pipeline) is false { ret none }
-  if entries.length < 1 { ret none }
+func createRenderBindGroupExternal(
+  resources: mod GpuResources
+  pipeline: view ExternalId
+  entries: view List(ResourceRef)
+) ret opt BindGroupId {
+  if isExternalRenderPipeline(resources: resources, id: pipeline) is false {
+    ret none
+  }
+  if entries.length < 1 {
+    ret none
+  }
   let slot: Int = findFreeSlot(table: resources.bindGroups, capacity: resources.capacity)
-  if slot < 0 { ret none }
+  if slot < 0 {
+    ret none
+  }
   let start: Int = resources.depKinds.length
-  appendDep(resources: resources, kind: kindExternal, slot: pipeline.slot, generation: pipeline.generation)
+  appendDep(
+    resources: resources
+    kind: kindExternal
+    slot: pipeline.slot
+    generation: pipeline.generation
+  )
   var nativeEntries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: entries.length)
-  if appendOrderedEntries(resources: resources, entries: entries, nativeEntries: nativeEntries) is false { ret none }
+  if appendOrderedEntries(resources: resources, entries: entries, nativeEntries: nativeEntries) is false {
+    ret none
+  }
   unsafe {
-    let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: slotHandle(table: resources.externals, slot: pipeline.slot), groupIndex: 0 as UInt32)
-    ret finishBindGroup(resources: resources, slot: slot, start: start, layout: layout, nativeEntries: nativeEntries)
+    let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(
+      renderPipeline: slotHandle(table: resources.externals, slot: pipeline.slot)
+      groupIndex: 0 as UInt32
+    )
+    ret finishBindGroup(
+      resources: resources
+      slot: slot
+      start: start
+      layout: layout
+      nativeEntries: nativeEntries
+    )
   }
 }
 
 # The same over a COMPUTE pipeline's group 0: the ordered, mixed-kind (and
 # external-capable) counterpart of GpuLifetime.createBindGroup, for layouts
 # whose binding order is not buffers-then-views-then-samplers.
-func createComputeBindGroupOrdered(resources: mod GpuResources, pipeline: view PipelineId, entries: view List(ResourceRef)) ret opt BindGroupId {
-  if isValidPipeline(resources: resources, id: pipeline) is false { ret none }
-  if entries.length < 1 { ret none }
+func createComputeBindGroupOrdered(
+  resources: mod GpuResources
+  pipeline: view PipelineId
+  entries: view List(ResourceRef)
+) ret opt BindGroupId {
+  if isValidPipeline(resources: resources, id: pipeline) is false {
+    ret none
+  }
+  if entries.length < 1 {
+    ret none
+  }
   let slot: Int = findFreeSlot(table: resources.bindGroups, capacity: resources.capacity)
-  if slot < 0 { ret none }
+  if slot < 0 {
+    ret none
+  }
   let start: Int = resources.depKinds.length
-  appendDep(resources: resources, kind: kindPipeline, slot: pipeline.slot, generation: pipeline.generation)
+  appendDep(
+    resources: resources
+    kind: kindPipeline
+    slot: pipeline.slot
+    generation: pipeline.generation
+  )
   var nativeEntries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: entries.length)
-  if appendOrderedEntries(resources: resources, entries: entries, nativeEntries: nativeEntries) is false { ret none }
+  if appendOrderedEntries(resources: resources, entries: entries, nativeEntries: nativeEntries) is false {
+    ret none
+  }
   unsafe {
-    let layout: Ptr = wgpuComputePipelineGetBindGroupLayout(computePipeline: slotHandle(table: resources.pipelines, slot: pipeline.slot), groupIndex: 0 as UInt32)
-    ret finishBindGroup(resources: resources, slot: slot, start: start, layout: layout, nativeEntries: nativeEntries)
+    let layout: Ptr = wgpuComputePipelineGetBindGroupLayout(
+      computePipeline: slotHandle(table: resources.pipelines, slot: pipeline.slot)
+      groupIndex: 0 as UInt32
+    )
+    ret finishBindGroup(
+      resources: resources
+      slot: slot
+      start: start
+      layout: layout
+      nativeEntries: nativeEntries
+    )
   }
 }
 

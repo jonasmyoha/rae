@@ -75,16 +75,37 @@ func attachSafeAreaEdges(
 func buildPageTopBar(world: mod UiWorld, title: view String) pub ret EntityId {
   let bar: EntityId = createEntity(world: world)
   let w: Float = phoneFrameW - outerPad * 2.0
-  setRectFixed(world: world, entity: bar, w: w, h: topBarH)
+  setRectFixed(
+    world: world
+    entity: bar
+    w: w
+    h: topBarH
+  )
   let layH: LayoutType = LayoutType.horizontal
   let alignC: AlignKind = AlignKind.center
-  setLayout(world: world, entity: bar, kind: layH, gap: 0.0, alignCross: alignC)
+  setLayout(
+    world: world
+    entity: bar
+    kind: layH
+    gap: 0.0
+    alignCross: alignC
+  )
 
   let titleE: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: titleE, w: w, h: topBarH)
+  setRectFixed(
+    world: world
+    entity: titleE
+    w: w
+    h: topBarH
+  )
   let style: String = "pageTitle"
   let text: String = "{title}"
-  setText(world: world, entity: titleE, text: own text, styleId: own style)
+  setText(
+    world: world
+    entity: titleE
+    text: own text
+    styleId: own style
+  )
 
   let kids: List(EntityId) = List.create(EntityId, cap: 1)
   kids.add(value: titleE)
@@ -112,12 +133,23 @@ func refreshHistoryViewsIfNeeded(
   }
   if visible is Screen.home {
     unmountPage(world: world, pageId: homePageId)
-    let h: EntityId = mountHomePage(world: world, scenes: scenes, state: state, scrollY: 0.0, viewport: viewport)
+    let h: EntityId = mountHomePage(
+      world: world
+      scenes: scenes
+      state: state
+      scrollY: 0.0
+      viewport: viewport
+    )
     setPageActive(world: world, pageId: homePageId, active: true)
   }
   if visible is Screen.history {
     unmountPage(world: world, pageId: historyPageId)
-    let h: EntityId = mountHistoryPage(world: world, state: state, scrollY: 0.0, viewport: viewport)
+    let h: EntityId = mountHistoryPage(
+      world: world
+      state: state
+      scrollY: 0.0
+      viewport: viewport
+    )
     setPageActive(world: world, pageId: historyPageId, active: true)
   }
   ret n
@@ -141,15 +173,33 @@ func tagPlaybackIconDependency(
   let playbackSource: DataResourceId = dataResourcePlayback()
   let playbackField: DataFieldId = dataFieldIsPlaying()
   let iconKind: String = "playbackIcon"
-  setWidgetIdentity(world: world, entity: entity, id: widgetId, kind: iconKind)
+  setWidgetIdentity(
+    world: world
+    entity: entity
+    id: widgetId
+    kind: iconKind
+  )
   # Seed `selected` from the ACTUAL play state (#): the widgetStyleSystem
   # applies the play_arrow<->pause swap from `selected`, and the per-frame
   # refresh only fires when the playback revision CHANGES. Mounting with
   # observedRevision == playback.revision means no refresh, so a page
   # mounted while already playing must start selected=true or it would
   # show the play glyph until the next play/pause toggle.
-  setWidgetState(world: world, entity: entity, enabled: true, selected: playing, loading: false, error: false)
-  setDataDependency(world: world, entity: entity, resource: playbackSource, field: playbackField, observedRevision: observedRevision)
+  setWidgetState(
+    world: world
+    entity: entity
+    enabled: true
+    selected: playing
+    loading: false
+    error: false
+  )
+  setDataDependency(
+    world: world
+    entity: entity
+    resource: playbackSource
+    field: playbackField
+    observedRevision: observedRevision
+  )
   # Declarative visuals: selected (= playing) shows the pause glyph.
   # `widgetStyleSystem` applies the swap; the refresh below only flips
   # WidgetState.selected. Struct built inline with `own` moves — the

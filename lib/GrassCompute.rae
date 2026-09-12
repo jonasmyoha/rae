@@ -38,16 +38,22 @@ import WorldBiome
 # frame uniform (adopted as an external), the live geometry pass, and the
 # static pipeline + bind group restored after the grass draw.
 func gbFrameUbuf() unsafe extern("rae_gb_frame_ubuf") ret Ptr
+
 func gbPass() unsafe extern("rae_gb_pass") ret Ptr
 
 # Blade count MUST be a perfect square: the compute grid is side x side, and the
 # shader derives side = sqrt(count). 256 x 256 = 65536 candidate blades; GPU
 # culling keeps only the visible subset (indirect draw).
 const grassGpuBladeCount: Int = 65536
-const grassRecordBytes: Int = 160    # 40 floats per DrawU
-const grassUniformFloats: Int = 28   # seven vec4 (GrassU: player/time, count/extent, cam, forward, ground, wind, blade)
+
+const grassRecordBytes: Int = 160  # 40 floats per DrawU
+
+const grassUniformFloats: Int = 28  # seven vec4 (GrassU: player/time, count/extent, cam, forward, ground, wind, blade)
+
 const grassUniformBytes: Int = 112
-const grassIndirectBytes: Int = 16   # 4 u32 DrawIndirect args (vertexCount, instanceCount, ...)
+
+const grassIndirectBytes: Int = 16  # 4 u32 DrawIndirect args (vertexCount, instanceCount, ...)
+
 # Vertices per procedural blade: a tapered quad = two triangles (see bladeLocal
 # in the render WGSL). No mesh, no vertex/index buffer.
 const grassBladeVerts: Int = 6
@@ -83,12 +89,22 @@ type GrassCompute {
 
 func createGrassCompute() ret GrassCompute {
   ret GrassCompute {
-    surfaceShader: "", made: false, drawBindMade: false,
-    uniformArgs: createArgs(uniform: true), resetArgs: createArgs(uniform: false),
-    diagFrame: 0, visibleCache: 0,
-    computePipeline: noPipelineId(), renderPipeline: noRenderPipelineId(),
-    instances: noBufferId(), uniform: noBufferId(), indirect: noBufferId(), staging: noBufferId(),
-    computeBind: noBindGroupId(), drawBind: noBindGroupId(), frameUniform: noExternalId(),
+    surfaceShader: ""
+    made: false
+    drawBindMade: false
+    uniformArgs: createArgs(uniform: true)
+    resetArgs: createArgs(uniform: false)
+    diagFrame: 0
+    visibleCache: 0
+    computePipeline: noPipelineId()
+    renderPipeline: noRenderPipelineId()
+    instances: noBufferId()
+    uniform: noBufferId()
+    indirect: noBufferId()
+    staging: noBufferId()
+    computeBind: noBindGroupId()
+    drawBind: noBindGroupId()
+    frameUniform: noExternalId()
     inFlight: List.create(SubmissionId, cap: 4)
   }
 }
@@ -97,15 +113,18 @@ func createGrassCompute() ret GrassCompute {
 # itself. Mirrors how the terrain splat pipeline composes its shader.
 func wgsl(surfaceShader: view String) ret String {
   unsafe {
-      if surfaceShader.length() > 0 {
-        ret surfaceShader.concat(other: "\n").concat(other: Gbuffer.gbReadWgsl(path: "lib/grass_compute.wgsl"))
-      }
-      let islandSrc: String = WorldBiome.islandParamsWgsl()
-      let noiseSrc: String = Gbuffer.gbReadWgsl(path: "lib/noise.wgsl")
-      let biomeSrc: String = Gbuffer.gbReadWgsl(path: "lib/world_biome.wgsl")
-      let grassSrc: String = Gbuffer.gbReadWgsl(path: "lib/grass_compute.wgsl")
-      ret islandSrc.concat(other: noiseSrc).concat(other: "\n").concat(other: biomeSrc)
-        .concat(other: "\n").concat(other: grassSrc)
+    if surfaceShader.length() > 0 {
+      ret surfaceShader.concat(other: "\n").concat(
+        other: Gbuffer.gbReadWgsl(path: "lib/grass_compute.wgsl")
+      )
+    }
+    let islandSrc: String = WorldBiome.islandParamsWgsl()
+    let noiseSrc: String = Gbuffer.gbReadWgsl(path: "lib/noise.wgsl")
+    let biomeSrc: String = Gbuffer.gbReadWgsl(path: "lib/world_biome.wgsl")
+    let grassSrc: String = Gbuffer.gbReadWgsl(path: "lib/grass_compute.wgsl")
+    ret islandSrc.concat(other: noiseSrc).concat(other: "\n").concat(other: biomeSrc).concat(
+      other: "\n"
+    ).concat(other: grassSrc)
   }
 }
 
@@ -130,9 +149,15 @@ func gbufferProceduralPipelineSpec() ret RenderPipelineSpec {
   colorFormats.add(value: WGPUTextureFormat_RGBA8Unorm)
   let attributes: List(VertexAttributeSpec) = List.create(VertexAttributeSpec, cap: 1)
   ret RenderPipelineSpec {
-    vertexStride: 0, attributes: own attributes, colorFormats: own colorFormats,
-    alphaBlend: false, premultiplied: false, depthFormat: WGPUTextureFormat_Depth32Float, depthWrite: true,
-    depthCompare: WGPUCompareFunction_Greater, cullMode: WGPUCullMode_None
+    vertexStride: 0
+    attributes: own attributes
+    colorFormats: own colorFormats
+    alphaBlend: false
+    premultiplied: false
+    depthFormat: WGPUTextureFormat_Depth32Float
+    depthWrite: true
+    depthCompare: WGPUCompareFunction_Greater
+    cullMode: WGPUCullMode_None
   }
 }
 
@@ -163,43 +188,90 @@ func releaseGrassGpu(grass: mod GrassCompute, resources: mod GpuResources) {
 # Create the instance buffer, uniform, compute pipeline, compute bind group and
 # grass render pipeline once. Safe after the device + static pipeline exist.
 func ensureGrassGpu(grass: mod GrassCompute, resources: mod GpuResources) {
-  if grass.made { ret }
+  if grass.made {
+    ret
+  }
   grass.made = true
   # On a REBUILD (island grow reset grass.made) the previous pipelines, buffers
   # and bind groups are retired first — deferred behind any frame still using them.
   releaseGrassGpu(grass: grass, resources: resources)
   let instBytes: Int = grassGpuBladeCount * grassRecordBytes
-  if let instances: BufferId = createBuffer(resources: resources, size: instBytes, usage: WGPUBufferUsage_Storage + WGPUBufferUsage_CopyDst) { grass.instances = instances }
-  if let uniform: BufferId = createBuffer(resources: resources, size: grassUniformBytes, usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst) { grass.uniform = uniform }
+  if let instances: BufferId = createBuffer(
+    resources: resources
+    size: instBytes
+    usage: WGPUBufferUsage_Storage + WGPUBufferUsage_CopyDst
+  ) {
+    grass.instances = instances
+  }
+  if let uniform: BufferId = createBuffer(
+    resources: resources
+    size: grassUniformBytes
+    usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst
+  ) {
+    grass.uniform = uniform
+  }
   # Indirect draw-args buffer: the compute atomically bumps instanceCount as it
   # appends visible blades; the draw reads it via DrawIndirect. Needs Indirect
   # (drawn from) + Storage (compute writes) + CopyDst (per-frame reset) +
   # CopySrc (#488: the diagnostics read the bumped instanceCount back).
-  if let indirect: BufferId = createBuffer(resources: resources, size: grassIndirectBytes, usage: WGPUBufferUsage_Indirect + WGPUBufferUsage_Storage + WGPUBufferUsage_CopyDst + WGPUBufferUsage_CopySrc) { grass.indirect = indirect }
+  if let indirect: BufferId = createBuffer(
+    resources: resources
+    size: grassIndirectBytes
+    usage: WGPUBufferUsage_Indirect + WGPUBufferUsage_Storage + WGPUBufferUsage_CopyDst + WGPUBufferUsage_CopySrc
+  ) {
+    grass.indirect = indirect
+  }
   # Tiny MapRead staging for reading the visible count back (#488).
-  if let staging: BufferId = createBuffer(resources: resources, size: grassIndirectBytes, usage: WGPUBufferUsage_CopyDst + WGPUBufferUsage_MapRead) { grass.staging = staging }
+  if let staging: BufferId = createBuffer(
+    resources: resources
+    size: grassIndirectBytes
+    usage: WGPUBufferUsage_CopyDst + WGPUBufferUsage_MapRead
+  ) {
+    grass.staging = staging
+  }
 
   # Composed from FILES, not a C string, so the pass shares the one biome and
   # terrain-height definition with everything else that touches the ground.
   # Carrying its own copy is what left blades standing on a height field the
   # terrain had already moved off.
-  if let computePipeline: PipelineId = createComputePipeline(resources: resources, wgsl: wgsl(surfaceShader: grass.surfaceShader), entryPoint: "main") {
+  if let computePipeline: PipelineId = createComputePipeline(
+    resources: resources
+    wgsl: wgsl(surfaceShader: grass.surfaceShader)
+    entryPoint: "main"
+  ) {
     grass.computePipeline = computePipeline
     let entries: List(ResourceRef) = List.create(ResourceRef, cap: 3)
     entries.add(value: bufferRef(id: grass.uniform))
     entries.add(value: bufferRef(id: grass.instances))
     entries.add(value: bufferRef(id: grass.indirect))
-    if let computeBind: BindGroupId = createComputeBindGroupOrdered(resources: resources, pipeline: computePipeline, entries: entries) {
+    if let computeBind: BindGroupId = createComputeBindGroupOrdered(
+      resources: resources
+      pipeline: computePipeline
+      entries: entries
+    ) {
       grass.computeBind = computeBind
     }
   }
   var renderSource: String = ""
-  unsafe { renderSource = Gbuffer.gbReadWgsl(path: "lib/grass_render.wgsl") }
-  if let renderPipeline: RenderPipelineId = createRenderPipeline(resources: resources, wgsl: renderSource, vertexEntry: "vs", fragmentEntry: "fs", spec: gbufferProceduralPipelineSpec()) {
+  unsafe {
+    renderSource = Gbuffer.gbReadWgsl(path: "lib/grass_render.wgsl")
+  }
+  if let renderPipeline: RenderPipelineId = createRenderPipeline(
+    resources: resources
+    wgsl: renderSource
+    vertexEntry: "vs"
+    fragmentEntry: "fs"
+    spec: gbufferProceduralPipelineSpec()
+  ) {
     grass.renderPipeline = renderPipeline
   }
-  if not isValidBindGroup(resources: resources, id: grass.computeBind) or not isValidRenderPipeline(resources: resources, id: grass.renderPipeline) {
-    log("[grass] GPU objects could not be created (shader files readable from the repo root?); grass is not drawn")
+  if not isValidBindGroup(resources: resources, id: grass.computeBind) or not isValidRenderPipeline(
+    resources: resources
+    id: grass.renderPipeline
+  ) {
+    log(
+      "[grass] GPU objects could not be created (shader files readable from the repo root?); grass is not drawn"
+    )
   }
 }
 
@@ -208,19 +280,32 @@ func ensureGrassGpu(grass: mod GrassCompute, resources: mod GpuResources) {
 # the gbuffer), instance storage @1, grass uniform @2, over the grass render
 # pipeline's group-0 layout.
 func ensureGrassDrawBind(grass: mod GrassCompute, resources: mod GpuResources) {
-  if grass.drawBindMade { ret }
-  if not isValidRenderPipeline(resources: resources, id: grass.renderPipeline) { ret }
+  if grass.drawBindMade {
+    ret
+  }
+  if not isValidRenderPipeline(resources: resources, id: grass.renderPipeline) {
+    ret
+  }
   grass.drawBindMade = true
   releaseExternal(resources: resources, id: grass.frameUniform)
   grass.frameUniform = noExternalId()
   unsafe {
-    if let frameUniform: ExternalId = adoptExternalBuffer(resources: resources, handle: gbFrameUbuf()) { grass.frameUniform = frameUniform }
+    if let frameUniform: ExternalId = adoptExternalBuffer(
+      resources: resources
+      handle: gbFrameUbuf()
+    ) {
+      grass.frameUniform = frameUniform
+    }
   }
   let entries: List(ResourceRef) = List.create(ResourceRef, cap: 3)
   entries.add(value: externalRef(id: grass.frameUniform))
   entries.add(value: bufferRef(id: grass.instances))
   entries.add(value: bufferRef(id: grass.uniform))
-  if let drawBind: BindGroupId = createRenderBindGroup(resources: resources, pipeline: grass.renderPipeline, entries: entries) {
+  if let drawBind: BindGroupId = createRenderBindGroup(
+    resources: resources
+    pipeline: grass.renderPipeline
+    entries: entries
+  ) {
     grass.drawBind = drawBind
   }
 }
@@ -230,31 +315,98 @@ func ensureGrassDrawBind(grass: mod GrassCompute, resources: mod GpuResources) {
 # is within the view cone (dot(dirToBlade, forward) >= coneCos). coneCos ~ cos(69)
 # is generous so nothing on-screen is clipped early.
 const grassNearKeep: Float = 5.0
+
 const grassConeCos: Float = 0.36
 
 # Dispatch the grass generation + CULLING compute for this frame. Centres the
 # candidate grid on (playerX, playerY); each survivor (on-terrain, unfaded, inside
 # the view cone from the camera) is appended to a compacted list and bumps the
 # indirect draw's instanceCount. No readback, no blocking. Call BEFORE the pass.
-func grassGenerate(grass: mod GrassCompute, resources: mod GpuResources, playerX: copy Float, playerY: copy Float, groundZ: copy Float,
-                   time: copy Float, deltaTime: copy Float, toon: copy Int,
-                   camX: copy Float, camY: copy Float, camZ: copy Float,
-                   fwdX: copy Float, fwdY: copy Float, fwdZ: copy Float,
-                   settings: view GrassViewSettings) {
+func grassGenerate(
+  grass: mod GrassCompute
+  resources: mod GpuResources
+  playerX: copy Float
+  playerY: copy Float
+  groundZ: copy Float
+  time: copy Float
+  deltaTime: copy Float
+  toon: copy Int
+  camX: copy Float
+  camY: copy Float
+  camZ: copy Float
+  fwdX: copy Float
+  fwdY: copy Float
+  fwdZ: copy Float
+  settings: view GrassViewSettings
+) {
   pollSubmissions(inFlight: grass.inFlight, resources: resources)
   ensureGrassGpu(grass: grass, resources: resources)
-  if not isValidBindGroup(resources: resources, id: grass.computeBind) { ret }
+  if not isValidBindGroup(resources: resources, id: grass.computeBind) {
+    ret
+  }
   var toonF: Float = 0.0
-  if toon is 1 { toonF = 1.0 }
+  if toon is 1 {
+    toonF = 1.0
+  }
   resetArgs(writer: grass.uniformArgs)
-  pushVec4F(writer: grass.uniformArgs, x: playerX, y: playerY, z: groundZ, w: time)
-  pushVec4F(writer: grass.uniformArgs, x: grassGpuBladeCount.toFloat(), y: settings.extent, z: toonF, w: deltaTime)
-  pushVec4F(writer: grass.uniformArgs, x: camX, y: camY, z: camZ, w: grassNearKeep)
-  pushVec4F(writer: grass.uniformArgs, x: fwdX, y: fwdY, z: fwdZ, w: grassConeCos)
-  pushVec4F(writer: grass.uniformArgs, x: settings.groundColor.x, y: settings.groundColor.y, z: settings.groundColor.z, w: 0.0)   # gradient bottom = ground
-  pushVec4F(writer: grass.uniformArgs, x: settings.windDirX, y: settings.windDirY, z: settings.windStrength, w: settings.windGust)   # f: wind
-  pushVec4F(writer: grass.uniformArgs, x: settings.bladeHeightScale, y: settings.bladeWidthScale, z: settings.densityScale, w: settings.tipLighten)   # g: blade + gradient
-  uploadArgs(writer: grass.uniformArgs, resources: resources, buffer: grass.uniform, offset: 0)
+  pushVec4F(
+    writer: grass.uniformArgs
+    x: playerX
+    y: playerY
+    z: groundZ
+    w: time
+  )
+  pushVec4F(
+    writer: grass.uniformArgs
+    x: grassGpuBladeCount.toFloat()
+    y: settings.extent
+    z: toonF
+    w: deltaTime
+  )
+  pushVec4F(
+    writer: grass.uniformArgs
+    x: camX
+    y: camY
+    z: camZ
+    w: grassNearKeep
+  )
+  pushVec4F(
+    writer: grass.uniformArgs
+    x: fwdX
+    y: fwdY
+    z: fwdZ
+    w: grassConeCos
+  )
+  pushVec4F(
+    writer: grass.uniformArgs
+    x: settings.groundColor.x
+    y: settings.groundColor.y
+    z: settings.groundColor.z
+    w: 0.0
+  )
+  # gradient bottom = ground
+  pushVec4F(
+    writer: grass.uniformArgs
+    x: settings.windDirX
+    y: settings.windDirY
+    z: settings.windStrength
+    w: settings.windGust
+  )
+  # f: wind
+  pushVec4F(
+    writer: grass.uniformArgs
+    x: settings.bladeHeightScale
+    y: settings.bladeWidthScale
+    z: settings.densityScale
+    w: settings.tipLighten
+  )
+  # g: blade + gradient
+  uploadArgs(
+    writer: grass.uniformArgs
+    resources: resources
+    buffer: grass.uniform
+    offset: 0
+  )
 
   # Reset the indirect args so this frame's atomic append counts from 0.
   resetArgs(writer: grass.resetArgs)
@@ -262,10 +414,21 @@ func grassGenerate(grass: mod GrassCompute, resources: mod GpuResources, playerX
   pushU32(writer: grass.resetArgs, value: 0)
   pushU32(writer: grass.resetArgs, value: 0)
   pushU32(writer: grass.resetArgs, value: 0)
-  uploadArgs(writer: grass.resetArgs, resources: resources, buffer: grass.indirect, offset: 0)
+  uploadArgs(
+    writer: grass.resetArgs
+    resources: resources
+    buffer: grass.indirect
+    offset: 0
+  )
 
   let groups: Int = (grassGpuBladeCount + 63) / 64
-  let command: ComputeCommand = computeCommand(pipeline: grass.computePipeline, bindGroup: grass.computeBind, workgroupsX: groups, workgroupsY: 1, workgroupsZ: 1)
+  let command: ComputeCommand = computeCommand(
+    pipeline: grass.computePipeline
+    bindGroup: grass.computeBind
+    workgroupsX: groups
+    workgroupsY: 1
+    workgroupsZ: 1
+  )
   if let recording: Recording = beginRecording(resources: resources) {
     if recordComputeCommand(recording: recording, resources: resources, command: command) {
       trackSubmission(inFlight: grass.inFlight, resources: resources, recording: recording)
@@ -285,14 +448,24 @@ func grassDraw(grass: mod GrassCompute, resources: mod GpuResources) {
   ensureGrassDrawBind(grass: grass, resources: resources)
   unsafe {
     let pass: Ptr = gbPass()
-    if pass is webgpuNull() { ret }
+    if pass is webgpuNull() {
+      ret
+    }
     # No static re-bind after: every G-buffer draw binds its own pipeline (#912).
-    recordDrawIndirectInPass(resources: resources, pass: pass, pipeline: grass.renderPipeline, bindGroup: grass.drawBind, indirect: bufferRef(id: grass.indirect))
+    recordDrawIndirectInPass(
+      resources: resources
+      pass: pass
+      pipeline: grass.renderPipeline
+      bindGroup: grass.drawBind
+      indirect: bufferRef(id: grass.indirect)
+    )
   }
 }
 
 # Total candidate blades the compute considers each frame (#488 diagnostics).
-func grassGeneratedCount() ret Int { ret grassGpuBladeCount }
+func grassGeneratedCount() ret Int {
+  ret grassGpuBladeCount
+}
 
 # Read the VISIBLE blade count back (#488): the culling compute atomically bumped
 # the indirect draw's instanceCount (u32 #1 of the 4-word args) to the number of
@@ -301,22 +474,45 @@ func grassGeneratedCount() ret Int { ret grassGpuBladeCount }
 # (every N frames), not per frame. Returns -1 before the grass GPU exists or
 # when the readback failed.
 func grassReadVisible(grass: mod GrassCompute, resources: mod GpuResources) ret Int {
-  if not isValidBuffer(resources: resources, id: grass.staging) { ret 0 - 1 }
+  if not isValidBuffer(resources: resources, id: grass.staging) {
+    ret 0 - 1
+  }
   var copied: Bool = false
   if let recording: Recording = beginRecording(resources: resources) {
-    if recordCopyBuffer(recording: recording, resources: resources, source: grass.indirect, sourceOffset: 0, destination: grass.staging, destinationOffset: 0, size: grassIndirectBytes) {
-      if let submission: SubmissionId = trackSubmission(inFlight: grass.inFlight, resources: resources, recording: recording) {
+    if recordCopyBuffer(
+      recording: recording
+      resources: resources
+      source: grass.indirect
+      sourceOffset: 0
+      destination: grass.staging
+      destinationOffset: 0
+      size: grassIndirectBytes
+    ) {
+      if let submission: SubmissionId = trackSubmission(
+        inFlight: grass.inFlight
+        resources: resources
+        recording: recording
+      ) {
         copied = waitSubmission(resources: resources, id: submission)
       }
     }
   }
-  if not copied { ret 0 - 1 }
+  if not copied {
+    ret 0 - 1
+  }
   pollSubmissions(inFlight: grass.inFlight, resources: resources)
   var visible: Int = 0 - 1
-  if let read: ReadbackId = startReadback(resources: resources, buffer: grass.staging, offset: 0, size: grassIndirectBytes) {
+  if let read: ReadbackId = startReadback(
+    resources: resources
+    buffer: grass.staging
+    offset: 0
+    size: grassIndirectBytes
+  ) {
     if waitReadback(resources: resources, id: read) {
       let bytes: List(UInt8) = List.create(UInt8, cap: grassIndirectBytes)
-      loop bytes.length < grassIndirectBytes { bytes.add(value: 0 as UInt8) }
+      loop bytes.length < grassIndirectBytes {
+        bytes.add(value: 0 as UInt8)
+      }
       if copyReadback(resources: resources, id: read, destination: bytes) {
         # args = {vertexCount:u32, instanceCount:u32, ...}: instanceCount is
         # little-endian bytes 4..7.
@@ -334,7 +530,9 @@ func grassReadVisible(grass: mod GrassCompute, resources: mod GpuResources) ret 
 }
 
 # Last read visible-blade count (#488). Cheap; refreshed by grassDiagTick.
-func grassVisibleCount(grass: view GrassCompute) ret Int { ret grass.visibleCache }
+func grassVisibleCount(grass: view GrassCompute) ret Int {
+  ret grass.visibleCache
+}
 
 # Per-frame grass diagnostics (#488). Only active during a profile capture so the
 # blocking readback never stalls normal play, and throttled to every 10th frame
@@ -343,15 +541,23 @@ func grassVisibleCount(grass: view GrassCompute) ret Int { ret grass.visibleCach
 # capture alongside fps and per-pass GPU ms. Call once per frame after
 # grassGenerate.
 func grassDiagTick(grass: mod GrassCompute, resources: mod GpuResources, profiler: mod Profiler) {
-  if Profile.capturing(profiler: profiler) is false { ret }
+  if Profile.capturing(profiler: profiler) is false {
+    ret
+  }
   grass.diagFrame = grass.diagFrame + 1
   if grass.diagFrame % 10 is 0 {
     let visible: Int = grassReadVisible(grass: grass, resources: resources)
-    if visible >= 0 { grass.visibleCache = visible }
+    if visible >= 0 {
+      grass.visibleCache = visible
+    }
   }
   Profile.counter(profiler: profiler, name: "grass.generated", value: grassGpuBladeCount)
   Profile.counter(profiler: profiler, name: "grass.visible", value: grass.visibleCache)
-  Profile.counter(profiler: profiler, name: "grass.culled", value: grassGpuBladeCount - grass.visibleCache)
+  Profile.counter(
+    profiler: profiler
+    name: "grass.culled"
+    value: grassGpuBladeCount - grass.visibleCache
+  )
 }
 
 # Retire the field's GPU objects and drain its submissions (app shutdown). The

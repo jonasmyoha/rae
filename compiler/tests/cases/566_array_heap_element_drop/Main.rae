@@ -7,7 +7,6 @@
 # The loop is the real assertion: a missing drop leaks and a double drop
 # aborts, so completing 2000 iterations cleanly is what proves the
 # per-element cascade is correct rather than merely present.
-
 func makeNames(tag: view String) ret Array(String, cap: 2) {
   var names: Array(String, cap: 2) = Array(String, cap: 2)
   names[0] = "first-{tag}"
@@ -22,7 +21,9 @@ func main() {
   var i: Int = 0
   loop i < 2000 {
     let tmp: Array(String, cap: 2) = makeNames(tag: "{i}")
-    if tmp[0].length() < 1 { log("empty") }
+    if tmp[0].length() < 1 {
+      log("empty")
+    }
     i = i + 1
   }
   log("survived {i} iterations")

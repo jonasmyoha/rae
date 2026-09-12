@@ -4,14 +4,18 @@ import String
 # string-literal `let` are FINE (no diagnostic). A module-level `var` (mutable
 # global) and a `let` that ALLOCATES heap each fail to compile, pointing at the
 # App-ownership doc.
+const okConst: Int = 5  # fine
 
-const okConst: Int = 5                          # fine
-let okPodLet: Float = 3.14                       # fine (POD literal)
-let okStrLiteral: String = "static"              # fine (string literal = constant)
+let okPodLet: Float = 3.14  # fine (POD literal)
 
-var warnVarInt: Int = 0                           # ERROR: mutable global
-var warnVarList: List(Int) = List.create(Int, cap: 2)   # ERROR: mutable global
-let warnHeapStr: String = "a".concat(other: "b")       # ERROR: let allocates heap
+let okStrLiteral: String = "static"  # fine (string literal = constant)
+
+var warnVarInt: Int = 0  # ERROR: mutable global
+
+var warnVarList: List(Int) = List.create(Int, cap: 2)  # ERROR: mutable global
+
+let warnHeapStr: String = "a".concat(other: "b")  # ERROR: let allocates heap
+
 let warnHeapList: List(Int) = List.create(Int, cap: 2)  # ERROR: let owns heap
 
 func main() {

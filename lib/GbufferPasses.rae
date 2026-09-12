@@ -30,18 +30,44 @@ open GbufferFullscreen
 
 # Composite: tonemap the last radiometric result into the presentable target.
 func gbDeferredPrepare() ret Int {
-  unsafe { ret nativeGbDeferredPrepare() }
+  unsafe {
+    ret nativeGbDeferredPrepare()
+  }
 }
+
 func gbSetTaaEnabled(on: copy Int) {
-  unsafe { nativeGbSetTaaEnabled(on: on) }
+  unsafe {
+    nativeGbSetTaaEnabled(on: on)
+  }
 }
-func gbSetFog(on: copy Int, r: copy Float, g: copy Float, b: copy Float, start: copy Float, end: copy Float) {
-  unsafe { nativeGbSetFog(on: on, r: r, g: g, b: b, start: start, end: end) }
+
+func gbSetFog(
+  on: copy Int
+  r: copy Float
+  g: copy Float
+  b: copy Float
+  start: copy Float
+  end: copy Float
+) {
+  unsafe {
+    nativeGbSetFog(
+      on: on
+      r: r
+      g: g
+      b: b
+      start: start
+      end: end
+    )
+  }
 }
+
 # One fullscreen pass (clear + draw 3) into a C-owned `target` view, opened in
 # Rae and submitted on the shared queue. The draw is recorded from manager IDs
 # (a manager pipeline, or an adopted C pipeline via runFullscreenExternal).
-type FullscreenPass { encoder: Ptr, pass: Ptr }
+type FullscreenPass {
+  encoder: Ptr
+  pass: Ptr
+}
 
 # #764: the deferred pass caches were module-level globals; they are per-frame
 # state a deferred renderer owns, so they live in RenderPasses, threaded from
@@ -54,11 +80,12 @@ type CompositePassCache {
   pipeline: RenderPipelineId
   uniform: BufferId
   sampler: SamplerId
-  binds: List(BindGroupId)      # per source slot: TAA 0/1, no-TAA lit 2
+  binds: List(BindGroupId)  # per source slot: TAA 0/1, no-TAA lit 2
   adopted: List(ExternalId)
   bindGen: Int
   args: ArgWriter
 }
+
 type AoPassCache {
   pipeMade: Bool
   pipeline: RenderPipelineId
@@ -66,22 +93,25 @@ type AoPassCache {
   adopted: List(ExternalId)
   bindGen: Int
 }
+
 type LightPassCache {
-  pipeline: ExternalId          # the C-owned lighting pipeline, adopted
+  pipeline: ExternalId  # the C-owned lighting pipeline, adopted
   bindGroup: BindGroupId
   adopted: List(ExternalId)
   bindGen: Int
 }
+
 type TaaPassCache {
-  pipeline: ExternalId          # the C-owned resolve pipeline, adopted
-  binds: List(BindGroupId)      # per ping-pong slot
+  pipeline: ExternalId  # the C-owned resolve pipeline, adopted
+  binds: List(BindGroupId)  # per ping-pong slot
   adopted: List(ExternalId)
   bindGen: Int
 }
+
 type PyrPassCache {
-  fromDepth: ExternalId         # the C-owned level-0 pipeline, adopted
-  reduce: ExternalId            # the C-owned reduce pipeline, adopted
-  binds: List(BindGroupId)      # per mip
+  fromDepth: ExternalId  # the C-owned level-0 pipeline, adopted
+  reduce: ExternalId  # the C-owned reduce pipeline, adopted
+  binds: List(BindGroupId)  # per mip
   adopted: List(ExternalId)
   bindGen: Int
 }
@@ -115,9 +145,14 @@ type ColorGrade {
 # Identity. What every caller that does not ask for a grade gets.
 func neutralGrade() pub ret ColorGrade {
   ret ColorGrade {
-    pbrNeutral: false, contrast: 1.0, vibrance: 0.0, saturation: 1.0,
-    shadowTint: Vec3.create(x: 0.0, y: 0.0, z: 0.0), shadowTintStrength: 0.0,
-    highlightTint: Vec3.create(x: 0.0, y: 0.0, z: 0.0), highlightTintStrength: 0.0
+    pbrNeutral: false
+    contrast: 1.0
+    vibrance: 0.0
+    saturation: 1.0
+    shadowTint: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    shadowTintStrength: 0.0
+    highlightTint: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    highlightTintStrength: 0.0
   }
 }
 
@@ -125,16 +160,39 @@ func neutralGrade() pub ret ColorGrade {
 # presentable format, the 64-byte CompositeU uniform and the linear clamp
 # sampler for the dynamic-resolution upscale (#530).
 func ensureCompositeObjects(cache: mod CompositePassCache, resources: mod GpuResources) {
-  if cache.pipeMade { ret }
+  if cache.pipeMade {
+    ret
+  }
   cache.pipeMade = true
-  unsafe { cache.pipeline = createFullscreenPipeline(resources: resources, wgsl: gbCompositeWgsl(), format: g2dFormat() as Int32) }
-  if let uniform: BufferId = createBuffer(resources: resources, size: 64, usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst) { cache.uniform = uniform }
-  if let sampler: SamplerId = createSampler(resources: resources) { cache.sampler = sampler }
+  unsafe {
+    cache.pipeline = createFullscreenPipeline(
+      resources: resources
+      wgsl: gbCompositeWgsl()
+      format: g2dFormat() as Int32
+    )
+  }
+  if let uniform: BufferId = createBuffer(
+    resources: resources
+    size: 64
+    usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst
+  ) {
+    cache.uniform = uniform
+  }
+  if let sampler: SamplerId = createSampler(resources: resources) {
+    cache.sampler = sampler
+  }
 }
 
 # Composite the lit/TAA result into the presentable target with exposure.
-func composite(cache: mod CompositePassCache, resources: mod GpuResources, exposure: copy Float, grade: view ColorGrade) pub {
-  if gbDeferredPrepare() is 0 { ret }
+func composite(
+  cache: mod CompositePassCache
+  resources: mod GpuResources
+  exposure: copy Float
+  grade: view ColorGrade
+) pub {
+  if gbDeferredPrepare() is 0 {
+    ret
+  }
   ensureCompositeObjects(cache: cache, resources: resources)
 
   # The source bind is per TAA slot (0/1) or the no-TAA lit slot (2), rebuilt
@@ -149,55 +207,143 @@ func composite(cache: mod CompositePassCache, resources: mod GpuResources, expos
   if not bindSlotUsable(resources: resources, binds: cache.binds, idx: idx) {
     let entries: List(ResourceRef) = List.create(ResourceRef, cap: 3)
     entries.add(value: bufferRef(id: cache.uniform))
-    unsafe { entries.add(value: adoptTextureViewRef(resources: resources, adopted: cache.adopted, handle: gbCompositeSourceView())) }
+    unsafe {
+      entries.add(
+        value: adoptTextureViewRef(
+          resources: resources
+          adopted: cache.adopted
+          handle: gbCompositeSourceView()
+        )
+      )
+    }
     entries.add(value: samplerRef(id: cache.sampler))
     var made: Bool = false
-    if let bind: BindGroupId = createRenderBindGroup(resources: resources, pipeline: cache.pipeline, entries: entries) {
+    if let bind: BindGroupId = createRenderBindGroup(
+      resources: resources
+      pipeline: cache.pipeline
+      entries: entries
+    ) {
       cache.binds.set(index: idx, value: bind)
       made = true
     }
     # A failed build (an input not up yet) drops this generation's adoptions
     # so a retry next frame does not accumulate slots.
-    if not made { failPassGeneration(resources: resources, binds: cache.binds, adopted: cache.adopted) }
+    if not made {
+      failPassGeneration(resources: resources, binds: cache.binds, adopted: cache.adopted)
+    }
   }
 
   # Four vec4s, matching CompositeU in the shader. Order is load-bearing. The
   # writer is held on the cache (allocated once) so the hot path stays
   # zero-alloc (#573).
   var opFlag: Float = 0.0
-  if grade.pbrNeutral { opFlag = 1.0 }
+  if grade.pbrNeutral {
+    opFlag = 1.0
+  }
   # p2.w = FXAA flag (#20): on exactly when TAA is off, so the aliasing TAA used
   # to resolve gets a spatial pass instead. Identity when TAA is enabled.
   var fxaaFlag: Float = 0.0
-  if gbTaaIsEnabled() is 0 { fxaaFlag = 1.0 }
+  if gbTaaIsEnabled() is 0 {
+    fxaaFlag = 1.0
+  }
   resetArgs(writer: cache.args)
-  pushVec4F(writer: cache.args, x: exposure, y: gbRenderScale() as Float, z: opFlag, w: grade.contrast)   # y: #530 upscale ratio
-  pushVec4F(writer: cache.args, x: grade.vibrance, y: grade.saturation, z: grade.shadowTintStrength, w: grade.highlightTintStrength)
-  pushVec4F(writer: cache.args, x: grade.shadowTint.x, y: grade.shadowTint.y, z: grade.shadowTint.z, w: fxaaFlag)
-  pushVec4F(writer: cache.args, x: grade.highlightTint.x, y: grade.highlightTint.y, z: grade.highlightTint.z, w: 0.0)
-  let uploaded: Bool = uploadArgs(writer: cache.args, resources: resources, buffer: cache.uniform, offset: 0)
+  pushVec4F(
+    writer: cache.args
+    x: exposure
+    y: gbRenderScale() as Float
+    z: opFlag
+    w: grade.contrast
+  )
+  # y: #530 upscale ratio
+  pushVec4F(
+    writer: cache.args
+    x: grade.vibrance
+    y: grade.saturation
+    z: grade.shadowTintStrength
+    w: grade.highlightTintStrength
+  )
+  pushVec4F(
+    writer: cache.args
+    x: grade.shadowTint.x
+    y: grade.shadowTint.y
+    z: grade.shadowTint.z
+    w: fxaaFlag
+  )
+  pushVec4F(
+    writer: cache.args
+    x: grade.highlightTint.x
+    y: grade.highlightTint.y
+    z: grade.highlightTint.z
+    w: 0.0
+  )
+  let uploaded: Bool = uploadArgs(
+    writer: cache.args
+    resources: resources
+    buffer: cache.uniform
+    offset: 0
+  )
 
   if let bind: BindGroupId = cache.binds.copyAt(index: idx) {
-    unsafe { runFullscreen(resources: resources, pipeline: cache.pipeline, bind: bind, target: g2dOffView()) }
+    unsafe {
+      runFullscreen(
+        resources: resources
+        pipeline: cache.pipeline
+        bind: bind
+        target: g2dOffView()
+      )
+    }
   }
 }
 
 # Public wrapper: the render graph's composite step (was gbuffer.compositePass).
 # Ungraded, so every existing caller keeps the look it was calibrated against.
-func compositePass(cache: mod CompositePassCache, resources: mod GpuResources, exposure: view Float) pub {
-  composite(cache: cache, resources: resources, exposure: exposure, grade: neutralGrade())
+func compositePass(
+  cache: mod CompositePassCache
+  resources: mod GpuResources
+  exposure: view Float
+) pub {
+  composite(
+    cache: cache
+    resources: resources
+    exposure: exposure
+    grade: neutralGrade()
+  )
 }
 
 # Composite with a look. See ColorGrade.
-func compositePassGraded(cache: mod CompositePassCache, resources: mod GpuResources, exposure: view Float, grade: view ColorGrade) pub {
-  composite(cache: cache, resources: resources, exposure: exposure, grade: grade)
+func compositePassGraded(
+  cache: mod CompositePassCache
+  resources: mod GpuResources
+  exposure: view Float
+  grade: view ColorGrade
+) pub {
+  composite(
+    cache: cache
+    resources: resources
+    exposure: exposure
+    grade: grade
+  )
 }
 
-func ssao(cache: mod AoPassCache, resources: mod GpuResources, camX: copy Float, camY: copy Float, camZ: copy Float) pub {
-  if gbDeferredPrepare() is 0 { ret }
+func ssao(
+  cache: mod AoPassCache
+  resources: mod GpuResources
+  camX: copy Float
+  camY: copy Float
+  camZ: copy Float
+) pub {
+  if gbDeferredPrepare() is 0 {
+    ret
+  }
   if not cache.pipeMade {
     cache.pipeMade = true
-    unsafe { cache.pipeline = createFullscreenPipeline(resources: resources, wgsl: gbAoWgsl(), format: WGPUTextureFormat_R8Unorm) }
+    unsafe {
+      cache.pipeline = createFullscreenPipeline(
+        resources: resources
+        wgsl: gbAoWgsl()
+        format: WGPUTextureFormat_R8Unorm
+      )
+    }
   }
   gbSsaoUpload(camX: camX, camY: camY, camZ: camZ)
   let gen: Int = gbTargetsGen()
@@ -210,30 +356,64 @@ func ssao(cache: mod AoPassCache, resources: mod GpuResources, camX: copy Float,
   if not bindGroupIsUsable(resources: resources, id: cache.bindGroup) {
     let entries: List(ResourceRef) = List.create(ResourceRef, cap: 3)
     unsafe {
-      entries.add(value: adoptBufferRef(resources: resources, adopted: cache.adopted, handle: gbLightUbuf()))
-      entries.add(value: adoptTextureViewRef(resources: resources, adopted: cache.adopted, handle: gbViewA()))
-      entries.add(value: adoptTextureViewRef(resources: resources, adopted: cache.adopted, handle: gbViewDepth()))
+      entries.add(
+        value: adoptBufferRef(resources: resources, adopted: cache.adopted, handle: gbLightUbuf())
+      )
+      entries.add(
+        value: adoptTextureViewRef(resources: resources, adopted: cache.adopted, handle: gbViewA())
+      )
+      entries.add(
+        value: adoptTextureViewRef(
+          resources: resources
+          adopted: cache.adopted
+          handle: gbViewDepth()
+        )
+      )
     }
     var made: Bool = false
-    if let bind: BindGroupId = createRenderBindGroup(resources: resources, pipeline: cache.pipeline, entries: entries) {
+    if let bind: BindGroupId = createRenderBindGroup(
+      resources: resources
+      pipeline: cache.pipeline
+      entries: entries
+    ) {
       cache.bindGroup = bind
       made = true
     }
-    if not made { releaseExternalIds(resources: resources, list: cache.adopted) }
+    if not made {
+      releaseExternalIds(resources: resources, list: cache.adopted)
+    }
   }
-  unsafe { runFullscreen(resources: resources, pipeline: cache.pipeline, bind: cache.bindGroup, target: gbAoView()) }
+  unsafe {
+    runFullscreen(
+      resources: resources
+      pipeline: cache.pipeline
+      bind: cache.bindGroup
+      target: gbAoView()
+    )
+  }
 }
 
 # Public wrapper: the render graph's SSAO step (was gbuffer.ssaoPass).
 func ssaoPass(cache: mod AoPassCache, resources: mod GpuResources, camera: view Camera3d) pub {
-  ssao(cache: cache, resources: resources, camX: camera.position.x, camY: camera.position.y, camZ: camera.position.z)
+  ssao(
+    cache: cache
+    resources: resources
+    camX: camera.position.x
+    camY: camera.position.y
+    camZ: camera.position.z
+  )
 }
 
 func nativeSkyHosekPush(index: Int, value: Float) unsafe extern("rae_ext_Gbuffer_skyHosekPush")
+
 func skyHosekPush(index: copy Int, value: copy Float) {
-  unsafe { nativeSkyHosekPush(index: index, value: value) }
+  unsafe {
+    nativeSkyHosekPush(index: index, value: value)
+  }
 }
+
 func gbLitView() unsafe extern("rae_gb_lit_view") ret Ptr
+
 # Cooked Hosek-Wilkie coefficients pushed before lighting; three vec4 per
 # channel, matching the WGSL `hosek` layout.
 func pushHosekChannel(c: view HosekChannel, base: view Int) {
@@ -253,21 +433,71 @@ func pushHosekChannel(c: view HosekChannel, base: view Int) {
 
 # Low-level lighting: upload the uniform (C), build the bind (rebuilt on resize)
 # over the adopted C pipeline, run the fullscreen pass into the lit target.
-func lighting(cache: mod LightPassCache, resources: mod GpuResources, camX: copy Float, camY: copy Float, camZ: copy Float, exposure: copy Float,
-              sunX: copy Float, sunY: copy Float, sunZ: copy Float,
-              sunR: copy Float, sunG: copy Float, sunB: copy Float,
-              skyR: copy Float, skyG: copy Float, skyB: copy Float,
-              gndR: copy Float, gndG: copy Float, gndB: copy Float,
-              skyKind: copy Float, turbidity: copy Float, skyExposure: copy Float,
-              sunSizeRad: copy Float, zenR: copy Float, zenG: copy Float, zenB: copy Float,
-              bands: copy Float, horR: copy Float, horG: copy Float, horB: copy Float,
-              discI: copy Float) {
-  if gbDeferredPrepare() is 0 { ret }
-  gbLightUpload(camX: camX, camY: camY, camZ: camZ, exposure: exposure,
-    sunX: sunX, sunY: sunY, sunZ: sunZ, sunR: sunR, sunG: sunG, sunB: sunB,
-    skyR: skyR, skyG: skyG, skyB: skyB, gndR: gndR, gndG: gndG, gndB: gndB,
-    skyKind: skyKind, turbidity: turbidity, skyExposure: skyExposure, sunSizeRad: sunSizeRad,
-    zenR: zenR, zenG: zenG, zenB: zenB, bands: bands, horR: horR, horG: horG, horB: horB, discI: discI)
+func lighting(
+  cache: mod LightPassCache
+  resources: mod GpuResources
+  camX: copy Float
+  camY: copy Float
+  camZ: copy Float
+  exposure: copy Float
+  sunX: copy Float
+  sunY: copy Float
+  sunZ: copy Float
+  sunR: copy Float
+  sunG: copy Float
+  sunB: copy Float
+  skyR: copy Float
+  skyG: copy Float
+  skyB: copy Float
+  gndR: copy Float
+  gndG: copy Float
+  gndB: copy Float
+  skyKind: copy Float
+  turbidity: copy Float
+  skyExposure: copy Float
+  sunSizeRad: copy Float
+  zenR: copy Float
+  zenG: copy Float
+  zenB: copy Float
+  bands: copy Float
+  horR: copy Float
+  horG: copy Float
+  horB: copy Float
+  discI: copy Float
+) {
+  if gbDeferredPrepare() is 0 {
+    ret
+  }
+  gbLightUpload(
+    camX: camX
+    camY: camY
+    camZ: camZ
+    exposure: exposure
+    sunX: sunX
+    sunY: sunY
+    sunZ: sunZ
+    sunR: sunR
+    sunG: sunG
+    sunB: sunB
+    skyR: skyR
+    skyG: skyG
+    skyB: skyB
+    gndR: gndR
+    gndG: gndG
+    gndB: gndB
+    skyKind: skyKind
+    turbidity: turbidity
+    skyExposure: skyExposure
+    sunSizeRad: sunSizeRad
+    zenR: zenR
+    zenG: zenG
+    zenB: zenB
+    bands: bands
+    horR: horR
+    horG: horG
+    horB: horB
+    discI: discI
+  )
   let gen: Int = gbTargetsGen()
   if not (gen is cache.bindGen) {
     cache.bindGen = gen
@@ -279,22 +509,63 @@ func lighting(cache: mod LightPassCache, resources: mod GpuResources, camX: copy
   if not bindGroupIsUsable(resources: resources, id: cache.bindGroup) {
     let entries: List(ResourceRef) = List.create(ResourceRef, cap: 9)
     unsafe {
-      if let pipeline: ExternalId = adoptExternalRenderPipeline(resources: resources, handle: gbLightPipeline()) {
+      if let pipeline: ExternalId = adoptExternalRenderPipeline(
+        resources: resources
+        handle: gbLightPipeline()
+      ) {
         cache.adopted.add(value: pipeline)
         cache.pipeline = pipeline
       }
-      entries.add(value: adoptBufferRef(resources: resources, adopted: cache.adopted, handle: gbLightUbuf()))
-      entries.add(value: adoptTextureViewRef(resources: resources, adopted: cache.adopted, handle: gbViewA()))
-      entries.add(value: adoptTextureViewRef(resources: resources, adopted: cache.adopted, handle: gbViewB()))
-      entries.add(value: adoptTextureViewRef(resources: resources, adopted: cache.adopted, handle: gbViewC()))
-      entries.add(value: adoptTextureViewRef(resources: resources, adopted: cache.adopted, handle: gbViewDepth()))
-      entries.add(value: adoptTextureViewRef(resources: resources, adopted: cache.adopted, handle: gbAoView()))
-      entries.add(value: adoptBufferRef(resources: resources, adopted: cache.adopted, handle: gbShadowFrameUbuf()))
-      entries.add(value: adoptTextureViewRef(resources: resources, adopted: cache.adopted, handle: gbShadowArrayView()))
-      entries.add(value: adoptSamplerRef(resources: resources, adopted: cache.adopted, handle: gbShadowSampler()))
+      entries.add(
+        value: adoptBufferRef(resources: resources, adopted: cache.adopted, handle: gbLightUbuf())
+      )
+      entries.add(
+        value: adoptTextureViewRef(resources: resources, adopted: cache.adopted, handle: gbViewA())
+      )
+      entries.add(
+        value: adoptTextureViewRef(resources: resources, adopted: cache.adopted, handle: gbViewB())
+      )
+      entries.add(
+        value: adoptTextureViewRef(resources: resources, adopted: cache.adopted, handle: gbViewC())
+      )
+      entries.add(
+        value: adoptTextureViewRef(
+          resources: resources
+          adopted: cache.adopted
+          handle: gbViewDepth()
+        )
+      )
+      entries.add(
+        value: adoptTextureViewRef(resources: resources, adopted: cache.adopted, handle: gbAoView())
+      )
+      entries.add(
+        value: adoptBufferRef(
+          resources: resources
+          adopted: cache.adopted
+          handle: gbShadowFrameUbuf()
+        )
+      )
+      entries.add(
+        value: adoptTextureViewRef(
+          resources: resources
+          adopted: cache.adopted
+          handle: gbShadowArrayView()
+        )
+      )
+      entries.add(
+        value: adoptSamplerRef(
+          resources: resources
+          adopted: cache.adopted
+          handle: gbShadowSampler()
+        )
+      )
     }
     var made: Bool = false
-    if let bind: BindGroupId = createRenderBindGroupExternal(resources: resources, pipeline: cache.pipeline, entries: entries) {
+    if let bind: BindGroupId = createRenderBindGroupExternal(
+      resources: resources
+      pipeline: cache.pipeline
+      entries: entries
+    ) {
       cache.bindGroup = bind
       made = true
     }
@@ -303,11 +574,24 @@ func lighting(cache: mod LightPassCache, resources: mod GpuResources, camX: copy
       cache.pipeline = noExternalId()
     }
   }
-  unsafe { runFullscreenExternal(resources: resources, pipeline: cache.pipeline, bind: cache.bindGroup, target: gbLitView()) }
+  unsafe {
+    runFullscreenExternal(
+      resources: resources
+      pipeline: cache.pipeline
+      bind: cache.bindGroup
+      target: gbLitView()
+    )
+  }
 }
 
 # Public: lighting with a bound sky environment (Hosek ambient + background).
-func lightingPassSky(cache: mod LightPassCache, resources: mod GpuResources, camera: view Camera3d, light: view Light3d, sky: view Sky) pub {
+func lightingPassSky(
+  cache: mod LightPassCache
+  resources: mod GpuResources
+  camera: view Camera3d
+  light: view Light3d
+  sky: view Sky
+) pub {
   let up: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
   let down: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0 - 1.0)
   # DESATURATED BY THE SKY'S OWN SETTING. The sky's irradiance is THE ambient
@@ -320,39 +604,85 @@ func lightingPassSky(cache: mod LightPassCache, resources: mod GpuResources, cam
   pushHosekChannel(c: sky.hosek.r, base: 0)
   pushHosekChannel(c: sky.hosek.g, base: 12)
   pushHosekChannel(c: sky.hosek.b, base: 24)
-  lighting(cache: cache, resources: resources,
-    camX: camera.position.x, camY: camera.position.y, camZ: camera.position.z,
-    exposure: light.exposure,
-    sunX: light.sunDir.x, sunY: light.sunDir.y, sunZ: light.sunDir.z,
-    sunR: light.sunColor.x, sunG: light.sunColor.y, sunB: light.sunColor.z,
-    skyR: skyC.x, skyG: skyC.y, skyB: skyC.z,
-    gndR: gndC.x, gndG: gndC.y, gndB: gndC.z,
-    skyKind: kindCode(sky: sky), turbidity: sky.turbidity,
-    skyExposure: sky.exposure, sunSizeRad: sky.sunAngularRadius,
-    zenR: sky.zenithColor.x, zenG: sky.zenithColor.y, zenB: sky.zenithColor.z,
-    bands: sky.bands,
-    horR: sky.horizonColor.x, horG: sky.horizonColor.y, horB: sky.horizonColor.z,
+  lighting(
+    cache: cache
+    resources: resources
+    camX: camera.position.x
+    camY: camera.position.y
+    camZ: camera.position.z
+    exposure: light.exposure
+    sunX: light.sunDir.x
+    sunY: light.sunDir.y
+    sunZ: light.sunDir.z
+    sunR: light.sunColor.x
+    sunG: light.sunColor.y
+    sunB: light.sunColor.z
+    skyR: skyC.x
+    skyG: skyC.y
+    skyB: skyC.z
+    gndR: gndC.x
+    gndG: gndC.y
+    gndB: gndC.z
+    skyKind: kindCode(sky: sky)
+    turbidity: sky.turbidity
+    skyExposure: sky.exposure
+    sunSizeRad: sky.sunAngularRadius
+    zenR: sky.zenithColor.x
+    zenG: sky.zenithColor.y
+    zenB: sky.zenithColor.z
+    bands: sky.bands
+    horR: sky.horizonColor.x
+    horG: sky.horizonColor.y
+    horB: sky.horizonColor.z
     discI: sky.sunDiscIntensity
   )
 }
 
 # Public: lighting with the authored ambient hemisphere, no sky.
-func lightingPass(cache: mod LightPassCache, resources: mod GpuResources, camera: view Camera3d, light: view Light3d) pub {
-  lighting(cache: cache, resources: resources,
-    camX: camera.position.x, camY: camera.position.y, camZ: camera.position.z,
-    exposure: light.exposure,
-    sunX: light.sunDir.x, sunY: light.sunDir.y, sunZ: light.sunDir.z,
-    sunR: light.sunColor.x, sunG: light.sunColor.y, sunB: light.sunColor.z,
-    skyR: light.ambSky.x, skyG: light.ambSky.y, skyB: light.ambSky.z,
-    gndR: light.ambGround.x, gndG: light.ambGround.y, gndB: light.ambGround.z,
-    skyKind: 0.0, turbidity: 3.0, skyExposure: 1.0, sunSizeRad: 0.0047,
-    zenR: 0.0, zenG: 0.0, zenB: 0.0, bands: 1.0,
-    horR: 0.0, horG: 0.0, horB: 0.0, discI: 0.0
+func lightingPass(
+  cache: mod LightPassCache
+  resources: mod GpuResources
+  camera: view Camera3d
+  light: view Light3d
+) pub {
+  lighting(
+    cache: cache
+    resources: resources
+    camX: camera.position.x
+    camY: camera.position.y
+    camZ: camera.position.z
+    exposure: light.exposure
+    sunX: light.sunDir.x
+    sunY: light.sunDir.y
+    sunZ: light.sunDir.z
+    sunR: light.sunColor.x
+    sunG: light.sunColor.y
+    sunB: light.sunColor.z
+    skyR: light.ambSky.x
+    skyG: light.ambSky.y
+    skyB: light.ambSky.z
+    gndR: light.ambGround.x
+    gndG: light.ambGround.y
+    gndB: light.ambGround.z
+    skyKind: 0.0
+    turbidity: 3.0
+    skyExposure: 1.0
+    sunSizeRad: 0.0047
+    zenR: 0.0
+    zenG: 0.0
+    zenB: 0.0
+    bands: 1.0
+    horR: 0.0
+    horG: 0.0
+    horB: 0.0
+    discI: 0.0
   )
 }
 
 func taa(cache: mod TaaPassCache, resources: mod GpuResources) pub {
-  if gbTaaReady() is 0 { ret }
+  if gbTaaReady() is 0 {
+    ret
+  }
   let cur: Int = gbTaaBegin()
   let gen: Int = gbTargetsGen()
   if not (gen is cache.bindGen) {
@@ -363,7 +693,10 @@ func taa(cache: mod TaaPassCache, resources: mod GpuResources) pub {
   }
   if not isExternalRenderPipeline(resources: resources, id: cache.pipeline) {
     unsafe {
-      if let pipeline: ExternalId = adoptExternalRenderPipeline(resources: resources, handle: gbTaaPipeline()) {
+      if let pipeline: ExternalId = adoptExternalRenderPipeline(
+        resources: resources
+        handle: gbTaaPipeline()
+      ) {
         cache.adopted.add(value: pipeline)
         cache.pipeline = pipeline
       }
@@ -372,13 +705,33 @@ func taa(cache: mod TaaPassCache, resources: mod GpuResources) pub {
   if not bindSlotUsable(resources: resources, binds: cache.binds, idx: cur) {
     let entries: List(ResourceRef) = List.create(ResourceRef, cap: 4)
     unsafe {
-      entries.add(value: adoptTextureViewRef(resources: resources, adopted: cache.adopted, handle: gbLitView()))
-      entries.add(value: adoptTextureViewRef(resources: resources, adopted: cache.adopted, handle: gbTaaHistoryView()))
-      entries.add(value: adoptTextureViewRef(resources: resources, adopted: cache.adopted, handle: gbViewC()))
-      entries.add(value: adoptBufferRef(resources: resources, adopted: cache.adopted, handle: gbTaaUbuf()))
+      entries.add(
+        value: adoptTextureViewRef(
+          resources: resources
+          adopted: cache.adopted
+          handle: gbLitView()
+        )
+      )
+      entries.add(
+        value: adoptTextureViewRef(
+          resources: resources
+          adopted: cache.adopted
+          handle: gbTaaHistoryView()
+        )
+      )
+      entries.add(
+        value: adoptTextureViewRef(resources: resources, adopted: cache.adopted, handle: gbViewC())
+      )
+      entries.add(
+        value: adoptBufferRef(resources: resources, adopted: cache.adopted, handle: gbTaaUbuf())
+      )
     }
     var made: Bool = false
-    if let bind: BindGroupId = createRenderBindGroupExternal(resources: resources, pipeline: cache.pipeline, entries: entries) {
+    if let bind: BindGroupId = createRenderBindGroupExternal(
+      resources: resources
+      pipeline: cache.pipeline
+      entries: entries
+    ) {
       cache.binds.set(index: cur, value: bind)
       made = true
     }
@@ -388,7 +741,14 @@ func taa(cache: mod TaaPassCache, resources: mod GpuResources) pub {
     }
   }
   if let bind: BindGroupId = cache.binds.copyAt(index: cur) {
-    unsafe { runFullscreenExternal(resources: resources, pipeline: cache.pipeline, bind: bind, target: gbTaaTargetView()) }
+    unsafe {
+      runFullscreenExternal(
+        resources: resources
+        pipeline: cache.pipeline
+        bind: bind
+        target: gbTaaTargetView()
+      )
+    }
   }
   gbTaaEnd()
 }
@@ -399,7 +759,9 @@ func taaPass(cache: mod TaaPassCache, resources: mod GpuResources) pub {
 }
 
 func depthPyramid(cache: mod PyrPassCache, resources: mod GpuResources) pub {
-  if gbPyramidReady() is 0 { ret }
+  if gbPyramidReady() is 0 {
+    ret
+  }
   let gen: Int = gbTargetsGen()
   if not (gen is cache.bindGen) {
     cache.bindGen = gen
@@ -410,28 +772,50 @@ func depthPyramid(cache: mod PyrPassCache, resources: mod GpuResources) pub {
   }
   if not isExternalRenderPipeline(resources: resources, id: cache.reduce) {
     unsafe {
-      if let pipeline: ExternalId = adoptExternalRenderPipeline(resources: resources, handle: gbPyrFromDepthPipeline()) {
+      if let pipeline: ExternalId = adoptExternalRenderPipeline(
+        resources: resources
+        handle: gbPyrFromDepthPipeline()
+      ) {
         cache.adopted.add(value: pipeline)
         cache.fromDepth = pipeline
       }
-      if let pipeline: ExternalId = adoptExternalRenderPipeline(resources: resources, handle: gbPyrReducePipeline()) {
+      if let pipeline: ExternalId = adoptExternalRenderPipeline(
+        resources: resources
+        handle: gbPyrReducePipeline()
+      ) {
         cache.adopted.add(value: pipeline)
         cache.reduce = pipeline
       }
     }
   }
   let mips: Int = gbPyramidMips()
-  loop cache.binds.length < mips { cache.binds.add(value: noBindGroupId()) }
+  loop cache.binds.length < mips {
+    cache.binds.add(value: noBindGroupId())
+  }
   var i: Int = 0
   loop i < mips {
     # Level 0 reduces the G-buffer depth; every later level reduces the one above.
     var pipeline: ExternalId = cache.reduce
-    if i is 0 { pipeline = cache.fromDepth }
+    if i is 0 {
+      pipeline = cache.fromDepth
+    }
     if not bindSlotUsable(resources: resources, binds: cache.binds, idx: i) {
       let entries: List(ResourceRef) = List.create(ResourceRef, cap: 1)
-      unsafe { entries.add(value: adoptTextureViewRef(resources: resources, adopted: cache.adopted, handle: gbPyrSrcView(i: i))) }
+      unsafe {
+        entries.add(
+          value: adoptTextureViewRef(
+            resources: resources
+            adopted: cache.adopted
+            handle: gbPyrSrcView(i: i)
+          )
+        )
+      }
       var made: Bool = false
-      if let bind: BindGroupId = createRenderBindGroupExternal(resources: resources, pipeline: pipeline, entries: entries) {
+      if let bind: BindGroupId = createRenderBindGroupExternal(
+        resources: resources
+        pipeline: pipeline
+        entries: entries
+      ) {
         cache.binds.set(index: i, value: bind)
         made = true
       }
@@ -443,7 +827,14 @@ func depthPyramid(cache: mod PyrPassCache, resources: mod GpuResources) pub {
       }
     }
     if let bind: BindGroupId = cache.binds.copyAt(index: i) {
-      unsafe { runFullscreenExternal(resources: resources, pipeline: pipeline, bind: bind, target: gbPyrRtView(i: i)) }
+      unsafe {
+        runFullscreenExternal(
+          resources: resources
+          pipeline: pipeline
+          bind: bind
+          target: gbPyrRtView(i: i)
+        )
+      }
     }
     i = i + 1
   }
@@ -457,7 +848,14 @@ func buildDepthPyramid(cache: mod PyrPassCache, resources: mod GpuResources) pub
 # Retire every manager object the post-passes hold (renderer shutdown): the
 # bind groups first (dropping their pins), then the adopted inputs, then the
 # composite / ssao objects. The C-owned inputs are released by C's shutdown.
-func postPassesShutdown(composite: mod CompositePassCache, ao: mod AoPassCache, light: mod LightPassCache, taa: mod TaaPassCache, pyr: mod PyrPassCache, resources: mod GpuResources) {
+func postPassesShutdown(
+  composite: mod CompositePassCache
+  ao: mod AoPassCache
+  light: mod LightPassCache
+  taa: mod TaaPassCache
+  pyr: mod PyrPassCache
+  resources: mod GpuResources
+) {
   retireBindGroupIds(resources: resources, list: composite.binds)
   releaseExternalIds(resources: resources, list: composite.adopted)
   retireRenderPipeline(resources: resources, id: composite.pipeline)

@@ -7,12 +7,25 @@ open ecs/Query
 # tables are built so the smallest lands in a different SLOT per call, exercising
 # different driver branches (query4: D then B; query5: E then A). Only e4 is in
 # every table. A mod write through queryModAt must be visible on read-back.
+type Position {
+  x: Int
+}
 
-type Position { x: Int }
-type Velocity { v: Int }
-type Hp { hp: Int }
-type Tag { t: Int }
-type Nm { n: Int }
+type Velocity {
+  v: Int
+}
+
+type Hp {
+  hp: Int
+}
+
+type Tag {
+  t: Int
+}
+
+type Nm {
+  n: Int
+}
 
 func main() {
   var pos: ComponentTable(Position) = ComponentTable.create(Position)
@@ -38,7 +51,12 @@ func main() {
   componentSet(this: nm, entity: e4, data: Nm { n: 400 })
 
   # query4, smallest table (tag, 1 entity) in slot D.
-  let h4: List(Query4Match) = query4(tableA: pos, tableB: vel, tableC: hp, tableD: tag)
+  let h4: List(Query4Match) = query4(
+    tableA: pos
+    tableB: vel
+    tableC: hp
+    tableD: tag
+  )
   log("q4 count: {h4.length}")
   loop let row: view Query4Match in h4 {
     let position: view Position => query4ViewA(tableA: pos, hit: row)
@@ -49,7 +67,12 @@ func main() {
   }
 
   # query4 again with the smallest table in slot B (a different driver branch).
-  let h4b: List(Query4Match) = query4(tableA: pos, tableB: tag, tableC: vel, tableD: hp)
+  let h4b: List(Query4Match) = query4(
+    tableA: pos
+    tableB: tag
+    tableC: vel
+    tableD: hp
+  )
   log("q4b count: {h4b.length}")
   loop let row: view Query4Match in h4b {
     let px: mod Position => queryModAt(table: pos, denseIndex: row.indexA)
@@ -59,7 +82,13 @@ func main() {
   log("e4.x after q4 mod: {got.x}")
 
   # query5, smallest table (tag) in slot E.
-  let h5: List(Query5Match) = query5(tableA: pos, tableB: vel, tableC: hp, tableD: nm, tableE: tag)
+  let h5: List(Query5Match) = query5(
+    tableA: pos
+    tableB: vel
+    tableC: hp
+    tableD: nm
+    tableE: tag
+  )
   log("q5 count: {h5.length}")
   loop let row: view Query5Match in h5 {
     let position: view Position => query5ViewA(tableA: pos, hit: row)
@@ -71,7 +100,13 @@ func main() {
   }
 
   # query5 with the smallest table in slot A.
-  let h5a: List(Query5Match) = query5(tableA: tag, tableB: pos, tableC: vel, tableD: hp, tableE: nm)
+  let h5a: List(Query5Match) = query5(
+    tableA: tag
+    tableB: pos
+    tableC: vel
+    tableD: hp
+    tableE: nm
+  )
   log("q5a count: {h5a.length}")
   loop let row: view Query5Match in h5a {
     let nn: mod Nm => queryModAt(table: nm, denseIndex: row.indexE)

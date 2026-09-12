@@ -10,7 +10,6 @@ open Gpu2dCanvas
 # Frame-phase helpers for 106. The app still owns the loop policy, but the
 # systems now run through explicit phases: input dispatch, UI refresh/data sync,
 # layout/transform, animation, and GPU2D render.
-
 type FrameInputDispatchResult {
   nextScreen: Screen
   hadActions: Bool
@@ -34,7 +33,14 @@ func runFrameInputDispatch(
   let hadActions: Bool = input.events.length > 0
 
   if dragJustReleased is false {
-    nextScreen = dispatchActions(input: input, current: currentScreen, playback: playback, state: appState, world: world, spotifyEnabled: spotifyEnabled)
+    nextScreen = dispatchActions(
+      input: input
+      current: currentScreen
+      playback: playback
+      state: appState
+      world: world
+      spotifyEnabled: spotifyEnabled
+    )
   } else {
     if hadActions {
       let dropped: Int = input.events.length
@@ -84,7 +90,16 @@ func refreshUiDiffs(
   applyOverlaySync: view Bool
   reg: view TextureRegistry
 ) pub ret FrameUiRefreshResult {
-  let refreshed: UiRefreshResult = refreshMountedUi(world: world, scenes: scenes, state: appState, playback: playback, visible: visible, cache: cache, viewport: viewport, reg: reg)
+  let refreshed: UiRefreshResult = refreshMountedUi(
+    world: world
+    scenes: scenes
+    state: appState
+    playback: playback
+    visible: visible
+    cache: cache
+    viewport: viewport
+    reg: reg
+  )
   if applyOverlaySync or refreshed.playbackChanged {
     applyOverlaysToWorld(world: world, playback: playback, state: appState)
   }
@@ -122,14 +137,40 @@ func syncFrameData(
 
   # Wrap at the boundary: the frame pipeline still carries a raw Float64 clock,
   # while the poller's throttle is expressed in Timestamp/Duration.
-  pollSpotify(state: spotifyState, world: world, reg: texReg, playback: playback, appState: appState, now: Time.atSeconds(s: now))
-  let spotifyRefresh: UiRefreshResult = refreshMountedUi(world: world, scenes: scenes, state: appState, playback: playback, visible: visible, cache: uiRefresh, viewport: viewport, reg: texReg)
+  pollSpotify(
+    state: spotifyState
+    world: world
+    reg: texReg
+    playback: playback
+    appState: appState
+    now: Time.atSeconds(s: now)
+  )
+  let spotifyRefresh: UiRefreshResult = refreshMountedUi(
+    world: world
+    scenes: scenes
+    state: appState
+    playback: playback
+    visible: visible
+    cache: uiRefresh
+    viewport: viewport
+    reg: texReg
+  )
   if spotifyRefresh.playbackChanged {
     applyOverlaysToWorld(world: world, playback: playback, state: appState)
   }
 
-  let loadingCovers: Bool = cascadeAssets(reg: texReg, albums: appState.mediaLibrary.albums, budget: 2, load: appState.assetLoad)
-  let loadingHistoryArt: Bool = loadCachedHistoryArtChunk(history: appState.playHistory, reg: texReg, budget: 4, loader: appState.historyArt)
+  let loadingCovers: Bool = cascadeAssets(
+    reg: texReg
+    albums: appState.mediaLibrary.albums
+    budget: 2
+    load: appState.assetLoad
+  )
+  let loadingHistoryArt: Bool = loadCachedHistoryArtChunk(
+    history: appState.playHistory
+    reg: texReg
+    budget: 4
+    loader: appState.historyArt
+  )
   var profileBecameReady: Bool = false
   if visible is Screen.profile {
     let profileKeyNow: String = profileAvatarKey()
@@ -186,7 +227,12 @@ func runFrameAnimation(
   var nextPendingHeroTargetPageId: String = "{pendingHeroTargetPageId}"
 
   if nextTransitionArmed {
-    startHeroTransition(anim: anim, key: "{appState.currentAlbumStem}", durationSec: heroDuration, now: now)
+    startHeroTransition(
+      anim: anim
+      key: "{appState.currentAlbumStem}"
+      durationSec: heroDuration
+      now: now
+    )
     nextTransitionArmed = false
   }
 
@@ -195,7 +241,12 @@ func runFrameAnimation(
     if nextPendingSrc {
       if willSwitch is false {
         if nextPendingHeroTargetPageId.length() > 0 {
-          setHeroVisibleOnPage(world: world, pageId: nextPendingHeroTargetPageId, key: appState.currentAlbumStem, visible: true)
+          setHeroVisibleOnPage(
+            world: world
+            pageId: nextPendingHeroTargetPageId
+            key: appState.currentAlbumStem
+            visible: true
+          )
         } else {
           setHeroVisible(world: world, key: appState.currentAlbumStem, visible: true)
         }
@@ -248,10 +299,22 @@ func renderGpu2dFrame(
   if (busyAnimating or active or forceRender or now < renderUntil) and frameDue and switching is false {
     uiBeginFrame(canvas: canvas, clear: bg)
     renderSystemGpu2d(world: world, res: gpuUi, canvas: canvas)
-    updateAndRenderDebugOverlayGpu2d(debug: debug, canvas: canvas, now: now, didRealWork: active, font: gpuUi.textFont)
+    updateAndRenderDebugOverlayGpu2d(
+      debug: debug
+      canvas: canvas
+      now: now
+      didRealWork: active
+      font: gpuUi.textFont
+    )
     # Shared log overlay (lib/ui/LogOverlay.rae) — top-left here, bottom-left
     # in the 3D example. Drawn last so it is never covered by app UI.
-    drawLogOverlay(ov: logView, canvas: canvas, font: gpuUi.textFont, screenW: logW, screenH: logH)
+    drawLogOverlay(
+      ov: logView
+      canvas: canvas
+      font: gpuUi.textFont
+      screenW: logW
+      screenH: logH
+    )
     uiEndFrame(canvas: canvas)
     cacheDirty(world: world, cache: renderCache)
     ret FrameRenderResult {

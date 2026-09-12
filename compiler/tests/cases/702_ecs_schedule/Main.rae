@@ -5,18 +5,29 @@ open ecs/Schedule
 # #755: a Schedule runs system entries in explicit order and skips an entry when
 # none of the tables its system READS changed generation since the last run.
 # Here: `move` reads velocities, `render` reads positions.
+type Position {
+  x: Int
+}
 
-type Position { x: Int }
-type Velocity { v: Int }
+type Velocity {
+  v: Int
+}
 
 # One frame of the schedule: walk entries in order, run each only when its read
 # tables' generation moved. Returns the space-joined names that ran (proves order
 # + dirty-skip). Entry 0 = move (reads velocities), entry 1 = render (reads
 # positions) — matching addSystem order.
-func runFrame(sched: mod Schedule, positions: view ComponentTable(Position),
-              velocities: view ComponentTable(Velocity)) ret String {
+func runFrame(
+  sched: mod Schedule
+  positions: view ComponentTable(Position)
+  velocities: view ComponentTable(Velocity)
+) ret String {
   var order: String = ""
-  if shouldRun(schedule: sched, index: 0, readGeneration: componentTableGeneration(this: velocities)) {
+  if shouldRun(
+    schedule: sched
+    index: 0
+    readGeneration: componentTableGeneration(this: velocities)
+  ) {
     order = order.concat(other: "move ")
   }
   if shouldRun(schedule: sched, index: 1, readGeneration: componentTableGeneration(this: positions)) {
@@ -32,7 +43,12 @@ func main() {
   let moveIdx: Int = addSystem(schedule: sched, name: "move")
   let renderIdx: Int = addSystem(schedule: sched, name: "render")
   log("size: {scheduleSize(schedule: sched)}")
-  log("order: {scheduleName(schedule: sched, index: moveIdx)} {scheduleName(schedule: sched, index: renderIdx)}")
+  log(
+    "order: {scheduleName(schedule: sched, index: moveIdx)} {scheduleName(
+      schedule: sched
+      index: renderIdx
+    )}"
+  )
 
   let e1: EntityId = { index: 1, generation: 0 }
   componentSet(this: positions, entity: e1, data: Position { x: 10 })

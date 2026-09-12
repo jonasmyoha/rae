@@ -38,16 +38,23 @@ open Mesh3d
 open Math3d
 open Quat
 
-const glbMagic: Int = 1179937895      # "glTF" little-endian
-const chunkJson: Int = 1313821514     # "JSON"
-const chunkBin: Int = 5130562         # "BIN\0"
+const glbMagic: Int = 1179937895  # "glTF" little-endian
+
+const chunkJson: Int = 1313821514  # "JSON"
+
+const chunkBin: Int = 5130562  # "BIN\0"
 
 # glTF component types, from the spec's enum.
 const compByte: Int = 5120
+
 const compUByte: Int = 5121
+
 const compShort: Int = 5122
+
 const compUShort: Int = 5123
+
 const compUInt: Int = 5125
+
 const compFloat: Int = 5126
 
 type Glb {
@@ -67,30 +74,35 @@ type Glb {
 # Callers branch on `ok`, never on the contents of `doc`.
 func glbFailed(msg: view String) ret Glb {
   ret Glb {
-    ok: false,
-    errorMsg: "{msg}",
-    doc: parseJson(source: "null"),
-    binOffset: 0, binLength: 0, bytes: List.create(Int, cap: 0)
+    ok: false
+    errorMsg: "{msg}"
+    doc: parseJson(source: "null")
+    binOffset: 0
+    binLength: 0
+    bytes: List.create(Int, cap: 0)
   }
 }
 
 # ----- little-endian scalar readers -----------------------------------
-
 func gltfIntAt(values: view List(Int), index: view Int) ret Int {
-  if let value: Int = values.copyAt(index: index) { ret value }
+  if let value: Int = values.copyAt(index: index) {
+    ret value
+  }
   ret 0
 }
 
 func gltfFloatAt(values: view List(Float), index: view Int) ret Float {
-  if let value: Float = values.copyAt(index: index) { ret value }
+  if let value: Float = values.copyAt(index: index) {
+    ret value
+  }
   ret 0.0
 }
 
 func readU32(b: view List(Int), pos: view Int) pub ret Int {
-  ret gltfIntAt(values: b, index: pos)
-    bitor (gltfIntAt(values: b, index: pos + 1) shl 8)
-    bitor (gltfIntAt(values: b, index: pos + 2) shl 16)
-    bitor (gltfIntAt(values: b, index: pos + 3) shl 24)
+  ret gltfIntAt(values: b, index: pos) bitor (gltfIntAt(values: b, index: pos + 1) shl 8) bitor (gltfIntAt(
+    values: b
+    index: pos + 2
+  ) shl 16) bitor (gltfIntAt(values: b, index: pos + 3) shl 24)
 }
 
 func readU16(b: view List(Int), pos: view Int) pub ret Int {
@@ -194,8 +206,12 @@ func loadGlb(path: view String) pub ret Glb {
   }
 
   ret Glb {
-    ok: true, errorMsg: "", doc: own doc,
-    binOffset: binStart, binLength: binLen, bytes: own bytes
+    ok: true
+    errorMsg: ""
+    doc: own doc
+    binOffset: binStart
+    binLength: binLen
+    bytes: own bytes
   }
 }
 
@@ -203,7 +219,6 @@ func loadGlb(path: view String) pub ret Glb {
 # glTF documents are deeply nested, so reaching "the byteOffset of the
 # bufferView of the accessor of an attribute" is four lookups. These keep
 # the accessor code readable instead of a wall of valueAt(field(...)).
-
 func objField(glb: view Glb, obj: view JsonValue, key: view String) pub ret JsonValue {
   ret valueAt(doc: glb.doc, idx: field(doc: glb.doc, this: obj, key: key))
 }
@@ -211,7 +226,12 @@ func objField(glb: view Glb, obj: view JsonValue, key: view String) pub ret Json
 # Missing numeric fields are COMMON and legal in glTF — byteOffset,
 # byteStride and normalized are all optional with defined defaults — so a
 # missing key returns the fallback rather than being an error.
-func intField(glb: view Glb, obj: view JsonValue, key: view String, fallback: view Int) pub ret Int {
+func intField(
+  glb: view Glb
+  obj: view JsonValue
+  key: view String
+  fallback: view Int
+) pub ret Int {
   let idx: Int = field(doc: glb.doc, this: obj, key: key)
   if idx < 0 {
     ret fallback
@@ -227,20 +247,38 @@ func arrayField(glb: view Glb, obj: view JsonValue, key: view String) pub ret Js
 
 # Bytes per component, from the glTF component-type enum.
 func componentSize(componentType: view Int) ret Int {
-  if componentType is compByte { ret 1 }
-  if componentType is compUByte { ret 1 }
-  if componentType is compShort { ret 2 }
-  if componentType is compUShort { ret 2 }
+  if componentType is compByte {
+    ret 1
+  }
+  if componentType is compUByte {
+    ret 1
+  }
+  if componentType is compShort {
+    ret 2
+  }
+  if componentType is compUShort {
+    ret 2
+  }
   ret 4
 }
 
 # Components per element, from the accessor's `type` string.
 func typeComponents(t: view String) ret Int {
-  if t is "SCALAR" { ret 1 }
-  if t is "VEC2" { ret 2 }
-  if t is "VEC3" { ret 3 }
-  if t is "VEC4" { ret 4 }
-  if t is "MAT4" { ret 16 }
+  if t is "SCALAR" {
+    ret 1
+  }
+  if t is "VEC2" {
+    ret 2
+  }
+  if t is "VEC3" {
+    ret 3
+  }
+  if t is "VEC4" {
+    ret 4
+  }
+  if t is "MAT4" {
+    ret 16
+  }
   ret 0
 }
 
@@ -265,36 +303,91 @@ func accessorAt(glb: view Glb, index: view Int) pub ret Accessor {
   let root: JsonValue = root(doc: glb.doc)
   let accessors: JsonValue = arrayField(glb: glb, obj: root, key: "accessors")
   if index < 0 or index >= arrayLen(this: accessors) {
-    ret Accessor { ok: false, count: 0, components: 0, componentType: 0, start: 0, stride: 0 }
+    ret Accessor {
+      ok: false
+      count: 0
+      components: 0
+      componentType: 0
+      start: 0
+      stride: 0
+    }
   }
   let acc: JsonValue = arrayAt(doc: glb.doc, this: accessors, idx: index)
   let typeName: String = jsonString(this: objField(glb: glb, obj: acc, key: "type"), fallback: "")
   let comps: Int = typeComponents(t: typeName)
-  let compType: Int = intField(glb: glb, obj: acc, key: "componentType", fallback: 0)
-  let count: Int = intField(glb: glb, obj: acc, key: "count", fallback: 0)
+  let compType: Int = intField(
+    glb: glb
+    obj: acc
+    key: "componentType"
+    fallback: 0
+  )
+  let count: Int = intField(
+    glb: glb
+    obj: acc
+    key: "count"
+    fallback: 0
+  )
   if comps is 0 or count is 0 {
-    ret Accessor { ok: false, count: 0, components: 0, componentType: 0, start: 0, stride: 0 }
+    ret Accessor {
+      ok: false
+      count: 0
+      components: 0
+      componentType: 0
+      start: 0
+      stride: 0
+    }
   }
   let elemSize: Int = comps * componentSize(componentType: compType)
 
-  let bvIndex: Int = intField(glb: glb, obj: acc, key: "bufferView", fallback: 0 - 1)
+  let bvIndex: Int = intField(
+    glb: glb
+    obj: acc
+    key: "bufferView"
+    fallback: 0 - 1
+  )
   if bvIndex < 0 {
     # A bufferView-less accessor is legal and means "all zeros" (used for
     # sparse bases). Report it as empty rather than reading from offset 0,
     # which would silently return whatever the previous attribute holds.
-    ret Accessor { ok: false, count: 0, components: 0, componentType: 0, start: 0, stride: 0 }
+    ret Accessor {
+      ok: false
+      count: 0
+      components: 0
+      componentType: 0
+      start: 0
+      stride: 0
+    }
   }
   let views: JsonValue = arrayField(glb: glb, obj: root, key: "bufferViews")
   let bv: JsonValue = arrayAt(doc: glb.doc, this: views, idx: bvIndex)
-  let bvOffset: Int = intField(glb: glb, obj: bv, key: "byteOffset", fallback: 0)
-  var stride: Int = intField(glb: glb, obj: bv, key: "byteStride", fallback: 0)
+  let bvOffset: Int = intField(
+    glb: glb
+    obj: bv
+    key: "byteOffset"
+    fallback: 0
+  )
+  var stride: Int = intField(
+    glb: glb
+    obj: bv
+    key: "byteStride"
+    fallback: 0
+  )
   if stride is 0 {
     stride = elemSize
   }
-  let accOffset: Int = intField(glb: glb, obj: acc, key: "byteOffset", fallback: 0)
+  let accOffset: Int = intField(
+    glb: glb
+    obj: acc
+    key: "byteOffset"
+    fallback: 0
+  )
   ret Accessor {
-    ok: true, count: count, components: comps, componentType: compType,
-    start: glb.binOffset + bvOffset + accOffset, stride: stride
+    ok: true
+    count: count
+    components: comps
+    componentType: compType
+    start: glb.binOffset + bvOffset + accOffset
+    stride: stride
   }
 }
 
@@ -380,10 +473,30 @@ func loadPrimitive(glb: view Glb, meshIndex: view Int, primIndex: view Int) pub 
   let prim: JsonValue = arrayAt(doc: glb.doc, this: prims, idx: primIndex)
   let attrs: JsonValue = objField(glb: glb, obj: prim, key: "attributes")
 
-  let posAcc: Int = intField(glb: glb, obj: attrs, key: "POSITION", fallback: 0 - 1)
-  let nrmAcc: Int = intField(glb: glb, obj: attrs, key: "NORMAL", fallback: 0 - 1)
-  let uvAcc: Int = intField(glb: glb, obj: attrs, key: "TEXCOORD_0", fallback: 0 - 1)
-  let idxAcc: Int = intField(glb: glb, obj: prim, key: "indices", fallback: 0 - 1)
+  let posAcc: Int = intField(
+    glb: glb
+    obj: attrs
+    key: "POSITION"
+    fallback: 0 - 1
+  )
+  let nrmAcc: Int = intField(
+    glb: glb
+    obj: attrs
+    key: "NORMAL"
+    fallback: 0 - 1
+  )
+  let uvAcc: Int = intField(
+    glb: glb
+    obj: attrs
+    key: "TEXCOORD_0"
+    fallback: 0 - 1
+  )
+  let idxAcc: Int = intField(
+    glb: glb
+    obj: prim
+    key: "indices"
+    fallback: 0 - 1
+  )
 
   let verts: List(Float) = List.create(Float, cap: 0)
   let indices: List(Int) = List.create(Int, cap: 0)
@@ -440,12 +553,30 @@ func loadPrimitive(glb: view Glb, meshIndex: view Int, primIndex: view Int) pub 
       let i0: Int = gltfIntAt(values: tri, index: f)
       let i1: Int = gltfIntAt(values: tri, index: f + 1)
       let i2: Int = gltfIntAt(values: tri, index: f + 2)
-      let ax: Float = gltfFloatAt(values: pos, index: i1 * 3) - gltfFloatAt(values: pos, index: i0 * 3)
-      let ay: Float = gltfFloatAt(values: pos, index: i1 * 3 + 1) - gltfFloatAt(values: pos, index: i0 * 3 + 1)
-      let az: Float = gltfFloatAt(values: pos, index: i1 * 3 + 2) - gltfFloatAt(values: pos, index: i0 * 3 + 2)
-      let bx: Float = gltfFloatAt(values: pos, index: i2 * 3) - gltfFloatAt(values: pos, index: i0 * 3)
-      let by: Float = gltfFloatAt(values: pos, index: i2 * 3 + 1) - gltfFloatAt(values: pos, index: i0 * 3 + 1)
-      let bz: Float = gltfFloatAt(values: pos, index: i2 * 3 + 2) - gltfFloatAt(values: pos, index: i0 * 3 + 2)
+      let ax: Float = gltfFloatAt(values: pos, index: i1 * 3) - gltfFloatAt(
+        values: pos
+        index: i0 * 3
+      )
+      let ay: Float = gltfFloatAt(values: pos, index: i1 * 3 + 1) - gltfFloatAt(
+        values: pos
+        index: i0 * 3 + 1
+      )
+      let az: Float = gltfFloatAt(values: pos, index: i1 * 3 + 2) - gltfFloatAt(
+        values: pos
+        index: i0 * 3 + 2
+      )
+      let bx: Float = gltfFloatAt(values: pos, index: i2 * 3) - gltfFloatAt(
+        values: pos
+        index: i0 * 3
+      )
+      let by: Float = gltfFloatAt(values: pos, index: i2 * 3 + 1) - gltfFloatAt(
+        values: pos
+        index: i0 * 3 + 1
+      )
+      let bz: Float = gltfFloatAt(values: pos, index: i2 * 3 + 2) - gltfFloatAt(
+        values: pos
+        index: i0 * 3 + 2
+      )
       var cx: Float = ay * bz - az * by
       var cy: Float = az * bx - ax * bz
       var cz: Float = ax * by - ay * bx
@@ -489,9 +620,15 @@ func loadPrimitive(glb: view Glb, meshIndex: view Int, primIndex: view Int) pub 
       v = gltfFloatAt(values: uv, index: i * 2 + 1)
     }
     pushVert(
-      verts: verts,
-      px: gltfFloatAt(values: pos, index: i * 3), py: gltfFloatAt(values: pos, index: i * 3 + 1), pz: gltfFloatAt(values: pos, index: i * 3 + 2),
-      nx: nx, ny: ny, nz: nz, u: u, value: v
+      verts: verts
+      px: gltfFloatAt(values: pos, index: i * 3)
+      py: gltfFloatAt(values: pos, index: i * 3 + 1)
+      pz: gltfFloatAt(values: pos, index: i * 3 + 2)
+      nx: nx
+      ny: ny
+      nz: nz
+      u: u
+      value: v
     )
     i = i + 1
   }
@@ -597,12 +734,24 @@ func meshBounds(meshData: view MeshData) pub ret List(Float) {
     let x: Float = gltfFloatAt(values: meshData.verts, index: i * 8)
     let y: Float = gltfFloatAt(values: meshData.verts, index: i * 8 + 1)
     let z: Float = gltfFloatAt(values: meshData.verts, index: i * 8 + 2)
-    if x < minX { minX = x }
-    if y < minY { minY = y }
-    if z < minZ { minZ = z }
-    if x > maxX { maxX = x }
-    if y > maxY { maxY = y }
-    if z > maxZ { maxZ = z }
+    if x < minX {
+      minX = x
+    }
+    if y < minY {
+      minY = y
+    }
+    if z < minZ {
+      minZ = z
+    }
+    if x > maxX {
+      maxX = x
+    }
+    if y > maxY {
+      maxY = y
+    }
+    if z > maxZ {
+      maxZ = z
+    }
     i = i + 1
   }
   out.add(value: minX)
@@ -619,7 +768,6 @@ func meshBounds(meshData: view MeshData) pub ret List(Float) {
 # cannot keep per-primitive materials. These let a caller walk the
 # primitives itself and give each one its own material, which is what
 # colouring a multi-part character requires.
-
 func meshCount(glb: view Glb) pub ret Int {
   if glb.ok is false {
     ret 0

@@ -17,7 +17,6 @@ open gpu/GpuLifetime
 open gpu/GpuRender
 open gpu/GpuIds
 
-
 # Force a terrain-pipeline rebuild on the next draw. The island radius is baked
 # into the composed shader as a const (islandParamsWgsl), so growing the island
 # (#41) must recompose it. The old pipeline and its bind group are RETIRED here
@@ -43,23 +42,56 @@ func resetTerrainPipeline(cache: mod GbufferCache, resources: mod GpuResources) 
 # One texture_2d_array, one layer per material — see terrainLayers below and
 # lib/terrain_splat.wgsl.
 func gbTerrainArrayView() unsafe extern("rae_gb_terrain_array_view") ret Ptr
+
 func nativeGbTerrainTexGen() unsafe extern("rae_gb_terrain_tex_gen") ret Int
+
 func gbTerrainTexGen() ret Int {
-  unsafe { ret nativeGbTerrainTexGen() }
+  unsafe {
+    ret nativeGbTerrainTexGen()
+  }
 }
-func nativeGbTerrainArrayInit(w: Int, h: Int, layers: Int) unsafe extern("rae_gb_terrain_array_init")
+
+func nativeGbTerrainArrayInit(
+  w: Int
+  h: Int
+  layers: Int
+) unsafe extern("rae_gb_terrain_array_init")
+
 func gbTerrainArrayInit(w: copy Int, h: copy Int, layers: copy Int) {
-  unsafe { nativeGbTerrainArrayInit(w: w, h: h, layers: layers) }
+  unsafe {
+    nativeGbTerrainArrayInit(w: w, h: h, layers: layers)
+  }
 }
-func nativeGbTerrainArrayWrite(layer: Int, pixels: view Buffer(Int), w: Int, h: Int) unsafe extern("rae_gb_terrain_array_write")
-func gbTerrainArrayWrite(layer: copy Int, pixels: view Buffer(Int), w: copy Int, h: copy Int) {
-  unsafe { nativeGbTerrainArrayWrite(layer: layer, pixels: pixels, w: w, h: h) }
+
+func nativeGbTerrainArrayWrite(
+  layer: Int
+  pixels: view Buffer(Int)
+  w: Int
+  h: Int
+) unsafe extern("rae_gb_terrain_array_write")
+
+func gbTerrainArrayWrite(
+  layer: copy Int
+  pixels: view Buffer(Int)
+  w: copy Int
+  h: copy Int
+) {
+  unsafe {
+    nativeGbTerrainArrayWrite(
+      layer: layer
+      pixels: pixels
+      w: w
+      h: h
+    )
+  }
 }
 
 # Layers of the material array, indexed to match lib/terrain_splat.wgsl:
 # 0 grass, 1 sand, 2 road, 3 water. (Rock has no plate-harvestable ground tile,
 # so it stays procedural — see the fragment shader.)
-func terrainLayers() pub ret Int { ret 4 }
+func terrainLayers() pub ret Int {
+  ret 4
+}
 
 # Create the material array (all tiles are the same size). The game calls this
 # once, then uploads each layer with terrainUploadLayer and turns the blend on
@@ -68,12 +100,24 @@ func terrainLayers() pub ret Int { ret 4 }
 func terrainInitArray(w: copy Int, h: copy Int) pub {
   gbTerrainArrayInit(w: w, h: h, layers: terrainLayers())
 }
+
 # Upload one material layer (packed RGBA, order R,G,B,A per pixel — the format
 # decodePng+swap produces). Does not rebind: the view already points at this
 # texture, so the new layer content is visible immediately.
-func terrainUploadLayer(layer: copy Int, pixels: view Buffer(Int), w: copy Int, h: copy Int) pub {
-  gbTerrainArrayWrite(layer: layer, pixels: pixels, w: w, h: h)
+func terrainUploadLayer(
+  layer: copy Int
+  pixels: view Buffer(Int)
+  w: copy Int
+  h: copy Int
+) pub {
+  gbTerrainArrayWrite(
+    layer: layer
+    pixels: pixels
+    w: w
+    h: h
+  )
 }
+
 func terrainSetBlend(cache: mod GbufferCache, blend: copy Float) pub {
   cache.terrainBlend = blend
 }
@@ -83,16 +127,26 @@ func terrainSetBlend(cache: mod GbufferCache, blend: copy Float) pub {
 # there, so the fallback is sampled but never visible). One white texel per layer.
 func ensureTerrainTexDefaults(cache: mod GbufferCache, resources: mod GpuResources) {
   if not isValidSampler(resources: resources, id: cache.terrainSampler) {
-    if let sampler: SamplerId = createSamplerWith(resources: resources, addressMode: WGPUAddressMode_Repeat) { cache.terrainSampler = sampler }
+    if let sampler: SamplerId = createSamplerWith(
+      resources: resources
+      addressMode: WGPUAddressMode_Repeat
+    ) {
+      cache.terrainSampler = sampler
+    }
   }
   unsafe {
     if gbTerrainArrayView() is webgpuNull() {
       gbTerrainArrayInit(w: 1, h: 1, layers: terrainLayers())
       var one: List(Int) = List.create(Int, cap: 1)
-      one.add(value: 4294967295)   # 0xFFFFFFFF, opaque white
+      one.add(value: 4294967295)  # 0xFFFFFFFF, opaque white
       var l: Int = 0
       loop l < terrainLayers() {
-        gbTerrainArrayWrite(layer: l, pixels: one.data, w: 1, h: 1)
+        gbTerrainArrayWrite(
+          layer: l
+          pixels: one.data
+          w: 1
+          h: 1
+        )
         l = l + 1
       }
     }
@@ -100,8 +154,11 @@ func ensureTerrainTexDefaults(cache: mod GbufferCache, resources: mod GpuResourc
 }
 
 func nativeSysFileExists(path: String) unsafe extern("rae_ext_rae_sys_exists") ret Bool
+
 func sysFileExists(path: copy String) ret Bool {
-  unsafe { ret nativeSysFileExists(path: path) }
+  unsafe {
+    ret nativeSysFileExists(path: path)
+  }
 }
 
 # The grade-calibrated RAE_TERRAIN_* palette, PER APP (#13). An app that ships its
@@ -127,16 +184,23 @@ func terrainSplatWgsl() ret String {
   let paletteSrc: String = terrainPaletteWgsl()
   let detailSrc: String = gbReadWgsl(path: "lib/terrain_detail.wgsl")
   let terrSrc: String = gbReadWgsl(path: "lib/terrain_splat.wgsl")
-  ret islandSrc.concat(other: noiseSrc).concat(other: "\n").concat(other: biomeSrc).concat(other: "\n")
-    .concat(other: paletteSrc).concat(other: "\n")
-    .concat(other: detailSrc).concat(other: "\n").concat(other: terrSrc)
+  ret islandSrc.concat(other: noiseSrc).concat(other: "\n").concat(other: biomeSrc).concat(
+    other: "\n"
+  ).concat(other: paletteSrc).concat(other: "\n").concat(other: detailSrc).concat(other: "\n").concat(
+    other: terrSrc
+  )
 }
 
 func ensureTerrainPipeline(cache: mod GbufferCache, resources: mod GpuResources) {
   if not cache.terrainPipeMade {
     cache.terrainPipeMade = true
     let composed: String = terrainSplatWgsl()
-    cache.terrainPipeline = createGbufferPipeline(resources: resources, wgsl: composed, stride: 32, attributes: gbufferStaticAttributes())
+    cache.terrainPipeline = createGbufferPipeline(
+      resources: resources
+      wgsl: composed
+      stride: 32
+      attributes: gbufferStaticAttributes()
+    )
   }
   # A bind group from the TERRAIN pipeline's own layout (wgpu auto-layouts are
   # pipeline-exclusive, so the static bind group can't be reused) — frame uniform
@@ -144,24 +208,50 @@ func ensureTerrainPipeline(cache: mod GbufferCache, resources: mod GpuResources)
   # only when the tile generation changes, so the steady state pays nothing.
   ensureTerrainTexDefaults(cache: cache, resources: resources)
   let gen: Int = gbTerrainTexGen()
-  if gen is cache.terrainBindGen and bindGroupIsUsable(resources: resources, id: cache.terrainBind) { ret }
+  if gen is cache.terrainBindGen and bindGroupIsUsable(resources: resources, id: cache.terrainBind) {
+    ret
+  }
   cache.terrainBindGen = gen
   retireBindGroup(resources: resources, id: cache.terrainBind)
   cache.terrainBind = noBindGroupId()
   releaseExternalIds(resources: resources, list: cache.terrainAdopted)
   let entries: List(ResourceRef) = List.create(ResourceRef, cap: 4)
   unsafe {
-    entries.add(value: adoptBufferRef(resources: resources, adopted: cache.terrainAdopted, handle: gbFrameUbuf()))
-    entries.add(value: adoptBufferRef(resources: resources, adopted: cache.terrainAdopted, handle: gbDrawsBuffer()))
-    entries.add(value: adoptTextureViewRef(resources: resources, adopted: cache.terrainAdopted, handle: gbTerrainArrayView()))
+    entries.add(
+      value: adoptBufferRef(
+        resources: resources
+        adopted: cache.terrainAdopted
+        handle: gbFrameUbuf()
+      )
+    )
+    entries.add(
+      value: adoptBufferRef(
+        resources: resources
+        adopted: cache.terrainAdopted
+        handle: gbDrawsBuffer()
+      )
+    )
+    entries.add(
+      value: adoptTextureViewRef(
+        resources: resources
+        adopted: cache.terrainAdopted
+        handle: gbTerrainArrayView()
+      )
+    )
   }
   entries.add(value: samplerRef(id: cache.terrainSampler))
   var made: Bool = false
-  if let bind: BindGroupId = createRenderBindGroup(resources: resources, pipeline: cache.terrainPipeline, entries: entries) {
+  if let bind: BindGroupId = createRenderBindGroup(
+    resources: resources
+    pipeline: cache.terrainPipeline
+    entries: entries
+  ) {
     cache.terrainBind = bind
     made = true
   }
-  if not made { releaseExternalIds(resources: resources, list: cache.terrainAdopted) }
+  if not made {
+    releaseExternalIds(resources: resources, list: cache.terrainAdopted)
+  }
 }
 
 # Draw one ground-tile mesh with the biome-splat pipeline (#533): its shader
@@ -176,17 +266,39 @@ func ensureTerrainPipeline(cache: mod GbufferCache, resources: mod GpuResources)
 # #745: takes composed model matrices directly (Quat-friendly), not a Euler
 # Transform3d — the caller builds them with transform3dToMatrix from the entity's
 # Quat Transform3D, so no Euler Vec3 rotation survives on the terrain path.
-func drawTerrainMesh(cache: mod GbufferCache, resources: mod GpuResources, mesh: copy Int, model: view Mat4, prevModel: view Mat4,
-                     roughness: copy Float, time: copy Float) pub {
+func drawTerrainMesh(
+  cache: mod GbufferCache
+  resources: mod GpuResources
+  mesh: copy Int
+  model: view Mat4
+  prevModel: view Mat4
+  roughness: copy Float
+  time: copy Float
+) pub {
   unsafe {
     ensureTerrainPipeline(cache: cache, resources: resources)
-    if gbMeshReady(mesh: mesh) is 0 { ret }
+    if gbMeshReady(mesh: mesh) is 0 {
+      ret
+    }
     let base: Int = gbDrawCount()
-    if base >= gbMaxDraws() { ret }
+    if base >= gbMaxDraws() {
+      ret
+    }
     ensureDrawScratch(cache: cache)
-    packInstanceRecord(records: cache.drawScratch, slot: 0, model: model, prevModel: prevModel,
-      r: 1.0, g: 1.0, b: 1.0, metallic: 0.0, roughness: roughness, emissive: 0.0, toon: 0,
-      paletteBase: 0)
+    packInstanceRecord(
+      records: cache.drawScratch
+      slot: 0
+      model: model
+      prevModel: prevModel
+      r: 1.0
+      g: 1.0
+      b: 1.0
+      metallic: 0.0
+      roughness: roughness
+      emissive: 0.0
+      toon: 0
+      paletteBase: 0
+    )
     # paletteBase is an Int in the record API; the clock needs sub-second
     # resolution, so it is written straight into the float slot instead.
     cache.drawScratch.set(index: 39, value: time)
@@ -194,9 +306,18 @@ func drawTerrainMesh(cache: mod GbufferCache, resources: mod GpuResources, mesh:
     # carries the global texture-blend amount. 0 until an app uploads a tile, so
     # the shader's textured-grass term is identity for every other terrain user.
     cache.drawScratch.set(index: 32, value: cache.terrainBlend)
-    gbIssueInstanced(resources: resources, pass: gbPass(), pipeline: cache.terrainPipeline, bind: cache.terrainBind,
-      vbuf: gbMeshVbuf(mesh: mesh), ibuf: gbMeshIbuf(mesh: mesh),
-      icount: gbMeshIcount(mesh: mesh), base: base, count: 1, records: cache.drawScratch.data)
+    gbIssueInstanced(
+      resources: resources
+      pass: gbPass()
+      pipeline: cache.terrainPipeline
+      bind: cache.terrainBind
+      vbuf: gbMeshVbuf(mesh: mesh)
+      ibuf: gbMeshIbuf(mesh: mesh)
+      icount: gbMeshIcount(mesh: mesh)
+      base: base
+      count: 1
+      records: cache.drawScratch.data
+    )
   }
 }
 
@@ -212,4 +333,3 @@ func terrainShutdown(cache: mod GbufferCache, resources: mod GpuResources) pub {
   cache.terrainPipeMade = false
   cache.terrainBindGen = 0 - 1
 }
-

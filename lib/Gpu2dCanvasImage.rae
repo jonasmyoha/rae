@@ -20,28 +20,52 @@ open Gpu2dCanvas
 open Gpu2dCanvasClip
 
 func ensureImagePipeline(canvas: mod Gpu2dCanvas, resources: mod GpuResources) {
-  if canvas.imagePipeMade { ret }
+  if canvas.imagePipeMade {
+    ret
+  }
   canvas.imagePipeMade = true
   var source: String = ""
-  unsafe { source = nativeG2dBoxReadFile(path: "lib/gpu2d_image.wgsl") }
+  unsafe {
+    source = nativeG2dBoxReadFile(path: "lib/gpu2d_image.wgsl")
+  }
   if source.length() is 0 {
-    log("[gpu2d] lib/gpu2d_image.wgsl not readable from the working directory — run from the repo root; 2D images are skipped")
+    log(
+      "[gpu2d] lib/gpu2d_image.wgsl not readable from the working directory — run from the repo root; 2D images are skipped"
+    )
     ret
   }
   var format: Int = 0
-  unsafe { format = nativeG2dBoxFormat() }
-  if let pipeline: RenderPipelineId = createRenderPipeline(resources: resources, wgsl: source, vertexEntry: "vs", fragmentEntry: "fs", spec: boxPipelineSpec(format: format as Int32)) {
+  unsafe {
+    format = nativeG2dBoxFormat()
+  }
+  if let pipeline: RenderPipelineId = createRenderPipeline(
+    resources: resources
+    wgsl: source
+    vertexEntry: "vs"
+    fragmentEntry: "fs"
+    spec: boxPipelineSpec(format: format as Int32)
+  ) {
     canvas.imagePipeline = pipeline
   }
   # Linear, clamp-to-edge (the C image path shared the text sampler's settings).
-  if let sampler: SamplerId = createSampler(resources: resources) { canvas.imageSampler = sampler }
+  if let sampler: SamplerId = createSampler(resources: resources) {
+    canvas.imageSampler = sampler
+  }
   ensureViewportUniform(canvas: canvas, resources: resources)
 }
 
 # Registers an uploaded RGBA8 texture (w x h) as the next 1-based handle.
-func registerImageTexture(canvas: mod Gpu2dCanvas, resources: mod GpuResources, texture: view TextureId, width: copy Int, height: copy Int) ret Int {
+func registerImageTexture(
+  canvas: mod Gpu2dCanvas
+  resources: mod GpuResources
+  texture: view TextureId
+  width: copy Int
+  height: copy Int
+) ret Int {
   if let textureView: TextureViewId = createTextureView(resources: resources, texture: texture) {
-    canvas.images.add(value: { texture: texture, textureView: textureView, width: width, height: height })
+    canvas.images.add(
+      value: { texture: texture, textureView: textureView, width: width, height: height }
+    )
     ret canvas.images.length
   }
   retireTexture(resources: resources, id: texture)
@@ -56,12 +80,32 @@ func canvasLoadImage(canvas: mod Gpu2dCanvas, path: copy String) ret Int {
   if let resources: mod GpuResources => canvas.gpuResources {
     unsafe {
       let rgba: Ptr = g2dDecodeImage(path: path)
-      if rgba is webgpuNull() { ret 0 }
+      if rgba is webgpuNull() {
+        ret 0
+      }
       let width: Int = g2dDecodedWidth()
       let height: Int = g2dDecodedHeight()
-      if let texture: TextureId = createTexture(resources: resources, width: width, height: height, format: WGPUTextureFormat_RGBA8Unorm, usage: WGPUTextureUsage_TextureBinding + WGPUTextureUsage_CopyDst) {
-        if writeTextureFromPtr(resources: resources, texture: texture, data: rgba, bytesPerRow: width * 4, rows: height) {
-          handle = registerImageTexture(canvas: canvas, resources: resources, texture: texture, width: width, height: height)
+      if let texture: TextureId = createTexture(
+        resources: resources
+        width: width
+        height: height
+        format: WGPUTextureFormat_RGBA8Unorm
+        usage: WGPUTextureUsage_TextureBinding + WGPUTextureUsage_CopyDst
+      ) {
+        if writeTextureFromPtr(
+          resources: resources
+          texture: texture
+          data: rgba
+          bytesPerRow: width * 4
+          rows: height
+        ) {
+          handle = registerImageTexture(
+            canvas: canvas
+            resources: resources
+            texture: texture
+            width: width
+            height: height
+          )
         } else {
           retireTexture(resources: resources, id: texture)
         }
@@ -75,8 +119,15 @@ func canvasLoadImage(canvas: mod Gpu2dCanvas, path: copy String) ret Int {
 # Register an image from RGBA pixels generated in Rae (#539 procedural
 # textures): each Int is one packed pixel r | g<<8 | b<<16 | a<<24 (byte order
 # R,G,B,A, matching RGBA8Unorm). Returns a 1-based handle, 0 on failure.
-func canvasRegisterImageRgba(canvas: mod Gpu2dCanvas, pixels: view Buffer(Int), width: copy Int, height: copy Int) ret Int {
-  if width <= 0 or height <= 0 { ret 0 }
+func canvasRegisterImageRgba(
+  canvas: mod Gpu2dCanvas
+  pixels: view Buffer(Int)
+  width: copy Int
+  height: copy Int
+) ret Int {
+  if width <= 0 or height <= 0 {
+    ret 0
+  }
   ensureBoxResources(canvas: canvas)
   var handle: Int = 0
   if let resources: mod GpuResources => canvas.gpuResources {
@@ -91,9 +142,26 @@ func canvasRegisterImageRgba(canvas: mod Gpu2dCanvas, pixels: view Buffer(Int), 
         bytes.add(value: ((packed / 16777216) % 256) as UInt8)
       }
     }
-    if let texture: TextureId = createTexture(resources: resources, width: width, height: height, format: WGPUTextureFormat_RGBA8Unorm, usage: WGPUTextureUsage_TextureBinding + WGPUTextureUsage_CopyDst) {
-      if writeTexture(resources: resources, texture: texture, bytes: bytes, bytesPerRow: width * 4) {
-        handle = registerImageTexture(canvas: canvas, resources: resources, texture: texture, width: width, height: height)
+    if let texture: TextureId = createTexture(
+      resources: resources
+      width: width
+      height: height
+      format: WGPUTextureFormat_RGBA8Unorm
+      usage: WGPUTextureUsage_TextureBinding + WGPUTextureUsage_CopyDst
+    ) {
+      if writeTexture(
+        resources: resources
+        texture: texture
+        bytes: bytes
+        bytesPerRow: width * 4
+      ) {
+        handle = registerImageTexture(
+          canvas: canvas
+          resources: resources
+          texture: texture
+          width: width
+          height: height
+        )
       } else {
         retireTexture(resources: resources, id: texture)
       }
@@ -104,7 +172,9 @@ func canvasRegisterImageRgba(canvas: mod Gpu2dCanvas, pixels: view Buffer(Int), 
 
 # Name -> handle registry. Re-registering a key updates it.
 func canvasRegisterImageKey(canvas: mod Gpu2dCanvas, key: copy String, handle: copy Int) {
-  if handle <= 0 { ret }
+  if handle <= 0 {
+    ret
+  }
   loop var i: Int = 0, i < canvas.imageKeys.length, ++i {
     if let existing: String = canvas.imageKeys.copyAt(index: i) {
       if existing is key {
@@ -121,7 +191,9 @@ func canvasImageHandleForKey(canvas: view Gpu2dCanvas, key: view String) ret Int
   loop var i: Int = 0, i < canvas.imageKeys.length, ++i {
     if let existing: String = canvas.imageKeys.copyAt(index: i) {
       if existing is key {
-        if let handle: Int = canvas.imageKeyHandles.copyAt(index: i) { ret handle }
+        if let handle: Int = canvas.imageKeyHandles.copyAt(index: i) {
+          ret handle
+        }
       }
     }
   }
@@ -151,8 +223,23 @@ func tintChannel(color: view Int, shift: view Int) ret Float {
 
 # Queue one image draw for this frame: rect, straight tint (the shader
 # premultiplies), radius, uv window, and the clip active now.
-func queueImage(canvas: mod Gpu2dCanvas, x: copy Float, y: copy Float, w: copy Float, h: copy Float, radius: copy Float, handle: copy Int, tint: copy Int, u0: copy Float, v0: copy Float, u1: copy Float, v1: copy Float) {
-  if handle < 1 or handle > canvas.images.length { ret }
+func queueImage(
+  canvas: mod Gpu2dCanvas
+  x: copy Float
+  y: copy Float
+  w: copy Float
+  h: copy Float
+  radius: copy Float
+  handle: copy Int
+  tint: copy Int
+  u0: copy Float
+  v0: copy Float
+  u1: copy Float
+  v1: copy Float
+) {
+  if handle < 1 or handle > canvas.images.length {
+    ret
+  }
   canvas.imageCommands.add(value: x)
   canvas.imageCommands.add(value: y)
   canvas.imageCommands.add(value: w)
@@ -176,21 +263,75 @@ func queueImage(canvas: mod Gpu2dCanvas, x: copy Float, y: copy Float, w: copy F
 # Queue an image draw (handle from canvasLoadImage). tint is 0xAARRGGBB applied
 # multiplicatively (0xFFFFFFFF for the unmodified image); radius rounds the
 # corners (design units).
-func canvasDrawImage(canvas: mod Gpu2dCanvas, x: copy Float, y: copy Float, w: copy Float, h: copy Float, radius: copy Float, handle: copy Int, tint: copy Int) {
-  queueImage(canvas: canvas, x: x, y: y, w: w, h: h, radius: radius, handle: handle, tint: tint, u0: 0.0, v0: 0.0, u1: 1.0, v1: 1.0)
+func canvasDrawImage(
+  canvas: mod Gpu2dCanvas
+  x: copy Float
+  y: copy Float
+  w: copy Float
+  h: copy Float
+  radius: copy Float
+  handle: copy Int
+  tint: copy Int
+) {
+  queueImage(
+    canvas: canvas
+    x: x
+    y: y
+    w: w
+    h: h
+    radius: radius
+    handle: handle
+    tint: tint
+    u0: 0.0
+    v0: 0.0
+    u1: 1.0
+    v1: 1.0
+  )
 }
 
 # Draw a registered image by key (no-op if the key isn't registered).
-func canvasDrawImageKey(canvas: mod Gpu2dCanvas, key: view String, x: copy Float, y: copy Float, w: copy Float, h: copy Float, radius: copy Float, tint: copy Int) {
+func canvasDrawImageKey(
+  canvas: mod Gpu2dCanvas
+  key: view String
+  x: copy Float
+  y: copy Float
+  w: copy Float
+  h: copy Float
+  radius: copy Float
+  tint: copy Int
+) {
   let handle: Int = canvasImageHandleForKey(canvas: canvas, key: key)
-  if handle > 0 { canvasDrawImage(canvas: canvas, x: x, y: y, w: w, h: h, radius: radius, handle: handle, tint: tint) }
+  if handle > 0 {
+    canvasDrawImage(
+      canvas: canvas
+      x: x
+      y: y
+      w: w
+      h: h
+      radius: radius
+      handle: handle
+      tint: tint
+    )
+  }
 }
 
 # Draw by key preserving the image's aspect: scaleMode 0 = fit (letterbox
 # inside the rect), 1 = fill (center-crop the source), anything else = stretch.
-func canvasDrawImageKeyScaled(canvas: mod Gpu2dCanvas, key: view String, x: copy Float, y: copy Float, w: copy Float, h: copy Float, radius: copy Float, tint: copy Int, scaleMode: copy Int) {
+func canvasDrawImageKeyScaled(
+  canvas: mod Gpu2dCanvas
+  key: view String
+  x: copy Float
+  y: copy Float
+  w: copy Float
+  h: copy Float
+  radius: copy Float
+  tint: copy Int
+  scaleMode: copy Int
+) {
   let handle: Int = canvasImageHandleForKey(canvas: canvas, key: key)
-  if handle <= 0 or handle > canvas.images.length or w <= 0.0 or h <= 0.0 { ret }
+  if handle <= 0 or handle > canvas.images.length or w <= 0.0 or h <= 0.0 {
+    ret
+  }
   var imageWidth: Float = 0.0
   var imageHeight: Float = 0.0
   if let image: Gpu2dImage = canvas.images.copyAt(index: handle - 1) {
@@ -198,7 +339,16 @@ func canvasDrawImageKeyScaled(canvas: mod Gpu2dCanvas, key: view String, x: copy
     imageHeight = image.height.toFloat()
   }
   if imageWidth <= 0.0 or imageHeight <= 0.0 {
-    canvasDrawImage(canvas: canvas, x: x, y: y, w: w, h: h, radius: radius, handle: handle, tint: tint)
+    canvasDrawImage(
+      canvas: canvas
+      x: x
+      y: y
+      w: w
+      h: h
+      radius: radius
+      handle: handle
+      tint: tint
+    )
     ret
   }
   let imageAspect: Float = imageWidth / imageHeight
@@ -230,20 +380,45 @@ func canvasDrawImageKeyScaled(canvas: mod Gpu2dCanvas, key: view String, x: copy
       v1 = v0 + visibleH
     }
   }
-  queueImage(canvas: canvas, x: drawX, y: drawY, w: drawW, h: drawH, radius: radius, handle: handle, tint: tint, u0: u0, v0: v0, u1: u1, v1: v1)
+  queueImage(
+    canvas: canvas
+    x: drawX
+    y: drawY
+    w: drawW
+    h: drawH
+    radius: radius
+    handle: handle
+    tint: tint
+    u0: u0
+    v0: v0
+    u1: u1
+    v1: v1
+  )
 }
 
 # This draw slot's 64-byte uniform (persistent pool, grown on demand).
-func imageUniformAt(canvas: mod Gpu2dCanvas, resources: mod GpuResources, slot: copy Int) ret BufferId {
+func imageUniformAt(
+  canvas: mod Gpu2dCanvas
+  resources: mod GpuResources
+  slot: copy Int
+) ret BufferId {
   loop canvas.imageUniforms.length <= slot {
     canvas.imageUniforms.add(value: noBufferId())
     canvas.imageBinds.add(value: noBindGroupId())
     canvas.imageBindHandles.add(value: 0)
   }
   var current: BufferId = noBufferId()
-  if let known: BufferId = canvas.imageUniforms.copyAt(index: slot) { current = known }
-  if isValidBuffer(resources: resources, id: current) { ret current }
-  if let buffer: BufferId = createBuffer(resources: resources, size: imageUniformFloats * 4, usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst) {
+  if let known: BufferId = canvas.imageUniforms.copyAt(index: slot) {
+    current = known
+  }
+  if isValidBuffer(resources: resources, id: current) {
+    ret current
+  }
+  if let buffer: BufferId = createBuffer(
+    resources: resources
+    size: imageUniformFloats * 4
+    usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst
+  ) {
     canvas.imageUniforms.set(index: slot, value: buffer)
     ret buffer
   }
@@ -260,7 +435,9 @@ func clearImageQueue(canvas: mod Gpu2dCanvas) {
 }
 
 func imageFlushWith(canvas: mod Gpu2dCanvas, resources: mod GpuResources) {
-  if not canvasFrameActive(canvas: canvas) { ret }
+  if not canvasFrameActive(canvas: canvas) {
+    ret
+  }
   ensureImagePipeline(canvas: canvas, resources: resources)
   if not isValidRenderPipeline(resources: resources, id: canvas.imagePipeline) {
     clearImageQueue(canvas: canvas)
@@ -269,15 +446,27 @@ func imageFlushWith(canvas: mod Gpu2dCanvas, resources: mod GpuResources) {
   let bytes: List(UInt8) = List.create(UInt8, cap: imageUniformFloats * 4)
   loop var i: Int = 0, i < canvas.imageCommandHandles.length, ++i {
     var handle: Int = 0
-    if let known: Int = canvas.imageCommandHandles.copyAt(index: i) { handle = known }
+    if let known: Int = canvas.imageCommandHandles.copyAt(index: i) {
+      handle = known
+    }
     if handle >= 1 and handle <= canvas.images.length {
-      imageDrawCommand(canvas: canvas, resources: resources, index: i, handle: handle)
+      imageDrawCommand(
+        canvas: canvas
+        resources: resources
+        index: i
+        handle: handle
+      )
     }
   }
   clearImageQueue(canvas: canvas)
 }
 
-func imageDrawCommand(canvas: mod Gpu2dCanvas, resources: mod GpuResources, index: copy Int, handle: copy Int) {
+func imageDrawCommand(
+  canvas: mod Gpu2dCanvas
+  resources: mod GpuResources
+  index: copy Int
+  handle: copy Int
+) {
   let i: Int = index
   let slot: Int = canvas.imageDrawCursor
   canvas.imageDrawCursor = slot + 1
@@ -285,16 +474,30 @@ func imageDrawCommand(canvas: mod Gpu2dCanvas, resources: mod GpuResources, inde
   canvas.imageScratch.clear()
   loop var k: Int = 0, k < imageUniformFloats, ++k {
     var value: Float = 0.0
-    if let known: Float = canvas.imageCommands.copyAt(index: i * imageUniformFloats + k) { value = known }
+    if let known: Float = canvas.imageCommands.copyAt(index: i * imageUniformFloats + k) {
+      value = known
+    }
     canvas.imageScratch.add(value: value)
   }
   unsafe {
-    if not writeBufferFromPtr(resources: resources, id: uniform, offset: 0, data: canvas.imageScratch.data, size: imageUniformFloats * 4) { ret }
+    if not writeBufferFromPtr(
+      resources: resources
+      id: uniform
+      offset: 0
+      data: canvas.imageScratch.data
+      size: imageUniformFloats * 4
+    ) {
+      ret
+    }
   }
   var cachedHandle: Int = 0
-  if let known: Int = canvas.imageBindHandles.copyAt(index: slot) { cachedHandle = known }
+  if let known: Int = canvas.imageBindHandles.copyAt(index: slot) {
+    cachedHandle = known
+  }
   var bind: BindGroupId = noBindGroupId()
-  if let known: BindGroupId = canvas.imageBinds.copyAt(index: slot) { bind = known }
+  if let known: BindGroupId = canvas.imageBinds.copyAt(index: slot) {
+    bind = known
+  }
   if cachedHandle is not handle or not bindGroupIsUsable(resources: resources, id: bind) {
     retireBindGroup(resources: resources, id: bind)
     bind = noBindGroupId()
@@ -304,15 +507,32 @@ func imageDrawCommand(canvas: mod Gpu2dCanvas, resources: mod GpuResources, inde
       entries.add(value: bufferRef(id: uniform))
       entries.add(value: textureViewRef(id: image.textureView))
       entries.add(value: samplerRef(id: canvas.imageSampler))
-      if let made: BindGroupId = createRenderBindGroup(resources: resources, pipeline: canvas.imagePipeline, entries: entries) { bind = made }
+      if let made: BindGroupId = createRenderBindGroup(
+        resources: resources
+        pipeline: canvas.imagePipeline
+        entries: entries
+      ) {
+        bind = made
+      }
     }
     canvas.imageBinds.set(index: slot, value: bind)
     canvas.imageBindHandles.set(index: slot, value: handle)
   }
   var clip: Int = 0
-  if let known: Int = canvas.imageCommandClips.copyAt(index: i) { clip = known }
+  if let known: Int = canvas.imageCommandClips.copyAt(index: i) {
+    clip = known
+  }
   g2dScissor(canvas: canvas, clip: clip)
   unsafe {
-    let drawn: Bool = recordDrawInPass(resources: resources, pass: canvas.framePass, pipeline: canvas.imagePipeline, bindGroup: bind, vertexCount: 6, instanceCount: 1, firstVertex: 0, firstInstance: 0)
+    let drawn: Bool = recordDrawInPass(
+      resources: resources
+      pass: canvas.framePass
+      pipeline: canvas.imagePipeline
+      bindGroup: bind
+      vertexCount: 6
+      instanceCount: 1
+      firstVertex: 0
+      firstInstance: 0
+    )
   }
 }

@@ -24,6 +24,7 @@ open ui/Theme
 open ui/Layer
 
 let bottomSheetPageId: String = "bottom-sheet"
+
 let sheetDismissAction: String = "sheet.dismiss"
 
 type BottomSheetAction {
@@ -40,11 +41,7 @@ type BottomSheetState {
 }
 
 func createBottomSheetState() pub ret BottomSheetState {
-  ret BottomSheetState {
-    visible: false
-    actions: List.create(BottomSheetAction, cap: 4)
-    epoch: 0
-  }
+  ret BottomSheetState { visible: false, actions: List.create(BottomSheetAction, cap: 4), epoch: 0 }
 }
 
 # Build an owned BottomSheetAction with deep-copied Strings — safe
@@ -74,18 +71,50 @@ func closeBottomSheet(sheet: mod BottomSheetState) pub {
 }
 
 # One action row inside the panel: full-width label, tappable.
-func buildSheetActionRow(world: mod UiWorld, action: view BottomSheetAction, w: view Float) ret EntityId {
+func buildSheetActionRow(
+  world: mod UiWorld
+  action: view BottomSheetAction
+  w: view Float
+) ret EntityId {
   let row: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: row, w: w, h: 56.0)
+  setRectFixed(
+    world: world
+    entity: row
+    w: w
+    h: 56.0
+  )
   let labelText: String = "{action.label}"
   let labelStyle: String = "primary"
-  setText(world: world, entity: row, text: own labelText, styleId: own labelStyle)
+  setText(
+    world: world
+    entity: row
+    text: own labelText
+    styleId: own labelStyle
+  )
   let aid: String = "{action.actionId}"
   let widgetId: String = "{action.actionId}"
   let rowKind: String = "bottomSheetAction"
-  setWidgetIdentity(world: world, entity: row, id: widgetId, kind: rowKind)
-  setWidgetState(world: world, entity: row, enabled: true, selected: false, loading: false, error: false)
-  setOpacityStateStyle(world: world, entity: row, disabledAlpha: 0.45, loadingAlpha: 0.72, errorAlpha: 0.42)
+  setWidgetIdentity(
+    world: world
+    entity: row
+    id: widgetId
+    kind: rowKind
+  )
+  setWidgetState(
+    world: world
+    entity: row
+    enabled: true
+    selected: false
+    loading: false
+    error: false
+  )
+  setOpacityStateStyle(
+    world: world
+    entity: row
+    disabledAlpha: 0.45
+    loadingAlpha: 0.72
+    errorAlpha: 0.42
+  )
   setOnClick(world: world, entity: row, actionId: own aid)
   ret row
 }
@@ -104,7 +133,12 @@ func addBottomSheetLayer(world: mod UiWorld, sheet: view BottomSheetState) pub {
 
     # Page-root container so the unmount path can find this subtree.
     let root: EntityId = createEntity(world: world)
-    setRectFixed(world: world, entity: root, w: phoneFrameW, h: phoneFrameH)
+    setRectFixed(
+      world: world
+      entity: root
+      w: phoneFrameW
+      h: phoneFrameH
+    )
     let copiedId: String = "{bottomSheetPageId}"
     let pr: PageRoot = { id: own copiedId }
     componentSet(this: world.pageRoots, entity: root, data: own pr)
@@ -112,7 +146,12 @@ func addBottomSheetLayer(world: mod UiWorld, sheet: view BottomSheetState) pub {
 
     # Scrim — full screen, tap-anywhere dismiss.
     let scrim: EntityId = createEntity(world: world)
-    setRectFixed(world: world, entity: scrim, w: phoneFrameW, h: phoneFrameH)
+    setRectFixed(
+      world: world
+      entity: scrim
+      w: phoneFrameW
+      h: phoneFrameH
+    )
     let scrimFill: RgbaColor = { r: 0, g: 0, b: 0, a: 140 }
     let scrimShape: Shape = {
       kind: ShapeKind.rect
@@ -130,7 +169,12 @@ func addBottomSheetLayer(world: mod UiWorld, sheet: view BottomSheetState) pub {
     let panelW: Float = phoneFrameW
     let panelH: Float = 52.04819277108433 + 121.44578313253011 * n.toFloat() + 52.04819277108433
     let panel: EntityId = createEntity(world: world)
-    setRectFixed(world: world, entity: panel, w: panelW, h: panelH)
+    setRectFixed(
+      world: world
+      entity: panel
+      w: panelW
+      h: panelH
+    )
     let panelFill: RgbaColor = colorByName(theme: world.theme.active, name: "surface")
     let panelShape: Shape = {
       kind: ShapeKind.roundedRect
@@ -144,7 +188,14 @@ func addBottomSheetLayer(world: mod UiWorld, sheet: view BottomSheetState) pub {
     componentSet(this: world.offsets, entity: panel, data: panelOff)
     let layV: LayoutType = LayoutType.vertical
     let alignS: AlignKind = AlignKind.start
-    setLayout(world: world, entity: panel, kind: layV, gap: 8.674698795180722, alignCross: alignS)  # spaceXS (full-precision literal; token is 6-dec)
+    setLayout(
+      world: world
+      entity: panel
+      kind: layV
+      gap: 8.674698795180722
+      alignCross: alignS
+    )
+    # spaceXS (full-precision literal; token is 6-dec)
     setPaddingAll(world: world, entity: panel, n: 52.04819277108433)
 
     let rowKids: List(EntityId) = List.create(EntityId, cap: n)
@@ -169,7 +220,11 @@ func addBottomSheetLayer(world: mod UiWorld, sheet: view BottomSheetState) pub {
 # `cachedEpoch`. Returns the new epoch. main.rae calls this each
 # frame after dispatchActions; the no-change fast-path is two int
 # comparisons and a string-pool flush boundary.
-func refreshBottomSheetIfNeeded(world: mod UiWorld, sheet: view BottomSheetState, cachedEpoch: view Int) pub ret Int {
+func refreshBottomSheetIfNeeded(
+  world: mod UiWorld
+  sheet: view BottomSheetState
+  cachedEpoch: view Int
+) pub ret Int {
   if sheet.epoch is cachedEpoch {
     ret cachedEpoch
   }

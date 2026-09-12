@@ -38,8 +38,13 @@ func createWorldJson() ret WorldJson {
 # (registered without serialize, or not registered) is silently skipped, so it is
 # never written. Generic over the component type T (inferred from the table);
 # each stored component is written through its compiler-generated `toJson()`.
-func addComponentTable(T: type, writer: mod WorldJson, table: view ComponentTable(T),
-                       name: view String, registry: view ComponentRegistry) {
+func addComponentTable(
+  T: type
+  writer: mod WorldJson
+  table: view ComponentTable(T)
+  name: view String
+  registry: view ComponentRegistry
+) {
   if registeredHasFlag(reg: registry, name: name, flag: serialize) is false {
     ret
   }
@@ -87,9 +92,13 @@ func finishWorldJson(writer: view WorldJson) ret String {
 # loadComponentTable per table); the dispatch to the concrete fromJson is the
 # generic T (compiler-monomorphized), never a switch — so adding a component is
 # one registration + one call, not a new case in a giant applyComponentByName.
-
-func loadComponentTable(T: type, table: mod ComponentTable(T), name: view String,
-                        registry: view ComponentRegistry, doc: view JsonDoc) {
+func loadComponentTable(
+  T: type
+  table: mod ComponentTable(T)
+  name: view String
+  registry: view ComponentRegistry
+  doc: view JsonDoc
+) {
   if registeredHasFlag(reg: registry, name: name, flag: serialize) is false {
     ret
   }
@@ -125,8 +134,12 @@ func loadComponentTable(T: type, table: mod ComponentTable(T), name: view String
 
 # Write a resource's value into the world JSON, but ONLY if `name` is registered
 # with serialize. `valueJson` is the resource's own JSON (its `toJson()`).
-func addResource(writer: mod WorldJson, name: view String, valueJson: view String,
-                 registry: view ComponentRegistry) {
+func addResource(
+  writer: mod WorldJson
+  name: view String
+  valueJson: view String
+  registry: view ComponentRegistry
+) {
   if registeredHasFlag(reg: registry, name: name, flag: serialize) is false {
     ret
   }
@@ -138,7 +151,11 @@ func addResource(writer: mod WorldJson, name: view String, valueJson: view Strin
 
 # The JSON string for resource `name` in `doc` (feed to Type.fromJson), or ""
 # when it isn't registered serialize or isn't present in the document.
-func resourceJson(name: view String, registry: view ComponentRegistry, doc: view JsonDoc) ret String {
+func resourceJson(
+  name: view String
+  registry: view ComponentRegistry
+  doc: view JsonDoc
+) ret String {
   if registeredHasFlag(reg: registry, name: name, flag: serialize) is false {
     ret ""
   }

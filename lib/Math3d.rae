@@ -185,7 +185,12 @@ func mat4RotateZ(angle: view Float) pub ret Mat4 {
 # standard convention; flipping it globally would silently invert every
 # depth comparison in renderer3d. A caller opts in, and its pipeline must
 # then clear depth to 0.0 and compare with Greater.
-func mat4PerspectiveReverseZ(fovYDeg: view Float, aspect: view Float, near: view Float, far: view Float) pub ret Mat4 {
+func mat4PerspectiveReverseZ(
+  fovYDeg: view Float
+  aspect: view Float
+  near: view Float
+  far: view Float
+) pub ret Mat4 {
   var m: Mat4 = mat4Zero()
   let f: Float = 1.0 / Math.tan(x: fovYDeg * 0.008726646259971648)  # deg->rad, /2
   m.m[0] = f / aspect
@@ -196,7 +201,12 @@ func mat4PerspectiveReverseZ(fovYDeg: view Float, aspect: view Float, near: view
   ret m
 }
 
-func mat4Perspective(fovYDeg: view Float, aspect: view Float, near: view Float, far: view Float) pub ret Mat4 {
+func mat4Perspective(
+  fovYDeg: view Float
+  aspect: view Float
+  near: view Float
+  far: view Float
+) pub ret Mat4 {
   var m: Mat4 = mat4Zero()
   let f: Float = 1.0 / Math.tan(x: fovYDeg * 0.008726646259971648)  # deg->rad, /2
   m.m[0] = f / aspect
@@ -215,8 +225,14 @@ func mat4Perspective(fovYDeg: view Float, aspect: view Float, near: view Float, 
 # exponent against perspective's 1/z, and ortho depth is linear, so it
 # would buy nothing while risking a convention mismatch with the main
 # pass (docs/shadow-system-design.md §3).
-func mat4Ortho(left: view Float, right: view Float, bottom: view Float, top: view Float,
-               near: view Float, far: view Float) pub ret Mat4 {
+func mat4Ortho(
+  left: view Float
+  right: view Float
+  bottom: view Float
+  top: view Float
+  near: view Float
+  far: view Float
+) pub ret Mat4 {
   var m: Mat4 = mat4Zero()
   let rl: Float = right - left
   let tb: Float = top - bottom
@@ -255,7 +271,17 @@ func mat4TransformPoint(m: view Mat4, p: view Vec3) pub ret Vec3 {
 #
 # View space keeps the camera looking down its own -Z (what the WebGPU
 # projection below expects), so the third basis row is -forward.
-func mat4LookAt(eyeX: view Float, eyeY: view Float, eyeZ: view Float, atX: view Float, atY: view Float, atZ: view Float, upX: view Float, upY: view Float, upZ: view Float) pub ret Mat4 {
+func mat4LookAt(
+  eyeX: view Float
+  eyeY: view Float
+  eyeZ: view Float
+  atX: view Float
+  atY: view Float
+  atZ: view Float
+  upX: view Float
+  upY: view Float
+  upZ: view Float
+) pub ret Mat4 {
   # forward = normalize(target - eye) — the direction the camera looks.
   var fx: Float = atX - eyeX
   var fy: Float = atY - eyeY
@@ -304,11 +330,18 @@ func mat4LookAt(eyeX: view Float, eyeY: view Float, eyeZ: view Float, atX: view 
 # Z-up orbit camera position from yaw/pitch/distance around a target.
 # Yaw is about +Z (0 puts the camera on -Y, Blender front view); positive
 # pitch raises the camera toward +Z.
-func orbitEye(targetX: view Float, targetY: view Float, targetZ: view Float, yaw: view Float, pitch: view Float, dist: view Float) pub ret Vec3 {
+func orbitEye(
+  targetX: view Float
+  targetY: view Float
+  targetZ: view Float
+  yaw: view Float
+  pitch: view Float
+  dist: view Float
+) pub ret Vec3 {
   let cp: Float = Math.cos(x: pitch)
   ret Vec3.create(
-    x: targetX + dist * cp * Math.sin(x: yaw),
-    y: targetY - dist * cp * Math.cos(x: yaw),
+    x: targetX + dist * cp * Math.sin(x: yaw)
+    y: targetY - dist * cp * Math.cos(x: yaw)
     z: targetZ + dist * Math.sin(x: pitch)
   )
 }

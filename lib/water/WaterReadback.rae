@@ -22,7 +22,10 @@ const fftCacheBytes: Int = 16384
 func releaseWaterReadback(waterSystem: mod WaterSystem, resources: mod GpuResources) {
   loop var i: Int = 0, i < fftMaxCascades, ++i {
     if waterSystem.cache.requestActive.copyAtFallback(index: i, fallback: 0) is 1 {
-      retireReadback(resources: resources, id: waterSystem.cache.requests.copyAtFallback(index: i, fallback: noReadbackId()))
+      retireReadback(
+        resources: resources
+        id: waterSystem.cache.requests.copyAtFallback(index: i, fallback: noReadbackId())
+      )
     }
     waterSystem.cache.requests.set(index: i, value: noReadbackId())
     waterSystem.cache.requestActive.set(index: i, value: 0)
@@ -38,31 +41,60 @@ func releaseWaterReadback(waterSystem: mod WaterSystem, resources: mod GpuResour
 }
 
 func ensureWaterReadback(waterSystem: mod WaterSystem, resources: mod GpuResources) ret Bool {
-  if isValidPipeline(resources: resources, id: waterSystem.cache.pipeline) { ret true }
+  if isValidPipeline(resources: resources, id: waterSystem.cache.pipeline) {
+    ret true
+  }
   let source: String = gbReadWgsl(path: "lib/water/waterReadback.wgsl")
-  if source.length() is 0 { ret false }
-  if let pipeline: PipelineId = createComputePipeline(resources: resources, wgsl: source, entryPoint: "capture") {
+  if source.length() is 0 {
+    ret false
+  }
+  if let pipeline: PipelineId = createComputePipeline(
+    resources: resources
+    wgsl: source
+    entryPoint: "capture"
+  ) {
     waterSystem.cache.pipeline = pipeline
   } else {
     ret false
   }
-  if let sampler: SamplerId = createSamplerWith(resources: resources, addressMode: WGPUAddressMode_Repeat) { waterSystem.cache.sampler = sampler }
+  if let sampler: SamplerId = createSamplerWith(
+    resources: resources
+    addressMode: WGPUAddressMode_Repeat
+  ) {
+    waterSystem.cache.sampler = sampler
+  }
   loop var i: Int = 0, i < waterSystem.fftAllocatedCount, ++i {
-    if let staging: BufferId = createBuffer(resources: resources, size: fftCacheBytes, usage: WGPUBufferUsage_MapRead + WGPUBufferUsage_CopyDst) {
+    if let staging: BufferId = createBuffer(
+      resources: resources
+      size: fftCacheBytes
+      usage: WGPUBufferUsage_MapRead + WGPUBufferUsage_CopyDst
+    ) {
       waterSystem.cache.staging.set(index: i, value: staging)
     }
-    if let storage: BufferId = createBuffer(resources: resources, size: fftCacheBytes, usage: WGPUBufferUsage_Storage + WGPUBufferUsage_CopySrc) {
+    if let storage: BufferId = createBuffer(
+      resources: resources
+      size: fftCacheBytes
+      usage: WGPUBufferUsage_Storage + WGPUBufferUsage_CopySrc
+    ) {
       waterSystem.cache.storage.set(index: i, value: storage)
       let entries: List(ResourceRef) = List.create(ResourceRef, cap: 3)
-      entries.add(value: textureViewRef(id: cascadeView(waterSystem: waterSystem, cascade: i, map: 0)))
+      entries.add(
+        value: textureViewRef(id: cascadeView(waterSystem: waterSystem, cascade: i, map: 0))
+      )
       entries.add(value: samplerRef(id: waterSystem.cache.sampler))
       entries.add(value: bufferRef(id: storage))
-      if let bind: BindGroupId = createComputeBindGroupOrdered(resources: resources, pipeline: waterSystem.cache.pipeline, entries: entries) {
+      if let bind: BindGroupId = createComputeBindGroupOrdered(
+        resources: resources
+        pipeline: waterSystem.cache.pipeline
+        entries: entries
+      ) {
         waterSystem.cache.binds.set(index: i, value: bind)
       }
     }
     if let cascade: mod FftCascadeCache => waterSystem.surfaceCache.cascades.modAt(index: i) {
-      loop cascade.values.length < fftCacheFloats { cascade.values.add(value: 0.0) }
+      loop cascade.values.length < fftCacheFloats {
+        cascade.values.add(value: 0.0)
+      }
     }
   }
   waterSystem.surfaceCache.activeCount = waterSystem.fftAllocatedCount
@@ -73,18 +105,29 @@ func ensureWaterReadback(waterSystem: mod WaterSystem, resources: mod GpuResourc
 # Poll even on idle FFT frames. Each cascade has at most one outstanding map.
 # A busy slot keeps its old CPU snapshot; it never stalls to catch up.
 func updateWaterReadback(waterSystem: mod WaterSystem, resources: mod GpuResources) {
-  if not waterSystem.fftBaked or not waterSystem.fftFrameMade { ret }
-  if not ensureWaterReadback(waterSystem: waterSystem, resources: resources) { ret }
+  if not waterSystem.fftBaked or not waterSystem.fftFrameMade {
+    ret
+  }
+  if not ensureWaterReadback(waterSystem: waterSystem, resources: resources) {
+    ret
+  }
   let body: WaterBody = primaryBody(waterSystem: waterSystem)
   loop var i: Int = 0, i < waterSystem.fftAllocatedCount, ++i {
     if let cascade: mod FftCascadeCache => waterSystem.surfaceCache.cascades.modAt(index: i) {
       if waterSystem.cache.requestActive.copyAtFallback(index: i, fallback: 0) is 1 {
-        let request: ReadbackId = waterSystem.cache.requests.copyAtFallback(index: i, fallback: noReadbackId())
+        let request: ReadbackId = waterSystem.cache.requests.copyAtFallback(
+          index: i
+          fallback: noReadbackId()
+        )
         let status: Int = pollReadback(resources: resources, id: request)
-        if status is 0 { continue }
+        if status is 0 {
+          continue
+        }
         if status is 1 and cascade.pendingGeneration is waterSystem.surfaceCache.generation {
           let raw: List(UInt8) = List.create(UInt8, cap: fftCacheBytes)
-          loop raw.length < fftCacheBytes { raw.add(value: 0 as UInt8) }
+          loop raw.length < fftCacheBytes {
+            raw.add(value: 0 as UInt8)
+          }
           if copyReadback(resources: resources, id: request, destination: raw) {
             bytesToFloats(bytes: raw, floats: cascade.values, count: fftCacheFloats)
             cascade.generation = cascade.pendingGeneration
@@ -95,26 +138,61 @@ func updateWaterReadback(waterSystem: mod WaterSystem, resources: mod GpuResourc
         retireReadback(resources: resources, id: request)
         waterSystem.cache.requests.set(index: i, value: noReadbackId())
         waterSystem.cache.requestActive.set(index: i, value: 0)
-        if status is not 1 { cascade.submittedUpdate = -1 }
+        if status is not 1 {
+          cascade.submittedUpdate = -1
+        }
       }
       let update: Int = waterSystem.fftUpdateCounts.copyAtFallback(index: i, fallback: 0)
-      if update is cascade.submittedUpdate or update < 1 { continue }
-      let storage: BufferId = waterSystem.cache.storage.copyAtFallback(index: i, fallback: noBufferId())
-      let staging: BufferId = waterSystem.cache.staging.copyAtFallback(index: i, fallback: noBufferId())
-      let command: ComputeCommand = computeCommand(pipeline: waterSystem.cache.pipeline,
-        bindGroup: waterSystem.cache.binds.copyAtFallback(index: i, fallback: noBindGroupId()),
-        workgroupsX: (fftCacheSize + 7) / 8, workgroupsY: (fftCacheSize + 7) / 8, workgroupsZ: 1)
+      if update is cascade.submittedUpdate or update < 1 {
+        continue
+      }
+      let storage: BufferId = waterSystem.cache.storage.copyAtFallback(
+        index: i
+        fallback: noBufferId()
+      )
+      let staging: BufferId = waterSystem.cache.staging.copyAtFallback(
+        index: i
+        fallback: noBufferId()
+      )
+      let command: ComputeCommand = computeCommand(
+        pipeline: waterSystem.cache.pipeline
+        bindGroup: waterSystem.cache.binds.copyAtFallback(index: i, fallback: noBindGroupId())
+        workgroupsX: (fftCacheSize + 7) / 8
+        workgroupsY: (fftCacheSize + 7) / 8
+        workgroupsZ: 1
+      )
       var submitted: Bool = false
       if let recording: Recording = beginRecording(resources: resources) {
         if recordComputeCommand(recording: recording, resources: resources, command: command) {
-          if recordCopyBuffer(recording: recording, resources: resources, source: storage, sourceOffset: 0, destination: staging, destinationOffset: 0, size: fftCacheBytes) {
-            if let submission: SubmissionId = waterSubmit(waterSystem: waterSystem, resources: resources, recording: recording) { submitted = true }
+          if recordCopyBuffer(
+            recording: recording
+            resources: resources
+            source: storage
+            sourceOffset: 0
+            destination: staging
+            destinationOffset: 0
+            size: fftCacheBytes
+          ) {
+            if let submission: SubmissionId = waterSubmit(
+              waterSystem: waterSystem
+              resources: resources
+              recording: recording
+            ) {
+              submitted = true
+            }
           }
         }
       }
-      if not submitted { continue }
+      if not submitted {
+        continue
+      }
       # The map is ordered after the copy; a busy readback table retries next frame.
-      if let request: ReadbackId = startReadback(resources: resources, buffer: staging, offset: 0, size: fftCacheBytes) {
+      if let request: ReadbackId = startReadback(
+        resources: resources
+        buffer: staging
+        offset: 0
+        size: fftCacheBytes
+      ) {
         waterSystem.cache.requests.set(index: i, value: request)
         waterSystem.cache.requestActive.set(index: i, value: 1)
         cascade.pendingTime = waterSystem.fftSampleTimes.copyAtFallback(index: i, fallback: 0.0)

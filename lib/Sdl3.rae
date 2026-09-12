@@ -13,50 +13,79 @@
 # Create the window + renderer at this pixel size. The framebuffer texture is
 # created lazily by sdlUpdatePixels (which may differ from the window size and
 # is stretched to fill it).
-func nativeInitWindow(width: Int, height: Int, title: String) unsafe extern("rae_ext_Sdl3_initWindow")
+func nativeInitWindow(
+  width: Int
+  height: Int
+  title: String
+) unsafe extern("rae_ext_Sdl3_initWindow")
+
 func initWindow(width: copy Int, height: copy Int, title: copy String) {
-  unsafe { nativeInitWindow(width: width, height: height, title: title) }
+  unsafe {
+    nativeInitWindow(width: width, height: height, title: title)
+  }
 }
 
 # Cap the present rate (frames/sec). 0 disables the cap. sdlPresent sleeps the
 # remainder of each frame so an idle/finished render doesn't spin at 100% CPU.
 func nativeSetTargetFPS(fps: Int) unsafe extern("rae_ext_Sdl3_setTargetFPS")
+
 func setTargetFPS(fps: copy Int) {
-  unsafe { nativeSetTargetFPS(fps: fps) }
+  unsafe {
+    nativeSetTargetFPS(fps: fps)
+  }
 }
 
 # Pump the event queue; returns true once the user asks to close the window
 # (window close button, Escape, or Cmd-Q).
 func nativeShouldClose() unsafe extern("rae_ext_Sdl3_shouldClose") ret Bool
+
 func shouldClose() ret Bool {
-  unsafe { ret nativeShouldClose() }
+  unsafe {
+    ret nativeShouldClose()
+  }
 }
 
 # Upload a w x h packed-0xRRGGBB framebuffer (e.g. a List(Int)'s .data) into the
 # streaming texture, (re)creating it if the size changed since last call — so an
 # example can switch framebuffer resolution at runtime. The texture stretches to
 # fill the window on present.
-func nativeUpdatePixels(pixels: view Buffer(Int), w: Int, h: Int) unsafe extern("rae_ext_Sdl3_updatePixels")
+func nativeUpdatePixels(
+  pixels: view Buffer(Int)
+  w: Int
+  h: Int
+) unsafe extern("rae_ext_Sdl3_updatePixels")
+
 func updatePixels(pixels: view Buffer(Int), w: copy Int, h: copy Int) {
-  unsafe { nativeUpdatePixels(pixels: pixels, w: w, h: h) }
+  unsafe {
+    nativeUpdatePixels(pixels: pixels, w: w, h: h)
+  }
 }
 
 # Draw the texture to the window and present this frame.
 func nativePresent() unsafe extern("rae_ext_Sdl3_present")
+
 func present() {
-  unsafe { nativePresent() }
+  unsafe {
+    nativePresent()
+  }
 }
 
 # Update the window title bar (status text — there is no drawText here).
 func nativeSetTitle(title: String) unsafe extern("rae_ext_Sdl3_setTitle")
+
 func setTitle(title: copy String) {
-  unsafe { nativeSetTitle(title: title) }
+  unsafe {
+    nativeSetTitle(title: title)
+  }
 }
 
 # Tear down the texture, renderer, window, and SDL.
 func nativeCloseWindow() unsafe extern("rae_ext_Sdl3_closeWindow")
+
 func closeWindow() {
-  unsafe { nativeCloseWindow() }
+  unsafe {
+    nativeCloseWindow()
+  }
 }
 
 # --- Input ---------------------------------------------------------------
@@ -67,37 +96,61 @@ func closeWindow() {
 # Current window (renderer output) size in pixels. The window is resizable;
 # poll these to detect a resize and re-render at the new size.
 func nativeWindowWidth() unsafe extern("rae_ext_Sdl3_windowWidth") ret Int
+
 func windowWidth() ret Int {
-  unsafe { ret nativeWindowWidth() }
+  unsafe {
+    ret nativeWindowWidth()
+  }
 }
+
 func nativeWindowHeight() unsafe extern("rae_ext_Sdl3_windowHeight") ret Int
+
 func windowHeight() ret Int {
-  unsafe { ret nativeWindowHeight() }
+  unsafe {
+    ret nativeWindowHeight()
+  }
 }
 
 # Mouse position in window pixels (top-left origin).
 func nativeGetMouseX() unsafe extern("rae_ext_Sdl3_getMouseX") ret Int
+
 func getMouseX() ret Int {
-  unsafe { ret nativeGetMouseX() }
+  unsafe {
+    ret nativeGetMouseX()
+  }
 }
+
 func nativeGetMouseY() unsafe extern("rae_ext_Sdl3_getMouseY") ret Int
+
 func getMouseY() ret Int {
-  unsafe { ret nativeGetMouseY() }
+  unsafe {
+    ret nativeGetMouseY()
+  }
 }
 
 # Mouse button held this frame: 0 = left, 1 = right, 2 = middle.
 func nativeIsMouseButtonDown(button: Int) unsafe extern("rae_ext_Sdl3_isMouseButtonDown") ret Bool
+
 func isMouseButtonDown(button: copy Int) ret Bool {
-  unsafe { ret nativeIsMouseButtonDown(button: button) }
+  unsafe {
+    ret nativeIsMouseButtonDown(button: button)
+  }
 }
 
 # Keyboard: down = held this frame (level); pressed = went down on this frame
 # (edge, false on auto-repeat). Poll once per frame after sdl3.shouldClose().
 func nativeIsKeyDown(key: Int) unsafe extern("rae_ext_Sdl3_isKeyDown") ret Bool
+
 func isKeyDown(key: copy Int) ret Bool {
-  unsafe { ret nativeIsKeyDown(key: key) }
+  unsafe {
+    ret nativeIsKeyDown(key: key)
+  }
 }
+
 func nativeIsKeyPressed(key: Int) unsafe extern("rae_ext_Sdl3_isKeyPressed") ret Bool
+
 func isKeyPressed(key: copy Int) ret Bool {
-  unsafe { ret nativeIsKeyPressed(key: key) }
+  unsafe {
+    ret nativeIsKeyPressed(key: key)
+  }
 }

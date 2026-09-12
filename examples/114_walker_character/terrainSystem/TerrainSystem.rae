@@ -29,37 +29,61 @@ open ecs/Transform
 
 # Single source of truth for the ground colour: the terrain ground material AND
 # the GPU grass gradient's bottom both read this, so the grass roots match ground.
-func walkerGroundColor() ret Vec3 { ret Vec3.create(x: 0.105, y: 0.245, z: 0.055) }
+func walkerGroundColor() ret Vec3 {
+  ret Vec3.create(x: 0.105, y: 0.245, z: 0.055)
+}
 
 const terrainGridSide: Int = 7
+
 const terrainCellSize: Float = 18.0
+
 const terrainHalfGrid: Int = 3
+
 const terrainCellCount: Int = 49
+
 const terrainTau: Float = 6.283185307179586
 
 const terrainTileSegments: Int = 12
+
 const terrainTileVerts: Int = 169
+
 const terrainTileFloats: Int = 1352
 
 # Prop kinds (the PropKind.kind discriminator).
 const kindTile: Int = 0
+
 const kindTree: Int = 1
+
 const kindRock: Int = 2
+
 const kindBush: Int = 3
+
 const kindFlower: Int = 4
+
 const kindGrassA: Int = 5
+
 const kindGrassB: Int = 6
 
 # The height field IS the biome elevation field (lib/world_biome).
 func terrainHeightAt(x: view Float, y: view Float, groundZ: view Float) ret Float {
-  ret worldTerrainHeight(x: x, y: y, groundZ: groundZ, cfg: defaultBiomeConfig())
+  ret worldTerrainHeight(
+    x: x
+    y: y
+    groundZ: groundZ
+    cfg: defaultBiomeConfig()
+  )
 }
 
 const propGrassMin: Float = 0.45
 
 # Nothing stands in the sea, and vegetation wants grass under it.
 func terrainPropAllowed(x: view Float, y: view Float, minGrass: view Float) ret Bool {
-  ret worldPropAllowed(x: x, y: y, minGrass: minGrass, cfg: defaultBiomeConfig())
+  ret worldPropAllowed(
+    x: x
+    y: y
+    minGrass: minGrass
+    cfg: defaultBiomeConfig()
+  )
 }
 
 # ----- ECS components (#741) -----------------------------------------
@@ -92,10 +116,14 @@ type PropInstancer {
   batch: InstanceBatch
 }
 
-func createPropInstancer(mesh: view MeshHandle, material: view Material3d,
-                         capacity: copy Int) ret PropInstancer {
+func createPropInstancer(
+  mesh: view MeshHandle
+  material: view Material3d
+  capacity: copy Int
+) ret PropInstancer {
   ret PropInstancer {
-    mesh: mesh, material: material,
+    mesh: mesh
+    material: material
     batch: own createInstanceBatch(mesh: mesh, capacity: capacity)
   }
 }
@@ -135,66 +163,151 @@ func terrainOffset(cellX: view Int, cellY: view Int, seed: view Int) ret Float {
   ret (terrainHash(cellX: cellX, cellY: cellY, seed: seed) - 0.5) * 12.0
 }
 
-func terrainScale(cellX: view Int, cellY: view Int, seed: view Int,
-                  minimum: view Float, spread: view Float) ret Float {
+func terrainScale(
+  cellX: view Int
+  cellY: view Int
+  seed: view Int
+  minimum: view Float
+  spread: view Float
+) ret Float {
   ret minimum + terrainHash(cellX: cellX, cellY: cellY, seed: seed) * spread
 }
 
 # A prop's placement transform for its cell: scattered x/y, height-sampled z, a
 # yaw quaternion about +Z, uniform scale. (Editor-Euler is never involved.)
-func propTransform3D(cellX: view Int, cellY: view Int, seedX: view Int, seedY: view Int,
-                     seedScale: view Int, groundZ: view Float,
-                     minScale: view Float, scaleSpread: view Float) ret Transform3D {
-  let scale: Float = terrainScale(cellX: cellX, cellY: cellY, seed: seedScale,
-                                  minimum: minScale, spread: scaleSpread)
-  let posX: Float = cellX.toFloat() * terrainCellSize
-    + terrainOffset(cellX: cellX, cellY: cellY, seed: seedX)
-  let posY: Float = cellY.toFloat() * terrainCellSize
-    + terrainOffset(cellX: cellX, cellY: cellY, seed: seedY)
+func propTransform3D(
+  cellX: view Int
+  cellY: view Int
+  seedX: view Int
+  seedY: view Int
+  seedScale: view Int
+  groundZ: view Float
+  minScale: view Float
+  scaleSpread: view Float
+) ret Transform3D {
+  let scale: Float = terrainScale(
+    cellX: cellX
+    cellY: cellY
+    seed: seedScale
+    minimum: minScale
+    spread: scaleSpread
+  )
+  let posX: Float = cellX.toFloat() * terrainCellSize + terrainOffset(
+    cellX: cellX
+    cellY: cellY
+    seed: seedX
+  )
+  let posY: Float = cellY.toFloat() * terrainCellSize + terrainOffset(
+    cellX: cellX
+    cellY: cellY
+    seed: seedY
+  )
   let yaw: Float = terrainHash(cellX: cellX, cellY: cellY, seed: seedScale + 71) * terrainTau
   ret Transform3D {
-    position: Vec3.create(x: posX, y: posY,
-                          z: terrainHeightAt(x: posX, y: posY, groundZ: groundZ)),
-    rotation: Quat.fromAxisAngle(axis: Vec3.create(x: 0.0, y: 0.0, z: 1.0), angle: yaw),
+    position: Vec3.create(x: posX, y: posY, z: terrainHeightAt(x: posX, y: posY, groundZ: groundZ))
+    rotation: Quat.fromAxisAngle(axis: Vec3.create(x: 0.0, y: 0.0, z: 1.0), angle: yaw)
     scale: Vec3.create(x: scale, y: scale, z: scale)
   }
 }
 
 # The prop transform for a given kind (per-kind scatter seeds + scale range).
-func kindTransform(kind: view Int, broad: view Bool, cellX: view Int, cellY: view Int,
-                   groundZ: view Float) ret Transform3D {
+func kindTransform(
+  kind: view Int
+  broad: view Bool
+  cellX: view Int
+  cellY: view Int
+  groundZ: view Float
+) ret Transform3D {
   if kind is kindTree {
     if broad {
-      ret propTransform3D(cellX: cellX, cellY: cellY, seedX: 11, seedY: 17, seedScale: 23,
-        groundZ: groundZ, minScale: 0.30, scaleSpread: 0.15)
+      ret propTransform3D(
+        cellX: cellX
+        cellY: cellY
+        seedX: 11
+        seedY: 17
+        seedScale: 23
+        groundZ: groundZ
+        minScale: 0.30
+        scaleSpread: 0.15
+      )
     }
-    ret propTransform3D(cellX: cellX, cellY: cellY, seedX: 11, seedY: 17, seedScale: 109,
-      groundZ: groundZ, minScale: 0.25, scaleSpread: 0.14)
+    ret propTransform3D(
+      cellX: cellX
+      cellY: cellY
+      seedX: 11
+      seedY: 17
+      seedScale: 109
+      groundZ: groundZ
+      minScale: 0.25
+      scaleSpread: 0.14
+    )
   }
   if kind is kindRock {
-    ret propTransform3D(cellX: cellX, cellY: cellY, seedX: 31, seedY: 37, seedScale: 41,
-      groundZ: groundZ, minScale: 0.28, scaleSpread: 0.34)
+    ret propTransform3D(
+      cellX: cellX
+      cellY: cellY
+      seedX: 31
+      seedY: 37
+      seedScale: 41
+      groundZ: groundZ
+      minScale: 0.28
+      scaleSpread: 0.34
+    )
   }
   if kind is kindBush {
-    ret propTransform3D(cellX: cellX, cellY: cellY, seedX: 47, seedY: 53, seedScale: 59,
-      groundZ: groundZ, minScale: 0.22, scaleSpread: 0.16)
+    ret propTransform3D(
+      cellX: cellX
+      cellY: cellY
+      seedX: 47
+      seedY: 53
+      seedScale: 59
+      groundZ: groundZ
+      minScale: 0.22
+      scaleSpread: 0.16
+    )
   }
   if kind is kindFlower {
-    ret propTransform3D(cellX: cellX, cellY: cellY, seedX: 61, seedY: 67, seedScale: 71,
-      groundZ: groundZ + 0.015, minScale: 0.35, scaleSpread: 0.25)
+    ret propTransform3D(
+      cellX: cellX
+      cellY: cellY
+      seedX: 61
+      seedY: 67
+      seedScale: 71
+      groundZ: groundZ + 0.015
+      minScale: 0.35
+      scaleSpread: 0.25
+    )
   }
   if kind is kindGrassA {
-    ret propTransform3D(cellX: cellX, cellY: cellY, seedX: 73, seedY: 79, seedScale: 83,
-      groundZ: groundZ, minScale: 0.52, scaleSpread: 0.30)
+    ret propTransform3D(
+      cellX: cellX
+      cellY: cellY
+      seedX: 73
+      seedY: 79
+      seedScale: 83
+      groundZ: groundZ
+      minScale: 0.52
+      scaleSpread: 0.30
+    )
   }
   # kindGrassB
-  ret propTransform3D(cellX: cellX, cellY: cellY, seedX: 89, seedY: 97, seedScale: 101,
-    groundZ: groundZ, minScale: 0.38, scaleSpread: 0.27)
+  ret propTransform3D(
+    cellX: cellX
+    cellY: cellY
+    seedX: 89
+    seedY: 97
+    seedScale: 101
+    groundZ: groundZ
+    minScale: 0.38
+    scaleSpread: 0.27
+  )
 }
 
 # Rocks may stand on bare ground; everything else wants grass under it.
 func kindMinGrass(kind: view Int) ret Float {
-  if kind is kindRock { ret 0.0 }
+  if kind is kindRock {
+    ret 0.0
+  }
   ret propGrassMin
 }
 
@@ -208,9 +321,15 @@ func slotCellY(centreCellY: view Int, slot: view Int) ret Int {
 
 # Rewrite a tile's mesh so its vertices carry the ABSOLUTE world height of the
 # cell it now covers. Normals from central differences of the height function.
-func reshapeTerrainTile(terrainSystem: mod TerrainSystem, meshId: view Int,
-                        cellX: view Int, cellY: view Int) {
-  if meshId < 1 { ret }
+func reshapeTerrainTile(
+  terrainSystem: mod TerrainSystem
+  meshId: view Int
+  cellX: view Int
+  cellY: view Int
+) {
+  if meshId < 1 {
+    ret
+  }
   let tileSize: Float = terrainCellSize + 0.04
   let centreX: Float = cellX.toFloat() * terrainCellSize
   let centreY: Float = cellY.toFloat() * terrainCellSize
@@ -224,12 +343,17 @@ func reshapeTerrainTile(terrainSystem: mod TerrainSystem, meshId: view Int,
       let localX: Float = (fx - 0.5) * tileSize
       let worldX: Float = centreX + localX
       let height: Float = terrainHeightAt(x: worldX, y: worldY, groundZ: terrainSystem.groundZ)
-      let slopeX: Float = (terrainHeightAt(x: worldX + eps, y: worldY, groundZ: terrainSystem.groundZ)
-        - terrainHeightAt(x: worldX - eps, y: worldY, groundZ: terrainSystem.groundZ)) / (eps * 2.0)
-      let slopeY: Float = (terrainHeightAt(x: worldX, y: worldY + eps, groundZ: terrainSystem.groundZ)
-        - terrainHeightAt(x: worldX, y: worldY - eps, groundZ: terrainSystem.groundZ)) / (eps * 2.0)
-      let inverseLength: Float = 1.0
-        / Math.sqrt(x: slopeX * slopeX + slopeY * slopeY + 1.0)
+      let slopeX: Float = (terrainHeightAt(
+        x: worldX + eps
+        y: worldY
+        groundZ: terrainSystem.groundZ
+      ) - terrainHeightAt(x: worldX - eps, y: worldY, groundZ: terrainSystem.groundZ)) / (eps * 2.0)
+      let slopeY: Float = (terrainHeightAt(
+        x: worldX
+        y: worldY + eps
+        groundZ: terrainSystem.groundZ
+      ) - terrainHeightAt(x: worldX, y: worldY - eps, groundZ: terrainSystem.groundZ)) / (eps * 2.0)
+      let inverseLength: Float = 1.0 / Math.sqrt(x: slopeX * slopeX + slopeY * slopeY + 1.0)
       let base: Int = (yi * (terrainTileSegments + 1) + xi) * 8
       terrainSystem.scratchVerts.set(index: base, value: localX)
       terrainSystem.scratchVerts.set(index: base + 1, value: localY)
@@ -241,16 +365,22 @@ func reshapeTerrainTile(terrainSystem: mod TerrainSystem, meshId: view Int,
       terrainSystem.scratchVerts.set(index: base + 7, value: fy)
     }
   }
-  updateMeshVerts(mesh: meshHandle(id: meshId, generation: 0),
-                  verts: terrainSystem.scratchVerts, vertCount: terrainTileVerts)
+  updateMeshVerts(
+    mesh: meshHandle(id: meshId, generation: 0)
+    verts: terrainSystem.scratchVerts
+    vertCount: terrainTileVerts
+  )
 }
 
 # ----- streaming -----------------------------------------------------
 # Re-place every prop/tile entity onto the world cell its pool slot now maps to.
 # A single query over the PropKind table drives placement; no per-slot,
 # per-kind list bookkeeping.
-func updateInfiniteTerrain(terrainSystem: mod TerrainSystem, world: mod GameWorld,
-                           playerPosition: view Vec3) ret Bool {
+func updateInfiniteTerrain(
+  terrainSystem: mod TerrainSystem
+  world: mod GameWorld
+  playerPosition: view Vec3
+) ret Bool {
   let cellX: Int = Math.floor(x: playerPosition.x / terrainCellSize).toInt()
   let cellY: Int = Math.floor(x: playerPosition.y / terrainCellSize).toInt()
   if cellX is terrainSystem.centreCellX and cellY is terrainSystem.centreCellY {
@@ -266,24 +396,44 @@ func updateInfiniteTerrain(terrainSystem: mod TerrainSystem, world: mod GameWorl
     let ccy: Int = slotCellY(centreCellY: cellY, slot: pk.slot)
     if pk.kind is kindTile {
       let tile: TileMesh = componentGet(this: world.tileMeshes, entity: entity)
-      reshapeTerrainTile(terrainSystem: terrainSystem, meshId: tile.meshId, cellX: ccx, cellY: ccy)
-      componentSet(this: world.transforms, entity: entity, data: Transform3D {
-        position: Vec3.create(x: ccx.toFloat() * terrainCellSize,
-                              y: ccy.toFloat() * terrainCellSize, z: 0.0),
-        rotation: Quat.identity(),
-        scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
-      })
+      reshapeTerrainTile(
+        terrainSystem: terrainSystem
+        meshId: tile.meshId
+        cellX: ccx
+        cellY: ccy
+      )
+      componentSet(
+        this: world.transforms
+        entity: entity
+        data: Transform3D {
+          position: Vec3.create(
+            x: ccx.toFloat() * terrainCellSize
+            y: ccy.toFloat() * terrainCellSize
+            z: 0.0
+          )
+          rotation: Quat.identity()
+          scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
+        }
+      )
     } else {
       var broad: Bool = false
       if pk.kind is kindTree {
         broad = terrainHash(cellX: ccx, cellY: ccy, seed: 131) < 0.54
         componentSet(this: world.treeVariants, entity: entity, data: TreeVariant { broad: broad })
       }
-      let t: Transform3D = kindTransform(kind: pk.kind, broad: broad,
-        cellX: ccx, cellY: ccy, groundZ: terrainSystem.groundZ)
+      let t: Transform3D = kindTransform(
+        kind: pk.kind
+        broad: broad
+        cellX: ccx
+        cellY: ccy
+        groundZ: terrainSystem.groundZ
+      )
       componentSet(this: world.transforms, entity: entity, data: t)
-      pk.active = terrainPropAllowed(x: t.position.x, y: t.position.y,
-        minGrass: kindMinGrass(kind: pk.kind))
+      pk.active = terrainPropAllowed(
+        x: t.position.x
+        y: t.position.y
+        minGrass: kindMinGrass(kind: pk.kind)
+      )
       componentSet(this: world.propKinds, entity: entity, data: pk)
     }
   }
@@ -292,10 +442,20 @@ func updateInfiniteTerrain(terrainSystem: mod TerrainSystem, world: mod GameWorl
 
 # ----- draw (queries) ------------------------------------------------
 func gatherKind(prop: mod PropInstancer, model: view Mat4) {
-  addInstance(batch: prop.batch, model: model, prevModel: model, material: prop.material)
+  addInstance(
+    batch: prop.batch
+    model: model
+    prevModel: model
+    material: prop.material
+  )
 }
 
-func drawTerrainProps(cache: mod GbufferCache, resources: mod GpuResources, terrainSystem: mod TerrainSystem, world: view GameWorld) {
+func drawTerrainProps(
+  cache: mod GbufferCache
+  resources: mod GpuResources
+  terrainSystem: mod TerrainSystem
+  world: view GameWorld
+) {
   resetInstanceBatch(batch: terrainSystem.rockProp.batch)
   resetInstanceBatch(batch: terrainSystem.bushProp.batch)
   resetInstanceBatch(batch: terrainSystem.flowerProp.batch)
@@ -309,11 +469,21 @@ func drawTerrainProps(cache: mod GbufferCache, resources: mod GpuResources, terr
     let pk: PropKind = componentDataAt(this: world.propKinds, i: i)
     if pk.active and pk.kind is not kindTile {
       let model: Mat4 = transform3dToMatrix(t: componentGet(this: world.transforms, entity: entity))
-      if pk.kind is kindRock { gatherKind(prop: terrainSystem.rockProp, model: model) }
-      if pk.kind is kindBush { gatherKind(prop: terrainSystem.bushProp, model: model) }
-      if pk.kind is kindFlower { gatherKind(prop: terrainSystem.flowerProp, model: model) }
-      if pk.kind is kindGrassA { gatherKind(prop: terrainSystem.grassProp, model: model) }
-      if pk.kind is kindGrassB { gatherKind(prop: terrainSystem.grassProp, model: model) }
+      if pk.kind is kindRock {
+        gatherKind(prop: terrainSystem.rockProp, model: model)
+      }
+      if pk.kind is kindBush {
+        gatherKind(prop: terrainSystem.bushProp, model: model)
+      }
+      if pk.kind is kindFlower {
+        gatherKind(prop: terrainSystem.flowerProp, model: model)
+      }
+      if pk.kind is kindGrassA {
+        gatherKind(prop: terrainSystem.grassProp, model: model)
+      }
+      if pk.kind is kindGrassB {
+        gatherKind(prop: terrainSystem.grassProp, model: model)
+      }
       if pk.kind is kindTree {
         if componentGet(this: world.treeVariants, entity: entity).broad {
           gatherKind(prop: terrainSystem.broadTrunkProp, model: model)
@@ -335,7 +505,13 @@ func drawTerrainProps(cache: mod GbufferCache, resources: mod GpuResources, terr
   drawInstances(cache: cache, resources: resources, batch: terrainSystem.tallCrownProp.batch)
 }
 
-func drawTerrainGround(cache: mod GbufferCache, resources: mod GpuResources, terrainSystem: view TerrainSystem, world: view GameWorld, time: copy Float) {
+func drawTerrainGround(
+  cache: mod GbufferCache
+  resources: mod GpuResources
+  terrainSystem: view TerrainSystem
+  world: view GameWorld
+  time: copy Float
+) {
   loop var i: Int = 0, i < componentCount(this: world.tileMeshes), ++i {
     let entity: EntityId = componentEntityAt(this: world.tileMeshes, i: i)
     let tile: TileMesh = componentDataAt(this: world.tileMeshes, i: i)
@@ -344,8 +520,15 @@ func drawTerrainGround(cache: mod GbufferCache, resources: mod GpuResources, ter
       # Quat Transform3D; compose it straight to a Mat4 (no Euler Vec3 detour).
       let q: Transform3D = componentGet(this: world.transforms, entity: entity)
       let model: Mat4 = transform3dToMatrix(t: q)
-      drawTerrainMesh(cache: cache, resources: resources, mesh: tile.meshId, model: model, prevModel: model,
-                      roughness: 0.96, time: time)
+      drawTerrainMesh(
+        cache: cache
+        resources: resources
+        mesh: tile.meshId
+        model: model
+        prevModel: model
+        roughness: 0.96
+        time: time
+      )
     }
   }
 }
@@ -360,11 +543,21 @@ func drawTerrainPropsShadow(terrainSystem: view TerrainSystem, world: view GameW
     let pk: PropKind = componentDataAt(this: world.propKinds, i: i)
     if pk.active and pk.kind is not kindTile {
       let model: Mat4 = transform3dToMatrix(t: componentGet(this: world.transforms, entity: entity))
-      if pk.kind is kindRock { castKind(mesh: terrainSystem.rockProp.mesh, model: model) }
-      if pk.kind is kindBush { castKind(mesh: terrainSystem.bushProp.mesh, model: model) }
-      if pk.kind is kindFlower { castKind(mesh: terrainSystem.flowerProp.mesh, model: model) }
-      if pk.kind is kindGrassA { castKind(mesh: terrainSystem.grassProp.mesh, model: model) }
-      if pk.kind is kindGrassB { castKind(mesh: terrainSystem.grassProp.mesh, model: model) }
+      if pk.kind is kindRock {
+        castKind(mesh: terrainSystem.rockProp.mesh, model: model)
+      }
+      if pk.kind is kindBush {
+        castKind(mesh: terrainSystem.bushProp.mesh, model: model)
+      }
+      if pk.kind is kindFlower {
+        castKind(mesh: terrainSystem.flowerProp.mesh, model: model)
+      }
+      if pk.kind is kindGrassA {
+        castKind(mesh: terrainSystem.grassProp.mesh, model: model)
+      }
+      if pk.kind is kindGrassB {
+        castKind(mesh: terrainSystem.grassProp.mesh, model: model)
+      }
       if pk.kind is kindTree {
         if componentGet(this: world.treeVariants, entity: entity).broad {
           castKind(mesh: terrainSystem.broadTrunkProp.mesh, model: model)
@@ -383,7 +576,9 @@ func setPropInstancerToon(prop: mod PropInstancer, toon: view Bool) {
 }
 
 func setInfiniteTerrainToon(terrainSystem: mod TerrainSystem, toon: view Bool) {
-  if terrainSystem.toon is toon { ret }
+  if terrainSystem.toon is toon {
+    ret
+  }
   terrainSystem.toon = toon
   setPropInstancerToon(prop: terrainSystem.rockProp, toon: toon)
   setPropInstancerToon(prop: terrainSystem.bushProp, toon: toon)
@@ -397,8 +592,11 @@ func setInfiniteTerrainToon(terrainSystem: mod TerrainSystem, toon: view Bool) {
 
 func terrainMaterial(color: view Vec3, roughness: view Float) ret Material3d {
   ret Material3d {
-    baseColor: color, metallic: 0.0, roughness: roughness,
-    emission: Vec3.create(x: 0.0, y: 0.0, z: 0.0), toon: true
+    baseColor: color
+    metallic: 0.0
+    roughness: roughness
+    emission: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    toon: true
   }
 }
 
@@ -406,16 +604,20 @@ func terrainMaterial(color: view Vec3, roughness: view Float) ret Material3d {
 func spawnProp(world: mod GameWorld, kind: view Int, slot: view Int) ret EntityId {
   let entity: EntityId = gameWorldAddEntity(world: world)
   componentSet(this: world.transforms, entity: entity, data: createTransform3D())
-  componentSet(this: world.propKinds, entity: entity, data: PropKind {
-    kind: kind, slot: slot, active: false
-  })
+  componentSet(
+    this: world.propKinds
+    entity: entity
+    data: PropKind { kind: kind, slot: slot, active: false }
+  )
   ret entity
 }
 
-func createTerrainSystem(world: mod GameWorld, assets: view String,
-                           groundZ: view Float) ret TerrainSystem {
-  let tilePlane: MeshData = makePlane(size: terrainCellSize + 0.04,
-                                      segments: terrainTileSegments)
+func createTerrainSystem(
+  world: mod GameWorld
+  assets: view String
+  groundZ: view Float
+) ret TerrainSystem {
+  let tilePlane: MeshData = makePlane(size: terrainCellSize + 0.04, segments: terrainTileSegments)
   let broadTrunk: MeshHandle = terrainMesh(path: "{assets}environment/tree_broad_trunk.glb")
   let broadCrown: MeshHandle = terrainMesh(path: "{assets}environment/tree_broad_crown.glb")
   let tallTrunk: MeshHandle = terrainMesh(path: "{assets}environment/tree_tall_trunk.glb")
@@ -425,12 +627,30 @@ func createTerrainSystem(world: mod GameWorld, assets: view String,
   let flowerMesh: MeshHandle = terrainMesh(path: "{assets}environment/flower.glb")
   let grassMesh: MeshHandle = terrainMesh(path: "{assets}environment/grass.glb")
 
-  let trunkMat: Material3d = terrainMaterial(color: Vec3.create(x: 0.205, y: 0.090, z: 0.032), roughness: 0.92)
-  let crownMat: Material3d = terrainMaterial(color: Vec3.create(x: 0.055, y: 0.255, z: 0.075), roughness: 0.88)
-  let rockMat: Material3d = terrainMaterial(color: Vec3.create(x: 0.235, y: 0.265, z: 0.285), roughness: 0.82)
-  let bushMat: Material3d = terrainMaterial(color: Vec3.create(x: 0.035, y: 0.185, z: 0.105), roughness: 0.90)
-  let flowerMat: Material3d = terrainMaterial(color: Vec3.create(x: 0.92, y: 0.38, z: 0.045), roughness: 0.72)
-  let grassMat: Material3d = terrainMaterial(color: Vec3.create(x: 0.18, y: 0.42, z: 0.055), roughness: 0.94)
+  let trunkMat: Material3d = terrainMaterial(
+    color: Vec3.create(x: 0.205, y: 0.090, z: 0.032)
+    roughness: 0.92
+  )
+  let crownMat: Material3d = terrainMaterial(
+    color: Vec3.create(x: 0.055, y: 0.255, z: 0.075)
+    roughness: 0.88
+  )
+  let rockMat: Material3d = terrainMaterial(
+    color: Vec3.create(x: 0.235, y: 0.265, z: 0.285)
+    roughness: 0.82
+  )
+  let bushMat: Material3d = terrainMaterial(
+    color: Vec3.create(x: 0.035, y: 0.185, z: 0.105)
+    roughness: 0.90
+  )
+  let flowerMat: Material3d = terrainMaterial(
+    color: Vec3.create(x: 0.92, y: 0.38, z: 0.045)
+    roughness: 0.72
+  )
+  let grassMat: Material3d = terrainMaterial(
+    color: Vec3.create(x: 0.18, y: 0.42, z: 0.055)
+    roughness: 0.94
+  )
 
   let scratch: List(Float) = List.create(Float, cap: terrainTileFloats)
   loop var scratchIndex: Int = 0, scratchIndex < terrainTileFloats, ++scratchIndex {
@@ -443,9 +663,11 @@ func createTerrainSystem(world: mod GameWorld, assets: view String,
     let tileMesh: MeshHandle = uploadMeshDataForTerrain(mesh: tilePlane)
     let tileEntity: EntityId = gameWorldAddEntity(world: world)
     componentSet(this: world.transforms, entity: tileEntity, data: createTransform3D())
-    componentSet(this: world.propKinds, entity: tileEntity, data: PropKind {
-      kind: kindTile, slot: slot, active: true
-    })
+    componentSet(
+      this: world.propKinds
+      entity: tileEntity
+      data: PropKind { kind: kindTile, slot: slot, active: true }
+    )
     componentSet(this: world.tileMeshes, entity: tileEntity, data: TileMesh { meshId: tileMesh.id })
 
     let treeEntity: EntityId = spawnProp(world: world, kind: kindTree, slot: slot)
@@ -458,17 +680,43 @@ func createTerrainSystem(world: mod GameWorld, assets: view String,
   }
 
   var terrainSystem: TerrainSystem = {
-    centreCellX: 1000000000, centreCellY: 1000000000,
-    groundZ: groundZ, toon: true,
-    scratchVerts: own scratch,
-    rockProp: own createPropInstancer(mesh: rockMesh, material: rockMat, capacity: terrainCellCount),
-    bushProp: own createPropInstancer(mesh: bushMesh, material: bushMat, capacity: terrainCellCount),
-    flowerProp: own createPropInstancer(mesh: flowerMesh, material: flowerMat, capacity: terrainCellCount),
-    grassProp: own createPropInstancer(mesh: grassMesh, material: grassMat, capacity: terrainCellCount * 2),
-    broadTrunkProp: own createPropInstancer(mesh: broadTrunk, material: trunkMat, capacity: terrainCellCount),
-    broadCrownProp: own createPropInstancer(mesh: broadCrown, material: crownMat, capacity: terrainCellCount),
-    tallTrunkProp: own createPropInstancer(mesh: tallTrunk, material: trunkMat, capacity: terrainCellCount),
-    tallCrownProp: own createPropInstancer(mesh: tallCrown, material: crownMat, capacity: terrainCellCount)
+    centreCellX: 1000000000
+    centreCellY: 1000000000
+    groundZ: groundZ
+    toon: true
+    scratchVerts: own scratch
+    rockProp: own createPropInstancer(mesh: rockMesh, material: rockMat, capacity: terrainCellCount)
+    bushProp: own createPropInstancer(mesh: bushMesh, material: bushMat, capacity: terrainCellCount)
+    flowerProp: own createPropInstancer(
+      mesh: flowerMesh
+      material: flowerMat
+      capacity: terrainCellCount
+    )
+    grassProp: own createPropInstancer(
+      mesh: grassMesh
+      material: grassMat
+      capacity: terrainCellCount * 2
+    )
+    broadTrunkProp: own createPropInstancer(
+      mesh: broadTrunk
+      material: trunkMat
+      capacity: terrainCellCount
+    )
+    broadCrownProp: own createPropInstancer(
+      mesh: broadCrown
+      material: crownMat
+      capacity: terrainCellCount
+    )
+    tallTrunkProp: own createPropInstancer(
+      mesh: tallTrunk
+      material: trunkMat
+      capacity: terrainCellCount
+    )
+    tallCrownProp: own createPropInstancer(
+      mesh: tallCrown
+      material: crownMat
+      capacity: terrainCellCount
+    )
   }
   ret own terrainSystem
 }

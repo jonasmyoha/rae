@@ -9,8 +9,10 @@ open ui/Ecs
 # domain — an `entities` table (id, type, title, …) and an `items` table
 # (parent_id, position, kind, ref) map onto it 1:1.
 #
-#   Album   (catalog, read-only): { "type":"album",   "id":<stem>,  "title":<album>, "items":[<track>, …] }
-#   Playlist(user-curated)       : { "type":"playlist","id":<id>,    "title":<title>, "items":[<ref>,  …] }
+#   Album   (catalog, read-only): { "type":"album",   "id":<stem>,  "title":<album>,
+#   "items":[<track>, …] }
+#   Playlist(user-curated)       : { "type":"playlist","id":<id>,    "title":<title>,
+#   "items":[<ref>,  …] }
 #
 # A playlist item is a typed reference (a "link"), never an embedded
 # copy — so the same song/album/playlist can appear in many lists and
@@ -46,7 +48,9 @@ let playlistsAssetDir: String = "examples/106_mobile_ui/assets/playlists"
 # verbatim and an unknown future kind degrades to "skip" rather than
 # crashing an older client.
 let playlistKindTrack: String = "track"
+
 let playlistKindAlbum: String = "album"
+
 let playlistKindPlaylist: String = "playlist"
 
 # A single typed reference inside a playlist. Only the fields relevant
@@ -68,11 +72,7 @@ type Playlist {
 }
 
 func createPlaylist(id: own String, title: own String) pub ret Playlist {
-  ret Playlist {
-    id: own id
-    title: own title
-    items: List.create(PlaylistItem, cap: 8)
-  }
+  ret Playlist { id: own id, title: own title, items: List.create(PlaylistItem, cap: 8) }
 }
 
 # Construct a `track` reference item (the only kind the heart button
@@ -91,7 +91,11 @@ func makeTrackItem(stem: view String, trackIndex: view Int) ret PlaylistItem {
 
 # Return the index of the `track` ref matching (stem, trackIndex), or
 # -1 if absent. Linear scan; even a heavy Liked playlist is small.
-func playlistFindTrack(playlist: view Playlist, stem: view String, trackIndex: view Int) pub ret Int {
+func playlistFindTrack(
+  playlist: view Playlist
+  stem: view String
+  trackIndex: view Int
+) pub ret Int {
   unsafe {
     let n: Int = playlist.items.length
     var i: Int = 0
@@ -110,13 +114,21 @@ func playlistFindTrack(playlist: view Playlist, stem: view String, trackIndex: v
   }
 }
 
-func playlistContains(playlist: view Playlist, stem: view String, trackIndex: view Int) pub ret Bool {
+func playlistContains(
+  playlist: view Playlist
+  stem: view String
+  trackIndex: view Int
+) pub ret Bool {
   ret playlistFindTrack(playlist: playlist, stem: stem, trackIndex: trackIndex) >= 0
 }
 
 # Toggle a track's membership. Returns `true` when the track is now
 # present (was added), `false` when it was removed.
-func playlistToggleTrack(playlist: mod Playlist, stem: view String, trackIndex: view Int) pub ret Bool {
+func playlistToggleTrack(
+  playlist: mod Playlist
+  stem: view String
+  trackIndex: view Int
+) pub ret Bool {
   let existing: Int = playlistFindTrack(playlist: playlist, stem: stem, trackIndex: trackIndex)
   if existing >= 0 {
     playlist.items.remove(index: existing)
@@ -211,12 +223,7 @@ func parsePlaylistItem(doc: view JsonDoc, entry: view JsonValue) ret PlaylistIte
     let plVal: JsonValue = Json.jsonValueAt(doc: doc, idx: plFieldIdx)
     plId = Json.jsonString(this: plVal, fallback: emptyPl)
   }
-  ret PlaylistItem {
-    kind: own kind
-    albumStem: own stem
-    trackIndex: ti
-    playlistId: own plId
-  }
+  ret PlaylistItem { kind: own kind, albumStem: own stem, trackIndex: ti, playlistId: own plId }
 }
 
 # True when `item` carries enough to be a usable reference of its kind.
@@ -318,8 +325,8 @@ func savePlaylist(playlist: view Playlist) pub {
   unsafe {
     ensureAppCacheDirs()
     let path: String = playlistTempPath(id: playlist.id)
-    let openBrace: String = "\u{007B}"
-    let closeBrace: String = "\u{007D}"
+    let openBrace: String = "\{"
+    let closeBrace: String = "\}"
     let openBracket: String = "["
     let closeBracket: String = "]"
     let nl: String = "\n"
@@ -332,13 +339,21 @@ func savePlaylist(playlist: view Playlist) pub {
     var content: String = ""
     content = content.concat(other: openBrace).concat(other: nl)
     content = content.concat(other: "  ").concat(other: q).concat(other: "type").concat(other: q)
-    content = content.concat(other: colon).concat(other: " ").concat(other: q).concat(other: "playlist").concat(other: q).concat(other: comma).concat(other: nl)
+    content = content.concat(other: colon).concat(other: " ").concat(other: q).concat(
+      other: "playlist"
+    ).concat(other: q).concat(other: comma).concat(other: nl)
     content = content.concat(other: "  ").concat(other: q).concat(other: "id").concat(other: q)
-    content = content.concat(other: colon).concat(other: " ").concat(other: q).concat(other: escapedId).concat(other: q).concat(other: comma).concat(other: nl)
+    content = content.concat(other: colon).concat(other: " ").concat(other: q).concat(
+      other: escapedId
+    ).concat(other: q).concat(other: comma).concat(other: nl)
     content = content.concat(other: "  ").concat(other: q).concat(other: "title").concat(other: q)
-    content = content.concat(other: colon).concat(other: " ").concat(other: q).concat(other: escapedTitle).concat(other: q).concat(other: comma).concat(other: nl)
+    content = content.concat(other: colon).concat(other: " ").concat(other: q).concat(
+      other: escapedTitle
+    ).concat(other: q).concat(other: comma).concat(other: nl)
     content = content.concat(other: "  ").concat(other: q).concat(other: "items").concat(other: q)
-    content = content.concat(other: colon).concat(other: " ").concat(other: openBracket).concat(other: nl)
+    content = content.concat(other: colon).concat(other: " ").concat(other: openBracket).concat(
+      other: nl
+    )
     let n: Int = playlist.items.length
     var i: Int = 0
     loop i < n {
@@ -347,15 +362,29 @@ func savePlaylist(playlist: view Playlist) pub {
       let escapedPlaylistId: String = Json.escape(text: it.playlistId)
       let escapedAlbumStem: String = Json.escape(text: it.albumStem)
       content = content.concat(other: "    ").concat(other: openBrace).concat(other: " ")
-      content = content.concat(other: q).concat(other: "kind").concat(other: q).concat(other: colon).concat(other: " ")
-      content = content.concat(other: q).concat(other: escapedKind).concat(other: q).concat(other: comma).concat(other: " ")
+      content = content.concat(other: q).concat(other: "kind").concat(other: q).concat(other: colon).concat(
+        other: " "
+      )
+      content = content.concat(other: q).concat(other: escapedKind).concat(other: q).concat(
+        other: comma
+      ).concat(other: " ")
       if it.kind is playlistKindPlaylist {
-        content = content.concat(other: q).concat(other: "playlistId").concat(other: q).concat(other: colon).concat(other: " ")
-        content = content.concat(other: q).concat(other: escapedPlaylistId).concat(other: q).concat(other: " ")
+        content = content.concat(other: q).concat(other: "playlistId").concat(other: q).concat(
+          other: colon
+        ).concat(other: " ")
+        content = content.concat(other: q).concat(other: escapedPlaylistId).concat(other: q).concat(
+          other: " "
+        )
       } else {
-        content = content.concat(other: q).concat(other: "albumStem").concat(other: q).concat(other: colon).concat(other: " ")
-        content = content.concat(other: q).concat(other: escapedAlbumStem).concat(other: q).concat(other: comma).concat(other: " ")
-        content = content.concat(other: q).concat(other: "trackIndex").concat(other: q).concat(other: colon).concat(other: " ")
+        content = content.concat(other: q).concat(other: "albumStem").concat(other: q).concat(
+          other: colon
+        ).concat(other: " ")
+        content = content.concat(other: q).concat(other: escapedAlbumStem).concat(other: q).concat(
+          other: comma
+        ).concat(other: " ")
+        content = content.concat(other: q).concat(other: "trackIndex").concat(other: q).concat(
+          other: colon
+        ).concat(other: " ")
         content = content.concat(other: "{it.trackIndex}").concat(other: " ")
       }
       content = content.concat(other: closeBrace)
@@ -437,11 +466,29 @@ func tagLikedHeart(
   }
   let entity: EntityId = id(v: raw)
   let heartKind: String = "likeButton"
-  setWidgetIdentity(world: world, entity: entity, id: widgetId, kind: heartKind)
-  setWidgetState(world: world, entity: entity, enabled: true, selected: false, loading: false, error: false)
+  setWidgetIdentity(
+    world: world
+    entity: entity
+    id: widgetId
+    kind: heartKind
+  )
+  setWidgetState(
+    world: world
+    entity: entity
+    enabled: true
+    selected: false
+    loading: false
+    error: false
+  )
   let likedSource: DataResourceId = dataResourcePlaylists()
   let likedField: DataFieldId = dataFieldLiked()
-  setDataDependency(world: world, entity: entity, resource: likedSource, field: likedField, observedRevision: observedRevision)
+  setDataDependency(
+    world: world
+    entity: entity
+    resource: likedSource
+    field: likedField
+    observedRevision: observedRevision
+  )
   # Warm coral / Spotify-ish like-red when liked. Visibly distinct
   # from the accentText / textPrimary the scenes author the outline
   # heart in. Struct built inline with `own`-moved locals (the safe
@@ -480,8 +527,17 @@ func tagLikedHeart(
 # carrying a StateStyle (play/pause icons, hearts, future toggles).
 # Play/pause selected-flags refresh through PlaybackState revision
 # bindings before this runs (refreshMountedUi in main.rae).
-func applyOverlaysToWorld(world: mod UiWorld, playback: view PlaybackState, state: view AppState) pub {
+func applyOverlaysToWorld(
+  world: mod UiWorld
+  playback: view PlaybackState
+  state: view AppState
+) pub {
   applyPlaybackToWorld(world: world, state: playback)
-  applyLikedToWorld(world: world, liked: state.liked, stem: state.currentAlbumStem, trackIndex: state.currentTrackIndex)
+  applyLikedToWorld(
+    world: world
+    liked: state.liked
+    stem: state.currentAlbumStem
+    trackIndex: state.currentTrackIndex
+  )
   widgetStyleSystem(world: world)
 }
