@@ -3251,6 +3251,14 @@ static int run_compiled_file(const RunOptions* run_opts, const char* project_roo
     snprintf(channel_dir, sizeof(channel_dir), "%s/.rae/apps/%s", cwd_abs, channel_id);
     if (ensure_directory_p(channel_dir)) setenv(RAE_HOT_RELOAD_DIR_ENV, channel_dir, 1);
   }
+  /* #935: hand the child the toolchain stdlib dir so its runtime shader reads
+   * (the lib WGSL assets via rae_ext_rae_gb_read_shader) resolve even when cwd has no
+   * local lib/ — matching how #933 lets .rae imports resolve through the
+   * toolchain. Do not overwrite a caller-set RAE_STDLIB (the `0`). */
+  {
+    const char* stdlib = compiler_stdlib_dir();
+    if (stdlib && stdlib[0]) setenv("RAE_STDLIB", stdlib, 0);
+  }
   int result = system(temp_bin);
 
   if (chdired && have_saved) { if (chdir(saved_cwd) != 0) { /* best effort */ } }
@@ -3518,6 +3526,11 @@ static pid_t watch_spawn_child(const char* bin_path,
   if (pid == 0) {
     // The channel dir is absolute precisely because of the chdir below.
     if (channel_dir && channel_dir[0]) setenv(RAE_HOT_RELOAD_DIR_ENV, channel_dir, 1);
+    /* #935: same toolchain-stdlib hand-off as run_compiled_file. */
+    {
+      const char* stdlib = compiler_stdlib_dir();
+      if (stdlib && stdlib[0]) setenv("RAE_STDLIB", stdlib, 0);
+    }
     // Run with cwd = lib-root so root-relative asset paths resolve (same as
     // `rae run` and the devtools). bin_path is absolute, so this is safe.
     if (run_cwd && run_cwd[0]) { if (chdir(run_cwd) != 0) { /* best effort */ } }
@@ -4434,7 +4447,7 @@ static const char* RAE_INIT_TEMPLATE_MAKEFILE =
   "\tgcc $(CFLAGS) -o $(BIN) $(OUT_C) $(RUNTIME_C) -I$(BUILD) $(LDFLAGS)\n"
   "\n"
   "run: build\n"
-  "\t$(BIN)\n"
+  "\t"  "RAE_STDLIB=$(RAE_REPO)/lib "  "$(BIN)\n"
   "\n"
   "watch: lib-link\n"
   "\t$(RAE_BIN) watch --target compiled --project $(PROJECT) $(ENTRY)\n"
