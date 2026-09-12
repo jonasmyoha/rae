@@ -175,7 +175,7 @@ func panelGlass(canvas: mod Gpu2dCanvas, x: view Float, y: view Float, w: view F
 # A full-width header whose gradient and diagonal stripes are clipped to a
 # rounded rectangle, so the stripes end cleanly at the rounded corners.
 func heroBand(canvas: mod Gpu2dCanvas, x: view Float, y: view Float, w: view Float, h: view Float) {
-  Gpu2d.pushClipRoundedRect(x: x, y: y, w: w, h: h, radius: 20.0)
+  Gpu2d.pushClipRoundedRect(canvas: canvas, x: x, y: y, w: w, h: h, radius: 20.0)
   Gpu2d.drawGradientRect(canvas: canvas, x: x, y: y, w: w, h: h, radius: 0.0, from: 0xFF141E30, to: 0xFF243B55, angleDeg: 0.0)
   # Diagonal accent stripes marching across, clipped to the band.
   var sx: Float = x - h
@@ -190,7 +190,7 @@ func heroBand(canvas: mod Gpu2dCanvas, x: view Float, y: view Float, w: view Flo
   Gpu2d.drawRoundedRect(canvas: canvas, x: x + 104.0, y: y + h * 0.5 - 9.0, w: 18.0, h: 18.0, radius: 9.0, color: blue)
   # A pill on the right edge of the band.
   Gpu2d.drawGradientRect(canvas: canvas, x: x + w - 220.0, y: y + h * 0.5 - 18.0, w: 190.0, h: 36.0, radius: 18.0, from: 0xFF6A11CB, to: 0xFF2575FC, angleDeg: 0.0)
-  Gpu2d.popClipRect()
+  Gpu2d.popClipRect(canvas: canvas)
 }
 
 func main() ret Int {
