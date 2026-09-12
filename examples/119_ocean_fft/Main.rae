@@ -385,13 +385,13 @@ func main() ret Int {
           }
         }
         if tag is RenderTag.transparentForward {
-          transparentSnapshot(cache: renderer.passes.transparent)
+          snapshotOpaque(renderer: renderer)
           if let resources: mod GpuResources => gpuManager {
             if let meshResources: view GpuResources => renderer.gpuResources {
               waterDraw(
                 waterSystem: waterSystem
                 resources: resources
-                gbuffer: renderer.passes.gbuffer
+                passes: renderer.passes
                 meshResources: meshResources
                 camera: camera
                 light: light

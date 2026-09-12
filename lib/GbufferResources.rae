@@ -41,6 +41,10 @@ const gbufferFrameFloats: Int = 36
 # GB_MAX_DRAWS); every draw path clamps to it.
 const gbufferMaxDraws: Int = 4096
 
+# The biased zero the motion channel clears to: 128/255, the one value
+# rgba8unorm reproduces exactly (the decode is the paired raw*2 - 256/255).
+const gbufferMotionZero: Float = 0.50196078
+
 func gbufferTargetFormat(index: copy Int) ret Int32 {
   if index is gbufferTargetA {
     ret WGPUTextureFormat_RGB10A2Unorm
@@ -99,7 +103,7 @@ func createTarget(
 }
 
 # Retire the four targets (a rebuild or shutdown); the manager releases them
-# once no in-flight frame uses them. C forgets its borrowed views.
+# once no in-flight frame uses them.
 func retireTargets(cache: mod GbufferCache, resources: mod GpuResources) {
   loop var i: Int = 0, i < gbufferTargetCount, ++i {
     if let textureView: TextureViewId = cache.targetViews.copyAt(index: i) {
@@ -113,13 +117,11 @@ func retireTargets(cache: mod GbufferCache, resources: mod GpuResources) {
   }
   cache.targetWidth = 0
   cache.targetHeight = 0
-  gbForgetTargets()
 }
 
 # (Re)create the three colour targets + depth when the offscreen size (the
-# surface at the render scale, C glue) changes; the borrowed views + size go
-# to C for the post passes that are still there, and the generation bumps so
-# every consumer re-fits its bind groups.
+# surface at the render scale, C glue) changes; the generation bumps so every
+# consumer re-fits its bind groups.
 func ensureTargets(cache: mod GbufferCache, resources: mod GpuResources) {
   let w: Int = gbOffscreenW()
   let h: Int = gbOffscreenH()
@@ -152,19 +154,6 @@ func ensureTargets(cache: mod GbufferCache, resources: mod GpuResources) {
   cache.targetWidth = w
   cache.targetHeight = h
   cache.targetsGen = cache.targetsGen + 1
-  unsafe {
-    gbCommitTargets(
-      w: w
-      h: h
-      a: refHandle(resources: resources, ref: gbufferTargetRef(cache: cache, index: gbufferTargetA))
-      b: refHandle(resources: resources, ref: gbufferTargetRef(cache: cache, index: gbufferTargetB))
-      c: refHandle(resources: resources, ref: gbufferTargetRef(cache: cache, index: gbufferTargetC))
-      depth: refHandle(
-        resources: resources
-        ref: gbufferTargetRef(cache: cache, index: gbufferTargetDepth)
-      )
-    )
-  }
 }
 
 # The frame uniform + draws storage buffers, created once in the manager

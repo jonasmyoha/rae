@@ -52,6 +52,17 @@
 #   the Rae buffer (frame-derived uniform math, the rae_g2d_xform pattern), rae_gb_commit_targets
 #   hands C the BORROWED views + size for its still-C post passes (forget_targets at shutdown),
 #   rae_gb_set_frame_open flags the pass for the C metaball prep — for the record.)
+# (#923 slice 3c: the deferred POST-PASS targets (lit, litCopy, AO, TAA x2, the depth pyramid mip chain),
+#   the light + TAA uniforms, the lighting / TAA / pyramid pipelines and the frame-derived math (jitter,
+#   previous view-projection, the SSAO / lighting uniform packing, fog, the TAA switch) are Rae manager
+#   objects (lib/GbufferTargets.rae, GbufferCache); rae_gb_{frame_data,commit_targets,forget_targets,
+#   view_a/b/c/depth,targets_gen,motion_zero,ssao_upload,light_upload,light_ubuf,light_bytes,light_pipeline,
+#   lit_view,lit_texture,lit_copy_texture,lit_copy_view,lit_format,ao_view,taa_*,set_taa_enabled,
+#   set_fog,pyramid_ready,pyr_*,composite_source_view,composite_source_index} and the gated
+#   rae_ext_Gbuffer_{deferredShutdown,pyramidMips,skyHosekPush} are gone (allowlist -3, gate 7);
+#   rae_gb_deferred_prepare keeps only the device/surface check + the shadow defaults, the WGSL sources
+#   are read through rae_gb_{light,taa,pyr_from_depth,pyr_reduce}_wgsl, rae_wgpu_have_rg11b10 is the lit
+#   format capability, and rae_gb_shadow_{frame_ubuf,array_view,sampler} stay until #925 — for the record.)
 # (#922 slice b-i: the deferred METABALL clusters are Rae manager objects on the GbufferCache
 #   (lib/GbufferSdf.rae: pipeline over the C-kept rae_gb_sdf_wgsl, frame uniform from the cache's frame
 #   data — inverse of the JITTERED viewProj computed in Rae — per-cluster ball/colour/param buffers +
@@ -72,14 +83,11 @@
 # (#830's rae_gb_water_set / _get / _release slot store was REMOVED by #873: water's GPU objects are
 #   typed IDs in the App-owned gpu/GpuResources manager; the gbuffer frame resources it draws with are
 #   adopted externals, not C slots.)
-rae_ext_Gbuffer_deferredShutdown
 # present: no-UI final blit to the swapchain; reached from Rae as
 # gbuffer.present(canvas:) -> presentFrame(canvas:) -> renderDeferredPass. Platform copy-to-drawable
 # of the CANVAS-owned offscreen texture it is handed (#920); C owns nothing of the target.
 rae_ext_Gbuffer_present
-rae_ext_Gbuffer_pyramidMips
 rae_ext_Gbuffer_shutdown
-rae_ext_Gbuffer_skyHosekPush
 rae_ext_Gpu3d_shutdown
 rae_ext_Gpu3d_skinDrawCount
 rae_ext_Gpu3d_skinFrameBegin

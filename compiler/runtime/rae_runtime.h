@@ -852,6 +852,7 @@ void  rae_wgpu_ctx_poll(int wait);
 void* rae_wgpu_null_ptr(void);
 /* #528 GPU timestamp timing */
 int   rae_wgpu_have_timestamp(void);
+int   rae_wgpu_have_rg11b10(void);
 void  rae_wgpu_report(const char* tag);   /* live wgpu object counts */
 void  rae_wgpu_report_periodic(void);     /* every 120 presented frames; RAE_WGPU_REPORT=0 silences */
 int   rae_g2d_window_visible(void);   /* 0 while window hidden/minimized/occluded (gpu2d.windowVisible) */
@@ -886,24 +887,17 @@ const char* rae_gb_sdf_wgsl(void);
 /* One-command-buffer submit for the raw-encoder passes (shadow, fullscreen,
  * transparent, the legacy GpuTiming): a general FFI gap, not renderer state. */
 void rae_gb_submit(void* cmd);
-/* #906: the geometry frame is the Rae GbufferCache's (manager targets, frame
- * uniform, draws buffer, a Recording per frame). C keeps the frame-derived
- * uniform math (rae_gb_frame_data writes 36 floats into a Rae buffer), a
- * "pass open" flag for the metaball prep, and BORROWS the target views + size
- * for its still-C post passes. rae_Mat4 is forward-declared (defined later in
- * the generated C, after this header) — only a pointer is needed. */
+/* #906/#923: the whole deferred frame (G-buffer targets, frame uniform, draws,
+ * a Recording per frame, the post-pass targets / uniforms / pipelines) is Rae
+ * manager state; C keeps the WGSL sources, the offscreen size and the
+ * render scale. rae_Mat4 is forward-declared for the remaining Mat4 externs. */
 struct rae_Mat4;
 int64_t rae_gb_prepare(void);
-int64_t rae_gb_frame_data(struct rae_Mat4* viewProj, float clearR, float clearG, float clearB,
-                          int64_t w, int64_t h, void* out);
 int64_t rae_gb_offscreen_w(void);
 int64_t rae_gb_offscreen_h(void);
 /* Dynamic resolution (#530). */
 void   rae_gb_set_render_scale(double s);
 double rae_gb_render_scale(void);
-void rae_gb_commit_targets(int64_t w, int64_t h, void* a, void* b, void* c, void* depth);
-void rae_gb_forget_targets(void);
-int64_t rae_gb_targets_gen(void);
 /* Render pipelines + WGSL shader modules created in Rae (#503). */
 const char* rae_gb_wgsl(void);
 const char* rae_gb_skin_wgsl(void);
@@ -923,6 +917,10 @@ int64_t rae_gb_composite_source_index(void);
 /* SSAO pass in Rae (#504). */
 void rae_gb_ssao_upload(float camX, float camY, float camZ);
 const char* rae_gb_ao_wgsl(void);
+const char* rae_gb_light_wgsl(void);
+const char* rae_gb_taa_wgsl(void);
+const char* rae_gb_pyr_from_depth_wgsl(void);
+const char* rae_gb_pyr_reduce_wgsl(void);
 void* rae_gb_ao_view(void);
 void* rae_gb_light_ubuf(void);
 int64_t rae_gb_light_bytes(void);
@@ -1004,11 +1002,6 @@ void* rae_sdf_atlas_pixels(int64_t handle);
 int64_t rae_sdf_atlas_width(int64_t handle);
 int64_t rae_sdf_atlas_height(int64_t handle);
 /* Procedural texture registration (#539): upload RGBA pixels generated in Rae. */
-void* rae_gb_view_a(void);
-void* rae_gb_view_b(void);
-void* rae_gb_view_c(void);
-void* rae_gb_view_depth(void);
-float rae_gb_motion_zero(void);
 /* Forward renderer (#514): frame prepare + handle accessors for the Rae-side
  * forward render pass (gpu3d.beginForward). Mirrors the rae_gb_* deferred set. */
 int   rae_g3d_frame_prepare(const float* frame, int64_t count);

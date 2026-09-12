@@ -1,0 +1,627 @@
+# GbufferTargets — the deferred POST-PASS targets, uniforms and pipelines as
+# renderer-owned manager objects (#923, shared renderer slice 3c). Was C's
+# runtime_gpu3d_deferred.c state: the lit HDR target + its opaque snapshot
+# (litCopy), the AO target, the two TAA ping-pong/history targets, the depth
+# pyramid (a half-res r32float mip chain, one view per level), the 416-byte
+# light uniform + the 16-byte TAA uniform, and the lighting / TAA / pyramid
+# pipelines over the C-kept WGSL sources. Everything is keyed on the geometry
+# pass's targets generation (GbufferCache.targetsGen): a G-buffer rebuild
+# (resize, render-scale change) retires and re-creates these at the new size,
+# and every pass rebuilds its bind groups when the generation changes.
+#
+# The per-frame state that used to be C statics lives here too: the TAA
+# ping-pong slot + "history exists" flag, the fog block (#57) and the TAA
+# switch (#20, mirrored onto the GbufferCache so the geometry jitter follows).
+import Math
+open Scene3d
+open Math3d
+open Vec3
+open Sky
+open SkyHosek
+open webgpu/Webgpu
+open webgpu/Context
+open gpu/GpuResources
+open gpu/GpuTextures
+open gpu/GpuLifetime
+open gpu/GpuRender
+open gpu/GpuArgs
+open gpu/GpuIds
+open Gbuffer
+open GbufferResources
+open GbufferPassesNative
+open GbufferFullscreen
+
+const pyramidMaxMips: Int = 16
+
+const lightUniformFloats: Int = 104  # 416 bytes: LightU in the lighting WGSL
+
+const taaUniformBytes: Int = 16
+
+type DeferredTargets {
+  gen: Int  # the GbufferCache.targetsGen these were built for (-1: none)
+  width: Int
+  height: Int
+  litFormat: Int32  # rg11b10ufloat when renderable, else rgba16float (#370)
+  lit: TextureId
+  litView: TextureViewId
+  litCopy: TextureId
+  litCopyView: TextureViewId
+  ao: TextureId
+  aoView: TextureViewId
+  taa: List(TextureId)  # ping-pong slots 0/1
+  taaViews: List(TextureViewId)
+  pyramid: TextureId
+  pyramidViews: List(TextureViewId)  # one per mip level
+  pyramidMips: Int
+  # frame state
+  taaEnabled: Bool
+  taaCur: Int  # the slot the resolve writes this frame (the composite reads it)
+  taaHaveHistory: Bool
+  fogOn: Bool
+  fogColor: Vec3
+  fogStart: Float
+  fogEnd: Float
+  # uniforms + pipelines (created once, survive resizes)
+  lightUniform: BufferId
+  taaUniform: BufferId
+  lightPipeline: RenderPipelineId
+  taaPipeline: RenderPipelineId
+  pyrFromDepth: RenderPipelineId
+  pyrReduce: RenderPipelineId
+  pipesMade: Bool
+  args: ArgWriter
+  columns: List(Float)
+  hosek: List(Float)  # the cooked Hosek-Wilkie state (36 floats) for the light uniform
+}
+
+func createDeferredTargets() ret DeferredTargets {
+  var hosek: List(Float) = List.create(Float, cap: 36)
+  loop hosek.length < 36 {
+    hosek.add(value: 0.0)
+  }
+  ret DeferredTargets {
+    gen: 0 - 1
+    width: 0
+    height: 0
+    litFormat: WGPUTextureFormat_RGBA16Float
+    lit: noTextureId()
+    litView: noTextureViewId()
+    litCopy: noTextureId()
+    litCopyView: noTextureViewId()
+    ao: noTextureId()
+    aoView: noTextureViewId()
+    taa: fillTextureIds(count: 2)
+    taaViews: fillTextureViewIds(count: 2)
+    pyramid: noTextureId()
+    pyramidViews: List.create(TextureViewId, cap: pyramidMaxMips)
+    pyramidMips: 0
+    taaEnabled: false  # #20: FXAA by default, TAA opt-in (setTaaEnabled)
+    taaCur: 0
+    taaHaveHistory: false
+    fogOn: false
+    fogColor: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    fogStart: 0.0
+    fogEnd: 0.0
+    lightUniform: noBufferId()
+    taaUniform: noBufferId()
+    lightPipeline: noRenderPipelineId()
+    taaPipeline: noRenderPipelineId()
+    pyrFromDepth: noRenderPipelineId()
+    pyrReduce: noRenderPipelineId()
+    pipesMade: false
+    args: createArgs(uniform: true)
+    columns: List.create(Float, cap: 16)
+    hosek: own hosek
+  }
+}
+
+func targetsReady(targets: view DeferredTargets, resources: view GpuResources) ret Bool {
+  ret isValidTextureView(resources: resources, id: targets.litView) and isValidTextureView(
+    resources: resources
+    id: targets.litCopyView
+  ) and isValidTextureView(resources: resources, id: targets.aoView)
+}
+
+func retireDeferredTargets(targets: mod DeferredTargets, resources: mod GpuResources) {
+  retireTextureView(resources: resources, id: targets.litView)
+  retireTexture(resources: resources, id: targets.lit)
+  retireTextureView(resources: resources, id: targets.litCopyView)
+  retireTexture(resources: resources, id: targets.litCopy)
+  retireTextureView(resources: resources, id: targets.aoView)
+  retireTexture(resources: resources, id: targets.ao)
+  retireTextureViewIds(resources: resources, list: targets.taaViews)
+  retireTextureIds(resources: resources, list: targets.taa)
+  retireTextureViewIds(resources: resources, list: targets.pyramidViews)
+  targets.pyramidViews.clear()
+  retireTexture(resources: resources, id: targets.pyramid)
+  targets.lit = noTextureId()
+  targets.litView = noTextureViewId()
+  targets.litCopy = noTextureId()
+  targets.litCopyView = noTextureViewId()
+  targets.ao = noTextureId()
+  targets.aoView = noTextureViewId()
+  targets.taa = fillTextureIds(count: 2)
+  targets.taaViews = fillTextureViewIds(count: 2)
+  targets.pyramid = noTextureId()
+  targets.pyramidMips = 0
+  targets.taaHaveHistory = false
+  targets.width = 0
+  targets.height = 0
+  targets.gen = 0 - 1
+}
+
+func makeTarget(
+  resources: mod GpuResources
+  width: copy Int
+  height: copy Int
+  format: copy Int32
+  usage: copy UInt64
+  texture: mod TextureId
+  textureView: mod TextureViewId
+) ret Bool {
+  if let made: TextureId = createTexture(
+    resources: resources
+    width: width
+    height: height
+    format: format
+    usage: usage
+  ) {
+    if let madeView: TextureViewId = createTextureView(resources: resources, texture: made) {
+      texture = made
+      textureView = madeView
+      ret true
+    }
+    retireTexture(resources: resources, id: made)
+  }
+  ret false
+}
+
+# (Re)create everything downstream of the G-buffer whenever the G-buffer was
+# recreated — keyed on its generation, not on dimensions: a resize back to a
+# previous size still invalidates every bind group.
+func ensureDeferredTargets(
+  targets: mod DeferredTargets
+  resources: mod GpuResources
+  gbuffer: view GbufferCache
+) ret Bool {
+  if targets.gen is gbuffer.targetsGen and targetsReady(targets: targets, resources: resources) {
+    ret true
+  }
+  if gbuffer.targetWidth < 1 or gbuffer.targetHeight < 1 {
+    ret false
+  }
+  if not gbufferTargetsReady(cache: gbuffer, resources: resources) {
+    ret false
+  }
+  retireDeferredTargets(targets: targets, resources: resources)
+  let w: Int = gbuffer.targetWidth
+  let h: Int = gbuffer.targetHeight
+  unsafe {
+    if webgpuHaveRg11b10() is 1 {
+      targets.litFormat = WGPUTextureFormat_RG11B10Ufloat
+    } else {
+      targets.litFormat = WGPUTextureFormat_RGBA16Float
+    }
+  }
+  let attach: UInt64 = WGPUTextureUsage_RenderAttachment + WGPUTextureUsage_TextureBinding
+  var ok: Bool = makeTarget(
+    resources: resources
+    width: w
+    height: h
+    format: targets.litFormat
+    usage: attach + WGPUTextureUsage_CopySrc
+    texture: targets.lit
+    textureView: targets.litView
+  )
+  # Same extent/format as the lit target, sampled by transparent materials
+  # (the #842 opaque snapshot) and the underwater fog.
+  if ok {
+    ok = makeTarget(
+      resources: resources
+      width: w
+      height: h
+      format: targets.litFormat
+      usage: WGPUTextureUsage_CopyDst + WGPUTextureUsage_TextureBinding
+      texture: targets.litCopy
+      textureView: targets.litCopyView
+    )
+  }
+  # AO (#387): full resolution r8unorm — one byte per pixel, and a fragment
+  # pass can write r8unorm as a colour attachment.
+  if ok {
+    ok = makeTarget(
+      resources: resources
+      width: w
+      height: h
+      format: WGPUTextureFormat_R8Unorm
+      usage: attach
+      texture: targets.ao
+      textureView: targets.aoView
+    )
+  }
+  # TAA history, same format as radiance: the resolve accumulates LINEAR HDR,
+  # before the composite's tone curve.
+  loop var i: Int = 0, i < 2, ++i {
+    if ok {
+      var texture: TextureId = noTextureId()
+      var slotView: TextureViewId = noTextureViewId()
+      ok = makeTarget(
+        resources: resources
+        width: w
+        height: h
+        format: targets.litFormat
+        usage: attach
+        texture: texture
+        textureView: slotView
+      )
+      targets.taa.set(index: i, value: texture)
+      targets.taaViews.set(index: i, value: slotView)
+    }
+  }
+  # The depth pyramid: half res, a MIN mip chain down to 1x1 (bounded).
+  if ok {
+    var pw: Int = w / 2
+    var ph: Int = h / 2
+    if pw < 1 {
+      pw = 1
+    }
+    if ph < 1 {
+      ph = 1
+    }
+    var mips: Int = 1
+    var m: Int = pw
+    if ph > m {
+      m = ph
+    }
+    loop m > 1 and mips < pyramidMaxMips {
+      m = m / 2
+      mips = mips + 1
+    }
+    if let pyramid: TextureId = createTextureMipped(
+      resources: resources
+      width: pw
+      height: ph
+      format: WGPUTextureFormat_R32Float
+      usage: attach
+      mipLevels: mips
+    ) {
+      targets.pyramid = pyramid
+      loop var level: Int = 0, level < mips, ++level {
+        if let mipView: TextureViewId = createTextureViewMip(
+          resources: resources
+          texture: pyramid
+          mip: level
+        ) {
+          targets.pyramidViews.add(value: mipView)
+        } else {
+          ok = false
+        }
+      }
+      targets.pyramidMips = mips
+    } else {
+      ok = false
+    }
+  }
+  if not ok {
+    retireDeferredTargets(targets: targets, resources: resources)
+    ret false
+  }
+  targets.width = w
+  targets.height = h
+  targets.taaHaveHistory = false
+  targets.gen = gbuffer.targetsGen
+  ret true
+}
+
+# The pipelines + uniforms, created once. The lit format is decided with the
+# targets, so this runs after the first ensureDeferredTargets.
+func ensureDeferredPipelines(targets: mod DeferredTargets, resources: mod GpuResources) {
+  if targets.pipesMade {
+    ret
+  }
+  targets.pipesMade = true
+  unsafe {
+    targets.lightPipeline = createFullscreenPipeline(
+      resources: resources
+      wgsl: gbLightWgsl()
+      format: targets.litFormat
+    )
+    targets.taaPipeline = createFullscreenPipeline(
+      resources: resources
+      wgsl: gbTaaWgsl()
+      format: targets.litFormat
+    )
+    targets.pyrFromDepth = createFullscreenPipeline(
+      resources: resources
+      wgsl: gbPyrFromDepthWgsl()
+      format: WGPUTextureFormat_R32Float
+    )
+    targets.pyrReduce = createFullscreenPipeline(
+      resources: resources
+      wgsl: gbPyrReduceWgsl()
+      format: WGPUTextureFormat_R32Float
+    )
+  }
+  if let uniform: BufferId = createBuffer(
+    resources: resources
+    size: lightUniformFloats * 4
+    usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst
+  ) {
+    targets.lightUniform = uniform
+  }
+  if let uniform: BufferId = createBuffer(
+    resources: resources
+    size: taaUniformBytes
+    usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst
+  ) {
+    targets.taaUniform = uniform
+  }
+}
+
+func pyramidViewRef(targets: view DeferredTargets, level: copy Int) ret ResourceRef {
+  if let levelView: TextureViewId = targets.pyramidViews.copyAt(index: level) {
+    ret textureViewRef(id: levelView)
+  }
+  ret noRef()
+}
+
+func taaViewRef(targets: view DeferredTargets, slot: copy Int) ret ResourceRef {
+  if let slotView: TextureViewId = targets.taaViews.copyAt(index: slot) {
+    ret textureViewRef(id: slotView)
+  }
+  ret noRef()
+}
+
+# What the composite samples: the TAA resolve when it ran (the slot written
+# this frame), else the raw lit radiance; the index keys the composite's bind.
+func compositeSourceRef(targets: view DeferredTargets) ret ResourceRef {
+  if targets.taaEnabled {
+    ret taaViewRef(targets: targets, slot: targets.taaCur)
+  }
+  ret textureViewRef(id: targets.litView)
+}
+
+func compositeSourceIndex(targets: view DeferredTargets) ret Int {
+  if targets.taaEnabled {
+    ret targets.taaCur
+  }
+  ret 2
+}
+
+# TAA per frame: flip the write slot (resolve into the slot not read this
+# frame) and upload the history flag; taaEnd marks that history now exists.
+func taaBegin(targets: mod DeferredTargets, resources: mod GpuResources) ret Int {
+  targets.taaCur = 1 - targets.taaCur
+  var history: Float = 0.0
+  if targets.taaHaveHistory {
+    history = 1.0
+  }
+  resetArgs(writer: targets.args)
+  pushVec4F(
+    writer: targets.args
+    x: history
+    y: 0.0
+    z: 0.0
+    w: 0.0
+  )
+  let uploaded: Bool = uploadArgs(
+    writer: targets.args
+    resources: resources
+    buffer: targets.taaUniform
+    offset: 0
+  )
+  ret targets.taaCur
+}
+
+func taaEnd(targets: mod DeferredTargets) {
+  targets.taaHaveHistory = true
+}
+
+func pushMatrixColumns(targets: mod DeferredTargets, m: view Mat4) {
+  targets.columns.clear()
+  var i: Int = 0
+  loop i < 16 {
+    targets.columns.add(value: m.m[i])
+    i = i + 1
+  }
+  let pushed: Bool = pushMat4(writer: targets.args, columns: targets.columns)
+}
+
+# The SSAO's share of the light uniform (it runs BEFORE lighting): the inverse
+# of the jittered viewProj + the camera at the top, the jittered viewProj at
+# float 40, the rest zero. Lighting rewrites the same values later from the
+# same matrices, so they cannot disagree.
+func uploadSsaoUniform(
+  targets: mod DeferredTargets
+  resources: mod GpuResources
+  gbuffer: view GbufferCache
+  camera: view Camera3d
+) ret Bool {
+  resetArgs(writer: targets.args)
+  pushMatrixColumns(targets: targets, m: mat4Inverse(a: gbuffer.viewProjJittered))
+  pushVec4F(
+    writer: targets.args
+    x: camera.position.x
+    y: camera.position.y
+    z: camera.position.z
+    w: 0.0
+  )
+  loop var i: Int = 0, i < 5, ++i {
+    pushVec4F(
+      writer: targets.args
+      x: 0.0
+      y: 0.0
+      z: 0.0
+      w: 0.0
+    )
+  }
+  pushMatrixColumns(targets: targets, m: gbuffer.viewProjJittered)
+  loop var i: Int = 0, i < 12, ++i {
+    pushVec4F(
+      writer: targets.args
+      x: 0.0
+      y: 0.0
+      z: 0.0
+      w: 0.0
+    )
+  }
+  ret uploadArgs(
+    writer: targets.args
+    resources: resources
+    buffer: targets.lightUniform
+    offset: 0
+  )
+}
+
+# The cooked Hosek-Wilkie coefficients for the light uniform: three vec4 per
+# channel (a..i + radiance, 10 of 12 floats), matching the WGSL `hosek` layout.
+func setHosekChannel(targets: mod DeferredTargets, c: view HosekChannel, base: copy Int) {
+  targets.hosek.set(index: base + 0, value: c.a)
+  targets.hosek.set(index: base + 1, value: c.b)
+  targets.hosek.set(index: base + 2, value: c.c)
+  targets.hosek.set(index: base + 3, value: c.d)
+  targets.hosek.set(index: base + 4, value: c.e)
+  targets.hosek.set(index: base + 5, value: c.f)
+  targets.hosek.set(index: base + 6, value: c.g)
+  targets.hosek.set(index: base + 7, value: c.h)
+  targets.hosek.set(index: base + 8, value: c.i)
+  targets.hosek.set(index: base + 9, value: c.radiance)
+}
+
+func hosekAt(targets: view DeferredTargets, index: copy Int) ret Float {
+  ret targets.hosek.copyAtFallback(index: index, fallback: 0.0)
+}
+
+# The whole light uniform (LightU): inverse jittered viewProj, camera +
+# exposure, sun, sun colour (+ fog start in .w), sky ambient (+ fog end),
+# ground ambient, the fog block (#57: rgb + enabled flag, else the clear
+# colour), the jittered viewProj, the sky params, then the cooked Hosek state.
+func uploadLightUniform(
+  targets: mod DeferredTargets
+  resources: mod GpuResources
+  gbuffer: view GbufferCache
+  camera: view Camera3d
+  exposure: copy Float
+  sunDir: view Vec3
+  sunColor: view Vec3
+  skyAmbient: view Vec3
+  groundAmbient: view Vec3
+  skyKind: copy Float
+  turbidity: copy Float
+  skyExposure: copy Float
+  sunSizeRad: copy Float
+  zenith: view Vec3
+  bands: copy Float
+  horizon: view Vec3
+  discIntensity: copy Float
+) ret Bool {
+  var fogStart: Float = 0.0
+  var fogEnd: Float = 0.0
+  var fogRgb: Vec3 = gbuffer.clearColor
+  var fogFlag: Float = 0.0
+  if targets.fogOn {
+    fogStart = targets.fogStart
+    fogEnd = targets.fogEnd
+    fogRgb = targets.fogColor
+    fogFlag = 1.0
+  }
+  resetArgs(writer: targets.args)
+  pushMatrixColumns(targets: targets, m: mat4Inverse(a: gbuffer.viewProjJittered))
+  pushVec4F(
+    writer: targets.args
+    x: camera.position.x
+    y: camera.position.y
+    z: camera.position.z
+    w: exposure
+  )
+  pushVec4F(
+    writer: targets.args
+    x: sunDir.x
+    y: sunDir.y
+    z: sunDir.z
+    w: 0.0
+  )
+  pushVec4F(
+    writer: targets.args
+    x: sunColor.x
+    y: sunColor.y
+    z: sunColor.z
+    w: fogStart
+  )
+  pushVec4F(
+    writer: targets.args
+    x: skyAmbient.x
+    y: skyAmbient.y
+    z: skyAmbient.z
+    w: fogEnd
+  )
+  pushVec4F(
+    writer: targets.args
+    x: groundAmbient.x
+    y: groundAmbient.y
+    z: groundAmbient.z
+    w: 0.0
+  )
+  pushVec4F(
+    writer: targets.args
+    x: fogRgb.x
+    y: fogRgb.y
+    z: fogRgb.z
+    w: fogFlag
+  )
+  pushMatrixColumns(targets: targets, m: gbuffer.viewProjJittered)
+  pushVec4F(
+    writer: targets.args
+    x: skyKind
+    y: turbidity
+    z: skyExposure
+    w: sunSizeRad
+  )
+  pushVec4F(
+    writer: targets.args
+    x: zenith.x
+    y: zenith.y
+    z: zenith.z
+    w: bands
+  )
+  pushVec4F(
+    writer: targets.args
+    x: horizon.x
+    y: horizon.y
+    z: horizon.z
+    w: discIntensity
+  )
+  loop var i: Int = 0, i < 9, ++i {
+    pushVec4F(
+      writer: targets.args
+      x: hosekAt(targets: targets, index: i * 4)
+      y: hosekAt(targets: targets, index: i * 4 + 1)
+      z: hosekAt(targets: targets, index: i * 4 + 2)
+      w: hosekAt(targets: targets, index: i * 4 + 3)
+    )
+  }
+  ret uploadArgs(
+    writer: targets.args
+    resources: resources
+    buffer: targets.lightUniform
+    offset: 0
+  )
+}
+
+# Retire everything (renderer shutdown).
+func deferredTargetsShutdown(targets: mod DeferredTargets, resources: mod GpuResources) {
+  retireDeferredTargets(targets: targets, resources: resources)
+  retireBuffer(resources: resources, id: targets.lightUniform)
+  retireBuffer(resources: resources, id: targets.taaUniform)
+  retireRenderPipeline(resources: resources, id: targets.lightPipeline)
+  retireRenderPipeline(resources: resources, id: targets.taaPipeline)
+  retireRenderPipeline(resources: resources, id: targets.pyrFromDepth)
+  retireRenderPipeline(resources: resources, id: targets.pyrReduce)
+  targets.lightUniform = noBufferId()
+  targets.taaUniform = noBufferId()
+  targets.lightPipeline = noRenderPipelineId()
+  targets.taaPipeline = noRenderPipelineId()
+  targets.pyrFromDepth = noRenderPipelineId()
+  targets.pyrReduce = noRenderPipelineId()
+  targets.pipesMade = false
+}

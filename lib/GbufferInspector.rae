@@ -8,6 +8,7 @@
 # externals per targets generation); the pass itself is opened through
 # GbufferPasses' fullscreen helpers and submitted on the shared queue.
 open Gbuffer
+open GbufferResources
 open Gpu2dCanvas
 open GbufferPasses
 open GbufferFullscreen
@@ -30,7 +31,6 @@ type ViewPassCache {
   pipeline: RenderPipelineId
   uniform: BufferId
   bindGroup: BindGroupId
-  adopted: List(ExternalId)
   bindGen: Int
   args: ArgWriter
 }
@@ -41,7 +41,6 @@ func createViewPassCache() ret ViewPassCache {
     pipeline: noRenderPipelineId()
     uniform: noBufferId()
     bindGroup: noBindGroupId()
-    adopted: List.create(ExternalId, cap: 4)
     bindGen: 0 - 1
     args: createArgs(uniform: true)
   }
@@ -72,51 +71,35 @@ func ensureViewPipeline(cache: mod ViewPassCache, resources: mod GpuResources) {
 
 # Inspector bind group: the uniform + the four G-buffer views. Rebuilt after a
 # resize — the targets-generation counter changing forces a fresh bind.
-func ensureViewBind(cache: mod ViewPassCache, resources: mod GpuResources) {
-  let gen: Int = gbTargetsGen()
+func ensureViewBind(
+  cache: mod ViewPassCache
+  resources: mod GpuResources
+  gbuffer: view GbufferCache
+) {
+  let gen: Int = gbuffer.targetsGen
   if not (gen is cache.bindGen) {
     cache.bindGen = gen
     retireBindGroup(resources: resources, id: cache.bindGroup)
     cache.bindGroup = noBindGroupId()
-    releaseExternalIds(resources: resources, list: cache.adopted)
   }
   if bindGroupIsUsable(resources: resources, id: cache.bindGroup) {
     ret
   }
-  if not gbTargetsBorrowed() {
+  if not gbufferTargetsReady(cache: gbuffer, resources: resources) {
     ret
   }
   let entries: List(ResourceRef) = List.create(ResourceRef, cap: 5)
   entries.add(value: bufferRef(id: cache.uniform))
-  unsafe {
-    entries.add(
-      value: adoptTextureViewRef(resources: resources, adopted: cache.adopted, handle: gbViewA())
-    )
-    entries.add(
-      value: adoptTextureViewRef(resources: resources, adopted: cache.adopted, handle: gbViewB())
-    )
-    entries.add(
-      value: adoptTextureViewRef(resources: resources, adopted: cache.adopted, handle: gbViewC())
-    )
-    entries.add(
-      value: adoptTextureViewRef(
-        resources: resources
-        adopted: cache.adopted
-        handle: gbViewDepth()
-      )
-    )
-  }
-  var made: Bool = false
+  entries.add(value: gbufferTargetRef(cache: gbuffer, index: gbufferTargetA))
+  entries.add(value: gbufferTargetRef(cache: gbuffer, index: gbufferTargetB))
+  entries.add(value: gbufferTargetRef(cache: gbuffer, index: gbufferTargetC))
+  entries.add(value: gbufferTargetRef(cache: gbuffer, index: gbufferTargetDepth))
   if let bind: BindGroupId = createRenderBindGroup(
     resources: resources
     pipeline: cache.pipeline
     entries: entries
   ) {
     cache.bindGroup = bind
-    made = true
-  }
-  if not made {
-    releaseExternalIds(resources: resources, list: cache.adopted)
   }
 }
 
@@ -124,6 +107,7 @@ func ensureViewBind(cache: mod ViewPassCache, resources: mod GpuResources) {
 func debugView(
   cache: mod ViewPassCache
   resources: mod GpuResources
+  gbuffer: view GbufferCache
   canvas: mod Gpu2dCanvas
   mode: copy Int
   zNear: copy Float
@@ -133,7 +117,7 @@ func debugView(
     ret
   }
   ensureViewPipeline(cache: cache, resources: resources)
-  ensureViewBind(cache: cache, resources: resources)
+  ensureViewBind(cache: cache, resources: resources, gbuffer: gbuffer)
   if not bindGroupIsUsable(resources: resources, id: cache.bindGroup) {
     ret
   }
@@ -168,6 +152,7 @@ func debugView(
 func inspect(
   cache: mod ViewPassCache
   resources: mod GpuResources
+  gbuffer: view GbufferCache
   canvas: mod Gpu2dCanvas
   mode: view Int
   zNear: view Float
@@ -176,6 +161,7 @@ func inspect(
   debugView(
     cache: cache
     resources: resources
+    gbuffer: gbuffer
     canvas: canvas
     mode: mode
     zNear: zNear
@@ -186,7 +172,6 @@ func inspect(
 # Retire the inspector's manager objects (renderer shutdown).
 func inspectorShutdown(cache: mod ViewPassCache, resources: mod GpuResources) {
   retireBindGroup(resources: resources, id: cache.bindGroup)
-  releaseExternalIds(resources: resources, list: cache.adopted)
   retireRenderPipeline(resources: resources, id: cache.pipeline)
   retireBuffer(resources: resources, id: cache.uniform)
   cache = createViewPassCache()

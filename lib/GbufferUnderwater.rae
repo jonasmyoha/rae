@@ -27,6 +27,8 @@ open GbufferResources
 open GbufferPasses
 open GbufferFullscreen
 open TransparentForward
+open GbufferTargets
+open gpu/GpuTextures
 open webgpu/Webgpu
 open webgpu/Context
 open gpu/GpuResources
@@ -78,7 +80,6 @@ type UnderwaterPassCache {
   pipeline: RenderPipelineId
   uniform: BufferId
   bindGroup: BindGroupId
-  adopted: List(ExternalId)  # the C-owned litCopy view of this generation
   bindGen: Int
   args: ArgWriter
   columns: List(Float)  # the inverse view-projection, column-major scratch
@@ -91,7 +92,6 @@ func createUnderwaterPassCache() ret UnderwaterPassCache {
     pipeline: noRenderPipelineId()
     uniform: noBufferId()
     bindGroup: noBindGroupId()
-    adopted: List.create(ExternalId, cap: 2)
     bindGen: 0 - 1
     args: createArgs(uniform: true)
     columns: List.create(Float, cap: 16)
@@ -102,7 +102,11 @@ func createUnderwaterPassCache() ret UnderwaterPassCache {
 # The uniform: a mat4 (64 B) + six vec4 (96 B) — the last two are #860 caustics.
 const underwaterUniformBytes: Int = 160
 
-func ensureUnderwaterObjects(cache: mod UnderwaterPassCache, resources: mod GpuResources) {
+func ensureUnderwaterObjects(
+  cache: mod UnderwaterPassCache
+  resources: mod GpuResources
+  litFormat: copy Int32
+) {
   if cache.pipeMade {
     ret
   }
@@ -121,7 +125,7 @@ func ensureUnderwaterObjects(cache: mod UnderwaterPassCache, resources: mod GpuR
     wgsl: source
     vertexEntry: "vs"
     fragmentEntry: "fs"
-    spec: fullscreenPipelineSpec(format: gbLitFormat() as Int32)
+    spec: fullscreenPipelineSpec(format: litFormat)
   ) {
     cache.pipeline = pipeline
   }
@@ -134,19 +138,19 @@ func ensureUnderwaterObjects(cache: mod UnderwaterPassCache, resources: mod GpuR
   }
 }
 
-# Uniform @0, the litCopy snapshot @1 (C-owned, adopted per generation), the
-# G-buffer depth @2 (the cache's manager view).
+# Uniform @0, the litCopy snapshot @1 (the renderer's DeferredTargets, #923),
+# the G-buffer depth @2 (the cache's manager view); rebuilt per targets generation.
 func ensureUnderwaterBind(
   cache: mod UnderwaterPassCache
   resources: mod GpuResources
   gbuffer: view GbufferCache
+  targets: view DeferredTargets
 ) {
-  let gen: Int = gbTargetsGen()
+  let gen: Int = targets.gen
   if not (gen is cache.bindGen) {
     cache.bindGen = gen
     retireBindGroup(resources: resources, id: cache.bindGroup)
     cache.bindGroup = noBindGroupId()
-    releaseExternalIds(resources: resources, list: cache.adopted)
   }
   if bindGroupIsUsable(resources: resources, id: cache.bindGroup) {
     ret
@@ -156,27 +160,14 @@ func ensureUnderwaterBind(
   }
   let entries: List(ResourceRef) = List.create(ResourceRef, cap: 3)
   entries.add(value: bufferRef(id: cache.uniform))
-  unsafe {
-    entries.add(
-      value: adoptTextureViewRef(
-        resources: resources
-        adopted: cache.adopted
-        handle: gbLitCopyView()
-      )
-    )
-  }
+  entries.add(value: textureViewRef(id: targets.litCopyView))
   entries.add(value: gbufferTargetRef(cache: gbuffer, index: gbufferTargetDepth))
-  var made: Bool = false
   if let bind: BindGroupId = createRenderBindGroup(
     resources: resources
     pipeline: cache.pipeline
     entries: entries
   ) {
     cache.bindGroup = bind
-    made = true
-  }
-  if not made {
-    releaseExternalIds(resources: resources, list: cache.adopted)
   }
 }
 
@@ -220,6 +211,7 @@ func underwaterPass(
   cache: mod UnderwaterPassCache
   resources: mod GpuResources
   gbuffer: view GbufferCache
+  targets: view DeferredTargets
   camera: view Camera3d
   aspect: copy Float
   params: view UnderwaterParams
@@ -227,14 +219,19 @@ func underwaterPass(
   if not params.active {
     ret
   }
-  if gbDeferredPrepare() is 0 {
+  if not targetsReady(targets: targets, resources: resources) {
     ret
   }
-  ensureUnderwaterObjects(cache: cache, resources: resources)
+  ensureUnderwaterObjects(cache: cache, resources: resources, litFormat: targets.litFormat)
   if not isValidRenderPipeline(resources: resources, id: cache.pipeline) {
     ret
   }
-  ensureUnderwaterBind(cache: cache, resources: resources, gbuffer: gbuffer)
+  ensureUnderwaterBind(
+    cache: cache
+    resources: resources
+    gbuffer: gbuffer
+    targets: targets
+  )
   if not bindGroupIsUsable(resources: resources, id: cache.bindGroup) {
     ret
   }
@@ -296,13 +293,13 @@ func underwaterPass(
   # Snapshot the composed frame (opaque + water + transparents) so the pass
   # can read it while writing the lit target — the same copy the refracting
   # surfaces used, free again now that they have drawn.
-  copyOpaqueRadiance()
+  copyOpaqueRadiance(resources: resources, targets: targets)
   unsafe {
     runFullscreen(
       resources: resources
       pipeline: cache.pipeline
       bind: cache.bindGroup
-      target: gbLitView()
+      target: textureViewHandle(resources: resources, id: targets.litView)
     )
   }
   cache.frames = cache.frames + 1
@@ -311,7 +308,6 @@ func underwaterPass(
 # Retire the pass's manager objects (renderer shutdown).
 func underwaterShutdown(cache: mod UnderwaterPassCache, resources: mod GpuResources) {
   retireBindGroup(resources: resources, id: cache.bindGroup)
-  releaseExternalIds(resources: resources, list: cache.adopted)
   retireRenderPipeline(resources: resources, id: cache.pipeline)
   retireBuffer(resources: resources, id: cache.uniform)
   cache.bindGroup = noBindGroupId()
