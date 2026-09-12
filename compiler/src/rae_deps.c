@@ -19,6 +19,27 @@ typedef struct {
 static ResolvedDep s_deps[RAE_DEPS_MAX];
 static int s_dep_count = 0;
 
+/* #934 `rae update`: NULL name + s_update_all=false => honor the lock (normal
+ * builds, `rae fetch`). s_update_all => re-resolve every dep; else only the
+ * one named in s_update_name. */
+static bool s_update_all = false;
+static char s_update_name[128] = {0};
+
+void rae_deps_set_update(const char* only_name) {
+  if (only_name) {
+    s_update_all = false;
+    snprintf(s_update_name, sizeof(s_update_name), "%s", only_name);
+  } else {
+    s_update_all = true;
+    s_update_name[0] = '\0';
+  }
+}
+
+static bool dep_is_updating(const char* name) {
+  if (s_update_all) return true;
+  return s_update_name[0] && strcmp(s_update_name, name) == 0;
+}
+
 static bool dir_exists(const char* path) {
   struct stat st;
   return stat(path, &st) == 0 && S_ISDIR(st.st_mode);
@@ -93,8 +114,9 @@ static bool resolve_git_dep(ResolvedDep* dep, const RaePackDep* spec, const char
   snprintf(dep->source, sizeof(dep->source), "git:%s", url);
   snprintf(dep->dir, sizeof(dep->dir), "%s/.rae/deps/%s", pack_dir, dep->name);
 
+  bool updating = dep_is_updating(dep->name);
   char pinned[64] = {0};
-  bool have_pin = lock_pinned_commit(lock_path, dep->name, pinned, sizeof(pinned));
+  bool have_pin = !updating && lock_pinned_commit(lock_path, dep->name, pinned, sizeof(pinned));
 
   if (!dir_exists(dep->dir)) {
     char parent[PATH_MAX];
@@ -107,6 +129,21 @@ static bool resolve_git_dep(ResolvedDep* dep, const RaePackDep* spec, const char
     if (system(clone) != 0) {
       fprintf(stderr, "error: dependency '%s': could not clone %s\n", dep->name, url);
       return false;
+    }
+  }
+
+  if (updating) {
+    /* Re-resolve within the pack's requirement: pull the remote, then move to
+     * the pack's rev (or the default branch tip when no rev is pinned). */
+    git_in(dep->dir, "fetch --tags --quiet", NULL, 0);
+    git_in(dep->dir, "fetch --quiet", NULL, 0);
+    if (!dep->rev[0]) {
+      char def[128] = {0};
+      if (git_in(dep->dir, "rev-parse --abbrev-ref origin/HEAD", def, sizeof(def)) && def[0]) {
+        char args[192];
+        snprintf(args, sizeof(args), "checkout --quiet \"%s\"", def);
+        git_in(dep->dir, args, NULL, 0);
+      }
     }
   }
 
@@ -231,4 +268,28 @@ bool rae_deps_owns_path(const char* file_path) {
     if (strncmp(probe, s_deps[i].dir, n) == 0 && (probe[n] == '/' || probe[n] == '\0')) return true;
   }
   return false;
+}
+
+void rae_deps_print_tree(FILE* out, const char* root_label, const char* stdlib_dir) {
+  fprintf(out, "%s\n", root_label && root_label[0] ? root_label : "(project)");
+  int total = s_dep_count + 1;  /* +1 for the implicit stdlib edge */
+  fprintf(out, "%s lib  (stdlib via toolchain: %s)\n",
+          total == 1 ? "\xe2\x94\x94\xe2\x94\x80" : "\xe2\x94\x9c\xe2\x94\x80",
+          stdlib_dir && stdlib_dir[0] ? stdlib_dir : "(unresolved)");
+  for (int i = 0; i < s_dep_count; ++i) {
+    const ResolvedDep* dep = &s_deps[i];
+    const char* branch = (i == s_dep_count - 1) ? "\xe2\x94\x94\xe2\x94\x80"
+                                                : "\xe2\x94\x9c\xe2\x94\x80";
+    if (!dep->is_git) {
+      fprintf(out, "%s %s  %s\n", branch, dep->name, dep->source);
+    } else {
+      char shortc[13] = {0};
+      snprintf(shortc, sizeof(shortc), "%.12s", dep->commit);
+      if (dep->rev[0]) {
+        fprintf(out, "%s %s  %s @ %s (%s)\n", branch, dep->name, dep->source, dep->rev, shortc);
+      } else {
+        fprintf(out, "%s %s  %s (%s)\n", branch, dep->name, dep->source, shortc);
+      }
+    }
+  }
 }

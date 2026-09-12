@@ -85,6 +85,11 @@ if [ -f tools/test-format-cli.sh ]; then
   echo
   if bash tools/test-format-cli.sh; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 fi
+
+if [ -f tools/test-packages-cli.sh ]; then
+  echo
+  if bash tools/test-packages-cli.sh; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
+fi
 echo
 echo "=========================================="
 echo "Results: $PASSED passed, $FAILED failed"

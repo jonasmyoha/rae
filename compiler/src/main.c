@@ -2297,6 +2297,11 @@ static void print_usage(const char* prog) {
   fprintf(stderr, "  toolchain <status|use|list>\n");
   fprintf(stderr, "                  Inspect/switch the Rae toolchain (version check,\n");
   fprintf(stderr, "                  `use <req>` checks out + rebuilds a matching tag)\n");
+  fprintf(stderr, "  add <name> --path <dir> | --git <url> [--rev <rev>]\n");
+  fprintf(stderr, "                  Add a dependency to the project's .raepack\n");
+  fprintf(stderr, "  fetch           Resolve dependencies into .rae/deps from the lockfile\n");
+  fprintf(stderr, "  update [<name>] Re-resolve dependencies and rewrite rae.lock\n");
+  fprintf(stderr, "  tree            Print the resolved dependency graph\n");
   fprintf(stderr, "  --version, -v   Print the compiler version (--json for tooling)\n");
 }
 
@@ -4806,6 +4811,248 @@ static int cmd_toolchain(int argc, char** argv) {
   return 1;
 }
 
+
+/* ---- `rae add` / `fetch` / `update` / `tree` (#934, docs/versioning-and-toolchain.md §4) ---- */
+
+/* Locate the project pack (in cwd) into `pack_path`; false with a message when
+ * there is none. Also fills `pack_dir` with the directory the pack lives in. */
+static bool packages_find_pack(char* pack_path, char* pack_dir) {
+  char cwd[PATH_MAX];
+  if (!getcwd(cwd, sizeof(cwd))) {
+    fprintf(stderr, "error: getcwd failed: %s\n", strerror(errno));
+    return false;
+  }
+  if (!find_project_pack(NULL, cwd, pack_path)) {
+    fprintf(stderr, "error: no .raepack in %s — dependencies live in a pack\n", cwd);
+    return false;
+  }
+  strncpy(pack_dir, pack_path, PATH_MAX - 1);
+  pack_dir[PATH_MAX - 1] = '\0';
+  char* slash = strrchr(pack_dir, '/');
+  if (slash) *slash = '\0'; else strcpy(pack_dir, ".");
+  return true;
+}
+
+/* Index of the `}` matching the `{` at s[open]. Returns -1 if unbalanced. */
+static long matching_brace(const char* s, long open) {
+  int depth = 0;
+  for (long i = open; s[i]; ++i) {
+    if (s[i] == '{') depth += 1;
+    else if (s[i] == '}') { depth -= 1; if (depth == 0) return i; }
+  }
+  return -1;
+}
+
+/* Edit the pack text to add one dependency; returns a malloc'd new buffer, or
+ * NULL on a structural problem (message printed). */
+static char* packages_insert_dep(const char* text, const char* entry) {
+  const char* deps = strstr(text, "dependencies");
+  size_t entry_len = strlen(entry);
+  if (deps) {
+    const char* brace = strchr(deps, '{');
+    if (!brace) { fprintf(stderr, "error: malformed dependencies block\n"); return NULL; }
+    long open = brace - text;
+    long close = matching_brace(text, open);
+    if (close < 0) { fprintf(stderr, "error: unbalanced dependencies block\n"); return NULL; }
+    /* Splice the entry in at the START of the closing brace's line, so that
+     * brace keeps its own indentation and the new dep lines up with siblings. */
+    long at = close;
+    while (at > open && (text[at - 1] == ' ' || text[at - 1] == '\t')) at -= 1;
+    char* out = malloc(strlen(text) + entry_len + 2);
+    if (!out) return NULL;
+    memcpy(out, text, at);
+    out[at] = '\0';
+    strcat(out, entry);
+    strcat(out, text + at);
+    return out;
+  }
+  /* No dependencies block yet: add one just before `targets` (required field). */
+  const char* targets = strstr(text, "targets");
+  const char* insert_at = targets ? targets : NULL;
+  /* Back up to the start of the targets line so indentation is preserved. */
+  if (insert_at) {
+    while (insert_at > text && insert_at[-1] != '\n') insert_at -= 1;
+  } else {
+    fprintf(stderr, "error: pack has no targets block to anchor dependencies before\n");
+    return NULL;
+  }
+  long at = insert_at - text;
+  const char* head = "  dependencies: {\n";
+  const char* tail = "  }\n";
+  size_t block_len = strlen(head) + entry_len + strlen(tail);
+  char* out = malloc(strlen(text) + block_len + 2);
+  if (!out) return NULL;
+  memcpy(out, text, at);
+  out[at] = '\0';
+  strcat(out, head);
+  strcat(out, entry);
+  strcat(out, tail);
+  strcat(out, text + at);
+  return out;
+}
+
+static int cmd_add(int argc, char** argv) {
+  const char* name = NULL;
+  const char* path = NULL;
+  const char* git = NULL;
+  const char* rev = NULL;
+  for (int i = 0; i < argc; ++i) {
+    if (strcmp(argv[i], "--path") == 0 && i + 1 < argc) { path = argv[++i]; }
+    else if (strcmp(argv[i], "--git") == 0 && i + 1 < argc) { git = argv[++i]; }
+    else if (strcmp(argv[i], "--rev") == 0 && i + 1 < argc) { rev = argv[++i]; }
+    else if (argv[i][0] == '-') { fprintf(stderr, "error: unknown add option '%s'\n", argv[i]); return 1; }
+    else if (!name) { name = argv[i]; }
+    else { fprintf(stderr, "error: unexpected argument '%s'\n", argv[i]); return 1; }
+  }
+  if (!name) { fprintf(stderr, "error: 'rae add' needs a dependency name\n"); return 1; }
+  if ((path != NULL) == (git != NULL)) {
+    fprintf(stderr, "error: give exactly one of --path or --git\n");
+    return 1;
+  }
+  if (rev && !git) { fprintf(stderr, "error: --rev is only valid with --git\n"); return 1; }
+
+  char pack_path[PATH_MAX], pack_dir[PATH_MAX];
+  if (!packages_find_pack(pack_path, pack_dir)) return 1;
+
+  /* Refuse a duplicate name up front (clearer than a post-edit parse error). */
+  RaePack existing;
+  diag_set_quiet(true);
+  bool parsed_existing = raepack_parse_file(pack_path, &existing, false);
+  diag_set_quiet(false);
+  if (parsed_existing) {
+    for (const RaePackDep* dep = existing.deps; dep; dep = dep->next) {
+      if (str_eq_cstr(dep->name, name)) {
+        fprintf(stderr, "error: dependency '%s' is already declared\n", name);
+        raepack_free(&existing);
+        return 1;
+      }
+    }
+    raepack_free(&existing);
+  }
+
+  char entry[2 * PATH_MAX];
+  if (path) {
+    snprintf(entry, sizeof(entry),
+             "    dep %s: {\n      path: \"%s\"\n    }\n", name, path);
+  } else if (rev) {
+    snprintf(entry, sizeof(entry),
+             "    dep %s: {\n      git: \"%s\"\n      rev: \"%s\"\n    }\n", name, git, rev);
+  } else {
+    snprintf(entry, sizeof(entry),
+             "    dep %s: {\n      git: \"%s\"\n    }\n", name, git);
+  }
+
+  size_t size = 0;
+  char* text = read_file(pack_path, &size);
+  if (!text) { fprintf(stderr, "error: could not read %s\n", pack_path); return 1; }
+  char* edited = packages_insert_dep(text, entry);
+  free(text);
+  if (!edited) return 1;
+
+  /* Guard the mechanical splice with a brace-balance check (a full parse would
+   * couple this metadata edit to entry files existing, which need not be true
+   * when scaffolding). Write atomically via temp + rename. */
+  int depth = 0;
+  bool balanced = true;
+  for (const char* p = edited; *p; ++p) {
+    if (*p == '{') depth += 1;
+    else if (*p == '}') { depth -= 1; if (depth < 0) { balanced = false; break; } }
+  }
+  if (!balanced || depth != 0) {
+    fprintf(stderr, "error: the edit unbalanced the pack braces; left %s unchanged\n", pack_path);
+    free(edited);
+    return 1;
+  }
+  char tmp_path[PATH_MAX];
+  snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", pack_path);
+  FILE* tmp = fopen(tmp_path, "w");
+  if (!tmp) { fprintf(stderr, "error: could not write %s\n", tmp_path); free(edited); return 1; }
+  fputs(edited, tmp);
+  fclose(tmp);
+  free(edited);
+  if (rename(tmp_path, pack_path) != 0) {
+    remove(tmp_path);
+    fprintf(stderr, "error: could not update %s\n", pack_path);
+    return 1;
+  }
+  printf("added dependency '%s' to %s\n", name, pack_path);
+  printf("run 'rae fetch' (or a build) to resolve it into rae.lock\n");
+  return 0;
+}
+
+/* Shared resolve step for fetch/update/tree: parse the pack, resolve deps into
+ * .rae/deps. `update_name` (NULL) / update_all drive re-resolution. Returns the
+ * parsed pack in *out (caller frees) or false on failure. */
+static bool packages_resolve(const char* pack_path, const char* pack_dir, RaePack* out) {
+  if (!raepack_parse_file(pack_path, out, false)) {
+    fprintf(stderr, "error: could not parse %s\n", pack_path);
+    return false;
+  }
+  char lock_path[PATH_MAX];
+  snprintf(lock_path, sizeof(lock_path), "%s/rae.lock", pack_dir);
+  if (!rae_deps_resolve(out, pack_dir, lock_path)) {
+    raepack_free(out);
+    return false;
+  }
+  return true;
+}
+
+static int cmd_fetch(void) {
+  char pack_path[PATH_MAX], pack_dir[PATH_MAX];
+  if (!packages_find_pack(pack_path, pack_dir)) return 1;
+  char lock_path[PATH_MAX];
+  snprintf(lock_path, sizeof(lock_path), "%s/rae.lock", pack_dir);
+  bool had_lock = file_exists(lock_path);
+  RaePack pack;
+  if (!packages_resolve(pack_path, pack_dir, &pack)) return 1;
+  /* fetch honors an existing lock and never rewrites it (deterministic,
+   * offline-safe); with no lock yet it captures the resolved state once. */
+  if (!had_lock) {
+    char version[160];
+    build_compiler_version_string(version, sizeof(version));
+    write_rae_lock(pack_path, version);
+  }
+  printf("fetched %d dependenc%s into %s/.rae/deps\n",
+         rae_deps_count(), rae_deps_count() == 1 ? "y" : "ies", pack_dir);
+  raepack_free(&pack);
+  return 0;
+}
+
+static int cmd_update(int argc, char** argv) {
+  const char* only = NULL;
+  for (int i = 0; i < argc; ++i) {
+    if (argv[i][0] == '-') { fprintf(stderr, "error: unknown update option '%s'\n", argv[i]); return 1; }
+    if (!only) only = argv[i];
+    else { fprintf(stderr, "error: unexpected argument '%s'\n", argv[i]); return 1; }
+  }
+  char pack_path[PATH_MAX], pack_dir[PATH_MAX];
+  if (!packages_find_pack(pack_path, pack_dir)) return 1;
+  rae_deps_set_update(only);  /* re-resolve: ignore lock pins, re-fetch remotes */
+  RaePack pack;
+  if (!packages_resolve(pack_path, pack_dir, &pack)) return 1;
+  char version[160];
+  build_compiler_version_string(version, sizeof(version));
+  write_rae_lock(pack_path, version);
+  if (only) printf("updated '%s'; rewrote %s/rae.lock\n", only, pack_dir);
+  else printf("updated %d dependenc%s; rewrote %s/rae.lock\n",
+              rae_deps_count(), rae_deps_count() == 1 ? "y" : "ies", pack_dir);
+  raepack_free(&pack);
+  return 0;
+}
+
+static int cmd_tree(void) {
+  char pack_path[PATH_MAX], pack_dir[PATH_MAX];
+  if (!packages_find_pack(pack_path, pack_dir)) return 1;
+  RaePack pack;
+  if (!packages_resolve(pack_path, pack_dir, &pack)) return 1;
+  char label[256];
+  if (pack.name.len > 0) snprintf(label, sizeof(label), "%.*s", (int)pack.name.len, pack.name.data);
+  else snprintf(label, sizeof(label), "(project)");
+  rae_deps_print_tree(stdout, label, compiler_stdlib_dir());
+  raepack_free(&pack);
+  return 0;
+}
+
 int main(int argc, char** argv) {
   if (argc < 2) {
     print_usage(argv[0]);
@@ -4837,6 +5084,18 @@ int main(int argc, char** argv) {
   }
   if (strcmp(cmd, "toolchain") == 0) {
     return cmd_toolchain(argc - 2, argv + 2);
+  }
+  if (strcmp(cmd, "add") == 0) {
+    return cmd_add(argc - 2, argv + 2);
+  }
+  if (strcmp(cmd, "fetch") == 0) {
+    return cmd_fetch();
+  }
+  if (strcmp(cmd, "update") == 0) {
+    return cmd_update(argc - 2, argv + 2);
+  }
+  if (strcmp(cmd, "tree") == 0) {
+    return cmd_tree();
   }
   if (strcmp(cmd, "bindgen") == 0) {
     return bindgen_run(argc - 2, argv + 2);

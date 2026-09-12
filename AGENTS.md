@@ -536,6 +536,14 @@ The compiler has one version, `compiler/VERSION` — a single semver line
   `lib` symlink. Dependency sources are vendored: the format preflight neither
   rewrites nor check-fails them, and the implicit project scan skips every
   dot-directory so `.rae/deps` is reached only through the resolver.
+- **Package CLI (#934).** `rae add <name> --path <dir> | --git <url> [--rev <rev>]`
+  edits the project's `.raepack` (creating the `dependencies` block if absent,
+  refusing a duplicate name); `rae fetch` resolves dependencies into `.rae/deps`
+  honoring the committed lock (offline-safe, never rewrites an existing lock);
+  `rae update [<name>]` re-resolves within the pack's requirement — re-fetching
+  the remote and ignoring the lock pin — then rewrites `rae.lock`; `rae tree`
+  prints the resolved graph (the stdlib `lib` edge + each dep with its rev and
+  short commit). All four operate on the pack in the current directory.
 
 ---
 ## Interaction rules

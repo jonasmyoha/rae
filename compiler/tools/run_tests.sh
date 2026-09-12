@@ -454,6 +454,12 @@ if [ -z "$TEST_NAME_FILTER" ] && [ -f "tools/test-format-cli.sh" ]; then
   if ! bash tools/test-format-cli.sh; then FAILED=$((FAILED+1)); fi
 fi
 
+# #934: package-CLI behavior checks (add/fetch/update/tree), full run only.
+if [ -z "$TEST_NAME_FILTER" ] && [ -f "tools/test-packages-cli.sh" ]; then
+  echo
+  if ! bash tools/test-packages-cli.sh; then FAILED=$((FAILED+1)); fi
+fi
+
 if [ "$TREE_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ $FAILED -gt 0 ]; then
   exit 1
