@@ -1,10 +1,11 @@
 # Compiler versioning, toolchain pinning, and the road to a package manager
 
-**Status:** design, agreed direction. Nothing here is implemented; the QUEUE
-tasks (#930–#934) are the phases. Extends `docs/raepack-v2-and-packages.md`
-§12 (dependencies + `rae.lock`), which already covers *package* versions and
-dependency pins but says nothing about the **compiler's own version** — the
-gap this doc closes.
+**Status:** design, agreed direction. §1 is implemented (#930: `compiler/VERSION`,
+`rae --version`/`-v`/`--json`, the AGENTS.md bump discipline, the `v0.1.0` tag).
+§2–§4 are not; the QUEUE tasks (#931–#934) are the remaining phases. Extends
+`docs/raepack-v2-and-packages.md` §12 (dependencies + `rae.lock`), which
+already covers *package* versions and dependency pins but says nothing about
+the **compiler's own version** — the gap this doc closes.
 
 ## 0. The problem
 
