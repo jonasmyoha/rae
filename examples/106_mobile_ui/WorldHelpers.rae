@@ -18,7 +18,12 @@ func makeFixed() pub ret Size {
 
 # Set a fixed-size rectangle on `entity` (the common case for
 # code-built UI nodes).
-func setRectFixed(world: mod UiWorld, entity: view EntityId, w: view Float, h: view Float) pub {
+func setRectFixed(
+  world: mod UiWorld
+  entity: view EntityId
+  w: view Float
+  h: view Float
+) pub {
   let r: Rect = { position: { x: 0.0, y: 0.0 }, size: { x: w, y: h } }
   componentSet(this: world.rects, entity: entity, data: r)
   componentSet(this: world.sizes, entity: entity, data: makeFixed())
@@ -49,31 +54,26 @@ func setOnClick(world: mod UiWorld, entity: view EntityId, actionId: view String
     maxDelayMs: 250
   }
   componentSet(this: world.onClicks, entity: entity, data: click)
-  let binding: ActionBinding = {
-    actionId: actionId
-    role: "primary"
-  }
+  let binding: ActionBinding = { actionId: actionId, role: "primary" }
   componentSet(this: world.actionBindings, entity: entity, data: binding)
   setPointerCursor(world: world, entity: entity, cursor: "pointer")
 }
 
 func setPointerCursor(world: mod UiWorld, entity: view EntityId, cursor: view String) pub {
   let cursorName: String = "{cursor}"
-  let pe: PointerEvents = {
-    enabled: true
-    cursor: own cursorName
-    blockChildren: false
-  }
+  let pe: PointerEvents = { enabled: true, cursor: own cursorName, blockChildren: false }
   componentSet(this: world.pointerEvents, entity: entity, data: own pe)
 }
 
-func setWidgetIdentity(world: mod UiWorld, entity: view EntityId, id: view String, kind: view String) pub {
+func setWidgetIdentity(
+  world: mod UiWorld
+  entity: view EntityId
+  id: view String
+  kind: view String
+) pub {
   let wid: String = "{id}"
   let wkind: String = "{kind}"
-  let meta: WidgetId = {
-    id: own wid
-    kind: own wkind
-  }
+  let meta: WidgetId = { id: own wid, kind: own wkind }
   componentSet(this: world.widgetIds, entity: entity, data: own meta)
 }
 
@@ -85,12 +85,7 @@ func setWidgetState(
   loading: view Bool
   error: view Bool
 ) pub {
-  let state: WidgetState = {
-    enabled: enabled
-    selected: selected
-    loading: loading
-    error: error
-  }
+  let state: WidgetState = { enabled: enabled, selected: selected, loading: loading, error: error }
   componentSet(this: world.widgetStates, entity: entity, data: state)
 }
 
@@ -99,7 +94,14 @@ func setWidgetState(
 # churn the widgetStates generation (componentMod bumps it eagerly).
 func setWidgetSelected(world: mod UiWorld, entity: view EntityId, selected: view Bool) pub {
   if componentHas(this: world.widgetStates, entity: entity) is false {
-    setWidgetState(world: world, entity: entity, enabled: true, selected: selected, loading: false, error: false)
+    setWidgetState(
+      world: world
+      entity: entity
+      enabled: true
+      selected: selected
+      loading: false
+      error: false
+    )
     ret
   }
   let cur: WidgetState = componentGet(this: world.widgetStates, entity: entity)
@@ -112,7 +114,14 @@ func setWidgetSelected(world: mod UiWorld, entity: view EntityId, selected: view
 
 func setWidgetLoading(world: mod UiWorld, entity: view EntityId, loading: view Bool) pub {
   if componentHas(this: world.widgetStates, entity: entity) is false {
-    setWidgetState(world: world, entity: entity, enabled: true, selected: false, loading: loading, error: false)
+    setWidgetState(
+      world: world
+      entity: entity
+      enabled: true
+      selected: false
+      loading: loading
+      error: false
+    )
     ret
   }
   let cur: WidgetState = componentGet(this: world.widgetStates, entity: entity)
@@ -125,7 +134,14 @@ func setWidgetLoading(world: mod UiWorld, entity: view EntityId, loading: view B
 
 func setWidgetError(world: mod UiWorld, entity: view EntityId, error: view Bool) pub {
   if componentHas(this: world.widgetStates, entity: entity) is false {
-    setWidgetState(world: world, entity: entity, enabled: true, selected: false, loading: false, error: error)
+    setWidgetState(
+      world: world
+      entity: entity
+      enabled: true
+      selected: false
+      loading: false
+      error: error
+    )
     ret
   }
   let cur: WidgetState = componentGet(this: world.widgetStates, entity: entity)
@@ -178,11 +194,7 @@ func setDataDependency(
   field: view DataFieldId
   observedRevision: view Int
 ) pub {
-  let dep: DataDependency = {
-    resource: resource
-    field: field
-    observedRevision: observedRevision
-  }
+  let dep: DataDependency = { resource: resource, field: field, observedRevision: observedRevision }
   componentSet(this: world.dataDependencies, entity: entity, data: dep)
 }
 
@@ -211,9 +223,7 @@ func setRefreshRegion(
 # unique, content-addressed hero identifier without needing a
 # separate albumId mapping.
 func setHeroWidget(world: mod UiWorld, entity: view EntityId, key: own String) pub {
-  let hw: HeroWidget = {
-    key: key
-  }
+  let hw: HeroWidget = { key: key }
   componentSet(this: world.heroWidgets, entity: entity, data: hw)
 }
 
@@ -228,7 +238,12 @@ func setShapeRect(world: mod UiWorld, entity: view EntityId, fill: view RgbaColo
   componentSet(this: world.shapes, entity: entity, data: shape)
 }
 
-func setShapeRounded(world: mod UiWorld, entity: view EntityId, fill: view RgbaColor, radius: view Float) pub {
+func setShapeRounded(
+  world: mod UiWorld
+  entity: view EntityId
+  fill: view RgbaColor
+  radius: view Float
+) pub {
   let shape: Shape = {
     kind: ShapeKind.roundedRect
     fill: fill
@@ -239,7 +254,12 @@ func setShapeRounded(world: mod UiWorld, entity: view EntityId, fill: view RgbaC
   componentSet(this: world.shapes, entity: entity, data: shape)
 }
 
-func setSprite(world: mod UiWorld, entity: view EntityId, key: own String, tint: view RgbaColor) pub {
+func setSprite(
+  world: mod UiWorld
+  entity: view EntityId
+  key: own String
+  tint: view RgbaColor
+) pub {
   let sp: Sprite = {
     textureKey: key
     tint: tint
@@ -251,7 +271,12 @@ func setSprite(world: mod UiWorld, entity: view EntityId, key: own String, tint:
   componentSet(this: world.sprites, entity: entity, data: sp)
 }
 
-func setSpriteFill(world: mod UiWorld, entity: view EntityId, key: own String, tint: view RgbaColor) pub {
+func setSpriteFill(
+  world: mod UiWorld
+  entity: view EntityId
+  key: own String
+  tint: view RgbaColor
+) pub {
   let sp: Sprite = {
     textureKey: key
     tint: tint
@@ -274,12 +299,13 @@ func setHoverScale(world: mod UiWorld, entity: view EntityId, hoverScale: view F
   componentSet(this: world.hoverScales, entity: entity, data: hs)
 }
 
-func setText(world: mod UiWorld, entity: view EntityId, text: view String, styleId: view String) pub {
-  let t: Text = {
-    text: text
-    styleId: styleId
-    wrapWidthMode: WrapWidthMode.none
-  }
+func setText(
+  world: mod UiWorld
+  entity: view EntityId
+  text: view String
+  styleId: view String
+) pub {
+  let t: Text = { text: text, styleId: styleId, wrapWidthMode: WrapWidthMode.none }
   componentSet(this: world.texts, entity: entity, data: t)
 }
 
@@ -314,7 +340,12 @@ func attachChildren(world: mod UiWorld, parent: view EntityId, kids: view List(E
     var i: Int = 0
     loop i < kids.length {
       let kid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: i)
-      setParent(parents: world.parents, childrens: world.childrens, child: kid, parent: parent)
+      setParent(
+        parents: world.parents
+        childrens: world.childrens
+        child: kid
+        parent: parent
+      )
       i = i + 1
     }
   }

@@ -24,7 +24,9 @@ open app3d/CameraRig
 
 func approxEq(a: view Float, b: view Float, tol: view Float) ret Bool {
   var d: Float = a - b
-  if d < 0.0 { d = 0.0 - d }
+  if d < 0.0 {
+    d = 0.0 - d
+  }
   ret d < tol
 }
 
@@ -64,8 +66,20 @@ func main() {
 
   # The pivot took, and the eye orbits it at the rig's distance -- so the app
   # never had to touch yaw, pitch or distance.
-  log("target recentred: {approxEq(a: cam.target.x, b: 0.0, tol: 0.0001) and approxEq(a: cam.target.z, b: 0.5, tol: 0.0001)}")
-  log("eye orbits it at rig distance: {approxEq(a: dist(a: cam.position, b: cam.target), b: rig.viewDistance, tol: 0.001)}")
+  log(
+    "target recentred: {approxEq(a: cam.target.x, b: 0.0, tol: 0.0001) and approxEq(
+      a: cam.target.z
+      b: 0.5
+      tol: 0.0001
+    )}"
+  )
+  log(
+    "eye orbits it at rig distance: {approxEq(
+      a: dist(a: cam.position, b: cam.target)
+      b: rig.viewDistance
+      tol: 0.001
+    )}"
+  )
 
   # The eye sits where the rig's OWN yaw/pitch put it around the NEW target --
   # the check that the re-aim moved the whole orbit rather than just relabelling
@@ -73,8 +87,12 @@ func main() {
   # recomputed from the target, so it fails if applyCameraRig ever anchors on
   # anything else.
   let expected: Vec3 = orbitEye(
-    targetX: cam.target.x, targetY: cam.target.y, targetZ: cam.target.z,
-    yaw: rig.viewYaw, pitch: rig.viewOrbitPitch, dist: rig.viewDistance
+    targetX: cam.target.x
+    targetY: cam.target.y
+    targetZ: cam.target.z
+    yaw: rig.viewYaw
+    pitch: rig.viewOrbitPitch
+    dist: rig.viewDistance
   )
   log("eye placed by yaw/pitch around it: {dist(a: cam.position, b: expected) < 0.0001}")
   # And it is genuinely above the pivot by the pitch, not merely at the right

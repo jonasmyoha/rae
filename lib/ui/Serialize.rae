@@ -26,7 +26,12 @@ open ui/Ecs
 func worldToJson(world: view UiWorld, registry: view ComponentRegistry) ret String {
   var writer: WorldJson = createWorldJson()
   loop let table: view ComponentTable(any) in fields(world) {
-    addComponentTable(writer: writer, table: table, name: fieldName(table), registry: registry)
+    addComponentTable(
+      writer: writer
+      table: table
+      name: fieldName(table)
+      registry: registry
+    )
   }
   ret finishWorldJson(writer: writer)
 }
@@ -37,6 +42,11 @@ func worldToJson(world: view UiWorld, registry: view ComponentRegistry) ret Stri
 # structure is restored; rebuildParentsFromChildren re-derives Parent.
 func worldFromJson(world: mod UiWorld, registry: view ComponentRegistry, doc: view JsonDoc) {
   loop let table: mod ComponentTable(any) in fields(world) {
-    loadComponentTable(table: table, name: fieldName(table), registry: registry, doc: doc)
+    loadComponentTable(
+      table: table
+      name: fieldName(table)
+      registry: registry
+      doc: doc
+    )
   }
 }

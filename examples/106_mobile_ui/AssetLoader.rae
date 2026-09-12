@@ -15,7 +15,6 @@ func albumCoverKey(stem: view String) pub ret String {
   ret "{stem}"
 }
 
-
 # Registry key for the circular profile avatar. Lives under a
 # `user.*` namespace so iteration over album-cover keys (which use
 # the bare stem) never picks it up by accident.
@@ -74,8 +73,18 @@ func loadAllTextures(reg: mod TextureRegistry, albums: view List(Album)) pub {
 
 # Progressive loader for the interactive path. In 106 this is an alias for
 # the gpu2d image-key path.
-func cascadeAssets(reg: mod TextureRegistry, albums: view List(Album), budget: view Int, load: mod AssetLoad) pub ret Bool {
-  ret cascadeGpu2dAssets(reg: reg, albums: albums, budget: budget, load: load)
+func cascadeAssets(
+  reg: mod TextureRegistry
+  albums: view List(Album)
+  budget: view Int
+  load: mod AssetLoad
+) pub ret Bool {
+  ret cascadeGpu2dAssets(
+    reg: reg
+    albums: albums
+    budget: budget
+    load: load
+  )
 }
 
 # Latches so the progressive loader stops re-scanning once everything is
@@ -104,7 +113,12 @@ func createAssetLoad() pub ret AssetLoad {
 # Sprite.textureKey used throughout the ECS world. Idempotent + self-latching:
 # once every cover (and the avatar) is registered it becomes a cheap no-op
 # until the album list changes.
-func cascadeGpu2dAssets(reg: mod TextureRegistry, albums: view List(Album), budget: view Int, load: mod AssetLoad) pub ret Bool {
+func cascadeGpu2dAssets(
+  reg: mod TextureRegistry
+  albums: view List(Album)
+  budget: view Int
+  load: mod AssetLoad
+) pub ret Bool {
   unsafe {
     if albums.length is not load.coversSeenLen {
       load.coversSeenLen = albums.length

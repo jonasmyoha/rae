@@ -31,7 +31,13 @@ type UiInput {
 
 func createUiInput() pub ret UiInput {
   ret UiInput {
-    pointer: UiPointerState { x: 0.0, y: 0.0, down: false, pressed: false, released: false }
+    pointer: UiPointerState {
+      x: 0.0
+      y: 0.0
+      down: false
+      pressed: false
+      released: false
+    }
     hoveredEntity: noEntity()
     pressedEntity: noEntity()
     events: List.create(UiActionEvent, cap: 8)
@@ -46,35 +52,77 @@ func uiEntityActive(world: view UiWorld, entity: view EntityId) ret Bool {
   ret true
 }
 
-func uiPointInEntity(world: view UiWorld, entity: view EntityId, x: view Float, y: view Float) ret Bool {
-  if uiEntityActive(world: world, entity: entity) is false { ret false }
-  if componentHas(this: world.worldTransforms, entity: entity) is false { ret false }
-  if componentHas(this: world.computedRects, entity: entity) is false { ret false }
+func uiPointInEntity(
+  world: view UiWorld
+  entity: view EntityId
+  x: view Float
+  y: view Float
+) ret Bool {
+  if uiEntityActive(world: world, entity: entity) is false {
+    ret false
+  }
+  if componentHas(this: world.worldTransforms, entity: entity) is false {
+    ret false
+  }
+  if componentHas(this: world.computedRects, entity: entity) is false {
+    ret false
+  }
   let wt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: entity)
-  if worldVisualOf(world: world, entity: entity).visible is false { ret false }
+  if worldVisualOf(world: world, entity: entity).visible is false {
+    ret false
+  }
   let cr: ComputedRect = componentGet(this: world.computedRects, entity: entity)
-  if x < wt.position.x { ret false }
-  if y < wt.position.y { ret false }
-  if x > wt.position.x + cr.size.x { ret false }
-  if y > wt.position.y + cr.size.y { ret false }
+  if x < wt.position.x {
+    ret false
+  }
+  if y < wt.position.y {
+    ret false
+  }
+  if x > wt.position.x + cr.size.x {
+    ret false
+  }
+  if y > wt.position.y + cr.size.y {
+    ret false
+  }
   ret true
 }
 
-func uiHitTestEntity(world: view UiWorld, entity: view EntityId, x: view Float, y: view Float) ret EntityId {
+func uiHitTestEntity(
+  world: view UiWorld
+  entity: view EntityId
+  x: view Float
+  y: view Float
+) ret EntityId {
   unsafe {
-    if uiEntityActive(world: world, entity: entity) is false { ret noEntity() }
+    if uiEntityActive(world: world, entity: entity) is false {
+      ret noEntity()
+    }
     if componentHas(this: world.childrens, entity: entity) {
       let children: view Children => componentView(this: world.childrens, entity: entity)
       var i: Int = children.ids.length - 1
       loop i >= 0 {
         let child: EntityId = rae_ext_rae_buf_get(buf: children.ids.data, index: i)
-        let hit: EntityId = uiHitTestEntity(world: world, entity: child, x: x, y: y)
-        if isNone(this: hit) is false { ret hit }
+        let hit: EntityId = uiHitTestEntity(
+          world: world
+          entity: child
+          x: x
+          y: y
+        )
+        if isNone(this: hit) is false {
+          ret hit
+        }
         i = i - 1
       }
     }
     if componentHas(this: world.onClicks, entity: entity) {
-      if uiPointInEntity(world: world, entity: entity, x: x, y: y) { ret entity }
+      if uiPointInEntity(
+        world: world
+        entity: entity
+        x: x
+        y: y
+      ) {
+        ret entity
+      }
     }
     ret noEntity()
   }
@@ -87,8 +135,15 @@ func uiHitTest(world: view UiWorld, x: view Float, y: view Float) pub ret Entity
     loop i >= 0 {
       let root: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: i)
       if componentHas(this: world.layerRoots, entity: root) is false {
-        let hit: EntityId = uiHitTestEntity(world: world, entity: root, x: x, y: y)
-        if isNone(this: hit) is false { ret hit }
+        let hit: EntityId = uiHitTestEntity(
+          world: world
+          entity: root
+          x: x
+          y: y
+        )
+        if isNone(this: hit) is false {
+          ret hit
+        }
       }
       i = i - 1
     }
@@ -98,7 +153,9 @@ func uiHitTest(world: view UiWorld, x: view Float, y: view Float) pub ret Entity
 
 func clearUiActions(input: mod UiInput) {
   let events: mod List(UiActionEvent) => input.events
-  loop events.length > 0 { events.remove(index: events.length - 1) }
+  loop events.length > 0 {
+    events.remove(index: events.length - 1)
+  }
 }
 
 # #729: per-entity pointer state lives in `Interaction` components. At most two
@@ -107,32 +164,49 @@ func clearUiActions(input: mod UiInput) {
 # THIS frame — no per-entity scan. Merge the flags so an entity that is both
 # hovered and pressed gets a single {hovered:true, pressed:true}.
 func clearInteraction(world: mod UiWorld, entity: view EntityId) {
-  if isNone(this: entity) { ret }
+  if isNone(this: entity) {
+    ret
+  }
   if componentHas(this: world.interactions, entity: entity) {
     componentRemove(this: world.interactions, entity: entity)
   }
 }
 
-func markInteraction(world: mod UiWorld, entity: view EntityId, hovered: view Bool, pressed: view Bool) {
-  if isNone(this: entity) { ret }
+func markInteraction(
+  world: mod UiWorld
+  entity: view EntityId
+  hovered: view Bool
+  pressed: view Bool
+) {
+  if isNone(this: entity) {
+    ret
+  }
   var state: Interaction = { hovered: false, pressed: false }
   if componentHas(this: world.interactions, entity: entity) {
     state = componentGet(this: world.interactions, entity: entity)
   }
-  if hovered { state.hovered = true }
-  if pressed { state.pressed = true }
+  if hovered {
+    state.hovered = true
+  }
+  if pressed {
+    state.pressed = true
+  }
   componentSet(this: world.interactions, entity: entity, data: state)
 }
 
 # Read a per-entity interaction flag (default false when the entity carries no
 # Interaction), for render/style systems that want to react to hover/press.
 func entityHovered(world: view UiWorld, entity: view EntityId) pub ret Bool {
-  if componentHas(this: world.interactions, entity: entity) is false { ret false }
+  if componentHas(this: world.interactions, entity: entity) is false {
+    ret false
+  }
   ret componentGet(this: world.interactions, entity: entity).hovered
 }
 
 func entityPressed(world: view UiWorld, entity: view EntityId) pub ret Bool {
-  if componentHas(this: world.interactions, entity: entity) is false { ret false }
+  if componentHas(this: world.interactions, entity: entity) is false {
+    ret false
+  }
   ret componentGet(this: world.interactions, entity: entity).pressed
 }
 
@@ -155,7 +229,9 @@ func updateUiInput(input: mod UiInput, world: mod UiWorld) pub {
     released: released
   }
   input.hoveredEntity = uiHitTest(world: world, x: x, y: y)
-  if pressed { input.pressedEntity = input.hoveredEntity }
+  if pressed {
+    input.pressedEntity = input.hoveredEntity
+  }
   if released {
     if isNone(this: input.hoveredEntity) is false {
       if input.hoveredEntity is input.pressedEntity {
@@ -169,8 +245,18 @@ func updateUiInput(input: mod UiInput, world: mod UiWorld) pub {
   }
 
   # Project this frame's hovered/pressed refs onto the entities as components.
-  markInteraction(world: world, entity: input.hoveredEntity, hovered: true, pressed: false)
-  markInteraction(world: world, entity: input.pressedEntity, hovered: false, pressed: true)
+  markInteraction(
+    world: world
+    entity: input.hoveredEntity
+    hovered: true
+    pressed: false
+  )
+  markInteraction(
+    world: world
+    entity: input.pressedEntity
+    hovered: false
+    pressed: true
+  )
 }
 
 # Drop the in-progress press and anything already queued, so a release cannot
@@ -183,7 +269,11 @@ func suppressUiPress(input: mod UiInput) {
 }
 
 func uiPointerCaptured(input: view UiInput) pub ret Bool {
-  if isNone(this: input.hoveredEntity) is false { ret true }
-  if isNone(this: input.pressedEntity) is false { ret true }
+  if isNone(this: input.hoveredEntity) is false {
+    ret true
+  }
+  if isNone(this: input.pressedEntity) is false {
+    ret true
+  }
   ret false
 }

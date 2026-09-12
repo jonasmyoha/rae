@@ -30,7 +30,6 @@ import ui/ThemeResolved
 # style with an inline color returns its baked RGBA. M5 moves slot
 # resolution onto the ResolvedTheme palette + a generation counter.
 # ================================================================
-
 const styleBodySize: Float = 43.373493975903614
 
 func resolveTextSize(theme: view ResolvedTheme, styleId: view String) pub ret Float {
@@ -46,7 +45,9 @@ func resolveTextSize(theme: view ResolvedTheme, styleId: view String) pub ret Fl
 
 func resolveTextWeight(theme: view ResolvedTheme, styleId: view String) pub ret Float {
   let i: Int = themeTextStyleIndex(theme: theme, styleId: styleId)
-  if i < 0 { ret 400.0 }
+  if i < 0 {
+    ret 400.0
+  }
   if let weight: Float = theme.textWeights.copyAt(index: i) {
     ret weight
   }
@@ -55,14 +56,20 @@ func resolveTextWeight(theme: view ResolvedTheme, styleId: view String) pub ret 
 
 func resolveTextLineHeight(theme: view ResolvedTheme, styleId: view String) pub ret Float {
   let i: Int = themeTextStyleIndex(theme: theme, styleId: styleId)
-  if i < 0 { ret 1.0 }
+  if i < 0 {
+    ret 1.0
+  }
   if let lineHeight: Float = theme.textLineHeights.copyAt(index: i) {
     ret lineHeight
   }
   ret 1.0
 }
 
-func resolveTextColor(theme: view ResolvedTheme, styleId: view String, active: view Theme) pub ret RgbaColor {
+func resolveTextColor(
+  theme: view ResolvedTheme
+  styleId: view String
+  active: view Theme
+) pub ret RgbaColor {
   unsafe {
     let i: Int = themeTextStyleIndex(theme: theme, styleId: styleId)
     if i < 0 {
@@ -76,10 +83,18 @@ func resolveTextColor(theme: view ResolvedTheme, styleId: view String, active: v
     var g: Int = 0
     var b: Int = 0
     var a: Int = 255
-    if let colorRVal: Int = theme.textColorR.copyAt(index: i) { r = colorRVal }
-    if let colorGVal: Int = theme.textColorG.copyAt(index: i) { g = colorGVal }
-    if let colorBVal: Int = theme.textColorB.copyAt(index: i) { b = colorBVal }
-    if let colorAVal: Int = theme.textColorA.copyAt(index: i) { a = colorAVal }
+    if let colorRVal: Int = theme.textColorR.copyAt(index: i) {
+      r = colorRVal
+    }
+    if let colorGVal: Int = theme.textColorG.copyAt(index: i) {
+      g = colorGVal
+    }
+    if let colorBVal: Int = theme.textColorB.copyAt(index: i) {
+      b = colorBVal
+    }
+    if let colorAVal: Int = theme.textColorA.copyAt(index: i) {
+      a = colorAVal
+    }
     ret RgbaColor { r: r, g: g, b: b, a: a }
   }
 }
@@ -137,7 +152,11 @@ func styleOverrideSize(base: view Float, so: view StyleOverride) pub ret Float {
   ret base
 }
 
-func styleOverrideColor(base: view RgbaColor, so: view StyleOverride, active: view Theme) pub ret RgbaColor {
+func styleOverrideColor(
+  base: view RgbaColor
+  so: view StyleOverride
+  active: view Theme
+) pub ret RgbaColor {
   if so.hasColor {
     if so.colorSlot.length() > 0 {
       ret colorByName(theme: active, name: so.colorSlot)
@@ -153,22 +172,54 @@ func styleOverrideColor(base: view RgbaColor, so: view StyleOverride, active: vi
 
 # Font size (design units) for a style id. Mirrors render.rae's textStyleSize.
 func textStyleSize(styleId: view String) pub ret Float {
-  if styleId is "h1" { ret 78.0722891566265 }
-  if styleId is "h2" { ret 60.722891566265055 }
-  if styleId is "pageTitle" { ret 60.722891566265055 }
-  if styleId is "topBarTitle" { ret 39.03614457831325 }
-  if styleId is "miniTitle" { ret 39.03614457831325 }
-  if styleId is "miniMuted" { ret 30.361445783132528 }
-  if styleId is "caption" { ret 34.69879518072289 }
-  if styleId is "albumCaption" { ret 30.361445783132528 }
-  if styleId is "pillLabel" { ret 39.03614457831325 }
-  if styleId is "trackTitle" { ret 43.373493975903614 }
-  if styleId is "trackMuted" { ret 30.361445783132528 }
-  if styleId is "historyTitle" { ret 39.03614457831325 }
-  if styleId is "historyArtist" { ret 30.361445783132528 }
-  if styleId is "tabActive" { ret 30.361445783132528 }
-  if styleId is "tabInactive" { ret 30.361445783132528 }
-  if styleId is "timeTotal" { ret 34.69879518072289 }
+  if styleId is "h1" {
+    ret 78.0722891566265
+  }
+  if styleId is "h2" {
+    ret 60.722891566265055
+  }
+  if styleId is "pageTitle" {
+    ret 60.722891566265055
+  }
+  if styleId is "topBarTitle" {
+    ret 39.03614457831325
+  }
+  if styleId is "miniTitle" {
+    ret 39.03614457831325
+  }
+  if styleId is "miniMuted" {
+    ret 30.361445783132528
+  }
+  if styleId is "caption" {
+    ret 34.69879518072289
+  }
+  if styleId is "albumCaption" {
+    ret 30.361445783132528
+  }
+  if styleId is "pillLabel" {
+    ret 39.03614457831325
+  }
+  if styleId is "trackTitle" {
+    ret 43.373493975903614
+  }
+  if styleId is "trackMuted" {
+    ret 30.361445783132528
+  }
+  if styleId is "historyTitle" {
+    ret 39.03614457831325
+  }
+  if styleId is "historyArtist" {
+    ret 30.361445783132528
+  }
+  if styleId is "tabActive" {
+    ret 30.361445783132528
+  }
+  if styleId is "tabInactive" {
+    ret 30.361445783132528
+  }
+  if styleId is "timeTotal" {
+    ret 34.69879518072289
+  }
   # body / muted / primary and unknowns.
   ret 43.373493975903614
 }
@@ -176,17 +227,37 @@ func textStyleSize(styleId: view String) pub ret Float {
 # Theme-palette color for a style id. Mirrors render.rae's textStyleColor —
 # light/dark themes flip for free because every branch reads a semantic slot.
 func colorRgba(styleId: view String, active: view Theme) pub ret RgbaColor {
-  if styleId is "muted" { ret colorByName(theme: active, name: "textMuted") }
-  if styleId is "caption" { ret colorByName(theme: active, name: "textMuted") }
-  if styleId is "albumCaption" { ret colorByName(theme: active, name: "textMuted") }
-  if styleId is "trackMuted" { ret colorByName(theme: active, name: "textMuted") }
-  if styleId is "historyArtist" { ret colorByName(theme: active, name: "textMuted") }
-  if styleId is "tabInactive" { ret colorByName(theme: active, name: "textMuted") }
-  if styleId is "timeTotal" { ret colorByName(theme: active, name: "textMuted") }
+  if styleId is "muted" {
+    ret colorByName(theme: active, name: "textMuted")
+  }
+  if styleId is "caption" {
+    ret colorByName(theme: active, name: "textMuted")
+  }
+  if styleId is "albumCaption" {
+    ret colorByName(theme: active, name: "textMuted")
+  }
+  if styleId is "trackMuted" {
+    ret colorByName(theme: active, name: "textMuted")
+  }
+  if styleId is "historyArtist" {
+    ret colorByName(theme: active, name: "textMuted")
+  }
+  if styleId is "tabInactive" {
+    ret colorByName(theme: active, name: "textMuted")
+  }
+  if styleId is "timeTotal" {
+    ret colorByName(theme: active, name: "textMuted")
+  }
   # "On surfaceAlt"/accent-panel styles.
-  if styleId is "miniTitle" { ret colorByName(theme: active, name: "accentText") }
-  if styleId is "miniMuted" { ret colorByName(theme: active, name: "accentTextMuted") }
-  if styleId is "pillLabel" { ret colorByName(theme: active, name: "accentText") }
+  if styleId is "miniTitle" {
+    ret colorByName(theme: active, name: "accentText")
+  }
+  if styleId is "miniMuted" {
+    ret colorByName(theme: active, name: "accentTextMuted")
+  }
+  if styleId is "pillLabel" {
+    ret colorByName(theme: active, name: "accentText")
+  }
   # primary / h1 / h2 / pageTitle / topBarTitle / trackTitle / tabActive / body
   # and unknowns fall back to primary text.
   ret colorByName(theme: active, name: "textPrimary")
@@ -195,14 +266,22 @@ func colorRgba(styleId: view String, active: view Theme) pub ret RgbaColor {
 # Whether a style id is horizontally centered within its rect. Mirrors
 # render.rae's isCentered.
 func isCentered(styleId: view String) pub ret Bool {
-  if styleId is "tabActive" { ret true }
-  if styleId is "tabInactive" { ret true }
-  if styleId is "pageTitle" { ret true }
+  if styleId is "tabActive" {
+    ret true
+  }
+  if styleId is "tabInactive" {
+    ret true
+  }
+  if styleId is "pageTitle" {
+    ret true
+  }
   ret false
 }
 
 # Whether a style id is right-aligned within its rect (NowPlaying TimeTotal).
 func isRightAligned(styleId: view String) pub ret Bool {
-  if styleId is "timeTotal" { ret true }
+  if styleId is "timeTotal" {
+    ret true
+  }
   ret false
 }

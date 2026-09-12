@@ -21,6 +21,7 @@ open ecs/ComponentTable
 
 # Internal: left mouse button.
 let mouseButtonLeft: Int = 0
+
 let inputNoEntity: EntityId = { index: 0 - 1, generation: 0 }
 
 type PointerState {
@@ -59,7 +60,12 @@ func createInputSystem() ret InputSystem {
 # Returns true if the point (x, y) is inside the entity's
 # `WorldTransform`+`ComputedRect` bounds. Skips entities without one
 # of those, or with `WorldTransform.visible == false`.
-func pointInEntity(world: view UiWorld, entity: view EntityId, x: view Float, y: view Float) ret Bool {
+func pointInEntity(
+  world: view UiWorld
+  entity: view EntityId
+  x: view Float
+  y: view Float
+) ret Bool {
   if componentHas(this: world.worldTransforms, entity: entity) is false {
     ret false
   }
@@ -68,7 +74,9 @@ func pointInEntity(world: view UiWorld, entity: view EntityId, x: view Float, y:
   }
   let wt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: entity)
   var wv: WorldVisual = { alpha: 1.0, visible: true }
-  if componentHas(this: world.worldVisuals, entity: entity) { wv = componentGet(this: world.worldVisuals, entity: entity) }
+  if componentHas(this: world.worldVisuals, entity: entity) {
+    wv = componentGet(this: world.worldVisuals, entity: entity)
+  }
   if wv.visible is false {
     ret false
   }
@@ -110,7 +118,12 @@ func pointInEntity(world: view UiWorld, entity: view EntityId, x: view Float, y:
 # the right answer is to track per-entity "subtree bounds" during
 # layout (union of own bounds + every descendant's bounds) and check
 # those — not the entity's own visual bounds.
-func hitTestEntity(world: view UiWorld, entity: view EntityId, x: view Float, y: view Float) ret EntityId {
+func hitTestEntity(
+  world: view UiWorld
+  entity: view EntityId
+  x: view Float
+  y: view Float
+) ret EntityId {
   unsafe {
     # Children first, in reverse declaration order — visually-topmost
     # child wins. Recurse regardless of own bounds (see comment above).
@@ -120,7 +133,12 @@ func hitTestEntity(world: view UiWorld, entity: view EntityId, x: view Float, y:
       var i: Int = n - 1
       loop i >= 0 {
         let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
-        let hit: EntityId = hitTestEntity(world: world, entity: cid, x: x, y: y)
+        let hit: EntityId = hitTestEntity(
+          world: world
+          entity: cid
+          x: x
+          y: y
+        )
         if isNone(this: hit) is false {
           ret hit
         }
@@ -134,7 +152,12 @@ func hitTestEntity(world: view UiWorld, entity: view EntityId, x: view Float, y:
     # marked invisible (inactive ancestor, hidden hero target during
     # a transition, etc.) won't fire.
     if componentHas(this: world.onClicks, entity: entity) {
-      if pointInEntity(world: world, entity: entity, x: x, y: y) {
+      if pointInEntity(
+        world: world
+        entity: entity
+        x: x
+        y: y
+      ) {
         ret entity
       }
     }
@@ -163,7 +186,12 @@ func hitTest(world: view UiWorld, x: view Float, y: view Float) ret EntityId {
     loop i >= 0 {
       let e: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: i)
       if componentHas(this: world.layerRoots, entity: e) is false {
-        let hit: EntityId = hitTestEntity(world: world, entity: e, x: x, y: y)
+        let hit: EntityId = hitTestEntity(
+          world: world
+          entity: e
+          x: x
+          y: y
+        )
         if isNone(this: hit) is false {
           ret hit
         }

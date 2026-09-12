@@ -15,7 +15,6 @@
 # 1582 adoption too, where history used the Julian calendar. For a sky control
 # that is the useful choice — a continuous rule with no ten-day hole in October
 # 1582 — but it means dates before 1582 are not what a historian would write.
-
 type CalendarDate {
   year: Int
   # 1..12 and 1..31. One-based because that is how a date is written and read;
@@ -58,17 +57,39 @@ func daysInMonth(year: view Int, month: view Int) ret Int {
 }
 
 func monthShortName(month: view Int) ret String {
-  if month is 1 { ret "Jan" }
-  if month is 2 { ret "Feb" }
-  if month is 3 { ret "Mar" }
-  if month is 4 { ret "Apr" }
-  if month is 5 { ret "May" }
-  if month is 6 { ret "Jun" }
-  if month is 7 { ret "Jul" }
-  if month is 8 { ret "Aug" }
-  if month is 9 { ret "Sep" }
-  if month is 10 { ret "Oct" }
-  if month is 11 { ret "Nov" }
+  if month is 1 {
+    ret "Jan"
+  }
+  if month is 2 {
+    ret "Feb"
+  }
+  if month is 3 {
+    ret "Mar"
+  }
+  if month is 4 {
+    ret "Apr"
+  }
+  if month is 5 {
+    ret "May"
+  }
+  if month is 6 {
+    ret "Jun"
+  }
+  if month is 7 {
+    ret "Jul"
+  }
+  if month is 8 {
+    ret "Aug"
+  }
+  if month is 9 {
+    ret "Sep"
+  }
+  if month is 10 {
+    ret "Oct"
+  }
+  if month is 11 {
+    ret "Nov"
+  }
   ret "Dec"
 }
 
@@ -99,12 +120,20 @@ func dateFromDayOfYear(year: view Int, dayOfYear: view Int) ret CalendarDate {
 
 func dayOfYearFromDate(date: view CalendarDate) ret Int {
   var month: Int = date.month
-  if month < 1 { month = 1 }
-  if month > 12 { month = 12 }
+  if month < 1 {
+    month = 1
+  }
+  if month > 12 {
+    month = 12
+  }
   var day: Int = date.day
-  if day < 1 { day = 1 }
+  if day < 1 {
+    day = 1
+  }
   let len: Int = daysInMonth(year: date.year, month: month)
-  if day > len { day = len }
+  if day > len {
+    day = len
+  }
   var total: Int = day
   var m: Int = 1
   loop m < month {

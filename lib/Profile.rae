@@ -28,8 +28,10 @@ import String
 const profMaxEvents: Int = 300000
 
 # Phase codes stored per event; mapped to Chrome Trace `ph` chars at write time.
-const profPhBegin: Int = 0    # "B"
-const profPhEnd: Int = 1      # "E"
+const profPhBegin: Int = 0  # "B"
+
+const profPhEnd: Int = 1  # "E"
+
 const profPhCounter: Int = 2  # "C"
 
 # The frame profiler as an App-owned resource (#764). Was a set of module-level
@@ -54,16 +56,22 @@ type Profiler {
 # reallocates them to the full cap. Owned by the App / the example's main.
 func createProfiler() pub ret Profiler {
   ret Profiler {
-    capturing: false, startNs: 0, endNs: 0, outPath: "rae_profile.json", dropped: false,
-    names: List.create(String, cap: 1),
-    phases: List.create(Int, cap: 1),
-    times: List.create(Int, cap: 1),
-    tids: List.create(Int, cap: 1),
+    capturing: false
+    startNs: 0
+    endNs: 0
+    outPath: "rae_profile.json"
+    dropped: false
+    names: List.create(String, cap: 1)
+    phases: List.create(Int, cap: 1)
+    times: List.create(Int, cap: 1)
+    tids: List.create(Int, cap: 1)
     values: List.create(Int, cap: 1)
   }
 }
 
-func capturing(profiler: view Profiler) pub ret Bool { ret profiler.capturing }
+func capturing(profiler: view Profiler) pub ret Bool {
+  ret profiler.capturing
+}
 
 # Begin a capture of `seconds`, writing to `outPath` when it ends. Reallocates the
 # event buffers up front so recording never allocates.
@@ -85,24 +93,37 @@ func startCapture(profiler: mod Profiler, seconds: view Float, outPath: view Str
 # Start a capture from the environment if RAE_PROFILE is set. Call once at startup.
 func maybeAutoStart(profiler: mod Profiler) pub {
   let flag: String = Sys.getEnv(name: "RAE_PROFILE")
-  if flag.length() is 0 { ret }
+  if flag.length() is 0 {
+    ret
+  }
   var seconds: Float = 20.0
   let secStr: String = Sys.getEnv(name: "RAE_PROFILE_SECONDS")
-  if secStr.length() > 0 { seconds = secStr.toFloat() }
+  if secStr.length() > 0 {
+    seconds = secStr.toFloat()
+  }
   var out: String = "rae_profile.json"
   let outEnv: String = Sys.getEnv(name: "RAE_PROFILE_OUT")
-  if outEnv.length() > 0 { out = "{outEnv}" }
+  if outEnv.length() > 0 {
+    out = "{outEnv}"
+  }
   startCapture(profiler: profiler, seconds: seconds, outPath: out)
 }
 
-func profRecord(profiler: mod Profiler, name: view String, ph: view Int, tsNs: view Int, tid: view Int, value: view Int) {
+func profRecord(
+  profiler: mod Profiler
+  name: view String
+  ph: view Int
+  tsNs: view Int
+  tid: view Int
+  value: view Int
+) {
   if profiler.names.length >= profMaxEvents {
     profiler.dropped = true
     ret
   }
   profiler.names.add(value: "{name}")
   profiler.phases.add(value: ph)
-  profiler.times.add(value: (tsNs - profiler.startNs) / 1000)   # ns -> microseconds
+  profiler.times.add(value: (tsNs - profiler.startNs) / 1000)  # ns -> microseconds
   profiler.tids.add(value: tid)
   profiler.values.add(value: value)
 }
@@ -111,33 +132,66 @@ func profRecord(profiler: mod Profiler, name: view String, ph: view Int, tsNs: v
 # capturing. Zones must be strictly nested (LIFO) — every zoneBegin needs a
 # matching zoneEnd, which the Chrome format relies on to build the flame graph.
 func zoneBegin(profiler: mod Profiler, name: view String) pub {
-  if profiler.capturing is false { ret }
-  profRecord(profiler: profiler, name: name, ph: profPhBegin, tsNs: nowNs(), tid: 0, value: 0)
+  if profiler.capturing is false {
+    ret
+  }
+  profRecord(
+    profiler: profiler
+    name: name
+    ph: profPhBegin
+    tsNs: nowNs()
+    tid: 0
+    value: 0
+  )
 }
 
 func zoneEnd(profiler: mod Profiler, name: view String) pub {
-  if profiler.capturing is false { ret }
-  profRecord(profiler: profiler, name: name, ph: profPhEnd, tsNs: nowNs(), tid: 0, value: 0)
+  if profiler.capturing is false {
+    ret
+  }
+  profRecord(
+    profiler: profiler
+    name: name
+    ph: profPhEnd
+    tsNs: nowNs()
+    tid: 0
+    value: 0
+  )
 }
 
 # A single-value time series (fps, draw count, RSS, caster count, …). Perfetto
 # plots these as a track you can overlay against the zones.
 func counter(profiler: mod Profiler, name: view String, value: view Int) pub {
-  if profiler.capturing is false { ret }
-  profRecord(profiler: profiler, name: name, ph: profPhCounter, tsNs: nowNs(), tid: 0, value: value)
+  if profiler.capturing is false {
+    ret
+  }
+  profRecord(
+    profiler: profiler
+    name: name
+    ph: profPhCounter
+    tsNs: nowNs()
+    tid: 0
+    value: value
+  )
 }
 
 # Call once per frame. Auto-stops and writes the trace when the capture window
 # elapses. Returns true on the frame it wrote the file.
 func tick(profiler: mod Profiler) pub ret Bool {
-  if profiler.capturing is false { ret false }
-  if nowNs() < profiler.endNs { ret false }
+  if profiler.capturing is false {
+    ret false
+  }
+  if nowNs() < profiler.endNs {
+    ret false
+  }
   ret profileStop(profiler: profiler)
 }
 
 # Stop early and write immediately. Returns true if the file was written.
 func profileStop(profiler: mod Profiler) pub ret Bool {
-  if profiler.capturing is false { ret false }
+  if profiler.capturing is false {
+    ret false
+  }
   profiler.capturing = false
   ret write(profiler: profiler, path: profiler.outPath)
 }
@@ -145,12 +199,20 @@ func profileStop(profiler: mod Profiler) pub ret Bool {
 # One trace event object. Literal JSON braces are `\{` / `\}`; `{expr}` is Rae
 # interpolation. Zone names here are static identifiers, so no JSON escaping of
 # the name is needed.
-func profFragment(name: view String, ph: view Int, ts: view Int, tid: view Int, value: view Int) ret String {
+func profFragment(
+  name: view String
+  ph: view Int
+  ts: view Int
+  tid: view Int
+  value: view Int
+) ret String {
   if ph is profPhCounter {
     ret "\{\"name\":\"{name}\",\"ph\":\"C\",\"ts\":{ts},\"pid\":1,\"tid\":{tid},\"args\":\{\"v\":{value}\}\}"
   }
   var phc: String = "B"
-  if ph is profPhEnd { phc = "E" }
+  if ph is profPhEnd {
+    phc = "E"
+  }
   ret "\{\"name\":\"{name}\",\"ph\":\"{phc}\",\"ts\":{ts},\"pid\":1,\"tid\":{tid}\}"
 }
 
@@ -161,17 +223,22 @@ func profFragment(name: view String, ph: view Int, ts: view Int, tid: view Int, 
 func joinBlocked(frags: view List(String), blockSize: view Int) ret String {
   unsafe {
     let n: Int = frags.length
-    if n is 0 { ret "" }
+    if n is 0 {
+      ret ""
+    }
     let blocks: List(String) = List.create(String, cap: n / blockSize + 2)
     var i: Int = 0
     loop i < n {
       var stop: Int = i + blockSize
-      if stop > n { stop = n }
+      if stop > n {
+        stop = n
+      }
       var block: String = rae_ext_rae_buf_get(V: String, buf: frags.data, index: i)
       var j: Int = i + 1
       loop j < stop {
         block = block.concat(other: ",").concat(
-          other: rae_ext_rae_buf_get(V: String, buf: frags.data, index: j))
+          other: rae_ext_rae_buf_get(V: String, buf: frags.data, index: j)
+        )
         j = j + 1
       }
       blocks.add(value: block)
@@ -187,7 +254,9 @@ func write(profiler: view Profiler, path: view String) ret Bool {
     let frags: List(String) = List.create(String, cap: n + 2)
     # Label the CPU track; a second thread_name for tid 1 (GPU) lands here once GPU
     # timestamp events exist (phase 2).
-    frags.add(value: "\{\"name\":\"thread_name\",\"ph\":\"M\",\"pid\":1,\"tid\":0,\"args\":\{\"name\":\"CPU main loop\"\}\}")
+    frags.add(
+      value: "\{\"name\":\"thread_name\",\"ph\":\"M\",\"pid\":1,\"tid\":0,\"args\":\{\"name\":\"CPU main loop\"\}\}"
+    )
     var i: Int = 0
     loop i < n {
       let nm: String = rae_ext_rae_buf_get(V: String, buf: profiler.names.data, index: i)
@@ -195,7 +264,13 @@ func write(profiler: view Profiler, path: view String) ret Bool {
       let ts: Int = rae_ext_rae_buf_get(V: Int, buf: profiler.times.data, index: i)
       let tid: Int = rae_ext_rae_buf_get(V: Int, buf: profiler.tids.data, index: i)
       let value: Int = rae_ext_rae_buf_get(V: Int, buf: profiler.values.data, index: i)
-      frags.add(value: profFragment(name: nm, ph: ph, ts: ts, tid: tid, value: value))
+      frags.add(value: profFragment(
+        name: nm
+        ph: ph
+        ts: ts
+        tid: tid
+        value: value
+      ))
       i = i + 1
     }
     let body: String = joinBlocked(frags: frags, blockSize: 256)

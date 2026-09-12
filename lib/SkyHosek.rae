@@ -27,10 +27,14 @@ const hosekDatasetPath: String = "lib/data/hosek_wilkie_rgb.json"
 
 # Dataset shape, fixed by the fit and not by us.
 const hosekTurbidities: Int = 10
+
 const hosekControlPoints: Int = 6
+
 const hosekCoefficients: Int = 9
+
 # One albedo block of coefficients: 10 turbidities x 6 control points x 9.
 const hosekAlbedoStride: Int = 540
+
 # One albedo block of radiances: 10 turbidities x 6 control points.
 const hosekRadAlbedoStride: Int = 60
 
@@ -70,17 +74,21 @@ type HosekSky {
 
 func emptyHosekChannel() ret HosekChannel {
   ret HosekChannel {
-    a: 0.0, b: 0.0, c: 0.0, d: 0.0, e: 0.0,
-    f: 0.0, g: 0.0, h: 0.0, i: 0.0, radiance: 0.0
+    a: 0.0
+    b: 0.0
+    c: 0.0
+    d: 0.0
+    e: 0.0
+    f: 0.0
+    g: 0.0
+    h: 0.0
+    i: 0.0
+    radiance: 0.0
   }
 }
 
 func emptyHosekSky() ret HosekSky {
-  ret HosekSky {
-    r: emptyHosekChannel()
-    g: emptyHosekChannel()
-    b: emptyHosekChannel()
-  }
+  ret HosekSky { r: emptyHosekChannel(), g: emptyHosekChannel(), b: emptyHosekChannel() }
 }
 
 func emptyHosekDataset() ret HosekDataset {
@@ -94,8 +102,12 @@ func emptyHosekDataset() ret HosekDataset {
   let rB: List(Float) = List.create(Float, cap: 0)
   ret HosekDataset {
     loaded: false
-    coeffR: cR, coeffG: cG, coeffB: cB
-    radR: rR, radG: rG, radB: rB
+    coeffR: cR
+    coeffG: cG
+    coeffB: cB
+    radR: rR
+    radG: rG
+    radB: rB
   }
 }
 
@@ -112,7 +124,12 @@ func readNumberArray(doc: view JsonDoc, arr: view JsonValue) ret List(Float) {
 }
 
 # One channel out of a "coefficients"/"radiances" array of three.
-func readChannel(doc: view JsonDoc, root: view JsonValue, key: view String, channel: view Int) ret List(Float) {
+func readChannel(
+  doc: view JsonDoc
+  root: view JsonValue
+  key: view String
+  channel: view Int
+) ret List(Float) {
   let empty: List(Float) = List.create(Float, cap: 0)
   let idx: Int = field(doc: doc, this: root, key: key)
   if idx < 0 {
@@ -143,12 +160,42 @@ func loadHosekDataset(path: view String) pub ret HosekDataset {
     }
     let doc: JsonDoc = parseJson(source: raw)
     let root: JsonValue = root(doc: doc)
-    let cR: List(Float) = readChannel(doc: doc, root: root, key: "coefficients", channel: 0)
-    let cG: List(Float) = readChannel(doc: doc, root: root, key: "coefficients", channel: 1)
-    let cB: List(Float) = readChannel(doc: doc, root: root, key: "coefficients", channel: 2)
-    let rR: List(Float) = readChannel(doc: doc, root: root, key: "radiances", channel: 0)
-    let rG: List(Float) = readChannel(doc: doc, root: root, key: "radiances", channel: 1)
-    let rB: List(Float) = readChannel(doc: doc, root: root, key: "radiances", channel: 2)
+    let cR: List(Float) = readChannel(
+      doc: doc
+      root: root
+      key: "coefficients"
+      channel: 0
+    )
+    let cG: List(Float) = readChannel(
+      doc: doc
+      root: root
+      key: "coefficients"
+      channel: 1
+    )
+    let cB: List(Float) = readChannel(
+      doc: doc
+      root: root
+      key: "coefficients"
+      channel: 2
+    )
+    let rR: List(Float) = readChannel(
+      doc: doc
+      root: root
+      key: "radiances"
+      channel: 0
+    )
+    let rG: List(Float) = readChannel(
+      doc: doc
+      root: root
+      key: "radiances"
+      channel: 1
+    )
+    let rB: List(Float) = readChannel(
+      doc: doc
+      root: root
+      key: "radiances"
+      channel: 2
+    )
     # Sizes are fixed by the fit: 2 albedos x 10 turbidities x 6 control points,
     # times 9 coefficients. A short array means a truncated or wrong file, and
     # cooking from one would read past the end.
@@ -160,8 +207,12 @@ func loadHosekDataset(path: view String) pub ret HosekDataset {
     }
     ret HosekDataset {
       loaded: true
-      coeffR: cR, coeffG: cG, coeffB: cB
-      radR: rR, radG: rG, radB: rB
+      coeffR: cR
+      coeffG: cG
+      coeffB: cB
+      radR: rR
+      radG: rG
+      radB: rB
     }
   }
 }
@@ -193,8 +244,12 @@ type HosekBezier {
 
 func hosekBezierWeights(solarElevationRad: view Float) ret HosekBezier {
   var frac: Float = solarElevationRad / (pi / 2.0)
-  if frac < 0.0 { frac = 0.0 }
-  if frac > 1.0 { frac = 1.0 }
+  if frac < 0.0 {
+    frac = 0.0
+  }
+  if frac > 1.0 {
+    frac = 1.0
+  }
   let s: Float = pow(x: frac, y: 1.0 / 3.0)
   let s1: Float = 1.0 - s
   ret HosekBezier {
@@ -207,13 +262,17 @@ func hosekBezierWeights(solarElevationRad: view Float) ret HosekBezier {
   }
 }
 
-func bezierAt(table: view List(Float), base: view Int, stride: view Int, w: view HosekBezier) ret Float {
-  ret w.w0 * table.copyAt(index: base)
-   + w.w1 * table.copyAt(index: base + stride)
-   + w.w2 * table.copyAt(index: base + stride * 2)
-   + w.w3 * table.copyAt(index: base + stride * 3)
-   + w.w4 * table.copyAt(index: base + stride * 4)
-   + w.w5 * table.copyAt(index: base + stride * 5)
+func bezierAt(
+  table: view List(Float)
+  base: view Int
+  stride: view Int
+  w: view HosekBezier
+) ret Float {
+  ret w.w0 * table.copyAt(index: base) + w.w1 * table.copyAt(index: base + stride) + w.w2 * table.copyAt(
+    index: base + stride * 2
+  ) + w.w3 * table.copyAt(index: base + stride * 3) + w.w4 * table.copyAt(index: base + stride * 4) + w.w5 * table.copyAt(
+    index: base + stride * 5
+  )
 }
 
 # The four corners of the (albedo, turbidity) bilinear blend, as weights.
@@ -238,14 +297,22 @@ func hosekBlend(turbidity: view Float, albedo: view Float) ret HosekBlend {
     frac = 1.0
   }
   var alb: Float = albedo
-  if alb < 0.0 { alb = 0.0 }
-  if alb > 1.0 { alb = 1.0 }
+  if alb < 0.0 {
+    alb = 0.0
+  }
+  if alb > 1.0 {
+    alb = 1.0
+  }
   ret HosekBlend { turbLo: lo, turbFrac: frac, albedo: alb }
 }
 
-func hosekCookChannel(coeffs: view List(Float), rads: view List(Float),
-                      turbidity: view Float, albedo: view Float,
-                      solarElevationRad: view Float) ret HosekChannel {
+func hosekCookChannel(
+  coeffs: view List(Float)
+  rads: view List(Float)
+  turbidity: view Float
+  albedo: view Float
+  solarElevationRad: view Float
+) ret HosekChannel {
   let w: HosekBezier = hosekBezierWeights(solarElevationRad: solarElevationRad)
   let bl: HosekBlend = hosekBlend(turbidity: turbidity, albedo: albedo)
 
@@ -265,10 +332,27 @@ func hosekCookChannel(coeffs: view List(Float), rads: view List(Float),
   loop i < hosekCoefficients {
     # Within a turbidity block the six control points are 9 apart, because the
     # nine coefficients are interleaved.
-    let v: Float = wLoLo * bezierAt(table: coeffs, base: cLoLo + i, stride: 9, w: w)
-      + wLoHi * bezierAt(table: coeffs, base: cLoHi + i, stride: 9, w: w)
-      + wHiLo * bezierAt(table: coeffs, base: cHiLo + i, stride: 9, w: w)
-      + wHiHi * bezierAt(table: coeffs, base: cHiHi + i, stride: 9, w: w)
+    let v: Float = wLoLo * bezierAt(
+      table: coeffs
+      base: cLoLo + i
+      stride: 9
+      w: w
+    ) + wLoHi * bezierAt(
+      table: coeffs
+      base: cLoHi + i
+      stride: 9
+      w: w
+    ) + wHiLo * bezierAt(
+      table: coeffs
+      base: cHiLo + i
+      stride: 9
+      w: w
+    ) + wHiHi * bezierAt(
+      table: coeffs
+      base: cHiHi + i
+      stride: 9
+      w: w
+    )
     out.add(value: v)
     i = i + 1
   }
@@ -278,10 +362,27 @@ func hosekCookChannel(coeffs: view List(Float), rads: view List(Float),
   let rLoHi: Int = bl.turbLo * hosekControlPoints
   let rHiLo: Int = hosekRadAlbedoStride + rLoLo
   let rHiHi: Int = hosekRadAlbedoStride + rLoHi
-  let radiance: Float = wLoLo * bezierAt(table: rads, base: rLoLo, stride: 1, w: w)
-    + wLoHi * bezierAt(table: rads, base: rLoHi, stride: 1, w: w)
-    + wHiLo * bezierAt(table: rads, base: rHiLo, stride: 1, w: w)
-    + wHiHi * bezierAt(table: rads, base: rHiHi, stride: 1, w: w)
+  let radiance: Float = wLoLo * bezierAt(
+    table: rads
+    base: rLoLo
+    stride: 1
+    w: w
+  ) + wLoHi * bezierAt(
+    table: rads
+    base: rLoHi
+    stride: 1
+    w: w
+  ) + wHiLo * bezierAt(
+    table: rads
+    base: rHiLo
+    stride: 1
+    w: w
+  ) + wHiHi * bezierAt(
+    table: rads
+    base: rHiHi
+    stride: 1
+    w: w
+  )
 
   ret HosekChannel {
     a: out.copyAt(index: 0)
@@ -299,15 +400,37 @@ func hosekCookChannel(coeffs: view List(Float), rads: view List(Float),
 
 # Cook the table for one sky. Call when turbidity / albedo / sun elevation
 # change, not per frame.
-func createHosekSky(data: view HosekDataset, turbidity: view Float,
-                    albedo: view Float, solarElevationRad: view Float) pub ret HosekSky {
+func createHosekSky(
+  data: view HosekDataset
+  turbidity: view Float
+  albedo: view Float
+  solarElevationRad: view Float
+) pub ret HosekSky {
   if data.loaded is false {
     ret emptyHosekSky()
   }
   ret HosekSky {
-    r: hosekCookChannel(coeffs: data.coeffR, rads: data.radR, turbidity: turbidity, albedo: albedo, solarElevationRad: solarElevationRad)
-    g: hosekCookChannel(coeffs: data.coeffG, rads: data.radG, turbidity: turbidity, albedo: albedo, solarElevationRad: solarElevationRad)
-    b: hosekCookChannel(coeffs: data.coeffB, rads: data.radB, turbidity: turbidity, albedo: albedo, solarElevationRad: solarElevationRad)
+    r: hosekCookChannel(
+      coeffs: data.coeffR
+      rads: data.radR
+      turbidity: turbidity
+      albedo: albedo
+      solarElevationRad: solarElevationRad
+    )
+    g: hosekCookChannel(
+      coeffs: data.coeffG
+      rads: data.radG
+      turbidity: turbidity
+      albedo: albedo
+      solarElevationRad: solarElevationRad
+    )
+    b: hosekCookChannel(
+      coeffs: data.coeffB
+      rads: data.radB
+      turbidity: turbidity
+      albedo: albedo
+      solarElevationRad: solarElevationRad
+    )
   }
 }
 
@@ -316,7 +439,11 @@ func createHosekSky(data: view HosekDataset, turbidity: view Float,
 #   gamma — angle between the view direction and the sun
 # The `cos(theta) + 0.01` guard is the model's own: at the horizon cos(theta)
 # reaches 0 and the widening term would divide by zero.
-func hosekChannelRadiance(c: view HosekChannel, theta: view Float, gamma: view Float) pub ret Float {
+func hosekChannelRadiance(
+  c: view HosekChannel
+  theta: view Float
+  gamma: view Float
+) pub ret Float {
   let cosGamma: Float = cos(x: gamma)
   let cosTheta: Float = cos(x: theta)
   let expM: Float = exp(x: c.e * gamma)
@@ -339,19 +466,28 @@ func hosekChannelRadiance(c: view HosekChannel, theta: view Float, gamma: view F
 # come out in consistent units. Z is up.
 func hosekRadiance(sky: view HosekSky, dir: view Vec3, sunDir: view Vec3) pub ret Vec3 {
   var cosTheta: Float = dir.z
-  if cosTheta > 1.0 { cosTheta = 1.0 }
-  if cosTheta < 0.0 - 1.0 { cosTheta = 0.0 - 1.0 }
+  if cosTheta > 1.0 {
+    cosTheta = 1.0
+  }
+  if cosTheta < 0.0 - 1.0 {
+    cosTheta = 0.0 - 1.0
+  }
   let theta: Float = acos(x: cosTheta)
 
   var cosGamma: Float = dir.x * sunDir.x + dir.y * sunDir.y + dir.z * sunDir.z
-  if cosGamma > 1.0 { cosGamma = 1.0 }
-  if cosGamma < 0.0 - 1.0 { cosGamma = 0.0 - 1.0 }
+  if cosGamma > 1.0 {
+    cosGamma = 1.0
+  }
+  if cosGamma < 0.0 - 1.0 {
+    cosGamma = 0.0 - 1.0
+  }
   let gamma: Float = acos(x: cosGamma)
 
   ret Vec3.create(
     x: hosekChannelRadiance(c: sky.r, theta: theta, gamma: gamma) * sky.r.radiance
     y: hosekChannelRadiance(c: sky.g, theta: theta, gamma: gamma) * sky.g.radiance
-    z: hosekChannelRadiance(c: sky.b, theta: theta, gamma: gamma) * sky.b.radiance)
+    z: hosekChannelRadiance(c: sky.b, theta: theta, gamma: gamma) * sky.b.radiance
+  )
 }
 
 # Solar elevation from a sun direction, clamped just above the horizon: the fit
@@ -363,7 +499,11 @@ func hosekRadiance(sky: view HosekSky, dir: view Vec3, sunDir: view Vec3) pub re
 # of the real one, which renders as a plausible sky at the wrong time of day.
 func sunElevationRad(sunDir: view Vec3) pub ret Float {
   var z: Float = 0.0 - sunDir.z
-  if z > 1.0 { z = 1.0 }
-  if z < 0.0001 { z = 0.0001 }
+  if z > 1.0 {
+    z = 1.0
+  }
+  if z < 0.0001 {
+    z = 0.0001
+  }
   ret asin(x: z)
 }

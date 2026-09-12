@@ -33,9 +33,11 @@ type NetPlayer {
 # earlier leave is recycled with a bumped generation.
 func netJoin(world: mod GameWorld, remoteId: view Int, role: view Int) ret EntityId {
   let entity: EntityId = gameWorldAddEntity(world: world)
-  componentSet(this: world.netPlayers, entity: entity, data: NetPlayer {
-    remoteId: remoteId, role: role, controlled: noEntity()
-  })
+  componentSet(
+    this: world.netPlayers
+    entity: entity
+    data: NetPlayer { remoteId: remoteId, role: role, controlled: noEntity() }
+  )
   ret entity
 }
 
@@ -87,9 +89,12 @@ func seamSelfTest(world: mod GameWorld) {
   let departedDead: Bool = allocatorIsAlive(this: world.allocator, entity: b) is false
   let netOk: Bool = recycledIndex and bumpedGeneration and departedDead
 
-  let body: EntityId = spawnPhysicsBody(world: world,
-    position: Vec3.create(x: 0.0, y: 0.0, z: 10.0),
-    velocity: Vec3.create(x: 1.0, y: 0.0, z: 0.0), gravityScale: 1.0)
+  let body: EntityId = spawnPhysicsBody(
+    world: world
+    position: Vec3.create(x: 0.0, y: 0.0, z: 10.0)
+    velocity: Vec3.create(x: 1.0, y: 0.0, z: 0.0)
+    gravityScale: 1.0
+  )
   let before: Transform3D = componentGet(this: world.transforms, entity: body)
   physicsStepWorld(world: world, fixedDt: 0.1)
   let after: Transform3D = componentGet(this: world.transforms, entity: body)
@@ -100,5 +105,7 @@ func seamSelfTest(world: mod GameWorld) {
   netLeave(world: world, entity: c)
   netLeave(world: world, entity: d)
   despawnPhysicsBody(world: world, entity: body)
-  log("[seamtest] net recycle idx={b.index} gen {b.generation}->{d.generation} netOk={netOk} physicsOk={physicsOk}")
+  log(
+    "[seamtest] net recycle idx={b.index} gen {b.generation}->{d.generation} netOk={netOk} physicsOk={physicsOk}"
+  )
 }

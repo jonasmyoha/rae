@@ -31,7 +31,12 @@ open ecs/Query
 # The G-buffer metaball draw for a single cluster: pack its spheres (position +
 # scale.x) and per-ball baseColor, take metallic/roughness/emission/smoothing
 # from the cluster HEAD (its first sphere in query = list order), and raymarch.
-func renderSdfClusterGbuffer(T: type, world: view World3d, clusterTable: view ComponentTable(T), camera: view Camera3d) {
+func renderSdfClusterGbuffer(
+  T: type
+  world: view World3d
+  clusterTable: view ComponentTable(T)
+  camera: view Camera3d
+) {
   let matches: List(Query2Match) = tagged(dataTable: world.sdfs, tagTable: clusterTable)
   if matches.length is 0 {
     ret
@@ -42,8 +47,11 @@ func renderSdfClusterGbuffer(T: type, world: view World3d, clusterTable: view Co
   var haveHead: Bool = false
   var headSmoothing: Float = 0.0
   var headMaterial: Material3d = {
-    baseColor: { x: 0.0, y: 0.0, z: 0.0 }, metallic: 0.0, roughness: 1.0,
-    emission: { x: 0.0, y: 0.0, z: 0.0 }, toon: false
+    baseColor: { x: 0.0, y: 0.0, z: 0.0 }
+    metallic: 0.0
+    roughness: 1.0
+    emission: { x: 0.0, y: 0.0, z: 0.0 }
+    toon: false
   }
   loop let hit: view Query2Match in matches {
     let sdf: SdfPrimitive = componentGet(this: world.sdfs, entity: hit.entity)
@@ -68,11 +76,18 @@ func renderSdfClusterGbuffer(T: type, world: view World3d, clusterTable: view Co
   }
   if ballCount > 0 {
     Gbuffer.drawMetaballs(
-      packedBalls: packed.data, count: ballCount,
-      packedColors: colors.data, smoothing: headSmoothing,
-      camX: camera.position.x, camY: camera.position.y, camZ: camera.position.z,
-      metallic: headMaterial.metallic, roughness: headMaterial.roughness,
-      emR: headMaterial.emission.x, emG: headMaterial.emission.y, emB: headMaterial.emission.z
+      packedBalls: packed.data
+      count: ballCount
+      packedColors: colors.data
+      smoothing: headSmoothing
+      camX: camera.position.x
+      camY: camera.position.y
+      camZ: camera.position.z
+      metallic: headMaterial.metallic
+      roughness: headMaterial.roughness
+      emR: headMaterial.emission.x
+      emG: headMaterial.emission.y
+      emB: headMaterial.emission.z
     )
   }
 }

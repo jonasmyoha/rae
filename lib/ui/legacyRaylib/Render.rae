@@ -32,6 +32,7 @@ import ui/AnimationSystem/AnimationSystem
 open ecs/ComponentTable
 open Gpu2dCanvas
 open ui/legacyRaylib/RenderText
+
 # Default text font slot; matches `loadFontInto(slot: 0, ...)`.
 let defaultFontSlot: Int = 0
 
@@ -51,7 +52,9 @@ func alpha255(world: view UiWorld, entity: view EntityId) ret Int {
   }
   let wt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: entity)
   var wv: WorldVisual = { alpha: 1.0, visible: true }
-  if componentHas(this: world.worldVisuals, entity: entity) { wv = componentGet(this: world.worldVisuals, entity: entity) }
+  if componentHas(this: world.worldVisuals, entity: entity) {
+    wv = componentGet(this: world.worldVisuals, entity: entity)
+  }
   var a: Float = wv.alpha
   if a < 0.0 {
     a = 0.0
@@ -78,18 +81,43 @@ func chainRgba(color: view RgbaColor, chain255: view Int) ret RgbaColor {
 # Paint Shape variants on `entity` using the world transform / size
 # already on it. Caller has already verified visibility + alpha > 0.
 # Drawing goes through the backend-agnostic sink (lib/ui/draw.rae).
-func paintShape(backend: view UiBackend, canvas: mod Gpu2dCanvas, world: view UiWorld, entity: view EntityId, wt: view WorldTransform2D, cr: view ComputedRect, chain255: view Int) {
+func paintShape(
+  backend: view UiBackend
+  canvas: mod Gpu2dCanvas
+  world: view UiWorld
+  entity: view EntityId
+  wt: view WorldTransform2D
+  cr: view ComputedRect
+  chain255: view Int
+) {
   let sh: Shape = componentGet(this: world.shapes, entity: entity)
   let fill: RgbaColor = chainRgba(color: sh.fill, chain255: chain255)
 
   if sh.kind is ShapeKind.rect {
-    sinkRect(backend: backend, canvas: canvas, x: wt.position.x, y: wt.position.y, w: cr.size.x, h: cr.size.y, color: fill)
+    sinkRect(
+      backend: backend
+      canvas: canvas
+      x: wt.position.x
+      y: wt.position.y
+      w: cr.size.x
+      h: cr.size.y
+      color: fill
+    )
     ret
   }
   if sh.kind is ShapeKind.roundedRect {
     # `Shape.radius` is in pixels; the sink clamps it and converts to
     # raylib's fraction-of-smaller-side roundness.
-    sinkRoundedRect(backend: backend, canvas: canvas, x: wt.position.x, y: wt.position.y, w: cr.size.x, h: cr.size.y, radius: sh.radius, color: fill)
+    sinkRoundedRect(
+      backend: backend
+      canvas: canvas
+      x: wt.position.x
+      y: wt.position.y
+      w: cr.size.x
+      h: cr.size.y
+      radius: sh.radius
+      color: fill
+    )
     ret
   }
   if sh.kind is ShapeKind.circle {
@@ -105,12 +133,26 @@ func paintShape(backend: view UiBackend, canvas: mod Gpu2dCanvas, world: view Ui
     }
     let cx: Float = wt.position.x + (cr.size.x / 2.0)
     let cy: Float = wt.position.y + (cr.size.y / 2.0)
-    sinkCircle(backend: backend, canvas: canvas, cx: cx, cy: cy, r: r, color: fill)
+    sinkCircle(
+      backend: backend
+      canvas: canvas
+      cx: cx
+      cy: cy
+      r: r
+      color: fill
+    )
     ret
   }
 }
 
-func paintSprite(reg: view TextureRegistry, world: view UiWorld, entity: view EntityId, wt: view WorldTransform2D, cr: view ComputedRect, chain255: view Int) {
+func paintSprite(
+  reg: view TextureRegistry
+  world: view UiWorld
+  entity: view EntityId
+  wt: view WorldTransform2D
+  cr: view ComputedRect
+  chain255: view Int
+) {
   unsafe {
     let sp: view Sprite => componentView(this: world.sprites, entity: entity)
     let key: String = sp.textureKey
@@ -138,10 +180,23 @@ func paintSprite(reg: view TextureRegistry, world: view UiWorld, entity: view En
       # like 0xE037 aren't in the default font — measuring there would
       # return the notdef width and the icon would land off-center.
       let fontSize: Float = smaller
-      let glyphW: Int = measureTextWithFont(slot: iconFontSlot, text: glyph, fontSize: fontSize, spacing: 0.0)
+      let glyphW: Int = measureTextWithFont(
+        slot: iconFontSlot
+        text: glyph
+        fontSize: fontSize
+        spacing: 0.0
+      )
       let centerOffsetX: Float = (cr.size.x - glyphW.toFloat()) / 2.0
       let centerOffsetY: Float = (cr.size.y - fontSize) / 2.0
-      drawTextWithFont(slot: iconFontSlot, text: glyph, x: wt.position.x + centerOffsetX, y: wt.position.y + centerOffsetY, fontSize: fontSize, spacing: 0.0, color: tint)
+      drawTextWithFont(
+        slot: iconFontSlot
+        text: glyph
+        x: wt.position.x + centerOffsetX
+        y: wt.position.y + centerOffsetY
+        fontSize: fontSize
+        spacing: 0.0
+        color: tint
+      )
       ret
     }
 
@@ -212,7 +267,14 @@ func paintSprite(reg: view TextureRegistry, world: view UiWorld, entity: view En
 # texture and points the BackdropImage at the key. Silently no-ops
 # when the texture key isn't registered (first-frame race before the
 # host's first capture lands).
-func paintBackdropImage(reg: view TextureRegistry, world: view UiWorld, entity: view EntityId, wt: view WorldTransform2D, cr: view ComputedRect, chain255: view Int) {
+func paintBackdropImage(
+  reg: view TextureRegistry
+  world: view UiWorld
+  entity: view EntityId
+  wt: view WorldTransform2D
+  cr: view ComputedRect
+  chain255: view Int
+) {
   unsafe {
     let bi: BackdropImage = componentGet(this: world.backdropImages, entity: entity)
     let key: String = bi.textureKey
@@ -255,7 +317,13 @@ func paintBackdropImage(reg: view TextureRegistry, world: view UiWorld, entity: 
 # the entity's CornerRadius if present (defaults to 0 = sharp). Same
 # inherited-alpha multiplication as `paintShape` so opacity chains
 # work the same way.
-func paintGradientFill(world: view UiWorld, entity: view EntityId, wt: view WorldTransform2D, cr: view ComputedRect, chain255: view Int) {
+func paintGradientFill(
+  world: view UiWorld
+  entity: view EntityId
+  wt: view WorldTransform2D
+  cr: view ComputedRect
+  chain255: view Int
+) {
   unsafe {
     let gf: view GradientFill => componentView(this: world.gradientFills, entity: entity)
     var radius: Float = 0.0
@@ -288,13 +356,20 @@ func paintGradientFill(world: view UiWorld, entity: view EntityId, wt: view Worl
 # text/sprites layer on top of Shape backgrounds correctly when an
 # entity carries multiple visual components (e.g. a button background
 # + label).
-func paintEntity(backend: view UiBackend, world: view UiWorld, reg: mod TextureRegistry, entity: view EntityId) {
+func paintEntity(
+  backend: view UiBackend
+  world: view UiWorld
+  reg: mod TextureRegistry
+  entity: view EntityId
+) {
   if componentHas(this: world.worldTransforms, entity: entity) is false {
     ret
   }
   let wt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: entity)
   var wv: WorldVisual = { alpha: 1.0, visible: true }
-  if componentHas(this: world.worldVisuals, entity: entity) { wv = componentGet(this: world.worldVisuals, entity: entity) }
+  if componentHas(this: world.worldVisuals, entity: entity) {
+    wv = componentGet(this: world.worldVisuals, entity: entity)
+  }
   if wv.visible is false {
     ret
   }
@@ -305,27 +380,65 @@ func paintEntity(backend: view UiBackend, world: view UiWorld, reg: mod TextureR
     ret
   }
   let cr: ComputedRect = componentGet(this: world.computedRects, entity: entity)
-  # Viewport cull: skip the paint (esp. text shaping) for entities fully off-screen — the big win for long scrolled lists (200+ rows). world.layoutW/H is the screen; 80px margin keeps edge shadows/partial rows.
-  if (wt.position.y + cr.size.y + 80.0 < 0.0) or (wt.position.y - 80.0 > world.layoutH) or (wt.position.x + cr.size.x + 80.0 < 0.0) or (wt.position.x - 80.0 > world.layoutW) { ret }
+  # Viewport cull: skip the paint (esp. text shaping) for entities fully off-screen — the big win
+  # for long scrolled lists (200+ rows). world.layoutW/H is the screen; 80px margin keeps edge
+  # shadows/partial rows.
+  if (wt.position.y + cr.size.y + 80.0 < 0.0) or (wt.position.y - 80.0 > world.layoutH) or (wt.position.x + cr.size.x + 80.0 < 0.0) or (wt.position.x - 80.0 > world.layoutW) {
+    ret
+  }
   let chain255: Int = alpha255(world: world, entity: entity)
 
   # GradientFill takes precedence over a solid Shape.fill (the gradient
   # shader does its own rounded-rect alpha mask off CornerRadius).
   if componentHas(this: world.gradientFills, entity: entity) {
-    paintGradientFill(world: world, entity: entity, wt: wt, cr: cr, chain255: chain255)
+    paintGradientFill(
+      world: world
+      entity: entity
+      wt: wt
+      cr: cr
+      chain255: chain255
+    )
   } else {
     if componentHas(this: world.shapes, entity: entity) {
-      paintShape(backend: backend, canvas: reg.canvas, world: world, entity: entity, wt: wt, cr: cr, chain255: chain255)
+      paintShape(
+        backend: backend
+        canvas: reg.canvas
+        world: world
+        entity: entity
+        wt: wt
+        cr: cr
+        chain255: chain255
+      )
     }
   }
   if componentHas(this: world.backdropImages, entity: entity) {
-    paintBackdropImage(reg: reg, world: world, entity: entity, wt: wt, cr: cr, chain255: chain255)
+    paintBackdropImage(
+      reg: reg
+      world: world
+      entity: entity
+      wt: wt
+      cr: cr
+      chain255: chain255
+    )
   }
   if componentHas(this: world.sprites, entity: entity) {
-    paintSprite(reg: reg, world: world, entity: entity, wt: wt, cr: cr, chain255: chain255)
+    paintSprite(
+      reg: reg
+      world: world
+      entity: entity
+      wt: wt
+      cr: cr
+      chain255: chain255
+    )
   }
   if componentHas(this: world.texts, entity: entity) {
-    paintText(world: world, entity: entity, wt: wt, cr: cr, chain255: chain255)
+    paintText(
+      world: world
+      entity: entity
+      wt: wt
+      cr: cr
+      chain255: chain255
+    )
   }
 }
 
@@ -335,9 +448,19 @@ func paintEntity(backend: view UiBackend, world: view UiWorld, reg: mod TextureR
 # Using the subtree max (not the child's own rank) lets a row that
 # contains the hovered tile float above sibling rows whose tiles
 # would otherwise overdraw the popped tile's vertical overflow.
-func paintSubtree(backend: view UiBackend, world: view UiWorld, reg: mod TextureRegistry, entity: view EntityId) {
+func paintSubtree(
+  backend: view UiBackend
+  world: view UiWorld
+  reg: mod TextureRegistry
+  entity: view EntityId
+) {
   unsafe {
-    paintEntity(backend: backend, world: world, reg: reg, entity: entity)
+    paintEntity(
+      backend: backend
+      world: world
+      reg: reg
+      entity: entity
+    )
     if componentHas(this: world.childrens, entity: entity) is false {
       ret
     }
@@ -349,7 +472,12 @@ func paintSubtree(backend: view UiBackend, world: view UiWorld, reg: mod Texture
       loop i < n {
         let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
         if subtreeHoverPaintRank(world: world, entity: cid) is pass {
-          paintSubtree(backend: backend, world: world, reg: reg, entity: cid)
+          paintSubtree(
+            backend: backend
+            world: world
+            reg: reg
+            entity: cid
+          )
         }
         i = i + 1
       }
@@ -369,7 +497,9 @@ func paintSubtree(backend: view UiBackend, world: view UiWorld, reg: mod Texture
 # need a different face load it manually before calling initRaeUi —
 # the call sees the slot is already populated and bails.
 let raeDefaultUiFontPath: String = "assets/Roboto-Regular.ttf"
+
 let raeDefaultUiFontSize: Int = 36
+
 let raeDefaultUiFontSlot: Int = 0
 
 # One-shot host-side setup for the rae UI layer. Call once at boot,
@@ -398,7 +528,13 @@ func renderSystem(backend: view UiBackend, world: view UiWorld, reg: mod Texture
   # top of page content.
   let allRangeLow: Int = 0 - 1000000
   let allRangeHi: Int = 1000000
-  systemLayerRange(backend: backend, world: world, reg: reg, minOrder: allRangeLow, maxOrder: allRangeHi)
+  systemLayerRange(
+    backend: backend
+    world: world
+    reg: reg
+    minOrder: allRangeLow
+    maxOrder: allRangeHi
+  )
 }
 
 # Same painter walk as `renderSystem` but only paints roots whose
@@ -407,7 +543,13 @@ func renderSystem(backend: view UiBackend, world: view UiWorld, reg: mod Texture
 # after content paints (layer 0..99) but before the dock paints
 # (layer 100+) so a `captureAndBlurRegion` doesn't include the very
 # overlay it's meant to sit behind.
-func systemLayerRange(backend: view UiBackend, world: view UiWorld, reg: view TextureRegistry, minOrder: view Int, maxOrder: view Int) pub {
+func systemLayerRange(
+  backend: view UiBackend
+  world: view UiWorld
+  reg: view TextureRegistry
+  minOrder: view Int
+  maxOrder: view Int
+) pub {
   unsafe {
     let roots: List(EntityId) = collectPaintableRoots(world: world)
     let m: Int = roots.length
@@ -418,7 +560,12 @@ func systemLayerRange(backend: view UiBackend, world: view UiWorld, reg: view Te
         let ord: Int = entityLayerOrder(world: world, entity: root)
         if ord >= minOrder {
           if ord < maxOrder {
-            paintSubtree(backend: backend, world: world, reg: reg, entity: root)
+            paintSubtree(
+              backend: backend
+              world: world
+              reg: reg
+              entity: root
+            )
           }
         }
       }
@@ -454,7 +601,9 @@ func debugClickRects(
         if componentHas(this: world.computedRects, entity: e) {
           let wt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: e)
           var wv: WorldVisual = { alpha: 1.0, visible: true }
-          if componentHas(this: world.worldVisuals, entity: e) { wv = componentGet(this: world.worldVisuals, entity: e) }
+          if componentHas(this: world.worldVisuals, entity: e) {
+            wv = componentGet(this: world.worldVisuals, entity: e)
+          }
           if wv.visible {
             let cr: ComputedRect = componentGet(this: world.computedRects, entity: e)
             var inside: Bool = true

@@ -6,10 +6,17 @@ open ecs/Query
 # forEach walks one table's whole dense set; the View accessors read a matched
 # component through a `view` ref WITHOUT bumping the table generation (unlike the
 # mutating queryModAt), so a read-only pass leaves change-detection untouched.
+type Position {
+  x: Int
+}
 
-type Position { x: Int }
-type Velocity { v: Int }
-type Tag { t: Int }
+type Velocity {
+  v: Int
+}
+
+type Tag {
+  t: Int
+}
 
 func main() {
   var pos: ComponentTable(Position) = ComponentTable.create(Position)

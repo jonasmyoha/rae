@@ -10,8 +10,11 @@ open ecs/hierarchySystem/HierarchySystem
 # Also covers insertChild (explicit ordering), the single-parent invariant on
 # reparent and on rebuild (duplicate healing), and depthOrder dirty-tracking on
 # the Children table.
-
-func printKids(childrens: view ComponentTable(Children), entity: view EntityId, label: view String) {
+func printKids(
+  childrens: view ComponentTable(Children)
+  entity: view EntityId
+  label: view String
+) {
   let kids: List(EntityId) = getChildren(childrens: childrens, parent: entity)
   var line: String = "{label}:"
   loop var i: Int = 0, i < kids.length, ++i {
@@ -51,11 +54,36 @@ func main() {
   let s5: EntityId = { index: 5, generation: 0 }
 
   # ----- 5 siblings, destroy sibling 2, rebuild Parent from Children -----
-  setParent(parents: parents, childrens: childrens, child: s1, parent: root)
-  setParent(parents: parents, childrens: childrens, child: s2, parent: root)
-  setParent(parents: parents, childrens: childrens, child: s3, parent: root)
-  setParent(parents: parents, childrens: childrens, child: s4, parent: root)
-  setParent(parents: parents, childrens: childrens, child: s5, parent: root)
+  setParent(
+    parents: parents
+    childrens: childrens
+    child: s1
+    parent: root
+  )
+  setParent(
+    parents: parents
+    childrens: childrens
+    child: s2
+    parent: root
+  )
+  setParent(
+    parents: parents
+    childrens: childrens
+    child: s3
+    parent: root
+  )
+  setParent(
+    parents: parents
+    childrens: childrens
+    child: s4
+    parent: root
+  )
+  setParent(
+    parents: parents
+    childrens: childrens
+    child: s5
+    parent: root
+  )
   printKids(childrens: childrens, entity: root, label: "siblings")
 
   detachForDestroy(parents: parents, childrens: childrens, entity: s2)
@@ -74,14 +102,32 @@ func main() {
   # ----- insertChild: explicit index, clamped -----
   let s6: EntityId = { index: 6, generation: 0 }
   let s7: EntityId = { index: 7, generation: 0 }
-  insertChild(parents: parents, childrens: childrens, parent: root, child: s6, index: 1)
-  insertChild(parents: parents, childrens: childrens, parent: root, child: s7, index: 99)
+  insertChild(
+    parents: parents
+    childrens: childrens
+    parent: root
+    child: s6
+    index: 1
+  )
+  insertChild(
+    parents: parents
+    childrens: childrens
+    parent: root
+    child: s7
+    index: 99
+  )
   printKids(childrens: childrens, entity: root, label: "after inserts")
   log("s6 parent: {parentIndex(parents: parents, child: s6)}")
 
   # ----- single parent on reparent via insertChild -----
   let other: EntityId = { index: 200, generation: 0 }
-  insertChild(parents: parents, childrens: childrens, parent: other, child: s3, index: 0)
+  insertChild(
+    parents: parents
+    childrens: childrens
+    parent: other
+    child: s3
+    index: 0
+  )
   printKids(childrens: childrens, entity: root, label: "root after s3 moved")
   printKids(childrens: childrens, entity: other, label: "other after s3 moved")
 
@@ -98,7 +144,13 @@ func main() {
   var ord: HierarchyOrder = createHierarchyOrder()
   let order1: view List(EntityId) => depthOrder(state: ord, parents: parents, childrens: childrens)
   printOrder(order: order1, label: "order")
-  insertChild(parents: parents, childrens: childrens, parent: root, child: s5, index: 0)
+  insertChild(
+    parents: parents
+    childrens: childrens
+    parent: root
+    child: s5
+    index: 0
+  )
   let order2: view List(EntityId) => depthOrder(state: ord, parents: parents, childrens: childrens)
   printOrder(order: order2, label: "order after move s5 first")
 }

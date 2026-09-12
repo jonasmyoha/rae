@@ -82,8 +82,12 @@ func uploadMeshData(mesh: view MeshData) ret MeshHandle {
 }
 
 func main() ret Int {
-  Gpu2d.initWindow(width: 1280, height: 800, title: "Rae 3D — Metaballs ({rendererPathName()} rendering)")
-  var canvas: Gpu2dCanvas = createGpu2dCanvas()   # #907: the app-owned 2D canvas (box + image passes)
+  Gpu2d.initWindow(
+    width: 1280
+    height: 800
+    title: "Rae 3D — Metaballs ({rendererPathName()} rendering)"
+  )
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()  # #907: the app-owned 2D canvas (box + image passes)
   # Remember where the user put the window, across restarts. Opt-in, and the
   # app picks the file: the hot-reload channel dir is per app, so two examples
   # running at once do not share one window position.
@@ -91,7 +95,9 @@ func main() ret Int {
   # app: a shared file name is a shared window, and this one used to open at
   # the mobile UI example's phone-shaped 599x1259.
   var windowGeom: WindowGeometry = createWindowGeometry(
-    dir: dir(), name: "window.{state112AppId}.geometry")
+    dir: dir()
+    name: "window.{state112AppId}.geometry"
+  )
   restoreWindowGeometry(g: windowGeom)
   # Design resolution tracks the window's LOGICAL size, so the transform is
   # identity: no letterbox bars, and fonts keep their authored point size
@@ -101,7 +107,12 @@ func main() ret Int {
   Gpu2d.setDesignResolution(width: extentW, height: extentH, fit: 0)
 
   let sphereData: MeshData = makeSphere(rings: 32, segments: 48)
-  let torusData: MeshData = makeTorus(majorR: 1.55, minorR: 0.42, majorSegs: 96, minorSegs: 40)
+  let torusData: MeshData = makeTorus(
+    majorR: 1.55
+    minorR: 0.42
+    majorSegs: 96
+    minorSegs: 40
+  )
   let planeData: MeshData = makePlane(size: 36.0, segments: 1)
   # Unit box, flat shaded (24 verts, not 8 — a shared corner cannot carry
   # three face normals). Scene 1 uses it for the voxel mountains and the
@@ -154,7 +165,11 @@ func main() ret Int {
   let light3: Light3d = asset3.light
   # The World3d stays owned by its asset (asset1.world) — copying it out would
   # double-free the component tables; every call passes asset1.world by ref.
-  log("[ecs] World3d: scene1 {world3dEntityCount(world: asset1.world)}, scene2 {world3dEntityCount(world: asset2.world)}, scene3 {world3dEntityCount(world: asset3.world)} entities (#737)")
+  log(
+    "[ecs] World3d: scene1 {world3dEntityCount(world: asset1.world)}, scene2 {world3dEntityCount(
+      world: asset2.world
+    )}, scene3 {world3dEntityCount(world: asset3.world)} entities (#737)"
+  )
   # #734: per-cluster marker tags, classified once from the (renderer-owned)
   # cluster field. The animators query these tag tables instead of an
   # `if sdf.cluster is N` ladder. Clusters never change, so build once here.
@@ -168,9 +183,12 @@ func main() ret Int {
   # theme's PALETTE into the active theme — the step that was missing
   # here and is why a slot-coloured component would otherwise render in
   # the built-in light palette.
-  let gpuUi: Gpu2dUi = loadUiAssets(dir: base, textFontName: "Roboto-Regular",
-                                    iconFontName: "MaterialIconsRound-Regular",
-                                    themeFile: "theme.raescene")
+  let gpuUi: Gpu2dUi = loadUiAssets(
+    dir: base
+    textFontName: "Roboto-Regular"
+    iconFontName: "MaterialIconsRound-Regular"
+    themeFile: "theme.raescene"
+  )
 
   var uiWorld: UiWorld = create()
   # #764: install the app's theme (palette + scene tokens) onto this world.
@@ -185,18 +203,32 @@ func main() ret Int {
   # the two hug to one height and resize together (lib/ui/CornerMenuButton).
   mountCornerMenuButton(world: uiWorld, res: gpuUi, hostNodeId: "CornerMenuSlot")
   mountCameraBar(world: uiWorld, res: gpuUi, hostNodeId: "CameraBarSlot")
-  anchorUiToExtent(world: uiWorld, res: gpuUi, w: extentW, h: extentH)
+  anchorUiToExtent(
+    world: uiWorld
+    res: gpuUi
+    w: extentW
+    h: extentH
+  )
   layoutSystem(world: uiWorld)
   transformSystem(world: uiWorld)
   visualBoundsSystem(world: uiWorld, res: gpuUi)
 
   # Diagnostic log overlay (lib/ui/LogOverlay.rae), bottom-left here and
   # top-left in the mobile UI example — same widget, different corner.
-  var logView: LogOverlay = createLogOverlay(capacity: 64, maxLines: 10, anchor: logAnchorBottomLeft, fontSize: 14.0)
+  var logView: LogOverlay = createLogOverlay(
+    capacity: 64
+    maxLines: 10
+    anchor: logAnchorBottomLeft
+    fontSize: 14.0
+  )
   # Shared debug instrumentation: amber button top right, fps/memory readouts
   # and the moving update indicator. One line to opt in per feature.
-  var dbg: DebugOverlay = createDebugOverlay(button: true, fps: true,
-                                             memory: true, heartbeat: true)
+  var dbg: DebugOverlay = createDebugOverlay(
+    button: true
+    fps: true
+    memory: true
+    heartbeat: true
+  )
   # This example PARKS when nothing moves, so "did real work" is the previous
   # frame's render decision — it is not known yet this early in the frame.
   var dbgDidWork: Bool = true
@@ -216,14 +248,19 @@ func main() ret Int {
   var uiState: DemoUiResource = createDemoUiResource()
   # The shared dialog (lib/app3d/settings_dialog). Three scenes here, so its
   # scene chooser is live; 113 mounts the same dialog with sceneCount 1.
-  var settings: SettingsState = createSettingsState(scene: uiState.activeScene, sceneCount: 3,
-                                                    speed: 1.0, toon: false, hour: 12.0,
-                                                    skyModel: SettingsSkyModel.preetham)
+  var settings: SettingsState = createSettingsState(
+    scene: uiState.activeScene
+    sceneCount: 3
+    speed: 1.0
+    toon: false
+    hour: 12.0
+    skyModel: SettingsSkyModel.preetham
+  )
   if mountSettingsDialog(world: uiWorld, res: gpuUi, hostNodeId: "SettingsDialogSlot") is false {
     logWarnLine(ov: logView, text: "settings dialog failed to mount")
   }
   settingsApplyToWorld(settingsState: settings, world: uiWorld)
-  setTaaEnabled(on: settings.taa)   # default FXAA; the settings pane toggles TAA
+  setTaaEnabled(on: settings.taa)  # default FXAA; the settings pane toggles TAA
   applySettingsPanelOpen(world: uiWorld, open: settings.open)
   # The legacy in-scene "Settings" button is superseded by the shared corner
   # menu button (#546 UI unification), so hide it — one settings affordance, the
@@ -244,20 +281,34 @@ func main() ret Int {
   # deterministic variant used for exact-frame captures, so it is precisely
   # the mode that must not inherit machine-local camera state — checking
   # only RAE_SDL_HEADLESS_MS left the stricter mode unguarded.
-  let headless: Bool = getEnv(name: "RAE_SDL_HEADLESS_MS").length() > 0
-    or getEnv(name: "RAE_HEADLESS_FRAMES").length() > 0
+  let headless: Bool = getEnv(name: "RAE_SDL_HEADLESS_MS").length() > 0 or getEnv(
+    name: "RAE_HEADLESS_FRAMES"
+  ).length() > 0
   if not headless {
     let savedState: String = readHotReloadStateFor(appId: state112AppId)
-    if restore112State(raw: savedState, ui: uiState, rig: cameraRig, camera: camera) {
+    if restore112State(
+      raw: savedState
+      ui: uiState
+      rig: cameraRig
+      camera: camera
+    ) {
       logInfoLine(ov: logView, text: "state restored: scene {uiState.activeScene}, camera kept")
     }
   }
 
   let testState: String = getEnv(name: "RAE_GPU3D_UI_TEST_STATE")
-  if testState is "pause" { uiState.paused = true }
-  if testState is "debug" { uiState.debugOpen = true }
-  if testState is "scene2" { uiState.activeScene = 2 }
-  if testState is "scene3" { uiState.activeScene = 3 }
+  if testState is "pause" {
+    uiState.paused = true
+  }
+  if testState is "debug" {
+    uiState.debugOpen = true
+  }
+  if testState is "scene2" {
+    uiState.activeScene = 2
+  }
+  if testState is "scene3" {
+    uiState.activeScene = 3
+  }
   if testState is "free" {
     toggleCameraRigMode(rig: cameraRig, camera: camera)
   }
@@ -274,7 +325,7 @@ func main() ret Int {
   # Epoch seconds must stay Float64 (see docs/primitive-types.md); only the
   # small per-frame delta is narrowed to Float.
   # Frame declared as a render graph with a load-preserving UI overlay.
-    # A REAL sky (#400): Preetham, from the same sun the scene is lit by,
+  # A REAL sky (#400): Preetham, from the same sun the scene is lit by,
   # so the visible sun and the shadows agree. Turbidity 2.5 is a clear
   # day. This example is the renderer's realistic end; 113 is the
   # stylised one, and they deliberately use different kinds behind the
@@ -284,9 +335,12 @@ func main() ret Int {
   let hosekData: HosekDataset = loadDefaultHosekDataset()
   let skyTurbidity: Float = 2.5
   let skyGroundAlbedo: Float = 0.25
-  var renderer: DeferredRenderer = createDeferredRendererWithUiSky(
-    sky: settingsBuildSky(settingsState: settings, data: hosekData,
-                          turbidity: skyTurbidity, groundAlbedo: skyGroundAlbedo))
+  var renderer: DeferredRenderer = createDeferredRendererWithUiSky(sky: settingsBuildSky(
+    settingsState: settings
+    data: hosekData
+    turbidity: skyTurbidity
+    groundAlbedo: skyGroundAlbedo
+  ))
   # The sun the sky was built for drives the shadows too, or the visible sun and
   # the cast shadows disagree.
   light.sunDir = settingsSunDir(settingsState: settings)
@@ -310,8 +364,11 @@ func main() ret Int {
   var lastSettingsScene: Int = settings.scene
   # The panel outgrew its space once the rendering toggles landed, so it
   # scrolls: wheel when the pointer is over it, drag anywhere inside it.
-  var panelScroll: EntityId = createScrollPanel(world: uiWorld, viewportId: "SidePanelBody",
-                                                contentId: "SidePanelContent")
+  var panelScroll: EntityId = createScrollPanel(
+    world: uiWorld
+    viewportId: "SidePanelBody"
+    contentId: "SidePanelContent"
+  )
   var renderedOnce: Bool = false
   var lastLogRevision: Int = 0 - 1
   # Once, not per frame: this is a gate assertion, not a readout.
@@ -354,7 +411,9 @@ func main() ret Int {
     #
     # Negative is still refused: that is a clock going backwards, not a long
     # frame, and no amount of honesty makes it meaningful.
-    if deltaTime < 0.0 { deltaTime = 0.0 }
+    if deltaTime < 0.0 {
+      deltaTime = 0.0
+    }
 
     # Re-anchor on resize. The window's logical size is the layout extent,
     # so a resize re-runs placement instead of rescaling a fixed canvas.
@@ -368,7 +427,12 @@ func main() ret Int {
         Gpu2d.setDesignResolution(width: extentW, height: extentH, fit: 0)
         uiWorld.layoutW = extentW
         uiWorld.layoutH = extentH
-        anchorUiToExtent(world: uiWorld, res: gpuUi, w: extentW, h: extentH)
+        anchorUiToExtent(
+          world: uiWorld
+          res: gpuUi
+          w: extentW
+          h: extentH
+        )
         extentChanged = true
       }
     }
@@ -379,8 +443,13 @@ func main() ret Int {
     let scrolled: Bool = updateScrollPanel(world: uiWorld, viewport: panelScroll, input: uiInput)
     # The debug button sits over the side panel, so a press it takes has to be
     # withdrawn from the UI world or the same click works the control beneath.
-    if updateDebugOverlay(debugOverlay: dbg, screenW: windowExtentW(), screenH: windowExtentH(),
-                          now: now, didRealWork: dbgDidWork) {
+    if updateDebugOverlay(
+      debugOverlay: dbg
+      screenW: windowExtentW()
+      screenH: windowExtentH()
+      now: now
+      didRealWork: dbgDidWork
+    ) {
       suppressUiPress(input: uiInput)
     }
     # Shared corner menu button, mounted beside the camera bar — its press is an
@@ -407,7 +476,12 @@ func main() ret Int {
       camera.target = Vec3.create(x: 0.0, y: 0.0, z: orbitFocusZ)
     }
     let hadUiEvents: Bool = uiInput.events.length > 0
-    dispatchUiActions(input: uiInput, state: uiState, rig: cameraRig, camera: camera)
+    dispatchUiActions(
+      input: uiInput
+      state: uiState
+      rig: cameraRig
+      camera: camera
+    )
     # The shared dialog sees every action and ignores what it does not own.
     var settingsChanged: Bool = false
     if menuTapped {
@@ -416,12 +490,17 @@ func main() ret Int {
     }
     var sa: Int = 0
     loop sa < uiActionCount(input: uiInput) {
-      if settingsHandleAction(settingsState: settings, actionId: uiActionAt(input: uiInput, index: sa)) {
+      if settingsHandleAction(
+        settingsState: settings
+        actionId: uiActionAt(input: uiInput, index: sa)
+      ) {
         settingsChanged = true
       }
       sa = sa + 1
     }
-    if settingsChanged { setTaaEnabled(on: settings.taa) }   # TAA opt-in; FXAA when off
+    if settingsChanged {
+      setTaaEnabled(on: settings.taa)  # TAA opt-in; FXAA when off
+    }
     if settingsUpdatePointer(settingsState: settings, world: uiWorld, input: uiInput) {
       settingsChanged = true
     }
@@ -462,8 +541,12 @@ func main() ret Int {
       # Assigned on the local rather than through setRendererSky: writing a
       # nested struct field through a `mod` parameter does not reliably land,
       # and the failure is silent (see renderer_deferred's note).
-      renderer.sky = settingsBuildSky(settingsState: settings, data: hosekData,
-                                      turbidity: skyTurbidity, groundAlbedo: skyGroundAlbedo)
+      renderer.sky = settingsBuildSky(
+        settingsState: settings
+        data: hosekData
+        turbidity: skyTurbidity
+        groundAlbedo: skyGroundAlbedo
+      )
       light.sunDir = settingsSunDir(settingsState: settings)
       light.sunColor = settingsSunColor(settingsState: settings)
       # Pause is the shared control now; uiState still owns the flag the rest
@@ -492,7 +575,12 @@ func main() ret Int {
     # all. `cameraMoved` already forces a redraw, so the idle wait-loop
     # still wakes for it.
     let cameraInput: Bool = uiPointerCaptured(input: uiInput) is false
-    let cameraMoved: Bool = updateCameraRig(rig: cameraRig, camera: camera, allowInput: cameraInput, deltaTime: deltaTime)
+    let cameraMoved: Bool = updateCameraRig(
+      rig: cameraRig
+      camera: camera
+      allowInput: cameraInput
+      deltaTime: deltaTime
+    )
 
     # The frame is only worth drawing if something it depends on changed.
     # While paused the 3D scene is frozen, so the presented image is still
@@ -508,35 +596,42 @@ func main() ret Int {
       lastSavedScene = uiState.activeScene
     }
     let logChanged: Bool = logView.revision is not lastLogRevision
-    var needsRender: Bool = sceneAnimating or cameraMoved or uiLayoutDirty
-      or extentChanged or hadUiEvents or logChanged
-      or timeAnimating or scrolled or renderedOnce is false
-    if taaSettleFrames > 0 { needsRender = true }
+    var needsRender: Bool = sceneAnimating or cameraMoved or uiLayoutDirty or extentChanged or hadUiEvents or logChanged or timeAnimating or scrolled or renderedOnce is false
+    if taaSettleFrames > 0 {
+      needsRender = true
+    }
     dbgDidWork = needsRender
     if Gpu2d.shouldRenderFrame(appNeedsRender: needsRender) is false {
       # Nothing to draw: park until the OS has something to say, or until
       # the readout heartbeat is due. Shared policy from
       # lib/ui/eventLoop.rae rather than a hardcoded timeout.
       let idleTimeout: Float = nextWaitTimeoutSec(
-        animating: false, mouseDown: false, pollWatcher: false,
-        frameSec: 0.016667, heartbeatSec: 1.0
+        animating: false
+        mouseDown: false
+        pollWatcher: false
+        frameSec: 0.016667
+        heartbeatSec: 1.0
       )
       Gpu2d.waitEvents(timeoutSec: idleTimeout)
     } else {
-      if sceneAnimating or cameraMoved or uiLayoutDirty or extentChanged or hadUiEvents
-        or timeAnimating {
+      if sceneAnimating or cameraMoved or uiLayoutDirty or extentChanged or hadUiEvents or timeAnimating {
         taaSettleFrames = 6
       } else {
         taaSettleFrames = taaSettleFrames - 1
       }
       renderedOnce = true
-      if cameraMoved { stateDirty = true }
+      if cameraMoved {
+        stateDirty = true
+      }
       # Flush at most 4x/sec. The snapshot is a dozen numbers, so the cost
       # is the file write, not the formatting.
       if stateDirty and not headless {
         let sinceSave: Float = (now - lastStateSave) as Float
         if sinceSave >= 0.25 {
-          writeHotReloadStateFor(appId: state112AppId, state: serialize112State(ui: uiState, rig: cameraRig, camera: camera))
+          writeHotReloadStateFor(
+            appId: state112AppId
+            state: serialize112State(ui: uiState, rig: cameraRig, camera: camera)
+          )
           lastStateSave = now
           stateDirty = false
         }
@@ -550,9 +645,15 @@ func main() ret Int {
       }
       applyCameraRig(rig: cameraRig, camera: camera)
       syncCameraBar(world: uiWorld, rig: cameraRig, camera: camera)
-      if uiState.activeScene is 1 { light = light1 }
-      if uiState.activeScene is 2 { light = light2 }
-      if uiState.activeScene is 3 { light = light3 }
+      if uiState.activeScene is 1 {
+        light = light1
+      }
+      if uiState.activeScene is 2 {
+        light = light2
+      }
+      if uiState.activeScene is 3 {
+        light = light3
+      }
       # AFTER the scene's own light is restored, not before: this runs every
       # frame, so setting the sun anywhere earlier is silently undone here and
       # the time-of-day slider appears to do nothing.
@@ -564,13 +665,23 @@ func main() ret Int {
       # solid, which is how the bug was noticed.
       light.sunDir = settingsSunDir(settingsState: settings)
       light.sunColor = settingsSunColor(settingsState: settings)
-      if uiState.activeScene is 1 { animateScene1(world: asset1.world, cubeA: cubeAEntity, cubeB: cubeBEntity, torus: torusEntity, tags: clusters1, time: simTime) }
+      if uiState.activeScene is 1 {
+        animateScene1(
+          world: asset1.world
+          cubeA: cubeAEntity
+          cubeB: cubeBEntity
+          torus: torusEntity
+          tags: clusters1
+          time: simTime
+        )
+      }
       if uiState.activeScene is 2 {
         animateScene(world: asset2.world, sceneId: 2, time: simTime)
         animateMetaballLab(world: asset2.world, tags: clusters2, time: simTime)
       }
-      if uiState.activeScene is 3 { animateScene3(world: asset3.world, time: simTime) }
-
+      if uiState.activeScene is 3 {
+        animateScene3(world: asset3.world, time: simTime)
+      }
 
       let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
       # Rendering reads the active World3d directly through the RenderSystem's
@@ -590,10 +701,17 @@ func main() ret Int {
           # this before the scene pass because the scene pass declares a
           # read of what it writes.
           let cascades: ShadowCascades = fitShadowCascades(
-            camPos: camera.position, camTarget: camera.target,
-            fovYDeg: camera.fovYDeg, aspect: aspect,
-            near: camera.nearZ, far: 45.0, sunDir: light.sunDir,
-            count: 3, resolution: 2048, lambda: 0.7, backExtent: 30.0
+            camPos: camera.position
+            camTarget: camera.target
+            fovYDeg: camera.fovYDeg
+            aspect: aspect
+            near: camera.nearZ
+            far: 45.0
+            sunDir: light.sunDir
+            count: 3
+            resolution: 2048
+            lambda: 0.7
+            backExtent: 30.0
           )
           beginShadowPass(c: cascades)
           # SHADOWS OFF means filling no cascades. renderer_deferred's note says
@@ -616,7 +734,9 @@ func main() ret Int {
           }
           endShadowPass()
           if shadowLogged is false {
-            log("[shadow] casters {shadowCasterCount()}, {cascades.count} cascades at {cascades.resolution}")
+            log(
+              "[shadow] casters {shadowCasterCount()}, {cascades.count} cascades at {cascades.resolution}"
+            )
             shadowLogged = true
           }
         }
@@ -629,34 +749,68 @@ func main() ret Int {
           # #912: the geometry pass draws from the renderer-owned GPU manager.
           ensureRendererResources(renderer: renderer)
           if let resources: mod GpuResources => renderer.gpuResources {
-            Gbuffer.beginPass(cache: renderer.passes.gbuffer, resources: resources, camera: camera, light: light, aspect: aspect)
+            Gbuffer.beginPass(
+              cache: renderer.passes.gbuffer
+              resources: resources
+              camera: camera
+              light: light
+              aspect: aspect
+            )
             if uiState.activeScene is 1 {
-              GbufferWorld.renderSceneWorld(cache: renderer.passes.gbuffer, resources: resources, world: asset1.world)
+              GbufferWorld.renderSceneWorld(
+                cache: renderer.passes.gbuffer
+                resources: resources
+                world: asset1.world
+              )
               renderSdfGbuffer(world: asset1.world, tags: clusters1, camera: camera)
             }
             if uiState.activeScene is 2 {
-              GbufferWorld.renderSceneWorld(cache: renderer.passes.gbuffer, resources: resources, world: asset2.world)
+              GbufferWorld.renderSceneWorld(
+                cache: renderer.passes.gbuffer
+                resources: resources
+                world: asset2.world
+              )
               renderSdfGbuffer(world: asset2.world, tags: clusters2, camera: camera)
             }
             if uiState.activeScene is 3 {
-              GbufferWorld.renderSceneWorld(cache: renderer.passes.gbuffer, resources: resources, world: asset3.world)
+              GbufferWorld.renderSceneWorld(
+                cache: renderer.passes.gbuffer
+                resources: resources
+                world: asset3.world
+              )
               renderSdfGbuffer(world: asset3.world, tags: clusters3, camera: camera)
             }
             Gbuffer.endPass()
           }
         }
-        if tag is RenderTag.ssao or tag is RenderTag.depthPyramid or tag is RenderTag.lighting
-          or tag is RenderTag.transparentForward or tag is RenderTag.taa or tag is RenderTag.composite {
-          renderDeferredPassWorld(renderer: renderer, tag: tag, world: asset1.world,
-                                  camera: camera, light: light, aspect: aspect)
+        if tag is RenderTag.ssao or tag is RenderTag.depthPyramid or tag is RenderTag.lighting or tag is RenderTag.transparentForward or tag is RenderTag.taa or tag is RenderTag.composite {
+          renderDeferredPassWorld(
+            renderer: renderer
+            tag: tag
+            world: asset1.world
+            camera: camera
+            light: light
+            aspect: aspect
+          )
         }
         if tag is RenderTag.uiOverlay {
           Gpu2d.beginFrameLoad(canvas: canvas)
           renderSystemGpu2d(world: uiWorld, res: gpuUi, canvas: canvas)
           # After the app UI, so the diagnostic is never what gets covered up.
-          drawLogOverlay(ov: logView, canvas: canvas, font: gpuUi.textFont, screenW: extentW, screenH: extentH)
+          drawLogOverlay(
+            ov: logView
+            canvas: canvas
+            font: gpuUi.textFont
+            screenW: extentW
+            screenH: extentH
+          )
           # LAST, so it is above the scene, the UI world and the log.
-          drawDebugOverlay(debugOverlay: dbg, canvas: canvas, font: gpuUi.textFont, didRealWork: dbgDidWork)
+          drawDebugOverlay(
+            debugOverlay: dbg
+            canvas: canvas
+            font: gpuUi.textFont
+            didRealWork: dbgDidWork
+          )
           lastLogRevision = logView.revision
         }
         if tag is RenderTag.present {
@@ -668,18 +822,27 @@ func main() ret Int {
       # the ACTIVE scene's current transforms its previous-frame set. Inactive
       # scenes are not advanced — they aren't rendered, so they have no frame
       # history to keep, and their first frame back re-syncs on the next run.
-      if uiState.activeScene is 1 { world3dPrevTransformSystem(world: asset1.world) }
-      if uiState.activeScene is 2 { world3dPrevTransformSystem(world: asset2.world) }
-      if uiState.activeScene is 3 { world3dPrevTransformSystem(world: asset3.world) }
+      if uiState.activeScene is 1 {
+        world3dPrevTransformSystem(world: asset1.world)
+      }
+      if uiState.activeScene is 2 {
+        world3dPrevTransformSystem(world: asset2.world)
+      }
+      if uiState.activeScene is 3 {
+        world3dPrevTransformSystem(world: asset3.world)
+      }
     }
   }
   # Final flush: the throttle may have a pending change when the loop ends.
   # Headless runs neither read nor write the snapshot — a smoke test must
   # not clobber the scene and camera a developer left set up.
   if not headless {
-    writeHotReloadStateFor(appId: state112AppId, state: serialize112State(ui: uiState, rig: cameraRig, camera: camera))
+    writeHotReloadStateFor(
+      appId: state112AppId
+      state: serialize112State(ui: uiState, rig: cameraRig, camera: camera)
+    )
   }
-  shutdownDeferredRenderer(renderer: renderer)   # #904: the renderer-owned GPU manager, before the C shutdown
+  shutdownDeferredRenderer(renderer: renderer)  # #904: the renderer-owned GPU manager, before the C shutdown
   shutdown()
   canvasShutdown(canvas: canvas)
   Gpu2d.closeWindow()

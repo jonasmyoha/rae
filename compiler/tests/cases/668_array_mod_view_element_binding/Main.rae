@@ -7,6 +7,7 @@ type Cell {
   hp: Int
   tag: Int
 }
+
 func main() {
   var grid: Array(Cell, cap: 3) = Array(Cell, cap: 3)
   grid[1].hp = 5
@@ -14,8 +15,8 @@ func main() {
   let refm: mod Cell => grid[1]
   refm.hp = 99
   refm.tag = 7
-  log("after mod-bind hp={grid[1].hp} tag={grid[1].tag}")   # 99, 7 if aliasing
+  log("after mod-bind hp={grid[1].hp} tag={grid[1].tag}")  # 99, 7 if aliasing
 
   let refv: view Cell => grid[1]
-  log("view reads hp={refv.hp}")                            # 99
+  log("view reads hp={refv.hp}")  # 99
 }

@@ -42,20 +42,44 @@ func createInputSystem() ret InputSystem {
   }
 }
 
-func pointInEntity(world: view UiWorld, entity: view EntityId, x: view Float, y: view Float) ret Bool {
-  if componentHas(this: world.worldTransforms, entity: entity) is false { ret false }
-  if componentHas(this: world.computedRects, entity: entity) is false { ret false }
+func pointInEntity(
+  world: view UiWorld
+  entity: view EntityId
+  x: view Float
+  y: view Float
+) ret Bool {
+  if componentHas(this: world.worldTransforms, entity: entity) is false {
+    ret false
+  }
+  if componentHas(this: world.computedRects, entity: entity) is false {
+    ret false
+  }
   let wt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: entity)
-  if worldVisualOf(world: world, entity: entity).visible is false { ret false }
+  if worldVisualOf(world: world, entity: entity).visible is false {
+    ret false
+  }
   let cr: ComputedRect = componentGet(this: world.computedRects, entity: entity)
-  if x < wt.position.x { ret false }
-  if y < wt.position.y { ret false }
-  if x > wt.position.x + cr.size.x { ret false }
-  if y > wt.position.y + cr.size.y { ret false }
+  if x < wt.position.x {
+    ret false
+  }
+  if y < wt.position.y {
+    ret false
+  }
+  if x > wt.position.x + cr.size.x {
+    ret false
+  }
+  if y > wt.position.y + cr.size.y {
+    ret false
+  }
   ret true
 }
 
-func hitTestEntity(world: view UiWorld, entity: view EntityId, x: view Float, y: view Float) ret EntityId {
+func hitTestEntity(
+  world: view UiWorld
+  entity: view EntityId
+  x: view Float
+  y: view Float
+) ret EntityId {
   unsafe {
     if componentHas(this: world.childrens, entity: entity) {
       let ch: view Children => componentView(this: world.childrens, entity: entity)
@@ -63,14 +87,26 @@ func hitTestEntity(world: view UiWorld, entity: view EntityId, x: view Float, y:
       var i: Int = n - 1
       loop i >= 0 {
         let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
-        let hit: EntityId = hitTestEntity(world: world, entity: cid, x: x, y: y)
-        if isNone(this: hit) is false { ret hit }
+        let hit: EntityId = hitTestEntity(
+          world: world
+          entity: cid
+          x: x
+          y: y
+        )
+        if isNone(this: hit) is false {
+          ret hit
+        }
         i = i - 1
       }
     }
 
     if componentHas(this: world.onClicks, entity: entity) {
-      if pointInEntity(world: world, entity: entity, x: x, y: y) {
+      if pointInEntity(
+        world: world
+        entity: entity
+        x: x
+        y: y
+      ) {
         ret entity
       }
     }
@@ -86,8 +122,15 @@ func hitTest(world: view UiWorld, x: view Float, y: view Float) ret EntityId {
     loop i >= 0 {
       let e: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: i)
       if componentHas(this: world.layerRoots, entity: e) is false {
-        let hit: EntityId = hitTestEntity(world: world, entity: e, x: x, y: y)
-        if isNone(this: hit) is false { ret hit }
+        let hit: EntityId = hitTestEntity(
+          world: world
+          entity: e
+          x: x
+          y: y
+        )
+        if isNone(this: hit) is false {
+          ret hit
+        }
       }
       i = i - 1
     }

@@ -172,6 +172,29 @@ preservation, atomic write, over-cap, per-file parse-failure) run at the end of
 a full suite. The pre-#917 `format --output <path> <src>` / `format --write
 <src>` single-target spellings still work (the 203/204 fixtures).
 
+### #918 result (the migration)
+
+Two commits. (1) The 21 modules whose canonical form exceeded the 1,000-line
+cap were split into domain sibling modules with no semantic change — top-level
+declarations moved, cyclic `open`s between the halves (Rae merges every loaded
+module into one program), and every external caller that used a moved name
+opens the new module too; `main` of 106_mobile_ui (a single 1,053-line
+function) gave up seven boot-time blocks, each moved verbatim behind a function
+returning its one value. The generated `lib/webgpu` bindings are a foreign
+snippet in the formatter's sense — one C declaration per line — so bindgen now
+emits `# raefmt: off` as their first line (the to-EOF verbatim range and the
+`cheader` re-emission were fixed on the way). (2) ONE mechanical `rae format`
+over lib/, examples/ (legacy excluded) and compiler/tests/cases: 669 files
+rewritten, AST equivalence verified by the formatter itself for each (the
+CLI's built-in check), expected diagnostics of 38 fixtures re-anchored where
+lines re-wrapped (positions and source excerpts only — checked by a
+number-blind diff before each rewrite). Left deliberately untouched, and to be
+excluded by #919's check mode: the format fixtures' inputs (200–208, 568, 786,
+810–813, 829, 830), the expected-parse-error fixtures, the lexer fixtures
+whose token columns are the test (006, 015, 019 — the formatter also moves an
+inline `#[ ]#` block comment to the statement end, which 019 exists to lex)
+and the CRLF / missing-final-newline fixtures (345, 346, 348).
+
 ### Task map
 
 - **#916** formatter correctness: the char-literal crash, comment attachment

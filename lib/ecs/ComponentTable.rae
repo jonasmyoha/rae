@@ -9,7 +9,6 @@
 open ecs/Entity
 import ecs/ListHelpers
 
-
 # ----- ComponentTable -----
 #
 # ComponentTable(T) IS the fundamental ECS table primitive — one
@@ -18,7 +17,6 @@ import ecs/ListHelpers
 # conceptual shorthand for exactly this type (there is deliberately no
 # separate `Table(T)`); its `generation` is that design's table-level
 # revision and `denseStamps` the per-entity (component-instance) level.
-
 type ComponentTable(T: type) {
   denseEntities: List(EntityId)
   denseData: List(T)
@@ -190,7 +188,12 @@ func componentMod(T: type, this: mod ComponentTable(T), entity: view EntityId) r
 
 # Add or replace the component for `entity`. Internally aliases the
 # two inner lists so the mutation propagates on both targets.
-func componentSet(T: type, this: mod ComponentTable(T), entity: view EntityId, data: own T) {
+func componentSet(
+  T: type
+  this: mod ComponentTable(T)
+  entity: view EntityId
+  data: own T
+) {
   unsafe {
     let existing: Int = componentIndexOf(T, this: this, entity: entity)
     if existing >= 0 {

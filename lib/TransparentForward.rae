@@ -39,20 +39,26 @@ open gpu/GpuRenderPass
 open gpu/GpuIds
 
 func gbLitTexture() unsafe extern("rae_gb_lit_texture") ret Ptr
+
 func gbLitCopyTexture() unsafe extern("rae_gb_lit_copy_texture") ret Ptr
+
 func gbLitCopyView() unsafe extern("rae_gb_lit_copy_view") ret Ptr
+
 func nativeGbLitFormat() unsafe extern("rae_gb_lit_format") ret Int
+
 func gbLitFormat() ret Int {
-  unsafe { ret nativeGbLitFormat() }
+  unsafe {
+    ret nativeGbLitFormat()
+  }
 }
 
 # Per-renderer state (#764: no module globals). `batch` is sized once at
 # creation and refilled in place each frame — zero per-frame allocation.
 type TransparentPassCache {
-  pipeMade: Bool   # creation attempted (so a missing shader is reported once)
-  pipeline: RenderPipelineId   # invalid when creation failed; the draw is skipped then
+  pipeMade: Bool  # creation attempted (so a missing shader is reported once)
+  pipeline: RenderPipelineId  # invalid when creation failed; the draw is skipped then
   bindGroup: BindGroupId
-  adopted: List(ExternalId)    # the frame uniform + draws storage, adopted once
+  adopted: List(ExternalId)  # the frame uniform + draws storage, adopted once
   snapshotDone: Bool  # this frame's opaque snapshot was taken early (transparentSnapshot)
   batch: InstanceBatch
 }
@@ -67,8 +73,11 @@ func createTransparentPassCache(capacity: copy Int) pub ret TransparentPassCache
   }
   # meshId -1: no mesh until the first addTransparentInstance names one.
   ret TransparentPassCache {
-    pipeMade: false, pipeline: noRenderPipelineId(), bindGroup: noBindGroupId(),
-    adopted: List.create(ExternalId, cap: 2), snapshotDone: false,
+    pipeMade: false
+    pipeline: noRenderPipelineId()
+    bindGroup: noBindGroupId()
+    adopted: List.create(ExternalId, cap: 2)
+    snapshotDone: false
     batch: { meshId: 0 - 1, capacity: capacity, count: 0, records: records }
   }
 }
@@ -77,37 +86,71 @@ func createTransparentPassCache(capacity: copy Int) pub ret TransparentPassCache
 # pass's DrawU with the ALPHA carried in the metallic slot (the transparent
 # shader reads albedoMetallic.w as alpha; an unlit blend has no metallic).
 # Silently drops instances past capacity, like every fixed-size batch.
-func addTransparentInstance(cache: mod TransparentPassCache, mesh: view MeshHandle,
-                            transform: view Transform3d,
-                            r: copy Float, g: copy Float, b: copy Float, alpha: copy Float) pub {
+func addTransparentInstance(
+  cache: mod TransparentPassCache
+  mesh: view MeshHandle
+  transform: view Transform3d
+  r: copy Float
+  g: copy Float
+  b: copy Float
+  alpha: copy Float
+) pub {
   cache.batch.meshId = mesh.id
-  if cache.batch.count >= cache.batch.capacity { ret }
+  if cache.batch.count >= cache.batch.capacity {
+    ret
+  }
   let model: Mat4 = modelMatrixOf(t: transform)
-  packInstanceRecord(records: cache.batch.records, slot: cache.batch.count,
-    model: model, prevModel: model,
-    r: r, g: g, b: b, metallic: alpha, roughness: 0.0,
-    emissive: 0.0, toon: 0, paletteBase: 0)
+  packInstanceRecord(
+    records: cache.batch.records
+    slot: cache.batch.count
+    model: model
+    prevModel: model
+    r: r
+    g: g
+    b: b
+    metallic: alpha
+    roughness: 0.0
+    emissive: 0.0
+    toon: 0
+    paletteBase: 0
+  )
   cache.batch.count = cache.batch.count + 1
 }
 
 func copyOpaqueRadiance() {
   unsafe {
-    if gbDeferredPrepare() is 0 { ret }
+    if gbDeferredPrepare() is 0 {
+      ret
+    }
     # Geometry has already submitted its encoder. Like the fullscreen post
     # passes, submit on the same queue to preserve graph execution order.
     let encoderDescriptor: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
-    let encoder: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encoderDescriptor)
+    let encoder: Ptr = wgpuDeviceCreateCommandEncoder(
+      device: webgpuDevice()
+      descriptor: encoderDescriptor
+    )
     let texture: Ptr = gbLitTexture()
     let source: WGPUTexelCopyTextureInfo = { texture: texture, aspect: WGPUTextureAspect_All }
-    let destination: WGPUTexelCopyTextureInfo = { texture: gbLitCopyTexture(), aspect: WGPUTextureAspect_All }
+    let destination: WGPUTexelCopyTextureInfo = {
+      texture: gbLitCopyTexture()
+      aspect: WGPUTextureAspect_All
+    }
     let extent: WGPUExtent3D = {
       width: wgpuTextureGetWidth(texture: texture)
       height: wgpuTextureGetHeight(texture: texture)
       depthOrArrayLayers: 1 as UInt32
     }
-    wgpuCommandEncoderCopyTextureToTexture(commandEncoder: encoder, source: source, destination: destination, copySize: extent)
+    wgpuCommandEncoderCopyTextureToTexture(
+      commandEncoder: encoder
+      source: source
+      destination: destination
+      copySize: extent
+    )
     let bufferDescriptor: WGPUCommandBufferDescriptor = { nextInChain: webgpuNull() }
-    let commandBuffer: Ptr = wgpuCommandEncoderFinish(commandEncoder: encoder, descriptor: bufferDescriptor)
+    let commandBuffer: Ptr = wgpuCommandEncoderFinish(
+      commandEncoder: encoder
+      descriptor: bufferDescriptor
+    )
     gbSubmit(cmd: commandBuffer)
     wgpuCommandBufferRelease(commandBuffer: commandBuffer)
     wgpuCommandEncoderRelease(commandEncoder: encoder)
@@ -129,26 +172,44 @@ func transparentPipelineSpec() ret RenderPipelineSpec {
   attributes.add(value: { format: WGPUVertexFormat_Float32x3, offset: 12, location: 1 })
   attributes.add(value: { format: WGPUVertexFormat_Float32x2, offset: 24, location: 2 })
   ret RenderPipelineSpec {
-    vertexStride: 32, attributes: own attributes, colorFormats: own colorFormats,
-    alphaBlend: true, premultiplied: false, depthFormat: WGPUTextureFormat_Depth32Float, depthWrite: false,
-    depthCompare: WGPUCompareFunction_Greater, cullMode: WGPUCullMode_None
+    vertexStride: 32
+    attributes: own attributes
+    colorFormats: own colorFormats
+    alphaBlend: true
+    premultiplied: false
+    depthFormat: WGPUTextureFormat_Depth32Float
+    depthWrite: false
+    depthCompare: WGPUCompareFunction_Greater
+    cullMode: WGPUCullMode_None
   }
 }
 
 func ensureTransparentPipeline(cache: mod TransparentPassCache, resources: mod GpuResources) {
-  if cache.pipeMade { ret }
+  if cache.pipeMade {
+    ret
+  }
   cache.pipeMade = true
   # The shader is read relative to the working directory, like every lib/*.wgsl
   # (run the app from the repo root — the example gates `cd ..` for this).
   # An empty read must NOT reach wgpu: a module with no `vs` entry point makes
   # createRenderPipeline abort the process with an unhelpful validation error.
   var source: String = ""
-  unsafe { source = gbReadWgsl(path: "lib/transparentForward.wgsl") }
+  unsafe {
+    source = gbReadWgsl(path: "lib/transparentForward.wgsl")
+  }
   if source.length() is 0 {
-    log("[transparentForward] lib/transparentForward.wgsl not readable from the working directory — run from the repo root; transparent draws are skipped")
+    log(
+      "[transparentForward] lib/transparentForward.wgsl not readable from the working directory — run from the repo root; transparent draws are skipped"
+    )
     ret
   }
-  if let pipeline: RenderPipelineId = createRenderPipeline(resources: resources, wgsl: source, vertexEntry: "vs", fragmentEntry: "fs", spec: transparentPipelineSpec()) {
+  if let pipeline: RenderPipelineId = createRenderPipeline(
+    resources: resources
+    wgsl: source
+    vertexEntry: "vs"
+    fragmentEntry: "fs"
+    spec: transparentPipelineSpec()
+  ) {
     cache.pipeline = pipeline
   }
 }
@@ -158,19 +219,31 @@ func ensureTransparentPipeline(cache: mod TransparentPassCache, resources: mod G
 # two buffers: frame uniform @0, draws storage @1. Those buffers are created
 # once and survive resizes, so the bind (and its adoptions) are made once.
 func ensureTransparentBind(cache: mod TransparentPassCache, resources: mod GpuResources) {
-  if bindGroupIsUsable(resources: resources, id: cache.bindGroup) { ret }
+  if bindGroupIsUsable(resources: resources, id: cache.bindGroup) {
+    ret
+  }
   releaseExternalIds(resources: resources, list: cache.adopted)
   let entries: List(ResourceRef) = List.create(ResourceRef, cap: 2)
   unsafe {
-    entries.add(value: adoptBufferRef(resources: resources, adopted: cache.adopted, handle: gbFrameUbuf()))
-    entries.add(value: adoptBufferRef(resources: resources, adopted: cache.adopted, handle: gbDrawsBuffer()))
+    entries.add(
+      value: adoptBufferRef(resources: resources, adopted: cache.adopted, handle: gbFrameUbuf())
+    )
+    entries.add(
+      value: adoptBufferRef(resources: resources, adopted: cache.adopted, handle: gbDrawsBuffer())
+    )
   }
   var made: Bool = false
-  if let bind: BindGroupId = createRenderBindGroup(resources: resources, pipeline: cache.pipeline, entries: entries) {
+  if let bind: BindGroupId = createRenderBindGroup(
+    resources: resources
+    pipeline: cache.pipeline
+    entries: entries
+  ) {
     cache.bindGroup = bind
     made = true
   }
-  if not made { releaseExternalIds(resources: resources, list: cache.adopted) }
+  if not made {
+    releaseExternalIds(resources: resources, list: cache.adopted)
+  }
 }
 
 # Encode + submit the transparent draw: one render pass that LOADS the lit
@@ -185,38 +258,70 @@ func drawTransparentBatch(cache: mod TransparentPassCache, resources: mod GpuRes
     # NOT gbMeshReady: that answers "may I draw into the CURRENT geometry pass"
     # (it is 0 once Gbuffer.end cleared the pass), and this pass runs after it.
     # An uploaded mesh has a non-zero index count; an invalid/unset id has 0.
-    if gbMeshIcount(mesh: mesh) <= 0 { ret }
+    if gbMeshIcount(mesh: mesh) <= 0 {
+      ret
+    }
     let base: Int = gbDrawCount()
     var count: Int = cache.batch.count
     let remaining: Int = gbMaxDraws() - base
-    if count > remaining { count = remaining }
-    if count <= 0 { ret }
+    if count > remaining {
+      count = remaining
+    }
+    if count <= 0 {
+      ret
+    }
     let strideBytes: Int = instanceRecordFloats * 4
-    wgpuQueueWriteBuffer(queue: webgpuQueue(), buffer: gbDrawsBuffer(),
-      bufferOffset: (base * strideBytes) as UInt64, data: cache.batch.records.data,
-      size: (count * strideBytes) as UInt64)
+    wgpuQueueWriteBuffer(
+      queue: webgpuQueue()
+      buffer: gbDrawsBuffer()
+      bufferOffset: (base * strideBytes) as UInt64
+      data: cache.batch.records.data
+      size: (count * strideBytes) as UInt64
+    )
     let encDesc: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
     let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
-    var colorAtts: List(WGPURenderPassColorAttachment) = List.create(WGPURenderPassColorAttachment, cap: 1)
-    colorAtts.add(value: {
-      view_: gbLitView(), depthSlice: WGPU_DEPTH_SLICE_UNDEFINED as UInt32,
-      loadOp: WGPULoadOp_Load, storeOp: WGPUStoreOp_Store
-    })
+    var colorAtts: List(WGPURenderPassColorAttachment) = List.create(
+      WGPURenderPassColorAttachment
+      cap: 1
+    )
+    colorAtts.add(
+      value: {
+        view_: gbLitView()
+        depthSlice: WGPU_DEPTH_SLICE_UNDEFINED as UInt32
+        loadOp: WGPULoadOp_Load
+        storeOp: WGPUStoreOp_Store
+      }
+    )
     # Read-only depth: WebGPU requires the load/store ops to be Undefined then.
-    var depthAtts: List(WGPURenderPassDepthStencilAttachment) = List.create(WGPURenderPassDepthStencilAttachment, cap: 1)
-    depthAtts.add(value: {
-      view_: gbViewDepth(),
-      depthLoadOp: WGPULoadOp_Undefined, depthStoreOp: WGPUStoreOp_Undefined,
-      depthReadOnly: 1 as UInt32
-    })
+    var depthAtts: List(WGPURenderPassDepthStencilAttachment) = List.create(
+      WGPURenderPassDepthStencilAttachment
+      cap: 1
+    )
+    depthAtts.add(
+      value: {
+        view_: gbViewDepth()
+        depthLoadOp: WGPULoadOp_Undefined
+        depthStoreOp: WGPUStoreOp_Undefined
+        depthReadOnly: 1 as UInt32
+      }
+    )
     let rpDesc: WGPURenderPassDescriptor = {
-      colorAttachmentCount: 1 as UInt64, colorAttachments: colorAtts.data,
+      colorAttachmentCount: 1 as UInt64
+      colorAttachments: colorAtts.data
       depthStencilAttachment: depthAtts.data
     }
     let pass: Ptr = wgpuCommandEncoderBeginRenderPass(commandEncoder: enc, descriptor: rpDesc)
-    if recordDrawIndexedInPass(resources: resources, pass: pass, pipeline: cache.pipeline, bindGroup: cache.bindGroup,
-         vertexBuffer: gbMeshVbuf(mesh: mesh), indexBuffer: gbMeshIbuf(mesh: mesh),
-         indexCount: gbMeshIcount(mesh: mesh), instanceCount: count, firstInstance: base) {
+    if recordDrawIndexedInPass(
+      resources: resources
+      pass: pass
+      pipeline: cache.pipeline
+      bindGroup: cache.bindGroup
+      vertexBuffer: gbMeshVbuf(mesh: mesh)
+      indexBuffer: gbMeshIbuf(mesh: mesh)
+      indexCount: gbMeshIcount(mesh: mesh)
+      instanceCount: count
+      firstInstance: base
+    ) {
       gbAdvanceDraws(count: count)
     }
     wgpuRenderPassEncoderEnd(renderPassEncoder: pass)
@@ -237,14 +342,20 @@ func drawTransparentBatch(cache: mod TransparentPassCache, resources: mod GpuRes
 # first, then its draws, then transparentPass; an app without them just calls
 # transparentPass, which snapshots on its own.
 func transparentSnapshot(cache: mod TransparentPassCache) pub {
-  if gbDeferredPrepare() is 0 { ret }
+  if gbDeferredPrepare() is 0 {
+    ret
+  }
   copyOpaqueRadiance()
   cache.snapshotDone = true
 }
 
 func transparentPass(cache: mod TransparentPassCache, resources: mod GpuResources) pub {
-  if gbDeferredPrepare() is 0 { ret }
-  if not cache.snapshotDone { copyOpaqueRadiance() }
+  if gbDeferredPrepare() is 0 {
+    ret
+  }
+  if not cache.snapshotDone {
+    copyOpaqueRadiance()
+  }
   cache.snapshotDone = false
   if cache.batch.count > 0 {
     ensureTransparentPipeline(cache: cache, resources: resources)

@@ -29,6 +29,7 @@ open ui/Transform
 open Gpu2dCanvas
 
 const designW: Int = 440
+
 const designH: Int = 880
 
 # Where the counter starts.
@@ -55,12 +56,15 @@ func applyActions(value: view Int, input: view UiInput) ret Int {
 
 func main() ret Int {
   Gpu2d.initWindow(width: designW, height: designH, title: "Rae UI — Hello")
-  var canvas: Gpu2dCanvas = createGpu2dCanvas()   # #907: the app-owned 2D canvas (box + image passes)
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()  # #907: the app-owned 2D canvas (box + image passes)
 
   let base: String = "examples/104_ui_hello/assets/"
-  let gpuUi: Gpu2dUi = loadUiAssets(dir: base, textFontName: "Roboto-Regular",
-                                    iconFontName: "MaterialIconsRound-Regular",
-                                    themeFile: "theme.raescene")
+  let gpuUi: Gpu2dUi = loadUiAssets(
+    dir: base
+    textFontName: "Roboto-Regular"
+    iconFontName: "MaterialIconsRound-Regular"
+    themeFile: "theme.raescene"
+  )
 
   var world: UiWorld = create()
   # #764: install the app's theme (palette + scene tokens) onto this world.
@@ -105,7 +109,13 @@ func main() ret Int {
     # — a window is not presentable the instant it is created, and a compositor
     # does not promise to keep a frame that was presented once.
     if hadEvents or changed or wokeUp or renderedOnce is false {
-      Gpu2d.beginFrame(canvas: canvas, r: 0.03, g: 0.05, b: 0.08, a: 1.0)
+      Gpu2d.beginFrame(
+        canvas: canvas
+        r: 0.03
+        g: 0.05
+        b: 0.08
+        a: 1.0
+      )
       renderSystemGpu2d(world: world, res: gpuUi, canvas: canvas)
       Gpu2d.endFrame(canvas: canvas)
       renderedOnce = true
@@ -114,8 +124,12 @@ func main() ret Int {
       # Idle at ~0% CPU: block until the OS has something to say. The timeout is
       # the shared policy from lib/ui/eventLoop.rae.
       Gpu2d.waitEvents(timeoutSec: nextWaitTimeoutSec(
-        animating: false, mouseDown: false, pollWatcher: false,
-        frameSec: 0.016667, heartbeatSec: 0.5))
+        animating: false
+        mouseDown: false
+        pollWatcher: false
+        frameSec: 0.016667
+        heartbeatSec: 0.5
+      ))
       wokeUp = true
     }
   }

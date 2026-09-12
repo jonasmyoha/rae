@@ -5,15 +5,12 @@
 import Vec3
 
 const gridWidth: Int = 10
+
 const gridHeight: Int = 20
+
 const maxParticles: Int = 64
 
-enum GameState {
-  menu
-  playing
-  paused
-  gameOver
-}
+enum GameState { menu, playing, paused, gameOver }
 
 type Piece {
   kind: TetrominoKind
@@ -42,7 +39,6 @@ type World {
 
   # Locked-board grid, row-major. 0 = empty, 1..7 = colour id.
   grid: List(Int)
-
   currentPiece: Piece
   nextKind: TetrominoKind
 
@@ -53,7 +49,7 @@ type World {
 
   # Tick timers
   fallTimer: Int
-  fallDelay: Int          # frames per row, decreases with level
+  fallDelay: Int  # frames per row, decreases with level
   hMoveTimer: Int
   hMoveDelay: Int
   dasDelay: Int
@@ -133,7 +129,12 @@ func gridGet(world: view World, x: view Int, y: view Int) ret Int {
   ret 1
 }
 
-func gridSet(world: mod World, x: view Int, y: view Int, value: view Int) {
+func gridSet(
+  world: mod World
+  x: view Int
+  y: view Int
+  value: view Int
+) {
   if x < 0 or x >= gridWidth or y < 0 or y >= gridHeight {
     ret
   }

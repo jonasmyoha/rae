@@ -32,8 +32,7 @@ func jointNameKey(name: view String) ret String {
   let lowered: String = base.toLower()
   loop i < lowered.length() {
     let ch: String = lowered.sub(start: i, len: 1)
-    if ch is "_" is false and ch is " " is false
-       and ch is "." is false and ch is "-" is false {
+    if ch is "_" is false and ch is " " is false and ch is "." is false and ch is "-" is false {
       out = out.concat(other: ch)
     }
     i = i + 1
@@ -49,13 +48,27 @@ func jointNameKey(name: view String) ret String {
 # spine joint and straightens at the next, so losing the upper segment keeps the
 # bend and discards the correction, and the character walks hunched.
 func jointNameAliasKey(key: view String) ret String {
-  if key is "spine1" { ret "spine02" }
-  if key is "spine02" { ret "spine1" }
-  if key is "spine2" { ret "spine03" }
-  if key is "headtopend" { ret "head1" }
-  if key is "head1" { ret "headtopend" }
-  if key is "leftupleg" { ret "leftthigh" }
-  if key is "rightupleg" { ret "rightthigh" }
+  if key is "spine1" {
+    ret "spine02"
+  }
+  if key is "spine02" {
+    ret "spine1"
+  }
+  if key is "spine2" {
+    ret "spine03"
+  }
+  if key is "headtopend" {
+    ret "head1"
+  }
+  if key is "head1" {
+    ret "headtopend"
+  }
+  if key is "leftupleg" {
+    ret "leftthigh"
+  }
+  if key is "rightupleg" {
+    ret "rightthigh"
+  }
   ret ""
 }
 
@@ -76,9 +89,13 @@ func findJointByKey(sk: view Skeleton, key: view String) ret Int {
 # Read/write a quaternion packed at slot `i` of a flat `x,y,z,w` List(Float).
 func quatFromList(a: view List(Float), i: copy Int) ret Quat {
   ret quat.create(
-    x: floatAt(list: a, index: i * 4), y: floatAt(list: a, index: i * 4 + 1),
-    z: floatAt(list: a, index: i * 4 + 2), w: floatAt(list: a, index: i * 4 + 3))
+    x: floatAt(list: a, index: i * 4)
+    y: floatAt(list: a, index: i * 4 + 1)
+    z: floatAt(list: a, index: i * 4 + 2)
+    w: floatAt(list: a, index: i * 4 + 3)
+  )
 }
+
 func quatIntoList(a: mod List(Float), i: copy Int, q: view Quat) {
   a.set(index: i * 4, value: q.x)
   a.set(index: i * 4 + 1, value: q.y)
@@ -94,7 +111,11 @@ func quatIntoList(a: mod List(Float), i: copy Int, q: view Quat) {
 # in passes: a node is computed once its parent is, and a node whose parent is
 # still pending waits for the next pass. It converges in at most `depth` passes;
 # the `pass <= nodeCount` guard is the cycle backstop nodeWorldMatrix also keeps.
-func accumModelRot(localR: view List(Float), parent: view List(Int), nodeCount: copy Int) ret List(Float) {
+func accumModelRot(
+  localR: view List(Float)
+  parent: view List(Int)
+  nodeCount: copy Int
+) ret List(Float) {
   let out: List(Float) = List.create(Float, cap: nodeCount * 4)
   let done: List(Bool) = List.create(Bool, cap: nodeCount)
   var i: Int = 0
@@ -143,20 +164,38 @@ func accumModelRot(localR: view List(Float), parent: view List(Int), nodeCount: 
 func cloneSourceForSampling(from: view Skeleton, fromBind: view SkeletonPose) ret Skeleton {
   let localR: List(Float) = List.create(Float, cap: fromBind.localR.length)
   var i: Int = 0
-  loop i < fromBind.localR.length { localR.add(value: floatAt(list: fromBind.localR, index: i)) i = i + 1 }
+  loop i < fromBind.localR.length {
+    localR.add(value: floatAt(list: fromBind.localR, index: i))
+    i = i + 1
+  }
   let localT: List(Float) = List.create(Float, cap: fromBind.localT.length)
   i = 0
-  loop i < fromBind.localT.length { localT.add(value: floatAt(list: fromBind.localT, index: i)) i = i + 1 }
+  loop i < fromBind.localT.length {
+    localT.add(value: floatAt(list: fromBind.localT, index: i))
+    i = i + 1
+  }
   let localS: List(Float) = List.create(Float, cap: fromBind.localS.length)
   i = 0
-  loop i < fromBind.localS.length { localS.add(value: floatAt(list: fromBind.localS, index: i)) i = i + 1 }
+  loop i < fromBind.localS.length {
+    localS.add(value: floatAt(list: fromBind.localS, index: i))
+    i = i + 1
+  }
   let parent: List(Int) = List.create(Int, cap: from.parent.length)
   i = 0
-  loop i < from.parent.length { parent.add(value: intAt(list: from.parent, index: i, fallback: 0 - 1)) i = i + 1 }
+  loop i < from.parent.length {
+    parent.add(value: intAt(list: from.parent, index: i, fallback: 0 - 1))
+    i = i + 1
+  }
   ret Skeleton {
-    ok: true, jointNodes: List.create(Int, cap: 0), inverseBind: List.create(Float, cap: 0),
-    nodeCount: from.nodeCount, parent: own parent, nodeNames: List.create(String, cap: 0),
-    localT: own localT, localR: own localR, localS: own localS
+    ok: true
+    jointNodes: List.create(Int, cap: 0)
+    inverseBind: List.create(Float, cap: 0)
+    nodeCount: from.nodeCount
+    parent: own parent
+    nodeNames: List.create(String, cap: 0)
+    localT: own localT
+    localR: own localR
+    localS: own localS
   }
 }
 
@@ -197,16 +236,29 @@ func cloneSourceForSampling(from: view Skeleton, fromBind: view SkeletonPose) re
 #
 # `fromBind`/`toBind` are the rest poses captured at load (captureSkeletonPose),
 # NOT the live skeletons — those are mutated every frame by applyClip.
-func retargetClip(c: view Clip, from: view Skeleton, fromBind: view SkeletonPose,
-                  to: view Skeleton, toBind: view SkeletonPose,
-                  skipRoot: view Bool) pub ret Clip {
+func retargetClip(
+  c: view Clip
+  from: view Skeleton
+  fromBind: view SkeletonPose
+  to: view Skeleton
+  toBind: view SkeletonPose
+  skipRoot: view Bool
+) pub ret Clip {
   if c.ok is false or from.ok is false or to.ok is false or c.duration <= 0.0 {
     ret emptyClip()
   }
 
   # Static model-space rest orientations for both rigs.
-  let msrcBind: List(Float) = accumModelRot(localR: fromBind.localR, parent: from.parent, nodeCount: from.nodeCount)
-  let mdstBind: List(Float) = accumModelRot(localR: toBind.localR, parent: to.parent, nodeCount: to.nodeCount)
+  let msrcBind: List(Float) = accumModelRot(
+    localR: fromBind.localR
+    parent: from.parent
+    nodeCount: from.nodeCount
+  )
+  let mdstBind: List(Float) = accumModelRot(
+    localR: toBind.localR
+    parent: to.parent
+    nodeCount: to.nodeCount
+  )
 
   # dst node -> matching source node (by name), or -1. `skipRoot` maps the hip to
   # -1 so it holds bind. Built dst-first because Mdst_key is computed for EVERY
@@ -218,12 +270,16 @@ func retargetClip(c: view Clip, from: view Skeleton, fromBind: view SkeletonPose
     if let dstName: String = to.nodeNames.copyAt(index: d) {
       let key: String = jointNameKey(name: dstName)
       var skip: Bool = false
-      if skipRoot and key is "hips" { skip = true }
+      if skipRoot and key is "hips" {
+        skip = true
+      }
       if skip is false {
         s = findJointByKey(sk: from, key: key)
         if s < 0 {
           let aliasKey: String = jointNameAliasKey(key: key)
-          if aliasKey.length() > 0 { s = findJointByKey(sk: from, key: aliasKey) }
+          if aliasKey.length() > 0 {
+            s = findJointByKey(sk: from, key: aliasKey)
+          }
         }
       }
     }
@@ -235,31 +291,47 @@ func retargetClip(c: view Clip, from: view Skeleton, fromBind: view SkeletonPose
   let chanDst: List(Int) = List.create(Int, cap: to.nodeCount)
   d = 0
   loop d < to.nodeCount {
-    if intAt(list: srcOfDst, index: d, fallback: 0 - 1) >= 0 { chanDst.add(value: d) }
+    if intAt(list: srcOfDst, index: d, fallback: 0 - 1) >= 0 {
+      chanDst.add(value: d)
+    }
     d = d + 1
   }
   let matched: Int = chanDst.length
-  if matched is 0 { ret emptyClip() }
+  if matched is 0 {
+    ret emptyClip()
+  }
 
   # Shared resample grid, ~60 Hz, endpoints included.
   var nSamp: Int = (c.duration * 60.0).floor() as Int + 1
-  if nSamp < 2 { nSamp = 2 }
+  if nSamp < 2 {
+    nSamp = 2
+  }
   let scratch: Skeleton = cloneSourceForSampling(from: from, fromBind: fromBind)
 
   # Output values, joint-major: (channel m, sample s) at (m * nSamp + s) * 4.
   let valBuf: List(Float) = List.create(Float, cap: matched * nSamp * 4)
   var z: Int = 0
-  loop z < matched * nSamp * 4 { valBuf.add(value: 0.0) z = z + 1 }
+  loop z < matched * nSamp * 4 {
+    valBuf.add(value: 0.0)
+    z = z + 1
+  }
   let mdstKey: List(Float) = List.create(Float, cap: to.nodeCount * 4)
   z = 0
-  loop z < to.nodeCount * 4 { mdstKey.add(value: 0.0) z = z + 1 }
+  loop z < to.nodeCount * 4 {
+    mdstKey.add(value: 0.0)
+    z = z + 1
+  }
 
   let lastT: Float = (nSamp - 1).toFloat()
   var s: Int = 0
   loop s < nSamp {
     let t: Float = c.duration * s.toFloat() / lastT
     applyClip(sk: scratch, c: c, time: t)
-    let msrcKey: List(Float) = accumModelRot(localR: scratch.localR, parent: scratch.parent, nodeCount: scratch.nodeCount)
+    let msrcKey: List(Float) = accumModelRot(
+      localR: scratch.localR
+      parent: scratch.parent
+      nodeCount: scratch.nodeCount
+    )
     # Mdst_key for every dst node.
     var dd: Int = 0
     loop dd < to.nodeCount {
@@ -331,10 +403,17 @@ func retargetClip(c: view Clip, from: view Skeleton, fromBind: view SkeletonPose
   }
 
   ret Clip {
-    ok: true, name: c.name, duration: c.duration,
-    targetNode: own targetNode, path: own path, interp: own interp,
-    timeStart: own timeStart, timeCount: own timeCount, times: own times,
-    valueStart: own valueStart, values: own values
+    ok: true
+    name: c.name
+    duration: c.duration
+    targetNode: own targetNode
+    path: own path
+    interp: own interp
+    timeStart: own timeStart
+    timeCount: own timeCount
+    times: own times
+    valueStart: own valueStart
+    values: own values
   }
 }
 
@@ -345,15 +424,23 @@ func retargetedChannelCount(c: view Clip, from: view Skeleton, to: view Skeleton
   var ch: Int = 0
   loop ch < c.targetNode.length {
     let srcNode: Int = intAt(list: c.targetNode, index: ch, fallback: 0 - 1)
-    if srcNode >= 0 and srcNode < from.nodeNames.length and intAt(list: c.path, index: ch, fallback: pathTranslation) is pathRotation {
+    if srcNode >= 0 and srcNode < from.nodeNames.length and intAt(
+      list: c.path
+      index: ch
+      fallback: pathTranslation
+    ) is pathRotation {
       if let srcName: String = from.nodeNames.copyAt(index: srcNode) {
         let key: String = jointNameKey(name: srcName)
         var hit: Int = findJointByKey(sk: to, key: key)
         if hit < 0 {
           let aliasKey: String = jointNameAliasKey(key: key)
-          if aliasKey.length() > 0 { hit = findJointByKey(sk: to, key: aliasKey) }
+          if aliasKey.length() > 0 {
+            hit = findJointByKey(sk: to, key: aliasKey)
+          }
         }
-        if hit >= 0 { kept = kept + 1 }
+        if hit >= 0 {
+          kept = kept + 1
+        }
       }
     }
     ch = ch + 1

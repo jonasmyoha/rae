@@ -78,7 +78,9 @@ func pushU32(writer: mod ArgWriter, value: view Int) {
 func pushI32(writer: mod ArgWriter, value: view Int) {
   padTo(writer: writer, alignment: 4)
   var word: Int = value
-  if word < 0 { word = word + 4294967296 }
+  if word < 0 {
+    word = word + 4294967296
+  }
   appendWord(writer: writer, word: word)
 }
 
@@ -96,7 +98,15 @@ func pushF32(writer: mod ArgWriter, value: view Float) {
     i = i + 1
   }
   unsafe {
-    rae_ext_rae_buf_copy(V: UInt8, src: scratch.data, src_off: 0, dst: writer.bytes.data, dst_off: base, len: 4, elemSize: 1)
+    rae_ext_rae_buf_copy(
+      V: UInt8
+      src: scratch.data
+      src_off: 0
+      dst: writer.bytes.data
+      dst_off: base
+      len: 4
+      elemSize: 1
+    )
   }
 }
 
@@ -106,14 +116,25 @@ func pushVec2F(writer: mod ArgWriter, x: view Float, y: view Float) {
   pushF32(writer: writer, value: y)
 }
 
-func pushVec3F(writer: mod ArgWriter, x: view Float, y: view Float, z: view Float) {
+func pushVec3F(
+  writer: mod ArgWriter
+  x: view Float
+  y: view Float
+  z: view Float
+) {
   padTo(writer: writer, alignment: 16)
   pushF32(writer: writer, value: x)
   pushF32(writer: writer, value: y)
   pushF32(writer: writer, value: z)
 }
 
-func pushVec4F(writer: mod ArgWriter, x: view Float, y: view Float, z: view Float, w: view Float) {
+func pushVec4F(
+  writer: mod ArgWriter
+  x: view Float
+  y: view Float
+  z: view Float
+  w: view Float
+) {
   padTo(writer: writer, alignment: 16)
   pushF32(writer: writer, value: x)
   pushF32(writer: writer, value: y)
@@ -127,7 +148,13 @@ func pushVec2U(writer: mod ArgWriter, x: view Int, y: view Int) {
   pushU32(writer: writer, value: y)
 }
 
-func pushVec4U(writer: mod ArgWriter, x: view Int, y: view Int, z: view Int, w: view Int) {
+func pushVec4U(
+  writer: mod ArgWriter
+  x: view Int
+  y: view Int
+  z: view Int
+  w: view Int
+) {
   padTo(writer: writer, alignment: 16)
   pushU32(writer: writer, value: x)
   pushU32(writer: writer, value: y)
@@ -137,7 +164,9 @@ func pushVec4U(writer: mod ArgWriter, x: view Int, y: view Int, z: view Int, w: 
 
 # A column-major mat4x4<f32> (16 floats, column 0 first). Alignment 16, size 64.
 func pushMat4(writer: mod ArgWriter, columns: view List(Float)) ret Bool {
-  if columns.length < 16 { ret false }
+  if columns.length < 16 {
+    ret false
+  }
   padTo(writer: writer, alignment: 16)
   var i: Int = 0
   loop i < 16 {
@@ -161,9 +190,19 @@ func finalizeArgs(writer: mod ArgWriter) {
 # write copies the bytes and lands before the next submit, so a later change to
 # this writer does not affect the uploaded data. Requires a CopyDst buffer big
 # enough for the packed size.
-func uploadArgs(writer: mod ArgWriter, resources: view GpuResources, buffer: view BufferId, offset: view Int) ret Bool {
+func uploadArgs(
+  writer: mod ArgWriter
+  resources: view GpuResources
+  buffer: view BufferId
+  offset: view Int
+) ret Bool {
   finalizeArgs(writer: writer)
-  ret writeBuffer(resources: resources, id: buffer, offset: offset, bytes: writer.bytes)
+  ret writeBuffer(
+    resources: resources
+    id: buffer
+    offset: offset
+    bytes: writer.bytes
+  )
 }
 
 # ----- compact typed dispatch -----------------------------------------
@@ -181,7 +220,13 @@ type ComputeCommand {
   workgroupsZ: Int
 }
 
-func computeCommand(pipeline: view PipelineId, bindGroup: view BindGroupId, workgroupsX: view Int, workgroupsY: view Int, workgroupsZ: view Int) ret ComputeCommand {
+func computeCommand(
+  pipeline: view PipelineId
+  bindGroup: view BindGroupId
+  workgroupsX: view Int
+  workgroupsY: view Int
+  workgroupsZ: view Int
+) ret ComputeCommand {
   ret ComputeCommand {
     pipeline: pipeline
     bindGroup: bindGroup
@@ -193,36 +238,85 @@ func computeCommand(pipeline: view PipelineId, bindGroup: view BindGroupId, work
 
 # Records the snapshotted command over #870's checked recordCompute (which
 # re-validates the resolved IDs and pins the dependencies).
-func recordComputeCommand(recording: mod Recording, resources: view GpuResources, command: view ComputeCommand) ret Bool {
-  ret recordCompute(recording: recording, resources: resources, pipeline: command.pipeline, bindGroup: command.bindGroup, workgroupsX: command.workgroupsX, workgroupsY: command.workgroupsY, workgroupsZ: command.workgroupsZ)
+func recordComputeCommand(
+  recording: mod Recording
+  resources: view GpuResources
+  command: view ComputeCommand
+) ret Bool {
+  ret recordCompute(
+    recording: recording
+    resources: resources
+    pipeline: command.pipeline
+    bindGroup: command.bindGroup
+    workgroupsX: command.workgroupsX
+    workgroupsY: command.workgroupsY
+    workgroupsZ: command.workgroupsZ
+  )
 }
 
 # Records `commands` as ONE compute pass (many dispatches, one set of pass
 # timestamps when `timestampWrites` is not null — the fallback for unavailable
 # timing) over #870's Recording. Every command is validated before the pass is
 # opened, so a dead ID refuses the whole sequence rather than half of it.
-func recordComputeCommands(recording: mod Recording, resources: view GpuResources, commands: view List(ComputeCommand), timestampWrites: copy Ptr) ret Bool {
-  if recordingIsOpen(recording: recording, resources: resources) is false { ret false }
-  if commands.length < 1 { ret false }
+func recordComputeCommands(
+  recording: mod Recording
+  resources: view GpuResources
+  commands: view List(ComputeCommand)
+  timestampWrites: copy Ptr
+) ret Bool {
+  if recordingIsOpen(recording: recording, resources: resources) is false {
+    ret false
+  }
+  if commands.length < 1 {
+    ret false
+  }
   var i: Int = 0
   loop i < commands.length {
     if let command: ComputeCommand = commands.copyAt(index: i) {
-      if isValidPipeline(resources: resources, id: command.pipeline) is false { ret false }
-      if bindGroupIsUsable(resources: resources, id: command.bindGroup) is false { ret false }
-      if command.workgroupsX < 1 or command.workgroupsY < 1 or command.workgroupsZ < 1 { ret false }
+      if isValidPipeline(resources: resources, id: command.pipeline) is false {
+        ret false
+      }
+      if bindGroupIsUsable(resources: resources, id: command.bindGroup) is false {
+        ret false
+      }
+      if command.workgroupsX < 1 or command.workgroupsY < 1 or command.workgroupsZ < 1 {
+        ret false
+      }
     }
     i = i + 1
   }
   unsafe {
-    let passDescriptor: WGPUComputePassDescriptor = { nextInChain: webgpuNull(), timestampWrites: timestampWrites }
-    let pass: Ptr = wgpuCommandEncoderBeginComputePass(commandEncoder: recording.encoder, descriptor: passDescriptor)
-    if pass is webgpuNull() { ret false }
+    let passDescriptor: WGPUComputePassDescriptor = {
+      nextInChain: webgpuNull()
+      timestampWrites: timestampWrites
+    }
+    let pass: Ptr = wgpuCommandEncoderBeginComputePass(
+      commandEncoder: recording.encoder
+      descriptor: passDescriptor
+    )
+    if pass is webgpuNull() {
+      ret false
+    }
     i = 0
     loop i < commands.length {
       if let command: ComputeCommand = commands.copyAt(index: i) {
-        wgpuComputePassEncoderSetPipeline(computePassEncoder: pass, pipeline: slotHandle(table: resources.pipelines, slot: command.pipeline.slot))
-        wgpuComputePassEncoderSetBindGroup(computePassEncoder: pass, groupIndex: 0 as UInt32, group: slotHandle(table: resources.bindGroups, slot: command.bindGroup.slot), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
-        wgpuComputePassEncoderDispatchWorkgroups(computePassEncoder: pass, workgroupCountX: command.workgroupsX as UInt32, workgroupCountY: command.workgroupsY as UInt32, workgroupCountZ: command.workgroupsZ as UInt32)
+        wgpuComputePassEncoderSetPipeline(
+          computePassEncoder: pass
+          pipeline: slotHandle(table: resources.pipelines, slot: command.pipeline.slot)
+        )
+        wgpuComputePassEncoderSetBindGroup(
+          computePassEncoder: pass
+          groupIndex: 0 as UInt32
+          group: slotHandle(table: resources.bindGroups, slot: command.bindGroup.slot)
+          dynamicOffsetCount: 0 as UInt64
+          dynamicOffsets: webgpuNull()
+        )
+        wgpuComputePassEncoderDispatchWorkgroups(
+          computePassEncoder: pass
+          workgroupCountX: command.workgroupsX as UInt32
+          workgroupCountY: command.workgroupsY as UInt32
+          workgroupCountZ: command.workgroupsZ as UInt32
+        )
       }
       i = i + 1
     }
@@ -232,13 +326,28 @@ func recordComputeCommands(recording: mod Recording, resources: view GpuResource
   i = 0
   loop i < commands.length {
     if let command: ComputeCommand = commands.copyAt(index: i) {
-      recordUse(recording: recording, kind: kindPipeline, slot: command.pipeline.slot, generation: command.pipeline.generation)
-      recordUse(recording: recording, kind: kindBindGroup, slot: command.bindGroup.slot, generation: command.bindGroup.generation)
+      recordUse(
+        recording: recording
+        kind: kindPipeline
+        slot: command.pipeline.slot
+        generation: command.pipeline.generation
+      )
+      recordUse(
+        recording: recording
+        kind: kindBindGroup
+        slot: command.bindGroup.slot
+        generation: command.bindGroup.generation
+      )
       let start: Int = intAt(list: resources.bindGroups.depStart, index: command.bindGroup.slot)
       let count: Int = intAt(list: resources.bindGroups.depCount, index: command.bindGroup.slot)
       var dep: Int = start
       loop dep < start + count {
-        recordUse(recording: recording, kind: intAt(list: resources.depKinds, index: dep), slot: intAt(list: resources.depSlots, index: dep), generation: intAt(list: resources.depGenerations, index: dep))
+        recordUse(
+          recording: recording
+          kind: intAt(list: resources.depKinds, index: dep)
+          slot: intAt(list: resources.depSlots, index: dep)
+          generation: intAt(list: resources.depGenerations, index: dep)
+        )
         dep = dep + 1
       }
     }

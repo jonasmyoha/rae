@@ -15,7 +15,6 @@ open ecs/ComponentTable
 # per-component switch — worldToJson/worldFromJson are the reflection loop over
 # fields(world). DoD: load a .raescene, snapshot, reload into a FRESH world,
 # snapshot again -> byte-identical JSON. Separate from the .raescene loader.
-
 func sampleScene() ret String {
   var s: String = ""
   s = s.concat(other: "\{")
@@ -31,7 +30,9 @@ func sampleScene() ret String {
   s = s.concat(other: "\"Children\":[\"TopBar\",\"AlbumHero\",\"PlayButton\"]")
   s = s.concat(other: "\},")
   s = s.concat(other: "\"TopBar\":\{")
-  s = s.concat(other: "\"Layout\":\{\"type\":\"Horizontal\",\"gap\":12,\"alignCross\":\"Center\"\},")
+  s = s.concat(
+    other: "\"Layout\":\{\"type\":\"Horizontal\",\"gap\":12,\"alignCross\":\"Center\"\},"
+  )
   s = s.concat(other: "\"Children\":[\"BackButton\"]")
   s = s.concat(other: "\},")
   s = s.concat(other: "\"BackButton\":\{")
@@ -43,7 +44,9 @@ func sampleScene() ret String {
   s = s.concat(other: "\"Active\":\{\"value\":true\}")
   s = s.concat(other: "\},")
   s = s.concat(other: "\"PlayButton\":\{")
-  s = s.concat(other: "\"Shape\":\{\"kind\":\"RoundedRect\",\"radius\":24,\"fill\":\{\"r\":0,\"g\":0,\"b\":0,\"a\":255\}\},")
+  s = s.concat(
+    other: "\"Shape\":\{\"kind\":\"RoundedRect\",\"radius\":24,\"fill\":\{\"r\":0,\"g\":0,\"b\":0,\"a\":255\}\},"
+  )
   s = s.concat(other: "\"Button\":\{\"role\":\"primary\"\},")
   s = s.concat(other: "\"OnClick\":\{\"actionId\":\"music.play\"\}")
   s = s.concat(other: "\}")

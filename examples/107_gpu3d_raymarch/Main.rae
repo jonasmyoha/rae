@@ -19,279 +19,513 @@ import Vec3
 open NoiseWgsl
 
 type Transform3d {
-    x: Float
-    y: Float
-    z: Float
-    sx: Float
-    sy: Float
-    sz: Float
+  x: Float
+  y: Float
+  z: Float
+  sx: Float
+  sy: Float
+  sz: Float
 }
 
 type Material3d {
-    r: Float
-    g: Float
-    b: Float
-    roughness: Float
-    metallic: Float
-    emissive: Float
+  r: Float
+  g: Float
+  b: Float
+  roughness: Float
+  metallic: Float
+  emissive: Float
 }
 
 type Renderable3d {
-    shape: Int
-    material: Int
-    phase: Float
-    noise: Float
+  shape: Int
+  material: Int
+  phase: Float
+  noise: Float
 }
 
 type Scene3d {
-    transforms: List(Transform3d)
-    materials: List(Material3d)
-    renderables: List(Renderable3d)
+  transforms: List(Transform3d)
+  materials: List(Material3d)
+  renderables: List(Renderable3d)
 }
 
 type Gpu3dRt {
-    paramsBuf: Int
-    cameraBuf: Int
-    objectBuf: Int
-    materialBuf: Int
-    outBuf: Int
-    kernel: Int
+  paramsBuf: Int
+  cameraBuf: Int
+  objectBuf: Int
+  materialBuf: Int
+  outBuf: Int
+  kernel: Int
 }
 
 func rae_ext_rae_sys_read_file(path: String) unsafe extern ret String
 
-func addMaterial(scene: mod Scene3d, r: view Float, g: view Float, b: view Float, roughness: view Float, metallic: view Float, emissive: view Float) {
-    scene.materials.add(value: Material3d { r: r, g: g, b: b, roughness: roughness, metallic: metallic, emissive: emissive })
+func addMaterial(
+  scene: mod Scene3d
+  r: view Float
+  g: view Float
+  b: view Float
+  roughness: view Float
+  metallic: view Float
+  emissive: view Float
+) {
+  scene.materials.add(value: Material3d {
+    r: r
+    g: g
+    b: b
+    roughness: roughness
+    metallic: metallic
+    emissive: emissive
+  })
 }
 
-func addObject(scene: mod Scene3d, shape: view Int, material: view Int, x: view Float, y: view Float, z: view Float, sx: view Float, sy: view Float, sz: view Float, phase: view Float, noise: view Float) {
-    scene.transforms.add(value: Transform3d { x: x, y: y, z: z, sx: sx, sy: sy, sz: sz })
-    scene.renderables.add(value: Renderable3d { shape: shape, material: material, phase: phase, noise: noise })
+func addObject(
+  scene: mod Scene3d
+  shape: view Int
+  material: view Int
+  x: view Float
+  y: view Float
+  z: view Float
+  sx: view Float
+  sy: view Float
+  sz: view Float
+  phase: view Float
+  noise: view Float
+) {
+  scene.transforms.add(value: Transform3d {
+    x: x
+    y: y
+    z: z
+    sx: sx
+    sy: sy
+    sz: sz
+  })
+  scene.renderables.add(
+    value: Renderable3d { shape: shape, material: material, phase: phase, noise: noise }
+  )
 }
 
 func buildScene3d() ret Scene3d {
-    var scene: Scene3d = {
-        transforms: List.create(Transform3d, cap: 16),
-        materials: List.create(Material3d, cap: 8),
-        renderables: List.create(Renderable3d, cap: 16)
-    }
+  var scene: Scene3d = {
+    transforms: List.create(Transform3d, cap: 16)
+    materials: List.create(Material3d, cap: 8)
+    renderables: List.create(Renderable3d, cap: 16)
+  }
 
-    addMaterial(scene: scene, r: 0.96, g: 0.38, b: 0.22, roughness: 0.42, metallic: 0.0, emissive: 0.0)
-    addMaterial(scene: scene, r: 0.20, g: 0.64, b: 1.00, roughness: 0.24, metallic: 0.25, emissive: 0.0)
-    addMaterial(scene: scene, r: 0.92, g: 0.82, b: 0.44, roughness: 0.18, metallic: 0.55, emissive: 0.0)
-    addMaterial(scene: scene, r: 0.14, g: 0.16, b: 0.21, roughness: 0.82, metallic: 0.0, emissive: 0.0)
-    addMaterial(scene: scene, r: 0.55, g: 0.90, b: 1.00, roughness: 0.35, metallic: 0.0, emissive: 1.4)
+  addMaterial(
+    scene: scene
+    r: 0.96
+    g: 0.38
+    b: 0.22
+    roughness: 0.42
+    metallic: 0.0
+    emissive: 0.0
+  )
+  addMaterial(
+    scene: scene
+    r: 0.20
+    g: 0.64
+    b: 1.00
+    roughness: 0.24
+    metallic: 0.25
+    emissive: 0.0
+  )
+  addMaterial(
+    scene: scene
+    r: 0.92
+    g: 0.82
+    b: 0.44
+    roughness: 0.18
+    metallic: 0.55
+    emissive: 0.0
+  )
+  addMaterial(
+    scene: scene
+    r: 0.14
+    g: 0.16
+    b: 0.21
+    roughness: 0.82
+    metallic: 0.0
+    emissive: 0.0
+  )
+  addMaterial(
+    scene: scene
+    r: 0.55
+    g: 0.90
+    b: 1.00
+    roughness: 0.35
+    metallic: 0.0
+    emissive: 1.4
+  )
 
-    # shape: 0 sphere, 1 box, 2 floor plane
-    addObject(scene: scene, shape: 2, material: 3, x: 0.0, y: 0.0, z: -0.75, sx: 1.0, sy: 1.0, sz: 1.0, phase: 0.0, noise: 0.0)
-    addObject(scene: scene, shape: 0, material: 0, x: -1.15, y: 1.80, z: 0.03, sx: 0.75, sy: 0.75, sz: 0.75, phase: 0.4, noise: 0.18)
-    addObject(scene: scene, shape: 1, material: 1, x: 0.35, y: 2.35, z: 0.06, sx: 0.82, sy: 0.82, sz: 0.82, phase: 2.0, noise: 0.12)
-    addObject(scene: scene, shape: 0, material: 2, x: 1.65, y: 1.65, z: -0.08, sx: 0.48, sy: 0.48, sz: 0.48, phase: 3.2, noise: 0.05)
-    addObject(scene: scene, shape: 0, material: 4, x: 0.20, y: 3.25, z: 1.10, sx: 0.24, sy: 0.24, sz: 0.24, phase: 1.0, noise: 0.0)
+  # shape: 0 sphere, 1 box, 2 floor plane
+  addObject(
+    scene: scene
+    shape: 2
+    material: 3
+    x: 0.0
+    y: 0.0
+    z: -0.75
+    sx: 1.0
+    sy: 1.0
+    sz: 1.0
+    phase: 0.0
+    noise: 0.0
+  )
+  addObject(
+    scene: scene
+    shape: 0
+    material: 0
+    x: -1.15
+    y: 1.80
+    z: 0.03
+    sx: 0.75
+    sy: 0.75
+    sz: 0.75
+    phase: 0.4
+    noise: 0.18
+  )
+  addObject(
+    scene: scene
+    shape: 1
+    material: 1
+    x: 0.35
+    y: 2.35
+    z: 0.06
+    sx: 0.82
+    sy: 0.82
+    sz: 0.82
+    phase: 2.0
+    noise: 0.12
+  )
+  addObject(
+    scene: scene
+    shape: 0
+    material: 2
+    x: 1.65
+    y: 1.65
+    z: -0.08
+    sx: 0.48
+    sy: 0.48
+    sz: 0.48
+    phase: 3.2
+    noise: 0.05
+  )
+  addObject(
+    scene: scene
+    shape: 0
+    material: 4
+    x: 0.20
+    y: 3.25
+    z: 1.10
+    sx: 0.24
+    sy: 0.24
+    sz: 0.24
+    phase: 1.0
+    noise: 0.0
+  )
 
-    ret scene
+  ret scene
 }
 
 func packObjects(scene: view Scene3d) ret List(Float) {
-    let out: List(Float) = List.create(Float, cap: scene.renderables.length * 12)
-    var i: Int = 0
-    loop let renderable: view Renderable3d in scene.renderables {
-        if let transform: view Transform3d => scene.transforms.viewAt(index: i) {
-            out.add(value: renderable.shape.toFloat())
-            out.add(value: renderable.material.toFloat())
-            out.add(value: transform.x)
-            out.add(value: transform.y)
-            out.add(value: transform.z)
-            out.add(value: transform.sx)
-            out.add(value: transform.sy)
-            out.add(value: transform.sz)
-            out.add(value: renderable.phase)
-            out.add(value: renderable.noise)
-            out.add(value: 0.0)
-            out.add(value: 0.0)
-        }
-        i = i + 1
+  let out: List(Float) = List.create(Float, cap: scene.renderables.length * 12)
+  var i: Int = 0
+  loop let renderable: view Renderable3d in scene.renderables {
+    if let transform: view Transform3d => scene.transforms.viewAt(index: i) {
+      out.add(value: renderable.shape.toFloat())
+      out.add(value: renderable.material.toFloat())
+      out.add(value: transform.x)
+      out.add(value: transform.y)
+      out.add(value: transform.z)
+      out.add(value: transform.sx)
+      out.add(value: transform.sy)
+      out.add(value: transform.sz)
+      out.add(value: renderable.phase)
+      out.add(value: renderable.noise)
+      out.add(value: 0.0)
+      out.add(value: 0.0)
     }
-    ret out
+    i = i + 1
+  }
+  ret out
 }
 
 func packMaterials(scene: view Scene3d) ret List(Float) {
-    let out: List(Float) = List.create(Float, cap: scene.materials.length * 8)
-    loop let material: view Material3d in scene.materials {
-        out.add(value: material.r)
-        out.add(value: material.g)
-        out.add(value: material.b)
-        out.add(value: material.roughness)
-        out.add(value: material.metallic)
-        out.add(value: material.emissive)
-        out.add(value: 0.0)
-        out.add(value: 0.0)
-    }
-    ret out
+  let out: List(Float) = List.create(Float, cap: scene.materials.length * 8)
+  loop let material: view Material3d in scene.materials {
+    out.add(value: material.r)
+    out.add(value: material.g)
+    out.add(value: material.b)
+    out.add(value: material.roughness)
+    out.add(value: material.metallic)
+    out.add(value: material.emissive)
+    out.add(value: 0.0)
+    out.add(value: 0.0)
+  }
+  ret out
 }
 
 func packCamera(pos: view Vec3, fwd: view Vec3, aspect: view Float) ret List(Float) {
-    let worldUp: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
-    let right: Vec3 = Vec3.vnorm(a: Vec3.vcross(a: fwd, b: worldUp))
-    let up: Vec3 = Vec3.vnorm(a: Vec3.vcross(a: right, b: fwd))
-    let out: List(Float) = List.create(Float, cap: 16)
-    out.add(value: pos.x)
-    out.add(value: pos.y)
-    out.add(value: pos.z)
-    out.add(value: aspect)
-    out.add(value: fwd.x)
-    out.add(value: fwd.y)
-    out.add(value: fwd.z)
-    out.add(value: 1.0)
-    out.add(value: right.x)
-    out.add(value: right.y)
-    out.add(value: right.z)
-    out.add(value: 0.0)
-    out.add(value: up.x)
-    out.add(value: up.y)
-    out.add(value: up.z)
-    out.add(value: 0.0)
-    ret out
+  let worldUp: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
+  let right: Vec3 = Vec3.vnorm(a: Vec3.vcross(a: fwd, b: worldUp))
+  let up: Vec3 = Vec3.vnorm(a: Vec3.vcross(a: right, b: fwd))
+  let out: List(Float) = List.create(Float, cap: 16)
+  out.add(value: pos.x)
+  out.add(value: pos.y)
+  out.add(value: pos.z)
+  out.add(value: aspect)
+  out.add(value: fwd.x)
+  out.add(value: fwd.y)
+  out.add(value: fwd.z)
+  out.add(value: 1.0)
+  out.add(value: right.x)
+  out.add(value: right.y)
+  out.add(value: right.z)
+  out.add(value: 0.0)
+  out.add(value: up.x)
+  out.add(value: up.y)
+  out.add(value: up.z)
+  out.add(value: 0.0)
+  ret out
 }
 
-func buildGpu3d(wgsl: view String, camera: view List(Float), objects: view List(Float), materials: view List(Float), params: view List(Int), pixels: view Int) ret Gpu3dRt {
-    Gpu.reset()
-    ret Gpu3dRt {
-        paramsBuf: Gpu.uniformU32(data: params.data, count: 8),
-        cameraBuf: Gpu.storageF32(data: camera.data, count: camera.length),
-        objectBuf: Gpu.storageF32(data: objects.data, count: objects.length),
-        materialBuf: Gpu.storageF32(data: materials.data, count: materials.length),
-        outBuf: Gpu.allocU32(count: pixels),
-        kernel: Gpu.kernel(wgsl: wgsl, entry: "main")
-    }
+func buildGpu3d(
+  wgsl: view String
+  camera: view List(Float)
+  objects: view List(Float)
+  materials: view List(Float)
+  params: view List(Int)
+  pixels: view Int
+) ret Gpu3dRt {
+  Gpu.reset()
+  ret Gpu3dRt {
+    paramsBuf: Gpu.uniformU32(data: params.data, count: 8)
+    cameraBuf: Gpu.storageF32(data: camera.data, count: camera.length)
+    objectBuf: Gpu.storageF32(data: objects.data, count: objects.length)
+    materialBuf: Gpu.storageF32(data: materials.data, count: materials.length)
+    outBuf: Gpu.allocU32(count: pixels)
+    kernel: Gpu.kernel(wgsl: wgsl, entry: "main")
+  }
 }
 
 func fillPixels(width: view Int, height: view Int) ret List(Int) {
-    let fb: List(Int) = List.create(Int, cap: width * height)
-    var i: Int = 0
-    loop i < width * height {
-        fb.add(value: 0)
-        i = i + 1
-    }
-    ret fb
+  let fb: List(Int) = List.create(Int, cap: width * height)
+  var i: Int = 0
+  loop i < width * height {
+    fb.add(value: 0)
+    i = i + 1
+  }
+  ret fb
 }
 
 func main() {
-    let wgsl: String = loadNoiseShader(path: "examples/107_gpu3d_raymarch/raymarch.wgsl")
-    let scene: Scene3d = buildScene3d()
-    let objects: List(Float) = packObjects(scene: scene)
-    let materials: List(Float) = packMaterials(scene: scene)
+  let wgsl: String = loadNoiseShader(path: "examples/107_gpu3d_raymarch/raymarch.wgsl")
+  let scene: Scene3d = buildScene3d()
+  let objects: List(Float) = packObjects(scene: scene)
+  let materials: List(Float) = packMaterials(scene: scene)
 
-    Sdl3.initWindow(width: 1280, height: 720, title: "Rae 3D — WebGPU Raymarch — GPT-5.5")
-    Sdl3.setTargetFPS(fps: 0)
+  Sdl3.initWindow(width: 1280, height: 720, title: "Rae 3D — WebGPU Raymarch — GPT-5.5")
+  Sdl3.setTargetFPS(fps: 0)
 
-    var quality: Int = 1
-    var width: Int = 1280
-    var height: Int = 720
-    var aspect: Float = width.toFloat() / height.toFloat()
+  var quality: Int = 1
+  var width: Int = 1280
+  var height: Int = 720
+  var aspect: Float = width.toFloat() / height.toFloat()
 
-    var camPos: Vec3 = Vec3.create(x: 0.0, y: -2.55, z: 0.55)
-    var yaw: Float = pi / 2.0
-    var pitch: Float = -0.08
-    var fwd: Vec3 = Vec3.create(x: Math.cos(x: pitch) * Math.cos(x: yaw), y: Math.cos(x: pitch) * Math.sin(x: yaw), z: Math.sin(x: pitch))
-    let moveStep: Float = 0.075
-    let rotStep: Float = 0.028
-    let mouseSens: Float = 0.0045
-    let worldUp: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
+  var camPos: Vec3 = Vec3.create(x: 0.0, y: -2.55, z: 0.55)
+  var yaw: Float = pi / 2.0
+  var pitch: Float = -0.08
+  var fwd: Vec3 = Vec3.create(
+    x: Math.cos(x: pitch) * Math.cos(x: yaw)
+    y: Math.cos(x: pitch) * Math.sin(x: yaw)
+    z: Math.sin(x: pitch)
+  )
+  let moveStep: Float = 0.075
+  let rotStep: Float = 0.028
+  let mouseSens: Float = 0.0045
+  let worldUp: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
 
-    let params: List(Int) = List.create(Int, cap: 8)
-    var pIdx: Int = 0
-    loop pIdx < 8 {
-        params.add(value: 0)
-        pIdx = pIdx + 1
-    }
-    params.set(index: 0, value: width)
-    params.set(index: 1, value: height)
-    params.set(index: 3, value: scene.renderables.length)
-    params.set(index: 4, value: scene.materials.length)
-    params.set(index: 5, value: quality)
+  let params: List(Int) = List.create(Int, cap: 8)
+  var pIdx: Int = 0
+  loop pIdx < 8 {
+    params.add(value: 0)
+    pIdx = pIdx + 1
+  }
+  params.set(index: 0, value: width)
+  params.set(index: 1, value: height)
+  params.set(index: 3, value: scene.renderables.length)
+  params.set(index: 4, value: scene.materials.length)
+  params.set(index: 5, value: quality)
 
-    var camera: List(Float) = packCamera(pos: camPos, fwd: fwd, aspect: aspect)
-    var rt: Gpu3dRt = buildGpu3d(wgsl: wgsl, camera: camera, objects: objects, materials: materials, params: params, pixels: width * height)
-    var fb: List(Int) = fillPixels(width: width, height: height)
+  var camera: List(Float) = packCamera(pos: camPos, fwd: fwd, aspect: aspect)
+  var rt: Gpu3dRt = buildGpu3d(
+    wgsl: wgsl
+    camera: camera
+    objects: objects
+    materials: materials
+    params: params
+    pixels: width * height
+  )
+  var fb: List(Int) = fillPixels(width: width, height: height)
 
-    var frame: Int = 0
-    var prevMouseX: Int = Sdl3.getMouseX()
-    var prevMouseY: Int = Sdl3.getMouseY()
+  var frame: Int = 0
+  var prevMouseX: Int = Sdl3.getMouseX()
+  var prevMouseY: Int = Sdl3.getMouseY()
 
-    loop not Sdl3.shouldClose() {
-        if Sdl3.isKeyPressed(key: Keys.keyF2) {
-            let saved: Bool = Image.savePng(path: Filesystem.renderPath(stem: "rae_3d_minimal"), pixels: fb.data, width: width, height: height)
-        }
-
-        var newQuality: Int = quality
-        if Sdl3.isKeyPressed(key: Keys.key1) { newQuality = 0 }
-        if Sdl3.isKeyPressed(key: Keys.key2) { newQuality = 1 }
-        if Sdl3.isKeyPressed(key: Keys.key3) { newQuality = 2 }
-        if newQuality > quality or newQuality < quality {
-            quality = newQuality
-            if quality is 0 { width = 960   height = 540 }
-            if quality is 1 { width = 1280  height = 720 }
-            if quality is 2 { width = 1600  height = 900 }
-            aspect = width.toFloat() / height.toFloat()
-            params.set(index: 0, value: width)
-            params.set(index: 1, value: height)
-            params.set(index: 5, value: quality)
-            camera = packCamera(pos: camPos, fwd: fwd, aspect: aspect)
-            rt = buildGpu3d(wgsl: wgsl, camera: camera, objects: objects, materials: materials, params: params, pixels: width * height)
-            fb = fillPixels(width: width, height: height)
-        }
-
-        var moved: Bool = false
-        if Sdl3.isKeyDown(key: Keys.keyW) { camPos = Vec3.vadd(a: camPos, b: Vec3.vscale(a: fwd, s: moveStep))  moved = true }
-        if Sdl3.isKeyDown(key: Keys.keyS) { camPos = Vec3.vsub(a: camPos, b: Vec3.vscale(a: fwd, s: moveStep))  moved = true }
-        let right: Vec3 = Vec3.vnorm(a: Vec3.vcross(a: fwd, b: worldUp))
-        if Sdl3.isKeyDown(key: Keys.keyD) { camPos = Vec3.vadd(a: camPos, b: Vec3.vscale(a: right, s: moveStep))  moved = true }
-        if Sdl3.isKeyDown(key: Keys.keyA) { camPos = Vec3.vsub(a: camPos, b: Vec3.vscale(a: right, s: moveStep))  moved = true }
-        if Sdl3.isKeyDown(key: Keys.keyE) { camPos = Vec3.vadd(a: camPos, b: Vec3.vscale(a: worldUp, s: moveStep))  moved = true }
-        if Sdl3.isKeyDown(key: Keys.keyQ) { camPos = Vec3.vsub(a: camPos, b: Vec3.vscale(a: worldUp, s: moveStep))  moved = true }
-        if Sdl3.isKeyDown(key: Keys.keyRight) { yaw = yaw - rotStep  moved = true }
-        if Sdl3.isKeyDown(key: Keys.keyLeft) { yaw = yaw + rotStep  moved = true }
-        if Sdl3.isKeyDown(key: Keys.keyUp) { pitch = pitch + rotStep  moved = true }
-        if Sdl3.isKeyDown(key: Keys.keyDown) { pitch = pitch - rotStep  moved = true }
-
-        let mx: Int = Sdl3.getMouseX()
-        let my: Int = Sdl3.getMouseY()
-        if Sdl3.isMouseButtonDown(button: 0) {
-            let dx: Int = mx - prevMouseX
-            let dy: Int = my - prevMouseY
-            if dx > 0 or dx < 0 { yaw = yaw - dx.toFloat() * mouseSens  moved = true }
-            if dy > 0 or dy < 0 { pitch = pitch - dy.toFloat() * mouseSens  moved = true }
-        }
-        prevMouseX = mx
-        prevMouseY = my
-
-        if moved {
-            if pitch > 1.35 { pitch = 1.35 }
-            if pitch < -1.25 { pitch = -1.25 }
-            fwd = Vec3.create(x: Math.cos(x: pitch) * Math.cos(x: yaw), y: Math.cos(x: pitch) * Math.sin(x: yaw), z: Math.sin(x: pitch))
-            camera = packCamera(pos: camPos, fwd: fwd, aspect: aspect)
-            Gpu.writeF32(buf: rt.cameraBuf, data: camera.data, count: camera.length)
-        }
-
-        params.set(index: 2, value: frame)
-        Gpu.writeU32(buf: rt.paramsBuf, data: params.data, count: 8)
-
-        let bufs: List(Int) = List.create(Int, cap: 5)
-        bufs.add(value: rt.paramsBuf)
-        bufs.add(value: rt.cameraBuf)
-        bufs.add(value: rt.objectBuf)
-        bufs.add(value: rt.materialBuf)
-        bufs.add(value: rt.outBuf)
-        Gpu.run(kernel: rt.kernel, bufs: bufs.data, bufCount: 5, gx: (width + 7) / 8, gy: (height + 7) / 8, gz: 1)
-        Gpu.downloadU32(buf: rt.outBuf, out: fb.data, count: width * height)
-
-        Sdl3.updatePixels(pixels: fb.data, w: width, h: height)
-        Sdl3.present()
-        Sdl3.setTitle(title: "Rae 3D — GPT-5.5 | WebGPU raymarch | {width}x{height} | WASD/E-Q, arrows/drag | 1/2/3")
-        frame = frame + 1
+  loop not Sdl3.shouldClose() {
+    if Sdl3.isKeyPressed(key: Keys.keyF2) {
+      let saved: Bool = Image.savePng(
+        path: Filesystem.renderPath(stem: "rae_3d_minimal")
+        pixels: fb.data
+        width: width
+        height: height
+      )
     }
 
-    Gpu.reset()
-    Sdl3.closeWindow()
+    var newQuality: Int = quality
+    if Sdl3.isKeyPressed(key: Keys.key1) {
+      newQuality = 0
+    }
+    if Sdl3.isKeyPressed(key: Keys.key2) {
+      newQuality = 1
+    }
+    if Sdl3.isKeyPressed(key: Keys.key3) {
+      newQuality = 2
+    }
+    if newQuality > quality or newQuality < quality {
+      quality = newQuality
+      if quality is 0 {
+        width = 960
+        height = 540
+      }
+      if quality is 1 {
+        width = 1280
+        height = 720
+      }
+      if quality is 2 {
+        width = 1600
+        height = 900
+      }
+      aspect = width.toFloat() / height.toFloat()
+      params.set(index: 0, value: width)
+      params.set(index: 1, value: height)
+      params.set(index: 5, value: quality)
+      camera = packCamera(pos: camPos, fwd: fwd, aspect: aspect)
+      rt = buildGpu3d(
+        wgsl: wgsl
+        camera: camera
+        objects: objects
+        materials: materials
+        params: params
+        pixels: width * height
+      )
+      fb = fillPixels(width: width, height: height)
+    }
+
+    var moved: Bool = false
+    if Sdl3.isKeyDown(key: Keys.keyW) {
+      camPos = Vec3.vadd(a: camPos, b: Vec3.vscale(a: fwd, s: moveStep))
+      moved = true
+    }
+    if Sdl3.isKeyDown(key: Keys.keyS) {
+      camPos = Vec3.vsub(a: camPos, b: Vec3.vscale(a: fwd, s: moveStep))
+      moved = true
+    }
+    let right: Vec3 = Vec3.vnorm(a: Vec3.vcross(a: fwd, b: worldUp))
+    if Sdl3.isKeyDown(key: Keys.keyD) {
+      camPos = Vec3.vadd(a: camPos, b: Vec3.vscale(a: right, s: moveStep))
+      moved = true
+    }
+    if Sdl3.isKeyDown(key: Keys.keyA) {
+      camPos = Vec3.vsub(a: camPos, b: Vec3.vscale(a: right, s: moveStep))
+      moved = true
+    }
+    if Sdl3.isKeyDown(key: Keys.keyE) {
+      camPos = Vec3.vadd(a: camPos, b: Vec3.vscale(a: worldUp, s: moveStep))
+      moved = true
+    }
+    if Sdl3.isKeyDown(key: Keys.keyQ) {
+      camPos = Vec3.vsub(a: camPos, b: Vec3.vscale(a: worldUp, s: moveStep))
+      moved = true
+    }
+    if Sdl3.isKeyDown(key: Keys.keyRight) {
+      yaw = yaw - rotStep
+      moved = true
+    }
+    if Sdl3.isKeyDown(key: Keys.keyLeft) {
+      yaw = yaw + rotStep
+      moved = true
+    }
+    if Sdl3.isKeyDown(key: Keys.keyUp) {
+      pitch = pitch + rotStep
+      moved = true
+    }
+    if Sdl3.isKeyDown(key: Keys.keyDown) {
+      pitch = pitch - rotStep
+      moved = true
+    }
+
+    let mx: Int = Sdl3.getMouseX()
+    let my: Int = Sdl3.getMouseY()
+    if Sdl3.isMouseButtonDown(button: 0) {
+      let dx: Int = mx - prevMouseX
+      let dy: Int = my - prevMouseY
+      if dx > 0 or dx < 0 {
+        yaw = yaw - dx.toFloat() * mouseSens
+        moved = true
+      }
+      if dy > 0 or dy < 0 {
+        pitch = pitch - dy.toFloat() * mouseSens
+        moved = true
+      }
+    }
+    prevMouseX = mx
+    prevMouseY = my
+
+    if moved {
+      if pitch > 1.35 {
+        pitch = 1.35
+      }
+      if pitch < -1.25 {
+        pitch = -1.25
+      }
+      fwd = Vec3.create(
+        x: Math.cos(x: pitch) * Math.cos(x: yaw)
+        y: Math.cos(x: pitch) * Math.sin(x: yaw)
+        z: Math.sin(x: pitch)
+      )
+      camera = packCamera(pos: camPos, fwd: fwd, aspect: aspect)
+      Gpu.writeF32(buf: rt.cameraBuf, data: camera.data, count: camera.length)
+    }
+
+    params.set(index: 2, value: frame)
+    Gpu.writeU32(buf: rt.paramsBuf, data: params.data, count: 8)
+
+    let bufs: List(Int) = List.create(Int, cap: 5)
+    bufs.add(value: rt.paramsBuf)
+    bufs.add(value: rt.cameraBuf)
+    bufs.add(value: rt.objectBuf)
+    bufs.add(value: rt.materialBuf)
+    bufs.add(value: rt.outBuf)
+    Gpu.run(
+      kernel: rt.kernel
+      bufs: bufs.data
+      bufCount: 5
+      gx: (width + 7) / 8
+      gy: (height + 7) / 8
+      gz: 1
+    )
+    Gpu.downloadU32(buf: rt.outBuf, out: fb.data, count: width * height)
+
+    Sdl3.updatePixels(pixels: fb.data, w: width, h: height)
+    Sdl3.present()
+    Sdl3.setTitle(
+      title: "Rae 3D — GPT-5.5 | WebGPU raymarch | {width}x{height} | WASD/E-Q, arrows/drag | 1/2/3"
+    )
+    frame = frame + 1
+  }
+
+  Gpu.reset()
+  Sdl3.closeWindow()
 }

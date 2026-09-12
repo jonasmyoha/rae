@@ -12,15 +12,27 @@ open Quat
 open GltfSkin
 
 # The authored normals, untouched.
-func loadSkinnedPrimitiveFlat(glb: view Glb, meshIndex: view Int, primIndex: view Int) pub ret SkinnedMeshData {
+func loadSkinnedPrimitiveFlat(
+  glb: view Glb
+  meshIndex: view Int
+  primIndex: view Int
+) pub ret SkinnedMeshData {
   # A negative angle merges nothing, so this shares one code path with
   # the smoothed case rather than duplicating the whole loader.
-  ret loadSkinnedPrimitiveSmoothed(glb: glb, meshIndex: meshIndex, primIndex: primIndex,
-                                   smoothAngleDeg: 0.0 - 1.0)
+  ret loadSkinnedPrimitiveSmoothed(
+    glb: glb
+    meshIndex: meshIndex
+    primIndex: primIndex
+    smoothAngleDeg: 0.0 - 1.0
+  )
 }
 
-func loadSkinnedPrimitiveSmoothed(glb: view Glb, meshIndex: view Int, primIndex: view Int,
-                                  smoothAngleDeg: view Float) pub ret SkinnedMeshData {
+func loadSkinnedPrimitiveSmoothed(
+  glb: view Glb
+  meshIndex: view Int
+  primIndex: view Int
+  smoothAngleDeg: view Float
+) pub ret SkinnedMeshData {
   let verts: List(Float) = List.create(Float, cap: 0)
   let indices: List(Int) = List.create(Int, cap: 0)
   if glb.ok is false {
@@ -43,8 +55,18 @@ func loadSkinnedPrimitiveSmoothed(glb: view Glb, meshIndex: view Int, primIndex:
     ret SkinnedMeshData { verts: own verts, indices: own indices, vertCount: 0 }
   }
 
-  let jointAcc: Int = intField(glb: glb, obj: attrs, key: "JOINTS_0", fallback: 0 - 1)
-  let weightAcc: Int = intField(glb: glb, obj: attrs, key: "WEIGHTS_0", fallback: 0 - 1)
+  let jointAcc: Int = intField(
+    glb: glb
+    obj: attrs
+    key: "JOINTS_0"
+    fallback: 0 - 1
+  )
+  let weightAcc: Int = intField(
+    glb: glb
+    obj: attrs
+    key: "WEIGHTS_0"
+    fallback: 0 - 1
+  )
   # readInts, not readFloats: joint indices are INDICES, and readFloats
   # normalises unsigned integer types to [0,1], which would turn joint 37
   # into 0.145 and silently bind every vertex to joint 0.

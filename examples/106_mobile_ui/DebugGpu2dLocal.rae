@@ -15,39 +15,80 @@ open ecs/hierarchySystem/HierarchySystem
 open Gpu2dCanvas
 
 let debugActionToggleMenu: String = "debug.toggleMenu"
+
 let debugActionToggleTheme: String = "debug.toggleTheme"
+
 let debugActionToggleLabels: String = "debug.toggleLabels"
+
 let debugActionToggleInputOutlines: String = "debug.toggleInputOutlines"
+
 let debugActionDismiss: String = "debug.dismiss"
 
 const debugRowH: Float = 121.44578313253011
+
 const debugLabelH: Float = 52.04819277108433
+
 const debugSwitchW: Float = 121.44578313253011
+
 const debugSwitchH: Float = 69.39759036144578
+
 const debugSwitchRadius: Float = 34.69879518072289
+
 const debugSwitchKnob: Float = 56.3855421686747
+
 const debugSwitchKnobOffset: Float = 26.024096385542165
+
 const debugPanelRadius: Float = 69.39759036144578
+
 const debugPanelPadding: Float = 43.373493975903614
+
 const debugPanelInset: Float = 86.74698795180723
+
 const debugCloseIconSize: Float = 69.39759036144578
+
 const debugCloseButtonW: Float = 312.289156626506
+
 const debugCloseButtonH: Float = 86.74698795180723
+
 const debugCloseButtonRadius: Float = 43.373493975903614
+
 const debugRowGap: Float = 26.024096385542165
+
 const debugContentTop: Float = 138.81927710843374
+
 const debugButtonTextH: Float = 26.024096385542165
+
 const debugCloseTextH: Float = 39.03614457831325
+
 const debugDialogTitleH: Float = 47.71084337349397
+
 const debugCloseIconGlyph: Float = 43.373493975903614
+
 const debugDialogTitleY: Float = 43.373493975903614
 
-func amberColor() ret RgbaColor { ret RgbaColor { r: 255, g: 191, b: 0, a: 255 } }
-func backdropColor() ret RgbaColor { ret RgbaColor { r: 0, g: 0, b: 0, a: 160 } }
-func menuFillColor() ret RgbaColor { ret RgbaColor { r: 24, g: 24, b: 28, a: 240 } }
-func switchOnColor() ret RgbaColor { ret RgbaColor { r: 52, g: 199, b: 89, a: 255 } }
-func switchOffColor() ret RgbaColor { ret RgbaColor { r: 120, g: 120, b: 128, a: 200 } }
-func switchKnobColor() ret RgbaColor { ret RgbaColor { r: 255, g: 255, b: 255, a: 255 } }
+func amberColor() ret RgbaColor {
+  ret RgbaColor { r: 255, g: 191, b: 0, a: 255 }
+}
+
+func backdropColor() ret RgbaColor {
+  ret RgbaColor { r: 0, g: 0, b: 0, a: 160 }
+}
+
+func menuFillColor() ret RgbaColor {
+  ret RgbaColor { r: 24, g: 24, b: 28, a: 240 }
+}
+
+func switchOnColor() ret RgbaColor {
+  ret RgbaColor { r: 52, g: 199, b: 89, a: 255 }
+}
+
+func switchOffColor() ret RgbaColor {
+  ret RgbaColor { r: 120, g: 120, b: 128, a: 200 }
+}
+
+func switchKnobColor() ret RgbaColor {
+  ret RgbaColor { r: 255, g: 255, b: 255, a: 255 }
+}
 
 type DebugSystem {
   menuOpen: Bool
@@ -68,8 +109,13 @@ type DebugSystem {
   hasBlur: Bool
 }
 
-func blurBackdropKey() pub ret String { ret "debug.blurBackdrop" }
-func setDebugHasBlur(debug: mod DebugSystem, value: view Bool) pub { debug.hasBlur = value }
+func blurBackdropKey() pub ret String {
+  ret "debug.blurBackdrop"
+}
+
+func setDebugHasBlur(debug: mod DebugSystem, value: view Bool) pub {
+  debug.hasBlur = value
+}
 
 func setDebugButtonTopRight(debug: mod DebugSystem, margin: view Float) pub {
   debug.buttonX = debug.screenW - debug.buttonSize - margin
@@ -103,13 +149,19 @@ func createDebugSystem() pub ret DebugSystem {
 func saveDebugFlags(debug: view DebugSystem, path: view String) pub {
   unsafe {
     let q: String = "\""
-    let openBrace: String = "\u{007B}"
-    let closeBrace: String = "\u{007D}"
+    let openBrace: String = "\{"
+    let closeBrace: String = "\}"
     let nl: String = "\n"
     var content: String = ""
     content = content.concat(other: openBrace).concat(other: nl)
-    content = content.concat(other: "  ").concat(other: q).concat(other: "showLabels").concat(other: q).concat(other: ": ").concat(other: boolStr(b: debug.showLabels)).concat(other: ",").concat(other: nl)
-    content = content.concat(other: "  ").concat(other: q).concat(other: "showInputOutlines").concat(other: q).concat(other: ": ").concat(other: boolStr(b: debug.showInputOutlines)).concat(other: nl)
+    content = content.concat(other: "  ").concat(other: q).concat(other: "showLabels").concat(
+      other: q
+    ).concat(other: ": ").concat(other: boolStr(b: debug.showLabels)).concat(other: ",").concat(
+      other: nl
+    )
+    content = content.concat(other: "  ").concat(other: q).concat(other: "showInputOutlines").concat(
+      other: q
+    ).concat(other: ": ").concat(other: boolStr(b: debug.showInputOutlines)).concat(other: nl)
     content = content.concat(other: closeBrace).concat(other: nl)
     let ok: Bool = rae_ext_rae_sys_write_file(path: path, content: content)
     if ok is false {
@@ -134,12 +186,18 @@ func restoreDebugFlags(debug: mod DebugSystem, path: view String) pub {
     let labelsKey: String = "showLabels"
     let labelsIdx: Int = Json.field(doc: doc, this: root, key: labelsKey)
     if labelsIdx >= 0 {
-      debug.showLabels = Json.jsonBool(this: Json.jsonValueAt(doc: doc, idx: labelsIdx), fallback: false)
+      debug.showLabels = Json.jsonBool(
+        this: Json.jsonValueAt(doc: doc, idx: labelsIdx)
+        fallback: false
+      )
     }
     let outlinesKey: String = "showInputOutlines"
     let outlinesIdx: Int = Json.field(doc: doc, this: root, key: outlinesKey)
     if outlinesIdx >= 0 {
-      debug.showInputOutlines = Json.jsonBool(this: Json.jsonValueAt(doc: doc, idx: outlinesIdx), fallback: false)
+      debug.showInputOutlines = Json.jsonBool(
+        this: Json.jsonValueAt(doc: doc, idx: outlinesIdx)
+        fallback: false
+      )
     }
     log("[debug] restored flags labels={debug.showLabels} outlines={debug.showInputOutlines}")
   }
@@ -189,7 +247,9 @@ func recordDebugFrame(debug: mod DebugSystem, now: view Float64, didRealWork: vi
   debug.lastRssKb = processRssKb()
 }
 
-func currentDebugFPS(debug: view DebugSystem) pub ret Float { ret debug.lastFps }
+func currentDebugFPS(debug: view DebugSystem) pub ret Float {
+  ret debug.lastFps
+}
 
 func addDebugLayer(world: mod UiWorld, debug: mod DebugSystem) pub {
   let hasAnchor: Bool = applyDebugAnchor(world: world, debug: debug)
@@ -201,7 +261,11 @@ func addDebugLayer(world: mod UiWorld, debug: mod DebugSystem) pub {
   }
 }
 
-func dispatchDebugAction(state: mod AppState, input: view InputSystem, debug: mod DebugSystem) pub ret Bool {
+func dispatchDebugAction(
+  state: mod AppState
+  input: view InputSystem
+  debug: mod DebugSystem
+) pub ret Bool {
   unsafe {
     var needsRemount: Bool = false
     let n: Int = input.events.length
@@ -245,7 +309,11 @@ func dispatchDebugAction(state: mod AppState, input: view InputSystem, debug: mo
   }
 }
 
-func selectedForDebugAction(world: view UiWorld, actionId: view String, debug: view DebugSystem) ret Bool {
+func selectedForDebugAction(
+  world: view UiWorld
+  actionId: view String
+  debug: view DebugSystem
+) ret Bool {
   if actionId is debugActionToggleTheme {
     ret world.theme.active.mode is ThemeMode.dark
   }
@@ -270,14 +338,22 @@ func syncDebugWidgetStates(world: mod UiWorld, debug: view DebugSystem) pub {
       let knobKind: String = "debugSwitchKnob"
       var isDebugToggle: Bool = wid.kind is debugKind
       if isDebugToggle is false {
-        if wid.kind is pillKind { isDebugToggle = true }
+        if wid.kind is pillKind {
+          isDebugToggle = true
+        }
       }
       if isDebugToggle is false {
-        if wid.kind is knobKind { isDebugToggle = true }
+        if wid.kind is knobKind {
+          isDebugToggle = true
+        }
       }
       if isDebugToggle {
         let bind: view ActionBinding => componentView(this: world.actionBindings, entity: entity)
-        let selected: Bool = selectedForDebugAction(world: world, actionId: bind.actionId, debug: debug)
+        let selected: Bool = selectedForDebugAction(
+          world: world
+          actionId: bind.actionId
+          debug: debug
+        )
         setWidgetSelected(world: world, entity: entity, selected: selected)
       }
     }
@@ -294,16 +370,34 @@ func formatMemMBGpu2d(kb: view Int) ret String {
 
 func formatFpsGpu2d(fps: view Float) ret String {
   var rounded: Int = (fps + 0.5).toInt()
-  if rounded < 0 { rounded = 0 }
+  if rounded < 0 {
+    rounded = 0
+  }
   ret "fps: {rounded}"
 }
 
-func drawDebugHeartbeatGpu2d(debug: mod DebugSystem, canvas: mod Gpu2dCanvas, didRealWork: view Bool) {
+func drawDebugHeartbeatGpu2d(
+  debug: mod DebugSystem
+  canvas: mod Gpu2dCanvas
+  didRealWork: view Bool
+) {
   if didRealWork {
     debug.heartbeatX = debug.heartbeatX + 2.1686746987951806
-    if debug.heartbeatX > debug.screenW { debug.heartbeatX = -8.674698795180722 }
+    if debug.heartbeatX > debug.screenW {
+      debug.heartbeatX = -8.674698795180722
+    }
   }
-  Gpu2d.drawBox(canvas: canvas, x: debug.heartbeatX, y: 0.0, w: 8.674698795180722, h: 8.674698795180722, radius: 0.0, fill: 0xFFFFBF00, borderWidth: 0.0, border: 0x00000000)
+  Gpu2d.drawBox(
+    canvas: canvas
+    x: debug.heartbeatX
+    y: 0.0
+    w: 8.674698795180722
+    h: 8.674698795180722
+    radius: 0.0
+    fill: 0xFFFFBF00
+    borderWidth: 0.0
+    border: 0x00000000
+  )
 }
 
 func drawDebugLabelsGpu2d(debug: view DebugSystem, canvas: mod Gpu2dCanvas, font: view SdfFont) {
@@ -326,11 +420,29 @@ func drawDebugLabelsGpu2d(debug: view DebugSystem, canvas: mod Gpu2dCanvas, font
     memX = rightEdge - memText.length().toFloat() * fontSize * 0.52
   }
   let amber: Int = 0xFFFFBF00
-  Gpu2dText.drawText(canvas: canvas, font: font, text: fpsText, x: fpsX, y: fpsY, sizePx: fontSize, color: amber)
-  Gpu2dText.drawText(canvas: canvas, font: font, text: memText, x: memX, y: memY, sizePx: fontSize, color: amber)
+  Gpu2dText.drawText(
+    canvas: canvas
+    font: font
+    text: fpsText
+    x: fpsX
+    y: fpsY
+    sizePx: fontSize
+    color: amber
+  )
+  Gpu2dText.drawText(
+    canvas: canvas
+    font: font
+    text: memText
+    x: memX
+    y: memY
+    sizePx: fontSize
+    color: amber
+  )
   if debug.showInputOutlines {
     var lb: Int = 0
-    if Gpu2d.pointerDown() { lb = 1 }
+    if Gpu2d.pointerDown() {
+      lb = 1
+    }
     let buttonText: String = "button: {lb}"
     let buttonY: Float = memY + lineH + 4.337349397590361
     var buttonX: Float = debug.buttonX
@@ -338,11 +450,25 @@ func drawDebugLabelsGpu2d(debug: view DebugSystem, canvas: mod Gpu2dCanvas, font
       let rightEdge: Float = debug.buttonX + debug.buttonSize
       buttonX = rightEdge - buttonText.length().toFloat() * fontSize * 0.52
     }
-    Gpu2dText.drawText(canvas: canvas, font: font, text: buttonText, x: buttonX, y: buttonY, sizePx: fontSize, color: amber)
+    Gpu2dText.drawText(
+      canvas: canvas
+      font: font
+      text: buttonText
+      x: buttonX
+      y: buttonY
+      sizePx: fontSize
+      color: amber
+    )
   }
 }
 
-func updateAndRenderDebugOverlayGpu2d(debug: mod DebugSystem, canvas: mod Gpu2dCanvas, now: view Float64, didRealWork: view Bool, font: view SdfFont) pub {
+func updateAndRenderDebugOverlayGpu2d(
+  debug: mod DebugSystem
+  canvas: mod Gpu2dCanvas
+  now: view Float64
+  didRealWork: view Bool
+  font: view SdfFont
+) pub {
   recordDebugFrame(debug: debug, now: now, didRealWork: didRealWork)
   if debug.showLabels {
     drawDebugLabelsGpu2d(debug: debug, canvas: canvas, font: font)

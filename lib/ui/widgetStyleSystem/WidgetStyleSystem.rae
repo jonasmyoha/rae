@@ -21,15 +21,24 @@ import ui/Theme
 open ecs/ComponentTable
 
 func rgbaEquals(a: view RgbaColor, b: view RgbaColor) ret Bool {
-  if a.r is not b.r { ret false }
-  if a.g is not b.g { ret false }
-  if a.b is not b.b { ret false }
+  if a.r is not b.r {
+    ret false
+  }
+  if a.g is not b.g {
+    ret false
+  }
+  if a.b is not b.b {
+    ret false
+  }
   ret a.a is b.a
 }
 
 # ----- variant readers (fresh scalar/String copies, no struct copy) --
-
-func styleWantSpriteKey(world: view UiWorld, entity: view EntityId, selected: view Bool) ret String {
+func styleWantSpriteKey(
+  world: view UiWorld
+  entity: view EntityId
+  selected: view Bool
+) ret String {
   let style: view StateStyle => componentView(this: world.stateStyles, entity: entity)
   if selected {
     ret "{style.spriteKeySelected}"
@@ -57,7 +66,11 @@ func styleHasTint(world: view UiWorld, entity: view EntityId) ret Bool {
   ret style.hasTint
 }
 
-func styleWantTextStyle(world: view UiWorld, entity: view EntityId, selected: view Bool) ret String {
+func styleWantTextStyle(
+  world: view UiWorld
+  entity: view EntityId
+  selected: view Bool
+) ret String {
   let style: view StateStyle => componentView(this: world.stateStyles, entity: entity)
   if selected {
     ret "{style.textStyleSelected}"
@@ -80,7 +93,11 @@ func styleErrorAlpha(world: view UiWorld, entity: view EntityId) ret Float {
   ret style.errorAlpha
 }
 
-func styleWantShapeFill(world: view UiWorld, entity: view EntityId, selected: view Bool) ret RgbaColor {
+func styleWantShapeFill(
+  world: view UiWorld
+  entity: view EntityId
+  selected: view Bool
+) ret RgbaColor {
   let style: view StateStyle => componentView(this: world.stateStyles, entity: entity)
   # A non-empty slot references the active theme (#237); else the literal.
   if selected {
@@ -114,42 +131,64 @@ func styleHasOffset(world: view UiWorld, entity: view EntityId) ret Bool {
 }
 
 # ----- read-side checks (view borrows only) --------------------------
-
 func spriteKeyDiffers(world: view UiWorld, entity: view EntityId, wantKey: view String) ret Bool {
-  if wantKey.length() is 0 { ret false }
-  if componentHas(this: world.sprites, entity: entity) is false { ret false }
+  if wantKey.length() is 0 {
+    ret false
+  }
+  if componentHas(this: world.sprites, entity: entity) is false {
+    ret false
+  }
   let cur: view Sprite => componentView(this: world.sprites, entity: entity)
   ret cur.textureKey is wantKey is false
 }
 
-func spriteTintDiffers(world: view UiWorld, entity: view EntityId, wantTint: view RgbaColor) ret Bool {
-  if componentHas(this: world.sprites, entity: entity) is false { ret false }
+func spriteTintDiffers(
+  world: view UiWorld
+  entity: view EntityId
+  wantTint: view RgbaColor
+) ret Bool {
+  if componentHas(this: world.sprites, entity: entity) is false {
+    ret false
+  }
   let cur: view Sprite => componentView(this: world.sprites, entity: entity)
   ret rgbaEquals(a: cur.tint, b: wantTint) is false
 }
 
 func textStyleDiffers(world: view UiWorld, entity: view EntityId, wantStyle: view String) ret Bool {
-  if wantStyle.length() is 0 { ret false }
-  if componentHas(this: world.texts, entity: entity) is false { ret false }
+  if wantStyle.length() is 0 {
+    ret false
+  }
+  if componentHas(this: world.texts, entity: entity) is false {
+    ret false
+  }
   let cur: view Text => componentView(this: world.texts, entity: entity)
   ret cur.styleId is wantStyle is false
 }
 
-func shapeFillDiffers(world: view UiWorld, entity: view EntityId, wantFill: view RgbaColor) ret Bool {
-  if componentHas(this: world.shapes, entity: entity) is false { ret false }
+func shapeFillDiffers(
+  world: view UiWorld
+  entity: view EntityId
+  wantFill: view RgbaColor
+) ret Bool {
+  if componentHas(this: world.shapes, entity: entity) is false {
+    ret false
+  }
   let cur: view Shape => componentView(this: world.shapes, entity: entity)
   ret rgbaEquals(a: cur.fill, b: wantFill) is false
 }
 
 func offsetDiffers(world: view UiWorld, entity: view EntityId, wantOffset: view Vec2) ret Bool {
-  if componentHas(this: world.offsets, entity: entity) is false { ret true }
+  if componentHas(this: world.offsets, entity: entity) is false {
+    ret true
+  }
   let cur: view Offset => componentView(this: world.offsets, entity: entity)
-  if cur.delta.x is not wantOffset.x { ret true }
+  if cur.delta.x is not wantOffset.x {
+    ret true
+  }
   ret cur.delta.y is not wantOffset.y
 }
 
 # ----- per-visual apply (mod borrow only when a check said "differs")
-
 func applySpriteStyle(world: mod UiWorld, entity: view EntityId, selected: view Bool) {
   var wantKey: String = styleWantSpriteKey(world: world, entity: entity, selected: selected)
   let wantTint: RgbaColor = styleWantTint(world: world, entity: entity, selected: selected)
@@ -250,7 +289,6 @@ func applyStateOpacity(
 }
 
 # ----- the system -----------------------------------------------------
-
 func widgetStyleSystem(world: mod UiWorld) {
   let n: Int = componentCount(this: world.stateStyles)
   var i: Int = 0
@@ -271,7 +309,13 @@ func widgetStyleSystem(world: mod UiWorld) {
     applyTextStyle(world: world, entity: entity, selected: selected)
     applyShapeStyle(world: world, entity: entity, selected: selected)
     applyOffsetStyle(world: world, entity: entity, selected: selected)
-    applyStateOpacity(world: world, entity: entity, enabled: enabled, loading: loading, error: error)
+    applyStateOpacity(
+      world: world
+      entity: entity
+      enabled: enabled
+      loading: loading
+      error: error
+    )
     i = i + 1
   }
 }

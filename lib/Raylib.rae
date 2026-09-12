@@ -61,7 +61,14 @@ type Rectangle: c_struct {
 # picks a sub-region of `texture`, `dest` is where it lands, and
 # `origin` is the pivot point relative to dest (use 0,0 for the
 # standard top-left). Tint multiplies the sampled colour.
-func drawTexturePro(texture: Texture, source: Rectangle, dest: Rectangle, origin: Vector2, rotation: Float, tint: Color) unsafe extern
+func drawTexturePro(
+  texture: Texture
+  source: Rectangle
+  dest: Rectangle
+  origin: Vector2
+  rotation: Float
+  tint: Color
+) unsafe extern
 
 func initWindow(width: Int, height: Int, title: String) unsafe extern
 
@@ -85,6 +92,7 @@ func loadTexture(fileName: String) unsafe extern ret Texture
 # (row-major, expanded to opaque RGBA8) so the image can be shown as it is
 # computed. Draw it with the usual drawTexture/drawTextureEx.
 func loadStreamTexture(width: Int, height: Int) unsafe extern ret Texture
+
 func updateStreamTexture(texture: Texture, pixels: view Buffer(Int), count: Int) unsafe extern
 
 # Set a texture's GPU sampling filter. `filter` matches raylib's
@@ -120,6 +128,7 @@ func raylibSetLogLevel(level: Int) unsafe extern
 # at the curve with one-pixel smoothstep AA — no pre-baked variants,
 # any size, any radius, any texture.
 func roundedSpriteBegin(width: Float, height: Float, radius: Float) unsafe extern
+
 func roundedSpriteEnd() unsafe extern
 
 # Bracket a sequence of `drawTexturePro` calls against an MTSDF atlas
@@ -133,7 +142,17 @@ func roundedSpriteEnd() unsafe extern
 #   * shadowColor   — shadow tint (a = 0 disables)
 #   * shadowOffX/Y  — shadow displacement in atlas-UV space
 #   * shadowSoftness — falloff width in screen px (1 = hard)
-func msdfBegin(pxRange: Float, textColor: Color, outlineColor: Color, outlineWidth: Float, shadowColor: Color, shadowOffX: Float, shadowOffY: Float, shadowSoftness: Float) unsafe extern
+func msdfBegin(
+  pxRange: Float
+  textColor: Color
+  outlineColor: Color
+  outlineWidth: Float
+  shadowColor: Color
+  shadowOffX: Float
+  shadowOffY: Float
+  shadowSoftness: Float
+) unsafe extern
+
 func msdfEnd() unsafe extern
 
 # Draw a rounded rectangle filled with a linear gradient. One atomic
@@ -181,7 +200,12 @@ func captureAndBlurRegion(
   blurSize: Int
 ) unsafe extern ret Texture
 
-func drawTexture(texture: Texture, x: Float, y: Float, tint: Color) unsafe extern
+func drawTexture(
+  texture: Texture
+  x: Float
+  y: Float
+  tint: Color
+) unsafe extern
 
 func drawTextureEx(
   texture: Texture
@@ -221,13 +245,38 @@ func drawRectangleRounded(
   color: Color
 ) unsafe extern
 
-func drawCircle(x: Float, y: Float, radius: Float, color: Color) unsafe extern
+func drawCircle(
+  x: Float
+  y: Float
+  radius: Float
+  color: Color
+) unsafe extern
 
-func drawCircleGradient(x: Int, y: Int, radius: Float, color1: Color, color2: Color) unsafe extern
+func drawCircleGradient(
+  x: Int
+  y: Int
+  radius: Float
+  color1: Color
+  color2: Color
+) unsafe extern
 
-func drawRectangleGradientV(x: Int, y: Int, width: Int, height: Int, color1: Color, color2: Color) unsafe extern
+func drawRectangleGradientV(
+  x: Int
+  y: Int
+  width: Int
+  height: Int
+  color1: Color
+  color2: Color
+) unsafe extern
 
-func drawRectangleGradientH(x: Int, y: Int, width: Int, height: Int, color1: Color, color2: Color) unsafe extern
+func drawRectangleGradientH(
+  x: Int
+  y: Int
+  width: Int
+  height: Int
+  color1: Color
+  color2: Color
+) unsafe extern
 
 func drawText(
   text: String
@@ -447,7 +496,9 @@ func getMonitorRefreshRate(monitor: Int) unsafe extern ret Int
 func setWindowSize(width: Int, height: Int) unsafe extern
 
 func setWindowPosition(x: Int, y: Int) unsafe extern
+
 func getWindowPositionX() unsafe extern ret Int
+
 func getWindowPositionY() unsafe extern ret Int
 
 # Seconds since window init. Float64 like the other clock sources: f32

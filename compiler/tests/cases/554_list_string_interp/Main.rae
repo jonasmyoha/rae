@@ -16,11 +16,11 @@ import String
 func main() {
   let m: String = "gamma"
   var l: List(String) = List.create(String, cap: 8)
-  l.add(value: "literal")          # static: never pooled
-  l.add(value: m)                  # plain binding: already detached
-  l.add(value: "{m}")              # interpolation: the #343 case
-  l.add(value: "pre-{m}-post")     # interpolation with surrounding text
-  l.add(value: m.concat(other: "-tail"))   # call result, same ownership path
+  l.add(value: "literal")  # static: never pooled
+  l.add(value: m)  # plain binding: already detached
+  l.add(value: "{m}")  # interpolation: the #343 case
+  l.add(value: "pre-{m}-post")  # interpolation with surrounding text
+  l.add(value: m.concat(other: "-tail"))  # call result, same ownership path
   var i: Int = 0
   loop i < l.length {
     log("[{i}]={l.copyAt(index: i)}")

@@ -23,17 +23,19 @@ func maybeDrop(early: view Bool) {
   } else {
     log("kept")
   }
-}                               # early: nothing more; kept: release 10 here
+}
 
+# early: nothing more; kept: release 10 here
 func dropThenReuse(flag: view Bool) {
   var slot: Slot = create(id: 20)
   if flag {
     slot.drop()
-    slot = create(id: 21)      # reinitialised on this path; live again
+    slot = create(id: 21)  # reinitialised on this path; live again
   }
   log("slot is {slot.id}")
-}                               # release 21 or release 20, once
+}
 
+# release 21 or release 20, once
 func dropInLoop() {
   var slot: Slot = create(id: 30)
   loop var i: Int = 0, i < 3, ++i {
@@ -41,8 +43,9 @@ func dropInLoop() {
     slot = create(id: 31 + i)
   }
   log("after loop {slot.id}")
-}                               # release 33
+}
 
+# release 33
 func main() {
   log("-- early")
   maybeDrop(early: true)

@@ -33,11 +33,21 @@ func renderFrame(
       Gpu2d.beginFrameLoad(canvas: renderer.canvas)
       renderSystemGpu2d(world: uiWorld, res: uiResources, canvas: renderer.canvas)
       drawNextPiecePreview(kind: game.nextKind, canvas: renderer.canvas)
-      drawDebugOverlay(debugOverlay: debug, canvas: renderer.canvas, font: uiResources.textFont, didRealWork: true)
+      drawDebugOverlay(
+        debugOverlay: debug
+        canvas: renderer.canvas
+        font: uiResources.textFont
+        didRealWork: true
+      )
     } else {
       renderDeferredPassWorld(
-        r: renderer, tag: tag, world: renderState.world
-        camera: camera, light: light, aspect: aspect)
+        r: renderer
+        tag: tag
+        world: renderState.world
+        camera: camera
+        light: light
+        aspect: aspect
+      )
     }
     passIndex = passIndex + 1
   }
@@ -54,10 +64,16 @@ func main() ret Int {
     grid: List.create(Int, cap: 0)
     currentPiece: { kind: TetrominoKind.i, x: 3, y: 0, rotation: 0 }
     nextKind: TetrominoKind.o
-    score: 0, lines: 0, level: 1
-    fallTimer: 0, fallDelay: 30
-    hMoveTimer: 0, hMoveDelay: 4, dasDelay: 12
-    lockTimer: 0, lockDelay: 30
+    score: 0
+    lines: 0
+    level: 1
+    fallTimer: 0
+    fallDelay: 30
+    hMoveTimer: 0
+    hMoveDelay: 4
+    dasDelay: 12
+    lockTimer: 0
+    lockDelay: 30
     camTime: 0.0
     particles: List.create(Particle, cap: 0)
     lockFlash: 0.0
@@ -78,17 +94,23 @@ func main() ret Int {
     dir: "examples/104_ui_hello/assets/"
     textFontName: "Roboto-Regular"
     iconFontName: ""
-    themeFile: "theme.raescene")
+    themeFile: "theme.raescene"
+  )
   var uiWorld: UiWorld = create()
   # #764: install the app's theme (palette + scene tokens) onto this world.
   seedWorldTheme(world: uiWorld, res: uiResources)
   let uiRoot: EntityId = mountUiScene(
     world: uiWorld
     path: "examples/97_tetris3d/assets/ui.raescene"
-    res: uiResources)
+    res: uiResources
+  )
   var hudState: TetrisHudState = createTetrisHudState()
   var dbg: DebugOverlay = createDebugOverlay(
-    button: true, fps: true, memory: true, heartbeat: false)
+    button: true
+    fps: true
+    memory: true
+    heartbeat: false
+  )
 
   let testMode: Bool = Sys.getEnv(name: "RAE_TETRIS3D_TEST_FRAME").length() > 0
   if testMode {
@@ -97,9 +119,19 @@ func main() ret Int {
     game.level = 2
     var testX: Int = 0
     loop testX < gridWidth {
-      gridSet(world: game, x: testX, y: gridHeight - 1, value: testX % 7 + 1)
+      gridSet(
+        world: game
+        x: testX
+        y: gridHeight - 1
+        value: testX % 7 + 1
+      )
       if testX % 2 is 0 {
-        gridSet(world: game, x: testX, y: gridHeight - 2, value: testX % 7 + 1)
+        gridSet(
+          world: game
+          x: testX
+          y: gridHeight - 2
+          value: testX % 7 + 1
+        )
       }
       testX = testX + 1
     }
@@ -114,12 +146,18 @@ func main() ret Int {
     let resized: Bool = resizeUiToWindow(world: uiWorld, res: uiResources)
     let now: Float64 = Gpu2d.nowSeconds()
     if updateDebugOverlay(
-      d: dbg, screenW: Gpu2d.designWidth(), screenH: Gpu2d.designHeight()
-      now: now, didRealWork: true) {
+      d: dbg
+      screenW: Gpu2d.designWidth()
+      screenH: Gpu2d.designHeight()
+      now: now
+      didRealWork: true
+    ) {
     }
     var frameTime: Float64 = now - previousTime
     previousTime = now
-    if frameTime > 0.1 { frameTime = 0.1 }
+    if frameTime > 0.1 {
+      frameTime = 0.1
+    }
     accumulator = accumulator + frameTime
     if testMode is false {
       loop accumulator >= fixedStep {
@@ -135,14 +173,22 @@ func main() ret Int {
     runUiSystems(world: uiWorld, res: uiResources)
     if Gpu2d.renderGate() {
       renderFrame(
-        renderer: renderer, renderState: renderState, game: game
-        camera: camera, light: light
-        uiWorld: uiWorld, uiResources: uiResources, debug: dbg)
+        renderer: renderer
+        renderState: renderState
+        game: game
+        camera: camera
+        light: light
+        uiWorld: uiWorld
+        uiResources: uiResources
+        debug: dbg
+      )
     }
   }
 
-  if testMode { log("[tetris3d] deterministic deferred frame rendered") }
-  shutdownDeferredRenderer(renderer: renderer)   # #904: the renderer-owned GPU manager, before the C shutdown
+  if testMode {
+    log("[tetris3d] deterministic deferred frame rendered")
+  }
+  shutdownDeferredRenderer(renderer: renderer)  # #904: the renderer-owned GPU manager, before the C shutdown
   Gbuffer.shutdownAll()
   Gpu2d.closeWindow()
   ret 0

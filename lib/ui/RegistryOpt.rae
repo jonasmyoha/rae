@@ -7,12 +7,15 @@ import Json
 import ui/Spacing
 import ui/Theme
 
-
 # -----------------------------------------------------------------
 # Helpers — JSON value extraction with sensible defaults
 # -----------------------------------------------------------------
-
-func optFloat(doc: view JsonDoc, container: view JsonValue, key: view String, fallback: view Float) ret Float {
+func optFloat(
+  doc: view JsonDoc
+  container: view JsonValue
+  key: view String
+  fallback: view Float
+) ret Float {
   let idx: Int = Json.field(doc: doc, this: container, key: key)
   if idx < 0 {
     ret fallback
@@ -27,7 +30,13 @@ func optFloat(doc: view JsonDoc, container: view JsonValue, key: view String, fa
 # `"gap": "spaceM"` instead of remembering the pixel value. A numeric
 # JSON value still works unchanged — the string branch is the
 # extension, not a replacement.
-func optFloatOrToken(doc: view JsonDoc, theme: view UiTheme, container: view JsonValue, key: view String, fallback: view Float) ret Float {
+func optFloatOrToken(
+  doc: view JsonDoc
+  theme: view UiTheme
+  container: view JsonValue
+  key: view String
+  fallback: view Float
+) ret Float {
   let idx: Int = Json.field(doc: doc, this: container, key: key)
   if idx < 0 {
     ret fallback
@@ -49,7 +58,13 @@ func optFloatOrToken(doc: view JsonDoc, theme: view UiTheme, container: view Jso
 # Used for CornerRadius.radius and Shape.radius so a scene can write
 # `"radius": "radiusCard"` instead of a raw du value. A numeric value
 # still works unchanged.
-func optRadiusOrToken(doc: view JsonDoc, theme: view UiTheme, container: view JsonValue, key: view String, fallback: view Float) ret Float {
+func optRadiusOrToken(
+  doc: view JsonDoc
+  theme: view UiTheme
+  container: view JsonValue
+  key: view String
+  fallback: view Float
+) ret Float {
   let idx: Int = Json.field(doc: doc, this: container, key: key)
   if idx < 0 {
     ret fallback
@@ -63,7 +78,12 @@ func optRadiusOrToken(doc: view JsonDoc, theme: view UiTheme, container: view Js
   ret Json.jsonFloat(this: v, fallback: fallback)
 }
 
-func optInt(doc: view JsonDoc, container: view JsonValue, key: view String, fallback: view Int) ret Int {
+func optInt(
+  doc: view JsonDoc
+  container: view JsonValue
+  key: view String
+  fallback: view Int
+) ret Int {
   let idx: Int = Json.field(doc: doc, this: container, key: key)
   if idx < 0 {
     ret fallback
@@ -72,7 +92,12 @@ func optInt(doc: view JsonDoc, container: view JsonValue, key: view String, fall
   ret Json.jsonInt(this: v, fallback: fallback)
 }
 
-func optString(doc: view JsonDoc, container: view JsonValue, key: view String, fallback: view String) ret String {
+func optString(
+  doc: view JsonDoc
+  container: view JsonValue
+  key: view String
+  fallback: view String
+) ret String {
   unsafe {
     # Always return an independently-owned String (see jsonString
     # for the why) so callers can hand the result to a struct field
@@ -86,7 +111,12 @@ func optString(doc: view JsonDoc, container: view JsonValue, key: view String, f
   }
 }
 
-func optBool(doc: view JsonDoc, container: view JsonValue, key: view String, fallback: view Bool) ret Bool {
+func optBool(
+  doc: view JsonDoc
+  container: view JsonValue
+  key: view String
+  fallback: view Bool
+) ret Bool {
   let idx: Int = Json.field(doc: doc, this: container, key: key)
   if idx < 0 {
     ret fallback

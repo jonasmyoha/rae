@@ -9,8 +9,9 @@ open ecs/ComponentTable
 #   - removing the TAIL row leaves the remaining order untouched.
 # The swap-remove is the deliberate data-oriented choice (O(1), keeps the
 # array dense); order instability is its documented cost.
-
-type Position { x: Int }
+type Position {
+  x: Int
+}
 
 func order(pos: view ComponentTable(Position)) ret String {
   var line: String = ""
@@ -38,7 +39,12 @@ func main() {
   let stamp4: Int = componentModStamp(this: pos, entity: e4)
   componentRemove(this: pos, entity: e2)
   log("after removing e2 (non-tail): {order(pos: pos)}")
-  log("e4 still findable at dense {componentIndexOf(this: pos, entity: e4)} with x={componentGet(this: pos, entity: e4).x}")
+  log(
+    "e4 still findable at dense {componentIndexOf(this: pos, entity: e4)} with x={componentGet(
+      this: pos
+      entity: e4
+    ).x}"
+  )
   log("e4 stamp moved intact: {componentModStamp(this: pos, entity: e4) - stamp4}")
   log("e2 gone: {componentHas(this: pos, entity: e2)}")
 

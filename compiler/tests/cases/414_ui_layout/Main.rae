@@ -16,7 +16,6 @@ open ecs/ComponentTable
 #   └── Footer  (360x100)
 #
 # Then dump each entity's ComputedRect and WorldTransform.
-
 func makeFixedSize() ret Size {
   ret Size {
     w: SizeAxis { mode: SizeMode.fixed, min: -1, max: -1 }
@@ -24,13 +23,24 @@ func makeFixedSize() ret Size {
   }
 }
 
-func setRectFixed(world: mod UiWorld, entity: view EntityId, w: view Float, h: view Float) {
+func setRectFixed(
+  world: mod UiWorld
+  entity: view EntityId
+  w: view Float
+  h: view Float
+) {
   let r: Rect = { position: { x: 0.0, y: 0.0 }, size: { x: w, y: h } }
   componentSet(this: world.rects, entity: entity, data: r)
   componentSet(this: world.sizes, entity: entity, data: makeFixedSize())
 }
 
-func setShapeRect(world: mod UiWorld, entity: view EntityId, r: view Int, g: view Int, b: view Int) {
+func setShapeRect(
+  world: mod UiWorld
+  entity: view EntityId
+  r: view Int
+  g: view Int
+  b: view Int
+) {
   let shape: Shape = {
     kind: ShapeKind.rect
     fill: RgbaColor { r: r, g: g, b: b, a: 255 }
@@ -66,14 +76,21 @@ func dumpEntity(world: view UiWorld, entity: view EntityId, label: view String) 
   var cr: ComputedRect = componentGet(this: world.computedRects, entity: entity)
   var wt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: entity)
   let wv: WorldVisual = worldVisualOf(world: world, entity: entity)
-  log("{label} cr=({cr.position.x},{cr.position.y},{cr.size.x},{cr.size.y}) wt=({wt.position.x},{wt.position.y}) alpha={wv.alpha} visible={wv.visible}")
+  log(
+    "{label} cr=({cr.position.x},{cr.position.y},{cr.size.x},{cr.size.y}) wt=({wt.position.x},{wt.position.y}) alpha={wv.alpha} visible={wv.visible}"
+  )
 }
 
 func main() {
   let world: UiWorld = createUiWorld()
 
   let root: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: root, w: 400.0, h: 600.0)
+  setRectFixed(
+    world: world
+    entity: root
+    w: 400.0
+    h: 600.0
+  )
   let rootLayout: Layout = {
     kind: LayoutType.vertical
     gap: 10.0
@@ -88,7 +105,12 @@ func main() {
   componentSet(this: world.paddings, entity: root, data: rootPad)
 
   let header: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: header, w: 360.0, h: 80.0)
+  setRectFixed(
+    world: world
+    entity: header
+    w: 360.0
+    h: 80.0
+  )
   let headerLayout: Layout = {
     kind: LayoutType.horizontal
     gap: 10.0
@@ -101,23 +123,67 @@ func main() {
   componentSet(this: world.layouts, entity: header, data: headerLayout)
 
   let iconA: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: iconA, w: 40.0, h: 40.0)
-  setShapeRect(world: world, entity: iconA, r: 255, g: 0, b: 0)
+  setRectFixed(
+    world: world
+    entity: iconA
+    w: 40.0
+    h: 40.0
+  )
+  setShapeRect(
+    world: world
+    entity: iconA
+    r: 255
+    g: 0
+    b: 0
+  )
   let iconB: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: iconB, w: 40.0, h: 40.0)
-  setShapeRect(world: world, entity: iconB, r: 0, g: 255, b: 0)
+  setRectFixed(
+    world: world
+    entity: iconB
+    w: 40.0
+    h: 40.0
+  )
+  setShapeRect(
+    world: world
+    entity: iconB
+    r: 0
+    g: 255
+    b: 0
+  )
   let headerKids: List(EntityId) = List.create(EntityId, cap: 2)
   headerKids.add(value: iconA)
   headerKids.add(value: iconB)
   attachChildren(world: world, parent: header, kids: headerKids)
 
   let body: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: body, w: 360.0, h: 100.0)
-  setShapeRect(world: world, entity: body, r: 200, g: 200, b: 200)
+  setRectFixed(
+    world: world
+    entity: body
+    w: 360.0
+    h: 100.0
+  )
+  setShapeRect(
+    world: world
+    entity: body
+    r: 200
+    g: 200
+    b: 200
+  )
 
   let footer: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: footer, w: 360.0, h: 100.0)
-  setShapeRect(world: world, entity: footer, r: 100, g: 100, b: 100)
+  setRectFixed(
+    world: world
+    entity: footer
+    w: 360.0
+    h: 100.0
+  )
+  setShapeRect(
+    world: world
+    entity: footer
+    r: 100
+    g: 100
+    b: 100
+  )
 
   let rootKids: List(EntityId) = List.create(EntityId, cap: 3)
   rootKids.add(value: header)

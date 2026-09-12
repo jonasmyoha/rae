@@ -72,8 +72,8 @@ func addToLibrary(library: mod List(String), stem: view String) pub {
 func saveLibraryToJson(library: view List(String), path: view String) pub {
   unsafe {
     ensureAppCacheDirs()
-    let openBrace: String = "\u{007B}"
-    let closeBrace: String = "\u{007D}"
+    let openBrace: String = "\{"
+    let closeBrace: String = "\}"
     let openBracket: String = "["
     let closeBracket: String = "]"
     let nl: String = "\n"
@@ -84,13 +84,17 @@ func saveLibraryToJson(library: view List(String), path: view String) pub {
     var content: String = ""
     content = content.concat(other: openBrace).concat(other: nl)
     content = content.concat(other: "  ").concat(other: q).concat(other: "stems").concat(other: q)
-    content = content.concat(other: colon).concat(other: " ").concat(other: openBracket).concat(other: nl)
+    content = content.concat(other: colon).concat(other: " ").concat(other: openBracket).concat(
+      other: nl
+    )
     let n: Int = library.length
     var i: Int = 0
     loop i < n {
       if let entry: String = library.copyAt(index: i) {
         let escaped: String = Json.escape(text: entry)
-        content = content.concat(other: "    ").concat(other: q).concat(other: escaped).concat(other: q)
+        content = content.concat(other: "    ").concat(other: q).concat(other: escaped).concat(
+          other: q
+        )
         if i < n - 1 {
           content = content.concat(other: comma)
         }
@@ -107,7 +111,11 @@ func saveLibraryToJson(library: view List(String), path: view String) pub {
   }
 }
 
-func parseLibraryFromJson(albums: view List(Album), source: view String, loadPath: view String) ret List(String) {
+func parseLibraryFromJson(
+  albums: view List(Album)
+  source: view String
+  loadPath: view String
+) ret List(String) {
   unsafe {
     let doc: JsonDoc = Json.parseJson(source: source)
     if doc.ok is false {
@@ -155,7 +163,11 @@ func loadLibraryFromJson(albums: view List(Album), path: view String) pub ret Li
     }
     let legacySource: String = rae_ext_rae_sys_read_file(path: legacyLibraryFilePath)
     if legacySource.length() > 0 {
-      let migrated: List(String) = parseLibraryFromJson(albums: albums, source: legacySource, loadPath: legacyLibraryFilePath)
+      let migrated: List(String) = parseLibraryFromJson(
+        albums: albums
+        source: legacySource
+        loadPath: legacyLibraryFilePath
+      )
       saveLibraryToJson(library: migrated, path: path)
       ret migrated
     }

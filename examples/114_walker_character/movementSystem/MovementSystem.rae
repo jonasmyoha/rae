@@ -49,18 +49,30 @@ func spawnOnLand(controller: mod ThirdPersonController, groundZ: view Float) {
 # which keeps the turn — a character walking into the drop-off still faces the way
 # you pushed, it just does not advance. Each axis is tested separately so wading
 # along the drop-off at an angle SLIDES along it instead of sticking.
-func updateWalkerMovement(controller: mod ThirdPersonController,
-                          intent: view InputIntent, cameraYaw: view Float,
-                          deltaTime: view Float) ret Bool {
+func updateWalkerMovement(
+  controller: mod ThirdPersonController
+  intent: view InputIntent
+  cameraYaw: view Float
+  deltaTime: view Float
+) ret Bool {
   let fromX: Float = controller.position.x
   let fromY: Float = controller.position.y
-  let moved: Bool = stepThirdPersonController(controller: controller,
-    inputRight: intent.moveX, inputForward: intent.moveY,
-    walking: intent.walking, cameraYaw: cameraYaw, deltaTime: deltaTime)
-  if moved is false { ret moved }
+  let moved: Bool = stepThirdPersonController(
+    controller: controller
+    inputRight: intent.moveX
+    inputForward: intent.moveY
+    walking: intent.walking
+    cameraYaw: cameraYaw
+    deltaTime: deltaTime
+  )
+  if moved is false {
+    ret moved
+  }
   let toX: Float = controller.position.x
   let toY: Float = controller.position.y
-  if terrainWadable(x: toX, y: toY) { ret moved }
+  if terrainWadable(x: toX, y: toY) {
+    ret moved
+  }
   if terrainWadable(x: toX, y: fromY) {
     controller.position.y = fromY
     ret moved
@@ -79,15 +91,20 @@ func updateWalkerMovement(controller: mod ThirdPersonController,
 # Rae gameplay forward is +Y. Correct that at the asset-placement boundary.
 const walkerFacingCorrection: Float = 3.141592653589793
 
-func walkerWorldModel(baseModel: view Mat4,
-                      controller: view ThirdPersonController) ret Mat4 {
+func walkerWorldModel(baseModel: view Mat4, controller: view ThirdPersonController) ret Mat4 {
   let worldTranslation: Mat4 = mat4Translate(
-    x: controller.position.x, y: controller.position.y, z: controller.position.z)
+    x: controller.position.x
+    y: controller.position.y
+    z: controller.position.z
+  )
   # #745: heading -> quat rotation about Z (not a Euler axis matrix).
-  let worldHeading: Mat4 = Quat.toMat4(q: Quat.fromAxisAngle(
-    axis: Vec3.create(x: 0.0, y: 0.0, z: 1.0), angle: controller.heading + walkerFacingCorrection))
-  ret mat4Mul(a: worldTranslation,
-                 b: mat4Mul(a: worldHeading, b: baseModel))
+  let worldHeading: Mat4 = Quat.toMat4(
+    q: Quat.fromAxisAngle(
+      axis: Vec3.create(x: 0.0, y: 0.0, z: 1.0)
+      angle: controller.heading + walkerFacingCorrection
+    )
+  )
+  ret mat4Mul(a: worldTranslation, b: mat4Mul(a: worldHeading, b: baseModel))
 }
 
 # The character's walk ray: sample the terrain height field straight down at the
@@ -96,5 +113,8 @@ func walkerWorldModel(baseModel: view Mat4,
 # above the flat groundZ baked into the model's base transform.
 func groundWalker(controller: mod ThirdPersonController, groundZ: view Float) {
   controller.position.z = terrainHeightAt(
-    x: controller.position.x, y: controller.position.y, groundZ: groundZ) - groundZ
+    x: controller.position.x
+    y: controller.position.y
+    groundZ: groundZ
+  ) - groundZ
 }

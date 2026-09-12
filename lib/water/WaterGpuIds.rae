@@ -11,12 +11,17 @@ open gpu/GpuLifetime
 open gpu/GpuRender
 open gpu/GpuIds
 
-const waterCascadeMaps: Int = 3      # 0 displacement+Jacobian, 1 normal, 2 foam
+const waterCascadeMaps: Int = 3  # 0 displacement+Jacobian, 1 normal, 2 foam
+
 const waterCascadeCount: Int = 3
-const fftMaxStages: Int = 10         # up to 1024^2
+
+const fftMaxStages: Int = 10  # up to 1024^2
+
 const fftFields: Int = 4
+
 const fftMaxCascades: Int = 3
-const fftWorkTextures: Int = 6       # P, Q, R0..R3
+
+const fftWorkTextures: Int = 6  # P, Q, R0..R3
 
 # ----- the groups -----------------------------------------------------------
 
@@ -31,7 +36,13 @@ type WaterFrameExternals {
 }
 
 func noFrameExternals() ret WaterFrameExternals {
-  ret WaterFrameExternals { valid: false, frameUniform: noExternalId(), depthView: noExternalId(), litCopyView: noExternalId(), litView: noExternalId() }
+  ret WaterFrameExternals {
+    valid: false
+    frameUniform: noExternalId()
+    depthView: noExternalId()
+    litCopyView: noExternalId()
+    litView: noExternalId()
+  }
 }
 
 # One gbuffer mesh's vertex/index buffers, adopted once per mesh id.
@@ -44,7 +55,13 @@ type WaterMeshExternals {
 }
 
 func noMeshExternals() ret WaterMeshExternals {
-  ret WaterMeshExternals { valid: false, mesh: 0, vertex: noExternalId(), index: noExternalId(), indexCount: 0 }
+  ret WaterMeshExternals {
+    valid: false
+    mesh: 0
+    vertex: noExternalId()
+    index: noExternalId()
+    indexCount: 0
+  }
 }
 
 type WaterSurfaceGpu {
@@ -59,8 +76,12 @@ type WaterSurfaceGpu {
 
 func createSurfaceGpu() ret WaterSurfaceGpu {
   ret WaterSurfaceGpu {
-    pipeline: noRenderPipelineId(), uniform: noBufferId(), bindGroup: noBindGroupId(),
-    litSampler: noSamplerId(), cascadeSampler: noSamplerId(), frame: noFrameExternals(),
+    pipeline: noRenderPipelineId()
+    uniform: noBufferId()
+    bindGroup: noBindGroupId()
+    litSampler: noSamplerId()
+    cascadeSampler: noSamplerId()
+    frame: noFrameExternals()
     meshes: List.create(WaterMeshExternals, cap: 4)
   }
 }
@@ -72,7 +93,10 @@ type WaterCascadeGpu {
 }
 
 func createCascadeGpu() ret WaterCascadeGpu {
-  ret WaterCascadeGpu { textures: fillTextureIds(count: waterCascadeCount * waterCascadeMaps), views: fillTextureViewIds(count: waterCascadeCount * waterCascadeMaps) }
+  ret WaterCascadeGpu {
+    textures: fillTextureIds(count: waterCascadeCount * waterCascadeMaps)
+    views: fillTextureViewIds(count: waterCascadeCount * waterCascadeMaps)
+  }
 }
 
 func waterCascadeIndex(cascade: view Int, map: view Int) ret Int {
@@ -113,16 +137,29 @@ type WaterFftGpu {
 
 func createFftGpu() ret WaterFftGpu {
   ret WaterFftGpu {
-    uniform: noBufferId(), spectrumPipeline: noPipelineId(), butterflyPipeline: noPipelineId(),
-    butterflyTexture: noTextureId(), butterflyView: noTextureViewId(), readback: noBufferId(),
-    h0Textures: fillTextureIds(count: fftMaxCascades), h0Views: fillTextureViewIds(count: fftMaxCascades),
-    spectrumBinds: fillBindGroupIds(count: fftMaxCascades), butterflyBind: noBindGroupId(),
-    evolvePipeline: noPipelineId(), stockhamPipeline: noPipelineId(), transposePipeline: noPipelineId(),
-    fieldOutPipeline: noPipelineId(), postPipeline: noPipelineId(),
-    workTextures: fillTextureIds(count: fftWorkTextures), workViews: fillTextureViewIds(count: fftWorkTextures),
-    stageUniforms: fillBufferIds(count: fftMaxStages), stageBinds: fillBindGroupIds(count: fftMaxStages * 2),
-    transposeBinds: fillBindGroupIds(count: 2), fieldOutBinds: fillBindGroupIds(count: fftFields * 2),
-    evolveUniforms: fillBufferIds(count: fftMaxCascades * fftFields), evolveBinds: fillBindGroupIds(count: fftMaxCascades * fftFields),
+    uniform: noBufferId()
+    spectrumPipeline: noPipelineId()
+    butterflyPipeline: noPipelineId()
+    butterflyTexture: noTextureId()
+    butterflyView: noTextureViewId()
+    readback: noBufferId()
+    h0Textures: fillTextureIds(count: fftMaxCascades)
+    h0Views: fillTextureViewIds(count: fftMaxCascades)
+    spectrumBinds: fillBindGroupIds(count: fftMaxCascades)
+    butterflyBind: noBindGroupId()
+    evolvePipeline: noPipelineId()
+    stockhamPipeline: noPipelineId()
+    transposePipeline: noPipelineId()
+    fieldOutPipeline: noPipelineId()
+    postPipeline: noPipelineId()
+    workTextures: fillTextureIds(count: fftWorkTextures)
+    workViews: fillTextureViewIds(count: fftWorkTextures)
+    stageUniforms: fillBufferIds(count: fftMaxStages)
+    stageBinds: fillBindGroupIds(count: fftMaxStages * 2)
+    transposeBinds: fillBindGroupIds(count: 2)
+    fieldOutBinds: fillBindGroupIds(count: fftFields * 2)
+    evolveUniforms: fillBufferIds(count: fftMaxCascades * fftFields)
+    evolveBinds: fillBindGroupIds(count: fftMaxCascades * fftFields)
     postBinds: fillBindGroupIds(count: fftMaxCascades)
   }
 }
@@ -142,9 +179,12 @@ type WaterCacheGpu {
 func createCacheGpu() ret WaterCacheGpu {
   let active: List(Int) = { 0, 0, 0 }
   ret WaterCacheGpu {
-    pipeline: noPipelineId(), sampler: noSamplerId(),
-    storage: fillBufferIds(count: fftMaxCascades), staging: fillBufferIds(count: fftMaxCascades),
-    binds: fillBindGroupIds(count: fftMaxCascades), requests: fillReadbackIds(count: fftMaxCascades),
+    pipeline: noPipelineId()
+    sampler: noSamplerId()
+    storage: fillBufferIds(count: fftMaxCascades)
+    staging: fillBufferIds(count: fftMaxCascades)
+    binds: fillBindGroupIds(count: fftMaxCascades)
+    requests: fillReadbackIds(count: fftMaxCascades)
     requestActive: own active
   }
 }

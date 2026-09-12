@@ -43,12 +43,22 @@ func main() {
   let pngBytes: List(Int) = Sys.readFileBytes(path: "{assets}walker_palette.png")
   var w: Int = 0
   var h: Int = 0
-  let atlas: List(Int) = decodePng(png: pngBytes, len: pngBytes.length, width: w, height: h)
+  let atlas: List(Int) = decodePng(
+    png: pngBytes
+    len: pngBytes.length
+    width: w
+    height: h
+  )
   log("atlas {w}x{h}")
 
   # Mesh 9 primitive 0 is the body: the primitive the old table flattened.
   let raw: SkinnedMeshData = loadSkinnedPrimitive(glb: g, meshIndex: 9, primIndex: 0)
-  let m: SkinnedMeshData = withAtlasColors(m: raw, atlas: atlas, width: w, height: h)
+  let m: SkinnedMeshData = withAtlasColors(
+    m: raw
+    atlas: atlas
+    width: w
+    height: h
+  )
 
   # 1: stride.
   if m.verts.length is m.vertCount * 20 {
@@ -59,21 +69,33 @@ func main() {
 
   # 2: two known vertices, against values computed independently from the
   # same PNG and the same sRGB transfer function.
-  let leatherOk: Bool = near(a: floatAt(list: m.verts, index: 16), b: 0.2122)
-    and near(a: floatAt(list: m.verts, index: 17), b: 0.1356)
-    and near(a: floatAt(list: m.verts, index: 18), b: 0.0844)
+  let leatherOk: Bool = near(a: floatAt(list: m.verts, index: 16), b: 0.2122) and near(
+    a: floatAt(list: m.verts, index: 17)
+    b: 0.1356
+  ) and near(a: floatAt(list: m.verts, index: 18), b: 0.0844)
   if leatherOk {
     log("vertex 0 is leather: yes")
   } else {
-    log("vertex 0 is leather: NO ({floatAt(list: m.verts, index: 16)} {floatAt(list: m.verts, index: 17)} {floatAt(list: m.verts, index: 18)})")
+    log(
+      "vertex 0 is leather: NO ({floatAt(list: m.verts, index: 16)} {floatAt(
+        list: m.verts
+        index: 17
+      )} {floatAt(list: m.verts, index: 18)})"
+    )
   }
-  let skinOk: Bool = near(a: floatAt(list: m.verts, index: 100 * 20 + 16), b: 1.0)
-    and near(a: floatAt(list: m.verts, index: 100 * 20 + 17), b: 0.6939)
-    and near(a: floatAt(list: m.verts, index: 100 * 20 + 18), b: 0.3613)
+  let skinOk: Bool = near(a: floatAt(list: m.verts, index: 100 * 20 + 16), b: 1.0) and near(
+    a: floatAt(list: m.verts, index: 100 * 20 + 17)
+    b: 0.6939
+  ) and near(a: floatAt(list: m.verts, index: 100 * 20 + 18), b: 0.3613)
   if skinOk {
     log("vertex 100 is skin: yes")
   } else {
-    log("vertex 100 is skin: NO ({floatAt(list: m.verts, index: 100 * 20 + 16)} {floatAt(list: m.verts, index: 100 * 20 + 17)} {floatAt(list: m.verts, index: 100 * 20 + 18)})")
+    log(
+      "vertex 100 is skin: NO ({floatAt(list: m.verts, index: 100 * 20 + 16)} {floatAt(
+        list: m.verts
+        index: 100 * 20 + 17
+      )} {floatAt(list: m.verts, index: 100 * 20 + 18)})"
+    )
   }
 
   # 3: more than one swatch across the primitive.

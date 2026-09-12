@@ -32,132 +32,287 @@ import Render
 # A tile's pixel bounds, unpacked by value from quadTile's 4-int List so the
 # constant-index reads are optional-checked once, in one place.
 type TileRect {
-    x: Int
-    y: Int
-    w: Int
-    h: Int
+  x: Int
+  y: Int
+  w: Int
+  h: Int
 }
 
 func tileRect(bounds: view List(Int)) ret TileRect {
-    var tx0: Int = 0
-    var ty0: Int = 0
-    var tw: Int = 0
-    var th: Int = 0
-    if let value: Int = bounds.copyAt(index: 0) { tx0 = value }
-    if let value: Int = bounds.copyAt(index: 1) { ty0 = value }
-    if let value: Int = bounds.copyAt(index: 2) { tw = value }
-    if let value: Int = bounds.copyAt(index: 3) { th = value }
-    ret TileRect { x: tx0, y: ty0, w: tw, h: th }
+  var tx0: Int = 0
+  var ty0: Int = 0
+  var tw: Int = 0
+  var th: Int = 0
+  if let value: Int = bounds.copyAt(index: 0) {
+    tx0 = value
+  }
+  if let value: Int = bounds.copyAt(index: 1) {
+    ty0 = value
+  }
+  if let value: Int = bounds.copyAt(index: 2) {
+    tw = value
+  }
+  if let value: Int = bounds.copyAt(index: 3) {
+    th = value
+  }
+  ret TileRect { x: tx0, y: ty0, w: tw, h: th }
 }
 
 func main() {
-    let width: Int = 1280
-    let height: Int = 720
-    let samples: Int = 8
-    let maxDepth: Int = 16
-    let tileSize: Int = 48
+  let width: Int = 1280
+  let height: Int = 720
+  let samples: Int = 8
+  let maxDepth: Int = 16
+  let tileSize: Int = 48
 
-    let world: List(Sphere) = buildScene()
-    let aspect: Float = width.toFloat() / height.toFloat()
-    let camPos: Vec3 = Vec3.create(x: -1.6, y: -1.2, z: 0.6)
-    let camTarget: Vec3 = Vec3.create(x: 0.0, y: 1.0, z: 0.0)
-    let cam: Camera = buildCamera(pos: camPos, target: camTarget, vfovDeg: 45.0, aperture: 0.06, aspect: aspect)
+  let world: List(Sphere) = buildScene()
+  let aspect: Float = width.toFloat() / height.toFloat()
+  let camPos: Vec3 = Vec3.create(x: -1.6, y: -1.2, z: 0.6)
+  let camTarget: Vec3 = Vec3.create(x: 0.0, y: 1.0, z: 0.0)
+  let cam: Camera = buildCamera(
+    pos: camPos
+    target: camTarget
+    vfovDeg: 45.0
+    aperture: 0.06
+    aspect: aspect
+  )
 
-    let fb: List(Int) = List.create(Int, cap: width * height)
-    var i: Int = 0
-    loop i < width * height {
-        fb.add(value: 0)
-        i = i + 1
+  let fb: List(Int) = List.create(Int, cap: width * height)
+  var i: Int = 0
+  loop i < width * height {
+    fb.add(value: 0)
+    i = i + 1
+  }
+
+  Sdl3.initWindow(
+    width: width
+    height: height
+    title: "Rae raytracer — step 3 (materials + camera + threads)"
+  )
+  Sdl3.setTargetFPS(fps: 60)
+
+  # Four quadrants, one worker thread each (equal 960x540 blocks at Full HD).
+  let halfW: Int = width / 2
+  let halfH: Int = height / 2
+  let lw: Int = halfW
+  let rw: Int = width - halfW
+  let tHt: Int = halfH
+  let bh: Int = height - halfH
+  let t0: Int = quadTotal(qw: lw, qh: tHt, tileSize: tileSize)
+  let t1: Int = quadTotal(qw: rw, qh: tHt, tileSize: tileSize)
+  let t2: Int = quadTotal(qw: lw, qh: bh, tileSize: tileSize)
+  let t3: Int = quadTotal(qw: rw, qh: bh, tileSize: tileSize)
+  var n0: Int = 0
+  var n1: Int = 0
+  var n2: Int = 0
+  var n3: Int = 0
+  let startMs: Int = nowMs()
+  var doneMs: Int = 0
+  loop not Sdl3.shouldClose() {
+    if Sdl3.isKeyPressed(key: Keys.keyF2) {
+      let s: Bool = Image.savePng(
+        path: Filesystem.renderPath(stem: "rae_render")
+        pixels: fb.data
+        width: width
+        height: height
+      )
     }
 
-    Sdl3.initWindow(width: width, height: height, title: "Rae raytracer — step 3 (materials + camera + threads)")
-    Sdl3.setTargetFPS(fps: 60)
-
-    # Four quadrants, one worker thread each (equal 960x540 blocks at Full HD).
-    let halfW: Int = width / 2
-    let halfH: Int = height / 2
-    let lw: Int = halfW
-    let rw: Int = width - halfW
-    let tHt: Int = halfH
-    let bh: Int = height - halfH
-    let t0: Int = quadTotal(qw: lw, qh: tHt, tileSize: tileSize)
-    let t1: Int = quadTotal(qw: rw, qh: tHt, tileSize: tileSize)
-    let t2: Int = quadTotal(qw: lw, qh: bh, tileSize: tileSize)
-    let t3: Int = quadTotal(qw: rw, qh: bh, tileSize: tileSize)
-    var n0: Int = 0
-    var n1: Int = 0
-    var n2: Int = 0
-    var n3: Int = 0
-    let startMs: Int = nowMs()
-    var doneMs: Int = 0
-    loop not Sdl3.shouldClose() {
-        if Sdl3.isKeyPressed(key: Keys.keyF2) { let s: Bool = Image.savePng(path: Filesystem.renderPath(stem: "rae_render"), pixels: fb.data, width: width, height: height) }
-
-        if n0 < t0 or n1 < t1 or n2 < t2 or n3 < t3 {
-            var c0: Int = n0
-            var c1: Int = n1
-            var c2: Int = n2
-            var c3: Int = n3
-            if c0 >= t0 { c0 = t0 - 1 }
-            if c1 >= t1 { c1 = t1 - 1 }
-            if c2 >= t2 { c2 = t2 - 1 }
-            if c3 >= t3 { c3 = t3 - 1 }
-            let b0: List(Int) = quadTile(qx0: 0, qy0: 0, qw: lw, qh: tHt, tileSize: tileSize, idx: c0)
-            let b1: List(Int) = quadTile(qx0: halfW, qy0: 0, qw: rw, qh: tHt, tileSize: tileSize, idx: c1)
-            let b2: List(Int) = quadTile(qx0: 0, qy0: halfH, qw: lw, qh: bh, tileSize: tileSize, idx: c2)
-            let b3: List(Int) = quadTile(qx0: halfW, qy0: halfH, qw: rw, qh: bh, tileSize: tileSize, idx: c3)
-            let r0: TileRect = tileRect(bounds: b0)
-            let r1: TileRect = tileRect(bounds: b1)
-            let r2: TileRect = tileRect(bounds: b2)
-            let r3: TileRect = tileRect(bounds: b3)
-            let ax0: Int = r0.x
-            let ay0: Int = r0.y
-            let aw0: Int = r0.w
-            let ah0: Int = r0.h
-            let ax1: Int = r1.x
-            let ay1: Int = r1.y
-            let aw1: Int = r1.w
-            let ah1: Int = r1.h
-            let ax2: Int = r2.x
-            let ay2: Int = r2.y
-            let aw2: Int = r2.w
-            let ah2: Int = r2.h
-            let ax3: Int = r3.x
-            let ay3: Int = r3.y
-            let aw3: Int = r3.w
-            let ah3: Int = r3.h
-            let ta: Task(List(Int)) = spawn renderTile(world: world, cam: cam, width: width, height: height, tx0: ax0, ty0: ay0, tw: aw0, th: ah0, samples: samples, maxDepth: maxDepth, seedBase: 1)
-            let tb: Task(List(Int)) = spawn renderTile(world: world, cam: cam, width: width, height: height, tx0: ax1, ty0: ay1, tw: aw1, th: ah1, samples: samples, maxDepth: maxDepth, seedBase: 2)
-            let tc: Task(List(Int)) = spawn renderTile(world: world, cam: cam, width: width, height: height, tx0: ax2, ty0: ay2, tw: aw2, th: ah2, samples: samples, maxDepth: maxDepth, seedBase: 3)
-            let td: Task(List(Int)) = spawn renderTile(world: world, cam: cam, width: width, height: height, tx0: ax3, ty0: ay3, tw: aw3, th: ah3, samples: samples, maxDepth: maxDepth, seedBase: 4)
-            let pa: List(Int) = ta.get()
-            let pb: List(Int) = tb.get()
-            let pc: List(Int) = tc.get()
-            let pd: List(Int) = td.get()
-            writeTile(fb: fb, tile: pa, width: width, tx0: ax0, ty0: ay0, tw: aw0, th: ah0)
-            writeTile(fb: fb, tile: pb, width: width, tx0: ax1, ty0: ay1, tw: aw1, th: ah1)
-            writeTile(fb: fb, tile: pc, width: width, tx0: ax2, ty0: ay2, tw: aw2, th: ah2)
-            writeTile(fb: fb, tile: pd, width: width, tx0: ax3, ty0: ay3, tw: aw3, th: ah3)
-            if n0 < t0 { n0 = n0 + 1 }
-            if n1 < t1 { n1 = n1 + 1 }
-            if n2 < t2 { n2 = n2 + 1 }
-            if n3 < t3 { n3 = n3 + 1 }
-            if n0 >= t0 and n1 >= t1 and n2 >= t2 and n3 >= t3 and doneMs is 0 {
-                doneMs = nowMs() - startMs
-            }
-        }
-
-        Sdl3.updatePixels(pixels: fb.data, w: width, h: height)
-        Sdl3.present()
-        let done: Int = n0 + n1 + n2 + n3
-        let total: Int = t0 + t1 + t2 + t3
-        var pct: Int = done * 100 / total
-        if pct > 100 { pct = 100 }
-        if doneMs > 0 {
-            Sdl3.setTitle(title: "Rae step 3 (SDL3) | 4 threads, 1 per quadrant | {width}x{height} | done in {doneMs}ms")
-        } else {
-            Sdl3.setTitle(title: "Rae step 3 (SDL3) | 4 threads, 1 per quadrant | {width}x{height} | {pct}%")
-        }
+    if n0 < t0 or n1 < t1 or n2 < t2 or n3 < t3 {
+      var c0: Int = n0
+      var c1: Int = n1
+      var c2: Int = n2
+      var c3: Int = n3
+      if c0 >= t0 {
+        c0 = t0 - 1
+      }
+      if c1 >= t1 {
+        c1 = t1 - 1
+      }
+      if c2 >= t2 {
+        c2 = t2 - 1
+      }
+      if c3 >= t3 {
+        c3 = t3 - 1
+      }
+      let b0: List(Int) = quadTile(
+        qx0: 0
+        qy0: 0
+        qw: lw
+        qh: tHt
+        tileSize: tileSize
+        idx: c0
+      )
+      let b1: List(Int) = quadTile(
+        qx0: halfW
+        qy0: 0
+        qw: rw
+        qh: tHt
+        tileSize: tileSize
+        idx: c1
+      )
+      let b2: List(Int) = quadTile(
+        qx0: 0
+        qy0: halfH
+        qw: lw
+        qh: bh
+        tileSize: tileSize
+        idx: c2
+      )
+      let b3: List(Int) = quadTile(
+        qx0: halfW
+        qy0: halfH
+        qw: rw
+        qh: bh
+        tileSize: tileSize
+        idx: c3
+      )
+      let r0: TileRect = tileRect(bounds: b0)
+      let r1: TileRect = tileRect(bounds: b1)
+      let r2: TileRect = tileRect(bounds: b2)
+      let r3: TileRect = tileRect(bounds: b3)
+      let ax0: Int = r0.x
+      let ay0: Int = r0.y
+      let aw0: Int = r0.w
+      let ah0: Int = r0.h
+      let ax1: Int = r1.x
+      let ay1: Int = r1.y
+      let aw1: Int = r1.w
+      let ah1: Int = r1.h
+      let ax2: Int = r2.x
+      let ay2: Int = r2.y
+      let aw2: Int = r2.w
+      let ah2: Int = r2.h
+      let ax3: Int = r3.x
+      let ay3: Int = r3.y
+      let aw3: Int = r3.w
+      let ah3: Int = r3.h
+      let ta: Task(List(Int)) = spawn renderTile(
+        world: world
+        cam: cam
+        width: width
+        height: height
+        tx0: ax0
+        ty0: ay0
+        tw: aw0
+        th: ah0
+        samples: samples
+        maxDepth: maxDepth
+        seedBase: 1
+      )
+      let tb: Task(List(Int)) = spawn renderTile(
+        world: world
+        cam: cam
+        width: width
+        height: height
+        tx0: ax1
+        ty0: ay1
+        tw: aw1
+        th: ah1
+        samples: samples
+        maxDepth: maxDepth
+        seedBase: 2
+      )
+      let tc: Task(List(Int)) = spawn renderTile(
+        world: world
+        cam: cam
+        width: width
+        height: height
+        tx0: ax2
+        ty0: ay2
+        tw: aw2
+        th: ah2
+        samples: samples
+        maxDepth: maxDepth
+        seedBase: 3
+      )
+      let td: Task(List(Int)) = spawn renderTile(
+        world: world
+        cam: cam
+        width: width
+        height: height
+        tx0: ax3
+        ty0: ay3
+        tw: aw3
+        th: ah3
+        samples: samples
+        maxDepth: maxDepth
+        seedBase: 4
+      )
+      let pa: List(Int) = ta.get()
+      let pb: List(Int) = tb.get()
+      let pc: List(Int) = tc.get()
+      let pd: List(Int) = td.get()
+      writeTile(
+        fb: fb
+        tile: pa
+        width: width
+        tx0: ax0
+        ty0: ay0
+        tw: aw0
+        th: ah0
+      )
+      writeTile(
+        fb: fb
+        tile: pb
+        width: width
+        tx0: ax1
+        ty0: ay1
+        tw: aw1
+        th: ah1
+      )
+      writeTile(
+        fb: fb
+        tile: pc
+        width: width
+        tx0: ax2
+        ty0: ay2
+        tw: aw2
+        th: ah2
+      )
+      writeTile(
+        fb: fb
+        tile: pd
+        width: width
+        tx0: ax3
+        ty0: ay3
+        tw: aw3
+        th: ah3
+      )
+      if n0 < t0 {
+        n0 = n0 + 1
+      }
+      if n1 < t1 {
+        n1 = n1 + 1
+      }
+      if n2 < t2 {
+        n2 = n2 + 1
+      }
+      if n3 < t3 {
+        n3 = n3 + 1
+      }
+      if n0 >= t0 and n1 >= t1 and n2 >= t2 and n3 >= t3 and doneMs is 0 {
+        doneMs = nowMs() - startMs
+      }
     }
-    Sdl3.closeWindow()
+
+    Sdl3.updatePixels(pixels: fb.data, w: width, h: height)
+    Sdl3.present()
+    let done: Int = n0 + n1 + n2 + n3
+    let total: Int = t0 + t1 + t2 + t3
+    var pct: Int = done * 100 / total
+    if pct > 100 {
+      pct = 100
+    }
+    if doneMs > 0 {
+      Sdl3.setTitle(
+        title: "Rae step 3 (SDL3) | 4 threads, 1 per quadrant | {width}x{height} | done in {doneMs}ms"
+      )
+    } else {
+      Sdl3.setTitle(
+        title: "Rae step 3 (SDL3) | 4 threads, 1 per quadrant | {width}x{height} | {pct}%"
+      )
+    }
+  }
+  Sdl3.closeWindow()
 }

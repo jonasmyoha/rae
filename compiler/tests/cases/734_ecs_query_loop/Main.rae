@@ -3,15 +3,23 @@ open ecs/ComponentTable
 open ecs/Query
 
 # #807: the ECS query loop — Rae's native way to walk a component join.
-#   loop let entity: EntityId, position: mod Position, velocity: view Velocity in query2(tableA: pos, tableB: vel) { … }
+#   loop let entity: EntityId, position: mod Position, velocity: view Velocity in query2(tableA:
+#   pos, tableB: vel) { … }
 # It is pure sugar over the match loop + the storage-aliasing accessors: a `mod`
 # binding writes through (and bumps the change stamp like queryModAt), a `view`
 # binding reads without dirtying the table. The leading EntityId binding is
 # optional; component bindings map to the tables in order.
+type Position {
+  x: Int
+}
 
-type Position { x: Int }
-type Velocity { v: Int }
-type Tag { t: Int }
+type Velocity {
+  v: Int
+}
+
+type Tag {
+  t: Int
+}
 
 func main() {
   var pos: ComponentTable(Position) = ComponentTable.create(Position)
@@ -28,7 +36,10 @@ func main() {
   componentSet(this: tag, entity: e3, data: Tag { t: 9 })
 
   # query2: entity + mod + view. Integrates v into x for every entity in both.
-  loop let entity: EntityId, position: mod Position, velocity: view Velocity in query2(tableA: pos, tableB: vel) {
+  loop let entity: EntityId, position: mod Position, velocity: view Velocity in query2(
+    tableA: pos
+    tableB: vel
+  ) {
     position.x = position.x + velocity.v
     log("q2 e{entity.index} x={position.x} v={velocity.v}")
   }
@@ -46,7 +57,11 @@ func main() {
   log("pos gen delta: {componentTableGeneration(this: pos) - gen}")
 
   # query3: three bindings, two of them mod.
-  loop let entity: EntityId, position: mod Position, velocity: view Velocity, tg: mod Tag in query3(tableA: pos, tableB: vel, tableC: tag) {
+  loop let entity: EntityId, position: mod Position, velocity: view Velocity, tg: mod Tag in query3(
+    tableA: pos
+    tableB: vel
+    tableC: tag
+  ) {
     position.x = position.x + 100
     tg.t = tg.t + 1
     log("q3 e{entity.index}")
@@ -63,7 +78,10 @@ func main() {
   # nested query loops each alias their own hit.
   var pairs: Int = 0
   loop let outer: EntityId, outerVelocity: view Velocity in forEach(table: vel) {
-    loop let inner: EntityId, ip: view Position, innerVelocity: view Velocity in query2(tableA: pos, tableB: vel) {
+    loop let inner: EntityId, ip: view Position, innerVelocity: view Velocity in query2(
+      tableA: pos
+      tableB: vel
+    ) {
       pairs = pairs + 1
     }
   }

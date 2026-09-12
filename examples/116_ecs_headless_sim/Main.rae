@@ -20,15 +20,34 @@ open ecs/Schedule
 # The scenario: a moving hero attacks enemies. Each frame the hero deals 3 damage
 # to the lowest-index living enemy; dead enemies are culled. The `stats` system
 # recomputes total enemy HP but is SKIPPED on frames where no health changed —
-# the honest Schedule dirty-skip. Mirror of compiler/tests/cases/703_ecs_headless_sim (the in-suite deterministic check).
+# the honest Schedule dirty-skip. Mirror of compiler/tests/cases/703_ecs_headless_sim (the in-suite
+# deterministic check).
+type Position {
+  x: Int
+}
 
-type Position { x: Int }
-type Velocity { dx: Int }
-type Health { hp: Int }
-type Enemy {}                       # zero-field tag / marker component (#752)
+type Velocity {
+  dx: Int
+}
 
-type DamageEvent { target: EntityId, amount: Int }
-type Clock { frame: Int }           # a resource (world-global singleton)
+type Health {
+  hp: Int
+}
+
+type Enemy {
+}
+
+# zero-field tag / marker component (#752)
+type DamageEvent {
+  target: EntityId
+  amount: Int
+}
+
+type Clock {
+  frame: Int
+}
+
+# a resource (world-global singleton)
 
 # The World: the reusable entity core + one ComponentTable per component, plus
 # two resources held as plain fields (an EventQueue and the Clock) and one
@@ -46,13 +65,13 @@ type GameWorld {
 
 func createGameWorld() ret GameWorld {
   ret GameWorld {
-    allocator: createEntityAllocator(),
-    positions: ComponentTable.create(Position),
-    velocities: ComponentTable.create(Velocity),
-    healths: ComponentTable.create(Health),
-    enemies: ComponentTable.create(Enemy),
-    damage: createEventQueue(DamageEvent),
-    clock: Clock { frame: 0 },
+    allocator: createEntityAllocator()
+    positions: ComponentTable.create(Position)
+    velocities: ComponentTable.create(Velocity)
+    healths: ComponentTable.create(Health)
+    enemies: ComponentTable.create(Enemy)
+    damage: createEventQueue(DamageEvent)
+    clock: Clock { frame: 0 }
     totalEnemyHp: 0
   }
 }
@@ -167,33 +186,59 @@ func heroX(world: view GameWorld, hero: view EntityId) ret Int {
 # generation of the table(s) it reads. movement/combat/applyDamage/cull are gated
 # on `positions` (which movement bumps every frame, so they always run); stats is
 # gated on `healths`, so it skips when no damage landed.
-func runFrame(world: mod GameWorld, sched: mod Schedule, hero: view EntityId, frameNo: view Int) {
+func runFrame(
+  world: mod GameWorld
+  sched: mod Schedule
+  hero: view EntityId
+  frameNo: view Int
+) {
   world.clock.frame = frameNo
 
-  if shouldRun(schedule: sched, index: 0, readGeneration: componentTableGeneration(this: world.positions)) {
+  if shouldRun(
+    schedule: sched
+    index: 0
+    readGeneration: componentTableGeneration(this: world.positions)
+  ) {
     movementSystem(world: world)
   }
-  if shouldRun(schedule: sched, index: 1, readGeneration: componentTableGeneration(this: world.positions)) {
+  if shouldRun(
+    schedule: sched
+    index: 1
+    readGeneration: componentTableGeneration(this: world.positions)
+  ) {
     combatSystem(world: world)
   }
-  if shouldRun(schedule: sched, index: 2, readGeneration: componentTableGeneration(this: world.positions)) {
+  if shouldRun(
+    schedule: sched
+    index: 2
+    readGeneration: componentTableGeneration(this: world.positions)
+  ) {
     applyDamageSystem(world: world)
   }
-  if shouldRun(schedule: sched, index: 3, readGeneration: componentTableGeneration(this: world.positions)) {
+  if shouldRun(
+    schedule: sched
+    index: 3
+    readGeneration: componentTableGeneration(this: world.positions)
+  ) {
     cullSystem(world: world)
   }
   var statsRan: Bool = false
-  if shouldRun(schedule: sched, index: 4, readGeneration: componentTableGeneration(this: world.healths)) {
+  if shouldRun(
+    schedule: sched
+    index: 4
+    readGeneration: componentTableGeneration(this: world.healths)
+  ) {
     statsSystem(world: world)
     statsRan = true
   }
 
   let alive: Int = tagCount(table: world.enemies)
-  log("F{frameNo} heroX={heroX(world: world, hero: hero)} enemiesAlive={alive} totalEnemyHp={world.totalEnemyHp} statsRan={statsRan}")
+  log(
+    "F{frameNo} heroX={heroX(world: world, hero: hero)} enemiesAlive={alive} totalEnemyHp={world.totalEnemyHp} statsRan={statsRan}"
+  )
 }
 
 # ----- serialization (registry-driven round-trip) -----
-
 func worldToJson(world: view GameWorld, registry: view ComponentRegistry) ret String {
   var writer: WorldJson = createWorldJson()
   # #760: registry-gated serialize with NO hand-listing. `fields(world)` unrolls
@@ -204,12 +249,22 @@ func worldToJson(world: view GameWorld, registry: view ComponentRegistry) ret St
   # without serialize, so it is skipped). Add a component table -> nothing to edit
   # here. Resources (Clock) are not per-entity tables, so they stay explicit.
   loop let table: view ComponentTable(any) in fields(world) {
-    addComponentTable(writer: writer, table: table, name: typeName(table), registry: registry)
+    addComponentTable(
+      writer: writer
+      table: table
+      name: typeName(table)
+      registry: registry
+    )
   }
   # Pass the resource's toJson() directly (do NOT bind it to a `let s: String`
   # first and pass `s` by view — that currently double-frees the owned string;
   # see QUEUE #761).
-  addResource(writer: writer, name: "Clock", valueJson: world.clock.toJson(), registry: registry)
+  addResource(
+    writer: writer
+    name: "Clock"
+    valueJson: world.clock.toJson()
+    registry: registry
+  )
   ret finishWorldJson(writer: writer)
 }
 
@@ -217,7 +272,12 @@ func worldFromJson(world: mod GameWorld, registry: view ComponentRegistry, doc: 
   # #760: the mirror of worldToJson — one loadComponentTable per ComponentTable
   # field, registry-gated and keyed by the component type name. No hand-listing.
   loop let table: mod ComponentTable(any) in fields(world) {
-    loadComponentTable(table: table, name: typeName(table), registry: registry, doc: doc)
+    loadComponentTable(
+      table: table
+      name: typeName(table)
+      registry: registry
+      doc: doc
+    )
   }
   let clockStr: String = resourceJson(name: "Clock", registry: registry, doc: doc)
   if clockStr.length() > 0 {
@@ -269,7 +329,12 @@ func main() {
 
   log("systems: {scheduleSize(schedule: sched)}")
   loop var frame: Int = 1, frame <= 4, ++frame {
-    runFrame(world: world, sched: sched, hero: hero, frameNo: frame)
+    runFrame(
+      world: world
+      sched: sched
+      hero: hero
+      frameNo: frame
+    )
   }
 
   # ----- serialize -> parse -> reload into a fresh world -----

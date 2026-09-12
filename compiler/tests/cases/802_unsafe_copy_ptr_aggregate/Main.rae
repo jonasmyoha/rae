@@ -6,7 +6,9 @@ func allocate(byteCount: copy UInt64) unsafe extern("malloc") ret Ptr
 
 func makePtrList() ret List(Ptr) {
   var xs: List(Ptr) = List.create(Ptr, cap: 2)
-  unsafe { xs.add(value: allocate(byteCount: 8 as UInt64)) }
+  unsafe {
+    xs.add(value: allocate(byteCount: 8 as UInt64))
+  }
   ret xs
 }
 

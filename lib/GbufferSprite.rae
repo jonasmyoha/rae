@@ -24,14 +24,28 @@ open gpu/GpuIds
 # C-side sprite texture array (runtime_gpu3d_gbuffer.c): the array texture is a
 # platform upload; its view and generation are read here.
 func gbSpriteArrayView() unsafe extern("rae_gb_sprite_array_view") ret Ptr
+
 func gbSpriteTexGen() unsafe extern("rae_gb_sprite_tex_gen") ret Int
+
 func gbSpriteArrayInit(w: Int, h: Int, layers: Int) unsafe extern("rae_gb_sprite_array_init")
-func gbSpriteArrayWrite(layer: Int, pixels: view Buffer(Int), w: Int, h: Int) unsafe extern("rae_gb_sprite_array_write")
+
+func gbSpriteArrayWrite(
+  layer: Int
+  pixels: view Buffer(Int)
+  w: Int
+  h: Int
+) unsafe extern("rae_gb_sprite_array_write")
+
 func gbFrameUbuf() unsafe extern("rae_gb_frame_ubuf") ret Ptr
+
 func gbDrawsBuffer() unsafe extern("rae_gb_draws_buffer") ret Ptr
+
 func gbPass() unsafe extern("rae_gb_pass") ret Ptr
+
 func gbDrawCount() unsafe extern("rae_gb_draw_count") ret Int
+
 func gbMaxDraws() unsafe extern("rae_gb_max_draws") ret Int
+
 func gbAdvanceDraws(count: Int) unsafe extern("rae_gb_advance_draws")
 
 type SpriteCache {
@@ -48,43 +62,82 @@ type SpriteCache {
 
 func createSpriteCache() ret SpriteCache {
   ret SpriteCache {
-    pipeMade: false, bindGen: 0 - 1, pipeline: noRenderPipelineId(), bindGroup: noBindGroupId(),
-    uniform: noBufferId(), sampler: noSamplerId(), arrayView: noExternalId(), frameUniform: noExternalId(), draws: noExternalId()
+    pipeMade: false
+    bindGen: 0 - 1
+    pipeline: noRenderPipelineId()
+    bindGroup: noBindGroupId()
+    uniform: noBufferId()
+    sampler: noSamplerId()
+    arrayView: noExternalId()
+    frameUniform: noExternalId()
+    draws: noExternalId()
   }
 }
-const spriteUniformBytes: Int = 32     # two vec4 (SpriteU)
-const spriteRecordFloats: Int = 40     # DrawU, same as the instanced path
+
+const spriteUniformBytes: Int = 32  # two vec4 (SpriteU)
+
+const spriteRecordFloats: Int = 40  # DrawU, same as the instanced path
 
 # Create the sprite image array (one layer per prop kind) + upload a layer. The
 # game calls these once with plate-cut RGBA sprites (straight alpha for the cutout).
 func spriteInitArray(w: copy Int, h: copy Int, layers: copy Int) {
-  unsafe { gbSpriteArrayInit(w: w, h: h, layers: layers) }
+  unsafe {
+    gbSpriteArrayInit(w: w, h: h, layers: layers)
+  }
 }
-func spriteUploadLayer(layer: copy Int, pixels: view Buffer(Int), w: copy Int, h: copy Int) {
-  unsafe { gbSpriteArrayWrite(layer: layer, pixels: pixels, w: w, h: h) }
+
+func spriteUploadLayer(
+  layer: copy Int
+  pixels: view Buffer(Int)
+  w: copy Int
+  h: copy Int
+) {
+  unsafe {
+    gbSpriteArrayWrite(
+      layer: layer
+      pixels: pixels
+      w: w
+      h: h
+    )
+  }
 }
 
 # The SpriteU uniform buffer — created on demand so spriteSetParams can write it
 # at SETUP without touching the pipeline (which needs the frame/draws buffers that
 # only exist during the render).
 func ensureSpriteUniform(cache: mod SpriteCache, resources: mod GpuResources) {
-  if isValidBuffer(resources: resources, id: cache.uniform) { ret }
-  if let uniform: BufferId = createBuffer(resources: resources, size: spriteUniformBytes, usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst) { cache.uniform = uniform }
+  if isValidBuffer(resources: resources, id: cache.uniform) {
+    ret
+  }
+  if let uniform: BufferId = createBuffer(
+    resources: resources
+    size: spriteUniformBytes
+    usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst
+  ) {
+    cache.uniform = uniform
+  }
 }
 
 # Sampler (clamp — a sprite is not tiled), the SpriteU uniform buffer, and a 1x1
 # transparent default array so the bind group is always valid before upload.
 func ensureSpriteDefaults(cache: mod SpriteCache, resources: mod GpuResources) {
   if not isValidSampler(resources: resources, id: cache.sampler) {
-    if let sampler: SamplerId = createSampler(resources: resources) { cache.sampler = sampler }
+    if let sampler: SamplerId = createSampler(resources: resources) {
+      cache.sampler = sampler
+    }
   }
   ensureSpriteUniform(cache: cache, resources: resources)
   unsafe {
     if gbSpriteArrayView() is webgpuNull() {
       gbSpriteArrayInit(w: 1, h: 1, layers: 1)
       var one: List(Int) = List.create(Int, cap: 1)
-      one.add(value: 0)   # transparent -> alpha-tested away; never visible
-      gbSpriteArrayWrite(layer: 0, pixels: one.data, w: 1, h: 1)
+      one.add(value: 0)  # transparent -> alpha-tested away; never visible
+      gbSpriteArrayWrite(
+        layer: 0
+        pixels: one.data
+        w: 1
+        h: 1
+      )
     }
   }
 }
@@ -93,15 +146,27 @@ func ensureSpritePipeline(cache: mod SpriteCache, resources: mod GpuResources) {
   if not cache.pipeMade {
     cache.pipeMade = true
     var composed: String = ""
-    unsafe { composed = gbReadWgsl(path: "lib/sprite_billboard.wgsl") }
-    if let pipeline: RenderPipelineId = createRenderPipeline(resources: resources, wgsl: composed, vertexEntry: "vs", fragmentEntry: "fs", spec: gbufferProceduralPipelineSpec()) {
+    unsafe {
+      composed = gbReadWgsl(path: "lib/sprite_billboard.wgsl")
+    }
+    if let pipeline: RenderPipelineId = createRenderPipeline(
+      resources: resources
+      wgsl: composed
+      vertexEntry: "vs"
+      fragmentEntry: "fs"
+      spec: gbufferProceduralPipelineSpec()
+    ) {
       cache.pipeline = pipeline
     }
   }
   ensureSpriteDefaults(cache: cache, resources: resources)
   var gen: Int = 0
-  unsafe { gen = gbSpriteTexGen() }
-  if gen is cache.bindGen { ret }
+  unsafe {
+    gen = gbSpriteTexGen()
+  }
+  if gen is cache.bindGen {
+    ret
+  }
   cache.bindGen = gen
   # The array view changed generation: re-adopt the externals and rebuild the
   # bind group (the old one retires behind any frame still drawing with it).
@@ -114,9 +179,21 @@ func ensureSpritePipeline(cache: mod SpriteCache, resources: mod GpuResources) {
   cache.frameUniform = noExternalId()
   cache.draws = noExternalId()
   unsafe {
-    if let arrayView: ExternalId = adoptExternalTextureView(resources: resources, handle: gbSpriteArrayView()) { cache.arrayView = arrayView }
-    if let frameUniform: ExternalId = adoptExternalBuffer(resources: resources, handle: gbFrameUbuf()) { cache.frameUniform = frameUniform }
-    if let draws: ExternalId = adoptExternalBuffer(resources: resources, handle: gbDrawsBuffer()) { cache.draws = draws }
+    if let arrayView: ExternalId = adoptExternalTextureView(
+      resources: resources
+      handle: gbSpriteArrayView()
+    ) {
+      cache.arrayView = arrayView
+    }
+    if let frameUniform: ExternalId = adoptExternalBuffer(
+      resources: resources
+      handle: gbFrameUbuf()
+    ) {
+      cache.frameUniform = frameUniform
+    }
+    if let draws: ExternalId = adoptExternalBuffer(resources: resources, handle: gbDrawsBuffer()) {
+      cache.draws = draws
+    }
   }
   let entries: List(ResourceRef) = List.create(ResourceRef, cap: 5)
   entries.add(value: externalRef(id: cache.frameUniform))
@@ -124,7 +201,11 @@ func ensureSpritePipeline(cache: mod SpriteCache, resources: mod GpuResources) {
   entries.add(value: bufferRef(id: cache.uniform))
   entries.add(value: externalRef(id: cache.arrayView))
   entries.add(value: samplerRef(id: cache.sampler))
-  if let bindGroup: BindGroupId = createRenderBindGroup(resources: resources, pipeline: cache.pipeline, entries: entries) {
+  if let bindGroup: BindGroupId = createRenderBindGroup(
+    resources: resources
+    pipeline: cache.pipeline
+    entries: entries
+  ) {
     cache.bindGroup = bindGroup
   }
 }
@@ -133,32 +214,81 @@ func ensureSpritePipeline(cache: mod SpriteCache, resources: mod GpuResources) {
 # aspect w/h, alpha cutoff, time); b.x = camera TILT (0 = upright cylindrical,
 # 1 = lay flat to face the camera, #22). Camera-right/up are derived in the shader
 # from viewProj, so no camera vector is needed here. Set once (or when tuning).
-func spriteSetParams(cache: mod SpriteCache, resources: mod GpuResources, heightK: copy Float, aspect: copy Float, cutoff: copy Float, time: copy Float, tilt: copy Float) {
+func spriteSetParams(
+  cache: mod SpriteCache
+  resources: mod GpuResources
+  heightK: copy Float
+  aspect: copy Float
+  cutoff: copy Float
+  time: copy Float
+  tilt: copy Float
+) {
   ensureSpriteUniform(cache: cache, resources: resources)
   var args: ArgWriter = createArgs(uniform: true)
-  pushVec4F(writer: args, x: heightK, y: aspect, z: cutoff, w: time)
-  pushVec4F(writer: args, x: tilt, y: 0.0, z: 0.0, w: 0.0)
-  uploadArgs(writer: args, resources: resources, buffer: cache.uniform, offset: 0)
+  pushVec4F(
+    writer: args
+    x: heightK
+    y: aspect
+    z: cutoff
+    w: time
+  )
+  pushVec4F(
+    writer: args
+    x: tilt
+    y: 0.0
+    z: 0.0
+    w: 0.0
+  )
+  uploadArgs(
+    writer: args
+    resources: resources
+    buffer: cache.uniform
+    offset: 0
+  )
 }
 
 # Draw a batch of billboard instances from packed DrawU `records` (count of them):
 # upload to the shared draws buffer at the running base, draw 6 procedural verts x
 # count with the sprite pipeline. `records` is a raw record
 # pointer into the caller's packed floats, hence unsafe.
-func drawSpriteInstances(cache: mod SpriteCache, resources: mod GpuResources, records: copy Ptr, count: copy Int) unsafe {
-  if count <= 0 { ret }
+func drawSpriteInstances(
+  cache: mod SpriteCache
+  resources: mod GpuResources
+  records: copy Ptr
+  count: copy Int
+) unsafe {
+  if count <= 0 {
+    ret
+  }
   ensurePipelineForDraw(cache: cache, resources: resources)
   unsafe {
     let base: Int = gbDrawCount()
-    if base + count > gbMaxDraws() { ret }
+    if base + count > gbMaxDraws() {
+      ret
+    }
     let strideBytes: Int = spriteRecordFloats * 4
-    wgpuQueueWriteBuffer(queue: webgpuQueue(), buffer: gbDrawsBuffer(),
-      bufferOffset: (base * strideBytes) as UInt64, data: records,
-      size: (count * strideBytes) as UInt64)
+    wgpuQueueWriteBuffer(
+      queue: webgpuQueue()
+      buffer: gbDrawsBuffer()
+      bufferOffset: (base * strideBytes) as UInt64
+      data: records
+      size: (count * strideBytes) as UInt64
+    )
     let pass: Ptr = gbPass()
-    if pass is webgpuNull() { ret }
+    if pass is webgpuNull() {
+      ret
+    }
     # No static re-bind after: every G-buffer draw binds its own pipeline (#912).
-    if recordDrawInPass(resources: resources, pass: pass, pipeline: cache.pipeline, bindGroup: cache.bindGroup, vertexCount: 6, instanceCount: count, firstVertex: 0, firstInstance: base) {
+    if recordDrawInPass(
+      resources: resources
+      pass: pass
+      pipeline: cache.pipeline
+      bindGroup: cache.bindGroup
+      vertexCount: 6
+      instanceCount: count
+      firstVertex: 0
+      firstInstance: base
+    ) {
       gbAdvanceDraws(count: count)
     }
   }

@@ -228,7 +228,12 @@ func stateIsActive(activeStates: view List(String), name: view String) ret Bool 
 }
 
 # Pool index of `nodeId`'s override bag inside state `stateIdx`, or -1.
-func stateNodeBagIdx(scene: view Scene, states: view StateSet, stateIdx: view Int, nodeId: view String) ret Int {
+func stateNodeBagIdx(
+  scene: view Scene
+  states: view StateSet
+  stateIdx: view Int
+  nodeId: view String
+) ret Int {
   var nodesIdx: Int = -1
   if let value: Int = states.nodesValueIdxs.copyAt(index: stateIdx) {
     nodesIdx = value
@@ -263,7 +268,11 @@ func frameIndexByName(frames: view FrameSet, name: view String) ret Int {
 #      minPtW (most-specific breakpoint wins);
 #   3. the frame tagged `"default": true`;
 #   4. -1 (caller applies nothing — authored base only).
-func selectFrameIndex(frames: view FrameSet, windowPtW: view Float, forcedFrameId: view String) ret Int {
+func selectFrameIndex(
+  frames: view FrameSet
+  windowPtW: view Float
+  forcedFrameId: view String
+) ret Int {
   if frames.count is 0 {
     ret -1
   }
@@ -308,7 +317,12 @@ func bagHasKey(doc: view JsonDoc, bag: view JsonValue, key: view String) ret Boo
 }
 
 # Pool index of `nodeId`'s override bag inside frame `frameIdx`, or -1.
-func frameNodeBagIdx(scene: view Scene, frames: view FrameSet, frameIdx: view Int, nodeId: view String) ret Int {
+func frameNodeBagIdx(
+  scene: view Scene
+  frames: view FrameSet
+  frameIdx: view Int
+  nodeId: view String
+) ret Int {
   var nodesIdx: Int = -1
   if let value: Int = frames.nodesValueIdxs.copyAt(index: frameIdx) {
     nodesIdx = value
@@ -332,7 +346,14 @@ func frameNodeBagIdx(scene: view Scene, frames: view FrameSet, frameIdx: view In
 #      "Children"; placement components too when the node is the scene
 #      root, mirroring the mount pass — those belong to the mount
 #      entity).
-func resetNodeToBase(world: mod UiWorld, scene: view Scene, frames: view FrameSet, states: view StateSet, nodeId: view String, entity: view EntityId) {
+func resetNodeToBase(
+  world: mod UiWorld
+  scene: view Scene
+  frames: view FrameSet
+  states: view StateSet
+  nodeId: view String
+  entity: view EntityId
+) {
   let doc: view JsonDoc => scene.doc
   let baseIdx: Int = sceneNodeIndex(this: scene, nodeId: nodeId)
   if baseIdx < 0 {
@@ -343,14 +364,36 @@ func resetNodeToBase(world: mod UiWorld, scene: view Scene, frames: view FrameSe
 
   var f: Int = 0
   loop f < frames.count {
-    let bagIdx: Int = frameNodeBagIdx(scene: scene, frames: frames, frameIdx: f, nodeId: nodeId)
-    stripBagAddedComponents(world: world, scene: scene, bagIdx: bagIdx, baseBag: baseBag, entity: entity)
+    let bagIdx: Int = frameNodeBagIdx(
+      scene: scene
+      frames: frames
+      frameIdx: f
+      nodeId: nodeId
+    )
+    stripBagAddedComponents(
+      world: world
+      scene: scene
+      bagIdx: bagIdx
+      baseBag: baseBag
+      entity: entity
+    )
     f = f + 1
   }
   var st: Int = 0
   loop st < states.count {
-    let bagIdx: Int = stateNodeBagIdx(scene: scene, states: states, stateIdx: st, nodeId: nodeId)
-    stripBagAddedComponents(world: world, scene: scene, bagIdx: bagIdx, baseBag: baseBag, entity: entity)
+    let bagIdx: Int = stateNodeBagIdx(
+      scene: scene
+      states: states
+      stateIdx: st
+      nodeId: nodeId
+    )
+    stripBagAddedComponents(
+      world: world
+      scene: scene
+      bagIdx: bagIdx
+      baseBag: baseBag
+      entity: entity
+    )
     st = st + 1
   }
 
@@ -370,7 +413,13 @@ func resetNodeToBase(world: mod UiWorld, scene: view Scene, frames: view FrameSe
     }
     if skip is false {
       let val: JsonValue = Json.objectValueAt(doc: doc, this: baseBag, idx: k)
-      applyComponentByName(world: world, entity: entity, name: key, doc: doc, val: val)
+      applyComponentByName(
+        world: world
+        entity: entity
+        name: key
+        doc: doc
+        val: val
+      )
     }
     k = k + 1
   }
@@ -378,7 +427,13 @@ func resetNodeToBase(world: mod UiWorld, scene: view Scene, frames: view FrameSe
 
 # Strip components that a frame/state override bag names (so could
 # have added) but the node's base bag lacks. `bagIdx < 0` = no bag.
-func stripBagAddedComponents(world: mod UiWorld, scene: view Scene, bagIdx: view Int, baseBag: view JsonValue, entity: view EntityId) {
+func stripBagAddedComponents(
+  world: mod UiWorld
+  scene: view Scene
+  bagIdx: view Int
+  baseBag: view JsonValue
+  entity: view EntityId
+) {
   if bagIdx < 0 {
     ret
   }
@@ -406,19 +461,58 @@ func stripBagAddedComponents(world: mod UiWorld, scene: view Scene, bagIdx: view
 
 # Apply one frame's bag for one node: components via
 # applyComponentByName, the "remove" list via removeComponentByName.
-func overlayNodeFromFrame(world: mod UiWorld, scene: view Scene, frames: view FrameSet, frameIdx: view Int, nodeId: view String, entity: view EntityId) {
-  let bagIdx: Int = frameNodeBagIdx(scene: scene, frames: frames, frameIdx: frameIdx, nodeId: nodeId)
-  overlayNodeFromBag(world: world, scene: scene, bagIdx: bagIdx, entity: entity)
+func overlayNodeFromFrame(
+  world: mod UiWorld
+  scene: view Scene
+  frames: view FrameSet
+  frameIdx: view Int
+  nodeId: view String
+  entity: view EntityId
+) {
+  let bagIdx: Int = frameNodeBagIdx(
+    scene: scene
+    frames: frames
+    frameIdx: frameIdx
+    nodeId: nodeId
+  )
+  overlayNodeFromBag(
+    world: world
+    scene: scene
+    bagIdx: bagIdx
+    entity: entity
+  )
 }
 
 # Apply one state's bag for one node (same bag schema as frames).
-func overlayNodeFromState(world: mod UiWorld, scene: view Scene, states: view StateSet, stateIdx: view Int, nodeId: view String, entity: view EntityId) {
-  let bagIdx: Int = stateNodeBagIdx(scene: scene, states: states, stateIdx: stateIdx, nodeId: nodeId)
-  overlayNodeFromBag(world: world, scene: scene, bagIdx: bagIdx, entity: entity)
+func overlayNodeFromState(
+  world: mod UiWorld
+  scene: view Scene
+  states: view StateSet
+  stateIdx: view Int
+  nodeId: view String
+  entity: view EntityId
+) {
+  let bagIdx: Int = stateNodeBagIdx(
+    scene: scene
+    states: states
+    stateIdx: stateIdx
+    nodeId: nodeId
+  )
+  overlayNodeFromBag(
+    world: world
+    scene: scene
+    bagIdx: bagIdx
+    entity: entity
+  )
 }
 
 # Shared bag applier for frame and state overlays.
-func overlayNodeFromBag(world: mod UiWorld, scene: view Scene, bagIdx: view Int, entity: view EntityId) {
+func overlayNodeFromBag(
+  world: mod UiWorld
+  scene: view Scene
+  bagIdx: view Int
+  entity: view EntityId
+) {
   if bagIdx < 0 {
     ret
   }
@@ -447,7 +541,13 @@ func overlayNodeFromBag(world: mod UiWorld, scene: view Scene, bagIdx: view Int,
         }
       } else {
         let val: JsonValue = Json.objectValueAt(doc: doc, this: bag, idx: k)
-        applyComponentByName(world: world, entity: entity, name: key, doc: doc, val: val)
+        applyComponentByName(
+          world: world
+          entity: entity
+          name: key
+          doc: doc
+          val: val
+        )
       }
     }
     k = k + 1
@@ -485,7 +585,11 @@ func accumulateNodeIds(scene: view Scene, nodesIdx: view Int, out: mod List(Stri
 # Collect the union of node ids named by ANY frame's or state's
 # nodes bag — the reset set: switching frame or deactivating a state
 # must restore every node anything could have overridden.
-func overriddenNodeIds(scene: view Scene, frames: view FrameSet, states: view StateSet) ret List(String) {
+func overriddenNodeIds(
+  scene: view Scene
+  frames: view FrameSet
+  states: view StateSet
+) ret List(String) {
   let out: List(String) = List.create(String, cap: 8)
   var f: Int = 0
   loop f < frames.count {
@@ -515,7 +619,15 @@ func overriddenNodeIds(scene: view Scene, frames: view FrameSet, states: view St
 # resets — a scene falling back to "no frame" restores its authored
 # base. States apply in the scene's DECLARED order (not activeStates
 # order) so field conflicts resolve deterministically.
-func applyFrameToPage(world: mod UiWorld, scene: view Scene, frames: view FrameSet, states: view StateSet, frameIdx: view Int, pageId: view String, activeStates: view List(String)) {
+func applyFrameToPage(
+  world: mod UiWorld
+  scene: view Scene
+  frames: view FrameSet
+  states: view StateSet
+  frameIdx: view Int
+  pageId: view String
+  activeStates: view List(String)
+) {
   if frames.count is 0 {
     if states.count is 0 {
       ret
@@ -525,15 +637,36 @@ func applyFrameToPage(world: mod UiWorld, scene: view Scene, frames: view FrameS
   loop let nodeId: view String in overridden {
     if let raw: Int = findNodeInPage(world: world, pageId: pageId, nodeId: nodeId) {
       let entity: EntityId = id(v: raw)
-      resetNodeToBase(world: world, scene: scene, frames: frames, states: states, nodeId: nodeId, entity: entity)
+      resetNodeToBase(
+        world: world
+        scene: scene
+        frames: frames
+        states: states
+        nodeId: nodeId
+        entity: entity
+      )
       if frameIdx >= 0 {
-        overlayNodeFromFrame(world: world, scene: scene, frames: frames, frameIdx: frameIdx, nodeId: nodeId, entity: entity)
+        overlayNodeFromFrame(
+          world: world
+          scene: scene
+          frames: frames
+          frameIdx: frameIdx
+          nodeId: nodeId
+          entity: entity
+        )
       }
       var st: Int = 0
       loop st < states.count {
         if let stateName: String = states.names.copyAt(index: st) {
           if stateIsActive(activeStates: activeStates, name: stateName) {
-            overlayNodeFromState(world: world, scene: scene, states: states, stateIdx: st, nodeId: nodeId, entity: entity)
+            overlayNodeFromState(
+              world: world
+              scene: scene
+              states: states
+              stateIdx: st
+              nodeId: nodeId
+              entity: entity
+            )
           }
         }
         st = st + 1
@@ -545,7 +678,13 @@ func applyFrameToPage(world: mod UiWorld, scene: view Scene, frames: view FrameS
   # must restore the authored structure. States never carry
   # hierarchy directives.
   if haveHierarchyDirectives(scene: scene, frames: frames) {
-    deriveActiveHierarchy(world: world, scene: scene, frames: frames, frameIdx: frameIdx, pageId: pageId)
+    deriveActiveHierarchy(
+      world: world
+      scene: scene
+      frames: frames
+      frameIdx: frameIdx
+      pageId: pageId
+    )
   }
 }
 
@@ -556,16 +695,36 @@ func applyFrameToPage(world: mod UiWorld, scene: view Scene, frames: view FrameS
 # purely by window pt width. Returns the selected frame index (-1 =
 # scene has no frames / none matched). Cheap enough to run on every
 # (re)mount — the table is a few JsonDoc lookups.
-func applySceneFramesToPage(world: mod UiWorld, scene: view Scene, pageId: view String, windowPtW: view Float, forcedFrameId: view String) ret Int {
+func applySceneFramesToPage(
+  world: mod UiWorld
+  scene: view Scene
+  pageId: view String
+  windowPtW: view Float
+  forcedFrameId: view String
+) ret Int {
   let noStates: List(String) = List.create(String, cap: 1)
-  ret applySceneFramesToPageWithStates(world: world, scene: scene, pageId: pageId, windowPtW: windowPtW, forcedFrameId: forcedFrameId, activeStates: noStates)
+  ret applySceneFramesToPageWithStates(
+    world: world
+    scene: scene
+    pageId: pageId
+    windowPtW: windowPtW
+    forcedFrameId: forcedFrameId
+    activeStates: noStates
+  )
 }
 
 # S5 entry point: same as applySceneFramesToPage but overlays every
 # scene-declared state whose name appears in `activeStates` after the
 # frame overlay. Re-run with a changed list to toggle states — reset
 # handles deactivation, no inverse bags needed.
-func applySceneFramesToPageWithStates(world: mod UiWorld, scene: view Scene, pageId: view String, windowPtW: view Float, forcedFrameId: view String, activeStates: view List(String)) ret Int {
+func applySceneFramesToPageWithStates(
+  world: mod UiWorld
+  scene: view Scene
+  pageId: view String
+  windowPtW: view Float
+  forcedFrameId: view String
+  activeStates: view List(String)
+) ret Int {
   let frames: FrameSet = parseFrames(scene: scene)
   let states: StateSet = parseStates(scene: scene)
   if frames.count is 0 {
@@ -573,7 +732,19 @@ func applySceneFramesToPageWithStates(world: mod UiWorld, scene: view Scene, pag
       ret -1
     }
   }
-  let idx: Int = selectFrameIndex(frames: frames, windowPtW: windowPtW, forcedFrameId: forcedFrameId)
-  applyFrameToPage(world: world, scene: scene, frames: frames, states: states, frameIdx: idx, pageId: pageId, activeStates: activeStates)
+  let idx: Int = selectFrameIndex(
+    frames: frames
+    windowPtW: windowPtW
+    forcedFrameId: forcedFrameId
+  )
+  applyFrameToPage(
+    world: world
+    scene: scene
+    frames: frames
+    states: states
+    frameIdx: idx
+    pageId: pageId
+    activeStates: activeStates
+  )
   ret idx
 }

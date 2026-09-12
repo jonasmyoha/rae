@@ -11,49 +11,88 @@ open webgpu/Webgpu
 open webgpu/Context
 
 func nativeSmReady() unsafe extern("rae_sm_ready") ret Int
-func smReady() ret Int {
-  unsafe { ret nativeSmReady() }
-}
-func nativeSmUploadModels() unsafe extern("rae_sm_upload_models")
-func smUploadModels() {
-  unsafe { nativeSmUploadModels() }
-}
-func nativeSmCascadeCount() unsafe extern("rae_sm_cascade_count") ret Int
-func smCascadeCount() ret Int {
-  unsafe { ret nativeSmCascadeCount() }
-}
-func nativeSmDrawCount() unsafe extern("rae_sm_draw_count") ret Int
-func smDrawCount() ret Int {
-  unsafe { ret nativeSmDrawCount() }
-}
-func smLayerView(c: Int) unsafe extern("rae_sm_layer_view") ret Ptr
-func nativeSmCasterReady(i: Int, c: Int) unsafe extern("rae_sm_caster_ready") ret Int
-func smCasterReady(i: copy Int, c: copy Int) ret Int {
-  unsafe { ret nativeSmCasterReady(i: i, c: c) }
-}
-func smCasterPipeline(i: Int) unsafe extern("rae_sm_caster_pipeline") ret Ptr
-func smCasterBind(i: Int, c: Int) unsafe extern("rae_sm_caster_bind") ret Ptr
-func smCasterVbuf(i: Int) unsafe extern("rae_sm_caster_vbuf") ret Ptr
-func smCasterIbuf(i: Int) unsafe extern("rae_sm_caster_ibuf") ret Ptr
-func nativeSmCasterIcount(i: Int) unsafe extern("rae_sm_caster_icount") ret Int
-func smCasterIcount(i: copy Int) ret Int {
-  unsafe { ret nativeSmCasterIcount(i: i) }
-}
-func nativeSmCasterKey(i: Int) unsafe extern("rae_sm_caster_key") ret Int
-func smCasterKey(i: copy Int) ret Int {
-  unsafe { ret nativeSmCasterKey(i: i) }
-}
-func smDrawMetaballs(c: Int, pass: Ptr) unsafe extern("rae_sm_draw_metaballs")
 
+func smReady() ret Int {
+  unsafe {
+    ret nativeSmReady()
+  }
+}
+
+func nativeSmUploadModels() unsafe extern("rae_sm_upload_models")
+
+func smUploadModels() {
+  unsafe {
+    nativeSmUploadModels()
+  }
+}
+
+func nativeSmCascadeCount() unsafe extern("rae_sm_cascade_count") ret Int
+
+func smCascadeCount() ret Int {
+  unsafe {
+    ret nativeSmCascadeCount()
+  }
+}
+
+func nativeSmDrawCount() unsafe extern("rae_sm_draw_count") ret Int
+
+func smDrawCount() ret Int {
+  unsafe {
+    ret nativeSmDrawCount()
+  }
+}
+
+func smLayerView(c: Int) unsafe extern("rae_sm_layer_view") ret Ptr
+
+func nativeSmCasterReady(i: Int, c: Int) unsafe extern("rae_sm_caster_ready") ret Int
+
+func smCasterReady(i: copy Int, c: copy Int) ret Int {
+  unsafe {
+    ret nativeSmCasterReady(i: i, c: c)
+  }
+}
+
+func smCasterPipeline(i: Int) unsafe extern("rae_sm_caster_pipeline") ret Ptr
+
+func smCasterBind(i: Int, c: Int) unsafe extern("rae_sm_caster_bind") ret Ptr
+
+func smCasterVbuf(i: Int) unsafe extern("rae_sm_caster_vbuf") ret Ptr
+
+func smCasterIbuf(i: Int) unsafe extern("rae_sm_caster_ibuf") ret Ptr
+
+func nativeSmCasterIcount(i: Int) unsafe extern("rae_sm_caster_icount") ret Int
+
+func smCasterIcount(i: copy Int) ret Int {
+  unsafe {
+    ret nativeSmCasterIcount(i: i)
+  }
+}
+
+func nativeSmCasterKey(i: Int) unsafe extern("rae_sm_caster_key") ret Int
+
+func smCasterKey(i: copy Int) ret Int {
+  unsafe {
+    ret nativeSmCasterKey(i: i)
+  }
+}
+
+func smDrawMetaballs(c: Int, pass: Ptr) unsafe extern("rae_sm_draw_metaballs")
 
 func shadowEnd() pub {
   unsafe {
-    if smReady() is 0 { ret }
+    if smReady() is 0 {
+      ret
+    }
     smUploadModels()
     # Per-call scratch (#764: was a module-level global). WebGPU copies the
     # attachment during BeginRenderPass, so the local only needs to outlive that.
-    var shadowDepthAtt: List(WGPURenderPassDepthStencilAttachment) = List.create(WGPURenderPassDepthStencilAttachment, cap: 1)
-    loop shadowDepthAtt.length < 1 { shadowDepthAtt.add(value: { depthReadOnly: 0 as UInt32 }) }
+    var shadowDepthAtt: List(WGPURenderPassDepthStencilAttachment) = List.create(
+      WGPURenderPassDepthStencilAttachment
+      cap: 1
+    )
+    loop shadowDepthAtt.length < 1 {
+      shadowDepthAtt.add(value: { depthReadOnly: 0 as UInt32 })
+    }
 
     let encDesc: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
     let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
@@ -64,13 +103,15 @@ func shadowEnd() pub {
     loop c < cascades {
       # Depth-only pass into this cascade's array layer. NOT reverse-Z: clear to 1.
       let depthAtt: WGPURenderPassDepthStencilAttachment = {
-        view_: smLayerView(c: c),
-        depthLoadOp: WGPULoadOp_Clear, depthStoreOp: WGPUStoreOp_Store,
+        view_: smLayerView(c: c)
+        depthLoadOp: WGPULoadOp_Clear
+        depthStoreOp: WGPUStoreOp_Store
         depthClearValue: 1.0
       }
       shadowDepthAtt.set(index: 0, value: depthAtt)
       let rpDesc: WGPURenderPassDescriptor = {
-        colorAttachmentCount: 0 as UInt64, colorAttachments: webgpuNull(),
+        colorAttachmentCount: 0 as UInt64
+        colorAttachments: webgpuNull()
         depthStencilAttachment: shadowDepthAtt.data
       }
       let pass: Ptr = wgpuCommandEncoderBeginRenderPass(commandEncoder: enc, descriptor: rpDesc)
@@ -91,18 +132,41 @@ func shadowEnd() pub {
             runEnd = runEnd + 1
           }
           let instanceCount: Int = runEnd - i
-          wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: smCasterPipeline(i: i))
-          wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
-            group: smCasterBind(i: i, c: c), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
-          wgpuRenderPassEncoderSetVertexBuffer(renderPassEncoder: pass, slot: 0 as UInt32,
-            buffer: smCasterVbuf(i: i), offset: 0 as UInt64, size: WGPU_WHOLE_SIZE)
-          wgpuRenderPassEncoderSetIndexBuffer(renderPassEncoder: pass, buffer: smCasterIbuf(i: i),
-            format: WGPUIndexFormat_Uint32, offset: 0 as UInt64, size: WGPU_WHOLE_SIZE)
+          wgpuRenderPassEncoderSetPipeline(
+            renderPassEncoder: pass
+            pipeline: smCasterPipeline(i: i)
+          )
+          wgpuRenderPassEncoderSetBindGroup(
+            renderPassEncoder: pass
+            groupIndex: 0 as UInt32
+            group: smCasterBind(i: i, c: c)
+            dynamicOffsetCount: 0 as UInt64
+            dynamicOffsets: webgpuNull()
+          )
+          wgpuRenderPassEncoderSetVertexBuffer(
+            renderPassEncoder: pass
+            slot: 0 as UInt32
+            buffer: smCasterVbuf(i: i)
+            offset: 0 as UInt64
+            size: WGPU_WHOLE_SIZE
+          )
+          wgpuRenderPassEncoderSetIndexBuffer(
+            renderPassEncoder: pass
+            buffer: smCasterIbuf(i: i)
+            format: WGPUIndexFormat_Uint32
+            offset: 0 as UInt64
+            size: WGPU_WHOLE_SIZE
+          )
           # instance_index runs [firstInstance, firstInstance+instanceCount) → each instance
           # reads its OWN model + paletteBase row, exactly as the per-caster draws did.
-          wgpuRenderPassEncoderDrawIndexed(renderPassEncoder: pass,
-            indexCount: smCasterIcount(i: i) as UInt32, instanceCount: instanceCount as UInt32,
-            firstIndex: 0 as UInt32, baseVertex: 0 as Int32, firstInstance: i as UInt32)
+          wgpuRenderPassEncoderDrawIndexed(
+            renderPassEncoder: pass
+            indexCount: smCasterIcount(i: i) as UInt32
+            instanceCount: instanceCount as UInt32
+            firstIndex: 0 as UInt32
+            baseVertex: 0 as Int32
+            firstInstance: i as UInt32
+          )
           i = runEnd
         } else {
           i = i + 1

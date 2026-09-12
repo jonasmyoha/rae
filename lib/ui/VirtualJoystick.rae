@@ -20,8 +20,8 @@ open Gpu2dCanvas
 # lower-left spot regardless of window size, aspect or orientation — resolved to
 # absolute design units each frame.
 type VirtualJoystick {
-  padFracX: Float    # left margin as a fraction of design width
-  padFracY: Float    # bottom margin as a fraction of design height
+  padFracX: Float  # left margin as a fraction of design width
+  padFracY: Float  # bottom margin as a fraction of design height
   radiusFrac: Float  # base radius as a fraction of min(designW, designH)
   baseX: Float
   baseY: Float
@@ -31,16 +31,29 @@ type VirtualJoystick {
   grabbedId: Int  # finger id currently owned (-1 = none); held until it lifts
   knobX: Float
   knobY: Float
-  valueX: Float   # -1..1, right positive
-  valueY: Float   # -1..1, up (forward) positive
+  valueX: Float  # -1..1, right positive
+  valueY: Float  # -1..1, up (forward) positive
 }
 
-func createVirtualJoystick(padFracX: copy Float, padFracY: copy Float,
-                           radiusFrac: copy Float) pub ret VirtualJoystick {
+func createVirtualJoystick(
+  padFracX: copy Float
+  padFracY: copy Float
+  radiusFrac: copy Float
+) pub ret VirtualJoystick {
   ret VirtualJoystick {
-    padFracX: padFracX, padFracY: padFracY, radiusFrac: radiusFrac,
-    baseX: 0.0, baseY: 0.0, baseRadius: 0.0, knobRadius: 0.0,
-    active: false, grabbedId: 0 - 1, knobX: 0.0, knobY: 0.0, valueX: 0.0, valueY: 0.0
+    padFracX: padFracX
+    padFracY: padFracY
+    radiusFrac: radiusFrac
+    baseX: 0.0
+    baseY: 0.0
+    baseRadius: 0.0
+    knobRadius: 0.0
+    active: false
+    grabbedId: 0 - 1
+    knobX: 0.0
+    knobY: 0.0
+    valueX: 0.0
+    valueY: 0.0
   }
 }
 
@@ -49,7 +62,9 @@ func resolveVirtualJoystick(joy: mod VirtualJoystick) {
   let dw: Float = Gpu2d.designWidth()
   let dh: Float = Gpu2d.designHeight()
   var shorter: Float = dw
-  if dh < shorter { shorter = dh }
+  if dh < shorter {
+    shorter = dh
+  }
   joy.baseRadius = shorter * joy.radiusFrac
   joy.knobRadius = joy.baseRadius * 0.42
   joy.baseX = Gpu2d.safeLeft() + dw * joy.padFracX + joy.baseRadius
@@ -86,7 +101,9 @@ func updateVirtualJoystick(joy: mod VirtualJoystick) pub ret Bool {
       # id after our finger lifted (see camera_rig). A hold is never a fresh press
       # — drop it so the grab below re-decides by zone, else a reused id keeps the
       # stick and the camera fighting over one finger.
-      if joy.grabbedId >= 0 and id is joy.grabbedId and pressed { joy.grabbedId = 0 - 1 }
+      if joy.grabbedId >= 0 and id is joy.grabbedId and pressed {
+        joy.grabbedId = 0 - 1
+      }
       if joy.grabbedId >= 0 and id is joy.grabbedId {
         px = tx
         py = ty
@@ -103,7 +120,9 @@ func updateVirtualJoystick(joy: mod VirtualJoystick) pub ret Bool {
       }
       index = index + 1
     }
-    if found is false { joy.grabbedId = 0 - 1 }
+    if found is false {
+      joy.grabbedId = 0 - 1
+    }
     joy.active = found
   } else {
     # Desktop: the mouse pointer.
@@ -112,9 +131,13 @@ func updateVirtualJoystick(joy: mod VirtualJoystick) pub ret Bool {
     if Gpu2d.pointerPressed() {
       let ax: Float = px - joy.baseX
       let ay: Float = py - joy.baseY
-      if ax * ax + ay * ay <= zone * zone { joy.active = true }
+      if ax * ax + ay * ay <= zone * zone {
+        joy.active = true
+      }
     }
-    if not Gpu2d.pointerDown() { joy.active = false }
+    if not Gpu2d.pointerDown() {
+      joy.active = false
+    }
   }
   if joy.active {
     var dx: Float = px - joy.baseX
@@ -128,7 +151,7 @@ func updateVirtualJoystick(joy: mod VirtualJoystick) pub ret Bool {
     joy.knobX = joy.baseX + dx
     joy.knobY = joy.baseY + dy
     joy.valueX = dx / joy.baseRadius
-    joy.valueY = 0.0 - dy / joy.baseRadius   # screen-down is +y; forward is up
+    joy.valueY = 0.0 - dy / joy.baseRadius  # screen-down is +y; forward is up
   } else {
     joy.knobX = joy.baseX
     joy.knobY = joy.baseY
@@ -142,9 +165,23 @@ func updateVirtualJoystick(joy: mod VirtualJoystick) pub ret Bool {
 # rounded rect with radius = half its size is a circle. Call inside the 2D pass.
 func drawVirtualJoystick(joy: view VirtualJoystick, canvas: mod Gpu2dCanvas) pub {
   let baseDiam: Float = joy.baseRadius * 2.0
-  Gpu2d.drawRoundedRect(canvas: canvas, x: joy.baseX - joy.baseRadius, y: joy.baseY - joy.baseRadius,
-    w: baseDiam, h: baseDiam, radius: joy.baseRadius, color: 0x38FFFFFF)
+  Gpu2d.drawRoundedRect(
+    canvas: canvas
+    x: joy.baseX - joy.baseRadius
+    y: joy.baseY - joy.baseRadius
+    w: baseDiam
+    h: baseDiam
+    radius: joy.baseRadius
+    color: 0x38FFFFFF
+  )
   let knobDiam: Float = joy.knobRadius * 2.0
-  Gpu2d.drawRoundedRect(canvas: canvas, x: joy.knobX - joy.knobRadius, y: joy.knobY - joy.knobRadius,
-    w: knobDiam, h: knobDiam, radius: joy.knobRadius, color: 0xB0FFFFFF)
+  Gpu2d.drawRoundedRect(
+    canvas: canvas
+    x: joy.knobX - joy.knobRadius
+    y: joy.knobY - joy.knobRadius
+    w: knobDiam
+    h: knobDiam
+    radius: joy.knobRadius
+    color: 0xB0FFFFFF
+  )
 }

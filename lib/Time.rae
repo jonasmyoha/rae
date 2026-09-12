@@ -1,13 +1,18 @@
 # Time and Timer library for Rae
-
 func nativeFormatTimestamp(epochMs: Int) unsafe extern("rae_ext_Time_formatTimestamp") ret String
+
 func formatTimestamp(epochMs: copy Int) ret String {
-  unsafe { ret nativeFormatTimestamp(epochMs: epochMs) }
+  unsafe {
+    ret nativeFormatTimestamp(epochMs: epochMs)
+  }
 }
 
 func nativeFormatDate(epochMs: Int) unsafe extern("rae_ext_Time_formatDate") ret String
+
 func formatDate(epochMs: copy Int) ret String {
-  unsafe { ret nativeFormatDate(epochMs: epochMs) }
+  unsafe {
+    ret nativeFormatDate(epochMs: epochMs)
+  }
 }
 
 type Timer {
@@ -24,7 +29,9 @@ func start(t: mod Timer) {
   if t.running {
     ret
   }
-  unsafe { t.startTime = nowNs() }
+  unsafe {
+    t.startTime = nowNs()
+  }
   t.running = true
 }
 
@@ -33,7 +40,9 @@ func stop(t: mod Timer) {
     ret
   }
   var now: Int = 0
-  unsafe { now = nowNs() }
+  unsafe {
+    now = nowNs()
+  }
   t.accumulated = t.accumulated + (now - t.startTime)
   t.running = false
 }
@@ -48,7 +57,9 @@ func elapsedNs(t: view Timer) ret Int {
   let total: Int = t.accumulated
   if t.running {
     var now: Int = 0
-    unsafe { now = nowNs() }
+    unsafe {
+      now = nowNs()
+    }
     ret total + (now - t.startTime)
   }
   ret total
@@ -99,7 +110,6 @@ func elapsedSeconds(t: view Timer) ret Float {
 # The `Timer` type above is an older, unrelated stopwatch (Int nanoseconds) and
 # is untouched.
 # ======================================================================
-
 type Timestamp {
   # Seconds since the epoch. Float64 deliberately: an f32 holding ~1.75e9 has a
   # 128-second ulp, which is what made the original bug unreproducible.
@@ -117,7 +127,9 @@ type Duration {
 # gettimeofday underneath, so the values are comparable with `uiNowSeconds()`.
 func now() ret Timestamp {
   var ms: Int = 0
-  unsafe { ms = nowMs() }
+  unsafe {
+    ms = nowMs()
+  }
   let secs: Float64 = ms.toFloat() as Float64
   ret Timestamp { seconds: secs / 1000.0 }
 }
@@ -149,7 +161,6 @@ func zero() ret Duration {
 #
 # Nothing is hidden: `t.seconds` is an ordinary field. These are here so call
 # sites read as intent rather than as field poking.
-
 func epochSeconds(this: view Timestamp) ret Float64 {
   ret this.seconds
 }
@@ -200,7 +211,6 @@ func hasElapsed(this: view Timestamp, now: view Timestamp, interval: view Durati
 }
 
 # ----- Duration operations --------------------------------------------
-
 func plus(this: view Duration, other: view Duration) ret Duration {
   ret Duration { seconds: this.seconds + other.seconds }
 }

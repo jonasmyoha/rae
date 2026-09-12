@@ -56,7 +56,6 @@ type JsonParser {
 }
 
 # ---------- value constructors ----------
-
 func jsonNull() ret JsonValue {
   ret JsonValue {
     kind: JsonKind.null
@@ -101,8 +100,8 @@ func stringValue(v: own String) ret JsonValue {
   }
 }
 
-# ---------- pool primitives (raw buf calls; List.get returns RaeAny for struct types in compiled) ----------
-
+# ---------- pool primitives (raw buf calls; List.get returns RaeAny for struct types in compiled)
+# ----------
 func valueAt(doc: view JsonDoc, idx: view Int) ret JsonValue {
   unsafe {
     let v: JsonValue = rae_ext_rae_buf_get(buf: doc.values.data, index: idx)
@@ -125,7 +124,6 @@ func fieldAt(doc: view JsonDoc, idx: view Int) ret JsonField {
 }
 
 # ---------- public accessors ----------
-
 func root(doc: view JsonDoc) ret JsonValue {
   if doc.ok is false {
     ret Json.jsonNull()
@@ -295,7 +293,6 @@ func jsonValueAt(doc: view JsonDoc, idx: view Int) ret JsonValue {
 # ---------- parser internals ----------
 # `isWhitespace` / `isDigit` predicates live in lib/char.rae now and
 # are auto-loaded. Use UFCS-style `c.isWhitespace()` / `c.isDigit()`.
-
 func skipWhitespace(jsonParser: mod JsonParser) {
   loop jsonParser.pos < jsonParser.source.length() {
     let c: Char32 = jsonParser.source.at(index: jsonParser.pos)
@@ -410,10 +407,10 @@ func parseString(jsonParser: mod JsonParser) ret String {
                   one = "\r"
                 } else {
                   if esc is 'b' {
-                    one = "\u{0008}"
+                    one = ""
                   } else {
                     if esc is 'f' {
-                      one = "\u{000c}"
+                      one = ""
                     } else {
                       # \uXXXX or unknown: pass through as raw 1 byte
                       # (good enough for ASCII-heavy scene files)
@@ -512,7 +509,12 @@ func parseValue(
             jsonParser.ok = false
             ret -1
           }
-          let valIdx: Int = Json.parseValue(jsonParser, vals: vals, kids: kids, fields: fields)
+          let valIdx: Int = Json.parseValue(
+            jsonParser
+            vals: vals
+            kids: kids
+            fields: fields
+          )
           if jsonParser.ok is false {
             ret -1
           }
@@ -583,7 +585,12 @@ func parseValue(
       } else {
         loop true {
           Json.skipWhitespace(jsonParser)
-          let elemIdx: Int = Json.parseValue(jsonParser, vals: vals, kids: kids, fields: fields)
+          let elemIdx: Int = Json.parseValue(
+            jsonParser
+            vals: vals
+            kids: kids
+            fields: fields
+          )
           if jsonParser.ok is false {
             ret -1
           }
@@ -725,13 +732,21 @@ func parseJson(source: view String) ret JsonDoc {
 # reference child indices) to a compact JSON String.
 func stringify(doc: view JsonDoc, value: view JsonValue) ret String {
   match value.kind {
-    case JsonKind.null { ret "null" }
+    case JsonKind.null {
+      ret "null"
+    }
     case JsonKind.bool {
-      if value.asBool { ret "true" }
+      if value.asBool {
+        ret "true"
+      }
       ret "false"
     }
-    case JsonKind.number { ret "{value.asNumber}" }
-    case JsonKind.string { ret quote(text: value.asString) }
+    case JsonKind.number {
+      ret "{value.asNumber}"
+    }
+    case JsonKind.string {
+      ret quote(text: value.asString)
+    }
     case JsonKind.array {
       var out: String = "["
       let count: Int = arrayLen(this: value)
@@ -775,25 +790,34 @@ func stringifyDoc(doc: view JsonDoc) ret String {
 # A builder accumulates one object or array level; nest by feeding a finished
 # inner builder's string as a field/item value. Scalars come from jbNull / jbBool
 # / jbNumber / jbString.
-
 type JsonBuilder {
   out: String
   count: Int
 }
 
-func jbNull() ret String { ret "null" }
+func jbNull() ret String {
+  ret "null"
+}
 
 func jbBool(value: view Bool) ret String {
-  if value { ret "true" }
+  if value {
+    ret "true"
+  }
   ret "false"
 }
 
-func jbNumber(value: view Float) ret String { ret "{value}" }
+func jbNumber(value: view Float) ret String {
+  ret "{value}"
+}
 
-func jbString(value: view String) ret String { ret quote(text: value) }
+func jbString(value: view String) ret String {
+  ret quote(text: value)
+}
 
 # Start an object; add fields with jbField; finish with jbEndObject.
-func jbObject() ret JsonBuilder { ret JsonBuilder { out: "\{", count: 0 } }
+func jbObject() ret JsonBuilder {
+  ret JsonBuilder { out: "\{", count: 0 }
+}
 
 func jbField(builder: mod JsonBuilder, key: view String, valueJson: view String) {
   if builder.count > 0 {
@@ -813,7 +837,9 @@ func jbEndObject(builder: view JsonBuilder) ret String {
 }
 
 # Start an array; add items with jbItem; finish with jbEndArray.
-func jbArray() ret JsonBuilder { ret JsonBuilder { out: "[", count: 0 } }
+func jbArray() ret JsonBuilder {
+  ret JsonBuilder { out: "[", count: 0 }
+}
 
 func jbItem(builder: mod JsonBuilder, valueJson: view String) {
   if builder.count > 0 {

@@ -33,24 +33,52 @@ func canvasFrameBegin(canvas: mod Gpu2dCanvas) {
 
 # Open the frame: a manager recording, the C offscreen target adopted (re-adopted
 # when configure replaced it), a pass over it held open for the flushes.
-func canvasOpenFrame(canvas: mod Gpu2dCanvas, clear: copy Bool, r: copy Float, g: copy Float, b: copy Float, a: copy Float) {
+func canvasOpenFrame(
+  canvas: mod Gpu2dCanvas
+  clear: copy Bool
+  r: copy Float
+  g: copy Float
+  b: copy Float
+  a: copy Float
+) {
   ensureBoxResources(canvas: canvas)
   if let resources: mod GpuResources => canvas.gpuResources {
     unsafe {
       let offscreenView: Ptr = g2dOffscreenView()
-      if offscreenView is webgpuNull() { ret }
-      if offscreenView is not canvas.offscreenHandle or not isValidExternal(resources: resources, id: canvas.offscreen) {
+      if offscreenView is webgpuNull() {
+        ret
+      }
+      if offscreenView is not canvas.offscreenHandle or not isValidExternal(
+        resources: resources
+        id: canvas.offscreen
+      ) {
         releaseExternal(resources: resources, id: canvas.offscreen)
         canvas.offscreen = noExternalId()
-        if let adopted: ExternalId = adoptExternalTextureView(resources: resources, handle: offscreenView) { canvas.offscreen = adopted }
+        if let adopted: ExternalId = adoptExternalTextureView(
+          resources: resources
+          handle: offscreenView
+        ) {
+          canvas.offscreen = adopted
+        }
         canvas.offscreenHandle = offscreenView
       }
     }
-    if not isValidExternal(resources: resources, id: canvas.offscreen) { ret }
+    if not isValidExternal(resources: resources, id: canvas.offscreen) {
+      ret
+    }
     if let recording: Recording = beginRecording(resources: resources) {
       var opened: Recording = own recording
-      let target: RenderTarget = renderTarget(colorView: externalRef(id: canvas.offscreen), clear: clear, r: r, g: g, b: b, a: a)
-      unsafe { canvas.framePass = beginRenderPass(recording: opened, resources: resources, target: target) }
+      let target: RenderTarget = renderTarget(
+        colorView: externalRef(id: canvas.offscreen)
+        clear: clear
+        r: r
+        g: g
+        b: b
+        a: a
+      )
+      unsafe {
+        canvas.framePass = beginRenderPass(recording: opened, resources: resources, target: target)
+      }
       canvas.recording = own opened
     }
   }
@@ -68,25 +96,34 @@ func canvasCloseFrame(canvas: mod Gpu2dCanvas) {
     }
     if let recording: mod Recording => canvas.recording {
       loop var i: Int = 0, i < canvas.frameBinds.length, ++i {
-        if let bind: BindGroupId = canvas.frameBinds.copyAt(index: i) { recordBindGroupUse(recording: recording, resources: resources, id: bind) }
+        if let bind: BindGroupId = canvas.frameBinds.copyAt(index: i) {
+          recordBindGroupUse(recording: recording, resources: resources, id: bind)
+        }
       }
       loop var i: Int = 0, i < canvas.imageBinds.length, ++i {
-        if let bind: BindGroupId = canvas.imageBinds.copyAt(index: i) { recordBindGroupUse(recording: recording, resources: resources, id: bind) }
+        if let bind: BindGroupId = canvas.imageBinds.copyAt(index: i) {
+          recordBindGroupUse(recording: recording, resources: resources, id: bind)
+        }
       }
       recordRenderPipelineUse(recording: recording, resources: resources, id: canvas.pipeline)
       recordRenderPipelineUse(recording: recording, resources: resources, id: canvas.imagePipeline)
       recordRenderPipelineUse(recording: recording, resources: resources, id: canvas.textPipeline)
-      let tracked: opt SubmissionId = trackSubmission(inFlight: canvas.inFlight, resources: resources, recording: recording)
+      let tracked: opt SubmissionId = trackSubmission(
+        inFlight: canvas.inFlight
+        resources: resources
+        recording: recording
+      )
     }
     canvas.recording = none
   }
 }
 
-
 # The whole flush (Gpu2d.flush): the viewport transform for this flush, then
 # boxes, images, text — the painter order the C flush had.
 func canvasFlush(canvas: mod Gpu2dCanvas) {
-  if not canvasFrameActive(canvas: canvas) { ret }
+  if not canvasFrameActive(canvas: canvas) {
+    ret
+  }
   ensureBoxResources(canvas: canvas)
   if let resources: mod GpuResources => canvas.gpuResources {
     uploadViewport(canvas: canvas, resources: resources)

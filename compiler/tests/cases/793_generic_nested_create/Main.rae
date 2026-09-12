@@ -9,10 +9,7 @@ type Box(T: type) {
 }
 
 func makeBox(T: type) ret Box(T) {
-  ret Box(T) {
-    items: create(cap: 8)
-    more: create(cap: 8)
-  }
+  ret Box(T) { items: create(cap: 8), more: create(cap: 8) }
 }
 
 # One type param, several fields of DIFFERENT fixed element types plus a T field.
@@ -23,11 +20,7 @@ type Bag(T: type) {
 }
 
 func makeBag(T: type) ret Bag(T) {
-  ret Bag(T) {
-    ids: create(cap: 2)
-    names: create(cap: 2)
-    vals: create(cap: 2)
-  }
+  ret Bag(T) { ids: create(cap: 2), names: create(cap: 2), vals: create(cap: 2) }
 }
 
 # Typed locals inside a generic function, expected-type `create` form.
@@ -51,10 +44,7 @@ type Outer(T: type) {
 }
 
 func makeOuter(T: type) ret Outer(T) {
-  ret Outer(T) {
-    h: Holder(T) { inner: create(cap: 1), vals: create(cap: 1) }
-    tag: create(cap: 1)
-  }
+  ret Outer(T) { h: Holder(T) { inner: create(cap: 1), vals: create(cap: 1) }, tag: create(cap: 1) }
 }
 
 func main() {
@@ -66,9 +56,15 @@ func main() {
   bag.names.add(value: "x")
   bag.vals.add(value: 9)
   log("bag ids={bag.ids.length} names={bag.names.length} vals={bag.vals.length}")
-  if let e: EntityId = bag.ids.copyAt(index: 0) { log("id0={e.index}") }
-  if let n: String = bag.names.copyAt(index: 0) { log("name0={n}") }
-  if let v: Int = bag.vals.copyAt(index: 0) { log("val0={v}") }
+  if let e: EntityId = bag.ids.copyAt(index: 0) {
+    log("id0={e.index}")
+  }
+  if let n: String = bag.names.copyAt(index: 0) {
+    log("name0={n}")
+  }
+  if let v: Int = bag.vals.copyAt(index: 0) {
+    log("val0={v}")
+  }
 
   log("locals={buildLocals(String)}")
 

@@ -23,46 +23,63 @@ import Scene
 import Render
 
 func main() {
-    let width: Int = 1280
-    let height: Int = 720
+  let width: Int = 1280
+  let height: Int = 720
 
-    let world: List(Sphere) = buildScene()
+  let world: List(Sphere) = buildScene()
 
-    # Pre-fill the framebuffer with black so the streaming texture has a full
-    # width*height of pixels from the first frame.
-    let fb: List(Int) = List.create(Int, cap: width * height)
-    loop var i: Int = 0, i < width * height, ++i {
-        fb.add(value: 0)
+  # Pre-fill the framebuffer with black so the streaming texture has a full
+  # width*height of pixels from the first frame.
+  let fb: List(Int) = List.create(Int, cap: width * height)
+  loop var i: Int = 0, i < width * height, ++i {
+    fb.add(value: 0)
+  }
+
+  Sdl3.initWindow(
+    width: width
+    height: height
+    title: "Rae raytracer — step 1 (SDL3, single-threaded)"
+  )
+
+  var nextRow: Int = 0
+  let startMs: Int = nowMs()
+  var doneMs: Int = 0
+  loop not Sdl3.shouldClose() {
+    if Sdl3.isKeyPressed(key: Keys.keyF2) {
+      let s: Bool = Image.savePng(
+        path: Filesystem.renderPath(stem: "rae_render")
+        pixels: fb.data
+        width: width
+        height: height
+      )
     }
 
-    Sdl3.initWindow(width: width, height: height, title: "Rae raytracer — step 1 (SDL3, single-threaded)")
-
-    var nextRow: Int = 0
-    let startMs: Int = nowMs()
-    var doneMs: Int = 0
-    loop not Sdl3.shouldClose() {
-        if Sdl3.isKeyPressed(key: Keys.keyF2) { let s: Bool = Image.savePng(path: Filesystem.renderPath(stem: "rae_render"), pixels: fb.data, width: width, height: height) }
-
-        # Render a time-bounded slice of scanlines each frame (Rae has no
-        # `break`, so the budget is part of the loop guard).
-        let frameStart: Int = nowMs()
-        loop nextRow < height and nowMs() - frameStart <= 12 {
-            renderRow(fb: fb, world: world, width: width, height: height, y: nextRow)
-            nextRow = nextRow + 1
-        }
-        if nextRow >= height and doneMs is 0 {
-            doneMs = nowMs() - startMs
-        }
-
-        Sdl3.updatePixels(pixels: fb.data, w: width, h: height)
-        Sdl3.present()
-
-        let pct: Int = nextRow * 100 / height
-        if doneMs > 0 {
-            Sdl3.setTitle(title: "Rae step 1 (SDL3) | {width}x{height} | done in {doneMs}ms")
-        } else {
-            Sdl3.setTitle(title: "Rae step 1 (SDL3) | {width}x{height} | {pct}%")
-        }
+    # Render a time-bounded slice of scanlines each frame (Rae has no
+    # `break`, so the budget is part of the loop guard).
+    let frameStart: Int = nowMs()
+    loop nextRow < height and nowMs() - frameStart <= 12 {
+      renderRow(
+        fb: fb
+        world: world
+        width: width
+        height: height
+        y: nextRow
+      )
+      nextRow = nextRow + 1
     }
-    Sdl3.closeWindow()
+    if nextRow >= height and doneMs is 0 {
+      doneMs = nowMs() - startMs
+    }
+
+    Sdl3.updatePixels(pixels: fb.data, w: width, h: height)
+    Sdl3.present()
+
+    let pct: Int = nextRow * 100 / height
+    if doneMs > 0 {
+      Sdl3.setTitle(title: "Rae step 1 (SDL3) | {width}x{height} | done in {doneMs}ms")
+    } else {
+      Sdl3.setTitle(title: "Rae step 1 (SDL3) | {width}x{height} | {pct}%")
+    }
+  }
+  Sdl3.closeWindow()
 }
