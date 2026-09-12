@@ -4363,6 +4363,59 @@ static bool sema_name_near(Str candidate, Str typed) {
     return is_prefix || is_suffix;
 }
 
+// #927: closest-name suggestion for an unknown MODULE-QUALIFIED call. A small
+// Levenshtein distance so `noSuchFunction` finds nothing but a real typo
+// (`maxx` -> `max`) is suggested. Capped so an unrelated name is never offered.
+static size_t sema_edit_distance(Str a, Str b) {
+    size_t n = a.len, m = b.len;
+    if (n == 0) return m;
+    if (m == 0) return n;
+    size_t prev[128], curr[128];
+    if (m + 1 > 128) return (n > m ? n : m);  // too long to bother; treat as far
+    for (size_t j = 0; j <= m; j++) prev[j] = j;
+    for (size_t i = 1; i <= n; i++) {
+        curr[0] = i;
+        for (size_t j = 1; j <= m; j++) {
+            size_t cost = (sema_lower(a.data[i - 1]) == sema_lower(b.data[j - 1])) ? 0 : 1;
+            size_t del = prev[j] + 1, ins = curr[j - 1] + 1, sub = prev[j - 1] + cost;
+            size_t best = del < ins ? del : ins;
+            curr[j] = best < sub ? best : sub;
+        }
+        for (size_t j = 0; j <= m; j++) prev[j] = curr[j];
+    }
+    return prev[m];
+}
+
+// Track the closest candidate name to `typed` across a scan, keeping the one
+// with the smallest edit distance that is still a plausible typo (within a
+// third of the longer length, and at least a prefix/suffix near-miss when the
+// names are short). `*best_dist` starts at SIZE_MAX.
+static void sema_consider_suggestion(Str candidate, Str typed, Str* best, size_t* best_dist) {
+    if (candidate.len == 0) return;
+    size_t d = sema_edit_distance(candidate, typed);
+    if (d == 0) return;  // exact match is not a "did you mean"
+    size_t longer = candidate.len > typed.len ? candidate.len : typed.len;
+    size_t threshold = longer / 3 + 1;
+    if (d > threshold && !sema_name_near(candidate, typed)) return;
+    if (d < *best_dist) { *best_dist = d; *best = candidate; }
+}
+
+// #927: does ANY visible function named `name` exist (this module or an
+// import)? Mirrors #751's "no function by that name is loaded here" test: the
+// unknown-qualified-call diagnostic fires only when the name matches nothing,
+// so a backend-resolved call (a generic container method, a value-shadow UFCS)
+// whose name DOES exist is never wrongly rejected.
+static bool sema_any_function_named(AstModule* module, Str name) {
+    AstModule* scan[64]; size_t sn = 0; scan[sn++] = module;
+    for (const AstImport* imp = module->imports; imp && sn < 64; imp = imp->next)
+        if (imp->module) scan[sn++] = imp->module;
+    for (size_t si = 0; si < sn; si++)
+        for (AstDecl* d = scan[si]->decls; d; d = d->next)
+            if (d->kind == AST_DECL_FUNC && str_eq(d->as.func_decl.name, name)) return true;
+    return false;
+}
+
+
 // The template base name of a type: "List" for a specialized `List_int64_t`,
 // the plain name otherwise. Method receivers are declared against the template
 // (`this: mod List(T)`), so receiver matching must compare template to template.
@@ -5295,6 +5348,105 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
             if (expr->decl_link && expr->decl_link->kind == AST_DECL_FUNC) {
                 sema_check_own_args(ctx, module, symbols, &expr->decl_link->as.func_decl,
                                     expr->as.method_call.args, true);
+            }
+            // #927: an unknown MODULE-QUALIFIED call (`Math.noSuchFunction(...)`)
+            // or an unknown method on a TYPE NAME used as a namespace
+            // (`Ptr.null()`) reached here without resolving — decl_link unset,
+            // no result type — and would otherwise leak to the C backend as
+            // `undeclared function 'rae_null'` plus a nonsense `undeclared
+            // identifier 'Ptr'`. Give it #751's treatment for the qualified
+            // form: name the module/type and the missing function, and suggest
+            // the closest loaded name. Gated to a bare-IDENT receiver that is a
+            // NAMESPACE (a module, or a type/enum name), never a value binding
+            // (whose failed UFCS is diagnosed above), so ordinary method calls
+            // are untouched.
+            if (!expr->decl_link
+                && (!expr->resolved_type
+                    || expr->resolved_type->kind == TYPE_UNKNOWN
+                    || expr->resolved_type->kind == TYPE_VOID)
+                && expr->as.method_call.object->kind == AST_EXPR_IDENT) {
+                Str lhs = expr->as.method_call.object->as.ident;
+                Symbol* lsym = symbol_table_lookup(symbols, lhs);
+                bool is_value = lsym && lsym->decl
+                    && lsym->decl->kind != AST_DECL_TYPE
+                    && lsym->decl->kind != AST_DECL_ENUM;
+                bool is_type = lsym && lsym->decl
+                    && (lsym->decl->kind == AST_DECL_TYPE || lsym->decl->kind == AST_DECL_ENUM);
+                // A BUILTIN type name (`Ptr`, `Int`, `String`, ...) has no
+                // user decl in the symbol table, so recognise it from the fixed
+                // primitive list — `Ptr.null()` is a type namespace too. (Only a
+                // closed list, NOT a lenient type resolve: resolving an arbitrary
+                // bare name yields a fabricated struct type and would misfire on
+                // a value receiver whose local the scope did not surface.)
+                if (!is_type && !is_value) {
+                    static const char* const prim_types[] = {
+                        "Int","Int64","Int32","Int16","Int8","UInt64","UInt32","UInt16","UInt8",
+                        "Float","Float32","Float64","Bool","String","Char","Char32","Any","Void","Ptr"};
+                    for (size_t pi = 0; pi < sizeof prim_types / sizeof prim_types[0]; pi++)
+                        if (str_eq_cstr(lhs, prim_types[pi])) { is_type = true; break; }
+                }
+                Str modname = (Str){0};
+                if (!is_value) {
+                    if (sema_is_module_name(module, lhs)) modname = lhs;
+                    else {
+                        Str aliased = sema_resolve_alias(s_current_decl_origin, lhs);
+                        if (aliased.data && sema_is_module_name(module, aliased)) modname = aliased;
+                    }
+                }
+                Str fname = expr->as.method_call.method_name;
+                // Compiler INTRINSICS have no user decl and are backend-emitted
+                // for a type/module qualifier — never "unknown".
+                bool is_intrinsic = str_eq_cstr(fname, "create")
+                    || str_eq_cstr(fname, "toJson") || str_eq_cstr(fname, "toString")
+                    || str_eq_cstr(fname, "fromJson") || str_eq_cstr(fname, "get");
+                if (!is_value && (modname.data || is_type) && !is_intrinsic
+                    && !sema_any_function_named(module, fname)) {
+                    Str suggestion = {0}; size_t best_dist = (size_t)-1;
+                    // Candidates: functions of the qualified module (a bare
+                    // ident matches its module_name suffix), and `this`-methods
+                    // on the type when the qualifier is a type name.
+                    for (AstDecl* d = module->decls; d; d = d->next) {
+                        if (d->kind != AST_DECL_FUNC || d->as.func_decl.specialization_args) continue;
+                        if (!sema_decl_visible(s_current_decl_origin, d)) continue;
+                        bool candidate = false;
+                        if (modname.data && d->module_name && str_eq_cstr(modname, d->module_name))
+                            candidate = true;
+                        if (is_type && d->as.func_decl.params
+                            && str_eq_cstr(d->as.func_decl.params->name, "this")) {
+                            Str recv = get_base_type_name(d->as.func_decl.params->type);
+                            if (str_eq(recv, lhs)) candidate = true;
+                        }
+                        if (candidate)
+                            sema_consider_suggestion(d->as.func_decl.name, fname, &suggestion, &best_dist);
+                    }
+                    char buf[384];
+                    if (modname.data && !is_type) {
+                        if (suggestion.len)
+                            snprintf(buf, sizeof buf,
+                                "unknown function '%.*s' in module '%.*s'; did you mean '%.*s'?",
+                                (int)fname.len, fname.data, (int)modname.len, modname.data,
+                                (int)suggestion.len, suggestion.data);
+                        else
+                            snprintf(buf, sizeof buf,
+                                "unknown function '%.*s' in module '%.*s': no function by that name is defined there",
+                                (int)fname.len, fname.data, (int)modname.len, modname.data);
+                    } else {
+                        // A type name used as a namespace (`Ptr.null()`); it may
+                        // also be a module (`GpuTiming`), so mention both roles
+                        // only as "type".
+                        if (suggestion.len)
+                            snprintf(buf, sizeof buf,
+                                "unknown function '%.*s' on type '%.*s'; did you mean '%.*s'?",
+                                (int)fname.len, fname.data, (int)lhs.len, lhs.data,
+                                (int)suggestion.len, suggestion.data);
+                        else
+                            snprintf(buf, sizeof buf,
+                                "unknown function '%.*s' on type '%.*s': no such function or method",
+                                (int)fname.len, fname.data, (int)lhs.len, lhs.data);
+                    }
+                    diag_error(sema_diag_file(module), (int)expr->line, (int)expr->column, buf);
+                    if (module) module->had_error = true;
+                }
             }
             break;
         case AST_EXPR_INDEX:
