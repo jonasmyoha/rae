@@ -176,7 +176,8 @@ func buildScene(
 
 func main() ret Int {
   Gpu2d.initWindow(width: 1280, height: 800, title: "Rae — procedural rocks & trees")
-  var canvas: Gpu2dCanvas = createGpu2dCanvas()  # #907: the app-owned 2D canvas (box + image passes)
+  # The swatches draw on the RENDERER's canvas (#920): the composite writes the
+  # scene into that canvas's offscreen and the UI frame paints over it.
 
   # Five rock variants: vary seed, slice count, irregularity.
   var rocks: List(Int) = List.create(Int, cap: 5)
@@ -213,7 +214,7 @@ func main() ret Int {
 
   # Five procedural material textures (grass/sand/rock/mud/water), generated in
   # Rae and registered as gpu2d images (shown as swatches along the bottom).
-  registerTextures(canvas: canvas)
+  registerTextures(canvas: renderer.canvas)
 
   var sceneWorld: World3d = buildScene(
     rocks: rocks
@@ -280,11 +281,11 @@ func main() ret Int {
       loop var oi: Int = 0, oi < deferredOrderLength(renderer: renderer), ++oi {
         let tag: Int = deferredTagAt(renderer: renderer, i: oi)
         if tag is RenderTag.uiOverlay {
-          Gpu2d.beginFrameLoad(canvas: canvas)
-          drawTextureSwatches(canvas: canvas)
+          Gpu2d.beginFrameLoad(canvas: renderer.canvas)
+          drawTextureSwatches(canvas: renderer.canvas)
         } else {
           if tag is RenderTag.present {
-            Gpu2d.endFrame(canvas: canvas)
+            Gpu2d.endFrame(canvas: renderer.canvas)
           } else {
             renderDeferredPassWorld(
               renderer: renderer
@@ -302,7 +303,7 @@ func main() ret Int {
   }
   shutdownDeferredRenderer(renderer: renderer)  # #904: the renderer-owned GPU manager, before the C shutdown
   shutdown()
-  canvasShutdown(canvas: canvas)
+  # The renderer's canvas is shut down by shutdownDeferredRenderer.
   Gpu2d.closeWindow()
   ret 0
 }

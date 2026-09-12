@@ -103,7 +103,10 @@ func main() ret Int {
     height: 800
     title: "Rae 3D — Metaballs ({rendererPathName()} rendering)"
   )
-  var canvas: Gpu2dCanvas = createGpu2dCanvas()  # #907: the app-owned 2D canvas (box + image passes)
+  # The 2D UI draws on the RENDERER's canvas (#920): the deferred composite
+  # writes the scene into that canvas's offscreen target, and the UI frame
+  # loads it and paints over it - a separate app canvas would present an
+  # offscreen the scene was never composited into (a black viewport).
   # Remember where the user put the window, across restarts. Opt-in, and the
   # app picks the file: the hot-reload channel dir is per app, so two examples
   # running at once do not share one window position.
@@ -784,6 +787,7 @@ func main() ret Int {
               )
               renderSdfGbuffer(
                 cache: renderer.passes.gbuffer
+                resources: resources
                 world: asset1.world
                 tags: clusters1
                 camera: camera
@@ -797,6 +801,7 @@ func main() ret Int {
               )
               renderSdfGbuffer(
                 cache: renderer.passes.gbuffer
+                resources: resources
                 world: asset2.world
                 tags: clusters2
                 camera: camera
@@ -810,6 +815,7 @@ func main() ret Int {
               )
               renderSdfGbuffer(
                 cache: renderer.passes.gbuffer
+                resources: resources
                 world: asset3.world
                 tags: clusters3
                 camera: camera
@@ -829,12 +835,12 @@ func main() ret Int {
           )
         }
         if tag is RenderTag.uiOverlay {
-          Gpu2d.beginFrameLoad(canvas: canvas)
-          renderSystemGpu2d(world: uiWorld, res: gpuUi, canvas: canvas)
+          Gpu2d.beginFrameLoad(canvas: renderer.canvas)
+          renderSystemGpu2d(world: uiWorld, res: gpuUi, canvas: renderer.canvas)
           # After the app UI, so the diagnostic is never what gets covered up.
           drawLogOverlay(
             ov: logView
-            canvas: canvas
+            canvas: renderer.canvas
             font: gpuUi.textFont
             screenW: extentW
             screenH: extentH
@@ -842,14 +848,14 @@ func main() ret Int {
           # LAST, so it is above the scene, the UI world and the log.
           drawDebugOverlay(
             debugOverlay: dbg
-            canvas: canvas
+            canvas: renderer.canvas
             font: gpuUi.textFont
             didRealWork: dbgDidWork
           )
           lastLogRevision = logView.revision
         }
         if tag is RenderTag.present {
-          Gpu2d.endFrame(canvas: canvas)
+          Gpu2d.endFrame(canvas: renderer.canvas)
         }
         pi3 = pi3 + 1
       }
@@ -879,7 +885,7 @@ func main() ret Int {
   }
   shutdownDeferredRenderer(renderer: renderer)  # #904: the renderer-owned GPU manager, before the C shutdown
   shutdown()
-  canvasShutdown(canvas: canvas)
+  # The renderer's canvas is shut down by shutdownDeferredRenderer.
   Gpu2d.closeWindow()
   ret 0
 }
