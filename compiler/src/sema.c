@@ -806,7 +806,7 @@ typedef struct InstantiationStack {
 // Forward declarations
 static bool sema_is_list_value_accessor(const AstExpr* expr);
 static void sema_analyze_decl(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstDecl* decl);
-static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr);
+static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr, bool is_value_pos);
 static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstStmt* stmt, TypeInfo* current_return_type);
 static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstTypeRef* type_ref);
 static void sema_check_own_args(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, const AstFuncDecl* fd, AstCallArg* args, bool skip_receiver);
@@ -1788,7 +1788,7 @@ static void sema_analyze_decl_inner(CompilerContext* ctx, AstModule* module, Sym
             AstTypeField* field = decl->as.type_decl.fields;
             while (field) {
                 if (field->type) sema_resolve_type_internal(ctx, module, symbols, field->type);
-                if (field->default_value) sema_analyze_expr(ctx, module, symbols, field->default_value);
+                if (field->default_value) sema_analyze_expr(ctx, module, symbols, field->default_value, true);
                 field = field->next;
             }
             symbol_table_pop_scope(symbols);
@@ -1923,7 +1923,7 @@ static void sema_analyze_decl_inner(CompilerContext* ctx, AstModule* module, Sym
             break;
         }
         case AST_DECL_GLOBAL_LET: {
-            if (decl->as.let_decl.value) sema_analyze_expr(ctx, module, symbols, decl->as.let_decl.value);
+            if (decl->as.let_decl.value) sema_analyze_expr(ctx, module, symbols, decl->as.let_decl.value, true);
             // Mark the already-registered global symbol's mutability, and fold a
             // `const` initializer to a literal (decls are analyzed in source
             // order, so a const may reference earlier consts).
@@ -2813,7 +2813,7 @@ static void reflect_expand_field_loop(CompilerContext* ctx, AstModule* module,
             "fields(Type) over a type is not supported yet (#774); pass a struct VALUE");
     }
     AstExpr* value = args->value;
-    sema_analyze_expr(ctx, module, symbols, value);
+    sema_analyze_expr(ctx, module, symbols, value, true);
     TypeInfo* vt = value->resolved_type;
     bool value_is_mod = true; // a bare place/param with no ref wrapper is mutable
     if (vt && vt->kind == TYPE_REF) { value_is_mod = vt->as.ref.is_mod; vt = vt->as.ref.base; }
@@ -2994,7 +2994,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
     if (!stmt) return;
     switch (stmt->kind) {
         case AST_STMT_EXPR: {
-            if (stmt->as.expr_stmt) sema_analyze_expr(ctx, module, symbols, stmt->as.expr_stmt);
+            if (stmt->as.expr_stmt) sema_analyze_expr(ctx, module, symbols, stmt->as.expr_stmt, true);
             // #880/#881/#885: stray `create(...)` and use after `x.drop()` are
             // reported by sema_lifecycle_post_pass over the whole body.
             break;
@@ -3003,7 +3003,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
             TypeInfo* t = NULL;
             if (stmt->as.let_stmt.type) t = sema_resolve_type_internal(ctx, module, symbols, stmt->as.let_stmt.type);
             if (stmt->as.let_stmt.value) {
-                sema_analyze_expr(ctx, module, symbols, stmt->as.let_stmt.value);
+                sema_analyze_expr(ctx, module, symbols, stmt->as.let_stmt.value, true);
                 if (!t && stmt->as.let_stmt.value->resolved_type) t = stmt->as.let_stmt.value->resolved_type;
                 if (t) ensure_type_match(ctx, t, &stmt->as.let_stmt.value);
                 // #881/#882: a List value accessor copies the element.
@@ -3200,7 +3200,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
             AstReturnArg* arg = stmt->as.ret_stmt.values;
             while (arg) {
                 if (arg->value) {
-                    sema_analyze_expr(ctx, module, symbols, arg->value);
+                    sema_analyze_expr(ctx, module, symbols, arg->value, true);
                     sema_check_returned_ref(ctx, module, symbols, arg->value);
                     if (current_return_type) ensure_type_match(ctx, current_return_type, &arg->value);
                 }
@@ -3350,7 +3350,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                     }
                 }
             }
-            if (stmt->as.if_stmt.condition) sema_analyze_expr(ctx, module, symbols, stmt->as.if_stmt.condition);
+            if (stmt->as.if_stmt.condition) sema_analyze_expr(ctx, module, symbols, stmt->as.if_stmt.condition, true);
             if (stmt->as.if_stmt.then_block) {
                 symbol_table_push_scope(symbols);
                 AstStmt* s = stmt->as.if_stmt.then_block->first;
@@ -3369,7 +3369,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
              symbol_table_push_scope(symbols);
              if (stmt->as.loop_stmt.is_range) {
                  AstExpr* collection = stmt->as.loop_stmt.condition;
-                 if (collection) sema_analyze_expr(ctx, module, symbols, collection);
+                 if (collection) sema_analyze_expr(ctx, module, symbols, collection, true);
                  TypeInfo* collection_type = collection ? collection->resolved_type : NULL;
                  if (collection_type && collection_type->kind == TYPE_REF) {
                      collection_type = collection_type->as.ref.base;
@@ -3416,9 +3416,9 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                  }
              } else {
                  if (stmt->as.loop_stmt.init) sema_analyze_stmt(ctx, module, symbols, stmt->as.loop_stmt.init, current_return_type);
-                 if (stmt->as.loop_stmt.condition) sema_analyze_expr(ctx, module, symbols, stmt->as.loop_stmt.condition);
+                 if (stmt->as.loop_stmt.condition) sema_analyze_expr(ctx, module, symbols, stmt->as.loop_stmt.condition, true);
              }
-             if (stmt->as.loop_stmt.increment) sema_analyze_expr(ctx, module, symbols, stmt->as.loop_stmt.increment);
+             if (stmt->as.loop_stmt.increment) sema_analyze_expr(ctx, module, symbols, stmt->as.loop_stmt.increment, true);
              s_loop_depth++;
              if (stmt->as.loop_stmt.body) {
                  AstStmt* s = stmt->as.loop_stmt.body->first;
@@ -3452,17 +3452,17 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
              }
              break;
         case AST_STMT_MATCH: {
-            if (stmt->as.match_stmt.subject) sema_analyze_expr(ctx, module, symbols, stmt->as.match_stmt.subject);
+            if (stmt->as.match_stmt.subject) sema_analyze_expr(ctx, module, symbols, stmt->as.match_stmt.subject, true);
             bool has_default = false;
             const AstDecl* enum_decl = NULL;
             Str enum_name = {0};
             for (AstMatchCase* mc = stmt->as.match_stmt.cases; mc; mc = mc->next) {
                 if (!mc->pattern) { has_default = true; }
                 else {
-                    sema_analyze_expr(ctx, module, symbols, mc->pattern);
+                    sema_analyze_expr(ctx, module, symbols, mc->pattern, true);
                     // Analyze every or-pattern too (`case A, B, C`).
                     for (AstCasePattern* op = mc->or_patterns; op; op = op->next)
-                        sema_analyze_expr(ctx, module, symbols, op->expr);
+                        sema_analyze_expr(ctx, module, symbols, op->expr, true);
                     if (!enum_decl && mc->pattern->kind == AST_EXPR_MEMBER &&
                         mc->pattern->as.member.object->kind == AST_EXPR_IDENT) {
                         Str obj_name = mc->pattern->as.member.object->as.ident;
@@ -3542,8 +3542,8 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
             break;
         }
         case AST_STMT_ASSIGN: {
-            sema_analyze_expr(ctx, module, symbols, stmt->as.assign_stmt.target);
-            sema_analyze_expr(ctx, module, symbols, stmt->as.assign_stmt.value);
+            sema_analyze_expr(ctx, module, symbols, stmt->as.assign_stmt.target, true);
+            sema_analyze_expr(ctx, module, symbols, stmt->as.assign_stmt.value, true);
             if (stmt->as.assign_stmt.target->resolved_type) ensure_type_match(ctx, stmt->as.assign_stmt.target->resolved_type, &stmt->as.assign_stmt.value);
             // View restriction checks
             if (stmt->as.assign_stmt.target->kind == AST_EXPR_IDENT) {
@@ -4265,17 +4265,45 @@ static void sema_receiver_display(const TypeInfo* type, char* buf, size_t cap) {
     }
 }
 
-static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr) {
+static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr, bool is_value_pos) {
     if (!expr) return;
     switch (expr->kind) {
-        case AST_EXPR_IDENT: { Symbol* sym = symbol_table_lookup(symbols, expr->as.ident); if (sym) expr->resolved_type = sym->type; break; }
+        case AST_EXPR_IDENT: {
+            Symbol* sym = symbol_table_lookup(symbols, expr->as.ident);
+            if (sym) { expr->resolved_type = sym->type; break; }
+            // #914: an identifier read as a VALUE (not a call callee, and not the
+            // qualifier before a `.member`/`.method(...)` — those name a module or
+            // a type/namespace, never a value binding, and are diagnosed by the
+            // call/qualifier resolvers above with a more precise message) that
+            // matches no local, parameter, const, or global here would previously
+            // fall through silently: resolved_type stayed NULL and the C backend
+            // emitted `rae_<name>` by bare name, so the only error was gcc's
+            // cryptic "use of undeclared identifier" at the very end of the
+            // pipeline. A `__`-prefixed name is a backend intrinsic with no decl
+            // (mirrors the #821 callee exemption) and is exempt, and so is a bare
+            // PRIMITIVE type name (`List.create(Int, cap: n)`, the type-argument-
+            // as-value sugar `sema_arg_is_type_name` already recognizes) — a
+            // user-declared type/enum is already a Symbol with a decl, from the
+            // module-level pre-population pass, so only primitives need this.
+            if (is_value_pos
+                && !(expr->as.ident.len >= 2 && expr->as.ident.data[0] == '_' && expr->as.ident.data[1] == '_')
+                && !sema_arg_is_type_name(symbols, expr)) {
+                char buf[256];
+                snprintf(buf, sizeof(buf),
+                    "unknown value '%.*s': no local, parameter, const, or global by that name is in scope here",
+                    (int)expr->as.ident.len, expr->as.ident.data);
+                diag_error(sema_diag_file(module), (int)expr->line, (int)expr->column, buf);
+                if (module) module->had_error = true;
+            }
+            break;
+        }
         case AST_EXPR_INTEGER: expr->resolved_type = type_get_int(ctx->type_registry); break;
         case AST_EXPR_FLOAT: expr->resolved_type = type_get_float(ctx->type_registry); break;
         case AST_EXPR_BOOL: expr->resolved_type = type_get_bool(ctx->type_registry); break;
         case AST_EXPR_STRING: expr->resolved_type = type_get_string(ctx->type_registry); break;
         case AST_EXPR_CHAR: expr->resolved_type = type_get_char(ctx->type_registry); break;
         case AST_EXPR_BINARY:
-            sema_analyze_expr(ctx, module, symbols, expr->as.binary.lhs); sema_analyze_expr(ctx, module, symbols, expr->as.binary.rhs);
+            sema_analyze_expr(ctx, module, symbols, expr->as.binary.lhs, true); sema_analyze_expr(ctx, module, symbols, expr->as.binary.rhs, true);
             if (expr->as.binary.op >= AST_BIN_LT && expr->as.binary.op <= AST_BIN_OR) expr->resolved_type = type_get_bool(ctx->type_registry);
             /* Arithmetic on references yields a VALUE, not a reference. Taking
              * the lhs type verbatim made `a - b` inherit `view Float64` when a
@@ -4285,7 +4313,7 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
             else if (expr->as.binary.lhs && expr->as.binary.lhs->resolved_type) expr->resolved_type = sema_strip_ref(expr->as.binary.lhs->resolved_type);
             break;
         case AST_EXPR_CAST: {
-            sema_analyze_expr(ctx, module, symbols, expr->as.cast.operand);
+            sema_analyze_expr(ctx, module, symbols, expr->as.cast.operand, true);
             TypeInfo* target = sema_resolve_type_internal(ctx, module, symbols, expr->as.cast.target);
             expr->resolved_type = target;
             /* Strip refs: casting a value read through `view`/`mod` is a cast
@@ -4316,7 +4344,7 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
             break;
         }
         case AST_EXPR_UNARY:
-            sema_analyze_expr(ctx, module, symbols, expr->as.unary.operand);
+            sema_analyze_expr(ctx, module, symbols, expr->as.unary.operand, true);
             if (expr->as.unary.op == AST_UNARY_NOT) expr->resolved_type = type_get_bool(ctx->type_registry);
             else if (expr->as.unary.op == AST_UNARY_VIEW || expr->as.unary.op == AST_UNARY_MOD) {
                 if (expr->as.unary.operand->resolved_type) expr->resolved_type = type_get_ref(ctx->type_registry, expr->as.unary.operand->resolved_type, expr->as.unary.op == AST_UNARY_MOD);
@@ -4366,9 +4394,9 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
             } else if (expr->as.unary.operand->resolved_type) expr->resolved_type = expr->as.unary.operand->resolved_type;
             break;
         case AST_EXPR_CALL: {
-            sema_analyze_expr(ctx, module, symbols, expr->as.call.callee);
+            sema_analyze_expr(ctx, module, symbols, expr->as.call.callee, false);
             AstCallArg* arg = expr->as.call.args;
-            while (arg) { sema_analyze_expr(ctx, module, symbols, arg->value); arg = arg->next; }
+            while (arg) { sema_analyze_expr(ctx, module, symbols, arg->value, true); arg = arg->next; }
             /* Skip name re-resolution if this call is ALREADY resolved (decl_link
              * set). A module-qualified call `pkg.func(...)` is REWRITTEN in place
              * to a plain CALL of `func` bound to its decl; if that expr is then
@@ -4575,7 +4603,7 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                     }
                 }
             }
-            sema_analyze_expr(ctx, module, symbols, expr->as.member.object);
+            sema_analyze_expr(ctx, module, symbols, expr->as.member.object, false);
             if (expr->as.member.object->resolved_type) {
                 TypeInfo* t = expr->as.member.object->resolved_type; if (t->kind == TYPE_REF) t = t->as.ref.base;
                 if (t->kind == TYPE_STRUCT) {
@@ -4665,7 +4693,7 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                     Str fname = expr->as.method_call.method_name;
                     AstCallArg* qargs = expr->as.method_call.args;
                     AstTypeRef* qgen = expr->as.method_call.generic_args;
-                    for (AstCallArg* a = qargs; a; a = a->next) sema_analyze_expr(ctx, module, symbols, a->value);
+                    for (AstCallArg* a = qargs; a; a = a->next) sema_analyze_expr(ctx, module, symbols, a->value, true);
                     size_t argN = 0; for (AstCallArg* a = qargs; a; a = a->next) argN++;
                     // Match a function `fname` in a module whose path is (or ends with)
                     // `pkg/mod` — suffix-tolerant so it works regardless of how deep the
@@ -4767,7 +4795,7 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                 AstCallArg* qargs = expr->as.method_call.args;
                 AstTypeRef* qgen = expr->as.method_call.generic_args;
                 // Analyze args first so the resolver can use their types.
-                for (AstCallArg* a = qargs; a; a = a->next) sema_analyze_expr(ctx, module, symbols, a->value);
+                for (AstCallArg* a = qargs; a; a = a->next) sema_analyze_expr(ctx, module, symbols, a->value, true);
                 AstDecl* resolved = resolve_qualified_function(ctx, module, symbols, modname, fname, qargs);
                 // #777: only commit to the module-qualified rewrite when a module
                 // function actually resolved. If not (e.g. the qualifier is a type
@@ -4818,7 +4846,7 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                 TypeInfo* ct = sema_type_qualifier_type(ctx, module, symbols, expr->as.method_call.object);
                 if (ct) {
                     AstCallArg* cargs = expr->as.method_call.args;
-                    for (AstCallArg* a = cargs; a; a = a->next) sema_analyze_expr(ctx, module, symbols, a->value);
+                    for (AstCallArg* a = cargs; a; a = a->next) sema_analyze_expr(ctx, module, symbols, a->value, true);
                     AstExpr* callee = arena_alloc(ctx->ast_arena, sizeof(AstExpr));
                     memset(callee, 0, sizeof(*callee));
                     callee->kind = AST_EXPR_IDENT;
@@ -4833,9 +4861,9 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                     break;
                 }
             }
-            sema_analyze_expr(ctx, module, symbols, expr->as.method_call.object);
+            sema_analyze_expr(ctx, module, symbols, expr->as.method_call.object, false);
             AstCallArg* marg = expr->as.method_call.args;
-            while (marg) { sema_analyze_expr(ctx, module, symbols, marg->value); marg = marg->next; }
+            while (marg) { sema_analyze_expr(ctx, module, symbols, marg->value, true); marg = marg->next; }
             if (expr->as.method_call.object->resolved_type) {
                 TypeInfo* t = expr->as.method_call.object->resolved_type; if (t->kind == TYPE_REF) t = t->as.ref.base;
                 // Built-in Task(T).get() : T. Waits for the task and yields
@@ -5130,7 +5158,7 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
             }
             break;
         case AST_EXPR_INDEX:
-            sema_analyze_expr(ctx, module, symbols, expr->as.index.target); sema_analyze_expr(ctx, module, symbols, expr->as.index.index);
+            sema_analyze_expr(ctx, module, symbols, expr->as.index.target, true); sema_analyze_expr(ctx, module, symbols, expr->as.index.index, true);
             if (expr->as.index.target->resolved_type) {
                 TypeInfo* t = expr->as.index.target->resolved_type; if (t->kind == TYPE_REF) t = t->as.ref.base;
                 if (t->kind == TYPE_BUFFER) expr->resolved_type = t->as.buffer.base;
@@ -5178,18 +5206,18 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                 }
             }
             break;
-        case AST_EXPR_BOX: sema_analyze_expr(ctx, module, symbols, expr->as.unary.operand); break;
-        case AST_EXPR_UNBOX: sema_analyze_expr(ctx, module, symbols, expr->as.unary.operand); break;
+        case AST_EXPR_BOX: sema_analyze_expr(ctx, module, symbols, expr->as.unary.operand, true); break;
+        case AST_EXPR_UNBOX: sema_analyze_expr(ctx, module, symbols, expr->as.unary.operand, true); break;
         case AST_EXPR_OWN:
             // `own x` ownership-transfer marker. Type is the inner expression's
             // type; sema runs through. Stage 3 of docs/scope-exit-dealloc.md
             // adds the move-tracking + use-after-move check.
-            sema_analyze_expr(ctx, module, symbols, expr->as.unary.operand);
+            sema_analyze_expr(ctx, module, symbols, expr->as.unary.operand, true);
             if (expr->as.unary.operand) expr->resolved_type = expr->as.unary.operand->resolved_type;
             break;
         case AST_EXPR_OBJECT: {
             if (expr->as.object_literal.type) expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, expr->as.object_literal.type);
-            for (AstObjectField* f = expr->as.object_literal.fields; f; f = f->next) sema_analyze_expr(ctx, module, symbols, f->value);
+            for (AstObjectField* f = expr->as.object_literal.fields; f; f = f->next) sema_analyze_expr(ctx, module, symbols, f->value, true);
             /* #778: the RHS-typed form (`Rect { ... }`) — validate keys against the
              * named type. The bare-brace form is validated in ensure_type_match. */
             if (expr->as.object_literal.type)
@@ -5201,7 +5229,7 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
         case AST_EXPR_INTERP: {
             AstInterpPart* part = expr->as.interp.parts;
             while (part) {
-                if (part->value) sema_analyze_expr(ctx, module, symbols, part->value);
+                if (part->value) sema_analyze_expr(ctx, module, symbols, part->value, true);
                 part = part->next;
             }
             expr->resolved_type = type_get_string(ctx->type_registry);
