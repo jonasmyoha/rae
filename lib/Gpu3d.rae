@@ -61,6 +61,7 @@ open webgpu/Webgpu
 open webgpu/Context
 open Gpu2dCanvas
 open MeshStore
+open SkinStore
 open gpu/GpuResources
 open Gpu3dNative
 open Gpu3dSky
@@ -784,11 +785,29 @@ func drawShadowCaster(
 # `paletteBase` is this caster's start offset into the shared skin palette buffer
 # (characterPaletteBase in gbufferInstanced.rae) — the SAME base its G-buffer
 # instance uses — so its shadow shows its own pose (#547). 0 for a lone character.
-func drawShadowCasterSkinned(mesh: view MeshHandle, model: view Mat4, paletteBase: copy Int) pub {
+# #921: the caster is queued by its SkinStore buffer handles + the palette
+# handle, all borrowed by the C shadow pass for this frame.
+func drawShadowCasterSkinned(
+  skins: view SkinStore
+  resources: view GpuResources
+  mesh: view MeshHandle
+  model: view Mat4
+  paletteBase: copy Int
+) pub {
   if not meshHandleIsValid(h: mesh) {
     ret
   }
-  shadowDrawSkinned(mesh: mesh.id, model: model, paletteBase: paletteBase)
+  unsafe {
+    shadowDrawSkinned(
+      mesh: mesh.id
+      vbuf: skinStoreVbufHandle(store: skins, resources: resources, mesh: mesh.id)
+      ibuf: skinStoreIbufHandle(store: skins, resources: resources, mesh: mesh.id)
+      icount: skinStoreIndexCount(store: skins, mesh: mesh.id)
+      palette: skinStorePaletteHandle(store: skins, resources: resources)
+      model: model
+      paletteBase: paletteBase
+    )
+  }
 }
 
 func endShadowPass() pub {
@@ -809,46 +828,20 @@ func skinShutdown() {
   }
 }
 
-# Upload a skinned mesh. `verts` is 20 Floats per vertex: pos3, nrm3, uv2,
-# four joint indices (as Floats), four weights and an RGBA vertex colour
-# that MULTIPLIES the material's base colour — white is a no-op (#378).
-func uploadSkinnedMesh(
-  verts: view List(Float)
-  vertCount: view Int
-  indices: view List(Int)
-) pub ret MeshHandle {
-  let id: Int = skinnedMeshCreate(
-    verts: verts.data
-    vertCount: vertCount
-    indices: indices.data
-    indexCount: indices.length
-  )
-  if id is 0 {
-    ret meshHandleNone()
-  }
-  ret meshHandle(id: id, generation: 1)
-}
-
-# Upload the joint palette for this frame: 12 Floats per joint, three vec4
-# rows of an affine transform. Per FRAME, not per draw — every part of a
-# character shares one skeleton.
-func uploadPalette(rows: view List(Float), jointCount: view Int) pub {
-  unsafe {
-    setPalette(rows: rows.data, jointCount: jointCount)
-  }
-}
-
-# Per-character palette uploads (#547) live in gbuffer.rae, done directly over
-# the WebGPU bindings (wgpuQueueWriteBuffer into gbSkinPalette at a per-slot
-# offset) — the same pattern the draws buffer uses (#502/#503), so no C entry
-# point is needed. See uploadPaletteSlot there.
+# Skinned mesh uploads and the joint palette live on the renderer objects since
+# #921: RendererDeferred.uploadSkinnedMesh / uploadPalette (the GbufferCache's
+# SkinStore) and Renderer3d.uploadSkinnedMesh / uploadPalette (the forward one).
 
 # Forward skinned mesh draw (#514): encode one instanced DrawIndexed into the
-# scene pass. C uploads the palette + per-draw record and returns the slot; Rae
-# binds the skinned pipeline/bind + mesh buffers, draws, then restores the
-# geometry pipeline/bind (leaving the skinned pipeline bound would feed plain
-# vertices to a shader expecting joint attributes).
+# scene pass over the SkinStore's buffers (#921). C keeps the forward skin
+# pipeline + its per-draw record buffer and BORROWS the palette handle for its
+# bind (rebuilt when the handle changes); it returns the slot. Rae binds the
+# skinned pipeline/bind + mesh buffers, draws, then restores the geometry
+# pipeline/bind (leaving the skinned pipeline bound would feed plain vertices to
+# a shader expecting joint attributes).
 func drawSkinned(
+  skins: view SkinStore
+  resources: view GpuResources
   mesh: copy Int
   model: view Mat4
   r: copy Float
@@ -858,6 +851,9 @@ func drawSkinned(
   roughness: copy Float
 ) {
   unsafe {
+    if not skinStoreReady(store: skins, resources: resources, mesh: mesh) {
+      ret
+    }
     let slot: Int = g3dPushSkinnedDraw(
       mesh: mesh
       model: model
@@ -866,14 +862,15 @@ func drawSkinned(
       b: b
       metallic: metallic
       roughness: roughness
+      palette: skinStorePaletteHandle(store: skins, resources: resources)
     )
     if slot < 0 {
       ret
     }
     let pass: Ptr = g3dPass()
-    let vbuf: Ptr = g3dSkinVbuf(mesh: mesh)
-    let ibuf: Ptr = g3dSkinIbuf(mesh: mesh)
-    let icount: Int = g3dSkinIcount(mesh: mesh)
+    let vbuf: Ptr = skinStoreVbufHandle(store: skins, resources: resources, mesh: mesh)
+    let ibuf: Ptr = skinStoreIbufHandle(store: skins, resources: resources, mesh: mesh)
+    let icount: Int = skinStoreIndexCount(store: skins, mesh: mesh)
     wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: g3dSkinPipeline())
     wgpuRenderPassEncoderSetBindGroup(
       renderPassEncoder: pass
@@ -916,11 +913,19 @@ func drawSkinned(
   }
 }
 
-func drawSkinnedInstance(mesh: view MeshHandle, model: view Mat4, material: view Material3d) pub {
+func drawSkinnedInstance(
+  skins: view SkinStore
+  resources: view GpuResources
+  mesh: view MeshHandle
+  model: view Mat4
+  material: view Material3d
+) pub {
   if not meshHandleIsValid(h: mesh) {
     ret
   }
   drawSkinned(
+    skins: skins
+    resources: resources
     mesh: mesh.id
     model: model
     r: material.baseColor.x

@@ -1,0 +1,171 @@
+# SkinStore — the renderer-owned SKINNED mesh store + joint palette (#921, the
+# half of #905 split off): every skinned mesh's vertex/index buffers are
+# manager buffers (a MeshStore over the 20-float skinned layout) and the joint
+# PALETTE — the storage buffer every skinned pipeline reads (the deferred skin
+# pass, the skinned shadow casters, the forward skin pass) — is one manager
+# BufferId created on the first upload. Was C's g3d_skin_vbuf/ibuf/icount +
+# g3d_skin_palette_sbuf (rae_ext_Gpu3d_skinnedMeshCreate / setPalette, the
+# rae_gb_skin_* / rae_g3d_skin_* accessors). The owner is the renderer object
+# (GbufferCache.skins for the deferred frame, Renderer3d.skins for forward):
+# uploads and palette writes go through it, the passes resolve a handle to
+# its buffers here, and the still-C readers (the shadow caster binds, the
+# forward skin bind) BORROW the palette handle per call.
+#
+# Palette layout (unchanged from C): 12 Floats per joint — three vec4 rows of
+# an affine transform — for up to skinMaxJoints joints per palette and
+# skinMaxPalettes palettes (per-character slots, #547) in one buffer.
+open gpu/GpuResources
+open gpu/GpuIds
+open gpu/GpuRender
+open gpu/GpuRenderTransfer
+open webgpu/Webgpu
+open webgpu/Context
+open webgpu/WebgpuEnums
+open webgpu/WebgpuTypes
+open Scene3d
+open MeshStore
+
+const skinVertexFloats: Int = 20
+
+const skinMaxJoints: Int = 256
+
+const skinMaxPalettes: Int = 64
+
+const skinPaletteFloatsPerJoint: Int = 12
+
+# The whole palette buffer: joints x 12 floats x palettes.
+const skinPaletteFloats: Int = 196608
+
+const skinPaletteBytes: Int = 786432
+
+# vec4 rows in the palette buffer (bytes / 16): the PaletteArena's capacity.
+const skinPaletteRows: Int = 49152
+
+type SkinStore {
+  meshes: MeshStore
+  palette: BufferId
+}
+
+func createSkinStore() ret SkinStore {
+  ret SkinStore { meshes: createMeshStore(), palette: noBufferId() }
+}
+
+func skinStoreUpload(
+  store: mod SkinStore
+  resources: mod GpuResources
+  verts: view List(Float)
+  vertCount: copy Int
+  indices: view List(Int)
+) ret MeshHandle {
+  ret meshStoreUploadStride(
+    store: store.meshes
+    resources: resources
+    verts: verts
+    vertCount: vertCount
+    indices: indices
+    vertexFloats: skinVertexFloats
+  )
+}
+
+func skinStoreReady(store: view SkinStore, resources: view GpuResources, mesh: copy Int) ret Bool {
+  ret meshStoreReady(store: store.meshes, resources: resources, mesh: mesh)
+}
+
+func skinStoreIndexCount(store: view SkinStore, mesh: copy Int) ret Int {
+  ret meshStoreIndexCount(store: store.meshes, mesh: mesh)
+}
+
+func skinStoreVbufHandle(
+  store: view SkinStore
+  resources: view GpuResources
+  mesh: copy Int
+) unsafe ret Ptr {
+  unsafe {
+    ret meshStoreVbufHandle(store: store.meshes, resources: resources, mesh: mesh)
+  }
+}
+
+func skinStoreIbufHandle(
+  store: view SkinStore
+  resources: view GpuResources
+  mesh: copy Int
+) unsafe ret Ptr {
+  unsafe {
+    ret meshStoreIbufHandle(store: store.meshes, resources: resources, mesh: mesh)
+  }
+}
+
+# The palette buffer exists from the first upload on (Storage for the skin
+# pipelines, CopyDst for the writes); true when it is live.
+func skinStoreEnsurePalette(store: mod SkinStore, resources: mod GpuResources) ret Bool {
+  if isValidBuffer(resources: resources, id: store.palette) {
+    ret true
+  }
+  if let palette: BufferId = createBuffer(
+    resources: resources
+    size: skinPaletteBytes
+    usage: WGPUBufferUsage_Storage + WGPUBufferUsage_CopyDst
+  ) {
+    store.palette = palette
+    ret true
+  }
+  ret false
+}
+
+func skinStorePaletteReady(store: view SkinStore, resources: view GpuResources) ret Bool {
+  ret isValidBuffer(resources: resources, id: store.palette)
+}
+
+# Write one posed skeleton (jointCount x 12 Floats) at a vec4 ROW offset — row
+# 0 is the base palette, characterPaletteBase(slot, jointCount) the per-
+# character slots (#547). Clamped to the buffer; false when nothing was written.
+func skinStoreWritePalette(
+  store: mod SkinStore
+  resources: mod GpuResources
+  rows: view List(Float)
+  jointCount: copy Int
+  baseRow: copy Int
+) ret Bool {
+  if jointCount < 1 or baseRow < 0 {
+    ret false
+  }
+  var joints: Int = jointCount
+  if joints > skinMaxJoints {
+    joints = skinMaxJoints
+  }
+  let floats: Int = joints * skinPaletteFloatsPerJoint
+  if rows.length < floats or baseRow * 4 + floats > skinPaletteFloats {
+    ret false
+  }
+  if not skinStoreEnsurePalette(store: store, resources: resources) {
+    ret false
+  }
+  unsafe {
+    ret writeBufferFromPtr(
+      resources: resources
+      id: store.palette
+      offset: baseRow * 16
+      data: rows.data
+      size: floats * 4
+    )
+  }
+}
+
+# The raw palette handle for a still-C reader (the shadow caster binds, the
+# forward skin bind), borrowed for the call; null before the first write.
+func skinStorePaletteHandle(store: view SkinStore, resources: view GpuResources) unsafe ret Ptr {
+  unsafe {
+    if not isValidBuffer(resources: resources, id: store.palette) {
+      ret webgpuNull()
+    }
+    ret refHandle(resources: resources, ref: bufferRef(id: store.palette))
+  }
+}
+
+# Retire every skinned mesh and the palette (renderer shutdown, before the
+# manager itself shuts down).
+func skinStoreShutdown(store: mod SkinStore, resources: mod GpuResources) {
+  meshStoreShutdown(store: store.meshes, resources: resources)
+  retireBuffer(resources: resources, id: store.palette)
+  store.palette = noBufferId()
+}

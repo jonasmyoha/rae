@@ -50,13 +50,6 @@ void rae_gb_set_frame_open(int64_t open){ (void)open; }
  * these context accessors, so builds without the real geometry pass need no-op
  * versions. mesh_ready / skin_ready return 0, so the Rae draws early-return and
  * issue no GPU work. */
-void* rae_gb_skin_palette(void)         { return (void*)0; }
-int64_t rae_gb_skin_palette_size(void)  { return 0; }
-int64_t rae_gb_skin_palette_ready(void) { return 0; }
-int64_t rae_gb_skin_ready(int64_t mesh) { (void)mesh; return 0; }
-void* rae_gb_skin_vbuf(int64_t mesh)    { (void)mesh; return (void*)0; }
-void* rae_gb_skin_ibuf(int64_t mesh)    { (void)mesh; return (void*)0; }
-int64_t rae_gb_skin_icount(int64_t mesh){ (void)mesh; return 0; }
 void rae_gb_submit(void* cmd)           { (void)cmd; }
 int64_t rae_gb_sdf_prepare(void* packedBalls, int64_t count, void* packedColors,
                            float smoothing, float camX, float camY, float camZ,
@@ -135,7 +128,9 @@ void rae_sm_begin(const float* cascades, int64_t count, int64_t resolution,
     (void)depthRange;
 }
 void rae_sm_queue_mesh(int64_t mesh, void* vbuf, void* ibuf, int64_t icount, rae_Mat4* model){ (void)mesh; (void)vbuf; (void)ibuf; (void)icount; (void)model; }
-void rae_sm_queue_skinned(int64_t mesh, rae_Mat4* model, int64_t paletteBase){ (void)mesh; (void)model; (void)paletteBase; }
+void rae_sm_queue_skinned(int64_t mesh, void* vbuf, void* ibuf, int64_t icount, void* palette, rae_Mat4* model, int64_t paletteBase){
+    (void)mesh; (void)vbuf; (void)ibuf; (void)icount; (void)palette; (void)model; (void)paletteBase;
+}
 void rae_sm_record_metaballs(const float* packedBalls, int64_t count, float smoothing){
     (void)packedBalls; (void)count; (void)smoothing;
 }
@@ -157,24 +152,14 @@ void rae_sm_draw_metaballs(int64_t c, void* passptr) { (void)c; (void)passptr; }
 void rae_sm_shutdown(void) {}
 
 /* Skinning (#374). Stubbed for builds without the GPU backend. */
-int64_t rae_ext_Gpu3d_skinnedMeshCreate(const float* verts, int64_t vertCount,
-                                        const int64_t* indices, int64_t indexCount){
-    (void)verts; (void)vertCount; (void)indices; (void)indexCount; return 0;
-}
-void rae_ext_Gpu3d_setPalette(const float* rows, int64_t jointCount){
-    (void)rows; (void)jointCount;
-}
 int rae_g3d_push_skinned_draw(int64_t mesh, rae_Mat4* model,
                               float r, float g, float b,
-                              float metallic, float roughness){
-    (void)mesh; (void)model; (void)r; (void)g; (void)b; (void)metallic; (void)roughness;
+                              float metallic, float roughness, void* palette){
+    (void)mesh; (void)model; (void)r; (void)g; (void)b; (void)metallic; (void)roughness; (void)palette;
     return -1;
 }
 void* rae_g3d_skin_pipeline(void) { return (void*)0; }
 void* rae_g3d_skin_bind(void)     { return (void*)0; }
-void* rae_g3d_skin_vbuf(int64_t mesh){ (void)mesh; return (void*)0; }
-void* rae_g3d_skin_ibuf(int64_t mesh){ (void)mesh; return (void*)0; }
-int64_t rae_g3d_skin_icount(int64_t mesh){ (void)mesh; return 0; }
 void rae_ext_Gpu3d_skinFrameBegin(void) {}
 int64_t rae_ext_Gpu3d_skinDrawCount(void) { return 0; }
 void rae_ext_Gpu3d_skinShutdown(void) {}

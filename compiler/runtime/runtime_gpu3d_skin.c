@@ -45,21 +45,18 @@
 #define G3D_SKIN_MAX_PALETTES 64
 #define G3D_SKIN_VERT_FLOATS 20   /* pos3 nrm3 uv2 joints4 weights4 color4 */
 
-static WGPUBuffer g3d_skin_vbuf[G3D_SKIN_MAX_MESHES];
-static WGPUBuffer g3d_skin_ibuf[G3D_SKIN_MAX_MESHES];
-static uint32_t   g3d_skin_icount[G3D_SKIN_MAX_MESHES];
-static int        g3d_skin_mesh_n = 0;
+/* #921: the skinned meshes and the joint palette are the Rae SkinStore's
+ * (lib/SkinStore.rae, on the renderer's GbufferCache / Renderer3d). C keeps
+ * the forward skin PIPELINE, its per-draw record buffer and a bind group over
+ * the palette handle Rae hands each draw (borrowed; rebuilt when it changes). */
 
 static WGPURenderPipeline g3d_skin_pipeline = NULL;
 static WGPUBuffer    g3d_skin_draw_sbuf = NULL;
-static WGPUBuffer    g3d_skin_palette_sbuf = NULL;
+static WGPUBuffer    g3d_skin_palette_borrowed = NULL;   /* the SkinStore palette the bind was built over */
 static WGPUBindGroup g3d_skin_bind = NULL;
 static float g3d_skin_draw_cpu[G3D_SKIN_MAX_DRAWS * G3D_SKIN_DRAW_FLOATS];
 static int   g3d_skin_draw_count = 0;
 /* 3 vec4 rows per joint, times MAX_PALETTES palettes packed back to back. */
-static float g3d_skin_palette_cpu[G3D_SKIN_MAX_JOINTS * 12 * G3D_SKIN_MAX_PALETTES];
-static int   g3d_skin_joint_count = 0;
-static bool  g3d_skin_palette_dirty = false;
 
 static const char* G3D_SKIN_WGSL =
 "struct Frame {\n"
@@ -223,14 +220,6 @@ G3D_SHADOW_FN_WGSL
 "  return o;\n"
 "}\n";
 
-static void g3d_skin_ensure_palette_buffer(void) {
-    if (g3d_skin_palette_sbuf || !g_wgpu_dev) return;
-    WGPUBufferDescriptor pl; memset(&pl, 0, sizeof(pl));
-    pl.size = (uint64_t)G3D_SKIN_MAX_JOINTS * 12 * G3D_SKIN_MAX_PALETTES * sizeof(float);
-    pl.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
-    g3d_skin_palette_sbuf = wgpuDeviceCreateBuffer(g_wgpu_dev, &pl);
-}
-
 static void g3d_skin_init_pipeline(void) {
     if (g3d_skin_pipeline) return;
     WGPUShaderSourceWGSL src; memset(&src, 0, sizeof(src));
@@ -295,19 +284,24 @@ static void g3d_skin_init_pipeline(void) {
     sd.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
     g3d_skin_draw_sbuf = wgpuDeviceCreateBuffer(g_wgpu_dev, &sd);
 
-    g3d_skin_ensure_palette_buffer();
-    /* The forward path binds ONE palette's worth from offset 0 — it never uses
-     * per-instance palette bases (that's the deferred crowd path, which binds
-     * the full array via rae_gb_skin_palette_size). Binding a subrange of the
-     * now-larger buffer is valid and keeps the forward examples byte-identical. */
-    WGPUBufferDescriptor pl; memset(&pl, 0, sizeof(pl));
-    pl.size = (uint64_t)G3D_SKIN_MAX_JOINTS * 12 * sizeof(float);
+}
 
+/* The forward skin bind over the SkinStore palette Rae hands the draw (#921):
+ * frame uniform, the per-draw records, ONE palette's worth of the buffer from
+ * offset 0 (the forward path never uses per-instance palette bases), and the
+ * shadow inputs. Rebuilt when the palette handle changes (a new renderer). */
+static void g3d_skin_ensure_bind(WGPUBuffer palette) {
+    if (!g3d_skin_pipeline || !palette) return;
+    if (g3d_skin_bind && g3d_skin_palette_borrowed == palette) return;
+    if (g3d_skin_bind) { wgpuBindGroupRelease(g3d_skin_bind); g3d_skin_bind = NULL; }
+    g3d_skin_palette_borrowed = palette;
     WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(g3d_skin_pipeline, 0);
     WGPUBindGroupEntry e[6]; memset(e, 0, sizeof(e));
     e[0].binding = 0; e[0].buffer = g3d_frame_ubuf; e[0].size = 288;
-    e[1].binding = 1; e[1].buffer = g3d_skin_draw_sbuf; e[1].size = sd.size;
-    e[2].binding = 2; e[2].buffer = g3d_skin_palette_sbuf; e[2].size = pl.size;
+    e[1].binding = 1; e[1].buffer = g3d_skin_draw_sbuf;
+    e[1].size = (uint64_t)G3D_SKIN_MAX_DRAWS * G3D_SKIN_DRAW_FLOATS * sizeof(float);
+    e[2].binding = 2; e[2].buffer = palette;
+    e[2].size = (uint64_t)G3D_SKIN_MAX_JOINTS * 12 * sizeof(float);
     e[3].binding = 3; e[3].buffer = g3d_sm_frame_ubuf; e[3].size = 320;
     e[4].binding = 4; e[4].textureView = g3d_sm_array_view;
     e[5].binding = 5; e[5].sampler = g3d_sm_sampler;
@@ -317,76 +311,8 @@ static void g3d_skin_init_pipeline(void) {
     wgpuBindGroupLayoutRelease(bgl);
 }
 
-/* Upload a skinned mesh: 20 Floats per vertex, indices as Rae Ints. */
-int64_t rae_ext_Gpu3d_skinnedMeshCreate(const float* verts, int64_t vertCount,
-                                        const int64_t* indices, int64_t indexCount) {
-    if (!g_wgpu_dev || !verts || !indices) return 0;
-    if (vertCount <= 0 || indexCount <= 0 || g3d_skin_mesh_n >= G3D_SKIN_MAX_MESHES) return 0;
-    uint32_t* ix = (uint32_t*)malloc((size_t)indexCount * sizeof(uint32_t));
-    if (!ix) return 0;
-    for (int64_t i = 0; i < indexCount; i++) ix[i] = (uint32_t)indices[i];
-
-    WGPUBufferDescriptor bd; memset(&bd, 0, sizeof(bd));
-    bd.size = (uint64_t)vertCount * G3D_SKIN_VERT_FLOATS * sizeof(float);
-    bd.usage = WGPUBufferUsage_Vertex | WGPUBufferUsage_CopyDst;
-    WGPUBuffer vb = wgpuDeviceCreateBuffer(g_wgpu_dev, &bd);
-    wgpuQueueWriteBuffer(g_wgpu_queue, vb, 0, verts, bd.size);
-    bd.size = (uint64_t)indexCount * sizeof(uint32_t);
-    bd.usage = WGPUBufferUsage_Index | WGPUBufferUsage_CopyDst;
-    WGPUBuffer ib = wgpuDeviceCreateBuffer(g_wgpu_dev, &bd);
-    wgpuQueueWriteBuffer(g_wgpu_queue, ib, 0, ix, bd.size);
-    free(ix);
-    if (!vb || !ib) return 0;
-    int slot = g3d_skin_mesh_n++;
-    g3d_skin_vbuf[slot] = vb;
-    g3d_skin_ibuf[slot] = ib;
-    g3d_skin_icount[slot] = (uint32_t)indexCount;
-    return (int64_t)(slot + 1);
-}
-
-/* Replace the joint palette. `rows` is 12 Floats per joint: three vec4
- * rows of the affine transform. */
-void rae_ext_Gpu3d_setPalette(const float* rows, int64_t jointCount) {
-    /* Ensure the palette BUFFER alone — not the whole forward pipeline.
-     * The deferred and shadow paths read this buffer and may be the only
-     * ones drawing, so it cannot depend on the forward pipeline having
-     * been built. Building that pipeline here instead was worse than the
-     * bug: its bind group references the shadow targets, which do not
-     * exist yet on the first frame, and wgpu aborts the process rather
-     * than returning null. */
-    g3d_skin_ensure_palette_buffer();
-    if (!rows || jointCount <= 0) { g3d_skin_joint_count = 0; return; }
-    if (jointCount > G3D_SKIN_MAX_JOINTS) {
-        static bool warned = false;
-        if (!warned) {
-            fprintf(stderr, "[skin] palette has %lld joints, max is %d; extra joints ignored\n",
-                    (long long)jointCount, G3D_SKIN_MAX_JOINTS);
-            warned = true;
-        }
-        jointCount = G3D_SKIN_MAX_JOINTS;
-    }
-    memcpy(g3d_skin_palette_cpu, rows, (size_t)jointCount * 12 * sizeof(float));
-    g3d_skin_joint_count = (int)jointCount;
-    g3d_skin_palette_dirty = true;
-    /* Upload EAGERLY as well as lazily. The lazy path uploads on the
-     * first skinned draw, which is inside the scene pass — but the shadow
-     * pass (#382) runs BEFORE that and reads the same buffer, so a
-     * lazy-only upload would shadow the character in last frame's pose,
-     * or in no pose at all on frame one. Cheap: one write per frame. */
-    if (g3d_skin_palette_sbuf && g3d_skin_joint_count > 0) {
-        wgpuQueueWriteBuffer(g_wgpu_queue, g3d_skin_palette_sbuf, 0,
-                             g3d_skin_palette_cpu,
-                             (size_t)g3d_skin_joint_count * 12 * sizeof(float));
-        g3d_skin_palette_dirty = false;
-    }
-}
-
-/* NOTE (#547): per-character palette uploads into slots > 0 are done in RAE,
- * not here — the palette buffer is exposed via rae_gb_skin_palette() and Rae
- * writes each slot with wgpuQueueWriteBuffer(bufferOffset: index * jointCount *
- * 12 * 4), the same pattern the draws buffer already uses (#502/#503). Only the
- * buffer's ALLOCATION stays C (it is C-owned); a dedicated C upload entry point
- * would just duplicate that one Rae line, so there isn't one. */
+/* #921: the skinned-mesh create and set-palette entry points are gone — the meshes
+ * and the palette are Rae manager buffers (SkinStore); palette writes are Rae. */
 
 /* CPU bookkeeping + uploads for one skinned draw (#514): validate the mesh +
  * draw limit, ensure the pipeline, upload the per-frame palette once if dirty,
@@ -396,23 +322,14 @@ void rae_ext_Gpu3d_setPalette(const float* rows, int64_t jointCount) {
  * accessors below and restores the geometry pipeline/bind after the draw. */
 int rae_g3d_push_skinned_draw(int64_t mesh, rae_Mat4* model,
                               float r, float g, float b,
-                              float metallic, float roughness) {
-    if (!model) return -1;
-    int slot = (int)mesh - 1;
-    if (slot < 0 || slot >= g3d_skin_mesh_n) return -1;
+                              float metallic, float roughness, void* palette) {
+    (void)mesh;   /* the SkinStore validated the handle; the buffers come from Rae */
+    if (!model || !palette) return -1;
     if (g3d_skin_draw_count >= G3D_SKIN_MAX_DRAWS) return -1;
     g3d_skin_init_pipeline();
     if (!g3d_skin_pipeline) return -1;
-
-    /* The palette is per FRAME, not per draw, so it uploads once on the
-     * first skinned draw rather than once per character part — twelve
-     * primitives sharing one skeleton would otherwise upload it twelve
-     * times. */
-    if (g3d_skin_palette_dirty && g3d_skin_joint_count > 0) {
-        wgpuQueueWriteBuffer(g_wgpu_queue, g3d_skin_palette_sbuf, 0, g3d_skin_palette_cpu,
-                             (size_t)g3d_skin_joint_count * 12 * sizeof(float));
-        g3d_skin_palette_dirty = false;
-    }
+    g3d_skin_ensure_bind((WGPUBuffer)palette);
+    if (!g3d_skin_bind) return -1;
 
     float* d = g3d_skin_draw_cpu + g3d_skin_draw_count * G3D_SKIN_DRAW_FLOATS;
     for (int i = 0; i < 16; i++) d[i] = model->m.v[i];
@@ -424,38 +341,18 @@ int rae_g3d_push_skinned_draw(int64_t mesh, rae_Mat4* model,
     return g3d_skin_draw_count++;
 }
 
-/* Skinned pipeline/bind + mesh-buffer accessors (ungated), for the Rae-side
- * skinned encode. Buffers are keyed by the 1-based skinned-mesh handle. */
+/* Skinned pipeline/bind accessors (ungated), for the Rae-side skinned encode;
+ * the mesh buffers come from the Rae SkinStore (#921). */
 void* rae_g3d_skin_pipeline(void) { return (void*)g3d_skin_pipeline; }
 void* rae_g3d_skin_bind(void)     { return (void*)g3d_skin_bind; }
-void* rae_g3d_skin_vbuf(int64_t mesh){
-    int slot = (int)mesh - 1;
-    if (slot < 0 || slot >= g3d_skin_mesh_n) return (void*)0;
-    return (void*)g3d_skin_vbuf[slot];
-}
-void* rae_g3d_skin_ibuf(int64_t mesh){
-    int slot = (int)mesh - 1;
-    if (slot < 0 || slot >= g3d_skin_mesh_n) return (void*)0;
-    return (void*)g3d_skin_ibuf[slot];
-}
-int64_t rae_g3d_skin_icount(int64_t mesh){
-    int slot = (int)mesh - 1;
-    if (slot < 0 || slot >= g3d_skin_mesh_n) return 0;
-    return (int64_t)g3d_skin_icount[slot];
-}
 
 void rae_ext_Gpu3d_skinFrameBegin(void) { g3d_skin_draw_count = 0; }
 
 int64_t rae_ext_Gpu3d_skinDrawCount(void) { return (int64_t)g3d_skin_draw_count; }
 
 void rae_ext_Gpu3d_skinShutdown(void) {
-    for (int i = 0; i < g3d_skin_mesh_n; i++) {
-        if (g3d_skin_vbuf[i]) { wgpuBufferRelease(g3d_skin_vbuf[i]); g3d_skin_vbuf[i] = NULL; }
-        if (g3d_skin_ibuf[i]) { wgpuBufferRelease(g3d_skin_ibuf[i]); g3d_skin_ibuf[i] = NULL; }
-    }
-    g3d_skin_mesh_n = 0;
     if (g3d_skin_bind) { wgpuBindGroupRelease(g3d_skin_bind); g3d_skin_bind = NULL; }
+    g3d_skin_palette_borrowed = NULL;
     if (g3d_skin_draw_sbuf) { wgpuBufferRelease(g3d_skin_draw_sbuf); g3d_skin_draw_sbuf = NULL; }
-    if (g3d_skin_palette_sbuf) { wgpuBufferRelease(g3d_skin_palette_sbuf); g3d_skin_palette_sbuf = NULL; }
     if (g3d_skin_pipeline) { wgpuRenderPipelineRelease(g3d_skin_pipeline); g3d_skin_pipeline = NULL; }
 }
