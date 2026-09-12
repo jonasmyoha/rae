@@ -415,11 +415,24 @@ style configuration. The policy (full design: `docs/rae-format-design.md`):
   place); `--check-format` / `RAE_FORMAT=check` refuse to write and fail instead
   (what the test suite and the example gate use). A file whose canonical form
   would exceed 1,000 lines is an error to split, never a rewrite.
-- Until #916–#919 land, `rae format <file>` prints to stdout and `rae format
-  --write <file>` rewrites one file; it crashes on char literals and is not yet
-  idempotent around comments after multi-line calls, so do NOT bulk-format the
-  tree by hand — the migration is one mechanical commit (#918). When you edit a
-  `.rae` file, keep it within the policy above by hand in the meantime.
+- Clarifications settled by #916 (the formatter implements exactly these): a
+  `type` declaration is ALWAYS one field per line (the compact `{ a, b }` form
+  is for literals); a lone argument/field/value that is itself a vertical list
+  hugs its delimiters (`ret Point {` … `}`, `foo(a: bar(` … `))`); `ret a, b`
+  never goes vertical (the grammar ends the statement at the newline);
+  parentheses the source wrote are kept, missing ones are added only where
+  precedence needs them; `[a, b]` keeps its brackets; at most ONE blank line
+  is kept where the source had one, never at the start of a block; a comment
+  keeps its place — before the statement/item it precedes, trailing after a
+  one-line statement, on its own line below a statement that went vertical;
+  `# ` prose is wrapped at 100 columns at a space, comment lines with no break
+  point (URLs, diagrams) and `#`-without-space lines are copied verbatim.
+- Until #917–#919 land, `rae format <file>` prints to stdout and `rae format
+  --write <file>` rewrites one file. It is idempotent and AST-preserving on
+  every active `.rae` (the #916 survey: 0 crashes, 0 non-idempotent files, 0
+  AST differences), but do NOT bulk-format the tree by hand — the migration is
+  one mechanical commit (#918), after the over-cap files are split. When you
+  edit a `.rae` file, keep it within the policy above by hand in the meantime.
 
 ---
 
