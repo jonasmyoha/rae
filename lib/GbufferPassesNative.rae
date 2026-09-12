@@ -1,8 +1,10 @@
 # GbufferPassesNative — the C-ABI accessor layer of the post passes (#918
-# split of GbufferPasses for the 1000-line cap): every `native*` extern and the
-# thin `gb*` wrappers that hand the composite / SSAO / lighting / TAA / depth-
-# pyramid passes their C-owned handles and flags. Nothing here is app-facing;
-# the passes themselves stay in GbufferPasses.
+# split of GbufferPasses for the 1000-line cap; #923 shrank it to what is still
+# C): the deferred prepare (device + surface up, the shadow cascade defaults
+# the lighting bind samples), the WGSL sources the Rae pipelines are built
+# from, the dynamic render scale (#530) and the shadow inputs the lighting
+# pass adopts until #925 moves the cascades. The targets, uniforms, pipelines
+# and per-frame state are the Rae DeferredTargets (GbufferTargets.rae).
 import String
 open Gbuffer
 open Scene3d
@@ -17,43 +19,24 @@ open gpu/GpuArgs
 open gpu/GpuIds
 open GbufferPasses
 
+# 1 when the device + surface are up; also makes sure the shadow cascade
+# defaults exist (the lighting bind samples the array even when no shadow
+# pass ran — wgpu aborts on a null binding rather than returning an error).
 func nativeGbDeferredPrepare() unsafe extern("rae_gb_deferred_prepare") ret Int
 
 # The pass WGSL sources stay C string constants; read as NUL-terminated C
 # strings and copied into a String for the manager's createRenderPipeline.
 func gbCompositeWgsl() unsafe extern("rae_gb_composite_wgsl") ret Buffer(Any)
 
-func gbCompositeSourceView() unsafe extern("rae_gb_composite_source_view") ret Ptr
+func gbAoWgsl() unsafe extern("rae_gb_ao_wgsl") ret Buffer(Any)
 
-func nativeGbCompositeSourceIndex() unsafe extern("rae_gb_composite_source_index") ret Int
+func gbLightWgsl() unsafe extern("rae_gb_light_wgsl") ret Buffer(Any)
 
-func gbCompositeSourceIndex() ret Int {
-  unsafe {
-    ret nativeGbCompositeSourceIndex()
-  }
-}
+func gbTaaWgsl() unsafe extern("rae_gb_taa_wgsl") ret Buffer(Any)
 
-# TAA on/off (#20). Off routes composite to raw lit and turns on FXAA instead.
-func nativeGbTaaIsEnabled() unsafe extern("rae_gb_taa_is_enabled") ret Int
+func gbPyrFromDepthWgsl() unsafe extern("rae_gb_pyr_from_depth_wgsl") ret Buffer(Any)
 
-func gbTaaIsEnabled() ret Int {
-  unsafe {
-    ret nativeGbTaaIsEnabled()
-  }
-}
-
-func nativeGbSetTaaEnabled(on: Int) unsafe extern("rae_gb_set_taa_enabled")
-
-# Distance fog (#57, per-app). on=1 fades geometry to (r,g,b) over [start,end]
-# world units and paints that colour as the background; on=0 keeps the sky.
-func nativeGbSetFog(
-  on: Int
-  r: Float
-  g: Float
-  b: Float
-  start: Float
-  end: Float
-) unsafe extern("rae_gb_set_fog")
+func gbPyrReduceWgsl() unsafe extern("rae_gb_pyr_reduce_wgsl") ret Buffer(Any)
 
 # Dynamic resolution (#530): the current render scale (the upscale sampler is
 # a manager sampler on the composite cache).
@@ -65,135 +48,8 @@ func gbRenderScale() ret Float64 {
   }
 }
 
-# ----- SSAO: screen-space ambient occlusion (#504) ---------------------------
-# Reads the G-buffer normal (A) + depth, writes the R8 AO target. The uniform
-# (inverse jittered viewProj + camera pos) is C math, uploaded into the shared
-# light uniform by gbSsaoUpload.
-func nativeGbSsaoUpload(camX: Float, camY: Float, camZ: Float) unsafe extern("rae_gb_ssao_upload")
-
-func gbSsaoUpload(camX: copy Float, camY: copy Float, camZ: copy Float) {
-  unsafe {
-    nativeGbSsaoUpload(camX: camX, camY: camY, camZ: camZ)
-  }
-}
-
-func gbAoWgsl() unsafe extern("rae_gb_ao_wgsl") ret Buffer(Any)
-
-func gbAoView() unsafe extern("rae_gb_ao_view") ret Ptr
-
-func gbLightUbuf() unsafe extern("rae_gb_light_ubuf") ret Ptr
-
-func nativeGbLightBytes() unsafe extern("rae_gb_light_bytes") ret Int
-
-func gbLightBytes() ret Int {
-  unsafe {
-    ret nativeGbLightBytes()
-  }
-}
-
-# ----- lighting: the deferred shading pass (#504) ----------------------------
-# Reads the whole G-buffer + AO + the shadow cascades, writes linear HDR
-# radiance into the lit target. The large uniform (inverse viewProj + camera/
-# sun/sky params + the Rae-cooked Hosek state) is C frame-math, uploaded by
-# gbLightUpload; Rae builds the 9-entry bind and runs the pass. The lighting
-# pipeline stays C for now (its creation guards the shared init block).
-func nativeGbLightUpload(
-  camX: Float
-  camY: Float
-  camZ: Float
-  exposure: Float
-  sunX: Float
-  sunY: Float
-  sunZ: Float
-  sunR: Float
-  sunG: Float
-  sunB: Float
-  skyR: Float
-  skyG: Float
-  skyB: Float
-  gndR: Float
-  gndG: Float
-  gndB: Float
-  skyKind: Float
-  turbidity: Float
-  skyExposure: Float
-  sunSizeRad: Float
-  zenR: Float
-  zenG: Float
-  zenB: Float
-  bands: Float
-  horR: Float
-  horG: Float
-  horB: Float
-  discI: Float
-) unsafe extern("rae_gb_light_upload")
-
-func gbLightUpload(
-  camX: copy Float
-  camY: copy Float
-  camZ: copy Float
-  exposure: copy Float
-  sunX: copy Float
-  sunY: copy Float
-  sunZ: copy Float
-  sunR: copy Float
-  sunG: copy Float
-  sunB: copy Float
-  skyR: copy Float
-  skyG: copy Float
-  skyB: copy Float
-  gndR: copy Float
-  gndG: copy Float
-  gndB: copy Float
-  skyKind: copy Float
-  turbidity: copy Float
-  skyExposure: copy Float
-  sunSizeRad: copy Float
-  zenR: copy Float
-  zenG: copy Float
-  zenB: copy Float
-  bands: copy Float
-  horR: copy Float
-  horG: copy Float
-  horB: copy Float
-  discI: copy Float
-) {
-  unsafe {
-    nativeGbLightUpload(
-      camX: camX
-      camY: camY
-      camZ: camZ
-      exposure: exposure
-      sunX: sunX
-      sunY: sunY
-      sunZ: sunZ
-      sunR: sunR
-      sunG: sunG
-      sunB: sunB
-      skyR: skyR
-      skyG: skyG
-      skyB: skyB
-      gndR: gndR
-      gndG: gndG
-      gndB: gndB
-      skyKind: skyKind
-      turbidity: turbidity
-      skyExposure: skyExposure
-      sunSizeRad: sunSizeRad
-      zenR: zenR
-      zenG: zenG
-      zenB: zenB
-      bands: bands
-      horR: horR
-      horG: horG
-      horB: horB
-      discI: discI
-    )
-  }
-}
-
-func gbLightPipeline() unsafe extern("rae_gb_light_pipeline") ret Ptr
-
+# The shadow cascades (still C until #925): the 320-byte shadow frame uniform,
+# the depth array view and the comparison sampler the lighting pass adopts.
 func gbShadowFrameUbuf() unsafe extern("rae_gb_shadow_frame_ubuf") ret Ptr
 
 func nativeGbShadowFrameBytes() unsafe extern("rae_gb_shadow_frame_bytes") ret Int
@@ -207,69 +63,3 @@ func gbShadowFrameBytes() ret Int {
 func gbShadowArrayView() unsafe extern("rae_gb_shadow_array_view") ret Ptr
 
 func gbShadowSampler() unsafe extern("rae_gb_shadow_sampler") ret Ptr
-
-# ----- TAA: temporal resolve (#504) ------------------------------------------
-# Reads this frame's radiance + last frame's history + motion, writes the
-# resolved image into the slot the composite then reads. The ping-pong slot and
-# history flag are C frame state (taaBegin flips + uploads, taaEnd marks
-# history); Rae builds the per-slot bind and runs the pass. Pipeline stays C.
-func nativeGbTaaReady() unsafe extern("rae_gb_taa_ready") ret Int
-
-func gbTaaReady() ret Int {
-  unsafe {
-    ret nativeGbTaaReady()
-  }
-}
-
-func nativeGbTaaBegin() unsafe extern("rae_gb_taa_begin") ret Int
-
-func gbTaaBegin() ret Int {
-  unsafe {
-    ret nativeGbTaaBegin()
-  }
-}
-
-func nativeGbTaaEnd() unsafe extern("rae_gb_taa_end")
-
-func gbTaaEnd() {
-  unsafe {
-    nativeGbTaaEnd()
-  }
-}
-
-func gbTaaPipeline() unsafe extern("rae_gb_taa_pipeline") ret Ptr
-
-func gbTaaUbuf() unsafe extern("rae_gb_taa_ubuf") ret Ptr
-
-func gbTaaTargetView() unsafe extern("rae_gb_taa_target_view") ret Ptr
-
-func gbTaaHistoryView() unsafe extern("rae_gb_taa_history_view") ret Ptr
-
-# ----- depth pyramid: a Hi-Z mip chain (#504) --------------------------------
-# A loop of single-entry fullscreen passes: mip 0 reduces the G-buffer depth,
-# each later mip reduces the one above. C keeps the per-mip targets + the two
-# pipelines; Rae drives the loop, building one bind per level (reading the
-# previous mip) and running each pass into that mip's target.
-func nativeGbPyramidReady() unsafe extern("rae_gb_pyramid_ready") ret Int
-
-func gbPyramidReady() ret Int {
-  unsafe {
-    ret nativeGbPyramidReady()
-  }
-}
-
-func gbPyrFromDepthPipeline() unsafe extern("rae_gb_pyr_from_depth_pipeline") ret Ptr
-
-func gbPyrReducePipeline() unsafe extern("rae_gb_pyr_reduce_pipeline") ret Ptr
-
-func gbPyrSrcView(i: Int) unsafe extern("rae_gb_pyr_src_view") ret Ptr
-
-func gbPyrRtView(i: Int) unsafe extern("rae_gb_pyr_rt_view") ret Ptr
-
-func nativeGbPyramidMips() unsafe extern("rae_ext_Gbuffer_pyramidMips") ret Int
-
-func gbPyramidMips() ret Int {
-  unsafe {
-    ret nativeGbPyramidMips()
-  }
-}

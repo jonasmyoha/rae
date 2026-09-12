@@ -1,10 +1,10 @@
 # water/WaterGpuBridge — the one water module that touches raw handles (#873).
 # It adopts the renderer's per-frame resources and mesh buffers into the
-# water manager as EXTERNALS (referenced, never owned): since #906 the frame
-# uniform, the scene depth view and the mesh buffers are the renderer's
-# GbufferCache manager objects (a cross-manager borrow, read through the
-# renderer manager's handles), while the lit / opaque-snapshot views are still
-# C's. It also reinterprets readback bytes as floats and hands the optional
+# water manager as EXTERNALS (referenced, never owned): the frame uniform,
+# the scene depth view and the mesh buffers are the renderer's GbufferCache
+# manager objects and the lit / opaque-snapshot views its DeferredTargets'
+# (#906/#923) — a cross-manager borrow, read through the renderer manager's
+# handles. It also reinterprets readback bytes as floats and hands the optional
 # timing pointer to a one-pass multi-dispatch recording. Everything else in
 # water is plain Rae over typed IDs. The unsafe blocks here carry the
 # obligations the renderer already guarantees: a frame resource stays valid
@@ -13,6 +13,8 @@
 open MeshStore
 open Gbuffer
 open GbufferResources
+open GbufferTargets
+open gpu/GpuTextures
 open GbufferPasses
 open TransparentForward
 open gpu/GpuResources
@@ -25,20 +27,15 @@ open gpu/GpuIds
 open water/WaterPerf
 open webgpu/Context
 
-func gbLitFormat() unsafe extern("rae_gb_lit_format") ret Int
-
-# The lit HDR target's format: the water surface's colour target.
-func waterLitFormat() ret Int32 {
-  unsafe {
-    ret gbLitFormat() as Int32
-  }
-}
+# The lit HDR target's format (the water surface's colour target) is the
+# renderer's DeferredTargets.litFormat since #923.
 
 # Adopts the frame uniform, scene depth view, opaque snapshot view and lit
 # view of the current targets generation. All four or none.
 func adoptFrameExternals(
   resources: mod GpuResources
   gbuffer: view GbufferCache
+  targets: view DeferredTargets
   gbufferResources: view GpuResources
 ) ret WaterFrameExternals {
   var frame: WaterFrameExternals = noFrameExternals()
@@ -47,6 +44,9 @@ func adoptFrameExternals(
     ret frame
   }
   if not gbufferTargetsReady(cache: gbuffer, resources: gbufferResources) {
+    ret frame
+  }
+  if not targetsReady(targets: targets, resources: gbufferResources) {
     ret frame
   }
   unsafe {
@@ -69,12 +69,15 @@ func adoptFrameExternals(
     }
     if let litCopyView: ExternalId = adoptExternalTextureView(
       resources: resources
-      handle: gbLitCopyView()
+      handle: textureViewHandle(resources: gbufferResources, id: targets.litCopyView)
     ) {
       frame.litCopyView = litCopyView
       adopted = adopted + 1
     }
-    if let litView: ExternalId = adoptExternalTextureView(resources: resources, handle: gbLitView()) {
+    if let litView: ExternalId = adoptExternalTextureView(
+      resources: resources
+      handle: textureViewHandle(resources: gbufferResources, id: targets.litView)
+    ) {
       frame.litView = litView
       adopted = adopted + 1
     }

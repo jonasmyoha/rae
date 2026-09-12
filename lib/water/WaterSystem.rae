@@ -27,6 +27,7 @@ import RendererDeferred
 open MeshStore
 open Gbuffer
 open GbufferPasses
+open GbufferTargets
 open Gpu3d
 open Math3d
 open Mesh3d
@@ -242,7 +243,11 @@ func waterSurfaceWgsl() ret String {
 # straight alpha blending, reverse-Z depth TEST without write, cull none (a lake is
 # seen from above and, wading, from just under its surface), one target in the HDR
 # format lighting wrote. Built lazily after the first deferred prepare.
-func ensureWaterPipeline(waterSystem: mod WaterSystem, resources: mod GpuResources) {
+func ensureWaterPipeline(
+  waterSystem: mod WaterSystem
+  resources: mod GpuResources
+  litFormat: copy Int32
+) {
   if waterSystem.pipeMade {
     ret
   }
@@ -259,7 +264,7 @@ func ensureWaterPipeline(waterSystem: mod WaterSystem, resources: mod GpuResourc
   attributes.add(value: { format: WGPUVertexFormat_Float32x3, offset: 12, location: 1 })
   attributes.add(value: { format: WGPUVertexFormat_Float32x2, offset: 24, location: 2 })
   let colorFormats: List(Int32) = List.create(Int32, cap: 1)
-  colorFormats.add(value: waterLitFormat())
+  colorFormats.add(value: litFormat)
   let spec: RenderPipelineSpec = {
     vertexStride: 32
     attributes: own attributes
@@ -319,6 +324,7 @@ func ensureWaterBind(
   waterSystem: mod WaterSystem
   resources: mod GpuResources
   gbuffer: view GbufferCache
+  targets: view DeferredTargets
   gbufferResources: view GpuResources
 ) {
   let gen: Int = gbuffer.targetsGen
@@ -340,6 +346,7 @@ func ensureWaterBind(
   waterSystem.surface.frame = adoptFrameExternals(
     resources: resources
     gbuffer: gbuffer
+    targets: targets
     gbufferResources: gbufferResources
   )
   if not waterSystem.surface.frame.valid {
@@ -436,6 +443,8 @@ func uploadWaterUniform(
   light: view Light3d
   sky: view Sky
   hasSky: view Bool
+  litWidth: copy Int
+  litHeight: copy Int
 ) {
   unsafe {
     var sunDir: Vec3 = light.sunDir
@@ -531,14 +540,13 @@ func uploadWaterUniform(
       w: body.flowSpeed
     )
     # Refraction: on/off, strength, and the lit target's size for screen uvs.
-    let litTexture: Ptr = gbLitTexture()
     put4(
       uniform: waterSystem.uniform
       base: 56
       x: body.refraction.toFloat()
       y: body.refractStrength
-      z: (wgpuTextureGetWidth(texture: litTexture) as Int).toFloat()
-      w: (wgpuTextureGetHeight(texture: litTexture) as Int).toFloat()
+      z: litWidth.toFloat()
+      w: litHeight.toFloat()
     )
     put4(
       uniform: waterSystem.uniform
@@ -640,6 +648,8 @@ func drawWaterBody(
   light: view Light3d
   sky: view Sky
   hasSky: view Bool
+  litWidth: copy Int
+  litHeight: copy Int
 ) {
   uploadWaterUniform(
     waterSystem: waterSystem
@@ -649,6 +659,8 @@ func drawWaterBody(
     light: light
     sky: sky
     hasSky: hasSky
+    litWidth: litWidth
+    litHeight: litHeight
   )
   var mesh: Int = waterSystem.mesh.id
   if body.meshId > 0 {
@@ -728,7 +740,7 @@ func drawWaterBody(
 func waterDraw(
   waterSystem: mod WaterSystem
   resources: mod GpuResources
-  gbuffer: view GbufferCache
+  passes: view RenderPasses
   meshResources: view GpuResources
   camera: view Camera3d
   light: view Light3d
@@ -746,14 +758,22 @@ func waterDraw(
   if primary.style is WaterStyle.realistic and waterSystem.fftNeedsRefresh {
     ret
   }
-  ensureWaterPipeline(waterSystem: waterSystem, resources: resources)
+  if not targetsReady(targets: passes.targets, resources: meshResources) {
+    ret
+  }
+  ensureWaterPipeline(
+    waterSystem: waterSystem
+    resources: resources
+    litFormat: passes.targets.litFormat
+  )
   if not waterSystem.pipeReady {
     ret
   }
   ensureWaterBind(
     waterSystem: waterSystem
     resources: resources
-    gbuffer: gbuffer
+    gbuffer: passes.gbuffer
+    targets: passes.targets
     gbufferResources: meshResources
   )
   if not waterSystem.bindMade {
@@ -765,13 +785,15 @@ func waterDraw(
       drawWaterBody(
         waterSystem: waterSystem
         resources: resources
-        meshes: gbuffer.meshes
+        meshes: passes.gbuffer.meshes
         meshResources: meshResources
         body: body
         camera: camera
         light: light
         sky: sky
         hasSky: hasSky
+        litWidth: passes.targets.width
+        litHeight: passes.targets.height
       )
     }
     i = i + 1
