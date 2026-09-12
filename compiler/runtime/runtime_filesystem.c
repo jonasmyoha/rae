@@ -58,6 +58,59 @@ rae_String rae_ext_rae_sys_read_file(rae_String path) {
   return (rae_String){buffer, (int64_t)len, (int64_t)len + 1, 1};
 }
 
+/* #935: shader-asset read with stdlib resolution + a loud miss. See the header. */
+static rae_String rae_read_whole_file(const char* path) {
+  FILE* f = fopen(path, "rb");
+  if (!f) return (rae_String){NULL, 0, 0, 0};
+  fseek(f, 0, SEEK_END);
+  long len = ftell(f);
+  fseek(f, 0, SEEK_SET);
+  uint8_t* buffer = malloc((size_t)len + 1);
+  if (buffer) {
+    fread(buffer, 1, (size_t)len, f);
+    buffer[len] = '\0';
+    rae_mem_str_tag(buffer, (int64_t)len + 1, RAE_SITE_READ_FILE);
+  }
+  fclose(f);
+  return (rae_String){buffer, (int64_t)len, (int64_t)len + 1, 1};
+}
+
+rae_String rae_ext_rae_gb_read_shader(rae_String path) {
+  if (!path.data) return (rae_String){NULL, 0, 0, 0};
+  const char* p = (const char*)path.data;
+
+  /* 1. As given: a project's own lib/ (cwd) or an assets/ override wins. */
+  rae_String direct = rae_read_whole_file(p);
+  if (direct.data) return direct;
+
+  /* 2. A "lib/<rest>" asset, resolved against the toolchain stdlib dir the
+   *    compiler exports as $RAE_STDLIB (that dir IS the stdlib `lib`, so the
+   *    leading "lib/" is dropped when joining). Lets a project run without a
+   *    local lib/ copy — the gap #933 left for these runtime reads. */
+  const char* stdlib = getenv("RAE_STDLIB");
+  if (stdlib && stdlib[0] && strncmp(p, "lib/", 4) == 0) {
+    char joined[4096];
+    snprintf(joined, sizeof(joined), "%s/%s", stdlib, p + 4);
+    rae_String viaStdlib = rae_read_whole_file(joined);
+    if (viaStdlib.data) return viaStdlib;
+  }
+
+  /* 3. Nowhere: fail loudly at the point of the miss, not frames later inside
+   *    WGPU shader-module creation staring at an empty source. */
+  if (stdlib && stdlib[0]) {
+    fprintf(stderr,
+            "error: could not read shader asset '%s' (also tried $RAE_STDLIB=%s). "
+            "The Rae stdlib shaders are missing here; set RAE_STDLIB to the "
+            "toolchain's lib/ directory.\n", p, stdlib);
+  } else {
+    fprintf(stderr,
+            "error: could not read shader asset '%s', and $RAE_STDLIB is unset. "
+            "Run through `rae run`, or set RAE_STDLIB to the toolchain's lib/ "
+            "directory so stdlib shaders resolve without a local lib/ copy.\n", p);
+  }
+  return (rae_String){NULL, 0, 0, 0};
+}
+
 /* Read a file as raw BYTES.
  *
  * rae_ext_rae_sys_read_file already opens "rb" and carries an explicit
