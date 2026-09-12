@@ -17,8 +17,9 @@
 # layout, so an instance is packed once (packInstanceRecord) and drawn with the
 # same mesh buffers; only the pipeline (blend, read-only depth, one HDR target)
 # and the render pass differ. Since #904 the pipeline + bind are typed IDs in
-# the DeferredRenderer-owned manager (the frame uniform + draws storage are
-# adopted as externals once — they survive resizes), like the post-passes.
+# the DeferredRenderer-owned manager; since #906 the bind names the geometry
+# frame's uniform + draws buffers by ID (GbufferCache) and the pass attaches
+# the cache's depth target read-only — no adopted externals.
 #
 # Client API (one batch, one mesh per frame — a list of batches is the obvious
 # extension when a second mesh needs it):
@@ -27,6 +28,7 @@
 # never reset it themselves. Adding after the pass ran shows up next frame.
 open MeshStore
 open Gbuffer
+open GbufferResources
 open GbufferInstanced
 open GbufferRecord
 open GbufferPasses
@@ -37,6 +39,7 @@ open gpu/GpuResources
 open gpu/GpuLifetime
 open gpu/GpuRender
 open gpu/GpuRenderPass
+open gpu/GpuRenderTransfer
 open gpu/GpuIds
 
 func gbLitTexture() unsafe extern("rae_gb_lit_texture") ret Ptr
@@ -59,7 +62,6 @@ type TransparentPassCache {
   pipeMade: Bool  # creation attempted (so a missing shader is reported once)
   pipeline: RenderPipelineId  # invalid when creation failed; the draw is skipped then
   bindGroup: BindGroupId
-  adopted: List(ExternalId)  # the frame uniform + draws storage, adopted once
   snapshotDone: Bool  # this frame's opaque snapshot was taken early (transparentSnapshot)
   batch: InstanceBatch
 }
@@ -77,7 +79,6 @@ func createTransparentPassCache(capacity: copy Int) pub ret TransparentPassCache
     pipeMade: false
     pipeline: noRenderPipelineId()
     bindGroup: noBindGroupId()
-    adopted: List.create(ExternalId, cap: 2)
     snapshotDone: false
     batch: { meshId: 0 - 1, capacity: capacity, count: 0, records: records }
   }
@@ -218,32 +219,24 @@ func ensureTransparentPipeline(cache: mod TransparentPassCache, resources: mod G
 # A bind group from THIS pipeline's layout (wgpu auto-layouts are pipeline-
 # exclusive, so the geometry pass's static bind cannot be reused) over the same
 # two buffers: frame uniform @0, draws storage @1. Those buffers are created
-# once and survive resizes, so the bind (and its adoptions) are made once.
-func ensureTransparentBind(cache: mod TransparentPassCache, resources: mod GpuResources) {
+# once and survive resizes, so the bind is made once.
+func ensureTransparentBind(
+  cache: mod TransparentPassCache
+  resources: mod GpuResources
+  gbuffer: view GbufferCache
+) {
   if bindGroupIsUsable(resources: resources, id: cache.bindGroup) {
     ret
   }
-  releaseExternalIds(resources: resources, list: cache.adopted)
   let entries: List(ResourceRef) = List.create(ResourceRef, cap: 2)
-  unsafe {
-    entries.add(
-      value: adoptBufferRef(resources: resources, adopted: cache.adopted, handle: gbFrameUbuf())
-    )
-    entries.add(
-      value: adoptBufferRef(resources: resources, adopted: cache.adopted, handle: gbDrawsBuffer())
-    )
-  }
-  var made: Bool = false
+  entries.add(value: bufferRef(id: gbuffer.frameUniform))
+  entries.add(value: bufferRef(id: gbuffer.draws))
   if let bind: BindGroupId = createRenderBindGroup(
     resources: resources
     pipeline: cache.pipeline
     entries: entries
   ) {
     cache.bindGroup = bind
-    made = true
-  }
-  if not made {
-    releaseExternalIds(resources: resources, list: cache.adopted)
   }
 }
 
@@ -256,19 +249,22 @@ func ensureTransparentBind(cache: mod TransparentPassCache, resources: mod GpuRe
 func drawTransparentBatch(
   cache: mod TransparentPassCache
   resources: mod GpuResources
-  meshes: view MeshStore
+  gbuffer: mod GbufferCache
 ) {
   unsafe {
     let mesh: Int = cache.batch.meshId
     # NOT gbMeshReady: that answers "may I draw into the CURRENT geometry pass"
     # (it is 0 once Gbuffer.end cleared the pass), and this pass runs after it.
     # An uploaded mesh has a non-zero index count; an invalid/unset id has 0.
-    if meshStoreIndexCount(store: meshes, mesh: mesh) <= 0 {
+    if meshStoreIndexCount(store: gbuffer.meshes, mesh: mesh) <= 0 {
       ret
     }
-    let base: Int = gbDrawCount()
+    if not gbufferTargetsReady(cache: gbuffer, resources: resources) {
+      ret
+    }
+    let base: Int = gbDrawCount(cache: gbuffer)
     var count: Int = cache.batch.count
-    let remaining: Int = gbMaxDraws() - base
+    let remaining: Int = gbufferMaxDraws - base
     if count > remaining {
       count = remaining
     }
@@ -276,13 +272,15 @@ func drawTransparentBatch(
       ret
     }
     let strideBytes: Int = instanceRecordFloats * 4
-    wgpuQueueWriteBuffer(
-      queue: webgpuQueue()
-      buffer: gbDrawsBuffer()
-      bufferOffset: (base * strideBytes) as UInt64
+    if not writeBufferFromPtr(
+      resources: resources
+      id: gbuffer.draws
+      offset: base * strideBytes
       data: cache.batch.records.data
-      size: (count * strideBytes) as UInt64
-    )
+      size: count * strideBytes
+    ) {
+      ret
+    }
     let encDesc: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
     let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
     var colorAtts: List(WGPURenderPassColorAttachment) = List.create(
@@ -304,7 +302,10 @@ func drawTransparentBatch(
     )
     depthAtts.add(
       value: {
-        view_: gbViewDepth()
+        view_: refHandle(
+          resources: resources
+          ref: gbufferTargetRef(cache: gbuffer, index: gbufferTargetDepth)
+        )
         depthLoadOp: WGPULoadOp_Undefined
         depthStoreOp: WGPUStoreOp_Undefined
         depthReadOnly: 1 as UInt32
@@ -321,13 +322,13 @@ func drawTransparentBatch(
       pass: pass
       pipeline: cache.pipeline
       bindGroup: cache.bindGroup
-      vertexBuffer: meshStoreVbufHandle(store: meshes, resources: resources, mesh: mesh)
-      indexBuffer: meshStoreIbufHandle(store: meshes, resources: resources, mesh: mesh)
-      indexCount: meshStoreIndexCount(store: meshes, mesh: mesh)
+      vertexBuffer: meshStoreVbufHandle(store: gbuffer.meshes, resources: resources, mesh: mesh)
+      indexBuffer: meshStoreIbufHandle(store: gbuffer.meshes, resources: resources, mesh: mesh)
+      indexCount: meshStoreIndexCount(store: gbuffer.meshes, mesh: mesh)
       instanceCount: count
       firstInstance: base
     ) {
-      gbAdvanceDraws(count: count)
+      gbAdvanceDraws(cache: gbuffer, count: count)
     }
     wgpuRenderPassEncoderEnd(renderPassEncoder: pass)
     let cbDesc: WGPUCommandBufferDescriptor = { nextInChain: webgpuNull() }
@@ -357,7 +358,7 @@ func transparentSnapshot(cache: mod TransparentPassCache) pub {
 func transparentPass(
   cache: mod TransparentPassCache
   resources: mod GpuResources
-  meshes: view MeshStore
+  gbuffer: mod GbufferCache
 ) pub {
   if gbDeferredPrepare() is 0 {
     ret
@@ -369,8 +370,8 @@ func transparentPass(
   if cache.batch.count > 0 {
     ensureTransparentPipeline(cache: cache, resources: resources)
     if isValidRenderPipeline(resources: resources, id: cache.pipeline) {
-      ensureTransparentBind(cache: cache, resources: resources)
-      drawTransparentBatch(cache: cache, resources: resources, meshes: meshes)
+      ensureTransparentBind(cache: cache, resources: resources, gbuffer: gbuffer)
+      drawTransparentBatch(cache: cache, resources: resources, gbuffer: gbuffer)
     }
   }
   cache.batch.count = 0
@@ -379,7 +380,6 @@ func transparentPass(
 # Retire the pass's manager objects (renderer shutdown); the batch stays.
 func transparentShutdown(cache: mod TransparentPassCache, resources: mod GpuResources) {
   retireBindGroup(resources: resources, id: cache.bindGroup)
-  releaseExternalIds(resources: resources, list: cache.adopted)
   retireRenderPipeline(resources: resources, id: cache.pipeline)
   cache.bindGroup = noBindGroupId()
   cache.pipeline = noRenderPipelineId()
