@@ -100,9 +100,8 @@ void rae_g2d_frame_reset(void) {
  * configured with CopySrc usage (rae_g2d_configure). Gated on the env var so
  * it costs nothing in normal runs. The readback row stride must be 256-aligned
  * (WebGPU copy requirement); we unpad into a tight RGBA buffer for SDL. */
-static void rae_g2d_save_screenshot(const char* path) {
-    if (!path || !g_g2d_off_tex || !g_wgpu_dev) return;
-    int w = g_g2d_off_w, h = g_g2d_off_h;
+static void rae_g2d_save_screenshot(const char* path, WGPUTexture tex, int w, int h) {
+    if (!path || !tex || !g_wgpu_dev) return;
     if (w <= 0 || h <= 0) return;
     uint32_t bpr = (uint32_t)w * 4u;
     uint32_t padded = (bpr + 255u) & ~255u;            /* 256-byte row align */
@@ -113,7 +112,7 @@ static void rae_g2d_save_screenshot(const char* path) {
     if (!staging) return;
     WGPUCommandEncoder enc = wgpuDeviceCreateCommandEncoder(g_wgpu_dev, NULL);
     WGPUTexelCopyTextureInfo src; memset(&src, 0, sizeof(src));
-    src.texture = g_g2d_off_tex; src.mipLevel = 0; src.aspect = WGPUTextureAspect_All;
+    src.texture = tex; src.mipLevel = 0; src.aspect = WGPUTextureAspect_All;
     WGPUTexelCopyBufferInfo dst; memset(&dst, 0, sizeof(dst));
     dst.buffer = staging; dst.layout.offset = 0;
     dst.layout.bytesPerRow = padded; dst.layout.rowsPerImage = (uint32_t)h;
@@ -152,14 +151,15 @@ static void rae_g2d_save_screenshot(const char* path) {
     wgpuBufferRelease(staging);
 }
 
-/* Called by Rae's endFrame AFTER it has flushed, ended the pass, finished the
- * command buffer, submitted it and released the encoder/pass. Advances the
- * deterministic clock, releases this frame's transient bind groups + buffers,
- * clears the (already-released) encoder/pass globals, and does the platform
- * present + optional headless screenshot. All of this is platform/lifetime
- * bookkeeping that stays C. */
+/* Called by Rae's endFrame AFTER the frame was submitted through the manager.
+ * #920: the presentable target is the canvas's texture, passed in (C borrows
+ * it for the copy / readback and owns nothing of it). This is the platform
+ * tail: the optional headless screenshot, the best-effort copy into the
+ * surface drawable + present, and the device poll. */
 void rae_g2d_tick(void) { rae_g2d_tick_virtual_clock(); }
-void rae_g2d_present_and_cleanup(void) {
+void rae_g2d_present(void* texture, int64_t width, int64_t height) {
+    WGPUTexture tex = (WGPUTexture)texture;
+    if (!tex || !g_wgpu_dev) return;
     /* Optional: periodic live wgpu object counts (RAE_WGPU_REPORT), for leak
      * hunts. Off by default; harmless like RAE_MEM_STATS. */
     { static int g_wgpu_report = -1; static long g_wgpu_report_frame = 0;
@@ -179,7 +179,7 @@ void rae_g2d_present_and_cleanup(void) {
     if (g_sdl_headless_ms > 0 || g_sdl_headless_frames > 0) {
         g_rae_presented_any = 1;
         const char* shot = getenv("RAE_GPU2D_SCREENSHOT");
-        if (shot) rae_g2d_save_screenshot(shot);
+        if (shot) rae_g2d_save_screenshot(shot, tex, (int)width, (int)height);
     }
 
     /* Present best-effort: copy the offscreen image into the surface drawable
@@ -195,16 +195,19 @@ void rae_g2d_present_and_cleanup(void) {
      * dark is the only thing that keeps the drawable count flat (matches ImGui's
      * Metal backend and bevy's occlusion handling). */
     int presented = 0;
-    if (rae_g2d_window_visible()) {
+    if (g_g2d_surface && rae_g2d_window_visible()) {
         WGPUSurfaceTexture st; memset(&st, 0, sizeof(st));
         wgpuSurfaceGetCurrentTexture(g_g2d_surface, &st);
         if (st.texture &&
             (st.status == WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal ||
              st.status == WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal)) {
             WGPUCommandEncoder penc = wgpuDeviceCreateCommandEncoder(g_wgpu_dev, NULL);
-            WGPUTexelCopyTextureInfo cs; memset(&cs, 0, sizeof(cs)); cs.texture = g_g2d_off_tex; cs.aspect = WGPUTextureAspect_All;
+            WGPUTexelCopyTextureInfo cs; memset(&cs, 0, sizeof(cs)); cs.texture = tex; cs.aspect = WGPUTextureAspect_All;
             WGPUTexelCopyTextureInfo cd; memset(&cd, 0, sizeof(cd)); cd.texture = st.texture; cd.aspect = WGPUTextureAspect_All;
-            WGPUExtent3D ext; ext.width = (uint32_t)g_sdl_w; ext.height = (uint32_t)g_sdl_h; ext.depthOrArrayLayers = 1;
+            /* the target is built to the configured size; copy the smaller of the two */
+            uint32_t cw = (uint32_t)(width < g_sdl_w ? width : g_sdl_w);
+            uint32_t ch = (uint32_t)(height < g_sdl_h ? height : g_sdl_h);
+            WGPUExtent3D ext; ext.width = cw; ext.height = ch; ext.depthOrArrayLayers = 1;
             wgpuCommandEncoderCopyTextureToTexture(penc, &cs, &cd, &ext);
             WGPUCommandBuffer pcb = wgpuCommandEncoderFinish(penc, NULL);
             wgpuQueueSubmit(g_wgpu_queue, 1, &pcb);
@@ -253,10 +256,9 @@ rae_Bool rae_ext_Gpu2d_lastPresentOk(void) {
     return g_g2d_last_present_ok != 0;
 }
 
+/* #920: closeWindow releases no Rae-owned object — the offscreen target is
+ * the canvas's (canvasShutdown retires it); only the surface + cursors here. */
 void rae_ext_Gpu2d_closeWindow(void) {
-    if (g_g2d_off_view) { wgpuTextureViewRelease(g_g2d_off_view); g_g2d_off_view = NULL; }
-    if (g_g2d_off_tex)  { wgpuTextureRelease(g_g2d_off_tex);  g_g2d_off_tex = NULL; }
-    g_g2d_off_w = 0; g_g2d_off_h = 0;
     if (g_g2d_surface) { wgpuSurfaceRelease(g_g2d_surface); g_g2d_surface = NULL; }
     for (int i = 0; i < 7; i++) {
         if (g_g2d_cursors[i]) { SDL_DestroyCursor(g_g2d_cursors[i]); g_g2d_cursors[i] = NULL; }

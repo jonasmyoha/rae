@@ -621,8 +621,6 @@ void rae_gb_set_draws_buffer(void* buf) { gb_draw_sbuf = (WGPUBuffer)buf; }
  * G-buffer views) when gb_targets_gen changes. */
 const char* rae_gb_view_wgsl(void)  { return GB_VIEW_WGSL; }
 int64_t rae_g2d_format(void)        { return (int64_t)g_g2d_fmt; }
-void* rae_g2d_off_view(void)        { return (void*)g_g2d_off_view; }
-int64_t rae_g2d_off_view_ready(void){ return (g_wgpu_dev && g_g2d_off_view) ? 1 : 0; }
 
 /* Mirror of the Rae-side `Mat4` layout for the extern boundary; see the
  * long note in runtime_gpu3d.c. The include guard makes this a no-op when
@@ -680,8 +678,9 @@ static int rae_gb_scale_dim(int full) {
     int v = (int)((double)full * rae_gb_get_scale() + 0.5);
     return v < 1 ? 1 : v;
 }
-int64_t rae_gb_offscreen_w(void)  { return (int64_t)rae_gb_scale_dim(g_g2d_off_w); }
-int64_t rae_gb_offscreen_h(void)  { return (int64_t)rae_gb_scale_dim(g_g2d_off_h); }
+/* #920: the presentable target is the canvas's, built to the surface size. */
+int64_t rae_gb_offscreen_w(void)  { return (int64_t)rae_gb_scale_dim(g_sdl_w); }
+int64_t rae_gb_offscreen_h(void)  { return (int64_t)rae_gb_scale_dim(g_sdl_h); }
 int64_t rae_gb_targets_match(int64_t w, int64_t h) {
     return (gb_depth_view && (int)w == gb_target_w && (int)h == gb_target_h) ? 1 : 0;
 }
@@ -1001,9 +1000,9 @@ int64_t rae_ext_Gbuffer_drawCount(void) { return (int64_t)gb_draw_count; }
 /* Present the composed frame. Shares the platform copy-to-drawable with
  * the forward frame — see rae_g3d_present_offscreen. Reached from Rae as
  * gbuffer.present() -> presentFrame() -> renderDeferredPass (no-UI present). */
-void rae_ext_Gbuffer_present(void) {
+void rae_ext_Gbuffer_present(void* texture, int64_t width, int64_t height) {
     rae_g2d_tick_virtual_clock();
-    rae_g3d_present_offscreen();
+    rae_g3d_present_offscreen((WGPUTexture)texture, (int)width, (int)height);
 }
 
 void rae_ext_Gbuffer_shutdown(void) {

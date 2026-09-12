@@ -31,8 +31,8 @@ func canvasFrameBegin(canvas: mod Gpu2dCanvas) {
   clipReset(canvas: canvas)
 }
 
-# Open the frame: a manager recording, the C offscreen target adopted (re-adopted
-# when configure replaced it), a pass over it held open for the flushes.
+# Open the frame: a manager recording and a pass over the canvas's offscreen
+# target (rebuilt to the surface size, #920) held open for the flushes.
 func canvasOpenFrame(
   canvas: mod Gpu2dCanvas
   clear: copy Bool
@@ -41,35 +41,14 @@ func canvasOpenFrame(
   b: copy Float
   a: copy Float
 ) {
-  ensureBoxResources(canvas: canvas)
+  if not canvasEnsureOffscreen(canvas: canvas) {
+    ret
+  }
   if let resources: mod GpuResources => canvas.gpuResources {
-    unsafe {
-      let offscreenView: Ptr = g2dOffscreenView()
-      if offscreenView is webgpuNull() {
-        ret
-      }
-      if offscreenView is not canvas.offscreenHandle or not isValidExternal(
-        resources: resources
-        id: canvas.offscreen
-      ) {
-        releaseExternal(resources: resources, id: canvas.offscreen)
-        canvas.offscreen = noExternalId()
-        if let adopted: ExternalId = adoptExternalTextureView(
-          resources: resources
-          handle: offscreenView
-        ) {
-          canvas.offscreen = adopted
-        }
-        canvas.offscreenHandle = offscreenView
-      }
-    }
-    if not isValidExternal(resources: resources, id: canvas.offscreen) {
-      ret
-    }
     if let recording: Recording = beginRecording(resources: resources) {
       var opened: Recording = own recording
       let target: RenderTarget = renderTarget(
-        colorView: externalRef(id: canvas.offscreen)
+        colorView: textureViewRef(id: canvas.offscreenView)
         clear: clear
         r: r
         g: g

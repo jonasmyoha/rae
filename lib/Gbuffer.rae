@@ -60,6 +60,7 @@ open gpu/GpuLifetime
 open gpu/GpuRender
 open gpu/GpuRenderPass
 open gpu/GpuIds
+open Gpu2dCanvas
 open GbufferNative
 open GbufferResources
 
@@ -88,8 +89,6 @@ func g2dFormat() ret Int {
     ret nativeG2dFormat()
   }
 }
-
-func g2dOffView() unsafe extern("rae_g2d_off_view") ret Ptr
 
 func gbTargetsGen() ret Int {
   unsafe {
@@ -457,11 +456,16 @@ func drawCount() ret Int {
   }
 }
 
-func nativePresent() unsafe extern("rae_ext_Gbuffer_present")
+# #920: present copies the canvas-owned offscreen texture (borrowed by C).
+func nativePresent(texture: Ptr, width: Int, height: Int) unsafe extern("rae_ext_Gbuffer_present")
 
-func present() {
+func present(canvas: mod Gpu2dCanvas) {
   unsafe {
-    nativePresent()
+    nativePresent(
+      texture: canvasOffscreenTexture(canvas: canvas)
+      width: canvas.offscreenWidth
+      height: canvas.offscreenHeight
+    )
   }
 }
 
@@ -817,8 +821,8 @@ func passDrawCount() pub ret Int {
   ret drawCount()
 }
 
-func presentFrame() pub {
-  present()
+func presentFrame(canvas: mod Gpu2dCanvas) pub {
+  present(canvas: canvas)
 }
 
 # ----- the passes that consume the G-buffer ---------------------------
