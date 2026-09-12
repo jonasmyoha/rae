@@ -1,0 +1,163 @@
+# MainBoot — the boot-time helpers of the mobile UI's `main` (#918 split for
+# the 1000-line cap): each is one block that used to sit inline in main and
+# produces a single value — the GPU UI resource (fonts + theme), the boot
+# theme, the Spotify poller, the auto-exit budget, the restored start state
+# and scroll position, the scene file watcher and the debug system. The code
+# is the same statements moved behind a function; main keeps the loop.
+open HotReload
+open ui/WindowGeometry
+open ui/Ecs
+open ui/EventLoop
+open ui/LogOverlay
+import FileWatch
+import SdfText
+import sys/Spotify
+import ui/renderSystem/RenderSystem
+import ui/Scene
+open ecs/Entity
+open ui/ThemeResolved
+open ui/ThemeParse
+open ecs/ComponentTable
+open ui/fitSystem/FitSystem
+open ui/layoutSystem/LayoutSystem
+open ui/Theme
+open ui/Transform
+open ui/animationSystem/AnimationSystem
+open Gpu2dCanvas
+
+# Fonts + the .raescene theme (#231): styleId sizes/colors/align resolve from
+# the theme file; RAE_UI_THEME=light picks the light palette.
+func loadGpuUi() ret Gpu2dUi {
+  let gpuTextFont: SdfFont = SdfText.loadSdfFont(
+    jsonPath: "examples/106_mobile_ui/assets/Roboto-Regular.mtsdf.json",
+    rawAtlasPath: "examples/106_mobile_ui/assets/Roboto-Regular.mtsdf.raw")
+  let gpuIconFont: SdfFont = SdfText.loadSdfFont(
+    jsonPath: "examples/106_mobile_ui/assets/MaterialIconsRound-Regular.mtsdf.json",
+    rawAtlasPath: "examples/106_mobile_ui/assets/MaterialIconsRound-Regular.mtsdf.raw")
+  let themeScene: Scene = loadSceneFile(path: themePath)
+  let uiTheme: ResolvedTheme = parseTheme(scene: themeScene)
+  let themeEnv: String = getEnv(name: "RAE_UI_THEME")
+  let lightKey: String = "light"
+  var chosenTheme: Theme = darkTheme()
+  if themeEnv is lightKey {
+    chosenTheme = lightTheme()
+  }
+  ret Gpu2dUi { textFont: gpuTextFont, iconFont: gpuIconFont, theme: uiTheme, activeTheme: chosenTheme }
+}
+
+# #764: the theme is no longer a global — it lives on AppState (built from the
+# RAE_UI_THEME palette + the parsed token tables) and each rebuilt world is
+# seeded from it via seedWorldThemeFrom.
+func createBootTheme(gpuUi: view Gpu2dUi) ret UiTheme {
+  var bootTheme: UiTheme = createUiTheme()
+  bootTheme.active = gpuUi.activeTheme
+  bootTheme.generation = 1
+  applyResolvedTokens(dst: bootTheme.resolved, src: gpuUi.theme)
+  ret bootTheme
+}
+
+# Spotify-mode integration. ON by default; opt out with RAE_UI_NO_SPOTIFY=1 or
+# RAE_UI_HEADLESS=1 (would focus Spotify). Clears `enabled` too, not just the
+# local flag: `pollSpotify` gates on `state.enabled`, so headless skipped
+# `startPoller` yet still polled (and wrote text) every frame against a cache
+# nobody filled.
+func setupSpotify(isHeadless: view Bool) ret SpotifyState {
+  let spotifyState: SpotifyState = createSpotifyState()
+  var spotifyOn: Bool = spotifyState.enabled
+  if isHeadless and spotifyForcedOn() is false {
+    spotifyOn = false
+    spotifyState.enabled = false
+  }
+  if spotifyOn {
+    log("[spotify] ON — launches lazily on first play (AppleScript play auto-launches).")
+    Spotify.startPoller(intervalMs: 1000)
+  } else {
+    log("[spotify] OFF (RAE_UI_NO_SPOTIFY or RAE_UI_HEADLESS)")
+  }
+  ret spotifyState
+}
+
+# Self-terminate after `RAE_AUTO_EXIT_SEC` seconds of wall-clock uptime. Used
+# by automated test runs (and agents) so the binary exits cleanly on its own
+# instead of needing an external SIGKILL that GUI apps don't observe through
+# the windowing event loop. Empty / unset / <= 0 means "run forever".
+func autoExitSeconds(isHeadless: view Bool) ret Float {
+  let autoExitEnv: String = getEnv(name: "RAE_AUTO_EXIT_SEC")
+  var autoExitSec: Float = 0.0
+  if autoExitEnv.length() > 0 { autoExitSec = autoExitEnv.toFloat() }
+  autoExitSec = headlessApplyAutoExitDefault(headless: isHeadless, current: autoExitSec)
+  ret autoExitSec
+}
+
+# RAE_UI_SCREEN picks the start screen; then the phase 3-6 hot-reload restore:
+# if `.rae/state.json` exists from a previous run (the supervisor signalled
+# `reload`, the app saved state via saveStateAndExit, the supervisor swapped
+# binaries), the saved screen + profile scroll win so this build picks up where
+# the previous one left off. Defaults pass through untouched when nothing is
+# saved.
+func restoreStartState() ret RestoredState {
+  let startScreenEnv: String = getEnv(name: "RAE_UI_SCREEN")
+  var startScreen: Screen = Screen.home
+  if startScreenEnv is "library" { startScreen = Screen.library }
+  if startScreenEnv is "album"   { startScreen = Screen.album }
+  if startScreenEnv is "player"  { startScreen = Screen.player }
+  if startScreenEnv is "search"  { startScreen = Screen.search }
+  if startScreenEnv is "profile" { startScreen = Screen.profile }
+  if startScreenEnv is "history" { startScreen = Screen.history }
+  let restoredDefault: RestoredState = {
+    screen: startScreen
+    scrollY: 0.0
+  }
+  ret loadRestoredState(fallback: restoredDefault)
+}
+
+# #277 — generic headless scroll-injection hook: RAE_UI_SCROLL=<du> overrides
+# the initial scroll position of the active screen's scroll target, so
+# automated snapshot tests can byte-verify scrolled UI. Empty → restored
+# position. Negative scrolls content up.
+func initialScrollY(restored: view RestoredState) ret Float {
+  var initialScrollY: Float = restored.scrollY
+  let scrollInjectEnv: String = getEnv(name: "RAE_UI_SCROLL")
+  if scrollInjectEnv.length() > 0 {
+    initialScrollY = scrollInjectEnv.toFloat()
+  }
+  ret initialScrollY
+}
+
+# The .raescene files whose edits hot-reload the data (polled 4x/s).
+func createSceneWatcher() ret FileWatcher {
+  let dataHotReloadEnabled: Bool = true
+  let watchedPaths: List(String) = List.create(String, cap: 8)
+  watchedPaths.add(value: trackRowPath)
+  watchedPaths.add(value: navTabsPath)
+  watchedPaths.add(value: navTabPath)
+  watchedPaths.add(value: miniPlayerPath)
+  watchedPaths.add(value: nowPlayingPath)
+  watchedPaths.add(value: albumPath)
+  watchedPaths.add(value: homePath)
+  ret FileWatch.createFileWatcher(
+    paths: watchedPaths
+    enabled: dataHotReloadEnabled
+    intervalSec: 0.25
+  )
+}
+
+# The debug system with its persisted flag toggles restored, the button in the
+# top-right corner on every screen, and the RAE_UI_DEBUG_MENU snapshot hooks
+# (`open` pre-opens the menu, `labels` pre-enables the FPS / mem read-out) so
+# the snapshot tooling captures those states without scripting a click.
+func createBootDebugSystem(viewport: view Viewport) ret DebugSystem {
+  let debug: DebugSystem = createDebugSystem()
+  restoreDebugFlags(debug: debug, path: debugFlagsFilePath)
+  setDebugScreenSize(debug: debug, w: viewport.layoutW, h: viewport.layoutH)
+  let debugMargin: Float = 34.69879518072289
+  setDebugButtonTopRight(debug: debug, margin: debugMargin)
+  let debugMenuEnv: String = getEnv(name: "RAE_UI_DEBUG_MENU")
+  if debugMenuEnv is "open" {
+    debug.menuOpen = true
+  }
+  if debugMenuEnv is "labels" {
+    debug.showLabels = true
+  }
+  ret debug
+}

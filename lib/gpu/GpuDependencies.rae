@@ -1,0 +1,113 @@
+# GpuDependencies — the manager's dependency arena (#918 split of GpuLifetime
+# for the 1000-line cap): the per-object dependency slices a bind group or a
+# submission pins (so retiring a buffer/texture/pipeline is deferred until
+# nothing live depends on it), their pin/unpin, the live checks, and the
+# RELOCATING compaction (#908) that keeps per-frame groups from growing the
+# arena. GpuLifetime, GpuRender and GpuResources (same package) use these bare.
+open webgpu/Context
+open webgpu/Webgpu
+open webgpu/WebgpuEnums
+open webgpu/WebgpuTypes
+open webgpu/Readback
+open gpu/GpuResources
+open gpu/GpuLifetime
+
+# Compacts the append-only dependency arena: every slice still indexed by a
+# live or retired-and-pending bind group, submission or readback is copied into
+# a fresh arena and its owner re-pointed; everything else (the slices of freed
+# groups) is dropped. Pins are counts on the slots, so copying the triples
+# changes nothing about liveness. A consumer that builds bind groups per frame
+# (the 2D canvas, #907/#908) calls this at its frame end so the arena stays
+# bounded by what is actually referenced. Returns whether anything was dropped.
+func compactDependencies(resources: mod GpuResources) ret Bool {
+  let before: Int = resources.depKinds.length
+  let kinds: List(Int) = List.create(Int, cap: before)
+  let slots: List(Int) = List.create(Int, cap: before)
+  let generations: List(Int) = List.create(Int, cap: before)
+  relocateSlices(resources: resources, table: resources.bindGroups, kinds: kinds, slots: slots, generations: generations)
+  relocateSlices(resources: resources, table: resources.submissions, kinds: kinds, slots: slots, generations: generations)
+  relocateSlices(resources: resources, table: resources.readbacks, kinds: kinds, slots: slots, generations: generations)
+  let after: Int = kinds.length
+  resources.depKinds = own kinds
+  resources.depSlots = own slots
+  resources.depGenerations = own generations
+  ret after < before
+}
+
+func relocateSlices(resources: view GpuResources, table: mod SlotTable, kinds: mod List(Int), slots: mod List(Int), generations: mod List(Int)) {
+  loop var slot: Int = 0, slot < resources.capacity, ++slot {
+    if intAt(list: table.live, index: slot) is 1 or intAt(list: table.retired, index: slot) is 1 {
+      let start: Int = intAt(list: table.depStart, index: slot)
+      let count: Int = intAt(list: table.depCount, index: slot)
+      table.depStart.set(index: slot, value: kinds.length)
+      loop var i: Int = 0, i < count, ++i {
+        kinds.add(value: intAt(list: resources.depKinds, index: start + i))
+        slots.add(value: intAt(list: resources.depSlots, index: start + i))
+        generations.add(value: intAt(list: resources.depGenerations, index: start + i))
+      }
+    }
+  }
+}
+
+func depIsLive(resources: view GpuResources, kind: view Int, slot: view Int, generation: view Int) ret Bool {
+  ret slotIsLive(table: tableFor(resources: resources, kind: kind), capacity: resources.capacity, slot: slot, generation: generation)
+}
+
+func appendDep(resources: mod GpuResources, kind: view Int, slot: view Int, generation: view Int) {
+  resources.depKinds.add(value: kind)
+  resources.depSlots.add(value: slot)
+  resources.depGenerations.add(value: generation)
+}
+
+func pinDep(resources: mod GpuResources, kind: view Int, slot: view Int) {
+  if kind is kindBuffer { pinSlot(table: resources.buffers, slot: slot) }
+  if kind is kindTexture { pinSlot(table: resources.textures, slot: slot) }
+  if kind is kindTextureView { pinSlot(table: resources.textureViews, slot: slot) }
+  if kind is kindSampler { pinSlot(table: resources.samplers, slot: slot) }
+  if kind is kindPipeline { pinSlot(table: resources.pipelines, slot: slot) }
+  if kind is kindBindGroup { pinSlot(table: resources.bindGroups, slot: slot) }
+  if kind is kindRenderPipeline { pinSlot(table: resources.renderPipelines, slot: slot) }
+  if kind is kindExternal { pinSlot(table: resources.externals, slot: slot) }
+}
+
+func unpinDep(resources: mod GpuResources, kind: view Int, slot: view Int) {
+  unsafe {
+      let empty: Ptr = webgpuNull()
+      if kind is kindBuffer { unpinSlot(table: resources.buffers, slot: slot, kind: kind, empty: empty) }
+      if kind is kindTexture { unpinSlot(table: resources.textures, slot: slot, kind: kind, empty: empty) }
+      if kind is kindTextureView { unpinSlot(table: resources.textureViews, slot: slot, kind: kind, empty: empty) }
+      if kind is kindSampler { unpinSlot(table: resources.samplers, slot: slot, kind: kind, empty: empty) }
+      if kind is kindPipeline { unpinSlot(table: resources.pipelines, slot: slot, kind: kind, empty: empty) }
+      if kind is kindBindGroup { unpinSlot(table: resources.bindGroups, slot: slot, kind: kind, empty: empty) }
+      if kind is kindRenderPipeline { unpinSlot(table: resources.renderPipelines, slot: slot, kind: kind, empty: empty) }
+      if kind is kindExternal { unpinSlot(table: resources.externals, slot: slot, kind: kind, empty: empty) }
+  }
+}
+
+# Every dependency in an arena slice is still live at its recorded generation.
+func sliceIsLive(resources: view GpuResources, start: view Int, count: view Int) ret Bool {
+  var i: Int = start
+  loop i < start + count {
+    if depIsLive(resources: resources, kind: intAt(list: resources.depKinds, index: i), slot: intAt(list: resources.depSlots, index: i), generation: intAt(list: resources.depGenerations, index: i)) is false { ret false }
+    i = i + 1
+  }
+  ret true
+}
+
+func pinSlice(resources: mod GpuResources, start: view Int, count: view Int) {
+  var i: Int = start
+  loop i < start + count {
+    pinDep(resources: resources, kind: intAt(list: resources.depKinds, index: i), slot: intAt(list: resources.depSlots, index: i))
+    i = i + 1
+  }
+}
+
+func unpinSlice(resources: mod GpuResources, start: view Int, count: view Int) {
+  var i: Int = start
+  loop i < start + count {
+    unpinDep(resources: resources, kind: intAt(list: resources.depKinds, index: i), slot: intAt(list: resources.depSlots, index: i))
+    i = i + 1
+  }
+}
+
+# ----- pipelines -------------------------------------------------------
