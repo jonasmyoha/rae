@@ -214,7 +214,7 @@ static RaePackField* parse_field(RaePackParser* parser) {
   Str key = parser_copy_str(parser, key_token->lexeme);
   Str tag = str_from_cstr("");
 
-  if (str_eq_cstr(key, "target")) {
+  if (str_eq_cstr(key, "target") || str_eq_cstr(key, "dep")) {  /* #933: dep <name>: */
     const Token* tag_token = parser_peek(parser);
     const Token* colon = parser_peek_at(parser, 1);
     if (token_is_ident_like(tag_token) && colon && colon->kind == TOK_COLON) {
@@ -632,6 +632,82 @@ static bool parse_targets(RaePackParser* parser, RaePack* pack, RaePackBlock* bl
   return true;
 }
 
+/* #933: `dependencies: { dep <name>: { path: "..." } | { git: "...", rev: "..." } }` */
+static bool parse_dependencies(RaePackParser* parser, RaePack* pack, RaePackBlock* block) {
+  RaePackDep* tail = NULL;
+  for (const RaePackField* field = block ? block->fields : NULL; field; field = field->next) {
+    if (!str_eq_cstr(field->key, "dep")) {
+      diag_error(parser->file_path, (int)field->line, (int)field->column,
+                 "dependencies entries must use 'dep <name>: { ... }'");
+      parser->had_error = true;
+      return false;
+    }
+    if (str_is_empty(field->tag)) {
+      diag_error(parser->file_path, (int)field->line, (int)field->column,
+                 "dep entries must use 'dep <name>:'");
+      parser->had_error = true;
+      return false;
+    }
+    if (field->value.kind != RAEPACK_VALUE_BLOCK) {
+      diag_error(parser->file_path, (int)field->line, (int)field->column,
+                 "dep must be a block, e.g. dep ui: { path: \"../lib-ui\" }");
+      parser->had_error = true;
+      return false;
+    }
+    RaePackDep* dep = arena_alloc(parser->arena, sizeof(RaePackDep));
+    if (!dep) return false;
+    memset(dep, 0, sizeof(RaePackDep));
+    dep->name = field->tag;
+    for (const RaePackField* f = field->value.as.block->fields; f; f = f->next) {
+      const char* which = NULL;
+      Str* slot = NULL;
+      if (str_eq_cstr(f->key, "path")) { which = "path"; slot = &dep->path; }
+      else if (str_eq_cstr(f->key, "git")) { which = "git"; slot = &dep->git; }
+      else if (str_eq_cstr(f->key, "rev")) { which = "rev"; slot = &dep->rev; }
+      else {
+        diag_error(parser->file_path, (int)f->line, (int)f->column,
+                   "unknown dep field (expected path, git, or rev)");
+        parser->had_error = true;
+        return false;
+      }
+      if (f->value.kind != RAEPACK_VALUE_STRING) {
+        char message[96];
+        snprintf(message, sizeof(message), "dep %s must be a string", which);
+        diag_error(parser->file_path, (int)f->line, (int)f->column, message);
+        parser->had_error = true;
+        return false;
+      }
+      *slot = f->value.as.string;
+    }
+    bool has_path = dep->path.len > 0;
+    bool has_git = dep->git.len > 0;
+    if (has_path == has_git) {
+      diag_error(parser->file_path, (int)field->line, (int)field->column,
+                 "dep needs exactly one of path or git");
+      parser->had_error = true;
+      return false;
+    }
+    if (dep->rev.len > 0 && !has_git) {
+      diag_error(parser->file_path, (int)field->line, (int)field->column,
+                 "dep rev is only meaningful with git");
+      parser->had_error = true;
+      return false;
+    }
+    for (const RaePackDep* other = pack->deps; other; other = other->next) {
+      if (str_eq(other->name, dep->name)) {
+        diag_error(parser->file_path, (int)field->line, (int)field->column,
+                   "duplicate dep name");
+        parser->had_error = true;
+        return false;
+      }
+    }
+    if (!pack->deps) pack->deps = dep; else tail->next = dep;
+    tail = dep;
+    pack->dep_count += 1;
+  }
+  return true;
+}
+
 static bool parse_required_fields(RaePackParser* parser, RaePack* pack) {
   bool saw_format = false;
   bool saw_version = false;
@@ -702,6 +778,14 @@ static bool parse_required_fields(RaePackParser* parser, RaePack* pack) {
         return false;
       }
       saw_targets = true;
+    } else if (str_eq_cstr(field->key, "dependencies")) {
+      if (field->value.kind != RAEPACK_VALUE_BLOCK) {
+        diag_error(parser->file_path, (int)field->line, (int)field->column,
+                   "dependencies must be a block");
+        parser->had_error = true;
+        return false;
+      }
+      if (!parse_dependencies(parser, pack, field->value.as.block)) return false;
     } else if (str_eq_cstr(field->key, "rae")) {
       /* Optional toolchain requirement: `rae: { version: "0.3" }` (#931). */
       if (field->value.kind != RAEPACK_VALUE_BLOCK) {

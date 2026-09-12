@@ -32,6 +32,17 @@ typedef struct RaePackTarget {
 typedef struct RaePackField RaePackField;
 typedef struct RaePackBlock RaePackBlock;
 
+/* One `dep <name>: { path: "..." }` or `dep <name>: { git: "...", rev: "..." }`
+ * entry of the pack's `dependencies` block (#933). Exactly one of path/git is
+ * set; rev is optional and only meaningful with git. */
+typedef struct RaePackDep {
+  Str name;
+  Str path;
+  Str git;
+  Str rev;
+  struct RaePackDep* next;
+} RaePackDep;
+
 typedef struct {
   Str name;
   Str format;
@@ -40,6 +51,9 @@ typedef struct {
   /* Optional toolchain requirement: the string from `rae: { version: "..." }`
    * (#931). Empty (len 0) when the pack declares no requirement. */
   Str rae_version;
+  /* Optional `dependencies` block (#933), in declaration order. */
+  RaePackDep* deps;
+  size_t dep_count;
   RaePackTarget* targets;
   size_t target_count;
   RaePackBlock* raw;
