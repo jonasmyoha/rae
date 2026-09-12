@@ -863,8 +863,6 @@ int   rae_wgpu_read_start_status(void* request);
 int   rae_wgpu_read_poll(void* request);
 int   rae_wgpu_read_copy(void* request, void* destination, uint64_t capacity);
 void* rae_wgpu_read_release(void* request);
-void  rae_gt_set(int64_t i, void* p);
-void* rae_gt_get(int64_t i);
 #endif
 
 /* G-buffer instanced-draw context accessors (#502). Bound from Rae via

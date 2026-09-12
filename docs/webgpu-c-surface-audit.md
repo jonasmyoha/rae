@@ -466,3 +466,47 @@ the inventory found here): the cascaded shadow maps — they also feed the
 FORWARD renderer's C binds (`runtime_gpu3d.c` / `runtime_gpu3d_skin.c` read
 `g3d_sm_frame_ubuf / array_view / sampler` directly) and need manager support
 for array textures + layer views + comparison samplers first.
+
+**#923 update (shared renderer slice 3c — the deferred post-pass targets +
+the frame math):** `lib/GbufferTargets.rae` — `DeferredTargets` on the
+DeferredRenderer's RenderPasses: the lit HDR target (rg11b10 when
+`rae_wgpu_have_rg11b10`, else rgba16f) + its opaque snapshot (litCopy), the
+AO target, the two TAA ping-pong targets, the depth pyramid (a half-res
+r32float mip chain — `gpu/GpuTextures.createTextureMipped` + one
+`createTextureViewMip` per level, new manager support split out for the
+line cap), the 416-byte light uniform and the 16-byte TAA uniform, and the
+lighting / TAA / pyramid pipelines over the C-kept WGSL (`rae_gb_{light,taa,
+pyr_from_depth,pyr_reduce}_wgsl`), all rebuilt per G-buffer generation. The
+frame-derived math is Rae: the GbufferCache keeps viewProj, the JITTERED
+viewProj (Halton(2,3), suppressed with TAA off), the previous frame's and
+the clear colour; `uploadSsaoUniform` / `uploadLightUniform` pack the light
+uniform (inverse jittered viewProj, camera, sun, ambient, the #57 fog block,
+sky params, the cooked Hosek state — kept on the targets, no C push) with
+`GpuArgs`. Every consumer binds IDs: the composite (source = the TAA slot /
+lit), SSAO, lighting, TAA, pyramid, the inspector (G-buffer views), the
+transparent pass (lit target, the litCopy snapshot copied through
+`gpu/GpuTextures.textureHandle`), the underwater pass, and the water system
+(borrowing the lit views across managers). The TAA switch and the fog block
+are renderer state (`setTaaEnabled(renderer:, on:)`, `setFog(renderer:, …)`).
+The lighting bind still ADOPTS the three shadow inputs (`rae_gb_shadow_*`, C
+until #925), which is also why `rae_gb_deferred_prepare` survives: the
+device/surface check + the shadow cascade DEFAULTS the bind samples. Removed
+from C: every deferred target / uniform / pipeline / frame static
+(`gb_lit_*`, `gb_ao_*`, `gb_taa_*`, `gb_pyramid_*`, `gb_light_ubuf`,
+`gb_fog_*`, `gb_deferred_gen`, the borrowed `gb_a/b/c/depth_view`,
+`gb_target_w/h`, `gb_targets_gen`, `gb_viewproj*`, `gb_clear`,
+`gb_jitter_frame`), `rae_gb_{frame_data,commit_targets,forget_targets,
+view_*,targets_gen,motion_zero,ssao_upload,light_upload,light_ubuf,
+light_bytes,light_pipeline,lit_*,ao_view,taa_*,set_taa_enabled,set_fog,
+pyramid_ready,pyr_*,composite_source_*}` and the gated
+`rae_ext_Gbuffer_{deferredShutdown,pyramidMips,skyHosekPush}` (allowlist −3,
+gate 7). `rae_ext_Gbuffer_shutdown` now releases the terrain / sprite asset
+arrays (the still-C upload ABI) — the end-of-main `Gbuffer.shutdownAll()`
+STAYS for those and for the shadow cascades until #925; the renderer's own
+objects are all retired by `shutdownDeferredRenderer` (live wgpu counts flat
+across 240 headless frames in 110/118). The legacy blocking
+`lib/GpuTiming.rae` keeps its query set + buffers as owner fields now: the
+last C slot store (`g_gt_handles` / `rae_gt_set/get`) is deleted; it remains
+the raw-encoder harness of zz_gpu_timing_check beside the manager's
+nonblocking `gpu/GpuTiming` (not merged into it — different contracts,
+blocking vs tracked readback).
