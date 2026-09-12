@@ -83,10 +83,9 @@ void rae_g2d_xform(float* out) { if (out) rae_g2d_compute_xform(out); }
  * screenshots work even when the OS won't vend a drawable (window occluded /
  * display asleep / headless), where wgpuSurfaceGetCurrentTexture returns no
  * texture. */
-static WGPUTexture     g_g2d_off_tex = NULL;
-static WGPUTextureView g_g2d_off_view = NULL;
-static int g_g2d_off_w = 0, g_g2d_off_h = 0;
-
+/* #920: the offscreen presentable target is the Rae canvas's texture (built
+ * to the configured surface size, rebuilt on resize); C only configures the
+ * surface and reports its size/format. */
 static void rae_g2d_configure(int pw, int ph) {
     if (!g_g2d_surface || pw <= 0 || ph <= 0) return;
     WGPUSurfaceConfiguration cfg; memset(&cfg, 0, sizeof(cfg));
@@ -100,20 +99,14 @@ static void rae_g2d_configure(int pw, int ph) {
     cfg.alphaMode = WGPUCompositeAlphaMode_Auto;
     wgpuSurfaceConfigure(g_g2d_surface, &cfg);
     g_sdl_w = pw; g_sdl_h = ph;
-    /* (Re)create the offscreen render target at the new size. */
-    if (g_g2d_off_w != pw || g_g2d_off_h != ph || !g_g2d_off_tex) {
-        if (g_g2d_off_view) { wgpuTextureViewRelease(g_g2d_off_view); g_g2d_off_view = NULL; }
-        if (g_g2d_off_tex)  { wgpuTextureRelease(g_g2d_off_tex);  g_g2d_off_tex = NULL; }
-        WGPUTextureDescriptor td; memset(&td, 0, sizeof(td));
-        td.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_CopySrc;
-        td.dimension = WGPUTextureDimension_2D;
-        td.size.width = (uint32_t)pw; td.size.height = (uint32_t)ph; td.size.depthOrArrayLayers = 1;
-        td.format = g_g2d_fmt; td.mipLevelCount = 1; td.sampleCount = 1;
-        g_g2d_off_tex = wgpuDeviceCreateTexture(g_wgpu_dev, &td);
-        g_g2d_off_view = wgpuTextureCreateView(g_g2d_off_tex, NULL);
-        g_g2d_off_w = pw; g_g2d_off_h = ph;
-    }
 }
+
+/* The configured surface, for the canvas that owns the presentable target:
+ * ready once the device + surface exist and have a size; the physical size the
+ * target must have (the format is rae_g2d_format). */
+int64_t rae_g2d_surface_ready(void) { return (g_wgpu_dev && g_g2d_surface && g_sdl_w > 0 && g_sdl_h > 0) ? 1 : 0; }
+int64_t rae_g2d_surface_width(void)  { return (int64_t)g_sdl_w; }
+int64_t rae_g2d_surface_height(void) { return (int64_t)g_sdl_h; }
 
 /* Is the window in a state where rendering + presenting is worthwhile? False
  * when hidden / minimized / occluded (app switched away, another window fully

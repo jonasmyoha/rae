@@ -88,9 +88,7 @@ void rae_ext_Gbuffer_sdfShutdown(void) {}
 int64_t rae_ext_Gbuffer_drawCount(void) { return 0; }
 const char* rae_gb_view_wgsl(void)  { return ""; }
 int64_t rae_g2d_format(void)        { return 0; }
-void* rae_g2d_off_view(void)        { return (void*)0; }
-int64_t rae_g2d_off_view_ready(void){ return 0; }
-void rae_ext_Gbuffer_present(void) {}
+void rae_ext_Gbuffer_present(void* texture, int64_t width, int64_t height) { (void)texture; (void)width; (void)height; }
 void rae_ext_Gbuffer_shutdown(void) {}
 
 /* The passes downstream of the G-buffer are pure GPU work — there is no

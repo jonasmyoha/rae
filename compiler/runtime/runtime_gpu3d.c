@@ -9,8 +9,8 @@
  * without presenting so gpu2d can append one load-preserving UI pass. The 3D
  * pass is SINGLE-SAMPLED (#333: MSAA dropped so depth is sampleable — WebGPU
  * has no depth resolve) and renders MRT directly into the same persistent
- * offscreen texture the 2D path uses (g_g2d_off_view) plus a prepass set:
- *   @location(0) color     -> g_g2d_off_view (present/screenshot unchanged)
+ * offscreen texture the 2D canvas owns (#920) plus a prepass set:
+ *   @location(0) color     -> the canvas offscreen view (present/screenshot unchanged)
  *   @location(1) normal    -> rgba16f world-space normals (real, not
  *                             depth-reconstructed — reconstruction is wrong
  *                             exactly at the edges where AO/GI matter)
@@ -744,10 +744,10 @@ static void g3d_ensure_tonemap_bind(void) {
 /* (Re)create the prepass targets (depth/normal/velocity) to match the
  * offscreen color target's size. Called from begin(); cheap when unchanged.
  * All three carry TextureBinding: their whole reason to exist is being
- * sampled by later passes (SSAO/TAA/GI); color goes directly to
- * g_g2d_off_view and needs nothing here. */
+ * sampled by later passes (SSAO/TAA/GI); color goes directly to the
+ * canvas's offscreen target (surface-sized, #920) and needs nothing here. */
 static void g3d_ensure_targets(void) {
-    int w = g_g2d_off_w, h = g_g2d_off_h;
+    int w = g_sdl_w, h = g_sdl_h;
     if (w <= 0 || h <= 0) return;
     if (g3d_depth_view && w == g3d_target_w && h == g3d_target_h) return;
     for (int t = 0; t < 2; t++) {
@@ -858,7 +858,7 @@ void rae_ext_Gpu3d_meshUpdate(int64_t mesh, const float* verts, int64_t vertCoun
  * (gpu3d.beginForward) over the WebGPU bindings; this returns 1 when the frame
  * is ready to encode, 0 if the device/targets are not up yet. */
 int rae_g3d_frame_prepare(const float* frame, int64_t count){
-    if (!g_wgpu_dev || !g_g2d_off_view || !frame || count < 36) return 0;
+    if (!g_wgpu_dev || !g_g2d_surface || !frame || count < 36) return 0;
     g3d_init_pipeline();
     g3d_ensure_targets();
     if (!g3d_hdr_view || !g3d_depth_view || !g3d_normal_view || !g3d_velocity_view || !g3d_ambient_view) return 0;
@@ -1105,7 +1105,7 @@ void* rae_g3d_taa_view(int64_t slot){
  * tonemap pipeline/bind and returns the source slot (the TAA slot when TAA is on)
  * for the Rae side to encode the fullscreen resolve, or -1 to skip. */
 int rae_g3d_tonemap_prepare(void) {
-    if (!g3d_tonemap_pending || !g3d_hdr_view || !g_g2d_off_view) return -1;
+    if (!g3d_tonemap_pending || !g3d_hdr_view || !g_g2d_surface) return -1;
     g3d_init_tonemap_pipeline();
     g3d_ensure_tonemap_bind();
     const int tmSlot = g3d_taa_enabled ? g3d_taa_cur : 0;
@@ -1131,14 +1131,15 @@ int64_t rae_g3d_tonemap_pending(void) { return g3d_tonemap_pending ? 1 : 0; }
  * reaches the window. Sharing it here is why the deferred present pass
  * does not have to call into renderer3d's frame logic to show anything.
  */
-static void rae_g3d_present_offscreen(void) {
+static void rae_g3d_present_offscreen(WGPUTexture tex, int width, int height) {
+    if (!tex) { rae_wgpu_poll(0); return; }
     /* A frame's pixels exist by this point whether or not there is a surface to
      * show them on, so mark it here rather than at wgpuSurfacePresent -- headless
      * returns before ever presenting. */
     g_rae_presented_any = 1;
     if (g_sdl_headless_ms > 0 || g_sdl_headless_frames > 0) {
         const char* shot = getenv("RAE_GPU2D_SCREENSHOT");
-        if (shot) rae_g2d_save_screenshot(shot);
+        if (shot) rae_g2d_save_screenshot(shot, tex, width, height);
     }
 
     /* NO WINDOW MEANS NOTHING TO PRESENT TO. An offscreen-only frame (the
@@ -1163,9 +1164,11 @@ static void rae_g3d_present_offscreen(void) {
         (st.status == WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal ||
          st.status == WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal)) {
         WGPUCommandEncoder penc = wgpuDeviceCreateCommandEncoder(g_wgpu_dev, NULL);
-        WGPUTexelCopyTextureInfo cs; memset(&cs, 0, sizeof(cs)); cs.texture = g_g2d_off_tex; cs.aspect = WGPUTextureAspect_All;
+        WGPUTexelCopyTextureInfo cs; memset(&cs, 0, sizeof(cs)); cs.texture = tex; cs.aspect = WGPUTextureAspect_All;
         WGPUTexelCopyTextureInfo cd; memset(&cd, 0, sizeof(cd)); cd.texture = st.texture; cd.aspect = WGPUTextureAspect_All;
-        WGPUExtent3D ext; ext.width = (uint32_t)g_sdl_w; ext.height = (uint32_t)g_sdl_h; ext.depthOrArrayLayers = 1;
+        uint32_t cw = (uint32_t)(width < g_sdl_w ? width : g_sdl_w);
+        uint32_t ch = (uint32_t)(height < g_sdl_h ? height : g_sdl_h);
+        WGPUExtent3D ext; ext.width = cw; ext.height = ch; ext.depthOrArrayLayers = 1;
         wgpuCommandEncoderCopyTextureToTexture(penc, &cs, &cd, &ext);
         WGPUCommandBuffer pcb = wgpuCommandEncoderFinish(penc, NULL);
         wgpuQueueSubmit(g_wgpu_queue, 1, &pcb);
@@ -1194,9 +1197,9 @@ static void rae_g3d_present_offscreen(void) {
  * to the drawable. The scene-pass finish and the tonemap-if-pending fallback
  * move to the Rae end() wrapper; rae_g3d_present_offscreen is genuine platform
  * copy-to-drawable, so it stays C (same class as rae_ext_Gbuffer_present). */
-void rae_g3d_present_frame(void) {
+void rae_g3d_present_frame(void* texture, int64_t width, int64_t height) {
     rae_g2d_tick_virtual_clock();
-    rae_g3d_present_offscreen();
+    rae_g3d_present_offscreen((WGPUTexture)texture, (int)width, (int)height);
 }
 
 void rae_ext_Gpu3d_shutdown(void) {
