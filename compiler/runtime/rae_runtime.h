@@ -560,6 +560,14 @@ void rae_ext_rae_chan_free(int64_t ch);
 void rae_ext_rae_sys_exit(int64_t code);
 rae_String rae_ext_rae_sys_get_env(rae_String name);
 rae_String rae_ext_rae_sys_read_file(rae_String path);
+/* #935: read a WGSL/stdlib shader asset. Tries the path as given (cwd-relative,
+ * so a project's own lib/ or an assets/ override still wins), then — for a
+ * "lib/..." path — joins it against $RAE_STDLIB (the toolchain stdlib dir the
+ * compiler exports, so a project needs no local lib/ copy). If the file is
+ * found nowhere it fails LOUDLY (a stderr diagnostic naming the path) and
+ * returns empty, instead of silently feeding an empty WGSL source into GPU
+ * shader-module creation and crashing frames later. */
+rae_String rae_ext_rae_gb_read_shader(rae_String path);
 /* Binary counterpart: a Buffer of one-byte-per-Int values, for container
  * formats whose content is not text. */
 void* rae_ext_rae_sys_read_file_bytes(rae_String path, rae_Mod_Int64 out);
