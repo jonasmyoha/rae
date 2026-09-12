@@ -50,8 +50,13 @@ open Rendergraph
 open Math3d
 open Mesh3d
 
-func uploadMeshData(meshData: view MeshData) ret MeshHandle {
-  ret uploadMesh(verts: meshData.verts, vertCount: meshData.vertCount, indices: meshData.indices)
+func uploadMeshData(renderer: mod DeferredRenderer, meshData: view MeshData) ret MeshHandle {
+  ret uploadMesh(
+    renderer: renderer
+    verts: meshData.verts
+    vertCount: meshData.vertCount
+    indices: meshData.indices
+  )
 }
 
 # A metallic x roughness sphere grid plus a ground plane. Deliberately the
@@ -171,15 +176,16 @@ func main() ret Int {
     majorSegs: 96
     minorSegs: 48
   )
-  let sphere: MeshHandle = uploadMeshData(meshData: sphereData)
-  let ground: MeshHandle = uploadMeshData(meshData: planeData)
-  let torus: MeshHandle = uploadMeshData(meshData: torusData)
+  var renderer: DeferredRenderer = createDeferredRenderer()
+
+  let sphere: MeshHandle = uploadMeshData(renderer: renderer, meshData: sphereData)
+  let ground: MeshHandle = uploadMeshData(renderer: renderer, meshData: planeData)
+  let torus: MeshHandle = uploadMeshData(renderer: renderer, meshData: torusData)
 
   var world: World3d = buildScene(sphere: sphere, ground: ground, torus: torus)
   var camera: Camera3d = defaultCamera3d()
   var light: Light3d = defaultLight3d()
 
-  var renderer: DeferredRenderer = createDeferredRenderer()
   let gs: Int = compileDeferred(renderer: renderer)
   if gs is not 0 {
     log("deferred graph invalid: {statusName(status: gs)}")

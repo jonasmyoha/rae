@@ -1,13 +1,6 @@
 /* gpu3d disabled-capability stubs — builds with WebGPU but without SDL3.
  * Mirrors runtime_gpu2d_stubs.c. Included by rae_runtime.c into one TU. */
 
-int64_t rae_ext_Gpu3d_meshCreate(const float* verts, int64_t vertCount,
-                                 const int64_t* indices, int64_t indexCount){
-    (void)verts; (void)vertCount; (void)indices; (void)indexCount; return 0;
-}
-void rae_ext_Gpu3d_meshUpdate(int64_t mesh, const float* verts, int64_t vertCount){
-    (void)mesh; (void)verts; (void)vertCount;
-}
 int rae_g3d_frame_prepare(const float* frame, int64_t count){ (void)frame; (void)count; return 0; }
 void* rae_g3d_hdr_view(void)      { return (void*)0; }
 void* rae_g3d_normal_view(void)   { return (void*)0; }
@@ -53,9 +46,6 @@ int rae_g3d_push_draw_record(int64_t mesh, rae_Mat4* model, rae_Mat4* prevModel,
     (void)metallic; (void)emR; (void)emG; (void)emB; (void)roughness;
     return -1;
 }
-void* rae_g3d_mesh_vbuf(int64_t mesh){ (void)mesh; return (void*)0; }
-void* rae_g3d_mesh_ibuf(int64_t mesh){ (void)mesh; return (void*)0; }
-int64_t rae_g3d_mesh_icount(int64_t mesh){ (void)mesh; return 0; }
 int rae_g3d_push_metaball_cluster(const float* packedBalls, int64_t count,
                                   const float* packedColors, float smoothing,
                                   float metallic, float roughness,

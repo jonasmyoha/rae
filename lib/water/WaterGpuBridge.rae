@@ -6,6 +6,7 @@
 # plain Rae over typed IDs. The unsafe blocks here carry the obligations the
 # gbuffer already guarantees: a frame resource stays valid until the targets
 # generation changes (re-adopted then), a mesh buffer until renderer shutdown.
+open MeshStore
 open Gbuffer
 open GbufferPasses
 open TransparentForward
@@ -75,26 +76,33 @@ func releaseFrameExternals(resources: mod GpuResources, frame: view WaterFrameEx
   releaseExternal(resources: resources, id: frame.litView)
 }
 
-# Adopts one gbuffer mesh's vertex + index buffers (u32 indices).
-func adoptMeshExternals(resources: mod GpuResources, mesh: view Int) ret WaterMeshExternals {
+# Adopts one renderer mesh's vertex + index buffers (u32 indices) into the
+# water manager: the buffers belong to the renderer's MeshStore (#905), the
+# water system BORROWS them as externals.
+func adoptMeshExternals(
+  resources: mod GpuResources
+  meshes: view MeshStore
+  meshResources: view GpuResources
+  mesh: view Int
+) ret WaterMeshExternals {
   var result: WaterMeshExternals = noMeshExternals()
   result.mesh = mesh
   var adopted: Int = 0
   unsafe {
-    result.indexCount = gbMeshIcount(mesh: mesh)
+    result.indexCount = meshStoreIndexCount(store: meshes, mesh: mesh)
     if result.indexCount <= 0 {
       ret noMeshExternals()
     }
     if let vertex: ExternalId = adoptExternalBuffer(
       resources: resources
-      handle: gbMeshVbuf(mesh: mesh)
+      handle: meshStoreVbufHandle(store: meshes, resources: meshResources, mesh: mesh)
     ) {
       result.vertex = vertex
       adopted = adopted + 1
     }
     if let index: ExternalId = adoptExternalBuffer(
       resources: resources
-      handle: gbMeshIbuf(mesh: mesh)
+      handle: meshStoreIbufHandle(store: meshes, resources: meshResources, mesh: mesh)
     ) {
       result.index = index
       adopted = adopted + 1

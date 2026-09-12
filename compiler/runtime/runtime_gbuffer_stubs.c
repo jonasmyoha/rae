@@ -56,10 +56,6 @@ void* rae_gb_draws_buffer(void)         { return (void*)0; }
 int64_t rae_gb_max_draws(void)          { return 0; }
 int64_t rae_gb_draw_count(void)         { return 0; }
 void rae_gb_advance_draws(int64_t count){ (void)count; }
-int64_t rae_gb_mesh_ready(int64_t mesh) { (void)mesh; return 0; }
-void* rae_gb_mesh_vbuf(int64_t mesh)    { (void)mesh; return (void*)0; }
-void* rae_gb_mesh_ibuf(int64_t mesh)    { (void)mesh; return (void*)0; }
-int64_t rae_gb_mesh_icount(int64_t mesh){ (void)mesh; return 0; }
 void* rae_gb_skin_palette(void)         { return (void*)0; }
 int64_t rae_gb_skin_palette_size(void)  { return 0; }
 int64_t rae_gb_skin_palette_ready(void) { return 0; }
@@ -151,7 +147,7 @@ void rae_sm_begin(const float* cascades, int64_t count, int64_t resolution,
     (void)cascades; (void)count; (void)resolution; (void)splits; (void)texelWorld;
     (void)depthRange;
 }
-void rae_sm_queue_mesh(int64_t mesh, rae_Mat4* model){ (void)mesh; (void)model; }
+void rae_sm_queue_mesh(int64_t mesh, void* vbuf, void* ibuf, int64_t icount, rae_Mat4* model){ (void)mesh; (void)vbuf; (void)ibuf; (void)icount; (void)model; }
 void rae_sm_queue_skinned(int64_t mesh, rae_Mat4* model, int64_t paletteBase){ (void)mesh; (void)model; (void)paletteBase; }
 void rae_sm_record_metaballs(const float* packedBalls, int64_t count, float smoothing){
     (void)packedBalls; (void)count; (void)smoothing;

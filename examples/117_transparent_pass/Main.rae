@@ -30,8 +30,13 @@ const alphaCubeCount: Int = 9
 
 const opaqueCubeCount: Int = 4
 
-func uploadMeshData(meshData: view MeshData) ret MeshHandle {
-  ret uploadMesh(verts: meshData.verts, vertCount: meshData.vertCount, indices: meshData.indices)
+func uploadMeshData(renderer: mod DeferredRenderer, meshData: view MeshData) ret MeshHandle {
+  ret uploadMesh(
+    renderer: renderer
+    verts: meshData.verts
+    vertCount: meshData.vertCount
+    indices: meshData.indices
+  )
 }
 
 # Ground plane + four opaque cubes: two in FRONT of the alpha row (they must
@@ -127,15 +132,16 @@ func main() ret Int {
 
   let boxData: MeshData = makeBox(size: 1.0)
   let planeData: MeshData = makePlane(size: 30.0, segments: 1)
-  let box: MeshHandle = uploadMeshData(meshData: boxData)
-  let ground: MeshHandle = uploadMeshData(meshData: planeData)
+  var renderer: DeferredRenderer = createDeferredRenderer()
+
+  let box: MeshHandle = uploadMeshData(renderer: renderer, meshData: boxData)
+  let ground: MeshHandle = uploadMeshData(renderer: renderer, meshData: planeData)
   var sceneWorld: World3d = buildScene(box: box, ground: ground)
   var camera: Camera3d = defaultCamera3d()
   camera.position = Vec3.create(x: 1.0, y: 0.0 - 13.0, z: 7.0)
   camera.target = Vec3.create(x: 0.0, y: 0.0, z: 1.5)
   let light: Light3d = defaultLight3d()
 
-  var renderer: DeferredRenderer = createDeferredRenderer()
   let graphStatus: Int = compileDeferred(renderer: renderer)
   if graphStatus is not 0 {
     log("deferred graph invalid: {statusName(status: graphStatus)}")

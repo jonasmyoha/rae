@@ -956,19 +956,7 @@ void rae_gb_advance_draws(int64_t count) {
     if (gb_draw_count + (int)count > GB_MAX_DRAWS) gb_draw_count = GB_MAX_DRAWS;
     else gb_draw_count += (int)count;
 }
-/* 1 if an instanced draw of `mesh` can proceed this frame (pass open, mesh slot
- * valid and its buffers uploaded), else 0 — Rae checks this rather than testing
- * opaque Ptr handles for null. */
-int64_t rae_gb_mesh_ready(int64_t mesh) {
-    int slot = (int)mesh - 1;
-    if (!gb_pass) return 0;
-    if (slot < 0 || slot >= g3d_mesh_n) return 0;
-    if (!g3d_mesh_vbuf[slot] || !g3d_mesh_ibuf[slot]) return 0;
-    return 1;
-}
-void* rae_gb_mesh_vbuf(int64_t mesh)  { int s=(int)mesh-1; return (s>=0 && s<g3d_mesh_n)?(void*)g3d_mesh_vbuf[s]:NULL; }
-void* rae_gb_mesh_ibuf(int64_t mesh)  { int s=(int)mesh-1; return (s>=0 && s<g3d_mesh_n)?(void*)g3d_mesh_ibuf[s]:NULL; }
-int64_t rae_gb_mesh_icount(int64_t mesh){ int s=(int)mesh-1; return (s>=0 && s<g3d_mesh_n)?(int64_t)g3d_mesh_icount[s]:0; }
+/* #905: rae_gb_mesh_* are gone — the Rae MeshStore owns the meshes. */
 
 /* Finish and submit the geometry pass. Uniform data uploads once here, not
  * per draw. */

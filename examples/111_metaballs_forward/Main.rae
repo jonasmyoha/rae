@@ -91,8 +91,13 @@ type DemoUiResource {
   appliedRevision: Int
 }
 
-func uploadMeshData(mesh: view MeshData) ret MeshHandle {
-  ret uploadMesh(verts: mesh.verts, vertCount: mesh.vertCount, indices: mesh.indices)
+func uploadMeshData(renderer: mod Renderer3d, mesh: view MeshData) ret MeshHandle {
+  ret uploadMesh(
+    renderer: renderer
+    verts: mesh.verts
+    vertCount: mesh.vertCount
+    indices: mesh.indices
+  )
 }
 
 func main() ret Int {
@@ -132,10 +137,12 @@ func main() ret Int {
   # three face normals). Scene 1 uses it for the voxel mountains and the
   # two spinning cubes.
   let boxData: MeshData = makeBox(size: 1.0)
-  let sphere: MeshHandle = uploadMeshData(mesh: sphereData)
-  let torus: MeshHandle = uploadMeshData(mesh: torusData)
-  let ground: MeshHandle = uploadMeshData(mesh: planeData)
-  let boxMesh: MeshHandle = uploadMeshData(mesh: boxData)
+  var renderer: Renderer3d = createRenderer3dWithUi()
+
+  let sphere: MeshHandle = uploadMeshData(renderer: renderer, mesh: sphereData)
+  let torus: MeshHandle = uploadMeshData(renderer: renderer, mesh: torusData)
+  let ground: MeshHandle = uploadMeshData(renderer: renderer, mesh: planeData)
+  let boxMesh: MeshHandle = uploadMeshData(renderer: renderer, mesh: boxData)
   # THIS EXAMPLE'S OWN assets. It pointed at 112's for a while, left over from
   # this example being created as a copy of it. Natively that still worked --
   # the path resolves from the repo root, 112 is right there, and the two asset
@@ -344,7 +351,6 @@ func main() ret Int {
     turbidity: skyTurbidity
     groundAlbedo: skyGroundAlbedo
   )
-  var renderer: Renderer3d = createRenderer3dWithUi()
   light.sunDir = settingsSunDir(settingsState: settings)
   light.sunColor = settingsSunColor(settingsState: settings)
   let gstatus: Int = compileRenderer(r: renderer)
@@ -707,15 +713,15 @@ func main() ret Int {
           # unshadowed, which is what a frame with no shadow pass should look
           # like, and needs no renderer flag.
           if settings.shadows and uiState.activeScene is 1 {
-            renderSceneShadowWorld(world: scene1.world)
+            renderSceneShadowWorldWith(r: renderer, world: scene1.world)
             renderSceneShadowSdfWorld(world: scene1.world)
           }
           if settings.shadows and uiState.activeScene is 2 {
-            renderSceneShadowWorld(world: scene2.world)
+            renderSceneShadowWorldWith(r: renderer, world: scene2.world)
             renderSceneShadowSdfWorld(world: scene2.world)
           }
           if settings.shadows and uiState.activeScene is 3 {
-            renderSceneShadowWorld(world: scene3.world)
+            renderSceneShadowWorldWith(r: renderer, world: scene3.world)
             renderSceneShadowSdfWorld(world: scene3.world)
           }
           endShadowPass()
@@ -748,15 +754,15 @@ func main() ret Int {
           # object at the far plane.
           drawSky(sky: sky, light: light)
           if uiState.activeScene is 1 {
-            renderSceneWorld(world: scene1.world)
+            renderSceneWorldWith(r: renderer, world: scene1.world)
             renderSceneSdfWorld(world: scene1.world)
           }
           if uiState.activeScene is 2 {
-            renderSceneWorld(world: scene2.world)
+            renderSceneWorldWith(r: renderer, world: scene2.world)
             renderSceneSdfWorld(world: scene2.world)
           }
           if uiState.activeScene is 3 {
-            renderSceneWorld(world: scene3.world)
+            renderSceneWorldWith(r: renderer, world: scene3.world)
             renderSceneSdfWorld(world: scene3.world)
           }
         }

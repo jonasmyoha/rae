@@ -11,6 +11,7 @@
 # First user is the game's water splashes (#84), but nothing here is game-specific:
 # `particleEmit` / `particleBurst` take a colour + spread, so any effect (dust, sparks,
 # embers) is just a different emit call.
+import RendererDeferred
 import Vec3
 import Math
 open Mesh3d
@@ -40,9 +41,15 @@ type ParticleSystem {
   cap: Int
 }
 
-func createParticleSystem(cap: copy Int, gravity: copy Float) pub ret ParticleSystem {
+# The particle box mesh is uploaded into the RENDERER's mesh store (#905).
+func createParticleSystem(
+  renderer: mod DeferredRenderer
+  cap: copy Int
+  gravity: copy Float
+) pub ret ParticleSystem {
   let box: MeshData = makeBox(size: 1.0)
-  let mesh: MeshHandle = uploadMesh(
+  let mesh: MeshHandle = RendererDeferred.uploadMesh(
+    renderer: renderer
     verts: box.verts
     vertCount: box.vertCount
     indices: box.indices
