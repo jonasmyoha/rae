@@ -47,6 +47,9 @@ open GbufferUnderwater
 open GbufferTargets
 open RendererDeferredGraph
 open Sky
+open Shadow3d
+open ShadowMaps
+open ShadowMapsSdf
 open gpu/GpuResources
 open gpu/GpuLifetime
 open Gpu2dCanvas
@@ -138,6 +141,7 @@ type RenderPasses {
   transparent: TransparentPassCache
   underwater: UnderwaterPassCache
   targets: DeferredTargets  # #923: the post-pass targets, uniforms, pipelines + frame state
+  shadow: ShadowCache  # #925: the sun cascades — targets, pipelines, caster queue, passes
 }
 
 func createRenderPasses() ret RenderPasses {
@@ -153,16 +157,18 @@ func createRenderPasses() ret RenderPasses {
       transparent: createTransparentPassCache(capacity: 256)
       underwater: createUnderwaterPassCache()
       targets: createDeferredTargets()
+      shadow: createShadowCache()
     }
   }
 }
 
-# The manager slot budget: per targets generation the post-passes adopt ~40
-# C-owned inputs (views, uniforms, the shadow sampler, the C pipelines) plus
-# their bind groups; the geometry frame adds its 4 targets + views, 2 buffers
-# and a few in-flight submissions (#906); retired slots are reused, so 160
-# leaves headroom for the shadow / SDF objects of the next slices.
-const deferredManagerCapacity: Int = 160
+# The manager slot budget: the post-pass targets + views, uniforms, pipelines
+# and binds (~40), the geometry frame's 4 targets + views, 2 buffers, the SDF
+# clusters' buffers + binds (~30), the shadow cascades' texture, 5 views,
+# sampler, 3 pipelines, 8 uniforms + queue buffers, 8 caster binds and up to
+# 8 x 4 metaball uniform + bind slots (~90), plus a few in-flight submissions;
+# retired slots are reused, so 256 leaves headroom.
+const deferredManagerCapacity: Int = 256
 
 func ensureRendererResources(renderer: mod DeferredRenderer) pub {
   if let existing: view GpuResources => renderer.gpuResources {
@@ -238,23 +244,99 @@ func uploadPalette(
   }
 }
 
-# A skinned shadow caster from this renderer's SkinStore: queued by its buffer
-# handles + the palette handle (borrowed by the C shadow pass for this frame),
-# `paletteBase` its start row in the palette (characterPaletteBase, #547).
+# ----- the shadow pass (#925) ------------------------------------------
+# The sun cascades are the renderer's ShadowCache (RenderPasses.shadow); the
+# app fits the cascades (Shadow3d.fitShadowCascades) and, at RenderTag.shadow,
+# opens the pass, queues its casters and closes it. Everything queued between
+# beginShadowPass and endShadowPass casts.
+func beginShadowPass(renderer: mod DeferredRenderer, c: view ShadowCascades) pub {
+  ensureRendererResources(renderer: renderer)
+  if let resources: mod GpuResources => renderer.gpuResources {
+    shadowBegin(shadow: renderer.passes.shadow, resources: resources, cascades: c)
+  }
+}
+
+func endShadowPass(renderer: mod DeferredRenderer) pub {
+  if let resources: mod GpuResources => renderer.gpuResources {
+    shadowEnd(shadow: renderer.passes.shadow, resources: resources)
+  }
+}
+
+# How many casters the last shadow pass rasterised (#388: only a count tells
+# a working pass from a dead one).
+func shadowCasterCount(renderer: view DeferredRenderer) pub ret Int {
+  ret ShadowMaps.shadowCasterCount(shadow: renderer.passes.shadow)
+}
+
+# Per-app cast-shadow ambient darkening [0..1] (shadowCfg.z; 0 = off).
+func setShadowAmbient(renderer: mod DeferredRenderer, strength: copy Float) pub {
+  ShadowMaps.setShadowAmbient(shadow: renderer.passes.shadow, strength: strength)
+}
+
+# Every visible mesh of a World3d as a static caster, resolved in this
+# renderer's MeshStore.
+func renderSceneShadowWorldWith(renderer: mod DeferredRenderer, world: view World3d) pub {
+  if let resources: view GpuResources => renderer.gpuResources {
+    Gpu3d.renderSceneShadowWorld(
+      shadow: renderer.passes.shadow
+      meshes: renderer.passes.gbuffer.meshes
+      resources: resources
+      world: world
+    )
+  }
+}
+
+# One static caster from this renderer's MeshStore.
+func drawShadowCasterWith(
+  renderer: mod DeferredRenderer
+  mesh: view MeshHandle
+  model: view Mat4
+) pub {
+  if let resources: view GpuResources => renderer.gpuResources {
+    drawShadowCaster(
+      shadow: renderer.passes.shadow
+      meshes: renderer.passes.gbuffer.meshes
+      resources: resources
+      mesh: mesh
+      model: model
+    )
+  }
+}
+
+# A skinned shadow caster from this renderer's SkinStore; `paletteBase` is its
+# start row in the palette (characterPaletteBase, #547).
 func drawShadowCasterSkinnedWith(
   renderer: mod DeferredRenderer
   mesh: view MeshHandle
   model: view Mat4
   paletteBase: copy Int
 ) pub {
-  ensureRendererResources(renderer: renderer)
   if let resources: view GpuResources => renderer.gpuResources {
-    Gpu3d.drawShadowCasterSkinned(
+    drawShadowCasterSkinned(
+      shadow: renderer.passes.shadow
       skins: renderer.passes.gbuffer.skins
       resources: resources
       mesh: mesh
       model: model
       paletteBase: paletteBase
+    )
+  }
+}
+
+# A metaball cluster as a caster (`packedBalls`: count x (x, y, z, radius)).
+func shadowMetaballsWith(
+  renderer: mod DeferredRenderer
+  packedBalls: view List(Float)
+  count: copy Int
+  smoothing: copy Float
+) pub {
+  if let resources: mod GpuResources => renderer.gpuResources {
+    shadowMetaballs(
+      shadow: renderer.passes.shadow
+      resources: resources
+      packedBalls: packedBalls
+      count: count
+      smoothing: smoothing
     )
   }
 }
@@ -297,6 +379,7 @@ func shutdownDeferredRenderer(renderer: mod DeferredRenderer) pub {
     transparentShutdown(cache: renderer.passes.transparent, resources: resources)
     underwaterShutdown(cache: renderer.passes.underwater, resources: resources)
     deferredTargetsShutdown(targets: renderer.passes.targets, resources: resources)
+    shadowShutdown(shadow: renderer.passes.shadow, resources: resources)
     gbufferShutdown(cache: renderer.passes.gbuffer, resources: resources)
     terrainShutdown(cache: renderer.passes.gbuffer, resources: resources)
     meshStoreShutdown(store: renderer.passes.gbuffer.meshes, resources: resources)
@@ -496,6 +579,7 @@ func renderDeferredPassWith(
       resources: resources
       targets: renderer.passes.targets
       gbuffer: renderer.passes.gbuffer
+      shadow: renderer.passes.shadow
       camera: camera
       light: light
       sky: sky

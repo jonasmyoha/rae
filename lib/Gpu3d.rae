@@ -43,9 +43,7 @@
 # Additional draws are safely discarded and emit one renderer-lifetime error
 # instead of failing silently. `RAE_GPU3D_DRAW_LIMIT=N` can lower the effective
 # limit for diagnostics/tests, but cannot raise the hard capacity.
-open Shadow3d
-# The sun cascade shadow render moved to Rae (#504); endShadowPass calls it.
-import GbufferShadow
+open ShadowMaps  # #925: the shadow casters queue on the renderer's ShadowCache
 # The sky the forward background draws (#418). sky.rae does not import this,
 # so the dependency runs one way only.
 open Sky
@@ -503,6 +501,7 @@ func drawInstance(
 # World3d, reading each mesh entity's Transform3d through ECS queries. Lifted
 # from 112/114's open-coded renderMeshShadow (#736) into shared lib.
 func renderSceneShadowWorld(
+  shadow: mod ShadowCache
   meshes: view MeshStore
   resources: view GpuResources
   world: view World3d
@@ -513,6 +512,7 @@ func renderSceneShadowWorld(
     if renderer.visible {
       let t: Transform3d = componentGet(this: world.transforms, entity: entity)
       drawShadowCaster(
+        shadow: shadow
         meshes: meshes
         resources: resources
         mesh: renderer.mesh
@@ -739,89 +739,9 @@ func updateMeshVerts(
   )
 }
 
-func shadowMetaballs(packedBalls: view Buffer(Float), count: copy Int, smoothing: copy Float) {
-  unsafe {
-    nativeShadowMetaballs(packedBalls: packedBalls, count: count, smoothing: smoothing)
-  }
-}
-
-# Open the shadow pass for a fitted cascade set. Everything drawn between
-# this and `endShadowPass` casts.
-func beginShadowPass(c: view ShadowCascades) pub {
-  unsafe {
-    shadowBegin(
-      cascades: c.viewProj.data
-      count: c.count
-      resolution: c.resolution
-      splits: c.splitFar.data
-      texelWorld: c.texelWorld.data
-      depthRange: c.depthRange.data
-    )
-  }
-}
-
-# The shadow queue is C (rae_sm_*, #906); a static caster is queued by its
-# buffer handles, borrowed from the store for the pass (#905).
-func drawShadowCaster(
-  meshes: view MeshStore
-  resources: view GpuResources
-  mesh: view MeshHandle
-  model: view Mat4
-) pub {
-  if not meshHandleIsValid(h: mesh) {
-    ret
-  }
-  unsafe {
-    shadowDraw(
-      mesh: mesh.id
-      vbuf: meshStoreVbufHandle(store: meshes, resources: resources, mesh: mesh.id)
-      ibuf: meshStoreIbufHandle(store: meshes, resources: resources, mesh: mesh.id)
-      icount: meshStoreIndexCount(store: meshes, mesh: mesh.id)
-      model: model
-    )
-  }
-}
-
-# `paletteBase` is this caster's start offset into the shared skin palette buffer
-# (characterPaletteBase in gbufferInstanced.rae) — the SAME base its G-buffer
-# instance uses — so its shadow shows its own pose (#547). 0 for a lone character.
-# #921: the caster is queued by its SkinStore buffer handles + the palette
-# handle, all borrowed by the C shadow pass for this frame.
-func drawShadowCasterSkinned(
-  skins: view SkinStore
-  resources: view GpuResources
-  mesh: view MeshHandle
-  model: view Mat4
-  paletteBase: copy Int
-) pub {
-  if not meshHandleIsValid(h: mesh) {
-    ret
-  }
-  unsafe {
-    shadowDrawSkinned(
-      mesh: mesh.id
-      vbuf: skinStoreVbufHandle(store: skins, resources: resources, mesh: mesh.id)
-      ibuf: skinStoreIbufHandle(store: skins, resources: resources, mesh: mesh.id)
-      icount: skinStoreIndexCount(store: skins, mesh: mesh.id)
-      palette: skinStorePaletteHandle(store: skins, resources: resources)
-      model: model
-      paletteBase: paletteBase
-    )
-  }
-}
-
-func endShadowPass() pub {
-  GbufferShadow.shadowEnd()
-}
-
-# How many casters the shadow pass rasterised. Exposed because a shadow
-# pass that draws NOTHING still produces a lit, non-blank frame — so a
-# screenshot check cannot tell a working pass from a dead one, and only a
-# count can (#388).
-func shadowCasterCount() pub ret Int {
-  ret shadowDrawCount()
-}
-
+# The shadow pass itself — beginShadowPass / endShadowPass / the caster queue /
+# the metaball casters — is the renderer's ShadowCache (lib/ShadowMaps.rae,
+# #925); the renderers wrap it (Renderer3d / RendererDeferred).
 func skinShutdown() {
   unsafe {
     nativeSkinShutdown()

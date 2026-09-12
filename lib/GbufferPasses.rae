@@ -6,8 +6,8 @@
 # gpu/GpuResources manager, threaded in as `resources`; since #923 the pass
 # TARGETS, uniforms and pipelines are the renderer's DeferredTargets
 # (GbufferTargets.rae) and the G-buffer views the GbufferCache's, so the binds
-# name IDs — only the lighting pass still ADOPTS the three shadow inputs (C
-# until #925), per targets generation. The pass is opened in Rae over the
+# name IDs, the shadow inputs the renderer's ShadowCache's (#925), rebuilt at
+# the targets' or the cascades' generation. The pass is opened in Rae over the
 # bindings and submitted on the shared queue (gbSubmit) so graph order is
 # preserved; the draw is recorded from the IDs.
 import String
@@ -28,6 +28,7 @@ open GbufferTargets
 open gpu/GpuTextures
 open GbufferPassesNative
 open GbufferFullscreen
+open ShadowMaps
 
 # Presentable target + resize generation (also declared in gbuffer_inspector;
 # these bind the same C symbols).
@@ -51,8 +52,8 @@ type FullscreenPass {
 # state a deferred renderer owns, so they live in RenderPasses, threaded from
 # DeferredRenderer through renderDeferredPassWorld. #904/#923: each holds its
 # manager IDs — the pass's own objects and the bind groups (rebuilt at
-# `bindGen`, the targets generation they were built at); the lighting cache
-# also holds the adopted C shadow inputs of that generation.
+# `bindGen`, the targets generation they were built at; the lighting bind also
+# at `shadowGen`, the shadow cascades' generation).
 type CompositePassCache {
   pipeMade: Bool
   pipeline: RenderPipelineId
@@ -72,8 +73,8 @@ type AoPassCache {
 
 type LightPassCache {
   bindGroup: BindGroupId
-  adopted: List(ExternalId)  # the C shadow inputs (frame uniform, array view, sampler)
   bindGen: Int
+  shadowGen: Int  # the ShadowCache targets generation the bind samples
 }
 
 type TaaPassCache {
@@ -372,14 +373,17 @@ func ssaoPass(
   }
 }
 
-# Low-level lighting: upload the uniform, build the bind (rebuilt on resize)
-# and run the fullscreen pass into the lit target. The whole G-buffer + AO +
-# the shadow cascades (adopted, C until #925) are read once per pixel.
+# Low-level lighting: upload the uniform, build the bind (rebuilt on resize
+# and when the shadow cascades are recreated) and run the fullscreen pass into
+# the lit target. The whole G-buffer + AO + the shadow cascades (the
+# renderer's ShadowCache, #925 — its default targets when no shadow pass ran)
+# are read once per pixel.
 func lighting(
   cache: mod LightPassCache
   resources: mod GpuResources
   targets: mod DeferredTargets
   gbuffer: view GbufferCache
+  shadow: mod ShadowCache
   camera: view Camera3d
   exposure: copy Float
   sunDir: view Vec3
@@ -417,12 +421,16 @@ func lighting(
     horizon: horizon
     discIntensity: discIntensity
   )
+  ensureShadowDefaults(shadow: shadow, resources: resources)
+  if not shadowTargetsReady(shadow: shadow, resources: resources) {
+    ret
+  }
   let gen: Int = targets.gen
-  if not (gen is cache.bindGen) {
+  if not (gen is cache.bindGen) or not (shadow.gen is cache.shadowGen) {
     cache.bindGen = gen
+    cache.shadowGen = shadow.gen
     retireBindGroup(resources: resources, id: cache.bindGroup)
     cache.bindGroup = noBindGroupId()
-    releaseExternalIds(resources: resources, list: cache.adopted)
   }
   if not bindGroupIsUsable(resources: resources, id: cache.bindGroup) {
     let entries: List(ResourceRef) = List.create(ResourceRef, cap: 9)
@@ -432,40 +440,15 @@ func lighting(
     entries.add(value: gbufferTargetRef(cache: gbuffer, index: gbufferTargetC))
     entries.add(value: gbufferTargetRef(cache: gbuffer, index: gbufferTargetDepth))
     entries.add(value: textureViewRef(id: targets.aoView))
-    unsafe {
-      entries.add(
-        value: adoptBufferRef(
-          resources: resources
-          adopted: cache.adopted
-          handle: gbShadowFrameUbuf()
-        )
-      )
-      entries.add(
-        value: adoptTextureViewRef(
-          resources: resources
-          adopted: cache.adopted
-          handle: gbShadowArrayView()
-        )
-      )
-      entries.add(
-        value: adoptSamplerRef(
-          resources: resources
-          adopted: cache.adopted
-          handle: gbShadowSampler()
-        )
-      )
-    }
-    var made: Bool = false
+    entries.add(value: bufferRef(id: shadow.frameUniform))
+    entries.add(value: textureViewRef(id: shadow.arrayView))
+    entries.add(value: samplerRef(id: shadow.sampler))
     if let bind: BindGroupId = createRenderBindGroup(
       resources: resources
       pipeline: targets.lightPipeline
       entries: entries
     ) {
       cache.bindGroup = bind
-      made = true
-    }
-    if not made {
-      releaseExternalIds(resources: resources, list: cache.adopted)
     }
   }
   unsafe {
@@ -484,6 +467,7 @@ func lightingPassSky(
   resources: mod GpuResources
   targets: mod DeferredTargets
   gbuffer: view GbufferCache
+  shadow: mod ShadowCache
   camera: view Camera3d
   light: view Light3d
   sky: view Sky
@@ -505,6 +489,7 @@ func lightingPassSky(
     resources: resources
     targets: targets
     gbuffer: gbuffer
+    shadow: shadow
     camera: camera
     exposure: light.exposure
     sunDir: light.sunDir
@@ -528,6 +513,7 @@ func lightingPass(
   resources: mod GpuResources
   targets: mod DeferredTargets
   gbuffer: view GbufferCache
+  shadow: mod ShadowCache
   camera: view Camera3d
   light: view Light3d
 ) pub {
@@ -537,6 +523,7 @@ func lightingPass(
     resources: resources
     targets: targets
     gbuffer: gbuffer
+    shadow: shadow
     camera: camera
     exposure: light.exposure
     sunDir: light.sunDir
@@ -669,8 +656,8 @@ func buildDepthPyramid(
 }
 
 # Retire every manager object the post-passes hold (renderer shutdown): the
-# bind groups first (dropping their pins), then the lighting's adopted shadow
-# inputs, then the composite / ssao objects. The targets, uniforms and
+# bind groups first (dropping their pins), then the composite / ssao objects. The targets, uniforms
+# and
 # pipelines are the DeferredTargets' (deferredTargetsShutdown).
 func postPassesShutdown(
   composite: mod CompositePassCache
@@ -689,7 +676,6 @@ func postPassesShutdown(
   retireRenderPipeline(resources: resources, id: ao.pipeline)
   ao = createAoPassCache()
   retireBindGroup(resources: resources, id: light.bindGroup)
-  releaseExternalIds(resources: resources, list: light.adopted)
   light = createLightPassCache()
   retireBindGroupIds(resources: resources, list: taa.binds)
   taa = createTaaPassCache()

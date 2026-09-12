@@ -544,14 +544,7 @@ func drawTerrainGround(
 }
 
 func castKind(renderer: mod DeferredRenderer, mesh: view MeshHandle, model: view Mat4) {
-  if let resources: view GpuResources => renderer.gpuResources {
-    drawShadowCaster(
-      meshes: renderer.passes.gbuffer.meshes
-      resources: resources
-      mesh: mesh
-      model: model
-    )
-  }
+  RendererDeferred.drawShadowCasterWith(renderer: renderer, mesh: mesh, model: model)
 }
 
 func drawTerrainPropsShadow(

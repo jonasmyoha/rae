@@ -100,7 +100,7 @@ func renderShadowPass(
     jointCount: jointCount(sk: characterSystem.skeleton)
   )
   if inputSystem.settings.shadows {
-    beginShadowPass(c: cascades)
+    beginShadowPass(renderer: renderSystem.renderer, c: cascades)
     drawTerrainPropsShadow(
       renderer: renderSystem.renderer
       terrainSystem: terrainSystem
@@ -136,11 +136,11 @@ func renderShadowPass(
         }
       }
     }
-    endShadowPass()
+    endShadowPass(renderer: renderSystem.renderer)
   }
   if renderSystem.shadowLogged is false {
     log(
-      "[shadow] casters {shadowCasterCount()}, {cascades.count} cascades at {cascades.resolution}"
+      "[shadow] casters {shadowCasterCount(renderer: renderSystem.renderer)}, {cascades.count} cascades at {cascades.resolution}"
     )
     renderSystem.shadowLogged = true
   }

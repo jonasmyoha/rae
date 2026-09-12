@@ -1,0 +1,158 @@
+# gpu/GpuRenderDepth — DEPTH-ONLY render pipelines on the manager (#925): a
+# pipeline with no colour target, for a shadow-map pass that writes a depth
+# attachment and nothing else. gpu/GpuRender.createRenderPipeline requires at
+# least one colour format (a fragment stage with targets); this one has either
+# NO fragment stage at all (the rasteriser writes the interpolated depth — the
+# static / skinned cascade casters) or a fragment entry with ZERO targets that
+# writes frag_depth itself (the metaball raymarch). Adds the rasteriser depth
+# bias (constant + slope-scaled) shadow acne wants and the caller's cull mode
+# (front-face culling for casters). Same slot table, validation and retire as
+# every other render pipeline (retireRenderPipeline).
+open webgpu/Context
+open webgpu/Webgpu
+open webgpu/WebgpuEnums
+open webgpu/WebgpuTypes
+open gpu/GpuResources
+open gpu/GpuRender
+
+type DepthPipelineSpec {
+  vertexStride: Int
+  attributes: List(VertexAttributeSpec)  # empty = no vertex buffer (vertex_index geometry)
+  fragmentEntry: String  # "" = no fragment stage (depth from the rasteriser)
+  depthFormat: Int32
+  cullMode: Int32
+  depthBias: Int
+  depthBiasSlopeScale: Float
+}
+
+func createDepthPipeline(
+  resources: mod GpuResources
+  wgsl: view String
+  vertexEntry: view String
+  spec: view DepthPipelineSpec
+) ret opt RenderPipelineId {
+  if wgsl.length() is 0 or vertexEntry.length() is 0 {
+    ret none
+  }
+  if spec.attributes.length > 0 and spec.vertexStride < 1 {
+    ret none
+  }
+  if spec.depthFormat is (0 as Int32) {
+    ret none
+  }
+  let slot: Int = findFreeSlot(table: resources.renderPipelines, capacity: resources.capacity)
+  if slot < 0 {
+    ret none
+  }
+  unsafe {
+    let sourceC: Buffer(Any) = wgsl.toCStr()
+    var sourceList: List(WGPUShaderSourceWGSL) = List.create(WGPUShaderSourceWGSL, cap: 1)
+    sourceList.add(
+      value: {
+        chain: { sType: WGPUSType_ShaderSourceWGSL }
+        code: { data: sourceC, length: WGPU_STRLEN }
+      }
+    )
+    let moduleDescriptor: WGPUShaderModuleDescriptor = { nextInChain: sourceList.data }
+    let shaderModule: Ptr = wgpuDeviceCreateShaderModule(
+      device: webgpuDevice()
+      descriptor: moduleDescriptor
+    )
+    if shaderModule is webgpuNull() {
+      ret none
+    }
+    var attributes: List(WGPUVertexAttribute) = List.create(
+      WGPUVertexAttribute
+      cap: spec.attributes.length
+    )
+    loop var i: Int = 0, i < spec.attributes.length, ++i {
+      if let attribute: VertexAttributeSpec = spec.attributes.copyAt(index: i) {
+        attributes.add(
+          value: {
+            format: attribute.format
+            offset: attribute.offset as UInt64
+            shaderLocation: attribute.location as UInt32
+          }
+        )
+      }
+    }
+    var layouts: List(WGPUVertexBufferLayout) = List.create(WGPUVertexBufferLayout, cap: 1)
+    var bufferCount: Int = 0
+    if attributes.length > 0 {
+      layouts.add(
+        value: {
+          stepMode: WGPUVertexStepMode_Vertex
+          arrayStride: spec.vertexStride as UInt64
+          attributeCount: attributes.length as UInt64
+          attributes: attributes.data
+        }
+      )
+      bufferCount = 1
+    }
+    let vertexC: Buffer(Any) = vertexEntry.toCStr()
+    let fragmentC: Buffer(Any) = spec.fragmentEntry.toCStr()
+    var fragments: List(WGPUFragmentState) = List.create(WGPUFragmentState, cap: 1)
+    var fragmentData: Ptr = webgpuNull()
+    if spec.fragmentEntry.length() > 0 {
+      fragments.add(
+        value: {
+          module: shaderModule
+          entryPoint: { data: fragmentC, length: WGPU_STRLEN }
+          targetCount: 0 as UInt64
+          targets: webgpuNull()
+        }
+      )
+      fragmentData = fragments.data
+    }
+    var depths: List(WGPUDepthStencilState) = List.create(WGPUDepthStencilState, cap: 1)
+    depths.add(value: {
+      format: spec.depthFormat
+      depthWriteEnabled: WGPUOptionalBool_True
+      depthCompare: WGPUCompareFunction_Less
+      stencilFront: {
+        compare: WGPUCompareFunction_Always
+        failOp: WGPUStencilOperation_Keep
+        depthFailOp: WGPUStencilOperation_Keep
+        passOp: WGPUStencilOperation_Keep
+      }
+      stencilBack: {
+        compare: WGPUCompareFunction_Always
+        failOp: WGPUStencilOperation_Keep
+        depthFailOp: WGPUStencilOperation_Keep
+        passOp: WGPUStencilOperation_Keep
+      }
+      stencilReadMask: 4294967295 as UInt32
+      stencilWriteMask: 4294967295 as UInt32
+      depthBias: spec.depthBias as Int32
+      depthBiasSlopeScale: spec.depthBiasSlopeScale as Float32
+      depthBiasClamp: 0.0 as Float32
+    })
+    let descriptor: WGPURenderPipelineDescriptor = {
+      vertex: {
+        module: shaderModule
+        entryPoint: { data: vertexC, length: WGPU_STRLEN }
+        bufferCount: bufferCount as UInt64
+        buffers: layouts.data
+      }
+      primitive: {
+        topology: WGPUPrimitiveTopology_TriangleList
+        frontFace: WGPUFrontFace_CCW
+        cullMode: spec.cullMode
+      }
+      depthStencil: depths.data
+      multisample: { count: 1 as UInt32, mask: 4294967295 as UInt32 }
+      fragment: fragmentData
+    }
+    let handle: Ptr = wgpuDeviceCreateRenderPipeline(device: webgpuDevice(), descriptor: descriptor)
+    wgpuShaderModuleRelease(shaderModule: shaderModule)
+    if handle is webgpuNull() {
+      ret none
+    }
+    storeHandle(table: resources.renderPipelines, slot: slot, handle: handle)
+  }
+  ret RenderPipelineId {
+    managerTag: resources.managerTag
+    slot: slot
+    generation: slotGeneration(table: resources.renderPipelines, slot: slot)
+  }
+}
