@@ -59,127 +59,12 @@ open ecs/ComponentTable
 # the same way gbuffer.rae builds the deferred geometry pass.
 open webgpu/Webgpu
 open webgpu/Context
+open Gpu3dNative
+open Gpu3dSky
 
 # ----- raw C ABI (implementation detail; prefer the typed API below) ---
-func nativeMeshCreate(verts: view Buffer(Float), vertCount: Int, indices: view Buffer(Int), indexCount: Int) unsafe extern("rae_ext_Gpu3d_meshCreate") ret Int
-func meshCreate(verts: view Buffer(Float), vertCount: copy Int, indices: view Buffer(Int), indexCount: copy Int) ret Int {
-  unsafe { ret nativeMeshCreate(verts: verts, vertCount: vertCount, indices: indices, indexCount: indexCount) }
-}
-func nativeMeshUpdate(mesh: Int, verts: view Buffer(Float), vertCount: Int) unsafe extern("rae_ext_Gpu3d_meshUpdate")
-func meshUpdate(mesh: copy Int, verts: view Buffer(Float), vertCount: copy Int) {
-  unsafe { nativeMeshUpdate(mesh: mesh, verts: verts, vertCount: vertCount) }
-}
-# Frame prepare (#514): C packs+uploads the per-frame uniform and returns 1 when
-# the device/targets are ready; the render pass is then built in Rae below.
-func nativeG3dFramePrepare(frame: view Buffer(Float), count: Int) unsafe extern("rae_g3d_frame_prepare") ret Int
-func g3dFramePrepare(frame: view Buffer(Float), count: copy Int) ret Int {
-  unsafe { ret nativeG3dFramePrepare(frame: frame, count: count) }
-}
-# Forward target-view + pipeline handle accessors (ungated platform ABI,
-# mirroring the deferred rae_gb_* accessors).
-func g3dHdrView() unsafe extern("rae_g3d_hdr_view") ret Ptr
-func g3dNormalView() unsafe extern("rae_g3d_normal_view") ret Ptr
-func g3dVelocityView() unsafe extern("rae_g3d_velocity_view") ret Ptr
-func g3dAmbientView() unsafe extern("rae_g3d_ambient_view") ret Ptr
-func g3dDepthView() unsafe extern("rae_g3d_depth_view") ret Ptr
-func g3dPipeline() unsafe extern("rae_g3d_pipeline") ret Ptr
-func g3dBind() unsafe extern("rae_g3d_bind") ret Ptr
-# Hand the Rae-built encoder + render pass back to C so the still-C end/submit
-# path (and metaballs/skinned draws) encode into them.
-func g3dSetFrame(enc: Ptr, pass: Ptr) unsafe extern("rae_g3d_set_frame")
-# Forward mesh draw (#514): C does the shared CPU bookkeeping (validate mesh +
-# draw limit, pack the 40-float record, return the firstInstance slot or -1);
-# Rae encodes the instanced DrawIndexed below.
-func nativeG3dPushDrawRecord(mesh: Int, model: view Mat4, prevModel: view Mat4, r: Float, g: Float, b: Float, metallic: Float, emR: Float, emG: Float, emB: Float, roughness: Float) unsafe extern("rae_g3d_push_draw_record") ret Int
-func g3dPushDrawRecord(mesh: copy Int, model: view Mat4, prevModel: view Mat4, r: copy Float, g: copy Float, b: copy Float, metallic: copy Float, emR: copy Float, emG: copy Float, emB: copy Float, roughness: copy Float) ret Int {
-  unsafe { ret nativeG3dPushDrawRecord(mesh: mesh, model: model, prevModel: prevModel, r: r, g: g, b: b, metallic: metallic, emR: emR, emG: emG, emB: emB, roughness: roughness) }
-}
-func g3dMeshVbuf(mesh: Int) unsafe extern("rae_g3d_mesh_vbuf") ret Ptr
-func g3dMeshIbuf(mesh: Int) unsafe extern("rae_g3d_mesh_ibuf") ret Ptr
-func nativeG3dMeshIcount(mesh: Int) unsafe extern("rae_g3d_mesh_icount") ret Int
-func g3dMeshIcount(mesh: copy Int) ret Int {
-  unsafe { ret nativeG3dMeshIcount(mesh: mesh) }
-}
-# The current scene pass (set by beginForward via g3dSetFrame). draw() reads it
-# to encode; the still-C end/submit/skinned path reads the same global.
-func g3dPass() unsafe extern("rae_g3d_pass") ret Ptr
-# Metaball cluster (#514): C ensures the SDF pipeline, takes a per-frame group
-# slot, packs+uploads the balls/colors/params, and returns the slot (or -1);
-# Rae encodes the SDF fullscreen draw and restores the geometry pipeline/bind.
-func nativeG3dPushMetaballCluster(packedBalls: view Buffer(Float), count: Int, packedColors: view Buffer(Float), smoothing: Float, metallic: Float, roughness: Float, emR: Float, emG: Float, emB: Float) unsafe extern("rae_g3d_push_metaball_cluster") ret Int
-func g3dPushMetaballCluster(packedBalls: view Buffer(Float), count: copy Int, packedColors: view Buffer(Float), smoothing: copy Float, metallic: copy Float, roughness: copy Float, emR: copy Float, emG: copy Float, emB: copy Float) ret Int {
-  unsafe { ret nativeG3dPushMetaballCluster(packedBalls: packedBalls, count: count, packedColors: packedColors, smoothing: smoothing, metallic: metallic, roughness: roughness, emR: emR, emG: emG, emB: emB) }
-}
-func g3dSdfPipeline() unsafe extern("rae_g3d_sdf_pipeline") ret Ptr
-func g3dSdfBind(slot: Int) unsafe extern("rae_g3d_sdf_bind") ret Ptr
-# Scene-pass finish primitives (#514): Rae ends the pass + finishes the command
-# buffer over the bindings; g3dSubmitCmd is the one thin C call (Rae cannot yet
-# take the address of a single handle for wgpuQueueSubmit).
-func g3dEncoder() unsafe extern("rae_g3d_encoder") ret Ptr
-func nativeG3dFrameActive() unsafe extern("rae_g3d_frame_active") ret Int
-func g3dFrameActive() ret Int {
-  unsafe { ret nativeG3dFrameActive() }
-}
-func nativeG3dClearFrame() unsafe extern("rae_g3d_clear_frame")
-func g3dClearFrame() {
-  unsafe { nativeG3dClearFrame() }
-}
-func g3dSubmitCmd(cmd: Ptr) unsafe extern("rae_g3d_submit_cmd")
 # The LDR offscreen the window presents (shared with the deferred/2D path).
 func g2dOffView() unsafe extern("rae_g2d_off_view") ret Ptr
-# Tonemap (#514): C ensures the pipeline/bind and returns the source slot (the
-# TAA slot when TAA is on), or -1; Rae encodes the fullscreen resolve into the
-# offscreen. present-frame advances the virtual clock + copies to the drawable.
-func nativeG3dTonemapPrepare() unsafe extern("rae_g3d_tonemap_prepare") ret Int
-func g3dTonemapPrepare() ret Int {
-  unsafe { ret nativeG3dTonemapPrepare() }
-}
-func g3dTonemapPipeline() unsafe extern("rae_g3d_tonemap_pipeline") ret Ptr
-func g3dTonemapBind(slot: Int) unsafe extern("rae_g3d_tonemap_bind") ret Ptr
-func nativeG3dTonemapPending() unsafe extern("rae_g3d_tonemap_pending") ret Int
-func g3dTonemapPending() ret Int {
-  unsafe { ret nativeG3dTonemapPending() }
-}
-func nativeG3dPresentFrame() unsafe extern("rae_g3d_present_frame")
-func g3dPresentFrame() {
-  unsafe { nativeG3dPresentFrame() }
-}
-# TAA (#514): C ensures the pipeline/bind, uploads the blend params, flips
-# history-valid and returns the current history slot (or -1); Rae encodes the
-# fullscreen resolve into taa_view[cur].
-func nativeG3dTaaPrepare() unsafe extern("rae_g3d_taa_prepare") ret Int
-func g3dTaaPrepare() ret Int {
-  unsafe { ret nativeG3dTaaPrepare() }
-}
-func g3dTaaPipeline() unsafe extern("rae_g3d_taa_pipeline") ret Ptr
-func g3dTaaBind(slot: Int) unsafe extern("rae_g3d_taa_bind") ret Ptr
-func g3dTaaView(slot: Int) unsafe extern("rae_g3d_taa_view") ret Ptr
-# SSAO (#514): C ensures the pipelines/binds/targets + uploads the params
-# (returns 1 to proceed, 0 to skip); Rae runs the two fullscreen passes — AO
-# generation into ao_view, then the ambient*AO composite into hdrColor (Load).
-func nativeG3dSsaoPrepare() unsafe extern("rae_g3d_ssao_prepare") ret Int
-func g3dSsaoPrepare() ret Int {
-  unsafe { ret nativeG3dSsaoPrepare() }
-}
-func nativeG3dSsaoEnabled() unsafe extern("rae_g3d_ssao_enabled") ret Int
-func g3dSsaoEnabled() ret Int {
-  unsafe { ret nativeG3dSsaoEnabled() }
-}
-func nativeG3dAoDebugOn() unsafe extern("rae_g3d_ao_debug_on") ret Int
-func g3dAoDebugOn() ret Int {
-  unsafe { ret nativeG3dAoDebugOn() }
-}
-func g3dSsaoPipeline() unsafe extern("rae_g3d_ssao_pipeline") ret Ptr
-func g3dSsaoBind() unsafe extern("rae_g3d_ssao_bind") ret Ptr
-func g3dAoView() unsafe extern("rae_g3d_ao_view") ret Ptr
-func g3dAoApplyPipeline() unsafe extern("rae_g3d_ao_apply_pipeline") ret Ptr
-func g3dAoApplyBind() unsafe extern("rae_g3d_ao_apply_bind") ret Ptr
-func g3dAoDebugPipeline() unsafe extern("rae_g3d_ao_debug_pipeline") ret Ptr
-func g3dAoDebugBind() unsafe extern("rae_g3d_ao_debug_bind") ret Ptr
-func nativeG3dClearAo() unsafe extern("rae_g3d_clear_ao")
-func g3dClearAo() {
-  unsafe { nativeG3dClearAo() }
-}
 func nativeShutdown() unsafe extern("rae_ext_Gpu3d_shutdown")
 func shutdown() {
   unsafe { nativeShutdown() }
@@ -415,107 +300,6 @@ func beginScene(camera: view Camera3d, light: view Light3d, aspect: view Float, 
     clearR: light.clearColor.x, clearG: light.clearColor.y, clearB: light.clearColor.z)
 }
 
-# ----- the sky (#418) -------------------------------------------------
-#
-# The background, for the FORWARD frame. The deferred path gets its sky from
-# gbuffer.lightingPassSky, which can compute it for every pixel the G-buffer
-# left empty; there is no G-buffer here, so the same shader runs as a
-# fullscreen draw at the start of the scene pass instead. One shader, shared in
-# runtime_sky_wgsl.h — examples 111 and 112 are the same scene under the two
-# renderers, and they must not disagree about what the sky looks like.
-#
-# OPT IN, one line, between beginScene and the geometry:
-#
-#     beginScene(camera: camera, light: light, aspect: aspect, time: t)
-#     drawSky(sky: sky, light: light)
-#     renderScene(scene: scene)
-#
-# An app that does not write that line keeps the flat clear colour.
-func nativeSkyHosekPush(index: Int, value: Float) unsafe extern("rae_ext_Gpu3d_skyHosekPush")
-func skyHosekPush(index: copy Int, value: copy Float) {
-  unsafe { nativeSkyHosekPush(index: index, value: value) }
-}
-# Sky (#514): C ensures the pipeline, packs+uploads the sky uniform (with the
-# Hosek table Rae pushed), returns 1 to proceed / 0 to skip; Rae encodes the
-# fullscreen sky draw into the scene pass and restores the geometry pipeline.
-func g3dSkyPrepare(skyKind: Float, turbidity: Float, skyExposure: Float, sunSizeRad: Float,
-                   sunX: Float, sunY: Float, sunZ: Float,
-                   sunR: Float, sunG: Float, sunB: Float,
-                   zenR: Float, zenG: Float, zenB: Float, bands: Float,
-                   horR: Float, horG: Float, horB: Float, discI: Float,
-                   clearR: Float, clearG: Float, clearB: Float) unsafe extern("rae_g3d_sky_prepare") ret Int
-func g3dSkyPipeline() unsafe extern("rae_g3d_sky_pipeline") ret Ptr
-func g3dSkyBind() unsafe extern("rae_g3d_sky_bind") ret Ptr
-func skyDraw(skyKind: copy Float, turbidity: copy Float, skyExposure: copy Float, sunSizeRad: copy Float,
-             sunX: copy Float, sunY: copy Float, sunZ: copy Float,
-             sunR: copy Float, sunG: copy Float, sunB: copy Float,
-             zenR: copy Float, zenG: copy Float, zenB: copy Float, bands: copy Float,
-             horR: copy Float, horG: copy Float, horB: copy Float, discI: copy Float,
-             clearR: copy Float, clearG: copy Float, clearB: copy Float) {
-  unsafe {
-    let ok: Int = g3dSkyPrepare(skyKind: skyKind, turbidity: turbidity, skyExposure: skyExposure, sunSizeRad: sunSizeRad,
-      sunX: sunX, sunY: sunY, sunZ: sunZ, sunR: sunR, sunG: sunG, sunB: sunB,
-      zenR: zenR, zenG: zenG, zenB: zenB, bands: bands,
-      horR: horR, horG: horG, horB: horB, discI: discI,
-      clearR: clearR, clearG: clearG, clearB: clearB)
-    if ok is 0 { ret }
-    let pass: Ptr = g3dPass()
-    wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: g3dSkyPipeline())
-    wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
-      group: g3dSkyBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
-    wgpuRenderPassEncoderDraw(renderPassEncoder: pass, vertexCount: 3 as UInt32,
-      instanceCount: 1 as UInt32, firstVertex: 0 as UInt32, firstInstance: 0 as UInt32)
-    # Restore the geometry pipeline/bind so the scene draws after the sky are correct.
-    wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: g3dPipeline())
-    wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
-      group: g3dBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
-  }
-}
-
-# Three vec4 per channel: [A B C D][E F G H][I radiance _ _], matching `hosek`
-# in the WGSL. The deferred path has the same walk in lib/gbuffer.rae, and the
-# two stay separate because a Rae extern's C name follows its module — they
-# land in the ONE table in runtime_sky_state.h, so the duplication is in how
-# the values are handed over, never in the values themselves.
-func pushForwardHosekChannel(c: view HosekChannel, base: view Int) {
-  skyHosekPush(index: base + 0, value: c.a)
-  skyHosekPush(index: base + 1, value: c.b)
-  skyHosekPush(index: base + 2, value: c.c)
-  skyHosekPush(index: base + 3, value: c.d)
-  skyHosekPush(index: base + 4, value: c.e)
-  skyHosekPush(index: base + 5, value: c.f)
-  skyHosekPush(index: base + 6, value: c.g)
-  skyHosekPush(index: base + 7, value: c.h)
-  skyHosekPush(index: base + 8, value: c.i)
-  skyHosekPush(index: base + 9, value: c.radiance)
-}
-
-# The SUN comes from the light, not from the sky, which is the same choice
-# lightingPassSky makes: the disc the camera sees and the shadows on the ground
-# then come from one direction by construction. A sky whose own sunDir differs
-# is telling the renderer where its HDRI's sun is (#403), not where to put the
-# shadows.
-func drawSky(sky: view Sky, light: view Light3d) pub {
-  # Before the draw: the pass copies whatever is in the table, so pushing
-  # afterwards would show last frame's sky.
-  pushForwardHosekChannel(c: sky.hosek.r, base: 0)
-  pushForwardHosekChannel(c: sky.hosek.g, base: 12)
-  pushForwardHosekChannel(c: sky.hosek.b, base: 24)
-  skyDraw(
-    skyKind: kindCode(sky: sky), turbidity: sky.turbidity,
-    skyExposure: sky.exposure, sunSizeRad: sky.sunAngularRadius,
-    sunX: light.sunDir.x, sunY: light.sunDir.y, sunZ: light.sunDir.z,
-    sunR: light.sunColor.x, sunG: light.sunColor.y, sunB: light.sunColor.z,
-    zenR: sky.zenithColor.x, zenG: sky.zenithColor.y, zenB: sky.zenithColor.z,
-    bands: sky.bands,
-    horR: sky.horizonColor.x, horG: sky.horizonColor.y, horB: sky.horizonColor.z,
-    discI: sky.sunDiscIntensity,
-    # Kind 0 shows this and nothing else, so an app can bind a `none` sky and
-    # get exactly the background it had before it called this at all.
-    clearR: sky.clearColor.x, clearG: sky.clearColor.y, clearB: sky.clearColor.z
-  )
-}
-
 # Build a model matrix from a typed transform: M = T * Rz * Ry * Rx * S.
 # Rotation is Euler XYZ radians, right-handed (yaw about +Z, pitch about
 # +X) per docs/coordinate-system.md.
@@ -697,38 +481,9 @@ func updateMeshVerts(mesh: view MeshHandle, verts: view List(Float), vertCount: 
   meshUpdate(mesh: mesh.id, verts: verts.data, vertCount: vertCount)
 }
 
-# ----- shadows (#382) -------------------------------------------------
-# Cascaded shadow maps for the sun. The cascade FIT is in lib/shadow3d.rae
-# (pure arithmetic, unit-tested); these only move it to the GPU and
-# rasterise the casters.
-# The shadow-map feed (cascade uniforms + draw queue) is bookkeeping, not a pass
-# encoder — the shadow render itself is in Rae (GbufferShadow.shadowEnd, #504).
-# So these bind the shadow-map C helpers under the rae_sm_* prefix (#514), the
-# same prefix the shadow accessors already use.
-func shadowBegin(cascades: view Buffer(Float), count: Int, resolution: Int,
-                 splits: view Buffer(Float), texelWorld: view Buffer(Float),
-                 depthRange: view Buffer(Float)) unsafe extern("rae_sm_begin")
-func nativeShadowDraw(mesh: Int, model: view Mat4) unsafe extern("rae_sm_queue_mesh")
-func shadowDraw(mesh: copy Int, model: view Mat4) {
-  unsafe { nativeShadowDraw(mesh: mesh, model: model) }
-}
-func nativeShadowDrawSkinned(mesh: Int, model: view Mat4, paletteBase: Int) unsafe extern("rae_sm_queue_skinned")
-func shadowDrawSkinned(mesh: copy Int, model: view Mat4, paletteBase: copy Int) {
-  unsafe { nativeShadowDrawSkinned(mesh: mesh, model: model, paletteBase: paletteBase) }
-}
-func nativeShadowMetaballs(packedBalls: view Buffer(Float), count: Int, smoothing: Float) unsafe extern("rae_sm_record_metaballs")
 func shadowMetaballs(packedBalls: view Buffer(Float), count: copy Int, smoothing: copy Float) {
   unsafe { nativeShadowMetaballs(packedBalls: packedBalls, count: count, smoothing: smoothing) }
 }
-func nativeShadowDrawCount() unsafe extern("rae_sm_draw_count") ret Int
-func shadowDrawCount() ret Int {
-  unsafe { ret nativeShadowDrawCount() }
-}
-func nativeShadowShutdown() unsafe extern("rae_sm_shutdown")
-func shadowShutdown() {
-  unsafe { nativeShadowShutdown() }
-}
-
 # Open the shadow pass for a fitted cascade set. Everything drawn between
 # this and `endShadowPass` casts.
 func beginShadowPass(c: view ShadowCascades) pub {
@@ -768,42 +523,6 @@ func shadowCasterCount() pub ret Int {
   ret shadowDrawCount()
 }
 
-# ----- skinned meshes (#374) ------------------------------------------
-# A second vertex format and pipeline for skeletally animated geometry.
-# Separate from the static path because a ground plane should not carry
-# joint indices it can never read — see runtime_gpu3d_skin.c.
-func nativeSkinnedMeshCreate(verts: view Buffer(Float), vertCount: Int, indices: view Buffer(Int), indexCount: Int) unsafe extern("rae_ext_Gpu3d_skinnedMeshCreate") ret Int
-func skinnedMeshCreate(verts: view Buffer(Float), vertCount: copy Int, indices: view Buffer(Int), indexCount: copy Int) ret Int {
-  unsafe { ret nativeSkinnedMeshCreate(verts: verts, vertCount: vertCount, indices: indices, indexCount: indexCount) }
-}
-func nativeSetPalette(rows: view Buffer(Float), jointCount: Int) unsafe extern("rae_ext_Gpu3d_setPalette")
-func setPalette(rows: view Buffer(Float), jointCount: copy Int) {
-  unsafe { nativeSetPalette(rows: rows, jointCount: jointCount) }
-}
-# Skinned draw (#514): C validates the mesh + draw limit, uploads the per-frame
-# palette (if dirty) and the per-draw record, and returns the firstInstance slot
-# (or -1); Rae encodes the instanced DrawIndexed below.
-func nativeG3dPushSkinnedDraw(mesh: Int, model: view Mat4, r: Float, g: Float, b: Float, metallic: Float, roughness: Float) unsafe extern("rae_g3d_push_skinned_draw") ret Int
-func g3dPushSkinnedDraw(mesh: copy Int, model: view Mat4, r: copy Float, g: copy Float, b: copy Float, metallic: copy Float, roughness: copy Float) ret Int {
-  unsafe { ret nativeG3dPushSkinnedDraw(mesh: mesh, model: model, r: r, g: g, b: b, metallic: metallic, roughness: roughness) }
-}
-func g3dSkinPipeline() unsafe extern("rae_g3d_skin_pipeline") ret Ptr
-func g3dSkinBind() unsafe extern("rae_g3d_skin_bind") ret Ptr
-func g3dSkinVbuf(mesh: Int) unsafe extern("rae_g3d_skin_vbuf") ret Ptr
-func g3dSkinIbuf(mesh: Int) unsafe extern("rae_g3d_skin_ibuf") ret Ptr
-func nativeG3dSkinIcount(mesh: Int) unsafe extern("rae_g3d_skin_icount") ret Int
-func g3dSkinIcount(mesh: copy Int) ret Int {
-  unsafe { ret nativeG3dSkinIcount(mesh: mesh) }
-}
-func nativeSkinFrameBegin() unsafe extern("rae_ext_Gpu3d_skinFrameBegin")
-func skinFrameBegin() {
-  unsafe { nativeSkinFrameBegin() }
-}
-func nativeSkinDrawCount() unsafe extern("rae_ext_Gpu3d_skinDrawCount") ret Int
-func skinDrawCount() ret Int {
-  unsafe { ret nativeSkinDrawCount() }
-}
-func nativeSkinShutdown() unsafe extern("rae_ext_Gpu3d_skinShutdown")
 func skinShutdown() {
   unsafe { nativeSkinShutdown() }
 }

@@ -1,0 +1,178 @@
+# GpuRenderPass — render passes over a manager Recording (#918 split of
+# GpuRender for the 1000-line cap): the RenderTarget (colour + optional depth
+# over ResourceRefs), beginRenderPass / endRenderPass holding a raw pass
+# encoder for the `record*InPass` family (draw, indexed, indirect, external
+# bind, scissor), and the use records (recordBindGroupUse /
+# recordRenderPipelineUse) that pin per-frame objects behind the submission.
+# Callers that `open gpu/GpuRender` for these open `gpu/GpuRenderPass` as well.
+open webgpu/Context
+open webgpu/Webgpu
+open webgpu/WebgpuEnums
+open webgpu/WebgpuTypes
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuRender
+
+# A pass target: one colour view (cleared or loaded) and an optional depth view.
+type RenderTarget {
+  colorView: ResourceRef
+  clear: Bool
+  clearR: Float
+  clearG: Float
+  clearB: Float
+  clearA: Float
+  hasDepth: Bool
+  depthView: ResourceRef
+  depthReadOnly: Bool
+}
+
+func renderTarget(colorView: view ResourceRef, clear: view Bool, r: view Float, g: view Float, b: view Float, a: view Float) ret RenderTarget {
+  ret RenderTarget { colorView: colorView, clear: clear, clearR: r, clearG: g, clearB: b, clearA: a, hasDepth: false, depthView: noRef(), depthReadOnly: true }
+}
+
+func renderTargetWithDepth(colorView: view ResourceRef, clear: view Bool, r: view Float, g: view Float, b: view Float, a: view Float, depthView: view ResourceRef, depthReadOnly: view Bool) ret RenderTarget {
+  ret RenderTarget { colorView: colorView, clear: clear, clearR: r, clearG: g, clearB: b, clearA: a, hasDepth: true, depthView: depthView, depthReadOnly: depthReadOnly }
+}
+
+func recordDrawIndirectInPass(resources: view GpuResources, pass: copy Ptr, pipeline: view RenderPipelineId, bindGroup: view BindGroupId, indirect: view ResourceRef) unsafe ret Bool {
+  if isValidRenderPipeline(resources: resources, id: pipeline) is false { ret false }
+  if bindGroupIsUsable(resources: resources, id: bindGroup) is false { ret false }
+  if isValidRef(resources: resources, ref: indirect) is false or refIsBuffer(resources: resources, ref: indirect) is false { ret false }
+  if indirect.refKind is refBuffer and hasUsageFlag(usage: refBufferUsage(resources: resources, ref: indirect), flag: WGPUBufferUsage_Indirect) is false { ret false }
+  if refBufferSize(resources: resources, ref: indirect) < 16 { ret false }
+  unsafe {
+    if pass is webgpuNull() { ret false }
+    wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: slotHandle(table: resources.renderPipelines, slot: pipeline.slot))
+    wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32, group: slotHandle(table: resources.bindGroups, slot: bindGroup.slot), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+    wgpuRenderPassEncoderDrawIndirect(renderPassEncoder: pass, indirectBuffer: refHandle(resources: resources, ref: indirect), indirectOffset: 0 as UInt64)
+  }
+  ret true
+}
+
+func recordDrawInPass(resources: view GpuResources, pass: copy Ptr, pipeline: view RenderPipelineId, bindGroup: view BindGroupId, vertexCount: view Int, instanceCount: view Int, firstVertex: view Int, firstInstance: view Int) unsafe ret Bool {
+  if isValidRenderPipeline(resources: resources, id: pipeline) is false { ret false }
+  if bindGroupIsUsable(resources: resources, id: bindGroup) is false { ret false }
+  if vertexCount < 1 or instanceCount < 1 or firstVertex < 0 or firstInstance < 0 { ret false }
+  unsafe {
+    if pass is webgpuNull() { ret false }
+    wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: slotHandle(table: resources.renderPipelines, slot: pipeline.slot))
+    wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32, group: slotHandle(table: resources.bindGroups, slot: bindGroup.slot), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+    wgpuRenderPassEncoderDraw(renderPassEncoder: pass, vertexCount: vertexCount as UInt32, instanceCount: instanceCount as UInt32, firstVertex: firstVertex as UInt32, firstInstance: firstInstance as UInt32)
+  }
+  ret true
+}
+
+# recordDrawInPass over an ADOPTED render pipeline (see adoptExternalRenderPipeline).
+func recordDrawInPassExternal(resources: view GpuResources, pass: copy Ptr, pipeline: view ExternalId, bindGroup: view BindGroupId, vertexCount: view Int, instanceCount: view Int, firstVertex: view Int, firstInstance: view Int) unsafe ret Bool {
+  if isExternalRenderPipeline(resources: resources, id: pipeline) is false { ret false }
+  if bindGroupIsUsable(resources: resources, id: bindGroup) is false { ret false }
+  if vertexCount < 1 or instanceCount < 1 or firstVertex < 0 or firstInstance < 0 { ret false }
+  unsafe {
+    if pass is webgpuNull() { ret false }
+    wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: slotHandle(table: resources.externals, slot: pipeline.slot))
+    wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32, group: slotHandle(table: resources.bindGroups, slot: bindGroup.slot), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+    wgpuRenderPassEncoderDraw(renderPassEncoder: pass, vertexCount: vertexCount as UInt32, instanceCount: instanceCount as UInt32, firstVertex: firstVertex as UInt32, firstInstance: firstInstance as UInt32)
+  }
+  ret true
+}
+
+# An instanced indexed draw into a pass the caller opened, over the legacy
+# gbuffer's C-owned mesh buffers (raw handles the mesh registry keeps valid for
+# the frame — hence unsafe, like the pass encoder). The pipeline and bind group
+# are validated manager objects; nothing is pinned (the caller's submission is
+# not tracked here), as recordDrawInPass.
+func recordDrawIndexedInPass(resources: view GpuResources, pass: copy Ptr, pipeline: view RenderPipelineId, bindGroup: view BindGroupId, vertexBuffer: copy Ptr, indexBuffer: copy Ptr, indexCount: view Int, instanceCount: view Int, firstInstance: view Int) unsafe ret Bool {
+  if isValidRenderPipeline(resources: resources, id: pipeline) is false { ret false }
+  if bindGroupIsUsable(resources: resources, id: bindGroup) is false { ret false }
+  if indexCount < 1 or instanceCount < 1 or firstInstance < 0 { ret false }
+  unsafe {
+    if pass is webgpuNull() or vertexBuffer is webgpuNull() or indexBuffer is webgpuNull() { ret false }
+    wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: slotHandle(table: resources.renderPipelines, slot: pipeline.slot))
+    wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32, group: slotHandle(table: resources.bindGroups, slot: bindGroup.slot), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+    wgpuRenderPassEncoderSetVertexBuffer(renderPassEncoder: pass, slot: 0 as UInt32, buffer: vertexBuffer, offset: 0 as UInt64, size: wgpuBufferGetSize(buffer: vertexBuffer))
+    wgpuRenderPassEncoderSetIndexBuffer(renderPassEncoder: pass, buffer: indexBuffer, format: WGPUIndexFormat_Uint32, offset: 0 as UInt64, size: wgpuBufferGetSize(buffer: indexBuffer))
+    wgpuRenderPassEncoderDrawIndexed(renderPassEncoder: pass, indexCount: indexCount as UInt32, instanceCount: instanceCount as UInt32, firstIndex: 0 as UInt32, baseVertex: 0 as Int32, firstInstance: firstInstance as UInt32)
+  }
+  ret true
+}
+
+# Binds a manager pipeline + bind group in a pass the caller opened without
+# drawing — for a pass that the legacy C-driven code expects to find a known
+# pipeline bound in (the geometry pass's static pipeline).
+func recordBindInPass(resources: view GpuResources, pass: copy Ptr, pipeline: view RenderPipelineId, bindGroup: view BindGroupId) unsafe ret Bool {
+  if isValidRenderPipeline(resources: resources, id: pipeline) is false { ret false }
+  if bindGroupIsUsable(resources: resources, id: bindGroup) is false { ret false }
+  unsafe {
+    if pass is webgpuNull() { ret false }
+    wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: slotHandle(table: resources.renderPipelines, slot: pipeline.slot))
+    wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32, group: slotHandle(table: resources.bindGroups, slot: bindGroup.slot), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+  }
+  ret true
+}
+
+# Opens a pass on `recording` over `target` and hands the raw pass encoder
+# back for the recordDrawInPass / recordBindInPass family; endRenderPass
+# closes it. The target views are recorded as uses, so submitting the
+# recording pins them. Raw pass handle out, hence unsafe.
+func beginRenderPass(recording: mod Recording, resources: mod GpuResources, target: view RenderTarget) unsafe ret Ptr {
+  unsafe {
+    if recordingIsOpen(recording: recording, resources: resources) is false { ret webgpuNull() }
+    if isValidRef(resources: resources, ref: target.colorView) is false or refIsTextureView(resources: resources, ref: target.colorView) is false { ret webgpuNull() }
+    if target.hasDepth {
+      if isValidRef(resources: resources, ref: target.depthView) is false or refIsTextureView(resources: resources, ref: target.depthView) is false { ret webgpuNull() }
+    }
+    recordUse(recording: recording, kind: refDepKind(ref: target.colorView), slot: target.colorView.slot, generation: target.colorView.generation)
+    if target.hasDepth { recordUse(recording: recording, kind: refDepKind(ref: target.depthView), slot: target.depthView.slot, generation: target.depthView.generation) }
+    var loadOp: Int32 = WGPULoadOp_Load
+    if target.clear { loadOp = WGPULoadOp_Clear }
+    var colorAttachments: List(WGPURenderPassColorAttachment) = List.create(WGPURenderPassColorAttachment, cap: 1)
+    colorAttachments.add(value: {
+      view_: refHandle(resources: resources, ref: target.colorView)
+      depthSlice: WGPU_DEPTH_SLICE_UNDEFINED as UInt32
+      loadOp: loadOp
+      storeOp: WGPUStoreOp_Store
+      clearValue: { r: target.clearR as Float64, g: target.clearG as Float64, b: target.clearB as Float64, a: target.clearA as Float64 }
+    })
+    var depthAttachments: List(WGPURenderPassDepthStencilAttachment) = List.create(WGPURenderPassDepthStencilAttachment, cap: 1)
+    if target.hasDepth {
+      if target.depthReadOnly {
+        depthAttachments.add(value: { view_: refHandle(resources: resources, ref: target.depthView), depthLoadOp: WGPULoadOp_Undefined, depthStoreOp: WGPUStoreOp_Undefined, depthReadOnly: 1 as UInt32 })
+      } else {
+        depthAttachments.add(value: { view_: refHandle(resources: resources, ref: target.depthView), depthLoadOp: WGPULoadOp_Load, depthStoreOp: WGPUStoreOp_Store, depthReadOnly: 0 as UInt32 })
+      }
+      let descriptor: WGPURenderPassDescriptor = { colorAttachmentCount: 1 as UInt64, colorAttachments: colorAttachments.data, depthStencilAttachment: depthAttachments.data }
+      ret wgpuCommandEncoderBeginRenderPass(commandEncoder: recording.encoder, descriptor: descriptor)
+    }
+    let descriptor: WGPURenderPassDescriptor = { colorAttachmentCount: 1 as UInt64, colorAttachments: colorAttachments.data }
+    ret wgpuCommandEncoderBeginRenderPass(commandEncoder: recording.encoder, descriptor: descriptor)
+  }
+}
+
+func endRenderPass(pass: copy Ptr) unsafe {
+  unsafe {
+    if pass is webgpuNull() { ret }
+    wgpuRenderPassEncoderEnd(renderPassEncoder: pass)
+    wgpuRenderPassEncoderRelease(renderPassEncoder: pass)
+  }
+}
+
+# Records a bind group / render pipeline the in-pass draws used, so the
+# recording's submission pins it: retiring it afterwards defers its release
+# until the GPU is done with it (the frame's per-run groups, #915).
+func recordBindGroupUse(recording: mod Recording, resources: view GpuResources, id: view BindGroupId) {
+  if isValidBindGroup(resources: resources, id: id) is false { ret }
+  recordUse(recording: recording, kind: kindBindGroup, slot: id.slot, generation: id.generation)
+}
+
+func recordRenderPipelineUse(recording: mod Recording, resources: view GpuResources, id: view RenderPipelineId) {
+  if isValidRenderPipeline(resources: resources, id: id) is false { ret }
+  recordUse(recording: recording, kind: kindRenderPipeline, slot: id.slot, generation: id.generation)
+}
+
+# The scissor of an open pass, in framebuffer pixels (clamped by the caller).
+func setScissorInPass(pass: copy Ptr, x: copy Int, y: copy Int, width: copy Int, height: copy Int) unsafe {
+  unsafe {
+    if pass is webgpuNull() { ret }
+    wgpuRenderPassEncoderSetScissorRect(renderPassEncoder: pass, x: x as UInt32, y: y as UInt32, width: width as UInt32, height: height as UInt32)
+  }
+}

@@ -1,0 +1,176 @@
+# GpuRenderTransfer — the self-contained draw and the CPU<->GPU transfers of
+# the render manager (#918 split of GpuRender for the 1000-line cap):
+# recordDrawIndexed (a whole encoder + pass for one indexed draw),
+# recordCopyTextureToBuffer (texture -> staging buffer, texel-size aware) and
+# the write helpers (writeBufferFromPtr / writeTextureFromPtr / writeTexture)
+# that upload CPU bytes into manager objects. Callers that `open gpu/GpuRender`
+# for these open `gpu/GpuRenderTransfer` as well.
+open webgpu/Context
+open webgpu/Webgpu
+open webgpu/WebgpuEnums
+open webgpu/WebgpuTypes
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuRender
+
+# One render pass with one indexed draw (a water body is exactly this): begin
+# the pass on the target, set the pipeline, bind group, vertex and index
+# buffers (u32 indices, whole buffers, authoritative native sizes), draw, end.
+# Manager buffers must carry Vertex / Index usage; adopted externals are the
+# adopter's obligation. Every referenced resource becomes a use of the
+# recording, validated again at submit and pinned until completion.
+func recordDrawIndexed(recording: mod Recording, resources: view GpuResources, target: view RenderTarget, pipeline: view RenderPipelineId, bindGroup: view BindGroupId, vertexBuffer: view ResourceRef, indexBuffer: view ResourceRef, indexCount: view Int) ret Bool {
+  if recordingIsOpen(recording: recording, resources: resources) is false { ret false }
+  if isValidRenderPipeline(resources: resources, id: pipeline) is false { ret false }
+  if bindGroupIsUsable(resources: resources, id: bindGroup) is false { ret false }
+  if indexCount < 1 { ret false }
+  if isValidRef(resources: resources, ref: target.colorView) is false or refIsTextureView(resources: resources, ref: target.colorView) is false { ret false }
+  if target.hasDepth {
+    if isValidRef(resources: resources, ref: target.depthView) is false or refIsTextureView(resources: resources, ref: target.depthView) is false { ret false }
+  }
+  if isValidRef(resources: resources, ref: vertexBuffer) is false or refIsBuffer(resources: resources, ref: vertexBuffer) is false { ret false }
+  if isValidRef(resources: resources, ref: indexBuffer) is false or refIsBuffer(resources: resources, ref: indexBuffer) is false { ret false }
+  if vertexBuffer.refKind is refBuffer and hasUsageFlag(usage: refBufferUsage(resources: resources, ref: vertexBuffer), flag: WGPUBufferUsage_Vertex) is false { ret false }
+  if indexBuffer.refKind is refBuffer and hasUsageFlag(usage: refBufferUsage(resources: resources, ref: indexBuffer), flag: WGPUBufferUsage_Index) is false { ret false }
+  if refBufferSize(resources: resources, ref: indexBuffer) < indexCount * 4 { ret false }
+  unsafe {
+    var loadOp: Int32 = WGPULoadOp_Load
+    if target.clear { loadOp = WGPULoadOp_Clear }
+    var colorAttachments: List(WGPURenderPassColorAttachment) = List.create(WGPURenderPassColorAttachment, cap: 1)
+    colorAttachments.add(value: {
+      view_: refHandle(resources: resources, ref: target.colorView)
+      depthSlice: WGPU_DEPTH_SLICE_UNDEFINED as UInt32
+      loadOp: loadOp
+      storeOp: WGPUStoreOp_Store
+      clearValue: { r: target.clearR as Float64, g: target.clearG as Float64, b: target.clearB as Float64, a: target.clearA as Float64 }
+    })
+    var depthAttachments: List(WGPURenderPassDepthStencilAttachment) = List.create(WGPURenderPassDepthStencilAttachment, cap: 1)
+    var pass: Ptr = webgpuNull()
+    if target.hasDepth {
+      if target.depthReadOnly {
+        depthAttachments.add(value: { view_: refHandle(resources: resources, ref: target.depthView), depthLoadOp: WGPULoadOp_Undefined, depthStoreOp: WGPUStoreOp_Undefined, depthReadOnly: 1 as UInt32 })
+      } else {
+        depthAttachments.add(value: { view_: refHandle(resources: resources, ref: target.depthView), depthLoadOp: WGPULoadOp_Load, depthStoreOp: WGPUStoreOp_Store, depthReadOnly: 0 as UInt32 })
+      }
+      let descriptor: WGPURenderPassDescriptor = { colorAttachmentCount: 1 as UInt64, colorAttachments: colorAttachments.data, depthStencilAttachment: depthAttachments.data }
+      pass = wgpuCommandEncoderBeginRenderPass(commandEncoder: recording.encoder, descriptor: descriptor)
+    } else {
+      let descriptor: WGPURenderPassDescriptor = { colorAttachmentCount: 1 as UInt64, colorAttachments: colorAttachments.data }
+      pass = wgpuCommandEncoderBeginRenderPass(commandEncoder: recording.encoder, descriptor: descriptor)
+    }
+    if pass is webgpuNull() { ret false }
+    wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: slotHandle(table: resources.renderPipelines, slot: pipeline.slot))
+    wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32, group: slotHandle(table: resources.bindGroups, slot: bindGroup.slot), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+    let vertexHandle: Ptr = refHandle(resources: resources, ref: vertexBuffer)
+    wgpuRenderPassEncoderSetVertexBuffer(renderPassEncoder: pass, slot: 0 as UInt32, buffer: vertexHandle, offset: 0 as UInt64, size: wgpuBufferGetSize(buffer: vertexHandle))
+    let indexHandle: Ptr = refHandle(resources: resources, ref: indexBuffer)
+    wgpuRenderPassEncoderSetIndexBuffer(renderPassEncoder: pass, buffer: indexHandle, format: WGPUIndexFormat_Uint32, offset: 0 as UInt64, size: wgpuBufferGetSize(buffer: indexHandle))
+    wgpuRenderPassEncoderDrawIndexed(renderPassEncoder: pass, indexCount: indexCount as UInt32, instanceCount: 1 as UInt32, firstIndex: 0 as UInt32, baseVertex: 0 as Int32, firstInstance: 0 as UInt32)
+    wgpuRenderPassEncoderEnd(renderPassEncoder: pass)
+    wgpuRenderPassEncoderRelease(renderPassEncoder: pass)
+  }
+  recordUse(recording: recording, kind: kindRenderPipeline, slot: pipeline.slot, generation: pipeline.generation)
+  recordUse(recording: recording, kind: kindBindGroup, slot: bindGroup.slot, generation: bindGroup.generation)
+  let start: Int = intAt(list: resources.bindGroups.depStart, index: bindGroup.slot)
+  let count: Int = intAt(list: resources.bindGroups.depCount, index: bindGroup.slot)
+  var i: Int = start
+  loop i < start + count {
+    recordUse(recording: recording, kind: intAt(list: resources.depKinds, index: i), slot: intAt(list: resources.depSlots, index: i), generation: intAt(list: resources.depGenerations, index: i))
+    i = i + 1
+  }
+  recordUse(recording: recording, kind: refDepKind(ref: target.colorView), slot: target.colorView.slot, generation: target.colorView.generation)
+  if target.hasDepth { recordUse(recording: recording, kind: refDepKind(ref: target.depthView), slot: target.depthView.slot, generation: target.depthView.generation) }
+  recordUse(recording: recording, kind: refDepKind(ref: vertexBuffer), slot: vertexBuffer.slot, generation: vertexBuffer.generation)
+  recordUse(recording: recording, kind: refDepKind(ref: indexBuffer), slot: indexBuffer.slot, generation: indexBuffer.generation)
+  ret true
+}
+
+# Bytes per texel of the formats the manager copies; -1 for an unknown one
+# (refused rather than handed to wgpu, which would abort on a bad row pitch).
+func texelBytes(format: view Int32) ret Int {
+  if (format is WGPUTextureFormat_RGBA8Unorm) or (format is WGPUTextureFormat_BGRA8Unorm) or (format is WGPUTextureFormat_R32Float) { ret 4 }
+  if (format is WGPUTextureFormat_RGBA16Float) or (format is WGPUTextureFormat_RG32Float) { ret 8 }
+  if (format is WGPUTextureFormat_RGBA32Float) { ret 16 }
+  ret 0 - 1
+}
+
+# Copies a 2D texture's level 0 into a buffer laid out row by row with
+# `bytesPerRow` (a multiple of 256, at least width * texel size) — the pixel
+# readback path for checks, diagnostics and screenshots. Both resources become
+# uses of the recording.
+func recordCopyTextureToBuffer(recording: mod Recording, resources: view GpuResources, texture: view TextureId, buffer: view BufferId, bytesPerRow: view Int) ret Bool {
+  if recordingIsOpen(recording: recording, resources: resources) is false { ret false }
+  if isValidTexture(resources: resources, id: texture) is false { ret false }
+  let width: Int = textureWidth(resources: resources, id: texture)
+  let height: Int = textureHeight(resources: resources, id: texture)
+  if width < 1 or height < 1 { ret false }
+  var texel: Int = 0 - 1
+  unsafe { texel = texelBytes(format: wgpuTextureGetFormat(texture: slotHandle(table: resources.textures, slot: texture.slot))) }
+  if texel < 1 { ret false }
+  if bytesPerRow - (bytesPerRow / 256) * 256 is not 0 or bytesPerRow < width * texel { ret false }
+  if bufferRangeIsValid(resources: resources, id: buffer, offset: 0, size: bytesPerRow * height) is false { ret false }
+  if hasUsageFlag(usage: bufferUsage(resources: resources, id: buffer), flag: WGPUBufferUsage_CopyDst) is false { ret false }
+  unsafe {
+    let source: WGPUTexelCopyTextureInfo = { texture: slotHandle(table: resources.textures, slot: texture.slot), mipLevel: 0 as UInt32, origin: { x: 0 as UInt32, y: 0 as UInt32, z: 0 as UInt32 }, aspect: WGPUTextureAspect_All }
+    let destination: WGPUTexelCopyBufferInfo = { layout: { offset: 0 as UInt64, bytesPerRow: bytesPerRow as UInt32, rowsPerImage: height as UInt32 }, buffer: slotHandle(table: resources.buffers, slot: buffer.slot) }
+    let size: WGPUExtent3D = { width: width as UInt32, height: height as UInt32, depthOrArrayLayers: 1 as UInt32 }
+    wgpuCommandEncoderCopyTextureToBuffer(commandEncoder: recording.encoder, source: source, destination: destination, copySize: size)
+  }
+  recordUse(recording: recording, kind: kindTexture, slot: texture.slot, generation: texture.generation)
+  recordUse(recording: recording, kind: kindBuffer, slot: buffer.slot, generation: buffer.generation)
+  ret true
+}
+
+# ----- draws into an EXTERNAL render pass ------------------------------------
+#
+# The legacy gbuffer opens its geometry pass in C; grass and sprites draw INTO
+# that pass. These record on a raw pass encoder the caller obtained from the
+# renderer (hence `unsafe`: the pass's validity and submission are the
+# renderer's), resolving manager IDs with the usual checks. Nothing is pinned
+# — the foreign submission is not tracked here — and retiring a used ID after
+# the draw is a Release, never a Destroy: wgpu's own command tracking keeps the
+# native alive until that command buffer completes.
+
+# Uploads `size` bytes from a raw C pointer into a manager buffer at `offset`
+# (the legacy C-batched 2D primitives, #907). Same range/usage validation as
+# writeBuffer; the source pointer is the caller's obligation, hence unsafe.
+func writeBufferFromPtr(resources: view GpuResources, id: view BufferId, offset: view Int, data: copy Ptr, size: view Int) unsafe ret Bool {
+  if size < 1 { ret false }
+  if bufferRangeIsValid(resources: resources, id: id, offset: offset, size: size) is false { ret false }
+  if hasUsageFlag(usage: bufferUsage(resources: resources, id: id), flag: WGPUBufferUsage_CopyDst) is false { ret false }
+  unsafe {
+    if data is webgpuNull() { ret false }
+    wgpuQueueWriteBuffer(queue: webgpuQueue(), buffer: slotHandle(table: resources.buffers, slot: id.slot), bufferOffset: offset as UInt64, data: data, size: size as UInt64)
+  }
+  ret true
+}
+
+# Uploads a whole-texture RGBA8 image (`rows` rows of `bytesPerRow` bytes) into
+# a manager texture through the queue: the 2D image pass (#908). The texture
+# must be CopyDst and exactly `rows` high; the row size must match its width.
+func writeTextureFromPtr(resources: view GpuResources, texture: view TextureId, data: copy Ptr, bytesPerRow: view Int, rows: view Int) unsafe ret Bool {
+  if isValidTexture(resources: resources, id: texture) is false { ret false }
+  if bytesPerRow < 4 or rows < 1 { ret false }
+  if textureHeight(resources: resources, id: texture) is not rows { ret false }
+  if textureWidth(resources: resources, id: texture) * 4 is not bytesPerRow { ret false }
+  unsafe {
+    if data is webgpuNull() { ret false }
+    let handle: Ptr = slotHandle(table: resources.textures, slot: texture.slot)
+    if hasUsageFlag(usage: wgpuTextureGetUsage(texture: handle), flag: WGPUTextureUsage_CopyDst) is false { ret false }
+    let destination: WGPUTexelCopyTextureInfo = { texture: handle, aspect: WGPUTextureAspect_All }
+    let layout: WGPUTexelCopyBufferLayout = { bytesPerRow: bytesPerRow as UInt32, rowsPerImage: rows as UInt32 }
+    let extent: WGPUExtent3D = { width: (bytesPerRow / 4) as UInt32, height: rows as UInt32, depthOrArrayLayers: 1 as UInt32 }
+    wgpuQueueWriteTexture(queue: webgpuQueue(), destination: destination, data: data, dataSize: (bytesPerRow * rows) as UInt64, dataLayout: layout, writeSize: extent)
+  }
+  ret true
+}
+
+# The same from a Rae byte list (procedural RGBA pixels); the list is only
+# borrowed for the call, the queue copies it.
+func writeTexture(resources: view GpuResources, texture: view TextureId, bytes: view List(UInt8), bytesPerRow: view Int) ret Bool {
+  if bytesPerRow < 4 or bytes.length < bytesPerRow { ret false }
+  if bytes.length % bytesPerRow is not 0 { ret false }
+  unsafe { ret writeTextureFromPtr(resources: resources, texture: texture, data: bytes.data, bytesPerRow: bytesPerRow, rows: bytes.length / bytesPerRow) }
+}
+
+# ----- a render pass held open across many in-pass draws (#915) ---------

@@ -1,0 +1,146 @@
+# GpuReadback — GPU->CPU readbacks and the blocking waits (#918 split of
+# GpuLifetime for the 1000-line cap): a readback is a mapped staging buffer
+# tied to the submission that filled it (startReadback / pollReadback /
+# copyReadback / retireReadback), plus waitSubmission / waitReadback for the
+# headless and test paths that need the result now. Callers that `open
+# gpu/GpuLifetime` for these open `gpu/GpuReadback` as well.
+open webgpu/Context
+open webgpu/Webgpu
+open webgpu/WebgpuEnums
+open webgpu/WebgpuTypes
+open webgpu/Readback
+open gpu/GpuResources
+open gpu/GpuLifetime
+
+func isValidReadback(resources: view GpuResources, id: view ReadbackId) ret Bool {
+  if id.managerTag is not resources.managerTag { ret false }
+  ret slotIsLive(table: resources.readbacks, capacity: resources.capacity, slot: id.slot, generation: id.generation)
+}
+
+func liveReadbackCount(resources: view GpuResources) ret Int {
+  ret liveCount(table: resources.readbacks, capacity: resources.capacity)
+}
+
+# The source buffer of a live readback, or -1. Used for the exclusive-mapping
+# guard: WebGPU allows only one active map per buffer, and wgpu-native aborts on
+# a double map, so a second readback of a buffer already being read is refused.
+func mappedSourceSlot(resources: view GpuResources, readbackSlot: view Int) ret Int {
+  let start: Int = intAt(list: resources.readbacks.depStart, index: readbackSlot)
+  if intAt(list: resources.readbacks.depCount, index: readbackSlot) < 1 { ret 0 - 1 }
+  ret intAt(list: resources.depSlots, index: start)
+}
+
+func bufferIsMapped(resources: view GpuResources, bufferSlot: view Int) ret Bool {
+  var slot: Int = 0
+  loop slot < resources.capacity {
+    if intAt(list: resources.readbacks.live, index: slot) is 1 {
+      if mappedSourceSlot(resources: resources, readbackSlot: slot) is bufferSlot { ret true }
+    }
+    slot = slot + 1
+  }
+  ret false
+}
+
+# Starts a nonblocking MapRead of [offset, offset+size) of `buffer`. none for an
+# invalid/out-of-range/non-MapRead buffer, a buffer already being read
+# (exclusive mapping) or when every readback slot is busy (defer and retry).
+func startReadback(resources: mod GpuResources, buffer: view BufferId, offset: view Int, size: view Int) ret opt ReadbackId {
+  if bufferRangeIsValid(resources: resources, id: buffer, offset: offset, size: size) is false { ret none }
+  if hasUsageFlag(usage: bufferUsage(resources: resources, id: buffer), flag: WGPUBufferUsage_MapRead) is false { ret none }
+  if bufferIsMapped(resources: resources, bufferSlot: buffer.slot) { ret none }
+  let slot: Int = findFreeSlot(table: resources.readbacks, capacity: resources.capacity)
+  if slot < 0 { ret none }
+  # Start the native map and adopt it into the slot in one unsafe region so no
+  # raw request pointer escapes; a rejected start is released and reported none.
+  var started: Bool = false
+  unsafe {
+    let request: Ptr = startRead(buffer: slotHandle(table: resources.buffers, slot: buffer.slot), offset: offset as UInt64, size: size as UInt64)
+    if readStartStatus(request: request) is not -1 {
+      storeHandle(table: resources.readbacks, slot: slot, handle: request)
+      started = true
+    } else {
+      let released: Ptr = releaseRead(request: request)
+    }
+  }
+  if started is false { ret none }
+  let start: Int = resources.depKinds.length
+  appendDep(resources: resources, kind: kindBuffer, slot: buffer.slot, generation: buffer.generation)
+  resources.readbacks.nativeIndex.set(index: slot, value: size)
+  resources.readbacks.completed.set(index: slot, value: 0)
+  resources.readbacks.depStart.set(index: slot, value: start)
+  resources.readbacks.depCount.set(index: slot, value: 1)
+  pinSlice(resources: resources, start: start, count: 1)
+  ret ReadbackId { managerTag: resources.managerTag, slot: slot, generation: slotGeneration(table: resources.readbacks, slot: slot) }
+}
+
+# Nonblocking: -1 invalid, 0 pending, 1 success (bytes available), 2 failure.
+# The terminal state is cached; polling after it keeps answering the same value.
+func pollReadback(resources: mod GpuResources, id: view ReadbackId) ret Int {
+  if isValidReadback(resources: resources, id: id) is false { ret 0 - 1 }
+  let cached: Int = intAt(list: resources.readbacks.completed, index: id.slot)
+  if cached is 1 { ret 1 }
+  if cached is 2 { ret 2 }
+  var status: Int = 0
+  unsafe { status = pollRead(request: slotHandle(table: resources.readbacks, slot: id.slot)) }
+  if status is 1 { resources.readbacks.completed.set(index: id.slot, value: 1) ret 1 }
+  if status is -1 { resources.readbacks.completed.set(index: id.slot, value: 2) ret 2 }
+  ret 0
+}
+
+# The requested byte count of a readback, or -1 for an invalid ID.
+func readbackByteCount(resources: view GpuResources, id: view ReadbackId) ret Int {
+  if isValidReadback(resources: resources, id: id) is false { ret 0 - 1 }
+  ret intAt(list: resources.readbacks.nativeIndex, index: id.slot)
+}
+
+# Copies the completed bytes into `destination` (a temporary borrow). Only after
+# success; false while pending, on failure or for a corrupt destination. The
+# native copy is bounded by the destination's real allocation (#897) and never
+# retains it, so the List may grow between poll and copy.
+func copyReadback(resources: view GpuResources, id: view ReadbackId, destination: mod List(UInt8)) ret Bool {
+  if isValidReadback(resources: resources, id: id) is false { ret false }
+  if intAt(list: resources.readbacks.completed, index: id.slot) is not 1 { ret false }
+  if destination.length < 0 or destination.cap < destination.length { ret false }
+  let capacity: UInt64 = destination.length as UInt64
+  unsafe { ret copyRead(request: slotHandle(table: resources.readbacks, slot: id.slot), destination: destination.data, capacity: capacity) is 1 }
+}
+
+# Releases the native request exactly once (cancelling it if still pending; the
+# pending callback keeps its own reference until it arrives) and unpins the
+# source buffer, releasing it if it was retired behind the map.
+func retireReadback(resources: mod GpuResources, id: view ReadbackId) ret Bool {
+  if isValidReadback(resources: resources, id: id) is false { ret false }
+  let start: Int = intAt(list: resources.readbacks.depStart, index: id.slot)
+  let count: Int = intAt(list: resources.readbacks.depCount, index: id.slot)
+  unsafe { retireSlot(table: resources.readbacks, slot: id.slot, kind: kindReadback, empty: webgpuNull()) }
+  unpinSlice(resources: resources, start: start, count: count)
+  ret true
+}
+
+# ----- blocking waits (diagnostics, captures, shutdown — never per frame) -----
+
+# Spins on pollSubmission until the submission completed (true) or is invalid /
+# the spin budget ran out (false).
+func waitSubmission(resources: mod GpuResources, id: view SubmissionId) ret Bool {
+  var spins: Int = 0
+  loop spins < 100000000 {
+    let status: Int = pollSubmission(resources: resources, id: id)
+    if status is 1 { ret true }
+    if status < 0 { ret false }
+    spins = spins + 1
+  }
+  ret false
+}
+
+# Spins on pollReadback until the bytes are available (true) or the readback
+# failed / was cancelled / the spin budget ran out (false).
+func waitReadback(resources: mod GpuResources, id: view ReadbackId) ret Bool {
+  var spins: Int = 0
+  loop spins < 100000000 {
+    let status: Int = pollReadback(resources: resources, id: id)
+    if status is 1 { ret true }
+    if status is not 0 { ret false }
+    spins = spins + 1
+  }
+  ret false
+}

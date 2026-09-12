@@ -1,0 +1,168 @@
+# Gpu2dCanvasClip — the 2D canvas's clip stack (#144/#118; #918 split of
+# Gpu2dCanvas for the 1000-line cap): clip rects in DESIGN units, index 0 the
+# "no clip" sentinel, a push intersecting its parent so nested clips compose,
+# the per-run scissor over the design->physical transform (g2dScissor) and
+# the rounded-clip uniform (clipUniformFor) the box pass binds per run.
+import String
+import Math
+open webgpu/Webgpu
+open webgpu/Context
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuRender
+open gpu/GpuRenderTransfer
+open gpu/GpuRenderPass
+open gpu/GpuIds
+open Gpu2dCanvasImage
+open Gpu2dCanvas
+
+# Clip stack (#144/#118) in DESIGN units. Index 0 is the "no clip" sentinel
+# (full framebuffer). A push intersects with the parent so nested clips
+# compose; the larger radius wins (the scissor bbox already enforces the
+# parent's straight edges). Reset each frame.
+func clipReset(canvas: mod Gpu2dCanvas) {
+  canvas.clipX.clear()
+  canvas.clipY.clear()
+  canvas.clipW.clear()
+  canvas.clipH.clear()
+  canvas.clipRadius.clear()
+  canvas.clipFull.clear()
+  canvas.clipStack.clear()
+  canvas.clipX.add(value: 0.0)
+  canvas.clipY.add(value: 0.0)
+  canvas.clipW.add(value: 0.0)
+  canvas.clipH.add(value: 0.0)
+  canvas.clipRadius.add(value: 0.0)
+  canvas.clipFull.add(value: true)
+  canvas.currentClip = 0
+}
+
+func clipFloatAt(list: view List(Float), index: copy Int) ret Float {
+  if let value: Float = list.copyAt(index: index) { ret value }
+  ret 0.0
+}
+
+func clipIsFull(canvas: view Gpu2dCanvas, clip: copy Int) ret Bool {
+  if clip <= 0 or clip >= canvas.clipFull.length { ret true }
+  if let full: Bool = canvas.clipFull.copyAt(index: clip) { ret full }
+  ret true
+}
+
+func canvasPushClip(canvas: mod Gpu2dCanvas, x: copy Float, y: copy Float, w: copy Float, h: copy Float, radius: copy Float) {
+  let parent: Int = canvas.currentClip
+  var childX: Float = x
+  var childY: Float = y
+  var childW: Float = w
+  var childH: Float = h
+  var childRadius: Float = radius
+  if not clipIsFull(canvas: canvas, clip: parent) {
+    let parentX: Float = clipFloatAt(list: canvas.clipX, index: parent)
+    let parentY: Float = clipFloatAt(list: canvas.clipY, index: parent)
+    let parentW: Float = clipFloatAt(list: canvas.clipW, index: parent)
+    let parentH: Float = clipFloatAt(list: canvas.clipH, index: parent)
+    let parentRadius: Float = clipFloatAt(list: canvas.clipRadius, index: parent)
+    let x0: Float = Math.max(a: parentX, b: x)
+    let y0: Float = Math.max(a: parentY, b: y)
+    let x1: Float = Math.min(a: parentX + parentW, b: x + w)
+    let y1: Float = Math.min(a: parentY + parentH, b: y + h)
+    childX = x0
+    childY = y0
+    childW = Math.max(a: 0.0, b: x1 - x0)
+    childH = Math.max(a: 0.0, b: y1 - y0)
+    childRadius = Math.max(a: radius, b: parentRadius)
+  }
+  canvas.clipX.add(value: childX)
+  canvas.clipY.add(value: childY)
+  canvas.clipW.add(value: childW)
+  canvas.clipH.add(value: childH)
+  canvas.clipRadius.add(value: childRadius)
+  canvas.clipFull.add(value: false)
+  canvas.clipStack.add(value: parent)
+  canvas.currentClip = canvas.clipFull.length - 1
+}
+
+func canvasPopClip(canvas: mod Gpu2dCanvas) {
+  if canvas.clipStack.length > 0 {
+    if let parent: Int = canvas.clipStack.copyAt(index: canvas.clipStack.length - 1) { canvas.currentClip = parent }
+    canvas.clipStack.removeLast()
+  } else {
+    canvas.currentClip = 0
+  }
+}
+
+# Resolve a clip index to a framebuffer-pixel scissor (via the design->physical
+# transform of this flush) and set it on the open pass, clamped to the target.
+func g2dScissor(canvas: view Gpu2dCanvas, clip: copy Int) {
+  let physW: Float = xformAt(canvas: canvas, index: 0)
+  let physH: Float = xformAt(canvas: canvas, index: 1)
+  let scaleX: Float = xformAt(canvas: canvas, index: 2)
+  let scaleY: Float = xformAt(canvas: canvas, index: 3)
+  let offX: Float = xformAt(canvas: canvas, index: 4)
+  let offY: Float = xformAt(canvas: canvas, index: 5)
+  var x0: Float = 0.0
+  var y0: Float = 0.0
+  var x1: Float = physW
+  var y1: Float = physH
+  if not clipIsFull(canvas: canvas, clip: clip) {
+    let clipX: Float = clipFloatAt(list: canvas.clipX, index: clip)
+    let clipY: Float = clipFloatAt(list: canvas.clipY, index: clip)
+    let clipW: Float = clipFloatAt(list: canvas.clipW, index: clip)
+    let clipH: Float = clipFloatAt(list: canvas.clipH, index: clip)
+    x0 = clipX * scaleX + offX
+    y0 = clipY * scaleY + offY
+    x1 = (clipX + clipW) * scaleX + offX
+    y1 = (clipY + clipH) * scaleY + offY
+  }
+  x0 = Math.max(a: 0.0, b: x0)
+  y0 = Math.max(a: 0.0, b: y0)
+  x1 = Math.min(a: physW, b: x1)
+  y1 = Math.min(a: physH, b: y1)
+  if x1 < x0 { x1 = x0 }
+  if y1 < y0 { y1 = y0 }
+  var ix: Int = (x0 + 0.5).toInt()
+  var iy: Int = (y0 + 0.5).toInt()
+  var iw: Int = (x1 - x0 + 0.5).toInt()
+  var ih: Int = (y1 - y0 + 0.5).toInt()
+  let pw: Int = (physW + 0.5).toInt()
+  let ph: Int = (physH + 0.5).toInt()
+  if ix > pw { ix = pw }
+  if iy > ph { iy = ph }
+  if ix + iw > pw { iw = pw - ix }
+  if iy + ih > ph { ih = ph - iy }
+  unsafe { setScissorInPass(pass: canvas.framePass, x: ix, y: iy, width: iw, height: ih) }
+}
+
+# This run's clip uniform (a persistent per-run-slot pool of 32-byte uniforms):
+# [x,y,w,h] design units + [radius, enabled, 0, 0]. `enabled` only for a ROUNDED
+# clip — a rectangular clip is the scissor alone, so its SDF stays off.
+func clipUniformFor(canvas: mod Gpu2dCanvas, resources: mod GpuResources, clip: copy Int) ret BufferId {
+  let slot: Int = canvas.clipCursor
+  canvas.clipCursor = slot + 1
+  loop canvas.clipUniforms.length <= slot { canvas.clipUniforms.add(value: noBufferId()) }
+  var uniform: BufferId = noBufferId()
+  if let known: BufferId = canvas.clipUniforms.copyAt(index: slot) { uniform = known }
+  if not isValidBuffer(resources: resources, id: uniform) {
+    if let made: BufferId = createBuffer(resources: resources, size: 32, usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst) {
+      uniform = made
+      canvas.clipUniforms.set(index: slot, value: made)
+    }
+  }
+  canvas.clipScratch.clear()
+  let rounded: Bool = not clipIsFull(canvas: canvas, clip: clip) and clipFloatAt(list: canvas.clipRadius, index: clip) > 0.0
+  if rounded {
+    canvas.clipScratch.add(value: clipFloatAt(list: canvas.clipX, index: clip))
+    canvas.clipScratch.add(value: clipFloatAt(list: canvas.clipY, index: clip))
+    canvas.clipScratch.add(value: clipFloatAt(list: canvas.clipW, index: clip))
+    canvas.clipScratch.add(value: clipFloatAt(list: canvas.clipH, index: clip))
+    canvas.clipScratch.add(value: clipFloatAt(list: canvas.clipRadius, index: clip))
+    canvas.clipScratch.add(value: 1.0)
+    canvas.clipScratch.add(value: 0.0)
+    canvas.clipScratch.add(value: 0.0)
+  } else {
+    loop var k: Int = 0, k < 8, ++k { canvas.clipScratch.add(value: 0.0) }
+  }
+  unsafe {
+    let written: Bool = writeBufferFromPtr(resources: resources, id: uniform, offset: 0, data: canvas.clipScratch.data, size: 32)
+  }
+  ret uniform
+}

@@ -176,7 +176,9 @@ void pp_blank_line_before(PrettyPrinter* pp, size_t line) {
 
 void pp_print_verbatim_range(PrettyPrinter* pp, size_t start_line, size_t end_line) {
   const char* start = get_line_ptr(pp->source, start_line);
-  const char* end = get_line_ptr(pp->source, end_line + 1);
+  /* A `# raefmt: off` with no matching `on` runs to the end of the file. */
+  const char* end = (end_line == (size_t)-1) ? pp->source + strlen(pp->source)
+                                             : get_line_ptr(pp->source, end_line + 1);
   if (start && end && end > start) {
     if (pp->out) fwrite(start, 1, (size_t)(end - start), pp->out);
     pp->start_of_line = 1;
