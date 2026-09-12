@@ -83,11 +83,6 @@ static int             gb_targets_gen = 0;
  * encoder / render pass (a manager Recording per frame). C keeps the WGSL
  * sources, the frame-derived uniform MATH below and a "pass open" flag for
  * the metaball prep, which still runs here. */
-/* Metaball cluster slots are PER FRAME (#392). Declared here because the
- * reset belongs beside every other per-frame counter, while the buffers
- * live in runtime_gpu3d_gbuffer_sdf.c, which is included after this. */
-static int                gb_sdf_group;
-static int                gb_frame_open = 0;   /* 1 between the Rae begin and end */
 
 /* This frame's view-projection and clear colour, kept for the LIGHTING
  * pass. Lighting reconstructs world position from depth, which needs the
@@ -694,11 +689,6 @@ int64_t rae_gb_targets_gen(void) { return (int64_t)gb_targets_gen; }
 int64_t rae_gb_frame_data(rae_Mat4* viewProj, float clearR, float clearG, float clearB,
                           int64_t w, int64_t h, void* out) {
     if (!viewProj || !out) return 0;
-    /* Without this the counter climbs past GB_SDF_MAX_GROUPS after a few
-     * frames and every later cluster is silently dropped — metaballs that
-     * render for two frames and then vanish, with no error anywhere. The
-     * forward path resets its equivalent in exactly this place. */
-    gb_sdf_group = 0;
     memcpy(gb_viewproj, viewProj->m.v, 16 * sizeof(float));
     gb_clear[0] = clearR; gb_clear[1] = clearG; gb_clear[2] = clearB;
     /* First frame has no previous view-projection; reusing this one gives
@@ -751,10 +741,8 @@ void* rae_gb_view_depth(void) { return (void*)gb_depth_view; }
 /* The biased zero the motion channel clears to (128/255); Rae uses it for the
  * C-target clear so a static background reads as "not moving". */
 float rae_gb_motion_zero(void) { return GB_MOTION_ZERO; }
-/* #906: the frame's encoder + pass are the Rae GbufferCache's (a manager
- * Recording); C only learns whether a geometry pass is open, for the metaball
- * prep and the skin readiness check. */
-void rae_gb_set_frame_open(int64_t open) { gb_frame_open = open ? 1 : 0; }
+/* #906/#922: the frame's encoder + pass are the Rae GbufferCache's; nothing
+ * in C needs to know whether a geometry pass is open any more. */
 
 /* Queue one mesh into the G-buffer. `model` arrives as a Mat4 by value —
  * 16 floats the caller already had on the stack — and is memcpy'd into a
@@ -942,5 +930,4 @@ void rae_ext_Gbuffer_shutdown(void) {
     gb_release_targets();
     gb_have_prev_vp = false;
     gb_jitter_frame = 0;
-    gb_frame_open = 0;
 }
