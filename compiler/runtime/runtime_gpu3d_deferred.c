@@ -759,26 +759,10 @@ GB_FULLSCREEN_VS
 "  return vec4<f32>(rgbB, 1.0);\n"
 "}\n";
 
-/* #923: the pass objects are Rae's. What is left of the deferred prep is the
- * device + surface check and the shadow cascade DEFAULTS: the lighting bind
- * samples the cascade array even when no shadow pass ran (wgpu aborts on a
- * null binding rather than returning an error), and an unrendered cascade is
- * never sampled because shadowCfg.x stays 0. */
-static void gb_deferred_ensure_shadow_defaults(void) {
-    g3d_shadow_init();
-    g3d_shadow_ensure_targets(G3D_SHADOW_DEFAULT_RES, G3D_SHADOW_DEFAULT_CASCADES);
-}
-
-/* The shadow cascades' inputs the Rae lighting pass adopts (C until #925). */
-void* rae_gb_shadow_frame_ubuf(void)  { return (void*)g3d_sm_frame_ubuf; }
-int64_t rae_gb_shadow_frame_bytes(void){ return 320; }
-void* rae_gb_shadow_array_view(void)  { return (void*)g3d_sm_array_view; }
-void* rae_gb_shadow_sampler(void)     { return (void*)g3d_sm_sampler; }
-
-
+/* #923/#925: the pass objects and the shadow cascades are Rae's. What is
+ * left of the deferred prep is the device + surface check. */
 int64_t rae_gb_deferred_prepare(void) {
     if (!g_wgpu_dev) return 0;
-    gb_deferred_ensure_shadow_defaults();
     return g_g2d_surface ? 1 : 0;
 }
 const char* rae_gb_composite_wgsl(void)  { return GB_COMPOSITE_WGSL; }

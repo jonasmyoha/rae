@@ -937,10 +937,6 @@ void* rae_gb_lit_texture(void);
 void* rae_gb_lit_copy_texture(void);
 void* rae_gb_lit_copy_view(void);
 int64_t rae_gb_lit_format(void);
-void* rae_gb_shadow_frame_ubuf(void);
-int64_t rae_gb_shadow_frame_bytes(void);
-void* rae_gb_shadow_array_view(void);
-void* rae_gb_shadow_sampler(void);
 void rae_ext_Gbuffer_skyHosekPush(int64_t index, float value);
 /* TAA pass in Rae (#504). */
 int64_t rae_gb_taa_ready(void);
@@ -959,29 +955,13 @@ void* rae_gb_pyr_from_depth_pipeline(void);
 void* rae_gb_pyr_reduce_pipeline(void);
 void* rae_gb_pyr_src_view(int64_t i);
 void* rae_gb_pyr_rt_view(int64_t i);
-/* Shadow cascade render in Rae (#504). The feed (cascade uniforms + draw queue)
- * is shadow-map bookkeeping, reclassified from rae_ext_Gpu3d_shadow* (#514). */
-void rae_sm_begin(const float* cascades, int64_t count, int64_t resolution,
-                  const float* splits, const float* texelWorld, const float* depthRange);
-void rae_sm_queue_mesh(int64_t mesh, void* vbuf, void* ibuf, int64_t icount, struct rae_Mat4* model);
-void rae_sm_queue_skinned(int64_t mesh, void* vbuf, void* ibuf, int64_t icount, void* palette,
-                          struct rae_Mat4* model, int64_t paletteBase);
-void rae_sm_record_metaballs(const float* packedBalls, int64_t count, float smoothing);
-void rae_sm_shutdown(void);
-int64_t rae_sm_ready(void);
-void rae_sm_upload_models(void);
-void rae_sm_set_shadow_ambient(double v);
-int64_t rae_sm_cascade_count(void);
-int64_t rae_sm_draw_count(void);
-void* rae_sm_layer_view(int64_t c);
-int64_t rae_sm_caster_ready(int64_t i, int64_t c);
-void* rae_sm_caster_pipeline(int64_t i);
-void* rae_sm_caster_bind(int64_t i, int64_t c);
-void* rae_sm_caster_vbuf(int64_t i);
-void* rae_sm_caster_ibuf(int64_t i);
-int64_t rae_sm_caster_icount(int64_t i);
-int64_t rae_sm_caster_key(int64_t i);
-void rae_sm_draw_metaballs(int64_t c, void* passptr);
+/* Shadow cascades (#925): the ShadowCache (lib/ShadowMaps.rae) owns the targets,
+ * pipelines, queue and passes; C keeps the WGSL and receives the three sampled
+ * inputs BORROWED for the forward scene / skin binds. */
+const char* rae_sm_wgsl_static(void);
+const char* rae_sm_wgsl_skinned(void);
+const char* rae_sm_wgsl_sdf(void);
+void rae_g3d_set_shadow_inputs(void* frame_ubuf, void* array_view, void* sampler);
 /* gpu2d frame lifecycle in Rae (#504). */
 void rae_g2d_frame_reset(void);
 void rae_g2d_present(void* texture, int64_t width, int64_t height);

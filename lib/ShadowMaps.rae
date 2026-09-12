@@ -1,0 +1,725 @@
+# ShadowMaps — the sun's cascaded shadow maps as the renderer's manager
+# objects (#925; the GPU half of docs/shadow-system-design.md §3 Layer A).
+#
+# The cascade FITTING is not here: it is pure arithmetic in Shadow3d.rae,
+# where test 579 checks the anti-shimmer property without a GPU. This module
+# only rasterises depth into the cascades and publishes them for sampling:
+#
+#   * TARGETS: one Depth32Float array texture with a layer per cascade, a 2D
+#     view per layer (the render attachments), one 2DArray view (what the
+#     lighting passes sample) and a comparison sampler (2x2 PCF per tap).
+#     Recreated when the fit's resolution / count changes; `gen` bumps so a
+#     bind built over the old views is rebuilt rather than sampling a freed
+#     texture (the DeferredTargets pattern).
+#   * PIPELINES: one depth-only pipeline per vertex format — static (32 B)
+#     and skinned (80 B, palette-posed in the vertex stage) — from the WGSL C
+#     keeps (rae_sm_wgsl_*). NOT reverse-Z: cascades are orthographic, where
+#     depth is linear, so standard Less, clear to 1.0. Front-face culling and
+#     a rasteriser bias (constant 2, slope 2.5) handle the acne.
+#   * THE CASTER QUEUE: the shadow pass runs BEFORE the scene pass, so it
+#     needs its own walk of the scene; casters are queued (model matrix,
+#     buffers, palette base) between shadowBegin and shadowEnd, uploaded once
+#     and drawn instanced per run of equal batch key (mesh + skinned).
+#   * THE FRAME UNIFORM (320 B) the lighting reads: the cascade matrices,
+#     splits, texel sizes, depth ranges, and shadowCfg = (count, resolution,
+#     ambient darkening). Unused slots stay zero and cfg.x carries the live
+#     count, so an app that never runs the pass simply gets 1.0.
+#
+# Owned by the renderer (RenderPasses.shadow / Renderer3d.shadow); the
+# metaball casters are ShadowMapsSdf.rae.
+import String
+import Math
+open Scene3d
+open Math3d
+open Shadow3d
+open MeshStore
+open SkinStore
+open webgpu/Webgpu
+open webgpu/Context
+open gpu/GpuResources
+open gpu/GpuTextures
+open gpu/GpuLifetime
+open gpu/GpuRender
+open gpu/GpuRenderDepth
+open gpu/GpuRenderPass
+open gpu/GpuRenderTransfer
+open gpu/GpuIds
+open ShadowMapsSdf
+
+const shadowMaxCascades: Int = 4
+
+const shadowMaxDraws: Int = 4096
+
+const shadowModelBytes: Int = 262144  # shadowMaxDraws mat4s
+
+const shadowPaletteBaseBytes: Int = 16384  # shadowMaxDraws u32s
+
+const shadowFrameFloats: Int = 80
+
+const shadowFrameBytes: Int = 320
+
+const shadowDefaultResolution: Int = 2048
+
+const shadowDefaultCascades: Int = 3
+
+const shadowSkinnedKeyBit: Int = 1099511627776  # 1 << 40: the skinned half of a batch key
+
+func nativeSmWgslStatic() unsafe extern("rae_sm_wgsl_static") ret Buffer(Any)
+
+func nativeSmWgslSkinned() unsafe extern("rae_sm_wgsl_skinned") ret Buffer(Any)
+
+type ShadowCache {
+  objectsMade: Bool
+  texture: TextureId
+  arrayView: TextureViewId
+  layerViews: List(TextureViewId)
+  sampler: SamplerId
+  resolution: Int
+  layers: Int
+  gen: Int  # bumped when the targets are recreated
+  staticPipeline: RenderPipelineId
+  skinPipeline: RenderPipelineId
+  cascadeUniforms: List(BufferId)  # one mat4 per cascade
+  models: BufferId
+  paletteBases: BufferId
+  frameUniform: BufferId
+  staticBinds: List(BindGroupId)  # per cascade
+  skinBinds: List(BindGroupId)  # per cascade, over `palette`
+  palette: BufferId  # the SkinStore palette the skin binds are built over
+  enabled: Bool  # between shadowBegin and shadowEnd
+  cascadeCount: Int
+  cascadeVp: List(Float)  # cascadeCount * 16
+  depthRange: List(Float)
+  drawCount: Int
+  modelFloats: List(Float)  # 16 per caster
+  paletteBaseRows: List(Int32)
+  casterKeys: List(Int)
+  casterVbufs: List(BufferId)
+  casterIbufs: List(BufferId)
+  casterIcounts: List(Int)
+  shadowAmbient: Float
+  sdf: ShadowSdfCache
+  inFlight: List(SubmissionId)
+  scratch: List(Float)
+}
+
+func createShadowCache() ret ShadowCache {
+  ret ShadowCache {
+    objectsMade: false
+    texture: noTextureId()
+    arrayView: noTextureViewId()
+    layerViews: fillTextureViewIds(count: shadowMaxCascades)
+    sampler: noSamplerId()
+    resolution: 0
+    layers: 0
+    gen: 0
+    staticPipeline: noRenderPipelineId()
+    skinPipeline: noRenderPipelineId()
+    cascadeUniforms: fillBufferIds(count: shadowMaxCascades)
+    models: noBufferId()
+    paletteBases: noBufferId()
+    frameUniform: noBufferId()
+    staticBinds: fillBindGroupIds(count: shadowMaxCascades)
+    skinBinds: fillBindGroupIds(count: shadowMaxCascades)
+    palette: noBufferId()
+    enabled: false
+    cascadeCount: 0
+    cascadeVp: List.create(Float, cap: 64)
+    depthRange: List.create(Float, cap: shadowMaxCascades)
+    drawCount: 0
+    modelFloats: List.create(Float, cap: 1024)
+    paletteBaseRows: List.create(Int32, cap: 64)
+    casterKeys: List.create(Int, cap: 64)
+    casterVbufs: List.create(BufferId, cap: 64)
+    casterIbufs: List.create(BufferId, cap: 64)
+    casterIcounts: List.create(Int, cap: 64)
+    shadowAmbient: 0.0
+    sdf: createShadowSdfCache()
+    inFlight: List.create(SubmissionId, cap: 4)
+    scratch: List.create(Float, cap: shadowFrameFloats)
+  }
+}
+
+func floatAt(list: view List(Float), index: copy Int) ret Float {
+  ret list.copyAtFallback(index: index, fallback: 0.0)
+}
+
+func sameBufferId(a: view BufferId, b: view BufferId) ret Bool {
+  ret a.slot is b.slot and a.generation is b.generation and a.managerTag is b.managerTag
+}
+
+# The three inputs the lighting passes bind: false until the targets exist.
+func shadowTargetsReady(shadow: view ShadowCache, resources: view GpuResources) ret Bool {
+  if not isValidTextureView(resources: resources, id: shadow.arrayView) {
+    ret false
+  }
+  if not isValidSampler(resources: resources, id: shadow.sampler) {
+    ret false
+  }
+  ret isValidBuffer(resources: resources, id: shadow.frameUniform)
+}
+
+func casterPipelineSpec(skinned: copy Bool) ret DepthPipelineSpec {
+  var attributes: List(VertexAttributeSpec) = List.create(VertexAttributeSpec, cap: 3)
+  attributes.add(value: { format: WGPUVertexFormat_Float32x3, offset: 0, location: 0 })
+  var stride: Int = 32
+  if skinned {
+    attributes.add(value: { format: WGPUVertexFormat_Float32x4, offset: 32, location: 3 })
+    attributes.add(value: { format: WGPUVertexFormat_Float32x4, offset: 48, location: 4 })
+    stride = 80
+  }
+  ret DepthPipelineSpec {
+    vertexStride: stride
+    attributes: own attributes
+    fragmentEntry: ""
+    depthFormat: WGPUTextureFormat_Depth32Float
+    cullMode: WGPUCullMode_Front
+    depthBias: 2
+    depthBiasSlopeScale: 2.5
+  }
+}
+
+# The pipelines, uniforms and queue buffers (once per manager).
+func ensureShadowObjects(shadow: mod ShadowCache, resources: mod GpuResources) {
+  if shadow.objectsMade {
+    ret
+  }
+  shadow.objectsMade = true
+  var staticSource: String = ""
+  var skinnedSource: String = ""
+  unsafe {
+    staticSource = String.fromCStr(s: nativeSmWgslStatic())
+    skinnedSource = String.fromCStr(s: nativeSmWgslSkinned())
+  }
+  if let pipeline: RenderPipelineId = createDepthPipeline(
+    resources: resources
+    wgsl: staticSource
+    vertexEntry: "vs"
+    spec: casterPipelineSpec(skinned: false)
+  ) {
+    shadow.staticPipeline = pipeline
+  }
+  if let pipeline: RenderPipelineId = createDepthPipeline(
+    resources: resources
+    wgsl: skinnedSource
+    vertexEntry: "vs"
+    spec: casterPipelineSpec(skinned: true)
+  ) {
+    shadow.skinPipeline = pipeline
+  }
+  if let models: BufferId = createBuffer(
+    resources: resources
+    size: shadowModelBytes
+    usage: WGPUBufferUsage_Storage + WGPUBufferUsage_CopyDst
+  ) {
+    shadow.models = models
+  }
+  if let bases: BufferId = createBuffer(
+    resources: resources
+    size: shadowPaletteBaseBytes
+    usage: WGPUBufferUsage_Storage + WGPUBufferUsage_CopyDst
+  ) {
+    shadow.paletteBases = bases
+  }
+  if let frame: BufferId = createBuffer(
+    resources: resources
+    size: shadowFrameBytes
+    usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst
+  ) {
+    shadow.frameUniform = frame
+  }
+  loop var i: Int = 0, i < shadowMaxCascades, ++i {
+    if let uniform: BufferId = createBuffer(
+      resources: resources
+      size: 64
+      usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst
+    ) {
+      shadow.cascadeUniforms.set(index: i, value: uniform)
+    }
+  }
+  if let sampler: SamplerId = createComparisonSampler(resources: resources) {
+    shadow.sampler = sampler
+  }
+}
+
+# The cascade array at `resolution` x `layers`: kept when unchanged, else the
+# old views / texture / binds are retired (deferred behind the GPU by their
+# pins) and `gen` bumps.
+func ensureShadowTargets(
+  shadow: mod ShadowCache
+  resources: mod GpuResources
+  resolution: copy Int
+  layers: copy Int
+) {
+  if isValidTexture(resources: resources, id: shadow.texture) and shadow.resolution is resolution and shadow.layers is layers {
+    ret
+  }
+  retireTextureViewIds(resources: resources, list: shadow.layerViews)
+  retireTextureView(resources: resources, id: shadow.arrayView)
+  retireTexture(resources: resources, id: shadow.texture)
+  retireBindGroupIds(resources: resources, list: shadow.staticBinds)
+  retireBindGroupIds(resources: resources, list: shadow.skinBinds)
+  shadow.arrayView = noTextureViewId()
+  shadow.texture = noTextureId()
+  shadow.resolution = 0
+  shadow.layers = 0
+  if let texture: TextureId = createTextureArray(
+    resources: resources
+    width: resolution
+    height: resolution
+    layers: layers
+    format: WGPUTextureFormat_Depth32Float
+    usage: WGPUTextureUsage_RenderAttachment + WGPUTextureUsage_TextureBinding
+  ) {
+    shadow.texture = texture
+    if let arrayView: TextureViewId = createTextureViewArray(
+      resources: resources
+      texture: texture
+      layers: layers
+    ) {
+      shadow.arrayView = arrayView
+    }
+    loop var i: Int = 0, i < layers, ++i {
+      if let layerView: TextureViewId = createTextureViewLayer(
+        resources: resources
+        texture: texture
+        layer: i
+      ) {
+        shadow.layerViews.set(index: i, value: layerView)
+      }
+    }
+    shadow.resolution = resolution
+    shadow.layers = layers
+  }
+  shadow.gen = shadow.gen + 1
+}
+
+# What a lighting bind needs even when no shadow pass ran: the default
+# cascade array (never sampled while shadowCfg.x is 0) and a zeroed frame
+# uniform. wgpu aborts on a null binding rather than returning an error.
+func ensureShadowDefaults(shadow: mod ShadowCache, resources: mod GpuResources) {
+  ensureShadowObjects(shadow: shadow, resources: resources)
+  if not isValidTexture(resources: resources, id: shadow.texture) {
+    ensureShadowTargets(
+      shadow: shadow
+      resources: resources
+      resolution: shadowDefaultResolution
+      layers: shadowDefaultCascades
+    )
+  }
+}
+
+# Per-app cast-shadow ambient darkening [0..1], published as shadowCfg.z. The
+# sun shadow multiplies DIRECT only (§5); on a bright top-down scene the
+# ambient floor fills a cast shadow back in, so an app can also pull the
+# ambient down inside the shadow. Default 0 = pure §5.
+func setShadowAmbient(shadow: mod ShadowCache, strength: copy Float) {
+  var clamped: Float = strength
+  if clamped < 0.0 {
+    clamped = 0.0
+  }
+  if clamped > 1.0 {
+    clamped = 1.0
+  }
+  shadow.shadowAmbient = clamped
+}
+
+# Start collecting casters for a fitted cascade set: ensure the targets at
+# the fit's resolution / count, upload the per-cascade matrices and publish
+# the frame uniform to the lighting passes.
+func shadowBegin(
+  shadow: mod ShadowCache
+  resources: mod GpuResources
+  cascades: view ShadowCascades
+) {
+  shadow.enabled = false
+  shadow.drawCount = 0
+  shadow.modelFloats.clear()
+  shadow.paletteBaseRows.clear()
+  shadow.casterKeys.clear()
+  shadow.casterVbufs.clear()
+  shadow.casterIbufs.clear()
+  shadow.casterIcounts.clear()
+  shadowSdfReset(sdf: shadow.sdf)
+  if cascades.count < 1 or cascades.viewProj.length < cascades.count * 16 {
+    ret
+  }
+  var count: Int = cascades.count
+  if count > shadowMaxCascades {
+    count = shadowMaxCascades
+  }
+  var resolution: Int = cascades.resolution
+  if resolution < 256 {
+    resolution = 256
+  }
+  if resolution > 4096 {
+    resolution = 4096
+  }
+  ensureShadowObjects(shadow: shadow, resources: resources)
+  if not isValidRenderPipeline(resources: resources, id: shadow.staticPipeline) {
+    ret
+  }
+  ensureShadowTargets(
+    shadow: shadow
+    resources: resources
+    resolution: resolution
+    layers: count
+  )
+  if not shadowTargetsReady(shadow: shadow, resources: resources) {
+    ret
+  }
+  shadow.cascadeCount = count
+  shadow.cascadeVp.clear()
+  shadow.depthRange.clear()
+  loop var i: Int = 0, i < count * 16, ++i {
+    shadow.cascadeVp.add(value: floatAt(list: cascades.viewProj, index: i))
+  }
+  loop var c: Int = 0, c < count, ++c {
+    shadow.depthRange.add(value: cascades.depthRange.copyAtFallback(index: c, fallback: 1.0))
+    shadow.scratch.clear()
+    loop var k: Int = 0, k < 16, ++k {
+      shadow.scratch.add(value: floatAt(list: cascades.viewProj, index: c * 16 + k))
+    }
+    unsafe {
+      let wroteCascade: Bool = writeBufferFromPtr(
+        resources: resources
+        id: shadow.cascadeUniforms.copyAtFallback(index: c, fallback: noBufferId())
+        offset: 0
+        data: shadow.scratch.data
+        size: 64
+      )
+    }
+  }
+  # The frame uniform: [0..63] the cascade matrices, [64+i] splits, [68+i]
+  # texel world sizes, [72+i] depth ranges, [76] count, [77] resolution (so
+  # the shader turns a UV radius into texels without a second uniform),
+  # [78] ambient darkening.
+  shadow.scratch.clear()
+  loop var f: Int = 0, f < shadowFrameFloats, ++f {
+    shadow.scratch.add(value: 0.0)
+  }
+  loop var i: Int = 0, i < count * 16, ++i {
+    shadow.scratch.set(index: i, value: floatAt(list: cascades.viewProj, index: i))
+  }
+  loop var c: Int = 0, c < count, ++c {
+    shadow.scratch.set(index: 64 + c, value: floatAt(list: cascades.splitFar, index: c))
+    shadow.scratch.set(index: 68 + c, value: floatAt(list: cascades.texelWorld, index: c))
+    shadow.scratch.set(index: 72 + c, value: floatAt(list: shadow.depthRange, index: c))
+  }
+  shadow.scratch.set(index: 76, value: count as Float)
+  shadow.scratch.set(index: 77, value: resolution as Float)
+  shadow.scratch.set(index: 78, value: shadow.shadowAmbient)
+  unsafe {
+    let wroteFrame: Bool = writeBufferFromPtr(
+      resources: resources
+      id: shadow.frameUniform
+      offset: 0
+      data: shadow.scratch.data
+      size: shadowFrameBytes
+    )
+  }
+  shadow.enabled = true
+}
+
+func shadowQueue(
+  shadow: mod ShadowCache
+  key: copy Int
+  vbuf: view BufferId
+  ibuf: view BufferId
+  icount: copy Int
+  model: view Mat4
+  paletteBase: copy Int
+) {
+  if not shadow.enabled or icount < 1 or shadow.drawCount >= shadowMaxDraws {
+    ret
+  }
+  loop var i: Int = 0, i < 16, ++i {
+    shadow.modelFloats.add(value: model.m[i])
+  }
+  var base: Int = paletteBase
+  if base < 0 {
+    base = 0
+  }
+  shadow.paletteBaseRows.add(value: base as Int32)
+  shadow.casterKeys.add(value: key)
+  shadow.casterVbufs.add(value: vbuf)
+  shadow.casterIbufs.add(value: ibuf)
+  shadow.casterIcounts.add(value: icount)
+  shadow.drawCount = shadow.drawCount + 1
+}
+
+# A static caster from a MeshStore, queued by its buffer IDs.
+func drawShadowCaster(
+  shadow: mod ShadowCache
+  meshes: view MeshStore
+  resources: view GpuResources
+  mesh: view MeshHandle
+  model: view Mat4
+) {
+  if not meshHandleIsValid(h: mesh) {
+    ret
+  }
+  if not meshStoreReady(store: meshes, resources: resources, mesh: mesh.id) {
+    ret
+  }
+  shadowQueue(
+    shadow: shadow
+    key: mesh.id
+    vbuf: meshStoreVbuf(store: meshes, mesh: mesh.id)
+    ibuf: meshStoreIbuf(store: meshes, mesh: mesh.id)
+    icount: meshStoreIndexCount(store: meshes, mesh: mesh.id)
+    model: model
+    paletteBase: 0
+  )
+}
+
+# A skinned caster from a SkinStore. `paletteBase` is its start row in the
+# shared palette (characterPaletteBase, #547) — the SAME base its G-buffer
+# instance uses, so a crowd member's shadow shows its own pose; 0 for a lone
+# character. The skin binds are built over the store's palette buffer and
+# rebuilt when a different store's palette arrives.
+func drawShadowCasterSkinned(
+  shadow: mod ShadowCache
+  skins: view SkinStore
+  resources: view GpuResources
+  mesh: view MeshHandle
+  model: view Mat4
+  paletteBase: copy Int
+) {
+  if not meshHandleIsValid(h: mesh) {
+    ret
+  }
+  if not skinStoreReady(store: skins, resources: resources, mesh: mesh.id) {
+    ret
+  }
+  if not skinStorePaletteReady(store: skins, resources: resources) {
+    ret
+  }
+  if not sameBufferId(a: shadow.palette, b: skins.palette) {
+    shadow.palette = skins.palette
+    shadow.skinBinds = fillBindGroupIds(count: shadowMaxCascades)
+  }
+  shadowQueue(
+    shadow: shadow
+    key: mesh.id + shadowSkinnedKeyBit
+    vbuf: meshStoreVbuf(store: skins.meshes, mesh: mesh.id)
+    ibuf: meshStoreIbuf(store: skins.meshes, mesh: mesh.id)
+    icount: skinStoreIndexCount(store: skins, mesh: mesh.id)
+    model: model
+    paletteBase: paletteBase
+  )
+}
+
+# Per cascade: the static bind (cascade matrix, models) and, over the queued
+# palette, the skinned bind (+ palette, palette bases).
+func ensureShadowBinds(shadow: mod ShadowCache, resources: mod GpuResources) {
+  loop var c: Int = 0, c < shadow.layers, ++c {
+    let cascadeUniform: BufferId = shadow.cascadeUniforms.copyAtFallback(
+      index: c
+      fallback: noBufferId()
+    )
+    if not bindGroupIsUsable(
+      resources: resources
+      id: shadow.staticBinds.copyAtFallback(index: c, fallback: noBindGroupId())
+    ) {
+      let entries: List(ResourceRef) = List.create(ResourceRef, cap: 2)
+      entries.add(value: bufferRef(id: cascadeUniform))
+      entries.add(value: bufferRef(id: shadow.models))
+      if let bind: BindGroupId = createRenderBindGroup(
+        resources: resources
+        pipeline: shadow.staticPipeline
+        entries: entries
+      ) {
+        shadow.staticBinds.set(index: c, value: bind)
+      }
+    }
+    let skinBindUsable: Bool = bindGroupIsUsable(
+      resources: resources
+      id: shadow.skinBinds.copyAtFallback(index: c, fallback: noBindGroupId())
+    )
+    if not skinBindUsable and isValidBuffer(resources: resources, id: shadow.palette) {
+      let entries: List(ResourceRef) = List.create(ResourceRef, cap: 4)
+      entries.add(value: bufferRef(id: cascadeUniform))
+      entries.add(value: bufferRef(id: shadow.models))
+      entries.add(value: bufferRef(id: shadow.palette))
+      entries.add(value: bufferRef(id: shadow.paletteBases))
+      if let bind: BindGroupId = createRenderBindGroup(
+        resources: resources
+        pipeline: shadow.skinPipeline
+        entries: entries
+      ) {
+        shadow.skinBinds.set(index: c, value: bind)
+      }
+    }
+  }
+}
+
+# The queued casters into one cascade's open pass: INSTANCED batching (#118).
+# Casters sharing a mesh sit consecutively in the queue (every alive walker
+# for one body part) and the model + palette-base buffers are indexed by
+# instance_index (the queue position), so a RUN of equal keys is ONE
+# DrawIndexed (firstInstance = run start, instanceCount = run length).
+func drawShadowCasters(
+  shadow: view ShadowCache
+  resources: view GpuResources
+  cascade: copy Int
+  pass: copy Ptr
+) {
+  var i: Int = 0
+  loop i < shadow.drawCount {
+    let key: Int = shadow.casterKeys.copyAtFallback(index: i, fallback: 0 - 1)
+    var runEnd: Int = i + 1
+    loop runEnd < shadow.drawCount and shadow.casterKeys.copyAtFallback(
+      index: runEnd
+      fallback: 0 - 1
+    ) is key {
+      runEnd = runEnd + 1
+    }
+    var pipeline: RenderPipelineId = shadow.staticPipeline
+    var bind: BindGroupId = shadow.staticBinds.copyAtFallback(
+      index: cascade
+      fallback: noBindGroupId()
+    )
+    if key >= shadowSkinnedKeyBit {
+      pipeline = shadow.skinPipeline
+      bind = shadow.skinBinds.copyAtFallback(index: cascade, fallback: noBindGroupId())
+    }
+    unsafe {
+      let drawn: Bool = recordDrawIndexedInPass(
+        resources: resources
+        pass: pass
+        pipeline: pipeline
+        bindGroup: bind
+        vertexBuffer: refHandle(
+          resources: resources
+          ref: bufferRef(id: shadow.casterVbufs.copyAtFallback(index: i, fallback: noBufferId()))
+        )
+        indexBuffer: refHandle(
+          resources: resources
+          ref: bufferRef(id: shadow.casterIbufs.copyAtFallback(index: i, fallback: noBufferId()))
+        )
+        indexCount: shadow.casterIcounts.copyAtFallback(index: i, fallback: 0)
+        instanceCount: runEnd - i
+        firstInstance: i
+      )
+    }
+    i = runEnd
+  }
+}
+
+# Rasterise every queued caster into every cascade: upload the queue, then
+# one depth-only pass per cascade layer (they share the buffers and the
+# pipelines, so the cost is the geometry), the metaball casters into the
+# same pass, one tracked submission.
+func shadowEnd(shadow: mod ShadowCache, resources: mod GpuResources) {
+  if not shadow.enabled {
+    ret
+  }
+  shadow.enabled = false
+  if not shadowTargetsReady(shadow: shadow, resources: resources) {
+    ret
+  }
+  if shadow.drawCount > 0 {
+    unsafe {
+      let wroteModels: Bool = writeBufferFromPtr(
+        resources: resources
+        id: shadow.models
+        offset: 0
+        data: shadow.modelFloats.data
+        size: shadow.drawCount * 64
+      )
+      let wroteBases: Bool = writeBufferFromPtr(
+        resources: resources
+        id: shadow.paletteBases
+        offset: 0
+        data: shadow.paletteBaseRows.data
+        size: shadow.drawCount * 4
+      )
+    }
+  }
+  ensureShadowBinds(shadow: shadow, resources: resources)
+  if let recording: Recording = beginRecording(resources: resources) {
+    var opened: Recording = own recording
+    loop var c: Int = 0, c < shadow.cascadeCount, ++c {
+      var targets: RenderTargetSet = createRenderTargetSet(clear: false)
+      setDepthTarget(
+        targets: targets
+        depthView: textureViewRef(
+          id: shadow.layerViews.copyAtFallback(index: c, fallback: noTextureViewId())
+        )
+        clear: true
+        clearValue: 1.0
+        readOnly: false
+      )
+      unsafe {
+        let pass: Ptr = beginRenderPassMulti(
+          recording: opened
+          resources: resources
+          targets: targets
+        )
+        if pass is not webgpuNull() {
+          drawShadowCasters(
+            shadow: shadow
+            resources: resources
+            cascade: c
+            pass: pass
+          )
+          shadowSdfDraw(
+            shadow: shadow
+            resources: resources
+            cascade: c
+            pass: pass
+          )
+          endRenderPass(pass: pass)
+        }
+      }
+    }
+    recordRenderPipelineUse(recording: opened, resources: resources, id: shadow.staticPipeline)
+    recordRenderPipelineUse(recording: opened, resources: resources, id: shadow.skinPipeline)
+    loop var c: Int = 0, c < shadow.cascadeCount, ++c {
+      recordBindGroupUse(
+        recording: opened
+        resources: resources
+        id: shadow.staticBinds.copyAtFallback(index: c, fallback: noBindGroupId())
+      )
+      recordBindGroupUse(
+        recording: opened
+        resources: resources
+        id: shadow.skinBinds.copyAtFallback(index: c, fallback: noBindGroupId())
+      )
+    }
+    shadowSdfRecordUses(sdf: shadow.sdf, recording: opened, resources: resources)
+    let tracked: opt SubmissionId = trackSubmission(
+      inFlight: shadow.inFlight
+      resources: resources
+      recording: opened
+    )
+  }
+  pollSubmissions(inFlight: shadow.inFlight, resources: resources)
+}
+
+# How many casters the last pass rasterised. A pass that draws NOTHING still
+# produces a lit, non-blank frame, so only a count can tell a working pass
+# from a dead one (#388).
+func shadowCasterCount(shadow: view ShadowCache) ret Int {
+  ret shadow.drawCount
+}
+
+# Retire everything (renderer shutdown, before the manager itself).
+func shadowShutdown(shadow: mod ShadowCache, resources: mod GpuResources) {
+  drainSubmissions(inFlight: shadow.inFlight, resources: resources)
+  shadowSdfShutdown(sdf: shadow.sdf, resources: resources)
+  retireBindGroupIds(resources: resources, list: shadow.staticBinds)
+  retireBindGroupIds(resources: resources, list: shadow.skinBinds)
+  retireTextureViewIds(resources: resources, list: shadow.layerViews)
+  retireTextureView(resources: resources, id: shadow.arrayView)
+  retireTexture(resources: resources, id: shadow.texture)
+  retireSampler(resources: resources, id: shadow.sampler)
+  retireBufferIds(resources: resources, list: shadow.cascadeUniforms)
+  retireBuffer(resources: resources, id: shadow.models)
+  retireBuffer(resources: resources, id: shadow.paletteBases)
+  retireBuffer(resources: resources, id: shadow.frameUniform)
+  retireRenderPipeline(resources: resources, id: shadow.staticPipeline)
+  retireRenderPipeline(resources: resources, id: shadow.skinPipeline)
+  shadow = createShadowCache()
+}

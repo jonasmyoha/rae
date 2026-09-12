@@ -1,0 +1,383 @@
+# ShadowMapsSdf — metaball clusters as shadow CASTERS, on the ShadowCache
+# (#925; was the C rae_sm_draw_metaballs). Metaballs have no triangles, so
+# the cascade pass cannot rasterise them: instead the same field the
+# G-buffer raymarches is marched FROM THE LIGHT and its hit depth written.
+#
+# ORTHOGRAPHIC RAYS. Under a directional light every ray is parallel, so
+# the direction is constant and only the origin varies per shadow-map
+# pixel — which is why the cascade matrix's INVERSE is uploaded: it turns a
+# shadow-map pixel back into a world point on the near plane. The light
+# direction is recovered from the cascade matrix itself (row 2 of the light
+# view is -forward; the ortho projection leaves it unrotated) so it cannot
+# disagree with the fit.
+#
+# A QUAD OVER THE CLUSTER'S PROJECTED EXTENT, not a fullscreen triangle
+# (#398): a 2-metre blob covers a tiny fraction of a 2048 map, and every
+# pixel outside its AABB's projection missed anyway. The box is grown by the
+# smoothing distance because the smooth union BULGES beyond the spheres, and
+# a cascade where the blob is sub-texel is skipped: it could write nothing a
+# sample would ever read.
+import String
+import Math
+import Vec3
+open Math3d
+open webgpu/Webgpu
+open webgpu/Context
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuRender
+open gpu/GpuRenderDepth
+open gpu/GpuRenderPass
+open gpu/GpuRenderTransfer
+open gpu/GpuIds
+open ShadowMaps
+
+const shadowSdfMaxClusters: Int = 8
+
+const shadowSdfMaxBalls: Int = 64
+
+const shadowSdfBallBytes: Int = 1024  # shadowSdfMaxBalls vec4s
+
+const shadowSdfUniformFloats: Int = 44  # 2 mat4 + lightDir + params + ndc bounds
+
+const shadowSdfUniformBytes: Int = 176
+
+const shadowSdfSlots: Int = 32  # shadowMaxCascades * shadowSdfMaxClusters
+
+const shadowSdfFar: Float = 1000000000.0  # an "unset" AABB bound
+
+func nativeSmWgslSdf() unsafe extern("rae_sm_wgsl_sdf") ret Buffer(Any)
+
+type ShadowSdfCache {
+  pipeMade: Bool
+  pipeline: RenderPipelineId
+  balls: List(BufferId)  # per cluster
+  uniforms: List(BufferId)  # per cascade x cluster
+  binds: List(BindGroupId)  # per cascade x cluster
+  clusters: Int  # queued this frame
+  ballFloats: List(Float)  # CPU copy, shadowSdfMaxBalls * 4 per cluster
+  counts: List(Int)
+  smoothing: List(Float)
+  scratch: List(Float)
+}
+
+func createShadowSdfCache() ret ShadowSdfCache {
+  let ballFloats: List(Float) = List.create(
+    Float
+    cap: shadowSdfMaxClusters * shadowSdfMaxBalls * 4
+  )
+  loop var i: Int = 0, i < shadowSdfMaxClusters * shadowSdfMaxBalls * 4, ++i {
+    ballFloats.add(value: 0.0)
+  }
+  let counts: List(Int) = List.create(Int, cap: shadowSdfMaxClusters)
+  let smoothing: List(Float) = List.create(Float, cap: shadowSdfMaxClusters)
+  loop var i: Int = 0, i < shadowSdfMaxClusters, ++i {
+    counts.add(value: 0)
+    smoothing.add(value: 0.0001)
+  }
+  ret ShadowSdfCache {
+    pipeMade: false
+    pipeline: noRenderPipelineId()
+    balls: fillBufferIds(count: shadowSdfMaxClusters)
+    uniforms: fillBufferIds(count: shadowSdfSlots)
+    binds: fillBindGroupIds(count: shadowSdfSlots)
+    clusters: 0
+    ballFloats: own ballFloats
+    counts: own counts
+    smoothing: own smoothing
+    scratch: List.create(Float, cap: shadowSdfUniformFloats)
+  }
+}
+
+func shadowSdfReset(sdf: mod ShadowSdfCache) {
+  sdf.clusters = 0
+}
+
+func sdfCasterPipelineSpec() ret DepthPipelineSpec {
+  ret DepthPipelineSpec {
+    vertexStride: 0
+    attributes: List.create(VertexAttributeSpec, cap: 1)
+    fragmentEntry: "fs"
+    depthFormat: WGPUTextureFormat_Depth32Float
+    cullMode: WGPUCullMode_None
+    depthBias: 0
+    depthBiasSlopeScale: 0.0
+  }
+}
+
+func ensureShadowSdfObjects(sdf: mod ShadowSdfCache, resources: mod GpuResources) {
+  if sdf.pipeMade {
+    ret
+  }
+  sdf.pipeMade = true
+  var source: String = ""
+  unsafe {
+    source = String.fromCStr(s: nativeSmWgslSdf())
+  }
+  if let pipeline: RenderPipelineId = createDepthPipeline(
+    resources: resources
+    wgsl: source
+    vertexEntry: "vs"
+    spec: sdfCasterPipelineSpec()
+  ) {
+    sdf.pipeline = pipeline
+  }
+  loop var i: Int = 0, i < shadowSdfMaxClusters, ++i {
+    if let balls: BufferId = createBuffer(
+      resources: resources
+      size: shadowSdfBallBytes
+      usage: WGPUBufferUsage_Storage + WGPUBufferUsage_CopyDst
+    ) {
+      sdf.balls.set(index: i, value: balls)
+    }
+  }
+  loop var i: Int = 0, i < shadowSdfSlots, ++i {
+    if let uniform: BufferId = createBuffer(
+      resources: resources
+      size: shadowSdfUniformBytes
+      usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst
+    ) {
+      sdf.uniforms.set(index: i, value: uniform)
+    }
+  }
+}
+
+# Queue a metaball cluster as a caster (between shadowBegin and shadowEnd,
+# like the mesh casters): `packedBalls` is count x (x, y, z, radius).
+func shadowMetaballs(
+  shadow: mod ShadowCache
+  resources: mod GpuResources
+  packedBalls: view List(Float)
+  count: copy Int
+  smoothing: copy Float
+) {
+  if not shadow.enabled or count < 1 or packedBalls.length < count * 4 {
+    ret
+  }
+  if shadow.sdf.clusters >= shadowSdfMaxClusters {
+    ret
+  }
+  var balls: Int = count
+  if balls > shadowSdfMaxBalls {
+    balls = shadowSdfMaxBalls
+  }
+  ensureShadowSdfObjects(sdf: shadow.sdf, resources: resources)
+  if not isValidRenderPipeline(resources: resources, id: shadow.sdf.pipeline) {
+    ret
+  }
+  let ci: Int = shadow.sdf.clusters
+  var wrote: Bool = false
+  unsafe {
+    wrote = writeBufferFromPtr(
+      resources: resources
+      id: shadow.sdf.balls.copyAtFallback(index: ci, fallback: noBufferId())
+      offset: 0
+      data: packedBalls.data
+      size: balls * 16
+    )
+  }
+  if not wrote {
+    ret
+  }
+  loop var i: Int = 0, i < balls * 4, ++i {
+    shadow.sdf.ballFloats.set(
+      index: ci * shadowSdfMaxBalls * 4 + i
+      value: floatAt(list: packedBalls, index: i)
+    )
+  }
+  var blend: Float = smoothing
+  if blend <= 0.0001 {
+    blend = 0.0001
+  }
+  shadow.sdf.counts.set(index: ci, value: balls)
+  shadow.sdf.smoothing.set(index: ci, value: blend)
+  shadow.sdf.clusters = ci + 1
+}
+
+func ensureShadowSdfBind(
+  sdf: mod ShadowSdfCache
+  resources: mod GpuResources
+  ui: copy Int
+  ci: copy Int
+) ret Bool {
+  if bindGroupIsUsable(
+    resources: resources
+    id: sdf.binds.copyAtFallback(index: ui, fallback: noBindGroupId())
+  ) {
+    ret true
+  }
+  let entries: List(ResourceRef) = List.create(ResourceRef, cap: 2)
+  entries.add(value: bufferRef(id: sdf.uniforms.copyAtFallback(index: ui, fallback: noBufferId())))
+  entries.add(value: bufferRef(id: sdf.balls.copyAtFallback(index: ci, fallback: noBufferId())))
+  if let bind: BindGroupId = createRenderBindGroup(
+    resources: resources
+    pipeline: sdf.pipeline
+    entries: entries
+  ) {
+    sdf.binds.set(index: ui, value: bind)
+    ret true
+  }
+  ret false
+}
+
+# The queued clusters into one cascade's open pass.
+func shadowSdfDraw(
+  shadow: mod ShadowCache
+  resources: mod GpuResources
+  cascade: copy Int
+  pass: copy Ptr
+) {
+  if shadow.sdf.clusters < 1 or not isValidRenderPipeline(
+    resources: resources
+    id: shadow.sdf.pipeline
+  ) {
+    ret
+  }
+  var vp: Mat4 = mat4Identity()
+  loop var k: Int = 0, k < 16, ++k {
+    vp.m[k] = floatAt(list: shadow.cascadeVp, index: cascade * 16 + k)
+  }
+  let inverse: Mat4 = mat4Inverse(a: vp)
+  var span: Float = floatAt(list: shadow.depthRange, index: cascade)
+  if span <= 0.0 {
+    span = 100.0
+  }
+  loop var ci: Int = 0, ci < shadow.sdf.clusters, ++ci {
+    let ui: Int = cascade * shadowSdfMaxClusters + ci
+    let count: Int = shadow.sdf.counts.copyAtFallback(index: ci, fallback: 0)
+    let blend: Float = shadow.sdf.smoothing.copyAtFallback(index: ci, fallback: 0.0001)
+    # The cluster's world AABB, grown by the smoothing distance.
+    var lo: Vec3 = Vec3.create(x: shadowSdfFar, y: shadowSdfFar, z: shadowSdfFar)
+    var hi: Vec3 = Vec3.create(x: 0.0 - shadowSdfFar, y: 0.0 - shadowSdfFar, z: 0.0 - shadowSdfFar)
+    let base: Int = ci * shadowSdfMaxBalls * 4
+    loop var b: Int = 0, b < count, ++b {
+      let r: Float = floatAt(list: shadow.sdf.ballFloats, index: base + b * 4 + 3) + blend
+      let x: Float = floatAt(list: shadow.sdf.ballFloats, index: base + b * 4)
+      let y: Float = floatAt(list: shadow.sdf.ballFloats, index: base + b * 4 + 1)
+      let z: Float = floatAt(list: shadow.sdf.ballFloats, index: base + b * 4 + 2)
+      lo = Vec3.create(
+        x: Math.min(a: lo.x, b: x - r)
+        y: Math.min(a: lo.y, b: y - r)
+        z: Math.min(a: lo.z, b: z - r)
+      )
+      hi = Vec3.create(
+        x: Math.max(a: hi.x, b: x + r)
+        y: Math.max(a: hi.y, b: y + r)
+        z: Math.max(a: hi.z, b: z + r)
+      )
+    }
+    # Its projection into this cascade, clipped to the map.
+    var nx0: Float = shadowSdfFar
+    var ny0: Float = shadowSdfFar
+    var nx1: Float = 0.0 - shadowSdfFar
+    var ny1: Float = 0.0 - shadowSdfFar
+    loop var corner: Int = 0, corner < 8, ++corner {
+      var wx: Float = lo.x
+      if corner % 2 is 1 {
+        wx = hi.x
+      }
+      var wy: Float = lo.y
+      if (corner / 2) % 2 is 1 {
+        wy = hi.y
+      }
+      var wz: Float = lo.z
+      if corner >= 4 {
+        wz = hi.z
+      }
+      let cx: Float = vp.m[0] * wx + vp.m[4] * wy + vp.m[8] * wz + vp.m[12]
+      let cy: Float = vp.m[1] * wx + vp.m[5] * wy + vp.m[9] * wz + vp.m[13]
+      var cw: Float = vp.m[3] * wx + vp.m[7] * wy + vp.m[11] * wz + vp.m[15]
+      if cw <= 0.0 {
+        cw = 1.0  # ortho: w is 1
+      }
+      nx0 = Math.min(a: nx0, b: cx / cw)
+      nx1 = Math.max(a: nx1, b: cx / cw)
+      ny0 = Math.min(a: ny0, b: cy / cw)
+      ny1 = Math.max(a: ny1, b: cy / cw)
+    }
+    nx0 = Math.max(a: nx0, b: 0.0 - 1.0)
+    ny0 = Math.max(a: ny0, b: 0.0 - 1.0)
+    nx1 = Math.min(a: nx1, b: 1.0)
+    ny1 = Math.min(a: ny1, b: 1.0)
+    var skip: Bool = nx1 <= nx0 or ny1 <= ny0
+    if not skip {
+      let wpx: Float = (nx1 - nx0) * 0.5 * (shadow.resolution as Float)
+      let hpx: Float = (ny1 - ny0) * 0.5 * (shadow.resolution as Float)
+      if wpx < 2.0 or hpx < 2.0 {
+        skip = true
+      }
+    }
+    if not skip {
+      shadow.sdf.scratch.clear()
+      loop var k: Int = 0, k < 16, ++k {
+        shadow.sdf.scratch.add(value: vp.m[k])
+      }
+      loop var k: Int = 0, k < 16, ++k {
+        shadow.sdf.scratch.add(value: inverse.m[k])
+      }
+      shadow.sdf.scratch.add(value: 0.0 - vp.m[2])
+      shadow.sdf.scratch.add(value: 0.0 - vp.m[6])
+      shadow.sdf.scratch.add(value: 0.0 - vp.m[10])
+      shadow.sdf.scratch.add(value: 0.0)
+      shadow.sdf.scratch.add(value: count as Float)
+      shadow.sdf.scratch.add(value: blend)
+      shadow.sdf.scratch.add(value: span)
+      shadow.sdf.scratch.add(value: 0.0)
+      shadow.sdf.scratch.add(value: nx0)
+      shadow.sdf.scratch.add(value: ny0)
+      shadow.sdf.scratch.add(value: nx1)
+      shadow.sdf.scratch.add(value: ny1)
+      unsafe {
+        let wrote: Bool = writeBufferFromPtr(
+          resources: resources
+          id: shadow.sdf.uniforms.copyAtFallback(index: ui, fallback: noBufferId())
+          offset: 0
+          data: shadow.sdf.scratch.data
+          size: shadowSdfUniformBytes
+        )
+        if wrote and ensureShadowSdfBind(
+          sdf: shadow.sdf
+          resources: resources
+          ui: ui
+          ci: ci
+        ) {
+          let drawn: Bool = recordDrawInPass(
+            resources: resources
+            pass: pass
+            pipeline: shadow.sdf.pipeline
+            bindGroup: shadow.sdf.binds.copyAtFallback(index: ui, fallback: noBindGroupId())
+            vertexCount: 6
+            instanceCount: 1
+            firstVertex: 0
+            firstInstance: 0
+          )
+        }
+      }
+    }
+  }
+}
+
+# The frame's SDF objects as submission uses (shadowEnd): the pipeline and
+# every bind, so retiring one is deferred behind the GPU.
+func shadowSdfRecordUses(
+  sdf: view ShadowSdfCache
+  recording: mod Recording
+  resources: view GpuResources
+) {
+  recordRenderPipelineUse(recording: recording, resources: resources, id: sdf.pipeline)
+  loop var i: Int = 0, i < shadowSdfSlots, ++i {
+    recordBindGroupUse(
+      recording: recording
+      resources: resources
+      id: sdf.binds.copyAtFallback(index: i, fallback: noBindGroupId())
+    )
+  }
+}
+
+func shadowSdfShutdown(sdf: mod ShadowSdfCache, resources: mod GpuResources) {
+  retireBindGroupIds(resources: resources, list: sdf.binds)
+  retireBufferIds(resources: resources, list: sdf.balls)
+  retireBufferIds(resources: resources, list: sdf.uniforms)
+  retireRenderPipeline(resources: resources, id: sdf.pipeline)
+  sdf = createShadowSdfCache()
+}

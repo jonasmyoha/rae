@@ -22,6 +22,7 @@
 import Scene3d
 import SceneAnimation
 import Gpu3d
+open RendererDeferred
 open Gbuffer
 open GbufferSdf
 open gpu/GpuResources
@@ -98,7 +99,12 @@ func renderSdfClusterGbuffer(
   }
 }
 
-func renderSdfClusterShadow(T: type, world: view World3d, clusterTable: view ComponentTable(T)) {
+func renderSdfClusterShadow(
+  T: type
+  renderer: mod DeferredRenderer
+  world: view World3d
+  clusterTable: view ComponentTable(T)
+) {
   let matches: List(Query2Match) = tagged(dataTable: world.sdfs, tagTable: clusterTable)
   if matches.length is 0 {
     ret
@@ -123,7 +129,12 @@ func renderSdfClusterShadow(T: type, world: view World3d, clusterTable: view Com
     }
   }
   if ballCount > 0 {
-    Gpu3d.shadowMetaballs(packedBalls: packed.data, count: ballCount, smoothing: headSmoothing)
+    shadowMetaballsWith(
+      renderer: renderer
+      packedBalls: packed
+      count: ballCount
+      smoothing: headSmoothing
+    )
   }
 }
 
@@ -187,12 +198,12 @@ func renderSdfGbuffer(
   )
 }
 
-func renderSdfShadow(world: view World3d, tags: view ClusterTags) {
-  renderSdfClusterShadow(world: world, clusterTable: tags.c0)
-  renderSdfClusterShadow(world: world, clusterTable: tags.c1)
-  renderSdfClusterShadow(world: world, clusterTable: tags.c2)
-  renderSdfClusterShadow(world: world, clusterTable: tags.c3)
-  renderSdfClusterShadow(world: world, clusterTable: tags.c4)
-  renderSdfClusterShadow(world: world, clusterTable: tags.c5)
-  renderSdfClusterShadow(world: world, clusterTable: tags.c6)
+func renderSdfShadow(renderer: mod DeferredRenderer, world: view World3d, tags: view ClusterTags) {
+  renderSdfClusterShadow(renderer: renderer, world: world, clusterTable: tags.c0)
+  renderSdfClusterShadow(renderer: renderer, world: world, clusterTable: tags.c1)
+  renderSdfClusterShadow(renderer: renderer, world: world, clusterTable: tags.c2)
+  renderSdfClusterShadow(renderer: renderer, world: world, clusterTable: tags.c3)
+  renderSdfClusterShadow(renderer: renderer, world: world, clusterTable: tags.c4)
+  renderSdfClusterShadow(renderer: renderer, world: world, clusterTable: tags.c5)
+  renderSdfClusterShadow(renderer: renderer, world: world, clusterTable: tags.c6)
 }

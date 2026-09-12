@@ -166,7 +166,7 @@ extern`, every unsafe call / raw-Ptr op wrapped) as part of its work:
 | `lib/Gbuffer.rae` | 63 | #905/#906 (mesh store, frame/targets/pass/submit) |
 | `lib/Gpu3d.rae` | 57 | #905/#906 |
 | `lib/GbufferPasses.rae` | 52 | #904 (ao/light/composite/taa/pyramid/fog) |
-| `lib/GbufferShadow.rae` | 13 | #906 (shadow maps) |
+| `lib/GbufferShadow.rae` | 13 | #906 (shadow maps) — deleted by #925, the pass is `lib/ShadowMaps.rae` |
 | `lib/Gpu2d.rae` | 13 | #907–#910 (2D renderer C→Rae) |
 | `lib/GbufferTerrain.rae` | 10 | #904 |
 | `lib/webgpu/Context.rae` | 9 | #906 (device/queue/bootstrap accessors) |
@@ -510,3 +510,64 @@ last C slot store (`g_gt_handles` / `rae_gt_set/get`) is deleted; it remains
 the raw-encoder harness of zz_gpu_timing_check beside the manager's
 nonblocking `gpu/GpuTiming` (not merged into it — different contracts,
 blocking vs tracked readback).
+
+**#925 update (shared renderer slice 3b-ii — the cascaded shadow maps):**
+`lib/ShadowMaps.rae` + `lib/ShadowMapsSdf.rae` — the `ShadowCache` on
+`RenderPasses.shadow` (deferred) and `Renderer3d.shadow` (forward) — owns
+the sun cascades: ONE Depth32Float array texture with a layer per cascade
+(`gpu/GpuTextures.createTextureArray`, new), a 2D view per layer for the
+render attachments (`createTextureViewLayer`) and one 2DArray view the
+lighting samples (`createTextureViewArray`), the comparison sampler
+(`createComparisonSampler`, compare Less), recreated when the fit's
+resolution / count changes (`gen` bumps, the lighting bind and the forward
+binds rebuild). The static (32 B) and skinned (80 B, palette-posed) casters
+and the metaball raymarch are DEPTH-ONLY pipelines from the new
+`gpu/GpuRenderDepth.createDepthPipeline` (no colour target; no fragment
+stage or a zero-target frag_depth stage; rasteriser depth bias 2 / slope
+2.5; front-face culling) over the C-kept WGSL (`rae_sm_wgsl_{static,skinned,
+sdf}`). The caster queue is Rae (model floats, batch keys, buffer IDs from
+the MeshStore / SkinStore, palette bases), uploaded once per pass and drawn
+INSTANCED per run of equal key (`recordDrawIndexedInPass`); the metaball
+clusters' per-cascade uniform (cascade matrix, its `Math3d.mat4Inverse`,
+the light direction recovered from the matrix, the cluster AABB projected
+to NDC + the sub-texel skip) is Rae math, drawn as a 6-vertex quad
+(`recordDrawInPass`). `shadowEnd` records one manager `Recording` with a
+depth-only `beginRenderPassMulti` per cascade layer (clear 1.0), tracks the
+submission and polls; `shadowShutdown` retires everything (drained first).
+The 320-byte shadow frame uniform (cascade matrices, splits, texel sizes,
+depth ranges, shadowCfg = count / resolution / ambient darkening —
+`setShadowAmbient(renderer:, strength:)` is a renderer knob now) is written
+by `shadowBegin`; `ensureShadowDefaults` gives a lighting bind the default
+2048 x 3 array + a zeroed uniform when no shadow pass ran (never sampled
+while shadowCfg.x is 0 — wgpu aborts on a null binding). The deferred
+lighting bind names the three IDs (rebuilt at the targets' OR the cascades'
+generation; the last adopted externals in GbufferPasses are gone). The
+FORWARD renderer's C scene / skin binds still sample the cascades: Rae hands
+the three handles over BORROWED through the one new C entry
+`rae_g3d_set_shadow_inputs(ubuf, view, sampler)` (a pointer compare; the
+binds are rebuilt on change, and the frame is "not ready" until they are
+set) from `Renderer3d.beginSceneWith(r:, …)`, which `renderFrameWorld` and
+111's tag loop call before the scene pass. App API: `beginShadowPass /
+endShadowPass / shadowCasterCount / renderSceneShadowWorldWith /
+drawShadowCasterWith / drawShadowCasterSkinnedWith / shadowMetaballsWith
+(renderer:, …)` on the DeferredRenderer and `beginShadowPass /
+endShadowPass / shadowCasterCount / renderSceneShadowWorldWith /
+renderSceneShadowSdfWorldWith (r:, …)` on the Renderer3d; the low-level
+`ShadowMaps.drawShadowCaster / drawShadowCasterSkinned / shadowMetaballs
+(shadow:, …)` take the cache. Removed from C: everything in
+`runtime_gpu3d_shadow.c` but the WGSL (788 → 166 lines: `g3d_sm_*` targets,
+pipelines, binds, uniforms, the queue, the metaball uniforms/binds and
+projection math, `rae_sm_{begin,queue_mesh,queue_skinned,record_metaballs,
+shutdown,ready,upload_models,set_shadow_ambient,cascade_count,draw_count,
+layer_view,caster_ready/pipeline/bind/vbuf/ibuf/icount/key,draw_metaballs}`),
+`rae_gb_shadow_{frame_ubuf,frame_bytes,array_view,sampler}` and the shadow
+defaults in `rae_gb_deferred_prepare` (the device/surface check only now),
+`lib/GbufferShadow.rae` (the raw-encoder pass) and the `rae_sm_*` externs
+in Gpu3dNative / Shadow3d. Gate unchanged at 7. Verified: 111 (forward
+shadows, 17 casters + metaball shadows), 112 (17 casters incl. metaball
+shadows), 114 (130 casters, the skinned crowd) gates PASS on hardware;
+`RAE_WGPU_REPORT` flat across 360 / 480 headless frames and, with 114's
+shadow resolution toggled 2048 ↔ 1024 every 100 frames (a temporary
+patch), back to the baseline counts after each recreation (the old views /
+binds release behind the in-flight submissions); test 579 (the CPU
+fitting) untouched.
