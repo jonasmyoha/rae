@@ -1,0 +1,10 @@
+# #926: a call that omits a parameter is a sema error naming the callee's
+# signature — not a `call to undeclared function 'rae_takesTwo'` from the C
+# compiler (the mangled name embeds the arity, so the symbol did not exist).
+func takesTwo(alpha: view Int, beta: view Int) ret Int {
+  ret alpha + beta
+}
+
+func main() {
+  log("{takesTwo(alpha: 1)}")
+}

@@ -20,7 +20,7 @@ type Match {
 # Canonical Huffman codes from per-symbol code lengths (RFC 1951 §3.2.2). Used
 # for the fixed literal/length alphabet (and reusable for dynamic blocks later).
 func buildCanonicalCodes(lengths: view List(Int), value: view Int) ret List(Int) {
-  let blCount: List(Int) = zeros(value: 16)
+  let blCount: List(Int) = zeros(count: 16)
   var i: Int = 0
   loop i < value {
     let codeLen: Int = bufAt(list: lengths, index: i)
@@ -29,7 +29,7 @@ func buildCanonicalCodes(lengths: view List(Int), value: view Int) ret List(Int)
     }
     i = i + 1
   }
-  let nextCode: List(Int) = zeros(value: 16)
+  let nextCode: List(Int) = zeros(count: 16)
   var code: Int = 0
   var bits: Int = 1
   loop bits <= 15 {
@@ -37,7 +37,7 @@ func buildCanonicalCodes(lengths: view List(Int), value: view Int) ret List(Int)
     nextCode.set(index: bits, value: code)
     bits = bits + 1
   }
-  let codes: List(Int) = zeros(value: value)
+  let codes: List(Int) = zeros(count: value)
   i = 0
   loop i < value {
     let codeLen: Int = bufAt(list: lengths, index: i)
@@ -184,7 +184,7 @@ func deflateRaw(data: view List(Int), value: view Int) ret List(Int) {
 
   var w: BitWriter = newBitWriter()
   putBit(this: w, bit: 1)  # BFINAL = 1 (single block)
-  putBits(this: w, value: 1, value: 2)  # BTYPE = 01 (fixed Huffman)
+  putBits(this: w, value: 1, count: 2)  # BTYPE = 01 (fixed Huffman)
 
   var pos: Int = 0
   loop pos < value {
