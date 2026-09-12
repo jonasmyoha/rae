@@ -880,12 +880,8 @@ void* rae_gb_sprite_array_view(void);
 int64_t rae_gb_sprite_tex_gen(void);
 void rae_gb_sprite_array_init(int64_t w, int64_t h, int64_t layers);
 void rae_gb_sprite_array_write(int64_t layer, const int64_t* pixels, int64_t w, int64_t h);
-/* G-buffer metaball draw in Rae (#504). */
-int64_t rae_gb_sdf_prepare(void* packedBalls, int64_t count, void* packedColors,
-                           float smoothing, float camX, float camY, float camZ,
-                           float metallic, float roughness, float emR, float emG, float emB);
-void* rae_gb_sdf_pipeline(void);
-void* rae_gb_sdf_bind(int64_t gi);
+/* G-buffer metaball clusters are Rae manager objects (#922); C keeps the WGSL. */
+const char* rae_gb_sdf_wgsl(void);
 /* #921: the skinned meshes + palette are the Rae SkinStore's (no rae_gb_skin_* accessors). */
 /* One-command-buffer submit for the raw-encoder passes (shadow, fullscreen,
  * transparent, the legacy GpuTiming): a general FFI gap, not renderer state. */
@@ -900,7 +896,6 @@ struct rae_Mat4;
 int64_t rae_gb_prepare(void);
 int64_t rae_gb_frame_data(struct rae_Mat4* viewProj, float clearR, float clearG, float clearB,
                           int64_t w, int64_t h, void* out);
-void rae_gb_set_frame_open(int64_t open);
 int64_t rae_gb_offscreen_w(void);
 int64_t rae_gb_offscreen_h(void);
 /* Dynamic resolution (#530). */

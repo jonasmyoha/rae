@@ -1,0 +1,401 @@
+# GbufferSdf — metaball clusters into the G-buffer (#392, Rae-owned since
+# #922). A fullscreen raymarch that writes packed G-buffer attributes + depth
+# into the OPEN geometry pass, so a metaball surface is shaded by the same
+# lighting as every triangle. Everything is a manager object on the cache's
+# SdfPassCache: the pipeline (over the C-kept WGSL source, like every other
+# shader), ONE frame uniform per frame (viewProj, the inverse of the JITTERED
+# viewProj so the ray matches the rasterised pixel grid, prevViewProj, the
+# camera), and per cluster a ball buffer, a colour buffer, a params uniform
+# and the bind group over them — up to sdfMaxGroups clusters per frame, the
+# cursor reset by Gbuffer.begin. The frame uniform's inputs are the cache's
+# frameFloats (the C-computed jittered frame data the geometry pass uploaded),
+# so C keeps no SDF state at all.
+import Math
+import Sys
+open Scene3d
+open Math3d
+open GbufferRecord
+open webgpu/Webgpu
+open webgpu/Context
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuRender
+open gpu/GpuRenderPass
+open gpu/GpuRenderTransfer
+open gpu/GpuArgs
+open gpu/GpuIds
+open Gbuffer
+open GbufferResources
+open GbufferNative
+
+const sdfMaxGroups: Int = 8
+
+const sdfMaxBalls: Int = 64
+
+const sdfFrameBytes: Int = 208  # 3 mat4 + camPos vec4
+
+const sdfBallBytes: Int = 1024  # sdfMaxBalls x vec4<f32>
+
+const sdfParamBytes: Int = 64  # info u32x4, baseColorMetallic, emissiveRoughness, blend
+
+type SdfPassCache {
+  pipeMade: Bool
+  pipeline: RenderPipelineId
+  frameUniform: BufferId
+  balls: List(BufferId)
+  colors: List(BufferId)
+  params: List(BufferId)
+  binds: List(BindGroupId)
+  group: Int  # clusters drawn this frame (the next free slot)
+  frameUploaded: Bool  # the frame uniform is up to date for this frame
+  args: ArgWriter
+  columns: List(Float)  # mat4 scratch for the uniform writes
+  testLogged: Bool  # the RAE_GPU3D_SDF_TEST_LOG line, once
+}
+
+func createSdfPassCache() ret SdfPassCache {
+  ret SdfPassCache {
+    pipeMade: false
+    pipeline: noRenderPipelineId()
+    frameUniform: noBufferId()
+    balls: fillBufferIds(count: sdfMaxGroups)
+    colors: fillBufferIds(count: sdfMaxGroups)
+    params: fillBufferIds(count: sdfMaxGroups)
+    binds: fillBindGroupIds(count: sdfMaxGroups)
+    group: 0
+    frameUploaded: false
+    args: createArgs(uniform: true)
+    columns: List.create(Float, cap: 16)
+    testLogged: false
+  }
+}
+
+# Per frame (Gbuffer.begin): the cluster cursor restarts. Without this the
+# counter climbs past sdfMaxGroups after a few frames and every later cluster
+# is silently dropped — metaballs that render for two frames and then vanish.
+func sdfFrameReset(sdf: mod SdfPassCache) {
+  sdf.group = 0
+  sdf.frameUploaded = false
+}
+
+func ensureSdfObjects(sdf: mod SdfPassCache, resources: mod GpuResources) {
+  if sdf.pipeMade {
+    ret
+  }
+  sdf.pipeMade = true
+  var source: String = ""
+  unsafe {
+    source = String.fromCStr(s: gbSdfWgsl())
+  }
+  # The geometry pass's 3 targets + reverse-Z depth, no vertex buffer, no cull:
+  # a fullscreen triangle that writes its own frag_depth.
+  if let pipeline: RenderPipelineId = createRenderPipeline(
+    resources: resources
+    wgsl: source
+    vertexEntry: "vs"
+    fragmentEntry: "fs"
+    spec: sdfPipelineSpec()
+  ) {
+    sdf.pipeline = pipeline
+  }
+  if let frameUniform: BufferId = createBuffer(
+    resources: resources
+    size: sdfFrameBytes
+    usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst
+  ) {
+    sdf.frameUniform = frameUniform
+  }
+  loop var i: Int = 0, i < sdfMaxGroups, ++i {
+    if let balls: BufferId = createBuffer(
+      resources: resources
+      size: sdfBallBytes
+      usage: WGPUBufferUsage_Storage + WGPUBufferUsage_CopyDst
+    ) {
+      sdf.balls.set(index: i, value: balls)
+    }
+    if let colors: BufferId = createBuffer(
+      resources: resources
+      size: sdfBallBytes
+      usage: WGPUBufferUsage_Storage + WGPUBufferUsage_CopyDst
+    ) {
+      sdf.colors.set(index: i, value: colors)
+    }
+    if let params: BufferId = createBuffer(
+      resources: resources
+      size: sdfParamBytes
+      usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst
+    ) {
+      sdf.params.set(index: i, value: params)
+    }
+  }
+}
+
+func sdfPipelineSpec() ret RenderPipelineSpec {
+  let colorFormats: List(Int32) = List.create(Int32, cap: 3)
+  colorFormats.add(value: WGPUTextureFormat_RGB10A2Unorm)
+  colorFormats.add(value: WGPUTextureFormat_RGBA8Unorm)
+  colorFormats.add(value: WGPUTextureFormat_RGBA8Unorm)
+  let attributes: List(VertexAttributeSpec) = List.create(VertexAttributeSpec, cap: 1)
+  ret RenderPipelineSpec {
+    vertexStride: 0
+    attributes: own attributes
+    colorFormats: own colorFormats
+    alphaBlend: false
+    premultiplied: false
+    depthFormat: WGPUTextureFormat_Depth32Float
+    depthWrite: true
+    depthCompare: WGPUCompareFunction_Greater
+    cullMode: WGPUCullMode_None
+  }
+}
+
+# The bind of cluster slot `gi`: frame @0, balls @1, params @2, colours @3.
+# The buffers are created once, so the bind is too.
+func ensureSdfBind(sdf: mod SdfPassCache, resources: mod GpuResources, gi: copy Int) ret Bool {
+  if let existing: BindGroupId = sdf.binds.copyAt(index: gi) {
+    if bindGroupIsUsable(resources: resources, id: existing) {
+      ret true
+    }
+  }
+  let entries: List(ResourceRef) = List.create(ResourceRef, cap: 4)
+  entries.add(value: bufferRef(id: sdf.frameUniform))
+  entries.add(value: bufferRef(id: sdf.balls.copyAtFallback(index: gi, fallback: noBufferId())))
+  entries.add(value: bufferRef(id: sdf.params.copyAtFallback(index: gi, fallback: noBufferId())))
+  entries.add(value: bufferRef(id: sdf.colors.copyAtFallback(index: gi, fallback: noBufferId())))
+  if let bind: BindGroupId = createRenderBindGroup(
+    resources: resources
+    pipeline: sdf.pipeline
+    entries: entries
+  ) {
+    sdf.binds.set(index: gi, value: bind)
+    ret true
+  }
+  ret false
+}
+
+func sdfFrameFloat(cache: view GbufferCache, index: copy Int) ret Float {
+  ret cache.frameFloats.copyAtFallback(index: index, fallback: 0.0)
+}
+
+# The frame uniform, once per frame from the geometry pass's frame data:
+# viewProj, inverse(JITTERED viewProj) — a clip-space xy offset proportional
+# to w is jx*(row 3) added to row 0 and jy*(row 3) to row 1, column-major —
+# prevViewProj, and the camera position.
+func uploadSdfFrame(
+  cache: mod GbufferCache
+  resources: mod GpuResources
+  camX: copy Float
+  camY: copy Float
+  camZ: copy Float
+) ret Bool {
+  var viewProj: Mat4 = mat4Zero()
+  var prevViewProj: Mat4 = mat4Zero()
+  var i: Int = 0
+  loop i < 16 {
+    viewProj.m[i] = sdfFrameFloat(cache: cache, index: i)
+    prevViewProj.m[i] = sdfFrameFloat(cache: cache, index: 16 + i)
+    i = i + 1
+  }
+  let jx: Float = sdfFrameFloat(cache: cache, index: 32)
+  let jy: Float = sdfFrameFloat(cache: cache, index: 33)
+  var jittered: Mat4 = viewProj
+  var c: Int = 0
+  loop c < 4 {
+    jittered.m[c * 4] = jittered.m[c * 4] + jx * jittered.m[c * 4 + 3]
+    jittered.m[c * 4 + 1] = jittered.m[c * 4 + 1] + jy * jittered.m[c * 4 + 3]
+    c = c + 1
+  }
+  let inverse: Mat4 = mat4Inverse(a: jittered)
+  resetArgs(writer: cache.sdf.args)
+  pushMatrix(sdf: cache.sdf, m: viewProj)
+  pushMatrix(sdf: cache.sdf, m: inverse)
+  pushMatrix(sdf: cache.sdf, m: prevViewProj)
+  pushVec4F(
+    writer: cache.sdf.args
+    x: camX
+    y: camY
+    z: camZ
+    w: 0.0
+  )
+  ret uploadArgs(
+    writer: cache.sdf.args
+    resources: resources
+    buffer: cache.sdf.frameUniform
+    offset: 0
+  )
+}
+
+func pushMatrix(sdf: mod SdfPassCache, m: view Mat4) {
+  sdf.columns.clear()
+  var i: Int = 0
+  loop i < 16 {
+    sdf.columns.add(value: m.m[i])
+    i = i + 1
+  }
+  let pushed: Bool = pushMat4(writer: sdf.args, columns: sdf.columns)
+}
+
+# One smooth-union cluster into the open geometry pass: `packedBalls` is
+# `count` x (x, y, z, radius), `packedColors` `count` x (r, g, b, 0). Uploads
+# the cluster's buffers + params into its slot and issues the fullscreen draw
+# with that slot's bind; the frame uniform is uploaded on the frame's first
+# cluster. Silently drops clusters past sdfMaxGroups.
+func drawMetaballs(
+  cache: mod GbufferCache
+  resources: mod GpuResources
+  packedBalls: copy Ptr
+  count: copy Int
+  packedColors: copy Ptr
+  smoothing: copy Float
+  camX: copy Float
+  camY: copy Float
+  camZ: copy Float
+  metallic: copy Float
+  roughness: copy Float
+  emR: copy Float
+  emG: copy Float
+  emB: copy Float
+) pub {
+  if not gbufferFrameActive(cache: cache) or count < 1 {
+    ret
+  }
+  var balls: Int = count
+  if balls > sdfMaxBalls {
+    balls = sdfMaxBalls
+  }
+  ensureSdfObjects(sdf: cache.sdf, resources: resources)
+  if not isValidRenderPipeline(resources: resources, id: cache.sdf.pipeline) {
+    ret
+  }
+  if cache.sdf.group >= sdfMaxGroups {
+    ret
+  }
+  let gi: Int = cache.sdf.group
+  if not cache.sdf.frameUploaded {
+    if not uploadSdfFrame(
+      cache: cache
+      resources: resources
+      camX: camX
+      camY: camY
+      camZ: camZ
+    ) {
+      ret
+    }
+    cache.sdf.frameUploaded = true
+  }
+  unsafe {
+    if packedBalls is webgpuNull() {
+      ret
+    }
+    let wroteBalls: Bool = writeBufferFromPtr(
+      resources: resources
+      id: cache.sdf.balls.copyAtFallback(index: gi, fallback: noBufferId())
+      offset: 0
+      data: packedBalls
+      size: balls * 16
+    )
+    if not wroteBalls {
+      ret
+    }
+    if packedColors is not webgpuNull() {
+      let wroteColors: Bool = writeBufferFromPtr(
+        resources: resources
+        id: cache.sdf.colors.copyAtFallback(index: gi, fallback: noBufferId())
+        offset: 0
+        data: packedColors
+        size: balls * 16
+      )
+    }
+  }
+  var blend: Float = smoothing
+  if blend <= 0.0001 {
+    blend = 0.0001
+  }
+  resetArgs(writer: cache.sdf.args)
+  pushVec4U(
+    writer: cache.sdf.args
+    x: balls
+    y: 0
+    z: 0
+    w: 0
+  )
+  pushVec4F(
+    writer: cache.sdf.args
+    x: 0.0
+    y: 0.0
+    z: 0.0
+    w: metallic
+  )
+  pushVec4F(
+    writer: cache.sdf.args
+    x: emR
+    y: emG
+    z: emB
+    w: roughness
+  )
+  pushVec4F(
+    writer: cache.sdf.args
+    x: blend
+    y: 0.0
+    z: 0.0
+    w: 0.0
+  )
+  let uploadedParams: Bool = uploadArgs(
+    writer: cache.sdf.args
+    resources: resources
+    buffer: cache.sdf.params.copyAtFallback(index: gi, fallback: noBufferId())
+    offset: 0
+  )
+  if not ensureSdfBind(sdf: cache.sdf, resources: resources, gi: gi) {
+    ret
+  }
+  cache.sdf.group = gi + 1
+  # The same diagnostic line and env gate as the forward path, so 112's gate
+  # keeps asserting that metaballs actually reached the renderer.
+  if not cache.sdf.testLogged and Sys.getEnv(name: "RAE_GPU3D_SDF_TEST_LOG").length() > 0 {
+    cache.sdf.testLogged = true
+    log("[gpu3d] SDF metaballs: count={balls}")
+  }
+  unsafe {
+    let drawn: Bool = recordDrawInPass(
+      resources: resources
+      pass: cache.pass
+      pipeline: cache.sdf.pipeline
+      bindGroup: cache.sdf.binds.copyAtFallback(index: gi, fallback: noBindGroupId())
+      vertexCount: 3
+      instanceCount: 1
+      firstVertex: 0
+      firstInstance: 0
+    )
+  }
+  # No restore: every G-buffer draw binds its own pipeline + group (#912).
+}
+
+# The frame's SDF objects as submission uses (Gbuffer.end): the pipeline and
+# every bind drawn this frame, so retiring one is deferred behind the GPU.
+func sdfRecordUses(sdf: view SdfPassCache, recording: mod Recording, resources: view GpuResources) {
+  recordRenderPipelineUse(recording: recording, resources: resources, id: sdf.pipeline)
+  loop var i: Int = 0, i < sdf.group, ++i {
+    if let bind: BindGroupId = sdf.binds.copyAt(index: i) {
+      recordBindGroupUse(recording: recording, resources: resources, id: bind)
+    }
+  }
+}
+
+# Retire the SDF objects (renderer shutdown).
+func sdfShutdown(sdf: mod SdfPassCache, resources: mod GpuResources) {
+  retireBindGroupIds(resources: resources, list: sdf.binds)
+  retireBufferIds(resources: resources, list: sdf.balls)
+  retireBufferIds(resources: resources, list: sdf.colors)
+  retireBufferIds(resources: resources, list: sdf.params)
+  retireBuffer(resources: resources, id: sdf.frameUniform)
+  retireRenderPipeline(resources: resources, id: sdf.pipeline)
+  sdf.binds = fillBindGroupIds(count: sdfMaxGroups)
+  sdf.balls = fillBufferIds(count: sdfMaxGroups)
+  sdf.colors = fillBufferIds(count: sdfMaxGroups)
+  sdf.params = fillBufferIds(count: sdfMaxGroups)
+  sdf.frameUniform = noBufferId()
+  sdf.pipeline = noRenderPipelineId()
+  sdf.pipeMade = false
+  sdf.group = 0
+}

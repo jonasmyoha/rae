@@ -441,3 +441,28 @@ palette_ready}` and `rae_g3d_skin_{vbuf,ibuf,icount}`. Still C: the forward
 skin pipeline + its per-draw record buffer (`rae_g3d_skin_pipeline/bind`,
 `skinFrameBegin/skinDrawCount/skinShutdown`) and the shadow skin pipeline —
 #922's scope with the rest of the shadow maps.
+
+**#922 update (shared renderer slice 3b-i — the deferred metaball clusters):**
+`lib/GbufferSdf.rae` — the `SdfPassCache` on the `GbufferCache`: the
+raymarch pipeline (over the C-kept `rae_gb_sdf_wgsl` source, like every other
+shader; 3 G-buffer targets + reverse-Z depth, no vertex buffer), ONE frame
+uniform per frame computed in Rae from the cache's frame data (viewProj,
+the inverse of the JITTERED viewProj — the jitter re-applied column-wise and
+inverted with `Math3d.mat4Inverse` — prevViewProj, the camera), and per
+cluster slot (8) a ball buffer, a colour buffer, a params uniform and the
+bind group over them, all manager IDs. `drawMetaballs(cache:, resources:, …)`
+uploads the cluster (`writeBufferFromPtr` / `uploadArgs`) and records a
+fullscreen draw into the open geometry pass (`recordDrawInPass`); the
+cluster cursor resets in `Gbuffer.begin`, `Gbuffer.end` records the SDF
+pipeline + binds as submission uses, `gbufferShutdown` retires them. The
+`RAE_GPU3D_SDF_TEST_LOG` diagnostic line moved with it. Removed from C:
+`gb_sdf_*` (pipeline, frame uniform, ball/colour/param buffers, binds),
+`gb_sdf_group`, `rae_gb_sdf_prepare / pipeline / bind`,
+`rae_ext_Gbuffer_sdfShutdown` (allowlist −1, gate 10) and — the last C
+coupling to the open geometry pass — `gb_frame_open` / `rae_gb_set_frame_open`.
+`rae_gb_frame_data` still remembers the jittered / previous view-projection
+for the SSAO and lighting uploads (#923). NOT in this slice (filed as #925 with
+the inventory found here): the cascaded shadow maps — they also feed the
+FORWARD renderer's C binds (`runtime_gpu3d.c` / `runtime_gpu3d_skin.c` read
+`g3d_sm_frame_ubuf / array_view / sampler` directly) and need manager support
+for array textures + layer views + comparison samplers first.

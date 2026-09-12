@@ -9,6 +9,7 @@
 # (GbufferCache, drawInstance, drawMetaballs) still lives there and is reached
 # through `import gbuffer`.
 open Gbuffer
+open GbufferSdf
 open gpu/GpuResources
 open Scene3d
 open Vec3
@@ -51,7 +52,12 @@ func renderSceneWorld(
 # cluster ids), so the two paths group the same balls into the same surfaces. The
 # mesh-only examples migrated in #794 have no SDF entities, so this early-returns;
 # it is here so the World3d deferred path is complete for SDF scenes (#795).
-func renderSceneSdfWorld(cache: view GbufferCache, world: view World3d, camera: view Camera3d) pub {
+func renderSceneSdfWorld(
+  cache: mod GbufferCache
+  resources: mod GpuResources
+  world: view World3d
+  camera: view Camera3d
+) pub {
   let count: Int = componentCount(this: world.sdfs)
   if count is 0 {
     ret
@@ -97,6 +103,7 @@ func renderSceneSdfWorld(cache: view GbufferCache, world: view World3d, camera: 
           let material: Material3d = componentGet(this: world.materials, entity: headEntity)
           drawMetaballs(
             cache: cache
+            resources: resources
             packedBalls: packed.data
             count: ballCount
             packedColors: colors.data
