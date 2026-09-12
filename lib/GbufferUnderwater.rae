@@ -1,0 +1,293 @@
+# GbufferUnderwater — the underwater tint/fog pass of the deferred frame
+# (#855, docs/water-rendering-design.md Phase 3).
+#
+# Runs at the `underwater` render-graph tag: AFTER the water surface and the
+# transparents were composed into the lit HDR target (transparentForward) and
+# BEFORE TAA / composite, so the fog is resolved and tone-mapped like every
+# other radiance. It does nothing unless the renderer's `UnderwaterParams`
+# say the camera is under a body's surface — the water system decides that
+# each frame (water/Underwater.rae: containing body, surface query, crossing)
+# and hands the renderer the body's colours; the renderer knows no water.
+#
+# The pass snapshots the lit target into litCopy (the #842 copy, free again
+# once the transparents drew) and runs one fullscreen pass back into lit over
+# that snapshot + the G-buffer depth: reconstruct the world position under the
+# pixel through the inverse view-projection, cut the view ray at the still
+# surface plane when the point is above the water, and apply Beer-Lambert
+# attenuation per channel toward the body's deep colour over that underwater
+# distance (lib/underwaterFog.wgsl). The objects are typed IDs in the
+# DeferredRenderer-owned manager; the bind follows the targets generation
+# (litCopy is re-created on resize, the depth target is the GbufferCache's).
+import String
+open Scene3d
+open Vec3
+open Math3d
+open Gbuffer
+open GbufferResources
+open GbufferPasses
+open GbufferFullscreen
+open TransparentForward
+open webgpu/Webgpu
+open webgpu/Context
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuRender
+open gpu/GpuRenderPass
+open gpu/GpuArgs
+open gpu/GpuIds
+
+# What the fog needs from the containing body, filled by the water system
+# (a per-frame VALUE on the renderer; `active` false = the pass is skipped).
+type UnderwaterParams {
+  active: Bool
+  surfaceZ: Float  # the surface height at the camera (world z)
+  deepColor: Vec3  # the fog's asymptote (the body's deep colour)
+  absorbColor: Vec3  # Beer-Lambert absorption per metre, per channel
+  density: Float  # scale on the absorption (1 = the body's own)
+  farDistance: Float  # metres past which the fog is fully saturated
+  tintStrength: Float  # near-surface whole-screen tint (0..1)
+  tintDepth: Float  # camera depth (m) at which the tint reaches full strength
+}
+
+func noUnderwater() ret UnderwaterParams {
+  ret UnderwaterParams {
+    active: false
+    surfaceZ: 0.0
+    deepColor: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    absorbColor: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    density: 1.0
+    farDistance: 200.0
+    tintStrength: 0.0
+    tintDepth: 1.0
+  }
+}
+
+type UnderwaterPassCache {
+  pipeMade: Bool
+  pipeline: RenderPipelineId
+  uniform: BufferId
+  bindGroup: BindGroupId
+  adopted: List(ExternalId)  # the C-owned litCopy view of this generation
+  bindGen: Int
+  args: ArgWriter
+  columns: List(Float)  # the inverse view-projection, column-major scratch
+  frames: Int  # frames the fog actually ran (diagnostics)
+}
+
+func createUnderwaterPassCache() ret UnderwaterPassCache {
+  ret UnderwaterPassCache {
+    pipeMade: false
+    pipeline: noRenderPipelineId()
+    uniform: noBufferId()
+    bindGroup: noBindGroupId()
+    adopted: List.create(ExternalId, cap: 2)
+    bindGen: 0 - 1
+    args: createArgs(uniform: true)
+    columns: List.create(Float, cap: 16)
+    frames: 0
+  }
+}
+
+# The uniform: a mat4 (64 B) + four vec4 (64 B).
+const underwaterUniformBytes: Int = 128
+
+func ensureUnderwaterObjects(cache: mod UnderwaterPassCache, resources: mod GpuResources) {
+  if cache.pipeMade {
+    ret
+  }
+  cache.pipeMade = true
+  # The shader is an asset read relative to the working directory like every
+  # lib/*.wgsl; an empty read must not reach wgpu (no `vs` entry point aborts).
+  let source: String = gbReadWgsl(path: "lib/underwaterFog.wgsl")
+  if source.length() is 0 {
+    log(
+      "[underwater] lib/underwaterFog.wgsl not readable from the working directory — run from the repo root; the underwater fog is skipped"
+    )
+    ret
+  }
+  if let pipeline: RenderPipelineId = createRenderPipeline(
+    resources: resources
+    wgsl: source
+    vertexEntry: "vs"
+    fragmentEntry: "fs"
+    spec: fullscreenPipelineSpec(format: gbLitFormat() as Int32)
+  ) {
+    cache.pipeline = pipeline
+  }
+  if let uniform: BufferId = createBuffer(
+    resources: resources
+    size: underwaterUniformBytes
+    usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst
+  ) {
+    cache.uniform = uniform
+  }
+}
+
+# Uniform @0, the litCopy snapshot @1 (C-owned, adopted per generation), the
+# G-buffer depth @2 (the cache's manager view).
+func ensureUnderwaterBind(
+  cache: mod UnderwaterPassCache
+  resources: mod GpuResources
+  gbuffer: view GbufferCache
+) {
+  let gen: Int = gbTargetsGen()
+  if not (gen is cache.bindGen) {
+    cache.bindGen = gen
+    retireBindGroup(resources: resources, id: cache.bindGroup)
+    cache.bindGroup = noBindGroupId()
+    releaseExternalIds(resources: resources, list: cache.adopted)
+  }
+  if bindGroupIsUsable(resources: resources, id: cache.bindGroup) {
+    ret
+  }
+  if not gbufferTargetsReady(cache: gbuffer, resources: resources) {
+    ret
+  }
+  let entries: List(ResourceRef) = List.create(ResourceRef, cap: 3)
+  entries.add(value: bufferRef(id: cache.uniform))
+  unsafe {
+    entries.add(
+      value: adoptTextureViewRef(
+        resources: resources
+        adopted: cache.adopted
+        handle: gbLitCopyView()
+      )
+    )
+  }
+  entries.add(value: gbufferTargetRef(cache: gbuffer, index: gbufferTargetDepth))
+  var made: Bool = false
+  if let bind: BindGroupId = createRenderBindGroup(
+    resources: resources
+    pipeline: cache.pipeline
+    entries: entries
+  ) {
+    cache.bindGroup = bind
+    made = true
+  }
+  if not made {
+    releaseExternalIds(resources: resources, list: cache.adopted)
+  }
+}
+
+# The frame's UNJITTERED view-projection, inverted on the CPU: the same
+# lookAt + reverse-Z perspective Gbuffer.beginPass rasterised with. The
+# half-pixel jitter is ignored — a fog distance does not need it.
+func underwaterInverseViewProj(
+  cache: mod UnderwaterPassCache
+  camera: view Camera3d
+  aspect: copy Float
+) {
+  let worldUp: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
+  let viewM: Mat4 = mat4LookAt(
+    eyeX: camera.position.x
+    eyeY: camera.position.y
+    eyeZ: camera.position.z
+    atX: camera.target.x
+    atY: camera.target.y
+    atZ: camera.target.z
+    upX: worldUp.x
+    upY: worldUp.y
+    upZ: worldUp.z
+  )
+  let proj: Mat4 = mat4PerspectiveReverseZ(
+    fovYDeg: camera.fovYDeg
+    aspect: aspect
+    near: camera.nearZ
+    far: camera.farZ
+  )
+  let inverse: Mat4 = mat4Inverse(a: mat4Mul(a: proj, b: viewM))
+  cache.columns.clear()
+  var i: Int = 0
+  loop i < 16 {
+    cache.columns.add(value: inverse.m[i])
+    i = i + 1
+  }
+}
+
+# The render graph's `underwater` step. A no-op unless `params.active`.
+func underwaterPass(
+  cache: mod UnderwaterPassCache
+  resources: mod GpuResources
+  gbuffer: view GbufferCache
+  camera: view Camera3d
+  aspect: copy Float
+  params: view UnderwaterParams
+) pub {
+  if not params.active {
+    ret
+  }
+  if gbDeferredPrepare() is 0 {
+    ret
+  }
+  ensureUnderwaterObjects(cache: cache, resources: resources)
+  if not isValidRenderPipeline(resources: resources, id: cache.pipeline) {
+    ret
+  }
+  ensureUnderwaterBind(cache: cache, resources: resources, gbuffer: gbuffer)
+  if not bindGroupIsUsable(resources: resources, id: cache.bindGroup) {
+    ret
+  }
+  underwaterInverseViewProj(cache: cache, camera: camera, aspect: aspect)
+  resetArgs(writer: cache.args)
+  let pushed: Bool = pushMat4(writer: cache.args, columns: cache.columns)
+  pushVec4F(
+    writer: cache.args
+    x: camera.position.x
+    y: camera.position.y
+    z: camera.position.z
+    w: params.surfaceZ
+  )
+  pushVec4F(
+    writer: cache.args
+    x: params.deepColor.x
+    y: params.deepColor.y
+    z: params.deepColor.z
+    w: params.farDistance
+  )
+  pushVec4F(
+    writer: cache.args
+    x: params.absorbColor.x
+    y: params.absorbColor.y
+    z: params.absorbColor.z
+    w: params.density
+  )
+  pushVec4F(
+    writer: cache.args
+    x: params.tintStrength
+    y: params.tintDepth
+    z: 0.0
+    w: 0.0
+  )
+  let uploaded: Bool = uploadArgs(
+    writer: cache.args
+    resources: resources
+    buffer: cache.uniform
+    offset: 0
+  )
+  # Snapshot the composed frame (opaque + water + transparents) so the pass
+  # can read it while writing the lit target — the same copy the refracting
+  # surfaces used, free again now that they have drawn.
+  copyOpaqueRadiance()
+  unsafe {
+    runFullscreen(
+      resources: resources
+      pipeline: cache.pipeline
+      bind: cache.bindGroup
+      target: gbLitView()
+    )
+  }
+  cache.frames = cache.frames + 1
+}
+
+# Retire the pass's manager objects (renderer shutdown).
+func underwaterShutdown(cache: mod UnderwaterPassCache, resources: mod GpuResources) {
+  retireBindGroup(resources: resources, id: cache.bindGroup)
+  releaseExternalIds(resources: resources, list: cache.adopted)
+  retireRenderPipeline(resources: resources, id: cache.pipeline)
+  retireBuffer(resources: resources, id: cache.uniform)
+  cache.bindGroup = noBindGroupId()
+  cache.pipeline = noRenderPipelineId()
+  cache.uniform = noBufferId()
+  cache.pipeMade = false
+  cache.bindGen = 0 - 1
+}
