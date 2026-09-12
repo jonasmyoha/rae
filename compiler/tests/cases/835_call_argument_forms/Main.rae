@@ -1,0 +1,30 @@
+# #926: the accepted call shapes still resolve once arguments are checked
+# against the parameters — a positional first argument, all-named arguments,
+# an arity-overloaded name, a generic with a positional type argument, and a
+# module-qualified call. (Rae has no defaulted parameters: every parameter is
+# required, so there is no "omitted defaulted argument" shape to accept.)
+import Math
+
+func takesTwo(alpha: view Int, beta: view Int) ret Int {
+  ret alpha + beta
+}
+
+func takesOne(alpha: view Int) ret Int {
+  ret alpha * 10
+}
+
+func describe(items: view List(Int)) ret Int {
+  ret items.length
+}
+
+func main() {
+  log("{takesTwo(1, beta: 2)}")
+  log("{takesTwo(alpha: 3, beta: 4)}")
+  log("{takesOne(alpha: 5)}")
+  log("{takesOne(6)}")
+  let items: List(Int) = List.create(Int, cap: 4)
+  items.add(value: 7)
+  items.add(value: 8)
+  log("{describe(items: items)}")
+  log("{Math.max(a: 1, b: 2)}")
+}

@@ -30,7 +30,7 @@ func createMaterialRegistry3d() ret MaterialRegistry3d {
 func registerMaterial3d(reg: mod MaterialRegistry3d, key: view String, index: view Int) {
   var keyCopy: String = ""
   unsafe {
-    keyCopy = rae_ext_rae_string_copy(s: key)
+    keyCopy = rae_ext_rae_string_copy(string: key)
   }
   reg.keys.add(value: keyCopy)
   reg.indices.add(value: index)
@@ -76,7 +76,7 @@ func registerMesh3d(reg: mod MeshRegistry3d, key: view String, handle: view Mesh
   }
   var keyCopy: String = ""
   unsafe {
-    keyCopy = rae_ext_rae_string_copy(s: key)
+    keyCopy = rae_ext_rae_string_copy(string: key)
   }
   reg.keys.add(value: keyCopy)
   reg.handles.add(value: handle)
@@ -126,7 +126,7 @@ func emptyWorld3dAsset() ret World3dAsset {
 func failWorld3dAsset(asset: mod World3dAsset, message: view String) {
   asset.ok = false
   unsafe {
-    asset.errorMsg = rae_ext_rae_string_copy(s: message)
+    asset.errorMsg = rae_ext_rae_string_copy(string: message)
   }
 }
 
@@ -137,7 +137,7 @@ func failWorld3dAsset(asset: mod World3dAsset, message: view String) {
 func addWorldAssetEntity(asset: mod World3dAsset, nodeId: view String, entity: view Int) {
   var nodeIdCopy: String = ""
   unsafe {
-    nodeIdCopy = rae_ext_rae_string_copy(s: nodeId)
+    nodeIdCopy = rae_ext_rae_string_copy(string: nodeId)
   }
   asset.nodeIds.add(value: nodeIdCopy)
   asset.entityIds.add(value: entity)

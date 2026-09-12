@@ -41,7 +41,7 @@ func renderFrame(
       )
     } else {
       renderDeferredPassWorld(
-        r: renderer
+        renderer: renderer
         tag: tag
         world: renderState.world
         camera: camera
@@ -57,7 +57,7 @@ func renderFrame(
 func main() ret Int {
   Gpu2d.initWindow(width: 900, height: 900, title: "Rae Tetris 3D — Deferred")
   Gpu2d.setDesignResolution(width: 900.0, height: 900.0, fit: 0)
-  seed(n: 2026)
+  seed(value: 2026)
 
   var game: World = {
     state: GameState.playing
@@ -146,7 +146,7 @@ func main() ret Int {
     let resized: Bool = resizeUiToWindow(world: uiWorld, res: uiResources)
     let now: Float64 = Gpu2d.nowSeconds()
     if updateDebugOverlay(
-      d: dbg
+      debugOverlay: dbg
       screenW: Gpu2d.designWidth()
       screenH: Gpu2d.designHeight()
       now: now

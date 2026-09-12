@@ -35,7 +35,7 @@ func main() {
       aperture: 0.06
       aspect: aspect
     )
-    seed(n: 1)
+    seed(value: 1)
     var y: Int = 0
     loop y < height {
       var x: Int = 0
@@ -46,7 +46,7 @@ func main() {
           let u: Float = (x.toFloat() + random()) / (width - 1).toFloat()
           let v: Float = ((height - 1 - y).toFloat() + random()) / (height - 1).toFloat()
           let r: Ray = makeRay(cam: cam, u: u, v: v)
-          acc = Vec3.vadd(a: acc, b: rayColor(world: world, r: r, depth: maxDepth))
+          acc = Vec3.vadd(a: acc, b: rayColor(world: world, ray: r, depth: maxDepth))
           s = s + 1
         }
         let inv: Float = 1.0 / samples.toFloat()

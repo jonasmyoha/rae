@@ -1328,6 +1328,117 @@ static bool sema_arg_is_type_name(SymbolTable* symbols, const AstExpr* v) {
     return s && s->decl && (s->decl->kind == AST_DECL_TYPE || s->decl->kind == AST_DECL_ENUM);
 }
 
+// ===== #926: call ARGUMENTS against the callee's PARAMETERS =================
+//
+// Rae's call arguments are named, and the name is CHECKED information, not
+// decoration: `takesTwo(alpha: 1, gamma: 2)` binds positionally in the backend
+// and used to compile and run, and a missing or extra argument only died in
+// the emitted C (the mangled name embeds the arity, so the symbol did not
+// exist). Both are sema errors now, at the call site, naming the callee's
+// signature. Type parameters (`T: type`) are not value parameters and never
+// appear in the rendered signature; a bare TYPE argument in the value list is
+// the positional generic form and is not counted against them.
+
+// Renders `name(alpha: view Int, beta: mod Point)` into `out`.
+static void sema_render_signature(const AstFuncDecl* fd, char* out, size_t cap) {
+    size_t pos = 0;
+    int w = snprintf(out, cap, "%.*s(", (int)fd->name.len, fd->name.data);
+    if (w > 0) pos = (size_t)w;
+    for (const AstParam* p = fd->params; p && pos < cap; p = p->next) {
+        const char* mode = "";
+        if (p->type) {
+            if (p->type->is_mod) mode = "mod ";
+            else if (p->type->is_own) mode = "own ";
+            else if (p->type->is_copy) mode = "copy ";
+            else if (p->type->is_view) mode = "view ";
+        }
+        char tname[128]; size_t tp = 0; tname[0] = '\0';
+        if (p->type && p->type->is_opt) { snprintf(tname, sizeof tname, "opt "); tp = 4; }
+        for (const AstIdentifierPart* part = p->type ? p->type->parts : NULL; part && tp < sizeof tname; part = part->next) {
+            int tw = snprintf(tname + tp, sizeof tname - tp, "%s%.*s", part == p->type->parts ? "" : "/", (int)part->text.len, part->text.data);
+            if (tw > 0) tp += (size_t)tw;
+        }
+        if (p->type && p->type->generic_args && tp < sizeof tname) {
+            int tw = snprintf(tname + tp, sizeof tname - tp, "(");
+            if (tw > 0) tp += (size_t)tw;
+            for (const AstTypeRef* g = p->type->generic_args; g && tp < sizeof tname; g = g->next) {
+                const char* gname = g->parts ? "" : "?";
+                (void)gname;
+                int gw = snprintf(tname + tp, sizeof tname - tp, "%s%.*s", g == p->type->generic_args ? "" : ", ",
+                                  g->parts ? (int)g->parts->text.len : 1, g->parts ? g->parts->text.data : "?");
+                if (gw > 0) tp += (size_t)gw;
+            }
+            if (tp < sizeof tname) { tw = snprintf(tname + tp, sizeof tname - tp, ")"); if (tw > 0) tp += (size_t)tw; }
+        }
+        w = snprintf(out + pos, cap - pos, "%s%.*s: %s%s", p == fd->params ? "" : ", ",
+                     (int)p->name.len, p->name.data, mode, tname);
+        if (w > 0) pos += (size_t)w;
+    }
+    if (pos < cap) snprintf(out + pos, cap - pos, ")");
+}
+
+// The call is bound to `fd`: every NAMED argument must name the parameter at
+// its position (arguments are positional; the name is checked, not used to
+// reorder), and no name may appear twice. A bare type argument filling a
+// generic slot is skipped. Reports at the argument.
+static void sema_check_call_arg_names(AstModule* module, SymbolTable* symbols, const AstFuncDecl* fd, AstCallArg* args) {
+    char sig[512];
+    bool rendered = false;
+    const AstParam* p = fd->params;
+    for (AstCallArg* a = args; a; a = a->next) {
+        if (fd->generic_params && !a->name.len && sema_arg_is_type_name(symbols, a->value)) continue;
+        for (AstCallArg* b = args; b != a; b = b->next) {
+            if (a->name.len && b->name.len && str_eq(a->name, b->name)) {
+                if (!rendered) { sema_render_signature(fd, sig, sizeof sig); rendered = true; }
+                char buf[700];
+                snprintf(buf, sizeof buf, "duplicate argument '%.*s' in call to %s",
+                         (int)a->name.len, a->name.data, sig);
+                diag_error(sema_diag_file(module), (int)a->value->line, (int)a->value->column, buf);
+                if (module) module->had_error = true;
+                return;
+            }
+        }
+        if (!p) return;
+        if (a->name.len && !str_eq(a->name, p->name)) {
+            if (!rendered) { sema_render_signature(fd, sig, sizeof sig); rendered = true; }
+            char buf[700];
+            snprintf(buf, sizeof buf,
+                "argument '%.*s' does not match parameter '%.*s' of %s — arguments are positional and their names must match the parameters",
+                (int)a->name.len, a->name.data, (int)p->name.len, p->name.data, sig);
+            diag_error(sema_diag_file(module), (int)a->value->line, (int)a->value->column, buf);
+            if (module) module->had_error = true;
+            return;
+        }
+        p = p->next;
+    }
+}
+
+// No candidate of `name` took `arg_count` arguments: report the count against
+// the candidates' signatures (missing / extra argument), like #751's
+// unknown-function message names what IS loaded.
+static void sema_report_arity_mismatch(AstModule* module, Str name, size_t arg_count,
+                                       const AstDecl* const* cands, size_t cand_count,
+                                       size_t line, size_t column) {
+    char buf[1400]; size_t pos = 0;
+    const AstFuncDecl* fd0 = &cands[0]->as.func_decl;
+    size_t pc0 = 0; for (const AstParam* p = fd0->params; p; p = p->next) pc0++;
+    int w;
+    if (cand_count == 1)
+        w = snprintf(buf, sizeof buf, "call to '%.*s' has %zu argument%s but it takes %zu: ",
+                     (int)name.len, name.data, arg_count, arg_count == 1 ? "" : "s", pc0);
+    else
+        w = snprintf(buf, sizeof buf, "call to '%.*s' has %zu argument%s, which matches none of its signatures: ",
+                     (int)name.len, name.data, arg_count, arg_count == 1 ? "" : "s");
+    if (w > 0) pos = (size_t)w;
+    for (size_t i = 0; i < cand_count && pos < sizeof buf; i++) {
+        char sig[512]; sema_render_signature(&cands[i]->as.func_decl, sig, sizeof sig);
+        w = snprintf(buf + pos, sizeof buf - pos, "%s%s", i ? "; " : "", sig);
+        if (w > 0) pos += (size_t)w;
+    }
+    diag_error(sema_diag_file(module), (int)line, (int)column, buf);
+    if (module) module->had_error = true;
+}
+
 static AstDecl* resolve_function_overload(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, Str name, AstCallArg* args, AstTypeRef* explicit_generic_args, size_t line, size_t column) {
     size_t arg_count = 0;
     for (AstCallArg* a = args; a; a = a->next) arg_count++;
@@ -1401,6 +1512,12 @@ static AstDecl* resolve_function_overload(CompilerContext* ctx, AstModule* modul
     // bare, undeclared `rae_<name>()` that only fails in gcc (#415).
     bool generic_value_arity_issue = false;
     size_t generic_expected_values = 0, generic_got_values = 0;
+    // #926: the OPEN non-generic candidates that did NOT match the argument
+    // count, for the arity diagnostic; any open GENERIC candidate disables it
+    // (a positional type argument makes the count legitimately differ, and
+    // such a call is bound by name in the backend).
+    const AstDecl* arity_cands[8]; size_t arity_cand_count = 0;
+    bool open_generic_candidate = false;
 
     for (Symbol* curr = symbols->head; curr; curr = curr->next) {
         if (!str_eq(curr->name, name)) continue;
@@ -1411,7 +1528,15 @@ static AstDecl* resolve_function_overload(CompilerContext* ctx, AstModule* modul
         size_t param_count = 0;
         for (AstParam* p = fd->params; p; p = p->next) param_count++;
 
-        if (param_count != arg_count) continue;
+        if (fd->generic_params) open_generic_candidate = true;
+        if (param_count != arg_count) {
+            if (!fd->generic_params && !fd->specialization_args) {
+                bool dup = false;
+                for (size_t i = 0; i < arity_cand_count; i++) if (arity_cands[i] == curr->decl) dup = true;
+                if (!dup && arity_cand_count < 8) arity_cands[arity_cand_count++] = curr->decl;
+            }
+            continue;
+        }
         open_arity_match = true;  // #819: an opened candidate matches by name+arity
 
         if (fd->generic_params) {
@@ -1527,7 +1652,12 @@ static AstDecl* resolve_function_overload(CompilerContext* ctx, AstModule* modul
     // loaded elsewhere in the unit) a not-open collections drop; the open one
     // is the real target and is resolved by the downstream fallback, so the
     // not-open collections candidate must not hijack the call with an error.
-    if (ineligible && ineligible->module_name && !open_arity_match) {
+    if (arity_cand_count > 0 && !open_arity_match && !open_generic_candidate) {
+        // #926: the name is open here but no signature takes this many
+        // arguments — a missing or extra argument, reported at the call rather
+        // than as an undeclared C symbol.
+        sema_report_arity_mismatch(module, name, arg_count, arity_cands, arity_cand_count, line, column);
+    } else if (ineligible && ineligible->module_name && !open_arity_match) {
         char buf[320];
         snprintf(buf, sizeof(buf),
             "'%.*s' is in module '%s', which is not open here; use `open %s` for a bare call, or %s.%.*s(...)",
@@ -1580,10 +1710,12 @@ static AstDecl* resolve_function_overload(CompilerContext* ctx, AstModule* modul
 // functions are non-generic; generic stays in flat-visible `core`.
 // (docs/module-namespacing.md)
 static AstDecl* resolve_qualified_function(CompilerContext* ctx, AstModule* module, SymbolTable* symbols,
-                                           Str qualifier, Str name, AstCallArg* args) {
+                                           Str qualifier, Str name, AstCallArg* args, size_t line, size_t column) {
     size_t arg_count = 0;
     for (AstCallArg* a = args; a; a = a->next) arg_count++;
     AstDecl* arity_match = NULL;
+    const AstDecl* arity_cands[8]; size_t arity_cand_count = 0;  // #926
+    bool generic_candidate = false;
     for (AstDecl* d = module->decls; d; d = d->next) {
         if (d->kind != AST_DECL_FUNC) continue;
         // Match either the full module path (`ui/ecs` — the lib/qualified form)
@@ -1602,7 +1734,11 @@ static AstDecl* resolve_qualified_function(CompilerContext* ctx, AstModule* modu
         AstFuncDecl* fd = &d->as.func_decl;
         size_t param_count = 0;
         for (AstParam* p = fd->params; p; p = p->next) param_count++;
-        if (param_count != arg_count) continue;
+        if (fd->generic_params) generic_candidate = true;
+        if (param_count != arg_count) {
+            if (!fd->generic_params && arity_cand_count < 8) arity_cands[arity_cand_count++] = d;
+            continue;
+        }
         if (!arity_match) arity_match = d;
         bool mismatch = false;
         AstParam* p = fd->params;
@@ -1622,6 +1758,8 @@ static AstDecl* resolve_qualified_function(CompilerContext* ctx, AstModule* modu
         }
         if (!mismatch) return d;
     }
+    if (!arity_match && arity_cand_count > 0 && !generic_candidate)
+        sema_report_arity_mismatch(module, name, arg_count, arity_cands, arity_cand_count, line, column);
     return arity_match;
 }
 
@@ -4445,6 +4583,7 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                     }
                     if (resolved) {
                         expr->decl_link = resolved;
+                        sema_check_call_arg_names(module, symbols, &resolved->as.func_decl, expr->as.call.args);
                         if (resolved->as.func_decl.returns) expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, resolved->as.func_decl.returns->type);
                         AstParam* p = resolved->as.func_decl.params; AstCallArg* a = expr->as.call.args;
                         while (p && a) { TypeInfo* pt = sema_resolve_type_internal(ctx, module, symbols, p->type); ensure_type_match(ctx, pt, &a->value); p = p->next; a = a->next; }
@@ -4796,7 +4935,8 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                 AstTypeRef* qgen = expr->as.method_call.generic_args;
                 // Analyze args first so the resolver can use their types.
                 for (AstCallArg* a = qargs; a; a = a->next) sema_analyze_expr(ctx, module, symbols, a->value, true);
-                AstDecl* resolved = resolve_qualified_function(ctx, module, symbols, modname, fname, qargs);
+                AstDecl* resolved = resolve_qualified_function(ctx, module, symbols, modname, fname, qargs, expr->line, expr->column);
+                if (resolved) sema_check_call_arg_names(module, symbols, &resolved->as.func_decl, qargs);
                 // #777: only commit to the module-qualified rewrite when a module
                 // function actually resolved. If not (e.g. the qualifier is a type
                 // with no such member), fall through to the value/UFCS/member path
