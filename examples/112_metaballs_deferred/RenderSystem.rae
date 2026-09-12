@@ -23,6 +23,8 @@ import Scene3d
 import SceneAnimation
 import Gpu3d
 open Gbuffer
+open GbufferSdf
+open gpu/GpuResources
 open ecs/Entity
 open ecs/ComponentTable
 open ecs/Query
@@ -33,7 +35,8 @@ open ecs/Query
 # from the cluster HEAD (its first sphere in query = list order), and raymarch.
 func renderSdfClusterGbuffer(
   T: type
-  cache: view GbufferCache
+  cache: mod GbufferCache
+  resources: mod GpuResources
   world: view World3d
   clusterTable: view ComponentTable(T)
   camera: view Camera3d
@@ -76,8 +79,9 @@ func renderSdfClusterGbuffer(
     }
   }
   if ballCount > 0 {
-    Gbuffer.drawMetaballs(
+    drawMetaballs(
       cache: cache
+      resources: resources
       packedBalls: packed.data
       count: ballCount
       packedColors: colors.data
@@ -126,49 +130,57 @@ func renderSdfClusterShadow(T: type, world: view World3d, clusterTable: view Com
 # Draw every cluster of a scene. Empty tag tables (cluster ids a scene doesn't
 # use) query to zero matches and are skipped.
 func renderSdfGbuffer(
-  cache: view GbufferCache
+  cache: mod GbufferCache
+  resources: mod GpuResources
   world: view World3d
   tags: view ClusterTags
   camera: view Camera3d
 ) {
   renderSdfClusterGbuffer(
     cache: cache
+    resources: resources
     world: world
     clusterTable: tags.c0
     camera: camera
   )
   renderSdfClusterGbuffer(
     cache: cache
+    resources: resources
     world: world
     clusterTable: tags.c1
     camera: camera
   )
   renderSdfClusterGbuffer(
     cache: cache
+    resources: resources
     world: world
     clusterTable: tags.c2
     camera: camera
   )
   renderSdfClusterGbuffer(
     cache: cache
+    resources: resources
     world: world
     clusterTable: tags.c3
     camera: camera
   )
   renderSdfClusterGbuffer(
     cache: cache
+    resources: resources
     world: world
     clusterTable: tags.c4
     camera: camera
   )
   renderSdfClusterGbuffer(
     cache: cache
+    resources: resources
     world: world
     clusterTable: tags.c5
     camera: camera
   )
   renderSdfClusterGbuffer(
     cache: cache
+    resources: resources
     world: world
     clusterTable: tags.c6
     camera: camera
