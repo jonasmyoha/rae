@@ -16,6 +16,8 @@ struct Underwater {
   deep: vec4<f32>,            // rgb = body deep colour (the fog's asymptote), w = far distance cap (m)
   absorb: vec4<f32>,          // rgb = Beer-Lambert absorption per metre, w = density scale
   params: vec4<f32>,          // x = near-surface tint strength, y = tint depth (m), zw = unused
+  sun: vec4<f32>,             // xyz = direction TOWARD the sun (unit), w = caustics on (1) / off (0)
+  caustic: vec4<f32>,         // rgb = sun colour (caustic tint), w = caustic strength
 };
 @group(0) @binding(0) var<uniform> U: Underwater;
 @group(0) @binding(1) var sceneTex: texture_2d<f32>;    // litCopy: the composed frame
@@ -33,6 +35,32 @@ fn vs(@builtin(vertex_index) vi: u32) -> VsOut {
   let y = f32(i32(vi >> 1u) * 4 - 1);
   o.pos = vec4<f32>(x, y, 0.0, 1.0);
   return o;
+}
+
+// A compact self-contained value noise (this file is read verbatim, not
+// composed with lib/noise.wgsl). Hash -> [0,1], smooth-interpolated.
+fn cwHash(p: vec2<i32>) -> f32 {
+  var h = u32(p.x) * 0x85ebca6bu ^ u32(p.y) * 0xc2b2ae35u;
+  h = h ^ (h >> 15u); h = h * 0x2c1b3c6du; h = h ^ (h >> 12u);
+  return f32(h & 0xffffffu) / 16777215.0;
+}
+fn cwValue(p: vec2<f32>) -> f32 {
+  let c = vec2<i32>(floor(p));
+  let f = fract(p);
+  let u = f * f * (3.0 - 2.0 * f);
+  let a = mix(cwHash(c), cwHash(c + vec2<i32>(1, 0)), u.x);
+  let b = mix(cwHash(c + vec2<i32>(0, 1)), cwHash(c + vec2<i32>(1, 1)), u.x);
+  return mix(a, b, u.y);
+}
+// Caustics (#860): a two-octave RIDGED noise (1 - |2n-1| peaks along thin
+// curves, like the light network on a pool floor), the two octaves panned in
+// opposite directions so the pattern shimmers instead of scrolling.
+fn causticPattern(xy: vec2<f32>, t: f32) -> f32 {
+  let a = 1.0 - abs(2.0 * cwValue(xy * 0.6 + vec2<f32>(t * 0.08, -t * 0.05)) - 1.0);
+  let b = 1.0 - abs(2.0 * cwValue(xy * 1.13 + vec2<f32>(-t * 0.06, t * 0.09)) - 1.0);
+  let net = a * b;
+  // Sharpen: only the brightest ridges survive, so it reads as focused light.
+  return pow(clamp(net, 0.0, 1.0), 3.0);
 }
 
 @fragment
@@ -67,5 +95,26 @@ fn fs(i: VsOut) -> @location(0) vec4<f32> {
   let camDepth = max(surfaceZ - cam.z, 0.0);
   let tint = U.params.x * clamp(camDepth / max(U.params.y, 0.01), 0.0, 1.0);
   colour = mix(colour, colour * U.deep.rgb * 4.0, tint * 0.25);
+
+  // Sun caustics on SUBMERGED geometry only. Conditions, each of which zeroes
+  // the contribution: caustics off; the sun below the horizon (toSun.z <= 0,
+  // so no light enters — "without sun illumination" adds nothing); a sky pixel
+  // (reverse-Z depth ~0, no surface to light); a surface AT or ABOVE the water
+  // line (world.z >= surfaceZ — nothing above/outside the water is touched).
+  let toSun = U.sun.xyz;
+  if (U.sun.w > 0.5 && toSun.z > 0.0 && ndcDepth > 1e-6 && world.z < surfaceZ - 0.02) {
+    // Project the submerged point up the sun ray onto the surface plane: every
+    // point the same refracted shaft lights shares this coordinate, so the
+    // caustic sits in world space and does not swim with the camera.
+    let toSurface = (surfaceZ - world.z) / toSun.z;
+    let causticXy = world.xy + toSun.xy * toSurface;
+    let pattern = causticPattern(causticXy, U.params.z);
+    // Fade with the depth of water above the lit point (shallow = crisp), and
+    // never brighten a point deeper than the fog's far cap.
+    let depthAbove = surfaceZ - world.z;
+    let depthFade = clamp(1.0 - depthAbove / 12.0, 0.0, 1.0);
+    let reach = transmit;  // caustic light is absorbed on the way to the eye too
+    colour += U.caustic.rgb * pattern * U.caustic.w * depthFade * reach;
+  }
   return vec4<f32>(colour, 1.0);
 }
