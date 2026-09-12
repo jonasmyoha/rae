@@ -508,12 +508,12 @@ func renderApp(
       case RenderTag.transparentForward {
         # Opaque snapshot BEFORE the water so a refracting surface can read it (#832),
         # then the toon lake (#830), then the splash droplets blend OVER it.
-        transparentSnapshot(cache: renderSystem.renderer.passes.transparent)
+        snapshotOpaque(renderer: renderSystem.renderer)
         if let meshResources: view GpuResources => renderSystem.renderer.gpuResources {
           waterDraw(
             waterSystem: waterSystem
             resources: resources
-            gbuffer: renderSystem.renderer.passes.gbuffer
+            passes: renderSystem.renderer.passes
             meshResources: meshResources
             camera: cameraSystem.camera
             light: cameraSystem.light

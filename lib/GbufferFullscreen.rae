@@ -154,7 +154,6 @@ func createCompositePassCache() ret CompositePassCache {
     uniform: noBufferId()
     sampler: noSamplerId()
     binds: fillBindGroupIds(count: 3)
-    adopted: List.create(ExternalId, cap: 4)
     bindGen: 0 - 1
     args: createArgs(uniform: true)
   }
@@ -165,37 +164,24 @@ func createAoPassCache() ret AoPassCache {
     pipeMade: false
     pipeline: noRenderPipelineId()
     bindGroup: noBindGroupId()
-    adopted: List.create(ExternalId, cap: 4)
     bindGen: 0 - 1
   }
 }
 
 func createLightPassCache() ret LightPassCache {
   ret LightPassCache {
-    pipeline: noExternalId()
     bindGroup: noBindGroupId()
-    adopted: List.create(ExternalId, cap: 10)
+    adopted: List.create(ExternalId, cap: 4)
     bindGen: 0 - 1
   }
 }
 
 func createTaaPassCache() ret TaaPassCache {
-  ret TaaPassCache {
-    pipeline: noExternalId()
-    binds: fillBindGroupIds(count: 2)
-    adopted: List.create(ExternalId, cap: 10)
-    bindGen: 0 - 1
-  }
+  ret TaaPassCache { binds: fillBindGroupIds(count: 2), bindGen: 0 - 1 }
 }
 
 func createPyrPassCache() ret PyrPassCache {
-  ret PyrPassCache {
-    fromDepth: noExternalId()
-    reduce: noExternalId()
-    binds: List.create(BindGroupId, cap: 16)
-    adopted: List.create(ExternalId, cap: 20)
-    bindGen: 0 - 1
-  }
+  ret PyrPassCache { binds: List.create(BindGroupId, cap: 16), bindGen: 0 - 1 }
 }
 
 # A failed bind build (a C input not up yet) resets the pass's generation

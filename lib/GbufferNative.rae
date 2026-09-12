@@ -33,43 +33,8 @@ func gbPrepare() ret Int {
   }
 }
 
-# #906: the geometry frame's targets, frame uniform, draws buffer and
-# encoder / pass are the GbufferCache's manager objects (GbufferResources).
-# C keeps the frame-derived uniform MATH — rae_gb_frame_data writes the 36
-# floats of the TAA-jittered frame uniform into a Rae buffer and remembers the
-# jittered / previous view-projection for the still-C post passes — and
-# BORROWS the four target views + size (gbCommitTargets / gbForgetTargets).
-func nativeGbFrameData(
-  viewProj: view Mat4
-  clearR: Float
-  clearG: Float
-  clearB: Float
-  w: Int
-  h: Int
-  out: Ptr
-) unsafe extern("rae_gb_frame_data") ret Int
-
-func gbFrameData(
-  viewProj: view Mat4
-  clearR: copy Float
-  clearG: copy Float
-  clearB: copy Float
-  w: copy Int
-  h: copy Int
-  out: copy Ptr
-) unsafe ret Int {
-  unsafe {
-    ret nativeGbFrameData(
-      viewProj: viewProj
-      clearR: clearR
-      clearG: clearG
-      clearB: clearB
-      w: w
-      h: h
-      out: out
-    )
-  }
-}
+# The presentable target's format (the composite / inspector pipelines write it).
+func nativeG2dFormat() unsafe extern("rae_g2d_format") ret Int
 
 # The offscreen size the targets are built to: the configured surface at the
 # dynamic render scale (#530) — C surface glue.
@@ -86,40 +51,6 @@ func nativeGbOffscreenH() unsafe extern("rae_gb_offscreen_h") ret Int
 func gbOffscreenH() ret Int {
   unsafe {
     ret nativeGbOffscreenH()
-  }
-}
-
-# Hand C the borrowed target views + size (it never releases them) and bump
-# the targets generation the post passes re-fit on.
-func gbCommitTargets(
-  w: Int
-  h: Int
-  a: Ptr
-  b: Ptr
-  c: Ptr
-  depth: Ptr
-) unsafe extern("rae_gb_commit_targets")
-
-func nativeGbForgetTargets() unsafe extern("rae_gb_forget_targets")
-
-func gbForgetTargets() {
-  unsafe {
-    nativeGbForgetTargets()
-  }
-}
-
-# Shared by the inspector and the deferred post-passes (declared here so both
-# get them via `open gbuffer` without redeclaring): the presentable target's
-# format/view and the targets-resize generation counter.
-func nativeG2dFormat() unsafe extern("rae_g2d_format") ret Int
-
-func nativeGbTargetsGen() unsafe extern("rae_gb_targets_gen") ret Int
-
-func nativeGbMotionZero() unsafe extern("rae_gb_motion_zero") ret Float
-
-func gbMotionZero() ret Float {
-  unsafe {
-    ret nativeGbMotionZero()
   }
 }
 
@@ -161,19 +92,3 @@ func gbufferPipelineSpec(
 # other shader; the pipeline, uniforms, buffers and binds are the Rae
 # SdfPassCache's (GbufferSdf.rae, #922).
 func gbSdfWgsl() unsafe extern("rae_gb_sdf_wgsl") ret Buffer(Any)
-
-func nativePyramidMips() unsafe extern("rae_ext_Gbuffer_pyramidMips") ret Int
-
-func pyramidMips() ret Int {
-  unsafe {
-    ret nativePyramidMips()
-  }
-}
-
-func nativeDeferredShutdown() unsafe extern("rae_ext_Gbuffer_deferredShutdown")
-
-func deferredShutdown() {
-  unsafe {
-    nativeDeferredShutdown()
-  }
-}

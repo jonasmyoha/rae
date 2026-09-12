@@ -73,34 +73,12 @@ open GbufferResources
 # size), a manager frame uniform + draws buffer, and a manager Recording per
 # frame whose multi-attachment pass (3 G-buffer colour views + depth) every
 # draw records into; end() submits it TRACKED (the cache polls its in-flight
-# submissions). C computes the frame-derived uniform data (TAA jitter, previous
-# view-projection) into the Rae buffer and BORROWS the four views for the
-# post passes that are still C (read through gbViewA..gbViewDepth below).
-func gbViewA() unsafe extern("rae_gb_view_a") ret Ptr
-
-func gbViewB() unsafe extern("rae_gb_view_b") ret Ptr
-
-func gbViewC() unsafe extern("rae_gb_view_c") ret Ptr
-
-func gbViewDepth() unsafe extern("rae_gb_view_depth") ret Ptr
-
-# True while C holds the borrowed target views (between the first begin and
-# the renderer's shutdown) — what the still-C post passes read.
-func gbTargetsBorrowed() ret Bool {
-  unsafe {
-    ret gbViewDepth() is not webgpuNull()
-  }
-}
-
+# submissions). Since #923 every consumer (the post passes, the inspector, the
+# transparent / underwater / water passes) binds the target views by ID —
+# nothing in C reads them.
 func g2dFormat() ret Int {
   unsafe {
     ret nativeG2dFormat()
-  }
-}
-
-func gbTargetsGen() ret Int {
-  unsafe {
-    ret nativeGbTargetsGen()
   }
 }
 
@@ -124,7 +102,17 @@ type GbufferCache {
   targetsGen: Int  # bumped per rebuild; the post passes re-fit on it
   frameUniform: BufferId
   draws: BufferId
-  frameFloats: List(Float)  # the frame uniform's 36 floats, C-computed
+  frameFloats: List(Float)  # the frame uniform's 36 floats (viewProj, prevViewProj, jitter)
+  # The frame-derived matrices (#923, was C's gb_viewproj / _jittered / _prev):
+  # the post passes (SSAO, lighting, SDF) reconstruct positions from depth with
+  # the matrix the geometry was RASTERISED with — the jittered one.
+  viewProj: Mat4
+  viewProjJittered: Mat4
+  prevViewProj: Mat4
+  havePrevViewProj: Bool
+  jitterFrame: Int  # Halton index; TAA off = zero jitter
+  taaEnabled: Bool  # the renderer's TAA switch (setTaaEnabled); jitter follows it
+  clearColor: Vec3  # this frame's background (the lighting pass's clear)
   drawCount: Int  # the draws-buffer cursor, reset per begin
   recording: opt Recording  # the open frame's manager recording
   pass: Ptr  # the open geometry pass (null between frames)
@@ -159,6 +147,13 @@ func createGbufferCache() pub ret GbufferCache {
       frameUniform: noBufferId()
       draws: noBufferId()
       frameFloats: List.create(Float, cap: gbufferFrameFloats)
+      viewProj: mat4Identity()
+      viewProjJittered: mat4Identity()
+      prevViewProj: mat4Identity()
+      havePrevViewProj: false
+      jitterFrame: 0
+      taaEnabled: false
+      clearColor: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
       drawCount: 0
       recording: none
       pass: webgpuNull()
@@ -235,7 +230,7 @@ func begin(
   # B: albedo, cleared to the sky/background colour.
   # C: material/motion. Motion clears to the biased zero (no movement).
   # Depth: reverse-Z, so the far plane clears to 0 (#367).
-  let motionZero: Float = gbMotionZero()
+  let motionZero: Float = gbufferMotionZero
   var targets: RenderTargetSet = createRenderTargetSet(clear: true)
   addColorTarget(
     targets: targets
@@ -279,9 +274,15 @@ func begin(
   # opens with nothing bound; the SDF draw binds its own too.
 }
 
-# The frame uniform's data is C math (jitter + previous view-projection,
-# remembered there for the still-C post passes); Rae uploads it into its
-# manager buffer.
+# The frame uniform (#397/#906; Rae math since #923): viewProj, the previous
+# frame's viewProj (motion vectors) and this frame's sub-pixel jitter. The
+# jitter is Halton(2,3) — the same low-discrepancy sequence the forward path
+# uses — with index 0 skipped so no frame lands on a zero offset; it feeds
+# ONLY TAA, so with TAA off it is suppressed (#20). The rasterised matrix is
+# jitter * viewProj: a clip-space xy offset proportional to w is jx*(row 3)
+# added to row 0 and jy*(row 3) to row 1 (column-major: m[c*4+r]); the post
+# passes invert THAT one. The first frame reuses this viewProj as the previous,
+# which yields zero motion — right, and better than an uninitialised matrix.
 func uploadFrameUniform(
   cache: mod GbufferCache
   resources: mod GpuResources
@@ -290,21 +291,46 @@ func uploadFrameUniform(
   clearG: copy Float
   clearB: copy Float
 ) ret Bool {
-  loop cache.frameFloats.length < gbufferFrameFloats {
-    cache.frameFloats.add(value: 0.0)
+  cache.viewProj = viewProj
+  cache.clearColor = Vec3.create(x: clearR, y: clearG, z: clearB)
+  if not cache.havePrevViewProj {
+    cache.prevViewProj = viewProj
+    cache.havePrevViewProj = true
   }
+  var jx: Float = 0.0
+  var jy: Float = 0.0
+  if cache.targetWidth > 0 and cache.targetHeight > 0 and cache.taaEnabled {
+    let index: Int = cache.jitterFrame % 16 + 1
+    jx = (halton(index: index, base: 2) - 0.5) * 2.0 / cache.targetWidth.toFloat()
+    jy = (halton(index: index, base: 3) - 0.5) * 2.0 / cache.targetHeight.toFloat()
+  }
+  cache.jitterFrame = cache.jitterFrame + 1
+  var jittered: Mat4 = viewProj
+  var c: Int = 0
+  loop c < 4 {
+    jittered.m[c * 4] = jittered.m[c * 4] + jx * jittered.m[c * 4 + 3]
+    jittered.m[c * 4 + 1] = jittered.m[c * 4 + 1] + jy * jittered.m[c * 4 + 3]
+    c = c + 1
+  }
+  cache.viewProjJittered = jittered
+  cache.frameFloats.clear()
+  var i: Int = 0
+  loop i < 16 {
+    cache.frameFloats.add(value: viewProj.m[i])
+    i = i + 1
+  }
+  i = 0
+  loop i < 16 {
+    cache.frameFloats.add(value: cache.prevViewProj.m[i])
+    i = i + 1
+  }
+  cache.frameFloats.add(value: jx)
+  cache.frameFloats.add(value: jy)
+  cache.frameFloats.add(value: 0.0)
+  cache.frameFloats.add(value: 0.0)
+  # Remember for NEXT frame, after this frame's copy is handed over.
+  cache.prevViewProj = viewProj
   unsafe {
-    if gbFrameData(
-      viewProj: viewProj
-      clearR: clearR
-      clearG: clearG
-      clearB: clearB
-      w: cache.targetWidth
-      h: cache.targetHeight
-      out: cache.frameFloats.data
-    ) is 0 {
-      ret false
-    }
     ret writeBufferFromPtr(
       resources: resources
       id: cache.frameUniform
@@ -313,6 +339,18 @@ func uploadFrameUniform(
       size: gbufferFrameFloats * 4
     )
   }
+}
+
+func halton(index: copy Int, base: copy Int) ret Float {
+  var f: Float = 1.0
+  var r: Float = 0.0
+  var i: Int = index
+  loop i > 0 {
+    f = f / base.toFloat()
+    r = r + f * (i % base).toFloat()
+    i = i / base
+  }
+  ret r
 }
 
 func gbufferFrameActive(cache: view GbufferCache) ret Bool {
@@ -747,14 +785,10 @@ func presentFrame(canvas: mod Gpu2dCanvas) pub {
 # comparing them proves nothing.
 # compositePass moved to gbufferPasses.rae (#504).
 
-# Mip levels in the pyramid; 0 before the first build. Lets a caller
-# confirm the chain was built rather than silently skipped.
-func depthPyramidMips() pub ret Int {
-  ret pyramidMips()
-}
-
+# The C-side shutdown: what is still C (the terrain / sprite asset arrays,
+# the shadow cascades until #925). Everything else the renderer owns is
+# retired by shutdownDeferredRenderer.
 func shutdownAll() pub {
-  deferredShutdown()
   shutdown()
 }
 

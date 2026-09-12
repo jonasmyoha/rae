@@ -1,0 +1,116 @@
+# GpuTextures — mip-chained textures and per-mip views on the manager (#923),
+# split from gpu/GpuResources for the 1000-line cap. `createTexture` makes a
+# single-mip 2D texture and `createTextureView` its level-0 view; a depth
+# pyramid needs a chain of mips written one level at a time, so this adds a
+# texture with `mipLevels` levels and a view over ONE chosen level (a render
+# target and a sampled source in different passes). Also the raw texture
+# handle a copy between two manager textures needs (the still-raw
+# copyTextureToTexture encode), guarded like every other handle accessor.
+open webgpu/Webgpu
+open webgpu/Context
+open webgpu/WebgpuEnums
+open webgpu/WebgpuTypes
+open gpu/GpuResources
+
+func createTextureMipped(
+  resources: mod GpuResources
+  width: view Int
+  height: view Int
+  format: view Int32
+  usage: view UInt64
+  mipLevels: view Int
+) ret opt TextureId {
+  if width < 1 or height < 1 or mipLevels < 1 {
+    ret none
+  }
+  if usage is (0 as UInt64) {
+    ret none
+  }
+  let slot: Int = findFreeSlot(table: resources.textures, capacity: resources.capacity)
+  if slot < 0 {
+    ret none
+  }
+  unsafe {
+    let descriptor: WGPUTextureDescriptor = {
+      usage: usage
+      dimension: WGPUTextureDimension_2D
+      size: { width: width as UInt32, height: height as UInt32, depthOrArrayLayers: 1 as UInt32 }
+      format: format
+      mipLevelCount: mipLevels as UInt32
+      sampleCount: 1 as UInt32
+    }
+    let handle: Ptr = wgpuDeviceCreateTexture(device: webgpuDevice(), descriptor: descriptor)
+    if handle is webgpuNull() {
+      ret none
+    }
+    storeHandle(table: resources.textures, slot: slot, handle: handle)
+  }
+  ret TextureId {
+    managerTag: resources.managerTag
+    slot: slot
+    generation: slotGeneration(table: resources.textures, slot: slot)
+  }
+}
+
+# A 2D view over mip level `mip` of `texture` (the texture's own format);
+# records the texture as its dependency like createTextureView.
+func createTextureViewMip(
+  resources: mod GpuResources
+  texture: view TextureId
+  mip: view Int
+) ret opt TextureViewId {
+  if isValidTexture(resources: resources, id: texture) is false or mip < 0 {
+    ret none
+  }
+  let slot: Int = findFreeSlot(table: resources.textureViews, capacity: resources.capacity)
+  if slot < 0 {
+    ret none
+  }
+  unsafe {
+    let textureHandle: Ptr = slotHandle(table: resources.textures, slot: texture.slot)
+    if mip >= (wgpuTextureGetMipLevelCount(texture: textureHandle) as Int) {
+      ret none
+    }
+    let descriptor: WGPUTextureViewDescriptor = {
+      format: wgpuTextureGetFormat(texture: textureHandle)
+      dimension: WGPUTextureViewDimension_2D
+      baseMipLevel: mip as UInt32
+      mipLevelCount: 1 as UInt32
+      baseArrayLayer: 0 as UInt32
+      arrayLayerCount: 1 as UInt32
+      aspect: WGPUTextureAspect_All
+    }
+    let handle: Ptr = wgpuTextureCreateView(texture: textureHandle, descriptor: descriptor)
+    if handle is webgpuNull() {
+      ret none
+    }
+    storeHandle(table: resources.textureViews, slot: slot, handle: handle)
+  }
+  resources.textureViews.parentSlot.set(index: slot, value: texture.slot)
+  resources.textureViews.parentGeneration.set(index: slot, value: texture.generation)
+  ret TextureViewId {
+    managerTag: resources.managerTag
+    slot: slot
+    generation: slotGeneration(table: resources.textureViews, slot: slot)
+  }
+}
+
+# The native texture handle (null for an invalid ID), for a raw encode that
+# copies between two manager textures.
+func textureHandle(resources: view GpuResources, id: view TextureId) unsafe ret Ptr {
+  unsafe {
+    if isValidTexture(resources: resources, id: id) is false {
+      ret webgpuNull()
+    }
+    ret slotHandle(table: resources.textures, slot: id.slot)
+  }
+}
+
+func textureViewHandle(resources: view GpuResources, id: view TextureViewId) unsafe ret Ptr {
+  unsafe {
+    if isValidTextureView(resources: resources, id: id) is false {
+      ret webgpuNull()
+    }
+    ret slotHandle(table: resources.textureViews, slot: id.slot)
+  }
+}

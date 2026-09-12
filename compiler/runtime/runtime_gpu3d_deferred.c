@@ -45,38 +45,10 @@
  * sky you are lit by to be a frame apart. */
 #define GB_LIGHT_BYTES 416
 
-static WGPUTexture     gb_pyramid_tex = NULL;    /* r32float, half res, mip chain */
-static WGPUTextureView gb_pyramid_rt[GB_PYRAMID_MAX_MIPS];   /* one per mip, as target */
-static WGPUTextureView gb_pyramid_src[GB_PYRAMID_MAX_MIPS];  /* one per mip, as source */
-static int             gb_pyramid_mips = 0;
-static int             gb_pyramid_w = 0, gb_pyramid_h = 0;
-
-static WGPUTexture     gb_lit_tex = NULL;        /* linear HDR radiance */
-static WGPUTextureView gb_lit_view = NULL;
-static WGPUTexture gb_lit_copy_tex = NULL;
-static WGPUTextureView gb_lit_copy_view = NULL;
-/* Transparent forward pass (#843): the blend pipeline + its bind group are
- * manager IDs on the Rae side since #904 (lib/TransparentForward.rae); C keeps
- * only the lit / litCopy accessors it binds. */
-/* HDR radiance format (#370). rg11b10ufloat halves the bandwidth of the
- * largest full-res float target in the frame, but it is an optional
- * WebGPU feature; when the adapter does not offer it we fall back to
- * rgba16float, which is guaranteed. The pipeline is created from this
- * same variable, so the two cannot drift apart. */
-static WGPUTextureFormat gb_lit_format = WGPUTextureFormat_RGBA16Float;
-
-static WGPURenderPipeline gb_pyr_from_depth_pipeline = NULL;  /* depth32f -> r32f */
-static WGPURenderPipeline gb_pyr_reduce_pipeline = NULL;      /* r32f -> r32f */
-
-static WGPURenderPipeline gb_light_pipeline = NULL;
-static WGPUBuffer         gb_light_ubuf = NULL;
-/* #904: the light / taa / pyramid bind groups and the composite pipeline,
- * uniform, sampler and binds are manager IDs on the Rae side
- * (lib/GbufferPasses.rae); the C pipelines above are adopted there. */
-static WGPUBuffer         gb_taa_ubuf = NULL;
-
-static int gb_deferred_gen = -1;   /* gb_targets_gen this file's binds were built for */
-
+/* #923: the lit / litCopy / AO / TAA / pyramid targets, the light + TAA
+ * uniforms and the lighting / TAA / pyramid pipelines are Rae manager objects
+ * on the DeferredRenderer (lib/GbufferTargets.rae); C keeps the WGSL sources,
+ * the deferred prepare (shadow defaults) and the shadow inputs. */
 /* Fullscreen triangle, shared by every pass here. Three vertices covering
  * the viewport beats two triangles: no shared edge, so no risk of a seam
  * from inconsistent interpolation along the diagonal. */
@@ -151,41 +123,6 @@ GB_FULLSCREEN_VS
  * instead of ghosting. Without it TAA trades aliasing for trailing, which
  * is a worse artefact.
  */
-static WGPUTexture     gb_taa_tex[2] = {NULL, NULL};
-static WGPUTextureView gb_taa_view[2] = {NULL, NULL};
-static WGPURenderPipeline gb_taa_pipeline = NULL;
-static int  gb_taa_cur = 0;
-static bool gb_taa_have_history = false;
-/* Sub-pixel jitter (#390). WITHOUT IT TAA IS NOT ANTIALIASING: every
- * frame samples the same point inside each pixel, so accumulating them
- * adds nothing and only risks ghosting. The jitter is what makes
- * successive frames carry different information. */
-static float gb_jitter_x = 0.0f, gb_jitter_y = 0.0f;
-static int   gb_taa_frame = 0;
-/* DEFAULT OFF: FXAA is the default anti-aliasing, TAA is opt-in
- * (rae_gb_set_taa_enabled(1) / RendererDeferred.setTaaEnabled(on: true)).
- * The TAA resolve is the minimal recipe (8-bit motion channel, 3x3 min/max
- * clamp, fixed 0.9 blend, no mip bias) and blurs/ghosts on detailed top-down
- * terrain and constant crowd motion; FXAA is ghost-free and cheaper. The
- * TAA quality fixes are queued as POSTPONED tasks. */
-static bool  gb_taa_enabled = false;
-
-/* DISTANCE FOG (#57, per-app). Off by default so every deferred example is
- * byte-identical. An app opts in with rae_gb_set_fog(1, r,g,b, start, end):
- * geometry within [start,end] world units of the camera fades to (r,g,b), and
- * the sky BACKGROUND is replaced by that same colour, so the far edge of a
- * ground/sea plane dissolves into the horizon with no hard far-clip seam. The
- * colour is LINEAR HDR (pre-composite), the same space the lit radiance and the
- * sky background live in — background and fog target share one value, so they
- * tonemap to the identical display colour and the join is seamless by
- * construction. Carried in the LightU uniform's otherwise-DEAD clearColor
- * (never read by the lighting fs) plus two free .w padding slots, so
- * GB_LIGHT_BYTES does not change and no other pass is touched. */
-static int   gb_fog_on = 0;
-static float gb_fog_col[3] = {0.0f, 0.0f, 0.0f};
-static float gb_fog_start = 0.0f;
-static float gb_fog_end   = 0.0f;
-
 static const char* GB_TAA_WGSL =
 "@group(0) @binding(0) var litTex: texture_2d<f32>;\n"
 "@group(0) @binding(1) var histTex: texture_2d<f32>;\n"
@@ -251,9 +188,6 @@ GB_FULLSCREEN_VS
  * second pass and a sampler; correctness first, cost second. Half-res is a
  * tier knob and is tracked rather than pretended at.
  */
-static WGPUTexture     gb_ao_tex = NULL;
-static WGPUTextureView gb_ao_view = NULL;
-
 static const char* GB_AO_WGSL =
 "struct LightU {\n"
 "  invViewProj: mat4x4<f32>,\n"
@@ -825,402 +759,31 @@ GB_FULLSCREEN_VS
 "  return vec4<f32>(rgbB, 1.0);\n"
 "}\n";
 
-/* Build a fullscreen pipeline: no vertex buffers, no depth, one target. */
-static WGPURenderPipeline gb_make_fullscreen_pipeline(const char* wgsl, WGPUTextureFormat fmt,
-                                                      const char* label) {
-    WGPUShaderSourceWGSL src; memset(&src, 0, sizeof(src));
-    src.chain.sType = WGPUSType_ShaderSourceWGSL;
-    src.code = rae_wgpu_sv(wgsl);
-    WGPUShaderModuleDescriptor smd; memset(&smd, 0, sizeof(smd));
-    smd.nextInChain = &src.chain;
-    WGPUShaderModule mod = wgpuDeviceCreateShaderModule(g_wgpu_dev, &smd);
-
-    WGPUColorTargetState cts; memset(&cts, 0, sizeof(cts));
-    cts.format = fmt; cts.writeMask = WGPUColorWriteMask_All;
-    WGPUFragmentState fs; memset(&fs, 0, sizeof(fs));
-    fs.module = mod; fs.entryPoint = rae_wgpu_sv("fs"); fs.targetCount = 1; fs.targets = &cts;
-    WGPURenderPipelineDescriptor pd; memset(&pd, 0, sizeof(pd));
-    pd.vertex.module = mod; pd.vertex.entryPoint = rae_wgpu_sv("vs");
-    pd.primitive.topology = WGPUPrimitiveTopology_TriangleList;
-    pd.primitive.frontFace = WGPUFrontFace_CCW;
-    pd.primitive.cullMode = WGPUCullMode_None;
-    pd.multisample.count = 1; pd.multisample.mask = 0xFFFFFFFFu;
-    pd.fragment = &fs;
-    WGPURenderPipeline p = wgpuDeviceCreateRenderPipeline(g_wgpu_dev, &pd);
-    wgpuShaderModuleRelease(mod);
-    if (!p) fprintf(stderr, "[deferred] %s pipeline creation FAILED\n", label);
-    return p;
+/* #923: the pass objects are Rae's. What is left of the deferred prep is the
+ * device + surface check and the shadow cascade DEFAULTS: the lighting bind
+ * samples the cascade array even when no shadow pass ran (wgpu aborts on a
+ * null binding rather than returning an error), and an unrendered cascade is
+ * never sampled because shadowCfg.x stays 0. */
+static void gb_deferred_ensure_shadow_defaults(void) {
+    g3d_shadow_init();
+    g3d_shadow_ensure_targets(G3D_SHADOW_DEFAULT_RES, G3D_SHADOW_DEFAULT_CASCADES);
 }
 
-static void gb_deferred_release_targets(void) {
-    for (int i = 0; i < GB_PYRAMID_MAX_MIPS; i++) {
-        if (gb_pyramid_rt[i])  { wgpuTextureViewRelease(gb_pyramid_rt[i]); gb_pyramid_rt[i] = NULL; }
-        if (gb_pyramid_src[i]) { wgpuTextureViewRelease(gb_pyramid_src[i]); gb_pyramid_src[i] = NULL; }
-    }
-    if (gb_pyramid_tex)    { wgpuTextureRelease(gb_pyramid_tex); gb_pyramid_tex = NULL; }
-    /* The bind groups sampling these targets are manager-owned (#904): Rae
-     * retires them when gb_targets_gen changes, before re-adopting the views. */
-    for (int i = 0; i < 2; i++) {
-        if (gb_taa_view[i]) { wgpuTextureViewRelease(gb_taa_view[i]); gb_taa_view[i] = NULL; }
-        if (gb_taa_tex[i])  { wgpuTextureRelease(gb_taa_tex[i]); gb_taa_tex[i] = NULL; }
-    }
-    gb_taa_have_history = false;
-    if (gb_ao_view)        { wgpuTextureViewRelease(gb_ao_view); gb_ao_view = NULL; }
-    if (gb_ao_tex)         { wgpuTextureRelease(gb_ao_tex); gb_ao_tex = NULL; }
-    if (gb_lit_view)       { wgpuTextureViewRelease(gb_lit_view); gb_lit_view = NULL; }
-    if (gb_lit_tex)        { wgpuTextureRelease(gb_lit_tex); gb_lit_tex = NULL; }
-    if (gb_lit_copy_view) { wgpuTextureViewRelease(gb_lit_copy_view); gb_lit_copy_view = NULL; }
-    if (gb_lit_copy_tex) { wgpuTextureRelease(gb_lit_copy_tex); gb_lit_copy_tex = NULL; }
-    gb_pyramid_mips = 0;
-}
-
-/* Recreate everything downstream of the G-buffer whenever the G-buffer
- * itself was recreated. Keyed on gb_targets_gen rather than on dimensions:
- * a resize back to a previous size still invalidates the bind groups, and
- * comparing sizes would miss that. */
-static void gb_deferred_ensure(void) {
-    if (gb_deferred_gen == gb_targets_gen && gb_pyramid_tex && gb_lit_tex && gb_lit_copy_tex) return;
-    if (gb_target_w <= 0 || gb_target_h <= 0) return;
-    gb_deferred_release_targets();
-
-    int pw = gb_target_w / 2; if (pw < 1) pw = 1;
-    int ph = gb_target_h / 2; if (ph < 1) ph = 1;
-    int mips = 1;
-    {
-        int m = pw > ph ? pw : ph;
-        while (m > 1 && mips < GB_PYRAMID_MAX_MIPS) { m /= 2; mips++; }
-    }
-
-    WGPUTextureDescriptor td; memset(&td, 0, sizeof(td));
-    td.dimension = WGPUTextureDimension_2D;
-    td.size.width = (uint32_t)pw; td.size.height = (uint32_t)ph; td.size.depthOrArrayLayers = 1;
-    td.mipLevelCount = (uint32_t)mips; td.sampleCount = 1;
-    td.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TextureBinding;
-    td.format = WGPUTextureFormat_R32Float;
-    gb_pyramid_tex = wgpuDeviceCreateTexture(g_wgpu_dev, &td);
-    for (int i = 0; i < mips; i++) {
-        WGPUTextureViewDescriptor vd; memset(&vd, 0, sizeof(vd));
-        vd.format = WGPUTextureFormat_R32Float;
-        vd.dimension = WGPUTextureViewDimension_2D;
-        vd.baseMipLevel = (uint32_t)i; vd.mipLevelCount = 1;
-        vd.baseArrayLayer = 0; vd.arrayLayerCount = 1;
-        vd.aspect = WGPUTextureAspect_All;
-        gb_pyramid_rt[i]  = wgpuTextureCreateView(gb_pyramid_tex, &vd);
-        gb_pyramid_src[i] = wgpuTextureCreateView(gb_pyramid_tex, &vd);
-    }
-    gb_pyramid_mips = mips;
-    gb_pyramid_w = pw; gb_pyramid_h = ph;
-
-    memset(&td, 0, sizeof(td));
-    td.dimension = WGPUTextureDimension_2D;
-    td.size.width = (uint32_t)gb_target_w; td.size.height = (uint32_t)gb_target_h;
-    td.size.depthOrArrayLayers = 1;
-    td.mipLevelCount = 1; td.sampleCount = 1;
-    td.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TextureBinding;
-    td.format = gb_lit_format;
-    td.usage |= WGPUTextureUsage_CopySrc;
-    gb_lit_tex = wgpuDeviceCreateTexture(g_wgpu_dev, &td);
-    gb_lit_view = wgpuTextureCreateView(gb_lit_tex, NULL);
-    /* Same extent/format as HDR, sampled by later transparent materials.
-     * Recreated and released with the other generation-keyed targets. */
-    td.usage = WGPUTextureUsage_CopyDst | WGPUTextureUsage_TextureBinding;
-    gb_lit_copy_tex = wgpuDeviceCreateTexture(g_wgpu_dev, &td);
-    gb_lit_copy_view = wgpuTextureCreateView(gb_lit_copy_tex, NULL);
-    td.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TextureBinding;
-
-    /* AO target (#387). Full resolution and r8unorm: one byte per pixel,
-     * and a fragment pass can write r8unorm as a colour attachment even
-     * though it is not a writable STORAGE format. */
-    td.size.width = (uint32_t)gb_target_w;
-    td.size.height = (uint32_t)gb_target_h;
-    td.mipLevelCount = 1;
-    td.format = WGPUTextureFormat_R8Unorm;
-    gb_ao_tex = wgpuDeviceCreateTexture(g_wgpu_dev, &td);
-    gb_ao_view = wgpuTextureCreateView(gb_ao_tex, NULL);
-
-    /* TAA history, same format as radiance: the resolve accumulates
-     * LINEAR HDR, before the composite's tone curve. Accumulating
-     * tonemapped values would make convergence depend on exposure. */
-    td.format = gb_lit_format;
-    for (int i = 0; i < 2; i++) {
-        gb_taa_tex[i] = wgpuDeviceCreateTexture(g_wgpu_dev, &td);
-        gb_taa_view[i] = wgpuTextureCreateView(gb_taa_tex[i], NULL);
-    }
-    gb_taa_have_history = false;
-
-    gb_deferred_gen = gb_targets_gen;
-}
-
-static void gb_deferred_init_pipelines(void) {
-    if (!gb_pyr_from_depth_pipeline)
-        gb_pyr_from_depth_pipeline = gb_make_fullscreen_pipeline(
-            GB_PYR_FROM_DEPTH_WGSL, WGPUTextureFormat_R32Float, "depth-pyramid mip0");
-    if (!gb_pyr_reduce_pipeline)
-        gb_pyr_reduce_pipeline = gb_make_fullscreen_pipeline(
-            GB_PYR_REDUCE_WGSL, WGPUTextureFormat_R32Float, "depth-pyramid reduce");
-    if (!gb_light_pipeline) {
-        gb_lit_format = g_wgpu_have_rg11b10 ? WGPUTextureFormat_RG11B10Ufloat
-                                            : WGPUTextureFormat_RGBA16Float;
-        /* The lighting bind group references the shadow cascades, so
-         * they must EXIST even for an app that never runs a shadow pass —
-         * wgpu aborts the process on a null binding rather than returning
-         * an error. An unrendered cascade is never sampled, because
-         * shadowCfg.x stays 0 and sunVisibility returns 1.0 before
-         * touching the texture. */
-        g3d_shadow_init();
-        g3d_shadow_ensure_targets(G3D_SHADOW_DEFAULT_RES, G3D_SHADOW_DEFAULT_CASCADES);
-        gb_taa_pipeline = gb_make_fullscreen_pipeline(
-            GB_TAA_WGSL, gb_lit_format, "taa");
-        /* The SSAO pipeline is created in Rae now (#504). */
-        gb_light_pipeline = gb_make_fullscreen_pipeline(
-            GB_LIGHT_WGSL, gb_lit_format, "lighting");
-        WGPUBufferDescriptor ud; memset(&ud, 0, sizeof(ud));
-        ud.size = GB_LIGHT_BYTES;
-        ud.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
-        gb_light_ubuf = wgpuDeviceCreateBuffer(g_wgpu_dev, &ud);
-        /* The TAA uniform is a 16-byte block like the composite's; it lives
-         * with the light family now that the composite pipeline moved to Rae
-         * (#504). */
-        WGPUBufferDescriptor td; memset(&td, 0, sizeof(td));
-        td.size = 16; td.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
-        gb_taa_ubuf = wgpuDeviceCreateBuffer(g_wgpu_dev, &td);
-    }
-    /* The composite pipeline + uniform + bind group are created in Rae now
-     * (lib/gbuffer_passes.rae:composite, #504) over the bindings. */
-}
-
-/* SSAO's pipeline, bind group and pass run in Rae now (#504,
- * lib/gbuffer_passes.rae). The uniform it needs — inverse(jittered viewProj)
- * plus camera position, derived from the geometry pass's matrix — stays C math
- * and is uploaded here into the shared light uniform. */
-void rae_gb_ssao_upload(float camX, float camY, float camZ) {
-    if (!gb_light_ubuf) return;
-    float u[GB_LIGHT_BYTES / 4];
-    memset(u, 0, sizeof(u));
-    if (!g3d_invert_mat4(gb_viewproj_jittered, u)) {
-        memset(u, 0, 16 * sizeof(float));
-        u[0] = 1.0f; u[5] = 1.0f; u[10] = 1.0f; u[15] = 1.0f;
-    }
-    u[16] = camX; u[17] = camY; u[18] = camZ; u[19] = 0.0f;
-    memcpy(u + 40, gb_viewproj_jittered, 16 * sizeof(float));
-    wgpuQueueWriteBuffer(g_wgpu_queue, gb_light_ubuf, 0, u, GB_LIGHT_BYTES);
-}
-const char* rae_gb_ao_wgsl(void)   { return GB_AO_WGSL; }
-void* rae_gb_ao_view(void)         { return (void*)gb_ao_view; }
-void* rae_gb_light_ubuf(void)      { return (void*)gb_light_ubuf; }
-int64_t rae_gb_light_bytes(void)   { return (int64_t)GB_LIGHT_BYTES; }
-
-static void gb_run_fullscreen(WGPURenderPipeline pipeline, WGPUBindGroup bind,
-                              WGPUTextureView target) {
-    if (!pipeline || !bind || !target) return;
-    WGPUCommandEncoder enc = wgpuDeviceCreateCommandEncoder(g_wgpu_dev, NULL);
-    WGPURenderPassColorAttachment ca; memset(&ca, 0, sizeof(ca));
-    ca.view = target;
-    ca.depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
-    ca.loadOp = WGPULoadOp_Clear;
-    ca.storeOp = WGPUStoreOp_Store;
-    WGPURenderPassDescriptor rp; memset(&rp, 0, sizeof(rp));
-    rp.colorAttachmentCount = 1; rp.colorAttachments = &ca;
-    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(enc, &rp);
-    wgpuRenderPassEncoderSetPipeline(pass, pipeline);
-    wgpuRenderPassEncoderSetBindGroup(pass, 0, bind, 0, NULL);
-    wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0);
-    wgpuRenderPassEncoderEnd(pass);
-    WGPUCommandBuffer cb = wgpuCommandEncoderFinish(enc, NULL);
-    wgpuQueueSubmit(g_wgpu_queue, 1, &cb);
-    wgpuCommandBufferRelease(cb);
-    wgpuRenderPassEncoderRelease(pass);
-    wgpuCommandEncoderRelease(enc);
-}
-
-/* Build the depth pyramid: mip 0 from the G-buffer's depth, then each
- * level from the one above. Each level is a separate pass because a level
- * cannot be read until the level that produces it has finished. */
-/* The depth-pyramid build runs in Rae now (lib/gbuffer_passes.rae:depthPyramid,
- * #504): a loop of single-entry fullscreen passes, each reading the previous
- * mip and writing the next. C keeps the pyramid targets + the two pipelines and
- * exposes per-mip accessors; the source for level i is the G-buffer depth at
- * mip 0, else the previous mip's source view. */
-int64_t rae_gb_pyramid_ready(void) {
-    if (!g_wgpu_dev || !gb_depth_view) return 0;
-    gb_deferred_init_pipelines();
-    gb_deferred_ensure();
-    return (gb_pyramid_tex && gb_pyr_from_depth_pipeline && gb_pyr_reduce_pipeline) ? 1 : 0;
-}
-void* rae_gb_pyr_from_depth_pipeline(void) { return (void*)gb_pyr_from_depth_pipeline; }
-void* rae_gb_pyr_reduce_pipeline(void)     { return (void*)gb_pyr_reduce_pipeline; }
-void* rae_gb_pyr_src_view(int64_t i) {
-    if (i <= 0) return (void*)gb_depth_view;
-    return (i - 1 < GB_PYRAMID_MAX_MIPS) ? (void*)gb_pyramid_src[i - 1] : NULL;
-}
-void* rae_gb_pyr_rt_view(int64_t i) {
-    return (i >= 0 && i < GB_PYRAMID_MAX_MIPS) ? (void*)gb_pyramid_rt[(int)i] : NULL;
-}
-
-/* Deferred lighting. Sun direction points TOWARD the scene, matching
- * Light3d and the forward path. */
-/* SSAO (#387). Runs BEFORE lighting, so it writes the part of the light
- * uniform it needs itself — invViewProj and camPos, both derived from the
- * geometry pass's viewProj. Lighting rewrites the same values later; they
- * cannot disagree because both come from gb_viewproj. */
-/* The SSAO pass moved to Rae (lib/gbuffer_passes.rae ssaoPass, #504). */
-
-/* Cooked Hosek-Wilkie coefficients, pushed from Rae before the lighting call.
- * One scalar per call keeps this off the lighting extern's already 28-long
- * argument list, where a positional mistake is silent.
- *
- * The table itself lives in runtime_sky_state.h, shared with the forward sky
- * pass so the two renderers cannot end up under different skies. Layout is
- * documented there. */
-void rae_ext_Gbuffer_skyHosekPush(int64_t index, float value) {
-    rae_sky_hosek_push(index, value);
-}
-
-/* Lighting runs in Rae now (lib/gbuffer_passes.rae:lighting, #504). C keeps the
- * large frame-derived uniform build (inverse viewProj + camera/sun/sky params +
- * the Rae-cooked Hosek state) and uploads it; Rae builds the 9-entry bind (the
- * G-buffer, AO, shadow cascades + sampler) and runs the fullscreen pass. The
- * lighting PIPELINE stays C for now — its creation guards the shared TAA /
- * light-uniform / shadow init block. */
-void* rae_gb_light_pipeline(void)     { return (void*)gb_light_pipeline; }
-void* rae_gb_lit_view(void)           { return (void*)gb_lit_view; }
-void* rae_gb_lit_texture(void)        { return (void*)gb_lit_tex; }
-void* rae_gb_lit_copy_texture(void)   { return (void*)gb_lit_copy_tex; }
-void* rae_gb_lit_copy_view(void)      { return (void*)gb_lit_copy_view; }
-int64_t rae_gb_lit_format(void)       { return (int64_t)gb_lit_format; }
+/* The shadow cascades' inputs the Rae lighting pass adopts (C until #925). */
 void* rae_gb_shadow_frame_ubuf(void)  { return (void*)g3d_sm_frame_ubuf; }
 int64_t rae_gb_shadow_frame_bytes(void){ return 320; }
 void* rae_gb_shadow_array_view(void)  { return (void*)g3d_sm_array_view; }
 void* rae_gb_shadow_sampler(void)     { return (void*)g3d_sm_sampler; }
 
-void rae_gb_light_upload(float camX, float camY, float camZ, float exposure,
-                              float sunX, float sunY, float sunZ,
-                              float sunR, float sunG, float sunB,
-                              float skyR, float skyG, float skyB,
-                              float gndR, float gndG, float gndB,
-                              float skyKind, float turbidity, float skyExposure,
-                              float sunSizeRad, float zenR, float zenG, float zenB,
-                              float bands, float horR, float horG, float horB,
-                              float discI) {
-    if (!gb_light_ubuf) return;
 
-    float u[GB_LIGHT_BYTES / 4];
-    memset(u, 0, sizeof(u));
-    /* Invert THIS frame's view-projection — the one the geometry pass
-     * rendered with — so reconstruction matches the depth being read. */
-    if (!g3d_invert_mat4(gb_viewproj_jittered, u)) {
-        /* Singular: a degenerate camera. Leaving the matrix zeroed would
-         * collapse every pixel to the origin and light the frame from
-         * inside itself; identity at least fails visibly and predictably. */
-        memset(u, 0, 16 * sizeof(float));
-        u[0] = 1.0f; u[5] = 1.0f; u[10] = 1.0f; u[15] = 1.0f;
-    }
-    u[16] = camX; u[17] = camY; u[18] = camZ; u[19] = exposure;
-    u[20] = sunX; u[21] = sunY; u[22] = sunZ; u[23] = 0.0f;
-    u[24] = sunR; u[25] = sunG; u[26] = sunB; u[27] = 0.0f;
-    u[28] = skyR; u[29] = skyG; u[30] = skyB; u[31] = 0.0f;
-    u[32] = gndR; u[33] = gndG; u[34] = gndB; u[35] = 0.0f;
-    /* clearColor is dead in the lighting fs, so #57 repurposes it as the fog
-     * block: rgb = fog/background colour, w = fog enabled. Fog near/far ride in
-     * the free sunColor.w (u[27]) and ambSky.w (u[31]) padding — neither .w is
-     * read by the shader. Off (the default) leaves w = 0, and the fs fog branch
-     * is skipped, so examples are unchanged. */
-    if (gb_fog_on) {
-        u[36] = gb_fog_col[0]; u[37] = gb_fog_col[1]; u[38] = gb_fog_col[2]; u[39] = 1.0f;
-        u[27] = gb_fog_start; u[31] = gb_fog_end;
-    } else {
-        u[36] = gb_clear[0]; u[37] = gb_clear[1]; u[38] = gb_clear[2]; u[39] = 0.0f;
-    }
-    memcpy(u + 40, gb_viewproj_jittered, 16 * sizeof(float));
-    /* Sky (#400/#404), packed after viewProj to match LightU. The offsets
-     * are not free-standing numbers: 56 is exactly where viewProj ends,
-     * which is why the WGSL struct must declare viewProj even though the
-     * lighting shader never reads it. */
-    u[56] = skyKind; u[57] = turbidity; u[58] = skyExposure; u[59] = sunSizeRad;
-    u[60] = zenR; u[61] = zenG; u[62] = zenB; u[63] = bands;
-    u[64] = horR; u[65] = horG; u[66] = horB; u[67] = discI;
-    /* Cooked Hosek-Wilkie state at u[68..103] (9 vec4). Rae computes these from
-     * the fitted table (lib/sky_hosek.rae + lib/data/hosek_wilkie_rgb.json) and
-     * pushes them with rae_ext_Gbuffer_skyHosekPush; this pass only copies. The
-     * model's arithmetic deliberately does not live in C — see
-     * docs/tech-stack-and-dependencies.md, and lib/sky_hosek.rae's header for
-     * what the earlier C version cost. */
-    memcpy(u + 68, rae_sky_hosek, 36 * sizeof(float));
-    wgpuQueueWriteBuffer(g_wgpu_queue, gb_light_ubuf, 0, u, GB_LIGHT_BYTES);
-}
-
-/* Composite radiance into the presentable offscreen. */
-/* TAA resolve (#390). Reads the radiance the lighting pass wrote plus
- * last frame's history, writes this frame's. The composite then reads
- * the resolved image rather than raw radiance. */
-/* TAA runs in Rae now (lib/gbuffer_passes.rae:taa, #504). The double-buffer
- * ping-pong and history flag are frame state, so they stay C: taa_begin flips
- * the write slot (also read by the composite's source-index) and uploads the
- * history flag; Rae builds the per-slot bind and runs the pass; taa_end marks
- * that history now exists. The TAA pipeline stays C (shared init block). */
-int64_t rae_gb_taa_ready(void) {
-    if (!g_wgpu_dev) return 0;
-    gb_deferred_init_pipelines();
-    gb_deferred_ensure();
-    return (gb_taa_enabled && gb_taa_pipeline && gb_taa_view[0] && gb_taa_view[1] && gb_lit_view) ? 1 : 0;
-}
-int64_t rae_gb_taa_begin(void) {
-    gb_taa_cur = 1 - gb_taa_cur;   /* resolve into the slot not read this frame */
-    float p[4] = { gb_taa_have_history ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f };
-    if (gb_taa_ubuf) wgpuQueueWriteBuffer(g_wgpu_queue, gb_taa_ubuf, 0, p, sizeof(p));
-    return (int64_t)gb_taa_cur;
-}
-void rae_gb_taa_end(void) { gb_taa_have_history = true; }
-void* rae_gb_taa_pipeline(void)      { return (void*)gb_taa_pipeline; }
-void* rae_gb_taa_ubuf(void)          { return (void*)gb_taa_ubuf; }
-void* rae_gb_taa_target_view(void)   { return (void*)gb_taa_view[gb_taa_cur]; }
-void* rae_gb_taa_history_view(void)  { return (void*)gb_taa_view[1 - gb_taa_cur]; }
-/* TAA on/off (#20, the game). Default is on so shared examples keep their look;
- * an app disables it with rae_gb_set_taa_enabled(0). When off the composite
- * routes to the raw lit slot (source-index 2), the taa graph pass no-ops via
- * rae_gb_taa_ready==0, the G-buffer jitter is suppressed (gbuffer.c reads this
- * getter), and the composite turns on FXAA instead — a spatial edge AA that
- * does not ghost on animation the way TAA does, and is cheap enough for the
- * mobile deferred target. */
-int64_t rae_gb_taa_is_enabled(void)     { return gb_taa_enabled ? 1 : 0; }
-void    rae_gb_set_taa_enabled(int64_t e) { gb_taa_enabled = (e != 0); }
-
-/* Distance fog (#57). See gb_fog_* above. Colour is LINEAR HDR; start/end are
- * world-unit distances from the camera. on=0 restores the sky background. */
-void rae_gb_set_fog(int64_t on, float r, float g, float b, float start, float end) {
-    gb_fog_on = (on != 0);
-    gb_fog_col[0] = r; gb_fog_col[1] = g; gb_fog_col[2] = b;
-    gb_fog_start = start; gb_fog_end = end;
-}
-
-/* Composite (tonemap the lit result into the presentable target) runs in Rae
- * now (lib/gbuffer_passes.rae, #504). C exposes the shared deferred prep, the
- * composite WGSL, and the source view/index the composite samples — whatever
- * the last radiometric pass wrote: the TAA resolve when it ran (ping-ponged by
- * gb_taa_cur), else the raw lit radiance. */
 int64_t rae_gb_deferred_prepare(void) {
     if (!g_wgpu_dev) return 0;
-    gb_deferred_init_pipelines();
-    gb_deferred_ensure();
-    return (gb_lit_view && g_g2d_surface) ? 1 : 0;
+    gb_deferred_ensure_shadow_defaults();
+    return g_g2d_surface ? 1 : 0;
 }
 const char* rae_gb_composite_wgsl(void)  { return GB_COMPOSITE_WGSL; }
-void* rae_gb_composite_source_view(void) {
-    return (void*)((gb_taa_enabled && gb_taa_view[gb_taa_cur]) ? gb_taa_view[gb_taa_cur] : gb_lit_view);
-}
-int64_t rae_gb_composite_source_index(void) { return gb_taa_enabled ? (int64_t)gb_taa_cur : 2; }
-
-/* Number of mip levels in the pyramid — 0 before the first build. Lets a
- * caller or test confirm the chain was actually built rather than skipped. */
-int64_t rae_ext_Gbuffer_pyramidMips(void) { return (int64_t)gb_pyramid_mips; }
-
-void rae_ext_Gbuffer_deferredShutdown(void) {
-    gb_deferred_release_targets();
-    if (gb_pyr_from_depth_pipeline) { wgpuRenderPipelineRelease(gb_pyr_from_depth_pipeline); gb_pyr_from_depth_pipeline = NULL; }
-    if (gb_pyr_reduce_pipeline)     { wgpuRenderPipelineRelease(gb_pyr_reduce_pipeline); gb_pyr_reduce_pipeline = NULL; }
-    if (gb_light_pipeline)          { wgpuRenderPipelineRelease(gb_light_pipeline); gb_light_pipeline = NULL; }
-    if (gb_light_ubuf)              { wgpuBufferRelease(gb_light_ubuf); gb_light_ubuf = NULL; }
-    if (gb_taa_ubuf)                { wgpuBufferRelease(gb_taa_ubuf); gb_taa_ubuf = NULL; }
-    if (gb_taa_pipeline)            { wgpuRenderPipelineRelease(gb_taa_pipeline); gb_taa_pipeline = NULL; }
-    gb_deferred_gen = -1;
-}
+const char* rae_gb_ao_wgsl(void)   { return GB_AO_WGSL; }
+const char* rae_gb_light_wgsl(void)          { return GB_LIGHT_WGSL; }
+const char* rae_gb_taa_wgsl(void)            { return GB_TAA_WGSL; }
+const char* rae_gb_pyr_from_depth_wgsl(void) { return GB_PYR_FROM_DEPTH_WGSL; }
+const char* rae_gb_pyr_reduce_wgsl(void)     { return GB_PYR_REDUCE_WGSL; }
