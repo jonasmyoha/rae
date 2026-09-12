@@ -28,7 +28,7 @@ func zeros(count: view Int) ret List(Int) {
 
 # Build a canonical Huffman table from per-symbol code lengths (0 = unused).
 func buildHuff(lengths: view List(Int), value: view Int) ret Huff {
-  let counts: List(Int) = zeros(value: 16)
+  let counts: List(Int) = zeros(count: 16)
   var i: Int = 0
   loop i < value {
     let len: Int = bufAt(list: lengths, index: i)
@@ -36,7 +36,7 @@ func buildHuff(lengths: view List(Int), value: view Int) ret Huff {
     i = i + 1
   }
   # offs[len] = first symbol-array index for codes of this length.
-  let offs: List(Int) = zeros(value: 16)
+  let offs: List(Int) = zeros(count: 16)
   var len2: Int = 1
   loop len2 < 16 {
     offs.set(
@@ -45,7 +45,7 @@ func buildHuff(lengths: view List(Int), value: view Int) ret Huff {
     )
     len2 = len2 + 1
   }
-  let symbols: List(Int) = zeros(value: value)
+  let symbols: List(Int) = zeros(count: value)
   var sym: Int = 0
   loop sym < value {
     let codeLen: Int = bufAt(list: lengths, index: sym)

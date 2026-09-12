@@ -15,7 +15,7 @@ func rae_str_sub(s: String, start: Int, len: Int) unsafe extern ret String
 
 func rae_str_to_f64(s: String) unsafe extern ret Float
 
-func rae_str_to_i64(s: String) unsafe extern ret Int
+func rae_str_to_i64(text: String) unsafe extern ret Int
 
 func rae_ext_rae_str_from_cstr(s: view Buffer(Any)) unsafe extern ret String
 
@@ -362,6 +362,6 @@ func toFloat(this: view String) ret Float {
 
 func toInt(this: view String) ret Int {
   unsafe {
-    ret rae_str_to_i64(s: this)
+    ret rae_str_to_i64(text: this)
   }
 }
