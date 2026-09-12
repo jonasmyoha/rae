@@ -12,9 +12,12 @@
 # pass each frame (the geometry pass's render encoder is already mid-render-pass
 # when Rae sees it, so a compute pass cannot share it). The GPU orders the
 # compute submit before the later G-buffer submit, so the draw reads fresh data.
-# The draw itself goes INTO the gbuffer's C-owned geometry pass through
-# gpu/GpuRender.recordDrawIndirectInPass — the pass encoder is the one raw
-# handle this module touches, so it is the opted-in unsafe module for grass.
+# The draw itself goes INTO the gbuffer's open geometry pass (the renderer's
+# GbufferCache since #906) through gpu/GpuRenderPass.recordDrawIndirectInPass
+# — the pass encoder is the one raw handle this module touches, so it is the
+# opted-in unsafe module for grass. The grass objects live in the APP's manager
+# while the frame uniform is the renderer's, so the draw bind BORROWS that
+# buffer as an external (a cross-manager reference, not C-owned).
 #
 # The shaders are assets: lib/grass_compute.wgsl (composed with the biome and
 # noise chunks) and lib/grass_render.wgsl (moved verbatim out of C by #874).
@@ -30,16 +33,9 @@ open gpu/GpuArgs
 open gpu/GpuIds
 import Profile
 import GrassConfig
-import Gbuffer
+open Gbuffer
 import String
 import WorldBiome
-
-# Reused gbuffer ABI-seam accessors (the same C symbols Gbuffer.rae binds): the
-# frame uniform (adopted as an external), the live geometry pass, and the
-# static pipeline + bind group restored after the grass draw.
-func gbFrameUbuf() unsafe extern("rae_gb_frame_ubuf") ret Ptr
-
-func gbPass() unsafe extern("rae_gb_pass") ret Ptr
 
 # Blade count MUST be a perfect square: the compute grid is side x side, and the
 # shader derives side = sqrt(count). 256 x 256 = 65536 candidate blades; GPU
@@ -279,11 +275,19 @@ func ensureGrassGpu(grass: mod GrassCompute, resources: mod GpuResources) {
 # beginPass — so build it lazily on first draw: frame uniform @0 (adopted from
 # the gbuffer), instance storage @1, grass uniform @2, over the grass render
 # pipeline's group-0 layout.
-func ensureGrassDrawBind(grass: mod GrassCompute, resources: mod GpuResources) {
+func ensureGrassDrawBind(
+  grass: mod GrassCompute
+  resources: mod GpuResources
+  gbuffer: view GbufferCache
+  gbufferResources: view GpuResources
+) {
   if grass.drawBindMade {
     ret
   }
   if not isValidRenderPipeline(resources: resources, id: grass.renderPipeline) {
+    ret
+  }
+  if not isValidBuffer(resources: gbufferResources, id: gbuffer.frameUniform) {
     ret
   }
   grass.drawBindMade = true
@@ -292,7 +296,7 @@ func ensureGrassDrawBind(grass: mod GrassCompute, resources: mod GpuResources) {
   unsafe {
     if let frameUniform: ExternalId = adoptExternalBuffer(
       resources: resources
-      handle: gbFrameUbuf()
+      handle: refHandle(resources: gbufferResources, ref: bufferRef(id: gbuffer.frameUniform))
     ) {
       grass.frameUniform = frameUniform
     }
@@ -443,11 +447,21 @@ func grassGenerate(
 # buffer; instanceCount was written by the culling compute, so only the
 # surviving (visible) blades are drawn. Restores the shared static pipeline +
 # bind group after so any following static draw is unaffected.
-func grassDraw(grass: mod GrassCompute, resources: mod GpuResources) {
+func grassDraw(
+  grass: mod GrassCompute
+  resources: mod GpuResources
+  gbuffer: view GbufferCache
+  gbufferResources: view GpuResources
+) {
   ensureGrassGpu(grass: grass, resources: resources)
-  ensureGrassDrawBind(grass: grass, resources: resources)
+  ensureGrassDrawBind(
+    grass: grass
+    resources: resources
+    gbuffer: gbuffer
+    gbufferResources: gbufferResources
+  )
   unsafe {
-    let pass: Ptr = gbPass()
+    let pass: Ptr = gbuffer.pass
     if pass is webgpuNull() {
       ret
     }

@@ -1,8 +1,10 @@
 # GbufferNative — the C-ABI accessor layer of Gbuffer (#918 split for the
 # 1000-line cap): every `native*` extern and the thin `gb*` wrappers that hand
-# the Rae geometry pass its C-owned handles (frame uniform, targets, draws
-# buffer, mesh/skin buffers, SDF pipeline, encoder/frame state). Nothing here
-# is app-facing; the frame API (begin / draw / end / present) stays in Gbuffer.
+# the Rae geometry pass what is still C-owned (the WGSL sources, the skin
+# buffers + palette, the SDF prepare, the frame-derived uniform math, the
+# offscreen size) — since #906 the targets, frame uniform, draws buffer and
+# the frame's encoder / pass are the GbufferCache's manager objects. Nothing
+# here is app-facing; the frame API (begin / draw / end / present) stays in Gbuffer.
 import Math
 import String
 open SkyHosek
@@ -29,35 +31,46 @@ func gbPrepare() ret Int {
   }
 }
 
-func nativeGbFrameUniform(
+# #906: the geometry frame's targets, frame uniform, draws buffer and
+# encoder / pass are the GbufferCache's manager objects (GbufferResources).
+# C keeps the frame-derived uniform MATH — rae_gb_frame_data writes the 36
+# floats of the TAA-jittered frame uniform into a Rae buffer and remembers the
+# jittered / previous view-projection for the still-C post passes — and
+# BORROWS the four target views + size (gbCommitTargets / gbForgetTargets).
+func nativeGbFrameData(
   viewProj: view Mat4
   clearR: Float
   clearG: Float
   clearB: Float
-) unsafe extern("rae_gb_frame_uniform") ret Int
+  w: Int
+  h: Int
+  out: Ptr
+) unsafe extern("rae_gb_frame_data") ret Int
 
-func gbFrameUniform(
+func gbFrameData(
   viewProj: view Mat4
   clearR: copy Float
   clearG: copy Float
   clearB: copy Float
-) ret Int {
+  w: copy Int
+  h: copy Int
+  out: copy Ptr
+) unsafe ret Int {
   unsafe {
-    ret nativeGbFrameUniform(
+    ret nativeGbFrameData(
       viewProj: viewProj
       clearR: clearR
       clearG: clearG
       clearB: clearB
+      w: w
+      h: h
+      out: out
     )
   }
 }
 
-func gbSetFrameUbuf(buf: Ptr) unsafe extern("rae_gb_set_frame_ubuf")
-
-func gbSetDrawsBuffer(buf: Ptr) unsafe extern("rae_gb_set_draws_buffer")
-
-# Target creation (#503): C provides the offscreen size, the resize check, the
-# release and the size/gen commit; Rae builds each attachment texture + view.
+# The offscreen size the targets are built to: the configured surface at the
+# dynamic render scale (#530) — C surface glue.
 func nativeGbOffscreenW() unsafe extern("rae_gb_offscreen_w") ret Int
 
 func gbOffscreenW() ret Int {
@@ -74,31 +87,30 @@ func gbOffscreenH() ret Int {
   }
 }
 
-func nativeGbTargetsMatch(w: Int, h: Int) unsafe extern("rae_gb_targets_match") ret Int
+# Hand C the borrowed target views + size (it never releases them) and bump
+# the targets generation the post passes re-fit on.
+func gbCommitTargets(
+  w: Int
+  h: Int
+  a: Ptr
+  b: Ptr
+  c: Ptr
+  depth: Ptr
+) unsafe extern("rae_gb_commit_targets")
 
-func gbTargetsMatch(w: copy Int, h: copy Int) ret Int {
+func nativeGbForgetTargets() unsafe extern("rae_gb_forget_targets")
+
+func gbForgetTargets() {
   unsafe {
-    ret nativeGbTargetsMatch(w: w, h: h)
+    nativeGbForgetTargets()
   }
 }
 
-func nativeGbTargetsReady() unsafe extern("rae_gb_targets_ready") ret Int
+func nativeGbSetFrameOpen(open: Int) unsafe extern("rae_gb_set_frame_open")
 
-func nativeGbReleaseTargets() unsafe extern("rae_gb_release_targets_ext")
-
-func gbReleaseTargets() {
+func gbSetFrameOpen(open: copy Int) {
   unsafe {
-    nativeGbReleaseTargets()
-  }
-}
-
-func gbSetTarget(idx: Int, tex: Ptr, texView: Ptr) unsafe extern("rae_gb_set_target")
-
-func nativeGbCommitTargets(w: Int, h: Int) unsafe extern("rae_gb_commit_targets")
-
-func gbCommitTargets(w: copy Int, h: copy Int) {
-  unsafe {
-    nativeGbCommitTargets(w: w, h: h)
+    nativeGbSetFrameOpen(open: open)
   }
 }
 
@@ -114,24 +126,6 @@ func nativeGbMotionZero() unsafe extern("rae_gb_motion_zero") ret Float
 func gbMotionZero() ret Float {
   unsafe {
     ret nativeGbMotionZero()
-  }
-}
-
-func gbSetFrame(enc: Ptr, pass: Ptr) unsafe extern("rae_gb_set_frame")
-
-func nativeGbFrameBytes() unsafe extern("rae_gb_frame_bytes") ret Int
-
-func gbFrameBytes() ret Int {
-  unsafe {
-    ret nativeGbFrameBytes()
-  }
-}
-
-func nativeGbDrawsSize() unsafe extern("rae_gb_draws_size") ret Int
-
-func gbDrawsSize() ret Int {
-  unsafe {
-    ret nativeGbDrawsSize()
   }
 }
 
@@ -168,12 +162,6 @@ func gbufferPipelineSpec(
     cullMode: WGPUCullMode_Back
   }
 }
-
-func nativeGbMaxDraws() unsafe extern("rae_gb_max_draws") ret Int
-
-func nativeGbDrawCount() unsafe extern("rae_gb_draw_count") ret Int
-
-func nativeGbAdvanceDraws(count: Int) unsafe extern("rae_gb_advance_draws")
 
 # Skinned-draw accessors (#503). The skin bind group (frame uniform + draws +
 # joint palette) is still created lazily in C — it needs the pipeline layout and
@@ -234,28 +222,6 @@ func sdfShutdown() {
     nativeSdfShutdown()
   }
 }
-
-# Geometry-pass finish/submit accessors (#503). The pass encoding (end/finish/
-# submit) runs in Rae; C keeps the encoder handle and the frame-clear.
-func gbEncoder() unsafe extern("rae_gb_encoder") ret Ptr
-
-func nativeGbClearFrame() unsafe extern("rae_gb_clear_frame")
-
-func gbClearFrame() {
-  unsafe {
-    nativeGbClearFrame()
-  }
-}
-
-func nativeGbFrameActive() unsafe extern("rae_gb_frame_active") ret Int
-
-func gbFrameActive() ret Int {
-  unsafe {
-    ret nativeGbFrameActive()
-  }
-}
-
-func nativeDrawCount() unsafe extern("rae_ext_Gbuffer_drawCount") ret Int
 
 func nativePyramidMips() unsafe extern("rae_ext_Gbuffer_pyramidMips") ret Int
 
