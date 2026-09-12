@@ -31,11 +31,17 @@ open Gpu2dCanvas
 
 # 0xAARRGGBB.
 const debugAmber: Int = 0xFFFFBF00
+
 const debugPanelFill: Int = 0xF0181820
+
 const debugPanelBorder: Int = 0x60FFBF00
+
 const debugBackdrop: Int = 0xA0000000
+
 const debugOnFill: Int = 0xFF34C759
+
 const debugOffFill: Int = 0xC0787880
+
 # The letter on the amber disc.
 const debugInk: Int = 0xFF101014
 
@@ -52,9 +58,7 @@ type DebugOverlay {
   wantFps: Bool
   wantMemory: Bool
   wantHeartbeat: Bool
-
   open: Bool
-
   screenW: Float
   screenH: Float
   buttonSize: Float
@@ -66,12 +70,10 @@ type DebugOverlay {
   frameTimes: List(Float64)
   fpsWindowSec: Float
   lastFps: Float
-
   lastRssKb: Int
   # Resident size is a syscall; sampling it every frame to move a label that
   # changes by kilobytes is waste in a loop built to idle at ~0% CPU.
   rssSampledAt: Float64
-
   heartbeatX: Float
 
   # Opt-in custom readout: an app sets this each frame (setDebugOverlayLine) and it is
@@ -80,8 +82,12 @@ type DebugOverlay {
   customLine: String
 }
 
-func createDebugOverlay(button: view Bool, fps: view Bool, memory: view Bool,
-                        heartbeat: view Bool) ret DebugOverlay {
+func createDebugOverlay(
+  button: view Bool
+  fps: view Bool
+  memory: view Bool
+  heartbeat: view Bool
+) ret DebugOverlay {
   ret DebugOverlay {
     wantButton: button
     wantFps: fps
@@ -110,8 +116,14 @@ func debugButtonX(debugOverlay: view DebugOverlay) ret Float {
   ret debugOverlay.screenW - debugOverlay.buttonSize - debugOverlay.margin
 }
 
-func debugPointInRect(px: view Float, py: view Float, x: view Float, y: view Float,
-                      w: view Float, h: view Float) ret Bool {
+func debugPointInRect(
+  px: view Float
+  py: view Float
+  x: view Float
+  y: view Float
+  w: view Float
+  h: view Float
+) ret Bool {
   if px < x or px > x + w {
     ret false
   }
@@ -122,7 +134,6 @@ func debugPointInRect(px: view Float, py: view Float, x: view Float, y: view Flo
 }
 
 # ----- sampling -------------------------------------------------------
-
 func debugPruneFrames(debugOverlay: mod DebugOverlay, now: view Float64) {
   let times: mod List(Float64) => debugOverlay.frameTimes
   loop times.length > 1 {
@@ -145,7 +156,9 @@ func debugRecordFrame(debugOverlay: mod DebugOverlay, now: view Float64, didReal
   let n: Int = debugOverlay.frameTimes.length
   var fps: Float = 0.0
   if n > 1 {
-    let span: Float = (debugOverlay.frameTimes.copyAt(index: n - 1) - debugOverlay.frameTimes.copyAt(index: 0)) as Float
+    let span: Float = (debugOverlay.frameTimes.copyAt(index: n - 1) - debugOverlay.frameTimes.copyAt(
+      index: 0
+    )) as Float
     if span > 0.0 {
       fps = (n - 1).toFloat() / span
     }
@@ -175,8 +188,13 @@ func setDebugOverlayLine(debugOverlay: mod DebugOverlay, text: own String) {
 
 # Returns true when the overlay took the pointer, so the caller can skip its own
 # hit test for this frame.
-func updateDebugOverlay(debugOverlay: mod DebugOverlay, screenW: view Float, screenH: view Float,
-                        now: view Float64, didRealWork: view Bool) ret Bool {
+func updateDebugOverlay(
+  debugOverlay: mod DebugOverlay
+  screenW: view Float
+  screenH: view Float
+  now: view Float64
+  didRealWork: view Bool
+) ret Bool {
   debugOverlay.screenW = screenW
   debugOverlay.screenH = screenH
   debugRecordFrame(debugOverlay: debugOverlay, now: now, didRealWork: didRealWork)
@@ -190,8 +208,14 @@ func updateDebugOverlay(debugOverlay: mod DebugOverlay, screenW: view Float, scr
 
   let px: Float = Gpu2d.pointerX()
   let py: Float = Gpu2d.pointerY()
-  if debugPointInRect(px: px, py: py, x: debugButtonX(debugOverlay: debugOverlay), y: debugOverlay.margin,
-                      w: debugOverlay.buttonSize, h: debugOverlay.buttonSize) {
+  if debugPointInRect(
+    px: px
+    py: py
+    x: debugButtonX(debugOverlay: debugOverlay)
+    y: debugOverlay.margin
+    w: debugOverlay.buttonSize
+    h: debugOverlay.buttonSize
+  ) {
     debugOverlay.open = debugOverlay.open is false
     ret true
   }
@@ -204,8 +228,11 @@ func updateDebugOverlay(debugOverlay: mod DebugOverlay, screenW: view Float, scr
 # The dialog is a fixed stack of rows, so hit testing is the same arithmetic the
 # drawing uses. Both derive from `debugDialogRowY` rather than repeating it.
 const debugDialogW: Float = 260.0
+
 const debugDialogRowH: Float = 38.0
+
 const debugDialogTitleH: Float = 44.0
+
 const debugDialogRows: Int = 3
 
 func debugDialogX(debugOverlay: view DebugOverlay) ret Float {
@@ -226,26 +253,50 @@ func debugDialogRowY(debugOverlay: view DebugOverlay, index: view Int) ret Float
 
 func debugDialogPress(debugOverlay: mod DebugOverlay, px: view Float, py: view Float) ret Bool {
   let x: Float = debugDialogX(debugOverlay: debugOverlay)
-  if debugPointInRect(px: px, py: py, x: x, y: debugDialogY(debugOverlay: debugOverlay),
-                      w: debugDialogW, h: debugDialogH()) is false {
+  if debugPointInRect(
+    px: px
+    py: py
+    x: x
+    y: debugDialogY(debugOverlay: debugOverlay)
+    w: debugDialogW
+    h: debugDialogH()
+  ) is false {
     # A press anywhere else closes it, which is what a transient debug panel
     # should do — and it still counts as taken, or the same click would also
     # reach the app underneath.
     debugOverlay.open = false
     ret true
   }
-  if debugPointInRect(px: px, py: py, x: x, y: debugDialogRowY(debugOverlay: debugOverlay, index: 0),
-                      w: debugDialogW, h: debugDialogRowH) {
+  if debugPointInRect(
+    px: px
+    py: py
+    x: x
+    y: debugDialogRowY(debugOverlay: debugOverlay, index: 0)
+    w: debugDialogW
+    h: debugDialogRowH
+  ) {
     debugOverlay.wantFps = debugOverlay.wantFps is false
     ret true
   }
-  if debugPointInRect(px: px, py: py, x: x, y: debugDialogRowY(debugOverlay: debugOverlay, index: 1),
-                      w: debugDialogW, h: debugDialogRowH) {
+  if debugPointInRect(
+    px: px
+    py: py
+    x: x
+    y: debugDialogRowY(debugOverlay: debugOverlay, index: 1)
+    w: debugDialogW
+    h: debugDialogRowH
+  ) {
     debugOverlay.wantMemory = debugOverlay.wantMemory is false
     ret true
   }
-  if debugPointInRect(px: px, py: py, x: x, y: debugDialogRowY(debugOverlay: debugOverlay, index: 2),
-                      w: debugDialogW, h: debugDialogRowH) {
+  if debugPointInRect(
+    px: px
+    py: py
+    x: x
+    y: debugDialogRowY(debugOverlay: debugOverlay, index: 2)
+    w: debugDialogW
+    h: debugDialogRowH
+  ) {
     debugOverlay.wantHeartbeat = debugOverlay.wantHeartbeat is false
     ret true
   }
@@ -253,7 +304,6 @@ func debugDialogPress(debugOverlay: mod DebugOverlay, px: view Float, py: view F
 }
 
 # ----- formatting -----------------------------------------------------
-
 func formatDebugFps(fps: view Float) ret String {
   var rounded: Int = (fps + 0.5).toInt()
   if rounded < 0 {
@@ -272,13 +322,25 @@ func formatDebugMem(kb: view Int) ret String {
 }
 
 # ----- drawing --------------------------------------------------------
-
-func drawDebugToggleRow(debugOverlay: view DebugOverlay, canvas: mod Gpu2dCanvas, font: view SdfFont, index: view Int,
-                        label: view String, on: view Bool) {
+func drawDebugToggleRow(
+  debugOverlay: view DebugOverlay
+  canvas: mod Gpu2dCanvas
+  font: view SdfFont
+  index: view Int
+  label: view String
+  on: view Bool
+) {
   let x: Float = debugDialogX(debugOverlay: debugOverlay)
   let y: Float = debugDialogRowY(debugOverlay: debugOverlay, index: index)
-  Gpu2dText.drawText(canvas: canvas, font: font, text: label, x: x + 16.0, y: y + 24.0,
-                      sizePx: 14.0, color: debugAmber)
+  Gpu2dText.drawText(
+    canvas: canvas
+    font: font
+    text: label
+    x: x + 16.0
+    y: y + 24.0
+    sizePx: 14.0
+    color: debugAmber
+  )
   var fill: Int = debugOffFill
   if on {
     fill = debugOnFill
@@ -287,42 +349,108 @@ func drawDebugToggleRow(debugOverlay: view DebugOverlay, canvas: mod Gpu2dCanvas
   let pillH: Float = 20.0
   let pillX: Float = x + debugDialogW - pillW - 16.0
   let pillY: Float = y + (debugDialogRowH - pillH) * 0.5
-  Gpu2d.drawBox(canvas: canvas, x: pillX, y: pillY, w: pillW, h: pillH, radius: pillH * 0.5,
-                fill: fill, borderWidth: 0.0, border: 0x00000000)
+  Gpu2d.drawBox(
+    canvas: canvas
+    x: pillX
+    y: pillY
+    w: pillW
+    h: pillH
+    radius: pillH * 0.5
+    fill: fill
+    borderWidth: 0.0
+    border: 0x00000000
+  )
   var knobX: Float = pillX + 2.0
   if on {
     knobX = pillX + pillW - pillH + 2.0
   }
-  Gpu2d.drawBox(canvas: canvas, x: knobX, y: pillY + 2.0, w: pillH - 4.0, h: pillH - 4.0,
-                radius: (pillH - 4.0) * 0.5, fill: 0xFFFFFFFF,
-                borderWidth: 0.0, border: 0x00000000)
+  Gpu2d.drawBox(
+    canvas: canvas
+    x: knobX
+    y: pillY + 2.0
+    w: pillH - 4.0
+    h: pillH - 4.0
+    radius: (pillH - 4.0) * 0.5
+    fill: 0xFFFFFFFF
+    borderWidth: 0.0
+    border: 0x00000000
+  )
 }
 
 func drawDebugDialog(debugOverlay: view DebugOverlay, canvas: mod Gpu2dCanvas, font: view SdfFont) {
   let x: Float = debugDialogX(debugOverlay: debugOverlay)
   let y: Float = debugDialogY(debugOverlay: debugOverlay)
-  Gpu2d.drawBox(canvas: canvas, x: x, y: y, w: debugDialogW, h: debugDialogH(), radius: 10.0,
-                fill: debugPanelFill, borderWidth: 1.0, border: debugPanelBorder)
-  Gpu2dText.drawText(canvas: canvas, font: font, text: "Debug", x: x + 16.0, y: y + 28.0,
-                      sizePx: 16.0, color: debugAmber)
-  drawDebugToggleRow(debugOverlay: debugOverlay, canvas: canvas, font: font, index: 0, label: "FPS", on: debugOverlay.wantFps)
-  drawDebugToggleRow(debugOverlay: debugOverlay, canvas: canvas, font: font, index: 1, label: "Memory", on: debugOverlay.wantMemory)
-  drawDebugToggleRow(debugOverlay: debugOverlay, canvas: canvas, font: font, index: 2, label: "Update indicator",
-                     on: debugOverlay.wantHeartbeat)
+  Gpu2d.drawBox(
+    canvas: canvas
+    x: x
+    y: y
+    w: debugDialogW
+    h: debugDialogH()
+    radius: 10.0
+    fill: debugPanelFill
+    borderWidth: 1.0
+    border: debugPanelBorder
+  )
+  Gpu2dText.drawText(
+    canvas: canvas
+    font: font
+    text: "Debug"
+    x: x + 16.0
+    y: y + 28.0
+    sizePx: 16.0
+    color: debugAmber
+  )
+  drawDebugToggleRow(
+    debugOverlay: debugOverlay
+    canvas: canvas
+    font: font
+    index: 0
+    label: "FPS"
+    on: debugOverlay.wantFps
+  )
+  drawDebugToggleRow(
+    debugOverlay: debugOverlay
+    canvas: canvas
+    font: font
+    index: 1
+    label: "Memory"
+    on: debugOverlay.wantMemory
+  )
+  drawDebugToggleRow(
+    debugOverlay: debugOverlay
+    canvas: canvas
+    font: font
+    index: 2
+    label: "Update indicator"
+    on: debugOverlay.wantHeartbeat
+  )
 }
 
 # A square that steps across the top of the screen once per frame that did real
 # work. It is the cheapest possible answer to "is this thing repainting when it
 # should not be" — a still square means an idle app, a moving one means work.
-func drawDebugHeartbeat(debugOverlay: mod DebugOverlay, canvas: mod Gpu2dCanvas, didRealWork: view Bool) {
+func drawDebugHeartbeat(
+  debugOverlay: mod DebugOverlay
+  canvas: mod Gpu2dCanvas
+  didRealWork: view Bool
+) {
   if didRealWork {
     debugOverlay.heartbeatX = debugOverlay.heartbeatX + 2.0
     if debugOverlay.heartbeatX > debugOverlay.screenW {
       debugOverlay.heartbeatX = 0.0 - 8.0
     }
   }
-  Gpu2d.drawBox(canvas: canvas, x: debugOverlay.heartbeatX, y: 0.0, w: 8.0, h: 8.0, radius: 0.0,
-                fill: debugAmber, borderWidth: 0.0, border: 0x00000000)
+  Gpu2d.drawBox(
+    canvas: canvas
+    x: debugOverlay.heartbeatX
+    y: 0.0
+    w: 8.0
+    h: 8.0
+    radius: 0.0
+    fill: debugAmber
+    borderWidth: 0.0
+    border: 0x00000000
+  )
 }
 
 # Example 106's mark: a FILLED amber disc with a black D. Solid amber carries
@@ -338,9 +466,17 @@ func drawDebugButton(debugOverlay: view DebugOverlay, canvas: mod Gpu2dCanvas, f
     disc = debugInk
     glyph = debugAmber
   }
-  Gpu2d.drawBox(canvas: canvas, x: x, y: debugOverlay.margin, w: debugOverlay.buttonSize, h: debugOverlay.buttonSize,
-                radius: debugOverlay.buttonSize * 0.5, fill: disc,
-                borderWidth: 0.0, border: 0x00000000)
+  Gpu2d.drawBox(
+    canvas: canvas
+    x: x
+    y: debugOverlay.margin
+    w: debugOverlay.buttonSize
+    h: debugOverlay.buttonSize
+    radius: debugOverlay.buttonSize * 0.5
+    fill: disc
+    borderWidth: 0.0
+    border: 0x00000000
+  )
   let glyphSize: Float = debugOverlay.buttonSize * 0.66
   let glyphW: Float = debugTextWidth(text: "D", sizePx: glyphSize)
   # drawText places the PEN, and the glyph starts a little to the right of it.
@@ -349,11 +485,22 @@ func drawDebugButton(debugOverlay: view DebugOverlay, canvas: mod Gpu2dCanvas, f
   let bearing: Float = glyphSize * 0.09
   let gx: Float = x + (debugOverlay.buttonSize - glyphW) * 0.5 - bearing
   let gy: Float = debugOverlay.margin + debugOverlay.buttonSize * 0.5 + glyphSize * 0.36
-  Gpu2dText.drawText(canvas: canvas, font: font, text: "D", x: gx, y: gy,
-                      sizePx: glyphSize, color: glyph)
+  Gpu2dText.drawText(
+    canvas: canvas
+    font: font
+    text: "D"
+    x: gx
+    y: gy
+    sizePx: glyphSize
+    color: glyph
+  )
 }
 
-func drawDebugReadouts(debugOverlay: view DebugOverlay, canvas: mod Gpu2dCanvas, font: view SdfFont) {
+func drawDebugReadouts(
+  debugOverlay: view DebugOverlay
+  canvas: mod Gpu2dCanvas
+  font: view SdfFont
+) {
   let fontSize: Float = 14.0
   let lineH: Float = 18.0
   let rightEdge: Float = debugButtonX(debugOverlay: debugOverlay) + debugOverlay.buttonSize
@@ -365,30 +512,52 @@ func drawDebugReadouts(debugOverlay: view DebugOverlay, canvas: mod Gpu2dCanvas,
   }
   if debugOverlay.wantFps {
     let text: String = formatDebugFps(fps: debugOverlay.lastFps)
-    Gpu2dText.drawText(canvas: canvas, font: font, text: text,
-                        x: rightEdge - debugTextWidth(text: text, sizePx: fontSize),
-                        y: y, sizePx: fontSize, color: debugAmber)
+    Gpu2dText.drawText(
+      canvas: canvas
+      font: font
+      text: text
+      x: rightEdge - debugTextWidth(text: text, sizePx: fontSize)
+      y: y
+      sizePx: fontSize
+      color: debugAmber
+    )
     y = y + lineH
   }
   if debugOverlay.wantMemory {
     let text: String = formatDebugMem(kb: debugOverlay.lastRssKb)
-    Gpu2dText.drawText(canvas: canvas, font: font, text: text,
-                        x: rightEdge - debugTextWidth(text: text, sizePx: fontSize),
-                        y: y, sizePx: fontSize, color: debugAmber)
+    Gpu2dText.drawText(
+      canvas: canvas
+      font: font
+      text: text
+      x: rightEdge - debugTextWidth(text: text, sizePx: fontSize)
+      y: y
+      sizePx: fontSize
+      color: debugAmber
+    )
     y = y + lineH
   }
   # Opt-in custom line under the fps/mem readouts — same amber as the rest.
   if debugOverlay.customLine.length() > 0 {
-    Gpu2dText.drawText(canvas: canvas, font: font, text: debugOverlay.customLine,
-                        x: rightEdge - debugTextWidth(text: debugOverlay.customLine, sizePx: fontSize),
-                        y: y, sizePx: fontSize, color: debugAmber)
+    Gpu2dText.drawText(
+      canvas: canvas
+      font: font
+      text: debugOverlay.customLine
+      x: rightEdge - debugTextWidth(text: debugOverlay.customLine, sizePx: fontSize)
+      y: y
+      sizePx: fontSize
+      color: debugAmber
+    )
   }
 }
 
 # Call LAST in the frame. Everything here paints straight to gpu2d, so whatever
 # is drawn after it wins — which is the whole reason this is not an ECS layer.
-func drawDebugOverlay(debugOverlay: mod DebugOverlay, canvas: mod Gpu2dCanvas, font: view SdfFont,
-                      didRealWork: view Bool) {
+func drawDebugOverlay(
+  debugOverlay: mod DebugOverlay
+  canvas: mod Gpu2dCanvas
+  font: view SdfFont
+  didRealWork: view Bool
+) {
   if debugOverlay.wantHeartbeat {
     drawDebugHeartbeat(debugOverlay: debugOverlay, canvas: canvas, didRealWork: didRealWork)
   }

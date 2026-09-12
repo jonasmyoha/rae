@@ -23,7 +23,9 @@ func gbLitFormat() unsafe extern("rae_gb_lit_format") ret Int
 
 # The lit HDR target's format: the water surface's colour target.
 func waterLitFormat() ret Int32 {
-  unsafe { ret gbLitFormat() as Int32 }
+  unsafe {
+    ret gbLitFormat() as Int32
+  }
 }
 
 # Adopts the frame uniform, scene depth view, opaque snapshot view and lit
@@ -32,10 +34,31 @@ func adoptFrameExternals(resources: mod GpuResources) ret WaterFrameExternals {
   var frame: WaterFrameExternals = noFrameExternals()
   var adopted: Int = 0
   unsafe {
-    if let frameUniform: ExternalId = adoptExternalBuffer(resources: resources, handle: gbFrameUbuf()) { frame.frameUniform = frameUniform adopted = adopted + 1 }
-    if let depthView: ExternalId = adoptExternalTextureView(resources: resources, handle: gbViewDepth()) { frame.depthView = depthView adopted = adopted + 1 }
-    if let litCopyView: ExternalId = adoptExternalTextureView(resources: resources, handle: gbLitCopyView()) { frame.litCopyView = litCopyView adopted = adopted + 1 }
-    if let litView: ExternalId = adoptExternalTextureView(resources: resources, handle: gbLitView()) { frame.litView = litView adopted = adopted + 1 }
+    if let frameUniform: ExternalId = adoptExternalBuffer(
+      resources: resources
+      handle: gbFrameUbuf()
+    ) {
+      frame.frameUniform = frameUniform
+      adopted = adopted + 1
+    }
+    if let depthView: ExternalId = adoptExternalTextureView(
+      resources: resources
+      handle: gbViewDepth()
+    ) {
+      frame.depthView = depthView
+      adopted = adopted + 1
+    }
+    if let litCopyView: ExternalId = adoptExternalTextureView(
+      resources: resources
+      handle: gbLitCopyView()
+    ) {
+      frame.litCopyView = litCopyView
+      adopted = adopted + 1
+    }
+    if let litView: ExternalId = adoptExternalTextureView(resources: resources, handle: gbLitView()) {
+      frame.litView = litView
+      adopted = adopted + 1
+    }
   }
   if adopted is 4 {
     frame.valid = true
@@ -59,9 +82,23 @@ func adoptMeshExternals(resources: mod GpuResources, mesh: view Int) ret WaterMe
   var adopted: Int = 0
   unsafe {
     result.indexCount = gbMeshIcount(mesh: mesh)
-    if result.indexCount <= 0 { ret noMeshExternals() }
-    if let vertex: ExternalId = adoptExternalBuffer(resources: resources, handle: gbMeshVbuf(mesh: mesh)) { result.vertex = vertex adopted = adopted + 1 }
-    if let index: ExternalId = adoptExternalBuffer(resources: resources, handle: gbMeshIbuf(mesh: mesh)) { result.index = index adopted = adopted + 1 }
+    if result.indexCount <= 0 {
+      ret noMeshExternals()
+    }
+    if let vertex: ExternalId = adoptExternalBuffer(
+      resources: resources
+      handle: gbMeshVbuf(mesh: mesh)
+    ) {
+      result.vertex = vertex
+      adopted = adopted + 1
+    }
+    if let index: ExternalId = adoptExternalBuffer(
+      resources: resources
+      handle: gbMeshIbuf(mesh: mesh)
+    ) {
+      result.index = index
+      adopted = adopted + 1
+    }
   }
   if adopted is 2 {
     result.valid = true
@@ -84,37 +121,86 @@ func releaseMeshExternals(resources: mod GpuResources, meshes: mod List(WaterMes
 
 # Uploads a float list as a tightly packed f32 stream (#872 packing; the water
 # uniforms are sequences of vec4, so std140 and a flat stream coincide).
-func uploadFloats(resources: view GpuResources, buffer: view BufferId, floats: view List(Float)) ret Bool {
+func uploadFloats(
+  resources: view GpuResources
+  buffer: view BufferId
+  floats: view List(Float)
+) ret Bool {
   var writer: ArgWriter = createArgs(uniform: true)
   loop var i: Int = 0, i < floats.length, ++i {
-    if let value: Float = floats.copyAt(index: i) { pushF32(writer: writer, value: value) }
+    if let value: Float = floats.copyAt(index: i) {
+      pushF32(writer: writer, value: value)
+    }
   }
-  ret uploadArgs(writer: writer, resources: resources, buffer: buffer, offset: 0)
+  ret uploadArgs(
+    writer: writer
+    resources: resources
+    buffer: buffer
+    offset: 0
+  )
 }
 
-func uploadInts(resources: view GpuResources, buffer: view BufferId, values: view List(Int32)) ret Bool {
+func uploadInts(
+  resources: view GpuResources
+  buffer: view BufferId
+  values: view List(Int32)
+) ret Bool {
   var writer: ArgWriter = createArgs(uniform: true)
   loop var i: Int = 0, i < values.length, ++i {
-    if let value: Int32 = values.copyAt(index: i) { pushI32(writer: writer, value: value as Int) }
+    if let value: Int32 = values.copyAt(index: i) {
+      pushI32(writer: writer, value: value as Int)
+    }
   }
-  ret uploadArgs(writer: writer, resources: resources, buffer: buffer, offset: 0)
+  ret uploadArgs(
+    writer: writer
+    resources: resources
+    buffer: buffer
+    offset: 0
+  )
 }
 
 # Reinterprets the first `count` * 4 readback bytes as f32 into `floats`.
 func bytesToFloats(bytes: view List(UInt8), floats: mod List(Float), count: view Int) {
-  loop floats.length < count { floats.add(value: 0.0) }
-  if bytes.length < count * 4 { ret }
-  unsafe { rae_ext_rae_buf_copy(V: UInt8, src: bytes.data, src_off: 0, dst: floats.data, dst_off: 0, len: count * 4, elemSize: 1) }
+  loop floats.length < count {
+    floats.add(value: 0.0)
+  }
+  if bytes.length < count * 4 {
+    ret
+  }
+  unsafe {
+    rae_ext_rae_buf_copy(
+      V: UInt8
+      src: bytes.data
+      src_off: 0
+      dst: floats.data
+      dst_off: 0
+      len: count * 4
+      elemSize: 1
+    )
+  }
 }
 
 # ONE compute pass with every dispatch of `commands`, timed by the water
 # performance capture when `timed` (untimed otherwise).
-func recordWaterCompute(recording: mod Recording, resources: view GpuResources, commands: view List(ComputeCommand), performance: view WaterPerf, timed: view Bool) ret Bool {
+func recordWaterCompute(
+  recording: mod Recording
+  resources: view GpuResources
+  commands: view List(ComputeCommand)
+  performance: view WaterPerf
+  timed: view Bool
+) ret Bool {
   unsafe {
-      var writes: Ptr = webgpuNull()
-      if timed and performance.enabled {
-        if let timing: view GpuTiming => performance.timing { writes = timingWrites(timing: timing) }
+    var writes: Ptr = webgpuNull()
+    if timed and performance.enabled {
+      if let timing: view GpuTiming => performance.timing {
+        writes = timingWrites(timing: timing)
       }
-      ret recordComputeCommands(recording: recording, resources: resources, commands: commands, timestampWrites: writes)
+    }
+    ret recordComputeCommands(
+      recording: recording
+      resources: resources
+      commands: commands
+      timestampWrites: writes
+    )
   }
 }

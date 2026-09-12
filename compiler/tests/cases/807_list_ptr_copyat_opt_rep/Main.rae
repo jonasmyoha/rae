@@ -1,3 +1,5 @@
+cheader "stdlib.h"
+
 # #901: `List(Ptr).copyAt(index:)` used to miscompile. The generic accessor's
 # `opt Ptr` result got the struct-rep form (`.has`/`.value`), but the
 # name-mangler's `Ptr -> Buffer(void)` shortcut fired BEFORE its `is_opt`
@@ -6,9 +8,8 @@
 # ("member reference base type 'Buffer_void' is not a structure or union").
 # Reproduces the exact shape from the task: a struct with a `handles:
 # List(Ptr)` field, `add` inside unsafe, then `if let ... = copyAt(...)`.
-cheader "stdlib.h"
-
 func allocate(byteCount: copy UInt64) unsafe extern("malloc") ret Ptr
+
 func release(pointer: copy Ptr) unsafe extern("free")
 
 type Holder {
@@ -26,13 +27,19 @@ func main() {
 
     # Round-trips the right value at the right index...
     if let raw0: Ptr = holder.handles.copyAt(index: 0) {
-      if raw0 is not a { ok = false }
-      if raw0 is b { ok = false }
+      if raw0 is not a {
+        ok = false
+      }
+      if raw0 is b {
+        ok = false
+      }
     } else {
       ok = false
     }
     if let raw1: Ptr = holder.handles.copyAt(index: 1) {
-      if raw1 is not b { ok = false }
+      if raw1 is not b {
+        ok = false
+      }
     } else {
       ok = false
     }

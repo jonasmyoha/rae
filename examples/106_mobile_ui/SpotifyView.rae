@@ -22,6 +22,7 @@ import Sys
 import Time
 open ecs/Entity
 open ecs/ComponentTable
+
 # PlaybackState lives in this example's playback.rae — auto-imported
 # from the same project directory. We mutate it here to sync the local
 # mock's `isPlaying` from Spotify's reported state so the play-button
@@ -76,7 +77,12 @@ func createSpotifyState() pub ret SpotifyState {
 # Replace a node's Text.text in place. Walks the page-scoped nodeIds
 # lookup; no-op when the node isn't in the world (e.g. NowPlaying not
 # currently mounted).
-func updateNodeText(world: mod UiWorld, pageId: view String, nodeId: view String, value: view String) {
+func updateNodeText(
+  world: mod UiWorld
+  pageId: view String
+  nodeId: view String
+  value: view String
+) {
   var raw: Int = -1
   if let value: Int = findNodeInPage(world: world, pageId: pageId, nodeId: nodeId) {
     raw = value
@@ -149,15 +155,19 @@ func loadHistoryEntryArt(track: view SpotifyTrack, reg: mod TextureRegistry) pub
   ret key
 }
 
-func saveHistoryArtworkMetadata(track: view SpotifyTrack, imageHash: view String, path: view String) {
+func saveHistoryArtworkMetadata(
+  track: view SpotifyTrack
+  imageHash: view String
+  path: view String
+) {
   ensureAppCacheDirs()
   let metaPath: String = cachedArtworkMetadataPath(imageHash: imageHash)
   let q: String = "\""
   let colon: String = ":"
   let comma: String = ","
   let nl: String = "\n"
-  let openBrace: String = "\u{007B}"
-  let closeBrace: String = "\u{007D}"
+  let openBrace: String = "\{"
+  let closeBrace: String = "\}"
   let tn: String = Json.escape(text: track.trackName)
   let an: String = Json.escape(text: track.artistName)
   let alb: String = Json.escape(text: track.albumName)
@@ -165,12 +175,34 @@ func saveHistoryArtworkMetadata(track: view SpotifyTrack, imageHash: view String
   let p: String = Json.escape(text: path)
   var content: String = ""
   content = content.concat(other: openBrace).concat(other: nl)
-  content = content.concat(other: "  ").concat(other: q).concat(other: "imageHash").concat(other: q).concat(other: colon).concat(other: " ").concat(other: q).concat(other: imageHash).concat(other: q).concat(other: comma).concat(other: nl)
-  content = content.concat(other: "  ").concat(other: q).concat(other: "trackName").concat(other: q).concat(other: colon).concat(other: " ").concat(other: q).concat(other: tn).concat(other: q).concat(other: comma).concat(other: nl)
-  content = content.concat(other: "  ").concat(other: q).concat(other: "artistName").concat(other: q).concat(other: colon).concat(other: " ").concat(other: q).concat(other: an).concat(other: q).concat(other: comma).concat(other: nl)
-  content = content.concat(other: "  ").concat(other: q).concat(other: "albumName").concat(other: q).concat(other: colon).concat(other: " ").concat(other: q).concat(other: alb).concat(other: q).concat(other: comma).concat(other: nl)
-  content = content.concat(other: "  ").concat(other: q).concat(other: "artworkUrl").concat(other: q).concat(other: colon).concat(other: " ").concat(other: q).concat(other: url).concat(other: q).concat(other: comma).concat(other: nl)
-  content = content.concat(other: "  ").concat(other: q).concat(other: "path").concat(other: q).concat(other: colon).concat(other: " ").concat(other: q).concat(other: p).concat(other: q).concat(other: nl)
+  content = content.concat(other: "  ").concat(other: q).concat(other: "imageHash").concat(other: q).concat(
+    other: colon
+  ).concat(other: " ").concat(other: q).concat(other: imageHash).concat(other: q).concat(
+    other: comma
+  ).concat(other: nl)
+  content = content.concat(other: "  ").concat(other: q).concat(other: "trackName").concat(other: q).concat(
+    other: colon
+  ).concat(other: " ").concat(other: q).concat(other: tn).concat(other: q).concat(other: comma).concat(
+    other: nl
+  )
+  content = content.concat(other: "  ").concat(other: q).concat(other: "artistName").concat(
+    other: q
+  ).concat(other: colon).concat(other: " ").concat(other: q).concat(other: an).concat(other: q).concat(
+    other: comma
+  ).concat(other: nl)
+  content = content.concat(other: "  ").concat(other: q).concat(other: "albumName").concat(other: q).concat(
+    other: colon
+  ).concat(other: " ").concat(other: q).concat(other: alb).concat(other: q).concat(other: comma).concat(
+    other: nl
+  )
+  content = content.concat(other: "  ").concat(other: q).concat(other: "artworkUrl").concat(
+    other: q
+  ).concat(other: colon).concat(other: " ").concat(other: q).concat(other: url).concat(other: q).concat(
+    other: comma
+  ).concat(other: nl)
+  content = content.concat(other: "  ").concat(other: q).concat(other: "path").concat(other: q).concat(
+    other: colon
+  ).concat(other: " ").concat(other: q).concat(other: p).concat(other: q).concat(other: nl)
   content = content.concat(other: closeBrace).concat(other: nl)
   let ok: Bool = Sys.writeFile(path: metaPath, content: content)
   if ok is false {
@@ -178,7 +210,11 @@ func saveHistoryArtworkMetadata(track: view SpotifyTrack, imageHash: view String
   }
 }
 
-func refreshSpotifyArt(state: view SpotifyState, track: view SpotifyTrack, reg: mod TextureRegistry) ret Bool {
+func refreshSpotifyArt(
+  state: view SpotifyState
+  track: view SpotifyTrack
+  reg: mod TextureRegistry
+) ret Bool {
   unsafe {
     ensureAppCacheDirs()
     var outPath: String = ""
@@ -258,11 +294,31 @@ func pollSpotify(
   # Text updates run every poll — cheap, and handles the "user
   # paused/resumed in Spotify directly" case without extra logic.
   let nowPlayingPage: String = "player"
-  updateNodeText(world: world, pageId: nowPlayingPage, nodeId: "TrackTitle", value: track.trackName)
-  updateNodeText(world: world, pageId: nowPlayingPage, nodeId: "TrackArtist", value: track.artistName)
+  updateNodeText(
+    world: world
+    pageId: nowPlayingPage
+    nodeId: "TrackTitle"
+    value: track.trackName
+  )
+  updateNodeText(
+    world: world
+    pageId: nowPlayingPage
+    nodeId: "TrackArtist"
+    value: track.artistName
+  )
   let miniPage: String = "mini-player"
-  updateNodeText(world: world, pageId: miniPage, nodeId: "MiniTitle", value: track.trackName)
-  updateNodeText(world: world, pageId: miniPage, nodeId: "MiniArtist", value: track.artistName)
+  updateNodeText(
+    world: world
+    pageId: miniPage
+    nodeId: "MiniTitle"
+    value: track.trackName
+  )
+  updateNodeText(
+    world: world
+    pageId: miniPage
+    nodeId: "MiniArtist"
+    value: track.artistName
+  )
   # Sync the M:SS time labels too. The scene mount path baked these
   # from the LOCAL track at boot, so without this refresh they show
   # the wrong duration in Spotify mode.
@@ -270,8 +326,18 @@ func pollSpotify(
   let durMs: Int = (dur * 1000.0).toInt()
   let nowStr: String = formatDurationMs(ms: posMs)
   let totalStr: String = formatDurationMs(ms: durMs)
-  updateNodeText(world: world, pageId: nowPlayingPage, nodeId: "TimeNow", value: nowStr)
-  updateNodeText(world: world, pageId: nowPlayingPage, nodeId: "TimeTotal", value: totalStr)
+  updateNodeText(
+    world: world
+    pageId: nowPlayingPage
+    nodeId: "TimeNow"
+    value: nowStr
+  )
+  updateNodeText(
+    world: world
+    pageId: nowPlayingPage
+    nodeId: "TimeTotal"
+    value: totalStr
+  )
   # Track-change → re-fetch artwork. Compare trackId, not artworkUrl
   # (Spotify sometimes reports a slightly different art URL between
   # polls for the same track during playback).

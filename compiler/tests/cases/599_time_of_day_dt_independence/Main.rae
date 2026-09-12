@@ -23,7 +23,9 @@ open app3d/SettingsDialog
 
 func approxEq(a: view Float, b: view Float, tol: view Float) ret Bool {
   var d: Float = a - b
-  if d < 0.0 { d = 0.0 - d }
+  if d < 0.0 {
+    d = 0.0 - d
+  }
   ret d < tol
 }
 
@@ -34,9 +36,14 @@ func approxEq(a: view Float, b: view Float, tol: view Float) ret Bool {
 # step that crosses two midnights -- it read a correct two-day jump as twelve
 # hours and failed a passing implementation.
 func hoursAfter(deltaTime: view Float, frames: view Int) ret Float {
-  var settingsState: SettingsState = createSettingsState(scene: 1, sceneCount: 3, speed: 1.0,
-                                             toon: false, hour: 0.0,
-                                             skyModel: SettingsSkyModel.preetham)
+  var settingsState: SettingsState = createSettingsState(
+    scene: 1
+    sceneCount: 3
+    speed: 1.0
+    toon: false
+    hour: 0.0
+    skyModel: SettingsSkyModel.preetham
+  )
   let startDay: Int = settingsState.dayOfYear
   var i: Int = 0
   loop i < frames {
@@ -61,13 +68,31 @@ func main() {
 
   # One long stall must be integrated in full, not rounded down to a frame:
   # 2.5 s of stall is 1.0 simulated hour and has to arrive as one.
-  log("a 2.5s stall is one hour: {approxEq(a: hoursAfter(deltaTime: 2.5, frames: 1), b: 1.0, tol: 0.0001)}")
+  log(
+    "a 2.5s stall is one hour: {approxEq(
+      a: hoursAfter(deltaTime: 2.5, frames: 1)
+      b: 1.0
+      tol: 0.0001
+    )}"
+  )
 
   # And a stall longer than a day still lands on the right hour, because the
   # roll is a loop rather than a single subtraction.
   # 150 s = 60 simulated hours = 2 days and 12 hours.
-  log("a 150s stall rolls two whole days: {approxEq(a: hoursAfter(deltaTime: 150.0, frames: 1), b: 60.0, tol: 0.001)}")
+  log(
+    "a 150s stall rolls two whole days: {approxEq(
+      a: hoursAfter(deltaTime: 150.0, frames: 1)
+      b: 60.0
+      tol: 0.001
+    )}"
+  )
 
   # Time never runs backwards on a bad clock reading.
-  log("negative dt is refused: {approxEq(a: hoursAfter(deltaTime: 0.0 - 1.0, frames: 10), b: 0.0, tol: 0.0001)}")
+  log(
+    "negative dt is refused: {approxEq(
+      a: hoursAfter(deltaTime: 0.0 - 1.0, frames: 10)
+      b: 0.0
+      tol: 0.0001
+    )}"
+  )
 }

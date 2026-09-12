@@ -30,7 +30,6 @@
 # timestamp are recorded but not consumed by the runtime — they're
 # for log forensics and supervisor-side dedup.
 
-
 # ----- paths ----------------------------------------------------------
 #
 # Location convention: `.rae/` under the current working directory,
@@ -47,7 +46,6 @@
 # watch` supervisor now owns `.rae/apps/<id>/` and points its own
 # children at it; an app started without a supervisor keeps the plain
 # `.rae` default, where nothing writes a signal.
-
 func dir() pub ret String {
   let override: String = getEnv(name: "RAE_HOT_RELOAD_DIR")
   if override.length() > 0 {
@@ -88,7 +86,9 @@ func rae_ext_rae_sys_read_file(path: String) unsafe extern ret String
 # there's nothing to restore; apps check `.length() > 0` before
 # deserializing. The app owns the schema (typically JSON).
 func readHotReloadState() pub ret String {
-  unsafe { ret rae_ext_rae_sys_read_file(path: statePath()) }
+  unsafe {
+    ret rae_ext_rae_sys_read_file(path: statePath())
+  }
 }
 
 # Save state for the next run. Apps should call this just before
@@ -112,7 +112,9 @@ func statePathFor(appId: view String) pub ret String {
 }
 
 func readHotReloadStateFor(appId: view String) pub ret String {
-  unsafe { ret rae_ext_rae_sys_read_file(path: statePathFor(appId: appId)) }
+  unsafe {
+    ret rae_ext_rae_sys_read_file(path: statePathFor(appId: appId))
+  }
 }
 
 func writeHotReloadStateFor(appId: view String, state: view String) pub ret Bool {
@@ -135,7 +137,9 @@ func writeHotReloadStateFor(appId: view String, state: view String) pub ret Bool
 # and it should never be the reason an app does not boot.
 func nextReloadGeneration() pub ret Int {
   var raw: String = ""
-  unsafe { raw = rae_ext_rae_sys_read_file(path: generationPath()) }
+  unsafe {
+    raw = rae_ext_rae_sys_read_file(path: generationPath())
+  }
   var n: Int = 0
   if raw.length() > 0 {
     n = raw.trim().toInt()
@@ -160,13 +164,7 @@ func clearHotReloadState() pub ret Bool {
 }
 
 # ----- signal file ----------------------------------------------------
-
-enum ReloadVerb {
-  none
-  data
-  reload
-  restart
-}
+enum ReloadVerb { none, data, reload, restart }
 
 type ReloadSignal {
   verb: ReloadVerb
@@ -182,11 +180,7 @@ type ReloadSignalWatcher {
 }
 
 func emptySignal() ret ReloadSignal {
-  ret ReloadSignal {
-    verb: ReloadVerb.none
-    buildId: ""
-    timestampMs: ""
-  }
+  ret ReloadSignal { verb: ReloadVerb.none, buildId: "", timestampMs: "" }
 }
 
 # Snapshot the signal file's current mtime so the first
@@ -196,10 +190,7 @@ func emptySignal() ret ReloadSignal {
 func createReloadSignalWatcher() pub ret ReloadSignalWatcher {
   let p: String = signalPath()
   let mt: Float64 = fileModTime(path: p)
-  ret ReloadSignalWatcher {
-    path: p
-    lastMtime: mt
-  }
+  ret ReloadSignalWatcher { path: p, lastMtime: mt }
 }
 
 # ----- build status ---------------------------------------------------
@@ -219,7 +210,6 @@ func createReloadSignalWatcher() pub ret ReloadSignalWatcher {
 # case `readBuildStatus()` returns a `BuildStatus` with
 # `present=false` so the app can distinguish "no supervisor" from
 # "supervisor + last build ok".
-
 type BuildStatus {
   # True iff `.rae/build.status` exists. False means no supervisor
   # has reported anything yet (e.g. app launched standalone, or
@@ -237,11 +227,7 @@ type BuildStatus {
 }
 
 func emptyBuildStatus() ret BuildStatus {
-  ret BuildStatus {
-    present: false
-    ok: false
-    message: ""
-  }
+  ret BuildStatus { present: false, ok: false, message: "" }
 }
 
 # Parse the two-line build-status format the supervisor writes.
@@ -262,11 +248,7 @@ func parseBuildStatus(raw: view String) pub ret BuildStatus {
   if lines.length > 1 {
     msg = lines.copyAt(index: 1).trim()
   }
-  ret BuildStatus {
-    present: true
-    ok: okFlag
-    message: msg
-  }
+  ret BuildStatus { present: true, ok: okFlag, message: msg }
 }
 
 # Read the current build status from `.rae/build.status`. Cheap
@@ -278,7 +260,9 @@ func readBuildStatus() pub ret BuildStatus {
     ret emptyBuildStatus()
   }
   var raw: String = ""
-  unsafe { raw = rae_ext_rae_sys_read_file(path: path) }
+  unsafe {
+    raw = rae_ext_rae_sys_read_file(path: path)
+  }
   ret parseBuildStatus(raw: raw)
 }
 
@@ -311,7 +295,9 @@ func pollReloadSignal(w: mod ReloadSignalWatcher) pub ret ReloadSignal {
   }
   w.lastMtime = mt
   var raw: String = ""
-  unsafe { raw = rae_ext_rae_sys_read_file(path: w.path) }
+  unsafe {
+    raw = rae_ext_rae_sys_read_file(path: w.path)
+  }
   if raw.length() is 0 {
     ret emptySignal()
   }
@@ -337,11 +323,7 @@ func pollReloadSignal(w: mod ReloadSignalWatcher) pub ret ReloadSignal {
         timestamp = "{part2}"
       }
     }
-    ret ReloadSignal {
-      verb: verb
-      buildId: buildId
-      timestampMs: timestamp
-    }
+    ret ReloadSignal { verb: verb, buildId: buildId, timestampMs: timestamp }
   }
   ret emptySignal()
 }

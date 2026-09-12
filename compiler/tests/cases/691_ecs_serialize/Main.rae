@@ -8,11 +8,21 @@ open ecs/Serialize
 # component's compiler-generated toJson(). Derived/cache components (no serialize
 # flag) must be omitted. This round-trips the output through parseJson and asserts
 # the cache component is absent.
+type Position {
+  x: Int
+  y: Int
+}
 
-type Position { x: Int, y: Int }
-type Velocity { dx: Int, dy: Int }
-type WorldCache { w: Int }   # derived cache — registered WITHOUT serialize
+type Velocity {
+  dx: Int
+  dy: Int
+}
 
+type WorldCache {
+  w: Int
+}
+
+# derived cache — registered WITHOUT serialize
 type MiniWorld {
   positions: ComponentTable(Position)
   velocities: ComponentTable(Velocity)
@@ -23,9 +33,24 @@ type MiniWorld {
 # per-table serializer — one addComponentTable per table, then finishWorldJson.
 func worldToJson(world: view MiniWorld, registry: view ComponentRegistry) ret String {
   var writer: WorldJson = createWorldJson()
-  addComponentTable(writer: writer, table: world.positions, name: "Position", registry: registry)
-  addComponentTable(writer: writer, table: world.velocities, name: "Velocity", registry: registry)
-  addComponentTable(writer: writer, table: world.caches, name: "WorldCache", registry: registry)
+  addComponentTable(
+    writer: writer
+    table: world.positions
+    name: "Position"
+    registry: registry
+  )
+  addComponentTable(
+    writer: writer
+    table: world.velocities
+    name: "Velocity"
+    registry: registry
+  )
+  addComponentTable(
+    writer: writer
+    table: world.caches
+    name: "WorldCache"
+    registry: registry
+  )
   ret finishWorldJson(writer: writer)
 }
 
@@ -37,11 +62,11 @@ func main() {
   var reg: ComponentRegistry = createComponentRegistry()
   registerComponent(reg: reg, name: kPos, flags: serialize)
   registerComponent(reg: reg, name: kVelocity, flags: serialize)
-  registerComponent(reg: reg, name: kCache, flags: 0)   # derived cache: not serialized
+  registerComponent(reg: reg, name: kCache, flags: 0)  # derived cache: not serialized
 
   var world: MiniWorld = {
-    positions: ComponentTable.create(Position),
-    velocities: ComponentTable.create(Velocity),
+    positions: ComponentTable.create(Position)
+    velocities: ComponentTable.create(Velocity)
     caches: ComponentTable.create(WorldCache)
   }
   let e1: EntityId = { index: 1, generation: 0 }

@@ -31,7 +31,13 @@ func albumHeaderHeight() ret Float {
 # existing hero rebind in main.rae against `state.currentAlbumStem`),
 # HeroCaption / HeroTitle / HeroArtist text → the collection's fields.
 # Works the same for an album or a playlist — the caller resolves which.
-func buildAlbumHeader(world: mod UiWorld, scene: view Scene, title: view String, caption: view String, artist: view String) ret EntityId {
+func buildAlbumHeader(
+  world: mod UiWorld
+  scene: view Scene
+  title: view String
+  caption: view String
+  artist: view String
+) ret EntityId {
   let w: Float = phoneFrameW - outerPad * 2.0
 
   let overrides: List(SceneOverride) = emptyOverrides()
@@ -60,7 +66,12 @@ func buildAlbumHeader(world: mod UiWorld, scene: view Scene, title: view String,
   # a PageRoot — the album SCREEN root carries `PageRoot{"album"}`
   # in the persistent-world model.
   let header: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: header, w: w, h: albumHeaderHeight())
+  setRectFixed(
+    world: world
+    entity: header
+    w: w
+    h: albumHeaderHeight()
+  )
   let label: String = "album"
   let mounted: EntityId = mountSceneInstanceIntoPage(
     world: world
@@ -85,7 +96,12 @@ func buildAlbumHeader(world: mod UiWorld, scene: view Scene, title: view String,
 # Each row carries its own (albumStem, trackIndex), so a playlist whose
 # songs span many albums plays each correctly — the click encodes both
 # as `song.openref.<trackIndex>.<albumStem>`.
-func buildTrackList(world: mod UiWorld, trackScene: view Scene, rows: view List(CollectionRow), playback: view PlaybackState) pub ret EntityId {
+func buildTrackList(
+  world: mod UiWorld
+  trackScene: view Scene
+  rows: view List(CollectionRow)
+  playback: view PlaybackState
+) pub ret EntityId {
   unsafe {
     let list: EntityId = createEntity(world: world)
     let n: Int = rows.length
@@ -94,17 +110,33 @@ func buildTrackList(world: mod UiWorld, trackScene: view Scene, rows: view List(
       visible = 1
     }
     let listH: Float = trackRowH * visible.toFloat() + trackGap * (visible - 1).toFloat()
-    setRectFixed(world: world, entity: list, w: phoneFrameW - outerPad * 2.0, h: listH)
+    setRectFixed(
+      world: world
+      entity: list
+      w: phoneFrameW - outerPad * 2.0
+      h: listH
+    )
     let layV: LayoutType = LayoutType.vertical
     let alignS: AlignKind = AlignKind.start
-    setLayout(world: world, entity: list, kind: layV, gap: trackGap, alignCross: alignS)
+    setLayout(
+      world: world
+      entity: list
+      kind: layV
+      gap: trackGap
+      alignCross: alignS
+    )
 
     let rowKids: List(EntityId) = List.create(EntityId, cap: trackRowCount)
     var i: Int = 0
     loop i < n {
       let cr: CollectionRow = rae_ext_rae_buf_get(buf: rows.data, index: i)
       let row: EntityId = createEntity(world: world)
-      setRectFixed(world: world, entity: row, w: phoneFrameW - outerPad * 2.0, h: trackRowH)
+      setRectFixed(
+        world: world
+        entity: row
+        w: phoneFrameW - outerPad * 2.0
+        h: trackRowH
+      )
 
       let overrides: List(SceneOverride) = emptyOverrides()
       var num: Int = cr.number
@@ -156,11 +188,29 @@ func buildTrackList(world: mod UiWorld, trackScene: view Scene, rows: view List(
       }
       let rowWidgetId: String = "{cr.albumStem}:{cr.trackIndex}"
       let rowKind: String = "trackRow"
-      setWidgetIdentity(world: world, entity: row, id: rowWidgetId, kind: rowKind)
-      setWidgetState(world: world, entity: row, enabled: true, selected: isPlayingRow, loading: false, error: false)
+      setWidgetIdentity(
+        world: world
+        entity: row
+        id: rowWidgetId
+        kind: rowKind
+      )
+      setWidgetState(
+        world: world
+        entity: row
+        enabled: true
+        selected: isPlayingRow
+        loading: false
+        error: false
+      )
       let playbackSource: DataResourceId = dataResourcePlayback()
       let playingField: DataFieldId = dataFieldPlayingTrack()
-      setDataDependency(world: world, entity: row, resource: playbackSource, field: playingField, observedRevision: playback.revision)
+      setDataDependency(
+        world: world
+        entity: row
+        resource: playbackSource
+        field: playingField
+        observedRevision: playback.revision
+      )
       # Whole-row click → start this exact song and reflect it in the
       # mini-player. The album stem + track index are both encoded into
       # the actionId (`song.openref.<idx>.<stem>`) so a playlist row plays
@@ -244,10 +294,21 @@ func mountAlbumPage(
   let cv: CollectionView = buildCurrentCollection(state: state)
 
   let root: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: root, w: viewport.areaDuW, h: viewport.areaDuH)
+  setRectFixed(
+    world: world
+    entity: root
+    w: viewport.areaDuW
+    h: viewport.areaDuH
+  )
   let layV: LayoutType = LayoutType.vertical
   let alignS: AlignKind = AlignKind.start
-  setLayout(world: world, entity: root, kind: layV, gap: outerGap, alignCross: alignS)
+  setLayout(
+    world: world
+    entity: root
+    kind: layV
+    gap: outerGap
+    alignCross: alignS
+  )
   setPaddingAll(world: world, entity: root, n: outerPad)
 
   var copiedId: String = ""
@@ -260,8 +321,19 @@ func mountAlbumPage(
   let scroll: ScrollState = { y: scrollY, velocity: 0.0 }
   componentSet(this: world.scrollStates, entity: root, data: scroll)
 
-  let header: EntityId = buildAlbumHeader(world: world, scene: scenes.album, title: cv.title, caption: cv.caption, artist: cv.artist)
-  let trackList: EntityId = buildTrackList(world: world, trackScene: scenes.trackRow, rows: cv.rows, playback: playback)
+  let header: EntityId = buildAlbumHeader(
+    world: world
+    scene: scenes.album
+    title: cv.title
+    caption: cv.caption
+    artist: cv.artist
+  )
+  let trackList: EntityId = buildTrackList(
+    world: world
+    trackScene: scenes.trackRow
+    rows: cv.rows
+    playback: playback
+  )
   let spacer: EntityId = buildVerticalSpacer(world: world)
 
   let kids: List(EntityId) = List.create(EntityId, cap: 3)
@@ -269,16 +341,35 @@ func mountAlbumPage(
   kids.add(value: trackList)
   kids.add(value: spacer)
   attachChildren(world: world, parent: root, kids: kids)
-  attachSafeAreaEdges(world: world, entity: root, top: 1.0, bottom: 0.0)
+  attachSafeAreaEdges(
+    world: world
+    entity: root
+    top: 1.0
+    bottom: 0.0
+  )
 
   ret root
 }
 
-func buildAlbumWorld(scenes: view AlbumScenes, playback: view PlaybackState, state: view AppState, reg: view TextureRegistry, scrollY: view Float, viewport: view Viewport) pub ret UiWorld {
+func buildAlbumWorld(
+  scenes: view AlbumScenes
+  playback: view PlaybackState
+  state: view AppState
+  reg: view TextureRegistry
+  scrollY: view Float
+  viewport: view Viewport
+) pub ret UiWorld {
   let world: UiWorld = create()
   seedWorldThemeFrom(world: world, src: state.theme)  # #764: theme from AppState
   applyViewportExtent(world: world, viewport: viewport)
-  let page: EntityId = mountAlbumPage(world: world, scenes: scenes, state: state, playback: playback, scrollY: scrollY, viewport: viewport)
+  let page: EntityId = mountAlbumPage(
+    world: world
+    scenes: scenes
+    state: state
+    playback: playback
+    scrollY: scrollY
+    viewport: viewport
+  )
   let dock: EntityId = mountBottomDockOverlay(
     world: world
     activeTab: state.tab

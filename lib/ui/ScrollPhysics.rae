@@ -44,7 +44,6 @@
 #
 # which is what `rubberBandSlope` returns.
 
-
 # Pure slope value in [0, 1] at the given visual overshoot. 1.0
 # right at the bound (no damping), 0.0 once we hit max stretch.
 func rubberBandSlope(visualOver: view Float, dim: view Float) ret Float {
@@ -69,10 +68,10 @@ func rubberBandSlope(visualOver: view Float, dim: view Float) ret Float {
 # visual overshoot — so finger / trackpad input feels exactly like
 # stock UIScrollView.
 func dampedDelta(
-  current: view Float,
-  delta: view Float,
-  low: view Float,
-  high: view Float,
+  current: view Float
+  delta: view Float
+  low: view Float
+  high: view Float
   dim: view Float
 ) ret Float {
   if current > high and delta > 0.0 {
@@ -90,11 +89,7 @@ func dampedDelta(
 # per-frame deltas. Prefers the latest sample when it's a real
 # movement; falls back to older samples when the user paused at
 # end of drag.
-func pickReleaseVelocity(
-  d0: view Float,
-  d1: view Float,
-  d2: view Float
-) ret Float {
+func pickReleaseVelocity(d0: view Float, d1: view Float, d2: view Float) ret Float {
   let thresh: Float = 0.5
   var a0: Float = d0
   if a0 < 0.0 {
@@ -119,10 +114,10 @@ func pickReleaseVelocity(
 # settle with a barely-perceptible overshoot, close to UIKit's
 # default "0.55 damping ratio" interactive feel.
 func springStepVelocity(
-  pos: view Float,
-  velocity: view Float,
-  target: view Float,
-  tension: view Float,
+  pos: view Float
+  velocity: view Float
+  target: view Float
+  tension: view Float
   friction: view Float
 ) ret Float {
   let displ: Float = pos - target

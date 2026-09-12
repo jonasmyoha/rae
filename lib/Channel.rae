@@ -25,12 +25,16 @@
 # runs `spawn` synchronously (inline at the spawn site), so a persistent
 # polling worker there would run before any producer sends — the #271 proof
 # is therefore a compiled-target test.
-
 func rae_ext_rae_chan_new() unsafe extern ret Int
+
 func rae_ext_rae_chan_send(ch: Int, value: Int) unsafe extern
+
 func rae_ext_rae_chan_count(ch: Int) unsafe extern ret Int
+
 func rae_ext_rae_chan_recv(ch: Int) unsafe extern ret Int
+
 func rae_ext_rae_chan_received(ch: Int) unsafe extern ret Int
+
 func rae_ext_rae_chan_free(ch: Int) unsafe extern
 
 type Channel(T: type) {
@@ -38,34 +42,46 @@ type Channel(T: type) {
 }
 
 func createChannel(T: type) pub ret Channel(T) {
-  unsafe { ret Channel(T) { handle: rae_ext_rae_chan_new() } }
+  unsafe {
+    ret Channel(T) { handle: rae_ext_rae_chan_new() }
+  }
 }
 
 # Producer side — callable from any thread. FIFO; thread-safe.
 func channelSend(T: type, this: view Channel(T), value: view T) pub {
-  unsafe { rae_ext_rae_chan_send(ch: this.handle, value: value) }
+  unsafe {
+    rae_ext_rae_chan_send(ch: this.handle, value: value)
+  }
 }
 
 # Consumer side (owning thread only). Number of messages currently buffered;
 # call `receive` only when this is > 0.
 func pending(T: type, this: view Channel(T)) pub ret Int {
-  unsafe { ret rae_ext_rae_chan_count(ch: this.handle) }
+  unsafe {
+    ret rae_ext_rae_chan_count(ch: this.handle)
+  }
 }
 
 # Pop the oldest buffered message (owning thread only). Returns a zero value
 # if the channel is empty — always gate on `pending` first.
 func receive(T: type, this: view Channel(T)) pub ret T {
-  unsafe { ret rae_ext_rae_chan_recv(ch: this.handle) }
+  unsafe {
+    ret rae_ext_rae_chan_recv(ch: this.handle)
+  }
 }
 
 # Read-only observable: total messages the consumer has drained so far.
 # Monotonic; safe to read from any thread.
 func received(T: type, this: view Channel(T)) pub ret Int {
-  unsafe { ret rae_ext_rae_chan_received(ch: this.handle) }
+  unsafe {
+    ret rae_ext_rae_chan_received(ch: this.handle)
+  }
 }
 
 # Owner lifecycle: release the runtime channel. Call exactly once, on the
 # owning thread, after the worker has joined.
 func freeChannel(T: type, this: view Channel(T)) pub {
-  unsafe { rae_ext_rae_chan_free(ch: this.handle) }
+  unsafe {
+    rae_ext_rae_chan_free(ch: this.handle)
+  }
 }

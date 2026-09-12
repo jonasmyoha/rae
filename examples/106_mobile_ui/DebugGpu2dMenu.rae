@@ -15,22 +15,32 @@ open ecs/ComponentTable
 open ecs/hierarchySystem/HierarchySystem
 open Gpu2dCanvas
 
-func setOffset(world: mod UiWorld, entity: view EntityId, x: view Float, y: view Float) {
+func setOffset(
+  world: mod UiWorld
+  entity: view EntityId
+  x: view Float
+  y: view Float
+) {
   let off: Offset = { delta: Vec2 { x: x, y: y } }
   componentSet(this: world.offsets, entity: entity, data: off)
 }
 
-func setAlign(world: mod UiWorld, entity: view EntityId, x: AlignKind, y: AlignKind) {
-  let a: Align = {
-    x: x
-    y: y
-    hasX: true
-    hasY: true
-  }
+func setAlign(
+  world: mod UiWorld
+  entity: view EntityId
+  x: AlignKind
+  y: AlignKind
+) {
+  let a: Align = { x: x, y: y, hasX: true, hasY: true }
   componentSet(this: world.aligns, entity: entity, data: a)
 }
 
-func setFixedRect(world: mod UiWorld, entity: view EntityId, w: view Float, h: view Float) {
+func setFixedRect(
+  world: mod UiWorld
+  entity: view EntityId
+  w: view Float
+  h: view Float
+) {
   let r: Rect = { position: { x: 0.0, y: 0.0 }, size: { x: w, y: h } }
   componentSet(this: world.rects, entity: entity, data: r)
   let s: Size = {
@@ -62,7 +72,12 @@ func setRectShape(world: mod UiWorld, entity: view EntityId, fill: view RgbaColo
   componentSet(this: world.shapes, entity: entity, data: sh)
 }
 
-func setRoundedShape(world: mod UiWorld, entity: view EntityId, fill: view RgbaColor, radius: view Float) {
+func setRoundedShape(
+  world: mod UiWorld
+  entity: view EntityId
+  fill: view RgbaColor
+  radius: view Float
+) {
   let sh: Shape = {
     kind: ShapeKind.roundedRect
     fill: fill
@@ -73,16 +88,22 @@ func setRoundedShape(world: mod UiWorld, entity: view EntityId, fill: view RgbaC
   componentSet(this: world.shapes, entity: entity, data: sh)
 }
 
-func setDebugText(world: mod UiWorld, entity: view EntityId, text: own String, styleId: own String) {
-  let t: Text = {
-    text: text
-    styleId: styleId
-    wrapWidthMode: WrapWidthMode.none
-  }
+func setDebugText(
+  world: mod UiWorld
+  entity: view EntityId
+  text: own String
+  styleId: own String
+) {
+  let t: Text = { text: text, styleId: styleId, wrapWidthMode: WrapWidthMode.none }
   componentSet(this: world.texts, entity: entity, data: t)
 }
 
-func setDebugSprite(world: mod UiWorld, entity: view EntityId, key: own String, tint: view RgbaColor) {
+func setDebugSprite(
+  world: mod UiWorld
+  entity: view EntityId
+  key: own String
+  tint: view RgbaColor
+) {
   let sp: Sprite = {
     textureKey: key
     tint: tint
@@ -94,7 +115,14 @@ func setDebugSprite(world: mod UiWorld, entity: view EntityId, key: own String, 
   componentSet(this: world.sprites, entity: entity, data: sp)
 }
 
-func setOpticalAlign(world: mod UiWorld, entity: view EntityId, centerX: view Bool, centerY: view Bool, biasX: view Float, biasY: view Float) {
+func setOpticalAlign(
+  world: mod UiWorld
+  entity: view EntityId
+  centerX: view Bool
+  centerY: view Bool
+  biasX: view Float
+  biasY: view Float
+) {
   let oa: OpticalAlign = {
     enabled: true
     centerX: centerX
@@ -107,27 +135,16 @@ func setOpticalAlign(world: mod UiWorld, entity: view EntityId, centerX: view Bo
 func setOnClickAction(world: mod UiWorld, entity: view EntityId, actionId: own String) {
   let bindId: String = "{actionId}"
   let bindRole: String = "primary"
-  let oc: OnClick = {
-    actionId: actionId
-    actionIdDouble: ""
-    actionIdTriple: ""
-    maxDelayMs: 250
-  }
+  let oc: OnClick = { actionId: actionId, actionIdDouble: "", actionIdTriple: "", maxDelayMs: 250 }
   componentSet(this: world.onClicks, entity: entity, data: oc)
-  let binding: ActionBinding = {
-    actionId: own bindId
-    role: own bindRole
-  }
+  let binding: ActionBinding = { actionId: own bindId, role: own bindRole }
   componentSet(this: world.actionBindings, entity: entity, data: own binding)
 }
 
 func setActionBindingOnly(world: mod UiWorld, entity: view EntityId, actionId: view String) {
   let bindId: String = "{actionId}"
   let bindRole: String = "primary"
-  let binding: ActionBinding = {
-    actionId: own bindId
-    role: own bindRole
-  }
+  let binding: ActionBinding = { actionId: own bindId, role: own bindRole }
   componentSet(this: world.actionBindings, entity: entity, data: own binding)
 }
 
@@ -139,11 +156,29 @@ func tagDebugToggleWidget(
   selected: view Bool
 ) {
   let widgetId: String = "{actionId}.{kind}"
-  setWidgetIdentity(world: world, entity: entity, id: widgetId, kind: kind)
-  setWidgetState(world: world, entity: entity, enabled: true, selected: selected, loading: false, error: false)
+  setWidgetIdentity(
+    world: world
+    entity: entity
+    id: widgetId
+    kind: kind
+  )
+  setWidgetState(
+    world: world
+    entity: entity
+    enabled: true
+    selected: selected
+    loading: false
+    error: false
+  )
   let source: DataResourceId = dataResourceDebug()
   let field: DataFieldId = dataFieldDebugToggle()
-  setDataDependency(world: world, entity: entity, resource: source, field: field, observedRevision: 0)
+  setDataDependency(
+    world: world
+    entity: entity
+    resource: source
+    field: field
+    observedRevision: 0
+  )
   setActionBindingOnly(world: world, entity: entity, actionId: actionId)
 }
 
@@ -233,7 +268,12 @@ func setVerticalLayout(world: mod UiWorld, entity: view EntityId, gap: view Floa
   componentSet(this: world.layouts, entity: entity, data: lay)
 }
 
-func setHorizontalLayout(world: mod UiWorld, entity: view EntityId, gap: view Float, alignCross: AlignKind) {
+func setHorizontalLayout(
+  world: mod UiWorld
+  entity: view EntityId
+  gap: view Float
+  alignCross: AlignKind
+) {
   let lay: Layout = {
     kind: LayoutType.horizontal
     gap: gap
@@ -257,7 +297,12 @@ func attachKids(world: mod UiWorld, parent: view EntityId, kids: view List(Entit
     var i: Int = 0
     loop i < kids.length {
       let k: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: i)
-      setParent(parents: world.parents, childrens: world.childrens, child: k, parent: parent)
+      setParent(
+        parents: world.parents
+        childrens: world.childrens
+        child: k
+        parent: parent
+      )
       i = i + 1
     }
   }
@@ -265,16 +310,43 @@ func attachKids(world: mod UiWorld, parent: view EntityId, kids: view List(Entit
 
 func buildDebugButton(world: mod UiWorld, debug: view DebugSystem) ret EntityId {
   let button: EntityId = createEntity(world: world)
-  setFixedRect(world: world, entity: button, w: debug.buttonSize, h: debug.buttonSize)
-  setOffset(world: world, entity: button, x: debug.buttonX, y: debug.buttonY)
+  setFixedRect(
+    world: world
+    entity: button
+    w: debug.buttonSize
+    h: debug.buttonSize
+  )
+  setOffset(
+    world: world
+    entity: button
+    x: debug.buttonX
+    y: debug.buttonY
+  )
   setCircleShape(world: world, entity: button, fill: amberColor())
   setStackLayout(world: world, entity: button)
   setOnClickAction(world: world, entity: button, actionId: debugActionToggleMenu)
 
   let label: EntityId = createEntity(world: world)
-  setFixedRect(world: world, entity: label, w: debug.buttonSize, h: debugButtonTextH)
-  setOpticalAlign(world: world, entity: label, centerX: true, centerY: true, biasX: 0.0, biasY: 0.0)
-  setDebugText(world: world, entity: label, text: "D", styleId: "debugButtonSmall")
+  setFixedRect(
+    world: world
+    entity: label
+    w: debug.buttonSize
+    h: debugButtonTextH
+  )
+  setOpticalAlign(
+    world: world
+    entity: label
+    centerX: true
+    centerY: true
+    biasX: 0.0
+    biasY: 0.0
+  )
+  setDebugText(
+    world: world
+    entity: label
+    text: "D"
+    styleId: "debugButtonSmall"
+  )
   let kids: List(EntityId) = List.create(EntityId, cap: 1)
   kids.add(value: label)
   attachKids(world: world, parent: button, kids: kids)
@@ -283,15 +355,42 @@ func buildDebugButton(world: mod UiWorld, debug: view DebugSystem) ret EntityId 
 
 func buildDebugIconButton(world: mod UiWorld) ret EntityId {
   let button: EntityId = createEntity(world: world)
-  setFixedRect(world: world, entity: button, w: debugCloseIconSize, h: debugCloseIconSize)
-  setRoundedShape(world: world, entity: button, fill: colorByName(theme: world.theme.active, name: "outline"), radius: debugCloseIconSize / 2.0)
+  setFixedRect(
+    world: world
+    entity: button
+    w: debugCloseIconSize
+    h: debugCloseIconSize
+  )
+  setRoundedShape(
+    world: world
+    entity: button
+    fill: colorByName(theme: world.theme.active, name: "outline")
+    radius: debugCloseIconSize / 2.0
+  )
   setStackLayout(world: world, entity: button)
   setOnClickAction(world: world, entity: button, actionId: debugActionDismiss)
 
   let icon: EntityId = createEntity(world: world)
-  setFixedRect(world: world, entity: icon, w: debugCloseIconGlyph, h: debugCloseIconGlyph)
-  setOpticalAlign(world: world, entity: icon, centerX: true, centerY: true, biasX: 0.0, biasY: 0.0)
-  setDebugSprite(world: world, entity: icon, key: "mat:close", tint: colorByName(theme: world.theme.active, name: "textPrimary"))
+  setFixedRect(
+    world: world
+    entity: icon
+    w: debugCloseIconGlyph
+    h: debugCloseIconGlyph
+  )
+  setOpticalAlign(
+    world: world
+    entity: icon
+    centerX: true
+    centerY: true
+    biasX: 0.0
+    biasY: 0.0
+  )
+  setDebugSprite(
+    world: world
+    entity: icon
+    key: "mat:close"
+    tint: colorByName(theme: world.theme.active, name: "textPrimary")
+  )
   let kids: List(EntityId) = List.create(EntityId, cap: 1)
   kids.add(value: icon)
   attachKids(world: world, parent: button, kids: kids)
@@ -300,15 +399,42 @@ func buildDebugIconButton(world: mod UiWorld) ret EntityId {
 
 func buildDebugCloseButton(world: mod UiWorld) ret EntityId {
   let button: EntityId = createEntity(world: world)
-  setFixedRect(world: world, entity: button, w: debugCloseButtonW, h: debugCloseButtonH)
-  setRoundedShape(world: world, entity: button, fill: colorByName(theme: world.theme.active, name: "accent"), radius: debugCloseButtonRadius)
+  setFixedRect(
+    world: world
+    entity: button
+    w: debugCloseButtonW
+    h: debugCloseButtonH
+  )
+  setRoundedShape(
+    world: world
+    entity: button
+    fill: colorByName(theme: world.theme.active, name: "accent")
+    radius: debugCloseButtonRadius
+  )
   setStackLayout(world: world, entity: button)
   setOnClickAction(world: world, entity: button, actionId: debugActionDismiss)
 
   let label: EntityId = createEntity(world: world)
-  setFixedRect(world: world, entity: label, w: debugCloseButtonW, h: debugCloseTextH)
-  setOpticalAlign(world: world, entity: label, centerX: true, centerY: true, biasX: 0.0, biasY: 0.0)
-  setDebugText(world: world, entity: label, text: "Close", styleId: "debugCloseButton")
+  setFixedRect(
+    world: world
+    entity: label
+    w: debugCloseButtonW
+    h: debugCloseTextH
+  )
+  setOpticalAlign(
+    world: world
+    entity: label
+    centerX: true
+    centerY: true
+    biasX: 0.0
+    biasY: 0.0
+  )
+  setDebugText(
+    world: world
+    entity: label
+    text: "Close"
+    styleId: "debugCloseButton"
+  )
   let kids: List(EntityId) = List.create(EntityId, cap: 2)
   kids.add(value: label)
   attachKids(world: world, parent: button, kids: kids)
@@ -317,15 +443,47 @@ func buildDebugCloseButton(world: mod UiWorld) ret EntityId {
 
 func buildDebugMenuTitle(world: mod UiWorld, panelW: view Float) ret EntityId {
   let title: EntityId = createEntity(world: world)
-  setFixedRect(world: world, entity: title, w: panelW, h: debugDialogTitleH)
-  setAlign(world: world, entity: title, x: AlignKind.center, y: AlignKind.start)
-  setOffset(world: world, entity: title, x: 0.0, y: debugDialogTitleY)
+  setFixedRect(
+    world: world
+    entity: title
+    w: panelW
+    h: debugDialogTitleH
+  )
+  setAlign(
+    world: world
+    entity: title
+    x: AlignKind.center
+    y: AlignKind.start
+  )
+  setOffset(
+    world: world
+    entity: title
+    x: 0.0
+    y: debugDialogTitleY
+  )
   setStackLayout(world: world, entity: title)
 
   let label: EntityId = createEntity(world: world)
-  setFixedRect(world: world, entity: label, w: panelW, h: debugDialogTitleH)
-  setOpticalAlign(world: world, entity: label, centerX: true, centerY: true, biasX: 0.0, biasY: 0.0)
-  setDebugText(world: world, entity: label, text: "Debug", styleId: "debugDialogTitle")
+  setFixedRect(
+    world: world
+    entity: label
+    w: panelW
+    h: debugDialogTitleH
+  )
+  setOpticalAlign(
+    world: world
+    entity: label
+    centerX: true
+    centerY: true
+    biasX: 0.0
+    biasY: 0.0
+  )
+  setDebugText(
+    world: world
+    entity: label
+    text: "Debug"
+    styleId: "debugDialogTitle"
+  )
 
   let kids: List(EntityId) = List.create(EntityId, cap: 2)
   kids.add(value: label)
@@ -341,8 +499,18 @@ func buildSwitchRow(
   width: view Float
 ) ret EntityId {
   let row: EntityId = createEntity(world: world)
-  setFixedRect(world: world, entity: row, w: width, h: debugRowH)
-  setHorizontalLayout(world: world, entity: row, gap: debugRowGap, alignCross: AlignKind.center)
+  setFixedRect(
+    world: world
+    entity: row
+    w: width
+    h: debugRowH
+  )
+  setHorizontalLayout(
+    world: world
+    entity: row
+    gap: debugRowGap
+    alignCross: AlignKind.center
+  )
   # Data-oriented widget tags (#220): identity + on/off state + action
   # binding as queryable component data. Copies taken BEFORE
   # setOnClickAction consumes `actionId` (own param). The switch
@@ -350,40 +518,95 @@ func buildSwitchRow(
   # toggle — but systems can now read which toggles exist and which
   # are on straight from the widgetStates table.
   let toggleKind: String = "debugToggle"
-  setWidgetIdentity(world: world, entity: row, id: actionId, kind: toggleKind)
-  setWidgetState(world: world, entity: row, enabled: true, selected: on, loading: false, error: false)
+  setWidgetIdentity(
+    world: world
+    entity: row
+    id: actionId
+    kind: toggleKind
+  )
+  setWidgetState(
+    world: world
+    entity: row
+    enabled: true
+    selected: on
+    loading: false
+    error: false
+  )
   let bindId: String = "{actionId}"
   let bindRole: String = "primary"
-  let binding: ActionBinding = {
-    actionId: own bindId
-    role: own bindRole
-  }
+  let binding: ActionBinding = { actionId: own bindId, role: own bindRole }
   componentSet(this: world.actionBindings, entity: row, data: own binding)
   setOnClickAction(world: world, entity: row, actionId: actionId)
 
   let label: EntityId = createEntity(world: world)
   let labelW: Float = width - debugSwitchW - debugRowGap
-  setFixedRect(world: world, entity: label, w: labelW, h: debugLabelH)
-  setDebugText(world: world, entity: label, text: labelText, styleId: "debugMenuLabel")
+  setFixedRect(
+    world: world
+    entity: label
+    w: labelW
+    h: debugLabelH
+  )
+  setDebugText(
+    world: world
+    entity: label
+    text: labelText
+    styleId: "debugMenuLabel"
+  )
 
   let pill: EntityId = createEntity(world: world)
-  setFixedRect(world: world, entity: pill, w: debugSwitchW, h: debugSwitchH)
+  setFixedRect(
+    world: world
+    entity: pill
+    w: debugSwitchW
+    h: debugSwitchH
+  )
   var pillFill: RgbaColor = switchOffColor()
-  if on { pillFill = switchOnColor() }
-  setRoundedShape(world: world, entity: pill, fill: pillFill, radius: debugSwitchRadius)
+  if on {
+    pillFill = switchOnColor()
+  }
+  setRoundedShape(
+    world: world
+    entity: pill
+    fill: pillFill
+    radius: debugSwitchRadius
+  )
   let pillKind: String = "debugSwitchPill"
-  tagDebugToggleWidget(world: world, entity: pill, actionId: actionId, kind: pillKind, selected: on)
+  tagDebugToggleWidget(
+    world: world
+    entity: pill
+    actionId: actionId
+    kind: pillKind
+    selected: on
+  )
   setDebugSwitchPillStyle(world: world, entity: pill)
   setStackLayout(world: world, entity: pill)
 
   let knob: EntityId = createEntity(world: world)
-  setFixedRect(world: world, entity: knob, w: debugSwitchKnob, h: debugSwitchKnob)
+  setFixedRect(
+    world: world
+    entity: knob
+    w: debugSwitchKnob
+    h: debugSwitchKnob
+  )
   setCircleShape(world: world, entity: knob, fill: switchKnobColor())
   var knobOff: Float = 0.0 - debugSwitchKnobOffset
-  if on { knobOff = debugSwitchKnobOffset }
-  setOffset(world: world, entity: knob, x: knobOff, y: 0.0)
+  if on {
+    knobOff = debugSwitchKnobOffset
+  }
+  setOffset(
+    world: world
+    entity: knob
+    x: knobOff
+    y: 0.0
+  )
   let knobKind: String = "debugSwitchKnob"
-  tagDebugToggleWidget(world: world, entity: knob, actionId: actionId, kind: knobKind, selected: on)
+  tagDebugToggleWidget(
+    world: world
+    entity: knob
+    actionId: actionId
+    kind: knobKind
+    selected: on
+  )
   setDebugSwitchKnobStyle(world: world, entity: knob)
 
   let pillKids: List(EntityId) = List.create(EntityId, cap: 1)
@@ -399,8 +622,18 @@ func buildSwitchRow(
 
 func buildDebugMenuOverlay(world: mod UiWorld, debug: view DebugSystem) ret EntityId {
   let backdrop: EntityId = createEntity(world: world)
-  setFixedRect(world: world, entity: backdrop, w: debug.screenW, h: debug.screenH)
-  setOffset(world: world, entity: backdrop, x: 0.0, y: 0.0)
+  setFixedRect(
+    world: world
+    entity: backdrop
+    w: debug.screenW
+    h: debug.screenH
+  )
+  setOffset(
+    world: world
+    entity: backdrop
+    x: 0.0
+    y: 0.0
+  )
   setRectShape(world: world, entity: backdrop, fill: backdropColor())
   setOnClickAction(world: world, entity: backdrop, actionId: debugActionDismiss)
   setStackLayout(world: world, entity: backdrop)
@@ -408,21 +641,64 @@ func buildDebugMenuOverlay(world: mod UiWorld, debug: view DebugSystem) ret Enti
   let panelW: Float = debug.screenW * 0.86
   let panelH: Float = debug.screenH * 0.72
   let panel: EntityId = createEntity(world: world)
-  setFixedRect(world: world, entity: panel, w: panelW, h: panelH)
-  setRoundedShape(world: world, entity: panel, fill: menuFillColor(), radius: debugPanelRadius)
+  setFixedRect(
+    world: world
+    entity: panel
+    w: panelW
+    h: panelH
+  )
+  setRoundedShape(
+    world: world
+    entity: panel
+    fill: menuFillColor()
+    radius: debugPanelRadius
+  )
   setStackLayout(world: world, entity: panel)
 
   let content: EntityId = createEntity(world: world)
   let contentW: Float = panelW - debugPanelPadding * 2.0
   let contentH: Float = panelH - debugContentTop - debugPanelPadding * 2.0 - debugCloseButtonH
-  setFixedRect(world: world, entity: content, w: contentW, h: contentH)
-  setAlign(world: world, entity: content, x: AlignKind.start, y: AlignKind.start)
-  setOffset(world: world, entity: content, x: debugPanelPadding, y: debugContentTop)
+  setFixedRect(
+    world: world
+    entity: content
+    w: contentW
+    h: contentH
+  )
+  setAlign(
+    world: world
+    entity: content
+    x: AlignKind.start
+    y: AlignKind.start
+  )
+  setOffset(
+    world: world
+    entity: content
+    x: debugPanelPadding
+    y: debugContentTop
+  )
   setVerticalLayout(world: world, entity: content, gap: debugRowGap)
 
-  let themeRow: EntityId = buildSwitchRow(world: world, labelText: "Dark theme", actionId: debugActionToggleTheme, on: world.theme.active.mode is ThemeMode.dark, width: contentW)
-  let labelsRow: EntityId = buildSwitchRow(world: world, labelText: "FPS / mem labels", actionId: debugActionToggleLabels, on: debug.showLabels, width: contentW)
-  let outlinesRow: EntityId = buildSwitchRow(world: world, labelText: "Input outlines", actionId: debugActionToggleInputOutlines, on: debug.showInputOutlines, width: contentW)
+  let themeRow: EntityId = buildSwitchRow(
+    world: world
+    labelText: "Dark theme"
+    actionId: debugActionToggleTheme
+    on: world.theme.active.mode is ThemeMode.dark
+    width: contentW
+  )
+  let labelsRow: EntityId = buildSwitchRow(
+    world: world
+    labelText: "FPS / mem labels"
+    actionId: debugActionToggleLabels
+    on: debug.showLabels
+    width: contentW
+  )
+  let outlinesRow: EntityId = buildSwitchRow(
+    world: world
+    labelText: "Input outlines"
+    actionId: debugActionToggleInputOutlines
+    on: debug.showInputOutlines
+    width: contentW
+  )
 
   let rows: List(EntityId) = List.create(EntityId, cap: 3)
   rows.add(value: themeRow)
@@ -431,12 +707,32 @@ func buildDebugMenuOverlay(world: mod UiWorld, debug: view DebugSystem) ret Enti
   attachKids(world: world, parent: content, kids: rows)
 
   let closeX: EntityId = buildDebugIconButton(world: world)
-  setAlign(world: world, entity: closeX, x: AlignKind.end, y: AlignKind.start)
-  setOffset(world: world, entity: closeX, x: 0.0 - debugPanelPadding, y: debugPanelPadding)
+  setAlign(
+    world: world
+    entity: closeX
+    x: AlignKind.end
+    y: AlignKind.start
+  )
+  setOffset(
+    world: world
+    entity: closeX
+    x: 0.0 - debugPanelPadding
+    y: debugPanelPadding
+  )
 
   let closeButton: EntityId = buildDebugCloseButton(world: world)
-  setAlign(world: world, entity: closeButton, x: AlignKind.center, y: AlignKind.end)
-  setOffset(world: world, entity: closeButton, x: 0.0, y: 0.0 - debugPanelPadding)
+  setAlign(
+    world: world
+    entity: closeButton
+    x: AlignKind.center
+    y: AlignKind.end
+  )
+  setOffset(
+    world: world
+    entity: closeButton
+    x: 0.0
+    y: 0.0 - debugPanelPadding
+  )
 
   let title: EntityId = buildDebugMenuTitle(world: world, panelW: panelW)
 
@@ -463,7 +759,9 @@ func applyDebugAnchor(world: view UiWorld, debug: mod DebugSystem) ret Bool {
       let r: Rect = componentGet(this: world.rects, entity: e)
       debug.buttonX = r.position.x
       debug.buttonY = r.position.y
-      if r.size.x > 0.0 { debug.buttonSize = r.size.x }
+      if r.size.x > 0.0 {
+        debug.buttonSize = r.size.x
+      }
       ret true
     }
     i = i + 1

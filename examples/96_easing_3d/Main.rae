@@ -17,10 +17,7 @@ open ui/renderSystem/RenderSystem
 open Gpu2dCanvas
 
 func uploadMeshData(meshData: view MeshData) ret MeshHandle {
-  ret uploadMesh(
-    verts: meshData.verts
-    vertCount: meshData.vertCount
-    indices: meshData.indices)
+  ret uploadMesh(verts: meshData.verts, vertCount: meshData.vertCount, indices: meshData.indices)
 }
 
 func buildScene(sphere: view MeshHandle, ground: view MeshHandle) ret World3d {
@@ -30,18 +27,34 @@ func buildScene(sphere: view MeshHandle, ground: view MeshHandle) ret World3d {
   let unitScale: Vec3 = Vec3.create(x: 1.0, y: 1.0, z: 1.0)
   let ballMaterial: Material3d = {
     baseColor: Vec3.create(x: 0.12, y: 0.62, z: 0.95)
-    metallic: 0.15, roughness: 0.22, emission: noEmission, toon: false }
+    metallic: 0.15
+    roughness: 0.22
+    emission: noEmission
+    toon: false
+  }
   let groundMaterial: Material3d = {
     baseColor: Vec3.create(x: 0.16, y: 0.2, z: 0.27)
-    metallic: 0.0, roughness: 0.82, emission: noEmission, toon: false }
+    metallic: 0.0
+    roughness: 0.82
+    emission: noEmission
+    toon: false
+  }
   let ballEntity: EntityId = world3dAddMeshInstance(
-    world: sceneWorld, mesh: sphere, material: ballMaterial
+    world: sceneWorld
+    mesh: sphere
+    material: ballMaterial
     position: Vec3.create(x: 0.0, y: 0.0, z: 5.0)
-    rotation: noRotation, scale: unitScale)
+    rotation: noRotation
+    scale: unitScale
+  )
   let groundEntity: EntityId = world3dAddMeshInstance(
-    world: sceneWorld, mesh: ground, material: groundMaterial
+    world: sceneWorld
+    mesh: ground
+    material: groundMaterial
     position: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
-    rotation: noRotation, scale: unitScale)
+    rotation: noRotation
+    scale: unitScale
+  )
   ret sceneWorld
 }
 
@@ -66,14 +79,16 @@ func main() ret Int {
     dir: "examples/104_ui_hello/assets/"
     textFontName: "Roboto-Regular"
     iconFontName: ""
-    themeFile: "theme.raescene")
+    themeFile: "theme.raescene"
+  )
   var world: UiWorld = create()
   # #764: install the app's theme (palette + scene tokens) onto this world.
   seedWorldTheme(world: world, res: uiResources)
   let uiRoot: EntityId = mountUiScene(
     world: world
     path: "examples/96_easing_3d/assets/ui.raescene"
-    res: uiResources)
+    res: uiResources
+  )
 
   var renderer: DeferredRenderer = createDeferredRendererWithUi()
   let graphStatus: Int = compileDeferred(renderer: renderer)
@@ -88,18 +103,24 @@ func main() ret Int {
   loop not Gpu2d.pollClose() {
     let resized: Bool = resizeUiToWindow(world: world, res: uiResources)
     var elapsed: Float = (Gpu2d.nowSeconds() - startTime) as Float
-    loop elapsed > duration { elapsed = elapsed - duration }
-    if fixedTestFrame { elapsed = 1.8 }
+    loop elapsed > duration {
+      elapsed = elapsed - duration
+    }
+    if fixedTestFrame {
+      elapsed = 1.8
+    }
     let phase: Float = elapsed / duration
     let bounce: Float = Easing.easeOutBounce(t: phase)
     let currentZ: Float = 5.0 - 4.0 * bounce
     world3dWriteTransform(
-      world: sceneWorld, entity: ballEntity
+      world: sceneWorld
+      entity: ballEntity
       transform: Transform3d {
         position: Vec3.create(x: 0.0, y: 0.0, z: currentZ)
         rotation: Vec3.create(x: 0.0, y: phase * 3.14159, z: 0.0)
         scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
-      })
+      }
+    )
     runUiSystems(world: world, res: uiResources)
 
     let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
@@ -112,8 +133,13 @@ func main() ret Int {
           renderSystemGpu2d(world: world, res: uiResources, canvas: renderer.canvas)
         } else {
           renderDeferredPassWorld(
-            r: renderer, tag: tag, world: sceneWorld
-            camera: camera, light: light, aspect: aspect)
+            r: renderer
+            tag: tag
+            world: sceneWorld
+            camera: camera
+            light: light
+            aspect: aspect
+          )
         }
         passIndex = passIndex + 1
       }
@@ -121,8 +147,10 @@ func main() ret Int {
     }
   }
 
-  if fixedTestFrame { log("[easing3d] deterministic deferred frame rendered") }
-  shutdownDeferredRenderer(renderer: renderer)   # #904: the renderer-owned GPU manager, before the C shutdown
+  if fixedTestFrame {
+    log("[easing3d] deterministic deferred frame rendered")
+  }
+  shutdownDeferredRenderer(renderer: renderer)  # #904: the renderer-owned GPU manager, before the C shutdown
   Gbuffer.shutdownAll()
   Gpu2d.closeWindow()
   ret 0

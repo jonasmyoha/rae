@@ -1,5 +1,4 @@
 # Math and Random library for Rae
-
 func rae_seed(n: Int) unsafe extern
 
 func rae_random() unsafe extern ret Float
@@ -7,82 +6,127 @@ func rae_random() unsafe extern ret Float
 func rae_random_int(min: Int, max: Int) unsafe extern ret Int
 
 func rae_popcount(x: Int) unsafe extern ret Int
+
 func rae_leading_zeros(x: Int) unsafe extern ret Int
+
 func rae_trailing_zeros(x: Int) unsafe extern ret Int
 
 func nativeSin(x: Float) unsafe extern("rae_ext_Math_sin") ret Float
+
 func sin(x: copy Float) ret Float {
-  unsafe { ret nativeSin(x: x) }
+  unsafe {
+    ret nativeSin(x: x)
+  }
 }
 
 func nativeCos(x: Float) unsafe extern("rae_ext_Math_cos") ret Float
+
 func cos(x: copy Float) ret Float {
-  unsafe { ret nativeCos(x: x) }
+  unsafe {
+    ret nativeCos(x: x)
+  }
 }
 
 func nativeTan(x: Float) unsafe extern("rae_ext_Math_tan") ret Float
+
 func tan(x: copy Float) ret Float {
-  unsafe { ret nativeTan(x: x) }
+  unsafe {
+    ret nativeTan(x: x)
+  }
 }
 
 func nativeAsin(x: Float) unsafe extern("rae_ext_Math_asin") ret Float
+
 func asin(x: copy Float) ret Float {
-  unsafe { ret nativeAsin(x: x) }
+  unsafe {
+    ret nativeAsin(x: x)
+  }
 }
 
 func nativeAcos(x: Float) unsafe extern("rae_ext_Math_acos") ret Float
+
 func acos(x: copy Float) ret Float {
-  unsafe { ret nativeAcos(x: x) }
+  unsafe {
+    ret nativeAcos(x: x)
+  }
 }
 
 func nativeAtan(x: Float) unsafe extern("rae_ext_Math_atan") ret Float
+
 func atan(x: copy Float) ret Float {
-  unsafe { ret nativeAtan(x: x) }
+  unsafe {
+    ret nativeAtan(x: x)
+  }
 }
 
 func nativeAtan2(y: Float, x: Float) unsafe extern("rae_ext_Math_atan2") ret Float
+
 func atan2(y: copy Float, x: copy Float) ret Float {
-  unsafe { ret nativeAtan2(y: y, x: x) }
+  unsafe {
+    ret nativeAtan2(y: y, x: x)
+  }
 }
 
 func nativeSqrt(x: Float) unsafe extern("rae_ext_Math_sqrt") ret Float
+
 func sqrt(x: copy Float) ret Float {
-  unsafe { ret nativeSqrt(x: x) }
+  unsafe {
+    ret nativeSqrt(x: x)
+  }
 }
 
 func nativePow(base: Float, exp: Float) unsafe extern("rae_ext_Math_pow") ret Float
+
 func pow(base: copy Float, exp: copy Float) ret Float {
-  unsafe { ret nativePow(base: base, exp: exp) }
+  unsafe {
+    ret nativePow(base: base, exp: exp)
+  }
 }
 
 func nativeExp(x: Float) unsafe extern("rae_ext_Math_exp") ret Float
+
 func exp(x: copy Float) ret Float {
-  unsafe { ret nativeExp(x: x) }
+  unsafe {
+    ret nativeExp(x: x)
+  }
 }
 
 func nativeNaturalLog(x: Float) unsafe extern("rae_ext_Math_math_log") ret Float
+
 func naturalLog(x: copy Float) ret Float {
-  unsafe { ret nativeNaturalLog(x: x) }
+  unsafe {
+    ret nativeNaturalLog(x: x)
+  }
 }
 
 func nativeFloor(x: Float) unsafe extern("rae_ext_Math_floor") ret Float
+
 func floor(x: copy Float) ret Float {
-  unsafe { ret nativeFloor(x: x) }
+  unsafe {
+    ret nativeFloor(x: x)
+  }
 }
 
 func nativeCeil(x: Float) unsafe extern("rae_ext_Math_ceil") ret Float
+
 func ceil(x: copy Float) ret Float {
-  unsafe { ret nativeCeil(x: x) }
+  unsafe {
+    ret nativeCeil(x: x)
+  }
 }
 
 func nativeRound(x: Float) unsafe extern("rae_ext_Math_round") ret Float
+
 func round(x: copy Float) ret Float {
-  unsafe { ret nativeRound(x: x) }
+  unsafe {
+    ret nativeRound(x: x)
+  }
 }
 
 # pi, and tau = 2*pi (one full turn in radians). Compile-time constants, used
 # directly (no call): `random() * tau`.
 const pi: Float = 3.14159265358979323846
+
 const tau: Float = pi * 2.0
 
 func seed(value: view Int) {

@@ -11,15 +11,27 @@ func main() {
   var meshes: MeshRegistry3d = createMeshRegistry3d()
   registerMesh3d(reg: meshes, key: "sphere", handle: meshHandle(id: 7, generation: 3))
 
-  let asset: World3dAsset = loadWorld3dFile(path: "tests/cases/550_scene3d_file/scene.raescene", meshes: meshes)
-  log("ok={asset.ok} meshes={world3dMeshRendererCount(world: asset.world)} sdf={world3dSdfCount(world: asset.world)} entities={world3dEntityCount(world: asset.world)}")
+  let asset: World3dAsset = loadWorld3dFile(
+    path: "tests/cases/550_scene3d_file/scene.raescene"
+    meshes: meshes
+  )
+  log(
+    "ok={asset.ok} meshes={world3dMeshRendererCount(world: asset.world)} sdf={world3dSdfCount(
+      world: asset.world
+    )} entities={world3dEntityCount(world: asset.world)}"
+  )
   let ball: EntityId = world3dAssetEntity(asset: asset, nodeId: "Ball")
   let blob: EntityId = world3dAssetEntity(asset: asset, nodeId: "Blob")
   log("ball={ball.index} blob={blob.index}")
   let ballEntity: EntityId = world3dMeshRendererEntityAt(world: asset.world, i: 0)
   let renderer: MeshRenderer = componentGet(this: asset.world.meshRenderers, entity: ballEntity)
-  log("mesh={renderer.mesh.id}:{renderer.mesh.generation} fov={asset.camera.fovYDeg} exposure={asset.light.exposure}")
+  log(
+    "mesh={renderer.mesh.id}:{renderer.mesh.generation} fov={asset.camera.fovYDeg} exposure={asset.light.exposure}"
+  )
 
-  let bad: World3dAsset = loadWorld3dFile(path: "tests/cases/550_scene3d_file/bad.raescene", meshes: meshes)
+  let bad: World3dAsset = loadWorld3dFile(
+    path: "tests/cases/550_scene3d_file/bad.raescene"
+    meshes: meshes
+  )
   log("bad={bad.ok} error={bad.errorMsg}")
 }

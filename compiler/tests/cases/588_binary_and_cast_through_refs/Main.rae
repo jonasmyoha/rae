@@ -7,7 +7,6 @@
 # non-numeric type and skipped (#408). The identical expression written over
 # locals compiled and converted fine, which is what made this so confusing to
 # hit — the fix for one is the fix for the other.
-
 func absF(x: view Float) ret Float {
   if x < 0.0 {
     ret 0.0 - x
@@ -42,11 +41,17 @@ func main() {
   var wide: Float64 = 2.5
   check(label: "(view - view) as Float", ok: absF(x: spanAsFloat(a: 3.0, b: 1.0) - 2.0) < 0.0001)
   check(label: "mod read as Float", ok: absF(x: narrowMod(x: wide) - 2.5) < 0.0001)
-  check(label: "chained refs as Float", ok: absF(x: chained(a: 10.0, b: 4.0, c: 0.5) - 6.5) < 0.0001)
+  check(
+    label: "chained refs as Float"
+    ok: absF(x: chained(a: 10.0, b: 4.0, c: 0.5) - 6.5) < 0.0001
+  )
 
   # The same expression over locals must keep behaving identically — the point
   # is that reference-ness stops leaking, not that refs become special.
   let a: Float64 = 3.0
   let b: Float64 = 1.0
-  check(label: "locals agree with refs", ok: absF(x: ((a - b) as Float) - spanAsFloat(a: 3.0, b: 1.0)) < 0.0001)
+  check(
+    label: "locals agree with refs"
+    ok: absF(x: ((a - b) as Float) - spanAsFloat(a: 3.0, b: 1.0)) < 0.0001
+  )
 }

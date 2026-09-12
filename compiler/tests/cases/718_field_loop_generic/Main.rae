@@ -4,12 +4,12 @@ open ecs/ComponentTable
 # #773: field reflection through a GENERIC world parameter. ONE generic function
 # is instantiated per concrete world; the field set (and so the unrolled body)
 # differs per instantiation. W is inferred from the argument — no explicit W:.
-
 type WorldA {
   rects: ComponentTable(Int)
   flags: ComponentTable(Bool)
   tag: Int
 }
+
 type WorldB {
   names: ComponentTable(Int)
 }
@@ -17,7 +17,10 @@ type WorldB {
 func createA() ret WorldA {
   ret WorldA { rects: ComponentTable.create(Int), flags: ComponentTable.create(Bool), tag: 0 }
 }
-func createB() ret WorldB { ret WorldB { names: ComponentTable.create(Int) } }
+
+func createB() ret WorldB {
+  ret WorldB { names: ComponentTable.create(Int) }
+}
 
 # mod variant: clear one entity from every ComponentTable field.
 func clearEntityComponents(W: type, world: mod W, entity: view EntityId) {

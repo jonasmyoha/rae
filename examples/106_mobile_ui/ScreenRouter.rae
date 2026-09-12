@@ -14,34 +14,35 @@ open ecs/ComponentTable
 open ui/safeAreaSystem/SafeAreaSystem
 
 enum Screen {
-  # The four bottom-nav tabs follow. Order matters: it must match
-  # `hot_reload_glue.screenToInt` / `intToScreen` so saved state.json
-  # ordinals keep restoring correctly after a code rebuild.
-  #
-  # `Home` is the discovery / landing tab — large 2-column grid of
-  # albums with a friendly greeting. Where the app boots.
   home
-  # `Library` is the dense 3-column album grid — the user's full
-  # catalog of music to play. Formerly mis-shared with Profile.
   library
-  # `Album` is the sub-page showing one album's track list. Reached
-  # by tapping any Home or Library cover tile. NOT a tab.
   album
-  # `Player` is the sub-page showing the currently-playing track with
-  # full controls. Reached by tapping a track row OR by tapping the
-  # mini-player at the bottom of any screen. NOT a tab.
   player
-  # `Search` — placeholder tab for now. Will host a query-against-
-  # catalogue UI later.
   search
-  # `Profile` is the user / account / Spotify-status / settings tab.
-  # Genuinely the user-info screen — no longer pretending to be the
-  # library grid.
   profile
-  # `History` is the full play-history sub-page. Pushed from a tap
-  # on the "Recently played" header on Home. NOT a tab.
   history
 }
+
+# The four bottom-nav tabs follow. Order matters: it must match
+# `hot_reload_glue.screenToInt` / `intToScreen` so saved state.json
+# ordinals keep restoring correctly after a code rebuild.
+#
+# `Home` is the discovery / landing tab — large 2-column grid of
+# albums with a friendly greeting. Where the app boots.
+# `Library` is the dense 3-column album grid — the user's full
+# catalog of music to play. Formerly mis-shared with Profile.
+# `Album` is the sub-page showing one album's track list. Reached
+# by tapping any Home or Library cover tile. NOT a tab.
+# `Player` is the sub-page showing the currently-playing track with
+# full controls. Reached by tapping a track row OR by tapping the
+# mini-player at the bottom of any screen. NOT a tab.
+# `Search` — placeholder tab for now. Will host a query-against-
+# catalogue UI later.
+# `Profile` is the user / account / Spotify-status / settings tab.
+# Genuinely the user-info screen — no longer pretending to be the
+# library grid.
+# `History` is the full play-history sub-page. Pushed from a tap
+# on the "Recently played" header on Home. NOT a tab.
 
 # Per-screen scroll bounds. `scrollable=false` means wheel / drag
 # is dropped on that screen. `floor` is the most-negative scrollY
@@ -58,7 +59,10 @@ func scrollBoundsForScreen(
   cachedAlbumScrollFloor: view Float
 ) pub ret ScrollBounds {
   if screen is Screen.home {
-    ret ScrollBounds { scrollable: true, floor: homeScrollMin(albums: appState.mediaLibrary.albums, history: appState.playHistory) }
+    ret ScrollBounds {
+      scrollable: true
+      floor: homeScrollMin(albums: appState.mediaLibrary.albums, history: appState.playHistory)
+    }
   }
   if screen is Screen.library {
     ret ScrollBounds { scrollable: true, floor: 0.0 - 1050.0 }
@@ -82,24 +86,71 @@ func buildScreenWorld(
   viewport: view Viewport
 ) pub ret UiWorld {
   if screen is Screen.home {
-    ret buildHomeWorld(scenes: scenes, reg: texReg, state: state, playback: playback, scrollY: scrollY, viewport: viewport)
+    ret buildHomeWorld(
+      scenes: scenes
+      reg: texReg
+      state: state
+      playback: playback
+      scrollY: scrollY
+      viewport: viewport
+    )
   }
   if screen is Screen.album {
-    ret buildAlbumWorld(scenes: scenes, playback: playback, state: state, reg: texReg, scrollY: scrollY, viewport: viewport)
+    ret buildAlbumWorld(
+      scenes: scenes
+      playback: playback
+      state: state
+      reg: texReg
+      scrollY: scrollY
+      viewport: viewport
+    )
   }
   if screen is Screen.search {
-    ret buildSearchWorld(scenes: scenes, playback: playback, state: state, reg: texReg, viewport: viewport)
+    ret buildSearchWorld(
+      scenes: scenes
+      playback: playback
+      state: state
+      reg: texReg
+      viewport: viewport
+    )
   }
   if screen is Screen.library {
-    ret buildLibraryWorld(scenes: scenes, reg: texReg, state: state, playback: playback, scrollY: scrollY, viewport: viewport)
+    ret buildLibraryWorld(
+      scenes: scenes
+      reg: texReg
+      state: state
+      playback: playback
+      scrollY: scrollY
+      viewport: viewport
+    )
   }
   if screen is Screen.profile {
-    ret buildProfileWorld(scenes: scenes, reg: texReg, state: state, playback: playback, scrollY: scrollY, viewport: viewport)
+    ret buildProfileWorld(
+      scenes: scenes
+      reg: texReg
+      state: state
+      playback: playback
+      scrollY: scrollY
+      viewport: viewport
+    )
   }
   if screen is Screen.history {
-    ret buildHistoryWorld(scenes: scenes, reg: texReg, state: state, playback: playback, scrollY: scrollY, viewport: viewport)
+    ret buildHistoryWorld(
+      scenes: scenes
+      reg: texReg
+      state: state
+      playback: playback
+      scrollY: scrollY
+      viewport: viewport
+    )
   }
-  ret buildNowPlayingWorld(scenes: scenes, playback: playback, state: state, reg: texReg, viewport: viewport)
+  ret buildNowPlayingWorld(
+    scenes: scenes
+    playback: playback
+    state: state
+    reg: texReg
+    viewport: viewport
+  )
 }
 
 # Maps a Screen to the PageRoot id used for its mount. Symmetric to
@@ -152,13 +203,49 @@ func buildAppWorld(
   # layer entities ("content" / "dock" / "back-button" / "dialog" /
   # "debug") already exist and look them up by id.
   createStandardLayers(world: world)
-  let homePage: EntityId = mountHomePage(world: world, scenes: scenes, state: state, scrollY: scrollY, viewport: viewport)
-  let libraryPage: EntityId = mountLibraryPage(world: world, state: state, scrollY: scrollY, viewport: viewport)
-  let albumPage: EntityId = mountAlbumPage(world: world, scenes: scenes, state: state, playback: playback, scrollY: scrollY, viewport: viewport)
-  let nowPlayingPage: EntityId = mountNowPlayingPage(world: world, scenes: scenes, playback: playback, state: state, reg: texReg, viewport: viewport)
-  let profilePage: EntityId = mountProfilePage(world: world, reg: texReg, state: state, scrollY: scrollY, viewport: viewport)
+  let homePage: EntityId = mountHomePage(
+    world: world
+    scenes: scenes
+    state: state
+    scrollY: scrollY
+    viewport: viewport
+  )
+  let libraryPage: EntityId = mountLibraryPage(
+    world: world
+    state: state
+    scrollY: scrollY
+    viewport: viewport
+  )
+  let albumPage: EntityId = mountAlbumPage(
+    world: world
+    scenes: scenes
+    state: state
+    playback: playback
+    scrollY: scrollY
+    viewport: viewport
+  )
+  let nowPlayingPage: EntityId = mountNowPlayingPage(
+    world: world
+    scenes: scenes
+    playback: playback
+    state: state
+    reg: texReg
+    viewport: viewport
+  )
+  let profilePage: EntityId = mountProfilePage(
+    world: world
+    reg: texReg
+    state: state
+    scrollY: scrollY
+    viewport: viewport
+  )
   let searchPage: EntityId = mountSearchPage(world: world, viewport: viewport)
-  let historyPage: EntityId = mountHistoryPage(world: world, state: state, scrollY: scrollY, viewport: viewport)
+  let historyPage: EntityId = mountHistoryPage(
+    world: world
+    state: state
+    scrollY: scrollY
+    viewport: viewport
+  )
 
   # Visibility: only the currently-visible screen is Active=true.
   let visible: Screen = visibleScreen(state: state)
@@ -445,7 +532,11 @@ func activeAlbum(state: view AppState) pub ret Album {
 # them, and an `album:` clause that doesn't match Spotify's exact album
 # title (deluxe editions, remasters) drops the match entirely. `album`
 # is kept in the signature for callers but intentionally unused.
-func spotifySearchQuery(artist: view String, title: view String, album: view String) pub ret String {
+func spotifySearchQuery(
+  artist: view String
+  title: view String
+  album: view String
+) pub ret String {
   unsafe {
     let unused: Int = album.length()
     ret "{title} {artist}"
@@ -678,7 +769,11 @@ func dispatchActions(
         recordPlay(history: state.playHistory, entry: own histEntry)
         saveHistoryToJson(history: state.playHistory, path: historyFilePath)
         if spotifyEnabled {
-          let q: String = spotifySearchQuery(artist: histAlbum.artist, title: histTrack.title, album: histAlbum.album)
+          let q: String = spotifySearchQuery(
+            artist: histAlbum.artist
+            title: histTrack.title
+            album: histAlbum.album
+          )
           log("[spotify] play track query={q}")
           Spotify.playQuery(query: q)
         }
@@ -694,7 +789,10 @@ func dispatchActions(
         let idx: Int = suf.toInt()
         let total: Int = state.playHistory.entries.length
         if idx >= 0 and idx < total {
-          let e: PlayHistoryEntry = rae_ext_rae_buf_get(buf: state.playHistory.entries.data, index: idx)
+          let e: PlayHistoryEntry = rae_ext_rae_buf_get(
+            buf: state.playHistory.entries.data
+            index: idx
+          )
           if e.albumStem.length() > 0 {
             state.currentAlbumStem = "{e.albumStem}"
             let aIdx: Int = findAlbumIndex(albums: state.mediaLibrary.albums, stem: e.albumStem)
@@ -721,7 +819,11 @@ func dispatchActions(
           setNowPlayingArt(state: playback, artKey: e.textureKey)
           # Dependent UI is refreshed by the frame pipeline after dispatch.
           if spotifyEnabled {
-            let q: String = spotifySearchQuery(artist: e.artistName, title: e.trackName, album: e.albumName)
+            let q: String = spotifySearchQuery(
+              artist: e.artistName
+              title: e.trackName
+              album: e.albumName
+            )
             log("[spotify] history-replay query={q}")
             Spotify.playQuery(query: q)
           }
@@ -752,7 +854,11 @@ func dispatchActions(
         # next frame's visual reflects the new state.
         let stem: view String => state.currentAlbumStem
         if stem.length() > 0 {
-          let added: Bool = playlistToggleTrack(playlist: state.liked, stem: stem, trackIndex: state.currentTrackIndex)
+          let added: Bool = playlistToggleTrack(
+            playlist: state.liked
+            stem: stem
+            trackIndex: state.currentTrackIndex
+          )
           if added {
             log("[liked] +{stem} track {state.currentTrackIndex}")
           } else {

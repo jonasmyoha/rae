@@ -24,6 +24,7 @@ open ecs/ComponentTable
 open ui/renderSystem/RenderSystem
 
 const homeGridColumns: Int = 2
+
 const homeGridTileGap: Float = 17.349397590361445  # spaceS
 
 # Responsive column count. Phone width keeps the authored base (2); as
@@ -90,10 +91,21 @@ func buildHomeGridRow(
   let row: EntityId = createEntity(world: world)
   let rowW: Float = phoneFrameW - outerPad * 2.0
   let tileH: Float = homeGridTileSize()
-  setRectFixed(world: world, entity: row, w: rowW, h: tileH)
+  setRectFixed(
+    world: world
+    entity: row
+    w: rowW
+    h: tileH
+  )
   let layH: LayoutType = LayoutType.horizontal
   let alignS: AlignKind = AlignKind.start
-  setLayout(world: world, entity: row, kind: layH, gap: homeGridTileGap, alignCross: alignS)
+  setLayout(
+    world: world
+    entity: row
+    kind: layH
+    gap: homeGridTileGap
+    alignCross: alignS
+  )
 
   let kids: List(EntityId) = List.create(EntityId, cap: homeGridColumns)
   let cols: Int = homeCols()
@@ -101,7 +113,12 @@ func buildHomeGridRow(
   loop col < cols {
     let i: Int = startIndex + col
     if let key: String = keys.copyAt(index: i) {
-      let tile: EntityId = buildLibraryCoverTile(world: world, key: key, size: tileH, rounded: rounded)
+      let tile: EntityId = buildLibraryCoverTile(
+        world: world
+        key: key
+        size: tileH
+        rounded: rounded
+      )
       kids.add(value: tile)
     }
     col = col + 1
@@ -113,7 +130,13 @@ func buildHomeGridRow(
 # Data adapter: materialise the album cover grid into the scene's
 # `CoverGrid` container. Layout/gap on the container come from the
 # scene; only the rows/tiles (data-dependent) are built here.
-func fillHomeCoverGrid(world: mod UiWorld, grid: view EntityId, albums: view List(Album), library: view List(String), rounded: view Bool) {
+func fillHomeCoverGrid(
+  world: mod UiWorld
+  grid: view EntityId
+  albums: view List(Album)
+  library: view List(String)
+  rounded: view Bool
+) {
   let keys: List(String) = collectLibraryCoverKeys(albums: albums, library: library)
   let cols: Int = homeCols()
   let total: Int = keys.length
@@ -122,7 +145,12 @@ func fillHomeCoverGrid(world: mod UiWorld, grid: view EntityId, albums: view Lis
   var i: Int = 0
   loop i < rows {
     let startIndex: Int = i * cols
-    let row: EntityId = buildHomeGridRow(world: world, keys: keys, startIndex: startIndex, rounded: rounded)
+    let row: EntityId = buildHomeGridRow(
+      world: world
+      keys: keys
+      startIndex: startIndex
+      rounded: rounded
+    )
     rowKids.add(value: row)
     i = i + 1
   }
@@ -156,7 +184,12 @@ func mountHomePage(
   # Reserve the notch at the top edge; safeAreaSystem folds the active
   # device preset's inset in. Applied here (not just in buildAppWorld)
   # so an in-place re-mount keeps the tag.
-  attachSafeAreaEdges(world: world, entity: mount, top: 1.0, bottom: 0.0)
+  attachSafeAreaEdges(
+    world: world
+    entity: mount
+    top: 1.0
+    bottom: 0.0
+  )
 
   # Runtime scroll state on the Body container (not authorable —
   # scroll position survives rebuilds via the scrollY argument).
@@ -172,12 +205,20 @@ func mountHomePage(
   # children, so an empty history collapses the section exactly like
   # the old builder that simply didn't create it).
   let hasRecent: Bool = state.playHistory.entries.length > 0
-  if let headerRaw: Int = findNodeInPage(world: world, pageId: homePageId, nodeId: "RecentlyPlayedHeader") {
+  if let headerRaw: Int = findNodeInPage(
+    world: world
+    pageId: homePageId
+    nodeId: "RecentlyPlayedHeader"
+  ) {
     let header: EntityId = id(v: headerRaw)
     let headerActive: Active = { value: hasRecent }
     componentSet(this: world.actives, entity: header, data: headerActive)
   }
-  if let stripRaw: Int = findNodeInPage(world: world, pageId: homePageId, nodeId: "RecentlyPlayedStrip") {
+  if let stripRaw: Int = findNodeInPage(
+    world: world
+    pageId: homePageId
+    nodeId: "RecentlyPlayedStrip"
+  ) {
     let strip: EntityId = id(v: stripRaw)
     let stripActive: Active = { value: hasRecent }
     componentSet(this: world.actives, entity: strip, data: stripActive)
@@ -216,7 +257,13 @@ func buildHomeWorld(
   let world: UiWorld = create()
   seedWorldThemeFrom(world: world, src: state.theme)  # #764: theme from AppState
   applyViewportExtent(world: world, viewport: viewport)
-  let page: EntityId = mountHomePage(world: world, scenes: scenes, state: state, scrollY: scrollY, viewport: viewport)
+  let page: EntityId = mountHomePage(
+    world: world
+    scenes: scenes
+    state: state
+    scrollY: scrollY
+    viewport: viewport
+  )
   let dock: EntityId = mountBottomDockOverlay(
     world: world
     activeTab: state.tab

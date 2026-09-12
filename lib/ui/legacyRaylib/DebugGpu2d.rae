@@ -30,7 +30,16 @@ func drawDebugHeartbeatGpu2d(debug: mod DebugSystem, didRealWork: view Bool) {
       debug.heartbeatX = -4.0
     }
   }
-  gpu2d.drawBox(x: debug.heartbeatX, y: 0.0, w: 4.0, h: 4.0, radius: 0.0, fill: 0xFFFFBF00, borderWidth: 0.0, border: 0x00000000)
+  gpu2d.drawBox(
+    x: debug.heartbeatX
+    y: 0.0
+    w: 4.0
+    h: 4.0
+    radius: 0.0
+    fill: 0xFFFFBF00
+    borderWidth: 0.0
+    border: 0x00000000
+  )
 }
 
 func drawDebugLabelsGpu2d(debug: view DebugSystem, font: view SdfFont) {
@@ -55,11 +64,27 @@ func drawDebugLabelsGpu2d(debug: view DebugSystem, font: view SdfFont) {
     memX = rightEdge - memW
   }
   let amber: Int = 0xFFFFBF00
-  gpu2dText.drawText(font: font, text: fpsText, x: fpsX, y: fpsY, sizePx: fontSize, color: amber)
-  gpu2dText.drawText(font: font, text: memText, x: memX, y: memY, sizePx: fontSize, color: amber)
+  gpu2dText.drawText(
+    font: font
+    text: fpsText
+    x: fpsX
+    y: fpsY
+    sizePx: fontSize
+    color: amber
+  )
+  gpu2dText.drawText(
+    font: font
+    text: memText
+    x: memX
+    y: memY
+    sizePx: fontSize
+    color: amber
+  )
   if debug.showInputOutlines {
     var lb: Int = 0
-    if gpu2d.pointerDown() { lb = 1 }
+    if gpu2d.pointerDown() {
+      lb = 1
+    }
     var rb: Int = 0
     var mb: Int = 0
     let buttons: Int = lb + rb + mb
@@ -71,11 +96,23 @@ func drawDebugLabelsGpu2d(debug: view DebugSystem, font: view SdfFont) {
       let buttonW: Float = buttonText.length().toFloat() * fontSize * 0.52
       buttonX = rightEdge - buttonW
     }
-    gpu2dText.drawText(font: font, text: buttonText, x: buttonX, y: buttonY, sizePx: fontSize, color: amber)
+    gpu2dText.drawText(
+      font: font
+      text: buttonText
+      x: buttonX
+      y: buttonY
+      sizePx: fontSize
+      color: amber
+    )
   }
 }
 
-func updateAndRenderDebugOverlayGpu2d(debug: mod DebugSystem, now: view Float64, didRealWork: view Bool, font: view SdfFont) pub {
+func updateAndRenderDebugOverlayGpu2d(
+  debug: mod DebugSystem
+  now: view Float64
+  didRealWork: view Bool
+  font: view SdfFont
+) pub {
   recordDebugFrame(debug: debug, now: now, didRealWork: didRealWork)
   if debug.showLabels {
     drawDebugLabelsGpu2d(debug: debug, font: font)

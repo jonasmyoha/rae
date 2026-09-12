@@ -1,15 +1,27 @@
-
 # #762: nested-field `mod` write-back MUST be reliable — it is THE state-access
 # pattern under the no-globals rule (docs/globals-and-app-ownership.md): main owns
 # one App tree and every mutation threads `mod app`/`mod world` down to the field.
 # This locks that guarantee: a 3-deep field through a mod param, a write-through
 # ref binding, whole-struct reassignment to a mod param, and multi-hop mod
 # threading, all writing back to the caller's App.
+type Slider {
+  value: Float
+  dragging: Bool
+}
 
-type Slider { value: Float, dragging: Bool }
-type Settings { slider: Slider, speed: Float }
-type Io { settings: Settings, count: Int }
-type App { io: Io }
+type Settings {
+  slider: Slider
+  speed: Float
+}
+
+type Io {
+  settings: Settings
+  count: Int
+}
+
+type App {
+  io: Io
+}
 
 # Mutate fields of a nested-struct mod param (the updateSlider shape).
 func updateSlider(s: mod Slider, value: view Float) {
@@ -23,12 +35,22 @@ func resetSlider(s: mod Slider) {
 }
 
 # Multi-hop: mod threaded through two function boundaries down to a scalar.
-func bumpCount(value: mod Int) { value = value + 1 }
-func viaIo(io: mod Io) { bumpCount(value: io.count) }
-func viaApp(app: mod App) { viaIo(io: app.io) }
+func bumpCount(value: mod Int) {
+  value = value + 1
+}
+
+func viaIo(io: mod Io) {
+  bumpCount(value: io.count)
+}
+
+func viaApp(app: mod App) {
+  viaIo(io: app.io)
+}
 
 func main() {
-  var app: App = { io: { settings: { slider: { value: 0.0, dragging: false }, speed: 1.0 }, count: 0 } }
+  var app: App = {
+    io: { settings: { slider: { value: 0.0, dragging: false }, speed: 1.0 }, count: 0 }
+  }
 
   # 1) 3-deep nested field (app.io.settings.slider) passed as mod, fields mutated
   updateSlider(s: app.io.settings.slider, value: 0.5)

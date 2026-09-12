@@ -39,14 +39,22 @@ func buildScene(objects: view Int) ret World3d {
   var i: Int = 0
   loop i < objects {
     let f: Float = i.toFloat()
-    let mat: Material3d = { baseColor: Vec3.create(x: 0.9, y: 0.3, z: 0.2), metallic: 0.5, roughness: 0.4, emission: noEmit, toon: false }
+    let mat: Material3d = {
+      baseColor: Vec3.create(x: 0.9, y: 0.3, z: 0.2)
+      metallic: 0.5
+      roughness: 0.4
+      emission: noEmit
+      toon: false
+    }
     # Rotation and non-unit scale on purpose: they force the full
     # T * Rz * Ry * Rx * S chain — five matrices and four multiplies per
     # object — rather than a translation-only fast path.
     let e: EntityId = world3dAddMeshInstance(
-      world: world, mesh: mesh, material: mat,
-      position: Vec3.create(x: f * 0.5, y: f * 0.25, z: 1.0),
-      rotation: Vec3.create(x: f * 0.1, y: f * 0.2, z: f * 0.3),
+      world: world
+      mesh: mesh
+      material: mat
+      position: Vec3.create(x: f * 0.5, y: f * 0.25, z: 1.0)
+      rotation: Vec3.create(x: f * 0.1, y: f * 0.2, z: f * 0.3)
       scale: Vec3.create(x: 1.5, y: 1.5, z: 1.5)
     )
     i = i + 1
@@ -80,12 +88,24 @@ func main() {
     # allocates once (lazy setup) is not a per-frame cost, and folding it
     # into the sample would either fail the test for the wrong reason or,
     # worse, hide a real per-object allocation behind a tolerance.
-    renderDeferredFrameWorld(renderer: renderer, world: world, camera: camera, light: light, aspect: 1.6)
+    renderDeferredFrameWorld(
+      renderer: renderer
+      world: world
+      camera: camera
+      light: light
+      aspect: 1.6
+    )
 
     let before: Int = rae_ext_rae_mem_alloc_total()
     var f: Int = 0
     loop f < frames {
-      renderDeferredFrameWorld(renderer: renderer, world: world, camera: camera, light: light, aspect: 1.6)
+      renderDeferredFrameWorld(
+        renderer: renderer
+        world: world
+        camera: camera
+        light: light
+        aspect: 1.6
+      )
       f = f + 1
     }
     let allocations: Int = rae_ext_rae_mem_alloc_total() - before

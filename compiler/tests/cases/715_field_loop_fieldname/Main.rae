@@ -4,9 +4,19 @@ open ecs/ComponentTable
 # #772: fieldName(binding) folds to the slot name String literal; a concrete
 # binding type filters to exactly that field; a filter matching no field
 # unrolls to nothing.
-type Rect { x: Int, y: Int }
-type Size { w: Int, h: Int }
-type Tag { on: Bool }
+type Rect {
+  x: Int
+  y: Int
+}
+
+type Size {
+  w: Int
+  h: Int
+}
+
+type Tag {
+  on: Bool
+}
 
 type World {
   rects: ComponentTable(Rect)
@@ -41,10 +51,7 @@ func tagNames(world: view World) ret String {
 }
 
 func main() {
-  var world: World = {
-    rects: ComponentTable.create(Rect)
-    sizes: ComponentTable.create(Size)
-  }
+  var world: World = { rects: ComponentTable.create(Rect), sizes: ComponentTable.create(Size) }
   let e: EntityId = { index: 2, generation: 0 }
   componentSet(this: world.rects, entity: e, data: Rect { x: 1, y: 1 })
   log("all: {names(world: world)}")

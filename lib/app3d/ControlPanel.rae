@@ -40,6 +40,7 @@ open ecs/ComponentTable
 # Fallback geometry, used when the caller does not override it. These are
 # points, matching ui_shell's logical-size convention.
 const panelButtonW: Float = 104.0
+
 const panelButtonH: Float = 34.0
 
 # Theme palette slots. Named here so a panel picks up an app's theme
@@ -50,6 +51,7 @@ const panelButtonH: Float = 34.0
 # imageTint) and paints anything else magenta. A theme may re-colour these
 # two; it may not rename them.
 const panelSlotIdle: String = "surfaceAlt"
+
 const panelSlotSelected: String = "accent"
 
 type ControlPanel {
@@ -72,17 +74,23 @@ type ControlPanel {
 }
 
 func panelStringAt(values: view List(String), index: view Int) ret String {
-  if let value: String = values.copyAt(index: index) { ret value }
+  if let value: String = values.copyAt(index: index) {
+    ret value
+  }
   ret ""
 }
 
 func panelIntAt(values: view List(Int), index: view Int) ret Int {
-  if let value: Int = values.copyAt(index: index) { ret value }
+  if let value: Int = values.copyAt(index: index) {
+    ret value
+  }
   ret -1
 }
 
 func panelEntityAt(values: view List(EntityId), index: view Int) ret EntityId {
-  if let value: EntityId = values.copyAt(index: index) { ret value }
+  if let value: EntityId = values.copyAt(index: index) {
+    ret value
+  }
   ret noEntity()
 }
 
@@ -108,8 +116,13 @@ func createControlPanel(hostNodeId: view String) pub ret ControlPanel {
 #
 # `group` 0 means independent; a positive group makes the button one of a
 # radio set.
-func addPanelButton(panel: mod ControlPanel, id: view String, label: view String,
-                    actionId: view String, group: view Int) pub {
+func addPanelButton(
+  panel: mod ControlPanel
+  id: view String
+  label: view String
+  actionId: view String
+  group: view Int
+) pub {
   let idList: mod List(String) => panel.ids
   let actionList: mod List(String) => panel.actionIds
   let groupList: mod List(Int) => panel.groups
@@ -141,7 +154,11 @@ func panelIndexOf(panel: view ControlPanel, id: view String) pub ret Int {
 # OpticalAlign centres TEXT within a box, which needs a box to centre
 # inside — collapsing them would centre the button within its parent
 # instead, which is the layout's job.
-func buildControlPanel(panel: mod ControlPanel, world: mod UiWorld, res: view Gpu2dUi) pub ret Bool {
+func buildControlPanel(
+  panel: mod ControlPanel
+  world: mod UiWorld
+  res: view Gpu2dUi
+) pub ret Bool {
   let host: EntityId = nodeEntityFor(world: world, nodeId: panel.hostNodeId)
   if isNone(this: host) {
     ret false
@@ -185,7 +202,10 @@ func buildControlPanel(panel: mod ControlPanel, world: mod UiWorld, res: view Gp
     }
     componentSet(this: world.onClicks, entity: buttonE, data: click)
 
-    let labelRect: Rect = { position: { x: 0.0, y: 0.0 }, size: { x: panel.buttonW, y: panel.buttonH } }
+    let labelRect: Rect = {
+      position: { x: 0.0, y: 0.0 }
+      size: { x: panel.buttonW, y: panel.buttonH }
+    }
     componentSet(this: world.rects, entity: labelE, data: labelRect)
     let text: Text = {
       text: "{panelStringAt(values: panel.selectedIds, index: i)}"
@@ -194,7 +214,9 @@ func buildControlPanel(panel: mod ControlPanel, world: mod UiWorld, res: view Gp
     }
     componentSet(this: world.texts, entity: labelE, data: text)
     let optical: OpticalAlign = {
-      enabled: true, centerX: true, centerY: true,
+      enabled: true
+      centerX: true
+      centerY: true
       bias: Vec2 { x: 0.0, y: 0.0 }
     }
     componentSet(this: world.opticalAligns, entity: labelE, data: optical)
@@ -236,8 +258,12 @@ func buildControlPanel(panel: mod ControlPanel, world: mod UiWorld, res: view Gp
   ret true
 }
 
-func setPanelButtonLabel(panel: view ControlPanel, world: mod UiWorld,
-                         id: view String, label: view String) pub {
+func setPanelButtonLabel(
+  panel: view ControlPanel
+  world: mod UiWorld
+  id: view String
+  label: view String
+) pub {
   let idx: Int = panelIndexOf(panel: panel, id: id)
   if idx < 0 {
     ret
@@ -257,8 +283,12 @@ func setPanelButtonLabel(panel: view ControlPanel, world: mod UiWorld,
 # way to know which one that was without tracking it is to set all of
 # them. That also makes the function idempotent, so a caller can drive it
 # from state every frame without accumulating highlights.
-func setPanelSelection(panel: mod ControlPanel, world: mod UiWorld,
-                       group: view Int, id: view String) pub {
+func setPanelSelection(
+  panel: mod ControlPanel
+  world: mod UiWorld
+  group: view Int
+  id: view String
+) pub {
   if group <= 0 {
     ret
   }
@@ -284,8 +314,12 @@ func setPanelSelection(panel: mod ControlPanel, world: mod UiWorld,
 }
 
 # Highlight a group-0 button as on/off — a toggle rather than a radio.
-func setPanelButtonOn(panel: view ControlPanel, world: mod UiWorld,
-                      id: view String, on: view Bool) pub {
+func setPanelButtonOn(
+  panel: view ControlPanel
+  world: mod UiWorld
+  id: view String
+  on: view Bool
+) pub {
   let idx: Int = panelIndexOf(panel: panel, id: id)
   if idx < 0 {
     ret

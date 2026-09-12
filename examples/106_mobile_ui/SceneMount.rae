@@ -25,10 +25,20 @@ func paintErrorBlock(world: mod UiWorld, entity: view EntityId, label: view Stri
   componentSet(this: world.shapes, entity: entity, data: shape)
 
   let txt: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: txt, w: 480.0, h: 32.0)
+  setRectFixed(
+    world: world
+    entity: txt
+    w: 480.0
+    h: 32.0
+  )
   let prefix: String = "Scene mount failed: "
   let msg: String = prefix.concat(other: label)
-  setText(world: world, entity: txt, text: msg, styleId: "primary")
+  setText(
+    world: world
+    entity: txt
+    text: msg
+    styleId: "primary"
+  )
 
   let kids: List(EntityId) = List.create(EntityId, cap: 1)
   kids.add(value: txt)
@@ -53,7 +63,9 @@ func mountOrError(
   )
   if isNone(this: result) {
     let label: String = sceneLabel
-    log("[scene-error] mount failed for {label} (entity {mountEntity.index}, scene.ok={scene.ok}, scene.errorMsg={scene.errorMsg})")
+    log(
+      "[scene-error] mount failed for {label} (entity {mountEntity.index}, scene.ok={scene.ok}, scene.errorMsg={scene.errorMsg})"
+    )
     paintErrorBlock(world: world, entity: mountEntity, label: label)
     ret mountEntity
   }
@@ -71,7 +83,12 @@ func buildSimpleSceneInstance(
   label: view String
 ) pub ret EntityId {
   let mount: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: mount, w: w, h: h)
+  setRectFixed(
+    world: world
+    entity: mount
+    w: w
+    h: h
+  )
   let noOverrides: List(SceneOverride) = emptyOverrides()
   let mounted: EntityId = mountOrError(
     world: world
@@ -111,9 +128,16 @@ func mountPageOrError(
   # Build a husk: same shape as the success path, plus the red error
   # block + PageRoot tag.
   let husk: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: husk, w: w, h: h)
+  setRectFixed(
+    world: world
+    entity: husk
+    w: w
+    h: h
+  )
   let label: String = sceneLabel
-  log("[scene-error] mount failed for page {pageId} (scene.ok={scene.ok}, scene.errorMsg={scene.errorMsg})")
+  log(
+    "[scene-error] mount failed for page {pageId} (scene.ok={scene.ok}, scene.errorMsg={scene.errorMsg})"
+  )
   paintErrorBlock(world: world, entity: husk, label: label)
   var copiedId: String = ""
   copiedId = copiedId.concat(other: pageId)

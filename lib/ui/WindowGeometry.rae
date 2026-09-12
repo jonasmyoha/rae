@@ -151,8 +151,7 @@ func writeWindowGeometry(g: mod WindowGeometry) {
 # reading it clears it — and the apps already read it to rebuild their layout.
 # A module that consumed it behind their back would make adding this feature
 # silently break resize handling, which is a rotten trade for one argument.
-func updateWindowGeometry(g: mod WindowGeometry, now: view Float64,
-                          resized: view Bool) {
+func updateWindowGeometry(g: mod WindowGeometry, now: view Float64, resized: view Bool) {
   if Gpu2d.windowMoved() or resized {
     g.dirty = true
     g.dirtyAt = now

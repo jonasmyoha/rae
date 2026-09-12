@@ -30,7 +30,6 @@ func rae_ext_rae_sys_read_file(path: String) unsafe extern ret String
 func rae_ext_rae_sys_write_file(path: String, content: String) unsafe extern ret Bool
 
 # ----- save ---------------------------------------------------------
-
 func boolStr(b: view Bool) ret String {
   if b {
     ret "true"
@@ -65,8 +64,8 @@ func saveAppState(path: view String, state: view AppState, playback: view Playba
     # as the start of `{expr}` interpolation, which then chokes on
     # the JSON body. `\u{007B}` / `\u{007D}` sidesteps that without
     # any runtime cost.
-    let openBrace: String = "\u{007B}"
-    let closeBrace: String = "\u{007D}"
+    let openBrace: String = "\{"
+    let closeBrace: String = "\}"
     let nl: String = "\n"
     let comma: String = ","
     let colon: String = ":"
@@ -79,16 +78,26 @@ func saveAppState(path: view String, state: view AppState, playback: view Playba
 
     var content: String = ""
     content = content.concat(other: openBrace).concat(other: nl)
-    content = content.concat(other: "  ").concat(other: q).concat(other: "currentAlbumStem").concat(other: q)
-    content = content.concat(other: colon).concat(other: " ").concat(other: q).concat(other: stemValue).concat(other: q)
+    content = content.concat(other: "  ").concat(other: q).concat(other: "currentAlbumStem").concat(
+      other: q
+    )
+    content = content.concat(other: colon).concat(other: " ").concat(other: q).concat(
+      other: stemValue
+    ).concat(other: q)
     content = content.concat(other: comma).concat(other: nl)
-    content = content.concat(other: "  ").concat(other: q).concat(other: "currentTrackIndex").concat(other: q)
+    content = content.concat(other: "  ").concat(other: q).concat(other: "currentTrackIndex").concat(
+      other: q
+    )
     content = content.concat(other: colon).concat(other: " ").concat(other: trackValue)
     content = content.concat(other: comma).concat(other: nl)
-    content = content.concat(other: "  ").concat(other: q).concat(other: "elapsedMs").concat(other: q)
+    content = content.concat(other: "  ").concat(other: q).concat(other: "elapsedMs").concat(
+      other: q
+    )
     content = content.concat(other: colon).concat(other: " ").concat(other: elapsedValue)
     content = content.concat(other: comma).concat(other: nl)
-    content = content.concat(other: "  ").concat(other: q).concat(other: "isPlaying").concat(other: q)
+    content = content.concat(other: "  ").concat(other: q).concat(other: "isPlaying").concat(
+      other: q
+    )
     content = content.concat(other: colon).concat(other: " ").concat(other: playingStr)
     content = content.concat(other: comma).concat(other: nl)
     content = content.concat(other: "  ").concat(other: q).concat(other: "tab").concat(other: q)
@@ -110,7 +119,9 @@ func saveAppState(path: view String, state: view AppState, playback: view Playba
     let visible: Screen = visibleScreen(state: state)
     let tabName: String = screenName(s: state.tab)
     let screenNameStr: String = screenName(s: visible)
-    log("[state] saved tab={tabName} (ord {tabOrdinal}) screen={screenNameStr} (ord {visibleOrdinal})")
+    log(
+      "[state] saved tab={tabName} (ord {tabOrdinal}) screen={screenNameStr} (ord {visibleOrdinal})"
+    )
   }
 }
 
@@ -118,13 +129,27 @@ func saveAppState(path: view String, state: view AppState, playback: view Playba
 # `[state] saved` log line so a glance at the terminal tells you
 # which page the user was on at save time.
 func screenName(s: view Screen) ret String {
-  if s is Screen.home {     ret "Home" }
-  if s is Screen.library {  ret "Library" }
-  if s is Screen.album {    ret "Album" }
-  if s is Screen.player {   ret "Player" }
-  if s is Screen.search {   ret "Search" }
-  if s is Screen.profile {  ret "Profile" }
-  if s is Screen.history {  ret "History" }
+  if s is Screen.home {
+    ret "Home"
+  }
+  if s is Screen.library {
+    ret "Library"
+  }
+  if s is Screen.album {
+    ret "Album"
+  }
+  if s is Screen.player {
+    ret "Player"
+  }
+  if s is Screen.search {
+    ret "Search"
+  }
+  if s is Screen.profile {
+    ret "Profile"
+  }
+  if s is Screen.history {
+    ret "History"
+  }
   ret "?"
 }
 
@@ -160,7 +185,10 @@ func restoreAppState(state: mod AppState, playback: mod PlaybackState, path: vie
     let stemIdx: Int = Json.field(doc: doc, this: root, key: stemKey)
     if stemIdx >= 0 {
       let empty: String = ""
-      let savedStem: String = Json.jsonString(this: Json.jsonValueAt(doc: doc, idx: stemIdx), fallback: empty)
+      let savedStem: String = Json.jsonString(
+        this: Json.jsonValueAt(doc: doc, idx: stemIdx)
+        fallback: empty
+      )
       if savedStem.length() > 0 {
         let albumIdx: Int = findAlbumIndex(albums: state.mediaLibrary.albums, stem: savedStem)
         if albumIdx >= 0 {
@@ -175,7 +203,10 @@ func restoreAppState(state: mod AppState, playback: mod PlaybackState, path: vie
     let trackKey: String = "currentTrackIndex"
     let trackIdx: Int = Json.field(doc: doc, this: root, key: trackKey)
     if trackIdx >= 0 {
-      var savedTrack: Int = Json.jsonInt(this: Json.jsonValueAt(doc: doc, idx: trackIdx), fallback: 0)
+      var savedTrack: Int = Json.jsonInt(
+        this: Json.jsonValueAt(doc: doc, idx: trackIdx)
+        fallback: 0
+      )
       let album: Album = activeAlbum(state: state)
       let n: Int = album.tracks.length
       if savedTrack < 0 {
@@ -202,7 +233,10 @@ func restoreAppState(state: mod AppState, playback: mod PlaybackState, path: vie
     let playingKey: String = "isPlaying"
     let playingFieldIdx: Int = Json.field(doc: doc, this: root, key: playingKey)
     if playingFieldIdx >= 0 {
-      playback.isPlaying = Json.jsonBool(this: Json.jsonValueAt(doc: doc, idx: playingFieldIdx), fallback: false)
+      playback.isPlaying = Json.jsonBool(
+        this: Json.jsonValueAt(doc: doc, idx: playingFieldIdx)
+        fallback: false
+      )
     }
 
     # Seed the "actually playing" pair from the restored snapshot so the
@@ -228,12 +262,17 @@ func restoreAppState(state: mod AppState, playback: mod PlaybackState, path: vie
     let tabKey: String = "tab"
     let tabFieldIdx: Int = Json.field(doc: doc, this: root, key: tabKey)
     if tabFieldIdx >= 0 {
-      let tabOrd: Int = Json.jsonInt(this: Json.jsonValueAt(doc: doc, idx: tabFieldIdx), fallback: 4)
+      let tabOrd: Int = Json.jsonInt(
+        this: Json.jsonValueAt(doc: doc, idx: tabFieldIdx)
+        fallback: 4
+      )
       state.tab = intToScreen(value: tabOrd)
     }
     # winX / winY are deliberately NOT read. Window geometry belongs to the
     # runtime now (runtime_gpu2d_platform.c), which persists it for every app.
     # Older state files still carry the keys; ignoring them is the migration.
-    log("[state] restored from {path}: stem={state.currentAlbumStem} track={state.currentTrackIndex} ms={(playback.elapsedSec * 1000.0).toInt()} playing={playback.isPlaying}")
+    log(
+      "[state] restored from {path}: stem={state.currentAlbumStem} track={state.currentTrackIndex} ms={(playback.elapsedSec * 1000.0).toInt()} playing={playback.isPlaying}"
+    )
   }
 }

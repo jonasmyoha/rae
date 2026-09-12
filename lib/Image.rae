@@ -13,9 +13,27 @@
 # Encode a packed-0xRRGGBB framebuffer (width*height Ints, row-major, top-down —
 # the same layout sdlUpdatePixels consumes) to a PNG file at `path`. The alpha
 # channel is written fully opaque. Returns false on failure.
-func nativeSavePng(path: view String, pixels: view Buffer(Int), width: Int, height: Int) unsafe extern("rae_ext_Image_savePng") ret Bool
-func savePng(path: view String, pixels: view Buffer(Int), width: copy Int, height: copy Int) ret Bool {
-  unsafe { ret nativeSavePng(path: path, pixels: pixels, width: width, height: height) }
+func nativeSavePng(
+  path: view String
+  pixels: view Buffer(Int)
+  width: Int
+  height: Int
+) unsafe extern("rae_ext_Image_savePng") ret Bool
+
+func savePng(
+  path: view String
+  pixels: view Buffer(Int)
+  width: copy Int
+  height: copy Int
+) ret Bool {
+  unsafe {
+    ret nativeSavePng(
+      path: path
+      pixels: pixels
+      width: width
+      height: height
+    )
+  }
 }
 
 # Decode a PNG file into a freshly allocated packed-Int framebuffer (width*height
@@ -25,7 +43,14 @@ func savePng(path: view String, pixels: view Buffer(Int), width: copy Int, heigh
 # Writes the decoded dimensions through the `mod Int` out-params. On failure the
 # returned buffer is empty and width is set to 0 — callers check `width > 0`. The
 # caller owns the returned buffer.
-func nativeLoadPng(path: view String, width: mod Int, height: mod Int) unsafe extern("rae_ext_Image_loadPng") ret Buffer(Int)
+func nativeLoadPng(
+  path: view String
+  width: mod Int
+  height: mod Int
+) unsafe extern("rae_ext_Image_loadPng") ret Buffer(Int)
+
 func loadPng(path: view String, width: mod Int, height: mod Int) ret Buffer(Int) {
-  unsafe { ret nativeLoadPng(path: path, width: width, height: height) }
+  unsafe {
+    ret nativeLoadPng(path: path, width: width, height: height)
+  }
 }

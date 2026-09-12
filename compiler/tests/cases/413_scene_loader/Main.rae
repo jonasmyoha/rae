@@ -26,7 +26,9 @@ func sampleScene() ret String {
   s = s.concat(other: "\"Children\":[\"TopBar\",\"AlbumHero\",\"PlayButton\"]")
   s = s.concat(other: "\},")
   s = s.concat(other: "\"TopBar\":\{")
-  s = s.concat(other: "\"Layout\":\{\"type\":\"Horizontal\",\"gap\":12,\"alignCross\":\"Center\"\},")
+  s = s.concat(
+    other: "\"Layout\":\{\"type\":\"Horizontal\",\"gap\":12,\"alignCross\":\"Center\"\},"
+  )
   s = s.concat(other: "\"Children\":[\"BackButton\"]")
   s = s.concat(other: "\},")
   s = s.concat(other: "\"BackButton\":\{")
@@ -38,7 +40,9 @@ func sampleScene() ret String {
   s = s.concat(other: "\"Active\":\{\"value\":true\}")
   s = s.concat(other: "\},")
   s = s.concat(other: "\"PlayButton\":\{")
-  s = s.concat(other: "\"Shape\":\{\"kind\":\"RoundedRect\",\"radius\":24,\"fill\":\{\"r\":0,\"g\":0,\"b\":0,\"a\":255\}\},")
+  s = s.concat(
+    other: "\"Shape\":\{\"kind\":\"RoundedRect\",\"radius\":24,\"fill\":\{\"r\":0,\"g\":0,\"b\":0,\"a\":255\}\},"
+  )
   s = s.concat(other: "\"Button\":\{\"role\":\"primary\"\},")
   s = s.concat(other: "\"OnClick\":\{\"actionId\":\"music.play\"\}")
   s = s.concat(other: "\}")
@@ -118,12 +122,16 @@ func main() {
   log("bad version ok={badScene2.ok} msg={badScene2.errorMsg}")
 
   var bad3: String = ""
-  bad3 = bad3.concat(other: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Missing\",\"nodes\":\{\"Other\":\{\}\}\}")
+  bad3 = bad3.concat(
+    other: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Missing\",\"nodes\":\{\"Other\":\{\}\}\}"
+  )
   let badScene3: Scene = parseScene(source: bad3)
   log("bad root ok={badScene3.ok} msg={badScene3.errorMsg}")
 
   var bad4: String = ""
-  bad4 = bad4.concat(other: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"R\",\"nodes\":\{\"R\":\{\"Children\":[\"Ghost\"]\}\}\}")
+  bad4 = bad4.concat(
+    other: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"R\",\"nodes\":\{\"R\":\{\"Children\":[\"Ghost\"]\}\}\}"
+  )
   let badScene4: Scene = parseScene(source: bad4)
   log("bad child ok={badScene4.ok} msg={badScene4.errorMsg}")
 }

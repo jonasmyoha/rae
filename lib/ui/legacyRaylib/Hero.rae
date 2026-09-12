@@ -115,7 +115,11 @@ func findHeroEntity(world: view UiWorld, key: view String) pub ret EntityId {
 # alone returns the first match in the table, which is unstable
 # across screen changes; this scoped lookup is what hero capture
 # uses to pick the right entity for the source vs target page.
-func findHeroEntityOnPage(world: view UiWorld, pageId: view String, key: view String) pub ret EntityId {
+func findHeroEntityOnPage(
+  world: view UiWorld
+  pageId: view String
+  key: view String
+) pub ret EntityId {
   let n: Int = componentCount(this: world.heroWidgets)
   var i: Int = 0
   loop i < n {
@@ -140,12 +144,21 @@ func captureHeroSource(anim: mod HeroAnim, world: view UiWorld, key: view String
 # Page-scoped source capture — picks the hero whose owning PageRoot
 # matches `pageId`, then samples its WorldTransform / ComputedRect.
 # Returns `false` when no hero with that key lives on that page.
-func captureHeroSourceOnPage(anim: mod HeroAnim, world: view UiWorld, pageId: view String, key: view String) pub ret Bool {
+func captureHeroSourceOnPage(
+  anim: mod HeroAnim
+  world: view UiWorld
+  pageId: view String
+  key: view String
+) pub ret Bool {
   let entity: EntityId = findHeroEntityOnPage(world: world, pageId: pageId, key: key)
   ret captureHeroSourceFromEntity(anim: anim, world: world, entity: entity)
 }
 
-func captureHeroSourceFromEntity(anim: mod HeroAnim, world: view UiWorld, entity: view EntityId) ret Bool {
+func captureHeroSourceFromEntity(
+  anim: mod HeroAnim
+  world: view UiWorld
+  entity: view EntityId
+) ret Bool {
   if isNone(this: entity) {
     ret false
   }
@@ -183,12 +196,21 @@ func captureHeroTarget(anim: mod HeroAnim, world: view UiWorld, key: view String
 }
 
 # Page-scoped target capture — symmetric with `captureHeroSourceOnPage`.
-func captureHeroTargetOnPage(anim: mod HeroAnim, world: view UiWorld, pageId: view String, key: view String) pub ret Bool {
+func captureHeroTargetOnPage(
+  anim: mod HeroAnim
+  world: view UiWorld
+  pageId: view String
+  key: view String
+) pub ret Bool {
   let entity: EntityId = findHeroEntityOnPage(world: world, pageId: pageId, key: key)
   ret captureHeroTargetFromEntity(anim: anim, world: world, entity: entity)
 }
 
-func captureHeroTargetFromEntity(anim: mod HeroAnim, world: view UiWorld, entity: view EntityId) ret Bool {
+func captureHeroTargetFromEntity(
+  anim: mod HeroAnim
+  world: view UiWorld
+  entity: view EntityId
+) ret Bool {
   if isNone(this: entity) {
     ret false
   }
@@ -231,7 +253,12 @@ func captureHeroTargetFromEntity(anim: mod HeroAnim, world: view UiWorld, entity
   ret true
 }
 
-func startHeroTransition(anim: mod HeroAnim, key: own String, durationSec: view Float, now: view Float64) pub {
+func startHeroTransition(
+  anim: mod HeroAnim
+  key: own String
+  durationSec: view Float
+  now: view Float64
+) pub {
   anim.active = true
   anim.key = key
   anim.startTime = now
@@ -253,7 +280,12 @@ func setHeroVisible(world: mod UiWorld, key: view String, visible: view Bool) pu
 # under the given `pageId` only. With multiple pages mounted, two
 # hero entities can share the same key (e.g. album page + now-playing
 # page both have the rebound cover); this picks the right one.
-func setHeroVisibleOnPage(world: mod UiWorld, pageId: view String, key: view String, visible: view Bool) pub {
+func setHeroVisibleOnPage(
+  world: mod UiWorld
+  pageId: view String
+  key: view String
+  visible: view Bool
+) pub {
   let entity: EntityId = findHeroEntityOnPage(world: world, pageId: pageId, key: key)
   setHeroVisibleForEntity(world: world, entity: entity, visible: visible)
 }
@@ -436,12 +468,7 @@ func renderHeroOverlay(anim: view HeroAnim, reg: view TextureRegistry, now: view
     let offX: Float = (w - drawW) / 2.0
     let offY: Float = (h - drawH) / 2.0
 
-    let tint: Color = {
-      r: anim.tintR
-      g: anim.tintG
-      b: anim.tintB
-      a: anim.tintA
-    }
+    let tint: Color = { r: anim.tintR, g: anim.tintG, b: anim.tintB, a: anim.tintA }
 
     # Corner-radius lerp. Same eased `t` as the rect, so the radius
     # tracks the size — a 12px library tile growing into a 360px album

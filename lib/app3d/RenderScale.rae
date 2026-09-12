@@ -17,22 +17,32 @@ import Profile
 
 # Push the render scale to the deferred renderer (#530). C clamps to [0.25, 1.0].
 func nativeSetRenderScale(s: Float64) unsafe extern("rae_gb_set_render_scale")
+
 func setRenderScale(s: copy Float64) {
-  unsafe { nativeSetRenderScale(s: s) }
+  unsafe {
+    nativeSetRenderScale(s: s)
+  }
 }
 
 # OS thermal pressure (Apple): 0 nominal, 1 fair, 2 serious, 3 critical; 0 else.
 func nativeThermalState() unsafe extern("rae_ext_thermalState") ret Int
+
 func thermalState() ret Int {
-  unsafe { ret nativeThermalState() }
+  unsafe {
+    ret nativeThermalState()
+  }
 }
 
 # Scale ceiling for the current OS thermal state — proactively cap resolution
 # BEFORE frames drop, which is the whole point of reading thermalState: reacting
 # only to dropped frames means the device is already hot.
 func thermalCeiling(therm: view Int) ret Float {
-  if therm >= 3 { ret 0.5 }
-  if therm >= 2 { ret 0.7 }
+  if therm >= 3 {
+    ret 0.5
+  }
+  if therm >= 2 {
+    ret 0.7
+  }
   ret 1.0
 }
 
@@ -45,28 +55,39 @@ type RenderScaleController {
   scale: Float
   minScale: Float
   step: Float
-  capFps: Float          # 60 normally; 30 = bottom rung frame cap
-  overBudgetSec: Float    # a frame slower than this counts as "missed"
-  overFrames: Int         # consecutive missed frames
-  goodFrames: Int         # consecutive good frames
-  cooldown: Int           # frames to wait after a change (anti-oscillation)
+  capFps: Float  # 60 normally; 30 = bottom rung frame cap
+  overBudgetSec: Float  # a frame slower than this counts as "missed"
+  overFrames: Int  # consecutive missed frames
+  goodFrames: Int  # consecutive good frames
+  cooldown: Int  # frames to wait after a change (anti-oscillation)
 }
 
 func createRenderScaleController(targetFps: copy Float) pub ret RenderScaleController {
   var fps: Float = targetFps
-  if fps < 1.0 { fps = 60.0 }
+  if fps < 1.0 {
+    fps = 60.0
+  }
   # Missed = 25% over the target period (e.g. >20.8ms for 60fps) — clearly not
   # holding the rate, not just jitter.
   ret RenderScaleController {
-    scale: 1.0, minScale: 0.5, step: 0.1, capFps: 60.0,
-    overBudgetSec: 1.25 / fps,
-    overFrames: 0, goodFrames: 0, cooldown: 0
+    scale: 1.0
+    minScale: 0.5
+    step: 0.1
+    capFps: 60.0
+    overBudgetSec: 1.25 / fps
+    overFrames: 0
+    goodFrames: 0
+    cooldown: 0
   }
 }
 
 # Feed one frame's dt (seconds). Walks the ladder in place: drop fast after 4
 # missed frames, restore one rung after ~3s good, 30-frame cooldown between moves.
-func updateRenderScale(drs: mod RenderScaleController, deltaTime: copy Float, profiler: mod Profiler) pub {
+func updateRenderScale(
+  drs: mod RenderScaleController
+  deltaTime: copy Float
+  profiler: mod Profiler
+) pub {
   unsafe {
     # Proactive OS-thermal ceiling: snap the scale down (and force the 30fps cap at
     # critical) the moment the OS reports heat, without waiting for missed frames.
@@ -77,12 +98,22 @@ func updateRenderScale(drs: mod RenderScaleController, deltaTime: copy Float, pr
       setRenderScale(s: drs.scale as Float64)
       drs.cooldown = 30
     }
-    if therm >= 3 { drs.capFps = 30.0 }
+    if therm >= 3 {
+      drs.capFps = 30.0
+    }
 
     # Surface the current tier in profile captures: render.scale (percent), the
     # frame cap, and the OS thermal state, plotted alongside fps / per-pass GPU ms.
-    Profile.counter(profiler: profiler, name: "render.scale", value: rae_float_to_int(f: drs.scale * 100.0))
-    Profile.counter(profiler: profiler, name: "render.capFps", value: rae_float_to_int(f: drs.capFps))
+    Profile.counter(
+      profiler: profiler
+      name: "render.scale"
+      value: rae_float_to_int(f: drs.scale * 100.0)
+    )
+    Profile.counter(
+      profiler: profiler
+      name: "render.capFps"
+      value: rae_float_to_int(f: drs.capFps)
+    )
     Profile.counter(profiler: profiler, name: "thermal.state", value: therm)
 
     if deltaTime > drs.overBudgetSec {
@@ -99,23 +130,27 @@ func updateRenderScale(drs: mod RenderScaleController, deltaTime: copy Float, pr
     if drs.overFrames >= 4 {
       if drs.scale > drs.minScale {
         drs.scale = drs.scale - drs.step
-        if drs.scale < drs.minScale { drs.scale = drs.minScale }
+        if drs.scale < drs.minScale {
+          drs.scale = drs.minScale
+        }
         setRenderScale(s: drs.scale as Float64)
         drs.cooldown = 30
         drs.overFrames = 0
       } else if drs.capFps > 30.0 {
-        drs.capFps = 30.0            # bottom rung: cap to 30
+        drs.capFps = 30.0  # bottom rung: cap to 30
         drs.cooldown = 30
         drs.overFrames = 0
       }
     } else if drs.goodFrames >= 180 {
       if drs.capFps < 60.0 and therm < 3 {
-        drs.capFps = 60.0            # restore the rate before the resolution
+        drs.capFps = 60.0  # restore the rate before the resolution
         drs.cooldown = 30
         drs.goodFrames = 0
       } else if drs.scale < ceiling {
         drs.scale = drs.scale + drs.step
-        if drs.scale > ceiling { drs.scale = ceiling }
+        if drs.scale > ceiling {
+          drs.scale = ceiling
+        }
         setRenderScale(s: drs.scale as Float64)
         drs.cooldown = 30
         drs.goodFrames = 0
@@ -131,8 +166,12 @@ func updateRenderScale(drs: mod RenderScaleController, deltaTime: copy Float, pr
 # stays fixed so the lighting sampler is untouched; the shadow pass reallocates
 # only when this value changes.
 func drsShadowRes(drs: view RenderScaleController) pub ret Int {
-  if drs.scale >= 0.85 { ret 2048 }
-  if drs.scale >= 0.65 { ret 1536 }
+  if drs.scale >= 0.85 {
+    ret 2048
+  }
+  if drs.scale >= 0.65 {
+    ret 1536
+  }
   ret 1024
 }
 
@@ -141,7 +180,9 @@ func drsShadowRes(drs: view RenderScaleController) pub ret Int {
 # end of the render branch with the frame's start time.
 func capFrameSleep(drs: view RenderScaleController, frameStartSec: copy Float64) pub {
   unsafe {
-    if drs.capFps >= 60.0 { ret }
+    if drs.capFps >= 60.0 {
+      ret
+    }
     let period: Float = 1.0 / drs.capFps
     let elapsed: Float = (Gpu2d.nowSeconds() - frameStartSec) as Float
     if elapsed < period {

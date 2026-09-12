@@ -66,7 +66,11 @@ func findHeroEntity(world: view UiWorld, key: view String) pub ret EntityId {
   ret noEntity()
 }
 
-func findHeroEntityOnPage(world: view UiWorld, pageId: view String, key: view String) pub ret EntityId {
+func findHeroEntityOnPage(
+  world: view UiWorld
+  pageId: view String
+  key: view String
+) pub ret EntityId {
   let n: Int = componentCount(this: world.heroWidgets)
   var i: Int = 0
   loop i < n {
@@ -88,15 +92,30 @@ func captureHeroSource(anim: mod HeroAnim, world: view UiWorld, key: view String
   ret captureHeroSourceFromEntity(anim: anim, world: world, entity: entity)
 }
 
-func captureHeroSourceOnPage(anim: mod HeroAnim, world: view UiWorld, pageId: view String, key: view String) pub ret Bool {
+func captureHeroSourceOnPage(
+  anim: mod HeroAnim
+  world: view UiWorld
+  pageId: view String
+  key: view String
+) pub ret Bool {
   let entity: EntityId = findHeroEntityOnPage(world: world, pageId: pageId, key: key)
   ret captureHeroSourceFromEntity(anim: anim, world: world, entity: entity)
 }
 
-func captureHeroSourceFromEntity(anim: mod HeroAnim, world: view UiWorld, entity: view EntityId) ret Bool {
-  if isNone(this: entity) { ret false }
-  if componentHas(this: world.worldTransforms, entity: entity) is false { ret false }
-  if componentHas(this: world.computedRects, entity: entity) is false { ret false }
+func captureHeroSourceFromEntity(
+  anim: mod HeroAnim
+  world: view UiWorld
+  entity: view EntityId
+) ret Bool {
+  if isNone(this: entity) {
+    ret false
+  }
+  if componentHas(this: world.worldTransforms, entity: entity) is false {
+    ret false
+  }
+  if componentHas(this: world.computedRects, entity: entity) is false {
+    ret false
+  }
   let wt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: entity)
   let cr: ComputedRect = componentGet(this: world.computedRects, entity: entity)
   anim.srcX = wt.position.x
@@ -124,15 +143,30 @@ func captureHeroTarget(anim: mod HeroAnim, world: view UiWorld, key: view String
   ret captureHeroTargetFromEntity(anim: anim, world: world, entity: entity)
 }
 
-func captureHeroTargetOnPage(anim: mod HeroAnim, world: view UiWorld, pageId: view String, key: view String) pub ret Bool {
+func captureHeroTargetOnPage(
+  anim: mod HeroAnim
+  world: view UiWorld
+  pageId: view String
+  key: view String
+) pub ret Bool {
   let entity: EntityId = findHeroEntityOnPage(world: world, pageId: pageId, key: key)
   ret captureHeroTargetFromEntity(anim: anim, world: world, entity: entity)
 }
 
-func captureHeroTargetFromEntity(anim: mod HeroAnim, world: view UiWorld, entity: view EntityId) ret Bool {
-  if isNone(this: entity) { ret false }
-  if componentHas(this: world.worldTransforms, entity: entity) is false { ret false }
-  if componentHas(this: world.computedRects, entity: entity) is false { ret false }
+func captureHeroTargetFromEntity(
+  anim: mod HeroAnim
+  world: view UiWorld
+  entity: view EntityId
+) ret Bool {
+  if isNone(this: entity) {
+    ret false
+  }
+  if componentHas(this: world.worldTransforms, entity: entity) is false {
+    ret false
+  }
+  if componentHas(this: world.computedRects, entity: entity) is false {
+    ret false
+  }
   if anim.textureKey.length() > 0 {
     if componentHas(this: world.sprites, entity: entity) {
       let sp: view Sprite => componentView(this: world.sprites, entity: entity)
@@ -155,7 +189,12 @@ func captureHeroTargetFromEntity(anim: mod HeroAnim, world: view UiWorld, entity
   ret true
 }
 
-func startHeroTransition(anim: mod HeroAnim, key: own String, durationSec: view Float, now: view Float64) pub {
+func startHeroTransition(
+  anim: mod HeroAnim
+  key: own String
+  durationSec: view Float
+  now: view Float64
+) pub {
   anim.active = true
   anim.key = key
   anim.startTime = now
@@ -167,13 +206,20 @@ func setHeroVisible(world: mod UiWorld, key: view String, visible: view Bool) pu
   setHeroVisibleForEntity(world: world, entity: entity, visible: visible)
 }
 
-func setHeroVisibleOnPage(world: mod UiWorld, pageId: view String, key: view String, visible: view Bool) pub {
+func setHeroVisibleOnPage(
+  world: mod UiWorld
+  pageId: view String
+  key: view String
+  visible: view Bool
+) pub {
   let entity: EntityId = findHeroEntityOnPage(world: world, pageId: pageId, key: key)
   setHeroVisibleForEntity(world: world, entity: entity, visible: visible)
 }
 
 func setHeroVisibleForEntity(world: mod UiWorld, entity: view EntityId, visible: view Bool) {
-  if isNone(this: entity) { ret }
+  if isNone(this: entity) {
+    ret
+  }
   if componentHas(this: world.transforms, entity: entity) {
     let fx: mod TransformFx => componentMod(this: world.transforms, entity: entity)
     fx.visible = visible

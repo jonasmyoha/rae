@@ -7,73 +7,119 @@ open gpu/GpuResources
 open gpu/GpuLifetime
 open gpu/GpuRender
 
-func noBufferId() ret BufferId { ret BufferId { managerTag: 0, slot: 0 - 1, generation: 0 } }
-func noTextureId() ret TextureId { ret TextureId { managerTag: 0, slot: 0 - 1, generation: 0 } }
-func noTextureViewId() ret TextureViewId { ret TextureViewId { managerTag: 0, slot: 0 - 1, generation: 0 } }
-func noSamplerId() ret SamplerId { ret SamplerId { managerTag: 0, slot: 0 - 1, generation: 0 } }
-func noPipelineId() ret PipelineId { ret PipelineId { managerTag: 0, slot: 0 - 1, generation: 0 } }
-func noBindGroupId() ret BindGroupId { ret BindGroupId { managerTag: 0, slot: 0 - 1, generation: 0 } }
-func noRenderPipelineId() ret RenderPipelineId { ret RenderPipelineId { managerTag: 0, slot: 0 - 1, generation: 0 } }
-func noExternalId() ret ExternalId { ret ExternalId { managerTag: 0, slot: 0 - 1, generation: 0 } }
-func noReadbackId() ret ReadbackId { ret ReadbackId { managerTag: 0, slot: 0 - 1, generation: 0 } }
-func noSubmissionId() ret SubmissionId { ret SubmissionId { managerTag: 0, slot: 0 - 1, generation: 0 } }
+func noBufferId() ret BufferId {
+  ret BufferId { managerTag: 0, slot: 0 - 1, generation: 0 }
+}
+
+func noTextureId() ret TextureId {
+  ret TextureId { managerTag: 0, slot: 0 - 1, generation: 0 }
+}
+
+func noTextureViewId() ret TextureViewId {
+  ret TextureViewId { managerTag: 0, slot: 0 - 1, generation: 0 }
+}
+
+func noSamplerId() ret SamplerId {
+  ret SamplerId { managerTag: 0, slot: 0 - 1, generation: 0 }
+}
+
+func noPipelineId() ret PipelineId {
+  ret PipelineId { managerTag: 0, slot: 0 - 1, generation: 0 }
+}
+
+func noBindGroupId() ret BindGroupId {
+  ret BindGroupId { managerTag: 0, slot: 0 - 1, generation: 0 }
+}
+
+func noRenderPipelineId() ret RenderPipelineId {
+  ret RenderPipelineId { managerTag: 0, slot: 0 - 1, generation: 0 }
+}
+
+func noExternalId() ret ExternalId {
+  ret ExternalId { managerTag: 0, slot: 0 - 1, generation: 0 }
+}
+
+func noReadbackId() ret ReadbackId {
+  ret ReadbackId { managerTag: 0, slot: 0 - 1, generation: 0 }
+}
+
+func noSubmissionId() ret SubmissionId {
+  ret SubmissionId { managerTag: 0, slot: 0 - 1, generation: 0 }
+}
 
 func fillBufferIds(count: view Int) ret List(BufferId) {
   let list: List(BufferId) = List.create(BufferId, cap: count)
-  loop var i: Int = 0, i < count, ++i { list.add(value: noBufferId()) }
+  loop var i: Int = 0, i < count, ++i {
+    list.add(value: noBufferId())
+  }
   ret list
 }
 
 func fillTextureIds(count: view Int) ret List(TextureId) {
   let list: List(TextureId) = List.create(TextureId, cap: count)
-  loop var i: Int = 0, i < count, ++i { list.add(value: noTextureId()) }
+  loop var i: Int = 0, i < count, ++i {
+    list.add(value: noTextureId())
+  }
   ret list
 }
 
 func fillTextureViewIds(count: view Int) ret List(TextureViewId) {
   let list: List(TextureViewId) = List.create(TextureViewId, cap: count)
-  loop var i: Int = 0, i < count, ++i { list.add(value: noTextureViewId()) }
+  loop var i: Int = 0, i < count, ++i {
+    list.add(value: noTextureViewId())
+  }
   ret list
 }
 
 func fillBindGroupIds(count: view Int) ret List(BindGroupId) {
   let list: List(BindGroupId) = List.create(BindGroupId, cap: count)
-  loop var i: Int = 0, i < count, ++i { list.add(value: noBindGroupId()) }
+  loop var i: Int = 0, i < count, ++i {
+    list.add(value: noBindGroupId())
+  }
   ret list
 }
 
 func fillReadbackIds(count: view Int) ret List(ReadbackId) {
   let list: List(ReadbackId) = List.create(ReadbackId, cap: count)
-  loop var i: Int = 0, i < count, ++i { list.add(value: noReadbackId()) }
+  loop var i: Int = 0, i < count, ++i {
+    list.add(value: noReadbackId())
+  }
   ret list
 }
 
 # ----- retire helpers: retire every valid ID in a list and blank it ---------
-
 func retireBufferIds(resources: mod GpuResources, list: mod List(BufferId)) {
   loop var i: Int = 0, i < list.length, ++i {
-    if let id: BufferId = list.copyAt(index: i) { retireBuffer(resources: resources, id: id) }
+    if let id: BufferId = list.copyAt(index: i) {
+      retireBuffer(resources: resources, id: id)
+    }
     list.set(index: i, value: noBufferId())
   }
 }
 
 func retireTextureIds(resources: mod GpuResources, list: mod List(TextureId)) {
   loop var i: Int = 0, i < list.length, ++i {
-    if let id: TextureId = list.copyAt(index: i) { retireTexture(resources: resources, id: id) }
+    if let id: TextureId = list.copyAt(index: i) {
+      retireTexture(resources: resources, id: id)
+    }
     list.set(index: i, value: noTextureId())
   }
 }
 
 func retireTextureViewIds(resources: mod GpuResources, list: mod List(TextureViewId)) {
   loop var i: Int = 0, i < list.length, ++i {
-    if let id: TextureViewId = list.copyAt(index: i) { retireTextureView(resources: resources, id: id) }
+    if let id: TextureViewId = list.copyAt(index: i) {
+      retireTextureView(resources: resources, id: id)
+    }
     list.set(index: i, value: noTextureViewId())
   }
 }
 
 func retireBindGroupIds(resources: mod GpuResources, list: mod List(BindGroupId)) {
   loop var i: Int = 0, i < list.length, ++i {
-    if let id: BindGroupId = list.copyAt(index: i) { retireBindGroup(resources: resources, id: id) }
+    if let id: BindGroupId = list.copyAt(index: i) {
+      retireBindGroup(resources: resources, id: id)
+    }
     list.set(index: i, value: noBindGroupId())
   }
 }
@@ -81,8 +127,11 @@ func retireBindGroupIds(resources: mod GpuResources, list: mod List(BindGroupId)
 # ----- in-flight submissions of one consumer --------------------------------
 # A consumer keeps the SubmissionIds it submitted so completed ones are retired
 # (dropping their pins) and shutdown can drain them without blocking a frame.
-
-func trackSubmission(inFlight: mod List(SubmissionId), resources: mod GpuResources, recording: mod Recording) ret opt SubmissionId {
+func trackSubmission(
+  inFlight: mod List(SubmissionId)
+  resources: mod GpuResources
+  recording: mod Recording
+) ret opt SubmissionId {
   if let id: SubmissionId = submit(resources: resources, recording: recording) {
     inFlight.add(value: id)
     ret id
@@ -95,9 +144,17 @@ func pollSubmissions(inFlight: mod List(SubmissionId), resources: mod GpuResourc
   loop i < inFlight.length {
     var done: Bool = true
     if let id: SubmissionId = inFlight.copyAt(index: i) {
-      if pollSubmission(resources: resources, id: id) is 0 { done = false } else { retireSubmission(resources: resources, id: id) }
+      if pollSubmission(resources: resources, id: id) is 0 {
+        done = false
+      } else {
+        retireSubmission(resources: resources, id: id)
+      }
     }
-    if done { inFlight.removeAt(index: i) } else { i = i + 1 }
+    if done {
+      inFlight.removeAt(index: i)
+    } else {
+      i = i + 1
+    }
   }
 }
 

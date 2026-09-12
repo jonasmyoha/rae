@@ -26,8 +26,8 @@ open Sky
 func referenceHemisphere(ambSky: view Vec3, ambGround: view Vec3, nz: view Float) ret Vec3 {
   let t: Float = nz * 0.5 + 0.5
   ret Vec3.create(
-    x: ambGround.x + (ambSky.x - ambGround.x) * t,
-    y: ambGround.y + (ambSky.y - ambGround.y) * t,
+    x: ambGround.x + (ambSky.x - ambGround.x) * t
+    y: ambGround.y + (ambSky.y - ambGround.y) * t
     z: ambGround.z + (ambSky.z - ambGround.z) * t
   )
 }
@@ -60,7 +60,9 @@ func main() {
   zs.add(value: 0.0 - 0.37)
   loop i < zs.length {
     var z: Float = 0.0
-    if let value: Float = zs.copyAt(index: i) { z = value }
+    if let value: Float = zs.copyAt(index: i) {
+      z = value
+    }
     let n: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: z)
     let got: Vec3 = irradiance(sky: s, normal: n)
     let want: Vec3 = referenceHemisphere(ambSky: ambSky, ambGround: ambGround, nz: z)

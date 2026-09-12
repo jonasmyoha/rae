@@ -57,7 +57,10 @@ func main() {
   check(label: "signal path derived", ok: startsWith(text: signalPath(), prefix: "{dir}/"))
   check(label: "status path derived", ok: startsWith(text: buildStatusPath(), prefix: "{dir}/"))
   check(label: "generation path derived", ok: startsWith(text: generationPath(), prefix: "{dir}/"))
-  check(label: "app state path derived", ok: startsWith(text: statePathFor(appId: "demo"), prefix: "{dir}/"))
+  check(
+    label: "app state path derived"
+    ok: startsWith(text: statePathFor(appId: "demo"), prefix: "{dir}/")
+  )
 
   # The file names themselves are the wire contract with the supervisor,
   # which writes them from C. A rename on either side silently stops the
