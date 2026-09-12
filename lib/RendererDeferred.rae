@@ -41,6 +41,8 @@ open GbufferInspector
 open GbufferPasses
 open GbufferFullscreen
 open TransparentForward
+open GbufferUnderwater
+open RendererDeferredGraph
 open Sky
 open gpu/GpuResources
 open gpu/GpuLifetime
@@ -63,6 +65,7 @@ enum RenderTag {
   shadow
   transparentForward
   waterFft
+  underwater
 }
 
 # writes surface attributes, no lighting
@@ -76,6 +79,7 @@ enum RenderTag {
 # sun cascade depth (#382); lighting reads it
 # snapshot opaque radiance, then alpha-blend transparents into it (#842/#843)
 # compute: the FFT ocean cascades the water surface samples (#831); app-dispatched
+# underwater tint/fog over the composed lit frame while the camera is submerged (#855)
 type DeferredRenderer {
   graph: RenderGraph
   gbufferPass: Int
@@ -111,6 +115,10 @@ type DeferredRenderer {
   gpuResources: opt GpuResources
   # #907: the 2D box pass the UI-overlay present flushes with (its own manager).
   canvas: Gpu2dCanvas
+  # The underwater pass's per-frame parameters (#855): the water system that
+  # owns the bodies decides (water/Underwater.rae) and sets them; inactive
+  # by default, so a frame without water pays nothing.
+  underwater: UnderwaterParams
 }
 
 # The Rae-side deferred-pass caches, aggregated. Fields hold each pass's "have I
@@ -125,6 +133,7 @@ type RenderPasses {
   inspect: ViewPassCache
   gbuffer: GbufferCache
   transparent: TransparentPassCache
+  underwater: UnderwaterPassCache
 }
 
 func createRenderPasses() ret RenderPasses {
@@ -138,6 +147,7 @@ func createRenderPasses() ret RenderPasses {
       inspect: createViewPassCache()
       gbuffer: createGbufferCache()
       transparent: createTransparentPassCache(capacity: 256)
+      underwater: createUnderwaterPassCache()
     }
   }
 }
@@ -216,6 +226,7 @@ func shutdownDeferredRenderer(renderer: mod DeferredRenderer) pub {
     )
     inspectorShutdown(cache: renderer.passes.inspect, resources: resources)
     transparentShutdown(cache: renderer.passes.transparent, resources: resources)
+    underwaterShutdown(cache: renderer.passes.underwater, resources: resources)
     gbufferShutdown(cache: renderer.passes.gbuffer, resources: resources)
     terrainShutdown(cache: renderer.passes.gbuffer, resources: resources)
     meshStoreShutdown(store: renderer.passes.gbuffer.meshes, resources: resources)
@@ -225,485 +236,8 @@ func shutdownDeferredRenderer(renderer: mod DeferredRenderer) pub {
   canvasShutdown(canvas: renderer.canvas)
 }
 
-# Declare the deferred frame. Pass declaration order here is deliberately
-# scrambled — present first, gbuffer last — so that a regression to
-# insertion order is visible immediately in the derived sequence.
-# ONE builder, parameterised. renderer3d.rae has two near-identical copies
-# of its graph (with and without the UI overlay) and they have to be kept
-# in step by hand; this does not repeat that.
-func buildDeferredGraph(withUi: view Bool) ret DeferredRenderer {
-  unsafe {
-    var renderGraph: RenderGraph = createRenderGraph()
-
-    # --- resources ---
-    # sceneColor is External: the target gpu2d owns and presents.
-    let colorId: Int = addResource(
-      renderGraph: renderGraph
-      name: "sceneColor"
-      kind: resTexture2d
-      format: 0
-      sizing: sizeFull
-      lifetime: lifeExternal
-    )
-
-    # The G-buffer (#366). Three attachments plus depth, 16 bytes/pixel, with
-    # attributes packed ACROSS the targets rather than one per target: A holds
-    # the octahedral normal and a shading mode, B albedo and roughness, C
-    # motion, metallic and occlusion-or-emissive. Named A/B/C rather than by
-    # content precisely because no target holds one thing — a name like
-    # "gNormal" would be a lie about where roughness lives.
-    let albedoId: Int = addResource(
-      renderGraph: renderGraph
-      name: "gbufferA"
-      kind: resTexture2d
-      format: 0
-      sizing: sizeFull
-      lifetime: lifeTransient
-    )
-    let normalId: Int = addResource(
-      renderGraph: renderGraph
-      name: "gbufferB"
-      kind: resTexture2d
-      format: 0
-      sizing: sizeFull
-      lifetime: lifeTransient
-    )
-    let materialId: Int = addResource(
-      renderGraph: renderGraph
-      name: "gbufferC"
-      kind: resTexture2d
-      format: 0
-      sizing: sizeFull
-      lifetime: lifeTransient
-    )
-    let depthId: Int = addResource(
-      renderGraph: renderGraph
-      name: "gDepth"
-      kind: resDepth
-      format: 0
-      sizing: sizeFull
-      lifetime: lifeTransient
-    )
-
-    # Hi-Z / coarse-trace source. Half-res because the top mip is gDepth
-    # itself; this is the chain below it.
-    let pyramidId: Int = addResource(
-      renderGraph: renderGraph
-      name: "depthPyramid"
-      kind: resTexture2d
-      format: 0
-      sizing: sizeHalf
-      lifetime: lifeTransient
-    )
-
-    # Linear HDR radiance. Everything radiometric happens here; only
-    # composite writes the presentable target.
-    let litId: Int = addResource(
-      renderGraph: renderGraph
-      name: "litColor"
-      kind: resTexture2d
-      format: 0
-      sizing: sizeFull
-      lifetime: lifeTransient
-    )
-    let litCopyId: Int = addResource(
-      renderGraph: renderGraph
-      name: "litCopy"
-      kind: resTexture2d
-      format: 0
-      sizing: sizeFull
-      lifetime: lifeTransient
-    )
-    # FFT ocean cascades (#831): three fixed-size displacement/normal/Jacobian map
-    # sets, PERSISTENT because the update-rate knob refreshes one cascade per
-    # frame and the others must survive. Declared here so the graph derives
-    # waterFft -> transparentForward; the app's WaterSystem owns the textures.
-    let waterCascade0Id: Int = addResource(
-      renderGraph: renderGraph
-      name: "waterCascade0"
-      kind: resTexture2d
-      format: 0
-      sizing: sizeFixed
-      lifetime: lifePersistent
-    )
-    let waterCascade1Id: Int = addResource(
-      renderGraph: renderGraph
-      name: "waterCascade1"
-      kind: resTexture2d
-      format: 0
-      sizing: sizeFixed
-      lifetime: lifePersistent
-    )
-    let waterCascade2Id: Int = addResource(
-      renderGraph: renderGraph
-      name: "waterCascade2"
-      kind: resTexture2d
-      format: 0
-      sizing: sizeFixed
-      lifetime: lifePersistent
-    )
-    # AO is full-resolution for now. It is low-frequency and belongs at half
-    # res with a depth-aware upsample, which is a tier knob rather than a
-    # correctness question — declared truthfully as Full until it moves.
-    let aoId: Int = addResource(
-      renderGraph: renderGraph
-      name: "aoTex"
-      kind: resTexture2d
-      format: 0
-      sizing: sizeFull
-      lifetime: lifeTransient
-    )
-    # PERSISTENT, not transient: the history is read NEXT frame, which is
-    # the lifetime class #331 put in graph v1 so temporal techniques could
-    # be declared truthfully instead of hidden in C statics.
-    let taaId: Int = addResource(
-      renderGraph: renderGraph
-      name: "taaColor"
-      kind: resTexture2d
-      format: 0
-      sizing: sizeFull
-      lifetime: lifePersistent
-    )
-    let shadowId: Int = addResource(
-      renderGraph: renderGraph
-      name: "shadowMap"
-      kind: resDepth
-      format: 0
-      sizing: sizeFull
-      lifetime: lifeTransient
-    )
-
-    # --- passes, declared backwards on purpose ---
-    let present: Int = addPass(
-      renderGraph: renderGraph
-      name: "present"
-      kind: passRaster
-      tag: RenderTag.present
-    )
-    let composite: Int = addPass(
-      renderGraph: renderGraph
-      name: "composite"
-      kind: passRaster
-      tag: RenderTag.composite
-    )
-    let lighting: Int = addPass(
-      renderGraph: renderGraph
-      name: "lighting"
-      kind: passRaster
-      tag: RenderTag.lighting
-    )
-    let transparent: Int = addPass(
-      renderGraph: renderGraph
-      name: "transparentForward"
-      kind: passRaster
-      tag: RenderTag.transparentForward
-    )
-    let waterFftP: Int = addPass(
-      renderGraph: renderGraph
-      name: "waterFft"
-      kind: passCompute
-      tag: RenderTag.waterFft
-    )
-    let ssaoP: Int = addPass(
-      renderGraph: renderGraph
-      name: "ssao"
-      kind: passRaster
-      tag: RenderTag.ssao
-    )
-    let taaP: Int = addPass(
-      renderGraph: renderGraph
-      name: "taa"
-      kind: passRaster
-      tag: RenderTag.taa
-    )
-    let shadowP: Int = addPass(
-      renderGraph: renderGraph
-      name: "shadow"
-      kind: passRaster
-      tag: RenderTag.shadow
-    )
-    let pyramid: Int = addPass(
-      renderGraph: renderGraph
-      name: "depthPyramid"
-      kind: passCompute
-      tag: RenderTag.depthPyramid
-    )
-    let gbuffer: Int = addPass(
-      renderGraph: renderGraph
-      name: "gbuffer"
-      kind: passRaster
-      tag: RenderTag.gbuffer
-    )
-
-    # --- edges: these, and only these, determine the order ---
-    passWrites(
-      renderGraph: renderGraph
-      pass: gbuffer
-      resource: albedoId
-      access: accAttachmentWrite
-    )
-    passWrites(
-      renderGraph: renderGraph
-      pass: gbuffer
-      resource: normalId
-      access: accAttachmentWrite
-    )
-    passWrites(
-      renderGraph: renderGraph
-      pass: gbuffer
-      resource: materialId
-      access: accAttachmentWrite
-    )
-    passWrites(
-      renderGraph: renderGraph
-      pass: gbuffer
-      resource: depthId
-      access: accAttachmentWrite
-    )
-
-    # The pyramid is built from finished depth, so it must follow gbuffer.
-    passReads(
-      renderGraph: renderGraph
-      pass: pyramid
-      resource: depthId
-      access: accSampledRead
-    )
-    passWrites(
-      renderGraph: renderGraph
-      pass: pyramid
-      resource: pyramidId
-      access: accStorageWrite
-    )
-
-    # Lighting consumes every G-buffer attachment plus the pyramid, and is
-    # the only writer of radiance.
-    # SSAO reads what the G-buffer wrote and lighting reads the AO, so the
-    # graph derives gbuffer -> ssao -> lighting with nobody stating it.
-    passReads(
-      renderGraph: renderGraph
-      pass: ssaoP
-      resource: normalId
-      access: accSampledRead
-    )
-    passReads(
-      renderGraph: renderGraph
-      pass: ssaoP
-      resource: depthId
-      access: accSampledRead
-    )
-    passWrites(
-      renderGraph: renderGraph
-      pass: ssaoP
-      resource: aoId
-      access: accAttachmentWrite
-    )
-    # Lighting reads the cascades, so the graph orders shadow before it —
-    # and, since shadow has no other edges, before the G-buffer too, which
-    # is fine: the cascades depend on the scene, not on the G-buffer.
-    passWrites(
-      renderGraph: renderGraph
-      pass: shadowP
-      resource: shadowId
-      access: accAttachmentWrite
-    )
-    passReads(
-      renderGraph: renderGraph
-      pass: lighting
-      resource: shadowId
-      access: accSampledRead
-    )
-    passReads(
-      renderGraph: renderGraph
-      pass: lighting
-      resource: aoId
-      access: accSampledRead
-    )
-    passReads(
-      renderGraph: renderGraph
-      pass: lighting
-      resource: albedoId
-      access: accSampledRead
-    )
-    passReads(
-      renderGraph: renderGraph
-      pass: lighting
-      resource: normalId
-      access: accSampledRead
-    )
-    passReads(
-      renderGraph: renderGraph
-      pass: lighting
-      resource: materialId
-      access: accSampledRead
-    )
-    passReads(
-      renderGraph: renderGraph
-      pass: lighting
-      resource: depthId
-      access: accSampledRead
-    )
-    passReads(
-      renderGraph: renderGraph
-      pass: lighting
-      resource: pyramidId
-      access: accStorageRead
-    )
-    passWrites(
-      renderGraph: renderGraph
-      pass: lighting
-      resource: litId
-      access: accAttachmentWrite
-    )
-
-    # Snapshot opaque radiance before any transparent draw modifies it.
-    # passModifies orders all later radiance readers after this pass.
-    passReads(
-      renderGraph: renderGraph
-      pass: transparent
-      resource: depthId
-      access: accSampledRead
-    )
-    passModifies(
-      renderGraph: renderGraph
-      pass: transparent
-      resource: litId
-      access: accAttachmentRead
-    )
-    passWrites(
-      renderGraph: renderGraph
-      pass: transparent
-      resource: litCopyId
-      access: accAttachmentWrite
-    )
-    # The FFT compute writes the cascades the transparent surface reads, so the
-    # graph derives waterFft -> transparentForward (#831).
-    passWrites(
-      renderGraph: renderGraph
-      pass: waterFftP
-      resource: waterCascade0Id
-      access: accStorageWrite
-    )
-    passWrites(
-      renderGraph: renderGraph
-      pass: waterFftP
-      resource: waterCascade1Id
-      access: accStorageWrite
-    )
-    passWrites(
-      renderGraph: renderGraph
-      pass: waterFftP
-      resource: waterCascade2Id
-      access: accStorageWrite
-    )
-    passReads(
-      renderGraph: renderGraph
-      pass: transparent
-      resource: waterCascade0Id
-      access: accSampledRead
-    )
-    passReads(
-      renderGraph: renderGraph
-      pass: transparent
-      resource: waterCascade1Id
-      access: accSampledRead
-    )
-    passReads(
-      renderGraph: renderGraph
-      pass: transparent
-      resource: waterCascade2Id
-      access: accSampledRead
-    )
-
-    # TAA reads radiance and the motion the G-buffer packed, and writes the
-    # history the composite then reads — so the graph derives
-    # lighting -> transparentForward -> taa -> composite.
-    passReads(
-      renderGraph: renderGraph
-      pass: taaP
-      resource: litId
-      access: accSampledRead
-    )
-    passReads(
-      renderGraph: renderGraph
-      pass: taaP
-      resource: materialId
-      access: accSampledRead
-    )
-    passWrites(
-      renderGraph: renderGraph
-      pass: taaP
-      resource: taaId
-      access: accAttachmentWrite
-    )
-
-    # Composite is the only writer of the presentable target.
-    passReads(
-      renderGraph: renderGraph
-      pass: composite
-      resource: taaId
-      access: accSampledRead
-    )
-    passWrites(
-      renderGraph: renderGraph
-      pass: composite
-      resource: colorId
-      access: accAttachmentWrite
-    )
-
-    # The UI overlay MODIFIES the composited target rather than writing it:
-    # it loads the finished 3D image and paints over it. Declaring that as a
-    # second write would be rejected as two writers; declaring it as a plain
-    # read would not order it after composite. `passModifies` is the only
-    # honest statement, and the graph derives composite -> ui -> present.
-    var ui: Int = 0 - 1
-    if withUi {
-      ui = addPass(
-        renderGraph: renderGraph
-        name: "uiOverlay"
-        kind: passRaster
-        tag: RenderTag.uiOverlay
-      )
-      passModifies(
-        renderGraph: renderGraph
-        pass: ui
-        resource: colorId
-        access: accAttachmentRead
-      )
-    }
-
-    passReads(
-      renderGraph: renderGraph
-      pass: present
-      resource: colorId
-      access: accSampledRead
-    )
-
-    ret DeferredRenderer {
-      graph: renderGraph
-      gbufferPass: gbuffer
-      pyramidPass: pyramid
-      lightingPass: lighting
-      compositePass: composite
-      presentPass: present
-      uiPass: ui
-      hasUi: withUi
-      debugView: viewLit
-      sky: createSkyNone(
-        light: defaultLight3d()
-        clearColor: vec3.create(x: 0.02, y: 0.02, z: 0.03)
-      )
-      hasSky: false
-      grade: neutralGrade()
-      passes: createRenderPasses()
-      idIssuer: IdIssuer.create()
-      gpuResources: none
-      canvas: createGpu2dCanvas()
-    }
-  }
-}
-
-# See the note on renderer3d.rae's version: same name, so migrating an
-# example flips the word with no edit at the call site.
+# The graph itself (resources, passes, edges) is declared in
+# RendererDeferredGraph.buildDeferredGraph (#855 split for the 1000-line cap).
 func rendererPathName() pub ret String {
   ret "deferred"
 }
@@ -893,6 +427,16 @@ func renderDeferredPassWith(
       gbuffer: renderer.passes.gbuffer
     )
   }
+  if tag is RenderTag.underwater {
+    underwaterPass(
+      cache: renderer.passes.underwater
+      resources: resources
+      gbuffer: renderer.passes.gbuffer
+      camera: camera
+      aspect: aspect
+      params: renderer.underwater
+    )
+  }
   # waterFft is dispatched by the app that owns a WaterSystem (waterFftStep);
   # an app without water simply has nothing to do at this tag.
   if tag is RenderTag.composite {
@@ -948,6 +492,16 @@ func deferredDrawCount(renderer: view DeferredRenderer) pub ret Int {
 # Mip levels in the depth pyramid built by the last frame.
 func deferredPyramidMips(renderer: view DeferredRenderer) pub ret Int {
   ret depthPyramidMips()
+}
+
+# The underwater pass's parameters for this frame (#855): set by the water
+# system's waterUnderwaterUpdate before the graph walk; `active` false skips it.
+func setUnderwater(renderer: mod DeferredRenderer, params: view UnderwaterParams) pub {
+  renderer.underwater = params
+}
+
+func rendererIsUnderwater(renderer: view DeferredRenderer) pub ret Bool {
+  ret renderer.underwater.active
 }
 
 # Bind an environment. The frame's background and its ambient both come
