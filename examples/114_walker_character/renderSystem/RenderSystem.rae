@@ -19,6 +19,7 @@ open Particles
 open TransparentForward
 open water/WaterSystem
 open water/WaterFft
+open water/Underwater
 open gpu/GpuResources
 open gpu/GpuLifetime
 open GrassCompute
@@ -460,6 +461,22 @@ func renderApp(
         # FFT ocean cascades (#831): allocated for the body's tier; the compute
         # that fills them is the next slice.
         waterFftStep(waterSystem: waterSystem, resources: resources)
+      }
+      case RenderTag.underwater {
+        # Underwater fog (#855): the sea / the lake when the camera dips under.
+        waterUnderwaterUpdate(
+          waterSystem: waterSystem
+          renderer: renderSystem.renderer
+          camera: cameraSystem.camera
+        )
+        renderDeferredPassWorld(
+          renderer: renderSystem.renderer
+          tag: tag
+          world: emptyWorld
+          camera: cameraSystem.camera
+          light: cameraSystem.light
+          aspect: aspect
+        )
       }
       case RenderTag.transparentForward {
         # Opaque snapshot BEFORE the water so a refracting surface can read it (#832),
