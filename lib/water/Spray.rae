@@ -1,0 +1,208 @@
+# water/Spray — near-camera sea spray from the FFT surface (#859, water Phase 2
+# "Jacobian spray"). Where a cascade FOLDS (its signed Jacobian from the #858
+# readback cache drops below the crest threshold) a crest is breaking, and the
+# emitter throws a small burst of droplets from the surface there, drawn by
+# lib/Particles.rae through the transparent forward pass (#844) — the same
+# fading cubes as the walker's splashes.
+#
+# What keeps it BOUNDED and honest:
+#   * ONE emission per NEW snapshot. The readback cache identifies its content
+#     by (generation, newest cascade sample time); the emitter remembers the
+#     pair it last emitted from and does nothing while it is unchanged — a
+#     render frame that sees the same stale sample again does not multiply
+#     the spray, however many frames the readback lags. No readback of its own.
+#   * A fixed sample lattice ahead of the camera (sprayGridSide^2 points inside
+#     sprayRadius, jittered per snapshot), at most sprayMaxBursts bursts of
+#     sprayBurstCount droplets per snapshot, a pool cap and a bounded life:
+#     the worst case is a known number of particles, the calm case is zero.
+#   * Tier changes: a new cache generation (the tier / sea-state invalidation)
+#     drops every live droplet — old emitters do not outlive their sea.
+#   * Quality: the body's `spray` flag (desktop realistic on, mobile off, toon
+#     never) and the cache's usability (fresh, matching sea state) gate it.
+# The emitter is a VALUE the app owns next to its WaterSystem; it borrows the
+# system's cache and clock and never touches the GPU except through the
+# particle pool's mesh (uploaded once into the renderer's store).
+import Math
+import Vec3
+open Scene3d
+open Particles
+open TransparentForward
+open RendererDeferred
+open water/Water
+open water/WaterSystem
+open water/FftSurfaceCache
+
+const sprayRadius: Float = 28.0  # metres around the camera scanned for crests
+
+const sprayGridSide: Int = 12  # lattice points per side (144 samples per snapshot)
+
+const sprayJacobianThreshold: Float = 0.3  # the summed surface folding this far is a breaking crest
+
+const sprayMaxBursts: Int = 6  # bursts per new snapshot
+
+const sprayBurstCount: Int = 4  # droplets per burst
+
+const sprayPoolCap: Int = 160  # live droplets, oldest dropped first
+
+const sprayLife: Float = 0.9  # seconds a droplet lives (fades by alpha)
+
+const sprayMaxAge: Float = 0.5  # seconds a snapshot may lag the wave clock
+
+type SprayEmitter {
+  particles: ParticleSystem
+  enabled: Bool  # the body's quality switch at creation
+  lastGeneration: Int  # cache generation of the last emission
+  lastSampleTime: Float  # newest cascade sample time of the last emission
+  phase: Float  # deterministic jitter + burst phase, advanced per snapshot
+  snapshots: Int  # new snapshots consumed (diagnostics)
+  bursts: Int  # bursts emitted in total
+  staleFrames: Int  # frames that saw an already-consumed snapshot
+  crestsSeen: Int  # lattice points under the threshold in the last snapshot
+  minJacobian: Float  # the smallest Jacobian the last scan saw (calibration)
+  updateNs: Int  # CPU time of the last emission pass (diagnostics)
+}
+
+func createSprayEmitter(renderer: mod DeferredRenderer, body: view WaterBody) ret SprayEmitter {
+  ret SprayEmitter {
+    particles: createParticleSystem(renderer: renderer, cap: sprayPoolCap, gravity: 9.8)
+    enabled: body.spray > 0 and body.style is WaterStyle.realistic
+    lastGeneration: 0 - 1
+    lastSampleTime: 0.0 - 1.0
+    phase: 0.0
+    snapshots: 0
+    bursts: 0
+    staleFrames: 0
+    crestsSeen: 0
+    minJacobian: 1.0
+    updateNs: 0
+  }
+}
+
+# Per frame: age the droplets, and when the cache holds a snapshot this
+# emitter has not used, scan the lattice around the camera and burst at the
+# folded points. `camera` is the near-camera centre; the wave clock is the
+# system's.
+func sprayUpdate(
+  spray: mod SprayEmitter
+  waterSystem: view WaterSystem
+  camera: view Camera3d
+  deltaTime: copy Float
+) {
+  particleUpdate(sys: spray.particles, deltaTime: deltaTime)
+  if not spray.enabled {
+    ret
+  }
+  let body: WaterBody = primaryBody(waterSystem: waterSystem)
+  if not fftSurfaceCacheUsable(
+    cache: waterSystem.surfaceCache
+    body: body
+    now: waterSystem.time
+    maxAge: sprayMaxAge
+  ) {
+    ret
+  }
+  let generation: Int = waterSystem.surfaceCache.generation
+  let sampleTime: Float = fftSurfaceCacheSampleTime(cache: waterSystem.surfaceCache)
+  if generation is spray.lastGeneration and sampleTime is spray.lastSampleTime {
+    spray.staleFrames = spray.staleFrames + 1
+    ret
+  }
+  if generation is not spray.lastGeneration and spray.lastGeneration >= 0 {
+    # A new tier / sea state: the old sea's droplets go with it.
+    spray.particles.list.clear()
+  }
+  let started: Int = nowNs()
+  spray.lastGeneration = generation
+  spray.lastSampleTime = sampleTime
+  spray.snapshots = spray.snapshots + 1
+  spray.phase = spray.phase + 0.7548776662
+  emitCrests(
+    spray: spray
+    waterSystem: waterSystem
+    body: body
+    camera: camera
+  )
+  spray.updateNs = nowNs() - started
+}
+
+# The lattice scan: sprayGridSide^2 points on a square of side 2*sprayRadius
+# around the camera, each offset by a deterministic jitter (so a fixed camera
+# does not sample the identical points every snapshot), bursting at up to
+# sprayMaxBursts folded points.
+func emitCrests(
+  spray: mod SprayEmitter
+  waterSystem: view WaterSystem
+  body: view WaterBody
+  camera: view Camera3d
+) {
+  let cell: Float = sprayRadius * 2.0 / sprayGridSide.toFloat()
+  # The lattice sits AHEAD of the camera (2/3 of the radius along its look
+  # direction): crests behind the eye cost the same and are never seen.
+  var forwardX: Float = camera.target.x - camera.position.x
+  var forwardY: Float = camera.target.y - camera.position.y
+  let forwardLength: Float = Math.sqrt(x: forwardX * forwardX + forwardY * forwardY)
+  if forwardLength > 0.001 {
+    forwardX = forwardX / forwardLength
+    forwardY = forwardY / forwardLength
+  } else {
+    forwardX = 0.0
+    forwardY = 0.0
+  }
+  let centreX: Float = camera.position.x + forwardX * sprayRadius * 0.66
+  let centreY: Float = camera.position.y + forwardY * sprayRadius * 0.66
+  var bursts: Int = 0
+  var crests: Int = 0
+  var smallest: Float = 1.0
+  loop var gy: Int = 0, gy < sprayGridSide, ++gy {
+    loop var gx: Int = 0, gx < sprayGridSide, ++gx {
+      let index: Float = (gy * sprayGridSide + gx).toFloat()
+      let jitterX: Float = (Math.sin(x: index * 12.9898 + spray.phase) * 0.5) * cell
+      let jitterY: Float = (Math.cos(x: index * 78.233 + spray.phase) * 0.5) * cell
+      let x: Float = centreX - sprayRadius + (gx.toFloat() + 0.5) * cell + jitterX
+      let y: Float = centreY - sprayRadius + (gy.toFloat() + 0.5) * cell + jitterY
+      let jacobian: Float = fftCacheSumJacobian(cache: waterSystem.surfaceCache, x: x, y: y)
+      if jacobian < smallest {
+        smallest = jacobian
+      }
+      if jacobian < sprayJacobianThreshold {
+        crests = crests + 1
+        if bursts < sprayMaxBursts {
+          let displacement: Vec3 = fftCacheDisplacement(cache: waterSystem.surfaceCache, x: x, y: y)
+          # The crest is where the grid point ENDS UP (with its horizontal
+          # displacement), at the surface height there; a folded surface
+          # (J < 0) throws harder.
+          let fold: Float = Math.min(a: (sprayJacobianThreshold - jacobian) * 2.0, b: 1.0)
+          particleBurst(
+            sys: spray.particles
+            x: x + displacement.x
+            y: y + displacement.y
+            z: body.centre.z + displacement.z + 0.15
+            count: sprayBurstCount
+            hVel: 1.2 + 1.5 * fold
+            upVel: 2.0 + 2.5 * fold
+            life: sprayLife
+            size: 0.16
+            r: 0.94
+            g: 0.97
+            b: 1.0
+            phase: spray.phase + index
+          )
+          bursts = bursts + 1
+        }
+      }
+    }
+  }
+  spray.crestsSeen = crests
+  spray.minJacobian = smallest
+  spray.bursts = spray.bursts + bursts
+}
+
+# Queue the live droplets into the transparent pass (at the transparentForward
+# tag, after the water drew, before the renderer's transparentPass).
+func sprayDraw(spray: view SprayEmitter, transparent: mod TransparentPassCache) {
+  particleDraw(sys: spray.particles, transparent: transparent)
+}
+
+func sprayLiveCount(spray: view SprayEmitter) ret Int {
+  ret spray.particles.list.length
+}

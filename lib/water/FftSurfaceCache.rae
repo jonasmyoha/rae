@@ -165,8 +165,71 @@ func setFftSampleComponent(vector: mod Vec3, cascade: copy Int, value: copy Floa
   }
 }
 
-# All active cascades must be usable. Age is measured from simulation time,
-# not completion time; N=2/N=3 snapshots intentionally have different ages.
+# True when every active cascade of the cache is a usable snapshot for `body`
+# at wave time `now`: the sea state matches, every cascade is of the current
+# generation, filled, and no older than `maxAge`. Age is measured from
+# simulation time, not completion time; N=2/N=3 snapshots intentionally have
+# different ages. sampleFftSurface and the spray emitter (#859) share it.
+func fftSurfaceCacheUsable(
+  cache: view FftSurfaceCache
+  body: view WaterBody
+  now: copy Float
+  maxAge: copy Float
+) ret Bool {
+  if body.style is not WaterStyle.realistic or cache.activeCount < 1 or cache.activeCount is not body.cascadeCount or maxAge < 0.0 or not sameWaterSpectrum(
+    previous: cache.seaState
+    current: body
+  ) or cache.seaState.fftSize is not body.fftSize {
+    ret false
+  }
+  loop var i: Int = 0, i < cache.activeCount, ++i {
+    if let cascade: view FftCascadeCache => cache.cascades.viewAt(index: i) {
+      if cascade.generation is not cache.generation or cascade.values.length is not fftCacheFloats or cascade.tileSize <= 0.0 or cascade.sampleTime > now or now - cascade.sampleTime > maxAge {
+        ret false
+      }
+    } else {
+      ret false
+    }
+  }
+  ret true
+}
+
+# The newest simulation time any active cascade was sampled at — the identity
+# of the cache's CONTENT together with its generation: a consumer that acts
+# once per new snapshot (the spray, #859) compares these, never the frame.
+func fftSurfaceCacheSampleTime(cache: view FftSurfaceCache) ret Float {
+  var newest: Float = 0.0 - 1.0
+  loop var i: Int = 0, i < cache.activeCount, ++i {
+    if let cascade: view FftCascadeCache => cache.cascades.viewAt(index: i) {
+      if cascade.sampleTime > newest {
+        newest = cascade.sampleTime
+      }
+    }
+  }
+  ret newest
+}
+
+# The signed Jacobian of the SUMMED surface at GRID (x, y), to first order:
+# the cascades add their horizontal displacements, so their fold amounts add —
+# J ~ 1 - sum(1 - J_i). No inversion (the horizontal displacement is ignored),
+# which is what a crest detector wants; negative means the summed surface
+# folds over itself there. 1 with no cascades.
+func fftCacheSumJacobian(cache: view FftSurfaceCache, x: copy Float, y: copy Float) ret Float {
+  var fold: Float = 0.0
+  loop var i: Int = 0, i < cache.activeCount, ++i {
+    if let cascade: view FftCascadeCache => cache.cascades.viewAt(index: i) {
+      fold = fold + 1.0 - fftCacheChannel(
+        cascade: cascade
+        x: x
+        y: y
+        channel: 3
+      )
+    }
+  }
+  ret 1.0 - fold
+}
+
+# All active cascades must be usable (fftSurfaceCacheUsable).
 func sampleFftSurface(
   cache: view FftSurfaceCache
   body: view WaterBody
@@ -175,20 +238,13 @@ func sampleFftSurface(
   now: copy Float
   maxAge: copy Float
 ) ret opt FftSurfaceSample {
-  if body.style is not WaterStyle.realistic or cache.activeCount < 1 or cache.activeCount is not body.cascadeCount or maxAge < 0.0 or not sameWaterSpectrum(
-    previous: cache.seaState
-    current: body
-  ) or cache.seaState.fftSize is not body.fftSize {
+  if not fftSurfaceCacheUsable(
+    cache: cache
+    body: body
+    now: now
+    maxAge: maxAge
+  ) {
     ret none
-  }
-  loop var i: Int = 0, i < cache.activeCount, ++i {
-    if let cascade: view FftCascadeCache => cache.cascades.viewAt(index: i) {
-      if cascade.generation is not cache.generation or cascade.values.length is not fftCacheFloats or cascade.tileSize <= 0.0 or cascade.sampleTime > now or now - cascade.sampleTime > maxAge {
-        ret none
-      }
-    } else {
-      ret none
-    }
   }
   var px: Float = x
   var py: Float = y
