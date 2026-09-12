@@ -36,10 +36,16 @@ const gtMaxPasses: Int = 16
 # #764: the GPU-timing ring (query set indices, per-frame pass names, the readback
 # buffer, the timestamp period) was a set of module-level gt* globals. It is a
 # resource an app owns (only zz_gpu_timing_check drives it today); every entry
-# point takes it. The WGPU handles stay in C behind rae_gt_set/get.
+# point takes it. #923: the three WGPU handles are fields of this owner too —
+# the last C slot store (rae_gt_set/get) is gone. This is the raw-encoder,
+# BLOCKING capture harness; the manager's nonblocking timing is gpu/GpuTiming
+# (zz_gpu_manager_timing drives that one, the water perf captures use it).
 type GpuTiming {
   enabled: Bool
   inited: Bool
+  querySet: Ptr  # the timestamp query set (2 slots per pass)
+  resolveBuffer: Ptr  # QueryResolve + CopySrc
+  readBuffer: Ptr  # CopyDst + MapRead
   names: List(String)
   # One reusable timestampWrites struct: passes are encoded sequentially and wgpu
   # copies its contents at beginPass, so a single slot (overwritten per pass) is
@@ -56,6 +62,9 @@ func createGpuTiming() pub ret GpuTiming {
     ret GpuTiming {
       enabled: false
       inited: false
+      querySet: webgpuNull()
+      resolveBuffer: webgpuNull()
+      readBuffer: webgpuNull()
       names: List.create(String, cap: gtMaxPasses)
       tsw: List.create(WGPUPassTimestampWrites, cap: 1)
       count: 0
@@ -68,30 +77,6 @@ func createGpuTiming() pub ret GpuTiming {
 
 func enabled(timing: view GpuTiming) pub ret Bool {
   ret timing.enabled
-}
-
-# WGPU handle store lives in C (index 0=querySet, 1=resolveBuf, 2=readBuf) — see
-# runtime_webgpu.c rae_gt_set/get, same seam grass uses for its handles.
-func gtSet(index: Int, ptr: Ptr) unsafe extern("rae_gt_set")
-
-func gtGet(index: Int) unsafe extern("rae_gt_get") ret Ptr
-
-func gtQset() ret Ptr {
-  unsafe {
-    ret gtGet(index: 0)
-  }
-}
-
-func gtResolve() ret Ptr {
-  unsafe {
-    ret gtGet(index: 1)
-  }
-}
-
-func gtRead() ret Ptr {
-  unsafe {
-    ret gtGet(index: 2)
-  }
 }
 
 # Create the query set + resolve/readback buffers. Idempotent; safe no-op when the
@@ -110,21 +95,21 @@ func init(timing: mod GpuTiming) pub ret Bool {
       type_: WGPUQueryType_Timestamp
       count: (gtMaxPasses * 2) as UInt32
     }
-    gtSet(index: 0, ptr: wgpuDeviceCreateQuerySet(device: webgpuDevice(), descriptor: qDesc))
+    timing.querySet = wgpuDeviceCreateQuerySet(device: webgpuDevice(), descriptor: qDesc)
     let rDesc: WGPUBufferDescriptor = {
       usage: WGPUBufferUsage_QueryResolve + WGPUBufferUsage_CopySrc
       size: (gtMaxPasses * 16) as UInt64
     }
-    gtSet(index: 1, ptr: wgpuDeviceCreateBuffer(device: webgpuDevice(), descriptor: rDesc))
+    timing.resolveBuffer = wgpuDeviceCreateBuffer(device: webgpuDevice(), descriptor: rDesc)
     let mDesc: WGPUBufferDescriptor = {
       usage: WGPUBufferUsage_CopyDst + WGPUBufferUsage_MapRead
       size: (gtMaxPasses * 16) as UInt64
     }
-    gtSet(index: 2, ptr: wgpuDeviceCreateBuffer(device: webgpuDevice(), descriptor: mDesc))
+    timing.readBuffer = wgpuDeviceCreateBuffer(device: webgpuDevice(), descriptor: mDesc)
     timing.period = wgpuQueueGetTimestampPeriod(queue: webgpuQueue())
     timing.tsw.add(
       value: {
-        querySet: gtQset()
+        querySet: timing.querySet
         beginningOfPassWriteIndex: 0 as UInt32
         endOfPassWriteIndex: 1 as UInt32
       }
@@ -164,7 +149,7 @@ func passBegin(timing: mod GpuTiming, name: view String) pub ret Int {
     timing.tsw.set(
       index: 0
       value: {
-        querySet: gtQset()
+        querySet: timing.querySet
         beginningOfPassWriteIndex: (idx * 2) as UInt32
         endOfPassWriteIndex: (idx * 2 + 1) as UInt32
       }
@@ -195,10 +180,10 @@ func resolve(timing: view GpuTiming, enc: copy Ptr, idx: copy Int) pub {
     }
     wgpuCommandEncoderResolveQuerySet(
       commandEncoder: enc
-      querySet: gtQset()
+      querySet: timing.querySet
       firstQuery: (idx * 2) as UInt32
       queryCount: 2 as UInt32
-      destination: gtResolve()
+      destination: timing.resolveBuffer
       destinationOffset: (idx * 16) as UInt64
     )
   }
@@ -227,7 +212,7 @@ func collect(timing: mod GpuTiming, profiler: mod Profiler) {
     )
     wgpuCommandEncoderCopyBufferToBuffer(
       commandEncoder: commandEncoder
-      source: gtResolve()
+      source: timing.resolveBuffer
       sourceOffset: 0 as UInt64
       destination: staging
       destinationOffset: 0 as UInt64
@@ -279,17 +264,17 @@ func shutdown(timing: mod GpuTiming) {
     if not timing.inited {
       ret
     }
-    loop var slot: Int = 1, slot <= 2, ++slot {
-      let buffer: Ptr = gtGet(index: slot)
-      if not (buffer is webgpuNull()) {
-        wgpuBufferRelease(buffer: buffer)
-        gtSet(index: slot, ptr: webgpuNull())
-      }
+    if not (timing.resolveBuffer is webgpuNull()) {
+      wgpuBufferRelease(buffer: timing.resolveBuffer)
+      timing.resolveBuffer = webgpuNull()
     }
-    let queries: Ptr = gtGet(index: 0)
-    if not (queries is webgpuNull()) {
-      wgpuQuerySetRelease(querySet: queries)
-      gtSet(index: 0, ptr: webgpuNull())
+    if not (timing.readBuffer is webgpuNull()) {
+      wgpuBufferRelease(buffer: timing.readBuffer)
+      timing.readBuffer = webgpuNull()
+    }
+    if not (timing.querySet is webgpuNull()) {
+      wgpuQuerySetRelease(querySet: timing.querySet)
+      timing.querySet = webgpuNull()
     }
     timing.enabled = false
     timing.inited = false
