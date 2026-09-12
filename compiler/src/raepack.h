@@ -37,6 +37,9 @@ typedef struct {
   Str format;
   int64_t version;
   Str default_target;
+  /* Optional toolchain requirement: the string from `rae: { version: "..." }`
+   * (#931). Empty (len 0) when the pack declares no requirement. */
+  Str rae_version;
   RaePackTarget* targets;
   size_t target_count;
   RaePackBlock* raw;

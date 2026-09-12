@@ -36,6 +36,7 @@
 #include "ast.h"
 #include "pretty.h"
 #include "rae_format.h"
+#include "rae_version.h"
 #include "../build/version_gen.h"
 #include "c_backend.h"
 #include "sema.h"
@@ -259,6 +260,12 @@ static bool parse_run_args(int argc, char** argv, RunOptions* opts) {
       i += 1;
       continue;
     }
+    if (strcmp(arg, "--check-toolchain") == 0) {
+      /* #931: consumed by toolchain_check (which rescans argv); recognised
+       * here so the arg parser does not reject it as unknown. */
+      i += 1;
+      continue;
+    }
     // Build profile for the compiled target: release (-O2 -DNDEBUG) or
     // dev/debug (-O0 -g). Ignored by the live (bytecode) target. The
     // `--release` / `--debug` aliases mirror the common convention.
@@ -404,6 +411,12 @@ static bool parse_build_args(int argc, char** argv, BuildOptions* opts) {
     if (strcmp(arg, "--check-format") == 0) {
       /* #919: refuse to rewrite non-canonical sources; fail with the list. */
       rae_preflight_set_mode(RAE_PREFLIGHT_CHECK);
+      i += 1;
+      continue;
+    }
+    if (strcmp(arg, "--check-toolchain") == 0) {
+      /* #931: consumed by toolchain_check (which rescans argv); recognised
+       * here so the arg parser does not reject it as unknown. */
       i += 1;
       continue;
     }
@@ -2236,6 +2249,9 @@ static void print_usage(const char* prog) {
   fprintf(stderr, "                  devtools.json 'entry') and defaults to --target compiled.\n");
   fprintf(stderr, "                  Options: --project <dir>, --watch, --check-format\n");
   fprintf(stderr, "                  (refuse to rewrite non-canonical sources; RAE_FORMAT=check|off),\n");
+  fprintf(stderr, "                           --check-toolchain (strict: require a tagged Rae\n");
+  fprintf(stderr, "                           matching the project's rae.raepack requirement;\n");
+  fprintf(stderr, "                           RAE_TOOLCHAIN_CHECK=off skips the non-strict check),\n");
   fprintf(stderr, "                           --target <live|compiled>,\n");
   fprintf(stderr, "                           --profile <dev|release> (or --debug/--release;\n");
   fprintf(stderr, "                           compiled target: dev=-O0 -g, release=-O2 -DNDEBUG)\n");
@@ -2309,18 +2325,25 @@ static void print_json_string(Str value) {
   putchar('"');
 }
 
+/* #930: build the full compiler version string ("0.1.0", "0.2.0-dev.14",
+ * with "+dirty" appended on an uncommitted tree). RAE_* come from the
+ * generated build/version_gen.h. */
+static void build_compiler_version_string(char* out, size_t out_len) {
+  const char* dirty_suffix = RAE_GIT_DIRTY ? "+dirty" : "";
+  if (RAE_IS_RELEASE) {
+    snprintf(out, out_len, "%s%s", RAE_VERSION_BASE, dirty_suffix);
+  } else {
+    snprintf(out, out_len, "%s-dev.%d%s", RAE_VERSION_BASE, RAE_COMMITS_SINCE_TAG,
+             dirty_suffix);
+  }
+}
+
 /* #930: `rae --version` / `-v`, plain and `--json`. RAE_* come from the
  * generated build/version_gen.h (VERSION file + git state at build time —
  * see tools/gen-version-header.sh and docs/versioning-and-toolchain.md §1). */
 static void print_version(bool json) {
   char version[160];
-  const char* dirty_suffix = RAE_GIT_DIRTY ? "+dirty" : "";
-  if (RAE_IS_RELEASE) {
-    snprintf(version, sizeof(version), "%s%s", RAE_VERSION_BASE, dirty_suffix);
-  } else {
-    snprintf(version, sizeof(version), "%s-dev.%d%s", RAE_VERSION_BASE, RAE_COMMITS_SINCE_TAG,
-             dirty_suffix);
-  }
+  build_compiler_version_string(version, sizeof(version));
   if (json) {
     printf("{\n");
     printf("  \"version\": ");
@@ -3884,6 +3907,146 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
   _exit(0);
 }
 
+/* ---- Toolchain requirement check (#931, docs/versioning-and-toolchain.md §2) ---- */
+
+static RaeSemver compiler_semver(void) {
+  RaeSemver v = {0, 0, 0};
+  rae_semver_parse(RAE_VERSION_BASE, &v);
+  return v;
+}
+
+/* Scan `dir` (non-recursively) for a single `*.raepack`; on success copy its
+ * full path into `out` (size PATH_MAX) and return true. */
+static bool dir_has_raepack(const char* dir, char* out) {
+  if (!dir) return false;
+  DIR* handle = opendir(dir);
+  if (!handle) return false;
+  bool found = false;
+  struct dirent* entry;
+  while ((entry = readdir(handle)) != NULL) {
+    const char* name = entry->d_name;
+    size_t len = strlen(name);
+    if (len > 8 && strcmp(name + len - 8, ".raepack") == 0) {
+      snprintf(out, PATH_MAX, "%s/%s", dir, name);
+      found = true;
+      break;
+    }
+  }
+  closedir(handle);
+  return found;
+}
+
+/* The project's pack lives next to its entry (examples) or in the project
+ * root (a `rae init` project, whose entry is under src/). Look in both. */
+static bool find_project_pack(const char* entry_path, const char* project_root,
+                              char* out) {
+  if (entry_path) {
+    char entry_dir[PATH_MAX];
+    strncpy(entry_dir, entry_path, sizeof(entry_dir) - 1);
+    entry_dir[sizeof(entry_dir) - 1] = '\0';
+    char* slash = strrchr(entry_dir, '/');
+    if (slash) *slash = '\0';
+    else strcpy(entry_dir, ".");
+    if (dir_has_raepack(entry_dir, out)) return true;
+    if (project_root && strcmp(project_root, entry_dir) != 0 &&
+        dir_has_raepack(project_root, out)) {
+      return true;
+    }
+    return false;
+  }
+  return project_root && dir_has_raepack(project_root, out);
+}
+
+/* Write (overwrite) the project's rae.lock toolchain block. #933 will add the
+ * dependency blocks below it; for now the toolchain block is the whole file. */
+static void write_rae_lock(const char* pack_path, const char* version) {
+  char lock_path[PATH_MAX];
+  strncpy(lock_path, pack_path, sizeof(lock_path) - 1);
+  lock_path[sizeof(lock_path) - 1] = '\0';
+  char* slash = strrchr(lock_path, '/');
+  if (slash) {
+    slash[1] = '\0';
+    strncat(lock_path, "rae.lock", sizeof(lock_path) - strlen(lock_path) - 1);
+  } else {
+    strcpy(lock_path, "rae.lock");
+  }
+  FILE* out = fopen(lock_path, "w");
+  if (!out) return;  /* best-effort: a read-only tree must still build */
+  fprintf(out, "# generated by rae %s — do not edit\n", version);
+  fprintf(out, "toolchain { version: \"%s\" commit: \"%s\" }\n", version,
+          RAE_GIT_COMMIT);
+  fclose(out);
+}
+
+/* Run the requirement check before the format preflight. Returns true to let
+ * the build proceed, false to abort it. `entry_path` may be NULL (zero-config
+ * with no discoverable entry) — then only `project_root` is searched. */
+static bool toolchain_check(const char* entry_path, const char* project_root,
+                            int argc, char** argv) {
+  bool strict = false;
+  for (int i = 0; i < argc; ++i) {
+    if (strcmp(argv[i], "--check-toolchain") == 0) strict = true;
+  }
+  /* The env override skips the (non-strict) check entirely; --check-toolchain
+   * is the CI form that cannot be silenced this way. */
+  const char* env = getenv("RAE_TOOLCHAIN_CHECK");
+  bool disabled_by_env = env && (strcmp(env, "off") == 0 || strcmp(env, "0") == 0);
+  if (disabled_by_env && !strict) return true;
+
+  char pack_path[PATH_MAX];
+  if (!find_project_pack(entry_path, project_root, pack_path)) {
+    return true;  /* zero-config project: no pack, no check (packages doc #6) */
+  }
+
+  RaePack pack;
+  /* Parse non-strict and quiet: a malformed or partial project pack must not
+   * turn into a build failure here, nor leak pack diagnostics into the build
+   * output — `rae pack` is where pack validity is reported. */
+  diag_set_quiet(true);
+  bool parsed = raepack_parse_file(pack_path, &pack, false);
+  diag_set_quiet(false);
+  if (!parsed) return true;
+  if (pack.rae_version.len == 0) {
+    raepack_free(&pack);
+    return true;  /* pack present but declares no toolchain requirement */
+  }
+
+  char* req = str_to_cstr(pack.rae_version);
+  char version[160];
+  build_compiler_version_string(version, sizeof(version));
+
+  bool bad_req = false;
+  bool satisfied = rae_toolchain_satisfies(req, compiler_semver(),
+                                           /*is_dev=*/!RAE_IS_RELEASE, strict,
+                                           &bad_req);
+  if (bad_req) {
+    fprintf(stderr,
+            "error: malformed Rae toolchain requirement \"%s\" (in %s).\n"
+            "       Use a bare version like \"0.3\" or a range like \">=0.3.0 <0.5.0\".\n",
+            req, pack_path);
+    free(req);
+    raepack_free(&pack);
+    return false;
+  }
+
+  if (!satisfied) {
+    fprintf(stderr,
+            "error: this project requires Rae %s (from %s); this compiler is\n"
+            "       %s (%s). Run:  rae toolchain use %s\n"
+            "       or set RAE_TOOLCHAIN_CHECK=off to build against this compiler anyway.\n",
+            req, pack_path, version, RAE_GIT_COMMIT, req);
+    free(req);
+    raepack_free(&pack);
+    return false;
+  }
+
+  /* Verified: record the toolchain in the project's lockfile. */
+  write_rae_lock(pack_path, version);
+  free(req);
+  raepack_free(&pack);
+  return true;
+}
+
 static int run_command(const char* cmd, int argc, char** argv) {
   size_t file_size = 0;
   char* source = NULL;
@@ -3959,6 +4122,10 @@ static int run_command(const char* cmd, int argc, char** argv) {
                       const char* final_root = run_opts.project_path ? run_opts.project_path : project_root;
                       if (!final_root) final_root = ".";
 
+                      if (!toolchain_check(run_opts.input_path, final_root, argc, argv)) {
+                        return 1;
+                      }
+
                       RunOptions adjusted_opts = run_opts;
                       if (run_opts.target == BUILD_TARGET_COMPILED) {
                         return run_compiled_file(&adjusted_opts, final_root);
@@ -3974,6 +4141,9 @@ static int run_command(const char* cmd, int argc, char** argv) {
                       s_explicit_project_root = (run_opts.project_path != NULL);
                       const char* final_root = run_opts.project_path ? run_opts.project_path : project_root;
                       if (!final_root) final_root = ".";
+                      if (!toolchain_check(run_opts.input_path, final_root, argc, argv)) {
+                        return 1;
+                      }
                       return run_watch_supervisor(&run_opts, final_root);
               } else if (is_pack) {    PackOptions pack_opts;
     if (!parse_pack_args(argc, argv, &pack_opts)) {
@@ -3996,6 +4166,10 @@ static int run_command(const char* cmd, int argc, char** argv) {
     const char* final_root = build_opts.project_path ? build_opts.project_path : project_root;
     if (final_root && !directory_exists(final_root)) {
       fprintf(stderr, "error: project path '%s' not found or not a directory\n", final_root);
+      return 1;
+    }
+
+    if (!toolchain_check(build_opts.entry_path, final_root, argc, argv)) {
       return 1;
     }
 
@@ -4312,6 +4486,32 @@ static int cmd_init(int argc, char** argv) {
   int font_rc = rae_init_download_roboto();
   rc |= rae_init_write_if_missing("Makefile", RAE_INIT_TEMPLATE_MAKEFILE);
   rc |= rae_init_write_if_missing("AGENTS.md", RAE_INIT_TEMPLATE_AGENTS_MD);
+
+  // #931: declare the toolchain requirement so a second machine knows which
+  // Rae this project builds against. The caret is on this compiler's MINOR
+  // (the breaking axis pre-1.0), e.g. compiler 0.1.x -> `rae: { version: "0.1" }`.
+  RaeSemver self = compiler_semver();
+  char pack_contents[1024];
+  snprintf(pack_contents, sizeof(pack_contents),
+           "pack App {\n"
+           "  format: \"raepack\"\n"
+           "  version: 1\n"
+           "  defaultTarget: compiled\n"
+           "  rae: {\n"
+           "    version: \"%d.%d\"\n"
+           "  }\n"
+           "  targets: {\n"
+           "    target compiled: {\n"
+           "      label: \"Compiled\"\n"
+           "      entry: \"src/Main.rae\"\n"
+           "      sources: {\n"
+           "        source: { path: \"src\", emit: compiled }\n"
+           "      }\n"
+           "    }\n"
+           "  }\n"
+           "}\n",
+           self.major, self.minor);
+  rc |= rae_init_write_if_missing("App.raepack", pack_contents);
 
   if (rc != 0 || font_rc != 0) {
     fprintf(stderr,

@@ -702,6 +702,28 @@ static bool parse_required_fields(RaePackParser* parser, RaePack* pack) {
         return false;
       }
       saw_targets = true;
+    } else if (str_eq_cstr(field->key, "rae")) {
+      /* Optional toolchain requirement: `rae: { version: "0.3" }` (#931). */
+      if (field->value.kind != RAEPACK_VALUE_BLOCK) {
+        diag_error(parser->file_path, (int)field->line, (int)field->column,
+                   "rae must be a block, e.g. rae: { version: \"0.3\" }");
+        parser->had_error = true;
+        return false;
+      }
+      RaePackBlock* rae_block = field->value.as.block;
+      for (const RaePackField* rae_field = rae_block ? rae_block->fields : NULL;
+           rae_field;
+           rae_field = rae_field->next) {
+        if (str_eq_cstr(rae_field->key, "version")) {
+          if (rae_field->value.kind != RAEPACK_VALUE_STRING) {
+            diag_error(parser->file_path, (int)rae_field->line,
+                       (int)rae_field->column, "rae version must be a string");
+            parser->had_error = true;
+            return false;
+          }
+          pack->rae_version = rae_field->value.as.string;
+        }
+      }
     }
   }
 

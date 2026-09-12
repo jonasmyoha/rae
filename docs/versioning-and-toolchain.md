@@ -1,8 +1,13 @@
 # Compiler versioning, toolchain pinning, and the road to a package manager
 
-**Status:** design, agreed direction. §1 is implemented (#930: `compiler/VERSION`,
-`rae --version`/`-v`/`--json`, the AGENTS.md bump discipline, the `v0.1.0` tag).
-§2–§4 are not; the QUEUE tasks (#931–#934) are the remaining phases. Extends
+**Status:** design, agreed direction. §1 (#930) and §2 (#931) are implemented:
+`compiler/VERSION`, `rae --version`/`-v`/`--json`, the bump discipline, the
+`v0.1.0` tag; and the `rae: { version }` pack requirement, the run/build/watch
+toolchain check (before the format preflight), `--check-toolchain`,
+`RAE_TOOLCHAIN_CHECK=off`, the `rae init` requirement, and the `rae.lock`
+`toolchain` block. §3–§4 are not; the QUEUE tasks (#932–#934) are the remaining
+phases. `rae toolchain use` (the repair command the error message names) lands
+in #932; until then it prints as guidance. Extends
 `docs/raepack-v2-and-packages.md` §12 (dependencies + `rae.lock`), which
 already covers *package* versions and dependency pins but says nothing about
 the **compiler's own version** — the gap this doc closes.
