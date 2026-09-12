@@ -45,6 +45,12 @@ NAMES=$(find "$TEST_DIR" \( -name "Main.rae" -o -name "main.rae" \) | sort | whi
   basename "$d"
 done)
 TOTAL=$(printf '%s\n' "$NAMES" | wc -l | tr -d ' ')
+# #919: the whole-tree format check comes BEFORE the suite (one extra "case").
+TREE_CHECK=1
+if [ -f tools/format-check-tree.sh ]; then
+  if bash tools/format-check-tree.sh; then TREE_CHECK=0; fi
+  echo
+fi
 echo "Running Rae tests (PARALLEL: $TOTAL cases, $JOBS jobs)..."
 echo
 START=$(date +%s)
@@ -72,6 +78,7 @@ for n in $NAMES; do
   fi
 done
 
+if [ "$TREE_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 # #917: the format-CLI behavior checks (traversal, --check/--json, mtime,
 # permissions, atomic write, over-cap) — one extra "case" folded into the run.
 if [ -f tools/test-format-cli.sh ]; then

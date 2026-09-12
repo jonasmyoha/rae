@@ -1,8 +1,8 @@
 {
   "name": "rae-lang",
   "displayName": "Rae Language",
-  "description": "Syntax highlighting for the Rae language",
-  "version": "0.2.0",
+  "description": "Syntax highlighting and the canonical formatter (`rae format`) for the Rae language",
+  "version": "0.3.0",
   "engines": {
     "vscode": "^1.60.0"
   },
@@ -45,6 +45,32 @@
         "scopeName": "source.raescene",
         "path": "./syntaxes/raescene.tmLanguage.json"
       }
-    ]
-  }
+    ],
+    "configuration": {
+      "title": "Rae",
+      "properties": {
+        "rae.binaryPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the `rae` compiler binary used for formatting. Empty: $RAE_BIN, then `rae` on PATH."
+        }
+      }
+    },
+    "configurationDefaults": {
+      "[rae]": {
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "rae-lang.rae-lang",
+        "editor.tabSize": 2,
+        "editor.insertSpaces": true,
+        "files.eol": "\n",
+        "files.insertFinalNewline": true,
+        "files.trimTrailingWhitespace": true
+      }
+    }
+  },
+  "main": "./extension.js",
+  "activationEvents": [
+    "onLanguage:rae"
+  ],
+  "publisher": "rae-lang"
 }

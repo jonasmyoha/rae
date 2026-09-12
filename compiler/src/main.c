@@ -187,6 +187,7 @@ static void watch_state_init(WatchState* state, const char* fallback_path);
 static void watch_state_free(WatchState* state);
 static bool watch_state_apply_sources(WatchState* state, WatchSources* new_sources);
 static const char* watch_state_poll_change(WatchState* state);
+static void watch_state_absorb_formatted(WatchState* state, const char* build_dir);
 static int run_vm_file(const RunOptions* run_opts, const char* project_root);
 static int run_compiled_file(const RunOptions* run_opts, const char* project_root);
 static int run_vm_watch(const RunOptions* run_opts, const char* project_root);
@@ -248,6 +249,12 @@ static bool parse_run_args(int argc, char** argv, RunOptions* opts) {
     const char* arg = argv[i];
     if (strcmp(arg, "--no-implicit") == 0) {
       opts->no_implicit = true;
+      i += 1;
+      continue;
+    }
+    if (strcmp(arg, "--check-format") == 0) {
+      /* #919: refuse to rewrite non-canonical sources; fail with the list. */
+      rae_preflight_set_mode(RAE_PREFLIGHT_CHECK);
       i += 1;
       continue;
     }
@@ -390,6 +397,12 @@ static bool parse_build_args(int argc, char** argv, BuildOptions* opts) {
     const char* arg = argv[i];
     if (strcmp(arg, "--no-implicit") == 0) {
       opts->no_implicit = true;
+      i += 1;
+      continue;
+    }
+    if (strcmp(arg, "--check-format") == 0) {
+      /* #919: refuse to rewrite non-canonical sources; fail with the list. */
+      rae_preflight_set_mode(RAE_PREFLIGHT_CHECK);
       i += 1;
       continue;
     }
@@ -1709,6 +1722,11 @@ static bool module_graph_load_module(ModuleGraph* graph,
     module_stack_print_trace(stack, module_path);
     return false;
   }
+  /* #919: the formatter runs FIRST — the build lexes the canonical bytes. */
+  if (!rae_preflight_source(file_path, &source, &file_size)) {
+    free(source);
+    return false;
+  }
   if (hash_out) {
     uint64_t module_hash = hash_bytes(source, file_size);
     *hash_out ^= module_hash + 0x9e3779b97f4a7c15ull + (*hash_out << 6) + (*hash_out >> 2);
@@ -2069,6 +2087,9 @@ static bool module_graph_build(ModuleGraph* graph, const char* entry_file, uint6
   }
   free(module_path);
   free(resolved_entry);
+  /* #919: --check-format / RAE_FORMAT=check — the closure is loaded, now
+   * refuse the build if any of it was not canonical. */
+  if (rae_preflight_report() > 0) return false;
   return true;
 }
 
@@ -2212,7 +2233,8 @@ static void print_usage(const char* prog) {
   fprintf(stderr, "                  Build and run Rae source. With no file, infers\n");
   fprintf(stderr, "                  the entry from the current folder (Main.rae, or a\n");
   fprintf(stderr, "                  devtools.json 'entry') and defaults to --target compiled.\n");
-  fprintf(stderr, "                  Options: --project <dir>, --watch,\n");
+  fprintf(stderr, "                  Options: --project <dir>, --watch, --check-format\n");
+  fprintf(stderr, "                  (refuse to rewrite non-canonical sources; RAE_FORMAT=check|off),\n");
   fprintf(stderr, "                           --target <live|compiled>,\n");
   fprintf(stderr, "                           --profile <dev|release> (or --debug/--release;\n");
   fprintf(stderr, "                           compiled target: dev=-O0 -g, release=-O2 -DNDEBUG)\n");
@@ -3754,7 +3776,9 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
       snprintf(build_dir, sizeof(build_dir),
                "%s/build-%lld", channel_build_root, build_seq);
 
-      if (!watch_build_into_dir(entry, project_root, build_dir, new_bin, run_opts->profile)) {
+      bool rebuilt = watch_build_into_dir(entry, project_root, build_dir, new_bin, run_opts->profile);
+      watch_state_absorb_formatted(&ws, build_dir);
+      if (!rebuilt) {
         char msg[128];
         snprintf(msg, sizeof(msg), "build %s failed", build_id);
         if (child < 0) {
@@ -3977,6 +4001,17 @@ static int run_command(const char* cmd, int argc, char** argv) {
                     b_webgpu ? "webgpu" : "-");
             fclose(df);
           }
+          /* #919: the files the format preflight rewrote, one per line, so
+           * `rae watch` can ignore the mtime events of its own writes. */
+          char formatted_path[PATH_MAX];
+          snprintf(formatted_path, sizeof(formatted_path), "%s.formatted", build_opts.out_path);
+          FILE* ff = fopen(formatted_path, "w");
+          if (ff) {
+            for (int fi = 0; fi < rae_preflight_rewritten_count(); fi++) {
+              fprintf(ff, "%s\n", rae_preflight_rewritten_path(fi));
+            }
+            fclose(ff);
+          }
         }
         return okc ? 0 : 1;
       }
@@ -4071,6 +4106,34 @@ static const char* RAE_INIT_TEMPLATE_MAIN_RAE =
 // Tabs in the recipe lines below are real \t — required by make. The generated
 // starter is dependency-light; apps add SDL3/WebGPU flags when they import
 // those platform modules.
+/* #919: every new project carries the formatting section of AGENTS.md so an
+ * agent working in it knows the compiler owns layout. */
+static const char* RAE_INIT_TEMPLATE_AGENTS_MD =
+  "# AGENTS.md — working in this Rae project\n"
+  "\n"
+  "## Source formatting: `rae format` owns layout\n"
+  "\n"
+  "Rae has ONE canonical layout and the compiler is its authority — there is no\n"
+  "style configuration.\n"
+  "\n"
+  "- 2-space indent, 100 columns, LF, one final newline, no trailing whitespace,\n"
+  "  braces on the declaration line; files are capped at 1,000 lines.\n"
+  "- Function parameters and call arguments: 1-3 items may share the line if the\n"
+  "  whole header/call fits in 100 columns; from FOUR items, or whenever it does\n"
+  "  not fit, every item goes on its own line (two spaces deeper, no commas, `)`\n"
+  "  back at the declaration's indentation). Object and collection literals and\n"
+  "  enum members: the same from FIVE items. A `type` declaration is always one\n"
+  "  field per line. Never hand-align, never keep personal wrapping.\n"
+  "- The compiler formats FIRST: `rae run` / `rae build` / `rae watch` rewrite\n"
+  "  the project's changed `.rae` files canonically (atomic, in place) before\n"
+  "  compiling. `--check-format` or `RAE_FORMAT=check` refuse to write and fail\n"
+  "  with the file list instead (use that in CI). A file whose canonical form\n"
+  "  would exceed 1,000 lines is an error to split, never a rewrite.\n"
+  "- `rae format <files|dirs>` formats in place; `--check` lists unformatted\n"
+  "  files, `--stdout` prints, `--stdin --stdout` filters, `--rules --json`\n"
+  "  prints the rules. `# raefmt: off` / `# raefmt: on` fence a verbatim region\n"
+  "  (rare: foreign snippets, aligned tables).\n";
+
 static const char* RAE_INIT_TEMPLATE_MAKEFILE =
   "# Generated by `rae init`. Set RAE_REPO if the Rae monorepo lives\n"
   "# somewhere other than ../rae, e.g. `make RAE_REPO=/abs/path`.\n"
@@ -4213,6 +4276,7 @@ static int cmd_init(int argc, char** argv) {
   // the Makefile + src layout still get written.
   int font_rc = rae_init_download_roboto();
   rc |= rae_init_write_if_missing("Makefile", RAE_INIT_TEMPLATE_MAKEFILE);
+  rc |= rae_init_write_if_missing("AGENTS.md", RAE_INIT_TEMPLATE_AGENTS_MD);
 
   if (rc != 0 || font_rc != 0) {
     fprintf(stderr,
@@ -4338,6 +4402,54 @@ static time_t wait_for_stable_timestamp(const char* path, time_t initial) {
     stable_checks += 1;
   }
   return current;
+}
+
+/* #919: the build's format preflight rewrote these files (listed in the
+ * emit subprocess's `<c>.formatted` sidecar); re-stamp their mtimes and their
+ * directories' so the watcher does not treat its own writes as an edit. */
+static void watch_state_absorb_formatted(WatchState* state, const char* build_dir) {
+  char list_path[PATH_MAX];
+  snprintf(list_path, sizeof(list_path), "%s/app.c.formatted", build_dir);
+  FILE* f = fopen(list_path, "r");
+  if (!f) return;
+  char line[PATH_MAX];
+  while (fgets(line, sizeof(line), f)) {
+    size_t n = strlen(line);
+    while (n > 0 && (line[n-1] == '\n' || line[n-1] == '\r')) line[--n] = '\0';
+    if (n == 0) continue;
+    char resolved[PATH_MAX];
+    const char* written = realpath(line, resolved) ? resolved : line;
+    for (size_t i = 0; i < state->sources.file_count; ++i) {
+      char candidate[PATH_MAX];
+      const char* watched = realpath(state->sources.files[i], candidate) ? candidate : state->sources.files[i];
+      if (strcmp(watched, written) == 0) {
+        time_t modified = file_last_modified(state->sources.files[i]);
+        state->file_mtimes[i] = (modified == (time_t)-1) ? 0 : modified;
+      }
+    }
+    /* the atomic rename touched the containing directory too */
+    char dir[PATH_MAX];
+    snprintf(dir, sizeof(dir), "%s", written);
+    char* slash = strrchr(dir, '/');
+    if (slash) *slash = '\0';
+    for (size_t i = 0; i < state->sources.dir_count; ++i) {
+      char candidate[PATH_MAX];
+      const char* watched = realpath(state->sources.dirs[i], candidate) ? candidate : state->sources.dirs[i];
+      if (strcmp(watched, dir) == 0) {
+        time_t modified = file_last_modified(state->sources.dirs[i]);
+        state->dir_mtimes[i] = (modified == (time_t)-1) ? 0 : modified;
+      }
+    }
+    if (state->fallback_path) {
+      char candidate[PATH_MAX];
+      const char* watched = realpath(state->fallback_path, candidate) ? candidate : state->fallback_path;
+      if (strcmp(watched, written) == 0) {
+        time_t modified = file_last_modified(state->fallback_path);
+        state->fallback_mtime = (modified == (time_t)-1) ? 0 : modified;
+      }
+    }
+  }
+  fclose(f);
 }
 
 static const char* watch_state_poll_change(WatchState* state) {

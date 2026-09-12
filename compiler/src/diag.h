@@ -25,5 +25,8 @@ void diag_warn(const char* file, int line, int col, const char* message);
 void diag_fatal(const char* message);
 int diag_error_count(void);
 void diag_reset(void);
+/* #919: silence the printing (errors are still counted) — the format preflight
+ * parses a file before the build does and must not report twice. */
+void diag_set_quiet(bool quiet);
 
 #endif /* DIAG_H */
