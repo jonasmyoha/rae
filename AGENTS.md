@@ -523,6 +523,19 @@ The compiler has one version, `compiler/VERSION` — a single semver line
   reruns `make -C compiler build`, refusing when the checkout has uncommitted
   tracked changes. One checkout moved between tags; side-by-side toolchains are
   out of scope.
+- **Dependencies (#933).** A `.raepack` may declare
+  `dependencies: { dep ui: { path: "../lib-ui" } dep codec: { git: "<url>", rev: "v1.2.0" } }`.
+  A dep named `x` owns the import prefix `x/` — `import x/Foo` resolves to
+  `<depdir>/Foo.rae`, ahead of `lib/` and the stdlib — and a dep's own modules
+  address each other the same way (`import x/Bar`). Path deps resolve in place;
+  git deps are cloned into `<project>/.rae/deps/<name>` (gitignored) and pinned
+  to the commit the project's `rae.lock` records — the lock wins over the pack's
+  `rev`, so delete the lock record to move a dep. The lock's `dep` lines carry
+  `source`, `rev`, `commit` and a `git-tree` content hash; its first record is
+  `dep lib` — the stdlib resolved through the toolchain, so projects need no
+  `lib` symlink. Dependency sources are vendored: the format preflight neither
+  rewrites nor check-fails them, and the implicit project scan skips every
+  dot-directory so `.rae/deps` is reached only through the resolver.
 
 ---
 ## Interaction rules
