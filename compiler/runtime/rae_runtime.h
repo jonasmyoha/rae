@@ -852,7 +852,8 @@ void  rae_wgpu_ctx_poll(int wait);
 void* rae_wgpu_null_ptr(void);
 /* #528 GPU timestamp timing */
 int   rae_wgpu_have_timestamp(void);
-void  rae_wgpu_report(const char* tag);   /* env-gated live wgpu object counts */
+void  rae_wgpu_report(const char* tag);   /* live wgpu object counts */
+void  rae_wgpu_report_periodic(void);     /* every 120 presented frames; RAE_WGPU_REPORT=0 silences */
 int   rae_g2d_window_visible(void);   /* 0 while window hidden/minimized/occluded (gpu2d.windowVisible) */
 int   rae_wgpu_map_read(void* buffer, uint64_t size, void* dst);
 /* Owned asynchronous map requests; serialized on the WebGPU context thread. */

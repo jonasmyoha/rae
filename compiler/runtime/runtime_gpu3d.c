@@ -1133,6 +1133,7 @@ int64_t rae_g3d_tonemap_pending(void) { return g3d_tonemap_pending ? 1 : 0; }
  */
 static void rae_g3d_present_offscreen(WGPUTexture tex, int width, int height) {
     if (!tex) { rae_wgpu_poll(0); return; }
+    rae_wgpu_report_periodic();
     /* A frame's pixels exist by this point whether or not there is a surface to
      * show them on, so mark it here rather than at wgpuSurfacePresent -- headless
      * returns before ever presenting. */
