@@ -94,6 +94,9 @@ type WaterBody {
   # scene where it hits (the sky stays the fallback); 0 = sky only (mobile).
   ssr: Int
   ssrSteps: Int  # march steps per pixel (24 desktop); more = longer, finer rays
+  # Near-camera sea spray (#859, desktop): 1 = the app's SprayEmitter bursts
+  # droplets where the cached FFT Jacobian says a crest is breaking; 0 = none.
+  spray: Int
 }
 
 # A stylised lake with the surface at `surfaceZ`: pale turquoise shallows, a deep
@@ -154,6 +157,7 @@ func createLakeToon(surfaceZ: copy Float, extent: copy Float) ret WaterBody {
     updateRate: 1
     ssr: 0
     ssrSteps: 0
+    spray: 0
   }
 }
 
@@ -293,5 +297,6 @@ func createOceanRealistic(surfaceZ: copy Float) ret WaterBody {
   body.waveCount = 0
   body.ssr = 1
   body.ssrSteps = 24
+  body.spray = 1
   ret body
 }
