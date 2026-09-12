@@ -71,6 +71,13 @@ for n in $NAMES; do
   else FAILED=$((FAILED+1)); echo; echo "FAIL: $n (runner died, rc=$rc)"; tail -5 "$log" | sed 's/^/    /'
   fi
 done
+
+# #917: the format-CLI behavior checks (traversal, --check/--json, mtime,
+# permissions, atomic write, over-cap) — one extra "case" folded into the run.
+if [ -f tools/test-format-cli.sh ]; then
+  echo
+  if bash tools/test-format-cli.sh; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
+fi
 echo
 echo "=========================================="
 echo "Results: $PASSED passed, $FAILED failed"
