@@ -107,11 +107,23 @@ else
 TEST_RUNNER = tools/run_tests_parallel.sh
 endif
 
-.PHONY: all build test test-examples clean smoke install uninstall c-surface-gate
+.PHONY: all build test test-examples clean smoke install uninstall c-surface-gate FORCE
 
 all: build
 
 build: $(TARGET)
+
+# Version info (#930, docs/versioning-and-toolchain.md §1). Regenerated on
+# every build from VERSION + git state; rewritten only when its content
+# actually changes, so touching it does not force an unrelated rebuild of
+# every object that happens to include it (just main.o, which reads it).
+VERSION_HEADER = $(BUILD_DIR)/version_gen.h
+
+$(VERSION_HEADER): FORCE
+	@mkdir -p $(BUILD_DIR)
+	@bash tools/gen-version-header.sh > $(VERSION_HEADER).tmp
+	@cmp -s $(VERSION_HEADER).tmp $(VERSION_HEADER) 2>/dev/null || mv $(VERSION_HEADER).tmp $(VERSION_HEADER)
+	@rm -f $(VERSION_HEADER).tmp
 
 # `make install` — symlink the built rae binary into a PATH directory
 # so plain `rae init` / `rae watch` / etc. work from any shell. Defaults
@@ -150,6 +162,10 @@ $(BUILD_DIR)/vm_patch.o: src/vm_patch.c src/vm.h src/vm_chunk.h
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 $(BUILD_DIR)/sys_thread.o: src/sys_thread.c src/sys_thread.h
+	@mkdir -p $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+$(BUILD_DIR)/main.o: src/main.c $(VERSION_HEADER)
 	@mkdir -p $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
