@@ -75,11 +75,12 @@ func readoutId(index: view Int) ret String {
 
 # Where this module's shared scenes live.
 #
-# Paths resolve against the process's working directory, which for an
-# in-tree example is the repository root. A packaged app that relocates
-# its assets sets RAE_APP3D_SCENES rather than forking the module — the
-# whole point of the shared folder is that the next app does not copy
-# the file just to change where it sits.
+# The path is tried against the process's working directory first and then
+# against $RAE_STDLIB (the toolchain's lib/, which `rae run`/`watch` export),
+# so a downstream project needs no lib/ copy of its own (#937). A packaged
+# app that relocates its assets sets RAE_APP3D_SCENES rather than forking the
+# module — the whole point of the shared folder is that the next app does not
+# copy the file just to change where it sits.
 func app3dSceneDir() pub ret String {
   let override: String = Sys.getEnv(name: "RAE_APP3D_SCENES")
   if override.length() > 0 {
