@@ -857,6 +857,8 @@ void* rae_wgpu_ctx_queue(void);
 void* rae_wgpu_ctx_adapter(void);
 void* rae_wgpu_ctx_instance(void);
 void  rae_wgpu_ctx_poll(int wait);
+void  rae_wgpu_watch_submission(uint64_t index);      /* #938 */
+uint32_t rae_wgpu_submission_done(uint64_t index);   /* #938 */
 void* rae_wgpu_null_ptr(void);
 /* #528 GPU timestamp timing */
 int   rae_wgpu_have_timestamp(void);
