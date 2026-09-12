@@ -250,7 +250,12 @@ func renderGbufferPass(
       batch: characterSystem.crowdBatch
     )
   }
-  grassDraw(grass: grassCompute, resources: resources)
+  grassDraw(
+    grass: grassCompute
+    resources: resources
+    gbuffer: cache
+    gbufferResources: rendererResources
+  )
   # Water splashes for anything wading this frame (#84): advance + emit here; the
   # droplets are DRAWN later, at the transparentForward tag, as alpha-fading
   # cubes (#844) — they no longer go into this G-buffer pass.
@@ -260,7 +265,7 @@ func renderGbufferPass(
     world: world
     deltaTime: deltaTime
   )
-  Gbuffer.endPass()
+  Gbuffer.endPass(cache: cache, resources: rendererResources)
 }
 
 # ----- render phase: animation sample + render-graph walk ------------------
@@ -464,7 +469,7 @@ func renderApp(
           waterDraw(
             waterSystem: waterSystem
             resources: resources
-            meshes: renderSystem.renderer.passes.gbuffer.meshes
+            gbuffer: renderSystem.renderer.passes.gbuffer
             meshResources: meshResources
             camera: cameraSystem.camera
             light: cameraSystem.light

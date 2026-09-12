@@ -1,13 +1,18 @@
 # water/WaterGpuBridge — the one water module that touches raw handles (#873).
-# It adopts the legacy gbuffer's per-frame resources and mesh buffers into the
-# manager as EXTERNALS (referenced, never owned: the gbuffer keeps releasing
-# them), reinterprets readback bytes as floats, and hands the optional timing
-# pointer to a one-pass multi-dispatch recording. Everything else in water is
-# plain Rae over typed IDs. The unsafe blocks here carry the obligations the
-# gbuffer already guarantees: a frame resource stays valid until the targets
-# generation changes (re-adopted then), a mesh buffer until renderer shutdown.
+# It adopts the renderer's per-frame resources and mesh buffers into the
+# water manager as EXTERNALS (referenced, never owned): since #906 the frame
+# uniform, the scene depth view and the mesh buffers are the renderer's
+# GbufferCache manager objects (a cross-manager borrow, read through the
+# renderer manager's handles), while the lit / opaque-snapshot views are still
+# C's. It also reinterprets readback bytes as floats and hands the optional
+# timing pointer to a one-pass multi-dispatch recording. Everything else in
+# water is plain Rae over typed IDs. The unsafe blocks here carry the
+# obligations the renderer already guarantees: a frame resource stays valid
+# until the targets generation changes (re-adopted then), a mesh buffer until
+# renderer shutdown.
 open MeshStore
 open Gbuffer
+open GbufferResources
 open GbufferPasses
 open TransparentForward
 open gpu/GpuResources
@@ -31,20 +36,33 @@ func waterLitFormat() ret Int32 {
 
 # Adopts the frame uniform, scene depth view, opaque snapshot view and lit
 # view of the current targets generation. All four or none.
-func adoptFrameExternals(resources: mod GpuResources) ret WaterFrameExternals {
+func adoptFrameExternals(
+  resources: mod GpuResources
+  gbuffer: view GbufferCache
+  gbufferResources: view GpuResources
+) ret WaterFrameExternals {
   var frame: WaterFrameExternals = noFrameExternals()
   var adopted: Int = 0
+  if not isValidBuffer(resources: gbufferResources, id: gbuffer.frameUniform) {
+    ret frame
+  }
+  if not gbufferTargetsReady(cache: gbuffer, resources: gbufferResources) {
+    ret frame
+  }
   unsafe {
     if let frameUniform: ExternalId = adoptExternalBuffer(
       resources: resources
-      handle: gbFrameUbuf()
+      handle: refHandle(resources: gbufferResources, ref: bufferRef(id: gbuffer.frameUniform))
     ) {
       frame.frameUniform = frameUniform
       adopted = adopted + 1
     }
     if let depthView: ExternalId = adoptExternalTextureView(
       resources: resources
-      handle: gbViewDepth()
+      handle: refHandle(
+        resources: gbufferResources
+        ref: gbufferTargetRef(cache: gbuffer, index: gbufferTargetDepth)
+      )
     ) {
       frame.depthView = depthView
       adopted = adopted + 1

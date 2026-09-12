@@ -83,7 +83,7 @@ func ensureViewBind(cache: mod ViewPassCache, resources: mod GpuResources) {
   if bindGroupIsUsable(resources: resources, id: cache.bindGroup) {
     ret
   }
-  if gbTargetsReady() is 0 {
+  if not gbTargetsBorrowed() {
     ret
   }
   let entries: List(ResourceRef) = List.create(ResourceRef, cap: 5)

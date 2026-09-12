@@ -59,18 +59,21 @@ open gpu/GpuResources
 open gpu/GpuLifetime
 open gpu/GpuRender
 open gpu/GpuRenderPass
+open gpu/GpuRenderTransfer
 open gpu/GpuIds
 open Gpu2dCanvas
 open MeshStore
 open GbufferNative
 open GbufferResources
 
-# ----- geometry-pass begin: frame prep (C) + render pass (Rae) (#503) --------
-# C preps the frame — lazily creates pipeline/targets, resets counters, builds
-# and uploads the TAA-jittered frame uniform (stateful CPU math) — and returns 1
-# when ready. Everything after (the command encoder, the render pass with its 3
-# G-buffer colour attachments + depth, and binding the static pipeline) is built
-# in Rae over the generated bindings.
+# ----- geometry-pass begin (#503, manager-owned since #906) -------------------
+# The frame is the GbufferCache's: manager targets (rebuilt to the offscreen
+# size), a manager frame uniform + draws buffer, and a manager Recording per
+# frame whose multi-attachment pass (3 G-buffer colour views + depth) every
+# draw records into; end() submits it TRACKED (the cache polls its in-flight
+# submissions). C computes the frame-derived uniform data (TAA jitter, previous
+# view-projection) into the Rae buffer and BORROWS the four views for the
+# post passes that are still C (read through gbViewA..gbViewDepth below).
 func gbViewA() unsafe extern("rae_gb_view_a") ret Ptr
 
 func gbViewB() unsafe extern("rae_gb_view_b") ret Ptr
@@ -79,9 +82,11 @@ func gbViewC() unsafe extern("rae_gb_view_c") ret Ptr
 
 func gbViewDepth() unsafe extern("rae_gb_view_depth") ret Ptr
 
-func gbTargetsReady() ret Int {
+# True while C holds the borrowed target views (between the first begin and
+# the renderer's shutdown) — what the still-C post passes read.
+func gbTargetsBorrowed() ret Bool {
   unsafe {
-    ret nativeGbTargetsReady()
+    ret gbViewDepth() is not webgpuNull()
   }
 }
 
@@ -97,14 +102,6 @@ func gbTargetsGen() ret Int {
   }
 }
 
-# Static bind group creation (#503): built in Rae from the pipeline's auto
-# layout + the frame uniform and draws buffers (still C-created), stored back
-# into the C global via the setter so draws and begin() see it.
-func gbFrameUbuf() unsafe extern("rae_gb_frame_ubuf") ret Ptr
-
-# Create the frame uniform + draws storage buffers once, over the bindings, and
-# store them back into C so the frame-uniform upload, draws and bind groups use
-# them. Distinct flag bits, so `+` is the flag union.
 # #764: the G-buffer geometry pass caches — the "have I made the pipelines /
 # buffers / static+skin binds" flags, plus the reused attachment arrays and the
 # per-draw instance-record scratch (all zero-alloc, #573) — were module-level
@@ -112,13 +109,24 @@ func gbFrameUbuf() unsafe extern("rae_gb_frame_ubuf") ret Ptr
 # GbufferCache on RenderPasses, threaded from DeferredRenderer through beginPass /
 # renderSceneWorld and the draw entry points.
 # #912: the geometry pass's objects are typed IDs in the DeferredRenderer-owned
-# manager — the static / skin / terrain pipelines and their bind groups —
-# with the frame uniform, draws buffer and skin palette (still C-stored, created
-# here or by the skin uploader) adopted as externals in `adopted`.
+# manager — the static / skin / terrain pipelines and their bind groups.
+# #906: so are the frame itself — the four targets (A, B, C, depth) + views,
+# the frame uniform, the draws buffer with its per-frame cursor, and the open
+# frame's Recording / raw pass + the tracked in-flight submissions. Only the
+# skin palette (C, until #921) is still adopted in `adopted`.
 type GbufferCache {
-  buffersMade: Bool
-  colorAtts: List(WGPURenderPassColorAttachment)
-  depthAtt: List(WGPURenderPassDepthStencilAttachment)
+  targets: List(TextureId)  # A, B, C, depth (index 0..3)
+  targetViews: List(TextureViewId)
+  targetWidth: Int
+  targetHeight: Int
+  targetsGen: Int  # bumped per rebuild; the post passes re-fit on it
+  frameUniform: BufferId
+  draws: BufferId
+  frameFloats: List(Float)  # the frame uniform's 36 floats, C-computed
+  drawCount: Int  # the draws-buffer cursor, reset per begin
+  recording: opt Recording  # the open frame's manager recording
+  pass: Ptr  # the open geometry pass (null between frames)
+  inFlight: List(SubmissionId)
   pipelinesMade: Bool
   staticPipeline: RenderPipelineId
   skinPipeline: RenderPipelineId
@@ -140,9 +148,18 @@ type GbufferCache {
 func createGbufferCache() pub ret GbufferCache {
   unsafe {
     ret GbufferCache {
-      buffersMade: false
-      colorAtts: List.create(WGPURenderPassColorAttachment, cap: 3)
-      depthAtt: List.create(WGPURenderPassDepthStencilAttachment, cap: 1)
+      targets: fillTextureIds(count: gbufferTargetCount)
+      targetViews: fillTextureViewIds(count: gbufferTargetCount)
+      targetWidth: 0
+      targetHeight: 0
+      targetsGen: 0
+      frameUniform: noBufferId()
+      draws: noBufferId()
+      frameFloats: List.create(Float, cap: gbufferFrameFloats)
+      drawCount: 0
+      recording: none
+      pass: webgpuNull()
+      inFlight: List.create(SubmissionId, cap: 4)
       pipelinesMade: false
       staticPipeline: noRenderPipelineId()
       skinPipeline: noRenderPipelineId()
@@ -185,78 +202,120 @@ func begin(
   clearG: copy Float
   clearB: copy Float
 ) pub {
+  if gbPrepare() is 0 {
+    ret
+  }
+  if gbufferFrameActive(cache: cache) {
+    ret
+  }
+  ensurePipelines(cache: cache, resources: resources)
+  ensureTargets(cache: cache, resources: resources)
+  if not gbufferTargetsReady(cache: cache, resources: resources) {
+    ret
+  }
+  ensureGbBuffers(cache: cache, resources: resources)
+  ensureStaticBind(cache: cache, resources: resources)
+  if not uploadFrameUniform(
+    cache: cache
+    resources: resources
+    viewProj: viewProj
+    clearR: clearR
+    clearG: clearG
+    clearB: clearB
+  ) {
+    ret
+  }
+  cache.drawCount = 0
+  # A: octahedral normal + shading mode. (0.5, 0.5) decodes to +Z, mode 0 = lit.
+  # B: albedo, cleared to the sky/background colour.
+  # C: material/motion. Motion clears to the biased zero (no movement).
+  # Depth: reverse-Z, so the far plane clears to 0 (#367).
+  let motionZero: Float = gbMotionZero()
+  var targets: RenderTargetSet = createRenderTargetSet(clear: true)
+  addColorTarget(
+    targets: targets
+    colorView: gbufferTargetRef(cache: cache, index: gbufferTargetA)
+    r: 0.5
+    g: 0.5
+    b: 0.0
+    a: 0.0
+  )
+  addColorTarget(
+    targets: targets
+    colorView: gbufferTargetRef(cache: cache, index: gbufferTargetB)
+    r: clearR
+    g: clearG
+    b: clearB
+    a: 1.0
+  )
+  addColorTarget(
+    targets: targets
+    colorView: gbufferTargetRef(cache: cache, index: gbufferTargetC)
+    r: motionZero
+    g: motionZero
+    b: 0.0
+    a: 1.0
+  )
+  setDepthTarget(
+    targets: targets
+    depthView: gbufferTargetRef(cache: cache, index: gbufferTargetDepth)
+    clear: true
+    clearValue: 0.0
+    readOnly: false
+  )
+  if let recording: Recording = beginRecording(resources: resources) {
+    var opened: Recording = own recording
+    unsafe {
+      cache.pass = beginRenderPassMulti(recording: opened, resources: resources, targets: targets)
+    }
+    cache.recording = own opened
+  }
+  # Every draw binds its own pipeline + group (gbIssueInstanced), so the pass
+  # opens with nothing bound; the C-prepared SDF draw binds its own too.
+  if gbufferFrameActive(cache: cache) {
+    gbSetFrameOpen(open: 1)
+  }
+}
+
+# The frame uniform's data is C math (jitter + previous view-projection,
+# remembered there for the still-C post passes); Rae uploads it into its
+# manager buffer.
+func uploadFrameUniform(
+  cache: mod GbufferCache
+  resources: mod GpuResources
+  viewProj: view Mat4
+  clearR: copy Float
+  clearG: copy Float
+  clearB: copy Float
+) ret Bool {
+  loop cache.frameFloats.length < gbufferFrameFloats {
+    cache.frameFloats.add(value: 0.0)
+  }
   unsafe {
-    if gbPrepare() is 0 {
-      ret
-    }
-    ensurePipelines(cache: cache, resources: resources)
-    ensureTargets()
-    if gbTargetsReady() is 0 {
-      ret
-    }
-    ensureGbBuffers(cache: cache)
-    ensureStaticBind(cache: cache, resources: resources)
-    if gbFrameUniform(
+    if gbFrameData(
       viewProj: viewProj
       clearR: clearR
       clearG: clearG
       clearB: clearB
+      w: cache.targetWidth
+      h: cache.targetHeight
+      out: cache.frameFloats.data
     ) is 0 {
-      ret
+      ret false
     }
-    ensureGbAttachments(cache: cache)
+    ret writeBufferFromPtr(
+      resources: resources
+      id: cache.frameUniform
+      offset: 0
+      data: cache.frameFloats.data
+      size: gbufferFrameFloats * 4
+    )
+  }
+}
 
-    let undefinedSlice: UInt32 = WGPU_DEPTH_SLICE_UNDEFINED as UInt32
-    let motionZero: Float64 = gbMotionZero() as Float64
-
-    # A: octahedral normal + shading mode. (0.5, 0.5) decodes to +Z, mode 0 = lit.
-    let attA: WGPURenderPassColorAttachment = {
-      view_: gbViewA()
-      depthSlice: undefinedSlice
-      loadOp: WGPULoadOp_Clear
-      storeOp: WGPUStoreOp_Store
-      clearValue: { r: 0.5, g: 0.5, b: 0.0, a: 0.0 }
-    }
-    # B: albedo, cleared to the sky/background colour.
-    let attB: WGPURenderPassColorAttachment = {
-      view_: gbViewB()
-      depthSlice: undefinedSlice
-      loadOp: WGPULoadOp_Clear
-      storeOp: WGPUStoreOp_Store
-      clearValue: { r: clearR as Float64, g: clearG as Float64, b: clearB as Float64, a: 1.0 }
-    }
-    # C: material/motion. Motion clears to the biased zero (no movement).
-    let attC: WGPURenderPassColorAttachment = {
-      view_: gbViewC()
-      depthSlice: undefinedSlice
-      loadOp: WGPULoadOp_Clear
-      storeOp: WGPUStoreOp_Store
-      clearValue: { r: motionZero, g: motionZero, b: 0.0, a: 1.0 }
-    }
-    cache.colorAtts.set(index: 0, value: attA)
-    cache.colorAtts.set(index: 1, value: attB)
-    cache.colorAtts.set(index: 2, value: attC)
-
-    # Depth: reverse-Z, so the far plane clears to 0 (#367).
-    let depthAtt: WGPURenderPassDepthStencilAttachment = {
-      view_: gbViewDepth()
-      depthLoadOp: WGPULoadOp_Clear
-      depthStoreOp: WGPUStoreOp_Store
-      depthClearValue: 0.0
-    }
-    cache.depthAtt.set(index: 0, value: depthAtt)
-
-    let rpDesc: WGPURenderPassDescriptor = {
-      colorAttachmentCount: 3 as UInt64
-      colorAttachments: cache.colorAtts.data
-      depthStencilAttachment: cache.depthAtt.data
-    }
-    let encDesc: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
-    let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
-    let pass: Ptr = wgpuCommandEncoderBeginRenderPass(commandEncoder: enc, descriptor: rpDesc)
-    # Every draw binds its own pipeline + group (gbIssueInstanced), so the pass
-    # opens with nothing bound; the C-prepared SDF draw binds its own too.
-    gbSetFrame(enc: enc, pass: pass)
+func gbufferFrameActive(cache: view GbufferCache) ret Bool {
+  unsafe {
+    ret cache.pass is not webgpuNull()
   }
 }
 
@@ -266,8 +325,8 @@ func begin(
 # DrawIndexed. Every draw — static, skinned, instanced — funnels through here,
 # so the whole encoding lives in Rae over the generated bindings, no C shim.
 func gbIssueInstanced(
+  cache: mod GbufferCache
   resources: mod GpuResources
-  pass: copy Ptr
   pipeline: view RenderPipelineId
   bind: view BindGroupId
   vbuf: copy Ptr
@@ -279,16 +338,18 @@ func gbIssueInstanced(
 ) {
   unsafe {
     let strideBytes: Int = instanceRecordFloats * 4
-    wgpuQueueWriteBuffer(
-      queue: webgpuQueue()
-      buffer: gbDrawsBuffer()
-      bufferOffset: (base * strideBytes) as UInt64
+    if not writeBufferFromPtr(
+      resources: resources
+      id: cache.draws
+      offset: base * strideBytes
       data: records
-      size: (count * strideBytes) as UInt64
-    )
+      size: count * strideBytes
+    ) {
+      ret
+    }
     if recordDrawIndexedInPass(
       resources: resources
-      pass: pass
+      pass: cache.pass
       pipeline: pipeline
       bindGroup: bind
       vertexBuffer: vbuf
@@ -297,7 +358,7 @@ func gbIssueInstanced(
       instanceCount: count
       firstInstance: base
     ) {
-      gbAdvanceDraws(count: count)
+      gbAdvanceDraws(cache: cache, count: count)
     }
   }
 }
@@ -320,8 +381,8 @@ func drawRecords(
     if gbMeshReady(cache: cache, resources: resources, mesh: mesh) is 0 {
       ret
     }
-    let base: Int = gbDrawCount()
-    let remaining: Int = gbMaxDraws() - base
+    let base: Int = gbDrawCount(cache: cache)
+    let remaining: Int = gbufferMaxDraws - base
     var n: Int = count
     if n > remaining {
       n = remaining
@@ -330,8 +391,8 @@ func drawRecords(
       ret
     }
     gbIssueInstanced(
+      cache: cache
       resources: resources
-      pass: gbPass()
       pipeline: cache.staticPipeline
       bind: cache.staticBind
       vbuf: gbMeshVbuf(cache: cache, resources: resources, mesh: mesh)
@@ -344,34 +405,27 @@ func drawRecords(
   }
 }
 
-# Context accessors for the instanced draw (#502) — opaque frame handles + the
-# shared instance cursor, from the C geometry pass. See runtime_gpu3d_gbuffer.c.
-func gbPass() unsafe extern("rae_gb_pass") ret Ptr
-
-func gbDrawsBuffer() unsafe extern("rae_gb_draws_buffer") ret Ptr
-
-func gbMaxDraws() ret Int {
-  unsafe {
-    ret nativeGbMaxDraws()
-  }
+# The draws-buffer cursor (#906, was C's gb_draw_count): every G-buffer draw
+# — static, skinned, instanced, terrain, sprite, grass, transparent — writes
+# its DrawU records at the cursor and advances it; begin() resets it.
+func gbDrawCount(cache: view GbufferCache) ret Int {
+  ret cache.drawCount
 }
 
-func gbDrawCount() ret Int {
-  unsafe {
-    ret nativeGbDrawCount()
+func gbAdvanceDraws(cache: mod GbufferCache, count: copy Int) {
+  if count <= 0 {
+    ret
   }
-}
-
-func gbAdvanceDraws(count: copy Int) {
-  unsafe {
-    nativeGbAdvanceDraws(count: count)
+  cache.drawCount = cache.drawCount + count
+  if cache.drawCount > gbufferMaxDraws {
+    cache.drawCount = gbufferMaxDraws
   }
 }
 
 # #905: mesh lookups go to the cache's MeshStore. "Ready to draw" also needs
 # the geometry pass open (the C rae_gb_mesh_ready folded that in).
 func gbMeshReady(cache: view GbufferCache, resources: view GpuResources, mesh: copy Int) ret Int {
-  if gbFrameActive() is 0 {
+  if not gbufferFrameActive(cache: cache) {
     ret 0
   }
   if meshStoreReady(store: cache.meshes, resources: resources, mesh: mesh) {
@@ -422,6 +476,7 @@ func gbSkinPaletteReady() ret Int {
 }
 
 func drawMetaballs(
+  cache: view GbufferCache
   packedBalls: copy Ptr
   count: copy Int
   packedColors: copy Ptr
@@ -453,7 +508,10 @@ func drawMetaballs(
     if gi < 0 {
       ret
     }
-    let pass: Ptr = gbPass()
+    let pass: Ptr = cache.pass
+    if pass is webgpuNull() {
+      ret
+    }
     wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: gbSdfPipeline())
     wgpuRenderPassEncoderSetBindGroup(
       renderPassEncoder: pass
@@ -470,12 +528,6 @@ func drawMetaballs(
       firstInstance: 0 as UInt32
     )
     # No restore: every G-buffer draw binds its own pipeline + group (#912).
-  }
-}
-
-func drawCount() ret Int {
-  unsafe {
-    ret nativeDrawCount()
   }
 }
 
@@ -596,8 +648,8 @@ func draw(
     if gbMeshReady(cache: cache, resources: resources, mesh: mesh) is 0 {
       ret
     }
-    let base: Int = gbDrawCount()
-    if base >= gbMaxDraws() {
+    let base: Int = gbDrawCount(cache: cache)
+    if base >= gbufferMaxDraws {
       ret
     }
     ensureDrawScratch(cache: cache)
@@ -616,8 +668,8 @@ func draw(
       paletteBase: 0
     )
     gbIssueInstanced(
+      cache: cache
       resources: resources
-      pass: gbPass()
       pipeline: cache.staticPipeline
       bind: cache.staticBind
       vbuf: gbMeshVbuf(cache: cache, resources: resources, mesh: mesh)
@@ -653,8 +705,8 @@ func drawSkinned(
     if gbSkinReady(mesh: mesh) is 0 {
       ret
     }
-    let base: Int = gbDrawCount()
-    if base >= gbMaxDraws() {
+    let base: Int = gbDrawCount(cache: cache)
+    if base >= gbufferMaxDraws {
       ret
     }
     ensureDrawScratch(cache: cache)
@@ -673,8 +725,8 @@ func drawSkinned(
       paletteBase: 0
     )
     gbIssueInstanced(
+      cache: cache
       resources: resources
-      pass: gbPass()
       pipeline: cache.skinPipeline
       bind: cache.skinBind
       vbuf: gbSkinVbuf(mesh: mesh)
@@ -706,8 +758,8 @@ func drawSkinnedRecords(
     if gbSkinReady(mesh: mesh) is 0 {
       ret
     }
-    let base: Int = gbDrawCount()
-    let remaining: Int = gbMaxDraws() - base
+    let base: Int = gbDrawCount(cache: cache)
+    let remaining: Int = gbufferMaxDraws - base
     var n: Int = count
     if n > remaining {
       n = remaining
@@ -716,8 +768,8 @@ func drawSkinnedRecords(
       ret
     }
     gbIssueInstanced(
+      cache: cache
       resources: resources
-      pass: gbPass()
       pipeline: cache.skinPipeline
       bind: cache.skinBind
       vbuf: gbSkinVbuf(mesh: mesh)
@@ -809,39 +861,47 @@ func drawSkinnedInstance(
   )
 }
 
-# Finish and submit the geometry pass (#503, was the C `end`). Draws upload their
-# own slices now (#502), so nothing bulk-uploads here — just end the render pass,
-# finish the command buffer and submit it, all over the bindings. The single-
-# command-buffer submit goes through gbSubmit (a thin C call) only because Rae
-# cannot yet take the address of one handle; everything else is Rae.
+# Finish and submit the geometry pass (#503; a manager submission since #906):
+# end the pass, record the pass's own pipelines + bind groups as uses (so the
+# TRACKED submission pins them — retiring one afterwards is deferred until the
+# GPU is done), submit, poll earlier frames. The single-command-buffer
+# gbSubmit stays for the raw-encoder passes (shadow, transparent, fullscreen).
 func gbSubmit(cmd: Ptr) unsafe extern("rae_gb_submit")
 
-func end() pub {
-  unsafe {
-    if gbFrameActive() is 0 {
-      ret
-    }
-    let pass: Ptr = gbPass()
-    let enc: Ptr = gbEncoder()
-    wgpuRenderPassEncoderEnd(renderPassEncoder: pass)
-    let cbDesc: WGPUCommandBufferDescriptor = { nextInChain: webgpuNull() }
-    let cmd: Ptr = wgpuCommandEncoderFinish(commandEncoder: enc, descriptor: cbDesc)
-    gbSubmit(cmd: cmd)
-    wgpuCommandBufferRelease(commandBuffer: cmd)
-    wgpuRenderPassEncoderRelease(renderPassEncoder: pass)
-    wgpuCommandEncoderRelease(commandEncoder: enc)
-    gbClearFrame()
+func end(cache: mod GbufferCache, resources: mod GpuResources) pub {
+  if not gbufferFrameActive(cache: cache) {
+    ret
   }
+  unsafe {
+    endRenderPass(pass: cache.pass)
+    cache.pass = webgpuNull()
+  }
+  gbSetFrameOpen(open: 0)
+  if let recording: mod Recording => cache.recording {
+    recordRenderPipelineUse(recording: recording, resources: resources, id: cache.staticPipeline)
+    recordRenderPipelineUse(recording: recording, resources: resources, id: cache.skinPipeline)
+    recordRenderPipelineUse(recording: recording, resources: resources, id: cache.terrainPipeline)
+    recordBindGroupUse(recording: recording, resources: resources, id: cache.staticBind)
+    recordBindGroupUse(recording: recording, resources: resources, id: cache.skinBind)
+    recordBindGroupUse(recording: recording, resources: resources, id: cache.terrainBind)
+    let tracked: opt SubmissionId = trackSubmission(
+      inFlight: cache.inFlight
+      resources: resources
+      recording: recording
+    )
+  }
+  cache.recording = none
+  pollSubmissions(inFlight: cache.inFlight, resources: resources)
 }
 
-func endPass() pub {
-  end()
+func endPass(cache: mod GbufferCache, resources: mod GpuResources) pub {
+  end(cache: cache, resources: resources)
 }
 
 # How many instances the last pass actually submitted. Lets a caller (or a
 # test) distinguish "drew nothing" from "drew and the image is wrong".
-func passDrawCount() pub ret Int {
-  ret drawCount()
+func passDrawCount(cache: view GbufferCache) pub ret Int {
+  ret cache.drawCount
 }
 
 func presentFrame(canvas: mod Gpu2dCanvas) pub {
@@ -903,17 +963,28 @@ func shutdownAll() pub {
 }
 
 # Retire the geometry pass's manager objects (renderer shutdown, BEFORE the C
-# shutdown releases the adopted frame/draws/palette buffers). The terrain
-# objects are GbufferTerrain's; the renderer shutdown retires them there.
+# shutdown releases the adopted palette buffer): drain the in-flight frames,
+# then the binds, pipelines, frame buffers and targets (C forgets its borrowed
+# views). The terrain objects are GbufferTerrain's; the renderer shutdown
+# retires them there.
 func gbufferShutdown(cache: mod GbufferCache, resources: mod GpuResources) pub {
+  if gbufferFrameActive(cache: cache) {
+    end(cache: cache, resources: resources)
+  }
+  drainSubmissions(inFlight: cache.inFlight, resources: resources)
   retireBindGroup(resources: resources, id: cache.staticBind)
   retireBindGroup(resources: resources, id: cache.skinBind)
   releaseExternalIds(resources: resources, list: cache.adopted)
   retireRenderPipeline(resources: resources, id: cache.staticPipeline)
   retireRenderPipeline(resources: resources, id: cache.skinPipeline)
+  retireBuffer(resources: resources, id: cache.frameUniform)
+  retireBuffer(resources: resources, id: cache.draws)
+  retireTargets(cache: cache, resources: resources)
   cache.staticBind = noBindGroupId()
   cache.skinBind = noBindGroupId()
   cache.staticPipeline = noRenderPipelineId()
   cache.skinPipeline = noRenderPipelineId()
+  cache.frameUniform = noBufferId()
+  cache.draws = noBufferId()
   cache.pipelinesMade = false
 }

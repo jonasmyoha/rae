@@ -43,6 +43,15 @@
 #   and rae_g2d_present_and_cleanup are gone; rae_g2d_present(texture, w, h) / rae_g3d_present_frame(...)
 #   / rae_ext_Gbuffer_present(...) BORROW the texture for the drawable copy + headless readback, and
 #   rae_g2d_surface_ready/width/height report the configured surface — surface glue, for the record.)
+# (#906 slice a: the geometry FRAME is the Rae GbufferCache's — the four G-buffer targets + views,
+#   the frame uniform, the draws buffer + cursor and a manager Recording per frame (the multi-
+#   attachment beginRenderPassMulti); rae_gb_{set_target,targets_match,targets_ready,
+#   release_targets_ext,set_frame_ubuf,set_draws_buffer,frame_ubuf,draws_buffer,frame_bytes,
+#   draws_size,max_draws,draw_count,advance_draws,frame_uniform,set_frame,pass,encoder,
+#   clear_frame,frame_active} and rae_ext_Gbuffer_drawCount are gone; rae_gb_frame_data(out) fills
+#   the Rae buffer (frame-derived uniform math, the rae_g2d_xform pattern), rae_gb_commit_targets
+#   hands C the BORROWED views + size for its still-C post passes (forget_targets at shutdown),
+#   rae_gb_set_frame_open flags the pass for the C metaball prep — for the record.)
 # (#905: the static mesh store is the Rae MeshStore (lib/MeshStore.rae) owned by the renderer;
 #   rae_ext_Gpu3d_meshCreate/meshUpdate and the rae_gb_mesh_*/rae_g3d_mesh_* accessors are gone;
 #   rae_sm_queue_mesh takes the caster's buffer handles (borrowed for the pass) — for the record.)
@@ -53,7 +62,6 @@
 #   typed IDs in the App-owned gpu/GpuResources manager; the gbuffer frame resources it draws with are
 #   adopted externals, not C slots.)
 rae_ext_Gbuffer_deferredShutdown
-rae_ext_Gbuffer_drawCount
 # present: no-UI final blit to the swapchain; reached from Rae as
 # gbuffer.present(canvas:) -> presentFrame(canvas:) -> renderDeferredPass. Platform copy-to-drawable
 # of the CANVAS-owned offscreen texture it is handed (#920); C owns nothing of the target.
