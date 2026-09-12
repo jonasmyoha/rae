@@ -39,4 +39,15 @@ char* rae_deps_resolve_folder(const char* normalized);
  * are vendored, so the build's format preflight must not rewrite them. */
 bool rae_deps_owns_path(const char* file_path);
 
+/* #934: before resolving, mark deps whose lock pin should be IGNORED and whose
+ * git remote should be re-fetched — i.e. `rae update`. `only_name` NULL means
+ * every dep; otherwise just that one. Off by default (rae_deps_resolve honors
+ * the lock, which is what a build and `rae fetch` want). */
+void rae_deps_set_update(const char* only_name);
+
+/* #934: print the resolved dependency graph (call after rae_deps_resolve).
+ * `root_label` names the project at the root; `stdlib_dir` is shown as the
+ * first `lib` edge (the stdlib resolved through the toolchain). */
+void rae_deps_print_tree(FILE* out, const char* root_label, const char* stdlib_dir);
+
 #endif /* RAE_DEPS_H */
