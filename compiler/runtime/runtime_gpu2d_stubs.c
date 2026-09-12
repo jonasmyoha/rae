@@ -42,25 +42,14 @@ float rae_ext_Gpu2d_dpr(void){ return 1.0; }
 void rae_g2d_frame_reset(void) {}
 void rae_g2d_present_and_cleanup(void) {}
 void rae_g2d_tick(void) {}
-void* rae_g2d_viewport_uniform(void) { return (void*)0; }
-void rae_g2d_scissor(int64_t clip, void* pass) { (void)clip; (void)pass; }
-void rae_g2d_clip_uniform_at(int64_t clip, float* out) { (void)clip; if (out) { for (int i = 0; i < 8; i++) out[i] = 0.0f; } }
-void rae_g2d_prepare_flush(int64_t pending) { (void)pending; }
-int64_t rae_g2d_current_clip(void) { return 0; }
+void rae_g2d_xform(float* out) { if (out) { for (int i = 0; i < 8; i++) out[i] = (i == 2 || i == 3) ? 1.0f : 0.0f; } }
 void* rae_g2d_decode_image(rae_String path) { (void)path; return (void*)0; }
 int64_t rae_g2d_decoded_width(void) { return 0; }
 int64_t rae_g2d_decoded_height(void) { return 0; }
 void rae_g2d_decode_free(void* rgba) { (void)rgba; }
 rae_Bool rae_ext_Gpu2d_lastPresentOk(void) { return 0; }
 int64_t rae_g2d_text_atlas_max(void) { return 8; }
-int64_t rae_g2d_text_floats(void) { return 20; }
-int64_t rae_g2d_text_count(int64_t ai) { (void)ai; return 0; }
-void* rae_g2d_text_data(int64_t ai) { (void)ai; return (void*)0; }
-int64_t rae_g2d_text_clip_at(int64_t ai, int64_t i) { (void)ai; (void)i; return 0; }
-void rae_g2d_text_reset(int64_t ai) { (void)ai; }
 void* rae_sdf_atlas_pixels(int64_t handle) { (void)handle; return (void*)0; }
 int64_t rae_sdf_atlas_width(int64_t handle) { (void)handle; return 0; }
 int64_t rae_sdf_atlas_height(int64_t handle) { (void)handle; return 0; }
 void rae_ext_Gpu2d_closeWindow(void) {}
-void rae_ext_Gpu2d_drawGlyph(float sx0, float sy0, float sx1, float sy1, float u0, float v0, float u1, float v1, int64_t atlas, float pxRange, int64_t color){ (void)sx0; (void)sy0; (void)sx1; (void)sy1; (void)u0; (void)v0; (void)u1; (void)v1; (void)atlas; (void)pxRange; (void)color; }
-void rae_ext_Gpu2d_drawGlyphEx(float sx0, float sy0, float sx1, float sy1, float u0, float v0, float u1, float v1, int64_t atlas, float pxRange, int64_t color, float outlineWidth, int64_t outlineColor, float softness){ (void)sx0; (void)sy0; (void)sx1; (void)sy1; (void)u0; (void)v0; (void)u1; (void)v1; (void)atlas; (void)pxRange; (void)color; (void)outlineWidth; (void)outlineColor; (void)softness; }

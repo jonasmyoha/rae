@@ -14,6 +14,8 @@
 # Importing this module links both. Window globals are shared with lib/sdl3.rae,
 # so sdl3 input functions (getMouseX/isKeyDown/…) work against this window.
 open Gpu2dCanvas
+open Gpu2dCanvasText
+open Gpu2dCanvasFrame
 open webgpu/Webgpu
 open webgpu/Context
 
@@ -246,11 +248,11 @@ func closeWindow() {
 }
 
 # --- Frame ---------------------------------------------------------------
-# The frame command lifecycle runs here in Rae (#504): create the encoder +
-# offscreen render pass, and on end flush the batched primitives, submit, and
-# hand the platform present/screenshot tail back to C. C keeps the per-frame
-# batch-counter reset (g2dFrameReset), owns the persistent offscreen colour
-# target (g2dOffView), packs primitives (flush), and does the present tail.
+# The frame command lifecycle is Rae (#504/#910/#915): the canvas opens a
+# manager Recording + a pass over the adopted offscreen target, endFrame
+# flushes the batches, submits it tracked and hands the platform present /
+# screenshot tail back to C. C keeps the present-flag reset (g2dFrameReset),
+# owns the persistent offscreen colour target and does the present tail.
 func nativeG2dFrameReset() unsafe extern("rae_g2d_frame_reset")
 func g2dFrameReset() {
   unsafe { nativeG2dFrameReset() }
@@ -263,49 +265,20 @@ func nativeG2dTick() unsafe extern("rae_g2d_tick")
 func g2dTick() {
   unsafe { nativeG2dTick() }
 }
-func g2dOffView() unsafe extern("rae_g2d_off_view") ret Ptr
 func nativeG2dOffViewReady() unsafe extern("rae_g2d_off_view_ready") ret Int
 func g2dOffViewReady() ret Int {
   unsafe { ret nativeG2dOffViewReady() }
 }
-func g2dSubmit(cmd: Ptr) unsafe extern("rae_gb_submit")
 
-# Shared: create the command encoder and begin the offscreen colour pass with
-# the given load op + clear colour; the canvas owns the encoder/pass for the
-# frame (#910) — flush() draws into it and endFrame closes and submits it.
-func g2dOpenPass(canvas: mod Gpu2dCanvas, loadOp: copy Int32, r: copy Float, g: copy Float, b: copy Float, a: copy Float) {
-  unsafe {
-    let encDesc: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
-    let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
-    let att: WGPURenderPassColorAttachment = {
-      view_: g2dOffView(), depthSlice: WGPU_DEPTH_SLICE_UNDEFINED as UInt32,
-      loadOp: loadOp, storeOp: WGPUStoreOp_Store,
-      clearValue: { r: r as Float64, g: g as Float64, b: b as Float64, a: a as Float64 }
-    }
-    # Pure per-call scratch (#764: was a module-level global). Its .data is the C
-    # array the pass descriptor points at; WebGPU copies the attachments during
-    # BeginRenderPass below, so the local only needs to outlive that call. set() is
-    # a no-op past the length, so grow to one slot first (as gbuffer.rae does).
-    var g2dColorAtts: List(WGPURenderPassColorAttachment) = List.create(WGPURenderPassColorAttachment, cap: 1)
-    loop g2dColorAtts.length < 1 { g2dColorAtts.add(value: { depthSlice: 0 as UInt32 }) }
-    g2dColorAtts.set(index: 0, value: att)
-    let rpDesc: WGPURenderPassDescriptor = {
-      colorAttachmentCount: 1 as UInt64,
-      colorAttachments: g2dColorAtts.data
-    }
-    let pass: Ptr = wgpuCommandEncoderBeginRenderPass(commandEncoder: enc, descriptor: rpDesc)
-    canvas.frameEncoder = enc
-    canvas.framePass = pass
-  }
-}
-
-# Acquire the next surface texture and begin a render pass that clears it to
-# the given linear RGBA colour (components 0..1). Must be paired with endFrame.
+# Acquire the offscreen target and begin a render pass that clears it to the
+# given linear RGBA colour (components 0..1). Must be paired with endFrame.
+# #915: the frame is a manager Recording on the canvas — its pass stays open
+# for the flushes, endFrame submits it through the manager (tracked).
 func beginFrame(canvas: mod Gpu2dCanvas, r: copy Float, g: copy Float, b: copy Float, a: copy Float) {
   g2dFrameReset()
   canvasFrameBegin(canvas: canvas)
   if g2dOffViewReady() is 0 { ret }
-  g2dOpenPass(canvas: canvas, loadOp: WGPULoadOp_Clear, r: r, g: g, b: b, a: a)
+  canvasOpenFrame(canvas: canvas, clear: true, r: r, g: g, b: b, a: a)
 }
 
 # Begin a 2D/UI overlay pass that preserves the persistent offscreen color
@@ -315,33 +288,21 @@ func beginFrameLoad(canvas: mod Gpu2dCanvas) {
   g2dFrameReset()
   canvasFrameBegin(canvas: canvas)
   if g2dOffViewReady() is 0 { ret }
-  g2dOpenPass(canvas: canvas, loadOp: WGPULoadOp_Load, r: 0.0, g: 0.0, b: 0.0, a: 0.0)
+  canvasOpenFrame(canvas: canvas, clear: false, r: 0.0, g: 0.0, b: 0.0, a: 0.0)
 }
 
-# Finish the render pass, submit the command buffer, and present the frame.
-# `box` is the app-owned 2D box pass (#907): the frame's queued primitives are
-# drawn from its manager before images and text, and its per-frame objects are
-# retired after the submit.
+# Finish the render pass, submit the frame through the manager, present it
+# (C: copy the offscreen target into the surface drawable + present + poll,
+# still platform glue) and retire the frame's per-run objects behind the
+# tracked submission.
 func endFrame(canvas: mod Gpu2dCanvas) {
-  unsafe {
-    # Advance the deterministic clock every frame, even one with no drawable yet.
-    g2dTick()
-    if not canvasFrameActive(canvas: canvas) { ret }
-    flush(canvas: canvas)
-    let pass: Ptr = canvas.framePass
-    let enc: Ptr = canvas.frameEncoder
-    wgpuRenderPassEncoderEnd(renderPassEncoder: pass)
-    let cbDesc: WGPUCommandBufferDescriptor = { nextInChain: webgpuNull() }
-    let cmd: Ptr = wgpuCommandEncoderFinish(commandEncoder: enc, descriptor: cbDesc)
-    g2dSubmit(cmd: cmd)
-    wgpuCommandBufferRelease(commandBuffer: cmd)
-    wgpuRenderPassEncoderRelease(renderPassEncoder: pass)
-    wgpuCommandEncoderRelease(commandEncoder: enc)
-    canvas.framePass = webgpuNull()
-    canvas.frameEncoder = webgpuNull()
-    g2dPresentCleanup()
-    boxFrameEnd(canvas: canvas)
-  }
+  # Advance the deterministic clock every frame, even one with no drawable yet.
+  g2dTick()
+  if not canvasFrameActive(canvas: canvas) { ret }
+  flush(canvas: canvas)
+  canvasCloseFrame(canvas: canvas)
+  g2dPresentCleanup()
+  boxFrameEnd(canvas: canvas)
 }
 
 # True when the most recent endFrame copied to a surface drawable and presented.
@@ -357,10 +318,7 @@ func lastPresentOk() ret Bool {
 # pipelines (for example: image, then later shape, then text). Order within a
 # flush: boxes (the Rae box pass, #907), then images (#908), then text (#909).
 func flush(canvas: mod Gpu2dCanvas) {
-  g2dPrepareFlush(pending: canvasBoxCount(canvas: canvas) + canvas.imageCommandHandles.length)
-  boxFlush(canvas: canvas)
-  imageFlush(canvas: canvas)
-  textFlush(canvas: canvas)
+  canvasFlush(canvas: canvas)
 }
 
 # --- 2D primitives (#110, Box uber-shader) -------------------------------
@@ -406,23 +364,20 @@ func drawLine(canvas: mod Gpu2dCanvas, x0: copy Float, y0: copy Float, x1: copy 
 # intersects the current one — so a rounded card can hold a clipped scroll
 # list. Implemented as a render-pass scissor per contiguous same-clip run of
 # draws, preserving the box→image→text batch order. `popClipRect` restores
-# the previous region; an unmatched pop clears to no-clip. (The rounded /
-# per-instance clip variant is #118.)
-func nativePushClipRect(x: Float, y: Float, w: Float, h: Float) unsafe extern("rae_ext_Gpu2d_pushClipRect")
-func pushClipRect(x: copy Float, y: copy Float, w: copy Float, h: copy Float) {
-  unsafe { nativePushClipRect(x: x, y: y, w: w, h: h) }
+# the previous region; an unmatched pop clears to no-clip. The stack lives on
+# the canvas (#915).
+func pushClipRect(canvas: mod Gpu2dCanvas, x: copy Float, y: copy Float, w: copy Float, h: copy Float) {
+  canvasPushClip(canvas: canvas, x: x, y: y, w: w, h: h, radius: 0.0)
 }
 # Rounded clip (#118): same as pushClipRect but the corners are rounded by
 # `radius` (design units). The box pipeline rounds the corners via a
 # fragment-shader SDF; the axis-aligned scissor still bounds every pipeline
 # to the clip bbox. Use for a rounded card that contains a scroll list.
-func nativePushClipRoundedRect(x: Float, y: Float, w: Float, h: Float, radius: Float) unsafe extern("rae_ext_Gpu2d_pushClipRoundedRect")
-func pushClipRoundedRect(x: copy Float, y: copy Float, w: copy Float, h: copy Float, radius: copy Float) {
-  unsafe { nativePushClipRoundedRect(x: x, y: y, w: w, h: h, radius: radius) }
+func pushClipRoundedRect(canvas: mod Gpu2dCanvas, x: copy Float, y: copy Float, w: copy Float, h: copy Float, radius: copy Float) {
+  canvasPushClip(canvas: canvas, x: x, y: y, w: w, h: h, radius: radius)
 }
-func nativePopClipRect() unsafe extern("rae_ext_Gpu2d_popClipRect")
-func popClipRect() {
-  unsafe { nativePopClipRect() }
+func popClipRect(canvas: mod Gpu2dCanvas) {
+  canvasPopClip(canvas: canvas)
 }
 
 # --- Images (#143, textured rounded quads) -------------------------------
@@ -479,19 +434,20 @@ func drawImage(canvas: mod Gpu2dCanvas, x: copy Float, y: copy Float, w: copy Fl
 }
 
 # --- Text (#111, MSDF glyph quads) ---------------------------------------
-# Low-level: submit one MSDF glyph quad. Screen rect is (sx0,sy0)-(sx1,sy1)
-# in pixels; UV rect is (u0,v0)-(u1,v1) NORMALISED into the atlas; `atlas` is
-# the SdfText.loadAtlas handle (1-based); `pxRange` is the screen-space px
-# range (atlas pxRange * onScreenSize / atlasGlyphSize); colour is 0xAARRGGBB.
-# One atlas/font per frame. Layout helper: lib/gpu2dText.rae drawText.
-func drawGlyph(sx0: Float, sy0: Float, sx1: Float, sy1: Float,
-               u0: Float, v0: Float, u1: Float, v1: Float,
-               atlas: Int, pxRange: Float, color: Int) unsafe extern
-
-# Glyph with an outline: `outlineWidth` px of `outlineColor` (0xAARRGGBB) grown
-# outward from the glyph edge (MSDF dilation), body composited over it. Used by
-# lib/gpu2dText.drawTextEx for outlined + shadowed text.
-func drawGlyphEx(sx0: Float, sy0: Float, sx1: Float, sy1: Float,
-                 u0: Float, v0: Float, u1: Float, v1: Float,
-                 atlas: Int, pxRange: Float, color: Int,
-                 outlineWidth: Float, outlineColor: Int, softness: Float) unsafe extern
+# Low-level: submit one MSDF glyph quad on the canvas. Screen rect is
+# (sx0,sy0)-(sx1,sy1) in design units; UV rect is (u0,v0)-(u1,v1) NORMALISED
+# into the atlas; `atlas` is the SdfText.loadAtlas handle (1-based); `pxRange`
+# is the screen-space px range (atlas pxRange * onScreenSize / atlasGlyphSize);
+# colour is 0xAARRGGBB. Layout helper: lib/Gpu2dText.rae drawText.
+func drawGlyph(canvas: mod Gpu2dCanvas, sx0: copy Float, sy0: copy Float, sx1: copy Float, sy1: copy Float,
+               u0: copy Float, v0: copy Float, u1: copy Float, v1: copy Float,
+               atlas: copy Int, pxRange: copy Float, color: copy Int) {
+  canvasDrawGlyph(canvas: canvas, sx0: sx0, sy0: sy0, sx1: sx1, sy1: sy1, u0: u0, v0: v0, u1: u1, v1: v1, atlas: atlas, pxRange: pxRange, color: color)
+}
+# With an outline (width px + colour) and softness (edge falloff px; 1 = crisp).
+func drawGlyphEx(canvas: mod Gpu2dCanvas, sx0: copy Float, sy0: copy Float, sx1: copy Float, sy1: copy Float,
+                 u0: copy Float, v0: copy Float, u1: copy Float, v1: copy Float,
+                 atlas: copy Int, pxRange: copy Float, color: copy Int,
+                 outlineWidth: copy Float, outlineColor: copy Int, softness: copy Float) {
+  canvasDrawGlyphEx(canvas: canvas, sx0: sx0, sy0: sy0, sx1: sx1, sy1: sy1, u0: u0, v0: v0, u1: u1, v1: v1, atlas: atlas, pxRange: pxRange, color: color, outlineWidth: outlineWidth, outlineColor: outlineColor, softness: softness)
+}

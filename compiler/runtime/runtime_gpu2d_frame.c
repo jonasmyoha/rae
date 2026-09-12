@@ -85,14 +85,11 @@ static void rae_present_recover(const char* which, int status) {
 /* The gpu2d frame command lifecycle (begin/end) runs in Rae now (lib/gpu2d.rae,
  * #504): Rae creates the encoder + the offscreen render pass and, on end,
  * flushes + submits over the bindings. C keeps the per-frame batch-counter reset
- * and the platform present/screenshot tail. rae_g2d_frame_reset zeroes the batch
- * state at the top of a frame; the accessors hand Rae the offscreen view and let
- * it store the encoder/pass so the draw batching (flush) and the present tail
- * see the live frame. */
+ * and the platform present/screenshot tail. rae_g2d_frame_reset clears the
+ * present flag at the top of a frame (the batches, clip stack and viewport
+ * uniform are the Rae canvas's since #913/#915). */
 void rae_g2d_frame_reset(void) {
     g_g2d_last_present_ok = 0;
-    for (int i = 0; i < RAE_SDF_MAX_ATLAS; i++) g_g2d_text_count[i] = 0;
-    rae_g2d_clip_reset();
 }
 /* #910: the frame's encoder + pass are owned by the Rae canvas (Gpu2dCanvas);
  * nothing is parked here any more. */
@@ -256,37 +253,10 @@ rae_Bool rae_ext_Gpu2d_lastPresentOk(void) {
     return g_g2d_last_present_ok != 0;
 }
 
-/* Per-run clip support for the Rae passes (#907/#910): fill the 8-float clip
- * uniform for `clip` into a Rae-owned buffer (the manager uniform is the
- * canvas's) and set the scissor for it on the pass the canvas opened. */
-void rae_g2d_clip_uniform_at(int64_t clip, float* out) {
-    if (out) rae_g2d_fill_clip_uniform((int)clip, out);
-}
-void rae_g2d_scissor(int64_t clip, void* pass) { rae_g2d_set_scissor((int)clip, (WGPURenderPassEncoder)pass); }
-
-/* Upload this flush's viewport transform when anything is queued (the Rae
- * box + image queues' pending count comes in as an argument, the text batch is
- * still counted here). Called by the Rae flush BEFORE it draws. */
-void rae_g2d_prepare_flush(int64_t pending) {
-    if (!g_wgpu_dev) return;
-    int have_text = 0;
-    for (int i = 0; i < RAE_SDF_MAX_ATLAS; i++) if (g_g2d_text_count[i] > 0) have_text = 1;
-    if (pending > 0 || have_text) {
-        rae_g2d_ensure_viewport_uniform();
-        float xf[8]; rae_g2d_compute_xform(xf);
-        wgpuQueueWriteBuffer(g_wgpu_queue, g_g2d_uniform, 0, xf, sizeof(xf));
-    }
-}
-
 void rae_ext_Gpu2d_closeWindow(void) {
     if (g_g2d_off_view) { wgpuTextureViewRelease(g_g2d_off_view); g_g2d_off_view = NULL; }
     if (g_g2d_off_tex)  { wgpuTextureRelease(g_g2d_off_tex);  g_g2d_off_tex = NULL; }
     g_g2d_off_w = 0; g_g2d_off_h = 0;
-    for (int ai = 0; ai < RAE_SDF_MAX_ATLAS; ai++) {
-        if (g_g2d_text_prims[ai]) { free(g_g2d_text_prims[ai]); g_g2d_text_prims[ai] = NULL; g_g2d_text_capf[ai] = 0; }
-        g_g2d_text_count[ai] = 0;
-    }
-    if (g_g2d_uniform) { wgpuBufferRelease(g_g2d_uniform); g_g2d_uniform = NULL; }
     if (g_g2d_surface) { wgpuSurfaceRelease(g_g2d_surface); g_g2d_surface = NULL; }
     for (int i = 0; i < 7; i++) {
         if (g_g2d_cursors[i]) { SDL_DestroyCursor(g_g2d_cursors[i]); g_g2d_cursors[i] = NULL; }
