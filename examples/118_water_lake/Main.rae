@@ -33,6 +33,7 @@ open gpu/GpuLifetime
 open water/WaterSystem
 open water/WaterFft
 open water/WaterFftDiagnose
+open water/Underwater
 open ecs/Entity
 
 const lakeExtent: Float = 400.0
@@ -151,6 +152,13 @@ func main() ret Int {
   camera.position = Vec3.create(x: 0.0, y: 0.0 - 48.0, z: 9.0)
   camera.target = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
   camera.farZ = 900.0
+  # RAE_WATER_CAMERA_Z=<z> starts the free camera at that height (#855): a
+  # negative value puts it under the lake for the underwater fog check.
+  let cameraZSetting: String = Sys.getEnv(name: "RAE_WATER_CAMERA_Z")
+  if cameraZSetting.length() > 0 {
+    camera.position.z = cameraZSetting.toFloat()
+    camera.target.z = camera.position.z - 2.0
+  }
   var cameraRig: CameraRig = createCameraRig(camera: camera)
   # Start in the free (WASD fly) mode rather than orbit.
   toggleCameraRigMode(rig: cameraRig, camera: camera)
@@ -207,6 +215,7 @@ func main() ret Int {
   }
   var lastTime: Float64 = Gpu2d.nowSeconds()
   var waterFrames: Int = 0
+  var underwaterFrames: Int = 0
   loop not Gpu2d.pollClose() {
     let now: Float64 = Gpu2d.nowSeconds()
     var deltaTime: Float = (now - lastTime) as Float
@@ -289,6 +298,14 @@ func main() ret Int {
           }
           waterFrames = waterFrames + 1
         }
+        if tag is RenderTag.underwater {
+          # Underwater fog (#855): which body the camera is in, its surface
+          # under the camera (Gerstner here), hysteresis — then the renderer's pass.
+          waterUnderwaterUpdate(waterSystem: waterSystem, renderer: renderer, camera: camera)
+          if waterIsUnderwater(waterSystem: waterSystem) {
+            underwaterFrames = underwaterFrames + 1
+          }
+        }
         if tag is RenderTag.uiOverlay {
           drawDebugHud(debugHud: debugHud, canvas: renderer.canvas)
         }
@@ -308,7 +325,7 @@ func main() ret Int {
 
   if fixedTestFrame {
     log(
-      "[water example] deterministic deferred frame rendered: hour {hour}, 1 island, {cubeCount} boxes, {waterFrames} water frames"
+      "[water example] deterministic deferred frame rendered: hour {hour}, 1 island, {cubeCount} boxes, {waterFrames} water frames, {underwaterFrames} underwater frames"
     )
   }
   if let resources: mod GpuResources => gpuManager {

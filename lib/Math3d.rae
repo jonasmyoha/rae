@@ -253,6 +253,58 @@ func mat4Ortho(
 # Transform a point by a matrix (w assumed 1, result de-homogenised only
 # for the affine case this is used in). Column-major, so the x row reads
 # m[0], m[4], m[8], m[12].
+# General 4x4 inverse by cofactors (column-major, like every Mat4 here). A
+# singular matrix (determinant ~0) returns the identity rather than garbage —
+# a caller reconstructing world positions from clip space gets a visible
+# no-op instead of NaNs. Used by the underwater pass (#855) to invert the
+# frame's view-projection on the CPU.
+func mat4Inverse(a: view Mat4) pub ret Mat4 {
+  let m0: Float = a.m[0]
+  let m1: Float = a.m[1]
+  let m2: Float = a.m[2]
+  let m3: Float = a.m[3]
+  let m4: Float = a.m[4]
+  let m5: Float = a.m[5]
+  let m6: Float = a.m[6]
+  let m7: Float = a.m[7]
+  let m8: Float = a.m[8]
+  let m9: Float = a.m[9]
+  let m10: Float = a.m[10]
+  let m11: Float = a.m[11]
+  let m12: Float = a.m[12]
+  let m13: Float = a.m[13]
+  let m14: Float = a.m[14]
+  let m15: Float = a.m[15]
+  var inv: Mat4 = mat4Zero()
+  inv.m[0] = m5 * m10 * m15 - m5 * m11 * m14 - m9 * m6 * m15 + m9 * m7 * m14 + m13 * m6 * m11 - m13 * m7 * m10
+  inv.m[4] = 0.0 - m4 * m10 * m15 + m4 * m11 * m14 + m8 * m6 * m15 - m8 * m7 * m14 - m12 * m6 * m11 + m12 * m7 * m10
+  inv.m[8] = m4 * m9 * m15 - m4 * m11 * m13 - m8 * m5 * m15 + m8 * m7 * m13 + m12 * m5 * m11 - m12 * m7 * m9
+  inv.m[12] = 0.0 - m4 * m9 * m14 + m4 * m10 * m13 + m8 * m5 * m14 - m8 * m6 * m13 - m12 * m5 * m10 + m12 * m6 * m9
+  inv.m[1] = 0.0 - m1 * m10 * m15 + m1 * m11 * m14 + m9 * m2 * m15 - m9 * m3 * m14 - m13 * m2 * m11 + m13 * m3 * m10
+  inv.m[5] = m0 * m10 * m15 - m0 * m11 * m14 - m8 * m2 * m15 + m8 * m3 * m14 + m12 * m2 * m11 - m12 * m3 * m10
+  inv.m[9] = 0.0 - m0 * m9 * m15 + m0 * m11 * m13 + m8 * m1 * m15 - m8 * m3 * m13 - m12 * m1 * m11 + m12 * m3 * m9
+  inv.m[13] = m0 * m9 * m14 - m0 * m10 * m13 - m8 * m1 * m14 + m8 * m2 * m13 + m12 * m1 * m10 - m12 * m2 * m9
+  inv.m[2] = m1 * m6 * m15 - m1 * m7 * m14 - m5 * m2 * m15 + m5 * m3 * m14 + m13 * m2 * m7 - m13 * m3 * m6
+  inv.m[6] = 0.0 - m0 * m6 * m15 + m0 * m7 * m14 + m4 * m2 * m15 - m4 * m3 * m14 - m12 * m2 * m7 + m12 * m3 * m6
+  inv.m[10] = m0 * m5 * m15 - m0 * m7 * m13 - m4 * m1 * m15 + m4 * m3 * m13 + m12 * m1 * m7 - m12 * m3 * m5
+  inv.m[14] = 0.0 - m0 * m5 * m14 + m0 * m6 * m13 + m4 * m1 * m14 - m4 * m2 * m13 - m12 * m1 * m6 + m12 * m2 * m5
+  inv.m[3] = 0.0 - m1 * m6 * m11 + m1 * m7 * m10 + m5 * m2 * m11 - m5 * m3 * m10 - m9 * m2 * m7 + m9 * m3 * m6
+  inv.m[7] = m0 * m6 * m11 - m0 * m7 * m10 - m4 * m2 * m11 + m4 * m3 * m10 + m8 * m2 * m7 - m8 * m3 * m6
+  inv.m[11] = 0.0 - m0 * m5 * m11 + m0 * m7 * m9 + m4 * m1 * m11 - m4 * m3 * m9 - m8 * m1 * m7 + m8 * m3 * m5
+  inv.m[15] = m0 * m5 * m10 - m0 * m6 * m9 - m4 * m1 * m10 + m4 * m2 * m9 + m8 * m1 * m6 - m8 * m2 * m5
+  let det: Float = m0 * inv.m[0] + m1 * inv.m[4] + m2 * inv.m[8] + m3 * inv.m[12]
+  if Math.abs(value: det) < 0.000000000001 {
+    ret mat4Identity()
+  }
+  let scale: Float = 1.0 / det
+  var i: Int = 0
+  loop i < 16 {
+    inv.m[i] = inv.m[i] * scale
+    i = i + 1
+  }
+  ret inv
+}
+
 func mat4TransformPoint(m: view Mat4, p: view Vec3) pub ret Vec3 {
   ret Vec3.create(
     x: m.m[0] * p.x + m.m[4] * p.y + m.m[8] * p.z + m.m[12]
