@@ -37,7 +37,21 @@ is below the surface. A river is a `WaterBody` with `meshId` (its own world-spac
 mesh) and `flowSpeed`: the surface shader draws the ribbon as-is, skips Gerstner,
 and advects the ripple noise along u — the spline parameter IS the flow map, so no
 texture and no phase reset. 114 has a stream through the meadow sampled from
-terrainHeightAt. Underwater (tint/fog, caustics) is a follow-up. #849 (slice 2) is in: `lib/water/waterFft.wgsl` bakes, once per sea state, the
+terrainHeightAt. Underwater tint/fog is in (#855): a deferred-graph pass `underwater`
+between transparentForward and taa (`lib/GbufferUnderwater.rae`, `lib/underwaterFog.wgsl`)
+that re-snapshots the composed lit frame into litCopy and fogs it in place — world
+position reconstructed from depth through the CPU-inverted view-projection, the view
+ray cut at the still surface plane when the point is above water, Beer-Lambert
+attenuation per channel over that underwater distance toward the body's deep colour
+(the body's `absorbColor` per metre), plus a depth-fading near-surface tint. The
+renderer only holds `UnderwaterParams`; `lib/water/Underwater.rae` decides each frame
+(`waterUnderwaterUpdate`): containment = the square extent for a lake (meshMode 0),
+unbounded for an ocean (meshMode 2), never for a baked river ribbon (no bounds API);
+the surface under the camera = `waterHeightAt` (Gerstner) for toon water, the #858
+readback cache (`sampleFftSurface`, 0.5 s max age) for FFT water falling back to the
+STILL level when the sample is unavailable or stale (first frames, a tier change that
+invalidated the cache, a non-primary FFT body); overlap = the body the camera is
+deepest under; crossing = a 3 cm hysteresis band. Caustics are #860. #849 (slice 2) is in: `lib/water/waterFft.wgsl` bakes, once per sea state, the
 h0 spectrum per cascade (JONSWAP with the TMA depth factor, Hasselmann directional
 spreading, the k-plane Jacobian, hash-seeded Gaussians, packed as (h0(k), h0(-k)),
 per-cascade k bands handed over where the next, finer tile resolves a wave with ~6
@@ -329,7 +343,8 @@ GodotOceanWaves and inkwell-webgpu-water as the technique references; use
 Crest for the LOD-cascade and gameplay-query API shape.
 
 **Phase 3 — rivers and underwater.** Spline-baked river meshes with flow
-maps (Waterways), then an underwater fog/caustics post step.
+maps (Waterways), then an underwater fog/caustics post step (fog: #855, done;
+caustics: #860).
 
 **Do not:** port Unity or Unreal code (licenses and engine coupling), build
 planar reflections (a second scene render is what mobile cannot afford and

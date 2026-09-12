@@ -38,6 +38,7 @@ open water/WaterPerf
 open water/WaterSchedule
 open water/WaterGpuIds
 open water/WaterGpuBridge
+open GbufferUnderwater
 open gpu/GpuResources
 open gpu/GpuLifetime
 open gpu/GpuRender
@@ -109,6 +110,12 @@ type WaterSystem {
   fft: WaterFftGpu
   cache: WaterCacheGpu
   inFlight: List(SubmissionId)  # this system's submissions, polled every step
+  # The camera's underwater state (#855, water/Underwater.rae): the last
+  # decision (for the crossing hysteresis), the body it named, and how many
+  # frames an FFT body fell back to its still level for the crossing test.
+  underwater: UnderwaterParams
+  underwaterBody: Int
+  underwaterStillFrames: Int
 }
 
 # The unit grid mesh is uploaded into the RENDERER's mesh store (#905): the
@@ -172,6 +179,9 @@ func createWaterSystem(renderer: mod DeferredRenderer, body: view WaterBody) ret
       fft: createFftGpu()
       cache: createCacheGpu()
       inFlight: List.create(SubmissionId, cap: 8)
+      underwater: noUnderwater()
+      underwaterBody: 0 - 1
+      underwaterStillFrames: 0
     }
   }
 }

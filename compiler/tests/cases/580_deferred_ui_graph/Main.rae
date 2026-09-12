@@ -64,10 +64,13 @@ func main() {
   }
   let lighting: Int = indexOfTag(renderer: withUi, tag: RenderTag.lighting)
   let transparent: Int = indexOfTag(renderer: withUi, tag: RenderTag.transparentForward)
+  let underwater: Int = indexOfTag(renderer: withUi, tag: RenderTag.underwater)
   let temporal: Int = indexOfTag(renderer: withUi, tag: RenderTag.taa)
-  if lighting >= 0 and transparent is lighting + 1 and temporal is transparent + 1 {
-    log("derived lighting -> transparent -> taa: yes")
+  # The litColor chain (#855): lighting -> transparent -> underwater, then TAA
+  # reads the finished radiance.
+  if lighting >= 0 and transparent is lighting + 1 and underwater is transparent + 1 and temporal is underwater + 1 {
+    log("derived lighting -> transparent -> underwater -> taa: yes")
   } else {
-    log("derived lighting -> transparent -> taa: NO")
+    log("derived lighting -> transparent -> underwater -> taa: NO")
   }
 }

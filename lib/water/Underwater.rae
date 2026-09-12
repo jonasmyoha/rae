@@ -1,0 +1,173 @@
+# water/Underwater — which body the camera is in, and what the fog needs from
+# it (#855, docs/water-rendering-design.md Phase 3). The renderer's underwater
+# pass (GbufferUnderwater.rae) is a plain fullscreen effect over parameters;
+# THIS module makes the water decisions each frame:
+#
+#   * CONTAINMENT. A lake / pond (meshMode 0) contains the camera when its
+#     xy is inside the body's square extent around the centre; an ocean
+#     (meshMode 2, camera-centred) is unbounded and contains every camera; a
+#     baked river ribbon (meshMode 1) has no bounds API — its mesh is world-
+#     space geometry the body knows only by id — so it never selects (rivers
+#     are shallow; a river camera is a #833 follow-up, not a guess here).
+#   * SURFACE. The crossing test compares camera.z with the surface height at
+#     the camera's xy: the Gerstner mirror (waterHeightAt) for toon water; the
+#     #858 readback cache (sampleFftSurface, bounded age) for FFT water, and
+#     when that sample is unavailable or stale — before the first readback,
+#     during a tier change that invalidated the cache, a non-primary body
+#     without cascades — the STILL level (centre.z), so the effect degrades
+#     to a flat crossing rather than flickering or vanishing.
+#   * OVERLAP. Several containing bodies (a pond on an island in a sea): the
+#     one the camera is DEEPEST under wins; a body the camera is above does
+#     not compete.
+#   * CROSSING. A small hysteresis band around the surface (the wave motion
+#     alone would toggle the effect every frame at the water line): enter
+#     when the camera is a margin below, leave when a margin above.
+#
+# The result is a value on the WaterSystem (the last decision, for the
+# hysteresis) and is pushed to the renderer with setUnderwater.
+import Vec3
+open Scene3d
+open water/Water
+open water/WaterSystem
+open water/FftSurfaceCache
+open GbufferUnderwater
+open RendererDeferred
+
+const underwaterCrossingMargin: Float = 0.03  # metres of hysteresis at the surface
+
+const underwaterFftMaxAge: Float = 0.5  # seconds a cached FFT sample may lag the wave clock
+
+# Fog tuning shared by every body: the body's own absorption drives the
+# colour; these shape how fast it saturates and the near-surface tint.
+const underwaterDensity: Float = 1.0
+
+const underwaterFarDistance: Float = 200.0
+
+const underwaterTintStrength: Float = 1.0
+
+const underwaterTintDepth: Float = 2.0
+
+# The body's xy bounds for the camera test (see the header).
+func waterBodyContains(body: view WaterBody, x: copy Float, y: copy Float) ret Bool {
+  if body.meshMode is 2 {
+    ret true
+  }
+  if body.meshMode is not 0 {
+    ret false
+  }
+  let half: Float = body.extent * 0.5
+  if x < body.centre.x - half or x > body.centre.x + half {
+    ret false
+  }
+  if y < body.centre.y - half or y > body.centre.y + half {
+    ret false
+  }
+  ret true
+}
+
+# The surface height under (x, y) for the crossing test; `primary` marks the
+# first body, the only one with FFT cascades. Sets `usedStillLevel` when an
+# FFT body had no usable sample.
+func waterSurfaceAtCamera(
+  waterSystem: view WaterSystem
+  body: view WaterBody
+  primary: copy Bool
+  x: copy Float
+  y: copy Float
+  usedStillLevel: mod Bool
+) ret Float {
+  if body.style is WaterStyle.realistic {
+    if primary {
+      if let sample: FftSurfaceSample = sampleFftSurface(
+        cache: waterSystem.surfaceCache
+        body: primaryBody(waterSystem: waterSystem)
+        x: x
+        y: y
+        now: waterSystem.time
+        maxAge: underwaterFftMaxAge
+      ) {
+        ret sample.height
+      }
+    }
+    usedStillLevel = true
+    ret body.centre.z
+  }
+  ret waterHeightAt(
+    body: body
+    x: x
+    y: y
+    t: waterSystem.time
+  )
+}
+
+# Decide for this frame. Pure over the system's bodies + cache and the last
+# decision (`waterSystem.underwater` / `underwaterBody`, for the hysteresis).
+func underwaterSelect(waterSystem: mod WaterSystem, camera: view Camera3d) ret UnderwaterParams {
+  var best: Int = 0 - 1
+  var bestSurface: Float = 0.0
+  var bestSubmersion: Float = 0.0
+  var stillLevel: Bool = false
+  loop var i: Int = 0, i < waterSystem.bodies.length, ++i {
+    if let body: WaterBody = waterSystem.bodies.copyAt(index: i) {
+      if waterBodyContains(body: body, x: camera.position.x, y: camera.position.y) {
+        var fellBack: Bool = false
+        let surface: Float = waterSurfaceAtCamera(
+          waterSystem: waterSystem
+          body: body
+          primary: i is 0
+          x: camera.position.x
+          y: camera.position.y
+          usedStillLevel: fellBack
+        )
+        let submersion: Float = surface - camera.position.z
+        # Hysteresis: the body we were in last frame keeps us until we rise a
+        # margin above its surface; any other body needs a margin below.
+        var threshold: Float = underwaterCrossingMargin
+        if waterSystem.underwater.active and waterSystem.underwaterBody is i {
+          threshold = 0.0 - underwaterCrossingMargin
+        }
+        if submersion > threshold and (best < 0 or submersion > bestSubmersion) {
+          best = i
+          bestSurface = surface
+          bestSubmersion = submersion
+          stillLevel = fellBack
+        }
+      }
+    }
+  }
+  if best < 0 {
+    waterSystem.underwaterBody = 0 - 1
+    ret noUnderwater()
+  }
+  waterSystem.underwaterBody = best
+  if stillLevel {
+    waterSystem.underwaterStillFrames = waterSystem.underwaterStillFrames + 1
+  }
+  if let body: WaterBody = waterSystem.bodies.copyAt(index: best) {
+    ret UnderwaterParams {
+      active: true
+      surfaceZ: bestSurface
+      deepColor: body.deepColor
+      absorbColor: body.absorbColor
+      density: underwaterDensity
+      farDistance: underwaterFarDistance
+      tintStrength: underwaterTintStrength
+      tintDepth: underwaterTintDepth
+    }
+  }
+  ret noUnderwater()
+}
+
+# Per frame, before the graph walk: decide, remember, hand to the renderer.
+func waterUnderwaterUpdate(
+  waterSystem: mod WaterSystem
+  renderer: mod DeferredRenderer
+  camera: view Camera3d
+) {
+  waterSystem.underwater = underwaterSelect(waterSystem: waterSystem, camera: camera)
+  setUnderwater(renderer: renderer, params: waterSystem.underwater)
+}
+
+func waterIsUnderwater(waterSystem: view WaterSystem) ret Bool {
+  ret waterSystem.underwater.active
+}
