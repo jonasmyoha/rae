@@ -28,6 +28,14 @@ func webgpuInstance() unsafe extern("rae_wgpu_ctx_instance") ret Ptr
 # there is work; wait == 0 polls. Needed until Rae can pass callbacks to C.
 func webgpuPoll(wait: Int) unsafe extern("rae_wgpu_ctx_poll")
 
+# Per-submission completion (#938). `watch` registers a work-done callback for
+# the index `wgpuQueueSubmitForIndex` returned; `done` pumps callbacks without
+# blocking and answers for that index. `wgpuDevicePoll`'s own return value
+# means the whole queue is empty, which is NOT the same question.
+func webgpuWatchSubmission(index: UInt64) unsafe extern("rae_wgpu_watch_submission")
+
+func webgpuSubmissionDone(index: UInt64) unsafe extern("rae_wgpu_submission_done") ret UInt32
+
 # A null opaque pointer, for WebGPU params that take an optional pointer/array
 # (e.g. dynamicOffsets when the count is 0). Rae has no null-Ptr literal yet.
 func webgpuNull() unsafe extern("rae_wgpu_null_ptr") ret Ptr
