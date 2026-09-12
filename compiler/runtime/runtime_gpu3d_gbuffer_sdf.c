@@ -236,7 +236,7 @@ int64_t rae_gb_sdf_prepare(void* packedBalls_, int64_t count, void* packedColors
                            float emR, float emG, float emB) {
     const float* packedBalls = (const float*)packedBalls_;
     const float* packedColors = (const float*)packedColors_;
-    if (!gb_pass || !packedBalls || count < 1) return -1;
+    if (!gb_frame_open || !packedBalls || count < 1) return -1;
     if (count > GB_SDF_MAX_BALLS) count = GB_SDF_MAX_BALLS;
     gb_sdf_init();
     if (!gb_sdf_pipeline) return -1;

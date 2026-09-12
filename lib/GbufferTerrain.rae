@@ -205,7 +205,8 @@ func ensureTerrainPipeline(cache: mod GbufferCache, resources: mod GpuResources)
   # A bind group from the TERRAIN pipeline's own layout (wgpu auto-layouts are
   # pipeline-exclusive, so the static bind group can't be reused) — frame uniform
   # @0, draws storage @1, and (#9) the terrain tile @2 + its sampler @3. Rebuilt
-  # only when the tile generation changes, so the steady state pays nothing.
+  # only when the tile generation changes (or the bind is not usable yet: the
+  # first call can precede the frame buffers), so the steady state pays nothing.
   ensureTerrainTexDefaults(cache: cache, resources: resources)
   let gen: Int = gbTerrainTexGen()
   if gen is cache.terrainBindGen and bindGroupIsUsable(resources: resources, id: cache.terrainBind) {
@@ -215,22 +216,15 @@ func ensureTerrainPipeline(cache: mod GbufferCache, resources: mod GpuResources)
   retireBindGroup(resources: resources, id: cache.terrainBind)
   cache.terrainBind = noBindGroupId()
   releaseExternalIds(resources: resources, list: cache.terrainAdopted)
+  # The frame uniform + draws buffers are the cache's own manager buffers
+  # (#906); only the C material array's view is adopted.
+  if not isValidBuffer(resources: resources, id: cache.frameUniform) {
+    ret
+  }
   let entries: List(ResourceRef) = List.create(ResourceRef, cap: 4)
+  entries.add(value: bufferRef(id: cache.frameUniform))
+  entries.add(value: bufferRef(id: cache.draws))
   unsafe {
-    entries.add(
-      value: adoptBufferRef(
-        resources: resources
-        adopted: cache.terrainAdopted
-        handle: gbFrameUbuf()
-      )
-    )
-    entries.add(
-      value: adoptBufferRef(
-        resources: resources
-        adopted: cache.terrainAdopted
-        handle: gbDrawsBuffer()
-      )
-    )
     entries.add(
       value: adoptTextureViewRef(
         resources: resources
@@ -280,8 +274,8 @@ func drawTerrainMesh(
     if gbMeshReady(cache: cache, resources: resources, mesh: mesh) is 0 {
       ret
     }
-    let base: Int = gbDrawCount()
-    if base >= gbMaxDraws() {
+    let base: Int = gbDrawCount(cache: cache)
+    if base >= gbufferMaxDraws {
       ret
     }
     ensureDrawScratch(cache: cache)
@@ -307,8 +301,8 @@ func drawTerrainMesh(
     # the shader's textured-grass term is identity for every other terrain user.
     cache.drawScratch.set(index: 32, value: cache.terrainBlend)
     gbIssueInstanced(
+      cache: cache
       resources: resources
-      pass: gbPass()
       pipeline: cache.terrainPipeline
       bind: cache.terrainBind
       vbuf: gbMeshVbuf(cache: cache, resources: resources, mesh: mesh)

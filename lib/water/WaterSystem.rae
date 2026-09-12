@@ -295,8 +295,13 @@ func ensureWaterPipeline(waterSystem: mod WaterSystem, resources: mod GpuResourc
 # scene depth @2. The depth view is recreated on resize, so the bind (and the
 # adopted frame externals) follow the targets generation like the other post
 # passes. The previous bind group retires behind any draw still using it.
-func ensureWaterBind(waterSystem: mod WaterSystem, resources: mod GpuResources) {
-  let gen: Int = gbTargetsGen()
+func ensureWaterBind(
+  waterSystem: mod WaterSystem
+  resources: mod GpuResources
+  gbuffer: view GbufferCache
+  gbufferResources: view GpuResources
+) {
+  let gen: Int = gbuffer.targetsGen
   if waterSystem.bindMade and gen is waterSystem.bindGen {
     ret
   }
@@ -312,7 +317,11 @@ func ensureWaterBind(waterSystem: mod WaterSystem, resources: mod GpuResources) 
   retireBindGroup(resources: resources, id: waterSystem.surface.bindGroup)
   waterSystem.surface.bindGroup = noBindGroupId()
   releaseFrameExternals(resources: resources, frame: waterSystem.surface.frame)
-  waterSystem.surface.frame = adoptFrameExternals(resources: resources)
+  waterSystem.surface.frame = adoptFrameExternals(
+    resources: resources
+    gbuffer: gbuffer
+    gbufferResources: gbufferResources
+  )
   if not waterSystem.surface.frame.valid {
     ret
   }
@@ -655,7 +664,7 @@ func drawWaterBody(
 func waterDraw(
   waterSystem: mod WaterSystem
   resources: mod GpuResources
-  meshes: view MeshStore
+  gbuffer: view GbufferCache
   meshResources: view GpuResources
   camera: view Camera3d
   light: view Light3d
@@ -676,7 +685,12 @@ func waterDraw(
   if not waterSystem.pipeReady {
     ret
   }
-  ensureWaterBind(waterSystem: waterSystem, resources: resources)
+  ensureWaterBind(
+    waterSystem: waterSystem
+    resources: resources
+    gbuffer: gbuffer
+    gbufferResources: meshResources
+  )
   if not waterSystem.bindMade {
     ret
   }
@@ -686,7 +700,7 @@ func waterDraw(
       drawWaterBody(
         waterSystem: waterSystem
         resources: resources
-        meshes: meshes
+        meshes: gbuffer.meshes
         meshResources: meshResources
         body: body
         camera: camera

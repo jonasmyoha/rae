@@ -144,9 +144,10 @@ func createRenderPasses() ret RenderPasses {
 
 # The manager slot budget: per targets generation the post-passes adopt ~40
 # C-owned inputs (views, uniforms, the shadow sampler, the C pipelines) plus
-# their bind groups; retired slots are reused, so 128 leaves headroom for the
-# geometry-pass objects of the next slices (#912).
-const deferredManagerCapacity: Int = 128
+# their bind groups; the geometry frame adds its 4 targets + views, 2 buffers
+# and a few in-flight submissions (#906); retired slots are reused, so 160
+# leaves headroom for the shadow / SDF objects of the next slices.
+const deferredManagerCapacity: Int = 160
 
 func ensureRendererResources(renderer: mod DeferredRenderer) pub {
   if let existing: view GpuResources => renderer.gpuResources {
@@ -201,7 +202,8 @@ func updateMeshVerts(
 # Retire every manager object the passes hold and drop the manager. Call BEFORE
 # Gbuffer.shutdownAll() / Gpu3d.shutdown(): the adopted C-owned handles must
 # still be valid while their bind groups are released, and the device must
-# still be up for the releases.
+# still be up for the releases. The geometry frame (#906) drains its in-flight
+# submissions and retires the targets first; C forgets the borrowed views.
 func shutdownDeferredRenderer(renderer: mod DeferredRenderer) pub {
   if let resources: mod GpuResources => renderer.gpuResources {
     postPassesShutdown(
@@ -859,8 +861,8 @@ func renderDeferredPassWith(
     )
     # Metaballs go into the SAME pass as the triangles, so the two kinds
     # depth-test against each other rather than compositing (#392).
-    renderSceneSdfWorld(world: world, camera: camera)
-    endPass()
+    renderSceneSdfWorld(cache: renderer.passes.gbuffer, world: world, camera: camera)
+    endPass(cache: renderer.passes.gbuffer, resources: resources)
   }
   if tag is RenderTag.depthPyramid {
     buildDepthPyramid(cache: renderer.passes.pyr, resources: resources)
@@ -888,7 +890,7 @@ func renderDeferredPassWith(
     transparentPass(
       cache: renderer.passes.transparent
       resources: resources
-      meshes: renderer.passes.gbuffer.meshes
+      gbuffer: renderer.passes.gbuffer
     )
   }
   # waterFft is dispatched by the app that owns a WaterSystem (waterFftStep);
@@ -940,7 +942,7 @@ func renderDeferredFrameWorld(
 
 # How many instances the G-buffer pass submitted last frame.
 func deferredDrawCount(renderer: view DeferredRenderer) pub ret Int {
-  ret passDrawCount()
+  ret passDrawCount(cache: renderer.passes.gbuffer)
 }
 
 # Mip levels in the depth pyramid built by the last frame.

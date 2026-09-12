@@ -1,6 +1,7 @@
 # GpuRenderPass — render passes over a manager Recording (#918 split of
 # GpuRender for the 1000-line cap): the RenderTarget (colour + optional depth
-# over ResourceRefs), beginRenderPass / endRenderPass holding a raw pass
+# over ResourceRefs), the multi-attachment RenderTargetSet (#906),
+# beginRenderPass / beginRenderPassMulti / endRenderPass holding a raw pass
 # encoder for the `record*InPass` family (draw, indexed, indirect, external
 # bind, scissor), and the use records (recordBindGroupUse /
 # recordRenderPipelineUse) that pin per-frame objects behind the submission.
@@ -411,6 +412,196 @@ func beginRenderPass(
     let descriptor: WGPURenderPassDescriptor = {
       colorAttachmentCount: 1 as UInt64
       colorAttachments: colorAttachments.data
+    }
+    ret wgpuCommandEncoderBeginRenderPass(commandEncoder: recording.encoder, descriptor: descriptor)
+  }
+}
+
+# A multi-attachment pass target (#906): up to four colour views, each with
+# its own clear colour, plus an optional depth view (cleared or loaded, or
+# read-only). The deferred geometry pass opens over three colour targets +
+# depth; a single-target pass uses RenderTarget above.
+type RenderTargetSet {
+  colorViews: List(ResourceRef)
+  clearValues: List(Float)  # 4 per colour view (r g b a)
+  clear: Bool  # Clear every colour view (else Load)
+  hasDepth: Bool
+  depthView: ResourceRef
+  depthClear: Bool  # Clear the depth view (else Load); ignored when read-only
+  depthClearValue: Float
+  depthReadOnly: Bool
+}
+
+const renderTargetSetMaxColors: Int = 4
+
+func createRenderTargetSet(clear: copy Bool) ret RenderTargetSet {
+  ret RenderTargetSet {
+    colorViews: List.create(ResourceRef, cap: renderTargetSetMaxColors)
+    clearValues: List.create(Float, cap: renderTargetSetMaxColors * 4)
+    clear: clear
+    hasDepth: false
+    depthView: noRef()
+    depthClear: false
+    depthClearValue: 0.0
+    depthReadOnly: true
+  }
+}
+
+# Appends one colour attachment with its clear colour; false past the limit.
+func addColorTarget(
+  targets: mod RenderTargetSet
+  colorView: view ResourceRef
+  r: copy Float
+  g: copy Float
+  b: copy Float
+  a: copy Float
+) ret Bool {
+  if targets.colorViews.length >= renderTargetSetMaxColors {
+    ret false
+  }
+  targets.colorViews.add(value: colorView)
+  targets.clearValues.add(value: r)
+  targets.clearValues.add(value: g)
+  targets.clearValues.add(value: b)
+  targets.clearValues.add(value: a)
+  ret true
+}
+
+func setDepthTarget(
+  targets: mod RenderTargetSet
+  depthView: view ResourceRef
+  clear: copy Bool
+  clearValue: copy Float
+  readOnly: copy Bool
+) {
+  targets.hasDepth = true
+  targets.depthView = depthView
+  targets.depthClear = clear
+  targets.depthClearValue = clearValue
+  targets.depthReadOnly = readOnly
+}
+
+func clearValueAt(targets: view RenderTargetSet, index: copy Int) ret Float64 {
+  if let value: Float = targets.clearValues.copyAt(index: index) {
+    ret value as Float64
+  }
+  ret 0.0
+}
+
+# beginRenderPass over a RenderTargetSet: every view validated and recorded as
+# a use (the submission pins them), one colour attachment per view in order
+# (location 0..n-1), the depth attachment last. Raw pass handle out, hence
+# unsafe; endRenderPass closes it.
+func beginRenderPassMulti(
+  recording: mod Recording
+  resources: mod GpuResources
+  targets: view RenderTargetSet
+) unsafe ret Ptr {
+  unsafe {
+    if recordingIsOpen(recording: recording, resources: resources) is false {
+      ret webgpuNull()
+    }
+    if targets.colorViews.length < 1 and targets.hasDepth is false {
+      ret webgpuNull()
+    }
+    loop var i: Int = 0, i < targets.colorViews.length, ++i {
+      if let colorView: ResourceRef = targets.colorViews.copyAt(index: i) {
+        if isValidRef(resources: resources, ref: colorView) is false or refIsTextureView(
+          resources: resources
+          ref: colorView
+        ) is false {
+          ret webgpuNull()
+        }
+      }
+    }
+    if targets.hasDepth {
+      if isValidRef(resources: resources, ref: targets.depthView) is false or refIsTextureView(
+        resources: resources
+        ref: targets.depthView
+      ) is false {
+        ret webgpuNull()
+      }
+    }
+    var loadOp: Int32 = WGPULoadOp_Load
+    if targets.clear {
+      loadOp = WGPULoadOp_Clear
+    }
+    var colorAttachments: List(WGPURenderPassColorAttachment) = List.create(
+      WGPURenderPassColorAttachment
+      cap: renderTargetSetMaxColors
+    )
+    loop var i: Int = 0, i < targets.colorViews.length, ++i {
+      if let colorView: ResourceRef = targets.colorViews.copyAt(index: i) {
+        recordUse(
+          recording: recording
+          kind: refDepKind(ref: colorView)
+          slot: colorView.slot
+          generation: colorView.generation
+        )
+        colorAttachments.add(value: {
+          view_: refHandle(resources: resources, ref: colorView)
+          depthSlice: WGPU_DEPTH_SLICE_UNDEFINED as UInt32
+          loadOp: loadOp
+          storeOp: WGPUStoreOp_Store
+          clearValue: {
+            r: clearValueAt(targets: targets, index: i * 4)
+            g: clearValueAt(targets: targets, index: i * 4 + 1)
+            b: clearValueAt(targets: targets, index: i * 4 + 2)
+            a: clearValueAt(targets: targets, index: i * 4 + 3)
+          }
+        })
+      }
+    }
+    var colorData: Ptr = webgpuNull()
+    if colorAttachments.length > 0 {
+      colorData = colorAttachments.data
+    }
+    if targets.hasDepth is false {
+      let descriptor: WGPURenderPassDescriptor = {
+        colorAttachmentCount: colorAttachments.length as UInt64
+        colorAttachments: colorData
+      }
+      ret wgpuCommandEncoderBeginRenderPass(
+        commandEncoder: recording.encoder
+        descriptor: descriptor
+      )
+    }
+    recordUse(
+      recording: recording
+      kind: refDepKind(ref: targets.depthView)
+      slot: targets.depthView.slot
+      generation: targets.depthView.generation
+    )
+    var depthAttachments: List(WGPURenderPassDepthStencilAttachment) = List.create(
+      WGPURenderPassDepthStencilAttachment
+      cap: 1
+    )
+    if targets.depthReadOnly {
+      depthAttachments.add(
+        value: {
+          view_: refHandle(resources: resources, ref: targets.depthView)
+          depthLoadOp: WGPULoadOp_Undefined
+          depthStoreOp: WGPUStoreOp_Undefined
+          depthReadOnly: 1 as UInt32
+        }
+      )
+    } else {
+      var depthLoadOp: Int32 = WGPULoadOp_Load
+      if targets.depthClear {
+        depthLoadOp = WGPULoadOp_Clear
+      }
+      depthAttachments.add(value: {
+        view_: refHandle(resources: resources, ref: targets.depthView)
+        depthLoadOp: depthLoadOp
+        depthStoreOp: WGPUStoreOp_Store
+        depthClearValue: targets.depthClearValue as Float32
+        depthReadOnly: 0 as UInt32
+      })
+    }
+    let descriptor: WGPURenderPassDescriptor = {
+      colorAttachmentCount: colorAttachments.length as UInt64
+      colorAttachments: colorData
+      depthStencilAttachment: depthAttachments.data
     }
     ret wgpuCommandEncoderBeginRenderPass(commandEncoder: recording.encoder, descriptor: descriptor)
   }
