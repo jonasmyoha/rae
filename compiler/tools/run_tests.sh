@@ -355,10 +355,18 @@ for TARGET in "${TARGETS[@]}"; do
     # layout, never meaning). A failure of either is reported as the case's
     # failure, so a fixture's expected.txt cannot bless a broken layout.
     FORMAT_CHECK_MSG=""
-    if [ "${CMD_ARGS[0]}" = "format" ] && [ "${EXPECTED_OUTPUT:0:6}" != "REGEX:" ]; then
+    # Only the format-to-Rae commands (default / --stdout / --write / --output)
+    # produce Rae to re-check; --check/--json/--rules and an over-cap/parse
+    # error output are not Rae, so skip the idempotence + AST re-check there.
+    FORMAT_EMITS_RAE=1
+    for a in "${CMD_ARGS[@]}"; do
+      case "$a" in --check|--json|--rules|--stdin) FORMAT_EMITS_RAE=0 ;; esac
+    done
+    case "$ACTUAL_OUTPUT" in error:*) FORMAT_EMITS_RAE=0 ;; esac
+    if [ "${CMD_ARGS[0]}" = "format" ] && [ "$FORMAT_EMITS_RAE" = "1" ] && [ "${EXPECTED_OUTPUT:0:6}" != "REGEX:" ]; then
         FMT_TMP_DIR=$(mktemp -d)
         printf '%s\n' "$ACTUAL_OUTPUT" > "$FMT_TMP_DIR/Main.rae"
-        FMT_SECOND=$("$BIN" format "$FMT_TMP_DIR/Main.rae" 2>&1 || true)
+        FMT_SECOND=$("$BIN" format --stdout "$FMT_TMP_DIR/Main.rae" 2>&1 || true)
         if [ "$FMT_SECOND" != "$ACTUAL_OUTPUT" ]; then
             FORMAT_CHECK_MSG="format is not idempotent: a second pass changed the output"
         fi
@@ -421,6 +429,12 @@ Results: $PASSED passed, $FAILED failed
 # the end, itself.
 if [ -f "tools/update_test_history.py" ] && [ "${RAE_TEST_NO_HISTORY:-0}" != "1" ]; then
   ./tools/update_test_history.py $PASSED_TEST_NAMES
+fi
+
+# #917: format-CLI behavior checks, on a full (unfiltered) run only.
+if [ -z "$TEST_NAME_FILTER" ] && [ -f "tools/test-format-cli.sh" ]; then
+  echo
+  if ! bash tools/test-format-cli.sh; then FAILED=$((FAILED+1)); fi
 fi
 
 if [ $FAILED -gt 0 ]; then

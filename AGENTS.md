@@ -427,12 +427,22 @@ style configuration. The policy (full design: `docs/rae-format-design.md`):
   one-line statement, on its own line below a statement that went vertical;
   `# ` prose is wrapped at 100 columns at a space, comment lines with no break
   point (URLs, diagrams) and `#`-without-space lines are copied verbatim.
-- Until #917–#919 land, `rae format <file>` prints to stdout and `rae format
-  --write <file>` rewrites one file. It is idempotent and AST-preserving on
-  every active `.rae` (the #916 survey: 0 crashes, 0 non-idempotent files, 0
-  AST differences), but do NOT bulk-format the tree by hand — the migration is
-  one mechanical commit (#918), after the over-cap files are split. When you
-  edit a `.rae` file, keep it within the policy above by hand in the meantime.
+- The `rae format` CLI is complete (#917): `rae format <files|dirs>` formats
+  IN PLACE by default (atomic temp+rename, permissions preserved, unchanged
+  files untouched), `--check` lists unformatted files and exits non-zero,
+  `--stdout` prints, `--write`/`-w` are aliases for the in-place default,
+  `--stdin` reads stdin, `--json` emits per-file results, `--rules --json`
+  prints the width/indent/threshold rules; a canonical form over 1,000 lines
+  is REFUSED (never written). Directory traversal takes `.rae`/`.raepack`
+  sorted, follows no symlinks, and skips `.git` / `build` / `.rae` dirs. The
+  in-memory `rae_format_source` (src/rae_format.{c,h}) is the ONE formatter the
+  CLI, tests and the #919 build preflight all call.
+- Until #918–#919 land, do NOT bulk-format the tree by hand — the migration is
+  one mechanical commit (#918), after the over-cap files are split, and the
+  build does not yet format/check automatically (#919). The formatter is
+  idempotent and AST-preserving on every active `.rae` (the #916 survey: 0
+  crashes, 0 non-idempotent files, 0 AST differences). When you edit a `.rae`
+  file, keep it within the policy above by hand in the meantime.
 
 ---
 

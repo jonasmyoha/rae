@@ -1,1 +1,1 @@
-format
+format --stdout
