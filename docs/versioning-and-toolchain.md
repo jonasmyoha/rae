@@ -1,16 +1,17 @@
 # Compiler versioning, toolchain pinning, and the road to a package manager
 
-**Status:** design, agreed direction. §1 (#930) and §2 (#931) are implemented:
-`compiler/VERSION`, `rae --version`/`-v`/`--json`, the bump discipline, the
-`v0.1.0` tag; and the `rae: { version }` pack requirement, the run/build/watch
-toolchain check (before the format preflight), `--check-toolchain`,
-`RAE_TOOLCHAIN_CHECK=off`, the `rae init` requirement, and the `rae.lock`
-`toolchain` block. §3–§4 are not; the QUEUE tasks (#932–#934) are the remaining
-phases. `rae toolchain use` (the repair command the error message names) lands
-in #932; until then it prints as guidance. Extends
-`docs/raepack-v2-and-packages.md` §12 (dependencies + `rae.lock`), which
-already covers *package* versions and dependency pins but says nothing about
-the **compiler's own version** — the gap this doc closes.
+**Status:** design, agreed direction. §1 (#930), §2 (#931) and §3 (#932) are
+implemented: `compiler/VERSION`, `rae --version`/`-v`/`--json`, the bump
+discipline, the `v0.1.0` tag; the `rae: { version }` pack requirement, the
+run/build/watch toolchain check (before the format preflight),
+`--check-toolchain`, `RAE_TOOLCHAIN_CHECK=off`, the `rae init` requirement, the
+`rae.lock` `toolchain` block; and `rae toolchain status`/`list`/`use <req|main>`
+(resolve the newest matching tag in the checkout / `$RAE_ROOT`, refuse on a
+dirty tree, `git checkout` + rebuild). §4 is not; the QUEUE tasks (#933–#934)
+are the remaining phases. Extends `docs/raepack-v2-and-packages.md` §12
+(dependencies + `rae.lock`), which already covers *package* versions and
+dependency pins but says nothing about the **compiler's own version** — the gap
+this doc closes.
 
 ## 0. The problem
 
