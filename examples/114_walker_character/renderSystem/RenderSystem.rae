@@ -94,7 +94,11 @@ func renderShadowPass(
     lambda: 0.75
     backExtent: 12.0
   )
-  uploadPalette(rows: palette, jointCount: jointCount(sk: characterSystem.skeleton))
+  uploadPalette(
+    renderer: renderSystem.renderer
+    rows: palette
+    jointCount: jointCount(sk: characterSystem.skeleton)
+  )
   if inputSystem.settings.shadows {
     beginShadowPass(c: cascades)
     drawTerrainPropsShadow(
@@ -110,7 +114,12 @@ func renderShadowPass(
         id: gameWorldPartAt(world: world, i: sp).meshId
         generation: 1
       )
-      drawShadowCasterSkinned(mesh: sh, model: characterSystem.model, paletteBase: 0)
+      drawShadowCasterSkinnedWith(
+        renderer: renderSystem.renderer
+        mesh: sh
+        model: characterSystem.model
+        paletteBase: 0
+      )
       loop var shadowClone: Int = 0, shadowClone < characterSystem.crowdEntities.length, ++shadowClone {
         if let member: EntityId = characterSystem.crowdEntities.copyAt(index: shadowClone) {
           let ctrl: ThirdPersonController = componentGet(this: world.controllers, entity: member)
@@ -118,7 +127,8 @@ func renderShadowPass(
             baseModel: characterSystem.basePartModel
             controller: ctrl
           )
-          drawShadowCasterSkinned(
+          drawShadowCasterSkinnedWith(
+            renderer: renderSystem.renderer
             mesh: sh
             model: cloneModel
             paletteBase: characterPaletteBase(slot: shadowClone + 1, jointCount: jc)
@@ -203,9 +213,16 @@ func renderGbufferPass(
     terrainSystem: terrainSystem
     world: world
   )
-  # Palettes (hero slot 0 + one per crowd member) were uploaded in renderApp.
+  # Palettes (hero slot 0 + one per crowd member) were uploaded in renderApp;
+  # the hero's is re-written here into the cache's palette (slot 0).
   let jc: Int = jointCount(sk: characterSystem.skeleton)
-  uploadPalette(rows: palette, jointCount: jc)
+  uploadPaletteAt(
+    cache: cache
+    resources: rendererResources
+    rows: palette
+    jointCount: jc
+    baseRow: 0
+  )
   loop var p: Int = 0, p < gameWorldPartCount(world: world), ++p {
     let part: PartRoughness = gameWorldPartAt(world: world, i: p)
     let handle: MeshHandle = meshHandle(id: part.meshId, generation: 1)
@@ -355,7 +372,7 @@ func renderApp(
   # slot (#547) — independent of the player, so member 2 can idle while member 0
   # walks. Slot 0 is the hero (uploaded first, which also creates the buffer).
   let jc: Int = jointCount(sk: characterSystem.skeleton)
-  uploadPalette(rows: palette, jointCount: jc)
+  uploadPalette(renderer: renderSystem.renderer, rows: palette, jointCount: jc)
   loop var crowdSlot: Int = 0, crowdSlot < characterSystem.crowdEntities.length, ++crowdSlot {
     if let member: EntityId = characterSystem.crowdEntities.copyAt(index: crowdSlot) {
       # Advance this member's AnimationState IN PLACE (#739) — no copy/set-back.
@@ -368,7 +385,16 @@ func renderApp(
         clipIndex: memberClip
         animTime: memberTime
       )
-      uploadPaletteSlot(rows: crowdPalette, jointCount: jc, slot: crowdSlot + 1)
+      ensureRendererResources(renderer: renderSystem.renderer)
+      if let rendererResources: mod GpuResources => renderSystem.renderer.gpuResources {
+        uploadPaletteSlot(
+          cache: renderSystem.renderer.passes.gbuffer
+          resources: rendererResources
+          rows: crowdPalette
+          jointCount: jc
+          slot: crowdSlot + 1
+        )
+      }
     }
   }
 
