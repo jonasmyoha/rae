@@ -291,8 +291,8 @@ func createSkyProcedural(
 # disagreement is known and tracked, and this is the correct one. Every
 # future sky kind reduces to a function of the same normal, so the
 # convention is fixed here once rather than per implementation.
-func hemisphereIrradiance(ambSky: view Vec3, ambGround: view Vec3, n: view Vec3) pub ret Vec3 {
-  let t: Float = n.z * 0.5 + 0.5
+func hemisphereIrradiance(ambSky: view Vec3, ambGround: view Vec3, normal: view Vec3) pub ret Vec3 {
+  let t: Float = normal.z * 0.5 + 0.5
   ret Vec3.create(
     x: ambGround.x + (ambSky.x - ambGround.x) * t
     y: ambGround.y + (ambSky.y - ambGround.y) * t
@@ -300,7 +300,7 @@ func hemisphereIrradiance(ambSky: view Vec3, ambGround: view Vec3, n: view Vec3)
   )
 }
 
-# Ambient arriving at a surface facing `n`.
+# Ambient arriving at a surface facing `normal`.
 #
 # EXPOSURE IS APPLIED HERE, not by the caller, so a sky cannot be shown
 # at one brightness and light the scene at another.
@@ -368,7 +368,7 @@ func radiance(sky: view Sky, dir: view Vec3) pub ret Vec3 {
     let c: Vec3 = hemisphereIrradiance(
       ambSky: sky.zenithColor
       ambGround: sky.horizonColor
-      n: Vec3.create(x: 0.0, y: 0.0, z: dir.z)
+      normal: Vec3.create(x: 0.0, y: 0.0, z: dir.z)
     )
     ret Vec3.vscale(a: c, s: sky.exposure)
   }
