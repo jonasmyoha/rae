@@ -57,6 +57,8 @@ static void print_str(FILE* out, Str s) {
   fprintf(out, "%.*s", (int)s.len, s.data);
 }
 
+static void dump_expr(const AstExpr* expr, FILE* out);
+
 static void dump_type_ref(const AstTypeRef* type, FILE* out) {
   if (!type) {
     fputs("<type?>", out);
@@ -67,12 +69,16 @@ static void dump_type_ref(const AstTypeRef* type, FILE* out) {
      * Array(Float, cap: 16). It has no `parts` — the expression is the
      * argument. */
     print_str(out, type->value_name);
-    fputs(": <const>", out);
+    fputs(": ", out);
+    dump_expr(type->value_expr, out);
     return;
   }
   if (type->is_opt) fputs("opt ", out);
   if (type->is_view) fputs("view ", out);
   if (type->is_mod) fputs("mod ", out);
+  if (type->is_val) fputs("val ", out);
+  if (type->is_own) fputs("own ", out);
+  if (type->is_copy) fputs("copy ", out);
 
   if (!type->parts) {
     fputs("<base?>", out);
@@ -230,6 +236,7 @@ static void dump_expr(const AstExpr* expr, FILE* out) {
       print_str(out, expr->as.floating);
       break;
     case AST_EXPR_STRING:
+      if (expr->is_raw) fputc('r', out);
       fputc('"', out);
       print_str(out, expr->as.string_lit);
       fputc('"', out);
@@ -257,7 +264,9 @@ static void dump_expr(const AstExpr* expr, FILE* out) {
     case AST_EXPR_CAST:
       fputs("(", out);
       dump_expr(expr->as.cast.operand, out);
-      fputs(" as ...)", out);
+      fputs(" as ", out);
+      dump_type_ref(expr->as.cast.target, out);
+      fputs(")", out);
       break;
     case AST_EXPR_UNARY:
       fputc('(', out);
@@ -414,7 +423,7 @@ static void dump_block(const AstBlock* block, FILE* out, int indent);
 
 static void dump_let_stmt(const AstStmt* stmt, FILE* out, int indent) {
   print_indent(out, indent);
-  fputs("let ", out);
+  fputs(stmt->as.let_stmt.is_const ? "const " : stmt->as.let_stmt.is_var ? "var " : "let ", out);
   print_str(out, stmt->as.let_stmt.name);
   fputs(": ", out);
   dump_type_ref(stmt->as.let_stmt.type, out);
@@ -474,7 +483,18 @@ static void dump_ret_stmt(const AstStmt* stmt, FILE* out, int indent) {
 static void dump_if_stmt(const AstStmt* stmt, FILE* out, int indent) {
   print_indent(out, indent);
   fputs("if ", out);
-  dump_expr(stmt->as.if_stmt.condition, out);
+  if (stmt->as.if_stmt.binding) {
+    /* `if let`: the binding IS the condition (the parser's synthesised
+     * `name is not none` test is derived from it, so it is not repeated). */
+    fputs("let ", out);
+    print_str(out, stmt->as.if_stmt.binding->as.let_stmt.name);
+    fputs(": ", out);
+    dump_type_ref(stmt->as.if_stmt.binding->as.let_stmt.type, out);
+    fputs(stmt->as.if_stmt.binding->as.let_stmt.is_bind ? " => " : " = ", out);
+    dump_expr(stmt->as.if_stmt.binding->as.let_stmt.value, out);
+  } else {
+    dump_expr(stmt->as.if_stmt.condition, out);
+  }
   fputc('\n', out);
   print_indent(out, indent + 1);
   fputs("then\n", out);
@@ -488,7 +508,7 @@ static void dump_if_stmt(const AstStmt* stmt, FILE* out, int indent) {
 
 static void dump_loop_stmt(const AstStmt* stmt, FILE* out, int indent) {
   print_indent(out, indent);
-  fputs("loop", out);
+  fputs(stmt->as.loop_stmt.is_parallel ? "parallelLoop" : "loop", out);
   if (stmt->as.loop_stmt.init) {
     if (stmt->as.loop_stmt.init->kind == AST_STMT_LET) {
       fputc(' ', out);
@@ -653,6 +673,10 @@ static void dump_type_decl(const AstDecl* decl, FILE* out, int indent) {
     print_str(out, field->name);
     fputs(": ", out);
     dump_type_ref(field->type, out);
+    if (field->default_value) {
+      fputs(" = ", out);
+      dump_expr(field->default_value, out);
+    }
     fputc('\n', out);
     field = field->next;
   }
@@ -722,6 +746,9 @@ static void dump_func_decl(const AstDecl* decl, FILE* out, int indent) {
     fputc(']', out);
   }
   dump_properties(decl->as.func_decl.properties, out);
+  if (decl->as.func_decl.extern_symbol) {
+    fprintf(out, " extern(\"%s\")", decl->as.func_decl.extern_symbol);
+  }
   fputc('\n', out);
   dump_params(decl->as.func_decl.params, out, indent + 1);
   dump_return_items(decl->as.func_decl.returns, out, indent + 1);
@@ -741,6 +768,16 @@ void ast_dump_module(const AstModule* module, FILE* out) {
     return;
   }
   fputs("MODULE\n", out);
+  for (const AstImport* imp = module->imports; imp; imp = imp->next) {
+    print_indent(out, 1);
+    fputs(imp->is_export ? "export " : imp->is_open ? "open " : "import ", out);
+    print_str(out, imp->path);
+    if (imp->alias.len > 0) {
+      fputs(" as ", out);
+      print_str(out, imp->alias);
+    }
+    fputc('\n', out);
+  }
   const AstDecl* decl = module->decls;
   while (decl) {
     switch (decl->kind) {
@@ -754,10 +791,22 @@ void ast_dump_module(const AstModule* module, FILE* out) {
         dump_enum_decl(decl, out, 1);
         break;
       case AST_DECL_GLOBAL_LET:
+        print_indent(out, 1);
+        fputs(decl->as.let_decl.is_const ? "const " : decl->as.let_decl.is_var ? "var " : "let ", out);
+        print_str(out, decl->as.let_decl.name);
+        fputs(": ", out);
+        dump_type_ref(decl->as.let_decl.type, out);
+        if (decl->as.let_decl.value) {
+          fputs(decl->as.let_decl.is_bind ? " => " : " = ", out);
+          dump_expr(decl->as.let_decl.value, out);
+        }
+        fputc('\n', out);
         break;
       case AST_DECL_ALIAS:
-        fprintf(out, "  ALIAS %.*s\n",
+        fprintf(out, "  ALIAS %.*s = ",
                 (int)decl->as.alias_decl.name.len, decl->as.alias_decl.name.data);
+        dump_type_ref(decl->as.alias_decl.target, out);
+        fputc('\n', out);
         break;
     }
     decl = decl->next;

@@ -87,6 +87,61 @@ excluded), 928 files:
   the format-fixture rule above generalised to "fixtures that expect a parse
   error".
 
+### #916 result (2026-09-12)
+
+The formatter is now correct enough to be mandatory: on the 932 active `.rae`
+files (lib, examples, compiler/tests/cases; legacy excluded) a two-pass survey
+reports **0 crashes, 0 non-idempotent files, 0 AST differences** (`rae parse`
+dump of input vs output identical; 65 files are expected-parse-error fixtures
+and are skipped). 21 files would exceed the 1,000-line cap once formatted and
+are refused (`file exceeds the hard cap`) — the split list for #918 grew from
+16 because the 4-parameter rule wraps more headers than the estimate did:
+`lib/gpu/GpuRender` (1777), `lib/ui/Registry` (1552), `lib/Gpu2dCanvas`
+(1514), `lib/Gpu3d` (1513), `lib/Gbuffer` (1362), `lib/webgpu/WebgpuEnums`
+(1349), `lib/GbufferPasses` (1336), `lib/ui/legacyRaylib/Render` (1312),
+`lib/gpu/GpuLifetime` (1308), `examples/106_mobile_ui/DebugGpu2dLocal` (1231),
+`lib/water/WaterFft` (1221), `lib/ui/ThemeResolved` (1156),
+`examples/106_mobile_ui/ScreenRouter` (1118), `lib/ui/Frames` (1098),
+`examples/114_walker_character/App` (1097), `examples/106_mobile_ui/Main`
+(1088), `examples/112_metaballs_deferred/Main` (1080),
+`lib/ui/legacyRaylib/Debug` (1063), `examples/111_metaballs_forward/Main`
+(1054), `lib/webgpu/Webgpu` (1022), `lib/GltfSkin` (1006). 102 files still have
+a line over 100 columns after formatting — long binary expressions, string
+literals and generated symbol names, which the policy leaves alone.
+
+What #916 fixed or decided (all covered by fixtures 810–813 and the runner's
+idempotence + AST-equivalence checks on every `format` case):
+
+- The char-literal crash: `AstExpr.as.char_lit` (the spelling) and
+  `char_value` (the code point) aliased each other in the union.
+- Constructs the old printer silently rewrote: `open` → `import`, `own x` /
+  `x as T` → `<expr>`, `if let` lost its binding, `else if` became nested
+  blocks, field defaults / `parallelLoop` / `taskScope` / the query-loop sugar
+  / generic `T: type` parameters / `import … as` / `cheader` / bracketed
+  `[a, b]` literals were dropped or respelled. The parser now keeps the source
+  spelling of what it desugars (`AstStmt.is_synthetic`,
+  `loop_stmt.query_bindings`, `if_stmt.is_task_scope`,
+  `AstCollectionLiteral.is_bracketed`) and records each block's closing-brace
+  line so comments after the last statement stay inside the block.
+- Comment attachment: an expression/assignment statement's line was the token
+  AFTER it (the closing paren of a multi-line call), which re-attached a
+  trailing comment before the call on the second pass. Statements are
+  anchored at their first token; a same-line comment trails a one-line
+  statement and goes below a vertical one; comments between vertical items
+  stay between them.
+- ONE list policy (`pp_print_list`): parameters / arguments / return items
+  vertical from 4 items or when the one-line form (from the current column,
+  plus the exact header tail) exceeds 100; object / collection / list literals
+  and enum members from 5; a lone nested vertical item hugs; `type` bodies are
+  always vertical; `ret a, b` never is. Explicit parentheses are preserved.
+- `pretty.c` is split into `pretty.c` (entry + module), `pretty_writer.c`
+  (buffer, width in code points, blank lines, comments, raefmt off/on),
+  `pretty_expr.c` (types, expressions, the list policy) and `pretty_decl.c`
+  (statements, declarations); `pretty_internal.h` holds the shared state.
+- `rae parse` dumps everything the formatter must preserve (imports, globals,
+  aliases, if-let bindings, cast targets, field defaults, extern symbols,
+  `var`/`const`, raw strings) so it can serve as the AST-equivalence oracle.
+
 ### Task map
 
 - **#916** formatter correctness: the char-literal crash, comment attachment

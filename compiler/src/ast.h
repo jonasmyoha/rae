@@ -183,6 +183,7 @@ typedef struct AstCollectionElement {
 typedef struct AstCollectionLiteral {
   AstTypeRef* type; // Optional type hint (e.g. List[Int])
   AstCollectionElement* elements;
+  bool is_bracketed; // spelled `[a, b]` rather than `{ a, b }` (same meaning; the formatter keeps the spelling)
 } AstCollectionLiteral;
 
 // New struct definition (moved outside AstExpr)
@@ -205,8 +206,12 @@ struct AstExpr {
     Str integer;
     Str floating;
     Str string_lit;
-    Str char_lit;
-    uint32_t char_value;
+    /* A char literal keeps BOTH its source spelling (for the formatter) and its
+     * decoded code point (for the backends); they must not alias each other. */
+    struct {
+      Str char_lit;
+      uint32_t char_value;
+    };
     bool boolean;
     struct {
       AstExpr* lhs;
@@ -297,10 +302,21 @@ typedef struct AstMatchArm {
   struct AstMatchArm* next;
 } AstMatchArm;
 
+// One visible binding of an ECS query loop (`loop let entity: EntityId,
+// pos: mod Pos in query2(...)`, #807). The parser desugars the loop into a
+// hoisted `let` + accessor bindings; this list keeps the SOURCE spelling so
+// the formatter can print the sugar back (#916).
+typedef struct AstQueryLoopBinding {
+  Str name;
+  AstTypeRef* type;
+  struct AstQueryLoopBinding* next;
+} AstQueryLoopBinding;
+
 struct AstStmt {
   AstStmtKind kind;
   size_t line;
   size_t column;
+  bool is_synthetic;  // parser-generated (query-loop desugaring); not source, the formatter skips it
   struct AstStmt* next;
   union {
     struct {
@@ -327,6 +343,7 @@ struct AstStmt {
       // evaluated. NULL for a plain `if`. The backend wraps the whole
       // statement in a C block so the name does not outlive the construct.
       AstStmt* binding;
+      bool is_task_scope;  // spelled `taskScope { }` in source (desugared to `if true`)
     } if_stmt;
     struct {
       AstStmt* init;
@@ -338,6 +355,8 @@ struct AstStmt {
                         // compiled as a sequential loop on both backends;
                         // real parallel execution lands with the C thread
                         // runtime. Disjointness/capture checks are future.
+      AstQueryLoopBinding* query_bindings;  // non-NULL: this loop was a query-loop sugar form
+      AstExpr* query_iterable;              // ... iterating this query call (the hoisted value)
     } loop_stmt;
     struct {
       AstExpr* subject;
@@ -359,6 +378,7 @@ struct AstStmt {
 
 struct AstBlock {
   AstStmt* first;
+  size_t end_line;  // line of the closing `}` (0 when synthesised); the formatter keeps trailing comments inside
 };
 
 typedef enum {
