@@ -4,6 +4,9 @@
 set -e
 
 BIN="bin/rae"
+# #919: the example gate runs the build's format preflight in CHECK mode — an
+# unformatted example fails its gate instead of being rewritten by the gate.
+export RAE_FORMAT=check
 EXAMPLES_DIR="../examples"
 PASSED=0
 FAILED=0

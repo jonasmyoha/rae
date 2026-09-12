@@ -22,6 +22,12 @@ static const char* simplify_path(const char* path) {
   return path;
 }
 
+static bool g_diag_quiet = false;
+
+void diag_set_quiet(bool quiet) {
+  g_diag_quiet = quiet;
+}
+
 static void print_source_line(const char* file, int line, int col) {
   if (!file || line <= 0) return;
   FILE* f = fopen(file, "r");
@@ -61,6 +67,7 @@ void diag_ctx_error(DiagState* state, const char* file, int line, int col, const
 
 void diag_ctx_report(DiagState* state, const char* file, int line, int col, const char* message) {
   state->error_count++;
+  if (g_diag_quiet) return;
   fprintf(stderr, "%s:%d:%d: %s\n", simplify_path(file), line, col, message);
   if (file && line > 0) {
     print_source_line(file, line, col);
@@ -72,6 +79,7 @@ void diag_ctx_report(DiagState* state, const char* file, int line, int col, cons
 // still succeeds (used by the no-globals warning, #763).
 void diag_ctx_warn(DiagState* state, const char* file, int line, int col, const char* message) {
   (void)state;
+  if (g_diag_quiet) return;
   fprintf(stderr, "%s:%d:%d: warning: %s\n", simplify_path(file), line, col, message);
   fflush(stderr);
 }
