@@ -1,8 +1,9 @@
 # GbufferNative — the C-ABI accessor layer of Gbuffer (#918 split for the
 # 1000-line cap): every `native*` extern and the thin `gb*` wrappers that hand
-# the Rae geometry pass what is still C-owned (the WGSL sources, the skin
-# buffers + palette, the SDF prepare, the frame-derived uniform math, the
-# offscreen size) — since #906 the targets, frame uniform, draws buffer and
+# the Rae geometry pass what is still C-owned (the WGSL sources, the SDF
+# prepare, the frame-derived uniform math, the offscreen size; the skin
+# buffers + palette are the SkinStore's since #921) — since #906 the targets, frame uniform, draws
+# buffer and
 # the frame's encoder / pass are the GbufferCache's manager objects. Nothing
 # here is app-facing; the frame API (begin / draw / end / present) stays in Gbuffer.
 import Math
@@ -162,33 +163,6 @@ func gbufferPipelineSpec(
     cullMode: WGPUCullMode_Back
   }
 }
-
-# Skinned-draw accessors (#503). The skin bind group (frame uniform + draws +
-# joint palette) is still created lazily in C — it needs the pipeline layout and
-# the palette storage buffer — but the draw itself is issued from Rae.
-func nativeGbSkinReady(mesh: Int) unsafe extern("rae_gb_skin_ready") ret Int
-
-func gbSkinReady(mesh: copy Int) ret Int {
-  unsafe {
-    ret nativeGbSkinReady(mesh: mesh)
-  }
-}
-
-func gbSkinVbuf(mesh: Int) unsafe extern("rae_gb_skin_vbuf") ret Ptr
-
-func gbSkinIbuf(mesh: Int) unsafe extern("rae_gb_skin_ibuf") ret Ptr
-
-func nativeGbSkinIcount(mesh: Int) unsafe extern("rae_gb_skin_icount") ret Int
-
-func gbSkinIcount(mesh: copy Int) ret Int {
-  unsafe {
-    ret nativeGbSkinIcount(mesh: mesh)
-  }
-}
-
-func nativeGbSkinPaletteSize() unsafe extern("rae_gb_skin_palette_size") ret Int
-
-func nativeGbSkinPaletteReady() unsafe extern("rae_gb_skin_palette_ready") ret Int
 
 # Metaball cluster into the G-buffer (#392, ported to Rae #504): a fullscreen
 # raymarch that writes packed G-buffer attributes + depth into the OPEN geometry

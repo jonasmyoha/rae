@@ -886,14 +886,7 @@ int64_t rae_gb_sdf_prepare(void* packedBalls, int64_t count, void* packedColors,
                            float metallic, float roughness, float emR, float emG, float emB);
 void* rae_gb_sdf_pipeline(void);
 void* rae_gb_sdf_bind(int64_t gi);
-/* Skinned single draw ported to Rae (#503). */
-int64_t rae_gb_skin_ready(int64_t mesh);
-void* rae_gb_skin_vbuf(int64_t mesh);
-void* rae_gb_skin_ibuf(int64_t mesh);
-int64_t rae_gb_skin_icount(int64_t mesh);
-void* rae_gb_skin_palette(void);
-int64_t rae_gb_skin_palette_size(void);
-int64_t rae_gb_skin_palette_ready(void);
+/* #921: the skinned meshes + palette are the Rae SkinStore's (no rae_gb_skin_* accessors). */
 /* One-command-buffer submit for the raw-encoder passes (shadow, fullscreen,
  * transparent, the legacy GpuTiming): a general FFI gap, not renderer state. */
 void rae_gb_submit(void* cmd);
@@ -980,7 +973,8 @@ void* rae_gb_pyr_rt_view(int64_t i);
 void rae_sm_begin(const float* cascades, int64_t count, int64_t resolution,
                   const float* splits, const float* texelWorld, const float* depthRange);
 void rae_sm_queue_mesh(int64_t mesh, void* vbuf, void* ibuf, int64_t icount, struct rae_Mat4* model);
-void rae_sm_queue_skinned(int64_t mesh, struct rae_Mat4* model, int64_t paletteBase);
+void rae_sm_queue_skinned(int64_t mesh, void* vbuf, void* ibuf, int64_t icount, void* palette,
+                          struct rae_Mat4* model, int64_t paletteBase);
 void rae_sm_record_metaballs(const float* packedBalls, int64_t count, float smoothing);
 void rae_sm_shutdown(void);
 int64_t rae_sm_ready(void);
@@ -1074,11 +1068,9 @@ int   rae_g3d_push_metaball_cluster(const float* packedBalls, int64_t count,
 void* rae_g3d_sdf_pipeline(void);
 void* rae_g3d_sdf_bind(int64_t slot);
 int   rae_g3d_push_skinned_draw(int64_t mesh, struct rae_Mat4* model,
-                                float r, float g, float b, float metallic, float roughness);
+                                float r, float g, float b, float metallic, float roughness,
+                                void* palette);   /* #921: the SkinStore palette, borrowed */
 void* rae_g3d_skin_pipeline(void);
 void* rae_g3d_skin_bind(void);
-void* rae_g3d_skin_vbuf(int64_t mesh);
-void* rae_g3d_skin_ibuf(int64_t mesh);
-int64_t rae_g3d_skin_icount(int64_t mesh);
 
 #endif

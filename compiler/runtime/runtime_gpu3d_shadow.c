@@ -45,6 +45,9 @@ static WGPURenderPipeline g3d_sm_pipeline_skin = NULL;   /* skinned vertex forma
 static WGPUBuffer    g3d_sm_cascade_ubuf[G3D_SHADOW_MAX_CASCADES];
 static WGPUBindGroup g3d_sm_bind[G3D_SHADOW_MAX_CASCADES];
 static WGPUBindGroup g3d_sm_bind_skin[G3D_SHADOW_MAX_CASCADES];
+/* #921: the SkinStore palette the skin binds were built over (borrowed per
+ * frame from rae_sm_queue_skinned; the binds are rebuilt when it changes). */
+static WGPUBuffer    g3d_sm_palette_borrowed = NULL;
 static WGPUBuffer    g3d_sm_model_sbuf = NULL;
 /* Per-caster palette base (#547): the start offset into the shared skin palette
  * buffer, in vec4 rows, so a crowd of characters casts each its OWN pose's
@@ -480,7 +483,7 @@ static void g3d_shadow_ensure_binds(void) {
             g3d_sm_bind[i] = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bd);
             wgpuBindGroupLayoutRelease(bgl);
         }
-        if (!g3d_sm_bind_skin[i] && g3d_sm_pipeline_skin && g3d_skin_palette_sbuf
+        if (!g3d_sm_bind_skin[i] && g3d_sm_pipeline_skin && g3d_sm_palette_borrowed
             && g3d_sm_palette_base_sbuf) {
             WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(g3d_sm_pipeline_skin, 0);
             WGPUBindGroupEntry e[4]; memset(e, 0, sizeof(e));
@@ -489,7 +492,7 @@ static void g3d_shadow_ensure_binds(void) {
             e[1].size = (uint64_t)G3D_SHADOW_MAX_DRAWS * 16 * sizeof(float);
             /* Bind the FULL 64-palette buffer, not one palette, so per-caster
              * paletteBases can index slots > 0 (#547). */
-            e[2].binding = 2; e[2].buffer = g3d_skin_palette_sbuf;
+            e[2].binding = 2; e[2].buffer = g3d_sm_palette_borrowed;
             e[2].size = (uint64_t)G3D_SKIN_MAX_JOINTS * 12 * G3D_SKIN_MAX_PALETTES * sizeof(float);
             e[3].binding = 3; e[3].buffer = g3d_sm_palette_base_sbuf;
             e[3].size = (uint64_t)G3D_SHADOW_MAX_DRAWS * sizeof(uint32_t);
@@ -587,8 +590,24 @@ void rae_sm_queue_mesh(int64_t mesh, void* vbuf, void* ibuf, int64_t icount, rae
     }
 }
 
-void rae_sm_queue_skinned(int64_t mesh, rae_Mat4* model, int64_t paletteBase) {
+/* Queue a skinned caster by its SkinStore buffers (#921) and the store's
+ * palette, which the skin binds are (re)built over; `mesh` is the batching key. */
+void rae_sm_queue_skinned(int64_t mesh, void* vbuf, void* ibuf, int64_t icount, void* palette,
+                          rae_Mat4* model, int64_t paletteBase) {
+    if (!vbuf || !ibuf || icount <= 0 || !palette) return;
+    if ((WGPUBuffer)palette != g3d_sm_palette_borrowed) {
+        for (int i = 0; i < G3D_SHADOW_MAX_CASCADES; i++) {
+            if (g3d_sm_bind_skin[i]) { wgpuBindGroupRelease(g3d_sm_bind_skin[i]); g3d_sm_bind_skin[i] = NULL; }
+        }
+        g3d_sm_palette_borrowed = (WGPUBuffer)palette;
+    }
+    int at = g3d_sm_draw_count;
     g3d_shadow_queue(mesh, model, 1, paletteBase);
+    if (g3d_sm_draw_count == at + 1) {
+        g3d_sm_draw_vbuf[at] = (WGPUBuffer)vbuf;
+        g3d_sm_draw_ibuf[at] = (WGPUBuffer)ibuf;
+        g3d_sm_draw_icount[at] = (uint32_t)icount;
+    }
 }
 
 /* Rasterise every queued caster into every cascade.
@@ -620,10 +639,10 @@ int64_t rae_sm_caster_ready(int64_t i, int64_t c) {
     int slot = g3d_sm_draw_mesh[i];
     if (slot < 0) return 0;
     if (g3d_sm_draw_skinned[i]) {
-        if (slot >= g3d_skin_mesh_n || !g3d_sm_pipeline_skin || !g3d_sm_bind_skin[c]) return 0;
-        return (g3d_skin_vbuf[slot] && g3d_skin_ibuf[slot] && g3d_skin_icount[slot]) ? 1 : 0;
+        if (!g3d_sm_pipeline_skin || !g3d_sm_bind_skin[c]) return 0;
+    } else {
+        if (!g3d_sm_bind[c]) return 0;
     }
-    if (!g3d_sm_bind[c]) return 0;
     return (g3d_sm_draw_vbuf[i] && g3d_sm_draw_ibuf[i] && g3d_sm_draw_icount[i]) ? 1 : 0;
 }
 void* rae_sm_caster_pipeline(int64_t i) {
@@ -634,20 +653,18 @@ void* rae_sm_caster_bind(int64_t i, int64_t c) {
     if (i < 0 || i >= g3d_sm_draw_count || c < 0 || c >= G3D_SHADOW_MAX_CASCADES) return NULL;
     return g3d_sm_draw_skinned[i] ? (void*)g3d_sm_bind_skin[(int)c] : (void*)g3d_sm_bind[(int)c];
 }
+/* Static and skinned casters alike carry their buffers in the queue (#905/#921). */
 void* rae_sm_caster_vbuf(int64_t i) {
     if (i < 0 || i >= g3d_sm_draw_count) return NULL;
-    int slot = g3d_sm_draw_mesh[i];
-    return g3d_sm_draw_skinned[i] ? (void*)g3d_skin_vbuf[slot] : (void*)g3d_sm_draw_vbuf[i];
+    return (void*)g3d_sm_draw_vbuf[i];
 }
 void* rae_sm_caster_ibuf(int64_t i) {
     if (i < 0 || i >= g3d_sm_draw_count) return NULL;
-    int slot = g3d_sm_draw_mesh[i];
-    return g3d_sm_draw_skinned[i] ? (void*)g3d_skin_ibuf[slot] : (void*)g3d_sm_draw_ibuf[i];
+    return (void*)g3d_sm_draw_ibuf[i];
 }
 int64_t rae_sm_caster_icount(int64_t i) {
     if (i < 0 || i >= g3d_sm_draw_count) return 0;
-    int slot = g3d_sm_draw_mesh[i];
-    return g3d_sm_draw_skinned[i] ? (int64_t)g3d_skin_icount[slot] : (int64_t)g3d_sm_draw_icount[i];
+    return (int64_t)g3d_sm_draw_icount[i];
 }
 /* A batching KEY identifying this caster's pipeline+geometry: (skinned, mesh slot).
  * Consecutive casters with the same key share pipeline / vbuf / ibuf / bind, and the
@@ -761,6 +778,7 @@ void rae_sm_shutdown(void) {
     if (g3d_sm_sampler) { wgpuSamplerRelease(g3d_sm_sampler); g3d_sm_sampler = NULL; }
     if (g3d_sm_pipeline) { wgpuRenderPipelineRelease(g3d_sm_pipeline); g3d_sm_pipeline = NULL; }
     if (g3d_sm_pipeline_skin) { wgpuRenderPipelineRelease(g3d_sm_pipeline_skin); g3d_sm_pipeline_skin = NULL; }
+    g3d_sm_palette_borrowed = NULL;
     if (g3d_sm_model_sbuf) { wgpuBufferRelease(g3d_sm_model_sbuf); g3d_sm_model_sbuf = NULL; }
     if (g3d_sm_palette_base_sbuf) { wgpuBufferRelease(g3d_sm_palette_base_sbuf); g3d_sm_palette_base_sbuf = NULL; }
     for (int i = 0; i < G3D_SHADOW_MAX_CASCADES; i++) {

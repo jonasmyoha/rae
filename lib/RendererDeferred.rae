@@ -30,10 +30,12 @@
 # value and modelMatrix no longer allocates, so a frame's per-object data
 # path touches the allocator zero times.
 import Gpu2d
+import Gpu3d
 open Rendergraph
 open Math3d
 open Scene3d
 open MeshStore
+open SkinStore
 open Gbuffer
 open GbufferWorld
 open GbufferTerrain
@@ -190,6 +192,70 @@ func uploadMesh(
   ret meshHandleNone()
 }
 
+# #921: a SKINNED mesh (20 Floats per vertex: pos3, nrm3, uv2, four joint
+# indices as Floats, four weights, an RGBA vertex colour) into the renderer's
+# SkinStore; the deferred skin pass and the skinned shadow casters resolve it there.
+func uploadSkinnedMesh(
+  renderer: mod DeferredRenderer
+  verts: view List(Float)
+  vertCount: view Int
+  indices: view List(Int)
+) pub ret MeshHandle {
+  ensureRendererResources(renderer: renderer)
+  if let resources: mod GpuResources => renderer.gpuResources {
+    ret skinStoreUpload(
+      store: renderer.passes.gbuffer.skins
+      resources: resources
+      verts: verts
+      vertCount: vertCount
+      indices: indices
+    )
+  }
+  ret meshHandleNone()
+}
+
+# The joint palette for this frame (#921): 12 Floats per joint, three vec4 rows
+# of an affine transform, written at slot 0 of the renderer's palette buffer.
+# Per FRAME, not per draw — every part of a character shares one skeleton;
+# uploadPaletteSlot (GbufferInstanced) writes the other characters' slots.
+func uploadPalette(
+  renderer: mod DeferredRenderer
+  rows: view List(Float)
+  jointCount: view Int
+) pub {
+  ensureRendererResources(renderer: renderer)
+  if let resources: mod GpuResources => renderer.gpuResources {
+    let wrote: Bool = skinStoreWritePalette(
+      store: renderer.passes.gbuffer.skins
+      resources: resources
+      rows: rows
+      jointCount: jointCount
+      baseRow: 0
+    )
+  }
+}
+
+# A skinned shadow caster from this renderer's SkinStore: queued by its buffer
+# handles + the palette handle (borrowed by the C shadow pass for this frame),
+# `paletteBase` its start row in the palette (characterPaletteBase, #547).
+func drawShadowCasterSkinnedWith(
+  renderer: mod DeferredRenderer
+  mesh: view MeshHandle
+  model: view Mat4
+  paletteBase: copy Int
+) pub {
+  ensureRendererResources(renderer: renderer)
+  if let resources: view GpuResources => renderer.gpuResources {
+    Gpu3d.drawShadowCasterSkinned(
+      skins: renderer.passes.gbuffer.skins
+      resources: resources
+      mesh: mesh
+      model: model
+      paletteBase: paletteBase
+    )
+  }
+}
+
 # Rewrite a mesh's vertex data in place (pooled geometry, e.g. recycled
 # terrain tiles); the index buffer and vertex count stay.
 func updateMeshVerts(
@@ -230,6 +296,7 @@ func shutdownDeferredRenderer(renderer: mod DeferredRenderer) pub {
     gbufferShutdown(cache: renderer.passes.gbuffer, resources: resources)
     terrainShutdown(cache: renderer.passes.gbuffer, resources: resources)
     meshStoreShutdown(store: renderer.passes.gbuffer.meshes, resources: resources)
+    skinStoreShutdown(store: renderer.passes.gbuffer.skins, resources: resources)
     shutdown(resources: resources)
   }
   renderer.gpuResources = none
