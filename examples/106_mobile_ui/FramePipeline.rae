@@ -1,4 +1,5 @@
 open ui/Ecs
+open ecs/Event
 open ui/fitSystem/FitSystem
 open ui/layoutSystem/LayoutSystem
 open ui/LogOverlay
@@ -30,7 +31,7 @@ func runFrameInputDispatch(
 ) pub ret FrameInputDispatchResult {
   var nextScreen: Screen = currentScreen
   let canvasOpenBefore: Bool = appState.canvasOpen
-  let hadActions: Bool = input.events.length > 0
+  let hadActions: Bool = eventCount(this: input.uiActions) > 0
 
   if dragJustReleased is false {
     nextScreen = dispatchActions(
@@ -43,7 +44,7 @@ func runFrameInputDispatch(
     )
   } else {
     if hadActions {
-      let dropped: Int = input.events.length
+      let dropped: Int = eventCount(this: input.uiActions)
       log("[dispatch] dragJustReleased=true, dropping {dropped} pending event(s)")
     }
   }
