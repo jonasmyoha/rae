@@ -25,9 +25,13 @@
 #endif
 
 /* C emission retains parsed AST and generated specializations together. Large
- * applications can legitimately exceed the old 64 MiB budget by adding a
- * small helper, so keep enough headroom for production-sized module graphs. */
-#define RAE_C_BACKEND_ARENA_CAPACITY (128ULL * 1024ULL * 1024ULL)
+ * applications can legitimately exceed a smaller budget by adding a single
+ * feature module (e.g. a full water/ocean subsystem on top of an already-large
+ * renderer client tips it over): the substitute_type_ref specialization nodes
+ * for one more heavily-generic module graph run to tens of MiB. Raised 128 -> 512
+ * MiB so production-sized module graphs have real headroom; it is a one-shot
+ * malloc freed after emit, and only touched pages become resident. */
+#define RAE_C_BACKEND_ARENA_CAPACITY (512ULL * 1024ULL * 1024ULL)
 #include "arena.h"
 #include "str.h"
 #include "diag.h"
