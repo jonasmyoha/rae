@@ -1,19 +1,20 @@
 # Theme infrastructure for the UI stdlib — dark and light palettes
-# wrapped in a struct, plus a module-level "active theme" that the
-# scene parser consults when it sees a token color like `"$surface"`
-# in place of an `{r, g, b, a}` JSON object.
+# wrapped in a struct. Since #764 the active theme is a RESOURCE on the
+# UiWorld (`UiWorld.theme: UiTheme`), not a module-level global: the scene
+# parser resolves a token color like `"$surface"` (in place of an
+# `{r, g, b, a}` JSON object) against the world's theme.
 #
 # How to use:
 #
-#   * Call `setActiveTheme(darkTheme())` (or `lightTheme()`) BEFORE
-#     `loadAllScenes()`. Scenes resolve `"$tokenName"` colors against
-#     the current `activeTheme` at parse time.
-#   * `colorByName(name)` exposes the lookup directly for
+#   * `setActiveTheme(world: uiWorld, theme: darkTheme())` (or
+#     `lightTheme()`) stores the palette on the world; scenes then resolve
+#     `"$tokenName"` colors against it.
+#   * `currentTheme(world:)` / `generation(world:)` read it back;
+#     `colorByName(theme:, name:)` exposes the lookup directly for
 #     code-driven UI that wants the same semantic slots.
-#   * To switch themes at runtime, set the active theme and re-parse
-#     the scene files (the data hot-reload path already does the
-#     world rebuild; pointing it at the theme handle gives free
-#     theme switching without restart).
+#   * To switch themes at runtime, call `setActiveTheme` again and re-parse
+#     the scene files (the data hot-reload path already does the world
+#     rebuild) — `generation` advances so observers can react.
 #
 # The palette is deliberately small — eight semantic slots that
 # cover everything the music-player example uses. Apps that need

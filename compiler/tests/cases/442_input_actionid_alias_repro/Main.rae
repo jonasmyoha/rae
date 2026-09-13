@@ -1,23 +1,45 @@
-# Repro for the SIGABRT in rae_drop_struct_rae_UiWorld observed when
-# the user clicks a nav-tab in 98_mobile_ui.
+# Repro for a double-free (SIGABRT in a UiWorld drop) when an action event
+# aliases an OnClick's heap `actionId` String instead of deep-copying it.
 #
-# Hypothesis: appendActionEvent copies oc.actionId by SHALLOW alias
-# instead of deep-copying. When the InputSystem drops (its events
-# list cascade-drops each ActionEvent's actionId), the same heap
-# bytes are freed. Then when the world drops, the OnClick's actionId
-# field tries to free the same bytes again — double-free, libmalloc
-# aborts with "pointer being freed was not allocated".
+# Hypothesis (the bug this guards against): appendActionEvent stores its
+# `actionId` argument by SHALLOW alias. When the input system drops (its
+# events list cascade-drops each ActionEvent's actionId), the heap bytes are
+# freed. Then when the world drops, the OnClick's actionId field frees the
+# same bytes again — double-free, libmalloc aborts.
 #
-# Shape matches the real path:
-#   - one entity with an OnClick whose actionId is a long-enough
-#     String to be heap-allocated (short strings might be inlined)
+# Self-contained since #955 (the raylib UI backend, whose Input module this
+# used to `open`, was removed): a minimal ActionEvent / InputSystem stands in
+# for it, keeping the exact aliasing shape the compiler must handle —
+#   - one entity with an OnClick whose actionId is a long-enough String to be
+#     heap-allocated (short strings might be inlined)
 #   - input has an ActionEvent referencing that actionId
 #   - input drops first (inner scope), world drops second (outer)
 import String
 open ui/Ecs
 import ui/Components
-open ui/legacyRaylib/Input
+open ecs/Entity
 open ecs/ComponentTable
+
+# A minimal stand-in for the removed backend's input system: an event carries
+# its own owned actionId, so appending one must DEEP-COPY the source String.
+type ActionEvent {
+  entity: EntityId
+  actionId: String
+}
+
+type InputSystem {
+  events: List(ActionEvent)
+}
+
+func createInputSystem() ret InputSystem {
+  ret InputSystem { events: List.create(ActionEvent, cap: 4) }
+}
+
+func appendActionEvent(input: mod InputSystem, entity: view EntityId, actionId: view String) {
+  var copied: String = ""
+  copied = copied.concat(other: actionId)
+  input.events.add(value: ActionEvent { entity: entity, actionId: own copied })
+}
 
 func main() {
   let world: UiWorld = createUiWorld()

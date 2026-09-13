@@ -21,7 +21,6 @@
 #include "vm.h"
 #include "vm_registry.h"
 #include "vm_value.h"
-#include "vm_raylib.h"
 #include "vm_tinyexpr.h"
 #include "vm_drop.h"
 #include "../runtime/rae_runtime.h"
@@ -1348,7 +1347,6 @@ bool register_default_natives(VmRegistry* registry, TickCounter* tick_counter) {
   ok = vm_registry_register_native(registry, "ceil", native_rae_math_ceil, NULL) && ok;
   ok = vm_registry_register_native(registry, "round", native_rae_math_round, NULL) && ok;
 
-  ok = vm_registry_register_raylib(registry) && ok;
   ok = vm_registry_register_tinyexpr(registry) && ok;
   return ok;
 }
