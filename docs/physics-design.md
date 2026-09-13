@@ -29,8 +29,8 @@ per-body integration is replaced".
 | ragdoll (comedy) | capsules + spherical/revolute joints with limits, motors, springs |
 | multiplayer | **cross-platform determinism** (built with `-ffp-contract=off`), deterministic across thread counts; **no rollback** |
 
-Everything through ragdolls is covered by one engine, which is why the first
-draft's "write it in Rae" recommendation is withdrawn.
+Everything through ragdolls **and vehicles** (§5.7) is covered by one engine,
+which is why the first draft's "write it in Rae" recommendation is withdrawn.
 
 ## 1. What Box3D is (verified)
 
@@ -77,7 +77,7 @@ draft's "write it in Rae" recommendation is withdrawn.
 | | language | 3D | wasm | determinism | bind cost | verdict |
 |---|---|---|---|---|---|---|
 | **Box3D** | C17, MIT | yes | yes (SSE2-on-wasm or scalar) | cross-platform, thread-count independent | `rae bindgen` over 8 headers, like WebGPU | **adopt** |
-| Box2D v3 | C11, MIT | 2D only | yes | yes | trivial | reserve for 2D games (`lib/physics2d`, separate task) |
+| Box2D v3 | C11, MIT | 2D only | yes | yes | trivial | not needed — Rae targets 3D games only (maintainer decision) |
 | Jolt | C++17 | yes | yes | not cross-platform by default | C shim + libc++ in an all-C toolchain | no |
 | pure Rae | Rae | yes | yes | by construction | none, but a solver to write and maintain | no — Box3D covers phases 1–3 with a maintained, deterministic solver |
 
@@ -265,6 +265,52 @@ Box3D memory; `b3SetAssertFcn`/`b3SetLogFcn` → the Rae log so an engine assert
 is a Rae diagnostic, not a silent abort. These are C-side one-liners in the
 runtime behind `RAE_HAS_PHYSICS`, the only physics C Rae will have.
 
+### 5.7 Vehicles — what Box3D offers, and versus Jolt
+
+Box3D models a vehicle as **real rigid bodies on wheel joints**: chassis body
++ one dynamic wheel body per wheel, each attached by a `b3WheelJointDef`:
+
+- suspension: translation along the joint's local axis with a spring
+  (`suspensionHertz`, `suspensionDampingRatio`) and optional travel limits;
+- drive/brake: a spin motor (`enableSpinMotor`, `spinSpeed`, `maxSpinTorque`);
+- steering: a rotation about the suspension axis with its own spring/damper,
+  `targetSteeringAngle`, `maxSteeringTorque` and angle limits;
+- readbacks: spin speed/torque, steering angle/torque;
+- `b3BodyDef.allowFastRotation` for wheels; tire grip is the wheel shape's
+  surface material (`friction`, `rollingResistance`), so slicks vs. grass is a
+  material, and the ground's material contributes too.
+
+The engine ships a **`Driving` sample** (`samples/sample_joint.cpp`, registered
+under "Joints"; the docs call it "Drive"): a hull chassis (`b3MakeBoxHull(2,
+0.5, 1)`, density 0.5), four wheel bodies (density 2, friction 3,
+`allowFastRotation`), front wheels steer, rear wheels drive, suspension limits
++ spring, and a small "keep vehicle upright" torque. That is the whole recipe
+a Rae vehicle example needs; the interactive `WheelJoint` sample exposes every
+knob. Community bindings already expose it (godot-box3d maps
+`Box3DWheelJoint` as "a real constraint" next to Godot's ray-cast
+`VehicleBody3D`).
+
+**Jolt is more complete for vehicles**: a dedicated `VehicleConstraint` with
+`WheeledVehicleController` (engine curve, gearbox, differentials, tire
+friction curves, anti-roll bars), `TrackedVehicleController` (tanks) and
+`MotorcycleController`, plus a ray/cast-wheel model that does not simulate
+wheels as bodies (samples: `Samples/Tests/Vehicle/{VehicleConstraintTest,
+TankTest, MotorcycleTest, VehicleSixDOFTest}`). If the game needed a driving
+*sim* — tuned gear ratios, drift physics, tracked vehicles — Jolt wins on
+features. For an arcade/comedy car (drive, steer, jump, flip, get out) the
+Box3D joint model is sufficient, and the engine-level extras Jolt adds (engine
+curve, gearbox, differential) are plain Rae code over the spin motor: set
+`spinSpeed`/`maxSpinTorque` per wheel from a throttle, split torque between
+wheels, apply a downforce impulse. That keeps the "as much Rae as possible"
+goal and avoids C++.
+
+**Decision:** stay on Box3D; add a **vehicle example** (task §8.7) written in
+Rae over the wheel-joint bindings, porting the `Driving` sample: `VehicleBody`
+component (chassis + wheel entities + joint ids), `vehicleSystem` mapping
+input to steering target and spin motor, a windowed demo on the venue mesh.
+Re-evaluate Jolt only if a tracked vehicle or a tire-model sim is ever asked
+for.
+
 ## 6. Determinism rules
 
 - Fixed `fixedStep`, accumulator in the app (the client already has one).
@@ -277,6 +323,87 @@ runtime behind `RAE_HAS_PHYSICS`, the only physics C Rae will have.
 - Box3D has no rollback: lockstep or server-authoritative netcode fits;
   rollback netcode does not without re-simulating from a recording.
 - No wall clock or randomness inside the step; the game seeds throws.
+
+## 6b. Threading, SIMD and Rae concurrency — what must come first?
+
+**Nothing in Rae's concurrency needs to land before Box3D.** Box3D brings its
+own **internal task scheduler**: set `b3WorldDef.workerCount = N` and it
+creates N-1 threads itself and uses the calling thread as the Nth; the
+`enqueueTask`/`finishTask` callbacks are only for plugging in an *external*
+scheduler. Its parallelism is **data parallelism inside `b3World_Step`**
+(islands, contact solving), explicitly not task parallelism, and it is
+deterministic regardless of worker count. So physics can be multithreaded on
+day one with zero Rae threading — and single-threaded (`workerCount = 1`) is
+the phase-1 default until determinism across peers is validated.
+
+**SIMD** is likewise inside Box3D (SSE2/NEON, or `-msimd128 -msse2` on wasm,
+or `BOX3D_DISABLE_SIMD`). Rae has no SIMD types of its own and does not need
+them for this: Rae's `Float` = f32 was chosen with SIMD lane width in mind
+(`docs/primitive-types.md`), and the Rae side of physics is control flow over
+component tables, not inner solver loops. A Rae SIMD story is a separate,
+later language question; it is not a physics prerequisite.
+
+**Threading Rae's own game systems** is governed by `docs/concurrency-model.md`,
+which already exists and is partly implemented — this design adds nothing to
+it and depends on nothing unimplemented in it:
+
+- Rae **inverts** `async`/`await`: normal calls are synchronous; `spawn
+  f(args)` is the only marker and returns `Task(T)`; `task.get()` joins
+  explicitly; dropping a task joins it (no leaks, no silent detach); there is
+  **no `await`, no `async`, no function colouring** — the call site, not the
+  function, decides. Race-freedom is proven at the `spawn`/`parallelLoop`
+  boundary from the existing `own`/`copy`/`view`/`mod` modes instead of a
+  lock subsystem. `taskScope { }` (structured concurrency) and `parallelLoop`
+  exist as keywords; `Channel(T)` exists; `detach` is not yet implemented.
+- What runs today on the Compiled target: `spawn` with value / `own` / `copy`
+  heap args on **real OS threads** (deep-copied at the spawn site,
+  ASan-clean), `get()`, join-on-drop, `taskScope`; `parallelLoop` compiles to
+  a **sequential** loop for now; `mod`/`view`-aggregate captures fall back to
+  sequential. The concurrency doc's §5 "current state" predates the C-backend
+  work its own header describes — worth a refresh, but not a blocker.
+
+**async/await versus game-engine multithreading — are they the same thing?**
+No. `async`/`await` (JS, C#, Rust, Python) is a **concurrency** model for
+*latency hiding*: many logical activities waiting on I/O interleave on few
+threads, and the syntax marks suspension points. A game engine's frame is a
+**parallelism** problem: a fixed budget of CPU work (physics islands,
+animation, culling, ECS systems) that must be *finished* every 16 ms on as
+many cores as exist, with results merged deterministically. The state of the
+art there is not async/await but **job systems with fork-join / task graphs**
+— Naughty Dog's fiber job system, Unity's C# Jobs + Burst over ECS, Unreal's
+TaskGraph, Bevy/flecs scheduling ECS systems in parallel from their declared
+read/write sets, id Tech's job lists. Their shared shape: *the frame is a DAG
+of short jobs; each job declares what it reads and writes; a scheduler runs
+independent jobs concurrently and joins before dependents*. Async/await only
+belongs at the edges — network, disk, asset streaming — where waiting, not
+computing, is the cost.
+
+Rae's model is already the right one for a game engine, and unusually so:
+
+1. **`spawn` + `get()` + `taskScope` is fork-join**, the core of every job
+   system, without async colouring.
+2. **`parallelLoop` is the data-parallel job** (one iteration per entity range
+   over a dense component table), and the `own`/`view`/`mod` modes are exactly
+   the "declared read/write set" a job scheduler needs — Rae has it per
+   parameter *for free*, where Bevy derives it from system signatures and
+   Unity from `[ReadOnly]` attributes.
+3. **The ECS `Schedule`** (`docs/ecs-general-architecture.md`) is the frame
+   DAG: it already records what tables each system reads; the natural
+   evolution is to run systems with disjoint read/write sets concurrently
+   under `taskScope`, joining at each dependency edge — the Bevy design, with
+   Rae's mode system as the proof instead of runtime borrow tracking. That is
+   the "best model for Rae" and it needs no new keywords.
+4. Physics fits the DAG as one node: `physicsStepSystem` is a job that
+   parallelises *internally* (Box3D workers) while Rae-level jobs that do not
+   touch physics tables (animation, UI layout, audio) run alongside it. Later,
+   when Rae-function-to-C callbacks exist, Box3D's external scheduler can be
+   backed by Rae's own pool so the two do not oversubscribe cores — an
+   optimisation, not a requirement.
+
+Recommended order, therefore: **physics now** (Box3D, `workerCount` for
+parallelism), Rae concurrency continues on its own roadmap (real
+`parallelLoop`, `detach`, schedule-level parallel systems), and the two meet
+at the external-scheduler hook when callbacks land.
 
 ## 7. Testing (TDD, non-visual)
 
@@ -312,19 +439,23 @@ boxes, a thrown ball) for the manual visual gate only.
 5. **Character controller** in Rae over the mover primitives; fixtures 7.4.
 6. **Joints + demo:** revolute/spherical wrappers, hurdle and bar, the
    windowed example.
-7. **Runtime hooks:** allocator/assert/log into Rae's runtime accounting.
-8. **Downstream migration guide** (generic wording): `PhysicsBody` →
+7. **Vehicle example:** wheel-joint wrappers, a `VehicleBody` component +
+   `vehicleSystem` (input → steering target + spin motor, torque split), a
+   windowed drivable car on the venue mesh, porting Box3D's `Driving`
+   sample; non-visual fixture: a driven car on flat ground reaches a target
+   speed and a steered car turns (deterministic prints).
+8. **Runtime hooks:** allocator/assert/log into Rae's runtime accounting.
+9. **Downstream migration guide** (generic wording): `PhysicsBody` →
    `RigidBody`, ground plane → static shapes, hurdles → hinged bodies,
    javelin stick = hit event → weld/static.
-9. *(later)* external task scheduler via Rae `spawn` when Rae-function
-   callbacks reach the FFI; ragdoll rig helpers.
-10. *(independent)* `lib/physics2d/` = `rae bindgen` over Box2D v3 for 2D
-    games.
+10. *(later)* `workerCount > 1` once cross-peer determinism is validated;
+    external task scheduler via Rae's pool when Rae-function callbacks reach
+    the FFI; ragdoll rig helpers.
 
 ## 9. Open questions for the maintainer
 
 1. Confirm **Box3D** (over Jolt/pure Rae) and vendoring at the **v0.1.0 tag**
-   with bindings regenerated on each bump.
+   with bindings regenerated on each bump. (Box2D for 2D: dropped — 3D only.)
 2. Netcode: lockstep (needs the §6 same-configuration rule across all peers,
    including wasm) or server-authoritative?
 3. The on-demand `libbox3d.a` build inside the compiler (§4) vs. a documented
