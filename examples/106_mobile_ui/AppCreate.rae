@@ -138,6 +138,7 @@ func createApp() ret App {
   # Spotify-mode integration. ON by default; opt out with
   # RAE_UI_NO_SPOTIFY=1 or RAE_UI_HEADLESS=1 (would focus Spotify).
   let spotifyState: SpotifyState = setupSpotify(isHeadless: isHeadless)
+  let spotifyPoller: SpotifyPoller = startSpotifyPoller(enabled: spotifyState.enabled)
 
   let autoExitSec: Float = autoExitSeconds(isHeadless: isHeadless)
   let bootTime: Float64 = uiNowSeconds()
@@ -159,6 +160,7 @@ func createApp() ret App {
       viewport: viewport
       logView: own logView
       spotifyState: own spotifyState
+      spotifyPoller: own spotifyPoller
       autoExitSec: autoExitSec
       bootTime: bootTime
       waitTraceEnabled: waitTraceEnabled

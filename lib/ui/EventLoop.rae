@@ -47,3 +47,16 @@ func nextWaitTimeoutSec(
   }
   ret idleCapSec
 }
+
+# Thread-safe waker (#950). Posts a user event to the window's queue so a
+# `waitEvents` blocked on the UI thread returns immediately. A `spawn`'d
+# worker calls this right after it posts its result on a Channel: without
+# it an idle loop only notices the completion on its next timeout tick.
+# Safe from any thread; a no-op before a window exists (headless).
+func nativeWake() unsafe extern("rae_ext_EventLoop_wake")
+
+func wake() {
+  unsafe {
+    nativeWake()
+  }
+}

@@ -427,6 +427,9 @@ type AppState {
   # Transient (not persisted): the History-artwork scan cursor and the album/
   # avatar asset-registration latches.
   historyArt: HistoryArtLoader
+  # #950: the background artwork downloads the History loader kicks off
+  # (spawn'd curl workers + their result channel). Transient.
+  artworkFetch: ArtworkFetchQueue
   assetLoad: AssetLoad
 }
 
@@ -464,6 +467,7 @@ func createAppState(albums: own List(Album), theme: own UiTheme) pub ret AppStat
       settings: createAppSettings()
       canvasOpen: false
       historyArt: createHistoryArtLoader()
+      artworkFetch: createArtworkFetchQueue()
       assetLoad: createAssetLoad()
     }
   }

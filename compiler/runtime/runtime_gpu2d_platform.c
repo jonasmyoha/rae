@@ -375,6 +375,21 @@ void rae_ext_Gpu2d_waitEvents(float timeoutSec){
     SDL_WaitEventTimeout(NULL, ms);
 }
 
+/* Thread-safe waker (#950, lib/ui/EventLoop.rae `wake`): post a user event so
+ * a `waitEvents` blocked on the UI thread returns at once. A `spawn`'d worker
+ * calls this right after it posts its result on a Channel, so an idle loop
+ * reacts to the completion instead of noticing it on its next timeout tick.
+ * SDL_PushEvent is documented thread-safe; SDL_EVENT_USER needs no
+ * registration and the pump's default arm drops it unread. Before SDL is
+ * initialised the push simply fails, which is the right no-op for a headless
+ * run. Builds without an SDL3 window get the no-op in rae_runtime.c. */
+void rae_ext_EventLoop_wake(void){
+    SDL_Event ev;
+    SDL_zero(ev);
+    ev.type = SDL_EVENT_USER;
+    SDL_PushEvent(&ev);
+}
+
 /* Pointer position in DESIGN units (the same coordinate space drawRect etc.
  * take), so hit-testing matches what was drawn. SDL reports logical window
  * points; we scale to physical px (× dpr) then invert the design fit transform

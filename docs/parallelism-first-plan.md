@@ -210,6 +210,13 @@ Concretely, with the language as it is:
 4. `detach` for the poller (a worker with no result to join), once it exists;
    until then it is joined at shutdown, which is fine.
 
+**Status (#950):** items 1 and 2 landed — `SpotifyPoller.rae` /
+`ArtworkFetch.rae` in 106 own the scheduling, the C poll thread and curl job
+table are deleted, and `ui/EventLoop.wake()` exists (`rae_ext_EventLoop_wake`).
+Two limits shaped the code: `Channel(T)` is Int-only, so the artwork result
+is `serial * 2 + okBit` rather than a `Channel(ArtworkResult)`; and with no
+`detach`, the poller takes a stop channel and is joined at teardown.
+
 **On "games and other programs should share one architecture" — agreed, and
 this is the evidence.** Both kinds of program are the same shape: an ECS world
 stepped by a schedule, with two kinds of concurrency at the edges of each
