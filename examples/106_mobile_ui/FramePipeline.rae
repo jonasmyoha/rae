@@ -125,6 +125,7 @@ func syncFrameData(
   appState: mod AppState
   playback: mod PlaybackState
   spotifyState: mod SpotifyState
+  spotifyPoller: view SpotifyPoller
   texReg: mod TextureRegistry
   uiRefresh: mod UiRefreshCache
   visible: view Screen
@@ -138,8 +139,8 @@ func syncFrameData(
     applyOverlaysToWorld(world: world, playback: playback, state: appState)
   }
 
-  # Wrap at the boundary: the frame pipeline still carries a raw Float64 clock,
-  # while the poller's throttle is expressed in Timestamp/Duration.
+  # The poll worker (#950) refreshed the cache off-thread and posted a tick;
+  # only then is there a new snapshot worth mirroring into the world.
   pollSpotify(
     state: spotifyState
     world: world
@@ -147,6 +148,7 @@ func syncFrameData(
     playback: playback
     appState: appState
     now: Time.atSeconds(s: now)
+    ticked: spotifyPollerTicked(poller: spotifyPoller)
   )
   let spotifyRefresh: UiRefreshResult = refreshMountedUi(
     world: world
@@ -168,11 +170,15 @@ func syncFrameData(
     budget: 2
     load: appState.assetLoad
   )
+  # Settle the artwork downloads that landed since last frame (#950), then
+  # let the loader upload them / start the next ones.
+  artworkFetchDrain(queue: appState.artworkFetch)
   let loadingHistoryArt: Bool = loadCachedHistoryArtChunk(
     history: appState.playHistory
     reg: texReg
     budget: 4
     loader: appState.historyArt
+    fetches: appState.artworkFetch
   )
   var profileBecameReady: Bool = false
   if visible is Screen.profile {

@@ -65,9 +65,9 @@ func createBootTheme(gpuUi: view Gpu2dUi) ret UiTheme {
 
 # Spotify-mode integration. ON by default; opt out with RAE_UI_NO_SPOTIFY=1 or
 # RAE_UI_HEADLESS=1 (would focus Spotify). Clears `enabled` too, not just the
-# local flag: `pollSpotify` gates on `state.enabled`, so headless skipped
-# `startPoller` yet still polled (and wrote text) every frame against a cache
-# nobody filled.
+# local flag: `pollSpotify` gates on `state.enabled`, and `enabled` is also
+# what decides whether the poll worker (`startSpotifyPoller`, #950) polls
+# at all.
 func setupSpotify(isHeadless: view Bool) ret SpotifyState {
   let spotifyState: SpotifyState = createSpotifyState()
   var spotifyOn: Bool = spotifyState.enabled
@@ -77,7 +77,6 @@ func setupSpotify(isHeadless: view Bool) ret SpotifyState {
   }
   if spotifyOn {
     log("[spotify] ON — launches lazily on first play (AppleScript play auto-launches).")
-    Spotify.startPoller(intervalMs: 1000)
   } else {
     log("[spotify] OFF (RAE_UI_NO_SPOTIFY or RAE_UI_HEADLESS)")
   }

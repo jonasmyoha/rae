@@ -54,6 +54,7 @@ func runApp(app: mod App) {
   let playback: mod PlaybackState => app.playback
   let logView: mod LogOverlay => app.logView
   let spotifyState: view SpotifyState => app.spotifyState
+  let spotifyPoller: view SpotifyPoller => app.spotifyPoller
   var viewport: Viewport = app.viewport
   let autoExitSec: Float = app.autoExitSec
   let bootTime: Float64 = app.bootTime
@@ -666,6 +667,7 @@ func runApp(app: mod App) {
             appState: appState
             playback: playback
             spotifyState: spotifyState
+            spotifyPoller: spotifyPoller
             texReg: texReg
             uiRefresh: uiRefresh
             visible: currentScreen
@@ -884,6 +886,10 @@ func runApp(app: mod App) {
   # Final snapshot — captures window-drag-only sessions where no
   # dispatched action fired (and thus no in-loop save ran).
   saveAppState(path: stateFilePath, state: appState, playback: playback)
+  # #950: join the background workers before the window goes — the poll
+  # worker on its stop channel, the artwork downloads by waiting them out.
+  stopSpotifyPoller(poller: app.spotifyPoller)
+  shutdownArtworkFetchQueue(queue: appState.artworkFetch)
   textureUnloadAll(reg: texReg)
   uiCloseWindow()
 }
