@@ -18,11 +18,33 @@
 #
 #   if shouldRun(schedule, layoutIdx, layoutReadGen)       { layoutSystem(world) }
 #   if shouldRun(schedule, transformIdx, transformReadGen) { transformSystem(world) }
+#
+# #939 adds the DECLARED form: addDeclaredSystem records each system's read /
+# write table ids and shouldRunDeclared computes the read generation from that
+# declaration by reflection, so the runner no longer supplies it.
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/World
+
 type ScheduleEntry {
   name: String
+  # #939: the tables this system READS and WRITES, as table ids — a table's
+  # position among the world's ComponentTable fields (see tableIdByName). The
+  # read set drives dirty-skip through shouldRunDeclared; the write set is the
+  # declaration a parallel stager needs (docs/parallelism-first-plan.md Phase
+  # 2). Empty for entries registered with the plain addSystem.
+  reads: List(Int)
+  writes: List(Int)
+  # false = the system runs every frame regardless of its reads (its sets are
+  # declaration only). true = skip when no read table mutated and the live
+  # entity count is unchanged — the exact rule the UI's hand-written
+  # LayoutCache / TransformCache applied.
+  skipWhenClean: Bool
   # Combined read-table generation at the last run; -1 = never run, so the entry
   # always runs the first frame.
   lastGeneration: Int
+  # Live entity count at the last run (declared path only); -1 = never run.
+  lastEntityCount: Int
 }
 
 type Schedule {
@@ -34,12 +56,40 @@ func createSchedule() ret Schedule {
 }
 
 # Append a system entry in run order. Returns its index (its position in the
-# explicit order) — the per-frame runner keys shouldRun on it.
+# explicit order) — the per-frame runner keys shouldRun on it. This is the
+# UNDECLARED form: the runner supplies the read generation itself (shouldRun).
 func addSystem(schedule: mod Schedule, name: view String) ret Int {
+  ret addDeclaredSystem(
+    schedule: schedule
+    name: name
+    reads: List.create(Int, cap: 0)
+    writes: List.create(Int, cap: 0)
+    skipWhenClean: false
+  )
+}
+
+# #939: append a system entry WITH its declared read/write table ids. The
+# per-frame runner then asks shouldRunDeclared, which computes the read
+# generation from the declaration — no caller-supplied generation. Resolve ids
+# with tableIdByName once, at registration.
+func addDeclaredSystem(
+  schedule: mod Schedule
+  name: view String
+  reads: own List(Int)
+  writes: own List(Int)
+  skipWhenClean: view Bool
+) ret Int {
   let index: Int = schedule.entries.length
   var nameCopy: String = ""
   nameCopy = nameCopy.concat(other: name)
-  schedule.entries.add(value: ScheduleEntry { name: own nameCopy, lastGeneration: 0 - 1 })
+  schedule.entries.add(value: ScheduleEntry {
+    name: own nameCopy
+    reads: own reads
+    writes: own writes
+    skipWhenClean: skipWhenClean
+    lastGeneration: 0 - 1
+    lastEntityCount: 0 - 1
+  })
   ret index
 }
 
@@ -68,4 +118,119 @@ func shouldRun(schedule: mod Schedule, index: view Int, readGeneration: view Int
   }
   slot.lastGeneration = readGeneration
   ret true
+}
+
+# ---- #939: declared read sets, resolved and evaluated by reflection ----------
+#
+# A table id is a table's position among the world's `ComponentTable` fields in
+# declaration order — the order `fields(world)` visits. Generic over the World
+# type: one definition serves every world (UiWorld, World3d, GameWorld).
+
+# Resolve a table's id from its FIELD name (`"rects"`). -1 when the world has no
+# ComponentTable field of that name — the caller must treat that as a
+# registration bug, never as "no such read".
+func tableIdByName(W: type, world: view W, name: view String) ret Int {
+  var index: Int = 0
+  var found: Int = 0 - 1
+  loop let table: view ComponentTable(any) in fields(world) {
+    if found < 0 {
+      if fieldName(table) is name {
+        found = index
+      }
+    }
+    index = index + 1
+  }
+  ret found
+}
+
+# The world's live entity count, read from its EntityAllocator field. Part of
+# the dirty rule: an entity allocated but not yet given any component moves no
+# table generation, yet a structural system must see it.
+func worldAliveCount(W: type, world: view W) ret Int {
+  var count: Int = 0
+  loop let allocator: view EntityAllocator in fields(world) {
+    count = allocatorAliveCount(this: allocator)
+  }
+  ret count
+}
+
+func scheduleIdsContain(ids: view List(Int), id: view Int) ret Bool {
+  loop let candidate: Int in ids {
+    if candidate is id {
+      ret true
+    }
+  }
+  ret false
+}
+
+# Sum of the generations of entry `index`'s declared read tables. Generations
+# are monotonic, so the sum changes iff some read table mutated.
+func declaredReadGeneration(
+  W: type
+  world: view W
+  schedule: view Schedule
+  index: view Int
+) ret Int {
+  var sum: Int = 0
+  if let entry: view ScheduleEntry => schedule.entries.viewAt(index: index) {
+    var tableIndex: Int = 0
+    loop let table: view ComponentTable(any) in fields(world) {
+      if scheduleIdsContain(ids: entry.reads, id: tableIndex) {
+        sum = sum + componentTableGeneration(this: table)
+      }
+      tableIndex = tableIndex + 1
+    }
+  }
+  ret sum
+}
+
+# Should entry `index` run this frame, judged from its DECLARED read set over
+# `world`? An entry with skipWhenClean false always runs. Otherwise it runs —
+# and records the new values — when any read table's generation moved or the
+# live entity count changed since its last run; it skips when both are
+# unchanged. Byte-identical to the UI's LayoutCache / TransformCache rule.
+func shouldRunDeclared(
+  W: type
+  schedule: mod Schedule
+  world: view W
+  index: view Int
+) ret Bool {
+  let readGen: Int = declaredReadGeneration(
+    W
+    world: world
+    schedule: schedule
+    index: index
+  )
+  let alive: Int = worldAliveCount(W, world: world)
+  let slot: mod ScheduleEntry => schedule.entries.modAt(index: index)
+  if slot.skipWhenClean is false {
+    ret true
+  }
+  if slot.lastGeneration is readGen and slot.lastEntityCount is alive {
+    ret false
+  }
+  slot.lastGeneration = readGen
+  slot.lastEntityCount = alive
+  ret true
+}
+
+# The declared read / write ids of entry `index` (for a DAG dump or a stager).
+func scheduleReads(schedule: view Schedule, index: view Int) ret List(Int) {
+  var out: List(Int) = List.create(Int, cap: 16)
+  if let entry: view ScheduleEntry => schedule.entries.viewAt(index: index) {
+    loop let id: Int in entry.reads {
+      out.add(value: id)
+    }
+  }
+  ret out
+}
+
+func scheduleWrites(schedule: view Schedule, index: view Int) ret List(Int) {
+  var out: List(Int) = List.create(Int, cap: 16)
+  if let entry: view ScheduleEntry => schedule.entries.viewAt(index: index) {
+    loop let id: Int in entry.writes {
+      out.add(value: id)
+    }
+  }
+  ret out
 }

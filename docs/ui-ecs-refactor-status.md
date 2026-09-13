@@ -38,11 +38,13 @@ the flagship UI example (106) and the `.raescene`-driven UI system in
 
 Ordered by leverage.
 
-1. **No `Schedule`.** `lib/ui` and every UI example call systems in hand
-   order (106: `FramePipeline.rae`). `lib/ecs/Schedule` exists but has zero
-   users in `lib/ui`. Adopt it with **declared read/write tables per system**
-   (the architecture doc: "the schedule is the program"; also the
-   prerequisite of `docs/parallelism-first-plan.md` Phase 2).
+1. **No `Schedule`.** — **LANDED (#939):** `lib/ecs/Schedule` gained
+   `addDeclaredSystem` (read/write table ids) + a generic, reflection-driven
+   `shouldRunDeclared` (read generations + live entity count), and
+   `lib/ui/Pipeline.rae` registers every lib/ui system in canonical order with
+   its declared sets; fixture 839 proves the declared judgement equals the
+   hand-written `LayoutCache`/`TransformCache` frame by frame. The examples'
+   adoption is #949 (106) and #954 (104/105).
 2. **Consumers never moved to the query sugar.** `query2/3`: 0 uses in
    `lib/ui`, 0 in 106. `componentHas(`: 169 in `lib/ui` (SceneLoader 26,
    RenderSystem 20, LayoutSystem 17, legacyRaylib 18). Optional-component

@@ -191,7 +191,10 @@ func transformSystem(world: mod UiWorld) {
   accumulateVisibility(world: world)
 }
 
-# Per-call cache for `systemIfDirty`. Stores the generation
+# Per-call cache for `systemIfDirty`. SUPERSEDED by the declared schedule
+# (#939, lib/ui/Pipeline.rae: the `transform` entry declares this exact read
+# set) — fixture 839 proves the two agree; retained for fixture 489 and the
+# legacy raylib example until #949 migrates the mobile-UI example. Stores the generation
 # of every ComponentTable that transformSystem reads. When all of them
 # match the cached values, the whole walk + write-back to
 # `worldTransforms` can be skipped — the output would be identical.
