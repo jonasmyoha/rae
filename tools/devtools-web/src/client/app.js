@@ -4732,3 +4732,52 @@ function setBuildStatus(label, modifierClass, targetLabel) {
     buildStatusChip.classList.add(modifierClass);
   }
 }
+
+// --- Compiler tab: one log stage, stepped (#963) -----------------------------
+// Build log / Test log / Results share one terminal area; only one pane shows.
+// The strip is clickable, and the view auto-follows a run by watching the two
+// status chips (the only place app.js records run state): build running ->
+// Build log, tests running -> Test log, tests finished -> Results (which then
+// carries the green "All tests passing!" outline or the failures).
+(() => {
+  const stepButtons = document.querySelectorAll("[data-compiler-step]");
+  const panes = document.querySelectorAll("[data-compiler-log]");
+  if (!stepButtons.length || !panes.length) return;
+
+  const showStep = (name) => {
+    stepButtons.forEach((button) => {
+      const active = button.getAttribute("data-compiler-step") === name;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-selected", active ? "true" : "false");
+    });
+    panes.forEach((pane) => {
+      pane.classList.toggle("is-active", pane.getAttribute("data-compiler-log") === name);
+    });
+  };
+  stepButtons.forEach((button) => {
+    button.addEventListener("click", () => showStep(button.getAttribute("data-compiler-step")));
+  });
+
+  const resultsStep = document.querySelector('[data-compiler-step="results"]');
+  const followChip = (chip, onRunning, onDone) => {
+    if (!chip) return;
+    new MutationObserver(() => {
+      const classes = chip.classList;
+      if (classes.contains("is-running")) onRunning();
+      else if (classes.contains("is-success") || classes.contains("is-failure")) onDone(classes.contains("is-success"));
+    }).observe(chip, { attributes: true, attributeFilter: ["class"] });
+  };
+  followChip(buildStatusChip, () => showStep("build"), () => {});
+  followChip(
+    testStatusChip,
+    () => {
+      showStep("test");
+      resultsStep?.classList.remove("is-success", "is-failure");
+    },
+    (passed) => {
+      showStep("results");
+      resultsStep?.classList.toggle("is-success", passed);
+      resultsStep?.classList.toggle("is-failure", !passed);
+    }
+  );
+})();
