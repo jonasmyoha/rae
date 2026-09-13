@@ -29,6 +29,7 @@
 # unscaled). Text inside a scaled subtree renders at its style's font
 # size — glyphs don't scale; keep boards to sprites/shapes.
 open ecs/ComponentTable
+open ecs/Query
 
 # 0.01 du ≈ 1/300 pt: far below one physical pixel at any DPR, so
 # gating on it can't suppress a visible change.
@@ -177,25 +178,26 @@ func fitApplyOne(world: mod UiWorld, entity: view EntityId, mode: view FitMode) 
 # systemIfDirty every frame — cheap when the aspect /
 # scale-to-fit tables are empty or nothing changed.
 func fitSystem(world: mod UiWorld) pub {
-  var n: Int = componentCount(this: world.aspects)
-  var i: Int = 0
-  loop i < n {
-    let e: EntityId = componentEntityAt(this: world.aspects, i: i)
-    let a: Aspect = componentDataAt(this: world.aspects, i: i)
+  # Aspect ∧ ComputedRect join (#807/#940): only entities that carry BOTH an
+  # Aspect and a ComputedRect can be corrected, so query2 walks the smaller of
+  # the two tables and probes the other by index instead of scanning every
+  # Aspect and re-looking-up its ComputedRect. componentDataAt reads each side
+  # by its dense index (no sparse probe, no generation bump); queryModAt writes
+  # ONLY on a real change, keeping the same change-gated bump as componentMod.
+  let hits: List(Query2Match) = query2(tableA: world.aspects, tableB: world.computedRects)
+  loop let row: view Query2Match in hits {
+    let a: Aspect = componentDataAt(this: world.aspects, i: row.indexA)
     if a.ratio > 0.0 {
-      if componentHas(this: world.computedRects, entity: e) {
-        let cur: ComputedRect = componentGet(this: world.computedRects, entity: e)
-        let targetH: Float = cur.size.x / a.ratio
-        if fitDiffers(a: cur.size.y, b: targetH) {
-          let cr: mod ComputedRect => componentMod(this: world.computedRects, entity: e)
-          cr.size.y = targetH
-        }
+      let cur: ComputedRect = componentDataAt(this: world.computedRects, i: row.indexB)
+      let targetH: Float = cur.size.x / a.ratio
+      if fitDiffers(a: cur.size.y, b: targetH) {
+        let cr: mod ComputedRect => queryModAt(table: world.computedRects, denseIndex: row.indexB)
+        cr.size.y = targetH
       }
     }
-    i = i + 1
   }
-  n = componentCount(this: world.scaleToFits)
-  i = 0
+  var n: Int = componentCount(this: world.scaleToFits)
+  var i: Int = 0
   loop i < n {
     let e: EntityId = componentEntityAt(this: world.scaleToFits, i: i)
     let stf: ScaleToFit = componentDataAt(this: world.scaleToFits, i: i)
