@@ -19,6 +19,8 @@ import String
 import ui/Scene
 open app3d/UiShell
 open ui/Ecs
+open ui/Pipeline
+open ecs/Schedule
 open ui/EventLoop
 open ui/inputSystem/InputSystem
 open ui/layoutSystem/LayoutSystem
@@ -82,7 +84,13 @@ func main() ret Int {
 
   var value: Int = initialValue
   setNodeText(world: world, nodeId: "ValueText", value: "Value: {value}!")
-  runUiSystems(world: world, res: gpuUi)
+
+  # The lib/ui systems run on a #939 Schedule: createUiPipeline registers every
+  # UI system in canonical order with its declared read/write tables, and
+  # runScheduledUiSystems runs the render-prep ones each gated by `uiShouldRun`
+  # (layout/transform skip when their inputs are unchanged; see lib/ui/Pipeline).
+  var schedule: Schedule = createUiPipeline(world: world)
+  runScheduledUiSystems(schedule: schedule, world: world, res: gpuUi)
 
   var input: UiInput = createUiInput()
   var renderedOnce: Bool = false
@@ -102,7 +110,7 @@ func main() ret Int {
     }
 
     if hadEvents or changed {
-      runUiSystems(world: world, res: gpuUi)
+      runScheduledUiSystems(schedule: schedule, world: world, res: gpuUi)
     }
 
     # Draw when something changed, when the OS woke us, and for the first frame

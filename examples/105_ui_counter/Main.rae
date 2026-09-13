@@ -37,6 +37,8 @@ open ui/EventLoop
 # copying". A 2D UI app is exactly its audience.
 open app3d/UiShell
 open ui/Ecs
+open ui/Pipeline
+open ecs/Schedule
 open ui/inputSystem/InputSystem
 open ui/layoutSystem/LayoutSystem
 open ui/renderSystem/RenderSystem
@@ -238,7 +240,13 @@ func main() ret Int {
   }
 
   syncUi(world: world, state: state)
-  runUiSystems(world: world, res: gpuUi)
+
+  # The lib/ui systems run on a #939 Schedule: createUiPipeline registers every
+  # UI system in canonical order with its declared read/write tables, and
+  # runScheduledUiSystems runs the render-prep ones each gated by `uiShouldRun`
+  # (layout/transform skip when their inputs are unchanged; see lib/ui/Pipeline).
+  var schedule: Schedule = createUiPipeline(world: world)
+  runScheduledUiSystems(schedule: schedule, world: world, res: gpuUi)
 
   var input: UiInput = createUiInput()
   # Has a frame actually reached the screen yet? A window is not presentable the
@@ -277,8 +285,9 @@ func main() ret Int {
     if hadEvents or changed {
       # Layout, then transforms, then the visual bounds the renderer draws from.
       # The order is not a detail: bounds computed before layout are last
-      # frame's bounds.
-      runUiSystems(world: world, res: gpuUi)
+      # frame's bounds. The Schedule owns that order and skips layout/transform
+      # when their declared inputs did not change.
+      runScheduledUiSystems(schedule: schedule, world: world, res: gpuUi)
     }
 
     # DECIDED FRESH EVERY ITERATION, which is the whole point. An earlier

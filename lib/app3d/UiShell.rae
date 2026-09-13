@@ -25,6 +25,8 @@ import Gpu2d
 open SdfText
 open ui/Ecs
 open ecs/Event
+open ui/Pipeline
+open ecs/Schedule
 open ui/Components
 open ui/Registry
 open ui/inputSystem/InputSystem
@@ -193,6 +195,27 @@ func runUiSystems(world: mod UiWorld, res: view Gpu2dUi) {
   layoutSystem(world: world)
   transformSystem(world: world)
   visualBoundsSystem(world: world, res: res)
+}
+
+# The same three render-prep systems, but driven by a #939 `Schedule`
+# (`createUiPipeline`): each runs only when `uiShouldRun` says its declared read
+# tables changed. layout/transform get the dirty-skip the hand-written
+# LayoutCache/TransformCache used to give (fixture 839 proves the judgement is
+# identical); visualBounds is not a cache-gated system, so `uiShouldRun` returns
+# true for it every frame — same as the unconditional `runUiSystems` above. The
+# app builds the schedule once with `createUiPipeline(world)` and calls this per
+# frame; the schedule owns the order and the dirty state, the app still CALLS
+# the systems (Rae has no first-class function references).
+func runScheduledUiSystems(schedule: mod Schedule, world: mod UiWorld, res: view Gpu2dUi) {
+  if uiShouldRun(schedule: schedule, world: world, index: uiSystemLayout) {
+    layoutSystem(world: world)
+  }
+  if uiShouldRun(schedule: schedule, world: world, index: uiSystemTransform) {
+    transformSystem(world: world)
+  }
+  if uiShouldRun(schedule: schedule, world: world, index: uiSystemVisualBounds) {
+    visualBoundsSystem(world: world, res: res)
+  }
 }
 
 # Re-fit the world to the window after a resize. Returns whether anything
