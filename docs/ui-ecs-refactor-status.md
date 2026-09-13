@@ -124,7 +124,19 @@ Ordered by leverage.
    (`screenToInt`/`intToScreen`) and the nav-tab → screen mapping.
 4. **Hand-rolled frame sequencing** (`runFrameInputDispatch` →
    `runFrameLayoutTransform` → `runFrameAnimation` → render) → `Schedule`
-   entries with `shouldRun`.
+   entries with `shouldRun`. **LANDED (#949):** the two hand-written
+   `LayoutCache`/`TransformCache` objects are gone; one `Schedule`
+   (`createUiPipeline`) per world now gates every lib/ui system in the frame
+   through `uiShouldRun` off its declared sets — safe-area, layout, fit,
+   transform, visualBounds in `runFrameLayoutTransform`, hoverScale in the
+   frame loop, and the layout/transform re-pass inside `handleScreenSwitch`
+   and the stress runner. Layout/transform keep their dirty-skip (fixture 839
+   proves the declared judgement equals the caches it replaced), the rest run
+   every frame as before. The app-logic phases (input dispatch, observation
+   refresh, hero animation, render decision) stay as app code called in order:
+   Rae has no function references, so the app calls the systems and the
+   schedule owns the declarations and dirty state. 106 is the reference for a
+   Schedule-driven UI app.
 5. `ActionEvent` → `EventQueue`; `UiRefreshCache` revisions → `changedSince`.
 6. History windowing → `lib/ui` `ListView` (item 2.6).
 7. Background I/O (Spotify poller, artwork curl) → `spawn` + `Channel` + an

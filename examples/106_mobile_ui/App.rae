@@ -1,6 +1,8 @@
 open HotReload
 open ui/WindowGeometry
 open ui/Ecs
+open ui/Pipeline
+open ecs/Schedule
 open ecs/Event
 open ui/EventLoop
 open ui/LogOverlay
@@ -290,14 +292,23 @@ func runApp(app: mod App) {
       # `*IfDirty` helper again without first touching one of the
       # input tables — for example, a future per-frame re-layout /
       # re-transform safety net.
-      let layoutCache: LayoutCache = createLayoutCache()
-      ifDirty(world: world, cache: layoutCache)
+      # #949: ONE Schedule per world replaces the two hand-written caches. It
+      # is fresh per outer rebuild (a new world's table generations start at
+      # 0), so this first judgement always runs; from then on every lib/ui
+      # system in the frame is gated by `uiShouldRun` off its declared sets.
+      var schedule: Schedule = createUiPipeline(world: world)
+      if uiShouldRun(schedule: schedule, world: world, index: uiSystemLayout) {
+        layoutSystem(world: world)
+      }
       # Art-direction pass (#212 S6): Aspect + ScaleToFit run between
       # layout and transform. Change-gated, so an idle frame with an
       # unchanged layout writes nothing.
-      fitSystem(world: world)
-      let transformCache: TransformCache = createTransformCache()
-      systemIfDirty(world: world, cache: transformCache)
+      if uiShouldRun(schedule: schedule, world: world, index: uiSystemFit) {
+        fitSystem(world: world)
+      }
+      if uiShouldRun(schedule: schedule, world: world, index: uiSystemTransform) {
+        transformSystem(world: world)
+      }
       # Find the scroll-target entity for this world. Scroll handlers
       # mutate this entity's Offset + ScrollState in place every frame
       # — that's what lets wheel/drag/momentum/spring run WITHOUT
@@ -724,8 +735,7 @@ func runApp(app: mod App) {
           runFrameLayoutTransform(
             world: world
             viewport: viewport
-            layoutCache: layoutCache
-            transformCache: transformCache
+            schedule: schedule
             gpuUi: gpuUi
           )
 
@@ -761,11 +771,15 @@ func runApp(app: mod App) {
           let currentHovered: EntityId = activeDecision.currentHovered
           let currentMouseButtons: Int = activeDecision.currentMouseButtons
           syncDesktopCursor(world: world, hovered: currentHovered, lastKind: lastCursorKind)
-          lastHoverAnimDirty = hoverScaleSystem(
-            world: world
-            hovered: currentHovered
-            deltaTime: (now - lastFrameTime) as Float
-          )
+          # hoverScale is a lib/ui system too: gate it through the schedule
+          # like the rest (its declared sets never skip today).
+          if uiShouldRun(schedule: schedule, world: world, index: uiSystemHoverScale) {
+            lastHoverAnimDirty = hoverScaleSystem(
+              world: world
+              hovered: currentHovered
+              deltaTime: (now - lastFrameTime) as Float
+            )
+          }
           lastFrameTime = now
           if lastHoverAnimDirty {
             active = true
@@ -826,8 +840,7 @@ func runApp(app: mod App) {
             playback: playback
             appState: appState
             anim: anim
-            layoutCache: layoutCache
-            transformCache: transformCache
+            schedule: schedule
             input: input
             scrollFsm: scrollFsm
             watcher: watcher

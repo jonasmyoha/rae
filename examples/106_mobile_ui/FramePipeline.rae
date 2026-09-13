@@ -1,4 +1,6 @@
 open ui/Ecs
+open ui/Pipeline
+open ecs/Schedule
 open ecs/Event
 open ui/fitSystem/FitSystem
 open ui/layoutSystem/LayoutSystem
@@ -188,21 +190,37 @@ func syncFrameData(
   }
 }
 
+# The lib/ui system phase, driven by the #939 Schedule (#949): each system is
+# gated by `uiShouldRun`, which judges it from its DECLARED read/write tables
+# (layout/transform skip when their inputs are unchanged — fixture 839 proves
+# this equals the LayoutCache/TransformCache judgement this replaced; the
+# others always run). Rae has no function references, so the app still CALLS
+# the systems, in the order 106 has always used; the schedule owns the
+# declarations and the dirty state.
 func runFrameLayoutTransform(
   world: mod UiWorld
   viewport: view Viewport
-  layoutCache: mod LayoutCache
-  transformCache: mod TransformCache
+  schedule: mod Schedule
   gpuUi: view Gpu2dUi
 ) pub {
-  applySafeAreas(world: world, viewport: viewport)
-  ifDirty(world: world, cache: layoutCache)
-  fitSystem(world: world)
-  systemIfDirty(world: world, cache: transformCache)
+  if uiShouldRun(schedule: schedule, world: world, index: uiSystemSafeArea) {
+    applySafeAreas(world: world, viewport: viewport)
+  }
+  if uiShouldRun(schedule: schedule, world: world, index: uiSystemLayout) {
+    layoutSystem(world: world)
+  }
+  if uiShouldRun(schedule: schedule, world: world, index: uiSystemFit) {
+    fitSystem(world: world)
+  }
+  if uiShouldRun(schedule: schedule, world: world, index: uiSystemTransform) {
+    transformSystem(world: world)
+  }
   # Measured centering (#219): cache glyph bounds once per change so
   # the render pass reads them instead of remeasuring every frame.
   # Needs mod world + the fonts, so it runs here, before render.
-  visualBoundsSystem(world: world, res: gpuUi)
+  if uiShouldRun(schedule: schedule, world: world, index: uiSystemVisualBounds) {
+    visualBoundsSystem(world: world, res: gpuUi)
+  }
 }
 
 type FrameAnimationResult {
