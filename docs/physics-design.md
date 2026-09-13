@@ -1,310 +1,336 @@
-# Physics for Rae — design
+# Physics for Rae — design (Box3D)
 
-**Status:** proposal, awaiting the maintainer's decision on §2 (engine choice).
-Nothing here is implemented. The driving client is a 3D track-and-field style
-game (a stadium on a hill, first/third-person, Steam + mobile + WASM,
-multiplayer) that today has only a flat ground plane, an analytic 2D
-"walkable" test for the oval, render-only hurdles, and a bare semi-implicit
-Euler integrator over an ECS `PhysicsBody` table with no collision at all.
-Its physics seam already exists (a fixed-step accumulator calling a system
-that iterates a component table) and already says "when a Jolt/Box2D backend
-lands, this is where per-body integration is replaced".
+**Status:** proposal, revised. Supersedes the first draft, which wrongly
+claimed no "Box3D" exists. It does: **`github.com/erincatto/box3d`** — Erin
+Catto's 3D engine, **portable C17, MIT**, and it is the engine this design
+adopts. Nothing here is implemented; §9 lists the open questions and §8 the
+phased tasks (not queued until the maintainer confirms).
 
-## 0. What the game actually needs
+Facts below were read from the repository on 2026-09-13 (headers, docs,
+`types.c`, `CMakeLists.txt`); where the design depends on something that must
+be re-verified against the vendored copy at implementation time, it says so.
 
-From the events list (110 m hurdles first; javelin, hammer, shot put, high
-jump, steeplechase, diving, 10 k, relay; throwing an animal instead of the
-implement), in order of appearance:
+## 0. What the driving game needs
 
-| need | shape of the problem | phase |
-|---|---|---|
-| character on ground | kinematic capsule vs a mostly-flat venue (track, infield, stands, a hill) with slide, step-up, ground normal, slopes | 1 |
-| hurdle contact | capsule vs a small box; the hurdle tips over (one-axis hinge with a stop) or is knocked flat; the runner stumbles (gameplay, not physics) | 1 |
-| thrown implements | ballistic rigid bodies (sphere/capsule) with gravity, optional drag and spin, landing on the field, sticking (javelin) or rolling to rest (shot) | 1 |
-| ray / overlap queries | "what is under the foot", "did the javelin tip land inside the sector", trigger volumes (water pit, finish line) | 1 |
-| high-jump bar | a thin dynamic bar resting on two pegs; knocked off by a capsule | 2 |
-| water entry (diving, steeplechase pit) | sensor + a splash impulse; the existing `lib/water/Buoyancy` ECS system already handles floating | 2 |
-| ragdoll (comedy) | articulated capsules + joints — the one item that is *real* rigid-body physics | 3 |
-| multiplayer | the sim must be **deterministic** on one machine and ideally across machines for lockstep; no wall clock, no thread order in results | 1 |
+A 3D track-and-field style downstream game (a stadium on a hill, first/third
+person, Steam + mobile + WASM, multiplayer). Today it has a flat ground plane,
+an analytic 2D "walkable" oval test, render-only hurdles and a bare Euler
+integrator over an ECS `PhysicsBody` table — no collision. Its fixed-step
+seam already exists and says "when a Jolt/Box2D backend lands, this is where
+per-body integration is replaced".
 
-Everything in phases 1–2 is "game physics": kinematic characters, a handful
-of free bodies against a static world, queries, sensors, one joint type. Only
-phase 3 needs a general constraint solver.
+| need | Box3D feature that covers it |
+|---|---|
+| character on the venue (track, infield, stands, hill), slide/step/ground | character mover (`b3World_CastMover` / `CollideMover` / `b3SolvePlanes` / `b3ClipVector`) — geometric, app-driven |
+| hurdle contact + tip-over | dynamic body + revolute joint with limit; contact/hit events |
+| thrown implements (javelin, shot, hammer, an animal) | dynamic capsule/hull/compound bodies, continuous collision for fast objects, hit events to "stick" a javelin |
+| queries: what is under the foot, did it land in the sector, triggers | `b3World_CastRayClosest`, shape casts, overlap queries, sensor shapes + sensor events |
+| high-jump bar, water entry, steeplechase pit | thin body on pegs (joints/contacts), sensors; floating stays in `lib/water/Buoyancy` |
+| ragdoll (comedy) | capsules + spherical/revolute joints with limits, motors, springs |
+| multiplayer | **cross-platform determinism** (built with `-ffp-contract=off`), deterministic across thread counts; **no rollback** |
 
-## 1. The constraints Rae imposes
+Everything through ragdolls is covered by one engine, which is why the first
+draft's "write it in Rae" recommendation is withdrawn.
 
-- **The app is one amalgamated C translation unit** (`rae_runtime.c` includes
-  every `runtime_*.c`; `copy_runtime_assets` copies them plus single-file
-  vendored libs — `lodepng.c`, `stb_image.h` — into the build) recompiled with
-  each app, linked with clang natively and with clang `wasm32-wasip1`
-  (`-msimd128`, optional `-pthread`) for WASM. A physics dependency must fit
-  that: C sources that compile in both, or a prebuilt static library per
-  target like `libwgpu_native`.
-- **The binding model is C-header-driven.** `rae bindgen <header.h>` emits
-  low-level Rae bindings (handles → `Ptr`, enums → `Int32` consts, structs →
-  `c_struct` mirrors, functions → `unsafe extern("symbol")`, callback fn
-  pointers → `Ptr`). Ergonomic wrappers live in a separate module and carry
-  the `unsafe {}` obligation. C++ has no path here except through a C shim.
-- **The renderer rule generalises** (`docs/webgpu-c-surface-audit.md`): the
-  logic is Rae over low-level bindings; C is only genuine ABI/platform. A
-  physics layer must not become a pile of `rae_ext_physics_*` helpers.
-- **ECS is the architecture.** Bodies are entities; state lives in components;
-  singletons are resources on the World; systems run from a `Schedule`;
-  `Transform3D` is the one source of truth for position (the client's
-  `PhysicsBody` and `lib/water/Buoyancy` already do exactly this).
-- **No collision primitives exist yet.** `lib/Vec3` / `Quat` / `Math3d` are
-  complete (dot, cross, normalize, slerp, Mat4); `lib/Mesh3d` has
-  `sampleHeight` for a heightfield and box/sphere/plane generators; nothing
-  for AABB, ray, sphere, capsule, OBB, triangle intersection.
-- Language rules: Z-up, metres, `Float` is f32, every binding typed, no
-  globals, 1000-line file cap (so the library is many small modules), camelCase
-  everywhere.
+## 1. What Box3D is (verified)
 
-## 2. Engine choice — the decision to make
+- Repository created 2026-05, **v0.1.0** tagged, ~40 public commits, pushed
+  the day of this reading, CI badge, ~6.3 k stars. Young: expect API churn
+  between tags — pin the tag, regenerate bindings on a bump.
+- Core: **50 `.c` files (~1.5 MB) + 274 KB headers**, 8 public headers under
+  `include/box3d/` (`box3d.h` has 424 `B3_API` functions), "no dependencies
+  beyond the C runtime (and `libm`)". The repo's C++ is the sokol/imgui
+  *samples* under `extern/`, not the library.
+- Features: continuous collision; convex hulls, capsules, spheres, triangle
+  meshes, height fields, baked compounds; multiple shapes per body; filtering
+  (category/mask/group + optional custom callback); ray/shape/overlap queries;
+  sensors; character mover (docs mark it **experimental**); *Soft Step*
+  solver; island sleep; revolute/prismatic/distance/motor/weld/wheel/
+  spherical/parallel/filter joints with limits, motors, springs, friction;
+  contact/sensor/body-move/joint events, all **polled** as `pointer+count`
+  arrays after `b3World_Step`; recording and replay; up to 128 worlds.
+- Threading: optional. `b3WorldDef.workerCount` + `enqueueTask`/`finishTask`
+  callbacks; leave them null for single-threaded. Not thread-safe from
+  outside; read-only queries may be called from several threads.
+- Determinism: cross-platform (fp-contract disabled), same result for 2 or 8
+  workers, **no rollback** (cannot restore a prior state and re-step).
+- Units: MKS, tuned for 0.1–10 m objects; `b3SetLengthUnitsPerMeter`.
+- **No built-in up axis.** Gravity is any `b3Vec3` (docs/samples use Y-up,
+  default `{0,-10,0}`). Rae stays **Z-up** with `gravity = (0,0,-9.81)`; no
+  axis conversion anywhere. The one place Y-up leaks is the height-field
+  definition (`countX`/`countZ`, heights along the field's local up) — a
+  height-field body is simply rotated so its local up is world +Z, or the
+  venue uses triangle meshes, which are axis-agnostic (§5).
+- Types that matter for binding: `b3Vec3 {float x,y,z}`; `b3Quat {b3Vec3 v;
+  float s}`; `b3Transform {p,q}`; **`b3Pos` is `b3Vec3` unless
+  `BOX3D_DOUBLE_PRECISION`** (then `double x,y,z`) — the single-precision build
+  is used; ids are small by-value structs (`b3BodyId {int32 index1; uint16
+  world0; uint16 generation}`); defs are plain structs filled by
+  `b3DefaultWorldDef()` etc. (returned **by value**); events reference shapes
+  by id and carry `userData`.
+- Build: CMake, `BOX3D_DISABLE_SIMD`, `BOX3D_DOUBLE_PRECISION`, emscripten
+  supported (`-msimd128 -msse2` or SIMD off; pthreads optional and top-level
+  only). Rae will not use CMake (§4).
 
-### Candidates
+## 2. Engine decision
 
-| | language | dimension | wasm | determinism | bind cost | verdict |
+| | language | 3D | wasm | determinism | bind cost | verdict |
 |---|---|---|---|---|---|---|
-| **Box2D v3** (Erin Catto) | C11, MIT | **2D only** | yes (`BOX2D_DISABLE_SIMD` or wasm simd) | cross-platform deterministic since 3.1 | trivial: `rae bindgen box2d.h` | the right engine for any **2D** Rae game; wrong dimension for this one |
-| **Jolt** | C++17, MIT | 3D | yes (emcc) | not cross-platform by default | needs the unofficial JoltC shim + a C++ toolchain and libc++ in the link, ~1–2 MB, exceptions/RTTI settings | best general 3D engine, but it drags C++ into an all-C toolchain for a game that needs 5 % of it |
-| ODE | C, BSD/LGPL | 3D | yes | no | bindgen works | dated API, quality below Jolt, still more than we need |
-| Bullet / PhysX | C++ | 3D | partial | no | shim | out for the same reason as Jolt, with less to gain |
-| **pure Rae** | Rae | 3D | yes, automatically | yes, by construction | none | fits phases 1–2 exactly; phase 3 (ragdolls) is where it gets expensive |
+| **Box3D** | C17, MIT | yes | yes (SSE2-on-wasm or scalar) | cross-platform, thread-count independent | `rae bindgen` over 8 headers, like WebGPU | **adopt** |
+| Box2D v3 | C11, MIT | 2D only | yes | yes | trivial | reserve for 2D games (`lib/physics2d`, separate task) |
+| Jolt | C++17 | yes | yes | not cross-platform by default | C shim + libc++ in an all-C toolchain | no |
+| pure Rae | Rae | yes | yes | by construction | none, but a solver to write and maintain | no — Box3D covers phases 1–3 with a maintained, deterministic solver |
 
-Note: there is no "Box3D". Erin Catto's 3D work is inside Box2D's *solver
-research* (soft-step, TGS), not a shipped 3D library; what people call Box3D
-is usually Box2D v3 (2D) or Jolt (3D).
+**Decision: Box3D as the solver, everything above the C ABI in Rae.** The
+Rae side owns the ECS surface, the character controller loop (Box3D
+deliberately leaves it to the application), event draining, queries, and all
+gameplay physics (drag/spin on a javelin is a velocity edit per step). This is
+the same split the renderer made: Rae over generated low-level bindings, C
+only where it is genuine ABI (`docs/webgpu-c-surface-audit.md`).
 
-### Recommendation
+## 3. Rae binding layer — `lib/box3d/` (generated)
 
-**Write the physics in Rae, as an ECS library (`lib/physics/`), with an
-engine-agnostic component/query surface so a native backend can be slotted in
-later if phase 3 demands it.** Reasons, in order:
-
-1. **The need is small and known.** A kinematic capsule against static
-   geometry, a few free bodies, queries, sensors and one hinge is a few
-   thousand lines of Rae; a general engine's contact graph, islands, sleeping,
-   continuous collision and joint zoo are unused weight.
-2. **"As much Rae as possible" is the stated goal**, and it is also the
-   project's thesis: the water, grass, gbuffer and 2D-UI layers were all moved
-   from C into Rae over bindings. Physics being the one big C/C++ box next to
-   them would be the odd one out.
-3. **Determinism for multiplayer.** A fixed-step, single-threaded, entity-
-   ordered Rae sim is deterministic on one platform for free and can be made
-   cross-platform deterministic by avoiding transcendental-function divergence
-   in the hot path (the same discipline Box2D v3 follows). Jolt is not.
-4. **WASM and mobile come for free** — no second build of a C++ library, no
-   `-fno-exceptions` negotiation, no libc++ in the WASM link.
-5. **Debuggability and TDD.** Every collision routine is a decidable function
-   with a golden test; the client's agent guide is test-first by policy.
-6. **It keeps the option.** Because the *surface* is ECS components +
-   resource + queries, a `physics/backend/` module that pushes those same
-   components into Jolt (via JoltC + bindgen) and pulls transforms back is a
-   contained later project, not a rewrite. The client's seam comment already
-   assumes this shape.
-
-**And record the 2D answer now:** for a 2D Rae game the engine is Box2D v3 —
-C, MIT, deterministic, bindgen-ready in an afternoon. That is a separate,
-small task (`lib/physics2d/` = generated bindings + a thin ECS wrapper) and
-must not be conflated with the 3D library above.
-
-## 3. Architecture
-
-Everything below is `lib/`, product-name-free, and follows the ECS docs
-(`docs/ecs-general-architecture.md`, `docs/ecs-resources.md`).
-
-### 3.1 Packages
+Generated exactly like `lib/webgpu/` (2 104 lines for wgpu; Box3D will be of
+the same order):
 
 ```
-lib/geometry/          pure value types + intersection maths, no ECS, no state
-  Aabb.rae  Ray.rae  Sphere.rae  Capsule.rae  Obb.rae  Plane.rae
-  Triangle.rae  Heightfield.rae  ClosestPoint.rae  Overlap.rae
-lib/physics/           the ECS library
-  RigidBody.rae        components: RigidBody, Collider (one shape each)
-  PhysicsWorld.rae     the resource: gravity, fixed step, substeps, tuning
-  Contact.rae          Contact/Manifold value types + ContactEvent
-  broadphaseSystem/    uniform XY grid (Z-up world, mostly flat) → pairs
-  narrowphaseSystem/   pair → manifold (shape × shape table)
-  solverSystem/        sequential impulses: normal + friction, restitution
-  integrateSystem/     semi-implicit Euler, damping, sleeping
-  characterSystem/     kinematic capsule: move-and-slide, step, ground
-  querySystem/         raycast / spherecast / overlap over the broadphase
-  jointSystem/         phase 2: hinge with limits (hurdle, high-jump bar)
-  PhysicsSchedule.rae  the fixed-step schedule an app installs
+rae bindgen $B3/include/box3d/base.h $B3/include/box3d/id.h \
+  $B3/include/box3d/math_functions.h $B3/include/box3d/collision.h \
+  $B3/include/box3d/types.h $B3/include/box3d/box3d.h \
+  --out-dir lib/box3d --module Box3d --cheader box3d/box3d.h
 ```
 
-### 3.2 Components (data on entities)
+Mapping (already what bindgen does): ids/defs/results → `c_struct` mirrors by
+value; `const S*`/`S*` params → `view S`/`mod S`; data pointers and callbacks →
+`Ptr`; enums → `Int32` consts; `uint64_t` flags → `UInt64`; `float`/`double`
+→ `Float32`/`Float64`. Ergonomic wrappers and the `unsafe {}` obligation live
+in `lib/physics/`, never in the generated files (`# raefmt: off`, regenerate,
+do not edit).
+
+Generator gaps to close first (each is a small bindgen task, verified by a
+golden fixture):
+
+1. **Preprocessor conditionals.** `math_functions.h` defines `b3Pos` twice
+   under `#if defined(BOX3D_DOUBLE_PRECISION)`; bindgen reads text, not the
+   preprocessor. Either teach it `#if/#else/#endif` over `-D` flags, or
+   generate from a preprocessed header. The former is the honest fix.
+2. **Struct-by-value returns are now common** (`b3DefaultWorldDef`,
+   `b3World_CastRayClosest` → `b3RayResult`, `b3MakeBoxHull` → `b3BoxHull`,
+   `b3Body_GetTransform`). The WebGPU notes call this "rare, mapped directly";
+   it must be ABI-tested on arm64-macOS, x86-64 and wasm32 in the first spike.
+3. **Arrays inside structs** (`uint8_t padding[7]`, `b3Matrix3`) — confirm the
+   `c_struct` mirror keeps layout/size; add fixed-size array fields if missing.
+4. **Event arrays**: `b3ContactEvents.beginEvents` is `Ptr` + `beginCount`;
+   reading `c_struct` elements from a raw pointer needs the `view`-at-index
+   helper the WebGPU layer already uses (`docs/webgpu-bindings.md`, "List vs
+   Buffer vs `view`").
+5. **Callbacks stay `Ptr`** — a Rae function cannot yet be passed to C. Phase 1
+   therefore uses no callbacks at all: `*Closest` queries instead of callback
+   queries, polled events, no custom filter/friction, `workerCount = 1`.
+   Optional later: an external task scheduler backed by Rae `spawn` once
+   Rae-function callbacks exist.
+
+## 4. Vendoring and building — a C dependency, not a Rae dependency
+
+Rae's app build is one amalgamated `rae_runtime.c` plus `out.c`, compiled by
+clang natively and by wasi-sdk clang for WASM, with extra `.c` files passed
+on the command line. Box3D's 50 files use file-local `static` helpers, so a
+unity-include into `rae_runtime.c` risks symbol collisions and would tax every
+non-physics app; a hand-maintained prebuilt like `libwgpu_native` would rot.
+
+**Recommendation:** vendor the pinned tag at `third_party/box3d/` (source,
+LICENSE, the tag in a `VERSION` file) and let the compiler build it **on
+demand into a cached static library**:
+
+- detection mirrors `uses_webgpu` (the module graph contains a `box3d/…` or
+  `physics/…` module ⇒ `uses_physics`);
+- on first use per toolchain/target the compiler compiles `src/*.c` with
+  `-std=c17 -O2 -ffp-contract=off -I third_party/box3d/include` (+
+  `-msimd128 -msse2` for wasm, or `-DBOX3D_DISABLE_SIMD`) into
+  `.rae/box3d/<target>-<hash>/libbox3d.a`, keyed by the sources' content hash
+  and the flag set — one build, then a link line
+  `-L… -lbox3d -lm`; `wasm_build.sh` does the same with the wasi clang;
+- `-ffp-contract=off` is not optional: it is what Box3D's cross-platform
+  determinism rests on.
+
+This "vendored C dependency built by `rae`" mechanism is generic (`raylib`
+and `monocypher` could migrate to it) and is separate from #933's `.raepack`
+dependencies, which are Rae packages.
+
+## 5. The ECS layer — `lib/physics/` (hand-written Rae)
+
+Follows `docs/ecs-general-architecture.md` / `docs/ecs-resources.md`; product
+names never appear here.
+
+### 5.1 Resource
 
 ```rae
-type RigidBody {
-  motion: BodyMotion          # static | kinematic | dynamic  (enum, camelCase cases)
-  velocity: Vec3
-  angularVelocity: Vec3
-  inverseMass: Float          # 0 = infinite (static/kinematic)
-  inverseInertia: Vec3        # diagonal, body space (sphere/box/capsule closed forms)
-  linearDamping: Float
-  angularDamping: Float
+type PhysicsWorld {
+  worldId: B3WorldId                 # the Box3D world (c_struct by value)
+  fixedStep: Float                   # 1/60, the app's accumulator drives it
+  substeps: Int                      # 4
+  contactBegan: EventQueue(ContactEvent)
+  contactEnded: EventQueue(ContactEvent)
+  hits: EventQueue(HitEvent)         # approach speed over hitEventThreshold
+  sensorBegan: EventQueue(SensorEvent)
+  sensorEnded: EventQueue(SensorEvent)
+  staticShapes: List(StaticShape)    # venue geometry owned here (mesh/height-field data + shape ids)
+}
+```
+
+One resource per world; a menu and a game are two resources (Box3D allows
+128 worlds). Created with `b3DefaultWorldDef()` + `gravity = (0,0,-9.81)`,
+`workerCount = 1`, `enableContinuous = true`.
+
+### 5.2 Components
+
+```rae
+type RigidBody {                      # a simulated body; position lives in Transform3D
+  bodyId: B3BodyId
+  motion: BodyMotion                  # staticBody | kinematicBody | dynamicBody
   gravityScale: Float
-  restitution: Float
-  friction: Float
-  sleeping: Bool
 }
 
-type Collider {
-  shape: ColliderShape        # sphere | box | capsule | heightfield | triangleMesh
-  halfExtents: Vec3           # box; capsule uses x = radius, z = half height
-  radius: Float
-  offset: Vec3                # local offset from the entity's Transform3D
-  isSensor: Bool              # overlap events only, no response
-  layer: Int                  # collision layer bit
-  mask: Int                   # which layers it collides with
-  meshRef: Int                # heightfield/tri-mesh: index into PhysicsWorld.staticMeshes
+type Collider {                       # one shape on the entity's body; a compound is several entities or a baked compound
+  shapeId: B3ShapeId
+  shape: ColliderShape                # sphere | capsule | box | hull | mesh | heightField
+  isSensor: Bool
+  categoryBits: UInt64
+  maskBits: UInt64
 }
 
-type CharacterBody {          # kinematic capsule driven by input, not by forces
+type CharacterBody {                  # the geometric mover; NOT a rigid body
   radius: Float
   halfHeight: Float
   stepHeight: Float
   slopeLimitCos: Float
+  desiredMove: Vec3                   # written by the game's movement system per fixed step
+  verticalVelocity: Float
   grounded: Bool
   groundNormal: Vec3
-  desiredMove: Vec3           # written by the game's movement system each step
-  verticalVelocity: Float     # jump / fall
 }
 ```
 
-Position and orientation are **not** in `RigidBody`: they are the entity's
-`Transform3D`. Render interpolation between fixed steps uses the existing
-`lib/ecs/prevTransformSystem` — physics writes `Transform3D`, the renderer
-draws `lerp(prev, current, alpha)`. That is exactly how the client's
-accumulator loop is already shaped.
+`Transform3D` stays the single source of truth for pose (as the client's
+`PhysicsBody` and `lib/water/Buoyancy` already do). Render interpolation
+between fixed steps uses the existing `lib/ecs/prevTransformSystem`.
 
-### 3.3 Resources (singletons on the World)
+### 5.3 Systems, in the fixed-step schedule
 
-```rae
-type PhysicsWorld {
-  gravity: Vec3               # (0, 0, -9.81), Z-up
-  fixedStep: Float            # 1/60
-  substeps: Int               # 2–4 for thrown-object stability
-  solverIterations: Int       # 6–8
-  broadphase: BroadphaseGrid  # cell size ~2 m over the venue XY extent
-  staticMeshes: List(StaticMeshCollider)  # heightfield + triangle soups, built once
-  contacts: EventQueue(ContactEvent)      # begin/end/stay, drained by game systems
-  sensorHits: EventQueue(SensorEvent)
-}
-```
+1. `physicsPushSystem` — kinematic bodies: `b3Body_SetTargetTransform` from
+   `Transform3D`; dynamic bodies whose `Transform3D` was written by game code
+   (a respawn) get `b3Body_SetTransform`. Change detection via the table's
+   mod stamps (`componentModStamp`) so untouched bodies cost nothing.
+2. `physicsStepSystem` — `b3World_Step(worldId, fixedStep, substeps)`.
+3. `physicsPullSystem` — `b3World_GetBodyEvents`: only bodies that **moved**
+   are reported, so this writes `Transform3D` for exactly those (sleeping
+   bodies are free). `userData` on each body is the `EntityId` bits.
+4. `physicsEventSystem` — drain contact/sensor/hit events into the
+   `EventQueue`s (entity ids recovered from shape `userData`); game systems
+   consume them in schedule order. Physics never calls into the game.
+5. `characterSystem` — the Box3D-documented loop, in Rae: desired translation
+   → `b3World_CastMover` → move by fraction → `b3World_CollideMover` →
+   assemble `b3CollisionPlane`s (step-up and slope filtering happen here) →
+   `b3SolvePlanes` → apply delta → `b3ClipVector` on the velocity; writes
+   `Transform3D`, `grounded`, `groundNormal`. Runs *before* the step so
+   kinematic pushes see the new pose.
+6. Spawn/despawn helpers: `spawnRigidBody(world, entity, def…)` creates the
+   body and shapes and sets `userData`; `despawnRigidBody` destroys the body
+   **before** `clearEntityComponents`, so a recycled index never owns a live
+   Box3D body. Static venue shapes are created once on a single static body.
 
-No hidden state: an app that wants two worlds (menu + game) owns two resources.
+### 5.4 Queries
 
-### 3.4 Systems and the fixed-step schedule
+`raycastClosest(world, origin, direction, maxDistance, mask) ret RayHit`,
+`spherecast`, `overlapAabb`, `overlapSphere` — thin wrappers over the
+`*Closest`/overlap functions returning Rae structs with `EntityId`s. Read-only,
+callable from any system.
 
-Installed by the app into its `Schedule`, run `substeps` times per fixed step:
+### 5.5 Static venue
 
-1. `characterSystem` — applies `desiredMove`, resolves against static + kinematic
-   colliders by sphere-cast and slide, sets `grounded`/`groundNormal`.
-2. `integrateSystem` — gravity × scale, damping, velocity → predicted transform
-   for dynamic bodies; skips sleeping bodies.
-3. `broadphaseSystem` — rebuild grid cells from AABBs (cheap: N is small),
-   emit candidate pairs with layer/mask filtering, deterministic ordering by
-   `(entityIndexA, entityIndexB)`.
-4. `narrowphaseSystem` — per pair, the shape × shape function from
-   `lib/geometry` → contact manifold (point, normal, depth; up to 4 points for
-   box faces). Sensor pairs go straight to `sensorHits`.
-5. `solverSystem` — sequential impulses, `solverIterations` passes, warm-
-   started from last step's manifold (keyed by pair id) so stacks and resting
-   contacts do not jitter; restitution with a velocity threshold; Coulomb
-   friction. Position correction by Baumgarte or split impulse.
-6. `jointSystem` (phase 2) — hinge constraints in the same impulse loop.
-7. `sleepSystem` — bodies below a velocity threshold for N steps go to sleep;
-   a contact wakes them.
-8. Contact begin/end diffing against the previous step's pair set → events.
+- terrain / the hill: `b3HeightFieldDef` from the existing `MeshData` grid
+  (`lib/Mesh3d.sampleHeight` already samples it) on a static body rotated so
+  the field's local up is world +Z (verify orientation in the spike), **or**
+  a triangle mesh — meshes are axis-free and `b3CreateMesh` builds the BVH;
+- stands, props, track edge: `b3CreateMesh` from the render `MeshData`
+  (welded, `identifyEdges` on) as static shapes; a hand-placed box where a
+  gameplay edge matters;
+- the client's analytic `stadiumWalkable(x, y)` retires: the mover slides
+  against real geometry.
 
-All loops are `query2`/`query3` joins over component tables, like
-`buoyancySystem`. The game reads results from components and drains the event
-queues in its own systems — physics never calls back into the game.
+### 5.6 Runtime hooks (phase 2)
 
-### 3.5 Queries
+`b3SetAllocator` → the Rae runtime allocator so `RAE_MEM_STATS` accounts
+Box3D memory; `b3SetAssertFcn`/`b3SetLogFcn` → the Rae log so an engine assert
+is a Rae diagnostic, not a silent abort. These are C-side one-liners in the
+runtime behind `RAE_HAS_PHYSICS`, the only physics C Rae will have.
 
-Free functions over the resource: `raycastClosest(world, ray, mask) ret
-RayHit`, `raycastAll`, `spherecast`, `overlapSphere`, `overlapAabb`. These are
-also what the character system uses internally, so they are exercised every
-frame.
+## 6. Determinism rules
 
-### 3.6 Static world
+- Fixed `fixedStep`, accumulator in the app (the client already has one).
+- `workerCount = 1` in phase 1 (no callbacks available anyway); Box3D
+  guarantees identical results when workers are added later.
+- Build every lockstep peer with the **same** Box3D configuration: same tag,
+  `-ffp-contract=off`, same SIMD choice (scalar vs SSE2/NEON vs wasm SSE2
+  emulation may differ — pick one per shipped platform set and test with
+  `test_determinism`-style fixtures across machines).
+- Box3D has no rollback: lockstep or server-authoritative netcode fits;
+  rollback netcode does not without re-simulating from a recording.
+- No wall clock or randomness inside the step; the game seeds throws.
 
-Venue geometry is built once into `PhysicsWorld.staticMeshes`:
+## 7. Testing (TDD, non-visual)
 
-- **heightfield** for terrain / the hill (`lib/Mesh3d.sampleHeight` already
-  exists; a `Heightfield` collider wraps that grid) — capsule/sphere vs
-  heightfield is a closed-form local triangle test;
-- **triangle mesh with a flat BVH** for stands and props (the venue meshes are
-  already `MeshData`; a builder produces the collider from them);
-- **boxes** for hurdles, bars, pegs (dynamic or static bodies with box colliders).
+Golden fixtures under `compiler/tests/cases/` (deterministic prints):
 
-The client's analytic `stadiumWalkable(x, y)` becomes a static collider set
-(track edge as a loop of boxes, or a heightfield with a steep rim) and the
-character system handles the sliding it hand-codes today.
+- bindgen fixtures for §3 gaps: struct-by-value return round-trip, `#if`
+  handling, array fields, event array reads;
+- "hello box3d": drop a sphere on a static box, step 120×, print `z` — the
+  first thing to make green on native and wasm;
+- restitution: rebound height = e² × drop; friction: box holds on 20° at
+  μ=0.5, slides at 0.2; projectile range `v²/g` at 45°;
+- character: slides along a wall, steps a 0.3 m curb, is blocked by 0.6 m,
+  reports `grounded` and slope normal on a 20° ramp;
+- revolute hurdle: pushed at the top, rotates to its limit and rests;
+- despawn safety: spawn/despawn 1000 bodies, recycled entity ids never touch
+  a live body (mirrors the client's generation test);
+- determinism: two worlds stepped 600× print identical transforms.
 
-## 4. Determinism rules (written down so they survive)
+Plus one windowed example (a generic "field demo": mover, a row of hinged
+boxes, a thrown ball) for the manual visual gate only.
 
-- Fixed `fixedStep`; the accumulator lives in the app, never in the library.
-- Single-threaded phase 1. When `spawn` is used later, it is per broadphase
-  island with results merged in entity order — parallelism must not change
-  results.
-- Iterate tables in index order; sort candidate pairs; never iterate a map.
-- No wall clock, no random inside the sim; the game seeds any randomness.
-- Cross-platform: keep `sqrt`/basic arithmetic in the solver; route any
-  `sin`/`cos`/`atan2` through the game's own tables if lockstep across
-  platforms is ever required (it is not for phase 1; document it, do not
-  build it).
+## 8. Phased plan (proposed queue tasks; next free id is #939)
 
-## 5. Testing (TDD, non-visual)
+1. **Spike:** vendor Box3D v0.1.0 at `third_party/box3d/`, the on-demand
+   `libbox3d.a` build + `uses_physics` link (native + wasm), a hand-written
+   10-extern "hello box3d" proving struct-by-value ABI on arm64/x86-64/wasm.
+2. **bindgen gaps** (#if/#else, struct returns, array fields) + generate
+   `lib/box3d/` with a regeneration command in `docs/box3d-bindings.md`.
+3. **`lib/physics/` core:** `PhysicsWorld`, `RigidBody`/`Collider`,
+   push/step/pull systems, spawn/despawn, event draining; fixtures 7.2–7.3.
+4. **Static venue + queries:** mesh/height-field colliders from `MeshData`,
+   raycast/shapecast/overlap wrappers; orientation verified.
+5. **Character controller** in Rae over the mover primitives; fixtures 7.4.
+6. **Joints + demo:** revolute/spherical wrappers, hurdle and bar, the
+   windowed example.
+7. **Runtime hooks:** allocator/assert/log into Rae's runtime accounting.
+8. **Downstream migration guide** (generic wording): `PhysicsBody` →
+   `RigidBody`, ground plane → static shapes, hurdles → hinged bodies,
+   javelin stick = hit event → weld/static.
+9. *(later)* external task scheduler via Rae `spawn` when Rae-function
+   callbacks reach the FFI; ragdoll rig helpers.
+10. *(independent)* `lib/physics2d/` = `rae bindgen` over Box2D v3 for 2D
+    games.
 
-Golden fixtures under `compiler/tests/cases/` (deterministic prints, no
-window):
+## 9. Open questions for the maintainer
 
-- geometry: ray–triangle / ray–sphere / capsule–box closest points, AABB
-  overlap, heightfield sample — value tables;
-- free fall matches `z = z0 − ½ g t²` to tolerance after N steps;
-- restitution: a dropped sphere's rebound height = e² × drop height;
-- friction: a box on a 20° slope stays (μ = 0.5) and slides (μ = 0.2);
-- projectile range: a 45° launch lands at `v²/g` on flat ground;
-- character: walks into a wall and slides along it; steps a 0.3 m curb, is
-  blocked by 0.6 m; reports `grounded` and the slope normal;
-- hinge: a hurdle pushed at the top rotates to its stop and stays;
-- determinism: two identical worlds stepped 600 times print identical state.
-
-Plus one windowed example (a generic "field demo": a capsule walker, a box
-row to knock over, a thrown ball) for the manual visual gate only.
-
-## 6. Phased plan (proposed queue tasks, not yet queued)
-
-1. `lib/geometry/` value types + intersection maths + golden tests.
-2. `lib/physics/`: `RigidBody`/`Collider`/`PhysicsWorld`, integrate +
-   broadphase + sphere/box/capsule narrowphase + solver; free-fall,
-   restitution, friction, projectile tests.
-3. `characterSystem` (kinematic capsule, move-and-slide, step, ground) +
-   raycast/spherecast/overlap queries + heightfield & triangle-mesh static
-   colliders; character tests.
-4. Contact/sensor events on `EventQueue`, sleeping, warm-starting;
-   determinism test.
-5. `jointSystem` hinge with limits; the hurdle/bar demo; the windowed example.
-6. Downstream migration guide: `PhysicsBody` → `RigidBody`, analytic
-   walkability → static colliders, hurdles → hinged boxes.
-7. (parallel, independent) `lib/physics2d/` — `rae bindgen` over Box2D v3 +
-   an ECS wrapper, for 2D games.
-8. (gate, later) Ragdoll evaluation: prototype articulated capsules on the
-   Rae solver; if quality/cost is not acceptable, scope a Jolt backend behind
-   the same components (JoltC + bindgen + a `uses_physics` link flag modelled
-   on `uses_webgpu`).
-
-## 7. Open questions for the maintainer
-
-1. Confirm **pure Rae for 3D** (with Box2D v3 reserved for 2D) over Jolt-via-C-shim.
-2. Cross-platform lockstep determinism: needed for multiplayer, or is
-   server-authoritative / state sync the plan? It changes the maths rules in §4.
-3. Ragdolls: comedy essential (phase 3 committed) or nice-to-have (gate)?
-4. Where does the venue's collision come from — the render meshes (build a
-   collider from `MeshData`) or hand-placed colliders? Recommendation: render
-   meshes for terrain/stands, hand-placed boxes for gameplay props.
+1. Confirm **Box3D** (over Jolt/pure Rae) and vendoring at the **v0.1.0 tag**
+   with bindings regenerated on each bump.
+2. Netcode: lockstep (needs the §6 same-configuration rule across all peers,
+   including wasm) or server-authoritative?
+3. The on-demand `libbox3d.a` build inside the compiler (§4) vs. a documented
+   one-time `make box3d` in the toolchain checkout — the former is zero-config
+   for downstream projects, the latter is less compiler code.
+4. Venue collision from render `MeshData` (recommended) or hand-placed shapes?
+5. Is the mover's "experimental" status acceptable for the first sport, or
+   should the runner be a kinematic *rigid body* on the solver instead
+   (simpler, but fights the solver on stairs and edges)?
