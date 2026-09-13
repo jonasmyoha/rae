@@ -1,4 +1,5 @@
 open ui/Ecs
+open ecs/Event
 open ui/Layer
 open ui/Theme
 # GPU2D-only debug UI for example 106.
@@ -268,10 +269,10 @@ func dispatchDebugAction(
 ) pub ret Bool {
   unsafe {
     var needsRemount: Bool = false
-    let n: Int = input.events.length
+    let n: Int = eventCount(this: input.uiActions)
     var i: Int = 0
     loop i < n {
-      let ev: ActionEvent = rae_ext_rae_buf_get(buf: input.events.data, index: i)
+      let ev: UiAction = eventAt(this: input.uiActions, i: i)
       let actionId: String = ev.actionId
       if actionId is debugActionToggleMenu {
         debug.menuOpen = debug.menuOpen is false
