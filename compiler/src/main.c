@@ -47,7 +47,6 @@
 #include "vm.h"
 #include "vm_compiler.h"
 #include "vm_registry.h"
-#include "vm_raylib.h"
 #include "vm_tinyexpr.h"
 #include "raepack.h"
 #include "sys_thread.h"
@@ -167,7 +166,6 @@ static bool build_c_backend_output(const char* entry_file,
                                    const char* project_root,
                                    const char* out_file,
                                    bool no_implicit,
-                                   bool* out_uses_raylib,
                                    bool* out_uses_sdl3,
                                    bool* out_uses_webgpu,
                                    WatchSources* out_sources);
@@ -2557,7 +2555,6 @@ static bool build_c_backend_output(const char* entry_file,
                                    const char* project_root,
                                    const char* out_file,
                                    bool no_implicit,
-                                   bool* out_uses_raylib,
                                    bool* out_uses_sdl3,
                                    bool* out_uses_webgpu,
                                    WatchSources* out_sources) {
@@ -2589,14 +2586,6 @@ static bool build_c_backend_output(const char* entry_file,
   
   AstModule merged = merge_module_graph(&graph);
   
-  bool uses_raylib = false;
-  for (ModuleNode* node = graph.head; node; node = node->next) {
-      if (node->module_path && (strcmp(node->module_path, "Raylib") == 0 || strstr(node->module_path, "/Raylib.rae") || strstr(node->module_path, "\\Raylib.rae"))) {
-          uses_raylib = true;
-          break;
-      }
-  }
-  if (out_uses_raylib) *out_uses_raylib = uses_raylib;
 
   bool uses_sdl3 = false;
   for (ModuleNode* node = graph.head; node; node = node->next) {
@@ -2667,7 +2656,7 @@ static bool build_c_backend_output(const char* entry_file,
   }
 
   int errs_before_emit = diag_error_count();
-  bool ok = c_backend_emit_module(&ctx, &merged, out_file, &registry, out_uses_raylib);
+  bool ok = c_backend_emit_module(&ctx, &merged, out_file, &registry);
   /* The backend reports semantic errors it can only see with full type
    * information (a reference returned to a temporary, for one). Emission
    * still writes a file, so without this the pipeline would hand invalid
@@ -2858,9 +2847,8 @@ static bool build_hybrid_output(const char* entry_file,
     ok = write_function_manifest(&merged, chunk_path);
   }
   if (ok) {
-    bool dummy_uses_raylib = false;
     int errs_before = diag_error_count();
-    ok = c_backend_emit_module(&ctx, &merged, c_path, &registry, &dummy_uses_raylib);
+    ok = c_backend_emit_module(&ctx, &merged, c_path, &registry);
     if (diag_error_count() > errs_before) ok = false;
   }
   if (ok) {
@@ -2931,16 +2919,12 @@ static bool ensure_directory_p(const char* path);
 static bool gcc_link_c_to_binary(const char* entry_rae_file,
                                  const char* c_path,
                                  const char* out_bin,
-                                 bool uses_raylib,
                                  bool uses_sdl3,
                                  bool uses_webgpu,
                                  int profile) {
   char runtime_dir[PATH_MAX];
   snprintf(runtime_dir, sizeof(runtime_dir), "%s", RAE_RUNTIME_SOURCE_DIR);
 
-  const char* raylib_flags = uses_raylib
-      ? "-DRAE_HAS_RAYLIB /opt/homebrew/lib/libraylib.a -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL"
-      : "";
   // SDL3 (lib/sdl3.rae): define the runtime block + link libSDL3 only when the
   // program imports it (brew-installed at /opt/homebrew, not toolchain-bundled).
   const char* sdl3_flags = uses_sdl3 ? "-DRAE_HAS_SDL3 -lSDL3" : "";
@@ -2991,8 +2975,8 @@ static bool gcc_link_c_to_binary(const char* entry_rae_file,
   }
 
   char cmd[PATH_MAX * 4];
-  snprintf(cmd, sizeof(cmd), "gcc -std=c11 %s -w %s %s %s -I%s -I/opt/homebrew/include -L/opt/homebrew/lib -framework Foundation -framework ImageIO -framework CoreGraphics %s %s/rae_runtime.c%s -o %s",
-           opt_flags, raylib_flags, sdl3_flags, wgpu_flags, runtime_dir,
+  snprintf(cmd, sizeof(cmd), "gcc -std=c11 %s -w %s %s -I%s -I/opt/homebrew/include -L/opt/homebrew/lib -framework Foundation -framework ImageIO -framework CoreGraphics %s %s/rae_runtime.c%s -o %s",
+           opt_flags, sdl3_flags, wgpu_flags, runtime_dir,
            c_path, runtime_dir, extra_c_files, out_bin);
 
   if (system(cmd) != 0) {
@@ -3008,14 +2992,9 @@ static bool gcc_link_c_to_binary(const char* entry_rae_file,
 static bool emcc_link_c_to_web(const char* entry_rae_file,
                                const char* c_path,
                                const char* out_path,
-                               bool uses_raylib,
                                bool uses_sdl3,
                                bool uses_webgpu,
                                int profile) {
-  if (uses_raylib) {
-    fprintf(stderr, "error: --target wasm does not support raylib; use SDL3/WebGPU\n");
-    return false;
-  }
   if (!ensure_parent_directory(out_path)) return false;
 
   size_t out_len = strlen(out_path);
@@ -3223,15 +3202,14 @@ static int run_compiled_file(const RunOptions* run_opts, const char* project_roo
                  lib_root, strerror(errno));
   }
 
-  bool uses_raylib = false;
   bool uses_sdl3 = false;
   bool uses_webgpu = false;
-  if (!build_c_backend_output(file_path, project_root, temp_c, run_opts->no_implicit, &uses_raylib, &uses_sdl3, &uses_webgpu, NULL)) {
+  if (!build_c_backend_output(file_path, project_root, temp_c, run_opts->no_implicit, &uses_sdl3, &uses_webgpu, NULL)) {
     if (chdired && have_saved) { if (chdir(saved_cwd) != 0) {} }
     return 1;
   }
 
-  if (!gcc_link_c_to_binary(file_path, temp_c, temp_bin, uses_raylib, uses_sdl3, uses_webgpu, run_opts->profile)) {
+  if (!gcc_link_c_to_binary(file_path, temp_c, temp_bin, uses_sdl3, uses_webgpu, run_opts->profile)) {
     unlink(temp_c);
     if (chdired && have_saved) { if (chdir(saved_cwd) != 0) {} }
     return 1;
@@ -3606,8 +3584,7 @@ static bool watch_build_into_dir(const char* entry,
   snprintf(out_bin_path, PATH_MAX, "%s/app", build_dir);
 
   if (!watch_subprocess_emit_c(entry, project_root, c_path)) return false;
-  // raylib stays pessimistically on (bundled with the toolchain; a few unused
-  // KB is fine). SDL3 / wgpu-native are NOT bundled, so we only link them when
+  // SDL3 / wgpu-native are NOT bundled, so we only link them when
   // the program actually imports them — read from the `.deps` sidecar the emit
   // subprocess wrote (build_c_backend_output's import detection). This is what
   // lets `rae watch` build SDL3 / WebGPU examples (e.g. example 53).
@@ -3626,7 +3603,7 @@ static bool watch_build_into_dir(const char* entry,
       fclose(df);
     }
   }
-  if (!gcc_link_c_to_binary(entry, c_path, out_bin_path, true, uses_sdl3, uses_webgpu, profile)) return false;
+  if (!gcc_link_c_to_binary(entry, c_path, out_bin_path, uses_sdl3, uses_webgpu, profile)) return false;
   return true;
 }
 
@@ -4251,25 +4228,23 @@ static int run_command(const char* cmd, int argc, char** argv) {
           fprintf(stderr, "error: --emit-c is required for compiled builds\n");
           return 1;
         }
-        bool b_raylib = false, b_sdl3 = false, b_webgpu = false;
+        bool b_sdl3 = false, b_webgpu = false;
         bool okc = build_c_backend_output(build_opts.entry_path,
                                           final_root,
                                           build_opts.out_path,
                                           build_opts.no_implicit,
-                                          &b_raylib,
                                           &b_sdl3,
                                           &b_webgpu,
                                           NULL);
         // Record which non-toolchain-bundled libs the program imports next to
         // the emitted C, so `rae watch` (which emits via this subprocess) can
-        // link SDL3 / wgpu-native instead of assuming a raylib-only program.
+        // link SDL3 / wgpu-native rather than assuming a plain program.
         if (okc) {
           char deps_path[PATH_MAX];
           snprintf(deps_path, sizeof(deps_path), "%s.deps", build_opts.out_path);
           FILE* df = fopen(deps_path, "w");
           if (df) {
-            fprintf(df, "%s %s %s\n",
-                    b_raylib ? "Raylib" : "-",
+            fprintf(df, "%s %s\n",
                     b_sdl3 ? "sdl3" : "-",
                     b_webgpu ? "webgpu" : "-");
             fclose(df);
@@ -4297,19 +4272,17 @@ static int run_command(const char* cmd, int argc, char** argv) {
       case BUILD_TARGET_WASM: {
         char temp_c[PATH_MAX];
         snprintf(temp_c, sizeof(temp_c), "/tmp/rae_wasm_%d.c", getpid());
-        bool b_raylib = false, b_sdl3 = false, b_webgpu = false;
+        bool b_sdl3 = false, b_webgpu = false;
         bool okc = build_c_backend_output(build_opts.entry_path,
                                           final_root,
                                           temp_c,
                                           build_opts.no_implicit,
-                                          &b_raylib,
                                           &b_sdl3,
                                           &b_webgpu,
                                           NULL);
         bool linked = okc && emcc_link_c_to_web(build_opts.entry_path,
                                                 temp_c,
                                                 build_opts.out_path,
-                                                b_raylib,
                                                 b_sdl3,
                                                 b_webgpu,
                                                 build_opts.profile);

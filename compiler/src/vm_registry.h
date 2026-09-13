@@ -83,7 +83,6 @@ bool vm_registry_register_native(VmRegistry* registry,
 const VmNativeEntry* vm_registry_find_native(const VmRegistry* registry, const char* name);
 
 // Sub-registry loaders
-bool vm_registry_register_raylib(VmRegistry* registry);
 bool vm_registry_register_tinyexpr(VmRegistry* registry);
 bool vm_registry_register_monocypher(VmRegistry* registry);
 

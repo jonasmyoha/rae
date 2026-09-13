@@ -47,7 +47,6 @@
  * the WebGPU guards because the stub builds answer the same push. */
 #include "runtime_sky_state.c"
 #include "runtime_platform_apple.c"
-#include "runtime_raylib.c"
 #include "runtime_image_sdl3.c"
 #include "runtime_audio_sdl3.c"
 #ifdef RAE_HAS_WEBGPU

@@ -47,19 +47,9 @@ bool is_primitive_type(Str type_name);
 bool is_scalar_primitive_type(Str type_name);
 
 /**
- * Checks if a type name refers to a Raylib built-in type.
- */
-bool is_raylib_builtin_type(Str type_name);
-
-/**
  * Maps a Rae primitive type name to its C equivalent.
  * Returns NULL if not a primitive.
  */
 const char* map_rae_type_to_c(Str type_name);
-
-/**
- * Returns the Raylib C function name for a given Rae name, or NULL if not a Raylib function.
- */
-const char* find_raylib_mapping(Str name);
 
 #endif /* MANGLER_H */

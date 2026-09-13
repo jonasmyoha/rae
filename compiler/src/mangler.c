@@ -5,49 +5,7 @@
 #include <stdlib.h>
 #include <ctype.h>
 
-typedef struct {
-    const char* rae_name;
-    const char* c_name;
-} NativeMap;
 
-static const NativeMap RAYLIB_MAP[] = {
-    {"initWindow", "InitWindow"},
-    {"windowShouldClose", "WindowShouldClose"},
-    {"closeWindow", "CloseWindow"},
-    {"beginDrawing", "BeginDrawing"},
-    {"endDrawing", "EndDrawing"},
-    {"setTargetFPS", "SetTargetFPS"},
-    {"getScreenWidth", "GetScreenWidth"},
-    {"getScreenHeight", "GetScreenHeight"},
-    {"isKeyDown", "IsKeyDown"},
-    {"isKeyPressed", "IsKeyPressed"},
-    {"clearBackground", "ClearBackground"},
-    {"loadTexture", "LoadTexture"},
-    {"unloadTexture", "UnloadTexture"},
-    {"drawTexture", "DrawTexture"},
-    {"drawTextureEx", "DrawTextureEx"},
-    {"drawRectangleGradientV", "DrawRectangleGradientV"},
-    {"drawRectangleGradientH", "DrawRectangleGradientH"},
-    {"drawCircle", "DrawCircle"},
-    {"drawCircleGradient", "DrawCircleGradient"},
-    {"drawText", "DrawText"},
-    {"drawCube", "DrawCube"},
-    {"drawSphere", "DrawSphere"},
-    {"drawCylinder", "DrawCylinder"},
-    {"drawGrid", "DrawGrid"},
-    {"beginMode3D", "BeginMode3D"},
-    {"endMode3D", "EndMode3D"},
-    {"beginMode2D", "BeginMode2D"},
-    {"endMode2D", "EndMode2D"},
-    {NULL, NULL}
-};
-
-const char* find_raylib_mapping(Str name) {
-    for (int i = 0; RAYLIB_MAP[i].rae_name; i++) {
-        if (str_eq_cstr(name, RAYLIB_MAP[i].rae_name)) return RAYLIB_MAP[i].c_name;
-    }
-    return NULL;
-}
 
 const char* map_rae_type_to_c(Str type_name) {
   if (str_eq_cstr(type_name, "Void")) return "void";
@@ -151,15 +109,6 @@ bool is_scalar_primitive_type(Str type_name) {
            str_eq_cstr(type_name, "Char32");
 }
 
-bool is_raylib_builtin_type(Str type_name) {
-    return str_eq_cstr(type_name, "Vector2") ||
-           str_eq_cstr(type_name, "Vector3") ||
-           str_eq_cstr(type_name, "Color") ||
-           str_eq_cstr(type_name, "Texture") ||
-           str_eq_cstr(type_name, "Camera3D") ||
-           str_eq_cstr(type_name, "Camera2D") ||
-           str_eq_cstr(type_name, "Rectangle");
-}
 
 static void sanitize_mangled_name(char* name) {
     if (!name) return;
@@ -499,8 +448,6 @@ static void mangle_type_recursive_specialized(CompilerContext* ctx, const struct
         }
     } else if (mangle_is_c_scalar_spelling(base) || str_starts_with_cstr(base, "rae_")) {
         *pos += snprintf(buf + *pos, cap - *pos, "%.*s", (int)base.len, base.data);
-    } else if (is_raylib_builtin_type(base)) {
-        *pos += snprintf(buf + *pos, cap - *pos, "%.*s", (int)base.len, base.data);
     } else {
         *pos += snprintf(buf + *pos, cap - *pos, "rae_%.*s", (int)base.len, base.data);
     }
@@ -605,13 +552,6 @@ const char* rae_mangle_function(CompilerContext* ctx, const AstFuncDecl* func) {
         memcpy(res, func->extern_symbol, n + 1);
         return res;
     }
-    // The raylib-name hijack (`drawText` -> `rae_ext_drawText`) is ONLY for
-    // raylib EXTERN bindings. A *defined* Rae function (has a body) that merely
-    // shares a name with a raylib builtin must NOT be mapped to the raylib C
-    // symbol — otherwise e.g. lib/gpu2d_text.rae's `drawText` collides with
-    // raylib's `rae_ext_drawText` whenever raylib is linked.
-    if (func->is_extern && find_raylib_mapping(func->name) && !is_namespaced_stdlib_extern(func)) { char* res = arena_alloc(ctx->ast_arena, func->name.len + 9); sprintf(res, "rae_ext_%.*s", (int)func->name.len, func->name.data); return res; }
-
     if (func->is_extern) {
         Str name = func->name; const char* mapped = NULL;
         if (str_eq_cstr(name, "sleep") || str_eq_cstr(name, "sleepMs")) mapped = "rae_ext_rae_sleep";
