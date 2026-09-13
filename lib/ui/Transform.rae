@@ -22,6 +22,7 @@
 # Coordinate convention: x grows right, y grows down (raylib-friendly).
 # rotation is in radians. scale defaults to 1.0. alpha defaults to 1.0.
 open ecs/ComponentTable
+open ecs/Query
 import ecs/Transform
 open ecs/hierarchySystem/HierarchySystem
 open ecs/transformSystem/TransformSystem
@@ -136,18 +137,20 @@ func buildLocalTransforms(world: mod UiWorld) {
 # onto a fully-visible parent; every other entity folds onto its parent's
 # already-written WorldVisual (depthOrder guarantees the parent came first).
 func accumulateVisibility(world: mod UiWorld) {
-  # Roots: a local transform but no Parent.
-  loop var i: Int = 0, i < componentCount(this: world.localTransforms), ++i {
-    let entity: EntityId = componentEntityAt(this: world.localTransforms, i: i)
-    if componentHas(this: world.parents, entity: entity) is false {
-      let wv: WorldVisual = composeVisual(
-        world: world
-        entity: entity
-        parentAlpha: 1.0
-        parentVisible: true
-      )
-      componentSet(this: world.worldVisuals, entity: entity, data: wv)
-    }
+  # Roots: a local transform but no Parent — the `without` filter (#807/#940)
+  # names exactly this "in table A, NOT in table B" set, replacing the manual
+  # scan-and-skip. Each root's WorldVisual is computed independently, so the
+  # dense walk order (unchanged from the old loop) does not affect the result.
+  let roots: List(QueryMatch) = without(dataTable: world.localTransforms, tagTable: world.parents)
+  loop let row: view QueryMatch in roots {
+    let entity: EntityId = row.entity
+    let wv: WorldVisual = composeVisual(
+      world: world
+      entity: entity
+      parentAlpha: 1.0
+      parentVisible: true
+    )
+    componentSet(this: world.worldVisuals, entity: entity, data: wv)
   }
   # Parented entities, parent before child.
   let order: view List(EntityId) => depthOrder(
