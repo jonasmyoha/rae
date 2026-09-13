@@ -775,3 +775,132 @@ func deserMaskShape(doc: view JsonDoc, val: view JsonValue) ret MaskShape {
 # applyComponentByName: dispatch a (name, val) onto the right
 # ComponentTable on the world.
 # -----------------------------------------------------------------
+
+# ListView (#945): the virtualised-list spec. Shape:
+#   { "itemSceneId": "row", "itemKeyField": "id",
+#     "itemHeight": 56, "itemGap": 8, "visibleItemCount": 10, "overscanRows": 4,
+#     "loadingSceneId": "", "emptySceneId": "", "errorSceneId": "",
+#     "bindings": [ { "nodeId": "title", "component": "Text", "field": "text",
+#                     "itemField": "trackName", "prefix": "", "suffix": "" } ] }
+# `bindings` is an array of {nodeId, component, field, itemField, prefix, suffix};
+# each becomes a ListViewBinding. listViewSystem windows the rows and applies the
+# bindings per row.
+func deserListView(doc: view JsonDoc, val: view JsonValue) ret ListView {
+  let empty: String = ""
+  let itemSceneId: String = optString(
+    doc: doc
+    container: val
+    key: "itemSceneId"
+    fallback: empty
+  )
+  let itemKeyField: String = optString(
+    doc: doc
+    container: val
+    key: "itemKeyField"
+    fallback: empty
+  )
+  let itemHeight: Float = optFloat(
+    doc: doc
+    container: val
+    key: "itemHeight"
+    fallback: 0.0
+  )
+  let itemGap: Float = optFloat(
+    doc: doc
+    container: val
+    key: "itemGap"
+    fallback: 0.0
+  )
+  let visibleItemCount: Int = optInt(
+    doc: doc
+    container: val
+    key: "visibleItemCount"
+    fallback: 0
+  )
+  let overscanRows: Int = optInt(
+    doc: doc
+    container: val
+    key: "overscanRows"
+    fallback: 0
+  )
+  let loadingSceneId: String = optString(
+    doc: doc
+    container: val
+    key: "loadingSceneId"
+    fallback: empty
+  )
+  let emptySceneId: String = optString(
+    doc: doc
+    container: val
+    key: "emptySceneId"
+    fallback: empty
+  )
+  let errorSceneId: String = optString(
+    doc: doc
+    container: val
+    key: "errorSceneId"
+    fallback: empty
+  )
+  let bindings: List(ListViewBinding) = List.create(ListViewBinding, cap: 4)
+  let bindingsIdx: Int = Json.field(doc: doc, this: val, key: "bindings")
+  if bindingsIdx >= 0 {
+    let arr: JsonValue = Json.jsonValueAt(doc: doc, idx: bindingsIdx)
+    let n: Int = Json.arrayLen(this: arr)
+    var i: Int = 0
+    loop i < n {
+      let elem: JsonValue = Json.arrayAt(doc: doc, this: arr, idx: i)
+      let b: ListViewBinding = {
+        nodeId: optString(
+          doc: doc
+          container: elem
+          key: "nodeId"
+          fallback: empty
+        )
+        componentName: optString(
+          doc: doc
+          container: elem
+          key: "component"
+          fallback: empty
+        )
+        fieldName: optString(
+          doc: doc
+          container: elem
+          key: "field"
+          fallback: empty
+        )
+        itemField: optString(
+          doc: doc
+          container: elem
+          key: "itemField"
+          fallback: empty
+        )
+        prefix: optString(
+          doc: doc
+          container: elem
+          key: "prefix"
+          fallback: empty
+        )
+        suffix: optString(
+          doc: doc
+          container: elem
+          key: "suffix"
+          fallback: empty
+        )
+      }
+      bindings.add(value: b)
+      i = i + 1
+    }
+  }
+  ret ListView {
+    itemSceneId: itemSceneId
+    itemKeyField: itemKeyField
+    itemHeight: itemHeight
+    itemGap: itemGap
+    visibleItemCount: visibleItemCount
+    overscanRows: overscanRows
+    bindings: bindings
+    loadingSceneId: loadingSceneId
+    emptySceneId: emptySceneId
+    errorSceneId: errorSceneId
+  }
+}

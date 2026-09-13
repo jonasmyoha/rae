@@ -676,6 +676,24 @@ type ListView {
   errorSceneId: String
 }
 
+# ----- ListView data model (#945) ------------------------------------------
+# The rows a `ListView` virtualises. Kept as a per-row pair of PARALLEL
+# String lists (keys[i] -> values[i]) rather than a List of {key,value}
+# structs: the parallel-List(String) shape is the one the C backend reads back
+# from a component table without the struct-by-list-index corruption the
+# SceneInstance overrides note calls out. A binding's `itemField` is looked up
+# by scanning `keys`; the matching `values` entry is the cell text. `ListViewData`
+# is a sibling component on the same entity as the `ListView`, so the system
+# reads the two together.
+type ListViewRow {
+  keys: List(String)
+  values: List(String)
+}
+
+type ListViewData {
+  rows: List(ListViewRow)
+}
+
 # Effects / motion (declared so .raescene can carry them; runtime
 # systems for these arrive in later phases).
 type BackgroundPan {

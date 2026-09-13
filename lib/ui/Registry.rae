@@ -434,6 +434,10 @@ func applyComponentByName(
     componentSet(this: world.aspects, entity: entity, data: asp)
     ret
   }
+  if name is "ListView" {
+    componentSet(this: world.listViews, entity: entity, data: deserListView(doc: doc, val: val))
+    ret
+  }
   if name is "ScaleToFit" {
     let modeStr: String = optString(
       doc: doc
