@@ -16,7 +16,6 @@
 #include <ctype.h>
 #include <limits.h>
 #include <dirent.h>
-#include <setjmp.h>
 #ifdef __APPLE__
 #include <mach-o/dyld.h>  /* _NSGetExecutablePath — for compiler-relative stdlib */
 #endif
@@ -161,8 +160,6 @@ static bool build_c_backend_output(const char* entry_file,
 static bool ensure_directory_tree(const char* dir_path);
 static bool ensure_parent_directory(const char* file_path);
 static bool copy_runtime_assets(const char* dest_dir);
-static bool write_function_manifest(const AstModule* module, const char* out_c_path);
-static char* derive_entry_stem(const char* entry_file);
 typedef struct {
   WatchSources sources;
   time_t* file_mtimes;
@@ -625,34 +622,6 @@ static bool ensure_parent_directory(const char* file_path) {
   return ensure_directory_tree(dir_path);
 }
 
-static char* derive_entry_stem(const char* entry_file) {
-  if (!entry_file) {
-    return NULL;
-  }
-  const char* slash = strrchr(entry_file, '/');
-#ifdef _WIN32
-  const char* slash_win = strrchr(entry_file, '\\');
-  if (!slash || (slash_win && slash_win > slash)) {
-    slash = slash_win;
-  }
-#endif
-  const char* name = slash ? slash + 1 : entry_file;
-  size_t len = strlen(name);
-  if (len > 4 && strcmp(name + len - 4, ".rae") == 0) {
-    len -= 4;
-  }
-  if (len == 0) {
-    len = strlen(name);
-  }
-  char* stem = malloc(len + 1);
-  if (!stem) {
-    return NULL;
-  }
-  memcpy(stem, name, len);
-  stem[len] = '\0';
-  return stem;
-}
-
 static bool copy_stream(FILE* src, FILE* dest) {
   char buffer[4096];
   while (!feof(src)) {
@@ -746,159 +715,6 @@ static bool copy_runtime_assets(const char* out_dir) {
   snprintf(lp_src, sizeof(lp_src), "%s/stb_image.h", RAE_RUNTIME_SOURCE_DIR);
   snprintf(lp_dst, sizeof(lp_dst), "%s/stb_image.h", out_dir);
   return copy_file_to(lp_src, lp_dst);
-}
-
-static bool write_bytes(FILE* out, const void* data, size_t size) {
-  if (!out || !data || size == 0) {
-    return size == 0;
-  }
-  return fwrite(data, 1, size, out) == size;
-}
-
-static bool write_u32(FILE* out, uint32_t value) {
-  uint8_t bytes[4];
-  bytes[0] = (uint8_t)(value & 0xFF);
-  bytes[1] = (uint8_t)((value >> 8) & 0xFF);
-  bytes[2] = (uint8_t)((value >> 16) & 0xFF);
-  bytes[3] = (uint8_t)((value >> 24) & 0xFF);
-  return write_bytes(out, bytes, sizeof(bytes));
-}
-
-static bool write_u8(FILE* out, uint8_t value) {
-  return write_bytes(out, &value, sizeof(value));
-}
-
-static bool write_i64(FILE* out, int64_t value) {
-  uint8_t bytes[8];
-  for (size_t i = 0; i < sizeof(bytes); ++i) {
-    bytes[i] = (uint8_t)((value >> (i * 8)) & 0xFF);
-  }
-  return write_bytes(out, bytes, sizeof(bytes));
-}
-
-static bool write_f64(FILE* out, double value) {
-  uint64_t bits;
-  memcpy(&bits, &value, sizeof(bits));
-  uint8_t bytes[8];
-  for (size_t i = 0; i < sizeof(bytes); ++i) {
-    bytes[i] = (uint8_t)((bits >> (i * 8)) & 0xFF);
-  }
-  return write_bytes(out, bytes, sizeof(bytes));
-}
-
-static char* type_ref_to_cstr(const AstTypeRef* type) {
-  if (!type || !type->parts) {
-    return strdup("Any");
-  }
-  size_t total = 0;
-  size_t segments = 0;
-  const AstIdentifierPart* part = type->parts;
-  while (part) {
-    total += part->text.len;
-    segments += 1;
-    part = part->next;
-  }
-  size_t len = total + (segments > 1 ? segments - 1 : 0);
-  char* result = malloc(len + 1);
-  if (!result) {
-    return NULL;
-  }
-  size_t offset = 0;
-  part = type->parts;
-  while (part) {
-    memcpy(result + offset, part->text.data, part->text.len);
-    offset += part->text.len;
-    if (part->next) {
-      result[offset++] = '.';
-    }
-    part = part->next;
-  }
-  result[offset] = '\0';
-  return result;
-}
-
-static char* derive_manifest_path(const char* out_path) {
-  if (!out_path) return NULL;
-  size_t len = strlen(out_path);
-  const char* dot = strrchr(out_path, '.');
-  size_t base_len = dot ? (size_t)(dot - out_path) : len;
-  const char* suffix = ".manifest.json";
-  size_t suffix_len = strlen(suffix);
-  char* path = malloc(base_len + suffix_len + 1);
-  if (!path) return NULL;
-  memcpy(path, out_path, base_len);
-  memcpy(path + base_len, suffix, suffix_len + 1);
-  return path;
-}
-
-static bool write_function_manifest(const AstModule* module, const char* out_c_path) {
-  if (!module || !out_c_path) {
-    return false;
-  }
-  char* manifest_path = derive_manifest_path(out_c_path);
-  if (!manifest_path) {
-    fprintf(stderr, "error: unable to derive manifest path for '%s'\n", out_c_path);
-    return false;
-  }
-  FILE* out = fopen(manifest_path, "w");
-  if (!out) {
-    fprintf(stderr, "error: unable to open manifest '%s'\n", manifest_path);
-    free(manifest_path);
-    return false;
-  }
-  fprintf(out, "{\n  \"functions\": [\n");
-  const AstDecl* decl = module->decls;
-  int first = 1;
-  while (decl) {
-    if (decl->kind == AST_DECL_FUNC) {
-      const AstFuncDecl* fn = &decl->as.func_decl;
-      if (!first) {
-        fprintf(out, ",\n");
-      }
-      first = 0;
-      char* name = str_to_cstr(fn->name);
-      const char* kind = fn->is_extern ? "extern" : "rae";
-      fprintf(out, "    {\n      \"name\": \"%s\",\n      \"kind\": \"%s\",\n      \"params\": [",
-              name ? name : "",
-              kind);
-      const AstParam* param = fn->params;
-      int first_param = 1;
-      while (param) {
-        if (!first_param) {
-          fprintf(out, ", ");
-        }
-        char* param_name = str_to_cstr(param->name);
-        char* type_str = type_ref_to_cstr(param->type);
-        fprintf(out, "{\"name\": \"%s\", \"type\": \"%s\"}",
-                param_name ? param_name : "",
-                type_str ? type_str : "Any");
-        free(param_name);
-        free(type_str);
-        first_param = 0;
-        param = param->next;
-      }
-      fprintf(out, "],\n      \"returns\": [");
-      const AstReturnItem* ret = fn->returns;
-      int first_ret = 1;
-      while (ret) {
-        if (!first_ret) {
-          fprintf(out, ", ");
-        }
-        char* type_str = type_ref_to_cstr(ret->type);
-        fprintf(out, "\"%s\"", type_str ? type_str : "Any");
-        free(type_str);
-        first_ret = 0;
-        ret = ret->next;
-      }
-      fprintf(out, "]\n    }");
-      free(name);
-    }
-    decl = decl->next;
-  }
-  fprintf(out, "\n  ]\n}\n");
-  fclose(out);
-  free(manifest_path);
-  return true;
 }
 
 static bool module_graph_has_module(const ModuleGraph* graph, const char* module_path) {
@@ -4771,25 +4587,4 @@ static const char* watch_state_poll_change(WatchState* state) {
     }
   }
   return NULL;
-}
-/* Sema can crash (SIGSEGV) when re-analysing a module that contains
- * parse-level garbage — see 399_code_hot_reload_error. The crash is a
- * real bug in type_mangle_recursive's handling of partially-resolved
- * TypeInfos, but on the hot-reload path we don't want the watcher to
- * die: the user is just editing live source. We trap the signal,
- * longjmp back here, and return false so the watch loop keeps running
- * with the previous-good chunk. The existing rae_runtime.c crash
- * handler is restored on the way out so any genuine crash in vm_run
- * (or anywhere else) still produces a backtrace + exit. */
-static sigjmp_buf g_watch_compile_jmp;
-static volatile sig_atomic_t g_watch_compile_armed = 0;
-static void watch_compile_sigsegv(int sig) {
-  if (g_watch_compile_armed) {
-    g_watch_compile_armed = 0;
-    siglongjmp(g_watch_compile_jmp, sig);
-  }
-  /* Not armed (something else hit SIGSEGV) — restore default and
-   * re-raise so the OS can dump core. */
-  signal(sig, SIG_DFL);
-  raise(sig);
 }
