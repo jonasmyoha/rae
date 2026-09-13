@@ -163,3 +163,67 @@ Rae-function-to-C callbacks exist, so the two never oversubscribe cores.
 `parallelLoop` + split joins (small). 11–14. Walker / metaballs / procgen /
 fixtures (per-example, small each). 15–16. The two prototypes (per-system).
 17. Refresh `concurrency-model.md` §5 (tiny, fold into task 2).
+
+## 5. The UI example (106): concurrency versus parallelism, and one architecture
+
+The mobile-UI example is the counter-example that sharpens the plan: it has
+almost no data-parallel CPU work, and a great deal of **waiting**.
+
+What it does today (verified):
+
+- **Waiting, hand-built in C because Rae had no `spawn` yet:**
+  `lib/sys/Spotify.rae` exposes `startPoller` (a runtime `pthread` that runs
+  `osascript` every N ms so the UI thread never forks), `fetchArtworkAsync` +
+  `fetchArtworkStatus` (one runtime `pthread` per curl download, observed by
+  polling a status code), and a blocking `fetchArtwork` whose use the app had
+  to ration: `refetchHistoryArtChunk` processes `budget` entries per frame
+  "so the UI does not beach-ball". That is an async/await problem solved with
+  a C thread pool and a per-frame poll.
+- **Computing:** per-frame systems are dirty-driven (`shouldRun` on table
+  generations; layout/transform skip when nothing changed) and the idle loop
+  sleeps in `waitEvents`. Boot decodes 15 PNGs (stb_image, CPU) and parses
+  scenes/JSON/SDF font tables synchronously — the only real parallel
+  candidate, and only at startup.
+- **No waker:** `waitEvents` is `SDL_WaitEventTimeout`; the example's
+  `uiInstallWindowCloseWaker` is an empty stub. A background completion cannot
+  wake an idle loop; it is noticed on the next timeout tick.
+
+So: **106 benefits from `spawn`/`Channel` (concurrency), barely from
+`parallelLoop` (parallelism), and needs one new primitive — a waker.**
+
+Concretely, with the language as it is:
+
+1. Replace the C poller + curl job table with Rae workers: `spawn
+   pollSpotify(chan)` and `spawn fetchArtwork(url, outPath, chan)` posting
+   results on a `Channel(ArtworkResult)`; the frame loop drains the channel
+   in a `historyArtSystem` and registers textures. The chunk/budget dance
+   disappears; `refetchHistoryArtChunk` becomes "drain what arrived". The C
+   left behind is the genuine ABI (`curl` / `osascript` invocation), not the
+   scheduling — the same boundary as the renderer.
+2. Add **`wake()`** to the event loop (`ui/EventLoop`): a thread-safe call
+   that posts a user event so `waitEvents` returns immediately. A worker calls
+   it after sending on the channel. Without it, async completions render one
+   timeout late; with it the idle loop stays at 0 % and still reacts.
+3. Boot: `taskScope { }` around the 15 cover decodes and the scene/JSON
+   parses — a one-line parallel startup once `taskScope` children may borrow
+   `view` data (Phase 1.5). Not a per-frame concern.
+4. `detach` for the poller (a worker with no result to join), once it exists;
+   until then it is joined at shutdown, which is fine.
+
+**On "games and other programs should share one architecture" — agreed, and
+this is the evidence.** Both kinds of program are the same shape: an ECS world
+stepped by a schedule, with two kinds of concurrency at the edges of each
+frame — *waiting* (`spawn` + `Channel`, results drained by a system) and
+*computing* (`parallelLoop`, systems in parallel stages). A game leans on the
+second (crowds, physics, AI) and a UI app on the first (network, subprocesses,
+disk), but every game also waits (asset streaming, netcode, save/load) and
+every app also computes (image decode, text shaping, search). The same
+schedule, the same modes, the same two primitives; only the mix differs. What
+must *not* differ is the loop policy: the wait-based idle loop
+(`nextWaitTimeoutSec` + `wake()`) for apps, the busy loop for games, and the
+hybrid the UI-render-loop postmortem already prescribes — the concurrency
+primitives plug into whichever loop the program owns.
+
+Task additions: 18. `EventLoop.wake()` (runtime user event + Rae API, small).
+19. Port 106's Spotify/artwork path to `spawn` + `Channel` (medium; deletes
+C scheduling code). 20. `taskScope` boot decode in 106 (small, after 1.5).
