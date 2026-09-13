@@ -1,0 +1,318 @@
+# listViewSystem — virtualised rows for the `ListView` component (#945).
+#
+# A `ListView` entity carries a `ListView` (the layout/binding spec), a
+# `ScrollState` (the scroll offset), and a sibling `ListViewData` (the rows). The
+# system keeps only a WINDOW of live row entities as the ListView's children —
+# the rows spanning the viewport plus `overscanRows` each side — and RECYCLES
+# them on scroll: the pooled row entities persist across scroll ticks, and each
+# tick only re-points a slot at its new data row (re-applying the bindings) and
+# moves it, growing or shrinking the pool only when the window SIZE changes. So a
+# 10k-row list costs O(window) live entities, not O(rows).
+#
+# A row is built from the component's `bindings`: each distinct `nodeId` becomes
+# one child node of the row, and each binding writes that child's component from
+# the row's `itemField` value (prefix + value + suffix). Supported binding
+# targets are `Text.text` and `OnClick.actionId` — the two a play-history / track
+# list needs; an unsupported (componentName, fieldName) is skipped. Multi-node
+# rows authored as a sub-scene (`ListView.itemSceneId`) are a later step — see
+# the #945 follow-up; this system renders rows from the bindings directly.
+open ui/Ecs
+import ui/Components
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/hierarchySystem/HierarchySystem
+
+# Look up a row cell by field key. The row stores parallel keys/values lists
+# (Components.rae ListViewRow); scan keys and return the matching value, or "".
+func listRowValue(row: view ListViewRow, key: view String) ret String {
+  unsafe {
+    let n: Int = row.keys.length
+    var i: Int = 0
+    loop i < n {
+      let k: String = rae_ext_rae_buf_get(buf: row.keys.data, index: i)
+      if k is key {
+        ret "{rae_ext_rae_buf_get(buf: row.values.data, index: i)}"
+      }
+      i = i + 1
+    }
+    ret ""
+  }
+}
+
+# The ordered, de-duplicated node ids the bindings target — one child node per
+# id, created in this order so a pooled row's k-th child always maps to
+# distinctNodeIds[k] on every recycle.
+func listViewDistinctNodeIds(lv: view ListView) ret List(String) {
+  unsafe {
+    let out: List(String) = List.create(String, cap: 4)
+    let n: Int = lv.bindings.length
+    var i: Int = 0
+    loop i < n {
+      let b: ListViewBinding = rae_ext_rae_buf_get(buf: lv.bindings.data, index: i)
+      var seen: Bool = false
+      var j: Int = 0
+      loop j < out.length {
+        if let existing: String = out.copyAt(index: j) {
+          if existing is b.nodeId {
+            seen = true
+          }
+        }
+        j = j + 1
+      }
+      if seen is false {
+        out.add(value: "{b.nodeId}")
+      }
+      i = i + 1
+    }
+    ret out
+  }
+}
+
+# Index of `nodeId` within the distinct list (its child slot in a row), or -1.
+func listViewNodeSlot(distinct: view List(String), nodeId: view String) ret Int {
+  var i: Int = 0
+  loop i < distinct.length {
+    if let existing: String = distinct.copyAt(index: i) {
+      if existing is nodeId {
+        ret i
+      }
+    }
+    i = i + 1
+  }
+  ret 0 - 1
+}
+
+# Write one binding onto its child entity from the row's data.
+func listViewApplyBinding(
+  world: mod UiWorld
+  child: view EntityId
+  binding: view ListViewBinding
+  row: view ListViewRow
+) {
+  let raw: String = listRowValue(row: row, key: binding.itemField)
+  let value: String = "{binding.prefix}{raw}{binding.suffix}"
+  let textName: String = "Text"
+  let onClickName: String = "OnClick"
+  if binding.componentName is textName {
+    let t: Text = { text: value, styleId: "", wrapWidthMode: WrapWidthMode.none }
+    componentSet(this: world.texts, entity: child, data: t)
+    ret
+  }
+  if binding.componentName is onClickName {
+    let click: OnClick = {
+      actionId: value
+      actionIdDouble: ""
+      actionIdTriple: ""
+      maxDelayMs: 250
+    }
+    componentSet(this: world.onClicks, entity: child, data: click)
+    ret
+  }
+}
+
+# Build one pooled row entity: a root with one child per distinct binding nodeId.
+# The children are created in distinct order so slot k == distinctNodeIds[k].
+func listViewBuildRow(
+  world: mod UiWorld
+  lv: view ListView
+  distinct: view List(String)
+) ret EntityId {
+  let rowRoot: EntityId = createEntity(world: world)
+  let r: Rect = { position: { x: 0.0, y: 0.0 }, size: { x: 0.0, y: lv.itemHeight } }
+  componentSet(this: world.rects, entity: rowRoot, data: r)
+  var k: Int = 0
+  loop k < distinct.length {
+    let child: EntityId = createEntity(world: world)
+    setParent(
+      parents: world.parents
+      childrens: world.childrens
+      child: child
+      parent: rowRoot
+    )
+    k = k + 1
+  }
+  ret rowRoot
+}
+
+# Re-point a pooled row at data row `row`, positioned at content-Y `topY`.
+func listViewApplyRow(
+  world: mod UiWorld
+  rowRoot: view EntityId
+  lv: view ListView
+  distinct: view List(String)
+  row: view ListViewRow
+  topY: view Float
+) {
+  unsafe {
+    let off: Offset = { delta: Vec2 { x: 0.0, y: topY } }
+    componentSet(this: world.offsets, entity: rowRoot, data: off)
+    # Snapshot this row's child ids (distinct-order) so binding writes don't
+    # alias the childrens table while it is being read.
+    let kids: List(EntityId) = List.create(EntityId, cap: distinct.length)
+    if componentHas(this: world.childrens, entity: rowRoot) {
+      let ch: view Children => componentView(this: world.childrens, entity: rowRoot)
+      var i: Int = 0
+      loop i < ch.ids.length {
+        kids.add(value: rae_ext_rae_buf_get(buf: ch.ids.data, index: i))
+        i = i + 1
+      }
+    }
+    let bn: Int = lv.bindings.length
+    var b: Int = 0
+    loop b < bn {
+      let binding: ListViewBinding = rae_ext_rae_buf_get(buf: lv.bindings.data, index: b)
+      let slot: Int = listViewNodeSlot(distinct: distinct, nodeId: binding.nodeId)
+      if slot >= 0 and slot < kids.length {
+        let child: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: slot)
+        listViewApplyBinding(
+          world: world
+          child: child
+          binding: binding
+          row: row
+        )
+      }
+      b = b + 1
+    }
+  }
+}
+
+# Topmost data-row index to build for a scroll offset, with `overscanRows` of
+# lead-in above the viewport. scrollY <= 0 (content scrolled up).
+func listViewFirstRow(lv: view ListView, scrollY: view Float, count: view Int) ret Int {
+  let pitch: Float = lv.itemHeight + lv.itemGap
+  if pitch <= 0.0 {
+    ret 0
+  }
+  var top: Float = 0.0 - scrollY
+  if top < 0.0 {
+    top = 0.0
+  }
+  var first: Int = (top / pitch).toInt() - lv.overscanRows
+  if first < 0 {
+    first = 0
+  }
+  if first > count {
+    first = count
+  }
+  ret first
+}
+
+# How many rows to keep live: the viewport count plus a buffer each side (and
+# one extra for a partially-visible bottom row).
+func listViewWindowCount(lv: view ListView) ret Int {
+  ret lv.visibleItemCount + lv.overscanRows * 2 + 1
+}
+
+# One ListView entity: reconcile its pooled row window to the current scroll.
+func listViewSyncEntity(world: mod UiWorld, entity: view EntityId) {
+  unsafe {
+    let lv: ListView = componentGet(this: world.listViews, entity: entity)
+    var scrollY: Float = 0.0
+    if componentHas(this: world.scrollStates, entity: entity) {
+      scrollY = componentGet(this: world.scrollStates, entity: entity).y
+    }
+    var count: Int = 0
+    if componentHas(this: world.listViewDatas, entity: entity) {
+      let data: ListViewData = componentGet(this: world.listViewDatas, entity: entity)
+      count = data.rows.length
+    }
+
+    let first: Int = listViewFirstRow(lv: lv, scrollY: scrollY, count: count)
+    let windowCount: Int = listViewWindowCount(lv: lv)
+    var last: Int = first + windowCount - 1
+    if last > count - 1 {
+      last = count - 1
+    }
+    var target: Int = 0
+    if last >= first {
+      target = last - first + 1
+    }
+
+    let distinct: List(String) = listViewDistinctNodeIds(lv: lv)
+
+    # Snapshot the current pool (the ListView's row-root children).
+    let pool: List(EntityId) = List.create(EntityId, cap: windowCount + 2)
+    if componentHas(this: world.childrens, entity: entity) {
+      let ch: view Children => componentView(this: world.childrens, entity: entity)
+      var i: Int = 0
+      loop i < ch.ids.length {
+        pool.add(value: rae_ext_rae_buf_get(buf: ch.ids.data, index: i))
+        i = i + 1
+      }
+    }
+
+    # Shrink: destroy surplus rows from the tail.
+    var poolCount: Int = pool.length
+    loop poolCount > target {
+      let victim: EntityId = rae_ext_rae_buf_get(buf: pool.data, index: poolCount - 1)
+      destroyEntitySubtree(world: world, root: victim)
+      poolCount = poolCount - 1
+    }
+    # Grow: build fresh rows and parent them under the ListView.
+    loop poolCount < target {
+      let rowRoot: EntityId = listViewBuildRow(world: world, lv: lv, distinct: distinct)
+      setParent(
+        parents: world.parents
+        childrens: world.childrens
+        child: rowRoot
+        parent: entity
+      )
+      poolCount = poolCount + 1
+    }
+
+    # Re-snapshot the pool (post grow/shrink) in stable child order, then
+    # re-point each slot at its data row.
+    let rows2: List(EntityId) = List.create(EntityId, cap: target)
+    if componentHas(this: world.childrens, entity: entity) {
+      let ch: view Children => componentView(this: world.childrens, entity: entity)
+      var i: Int = 0
+      loop i < ch.ids.length {
+        rows2.add(value: rae_ext_rae_buf_get(buf: ch.ids.data, index: i))
+        i = i + 1
+      }
+    }
+    if count is 0 {
+      ret
+    }
+    let data: ListViewData = componentGet(this: world.listViewDatas, entity: entity)
+    let pitch: Float = lv.itemHeight + lv.itemGap
+    var s: Int = 0
+    loop s < target and s < rows2.length {
+      let dataIdx: Int = first + s
+      let row: ListViewRow = rae_ext_rae_buf_get(buf: data.rows.data, index: dataIdx)
+      let rowRoot: EntityId = rae_ext_rae_buf_get(buf: rows2.data, index: s)
+      let topY: Float = dataIdx.toFloat() * pitch + scrollY
+      listViewApplyRow(
+        world: world
+        rowRoot: rowRoot
+        lv: lv
+        distinct: distinct
+        row: row
+        topY: topY
+      )
+      s = s + 1
+    }
+  }
+}
+
+# Virtualise every ListView in the world (#945). Run after input/scroll,
+# before layout, so the current window's rows are laid out this frame.
+func listViewSystem(world: mod UiWorld) pub {
+  unsafe {
+    let n: Int = componentCount(this: world.listViews)
+    # Collect entity ids first: syncing mutates childrens/entities, which must
+    # not alias the listViews table iteration.
+    let entities: List(EntityId) = List.create(EntityId, cap: n)
+    var i: Int = 0
+    loop i < n {
+      entities.add(value: componentEntityAt(this: world.listViews, i: i))
+      i = i + 1
+    }
+    var e: Int = 0
+    loop e < entities.length {
+      let entity: EntityId = rae_ext_rae_buf_get(buf: entities.data, index: e)
+      listViewSyncEntity(world: world, entity: entity)
+      e = e + 1
+    }
+  }
+}
