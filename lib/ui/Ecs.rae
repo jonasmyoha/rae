@@ -5,12 +5,22 @@ import ui/Theme
 open ecs/Entity
 open ecs/ComponentTable
 open ecs/Queue
+open ecs/Event
 open ecs/World
 open ecs/Hierarchy
 open ecs/hierarchySystem/HierarchySystem
 # Only raylib-free MSDF data types; paint code stays out of UiWorld.
 import ui/MsdfState
 open collections/StringMap
+
+# One semantic UI action produced by the input system when a click resolves to
+# an OnClick's actionId (#943). Drained by the app's UI dispatch through the
+# `uiActions` EventQueue resource on UiWorld — replaces the old hand-rolled
+# `UiInput.events` list.
+type UiAction {
+  entity: EntityId
+  actionId: String
+}
 
 # ----- UiWorld -----
 
@@ -161,6 +171,13 @@ type UiWorld {
   # owned theme (loadUiAssets' Gpu2dUi, or an AppState field) as it builds a world.
   # A RUNTIME resource, not a per-entity component and never serialized.
   theme: UiTheme
+
+  # #943: this frame's UI action events (a click resolved to an OnClick actionId).
+  # The input system PRODUCES into it (eventSend) and the app's UI dispatch DRAINS
+  # it (eventCount/eventAt) in schedule order; frameAdvance at the top of
+  # updateUiInput recycles it. A TRANSIENT runtime resource (an EventQueue, not a
+  # ComponentTable), so the serialize / clear / destroy field loops skip it.
+  uiActions: EventQueue(UiAction)
 }
 
 func createUiWorld() ret UiWorld {
@@ -248,6 +265,7 @@ func createUiWorld() ret UiWorld {
     layoutH: 1300.0
     hierarchyOrder: createHierarchyOrder()
     theme: createUiTheme()
+    uiActions: createEventQueue(UiAction)
   }
 }
 

@@ -24,6 +24,7 @@
 import Gpu2d
 open SdfText
 open ui/Ecs
+open ecs/Event
 open ui/Components
 open ui/Registry
 open ui/inputSystem/InputSystem
@@ -368,33 +369,29 @@ func nodeRectH(world: view UiWorld, nodeId: view String) ret Float {
 # themselves: a List of structs needs rae_ext_rae_buf_get rather than
 # .at() (see the note in docs/ownership-model.md), and that is exactly
 # the kind of detail that gets copied wrong.
-func uiActionCount(input: view UiInput) ret Int {
-  ret input.events.length
+func uiActionCount(world: view UiWorld) ret Int {
+  ret eventCount(this: world.uiActions)
 }
 
-func uiActionAt(input: view UiInput, index: view Int) ret String {
-  unsafe {
-    if index < 0 or index >= input.events.length {
-      ret ""
-    }
-    let event: UiActionEvent = rae_ext_rae_buf_get(buf: input.events.data, index: index)
-    ret "{event.actionId}"
+func uiActionAt(world: view UiWorld, index: view Int) ret String {
+  if index < 0 or index >= eventCount(this: world.uiActions) {
+    ret ""
   }
+  let event: UiAction = eventAt(this: world.uiActions, i: index)
+  ret "{event.actionId}"
 }
 
 # True when `actionId` fired this frame. The common case is a handful of
 # buttons, so a scan per button is cheaper than building a set — and it
 # reads as a list of things the app responds to, which is the point.
-func uiActionFired(input: view UiInput, actionId: view String) ret Bool {
-  unsafe {
-    var i: Int = 0
-    loop i < input.events.length {
-      let event: UiActionEvent = rae_ext_rae_buf_get(buf: input.events.data, index: i)
-      if event.actionId is actionId {
-        ret true
-      }
-      i = i + 1
+func uiActionFired(world: view UiWorld, actionId: view String) ret Bool {
+  var i: Int = 0
+  loop i < eventCount(this: world.uiActions) {
+    let event: UiAction = eventAt(this: world.uiActions, i: i)
+    if event.actionId is actionId {
+      ret true
     }
-    ret false
+    i = i + 1
   }
+  ret false
 }

@@ -339,10 +339,10 @@ func setPanelButtonOn(
 # The id of the button whose action fired this frame, or "" for none.
 # Callers switch on the returned id rather than on action strings, so a
 # panel can be re-labelled or re-ordered without touching its handler.
-func panelClickedId(panel: view ControlPanel, input: view UiInput) pub ret String {
+func panelClickedId(panel: view ControlPanel, world: view UiWorld) pub ret String {
   var i: Int = 0
   loop i < panel.ids.length {
-    if uiActionFired(input: input, actionId: panelStringAt(values: panel.actionIds, index: i)) {
+    if uiActionFired(world: world, actionId: panelStringAt(values: panel.actionIds, index: i)) {
       ret "{panelStringAt(values: panel.ids, index: i)}"
     }
     i = i + 1

@@ -8,6 +8,7 @@ open ui/Layer
 import Gpu2d
 open ecs/Entity
 open ecs/ComponentTable
+open ecs/Event
 
 type UiPointerState {
   x: Float
@@ -17,16 +18,13 @@ type UiPointerState {
   released: Bool
 }
 
-type UiActionEvent {
-  entity: EntityId
-  actionId: String
-}
-
+# UI action events are no longer a list on UiInput (#943): they live in the
+# `uiActions` EventQueue resource on UiWorld — produced here, drained by the
+# app's UI dispatch. UiInput now carries only pointer + hover/press tracking.
 type UiInput {
   pointer: UiPointerState
   hoveredEntity: EntityId
   pressedEntity: EntityId
-  events: List(UiActionEvent)
 }
 
 func createUiInput() pub ret UiInput {
@@ -40,7 +38,6 @@ func createUiInput() pub ret UiInput {
     }
     hoveredEntity: noEntity()
     pressedEntity: noEntity()
-    events: List.create(UiActionEvent, cap: 8)
   }
 }
 
@@ -151,13 +148,6 @@ func uiHitTest(world: view UiWorld, x: view Float, y: view Float) pub ret Entity
   }
 }
 
-func clearUiActions(input: mod UiInput) {
-  let events: mod List(UiActionEvent) => input.events
-  loop events.length > 0 {
-    events.remove(index: events.length - 1)
-  }
-}
-
 # #729: per-entity pointer state lives in `Interaction` components. At most two
 # entities carry one at a time (the hovered one and the pressed one), so the whole
 # table is kept in step by clearing the two from LAST frame and marking the two for
@@ -211,7 +201,9 @@ func entityPressed(world: view UiWorld, entity: view EntityId) pub ret Bool {
 }
 
 func updateUiInput(input: mod UiInput, world: mod UiWorld) pub {
-  clearUiActions(input: input)
+  # Recycle last frame's action channel: frameAdvance swaps in the empty spare so
+  # this frame's input produces into a clean queue (the old clearUiActions).
+  frameAdvance(this: world.uiActions)
   # Clear last frame's per-entity marks before recomputing (previous hovered +
   # pressed are the only two that can carry an Interaction).
   clearInteraction(world: world, entity: input.hoveredEntity)
@@ -236,9 +228,10 @@ func updateUiInput(input: mod UiInput, world: mod UiWorld) pub {
     if isNone(this: input.hoveredEntity) is false {
       if input.hoveredEntity is input.pressedEntity {
         let click: OnClick = componentGet(this: world.onClicks, entity: input.hoveredEntity)
-        let event: UiActionEvent = { entity: input.hoveredEntity, actionId: click.actionId }
-        let events: mod List(UiActionEvent) => input.events
-        events.add(value: event)
+        eventSend(
+          this: world.uiActions
+          value: UiAction { entity: input.hoveredEntity, actionId: click.actionId }
+        )
       }
     }
     input.pressedEntity = noEntity()
@@ -263,8 +256,8 @@ func updateUiInput(input: mod UiInput, world: mod UiWorld) pub {
 # turn into a click. Used when an overlay drawn OUTSIDE this world took the
 # press — the debug overlay sits over the side panel in 110 and 113, and without
 # this the same click would work the button underneath it too.
-func suppressUiPress(input: mod UiInput) {
-  clearUiActions(input: input)
+func suppressUiPress(input: mod UiInput, world: mod UiWorld) {
+  eventClear(this: world.uiActions)
   input.pressedEntity = noEntity()
 }
 
