@@ -1,0 +1,197 @@
+open Channel
+open sys/Spotify
+open ui/EventLoop
+
+# Background artwork downloads as Rae workers (#950, docs/parallelism-first-plan.md
+# §5). `Spotify.fetchArtwork` blocks for the whole curl download, so each
+# fetch is `spawn`'d on its own thread and reports back on ONE result
+# channel the app drains once per frame. This replaces the runtime's C job
+# table (`fetchArtworkAsync` + `fetchArtworkStatus`, one detached pthread per
+# download polled by path) with the same observable protocol, in app code:
+#
+#   artworkFetchStart(queue, url, outPath)  -> starts (or dedupes) a fetch
+#   artworkFetchDrain(queue)                -> once per frame: settle results
+#   artworkFetchStatus(queue, outPath)      -> 0 pending/unknown, 1 fetched,
+#                                              2 failed (terminal reads clear
+#                                              the slot, like the C table did)
+#
+# `Channel(T)` carries Int payloads only, so a result is encoded as
+# `serial * 2 + okBit`: the serial names the job, the low bit the outcome.
+# A worker calls `wake()` after posting so an idle event loop repaints the
+# arrived thumbnail at once instead of on its next timeout tick.
+#
+# Two index-aligned lists hold the in-flight jobs and their Tasks (a Task
+# inside a struct is not cascade-dropped, so it is kept beside the job and
+# joined explicitly when its result lands); finished jobs move to a third
+# list that only carries the status until the loader reads it.
+const artworkFetchMaxInFlight: Int = 64
+
+const artworkStatusPending: Int = 0
+
+const artworkStatusFetched: Int = 1
+
+const artworkStatusFailed: Int = 2
+
+type ArtworkFetchJob {
+  serial: Int
+  outPath: String
+  status: Int
+}
+
+type ArtworkFetchQueue {
+  inFlight: List(ArtworkFetchJob)
+  # `tasks[i]` is the worker of `inFlight[i]`.
+  tasks: List(Task(Int))
+  finished: List(ArtworkFetchJob)
+  results: Channel(Int)
+  nextSerial: Int
+}
+
+func createArtworkFetchQueue() ret ArtworkFetchQueue {
+  ret ArtworkFetchQueue {
+    inFlight: {}
+    tasks: {}
+    finished: {}
+    results: createChannel(Int)
+    nextSerial: 1
+  }
+}
+
+# The worker body: one blocking curl download on its own thread, then the
+# encoded result on the shared channel. `own` Strings: spawn deep-copies its
+# arguments, so the worker holds its own url/path for the whole download.
+func artworkFetchWorker(
+  serial: copy Int
+  url: own String
+  outPath: own String
+  results: own Channel(Int)
+) ret Int {
+  let ok: Bool = Spotify.fetchArtwork(url: url, outPath: outPath)
+  var okBit: Int = 0
+  if ok {
+    okBit = 1
+  }
+  channelSend(this: results, value: serial * 2 + okBit)
+  wake()
+  ret okBit
+}
+
+func artworkFetchIndexOf(jobs: view List(ArtworkFetchJob), outPath: view String) ret Int {
+  var i: Int = 0
+  loop i < jobs.length() {
+    if let job: view ArtworkFetchJob => jobs.viewAt(index: i) {
+      if job.outPath is outPath {
+        ret i
+      }
+    }
+    i = i + 1
+  }
+  ret 0 - 1
+}
+
+# Start a background download of `url` into `outPath`. Returns true when the
+# fetch is running or already known (in flight or finished-unread); false
+# when the in-flight cap is reached — retry on a later frame.
+func artworkFetchStart(
+  queue: mod ArtworkFetchQueue
+  url: view String
+  outPath: view String
+) ret Bool {
+  if url.length() is 0 or outPath.length() is 0 {
+    ret false
+  }
+  if artworkFetchIndexOf(jobs: queue.inFlight, outPath: outPath) >= 0 {
+    ret true
+  }
+  if artworkFetchIndexOf(jobs: queue.finished, outPath: outPath) >= 0 {
+    ret true
+  }
+  if queue.inFlight.length() >= artworkFetchMaxInFlight {
+    ret false
+  }
+  let serial: Int = queue.nextSerial
+  queue.nextSerial = serial + 1
+  let urlForWorker: String = "{url}"
+  let pathForWorker: String = "{outPath}"
+  queue.inFlight.add(
+    value: ArtworkFetchJob { serial: serial, outPath: "{outPath}", status: artworkStatusPending }
+  )
+  queue.tasks.add(value: spawn artworkFetchWorker(
+    serial: serial
+    url: urlForWorker
+    outPath: pathForWorker
+    results: queue.results
+  ))
+  ret true
+}
+
+# Settle every result that arrived since the last call: join the worker
+# (it has already finished, so the join returns at once) and move its job to
+# `finished` with the outcome. Call once per frame before the loader scans.
+func artworkFetchDrain(queue: mod ArtworkFetchQueue) {
+  loop pending(this: queue.results) > 0 {
+    let message: Int = receive(this: queue.results)
+    let serial: Int = message / 2
+    let okBit: Int = message - serial * 2
+    var index: Int = 0 - 1
+    var i: Int = 0
+    loop i < queue.inFlight.length() and index < 0 {
+      if let job: view ArtworkFetchJob => queue.inFlight.viewAt(index: i) {
+        if job.serial is serial {
+          index = i
+        }
+      }
+      i = i + 1
+    }
+    if index >= 0 {
+      # The copied Task handle is joined by get() and freed when the copy
+      # drops; the list slot is then removed without touching it again.
+      if let task: Task(Int) = queue.tasks.copyAt(index: index) {
+        let workerOk: Int = task.get()
+      }
+      queue.tasks.removeAt(index: index)
+      var status: Int = artworkStatusFailed
+      if okBit is 1 {
+        status = artworkStatusFetched
+      }
+      if let job: view ArtworkFetchJob => queue.inFlight.viewAt(index: index) {
+        queue.finished.add(
+          value: ArtworkFetchJob { serial: job.serial, outPath: "{job.outPath}", status: status }
+        )
+      }
+      queue.inFlight.removeAt(index: index)
+    }
+  }
+}
+
+# Outcome for `outPath`: pending (0) while in flight or unknown; fetched (1)
+# or failed (2) once — a terminal read clears the record, so the caller
+# acts on it exactly once (loads the texture / marks the path failed).
+func artworkFetchStatus(queue: mod ArtworkFetchQueue, outPath: view String) ret Int {
+  let done: Int = artworkFetchIndexOf(jobs: queue.finished, outPath: outPath)
+  if done >= 0 {
+    var status: Int = artworkStatusPending
+    if let job: view ArtworkFetchJob => queue.finished.viewAt(index: done) {
+      status = job.status
+    }
+    queue.finished.removeAt(index: done)
+    ret status
+  }
+  ret artworkStatusPending
+}
+
+# Teardown: join every worker still running (each is one bounded curl call)
+# and release the channel. Afterwards the queue must not be used.
+func shutdownArtworkFetchQueue(queue: mod ArtworkFetchQueue) {
+  var i: Int = 0
+  loop i < queue.tasks.length() {
+    if let task: Task(Int) = queue.tasks.copyAt(index: i) {
+      let workerOk: Int = task.get()
+    }
+    i = i + 1
+  }
+  queue.tasks.clear()
+  queue.inFlight.clear()
+  queue.finished.clear()
+  freeChannel(this: queue.results)
+}

@@ -83,5 +83,10 @@
  * the gpu2d/gpu3d stubs above deliberately do not. */
 #if !defined(RAE_HAS_WEBGPU) || !defined(RAE_HAS_SDL3)
 #include "runtime_gbuffer_stubs.c"
+/* The event-loop waker (#950, lib/ui/EventLoop.rae `wake`) is meaningful to
+ * any program with a spawn'd worker, so it exists in every build: the SDL3
+ * window (runtime_gpu2d_platform.c) posts a user event; without one there is
+ * no wait to interrupt, so it is a no-op. */
+void rae_ext_EventLoop_wake(void) {}
 #endif
 #include "runtime_spotify_apple.c"
