@@ -229,26 +229,3 @@ func mountSearchPage(world: mod UiWorld, viewport: view Viewport) pub ret Entity
 
   ret root
 }
-
-func buildSearchWorld(
-  scenes: view AlbumScenes
-  playback: view PlaybackState
-  state: view AppState
-  reg: view TextureRegistry
-  viewport: view Viewport
-) pub ret UiWorld {
-  let world: UiWorld = create()
-  seedWorldThemeFrom(world: world, src: state.theme)  # #764: theme from AppState
-  applyViewportExtent(world: world, viewport: viewport)
-  let page: EntityId = mountSearchPage(world: world, viewport: viewport)
-  let dock: EntityId = mountBottomDockOverlay(
-    world: world
-    activeTab: state.tab
-    scenes: scenes
-    playback: playback
-    state: state
-    reg: reg
-  )
-  let back: EntityId = mountBackButtonOverlay(world: world, state: state)
-  ret world
-}

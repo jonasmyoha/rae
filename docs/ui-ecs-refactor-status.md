@@ -110,7 +110,18 @@ Ordered by leverage.
    `pageIdForScreen`, `scrollBoundsForScreen`, …) — the exact query-by-tag
    pattern the architecture doc removed from 112's animation. Screens become
    page entities with a `ScreenPage` component + tags; the router becomes a
-   table.
+   table. **LANDED (#948):** all 23 `is Screen.` tests in `ScreenRouter.rae`
+   are gone. `createScreenPages()` is the table — one `ScreenPage` row per
+   screen (page id + scroll policy as data, the floor as a `ScrollFloor`
+   *kind*), cached once on the App so the per-frame `scrollBoundsForScreen`
+   walks a `view` of it with zero allocation. `pageIdForScreen` is a row
+   lookup; `buildAppWorldFor(visible)` toggles `Active` by walking the rows and
+   resolving each page entity through its existing `PageRoot{id}` tag; and
+   `buildScreenWorld` is now just "the persistent world with that screen
+   visible", which retired the seven per-screen `build*World` builders (dead
+   once the ladder choosing between them went). The `Screen` enum stays only
+   where an enum belongs: the persistence ordinal map
+   (`screenToInt`/`intToScreen`) and the nav-tab → screen mapping.
 4. **Hand-rolled frame sequencing** (`runFrameInputDispatch` →
    `runFrameLayoutTransform` → `runFrameAnimation` → render) → `Schedule`
    entries with `shouldRun`.
