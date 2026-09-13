@@ -5,6 +5,7 @@ open ui/Layer
 # Coordinates are in logical points, matching `WorldTransform2D`.
 open ecs/Entity
 open ecs/ComponentTable
+open ecs/Event
 open ui/Transform
 
 let inputNoEntity: EntityId = { index: 0 - 1, generation: 0 }
@@ -17,15 +18,12 @@ type PointerState {
   released: Bool
 }
 
-type ActionEvent {
-  entity: EntityId
-  actionId: String
-}
-
+# Action events use lib/ui's shared `UiAction` (#943) drained through the
+# lib/ecs `EventQueue` primitive — 106 no longer defines its own ActionEvent.
 type InputSystem {
   pointer: PointerState
   pressedEntity: EntityId
-  events: List(ActionEvent)
+  uiActions: EventQueue(UiAction)
 }
 
 func createInputSystem() ret InputSystem {
@@ -38,7 +36,7 @@ func createInputSystem() ret InputSystem {
       released: false
     }
     pressedEntity: noEntity()
-    events: List.create(ActionEvent, cap: 8)
+    uiActions: createEventQueue(UiAction)
   }
 }
 
@@ -138,21 +136,10 @@ func hitTest(world: view UiWorld, x: view Float, y: view Float) ret EntityId {
   }
 }
 
-func appendActionEvent(input: mod InputSystem, entity: view EntityId, actionId: own String) {
-  let events: mod List(ActionEvent) => input.events
-  let ev: ActionEvent = { entity: entity, actionId: actionId }
-  events.add(value: ev)
-}
-
-func clearActionEvents(input: mod InputSystem) {
-  let events: mod List(ActionEvent) => input.events
-  loop events.length > 0 {
-    events.remove(index: events.length - 1)
-  }
-}
-
 func updateInputSystem(input: mod InputSystem, world: view UiWorld, viewport: view Viewport) {
-  clearActionEvents(input: input)
+  # Recycle last frame's action channel (double-buffered), replacing the old
+  # clearActionEvents: this frame's clicks produce into a clean queue.
+  frameAdvance(this: input.uiActions)
 
   let mx: Float = viewportPointerX(viewport: viewport)
   let my: Float = viewportPointerY(viewport: viewport)
@@ -189,7 +176,7 @@ func updateInputSystem(input: mod InputSystem, world: view UiWorld, viewport: vi
         if componentHas(this: world.onClicks, entity: hit) {
           let oc: view OnClick => componentView(this: world.onClicks, entity: hit)
           log("[input] fire {oc.actionId} on entity {hit.index}")
-          appendActionEvent(input: input, entity: hit, actionId: oc.actionId)
+          eventSend(this: input.uiActions, value: UiAction { entity: hit, actionId: oc.actionId })
         } else {
           log("[input] release matched press but entity has no OnClick")
         }
