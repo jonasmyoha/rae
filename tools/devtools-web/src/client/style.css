@@ -1598,11 +1598,17 @@ body { display: flex; flex-direction: column; }
 .compiler-pane { display: none; flex: 1 1 auto; min-height: 0; flex-direction: column; gap: 0.5rem; }
 .compiler-pane.is-active { display: flex; }
 .compiler-pane .terminal-wrapper { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; padding: 0.9rem 1rem; }
-.compiler-pane .terminal { flex: 1 1 auto; min-height: 0; max-height: none; overflow-y: auto; }
+/* A terminal must scroll INSIDE its pane, never stretch the page.
+   `flex: 1 1 auto` only bounds the pane when every ancestor is itself bounded,
+   and body is `min-height: 100vh` — a floor, not a ceiling — so the chain was
+   content-driven: each appended line made the page taller and the pane never
+   scrolled. The vh ceiling is the guarantee the flex chain cannot give, and it
+   replaces the old fixed 200-400px band without bringing back its problem. */
+.compiler-pane .terminal { flex: 1 1 auto; min-height: 0; max-height: 62vh; overflow-y: auto; }
 .compiler-pane .terminal-actions { margin: 0; flex: 0 0 auto; }
 .compiler-pane .test-errors-summary { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 0.6rem; margin-bottom: 0; padding: 0.9rem 1rem; }
 .compiler-pane .test-errors-summary[hidden] { display: none; }
-.compiler-pane .terminal--mini { flex: 1 1 auto; min-height: 0; max-height: none; overflow-y: auto; }
+.compiler-pane .terminal--mini { flex: 1 1 auto; min-height: 0; max-height: 55vh; overflow-y: auto; }
 .compiler-results-empty { margin: 0; padding: 1rem 0.25rem; color: var(--text-muted); font-size: 0.9rem; }
 .test-errors-summary:not([hidden]) ~ .compiler-results-empty { display: none; }
 
