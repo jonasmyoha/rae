@@ -140,7 +140,25 @@ Ordered by leverage.
 5. `ActionEvent` → `EventQueue`; `UiRefreshCache` revisions → `changedSince`.
 6. History windowing → `lib/ui` `ListView` (item 2.6).
 7. Background I/O (Spotify poller, artwork curl) → `spawn` + `Channel` + an
-   event-loop `wake()` (parallelism plan §5).
+   event-loop `wake()` (parallelism plan §5). **LANDED (#950):** the runtime's
+   two C schedulers are gone — the osascript poll pthread (`startPoller`/
+   `stopPoller`) and the detached-pthread curl job table (`fetchArtworkAsync`/
+   `fetchArtworkStatus`); what stays in C is the ABI (`refresh`, the
+   mutex-guarded cache getters, the blocking atomic `fetchArtwork`). The
+   scheduling is Rae app code: `spotifySystem/SpotifyPoller.rae` spawns one
+   worker ("refresh, post a tick, `wake()`, sleep in stop-checked slices"; a
+   stop channel + join at teardown since there is no `detach` yet) and the
+   frame's `pollSpotify` runs only on a tick; `assetSystem/ArtworkFetch.rae`
+   spawns one worker per download posting `serial * 2 + okBit` on one
+   `Channel(Int)` (payloads are Int-only until Channel gains boxing) that
+   `artworkFetchDrain` settles once per frame, and the History loader reads
+   `artworkFetchStatus` exactly as it read the C table. `lib/ui/EventLoop.wake()`
+   is the new thread-safe waker (`rae_ext_EventLoop_wake`: SDL_PushEvent of a
+   user event; a no-op in windowless builds), so an idle `waitEvents` returns
+   the moment a worker posts instead of on its next timeout. The blocking
+   `refetchHistoryArt`/`refetchHistoryArtChunk` passes were dead and are
+   deleted; `SpotifyView`'s on-track-change current-cover fetch still blocks
+   the UI thread once per track (follow-up).
 8. `DESIGN.md` is raylib-era (texture handles, coordinate space, Live target
    as open questions) — refresh or retire.
 

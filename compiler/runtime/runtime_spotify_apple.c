@@ -109,18 +109,15 @@ typedef struct {
 } RaeSpotifyCache;
 static RaeSpotifyCache g_spotify_cache = {0};
 
-/* Spotify poll thread (#279). `rae_ext_sys_Spotify_refresh` shells out to
- * `osascript` (~tens of ms) — running it on the UI thread every second
- * spiked the frame rate. A background pthread now owns the refresh; the
- * cache is guarded by `g_spotify_mu` and the (cheap) getters read it under
- * the lock. osascript here is a fork/exec subprocess, so it is safe to run
- * off the main thread (no in-process Cocoa/AppleScript, no main-thread
- * requirement). */
+/* `rae_ext_sys_Spotify_refresh` shells out to `osascript` (~tens of ms), so
+ * the app runs it from a Rae `spawn`'d worker (#950 — the poll SCHEDULING
+ * used to be a pthread in here, #279; it is Rae code now, see
+ * examples/106_mobile_ui/spotifySystem/SpotifyPoller.rae). What stays in C
+ * is the ABI: this cache, guarded by `g_spotify_mu` because the worker
+ * writes it while the UI thread's (cheap) getters read it under the lock.
+ * osascript is a fork/exec subprocess, so it is safe to run off the main
+ * thread (no in-process Cocoa/AppleScript, no main-thread requirement). */
 static pthread_mutex_t g_spotify_mu = PTHREAD_MUTEX_INITIALIZER;
-static pthread_t g_spotify_poll_thread;
-static int g_spotify_poll_started = 0;
-static volatile int g_spotify_poll_stop = 0;
-static int g_spotify_poll_interval_ms = 1000;
 
 static void rae_spotify_cache_set_field(char** slot, const char* src, size_t len) {
     free(*slot);
@@ -306,7 +303,7 @@ void rae_ext_sys_Spotify_refresh(void) {
         NULL
     };
     char buf[4096];
-    /* Slow osascript shell-out runs OUTSIDE the lock (poll thread) so it
+    /* Slow osascript shell-out runs OUTSIDE the lock (refresh worker) so it
      * never blocks a UI-thread getter; only the fast parse below holds it. */
     long n = rae_osascript_capture(lines, buf, sizeof(buf));
     pthread_mutex_lock(&g_spotify_mu);
@@ -356,37 +353,7 @@ void rae_ext_sys_Spotify_refresh(void) {
     pthread_mutex_unlock(&g_spotify_mu);
 }
 
-/* Poll thread body: refresh the cache on an interval until asked to stop.
- * Sleeps in small slices so stopPoller returns promptly. */
-static void* rae_spotify_poll_thread_fn(void* arg) {
-    (void)arg;
-    while (!g_spotify_poll_stop) {
-        rae_ext_sys_Spotify_refresh();
-        int slept = 0;
-        while (slept < g_spotify_poll_interval_ms && !g_spotify_poll_stop) {
-            usleep(50 * 1000);
-            slept += 50;
-        }
-    }
-    return NULL;
-}
-
-void rae_ext_sys_Spotify_startPoller(int64_t interval_ms) {
-    if (g_spotify_poll_started) return;
-    g_spotify_poll_started = 1;
-    g_spotify_poll_stop = 0;
-    g_spotify_poll_interval_ms = (interval_ms > 0) ? (int)interval_ms : 1000;
-    pthread_create(&g_spotify_poll_thread, NULL, rae_spotify_poll_thread_fn, NULL);
-}
-
-void rae_ext_sys_Spotify_stopPoller(void) {
-    if (!g_spotify_poll_started) return;
-    g_spotify_poll_stop = 1;
-    pthread_join(g_spotify_poll_thread, NULL);
-    g_spotify_poll_started = 0;
-}
-
-/* Getters read the cache under the lock (the poll thread writes it). Each
+/* Getters read the cache under the lock (the refresh worker writes it). Each
  * field read is race-free; a rare cross-field tear during a track change at
  * the exact poll instant is cosmetic and self-corrects on the next frame. */
 static rae_String rae_spotify_read_field(char* const* slot) {
@@ -476,104 +443,6 @@ rae_Bool rae_ext_sys_Spotify_fetchArtwork(rae_String url, rae_String outPath) {
     return ok ? true : false;
 }
 
-typedef struct {
-    char* url;
-    char* out;
-    int status; /* 0=pending, 1=success, 2=failed */
-    pthread_t thread;
-} RaeSpotifyArtworkJob;
-
-#define RAE_SPOTIFY_ART_JOBS 64
-static RaeSpotifyArtworkJob g_spotify_art_jobs[RAE_SPOTIFY_ART_JOBS];
-static pthread_mutex_t g_spotify_art_mu = PTHREAD_MUTEX_INITIALIZER;
-
-static char* rae_strndup_bytes(const uint8_t* data, int64_t len) {
-    if (!data || len <= 0) return NULL;
-    char* out = (char*)malloc((size_t)len + 1);
-    if (!out) return NULL;
-    memcpy(out, data, (size_t)len);
-    out[len] = '\0';
-    return out;
-}
-
-static void* rae_spotify_art_worker(void* arg) {
-    RaeSpotifyArtworkJob* job = (RaeSpotifyArtworkJob*)arg;
-    int ok = rae_spotify_fetch_artwork_atomic(job->url, job->out);
-    pthread_mutex_lock(&g_spotify_art_mu);
-    job->status = ok ? 1 : 2;
-    pthread_mutex_unlock(&g_spotify_art_mu);
-    return NULL;
-}
-
-rae_Bool rae_ext_sys_Spotify_fetchArtworkAsync(rae_String url, rae_String outPath) {
-    if (!url.data || url.len == 0 || !outPath.data || outPath.len == 0) return false;
-    char* url_c = rae_strndup_bytes(url.data, url.len);
-    char* out_c = rae_strndup_bytes(outPath.data, outPath.len);
-    if (!url_c || !out_c) { free(url_c); free(out_c); return false; }
-
-    pthread_mutex_lock(&g_spotify_art_mu);
-    int free_idx = -1;
-    for (int i = 0; i < RAE_SPOTIFY_ART_JOBS; i++) {
-        if (g_spotify_art_jobs[i].out) {
-            if (strcmp(g_spotify_art_jobs[i].out, out_c) == 0) {
-                pthread_mutex_unlock(&g_spotify_art_mu);
-                free(url_c);
-                free(out_c);
-                return true;
-            }
-        } else if (free_idx < 0) {
-            free_idx = i;
-        }
-    }
-    if (free_idx < 0) {
-        pthread_mutex_unlock(&g_spotify_art_mu);
-        free(url_c);
-        free(out_c);
-        return false;
-    }
-    RaeSpotifyArtworkJob* job = &g_spotify_art_jobs[free_idx];
-    job->url = url_c;
-    job->out = out_c;
-    job->status = 0;
-    if (pthread_create(&job->thread, NULL, rae_spotify_art_worker, job) != 0) {
-        job->url = NULL;
-        job->out = NULL;
-        job->status = 2;
-        pthread_mutex_unlock(&g_spotify_art_mu);
-        free(url_c);
-        free(out_c);
-        return false;
-    }
-    pthread_detach(job->thread);
-    pthread_mutex_unlock(&g_spotify_art_mu);
-    return true;
-}
-
-int64_t rae_ext_sys_Spotify_fetchArtworkStatus(rae_String outPath) {
-    if (!outPath.data || outPath.len == 0) return 0;
-    char* out_c = rae_strndup_bytes(outPath.data, outPath.len);
-    if (!out_c) return 0;
-    int result = 0;
-    pthread_mutex_lock(&g_spotify_art_mu);
-    for (int i = 0; i < RAE_SPOTIFY_ART_JOBS; i++) {
-        RaeSpotifyArtworkJob* job = &g_spotify_art_jobs[i];
-        if (job->out && strcmp(job->out, out_c) == 0) {
-            result = job->status;
-            if (job->status != 0) {
-                free(job->url);
-                free(job->out);
-                job->url = NULL;
-                job->out = NULL;
-                job->status = 0;
-            }
-            break;
-        }
-    }
-    pthread_mutex_unlock(&g_spotify_art_mu);
-    free(out_c);
-    return result;
-}
-
 static void rae_url_encode_append(char* out, size_t* off, size_t cap, const char* s, size_t n) {
     static const char hex[] = "0123456789ABCDEF";
     for (size_t i = 0; i < n && *off + 3 < cap; i++) {
@@ -657,8 +526,6 @@ void rae_ext_sys_Spotify_pause(void)    {}
 void rae_ext_sys_Spotify_next(void)     {}
 void rae_ext_sys_Spotify_previous(void) {}
 void rae_ext_sys_Spotify_refresh(void)  {}
-void rae_ext_sys_Spotify_startPoller(int64_t interval_ms) { (void)interval_ms; }
-void rae_ext_sys_Spotify_stopPoller(void) {}
 rae_String rae_ext_sys_Spotify_state(void)      { return (rae_String){NULL, 0, 0, 0}; }
 rae_String rae_ext_sys_Spotify_trackId(void)    { return (rae_String){NULL, 0, 0, 0}; }
 rae_String rae_ext_sys_Spotify_trackName(void)  { return (rae_String){NULL, 0, 0, 0}; }
@@ -670,8 +537,6 @@ float rae_ext_sys_Spotify_duration(void){ return 0.0; }
 void rae_ext_sys_Spotify_playUri(rae_String uri) { (void)uri; }
 void rae_ext_sys_Spotify_playQuery(rae_String query) { (void)query; }
 rae_Bool rae_ext_sys_Spotify_fetchArtwork(rae_String url, rae_String outPath) { (void)url; (void)outPath; return false; }
-rae_Bool rae_ext_sys_Spotify_fetchArtworkAsync(rae_String url, rae_String outPath) { (void)url; (void)outPath; return false; }
-int64_t rae_ext_sys_Spotify_fetchArtworkStatus(rae_String outPath) { (void)outPath; return 2; }
 rae_String rae_ext_sys_Spotify_itunesSearchArtworkUrl(rae_String term) { (void)term; return (rae_String){NULL, 0, 0, 0}; }
 
 #endif  /* __APPLE__ */
