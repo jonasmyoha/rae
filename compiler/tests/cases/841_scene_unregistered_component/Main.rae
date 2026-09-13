@@ -1,0 +1,39 @@
+import Json
+import String
+import ui/Components
+open ui/Ecs
+import ui/Registry
+open ui/Scene
+open ui/SceneLoader
+open ecs/Entity
+open ecs/ComponentTable
+
+# A well-formed scene whose one node carries `Wibble` — a name that is NOT a
+# known component at all (a typo, or a non-UI component authored into a UI
+# scene). The loader must fail loudly with the "not registered" form, naming the
+# scene, node and component. `\{`/`\}` keep the JSON braces literal.
+func typoScene() ret String {
+  var s: String = ""
+  s = s.concat(other: "\{")
+  s = s.concat(other: "\"type\":\"Scene\",")
+  s = s.concat(other: "\"version\":2,")
+  s = s.concat(other: "\"sceneId\":\"fx-demo\",")
+  s = s.concat(other: "\"root\":\"Root\",")
+  s = s.concat(other: "\"nodes\":\{")
+  s = s.concat(other: "\"Root\":\{")
+  s = s.concat(other: "\"Wibble\":\{\"x\":1\}")
+  s = s.concat(other: "\}")
+  s = s.concat(other: "\}")
+  s = s.concat(other: "\}")
+  ret s
+}
+
+func main() {
+  let scene: Scene = parseScene(source: typoScene())
+  log("scene.ok = {scene.ok}")
+  let world: UiWorld = createUiWorld()
+  log("loading scene with an unregistered component...")
+  let rootEntity: EntityId = loadScene(world: world, scene: scene)
+  # Unreachable: loadScene aborts on the unregistered component (#941).
+  log("unreachable rootEntity = {rootEntity.index}")
+}

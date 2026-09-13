@@ -1,0 +1,40 @@
+import Json
+import String
+import ui/Components
+open ui/Ecs
+import ui/Registry
+open ui/Scene
+open ui/SceneLoader
+open ecs/Entity
+open ecs/ComponentTable
+
+# A well-formed scene whose one node carries `WobbleFx` — a component that IS in
+# the registry vocabulary (registeredComponentNames) but has no deserialiser arm
+# yet. Before #941 the loader swallowed it silently; now it must fail loudly,
+# naming the scene, node and component. `\{`/`\}` keep the JSON braces literal
+# (a bare `{` starts Rae string interpolation).
+func fxScene() ret String {
+  var s: String = ""
+  s = s.concat(other: "\{")
+  s = s.concat(other: "\"type\":\"Scene\",")
+  s = s.concat(other: "\"version\":2,")
+  s = s.concat(other: "\"sceneId\":\"fx-demo\",")
+  s = s.concat(other: "\"root\":\"Root\",")
+  s = s.concat(other: "\"nodes\":\{")
+  s = s.concat(other: "\"Root\":\{")
+  s = s.concat(other: "\"WobbleFx\":\{\"amp\":3\}")
+  s = s.concat(other: "\}")
+  s = s.concat(other: "\}")
+  s = s.concat(other: "\}")
+  ret s
+}
+
+func main() {
+  let scene: Scene = parseScene(source: fxScene())
+  log("scene.ok = {scene.ok}")
+  let world: UiWorld = createUiWorld()
+  log("loading scene with an unsupported component...")
+  let rootEntity: EntityId = loadScene(world: world, scene: scene)
+  # Unreachable: loadScene aborts on the unsupported component (#941).
+  log("unreachable rootEntity = {rootEntity.index}")
+}
