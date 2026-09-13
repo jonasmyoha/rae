@@ -93,7 +93,19 @@ Ordered by leverage.
    plus the loop, as the games did.
 2. **Flat layout, 44 files in one folder.** Move to the folder-per-system
    layout the prototypes settled on (`inputSystem/`, `historySystem/`,
-   `playbackSystem/`, `screenSystem/`, …).
+   `playbackSystem/`, `screenSystem/`, …). **LANDED (#947):** the 53 files
+   are now `inputSystem/` (3), `screenSystem/` (router + views, 15),
+   `historySystem/` (3), `playbackSystem/` (3), `spotifySystem/` (1),
+   `debugSystem/` (4, incl. the stress/screenshot runners), `assetSystem/`
+   (8, loaders + the catalogue/library/playlist data layer), with the entry,
+   `App*`, and the cross-cutting spine (Config, Viewport, WorldHelpers, the
+   frame pipeline/refresh/render-cache glue) at the root. No import churn
+   was needed: the project namespace is flat and recursive, so only the one
+   explicit sibling `open` (`GpuAssetRegistry`) changed path. The split did
+   surface a latent duplicate: `rae_ext_rae_sys_read_file` was re-declared in
+   three files, which the flat root tolerated but the folder-package rule
+   rejects as ambiguous — it and `write_file` now have ONE root declaration in
+   `FileIo.rae`.
 3. **16 `if screen is` ladders** in `ScreenRouter.rae` (`buildScreenWorld`,
    `pageIdForScreen`, `scrollBoundsForScreen`, …) — the exact query-by-tag
    pattern the architecture doc removed from 112's animation. Screens become
