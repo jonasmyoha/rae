@@ -124,12 +124,16 @@ func refreshHistoryViewsIfNeeded(
   scenes: view AlbumScenes
   state: view AppState
   visible: view Screen
-  cachedLen: view Int
+  cachedRevision: view Int
   viewport: view Viewport
 ) pub ret Int {
-  let n: Int = state.playHistory.entries.length
-  if n is cachedLen {
-    ret cachedLen
+  # Observe PlayHistory's §7 revision (bumped on every append) rather than
+  # diffing the List length (#944): both fire on append, but the revision also
+  # catches an append that evicts at cap (length unchanged) and never re-keys
+  # off a stale length.
+  let n: Int = state.playHistory.revision
+  if n is cachedRevision {
+    ret cachedRevision
   }
   if visible is Screen.home {
     unmountPage(world: world, pageId: homePageId)

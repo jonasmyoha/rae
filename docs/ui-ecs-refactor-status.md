@@ -63,7 +63,13 @@ Ordered by leverage.
    `EventQueue(UiAction)` drained by systems in schedule order.
 5. **Observation.** The docs prescribe `changedSince`/`componentModStamp`; the
    UI examples use bespoke revision ints (`historyLen`, `sheetEpoch`,
-   `playbackRevision`). Migrate.
+   `playbackRevision`). Migrate. **RESOLVED (#944):** `changedSince` is for
+   `ComponentTable`; resource/actor state uses §7 revision ints — 106 already
+   does both correctly (`RenderCacheGpu2d` keys off `componentTableGeneration`;
+   `PlaybackState`/`BottomSheetState`/`PlayHistory` are resources observed by
+   §7 revision ints). Tidied the one weak spot: `PlayHistory` now carries a
+   `revision` bumped on append (§7) instead of the observer diffing its List
+   length.
 6. **`ListView` / virtualisation** is a component type with no system; 106
    hand-rolls history windowing per view. A real `listViewSystem` is required
    before any editor/DAW list (tracks, clips, albums).

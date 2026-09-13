@@ -2,11 +2,12 @@ open ui/Ecs
 open GpuAssetRegistry
 
 # The per-frame UI observer state. The playback slice has been carved out
-# into its own per-feature `UiPlaybackSystem` (#267, §5.2); `historyLen` and
+# into its own per-feature `UiPlaybackSystem` (#267, §5.2); `historyRevision` and
 # `sheetEpoch` are the observer caches for the history list + bottom sheet
 # and become their own UI systems in follow-ups.
 type UiRefreshCache {
-  historyLen: Int
+  # Last PlayHistory.revision this observer reacted to (#944, §7 system revision).
+  historyRevision: Int
   uiPlayback: UiPlaybackSystem
   sheetEpoch: Int
 }
@@ -18,12 +19,12 @@ type UiRefreshResult {
 }
 
 func createUiRefreshCache(
-  historyLen: view Int
+  historyRevision: view Int
   playbackRevision: view Int
   sheetEpoch: view Int
 ) pub ret UiRefreshCache {
   ret UiRefreshCache {
-    historyLen: historyLen
+    historyRevision: historyRevision
     uiPlayback: createUiPlaybackSystem(observedRevision: playbackRevision)
     sheetEpoch: sheetEpoch
   }
@@ -39,15 +40,15 @@ func refreshMountedUi(
   viewport: view Viewport
   reg: view TextureRegistry
 ) pub ret UiRefreshResult {
-  let oldHistory: Int = cache.historyLen
+  let oldHistory: Int = cache.historyRevision
   let oldSheet: Int = cache.sheetEpoch
 
-  cache.historyLen = refreshHistoryViewsIfNeeded(
+  cache.historyRevision = refreshHistoryViewsIfNeeded(
     world: world
     scenes: scenes
     state: state
     visible: visible
-    cachedLen: cache.historyLen
+    cachedRevision: cache.historyRevision
     viewport: viewport
   )
   let playbackChanged: Bool = uiPlaybackObserve(
@@ -63,7 +64,7 @@ func refreshMountedUi(
   )
 
   ret UiRefreshResult {
-    historyChanged: cache.historyLen is not oldHistory
+    historyChanged: cache.historyRevision is not oldHistory
     playbackChanged: playbackChanged
     sheetChanged: cache.sheetEpoch is not oldSheet
   }
