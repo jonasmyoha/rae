@@ -179,36 +179,6 @@ func mountNowPlayingPage(
   ret root
 }
 
-func buildNowPlayingWorld(
-  scenes: view AlbumScenes
-  playback: view PlaybackState
-  state: view AppState
-  reg: view TextureRegistry
-  viewport: view Viewport
-) pub ret UiWorld {
-  let world: UiWorld = create()
-  seedWorldThemeFrom(world: world, src: state.theme)  # #764: theme from AppState
-  applyViewportExtent(world: world, viewport: viewport)
-  let page: EntityId = mountNowPlayingPage(
-    world: world
-    scenes: scenes
-    playback: playback
-    state: state
-    reg: reg
-    viewport: viewport
-  )
-  let dock: EntityId = mountBottomDockOverlay(
-    world: world
-    activeTab: state.tab
-    scenes: scenes
-    playback: playback
-    state: state
-    reg: reg
-  )
-  let back: EntityId = mountBackButtonOverlay(world: world, state: state)
-  ret world
-}
-
 # Mini-player mount that applies the play/pause icon, track title,
 # and artist overrides from the current playback + app state. Same
 # shape as `buildSimpleSceneInstance` from scene_mount.rae but with
