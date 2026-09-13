@@ -1,4 +1,5 @@
 open ui/Ecs
+open ecs/Event
 open ecs/Entity
 
 # Per-frame "did anything change?" gate. With the wait-events loop,
@@ -9,7 +10,7 @@ open ecs/Entity
 # Active when ANY of:
 #   - first frame after world rebuild (forceRender)
 #   - tracked visual ComponentTable bumped (cacheDirty)
-#   - input produced an ActionEvent
+#   - input produced a UiAction event
 #   - pressed-entity transition (catches the release edge)
 #   - hero transition is mid-flight
 #   - mouse button is currently held down (catches the release edge
@@ -43,7 +44,7 @@ func decideActive(
     }
   }
   if active is false {
-    if input.events.length > 0 {
+    if eventCount(this: input.uiActions) > 0 {
       active = true
     }
   }
