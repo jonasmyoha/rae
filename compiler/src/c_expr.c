@@ -356,7 +356,6 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
       // Special case: string equality — use rae_ext_rae_str_eq instead of ==
       // (and its negation for `is not`).
       if (expr->as.binary.op == AST_BIN_IS || expr->as.binary.op == AST_BIN_NEQ) {
-          const AstTypeRef* lhs_tr = infer_expr_type_ref(ctx, expr->as.binary.lhs);
           // #758: resolve a generic param (`T` in a `List(T)`/`view T` template)
           // to its concrete type, so `cur is value` with T=String takes the
           // rae_str_eq path instead of falling through to C `==` on two structs.
