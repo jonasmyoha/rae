@@ -21,6 +21,7 @@
 open ui/RegistryOpt
 open ui/ContainerStyle
 import Json
+import Sys
 import ui/Theme
 import ui/Spacing
 import ui/ThemeResolved
@@ -42,7 +43,9 @@ func registeredComponentNames() ret List(String) {
   names.add(value: "Align")
   names.add(value: "Offset")
   names.add(value: "Constraints")
-  names.add(value: "OverflowPolicy")
+  # Authored as `Overflow`; stored in the `overflows` table (OverflowPolicy).
+  names.add(value: "Overflow")
+  names.add(value: "ExtentAnchor")
   # Visual / interaction
   names.add(value: "TransformFx")
   names.add(value: "Sprite")
@@ -136,6 +139,8 @@ func applyComponentByName(
   name: view String
   doc: view JsonDoc
   val: view JsonValue
+  sceneId: view String
+  nodeId: view String
 ) {
   if name is "Rect" {
     componentSet(this: world.rects, entity: entity, data: deserRect(doc: doc, val: val))
@@ -395,6 +400,29 @@ func applyComponentByName(
     )
     ret
   }
+  if name is "Overflow" {
+    # Clip/overflow policy (#115). Authored as `Overflow`, stored in the
+    # `overflows` table as an OverflowPolicy. Was silently dropped before #941,
+    # which meant `"Overflow": { "mode": "clip" }` in a scene never clipped.
+    let modeStr: String = optString(
+      doc: doc
+      container: val
+      key: "mode"
+      fallback: "none"
+    )
+    var mode: OverflowMode = OverflowMode.none
+    let clipStr: String = "clip"
+    let scaleStr: String = "scaleToFitY"
+    if modeStr is clipStr {
+      mode = OverflowMode.clip
+    }
+    if modeStr is scaleStr {
+      mode = OverflowMode.scaleToFitY
+    }
+    let op: OverflowPolicy = { mode: mode }
+    componentSet(this: world.overflows, entity: entity, data: op)
+    ret
+  }
   if name is "Aspect" {
     let ratio: Float = optFloat(
       doc: doc
@@ -422,9 +450,22 @@ func applyComponentByName(
     componentSet(this: world.scaleToFits, entity: entity, data: stf)
     ret
   }
-  # Unknown / not-yet-handled components are ignored. The scene loader
-  # warns about names that aren't in `registeredComponentNames`, so an
-  # unknown name is a typo; one that's listed but not handled here
-  # (e.g. WobbleFx, ListView, DataRequest in #42) just won't produce
-  # ECS state until its phase lands.
+  # No arm matched. A `.raescene` component the loader cannot apply is a
+  # CORRECTNESS BUG, not a thing to swallow (#941): silently dropping it means
+  # the authored scene renders wrong with no signal. Fail loudly, naming the
+  # scene, node and component — like every other Rae error. Two cases, so the
+  # message tells the author which one they hit:
+  #   - the name IS in the registry vocabulary but has no deserialiser arm yet
+  #     (a declared-but-unsupported component, e.g. an effect from #42's later
+  #     phases) -> "registered but not supported by the loader yet";
+  #   - the name is not a known component at all (a typo, or a non-UI component
+  #     like a 3D `Transform3d` in a UI scene) -> "not registered".
+  if isKnownComponent(name: name) {
+    log(
+      "[scene] {sceneId} node {nodeId}: component {name} is registered but not supported by the loader yet"
+    )
+  } else {
+    log("[scene] {sceneId} node {nodeId}: component {name} is not registered")
+  }
+  exit(code: 1)
 }
