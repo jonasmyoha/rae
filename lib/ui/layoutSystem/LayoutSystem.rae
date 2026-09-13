@@ -454,7 +454,11 @@ func layoutSystem(world: mod UiWorld) {
 
 # -----------------------------------------------------------------
 # ifDirty — generation-skip wrapper around layoutSystem
-# (mirrors systemIfDirty). Tracks the generation counter of
+# (mirrors systemIfDirty). SUPERSEDED by the declared schedule (#939,
+# lib/ui/Pipeline.rae: the `layout` entry declares this exact read set and
+# uiShouldRun judges it) — fixture 839 proves the two agree frame by frame.
+# Retained for its fixture (490) and the legacy raylib example until #949
+# moves the mobile-UI example onto the schedule. Tracks the generation counter of
 # every ComponentTable the layout pass READS; when none bumped since
 # the last call, the measure+compute walk is skipped (identical output).
 # The layout OUTPUT tables (measuredSizes/computedRects) are deliberately
