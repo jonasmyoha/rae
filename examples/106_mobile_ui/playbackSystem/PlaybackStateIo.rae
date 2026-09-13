@@ -20,15 +20,6 @@
 # test.
 import Json
 
-# Read whole file. Empty on missing/error — caller treats empty as
-# "no saved state, use defaults".
-func rae_ext_rae_sys_read_file(path: String) unsafe extern ret String
-
-# Write the whole file, replacing any prior content. Returns true
-# on success. We log on failure but don't otherwise propagate the
-# error — a missing-disk save shouldn't crash the app.
-func rae_ext_rae_sys_write_file(path: String, content: String) unsafe extern ret Bool
-
 # ----- save ---------------------------------------------------------
 func boolStr(b: view Bool) ret String {
   if b {
