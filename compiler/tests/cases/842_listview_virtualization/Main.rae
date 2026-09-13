@@ -1,0 +1,169 @@
+# #945: the listViewSystem virtualises a bound list — a windowed, recycled set
+# of live row entities — and the scene registry now deserialises a `ListView`
+# (the #941 reject became a real arm). Two parts, both headless:
+#   A. a scene carrying a `ListView` component loads and deserialises.
+#   B. a 10k-row ListView keeps only a bounded window of entities live, and
+#      recycles them on scroll (the live count is the same at the top and deep
+#      in the list; it shrinks, never grows, near the end).
+import Json
+import String
+import ui/Components
+open ui/Ecs
+import ui/Registry
+open ui/Scene
+open ui/SceneLoader
+open ui/listViewSystem/ListViewSystem
+open ecs/Entity
+open ecs/ComponentTable
+
+const rowCount: Int = 10000
+
+const rowPitch: Float = 40.0
+
+func makeRow(label: own String) ret ListViewRow {
+  let keys: List(String) = List.create(String, cap: 1)
+  keys.add(value: "label")
+  let values: List(String) = List.create(String, cap: 1)
+  values.add(value: own label)
+  ret ListViewRow { keys: own keys, values: own values }
+}
+
+func buildData(count: view Int) ret ListViewData {
+  let rows: List(ListViewRow) = List.create(ListViewRow, cap: count)
+  var i: Int = 0
+  loop i < count {
+    rows.add(value: makeRow(label: "Row {i}"))
+    i = i + 1
+  }
+  ret ListViewData { rows: own rows }
+}
+
+func makeListView() ret ListView {
+  let bindings: List(ListViewBinding) = List.create(ListViewBinding, cap: 1)
+  let binding: ListViewBinding = {
+    nodeId: "Label"
+    componentName: "Text"
+    fieldName: "text"
+    itemField: "label"
+    prefix: ""
+    suffix: ""
+  }
+  bindings.add(value: binding)
+  ret ListView {
+    itemSceneId: ""
+    itemKeyField: ""
+    itemHeight: rowPitch
+    itemGap: 0.0
+    visibleItemCount: 8
+    overscanRows: 2
+    bindings: own bindings
+    loadingSceneId: ""
+    emptySceneId: ""
+    errorSceneId: ""
+  }
+}
+
+# The label text of the topmost windowed row (slot 0 = first child), for
+# asserting the bindings re-point correctly as the window scrolls.
+func topRowLabel(world: view UiWorld, listEntity: view EntityId) ret String {
+  unsafe {
+    if componentHas(this: world.childrens, entity: listEntity) is false {
+      ret "(none)"
+    }
+    let ch: view Children => componentView(this: world.childrens, entity: listEntity)
+    if ch.ids.length is 0 {
+      ret "(none)"
+    }
+    let rowRoot: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: 0)
+    if componentHas(this: world.childrens, entity: rowRoot) is false {
+      ret "(no child)"
+    }
+    let rch: view Children => componentView(this: world.childrens, entity: rowRoot)
+    if rch.ids.length is 0 {
+      ret "(no child)"
+    }
+    let label: EntityId = rae_ext_rae_buf_get(buf: rch.ids.data, index: 0)
+    if componentHas(this: world.texts, entity: label) is false {
+      ret "(no text)"
+    }
+    let t: Text = componentGet(this: world.texts, entity: label)
+    ret "{t.text}"
+  }
+}
+
+func partAScene() ret String {
+  var s: String = ""
+  s = s.concat(other: "\{")
+  s = s.concat(other: "\"type\":\"Scene\",\"version\":2,")
+  s = s.concat(other: "\"sceneId\":\"lv-demo\",\"root\":\"List\",")
+  s = s.concat(other: "\"nodes\":\{\"List\":\{")
+  s = s.concat(other: "\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":400\},")
+  s = s.concat(other: "\"ListView\":\{")
+  s = s.concat(other: "\"itemSceneId\":\"row\",\"itemHeight\":56,\"itemGap\":8,")
+  s = s.concat(other: "\"visibleItemCount\":6,\"overscanRows\":3,")
+  s = s.concat(
+    other: "\"bindings\":[\{\"nodeId\":\"title\",\"component\":\"Text\",\"field\":\"text\",\"itemField\":\"name\"\}]"
+  )
+  s = s.concat(other: "\}\}\}\}")
+  ret s
+}
+
+func main() {
+  # ----- Part A: ListView deserialises from a scene (#941 arm) -----
+  let scene: Scene = parseScene(source: partAScene())
+  log("scene ok: {scene.ok}")
+  let sceneWorld: UiWorld = createUiWorld()
+  loadScene(world: sceneWorld, scene: scene)
+  if let listRaw: Int = sceneWorld.nodeIds.get(k: "List") {
+    let listNode: EntityId = id(v: listRaw)
+    let has: Bool = componentHas(this: sceneWorld.listViews, entity: listNode)
+    log("List has ListView: {has}")
+    if has {
+      let lv: ListView = componentGet(this: sceneWorld.listViews, entity: listNode)
+      log(
+        "itemHeight: {lv.itemHeight.toInt()} visible: {lv.visibleItemCount} overscan: {lv.overscanRows} bindings: {lv.bindings.length}"
+      )
+      unsafe {
+        let b: ListViewBinding = rae_ext_rae_buf_get(buf: lv.bindings.data, index: 0)
+        log("binding: {b.nodeId} <- {b.componentName}.{b.fieldName} from {b.itemField}")
+      }
+    }
+  } else {
+    log("List node missing")
+  }
+
+  # ----- Part B: 10k rows stay bounded + recycle on scroll -----
+  let world: UiWorld = createUiWorld()
+  let listEntity: EntityId = createEntity(world: world)
+  componentSet(this: world.listViews, entity: listEntity, data: makeListView())
+  componentSet(this: world.listViewDatas, entity: listEntity, data: buildData(count: rowCount))
+  let scroll0: ScrollState = { y: 0.0, velocity: 0.0 }
+  componentSet(this: world.scrollStates, entity: listEntity, data: scroll0)
+
+  listViewSystem(world: world)
+  let aliveTop: Int = aliveCount(world: world)
+  log("rows: {rowCount}")
+  log("alive at top: {aliveTop}")
+  log("top row: {topRowLabel(world: world, listEntity: listEntity)}")
+
+  # Scroll deep into the middle (row ~4998 becomes the first windowed row).
+  let midY: Float = 0.0 - 200000.0
+  let mid: ScrollState = { y: midY, velocity: 0.0 }
+  componentSet(this: world.scrollStates, entity: listEntity, data: mid)
+  listViewSystem(world: world)
+  let aliveMid: Int = aliveCount(world: world)
+  log("alive at mid: {aliveMid}")
+  log("mid top row: {topRowLabel(world: world, listEntity: listEntity)}")
+
+  # Scroll to the very end: the window shrinks (fewer rows remain).
+  let endY: Float = 0.0 - (rowCount - 1).toFloat() * rowPitch
+  let endS: ScrollState = { y: endY, velocity: 0.0 }
+  componentSet(this: world.scrollStates, entity: listEntity, data: endS)
+  listViewSystem(world: world)
+  let aliveEnd: Int = aliveCount(world: world)
+  log("alive at end: {aliveEnd}")
+
+  log("recycled (top == mid): {aliveTop is aliveMid}")
+  log("bounded (< 60 for 10k rows): {aliveTop < 60}")
+  log("shrinks near end (end < mid): {aliveEnd < aliveMid}")
+}
