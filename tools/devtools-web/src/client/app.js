@@ -167,6 +167,16 @@ const errorEntries = [];
 const TEST_TREE_REFRESH_MS = 60000;
 const MAX_EXAMPLE_OUTPUT_LINES = 500;
 
+/*
+ * A log pane keeps the WHOLE run and you scroll it. Dropping old lines was
+ * wrong: a log you cannot scroll back through is not a log. What made the
+ * Compiler tab stop being one screen was never the line count — it was the
+ * pane's height, which had `max-height: none` on a chain whose only limit was
+ * `body { min-height: 100vh }` (a floor, not a ceiling), so every appended
+ * line made the PAGE taller instead of scrolling inside the pane. That is
+ * fixed in the stylesheet; the lines stay.
+ */
+
 const HEARTBEAT_STALE_MS = 60000;
 let testTreeRefreshTimer = null;
 let knownTests = new Map();
@@ -1344,9 +1354,9 @@ function resetTestCases() {
 }
 
 setupCopyButton(copyTestLogBtn, () => {
-  const lines = Array.from(testLog?.querySelectorAll(".terminal-line") ?? []).map((line) =>
-    line.textContent?.trimEnd() ?? ""
-  );
+  // From the recorded run rather than the DOM — same lines, and it keeps
+  // working if the pane is ever cleared or re-rendered mid-run.
+  const lines = allTestLogLines.map((line) => line.text.trimEnd());
   return lines.join("\n").trim() || "No test output yet.";
 });
 
@@ -1358,9 +1368,8 @@ setupCopyButton(copyTestErrorsBtn, () => {
 });
 
 setupCopyButton(copyBuildLogBtn, () => {
-  const lines = Array.from(buildLog?.querySelectorAll(".terminal-line") ?? []).map((line) =>
-    line.textContent?.trimEnd() ?? ""
-  );
+  // The recorded run, for the same reason as the test log above.
+  const lines = allBuildLogLines.map((line) => line.text.trimEnd());
   return lines.join("\n").trim() || "No build output yet.";
 });
 

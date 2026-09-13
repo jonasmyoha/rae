@@ -509,6 +509,11 @@
         if (line.startsWith("Results:")) return "log-summary";
         return "";
       }
+      // The WHOLE log, always. This page exists to show the full run and let
+      // you scroll back through it: truncating it to a tail is removing the
+      // only thing it does. The pane is height-bounded in CSS and scrolls, and
+      // poll() re-renders only when the file's size actually changed, so a long
+      // log costs one render, not one per poll.
       function render(content) {
         const frag = document.createDocumentFragment();
         for (const line of content.split("\n")) {
