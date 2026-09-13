@@ -8,16 +8,6 @@ COMMON_CFLAGS = -std=c11 -Wall -Wextra -Wpedantic -O0 -g
 LDFLAGS = -framework Foundation -framework ImageIO -framework CoreGraphics -L/opt/homebrew/lib
 COMMON_CFLAGS += -I/opt/homebrew/include -I../third_party/tinyexpr
 
-# Raylib is retained only for explicitly requested legacy archaeology. Normal
-# compiler builds use a registration stub and require no Raylib installation.
-ENABLE_LEGACY_RAYLIB ?= 0
-ifeq ($(ENABLE_LEGACY_RAYLIB),1)
-    VM_RAYLIB_SRC = $(SRC_DIR)/vm_raylib.c
-    LDFLAGS += /opt/homebrew/lib/libraylib.a -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL
-else
-    VM_RAYLIB_SRC = $(SRC_DIR)/vm_raylib_stub.c
-endif
-
 ifeq ($(MODE), CI_STRICT)
     CFLAGS = $(COMMON_CFLAGS) -Werror
 else
@@ -83,7 +73,6 @@ SRCS = $(SRC_DIR)/main.c \
        $(SRC_DIR)/vm_emit_stmt.c \
        $(SRC_DIR)/vm_natives_core.c \
        $(SRC_DIR)/vm_registry.c \
-       $(VM_RAYLIB_SRC) \
        $(SRC_DIR)/vm_tinyexpr.c \
        $(SRC_DIR)/vm_monocypher.c \
        $(SRC_DIR)/mangler.c

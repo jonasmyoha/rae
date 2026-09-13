@@ -134,13 +134,13 @@ void emit_type_info_as_c_type(CFuncContext* ctx, TypeInfo* t, FILE* out) {
     emit_type_ref_as_c_type(ctx, &tmp, out, false);
 }
 
-bool emit_type_recursive(CompilerContext* ctx, const AstModule* m, const AstTypeRef* type, FILE* out, EmittedTypeList* emitted, EmittedTypeList* visiting, bool ray) {
+bool emit_type_recursive(CompilerContext* ctx, const AstModule* m, const AstTypeRef* type, FILE* out, EmittedTypeList* emitted, EmittedTypeList* visiting) {
     if (!type) return true;
 
     // Value optional over an aggregate payload: emit the payload struct first,
     // then `struct rae_opt_<T> { rae_Bool has; T value; }`. Mirrors List(T).
     if (type->is_opt && !type->is_view && !type->is_mod) {
-        CFuncContext octx = {0}; octx.compiler_ctx = ctx; octx.module = m; octx.uses_raylib = ray;
+        CFuncContext octx = {0}; octx.compiler_ctx = ctx; octx.module = m;
         if (rae_opt_is_struct_rep(&octx, type)) {
             const char* optm = rae_mangle_type_specialized(ctx, NULL, NULL, type);
             if (emitted_list_contains(emitted, optm) || emitted_list_contains(visiting, optm)) return true;
@@ -150,7 +150,7 @@ bool emit_type_recursive(CompilerContext* ctx, const AstModule* m, const AstType
             payload.resolved_type = (type->resolved_type && type->resolved_type->kind == TYPE_OPT)
                 ? type->resolved_type->as.opt.base
                 : (payload.parts ? NULL : type->resolved_type);
-            emit_type_recursive(ctx, m, &payload, out, emitted, visiting, ray);
+            emit_type_recursive(ctx, m, &payload, out, emitted, visiting);
             fprintf(out, "typedef struct %s %s;\n", optm, optm);
             fprintf(out, "struct %s {\n  rae_Bool has;\n  ", optm);
             emit_type_ref_as_c_type(&octx, &payload, out, false);
@@ -169,9 +169,9 @@ bool emit_type_recursive(CompilerContext* ctx, const AstModule* m, const AstType
             TypeInfo* at = type->resolved_type;
             const char* amangled = type_mangle_name(ctx->ast_arena, at).data;
             if (emitted_list_contains(emitted, amangled)) return true;
-            if (type->generic_args) emit_type_recursive(ctx, m, type->generic_args, out, emitted, visiting, ray);
+            if (type->generic_args) emit_type_recursive(ctx, m, type->generic_args, out, emitted, visiting);
             AstTypeRef elem = {0}; elem.resolved_type = at->as.array.base;
-            CFuncContext tctx = {0}; tctx.compiler_ctx = ctx; tctx.module = m; tctx.uses_raylib = ray;
+            CFuncContext tctx = {0}; tctx.compiler_ctx = ctx; tctx.module = m;
             fprintf(out, "typedef struct { ");
             emit_type_ref_as_c_type(&tctx, &elem, out, false);
             fprintf(out, " v[%lld]; } %s;\n\n", (long long)(at->as.array.count > 0 ? at->as.array.count : 1), amangled);
@@ -180,7 +180,7 @@ bool emit_type_recursive(CompilerContext* ctx, const AstModule* m, const AstType
         }
         if (type->resolved_type->kind == TYPE_BUFFER) {
             // Buffer(T) - T might need registration but Buffer is a pointer
-            if (type->generic_args) emit_type_recursive(ctx, m, type->generic_args, out, emitted, visiting, ray);
+            if (type->generic_args) emit_type_recursive(ctx, m, type->generic_args, out, emitted, visiting);
             return true;
         }
         if (type->resolved_type->kind < TYPE_STRUCT) return true;
@@ -191,7 +191,7 @@ bool emit_type_recursive(CompilerContext* ctx, const AstModule* m, const AstType
     else if (type->resolved_type) base = type->resolved_type->name;
     
     if (base.len == 0) return true;
-    if (is_primitive_type(base) || (ray && is_raylib_builtin_type(base))) return true;
+    if (is_primitive_type(base)) return true;
     // Skip spurious void/Any specializations
     for (const AstTypeRef* ga = type->generic_args; ga; ga = ga->next) {
         Str ga_base = get_base_type_name(ga);
@@ -210,10 +210,10 @@ bool emit_type_recursive(CompilerContext* ctx, const AstModule* m, const AstType
     // Find the declaration
     if (str_eq_cstr(base, "List") || str_eq_cstr(base, "Buffer")) {
         // Built-in List/Buffer — recursively emit element type first
-        if (type->generic_args) emit_type_recursive(ctx, m, type->generic_args, out, emitted, visiting, ray);
+        if (type->generic_args) emit_type_recursive(ctx, m, type->generic_args, out, emitted, visiting);
         fprintf(out, "typedef struct %s %s;\n", mangled, mangled);
         fprintf(out, "struct %s {\n", mangled);
-        CFuncContext tctx = {0}; tctx.compiler_ctx = ctx; tctx.module = m; tctx.uses_raylib = ray;
+        CFuncContext tctx = {0}; tctx.compiler_ctx = ctx; tctx.module = m;
         fprintf(out, "  ");
         emit_type_ref_as_c_type(&tctx, type->generic_args, out, false);
         fprintf(out, "* data;\n  int64_t length;\n  int64_t cap;\n};\n\n");
@@ -233,11 +233,11 @@ bool emit_type_recursive(CompilerContext* ctx, const AstModule* m, const AstType
             for (const AstTypeField* f = td->fields; f; f = f->next) {
                 if (!f->type || f->type->is_view || f->type->is_mod) continue;
                 AstTypeRef* sub = substitute_type_ref(ctx, params, args, f->type);
-                emit_type_recursive(ctx, m, sub, out, emitted, visiting, ray);
+                emit_type_recursive(ctx, m, sub, out, emitted, visiting);
                 // If the field is Buffer(X), also emit X
                 Str fbase = get_base_type_name(sub);
                 if ((str_eq_cstr(fbase, "Buffer") || str_eq_cstr(fbase, "List")) && sub->generic_args) {
-                    emit_type_recursive(ctx, m, sub->generic_args, out, emitted, visiting, ray);
+                    emit_type_recursive(ctx, m, sub->generic_args, out, emitted, visiting);
                 }
             }
             
@@ -254,7 +254,7 @@ bool emit_type_recursive(CompilerContext* ctx, const AstModule* m, const AstType
                 if (has_void) { emitted_list_add(emitted, mangled); visiting->count--; return true; }
                 fprintf(out, "typedef struct %s %s;\n", mangled, mangled);
                 fprintf(out, "struct %s {\n", mangled);
-                CFuncContext tctx = {0}; tctx.compiler_ctx = ctx; tctx.module = m; tctx.uses_raylib = ray;
+                CFuncContext tctx = {0}; tctx.compiler_ctx = ctx; tctx.module = m;
                 tctx.generic_params = params; tctx.generic_args = args;
                 for (const AstTypeField* f = td->fields; f; f = f->next) {
                     fprintf(out, "  ");
@@ -758,7 +758,7 @@ bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* ou
           const AstDecl* sdecl = t->as.structure.decl;
           bool is_c_struct = sdecl && sdecl->kind == AST_DECL_TYPE
               && has_property(sdecl->as.type_decl.properties, "c_struct");
-          if (is_raylib_builtin_type(t->name) || is_c_struct) {
+          if (is_c_struct) {
               fprintf(out, "%.*s", (int)t->name.len, t->name.data);
           } else {
               const char* name = type_mangle_name(ctx->compiler_ctx->ast_arena, t).data;
@@ -822,12 +822,6 @@ bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* ou
       const AstDecl* ed = find_enum_decl(ctx, ctx->module, base);
       if (ed) { fprintf(out, "int64_t"); if (is_ptr) fprintf(out, "*"); return true; }
   }
-  // Check for c_struct property types (raylib types etc.) — emit as bare name
-  if (is_raylib_builtin_type(base)) {
-      fprintf(out, "%.*s", (int)base.len, base.data);
-      if (is_ptr) fprintf(out, "*");
-      return true;
-  }
   if (ctx) {
       const AstDecl* td = find_type_decl(ctx, ctx->module, base);
       if (td && td->kind == AST_DECL_TYPE && has_property(td->as.type_decl.properties, "c_struct")) {
@@ -837,11 +831,7 @@ bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* ou
       }
   }
   const char* mangled = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, type);
-  if (ctx && ctx->uses_raylib && is_raylib_builtin_type(base)) {
-        const AstDecl* td = find_type_decl(NULL, ctx->module, base);
-        if (td && td->kind == AST_DECL_TYPE && has_property(td->as.type_decl.properties, "c_struct")) fprintf(out, "%.*s", (int)base.len, base.data);
-        else if (!td) fprintf(out, "%.*s", (int)base.len, base.data); else fprintf(out, "rae_%.*s", (int)base.len, base.data);
-  } else fprintf(out, "%s", mangled);
+  fprintf(out, "%s", mangled);
   if (is_ptr) fprintf(out, "*");
   return true;
 }
@@ -864,7 +854,7 @@ bool emit_param_list(CFuncContext* ctx, const AstParam* params, FILE* out, bool 
             is_view = false;
             view_or_mod = false;
         }
-        bool is_ptr = is_extern ? (is_mod || is_view) : (is_mod || is_view || (!is_val && !is_primitive_type(base) && !(ctx->uses_raylib && is_raylib_builtin_type(base))));
+        bool is_ptr = is_extern ? (is_mod || is_view) : (is_mod || is_view || (!is_val && !is_primitive_type(base)));
         if (is_view && !is_ptr && !str_eq_cstr(base, "String")) fprintf(out, "const ");
         CFuncContext p_ctx = *ctx; AstTypeRef p_type = *p->type; p_type.is_view = is_view; p_type.is_mod = is_mod;
         emit_type_ref_as_c_type(&p_ctx, &p_type, out, false); fprintf(out, " %.*s", (int)p->name.len, p->name.data);
@@ -932,7 +922,7 @@ const char* c_return_type(CFuncContext* ctx, const AstFuncDecl* func) {
     const AstDecl* typeDecl = find_type_decl(ctx, ctx->module, base);
     bool isCStruct = typeDecl && typeDecl->kind == AST_DECL_TYPE
         && has_property(typeDecl->as.type_decl.properties, "c_struct");
-    const char* typeName = (isCStruct || is_raylib_builtin_type(base))
+    const char* typeName = isCStruct
         ? str_to_cstr(base)
         : rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr);
     if (strcmp(typeName, "RaeAny") == 0) return "RaeAny";
@@ -1467,9 +1457,9 @@ static bool global_init_is_deferred(const AstExpr* v) {
 }
 
 
-bool emit_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* f, FILE* out, const struct VmRegistry* r, bool ray) {
+bool emit_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* f, FILE* out, const struct VmRegistry* r) {
   if (f->is_extern || str_starts_with_cstr(f->name, "rae_ext_")) return true;
-  CFuncContext tctx = {.compiler_ctx = ctx, .module = m, .func_decl = f, .uses_raylib = ray, .registry = r, .func_first_let_idx = (size_t)-1};
+  CFuncContext tctx = {.compiler_ctx = ctx, .module = m, .func_decl = f, .registry = r, .func_first_let_idx = (size_t)-1};
   const char* rt = c_return_type(&tctx, f); const char* mangled = rae_mangle_function(ctx, f);
   
   bool is_main = str_eq_cstr(f->name, "main");
@@ -1564,13 +1554,13 @@ bool emit_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* 
 const char* g_emitted_spec_funcs[4096];
 static size_t g_emitted_spec_func_count = 0;
 
-bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* f, const AstTypeRef* args, FILE* out, const struct VmRegistry* r, bool ray) {
+bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* f, const AstTypeRef* args, FILE* out, const struct VmRegistry* r) {
   // Specialized externs (sizeof(T)(), rae_ext_rae_buf_get(V), ...) have no
   // body and their call sites are inlined elsewhere — emitting an empty
   // function body produces -Wreturn-type warnings.
   if (f->is_extern) return true;
   const AstIdentifierPart* gp_src = f->generic_params; if (!gp_src && f->generic_template) gp_src = f->generic_template->as.func_decl.generic_params;
-  CFuncContext tctx = {.compiler_ctx = ctx, .module = m, .func_decl = f, .uses_raylib = ray, .registry = r, .generic_params = gp_src, .generic_args = args, .func_first_let_idx = (size_t)-1};
+  CFuncContext tctx = {.compiler_ctx = ctx, .module = m, .func_decl = f, .registry = r, .generic_params = gp_src, .generic_args = args, .func_first_let_idx = (size_t)-1};
   const char* rt = c_return_type(&tctx, f); const char* mangled = rae_mangle_specialized_function(ctx, f, args);
   // Dedup check: skip if already emitted
   for (size_t i = 0; i < g_emitted_spec_func_count; i++) {
@@ -1828,8 +1818,7 @@ static const char* rae_json_struct_mangled(CompilerContext* ctx, const AstModule
       &(AstTypeRef){.parts = &(AstIdentifierPart){.text = base}});
 }
 
-bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const char* out_path, struct VmRegistry* registry, bool* out_uses_raylib) {
-  (void)out_uses_raylib;
+bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const char* out_path, struct VmRegistry* registry) {
   if (!module) return false;
   g_emitted_spec_func_count = 0; // Reset dedup for this compilation
   ctx->all_decl_count = 0; collect_decls_from_module(ctx, module); ctx->current_module = (AstModule*)module;
@@ -1870,7 +1859,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   fprintf(out, "\n");
   EmittedTypeList emitted = { .items = malloc(sizeof(char*) * 1024), .capacity = 1024, .count = 0 };
   EmittedTypeList visiting = { .items = malloc(sizeof(char*) * 1024), .capacity = 1024, .count = 0 };
-  for (size_t i = 0; i < ctx->generic_type_count; i++) emit_type_recursive(ctx, module, ctx->generic_types[i], out, &emitted, &visiting, false);
+  for (size_t i = 0; i < ctx->generic_type_count; i++) emit_type_recursive(ctx, module, ctx->generic_types[i], out, &emitted, &visiting);
 
   // Emit enum definitions as #define constants
   for (size_t i = 0; i < ctx->all_decl_count; i++) {
@@ -1917,7 +1906,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
           AstIdentifierPart part = {0};
           part.text = d->as.type_decl.name;
           tr.parts = &part;
-          emit_type_recursive(ctx, module, &tr, out, &emitted, &visiting, false);
+          emit_type_recursive(ctx, module, &tr, out, &emitted, &visiting);
       }
   }
 
@@ -1948,7 +1937,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
         for (size_t k = 0; !dup && k < opt_entry_count; k++) \
           if (strcmp(opt_entries[k].optm, optm) == 0) dup = true; \
         if (!dup) { \
-          emit_type_recursive(ctx, module, gt, out, &emitted, &visiting, false); \
+          emit_type_recursive(ctx, module, gt, out, &emitted, &visiting); \
           AstTypeRef payload = *gt; \
           payload.is_opt = false; payload.next = NULL; \
           payload.resolved_type = (gt->resolved_type && gt->resolved_type->kind == TYPE_OPT) \
@@ -3236,7 +3225,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   for (size_t i = 0; i < ctx->all_decl_count; i++) {
       const AstDecl* d = ctx->all_decls[i];
       if (d->kind == AST_DECL_FUNC && !d->as.func_decl.generic_params && !d->as.func_decl.specialization_args && !d->as.func_decl.is_extern && !str_eq_cstr(d->as.func_decl.name, "main")) {
-          emit_function(ctx, module, &d->as.func_decl, out, registry, false);
+          emit_function(ctx, module, &d->as.func_decl, out, registry);
       }
   }
 
@@ -3281,7 +3270,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
               emit_param_list(&tctx, f->params, out, false);
               fprintf(out, ");\n");
           }
-          emit_specialized_function(ctx, module, ctx->specialized_funcs[emitted_idx].decl, ctx->specialized_funcs[emitted_idx].concrete_args, out, registry, false);
+          emit_specialized_function(ctx, module, ctx->specialized_funcs[emitted_idx].decl, ctx->specialized_funcs[emitted_idx].concrete_args, out, registry);
           emitted_idx++;
       }
   }
@@ -3291,7 +3280,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   for (size_t i = 0; i < ctx->all_decl_count; i++) {
       const AstDecl* d = ctx->all_decls[i];
       if (d->kind == AST_DECL_FUNC && str_eq_cstr(d->as.func_decl.name, "main")) {
-          emit_function(ctx, module, &d->as.func_decl, out, registry, false);
+          emit_function(ctx, module, &d->as.func_decl, out, registry);
       }
   }
 
@@ -3311,7 +3300,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
           fprintf(out, "RAE_UNUSED static %s %s(", c_return_type(&tctx, f), mangled);
           emit_param_list(&tctx, f->params, out, false);
           fprintf(out, ");\n");
-          emit_specialized_function(ctx, module, f, args, out, registry, false);
+          emit_specialized_function(ctx, module, f, args, out, registry);
       }
   }
 
