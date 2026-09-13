@@ -13,7 +13,6 @@
 
 #include "ast.h"
 
-struct VmRegistry;
 
 // -- Precedence levels for C expressions (mirrors C operator precedence) --
 enum {
@@ -111,7 +110,6 @@ typedef struct {
   AstTypeRef expected_type;
   bool has_expected_type;
   bool suppress_opt_unbox; // when true, skip emit_opt_unbox_suffix (e.g. inside `... is none`)
-  const struct VmRegistry* registry;
   bool is_main;
   int scope_depth;
   CDeferStack defer_stack;
@@ -279,7 +277,7 @@ void discover_specializations_stmt(CFuncContext* ctx, const AstStmt* stmt);
 void discover_specializations_module(CompilerContext* ctx, const AstModule* module);
 
 // -- Function emission (called from the orchestrator) --
-bool emit_function(CompilerContext* compiler_ctx, const AstModule* module, const AstFuncDecl* func, FILE* out, const struct VmRegistry* registry);
-bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* f, const AstTypeRef* args, FILE* out, const struct VmRegistry* r);
+bool emit_function(CompilerContext* compiler_ctx, const AstModule* module, const AstFuncDecl* func, FILE* out);
+bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* f, const AstTypeRef* args, FILE* out);
 
 #endif /* C_BACKEND_INTERNAL_H */
