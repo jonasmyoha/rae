@@ -1,0 +1,23 @@
+# 106's raw file-I/O bindings, declared ONCE for the whole project (#947).
+#
+# Several systems read and write app files (album catalogue, scene files,
+# persisted playback state, play history, playlists, the debug menu). They
+# reach for the runtime's `rae_ext_rae_sys_*` externs directly rather than
+# lib/Sys' `opt String` wrapper: lib/fs is deliberately discovery-only (see its
+# module doc), and binding the same C name with a plain `String` return skips
+# the C backend's double-unbox bug for `opt String` returns. Both return the
+# "soft" failure the callers want — an empty String / `false` — never an error.
+#
+# They live at the project ROOT on purpose. Rae treats each project folder as a
+# package: a symbol declared in more than one folder is ambiguous and every
+# bare call to it is rejected ("defined in multiple project folders; qualify
+# the call"). Before the folder-per-system split these externs were
+# re-declared in three files, which the flat root tolerated as one symbol;
+# now there is exactly one declaration, visible to every system.
+
+# Read a whole file. Empty String on a missing file or read error.
+func rae_ext_rae_sys_read_file(path: String) unsafe extern ret String
+
+# Write a whole file, replacing it; `true` on success. Callers log a failure
+# but do not propagate it — a missing-disk save must not crash the app.
+func rae_ext_rae_sys_write_file(path: String, content: String) unsafe extern ret Bool
