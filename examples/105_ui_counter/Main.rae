@@ -147,30 +147,30 @@ func syncUi(world: mod UiWorld, state: view CounterState) {
 # UI ACTIONS FIRE ON RELEASE, and carry the id the .raescene author wrote in
 # `OnClick`. The app never asks "was the pointer inside that rectangle" — the
 # hit test already did, against the real laid-out geometry.
-func applyActions(state: mod CounterState, input: view UiInput) ret Bool {
+func applyActions(state: mod CounterState, world: view UiWorld) ret Bool {
   var changed: Bool = false
 
-  if uiActionFired(input: input, actionId: "counter.inc") {
+  if uiActionFired(world: world, actionId: "counter.inc") {
     state.value = state.value + state.step
     changed = true
   }
-  if uiActionFired(input: input, actionId: "counter.dec") {
+  if uiActionFired(world: world, actionId: "counter.dec") {
     state.value = state.value - state.step
     changed = true
   }
-  if uiActionFired(input: input, actionId: "counter.clear") {
+  if uiActionFired(world: world, actionId: "counter.clear") {
     state.value = 0
     changed = true
   }
   # The step buttons change how much the others move, and are deliberately not
   # part of the history: they alter the next change rather than being one.
-  if uiActionFired(input: input, actionId: "step.one") {
+  if uiActionFired(world: world, actionId: "step.one") {
     if state.step is not 1 {
       state.step = 1
       changed = true
     }
   }
-  if uiActionFired(input: input, actionId: "step.five") {
+  if uiActionFired(world: world, actionId: "step.five") {
     if state.step is not 5 {
       state.step = 5
       changed = true
@@ -255,9 +255,9 @@ func main() ret Int {
     var changed: Bool = resizeUiToWindow(world: world, res: gpuUi)
 
     updateUiInput(input: input, world: world)
-    let hadEvents: Bool = input.events.length > 0
+    let hadEvents: Bool = uiActionCount(world: world) > 0
 
-    if applyActions(state: state, input: input) {
+    if applyActions(state: state, world: world) {
       # A value change is what the history records. The step buttons report a
       # change too, so the check is on the value itself, not on "something
       # changed".
@@ -283,7 +283,7 @@ func main() ret Int {
 
     # DECIDED FRESH EVERY ITERATION, which is the whole point. An earlier
     # version latched a `needsRender` flag false after drawing and then, in the
-    # idle branch, asked whether `input.events` was non-empty -- but that list is
+    # idle branch, asked whether the `uiActions` queue was non-empty -- but it is
     # filled by updateUiInput at the TOP of the loop, so after the wait it still
     # held the previous pass's already-consumed events. A click was read on the
     # next iteration, ran the systems, and never drew: the app presented exactly

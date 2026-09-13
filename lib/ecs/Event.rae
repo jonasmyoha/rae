@@ -52,6 +52,16 @@ func eventAt(T: type, this: view EventQueue(T), i: view Int) pub ret T {
   }
 }
 
+# Discard this frame's events WITHOUT advancing the double buffer — a mid-frame
+# cancel. Unlike frameAdvance (the once-per-frame boundary), this just empties
+# the current channel in place, for a producer that decides its own events are
+# void this frame (e.g. an overlay swallowed the press, so the click it would
+# have produced must not reach any consumer). Consumers that already drained
+# keep what they read; nothing further is delivered this frame.
+func eventClear(T: type, this: mod EventQueue(T)) pub {
+  this.events.clear()
+}
+
 # Advance the frame: recycle the channel so the next frame starts empty. Call
 # ONCE per frame, AFTER every consumer has drained. Double-buffered: clear the
 # spare, then swap it in as the fresh (empty) events buffer — the just-drained

@@ -175,7 +175,7 @@ func cameraUpdate(
   deltaTime: copy Float
 ) ret CameraTick {
   let previousMode: CameraRigMode = cameraSystem.rig.mode
-  if handleCameraBar(input: inputSystem.ui, rig: cameraSystem.rig, camera: cameraSystem.camera) {
+  if handleCameraBar(world: inputSystem.world, rig: cameraSystem.rig, camera: cameraSystem.camera) {
     persist.stateDirty = true
   }
   if previousMode is not CameraRigMode.character and cameraSystem.rig.mode is CameraRigMode.character {

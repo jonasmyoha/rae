@@ -195,8 +195,8 @@ func fitCameraBar(
 # Handle the bar's own action. Returns whether the mode changed, so a
 # caller that gates rendering on state changes does not have to compare
 # the rig before and after.
-func handleCameraBar(input: view UiInput, rig: mod CameraRig, camera: mod Camera3d) pub ret Bool {
-  if uiActionFired(input: input, actionId: cameraBarModeAction) {
+func handleCameraBar(world: view UiWorld, rig: mod CameraRig, camera: mod Camera3d) pub ret Bool {
+  if uiActionFired(world: world, actionId: cameraBarModeAction) {
     toggleCameraRigMode(rig: rig, camera: camera)
     ret true
   }
@@ -204,14 +204,14 @@ func handleCameraBar(input: view UiInput, rig: mod CameraRig, camera: mod Camera
   # keep easing after the switch says there is none, which reads as the
   # toggle not having taken. Snapping once neither source is smoothed
   # covers both buttons.
-  if uiActionFired(input: input, actionId: cameraBarSmoothMouseAction) {
+  if uiActionFired(world: world, actionId: cameraBarSmoothMouseAction) {
     rig.smoothMouse = not rig.smoothMouse
     if rig.smoothMouse is false and rig.smoothKeys is false {
       snapCameraRigView(rig: rig)
     }
     ret true
   }
-  if uiActionFired(input: input, actionId: cameraBarSmoothKeysAction) {
+  if uiActionFired(world: world, actionId: cameraBarSmoothKeysAction) {
     rig.smoothKeys = not rig.smoothKeys
     if rig.smoothKeys is false and rig.smoothMouse is false {
       snapCameraRigView(rig: rig)

@@ -458,7 +458,7 @@ func main() ret Int {
       now: now
       didRealWork: dbgDidWork
     ) {
-      suppressUiPress(input: uiInput)
+      suppressUiPress(input: uiInput, world: uiWorld)
     }
     # RE-CENTRE ON SWITCHING TO ORBIT. The rig recovers the orbit target by
     # walking `distance` along the free camera's view direction, so the view
@@ -475,13 +475,13 @@ func main() ret Int {
     # Before-and-after, because handleCameraBar also returns true for its two
     # smoothing buttons -- the return value does not mean "the mode changed".
     let wasOrbit: Bool = cameraRig.mode is CameraRigMode.orbit
-    handleCameraBar(input: uiInput, rig: cameraRig, camera: camera)
+    handleCameraBar(world: uiWorld, rig: cameraRig, camera: camera)
     if wasOrbit is false and cameraRig.mode is CameraRigMode.orbit {
       camera.target = Vec3.create(x: 0.0, y: 0.0, z: orbitFocusZ)
     }
-    let hadUiEvents: Bool = uiInput.events.length > 0
+    let hadUiEvents: Bool = uiActionCount(world: uiWorld) > 0
     dispatchUiActions(
-      input: uiInput
+      world: uiWorld
       state: uiState
       rig: cameraRig
       camera: camera
@@ -489,15 +489,15 @@ func main() ret Int {
     # The shared dialog sees every action and ignores what it does not own.
     var settingsChanged: Bool = false
     # Shared corner menu button, mounted beside the camera bar (same as 112/114).
-    if menuToggleTapped(input: uiInput) {
+    if menuToggleTapped(world: uiWorld) {
       settings.open = settings.open is false
       settingsChanged = true
     }
     var sa: Int = 0
-    loop sa < uiActionCount(input: uiInput) {
+    loop sa < uiActionCount(world: uiWorld) {
       if settingsHandleAction(
         settingsState: settings
-        actionId: uiActionAt(input: uiInput, index: sa)
+        actionId: uiActionAt(world: uiWorld, index: sa)
       ) {
         settingsChanged = true
       }
