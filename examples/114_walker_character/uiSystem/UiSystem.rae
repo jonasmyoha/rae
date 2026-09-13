@@ -79,7 +79,7 @@ func uiUpdate(
   # action->layout gate below lays out the panel it toggles. (As an overlay
   # button its toggle ran no layout; that only went unnoticed because the
   # time-of-day animation flags settingsChanged every frame while it is on.)
-  if walkerMenuTapped(input: inputSystem.ui) {
+  if walkerMenuTapped(world: inputSystem.world) {
     toggleWalkerPanel(settings: inputSystem.settings, world: inputSystem.world)
   }
   let scrolled: Bool = updateScrollPanel(
@@ -94,9 +94,9 @@ func uiUpdate(
     now: now
     didRealWork: frame.dbgDidWork
   ) {
-    suppressUiPress(input: inputSystem.ui)
+    suppressUiPress(input: inputSystem.ui, world: inputSystem.world)
   }
-  let clipHit: String = panelClickedId(panel: inputSystem.clipPanel, input: inputSystem.ui)
+  let clipHit: String = panelClickedId(panel: inputSystem.clipPanel, world: inputSystem.world)
   if clipHit.length() > 0 and cameraSystem.rig.mode is not CameraRigMode.character {
     var nextClipIndex: Int = characterSystem.clipIndex
     if clipHit is "idle" {
@@ -125,7 +125,7 @@ func uiUpdate(
       id: clipHit
     )
   }
-  let transportHit: String = panelClickedId(panel: inputSystem.transport, input: inputSystem.ui)
+  let transportHit: String = panelClickedId(panel: inputSystem.transport, world: inputSystem.world)
   if transportHit is "play" {
     characterSystem.playing = not characterSystem.playing
     var playLabel: String = "Pause"
@@ -165,7 +165,7 @@ func uiUpdate(
     setNodeText(world: inputSystem.world, nodeId: "SpeedLabel", value: "Speed {pct}%")
   }
   # Character-switch buttons (#546): same effect as Page Up/Down and keys 1/2.
-  let charHit: String = panelClickedId(panel: inputSystem.charPanel, input: inputSystem.ui)
+  let charHit: String = panelClickedId(panel: inputSystem.charPanel, world: inputSystem.world)
   if charHit is "prev" {
     rosterSwitchPrev(roster: players)
     onCharacterSwitched(
@@ -189,10 +189,10 @@ func uiUpdate(
     )
   }
   var settingsChanged: Bool = false
-  loop var ai: Int = 0, ai < uiActionCount(input: inputSystem.ui), ++ai {
+  loop var ai: Int = 0, ai < uiActionCount(world: inputSystem.world), ++ai {
     if settingsHandleAction(
       settingsState: inputSystem.settings
-      actionId: uiActionAt(input: inputSystem.ui, index: ai)
+      actionId: uiActionAt(world: inputSystem.world, index: ai)
     ) {
       settingsChanged = true
     }
@@ -264,7 +264,7 @@ func uiUpdate(
   # component, and only transformSystem (inside runUiSystems) turns that into
   # screen positions. Without it the wheel moved nothing until the next
   # relayout — again masked by the time-of-day animation while it runs.
-  if uiActionCount(input: inputSystem.ui) > 0 or settingsChanged or scrolled {
+  if uiActionCount(world: inputSystem.world) > 0 or settingsChanged or scrolled {
     runUiSystems(world: inputSystem.world, res: inputSystem.gpuUi)
   }
   ret UiTick { settingsChanged: settingsChanged, scrolled: scrolled }

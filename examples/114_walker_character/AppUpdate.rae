@@ -320,7 +320,7 @@ func updateApp(app: mod App) {
     }
   }
 
-  let hadUiEvents: Bool = app.inputSystem.ui.events.length > 0 or app.inputSystem.ui.pointer.down or app.inputSystem.ui.pointer.pressed or app.inputSystem.ui.pointer.released
+  let hadUiEvents: Bool = uiActionCount(world: app.inputSystem.world) > 0 or app.inputSystem.ui.pointer.down or app.inputSystem.ui.pointer.pressed or app.inputSystem.ui.pointer.released
   let logChanged: Bool = app.inputSystem.logView.revision is not app.inputSystem.lastLogRevision
   let transitionActive: Bool = app.characterSystem.transitionElapsed < clipTransitionDuration
   # Live splash droplets are an animation source: keep rendering until the last one

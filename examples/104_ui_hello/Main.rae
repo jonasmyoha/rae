@@ -41,14 +41,14 @@ const initialValue: Int = 3
 # The action ids are the ones assets/ui.raescene writes in each button's
 # `OnClick`. Nothing here asks where the pointer was: the hit test already did
 # that, against the laid-out geometry.
-func applyActions(value: view Int, input: view UiInput) ret Int {
-  if uiActionFired(input: input, actionId: "counter.inc") {
+func applyActions(value: view Int, world: view UiWorld) ret Int {
+  if uiActionFired(world: world, actionId: "counter.inc") {
     ret value + 1
   }
-  if uiActionFired(input: input, actionId: "counter.dec") {
+  if uiActionFired(world: world, actionId: "counter.dec") {
     ret value - 1
   }
-  if uiActionFired(input: input, actionId: "counter.clear") {
+  if uiActionFired(world: world, actionId: "counter.clear") {
     ret 0
   }
   ret value
@@ -92,9 +92,9 @@ func main() ret Int {
     var changed: Bool = resizeUiToWindow(world: world, res: gpuUi)
 
     updateUiInput(input: input, world: world)
-    let hadEvents: Bool = input.events.length > 0
+    let hadEvents: Bool = uiActionCount(world: world) > 0
 
-    let next: Int = applyActions(value: value, input: input)
+    let next: Int = applyActions(value: value, world: world)
     if next is not value {
       value = next
       setNodeText(world: world, nodeId: "ValueText", value: "Value: {value}!")
