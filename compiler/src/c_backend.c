@@ -9,7 +9,6 @@
 #include <string.h>
 #include <stdint.h>
 
-#include "vm_registry.h"
 #include "lexer.h"
 #include "diag.h"
 
@@ -1457,9 +1456,9 @@ static bool global_init_is_deferred(const AstExpr* v) {
 }
 
 
-bool emit_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* f, FILE* out, const struct VmRegistry* r) {
+bool emit_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* f, FILE* out) {
   if (f->is_extern || str_starts_with_cstr(f->name, "rae_ext_")) return true;
-  CFuncContext tctx = {.compiler_ctx = ctx, .module = m, .func_decl = f, .registry = r, .func_first_let_idx = (size_t)-1};
+  CFuncContext tctx = {.compiler_ctx = ctx, .module = m, .func_decl = f, .func_first_let_idx = (size_t)-1};
   const char* rt = c_return_type(&tctx, f); const char* mangled = rae_mangle_function(ctx, f);
   
   bool is_main = str_eq_cstr(f->name, "main");
@@ -1554,13 +1553,13 @@ bool emit_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* 
 const char* g_emitted_spec_funcs[4096];
 static size_t g_emitted_spec_func_count = 0;
 
-bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* f, const AstTypeRef* args, FILE* out, const struct VmRegistry* r) {
+bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* f, const AstTypeRef* args, FILE* out) {
   // Specialized externs (sizeof(T)(), rae_ext_rae_buf_get(V), ...) have no
   // body and their call sites are inlined elsewhere — emitting an empty
   // function body produces -Wreturn-type warnings.
   if (f->is_extern) return true;
   const AstIdentifierPart* gp_src = f->generic_params; if (!gp_src && f->generic_template) gp_src = f->generic_template->as.func_decl.generic_params;
-  CFuncContext tctx = {.compiler_ctx = ctx, .module = m, .func_decl = f, .registry = r, .generic_params = gp_src, .generic_args = args, .func_first_let_idx = (size_t)-1};
+  CFuncContext tctx = {.compiler_ctx = ctx, .module = m, .func_decl = f, .generic_params = gp_src, .generic_args = args, .func_first_let_idx = (size_t)-1};
   const char* rt = c_return_type(&tctx, f); const char* mangled = rae_mangle_specialized_function(ctx, f, args);
   // Dedup check: skip if already emitted
   for (size_t i = 0; i < g_emitted_spec_func_count; i++) {
@@ -1818,7 +1817,7 @@ static const char* rae_json_struct_mangled(CompilerContext* ctx, const AstModule
       &(AstTypeRef){.parts = &(AstIdentifierPart){.text = base}});
 }
 
-bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const char* out_path, struct VmRegistry* registry) {
+bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const char* out_path) {
   if (!module) return false;
   g_emitted_spec_func_count = 0; // Reset dedup for this compilation
   ctx->all_decl_count = 0; collect_decls_from_module(ctx, module); ctx->current_module = (AstModule*)module;
@@ -3225,7 +3224,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   for (size_t i = 0; i < ctx->all_decl_count; i++) {
       const AstDecl* d = ctx->all_decls[i];
       if (d->kind == AST_DECL_FUNC && !d->as.func_decl.generic_params && !d->as.func_decl.specialization_args && !d->as.func_decl.is_extern && !str_eq_cstr(d->as.func_decl.name, "main")) {
-          emit_function(ctx, module, &d->as.func_decl, out, registry);
+          emit_function(ctx, module, &d->as.func_decl, out);
       }
   }
 
@@ -3270,7 +3269,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
               emit_param_list(&tctx, f->params, out, false);
               fprintf(out, ");\n");
           }
-          emit_specialized_function(ctx, module, ctx->specialized_funcs[emitted_idx].decl, ctx->specialized_funcs[emitted_idx].concrete_args, out, registry);
+          emit_specialized_function(ctx, module, ctx->specialized_funcs[emitted_idx].decl, ctx->specialized_funcs[emitted_idx].concrete_args, out);
           emitted_idx++;
       }
   }
@@ -3280,7 +3279,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   for (size_t i = 0; i < ctx->all_decl_count; i++) {
       const AstDecl* d = ctx->all_decls[i];
       if (d->kind == AST_DECL_FUNC && str_eq_cstr(d->as.func_decl.name, "main")) {
-          emit_function(ctx, module, &d->as.func_decl, out, registry);
+          emit_function(ctx, module, &d->as.func_decl, out);
       }
   }
 
@@ -3300,7 +3299,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
           fprintf(out, "RAE_UNUSED static %s %s(", c_return_type(&tctx, f), mangled);
           emit_param_list(&tctx, f->params, out, false);
           fprintf(out, ");\n");
-          emit_specialized_function(ctx, module, f, args, out, registry);
+          emit_specialized_function(ctx, module, f, args, out);
       }
   }
 

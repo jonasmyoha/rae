@@ -2656,7 +2656,7 @@ static bool build_c_backend_output(const char* entry_file,
   }
 
   int errs_before_emit = diag_error_count();
-  bool ok = c_backend_emit_module(&ctx, &merged, out_file, &registry);
+  bool ok = c_backend_emit_module(&ctx, &merged, out_file);
   /* The backend reports semantic errors it can only see with full type
    * information (a reference returned to a temporary, for one). Emission
    * still writes a file, so without this the pipeline would hand invalid
@@ -2848,7 +2848,7 @@ static bool build_hybrid_output(const char* entry_file,
   }
   if (ok) {
     int errs_before = diag_error_count();
-    ok = c_backend_emit_module(&ctx, &merged, c_path, &registry);
+    ok = c_backend_emit_module(&ctx, &merged, c_path);
     if (diag_error_count() > errs_before) ok = false;
   }
   if (ok) {
