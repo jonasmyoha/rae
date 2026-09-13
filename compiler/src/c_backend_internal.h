@@ -112,7 +112,6 @@ typedef struct {
   bool has_expected_type;
   bool suppress_opt_unbox; // when true, skip emit_opt_unbox_suffix (e.g. inside `... is none`)
   const struct VmRegistry* registry;
-  bool uses_raylib;
   bool is_main;
   int scope_depth;
   CDeferStack defer_stack;
@@ -229,7 +228,7 @@ const char* c_return_type(CFuncContext* ctx, const AstFuncDecl* func);
 bool emit_string_literal(FILE* out, Str literal);
 bool emit_auto_init(CFuncContext* ctx, const AstTypeRef* type, FILE* out);
 bool emit_struct_auto_init(CFuncContext* ctx, const AstDecl* decl, const AstTypeRef* tr, FILE* out);
-bool emit_type_recursive(CompilerContext* ctx, const AstModule* m, const AstTypeRef* type, FILE* out, EmittedTypeList* emitted, EmittedTypeList* visiting, bool ray);
+bool emit_type_recursive(CompilerContext* ctx, const AstModule* m, const AstTypeRef* type, FILE* out, EmittedTypeList* emitted, EmittedTypeList* visiting);
 
 // -- Decl/spec registry --
 void register_decl(CompilerContext* ctx, const AstDecl* decl);
@@ -280,7 +279,7 @@ void discover_specializations_stmt(CFuncContext* ctx, const AstStmt* stmt);
 void discover_specializations_module(CompilerContext* ctx, const AstModule* module);
 
 // -- Function emission (called from the orchestrator) --
-bool emit_function(CompilerContext* compiler_ctx, const AstModule* module, const AstFuncDecl* func, FILE* out, const struct VmRegistry* registry, bool uses_raylib);
-bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* f, const AstTypeRef* args, FILE* out, const struct VmRegistry* r, bool ray);
+bool emit_function(CompilerContext* compiler_ctx, const AstModule* module, const AstFuncDecl* func, FILE* out, const struct VmRegistry* registry);
+bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* f, const AstTypeRef* args, FILE* out, const struct VmRegistry* r);
 
 #endif /* C_BACKEND_INTERNAL_H */
