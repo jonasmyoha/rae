@@ -1,21 +1,19 @@
-# Live (bytecode VM) — status: DEPRECATED (left to rot)
+# Live (bytecode VM) — status: REMOVED (#957)
 
-**Policy (updated 2026-09-07):**
+**Policy (updated 2026-09-13):**
 
-> **The Live / VM (bytecode) target is DEPRECATED and UNMAINTAINED.** It is left
-> in the repo to rot — not removed yet, no plan to remove it yet, and equally no
-> plan to fix, extend, test, or keep it at parity with the Compiled target. The
-> test suite and the example gate run the **Compiled (C backend) target only**.
-> Do not "fix" a VM bug, add a VM feature, or let the VM's existence block,
-> caveat, or complicate Compiled-target work. If a shared change (e.g. a sema
-> diagnostic) happens to help the VM for free, fine — otherwise ignore it.
-> Read the older "preserved but unsupported / best-effort buildable" wording
-> below as historical; the operative word now is **deprecated**.
+> **The Live / VM (bytecode) target has been DELETED.** As of #957 the ~10.6K
+> lines of `compiler/src/vm_*.c`, the `--target live`/`hybrid` CLI options and
+> the `build_vm_output`/`run_vm_file`/`run_vm_watch` paths, and the bytecode
+> fixtures are gone. **Compiled (C backend) is the sole target.** Do not
+> reintroduce a bytecode VM, a `--target live`/`hybrid` flag, or a `vm_*.c`
+> file. Live's unique roles (scripting, hot-reload, OTA logic) are reassigned to
+> **native-hosted WASM module replacement** (see
+> `docs/raepack-v2-and-packages.md`). The deleted code remains recoverable from
+> git history (the #955–#957 commits) if it is ever wanted.
 
-This is stronger and clearer than "frozen," while staying **completely
-reversible** — nothing is deleted. The future replacement for Live's unique
-roles (scripting, hot-reload, OTA logic) is **native-hosted WASM module
-replacement** (see `docs/raepack-v2-and-packages.md`).
+Everything below is HISTORICAL — the deprecation/freeze notes that preceded the
+removal, kept for context.
 
 ---
 

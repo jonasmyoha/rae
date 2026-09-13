@@ -42,18 +42,11 @@ fi
 
 # Targets to test. Compiled is the sole supported target.
 #
-# The Live/Hybrid (bytecode VM) target is DEPRECATED and frozen
-# (docs/live-vm-status.md; frozen 2026-06-28). Its tests are NO LONGER
-# RUN IN ANY SCENARIO: `TEST_TARGET=live`/`hybrid` is refused here (it
-# used to opt into a live smoke job). Several Live-only tests
-# (e.g. 318/332/334/338/339/343/382/385 — VM-specific diagnostics) are
-# already skipped on the compiled target below and, with the live target
-# gone, never execute; treat them as deprecated. Do not re-enable the
-# live target without un-freezing the VM.
+# The Live/Hybrid (bytecode VM) target was REMOVED (#957). Only the Compiled
+# (C backend) target exists; a live/hybrid target filter is rejected.
 if [ "$TARGET_FILTER" = "live" ] || [ "$TARGET_FILTER" = "hybrid" ]; then
-  echo "Live/Hybrid (bytecode VM) is DEPRECATED and frozen (docs/live-vm-status.md)."
-  echo "Live-target tests are no longer run in any scenario. Nothing to do."
-  exit 0
+  echo "The Live/Hybrid (bytecode VM) target was removed (#957); only 'compiled' exists."
+  exit 1
 fi
 TARGETS=("compiled")
 
