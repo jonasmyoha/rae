@@ -63,18 +63,7 @@ SRCS = $(SRC_DIR)/main.c \
        $(SRC_DIR)/c_expr.c \
        $(SRC_DIR)/c_stmt.c \
        $(SRC_DIR)/ownership.c \
-       $(SRC_DIR)/vm_drop.c \
        $(SRC_DIR)/raepack.c \
-       $(SRC_DIR)/vm_chunk.c \
-       $(SRC_DIR)/vm_value.c \
-       $(SRC_DIR)/vm.c \
-       $(SRC_DIR)/vm_compiler.c \
-       $(SRC_DIR)/vm_emit_expr.c \
-       $(SRC_DIR)/vm_emit_stmt.c \
-       $(SRC_DIR)/vm_natives_core.c \
-       $(SRC_DIR)/vm_registry.c \
-       $(SRC_DIR)/vm_tinyexpr.c \
-       $(SRC_DIR)/vm_monocypher.c \
        $(SRC_DIR)/mangler.c
 
 EXT_SRCS = ../third_party/tinyexpr/rae_tinyexpr.c ../third_party/monocypher/monocypher.c
@@ -140,15 +129,11 @@ uninstall:
 	@rm -f $(INSTALL_LINK)
 	@echo "removed $(INSTALL_LINK)"
 
-$(BIN_DIR)/rae: $(OBJS) $(BUILD_DIR)/sys_thread.o $(BUILD_DIR)/vm_patch.o $(BUILD_DIR)/rae_runtime.o
+$(BIN_DIR)/rae: $(OBJS) $(BUILD_DIR)/sys_thread.o $(BUILD_DIR)/rae_runtime.o
 	@mkdir -p $(BIN_DIR)
 	$(CC) -o $@ $^ $(LDFLAGS)
 
 $(BUILD_DIR)/rae_runtime.o: runtime/rae_runtime.c runtime/rae_runtime.h
-	@mkdir -p $(BUILD_DIR)
-	$(CC) $(CFLAGS) -c -o $@ $<
-
-$(BUILD_DIR)/vm_patch.o: src/vm_patch.c src/vm.h src/vm_chunk.h
 	@mkdir -p $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
