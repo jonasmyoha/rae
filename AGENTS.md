@@ -590,6 +590,51 @@ A bare `make test > /tmp/some-other-file.log` is invisible to the UI (wrong file
 perl -e 'alarm shift; exec @ARGV' 600 bash compiler/tools/watch-tests.sh
 ```
 
+**Run it in the FOREGROUND.** The run takes ~6 minutes (489 cases, ~350 s
+parallel on 10 cores) and the tool call simply returns when it is done. That is
+the whole recipe; everything below is only for the case where you truly cannot
+block.
+
+**If you background it, watch the RIGHT marker.** This has cost hours, three
+times: a background run was waited on with
+
+```bash
+# WRONG — this can never match, and burns the entire bound every time.
+until grep -q 'RAE_RUN_END' "$f"; do sleep 5; done
+```
+
+`RAE_RUN_END` is written by `watch-tests.sh` into **`/tmp/rae-test-live.log`**
+(or `$RAE_TEST_LOG`) — never to stdout, so it is never in the background task's
+output file. Piping through `| tail -3` makes it worse: nothing at all reaches
+that file until the pipeline ends. The marker that IS in the task file is the
+runner's own `[exited with code N]`. Wait like this:
+
+```bash
+# RIGHT — ends the moment the run ends, gives up if the run dies, bounded.
+for t in $(seq 1 110); do
+  grep -q '\[exited with code' "$f" && break   # the task wrapper's end marker
+  grep -q 'RAE_RUN_END' /tmp/rae-test-live.log && break   # the script's own
+  kill -0 "$pid" 2>/dev/null || break           # producer gone: stop waiting
+  sleep 6
+done
+```
+
+Three rules behind it: bound every wait, check the producer is still alive, and
+grep a marker that is actually written to the file you are grepping. A wait that
+cannot end freezes the whole queue, not just your task.
+
+**Killing a previous run: scope the pattern.** `pkill -9 -f 'make test'` matches
+`make test` in EVERY repo on the machine, not just this one — it has killed
+unrelated work. Match this repo's path, and give the process a chance to exit
+cleanly before SIGKILL (a SIGKILLed `run_tests.sh` can leave a half-written
+build cache, which is the corruption the one-run-at-a-time rule exists to
+prevent):
+
+```bash
+pkill -f "$PWD/compiler/tools/(watch-tests|run_tests)" ; sleep 2
+pkill -9 -f "$PWD/compiler/tools/(watch-tests|run_tests)" 2>/dev/null || true
+```
+
 **The unit cases run in PARALLEL by default** (`tools/run_tests_parallel.sh`,
 #824/#846 — byte-identical verdicts to the serial runner at ~2.7x on 10 cores).
 You do not need any flag. The old sequential runner is a debugging-only
