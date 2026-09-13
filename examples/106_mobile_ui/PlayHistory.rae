@@ -39,10 +39,16 @@ type PlayHistoryEntry {
 type PlayHistory {
   entries: List(PlayHistoryEntry)
   cap: Int
+  # System/instance revision (docs/ecs-systems-and-data-observation.md §7):
+  # PlayHistory is a plain resource (a List), not a ComponentTable, so it is
+  # observed with a bespoke revision int rather than table-level `changedSince`.
+  # Bumped on every append (recordPlay / restoreHistoryFromSource); the UI
+  # history observer caches the last value it reacted to (#944).
+  revision: Int
 }
 
 func createPlayHistory(cap: view Int) pub ret PlayHistory {
-  ret PlayHistory { entries: List.create(PlayHistoryEntry, cap: cap), cap: cap }
+  ret PlayHistory { entries: List.create(PlayHistoryEntry, cap: cap), cap: cap, revision: 0 }
 }
 
 func copyHistoryEntryWithArt(
@@ -223,6 +229,7 @@ func recordPlay(history: mod PlayHistory, entry: own PlayHistoryEntry) pub {
       playedAt: entry.playedAt
     }
     history.entries.add(value: own owned)
+    history.revision = history.revision + 1
     normalizePlayHistoryArtwork(history: history)
   }
 }
