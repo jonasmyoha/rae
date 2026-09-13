@@ -44,13 +44,8 @@
 #include "mangler.h"
 #include "bindgen.h"
 #include "raepack.h"
-#include "vm.h"
-#include "vm_compiler.h"
-#include "vm_registry.h"
-#include "vm_tinyexpr.h"
 #include "raepack.h"
 #include "sys_thread.h"
-#include "vm_natives_core.h"
 #include "../runtime/rae_runtime.h"
 
 typedef struct {
@@ -82,8 +77,6 @@ typedef struct {
 
 typedef enum {
   BUILD_TARGET_COMPILED = 0,
-  BUILD_TARGET_LIVE,
-  BUILD_TARGET_HYBRID,
   BUILD_TARGET_WASM
 } BuildTarget;
 
@@ -154,14 +147,6 @@ static void watch_sources_clear(WatchSources* sources);
 static void watch_sources_move(WatchSources* dest, WatchSources* src);
 static bool watch_sources_add_file(WatchSources* sources, const char* path);
 static bool module_graph_collect_watch_sources(const ModuleGraph* graph, WatchSources* sources);
-static bool compile_file_chunk(const char* file_path,
-                               Chunk* chunk,
-                               uint64_t* out_hash,
-                               WatchSources* watch_sources,
-                               const char* project_root,
-                               bool no_implicit,
-                               VmRegistry* registry,
-                               bool is_patch);
 static bool build_c_backend_output(const char* entry_file,
                                    const char* project_root,
                                    const char* out_file,
@@ -169,10 +154,7 @@ static bool build_c_backend_output(const char* entry_file,
                                    bool* out_uses_sdl3,
                                    bool* out_uses_webgpu,
                                    WatchSources* out_sources);
-static bool build_vm_output(const char* entry_file,
-                               const char* project_root,
-                               const char* out_path,
-                               bool no_implicit);static bool ensure_directory_tree(const char* dir_path);
+static bool ensure_directory_tree(const char* dir_path);
 static bool ensure_parent_directory(const char* file_path);
 static bool copy_runtime_assets(const char* dest_dir);
 static bool write_function_manifest(const AstModule* module, const char* out_c_path);
@@ -189,22 +171,10 @@ static void watch_state_free(WatchState* state);
 static bool watch_state_apply_sources(WatchState* state, WatchSources* new_sources);
 static const char* watch_state_poll_change(WatchState* state);
 static void watch_state_absorb_formatted(WatchState* state, const char* build_dir);
-static int run_vm_file(const RunOptions* run_opts, const char* project_root);
 static int run_compiled_file(const RunOptions* run_opts, const char* project_root);
-static int run_vm_watch(const RunOptions* run_opts, const char* project_root);
 
 
 static bool file_exists(const char* path);  // defined below
-
-// Live (bytecode VM) is preserved but unsupported (docs/live-vm-status.md).
-// Explicit `--target live` invocations still work, but warn — ONLY to an
-// interactive terminal. When stderr is piped/captured (the test runner, CI, the
-// devtools), stay silent so the warning never pollutes captured program output.
-static void warn_live_frozen(void) {
-  if (isatty(fileno(stderr))) {
-    fprintf(stderr, "Warning: the Live VM is frozen and may not support current Rae features.\n");
-  }
-}
 
 // Zero-config entry inference for `rae run` / `rae watch` with no file arg:
 // extract the "entry" string from a devtools.json manifest in the cwd. Not a
@@ -320,15 +290,13 @@ static bool parse_run_args(int argc, char** argv, RunOptions* opts) {
     }
     if (strcmp(arg, "--target") == 0) {
       if (i + 1 >= argc) {
-        fprintf(stderr, "error: --target expects a target name (live|compiled)\n");
+        fprintf(stderr, "error: --target expects a target name (compiled)\n");
         return false;
       }
-      if (strcmp(argv[i+1], "live") == 0) {
-        opts->target = BUILD_TARGET_LIVE;
-      } else if (strcmp(argv[i+1], "compiled") == 0) {
+      if (strcmp(argv[i+1], "compiled") == 0) {
         opts->target = BUILD_TARGET_COMPILED;
       } else {
-        fprintf(stderr, "error: unknown target '%s' for run command\n", argv[i+1]);
+        fprintf(stderr, "error: unknown target '%s' for run (only 'compiled' is supported)\n", argv[i+1]);
         return false;
       }
       i += 2;
@@ -426,22 +394,16 @@ static bool parse_build_args(int argc, char** argv, BuildOptions* opts) {
     }
     if (strcmp(arg, "--target") == 0) {
       if (i + 1 >= argc) {
-        fprintf(stderr, "error: --target expects one of live|compiled|hybrid|wasm\n");
+        fprintf(stderr, "error: --target expects one of compiled|wasm\n");
         return false;
       }
       const char* value = argv[i + 1];
-      if (strcmp(value, "live") == 0) {
-        opts->target = BUILD_TARGET_LIVE;
-      } else if (strcmp(value, "compiled") == 0) {
+      if (strcmp(value, "compiled") == 0) {
         opts->target = BUILD_TARGET_COMPILED;
-      } else if (strcmp(value, "hybrid") == 0) {
-        opts->target = BUILD_TARGET_HYBRID;
       } else if (strcmp(value, "wasm") == 0) {
         opts->target = BUILD_TARGET_WASM;
       } else {
-        fprintf(stderr,
-                "error: unknown target '%s' (expected live|compiled|hybrid|wasm)\n",
-                value);
+        fprintf(stderr, "error: unknown target '%s' (expected compiled|wasm)\n", value);
         return false;
       }
       i += 2;
@@ -520,12 +482,6 @@ static bool parse_build_args(int argc, char** argv, BuildOptions* opts) {
   }
   if (!opts->out_path) {
     switch (opts->target) {
-      case BUILD_TARGET_LIVE:
-        opts->out_path = "build/out.vmchunk";
-        break;
-      case BUILD_TARGET_HYBRID:
-        opts->out_path = "build/out.hybrid";
-        break;
       case BUILD_TARGET_WASM:
         opts->out_path = "build/web/index.html";
         break;
@@ -824,92 +780,6 @@ static bool write_f64(FILE* out, double value) {
     bytes[i] = (uint8_t)((bits >> (i * 8)) & 0xFF);
   }
   return write_bytes(out, bytes, sizeof(bytes));
-}
-
-static bool write_vm_chunk_file(const Chunk* chunk, const char* out_path) {
-  if (!chunk || !out_path) {
-    return false;
-  }
-  if (chunk->code_count > UINT32_MAX || chunk->constants_count > UINT32_MAX) {
-    fprintf(stderr, "error: VM chunk too large to serialize\n");
-    return false;
-  }
-  FILE* out = fopen(out_path, "wb");
-  if (!out) {
-    fprintf(stderr, "error: could not open '%s' for writing: %s\n", out_path, strerror(errno));
-    return false;
-  }
-  bool ok = true;
-  const uint8_t magic[4] = {'R', 'V', 'M', '1'};
-  ok = ok && write_bytes(out, magic, sizeof(magic));
-  ok = ok && write_u32(out, 1);  // format version
-  uint32_t constant_count = (uint32_t)chunk->constants_count;
-  ok = ok && write_u32(out, constant_count);
-  for (size_t i = 0; ok && i < chunk->constants_count; ++i) {
-    const Value* value = &chunk->constants[i];
-    ok = ok && write_u8(out, (uint8_t)value->type);
-    switch (value->type) {
-      case VAL_INT:
-        ok = ok && write_i64(out, value->as.int_value);
-        break;
-      case VAL_FLOAT:
-        ok = ok && write_f64(out, value->as.float_value);
-        break;
-      case VAL_CHAR:
-        ok = ok && write_i64(out, value->as.char_value);
-        break;
-      case VAL_BOOL:
-        ok = ok && write_u8(out, value->as.bool_value ? 1 : 0);
-        break;
-      case VAL_STRING: {
-        size_t len = value->as.string_value.length;
-        if (len > UINT32_MAX) {
-          fprintf(stderr, "error: string constant too long for VM chunk\n");
-          ok = false;
-          break;
-        }
-        const uint8_t* data = value->as.string_value.chars;
-        ok = ok && write_u32(out, (uint32_t)len);
-        if (len > 0) {
-          if (!data) {
-            fprintf(stderr, "error: VM string constant has length but no data\n");
-            ok = false;
-          } else {
-            ok = ok && write_bytes(out, data, len);
-          }
-        }
-        break;
-      }
-      case VAL_NONE:
-        // No extra data for VAL_NONE
-        break;
-      default:
-        fprintf(stderr, "error: unknown VM constant type\n");
-        ok = false;
-        break;
-    }
-  }
-  uint32_t code_size = (uint32_t)chunk->code_count;
-  ok = ok && write_u32(out, code_size);
-  if (code_size > 0) {
-    ok = ok && write_bytes(out, chunk->code, chunk->code_count);
-  }
-  uint32_t line_count = chunk->lines ? (uint32_t)chunk->code_count : 0;
-  ok = ok && write_u32(out, line_count);
-  if (chunk->lines) {
-    for (size_t i = 0; ok && i < chunk->code_count; ++i) {
-      int line = chunk->lines[i];
-      uint32_t line_value = line < 0 ? 0u : (uint32_t)line;
-      ok = ok && write_u32(out, line_value);
-    }
-  }
-  if (fclose(out) != 0) {
-    ok = false;
-  }
-  if (!ok) {
-    fprintf(stderr, "error: failed to write VM bytecode to '%s'\n", out_path);
-  }
-  return ok;
 }
 
 static char* type_ref_to_cstr(const AstTypeRef* type) {
@@ -2269,7 +2139,7 @@ static void print_usage(const char* prog) {
   fprintf(stderr, "                           --check-toolchain (strict: require a tagged Rae\n");
   fprintf(stderr, "                           matching the project's rae.raepack requirement;\n");
   fprintf(stderr, "                           RAE_TOOLCHAIN_CHECK=off skips the non-strict check),\n");
-  fprintf(stderr, "                           --target <live|compiled>,\n");
+  fprintf(stderr, "                           --target compiled,\n");
   fprintf(stderr, "                           --profile <dev|release> (or --debug/--release;\n");
   fprintf(stderr, "                           compiled target: dev=-O0 -g, release=-O2 -DNDEBUG)\n");
   fprintf(stderr, "  pack <file>     Validate and summarize a .raepack file\n");
@@ -2279,7 +2149,7 @@ static void print_usage(const char* prog) {
   fprintf(stderr,
           "                  Options: --entry <file>, --project <dir>, --out <file>\n");
   fprintf(stderr,
-          "                           --target <live|compiled|hybrid|wasm>, --profile <dev|release>\n");
+          "                           --target <compiled|wasm>, --profile <dev|release>\n");
   fprintf(stderr,
           "  watch <file>    Compiled hot-reload supervisor. Builds and runs <file>,\n");
   fprintf(stderr,
@@ -2491,66 +2361,6 @@ static int run_raepack_file(const PackOptions* opts) {
   return 0;
 }
 
-static bool compile_file_chunk(const char* file_path,
-                               Chunk* chunk,
-                               uint64_t* out_hash,
-                               WatchSources* watch_sources,
-                               const char* project_root,
-                               bool no_implicit,
-                               VmRegistry* registry,
-                               bool is_patch) {
-  Arena* arena = arena_create(64 * 1024 * 1024);
-  if (!arena) {
-    diag_fatal("could not allocate arena");
-  }
-  ModuleGraph graph;
-  if (!module_graph_init(&graph, arena, project_root)) {
-    arena_destroy(arena);
-    return false;
-  }
-  WatchSources built_sources;
-  watch_sources_init(&built_sources);
-  uint64_t combined_hash = 0;
-  uint64_t* hash_target = out_hash ? &combined_hash : NULL;
-  if (!module_graph_build(&graph, file_path, hash_target, no_implicit)) {
-    watch_sources_clear(&built_sources);
-    module_graph_free(&graph);
-    arena_destroy(arena);
-    return false;
-  }
-  if (watch_sources) {
-    if (!module_graph_collect_watch_sources(&graph, &built_sources)) {
-      watch_sources_clear(&built_sources);
-      module_graph_free(&graph);
-      arena_destroy(arena);
-      return false;
-    }
-  }
-  AstModule merged = merge_module_graph(&graph);
-  
-  CompilerContext ctx;
-  compiler_init(&ctx, arena);
-  
-  if (!sema_analyze_module(&ctx, &merged)) {
-      watch_sources_clear(&built_sources);
-      module_graph_free(&graph);
-      arena_destroy(arena);
-      return false;
-  }
-
-  bool ok = vm_compile_module(&ctx, &merged, chunk, file_path, registry, is_patch);
-  module_graph_free(&graph);
-  arena_destroy(arena);
-  if (ok && out_hash) {
-    *out_hash = combined_hash;
-  }
-  if (ok && watch_sources) {
-    watch_sources_move(watch_sources, &built_sources);
-  }
-  watch_sources_clear(&built_sources);
-  return ok;
-}
-
 static bool build_c_backend_output(const char* entry_file,
                                    const char* project_root,
                                    const char* out_file,
@@ -2644,17 +2454,6 @@ static bool build_c_backend_output(const char* entry_file,
       return false;
   }
 
-  VmRegistry registry;
-  vm_registry_init(&registry);
-  TickCounter tick_counter = {.next = 0};
-  if (!register_default_natives(&registry, &tick_counter)) {
-      fprintf(stderr, "error: failed to register natives for build\n");
-      vm_registry_free(&registry);
-      module_graph_free(&graph);
-      arena_destroy(arena);
-      return false;
-  }
-
   int errs_before_emit = diag_error_count();
   bool ok = c_backend_emit_module(&ctx, &merged, out_file);
   /* The backend reports semantic errors it can only see with full type
@@ -2674,7 +2473,6 @@ static bool build_c_backend_output(const char* entry_file,
       ok = copy_runtime_assets(".");
     }
   }
-  vm_registry_free(&registry);
   module_graph_free(&graph);
   arena_destroy(arena);
   if (ok && out_sources) {
@@ -2682,223 +2480,6 @@ static bool build_c_backend_output(const char* entry_file,
   }
   watch_sources_clear(&collected_sources);
   return ok;
-}
-
-static bool build_vm_output(const char* entry_file,
-                               const char* project_root,
-                               const char* out_path,
-                               bool no_implicit) {
-  if (!out_path || out_path[0] == '\0') {
-    fprintf(stderr, "error: build requires a valid output path\n");
-    return false;
-  }
-  if (!ensure_parent_directory(out_path)) {
-    return false;
-  }
-  Arena* arena = arena_create(64 * 1024 * 1024);
-  if (!arena) {
-    diag_fatal("could not allocate arena");
-  }
-  ModuleGraph graph;
-  if (!module_graph_init(&graph, arena, project_root)) {
-    arena_destroy(arena);
-    return false;
-  }
-  bool ok = module_graph_build(&graph, entry_file, NULL, no_implicit);
-  if (!ok) {    module_graph_free(&graph);
-    arena_destroy(arena);
-    return false;
-  }
-  AstModule merged = merge_module_graph(&graph);
-
-  CompilerContext ctx;
-  compiler_init(&ctx, arena);
-
-  // Semantic analysis must run before bytecode emission, exactly as the
-  // `run` path (compile_file_chunk) does. Without it, expression
-  // `resolved_type`s are never set, so compile-time builtin dispatch that
-  // keys on them — e.g. `Task(T).get()` needing `resolved_type == TYPE_TASK`
-  // — fails with a spurious "unknown method". `build --target live` was the
-  // gap (the example/VM-compile smoke gate exercises this path).
-  if (!sema_analyze_module(&ctx, &merged)) {
-    module_graph_free(&graph);
-    arena_destroy(arena);
-    return false;
-  }
-
-  // We need a registry purely so globals get slots assigned during
-  // bytecode emission — without it `vm_registry_ensure_global` is
-  // skipped and any cross-file `let foo: Int = ...` reference fails
-  // resolution with "unknown identifier in VM". `run` already builds
-  // a registry; `build` was the gap.
-  VmRegistry registry;
-  vm_registry_init(&registry);
-
-  Chunk chunk;
-  chunk_init(&chunk);
-  ok = vm_compile_module(&ctx, &merged, &chunk, entry_file, &registry, false);
-  if (ok) {
-    ok = write_vm_chunk_file(&chunk, out_path);
-  }
-  if (ok) {
-    ok = write_function_manifest(&merged, out_path);
-  }
-  chunk_free(&chunk);
-  vm_registry_free(&registry);
-  module_graph_free(&graph);
-  arena_destroy(arena);
-  return ok;
-}
-
-static bool build_hybrid_output(const char* entry_file,
-                                const char* project_root,
-                                const char* out_path) {
-  if (!out_path || out_path[0] == '\0') {
-    fprintf(stderr, "error: build requires a valid output path\n");
-    return false;
-  }
-  if (!ensure_directory_tree(out_path)) {
-    return false;
-  }
-  char vm_dir[PATH_MAX];
-  char compiled_dir[PATH_MAX];
-  if (snprintf(vm_dir, sizeof(vm_dir), "%s/vm", out_path) >= (int)sizeof(vm_dir)) {
-    fprintf(stderr, "error: hybrid vm directory path too long\n");
-    return false;
-  }
-  if (snprintf(compiled_dir, sizeof(compiled_dir), "%s/compiled", out_path) >=
-      (int)sizeof(compiled_dir)) {
-    fprintf(stderr, "error: hybrid compiled directory path too long\n");
-    return false;
-  }
-  if (!ensure_directory_tree(vm_dir) || !ensure_directory_tree(compiled_dir)) {
-    return false;
-  }
-  char* entry_stem = derive_entry_stem(entry_file);
-  if (!entry_stem) {
-    fprintf(stderr, "error: unable to derive entry stem for hybrid build\n");
-    return false;
-  }
-  char chunk_path[PATH_MAX];
-  char c_path[PATH_MAX];
-  if (snprintf(chunk_path, sizeof(chunk_path), "%s/%s.vmchunk", vm_dir, entry_stem) >=
-      (int)sizeof(chunk_path)) {
-    fprintf(stderr, "error: hybrid VM chunk path too long\n");
-    free(entry_stem);
-    return false;
-  }
-  if (snprintf(c_path, sizeof(c_path), "%s/%s.c", compiled_dir, entry_stem) >=
-      (int)sizeof(c_path)) {
-    fprintf(stderr, "error: hybrid C output path too long\n");
-    free(entry_stem);
-    return false;
-  }
-  free(entry_stem);
-
-  Arena* arena = arena_create(64 * 1024 * 1024);
-  if (!arena) {
-    diag_fatal("could not allocate arena");
-  }
-  ModuleGraph graph;
-  if (!module_graph_init(&graph, arena, project_root)) {
-    arena_destroy(arena);
-    return false;
-  }
-  bool ok = module_graph_build(&graph, entry_file, NULL, false);
-  if (!ok) {
-    module_graph_free(&graph);
-    arena_destroy(arena);
-    return false;
-  }
-  AstModule merged = merge_module_graph(&graph);
-
-  CompilerContext ctx = {0};
-  ctx.ast_arena = arena;
-  ctx.all_decl_cap = 8192;
-  ctx.all_decls = arena_alloc(arena, sizeof(AstDecl*) * ctx.all_decl_cap);
-  // generic_types + specialized_funcs GROW dynamically (RAE_GROW1), so malloc'd.
-  ctx.generic_type_cap = 1024;
-  ctx.generic_types = malloc(sizeof(AstTypeRef*) * ctx.generic_type_cap);
-  ctx.emitted_generic_type_cap = 1024;
-  ctx.emitted_generic_types = arena_alloc(arena, sizeof(AstTypeRef*) * ctx.emitted_generic_type_cap);
-  ctx.specialized_func_cap = 2048;
-  ctx.specialized_funcs = malloc(sizeof(FunctionSpecialization) * ctx.specialized_func_cap);
-  ctx.emitted_method_cap = 2048;
-  ctx.emitted_method_names = arena_alloc(arena, sizeof(char*) * ctx.emitted_method_cap);
-
-  VmRegistry registry;
-  vm_registry_init(&registry);
-  TickCounter tick_counter = {.next = 0};
-  if (!register_default_natives(&registry, &tick_counter)) {
-      fprintf(stderr, "error: failed to register natives for build\n");
-      vm_registry_free(&registry);
-      module_graph_free(&graph);
-      arena_destroy(arena);
-      return false;
-  }
-
-  Chunk chunk;
-  chunk_init(&chunk);
-  ok = vm_compile_module(&ctx, &merged, &chunk, entry_file, &registry, false);
-  if (ok) {
-    ok = write_vm_chunk_file(&chunk, chunk_path);
-  }
-  if (ok) {
-    ok = write_function_manifest(&merged, chunk_path);
-  }
-  if (ok) {
-    int errs_before = diag_error_count();
-    ok = c_backend_emit_module(&ctx, &merged, c_path);
-    if (diag_error_count() > errs_before) ok = false;
-  }
-  if (ok) {
-    ok = copy_runtime_assets(compiled_dir);
-  }
-
-  vm_registry_free(&registry);
-  chunk_free(&chunk);
-  module_graph_free(&graph);
-  arena_destroy(arena);
-  return ok;
-}
-
-static int run_vm_file(const RunOptions* run_opts, const char* project_root) {
-  const char* file_path = run_opts->input_path;
-  
-  VmRegistry registry;
-  vm_registry_init(&registry);
-  TickCounter tick_counter = {.next = 0};
-  if (!register_default_natives(&registry, &tick_counter)) {
-    fprintf(stderr, "error: failed to register VM native functions\n");
-    vm_registry_free(&registry);
-    return 1;
-  }
-
-  Chunk chunk;
-  if (!compile_file_chunk(file_path, &chunk, NULL, NULL, project_root, run_opts->no_implicit, &registry, false)) {
-    vm_registry_free(&registry);
-    return 1;
-  }
-
-  VM* vm = malloc(sizeof(VM));
-  if (!vm) {
-    fprintf(stderr, "error: could not allocate VM\n");
-    chunk_free(&chunk);
-    return 1;
-  }
-  vm_init(vm);
-  vm->timeout_seconds = run_opts->timeout;
-  
-  vm_set_registry(vm, &registry);
-  VMResult result = vm_run(vm, &chunk);
-  if (result == VM_RUNTIME_TIMEOUT) {
-      fprintf(stderr, "info: execution timed out after %d seconds\n", run_opts->timeout);
-  }
-  vm_registry_free(&registry);
-  chunk_free(&chunk);
-  vm_free(vm);
-  free(vm);
-  return (result == VM_RUNTIME_OK || result == VM_RUNTIME_TIMEOUT) ? 0 : 1;
 }
 
 // Invoke GCC to link a Rae-generated `.c` (produced by build_c_backend_output)
@@ -3519,37 +3100,6 @@ static pid_t watch_spawn_child(const char* bin_path,
   return pid;
 }
 
-// Phase 5: Live-mode child is the `rae` binary itself running the entry
-// via the bytecode VM. The Live VM hot-recompiles on its own; the
-// supervisor still drives the reload-signal protocol so the same
-// app-side state contract (saveState → exit → loadState) works
-// identically across targets.
-static pid_t watch_spawn_live_child(const char* rae_exe,
-                                    const char* entry,
-                                    const char* project_root,
-                                    const char* channel_dir) {
-  pid_t pid = fork();
-  if (pid < 0) {
-    fprintf(stderr, "rae watch: fork failed (%s)\n", strerror(errno));
-    return -1;
-  }
-  if (pid == 0) {
-    if (channel_dir && channel_dir[0]) setenv(RAE_HOT_RELOAD_DIR_ENV, channel_dir, 1);
-    // execl: rae run --target live --project <root> <entry>
-    if (project_root && project_root[0]) {
-      execl(rae_exe, rae_exe, "run", "--target", "live",
-            "--project", project_root, entry, (char*)NULL);
-    } else {
-      execl(rae_exe, rae_exe, "run", "--target", "live",
-            entry, (char*)NULL);
-    }
-    fprintf(stderr, "rae watch: execl(%s run ...) failed (%s)\n",
-            rae_exe, strerror(errno));
-    _exit(127);
-  }
-  return pid;
-}
-
 // Monotonic wall clock in milliseconds. Used for the health window
 // (whether a freshly-spawned child has survived long enough to
 // promote its build to last-known-good).
@@ -3609,8 +3159,6 @@ static bool watch_build_into_dir(const char* entry,
 
 static int run_watch_supervisor(const RunOptions* run_opts, const char* project_root) {
   const char* entry = run_opts->input_path;
-  bool is_live = (run_opts->target == BUILD_TARGET_LIVE);
-  if (is_live) warn_live_frozen();
   // Child apps run with cwd = lib-root so root-relative asset paths resolve
   // (zero-config folder mode only). The supervisor itself stays in the cwd, so
   // .rae/build stays in the folder.
@@ -3654,18 +3202,10 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
   char build_id[64] = "b0";
 
   printf("rae watch: target=%s entry=%s\n",
-         is_live ? "live" : "compiled", entry);
+         "compiled", entry);
   fflush(stdout);
 
-  if (is_live) {
-    // Live mode: the VM compiles on each spawn; nothing to pre-build.
-    // Just confirm the file resolves.
-    if (!file_exists(entry)) {
-      fprintf(stderr, "rae watch: entry file '%s' not found\n", entry);
-      return 1;
-    }
-    watch_write_build_status(dotrae, true, "live");
-  } else {
+  {
     build_seq = 1;
     snprintf(build_id, sizeof(build_id), "b%lld", build_seq);
     char build_dir[PATH_MAX];
@@ -3711,9 +3251,7 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
   sigaction(SIGHUP, &sa, NULL);
 
   // ---- Spawn first child + arm health window ----
-  pid_t child = is_live
-    ? watch_spawn_live_child(g_rae_executable_path, entry, project_root, dotrae)
-    : watch_spawn_child(current_bin, lib_root, dotrae);
+  pid_t child = watch_spawn_child(current_bin, lib_root, dotrae);
   if (child < 0) {
     watch_state_free(&ws);
     return 1;
@@ -3733,7 +3271,7 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
   long long retry_at = 0;
 
   printf("rae watch: pid=%d running %s\n",
-         (int)child, is_live ? entry : current_bin);
+         (int)child, current_bin);
   fflush(stdout);
 
   while (!g_watch_stop) {
@@ -3760,7 +3298,7 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
         // Phase 4: bad exit inside the health window → fall back.
         // The supervisor stays alive only in this one case (try the
         // previous-good binary instead of shutting down).
-        if (!is_live && in_window && bad && previous_bin[0]) {
+        if (in_window && bad && previous_bin[0]) {
           fprintf(stderr,
                   "rae watch: new build unhealthy; falling back to previous-good\n");
           fflush(stderr);
@@ -3839,12 +3377,7 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
     watch_state_apply_sources(&ws, &new_sources);
 
     char new_bin[PATH_MAX] = {0};
-    if (is_live) {
-      // Live: no compile step here. The VM JITs at spawn; if the
-      // source is broken the new child will fail and we'll learn
-      // about it via the health window. Optimistic build.status.
-      watch_write_build_status(dotrae, true, "live");
-    } else {
+    {
       build_seq += 1;
       snprintf(build_id, sizeof(build_id), "b%lld", build_seq);
       char build_dir[PATH_MAX];
@@ -3887,7 +3420,7 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
 
     // Promote the previously-running binary to last-known-good (if it
     // survived its own health window). The new bin becomes current.
-    if (!is_live) {
+    {
       if (current_promoted && current_bin[0]) {
         strncpy(previous_bin, current_bin, sizeof(previous_bin) - 1);
         previous_bin[sizeof(previous_bin) - 1] = '\0';
@@ -3897,9 +3430,7 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
     }
 
     // Spawn the new child.
-    child = is_live
-      ? watch_spawn_live_child(g_rae_executable_path, entry, project_root, dotrae)
-      : watch_spawn_child(current_bin, lib_root, dotrae);
+    child = watch_spawn_child(current_bin, lib_root, dotrae);
     if (child < 0) break;
     spawn_t = watch_now_ms();
     health_until = spawn_t + HEALTH_MS;
@@ -4168,11 +3699,7 @@ static int run_command(const char* cmd, int argc, char** argv) {
                       }
 
                       RunOptions adjusted_opts = run_opts;
-                      if (run_opts.target == BUILD_TARGET_COMPILED) {
-                        return run_compiled_file(&adjusted_opts, final_root);
-                      }
-                      warn_live_frozen();
-                      return run_opts.watch ? run_vm_watch(&adjusted_opts, final_root) : run_vm_file(&adjusted_opts, final_root);
+                      return run_compiled_file(&adjusted_opts, final_root);
               } else if (is_watch) {
                       RunOptions run_opts;
                       if (!parse_run_args(argc, argv, &run_opts)) {
@@ -4215,14 +3742,6 @@ static int run_command(const char* cmd, int argc, char** argv) {
     }
 
     switch (build_opts.target) {
-      case BUILD_TARGET_LIVE:
-        warn_live_frozen();
-        return build_vm_output(build_opts.entry_path,
-                               final_root,
-                               build_opts.out_path,
-                               build_opts.no_implicit) ?
-                   0 :
-                   1;
       case BUILD_TARGET_COMPILED: {
         if (!build_opts.emit_c) {
           fprintf(stderr, "error: --emit-c is required for compiled builds\n");
@@ -4263,12 +3782,6 @@ static int run_command(const char* cmd, int argc, char** argv) {
         }
         return okc ? 0 : 1;
       }
-      case BUILD_TARGET_HYBRID:
-        return build_hybrid_output(build_opts.entry_path,
-                                   final_root,
-                                   build_opts.out_path) ?
-                   0 :
-                   1;
       case BUILD_TARGET_WASM: {
         char temp_c[PATH_MAX];
         snprintf(temp_c, sizeof(temp_c), "/tmp/rae_wasm_%d.c", getpid());
@@ -5255,39 +4768,6 @@ static const char* watch_state_poll_change(WatchState* state) {
   }
   return NULL;
 }
-
-typedef struct {
-    WatchState* state;
-    VM* vm;
-    sys_mutex_t mutex;
-    volatile bool running;
-    volatile bool change_detected;
-} WatcherContext;
-
-static void* watch_thread_func(void* arg) {
-    WatcherContext* ctx = (WatcherContext*)arg;
-    while (ctx->running) {
-        sys_sleep_ms(250); // Poll every 250ms
-        
-        sys_mutex_lock(&ctx->mutex);
-        if (ctx->change_detected) {
-            sys_mutex_unlock(&ctx->mutex);
-            continue; // Waiting for main thread to handle it
-        }
-        
-        const char* changed = watch_state_poll_change(ctx->state);
-        if (changed) {
-            ctx->change_detected = true;
-            if (ctx->vm) {
-                ctx->vm->reload_requested = true;
-                strncpy(ctx->vm->pending_reload_path, changed, sizeof(ctx->vm->pending_reload_path) - 1);
-            }
-        }
-        sys_mutex_unlock(&ctx->mutex);
-    }
-    return NULL;
-}
-
 /* Sema can crash (SIGSEGV) when re-analysing a module that contains
  * parse-level garbage — see 399_code_hot_reload_error. The crash is a
  * real bug in type_mangle_recursive's handling of partially-resolved
@@ -5308,293 +4788,4 @@ static void watch_compile_sigsegv(int sig) {
    * re-raise so the OS can dump core. */
   signal(sig, SIG_DFL);
   raise(sig);
-}
-
-static bool compile_file_chunk_protected(const char* file_path,
-                                         Chunk* chunk,
-                                         uint64_t* out_hash,
-                                         WatchSources* watch_sources,
-                                         const char* project_root,
-                                         bool no_implicit,
-                                         VmRegistry* registry,
-                                         bool is_patch) {
-  struct sigaction prev_segv, prev_bus, sa;
-  memset(&sa, 0, sizeof(sa));
-  sa.sa_handler = watch_compile_sigsegv;
-  sigemptyset(&sa.sa_mask);
-  sa.sa_flags = SA_NODEFER;
-  sigaction(SIGSEGV, &sa, &prev_segv);
-  sigaction(SIGBUS,  &sa, &prev_bus);
-
-  bool ok;
-  if (sigsetjmp(g_watch_compile_jmp, 1) == 0) {
-    g_watch_compile_armed = 1;
-    ok = compile_file_chunk(file_path, chunk, out_hash, watch_sources,
-                            project_root, no_implicit, registry, is_patch);
-    g_watch_compile_armed = 0;
-  } else {
-    /* Caught SIGSEGV / SIGBUS inside compile_file_chunk. */
-    fprintf(stderr,
-            "%s: hot-reload skipped: unknown identifier or malformed "
-            "source crashed the compiler — staying on previous build\n",
-            file_path);
-    ok = false;
-  }
-
-  sigaction(SIGSEGV, &prev_segv, NULL);
-  sigaction(SIGBUS,  &prev_bus,  NULL);
-  return ok;
-}
-
-static int run_vm_watch(const RunOptions* run_opts, const char* project_root) {
-  const char* file_path = run_opts->input_path;
-  printf("Watching '%s' for changes (Ctrl+C to exit)\n", file_path);
-
-  VmRegistry registry;
-  vm_registry_init(&registry);
-  TickCounter tick_counter = {.next = 0};
-  if (!register_default_natives(&registry, &tick_counter)) {
-    fprintf(stderr, "error: failed to register VM native functions\n");
-    vm_registry_free(&registry);
-    return 1;
-  }
-  
-  WatchState watch_state;
-  watch_state_init(&watch_state, file_path);
-
-
-
-  WatcherContext ctx;
-
-  ctx.state = &watch_state;
-
-  ctx.vm = NULL;
-
-  ctx.running = true;
-
-  ctx.change_detected = false;
-
-  sys_mutex_init(&ctx.mutex);
-
-
-
-  sys_thread_t watch_thread;
-
-  if (!sys_thread_create(&watch_thread, watch_thread_func, &ctx)) {
-
-      fprintf(stderr, "error: failed to create watcher thread\n");
-
-      return 1;
-
-  }
-
-
-
-    // Initial compilation
-
-
-
-    Chunk chunk;
-
-
-
-    uint64_t file_hash = 0;
-
-
-
-    WatchSources sources;
-
-
-
-    watch_sources_init(&sources);
-
-
-
-    
-
-
-
-        if (!compile_file_chunk(file_path, &chunk, &file_hash, &sources, project_root, run_opts->no_implicit, &registry, false)) {
-
-
-
-    
-
-
-
-          vm_registry_free(&registry);
-
-
-
-    
-
-
-
-          ctx.running = false;
-
-
-
-    
-
-
-
-          sys_thread_join(watch_thread);
-
-
-
-    
-
-
-
-          sys_mutex_destroy(&ctx.mutex);
-
-
-
-    
-
-
-
-          return 1;
-
-
-
-    
-
-
-
-        }
-
-
-
-    
-
-
-
-    
-
-  
-
-  watch_state_apply_sources(&watch_state, &sources);
-
-  vm_registry_load(&registry, file_path, chunk); // Takes ownership of chunk code
-
-  
-
-  VM* vm = malloc(sizeof(VM));
-
-  if (!vm) {
-
-      fprintf(stderr, "error: could not allocate VM\n");
-
-      return 1;
-
-  }
-
-  vm_init(vm);
-
-  vm->timeout_seconds = run_opts->timeout;
-
-  vm_set_registry(vm, &registry);
-
-  
-
-  // Link VM to watcher
-
-  sys_mutex_lock(&ctx.mutex);
-
-  ctx.vm = vm;
-
-  sys_mutex_unlock(&ctx.mutex);
-
-
-
-
-  int exit_code = 0;
-  while (ctx.running) {
-    // Non-blocking check for stdin EOF in non-TTY contexts (e.g. CI). The previous
-    // implementation called fgetc() which blocked when stdin was redirected from
-    // /dev/null or otherwise had no data ready, preventing the VM from ever
-    // running. Use poll() with 0 timeout so we only consume stdin when something
-    // is actually there.
-    if (!isatty(fileno(stdin))) {
-        struct pollfd pfd = { .fd = fileno(stdin), .events = POLLIN };
-        int pr = poll(&pfd, 1, 0);
-        if (pr > 0 && (pfd.revents & (POLLIN | POLLHUP))) {
-            int c = fgetc(stdin);
-            if (c == EOF) {
-                ctx.running = false;
-                break;
-            }
-            ungetc(c, stdin);
-        }
-    }
-
-    for (;;) {
-      if (!ctx.running) break;
-      VmModule* module = vm_registry_find(&registry, file_path);
-      if (!module) break;
-
-      VMResult result = vm_run(vm, &module->chunk);
-      
-      if (result == VM_RUNTIME_RELOAD) {
-          Chunk new_chunk;
-          chunk_init(&new_chunk);
-          uint64_t new_hash = 0;
-          WatchSources new_sources;
-          watch_sources_init(&new_sources);
-          
-          if (compile_file_chunk_protected(file_path, &new_chunk, &new_hash, &new_sources, project_root, run_opts->no_implicit, &registry, true)) {
-              sys_mutex_lock(&ctx.mutex);
-              bool patched = vm_hot_patch(vm, &new_chunk);
-              vm->reload_requested = false;
-              sys_mutex_unlock(&ctx.mutex);
-              
-              if (patched) {
-                  watch_state_apply_sources(&watch_state, &new_sources);
-              } else {
-              }
-              chunk_free(&new_chunk);
-              watch_sources_clear(&new_sources);
-          } else {
-              sys_mutex_lock(&ctx.mutex);
-              vm->reload_requested = false;
-              sys_mutex_unlock(&ctx.mutex);
-              chunk_free(&new_chunk);
-              watch_sources_clear(&new_sources);
-          }
-          
-          sys_mutex_lock(&ctx.mutex);
-          ctx.change_detected = false;
-          sys_mutex_unlock(&ctx.mutex);
-          continue;
-      }
-      
-      if (result == VM_RUNTIME_TIMEOUT) {
-          fprintf(stderr, "info: [watch] execution timed out\n");
-      } else if (result != VM_RUNTIME_OK) {
-          fprintf(stderr, "info: [watch] execution error\n");
-          exit_code = 1;
-      }
-      break;
-    }
-  }
-
-  // Cleanup
-  ctx.running = false;
-  sys_thread_join(watch_thread);
-
-  sys_mutex_lock(&ctx.mutex);
-  ctx.vm = NULL; // Signal watcher thread that VM is gone
-  sys_mutex_unlock(&ctx.mutex);
-
-  sys_mutex_destroy(&ctx.mutex);
-  vm_free(vm);
-  free(vm);
-
-  vm_registry_free(&registry);
-
-  watch_state_free(&watch_state);
-
-  return exit_code;
-
 }
