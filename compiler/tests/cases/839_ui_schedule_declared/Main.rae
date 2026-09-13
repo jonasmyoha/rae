@@ -1,0 +1,173 @@
+# #939: the UI pipeline on a lib/ecs Schedule with DECLARED read/write tables.
+# Proves (a) createUiPipeline registers every lib/ui system in the canonical
+# order the index constants name, and (b) the schedule's declared-set dirty
+# judgement for layout and transform is IDENTICAL, frame by frame, to the
+# hand-written LayoutCache / TransformCache wrappers it generalizes — same
+# first run, same idle skip, same reaction to a read-table mutation, to an
+# unrelated table, to a bare entity allocation (the entity-count rule), and
+# the same deliberate non-tracking of extentAnchors. Headless: no window.
+import String
+import ui/Components
+open ui/Ecs
+open ui/Pipeline
+open ui/layoutSystem/LayoutSystem
+open ui/Transform
+open ecs/ComponentTable
+open ecs/Schedule
+
+type Compare {
+  frame: String
+  layoutSame: Bool
+  transformSame: Bool
+}
+
+# One frame through BOTH mechanisms; runs the systems exactly as the wrappers
+# would, so the two paths mutate the same world in the same way.
+func frame(
+  label: view String
+  world: mod UiWorld
+  layoutCache: mod LayoutCache
+  transformCache: mod TransformCache
+  schedule: mod Schedule
+) ret Compare {
+  let cacheLayout: Bool = ifDirty(world: world, cache: layoutCache)
+  let schedLayout: Bool = uiShouldRun(schedule: schedule, world: world, index: uiSystemLayout)
+  let cacheTransform: Bool = systemIfDirty(world: world, cache: transformCache)
+  let schedTransform: Bool = uiShouldRun(schedule: schedule, world: world, index: uiSystemTransform)
+  log(
+    "{label}: layout cache={cacheLayout} sched={schedLayout} | transform cache={cacheTransform} sched={schedTransform}"
+  )
+  ret Compare {
+    frame: "{label}"
+    layoutSame: cacheLayout is schedLayout
+    transformSame: cacheTransform is schedTransform
+  }
+}
+
+func main() {
+  let world: UiWorld = createUiWorld()
+  let sched: Schedule = createUiPipeline(world: world)
+
+  # (a) order + count
+  log("systems: {scheduleSize(schedule: sched)} (expected {uiSystemCount})")
+  log(
+    "order: {scheduleName(schedule: sched, index: uiSystemInput)} {scheduleName(
+      schedule: sched
+      index: uiSystemWidgetStyle
+    )} {scheduleName(schedule: sched, index: uiSystemSafeArea)} {scheduleName(
+      schedule: sched
+      index: uiSystemLayout
+    )} {scheduleName(schedule: sched, index: uiSystemFit)} {scheduleName(
+      schedule: sched
+      index: uiSystemTransform
+    )} {scheduleName(schedule: sched, index: uiSystemHoverScale)} {scheduleName(
+      schedule: sched
+      index: uiSystemVisualBounds
+    )} {scheduleName(schedule: sched, index: uiSystemRender)}"
+  )
+  log(
+    "layout declares {scheduleReads(schedule: sched, index: uiSystemLayout).length} reads, {scheduleWrites(
+      schedule: sched
+      index: uiSystemLayout
+    ).length} writes; transform {scheduleReads(schedule: sched, index: uiSystemTransform).length} reads, {scheduleWrites(
+      schedule: sched
+      index: uiSystemTransform
+    ).length} writes; render {scheduleWrites(schedule: sched, index: uiSystemRender).length} writes"
+  )
+
+  # (b) equivalence over a mutation sequence
+  let root: EntityId = createEntity(world: world)
+  let r: Rect = { position: { x: 0.0, y: 0.0 }, size: { x: 200.0, y: 100.0 } }
+  componentSet(this: world.rects, entity: root, data: r)
+  let sz: Size = {
+    w: SizeAxis { mode: SizeMode.fixed, min: -1, max: -1 }
+    h: SizeAxis { mode: SizeMode.fixed, min: -1, max: -1 }
+  }
+  componentSet(this: world.sizes, entity: root, data: sz)
+
+  let layoutCache: LayoutCache = createLayoutCache()
+  let transformCache: TransformCache = createTransformCache()
+  var allSame: Bool = true
+
+  let f1: Compare = frame(
+    label: "first"
+    world: world
+    layoutCache: layoutCache
+    transformCache: transformCache
+    schedule: sched
+  )
+  allSame = allSame and f1.layoutSame and f1.transformSame
+
+  let f2: Compare = frame(
+    label: "idle"
+    world: world
+    layoutCache: layoutCache
+    transformCache: transformCache
+    schedule: sched
+  )
+  allSame = allSame and f2.layoutSame and f2.transformSame
+
+  # a layout read table: layout runs; it rewrites computedRects, which
+  # transform reads, so transform runs too
+  let inactive: Active = { value: false }
+  componentSet(this: world.actives, entity: root, data: inactive)
+  let f3: Compare = frame(
+    label: "actives"
+    world: world
+    layoutCache: layoutCache
+    transformCache: transformCache
+    schedule: sched
+  )
+  allSame = allSame and f3.layoutSame and f3.transformSame
+
+  # a table neither tracks
+  let text: Text = { text: "hi", styleId: "", wrapWidthMode: WrapWidthMode.none }
+  componentSet(this: world.texts, entity: root, data: text)
+  let f4: Compare = frame(
+    label: "texts"
+    world: world
+    layoutCache: layoutCache
+    transformCache: transformCache
+    schedule: sched
+  )
+  allSame = allSame and f4.layoutSame and f4.transformSame
+
+  # a bare entity: no table moves, the alive count does — both must re-run
+  let bare: EntityId = createEntity(world: world)
+  let f5: Compare = frame(
+    label: "bareEntity"
+    world: world
+    layoutCache: layoutCache
+    transformCache: transformCache
+    schedule: sched
+  )
+  allSame = allSame and f5.layoutSame and f5.transformSame
+
+  # a transform-only read: layout skips, transform runs
+  let opacity: Opacity = { value: 0.5 }
+  componentSet(this: world.opacities, entity: root, data: opacity)
+  let f6: Compare = frame(
+    label: "opacities"
+    world: world
+    layoutCache: layoutCache
+    transformCache: transformCache
+    schedule: sched
+  )
+  allSame = allSame and f6.layoutSame and f6.transformSame
+
+  # extentAnchors: layout READS it but deliberately does not track it — the
+  # schedule must reproduce that exclusion, not "fix" it
+  let anchor: ExtentAnchor = { h: HExtent.left }
+  componentSet(this: world.extentAnchors, entity: root, data: anchor)
+  let f7: Compare = frame(
+    label: "extentAnchors"
+    world: world
+    layoutCache: layoutCache
+    transformCache: transformCache
+    schedule: sched
+  )
+  allSame = allSame and f7.layoutSame and f7.transformSame
+
+  log("declared schedule == hand-written caches on every frame: {allSame}")
+  let unused: EntityId = bare
+}

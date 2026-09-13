@@ -1,0 +1,266 @@
+# lib/ui — Pipeline: the UI systems on a lib/ecs Schedule with DECLARED
+# read/write tables (#939).
+#
+# createUiPipeline registers every lib/ui system as a Schedule entry in its
+# canonical run order, each with the UiWorld tables it reads and writes,
+# resolved from the field names by reflection (tableIdByName). The per-frame
+# runner then asks `uiShouldRun(schedule, world, index)` before calling a
+# system — the schedule computes the read generation from the declaration, no
+# caller-supplied generation. Rae has no first-class function references, so the
+# app still CALLS the systems; the schedule owns the order, the declarations and
+# the dirty state.
+#
+# Dirty-skip semantics are unchanged from the hand-written wrappers: only
+# layoutSystem and transformSystem skip when clean (their entries declare EXACTLY
+# the tables LayoutCache / TransformCache tracked, deliberate exclusions
+# included — see the notes on each), and both also re-run when the live entity
+# count moves. Every other system runs every frame; its sets are declaration,
+# for a future parallel stager (docs/parallelism-first-plan.md Phase 2).
+#
+# The entry indices are the constants below; createUiPipeline registers in that
+# exact order and the fixture asserts it.
+import Sys
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Schedule
+open ui/Ecs
+
+const uiSystemInput: Int = 0
+
+const uiSystemWidgetStyle: Int = 1
+
+const uiSystemSafeArea: Int = 2
+
+const uiSystemLayout: Int = 3
+
+const uiSystemFit: Int = 4
+
+const uiSystemTransform: Int = 5
+
+const uiSystemHoverScale: Int = 6
+
+const uiSystemVisualBounds: Int = 7
+
+const uiSystemRender: Int = 8
+
+const uiSystemCount: Int = 9
+
+# Resolve UiWorld table FIELD names to table ids. A name that is not a
+# ComponentTable field of UiWorld is a registration bug in this file, so it is
+# loud and fatal — never a silently-untracked read.
+func uiTableIds(world: view UiWorld, names: view List(String)) ret List(Int) {
+  var ids: List(Int) = List.create(Int, cap: 24)
+  loop let name: view String in names {
+    let id: Int = tableIdByName(UiWorld, world: world, name: name)
+    if id < 0 {
+      log("error: ui pipeline declares unknown UiWorld table '{name}'")
+      Sys.exit(code: 1)
+    }
+    ids.add(value: id)
+  }
+  ret ids
+}
+
+func uiRegister(
+  schedule: mod Schedule
+  world: view UiWorld
+  name: view String
+  reads: view List(String)
+  writes: view List(String)
+  skipWhenClean: view Bool
+) {
+  addDeclaredSystem(
+    schedule: schedule
+    name: name
+    reads: uiTableIds(world: world, names: reads)
+    writes: uiTableIds(world: world, names: writes)
+    skipWhenClean: skipWhenClean
+  )
+}
+
+# Build the UI schedule: every lib/ui system, canonical order, declared sets.
+func createUiPipeline(world: view UiWorld) ret Schedule {
+  var schedule: Schedule = createSchedule()
+
+  # updateUiInput — pointer hit-test against last frame's transforms.
+  uiRegister(
+    schedule: schedule
+    world: world
+    name: "input"
+    reads: [
+      "actives"
+      "childrens"
+      "computedRects"
+      "interactions"
+      "layerRoots"
+      "onClicks"
+      "worldTransforms"
+    ]
+    writes: ["interactions"]
+    skipWhenClean: false
+  )
+
+  # widgetStyleSystem — widget state -> style tables; before layout because it
+  # writes offsets, which layout reads.
+  uiRegister(
+    schedule: schedule
+    world: world
+    name: "widgetStyle"
+    reads: [
+      "offsets"
+      "opacities"
+      "shapes"
+      "sprites"
+      "stateStyles"
+      "texts"
+      "widgetStates"
+    ]
+    writes: [
+      "offsets"
+      "opacities"
+      "shapes"
+      "sprites"
+      "texts"
+    ]
+    skipWhenClean: false
+  )
+
+  # safeAreaSystem — viewport insets into safeInsets, which layout reads.
+  uiRegister(
+    schedule: schedule
+    world: world
+    name: "safeArea"
+    reads: ["safeAreas", "safeInsets"]
+    writes: ["safeInsets"]
+    skipWhenClean: false
+  )
+
+  # layoutSystem — the set LayoutCache tracked. Deliberately NOT declared as
+  # reads (as before): the outputs measuredSizes/computedRects (tracking them
+  # would re-dirty the entry on its own first run), and extentAnchors /
+  # safeAreas / safeInsets, which are set at build and ride the rebuild that
+  # already dirties rects.
+  uiRegister(
+    schedule: schedule
+    world: world
+    name: "layout"
+    reads: [
+      "rects"
+      "sizes"
+      "layouts"
+      "paddings"
+      "offsets"
+      "constraints"
+      "actives"
+      "aligns"
+      "childrens"
+      "parents"
+    ]
+    writes: ["measuredSizes", "computedRects"]
+    skipWhenClean: true
+  )
+
+  # fitSystem — scale-to-fit / aspect adjustments over computedRects.
+  uiRegister(
+    schedule: schedule
+    world: world
+    name: "fit"
+    reads: [
+      "aspects"
+      "childrens"
+      "computedRects"
+      "paddings"
+      "parents"
+      "rects"
+      "scaleToFits"
+    ]
+    writes: ["computedRects"]
+    skipWhenClean: false
+  )
+
+  # transformSystem — the set TransformCache tracked. Its outputs
+  # (localTransforms, worldTransforms, worldVisuals) are not reads, as before.
+  uiRegister(
+    schedule: schedule
+    world: world
+    name: "transform"
+    reads: [
+      "computedRects"
+      "actives"
+      "opacities"
+      "transforms"
+      "childrens"
+      "parents"
+      "runtimeOffsets"
+    ]
+    writes: ["localTransforms", "worldTransforms", "worldVisuals"]
+    skipWhenClean: true
+  )
+
+  # hoverScaleSystem — hover animation state, read by render.
+  uiRegister(
+    schedule: schedule
+    world: world
+    name: "hoverScale"
+    reads: ["childrens", "hoverScales", "parents"]
+    writes: ["hoverScales"]
+    skipWhenClean: false
+  )
+
+  # visualBoundsSystem — measured glyph/sprite bounds, read by render.
+  uiRegister(
+    schedule: schedule
+    world: world
+    name: "visualBounds"
+    reads: [
+      "computedRects"
+      "sprites"
+      "styleOverrides"
+      "texts"
+      "visualBounds"
+    ]
+    writes: ["visualBounds"]
+    skipWhenClean: false
+  )
+
+  # renderSystemGpu2d — reads everything it paints, writes no table.
+  uiRegister(
+    schedule: schedule
+    world: world
+    name: "render"
+    reads: [
+      "aligns"
+      "backdropImages"
+      "childrens"
+      "computedRects"
+      "cornerRadiuses"
+      "gradientFills"
+      "hoverScales"
+      "layerRoots"
+      "opticalAligns"
+      "overflows"
+      "shapes"
+      "sprites"
+      "styleOverrides"
+      "texts"
+      "textShadows"
+      "visualBounds"
+      "worldTransforms"
+    ]
+    writes: List.create(String, cap: 0)
+    skipWhenClean: false
+  )
+
+  ret schedule
+}
+
+# Should the UI system at `index` run this frame? The declared-set judgement
+# over this world (see shouldRunDeclared).
+func uiShouldRun(schedule: mod Schedule, world: view UiWorld, index: view Int) ret Bool {
+  ret shouldRunDeclared(
+    UiWorld
+    schedule: schedule
+    world: world
+    index: index
+  )
+}
