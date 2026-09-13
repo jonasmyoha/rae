@@ -596,17 +596,21 @@ You do not need any flag. The old sequential runner is a debugging-only
 fallback: `RAE_TEST_SEQUENTIAL=1 … watch-tests.sh` forces it. See
 `docs/parallel-tests.md`.
 
-**The VISUAL example smoke tests are NOT part of the suite. Never run them
-from a queue task.** `run_examples.sh` builds and renders every example in a
-real SDL/GPU window and takes screenshots — minutes of wall time, and a window
-stealing focus on the user's screen. `make test` / `watch-tests.sh` run the
-non-visual unit suite only and print "Example smoke tests (visual) not run".
-Do NOT export `RAE_RUN_EXAMPLES=1`, do NOT call `make test-examples`, do NOT
-run `run_examples.sh` or any `bin/rae run examples/...` with a window, and do
-NOT invoke a screenshot gate — not to "verify" a renderer change, not for a
-task that says so in older wording. The user runs the visual gates by hand
-(`make test-examples`) when they choose to. A task that needs a visual check
-ends with a note asking the user to run it, and stops there.
+**The VISUAL example smoke tests are NOT part of the unit suite, but you MAY
+run them when a change warrants a visual check.** `run_examples.sh` builds and
+renders every example in a real SDL/GPU window and takes screenshots — minutes
+of wall time, and a window that briefly takes focus. `make test` /
+`watch-tests.sh` run the non-visual unit suite only and print "Example smoke
+tests (visual) not run"; they stay the fast default gate. When a renderer/UI
+change genuinely needs pixels verified, it is fine to run the visual gate
+(`make test-examples`, or `RAE_EXAMPLE_FILTER="106_mobile_ui" make test-examples`
+to scope it, or a single `bin/rae run examples/...`) — use a timeout, and
+narrow to the affected example(s) rather than rendering all of them. Prefer the
+headless `rae build --emit-c` compile-check for pure type/signature changes
+(no window, catches the same build errors); reach for the windowed gate when
+the change could actually alter what is drawn. If you would rather the user run
+it, ending with a note asking them to is still fine — but it is no longer
+required, and "NO VISUAL TESTS" in an older task brief is not a hard bar.
 
 **Only ONE test run at a time.** Concurrent `make test` / `watch-tests.sh`
 processes corrupt each other's build cache and interleave the shared log, which
