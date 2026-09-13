@@ -1,4 +1,6 @@
 open ui/Ecs
+open ui/Pipeline
+open ecs/Schedule
 import ui/fitSystem/FitSystem
 open ecs/Entity
 open ecs/ComponentTable
@@ -50,13 +52,11 @@ func runHoverStressMode(
     viewport: viewport
   )
   applyViewportExtent(world: world, viewport: viewport)
-  let layoutCache: LayoutCache = createLayoutCache()
-  let transformCache: TransformCache = createTransformCache()
+  var schedule: Schedule = createUiPipeline(world: world)
   runFrameLayoutTransform(
     world: world
     viewport: viewport
-    layoutCache: layoutCache
-    transformCache: transformCache
+    schedule: schedule
     gpuUi: gpuUi
   )
 
