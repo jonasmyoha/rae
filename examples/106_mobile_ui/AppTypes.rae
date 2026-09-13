@@ -1,0 +1,58 @@
+open HotReload
+open ui/WindowGeometry
+open ui/Ecs
+open ecs/Event
+open ui/EventLoop
+open ui/LogOverlay
+# Mobile-UI demo entrypoint. The actual work — scene loading, world
+# building, screen routing — lives in sibling `.rae` files in this same
+# directory, which Rae auto-imports because they share the project
+# root. This file owns only the program's lifecycle: window setup, font
+# loading, the main render/dispatch loop, and teardown.
+#
+# Architecture (all files in this folder are auto-imported):
+#   * config.rae           — layout, palette, asset paths
+#   * world_helpers.rae    — ECS component-setter shorthands
+#   * sceneLoader.rae     — parse the four .raescene files into an AlbumScenes
+#   * scene_mount.rae      — mountOrError + visible error sentinel
+#   * album_view.rae       — album-screen builders, including buildAlbumWorld
+#   * now_playing_view.rae — buildNowPlayingWorld
+#   * screen_router.rae    — Screen enum, buildScreenWorld, dispatchActions
+#   * album_loader.rae     — Album / Track structs + loadAllAlbums (album.json)
+#   * asset_loader.rae     — GPU2D image-key loading (per-album cover + avatar)
+import FileWatch
+import SdfText
+import sys/Spotify
+import ui/renderSystem/RenderSystem
+import ui/Scene
+open ecs/Entity
+open ui/ThemeResolved
+open ui/ThemeParse
+open ecs/ComponentTable
+open ui/fitSystem/FitSystem
+open ui/layoutSystem/LayoutSystem
+open ui/Theme
+open ui/Transform
+open ui/animationSystem/AnimationSystem
+open Gpu2dCanvas
+
+# #946: the app's long-lived setup state, split out of the former one-function
+# `main` (docs/ui-ecs-refactor-status.md §3.1). createApp() (AppCreate.rae)
+# builds it once; runApp() (App.rae) runs the interactive lifecycle over it.
+# Fields are exactly the setup locals the interactive loop referenced.
+type App {
+  windowGeom: WindowGeometry
+  gpuUi: Gpu2dUi
+  scenes: AlbumScenes
+  texReg: TextureRegistry
+  appState: AppState
+  playback: PlaybackState
+  viewport: Viewport
+  logView: LogOverlay
+  spotifyState: SpotifyState
+  autoExitSec: Float
+  bootTime: Float64
+  waitTraceEnabled: Bool
+  loopDebugEnabled: Bool
+  loopDebugFrame: Int
+}

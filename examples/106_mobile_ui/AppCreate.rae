@@ -1,0 +1,169 @@
+open HotReload
+open ui/WindowGeometry
+open ui/Ecs
+open ecs/Event
+open ui/EventLoop
+open ui/LogOverlay
+# Mobile-UI demo entrypoint. The actual work — scene loading, world
+# building, screen routing — lives in sibling `.rae` files in this same
+# directory, which Rae auto-imports because they share the project
+# root. This file owns only the program's lifecycle: window setup, font
+# loading, the main render/dispatch loop, and teardown.
+#
+# Architecture (all files in this folder are auto-imported):
+#   * config.rae           — layout, palette, asset paths
+#   * world_helpers.rae    — ECS component-setter shorthands
+#   * sceneLoader.rae     — parse the four .raescene files into an AlbumScenes
+#   * scene_mount.rae      — mountOrError + visible error sentinel
+#   * album_view.rae       — album-screen builders, including buildAlbumWorld
+#   * now_playing_view.rae — buildNowPlayingWorld
+#   * screen_router.rae    — Screen enum, buildScreenWorld, dispatchActions
+#   * album_loader.rae     — Album / Track structs + loadAllAlbums (album.json)
+#   * asset_loader.rae     — GPU2D image-key loading (per-album cover + avatar)
+import FileWatch
+import SdfText
+import sys/Spotify
+import ui/renderSystem/RenderSystem
+import ui/Scene
+open ecs/Entity
+open ui/ThemeResolved
+open ui/ThemeParse
+open ecs/ComponentTable
+open ui/fitSystem/FitSystem
+open ui/layoutSystem/LayoutSystem
+open ui/Theme
+open ui/Transform
+open ui/animationSystem/AnimationSystem
+open Gpu2dCanvas
+
+# #946: build the app's long-lived state (window, assets, catalogue, app state,
+# playback, viewport, log overlay, Spotify). Verbatim from the former `main`
+# setup block; returns the `App` the interactive lifecycle runs over.
+func createApp() ret App {
+  let backendEnv: String = "gpu2d"
+  # `RAE_UI_HEADLESS=1`: see headless.rae.
+  let isHeadless: Bool = headlessIsActive()
+  uiSetConfigFlags(flags: headlessConfigFlags(headless: isHeadless))
+  let winW: Float = windowW
+  let winH: Float = windowH
+  uiInitWindow(width: winW.toInt(), height: winH.toInt(), title: "Rae Mobile UI — {backendEnv}")
+  # Remember the window across restarts. Opt-in. The name carries the app id:
+  # dir() is ".rae" for every app, so a shared name is a shared window
+  # and the 3D examples were restoring this phone-shaped one. See lib/ui.
+  var windowGeom: WindowGeometry = createWindowGeometry(
+    dir: dir()
+    name: "window.106_mobile_ui.geometry"
+  )
+  restoreWindowGeometry(g: windowGeom)
+  # Backend-agnostic window/input hooks are no-ops on GPU2D when the SDL3
+  # backend already owns the corresponding event state.
+  uiInstallWindowCloseWaker()
+  uiInstallMouseButtonHook()
+  uiDisableAppNap()
+  uiSetMouseScale(scaleX: 1.0, scaleY: 1.0)
+
+  let gpuUi: Gpu2dUi = loadGpuUi()
+  var bootTheme: UiTheme = createBootTheme(gpuUi: gpuUi)
+
+  var scenes: AlbumScenes = loadAllScenes()
+  var texReg: TextureRegistry = createTextureRegistry()  # owns the app's Gpu2dCanvas (#907/#908)
+  ensureAppCacheDirs()
+  # Album catalogue (cheap json parse). Per-cover textures are NOT
+  # loaded here — the interactive loop streams them in via
+  # `cascadeAssets` after first paint so the window appears instantly.
+  # `appState` is built here so state-dependent blocks below see it.
+  let albums: List(Album) = loadAllAlbums(folder: albumsFolder)
+  var appState: AppState = createAppState(albums: albums, theme: own bootTheme)
+  # Mock playback state — survives world rebuilds; both the album
+  # mini-player and the now-playing screen mutate it through
+  # `dispatchActions`. Created here so `restoreAppState` below can
+  # populate `elapsedSec` + `isPlaying` from `state.json` before
+  # the screenshot / stress / main loop branches.
+  let playback: PlaybackState = createPlaybackState()
+  # Hydrate album/track/position from `state.json` if present.
+  # Missing file or stale fields fall back silently to the
+  # defaults `createAppState` / `createPlaybackState` set above.
+  restoreAppState(state: appState, playback: playback, path: stateFilePath)
+  # RAE_UI_CANVAS=1 opens the canvas overlay (S5 canvasOpen state) at
+  # boot — the headless proof hook for #212. Not persisted.
+  let canvasEnv: String = getEnv(name: "RAE_UI_CANVAS")
+  if canvasEnv is "1" {
+    appState.canvasOpen = true
+  }
+  # Persisted recently-played. CDN artwork is re-downloaded lazily in
+  # the loop (refetchHistoryArtChunk, a few/frame) so it never blocks.
+  restoreHistory(history: appState.playHistory, path: historyFilePath, loader: appState.historyArt)
+  # User library — first launch seeds it from the catalog so all
+  # albums are visible by default. Subsequent launches load the
+  # curated subset and stems that aren't in the catalog any more
+  # are dropped silently.
+  appState.library = loadLibraryFromJson(
+    albums: appState.mediaLibrary.albums
+    path: libraryFilePath
+  )
+  appState.liked = loadDefaultLiked()
+
+  # Log the requested window against the current display. `phoneFrameW/phoneFrameH`
+  # are fixed design constants now; runtime size and layout authority live
+  # exclusively in Viewport/UiWorld.layoutW/H.
+  let chromeBudget: Int = 100
+  let monitor: Int = uiCurrentMonitor()
+  var monitorH: Int = uiMonitorHeight(monitor: monitor)
+  var safeMaxH: Int = monitorH - chromeBudget
+  let reqW: Int = winW.toInt()
+  let reqH: Int = winH.toInt()
+  log("[boot] requested screen={reqW}x{reqH} monitorH={monitorH} safeMaxH={safeMaxH}")
+  var viewport: Viewport = createViewportFromWindow()
+  uiSetDesignResolution(width: viewport.layoutW, height: viewport.layoutH, fit: 0)
+  let frameName: String = frameIdName(id: viewport.forcedFrameId)
+  # Shared diagnostic log overlay, top-left (the 3D example anchors it
+  # bottom-left). First line makes hot reloads visible: a rebuilt binary
+  # that failed to relaunch looks identical to one that reloaded and
+  # changed nothing, so the generation number is the proof.
+  var logView: LogOverlay = createLogOverlay(
+    capacity: 64
+    maxLines: 10
+    anchor: logAnchorTopLeft
+    fontSize: 13.0
+  )
+  # Clear the status bar / safe-area inset rather than drawing under it.
+  logView.marginY = 44.0
+  let reloadGen: Int = nextReloadGeneration()
+  logInfoLine(ov: logView, text: "hot reload {reloadGen}")
+
+  log(
+    "[viewport] windowPt={viewport.windowPtW}x{viewport.windowPtH} fbPx={viewport.framebufferPxW}x{viewport.framebufferPxH} dpr={viewport.dpr} unitScale={viewport.unitScale} layout={viewport.layoutW}x{viewport.layoutH} deviceActive={viewport.devicePresetActive} frame={frameName} safe={viewport.safeInsetsDu.l},{viewport.safeInsetsDu.t},{viewport.safeInsetsDu.r},{viewport.safeInsetsDu.b}"
+  )
+
+  # Spotify-mode integration. ON by default; opt out with
+  # RAE_UI_NO_SPOTIFY=1 or RAE_UI_HEADLESS=1 (would focus Spotify).
+  let spotifyState: SpotifyState = setupSpotify(isHeadless: isHeadless)
+
+  let autoExitSec: Float = autoExitSeconds(isHeadless: isHeadless)
+  let bootTime: Float64 = uiNowSeconds()
+
+  let waitTraceEnabled: Bool = waitTraceIsEnabled()
+  let loopDebugEnabled: Bool = loopDebugIsEnabled()
+  var loopDebugFrame: Int = 0
+
+  # The App carries a TextureRegistry whose canvas holds a raw Ptr (the gpu2d
+  # recording encoder, GpuLifetime), so constructing it is an unsafe operation.
+  unsafe {
+    ret App {
+      windowGeom: own windowGeom
+      gpuUi: own gpuUi
+      scenes: own scenes
+      texReg: own texReg
+      appState: own appState
+      playback: own playback
+      viewport: viewport
+      logView: own logView
+      spotifyState: own spotifyState
+      autoExitSec: autoExitSec
+      bootTime: bootTime
+      waitTraceEnabled: waitTraceEnabled
+      loopDebugEnabled: loopDebugEnabled
+      loopDebugFrame: loopDebugFrame
+    }
+  }
+}
