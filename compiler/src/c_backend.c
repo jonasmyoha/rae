@@ -1527,7 +1527,7 @@ bool emit_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* 
   
   bool is_main = str_eq_cstr(f->name, "main");
   if (is_main) {
-      fprintf(out, "int main(int argc, char** argv) {\n  (void)argc; (void)argv;\n");
+      fprintf(out, "int main(int argc, char** argv) {\n  rae_runtime_set_args(argc, argv);  /* #995 */\n");
   } else {
       fprintf(out, "RAE_UNUSED static %s %s(", rt, mangled); emit_param_list(&tctx, f->params, out, false); fprintf(out, ") {\n");
   }

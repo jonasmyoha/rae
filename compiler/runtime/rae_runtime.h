@@ -564,6 +564,11 @@ void rae_ext_rae_chan_free(int64_t ch);
 
 void rae_ext_rae_sys_exit(int64_t code);
 rae_String rae_ext_rae_sys_get_env(rae_String name);
+/* #995: program arguments. The emitted main calls rae_runtime_set_args(argc,
+ * argv) first thing; the pair below exposes everything AFTER the executable. */
+void rae_runtime_set_args(int argc, char** argv);
+int64_t rae_ext_rae_sys_arg_count(void);
+rae_String rae_ext_rae_sys_arg_at(int64_t index);
 rae_String rae_ext_rae_sys_read_file(rae_String path);
 /* #935: read a WGSL/stdlib shader asset. Tries the path as given (cwd-relative,
  * so a project's own lib/ or an assets/ override still wins), then — for a

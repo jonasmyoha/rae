@@ -1,0 +1,14 @@
+# #995: program arguments. `rae run <entry> -- a "b c"` hands `a` and `b c` to
+# the program; Sys.argCount / Sys.argAt read them, and an index out of range is
+# the empty string rather than an error.
+import Sys
+
+func main() {
+  let count: Int = Sys.argCount()
+  log("argCount {count}")
+  loop var i: Int = 0, i < count, ++i {
+    log("arg {i} [{Sys.argAt(index: i)}]")
+  }
+  log("out of range [{Sys.argAt(index: count)}]")
+  log("negative [{Sys.argAt(index: 0 - 1)}]")
+}
