@@ -16,22 +16,41 @@
 # a no-op on scope exit (no double free); the OWNER calls `freeChannel` once
 # after the worker has joined.
 #
-# Payloads are Int-width today (the #271 proof uses Channel(Int)); richer T
-# (structs) needs boxing and is a follow-up — only Channel(Int) is
-# instantiated so far. `received` is a monotonic, read-only
-# observable of how many messages the consumer has drained.
+# Payloads (#969): ANY Rae value type — Int, Bool, an enum, a POD struct, or
+# a struct owning Strings/Lists. The runtime ring is `sizeof(T)`-sized slots
+# (a `Buffer(T)` the runtime allocates, `createChannel` tells it the element
+# size) and the typed store/load happens HERE, with the same per-T
+# `rae_ext_rae_buf_set` / `rae_ext_rae_buf_get` specialisation List uses:
+#   send    -> the value is MOVED into the slot (`value: own T` — the caller
+#              hands over its copy; spawn already deep-copied it if it came
+#              from another thread's data),
+#   receive -> the value is MOVED out of the slot into the returned T (the
+#              `List.pop` idiom), so the ring never holds a live T once it
+#              has been drained,
+#   free    -> whatever was never drained is popped and dropped here, so a
+#              channel freed with messages still buffered leaks nothing.
+# The Int path is the same code with an 8-byte slot — no separate fast path
+# is needed, the specialisation IS the fast path. A full ring (4096
+# buffered) refuses the send and drops the value; the consumer must drain.
+# `received` is a monotonic, read-only observable of how many messages the
+# consumer has drained.
 #
-# THREADING NOTE: real parallelism is COMPILED-ONLY. The Live (bytecode) VM
-# runs `spawn` synchronously (inline at the spawn site), so a persistent
-# polling worker there would run before any producer sends — the #271 proof
-# is therefore a compiled-target test.
-func rae_ext_rae_chan_new() unsafe extern ret Int
+# THREADING NOTE: the C backend is the only target, and `spawn` there is a
+# real OS thread — the #271 proof (fixture 541) exercises a persistent
+# polling worker against a producer on the main thread.
+func rae_ext_rae_chan_new(elemSize: Int) unsafe extern ret Int
 
-func rae_ext_rae_chan_send(ch: Int, value: Int) unsafe extern
+func rae_ext_rae_chan_ring(ch: Int) unsafe extern ret Buffer(Any)
+
+func rae_ext_rae_chan_reserve(ch: Int) unsafe extern ret Int
+
+func rae_ext_rae_chan_commit(ch: Int) unsafe extern
+
+func rae_ext_rae_chan_take(ch: Int) unsafe extern ret Int
+
+func rae_ext_rae_chan_release(ch: Int) unsafe extern
 
 func rae_ext_rae_chan_count(ch: Int) unsafe extern ret Int
-
-func rae_ext_rae_chan_recv(ch: Int) unsafe extern ret Int
 
 func rae_ext_rae_chan_received(ch: Int) unsafe extern ret Int
 
@@ -41,46 +60,73 @@ type Channel(T: type) {
   handle: Int
 }
 
-func createChannel(T: type) pub ret Channel(T) {
+func createChannel(T: type) ret Channel(T) {
   unsafe {
-    ret Channel(T) { handle: rae_ext_rae_chan_new() }
+    ret Channel(T) { handle: rae_ext_rae_chan_new(elemSize: sizeof(T)) }
   }
 }
 
-# Producer side — callable from any thread. FIFO; thread-safe.
-func channelSend(T: type, this: view Channel(T), value: view T) pub {
+# Producer side — callable from any thread. FIFO; thread-safe. The value is
+# moved into the ring; when the ring is full (4096 undrained messages) the
+# message is dropped instead — the consumer is expected to keep draining.
+# `reserve` takes the runtime lock and hands out the slot; the store below
+# runs under that lock and `commit` releases it (a slot index of -1 means
+# full, and no lock is held).
+func channelSend(T: type, this: view Channel(T), value: own T) {
   unsafe {
-    rae_ext_rae_chan_send(ch: this.handle, value: value)
+    let slot: Int = rae_ext_rae_chan_reserve(ch: this.handle)
+    if slot < 0 {
+      ret
+    }
+    var ring: Buffer(T) = rae_ext_rae_chan_ring(ch: this.handle)
+    rae_ext_rae_buf_set(buf: ring, index: slot, value: value)
+    rae_ext_rae_chan_commit(ch: this.handle)
   }
 }
 
 # Consumer side (owning thread only). Number of messages currently buffered;
 # call `receive` only when this is > 0.
-func pending(T: type, this: view Channel(T)) pub ret Int {
+func pending(T: type, this: view Channel(T)) ret Int {
   unsafe {
     ret rae_ext_rae_chan_count(ch: this.handle)
   }
 }
 
-# Pop the oldest buffered message (owning thread only). Returns a zero value
-# if the channel is empty — always gate on `pending` first.
-func receive(T: type, this: view Channel(T)) pub ret T {
+# Pop the oldest buffered message (owning thread only). Returns `T.default()`
+# if the channel is empty — always gate on `pending` first. `take` locks and
+# names the head slot; the value is moved out of it (the slot is left zeroed
+# by `release`, which also unlocks) and handed to the caller as an owned T —
+# `ret own val` says so explicitly: a bare `ret val` of a buf_get local reads
+# as an alias return, and the caller would then not drop what it received.
+func receive(T: type, this: view Channel(T)) ret T {
   unsafe {
-    ret rae_ext_rae_chan_recv(ch: this.handle)
+    let slot: Int = rae_ext_rae_chan_take(ch: this.handle)
+    if slot < 0 {
+      ret T.default()
+    }
+    let ring: Buffer(T) = rae_ext_rae_chan_ring(ch: this.handle)
+    let val: T = rae_ext_rae_buf_get(buf: ring, index: slot)
+    rae_ext_rae_chan_release(ch: this.handle)
+    ret own val
   }
 }
 
 # Read-only observable: total messages the consumer has drained so far.
 # Monotonic; safe to read from any thread.
-func received(T: type, this: view Channel(T)) pub ret Int {
+func received(T: type, this: view Channel(T)) ret Int {
   unsafe {
     ret rae_ext_rae_chan_received(ch: this.handle)
   }
 }
 
 # Owner lifecycle: release the runtime channel. Call exactly once, on the
-# owning thread, after the worker has joined.
-func freeChannel(T: type, this: view Channel(T)) pub {
+# owning thread, after every producer has joined. Messages still buffered
+# are drained and dropped first (each `receive` moves one out into a local
+# that scope-exit drops), so nothing a producer sent is ever leaked.
+func freeChannel(T: type, this: view Channel(T)) {
+  loop pending(this: this) > 0 {
+    let leftover: T = receive(this: this)
+  }
   unsafe {
     rae_ext_rae_chan_free(ch: this.handle)
   }

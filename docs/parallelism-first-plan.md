@@ -213,9 +213,11 @@ Concretely, with the language as it is:
 **Status (#950):** items 1 and 2 landed — `SpotifyPoller.rae` /
 `ArtworkFetch.rae` in 106 own the scheduling, the C poll thread and curl job
 table are deleted, and `ui/EventLoop.wake()` exists (`rae_ext_EventLoop_wake`).
-Two limits shaped the code: `Channel(T)` is Int-only, so the artwork result
-is `serial * 2 + okBit` rather than a `Channel(ArtworkResult)`; and with no
-`detach`, the poller takes a stop channel and is joined at teardown.
+Two limits shaped the code: `Channel(T)` was Int-only, so the artwork result
+was `serial * 2 + okBit` rather than a `Channel(ArtworkResult)` — lifted by
+#969 (struct payloads; `ArtworkFetch.rae` now sends `ArtworkResult { serial,
+ok }`); and with no `detach`, the poller takes a stop channel and is joined
+at teardown.
 
 **On "games and other programs should share one architecture" — agreed, and
 this is the evidence.** Both kinds of program are the same shape: an ECS world
