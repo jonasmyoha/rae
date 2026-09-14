@@ -236,6 +236,24 @@ static int64_t g_sdl_headless_ms = 0;          /* >0 => auto-close after this bu
  * across runs; RAE_HEADLESS_FRAMES + RAE_FIXED_DT makes them byte-identical. */
 static int64_t g_sdl_headless_frames = 0;
 static int64_t g_sdl_frames_done = 0;
+/* Wall-clock ms of the first presented frame, shared by both the sdl3-image
+ * path (below) and the gpu2d/gpu3d path (runtime_gpu2d_platform.c) since all
+ * these files are one translation unit (#986). 0 means "not yet presented". */
+static int64_t g_sdl_first_frame_ms = 0;
+/* RAE_SDL_HEADLESS_MS budgets RENDER time, not startup. On a loaded/shared
+ * machine, asset loading + shader/pipeline build -- especially the deferred
+ * GPU3D renderer's dozen-plus pipelines -- can occasionally outrun the
+ * configured budget by several SECONDS even though the app goes on to render
+ * fine (#986: measured directly against real (non-synthetic) contention from
+ * another long-running process on a shared box). While no frame has been
+ * presented yet, extend the deadline by this fixed, generous amount instead
+ * of giving up -- a flat addition rather than a multiple of the configured
+ * budget, since some callers (e.g. the water example's tier-cycling check)
+ * already pass a deliberately large budget that a multiplier would blow up
+ * further. Once a frame IS presented, the app gets its full configured
+ * budget measured from that point, so it still gets the number of rendered
+ * frames the example expects. */
+#define RAE_HEADLESS_STARTUP_GRACE_MS 12000
 static int64_t g_sdl_target_fps = 0;           /* >0 => cap present rate */
 static int64_t g_sdl_last_present_ms = 0;
 static rae_Bool g_sdl_presented_any = 0;       /* has any frame reached the screen? */
@@ -316,21 +334,29 @@ rae_Bool rae_ext_Sdl3_shouldClose(void) {
         }
     }
     if (quit) return true;
-    if (g_sdl_headless_ms > 0 && rae_ext_nowMs() - g_sdl_start_ms >= g_sdl_headless_ms) {
-        /* The headless budget is wall clock from WINDOW CREATION, so it covers
-         * asset loading too. An app that loads for longer than the budget exits
-         * having drawn nothing, writes no screenshot, and returns 0 — which reads
-         * exactly like a broken renderer. Say what actually happened. */
+    if (g_sdl_headless_ms > 0) {
+        int64_t now = rae_ext_nowMs();
         if (!g_sdl_presented_any) {
-            fprintf(stderr,
-                "warning: RAE_SDL_HEADLESS_MS=%lld elapsed before the first frame was "
-                "presented -- startup alone took longer than the budget, so nothing "
-                "was rendered and no screenshot was written. The budget is wall clock "
-                "from window creation and includes asset loading; raise it.\n",
-                (long long)g_sdl_headless_ms);
-            fflush(stderr);
+            int64_t startupCap = g_sdl_headless_ms + RAE_HEADLESS_STARTUP_GRACE_MS;
+            if (now - g_sdl_start_ms >= startupCap) {
+                /* Even with grace, no frame ever reached the screen. An app
+                 * that loads for longer than that exits having drawn nothing,
+                 * writes no screenshot, and returns 0 — which reads exactly
+                 * like a broken renderer. Say what actually happened. */
+                fprintf(stderr,
+                    "warning: RAE_SDL_HEADLESS_MS=%lld elapsed (grace extended to %lldms) "
+                    "before the first frame was presented -- startup alone took longer "
+                    "than the budget even with grace, so nothing was rendered and no "
+                    "screenshot was written. The budget is wall clock from window "
+                    "creation and includes asset loading; raise it.\n",
+                    (long long)g_sdl_headless_ms, (long long)startupCap);
+                fflush(stderr);
+                return true;
+            }
+            return false;
         }
-        return true;
+        if (g_sdl_first_frame_ms == 0) g_sdl_first_frame_ms = now;
+        if (now - g_sdl_first_frame_ms >= g_sdl_headless_ms) return true;
     }
     return false;
 }
