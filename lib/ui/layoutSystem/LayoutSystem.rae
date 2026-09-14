@@ -215,10 +215,23 @@ func entityOffset(world: view UiWorld, entity: view EntityId) ret Vec2 {
 # Returns the active children of `entity` in declaration order. List
 # is fresh; safe for the caller to mutate if needed.
 func activeChildren(world: view UiWorld, entity: view EntityId) ret List(EntityId) {
+  let out: List(EntityId) = List.create(EntityId, cap: 4)
+  activeChildrenInto(world: world, entity: entity, out: out)
+  ret out
+}
+
+# #973: fill a REUSED `out` buffer with `entity`'s layout-active children,
+# instead of allocating a fresh List per node per frame. `out` is cleared
+# first (clear() keeps the capacity), so the linear measure/place drivers hand
+# the SAME buffer every node and pay no per-node allocation — activeChildren
+# was ~105k Buffer allocs / 12 s in 114, the top idle-frame source after the
+# skinning fix. The layout walk is flat (measure and place each iterate the
+# depth order once, no re-entrancy), so one scratch buffer per phase is safe.
+func activeChildrenInto(world: view UiWorld, entity: view EntityId, out: mod List(EntityId)) {
   unsafe {
-    let out: List(EntityId) = List.create(EntityId, cap: 4)
+    out.clear()
     if componentHas(this: world.childrens, entity: entity) is false {
-      ret out
+      ret
     }
     let ch: view Children => componentView(this: world.childrens, entity: entity)
     let n: Int = ch.ids.length
@@ -230,7 +243,6 @@ func activeChildren(world: view UiWorld, entity: view EntityId) ret List(EntityI
       }
       i = i + 1
     }
-    ret out
   }
 }
 
@@ -242,9 +254,10 @@ func activeChildren(world: view UiWorld, entity: view EntityId) ret List(EntityI
 # MeasuredSize is the authored rect (set so the parent's measure
 # can still fall back to a real number).
 # -----------------------------------------------------------------
-func measureNode(world: mod UiWorld, entity: view EntityId) {
+func measureNode(world: mod UiWorld, entity: view EntityId, scratch: mod List(EntityId)) {
   unsafe {
-    let kids: List(EntityId) = activeChildren(world: world, entity: entity)
+    activeChildrenInto(world: world, entity: entity, out: scratch)
+    let kids: view List(EntityId) => scratch
     let n: Int = kids.length
 
     # Compute the container's measured size from its children.
@@ -337,10 +350,11 @@ func measureLinear(world: mod UiWorld) {
       parents: world.parents
       childrens: world.childrens
     )
+    var scratch: List(EntityId) = List.create(EntityId, cap: 8)
     var i: Int = order.length - 1
     loop i >= 0 {
       if let entity: EntityId = order.copyAt(index: i) {
-        measureNode(world: world, entity: entity)
+        measureNode(world: world, entity: entity, scratch: scratch)
       }
       i = i - 1
     }
@@ -349,7 +363,7 @@ func measureLinear(world: mod UiWorld) {
       let entity: EntityId = rae_ext_rae_buf_get(buf: alive.data, index: k)
       if componentHas(this: world.parents, entity: entity) is false {
         if componentHas(this: world.childrens, entity: entity) is false {
-          measureNode(world: world, entity: entity)
+          measureNode(world: world, entity: entity, scratch: scratch)
         }
       }
     }

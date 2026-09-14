@@ -71,9 +71,10 @@ func seedRoot(world: mod UiWorld, entity: view EntityId) {
 # a root); its size IS the resolved own size the old recursion threaded down
 # as ownW/ownH. Children get their ComputedRects here; the depth-order loop
 # visits each later to place THEIR children (#731).
-func placeChildren(world: mod UiWorld, entity: view EntityId) {
+func placeChildren(world: mod UiWorld, entity: view EntityId, scratch: mod List(EntityId)) {
   unsafe {
-    let kids: List(EntityId) = activeChildren(world: world, entity: entity)
+    activeChildrenInto(world: world, entity: entity, out: scratch)
+    let kids: view List(EntityId) => scratch
     let n: Int = kids.length
     if n is 0 {
       ret
@@ -495,6 +496,7 @@ func computeLinear(world: mod UiWorld) {
       parents: world.parents
       childrens: world.childrens
     )
+    var scratch: List(EntityId) = List.create(EntityId, cap: 8)
     loop var i: Int = 0, i < order.length, ++i {
       if let entity: EntityId = order.copyAt(index: i) {
         if layoutActive(world: world, entity: entity) {
@@ -503,7 +505,7 @@ func computeLinear(world: mod UiWorld) {
               seedRoot(world: world, entity: entity)
             }
           }
-          placeChildren(world: world, entity: entity)
+          placeChildren(world: world, entity: entity, scratch: scratch)
         }
       }
     }
