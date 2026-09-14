@@ -580,6 +580,12 @@ typedef struct CompilerContext {
     size_t generic_type_count;
     size_t generic_type_cap;
 
+    // #960: `opt E` types demanded by enumFromName(E, name:) calls, collected
+    // by discovery so the opt struct is emitted even when no signature or
+    // field spells `opt E` (register_generic_type skips scalar-based refs).
+    const AstTypeRef** demanded_opt_types;
+    size_t demanded_opt_type_count;
+    size_t demanded_opt_type_cap;
     const AstTypeRef** emitted_generic_types;
     size_t emitted_generic_type_count;
     size_t emitted_generic_type_cap;

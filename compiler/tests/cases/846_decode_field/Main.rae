@@ -1,0 +1,58 @@
+# `decodeField` (#960): ONE generic function decodes a scalar / enum field of
+# an authored component object, chosen per instantiation by `typeName`; used
+# from a `mod any` field loop it fills a `T.default()` component field by
+# field. Covers each kind: Int, Float (plain and space token), Bool, String,
+# enum (authored PascalCase), a missing key (keeps the default), and the
+# `radius` key's radius-category token.
+open ui/RegistryGeneric
+open ui/Components
+import Json
+open ui/Theme
+
+type Widget {
+  columns: Int
+  gap: Float
+  radius: Float
+  visible: Bool
+  title: String
+  layout: LayoutType
+  align: AlignKind
+  untouched: Int
+}
+
+func decodeWidget(doc: view JsonDoc, val: view JsonValue, theme: view UiTheme) ret Widget {
+  var widget: Widget = Widget.default()
+  loop let f: mod any in fields(widget) {
+    f.set(value: decodeField(
+      fallback: f
+      doc: doc
+      val: val
+      key: fieldName(f)
+      theme: theme
+    ))
+  }
+  ret widget
+}
+
+func main() {
+  let theme: UiTheme = createUiTheme()
+  let source: String = "\{ \"columns\": 3, \"gap\": \"spaceM\", \"radius\": 12.5, \"visible\": true, \"title\": \"Now Playing\", \"layout\": \"Horizontal\", \"align\": \"SpaceBetween\" \}"
+  let doc: JsonDoc = Json.parseJson(source: source)
+  let root: JsonValue = Json.root(doc: doc)
+  let widget: Widget = decodeWidget(doc: doc, val: root, theme: theme)
+  log("columns={widget.columns}")
+  log("gap token resolved={widget.gap > 0.0}")
+  log("radius={widget.radius}")
+  log("visible={widget.visible}")
+  log("title={widget.title}")
+  log("layout={widget.layout}")
+  log("align={widget.align}")
+  log("untouched (missing key keeps default)={widget.untouched}")
+
+  # Unknown enum spelling and a plain numeric gap: fallbacks and numbers.
+  let source2: String = "\{ \"gap\": 8.0, \"layout\": \"Sideways\" \}"
+  let doc2: JsonDoc = Json.parseJson(source: source2)
+  let root2: JsonValue = Json.root(doc: doc2)
+  let widget2: Widget = decodeWidget(doc: doc2, val: root2, theme: theme)
+  log("gap plain={widget2.gap} layout unknown keeps default={widget2.layout}")
+}

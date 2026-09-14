@@ -1,0 +1,39 @@
+# `enumFromName(E, name: s)` (#960): the compile-time member lookup, one per
+# enum, returning `opt E` — a member when `s` spells one, none otherwise. `E`
+# may be a generic type parameter; a non-enum instantiation is the constant
+# none, so a generic decoder can try the enum path last without a type test.
+enum Mode { idle, busy, done }
+
+enum Shape { rect, roundedRect, circle }
+
+func describe(name: view String) ret String {
+  if let mode: Mode = enumFromName(Mode, name: name) {
+    ret "Mode.{mode}"
+  }
+  ret "no Mode named {name}"
+}
+
+# Generic: the enum is the type parameter; the result narrows to T.
+func pick(T: type, fallback: copy T, name: view String) ret T {
+  if let member: T = enumFromName(T, name: name) {
+    ret member
+  }
+  ret fallback
+}
+
+func main() {
+  log(describe(name: "busy"))
+  log(describe(name: "idle"))
+  log(describe(name: "done"))
+  log(describe(name: "nope"))
+  log(describe(name: ""))
+  # Case-sensitive, exact: the authored PascalCase does not match by itself.
+  log(describe(name: "Busy"))
+  let shape: Shape = pick(fallback: Shape.rect, name: "roundedRect")
+  let shapeMiss: Shape = pick(fallback: Shape.circle, name: "hexagon")
+  log("generic: {shape} {shapeMiss}")
+  # A non-enum T: always the fallback (enumFromName is none).
+  let count: Int = pick(fallback: 7, name: "idle")
+  let label: String = pick(fallback: "kept", name: "idle")
+  log("non-enum: {count} {label}")
+}
