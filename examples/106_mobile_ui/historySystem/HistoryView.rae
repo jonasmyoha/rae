@@ -95,7 +95,8 @@ func historyHasArt(entry: view PlayHistoryEntry) pub ret Bool {
   ret entry.textureKey.length() > 0
 }
 
-# One recently-played thumb: the `recent-thumb` sub-scene on a square host.
+# One recently-played thumb: the `recent-thumb` sub-scene as its own square
+# root (#990: host-less).
 # Has-art -> the Art sprite is switched on with the entry's stored textureKey
 # (album stem for local, "spotify-art:<id>" for Spotify) and the placeholder
 # off; no-art -> the authored muted placeholder chip stays, tagged with the
@@ -109,32 +110,20 @@ func mountRecentThumb(
   rounded: view Bool
   actionId: view String
 ) ret EntityId {
-  let host: EntityId = createEntity(world: world)
-  setRectFixed(
-    world: world
-    entity: host
-    w: size
-    h: size
-  )
-  let overrides: List(SceneOverride) = emptyOverrides()
+  var overrides: List(SceneOverride) = emptyOverrides()
   if historyHasArt(entry: entry) {
     addSpriteOverride(list: overrides, nodeId: "Art", value: "{entry.textureKey}")
     addActiveOverride(list: overrides, nodeId: "Art", value: true)
     addActiveOverride(list: overrides, nodeId: "Placeholder", value: false)
   }
   addOnClickActionOverride(list: overrides, nodeId: "Thumb", value: "{actionId}")
-  let idx: Int = sceneRegistryIndex(reg: scenes.subScenes, key: "recent-thumb")
-  if idx < 0 {
-    paintErrorBlock(world: world, entity: host, label: "recent-thumb")
-    ret host
-  }
-  let scene: view Scene => sceneRegistryGet(reg: scenes.subScenes, idx: idx)
-  mountOrError(
+  let host: EntityId = mountRegistrySubSceneOrError(
     world: world
-    mountEntity: host
-    scene: scene
-    sceneLabel: "recent-thumb"
+    reg: scenes.subScenes
+    sceneId: "recent-thumb"
     overrides: overrides
+    w: size
+    h: size
   )
   if historyHasArt(entry: entry) is false {
     if let phRaw: Int = world.nodeIds.get(k: "Placeholder") {

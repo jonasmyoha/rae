@@ -132,7 +132,7 @@ func clearTrackRows(world: mod UiWorld, container: view EntityId) {
   }
 }
 
-# One track row: the `track-row` sub-scene on a fixed-height host with the
+# One track row: the `track-row` sub-scene as its own root (#990: host-less) with the
 # song's number / title / subtitle, the playing highlight, the widget tags
 # and the whole-row `song.openref.<index>.<stem>` click.
 func mountTrackRow(
@@ -142,13 +142,6 @@ func mountTrackRow(
   visual: view Int
   playback: view PlaybackState
 ) ret EntityId {
-  let row: EntityId = createEntity(world: world)
-  setRectFixed(
-    world: world
-    entity: row
-    w: phoneFrameW - outerPad * 2.0
-    h: trackRowH
-  )
   var num: Int = cr.number
   if num <= 0 {
     num = visual + 1
@@ -157,16 +150,17 @@ func mountTrackRow(
   if num < 10 {
     label = "0{num}"
   }
-  let overrides: List(SceneOverride) = emptyOverrides()
+  var overrides: List(SceneOverride) = emptyOverrides()
   addTextOverride(list: overrides, nodeId: "IdxText", value: label)
   addTextOverride(list: overrides, nodeId: "TitleText", value: "{cr.title}")
   addTextOverride(list: overrides, nodeId: "SubtitleText", value: "{cr.subtitle}")
-  let mounted: EntityId = mountOrError(
+  let row: EntityId = mountSubSceneOrError(
     world: world
-    mountEntity: row
     scene: scenes.trackRow
     sceneLabel: "track-row"
     overrides: overrides
+    w: phoneFrameW - outerPad * 2.0
+    h: trackRowH
   )
   # Highlight only the exact (album, track) that is playing — keyed on the
   # row's own stem + index so a playlist spanning albums works.

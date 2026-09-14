@@ -103,7 +103,8 @@ func mountBottomSheetOverlay(
   ret root
 }
 
-# One action row: the `sheet-action-row` sub-scene on a fixed-height host,
+# One action row: the `sheet-action-row` sub-scene as its own root (#990:
+# host-less; its authored `Size { w: Fill, h: Fixed }` now applies),
 # with the label and actionId as overrides and the widget identity (the
 # actionId) plus its loading/disabled fade — StateStyle is a runtime table
 # the scene loader refuses to author — written as component data.
@@ -115,28 +116,16 @@ func mountSheetActionRow(
   w: view Float
   h: view Float
 ) ret EntityId {
-  let host: EntityId = createEntity(world: world)
-  setRectFixed(
-    world: world
-    entity: host
-    w: w
-    h: h
-  )
-  let idx: Int = sceneRegistryIndex(reg: scenes.subScenes, key: sceneId)
-  if idx < 0 {
-    paintErrorBlock(world: world, entity: host, label: sceneId)
-    ret host
-  }
-  let overrides: List(SceneOverride) = emptyOverrides()
+  var overrides: List(SceneOverride) = emptyOverrides()
   addTextOverride(list: overrides, nodeId: "ActionRow", value: "{action.label}")
   addOnClickActionOverride(list: overrides, nodeId: "ActionRow", value: "{action.actionId}")
-  let scene: view Scene => sceneRegistryGet(reg: scenes.subScenes, idx: idx)
-  mountOrError(
+  let host: EntityId = mountRegistrySubSceneOrError(
     world: world
-    mountEntity: host
-    scene: scene
-    sceneLabel: sceneId
+    reg: scenes.subScenes
+    sceneId: sceneId
     overrides: overrides
+    w: w
+    h: h
   )
   setWidgetIdentity(
     world: world
