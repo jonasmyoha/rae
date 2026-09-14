@@ -1,15 +1,13 @@
 open ui/Ecs
 open assetSystem/GpuAssetRegistry
 
-# The per-frame UI observer state. The playback slice has been carved out
-# into its own per-feature `UiPlaybackSystem` (#267, §5.2); `historyRevision`
-# is the observer cache for the history list and becomes its own UI system in
-# a follow-up. (The bottom sheet's epoch lives on its `BottomSheet` component
-# since #980.)
+# The per-frame UI observer state: `historyRevision` is the observer cache
+# for the history list and becomes its own UI system in a follow-up. (The
+# playback widgets observe through their binding components since #981, the
+# bottom sheet's epoch lives on its `BottomSheet` component since #980.)
 type UiRefreshCache {
   # Last PlayHistory.revision this observer reacted to (#944, §7 system revision).
   historyRevision: Int
-  uiPlayback: UiPlaybackSystem
 }
 
 type UiRefreshResult {
@@ -17,14 +15,8 @@ type UiRefreshResult {
   playbackChanged: Bool
 }
 
-func createUiRefreshCache(
-  historyRevision: view Int
-  playbackRevision: view Int
-) pub ret UiRefreshCache {
-  ret UiRefreshCache {
-    historyRevision: historyRevision
-    uiPlayback: createUiPlaybackSystem(observedRevision: playbackRevision)
-  }
+func createUiRefreshCache(historyRevision: view Int) pub ret UiRefreshCache {
+  ret UiRefreshCache { historyRevision: historyRevision }
 }
 
 func refreshMountedUi(
@@ -47,10 +39,12 @@ func refreshMountedUi(
     cachedRevision: cache.historyRevision
     viewport: viewport
   )
-  let playbackChanged: Bool = uiPlaybackObserve(
-    this: cache.uiPlayback
+  # #981: play icon, cover, heart and track text follow playback / the
+  # browsed track through their binding components.
+  let playbackChanged: Bool = playbackBindingsSystems(
     world: world
     playback: playback
+    state: state
     reg: reg
   )
   # #980: the action sheet follows BottomSheetState (visible + epoch) in place.

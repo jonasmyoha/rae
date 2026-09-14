@@ -336,31 +336,7 @@ func pollSpotify(
   # Text updates run every poll — cheap, and handles the "user
   # paused/resumed in Spotify directly" case without extra logic.
   let nowPlayingPage: String = "player"
-  updateNodeText(
-    world: world
-    pageId: nowPlayingPage
-    nodeId: "TrackTitle"
-    value: track.trackName
-  )
-  updateNodeText(
-    world: world
-    pageId: nowPlayingPage
-    nodeId: "TrackArtist"
-    value: track.artistName
-  )
-  let miniPage: String = "mini-player"
-  updateNodeText(
-    world: world
-    pageId: miniPage
-    nodeId: "MiniTitle"
-    value: track.trackName
-  )
-  updateNodeText(
-    world: world
-    pageId: miniPage
-    nodeId: "MiniArtist"
-    value: track.artistName
-  )
+  trackTextWriteAll(world: world, title: track.trackName, artist: track.artistName)
   # Sync the M:SS time labels too. The scene mount path baked these
   # from the LOCAL track at boot, so without this refresh they show
   # the wrong duration in Spotify mode.
