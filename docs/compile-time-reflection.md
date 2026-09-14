@@ -271,12 +271,17 @@ func fill(comp: mod Comp) {
 Wholesale write is the only new capability: `f.set(value:)` assigns the whole
 field; per-field *method* calls through the `mod` binding were already there.
 
-**`T.default()` — the zero value.** A compiler-generated static method with
-the same shape as `T.fromJson(json:)`: it yields the value whose every field
-is zero / `0.0` / `false` / `""` / an empty List / the first enum case /
-`none` for `opt`, recursively for nested structs. It is ONE opaque value
-primitive (the C backend emits `(rae_T){0}`), not field-by-field construction
-— you cannot ask what it did per field, only start from it. `T` may be a
+**`T.default()` — the default value.** A compiler-generated static method
+with the same shape as `T.fromJson(json:)`: it yields the value whose every
+field is its DECLARED default (`value: Bool = true`, `tint: RgbaColor =
+RgbaColor { ... }`, `angle: Float = 90.0` — the field-default syntax the
+parser always accepted, given meaning by #961) or, absent one, zero / `0.0` /
+`false` / `""` / an empty List / the first enum case / `none` for `opt`;
+a nested user struct without a declared default is its own `default()`,
+recursively. It is ONE opaque value primitive (the C backend emits a generated
+`rae_default_<T>()` per non-generic user struct, `(C){0}` for everything
+else), not field-by-field construction — you cannot ask what it did per
+field, only start from it. `T` may be a
 generic parameter (`func zeroOf(T: type) ret T { ret T.default() }`) or a
 builtin (`Int.default()` is `0`, `String.default()` is `""`). Like
 `fromJson`, constructing a value that contains raw `Ptr` storage this way
@@ -332,7 +337,12 @@ ret LayoutType.none
 answers for a *parameter* whose type is (or contains) a generic parameter:
 `func decode(T: type, fallback: copy T, ...) { if typeName(fallback) is
 "Int" { ... } }`. In the template it is a String; in each instantiation it
-is that instantiation's concrete type name, folded to a literal.
+is that instantiation's concrete type name, folded to a literal. For a
+parameter the name is the type's OWN base name — `List` for a `List(String)`
+argument — where a field-loop binding over `ComponentTable(Position)` folds
+to the element `Position` (#809): the parameter IS the thing, the table
+holds the thing. (So a `List(String)` field never takes a decoder's `"String"`
+arm.)
 
 **Constant `if` is decided at fold time.** Wherever the compiler folds these
 queries — a field-loop body per field, a generic body per instantiation — an
@@ -360,9 +370,14 @@ func decodeField(T: type, fallback: copy T, doc: view JsonDoc, val: view JsonVal
 The Int instantiation never contains the String arm, so `ret optString(...)`
 never has to type-check against `Int`. This is still structural unrolling —
 no execution, no macro — just applied to a condition that has become a
-constant. It is limited to string-literal `is` conditions on purpose: the
-queries produce Strings, so that is exactly the shape a type test has; a
+constant. It is limited to string-literal `is` / `is not` conditions, and
+`and` / `or` of those, on purpose: the queries produce Strings, so that is
+exactly the shape a type test (or an exclude list of type names) has; a
 general constant folder is not on the table.
+
+A generic body may also run a field loop over a typed LOCAL, not only a
+parameter — `var comp: T = T.default()` then `loop ... in fields(comp)` —
+which is what `decodeComponent` needs (#961).
 
 Together with `T.default()` and `fieldSet` (#959) a component deserializer
 is a field loop (see `lib/ui/RegistryGeneric.rae` and fixture
@@ -379,6 +394,25 @@ Fixtures: `845_enum_from_name` (member / unknown / empty / case-sensitive,
 generic `T`, non-enum `T`), `846_decode_field` (Int, Float plain and space
 token, `radius` token, Bool, String, two enums from authored PascalCase, a
 missing key keeping the default, an unknown enum spelling keeping the default).
+
+## The scene registry as one reflected loop (#961)
+
+The consumer the whole kit was built for: `lib/ui/Registry.applyComponentByName`
+is one `loop let table: mod ComponentTable(any) in fields(world)`. Per table,
+a constant `if` of `typeName(table) is not "<runtime table>"` tests excludes
+the derived/runtime tables at fold time (they instantiate no decoder), the
+authored key is compared with `typeName(table)` (one alias, `Overflow` ->
+`OverflowPolicy`), and a match calls `decodeComponent(table: table, ...)` —
+`T` inferred from the table — which is `T.default()` + a `mod any` field loop
+of `decodeField` + `componentSet`. The 35 hand-written `deser<Component>`
+functions and the 39-arm name ladder are gone; what remains explicit is
+`ContainerStyle` (no table of its own) and a fixup block for the authored
+shapes that are not field-structural (Rect's `{x,y,w,h}`, Layout's `type`
+key, flattened insets, palette-slot mirrors, presence flags, two arrays). A
+component's authored grammar is now its Rae fields plus their declared
+defaults; a component that was "registered but unsupported" before decodes
+structurally, and an authored key naming a runtime table is the new hard
+error (fixture 840).
 
 ## Construction via `fields(Type)` — decided NOT to build (#774)
 

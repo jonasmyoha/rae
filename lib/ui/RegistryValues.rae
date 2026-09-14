@@ -1,10 +1,11 @@
-# RegistryValues — the value-level JSON decoders the component deserializers
-# share (#918 split of ui/Registry for the 1000-line cap): the enum-name
+# RegistryValues — the value-level JSON decoders behind the generic component
+# decoder (ui/RegistryGeneric, #961) and the registry's fixups: the enum-name
 # parsers (parseSizeMode / parseLayoutType / ... — `enumFromName` lookups since
 # #960), the small
 # value decoders (deserInsets / deserVec2 / deserRgba / deserSizeAxis /
-# deserRect / deserSize) and the data-resource / field id lookups.
-# ui/RegistryDeser's `deser<Component>` functions are built on these.
+# deserSizeAxis) and the data-resource / field id lookups, plus the
+# three authored shapes that are arrays or presence-flagged (styleOverride,
+# SceneInstance overrides, ListView bindings).
 open ui/RegistryOpt
 open ui/RegistryGeneric
 open ui/ContainerStyle
@@ -14,7 +15,6 @@ import ui/Spacing
 import ui/ThemeResolved
 open ecs/ComponentTable
 open ui/Registry
-open ui/RegistryDeser
 
 # The authored enum vocabulary is PascalCase ("Horizontal"); each parser is
 # the compile-time member lookup `enumFromName` (#960) over the camelCase
@@ -216,99 +216,157 @@ func deserSizeAxis(doc: view JsonDoc, val: view JsonValue) ret SizeAxis {
 # component bag (e.g. `{"x":0,"w":100}`) and produces the typed
 # component.
 # -----------------------------------------------------------------
-func deserRect(doc: view JsonDoc, val: view JsonValue) ret Rect {
-  # Wire format stays flat {x,y,w,h}; bridge into the Vec2 position/size pair.
-  ret Rect {
-    position: {
-      x: optFloat(
-        doc: doc
-        container: val
-        key: "x"
-        fallback: 0.0
-      )
-      y: optFloat(
-        doc: doc
-        container: val
-        key: "y"
-        fallback: 0.0
-      )
-    }
-    size: {
-      x: optFloat(
-        doc: doc
-        container: val
-        key: "w"
-        fallback: 0.0
-      )
-      y: optFloat(
-        doc: doc
-        container: val
-        key: "h"
-        fallback: 0.0
-      )
-    }
-  }
-}
 
-func deserSize(doc: view JsonDoc, val: view JsonValue) ret Size {
-  let wIdx: Int = Json.field(doc: doc, this: val, key: "w")
-  let hIdx: Int = Json.field(doc: doc, this: val, key: "h")
-  var wAxis: SizeAxis = defaultSizeAxis()
-  var hAxis: SizeAxis = defaultSizeAxis()
-  if wIdx >= 0 {
-    let wv: JsonValue = Json.jsonValueAt(doc: doc, idx: wIdx)
-    wAxis = deserSizeAxis(doc: doc, val: wv)
-  }
-  if hIdx >= 0 {
-    let hv: JsonValue = Json.jsonValueAt(doc: doc, idx: hIdx)
-    hAxis = deserSizeAxis(doc: doc, val: hv)
-  }
-  ret Size { w: wAxis, h: hAxis }
-}
-
+# The data-source / field ids are enum members spelled exactly as authored
+# ("albums", "isPlaying"), so the lookup is the compile-time member table.
 func dataResourceIdFromString(name: view String) ret DataResourceId {
-  if name is "albums" {
-    ret DataResourceId.albums
-  }
-  if name is "history" {
-    ret DataResourceId.history
-  }
-  if name is "library" {
-    ret DataResourceId.library
-  }
-  if name is "playback" {
-    ret DataResourceId.playback
-  }
-  if name is "playlists" {
-    ret DataResourceId.playlists
-  }
-  if name is "spotify" {
-    ret DataResourceId.spotify
-  }
-  if name is "settings" {
-    ret DataResourceId.settings
-  }
-  if name is "debug" {
-    ret DataResourceId.debug
+  if let id: DataResourceId = enumFromName(DataResourceId, name: name) {
+    ret id
   }
   ret DataResourceId.none
 }
 
 func dataFieldIdFromString(name: view String) ret DataFieldId {
-  if name is "all" {
-    ret DataFieldId.all
-  }
-  if name is "isPlaying" {
-    ret DataFieldId.isPlaying
-  }
-  if name is "likedTrack" {
-    ret DataFieldId.likedTrack
-  }
-  if name is "playingTrack" {
-    ret DataFieldId.playingTrack
-  }
-  if name is "debugToggle" {
-    ret DataFieldId.debugToggle
+  if let id: DataFieldId = enumFromName(DataFieldId, name: name) {
+    ret id
   }
   ret DataFieldId.none
+}
+
+# Tier-2 partial style override (#236): the `styleOverride` sub-object of a
+# Text bag. Presence-flagged: only the scalars the author wrote are applied
+# over the resolved style at paint; a colour may be a palette slot.
+func deserStyleOverride(
+  doc: view JsonDoc
+  theme: view UiTheme
+  val: view JsonValue
+) ret StyleOverride {
+  var so: StyleOverride = defaultStyleOverride()
+  let sizeIdx: Int = Json.field(doc: doc, this: val, key: "size")
+  if sizeIdx >= 0 {
+    so.hasSize = true
+    so.size = optFloat(
+      doc: doc
+      container: val
+      key: "size"
+      fallback: 0.0
+    )
+  }
+  let colorIdx: Int = Json.field(doc: doc, this: val, key: "color")
+  if colorIdx >= 0 {
+    so.hasColor = true
+    let cv: JsonValue = Json.jsonValueAt(doc: doc, idx: colorIdx)
+    so.color = deserRgba(doc: doc, theme: theme, val: cv)
+    let emptySlot: String = ""
+    so.colorSlot = Json.jsonString(this: cv, fallback: emptySlot)
+  }
+  ret so
+}
+
+# `SceneInstance.params.overrides`: an array of {nodeId, component, field,
+# value} records, stored as four parallel lists on the component.
+func deserSceneInstanceOverrides(
+  instance: mod SceneInstance
+  doc: view JsonDoc
+  val: view JsonValue
+) {
+  let paramsIdx: Int = Json.field(doc: doc, this: val, key: "params")
+  if paramsIdx < 0 {
+    ret
+  }
+  let paramsVal: JsonValue = Json.jsonValueAt(doc: doc, idx: paramsIdx)
+  let overridesIdx: Int = Json.field(doc: doc, this: paramsVal, key: "overrides")
+  if overridesIdx < 0 {
+    ret
+  }
+  let arr: JsonValue = Json.jsonValueAt(doc: doc, idx: overridesIdx)
+  let n: Int = Json.arrayLen(this: arr)
+  let empty: String = ""
+  var i: Int = 0
+  loop i < n {
+    let elem: JsonValue = Json.arrayAt(doc: doc, this: arr, idx: i)
+    instance.overrideNodeIds.add(value: optString(
+      doc: doc
+      container: elem
+      key: "nodeId"
+      fallback: empty
+    ))
+    instance.overrideComponents.add(value: optString(
+      doc: doc
+      container: elem
+      key: "component"
+      fallback: empty
+    ))
+    instance.overrideFields.add(value: optString(
+      doc: doc
+      container: elem
+      key: "field"
+      fallback: empty
+    ))
+    instance.overrideValues.add(value: optString(
+      doc: doc
+      container: elem
+      key: "value"
+      fallback: empty
+    ))
+    i = i + 1
+  }
+}
+
+# `ListView.bindings`: an array of {nodeId, component, field, itemField,
+# prefix, suffix} records.
+func deserListViewBindings(doc: view JsonDoc, val: view JsonValue) ret List(ListViewBinding) {
+  var bindings: List(ListViewBinding) = List.create(ListViewBinding, cap: 4)
+  let bindingsIdx: Int = Json.field(doc: doc, this: val, key: "bindings")
+  if bindingsIdx < 0 {
+    ret bindings
+  }
+  let arr: JsonValue = Json.jsonValueAt(doc: doc, idx: bindingsIdx)
+  let n: Int = Json.arrayLen(this: arr)
+  let empty: String = ""
+  var i: Int = 0
+  loop i < n {
+    let elem: JsonValue = Json.arrayAt(doc: doc, this: arr, idx: i)
+    let binding: ListViewBinding = {
+      nodeId: optString(
+        doc: doc
+        container: elem
+        key: "nodeId"
+        fallback: empty
+      )
+      componentName: optString(
+        doc: doc
+        container: elem
+        key: "component"
+        fallback: empty
+      )
+      fieldName: optString(
+        doc: doc
+        container: elem
+        key: "field"
+        fallback: empty
+      )
+      itemField: optString(
+        doc: doc
+        container: elem
+        key: "itemField"
+        fallback: empty
+      )
+      prefix: optString(
+        doc: doc
+        container: elem
+        key: "prefix"
+        fallback: empty
+      )
+      suffix: optString(
+        doc: doc
+        container: elem
+        key: "suffix"
+        fallback: empty
+      )
+    }
+    bindings.add(value: binding)
+    i = i + 1
+  }
+  ret bindings
 }

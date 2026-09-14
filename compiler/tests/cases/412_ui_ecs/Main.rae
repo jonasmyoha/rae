@@ -7,11 +7,11 @@ open ecs/ComponentTable
 func main() {
   let world: UiWorld = createUiWorld()
   log("alive at boot: {aliveCount(world: world)}")
-  log("known components: {registeredComponentCount()}")
+  log("known components: {registeredComponentCount(world: world)}")
   let rectName: String = "Rect"
   let wibbleName: String = "Wibble"
-  log("Rect known: {isKnownComponent(name: rectName)}")
-  log("Wibble known: {isKnownComponent(name: wibbleName)}")
+  log("Rect known: {isKnownComponent(world: world, name: rectName)}")
+  log("Wibble known: {isKnownComponent(world: world, name: wibbleName)}")
 
   # Allocate three entities.
   var e1: EntityId = createEntity(world: world)

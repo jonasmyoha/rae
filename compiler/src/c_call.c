@@ -1229,8 +1229,21 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                     ctx->compiler_ctx, ctx->generic_params,
                     ctx->generic_args, p_type_for_dc);
                 int tmp_id = ctx->temp_counter++;
-                fprintf(out, "(__extension__ ({ %s __cpy%d; rae_deep_copy_%s(&__cpy%d, &(",
-                        tn_dc, tmp_id, tn_dc, tmp_id);
+                // #961: a `mod`/`view` ALIAS of an aggregate (`let f: mod
+                // List(T) => comp.bindings`, or a field-loop binding) is
+                // already a pointer local — pass it as the source directly,
+                // not its address (which is a pointer-to-pointer).
+                bool src_is_ptr = false;
+                if (a->value && a->value->kind == AST_EXPR_IDENT) {
+                    for (int li = (int)ctx->local_count - 1; li >= 0; li--) {
+                        if (!str_eq(ctx->locals[li], a->value->as.ident)) continue;
+                        const AstTypeRef* ltr = ctx->local_type_refs[li];
+                        src_is_ptr = ltr && (ltr->is_mod || ltr->is_view);
+                        break;
+                    }
+                }
+                fprintf(out, "(__extension__ ({ %s __cpy%d; rae_deep_copy_%s(&__cpy%d, %s",
+                        tn_dc, tmp_id, tn_dc, tmp_id, src_is_ptr ? "(" : "&(");
                 emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
                 fprintf(out, ")); __cpy%d; }))", tmp_id);
             } else if (wrap_move_arg) {

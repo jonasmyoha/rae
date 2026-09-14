@@ -2864,8 +2864,12 @@ static void reflect_fold_field_name_expr(AstExpr* e, const ReflectFold* rf) {
             if (reflect_metadata_call_kind(e, p->name) != 2) continue;
             const AstTypeRef* sub = substitute_type_ref(rf->ctx, rf->gparams, rf->cargs, p->type);
             if (!sub) sub = p->type;
+            // The parameter's own type is the thing named — `List` for a
+            // `List(String)` argument (the element rule is for field-loop
+            // bindings over `ComponentTable(T)`, #809), so a `List(String)`
+            // field never takes a generic decoder's `"String"` arm (#961).
             e->kind = AST_EXPR_STRING;
-            e->as.string_lit = reflect_element_type_name(sub);
+            e->as.string_lit = reflect_base_name(sub);
             e->resolved_type = NULL;
             e->decl_link = NULL;
             return;
@@ -2935,6 +2939,14 @@ static void reflect_fold_field_name_expr(AstExpr* e, const ReflectFold* rf) {
 // 0 = false, -1 = not a constant condition.
 static int reflect_constant_condition(const AstExpr* c) {
     if (!c || c->kind != AST_EXPR_BINARY) return -1;
+    // #961: `and` / `or` over constant tests fold too, so an exclude list can
+    // be one condition (`typeName(t) is not "A" and typeName(t) is not "B"`).
+    if (c->as.binary.op == AST_BIN_AND || c->as.binary.op == AST_BIN_OR) {
+        int l = reflect_constant_condition(c->as.binary.lhs);
+        int r = reflect_constant_condition(c->as.binary.rhs);
+        if (l < 0 || r < 0) return -1;
+        return c->as.binary.op == AST_BIN_AND ? (l && r) : (l || r);
+    }
     if (c->as.binary.op != AST_BIN_IS && c->as.binary.op != AST_BIN_NEQ) return -1;
     const AstExpr* l = c->as.binary.lhs;
     const AstExpr* r = c->as.binary.rhs;
@@ -3192,13 +3204,35 @@ static AstDecl* reflect_find_struct_decl(const AstModule* module, Str name) {
 // enclosing function's params and the active generic substitution. v1 supports
 // the value being a bare parameter identifier (`fields(world)`) — the whole
 // point of the generic helper.
+// #961: the typed locals declared so far in the template body (`var comp: T =
+// T.default()` before `fields(comp)`), so a field loop over a LOCAL expands
+// too, not just one over a parameter. A flat, in-order list; the walker
+// appends as it passes each typed `let`/`var`.
+typedef struct {
+    Str name;
+    const AstTypeRef* type;
+} ReflectLocal;
+#define REFLECT_LOCAL_MAX 128
+typedef struct {
+    ReflectLocal items[REFLECT_LOCAL_MAX];
+    size_t count;
+} ReflectLocals;
+
 static const AstTypeRef* reflect_value_concrete_type(CompilerContext* ctx,
         const AstExpr* value, const AstParam* params,
-        const AstIdentifierPart* gparams, const AstTypeRef* cargs) {
+        const AstIdentifierPart* gparams, const AstTypeRef* cargs,
+        const ReflectLocals* locals) {
     if (!value || value->kind != AST_EXPR_IDENT) return NULL;
     for (const AstParam* p = params; p; p = p->next)
         if (str_eq(p->name, value->as.ident))
             return substitute_type_ref(ctx, gparams, cargs, p->type);
+    if (locals) {
+        for (size_t i = locals->count; i > 0; i--) {   // innermost declaration wins
+            const ReflectLocal* l = &locals->items[i - 1];
+            if (str_eq(l->name, value->as.ident))
+                return substitute_type_ref(ctx, gparams, cargs, l->type);
+        }
+    }
     return NULL;
 }
 
@@ -3290,18 +3324,24 @@ static bool reflect_block_has_fields_loop(const AstBlock* block) {
 
 static void reflect_expand_block_concrete(CompilerContext* ctx, const AstModule* module,
         AstBlock* block, const AstParam* params,
-        const AstIdentifierPart* gparams, const AstTypeRef* cargs);
+        const AstIdentifierPart* gparams, const AstTypeRef* cargs, ReflectLocals* locals);
 static void reflect_expand_stmt_concrete(CompilerContext* ctx, const AstModule* module,
         AstStmt* stmt, const AstParam* params,
-        const AstIdentifierPart* gparams, const AstTypeRef* cargs) {
+        const AstIdentifierPart* gparams, const AstTypeRef* cargs, ReflectLocals* locals) {
     if (!stmt) return;
+    if (stmt->kind == AST_STMT_LET && stmt->as.let_stmt.type && locals
+        && locals->count < REFLECT_LOCAL_MAX) {
+        locals->items[locals->count].name = stmt->as.let_stmt.name;
+        locals->items[locals->count].type = stmt->as.let_stmt.type;
+        locals->count++;
+    }
     if (stmt->kind == AST_STMT_LOOP && stmt->as.loop_stmt.is_range && reflect_loop_is_fields(stmt)) {
         AstExpr* collection = stmt->as.loop_stmt.condition;
         AstCallArg* call_args = collection->as.call.args;
         AstStmt* binding = stmt->as.loop_stmt.init;
         if (call_args && !call_args->next && call_args->value && binding
             && binding->kind == AST_STMT_LET && binding->as.let_stmt.type) {
-            const AstTypeRef* wt = reflect_value_concrete_type(ctx, call_args->value, params, gparams, cargs);
+            const AstTypeRef* wt = reflect_value_concrete_type(ctx, call_args->value, params, gparams, cargs, locals);
             AstDecl* decl = wt ? reflect_find_struct_decl(module, reflect_base_name(wt)) : NULL;
             AstTypeRef* pattern = binding->as.let_stmt.type;
             bool want_mod = pattern->is_mod, want_view = pattern->is_view;
@@ -3319,7 +3359,7 @@ static void reflect_expand_stmt_concrete(CompilerContext* ctx, const AstModule* 
                 stmt->as.if_stmt.then_block = out;
                 stmt->next = saved_next;
                 // Nested field loops inside the freshly emitted bodies, too.
-                reflect_expand_block_concrete(ctx, module, out, params, gparams, cargs);
+                reflect_expand_block_concrete(ctx, module, out, params, gparams, cargs, locals);
                 return;
             }
         }
@@ -3327,30 +3367,32 @@ static void reflect_expand_stmt_concrete(CompilerContext* ctx, const AstModule* 
     }
     switch (stmt->kind) {
         case AST_STMT_IF:
-            reflect_expand_block_concrete(ctx, module, stmt->as.if_stmt.then_block, params, gparams, cargs);
-            reflect_expand_block_concrete(ctx, module, stmt->as.if_stmt.else_block, params, gparams, cargs);
+            reflect_expand_block_concrete(ctx, module, stmt->as.if_stmt.then_block, params, gparams, cargs, locals);
+            reflect_expand_block_concrete(ctx, module, stmt->as.if_stmt.else_block, params, gparams, cargs, locals);
             break;
         case AST_STMT_LOOP:
-            reflect_expand_block_concrete(ctx, module, stmt->as.loop_stmt.body, params, gparams, cargs);
+            reflect_expand_block_concrete(ctx, module, stmt->as.loop_stmt.body, params, gparams, cargs, locals);
             break;
         case AST_STMT_MATCH:
             for (AstMatchCase* c = stmt->as.match_stmt.cases; c; c = c->next)
-                reflect_expand_block_concrete(ctx, module, c->block, params, gparams, cargs);
+                reflect_expand_block_concrete(ctx, module, c->block, params, gparams, cargs, locals);
             break;
         case AST_STMT_DEFER:
-            reflect_expand_block_concrete(ctx, module, stmt->as.defer_stmt.block, params, gparams, cargs);
+            reflect_expand_block_concrete(ctx, module, stmt->as.defer_stmt.block, params, gparams, cargs, locals);
             break;
         case AST_STMT_UNSAFE:
-            reflect_expand_block_concrete(ctx, module, stmt->as.unsafe_stmt.block, params, gparams, cargs);
+            reflect_expand_block_concrete(ctx, module, stmt->as.unsafe_stmt.block, params, gparams, cargs, locals);
             break;
         default: break;
     }
 }
 static void reflect_expand_block_concrete(CompilerContext* ctx, const AstModule* module,
         AstBlock* block, const AstParam* params,
-        const AstIdentifierPart* gparams, const AstTypeRef* cargs) {
+        const AstIdentifierPart* gparams, const AstTypeRef* cargs, ReflectLocals* locals) {
+    size_t mark = locals ? locals->count : 0;
     for (AstStmt* s = block ? block->first : NULL; s; s = s->next)
-        reflect_expand_stmt_concrete(ctx, module, s, params, gparams, cargs);
+        reflect_expand_stmt_concrete(ctx, module, s, params, gparams, cargs, locals);
+    if (locals) locals->count = mark;   // block scope ends
 }
 
 // Public (#773): if `template_body` contains a fields() loop, return a CLONE with
@@ -3372,7 +3414,10 @@ AstBlock* reflect_instantiate_body(CompilerContext* ctx, const AstModule* module
         rf.ctx = ctx; rf.params = params; rf.gparams = gparams; rf.cargs = cargs;
         reflect_fold_field_name_block(cloned, &rf);
     }
-    if (has_loop) reflect_expand_block_concrete(ctx, module, cloned, params, gparams, cargs);
+    if (has_loop) {
+        ReflectLocals locals; locals.count = 0;
+        reflect_expand_block_concrete(ctx, module, cloned, params, gparams, cargs, &locals);
+    }
     return cloned;
 }
 
@@ -4963,7 +5008,7 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                     } else {
                         // Concrete (a plain function, or a sema specialization
                         // whose params were substituted): fold now.
-                        Str folded = reflect_element_type_name(param->type);
+                        Str folded = reflect_base_name(param->type);
                         expr->kind = AST_EXPR_STRING;
                         expr->as.string_lit = folded;
                         expr->decl_link = NULL;
