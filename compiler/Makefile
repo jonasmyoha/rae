@@ -72,6 +72,12 @@ OBJS = $(SRCS:$(SRC_DIR)/%.c=$(BUILD_DIR)/%.o)
 OBJS += $(BUILD_DIR)/rae_tinyexpr.o $(BUILD_DIR)/monocypher.o
 
 DEPS = $(OBJS:.o=.d)
+# rae_runtime.o and sys_thread.o are NOT in $(OBJS) (they hang off the bin/rae
+# rule directly), so their generated .d files must be listed here explicitly or
+# they are never -include'd. Without this, rae_runtime.c's ~30 `#include`d
+# runtime_*.c files are invisible to make: editing one and running `make` did
+# nothing, and only `make clean && make` picked the edit up (#989).
+DEPS += $(BUILD_DIR)/rae_runtime.d $(BUILD_DIR)/sys_thread.d
 
 TARGET = $(BIN_DIR)/rae
 # Test runner selection. The PARALLEL per-case runner (#824) is the DEFAULT for
