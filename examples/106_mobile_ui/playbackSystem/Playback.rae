@@ -73,7 +73,7 @@ type PlaybackState {
   # driving playback. `nowPlayingRevision` is the component-instance
   # revision (§7) for this identity: bumped by `setNowPlayingArt` whenever
   # the key changes. The now-playing Hero + mini-player MiniThumb covers
-  # OBSERVE this revision (via a DataDependency) and re-point their
+  # OBSERVE this revision (via their `PlaybackCover` binding) and re-point their
   # Sprite.textureKey by identity — replacing the old per-frame cover poll
   # walk (`rebindAlbumCoversToSpotify`) that matched a stale browsed stem
   # and so never followed a track change (the motivating bug, §1).
@@ -120,8 +120,8 @@ func setPlaybackPlaying(state: mod PlaybackState, value: view Bool) pub {
 
 # Set the currently-playing cover art key and bump the nowPlaying
 # instance revision (§7) when it actually changes. The now-playing Hero
-# + mini-player MiniThumb observe this revision and re-point by identity
-# (#268). Idempotent: re-setting the same key is a no-op, so callers can
+# + mini-player MiniThumb (`PlaybackCover`) observe this revision and
+# re-point by identity (#268). Idempotent: re-setting the same key is a no-op, so callers can
 # call it every frame / poll without spurious re-paints.
 func setNowPlayingArt(state: mod PlaybackState, artKey: view String) pub {
   if state.nowPlayingArtKey is artKey {
@@ -199,8 +199,8 @@ func playbackProgress(state: view PlaybackState) pub ret Float {
 }
 
 # Per-frame playback progress refresh. Play/pause icons are intentionally not
-# patched here; they are mounted from PlaybackState and refreshed by
-# `refreshPlaybackViewsIfNeeded` when the playback revision changes. Progress
+# patched here; their `PlaybackIcon` binding follows the playback revision
+# (`playbackIconSystem`, #981). Progress
 # fill remains a per-frame animation because it depends on elapsed time.
 # Sub-pixel width differences are invisible but would still bump the
 # component generation and re-trigger a full layout, so treat them as equal.

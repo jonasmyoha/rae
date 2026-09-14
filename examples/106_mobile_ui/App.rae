@@ -174,10 +174,7 @@ func runApp(app: mod App) {
     var cachedTrackIndex: Int = 0 - 1
     var cachedTrackDurMs: Int = 0
     var cachedAlbumScrollFloor: Float = 0.0
-    let uiRefresh: UiRefreshCache = createUiRefreshCache(
-      historyRevision: 0
-      playbackRevision: playback.revision
-    )
+    let uiRefresh: UiRefreshCache = createUiRefreshCache(historyRevision: 0)
     var lastHoverAnimDirty: Bool = false
     # Absolute timestamps -> Float64 (see docs/primitive-types.md).
     var lastFrameTime: Float64 = 0.0
@@ -249,7 +246,6 @@ func runApp(app: mod App) {
         viewport: viewport
       )
       uiRefresh.historyRevision = appState.playHistory.revision
-      uiRefresh.uiPlayback.observedRevision = playback.revision
       # Apply the gpu2d design-resolution transform together with the
       # freshly-built world so the two never disagree. Doing this in the
       # resize-detection block instead painted one glitchy frame: the
