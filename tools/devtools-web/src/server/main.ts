@@ -50,7 +50,7 @@ const BUILD_VERSION = randomUUID();
 const statsStore = new StatsStore();
 const testRunner = new TestRunner(CONFIG, broadcastEvent, statsStore);
 const buildRunner = new BuildRunner(CONFIG, broadcastEvent, statsStore);
-const exampleRunner = new ExampleRunner(CONFIG, broadcastEvent);
+const exampleRunner = new ExampleRunner(CONFIG, broadcastEvent, statsStore);
 // Bridge agent-driven `make test > /tmp/rae-test-live.log` runs into the live
 // WebSocket test pipeline so the Test Runner UI auto-connects to them.
 const TEST_LIVE_LOG = process.env.RAE_TEST_LOG ?? "/tmp/rae-test-live.log";
@@ -367,6 +367,28 @@ const server = Bun.serve<SocketData>({
       return new Response(JSON.stringify({ ok: true }), {
         headers: { "Content-Type": "application/json" }
       });
+    }
+
+    if (url.pathname === "/api/stats/example-builds" && req.method === "GET") {
+      // Latest build cost per example (the compiler's @@RAE_BUILD_TIME@@ line):
+      // { <exampleId>: { buildMs, msPerKloc, lines, projectLines, emitMs, ccMs, timestamp } }
+      const totals = statsStore.latestPerExample("examples.build_ms");
+      const perKloc = statsStore.latestPerExample("examples.build_ms_per_kloc");
+      const data: Record<string, unknown> = {};
+      for (const [id, t] of Object.entries(totals)) {
+        data[id] = {
+          buildMs: t.value,
+          msPerKloc: perKloc[id]?.value ?? null,
+          lines: t.metadata.lines ?? null,
+          projectLines: t.metadata.projectLines ?? null,
+          emitMs: t.metadata.emitMs ?? null,
+          ccMs: t.metadata.ccMs ?? null,
+          targetId: t.metadata.targetId ?? null,
+          profile: t.metadata.profile ?? null,
+          timestamp: t.timestamp
+        };
+      }
+      return new Response(JSON.stringify(data), { headers: { "Content-Type": "application/json" } });
     }
 
     if (url.pathname === "/api/stats/recent" && req.method === "GET") {

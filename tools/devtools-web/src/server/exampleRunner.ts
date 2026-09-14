@@ -12,9 +12,12 @@ import type {
   ExampleRunStartedMessage,
   ExampleRunArtifactsMessage,
   ExampleRunSummary,
-  ServerEvent
+  ServerEvent,
+  ExampleBuildTimingMessage,
+  ExampleAppStartedMessage
 } from "../shared/types";
 import type { RaeDevtoolsConfig, TargetConfig } from "./config";
+import type { StatsStore } from "./stats";
 import { resolveCompilerPath, resolveTarget } from "./config";
 
 type BroadcastFn = (event: ServerEvent) => void;
@@ -41,6 +44,7 @@ type ActiveRun = {
   target: TargetConfig;
   tempOutputDir?: string;
   action?: ExampleActionRequest;
+  profile?: "debug" | "release";
 };
 
 export type ExampleRunOptions = {
@@ -60,7 +64,8 @@ export class ExampleRunner {
 
   constructor(
     private config: RaeDevtoolsConfig,
-    private broadcast: BroadcastFn
+    private broadcast: BroadcastFn,
+    private stats?: StatsStore
   ) {}
 
   async run(entry: string, options: ExampleRunOptions = {}) {
@@ -107,7 +112,8 @@ export class ExampleRunner {
       stopRequested: false,
       target,
       tempOutputDir: prepared.tempDir,
-      action
+      action,
+      profile: options.profile
     };
     this.runs.set(runId, run);
 
@@ -180,6 +186,61 @@ export class ExampleRunner {
     for (const line of lines) {
       if (!line.trim() && stream === "stdout") continue;
       this.broadcastLine(run, stream, line);
+      if (line.startsWith("@@RAE_")) this.handleSentinel(run, line);
+    }
+  }
+
+  /** The compiler's machine-readable timing lines (compiler/src/main.c "Build
+   * timing"): `@@RAE_BUILD_TIME@@ k=v ...` when the C compiler finishes and
+   * `@@RAE_APP_START@@` when the built app is exec'd. Parsed here into typed
+   * events (+ a stats record) so the client can budget build and run
+   * separately and show per-example build cost; the raw line still goes out
+   * as ordinary output above. */
+  private handleSentinel(run: ActiveRun, line: string) {
+    const fields: Record<string, string> = {};
+    for (const part of line.split(/\s+/).slice(1)) {
+      const eq = part.indexOf("=");
+      if (eq > 0) fields[part.slice(0, eq)] = part.slice(eq + 1);
+    }
+    const num = (k: string) => Number(fields[k] ?? 0) || 0;
+    const timestamp = new Date().toISOString();
+    if (line.startsWith("@@RAE_BUILD_TIME@@")) {
+      const timing = {
+        totalMs: num("total_ms"),
+        emitMs: num("emit_ms"),
+        ccMs: num("cc_ms"),
+        lines: num("lines"),
+        projectLines: num("project_lines"),
+        modules: num("modules"),
+        msPerKloc: num("ms_per_kloc")
+      };
+      if (run.exampleId && this.stats) {
+        this.stats.recordExampleBuild({
+          runId: run.id,
+          exampleId: run.exampleId,
+          entry: run.entry,
+          targetId: run.target.id,
+          profile: run.profile,
+          ...timing
+        });
+      }
+      this.broadcast({
+        type: "example-build-timing",
+        runId: run.id,
+        exampleId: run.exampleId,
+        entry: run.entry,
+        targetId: run.target.id,
+        ...timing,
+        timestamp
+      } satisfies ExampleBuildTimingMessage);
+    } else if (line.startsWith("@@RAE_APP_START@@")) {
+      this.broadcast({
+        type: "example-app-started",
+        runId: run.id,
+        exampleId: run.exampleId,
+        entry: run.entry,
+        timestamp
+      } satisfies ExampleAppStartedMessage);
     }
   }
 

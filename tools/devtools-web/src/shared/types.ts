@@ -198,6 +198,35 @@ export type ExampleRunOutputMessage = {
   timestamp: string;
 };
 
+/** The compiler's `@@RAE_BUILD_TIME@@` line for one run, parsed by the server
+ * (see compiler/src/main.c "Build timing"). Sent once per compiled build,
+ * before the app starts; `msPerKloc` is totalMs per 1,000 processed lines. */
+export type ExampleBuildTimingMessage = {
+  type: "example-build-timing";
+  runId: string;
+  exampleId?: string;
+  entry: string;
+  targetId: string;
+  totalMs: number;
+  emitMs: number;
+  ccMs: number;
+  lines: number;
+  projectLines: number;
+  modules: number;
+  msPerKloc: number;
+  timestamp: string;
+};
+
+/** The compiler's `@@RAE_APP_START@@` line: the build is done and the app
+ * binary is now running. Lets a driver budget build and run separately. */
+export type ExampleAppStartedMessage = {
+  type: "example-app-started";
+  runId: string;
+  exampleId?: string;
+  entry: string;
+  timestamp: string;
+};
+
 export type ExampleRunCompletedMessage = {
   type: "example-run-completed";
   runId: string;
@@ -299,6 +328,8 @@ export type ServerEvent =
   | BuildRunErrorMessage
   | ExampleRunStartedMessage
   | ExampleRunOutputMessage
+  | ExampleBuildTimingMessage
+  | ExampleAppStartedMessage
   | ExampleRunCompletedMessage
   | ExampleRunErrorMessage
   | ExampleRunArtifactsMessage
