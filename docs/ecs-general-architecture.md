@@ -390,39 +390,68 @@ and lacked generational entities + queries. One general ECS serves both.
 
 ## 4. Smallest set of improvements to make this practical
 
-Ordered by leverage; each is a library/ECS change, **no language change**:
+Ordered by leverage; each is a library/ECS change, **no language change**.
+**Status (refreshed 2026-09-14, #953): every step below has landed** except the
+compiler-synthesis half of step 7, which was assessed and declined (#774); the
+task ids are on each item. Fixtures: `683_ecs_world_core` … `703_ecs_headless_sim`
+plus `839` (Schedule declared sets) and `842` (listView).
 
 1. **Extract `lib/ecs/`** from `lib/ui/ecs.rae` — `EntityId`, `ComponentTable(T)`,
    `World` helpers, `createEntity`/`destroyEntity`. `UiWorld` becomes a thin
-   `World` user. (Mechanical; unblocks everything.)
+   `World` user. (Mechanical; unblocks everything.) — **LANDED #700–#702, #706**
+   (scaffold, storage layer, the reusable entity core embedded in `UiWorld`);
+   #747 confirmed `lib/ecs` is the single ECS in the tree.
 2. **Generational `EntityId`** + free-list recycling + O(1) `isAlive`
-   (`ecs.rae:7`, `:615`, `:624`).
+   (`ecs.rae:7`, `:615`, `:624`). — **LANDED #703, #704, #705.**
 3. **Multi-component query** (`query2`/`query3`, smallest-table probe) in
    `lib/ecs` — removes the `componentHas` ladders and the parallel-array joins.
+   — **LANDED #707 (needed multi-type-param generic inference in the compiler),
+   #708, #709;** `query4`/`query5`, `without`/`changedSince` and the query-loop
+   sugar followed in #807; the lib/ui ladders were migrated in #940.
 4. **`HierarchySystem`** owning `Children`(authoritative, ordered)/`Parent`(derived) with
    referential-integrity on destroy — fixes the desync + dangling-ref gap
-   (`ecs.rae:798-804`).
+   (`ecs.rae:798-804`). — **LANDED #710–#713, #712 (destroy integrity), #722/#726
+   (UI on it); authority flipped to `Children` in #769.**
 5. **`TransformSystem`** producing derived world transforms over a depth-sorted
    order — replaces recursive `Children` walks and 114's manual matrix rebuilds.
+   — **LANDED #714–#716, #727 (UI), #735 (`PrevTransformSystem`).**
 6. **Component registry + serialize-out**: a registration table (`save`/`load`/
    flags) driving both save and load, using the compiler's per-struct
    `toJson`/`fromJson`; register derived/cache components with no `SERIALIZE`
    flag. Requires a **JSON builder in `lib/json.rae`** (currently parser-only).
+   — **LANDED #717 (registry + flags), #718 (JSON builder), #719 (serialize-out),
+   #720 (serialize-in), #730 (UI flags), #768 (UiWorld machine snapshot).**
 7. **Cut component boilerplate** (§2.10): compiler-synthesized per-World
    `destroyEntity`/registry helpers so adding a component is one field. Do this
    BEFORE the large migrations, or they hard-code the four-place pattern.
+   — **HALF LANDED, HALF DECLINED.** The iteration half is compile-time field
+   reflection (#772/#773, `loop let table: mod ComponentTable(any) in
+   fields(world)`, first consumer #760, `typeName` #809): the whole-world
+   helpers are written once in Rae, so adding a component IS one field. The
+   *construction* half — `fields(Type)` building a World/value by reflection,
+   or a compiler-synthesised per-World builtin — was assessed in #756 and
+   **declined in #774** (see `compile-time-reflection.md`); the remaining
+   per-component registry arms are the #959–#961 follow-up.
 8. **Fix `mod`-component ergonomics for value structs** so games stop doing
    copy-mutate-set (`app.rae:590-599`) — this leans on the `opt T`/`view`/`mod`
    work already done this epic (#654/#656/#662/#663); verify component `mod`
-   access aliases storage for gameplay structs.
+   access aliases storage for gameplay structs. — **LANDED #721 (`componentMod`
+   write-through, proven), #762 (nested `mod` write-back locked by a test);
+   114 migrated off copy-mutate-set in #739.**
 9. **`Schedule`** (§2.5): ordered system entries + generalized generation-based
-   dirty-skip, replacing the per-system `*IfDirty` wrappers.
+   dirty-skip, replacing the per-system `*IfDirty` wrappers. — **LANDED #755
+   (minimal ordered, dirty-skipping runner), #939 (declared read/write sets +
+   the lib/ui pipeline on it), #949/#954 (106 and 104/105 driven by it).**
 10. **Tags**: make empty structs legal (one-byte C lowering) and add the tag
-    table pattern + query-by-tag.
+    table pattern + query-by-tag. — **LANDED #751 (zero-field struct legal),
+    #752 (tag pattern + query-by-tag); first uses #734 (112) and #948 (106).**
 11. **Resources + events** (§2.8, §2.9): name the resource pattern; `EventQueue(T)`
-    on the world.
+    on the world. — **LANDED #753 (`ecs-resources.md`), #754 (`EventQueue(T)`);
+    the UI action path moved onto it in #943/#962; no-globals enforcement that
+    makes resources the only option: #763/#764/#766/#789.**
 12. **A non-graphical ECS example** (headless simulation/CLI) in the test suite,
-    proving ECS as general program structure, not a graphics idiom.
+    proving ECS as general program structure, not a graphics idiom. — **LANDED
+    #757 (`703_ecs_headless_sim`).**
 
 ## 5. Non-goals (do not add to the language)
 

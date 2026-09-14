@@ -81,7 +81,12 @@ Ordered by leverage.
    cap) is used only by `examples/legacy` — move or delete. `lib/ui/Theme.rae`'s
    header still describes a module-level active theme (pre-#764).
    `docs/ui-theme-system.md` says "PROPOSED, no implementation" although the
-   theme resource exists. `docs/concurrency-model.md` §5 is stale.
+   theme resource exists. `docs/concurrency-model.md` §5 is stale. **Docs
+   refreshed (#953):** the theme doc now opens with the implemented state
+   (M0–M6 = #230–#237, resource since #764), the concurrency doc's header/§5/§6
+   describe the C-backend `spawn`/`Task`/`Channel` as they are (Live removed),
+   and `ecs-general-architecture.md` §4 carries the task id of every landed
+   step (7's construction half declined, #774). `legacyRaylib` went in #955.
 9. **File caps:** `Components.rae` 879, `RenderSystem.rae` 830,
    `RegistryDeser.rae` 777. Registry synthesis (item 3) is what shrinks the
    last one.
