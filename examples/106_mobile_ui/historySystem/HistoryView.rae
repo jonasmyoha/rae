@@ -11,8 +11,16 @@ open ui/Ecs
 # The History entry is stored in `appState.playHistory.entries`,
 # oldest-first. Rendering walks the list from the tail so the most
 # recent play sits at the top of the page, matching user intuition.
+#
+# #964: the list is a lib/ui `ListView` over `history-row.raescene`. This
+# file only turns the play history into `ListViewData` rows (one cell per
+# bound field) and declares the bindings; windowing, recycling and the
+# scroll translation are the listViewSystem's (docs/ui-ecs-refactor-status
+# §2.6). The row template's nodes: HistoryRow (OnClick), Thumb (Sprite,
+# with a ThumbPlaceholder child toggled by `Active`), Title, Artist,
+# Duration.
 import Files
-import ui/Components
+open ui/Components
 import ui/layoutSystem/LayoutSystem
 open ecs/ComponentTable
 open ui/Theme
@@ -67,19 +75,13 @@ func historyScrollMin(history: view PlayHistory) pub ret Float {
   ret 0.0 - overflow
 }
 
-# ----- List virtualization (#270c) ---------------------------------
-# The history list can hold hundreds of entries; building/laying out all
-# of them made scrolling O(total) (a full relayout every scroll frame).
-# Instead only the rows spanning the viewport (± a buffer) become
-# entities; top/bottom spacer rects reserve the off-window height so
-# positions and the scroll extent match a full list exactly.
-
-# Extra rows built above + below the viewport so a fast scroll doesn't
-# flash blank before the next in-place rewindow.
+# ----- List virtualization (#964: lib/ui ListView) ------------------
+# Extra rows kept live above + below the viewport so a fast scroll doesn't
+# flash blank before the pooled rows are re-bound.
 const historyWindowBuffer: Int = 4
 
-# Body content box (the scrolling region). Pure constants, shared by the
-# initial mount and the in-place rewindow so both agree exactly.
+# Body content box (the scrolling region). Pure constants so the mount and
+# the scroll clamp agree exactly.
 func historyBodyW() pub ret Float {
   ret phoneFrameW - outerPad * 2.0
 }
@@ -88,31 +90,10 @@ func historyBodyH() pub ret Float {
   ret phoneFrameH - topBarH - navTabsH - outerGap * 4.0 - outerPad * 2.0
 }
 
-# Topmost VISUAL row index (0 = newest, at the top) to build for a given
-# scroll offset. scrollY is <= 0 (content scrolled up); clamped to [0, n],
-# with `historyWindowBuffer` rows of lead-in above the viewport.
-func historyWindowFirstVisual(scrollY: view Float, count: view Int) pub ret Int {
+# Rows spanning the viewport (plus one for a partially visible bottom row).
+func historyVisibleRows() ret Int {
   let pitch: Float = historyRowH + historyRowGap
-  var top: Float = 0.0 - scrollY
-  if top < 0.0 {
-    top = 0.0
-  }
-  var fv: Int = (top / pitch).toInt() - historyWindowBuffer
-  if fv < 0 {
-    fv = 0
-  }
-  if fv > count {
-    fv = count
-  }
-  ret fv
-}
-
-# Rows to build per window: those spanning the viewport plus a buffer each
-# side (and one extra for a partially-visible row at the bottom edge).
-func historyWindowCount(bodyH: view Float) ret Int {
-  let pitch: Float = historyRowH + historyRowGap
-  let inView: Int = (bodyH / pitch).toInt() + 1
-  ret inView + historyWindowBuffer * 2 + 1
+  ret (historyBodyH() / pitch).toInt() + 1
 }
 
 # True when the entry has a textureKey the registry can paint.
@@ -206,120 +187,115 @@ func buildHistoryThumb(
   ret thumb
 }
 
-func buildHistoryRow(
-  world: mod UiWorld
-  entry: view PlayHistoryEntry
-  entryIndex: view Int
-  rounded: view Bool
-) ret EntityId {
-  let row: EntityId = createEntity(world: world)
-  let w: Float = phoneFrameW - outerPad * 2.0
-  setRectFixed(
-    world: world
-    entity: row
-    w: w
-    h: historyRowH
-  )
-  let layH: LayoutType = LayoutType.horizontal
-  let alignC: AlignKind = AlignKind.center
-  setLayout(
-    world: world
-    entity: row
-    kind: layH
-    gap: 26.024096385542165
-    alignCross: alignC
-  )
-  # spaceM (full-precision literal; token is 6-dec)
-  let replayAction: String = "history.replay.{entryIndex}"
-  setOnClick(world: world, entity: row, actionId: replayAction)
-
-  let thumb: EntityId = buildHistoryThumb(
-    world: world
-    entry: entry
-    size: historyThumbSize
-    rounded: rounded
-  )
-
-  let info: EntityId = createEntity(world: world)
-  let infoW: Float = w - historyThumbSize - historyDurationW - 24.0
-  setRectFixed(
-    world: world
-    entity: info
-    w: infoW
-    h: historyInfoH
-  )
-  let layV: LayoutType = LayoutType.vertical
-  let alignS: AlignKind = AlignKind.start
-  setLayout(
-    world: world
-    entity: info
-    kind: layV
-    gap: historyTextGap
-    alignCross: alignS
-  )
-
-  let title: EntityId = createEntity(world: world)
-  setRectFixed(
-    world: world
-    entity: title
-    w: infoW
-    h: historyTitleH
-  )
-  let titleStyle: String = "historyTitle"
-  let titleText: String = "{entry.trackName}"
-  setText(
-    world: world
-    entity: title
-    text: titleText
-    styleId: titleStyle
-  )
-
-  let sub: EntityId = createEntity(world: world)
-  setRectFixed(
-    world: world
-    entity: sub
-    w: infoW
-    h: historyArtistH
-  )
-  let subStyle: String = "historyArtist"
-  let subText: String = "{entry.artistName}"
-  setText(
-    world: world
-    entity: sub
-    text: subText
-    styleId: subStyle
-  )
-
-  let infoKids: List(EntityId) = List.create(EntityId, cap: 2)
-  infoKids.add(value: title)
-  infoKids.add(value: sub)
-  attachChildren(world: world, parent: info, kids: infoKids)
-
-  let dur: EntityId = createEntity(world: world)
-  setRectFixed(
-    world: world
-    entity: dur
-    w: historyDurationW
-    h: 20.0
-  )
-  let durStyle: String = "muted"
-  let durMs: Int = (entry.durationSec * 1000.0).toInt()
-  let durText: String = formatDurationMs(ms: durMs)
-  setText(
-    world: world
-    entity: dur
-    text: durText
-    styleId: durStyle
-  )
-
-  let rowKids: List(EntityId) = List.create(EntityId, cap: 3)
-  rowKids.add(value: thumb)
-  rowKids.add(value: info)
-  rowKids.add(value: dur)
-  attachChildren(world: world, parent: row, kids: rowKids)
-  ret row
+# One `ListViewRow` per play, newest first (visual 0 = the latest entry).
+# The cells are exactly what the bindings read: the texts, the replay
+# action with the REAL entries index baked in, the art key, and the
+# placeholder switch ("true" when the entry has no art yet).
+func historyRowCell(row: mod ListViewRow, key: view String, value: own String) {
+  row.keys.add(value: "{key}")
+  row.values.add(value: value)
 }
 
+func historyListData(history: view PlayHistory) ret ListViewData {
+  unsafe {
+    let n: Int = history.entries.length
+    var rows: List(ListViewRow) = List.create(ListViewRow, cap: n)
+    var visual: Int = 0
+    loop visual < n {
+      let i: Int = n - 1 - visual
+      let e: PlayHistoryEntry = rae_ext_rae_buf_get(buf: history.entries.data, index: i)
+      var row: ListViewRow = {
+        keys: List.create(String, cap: 6)
+        values: List.create(String, cap: 6)
+      }
+      historyRowCell(row: row, key: "title", value: "{e.trackName}")
+      historyRowCell(row: row, key: "artist", value: "{e.artistName}")
+      let durMs: Int = (e.durationSec * 1000.0).toInt()
+      historyRowCell(row: row, key: "duration", value: formatDurationMs(ms: durMs))
+      historyRowCell(row: row, key: "action", value: "history.replay.{i}")
+      historyRowCell(row: row, key: "textureKey", value: "{e.textureKey}")
+      var placeholder: String = "true"
+      if historyHasArt(entry: e) {
+        placeholder = "false"
+      }
+      historyRowCell(row: row, key: "placeholder", value: placeholder)
+      rows.add(value: row)
+      visual = visual + 1
+    }
+    ret ListViewData { rows: rows }
+  }
+}
+
+func historyBinding(
+  nodeId: view String
+  componentName: view String
+  fieldName: view String
+  itemField: view String
+) ret ListViewBinding {
+  ret ListViewBinding {
+    nodeId: "{nodeId}"
+    componentName: "{componentName}"
+    fieldName: "{fieldName}"
+    itemField: "{itemField}"
+    prefix: ""
+    suffix: ""
+  }
+}
+
+# The History ListView: the `history-row` sub-scene per pooled row, one
+# binding per cell, sized from the row constants above.
+func historyListView() ret ListView {
+  var bindings: List(ListViewBinding) = List.create(ListViewBinding, cap: 6)
+  bindings.add(value: historyBinding(
+    nodeId: "Title"
+    componentName: "Text"
+    fieldName: "text"
+    itemField: "title"
+  ))
+  bindings.add(value: historyBinding(
+    nodeId: "Artist"
+    componentName: "Text"
+    fieldName: "text"
+    itemField: "artist"
+  ))
+  bindings.add(value: historyBinding(
+    nodeId: "Duration"
+    componentName: "Text"
+    fieldName: "text"
+    itemField: "duration"
+  ))
+  bindings.add(value: historyBinding(
+    nodeId: "HistoryRow"
+    componentName: "OnClick"
+    fieldName: "actionId"
+    itemField: "action"
+  ))
+  bindings.add(value: historyBinding(
+    nodeId: "Thumb"
+    componentName: "Sprite"
+    fieldName: "textureKey"
+    itemField: "textureKey"
+  ))
+  bindings.add(value: historyBinding(
+    nodeId: "ThumbPlaceholder"
+    componentName: "Active"
+    fieldName: "value"
+    itemField: "placeholder"
+  ))
+  var lv: ListView = ListView.default()
+  lv.itemSceneId = "history-row"
+  lv.itemHeight = historyRowH
+  lv.itemGap = historyRowGap
+  lv.visibleItemCount = historyVisibleRows()
+  lv.overscanRows = historyWindowBuffer
+  lv.bindings = bindings
+  ret lv
+}
+
+# The scrolling body: a ListView over the play history. The body carries the
+# ScrollState the app's scroll FSM drives; the listViewSystem keeps the pooled
+# `history-row` instances re-bound to the rows in view. An empty history shows
+# a single muted line instead of a list.
 func buildHistoryBody(
   world: mod UiWorld
   history: view PlayHistory
@@ -335,181 +311,32 @@ func buildHistoryBody(
     w: bodyW
     h: bodyH
   )
-  let layV: LayoutType = LayoutType.vertical
-  let alignS: AlignKind = AlignKind.start
-  setLayout(
-    world: world
-    entity: body
-    kind: layV
-    gap: historyRowGap
-    alignCross: alignS
-  )
-  let off: Offset = { delta: Vec2 { x: 0.0, y: scrollY } }
-  componentSet(this: world.offsets, entity: body, data: off)
   let scroll: ScrollState = { y: scrollY, velocity: 0.0 }
   componentSet(this: world.scrollStates, entity: body, data: scroll)
-
-  # Build only the visible window of rows (#270c virtualization).
-  attachHistoryWindow(
-    world: world
-    body: body
-    history: history
-    rounded: rounded
-    scrollY: scrollY
-    bodyW: bodyW
-    bodyH: bodyH
-  )
-  ret body
-}
-
-# Build the visible window of history rows (+ top/bottom spacer rects that
-# reserve the off-window height) and attach them to `body`. Used by both
-# the initial mount and the in-place rewindow (#270c). O(visible), not
-# O(total): only rows spanning the viewport (± buffer) become entities.
-# The spacer heights are exact — top + window + bottom sum to the full
-# `historyContentHeight`, so row positions and the scroll extent match a
-# fully-built list.
-func attachHistoryWindow(
-  world: mod UiWorld
-  body: view EntityId
-  history: view PlayHistory
-  rounded: view Bool
-  scrollY: view Float
-  bodyW: view Float
-  bodyH: view Float
-) pub {
-  unsafe {
-    let n: Int = history.entries.length
-    if n is 0 {
-      let empty: EntityId = createEntity(world: world)
-      setRectFixed(
-        world: world
-        entity: empty
-        w: bodyW
-        h: 40.0
-      )
-      let style: String = "muted"
-      let text: String = "Nothing played yet."
-      setText(
-        world: world
-        entity: empty
-        text: text
-        styleId: style
-      )
-      let kids: List(EntityId) = List.create(EntityId, cap: 1)
-      kids.add(value: empty)
-      attachChildren(world: world, parent: body, kids: kids)
-      ret
-    }
-
-    let pitch: Float = historyRowH + historyRowGap
-    let fv: Int = historyWindowFirstVisual(scrollY: scrollY, count: n)
-    let wc: Int = historyWindowCount(bodyH: bodyH)
-    var lv: Int = fv + wc - 1
-    if lv > n - 1 {
-      lv = n - 1
-    }
-
-    let rowKids: List(EntityId) = List.create(EntityId, cap: wc + 2)
-
-    # Top spacer reserves the height of the `fv` rows above the window so the
-    # first built row lands at its true position under vertical layout (minus
-    # the gap the layout inserts after the spacer).
-    if fv > 0 {
-      let topSpacer: EntityId = createEntity(world: world)
-      let topH: Float = fv.toFloat() * pitch - historyRowGap
-      setRectFixed(
-        world: world
-        entity: topSpacer
-        w: bodyW
-        h: topH
-      )
-      rowKids.add(value: topSpacer)
-    }
-
-    # Window rows. Visual v (0 = top = newest) maps to entry index n-1-v;
-    # entries are oldest-first, and the user expects most-recent at the top.
-    var v: Int = fv
-    loop v <= lv {
-      let i: Int = n - 1 - v
-      let e: PlayHistoryEntry = rae_ext_rae_buf_get(buf: history.entries.data, index: i)
-      let row: EntityId = buildHistoryRow(
-        world: world
-        entry: e
-        entryIndex: i
-        rounded: rounded
-      )
-      rowKids.add(value: row)
-      v = v + 1
-    }
-
-    # Bottom spacer pads the laid-out content to the full n-row height so the
-    # scroll extent matches historyContentHeight; rows below the window are
-    # revealed by a rewindow as the user scrolls.
-    if lv < n - 1 {
-      let below: Int = n - 1 - lv
-      let bottomSpacer: EntityId = createEntity(world: world)
-      let botH: Float = below.toFloat() * pitch - historyRowGap
-      setRectFixed(
-        world: world
-        entity: bottomSpacer
-        w: bodyW
-        h: botH
-      )
-      rowKids.add(value: bottomSpacer)
-    }
-
-    attachChildren(world: world, parent: body, kids: rowKids)
-  }
-}
-
-# In-place window swap (#270c): rebuild `body`'s child rows for a new scroll
-# position WITHOUT replacing the body entity — so the scroll target is
-# unchanged and fling momentum survives (main.rae only zeroes scroll
-# velocity when the scroll-target ENTITY changes). Destroys the current
-# window's row subtrees, then attaches the new window.
-func rewindowHistoryBody(
-  world: mod UiWorld
-  body: view EntityId
-  history: view PlayHistory
-  rounded: view Bool
-  scrollY: view Float
-) pub {
-  unsafe {
-    # Snapshot the current child ids into a local list BEFORE destroying:
-    # destroyEntitySubtree swap-removes from world.childrens, which can
-    # relocate `body`'s own entry — so we must not hold a view/copy into that
-    # table across the destroy loop (a view would dangle; a componentGet copy
-    # would also auto-drop the aliased ids buffer). EntityIds are plain
-    # values, so the local snapshot is independent of the table.
-    let old: List(EntityId) = List.create(EntityId, cap: 32)
-    if componentHas(this: world.childrens, entity: body) {
-      let ch: view Children => componentView(this: world.childrens, entity: body)
-      let kn: Int = ch.ids.length
-      var k: Int = 0
-      loop k < kn {
-        let child: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: k)
-        old.add(value: child)
-        k = k + 1
-      }
-    }
-    let on: Int = old.length
-    var j: Int = 0
-    loop j < on {
-      let child: EntityId = rae_ext_rae_buf_get(buf: old.data, index: j)
-      destroyEntitySubtree(world: world, root: child)
-      j = j + 1
-    }
-    attachHistoryWindow(
+  if history.entries.length is 0 {
+    let empty: EntityId = createEntity(world: world)
+    setRectFixed(
       world: world
-      body: body
-      history: history
-      rounded: rounded
-      scrollY: scrollY
-      bodyW: historyBodyW()
-      bodyH: historyBodyH()
+      entity: empty
+      w: bodyW
+      h: 40.0
     )
+    let style: String = "muted"
+    let text: String = "Nothing played yet."
+    setText(
+      world: world
+      entity: empty
+      text: text
+      styleId: style
+    )
+    let kids: List(EntityId) = List.create(EntityId, cap: 1)
+    kids.add(value: empty)
+    attachChildren(world: world, parent: body, kids: kids)
+    ret body
   }
+  componentSet(this: world.listViews, entity: body, data: historyListView())
+  componentSet(this: world.listViewDatas, entity: body, data: historyListData(history: history))
+  ret body
 }
 
 func mountHistoryPage(

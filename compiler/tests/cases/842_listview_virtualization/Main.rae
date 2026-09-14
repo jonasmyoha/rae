@@ -13,6 +13,7 @@ import ui/Registry
 open ui/Scene
 open ui/SceneLoader
 open ui/listViewSystem/ListViewSystem
+open ui/SceneInstance
 open ecs/Entity
 open ecs/ComponentTable
 
@@ -109,6 +110,8 @@ func partAScene() ret String {
 }
 
 func main() {
+  # Bindings-only rows: no item sub-scene, so an empty registry (#964).
+  let rowScenes: SceneRegistry = createSceneRegistry()
   # ----- Part A: ListView deserialises from a scene (#941 arm) -----
   let scene: Scene = parseScene(source: partAScene())
   log("scene ok: {scene.ok}")
@@ -140,7 +143,7 @@ func main() {
   let scroll0: ScrollState = { y: 0.0, velocity: 0.0 }
   componentSet(this: world.scrollStates, entity: listEntity, data: scroll0)
 
-  listViewSystem(world: world)
+  listViewSystem(world: world, scenes: rowScenes)
   let aliveTop: Int = aliveCount(world: world)
   log("rows: {rowCount}")
   log("alive at top: {aliveTop}")
@@ -150,7 +153,7 @@ func main() {
   let midY: Float = 0.0 - 200000.0
   let mid: ScrollState = { y: midY, velocity: 0.0 }
   componentSet(this: world.scrollStates, entity: listEntity, data: mid)
-  listViewSystem(world: world)
+  listViewSystem(world: world, scenes: rowScenes)
   let aliveMid: Int = aliveCount(world: world)
   log("alive at mid: {aliveMid}")
   log("mid top row: {topRowLabel(world: world, listEntity: listEntity)}")
@@ -159,7 +162,7 @@ func main() {
   let endY: Float = 0.0 - (rowCount - 1).toFloat() * rowPitch
   let endS: ScrollState = { y: endY, velocity: 0.0 }
   componentSet(this: world.scrollStates, entity: listEntity, data: endS)
-  listViewSystem(world: world)
+  listViewSystem(world: world, scenes: rowScenes)
   let aliveEnd: Int = aliveCount(world: world)
   log("alive at end: {aliveEnd}")
 
