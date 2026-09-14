@@ -1,0 +1,104 @@
+# Compile-time field reflection, the WRITE half (#959): `fieldSet(f, value: v)`
+# and its UFCS spelling `f.set(value: v)` assign a field wholesale through a
+# `mod` field-loop binding, and `T.default()` is the compiler-generated zero
+# value every field starts from (0 / 0.0 / false / "" / empty List / first
+# enum case / none). A generic decoder starts at `T.default()` and fills field
+# by field — iteration + assignment over an EXISTING value, not construction
+# by reflection (#774).
+enum Mode { idle, busy, done }
+
+type Inner {
+  x: Float
+  y: Float
+}
+
+type Comp {
+  count: Int
+  ratio: Float
+  flag: Bool
+  label: String
+  mode: Mode
+  items: List(Int)
+  inner: Inner
+  maybe: opt Int
+}
+
+# Non-generic path (#772): the struct is known at the loop.
+func fill(comp: mod Comp) {
+  loop let f: mod Int in fields(comp) {
+    fieldSet(f, value: 7)
+  }
+  loop let f: mod String in fields(comp) {
+    f.set(value: "named")
+  }
+  loop let f: mod Bool in fields(comp) {
+    f.set(value: true)
+  }
+  loop let f: mod Inner in fields(comp) {
+    fieldSet(f, value: Inner { x: 1.5, y: 2.5 })
+  }
+  loop let f: mod List(Int) in fields(comp) {
+    f.set(value: [1, 2, 3])
+  }
+  loop let f: mod Mode in fields(comp) {
+    f.set(value: Mode.done)
+  }
+}
+
+# Generic path (#773): the struct is known per instantiation. The metadata
+# folds still work beside the write.
+func bumpInts(W: type, value: mod W) ret String {
+  var touched: String = ""
+  loop let f: mod Int in fields(value) {
+    fieldSet(f, value: 42)
+    touched = "{touched}{fieldName(f)} "
+  }
+  ret touched
+}
+
+func zeroOf(T: type) ret T {
+  ret T.default()
+}
+
+func main() {
+  var comp: Comp = Comp.default()
+  log(
+    "default: count={comp.count} ratio={comp.ratio} flag={comp.flag} label=[{comp.label}] items={comp.items.length()} inner={comp.inner.x},{comp.inner.y}"
+  )
+  if comp.mode is Mode.idle {
+    log("mode is the first case")
+  }
+  if let m: view Int => comp.maybe {
+    log("maybe unexpectedly present")
+  } else {
+    log("maybe is none")
+  }
+
+  fill(comp: comp)
+  log(
+    "filled: count={comp.count} ratio={comp.ratio} flag={comp.flag} label=[{comp.label}] items={comp.items.length()} inner={comp.inner.x},{comp.inner.y}"
+  )
+  if comp.mode is Mode.done {
+    log("mode set")
+  }
+  # The written List is a real, growable list, not a dangling literal.
+  comp.items.add(value: 4)
+  log("items after add: {comp.items.length()}")
+
+  let touched: String = bumpInts(W: Comp, value: comp)
+  log("generic touched [{touched}] count={comp.count}")
+
+  # T.default() round-trips through the generated serializer: the zero value
+  # serializes, parses back, and serializes to the same text.
+  var zero: Comp = Comp.default()
+  let zeroJson: String = zero.toJson()
+  let again: Comp = Comp.fromJson(json: zeroJson)
+  let againJson: String = again.toJson()
+  log("default roundtrip equal: {againJson is zeroJson}")
+
+  # Builtins and nested structs through a generic T.
+  let n: Int = zeroOf(Int)
+  let s: String = zeroOf(String)
+  let i: Inner = zeroOf(Inner)
+  log("generic defaults: {n} [{s}] {i.x}")
+}
