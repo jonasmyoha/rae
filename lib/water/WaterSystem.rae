@@ -52,7 +52,7 @@ open webgpu/Webgpu
 open webgpu/WebgpuEnums
 open webgpu/Context
 
-const waterUniformFloats: Int = 76  # nineteen vec4 (see waterSurface.wgsl `Water`)
+const waterUniformFloats: Int = 80  # twenty vec4 (see waterSurface.wgsl `Water`)
 
 # SSR march tuning (#854): a hit counts when the ray is behind the scene by
 # less than this many metres (grown with distance in the shader), and rays
@@ -598,6 +598,17 @@ func uploadWaterUniform(
       y: body.ssrSteps.toFloat()
       z: waterSsrThickness
       w: waterSsrMaxDistance
+    )
+    # The sampling limits the shader fades the cascades against (#1002): the
+    # centred grid's cell growth + innermost cell for the vertex displacement,
+    # the map size + band hand-over for the per-pixel normals and foam.
+    put4(
+      uniform: waterSystem.uniform
+      base: 76
+      x: body.clipCellPerMetre
+      y: body.clipFirstCell
+      z: fftBody.fftSize.toFloat()
+      w: cascadeBandBins
     )
     uploadFloats(
       resources: resources
