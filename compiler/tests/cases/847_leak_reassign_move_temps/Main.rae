@@ -1,0 +1,95 @@
+# Leak regression guard (#965) for three ownership rules the compiler now
+# enforces, each of which leaked in the idle example loops before:
+#   1. A whole-value store into an owned heap-owning place (a local, a field,
+#      a `mod` parameter) RELEASES the previous value first — `x = fresh()`
+#      used to leak x's old buffers (four Lists per drawn glyph in gpu2d).
+#   2. `own <place>` moves the value OUT and leaves the source empty, so the
+#      swap idiom (`var t = own a.x; a.x = own a.y; a.y = own t`) neither
+#      leaks nor double-frees, and a `let` bound from a move owns.
+#   3. A fresh String (call result / interpolation / concat) borrowed by a
+#      `view String` parameter is a statement temporary that is dropped —
+#      chained `s.concat(a).concat(b)` used to leak every intermediate.
+# Uses the mem-stats outstanding count (runs under RAE_MEM_STATS=1).
+import String
+import Sys
+
+func rae_ext_rae_mem_stats_outstanding() unsafe extern ret Int
+
+type Batch {
+  items: List(Int)
+  tags: List(String)
+  label: String
+}
+
+type Pair {
+  front: List(Int)
+  back: List(Int)
+  name: String
+}
+
+func freshBatch(n: view Int) ret Batch {
+  var items: List(Int) = List.create(Int, cap: 4)
+  items.add(value: n)
+  var tags: List(String) = List.create(String, cap: 2)
+  tags.add(value: "tag{n}")
+  ret Batch { items: items, tags: tags, label: "batch{n}" }
+}
+
+func rebind(target: mod Batch, n: view Int) {
+  target = freshBatch(n: n)
+}
+
+func swap(pair: mod Pair) {
+  var tmp: List(Int) = own pair.front
+  pair.front = own pair.back
+  pair.back = own tmp
+  let taken: String = own pair.name
+  pair.name = "{taken}!"
+}
+
+func measure(text: view String) ret Int {
+  ret text.length()
+}
+
+func exercise(rounds: view Int) ret Int {
+  var total: Int = 0
+  var batch: Batch = freshBatch(n: 0)
+  var pair: Pair = { front: List.create(Int, cap: 2), back: List.create(Int, cap: 2), name: "p" }
+  pair.front.add(value: 1)
+  var i: Int = 0
+  loop i < rounds {
+    # 1. reassignment of owned aggregates: local, via mod param, field
+    batch = freshBatch(n: i)
+    let other: Batch = freshBatch(n: i + 1)
+    batch = own other
+    rebind(target: batch, n: i)
+    batch.items = List.create(Int, cap: 1)
+    # 2. moves out of places
+    swap(pair: pair)
+    # 3. fresh Strings borrowed by view params, chained concats
+    var content: String = ""
+    content = content.concat(other: "a").concat(other: "b{i}").concat(other: "c")
+    total = total + measure(text: "item {i}".concat(other: "!"))
+    total = total + measure(text: content.concat(other: "d"))
+    total = total + content.length()
+    i = i + 1
+  }
+  ret total + batch.items.length() + pair.front.length() + pair.back.length()
+}
+
+func main() {
+  unsafe {
+    let warm: Int = exercise(rounds: 50)
+    let baseline: Int = rae_ext_rae_mem_stats_outstanding()
+    let iterations: Int = 3000
+    let total: Int = exercise(rounds: iterations)
+    let final: Int = rae_ext_rae_mem_stats_outstanding()
+    let leaked: Int = final - baseline
+    log("iterations: {iterations} total>0: {total > 0} warm>0: {warm > 0}")
+    if leaked < 100 {
+      log("verdict: OK")
+    } else {
+      log("verdict: LEAK ({leaked} outstanding)")
+    }
+  }
+}

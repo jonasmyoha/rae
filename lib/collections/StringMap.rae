@@ -268,6 +268,10 @@ func growStringMap(V: type, this: mod StringMap(V)) {
 func drop(V: type, this: mod StringMap(V)) {
   unsafe {
     rae_ext_rae_buf_free(buf: this.data)
+    # #965: leave the EMPTY value behind, not a dangling pointer — a
+    # zero-count alloc is the null Buffer, so a later drop (scope exit, or
+    # the release a whole-value store performs first) is a no-op.
+    this.data = rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(StringMapEntry(V)))
     this.length = 0
     this.cap = 0
   }

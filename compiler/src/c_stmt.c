@@ -1986,7 +1986,10 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 bool owns = (init == NULL)
                     || (init->kind == AST_EXPR_OBJECT)
                     || (init->kind == AST_EXPR_INTERP)
-                    || (init->kind == AST_EXPR_BINARY);
+                    || (init->kind == AST_EXPR_BINARY)
+                    // #965: `own <place>` MOVES the value in (the source is
+                    // marked moved or zeroed), so the binding is its owner.
+                    || (init->kind == AST_EXPR_OWN);
                 // Owning-let deep-copy path (above): when we wrapped the
                 // bare-ident RHS in rae_string_copy / rae_deep_copy_<T>,
                 // the binding now owns its own private heap and must
@@ -2111,18 +2114,67 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 fprintf(out, ".ptr = ");
                 emit_expr(ctx, stmt->as.assign_stmt.value, out, PREC_LOWEST, false, false);
             } else if (is_mod_ref) {
-                // *r = value (for non-primitive mod refs like mod Point)
-                fprintf(out, "*");
-                emit_expr(ctx, stmt->as.assign_stmt.target, out, PREC_LOWEST, true, true);
-                fprintf(out, " = ");
-                // Add compound literal cast for struct literals
-                if (stmt->as.assign_stmt.value->kind == AST_EXPR_OBJECT &&
-                    !stmt->as.assign_stmt.value->as.object_literal.type && target_tr) {
-                    fprintf(out, "(");
-                    emit_type_ref_as_c_type(ctx, target_tr, out, true);
-                    fprintf(out, ")");
+                // *r = value (for non-primitive mod refs like mod Point).
+                // #965: the pointee OWNS its previous value, so a whole-value
+                // store releases it first — exactly what the scope-exit drop
+                // would have done for it — then installs the new one. The new
+                // value is evaluated into a temp before the drop so an RHS
+                // that reads the target (`r = merge(r, x)`) sees it intact.
+                AstTypeRef pointee = *target_tr;
+                pointee.is_mod = false; pointee.is_view = false; pointee.next = NULL;
+                bool pointee_is_string = !pointee.is_opt
+                    && str_eq_cstr(get_base_type_name(&pointee), "String");
+                bool pointee_owns = pointee_is_string
+                    || (!pointee.is_opt && !pointee.generic_args
+                        && str_eq_cstr(get_base_type_name(&pointee), "Task"))
+                    || type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, &pointee, 0);
+                if (pointee_owns) {
+                    bool had_exp_m = ctx->has_expected_type;
+                    AstTypeRef saved_exp_m = ctx->expected_type;
+                    ctx->expected_type = pointee; ctx->has_expected_type = true;
+                    int tmpn = ctx->temp_counter++;
+                    const AstExpr* rhs = stmt->as.assign_stmt.value;
+                    // A fresh String temp (call / interpolation / concat) is
+                    // pool-owned: take it, as the String local/field stores do.
+                    bool rhs_fresh_string = pointee_is_string && rhs && (
+                        rhs->kind == AST_EXPR_CALL || rhs->kind == AST_EXPR_METHOD_CALL ||
+                        rhs->kind == AST_EXPR_INTERP || rhs->kind == AST_EXPR_BINARY ||
+                        rhs->kind == AST_EXPR_OWN);
+                    fprintf(out, "{ ");
+                    emit_type_ref_as_c_type(ctx, &pointee, out, false);
+                    fprintf(out, " __asg%d = ", tmpn);
+                    if (rhs->kind == AST_EXPR_OBJECT && !rhs->as.object_literal.type) {
+                        fprintf(out, "(");
+                        emit_type_ref_as_c_type(ctx, &pointee, out, true);
+                        fprintf(out, ")");
+                    }
+                    if (rhs_fresh_string) fprintf(out, "rae_string_pool_take(");
+                    emit_expr(ctx, rhs, out, PREC_LOWEST, false, false);
+                    if (rhs_fresh_string) fprintf(out, ")");
+                    fprintf(out, "; ");
+                    emit_type_ref_as_c_type(ctx, &pointee, out, false);
+                    fprintf(out, "* __asgp%d = ", tmpn);
+                    emit_expr(ctx, stmt->as.assign_stmt.target, out, PREC_LOWEST, true, true);
+                    fprintf(out, ";");
+                    char pname[48];
+                    snprintf(pname, sizeof pname, "(*__asgp%d)", tmpn);
+                    emit_drop_for_value(ctx, out, &pointee, pname, true);
+                    fprintf(out, "  *__asgp%d = __asg%d; }", tmpn, tmpn);
+                    ctx->has_expected_type = had_exp_m;
+                    ctx->expected_type = saved_exp_m;
+                } else {
+                    fprintf(out, "*");
+                    emit_expr(ctx, stmt->as.assign_stmt.target, out, PREC_LOWEST, true, true);
+                    fprintf(out, " = ");
+                    // Add compound literal cast for struct literals
+                    if (stmt->as.assign_stmt.value->kind == AST_EXPR_OBJECT &&
+                        !stmt->as.assign_stmt.value->as.object_literal.type && target_tr) {
+                        fprintf(out, "(");
+                        emit_type_ref_as_c_type(ctx, target_tr, out, true);
+                        fprintf(out, ")");
+                    }
+                    emit_expr(ctx, stmt->as.assign_stmt.value, out, PREC_LOWEST, false, false);
                 }
-                emit_expr(ctx, stmt->as.assign_stmt.value, out, PREC_LOWEST, false, false);
             } else {
                 bool had_exp = ctx->has_expected_type;
                 AstTypeRef saved_exp = ctx->expected_type;
@@ -2252,6 +2304,18 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                             (int)tname.len, tname.data,
                             (int)tname.len, tname.data,
                             tmpn);
+                    // #965: the local now holds a heap it OWNS, whatever it
+                    // was initialised from (`var s: String = ""` is a static
+                    // literal the scope-exit pass classified as non-owning),
+                    // so its scope exit must release it. rae_string_drop is
+                    // guarded by is_owned, so a literal stays a no-op.
+                    for (int li = (int)ctx->local_count - 1; li >= 0; li--) {
+                        if (str_eq(ctx->locals[li], tname)) {
+                            ctx->local_struct_owns_heap[li] = true;
+                            ctx->local_moved[li] = false;
+                            break;
+                        }
+                    }
                     ctx->has_expected_type = had_exp;
                     ctx->expected_type = saved_exp;
                 } else if (is_string_field_reassign) {
@@ -2306,6 +2370,65 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     emit_expr(ctx, stmt->as.assign_stmt.target, out, PREC_LOWEST, true, false);
                     fprintf(out, "); rae_drop_struct_%s(__asgp%d); *__asgp%d = __asg%d; }",
                             tn_dc, tmpn, tmpn, tmpn);
+                    ctx->has_expected_type = had_exp;
+                    ctx->expected_type = saved_exp;
+                } else if (target_tr && !target_tr->is_view && !target_tr->is_mod
+                           && !target_tr->is_opt && !target_is_string
+                           && (type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, target_tr, 0)
+                               || (!target_tr->generic_args
+                                   && str_eq_cstr(get_base_type_name(target_tr), "Task")))) {
+                    // #965: an owned aggregate place (a local, a field, an
+                    // element) that holds heap is REPLACED: the previous
+                    // value is released before the new one lands, the same
+                    // release its scope exit / owner's drop would perform.
+                    // Without this every `x = fresh()` over a heap-owning
+                    // struct leaked x's old buffers (the Gpu2dCanvas text
+                    // path leaked four Lists per glyph). Evaluate the RHS
+                    // into a temp first so it may read the target; a local
+                    // already moved out (`own x` passed on) has nothing to
+                    // release and is simply re-armed.
+                    int tmpn = ctx->temp_counter++;
+                    const AstExpr* tgt = stmt->as.assign_stmt.target;
+                    int tgt_local = -1;
+                    if (tgt->kind == AST_EXPR_IDENT) {
+                        for (int i = (int)ctx->local_count - 1; i >= 0; i--) {
+                            if (str_eq(ctx->locals[i], tgt->as.ident)) { tgt_local = i; break; }
+                        }
+                    }
+                    fprintf(out, "{ ");
+                    emit_type_ref_as_c_type(ctx, target_tr, out, false);
+                    fprintf(out, " __asg%d = ", tmpn);
+                    if (stmt->as.assign_stmt.value->kind == AST_EXPR_OBJECT &&
+                        !stmt->as.assign_stmt.value->as.object_literal.type) {
+                        fprintf(out, "(");
+                        emit_type_ref_as_c_type(ctx, target_tr, out, true);
+                        fprintf(out, ")");
+                    }
+                    emit_expr(ctx, stmt->as.assign_stmt.value, out, PREC_LOWEST, false, false);
+                    fprintf(out, "; ");
+                    emit_type_ref_as_c_type(ctx, target_tr, out, false);
+                    fprintf(out, "* __asgp%d = &(", tmpn);
+                    emit_expr(ctx, tgt, out, PREC_LOWEST, true, false);
+                    fprintf(out, ");");
+                    bool release_old = true;
+                    bool old_owns_heap = true;
+                    if (tgt_local >= 0) {
+                        if (ctx->local_moved[tgt_local]) release_old = false;
+                        old_owns_heap = ctx->local_struct_owns_heap[tgt_local];
+                    }
+                    if (release_old) {
+                        char pname[48];
+                        snprintf(pname, sizeof pname, "(*__asgp%d)", tmpn);
+                        emit_drop_for_value(ctx, out, target_tr, pname, old_owns_heap);
+                    }
+                    fprintf(out, "  *__asgp%d = __asg%d; }", tmpn, tmpn);
+                    if (tgt_local >= 0) {
+                        ctx->local_moved[tgt_local] = false;
+                        ctx->local_struct_owns_heap[tgt_local] = true;
+                    }
+                    if (stmt->as.assign_stmt.value->kind == AST_EXPR_OWN) {
+                        mark_expr_moved_if_local(ctx, stmt->as.assign_stmt.value);
+                    }
                     ctx->has_expected_type = had_exp;
                     ctx->expected_type = saved_exp;
                 } else {
