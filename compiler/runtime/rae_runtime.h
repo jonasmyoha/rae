@@ -550,10 +550,13 @@ int64_t rae_ext_rae_leading_zeros(int64_t x);
 int64_t rae_ext_rae_trailing_zeros(int64_t x);
 
 /* Channel(T) MPSC cross-thread channel (#271) — see lib/channel.rae. */
-int64_t rae_ext_rae_chan_new(void);
-void rae_ext_rae_chan_send(int64_t ch, int64_t value);
+int64_t rae_ext_rae_chan_new(int64_t elem_size);
+void* rae_ext_rae_chan_ring(int64_t ch);
+int64_t rae_ext_rae_chan_reserve(int64_t ch);
+void rae_ext_rae_chan_commit(int64_t ch);
+int64_t rae_ext_rae_chan_take(int64_t ch);
+void rae_ext_rae_chan_release(int64_t ch);
 int64_t rae_ext_rae_chan_count(int64_t ch);
-int64_t rae_ext_rae_chan_recv(int64_t ch);
 int64_t rae_ext_rae_chan_received(int64_t ch);
 void rae_ext_rae_chan_free(int64_t ch);
 

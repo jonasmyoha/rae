@@ -26,10 +26,11 @@ open ui/EventLoop
 #                                              2 failed (terminal reads clear
 #                                              the slot, like the C table did)
 #
-# `Channel(T)` carries Int payloads only, so a result is encoded as
-# `serial * 2 + okBit`: the serial names the job, the low bit the outcome.
-# A worker calls `wake()` after posting so an idle event loop repaints the
-# arrived thumbnail at once instead of on its next timeout tick.
+# A result is an `ArtworkResult { serial, ok }` sent as itself on a
+# `Channel(ArtworkResult)` (#969 — until struct payloads landed it had to be
+# encoded as `serial * 2 + okBit` on a `Channel(Int)`). A worker calls
+# `wake()` after posting so an idle event loop repaints the arrived
+# thumbnail at once instead of on its next timeout tick.
 #
 # Two index-aligned lists hold the in-flight jobs and their Tasks (a Task
 # inside a struct is not cascade-dropped, so it is kept beside the job and
@@ -52,12 +53,18 @@ type ArtworkFetchJob {
   status: Int
 }
 
+# One worker's report: which job (`serial`) and whether the file landed.
+type ArtworkResult {
+  serial: Int
+  ok: Bool
+}
+
 type ArtworkFetchQueue {
   inFlight: List(ArtworkFetchJob)
   # `tasks[i]` is the worker of `inFlight[i]`.
   tasks: List(Task(Int))
   finished: List(ArtworkFetchJob)
-  results: Channel(Int)
+  results: Channel(ArtworkResult)
   nextSerial: Int
 }
 
@@ -66,27 +73,27 @@ func createArtworkFetchQueue() ret ArtworkFetchQueue {
     inFlight: {}
     tasks: {}
     finished: {}
-    results: createChannel(Int)
+    results: createChannel(ArtworkResult)
     nextSerial: 1
   }
 }
 
 # The worker body: one blocking curl download on its own thread, then the
-# encoded result on the shared channel. `own` Strings: spawn deep-copies its
+# result on the shared channel. `own` Strings: spawn deep-copies its
 # arguments, so the worker holds its own url/path for the whole download.
 func artworkFetchWorker(
   serial: copy Int
   url: own String
   outPath: own String
-  results: own Channel(Int)
+  results: own Channel(ArtworkResult)
 ) ret Int {
   let ok: Bool = Spotify.fetchArtwork(url: url, outPath: outPath)
+  channelSend(this: results, value: ArtworkResult { serial: serial, ok: ok })
+  wake()
   var okBit: Int = 0
   if ok {
     okBit = 1
   }
-  channelSend(this: results, value: serial * 2 + okBit)
-  wake()
   ret okBit
 }
 
@@ -100,7 +107,7 @@ func artworkFetchWorkerWithFallback(
   url: own String
   term: own String
   outPath: own String
-  results: own Channel(Int)
+  results: own Channel(ArtworkResult)
 ) ret Int {
   var ok: Bool = false
   if url.length() > 0 {
@@ -112,12 +119,12 @@ func artworkFetchWorkerWithFallback(
       ok = Spotify.fetchArtwork(url: fallbackUrl, outPath: outPath)
     }
   }
+  channelSend(this: results, value: ArtworkResult { serial: serial, ok: ok })
+  wake()
   var okBit: Int = 0
   if ok {
     okBit = 1
   }
-  channelSend(this: results, value: serial * 2 + okBit)
-  wake()
   ret okBit
 }
 
@@ -229,9 +236,8 @@ func artworkFetchStartWithFallback(
 # `finished` with the outcome. Call once per frame before the loader scans.
 func artworkFetchDrain(queue: mod ArtworkFetchQueue) {
   loop pending(this: queue.results) > 0 {
-    let message: Int = receive(this: queue.results)
-    let serial: Int = message / 2
-    let okBit: Int = message - serial * 2
+    let message: ArtworkResult = receive(this: queue.results)
+    let serial: Int = message.serial
     var index: Int = 0 - 1
     var i: Int = 0
     loop i < queue.inFlight.length() and index < 0 {
@@ -250,7 +256,7 @@ func artworkFetchDrain(queue: mod ArtworkFetchQueue) {
       }
       queue.tasks.removeAt(index: index)
       var status: Int = artworkStatusFailed
-      if okBit is 1 {
+      if message.ok {
         status = artworkStatusFetched
       }
       if let job: view ArtworkFetchJob => queue.inFlight.viewAt(index: index) {
