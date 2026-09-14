@@ -65,6 +65,24 @@ bool rae_format_source(const char* path, const char* source, size_t len,
   memset(result, 0, sizeof(*result));
   result->input_lines = count_lines(source, len);
 
+  /* Over-cap INPUT: refuse before ever creating an arena or invoking the
+   * lexer/parser (#982). The lexer's own hard-line-cap check (lexer.c) still
+   * catches this during tokenization and stops cleanly, but `parse_module`
+   * used to run anyway on whatever token stream that left behind — on a file
+   * whose true size was well past the cap, error-recovery over that leftover
+   * token stream could cascade into thousands of diagnostics and exhaust the
+   * 64MB parse arena (`arena_alloc: out of space ... in parser_alloc`)
+   * instead of failing cleanly. A plain line count is O(n) and cannot hang,
+   * so it runs first and skips parsing entirely when the file is already
+   * over the cap — no retry loop, no arena exhaustion. */
+  if (result->input_lines > RAE_FORMAT_MAX_LINES) {
+    result->over_cap = true;
+    snprintf(result->message, sizeof(result->message),
+             "%s has %d lines: file exceeds 1000 lines, split it into smaller modules",
+             path, result->input_lines);
+    return false;
+  }
+
   Arena* arena = arena_create(64 * 1024 * 1024);
   if (!arena) {
     snprintf(result->message, sizeof(result->message), "out of memory");
@@ -75,6 +93,15 @@ bool rae_format_source(const char* path, const char* source, size_t len,
    * stderr and the file is left untouched (the CLI counts them per file). */
   diag_reset();
   TokenList tokens = lexer_tokenize(arena, path, source, len, /*strict=*/false);
+  if (tokens.had_error) {
+    /* The lexer already flagged this file (e.g. its own hard-line-cap
+     * check, an unterminated string/comment, ...) — don't hand a token
+     * stream we know is broken to the parser's error-recovery, which can
+     * cascade into a large number of allocations for no benefit (#982). */
+    snprintf(result->message, sizeof(result->message), "parse error");
+    arena_destroy(arena);
+    return false;
+  }
   AstModule* module = parse_module(arena, path, tokens);
   if (!module || diag_error_count() > 0) {
     snprintf(result->message, sizeof(result->message), "parse error");
