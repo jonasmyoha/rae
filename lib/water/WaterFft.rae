@@ -259,15 +259,8 @@ func cascadeTile(body: view WaterBody, cascade: view Int) ret Float {
   ret body.cascadeTile2
 }
 
-# Each cascade owns a k band so the cascades never count a wavelength twice
-# when the surface sums them. The hand-over to the next (smaller) tile happens
-# where that tile resolves the wave with cascadeBandBins grid cells per
-# wavelength: kHigh = cascadeBandBins * 2pi / L_next. (Handing over at exactly
-# 2pi/L_next — one cell — would leave the 250 m cascade owning a 4-bin disc of
-# its 256x256 grid while the 60 m cascade represents 60..10 m waves with 1..6
-# cells; six cells is where the finer tile is the better home.)
-const cascadeBandBins: Float = 6.0
-
+# The cascade k bands: cascadeBandBins lives in water/Water.rae (shared with
+# the surface uniform).
 func cascadeBandHigh(body: view WaterBody, cascade: view Int) ret Float {
   if cascade >= body.cascadeCount - 1 {
     ret 1000000.0

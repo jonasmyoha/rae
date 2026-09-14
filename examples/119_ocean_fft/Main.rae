@@ -182,6 +182,13 @@ func main() ret Int {
     camera.position.z = cameraZSetting.toFloat()
     camera.target.z = camera.position.z - 2.0
   }
+  # RAE_WATER_CAMERA_X=<x> slides the start along x (the frozen test frame at
+  # two positions a metre apart is the clip-map snapping check).
+  let cameraXSetting: String = Sys.getEnv(name: "RAE_WATER_CAMERA_X")
+  if cameraXSetting.length() > 0 {
+    camera.position.x = cameraXSetting.toFloat()
+    camera.target.x = camera.position.x
+  }
   var cameraRig: CameraRig = createCameraRig(camera: camera)
   toggleCameraRigMode(rig: cameraRig, camera: camera)
   var light: Light3d = defaultLight3d()
@@ -209,6 +216,8 @@ func main() ret Int {
   let gridMesh: MeshHandle = uploadMeshData(renderer: renderer, meshData: grid)
   var ocean: WaterBody = createOceanRealistic(surfaceZ: 0.0)
   ocean.meshId = gridMesh.id
+  ocean.clipCellPerMetre = radialGridCellPerMetre(segments: 96, growth: 1.09)
+  ocean.clipFirstCell = 1.0
   if Sys.getEnv(name: "RAE_WATER_MOBILE") is "1" {
     useMobileWaterTier(body: ocean)
   }
