@@ -349,8 +349,13 @@ func deserStyleOverride(
       sceneId: sceneId
       nodeId: nodeId
     )
+    # The slot name for a live theme switch; a `#rrggbb[aa]` literal is not
+    # a slot (#996), same as slotNameOf.
     let emptySlot: String = ""
-    so.colorSlot = Json.jsonString(this: cv, fallback: emptySlot)
+    let slot: String = Json.jsonString(this: cv, fallback: emptySlot)
+    if slot.startsWith(prefix: "#") is false {
+      so.colorSlot = slot
+    }
   }
   ret so
 }

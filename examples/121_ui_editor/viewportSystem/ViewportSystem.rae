@@ -1,0 +1,71 @@
+# viewportSystem — the window and the letterbox (docs/ui-editor-design.md §2):
+# the window opens 9:16 (540x960 logical, RAE_UI_EDITOR_WINDOW=WxH overrides,
+# resizable), and the DESIGN resolution is the document's, fitted with
+# `contain` so a phone scene stays a phone in any window shape. A resize only
+# re-fits; the layout size the world sees is always the design size.
+import Gpu2d
+open Sys
+open ui/Ecs
+open app3d/UiShell
+open ecs/Schedule
+
+const defaultWindowW: Int = 540
+
+const defaultWindowH: Int = 960
+
+type EditorViewport {
+  windowW: Int
+  windowH: Int
+  designW: Float
+  designH: Float
+}
+
+# `WxH` from `name`, or the defaults when unset or malformed.
+func envSizeOr(name: view String, fallbackW: view Int, fallbackH: view Int) ret EditorViewport {
+  var viewport: EditorViewport = {
+    windowW: fallbackW
+    windowH: fallbackH
+    designW: fallbackW.toFloat()
+    designH: fallbackH.toFloat()
+  }
+  let text: String = getEnv(name: name)
+  let x: Int = text.indexOf(sub: "x")
+  if x > 0 {
+    let w: Int = text.sub(start: 0, len: x).toInt()
+    let h: Int = text.sub(start: x + 1, len: text.length() - x - 1).toInt()
+    if w > 0 and h > 0 {
+      viewport.windowW = w
+      viewport.windowH = h
+    }
+  }
+  ret viewport
+}
+
+func createEditorViewport() ret EditorViewport {
+  ret envSizeOr(name: "RAE_UI_EDITOR_WINDOW", fallbackW: defaultWindowW, fallbackH: defaultWindowH)
+}
+
+# Point the 2D canvas at the design resolution (fit 0 = contain, letterboxed)
+# and size the world's layout to it.
+func applyViewport(
+  viewport: mod EditorViewport
+  world: mod UiWorld
+  designW: view Float
+  designH: view Float
+) {
+  viewport.designW = designW
+  viewport.designH = designH
+  Gpu2d.setDesignResolution(width: designW, height: designH, fit: 0)
+  world.layoutW = designW
+  world.layoutH = designH
+}
+
+# A window resize re-fits the same design resolution; the layout is unchanged.
+# Returns whether the window changed (a repaint is due).
+func viewportSystem(viewport: view EditorViewport) ret Bool {
+  if Gpu2d.windowResized() is false {
+    ret false
+  }
+  Gpu2d.setDesignResolution(width: viewport.designW, height: viewport.designH, fit: 0)
+  ret true
+}
