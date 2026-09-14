@@ -1,4 +1,5 @@
 open ui/Ecs
+open ui/SceneInstance
 open ui/Scene
 
 # Load the four `.raescene` files this app needs and bundle them into a
@@ -14,6 +15,9 @@ func loadSceneFile(path: view String) pub ret Scene {
 }
 
 type AlbumScenes {
+  # #964: the item sub-scenes the ListView system mounts per pooled row
+  # (`ListView.itemSceneId`), keyed by sceneId — today the History row.
+  rowScenes: SceneRegistry
   trackRow: Scene
   navTabs: Scene
   navTab: Scene
@@ -24,8 +28,16 @@ type AlbumScenes {
   home: Scene
 }
 
+func loadRowScenes() ret SceneRegistry {
+  var rowScenes: SceneRegistry = createSceneRegistry()
+  let historyRowId: String = "history-row"
+  registerScene(reg: rowScenes, key: historyRowId, scene: loadSceneFile(path: historyRowPath))
+  ret rowScenes
+}
+
 func loadAllScenes() pub ret AlbumScenes {
   ret AlbumScenes {
+    rowScenes: loadRowScenes()
     trackRow: loadSceneFile(path: trackRowPath)
     navTabs: loadSceneFile(path: navTabsPath)
     navTab: loadSceneFile(path: navTabPath)

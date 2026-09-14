@@ -9,18 +9,45 @@
 # moves it, growing or shrinking the pool only when the window SIZE changes. So a
 # 10k-row list costs O(window) live entities, not O(rows).
 #
-# A row is built from the component's `bindings`: each distinct `nodeId` becomes
-# one child node of the row, and each binding writes that child's component from
-# the row's `itemField` value (prefix + value + suffix). Supported binding
-# targets are `Text.text` and `OnClick.actionId` — the two a play-history / track
-# list needs; an unsupported (componentName, fieldName) is skipped. Multi-node
-# rows authored as a sub-scene (`ListView.itemSceneId`) are a later step — see
-# the #945 follow-up; this system renders rows from the bindings directly.
+# A row is either a SUB-SCENE or a bindings-only skeleton (#964):
+#   * `ListView.itemSceneId` names a scene in the host's `SceneRegistry`: each
+#     pooled row root mounts that scene once (its root node IS the row root),
+#     under a per-row nodeId page (`listRow<index>`) so the bindings can find
+#     the authored nodes by id. Recycling re-binds, never re-mounts.
+#   * Otherwise each distinct binding `nodeId` becomes one bare child of the
+#     row, created in binding order so slot k == distinctNodeIds[k].
+# A binding writes one component field of one row node from the row's
+# `itemField` value (prefix + value + suffix). Scene rows accept every
+# `SceneOverride` target — `Text.text` / `Text.styleId`, `Sprite.textureKey` /
+# `Sprite.tint`, `OnClick.actionId`, `Active.value` (a "true"/"false" cell, the
+# placeholder/media-state switch) — written in place and only when the value
+# changed, so an unchanged row costs no table generation bump. Skeleton rows
+# support `Text.text` and `OnClick.actionId`.
+#
+# Scrolling: `ScrollState.y` on the ListView entity is the source of truth. The
+# system applies it as the entity's `RuntimeOffset` (a transform-time
+# translation, so a scroll step never reruns layout) and positions the pooled
+# rows at their content offset (`dataIndex * pitch`) via `Offset`.
 open ui/Ecs
 import ui/Components
+open ui/SceneInstance
 open ecs/Entity
 open ecs/ComponentTable
 open ecs/hierarchySystem/HierarchySystem
+
+# The nodeId page a pooled row's sub-scene is mounted under, so several rows
+# of the same scene coexist in `world.nodeIds`.
+func listViewRowPage(rowRoot: view EntityId) ret String {
+  ret "listRow{rowRoot.index}"
+}
+
+# Does this ListView build its rows from a registered sub-scene?
+func listViewUsesScene(lv: view ListView, scenes: view SceneRegistry) ret Bool {
+  if lv.itemSceneId.length() is 0 {
+    ret false
+  }
+  ret sceneRegistryHas(reg: scenes, key: lv.itemSceneId)
+}
 
 # Look up a row cell by field key. The row stores parallel keys/values lists
 # (Components.rae ListViewRow); scan keys and return the matching value, or "".
@@ -110,16 +137,128 @@ func listViewApplyBinding(
   }
 }
 
-# Build one pooled row entity: a root with one child per distinct binding nodeId.
-# The children are created in distinct order so slot k == distinctNodeIds[k].
+# Is the binding's target already holding `value`? Compared BEFORE the write so
+# an unchanged row does not bump a table generation (and so trigger a relayout)
+# on every frame.
+func listViewSceneBindingCurrent(
+  world: view UiWorld
+  entity: view EntityId
+  binding: view ListViewBinding
+  value: view String
+) ret Bool {
+  let textName: String = "Text"
+  let spriteName: String = "Sprite"
+  let onClickName: String = "OnClick"
+  let activeName: String = "Active"
+  if binding.componentName is textName {
+    if componentHas(this: world.texts, entity: entity) is false {
+      ret true
+    }
+    let cur: view Text => componentView(this: world.texts, entity: entity)
+    let textField: String = "text"
+    if binding.fieldName is textField {
+      ret cur.text is value
+    }
+    ret cur.styleId is value
+  }
+  if binding.componentName is spriteName {
+    if componentHas(this: world.sprites, entity: entity) is false {
+      ret true
+    }
+    let cur: view Sprite => componentView(this: world.sprites, entity: entity)
+    let textureField: String = "textureKey"
+    if binding.fieldName is textureField {
+      ret cur.textureKey is value
+    }
+    ret false
+  }
+  if binding.componentName is onClickName {
+    if componentHas(this: world.onClicks, entity: entity) is false {
+      ret true
+    }
+    let cur: view OnClick => componentView(this: world.onClicks, entity: entity)
+    ret cur.actionId is value
+  }
+  if binding.componentName is activeName {
+    if componentHas(this: world.actives, entity: entity) is false {
+      ret false
+    }
+    let cur: Active = componentGet(this: world.actives, entity: entity)
+    let trueStr: String = "true"
+    ret cur.value is (value is trueStr)
+  }
+  ret true
+}
+
+# Write one binding onto a sub-scene row: resolve the authored node inside this
+# row's page and apply it as a SceneOverride (the same in-place field writes
+# scene instances use), skipping writes that would not change anything.
+func listViewApplySceneBinding(
+  world: mod UiWorld
+  rowRoot: view EntityId
+  binding: view ListViewBinding
+  row: view ListViewRow
+) {
+  let raw: String = listRowValue(row: row, key: binding.itemField)
+  let value: String = "{binding.prefix}{raw}{binding.suffix}"
+  let page: String = listViewRowPage(rowRoot: rowRoot)
+  var index: Int = -1
+  if let found: Int = findNodeInPage(world: world, pageId: page, nodeId: binding.nodeId) {
+    index = found
+  } else {
+    ret
+  }
+  let target: EntityId = id(v: index)
+  if listViewSceneBindingCurrent(
+    world: world
+    entity: target
+    binding: binding
+    value: value
+  ) {
+    ret
+  }
+  let override: SceneOverride = {
+    nodeId: "{binding.nodeId}"
+    componentName: "{binding.componentName}"
+    fieldName: "{binding.fieldName}"
+    valueString: value
+  }
+  applyOverride(world: world, entity: target, override: override)
+}
+
+# Build one pooled row entity. Sub-scene rows mount the item scene onto the
+# row root (once — recycling only re-binds); skeleton rows get one bare child
+# per distinct binding nodeId, in distinct order so slot k == distinctNodeIds[k].
 func listViewBuildRow(
   world: mod UiWorld
+  listEntity: view EntityId
   lv: view ListView
   distinct: view List(String)
+  scenes: view SceneRegistry
 ) ret EntityId {
   let rowRoot: EntityId = createEntity(world: world)
-  let r: Rect = { position: { x: 0.0, y: 0.0 }, size: { x: 0.0, y: lv.itemHeight } }
+  # The row's placement is the list's: full list width, one item height. (A
+  # sub-scene's ROOT placement components are skipped on mount, as for any
+  # scene instance — the host positions the instance.)
+  var rowW: Float = 0.0
+  if componentHas(this: world.rects, entity: listEntity) {
+    rowW = componentGet(this: world.rects, entity: listEntity).size.x
+  }
+  let r: Rect = { position: { x: 0.0, y: 0.0 }, size: { x: rowW, y: lv.itemHeight } }
   componentSet(this: world.rects, entity: rowRoot, data: r)
+  if listViewUsesScene(lv: lv, scenes: scenes) {
+    let idx: Int = sceneRegistryIndex(reg: scenes, key: lv.itemSceneId)
+    let scene: view Scene => sceneRegistryGet(reg: scenes, idx: idx)
+    let overrides: List(SceneOverride) = emptyOverrides()
+    mountSceneInstanceIntoPage(
+      world: world
+      mountEntity: rowRoot
+      scene: scene
+      overrides: overrides
+      pageId: listViewRowPage(rowRoot: rowRoot)
+    )
+    ret rowRoot
+  }
   var k: Int = 0
   loop k < distinct.length {
     let child: EntityId = createEntity(world: world)
@@ -142,10 +281,33 @@ func listViewApplyRow(
   distinct: view List(String)
   row: view ListViewRow
   topY: view Float
+  sceneRow: view Bool
 ) {
   unsafe {
-    let off: Offset = { delta: Vec2 { x: 0.0, y: topY } }
-    componentSet(this: world.offsets, entity: rowRoot, data: off)
+    var moved: Bool = true
+    if componentHas(this: world.offsets, entity: rowRoot) {
+      let cur: Offset = componentGet(this: world.offsets, entity: rowRoot)
+      moved = cur.delta.y is not topY
+    }
+    if moved {
+      let off: Offset = { delta: Vec2 { x: 0.0, y: topY } }
+      componentSet(this: world.offsets, entity: rowRoot, data: off)
+    }
+    if sceneRow {
+      let sn: Int = lv.bindings.length
+      var sb: Int = 0
+      loop sb < sn {
+        let binding: ListViewBinding = rae_ext_rae_buf_get(buf: lv.bindings.data, index: sb)
+        listViewApplySceneBinding(
+          world: world
+          rowRoot: rowRoot
+          binding: binding
+          row: row
+        )
+        sb = sb + 1
+      }
+      ret
+    }
     # Snapshot this row's child ids (distinct-order) so binding writes don't
     # alias the childrens table while it is being read.
     let kids: List(EntityId) = List.create(EntityId, cap: distinct.length)
@@ -204,12 +366,24 @@ func listViewWindowCount(lv: view ListView) ret Int {
 }
 
 # One ListView entity: reconcile its pooled row window to the current scroll.
-func listViewSyncEntity(world: mod UiWorld, entity: view EntityId) {
+func listViewSyncEntity(world: mod UiWorld, entity: view EntityId, scenes: view SceneRegistry) {
   unsafe {
     let lv: ListView = componentGet(this: world.listViews, entity: entity)
+    let sceneRow: Bool = listViewUsesScene(lv: lv, scenes: scenes)
     var scrollY: Float = 0.0
     if componentHas(this: world.scrollStates, entity: entity) {
       scrollY = componentGet(this: world.scrollStates, entity: entity).y
+    }
+    # The scroll is a runtime translation of the whole list (transform-time,
+    # never a relayout); the rows sit at their content offsets below.
+    var scrolled: Bool = true
+    if componentHas(this: world.runtimeOffsets, entity: entity) {
+      let cur: RuntimeOffset = componentGet(this: world.runtimeOffsets, entity: entity)
+      scrolled = cur.delta.y is not scrollY
+    }
+    if scrolled {
+      let ro: RuntimeOffset = { delta: Vec2 { x: 0.0, y: scrollY } }
+      componentSet(this: world.runtimeOffsets, entity: entity, data: ro)
     }
     var count: Int = 0
     if componentHas(this: world.listViewDatas, entity: entity) {
@@ -250,7 +424,13 @@ func listViewSyncEntity(world: mod UiWorld, entity: view EntityId) {
     }
     # Grow: build fresh rows and parent them under the ListView.
     loop poolCount < target {
-      let rowRoot: EntityId = listViewBuildRow(world: world, lv: lv, distinct: distinct)
+      let rowRoot: EntityId = listViewBuildRow(
+        world: world
+        listEntity: entity
+        lv: lv
+        distinct: distinct
+        scenes: scenes
+      )
       setParent(
         parents: world.parents
         childrens: world.childrens
@@ -281,7 +461,7 @@ func listViewSyncEntity(world: mod UiWorld, entity: view EntityId) {
       let dataIdx: Int = first + s
       let row: ListViewRow = rae_ext_rae_buf_get(buf: data.rows.data, index: dataIdx)
       let rowRoot: EntityId = rae_ext_rae_buf_get(buf: rows2.data, index: s)
-      let topY: Float = dataIdx.toFloat() * pitch + scrollY
+      let topY: Float = dataIdx.toFloat() * pitch
       listViewApplyRow(
         world: world
         rowRoot: rowRoot
@@ -289,6 +469,7 @@ func listViewSyncEntity(world: mod UiWorld, entity: view EntityId) {
         distinct: distinct
         row: row
         topY: topY
+        sceneRow: sceneRow
       )
       s = s + 1
     }
@@ -297,7 +478,9 @@ func listViewSyncEntity(world: mod UiWorld, entity: view EntityId) {
 
 # Virtualise every ListView in the world (#945). Run after input/scroll,
 # before layout, so the current window's rows are laid out this frame.
-func listViewSystem(world: mod UiWorld) pub {
+# `scenes` supplies the item sub-scenes (`ListView.itemSceneId`); pass an empty
+# registry for bindings-only rows.
+func listViewSystem(world: mod UiWorld, scenes: view SceneRegistry) pub {
   unsafe {
     let n: Int = componentCount(this: world.listViews)
     # Collect entity ids first: syncing mutates childrens/entities, which must
@@ -311,7 +494,7 @@ func listViewSystem(world: mod UiWorld) pub {
     var e: Int = 0
     loop e < entities.length {
       let entity: EntityId = rae_ext_rae_buf_get(buf: entities.data, index: e)
-      listViewSyncEntity(world: world, entity: entity)
+      listViewSyncEntity(world: world, entity: entity, scenes: scenes)
       e = e + 1
     }
   }
