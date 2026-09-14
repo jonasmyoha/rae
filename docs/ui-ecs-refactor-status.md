@@ -77,7 +77,13 @@ Ordered by leverage.
    length.
 6. **`ListView` / virtualisation** is a component type with no system; 106
    hand-rolls history windowing per view. A real `listViewSystem` is required
-   before any editor/DAW list (tracks, clips, albums).
+   before any editor/DAW list (tracks, clips, albums). **LANDED (#945 engine,
+   #964 rows):** `lib/ui/listViewSystem` windows + recycles pooled rows; a row
+   is a mounted item sub-scene (`ListView.itemSceneId` from a `SceneRegistry`,
+   re-bound on recycle through the `SceneOverride` writers — Text, Sprite,
+   OnClick, Active) or a bindings-only skeleton. 106's History page is a
+   `ListView` over `history-row.raescene` + `ListViewData` rows; its
+   hand-rolled window/rewindow code is gone.
 7. **Editor/DAW capability gaps** (scan): text input 0, clipboard 0, keyboard
    handling 0, undo 1, focus 5 (weak); drag/dock/split exist in some form.
    Needs a design doc before the DAW: focus + keyboard routing, text editing,
@@ -148,7 +154,7 @@ Ordered by leverage.
    schedule owns the declarations and dirty state. 106 is the reference for a
    Schedule-driven UI app.
 5. `ActionEvent` → `EventQueue`; `UiRefreshCache` revisions → `changedSince`.
-6. History windowing → `lib/ui` `ListView` (item 2.6).
+6. History windowing → `lib/ui` `ListView` (item 2.6). **LANDED (#964).**
 7. Background I/O (Spotify poller, artwork curl) → `spawn` + `Channel` + an
    event-loop `wake()` (parallelism plan §5). **LANDED (#950):** the runtime's
    two C schedulers are gone — the osascript poll pthread (`startPoller`/
