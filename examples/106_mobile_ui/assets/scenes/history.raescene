@@ -1,0 +1,137 @@
+{
+  "type": "Scene",
+  "version": 2,
+  "sceneId": "history",
+  "root": "HistoryPage",
+  "nodes": {
+    "HistoryPage": {
+      "Layout": {
+        "type": "Vertical",
+        "gap": "spaceM",
+        "alignCross": "Start"
+      },
+      "Padding": "screenEdgePadding",
+      "Children": [
+        "TopBar",
+        "EmptyState",
+        "Body"
+      ]
+    },
+    "TopBar": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 0.0,
+        "h": 104.096386
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Layout": {
+        "type": "Horizontal",
+        "gap": 0.0,
+        "alignCross": "Center"
+      },
+      "Children": [
+        "Title"
+      ]
+    },
+    "Title": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 0.0,
+        "h": 104.096386
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Text": {
+        "text": "Recently played",
+        "styleId": "pageTitle"
+      }
+    },
+    "EmptyState": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 993.253012,
+        "h": 40.0
+      },
+      "Text": {
+        "text": "Nothing played yet.",
+        "styleId": "muted"
+      },
+      "Active": {
+        "value": false
+      }
+    },
+    "Body": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 993.253012,
+        "h": 1794.216869
+      },
+      "ListView": {
+        "itemSceneId": "history-row",
+        "itemHeight": 138.795181,
+        "itemGap": "spaceS",
+        "visibleItemCount": 12,
+        "overscanRows": 4,
+        "bindings": [
+          {
+            "nodeId": "Title",
+            "component": "Text",
+            "field": "text",
+            "itemField": "title"
+          },
+          {
+            "nodeId": "Artist",
+            "component": "Text",
+            "field": "text",
+            "itemField": "artist"
+          },
+          {
+            "nodeId": "Duration",
+            "component": "Text",
+            "field": "text",
+            "itemField": "duration"
+          },
+          {
+            "nodeId": "HistoryRow",
+            "component": "OnClick",
+            "field": "actionId",
+            "itemField": "action"
+          },
+          {
+            "nodeId": "Thumb",
+            "component": "Sprite",
+            "field": "textureKey",
+            "itemField": "textureKey"
+          },
+          {
+            "nodeId": "ThumbPlaceholder",
+            "component": "Active",
+            "field": "value",
+            "itemField": "placeholder"
+          }
+        ]
+      },
+      "HistoryList": {
+        "emptyStateNodeId": "EmptyState"
+      }
+    }
+  },
+  "unitScale": 3
+}
