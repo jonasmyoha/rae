@@ -1,0 +1,100 @@
+{
+  "type": "Scene",
+  "version": 2,
+  "sceneId": "Settings",
+  "root": "Screen",
+  "nodes": {
+    "Screen": {
+      "Rect": { "x": 0, "y": 0, "w": 1080, "h": 1920 },
+      "Shape": { "kind": "Rect", "fill": "background", "stroke": "#00000000", "strokeWidth": 0 },
+      "Layout": { "type": "Vertical", "gap": "spaceM", "alignCross": "Stretch" },
+      "Padding": { "l": "spaceL", "t": 160, "r": "spaceL", "b": "spaceL" },
+      "Children": ["Heading", "SoundRow", "MusicRow", "HapticsRow", "Divider", "ListHeading", "ProfileList"]
+    },
+    "Heading": {
+      "Rect": { "x": 0, "y": 0, "w": 0, "h": 90 },
+      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
+      "Text": { "text": "Settings", "styleId": "title" }
+    },
+    "SoundRow": {
+      "Rect": { "x": 0, "y": 0, "w": 0, "h": 120 },
+      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
+      "Shape": { "kind": "RoundedRect", "fill": "surface", "stroke": "#00000000", "strokeWidth": 0, "radius": "radiusCard" },
+      "Layout": { "type": "Horizontal", "gap": "spaceM", "alignCross": "Center" },
+      "Padding": { "l": "spaceL", "t": 0, "r": "spaceL", "b": 0 },
+      "Children": ["SoundLabel", "SoundToggle"]
+    },
+    "SoundLabel": {
+      "Rect": { "x": 0, "y": 0, "w": 0, "h": 50 },
+      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
+      "Text": { "text": "Sound effects", "styleId": "body" }
+    },
+    "SoundToggle": {
+      "Rect": { "x": 0, "y": 0, "w": 64, "h": 64 },
+      "Shape": { "kind": "Circle", "fill": "accent", "stroke": "#00000000", "strokeWidth": 0 },
+      "OnClick": { "actionId": "settings.sound" }
+    },
+    "MusicRow": {
+      "Rect": { "x": 0, "y": 0, "w": 0, "h": 120 },
+      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
+      "Shape": { "kind": "RoundedRect", "fill": "surface", "stroke": "#00000000", "strokeWidth": 0, "radius": "radiusCard" },
+      "Layout": { "type": "Horizontal", "gap": "spaceM", "alignCross": "Center" },
+      "Padding": { "l": "spaceL", "t": 0, "r": "spaceL", "b": 0 },
+      "Children": ["MusicLabel", "MusicToggle"]
+    },
+    "MusicLabel": {
+      "Rect": { "x": 0, "y": 0, "w": 0, "h": 50 },
+      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
+      "Text": { "text": "Music", "styleId": "body" }
+    },
+    "MusicToggle": {
+      "Rect": { "x": 0, "y": 0, "w": 64, "h": 64 },
+      "Shape": { "kind": "Circle", "fill": "surfaceAlt", "stroke": "outline", "strokeWidth": 4 },
+      "OnClick": { "actionId": "settings.music" }
+    },
+    "HapticsRow": {
+      "Rect": { "x": 0, "y": 0, "w": 0, "h": 120 },
+      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
+      "Shape": { "kind": "RoundedRect", "fill": "surface", "stroke": "#00000000", "strokeWidth": 0, "radius": "radiusCard" },
+      "Layout": { "type": "Horizontal", "gap": "spaceM", "alignCross": "Center" },
+      "Padding": { "l": "spaceL", "t": 0, "r": "spaceL", "b": 0 },
+      "Children": ["HapticsLabel", "HapticsToggle"]
+    },
+    "HapticsLabel": {
+      "Rect": { "x": 0, "y": 0, "w": 0, "h": 50 },
+      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
+      "Text": { "text": "Haptics", "styleId": "body" }
+    },
+    "HapticsToggle": {
+      "Rect": { "x": 0, "y": 0, "w": 64, "h": 64 },
+      "Shape": { "kind": "Circle", "fill": "accent", "stroke": "#00000000", "strokeWidth": 0 },
+      "OnClick": { "actionId": "settings.haptics" }
+    },
+    "Divider": {
+      "Rect": { "x": 0, "y": 0, "w": 0, "h": 3 },
+      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
+      "Shape": { "kind": "Rect", "fill": "outline", "stroke": "#00000000", "strokeWidth": 0 }
+    },
+    "ListHeading": {
+      "Rect": { "x": 0, "y": 0, "w": 0, "h": 50 },
+      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
+      "Text": { "text": "Profiles", "styleId": "h2" }
+    },
+    "ProfileList": {
+      "Rect": { "x": 0, "y": 0, "w": 1016, "h": 860 },
+      "ScrollState": { "y": 0 },
+      "ListView": {
+        "itemSceneId": "SettingsRow",
+        "itemKeyField": "id",
+        "itemHeight": 132,
+        "itemGap": "spaceS",
+        "visibleItemCount": 6,
+        "overscanRows": 1,
+        "bindings": [
+          { "nodeId": "RowTitle", "component": "Text", "field": "text", "itemField": "name" },
+          { "nodeId": "RowDetail", "component": "Text", "field": "text", "itemField": "detail" }
+        ]
+      }
+    }
+  }
+}

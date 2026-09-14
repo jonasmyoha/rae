@@ -1,0 +1,19 @@
+# The editor's long-lived state (the 106/114 composition shape, #822): the
+# `App` struct IS the resource list. No globals — every system takes the narrow
+# state it needs from here.
+open ui/Ecs
+open ecs/Schedule
+open ui/renderSystem/RenderSystem
+open Gpu2dCanvas
+
+type App {
+  gpuUi: Gpu2dUi
+  canvas: Gpu2dCanvas
+  world: UiWorld
+  schedule: Schedule
+  document: SceneDocument
+  viewport: EditorViewport
+  chrome: ChromeState
+  textures: TextureSearch
+  headless: Bool
+}
