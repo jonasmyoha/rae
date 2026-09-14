@@ -893,6 +893,27 @@ type AvatarSource {
   textureKey: String
 }
 
+# ----- data-list container: a grid of album-cover tiles (#975) -------------
+
+# Which catalogue a `CoverGrid` shows: the user's library (a "Liked" playlist
+# tile first, then one tile per library album) or the Home landing grid (the
+# library albums only).
+enum CoverGridSource { library, home }
+
+# A container whose child rows/tiles are a DATA LIST materialised from app
+# state, not authored. The scene owns the container (its Layout, gap, place
+# in the page); `coverGridSystem` (re)builds the rows beneath it whenever the
+# app-state revision it observes moves, and records that revision in
+# `builtRevision` (-1 = never built, so a fresh mount fills on its first run).
+# `columns` is the column count at the authored phone width; `tileGap` is the
+# gap between tiles in a row and between rows.
+type CoverGrid {
+  columns: Int = 3
+  tileGap: Float = 17.349397590361445
+  source: CoverGridSource
+  builtRevision: Int = -1
+}
+
 func defaultStyleOverride() ret StyleOverride {
   ret StyleOverride {
     hasSize: false

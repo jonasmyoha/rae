@@ -74,8 +74,15 @@ func sendScriptedTap(input: mod InputSystem) {
     name = own head
   }
   input.scriptedScreens.removeAt(index: 0)
-  log("[screen-seq] tap nav.{name}")
-  eventSend(this: input.uiActions, value: UiAction { entity: noEntity(), actionId: "nav.{name}" })
+  # A bare screen name is a menubar tap (`nav.<name>`); a dotted name is sent
+  # as that actionId verbatim, so a script can also drive entity-less
+  # actions such as `library.remove` (#975).
+  var actionId: String = "nav.{name}"
+  if name.contains(sub: ".") {
+    actionId = "{name}"
+  }
+  log("[screen-seq] tap {actionId}")
+  eventSend(this: input.uiActions, value: UiAction { entity: noEntity(), actionId: actionId })
 }
 
 func pointInEntity(

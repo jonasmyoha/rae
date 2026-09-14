@@ -66,6 +66,8 @@ func refreshMountedUi(
   # they cost nothing at idle and need no observer revision of their own.
   profileStatsSystem(world: world, state: state)
   avatarSystem(world: world, reg: reg)
+  # #975: Home / Library cover grids follow state.libraryRevision.
+  coverGridSystem(world: world, state: state, scenes: scenes)
 
   ret UiRefreshResult {
     historyChanged: cache.historyRevision is not oldHistory

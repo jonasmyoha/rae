@@ -5,15 +5,15 @@ open ui/Ecs
 # assets/scenes/home.raescene; this module keeps only what a template
 # cannot express:
 #   * data extraction (album keys, history entries, settings flags)
-#   * list materialisation (grid rows / cover tiles / recent thumbs)
+#   * list materialisation (recent thumbs; the cover grid is a CoverGrid
+#     component driven by CoverGridSystem)
 #   * runtime state wiring (scroll offset, has-history visibility)
 #
 # Tapping any tile fires `album.open` (same path as the Library
 # tiles); the header's `nav.history` action is authored in the scene.
 #
-# Reuses `buildLibraryCoverTile` + `collectLibraryCoverKeys` from
-# `library_view.rae` — both are sibling-module pub helpers in this
-# project root.
+# The cover grid's rows are materialised by CoverGridSystem (#975) from the
+# `CoverGrid` component authored on the scene's CoverGrid node.
 import Files
 import ui/Components
 import ui/layoutSystem/LayoutSystem
@@ -78,83 +78,6 @@ func homeScrollMin(albums: view List(Album), history: view PlayHistory) pub ret 
     ret 0.0
   }
   ret 0.0 - overflow
-}
-
-# Single grid row — pure list materialisation (row containers are not
-# authorable: their count depends on the album list).
-func buildHomeGridRow(
-  world: mod UiWorld
-  keys: view List(String)
-  startIndex: view Int
-  rounded: view Bool
-) ret EntityId {
-  let row: EntityId = createEntity(world: world)
-  let rowW: Float = phoneFrameW - outerPad * 2.0
-  let tileH: Float = homeGridTileSize()
-  setRectFixed(
-    world: world
-    entity: row
-    w: rowW
-    h: tileH
-  )
-  let layH: LayoutType = LayoutType.horizontal
-  let alignS: AlignKind = AlignKind.start
-  setLayout(
-    world: world
-    entity: row
-    kind: layH
-    gap: homeGridTileGap
-    alignCross: alignS
-  )
-
-  let kids: List(EntityId) = List.create(EntityId, cap: homeGridColumns)
-  let cols: Int = homeCols()
-  var col: Int = 0
-  loop col < cols {
-    let i: Int = startIndex + col
-    if let key: String = keys.copyAt(index: i) {
-      let tile: EntityId = buildLibraryCoverTile(
-        world: world
-        key: key
-        size: tileH
-        rounded: rounded
-      )
-      kids.add(value: tile)
-    }
-    col = col + 1
-  }
-  attachChildren(world: world, parent: row, kids: kids)
-  ret row
-}
-
-# Data adapter: materialise the album cover grid into the scene's
-# `CoverGrid` container. Layout/gap on the container come from the
-# scene; only the rows/tiles (data-dependent) are built here.
-func fillHomeCoverGrid(
-  world: mod UiWorld
-  grid: view EntityId
-  albums: view List(Album)
-  library: view List(String)
-  rounded: view Bool
-) {
-  let keys: List(String) = collectLibraryCoverKeys(albums: albums, library: library)
-  let cols: Int = homeCols()
-  let total: Int = keys.length
-  let rows: Int = (total + cols - 1) / cols
-  let rowKids: List(EntityId) = List.create(EntityId, cap: rows)
-  var i: Int = 0
-  loop i < rows {
-    let startIndex: Int = i * cols
-    let row: EntityId = buildHomeGridRow(
-      world: world
-      keys: keys
-      startIndex: startIndex
-      rounded: rounded
-    )
-    rowKids.add(value: row)
-    i = i + 1
-  }
-  attachChildren(world: world, parent: grid, kids: rowKids)
 }
 
 # Mount the Home page from its scene template, then run the data
@@ -232,16 +155,11 @@ func mountHomePage(
     }
   }
 
-  if let gridRaw: Int = findNodeInPage(world: world, pageId: homePageId, nodeId: "CoverGrid") {
-    let grid: EntityId = nodeEntity(world: world, index: gridRaw)
-    fillHomeCoverGrid(
-      world: world
-      grid: grid
-      albums: state.mediaLibrary.albums
-      library: state.library
-      rounded: state.settings.roundedAlbumCovers
-    )
-  }
+  # The cover grid is a data list: the scene's CoverGrid node carries a
+  # `CoverGrid { columns: 2, source: home }` component and coverGridSystem
+  # (#975) materialises its rows. Fill now so the screen-switch hero capture
+  # right after this mount finds the tiles.
+  coverGridSystem(world: world, state: state, scenes: scenes)
 
   ret mount
 }
