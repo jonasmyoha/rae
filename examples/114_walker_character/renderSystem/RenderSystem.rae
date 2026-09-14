@@ -293,7 +293,6 @@ func renderApp(
   frame: mod Frame
   inputSystem: mod InputSystem
   renderSystem: mod RenderSystem
-  emptyWorld: view World3d
   world: mod GameWorld
   terrainSystem: mod TerrainSystem
   splashes: mod ParticleSystem
@@ -444,40 +443,36 @@ func renderApp(
         }
       }
       case RenderTag.ssao {
-        renderDeferredPassWorld(
+        renderDeferredPass(
           renderer: renderSystem.renderer
           tag: tag
-          world: emptyWorld
           camera: cameraSystem.camera
           light: cameraSystem.light
           aspect: aspect
         )
       }
       case RenderTag.depthPyramid {
-        renderDeferredPassWorld(
+        renderDeferredPass(
           renderer: renderSystem.renderer
           tag: tag
-          world: emptyWorld
           camera: cameraSystem.camera
           light: cameraSystem.light
           aspect: aspect
         )
       }
       case RenderTag.lighting {
-        renderDeferredPassWorld(
+        renderDeferredPass(
           renderer: renderSystem.renderer
           tag: tag
-          world: emptyWorld
           camera: cameraSystem.camera
           light: cameraSystem.light
           aspect: aspect
         )
       }
       case RenderTag.taa {
-        renderDeferredPassWorld(
+        renderDeferredPass(
           renderer: renderSystem.renderer
           tag: tag
-          world: emptyWorld
           camera: cameraSystem.camera
           light: cameraSystem.light
           aspect: aspect
@@ -496,10 +491,9 @@ func renderApp(
           camera: cameraSystem.camera
           light: cameraSystem.light
         )
-        renderDeferredPassWorld(
+        renderDeferredPass(
           renderer: renderSystem.renderer
           tag: tag
-          world: emptyWorld
           camera: cameraSystem.camera
           light: cameraSystem.light
           aspect: aspect
@@ -524,20 +518,18 @@ func renderApp(
         }
         # Splash droplets fade by alpha through the transparent pass (#844).
         particleDraw(sys: splashes, transparent: renderSystem.renderer.passes.transparent)
-        renderDeferredPassWorld(
+        renderDeferredPass(
           renderer: renderSystem.renderer
           tag: tag
-          world: emptyWorld
           camera: cameraSystem.camera
           light: cameraSystem.light
           aspect: aspect
         )
       }
       case RenderTag.composite {
-        renderDeferredPassWorld(
+        renderDeferredPass(
           renderer: renderSystem.renderer
           tag: tag
-          world: emptyWorld
           camera: cameraSystem.camera
           light: cameraSystem.light
           aspect: aspect
