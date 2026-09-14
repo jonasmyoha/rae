@@ -72,6 +72,14 @@ func refreshMountedUi(
   searchResultsSystem(world: world, state: state, scenes: scenes)
   # #977: the History page's rows follow playHistory.revision in place.
   historyListSystem(world: world, state: state)
+  # #979: the album page's header + track rows follow the collection / playing song.
+  albumHeaderSystem(world: world, state: state)
+  trackListSystem(
+    world: world
+    state: state
+    playback: playback
+    scenes: scenes
+  )
 
   ret UiRefreshResult {
     historyChanged: cache.historyRevision is not oldHistory

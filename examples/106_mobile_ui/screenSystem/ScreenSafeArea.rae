@@ -50,38 +50,6 @@ func attachSafeAreaEdges(
   componentSet(this: world.extentAnchors, entity: entity, data: anchor)
 }
 
-# The shared page top bar (#978): the `top-bar` sub-scene (a full-width bar
-# with one centred `pageTitle` Text) mounted on a host that only positions
-# it. Scene-driven pages instance it themselves (`"SceneInstance": {
-# "sceneId": "top-bar", ... }` on their TopBar node, resolved by
-# mountPageOrError); this host form serves the Now Playing page until #979
-# moves its skeleton into music-player-now-playing.raescene.
-func mountTopBar(
-  world: mod UiWorld
-  scenes: view AlbumScenes
-  title: view String
-) pub ret EntityId {
-  let host: EntityId = createEntity(world: world)
-  setRectFixed(
-    world: world
-    entity: host
-    w: phoneFrameW - outerPad * 2.0
-    h: topBarH
-  )
-  let overrides: List(SceneOverride) = emptyOverrides()
-  addTextOverride(list: overrides, nodeId: "Title", value: "{title}")
-  let idx: Int = sceneRegistryIndex(reg: scenes.subScenes, key: "top-bar")
-  let scene: view Scene => sceneRegistryGet(reg: scenes.subScenes, idx: idx)
-  let mounted: EntityId = mountOrError(
-    world: world
-    mountEntity: host
-    scene: scene
-    sceneLabel: "top-bar"
-    overrides: overrides
-  )
-  ret host
-}
-
 # Re-mount Home / History in place when `playHistory` has grown
 # since the last frame and one of them is the currently-visible
 # screen. Catches the case where pollSpotify (or a `song.open.N`

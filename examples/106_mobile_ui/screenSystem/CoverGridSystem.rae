@@ -7,15 +7,18 @@ open ui/Ecs
 # rows beneath each container whenever `state.libraryRevision` moves past
 # the revision the container was last built for (`CoverGrid.builtRevision`,
 # -1 on a fresh mount). It never touches the page's layout above the
-# container; the row containers it creates are the list items' host until
-# #979 turns the tile into a sub-scene instance.
+# container; the tiles are `cover-tile` / `playlist-tile` sub-scene instances
+# (#979) and the row containers are the data list's item hosts.
 #
 # Runs every frame from UiRefresh.refreshMountedUi (a no-op unless the
 # revision moved) and once at the end of each page mount, so the tiles exist
 # before the screen-switch hero capture reads them.
 import ui/Components
+import ui/Scene
+open ui/SceneInstance
 open ecs/Entity
 open ecs/ComponentTable
+open ecs/hierarchySystem/HierarchySystem
 
 # Tile edge for `cols` columns across the phone content width.
 func coverGridTileSize(cols: view Int, gap: view Float) ret Float {
@@ -85,11 +88,127 @@ func clearCoverGridRows(world: mod UiWorld, grid: view EntityId) {
   }
 }
 
+# Mount one sub-scene (`sceneId` from the registry) on a fresh tile host
+# sized `tileH` square. Returns the host, which the scene's root components
+# now live on. `noEntity()` when the scene is missing (a red error block).
+func mountTileScene(
+  world: mod UiWorld
+  scenes: view AlbumScenes
+  sceneId: view String
+  tileH: view Float
+  overrides: view List(SceneOverride)
+) ret EntityId {
+  let host: EntityId = createEntity(world: world)
+  setRectFixed(
+    world: world
+    entity: host
+    w: tileH
+    h: tileH
+  )
+  let idx: Int = sceneRegistryIndex(reg: scenes.subScenes, key: sceneId)
+  if idx < 0 {
+    paintErrorBlock(world: world, entity: host, label: sceneId)
+    ret host
+  }
+  let scene: view Scene => sceneRegistryGet(reg: scenes.subScenes, idx: idx)
+  let mounted: EntityId = mountOrError(
+    world: world
+    mountEntity: host
+    scene: scene
+    sceneLabel: sceneId
+    overrides: overrides
+  )
+  ret host
+}
+
+# One album-cover tile: the `cover-tile` sub-scene with its Sprite pointed at
+# the album's cover, and the per-item data the scene cannot carry — the hero
+# key and the widget id, both the album stem — written as component data.
+# The rounded-covers setting drops the authored CornerRadius when off.
+func mountCoverTile(
+  world: mod UiWorld
+  scenes: view AlbumScenes
+  key: view String
+  tileH: view Float
+  rounded: view Bool
+) ret EntityId {
+  let overrides: List(SceneOverride) = emptyOverrides()
+  addSpriteOverride(list: overrides, nodeId: "Tile", value: "{key}")
+  let tile: EntityId = mountTileScene(
+    world: world
+    scenes: scenes
+    sceneId: "cover-tile"
+    tileH: tileH
+    overrides: overrides
+  )
+  setHeroWidget(world: world, entity: tile, key: "{key}")
+  setWidgetIdentity(
+    world: world
+    entity: tile
+    id: key
+    kind: "albumTile"
+  )
+  if rounded is false {
+    componentRemove(this: world.cornerRadiuses, entity: tile)
+  }
+  ret tile
+}
+
+# The Liked playlist's 2x2 tile: the `playlist-tile` sub-scene with up to four
+# cover Sprites switched on (an empty cell keeps its authored placeholder).
+func mountPlaylistTile(
+  world: mod UiWorld
+  scenes: view AlbumScenes
+  coverStems: view List(String)
+  tileH: view Float
+  rounded: view Bool
+) ret EntityId {
+  let overrides: List(SceneOverride) = emptyOverrides()
+  var c: Int = 0
+  loop c < 4 {
+    if let stem: String = coverStems.copyAt(index: c) {
+      addSpriteOverride(list: overrides, nodeId: "Cell{c}Art", value: "{stem}")
+      addActiveOverride(list: overrides, nodeId: "Cell{c}Art", value: true)
+      addActiveOverride(list: overrides, nodeId: "Cell{c}Placeholder", value: false)
+    }
+    c = c + 1
+  }
+  let tile: EntityId = mountTileScene(
+    world: world
+    scenes: scenes
+    sceneId: "playlist-tile"
+    tileH: tileH
+    overrides: overrides
+  )
+  if coverStems.length is 0 {
+    setWidgetState(
+      world: world
+      entity: tile
+      enabled: true
+      selected: false
+      loading: true
+      error: false
+    )
+  }
+  if rounded is false {
+    unsafe {
+      # Square corners: strip the CornerRadius from every descendant cell.
+      let gathered: List(EntityId) = List.create(EntityId, cap: 12)
+      collectSubtree(childrens: world.childrens, node: tile, out: gathered)
+      loop let e: view EntityId in gathered {
+        componentRemove(this: world.cornerRadiuses, entity: e)
+      }
+    }
+  }
+  ret tile
+}
+
 # Build the tiles for one grid from app state, in display order.
 func buildCoverGridTiles(
   world: mod UiWorld
   grid: view CoverGrid
   state: view AppState
+  scenes: view AlbumScenes
   tileH: view Float
 ) ret List(EntityId) {
   let rounded: Bool = state.settings.roundedAlbumCovers
@@ -101,18 +220,20 @@ func buildCoverGridTiles(
   if grid.source is CoverGridSource.library {
     # The Liked playlist leads the library grid as a 2x2 cover tile.
     let coverStems: List(String) = playlistCoverStems(playlist: state.liked, max: 4)
-    tiles.add(value: buildPlaylistCoverTile(
+    tiles.add(value: mountPlaylistTile(
       world: world
+      scenes: scenes
       coverStems: coverStems
-      size: tileH
+      tileH: tileH
       rounded: rounded
     ))
   }
   loop let key: view String in keys {
-    tiles.add(value: buildLibraryCoverTile(
+    tiles.add(value: mountCoverTile(
       world: world
+      scenes: scenes
       key: key
-      size: tileH
+      tileH: tileH
       rounded: rounded
     ))
   }
@@ -125,6 +246,7 @@ func rebuildCoverGrid(
   container: view EntityId
   grid: view CoverGrid
   state: view AppState
+  scenes: view AlbumScenes
 ) {
   clearCoverGridRows(world: world, grid: container)
   let cols: Int = grid.columns
@@ -133,6 +255,7 @@ func rebuildCoverGrid(
     world: world
     grid: grid
     state: state
+    scenes: scenes
     tileH: tileH
   )
   let rows: Int = (tiles.length + cols - 1) / cols
@@ -154,7 +277,7 @@ func rebuildCoverGrid(
 }
 
 # Drive every `CoverGrid`: rebuild the ones whose rows predate the current
-# library revision. `scenes` is the tile sub-scene source once #979 lands.
+# library revision; `scenes` supplies the tile sub-scenes (#979).
 func coverGridSystem(world: mod UiWorld, state: view AppState, scenes: view AlbumScenes) pub {
   let n: Int = componentCount(this: world.coverGrids)
   var i: Int = 0
@@ -167,6 +290,7 @@ func coverGridSystem(world: mod UiWorld, state: view AppState, scenes: view Albu
         container: container
         grid: grid
         state: state
+        scenes: scenes
       )
       let built: CoverGrid = {
         columns: grid.columns
