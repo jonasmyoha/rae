@@ -350,6 +350,11 @@ for TARGET in "${TARGETS[@]}"; do
             708_no_globals_error) ;;
             *) ACTUAL_OUTPUT=$(printf '%s' "$ACTUAL_OUTPUT" | grep -Ev 'warning: module-level `(var|let)`' || true) ;;
         esac
+        # Build/run timing sentinels (`@@RAE_BUILD_TIME@@`, `@@RAE_APP_START@@`,
+        # `@@RAE_APP_EXIT@@`): the compiler prints them to stderr on EVERY
+        # compiled build/run for the devtools and other log parsers. They carry
+        # wall-clock numbers, so they can never be part of an expected output.
+        ACTUAL_OUTPUT=$(printf '%s' "$ACTUAL_OUTPUT" | grep -Ev '^@@RAE_(BUILD_TIME|APP_START|APP_EXIT)@@' || true)
     fi
 
     if [ -n "$TMP_OUTPUT_DIR" ]; then

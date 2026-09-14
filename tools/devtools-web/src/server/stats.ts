@@ -29,6 +29,21 @@ export type BuildRunStats = {
   targetLabel: string;
 };
 
+export type ExampleBuildStats = {
+  runId: string;
+  exampleId: string;
+  entry: string;
+  targetId: string;
+  profile?: string;
+  totalMs: number;
+  emitMs: number;
+  ccMs: number;
+  lines: number;
+  projectLines: number;
+  modules: number;
+  msPerKloc: number;
+};
+
 export class StatsStore {
   private metricsPath: string;
 
@@ -40,7 +55,10 @@ export class StatsStore {
     }
   }
 
-  record(metricName: string, metricValue: number, metadata: MetricMetadata = {}) {
+  /** One entry per metric per day; with `keyExampleId`, per metric per day
+   * PER EXAMPLE (metadata.exampleId), so per-app metrics don't overwrite each
+   * other. */
+  record(metricName: string, metricValue: number, metadata: MetricMetadata = {}, keyExampleId?: string) {
     const now = new Date();
     const todayStr = now.toISOString().split("T")[0]; // YYYY-MM-DD
 
@@ -52,6 +70,7 @@ export class StatsStore {
     for (let i = entries.length - 1; i >= 0; i--) {
       const entry = entries[i];
       if (entry.metric_name === metricName && entry.timestamp.startsWith(todayStr)) {
+        if (keyExampleId !== undefined && entry.metadata?.exampleId !== keyExampleId) continue;
         index = i;
         break;
       }
@@ -98,6 +117,40 @@ export class StatsStore {
     };
     this.record("builds.duration_ms", data.durationMs, metadata);
     this.record("builds.success", data.success ? 1 : 0, metadata);
+  }
+
+  /** Per-example build timing from the compiler's @@RAE_BUILD_TIME@@ line: the
+   * full build (emit + cc) and the size-normalised ms per 1,000 processed
+   * lines, one entry per example per day (the daily dedupe is keyed on the
+   * example, not just the metric name, so a Run-all batch keeps every app). */
+  recordExampleBuild(data: ExampleBuildStats) {
+    const metadata = {
+      runId: data.runId,
+      exampleId: data.exampleId,
+      entry: data.entry,
+      targetId: data.targetId,
+      profile: data.profile,
+      emitMs: data.emitMs,
+      ccMs: data.ccMs,
+      lines: data.lines,
+      projectLines: data.projectLines,
+      modules: data.modules
+    };
+    this.record("examples.build_ms", data.totalMs, metadata, data.exampleId);
+    this.record("examples.build_ms_per_kloc", data.msPerKloc, metadata, data.exampleId);
+  }
+
+  /** The latest recorded value of `metricName` for every example, keyed by
+   * exampleId — what the Featured list shows next to each app. */
+  latestPerExample(metricName: string) {
+    const out: Record<string, { timestamp: string; value: number; metadata: MetricMetadata }> = {};
+    for (const e of this.readAll()) {
+      if (e.metric_name !== metricName) continue;
+      const id = e.metadata?.exampleId;
+      if (typeof id !== "string") continue;
+      out[id] = { timestamp: e.timestamp, value: e.metric_value, metadata: e.metadata };
+    }
+    return out;
   }
 
   listRecentMetrics(metricName: string, limit = 20) {

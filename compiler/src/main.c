@@ -111,6 +111,67 @@ typedef struct {
   Arena* arena;
 } ModuleGraph;
 
+/* ---- Build timing (devtools "Run all", perf tracking) -------------------
+ *
+ * Every compiled build prints ONE machine-readable line to stderr when the C
+ * compiler finishes:
+ *
+ *   @@RAE_BUILD_TIME@@ entry=<path> total_ms=<n> emit_ms=<n> cc_ms=<n>
+ *       lines=<n> project_lines=<n> modules=<n> ms_per_kloc=<n.n>
+ *
+ * emit_ms is the Rae front end + C emission (parse, sema, codegen over the
+ * whole module graph); cc_ms is the system C compiler + link, which dominates
+ * and scales with -O. `lines` counts every source line the build actually
+ * processed (project + stdlib + deps) — the honest denominator for a
+ * "ms per 1,000 lines" figure that survives an example growing;
+ * `project_lines` is the subset under the project root, for the reader who
+ * wants to know how big the app itself is. `rae run` adds two more lines
+ * around the app itself, so a driver can budget the build and the run
+ * separately:
+ *
+ *   @@RAE_APP_START@@ entry=<path>
+ *   @@RAE_APP_EXIT@@ entry=<path> code=<n> run_ms=<n>
+ *
+ * They go to stderr, unbuffered, so they never interleave with the program's
+ * own stdout; the test runner strips the `@@RAE_` lines before comparing. */
+static long long g_build_total_lines = 0;
+static long long g_build_project_lines = 0;
+static long long g_build_modules = 0;
+static long long g_build_emit_ms = 0;
+
+static long long rae_now_ms(void) {
+  struct timeval tv;
+  gettimeofday(&tv, NULL);
+  return (long long)tv.tv_sec * 1000 + (long long)tv.tv_usec / 1000;
+}
+
+static long long count_source_lines(const char* source, size_t len) {
+  long long lines = 0;
+  for (size_t i = 0; i < len; i++) if (source[i] == '\n') lines++;
+  if (len > 0 && source[len - 1] != '\n') lines++;
+  return lines;
+}
+
+static void build_timing_reset(void) {
+  g_build_total_lines = 0;
+  g_build_project_lines = 0;
+  g_build_modules = 0;
+  g_build_emit_ms = 0;
+}
+
+static void build_timing_print(const char* entry, long long cc_ms) {
+  long long total_ms = g_build_emit_ms + cc_ms;
+  double per_kloc = g_build_total_lines > 0
+      ? (double)total_ms * 1000.0 / (double)g_build_total_lines
+      : 0.0;
+  fprintf(stderr,
+          "@@RAE_BUILD_TIME@@ entry=%s total_ms=%lld emit_ms=%lld cc_ms=%lld lines=%lld "
+          "project_lines=%lld modules=%lld ms_per_kloc=%.1f\n",
+          entry, total_ms, g_build_emit_ms, cc_ms, g_build_total_lines,
+          g_build_project_lines, g_build_modules, per_kloc);
+  fflush(stderr);
+}
+
 typedef struct ModuleStack {
   const char* module_path;
   struct ModuleStack* next;
@@ -1446,6 +1507,14 @@ static bool module_graph_load_module(ModuleGraph* graph,
     uint64_t module_hash = hash_bytes(source, file_size);
     *hash_out ^= module_hash + 0x9e3779b97f4a7c15ull + (*hash_out << 6) + (*hash_out >> 2);
   }
+  {
+    long long lines = count_source_lines(source, file_size);
+    g_build_total_lines += lines;
+    g_build_modules++;
+    if (graph->root_path && strncmp(path_to_check, graph->root_path, strlen(graph->root_path)) == 0) {
+      g_build_project_lines += lines;
+    }
+  }
 
   // Default mode: every stdlib module (core, string, math, io, sys, char)
   // is auto-loaded unless this file opts out via `import "nostdlib"` or
@@ -2189,6 +2258,8 @@ static bool build_c_backend_output(const char* entry_file,
                                    bool* out_uses_webgpu,
                                    WatchSources* out_sources) {
   diag_reset();
+  build_timing_reset();
+  long long emit_started_ms = rae_now_ms();
   Arena* arena = arena_create(RAE_C_BACKEND_ARENA_CAPACITY);
   if (!arena) {
     diag_fatal("could not allocate arena");
@@ -2299,6 +2370,7 @@ static bool build_c_backend_output(const char* entry_file,
     watch_sources_move(out_sources, &collected_sources);
   }
   watch_sources_clear(&collected_sources);
+  g_build_emit_ms = rae_now_ms() - emit_started_ms;
   return ok;
 }
 
@@ -2380,10 +2452,12 @@ static bool gcc_link_c_to_binary(const char* entry_rae_file,
            opt_flags, sdl3_flags, wgpu_flags, runtime_dir,
            c_path, runtime_dir, extra_c_files, out_bin);
 
+  long long cc_started_ms = rae_now_ms();
   if (system(cmd) != 0) {
     fprintf(stderr, "error: failed to compile C output\n");
     return false;
   }
+  build_timing_print(entry_rae_file, rae_now_ms() - cc_started_ms);
   return true;
 }
 
@@ -2638,7 +2712,13 @@ static int run_compiled_file(const RunOptions* run_opts, const char* project_roo
     const char* stdlib = compiler_stdlib_dir();
     if (stdlib && stdlib[0]) setenv("RAE_STDLIB", stdlib, 0);
   }
+  fprintf(stderr, "@@RAE_APP_START@@ entry=%s\n", file_path);
+  fflush(stderr);
+  long long app_started_ms = rae_now_ms();
   int result = system(temp_bin);
+  fprintf(stderr, "@@RAE_APP_EXIT@@ entry=%s code=%d run_ms=%lld\n",
+          file_path, (result == 0) ? 0 : 1, rae_now_ms() - app_started_ms);
+  fflush(stderr);
 
   if (chdired && have_saved) { if (chdir(saved_cwd) != 0) { /* best effort */ } }
   unlink(temp_c);
