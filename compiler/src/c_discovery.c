@@ -11,6 +11,7 @@
 #include "str.h"
 
 #include <stddef.h>
+#include <stdlib.h>
 
 static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr* expr);
 static void discover_specializations_stmt_impl(CFuncContext* ctx, const AstStmt* stmt);
@@ -20,6 +21,29 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
     // Normalise the new generic-call syntax so the spec-registration
     // logic below sees `generic_args` populated, same as the legacy
     // double-paren form. See c_backend.c::hoist_type_arg_if_present.
+    // #960: an enumFromName call needs its `opt E` struct-rep type emitted;
+    // its name argument is walked like any expression. Checked BEFORE the
+    // type-arg hoist below, which would move `E` out of the argument list.
+    if (c_call_enum_from_name_type(expr)) {
+        const AstTypeRef* ot = c_call_enum_from_name_opt_type(ctx, expr);
+        if (ot) {
+            CompilerContext* cc = ctx->compiler_ctx;
+            register_generic_type(cc, ot);
+            bool dup = false;
+            for (size_t i = 0; i < cc->demanded_opt_type_count && !dup; i++)
+                if (type_refs_equal(cc->demanded_opt_types[i], ot)) dup = true;
+            if (!dup) {
+                if (cc->demanded_opt_type_count >= cc->demanded_opt_type_cap) {
+                    size_t nc = cc->demanded_opt_type_cap ? cc->demanded_opt_type_cap * 2 : 16;
+                    cc->demanded_opt_types = realloc((void*)cc->demanded_opt_types, nc * sizeof(*cc->demanded_opt_types));
+                    cc->demanded_opt_type_cap = nc;
+                }
+                cc->demanded_opt_types[cc->demanded_opt_type_count++] = ot;
+            }
+        }
+        if (expr->as.call.args->next) discover_specializations_expr_impl(ctx, expr->as.call.args->next->value);
+        return;
+    }
     if (expr->kind == AST_EXPR_CALL) {
         AstExpr* hoisted = hoist_type_arg_if_present(ctx, expr);
         if (hoisted) expr = hoisted;
