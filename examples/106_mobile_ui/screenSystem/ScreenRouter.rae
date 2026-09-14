@@ -270,6 +270,7 @@ func buildAppWorldFor(
   )
   let libraryPage: EntityId = mountLibraryPage(
     world: world
+    scenes: scenes
     state: state
     scrollY: scrollY
     viewport: viewport
@@ -400,6 +401,9 @@ type AppState {
   # missing from this list still exist (covers + metadata) but are
   # hidden from Home / Library views. See `library_data.rae`.
   library: List(String)
+  # #975: bumped whenever `library` or `liked` changes shape — the
+  # CoverGrid system observes it to rebuild the Home / Library tiles.
+  libraryRevision: Int
   # The user's "Liked Songs" playlist. Just an ordered list of
   # (albumStem, trackIndex) pairs the heart button toggles. The
   # ship default lives at assets/playlists/liked.json; user mutations land in
@@ -461,6 +465,7 @@ func createAppState(albums: own List(Album), theme: own UiTheme) pub ret AppStat
       subPageStack: List.create(Int, cap: 4)
       playHistory: createPlayHistory(cap: 100)
       library: List.create(String, cap: 8)
+      libraryRevision: 0
       liked: own liked
       viewingPlaylist: false
       currentPlaylistId: ""
@@ -923,6 +928,7 @@ func dispatchActions(
             log("[liked] -{stem} track {state.currentTrackIndex}")
           }
           savePlaylist(playlist: state.liked)
+          state.libraryRevision = state.libraryRevision + 1
         }
       }
       if actionId is libraryRemoveKey {
@@ -932,6 +938,7 @@ func dispatchActions(
         # sub-page so the user lands back where they came from.
         removeFromLibrary(library: state.library, stem: state.currentAlbumStem)
         saveLibraryToJson(library: state.library, path: libraryFilePath)
+        state.libraryRevision = state.libraryRevision + 1
         closeBottomSheet(sheet: state.bottomSheet)
         popSubPage(state: state)
       }
