@@ -288,6 +288,10 @@ func length(T: type, this: view List(T)) ret Int {
 func drop(T: type, this: mod List(T)) {
   unsafe {
     rae_ext_rae_buf_free(buf: this.data)
+    # #965: leave the EMPTY value behind, not a dangling pointer — a
+    # zero-count alloc is the null Buffer, so a later drop (scope exit, or
+    # the release a whole-value store performs first) is a no-op.
+    this.data = rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(T))
     this.length = 0
     this.cap = 0
   }
