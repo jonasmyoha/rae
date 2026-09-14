@@ -18,6 +18,12 @@ func noEntity() ret EntityId {
   ret EntityId { index: 0 - 1, generation: 0 }
 }
 
+# A generation-0 handle for `v`. Correct ONLY for a slot that has never been
+# recycled — fresh test worlds, or a ComponentTable used without an allocator.
+# It must NOT be used to rebuild a live entity from a stored index (a
+# `world.nodeIds` lookup): after the first re-mount the slot's generation is
+# no longer 0 and the handle is stale. Use `nodeEntity(world, index)` there
+# (lib/ui/Ecs.rae, #972), which reads the allocator's current generation.
 func id(v: view Int) ret EntityId {
   ret EntityId { index: v, generation: 0 }
 }

@@ -224,8 +224,8 @@ func applyPlaybackToWorld(world: mod UiWorld, state: view PlaybackState) pub {
   let fillKey: String = "ProgressFill"
   if let trackRaw: Int = findNodeInPage(world: world, pageId: playerPageId, nodeId: trackKey) {
     if let fillRaw: Int = findNodeInPage(world: world, pageId: playerPageId, nodeId: fillKey) {
-      let trackEntity: EntityId = id(v: trackRaw)
-      let fillEntity: EntityId = id(v: fillRaw)
+      let trackEntity: EntityId = nodeEntity(world: world, index: trackRaw)
+      let fillEntity: EntityId = nodeEntity(world: world, index: fillRaw)
       var trackW: Float = 0.0
       if componentHas(this: world.computedRects, entity: trackEntity) {
         let tcr: ComputedRect = componentGet(this: world.computedRects, entity: trackEntity)
