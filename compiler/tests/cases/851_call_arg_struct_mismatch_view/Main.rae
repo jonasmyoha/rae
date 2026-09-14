@@ -1,0 +1,32 @@
+# #993: a struct of the wrong type passed to a `view` parameter used to
+# compile, link and READ the wrong layout (Apple.weight as Basket.count).
+type Apple {
+  weight: Int
+}
+
+type Basket {
+  count: Int
+  label: String
+}
+
+func inspect(basket: view Basket) ret Int {
+  ret basket.count
+}
+
+func fill(basket: mod Basket) {
+  basket.count = basket.count + 1
+}
+
+func twice(n: copy Int) ret Int {
+  ret n * 2
+}
+
+func pair(first: view Int, second: view String) ret Int {
+  ret first + second.length()
+}
+
+func main() ret Int {
+  let apple: Apple = { weight: 3 }
+  log("A {inspect(basket: apple)}")
+  ret 0
+}

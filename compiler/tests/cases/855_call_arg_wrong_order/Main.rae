@@ -1,0 +1,31 @@
+# #993: arguments are positional — swapping two named arguments is a
+# name error AND a type error at each argument, not a silent reorder.
+type Apple {
+  weight: Int
+}
+
+type Basket {
+  count: Int
+  label: String
+}
+
+func inspect(basket: view Basket) ret Int {
+  ret basket.count
+}
+
+func fill(basket: mod Basket) {
+  basket.count = basket.count + 1
+}
+
+func twice(n: copy Int) ret Int {
+  ret n * 2
+}
+
+func pair(first: view Int, second: view String) ret Int {
+  ret first + second.length()
+}
+
+func main() ret Int {
+  log("E {pair(second: "ab", first: 1)}")
+  ret 0
+}
