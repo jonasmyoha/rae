@@ -14,6 +14,23 @@ open Mesh3d
 # rings * segments + 1 vertices; the first ring at `firstCell` metres, each ring
 # `growth` times farther than the previous step. rings=64, segments=96,
 # firstCell=1, growth=1.09 reaches ~2.5 km with ~6k vertices.
+# The ring spacing of createRadialGridMesh per metre from the centre: radially
+# a ring is `growth - 1` of its radius farther than the last, tangentially a
+# segment spans 2pi / segments of it; the coarser of the two is the cell the
+# surface shader must be able to sample (WaterBody.clipCellPerMetre, #1002).
+func radialGridCellPerMetre(segments: copy Int, growth: copy Float) pub ret Float {
+  var segmentCount: Int = segments
+  if segmentCount < 3 {
+    segmentCount = 3
+  }
+  let tangential: Float = 6.28318530718 / segmentCount.toFloat()
+  let radial: Float = growth - 1.0
+  if radial > tangential {
+    ret radial
+  }
+  ret tangential
+}
+
 func createRadialGridMesh(
   rings: copy Int
   segments: copy Int

@@ -40,6 +40,7 @@ struct Water {
   cascades: vec4<f32>,      // xyz = cascade tile sizes (m), w = realistic path (1) / toon (0)
   centre: vec4<f32>,        // xy = camera position snapped to metres (mesh mode 2), z = cascade count, w = grid cell (m, lakes)
   ssr: vec4<f32>,           // x = screen-space reflections on (1) / off (0), y = march steps, z = hit thickness (m), w = max ray distance (m)
+  grid: vec4<f32>,          // x = radial cell per metre (mesh mode 2), y = its first cell (m), z = cascade map size (texels), w = band hand-over bins
 };
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var<uniform> W: Water;
@@ -55,11 +56,41 @@ struct Water {
 @group(0) @binding(10) var cascadeNorm2: texture_2d<f32>;
 @group(0) @binding(11) var cascadeSampler: sampler;   // repeat: the cascades tile
 
-// Sum the cascades' displacement at world xy (each tiles its own size).
-fn cascadeDisplacement(xy: vec2<f32>) -> vec3<f32> {
-  var d = textureSampleLevel(cascadeDisp0, cascadeSampler, xy / W.cascades.x, 0.0).xyz;
-  if (W.centre.z > 1.5) { d += textureSampleLevel(cascadeDisp1, cascadeSampler, xy / W.cascades.y, 0.0).xyz; }
-  if (W.centre.z > 2.5) { d += textureSampleLevel(cascadeDisp2, cascadeSampler, xy / W.cascades.z, 0.0).xyz; }
+// The longest wave a cascade owns: the first keeps everything up to its tile,
+// the others start at the band hand-over (cascadeBandBins cells of their own
+// tile, WaterFft.cascadeBandHigh).
+fn cascadeLongestWave(cascade: i32) -> f32 {
+  if (cascade == 1) { return W.cascades.y / W.grid.w; }
+  if (cascade == 2) { return W.cascades.z / W.grid.w; }
+  return W.cascades.x;
+}
+// Vertex-side sampling limit (#1002), the FFT twin of waveGridFactor: a cascade
+// whose longest wave spans under ~4 grid cells is faded out of the vertex
+// displacement (full above 8). Sampled on far, coarse cells the short cascades
+// alias into wide bands that re-shuffle every metre the centred mesh snaps to,
+// which reads as the sea speeding up / jittering whenever the camera moves.
+fn cascadeVertexWeight(cascade: i32, cell: f32) -> f32 {
+  if (cell <= 0.0) { return 1.0; }
+  return smoothstep(4.0, 8.0, cascadeLongestWave(cascade) / cell);
+}
+// Pixel-side limit (#1002): the maps have no mips, so once a pixel's footprint
+// on the water covers a few texels of a cascade its normal and Jacobian are
+// point samples of unrelated waves — a sparkle that decorrelates with every
+// camera step. Fade such a cascade out of the slope and foam instead.
+fn cascadePixelWeight(cascade: i32, footprint: f32) -> f32 {
+  if (W.grid.z <= 0.0) { return 1.0; }
+  var tile = W.cascades.x;
+  if (cascade == 1) { tile = W.cascades.y; }
+  if (cascade == 2) { tile = W.cascades.z; }
+  let texel = tile / W.grid.z;
+  return 1.0 - smoothstep(1.5, 4.0, footprint / texel);
+}
+// Sum the cascades' displacement at world xy (each tiles its own size), each
+// weighted by what the grid cell under the vertex can sample.
+fn cascadeDisplacement(xy: vec2<f32>, cell: f32) -> vec3<f32> {
+  var d = textureSampleLevel(cascadeDisp0, cascadeSampler, xy / W.cascades.x, 0.0).xyz * cascadeVertexWeight(0, cell);
+  if (W.centre.z > 1.5) { d += textureSampleLevel(cascadeDisp1, cascadeSampler, xy / W.cascades.y, 0.0).xyz * cascadeVertexWeight(1, cell); }
+  if (W.centre.z > 2.5) { d += textureSampleLevel(cascadeDisp2, cascadeSampler, xy / W.cascades.z, 0.0).xyz * cascadeVertexWeight(2, cell); }
   return d;
 }
 // Slopes add across cascades (a normal is -slope, 1). Whitecaps come from the
@@ -71,18 +102,23 @@ fn foamFromJacobian(j: f32) -> f32 {
 fn cascadeSlopeFoam(xy: vec2<f32>) -> vec3<f32> {
   var slope = vec2<f32>(0.0);
   var foam = 0.0;
+  // World metres this pixel covers on the still surface (the sampling footprint).
+  let footprint = max(length(dpdx(xy)), length(dpdy(xy)));
+  let w0 = cascadePixelWeight(0, footprint);
   let n0 = textureSample(cascadeNorm0, cascadeSampler, xy / W.cascades.x).xyz;
-  slope += -n0.xy / max(n0.z, 0.05);
-  foam += foamFromJacobian(textureSample(cascadeDisp0, cascadeSampler, xy / W.cascades.x).w);
+  slope += -n0.xy / max(n0.z, 0.05) * w0;
+  foam += foamFromJacobian(textureSample(cascadeDisp0, cascadeSampler, xy / W.cascades.x).w) * w0;
   if (W.centre.z > 1.5) {
+    let w1 = cascadePixelWeight(1, footprint);
     let n1 = textureSample(cascadeNorm1, cascadeSampler, xy / W.cascades.y).xyz;
-    slope += -n1.xy / max(n1.z, 0.05);
-    foam += foamFromJacobian(textureSample(cascadeDisp1, cascadeSampler, xy / W.cascades.y).w);
+    slope += -n1.xy / max(n1.z, 0.05) * w1;
+    foam += foamFromJacobian(textureSample(cascadeDisp1, cascadeSampler, xy / W.cascades.y).w) * w1;
   }
   if (W.centre.z > 2.5) {
+    let w2 = cascadePixelWeight(2, footprint);
     let n2 = textureSample(cascadeNorm2, cascadeSampler, xy / W.cascades.z).xyz;
-    slope += -n2.xy / max(n2.z, 0.05);
-    foam += foamFromJacobian(textureSample(cascadeDisp2, cascadeSampler, xy / W.cascades.z).w);
+    slope += -n2.xy / max(n2.z, 0.05) * w2;
+    foam += foamFromJacobian(textureSample(cascadeDisp2, cascadeSampler, xy / W.cascades.z).w) * w2;
   }
   return vec3<f32>(slope, foam);
 }
@@ -152,7 +188,11 @@ fn vs(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) uv: vec
   if (!river && !realistic && W.tuning.y > 1.5) { gerstner(wave1, W.wave1b, base.xy, t, &disp, &dn); }
   // Realistic: the FFT cascades displace the vertex (world-space lookup, so
   // the waves stay put while the centred mesh moves under them).
-  if (realistic) { disp = cascadeDisplacement(base.xy); }
+  // The grid cell under this vertex: a lake's fixed cell, or on the centred
+  // radial grid the ring spacing, which grows with the distance from the centre.
+  var cell = W.centre.w;
+  if (centred) { cell = max(W.grid.y, length(p.xy) * W.grid.x); }
+  if (realistic) { disp = cascadeDisplacement(base.xy, cell); }
   let world = base + disp;
   o.world = world;
   o.gridXy = base.xy;

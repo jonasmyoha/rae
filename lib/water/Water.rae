@@ -85,6 +85,12 @@ type WaterBody {
   cascadeTile0: Float  # world metres one cascade tile covers (~250 / 60 / 8)
   cascadeTile1: Float
   cascadeTile2: Float
+  # Camera-centred radial grid (mesh mode 2, ClipMap): the ring spacing per
+  # metre from the centre and the innermost cell (m). The surface shader fades
+  # each cascade's vertex displacement out where that cell cannot sample its
+  # waves, the FFT twin of waveGridFactor (#1002). 0 = no fade.
+  clipCellPerMetre: Float
+  clipFirstCell: Float
   # N frames per cascade update: cascade i runs when frame % N == i % N.
   # 1 updates all every frame; mobile defaults to 2. Initialization/invalidation
   # refresh all maps once. Wave time always follows real elapsed time, not updates.
@@ -157,6 +163,8 @@ func createLakeToon(surfaceZ: copy Float, extent: copy Float) ret WaterBody {
     cascadeTile0: 250.0
     cascadeTile1: 60.0
     cascadeTile2: 8.0
+    clipCellPerMetre: 0.0
+    clipFirstCell: 0.0
     updateRate: 1
     ssr: 0
     ssrSteps: 0
@@ -164,6 +172,16 @@ func createLakeToon(surfaceZ: copy Float, extent: copy Float) ret WaterBody {
     caustics: 0
   }
 }
+
+# Each FFT cascade owns a k band so the cascades never count a wavelength twice
+# when the surface sums them. The hand-over to the next (smaller) tile happens
+# where that tile resolves the wave with cascadeBandBins grid cells per
+# wavelength: kHigh = cascadeBandBins * 2pi / L_next. (Handing over at exactly
+# 2pi/L_next — one cell — would leave the 250 m cascade owning a 4-bin disc of
+# its 256x256 grid while the 60 m cascade represents 60..10 m waves with 1..6
+# cells; six cells is where the finer tile is the better home.) Shared by the
+# spectrum bake (WaterFft) and the surface uniform (WaterSystem).
+const cascadeBandBins: Float = 6.0
 
 # ----- gameplay query (#832) -------------------------------------------------
 # One Gerstner wave's displacement at grid point (px, py) — the CPU mirror of
