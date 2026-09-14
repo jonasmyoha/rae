@@ -748,7 +748,6 @@ func waterDraw(
   hasSky: view Bool
   deltaTime: copy Float
 ) {
-  waterSystem.time = waterSystem.time + deltaTime
   waterPollSubmissions(waterSystem: waterSystem, resources: resources)
   collectWaterPerf(performance: waterSystem.surfacePerf, resources: resources)
   if gbDeferredPrepare() is 0 {
@@ -779,6 +778,7 @@ func waterDraw(
   if not waterSystem.bindMade {
     ret
   }
+  waterSystem.time = waterSystem.time + deltaTime
   var i: Int = 0
   loop i < waterSystem.bodies.length {
     if let body: WaterBody = waterSystem.bodies.copyAt(index: i) {
