@@ -1,10 +1,12 @@
 # RegistryValues — the value-level JSON decoders the component deserializers
 # share (#918 split of ui/Registry for the 1000-line cap): the enum-name
-# parsers (parseSizeMode / parseLayoutType / parseAlignKind / ...), the small
+# parsers (parseSizeMode / parseLayoutType / ... — `enumFromName` lookups since
+# #960), the small
 # value decoders (deserInsets / deserVec2 / deserRgba / deserSizeAxis /
 # deserRect / deserSize) and the data-resource / field id lookups.
 # ui/RegistryDeser's `deser<Component>` functions are built on these.
 open ui/RegistryOpt
+open ui/RegistryGeneric
 open ui/ContainerStyle
 import Json
 import ui/Theme
@@ -14,146 +16,82 @@ open ecs/ComponentTable
 open ui/Registry
 open ui/RegistryDeser
 
+# The authored enum vocabulary is PascalCase ("Horizontal"); each parser is
+# the compile-time member lookup `enumFromName` (#960) over the camelCase
+# case name, with the same default the old `if text is` ladder fell back to.
+# `parseScaleMode` keeps its one alias ("Cover" = fill, CSS object-fit).
 func parseSizeMode(text: view String) ret SizeMode {
-  let hugStr: String = "Hug"
-  let fillStr: String = "Fill"
-  if text is hugStr {
-    ret SizeMode.hug
-  }
-  if text is fillStr {
-    ret SizeMode.fill
+  if let kind: SizeMode = enumFromName(SizeMode, name: authoredEnumName(text: text)) {
+    ret kind
   }
   ret SizeMode.fixed
 }
 
 func parseLayoutType(text: view String) ret LayoutType {
-  let h: String = "Horizontal"
-  let v: String = "Vertical"
-  let g: String = "Grid"
-  let st: String = "Stack"
-  if text is h {
-    ret LayoutType.horizontal
-  }
-  if text is v {
-    ret LayoutType.vertical
-  }
-  if text is g {
-    ret LayoutType.grid
-  }
-  if text is st {
-    ret LayoutType.stack
+  if let kind: LayoutType = enumFromName(LayoutType, name: authoredEnumName(text: text)) {
+    ret kind
   }
   ret LayoutType.none
 }
 
 func parseAlignKind(text: view String) ret AlignKind {
-  let c: String = "Center"
-  let e: String = "End"
-  let sb: String = "SpaceBetween"
-  let str: String = "Stretch"
-  if text is c {
-    ret AlignKind.center
-  }
-  if text is e {
-    ret AlignKind.end
-  }
-  if text is sb {
-    ret AlignKind.spaceBetween
-  }
-  if text is str {
-    ret AlignKind.stretch
+  if let kind: AlignKind = enumFromName(AlignKind, name: authoredEnumName(text: text)) {
+    ret kind
   }
   ret AlignKind.start
 }
 
 func parseShapeKind(text: view String) ret ShapeKind {
-  let rr: String = "RoundedRect"
-  let c: String = "Circle"
-  if text is rr {
-    ret ShapeKind.roundedRect
-  }
-  if text is c {
-    ret ShapeKind.circle
+  if let kind: ShapeKind = enumFromName(ShapeKind, name: authoredEnumName(text: text)) {
+    ret kind
   }
   ret ShapeKind.rect
 }
 
 func parseScaleMode(text: view String) ret ScaleMode {
-  let fi: String = "Fill"
-  let st: String = "Stretch"
-  # CSS object-fit vocabulary (S6): Cover = aspect-preserving crop
-  # (same as Fill), Contain = aspect-preserving letterbox (same as
-  # the Fit default). Both spellings are accepted so scenes can use
-  # whichever reads better.
+  # CSS object-fit vocabulary (S6): Cover = aspect-preserving crop (same as
+  # Fill), Contain = aspect-preserving letterbox (same as the Fit default).
   let cover: String = "Cover"
-  if text is fi {
-    ret ScaleMode.fill
-  }
   if text is cover {
     ret ScaleMode.fill
   }
-  if text is st {
-    ret ScaleMode.stretch
+  if let kind: ScaleMode = enumFromName(ScaleMode, name: authoredEnumName(text: text)) {
+    ret kind
   }
   ret ScaleMode.fit
 }
 
 func parseWrapWidthMode(text: view String) ret WrapWidthMode {
-  let nw: String = "NodeWidth"
-  if text is nw {
-    ret WrapWidthMode.nodeWidth
+  if let kind: WrapWidthMode = enumFromName(WrapWidthMode, name: authoredEnumName(text: text)) {
+    ret kind
   }
   ret WrapWidthMode.none
 }
 
 func parseHitAreaKind(text: view String) ret HitAreaKind {
-  let rr: String = "RoundedRect"
-  if text is rr {
-    ret HitAreaKind.roundedRect
+  if let kind: HitAreaKind = enumFromName(HitAreaKind, name: authoredEnumName(text: text)) {
+    ret kind
   }
   ret HitAreaKind.rect
 }
 
 func parseMaskKind(text: view String) ret MaskKind {
-  let rr: String = "RoundedRect"
-  if text is rr {
-    ret MaskKind.roundedRect
+  if let kind: MaskKind = enumFromName(MaskKind, name: authoredEnumName(text: text)) {
+    ret kind
   }
   ret MaskKind.circle
 }
 
 func parseResolverMode(text: view String) ret ResolverMode {
-  let r: String = "Random"
-  let h: String = "Hash"
-  let d: String = "Direct"
-  if text is r {
-    ret ResolverMode.random
-  }
-  if text is h {
-    ret ResolverMode.hash
-  }
-  if text is d {
-    ret ResolverMode.direct
+  if let kind: ResolverMode = enumFromName(ResolverMode, name: authoredEnumName(text: text)) {
+    ret kind
   }
   ret ResolverMode.fixed
 }
 
 func parseTextFormat(text: view String) ret TextFormat {
-  let n: String = "Number"
-  let p: String = "Percent1"
-  let c: String = "Coins"
-  let h: String = "HandRank"
-  if text is n {
-    ret TextFormat.number
-  }
-  if text is p {
-    ret TextFormat.percent1
-  }
-  if text is c {
-    ret TextFormat.coins
-  }
-  if text is h {
-    ret TextFormat.handRank
+  if let kind: TextFormat = enumFromName(TextFormat, name: authoredEnumName(text: text)) {
+    ret kind
   }
   ret TextFormat.plain
 }

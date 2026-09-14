@@ -1,0 +1,107 @@
+# RegistryGeneric — the generic authored-field decoder (#960, from the #942
+# (C) decision). ONE function decodes a field of ANY scalar/enum type from a
+# `.raescene` component object, so a component deserializer can be written as
+# a field loop instead of one hand-written arm per component (#961):
+#
+#     var comp: T = T.default()
+#     loop let f: mod any in fields(comp) {
+#       f.set(value: decodeField(fallback: f, doc: doc, val: val, key: fieldName(f), theme: theme))
+#     }
+#
+# How one body serves every type: `typeName(fallback)` is a compile-time query
+# on the generic parameter, and an `if typeName(fallback) is "Int" { ... }` arm
+# is DECIDED per instantiation — only the matching arm exists in the Int
+# instantiation, so the String arm never has to type-check against Int
+# (docs/compile-time-reflection.md, "Generic bodies that branch on the type").
+# The enum arm comes last: `enumFromName(T, name:)` is the constant none for a
+# non-enum T, so it costs nothing to try. Struct / List fields are not decoded
+# here (they keep `fallback`); the explicit override block in #961 handles the
+# few non-field-structural shapes (Rect's {x,y,w,h}, Text's styleOverride).
+#
+# Missing key: the field keeps `fallback` — the caller passes the current
+# value, which is `T.default()` for a freshly created component.
+# Theme tokens: a Float field accepts a token name where the authored grammar
+# allows one — space tokens ("gap": "spaceM") through optFloatOrToken, and the
+# `radius` key through the radius-category tokens ("radius": "radiusCard").
+open ui/RegistryOpt
+import Json
+import ui/Theme
+
+# Authored enum vocabulary is PascalCase ("Horizontal", "SpaceBetween"); Rae
+# enum cases are camelCase (`horizontal`, `spaceBetween`). The first letter is
+# the only difference, so lower it before the compile-time member lookup.
+func authoredEnumName(text: view String) ret String {
+  if text.length() is 0 {
+    ret ""
+  }
+  let head: String = text.sub(start: 0, len: 1)
+  let tail: String = text.sub(start: 1, len: text.length() - 1)
+  ret "{head.toLower()}{tail}"
+}
+
+func decodeField(
+  T: type
+  fallback: copy T
+  doc: view JsonDoc
+  val: view JsonValue
+  key: view String
+  theme: view UiTheme
+) ret T {
+  if typeName(fallback) is "Int" {
+    ret optInt(
+      doc: doc
+      container: val
+      key: key
+      fallback: fallback
+    )
+  }
+  if typeName(fallback) is "Float" {
+    let radiusKey: String = "radius"
+    if key is radiusKey {
+      ret optRadiusOrToken(
+        doc: doc
+        theme: theme
+        container: val
+        key: key
+        fallback: fallback
+      )
+    }
+    ret optFloatOrToken(
+      doc: doc
+      theme: theme
+      container: val
+      key: key
+      fallback: fallback
+    )
+  }
+  if typeName(fallback) is "Bool" {
+    ret optBool(
+      doc: doc
+      container: val
+      key: key
+      fallback: fallback
+    )
+  }
+  if typeName(fallback) is "String" {
+    ret optString(
+      doc: doc
+      container: val
+      key: key
+      fallback: fallback
+    )
+  }
+  # Enum (or nothing): the authored member name, if the key is present.
+  let empty: String = ""
+  let text: String = optString(
+    doc: doc
+    container: val
+    key: key
+    fallback: empty
+  )
+  if text.length() > 0 {
+    if let member: T = enumFromName(T, name: authoredEnumName(text: text)) {
+      ret member
+    }
+  }
+  ret fallback
+}

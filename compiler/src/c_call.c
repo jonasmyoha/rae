@@ -93,6 +93,24 @@ static bool arg_is_addressable_lvalue(CFuncContext* ctx, const AstExpr* e) {
 }
 
 bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
+    // #960: `enumFromName(E, name: s)` -> the `opt E` whose member is spelled
+    // `s`. One statement-expression: look the name up through the enum's
+    // generated index table (-1 = no such member). `E` substituted through
+    // the generic context; a NON-enum instantiation (a generic decoder trying
+    // the enum path on an Int field) is the constant none.
+    if (c_call_enum_from_name_type(expr)) {
+        const AstTypeRef* ot = c_call_enum_from_name_opt_type(ctx, expr);
+        Str ename = get_base_type_name(ot);
+        const char* optm = rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, (AstTypeRef*)ot);
+        if (find_enum_decl(ctx, ctx->module, ename)) {
+            fprintf(out, "({ int64_t __ei = rae_enum_index_%.*s(", (int)ename.len, ename.data);
+            emit_expr(ctx, expr->as.call.args->next->value, out, PREC_LOWEST, false, false);
+            fprintf(out, "); %s __eo = {0}; if (__ei >= 0) { __eo.has = 1; __eo.value = __ei; } __eo; })", optm);
+        } else {
+            fprintf(out, "((%s){0})", optm);
+        }
+        return true;
+    }
     // Hoist a type argument out of the value-arg list if present —
     // new generic-call syntax. See c_backend.c for the helper.
     AstExpr* hoisted = hoist_type_arg_if_present(ctx, expr);

@@ -102,8 +102,16 @@ bool rae_opt_is_struct_rep(CFuncContext* ctx, const AstTypeRef* type) {
         const AstIdentifierPart* gp = ctx->generic_params;
         const AstTypeRef* ga = ctx->generic_args;
         while (gp && ga) {
-            if (str_eq(gp->text, base->as.generic_param.param_name))
+            if (str_eq(gp->text, base->as.generic_param.param_name)) {
+                // #960: an argument INFERRED from a `mod`/`view` alias carries
+                // the reference in its TypeInfo; the payload is the base.
+                const TypeInfo* gt = ga->resolved_type;
+                if (gt && gt->kind == TYPE_REF && gt->as.ref.base
+                    && gt->as.ref.base->kind != TYPE_OPT
+                    && gt->as.ref.base->kind != TYPE_GENERIC_PARAM)
+                    return rae_typeinfo_opt_is_struct_rep(gt->as.ref.base);
                 return rae_opt_is_struct_rep(ctx, ga);
+            }
             gp = gp->next; ga = ga->next;
         }
     }
@@ -426,7 +434,18 @@ void register_function_specialization(CompilerContext* ctx, const AstFuncDecl* d
     for (size_t i = 0; i < ctx->specialized_func_count; i++) {
         if (ctx->specialized_funcs[i].decl == decl) {
             const AstTypeRef* a = ctx->specialized_funcs[i].concrete_args; const AstTypeRef* b = concrete_args;
-            bool match = true; while (a && b) { if (!type_refs_equal(a, b)) { match = false; break; } a = a->next; b = b->next; }
+            bool match = true;
+            while (a && b) {
+                // #960: an enum's TypeInfo is the Int TypeInfo, so the
+                // resolved-type shortcut inside type_refs_equal would dedupe
+                // decodeField(LayoutType) against decodeField(Int) (and
+                // AlignKind against LayoutType). Specializations are named by
+                // their WRITTEN args, so differing written names are distinct.
+                if (a->parts && b->parts && (uintptr_t)a->parts >= 0x1000 && (uintptr_t)b->parts >= 0x1000
+                    && !str_eq(a->parts->text, b->parts->text)) { match = false; break; }
+                if (!type_refs_equal(a, b)) { match = false; break; }
+                a = a->next; b = b->next;
+            }
             if (match && !a && !b) return;
         }
     }
@@ -1113,6 +1132,36 @@ static const AstTypeRef* infer_tr_from_resolved(CFuncContext* ctx, const TypeInf
     return tr;
 }
 
+// #960: is `expr` the intrinsic call `enumFromName(E, name: s)`? Returns the
+// enum-type identifier expression (E) or NULL.
+const AstExpr* c_call_enum_from_name_type(const AstExpr* expr) {
+    if (!expr || expr->kind != AST_EXPR_CALL || !expr->as.call.callee
+        || expr->as.call.callee->kind != AST_EXPR_IDENT
+        || !str_eq_cstr(expr->as.call.callee->as.ident, "enumFromName")) return NULL;
+    const AstCallArg* ta = expr->as.call.args;
+    if (!ta || !ta->next || ta->next->next || !ta->value || ta->value->kind != AST_EXPR_IDENT) return NULL;
+    return ta->value;
+}
+
+// The `opt E` type ref of an enumFromName call, with E substituted through the
+// current generic context. Arena-allocated; NULL when not such a call.
+const AstTypeRef* c_call_enum_from_name_opt_type(CFuncContext* ctx, const AstExpr* expr) {
+    const AstExpr* te = c_call_enum_from_name_type(expr);
+    if (!te) return NULL;
+    AstTypeRef* tr = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
+    memset(tr, 0, sizeof *tr);
+    tr->parts = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstIdentifierPart));
+    memset(tr->parts, 0, sizeof *tr->parts);
+    tr->parts->text = te->as.ident;
+    AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr);
+    if (sub && sub != tr) {
+        AstTypeRef* copy = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
+        *copy = *sub; copy->next = NULL; tr = copy;
+    }
+    tr->is_opt = true; tr->is_view = false; tr->is_mod = false;
+    return tr;
+}
+
 const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
     if (!expr) return NULL;
     // Cache primitive literal type-refs in static storage so callers can hold a
@@ -1205,6 +1254,12 @@ const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
             break;
         }
         case AST_EXPR_CALL: {
+            // #960: `enumFromName(E, name: s)` is `opt E`, E substituted through
+            // the enclosing generic context (E may be a type parameter).
+            if (c_call_enum_from_name_type(expr)) {
+                const AstTypeRef* et = c_call_enum_from_name_opt_type(ctx, expr);
+                if (et) return et;
+            }
             if (expr->decl_link && expr->decl_link->kind == AST_DECL_FUNC) {
                 const AstTypeRef* crt = expr->decl_link->as.func_decl.returns
                     ? expr->decl_link->as.func_decl.returns->type : NULL;
@@ -1893,6 +1948,17 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
                   (int)m->name.len, (int)m->name.len, m->name.data, (int)m->name.len, (long long)idx++);
           }
           fprintf(out, "  return 0;\n}\n");
+          // #960: member NAME -> ordinal or -1, behind `enumFromName(E, name:)`
+          // (the opt-returning form; the fromString above is fromJson's
+          // first-member fallback).
+          fprintf(out, "RAE_UNUSED static int64_t rae_enum_index_%.*s(rae_String s) {\n",
+              (int)d->as.enum_decl.name.len, d->as.enum_decl.name.data);
+          idx = 0;
+          for (const AstEnumMember* m = d->as.enum_decl.members; m; m = m->next) {
+              fprintf(out, "  if (s.len == %d && memcmp(s.data, \"%.*s\", %d) == 0) return %lldLL;\n",
+                  (int)m->name.len, (int)m->name.len, m->name.data, (int)m->name.len, (long long)idx++);
+          }
+          fprintf(out, "  return -1;\n}\n");
           fprintf(out, "\n");
       }
   }
@@ -1954,6 +2020,9 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
     } \
   } while (0)
   for (size_t i = 0; i < ctx->generic_type_count; i++) TRY_ADD_OPT(ctx->generic_types[i]);
+  // #960: the `opt E` an enumFromName call yields (including `opt Int` for a
+  // non-enum instantiation), demanded by discovery.
+  for (size_t i = 0; i < ctx->demanded_opt_type_count; i++) TRY_ADD_OPT(ctx->demanded_opt_types[i]);
   // Struct FIELDS: a struct-rep opt field (e.g. `Player { nowPlaying: opt Track }`)
   // reaches the field-drop/copy sites which call rae_drop_/rae_deep_copy_<optT>,
   // but the field type isn't necessarily a standalone generic_types entry.

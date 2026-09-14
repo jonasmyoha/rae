@@ -157,6 +157,10 @@ static void mangle_type_recursive_specialized(CompilerContext* ctx, const struct
 static bool mangler_payload_is_struct_rep(const AstTypeRef* payload) {
     if (!payload) return false;
     const TypeInfo* ti = payload->resolved_type;
+    // #960: a concrete arg INFERRED from a `mod`/`view` alias carries the
+    // reference in its TypeInfo; the payload is its base (the mangled name
+    // already strips the mode, so the rep judgement must agree).
+    if (ti && ti->kind == TYPE_REF && ti->as.ref.base) ti = ti->as.ref.base;
     if (ti && ti->kind != TYPE_GENERIC_PARAM) {
         // #901: TYPE_BUFFER (Ptr and any Buffer(T)) is struct-rep too —
         // must agree with rae_typeinfo_opt_is_struct_rep (c_backend.c) and
