@@ -945,6 +945,19 @@ type SearchResults {
   builtQuery: String
 }
 
+# ----- history page: the play-history list binding (#977) -------------------
+
+# Authored next to a `ListView` on the History page's list host. The rows are
+# the app's play history, so the scene cannot carry them: `historyListSystem`
+# writes the host's `ListViewData` from the history whenever its revision
+# moves past `builtRevision` (-1 on a fresh mount), shows the host while
+# there are entries and the page's `emptyStateNodeId` node otherwise. The
+# list re-binds in place — a new play no longer re-mounts the page.
+type HistoryList {
+  emptyStateNodeId: String = "EmptyState"
+  builtRevision: Int = -1
+}
+
 func defaultStyleOverride() ret StyleOverride {
   ret StyleOverride {
     hasSize: false

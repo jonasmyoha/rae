@@ -146,16 +146,8 @@ func refreshHistoryViewsIfNeeded(
     )
     setPageActive(world: world, pageId: homePageId, active: true)
   }
-  if visible is Screen.history {
-    unmountPage(world: world, pageId: historyPageId)
-    let h: EntityId = mountHistoryPage(
-      world: world
-      state: state
-      scrollY: 0.0
-      viewport: viewport
-    )
-    setPageActive(world: world, pageId: historyPageId, active: true)
-  }
+  # The History page needs no re-mount: its HistoryList system re-binds the
+  # ListView rows in place on the same revision (#977).
   ret n
 }
 

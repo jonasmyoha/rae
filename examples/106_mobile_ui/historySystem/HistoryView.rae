@@ -12,16 +12,17 @@ open ui/Ecs
 # oldest-first. Rendering walks the list from the tail so the most
 # recent play sits at the top of the page, matching user intuition.
 #
-# #964: the list is a lib/ui `ListView` over `history-row.raescene`. This
-# file only turns the play history into `ListViewData` rows (one cell per
-# bound field) and declares the bindings; windowing, recycling and the
-# scroll translation are the listViewSystem's (docs/ui-ecs-refactor-status
-# §2.6). The row template's nodes: HistoryRow (OnClick), Thumb (Sprite,
-# with a ThumbPlaceholder child toggled by `Active`), Title, Artist,
-# Duration.
+# #964/#977: the page is assets/scenes/history.raescene and the list is the
+# lib/ui `ListView` authored there over `history-row.raescene` (bindings and
+# window size included). This file only turns the play history into
+# `ListViewData` rows (one cell per bound field) through the `HistoryList`
+# component's system; windowing, recycling and the scroll translation are
+# the listViewSystem's (docs/ui-ecs-refactor-status §2.6).
 import Files
 open ui/Components
-import ui/layoutSystem/LayoutSystem
+import ui/Scene
+open ui/SceneInstance
+open ecs/Entity
 open ecs/ComponentTable
 open ui/Theme
 open ui/renderSystem/RenderSystem
@@ -75,11 +76,6 @@ func historyScrollMin(history: view PlayHistory) pub ret Float {
   ret 0.0 - overflow
 }
 
-# ----- List virtualization (#964: lib/ui ListView) ------------------
-# Extra rows kept live above + below the viewport so a fast scroll doesn't
-# flash blank before the pooled rows are re-bound.
-const historyWindowBuffer: Int = 4
-
 # Body content box (the scrolling region). Pure constants so the mount and
 # the scroll clamp agree exactly.
 func historyBodyW() pub ret Float {
@@ -88,12 +84,6 @@ func historyBodyW() pub ret Float {
 
 func historyBodyH() pub ret Float {
   ret phoneFrameH - topBarH - navTabsH - outerGap * 4.0 - outerPad * 2.0
-}
-
-# Rows spanning the viewport (plus one for a partially visible bottom row).
-func historyVisibleRows() ret Int {
-  let pitch: Float = historyRowH + historyRowGap
-  ret (historyBodyH() / pitch).toInt() + 1
 }
 
 # True when the entry has a textureKey the registry can paint.
@@ -226,167 +216,104 @@ func historyListData(history: view PlayHistory) ret ListViewData {
   }
 }
 
-func historyBinding(
-  nodeId: view String
-  componentName: view String
-  fieldName: view String
-  itemField: view String
-) ret ListViewBinding {
-  ret ListViewBinding {
-    nodeId: "{nodeId}"
-    componentName: "{componentName}"
-    fieldName: "{fieldName}"
-    itemField: "{itemField}"
-    prefix: ""
-    suffix: ""
-  }
-}
-
-# The History ListView: the `history-row` sub-scene per pooled row, one
-# binding per cell, sized from the row constants above.
-func historyListView() ret ListView {
-  var bindings: List(ListViewBinding) = List.create(ListViewBinding, cap: 6)
-  bindings.add(value: historyBinding(
-    nodeId: "Title"
-    componentName: "Text"
-    fieldName: "text"
-    itemField: "title"
-  ))
-  bindings.add(value: historyBinding(
-    nodeId: "Artist"
-    componentName: "Text"
-    fieldName: "text"
-    itemField: "artist"
-  ))
-  bindings.add(value: historyBinding(
-    nodeId: "Duration"
-    componentName: "Text"
-    fieldName: "text"
-    itemField: "duration"
-  ))
-  bindings.add(value: historyBinding(
-    nodeId: "HistoryRow"
-    componentName: "OnClick"
-    fieldName: "actionId"
-    itemField: "action"
-  ))
-  bindings.add(value: historyBinding(
-    nodeId: "Thumb"
-    componentName: "Sprite"
-    fieldName: "textureKey"
-    itemField: "textureKey"
-  ))
-  bindings.add(value: historyBinding(
-    nodeId: "ThumbPlaceholder"
-    componentName: "Active"
-    fieldName: "value"
-    itemField: "placeholder"
-  ))
-  var lv: ListView = ListView.default()
-  lv.itemSceneId = "history-row"
-  lv.itemHeight = historyRowH
-  lv.itemGap = historyRowGap
-  lv.visibleItemCount = historyVisibleRows()
-  lv.overscanRows = historyWindowBuffer
-  lv.bindings = bindings
-  ret lv
-}
-
-# The scrolling body: a ListView over the play history. The body carries the
-# ScrollState the app's scroll FSM drives; the listViewSystem keeps the pooled
-# `history-row` instances re-bound to the rows in view. An empty history shows
-# a single muted line instead of a list.
-func buildHistoryBody(
-  world: mod UiWorld
-  history: view PlayHistory
-  rounded: view Bool
-  scrollY: view Float
-) ret EntityId {
-  let body: EntityId = createEntity(world: world)
-  let bodyW: Float = historyBodyW()
-  let bodyH: Float = historyBodyH()
-  setRectFixed(
-    world: world
-    entity: body
-    w: bodyW
-    h: bodyH
-  )
-  let scroll: ScrollState = { y: scrollY, velocity: 0.0 }
-  componentSet(this: world.scrollStates, entity: body, data: scroll)
-  if history.entries.length is 0 {
-    let empty: EntityId = createEntity(world: world)
-    setRectFixed(
-      world: world
-      entity: empty
-      w: bodyW
-      h: 40.0
-    )
-    let style: String = "muted"
-    let text: String = "Nothing played yet."
-    setText(
-      world: world
-      entity: empty
-      text: text
-      styleId: style
-    )
-    let kids: List(EntityId) = List.create(EntityId, cap: 1)
-    kids.add(value: empty)
-    attachChildren(world: world, parent: body, kids: kids)
-    ret body
-  }
-  componentSet(this: world.listViews, entity: body, data: historyListView())
-  componentSet(this: world.listViewDatas, entity: body, data: historyListData(history: history))
-  ret body
-}
-
+# ----- the History page (#977, SCENE-DRIVEN) -------------------------------
+# assets/scenes/history.raescene owns the page: top bar, the `EmptyState`
+# line and the `Body` list host carrying the authored `ListView` (the
+# `history-row` sub-scene, its bindings, the window size) plus a
+# `HistoryList` binding component. This mount is one mountPageOrError + the
+# Body's runtime ScrollState; `historyListSystem` below feeds the rows.
 func mountHistoryPage(
   world: mod UiWorld
+  scenes: view AlbumScenes
   state: view AppState
   scrollY: view Float
   viewport: view Viewport
 ) pub ret EntityId {
-  let root: EntityId = createEntity(world: world)
-  setRectFixed(
+  let scene: view Scene => scenes.history
+  let overrides: List(SceneOverride) = emptyOverrides()
+  let pageIdCopy: String = "{historyPageId}"
+  let historyLabel: String = "history"
+  let mount: EntityId = mountPageOrError(
     world: world
-    entity: root
+    pageId: own pageIdCopy
+    scene: scene
+    overrides: overrides
     w: viewport.areaDuW
     h: viewport.areaDuH
+    sceneLabel: historyLabel
   )
-  let layV: LayoutType = LayoutType.vertical
-  let alignS: AlignKind = AlignKind.start
-  setLayout(
-    world: world
-    entity: root
-    kind: layV
-    gap: outerGap
-    alignCross: alignS
-  )
-  setPaddingAll(world: world, entity: root, n: outerPad)
-
-  var copiedId: String = ""
-  copiedId = copiedId.concat(other: historyPageId)
-  let pr: PageRoot = { id: own copiedId }
-  componentSet(this: world.pageRoots, entity: root, data: own pr)
-
-  let topBar: EntityId = buildPageTopBar(world: world, title: "Recently played")
-  let body: EntityId = buildHistoryBody(
-    world: world
-    history: state.playHistory
-    rounded: state.settings.roundedAlbumCovers
-    scrollY: scrollY
-  )
-
-  let kids: List(EntityId) = List.create(EntityId, cap: 2)
-  kids.add(value: topBar)
-  kids.add(value: body)
-  attachChildren(world: world, parent: root, kids: kids)
   attachSafeAreaEdges(
     world: world
-    entity: root
+    entity: mount
     top: 1.0
     bottom: 0.0
   )
-  ret root
+  # The list host carries the ScrollState the app's scroll FSM drives; the
+  # listViewSystem turns it into the rows' RuntimeOffset.
+  if let bodyRaw: Int = findNodeInPage(world: world, pageId: historyPageId, nodeId: "Body") {
+    let body: EntityId = nodeEntity(world: world, index: bodyRaw)
+    let scroll: ScrollState = { y: scrollY, velocity: 0.0 }
+    componentSet(this: world.scrollStates, entity: body, data: scroll)
+  }
+  # First fill now, so the rows exist before this frame's layout.
+  historyListSystem(world: world, state: state)
+  ret mount
+}
+
+func setHistoryActive(world: mod UiWorld, entity: view EntityId, active: view Bool) {
+  if isNone(this: entity) {
+    ret
+  }
+  var current: Bool = true
+  if componentHas(this: world.actives, entity: entity) {
+    let a: Active = componentGet(this: world.actives, entity: entity)
+    current = a.value
+  }
+  if current is not active {
+    let flag: Active = { value: active }
+    componentSet(this: world.actives, entity: entity, data: flag)
+  }
+}
+
+# Drive every `HistoryList`: when the play history's revision moved past the
+# rows last built, rewrite the host's ListViewData (the listViewSystem re-binds
+# its pooled rows in place on its next run) and show the host or the page's
+# empty-state node. Runs every frame from UiRefresh (a no-op at idle) and once
+# at mount.
+func historyListSystem(world: mod UiWorld, state: view AppState) pub {
+  let n: Int = componentCount(this: world.historyLists)
+  var i: Int = 0
+  loop i < n {
+    let host: EntityId = componentEntityAt(this: world.historyLists, i: i)
+    let binding: HistoryList = componentDataAt(this: world.historyLists, i: i)
+    if binding.builtRevision is not state.playHistory.revision {
+      componentSet(
+        this: world.listViewDatas
+        entity: host
+        data: historyListData(history: state.playHistory)
+      )
+      let hasEntries: Bool = state.playHistory.entries.length > 0
+      setHistoryActive(world: world, entity: host, active: hasEntries)
+      let page: String = pageOf(world: world, entity: host)
+      if let emptyRaw: Int = findNodeInPage(
+        world: world
+        pageId: page
+        nodeId: binding.emptyStateNodeId
+      ) {
+        setHistoryActive(
+          world: world
+          entity: nodeEntity(world: world, index: emptyRaw)
+          active: hasEntries is false
+        )
+      }
+      let built: HistoryList = {
+        emptyStateNodeId: "{binding.emptyStateNodeId}"
+        builtRevision: state.playHistory.revision
+      }
+      componentSet(this: world.historyLists, entity: host, data: built)
+    }
+    i = i + 1
+  }
 }
 
 # Materialise the most-recent plays into an existing strip container
