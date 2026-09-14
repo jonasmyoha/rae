@@ -3,6 +3,10 @@ func rae_sys_exit(code: Int) unsafe extern
 
 func rae_sys_get_env(name: String) unsafe extern ret String
 
+func rae_sys_arg_count() unsafe extern ret Int
+
+func rae_sys_arg_at(index: Int) unsafe extern ret String
+
 func rae_sys_read_file(path: String) unsafe extern ret opt String
 
 func rae_sys_write_file(path: String, content: String) unsafe extern ret Bool
@@ -61,6 +65,22 @@ func exit(code: view Int) {
 func getEnv(name: view String) ret String {
   unsafe {
     ret rae_sys_get_env(name: name)
+  }
+}
+
+# Program arguments (#995): everything after the executable, as the OS handed
+# them to `main`. Under `rae run <entry> -- <args...>` these are the words after
+# the first `--`; a `rae build` binary sees its own argv as-is.
+func argCount() ret Int {
+  unsafe {
+    ret rae_sys_arg_count()
+  }
+}
+
+# The empty string when `index` is out of range.
+func argAt(index: view Int) ret String {
+  unsafe {
+    ret rae_sys_arg_at(index: index)
   }
 }
 

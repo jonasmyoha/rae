@@ -114,6 +114,12 @@ for TARGET in "${TARGETS[@]}"; do
       CMD_LINE=$(echo "$CMD_LINE" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
       if [ -n "$CMD_LINE" ]; then
         read -r -a CMD_ARGS <<< "$CMD_LINE"
+        # #995: a `--` on the line means program arguments follow. Re-parse
+        # with shell quoting so `run -- a "b c"` yields the two words `a` and
+        # `b c`; lines without `--` keep the plain whitespace split above.
+        case " $CMD_LINE " in
+          *" -- "*|*" --") eval "CMD_ARGS=($CMD_LINE)" ;;
+        esac
       fi
     fi
 
@@ -294,7 +300,18 @@ for TARGET in "${TARGETS[@]}"; do
         DISPLAY_NAME="$TEST_NAME [hot-reload]"
         SKIP_EXEC=1
     elif [ "${CMD_RUN_ARGS[0]}" = "run" ]; then
-        CMD_RUN_ARGS=("run" "--target" "$TARGET" "${CMD_RUN_ARGS[@]:1}" "$TEST_FILE")
+        # #995: the entry file goes BEFORE a `--`; everything after it is the
+        # program's own argv and must stay after the file.
+        RUN_OPTS=()
+        APP_ARGS=()
+        SEEN_DASHDASH=0
+        for a in "${CMD_RUN_ARGS[@]:1}"; do
+          if [ $SEEN_DASHDASH -eq 1 ]; then APP_ARGS+=("$a")
+          elif [ "$a" = "--" ]; then SEEN_DASHDASH=1
+          else RUN_OPTS+=("$a"); fi
+        done
+        CMD_RUN_ARGS=("run" "--target" "$TARGET" "${RUN_OPTS[@]}" "$TEST_FILE")
+        if [ $SEEN_DASHDASH -eq 1 ]; then CMD_RUN_ARGS+=("--" "${APP_ARGS[@]}"); fi
     elif [ "${CMD_RUN_ARGS[0]}" = "build" ]; then
         CMD_RUN_ARGS=("build" "${CMD_RUN_ARGS[@]:1}" "$TEST_FILE")
     elif [ $APPEND_TEST_FILE -eq 1 ]; then

@@ -40,6 +40,7 @@
 #include "runtime_core_memory.c"
 #include "runtime_strings_core.c"
 #include "runtime_system_log.c"
+#include "runtime_args.c"
 #include "runtime_strings_algorithms.c"
 #include "runtime_filesystem.c"
 #include "runtime_buffers_math.c"
