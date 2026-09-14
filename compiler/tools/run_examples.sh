@@ -7,6 +7,15 @@ BIN="bin/rae"
 # #919: the example gate runs the build's format preflight in CHECK mode — an
 # unformatted example fails its gate instead of being rewritten by the gate.
 export RAE_FORMAT=check
+# #984: the gate below runs each example's STANDALONE built binary (not
+# `bin/rae`), so nothing sets $RAE_STDLIB or cwd for it automatically — a
+# gate that execs "$TMP_OUT/app" without both stalls on every stdlib asset
+# read (`lib/gpu2d_box.wgsl`, a `.raescene`, ...): "could not read stdlib
+# asset ..., and $RAE_STDLIB is unset". `rae run` gives its child both (cwd =
+# repo root, RAE_STDLIB = the toolchain lib/); every gate below that execs
+# the app must do the same, either via `(cd .. && RAE_STDLIB=... ...)` or by
+# relying on this exported default.
+export RAE_STDLIB="$(cd .. && pwd)/lib"
 EXAMPLES_DIR="../examples"
 PASSED=0
 FAILED=0
@@ -66,9 +75,9 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
          -lSDL3 -framework Foundation -framework ImageIO -framework CoreGraphics > "$TMP_OUT/link.log" 2>&1; then
         if [ "$EXAMPLE_NAME" = "91_pong_implicit" ]; then
           SCREENSHOT="$TMP_OUT/pong.bmp"
-          if RAE_PONG_TEST_FRAME=1 RAE_SDL_HEADLESS_MS=800 \
+          if (cd .. && RAE_PONG_TEST_FRAME=1 RAE_SDL_HEADLESS_MS=800 \
              RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
-             perl -e 'alarm shift; exec @ARGV' 20 "$TMP_OUT/app" > "$TMP_OUT/render.log" 2>&1 \
+             perl -e 'alarm shift; exec @ARGV' 20 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
              && grep -q '\[pong\] self-test passed' "$TMP_OUT/render.log" \
              && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=20 \
                 > "$TMP_OUT/screenshot.log" 2>&1; then
@@ -81,9 +90,9 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           fi
         elif [ "$EXAMPLE_NAME" = "94_tetris2d" ]; then
           SCREENSHOT="$TMP_OUT/tetris2d.bmp"
-          if RAE_TETRIS2D_TEST_FRAME=1 RAE_SDL_HEADLESS_MS=900 \
+          if (cd .. && RAE_TETRIS2D_TEST_FRAME=1 RAE_SDL_HEADLESS_MS=900 \
              RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
-             perl -e 'alarm shift; exec @ARGV' 20 "$TMP_OUT/app" > "$TMP_OUT/render.log" 2>&1 \
+             perl -e 'alarm shift; exec @ARGV' 20 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
              && grep -q '\[tetris2d\] deterministic frame ready' "$TMP_OUT/render.log" \
              && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=20 \
                 > "$TMP_OUT/screenshot.log" 2>&1; then
@@ -96,9 +105,9 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           fi
         elif [ "$EXAMPLE_NAME" = "95_easing_2d" ]; then
           SCREENSHOT="$TMP_OUT/easing2d.bmp"
-          if RAE_EASING_TEST_FRAME=1 RAE_SDL_HEADLESS_MS=800 \
+          if (cd .. && RAE_EASING_TEST_FRAME=1 RAE_SDL_HEADLESS_MS=800 \
              RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
-             perl -e 'alarm shift; exec @ARGV' 20 "$TMP_OUT/app" > "$TMP_OUT/render.log" 2>&1 \
+             perl -e 'alarm shift; exec @ARGV' 20 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
              && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=20 \
                 > "$TMP_OUT/screenshot.log" 2>&1; then
             echo "PASS: $EXAMPLE_NAME (fixed easing frame + .raescene overlay)"
@@ -110,9 +119,9 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           fi
         elif [ "$EXAMPLE_NAME" = "96_easing_3d" ]; then
           SCREENSHOT="$TMP_OUT/easing3d.bmp"
-          if RAE_EASING3D_TEST_FRAME=1 RAE_SDL_HEADLESS_MS=1200 \
+          if (cd .. && RAE_EASING3D_TEST_FRAME=1 RAE_SDL_HEADLESS_MS=1200 \
              RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
-             perl -e 'alarm shift; exec @ARGV' 25 "$TMP_OUT/app" > "$TMP_OUT/render.log" 2>&1 \
+             perl -e 'alarm shift; exec @ARGV' 25 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
              && grep -q '\[easing3d\] deterministic deferred frame rendered' "$TMP_OUT/render.log" \
              && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=50 \
                 > "$TMP_OUT/screenshot.log" 2>&1; then
@@ -125,9 +134,9 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           fi
         elif [ "$EXAMPLE_NAME" = "97_tetris3d" ]; then
           SCREENSHOT="$TMP_OUT/tetris3d.bmp"
-          if RAE_TETRIS3D_TEST_FRAME=1 RAE_SDL_HEADLESS_MS=1400 \
+          if (cd .. && RAE_TETRIS3D_TEST_FRAME=1 RAE_SDL_HEADLESS_MS=1400 \
              RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
-             perl -e 'alarm shift; exec @ARGV' 25 "$TMP_OUT/app" > "$TMP_OUT/render.log" 2>&1 \
+             perl -e 'alarm shift; exec @ARGV' 25 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
              && grep -q '\[tetris3d\] deterministic deferred frame rendered' "$TMP_OUT/render.log" \
              && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=50 \
                 > "$TMP_OUT/screenshot.log" 2>&1; then
@@ -147,8 +156,8 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # for the forward path but has lost its example test host; re-homing it
           # onto a forward multi-mesh example is tracked in QUEUE #759.
           SCREENSHOT="$TMP_OUT/gpu3d.bmp"
-          if RAE_SDL_HEADLESS_MS=1000 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
-             perl -e 'alarm shift; exec @ARGV' 20 "$TMP_OUT/app" > "$TMP_OUT/render.log" 2>&1 \
+          if (cd .. && RAE_SDL_HEADLESS_MS=1000 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
+             perl -e 'alarm shift; exec @ARGV' 20 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
              && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" > "$TMP_OUT/screenshot.log" 2>&1; then
             echo "PASS: $EXAMPLE_NAME (non-blank deferred PBR screenshot)"
             ((PASSED++))
@@ -208,7 +217,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # Destructors by name (#881): the compiled binary must run and every
           # voice must release its slot through `drop`, including the field
           # and List-element paths — the log proves the count and the order.
-          if perl -e 'alarm shift; exec @ARGV' 20 "$TMP_OUT/app" > "$TMP_OUT/run.log" 2>&1 \
+          if (cd .. && perl -e 'alarm shift; exec @ARGV' 20 "$TMP_OUT/app") > "$TMP_OUT/run.log" 2>&1 \
              && [ "$(grep -c '\[voice\] release slot' "$TMP_OUT/run.log")" -eq 7 ] \
              && grep -q '^\[voice\] double note 74 on slot 1$' "$TMP_OUT/run.log" \
              && ! grep -q 'BAD release' "$TMP_OUT/run.log" \
@@ -292,8 +301,8 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
               albedo|material) GB_ARGS="--min-colors=20" ;;
               *)               GB_ARGS="" ;;
             esac
-            if ! (RAE_GBUFFER_VIEW="$GB_VIEW" RAE_GBUFFER_DEBUG=1 RAE_SDL_HEADLESS_MS=1000 RAE_GPU2D_SCREENSHOT="$GB_SHOT" \
-                  perl -e 'alarm shift; exec @ARGV' 25 "$TMP_OUT/app" > "$TMP_OUT/gb-$GB_VIEW.log" 2>&1 \
+            if ! ( (cd .. && RAE_GBUFFER_VIEW="$GB_VIEW" RAE_GBUFFER_DEBUG=1 RAE_SDL_HEADLESS_MS=1000 RAE_GPU2D_SCREENSHOT="$GB_SHOT" \
+                  perl -e 'alarm shift; exec @ARGV' 25 "$TMP_OUT/app") > "$TMP_OUT/gb-$GB_VIEW.log" 2>&1 \
                   && python3 tools/assert_nonblank_bmp.py "$GB_SHOT" $GB_ARGS >> "$TMP_OUT/gb-$GB_VIEW.log" 2>&1); then
               GB_OK=0
             fi
