@@ -42,16 +42,14 @@ type AvatarSource {
 # library albums only).
 enum CoverGridSource { library, home }
 
-# A container whose child rows/tiles are a DATA LIST materialised from app
-# state, not authored. The scene owns the container (its Layout, gap, place
-# in the page); `coverGridSystem` (re)builds the rows beneath it whenever the
-# app-state revision it observes moves, and records that revision in
-# `builtRevision` (-1 = never built, so a fresh mount fills on its first run).
-# `columns` is the column count at the authored phone width; `tileGap` is the
-# gap between tiles in a row and between rows.
+# A container whose child tiles are a DATA LIST materialised from app state,
+# not authored. The scene owns the container and ALL of its geometry: the node
+# authors `Layout { type: Grid, columns, columnGap, rowGap }` (#991) and the
+# tiles are appended straight under it — no row entities. `coverGridSystem`
+# (re)builds the tiles whenever the app-state revision it observes moves, and
+# records that revision in `builtRevision` (-1 = never built, so a fresh mount
+# fills on its first run). `source` says which app list feeds it.
 type CoverGrid {
-  columns: Int = 3
-  tileGap: Float = 17.349397590361445
   source: CoverGridSource
   builtRevision: Int = -1
 }
