@@ -131,6 +131,30 @@ func windowVisible() ret Bool {
   }
 }
 
+# True under any of the headless-budget envs (RAE_UI_HEADLESS,
+# RAE_SDL_HEADLESS_MS, RAE_HEADLESS_FRAMES) -- the runtime's own definition,
+# the same one that creates the window hidden. A headless run renders to the
+# offscreen target and screenshots that, so it must NOT be treated as
+# "backgrounded" by the visibility rule below (#988): the drawable the rule
+# protects is already refused by the present path while the window is dark.
+func nativeHeadlessRequested() unsafe extern("rae_ext_Gpu2d_headlessRequested") ret Bool
+
+func headlessRequested() ret Bool {
+  unsafe {
+    ret nativeHeadlessRequested()
+  }
+}
+
+# The visibility rule as the render decision sees it: a hidden HEADLESS window
+# still renders (offscreen + screenshot); a hidden/minimized/occluded
+# interactive window does not.
+func renderableNow() ret Bool {
+  if headlessRequested() {
+    ret true
+  }
+  ret windowVisible()
+}
+
 # The universal per-frame render decision, so no app has to hand-roll it. Render
 # this frame only if the app wants to AND the window is actually visible. NEVER
 # render while hidden/minimized/occluded: it wastes power and, on macOS, leaks
@@ -142,7 +166,7 @@ func windowVisible() ret Bool {
 # being a per-app footgun — the engine present path refuses to present while dark
 # as a hard backstop, but skipping the whole render is what avoids the waste.
 func shouldRenderFrame(appNeedsRender: view Bool) ret Bool {
-  if windowVisible() is false {
+  if renderableNow() is false {
     ret false
   }
   ret appNeedsRender
@@ -155,7 +179,7 @@ func shouldRenderFrame(appNeedsRender: view Bool) ret Bool {
 # no else branch. Event-driven loops that already compute a needsRender should
 # use shouldRenderFrame + their own waitEvents instead.
 func renderGate() ret Bool {
-  if windowVisible() {
+  if renderableNow() {
     ret true
   }
   waitEvents(timeoutSec: 0.25)
