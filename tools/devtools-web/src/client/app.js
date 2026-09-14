@@ -255,6 +255,14 @@ let lastTestTargetLabel = "";
 let lastBuildTargetLabel = "";
 let isBatchRunning = false;
 let batchResults = [];
+// Per-run build/app-start markers from the compiler's @@RAE_BUILD_TIME@@ /
+// @@RAE_APP_START@@ lines (parsed by the server into typed events). Keyed by
+// runId; the Run-all batch reads them to budget the build and the run
+// separately, the example page shows the last build cost.
+const exampleBuildTimings = new Map();
+const exampleAppStartedAt = new Map();
+// Latest build cost per example, from /api/stats/example-builds + live events.
+let exampleBuildStats = {};
 let lastExampleTargetLabel = "";
 let currentExampleArtifacts = [];
 let currentExampleArtifactsTarget = "";
@@ -395,6 +403,12 @@ function handleServerEvent(payload) {
     case "example-run-completed":
       handleExampleRunCompleted(payload);
       break;
+    case "example-build-timing":
+      handleExampleBuildTiming(payload);
+      break;
+    case "example-app-started":
+      handleExampleAppStarted(payload);
+      break;
     case "example-run-error":
       handleExampleRunError(payload);
       break;
@@ -531,6 +545,7 @@ loadRaeSyntax("/rae_syntax.json")
   .finally(() => {
     loadTestFileTree();
     loadExamples();
+    loadExampleBuildStats();
   });
 
 // A new example on disk showed up in /api/examples but not in an already-open
@@ -804,8 +819,74 @@ function handleExampleRunOutput(event) {
   appendExampleOutput(event.line, event.stream);
 }
 
+function formatBuildTiming(t) {
+  if (!t) return "";
+  const s = (ms) => `${(ms / 1000).toFixed(1)}s`;
+  const lines = t.lines ? ` · ${Number(t.lines).toLocaleString()} lines` : "";
+  const kloc = t.msPerKloc ? ` · ${(t.msPerKloc / 1000).toFixed(2)} s/kloc` : "";
+  return `build ${s(t.totalMs ?? t.buildMs ?? 0)} (emit ${s(t.emitMs ?? 0)}, cc ${s(t.ccMs ?? 0)})${lines}${kloc}`;
+}
+
+function handleExampleBuildTiming(event) {
+  exampleBuildTimings.set(event.runId, event);
+  if (event.exampleId) {
+    exampleBuildStats[event.exampleId] = {
+      buildMs: event.totalMs,
+      msPerKloc: event.msPerKloc,
+      lines: event.lines,
+      projectLines: event.projectLines,
+      emitMs: event.emitMs,
+      ccMs: event.ccMs,
+      targetId: event.targetId,
+      timestamp: event.timestamp
+    };
+  }
+  renderExampleBuildStat();
+  if (event.runId !== activeExampleRunId || !isExampleEventRelevant(event.exampleId, event.entry)) {
+    return;
+  }
+  appendExampleOutput(`⏱ ${formatBuildTiming(event)}`, "stdout");
+}
+
+function handleExampleAppStarted(event) {
+  exampleAppStartedAt.set(event.runId, Date.parse(event.timestamp) || Date.now());
+  if (event.runId !== activeExampleRunId || !isExampleEventRelevant(event.exampleId, event.entry)) {
+    return;
+  }
+  setExampleStatus("running", "is-running", lastExampleTargetLabel);
+}
+
+// "Last build …" line under the example title. Empty until a build of the
+// selected example has been recorded (this session or an earlier one).
+function renderExampleBuildStat() {
+  const el = document.getElementById("example-build-stat");
+  if (!el) return;
+  const example = getSelectedExample();
+  const stat = example ? exampleBuildStats[example.id] : null;
+  if (!stat) {
+    el.hidden = true;
+    el.textContent = "";
+    return;
+  }
+  const when = stat.timestamp ? new Date(stat.timestamp).toLocaleString() : "";
+  el.hidden = false;
+  el.textContent = `Last ${formatBuildTiming(stat)}${stat.profile ? ` · ${stat.profile}` : ""}${when ? ` · ${when}` : ""}`;
+}
+
+async function loadExampleBuildStats() {
+  try {
+    const res = await fetch("/api/stats/example-builds", { cache: "no-store" });
+    if (res.ok) exampleBuildStats = await res.json();
+  } catch (_) {
+    /* stats are decoration; the page works without them */
+  }
+  renderExampleBuildStat();
+}
+
 function handleExampleRunCompleted(event) {
   activeExampleRuns.delete(event.runId);
+  // Keep the timing markers until the batch loop has read them; the map is
+  // tiny and cleared by the next Run-all.
   if (pendingExampleRunId && pendingExampleRunId === event.exampleId) {
     pendingExampleRunId = null;
   }
@@ -2055,6 +2136,7 @@ function renderExampleDetail() {
     details.push(example.description);
   }
   exampleEntryLabel.textContent = details.join(" · ");
+  renderExampleBuildStat();
   renderExampleScreenshots(example);
   updateExampleButtons();
   renderExampleFiles(example);
@@ -3077,6 +3159,13 @@ enhanceSelect(exampleProfileSelect);
 
 runAllExamplesBtn?.addEventListener("click", () => runAllExamples());
 
+// Run-all budgets. Build: generous, the C compiler on the big examples takes
+// tens of seconds at -O2 on a loaded machine. Run: what the app gets AFTER
+// @@RAE_APP_START@@ — long enough for a window to open, lay out and draw a
+// few frames, short enough that sixty examples finish in the same sitting.
+const RUN_ALL_BUILD_BUDGET_MS = 120000;
+const RUN_ALL_RUN_BUDGET_MS = 10000;
+
 async function runAllExamples() {
   if (exampleRunActive) {
     pushStatusItem("An example is already running. Please stop it first.");
@@ -3087,6 +3176,8 @@ async function runAllExamples() {
   
   isBatchRunning = true;
   batchResults = [];
+  exampleBuildTimings.clear();
+  exampleAppStartedAt.clear();
   hideBatchReport();
   
   // THIS TAB'S examples, not every example there is. The same list the sidebar
@@ -3157,18 +3248,39 @@ async function runAllExamples() {
 
     const beforeRunIdx = allExampleLogLines.length;
     await triggerExampleRun("run", targetId);
+    const runId = activeExampleRunId;
 
-    // Wait for up to 10 seconds or until finished
+    // Two budgets, not one. The compiler prints @@RAE_APP_START@@ (server:
+    // example-app-started) the moment the built binary is exec'd, so the
+    // build gets its own allowance and the app ALWAYS gets its full run
+    // window afterwards — a slow C compile used to eat the whole 10 s and
+    // Tetris never even opened. If no start marker arrives (a target that
+    // does not emit one), the run window starts at launch, as before.
     const start = Date.now();
-    while (exampleRunActive && (Date.now() - start < 10000)) {
+    let appStart = null;
+    let buildTimedOut = false;
+    while (exampleRunActive) {
+      appStart = exampleAppStartedAt.get(runId) ?? null;
+      if (appStart !== null) break;
+      if (Date.now() - start >= RUN_ALL_BUILD_BUDGET_MS) { buildTimedOut = true; break; }
       await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    if (exampleRunActive && !buildTimedOut) {
+      const runFrom = appStart ?? start;
+      while (exampleRunActive && (Date.now() - runFrom < RUN_ALL_RUN_BUDGET_MS)) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
     }
 
     const timedOut = exampleRunActive;
     if (timedOut) {
-      appendExampleOutput(`\n--- TIME LIMIT REACHED (10s) for ${example.name} ---`, "stdout");
+      const which = buildTimedOut
+        ? `BUILD TIME LIMIT REACHED (${RUN_ALL_BUILD_BUDGET_MS / 1000}s) for ${example.name}`
+        : `RUN TIME LIMIT REACHED (${RUN_ALL_RUN_BUDGET_MS / 1000}s after start) for ${example.name}`;
+      appendExampleOutput(`\n--- ${which} ---`, "stdout");
       await stopExampleRun();
     }
+    const timing = exampleBuildTimings.get(runId) ?? null;
 
     // Look only at this example's lines, and only count real errors —
     // warnings (gcc/clang) and raylib's INFO/WARNING console output are
@@ -3178,12 +3290,19 @@ async function runAllExamples() {
     const errorLines = runLines.filter(l => isRealError(l.text, l.stream)).map(l => l.text);
     const success = errorLines.length === 0;
 
+    // A build that never finished is a failure even with no error line: the
+    // app was never exercised.
+    const buildFailed = buildTimedOut && timedOut;
     batchResults.push({
       id: example.id,
       name: example.name,
-      success,
+      success: success && !buildFailed,
       skipped: false,
-      errors: success ? [] : errorLines
+      errors: buildFailed ? [`build did not finish within ${RUN_ALL_BUILD_BUDGET_MS / 1000}s`, ...errorLines] : (success ? [] : errorLines),
+      buildMs: timing?.totalMs ?? null,
+      msPerKloc: timing?.msPerKloc ?? null,
+      lines: timing?.lines ?? null,
+      ranMs: appStart !== null ? Math.max(0, Date.now() - appStart) : null
     });
     
     // Short pause between examples
@@ -3221,6 +3340,24 @@ function renderBatchReport() {
   if (copyBtn) copyBtn.hidden = failures === 0;
   
   content.innerHTML = "";
+  // Build cost per example, from the compiler's timing line. Every ran example
+  // gets a row, so the table doubles as the "which builds are slow" view.
+  const timed = batchResults.filter(r => !r.skipped && r.buildMs !== null && r.buildMs !== undefined);
+  if (timed.length > 0) {
+    const table = document.createElement("table");
+    table.className = "batch-timing-table";
+    const fmt = (ms) => `${(ms / 1000).toFixed(1)}s`;
+    table.innerHTML = `<thead><tr><th>Example</th><th>Build</th><th>s / kloc</th><th>Lines</th><th>Ran</th></tr></thead>`;
+    const tbody = document.createElement("tbody");
+    for (const r of timed) {
+      const tr = document.createElement("tr");
+      tr.className = r.success ? "" : "is-failed";
+      tr.innerHTML = `<td>${r.name}</td><td>${fmt(r.buildMs)}</td><td>${r.msPerKloc ? (r.msPerKloc / 1000).toFixed(2) : "–"}</td><td>${r.lines ? Number(r.lines).toLocaleString() : "–"}</td><td>${r.ranMs !== null && r.ranMs !== undefined ? fmt(r.ranMs) : "–"}</td>`;
+      tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+    content.appendChild(table);
+  }
   const problemResults = batchResults.filter(r => !r.success);
   
   if (problemResults.length === 0) {
@@ -4114,6 +4251,7 @@ async function setupShowcase() {
   
   if (!examples || !examples.length) {
     await loadExamples();
+    loadExampleBuildStats();
   }
   
   const pong = examples.find((ex) => ex.id === "advanced_pong");
