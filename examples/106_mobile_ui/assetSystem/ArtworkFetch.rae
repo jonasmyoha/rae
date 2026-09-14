@@ -10,6 +10,17 @@ open ui/EventLoop
 # download polled by path) with the same observable protocol, in app code:
 #
 #   artworkFetchStart(queue, url, outPath)  -> starts (or dedupes) a fetch
+#   artworkFetchStartWithFallback(queue, url, term, outPath)
+#                                            -> like artworkFetchStart, but
+#                                               when `url` is empty or the
+#                                               download fails, the SAME
+#                                               worker (already off the UI
+#                                               thread) tries the iTunes
+#                                               Search fallback before
+#                                               reporting a result (#968) —
+#                                               the now-playing cover's
+#                                               primary/fallback pair used to
+#                                               beach-ball on track change.
 #   artworkFetchDrain(queue)                -> once per frame: settle results
 #   artworkFetchStatus(queue, outPath)      -> 0 pending/unknown, 1 fetched,
 #                                              2 failed (terminal reads clear
@@ -23,7 +34,10 @@ open ui/EventLoop
 # Two index-aligned lists hold the in-flight jobs and their Tasks (a Task
 # inside a struct is not cascade-dropped, so it is kept beside the job and
 # joined explicitly when its result lands); finished jobs move to a third
-# list that only carries the status until the loader reads it.
+# list that only carries the status until the loader reads it. Both start
+# functions share the same queue/dedup keying (by `outPath`), so a
+# now-playing-cover job and a history-art job that happen to want the same
+# file (the same Spotify CDN URL) safely collapse into one download.
 const artworkFetchMaxInFlight: Int = 64
 
 const artworkStatusPending: Int = 0
@@ -76,6 +90,37 @@ func artworkFetchWorker(
   ret okBit
 }
 
+# Like `artworkFetchWorker`, but tries an iTunes Search fallback (also a
+# blocking network call — safe here, this is already the worker's own
+# off-UI-thread) when `url` is empty or the primary download fails (#968).
+# `term` is the "<artist> <track>" search term; a `term`-only caller (empty
+# `url`) skips straight to the fallback.
+func artworkFetchWorkerWithFallback(
+  serial: copy Int
+  url: own String
+  term: own String
+  outPath: own String
+  results: own Channel(Int)
+) ret Int {
+  var ok: Bool = false
+  if url.length() > 0 {
+    ok = Spotify.fetchArtwork(url: url, outPath: outPath)
+  }
+  if ok is false {
+    let fallbackUrl: String = Spotify.itunesSearchArtworkUrl(term: term)
+    if fallbackUrl.length() > 0 {
+      ok = Spotify.fetchArtwork(url: fallbackUrl, outPath: outPath)
+    }
+  }
+  var okBit: Int = 0
+  if ok {
+    okBit = 1
+  }
+  channelSend(this: results, value: serial * 2 + okBit)
+  wake()
+  ret okBit
+}
+
 func artworkFetchIndexOf(jobs: view List(ArtworkFetchJob), outPath: view String) ret Int {
   var i: Int = 0
   loop i < jobs.length() {
@@ -89,6 +134,32 @@ func artworkFetchIndexOf(jobs: view List(ArtworkFetchJob), outPath: view String)
   ret 0 - 1
 }
 
+# True when `outPath` already names an in-flight or finished-unread job —
+# shared dedup check for both start functions below.
+func artworkFetchAlreadyKnown(queue: view ArtworkFetchQueue, outPath: view String) ret Bool {
+  if artworkFetchIndexOf(jobs: queue.inFlight, outPath: outPath) >= 0 {
+    ret true
+  }
+  ret artworkFetchIndexOf(jobs: queue.finished, outPath: outPath) >= 0
+}
+
+# Reserve the next job slot for `outPath`: records the pending placeholder
+# and returns the serial to spawn with, or -1 when the in-flight cap is
+# reached (caller retries on a later frame). Shared by both start functions;
+# the caller still does its own dedup check first (`artworkFetchAlreadyKnown`)
+# since the two start functions spawn different worker bodies.
+func artworkFetchReserve(queue: mod ArtworkFetchQueue, outPath: view String) ret Int {
+  if queue.inFlight.length() >= artworkFetchMaxInFlight {
+    ret 0 - 1
+  }
+  let serial: Int = queue.nextSerial
+  queue.nextSerial = serial + 1
+  queue.inFlight.add(
+    value: ArtworkFetchJob { serial: serial, outPath: "{outPath}", status: artworkStatusPending }
+  )
+  ret serial
+}
+
 # Start a background download of `url` into `outPath`. Returns true when the
 # fetch is running or already known (in flight or finished-unread); false
 # when the in-flight cap is reached — retry on a later frame.
@@ -100,25 +171,53 @@ func artworkFetchStart(
   if url.length() is 0 or outPath.length() is 0 {
     ret false
   }
-  if artworkFetchIndexOf(jobs: queue.inFlight, outPath: outPath) >= 0 {
+  if artworkFetchAlreadyKnown(queue: queue, outPath: outPath) {
     ret true
   }
-  if artworkFetchIndexOf(jobs: queue.finished, outPath: outPath) >= 0 {
-    ret true
-  }
-  if queue.inFlight.length() >= artworkFetchMaxInFlight {
+  let serial: Int = artworkFetchReserve(queue: queue, outPath: outPath)
+  if serial < 0 {
     ret false
   }
-  let serial: Int = queue.nextSerial
-  queue.nextSerial = serial + 1
   let urlForWorker: String = "{url}"
   let pathForWorker: String = "{outPath}"
-  queue.inFlight.add(
-    value: ArtworkFetchJob { serial: serial, outPath: "{outPath}", status: artworkStatusPending }
-  )
   queue.tasks.add(value: spawn artworkFetchWorker(
     serial: serial
     url: urlForWorker
+    outPath: pathForWorker
+    results: queue.results
+  ))
+  ret true
+}
+
+# Like `artworkFetchStart`, but the worker falls back to an iTunes Search
+# lookup (using `term`, "<artist> <track>") when `url` is empty or the
+# primary download fails (#968) — the now-playing-cover pipeline's
+# primary/fallback pair, run entirely off the UI thread. `outPath` is the
+# dedup key exactly as in `artworkFetchStart`, so a cover job and a
+# history-art job wanting the same file collapse into one download.
+func artworkFetchStartWithFallback(
+  queue: mod ArtworkFetchQueue
+  url: view String
+  term: view String
+  outPath: view String
+) ret Bool {
+  if outPath.length() is 0 {
+    ret false
+  }
+  if artworkFetchAlreadyKnown(queue: queue, outPath: outPath) {
+    ret true
+  }
+  let serial: Int = artworkFetchReserve(queue: queue, outPath: outPath)
+  if serial < 0 {
+    ret false
+  }
+  let urlForWorker: String = "{url}"
+  let termForWorker: String = "{term}"
+  let pathForWorker: String = "{outPath}"
+  queue.tasks.add(value: spawn artworkFetchWorkerWithFallback(
+    serial: serial
+    url: urlForWorker
+    term: termForWorker
     outPath: pathForWorker
     results: queue.results
   ))
