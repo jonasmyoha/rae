@@ -28,6 +28,7 @@ type AlbumScenes {
   nowPlaying: Scene
   album: Scene
   canvas: Scene
+  bottomSheet: Scene
   home: Scene
   profile: Scene
   library: Scene
@@ -43,6 +44,11 @@ func loadSubScenes() ret SceneRegistry {
   registerScene(reg: subScenes, key: "cover-tile", scene: loadSceneFile(path: coverTilePath))
   registerScene(reg: subScenes, key: "playlist-tile", scene: loadSceneFile(path: playlistTilePath))
   registerScene(reg: subScenes, key: "recent-thumb", scene: loadSceneFile(path: recentThumbPath))
+  registerScene(
+    reg: subScenes
+    key: "sheet-action-row"
+    scene: loadSceneFile(path: sheetActionRowPath)
+  )
   ret subScenes
 }
 
@@ -56,6 +62,7 @@ func loadAllScenes() pub ret AlbumScenes {
     nowPlaying: loadSceneFile(path: nowPlayingPath)
     album: loadSceneFile(path: albumPath)
     canvas: loadSceneFile(path: canvasPath)
+    bottomSheet: loadSceneFile(path: bottomSheetPath)
     home: loadSceneFile(path: homePath)
     profile: loadSceneFile(path: profilePath)
     library: loadSceneFile(path: libraryPath)

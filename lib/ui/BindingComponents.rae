@@ -153,6 +153,18 @@ type TrackList {
 # the fill's width as `track width x progress` (Rect and ComputedRect, only
 # when it changed) — the app's existing `applyPlaybackToWorld`, now driven
 # by this component instead of a page node-id lookup.
+# ----- bottom sheet: the action-sheet overlay binding (#980) ----------------
+# Authored on the sheet's layer root. `bottomSheetSystem` shows/hides the root
+# from `BottomSheetState.visible` and, when `epoch` moves past `builtEpoch`,
+# re-mounts one `sheet-action-row` sub-scene per action under `panelNodeId`
+# and sizes that panel's Rect from the row count.
+type BottomSheet {
+  panelNodeId: String = "Panel"
+  rowSceneId: String = "sheet-action-row"
+  rowHeight: Float = 121.44578313253011
+  builtEpoch: Int = -1
+}
+
 type ProgressBar {
   enabled: Bool = true
 }
