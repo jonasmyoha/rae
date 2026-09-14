@@ -1,12 +1,7 @@
 open ui/Ecs
-# Now-playing screen world. The middle slot mounts the
-# `music-player-now-playing.raescene` directly; the bottom mini-player
-# and nav-tabs are the same scene files the album view uses.
-#
-# All scene-text placeholders ("Unsayable", "Brambles", "1:04", …)
-# are overridden at mount time from the active album + active
-# track in `AppState` so the screen reflects what the user is
-# actually playing.
+# Now-playing screen: mounts `music-player-now-playing.raescene`. The
+# time labels are overridden at mount from the active track; every other
+# data-bound node carries a binding component driven per frame (#981).
 import ui/Components
 import ui/Scene
 open ecs/Entity
@@ -40,19 +35,11 @@ func mountNowPlayingPage(
   let track: Track = trackAt(album: album, idx: state.currentTrackIndex)
 
   # The page is assets/scenes/music-player-now-playing.raescene (#979): the
-  # shared top bar as a sub-scene instance and the player block. The
-  # per-mount data — play icon, title/artist, the two time labels — travels
-  # as scene overrides; the playback/cover/heart data tags below are the
-  # imperative bindings #981 turns into components.
+  # shared top bar as a sub-scene instance and the player block. The play
+  # icon, cover, heart and title/artist are authored `PlaybackIcon` /
+  # `PlaybackCover` / `LikedHeart` / `TrackText` bindings driven by their
+  # systems (#981); only the two time labels travel as mount overrides.
   let npOverrides: List(SceneOverride) = emptyOverrides()
-  let playIconId: String = "PlayIcon"
-  addSpriteOverride(
-    list: npOverrides
-    nodeId: playIconId
-    value: playbackIconKey(playback: playback)
-  )
-  addTextOverride(list: npOverrides, nodeId: "TrackTitle", value: "{track.title}")
-  addTextOverride(list: npOverrides, nodeId: "TrackArtist", value: "{album.artist}")
   let times: List(String) = nowPlayingTimes(playback: playback, track: track)
   if let nowStr: String = times.copyAt(index: 0) {
     addTextOverride(list: npOverrides, nodeId: "TimeNow", value: nowStr)
@@ -78,218 +65,20 @@ func mountNowPlayingPage(
     bottom: 0.0
   )
 
-  let playWidgetId: String = "player.playIcon"
-  tagPlaybackIconDependency(
+  # First run of the bindings so the very first frame is right.
+  playbackBindingsSystems(
     world: world
-    pageId: playerPageId
-    nodeId: playIconId
-    widgetId: playWidgetId
-    observedRevision: playback.revision
-    playing: playback.isPlaying
-  )
-  # Cover observes the nowPlaying instance revision (#268): the big Hero
-  # cover re-points by identity on a track change without a re-mount.
-  let heroCoverNode: String = "Hero"
-  let heroCoverSeed: String = nowPlayingCoverSeed(
-    reg: reg
     playback: playback
-    browsedStem: state.currentAlbumStem
-  )
-  tagPlaybackCoverDependency(
-    world: world
-    pageId: playerPageId
-    nodeId: heroCoverNode
-    observedRevision: playback.nowPlayingRevision
-    artKey: heroCoverSeed
-  )
-  let heartNode: String = "HeartButton"
-  let heartWidgetId: String = "player.likeButton"
-  tagLikedHeart(
-    world: world
-    pageId: playerPageId
-    nodeId: heartNode
-    widgetId: heartWidgetId
-    observedRevision: 0
+    state: state
+    reg: reg
   )
 
   # The hero's authored 24px-class corner radius follows the same
   # AppSettings flag as every other cover: strip it when covers are square.
   if state.settings.roundedAlbumCovers is false {
-    if let raw: Int = findNodeInPage(world: world, pageId: playerPageId, nodeId: heroCoverNode) {
+    if let raw: Int = findNodeInPage(world: world, pageId: playerPageId, nodeId: "Hero") {
       componentRemove(this: world.cornerRadiuses, entity: nodeEntity(world: world, index: raw))
     }
   }
-  ret mount
-}
-
-# Mini-player mount that applies the play/pause icon, track title,
-# and artist overrides from the current playback + app state. Same
-# shape as `buildSimpleSceneInstance` from scene_mount.rae but with
-# the data-driven overrides list pre-populated.
-#
-# The dock's cover thumb is no longer patched imperatively on album
-# change (the old `updateMiniPlayerCover`): the MiniThumb observes the
-# nowPlaying instance revision and re-points by identity (#268).
-func buildMiniPlayerInstance(
-  world: mod UiWorld
-  scenes: view AlbumScenes
-  slot: view EntityId
-  playback: view PlaybackState
-  state: view AppState
-  reg: view TextureRegistry
-) pub ret EntityId {
-  let album: Album = activeAlbum(state: state)
-  let track: Track = trackAt(album: album, idx: state.currentTrackIndex)
-
-  let overrides: List(SceneOverride) = emptyOverrides()
-  let miniIconId: String = "MiniPlayIcon"
-  let iconKey: String = playbackIconKey(playback: playback)
-  addSpriteOverride(list: overrides, nodeId: miniIconId, value: iconKey)
-
-  # Cover thumb — set the actual album-stem texture key at mount time
-  # so the mini-player shows the right cover from the first frame.
-  # No rebindHero detour: the dock is mounted once and stays put, so
-  # the cover key has to be correct from the start.
-  let miniThumbId: String = "MiniThumb"
-  let thumbKey: String = "{state.currentAlbumStem}"
-  addSpriteOverride(list: overrides, nodeId: miniThumbId, value: thumbKey)
-
-  let miniTitleId: String = "MiniTitle"
-  let miniArtistId: String = "MiniArtist"
-  let titleText: String = "{track.title}"
-  let artistText: String = "{album.artist}"
-  addTextOverride(list: overrides, nodeId: miniTitleId, value: titleText)
-  addTextOverride(list: overrides, nodeId: miniArtistId, value: artistText)
-
-  # Scope the mini-player under its own page so MiniPlayIcon resolves
-  # via `findNodeInPage(world, "mini-player", "MiniPlayIcon")`. The
-  # mini-player is mounted as part of the bottom dock on every screen;
-  # only one is resident at any moment so the page id is a constant.
-  #
-  # FRESH copy, not `= miniPlayerPageId`: mountPageOrError takes
-  # `pageId: own String` and frees it. The old alias binding handed
-  # the config global's buffer to that free, dangling the global for
-  # the rest of the program — the mini play-icon dependency tag below
-  # silently failed on the garbage pageId, and any later reader could
-  # crash on it.
-  # #978: the dock scene authors the slot; the mini-player scene is mounted
-  # INTO it as its own page (the slot becomes the mini-player root), so the
-  # nodeIds keep their "mini-player/..." scope.
-  let mount: EntityId = slot
-  let mounted: EntityId = mountSceneInstanceIntoPage(
-    world: world
-    mountEntity: slot
-    scene: scenes.miniPlayer
-    overrides: overrides
-    pageId: miniPlayerPageId
-  )
-  if isNone(this: mounted) {
-    log("[scene-error] mini-player mount failed (scene.ok={scenes.miniPlayer.ok})")
-    paintErrorBlock(world: world, entity: slot, label: "mini-player")
-  }
-  let miniPr: PageRoot = { id: "{miniPlayerPageId}" }
-  componentSet(this: world.pageRoots, entity: slot, data: own miniPr)
-  let miniRootId: String = "miniPlayer.root"
-  let miniRootKind: String = "miniPlayer"
-  setWidgetIdentity(
-    world: world
-    entity: mount
-    id: miniRootId
-    kind: miniRootKind
-  )
-  setWidgetState(
-    world: world
-    entity: mount
-    enabled: true
-    selected: false
-    loading: false
-    error: false
-  )
-  let playbackSource: DataResourceId = dataResourcePlayback()
-  let playingField: DataFieldId = dataFieldPlayingTrack()
-  setDataDependency(
-    world: world
-    entity: mount
-    resource: playbackSource
-    field: playingField
-    observedRevision: playback.revision
-  )
-  let miniWidgetId: String = "miniPlayer.playIcon"
-  tagPlaybackIconDependency(
-    world: world
-    pageId: miniPlayerPageId
-    nodeId: miniIconId
-    widgetId: miniWidgetId
-    observedRevision: playback.revision
-    playing: playback.isPlaying
-  )
-  # Cover observes the nowPlaying instance revision (#268): the persistent
-  # dock's MiniThumb re-points by identity on a track change — this is the
-  # widget the motivating bug left stuck on the first album (§1).
-  let miniThumbCoverSeed: String = nowPlayingCoverSeed(
-    reg: reg
-    playback: playback
-    browsedStem: state.currentAlbumStem
-  )
-  tagPlaybackCoverDependency(
-    world: world
-    pageId: miniPlayerPageId
-    nodeId: "MiniThumb"
-    observedRevision: playback.nowPlayingRevision
-    artKey: miniThumbCoverSeed
-  )
-  let miniHeartNode: String = "MiniHeartButton"
-  let miniHeartWidgetId: String = "miniPlayer.likeButton"
-  tagLikedHeart(
-    world: world
-    pageId: miniPlayerPageId
-    nodeId: miniHeartNode
-    widgetId: miniHeartWidgetId
-    observedRevision: 0
-  )
-  # Frames S3 (#210): select + overlay the scene's frame. The forced
-  # id comes from the S2 device simulator (activeDeviceFrame folds
-  # RAE_UI_FRAME + RAE_UI_DEVICE; the default iPhone preset forces
-  # "PhonePortrait", RAE_UI_DEVICE=none yields "none" which matches no
-  # frame and falls through to width selection). The scene's
-  # `when.minPtW` is pt-based; layoutW is du, so divide by unitScale.
-  # Past the Desktop breakpoint the overlay activates the queue button
-  # and strips the play button's circle. Runs on every (re)mount, and
-  # the world rebuilds on live resize, so crossing the breakpoint
-  # re-selects. Applied AFTER the data tags above; widgetStyleSystem
-  # re-applies play/heart visuals next frame, so reset-to-base can't
-  # leave stale runtime patches on those nodes.
-  let deviceFrame: DeviceFrame = activeDeviceFrame()
-  let forcedName: String = frameIdName(id: deviceFrame.forcedFrameId)
-  let framePtW: Float = world.layoutW / unitScale
-  let frameIdx: Int = applySceneFramesToPage(
-    world: world
-    scene: scenes.miniPlayer
-    pageId: miniPlayerPageId
-    windowPtW: framePtW
-    forcedFrameId: forcedName
-  )
-  # Frames S4 (#211): MiniArtist is frame-overridden (the Desktop
-  # frame reparents it into the root row), so reset-to-base just
-  # replayed its authored placeholder text on every frame. Re-apply
-  # the runtime track data after the frame pass. MiniTitle isn't
-  # frame-overridden today, but re-setting it costs one write and
-  # keeps this block correct if it ever becomes overridden.
-  # Fresh node-id strings — miniTitleId/miniArtistId were own-moved
-  # into addTextOverride above.
-  let miniTitleText: String = "{track.title}"
-  let miniArtistText: String = "{album.artist}"
-  updateNodeText(
-    world: world
-    pageId: miniPlayerPageId
-    nodeId: "MiniTitle"
-    value: miniTitleText
-  )
-  updateNodeText(
-    world: world
-    pageId: miniPlayerPageId
-    nodeId: "MiniArtist"
-    value: miniArtistText
-  )
   ret mount
 }

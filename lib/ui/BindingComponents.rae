@@ -165,6 +165,37 @@ type BottomSheet {
   builtEpoch: Int = -1
 }
 
+# ----- playback widgets: the data bindings the dock and Now Playing share (#981)
+# Each is authored on the node it drives; the matching system runs every frame
+# from `refreshMountedUi` (and once at mount) and writes only on a change of
+# its observed revision / key, so the same components serve the dock's
+# mini-player and the Now Playing page.
+# Play/pause glyph: the Sprite key follows `PlaybackState.isPlaying` and the
+# WidgetState.selected flag mirrors it (`revision` observed).
+type PlaybackIcon {
+  builtRevision: Int = -1
+}
+
+# Now-playing cover: the Sprite key follows the playing track's art
+# (`nowPlayingRevision` observed); seeded from the browsed album at mount.
+type PlaybackCover {
+  builtRevision: Int = -1
+}
+
+# Heart / like button: WidgetState.selected follows the liked playlist
+# membership of the browsed track; the outline/filled StateStyle is
+# installed by the system (StateStyle is a runtime table).
+type LikedHeart {
+  styled: Bool = false
+}
+
+# Track text: `field` is "title" or "artist"; the Text follows the browsed
+# album + track (`builtKey` = stem|index).
+type TrackText {
+  field: String = "title"
+  builtKey: String
+}
+
 type ProgressBar {
   enabled: Bool = true
 }

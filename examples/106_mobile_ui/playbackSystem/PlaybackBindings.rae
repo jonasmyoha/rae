@@ -1,0 +1,300 @@
+open ui/Ecs
+# The playback widget bindings (#981) — the systems behind the `PlaybackIcon`,
+# `PlaybackCover`, `LikedHeart` and `TrackText` components authored in
+# mini-player.raescene (the dock) and music-player-now-playing.raescene.
+# Each system drives EVERY instance of its component, so the dock and the
+# Now Playing page share one binding and no page-id lookups: it reads the
+# app / playback state, compares against the component's observed revision
+# or key, and writes the node's Sprite / Text / WidgetState only on a change.
+# They run every frame from `refreshMountedUi` and once at mount.
+#
+# Layering (docs/ecs-systems-and-data-observation.md §5.2): these OBSERVE
+# the data systems (PlaybackState, the liked playlist, the browsed album)
+# and mutate only the UiWorld; the play/pause toggle itself is still a
+# command (`enqueuePlaybackToggle`), never a write from here.
+import ui/Components
+open ecs/Entity
+open ecs/ComponentTable
+open assetSystem/GpuAssetRegistry
+
+# Resolve the now-playing cover to a key whose texture is actually LOADED.
+# The now-playing art is preferred, but only when the gpu2d registry has it:
+# a Spotify "spotify-current" key whose fetch failed (or any key not yet
+# registered) would otherwise render the mini-player / hero as a grey rect.
+# Fall through to the playing track's local album cover (boot-loaded), then
+# the browsed stem — the first LOADED one wins.
+func coverKeyResolved(
+  reg: view TextureRegistry
+  playback: view PlaybackState
+  browsedStem: view String
+) pub ret String {
+  if playback.nowPlayingArtKey.length() > 0 and textureHas(reg: reg, key: playback.nowPlayingArtKey) {
+    ret "{playback.nowPlayingArtKey}"
+  }
+  if playback.playingAlbumStem.length() > 0 and textureHas(reg: reg, key: playback.playingAlbumStem) {
+    ret "{playback.playingAlbumStem}"
+  }
+  ret "{browsedStem}"
+}
+
+# Re-point one Sprite's textureKey by identity, preserving every other field.
+# Returns whether it wrote (an equal key is left alone: componentSet bumps
+# the table generation whether or not the value differs).
+func repointSprite(world: mod UiWorld, entity: view EntityId, key: view String) ret Bool {
+  if componentHas(this: world.sprites, entity: entity) is false {
+    ret false
+  }
+  let cur: Sprite = componentGet(this: world.sprites, entity: entity)
+  if cur.textureKey is key {
+    ret false
+  }
+  let next: Sprite = {
+    textureKey: "{key}"
+    tint: cur.tint
+    scaleMode: cur.scaleMode
+    tileScale: cur.tileScale
+    nineSlice: cur.nineSlice
+    hasNineSlice: cur.hasNineSlice
+  }
+  componentSet(this: world.sprites, entity: entity, data: next)
+  ret true
+}
+
+# Every `PlaybackIcon`: the play/pause glyph and the selected flag follow
+# `isPlaying`, observed through `PlaybackState.revision`. Returns whether any
+# icon changed (the caller re-syncs the widget styles on that).
+func playbackIconSystem(world: mod UiWorld, playback: view PlaybackState) pub ret Bool {
+  var changed: Bool = false
+  let n: Int = componentCount(this: world.playbackIcons)
+  var i: Int = 0
+  loop i < n {
+    let entity: EntityId = componentEntityAt(this: world.playbackIcons, i: i)
+    let icon: PlaybackIcon = componentDataAt(this: world.playbackIcons, i: i)
+    if icon.builtRevision is not playback.revision {
+      repointSprite(world: world, entity: entity, key: playbackIconKey(playback: playback))
+      setWidgetSelected(world: world, entity: entity, selected: playback.isPlaying)
+      let built: PlaybackIcon = { builtRevision: playback.revision }
+      componentSet(this: world.playbackIcons, entity: entity, data: built)
+      changed = true
+    }
+    i = i + 1
+  }
+  ret changed
+}
+
+# Every `PlaybackCover`: seeded once from the browsed album (so a fresh mount
+# shows the browsed cover), then re-pointed to the playing track's art when
+# `nowPlayingRevision` moves — by identity, no re-mount. Nothing playing yet
+# leaves the browsed cover untouched. Returns whether any cover changed.
+func playbackCoverSystem(
+  world: mod UiWorld
+  playback: view PlaybackState
+  state: view AppState
+  reg: view TextureRegistry
+) pub ret Bool {
+  var changed: Bool = false
+  let n: Int = componentCount(this: world.playbackCovers)
+  var i: Int = 0
+  loop i < n {
+    let entity: EntityId = componentEntityAt(this: world.playbackCovers, i: i)
+    let cover: PlaybackCover = componentDataAt(this: world.playbackCovers, i: i)
+    if cover.builtRevision is not playback.nowPlayingRevision {
+      if cover.builtRevision < 0 {
+        let seed: String = coverKeyResolved(
+          reg: reg
+          playback: playback
+          browsedStem: state.currentAlbumStem
+        )
+        repointSprite(world: world, entity: entity, key: seed)
+      } else if playback.nowPlayingArtKey.length() > 0 {
+        let key: String = coverKeyResolved(
+          reg: reg
+          playback: playback
+          browsedStem: playback.playingAlbumStem
+        )
+        repointSprite(world: world, entity: entity, key: key)
+      }
+      let built: PlaybackCover = { builtRevision: playback.nowPlayingRevision }
+      componentSet(this: world.playbackCovers, entity: entity, data: built)
+      changed = true
+    }
+    i = i + 1
+  }
+  ret changed
+}
+
+# The heart's declarative visuals: outline/filled glyph and white / warm
+# coral tint by `selected`. StateStyle is a runtime table the scene loader
+# refuses to author, so the system installs it on first sight.
+func installHeartStyle(world: mod UiWorld, entity: view EntityId) {
+  let baseKey: String = "mat:favorite_border"
+  let selKey: String = "mat:favorite"
+  let noTextStyle: String = ""
+  let noTextStyleSel: String = ""
+  let unlikedTint: RgbaColor = { r: 255, g: 255, b: 255, a: 255 }
+  let likedTint: RgbaColor = { r: 250, g: 80, b: 110, a: 255 }
+  let clearFill: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
+  let zeroOffset: Vec2 = { x: 0.0, y: 0.0 }
+  let style: StateStyle = {
+    spriteKey: own baseKey
+    spriteKeySelected: own selKey
+    tint: unlikedTint
+    tintSelected: likedTint
+    hasTint: true
+    shapeFill: clearFill
+    shapeFillSelected: clearFill
+    hasShapeFill: false
+    offset: zeroOffset
+    offsetSelected: zeroOffset
+    hasOffset: false
+    textStyle: own noTextStyle
+    textStyleSelected: own noTextStyleSel
+    disabledAlpha: 1.0
+    loadingAlpha: 1.0
+    errorAlpha: 1.0
+  }
+  componentSet(this: world.stateStyles, entity: entity, data: own style)
+}
+
+# Every `LikedHeart`: WidgetState.selected mirrors whether the browsed
+# (stem, trackIndex) is in the liked playlist. The liked bit depends on that
+# pair rather than a revision, so this runs per frame and writes only when
+# the bit flips. An empty stem (before any navigation) only installs the
+# styles. Returns whether any heart changed, so the caller re-syncs the
+# widget styles (the outline/filled swap) that frame.
+func likedHeartSystem(
+  world: mod UiWorld
+  liked: view Playlist
+  stem: view String
+  trackIndex: view Int
+) pub ret Bool {
+  var changed: Bool = false
+  var isLiked: Bool = false
+  if stem.length() > 0 {
+    isLiked = playlistContains(playlist: liked, stem: stem, trackIndex: trackIndex)
+  }
+  let n: Int = componentCount(this: world.likedHearts)
+  var i: Int = 0
+  loop i < n {
+    let entity: EntityId = componentEntityAt(this: world.likedHearts, i: i)
+    let heart: LikedHeart = componentDataAt(this: world.likedHearts, i: i)
+    if heart.styled is false {
+      installHeartStyle(world: world, entity: entity)
+      let styled: LikedHeart = { styled: true }
+      componentSet(this: world.likedHearts, entity: entity, data: styled)
+      changed = true
+    }
+    if stem.length() > 0 {
+      var current: Bool = false
+      if componentHas(this: world.widgetStates, entity: entity) {
+        current = componentGet(this: world.widgetStates, entity: entity).selected
+      }
+      if current is not isLiked {
+        setWidgetSelected(world: world, entity: entity, selected: isLiked)
+        changed = true
+      }
+    }
+    i = i + 1
+  }
+  ret changed
+}
+
+# Write one Text's string in place, keeping its style. Compared BEFORE
+# taking the mod ref: componentMod bumps the table generation eagerly, so
+# an unchanged string would mark the render cache dirty every frame.
+func writeTrackText(world: mod UiWorld, entity: view EntityId, value: view String) {
+  if componentHas(this: world.texts, entity: entity) is false {
+    ret
+  }
+  let cur: view Text => componentView(this: world.texts, entity: entity)
+  if cur.text is value {
+    ret
+  }
+  let slot: mod Text => componentMod(this: world.texts, entity: entity)
+  slot.text = "{value}"
+}
+
+# Every `TrackText`: the title / artist of the browsed track, keyed on
+# stem|index so a same-page track change re-binds in place.
+func trackTextSystem(world: mod UiWorld, state: view AppState) pub {
+  let key: String = "{state.currentAlbumStem}|{state.currentTrackIndex}"
+  let n: Int = componentCount(this: world.trackTexts)
+  var stale: Bool = false
+  var i: Int = 0
+  loop i < n {
+    let binding: view TrackText => componentView(
+      this: world.trackTexts
+      entity: componentEntityAt(this: world.trackTexts, i: i)
+    )
+    if binding.builtKey is not key {
+      stale = true
+    }
+    i = i + 1
+  }
+  if stale is false {
+    ret
+  }
+  let album: Album = activeAlbum(state: state)
+  let track: Track = trackAt(album: album, idx: state.currentTrackIndex)
+  i = 0
+  loop i < n {
+    let entity: EntityId = componentEntityAt(this: world.trackTexts, i: i)
+    let binding: TrackText = componentDataAt(this: world.trackTexts, i: i)
+    if binding.builtKey is not key {
+      if binding.field is "artist" {
+        writeTrackText(world: world, entity: entity, value: album.artist)
+      } else {
+        writeTrackText(world: world, entity: entity, value: track.title)
+      }
+      let built: TrackText = { field: "{binding.field}", builtKey: "{key}" }
+      componentSet(this: world.trackTexts, entity: entity, data: own built)
+    }
+    i = i + 1
+  }
+}
+
+# Overwrite every `TrackText` with externally-sourced names (the Spotify
+# poll mirrors the real player's track). The built key is left alone, so the
+# local binding does not fight it until the browsed track actually changes.
+func trackTextWriteAll(world: mod UiWorld, title: view String, artist: view String) pub {
+  let n: Int = componentCount(this: world.trackTexts)
+  var i: Int = 0
+  loop i < n {
+    let entity: EntityId = componentEntityAt(this: world.trackTexts, i: i)
+    let binding: TrackText = componentDataAt(this: world.trackTexts, i: i)
+    if binding.field is "artist" {
+      writeTrackText(world: world, entity: entity, value: artist)
+    } else {
+      writeTrackText(world: world, entity: entity, value: title)
+    }
+    i = i + 1
+  }
+}
+
+# The playback bindings, in one call: the per-frame step of
+# `refreshMountedUi` and the once-at-mount run. Returns whether a playback
+# widget's state changed, so the caller runs the widget-style sync
+# (`applyOverlaysToWorld`) that frame — the icon and heart visuals are
+# StateStyle swaps applied there.
+func playbackBindingsSystems(
+  world: mod UiWorld
+  playback: view PlaybackState
+  state: view AppState
+  reg: view TextureRegistry
+) pub ret Bool {
+  let iconChanged: Bool = playbackIconSystem(world: world, playback: playback)
+  let coverChanged: Bool = playbackCoverSystem(
+    world: world
+    playback: playback
+    state: state
+    reg: reg
+  )
+  let heartChanged: Bool = likedHeartSystem(
+    world: world
+    liked: state.liked
+    stem: state.currentAlbumStem
+    trackIndex: state.currentTrackIndex
+  )
+  trackTextSystem(world: world, state: state)
+  ret iconChanged or coverChanged or heartChanged
+}

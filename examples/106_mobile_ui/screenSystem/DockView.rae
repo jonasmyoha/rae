@@ -16,17 +16,17 @@ open ui/Ecs
 # assets/scenes/back-button.raescene is the floating back button, mounted once
 # as its own page and shown (setPageActive) only while a sub-page is open.
 #
-# The mini-player is still mounted into its slot by code
-# (NowPlayingView.buildMiniPlayerInstance): its playback/cover/heart data
-# bindings are imperative tags today and its nodeIds must stay scoped under
-# the "mini-player" page they are looked up by. Turning those into components
-# is the follow-up filed with this task.
+# The mini-player is the dock's authored `MiniPlayer` SceneInstance (#981):
+# its play icon, cover, heart and title/artist carry the PlaybackIcon /
+# PlaybackCover / LikedHeart / TrackText binding components driven by
+# playbackSystem/PlaybackBindings.rae, so nothing looks its nodes up by id.
 import ui/Components
 import ui/Scene
 open ecs/Entity
 open ui/SceneInstance
 open ecs/ComponentTable
 open ui/Layer
+open ui/Frames
 
 const floatingDockInset: Float = 52.04819277108433
 
@@ -102,21 +102,15 @@ func mountBottomDockOverlay(
     subScenes: scenes.subScenes
   )
 
-  # The mini-player CARD extends by exactly the nav-tabs height, so the
-  # gradient starts at the menubar bottom edge and its visible content
-  # remains the original miniPlayerH top slice. Extra bottom padding equal
-  # to the overlap keeps the row contents centred in that visible slice.
+  # The mini-player is the dock's authored `MiniPlayer` SceneInstance (#981),
+  # resolved by mountPageOrError under the dock's page id. Its CARD extends
+  # by exactly the nav-tabs height, so the gradient starts at the menubar
+  # bottom edge and its visible content remains the original miniPlayerH top
+  # slice. Extra bottom padding equal to the overlap keeps the row contents
+  # centred in that visible slice.
   let miniOverlap: Float = navTabsH
   if let slotRaw: Int = findNodeInPage(world: world, pageId: dockPageId, nodeId: "MiniPlayer") {
-    let slot: EntityId = nodeEntity(world: world, index: slotRaw)
-    let mini: EntityId = buildMiniPlayerInstance(
-      world: world
-      scenes: scenes
-      slot: slot
-      playback: playback
-      state: state
-      reg: reg
-    )
+    let mini: EntityId = nodeEntity(world: world, index: slotRaw)
     if componentHas(this: world.paddings, entity: mini) {
       let curPad: Padding = componentGet(this: world.paddings, entity: mini)
       let grownPad: Padding = {
@@ -133,10 +127,32 @@ func mountBottomDockOverlay(
       componentSet(this: world.paddings, entity: mini, data: freshPad)
     }
   }
+  # Frames S3 (#210): select + overlay the mini-player scene's device frame
+  # (its nodes live under the dock's page id). The forced id comes from the
+  # S2 device simulator (activeDeviceFrame folds RAE_UI_FRAME +
+  # RAE_UI_DEVICE); the scene's `when.minPtW` is pt-based, layoutW is du.
+  # Past the Desktop breakpoint the overlay activates the queue button and
+  # strips the play button's circle. Reset-to-base replays the authored
+  # placeholder texts; the TrackText binding below rewrites them.
+  let deviceFrame: DeviceFrame = activeDeviceFrame()
+  let forcedName: String = frameIdName(id: deviceFrame.forcedFrameId)
+  applySceneFramesToPage(
+    world: world
+    scene: scenes.miniPlayer
+    pageId: dockPageId
+    windowPtW: world.layoutW / unitScale
+    forcedFrameId: forcedName
+  )
 
   # First run of the dock's systems so the very first frame is right.
   layerTagSystem(world: world)
   navTabsSystem(world: world, activeTab: activeTab)
+  playbackBindingsSystems(
+    world: world
+    playback: playback
+    state: state
+    reg: reg
+  )
 
   # Canvas overlay (#212 S5/S6 demo) — mounted here because every screen
   # builder already calls mountBottomDockOverlay, and the mount is
