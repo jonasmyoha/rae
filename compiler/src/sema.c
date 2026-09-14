@@ -16,6 +16,11 @@
 // check that forbids raw rae_ext_rae_buf_set with cascade-drop element
 // types outside stdlib. NULL = unknown / top-level scope.
 static const char* s_current_decl_origin = NULL;
+// #960: the parameter list of the function whose body is being analysed, so
+// `typeName(param)` can read the param's WRITTEN type (an enum resolves to
+// Void in TypeInfo, so the type ref is the only place its name survives).
+static const AstParam* s_current_params = NULL;
+static const AstIdentifierPart* s_current_generic_params = NULL;
 
 // #815: the file a diagnostic should name. After merge_module_graph the merged
 // AstModule's file_path is only the LAST-loaded file, so in a multi-file project
@@ -1170,7 +1175,13 @@ static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, SymbolT
             }
             TypeInfo* ret_type = NULL;
             if (spec->as.func_decl.returns) ret_type = sema_resolve_type_internal(ctx, module, symbols, spec->as.func_decl.returns->type);
+            const AstParam* saved_params = s_current_params;
+            const AstIdentifierPart* saved_gparams = s_current_generic_params;
+            s_current_params = spec->as.func_decl.params;   // substituted: concrete
+            s_current_generic_params = NULL;
             sema_analyze_stmt(ctx, module, symbols, spec->as.func_decl.body->first, ret_type);
+            s_current_params = saved_params;
+            s_current_generic_params = saved_gparams;
             sema_lifecycle_post_pass(ctx, module, sema_diag_file(module), &spec->as.func_decl);
             symbol_table_pop_scope(symbols);
         }
@@ -2098,11 +2109,17 @@ static void sema_analyze_decl_inner(CompilerContext* ctx, AstModule* module, Sym
             }
             if (decl->as.func_decl.body) {
                 const char* saved_origin = s_current_decl_origin;
+                const AstParam* saved_params = s_current_params;
+                const AstIdentifierPart* saved_gparams = s_current_generic_params;
                 s_current_decl_origin = decl->origin_file;
+                s_current_params = decl->as.func_decl.params;
+                s_current_generic_params = decl->as.func_decl.generic_params;
                 AstStmt* stmt = decl->as.func_decl.body->first;
                 while (stmt) { sema_analyze_stmt(ctx, module, symbols, stmt, current_return_type); stmt = stmt->next; }
                 sema_lifecycle_post_pass(ctx, module, sema_diag_file(module), &decl->as.func_decl);
                 s_current_decl_origin = saved_origin;
+                s_current_params = saved_params;
+                s_current_generic_params = saved_gparams;
             }
             symbol_table_pop_scope(symbols);
             break;
@@ -2796,6 +2813,12 @@ typedef struct {
     Str field_name;
     Str type_name;
     const AstExpr* target;   // `value.<field>` member expression (cloned per use)
+    // #960 param mode: fold `typeName(<param>)` for a generic-typed PARAMETER
+    // of the function being instantiated (binding/field_name/type_name/target
+    // are unused). The param's type is substituted through gparams -> cargs.
+    const AstParam* params;
+    const AstIdentifierPart* gparams;
+    const AstTypeRef* cargs;
 } ReflectFold;
 
 // Is `e` a wholesale field WRITE through `binding` (#959)?
@@ -2832,13 +2855,30 @@ static void reflect_fold_field_name_block(AstBlock* block, const ReflectFold* rf
 // the whole expression tree.
 static void reflect_fold_field_name_expr(AstExpr* e, const ReflectFold* rf) {
     if (!e) return;
-    int kind = reflect_metadata_call_kind(e, rf->binding);
-    if (kind != 0) {
-        e->kind = AST_EXPR_STRING;
-        e->as.string_lit = kind == 1 ? rf->field_name : rf->type_name;
-        e->resolved_type = NULL;
-        e->decl_link = NULL;
-        return;
+    if (rf->params) {
+        // #960: `typeName(param)` / `param.typeName()` on a generic-typed
+        // parameter folds to the CONCRETE type's name in this instantiation
+        // (the element rule of reflect_element_type_name: `Position` for a
+        // `ComponentTable(Position)`, else the type's own name).
+        for (const AstParam* p = rf->params; p; p = p->next) {
+            if (reflect_metadata_call_kind(e, p->name) != 2) continue;
+            const AstTypeRef* sub = substitute_type_ref(rf->ctx, rf->gparams, rf->cargs, p->type);
+            if (!sub) sub = p->type;
+            e->kind = AST_EXPR_STRING;
+            e->as.string_lit = reflect_element_type_name(sub);
+            e->resolved_type = NULL;
+            e->decl_link = NULL;
+            return;
+        }
+    } else {
+        int kind = reflect_metadata_call_kind(e, rf->binding);
+        if (kind != 0) {
+            e->kind = AST_EXPR_STRING;
+            e->as.string_lit = kind == 1 ? rf->field_name : rf->type_name;
+            e->resolved_type = NULL;
+            e->decl_link = NULL;
+            return;
+        }
     }
     switch (e->kind) {
         case AST_EXPR_BINARY:
@@ -2891,6 +2931,20 @@ static void reflect_fold_field_name_expr(AstExpr* e, const ReflectFold* rf) {
     }
 }
 
+// `"a" is "b"` / `"a" is not "b"` with both sides String literals: 1 = true,
+// 0 = false, -1 = not a constant condition.
+static int reflect_constant_condition(const AstExpr* c) {
+    if (!c || c->kind != AST_EXPR_BINARY) return -1;
+    if (c->as.binary.op != AST_BIN_IS && c->as.binary.op != AST_BIN_NEQ) return -1;
+    const AstExpr* l = c->as.binary.lhs;
+    const AstExpr* r = c->as.binary.rhs;
+    if (!l || !r || l->kind != AST_EXPR_STRING || r->kind != AST_EXPR_STRING) return -1;
+    bool eq = str_eq(l->as.string_lit, r->as.string_lit);
+    return (c->as.binary.op == AST_BIN_IS) ? (eq ? 1 : 0) : (eq ? 0 : 1);
+}
+
+static AstExpr* reflect_make_true(CompilerContext* ctx, size_t line, size_t column);
+
 static void reflect_fold_field_name_stmt(AstStmt* s, const ReflectFold* rf) {
     if (!s) return;
     switch (s->kind) {
@@ -2898,7 +2952,7 @@ static void reflect_fold_field_name_stmt(AstStmt* s, const ReflectFold* rf) {
             // #959: `fieldSet(x, v)` / `x.set(v)` as a statement becomes the
             // assignment `value.<field> = v` — the one place a field is
             // written wholesale through a reflection binding.
-            AstExpr* set_value = reflect_field_set_value(s->as.expr_stmt, rf->binding);
+            AstExpr* set_value = rf->params ? NULL : reflect_field_set_value(s->as.expr_stmt, rf->binding);
             if (set_value && rf->target) {
                 reflect_fold_field_name_expr(set_value, rf);
                 s->kind = AST_STMT_ASSIGN;
@@ -2916,12 +2970,31 @@ static void reflect_fold_field_name_stmt(AstStmt* s, const ReflectFold* rf) {
             for (AstReturnArg* a = s->as.ret_stmt.values; a; a = a->next)
                 reflect_fold_field_name_expr(a->value, rf);
             break;
-        case AST_STMT_IF:
+        case AST_STMT_IF: {
             reflect_fold_field_name_stmt(s->as.if_stmt.binding, rf);
             reflect_fold_field_name_expr(s->as.if_stmt.condition, rf);
+            // #960: a condition that folded to `<literal> is <literal>` (or
+            // `is not`) is decided NOW — the untaken branch is dropped before
+            // any type check sees it. This is what lets one body carry
+            // per-type code behind `typeName(x) is "Int"`: only the arm that
+            // matches this field / instantiation exists afterwards.
+            int decided = reflect_constant_condition(s->as.if_stmt.condition);
+            if (decided >= 0 && !s->as.if_stmt.binding) {
+                AstBlock* keep = decided ? s->as.if_stmt.then_block : s->as.if_stmt.else_block;
+                if (!keep) {
+                    keep = arena_alloc(rf->ctx->ast_arena, sizeof(AstBlock));
+                    keep->first = NULL;
+                }
+                s->as.if_stmt.condition = reflect_make_true(rf->ctx, s->line, s->column);
+                s->as.if_stmt.then_block = keep;
+                s->as.if_stmt.else_block = NULL;
+                reflect_fold_field_name_block(keep, rf);
+                break;
+            }
             reflect_fold_field_name_block(s->as.if_stmt.then_block, rf);
             reflect_fold_field_name_block(s->as.if_stmt.else_block, rf);
             break;
+        }
         case AST_STMT_LOOP:
             reflect_fold_field_name_stmt(s->as.loop_stmt.init, rf);
             reflect_fold_field_name_expr(s->as.loop_stmt.condition, rf);
@@ -3000,7 +3073,9 @@ static void reflect_fill_unrolled(CompilerContext* ctx, AstBlock* out,
         AstBlock* iter_block = arena_alloc(ctx->ast_arena, sizeof(AstBlock));
         iter_block->first = alias;
         AstBlock* iter_body = clone_block(ctx->ast_arena, body);
-        ReflectFold rf = { ctx, bind_name, f->name, reflect_element_type_name(f->type), member };
+        ReflectFold rf = {0};
+        rf.ctx = ctx; rf.binding = bind_name; rf.field_name = f->name;
+        rf.type_name = reflect_element_type_name(f->type); rf.target = member;
         reflect_fold_field_name_block(iter_body, &rf);
         alias->next = iter_body ? iter_body->first : NULL;
         AstStmt* wrapper = arena_alloc(ctx->ast_arena, sizeof(AstStmt));
@@ -3127,6 +3202,68 @@ static const AstTypeRef* reflect_value_concrete_type(CompilerContext* ctx,
     return NULL;
 }
 
+// #960: does the expression tree mention `typeName(<ident>)` / `<ident>.typeName()`?
+// (Any ident — the instantiation fold then checks it names a parameter.)
+static bool reflect_expr_has_type_name(const AstExpr* e) {
+    if (!e) return false;
+    if (e->kind == AST_EXPR_CALL && e->as.call.callee && e->as.call.callee->kind == AST_EXPR_IDENT
+        && str_eq_cstr(e->as.call.callee->as.ident, "typeName")) return true;
+    if (e->kind == AST_EXPR_METHOD_CALL && str_eq_cstr(e->as.method_call.method_name, "typeName")
+        && !e->as.method_call.args) return true;
+    switch (e->kind) {
+        case AST_EXPR_BINARY: return reflect_expr_has_type_name(e->as.binary.lhs) || reflect_expr_has_type_name(e->as.binary.rhs);
+        case AST_EXPR_UNARY: return reflect_expr_has_type_name(e->as.unary.operand);
+        case AST_EXPR_CAST: return reflect_expr_has_type_name(e->as.cast.operand);
+        case AST_EXPR_CALL:
+            for (const AstCallArg* a = e->as.call.args; a; a = a->next)
+                if (reflect_expr_has_type_name(a->value)) return true;
+            return false;
+        case AST_EXPR_METHOD_CALL:
+            if (reflect_expr_has_type_name(e->as.method_call.object)) return true;
+            for (const AstCallArg* a = e->as.method_call.args; a; a = a->next)
+                if (reflect_expr_has_type_name(a->value)) return true;
+            return false;
+        case AST_EXPR_INTERP:
+            for (const AstInterpPart* p = e->as.interp.parts; p; p = p->next)
+                if (reflect_expr_has_type_name(p->value)) return true;
+            return false;
+        default: return false;
+    }
+}
+static bool reflect_block_has_type_name(const AstBlock* block);
+static bool reflect_stmt_has_type_name(const AstStmt* s) {
+    if (!s) return false;
+    switch (s->kind) {
+        case AST_STMT_EXPR: return reflect_expr_has_type_name(s->as.expr_stmt);
+        case AST_STMT_LET: return reflect_expr_has_type_name(s->as.let_stmt.value);
+        case AST_STMT_ASSIGN: return reflect_expr_has_type_name(s->as.assign_stmt.value);
+        case AST_STMT_RET:
+            for (const AstReturnArg* a = s->as.ret_stmt.values; a; a = a->next)
+                if (reflect_expr_has_type_name(a->value)) return true;
+            return false;
+        case AST_STMT_IF:
+            return reflect_expr_has_type_name(s->as.if_stmt.condition)
+                || reflect_stmt_has_type_name(s->as.if_stmt.binding)
+                || reflect_block_has_type_name(s->as.if_stmt.then_block)
+                || reflect_block_has_type_name(s->as.if_stmt.else_block);
+        case AST_STMT_LOOP:
+            return reflect_expr_has_type_name(s->as.loop_stmt.condition)
+                || reflect_block_has_type_name(s->as.loop_stmt.body);
+        case AST_STMT_MATCH:
+            for (const AstMatchCase* c = s->as.match_stmt.cases; c; c = c->next)
+                if (reflect_block_has_type_name(c->block)) return true;
+            return false;
+        case AST_STMT_DEFER: return reflect_block_has_type_name(s->as.defer_stmt.block);
+        case AST_STMT_UNSAFE: return reflect_block_has_type_name(s->as.unsafe_stmt.block);
+        default: return false;
+    }
+}
+static bool reflect_block_has_type_name(const AstBlock* block) {
+    for (const AstStmt* s = block ? block->first : NULL; s; s = s->next)
+        if (reflect_stmt_has_type_name(s)) return true;
+    return false;
+}
+
 static bool reflect_block_has_fields_loop(const AstBlock* block);
 static bool reflect_stmt_has_fields_loop(const AstStmt* s) {
     if (!s) return false;
@@ -3221,9 +3358,21 @@ static void reflect_expand_block_concrete(CompilerContext* ctx, const AstModule*
 AstBlock* reflect_instantiate_body(CompilerContext* ctx, const AstModule* module,
         const AstBlock* template_body, const AstParam* params,
         const AstIdentifierPart* gparams, const AstTypeRef* cargs) {
-    if (!template_body || !reflect_block_has_fields_loop(template_body)) return NULL;
+    if (!template_body) return NULL;
+    bool has_loop = reflect_block_has_fields_loop(template_body);
+    bool has_type_name = reflect_block_has_type_name(template_body);
+    if (!has_loop && !has_type_name) return NULL;
     AstBlock* cloned = clone_block(ctx->ast_arena, template_body);
-    reflect_expand_block_concrete(ctx, module, cloned, params, gparams, cargs);
+    if (has_type_name) {
+        // #960: fold `typeName(param)` to this instantiation's concrete name and
+        // decide the `typeName(x) is "..."` arms, so a generic body can carry
+        // one branch per concrete type (see docs/compile-time-reflection.md,
+        // "Generic bodies that branch on the type").
+        ReflectFold rf = {0};
+        rf.ctx = ctx; rf.params = params; rf.gparams = gparams; rf.cargs = cargs;
+        reflect_fold_field_name_block(cloned, &rf);
+    }
+    if (has_loop) reflect_expand_block_concrete(ctx, module, cloned, params, gparams, cargs);
     return cloned;
 }
 
@@ -3598,6 +3747,21 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                 }
             }
             if (stmt->as.if_stmt.condition) sema_analyze_expr(ctx, module, symbols, stmt->as.if_stmt.condition, true);
+            // #960: a condition that folded to `<literal> is <literal>` (a
+            // `typeName(x) is "Int"` guard in a specialization) is decided
+            // here, BEFORE the arms are analysed: only the taken arm is
+            // checked and emitted, so per-type code behind such a guard need
+            // not type-check for the other types.
+            if (!stmt->as.if_stmt.binding) {
+                int decided = reflect_constant_condition(stmt->as.if_stmt.condition);
+                if (decided >= 0) {
+                    AstBlock* keep = decided ? stmt->as.if_stmt.then_block : stmt->as.if_stmt.else_block;
+                    if (!keep) { keep = arena_alloc(ctx->ast_arena, sizeof(AstBlock)); keep->first = NULL; }
+                    stmt->as.if_stmt.condition = reflect_make_true(ctx, stmt->line, stmt->column);
+                    stmt->as.if_stmt.then_block = keep;
+                    stmt->as.if_stmt.else_block = NULL;
+                }
+            }
             if (stmt->as.if_stmt.then_block) {
                 symbol_table_push_scope(symbols);
                 AstStmt* s = stmt->as.if_stmt.then_block->first;
@@ -4735,6 +4899,84 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
             } else if (expr->as.unary.operand->resolved_type) expr->resolved_type = expr->as.unary.operand->resolved_type;
             break;
         case AST_EXPR_CALL: {
+            // #960: `enumFromName(E, name: s)` — compile-time plain function, one
+            // per enum: the member of `E` spelled `s`, as `opt E` (none when no
+            // member has that name). `E` may be a generic parameter; the backend
+            // then resolves it per instantiation (a non-enum instantiation is
+            // always none, so a generic decoder may try the enum path last).
+            if (expr->as.call.callee && expr->as.call.callee->kind == AST_EXPR_IDENT
+                && str_eq_cstr(expr->as.call.callee->as.ident, "enumFromName")) {
+                AstCallArg* ta = expr->as.call.args;
+                AstCallArg* na = ta ? ta->next : NULL;
+                if (!ta || !na || na->next || ta->name.len != 0 || !ta->value
+                    || ta->value->kind != AST_EXPR_IDENT || !na->value
+                    || !str_eq_cstr(na->name, "name")) {
+                    diag_error(sema_diag_file(module), (int)expr->line, (int)expr->column,
+                               "enumFromName takes an enum type and `name: String` — enumFromName(Kind, name: text)");
+                    module->had_error = true;
+                    expr->resolved_type = type_get_void(ctx->type_registry);
+                    break;
+                }
+                sema_analyze_expr(ctx, module, symbols, na->value, true);
+                ensure_type_match(ctx, type_get_string(ctx->type_registry), &na->value);
+                AstTypeRef* etr = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef)); memset(etr, 0, sizeof *etr);
+                etr->parts = arena_alloc(ctx->ast_arena, sizeof(AstIdentifierPart)); memset(etr->parts, 0, sizeof *etr->parts);
+                etr->parts->text = ta->value->as.ident;
+                etr->line = ta->value->line; etr->column = ta->value->column;
+                TypeInfo* et = sema_resolve_type_internal(ctx, module, symbols, etr);
+                // A generic parameter: unresolved in the template, or bound to a
+                // concrete type (decl-less symbol) in a sema specialization.
+                Symbol* esym = symbol_table_lookup(symbols, etr->parts->text);
+                bool is_generic = (et && et->kind == TYPE_GENERIC_PARAM) || (esym && !esym->decl);
+                if (!is_generic && !sema_typeref_is_enum(symbols, etr)) {
+                    diag_error(sema_diag_file(module), (int)ta->value->line, (int)ta->value->column,
+                               "enumFromName requires an enum type (or a generic type parameter)");
+                    module->had_error = true;
+                }
+                expr->resolved_type = type_get_opt(ctx->type_registry, et ? et : type_get_void(ctx->type_registry));
+                break;
+            }
+            // #960: `typeName(x)` on a GENERIC-typed parameter: a String the
+            // backend folds to the concrete type's name per instantiation (and
+            // decides `typeName(x) is "..."` arms with). Inside a field loop the
+            // unroller already folded it before this point.
+            if (expr->as.call.callee && expr->as.call.callee->kind == AST_EXPR_IDENT
+                && str_eq_cstr(expr->as.call.callee->as.ident, "typeName")
+                && expr->as.call.args && !expr->as.call.args->next
+                && expr->as.call.args->name.len == 0 && expr->as.call.args->value
+                && expr->as.call.args->value->kind == AST_EXPR_IDENT) {
+                Str pname = expr->as.call.args->value->as.ident;
+                const AstParam* param = NULL;
+                for (const AstParam* p = s_current_params; p; p = p->next)
+                    if (str_eq(p->name, pname)) { param = p; break; }
+                if (param && param->type) {
+                    Str base = reflect_base_name(param->type);
+                    bool is_generic = false;
+                    for (const AstIdentifierPart* gp = s_current_generic_params; gp; gp = gp->next)
+                        if (str_eq(gp->text, base)) { is_generic = true; break; }
+                    for (const AstTypeRef* ga = param->type->generic_args; !is_generic && ga; ga = ga->next)
+                        for (const AstIdentifierPart* gp = s_current_generic_params; gp; gp = gp->next)
+                            if (str_eq(gp->text, reflect_base_name(ga))) { is_generic = true; break; }
+                    if (is_generic) {
+                        // A template: the backend folds it per instantiation.
+                        expr->resolved_type = type_get_string(ctx->type_registry);
+                    } else {
+                        // Concrete (a plain function, or a sema specialization
+                        // whose params were substituted): fold now.
+                        Str folded = reflect_element_type_name(param->type);
+                        expr->kind = AST_EXPR_STRING;
+                        expr->as.string_lit = folded;
+                        expr->decl_link = NULL;
+                        expr->resolved_type = type_get_string(ctx->type_registry);
+                    }
+                    break;
+                }
+                diag_error(sema_diag_file(module), (int)expr->line, (int)expr->column,
+                           "typeName(x) is a compile-time query on a field-loop binding or a generic-typed parameter");
+                module->had_error = true;
+                expr->resolved_type = type_get_string(ctx->type_registry);
+                break;
+            }
             sema_analyze_expr(ctx, module, symbols, expr->as.call.callee, false);
             AstCallArg* arg = expr->as.call.args;
             while (arg) { sema_analyze_expr(ctx, module, symbols, arg->value, true); arg = arg->next; }

@@ -196,6 +196,8 @@ const AstDecl* find_enum_decl(CFuncContext* ctx, const AstModule* module, Str na
 const AstFuncDecl* find_function_overload(const AstModule* module, CFuncContext* ctx, Str name, const Str* param_types, uint16_t param_count, bool is_method, const AstExpr* call_expr);
 
 // -- Type inference (peeking at expression types without emitting) --
+const AstExpr* c_call_enum_from_name_type(const AstExpr* expr);
+const AstTypeRef* c_call_enum_from_name_opt_type(CFuncContext* ctx, const AstExpr* expr);
 const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr);
 Str infer_expr_type(CFuncContext* ctx, const AstExpr* expr);
 
