@@ -2,6 +2,37 @@
 > `func drop(this: mod T)` in T's module, by name and shape, run before the
 > structural field drops. See `docs/constructors-and-destructors.md`.
 
+> **Update (#965) — assignment is DECIDED for owned-data types.** Three rules
+> the compiler now enforces (they were the cause of the idle-loop leaks in
+> 106/114, found with `RAE_MEM_STATS=1` + macOS `leaks`):
+>
+> 1. **A whole-value store releases the previous value.** `x = fresh()`,
+>    `s.field = fresh()`, `list[i] = ...` and `r = value` through a `mod T`
+>    parameter first drop what the place held (exactly the drop its scope
+>    exit / owner would have run), then install the new value — the RHS is
+>    evaluated into a temporary first, so it may read the target. A local
+>    already moved out (`own x` passed on) has nothing to release and is
+>    simply re-armed; a local that was `.drop()`-ed explicitly keeps its live
+>    flag (#881). (`x = fresh()` over a heap-owning struct used to leak x's
+>    old buffers — four Lists per drawn glyph in gpu2d's text path.)
+> 2. **`own <place>` moves the value out and leaves the source EMPTY.** A
+>    zeroed String / List / Map / struct is the valid empty value every drop
+>    treats as "nothing to free", so the owner's later drop is a no-op. This
+>    is what makes the swap idiom (`var t = own a.x; a.x = own a.y; a.y = own
+>    t`, `EventQueue.frameAdvance`) both leak-free and double-free-free, and
+>    a `let` bound from a move owns what it received. `List.drop()` /
+>    `IntMap.drop()` / `StringMap.drop()` likewise leave the empty value, not
+>    a dangling pointer.
+> 3. **A fresh String borrowed by a `view`/`mod String` parameter is a
+>    statement temporary** (#884): pool-taken, borrowed by the callee, dropped
+>    after the statement. A chained `s.concat(a).concat(b)` used to leak every
+>    intermediate — one JSON save of the play history leaked 2 GB. And a
+>    String local reassigned from a fresh value owns it from then on, whatever
+>    it was initialised from (`var s: String = ""` is a static literal).
+>
+> Fixture `847_leak_reassign_move_temps` guards all three under
+> `RAE_MEM_STATS=1`.
+
 # Drop semantics, destructors, and defer in Rae
 
 > Design notes on how cleanup should work in Rae. Captures the

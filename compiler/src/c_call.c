@@ -646,7 +646,15 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         // addressable IDENT/MEMBER args. `mod String` and other heap
         // types are intentionally excluded to avoid ownership hazards.
         const AstExpr* wb_target[RAE_MAX_PRIM_WRAP];
-        for (int wi = 0; wi < RAE_MAX_PRIM_WRAP; wi++) { wrap_idx[wi] = -1; wb_target[wi] = NULL; }
+        // #965: a wrapped `view`/`mod String` slot fed by a FRESH String (a
+        // call result, an interpolation, a concat) owns that heap and nobody
+        // else ever sees it — before this it was simply leaked (a chained
+        // `s.concat(a).concat(b)` leaked every intermediate; one JSON save
+        // of the play history leaked 2 GB). Such a slot becomes a statement
+        // temporary (#884): pool-taken into `__rae_stmt_tmpN`, borrowed by
+        // the callee, dropped after the statement.
+        bool wrap_fresh_string[RAE_MAX_PRIM_WRAP];
+        for (int wi = 0; wi < RAE_MAX_PRIM_WRAP; wi++) { wrap_idx[wi] = -1; wb_target[wi] = NULL; wrap_fresh_string[wi] = false; }
         int wrap_count = 0;
         int wrap_base = ctx->temp_counter;
         {
@@ -689,6 +697,13 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                             && !view_is_value) {
                             int slot = wrap_count++;
                             wrap_idx[ai] = slot;
+                            if (str_eq_cstr(pbase_concrete, "String") && sa->value
+                                && (sa->value->kind == AST_EXPR_CALL
+                                    || sa->value->kind == AST_EXPR_METHOD_CALL
+                                    || sa->value->kind == AST_EXPR_INTERP
+                                    || sa->value->kind == AST_EXPR_BINARY)) {
+                                wrap_fresh_string[slot] = true;
+                            }
                             // Numeric `mod` out-param → schedule a
                             // copy-back to the caller's lvalue.
                             if (sp->type->is_mod && is_num_prim && sa->value
@@ -724,8 +739,21 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                         spt = substitute_type_ref(ctx->compiler_ctx, fd->generic_params, concrete, sp->type);
                     emit_type_ref_as_c_type(ctx, spt, out, true);
                     fprintf(out, " __rae_pw_%d = ", wrap_base + wrap_idx[ai]);
-                    emit_expr(ctx, sa->value, out, PREC_LOWEST, false, false);
-                    fprintf(out, "; ");
+                    int fresh_tmp = -1;
+                    if (wrap_fresh_string[wrap_idx[ai]] && ctx->stmt_temps) {
+                        static AstIdentifierPart kStrPart = { .text = { .data = "String", .len = 6 } };
+                        static AstTypeRef kStrTr = { .parts = &kStrPart };
+                        fresh_tmp = register_stmt_temp(ctx, &kStrTr, true);
+                    }
+                    if (fresh_tmp >= 0) {
+                        // Owned by the statement temporary; the view slot aliases it.
+                        fprintf(out, "((__rae_stmt_tmp%d = rae_string_pool_take(", fresh_tmp);
+                        emit_expr(ctx, sa->value, out, PREC_LOWEST, false, false);
+                        fprintf(out, ")), (__rae_stmt_tmp%d_set = 1), __rae_stmt_tmp%d); ", fresh_tmp, fresh_tmp);
+                    } else {
+                        emit_expr(ctx, sa->value, out, PREC_LOWEST, false, false);
+                        fprintf(out, "; ");
+                    }
                 }
                 ai++; sa = sa->next; if (sp) sp = sp->next;
             }
