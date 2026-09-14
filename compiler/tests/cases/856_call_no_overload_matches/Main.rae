@@ -1,0 +1,19 @@
+# #993: when several overloads take this many arguments and none accepts
+# the argument types, the diagnostic lists the signatures tried.
+type Apple {
+  weight: Int
+}
+
+func describe(value: view Int) ret String {
+  ret "int {value}"
+}
+
+func describe(value: view String) ret String {
+  ret "string {value}"
+}
+
+func main() ret Int {
+  let apple: Apple = { weight: 3 }
+  log(describe(value: apple))
+  ret 0
+}
