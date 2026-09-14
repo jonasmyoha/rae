@@ -914,6 +914,37 @@ type CoverGrid {
   builtRevision: Int = -1
 }
 
+# ----- search page: a text field and its result list (#976) ----------------
+
+# A single-line text field authored as a container whose first Text child is
+# the visible line. `query` is the live typed text (the field system appends
+# the frame's typed characters and applies backspaces while the field's page
+# is active); the Text child shows `query` in `textStyleId`, or `placeholder`
+# in `placeholderStyleId` while the query is empty. `emptyStateNodeId` names
+# the page node shown while the query is empty (the sibling `SearchResults`
+# container shows the rest of the time).
+type SearchField {
+  query: String
+  placeholder: String
+  textStyleId: String = "primary"
+  placeholderStyleId: String = "muted"
+  emptyStateNodeId: String = "EmptyState"
+}
+
+# What a `SearchResults` container lists: every catalogue track whose title,
+# artist or album matches the query, or the albums whose title/artist match.
+enum SearchSource { tracks, albums }
+
+# A data-list container of search-result rows. The rows come from app state
+# for the query of the `SearchField` on the same page; the system rebuilds
+# them whenever that query differs from `builtQuery` (the per-container
+# observer cache — "" on a fresh mount) and keeps at most `maxRows`.
+type SearchResults {
+  source: SearchSource
+  maxRows: Int = 12
+  builtQuery: String
+}
+
 func defaultStyleOverride() ret StyleOverride {
   ret StyleOverride {
     hasSize: false

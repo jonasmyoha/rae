@@ -137,6 +137,14 @@ rae_String rae_ext_rae_str_trim(rae_String s) {
   return rae_ext_rae_str_sub(s, start, end - start + 1);
 }
 
+/* #976: the raw byte at `index` (0..255), -1 out of range. The UTF-8 aware
+ * `rae_ext_rae_str_at` decodes; editing code that steps over continuation
+ * bytes (a Backspace on a multi-byte character) needs the bytes themselves. */
+int64_t rae_ext_rae_str_byte_at(rae_String s, int64_t index) {
+  if (!s.data || index < 0 || index >= s.len) return -1;
+  return (int64_t)s.data[index];
+}
+
 uint32_t rae_ext_rae_str_at(rae_String s, int64_t index) {
   if (!s.data || index < 0 || index >= s.len) return 0;
   uint8_t c = s.data[index];

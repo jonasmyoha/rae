@@ -63,6 +63,17 @@ func at(this: view String, index: view Int) ret Char32 {
 # never have to pay a deep-copy at the call site. The externs they
 # wrap still take `rae_String` by value at the C level; the codegen
 # auto-derefs the view when emitting the call.
+func rae_ext_rae_str_byte_at(s: String, index: Int) unsafe extern ret Int
+
+# The raw byte at `index` (0..255; -1 when out of range) — as opposed to
+# `at`, which decodes the UTF-8 character starting there. For byte-level
+# editing such as stepping back over continuation bytes (0x80..0xBF).
+func byteAt(this: view String, index: view Int) ret Int {
+  unsafe {
+    ret rae_ext_rae_str_byte_at(s: this, index: index)
+  }
+}
+
 func length(this: view String) ret Int {
   unsafe {
     ret rae_str_len(s: this)
