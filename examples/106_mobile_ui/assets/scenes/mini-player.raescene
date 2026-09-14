@@ -44,7 +44,22 @@
         "MiniQueueButton",
         "MiniHeartButton",
         "MiniPlayCircle"
-      ]
+      ],
+      "WidgetId": {
+        "id": "miniPlayer.root",
+        "kind": "miniPlayer"
+      },
+      "WidgetState": {
+        "enabled": true,
+        "selected": false,
+        "loading": false,
+        "error": false
+      },
+      "DataDependency": {
+        "sourceKey": "playback",
+        "fieldKey": "playingTrack",
+        "observedRevision": 0
+      }
     },
     "MiniThumb": {
       "Rect": {
@@ -60,7 +75,8 @@
       },
       "CornerRadius": {
         "radius": "radiusChip"
-      }
+      },
+      "PlaybackCover": {}
     },
     "MiniTitleBlock": {
       "Rect": {
@@ -89,6 +105,9 @@
       "Text": {
         "text": "Unsayable",
         "styleId": "miniTitle"
+      },
+      "TrackText": {
+        "field": "title"
       }
     },
     "MiniArtist": {
@@ -101,6 +120,9 @@
       "Text": {
         "text": "Brambles",
         "styleId": "miniMuted"
+      },
+      "TrackText": {
+        "field": "artist"
       }
     },
     "MiniSpacer": {
@@ -150,7 +172,18 @@
       },
       "OnClick": {
         "actionId": "playback.like"
-      }
+      },
+      "WidgetId": {
+        "id": "miniPlayer.likeButton",
+        "kind": "likeButton"
+      },
+      "WidgetState": {
+        "enabled": true,
+        "selected": false,
+        "loading": false,
+        "error": false
+      },
+      "LikedHeart": {}
     },
     "MiniPlayCircle": {
       "Rect": {
@@ -186,7 +219,18 @@
       "Sprite": {
         "textureKey": "mat:play_arrow",
         "tint": "textPrimary"
-      }
+      },
+      "WidgetId": {
+        "id": "miniPlayer.playIcon",
+        "kind": "playbackIcon"
+      },
+      "WidgetState": {
+        "enabled": true,
+        "selected": false,
+        "loading": false,
+        "error": false
+      },
+      "PlaybackIcon": {}
     }
   },
   "frames": {
@@ -205,7 +249,9 @@
           }
         },
         "MiniPlayCircle": {
-          "remove": ["Shape"]
+          "remove": [
+            "Shape"
+          ]
         },
         "MiniArtist": {
           "Parent": "MiniPlayer",
