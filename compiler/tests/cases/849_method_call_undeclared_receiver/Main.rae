@@ -1,0 +1,11 @@
+# #970: the receiver of a UFCS/method call is a VALUE and is resolved like any
+# other identifier. An undeclared receiver — the #950 shape, where a `now`
+# parameter was removed but a `now.epochSeconds()` call was left behind — must
+# fail sema with a precise file:line:col diagnostic, not reach the C backend as
+# a bare `rae_epochSeconds()` that only gcc rejects with "call to undeclared
+# function". The sibling forms (`.field`, `[i]`, `as T`, interpolation) resolve
+# the same identifier the same way; this fixture pins the method-call form.
+func main() {
+  let seconds: Float = now.epochSeconds()
+  log("{seconds}")
+}
