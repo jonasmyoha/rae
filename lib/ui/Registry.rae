@@ -1,118 +1,72 @@
-# Component registry — the bridge between component *names* (the
-# strings used in `.raescene` JSON keys) and per-component
-# deserialiser/applier code.
+# Component registry — the bridge between component *names* (the strings used
+# as `.raescene` JSON keys) and the UiWorld tables they load into.
 #
-# In RUICS this is a runtime-mutable `Map<string, ComponentSpec>` with
-# closures attached. Rae has no first-class function references, so
-# the dispatch can't be a hashmap of callbacks; it's a single function
-# that switches on the name. The list of names is enumerated here for
-# documentation and future tooling (registry-driven inspector,
-# validation that a `.raescene` file doesn't reference unknown
-# components, etc.).
+# In RUICS this is a runtime-mutable `Map<string, ComponentSpec>` with closures
+# attached. Rae has no first-class function references — and, since #961, needs
+# none: the registry IS the world. `applyComponentByName` is one compile-time
+# loop over `fields(mod world)` (docs/compile-time-reflection.md): for each
+# `ComponentTable(any)` field the authored key is matched against the table's
+# component type name (`typeName(table)`, plus the one alias `Overflow` ->
+# `OverflowPolicy`), and a match decodes the JSON object structurally into
+# `T.default()` field by field (ui/RegistryGeneric.decodeComponent). Adding a
+# component is ONE field on UiWorld; its authored grammar is its Rae fields.
 #
-# Phase 1c (#42) fills in `applyComponentByName` with the per-component
-# JSON deserialisers and applier dispatch. The dispatch is a long
-# if/else chain rather than a function pointer table because Rae has
-# no first-class function references — adding a new component costs
-# one new arm here, one entry in `registeredComponentNames`, and one
-# field on `UiWorld`. Components not yet handled (most effects,
-# DataRequest, ListView) fall through to a silent no-op so a scene
-# file can still load if it carries them.
+# Two explicit blocks remain, and they are the whole exception list:
+#   * `ContainerStyle` runs BEFORE the loop — it names no table, it expands a
+#     theme bundle into Shape + Padding (#237).
+#   * A short fixup block runs AFTER the generic decode for the handful of
+#     authored shapes that are not field-structural: Rect's {x,y,w,h},
+#     Layout's `type` key, the flattened insets of Padding/Margin (and
+#     Padding's token form), Offset's
+#     {x,y}, TextShadow's offsetX/offsetY (+ its lint), OpticalAlign's
+#     biasX/biasY, Align's presence flags, the palette-slot mirrors on
+#     Sprite/Shape, Text's namespaced `styleOverride`, the sourceKey/fieldKey
+#     spellings of DataDependency/RefreshRegion, and the two array-valued
+#     fields (SceneInstance overrides, ListView bindings).
+#
+# Runtime / derived tables (ComputedRect, Parent, WorldTransform2D, ...) are
+# EXCLUDED from the loop by name: they are never authored, and an authored key
+# naming one is a hard error, as is a key naming no table at all (#941).
 open ui/RegistryOpt
+open ui/RegistryGeneric
+open ui/RegistryValues
 open ui/ContainerStyle
 import Json
 import Sys
 import ui/Theme
-import ui/Spacing
 import ui/ThemeResolved
 open ecs/ComponentTable
-open ui/RegistryDeser
 
-# Build the canonical list of authored component names. Phase 1c uses
-# this to validate that every node's keys (other than `Children`) name
-# a real component.
-func registeredComponentNames() ret List(String) {
-  let names: List(String) = List.create(String, cap: 42)
-  # Geometry / layout
-  names.add(value: "Rect")
-  names.add(value: "Size")
-  names.add(value: "Layout")
-  names.add(value: "Padding")
-  names.add(value: "Margin")
-  names.add(value: "SafeArea")
-  names.add(value: "Align")
-  names.add(value: "Offset")
-  names.add(value: "Constraints")
-  # Authored as `Overflow`; stored in the `overflows` table (OverflowPolicy).
-  names.add(value: "Overflow")
-  names.add(value: "ExtentAnchor")
-  # Visual / interaction
-  names.add(value: "TransformFx")
-  names.add(value: "Sprite")
-  names.add(value: "Text")
-  names.add(value: "TextShadow")
-  names.add(value: "Shape")
-  names.add(value: "Shadow")
-  names.add(value: "Opacity")
-  names.add(value: "PointerEvents")
-  names.add(value: "HitArea")
-  names.add(value: "OnClick")
-  names.add(value: "Button")
-  names.add(value: "Active")
-  names.add(value: "EditorVisible")
-  names.add(value: "EditorLocked")
-  names.add(value: "HeroWidget")
-  names.add(value: "CornerRadius")
-  names.add(value: "GradientFill")
-  names.add(value: "BackdropImage")
-  names.add(value: "OpticalAlign")
-  names.add(value: "LayerRoot")
-  names.add(value: "LayerRef")
-  names.add(value: "DebugAnchor")
-  names.add(value: "PageRoot")
-  names.add(value: "ScrollState")
-  names.add(value: "WidgetId")
-  names.add(value: "WidgetState")
-  names.add(value: "DataDependency")
-  names.add(value: "ActionBinding")
-  names.add(value: "RefreshRegion")
-  # Art direction (S6)
-  names.add(value: "Aspect")
-  names.add(value: "ScaleToFit")
-  # Identity / metadata
-  names.add(value: "Name")
-  names.add(value: "PrimaryType")
-  names.add(value: "NodeId")
-  names.add(value: "SceneScope")
-  names.add(value: "RuntimeOnly")
-  # Dynamic / data binding
-  names.add(value: "SceneInstance")
-  names.add(value: "ImageSourceResolver")
-  names.add(value: "TextBinding")
-  names.add(value: "MaskShape")
-  names.add(value: "DataRequest")
-  names.add(value: "ListView")
-  # Effects
-  names.add(value: "BackgroundPan")
-  names.add(value: "Carousel")
-  names.add(value: "SmokeFx")
-  names.add(value: "AnimFrames")
-  names.add(value: "AnimTrigger")
-  names.add(value: "WobbleFx")
-  # Composite theme styles (#237, M6)
-  names.add(value: "ContainerStyle")
-  # Hierarchy is `Children` — handled specially by scene_loader, not
-  # treated as a component here.
-  ret names
-}
-
-func isKnownComponent(name: view String) ret Bool {
-  let known: List(String) = registeredComponentNames()
-  let n: Int = known.length
+# The world's tables that are derived or runtime state, never authored. This
+# runtime list serves the vocabulary and the diagnostic; the loader's loop
+# repeats it as literal `typeName(table) is not "..."` tests so that it folds
+# per table (docs/compile-time-reflection.md, constant `if`) — keep the two
+# in step.
+func isRuntimeTable(name: view String) ret Bool {
+  let runtime: List(String) = [
+    "Children"
+    "MeasuredSize"
+    "ComputedRect"
+    "Transform2D"
+    "WorldTransform2D"
+    "WorldVisual"
+    "RuntimeOffset"
+    "LayoutScale"
+    "SafeInsets"
+    "Parent"
+    "AnimState"
+    "HoverScale"
+    "VisualBounds"
+    "ScrollPanelState"
+    "Interaction"
+    "StateStyle"
+    "ListViewData"
+    "StyleOverride"
+  ]
   var i: Int = 0
-  loop i < n {
-    if let k: String = known.copyAt(index: i) {
-      if k is name {
+  loop i < runtime.length() {
+    if let entry: view String => runtime.viewAt(index: i) {
+      if entry is name {
         ret true
       }
     }
@@ -121,18 +75,60 @@ func isKnownComponent(name: view String) ret Bool {
   ret false
 }
 
-func registeredComponentCount() ret Int {
-  ret registeredComponentNames().length
+# The authored spelling of a table's component type. One alias today: the
+# clip policy is authored as `Overflow` and stored as `OverflowPolicy`.
+func authoredNameOf(typeName: view String) ret String {
+  let overflowPolicy: String = "OverflowPolicy"
+  if typeName is overflowPolicy {
+    ret "Overflow"
+  }
+  ret "{typeName}"
 }
 
-# -----------------------------------------------------------------
-# Enum-from-string lookups
-#
-# Each authored enum has a small set of legal string values. Anything
-# unrecognised falls back to the safest default. Keeping these inline
-# (rather than in a Map) avoids touching the StringMap-inside-struct
-# Live-VM corner.
-# -----------------------------------------------------------------
+# The authored component vocabulary, derived from the world's tables: every
+# non-runtime table under its authored name, plus the table-less
+# `ContainerStyle`. Order is UiWorld field order.
+func registeredComponentNames(world: view UiWorld) ret List(String) {
+  var names: List(String) = List.create(String, cap: 64)
+  loop let table: view ComponentTable(any) in fields(world) {
+    if isRuntimeTable(name: typeName(table)) is false {
+      names.add(value: authoredNameOf(typeName: typeName(table)))
+    }
+  }
+  names.add(value: "ContainerStyle")
+  ret names
+}
+
+func isKnownComponent(world: view UiWorld, name: view String) ret Bool {
+  let known: List(String) = registeredComponentNames(world: world)
+  var i: Int = 0
+  loop i < known.length() {
+    if let entry: view String => known.viewAt(index: i) {
+      if entry is name {
+        ret true
+      }
+    }
+    i = i + 1
+  }
+  ret false
+}
+
+func registeredComponentCount(world: view UiWorld) ret Int {
+  ret registeredComponentNames(world: world).length()
+}
+
+# The palette-slot name an authored colour was written as ("" for a literal
+# {r,g,b,a} object), kept beside the resolved colour so the renderer can
+# re-resolve on a live theme switch (#235).
+func slotNameOf(doc: view JsonDoc, val: view JsonValue, key: view String) ret String {
+  let idx: Int = Json.field(doc: doc, this: val, key: key)
+  let empty: String = ""
+  if idx < 0 {
+    ret empty
+  }
+  ret Json.jsonString(this: Json.jsonValueAt(doc: doc, idx: idx), fallback: empty)
+}
+
 func applyComponentByName(
   world: mod UiWorld
   entity: view EntityId
@@ -142,60 +138,214 @@ func applyComponentByName(
   sceneId: view String
   nodeId: view String
 ) {
-  if name is "Rect" {
-    componentSet(this: world.rects, entity: entity, data: deserRect(doc: doc, val: val))
+  # Composite style reference (#237, M6): a bare string naming a theme
+  # container style. Expands into the concrete Shape + Padding the bundle
+  # references (see ui/ContainerStyle). No table of its own.
+  let containerStyle: String = "ContainerStyle"
+  if name is containerStyle {
+    let empty: String = ""
+    let styleName: String = Json.jsonString(this: val, fallback: empty)
+    applyContainerStyle(world: world, entity: entity, name: styleName)
     ret
   }
-  if name is "Size" {
-    componentSet(this: world.sizes, entity: entity, data: deserSize(doc: doc, val: val))
+
+  # The generic path: find the table whose component the key names, decode
+  # the object structurally into it.
+  var applied: Bool = false
+  loop let table: mod ComponentTable(any) in fields(world) {
+    # The same list as isRuntimeTable, spelled as literal tests so it folds:
+    # `typeName(table)` is a literal per table, so this `if` is decided at
+    # compile time and an excluded table instantiates no decoder at all.
+    if typeName(table) is not "Children" and typeName(table) is not "MeasuredSize" and typeName(
+      table
+    ) is not "ComputedRect" and typeName(table) is not "Transform2D" and typeName(table) is not "WorldTransform2D" and typeName(
+      table
+    ) is not "WorldVisual" and typeName(table) is not "RuntimeOffset" and typeName(table) is not "LayoutScale" and typeName(
+      table
+    ) is not "SafeInsets" and typeName(table) is not "Parent" and typeName(table) is not "AnimState" and typeName(
+      table
+    ) is not "HoverScale" and typeName(table) is not "VisualBounds" and typeName(table) is not "ScrollPanelState" and typeName(
+      table
+    ) is not "Interaction" and typeName(table) is not "StateStyle" and typeName(table) is not "ListViewData" and typeName(
+      table
+    ) is not "StyleOverride" {
+      if name is authoredNameOf(typeName: typeName(table)) {
+        decodeComponent(
+          table: table
+          entity: entity
+          doc: doc
+          val: val
+          theme: world.theme
+        )
+        applied = true
+      }
+    }
+  }
+  if applied {
+    applyAuthoredFixups(
+      world: world
+      entity: entity
+      name: name
+      doc: doc
+      val: val
+    )
+    ret
+  }
+
+  # No table matched. A `.raescene` component the loader cannot apply is a
+  # CORRECTNESS BUG, not a thing to swallow (#941): fail loudly, naming the
+  # scene, node and component. Two cases, so the author knows which:
+  #   - the name is a world table that is derived / runtime state, never
+  #     authored (ComputedRect, Parent, ...) -> "not authorable";
+  #   - the name is no component at all (a typo, or a non-UI component such
+  #     as a 3D `Transform3d` in a UI scene) -> "not registered".
+  if isRuntimeTable(name: name) {
+    log(
+      "[scene] {sceneId} node {nodeId}: component {name} is a runtime/derived table and cannot be authored"
+    )
+  } else {
+    log("[scene] {sceneId} node {nodeId}: component {name} is not registered")
+  }
+  exit(code: 1)
+}
+
+# The authored shapes that are not field-structural, patched onto the
+# generically decoded component. Each arm is the difference between the JSON
+# grammar and the Rae fields, nothing more.
+func applyAuthoredFixups(
+  world: mod UiWorld
+  entity: view EntityId
+  name: view String
+  doc: view JsonDoc
+  val: view JsonValue
+) {
+  if name is "Rect" {
+    # {x, y, w, h} -> position / size.
+    let rect: mod Rect => componentMod(this: world.rects, entity: entity)
+    rect.position.x = optFloat(
+      doc: doc
+      container: val
+      key: "x"
+      fallback: 0.0
+    )
+    rect.position.y = optFloat(
+      doc: doc
+      container: val
+      key: "y"
+      fallback: 0.0
+    )
+    rect.size.x = optFloat(
+      doc: doc
+      container: val
+      key: "w"
+      fallback: 0.0
+    )
+    rect.size.y = optFloat(
+      doc: doc
+      container: val
+      key: "h"
+      fallback: 0.0
+    )
     ret
   }
   if name is "Layout" {
-    componentSet(
-      this: world.layouts
-      entity: entity
-      data: deserLayout(doc: doc, theme: world.theme, val: val)
-    )
+    # The layout kind is authored as `type` (RUICS vocabulary), not `kind`.
+    let layout: mod Layout => componentMod(this: world.layouts, entity: entity)
+    if Json.field(doc: doc, this: val, key: "type") >= 0 {
+      layout.kind = parseLayoutType(text: optString(
+        doc: doc
+        container: val
+        key: "type"
+        fallback: ""
+      ))
+    }
     ret
   }
   if name is "Padding" {
-    componentSet(
-      this: world.paddings
-      entity: entity
-      data: deserPadding(doc: doc, theme: world.theme, val: val)
-    )
+    # A padding token names a whole Insets preset (#233):
+    # `"Padding": "screenEdgePadding"`; an object gives the four sides
+    # flattened at the top level (each side may itself be a space token).
+    let padding: mod Padding => componentMod(this: world.paddings, entity: entity)
+    let empty: String = ""
+    let asStr: String = Json.jsonString(this: val, fallback: empty)
+    if asStr.length() > 0 {
+      let ti: ThemeInsets = themePaddingInsets(theme: world.theme.resolved, name: asStr)
+      padding.insets = Insets { l: ti.l, t: ti.t, r: ti.r, b: ti.b }
+    } else {
+      padding.insets = deserInsets(doc: doc, theme: world.theme, val: val)
+    }
     ret
   }
   if name is "Margin" {
-    componentSet(
-      this: world.margins
-      entity: entity
-      data: deserMargin(doc: doc, theme: world.theme, val: val)
-    )
-    ret
-  }
-  if name is "Align" {
-    componentSet(this: world.aligns, entity: entity, data: deserAlign(doc: doc, val: val))
+    let margin: mod Margin => componentMod(this: world.margins, entity: entity)
+    margin.insets = deserInsets(doc: doc, theme: world.theme, val: val)
     ret
   }
   if name is "Offset" {
-    componentSet(this: world.offsets, entity: entity, data: deserOffset(doc: doc, val: val))
+    let offset: mod Offset => componentMod(this: world.offsets, entity: entity)
+    offset.delta = deserVec2(doc: doc, val: val)
     ret
   }
-  if name is "Sprite" {
-    componentSet(
-      this: world.sprites
-      entity: entity
-      data: deserSprite(doc: doc, theme: world.theme, val: val)
+  if name is "Align" {
+    # Presence flags: an axis the author did not name stays "unset".
+    let align: mod Align => componentMod(this: world.aligns, entity: entity)
+    align.hasX = Json.field(doc: doc, this: val, key: "x") >= 0
+    align.hasY = Json.field(doc: doc, this: val, key: "y") >= 0
+    ret
+  }
+  if name is "TextShadow" {
+    # Lint (#232, theme §7): a raw per-entity TextShadow is the last-resort
+    # override, not the authoring path. A shadow that any two nodes share
+    # belongs in a theme `shadow` token referenced by a text style.
+    log(
+      "[scene] raw TextShadow authored on entity {entity.index} - prefer a theme shadow token on the text style (see docs/ui-theme-system.md sec 7)"
+    )
+    let shadow: mod TextShadow => componentMod(this: world.textShadows, entity: entity)
+    shadow.offset.x = optFloat(
+      doc: doc
+      container: val
+      key: "offsetX"
+      fallback: 0.0
+    )
+    shadow.offset.y = optFloat(
+      doc: doc
+      container: val
+      key: "offsetY"
+      fallback: 0.0
     )
     ret
   }
+  if name is "OpticalAlign" {
+    let optical: mod OpticalAlign => componentMod(this: world.opticalAligns, entity: entity)
+    optical.bias.x = optFloat(
+      doc: doc
+      container: val
+      key: "biasX"
+      fallback: 0.0
+    )
+    optical.bias.y = optFloat(
+      doc: doc
+      container: val
+      key: "biasY"
+      fallback: 0.0
+    )
+    ret
+  }
+  if name is "Sprite" {
+    let sprite: mod Sprite => componentMod(this: world.sprites, entity: entity)
+    sprite.tintSlot = slotNameOf(doc: doc, val: val, key: "tint")
+    ret
+  }
+  if name is "Shape" {
+    let shape: mod Shape => componentMod(this: world.shapes, entity: entity)
+    shape.fillSlot = slotNameOf(doc: doc, val: val, key: "fill")
+    shape.strokeSlot = slotNameOf(doc: doc, val: val, key: "stroke")
+    ret
+  }
   if name is "Text" {
-    componentSet(this: world.texts, entity: entity, data: deserText(doc: doc, val: val))
-    # Tier-2 partial style override (#236): namespaced inside the Text
-    # bag, stored as a sparse component only when authored. Base styleId
-    # (set above) is always kept — the override annotates the link to
-    # the theme, never severs it.
+    # Tier-2 partial style override (#236): namespaced inside the Text bag,
+    # stored as a sparse component only when authored. The base styleId is
+    # always kept — the override annotates the link to the theme.
     let soIdx: Int = Json.field(doc: doc, this: val, key: "styleOverride")
     if soIdx >= 0 {
       let sov: JsonValue = Json.jsonValueAt(doc: doc, idx: soIdx)
@@ -207,269 +357,42 @@ func applyComponentByName(
     }
     ret
   }
-  if name is "TextShadow" {
-    # Lint (#232, theme §7): a raw per-entity TextShadow is the
-    # last-resort override, not the authoring path. A shadow that any
-    # two nodes share belongs in a theme `shadow` token referenced by
-    # a text style (the miniTitle/miniMuted -> textOnAccent pattern).
-    # Nudge, don't block — one line per authored occurrence.
-    log(
-      "[scene] raw TextShadow authored on entity {entity.index} - prefer a theme shadow token on the text style (see docs/ui-theme-system.md sec 7)"
-    )
-    componentSet(
-      this: world.textShadows
-      entity: entity
-      data: deserTextShadow(doc: doc, theme: world.theme, val: val)
-    )
-    ret
-  }
-  if name is "Shape" {
-    componentSet(
-      this: world.shapes
-      entity: entity
-      data: deserShape(doc: doc, theme: world.theme, val: val)
-    )
-    ret
-  }
-  if name is "ContainerStyle" {
-    # Composite style reference (#237, M6): a bare string naming a
-    # theme container style. Expands into the concrete Shape + Padding
-    # the bundle references (see ui/container_style).
-    let empty: String = ""
-    let styleName: String = Json.jsonString(this: val, fallback: empty)
-    applyContainerStyle(world: world, entity: entity, name: styleName)
-    ret
-  }
-  if name is "Active" {
-    componentSet(this: world.actives, entity: entity, data: deserActive(doc: doc, val: val))
-    ret
-  }
-  if name is "Opacity" {
-    componentSet(this: world.opacities, entity: entity, data: deserOpacity(doc: doc, val: val))
-    ret
-  }
-  if name is "OnClick" {
-    componentSet(this: world.onClicks, entity: entity, data: deserOnClick(doc: doc, val: val))
-    ret
-  }
-  if name is "Button" {
-    componentSet(this: world.buttons, entity: entity, data: deserButton(doc: doc, val: val))
-    ret
-  }
-  if name is "Name" {
-    componentSet(this: world.names, entity: entity, data: deserName(doc: doc, val: val))
-    ret
-  }
-  if name is "PrimaryType" {
-    componentSet(
-      this: world.primaryTypes
-      entity: entity
-      data: deserPrimaryType(doc: doc, val: val)
-    )
-    ret
-  }
-  if name is "NodeId" {
-    componentSet(
-      this: world.nodeIdComponents
-      entity: entity
-      data: deserNodeId(doc: doc, val: val)
-    )
-    ret
-  }
-  if name is "SceneInstance" {
-    componentSet(
-      this: world.sceneInstances
-      entity: entity
-      data: deserSceneInstance(doc: doc, val: val)
-    )
-    ret
-  }
-  if name is "TextBinding" {
-    componentSet(
-      this: world.textBindings
-      entity: entity
-      data: deserTextBinding(doc: doc, val: val)
-    )
-    ret
-  }
-  if name is "MaskShape" {
-    componentSet(this: world.maskShapes, entity: entity, data: deserMaskShape(doc: doc, val: val))
-    ret
-  }
-  if name is "HeroWidget" {
-    componentSet(this: world.heroWidgets, entity: entity, data: deserHeroWidget(doc: doc, val: val))
-    ret
-  }
-  if name is "CornerRadius" {
-    componentSet(
-      this: world.cornerRadiuses
-      entity: entity
-      data: deserCornerRadius(doc: doc, theme: world.theme, val: val)
-    )
-    ret
-  }
-  if name is "GradientFill" {
-    componentSet(
-      this: world.gradientFills
-      entity: entity
-      data: deserGradientFill(doc: doc, theme: world.theme, val: val)
-    )
-    ret
-  }
-  if name is "BackdropImage" {
-    componentSet(
-      this: world.backdropImages
-      entity: entity
-      data: deserBackdropImage(doc: doc, val: val)
-    )
-    ret
-  }
-  if name is "OpticalAlign" {
-    componentSet(
-      this: world.opticalAligns
-      entity: entity
-      data: deserOpticalAlign(doc: doc, val: val)
-    )
-    ret
-  }
-  if name is "SafeArea" {
-    componentSet(
-      this: world.safeAreas
-      entity: entity
-      data: deserSafeArea(doc: doc, theme: world.theme, val: val)
-    )
-    ret
-  }
-  if name is "LayerRoot" {
-    componentSet(this: world.layerRoots, entity: entity, data: deserLayerRoot(doc: doc, val: val))
-    ret
-  }
-  if name is "DebugAnchor" {
-    componentSet(
-      this: world.debugAnchors
-      entity: entity
-      data: deserDebugAnchor(doc: doc, val: val)
-    )
-    ret
-  }
-  if name is "PageRoot" {
-    componentSet(this: world.pageRoots, entity: entity, data: deserPageRoot(doc: doc, val: val))
-    ret
-  }
-  if name is "ScrollState" {
-    componentSet(
-      this: world.scrollStates
-      entity: entity
-      data: deserScrollState(doc: doc, val: val)
-    )
-    ret
-  }
-  if name is "WidgetId" {
-    componentSet(this: world.widgetIds, entity: entity, data: deserWidgetId(doc: doc, val: val))
-    ret
-  }
-  if name is "WidgetState" {
-    componentSet(
-      this: world.widgetStates
-      entity: entity
-      data: deserWidgetState(doc: doc, val: val)
-    )
-    ret
-  }
   if name is "DataDependency" {
-    componentSet(
-      this: world.dataDependencies
-      entity: entity
-      data: deserDataDependency(doc: doc, val: val)
-    )
-    ret
-  }
-  if name is "ActionBinding" {
-    componentSet(
-      this: world.actionBindings
-      entity: entity
-      data: deserActionBinding(doc: doc, val: val)
-    )
+    # Authored as sourceKey / fieldKey; the ids are enum members spelled the
+    # same way, so the lookup is the compile-time member table.
+    let dep: mod DataDependency => componentMod(this: world.dataDependencies, entity: entity)
+    dep.resource = dataResourceIdFromString(name: optString(
+      doc: doc
+      container: val
+      key: "sourceKey"
+      fallback: ""
+    ))
+    dep.field = dataFieldIdFromString(name: optString(
+      doc: doc
+      container: val
+      key: "fieldKey"
+      fallback: ""
+    ))
     ret
   }
   if name is "RefreshRegion" {
-    componentSet(
-      this: world.refreshRegions
-      entity: entity
-      data: deserRefreshRegion(doc: doc, val: val)
-    )
-    ret
-  }
-  if name is "Overflow" {
-    # Clip/overflow policy (#115). Authored as `Overflow`, stored in the
-    # `overflows` table as an OverflowPolicy. Was silently dropped before #941,
-    # which meant `"Overflow": { "mode": "clip" }` in a scene never clipped.
-    let modeStr: String = optString(
+    let region: mod RefreshRegion => componentMod(this: world.refreshRegions, entity: entity)
+    region.resource = dataResourceIdFromString(name: optString(
       doc: doc
       container: val
-      key: "mode"
-      fallback: "none"
-    )
-    var mode: OverflowMode = OverflowMode.none
-    let clipStr: String = "clip"
-    let scaleStr: String = "scaleToFitY"
-    if modeStr is clipStr {
-      mode = OverflowMode.clip
-    }
-    if modeStr is scaleStr {
-      mode = OverflowMode.scaleToFitY
-    }
-    let op: OverflowPolicy = { mode: mode }
-    componentSet(this: world.overflows, entity: entity, data: op)
+      key: "sourceKey"
+      fallback: ""
+    ))
     ret
   }
-  if name is "Aspect" {
-    let ratio: Float = optFloat(
-      doc: doc
-      container: val
-      key: "ratio"
-      fallback: 1.0
-    )
-    let asp: Aspect = { ratio: ratio }
-    componentSet(this: world.aspects, entity: entity, data: asp)
+  if name is "SceneInstance" {
+    let instance: mod SceneInstance => componentMod(this: world.sceneInstances, entity: entity)
+    deserSceneInstanceOverrides(instance: instance, doc: doc, val: val)
     ret
   }
   if name is "ListView" {
-    componentSet(this: world.listViews, entity: entity, data: deserListView(doc: doc, val: val))
+    let listView: mod ListView => componentMod(this: world.listViews, entity: entity)
+    listView.bindings = deserListViewBindings(doc: doc, val: val)
     ret
   }
-  if name is "ScaleToFit" {
-    let modeStr: String = optString(
-      doc: doc
-      container: val
-      key: "mode"
-      fallback: "Contain"
-    )
-    var fitMode: FitMode = FitMode.contain
-    let coverStr: String = "Cover"
-    if modeStr is coverStr {
-      fitMode = FitMode.cover
-    }
-    let stf: ScaleToFit = { mode: fitMode }
-    componentSet(this: world.scaleToFits, entity: entity, data: stf)
-    ret
-  }
-  # No arm matched. A `.raescene` component the loader cannot apply is a
-  # CORRECTNESS BUG, not a thing to swallow (#941): silently dropping it means
-  # the authored scene renders wrong with no signal. Fail loudly, naming the
-  # scene, node and component — like every other Rae error. Two cases, so the
-  # message tells the author which one they hit:
-  #   - the name IS in the registry vocabulary but has no deserialiser arm yet
-  #     (a declared-but-unsupported component, e.g. an effect from #42's later
-  #     phases) -> "registered but not supported by the loader yet";
-  #   - the name is not a known component at all (a typo, or a non-UI component
-  #     like a 3D `Transform3d` in a UI scene) -> "not registered".
-  if isKnownComponent(name: name) {
-    log(
-      "[scene] {sceneId} node {nodeId}: component {name} is registered but not supported by the loader yet"
-    )
-  } else {
-    log("[scene] {sceneId} node {nodeId}: component {name} is not registered")
-  }
-  exit(code: 1)
 }
