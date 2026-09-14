@@ -8,6 +8,7 @@
 void rae_ext_Gpu2d_initWindow(int64_t w, int64_t h, rae_String t) { (void)w; (void)h; (void)t; }
 rae_Bool rae_ext_Gpu2d_pollClose(void) { return 1; }
 void rae_ext_Gpu2d_waitEvents(float timeoutSec){ (void)timeoutSec; }
+rae_Bool rae_ext_Gpu2d_headlessRequested(void) { return 0; }
 int64_t rae_ext_Gpu2d_decodeImageProbe(rae_String path) { (void)path; return 0; }
 float rae_ext_Gpu2d_pointerX(void){ return 0.0; }
 rae_String rae_ext_Gpu2d_textInput(void){ return rae_ext_rae_str_from_cstr(""); }

@@ -156,6 +156,20 @@ static int rae_g2d_headless_requested(void) {
     return 0;
 }
 
+/* The same predicate for Rae (gpu2d.headlessRequested, #988). The render
+ * decision in lib/Gpu2d.rae (shouldRenderFrame / renderGate) skips rendering
+ * while the window is not visible -- the macOS backgrounded-drawable leak fix
+ * -- but a headless window is created SDL_WINDOW_HIDDEN on purpose, so that
+ * rule read "hidden" as "backgrounded" and a headless run never rendered a
+ * single frame (it parked in waitEvents on a 250ms heartbeat until its budget
+ * expired). Headless renders to the offscreen target and screenshots THAT;
+ * the drawable it must never touch is already refused by the present path
+ * (rae_g2d_present checks rae_g2d_window_visible itself), so telling the app
+ * to go ahead and render costs nothing and leaks nothing. */
+rae_Bool rae_ext_Gpu2d_headlessRequested(void) {
+    return rae_g2d_headless_requested() ? 1 : 0;
+}
+
 void rae_ext_Gpu2d_initWindow(int64_t width, int64_t height, rae_String title) {
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         fprintf(stderr, "[gpu2d] SDL init failed: %s\n", SDL_GetError());
