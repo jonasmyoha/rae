@@ -1,92 +1,31 @@
 # Rae Concurrency & Threading — design
 
-Status: **partially implemented** (VM / Live target). This document is the
-authoritative model; implement against it in the staged order under *Roadmap*.
+Status: **implemented on the Compiled (C) backend — the only target** (the
+Live/bytecode VM this document was first written against was removed in #957).
+Refreshed against the tree 2026-09-14 (#953). §5 is the current state; §1–§4
+are the model, unchanged; §6–§9 are annotated with what landed and what is
+still open. Fixtures: `013_spawn_calls`, `360_spawn_concurrency`,
+`511_spawn_raytracer_bands`, `512_spawn_string_workers`,
+`513_spawn_own_list_copy`, `541_channel_worker`, `646_list_of_tasks`; the
+first production consumer is 106's background I/O (#950, `docs/parallelism-
+first-plan.md` §5).
 
-Implemented so far (Live / bytecode VM only):
-- `spawn f(args)` returns a joinable `Task(T)` (replaces the old detached,
-  result-discarding, handle-leaking prototype). `OP_SPAWN` allocates a
-  ref-counted `TaskObj`, runs a non-detached thread, and the spawned
-  function's return value is captured into the task's result slot.
-- `task.get()` (`OP_TASK_GET`): joins once, yields the result. Verified with
-  Int and String results (heap result moves correctly across threads) and
-  two concurrent tasks.
-- Dropping the last reference to a running task **joins it** (join-on-drop).
-- Type system: builtin `Task(T)` (`TYPE_TASK`); `spawn`→`Task(T)` typing;
-  `Task(T)` annotations resolve; `Task(T).get(): T`.
-- **Capture safety:** a spawned function's `view`/`mod` params are rejected
-  unless the borrowed type is a value type with no heap — scalars
-  (Int/Float/Bool/Char) and enums. Borrowed String/List/struct/Buffer/etc. is
-  a compile error (would alias the parent heap across threads; pass own/copy).
-- **Failure propagation:** a task that fails (worker runtime error) is recorded
-  as `status=failed`; `task.get()` raises instead of returning a bogus result.
-- **Bare-statement drop:** a discarded `spawn f()` statement joins on drop
-  (`OP_DROP_TOP`) rather than leaking/detaching — so bare spawn is synchronous;
-  fire-and-forget will require an explicit `detach` (not yet implemented).
-
-- **Drop discipline:** a `let`-bound task is joined-on-drop at block scope
-  exit (`OP_DROP_LOCAL`), at function return (`OP_RETURN`), and on slot reuse —
-  so a never-`get()`'d task always joins, never leaks.
-- **`taskScope { }`** — structured-concurrency block. Desugars to a run-once
-  scope (`if true { }`), so tasks bound inside join at scope exit. (Non-escape
-  enforcement / cancel-on-error are future refinements.)
-- **`parallelLoop`** — reuses the `loop` grammar with a parallel flag. Compiled
-  as a **sequential** loop on both backends for now (per "Live parallelLoop
-  runs sequentially first"); real parallel execution awaits the C thread runtime.
-- **Compiled (C) backend** — `spawn`/`Task.get()`/`taskScope`/`parallelLoop`
-  all run. Type-erased `RaeTask` runtime; `Task(T)` → `RaeTask*`.
-  - **Real OS threads** when every param of the spawn target is captured
-    safely for the worker:
-    - **path 1** — by-value params: scalar any-mode-but-`mod`; enum
-      plain/own/copy.
-    - **path 2** — `own`/`copy`/plain heap args. The spawn site hands the
-      worker a private copy so it owns a stable heap with no aliasing (the
-      parent keeps and drops its own original). Sidesteps move-tracking and the
-      statement temp-pool entirely. ASan/UBSan-clean.
-      - `String` → `rae_string_copy(arg)`.
-      - heap aggregate (`List`/`Map` instance, or a non-generic non-`c_struct`
-        user struct that owns heap — anything with a `rae_deep_copy_<T>`
-        helper): an aliasing **lvalue** arg (`x` / `x.f` / `x[i]`) is
-        deep-copied at the spawn site; a fresh **rvalue** arg (call result /
-        object literal) already owns its heap and just moves to the worker.
-      The arg is emitted under the param's declared type so object/collection
-      literals get the right C compound-literal type.
-
-    A per-function pthread thunk packs the (by-value / copied) args and
-    `pthread_create`s; `get()` joins. Verified concurrent + correct +
-    parent-intact, ASan/UBSan-clean: `greet(own String, view Int)`,
-    `joinNames(own List(String))`, `describe(own Person)` (struct w/ String
-    field), `sumList(own List(Int))`, and an object-literal rvalue arg.
-  - **Sequential fallback** for `mod`, `view`-of-`String`, `view`-of-enum,
-    `view`-of-aggregate (pointers into the parent), `c_struct`/generic-instance
-    struct args (no deep-copy helper), and POD-struct-by-value args — runs
-    synchronously into a completed task. Same observable result, not parallel.
-  - **Join-on-drop**: `rae_task_drop` joins+frees a `Task` local at scope exit
-    so a worker can't outlive its scope. The String temp pool is `__thread`
-    (concurrent workers no longer corrupt each other's interpolation).
-
-The **first milestone is complete** on both backends, and the compiled backend
-has **real parallelism for value-arg and `own`/`copy`/plain heap-arg spawns**
-(`String`, `List`/`Map`, heap user structs).
-
-Remaining: thread POD-struct-by-value args (trivially sound, just not wired);
-generalize nested-generic-rvalue spawn args (a *pre-existing* discovery gap —
-`f(createList())` fails to specialize whether or not it's spawned; use a
-let-binding); extend threads to `mod`/`view`-enum/`view`-aggregate args (need
-deref/coercion in the thunk; until then they're correctly sequential); make
-`g_mem_*` counters atomic
-(currently a benign stats-only race under threads); `Channel`, atomics, truly
-parallel `parallelLoop` over disjoint shards; `detach`; `taskScope`
-cancel-on-error/non-escape; `parallelLoop` disjointness checking (once
-parallel). The Live VM could also gain real interleaving if needed.
+In one paragraph: `spawn f(args)` returns a joinable `Task(T)`; `task.get()`
+joins exactly once and yields the result; a `Task` local that goes out of
+scope without `get()` is joined on drop (`rae_task_drop`); `taskScope { }`
+is a run-once block whose tasks therefore join at its exit; `Channel(T)` is
+an MPSC, Int-payload, non-blocking channel for long-running workers;
+`parallelLoop` parses and runs sequentially. Real OS threads are used when
+every argument of the spawned function is capturable by value or by a
+private deep copy (scalars, enums, `own`/`copy`/plain `String`, heap
+aggregates, POD structs); pointer-into-parent shapes (`mod`, `view` of
+anything but a scalar) fall back to running the call synchronously into a
+completed task — same observable result, no parallelism.
 
 The design came out of a roundtable (Chattie / Clo / Gem) plus a final
 maintainer pass. It deliberately diverges from the roundtable on two points:
-**no implicit task→value coercion**, and **no early green-fiber VM scheduler**.
-
-The design came out of a roundtable (Chattie / Clo / Gem) plus a final
-maintainer pass. It deliberately diverges from the roundtable on two points:
-**no implicit task→value coercion**, and **no early green-fiber VM scheduler**.
+**no implicit task→value coercion**, and **no early green-fiber VM scheduler**
+(moot now that there is no VM).
 
 ---
 
@@ -112,12 +51,10 @@ every parameter. The compiler proves race-freedom **at the `spawn` and
 `parallelLoop` boundaries**, so we avoid a lock-everything runtime. This is the
 spine of the design and its biggest single risk (see *Risks*).
 
-Two execution backends, one language semantics:
-
-- **Compiled (C):** genuine parallelism (thread pool, real OS threads).
-- **Live (bytecode VM):** same ownership checks and same observable results,
-  but initially sequential / cooperative — Live makes **no promise** about
-  timing or real parallel performance.
+One execution backend, one language semantics: **Compiled (C)** — genuine
+parallelism on real OS threads. (The design originally also named a Live/VM
+backend that would run tasks sequentially with the same ownership checks; it
+was removed in #957, see §6.)
 
 ---
 
@@ -314,71 +251,101 @@ with dense arrays plus an O(1) sparse map. Concurrency rules:
 
 ---
 
-## 5. Current state (what exists today)
+## 5. Current state (what exists today, 2026-09-14)
 
-`spawn` is already wired through the front end and the VM, but it is a
-**detached prototype**, not a task model:
+Everything below is the Compiled (C) backend; there is no other engine.
 
-- Parser: `AST_UNARY_SPAWN`; sema; VM codegen via `is_spawn` in
-  `compiler/src/vm_compiler.c`.
-- VM runtime: `OP_SPAWN` in `compiler/src/vm.c` spawns a **fresh sub-VM on a
-  detached OS thread** (`spawn_thread_wrapper` + `SpawnData`), via the
-  cross-platform `sys_thread` abstraction.
-- **It never joins** — the `sys_thread_t` handle is discarded (a thread leak),
-  there is **no result path**, and there is **no C-backend codegen** for spawn
-  at all (VM-only).
-- `docs/multiplayer-highscore-plan.md` already commits the project to the
-  "threads-over-async, `spawn`" direction.
+**Front end.** `spawn` is a unary expression (`AST_UNARY_SPAWN`) typed
+`Task(T)` for a callee returning `T`; `Task(T)` is a builtin generic
+(`TYPE_TASK`) with one method, `get(): T`. `taskScope { … }` parses to a
+run-once `if` block flagged `is_task_scope` (`parser.c`); `parallelLoop`
+parses to a `loop` flagged `is_parallel`. Both flags are carried, formatted
+(`rae format`, fixture 813) and otherwise ignored by codegen — `taskScope`
+gets its semantics from join-on-drop, `parallelLoop` runs as a plain loop.
 
-**First soundness question — answered.** `OP_SPAWN` transfers arguments with
-`data->args[i] = vm_pop(vm)`: a **shallow, by-value move of the `Value` struct**
-off the parent stack. Heap payloads (String / List buffers) are **not**
-deep-copied — only the pointer-bearing `Value` is moved, and the parent
-relinquishes its stack slot. Consequences that the model must enforce:
+**Runtime (`compiler/runtime/runtime_threads.c`, `rae_runtime.h`).**
+`Task(T)` lowers to `RaeTask*`: `{ pthread_t thread; void* result; int done;
+int joined; }`, one pthread per spawn. `rae_task_await` joins once (guarded)
+and hands back the result buffer, which the `get()` site casts to `T`;
+`rae_task_drop` joins if needed and frees. There is **no** running/failed
+status and **no** failure propagation yet (§8 stays open). A `Task` inside a
+struct or a `List(Task(T))` (fixture 646) is not cascade-dropped — the owner
+joins it explicitly (see `ArtworkFetch.rae` in 106 for the pattern: copy the
+handle out with `copyAt`, `get()`, let the copy drop, remove the slot).
 
-- It is safe **only** when the argument was genuinely `own` (the parent no
-  longer references that heap). This is exactly why §2a restricts independent-
-  task captures to `own`/`copy`.
-- A `view`/`mod` capture, or an `own` value the caller still aliases elsewhere,
-  would share the heap across threads → data race and/or double-free at drop.
-  The compiler must reject these at the `spawn` boundary.
+**Spawn codegen (`c_backend.c` `c_spawn_threadable`, `c_expr.c`).** For each
+spawned function a per-function pthread thunk packs the arguments and
+`pthread_create`s. The threadable shapes, per parameter:
 
-This is therefore an **isolate-per-task** prototype to *evolve* (make joinable,
-result-returning, ownership-checked), not to replace.
+- scalars (`Int`/`Float`/`Bool`/`Char`, any mode but `mod`) — by value;
+- enums (`own`/`copy`/plain) — by value;
+- `String` (`own`/`copy`/plain) — the spawn site hands the worker a private
+  `rae_string_copy`, the parent keeps and drops its own;
+- heap aggregates (`List`/`Map`, non-generic non-`c_struct` user structs that
+  own heap): an aliasing lvalue is deep-copied at the spawn site, a fresh
+  rvalue (call result / literal) moves;
+- POD structs (no heap → no cascade drop), `own`/`copy`/plain — by value.
 
-A second runtime hazard to fix before enabling real parallelism: the runtime's
-global memory-accounting counters (`g_mem_*` in `compiler/runtime/rae_runtime.c`)
-and any interned-constant/string pools are shared process-globals and would race
-under multiple OS threads — make them atomic or per-thread.
+Anything else — `mod` of anything, `view` of a `String`/enum/aggregate,
+generic-instance or `c_struct` args — takes the **sequential fallback**: the
+call runs synchronously on the caller and the result is stored into an
+already-completed task. Verified ASan/UBSan-clean for the threaded shapes.
+The String interpolation temp pool is `__thread`, so concurrent workers do
+not corrupt each other.
+
+**`Channel(T)` (`lib/Channel.rae`, #271).** A value-type wrapper over an
+opaque runtime handle; MPSC; a fixed int64 ring guarded by a mutex hidden in
+the runtime; `createChannel(T)`, `channelSend`, `pending`, `receive`,
+`received` (monotonic drained count), `freeChannel` (owner, after the worker
+joined). Only `Channel(Int)` is instantiable — struct payloads need boxing
+(#969). No blocking receive, no select: a consumer polls `pending`, a worker
+that wants to sleep uses `sleep(ms:)`. Real use: 106's poll worker posts
+ticks, its artwork workers post `serial * 2 + okBit`, and each calls
+`ui/EventLoop.wake()` (#950) so the UI's `waitEvents` returns at once.
+
+**Not implemented:** `detach` (a fire-and-forget worker; today a persistent
+worker takes a stop channel and is joined at teardown), a truly parallel
+`parallelLoop` with disjointness checking, atomics, task failure status /
+propagation, `taskScope` cancel-on-error / non-escape enforcement, and
+threading the `mod`/`view`-aggregate shapes (they are correctly sequential).
+The `g_mem_*` accounting counters are still plain globals (a benign,
+stats-only race under threads). The staged plan for the rest is
+`docs/parallelism-first-plan.md`.
 
 ---
 
-## 6. Live vs Compiled execution
+## 6. Execution engine
 
-Same language semantics and same ownership checks on both; different engines.
+There is one engine: the Compiled (C) backend. The Live/bytecode VM that the
+first revisions of this section described ran `spawn` synchronously and was
+removed in #957 — with it went the "Live runs sequentially first" staging and
+the Live↔Compiled observable-equivalence suite. What the design asked of the
+compiled engine, and where it stands:
 
-**Compiled (C):**
-- Real thread pool over `sys_thread` / `sys_mutex`.
-- `Task(T)` = heap struct: typed result slot + status (running/completed/failed)
-  + condition variable + owned thread handle.
-- `Channel(T)` = mutex + condvar MPMC queue.
-- Atomics via C11 `<stdatomic.h>`.
-- `parallelLoop` = genuine parallel execution over disjoint shards.
+- Real OS threads over pthreads — **done** for the threadable shapes (§5);
+  there is no thread pool, one thread per task.
+- `Task(T)` = heap struct with typed result slot — **done**; status
+  (running/completed/failed) and a condition variable — **not yet** (join is
+  `pthread_join`).
+- `Channel(T)` = mutex-guarded queue — **done** as MPSC int64; the MPMC +
+  condvar (blocking receive) form is **not yet**.
+- Atomics via C11 `<stdatomic.h>` — **not yet**.
+- `parallelLoop` = genuine parallel execution over disjoint shards — **not
+  yet** (sequential).
 
-**Live (bytecode VM):**
-- Initially **sequential or cooperatively scheduled** tasks.
-- `parallelLoop` may execute **sequentially** — identical observable results,
-  no parallelism.
-- Same ownership checks; **no promise** of reproduced timing or real parallel
-  performance.
-- **Do not build a sophisticated green-fiber VM scheduler up front.** That is a
-  large project and is not needed to establish the language model. Reconsider a
-  real VM task scheduler only when Live genuinely needs responsive interleaving
-  (step 5 below).
+Scripting / hot-reload roles the VM once nominally filled are reassigned to
+native-hosted WASM modules (`docs/raepack-v2-and-packages.md`); a WASM thread
+path is item 8 of the parallelism plan.
 
 ---
 
 ## 7. Roadmap (staged, in order)
+
+*Annotated 2026-09-14: steps 1–2 landed (as compiled-backend work once the VM
+went), step 3 landed as "parses, runs sequentially", step 4 is partly landed
+(threads + `Task` + `Channel`; the pool, atomics and real `parallelLoop` are
+open), step 5 is moot. The live successor of this list is
+`docs/parallelism-first-plan.md` §4.*
 
 1. **Make the existing VM `spawn` joinable and result-returning.** (See the
    precise milestone below.)
@@ -443,11 +410,15 @@ testable on its own.
 
 - **Soundness of the spawn-boundary capture rules is make-or-break.** If the
   rules ever admit one shared mutable alias across an independent-task boundary,
-  Compiled can race even where Live (sequential) looks fine. The Live↔Compiled
-  equivalence suite is the backstop, but only sound static rules prevent the
-  race in the first place.
-- **Global VM/runtime state** (`g_mem_*`, interned pools, registry) must be
-  audited and made thread-safe before step 4.
+  the program races. With no sequential reference engine any more there is
+  no equivalence suite to fall back on — only sound static rules
+  (`c_spawn_threadable` plus the sequential fallback for every unproven
+  shape) prevent the race. ASan/UBSan runs of the spawn fixtures are the
+  backstop.
+- **Global runtime state** (`g_mem_*`, interned pools, registry) must be
+  audited and made thread-safe before real `parallelLoop`; the String temp
+  pool is already `__thread`, the `g_mem_*` counters are still a stats-only
+  race.
 - **`Task(T)` drop/lifetime** must integrate with cascade-drop / scope-exit
   dealloc (`docs/scope-exit-dealloc.md`): a dropped task joins, then its result
   slot is dropped.
