@@ -130,16 +130,20 @@ func registeredComponentCount(world: view UiWorld) ret Int {
   ret registeredComponentNames(world: world).length()
 }
 
-# The palette-slot name an authored colour was written as ("" for a literal
-# {r,g,b,a} object), kept beside the resolved colour so the renderer can
-# re-resolve on a live theme switch (#235).
+# The palette-slot name an authored colour was written as ("" for a literal —
+# an {r,g,b,a} object or a `#rrggbb[aa]` hex string, #996), kept beside the
+# resolved colour so the renderer can re-resolve on a live theme switch (#235).
 func slotNameOf(doc: view JsonDoc, val: view JsonValue, key: view String) ret String {
   let idx: Int = Json.field(doc: doc, this: val, key: key)
   let empty: String = ""
   if idx < 0 {
     ret empty
   }
-  ret Json.jsonString(this: Json.jsonValueAt(doc: doc, idx: idx), fallback: empty)
+  let name: String = Json.jsonString(this: Json.jsonValueAt(doc: doc, idx: idx), fallback: empty)
+  if name.startsWith(prefix: "#") {
+    ret empty
+  }
+  ret name
 }
 
 func applyComponentByName(

@@ -188,6 +188,34 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" 2>/dev/null | sed 's/^/  /'
             ((FAILED++))
           fi
+        elif [ "$EXAMPLE_NAME" = "121_ui_editor" ]; then
+          # The .raescene viewer (#997): each shipped sample opens headlessly
+          # under the RAE_UI_EDITOR_SCENE fallback, mounts with ZERO
+          # diagnostics (every component, token, sub-scene and texture the
+          # samples use resolved) and renders a non-blank frame.
+          UI_EDITOR_OK=1
+          for SAMPLE in MainMenu Settings CardStrip; do
+            SCREENSHOT="$TMP_OUT/ui-editor-$SAMPLE.bmp"
+            if (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/$SAMPLE.raescene" \
+               RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
+               perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-$SAMPLE.log" 2>&1 \
+               && grep -qE "\[ui-editor\] mounted $SAMPLE: [1-9][0-9]* nodes, 0 diagnostics" "$TMP_OUT/render-$SAMPLE.log" \
+               && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=50 \
+                  > "$TMP_OUT/screenshot-$SAMPLE.log" 2>&1; then
+              :
+            else
+              UI_EDITOR_OK=0
+              echo "  sample $SAMPLE failed:"
+              cat "$TMP_OUT/render-$SAMPLE.log" "$TMP_OUT/screenshot-$SAMPLE.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
+            fi
+          done
+          if [ "$UI_EDITOR_OK" = "1" ]; then
+            echo "PASS: $EXAMPLE_NAME (3 sample scenes mounted with 0 diagnostics + screenshots)"
+            ((PASSED++))
+          else
+            echo "FAIL: $EXAMPLE_NAME (ui editor sample gate)"
+            ((FAILED++))
+          fi
         elif [ "$EXAMPLE_NAME" = "119_ocean_fft" ]; then
           # The realistic water tier on its own (#851): the log line proves the
           # FFT baked and the ocean drew. Then cycle all size/count combinations

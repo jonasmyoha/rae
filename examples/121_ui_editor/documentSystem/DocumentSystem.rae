@@ -1,0 +1,263 @@
+# documentSystem — the viewed `.raescene` as a resource: which file, the parsed
+# scene, the registry its sub-scenes resolve through, the theme beside it and
+# the page root it is mounted under (docs/ui-editor-design.md §3).
+#
+# Loading is ONE mountPage, exactly like a 106 page; sub-scenes load lazily
+# from `<scene dir>/<sceneId>.raescene` until no instance is left unresolved,
+# then resolveSceneInstances turns whatever is still missing into a red
+# sentinel + diagnostic (the #996 `report` policy). The app creates NO layout
+# entities of its own (the #990/#991 rule): the only entities are the mounted
+# scenes' nodes and the two layer roots.
+import Json
+import String
+open Sys
+open ui/Ecs
+open ui/Components
+open ui/Layer
+open ui/Scene
+open ui/SceneFile
+open ui/SceneInstance
+open ui/SceneLoader
+open ui/ScenePolicy
+open ui/RegistryOpt
+open ecs/Entity
+open ecs/ComponentTable
+
+const defaultDesignW: Float = 1080.0
+
+const defaultDesignH: Float = 1920.0
+
+# How many placeholder rows a viewed ListView gets, so a list authored against
+# app data still shows its row scene in a passive viewer.
+const listViewSampleRows: Int = 6
+
+type SceneDocument {
+  path: String
+  directory: String
+  fileName: String
+  scene: Scene
+  registry: SceneRegistry
+  pageRoot: EntityId
+  designW: Float
+  designH: Float
+  nodeCount: Int
+  loaded: Bool
+  status: String
+}
+
+# The scene to open: the first program argument, else RAE_UI_EDITOR_SCENE, else
+# the shipped MainMenu sample.
+func resolveScenePath() ret String {
+  if argCount() > 0 {
+    ret argAt(index: 0)
+  }
+  let fromEnv: String = getEnv(name: "RAE_UI_EDITOR_SCENE")
+  if fromEnv.length() > 0 {
+    ret fromEnv
+  }
+  ret "examples/121_ui_editor/assets/samples/MainMenu.raescene"
+}
+
+func directoryOf(path: view String) ret String {
+  let slash: Int = path.lastIndexOf(sub: "/")
+  if slash < 0 {
+    ret "./"
+  }
+  ret path.sub(start: 0, len: slash + 1)
+}
+
+func fileNameOf(path: view String) ret String {
+  let slash: Int = path.lastIndexOf(sub: "/")
+  if slash < 0 {
+    ret "{path}"
+  }
+  ret path.sub(start: slash + 1, len: path.length() - slash - 1)
+}
+
+func createSceneDocument(path: view String) ret SceneDocument {
+  ret SceneDocument {
+    path: "{path}"
+    directory: directoryOf(path: path)
+    fileName: fileNameOf(path: path)
+    scene: parseScene(source: "")
+    registry: createSceneRegistry()
+    pageRoot: noEntity()
+    designW: defaultDesignW
+    designH: defaultDesignH
+    nodeCount: 0
+    loaded: false
+    status: "no document"
+  }
+}
+
+# The design resolution: the root node's authored Rect when it has one, else
+# 1080x1920; RAE_UI_EDITOR_DESIGN=WxH wins over both.
+func documentDesignSize(document: mod SceneDocument) {
+  document.designW = defaultDesignW
+  document.designH = defaultDesignH
+  let scene: view Scene => document.scene
+  if scene.ok {
+    let rootIdx: Int = sceneNodeIndex(this: scene, nodeId: scene.rootNodeId)
+    if rootIdx >= 0 {
+      let node: view SceneNode => nodeAt(this: scene, idx: rootIdx)
+      let bag: JsonValue = Json.jsonValueAt(doc: scene.doc, idx: node.componentsValueIdx)
+      let rectIdx: Int = Json.field(doc: scene.doc, this: bag, key: "Rect")
+      if rectIdx >= 0 {
+        let rect: JsonValue = Json.jsonValueAt(doc: scene.doc, idx: rectIdx)
+        let w: Float = optFloat(
+          doc: scene.doc
+          container: rect
+          key: "w"
+          fallback: 0.0
+        )
+        let h: Float = optFloat(
+          doc: scene.doc
+          container: rect
+          key: "h"
+          fallback: 0.0
+        )
+        if w > 0.0 and h > 0.0 {
+          document.designW = w
+          document.designH = h
+        }
+      }
+    }
+  }
+  let override: String = getEnv(name: "RAE_UI_EDITOR_DESIGN")
+  let x: Int = override.indexOf(sub: "x")
+  if x > 0 {
+    let w: Int = override.sub(start: 0, len: x).toInt()
+    let h: Int = override.sub(start: x + 1, len: override.length() - x - 1).toInt()
+    if w > 0 and h > 0 {
+      document.designW = w.toFloat()
+      document.designH = h.toFloat()
+    }
+  }
+}
+
+# Load `<dir>/<sceneId>.raescene` into the registry if it is there and not yet
+# registered. Returns whether a scene was added this call.
+func registerSubSceneFile(document: mod SceneDocument, sceneId: view String) ret Bool {
+  if sceneId.length() is 0 or sceneRegistryHas(reg: document.registry, key: sceneId) {
+    ret false
+  }
+  let path: String = "{document.directory}{sceneId}.raescene"
+  if not exists(path: path) {
+    ret false
+  }
+  let scene: Scene = loadSceneFile(path: path)
+  if scene.ok is false {
+    log("[ui-editor] sub-scene {sceneId} failed to parse: {scene.errorMsg}")
+    ret false
+  }
+  let key: String = "{sceneId}"
+  registerScene(reg: document.registry, key: own key, scene: own scene)
+  ret true
+}
+
+# One pass over what the mounted world still references: unresolved
+# SceneInstance ids and every ListView's row/state scene ids. Returns whether
+# anything new was registered, so the caller can resolve and go again.
+func registerReferencedSubScenes(document: mod SceneDocument, world: view UiWorld) ret Bool {
+  var added: Bool = false
+  let instanceCount: Int = componentCount(this: world.sceneInstances)
+  loop var i: Int = 0, i < instanceCount, ++i {
+    let instance: SceneInstance = componentDataAt(this: world.sceneInstances, i: i)
+    if registerSubSceneFile(document: document, sceneId: instance.sceneId) {
+      added = true
+    }
+  }
+  let listCount: Int = componentCount(this: world.listViews)
+  loop var j: Int = 0, j < listCount, ++j {
+    let list: ListView = componentDataAt(this: world.listViews, i: j)
+    if registerSubSceneFile(document: document, sceneId: list.itemSceneId) {
+      added = true
+    }
+    if registerSubSceneFile(document: document, sceneId: list.emptySceneId) {
+      added = true
+    }
+    if registerSubSceneFile(document: document, sceneId: list.loadingSceneId) {
+      added = true
+    }
+    if registerSubSceneFile(document: document, sceneId: list.errorSceneId) {
+      added = true
+    }
+  }
+  ret added
+}
+
+# A passive viewer has no app data behind a ListView, so every list gets a few
+# placeholder rows whose cells name their bound field — the row scene draws.
+func seedListViewRows(world: mod UiWorld) {
+  let listCount: Int = componentCount(this: world.listViews)
+  loop var i: Int = 0, i < listCount, ++i {
+    let entity: EntityId = componentEntityAt(this: world.listViews, i: i)
+    if componentHas(this: world.listViewDatas, entity: entity) {
+      continue
+    }
+    let list: ListView = componentGet(this: world.listViews, entity: entity)
+    var rows: List(ListViewRow) = List.create(ListViewRow, cap: listViewSampleRows)
+    loop var row: Int = 0, row < listViewSampleRows, ++row {
+      var keys: List(String) = List.create(String, cap: list.bindings.length + 1)
+      var values: List(String) = List.create(String, cap: list.bindings.length + 1)
+      keys.add(value: "{list.itemKeyField}")
+      values.add(value: "row-{row + 1}")
+      loop var b: Int = 0, b < list.bindings.length, ++b {
+        if let binding: view ListViewBinding => list.bindings.viewAt(index: b) {
+          keys.add(value: "{binding.itemField}")
+          values.add(value: "{binding.itemField} {row + 1}")
+        }
+      }
+      rows.add(value: ListViewRow { keys: own keys, values: own values })
+    }
+    componentSet(this: world.listViewDatas, entity: entity, data: ListViewData { rows: own rows })
+  }
+}
+
+# Parse + register + mount under the `document` layer. On a parse failure the
+# world keeps whatever it had and the status line carries the error.
+func documentLoadSystem(document: mod SceneDocument, world: mod UiWorld) {
+  clearSceneDiagnostics(diagnostics: world.sceneDiagnostics)
+  document.scene = loadSceneFile(path: document.path)
+  documentDesignSize(document: document)
+  if document.scene.ok is false {
+    document.loaded = false
+    document.status = "parse error: {document.scene.errorMsg}"
+    reportSceneDiagnostic(
+      diagnostics: world.sceneDiagnostics
+      sceneId: document.fileName
+      nodeId: ""
+      kind: SceneDiagnosticKind.parseError
+      name: document.fileName
+      message: document.scene.errorMsg
+    )
+    log("[ui-editor] {document.path}: {document.status}")
+    ret
+  }
+  let overrides: List(SceneOverride) = List.create(SceneOverride, cap: 1)
+  let before: Int = aliveCount(world: world)
+  document.pageRoot = mountPage(
+    world: world
+    pageId: "document"
+    scene: document.scene
+    overrides: overrides
+    w: document.designW
+    h: document.designH
+  )
+  setLayerById(world: world, entity: document.pageRoot, id: "document")
+  # Sub-scenes: load what the world references, resolve, and repeat while
+  # resolving exposed new references (a sub-scene's own instances).
+  var passes: Int = 0
+  loop passes < 16 {
+    let added: Bool = registerReferencedSubScenes(document: document, world: world)
+    resolveSceneInstances(world: world, registry: document.registry, pageId: "document")
+    if not added {
+      passes = 16
+    }
+    passes = passes + 1
+  }
+  seedListViewRows(world: world)
+  document.nodeCount = aliveCount(world: world) - before
+  document.loaded = true
+  document.status = "ok"
+}
