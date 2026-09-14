@@ -73,6 +73,80 @@ func mountOrError(
   ret result
 }
 
+# Host-less sub-scene mount with the visible-failure sentinel (#990): the
+# scene's ROOT is the returned entity (lib `mountSubScene` keeps the root's
+# authored placement), sized w x h through a `Rect` override on the root
+# node — so a list materialiser creates no entity of its own. Only when the
+# scene is not ok does this materialise a red sentinel block at that size,
+# the same failure signal `mountOrError` paints on a page.
+func mountSubSceneOrError(
+  world: mod UiWorld
+  scene: view Scene
+  sceneLabel: view String
+  overrides: mod List(SceneOverride)
+  w: view Float
+  h: view Float
+) ret EntityId {
+  addRectSizeOverride(
+    list: overrides
+    nodeId: "{scene.rootNodeId}"
+    w: w
+    h: h
+  )
+  let mounted: EntityId = mountSubScene(world: world, scene: scene, overrides: overrides)
+  if isNone(this: mounted) {
+    let label: String = sceneLabel
+    log(
+      "[scene-error] mount failed for {label} (scene.ok={scene.ok}, scene.errorMsg={scene.errorMsg})"
+    )
+    let sentinel: EntityId = createEntity(world: world)
+    setRectFixed(
+      world: world
+      entity: sentinel
+      w: w
+      h: h
+    )
+    paintErrorBlock(world: world, entity: sentinel, label: label)
+    ret sentinel
+  }
+  ret mounted
+}
+
+# `mountSubSceneOrError` for a scene looked up by id in `reg`; an id the
+# registry does not know is the same visible failure as a broken scene.
+func mountRegistrySubSceneOrError(
+  world: mod UiWorld
+  reg: view SceneRegistry
+  sceneId: view String
+  overrides: mod List(SceneOverride)
+  w: view Float
+  h: view Float
+) ret EntityId {
+  let idx: Int = sceneRegistryIndex(reg: reg, key: sceneId)
+  if idx < 0 {
+    let label: String = sceneId
+    log("[scene-error] no sub-scene registered as {label}")
+    let sentinel: EntityId = createEntity(world: world)
+    setRectFixed(
+      world: world
+      entity: sentinel
+      w: w
+      h: h
+    )
+    paintErrorBlock(world: world, entity: sentinel, label: label)
+    ret sentinel
+  }
+  let scene: view Scene => sceneRegistryGet(reg: reg, idx: idx)
+  ret mountSubSceneOrError(
+    world: world
+    scene: scene
+    sceneLabel: sceneId
+    overrides: overrides
+    w: w
+    h: h
+  )
+}
+
 # Mount a scene under a fresh entity sized w x h. No overrides. `label`
 # is a short human-readable name used in error logs / on the sentinel
 # error block when mounting fails.

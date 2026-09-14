@@ -88,37 +88,24 @@ func clearCoverGridRows(world: mod UiWorld, grid: view EntityId) {
   }
 }
 
-# Mount one sub-scene (`sceneId` from the registry) on a fresh tile host
-# sized `tileH` square. Returns the host, which the scene's root components
-# now live on. `noEntity()` when the scene is missing (a red error block).
+# Mount one sub-scene (`sceneId` from the registry) as its own root entity,
+# `tileH` square (#990: host-less — the scene's root IS the tile; the side
+# travels as a `Rect` override on it). A missing scene is a red error block.
 func mountTileScene(
   world: mod UiWorld
   scenes: view AlbumScenes
   sceneId: view String
   tileH: view Float
-  overrides: view List(SceneOverride)
+  overrides: mod List(SceneOverride)
 ) ret EntityId {
-  let host: EntityId = createEntity(world: world)
-  setRectFixed(
+  ret mountRegistrySubSceneOrError(
     world: world
-    entity: host
+    reg: scenes.subScenes
+    sceneId: sceneId
+    overrides: overrides
     w: tileH
     h: tileH
   )
-  let idx: Int = sceneRegistryIndex(reg: scenes.subScenes, key: sceneId)
-  if idx < 0 {
-    paintErrorBlock(world: world, entity: host, label: sceneId)
-    ret host
-  }
-  let scene: view Scene => sceneRegistryGet(reg: scenes.subScenes, idx: idx)
-  let mounted: EntityId = mountOrError(
-    world: world
-    mountEntity: host
-    scene: scene
-    sceneLabel: sceneId
-    overrides: overrides
-  )
-  ret host
 }
 
 # One album-cover tile: the `cover-tile` sub-scene with its Sprite pointed at

@@ -17,14 +17,23 @@
 #    full-page scenes — but that's the same primitive plus a registry
 #    lookup, which is why `SceneRegistry` lives here too.
 #
+# Host-less mounts (#990)
+# ----------------------
+# `mountSubScene` is the same primitive for a scene whose ROOT should
+# be its own entity: it allocates the root, keeps the root's authored
+# placement (its `Rect` / `Size` ARE its size) and returns it, so a
+# list materialiser never creates a sizing host in code. A computed
+# size (a grid tile side, a row height) travels as a `Rect` override on
+# the root node, through the same channel as `Text.text`.
+#
 # Overrides
 # ---------
 # `SceneOverride` lets the caller patch specific fields on specific
-# nodes after the scene is loaded. Only string-valued fields are
-# supported in Phase 1f — `Text.text`, `Sprite.textureKey`, and
-# `Active.value` (parsed as `"true"` / `"false"`). The dispatch table
-# lives in `applyOverride`; extending it for numeric / colour overrides
-# is a follow-up when the music player needs them.
+# nodes after the scene is loaded. The value channel is a String:
+# `Text.text`, `Text.styleId`, `Sprite.textureKey`, `Sprite.tint`
+# (`"r,g,b,a"`), `Active.value` (`"true"` / `"false"`), `OnClick.actionId`
+# and `Rect.w` / `Rect.h` (a Float as text). The dispatch table lives in
+# `applyOverride`.
 open collections/StringMap
 import Json
 open ecs/Entity
@@ -169,6 +178,37 @@ func addActiveOverride(list: mod List(SceneOverride), nodeId: own String, value:
   )
 }
 
+# Root/any-node size override: `Rect.w` + `Rect.h` as Float text. This is how
+# a materialiser hands a COMPUTED size (a grid tile side, a row height) to a
+# host-less sub-scene root — the scene still owns the Rect, the code only
+# parameterises it, exactly as it parameterises `Text.text`.
+func addRectSizeOverride(
+  list: mod List(SceneOverride)
+  nodeId: own String
+  w: view Float
+  h: view Float
+) {
+  let rectKey: String = "Rect"
+  let wField: String = "w"
+  let hField: String = "h"
+  let nodeIdForH: String = "{nodeId}"
+  addOverride(
+    list: list
+    nodeId: own nodeId
+    componentName: own rectKey
+    fieldName: own wField
+    value: "{w}"
+  )
+  let rectKeyH: String = "Rect"
+  addOverride(
+    list: list
+    nodeId: own nodeIdForH
+    componentName: own rectKeyH
+    fieldName: own hField
+    value: "{h}"
+  )
+}
+
 # Sprite tint override. Encodes the colour as `"r,g,b,a"` because the
 # override value channel is currently a plain String — applyOverride
 # parses the four numeric components back out.
@@ -308,7 +348,52 @@ func mountSceneInstanceIntoPage(
   scene: view Scene
   overrides: view List(SceneOverride)
   pageId: view String
-) pub ret EntityId {
+) ret EntityId {
+  ret mountSceneInstanceImpl(
+    world: world
+    mountEntity: mountEntity
+    scene: scene
+    overrides: overrides
+    pageId: pageId
+    keepRootPlacement: false
+  )
+}
+
+# Mount `scene` as a NEW entity that IS the scene's root (#990). Unlike
+# `mountSceneInstance`, where the caller-owned mount entity already carries
+# its placement, here the root's authored `Rect` / `Size` / `Align` / ... are
+# applied too — the scene describes its own size. The caller attaches the
+# returned root wherever it belongs (`setParent`, a children list). A computed
+# size goes in `overrides` via `addRectSizeOverride` on the root node id.
+# Returns `noEntity()` (and creates nothing) when the scene is not ok.
+func mountSubScene(
+  world: mod UiWorld
+  scene: view Scene
+  overrides: view List(SceneOverride)
+) ret EntityId {
+  if scene.ok is false {
+    ret noEntity()
+  }
+  let root: EntityId = createEntity(world: world)
+  let mounted: EntityId = mountSceneInstanceImpl(
+    world: world
+    mountEntity: root
+    scene: scene
+    overrides: overrides
+    pageId: ""
+    keepRootPlacement: true
+  )
+  ret mounted
+}
+
+func mountSceneInstanceImpl(
+  world: mod UiWorld
+  mountEntity: view EntityId
+  scene: view Scene
+  overrides: view List(SceneOverride)
+  pageId: view String
+  keepRootPlacement: view Bool
+) ret EntityId {
   unsafe {
     if scene.ok is false {
       ret noEntity()
@@ -366,7 +451,7 @@ func mountSceneInstanceIntoPage(
         if key is childrenKey {
           skip = true
         }
-        if isRoot {
+        if isRoot and keepRootPlacement is false {
           if isPlacementComponent(name: key) {
             skip = true
           }
@@ -558,6 +643,24 @@ func applyOverride(world: mod UiWorld, entity: view EntityId, override: view Sce
       let active: Active = { value: v }
       componentSet(this: world.actives, entity: entity, data: active)
     }
+    ret
+  }
+  let rectKey: String = "Rect"
+  if override.componentName is rectKey {
+    var current: Rect = { position: { x: 0.0, y: 0.0 }, size: { x: 0.0, y: 0.0 } }
+    if componentHas(this: world.rects, entity: entity) {
+      current = componentGet(this: world.rects, entity: entity)
+    }
+    let value: Float = override.valueString.toFloat()
+    let wField: String = "w"
+    let hField: String = "h"
+    if override.fieldName is wField {
+      current.size.x = value
+    }
+    if override.fieldName is hField {
+      current.size.y = value
+    }
+    componentSet(this: world.rects, entity: entity, data: current)
     ret
   }
 }

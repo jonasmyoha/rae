@@ -222,7 +222,7 @@ func clearSearchRows(world: mod UiWorld, container: view EntityId) {
   }
 }
 
-# One result row: a track-row sub-scene instance on a fixed-height host,
+# One result row: a track-row sub-scene as its own root (#990: host-less),
 # tappable to play that exact song.
 func mountSearchRow(
   world: mod UiWorld
@@ -231,23 +231,17 @@ func mountSearchRow(
   subtitle: view String
   actionId: view String
 ) ret EntityId {
-  let row: EntityId = createEntity(world: world)
-  setRectFixed(
-    world: world
-    entity: row
-    w: phoneFrameW - outerPad * 2.0
-    h: trackRowH
-  )
-  let overrides: List(SceneOverride) = emptyOverrides()
+  var overrides: List(SceneOverride) = emptyOverrides()
   addTextOverride(list: overrides, nodeId: "IdxText", value: "")
   addTextOverride(list: overrides, nodeId: "TitleText", value: "{title}")
   addTextOverride(list: overrides, nodeId: "SubtitleText", value: "{subtitle}")
-  let mounted: EntityId = mountOrError(
+  let row: EntityId = mountSubSceneOrError(
     world: world
-    mountEntity: row
     scene: scenes.trackRow
     sceneLabel: "track-row"
     overrides: overrides
+    w: phoneFrameW - outerPad * 2.0
+    h: trackRowH
   )
   setOnClick(world: world, entity: row, actionId: actionId)
   ret row
