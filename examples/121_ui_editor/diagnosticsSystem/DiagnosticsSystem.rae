@@ -1,0 +1,200 @@
+# diagnosticsSystem — everything the document could not fully supply, made
+# visible (docs/ui-editor-design.md §3): the loader's `sceneDiagnostics`
+# (unknown component, runtime-only component, unknown token, missing
+# sub-scene, parse error — the #996 `report` policy) plus the textures this
+# system resolves itself. `Sprite.textureKey` is searched in `<scene dir>/`,
+# `<scene dir>/../textures/`, `<scene dir>/../images/` and
+# `$RAE_UI_EDITOR_ASSETS/` as `<key>.png`; a miss registers a hatched
+# placeholder under the key (so the sprite draws a box, not nothing) and records
+# a missingTexture diagnostic. The chrome's counters and status line are
+# written here from the document + the list; the chrome itself is a scene.
+import Gpu2d
+import String
+open Sys
+open ui/Ecs
+open ui/Components
+open ui/ScenePolicy
+open app3d/UiShell
+open ecs/Entity
+open ecs/ComponentTable
+open Gpu2dCanvas
+
+const placeholderSize: Int = 64
+
+# The key -> path search state: which keys were already looked up, so the scan
+# over the sprite table is free once every key is settled.
+type TextureSearch {
+  resolvedKeys: List(String)
+  extraDirectory: String
+}
+
+func createTextureSearch() ret TextureSearch {
+  ret TextureSearch {
+    resolvedKeys: List.create(String, cap: 16)
+    extraDirectory: getEnv(name: "RAE_UI_EDITOR_ASSETS")
+  }
+}
+
+func textureKeySettled(search: view TextureSearch, key: view String) ret Bool {
+  loop var i: Int = 0, i < search.resolvedKeys.length, ++i {
+    if let entry: view String => search.resolvedKeys.viewAt(index: i) {
+      if entry is key {
+        ret true
+      }
+    }
+  }
+  ret false
+}
+
+# The first `<dir>/<key>.png` that exists, or "".
+func findTexturePath(
+  search: view TextureSearch
+  sceneDirectory: view String
+  key: view String
+) ret String {
+  var candidates: List(String) = List.create(String, cap: 4)
+  candidates.add(value: "{sceneDirectory}{key}.png")
+  candidates.add(value: "{sceneDirectory}../textures/{key}.png")
+  candidates.add(value: "{sceneDirectory}../images/{key}.png")
+  if search.extraDirectory.length() > 0 {
+    candidates.add(value: "{search.extraDirectory}/{key}.png")
+  }
+  loop var i: Int = 0, i < candidates.length, ++i {
+    if let candidate: String = candidates.copyAt(index: i) {
+      if exists(path: candidate) {
+        ret candidate
+      }
+    }
+  }
+  ret ""
+}
+
+# A hatched grey box: diagonal stripes on a lighter field, one packed
+# r | g<<8 | b<<16 | a<<24 per pixel (Gpu2d.registerImageRgba's layout).
+func registerPlaceholderImage(canvas: mod Gpu2dCanvas, key: view String) {
+  var pixels: List(Int) = List.create(Int, cap: placeholderSize * placeholderSize)
+  loop var y: Int = 0, y < placeholderSize, ++y {
+    loop var x: Int = 0, x < placeholderSize, ++x {
+      var shade: Int = 150
+      if ((x + y) / 8) % 2 is 0 {
+        shade = 96
+      }
+      let edge: Bool = x < 2 or y < 2 or x >= placeholderSize - 2 or y >= placeholderSize - 2
+      if edge {
+        shade = 230
+      }
+      pixels.add(value: shade + shade * 256 + shade * 65536 + 255 * 16777216)
+    }
+  }
+  let handle: Int = Gpu2d.registerImageRgba(
+    canvas: canvas
+    key: "{key}"
+    pixels: pixels.data
+    w: placeholderSize
+    h: placeholderSize
+  )
+}
+
+# Resolve every Sprite.textureKey the world carries that is not settled yet.
+# Runs after a load; the table scan is cheap and every key settles once.
+func textureSystem(
+  search: mod TextureSearch
+  world: mod UiWorld
+  canvas: mod Gpu2dCanvas
+  sceneDirectory: view String
+  sceneId: view String
+) {
+  let spriteCount: Int = componentCount(this: world.sprites)
+  loop var i: Int = 0, i < spriteCount, ++i {
+    let sprite: Sprite = componentDataAt(this: world.sprites, i: i)
+    let key: String = "{sprite.textureKey}"
+    # Empty keys are colour-only sprites; `mat:` keys are icon-font glyphs.
+    if key.length() is 0 or key.startsWith(prefix: "mat:") or textureKeySettled(
+      search: search
+      key: key
+    ) {
+      continue
+    }
+    search.resolvedKeys.add(value: "{key}")
+    if Gpu2d.hasImageKey(canvas: canvas, key: key) {
+      continue
+    }
+    let path: String = findTexturePath(search: search, sceneDirectory: sceneDirectory, key: key)
+    if path.length() > 0 {
+      let handle: Int = Gpu2d.loadImageKey(canvas: canvas, key: key, path: path)
+      if handle > 0 {
+        continue
+      }
+    }
+    registerPlaceholderImage(canvas: canvas, key: key)
+    var nodeLabel: String = ""
+    let entity: EntityId = componentEntityAt(this: world.sprites, i: i)
+    if componentHas(this: world.nodeIdComponents, entity: entity) {
+      nodeLabel = "{componentGet(this: world.nodeIdComponents, entity: entity).id}"
+    }
+    reportSceneDiagnostic(
+      diagnostics: world.sceneDiagnostics
+      sceneId: sceneId
+      nodeId: nodeLabel
+      kind: SceneDiagnosticKind.missingTexture
+      name: key
+      message: "no {key}.png beside the scene, in ../textures, ../images or $RAE_UI_EDITOR_ASSETS; drawing a placeholder"
+    )
+  }
+}
+
+# The chrome's own state: its page root (so H can hide it) and visibility.
+type ChromeState {
+  pageRoot: EntityId
+  visible: Bool
+}
+
+# Write the top bar + status line from the document and the diagnostics.
+func chromeSyncSystem(
+  world: mod UiWorld
+  fileName: view String
+  designW: view Float
+  designH: view Float
+  nodeCount: view Int
+  status: view String
+) {
+  setNodeText(world: world, nodeId: "chrome/FileName", value: fileName)
+  setNodeText(
+    world: world
+    nodeId: "chrome/DesignSize"
+    value: "{designW.toInt()} x {designH.toInt()}"
+  )
+  setNodeText(world: world, nodeId: "chrome/NodeCount", value: "{nodeCount} nodes")
+  let count: Int = world.sceneDiagnostics.length
+  var diagnosticsLabel: String = "no diagnostics"
+  if count is 1 {
+    diagnosticsLabel = "1 diagnostic"
+  }
+  if count > 1 {
+    diagnosticsLabel = "{count} diagnostics"
+  }
+  setNodeText(world: world, nodeId: "chrome/DiagnosticsCount", value: diagnosticsLabel)
+  var line: String = "{status}"
+  if count > 0 {
+    if let first: view SceneDiagnostic => world.sceneDiagnostics.viewAt(index: 0) {
+      line = formatSceneDiagnostic(diagnostic: first)
+    }
+  }
+  setNodeText(world: world, nodeId: "chrome/StatusLine", value: line)
+  if count > 0 {
+    setNodeFillSlot(world: world, nodeId: "chrome/DiagnosticsPill", slot: "accent")
+  } else {
+    setNodeFillSlot(world: world, nodeId: "chrome/DiagnosticsPill", slot: "surfaceAlt")
+  }
+}
+
+# Log every diagnostic once, in the gate's one-line form, after a load.
+func logDiagnostics(world: view UiWorld, sceneId: view String, nodeCount: view Int) {
+  let count: Int = world.sceneDiagnostics.length
+  log("[ui-editor] mounted {sceneId}: {nodeCount} nodes, {count} diagnostics")
+  loop var i: Int = 0, i < count, ++i {
+    if let entry: view SceneDiagnostic => world.sceneDiagnostics.viewAt(index: i) {
+      log("[ui-editor]   {formatSceneDiagnostic(diagnostic: entry)}")
+    }
+  }
+}

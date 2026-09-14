@@ -201,7 +201,7 @@ const EXAMPLE_COLLECTIONS = {
   },
   ui: {
     title: "UI",
-    subtitle: "Application UI built on the Rae 2D renderer — scenes, layout, theming, scrolling and hot reload, at real app scale."
+    subtitle: "Application UI built on the Rae 2D renderer — scenes, layout, theming, scrolling and hot reload, at real app scale — plus the UI editor (121), a viewer that opens any .raescene file."
   },
   renderer2d: {
     title: "2D renderer",

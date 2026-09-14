@@ -1,0 +1,136 @@
+# createApp — the setup half: window, fonts, the document's theme, ONE UiWorld
+# under the #996 `report` policy with two layers (document / chrome), the
+# document mounted, the chrome mounted, textures resolved.
+import Gpu2d
+import SdfText
+import String
+open Sys
+open ui/Ecs
+open ui/Layer
+open ui/Pipeline
+open ui/Scene
+open ui/SceneFile
+open ui/SceneInstance
+open ui/ScenePolicy
+open ui/Theme
+open ui/ThemeParse
+open ui/ThemeResolved
+open ui/renderSystem/RenderSystem
+open app3d/UiShell
+open ecs/Entity
+open ecs/Schedule
+open Gpu2dCanvas
+
+# The shared Roboto MSDF atlas (no per-example font copies, as 119 does).
+const fontDirectory: String = "examples/105_ui_counter/assets/"
+
+const chromeScenePath: String = "examples/121_ui_editor/assets/scenes/editor.raescene"
+
+# Fonts from the shared atlas dir; the theme from `<scene dir>/theme.raescene`
+# when the document ships one, else the library default. (loadUiAssets ties
+# both to one directory, and the theme must follow the document.)
+func createEditorUi(sceneDirectory: view String) ret Gpu2dUi {
+  let textFont: SdfFont = SdfText.loadSdfFont(
+    jsonPath: "{fontDirectory}Roboto-Regular.mtsdf.json"
+    rawAtlasPath: "{fontDirectory}Roboto-Regular.mtsdf.raw"
+  )
+  let iconFont: SdfFont = SdfText.loadSdfFont(
+    jsonPath: "{fontDirectory}MaterialIconsRound-Regular.mtsdf.json"
+    rawAtlasPath: "{fontDirectory}MaterialIconsRound-Regular.mtsdf.raw"
+  )
+  var theme: ResolvedTheme = createResolvedTheme()
+  var active: Theme = lightTheme()
+  let themePath: String = "{sceneDirectory}theme.raescene"
+  if exists(path: themePath) {
+    let themeScene: Scene = loadSceneFile(path: themePath)
+    theme = parseTheme(scene: themeScene)
+    active = overlayPalette(base: lightTheme(), tokens: theme)
+    log("[ui-editor] theme: {themePath}")
+  } else {
+    log("[ui-editor] theme: library default (no {themePath})")
+  }
+  ret Gpu2dUi {
+    textFont: own textFont
+    iconFont: own iconFont
+    theme: own theme
+    activeTheme: active
+  }
+}
+
+func createApp() ret App {
+  let headless: Bool = getEnv(name: "RAE_UI_HEADLESS").length() > 0
+  var viewport: EditorViewport = createEditorViewport()
+  Gpu2d.initWindow(
+    width: viewport.windowW
+    height: viewport.windowH
+    title: "Rae UI Editor — .raescene viewer"
+  )
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+
+  var document: SceneDocument = createSceneDocument(path: resolveScenePath())
+  let gpuUi: Gpu2dUi = createEditorUi(sceneDirectory: document.directory)
+
+  var world: UiWorld = create()
+  seedWorldTheme(world: world, res: gpuUi)
+  # A viewer opens OTHER people's scenes: report what it cannot apply, never exit.
+  world.scenePolicy.unknownComponents = UnknownComponentPolicy.report
+  let documentLayer: EntityId = createLayerEntity(world: world, id: "document", order: 0)
+  let chromeLayer: EntityId = createLayerEntity(world: world, id: "chrome", order: 100)
+
+  documentLoadSystem(document: document, world: world)
+  applyViewport(
+    viewport: viewport
+    world: world
+    designW: document.designW
+    designH: document.designH
+  )
+
+  # The chrome: the app's own scene on its own layer, sized to the design.
+  let chromeScene: Scene = loadSceneFile(path: chromeScenePath)
+  let chromeOverrides: List(SceneOverride) = List.create(SceneOverride, cap: 1)
+  let chromeRoot: EntityId = mountPage(
+    world: world
+    pageId: "chrome"
+    scene: chromeScene
+    overrides: chromeOverrides
+    w: document.designW
+    h: document.designH
+  )
+  setLayerById(world: world, entity: chromeRoot, id: "chrome")
+  var chrome: ChromeState = { pageRoot: chromeRoot, visible: true }
+
+  var textures: TextureSearch = createTextureSearch()
+  unsafe {
+    textureSystem(
+      search: textures
+      world: world
+      canvas: canvas
+      sceneDirectory: document.directory
+      sceneId: document.fileName
+    )
+  }
+  chromeSyncSystem(
+    world: world
+    fileName: document.fileName
+    designW: document.designW
+    designH: document.designH
+    nodeCount: document.nodeCount
+    status: document.status
+  )
+  logDiagnostics(world: world, sceneId: document.scene.sceneId, nodeCount: document.nodeCount)
+
+  var schedule: Schedule = createUiPipeline(world: world)
+  unsafe {
+    ret App {
+      gpuUi: own gpuUi
+      canvas: own canvas
+      world: own world
+      schedule: own schedule
+      document: own document
+      viewport: viewport
+      chrome: chrome
+      textures: own textures
+      headless: headless
+    }
+  }
+}

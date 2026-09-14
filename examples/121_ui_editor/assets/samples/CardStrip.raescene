@@ -1,0 +1,67 @@
+{
+  "type": "Scene",
+  "version": 2,
+  "sceneId": "CardStrip",
+  "root": "Screen",
+  "nodes": {
+    "Screen": {
+      "Rect": { "x": 0, "y": 0, "w": 1080, "h": 1920 },
+      "Shape": { "kind": "Rect", "fill": "background", "stroke": "#00000000", "strokeWidth": 0 },
+      "Layout": { "type": "Vertical", "gap": "spaceL", "alignCross": "Stretch" },
+      "Padding": { "l": "spaceL", "t": 160, "r": "spaceL", "b": "spaceL" },
+      "Children": ["Heading", "Strip", "Note"]
+    },
+    "Heading": {
+      "Rect": { "x": 0, "y": 0, "w": 0, "h": 90 },
+      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
+      "Text": { "text": "Your hand", "styleId": "title" }
+    },
+    "Strip": {
+      "Rect": { "x": 0, "y": 0, "w": 0, "h": 520 },
+      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
+      "Layout": { "type": "Horizontal", "gap": "spaceM", "alignMain": "SpaceBetween", "alignCross": "Center" },
+      "Children": ["CardOne", "CardTwo", "CardThree"]
+    },
+    "CardOne": {
+      "Rect": { "x": 0, "y": 0, "w": 300, "h": 460 },
+      "TransformFx": { "scaleX": 1, "scaleY": 1, "rotation": -0.12, "alpha": 1, "visible": true, "pivot": { "x": 0.5, "y": 1 }, "anchor": { "x": 0.5, "y": 1 } },
+      "MaskShape": { "kind": "RoundedRect", "sourceNodeId": "", "radius": 36 },
+      "SceneInstance": {
+        "sceneId": "Card",
+        "params": { "overrides": [
+          { "nodeId": "CardTitle", "component": "Text", "field": "text", "value": "Ember" },
+          { "nodeId": "CardCost", "component": "Text", "field": "text", "value": "3" }
+        ] }
+      }
+    },
+    "CardTwo": {
+      "Rect": { "x": 0, "y": 0, "w": 300, "h": 460 },
+      "TransformFx": { "scaleX": 1.06, "scaleY": 1.06, "rotation": 0, "alpha": 1, "visible": true, "pivot": { "x": 0.5, "y": 1 }, "anchor": { "x": 0.5, "y": 1 } },
+      "MaskShape": { "kind": "RoundedRect", "sourceNodeId": "", "radius": 36 },
+      "SceneInstance": {
+        "sceneId": "Card",
+        "params": { "overrides": [
+          { "nodeId": "CardTitle", "component": "Text", "field": "text", "value": "Tide" },
+          { "nodeId": "CardCost", "component": "Text", "field": "text", "value": "5" }
+        ] }
+      }
+    },
+    "CardThree": {
+      "Rect": { "x": 0, "y": 0, "w": 300, "h": 460 },
+      "TransformFx": { "scaleX": 1, "scaleY": 1, "rotation": 0.12, "alpha": 1, "visible": true, "pivot": { "x": 0.5, "y": 1 }, "anchor": { "x": 0.5, "y": 1 } },
+      "MaskShape": { "kind": "RoundedRect", "sourceNodeId": "", "radius": 36 },
+      "SceneInstance": {
+        "sceneId": "Card",
+        "params": { "overrides": [
+          { "nodeId": "CardTitle", "component": "Text", "field": "text", "value": "Gale" },
+          { "nodeId": "CardCost", "component": "Text", "field": "text", "value": "2" }
+        ] }
+      }
+    },
+    "Note": {
+      "Rect": { "x": 0, "y": 0, "w": 0, "h": 36 },
+      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
+      "Text": { "text": "three instances of Card.raescene, spaceBetween, masked, rotated", "styleId": "caption" }
+    }
+  }
+}

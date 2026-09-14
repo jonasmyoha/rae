@@ -1,0 +1,24 @@
+pack UiEditor {
+  format: "raepack"
+  version: 1
+  defaultTarget: compiled
+  name: "UI Editor — .raescene viewer"
+  description: "Opens ANY .raescene file and shows it as lib/ui renders it: the scene named by the first program argument (rae run ... -- path/to/scene.raescene), else RAE_UI_EDITOR_SCENE, else the shipped MainMenu sample. One UiWorld, two layers: the document (mounted with one mountPage under its own design resolution, letterboxed into a 9:16 window) and the app's own chrome scene (file name, design size, node count, diagnostics; H hides it). Sub-scenes, theme and textures resolve from the scene's directory; whatever cannot load is a visible diagnostic, never a crash. Version 1 is a passive viewer; watching and the inspector follow."
+  category: "UI"
+  display: {
+    width: 540
+    height: 960
+  }
+  targets: {
+    target compiled: {
+      label: "Compiled"
+      entry: "Main.rae"
+      sources: {
+        source: {
+          path: "."
+          emit: compiled
+        }
+      }
+    }
+  }
+}

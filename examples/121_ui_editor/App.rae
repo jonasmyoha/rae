@@ -1,0 +1,73 @@
+# runApp — the passive view loop: the lib/ui systems on the #939 Schedule,
+# the ListView system (rows are placeholder data, documentSystem), `H` toggles
+# the chrome, and the same idle policy as 105 (repaint on wake, ~0% CPU idle).
+import Gpu2d
+import Keys
+import Sdl3
+open ui/Ecs
+open ui/Components
+open ui/EventLoop
+open ui/Pipeline
+open ui/inputSystem/InputSystem
+open ui/listViewSystem/ListViewSystem
+open ui/renderSystem/RenderSystem
+open app3d/UiShell
+open ecs/Entity
+open ecs/ComponentTable
+open Gpu2dCanvas
+
+const idleHeartbeatSec: Float = 0.5
+
+func toggleChrome(chrome: mod ChromeState, world: mod UiWorld) {
+  chrome.visible = not chrome.visible
+  let active: Active = { value: chrome.visible }
+  componentSet(this: world.actives, entity: chrome.pageRoot, data: active)
+}
+
+func runApp(app: mod App) ret Int {
+  var input: UiInput = createUiInput()
+  listViewSystem(world: app.world, scenes: app.document.registry)
+  runScheduledUiSystems(schedule: app.schedule, world: app.world, res: app.gpuUi)
+  var renderedOnce: Bool = false
+  var wokeUp: Bool = false
+
+  loop not Gpu2d.pollClose() {
+    var changed: Bool = viewportSystem(viewport: app.viewport)
+    updateUiInput(input: input, world: app.world)
+    let hadEvents: Bool = uiActionCount(world: app.world) > 0
+    if Sdl3.isKeyPressed(key: Keys.keyH) {
+      toggleChrome(chrome: app.chrome, world: app.world)
+      changed = true
+    }
+    if hadEvents or changed {
+      listViewSystem(world: app.world, scenes: app.document.registry)
+      runScheduledUiSystems(schedule: app.schedule, world: app.world, res: app.gpuUi)
+    }
+    let needsRender: Bool = hadEvents or changed or wokeUp or renderedOnce is false
+    wokeUp = false
+    if Gpu2d.shouldRenderFrame(appNeedsRender: needsRender) {
+      Gpu2d.beginFrame(
+        canvas: app.canvas
+        r: 0.04
+        g: 0.04
+        b: 0.05
+        a: 1.0
+      )
+      renderSystemGpu2d(world: app.world, res: app.gpuUi, canvas: app.canvas)
+      Gpu2d.endFrame(canvas: app.canvas)
+      renderedOnce = true
+    } else {
+      Gpu2d.waitEvents(timeoutSec: nextWaitTimeoutSec(
+        animating: false
+        mouseDown: false
+        pollWatcher: false
+        frameSec: 0.016667
+        heartbeatSec: idleHeartbeatSec
+      ))
+      wokeUp = true
+    }
+  }
+  canvasShutdown(canvas: app.canvas)
+  Gpu2d.closeWindow()
+  ret 0
+}
