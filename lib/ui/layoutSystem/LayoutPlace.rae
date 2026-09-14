@@ -140,6 +140,18 @@ func placeChildren(world: mod UiWorld, entity: view EntityId, scratch: mod List(
       )
       ret
     }
+    if layout.kind is LayoutType.grid {
+      placeGrid(
+        world: world
+        kids: kids
+        contentX: contentX
+        contentY: contentY
+        contentW: contentW
+        contentH: contentH
+        layout: layout
+      )
+      ret
+    }
     # None: each child uses its authored Rect.x/y as relative position
     # inside the parent's padded content box.
     var i: Int = 0
@@ -411,6 +423,99 @@ func placeVertical(
       )
       cursorY = cursorY + childH + gap + extraGap
       j = j + 1
+    }
+  }
+}
+
+# `Layout: Grid` (#991): row-major cells, `columns` per row; a column is as
+# wide as its widest child, a row as tall as its tallest (the same rule as
+# measureGrid, so the measured extent and the placed extent agree). A child
+# whose axis is `Fill` takes its whole cell on that axis; every other child
+# resolves its own size and sits at its cell's top-left.
+func placeGrid(
+  world: mod UiWorld
+  kids: view List(EntityId)
+  contentX: view Float
+  contentY: view Float
+  contentW: view Float
+  contentH: view Float
+  layout: view Layout
+) {
+  unsafe {
+    let n: Int = kids.length
+    let cols: Int = gridColumns(layout: layout)
+    let rows: Int = (n + cols - 1) / cols
+    var sizes: List(Vec2) = List.create(Vec2, cap: n)
+    var colWidths: List(Float) = List.create(Float, cap: cols)
+    var c: Int = 0
+    loop c < cols {
+      colWidths.add(value: 0.0)
+      c = c + 1
+    }
+    var rowHeights: List(Float) = List.create(Float, cap: rows)
+    var r: Int = 0
+    loop r < rows {
+      rowHeights.add(value: 0.0)
+      r = r + 1
+    }
+    var i: Int = 0
+    loop i < n {
+      let cid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: i)
+      let resolved: Vec2 = resolveOwnSize(
+        world: world
+        entity: cid
+        parentAvailW: contentW
+        parentAvailH: contentH
+        hasParentAvail: true
+      )
+      let childW: Float = applyConstraintsW(world: world, entity: cid, w: resolved.x)
+      let childH: Float = applyConstraintsH(world: world, entity: cid, h: resolved.y)
+      sizes.add(value: Vec2 { x: childW, y: childH })
+      let col: Int = i - (i / cols) * cols
+      let row: Int = i / cols
+      if childW > rae_ext_rae_buf_get(buf: colWidths.data, index: col) {
+        colWidths.set(index: col, value: childW)
+      }
+      if childH > rae_ext_rae_buf_get(buf: rowHeights.data, index: row) {
+        rowHeights.set(index: row, value: childH)
+      }
+      i = i + 1
+    }
+    var cursorY: Float = contentY
+    var rr: Int = 0
+    loop rr < rows {
+      let rowH: Float = rae_ext_rae_buf_get(buf: rowHeights.data, index: rr)
+      var cursorX: Float = contentX
+      var cc: Int = 0
+      loop cc < cols {
+        let k: Int = rr * cols + cc
+        let colW: Float = rae_ext_rae_buf_get(buf: colWidths.data, index: cc)
+        if k < n {
+          let cid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: k)
+          let size: Size = entitySize(world: world, entity: cid)
+          let childSize: Vec2 = rae_ext_rae_buf_get(buf: sizes.data, index: k)
+          var cellW: Float = childSize.x
+          var cellH: Float = childSize.y
+          if size.w.mode is SizeMode.fill {
+            cellW = colW
+          }
+          if size.h.mode is SizeMode.fill {
+            cellH = rowH
+          }
+          writeComputedRect(
+            world: world
+            entity: cid
+            localX: cursorX
+            localY: cursorY
+            ownW: cellW
+            ownH: cellH
+          )
+        }
+        cursorX = cursorX + colW + layout.columnGap
+        cc = cc + 1
+      }
+      cursorY = cursorY + rowH + layout.rowGap
+      rr = rr + 1
     }
   }
 }

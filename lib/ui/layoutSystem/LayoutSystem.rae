@@ -324,6 +324,11 @@ func measureNode(world: mod UiWorld, entity: view EntityId, scratch: mod List(En
         measuredW = sumMain + pad.l + pad.r
         measuredH = maxCross + pad.t + pad.b
       }
+      if layout.kind is LayoutType.grid {
+        let extent: Vec2 = measureGrid(world: world, kids: kids, layout: layout)
+        measuredW = extent.x + pad.l + pad.r
+        measuredH = extent.y + pad.t + pad.b
+      }
     } else {
       # Leaf nodes: their authored rect IS their measure.
       measuredW = rect.size.x
@@ -335,6 +340,70 @@ func measureNode(world: mod UiWorld, entity: view EntityId, scratch: mod List(En
 
     let ms: MeasuredSize = { w: measuredW, h: measuredH }
     componentSet(this: world.measuredSizes, entity: entity, data: ms)
+  }
+}
+
+# Grid columns for a layout: an authored `columns` < 1 means one column, so
+# an unconfigured grid degrades to a vertical list instead of dividing by 0.
+func gridColumns(layout: view Layout) ret Int {
+  if layout.columns < 1 {
+    ret 1
+  }
+  ret layout.columns
+}
+
+# `Layout: Grid` (#991): children fill `columns` cells per row in authored
+# order, row-major. Each column is as wide as its widest child and each row as
+# tall as its tallest, so a grid of equal tiles is exactly the rows-of-
+# Horizontal-containers it replaces; `columnGap` / `rowGap` sit between cells.
+# Returns the content extent (no padding).
+func measureGrid(world: view UiWorld, kids: view List(EntityId), layout: view Layout) ret Vec2 {
+  unsafe {
+    let n: Int = kids.length
+    let cols: Int = gridColumns(layout: layout)
+    let rows: Int = (n + cols - 1) / cols
+    var colWidths: List(Float) = List.create(Float, cap: cols)
+    var c: Int = 0
+    loop c < cols {
+      colWidths.add(value: 0.0)
+      c = c + 1
+    }
+    var totalH: Float = 0.0
+    var r: Int = 0
+    loop r < rows {
+      var rowH: Float = 0.0
+      var k: Int = 0
+      loop k < cols {
+        let i: Int = r * cols + k
+        if i < n {
+          let cid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: i)
+          let cw: Float = childMeasuredW(world: world, entity: cid)
+          let ch: Float = childMeasuredH(world: world, entity: cid)
+          if ch > rowH {
+            rowH = ch
+          }
+          if cw > rae_ext_rae_buf_get(buf: colWidths.data, index: k) {
+            colWidths.set(index: k, value: cw)
+          }
+        }
+        k = k + 1
+      }
+      totalH = totalH + rowH
+      r = r + 1
+    }
+    var totalW: Float = 0.0
+    var w: Int = 0
+    loop w < cols {
+      totalW = totalW + rae_ext_rae_buf_get(buf: colWidths.data, index: w)
+      w = w + 1
+    }
+    if cols > 1 {
+      totalW = totalW + layout.columnGap * (cols - 1).toFloat()
+    }
+    if rows > 1 {
+      totalH = totalH + layout.rowGap * (rows - 1).toFloat()
+    }
+    ret Vec2 { x: totalW, y: totalH }
   }
 }
 
