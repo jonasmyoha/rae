@@ -1,0 +1,250 @@
+open ui/Ecs
+# AlbumSystems (#979) — the systems behind the scene-driven album page.
+#
+#   albumHeaderSystem  every `AlbumHeader`: when the collection key derived
+#                      from app state (album stem / playlist view / library
+#                      revision) moves past `builtKey`, write the caption,
+#                      title and artist Texts and point the hero cover's
+#                      Sprite and HeroWidget at the collection's cover stem.
+#   trackListSystem    every `TrackList`: when that key or the playing song
+#                      moves past `builtKey`, destroy the rows and mount one
+#                      `track-row` sub-scene per CollectionRow — the playing
+#                      row highlighted with the accent pill and marked
+#                      selected — each tappable via `song.openref`.
+#
+# Neither builds page layout: the header nodes, the list container (Size h
+# Hug, so it grows with its rows) and the spacer are authored in
+# album.raescene; the rows are the data list's items.
+import ui/Components
+import ui/Scene
+open ui/SceneInstance
+open ecs/Entity
+open ecs/ComponentTable
+
+# What the header and the rows depend on, as one comparable string.
+func albumCollectionKey(state: view AppState) ret String {
+  ret "{state.currentAlbumStem}|{state.viewingPlaylist}|{state.currentPlaylistId}|{state.libraryRevision}"
+}
+
+func setPageTextIfDifferent(
+  world: mod UiWorld
+  page: view String
+  nodeId: view String
+  text: view String
+) {
+  if let raw: Int = findNodeInPage(world: world, pageId: page, nodeId: nodeId) {
+    let entity: EntityId = nodeEntity(world: world, index: raw)
+    if componentHas(this: world.texts, entity: entity) {
+      let current: Text = componentGet(this: world.texts, entity: entity)
+      if current.text is not text {
+        let updated: Text = {
+          text: "{text}"
+          styleId: "{current.styleId}"
+          wrapWidthMode: current.wrapWidthMode
+        }
+        componentSet(this: world.texts, entity: entity, data: updated)
+      }
+    }
+  }
+}
+
+func albumHeaderSystem(world: mod UiWorld, state: view AppState) pub {
+  let key: String = albumCollectionKey(state: state)
+  let n: Int = componentCount(this: world.albumHeaders)
+  var i: Int = 0
+  loop i < n {
+    let header: EntityId = componentEntityAt(this: world.albumHeaders, i: i)
+    let binding: AlbumHeader = componentDataAt(this: world.albumHeaders, i: i)
+    if binding.builtKey is not key {
+      let page: String = pageOf(world: world, entity: header)
+      let cv: CollectionView = buildCurrentCollection(state: state)
+      setPageTextIfDifferent(
+        world: world
+        page: page
+        nodeId: binding.captionNodeId
+        text: cv.caption
+      )
+      setPageTextIfDifferent(
+        world: world
+        page: page
+        nodeId: binding.titleNodeId
+        text: cv.title
+      )
+      setPageTextIfDifferent(
+        world: world
+        page: page
+        nodeId: binding.artistNodeId
+        text: cv.artist
+      )
+      if cv.coverStem.length() > 0 {
+        if let coverRaw: Int = findNodeInPage(
+          world: world
+          pageId: page
+          nodeId: binding.coverNodeId
+        ) {
+          let cover: EntityId = nodeEntity(world: world, index: coverRaw)
+          if componentHas(this: world.sprites, entity: cover) {
+            let sp: Sprite = componentGet(this: world.sprites, entity: cover)
+            if sp.textureKey is not cv.coverStem {
+              let updated: Sprite = {
+                textureKey: "{cv.coverStem}"
+                tint: sp.tint
+                tintSlot: "{sp.tintSlot}"
+                scaleMode: sp.scaleMode
+                tileScale: sp.tileScale
+                nineSlice: sp.nineSlice
+                hasNineSlice: sp.hasNineSlice
+              }
+              componentSet(this: world.sprites, entity: cover, data: updated)
+            }
+          }
+          setHeroWidget(world: world, entity: cover, key: "{cv.coverStem}")
+        }
+      }
+      let built: AlbumHeader = {
+        captionNodeId: "{binding.captionNodeId}"
+        titleNodeId: "{binding.titleNodeId}"
+        artistNodeId: "{binding.artistNodeId}"
+        coverNodeId: "{binding.coverNodeId}"
+        builtKey: "{key}"
+      }
+      componentSet(this: world.albumHeaders, entity: header, data: built)
+    }
+    i = i + 1
+  }
+}
+
+func clearTrackRows(world: mod UiWorld, container: view EntityId) {
+  unsafe {
+    if componentHas(this: world.childrens, entity: container) is false {
+      ret
+    }
+    let old: List(EntityId) = List.create(EntityId, cap: 16)
+    let kids: view Children => componentView(this: world.childrens, entity: container)
+    var k: Int = 0
+    loop k < kids.ids.length {
+      old.add(value: rae_ext_rae_buf_get(buf: kids.ids.data, index: k))
+      k = k + 1
+    }
+    loop let row: view EntityId in old {
+      destroyEntitySubtree(world: world, root: row)
+    }
+  }
+}
+
+# One track row: the `track-row` sub-scene on a fixed-height host with the
+# song's number / title / subtitle, the playing highlight, the widget tags
+# and the whole-row `song.openref.<index>.<stem>` click.
+func mountTrackRow(
+  world: mod UiWorld
+  scenes: view AlbumScenes
+  cr: view CollectionRow
+  visual: view Int
+  playback: view PlaybackState
+) ret EntityId {
+  let row: EntityId = createEntity(world: world)
+  setRectFixed(
+    world: world
+    entity: row
+    w: phoneFrameW - outerPad * 2.0
+    h: trackRowH
+  )
+  var num: Int = cr.number
+  if num <= 0 {
+    num = visual + 1
+  }
+  var label: String = "{num}"
+  if num < 10 {
+    label = "0{num}"
+  }
+  let overrides: List(SceneOverride) = emptyOverrides()
+  addTextOverride(list: overrides, nodeId: "IdxText", value: label)
+  addTextOverride(list: overrides, nodeId: "TitleText", value: "{cr.title}")
+  addTextOverride(list: overrides, nodeId: "SubtitleText", value: "{cr.subtitle}")
+  let mounted: EntityId = mountOrError(
+    world: world
+    mountEntity: row
+    scene: scenes.trackRow
+    sceneLabel: "track-row"
+    overrides: overrides
+  )
+  # Highlight only the exact (album, track) that is playing — keyed on the
+  # row's own stem + index so a playlist spanning albums works.
+  var isPlayingRow: Bool = false
+  if playback.playingAlbumStem is cr.albumStem {
+    if cr.trackIndex is playback.playingTrackIndex {
+      isPlayingRow = true
+    }
+  }
+  if isPlayingRow {
+    let pill: Shape = {
+      kind: ShapeKind.roundedRect
+      fill: palettePill(theme: world.theme.active)
+      stroke: RgbaColor { r: 0, g: 0, b: 0, a: 0 }
+      strokeWidth: 0.0
+      radius: 39.03614457831325
+    }
+    componentSet(this: world.shapes, entity: row, data: pill)
+  }
+  setWidgetIdentity(
+    world: world
+    entity: row
+    id: "{cr.albumStem}:{cr.trackIndex}"
+    kind: "trackRow"
+  )
+  setWidgetState(
+    world: world
+    entity: row
+    enabled: true
+    selected: isPlayingRow
+    loading: false
+    error: false
+  )
+  setDataDependency(
+    world: world
+    entity: row
+    resource: dataResourcePlayback()
+    field: dataFieldPlayingTrack()
+    observedRevision: playback.revision
+  )
+  setOnClick(world: world, entity: row, actionId: "song.openref.{cr.trackIndex}.{cr.albumStem}")
+  ret row
+}
+
+func trackListSystem(
+  world: mod UiWorld
+  state: view AppState
+  playback: view PlaybackState
+  scenes: view AlbumScenes
+) pub {
+  unsafe {
+    let key: String = "{albumCollectionKey(state: state)}|{playback.playingAlbumStem}|{playback.playingTrackIndex}"
+    let n: Int = componentCount(this: world.trackLists)
+    var i: Int = 0
+    loop i < n {
+      let container: EntityId = componentEntityAt(this: world.trackLists, i: i)
+      let binding: TrackList = componentDataAt(this: world.trackLists, i: i)
+      if binding.builtKey is not key {
+        clearTrackRows(world: world, container: container)
+        let cv: CollectionView = buildCurrentCollection(state: state)
+        let rows: List(EntityId) = List.create(EntityId, cap: cv.rows.length)
+        var r: Int = 0
+        loop r < cv.rows.length {
+          let cr: CollectionRow = rae_ext_rae_buf_get(buf: cv.rows.data, index: r)
+          rows.add(value: mountTrackRow(
+            world: world
+            scenes: scenes
+            cr: cr
+            visual: r
+            playback: playback
+          ))
+          r = r + 1
+        }
+        attachChildren(world: world, parent: container, kids: rows)
+        let built: TrackList = { builtKey: "{key}" }
+        componentSet(this: world.trackLists, entity: container, data: built)
+      }
+      i = i + 1
+    }
+  }
+}
