@@ -2,31 +2,28 @@ open ui/Ecs
 open assetSystem/GpuAssetRegistry
 
 # The per-frame UI observer state. The playback slice has been carved out
-# into its own per-feature `UiPlaybackSystem` (#267, §5.2); `historyRevision` and
-# `sheetEpoch` are the observer caches for the history list + bottom sheet
-# and become their own UI systems in follow-ups.
+# into its own per-feature `UiPlaybackSystem` (#267, §5.2); `historyRevision`
+# is the observer cache for the history list and becomes its own UI system in
+# a follow-up. (The bottom sheet's epoch lives on its `BottomSheet` component
+# since #980.)
 type UiRefreshCache {
   # Last PlayHistory.revision this observer reacted to (#944, §7 system revision).
   historyRevision: Int
   uiPlayback: UiPlaybackSystem
-  sheetEpoch: Int
 }
 
 type UiRefreshResult {
   historyChanged: Bool
   playbackChanged: Bool
-  sheetChanged: Bool
 }
 
 func createUiRefreshCache(
   historyRevision: view Int
   playbackRevision: view Int
-  sheetEpoch: view Int
 ) pub ret UiRefreshCache {
   ret UiRefreshCache {
     historyRevision: historyRevision
     uiPlayback: createUiPlaybackSystem(observedRevision: playbackRevision)
-    sheetEpoch: sheetEpoch
   }
 }
 
@@ -41,7 +38,6 @@ func refreshMountedUi(
   reg: view TextureRegistry
 ) pub ret UiRefreshResult {
   let oldHistory: Int = cache.historyRevision
-  let oldSheet: Int = cache.sheetEpoch
 
   cache.historyRevision = refreshHistoryViewsIfNeeded(
     world: world
@@ -57,11 +53,8 @@ func refreshMountedUi(
     playback: playback
     reg: reg
   )
-  cache.sheetEpoch = refreshBottomSheetIfNeeded(
-    world: world
-    sheet: state.bottomSheet
-    cachedEpoch: cache.sheetEpoch
-  )
+  # #980: the action sheet follows BottomSheetState (visible + epoch) in place.
+  bottomSheetSystem(world: world, sheet: state.bottomSheet, scenes: scenes)
   # #974: the profile page's data bindings. Both compare before writing, so
   # they cost nothing at idle and need no observer revision of their own.
   profileStatsSystem(world: world, state: state)
@@ -84,6 +77,5 @@ func refreshMountedUi(
   ret UiRefreshResult {
     historyChanged: cache.historyRevision is not oldHistory
     playbackChanged: playbackChanged
-    sheetChanged: cache.sheetEpoch is not oldSheet
   }
 }
