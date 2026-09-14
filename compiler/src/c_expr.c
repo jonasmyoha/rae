@@ -664,6 +664,26 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
             fprintf(out, ")");
             break;
         }
+        // Built-in static method (#959): Type.default() → the zero value of the
+        // type, `((rae_TYPE){0})`: every field zero / false / empty String /
+        // empty List / first enum case / none-opt — the same starting point
+        // fromJson fills. One opaque value primitive (not field-by-field
+        // construction reflection; #774). Substituted through the enclosing
+        // generic context like fromJson, so `T.default()` inside a function
+        // generic over T names the concrete instantiation.
+        if (str_eq_cstr(expr->as.method_call.method_name, "default")
+            && !expr->as.method_call.args
+            && expr->as.method_call.object->kind == AST_EXPR_IDENT) {
+            Str type_name = expr->as.method_call.object->as.ident;
+            AstTypeRef tmp = {0}; AstIdentifierPart part = {0}; part.text = type_name; tmp.parts = &part;
+            const AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, &tmp);
+            // Through the C type printer so builtins (Int, String, List(T))
+            // spell correctly as well as user structs.
+            fprintf(out, "((");
+            emit_type_ref_as_c_type(ctx, sub ? sub : &tmp, out, false);
+            fprintf(out, "){0})");
+            break;
+        }
         // Built-in static method: Type.fromJson(json: str) → rae_fromJson_TYPE_(str)
         if (str_eq_cstr(expr->as.method_call.method_name, "fromJson")) {
             Str type_name = {0};

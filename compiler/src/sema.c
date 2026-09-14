@@ -860,6 +860,8 @@ static TypeInfo* sema_array_type_from_call(CompilerContext* ctx, AstModule* modu
 static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr** expr_ptr);
 static bool sema_is_pending_create(const AstExpr* e);
 static bool sema_is_numeric_kind(TypeKind k);
+static bool sema_is_scalar_kind(TypeKind k);
+static const char* sema_scalar_name(TypeKind k);
 static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstDecl* generic_decl, TypeInfo** args, size_t arg_count, size_t line, size_t column);
 
 AstIdentifierPart* clone_parts(CompilerContext* ctx, const AstIdentifierPart* p) {
@@ -2718,6 +2720,11 @@ static bool reflect_is_wildcard(const AstTypeRef* tr) {
 // must match pairwise.
 static bool reflect_type_matches(const AstTypeRef* pattern, const AstTypeRef* field) {
     if (!pattern || !field) return false;
+    // #959: optionality is part of the match. An `opt T` field is bound only
+    // by an `opt T` pattern (the alias then carries the opt); a plain `T` or
+    // `any` pattern skips it, so the binding never silently aliases an
+    // un-unwrapped optional.
+    if (pattern->is_opt != field->is_opt) return false;
     if (reflect_is_wildcard(pattern)) return true;
     if (!str_eq(reflect_base_name(pattern), reflect_base_name(field))) return false;
     const AstTypeRef* pa = pattern->generic_args;
@@ -2780,121 +2787,174 @@ static Str reflect_element_type_name(const AstTypeRef* field_type) {
     return reflect_base_name(field_type);
 }
 
-static void reflect_fold_field_name_block(AstBlock* block, Str binding, Str field_name, Str type_name);
+// One unrolled field's fold context: the binding name the body spells, the
+// String literals its metadata calls fold to, and (for `fieldSet`, #959) the
+// `value.<field>` place expression an assignment through the binding targets.
+typedef struct {
+    CompilerContext* ctx;
+    Str binding;
+    Str field_name;
+    Str type_name;
+    const AstExpr* target;   // `value.<field>` member expression (cloned per use)
+} ReflectFold;
+
+// Is `e` a wholesale field WRITE through `binding` (#959)?
+//   `fieldSet(binding, v)`   — the compile-time plain function form
+//   `binding.set(v)`         — its UFCS spelling (the `v` may be named `value:`)
+// Returns the value expression, or NULL when `e` is neither. Folded at the
+// statement level into the ordinary assignment `value.<field> = v`, so the
+// per-field type check and ownership rules are the assignment's own.
+static AstExpr* reflect_field_set_value(const AstExpr* e, Str binding) {
+    if (!e) return NULL;
+    if (e->kind == AST_EXPR_CALL && e->as.call.callee
+        && e->as.call.callee->kind == AST_EXPR_IDENT
+        && str_eq_cstr(e->as.call.callee->as.ident, "fieldSet")
+        && e->as.call.args && e->as.call.args->next && !e->as.call.args->next->next
+        && e->as.call.args->name.len == 0
+        && e->as.call.args->value && e->as.call.args->value->kind == AST_EXPR_IDENT
+        && str_eq(e->as.call.args->value->as.ident, binding)) {
+        return e->as.call.args->next->value;
+    }
+    if (e->kind == AST_EXPR_METHOD_CALL
+        && str_eq_cstr(e->as.method_call.method_name, "set")
+        && e->as.method_call.args && !e->as.method_call.args->next
+        && e->as.method_call.object && e->as.method_call.object->kind == AST_EXPR_IDENT
+        && str_eq(e->as.method_call.object->as.ident, binding)) {
+        return e->as.method_call.args->value;
+    }
+    return NULL;
+}
+
+static void reflect_fold_field_name_block(AstBlock* block, const ReflectFold* rf);
 
 // Rewrite every `fieldName(binding)` / `typeName(binding)` inside `e` (in
 // place) to the String literal `field_name` / `type_name`, recursing through
 // the whole expression tree.
-static void reflect_fold_field_name_expr(AstExpr* e, Str binding, Str field_name, Str type_name) {
+static void reflect_fold_field_name_expr(AstExpr* e, const ReflectFold* rf) {
     if (!e) return;
-    int kind = reflect_metadata_call_kind(e, binding);
+    int kind = reflect_metadata_call_kind(e, rf->binding);
     if (kind != 0) {
         e->kind = AST_EXPR_STRING;
-        e->as.string_lit = kind == 1 ? field_name : type_name;
+        e->as.string_lit = kind == 1 ? rf->field_name : rf->type_name;
         e->resolved_type = NULL;
         e->decl_link = NULL;
         return;
     }
     switch (e->kind) {
         case AST_EXPR_BINARY:
-            reflect_fold_field_name_expr(e->as.binary.lhs, binding, field_name, type_name);
-            reflect_fold_field_name_expr(e->as.binary.rhs, binding, field_name, type_name);
+            reflect_fold_field_name_expr(e->as.binary.lhs, rf);
+            reflect_fold_field_name_expr(e->as.binary.rhs, rf);
             break;
         case AST_EXPR_UNARY:
-            reflect_fold_field_name_expr(e->as.unary.operand, binding, field_name, type_name);
+            reflect_fold_field_name_expr(e->as.unary.operand, rf);
             break;
         case AST_EXPR_CAST:
-            reflect_fold_field_name_expr(e->as.cast.operand, binding, field_name, type_name);
+            reflect_fold_field_name_expr(e->as.cast.operand, rf);
             break;
         case AST_EXPR_CALL:
-            reflect_fold_field_name_expr(e->as.call.callee, binding, field_name, type_name);
+            reflect_fold_field_name_expr(e->as.call.callee, rf);
             for (AstCallArg* a = e->as.call.args; a; a = a->next)
-                reflect_fold_field_name_expr(a->value, binding, field_name, type_name);
+                reflect_fold_field_name_expr(a->value, rf);
             break;
         case AST_EXPR_METHOD_CALL:
-            reflect_fold_field_name_expr(e->as.method_call.object, binding, field_name, type_name);
+            reflect_fold_field_name_expr(e->as.method_call.object, rf);
             for (AstCallArg* a = e->as.method_call.args; a; a = a->next)
-                reflect_fold_field_name_expr(a->value, binding, field_name, type_name);
+                reflect_fold_field_name_expr(a->value, rf);
             break;
         case AST_EXPR_MEMBER:
-            reflect_fold_field_name_expr(e->as.member.object, binding, field_name, type_name);
+            reflect_fold_field_name_expr(e->as.member.object, rf);
             break;
         case AST_EXPR_INDEX:
-            reflect_fold_field_name_expr(e->as.index.target, binding, field_name, type_name);
-            reflect_fold_field_name_expr(e->as.index.index, binding, field_name, type_name);
+            reflect_fold_field_name_expr(e->as.index.target, rf);
+            reflect_fold_field_name_expr(e->as.index.index, rf);
             break;
         case AST_EXPR_OBJECT:
             for (AstObjectField* f = e->as.object_literal.fields; f; f = f->next)
-                reflect_fold_field_name_expr(f->value, binding, field_name, type_name);
+                reflect_fold_field_name_expr(f->value, rf);
             break;
         case AST_EXPR_INTERP:
             for (AstInterpPart* p = e->as.interp.parts; p; p = p->next)
-                reflect_fold_field_name_expr(p->value, binding, field_name, type_name);
+                reflect_fold_field_name_expr(p->value, rf);
             break;
         case AST_EXPR_LIST:
             for (AstExprList* l = e->as.list; l; l = l->next)
-                reflect_fold_field_name_expr(l->value, binding, field_name, type_name);
+                reflect_fold_field_name_expr(l->value, rf);
             break;
         case AST_EXPR_MATCH:
-            reflect_fold_field_name_expr(e->as.match_expr.subject, binding, field_name, type_name);
+            reflect_fold_field_name_expr(e->as.match_expr.subject, rf);
             for (AstMatchArm* arm = e->as.match_expr.arms; arm; arm = arm->next) {
-                reflect_fold_field_name_expr(arm->pattern, binding, field_name, type_name);
-                reflect_fold_field_name_expr(arm->value, binding, field_name, type_name);
+                reflect_fold_field_name_expr(arm->pattern, rf);
+                reflect_fold_field_name_expr(arm->value, rf);
             }
             break;
         default: break;
     }
 }
 
-static void reflect_fold_field_name_stmt(AstStmt* s, Str binding, Str field_name, Str type_name) {
+static void reflect_fold_field_name_stmt(AstStmt* s, const ReflectFold* rf) {
     if (!s) return;
     switch (s->kind) {
-        case AST_STMT_EXPR: reflect_fold_field_name_expr(s->as.expr_stmt, binding, field_name, type_name); break;
-        case AST_STMT_LET: reflect_fold_field_name_expr(s->as.let_stmt.value, binding, field_name, type_name); break;
-        case AST_STMT_DESTRUCT: reflect_fold_field_name_expr(s->as.destruct_stmt.call, binding, field_name, type_name); break;
+        case AST_STMT_EXPR: {
+            // #959: `fieldSet(x, v)` / `x.set(v)` as a statement becomes the
+            // assignment `value.<field> = v` — the one place a field is
+            // written wholesale through a reflection binding.
+            AstExpr* set_value = reflect_field_set_value(s->as.expr_stmt, rf->binding);
+            if (set_value && rf->target) {
+                reflect_fold_field_name_expr(set_value, rf);
+                s->kind = AST_STMT_ASSIGN;
+                s->as.assign_stmt.target = clone_expr(rf->ctx->ast_arena, rf->target);
+                s->as.assign_stmt.value = set_value;
+                s->as.assign_stmt.is_bind = false;
+                break;
+            }
+            reflect_fold_field_name_expr(s->as.expr_stmt, rf);
+            break;
+        }
+        case AST_STMT_LET: reflect_fold_field_name_expr(s->as.let_stmt.value, rf); break;
+        case AST_STMT_DESTRUCT: reflect_fold_field_name_expr(s->as.destruct_stmt.call, rf); break;
         case AST_STMT_RET:
             for (AstReturnArg* a = s->as.ret_stmt.values; a; a = a->next)
-                reflect_fold_field_name_expr(a->value, binding, field_name, type_name);
+                reflect_fold_field_name_expr(a->value, rf);
             break;
         case AST_STMT_IF:
-            reflect_fold_field_name_stmt(s->as.if_stmt.binding, binding, field_name, type_name);
-            reflect_fold_field_name_expr(s->as.if_stmt.condition, binding, field_name, type_name);
-            reflect_fold_field_name_block(s->as.if_stmt.then_block, binding, field_name, type_name);
-            reflect_fold_field_name_block(s->as.if_stmt.else_block, binding, field_name, type_name);
+            reflect_fold_field_name_stmt(s->as.if_stmt.binding, rf);
+            reflect_fold_field_name_expr(s->as.if_stmt.condition, rf);
+            reflect_fold_field_name_block(s->as.if_stmt.then_block, rf);
+            reflect_fold_field_name_block(s->as.if_stmt.else_block, rf);
             break;
         case AST_STMT_LOOP:
-            reflect_fold_field_name_stmt(s->as.loop_stmt.init, binding, field_name, type_name);
-            reflect_fold_field_name_expr(s->as.loop_stmt.condition, binding, field_name, type_name);
-            reflect_fold_field_name_expr(s->as.loop_stmt.increment, binding, field_name, type_name);
-            reflect_fold_field_name_block(s->as.loop_stmt.body, binding, field_name, type_name);
+            reflect_fold_field_name_stmt(s->as.loop_stmt.init, rf);
+            reflect_fold_field_name_expr(s->as.loop_stmt.condition, rf);
+            reflect_fold_field_name_expr(s->as.loop_stmt.increment, rf);
+            reflect_fold_field_name_block(s->as.loop_stmt.body, rf);
             break;
         case AST_STMT_MATCH:
-            reflect_fold_field_name_expr(s->as.match_stmt.subject, binding, field_name, type_name);
+            reflect_fold_field_name_expr(s->as.match_stmt.subject, rf);
             for (AstMatchCase* c = s->as.match_stmt.cases; c; c = c->next) {
-                reflect_fold_field_name_expr(c->pattern, binding, field_name, type_name);
+                reflect_fold_field_name_expr(c->pattern, rf);
                 for (AstCasePattern* op = c->or_patterns; op; op = op->next)
-                    reflect_fold_field_name_expr(op->expr, binding, field_name, type_name);
-                reflect_fold_field_name_block(c->block, binding, field_name, type_name);
+                    reflect_fold_field_name_expr(op->expr, rf);
+                reflect_fold_field_name_block(c->block, rf);
             }
             break;
         case AST_STMT_ASSIGN:
-            reflect_fold_field_name_expr(s->as.assign_stmt.target, binding, field_name, type_name);
-            reflect_fold_field_name_expr(s->as.assign_stmt.value, binding, field_name, type_name);
+            reflect_fold_field_name_expr(s->as.assign_stmt.target, rf);
+            reflect_fold_field_name_expr(s->as.assign_stmt.value, rf);
             break;
         case AST_STMT_DEFER:
-            reflect_fold_field_name_block(s->as.defer_stmt.block, binding, field_name, type_name);
+            reflect_fold_field_name_block(s->as.defer_stmt.block, rf);
             break;
         case AST_STMT_UNSAFE:
-            reflect_fold_field_name_block(s->as.unsafe_stmt.block, binding, field_name, type_name);
+            reflect_fold_field_name_block(s->as.unsafe_stmt.block, rf);
             break;
         default: break;
     }
 }
 
-static void reflect_fold_field_name_block(AstBlock* block, Str binding, Str field_name, Str type_name) {
+static void reflect_fold_field_name_block(AstBlock* block, const ReflectFold* rf) {
     if (!block) return;
     for (AstStmt* s = block->first; s; s = s->next)
-        reflect_fold_field_name_stmt(s, binding, field_name, type_name);
+        reflect_fold_field_name_stmt(s, rf);
 }
 
 // Does this range-loop iterate `fields(...)` — i.e. is it a field loop at all?
@@ -2911,7 +2971,6 @@ static bool reflect_loop_is_fields(const AstStmt* stmt) {
 // (#773), so every field loop lowers to identical ordinary AST regardless of how
 // its concrete struct became known.
 static AstExpr* reflect_make_true(CompilerContext* ctx, size_t line, size_t column);
-static void reflect_fold_field_name_block(AstBlock* block, Str binding, Str field_name, Str type_name);
 static void reflect_fill_unrolled(CompilerContext* ctx, AstBlock* out,
                                   AstTypeField* fields, const AstTypeRef* pattern,
                                   bool want_view, bool want_mod, Str bind_name,
@@ -2922,7 +2981,8 @@ static void reflect_fill_unrolled(CompilerContext* ctx, AstBlock* out,
         if (!f->type || !reflect_type_matches(pattern, f->type)) continue;
         AstTypeRef* ftype = clone_type_ref(ctx->ast_arena, f->type);
         ftype->is_view = want_view; ftype->is_mod = want_mod;
-        ftype->is_val = false; ftype->is_own = false; ftype->is_copy = false; ftype->is_opt = false;
+        ftype->is_val = false; ftype->is_own = false; ftype->is_copy = false;
+        ftype->is_opt = f->type->is_opt;   // #959: an `opt T` pattern keeps the opt on the alias
         AstExpr* member = arena_alloc(ctx->ast_arena, sizeof(AstExpr));
         memset(member, 0, sizeof *member);
         member->kind = AST_EXPR_MEMBER;
@@ -2940,7 +3000,8 @@ static void reflect_fill_unrolled(CompilerContext* ctx, AstBlock* out,
         AstBlock* iter_block = arena_alloc(ctx->ast_arena, sizeof(AstBlock));
         iter_block->first = alias;
         AstBlock* iter_body = clone_block(ctx->ast_arena, body);
-        reflect_fold_field_name_block(iter_body, bind_name, f->name, reflect_element_type_name(f->type));
+        ReflectFold rf = { ctx, bind_name, f->name, reflect_element_type_name(f->type), member };
+        reflect_fold_field_name_block(iter_body, &rf);
         alias->next = iter_body ? iter_body->first : NULL;
         AstStmt* wrapper = arena_alloc(ctx->ast_arena, sizeof(AstStmt));
         memset(wrapper, 0, sizeof *wrapper);
@@ -3830,6 +3891,25 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
  * docs/primitive-types.md. `Float` and `Float32` are the SAME type so they
  * are not a conversion; `Float`(f32) and `Float64` are different types and
  * require an explicit `as`. */
+// The fully-resolved scalar kinds a value can be checked against by kind alone
+// (#959): the numerics plus Bool, String and Char.
+static bool sema_is_scalar_kind(TypeKind k) {
+    return k == TYPE_INT || k == TYPE_FLOAT || k == TYPE_FLOAT64
+        || k == TYPE_BOOL || k == TYPE_STRING || k == TYPE_CHAR;
+}
+
+static const char* sema_scalar_name(TypeKind k) {
+    switch (k) {
+        case TYPE_INT: return "Int";
+        case TYPE_FLOAT: return "Float";
+        case TYPE_FLOAT64: return "Float64";
+        case TYPE_BOOL: return "Bool";
+        case TYPE_STRING: return "String";
+        case TYPE_CHAR: return "Char";
+        default: return "value";
+    }
+}
+
 static bool sema_is_numeric_kind(TypeKind k) {
     return k == TYPE_INT || k == TYPE_FLOAT || k == TYPE_FLOAT64;
 }
@@ -4268,6 +4348,25 @@ static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr*
             sema_numeric_name(got_num->kind),
             sema_numeric_name(want_num->kind),
             sema_numeric_name(want_num->kind));
+        const char* err_file = s_current_decl_origin ? s_current_decl_origin : NULL;
+        diag_error(err_file, (int)expr->line, (int)expr->column, buf);
+        if (s_current_module) s_current_module->had_error = true;
+        return;
+    }
+    /* #959: a SCALAR-KIND mismatch (String into Int, Bool into String, ...) is
+     * as certain a C error as the numeric one above, and until now only gcc
+     * reported it, with a .c line. Both sides must be fully resolved scalars
+     * of different kinds; numeric pairs were judged above (they may be
+     * literals), and anything unresolved / generic / Any / opt stays with the
+     * existing rules. This is what makes `fieldSet` "checked per unrolled
+     * field": the write unrolls to an ordinary assignment and lands here. */
+    if (want_num && got_num && want_num->kind != got_num->kind
+        && sema_is_scalar_kind(want_num->kind) && sema_is_scalar_kind(got_num->kind)
+        && !(sema_is_numeric_kind(want_num->kind) && sema_is_numeric_kind(got_num->kind))
+        && expr->kind != AST_EXPR_CAST) {
+        char buf[240];
+        snprintf(buf, sizeof(buf), "type mismatch: expected %s, got %s",
+                 sema_scalar_name(want_num->kind), sema_scalar_name(got_num->kind));
         const char* err_file = s_current_decl_origin ? s_current_decl_origin : NULL;
         diag_error(err_file, (int)expr->line, (int)expr->column, buf);
         if (s_current_module) s_current_module->had_error = true;
@@ -5449,7 +5548,8 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                 // for a type/module qualifier — never "unknown".
                 bool is_intrinsic = str_eq_cstr(fname, "create")
                     || str_eq_cstr(fname, "toJson") || str_eq_cstr(fname, "toString")
-                    || str_eq_cstr(fname, "fromJson") || str_eq_cstr(fname, "get");
+                    || str_eq_cstr(fname, "fromJson") || str_eq_cstr(fname, "get")
+                    || str_eq_cstr(fname, "default");   // #959 `T.default()`
                 if (!is_value && (modname.data || is_type) && !is_intrinsic
                     && !sema_any_function_named(module, fname)) {
                     Str suggestion = {0}; size_t best_dist = (size_t)-1;
@@ -5631,12 +5731,15 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
             sema_unsafe_error(module, expr->line, expr->column,
                 "reflection and serialization cannot expose a value containing raw Ptr storage in safe code");
         } else if (expr->kind == AST_EXPR_METHOD_CALL
-                   && str_eq_cstr(expr->as.method_call.method_name, "fromJson")
+                   && (str_eq_cstr(expr->as.method_call.method_name, "fromJson")
+                       || (str_eq_cstr(expr->as.method_call.method_name, "default")
+                           && !expr->as.method_call.args))
                    && expr->as.method_call.object) {
             // #896: generated deserialization CONSTRUCTS a value's raw Ptr field
             // (from JSON, as null), the deserialization mirror of the toJson
             // guard. `Own.fromJson(json)` is a type-qualified intrinsic sema
             // leaves backend-resolved, so read the type from the qualifier.
+            // #959: `T.default()` constructs the zero value the same way.
             TypeInfo* built = sema_type_qualifier_type(ctx, module, symbols,
                                                        expr->as.method_call.object);
             if (!built) built = expr->as.method_call.object->resolved_type;
