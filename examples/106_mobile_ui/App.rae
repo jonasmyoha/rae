@@ -194,10 +194,6 @@ func runApp(app: mod App) {
     # previous gate check — promotes a re-render on any transition
     # so the debug "button:" readout updates without 60 fps polling.
     var lastMouseButtons: Int = 0
-    # Profile-avatar readiness at the time the current world was built.
-    # If the async image cascade loads it later, Profile needs one rebuild.
-    var profileLoaded: Bool = false
-
     # True while album covers / history art are still streaming in. Fed
     # into the wait-timeout so the loop ticks at frame cadence (not the
     # 30s idle cap) while loading, making the cascade actually progress.
@@ -213,9 +209,6 @@ func runApp(app: mod App) {
     var renderUntil: Float64 = 0.0
 
     loop running {
-      let profileKeyAtBuild: String = profileAvatarKey()
-      profileLoaded = profileAvatarLoaded(reg: texReg, key: profileKeyAtBuild)
-
       # Cache the active-album bounds + active-track duration so
       # the hot inner-loop heartbeat doesn't deep-copy a 15-25
       # track Album every frame. `activeAlbum(state)` and
@@ -670,13 +663,8 @@ func runApp(app: mod App) {
             viewport: viewport
             now: now
             applyPlaybackFrame: applyPlaybackFrame
-            profileLoadedAtBuild: profileLoaded
           )
           assetsLoading = dataSync.assetsLoading
-          if dataSync.profileBecameReady {
-            switching = true
-          }
-
           # Frame-gate decision: ask `decideActive` whether anything
           # changed that warrants a full begin/render/endDrawing this
           # frame. Inputs: forceRender, dirty caches, input events,

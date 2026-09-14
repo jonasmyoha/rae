@@ -11,16 +11,9 @@
         "alignCross": "Start"
       },
       "Padding": "screenEdgePadding",
-      "Shape": {
-        "kind": "Rect",
-        "fill": "surface"
-      },
       "Children": [
         "TopBar",
-        "AvatarBlock",
-        "StatsRow",
-        "SpotifyCard",
-        "SettingsList"
+        "Body"
       ]
     },
     "TopBar": {
@@ -67,147 +60,7 @@
         "styleId": "pageTitle"
       }
     },
-    "AvatarBlock": {
-      "Rect": {
-        "x": 0.0,
-        "y": 0.0,
-        "w": 0.0,
-        "h": 260.240964
-      },
-      "Size": {
-        "w": {
-          "mode": "Fill"
-        },
-        "h": {
-          "mode": "Fixed"
-        }
-      },
-      "Layout": {
-        "type": "Vertical",
-        "gap": 4.337349,
-        "alignCross": "Center"
-      },
-      "Children": [
-        "Avatar"
-      ]
-    },
-    "Avatar": {
-      "Rect": {
-        "x": 0.0,
-        "y": 0.0,
-        "w": 260.240964,
-        "h": 260.240964
-      },
-      "Sprite": {
-        "textureKey": "profileAvatar",
-        "scaleMode": "Fill",
-        "tint": {
-          "r": 255,
-          "g": 255,
-          "b": 255,
-          "a": 255
-        }
-      }
-    },
-    "StatsRow": {
-      "Rect": {
-        "x": 0.0,
-        "y": 0.0,
-        "w": 0.0,
-        "h": 130.120482
-      },
-      "Size": {
-        "w": {
-          "mode": "Fill"
-        },
-        "h": {
-          "mode": "Fixed"
-        }
-      },
-      "Layout": {
-        "type": "Horizontal",
-        "gap": "spaceXL",
-        "alignMain": "Center",
-        "alignCross": "Center"
-      }
-    },
-    "SpotifyCard": {
-      "Rect": {
-        "x": 0.0,
-        "y": 0.0,
-        "w": 0.0,
-        "h": 182.168675
-      },
-      "Size": {
-        "w": {
-          "mode": "Fill"
-        },
-        "h": {
-          "mode": "Fixed"
-        }
-      },
-      "Layout": {
-        "type": "Vertical",
-        "gap": "spaceXS",
-        "alignCross": "Start"
-      },
-      "Padding": {
-        "l": 30.361446,
-        "t": 30.361446,
-        "r": 30.361446,
-        "b": 30.361446
-      },
-      "Shape": {
-        "kind": "RoundedRect",
-        "fill": "accent",
-        "radius": "radiusChip"
-      },
-      "Children": [
-        "SpotifyTitle",
-        "SpotifyLine"
-      ]
-    },
-    "SpotifyTitle": {
-      "Rect": {
-        "x": 0.0,
-        "y": 0.0,
-        "w": 0.0,
-        "h": 52.048193
-      },
-      "Size": {
-        "w": {
-          "mode": "Fill"
-        },
-        "h": {
-          "mode": "Fixed"
-        }
-      },
-      "Text": {
-        "text": "Spotify",
-        "styleId": "topBarTitle"
-      }
-    },
-    "SpotifyLine": {
-      "Rect": {
-        "x": 0.0,
-        "y": 0.0,
-        "w": 0.0,
-        "h": 47.710843
-      },
-      "Size": {
-        "w": {
-          "mode": "Fill"
-        },
-        "h": {
-          "mode": "Fixed"
-        }
-      },
-      "Text": {
-        "text": "Not running",
-        "styleId": "trackArtist"
-      }
-    },
-    "SettingsList": {
+    "Body": {
       "Rect": {
         "x": 0.0,
         "y": 0.0,
@@ -224,8 +77,751 @@
       },
       "Layout": {
         "type": "Vertical",
-        "gap": "spaceS",
+        "gap": "spaceM",
+        "alignCross": "Center"
+      },
+      "Children": [
+        "Avatar",
+        "Identity",
+        "StatsRow",
+        "SettingsList"
+      ]
+    },
+    "Avatar": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 260.240964,
+        "h": 260.240964
+      },
+      "Layout": {
+        "type": "Stack",
+        "gap": 0.0,
+        "alignCross": "Center"
+      },
+      "AvatarSource": {
+        "textureKey": "user.avatar"
+      },
+      "Children": [
+        "AvatarPhoto",
+        "AvatarFallback"
+      ]
+    },
+    "AvatarPhoto": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 260.240964,
+        "h": 260.240964
+      },
+      "Sprite": {
+        "textureKey": "user.avatar",
+        "tint": "imageTint",
+        "scaleMode": "Fill"
+      },
+      "CornerRadius": {
+        "radius": 130.120482
+      },
+      "Active": {
+        "value": false
+      }
+    },
+    "AvatarFallback": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 260.240964,
+        "h": 260.240964
+      },
+      "Shape": {
+        "kind": "Circle",
+        "fill": "accent"
+      },
+      "Layout": {
+        "type": "Stack",
+        "gap": 0.0,
+        "alignCross": "Center"
+      },
+      "Children": [
+        "AvatarFallbackIcon"
+      ]
+    },
+    "AvatarFallbackIcon": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 173.493976,
+        "h": 173.493976
+      },
+      "Sprite": {
+        "textureKey": "mat:person",
+        "tint": "accentText"
+      }
+    },
+    "Identity": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 0.0,
+        "h": 108.433734
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Layout": {
+        "type": "Vertical",
+        "gap": 4.337349,
+        "alignCross": "Center"
+      },
+      "Children": [
+        "Handle",
+        "Bio"
+      ]
+    },
+    "Handle": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 0.0,
+        "h": 56.385542
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Text": {
+        "text": "@violet.tapes",
+        "styleId": "profileHandle"
+      }
+    },
+    "Bio": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 0.0,
+        "h": 47.710843
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Text": {
+        "text": "indie pop / dream-punk / playlist lover",
+        "styleId": "profileBio"
+      }
+    },
+    "StatsRow": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 0.0,
+        "h": 130.12048099999998
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Layout": {
+        "type": "Horizontal",
+        "gap": "spaceM",
+        "alignCross": "Center"
+      },
+      "Children": [
+        "AlbumsStat",
+        "TracksStat",
+        "ListeningStat"
+      ]
+    },
+    "AlbumsStat": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 0.0,
+        "h": 130.12048099999998
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Layout": {
+        "type": "Vertical",
+        "gap": 4.337349,
+        "alignCross": "Center"
+      },
+      "Children": [
+        "AlbumsStatValue",
+        "AlbumsStatLabel"
+      ]
+    },
+    "AlbumsStatValue": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 0.0,
+        "h": 78.072289
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Text": {
+        "text": "0",
+        "styleId": "statValue"
+      },
+      "ProfileStat": {
+        "stat": "albums"
+      }
+    },
+    "AlbumsStatLabel": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 0.0,
+        "h": 47.710843
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Text": {
+        "text": "Albums",
+        "styleId": "statLabel"
+      }
+    },
+    "TracksStat": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 0.0,
+        "h": 130.12048099999998
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Layout": {
+        "type": "Vertical",
+        "gap": 4.337349,
+        "alignCross": "Center"
+      },
+      "Children": [
+        "TracksStatValue",
+        "TracksStatLabel"
+      ]
+    },
+    "TracksStatValue": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 0.0,
+        "h": 78.072289
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Text": {
+        "text": "0",
+        "styleId": "statValue"
+      },
+      "ProfileStat": {
+        "stat": "tracks"
+      }
+    },
+    "TracksStatLabel": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 0.0,
+        "h": 47.710843
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Text": {
+        "text": "Tracks",
+        "styleId": "statLabel"
+      }
+    },
+    "ListeningStat": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 0.0,
+        "h": 130.12048099999998
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Layout": {
+        "type": "Vertical",
+        "gap": 4.337349,
+        "alignCross": "Center"
+      },
+      "Children": [
+        "ListeningStatValue",
+        "ListeningStatLabel"
+      ]
+    },
+    "ListeningStatValue": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 0.0,
+        "h": 78.072289
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Text": {
+        "text": "0",
+        "styleId": "statValue"
+      },
+      "ProfileStat": {
+        "stat": "listeningHours"
+      }
+    },
+    "ListeningStatLabel": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 0.0,
+        "h": 47.710843
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Text": {
+        "text": "Listening",
+        "styleId": "statLabel"
+      }
+    },
+    "SettingsList": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 0.0,
+        "h": 537.831326
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Layout": {
+        "type": "Vertical",
+        "gap": 17.349398,
         "alignCross": "Start"
+      },
+      "Children": [
+        "AudioQualityRow",
+        "EqualizerRow",
+        "AccountRow",
+        "SignOutRow"
+      ]
+    },
+    "AudioQualityRow": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 0.0,
+        "h": 121.445783
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Layout": {
+        "type": "Horizontal",
+        "gap": 26.024096,
+        "alignCross": "Center"
+      },
+      "Padding": {
+        "l": 26.024096,
+        "t": 26.024096,
+        "r": 26.024096,
+        "b": 26.024096
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": {
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "a": 14
+        },
+        "radius": 26.024096
+      },
+      "Children": [
+        "AudioQualityRowIcon",
+        "AudioQualityRowLabel",
+        "AudioQualityRowChevron"
+      ]
+    },
+    "AudioQualityRowIcon": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 60.722892,
+        "h": 60.722892
+      },
+      "Sprite": {
+        "textureKey": "mat:tune",
+        "tint": "textPrimary"
+      }
+    },
+    "AudioQualityRowLabel": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 0.0,
+        "h": 56.385542
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Text": {
+        "text": "Audio quality",
+        "styleId": "trackTitle"
+      }
+    },
+    "AudioQualityRowChevron": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 60.722892,
+        "h": 60.722892
+      },
+      "Sprite": {
+        "textureKey": "mat:chevron_right",
+        "tint": "textMuted"
+      }
+    },
+    "EqualizerRow": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 0.0,
+        "h": 121.445783
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Layout": {
+        "type": "Horizontal",
+        "gap": 26.024096,
+        "alignCross": "Center"
+      },
+      "Padding": {
+        "l": 26.024096,
+        "t": 26.024096,
+        "r": 26.024096,
+        "b": 26.024096
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": {
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "a": 14
+        },
+        "radius": 26.024096
+      },
+      "Children": [
+        "EqualizerRowIcon",
+        "EqualizerRowLabel",
+        "EqualizerRowChevron"
+      ]
+    },
+    "EqualizerRowIcon": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 60.722892,
+        "h": 60.722892
+      },
+      "Sprite": {
+        "textureKey": "mat:equalizer",
+        "tint": "textPrimary"
+      }
+    },
+    "EqualizerRowLabel": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 0.0,
+        "h": 56.385542
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Text": {
+        "text": "Equalizer",
+        "styleId": "trackTitle"
+      }
+    },
+    "EqualizerRowChevron": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 60.722892,
+        "h": 60.722892
+      },
+      "Sprite": {
+        "textureKey": "mat:chevron_right",
+        "tint": "textMuted"
+      }
+    },
+    "AccountRow": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 0.0,
+        "h": 121.445783
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Layout": {
+        "type": "Horizontal",
+        "gap": 26.024096,
+        "alignCross": "Center"
+      },
+      "Padding": {
+        "l": 26.024096,
+        "t": 26.024096,
+        "r": 26.024096,
+        "b": 26.024096
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": {
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "a": 14
+        },
+        "radius": 26.024096
+      },
+      "Children": [
+        "AccountRowIcon",
+        "AccountRowLabel",
+        "AccountRowChevron"
+      ]
+    },
+    "AccountRowIcon": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 60.722892,
+        "h": 60.722892
+      },
+      "Sprite": {
+        "textureKey": "mat:person",
+        "tint": "textPrimary"
+      }
+    },
+    "AccountRowLabel": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 0.0,
+        "h": 56.385542
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Text": {
+        "text": "Account",
+        "styleId": "trackTitle"
+      }
+    },
+    "AccountRowChevron": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 60.722892,
+        "h": 60.722892
+      },
+      "Sprite": {
+        "textureKey": "mat:chevron_right",
+        "tint": "textMuted"
+      }
+    },
+    "SignOutRow": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 0.0,
+        "h": 121.445783
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Layout": {
+        "type": "Horizontal",
+        "gap": 26.024096,
+        "alignCross": "Center"
+      },
+      "Padding": {
+        "l": 26.024096,
+        "t": 26.024096,
+        "r": 26.024096,
+        "b": 26.024096
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": {
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "a": 14
+        },
+        "radius": 26.024096
+      },
+      "Children": [
+        "SignOutRowIcon",
+        "SignOutRowLabel",
+        "SignOutRowChevron"
+      ]
+    },
+    "SignOutRowIcon": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 60.722892,
+        "h": 60.722892
+      },
+      "Sprite": {
+        "textureKey": "mat:logout",
+        "tint": "textPrimary"
+      }
+    },
+    "SignOutRowLabel": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 0.0,
+        "h": 56.385542
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Text": {
+        "text": "Sign out",
+        "styleId": "trackTitle"
+      }
+    },
+    "SignOutRowChevron": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 60.722892,
+        "h": 60.722892
+      },
+      "Sprite": {
+        "textureKey": "mat:chevron_right",
+        "tint": "textMuted"
       }
     }
   },

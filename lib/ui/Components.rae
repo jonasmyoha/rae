@@ -866,6 +866,33 @@ func defaultTextShadow() ret TextShadow {
   }
 }
 
+# ----- data-binding components for the profile page (#974) -----------------
+#
+# The page's layout lives entirely in its .raescene; these two components are
+# what a scene cannot express — a value that comes from app state — and a
+# per-frame system drives every instance (docs/ecs-general-architecture.md).
+
+# Which live library count a `ProfileStat` node shows. Authored as the member
+# name: `"ProfileStat": { "stat": "albums" }`.
+enum ProfileStatKind { albums, tracks, listeningHours }
+
+# A Text node whose `text` is a live count from the app's media library. The
+# number never lives in the scene; `profileStatsSystem` writes `Text.text` on
+# the same entity when the count changes (a pure data binding, no layout).
+type ProfileStat {
+  stat: ProfileStatKind
+}
+
+# An avatar slot whose photo may not be loaded yet. Authored on a Stack
+# container with two children: the photo (the child whose `Sprite.textureKey`
+# equals `textureKey`) and an authored placeholder. `avatarSystem` activates
+# the photo once the texture registry holds the key and the placeholder
+# otherwise, so a download that lands later is an `Active` toggle on two
+# children — not a page rebuild.
+type AvatarSource {
+  textureKey: String
+}
+
 func defaultStyleOverride() ret StyleOverride {
   ret StyleOverride {
     hasSize: false

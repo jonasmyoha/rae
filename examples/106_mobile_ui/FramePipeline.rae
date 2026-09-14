@@ -117,7 +117,6 @@ func refreshUiDiffs(
 
 type FrameDataSyncResult {
   assetsLoading: Bool
-  profileBecameReady: Bool
   playbackChanged: Bool
 }
 
@@ -134,7 +133,6 @@ func syncFrameData(
   viewport: view Viewport
   now: view Float64
   applyPlaybackFrame: view Bool
-  profileLoadedAtBuild: view Bool
 ) pub ret FrameDataSyncResult {
   advancePlayback(state: playback, now: now)
   if applyPlaybackFrame {
@@ -182,18 +180,8 @@ func syncFrameData(
     loader: appState.historyArt
     fetches: appState.artworkFetch
   )
-  var profileBecameReady: Bool = false
-  if visible is Screen.profile {
-    let profileKeyNow: String = profileAvatarKey()
-    let profileReadyNow: Bool = profileAvatarLoaded(reg: texReg, key: profileKeyNow)
-    if profileReadyNow and profileLoadedAtBuild is false {
-      profileBecameReady = true
-    }
-  }
-
   ret FrameDataSyncResult {
     assetsLoading: loadingCovers or loadingHistoryArt
-    profileBecameReady: profileBecameReady
     playbackChanged: spotifyRefresh.playbackChanged
   }
 }

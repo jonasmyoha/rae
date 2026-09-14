@@ -62,6 +62,10 @@ func refreshMountedUi(
     sheet: state.bottomSheet
     cachedEpoch: cache.sheetEpoch
   )
+  # #974: the profile page's data bindings. Both compare before writing, so
+  # they cost nothing at idle and need no observer revision of their own.
+  profileStatsSystem(world: world, state: state)
+  avatarSystem(world: world, reg: reg)
 
   ret UiRefreshResult {
     historyChanged: cache.historyRevision is not oldHistory
