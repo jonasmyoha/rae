@@ -35,6 +35,11 @@ int64_t rae_ext_rae_random_int(int64_t min, int64_t max) {
 
 float rae_ext_rae_int_to_float(int64_t v){ return (double)v; }
 int64_t rae_ext_rae_float_to_int(float v){ return (int64_t)v; }
+/* #973: the raw IEEE-754 bits of a 32-bit float as a u32 (in an int64). Lets
+ * GpuArgs.pushF32 append an f32's exact bytes without a per-call 1-element
+ * List(Float) + buf_copy — that scratch alloc was ~500k Buffer allocs / 18 s
+ * in 114 (the dominant idle malloc traffic). */
+int64_t rae_ext_rae_f32_bits(float v){ uint32_t b; memcpy(&b, &v, 4); return (int64_t)b; }
 
 /* Bit intrinsics over the 64-bit two's-complement representation of an Int.
  * leadingZeros/trailingZeros of 0 are defined as 64 (the builtins are UB on 0). */

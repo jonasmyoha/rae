@@ -474,21 +474,21 @@ func nodeLocalMatrix(sk: view Skeleton, node: view Int) ret Mat4 {
 # walking up would compose the transforms in reverse, which produces a
 # skeleton that is subtly inside-out rather than obviously broken.
 func nodeWorldMatrix(sk: view Skeleton, node: view Int) ret Mat4 {
-  let chain: List(Int) = List.create(Int, cap: 16)
+  # #973: walk parent links from `node` up to the root, pre-multiplying each
+  # local matrix onto the accumulator — `acc = local(cur) * acc` yields
+  # local(root) * ... * local(node), exactly the old root-to-node product, with
+  # NO per-call chain List. `nodeWorldMatrix` runs per joint per frame (the
+  # skinning palette), so its scratch List(Int) was ~240k Buffer allocs / 12 s
+  # in 114. `Mat4` is a value Array, so mat4Mul allocates nothing.
+  var m: Mat4 = mat4Identity()
   var cur: Int = node
   # The guard is against a malformed file whose parent links form a cycle;
   # without it a bad export hangs the frame instead of rendering wrong.
   var guard: Int = 0
   loop cur >= 0 and guard < sk.nodeCount + 1 {
-    chain.add(value: cur)
+    m = mat4Mul(a: nodeLocalMatrix(sk: sk, node: cur), b: m)
     cur = intAt(list: sk.parent, index: cur, fallback: 0 - 1)
     guard = guard + 1
-  }
-  var m: Mat4 = mat4Identity()
-  var i: Int = chain.length - 1
-  loop i >= 0 {
-    m = mat4Mul(a: m, b: nodeLocalMatrix(sk: sk, node: intAt(list: chain, index: i, fallback: 0)))
-    i = i - 1
   }
   ret m
 }

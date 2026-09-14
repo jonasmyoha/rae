@@ -28,6 +28,8 @@ open webgpu/WebgpuEnums
 open gpu/GpuResources
 open gpu/GpuLifetime
 
+func rae_ext_rae_f32_bits(value: Float) unsafe extern ret Int
+
 type ArgWriter {
   bytes: List(UInt8)
   uniform: Bool
@@ -89,24 +91,13 @@ func pushI32(writer: mod ArgWriter, value: view Int) {
 # explicit element size), so no value conversion happens.
 func pushF32(writer: mod ArgWriter, value: view Float) {
   padTo(writer: writer, alignment: 4)
-  var scratch: List(Float) = List.create(Float, cap: 1)
-  scratch.add(value: value)
-  let base: Int = writer.bytes.length
-  var i: Int = 0
-  loop i < 4 {
-    writer.bytes.add(value: 0 as UInt8)
-    i = i + 1
-  }
+  # #973: append the f32's exact IEEE-754 bytes via a reinterpret intrinsic.
+  # The previous form allocated a 1-element List(Float) scratch per call (plus
+  # a buf_copy) purely to reinterpret the bits — ~500k Buffer allocs / 18 s in
+  # 114, the single largest idle-frame malloc source. appendWord peels the
+  # four little-endian bytes off the u32 bit pattern with no heap.
   unsafe {
-    rae_ext_rae_buf_copy(
-      V: UInt8
-      src: scratch.data
-      src_off: 0
-      dst: writer.bytes.data
-      dst_off: base
-      len: 4
-      elemSize: 1
-    )
+    appendWord(writer: writer, word: rae_ext_rae_f32_bits(value: value))
   }
 }
 

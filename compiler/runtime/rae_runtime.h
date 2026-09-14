@@ -182,6 +182,7 @@ RAE_UNUSED static void rae_log_stream_RaeAny_(RaeAny v) { rae_ext_rae_log_stream
 /* Conversion Helpers */
 RAE_UNUSED float rae_ext_rae_int_to_float(int64_t v);
 RAE_UNUSED int64_t rae_ext_rae_float_to_int(float v);
+RAE_UNUSED int64_t rae_ext_rae_f32_bits(float v);
 RAE_UNUSED static RaeAny rae_any_int(int64_t v) { return (RaeAny){.type = RAE_TYPE_INT64, .as.i = v}; }
 RAE_UNUSED static RaeAny rae_any_int32(int32_t v) { return (RaeAny){.type = RAE_TYPE_INT32, .as.i = v}; }
 RAE_UNUSED static RaeAny rae_any_uint64(uint64_t v) { return (RaeAny){.type = RAE_TYPE_UINT64, .as.i = (int64_t)v}; }
