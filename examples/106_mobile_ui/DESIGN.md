@@ -1,757 +1,268 @@
 # 106_mobile_ui — Design
 
-Status: **primary gpu2d/SDL3 mobile UI example.** This app is the current target
-for the coordinate-system work in `rae/docs/ui-coordinate-and-responsive-layout.md`:
-Model A, `unitScale=3`, a 1080-wide phone frame, and desktop frames around
-5760×3240 du. Older text in this document was copied from 98 and should be read
-as historical context where it mentions raylib or `examples/98_mobile_ui`.
+Status: **the reference UI application for Rae** (refreshed 2026-09-14 after
+the #946–#950 refactor; docs/ui-ecs-refactor-status.md §3 is the ledger of
+what changed and why). It is a music-player mockup — Home, Search, Library,
+Profile, Album, Now Playing, History, a bottom sheet and a debug menu —
+driven by the local Spotify desktop app on macOS and a local album catalogue
+everywhere else.
 
-A scene-driven UI runtime for Rae, built for mobile-shaped layouts. The
-target reference is the music player mockup in `references/music_player.webp`
-and the two cropped screens in `screens/music_player_screen_*.png`.
+What this document is: the shape of the *app* — how a Rae program is
+organised around `lib/ecs` + `lib/ui`, what the frame does, who owns what.
+What it is not: a restatement of the library. Every `lib/ui` mechanism the
+app uses has its own document; this one links them. The earlier version of
+this file was the 98-era *plan* for building `lib/ui` on raylib; that plan
+shipped, the library moved on, and the plan's open questions are answered in
+§9. The plan itself is in git history if you need it.
 
-The starting model is **RUICS**, the Game proto1 UI system documented at
-`rae/docs/game-proto1-ruics-ecs-reference.md`. RUICS is an ECS-backed
-scene graph with JSON `.raescene` files,
-authored components, and a small set of layout/transform/render systems.
-This design carries that model into Rae nearly as-is, with a few
-deliberate adaptations called out below.
-
-The user has flagged that *most of the work belongs in the stdlib* —
-the example app itself should be small. So this doc plans both the new
-`lib/ui/` modules and the per-screen scene files, but leans most of the
-volume into the library.
-
-## Goals (this round)
-
-1. Render **music_player_screen_2.png** — the "Charcoal" album view —
-   from a `.raescene` file, with no hand-laid-out raylib draw calls in
-   the example.
-2. Then render **music_player_screen_1.png** — the "Now Playing" view —
-   reusing the shared bottom tab bar as a `SceneInstance`.
-3. The example app (`examples/98_mobile_ui/main.rae`) is a thin shell:
-   open a window, load the scene, run the system pipeline each frame.
-4. Most code lives in `lib/ui/*.rae`. Future examples (workout app,
-   etc.) should be able to consume the same library without changes.
-
-## Non-goals (this round)
-
-- Animations, smoke FX, wobble. Author them in components, but don't
-  wire the runtime systems yet.
-- Virtualised lists / `DataRequest`. The track list in screen 2 is
-  short enough to render the whole list every frame; a real `ListView`
-  + virtualisation comes later.
-- Editor / inspector tooling. Stable `NodeId` is preserved, but no
-  visual editor.
-- Audio. The mini-player UI exists; the actual playback engine doesn't.
-
-## Why scene-driven and ECS
-
-Two questions worth answering up-front, since neither is obvious for a
-language that already has structs and `raylib.drawRectangle`:
-
-**Why ECS instead of a tree of structs?** A tree of structs locks you
-into one shape per "widget kind" — `Button`, `Slider`, `ListItem` etc.
-ECS lets a node *become* a button by gaining `OnClick` and `HitArea`,
-without changing its struct type. The same node can drop those
-components later and become something else. That's what makes the
-authored format generic: a node's meaning is the *combination* of
-components on it, not its class.
-
-**Why a scene file format instead of building the tree in code?** The
-moment two screens share a tab bar, you want it as a reusable unit
-with a stable id. The moment a list has 20 items with the same shape,
-you want one item template instantiated 20× with different bound data.
-Both are awkward in code-only UI; both are natural with a scene file
-plus `SceneInstance` and overrides.
-
-## High-level architecture
-
-Five layers, mirroring RUICS:
+## 1. What runs where
 
 ```
-┌─────────────────────────────────────────────┐
-│ 1. ECS storage                              │   lib/ui/ecs.rae
-│    Entity = Int; ComponentTable(T); World   │
-├─────────────────────────────────────────────┤
-│ 2. Scene format + loader                    │   lib/ui/scene.rae
-│    .raescene JSON → ECS components          │   lib/ui/scene_loader.rae
-├─────────────────────────────────────────────┤
-│ 3. Layout + transform                       │   lib/ui/layout.rae
-│    measure → compute → world transform      │   lib/ui/transform.rae
-├─────────────────────────────────────────────┤
-│ 4. Render                                   │   lib/ui/render.rae
-│    raylib painter (immediate-mode)          │
-├─────────────────────────────────────────────┤
-│ 5. Behaviours (text binding, input,         │   lib/ui/text_binding.rae
-│    scene instance, list view, …)            │   lib/ui/input.rae
-└─────────────────────────────────────────────┘
+examples/106_mobile_ui/            the app: ~53 files, one folder per system
+  Main.rae                         main() = createApp() + runApp(app)
+  AppTypes.rae / AppCreate.rae / App.rae
+  FramePipeline.rae                the named frame phases (§4)
+  Config, Viewport, WorldHelpers, UiRefresh, RenderDecide, RenderCacheGpu2d,
+  GpuWindow, Headless, HotReloadGlue, AppSettings, FileIo
+  inputSystem/ screenSystem/ historySystem/ playbackSystem/ spotifySystem/
+  debugSystem/ assetSystem/
+  assets/scenes/*.raescene         12 authored scenes + theme.raescene
+  assets/                          MSDF fonts, icons, album art, catalogue
+  app_cache/                       runtime state (gitignored): history,
+                                   library, playlists, downloaded artwork
+
+lib/ui/                            the UI library the app is built on
+lib/ecs/                           the ECS core lib/ui is built on
+lib/Gpu2d*.rae, lib/webgpu/        the 2D renderer: Rae over WebGPU bindings
+lib/sys/Spotify.rae                the osascript/curl C ABI (no scheduling)
 ```
 
-The example app (`main.rae`) owns the `World`, calls
-`loadScene(...)` once at startup, and then per frame runs the system
-pipeline. That's it — the rest is library + scene files.
+The rule the split follows: **library = mechanism, app = policy.** Layout,
+transforms, scene loading, the theme, input hit-testing, rendering, list
+virtualisation, the schedule — mechanism, in `lib/ui`, reused unchanged by
+104/105/111/112/114 and the game prototypes. Which screens exist, what a
+tap does, what Spotify's state means for the play button, what is persisted
+— policy, here.
 
-## Adaptations vs. Game proto1
+## 2. The five layers, as they are now
 
-A few places the Rae version deliberately differs:
+```
+┌──────────────────────────────────────────────┐
+│ 1. ECS storage                               │  lib/ecs: World, EntityId
+│    UiWorld = World core + one named           │  (generational), Component-
+│    ComponentTable per UI component            │  Table, Hierarchy, query2..5,
+│                                               │  EventQueue, Schedule
+├──────────────────────────────────────────────┤
+│ 2. Scene format + loader + theme              │  lib/ui/Scene*, SceneInstance,
+│    .raescene JSON -> components via the       │  Registry*, Theme*, Frames
+│    registry; theme tokens resolved per world  │
+├──────────────────────────────────────────────┤
+│ 3. Layout + transform                         │  lib/ui/layoutSystem, fitSystem,
+│    safe area -> layout -> fit -> world        │  safeAreaSystem, Transform,
+│    transform -> visual bounds                 │  visualBoundsSystem, Pipeline
+├──────────────────────────────────────────────┤
+│ 4. Render                                     │  lib/ui/renderSystem over
+│    retained gpu2d canvas: boxes, MSDF text,   │  lib/Gpu2dCanvas + lib/webgpu
+│    images, layers; presented through SDL3     │
+├──────────────────────────────────────────────┤
+│ 5. Behaviours                                 │  lib/ui/inputSystem, animation-
+│    input/hit-test/actions, animation, scroll, │  System, ScrollPhysics/Panel,
+│    widget style, list view, overlays          │  widgetStyleSystem, listView-
+│                                               │  System, LogOverlay/DebugOverlay
+└──────────────────────────────────────────────┘
+```
 
-| Game proto1 | Rae adaptation |
+Two things changed since the plan and are worth knowing before reading code:
+
+- **The ECS is `lib/ecs`, not a UI-private one.** `UiWorld` embeds the
+  generic `World` (generational ids with recycling, sparse-set tables, a
+  `Hierarchy`), and the UI systems are ordinary systems over it. Reference:
+  `docs/ecs-api-reference.md`, `docs/ecs-general-architecture.md`,
+  `docs/ecs-systems-and-data-observation.md`.
+- **The renderer is retained, not immediate.** gpu2d keeps a canvas of box /
+  text / image passes on the GPU and the render system re-records only when
+  its inputs changed; the app decides per frame whether a repaint is needed
+  at all (`RenderDecide.rae`). Reference: `docs/webgpu-2d-ui-renderer.md`,
+  `docs/ui-render-loop-performance.md`.
+
+## 3. The app object
+
+`type App` (AppTypes.rae) is the program's long-lived state, built once by
+`createApp()` (AppCreate.rae: window, fonts, scenes, catalogue, persisted
+state, Spotify) and run by `runApp(app: mod App)` (App.rae: the interactive
+loop and teardown). Its fields are the setup-time singletons — `gpuUi`,
+`scenes`, `texReg`, `appState`, `playback`, `viewport`, `logView`,
+`spotifyState` + `spotifyPoller`, the screen table — and *nothing* is a
+module-level global: every singleton is a **resource on `App` or `AppState`**
+threaded through the `mod`/`view` parameter that says who may touch it
+(`docs/globals-and-app-ownership.md`, `docs/ecs-resources.md`).
+
+`AppState` (screenSystem/ScreenRouter.rae) is the persisted + navigational
+state: the theme, the media library, the current album/track, the tab and
+sub-page stack, the play history, liked/playlists, the bottom sheet, and the
+transient loader cursors (`historyArt`, `artworkFetch`, `assetLoad`). It is
+saved to `app_cache/` on every action and at exit, restored at boot.
+
+One `UiWorld` holds every screen at once. Screens are **page entities**: a
+`ScreenPage` table (`createScreenPages()`) lists each screen's page id and
+scroll policy as data, the page root is tagged `PageRoot{id}`, and switching
+screens toggles `Active` on the pages (`buildAppWorldFor(visible)`). There
+are no per-screen world builders and no `if screen is` ladders in the router.
+
+## 4. The frame
+
+`App.rae` owns the loop; `FramePipeline.rae` names its phases. Per iteration:
+
+```
+waitEvents(timeout)          hybrid loop: 0 while animating/interacting,
+                             nextWaitTimeoutSec(...) when idle (§5)
+pollClose + gather input     lib/ui inputSystem over the world
+applyWheelScroll             scroll FSM (inputSystem/ScrollInput.rae)
+1. runFrameInputDispatch     hit-test, uiActions EventQueue -> action handlers
+                             mutate AppState / issue commands; may pick a
+                             next screen
+2. processCommands(playback) Apply(A): the PlaybackSystem drains its inbox
+3. refreshUiDiffs +          observation: revision ints on resources
+   syncFrameData             (history, playback, sheet) -> component edits;
+                             Spotify tick -> mirror; artwork/asset loaders;
+                             the History window re-rows in place on scroll
+4. runFrameLayoutTransform   safeArea -> layout -> fit -> transform ->
+                             visualBounds, each gated by uiShouldRun on the
+                             world's Schedule (dirty tables skip)
+5. runFrameAnimation         hero transition, hover scale, scroll spring
+6. decideActive + render     RenderDecide: did anything change? if so
+                             renderGpu2dFrame records + presents the canvas
+7. handleScreenSwitch        after the frame, only when input picked a new
+                             screen: toggle pages, hero capture, re-run
+                             layout/transform for the first frame there
+```
+
+The mapping onto the ECS phase list in
+`docs/ecs-systems-and-data-observation.md` §4 (Input → Apply → Observe →
+Layout/Transform → Render) is written in a comment right above the loop
+body. Two design points:
+
+- **The app calls the systems; the Schedule owns the dirty state.** Rae has
+  no function references, so the schedule cannot call systems for you.
+  `createUiPipeline(world)` registers every lib/ui system with its declared
+  read/write tables (`lib/ui/Pipeline.rae`), and each call site asks
+  `uiShouldRun(schedule, index)` first. Layout and transform skip when their
+  inputs are unchanged; fixture 839 proves that judgement equals the hand
+  caches it replaced (#949).
+- **Observation is by revision, not by diffing.** Resource-shaped state
+  (`PlayHistory.revision`, `PlaybackState` revision, the sheet epoch) bumps
+  an Int on change and `UiRefreshCache` remembers the last one it reacted
+  to; component tables use `changedSince`. Both are §7 of the observation
+  doc; 106 uses each where it belongs (#944).
+
+## 5. The event loop
+
+Idle at ~0 % CPU, smooth while moving: `waitEvents` blocks for a policy
+timeout (`lib/ui/EventLoop.nextWaitTimeoutSec`: a frame while animating or
+with the mouse down, the watcher poll cadence otherwise, a 30 s cap), and
+busy-renders (timeout 0) during interaction, transitions and scroll
+momentum. Every continuous-motion source must feed the "animating" flag or
+it silently degrades to the watcher rate — see
+`docs/ui-render-loop-performance.md` for the postmortem behind this.
+
+Background work does not poll from the loop: a worker that finishes calls
+`EventLoop.wake()` (a thread-safe SDL user event, #950) so a parked
+`waitEvents` returns at once.
+
+## 6. Background I/O: spawn + Channel + wake
+
+Everything the app *waits* on runs on Rae workers, not runtime threads
+(`docs/parallelism-first-plan.md` §5):
+
+- `spotifySystem/SpotifyPoller.rae` — one `spawn`'d worker: `Spotify.refresh()`
+  (an osascript fork/exec) → a tick on a `Channel(Int)` → `wake()` → 50 ms
+  stop-checked sleep slices. The frame's `pollSpotify` mirrors the cache
+  into `PlaybackState` and the Now Playing texts only when a tick arrived.
+  A stop channel + `task.get()` at teardown stand in for `detach`.
+- `assetSystem/ArtworkFetch.rae` — one `spawn`'d worker per album-art
+  download (`Spotify.fetchArtwork`, a blocking atomic curl), posting
+  `serial * 2 + okBit` on one channel; `artworkFetchDrain` settles results
+  once per frame and the History loader (`historySystem/HistoryIo.rae`)
+  uploads textures as they land. `Channel(T)` carries Int payloads today,
+  hence the encoding (#969 adds boxing).
+- `lib/sys/Spotify.rae` is only the C ABI: refresh, the mutex-guarded cache
+  getters, the transport controls, the blocking fetch.
+
+## 7. Scenes, registry, theme
+
+Screens are authored in `assets/scenes/*.raescene` — the RUICS JSON format
+(`docs/game-proto1-ruics-ecs-reference.md`): a node tree where each node
+carries named components (`Rect`, `Layout`, `Text`, `Sprite`, `OnClick`,
+`ScrollPanel`, `ListView`, …), with `SceneInstance` for reuse (the nav tabs,
+the mini-player, a track row) and per-instance overrides. `lib/ui/Scene*`
+parse and mount; `lib/ui/Registry*` map a component name to its
+deserialiser; an unknown or unsupported component is a fatal diagnostic
+naming the scene and node (#941), never a silent no-op. `theme.raescene`
+declares the tokens (colours, spacing, text styles) that the loader
+resolves through the world's theme resource (`docs/ui-theme-system.md`);
+`RAE_UI_THEME` picks a variant at boot. The registry is still one arm per
+component; #959–#961 collapse it via reflection.
+
+The app-side glue is small: `screenSystem/SceneLoader.rae` loads the scene
+set, `SceneMount.rae` turns a failed mount into a visible red sentinel, the
+`*View.rae` files mount a page and bind its data (album rows, history rows,
+the playback overlays), `WorldHelpers.rae` shortens the component setters.
+
+## 8. Coordinates, viewport, assets, persistence, headless
+
+- **Coordinates:** Model A of `docs/ui-coordinate-and-responsive-layout.md`
+  — scenes are authored in design units (a 1080-wide phone frame,
+  `unitScale=3`), gpu2d's design-resolution transform fits the frame into
+  the SDL3 window (letterboxed), and `Viewport.rae` is the one place that
+  converts. Safe areas come from `docs/ui-viewport-and-safe-area-plan.md`;
+  `RAE_UI_DEVICE` / `RAE_UI_FRAME` pick device presets.
+- **Text:** MSDF atlases (`assets/*.mtsdf.*`, `lib/SdfText`, `lib/ui/MsdfState`)
+  — no raylib fonts, no per-glyph textures.
+- **Images:** `assetSystem/GpuAssetRegistry.rae` owns the gpu2d canvas and
+  its image keys; covers/avatars load progressively (`cascadeAssets`,
+  budgeted per frame) and the History thumbs through §6.
+- **Persistence:** JSON under `app_cache/` (`PlaybackStateIo`, `HistoryIo`,
+  `LibraryData`, `PlaylistData`), all via the one `FileIo.rae` declaration
+  pair. `assets/` is authored input; `app_cache/` is runtime output.
+- **Hot reload:** `.raescene`/theme edits reload live through
+  `lib/FileWatch` (`HotReloadGlue.rae` preserves navigation across a
+  rebuild).
+- **Headless + automation:** `RAE_UI_HEADLESS=1` (no focus steal, Spotify
+  off), `RAE_AUTO_EXIT_SEC`, `RAE_UI_SCREEN/SCROLL/PLAYING/PROGRESS` to pose
+  a state for a screenshot, `RAE_UI_STRESS_*` for the rebuild stress runner,
+  `RAE_UI_DEBUG_LOOP` / `RAE_UI_WAIT_TRACE` for loop diagnostics. The
+  example gate (`RAE_EXAMPLE_FILTER=106_mobile_ui make test-examples`) runs
+  the app headless and screenshots it.
+
+## 9. The old open questions, answered
+
+| 98-era question | Answer in the tree |
 |---|---|
-| Sparse-set component table keyed by entity id | Same shape, but as a Rae generic `ComponentTable(T)` (Rae's monomorphisation handles it). |
-| `UiWorld` stores tables in a `Map<Type, ComponentTable>` | Rae has no untyped maps over types. World holds each table as a **named field**: `transforms: ComponentTable(TransformFx)`, `rects: ComponentTable(Rect)`, etc. The set of components is fixed at compile time. |
-| Pixi render backend, retained-mode, with handle objects | Raylib is immediate-mode. We don't keep render handles. `RenderSystem` paints the scene directly each frame from `WorldTransform` + `Sprite`/`Text`/`Shape`. No `RenderSyncSystem` — that whole layer collapses. |
-| TypeScript + dynamic JSON ⇄ object mapping | Rae has flat-struct JSON helpers (`rae_json_extract_int/float/string/bool`) but no generic JSON tree. We add a small JSON-tree parser to `lib/json.rae`, then drive component deserialisation off a per-component-name table. |
-| Component registry discovered at runtime via reflection | Rae has no reflection. The registry is a plain `func registerCoreComponents(reg: mod ComponentRegistry)` that lists every component name + its deserialiser + applier. New components ⇒ one line in that function. |
-| Generic `query(...tables)` taking varargs | Rae lacks variadic generics. Provide query helpers per shape (`queryWith2(world, &world.rects, &world.layouts)` etc.) — the music player uses ≤4 components per query. Easy to extend later. |
-
-The architectural skeleton — authored components, scene instances,
-overrides, two-phase layout, derived `ComputedRect` and `WorldTransform`,
-text wrap by node width, active filtering — all lift over unchanged.
-
-## Scene file format
-
-Identical to RUICS at the JSON level, so existing tooling and the
-reference doc apply directly:
-
-```json
-{
-  "type": "Scene",
-  "version": 2,
-  "sceneId": "music-player-album",
-  "root": "AlbumRoot",
-  "nodes": {
-    "AlbumRoot": {
-      "Rect":     { "x": 0, "y": 0, "w": 600, "h": 1300 },
-      "Size":     { "w": { "mode": "Fill" }, "h": { "mode": "Fill" } },
-      "Layout":   { "type": "Vertical", "gap": 16 },
-      "Padding":  { "l": 24, "t": 24, "r": 24, "b": 12 },
-      "Children": ["TopBar", "AlbumHero", "ActionRow", "PlayShuffleRow",
-                   "TrackList", "MiniPlayer", "TabBar"]
-    },
-    "TopBar": {
-      "Layout":   { "type": "Horizontal", "gap": 12, "alignCross": "Center" },
-      "Size":     { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
-      "Rect":     { "x": 0, "y": 0, "w": 0, "h": 36 },
-      "Children": ["BackButton", "TopBarSpacer", "SearchButton"]
-    },
-    ...
-    "TabBar": {
-      "SceneInstance": {
-        "sceneId": "nav-tabs",
-        "params": {
-          "overrides": [
-            { "nodeId": "TabLibrary", "component": "Active",
-              "field": "value", "value": true }
-          ]
-        }
-      }
-    }
-  }
-}
-```
-
-Validation rules from RUICS apply verbatim: `type=="Scene"`,
-`version==2`, `root` exists, every `Children[i]` exists.
-
-### Why JSON and not a Rae-native form
-
-A Rae-native scene file would let the compiler type-check component
-data at parse time, which is real value. But:
-
-- it forks from the reference doc the user pointed at,
-- it can't be data-hot-reloaded without recompiling the whole module,
-- it can't be patched by an editor without touching the AST,
-- it kills the override mechanism (which is structural by design).
-
-We pay the runtime parse cost and the per-component deserialiser
-plumbing in exchange for keeping the scene model as data, not code.
-
-### Adding a JSON tree parser
-
-`lib/json.rae` (delivered in queue task #40) — recursive-descent JSON
-parser with a flat-pool layout. Initially designed with a recursive
-`JsonValue` containing `List(JsonValue)`, but the C backend currently
-segfaults on that shape (Live works), so the parser stores all values
-in three flat lists owned by a `JsonDoc`:
-
-```rae
-enum JsonKind { Null, Bool, Number, String, Array, Object }
-
-type JsonField {
-  key: String
-  valueIdx: Int          # index into JsonDoc.values
-}
-
-type JsonValue {
-  kind: JsonKind
-  asBool: Bool
-  asNumber: Float
-  asString: String
-  rangeStart: Int        # for Array: range in JsonDoc.children
-  rangeLen: Int          # for Object: range in JsonDoc.fields
-}
-
-type JsonDoc {
-  values: List(JsonValue)
-  children: List(Int)    # array element value-indices, contiguously
-  fields: List(JsonField) # object fields, contiguously
-  rootIdx: Int
-  ok: Bool
-  errorPos: Int
-}
-
-func parseJson(source: String) ret JsonDoc
-func jsonRoot(doc: view JsonDoc) ret JsonValue
-func jsonField(doc: view JsonDoc, this: view JsonValue, key: String) ret Int  # -1 = missing
-func jsonValueAt(doc: view JsonDoc, idx: Int) ret JsonValue
-func jsonArrayLen(this: view JsonValue) ret Int
-func jsonArrayAt(doc: view JsonDoc, this: view JsonValue, idx: Int) ret JsonValue
-func jsonObjectLen(this: view JsonValue) ret Int
-func jsonObjectKeyAt(doc: view JsonDoc, this: view JsonValue, idx: Int) ret String
-func jsonObjectValueAt(doc: view JsonDoc, this: view JsonValue, idx: Int) ret JsonValue
-func jsonInt(this: view JsonValue, fallback: Int) ret Int
-func jsonFloat(this: view JsonValue, fallback: Float) ret Float
-func jsonString(this: view JsonValue, fallback: String) ret String
-func jsonBool(this: view JsonValue, fallback: Bool) ret Bool
-```
-
-Two Rae-specific gotchas hit during implementation, worth flagging
-because they'll bite later phases:
-
-1. **Live VM doesn't propagate `mod struct.listField`.** Mutating a
-   list that's a *field* of a `mod` struct works inside the callee
-   but is invisible to the caller after return. Workaround: pass
-   each list as its own `mod List(...)` parameter. The parser does
-   this through `parseValue(p, vals: ..., kids: ..., fields: ...)`
-   instead of `parseValue(p, doc: doc)`.
-2. **Compiled C backend can't `&` a function-call rvalue passed as
-   `view T`.** Bind `jsonRoot(doc)` (or any `ret JsonValue`) to a
-   local first before passing to a `view JsonValue` helper. The
-   tests do this consistently.
-
-Both are real Rae bugs that should land in the queue once #40 is
-done, but neither blocks the parser shipping.
-
-## Component inventory for the music player
-
-The minimum component set needed to render both screens:
-
-**Authored (persisted in `.raescene`):**
-
-| Component | Fields | Used for |
-|---|---|---|
-| `Rect` | x, y, w, h | seed rectangle |
-| `Size` | w: SizeAxis, h: SizeAxis (Fixed/Hug/Fill, min, max) | sizing policy |
-| `Layout` | type (None/Horizontal/Vertical/Stack), gap, alignMain, alignCross | container mode |
-| `Padding` | l, t, r, b | inner padding |
-| `Margin` | l, t, r, b | reserved, not yet honoured |
-| `Align` | x, y (Start/Center/End) | child alignment |
-| `Offset` | x, y | post-layout shift |
-| `Constraints` | minW, maxW, minH, maxH | size clamping |
-| `OverflowPolicy` | mode | clip / scaleToFitY (none for now) |
-| `Sprite` | textureKey, tint, scaleMode, nineSlice | image draw |
-| `Text` | text, styleId, wrapWidthMode | text draw |
-| `Shape` | kind (Rect/RoundedRect/Circle), fill, stroke, strokeWidth, radius | vector panel |
-| `Shadow` | blur | drop shadow (raylib stub OK) |
-| `TransformFx` | scaleX, scaleY, rotation, alpha, visible, pivot, anchor | post-layout transform |
-| `Opacity` | value | alpha multiplier |
-| `Active` | value | runtime visibility/participation |
-| `Name` | label | tooling |
-| `PrimaryType` | typeName | semantic |
-| `NodeId` | id | stable id |
-| `Button` | role | semantic marker |
-| `OnClick` | actionId, actionIdDouble, actionIdTriple | action metadata |
-| `PointerEvents` | enabled, blockChildren | hit testing |
-| `HitArea` | kind, radius | hit shape |
-| `MaskShape` | kind, sourceNodeId, radius | clip child to shape |
-| `SceneInstance` | sceneId, params | mount another scene |
-| `TextBinding` | key, format, prefix, suffix | text from runtime data |
-| `ImageSourceResolver` | mode (Fixed/Random/Hash/Direct), textureKeys, seed | texture selection |
-| `Children` | List(String) | hierarchy ordering |
-
-**Derived (runtime only, never in the file):**
-
-| Component | Computed by |
-|---|---|
-| `MeasuredSize` | `LayoutSystem.measure` |
-| `ComputedRect` | `LayoutSystem.compute` |
-| `WorldTransform` | `TransformSystem` |
-| `RuntimeOffset` | future Wobble/BackgroundPan |
-| `LayoutScale` | `OverflowPolicy.scaleToFitY` |
-| `SafeInsets` | `SafeAreaSystem` |
-| `Parent` | `HierarchySystem` (see below) |
-
-Listed components are roughly two thirds of RUICS's full inventory.
-Drop `Carousel`, `BackgroundPan`, `SmokeFx`, `AnimFrames`/`AnimTrigger`,
-`WobbleFx`, `DataRequest`, `ListView` for now — the music player
-doesn't need any of them.
-
-## Module split (`lib/ui/`)
-
-```
-lib/ui/
-  ecs.rae                # Entity, ComponentTable(T), World
-  components.rae         # All authored + derived component types
-  registry.rae           # Component name → (deserialiser, applier)
-  scene.rae              # .raescene JSON → in-memory Scene (untyped tree)
-  scene_loader.rae       # Scene → ECS entities + components
-  scene_instance.rae     # SceneInstance mount, params, overrides
-  hierarchy.rae          # Parent + Children traversal helpers
-  layout.rae             # measureSubtree + computeSubtree
-  transform.rae          # TransformSystem
-  text_measure.rae       # Hug-text measurement (raylib measureText)
-  text_binding.rae       # TextBinding resolver protocol
-  image_source.rae       # ImageSourceResolver (Direct mode is enough)
-  masking.rae            # MaskShape stub for Circle / RoundedRect
-  input.rae              # Pointer events, hit testing, click dispatch
-  render.rae             # Immediate-mode raylib painter
-```
-
-And one new shared module:
-
-```
-lib/json.rae             # JsonValue tree + parseJson
-```
-
-Each file is small and focused. Per CLAUDE.md, target <1000 LOC each.
-The biggest file is likely `layout.rae` (~400 LOC for two-phase layout
-with row/column/stack and Hug/Fill resolution).
-
-## System pipeline (per frame)
-
-```rae
-loop not windowShouldClose() {
-  inputSystem(world)             # gather pointer state, dispatch OnClick
-  textBindingSystem(world)       # rewrite Text.text from runtime keys
-  textMeasureSystem(world)       # write MeasuredSize for hug-text nodes
-  imageSourceSystem(world)       # resolve ImageSourceResolver → Sprite.textureKey
-  safeAreaSystem(world)          # write SafeInsets
-  layoutSystem(world)            # measure → compute → ComputedRect
-  transformSystem(world)         # ComputedRect + parent → WorldTransform
-
-  beginDrawing()
-  clearBackground(color: bgColor)
-  renderSystem(world)            # paint by world transform z-order
-  endDrawing()
-}
-```
-
-The pipeline matches RUICS conceptually but is simplified by raylib's
-immediate-mode model: there's no `RenderSyncSystem`/handle creation,
-since we paint each frame from scratch.
-
-## Music player screen 2 — concrete plan
-
-Screen 2 (the album view) is the build target for phase 1. Here's the
-node decomposition:
-
-```
-AlbumRoot               Vertical, gap 16, padding 24
-├── TopBar              Horizontal, alignCross Center
-│   ├── BackButton          Sprite "icon-back"
-│   ├── TopBarSpacer        Size w Fill
-│   └── SearchButton        Sprite "icon-search"
-├── AlbumHero           Horizontal, gap 16, alignCross Center
-│   ├── AlbumArt            Sprite, 96×96, Shape RoundedRect mask r=12
-│   └── AlbumTitleGroup     Vertical, gap 4
-│       ├── AlbumMeta           Text "Album · 8 songs · 2012"
-│       ├── AlbumTitle          Text "Charcoal", styleId "h1"
-│       └── AlbumArtist         Text "Brambles", styleId "subtitle"
-├── ActionRow           Horizontal, gap 12
-│   ├── AddPlaylistBtn      Sprite "icon-add-playlist"
-│   ├── DownloadBtn         Sprite "icon-download"
-│   └── MoreBtn             Sprite "icon-more"
-├── PlayShuffleRow      Horizontal, gap 12
-│   ├── PlayBtn             Shape RoundedRect black,
-│   │                       Layout Horizontal alignCross Center,
-│   │                       OnClick "music.play"
-│   │   ├── PlayIcon            Sprite "icon-play"
-│   │   └── PlayLabel           Text "Play", styleId "button-on-dark"
-│   └── ShuffleBtn          Shape RoundedRect outlined,
-│                           OnClick "music.shuffle"
-│       ├── ShuffleIcon         Sprite "icon-shuffle"
-│       └── ShuffleLabel        Text "Shuffle", styleId "button-on-light"
-├── TrackList           Vertical, gap 8
-│   ├── Track1              SceneInstance "track-row" with overrides
-│   ├── Track2              SceneInstance "track-row" …
-│   ├── Track3              SceneInstance "track-row" …
-│   ├── Track4              SceneInstance "track-row" …
-│   └── Track5              SceneInstance "track-row" …
-├── MiniPlayer          SceneInstance "mini-player" with overrides
-└── TabBar              SceneInstance "nav-tabs" Active=Library
-```
-
-Five `.raescene` files in this round:
-
-```
-scenes/music-player-album.raescene       # screen 2
-scenes/music-player-now-playing.raescene  # screen 1 (phase 2)
-scenes/track-row.raescene                 # one track row, scaffolded
-scenes/mini-player.raescene               # mini player pill
-scenes/nav-tabs.raescene                  # bottom tab bar
-```
-
-`track-row.raescene` carries the standard fields:
-
-```json
-{
-  "type": "Scene", "version": 2, "sceneId": "track-row",
-  "root": "Row",
-  "nodes": {
-    "Row": {
-      "Layout": { "type": "Horizontal", "gap": 12, "alignCross": "Center" },
-      "Children": ["TrackNumber", "TrackIcon", "TrackTitleGroup", "TrackOverflow"]
-    },
-    "TrackNumber":      { "Text": { "text": "01", "styleId": "track-number" } },
-    "TrackIcon":        { "Sprite": { "textureKey": "icon-eq" } },
-    "TrackTitleGroup":  { "Layout": { "type": "Vertical", "gap": 2 },
-                          "Children": ["TrackTitle", "TrackArtist"] },
-    "TrackTitle":       { "Text": { "text": "—", "styleId": "track-title" } },
-    "TrackArtist":      { "Text": { "text": "—", "styleId": "track-artist" } },
-    "TrackOverflow":    { "Sprite": { "textureKey": "icon-more-h" } }
-  }
-}
-```
-
-Then each `Track1..5` in the album scene gets `SceneInstance` with
-overrides for `TrackNumber.Text.text`, `TrackTitle.Text.text`, and
-`TrackArtist.Text.text`. That's the override mechanism doing exactly
-what RUICS's list bindings do, just written by hand for five rows.
-
-When `lib/ui/list_view.rae` lands later, those five overrides become
-one `ListView` component with a 5-record data source. Same scene
-file, less verbose authoring.
-
-### Assets
-
-`examples/98_mobile_ui/assets/`:
-
-- icons (PNG, ~48×48) — back, search, add-playlist, download, more,
-  more-h, play, shuffle, eq, heart, pause, home, search-tab, library,
-  hotlist
-- album art placeholder (PNG, 256×256) — `Charcoal` cover
-
-About 14 small icons. Easiest path: hand-pick from a permissively
-licensed icon set (e.g. Lucide or Heroicons MIT) and ship them
-alongside. Alternatively, draw them as `Shape` primitives — works for
-the ones that are clearly geometric (back chevron, search circle,
-shuffle X-arrow), less well for the playlist-add and download icons.
-
-### Text styles
-
-`lib/ui/text_styles.rae` (or just on `World` for now): a registry
-keyed by `styleId` returning `(font slot, font size, color, line spacing,
-weight)`. Five styles cover both screens:
-
-| styleId | size | weight | color |
-|---|---|---|---|
-| `h1` | 28 | bold | text-primary |
-| `subtitle` | 14 | regular | text-muted (underlined for "Brambles" link) |
-| `body` | 14 | regular | text-primary |
-| `track-number` | 13 | regular | text-muted |
-| `track-title` | 16 | medium | text-primary |
-| `track-artist` | 13 | regular | text-muted |
-| `button-on-dark` | 16 | medium | white |
-| `button-on-light` | 16 | medium | text-primary |
-
-Roboto is already shipped from `97_tetris3d/Roboto-Regular.ttf` — copy
-into `assets/` here, or factor it out to a stdlib-friendly location.
-
-## Music player screen 1 — what's added
-
-Screen 1 ("Now Playing") is mostly a different composition of the
-same primitives, plus one new component:
-
-- Hero album art at large size + reflective shadow
-- A waveform/progress visualiser (a row of vertical bars representing
-  audio amplitude) — needs a new `WaveformBars` component or a
-  `Shape: VerticalBars` variant. Cheapest option for the demo:
-  `Shape RoundedRect` arranged via `Layout Horizontal` with
-  per-bar overrides. Real waveforms wait.
-- A circular play button — `Shape Circle` with a centred play icon
-  inside via `Layout Stack`.
-
-It reuses the same `nav-tabs` scene instance with a different `Active`
-override (`TabHome` instead of `TabLibrary`).
-
-The new bits in stdlib for screen 1: nothing essential. Both screens
-should be reachable from the same library after phase 1.
-
-## Phase plan
-
-| Phase | What lands | Stops gracefully if cut here? |
-|---|---|---|
-| 0 | This design doc, music player screen PNGs in place. | Yes (already cut). |
-| 1a | `lib/json.rae` JSON tree parser + tests. | Yes — useful on its own. |
-| 1b | `lib/ui/ecs.rae`, `lib/ui/components.rae`, `lib/ui/registry.rae`. World boots, can `add`/`get` components by hand. | Yes — useful as a pure-Rae ECS demo. |
-| 1c | `lib/ui/scene.rae` + `lib/ui/scene_loader.rae`: parse a `.raescene`, instantiate the entities, no layout yet. Just dump the entity list. | Yes — proves the loader. |
-| 1d | `lib/ui/layout.rae` + `lib/ui/transform.rae`. Renders rectangles only via `lib/ui/render.rae`. | Yes — the album scene shows as a tower of grey boxes, but it's positioned correctly. |
-| 1e | `Sprite` + `Text` + `Shape` painting in `render.rae`. Plus `lib/ui/text_measure.rae` for hug-text. | At this point screen 2 looks ~right without scene instances yet — track rows hand-laid. |
-| 1f | `lib/ui/scene_instance.rae` + override application. Screen 2 wired up properly with shared `nav-tabs` and instanced track rows. | First commit-ready milestone. |
-| 1g | `lib/ui/input.rae` + click dispatch. Tabs become tappable. | Screen 2 ships as a static-state demo. |
-| 2 | Screen 1 (Now Playing) added as a second `.raescene`. Tab navigation switches between them. | Two-screen demo. |
-| 3 | (Future) `ListView`, `DataRequest`, animations. Workout app screens. | Out of scope for this round. |
-
-Each of 1a–1g is a small commit. 1d is the first user-visible
-milestone — boxes on the screen in roughly the right places.
-
-## What `examples/98_mobile_ui/main.rae` looks like
-
-The whole example app fits in ~30 lines. The point is that the
-heavy lifting lives in `lib/ui/`, not here:
-
-```rae
-import raylib
-
-func main() {
-  setConfigFlags(flags: 4)
-  initWindow(width: 600, height: 1300, title: "Music Player")
-  setTargetFPS(fps: 60)
-  initHudFont()                                  # see 97_tetris3d
-
-  let world: UiWorld = createUiWorld()
-  registerCoreComponents(reg: world.registry)
-  loadScene(world: world, sceneId: "music-player-album")
-
-  loop not windowShouldClose() {
-    inputSystem(world)
-    textBindingSystem(world)
-    textMeasureSystem(world)
-    imageSourceSystem(world)
-    safeAreaSystem(world)
-    layoutSystem(world)
-    transformSystem(world)
-
-    beginDrawing()
-    clearBackground(color: { r: 248, g: 248, b: 250, a: 255 })
-    renderSystem(world)
-    endDrawing()
-  }
-
-  unloadHudFont()
-  closeWindow()
-}
-```
-
-Nothing music-player-specific in code. Switching to screen 1 is a
-one-line change to `loadScene(world, sceneId: "music-player-now-playing")`.
-
-## Open questions
-
-1. **Texture loader**: where do raylib `Texture` handles live? Probably
-   on the `World` as `textures: List(TextureSlot)` (parallel to
-   `Sprite.textureKey`), loaded lazily from `assets/`. That's a
-   `lib/ui/textures.rae` module — added in phase 1e.
-
-2. **Data hot reload**: `.raescene` files are pure data. Watching them
-   and re-loading on change should be straightforward —
-   `prepareLayoutRootForLoad` in RUICS is the model. Not in phase 1,
-   but it's free if we keep the scene loader idempotent. (See
-   `lib/file_watch.rae` for the primitive and `examples/99_data_hot_reload`
-   for a standalone demo. Distinct from *code* hot reload — that's the
-   VM patching story, in `examples/23_code_hot_reload` until that example was
-   deleted with the Live deprecation — see git history.)
-
-3. **Coordinate space**: raylib uses pixel coordinates with origin
-   top-left. Authored scenes assume the same. No translation needed
-   between the two — keep it that way.
-
-4. **HiDPI**: the cropped reference PNGs are around 535×1037 — that's
-   already roughly logical-pixel size. We render at 1× for now and
-   let raylib's window scale handle Retina.
-
-5. **List virtualisation cutover**: the design treats the five track
-   rows as five hand-instanced `SceneInstance`s for now. That's fine
-   up to maybe 50 rows. Once `ListView` lands, the album scene can
-   replace the five `Track1..5` entries with one `TrackList` node
-   carrying `ListView { itemSceneId: "track-row", ... }`. Same scene
-   file shape, less authoring.
-
-6. **Live target**: the live VM has worked for raylib so far in
-   `97_tetris3d`. The new `lib/ui/` modules use only generics + structs,
-   nothing that should challenge it. Still, plan to test live + compiled
-   in parallel from phase 1d onward.
-
-## Why this gets us closer to Rae's stated goals
-
-The reference doc closes with the line "Make scene instancing
-first-class, not an afterthought." `97_tetris3d` already nudged Rae
-toward a Bevy-flavoured component architecture; this round is the
-next step — components stop being fields on a `World` struct hand-coded
-in a single example, and start being a library that any Rae app can
-opt into. The scene file format keeps UI authoring data-driven, which
-the language has been waving toward (`design.md`'s "easy for AI agents
-to parse, generate, refactor") but not yet earned.
-
-The biggest debt this round will leave is the per-component-name
-deserialiser registration in `lib/ui/registry.rae` — it's manual today
-and a real reflection-or-codegen story would erase it. That's a
-language-level conversation, not a UI-system one, and it can come
-after the music player ships.
-
-## Cross-references
-
-- `rae/docs/game-proto1-ruics-ecs-reference.md` — the source document
-  this design tracks. Read it first if you're touching the layout or
-  scene-instance code.
-- `examples/97_tetris3d/DESIGN.md` — the previous round's
-  component/system layout; the same pattern, but per-example rather
-  than stdlib.
-- `examples/98_mobile_ui/screens/music_player_screen_*.png` — the
-  visual targets.
-- `lib/raylib.rae` — already has `loadFontInto`, `drawTextWithFont`,
-  `getMonitorWidth/Height`, `setWindowSize/Position`, plus the standard
-  shape and texture API. Sufficient for phase 1.
-
----
-
-## Checkpoint 10 — Phase 2 review
-
-Both music-player screens now build, layout, render, and respond to
-pointer input via the scene-driven runtime. The album view (screen 2)
-mounts five `track-row.raescene` instances with per-row text overrides;
-the now-playing view (screen 1) is a single mounted `music-player-now-
-playing.raescene`. Both screens share `mini-player.raescene` and
-`nav-tabs.raescene` mounts at the bottom. The host loop rebuilds the
-ECS world when navigation actions (`nav.home`, `nav.library`,
-`nav.back`) fire, which is the simplest expression of the
-"`prepareLayoutRootForLoad` root reuse" pattern that Game proto1
-itself uses.
-
-Baseline screenshots live under `screenshots/album.png` and
-`screenshots/now-playing.png`; `snapshot.sh` regenerates either one.
-
-### Stdlib status
-
-| module                  | state     | notes                                   |
-| ----------------------- | --------- | --------------------------------------- |
-| `lib/json.rae`          | shipped   | flat-pool tree; covers parse needs      |
-| `lib/ui/components.rae` | shipped   | 39 authored + 8 derived component types |
-| `lib/ui/ecs.rae`        | shipped   | ComponentTable cap=256 to dodge a       |
-|                         |           | C-backend grow corruption bug           |
-| `lib/ui/registry.rae`   | shipped   | one match arm per component; manual     |
-| `lib/ui/scene.rae`      | shipped   | `.raescene` v2 parser + node lookup     |
-| `lib/ui/scene_loader.rae`| shipped  | full-scene → fresh entities             |
-| `lib/ui/scene_instance.rae`| shipped| mount-with-override, string-only        |
-| `lib/ui/layout.rae`     | shipped   | None/Horizontal/Vertical/Stack          |
-| `lib/ui/transform.rae`  | shipped   | absolute pos + alpha + visibility       |
-| `lib/ui/render.rae`     | shipped   | Shape/Sprite/Text                       |
-| `lib/ui/text_measure.rae`| shipped  | default-font width only                 |
-| `lib/ui/textures.rae`   | shipped   | linear-scan registry                    |
-| `lib/ui/input.rae`      | shipped   | hit-test + ActionEvent queue            |
-| `lib/ui/list_view.rae`  | **next**  | spec below                              |
-
-### Stdlib gaps surfaced during phases 1–2
-
-These are real, but most are workable around. None block the workout
-app; they're each a backlog item.
-
-1. **`SceneInstance` overrides only support strings.** `SceneOverride`
-   carries a `valueString` and `applyOverride` dispatches to
-   `Text.text`, `Sprite.textureKey`, and `Active.value`. Numeric / RGBA
-   / enum overrides need new dispatch arms. The workout app likely
-   wants `Shape.fill` overrides for set-completion progress shading.
-2. **`StringMap` `nodeIds` is a single global.** Mounting the same
-   sub-scene multiple times overwrites previous node-id → entity
-   mappings, so per-instance overrides are applied immediately during
-   mount and can't be re-applied later by id. Long-term we want
-   scoped node-ids: one map per `SceneInstance` mount, addressable as
-   `sceneScope.nodeId`.
-3. **No `OnClick` payload.** Action handlers receive an `actionId` and
-   the entity that fired, but no per-row data. The album example
-   can't tell which track row's `track.more` was tapped without
-   walking the entity tree. The workout app's "log set" buttons need
-   this; either thread payload through `OnClick`, or expose the
-   entity's parent chain so the host can recover scope.
-4. **`opt String` double-unbox.** The compiled C backend emits
-   `(...).as.s.as.s` for `let s: String = readFile(...)`. We side-step
-   it by declaring a non-`opt` extern with the same C name. A fix in
-   the c-backend's UNBOX path would let us drop the workaround.
-5. **`var.toFloat()` on globals.** The C backend emits `rae_toFloat()`
-   with no args when the receiver is a top-level `let`. Worked around
-   by binding to a local first; spec'd as a sema/c-backend bug.
-6. **Custom-font text measurement.** `measureText` covers raylib's
-   default font; `MeasureTextEx` (custom font) isn't bound yet. Hug-
-   text on `drawTextWithFont` over-/under-estimates by ~10 %. Adding
-   one binding closes this.
-7. **Image-asset preload manifest.** `lib/ui/textures.rae` is a
-   linear list and the example hand-codes the icon name list. A
-   `manifest.raescene` (or just JSON) would let the asset list live
-   alongside the rest of the scene authoring.
-8. **Data hot reload of `.raescene`.** Done — see `lib/file_watch.rae`
-   plus the integration in this app's `main.rae`. Iterating layouts
-   no longer requires a recompile.
-9. **macOS+Metal `TakeScreenshot`** returns the cleared back buffer in
-   a fast headless flow; documented in `snapshot.sh`. Long-term fix
-   is to render to an off-screen `RenderTexture` and `ExportImage`
-   that, which removes the macOS dependency.
-
-### `lib/ui/list_view.rae` — what it needs
-
-The component already exists in `components.rae`:
-
-```rae
-type ListView {
-  itemSceneId: String           # which sub-scene to mount per item
-  itemKeyField: String          # data field that uniquely identifies a row
-  itemHeight: Float             # row height (pre-virtualisation)
-  itemGap: Float
-  visibleItemCount: Int         # rough viewport size in rows
-  overscanRows: Int             # rows mounted but not visible (each side)
-  bindings: List(ListViewBinding)
-  loadingSceneId: String
-  emptySceneId: String
-  errorSceneId: String
-}
-
-type ListViewBinding {
-  nodeId: String                # which node inside the item scene to patch
-  componentName: String         # e.g. "Text"
-  fieldName: String             # e.g. "text"
-  itemField: String             # e.g. "title" — the field on the data row
-  prefix: String
-  suffix: String
-}
-```
-
-The runtime module needs to:
-
-1. **Resolve the item scene** from `SceneRegistry` by `itemSceneId`.
-2. **Take a data list** (heterogeneous `List(JsonValue)` or a simple
-   `List(StringMap(String))`). Phase 1 spec: stringly-typed rows. The
-   workout app's per-set rows are int + string + bool, so we either
-   accept `List(JsonValue)` and require `JsonValue` field accessors,
-   or define a small `ListRow = StringMap(String)` and let the host
-   pre-render numeric values to strings.
-3. **Compute window**: index range `[scrollIndex - overscan,
-   scrollIndex + visibleItemCount + overscan]`, clamp to `[0, len)`.
-4. **Mount items in window**: for each index in range, mount the item
-   scene under a per-row mount entity sized
-   `(itemWidth, itemHeight)`. Overrides come from `bindings`:
-   for each binding, look up the row's `itemField` in the data row,
-   wrap with `prefix`/`suffix`, and emit a `SceneOverride` targeting
-   `bindings[i].nodeId`/`componentName`/`fieldName`.
-5. **Update on scroll**: when the visible window shifts, unmount rows
-   that left the window (free their entities) and mount the newly
-   exposed ones. Item entities must live in their own pool so
-   `world.alive` doesn't grow unbounded.
-6. **Loading / empty / error fall-throughs**: if the data list is
-   loading/empty/errored (state tracked by the host), mount the
-   matching `*SceneId` instead of the per-row scenes.
-
-The track-row mount pattern in `examples/98_mobile_ui/main.rae`
-(`buildTrackList`) is essentially a hand-rolled Phase-1 version of
-this. Rolling it into `lib/ui/list_view.rae` is a straight extraction:
-`buildTrackList` becomes `mountListView(world, listEntity, listView,
-data)`, and the example shrinks by ~40 LOC. Items 1–5 above cover the
-full Phase 1 surface; virtualisation (#5) can land as Phase 2 once the
-workout app's longer set list demands it.
-
-#### Open question
-
-Whether `List(JsonValue)` is a good enough payload, or whether we want
-a `RaeAny`-style sum to keep numeric data numeric. `JsonValue` works
-for stringification (today's bindings) but doesn't help once we have
-numeric overrides (gap #1 above). Lock this in once Phase 3 of
-overrides lands.
+| Where do raylib `Texture` handles live? | There are none. gpu2d owns images by string key on its canvas; `TextureRegistry` (assetSystem/GpuAssetRegistry.rae) is the app's handle. |
+| Pixel coordinates, origin top-left, no translation? | Design units, not pixels: Model A with a design-resolution fit transform and a `Viewport` spine (§8). |
+| HiDPI at 1×, let raylib scale? | The window is sized in logical points, the framebuffer in physical px; `dpr` is part of `Viewport`, and MSDF text is resolution-independent. |
+| Data hot reload of `.raescene`? | Landed (`lib/FileWatch` + `HotReloadGlue.rae`). |
+| List virtualisation cutover? | `lib/ui/listViewSystem` exists (#945); the History list still hand-windows its rows — the migration is #964. |
+| The Live (VM) target? | Removed (#957). Compiled is the one target; `spawn`/`Channel` are real threads. |
+| raylib immediate-mode painter, no `RenderSyncSystem`? | Replaced by the retained gpu2d canvas; the render system re-records on change and `RenderDecide` skips frames with nothing to draw. |
+| Manual per-component registry — reflection or codegen? | Still manual; the reflection path is queued (#959–#961) on `fields`/`typeName`, which now exist. |
+
+## 10. Cross-references
+
+- `docs/ui-ecs-refactor-status.md` — what the #939–#950 wave changed in
+  `lib/ui` and here, and what is still open.
+- `docs/ecs-api-reference.md`, `docs/ecs-general-architecture.md`,
+  `docs/ecs-systems-and-data-observation.md`, `docs/ecs-resources.md` — the
+  ECS the app is built on.
+- `docs/webgpu-2d-ui-renderer.md`, `docs/ui-render-loop-performance.md`,
+  `docs/event-driven-ui-loop-plan.md` — renderer and loop.
+- `docs/ui-coordinate-and-responsive-layout.md`,
+  `docs/ui-viewport-and-safe-area-plan.md`, `docs/coordinate-system.md`.
+- `docs/ui-theme-system.md`, `docs/game-proto1-ruics-ecs-reference.md` —
+  theme and scene format.
+- `docs/parallelism-first-plan.md` §5 — why the background I/O is shaped as
+  it is.
+- `docs/globals-and-app-ownership.md` — why nothing here is a global.
+- `examples/104_ui_hello`, `examples/105_ui_counter` — the small teaching examples of the
+  same Schedule-driven shape; 111/112/114 and the prototypes for HUDs on the
+  same library.
