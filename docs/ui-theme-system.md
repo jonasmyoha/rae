@@ -1,6 +1,10 @@
 # Rae UI theme system — design document
 
-Status: PROPOSED (design only, no implementation). 2026-07-08.
+Status: **IMPLEMENTED** — designed 2026-07-08, landed as the M0–M6 slices
+#230–#237 (2026-07), the theme moved onto the world as a resource in #764
+(2026-08); refreshed against the tree 2026-09-14 (#953). §0 below is the
+current state; §1 is kept as the *pre-implementation baseline* it was written
+against, and §2–§10 are the design rationale the implementation follows.
 
 The guiding principle under evaluation, which this document adopts as
 the test for every decision below:
@@ -8,9 +12,47 @@ the test for every decision below:
 > UI scenes should describe **what** visual style they want, not
 > **how** that style is built.
 
-## 1. Where we are
+## 0. Where it stands now (2026-09-14)
 
-### What already works
+- **The theme is a resource on the world, not a global (#764).** `UiWorld.theme:
+  UiTheme` (`lib/ui/Ecs.rae`) bundles the palette (`ThemePalette`, `lib/ui/
+  Theme.rae`), the flattened `ResolvedTheme` tables (`lib/ui/ThemeResolved.rae`)
+  and a generation counter. An app seeds it from the theme it owns as it builds
+  a world (`setActiveTheme(world:, theme:)`); every resolver takes the world or
+  its `ResolvedTheme` as a parameter. There is no module-level `activeTheme`
+  any more — the no-globals rule is a hard error in `lib/` (#766).
+- **Theme data is a `.raescene` (#230).** `theme.raescene` carries the
+  `palette` / `space` / `radius` / `padding` / `shadow` / `text` / `container`
+  sections; `lib/ui/ThemeParse.rae` parses them with single-parent `extends`
+  flattening into `ResolvedTheme`. `RAE_UI_THEME=light` picks the light palette
+  in 106.
+- **One text resolver (#231).** `lib/ui/TextStyle.rae` `resolveText*(theme,
+  styleId)` is the only `styleId` → concrete mapping; the duplicated gpu2d tables
+  are gone. (A `LEGACY` hardcoded table block still sits at the bottom of that
+  file with no callers — dead code from the raylib path, deletable.)
+- **Shadows (#232), radius + padding tokens (#233), spacing sweep (#234)** —
+  tokens are resolved at deserialise time into token-carrying fields; the 106
+  scenes reference `spaceM`/`radiusCard`-style tokens (a handful of raw gaps
+  and radii remain where §8 says raw numbers are correct).
+- **Live theme switching (#235).** Colours are stored as palette-slot names
+  (`fillSlot`/`strokeSlot`/`tintSlot`/`colorSlot` on the components) and
+  resolved at paint through the world's theme; a theme switch is a repaint +
+  generation bump, not a scene re-parse.
+- **Overrides are graded (#236):** derived style ≫ `styleOverride` (sparse
+  `StyleOverride` component) ≫ raw component (lint-warned). See §7.
+- **Composite container styles (#237):** the `container` section
+  (`primaryButton`, `card`) expanded by `lib/ui/ContainerStyle.rae`; `StateStyle`
+  variants reference slots. Applying a container's `text` style to child Text
+  entities is still open (#258, backlog).
+- **Scope:** gpu2d only. The legacy raylib UI path and example 98 were removed
+  (#231, #955), so the "98 gets no back-compat" decision in §9 is moot.
+
+## 1. Where we were (the 2026-07-08 baseline)
+
+This section is history: it describes the tree the design was written
+against. File names below are the pre-#801 lowercase spellings.
+
+### What already worked
 
 - **Semantic colors.** `ThemePalette` (lib/ui/theme.rae) has nine
   role-named slots (`surface`, `textPrimary`, `accentText`, …). Scenes
@@ -24,7 +66,7 @@ the test for every decision below:
   `"styleId": "miniTitle"` — the *reference* side of the design is in
   place. What's missing is a real *definition* side.
 
-### What doesn't
+### What didn't
 
 - **Text styles are code, not data.** `styleId` resolves through
   hardcoded if-chains — `textStyleSize` / `textStyleColorRgba` /
@@ -439,38 +481,38 @@ at those sites; call-site code uses tokens directly.
 Non-breaking, value-preserving, in slices — each lands green with
 byte-identical (or intentionally-identical) 106 screenshots:
 
-- **M0 — Theme sections + loader.** Add `ResolvedTheme` (parallel-list
+- **M0 — Theme sections + loader** (landed #230). Add `ResolvedTheme` (parallel-list
   tables) and a reader that parses the theme sections (`palette` /
   `text` / `space` / `radius` / `shadow` / `padding`) out of a
   `.raescene` JsonDoc — no new file format, reusing the flat-pool
   parser — with `extends` flattening + validation, plus a default
   `theme.raescene` whose values are transcribed from today's hardcoded
   tables. Nothing consumes it yet. Ship with a dump tool.
-- **M1 — Single text resolver.** text_style.rae reads ResolvedTheme
+- **M1 — Single text resolver** (landed #231). text_style.rae reads ResolvedTheme
   (falling back to its current if-chains when no theme is loaded, so
   lib/ui stays usable standalone); render_gpu2d's duplicated
   `g2dTextStyle*` tables are deleted in favour of it.
   Screenshot-verified no-change.
-- **M2 — Shadows into styles.** Add the shadow token table; give
+- **M2 — Shadows into styles** (landed #232). Add the shadow token table; give
   `miniTitle` / `miniMuted` their shadows in the theme file; delete
   the TextShadow blocks from mini-player.raescene. The TextShadow
   component remains as tier-3 override + gains the lint. This is the
   direct repair of e39a378 and the template for every future "should
   this be a component?" conversation.
-- **M3 — Radius + padding tokens.** Extend `optFloatOrToken` to
+- **M3 — Radius + padding tokens** (landed #233). Extend `optFloatOrToken` to
   category-aware resolution; add radius/padding tables; sweep 106
   scenes' repeated radii/paddings onto tokens (pure data change,
   values identical).
-- **M4 — Spacing sweep in 106.** Replace raw gaps/paddings with the
+- **M4 — Spacing sweep in 106** (landed #234). Replace raw gaps/paddings with the
   existing space tokens (98 is the reference). Data-only; screenshots
   identical by construction since tokens carry the same values.
-- **M5 — Live theme switching.** Move scene color-token resolution
+- **M5 — Live theme switching** (landed #235). Move scene color-token resolution
   from parse time to the tier-2 accessor path (store the slot name in
   components that today store baked RGBA), making dark/light and
   theme-file hot-reload a repaint instead of a rebuild. This is the
   largest slice and intentionally last — everything before it is
   value-neutral plumbing.
-- **M6 (with the widget model, #214/#215) — composite styles.**
+- **M6 (with the widget model, #214/#215) — composite styles** (landed #237).
   `StateStyle` variants reference named styles/tokens instead of
   carrying raw values; `primaryButton`-class container styles arrive
   here, once there is a widget system to consume them.
