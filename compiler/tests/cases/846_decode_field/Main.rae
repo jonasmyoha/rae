@@ -8,6 +8,7 @@ open ui/RegistryGeneric
 open ui/Components
 import Json
 open ui/Theme
+open ui/ScenePolicy
 
 type Widget {
   columns: Int
@@ -20,7 +21,14 @@ type Widget {
   untouched: Int
 }
 
-func decodeWidget(doc: view JsonDoc, val: view JsonValue, theme: view UiTheme) ret Widget {
+# The diagnostics list + scene/node scope decodeField reports unknown tokens
+# into (#996); nothing here writes one, so it stays empty.
+func decodeWidget(
+  doc: view JsonDoc
+  val: view JsonValue
+  theme: view UiTheme
+  diagnostics: mod List(SceneDiagnostic)
+) ret Widget {
   var widget: Widget = Widget.default()
   loop let f: mod any in fields(widget) {
     f.set(value: decodeField(
@@ -29,6 +37,9 @@ func decodeWidget(doc: view JsonDoc, val: view JsonValue, theme: view UiTheme) r
       val: val
       key: fieldName(f)
       theme: theme
+      diagnostics: diagnostics
+      sceneId: "fixture"
+      nodeId: "Widget"
     ))
   }
   ret widget
@@ -36,10 +47,16 @@ func decodeWidget(doc: view JsonDoc, val: view JsonValue, theme: view UiTheme) r
 
 func main() {
   let theme: UiTheme = createUiTheme()
+  var diagnostics: List(SceneDiagnostic) = createSceneDiagnostics()
   let source: String = "\{ \"columns\": 3, \"gap\": \"spaceM\", \"radius\": 12.5, \"visible\": true, \"title\": \"Now Playing\", \"layout\": \"Horizontal\", \"align\": \"SpaceBetween\" \}"
   let doc: JsonDoc = Json.parseJson(source: source)
   let root: JsonValue = Json.root(doc: doc)
-  let widget: Widget = decodeWidget(doc: doc, val: root, theme: theme)
+  let widget: Widget = decodeWidget(
+    doc: doc
+    val: root
+    theme: theme
+    diagnostics: diagnostics
+  )
   log("columns={widget.columns}")
   log("gap token resolved={widget.gap > 0.0}")
   log("radius={widget.radius}")
@@ -53,6 +70,12 @@ func main() {
   let source2: String = "\{ \"gap\": 8.0, \"layout\": \"Sideways\" \}"
   let doc2: JsonDoc = Json.parseJson(source: source2)
   let root2: JsonValue = Json.root(doc: doc2)
-  let widget2: Widget = decodeWidget(doc: doc2, val: root2, theme: theme)
+  let widget2: Widget = decodeWidget(
+    doc: doc2
+    val: root2
+    theme: theme
+    diagnostics: diagnostics
+  )
   log("gap plain={widget2.gap} layout unknown keeps default={widget2.layout}")
+  log("diagnostics={diagnostics.length}")
 }
