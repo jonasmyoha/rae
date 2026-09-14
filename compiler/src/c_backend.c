@@ -1243,7 +1243,16 @@ const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
             return NULL;
         }
         case AST_EXPR_MEMBER: {
-            const AstTypeRef* obj_tr = infer_expr_type_ref(ctx, expr->as.member.object); Str obj_name = get_base_type_name(obj_tr);
+            const AstTypeRef* obj_tr = infer_expr_type_ref(ctx, expr->as.member.object);
+            // #961: inside a generic instantiation the object may be typed by a
+            // type PARAMETER (`var comp: T`); resolve it to the concrete struct
+            // so the field's type — and the String-field assignment ownership
+            // rules that depend on it — are known.
+            if (obj_tr && ctx->generic_params && ctx->generic_args) {
+                const AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, obj_tr);
+                if (sub) obj_tr = sub;
+            }
+            Str obj_name = get_base_type_name(obj_tr);
             if (obj_name.len == 0) obj_name = infer_expr_type(ctx, expr->as.member.object);
             const AstDecl* d = find_type_decl(ctx, ctx->module, obj_name);
             if (d && d->kind == AST_DECL_TYPE) {
@@ -2137,6 +2146,51 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       }
       if (efirst) fprintf(out, "1");   // empty struct: always equal
       fprintf(out, ");\n}\n\n");
+  }
+
+  // #961: `T.default()` for a non-generic user struct — every field its
+  // DECLARED default (`value: Bool = true`, `tint: RgbaColor = RgbaColor {...}`)
+  // or, for a nested user struct without one, that struct's own default;
+  // everything else zero / empty / first enum case / none. Forward-declared
+  // first so nesting order does not matter, like the JSON helpers below.
+  for (size_t i = 0; i < ctx->all_decl_count; i++) {
+      const AstDecl* d = ctx->all_decls[i];
+      if (d->kind != AST_DECL_TYPE || d->as.type_decl.generic_params) continue;
+      if (has_property(d->as.type_decl.properties, "c_struct")) continue;
+      const AstTypeDecl* td = &d->as.type_decl;
+      if (earlier_same_named_type(ctx, i, td->name)) continue;
+      const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, &(AstTypeRef){.parts = &(AstIdentifierPart){.text = td->name}});
+      fprintf(out, "RAE_UNUSED static %s rae_default_%s_(void);\n", mangled, mangled);
+  }
+  fprintf(out, "\n");
+  for (size_t i = 0; i < ctx->all_decl_count; i++) {
+      const AstDecl* d = ctx->all_decls[i];
+      if (d->kind != AST_DECL_TYPE || d->as.type_decl.generic_params) continue;
+      if (has_property(d->as.type_decl.properties, "c_struct")) continue;
+      const AstTypeDecl* td = &d->as.type_decl;
+      if (earlier_same_named_type(ctx, i, td->name)) continue;
+      const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, &(AstTypeRef){.parts = &(AstIdentifierPart){.text = td->name}});
+      fprintf(out, "RAE_UNUSED static %s rae_default_%s_(void) {\n", mangled, mangled);
+      fprintf(out, "  %s __r = {0};\n", mangled);
+      for (const AstTypeField* f = td->fields; f; f = f->next) {
+          if (!f->type || f->type->is_view || f->type->is_mod) continue;
+          if (f->default_value) {
+              // The declared default, emitted with the field's type as the
+              // expected type so a bare `{ x: 1.0, y: 1.0 }` literal lowers.
+              CFuncContext dctx = {0}; dctx.compiler_ctx = ctx; dctx.module = module;
+              dctx.expected_type = *f->type; dctx.has_expected_type = true;
+              fprintf(out, "  __r.%.*s = ", (int)f->name.len, f->name.data);
+              emit_expr(&dctx, f->default_value, out, PREC_LOWEST, false, false);
+              fprintf(out, ";\n");
+              continue;
+          }
+          if (f->type->is_opt || f->type->generic_args) continue;   // none / empty
+          Str base = get_base_type_name(f->type);
+          const char* fm = rae_json_struct_mangled(ctx, module, base);
+          if (fm && !find_enum_decl(NULL, module, base))
+              fprintf(out, "  __r.%.*s = rae_default_%s_();\n", (int)f->name.len, f->name.data, fm);
+      }
+      fprintf(out, "  return __r;\n}\n\n");
   }
 
   // #768: forward-declare every toJson/fromJson first, so a nested-struct or
