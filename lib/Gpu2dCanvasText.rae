@@ -290,7 +290,10 @@ func textFlushWith(canvas: mod Gpu2dCanvas, resources: mod GpuResources) {
   }
   loop var ai: Int = 0, ai < canvas.textAtlases.length, ++ai {
     var count: Int = 0
-    if let atlas: Gpu2dTextAtlas = canvas.textAtlases.copyAt(index: ai) {
+    # #973: read the glyph count through a `view` window — the copyAt this
+    # replaced deep-copied the whole atlas (all four Lists) for EVERY atlas
+    # EVERY frame just to test its length, ~124 atlas copies/frame in 114.
+    if let atlas: view Gpu2dTextAtlas => canvas.textAtlases.viewAt(index: ai) {
       count = atlas.glyphClips.length
     }
     if count > 0 {
