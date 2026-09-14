@@ -121,7 +121,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           SCREENSHOT="$TMP_OUT/easing3d.bmp"
           if (cd .. && RAE_EASING3D_TEST_FRAME=1 RAE_SDL_HEADLESS_MS=1200 \
              RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
-             perl -e 'alarm shift; exec @ARGV' 25 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
+             perl -e 'alarm shift; exec @ARGV' 40 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
              && grep -q '\[easing3d\] deterministic deferred frame rendered' "$TMP_OUT/render.log" \
              && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=50 \
                 > "$TMP_OUT/screenshot.log" 2>&1; then
@@ -136,7 +136,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           SCREENSHOT="$TMP_OUT/tetris3d.bmp"
           if (cd .. && RAE_TETRIS3D_TEST_FRAME=1 RAE_SDL_HEADLESS_MS=1400 \
              RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
-             perl -e 'alarm shift; exec @ARGV' 25 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
+             perl -e 'alarm shift; exec @ARGV' 40 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
              && grep -q '\[tetris3d\] deterministic deferred frame rendered' "$TMP_OUT/render.log" \
              && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=50 \
                 > "$TMP_OUT/screenshot.log" 2>&1; then
@@ -157,7 +157,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # onto a forward multi-mesh example is tracked in QUEUE #759.
           SCREENSHOT="$TMP_OUT/gpu3d.bmp"
           if (cd .. && RAE_SDL_HEADLESS_MS=1000 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
-             perl -e 'alarm shift; exec @ARGV' 20 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
+             perl -e 'alarm shift; exec @ARGV' 35 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
              && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" > "$TMP_OUT/screenshot.log" 2>&1; then
             echo "PASS: $EXAMPLE_NAME (non-blank deferred PBR screenshot)"
             ((PASSED++))
@@ -177,7 +177,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           SCREENSHOT="$TMP_OUT/transparent.bmp"
           if (cd .. && RAE_TRANSPARENT_TEST_FRAME=1 RAE_SDL_HEADLESS_MS=1200 \
              RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
-             perl -e 'alarm shift; exec @ARGV' 25 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
+             perl -e 'alarm shift; exec @ARGV' 40 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
              && grep -qE '\[transparent\] deterministic deferred frame rendered: 10 alpha instances over 4 opaque, [1-9][0-9]* transparent frames' "$TMP_OUT/render.log" \
              && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=50 \
                 > "$TMP_OUT/screenshot.log" 2>&1; then
@@ -196,14 +196,14 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           SCREENSHOT="$TMP_OUT/ocean.bmp"
           if (cd .. && RAE_OCEAN_TEST_FRAME=1 RAE_SDL_HEADLESS_MS=1500 \
              RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
-             perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
+             perl -e 'alarm shift; exec @ARGV' 45 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
              && grep -qE '\[ocean\] deterministic deferred frame rendered: hour [0-9.]+, 3 cascades of 256, [1-9][0-9]* ocean frames' "$TMP_OUT/render.log" \
              && grep -q '\[water fft\] spectrum baked' "$TMP_OUT/render.log" \
              && grep -qF '[water comparison] 1 brown island, 3 boxes' "$TMP_OUT/render.log" \
              && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=50 \
                 > "$TMP_OUT/screenshot.log" 2>&1 \
              && (cd .. && RAE_WATER_TIER_CHECK=1 RAE_OCEAN_TEST_FRAME=1 RAE_SDL_HEADLESS_MS=15000 \
-                 perl -e 'alarm shift; exec @ARGV' 60 "$TMP_OUT/app") > "$TMP_OUT/tiers.log" 2>&1 \
+                 perl -e 'alarm shift; exec @ARGV' 75 "$TMP_OUT/app") > "$TMP_OUT/tiers.log" 2>&1 \
              && grep -qF '[water tiers] 14 stages ok' "$TMP_OUT/tiers.log" \
              && [ "$(grep -c '\[water fft\] ifft ok' "$TMP_OUT/tiers.log")" -eq 14 ]; then
             echo "PASS: $EXAMPLE_NAME (FFT ocean screenshot + 9 tiers, cadence, invalidation, shutdown)"
@@ -237,7 +237,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           SCREENSHOT="$TMP_OUT/water-lake.bmp"
           if (cd .. && RAE_WATER_TEST_FRAME=1 RAE_WATER_FFT_DIAG=1 RAE_SDL_HEADLESS_MS=1200 \
              RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
-             perl -e 'alarm shift; exec @ARGV' 25 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
+             perl -e 'alarm shift; exec @ARGV' 40 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
              && grep -qE '\[water example\] deterministic deferred frame rendered: hour [0-9.]+, 1 island, 3 boxes, [1-9][0-9]* water frames' "$TMP_OUT/render.log" \
              && grep -qF '[water comparison] 1 brown island, 3 boxes' "$TMP_OUT/render.log" \
              && grep -q '\[water fft\] h0 ok' "$TMP_OUT/render.log" \
@@ -264,7 +264,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # decode that feeds per-vertex colour).
           SHOT="$TMP_OUT/walker.bmp"
           if (cd .. && RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SHOT" \
-                perl -e 'alarm shift; exec @ARGV' 40 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
+                perl -e 'alarm shift; exec @ARGV' 45 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
              && python3 tools/assert_nonblank_bmp.py "$SHOT" --min-colors=20 > "$TMP_OUT/shot.log" 2>&1 \
              && [ "$(grep -c "walker: 6717 verts, 3465 triangles" "$TMP_OUT/render.log")" -eq 1 ] \
              && [ "$(grep -c "skeleton: 65 joints, 76 nodes" "$TMP_OUT/render.log")" -eq 1 ] \
@@ -302,7 +302,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
               *)               GB_ARGS="" ;;
             esac
             if ! ( (cd .. && RAE_GBUFFER_VIEW="$GB_VIEW" RAE_GBUFFER_DEBUG=1 RAE_SDL_HEADLESS_MS=1000 RAE_GPU2D_SCREENSHOT="$GB_SHOT" \
-                  perl -e 'alarm shift; exec @ARGV' 25 "$TMP_OUT/app") > "$TMP_OUT/gb-$GB_VIEW.log" 2>&1 \
+                  perl -e 'alarm shift; exec @ARGV' 35 "$TMP_OUT/app") > "$TMP_OUT/gb-$GB_VIEW.log" 2>&1 \
                   && python3 tools/assert_nonblank_bmp.py "$GB_SHOT" $GB_ARGS >> "$TMP_OUT/gb-$GB_VIEW.log" 2>&1); then
               GB_OK=0
             fi
@@ -343,11 +343,11 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # that differs.
           SCREENSHOT="$TMP_OUT/gpu3d-ui-forward.bmp"
           if (cd .. && RAE_SDL_HEADLESS_MS=1000 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
-             perl -e 'alarm shift; exec @ARGV' 20 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
+             perl -e 'alarm shift; exec @ARGV' 35 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
              && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --gpu3d-ui > "$TMP_OUT/screenshot.log" 2>&1 \
              && [ "$(grep -c '\[shadow\] casters 17, 3 cascades' "$TMP_OUT/render.log")" -eq 1 ] \
              && (cd .. && RAE_GPU3D_DRAW_LIMIT=1 RAE_SDL_HEADLESS_MS=800 \
-                   perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/drawlimit.log" 2>&1 \
+                   perl -e 'alarm shift; exec @ARGV' 35 "$TMP_OUT/app") > "$TMP_OUT/drawlimit.log" 2>&1 \
              && [ "$(grep -c "\[gpu3d\] ERROR: draw limit exceeded" "$TMP_OUT/drawlimit.log")" -ge 1 ]; then
             echo "PASS: $EXAMPLE_NAME (forward path, lit frame + shadow cascades, draw-limit guard fires)"
             ((PASSED++))
@@ -368,25 +368,25 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           SCENE2_SCREENSHOT="$TMP_OUT/gpu3d-ui-scene2.bmp"
           SCENE3_SCREENSHOT="$TMP_OUT/gpu3d-ui-scene3.bmp"
           if (cd .. && RAE_GPU3D_SDF_TEST_LOG=1 RAE_SDL_HEADLESS_MS=1000 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
-             perl -e 'alarm shift; exec @ARGV' 20 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
+             perl -e 'alarm shift; exec @ARGV' 35 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
              && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --gpu3d-ui > "$TMP_OUT/screenshot.log" 2>&1 \
              && [ "$(grep -c '\[gpu3d\] SDF metaballs: count=5' "$TMP_OUT/render.log")" -eq 1 ] \
              && [ "$(grep -c '\[shadow\] casters 17, 3 cascades' "$TMP_OUT/render.log")" -eq 1 ] \
              && (cd .. && RAE_GPU3D_UI_TEST_STATE=free RAE_SDL_HEADLESS_MS=1000 RAE_GPU2D_SCREENSHOT="$FREE_SCREENSHOT" \
-                perl -e 'alarm shift; exec @ARGV' 20 "$TMP_OUT/app") > "$TMP_OUT/free-render.log" 2>&1 \
+                perl -e 'alarm shift; exec @ARGV' 35 "$TMP_OUT/app") > "$TMP_OUT/free-render.log" 2>&1 \
              && python3 tools/assert_nonblank_bmp.py "$FREE_SCREENSHOT" --gpu3d-ui > "$TMP_OUT/free-screenshot.log" 2>&1 \
              && python3 tools/assert_nonblank_bmp.py "$FREE_SCREENSHOT" --min-colors=2000 >> "$TMP_OUT/free-screenshot.log" 2>&1 \
              && (cd .. && RAE_GPU3D_UI_TEST_STATE=pause RAE_SDL_HEADLESS_MS=1000 RAE_GPU2D_SCREENSHOT="$PAUSE_SCREENSHOT" \
-                perl -e 'alarm shift; exec @ARGV' 20 "$TMP_OUT/app") > "$TMP_OUT/pause-render.log" 2>&1 \
+                perl -e 'alarm shift; exec @ARGV' 35 "$TMP_OUT/app") > "$TMP_OUT/pause-render.log" 2>&1 \
              && python3 tools/assert_nonblank_bmp.py "$PAUSE_SCREENSHOT" --gpu3d-ui > "$TMP_OUT/pause-screenshot.log" 2>&1 \
              && (cd .. && RAE_GPU3D_UI_TEST_STATE=debug RAE_SDL_HEADLESS_MS=1000 RAE_GPU2D_SCREENSHOT="$SETTINGS_SCREENSHOT" \
-                perl -e 'alarm shift; exec @ARGV' 20 "$TMP_OUT/app") > "$TMP_OUT/settings-render.log" 2>&1 \
+                perl -e 'alarm shift; exec @ARGV' 35 "$TMP_OUT/app") > "$TMP_OUT/settings-render.log" 2>&1 \
              && python3 tools/assert_nonblank_bmp.py "$SETTINGS_SCREENSHOT" --gpu3d-ui > "$TMP_OUT/settings-screenshot.log" 2>&1 \
              && (cd .. && RAE_GPU3D_UI_TEST_STATE=scene2 RAE_SDL_HEADLESS_MS=1000 RAE_GPU2D_SCREENSHOT="$SCENE2_SCREENSHOT" \
-                perl -e 'alarm shift; exec @ARGV' 20 "$TMP_OUT/app") > "$TMP_OUT/scene2-render.log" 2>&1 \
+                perl -e 'alarm shift; exec @ARGV' 35 "$TMP_OUT/app") > "$TMP_OUT/scene2-render.log" 2>&1 \
              && python3 tools/assert_nonblank_bmp.py "$SCENE2_SCREENSHOT" --gpu3d-ui > "$TMP_OUT/scene2-screenshot.log" 2>&1 \
              && (cd .. && RAE_GPU3D_UI_TEST_STATE=scene3 RAE_SDL_HEADLESS_MS=1000 RAE_GPU2D_SCREENSHOT="$SCENE3_SCREENSHOT" \
-                perl -e 'alarm shift; exec @ARGV' 20 "$TMP_OUT/app") > "$TMP_OUT/scene3-render.log" 2>&1 \
+                perl -e 'alarm shift; exec @ARGV' 35 "$TMP_OUT/app") > "$TMP_OUT/scene3-render.log" 2>&1 \
              && python3 tools/assert_nonblank_bmp.py "$SCENE3_SCREENSHOT" --gpu3d-ui > "$TMP_OUT/scene3-screenshot.log" 2>&1; then
             echo "PASS: $EXAMPLE_NAME (3D scenes + camera, settings and pause UI screenshots)"
             ((PASSED++))
@@ -400,7 +400,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # come out SHADED: thousands of colours, not a swatch strip over black.
           SCREENSHOT="$TMP_OUT/procgen.bmp"
           if (cd .. && RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
-             perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
+             perl -e 'alarm shift; exec @ARGV' 45 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
              && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=2000 > "$TMP_OUT/screenshot.log" 2>&1; then
             echo "PASS: $EXAMPLE_NAME (shaded procgen scene + texture swatches)"
             ((PASSED++))

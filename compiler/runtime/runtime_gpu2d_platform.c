@@ -391,22 +391,39 @@ rae_Bool rae_ext_Gpu2d_pollClose(void) {
         g_sdl_frames_done++;
         return 0;   /* frame budget takes precedence over the ms budget */
     }
-    if (g_sdl_headless_ms > 0 && (rae_ext_nowMs() - g_sdl_start_ms) >= g_sdl_headless_ms) {
-        /* The budget is wall clock from WINDOW CREATION, so it covers asset
-         * loading as well as the loop. An app that loads for longer than the
-         * budget exits having drawn nothing, writes no screenshot and returns 0
-         * -- which is indistinguishable from a broken renderer. Say what
-         * actually happened rather than leaving a silent black run. */
+    if (g_sdl_headless_ms > 0) {
+        int64_t now = rae_ext_nowMs();
         if (!rae_frame_presented_any()) {
-            fprintf(stderr,
-                "warning: RAE_SDL_HEADLESS_MS=%lld elapsed before the first frame. "
-                "Startup alone took longer than the budget, so nothing rendered and "
-                "no screenshot was written. The budget is wall clock from window "
-                "creation and includes asset loading -- raise it.\n",
-                (long long)g_sdl_headless_ms);
-            fflush(stderr);
+            /* The budget is wall clock from WINDOW CREATION, so it normally
+             * covers asset loading as well as the loop. But startup (asset
+             * loading, shader pipeline build) can occasionally outrun that
+             * budget on a loaded/shared machine even though the app goes on
+             * to render fine (#986) -- the budget is meant to bound RENDER
+             * time, not contention on the box. Give startup a generous grace
+             * (see RAE_HEADLESS_STARTUP_GRACE_MS in runtime_image_sdl3.c)
+             * before giving up: an app that still loads for longer than that
+             * exits having drawn nothing, writes no screenshot and returns 0
+             * -- which is indistinguishable from a broken renderer. Say what
+             * actually happened rather than leaving a silent black run. */
+            int64_t startupCap = g_sdl_headless_ms + RAE_HEADLESS_STARTUP_GRACE_MS;
+            if (now - g_sdl_start_ms >= startupCap) {
+                fprintf(stderr,
+                    "warning: RAE_SDL_HEADLESS_MS=%lld elapsed (grace extended to %lldms) "
+                    "before the first frame. Startup alone took longer than the budget "
+                    "even with grace, so nothing rendered and no screenshot was written. "
+                    "The budget is wall clock from window creation and includes asset "
+                    "loading -- raise it.\n",
+                    (long long)g_sdl_headless_ms, (long long)startupCap);
+                fflush(stderr);
+                return 1;
+            }
+            return 0;
         }
-        return 1;
+        /* Rendering has started: give the app its full configured budget
+         * measured from the first presented frame, so a slow-starting run
+         * still gets the number of rendered frames the example expects. */
+        if (g_sdl_first_frame_ms == 0) g_sdl_first_frame_ms = now;
+        if (now - g_sdl_first_frame_ms >= g_sdl_headless_ms) return 1;
     }
     return 0;
 }
@@ -415,10 +432,27 @@ rae_Bool rae_ext_Gpu2d_pollClose(void) {
  * already queued), leaving events in the queue for the following pollClose to
  * drain. Passing NULL means SDL doesn't dequeue the event. This is the idle
  * half of the hybrid loop: busy-render while animating, park here when idle so
- * the app sits at ~0% CPU until input arrives. timeoutSec <= 0 returns at once. */
+ * the app sits at ~0% CPU until input arrives. timeoutSec <= 0 returns at once.
+ *
+ * Headless runs never receive real OS events (the window is hidden and has no
+ * interactive session), so an app whose "animating" flag goes false before its
+ * first/deterministic frame -- e.g. before RAE_SDL_HEADLESS_MS's own budget
+ * check next runs -- would otherwise block here for lib/ui/EventLoop.rae's
+ * idleCapSec (30s), a single OS call our headless-quit check in pollClose
+ * cannot interrupt because it only runs BETWEEN loop iterations (#986: this,
+ * not slow asset loading, is why widening RAE_SDL_HEADLESS_MS's own grace
+ * period alone did not fix the flaky GPU3D/deferred gates -- the process was
+ * stuck inside this single call, never returning to let pollClose re-check
+ * the deadline). Clamp the wait to a short, frequent poll instead so a
+ * headless run's own loop -- and therefore its RAE_SDL_HEADLESS_MS budget --
+ * stays in control regardless of the app's idle policy. */
+#define RAE_HEADLESS_WAIT_EVENTS_CAP_MS 20
 void rae_ext_Gpu2d_waitEvents(float timeoutSec){
     int ms = (int)(timeoutSec * 1000.0);
     if (ms < 0) ms = 0;
+    if (rae_g2d_headless_requested() && ms > RAE_HEADLESS_WAIT_EVENTS_CAP_MS) {
+        ms = RAE_HEADLESS_WAIT_EVENTS_CAP_MS;
+    }
     SDL_WaitEventTimeout(NULL, ms);
 }
 
