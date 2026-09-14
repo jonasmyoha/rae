@@ -1,0 +1,151 @@
+open ui/Ecs
+# The bottom dock and the floating back button — SCENE-DRIVEN (#978).
+#
+# assets/scenes/dock.raescene owns the dock: a full-width root (ExtentAnchor
+# fill, the soft GradientFill shadow, the padding that extends it above the
+# controls, the Vertical layout whose negative gap tucks the mini-player's
+# lower half behind the tab capsule), the `MiniPlayer` slot and the `NavTabs`
+# capsule whose four tabs are `nav-tab` sub-scene instances with authored
+# overrides (icon, label, the nav action on every visible node) plus a
+# `NavTab { screen }` binding. What a scene cannot express is a component a
+# system drives (DockSystems.rae): `AnchorBottom` pins the dock to the layout
+# extent's bottom edge, `LayerTag` names its paint layer, `NavTab` selects
+# the active styling — so the bar is mounted ONCE and never re-mounted on a
+# tab switch (the #972 re-attach path is gone).
+#
+# assets/scenes/back-button.raescene is the floating back button, mounted once
+# as its own page and shown (setPageActive) only while a sub-page is open.
+#
+# The mini-player is still mounted into its slot by code
+# (NowPlayingView.buildMiniPlayerInstance): its playback/cover/heart data
+# bindings are imperative tags today and its nodeIds must stay scoped under
+# the "mini-player" page they are looked up by. Turning those into components
+# is the follow-up filed with this task.
+import ui/Components
+import ui/Scene
+open ecs/Entity
+open ui/SceneInstance
+open ecs/ComponentTable
+open ui/Layer
+
+const floatingDockInset: Float = 52.04819277108433
+
+# Texture-registry key for the nav-tab band's frosted-glass blur.
+# The host renders content first, captures the strip of pixels behind
+# the nav-tabs, blurs them, registers under this key. The nav-tabs
+# bar's `BackdropImage` then samples it. Constant so producer and
+# consumer can't drift apart.
+func tabBlurTextureKey() pub ret String {
+  ret "dock.tabBlur"
+}
+
+# Screen-pixel y-coordinate of the top of the nav-tabs band. The
+# blur capture region runs from this y down by `navTabsH`. Computed
+# from `phoneFrameH`/`navTabsH` so it tracks the dock's actual layout.
+func tabBlurCaptureY() pub ret Float {
+  ret phoneFrameH - navTabsH
+}
+
+# Registry key the dock looks up its frosted-glass blur backdrop
+# under. The host (`main.rae`) writes a fresh blurred screenshot
+# of the dock region after every render; this is the lookup.
+func dockBlurKey() pub ret String {
+  ret "nav.dockBlur"
+}
+
+# Mount the floating back button once (boot). Shown only while a sub-page is
+# open — the screen switch flips its page Active instead of re-mounting it.
+func mountBackButtonOverlay(
+  world: mod UiWorld
+  scenes: view AlbumScenes
+  state: view AppState
+) pub ret EntityId {
+  # The scene's root is a transparent full-page host (a root's authored
+  # Offset would be dropped — root placement is the mount's); the button
+  # is its child, offset into the corner.
+  let pageIdCopy: String = "{backButtonPageId}"
+  let mount: EntityId = mountPageOrError(
+    world: world
+    pageId: own pageIdCopy
+    scene: scenes.backButton
+    overrides: emptyOverrides()
+    w: world.layoutW
+    h: world.layoutH
+    sceneLabel: "back-button"
+    subScenes: scenes.subScenes
+  )
+  setPageActive(world: world, pageId: backButtonPageId, active: isSubPage(state: state))
+  layerTagSystem(world: world)
+  ret mount
+}
+
+# The bottom dock — mounted once from dock.raescene, then the mini-player is
+# mounted into its authored `MiniPlayer` slot as its own page. Tagged
+# `PageRoot{"dock"}` by the mount. Returns the dock entity.
+func mountBottomDockOverlay(
+  world: mod UiWorld
+  activeTab: Screen
+  scenes: view AlbumScenes
+  playback: view PlaybackState
+  state: view AppState
+  reg: view TextureRegistry
+) pub ret EntityId {
+  let dockPageIdCopy: String = "{dockPageId}"
+  let dock: EntityId = mountPageOrError(
+    world: world
+    pageId: own dockPageIdCopy
+    scene: scenes.dock
+    overrides: emptyOverrides()
+    w: world.layoutW
+    h: dockHeight()
+    sceneLabel: "dock"
+    subScenes: scenes.subScenes
+  )
+
+  # The mini-player CARD extends by exactly the nav-tabs height, so the
+  # gradient starts at the menubar bottom edge and its visible content
+  # remains the original miniPlayerH top slice. Extra bottom padding equal
+  # to the overlap keeps the row contents centred in that visible slice.
+  let miniOverlap: Float = navTabsH
+  if let slotRaw: Int = findNodeInPage(world: world, pageId: dockPageId, nodeId: "MiniPlayer") {
+    let slot: EntityId = nodeEntity(world: world, index: slotRaw)
+    let mini: EntityId = buildMiniPlayerInstance(
+      world: world
+      scenes: scenes
+      slot: slot
+      playback: playback
+      state: state
+      reg: reg
+    )
+    if componentHas(this: world.paddings, entity: mini) {
+      let curPad: Padding = componentGet(this: world.paddings, entity: mini)
+      let grownPad: Padding = {
+        insets: Insets {
+          l: curPad.insets.l
+          t: curPad.insets.t
+          r: curPad.insets.r
+          b: curPad.insets.b + miniOverlap
+        }
+      }
+      componentSet(this: world.paddings, entity: mini, data: grownPad)
+    } else {
+      let freshPad: Padding = { insets: Insets { l: 0.0, t: 0.0, r: 0.0, b: miniOverlap } }
+      componentSet(this: world.paddings, entity: mini, data: freshPad)
+    }
+  }
+
+  # First run of the dock's systems so the very first frame is right.
+  layerTagSystem(world: world)
+  navTabsSystem(world: world, activeTab: activeTab)
+
+  # Canvas overlay (#212 S5/S6 demo) — mounted here because every screen
+  # builder already calls mountBottomDockOverlay, and the mount is
+  # idempotent (a resident page survives screen switches).
+  let canvasMount: EntityId = mountCanvasOverlay(world: world, scenes: scenes, state: state)
+  ret dock
+}
+
+# The dock's authored height: mini-player card + the shadow extension above.
+func dockHeight() ret Float {
+  ret miniPlayerH + navTabsH + 216.86746987951807
+}

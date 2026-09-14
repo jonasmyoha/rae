@@ -11,6 +11,7 @@ open ecs/Hierarchy
 open ecs/hierarchySystem/HierarchySystem
 # Only raylib-free MSDF data types; paint code stays out of UiWorld.
 import ui/MsdfState
+open ui/BindingComponents
 open collections/StringMap
 
 # One semantic UI action produced by the input system when a click resolves to
@@ -111,7 +112,7 @@ type UiWorld {
   listViews: ComponentTable(ListView)
   # #945: sibling data rows for a ListView, on the same entity as the ListView.
   listViewDatas: ComponentTable(ListViewData)
-  # #974: profile-page data bindings (see Components.rae).
+  # #974: profile-page data bindings (see BindingComponents.rae).
   profileStats: ComponentTable(ProfileStat)
   avatarSources: ComponentTable(AvatarSource)
   # #975: album-cover grids whose rows a system materialises from app state.
@@ -121,6 +122,10 @@ type UiWorld {
   searchResultss: ComponentTable(SearchResults)
   # #977: the History page's play-history list binding.
   historyLists: ComponentTable(HistoryList)
+  # #978: dock anchoring / layer tags / nav-tab state.
+  anchorBottoms: ComponentTable(AnchorBottom)
+  layerTags: ComponentTable(LayerTag)
+  navTabs: ComponentTable(NavTab)
 
   # ----- authored effects (declared so .raescene can carry them) -----
   backgroundPans: ComponentTable(BackgroundPan)
@@ -262,6 +267,9 @@ func createUiWorld() ret UiWorld {
     searchFields: ComponentTable.create(SearchField)
     searchResultss: ComponentTable.create(SearchResults)
     historyLists: ComponentTable.create(HistoryList)
+    anchorBottoms: ComponentTable.create(AnchorBottom)
+    layerTags: ComponentTable.create(LayerTag)
+    navTabs: ComponentTable.create(NavTab)
     backgroundPans: ComponentTable.create(BackgroundPan)
     carousels: ComponentTable.create(Carousel)
     smokeFxs: ComponentTable.create(SmokeFx)

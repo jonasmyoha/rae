@@ -204,21 +204,11 @@ func handleScreenSwitch(
   }
   setPageActive(world: world, pageId: incomingPageId, active: true)
 
-  # Nav-tabs bar lives as a child of the bottom dock. Unmount destroys
-  # the old bar's subtree; the new bar is built and re-attached as
-  # the dock's second child (mini-player stays as the first). One
-  # mutation of `Children` on the dock; the mini-player entity is
-  # never touched.
-  unmountPage(world: world, pageId: navTabsPageId)
-  let newBar: EntityId = mountNavTabsBar(world: world, activeTab: appState.tab, scenes: scenes)
-  let dock: EntityId = findPageRootEntity(world: world, pageId: dockPageId)
-  let mini: EntityId = findPageRootEntity(world: world, pageId: miniPlayerPageId)
-  let dockKids: List(EntityId) = List.create(EntityId, cap: 2)
-  dockKids.add(value: mini)
-  dockKids.add(value: newBar)
-  attachChildren(world: world, parent: dock, kids: dockKids)
-  unmountPage(world: world, pageId: backButtonPageId)
-  let newBack: EntityId = mountBackButtonOverlay(world: world, state: appState)
+  # #978: the nav-tabs bar and the back button are resident. The active
+  # tab is a component the nav-tabs system restyles in place; the back
+  # button's page is shown while a sub-page is open.
+  navTabsSystem(world: world, activeTab: appState.tab)
+  setPageActive(world: world, pageId: backButtonPageId, active: isSubPage(state: appState))
 
   # Re-seed safe-area insets onto the freshly re-mounted page BEFORE the
   # intermediate hero layout below. That layout would otherwise run while

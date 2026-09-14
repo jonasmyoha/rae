@@ -64,7 +64,7 @@ func mountNowPlayingPage(
 
   # Top bar matches the other pages — shared centered-title helper
   # so the look and back-button geometry line up across screens.
-  let topBar: EntityId = buildPageTopBar(world: world, title: "Now playing")
+  let topBar: EntityId = mountTopBar(world: world, scenes: scenes, title: "Now playing")
 
   # The now-playing scene fills whatever's left after the top bar and
   # the bottom bars.
@@ -189,10 +189,8 @@ func mountNowPlayingPage(
 # nowPlaying instance revision and re-points by identity (#268).
 func buildMiniPlayerInstance(
   world: mod UiWorld
-  scene: view Scene
-  w: view Float
-  h: view Float
-  label: view String
+  scenes: view AlbumScenes
+  slot: view EntityId
   playback: view PlaybackState
   state: view AppState
   reg: view TextureRegistry
@@ -231,16 +229,23 @@ func buildMiniPlayerInstance(
   # the rest of the program — the mini play-icon dependency tag below
   # silently failed on the garbage pageId, and any later reader could
   # crash on it.
-  let miniPageId: String = "{miniPlayerPageId}"
-  let mount: EntityId = mountPageOrError(
+  # #978: the dock scene authors the slot; the mini-player scene is mounted
+  # INTO it as its own page (the slot becomes the mini-player root), so the
+  # nodeIds keep their "mini-player/..." scope.
+  let mount: EntityId = slot
+  let mounted: EntityId = mountSceneInstanceIntoPage(
     world: world
-    pageId: own miniPageId
-    scene: scene
+    mountEntity: slot
+    scene: scenes.miniPlayer
     overrides: overrides
-    w: w
-    h: h
-    sceneLabel: label
+    pageId: miniPlayerPageId
   )
+  if isNone(this: mounted) {
+    log("[scene-error] mini-player mount failed (scene.ok={scenes.miniPlayer.ok})")
+    paintErrorBlock(world: world, entity: slot, label: "mini-player")
+  }
+  let miniPr: PageRoot = { id: "{miniPlayerPageId}" }
+  componentSet(this: world.pageRoots, entity: slot, data: own miniPr)
   let miniRootId: String = "miniPlayer.root"
   let miniRootKind: String = "miniPlayer"
   setWidgetIdentity(
@@ -316,7 +321,7 @@ func buildMiniPlayerInstance(
   let framePtW: Float = world.layoutW / unitScale
   let frameIdx: Int = applySceneFramesToPage(
     world: world
-    scene: scene
+    scene: scenes.miniPlayer
     pageId: miniPlayerPageId
     windowPtW: framePtW
     forcedFrameId: forcedName
