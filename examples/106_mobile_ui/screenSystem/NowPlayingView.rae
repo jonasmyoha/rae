@@ -39,83 +39,45 @@ func mountNowPlayingPage(
   let album: Album = activeAlbum(state: state)
   let track: Track = trackAt(album: album, idx: state.currentTrackIndex)
 
-  let root: EntityId = createEntity(world: world)
-  setRectFixed(
-    world: world
-    entity: root
-    w: viewport.areaDuW
-    h: viewport.areaDuH
-  )
-  let layV: LayoutType = LayoutType.vertical
-  let alignS: AlignKind = AlignKind.start
-  setLayout(
-    world: world
-    entity: root
-    kind: layV
-    gap: outerGap
-    alignCross: alignS
-  )
-  setPaddingAll(world: world, entity: root, n: outerPad)
-
-  var copiedId: String = ""
-  copiedId = copiedId.concat(other: playerPageId)
-  let pr: PageRoot = { id: own copiedId }
-  componentSet(this: world.pageRoots, entity: root, data: own pr)
-
-  # Top bar matches the other pages — shared centered-title helper
-  # so the look and back-button geometry line up across screens.
-  let topBar: EntityId = mountTopBar(world: world, scenes: scenes, title: "Now playing")
-
-  # The now-playing scene fills whatever's left after the top bar and
-  # the bottom bars.
-  let bottomGap: Float = outerGap * 2.0
-  let npH: Float = phoneFrameH - outerPad * 2.0 - topBarH - outerGap - miniPlayerH - navTabsH - bottomGap
-  let npW: Float = phoneFrameW - outerPad * 2.0
-  let np: EntityId = createEntity(world: world)
-  setRectFixed(
-    world: world
-    entity: np
-    w: npW
-    h: npH
-  )
-
+  # The page is assets/scenes/music-player-now-playing.raescene (#979): the
+  # shared top bar as a sub-scene instance and the player block. The
+  # per-mount data — play icon, title/artist, the two time labels — travels
+  # as scene overrides; the playback/cover/heart data tags below are the
+  # imperative bindings #981 turns into components.
   let npOverrides: List(SceneOverride) = emptyOverrides()
   let playIconId: String = "PlayIcon"
-  let iconKey: String = playbackIconKey(playback: playback)
-  addSpriteOverride(list: npOverrides, nodeId: playIconId, value: iconKey)
-
-  let titleId: String = "TrackTitle"
-  let artistId: String = "TrackArtist"
-  let titleText: String = "{track.title}"
-  let artistText: String = "{album.artist}"
-  addTextOverride(list: npOverrides, nodeId: titleId, value: titleText)
-  addTextOverride(list: npOverrides, nodeId: artistId, value: artistText)
-
+  addSpriteOverride(
+    list: npOverrides
+    nodeId: playIconId
+    value: playbackIconKey(playback: playback)
+  )
+  addTextOverride(list: npOverrides, nodeId: "TrackTitle", value: "{track.title}")
+  addTextOverride(list: npOverrides, nodeId: "TrackArtist", value: "{album.artist}")
   let times: List(String) = nowPlayingTimes(playback: playback, track: track)
-  let timeNowId: String = "TimeNow"
-  let timeTotalId: String = "TimeTotal"
   if let nowStr: String = times.copyAt(index: 0) {
-    addTextOverride(list: npOverrides, nodeId: timeNowId, value: nowStr)
+    addTextOverride(list: npOverrides, nodeId: "TimeNow", value: nowStr)
   }
   if let totalStr: String = times.copyAt(index: 1) {
-    addTextOverride(list: npOverrides, nodeId: timeTotalId, value: totalStr)
+    addTextOverride(list: npOverrides, nodeId: "TimeTotal", value: totalStr)
   }
-
-  # Scope-only mount: the PlayIcon / ProgressBar / ProgressFill
-  # nodeIds get the "now-playing/..." prefix without re-tagging
-  # the np entity. The page-root tag lives on the screen root above.
-  let npLabel: String = "music-player-now-playing"
-  let mounted: EntityId = mountSceneInstanceIntoPage(
+  let pageIdCopy: String = "{playerPageId}"
+  let mount: EntityId = mountPageOrError(
     world: world
-    mountEntity: np
+    pageId: own pageIdCopy
     scene: scenes.nowPlaying
     overrides: npOverrides
-    pageId: playerPageId
+    w: viewport.areaDuW
+    h: viewport.areaDuH
+    sceneLabel: "music-player-now-playing"
+    subScenes: scenes.subScenes
   )
-  if isNone(this: mounted) {
-    log("[scene-error] now-playing mount failed (scene.ok={scenes.nowPlaying.ok})")
-    paintErrorBlock(world: world, entity: np, label: npLabel)
-  }
+  attachSafeAreaEdges(
+    world: world
+    entity: mount
+    top: 1.0
+    bottom: 0.0
+  )
+
   let playWidgetId: String = "player.playIcon"
   tagPlaybackIconDependency(
     world: world
@@ -150,33 +112,14 @@ func mountNowPlayingPage(
     observedRevision: 0
   )
 
-  # Gate the big album-cover corner radius on the same AppSettings
-  # flag that drives Library / Home / History. The Now Playing hero
-  # is the largest cover on screen so it gets a beefier 24px radius
-  # — visibly chunkier than the 12px used by the Album / Library /
-  # Home thumbs. Hero transitions between those screens still lerp
-  # the radius automatically.
-  if state.settings.roundedAlbumCovers {
-    let heroNodeId: String = "Hero"
-    if let raw: Int = findNodeInPage(world: world, pageId: playerPageId, nodeId: heroNodeId) {
-      let heroEntity: EntityId = nodeEntity(world: world, index: raw)
-      let cr: CornerRadius = { radius: 52.04819277108433 }
-      componentSet(this: world.cornerRadiuses, entity: heroEntity, data: cr)
+  # The hero's authored 24px-class corner radius follows the same
+  # AppSettings flag as every other cover: strip it when covers are square.
+  if state.settings.roundedAlbumCovers is false {
+    if let raw: Int = findNodeInPage(world: world, pageId: playerPageId, nodeId: heroCoverNode) {
+      componentRemove(this: world.cornerRadiuses, entity: nodeEntity(world: world, index: raw))
     }
   }
-
-  let kids: List(EntityId) = List.create(EntityId, cap: 2)
-  kids.add(value: topBar)
-  kids.add(value: np)
-  attachChildren(world: world, parent: root, kids: kids)
-  attachSafeAreaEdges(
-    world: world
-    entity: root
-    top: 1.0
-    bottom: 0.0
-  )
-
-  ret root
+  ret mount
 }
 
 # Mini-player mount that applies the play/pause icon, track title,

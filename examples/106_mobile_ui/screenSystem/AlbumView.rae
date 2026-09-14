@@ -1,14 +1,11 @@
 open ui/Ecs
 # Album-screen world composition (reference: `screens/music_player_screen_2.png`).
 #
-# The static album header — top bar, hero block, action buttons,
-# play/shuffle pills — lives in `assets/scenes/album.raescene` and
-# is mounted as a single sub-tree. Caption / Title / Artist + the
-# hero thumb texture are overridden at mount time so the same
-# scene visualises whichever album `state.currentAlbumStem` is
-# pointing at. The track-row loop, mini-player mount, and nav-tabs
-# stay code-driven because the scene format doesn't yet express
-# a data-driven list of N children.
+# The page — top bar, hero block, action buttons, play/shuffle pills, the
+# track-list container and the spacer — is assets/scenes/album.raescene
+# (#979); the header texts / cover and the track rows are data bindings
+# driven by AlbumSystems.rae. This module keeps the collection resolution
+# (album vs playlist) and the scroll-clamp geometry.
 import ui/Components
 import ui/Scene
 open ecs/Entity
@@ -24,206 +21,6 @@ func albumHeaderHeight() ret Float {
   let rowSum: Float = topBarH + heroBlockH + actionsRowH + pillsRowH
   let gaps: Float = outerGap * 3.0
   ret rowSum + gaps
-}
-
-# Mount the header scene with overrides driven by a resolved
-# CollectionView: HeroThumb sprite → stem-keyed texture (via the
-# existing hero rebind in main.rae against `state.currentAlbumStem`),
-# HeroCaption / HeroTitle / HeroArtist text → the collection's fields.
-# Works the same for an album or a playlist — the caller resolves which.
-func buildAlbumHeader(
-  world: mod UiWorld
-  scene: view Scene
-  title: view String
-  caption: view String
-  artist: view String
-) ret EntityId {
-  let w: Float = phoneFrameW - outerPad * 2.0
-
-  let overrides: List(SceneOverride) = emptyOverrides()
-  let captionId: String = "HeroCaption"
-  let titleId: String = "HeroTitle"
-  let artistId: String = "HeroArtist"
-  let barTitleId: String = "BarTitle"
-  # Fresh String allocations so the override list owns its heap
-  # independent of the caller's CollectionView.
-  let captionText: String = "{caption}"
-  let titleText: String = "{title}"
-  let artistText: String = "{artist}"
-  # Top-bar label is blank — the floating back-button overlay
-  # (top-left chevron-left circle) is the only "go back" affordance.
-  # The album's own title sits below in the hero block, so there's
-  # nothing to put up here; a parent-tab name like "Library" would
-  # lie when the album was opened from Home/Search.
-  let barTitleText: String = ""
-  addTextOverride(list: overrides, nodeId: captionId, value: captionText)
-  addTextOverride(list: overrides, nodeId: titleId, value: titleText)
-  addTextOverride(list: overrides, nodeId: artistId, value: artistText)
-  addTextOverride(list: overrides, nodeId: barTitleId, value: barTitleText)
-
-  # Scope the album scene's nodeIds under "album/" so they don't
-  # collide with sibling pages, but don't tag the header itself as
-  # a PageRoot — the album SCREEN root carries `PageRoot{"album"}`
-  # in the persistent-world model.
-  let header: EntityId = createEntity(world: world)
-  setRectFixed(
-    world: world
-    entity: header
-    w: w
-    h: albumHeaderHeight()
-  )
-  let label: String = "album"
-  let mounted: EntityId = mountSceneInstanceIntoPage(
-    world: world
-    mountEntity: header
-    scene: scene
-    overrides: overrides
-    pageId: albumPageId
-  )
-  if isNone(this: mounted) {
-    log("[scene-error] album header mount failed (scene.ok={scene.ok})")
-    paintErrorBlock(world: world, entity: header, label: label)
-  }
-  ret header
-}
-
-# Track-row mounts driven by a resolved row list. Every CollectionRow
-# gets a row — no count cap; the page applies a scroll offset to root
-# so overflowing rows can be revealed by wheel/drag. Empty rows → a
-# 1-row-tall placeholder keeps the spacer below from collapsing the
-# layout into the dock.
-#
-# Each row carries its own (albumStem, trackIndex), so a playlist whose
-# songs span many albums plays each correctly — the click encodes both
-# as `song.openref.<trackIndex>.<albumStem>`.
-func buildTrackList(
-  world: mod UiWorld
-  trackScene: view Scene
-  rows: view List(CollectionRow)
-  playback: view PlaybackState
-) pub ret EntityId {
-  unsafe {
-    let list: EntityId = createEntity(world: world)
-    let n: Int = rows.length
-    var visible: Int = n
-    if visible < 1 {
-      visible = 1
-    }
-    let listH: Float = trackRowH * visible.toFloat() + trackGap * (visible - 1).toFloat()
-    setRectFixed(
-      world: world
-      entity: list
-      w: phoneFrameW - outerPad * 2.0
-      h: listH
-    )
-    let layV: LayoutType = LayoutType.vertical
-    let alignS: AlignKind = AlignKind.start
-    setLayout(
-      world: world
-      entity: list
-      kind: layV
-      gap: trackGap
-      alignCross: alignS
-    )
-
-    let rowKids: List(EntityId) = List.create(EntityId, cap: trackRowCount)
-    var i: Int = 0
-    loop i < n {
-      let cr: CollectionRow = rae_ext_rae_buf_get(buf: rows.data, index: i)
-      let row: EntityId = createEntity(world: world)
-      setRectFixed(
-        world: world
-        entity: row
-        w: phoneFrameW - outerPad * 2.0
-        h: trackRowH
-      )
-
-      let overrides: List(SceneOverride) = emptyOverrides()
-      var num: Int = cr.number
-      if num <= 0 {
-        num = i + 1
-      }
-      var label: String = ""
-      if num < 10 {
-        label = "0{num}"
-      } else {
-        label = "{num}"
-      }
-      let title: String = "{cr.title}"
-      let subtitle: String = "{cr.subtitle}"
-      let idxId: String = "IdxText"
-      let titleId: String = "TitleText"
-      let subtitleId: String = "SubtitleText"
-      addTextOverride(list: overrides, nodeId: idxId, value: label)
-      addTextOverride(list: overrides, nodeId: titleId, value: title)
-      addTextOverride(list: overrides, nodeId: subtitleId, value: subtitle)
-
-      let rowLabel: String = "track-row"
-      let mounted: EntityId = mountOrError(
-        world: world
-        mountEntity: row
-        scene: trackScene
-        sceneLabel: rowLabel
-        overrides: overrides
-      )
-      # Highlight the row only when this exact (album, track) is the one
-      # actually playing — keyed on the row's own stem + index so it
-      # works for playlists spanning multiple albums.
-      var isPlayingRow: Bool = false
-      if playback.playingAlbumStem is cr.albumStem {
-        if cr.trackIndex is playback.playingTrackIndex {
-          isPlayingRow = true
-        }
-      }
-      if isPlayingRow {
-        let pillFill: RgbaColor = palettePill(theme: world.theme.active)
-        let pill: Shape = {
-          kind: ShapeKind.roundedRect
-          fill: pillFill
-          stroke: RgbaColor { r: 0, g: 0, b: 0, a: 0 }
-          strokeWidth: 0.0
-          radius: 39.03614457831325
-        }
-        componentSet(this: world.shapes, entity: row, data: pill)
-      }
-      let rowWidgetId: String = "{cr.albumStem}:{cr.trackIndex}"
-      let rowKind: String = "trackRow"
-      setWidgetIdentity(
-        world: world
-        entity: row
-        id: rowWidgetId
-        kind: rowKind
-      )
-      setWidgetState(
-        world: world
-        entity: row
-        enabled: true
-        selected: isPlayingRow
-        loading: false
-        error: false
-      )
-      let playbackSource: DataResourceId = dataResourcePlayback()
-      let playingField: DataFieldId = dataFieldPlayingTrack()
-      setDataDependency(
-        world: world
-        entity: row
-        resource: playbackSource
-        field: playingField
-        observedRevision: playback.revision
-      )
-      # Whole-row click → start this exact song and reflect it in the
-      # mini-player. The album stem + track index are both encoded into
-      # the actionId (`song.openref.<idx>.<stem>`) so a playlist row plays
-      # the right album. Children with their own OnClick (e.g. MoreButton)
-      # still win the hit-test (hitTestEntity walks children first).
-      let songOpenAction: String = "song.openref.{cr.trackIndex}.{cr.albumStem}"
-      setOnClick(world: world, entity: row, actionId: songOpenAction)
-      rowKids.add(value: row)
-      i = i + 1
-    }
-    attachChildren(world: world, parent: list, kids: rowKids)
-    ret list
-  }
 }
 
 # Total vertical content of the view (header + track list with
@@ -275,14 +72,14 @@ func collectionScrollFloorForState(state: view AppState) pub ret Float {
   ret collectionScrollMin(rowCount: cv.rows.length)
 }
 
-# Compose the whole album world: header scene + track list / spacer /
-# mini-player / nav-tabs as code-attached siblings around it. Pulls
-# the active album from `state` once so all the data-driven pieces
-# below stay consistent within a single rebuild.
-# Persistent-world entrypoint. Mounts the album page (screen root
-# tagged `PageRoot{"album"}`, ScrollState for the scrolling
-# behaviour, header + track-list + spacer children). Does NOT mount
-# dock / back overlays — those are app-level chrome.
+# Persistent-world entrypoint (#979, SCENE-DRIVEN). assets/scenes/album.raescene
+# owns the whole page — top bar, hero block, action buttons, play/shuffle
+# pills, the `TrackList` container (Size h Hug) and the bottom spacer — and
+# the mount is one mountPageOrError plus the root's runtime ScrollState. The
+# data lands through two binding components (lib/ui/BindingComponents.rae):
+# `AlbumHeader` on the Hero node and `TrackList` on the list container, driven
+# by AlbumSystems.rae every frame and once here so the first frame is right.
+# Tagged `PageRoot{"album"}` by the mount.
 func mountAlbumPage(
   world: mod UiWorld
   scenes: view AlbumScenes
@@ -291,62 +88,37 @@ func mountAlbumPage(
   scrollY: view Float
   viewport: view Viewport
 ) pub ret EntityId {
-  let cv: CollectionView = buildCurrentCollection(state: state)
-
-  let root: EntityId = createEntity(world: world)
-  setRectFixed(
+  let scene: view Scene => scenes.album
+  let overrides: List(SceneOverride) = emptyOverrides()
+  let pageIdCopy: String = "{albumPageId}"
+  let mount: EntityId = mountPageOrError(
     world: world
-    entity: root
+    pageId: own pageIdCopy
+    scene: scene
+    overrides: overrides
     w: viewport.areaDuW
     h: viewport.areaDuH
+    sceneLabel: "album"
+    subScenes: scenes.subScenes
   )
-  let layV: LayoutType = LayoutType.vertical
-  let alignS: AlignKind = AlignKind.start
-  setLayout(
-    world: world
-    entity: root
-    kind: layV
-    gap: outerGap
-    alignCross: alignS
-  )
-  setPaddingAll(world: world, entity: root, n: outerPad)
-
-  var copiedId: String = ""
-  copiedId = copiedId.concat(other: albumPageId)
-  let pr: PageRoot = { id: own copiedId }
-  componentSet(this: world.pageRoots, entity: root, data: own pr)
-
+  # The whole page scrolls: the root carries the ScrollState the scroll FSM
+  # drives and the Offset it moves.
   let off: Offset = { delta: Vec2 { x: 0.0, y: scrollY } }
-  componentSet(this: world.offsets, entity: root, data: off)
+  componentSet(this: world.offsets, entity: mount, data: off)
   let scroll: ScrollState = { y: scrollY, velocity: 0.0 }
-  componentSet(this: world.scrollStates, entity: root, data: scroll)
-
-  let header: EntityId = buildAlbumHeader(
-    world: world
-    scene: scenes.album
-    title: cv.title
-    caption: cv.caption
-    artist: cv.artist
-  )
-  let trackList: EntityId = buildTrackList(
-    world: world
-    trackScene: scenes.trackRow
-    rows: cv.rows
-    playback: playback
-  )
-  let spacer: EntityId = buildVerticalSpacer(world: world)
-
-  let kids: List(EntityId) = List.create(EntityId, cap: 3)
-  kids.add(value: header)
-  kids.add(value: trackList)
-  kids.add(value: spacer)
-  attachChildren(world: world, parent: root, kids: kids)
+  componentSet(this: world.scrollStates, entity: mount, data: scroll)
   attachSafeAreaEdges(
     world: world
-    entity: root
+    entity: mount
     top: 1.0
     bottom: 0.0
   )
-
-  ret root
+  albumHeaderSystem(world: world, state: state)
+  trackListSystem(
+    world: world
+    state: state
+    playback: playback
+    scenes: scenes
+  )
+  ret mount
 }

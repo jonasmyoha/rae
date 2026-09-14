@@ -2,32 +2,8 @@
   "type": "Scene",
   "version": 2,
   "sceneId": "music-player-now-playing",
-  "root": "NowPlaying",
+  "root": "NowPlayingPage",
   "nodes": {
-    "NowPlaying": {
-      "Layout": {
-        "type": "Vertical",
-        "gap": 39.036145,
-        "alignCross": "Center"
-      },
-      "Padding": {
-        "l": 43.373494,
-        "t": "spaceL",
-        "r": 43.373494,
-        "b": "spaceL"
-      },
-      "Shape": {
-        "kind": "Rect",
-        "fill": "surface"
-      },
-      "Children": [
-        "Hero",
-        "TitleRow",
-        "ProgressBar",
-        "TimeLabels",
-        "Controls"
-      ]
-    },
     "Hero": {
       "Rect": {
         "x": 0.0,
@@ -42,6 +18,9 @@
       },
       "HeroWidget": {
         "key": "albumCover"
+      },
+      "CornerRadius": {
+        "radius": 52.048193
       }
     },
     "TitleRow": {
@@ -192,7 +171,8 @@
       },
       "Children": [
         "ProgressFill"
-      ]
+      ],
+      "ProgressBar": {}
     },
     "ProgressFill": {
       "Rect": {
@@ -392,6 +372,77 @@
       },
       "OnClick": {
         "actionId": "playback.repeat"
+      }
+    },
+    "Player": {
+      "Layout": {
+        "type": "Vertical",
+        "gap": 39.036145,
+        "alignCross": "Center"
+      },
+      "Padding": {
+        "l": 43.373494,
+        "t": "spaceL",
+        "r": 43.373494,
+        "b": "spaceL"
+      },
+      "Shape": {
+        "kind": "Rect",
+        "fill": "surface"
+      },
+      "Children": [
+        "Hero",
+        "TitleRow",
+        "ProgressBar",
+        "TimeLabels",
+        "Controls"
+      ],
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 993.253012,
+        "h": 1646.746989
+      }
+    },
+    "NowPlayingPage": {
+      "Layout": {
+        "type": "Vertical",
+        "gap": "spaceM",
+        "alignCross": "Start"
+      },
+      "Padding": "screenEdgePadding",
+      "Children": [
+        "TopBar",
+        "Player"
+      ]
+    },
+    "TopBar": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 0.0,
+        "h": 104.096386
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "SceneInstance": {
+        "sceneId": "top-bar",
+        "params": {
+          "overrides": [
+            {
+              "nodeId": "Title",
+              "component": "Text",
+              "field": "text",
+              "value": "Now playing"
+            }
+          ]
+        }
       }
     }
   },
