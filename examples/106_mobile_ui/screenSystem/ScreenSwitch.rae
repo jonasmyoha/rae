@@ -251,21 +251,16 @@ func handleScreenSwitch(
       pageId: incomingPageId
       key: heroKey
     )
+    # The hero fly-between-pages overlay is not drawn on the gpu2d backend
+    # (HeroGpu2d.rae keeps only the capture helpers), so hiding the
+    # destination art while the transition "runs" had exactly one visible
+    # effect: every page landed with its album cover blacked out for the
+    # duration, then popped in. The rects are still captured above for the
+    # day the overlay comes back; until then the destination stays visible
+    # and no transition is armed.
     if gotDst {
-      setHeroVisibleOnPage(
-        world: world
-        pageId: incomingPageId
-        key: heroKey
-        visible: false
-      )
-      startHeroTransition(
-        anim: anim
-        key: heroKey
-        durationSec: heroDuration
-        now: uiNowSeconds()
-      )
-      result.pendingSrc = true
-      result.pendingHeroTargetPageId = "{incomingPageId}"
+      result.pendingSrc = false
+      result.pendingHeroTargetPageId = ""
     }
   }
 
