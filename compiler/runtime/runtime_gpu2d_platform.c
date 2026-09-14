@@ -140,22 +140,51 @@ int rae_g2d_window_visible(void) {
  * What C keeps is what only C can do: notice the SDL event. */
 static int g_g2d_win_moved = 0;
 
+/* True under ANY of the headless-budget envs (#983). Checking only
+ * RAE_UI_HEADLESS would leave a run that sets just RAE_SDL_HEADLESS_MS /
+ * RAE_HEADLESS_FRAMES (both legitimate ways to bound a capture — see
+ * examples/111/112's own "BOTH headless vars" note) still stealing focus.
+ * A non-empty value of any of the three counts, matching Headless.rae's
+ * `headlessIsActive`. */
+static int rae_g2d_headless_requested(void) {
+    const char* h = getenv("RAE_UI_HEADLESS");
+    if (h && h[0]) return 1;
+    const char* hm = getenv("RAE_SDL_HEADLESS_MS");
+    if (hm && hm[0]) return 1;
+    const char* hf = getenv("RAE_HEADLESS_FRAMES");
+    if (hf && hf[0]) return 1;
+    return 0;
+}
+
 void rae_ext_Gpu2d_initWindow(int64_t width, int64_t height, rae_String title) {
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         fprintf(stderr, "[gpu2d] SDL init failed: %s\n", SDL_GetError());
         return;
     }
+    int headless = rae_g2d_headless_requested();
     const char* t = title.data ? (const char*)title.data : "Rae (GPU 2D)";
     SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
 #ifndef __EMSCRIPTEN__
     flags |= SDL_WINDOW_METAL;
 #endif
+    /* A headless run renders to the offscreen target and screenshots THAT
+     * (rae_g2d_present, below) regardless of window visibility — the present-
+     * to-drawable step is already best-effort and skipped for a hidden/
+     * occluded window (the same path used to avoid the backgrounded-macOS
+     * drawable leak) — so SDL_WINDOW_HIDDEN costs nothing here and keeps the
+     * window from ever taking OS focus or Space. */
+    if (headless) flags |= SDL_WINDOW_HIDDEN;
     g_sdl_win = SDL_CreateWindow(t, (int)width, (int)height, flags);
     if (!g_sdl_win) { fprintf(stderr, "[gpu2d] window failed: %s\n", SDL_GetError()); return; }
-    SDL_RaiseWindow(g_sdl_win);
-    /* SDL3 delivers SDL_EVENT_TEXT_INPUT only while text input is started
-     * for the window; on desktop this is free (no on-screen keyboard). */
-    SDL_StartTextInput(g_sdl_win);
+    if (!headless) {
+        SDL_RaiseWindow(g_sdl_win);
+        /* SDL3 delivers SDL_EVENT_TEXT_INPUT only while text input is started
+         * for the window; on desktop this is free (no on-screen keyboard).
+         * Skipped headless (#983): a started text-input window still accepts
+         * stray terminal keystrokes typed during an automated run — a Space
+         * toggled playback and a stray "to" filled a search field mid-capture. */
+        SDL_StartTextInput(g_sdl_win);
+    }
 #ifndef __EMSCRIPTEN__
     g_g2d_metal_view = SDL_Metal_CreateView(g_sdl_win);
     if (!g_g2d_metal_view) { fprintf(stderr, "[gpu2d] metal view failed: %s\n", SDL_GetError()); return; }
