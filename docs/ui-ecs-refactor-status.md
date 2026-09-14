@@ -160,7 +160,12 @@ Ordered by leverage.
    deleted; `SpotifyView`'s on-track-change current-cover fetch still blocks
    the UI thread once per track (follow-up).
 8. `DESIGN.md` is raylib-era (texture handles, coordinate space, Live target
-   as open questions) — refresh or retire.
+   as open questions) — refresh or retire. **LANDED (#951):** rewritten as a
+   current-state document (app object, frame phases, event loop, spawn +
+   Channel + wake, scenes/registry/theme, coordinates/assets/persistence,
+   headless knobs), the 98-era open questions answered in a table, and every
+   library mechanism linked to its own doc instead of restated. The 757-line
+   plan it replaced stays in git history.
 
 104/105 are fine as they are (one file each, no ladders) but should be the
 first to show the `Schedule` form once it exists — they are the teaching
