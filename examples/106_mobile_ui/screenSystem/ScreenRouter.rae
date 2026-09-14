@@ -329,7 +329,7 @@ func buildAppWorldFor(
     state: state
     reg: texReg
   )
-  let back: EntityId = mountBackButtonOverlay(world: world, state: state)
+  let back: EntityId = mountBackButtonOverlay(world: world, scenes: scenes, state: state)
   addBottomSheetLayer(world: world, sheet: state.bottomSheet)
   # Responsive safe-area pass. `RAE_UI_DEVICE=<preset>` selects a phone
   # form factor; its notch / home-indicator insets are resolved to
@@ -345,7 +345,9 @@ func buildAppWorldFor(
   # sets switching=true on viewport extent changes), so the active
   # viewport's insets stay in sync with the selected simulator preset.
   let safe: Insets = applySafeAreas(world: world, viewport: viewport)
-  liftDockForSafeArea(world: world, dock: dock, bottomInset: safe.b)
+  # #978: the dock's bottom anchoring (and the safe-area lift) is the
+  # AnchorBottom system's; run it once so the first layout is right.
+  anchorBottomSystem(world: world, bottomInset: safe.b)
   ret world
 }
 
@@ -377,7 +379,7 @@ type AppState {
   # player text overrides and the playback position.
   currentTrackIndex: Int
   # Which of the four bottom-nav tabs is currently active. Drives
-  # the highlight in `nav_tabs_builder.buildNavTabsForScreen`.
+  # the highlight through DockSystems.navTabsSystem (#978).
   # Stays put while the user drills into sub-pages — so navigating
   # Profile → Album (sub-page) → NowPlaying (sub-page) keeps the
   # Profile tab highlighted.
