@@ -12,20 +12,29 @@ open ui/Ecs
 #     dispatched through the normal input pipeline so the host
 #     handles them with its own action-id dispatch table.
 #   * `closeBottomSheet(state)` (or scrim tap → `sheet.dismiss`)
-#     hides it. The `epoch` field bumps on every mutation so
-#     main.rae can cheaply detect "needs re-mount".
-#   * Render layer: the existing "dialog" layer (order 300), so the
-#     sheet paints over dock + back-button + content but under the
-#     debug overlay.
+#     hides it. The `epoch` field bumps on every mutation; the
+#     `BottomSheet` component's `builtEpoch` trails it.
+#   * Layout (#980): the whole overlay is `bottom-sheet.raescene` — a
+#     dialog-layer root (Active false at rest), a Fill scrim, and a
+#     bottom-anchored panel — mounted once per world by
+#     `mountBottomSheetOverlay`. `bottomSheetSystem` drives every
+#     instance: root Active follows `visible`, and when `epoch` moves
+#     it re-mounts one `sheet-action-row` sub-scene per action into the
+#     panel and sizes the panel from the row count. Nothing here builds
+#     layout entities; the row hosts are the per-item sub-scene mounts.
+#   * Render layer: the existing "dialog" layer (order 300, via the
+#     authored LayerTag), so the sheet paints over dock + back-button +
+#     content but under the debug overlay.
 import ui/Components
-import ui/layoutSystem/LayoutSystem
+import ui/Scene
+open ui/SceneInstance
+open ecs/Entity
 open ecs/ComponentTable
+open ecs/hierarchySystem/HierarchySystem
+open ui/layoutSystem/LayoutSystem
 open ui/Theme
-open ui/Layer
 
 let bottomSheetPageId: String = "bottom-sheet"
-
-let sheetDismissAction: String = "sheet.dismiss"
 
 type BottomSheetAction {
   label: String
@@ -35,8 +44,8 @@ type BottomSheetAction {
 type BottomSheetState {
   visible: Bool
   actions: List(BottomSheetAction)
-  # Bumped on every mutation. main.rae caches the last-seen value
-  # and re-mounts the sheet entities whenever it differs.
+  # Bumped on every mutation. `bottomSheetSystem` compares it to the
+  # sheet root's `BottomSheet.builtEpoch` and rebuilds the rows when it moved.
   epoch: Int
 }
 
@@ -70,165 +79,190 @@ func closeBottomSheet(sheet: mod BottomSheetState) pub {
   sheet.epoch = sheet.epoch + 1
 }
 
-# One action row inside the panel: full-width label, tappable.
-func buildSheetActionRow(
+# Mount the sheet overlay scene once per world (hidden by its authored
+# `Active: false`). Tagged `PageRoot{bottomSheetPageId}` by the page mount.
+# The root is sized to the layout extent so the scrim covers the whole
+# frame and the panel anchors to its bottom — on every device preset.
+func mountBottomSheetOverlay(
   world: mod UiWorld
+  scenes: view AlbumScenes
+  sheet: view BottomSheetState
+) pub ret EntityId {
+  let pageIdCopy: String = "{bottomSheetPageId}"
+  let root: EntityId = mountPageOrError(
+    world: world
+    pageId: own pageIdCopy
+    scene: scenes.bottomSheet
+    overrides: emptyOverrides()
+    w: world.layoutW
+    h: world.layoutH
+    sceneLabel: "bottom-sheet"
+    subScenes: scenes.subScenes
+  )
+  bottomSheetSystem(world: world, sheet: sheet, scenes: scenes)
+  ret root
+}
+
+# One action row: the `sheet-action-row` sub-scene on a fixed-height host,
+# with the label and actionId as overrides and the widget identity (the
+# actionId) plus its loading/disabled fade — StateStyle is a runtime table
+# the scene loader refuses to author — written as component data.
+func mountSheetActionRow(
+  world: mod UiWorld
+  scenes: view AlbumScenes
+  sceneId: view String
   action: view BottomSheetAction
   w: view Float
+  h: view Float
 ) ret EntityId {
-  let row: EntityId = createEntity(world: world)
+  let host: EntityId = createEntity(world: world)
   setRectFixed(
     world: world
-    entity: row
+    entity: host
     w: w
-    h: 56.0
+    h: h
   )
-  let labelText: String = "{action.label}"
-  let labelStyle: String = "primary"
-  setText(
+  let idx: Int = sceneRegistryIndex(reg: scenes.subScenes, key: sceneId)
+  if idx < 0 {
+    paintErrorBlock(world: world, entity: host, label: sceneId)
+    ret host
+  }
+  let overrides: List(SceneOverride) = emptyOverrides()
+  addTextOverride(list: overrides, nodeId: "ActionRow", value: "{action.label}")
+  addOnClickActionOverride(list: overrides, nodeId: "ActionRow", value: "{action.actionId}")
+  let scene: view Scene => sceneRegistryGet(reg: scenes.subScenes, idx: idx)
+  mountOrError(
     world: world
-    entity: row
-    text: own labelText
-    styleId: own labelStyle
+    mountEntity: host
+    scene: scene
+    sceneLabel: sceneId
+    overrides: overrides
   )
-  let aid: String = "{action.actionId}"
-  let widgetId: String = "{action.actionId}"
-  let rowKind: String = "bottomSheetAction"
   setWidgetIdentity(
     world: world
-    entity: row
-    id: widgetId
-    kind: rowKind
-  )
-  setWidgetState(
-    world: world
-    entity: row
-    enabled: true
-    selected: false
-    loading: false
-    error: false
+    entity: host
+    id: action.actionId
+    kind: "bottomSheetAction"
   )
   setOpacityStateStyle(
     world: world
-    entity: row
+    entity: host
     disabledAlpha: 0.45
     loadingAlpha: 0.72
     errorAlpha: 0.42
   )
-  setOnClick(world: world, entity: row, actionId: own aid)
-  ret row
+  ret host
 }
 
-# Mount the scrim + panel onto the "dialog" layer when visible.
-# Idempotent — call `unmountPage(world, bottomSheetPageId)` first
-# if you need to refresh after `openBottomSheet`. Tagged with
-# `PageRoot{bottomSheetPageId}` so the unmount path can find it.
-func addBottomSheetLayer(world: mod UiWorld, sheet: view BottomSheetState) pub {
+# Destroy the panel's current rows (collected first: destroying while
+# iterating the Children cache would shift entries under the cursor).
+func clearSheetRows(world: mod UiWorld, panel: view EntityId) {
   unsafe {
-    if sheet.visible is false {
+    if componentHas(this: world.childrens, entity: panel) is false {
       ret
     }
-    let dialogLayerId: String = "dialog"
-    let transparent: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
-
-    # Page-root container so the unmount path can find this subtree.
-    let root: EntityId = createEntity(world: world)
-    setRectFixed(
-      world: world
-      entity: root
-      w: phoneFrameW
-      h: phoneFrameH
-    )
-    let copiedId: String = "{bottomSheetPageId}"
-    let pr: PageRoot = { id: own copiedId }
-    componentSet(this: world.pageRoots, entity: root, data: own pr)
-    setLayerById(world: world, entity: root, id: dialogLayerId)
-
-    # Scrim — full screen, tap-anywhere dismiss.
-    let scrim: EntityId = createEntity(world: world)
-    setRectFixed(
-      world: world
-      entity: scrim
-      w: phoneFrameW
-      h: phoneFrameH
-    )
-    let scrimFill: RgbaColor = { r: 0, g: 0, b: 0, a: 140 }
-    let scrimShape: Shape = {
-      kind: ShapeKind.rect
-      fill: scrimFill
-      stroke: transparent
-      strokeWidth: 0.0
-      radius: 0.0
+    let old: List(EntityId) = List.create(EntityId, cap: 4)
+    let kids: view Children => componentView(this: world.childrens, entity: panel)
+    var k: Int = 0
+    loop k < kids.ids.length {
+      old.add(value: rae_ext_rae_buf_get(buf: kids.ids.data, index: k))
+      k = k + 1
     }
-    componentSet(this: world.shapes, entity: scrim, data: scrimShape)
-    let dismissId: String = "{sheetDismissAction}"
-    setOnClick(world: world, entity: scrim, actionId: own dismissId)
-
-    # Panel — bottom-anchored, rounded top corners, action rows stacked.
-    let n: Int = sheet.actions.length
-    let panelW: Float = phoneFrameW
-    let panelH: Float = 52.04819277108433 + 121.44578313253011 * n.toFloat() + 52.04819277108433
-    let panel: EntityId = createEntity(world: world)
-    setRectFixed(
-      world: world
-      entity: panel
-      w: panelW
-      h: panelH
-    )
-    let panelFill: RgbaColor = colorByName(theme: world.theme.active, name: "surface")
-    let panelShape: Shape = {
-      kind: ShapeKind.roundedRect
-      fill: panelFill
-      stroke: transparent
-      strokeWidth: 0.0
-      radius: 52.04819277108433
+    loop let row: view EntityId in old {
+      destroyEntitySubtree(world: world, root: row)
     }
-    componentSet(this: world.shapes, entity: panel, data: panelShape)
-    let panelOff: Offset = { delta: Vec2 { x: 0.0, y: phoneFrameH - panelH } }
-    componentSet(this: world.offsets, entity: panel, data: panelOff)
-    let layV: LayoutType = LayoutType.vertical
-    let alignS: AlignKind = AlignKind.start
-    setLayout(
-      world: world
-      entity: panel
-      kind: layV
-      gap: 8.674698795180722
-      alignCross: alignS
-    )
-    # spaceXS (full-precision literal; token is 6-dec)
-    setPaddingAll(world: world, entity: panel, n: 52.04819277108433)
-
-    let rowKids: List(EntityId) = List.create(EntityId, cap: n)
-    var i: Int = 0
-    loop i < n {
-      let a: BottomSheetAction = rae_ext_rae_buf_get(buf: sheet.actions.data, index: i)
-      let rowW: Float = panelW - 48.0
-      let row: EntityId = buildSheetActionRow(world: world, action: a, w: rowW)
-      rowKids.add(value: row)
-      i = i + 1
-    }
-    attachChildren(world: world, parent: panel, kids: rowKids)
-
-    let kids: List(EntityId) = List.create(EntityId, cap: 2)
-    kids.add(value: scrim)
-    kids.add(value: panel)
-    attachChildren(world: world, parent: root, kids: kids)
   }
 }
 
-# Re-mount the sheet layer if `state.epoch` differs from
-# `cachedEpoch`. Returns the new epoch. main.rae calls this each
-# frame after dispatchActions; the no-change fast-path is two int
-# comparisons and a string-pool flush boundary.
-func refreshBottomSheetIfNeeded(
+# Re-mount the rows of one sheet instance from `sheet.actions` and size
+# the panel's authored Rect to fit them (padding + rows + gaps); the
+# AnchorBottom system then re-seats it on the bottom edge from that Rect.
+func rebuildSheetRows(
   world: mod UiWorld
   sheet: view BottomSheetState
-  cachedEpoch: view Int
-) pub ret Int {
-  if sheet.epoch is cachedEpoch {
-    ret cachedEpoch
+  scenes: view AlbumScenes
+  panel: view EntityId
+  binding: view BottomSheet
+) {
+  unsafe {
+    clearSheetRows(world: world, panel: panel)
+    let pad: Insets = entityPadding(world: world, entity: panel)
+    let layout: Layout = entityLayout(world: world, entity: panel)
+    let n: Int = sheet.actions.length
+    let rowW: Float = world.layoutW - pad.l - pad.r
+    let rows: List(EntityId) = List.create(EntityId, cap: n)
+    var i: Int = 0
+    loop i < n {
+      let action: BottomSheetAction = rae_ext_rae_buf_get(buf: sheet.actions.data, index: i)
+      rows.add(value: mountSheetActionRow(
+        world: world
+        scenes: scenes
+        sceneId: binding.rowSceneId
+        action: action
+        w: rowW
+        h: binding.rowHeight
+      ))
+      i = i + 1
+    }
+    attachChildren(world: world, parent: panel, kids: rows)
+    var gaps: Float = 0.0
+    if n > 1 {
+      gaps = layout.gap * (n - 1).toFloat()
+    }
+    let panelH: Float = pad.t + binding.rowHeight * n.toFloat() + gaps + pad.b
+    let current: Rect = entityRect(world: world, entity: panel)
+    if current.size.y is not panelH {
+      let sized: Rect = { position: current.position, size: Vec2 { x: current.size.x, y: panelH } }
+      componentSet(this: world.rects, entity: panel, data: sized)
+    }
   }
-  unmountPage(world: world, pageId: bottomSheetPageId)
-  addBottomSheetLayer(world: world, sheet: sheet)
-  ret sheet.epoch
+}
+
+# The bottom-sheet system: for every `BottomSheet` root, follow
+# `sheet.visible` with the root's Active and rebuild the rows when
+# `sheet.epoch` moved past `builtEpoch`. Runs every frame from
+# `refreshMountedUi` and once at mount; at idle it is two comparisons.
+func bottomSheetSystem(
+  world: mod UiWorld
+  sheet: view BottomSheetState
+  scenes: view AlbumScenes
+) pub {
+  let n: Int = componentCount(this: world.bottomSheets)
+  var i: Int = 0
+  loop i < n {
+    let root: EntityId = componentEntityAt(this: world.bottomSheets, i: i)
+    let binding: BottomSheet = componentDataAt(this: world.bottomSheets, i: i)
+    var currentActive: Bool = true
+    if componentHas(this: world.actives, entity: root) {
+      currentActive = componentGet(this: world.actives, entity: root).value
+    }
+    if currentActive is not sheet.visible {
+      let active: Active = { value: sheet.visible }
+      componentSet(this: world.actives, entity: root, data: active)
+    }
+    if binding.builtEpoch is not sheet.epoch {
+      let pageId: String = pageOf(world: world, entity: root)
+      if let panelRaw: Int = findNodeInPage(
+        world: world
+        pageId: pageId
+        nodeId: binding.panelNodeId
+      ) {
+        rebuildSheetRows(
+          world: world
+          sheet: sheet
+          scenes: scenes
+          panel: nodeEntity(world: world, index: panelRaw)
+          binding: binding
+        )
+      }
+      let built: BottomSheet = {
+        panelNodeId: "{binding.panelNodeId}"
+        rowSceneId: "{binding.rowSceneId}"
+        rowHeight: binding.rowHeight
+        builtEpoch: sheet.epoch
+      }
+      componentSet(this: world.bottomSheets, entity: root, data: own built)
+    }
+    i = i + 1
+  }
 }
