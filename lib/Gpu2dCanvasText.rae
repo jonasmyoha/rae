@@ -64,50 +64,58 @@ func ensureTextPipeline(canvas: mod Gpu2dCanvas, resources: mod GpuResources) {
 # Lazily upload atlas `ai` + 1 (1-based handle from SdfText.loadAtlas) as an
 # RGBA8 manager texture (MSDF data is linear, not sRGB); cached.
 func ensureTextAtlas(canvas: mod Gpu2dCanvas, resources: mod GpuResources, ai: copy Int) ret Bool {
-  var atlas: Gpu2dTextAtlas = emptyTextAtlas()
-  if let known: Gpu2dTextAtlas = canvas.textAtlases.copyAt(index: ai) {
-    atlas = own known
-  }
-  if isValidTextureView(resources: resources, id: atlas.textureView) {
-    ret true
-  }
-  let handle: Int = ai + 1
-  let width: Int = sdfAtlasWidth(handle: handle)
-  let height: Int = sdfAtlasHeight(handle: handle)
-  if width <= 0 or height <= 0 {
+  # #971: work through a `mod` window into the atlas List. The old copyAt/set
+  # round trip deep-copied the atlas (its glyph List and all) once per flush
+  # per atlas; only `resources` is mutated between get and set here (never
+  # `canvas`), so an in-place window is safe.
+  if ai < 0 or ai >= canvas.textAtlases.length {
     ret false
   }
-  var made: Bool = false
-  if let texture: TextureId = createTexture(
-    resources: resources
-    width: width
-    height: height
-    format: WGPUTextureFormat_RGBA8Unorm
-    usage: WGPUTextureUsage_TextureBinding + WGPUTextureUsage_CopyDst
-  ) {
-    var uploaded: Bool = false
-    unsafe {
-      uploaded = writeTextureFromPtr(
-        resources: resources
-        texture: texture
-        data: sdfAtlasPixels(handle: handle)
-        bytesPerRow: width * 4
-        rows: height
-      )
+  if let atlas: mod Gpu2dTextAtlas => canvas.textAtlases.modAt(index: ai) {
+    if isValidTextureView(resources: resources, id: atlas.textureView) {
+      ret true
     }
-    if uploaded {
-      if let textureView: TextureViewId = createTextureView(resources: resources, texture: texture) {
-        atlas.texture = texture
-        atlas.textureView = textureView
-        made = true
+    let handle: Int = ai + 1
+    let width: Int = sdfAtlasWidth(handle: handle)
+    let height: Int = sdfAtlasHeight(handle: handle)
+    if width <= 0 or height <= 0 {
+      ret false
+    }
+    var made: Bool = false
+    if let texture: TextureId = createTexture(
+      resources: resources
+      width: width
+      height: height
+      format: WGPUTextureFormat_RGBA8Unorm
+      usage: WGPUTextureUsage_TextureBinding + WGPUTextureUsage_CopyDst
+    ) {
+      var uploaded: Bool = false
+      unsafe {
+        uploaded = writeTextureFromPtr(
+          resources: resources
+          texture: texture
+          data: sdfAtlasPixels(handle: handle)
+          bytesPerRow: width * 4
+          rows: height
+        )
+      }
+      if uploaded {
+        if let textureView: TextureViewId = createTextureView(
+          resources: resources
+          texture: texture
+        ) {
+          atlas.texture = texture
+          atlas.textureView = textureView
+          made = true
+        }
+      }
+      if not made {
+        retireTexture(resources: resources, id: texture)
       }
     }
-    if not made {
-      retireTexture(resources: resources, id: texture)
-    }
+    ret made
   }
-  canvas.textAtlases.set(index: ai, value: own atlas)
-  ret made
+  ret false
 }
 
 # This flush's glyph instance buffer for atlas `ai`: the slot for its flush
@@ -118,45 +126,47 @@ func textFlushBuffer(
   ai: copy Int
   glyphs: copy Int
 ) ret BufferId {
-  var atlas: Gpu2dTextAtlas = emptyTextAtlas()
-  if let known: Gpu2dTextAtlas = canvas.textAtlases.copyAt(index: ai) {
-    atlas = own known
-  }
-  let slot: Int = atlas.flushIndex
-  atlas.flushIndex = slot + 1
-  loop atlas.buffers.length <= slot {
-    atlas.buffers.add(value: noBufferId())
-    atlas.capacities.add(value: 0)
-  }
-  var capacity: Int = 0
-  if let known: Int = atlas.capacities.copyAt(index: slot) {
-    capacity = known
-  }
+  # #971: in-place `mod` window (was a full-atlas copyAt/set per flush per
+  # atlas). Only `resources` is mutated between get and set, so this is safe.
   var current: BufferId = noBufferId()
-  if let known: BufferId = atlas.buffers.copyAt(index: slot) {
-    current = known
+  if ai < 0 or ai >= canvas.textAtlases.length {
+    ret current
   }
-  if not (isValidBuffer(resources: resources, id: current) and capacity >= glyphs) {
-    retireBuffer(resources: resources, id: current)
-    var grown: Int = capacity
-    if grown < 16 {
-      grown = 16
+  if let atlas: mod Gpu2dTextAtlas => canvas.textAtlases.modAt(index: ai) {
+    let slot: Int = atlas.flushIndex
+    atlas.flushIndex = slot + 1
+    loop atlas.buffers.length <= slot {
+      atlas.buffers.add(value: noBufferId())
+      atlas.capacities.add(value: 0)
     }
-    loop grown < glyphs {
-      grown = grown * 2
+    var capacity: Int = 0
+    if let known: Int = atlas.capacities.copyAt(index: slot) {
+      capacity = known
     }
-    current = noBufferId()
-    if let buffer: BufferId = createBuffer(
-      resources: resources
-      size: grown * textGlyphFloats * 4
-      usage: WGPUBufferUsage_Storage + WGPUBufferUsage_CopyDst
-    ) {
-      current = buffer
+    if let known: BufferId = atlas.buffers.copyAt(index: slot) {
+      current = known
     }
-    atlas.buffers.set(index: slot, value: current)
-    atlas.capacities.set(index: slot, value: grown)
+    if not (isValidBuffer(resources: resources, id: current) and capacity >= glyphs) {
+      retireBuffer(resources: resources, id: current)
+      var grown: Int = capacity
+      if grown < 16 {
+        grown = 16
+      }
+      loop grown < glyphs {
+        grown = grown * 2
+      }
+      current = noBufferId()
+      if let buffer: BufferId = createBuffer(
+        resources: resources
+        size: grown * textGlyphFloats * 4
+        usage: WGPUBufferUsage_Storage + WGPUBufferUsage_CopyDst
+      ) {
+        current = buffer
+      }
+      atlas.buffers.set(index: slot, value: current)
+      atlas.capacities.set(index: slot, value: grown)
+    }
   }
-  canvas.textAtlases.set(index: ai, value: own atlas)
   ret current
 }
 
@@ -195,32 +205,34 @@ func canvasDrawGlyphEx(
   loop canvas.textAtlases.length <= ai {
     canvas.textAtlases.add(value: emptyTextAtlas())
   }
-  var entry: Gpu2dTextAtlas = emptyTextAtlas()
-  if let known: Gpu2dTextAtlas = canvas.textAtlases.copyAt(index: ai) {
-    entry = own known
+  # #971: append the glyph IN PLACE via modAt. The copyAt+mutate+set form
+  # this replaced deep-copied the whole accumulated glyph List on EVERY
+  # glyph — O(n^2) per frame and the dominant idle malloc/free churn (114:
+  # ~2.8M Buffer allocs / 20 s). A `mod` window grows the List's own storage.
+  let clip: Int = canvas.currentClip
+  if let entry: mod Gpu2dTextAtlas => canvas.textAtlases.modAt(index: ai) {
+    entry.glyphs.add(value: sx0)
+    entry.glyphs.add(value: sy0)
+    entry.glyphs.add(value: sx1 - sx0)
+    entry.glyphs.add(value: sy1 - sy0)
+    entry.glyphs.add(value: u0)
+    entry.glyphs.add(value: v0)
+    entry.glyphs.add(value: u1 - u0)
+    entry.glyphs.add(value: v1 - v0)
+    entry.glyphs.add(value: tintChannel(color: color, shift: 65536))
+    entry.glyphs.add(value: tintChannel(color: color, shift: 256))
+    entry.glyphs.add(value: tintChannel(color: color, shift: 1))
+    entry.glyphs.add(value: tintChannel(color: color, shift: 16777216))
+    entry.glyphs.add(value: pxRange)
+    entry.glyphs.add(value: outlineWidth)
+    entry.glyphs.add(value: softness)
+    entry.glyphs.add(value: 0.0)
+    entry.glyphs.add(value: tintChannel(color: outlineColor, shift: 65536))
+    entry.glyphs.add(value: tintChannel(color: outlineColor, shift: 256))
+    entry.glyphs.add(value: tintChannel(color: outlineColor, shift: 1))
+    entry.glyphs.add(value: tintChannel(color: outlineColor, shift: 16777216))
+    entry.glyphClips.add(value: clip)
   }
-  entry.glyphs.add(value: sx0)
-  entry.glyphs.add(value: sy0)
-  entry.glyphs.add(value: sx1 - sx0)
-  entry.glyphs.add(value: sy1 - sy0)
-  entry.glyphs.add(value: u0)
-  entry.glyphs.add(value: v0)
-  entry.glyphs.add(value: u1 - u0)
-  entry.glyphs.add(value: v1 - v0)
-  entry.glyphs.add(value: tintChannel(color: color, shift: 65536))
-  entry.glyphs.add(value: tintChannel(color: color, shift: 256))
-  entry.glyphs.add(value: tintChannel(color: color, shift: 1))
-  entry.glyphs.add(value: tintChannel(color: color, shift: 16777216))
-  entry.glyphs.add(value: pxRange)
-  entry.glyphs.add(value: outlineWidth)
-  entry.glyphs.add(value: softness)
-  entry.glyphs.add(value: 0.0)
-  entry.glyphs.add(value: tintChannel(color: outlineColor, shift: 65536))
-  entry.glyphs.add(value: tintChannel(color: outlineColor, shift: 256))
-  entry.glyphs.add(value: tintChannel(color: outlineColor, shift: 1))
-  entry.glyphs.add(value: tintChannel(color: outlineColor, shift: 16777216))
-  entry.glyphClips.add(value: canvas.currentClip)
-  canvas.textAtlases.set(index: ai, value: own entry)
 }
 
 func canvasDrawGlyph(
@@ -257,12 +269,12 @@ func canvasDrawGlyph(
 }
 
 func clearTextBatches(canvas: mod Gpu2dCanvas) {
+  # #971: clear the batch Lists IN PLACE — the copyAt/set form deep-copied
+  # the whole (just-accumulated) glyph List only to empty it.
   loop var ai: Int = 0, ai < canvas.textAtlases.length, ++ai {
-    if let atlas: Gpu2dTextAtlas = canvas.textAtlases.copyAt(index: ai) {
-      var cleared: Gpu2dTextAtlas = own atlas
-      cleared.glyphs.clear()
-      cleared.glyphClips.clear()
-      canvas.textAtlases.set(index: ai, value: own cleared)
+    if let atlas: mod Gpu2dTextAtlas => canvas.textAtlases.modAt(index: ai) {
+      atlas.glyphs.clear()
+      atlas.glyphClips.clear()
     }
   }
 }
@@ -300,11 +312,9 @@ func textClipAt(atlas: view Gpu2dTextAtlas, i: copy Int) ret Int {
 }
 
 func clearTextBatch(canvas: mod Gpu2dCanvas, ai: copy Int) {
-  if let atlas: Gpu2dTextAtlas = canvas.textAtlases.copyAt(index: ai) {
-    var cleared: Gpu2dTextAtlas = own atlas
-    cleared.glyphs.clear()
-    cleared.glyphClips.clear()
-    canvas.textAtlases.set(index: ai, value: own cleared)
+  if let atlas: mod Gpu2dTextAtlas => canvas.textAtlases.modAt(index: ai) {
+    atlas.glyphs.clear()
+    atlas.glyphClips.clear()
   }
 }
 
