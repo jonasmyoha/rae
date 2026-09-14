@@ -43,6 +43,13 @@ type SpotifyState {
   # Owners (the NowPlaying cover Sprite) set their `textureKey` to
   # this so paint picks up the registered texture.
   artKey: String
+  # #968: async now-playing-cover pipeline state. `coverAppliedPath` is the
+  # app_cache file currently loaded under `artKey`, so a repeated poll for
+  # the same track is a no-op; `coverPendingPath` is the file a background
+  # fetch is targeting, checked every frame (independent of the ~1Hz Spotify
+  # poll tick) until it resolves — empty when nothing is in flight.
+  coverAppliedPath: String
+  coverPendingPath: String
 }
 
 func createSpotifyState() pub ret SpotifyState {
@@ -55,7 +62,13 @@ func createSpotifyState() pub ret SpotifyState {
   # users who didn't run from a manually-prepared shell.
   let optOut: String = getEnv(name: "RAE_UI_NO_SPOTIFY")
   let enabled: Bool = optOut.length() is 0
-  ret SpotifyState { enabled: enabled, lastTrackId: "", artKey: "spotify-current" }
+  ret SpotifyState {
+    enabled: enabled
+    lastTrackId: ""
+    artKey: "spotify-current"
+    coverAppliedPath: ""
+    coverPendingPath: ""
+  }
 }
 
 # Replace a node's Text.text in place. Walks the page-scoped nodeIds
@@ -89,16 +102,10 @@ func updateNodeText(
   slot.text = "{value}"
 }
 
-# Fetch the current track's artwork to app_cache and register it as a
-# texture under `state.artKey`. Tries the Spotify URL first; falls
-# back to iTunes Search API when Spotify's URL is empty (local files,
-# podcasts). Returns true on success.
-#
-# Caller is responsible for not calling this on every frame — only on
-# track change. We unconditionally remove the previous registration
-# first so the new file lands cleanly.
-# Fetch artwork for one play-history entry and register it under a
-# URL-derived key. Returns the textureKey on success, "" on failure.
+# Compute the History row's texture key for a Spotify entry and, when the
+# artwork isn't cached yet, kick off (or reuse) a background download for
+# it — NEVER blocks the caller (#968; this used to call the blocking
+# `Spotify.fetchArtwork` directly, beach-balling once per track change).
 #
 # Key is `spotify-art:<image-hash>` where <image-hash> is the last
 # path segment of the artwork URL (Spotify CDN URLs end with a
@@ -107,8 +114,14 @@ func updateNodeText(
 # the same song — therefore land under distinct keys, which lets the
 # play-history dedup keep them as separate entries.
 #
-# Skips the network round-trip when the key is already registered.
-func loadHistoryEntryArt(track: view SpotifyTrack, reg: mod TextureRegistry) pub ret String {
+# The key is deterministic from the URL alone, so it is safe to record onto
+# the `PlayHistoryEntry` before the pixels exist: the per-frame history-art
+# loader (`loadCachedHistoryArtChunk`, #950) already scans every entry whose
+# `textureKey` starts with `spotify-art:` and isn't loaded yet, starting
+# (or picking up) exactly this same download via `artworkFetchStatus` on the
+# same `outPath` — this function only needs to fire the metadata write once
+# the file is known to exist and get out of the way.
+func loadHistoryEntryArt(track: view SpotifyTrack, reg: view TextureRegistry) pub ret String {
   if track.artworkUrl.length() is 0 {
     ret ""
   }
@@ -117,25 +130,12 @@ func loadHistoryEntryArt(track: view SpotifyTrack, reg: mod TextureRegistry) pub
     ret ""
   }
   let key: String = "spotify-art:{imageHash}"
-  if textureHas(reg: reg, key: key) {
-    ret key
+  if textureHas(reg: reg, key: key) is false {
+    let outPath: String = cachedArtworkPath(imageHash: imageHash)
+    if Sys.exists(path: outPath) is false {
+      saveHistoryArtworkMetadata(track: track, imageHash: imageHash, path: outPath)
+    }
   }
-  ensureAppCacheDirs()
-  let outPath: String = cachedArtworkPath(imageHash: imageHash)
-  var ok: Bool = Sys.exists(path: outPath)
-  if ok is false {
-    ok = Spotify.fetchArtwork(url: track.artworkUrl, outPath: outPath)
-  }
-  if ok is false {
-    ret ""
-  }
-  let gpuKey: String = "{key}"
-  let gpuPath: String = "{outPath}"
-  let h: Int = textureLoad(reg: reg, key: gpuKey, path: gpuPath)
-  if h <= 0 {
-    ret ""
-  }
-  saveHistoryArtworkMetadata(track: track, imageHash: imageHash, path: outPath)
   ret key
 }
 
@@ -194,49 +194,100 @@ func saveHistoryArtworkMetadata(
   }
 }
 
-func refreshSpotifyArt(
-  state: view SpotifyState
+# The deterministic app_cache path for the now-playing cover: hash-derived
+# from the artwork URL when there is one (shared with `loadHistoryEntryArt`'s
+# keying, so the two dedupe onto one download when they want the same file),
+# else the fixed `spotify-current.jpg` the iTunes-only fallback path writes.
+func spotifyCoverOutPath(track: view SpotifyTrack) ret String {
+  if track.artworkUrl.length() > 0 {
+    let h: String = cachedArtworkHashFromUrl(url: track.artworkUrl)
+    if h.length() > 0 {
+      ret cachedArtworkPath(imageHash: h)
+    }
+  }
+  ret "{appCacheAlbumArtDir}/spotify-current.jpg"
+}
+
+# Load `state.coverPendingPath` under `state.artKey` and clear the pending
+# marker — the shared "a fetch just landed" tail for both the exists-already
+# fast path and the async-fetch-completed path below.
+func applyNowPlayingCover(state: mod SpotifyState, reg: mod TextureRegistry) {
+  let copiedKey: String = "{state.artKey}"
+  let copiedPath: String = "{state.coverPendingPath}"
+  let h: Int = textureLoad(reg: reg, key: copiedKey, path: copiedPath)
+  if h > 0 {
+    state.coverAppliedPath = "{state.coverPendingPath}"
+  }
+  state.coverPendingPath = ""
+}
+
+# Track-change entry point (#968): kicks off — or reuses — a background
+# download for the new track's cover. NEVER blocks: `Spotify.fetchArtwork`
+# and the iTunes Search fallback both run on a spawned worker
+# (`artworkFetchStartWithFallback`, #950); this only decides WHAT to fetch
+# and records the target so `syncNowPlayingCoverFinish` can pick up the
+# result on a later frame. A no-op when the wanted file is already applied
+# or already the in-flight target.
+func syncNowPlayingCoverStart(
+  state: mod SpotifyState
   track: view SpotifyTrack
   reg: mod TextureRegistry
-) ret Bool {
-  unsafe {
-    ensureAppCacheDirs()
-    var outPath: String = ""
-    if track.artworkUrl.length() > 0 {
-      let h: String = cachedArtworkHashFromUrl(url: track.artworkUrl)
-      if h.length() > 0 {
-        outPath = cachedArtworkPath(imageHash: h)
-      }
-    }
-    if outPath.length() is 0 {
-      outPath = "{appCacheAlbumArtDir}/spotify-current.jpg"
-    }
-    var primaryOk: Bool = false
-    if track.artworkUrl.length() > 0 {
-      primaryOk = Sys.exists(path: outPath)
-      if primaryOk is false {
-        primaryOk = Spotify.fetchArtwork(url: track.artworkUrl, outPath: outPath)
-      }
-    }
-    if primaryOk is false {
-      # iTunes fallback. Build "<artist> <track>" as the search term;
-      # iTunes returns the closest match.
-      let term: String = "{track.artistName} {track.trackName}"
-      let fallbackUrl: String = itunesSearchArtworkUrl(term: term)
-      if fallbackUrl.length() is 0 {
-        ret false
-      }
-      let fbOk: Bool = Spotify.fetchArtwork(url: fallbackUrl, outPath: outPath)
-      if fbOk is false {
-        ret false
-      }
-    }
-    # Drop any prior registration so the new file lands cleanly.
-    let copiedKey: String = "{state.artKey}"
-    let copiedPath: String = "{outPath}"
-    let h: Int = textureLoad(reg: reg, key: copiedKey, path: copiedPath)
-    ret h > 0
+  fetches: mod ArtworkFetchQueue
+) {
+  ensureAppCacheDirs()
+  let wantPath: String = spotifyCoverOutPath(track: track)
+  if wantPath is state.coverAppliedPath {
+    ret
   }
+  if wantPath is state.coverPendingPath {
+    ret
+  }
+  state.coverPendingPath = "{wantPath}"
+  if Sys.exists(path: wantPath) {
+    applyNowPlayingCover(state: state, reg: reg)
+    ret
+  }
+  let term: String = "{track.artistName} {track.trackName}"
+  let started: Bool = artworkFetchStartWithFallback(
+    queue: fetches
+    url: track.artworkUrl
+    term: term
+    outPath: wantPath
+  )
+  if started is false {
+    # In-flight cap reached — try again on the next track-change tick.
+    state.coverPendingPath = ""
+  }
+}
+
+# Per-frame entry point (#968): independent of the Spotify poll tick, so the
+# cover appears within a frame of the download landing (the worker's
+# `wake()` already repaints; this is what notices and applies it). Cheap
+# early-return when nothing is pending. Checks disk existence before the
+# fetch-queue status, matching `loadCachedHistoryArtChunk`'s pattern — the
+# file is written before the worker's channel post, so this is never wrong,
+# and it means a status record another consumer already drained (the two
+# queues share dedup keys by outPath) doesn't strand this caller.
+func syncNowPlayingCoverFinish(
+  state: mod SpotifyState
+  reg: mod TextureRegistry
+  fetches: mod ArtworkFetchQueue
+) {
+  if state.coverPendingPath.length() is 0 {
+    ret
+  }
+  let path: String = "{state.coverPendingPath}"
+  if Sys.exists(path: path) {
+    applyNowPlayingCover(state: state, reg: reg)
+    ret
+  }
+  let status: Int = artworkFetchStatus(queue: fetches, outPath: path)
+  if status is artworkStatusFetched {
+    applyNowPlayingCover(state: state, reg: reg)
+  } else if status is artworkStatusFailed {
+    state.coverPendingPath = ""
+  }
+  # else pending: nothing to do, check again next frame.
 }
 
 # Per-frame entry point. Cheap when disabled / when not enough time
@@ -258,6 +309,11 @@ func pollSpotify(
   if state.enabled is false {
     ret
   }
+  # #968: pick up a completed cover download every frame, independent of the
+  # Spotify poll tick below — a background fetch can land between polls, and
+  # this is what makes it appear within a frame instead of waiting up to 1s
+  # for the next tick.
+  syncNowPlayingCoverFinish(state: state, reg: reg, fetches: appState.artworkFetch)
   # `ticked` is the poll worker's "the cache has a new snapshot" cue (#950);
   # between ticks there is nothing new to mirror.
   if ticked is false {
@@ -330,7 +386,12 @@ func pollSpotify(
   let changed: Bool = track.trackId is state.lastTrackId is false
   if changed {
     state.lastTrackId = "{track.trackId}"
-    refreshSpotifyArt(state: state, track: track, reg: reg)
+    syncNowPlayingCoverStart(
+      state: state
+      track: track
+      reg: reg
+      fetches: appState.artworkFetch
+    )
     # Append to play history. Skip empty / stopped frames where
     # trackName is blank; the local-stem match lets the history
     # row reuse local cover textures when the user happens to be
