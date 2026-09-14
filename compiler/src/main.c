@@ -60,6 +60,10 @@ typedef struct {
   int profile;
   bool no_implicit;
   bool zero_config;  // entry was inferred from the cwd (folder `rae run`/`watch`)
+  // #995: everything after the first `--`, handed verbatim to the built app
+  // (argv[1..] of the child). NULL/0 when there is no `--`.
+  int app_argc;
+  char** app_argv;
 } RunOptions;
 
 typedef struct {
@@ -276,10 +280,18 @@ static bool parse_run_args(int argc, char** argv, RunOptions* opts) {
   opts->profile = BUILD_PROFILE_RELEASE;
   opts->no_implicit = false;
   opts->zero_config = false;
+  opts->app_argc = 0;
+  opts->app_argv = NULL;
 
   int i = 0;
   while (i < argc) {
     const char* arg = argv[i];
+    if (strcmp(arg, "--") == 0) {
+      /* #995: the rest belongs to the program, not to `rae run`. */
+      opts->app_argc = argc - (i + 1);
+      opts->app_argv = argv + (i + 1);
+      break;
+    }
     if (strcmp(arg, "--no-implicit") == 0) {
       opts->no_implicit = true;
       i += 1;
@@ -2019,8 +2031,11 @@ static void print_usage(const char* prog) {
   fprintf(stderr, "                  Canonically format Rae source, in place by default.\n");
   fprintf(stderr, "                  Options: --check (list unformatted, non-zero exit),\n");
   fprintf(stderr, "                  --stdout, --write/-w, --stdin, --json, --rules --json.\n");
-  fprintf(stderr, "  run [opts] [file]\n");
-  fprintf(stderr, "                  Build and run Rae source. With no file, infers\n");
+  fprintf(stderr, "  run [opts] [file] [-- <args...>]\n");
+  fprintf(stderr, "                  Build and run Rae source. Everything after the first\n");
+  fprintf(stderr, "                  `--` is passed verbatim to the program (Sys.argCount /\n");
+  fprintf(stderr, "                  Sys.argAt); `rae watch` forwards it on every restart.\n");
+  fprintf(stderr, "                  With no file, infers\n");
   fprintf(stderr, "                  the entry from the current folder (Main.rae, or a\n");
   fprintf(stderr, "                  devtools.json 'entry') and defaults to --target compiled.\n");
   fprintf(stderr, "                  Options: --project <dir>, --watch, --check-format\n");
@@ -2640,6 +2655,33 @@ static void find_lib_root(const char* project_root, char* out, size_t cap) {
   }
 }
 
+/* #995: run `bin_path` with the program arguments after the `--` of `rae run`
+ * as its argv[1..] and wait for it. Returns the raw wait status (0 on a clean
+ * exit), like system() did before arguments existed; execv (no shell) is what
+ * lets an argument carry spaces or quotes verbatim. */
+static int spawn_app_and_wait(const char* bin_path, int app_argc, char** app_argv) {
+  pid_t pid = fork();
+  if (pid < 0) {
+    fprintf(stderr, "error: fork failed (%s)\n", strerror(errno));
+    return 1;
+  }
+  if (pid == 0) {
+    char** child_argv = calloc((size_t)app_argc + 2, sizeof(char*));
+    if (!child_argv) _exit(127);
+    child_argv[0] = (char*)bin_path;
+    for (int i = 0; i < app_argc; i++) child_argv[i + 1] = app_argv[i];
+    child_argv[app_argc + 1] = NULL;
+    execv(bin_path, child_argv);
+    fprintf(stderr, "error: could not run '%s' (%s)\n", bin_path, strerror(errno));
+    _exit(127);
+  }
+  int status = 0;
+  while (waitpid(pid, &status, 0) < 0) {
+    if (errno != EINTR) return 1;
+  }
+  return status;
+}
+
 static int run_compiled_file(const RunOptions* run_opts, const char* project_root) {
   char temp_c[PATH_MAX];
   char temp_bin[PATH_MAX];
@@ -2715,7 +2757,7 @@ static int run_compiled_file(const RunOptions* run_opts, const char* project_roo
   fprintf(stderr, "@@RAE_APP_START@@ entry=%s\n", file_path);
   fflush(stderr);
   long long app_started_ms = rae_now_ms();
-  int result = system(temp_bin);
+  int result = spawn_app_and_wait(temp_bin, run_opts->app_argc, run_opts->app_argv);
   fprintf(stderr, "@@RAE_APP_EXIT@@ entry=%s code=%d run_ms=%lld\n",
           file_path, (result == 0) ? 0 : 1, rae_now_ms() - app_started_ms);
   fflush(stderr);
@@ -2976,7 +3018,9 @@ static void watch_channel_id(const char* project_root,
 
 static pid_t watch_spawn_child(const char* bin_path,
                                const char* run_cwd,
-                               const char* channel_dir) {
+                               const char* channel_dir,
+                               int app_argc,
+                               char** app_argv) {
   pid_t pid = fork();
   if (pid < 0) {
     fprintf(stderr, "rae watch: fork failed (%s)\n", strerror(errno));
@@ -2993,8 +3037,14 @@ static pid_t watch_spawn_child(const char* bin_path,
     // Run with cwd = lib-root so root-relative asset paths resolve (same as
     // `rae run` and the devtools). bin_path is absolute, so this is safe.
     if (run_cwd && run_cwd[0]) { if (chdir(run_cwd) != 0) { /* best effort */ } }
-    execl(bin_path, bin_path, (char*)NULL);
-    fprintf(stderr, "rae watch: execl(%s) failed (%s)\n", bin_path, strerror(errno));
+    /* #995: the program arguments after `--` ride along on every restart. */
+    char** child_argv = calloc((size_t)app_argc + 2, sizeof(char*));
+    if (!child_argv) _exit(127);
+    child_argv[0] = (char*)bin_path;
+    for (int i = 0; i < app_argc; i++) child_argv[i + 1] = app_argv[i];
+    child_argv[app_argc + 1] = NULL;
+    execv(bin_path, child_argv);
+    fprintf(stderr, "rae watch: execv(%s) failed (%s)\n", bin_path, strerror(errno));
     _exit(127);
   }
   return pid;
@@ -3151,7 +3201,7 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
   sigaction(SIGHUP, &sa, NULL);
 
   // ---- Spawn first child + arm health window ----
-  pid_t child = watch_spawn_child(current_bin, lib_root, dotrae);
+  pid_t child = watch_spawn_child(current_bin, lib_root, dotrae, run_opts->app_argc, run_opts->app_argv);
   if (child < 0) {
     watch_state_free(&ws);
     return 1;
@@ -3207,7 +3257,7 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
           strncpy(current_bin, previous_bin, sizeof(current_bin) - 1);
           current_bin[sizeof(current_bin) - 1] = '\0';
           previous_bin[0] = '\0';
-          child = watch_spawn_child(current_bin, lib_root, dotrae);
+          child = watch_spawn_child(current_bin, lib_root, dotrae, run_opts->app_argc, run_opts->app_argv);
           if (child < 0) break;
           spawn_t = watch_now_ms();
           health_until = spawn_t + HEALTH_MS;
@@ -3330,7 +3380,7 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
     }
 
     // Spawn the new child.
-    child = watch_spawn_child(current_bin, lib_root, dotrae);
+    child = watch_spawn_child(current_bin, lib_root, dotrae, run_opts->app_argc, run_opts->app_argv);
     if (child < 0) break;
     spawn_t = watch_now_ms();
     health_until = spawn_t + HEALTH_MS;
@@ -3434,6 +3484,7 @@ static bool toolchain_check(const char* entry_path, const char* project_root,
                             int argc, char** argv) {
   bool strict = false;
   for (int i = 0; i < argc; ++i) {
+    if (strcmp(argv[i], "--") == 0) break;  /* #995: program args follow */
     if (strcmp(argv[i], "--check-toolchain") == 0) strict = true;
   }
   /* The env override skips the (non-strict) check entirely; --check-toolchain
