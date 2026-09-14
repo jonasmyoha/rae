@@ -16,6 +16,8 @@ open ecs/Entity
 open ecs/hierarchySystem/HierarchySystem
 open collections/StringMap
 open ecs/ComponentTable
+open ui/ScenePolicy
+open ui/Components
 
 # Minimal helper: append an EntityId to a List(EntityId) via a non-generic
 # function. Same workaround as the ones in ecs.rae — needed when the
@@ -41,6 +43,16 @@ func loadSceneIntoPage(
 ) pub ret EntityId {
   unsafe {
     if scene.ok is false {
+      # A scene that did not parse mounts nothing (unchanged); the failure is
+      # also recorded so a tool can list it beside the other diagnostics.
+      reportSceneDiagnostic(
+        diagnostics: world.sceneDiagnostics
+        sceneId: scene.sceneId
+        nodeId: scene.rootNodeId
+        kind: SceneDiagnosticKind.parseError
+        name: scene.sceneId
+        message: scene.errorMsg
+      )
       ret noEntity()
     }
 
@@ -299,6 +311,28 @@ func resolveSceneInstances(
           # Clear the marker so the next loop pass doesn't re-mount this entity.
           componentRemove(this: world.sceneInstances, entity: entity)
           progressed = true
+        } else {
+          if world.scenePolicy.unknownComponents is UnknownComponentPolicy.report {
+            # A sub-scene the registry does not know (#996): under `report`
+            # the instance node becomes a red sentinel block so the gap is
+            # visible, and the marker is cleared so this pass does not spin on
+            # it. Under `fail` (the default) it is left unmounted, as before.
+            var nodeLabel: String = "{entity.index}"
+            if componentHas(this: world.nodeIdComponents, entity: entity) {
+              nodeLabel = "{componentGet(this: world.nodeIdComponents, entity: entity).id}"
+            }
+            reportSceneDiagnostic(
+              diagnostics: world.sceneDiagnostics
+              sceneId: pageId
+              nodeId: nodeLabel
+              kind: SceneDiagnosticKind.missingSubScene
+              name: inst.sceneId
+              message: "no sub-scene registered as {inst.sceneId}"
+            )
+            paintMissingSubSceneSentinel(world: world, entity: entity)
+            componentRemove(this: world.sceneInstances, entity: entity)
+            progressed = true
+          }
         }
       }
       i = i + 1
@@ -308,6 +342,21 @@ func resolveSceneInstances(
     }
     safety = safety + 1
   }
+}
+
+# The visible failure for an unresolved SceneInstance under `report`: a red
+# block in the node's own Rect (the same signal 106's mountOrError paints).
+func paintMissingSubSceneSentinel(world: mod UiWorld, entity: view EntityId) {
+  let sentinel: Shape = {
+    kind: ShapeKind.roundedRect
+    fill: RgbaColor { r: 220, g: 32, b: 48, a: 255 }
+    stroke: RgbaColor { r: 0, g: 0, b: 0, a: 0 }
+    fillSlot: ""
+    strokeSlot: ""
+    strokeWidth: 0.0
+    radius: 8.0
+  }
+  componentSet(this: world.shapes, entity: entity, data: sentinel)
 }
 
 # Diagnostic helper used by tests and the eventual editor: dump the

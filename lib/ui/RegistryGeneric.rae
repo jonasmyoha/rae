@@ -29,6 +29,7 @@
 # literal, `Insets` / `Vec2` / `SizeAxis` a sub-object — the same grammar the
 # hand-written arms used (ui/RegistryValues).
 open ui/RegistryOpt
+open ui/ScenePolicy
 open ui/RegistryValues
 open ui/Components
 import Json
@@ -55,6 +56,9 @@ func decodeField(
   val: view JsonValue
   key: view String
   theme: view UiTheme
+  diagnostics: mod List(SceneDiagnostic)
+  sceneId: view String
+  nodeId: view String
 ) ret T {
   if typeName(fallback) is "Int" {
     ret optInt(
@@ -73,6 +77,9 @@ func decodeField(
         container: val
         key: key
         fallback: fallback
+        diagnostics: diagnostics
+        sceneId: sceneId
+        nodeId: nodeId
       )
     }
     ret optFloatOrToken(
@@ -81,6 +88,9 @@ func decodeField(
       container: val
       key: key
       fallback: fallback
+      diagnostics: diagnostics
+      sceneId: sceneId
+      nodeId: nodeId
     )
   }
   if typeName(fallback) is "Bool" {
@@ -105,14 +115,28 @@ func decodeField(
     if idx < 0 {
       ret fallback
     }
-    ret deserRgba(doc: doc, theme: theme, val: Json.jsonValueAt(doc: doc, idx: idx))
+    ret deserRgba(
+      doc: doc
+      theme: theme
+      val: Json.jsonValueAt(doc: doc, idx: idx)
+      diagnostics: diagnostics
+      sceneId: sceneId
+      nodeId: nodeId
+    )
   }
   if typeName(fallback) is "Insets" {
     let idx: Int = Json.field(doc: doc, this: val, key: key)
     if idx < 0 {
       ret fallback
     }
-    ret deserInsets(doc: doc, theme: theme, val: Json.jsonValueAt(doc: doc, idx: idx))
+    ret deserInsets(
+      doc: doc
+      theme: theme
+      val: Json.jsonValueAt(doc: doc, idx: idx)
+      diagnostics: diagnostics
+      sceneId: sceneId
+      nodeId: nodeId
+    )
   }
   if typeName(fallback) is "Vec2" {
     let idx: Int = Json.field(doc: doc, this: val, key: key)
@@ -153,6 +177,9 @@ func decodeComponent(
   doc: view JsonDoc
   val: view JsonValue
   theme: view UiTheme
+  diagnostics: mod List(SceneDiagnostic)
+  sceneId: view String
+  nodeId: view String
 ) {
   var comp: T = T.default()
   loop let f: mod any in fields(comp) {
@@ -162,6 +189,9 @@ func decodeComponent(
       val: val
       key: fieldName(f)
       theme: theme
+      diagnostics: diagnostics
+      sceneId: sceneId
+      nodeId: nodeId
     ))
   }
   componentSet(this: table, entity: entity, data: comp)

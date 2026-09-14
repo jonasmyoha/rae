@@ -1,0 +1,119 @@
+import Json
+import String
+import ui/Components
+open ui/Ecs
+open ui/Registry
+open ui/Scene
+open ui/SceneLoader
+open ui/SceneInstance
+open ui/ScenePolicy
+open ecs/Entity
+open ecs/ComponentTable
+
+# The loader policy for FOREIGN scenes (#996). The same scene that aborts the
+# process under the default `fail` (841 covers that) loads under `report`:
+# every gap becomes a SceneDiagnostic and each node still mounts with the
+# components it has. The scene carries, on purpose: a made-up `Foo`
+# component, the runtime-only `ComputedRect`, an unknown space token, an
+# unknown colour token, a hex colour beside its {r,g,b,a} twin, and a
+# SceneInstance of a sub-scene nobody registered. `\{`/`\}` keep the JSON
+# braces literal.
+func foreignScene() ret String {
+  var s: String = ""
+  s = s.concat(other: "\{")
+  s = s.concat(other: "\"type\":\"Scene\",")
+  s = s.concat(other: "\"version\":2,")
+  s = s.concat(other: "\"sceneId\":\"card-game\",")
+  s = s.concat(other: "\"root\":\"Root\",")
+  s = s.concat(other: "\"nodes\":\{")
+  s = s.concat(other: "\"Root\":\{")
+  s = s.concat(other: "\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":200\},")
+  s = s.concat(other: "\"Layout\":\{\"type\":\"Vertical\",\"gap\":\"spaceHuge\"\},")
+  s = s.concat(other: "\"Foo\":\{\"x\":1\},")
+  s = s.concat(other: "\"ComputedRect\":\{\"x\":1\},")
+  s = s.concat(other: "\"Children\":[\"HexCard\",\"RgbaCard\",\"Deck\"]")
+  s = s.concat(other: "\},")
+  s = s.concat(other: "\"HexCard\":\{")
+  s = s.concat(other: "\"Rect\":\{\"x\":0,\"y\":0,\"w\":100,\"h\":50\},")
+  s = s.concat(
+    other: "\"Shape\":\{\"kind\":\"Rect\",\"fill\":\"#1a2b3c\",\"stroke\":\"#ff008080\",\"strokeWidth\":2\}"
+  )
+  s = s.concat(other: "\},")
+  s = s.concat(other: "\"RgbaCard\":\{")
+  s = s.concat(other: "\"Rect\":\{\"x\":0,\"y\":60,\"w\":100,\"h\":50\},")
+  s = s.concat(
+    other: "\"Shape\":\{\"kind\":\"Rect\",\"fill\":\{\"r\":26,\"g\":43,\"b\":60,\"a\":255\},\"stroke\":\{\"r\":255,\"g\":0,\"b\":128,\"a\":128\},\"strokeWidth\":2\}"
+  )
+  s = s.concat(other: "\},")
+  s = s.concat(other: "\"Deck\":\{")
+  s = s.concat(other: "\"Rect\":\{\"x\":0,\"y\":120,\"w\":100,\"h\":50\},")
+  s = s.concat(other: "\"Shape\":\{\"kind\":\"Rect\",\"fill\":\"cardFelt\"\},")
+  s = s.concat(other: "\"SceneInstance\":\{\"sceneId\":\"CardView\"\}")
+  s = s.concat(other: "\}")
+  s = s.concat(other: "\}")
+  s = s.concat(other: "\}")
+  ret s
+}
+
+func shapeOf(world: view UiWorld, nodeId: view String) ret Shape {
+  if let raw: Int = world.nodeIds.get(k: nodeId) {
+    ret componentGet(this: world.shapes, entity: id(v: raw))
+  }
+  ret Shape.default()
+}
+
+func rgba(color: view RgbaColor) ret String {
+  ret "{color.r},{color.g},{color.b},{color.a}"
+}
+
+func main() {
+  let scene: Scene = parseScene(source: foreignScene())
+  log("scene.ok = {scene.ok}")
+  let world: UiWorld = createUiWorld()
+  world.scenePolicy.unknownComponents = UnknownComponentPolicy.report
+  let rootEntity: EntityId = loadScene(world: world, scene: scene)
+  log("mounted root = {rootEntity.index >= 0}, alive = {aliveCount(world: world)}")
+  # The empty registry: `CardView` is nobody's sub-scene.
+  let registry: SceneRegistry = createSceneRegistry()
+  resolveSceneInstances(world: world, registry: registry, pageId: "")
+
+  # The node with the unknown components still mounted with the ones it has.
+  if let rootRaw: Int = world.nodeIds.get(k: "Root") {
+    let root: EntityId = id(v: rootRaw)
+    let layout: Layout = componentGet(this: world.layouts, entity: root)
+    log("Root Layout kind={layout.kind} gap={layout.gap} (unknown token kept the default)")
+    log("Root has ComputedRect = {componentHas(this: world.computedRects, entity: root)}")
+  }
+
+  # Hex colours decode to the same RgbaColor as their {r,g,b,a} twins.
+  let hex: Shape = shapeOf(world: world, nodeId: "HexCard")
+  let twin: Shape = shapeOf(world: world, nodeId: "RgbaCard")
+  log("HexCard fill {rgba(color: hex.fill)} stroke {rgba(color: hex.stroke)}")
+  log("RgbaCard fill {rgba(color: twin.fill)} stroke {rgba(color: twin.stroke)}")
+  let same: Bool = hex.fill.r is twin.fill.r and hex.fill.g is twin.fill.g and hex.fill.b is twin.fill.b and hex.fill.a is twin.fill.a and hex.stroke.a is twin.stroke.a
+  log("hex == rgba twin: {same}")
+
+  # The missing sub-scene left a red sentinel on the instance node.
+  let deck: Shape = shapeOf(world: world, nodeId: "Deck")
+  log(
+    "Deck sentinel fill {rgba(color: deck.fill)}, instances left = {componentCount(
+      this: world.sceneInstances
+    )}"
+  )
+
+  log("--- {world.sceneDiagnostics.length} diagnostics ---")
+  loop var i: Int = 0, i < world.sceneDiagnostics.length, ++i {
+    if let entry: view SceneDiagnostic => world.sceneDiagnostics.viewAt(index: i) {
+      log(formatSceneDiagnostic(diagnostic: entry))
+    }
+  }
+  log(
+    "unknownComponent x{sceneDiagnosticCountOfKind(
+      diagnostics: world.sceneDiagnostics
+      kind: SceneDiagnosticKind.unknownComponent
+    )}"
+  )
+  log("runtime-only names: {runtimeOnlyComponentNames(world: world).length}")
+  clearSceneDiagnostics(diagnostics: world.sceneDiagnostics)
+  log("after clear: {world.sceneDiagnostics.length}")
+}

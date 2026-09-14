@@ -28,6 +28,7 @@
 # EXCLUDED from the loop by name: they are never authored, and an authored key
 # naming one is a hard error, as is a key naming no table at all (#941).
 open ui/RegistryOpt
+open ui/ScenePolicy
 open ui/RegistryGeneric
 open ui/RegistryValues
 open ui/ContainerStyle
@@ -95,6 +96,19 @@ func registeredComponentNames(world: view UiWorld) ret List(String) {
     }
   }
   names.add(value: "ContainerStyle")
+  ret names
+}
+
+# The runtime / derived tables (#996, for tooling): the names a scene must NOT
+# author — the loader refuses them under `fail` and reports them as
+# runtimeOnlyComponent under `report`. Order is UiWorld field order.
+func runtimeOnlyComponentNames(world: view UiWorld) ret List(String) {
+  var names: List(String) = List.create(String, cap: 32)
+  loop let table: view ComponentTable(any) in fields(world) {
+    if isRuntimeTable(name: typeName(table)) {
+      names.add(value: "{typeName(table)}")
+    }
+  }
   ret names
 }
 
@@ -173,6 +187,9 @@ func applyComponentByName(
           doc: doc
           val: val
           theme: world.theme
+          diagnostics: world.sceneDiagnostics
+          sceneId: sceneId
+          nodeId: nodeId
         )
         applied = true
       }
@@ -185,22 +202,50 @@ func applyComponentByName(
       name: name
       doc: doc
       val: val
+      sceneId: sceneId
+      nodeId: nodeId
     )
     ret
   }
 
-  # No table matched. A `.raescene` component the loader cannot apply is a
-  # CORRECTNESS BUG, not a thing to swallow (#941): fail loudly, naming the
-  # scene, node and component. Two cases, so the author knows which:
+  # No table matched. For an app's OWN scenes a `.raescene` component the
+  # loader cannot apply is a CORRECTNESS BUG, not a thing to swallow (#941):
+  # fail loudly, naming the scene, node and component. A tool opening OTHER
+  # people's scenes sets `world.scenePolicy.unknownComponents = report`
+  # (#996): the same two cases become a SceneDiagnostic and the node mounts
+  # with the components it has. The two cases, so the author knows which:
   #   - the name is a world table that is derived / runtime state, never
   #     authored (ComputedRect, Parent, ...) -> "not authorable";
   #   - the name is no component at all (a typo, or a non-UI component such
   #     as a 3D `Transform3d` in a UI scene) -> "not registered".
+  let report: Bool = world.scenePolicy.unknownComponents is UnknownComponentPolicy.report
   if isRuntimeTable(name: name) {
+    if report {
+      reportSceneDiagnostic(
+        diagnostics: world.sceneDiagnostics
+        sceneId: sceneId
+        nodeId: nodeId
+        kind: SceneDiagnosticKind.runtimeOnlyComponent
+        name: name
+        message: "{name} is a runtime/derived table and cannot be authored"
+      )
+      ret
+    }
     log(
       "[scene] {sceneId} node {nodeId}: component {name} is a runtime/derived table and cannot be authored"
     )
   } else {
+    if report {
+      reportSceneDiagnostic(
+        diagnostics: world.sceneDiagnostics
+        sceneId: sceneId
+        nodeId: nodeId
+        kind: SceneDiagnosticKind.unknownComponent
+        name: name
+        message: "{name} is not a registered component"
+      )
+      ret
+    }
     log("[scene] {sceneId} node {nodeId}: component {name} is not registered")
   }
   exit(code: 1)
@@ -215,6 +260,8 @@ func applyAuthoredFixups(
   name: view String
   doc: view JsonDoc
   val: view JsonValue
+  sceneId: view String
+  nodeId: view String
 ) {
   if name is "Rect" {
     # {x, y, w, h} -> position / size.
@@ -269,13 +316,27 @@ func applyAuthoredFixups(
       let ti: ThemeInsets = themePaddingInsets(theme: world.theme.resolved, name: asStr)
       padding.insets = Insets { l: ti.l, t: ti.t, r: ti.r, b: ti.b }
     } else {
-      padding.insets = deserInsets(doc: doc, theme: world.theme, val: val)
+      padding.insets = deserInsets(
+        doc: doc
+        theme: world.theme
+        val: val
+        diagnostics: world.sceneDiagnostics
+        sceneId: sceneId
+        nodeId: nodeId
+      )
     }
     ret
   }
   if name is "Margin" {
     let margin: mod Margin => componentMod(this: world.margins, entity: entity)
-    margin.insets = deserInsets(doc: doc, theme: world.theme, val: val)
+    margin.insets = deserInsets(
+      doc: doc
+      theme: world.theme
+      val: val
+      diagnostics: world.sceneDiagnostics
+      sceneId: sceneId
+      nodeId: nodeId
+    )
     ret
   }
   if name is "Offset" {
@@ -349,7 +410,14 @@ func applyAuthoredFixups(
       componentSet(
         this: world.styleOverrides
         entity: entity
-        data: deserStyleOverride(doc: doc, theme: world.theme, val: sov)
+        data: deserStyleOverride(
+          doc: doc
+          theme: world.theme
+          val: sov
+          diagnostics: world.sceneDiagnostics
+          sceneId: sceneId
+          nodeId: nodeId
+        )
       )
     }
     ret
