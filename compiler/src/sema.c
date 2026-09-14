@@ -1562,7 +1562,20 @@ static AstDecl* resolve_function_overload(CompilerContext* ctx, AstModule* modul
     // than returning NULL and letting the C backend re-resolve by name with the
     // wrong numeric type (#410).
     AstDecl* numeric_mismatch_only = NULL;
+    // #993: the SOLE open non-generic name+arity candidate, whatever kind of
+    // argument mismatch it had (a different struct, a String for an Int).
+    // Previously only the numeric case above was bound; every other mismatch
+    // returned NULL here, no branch below diagnosed it (an open arity
+    // candidate exists), and the C backend re-resolved by name and emitted the
+    // call anyway — gcc merely WARNS on an incompatible struct pointer, so a
+    // `mod Basket` parameter fed an Apple compiled, linked, ran and wrote
+    // through the wrong layout. Binding it lets sema_check_call_arg_names and
+    // ensure_type_match report the name and the type at the argument.
+    AstDecl* mismatch_only = NULL;
     int nongeneric_arity_matches = 0;
+    // #993: the open non-generic candidates that matched arity but not the
+    // argument types, for the "no overload matches" diagnostic.
+    const AstDecl* type_cands[8]; size_t type_cand_count = 0;
     // A generic call that fills a value-parameter slot with a positional TYPE
     // argument and so leaves value parameters unprovided (e.g. `createList(Float)`
     // — `Float` is the type arg, `cap` is missing). Remember it so we can report
@@ -1682,6 +1695,8 @@ static AstDecl* resolve_function_overload(CompilerContext* ctx, AstModule* modul
             if (!mismatch) return curr->decl;
             nongeneric_arity_matches++;
             if (numeric_mismatch && !numeric_mismatch_only) numeric_mismatch_only = curr->decl;
+            if (!mismatch_only) mismatch_only = curr->decl;
+            if (type_cand_count < 8) type_cands[type_cand_count++] = curr->decl;
         }
     }
 
@@ -1691,6 +1706,32 @@ static AstDecl* resolve_function_overload(CompilerContext* ctx, AstModule* modul
     // arity candidate so genuine overload sets still fail to resolve. (#410)
     if (!best_sym && nongeneric_arity_matches == 1 && numeric_mismatch_only)
         return numeric_mismatch_only;
+    // #993: same for any other single-candidate mismatch — bind it and let the
+    // argument checks name the parameter and the types. NOT when an open
+    // GENERIC same-name candidate exists: a generic call the resolver could not
+    // infer (`contains(this: xs, value: 3)` on a List(Int), whose only
+    // non-generic namesake is String.contains) is bound by name in the backend,
+    // and binding it to the wrong non-generic twin here would mis-diagnose it.
+    if (!best_sym && nongeneric_arity_matches == 1 && mismatch_only && !open_generic_candidate)
+        return mismatch_only;
+    // #993: several open overloads take this many arguments and NONE accepts
+    // these argument types. Say so with the signatures tried, at the call —
+    // the backend must not pick one by name and let gcc decide.
+    if (!best_sym && nongeneric_arity_matches > 1 && !open_generic_candidate) {
+        char buf[1400]; size_t pos = 0;
+        int w = snprintf(buf, sizeof buf,
+                         "no overload of '%.*s' accepts these argument types; the candidates taking %zu argument%s are: ",
+                         (int)name.len, name.data, arg_count, arg_count == 1 ? "" : "s");
+        if (w > 0) pos = (size_t)w;
+        for (size_t i = 0; i < type_cand_count && pos < sizeof buf; i++) {
+            char sig[512]; sema_render_signature(&type_cands[i]->as.func_decl, sig, sizeof sig);
+            w = snprintf(buf + pos, sizeof buf - pos, "%s%s", i ? "; " : "", sig);
+            if (w > 0) pos += (size_t)w;
+        }
+        diag_error(sema_diag_file(module), (int)line, (int)column, buf);
+        if (module) module->had_error = true;
+        return NULL;
+    }
 
     if (best_sym) {
         if (best_inferred) {
