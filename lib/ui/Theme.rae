@@ -168,6 +168,15 @@ func generation(world: view UiWorld) pub ret Int {
 # `theme`. Unknown names fall back to a vivid magenta sentinel so missing tokens are
 # obvious in the rendered output rather than silently transparent.
 func colorByName(theme: view Theme, name: view String) pub ret RgbaColor {
+  if let found: RgbaColor = colorByNameOpt(theme: theme, name: name) {
+    ret found
+  }
+  ret RgbaColor { r: 255, g: 0, b: 255, a: 255 }
+}
+
+# The palette slot `name` names, or none when it is not a palette slot (the
+# loader records that as an unknownToken diagnostic under `report`, #996).
+func colorByNameOpt(theme: view Theme, name: view String) ret opt RgbaColor {
   let p: ThemePalette = theme.palette
   if name is "background" {
     ret p.background
@@ -199,5 +208,5 @@ func colorByName(theme: view Theme, name: view String) pub ret RgbaColor {
   if name is "imageTint" {
     ret p.imageTint
   }
-  ret RgbaColor { r: 255, g: 0, b: 255, a: 255 }
+  ret none
 }

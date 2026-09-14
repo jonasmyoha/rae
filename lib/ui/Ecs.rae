@@ -1,6 +1,7 @@
 # ECS storage layer. `componentIndexOf` is an O(1) sparse-set lookup.
 # #764: the UiWorld carries a `theme: UiTheme` resource (createUiTheme in
 # createUiWorld), so every module that imports ui/ecs must also emit ui/theme.
+open ui/ScenePolicy
 import ui/Theme
 open ecs/Entity
 open ecs/ComponentTable
@@ -204,6 +205,12 @@ type UiWorld {
   # updateUiInput recycles it. A TRANSIENT runtime resource (an EventQueue, not a
   # ComponentTable), so the serialize / clear / destroy field loops skip it.
   uiActions: EventQueue(UiAction)
+
+  # #996: what the loader does with a scene it cannot fully apply (ui/ScenePolicy)
+  # and what it could not apply. Both RUNTIME resources: not per-entity, never
+  # serialized; the field loops over ComponentTable(any) skip them.
+  scenePolicy: ScenePolicy
+  sceneDiagnostics: List(SceneDiagnostic)
 }
 
 func createUiWorld() ret UiWorld {
@@ -310,6 +317,8 @@ func createUiWorld() ret UiWorld {
     hierarchyOrder: createHierarchyOrder()
     theme: createUiTheme()
     uiActions: createEventQueue(UiAction)
+    scenePolicy: createScenePolicy()
+    sceneDiagnostics: createSceneDiagnostics()
   }
 }
 

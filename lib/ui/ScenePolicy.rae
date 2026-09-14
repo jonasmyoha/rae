@@ -1,0 +1,86 @@
+# ScenePolicy — what the loader does with a `.raescene` it cannot fully apply
+# (#996, docs/ui-editor-design.md §4). An app loading its OWN scenes wants a
+# loud failure: an unknown component is a typo or a missing registration, and
+# `fail` (the default) exits on it. A TOOL opening other people's scenes wants
+# to keep going: under `report` the loader appends a SceneDiagnostic to
+# `world.sceneDiagnostics` and mounts the node with the components it has.
+#
+# Diagnostics are appended in load order and never removed by the loader; a
+# tool clears the list itself between loads (`clearSceneDiagnostics`).
+enum UnknownComponentPolicy { fail, report }
+
+type ScenePolicy {
+  unknownComponents: UnknownComponentPolicy
+}
+
+func createScenePolicy() ret ScenePolicy {
+  ret ScenePolicy { unknownComponents: UnknownComponentPolicy.fail }
+}
+
+enum SceneDiagnosticKind {
+  unknownComponent
+  runtimeOnlyComponent
+  unknownToken
+  missingSubScene
+  missingTexture
+  parseError
+}
+
+# One thing the loader could not apply: where (scene, node), what kind, the
+# name involved (component / token / sub-scene / texture key) and a sentence.
+type SceneDiagnostic {
+  sceneId: String
+  nodeId: String
+  kind: SceneDiagnosticKind
+  name: String
+  message: String
+}
+
+func createSceneDiagnostics() ret List(SceneDiagnostic) {
+  ret List.create(SceneDiagnostic, cap: 16)
+}
+
+func reportSceneDiagnostic(
+  diagnostics: mod List(SceneDiagnostic)
+  sceneId: view String
+  nodeId: view String
+  kind: copy SceneDiagnosticKind
+  name: view String
+  message: view String
+) {
+  let sceneCopy: String = "{sceneId}"
+  let nodeCopy: String = "{nodeId}"
+  let nameCopy: String = "{name}"
+  let messageCopy: String = "{message}"
+  diagnostics.add(value: SceneDiagnostic {
+    sceneId: own sceneCopy
+    nodeId: own nodeCopy
+    kind: kind
+    name: own nameCopy
+    message: own messageCopy
+  })
+}
+
+func clearSceneDiagnostics(diagnostics: mod List(SceneDiagnostic)) {
+  diagnostics.clear()
+}
+
+func sceneDiagnosticCountOfKind(
+  diagnostics: view List(SceneDiagnostic)
+  kind: copy SceneDiagnosticKind
+) ret Int {
+  var count: Int = 0
+  loop var i: Int = 0, i < diagnostics.length, ++i {
+    if let entry: view SceneDiagnostic => diagnostics.viewAt(index: i) {
+      if entry.kind is kind {
+        count = count + 1
+      }
+    }
+  }
+  ret count
+}
+
+# `<sceneId>/<nodeId>: <kind> <name> — <message>`, the one-line form for logs.
+func formatSceneDiagnostic(diagnostic: view SceneDiagnostic) ret String {
+  ret "{diagnostic.sceneId}/{diagnostic.nodeId}: {diagnostic.kind.toString()} {diagnostic.name} — {diagnostic.message}"
+}
