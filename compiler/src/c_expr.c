@@ -860,6 +860,36 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
         // inner expression's value as usual. At the C level the
         // wrapper is a pass-through; the bit lives in
         // ctx->local_moved.
+        //
+        // #965: a move out of a PLACE inside a live owner (`own this.events`,
+        // `own item.list`) has no such bit — the owner keeps living and will
+        // release that field again at its own drop, and a whole-value store
+        // into it now releases the previous value first (c_stmt.c). So the
+        // move must leave the source EMPTY: read the value out, zero the
+        // place (a zeroed String / List / Map / struct is the valid empty
+        // value every drop path treats as "nothing to free"), yield the
+        // value. This is what makes the swap idiom (`var t = own a.x; a.x =
+        // own a.y; a.y = own t`) both leak-free and double-free-free.
+        {
+            const AstExpr* place = expr->as.unary.operand;
+            if (place && (place->kind == AST_EXPR_MEMBER || place->kind == AST_EXPR_INDEX)) {
+                const AstTypeRef* ptr = infer_expr_type_ref(ctx, place);
+                if (ptr && !ptr->is_view && !ptr->is_mod && !ptr->is_opt
+                    && (type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, ptr, 0)
+                        || str_eq_cstr(get_base_type_name(ptr), "String"))) {
+                    int mvn = ctx->temp_counter++;
+                    fprintf(out, "(__extension__ ({ ");
+                    emit_type_ref_as_c_type(ctx, ptr, out, false);
+                    fprintf(out, "* __rae_mvp%d = &(", mvn);
+                    emit_expr(ctx, place, out, PREC_LOWEST, true, false);
+                    fprintf(out, "); ");
+                    emit_type_ref_as_c_type(ctx, ptr, out, false);
+                    fprintf(out, " __rae_mv%d = *__rae_mvp%d; memset(__rae_mvp%d, 0, sizeof(*__rae_mvp%d)); __rae_mv%d; }))",
+                            mvn, mvn, mvn, mvn, mvn);
+                    break;
+                }
+            }
+        }
         mark_expr_moved_if_local(ctx, expr->as.unary.operand);
         emit_expr(ctx, expr->as.unary.operand, out, parent_prec, is_lvalue, suppress_deref);
         break;
