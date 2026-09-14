@@ -1,0 +1,42 @@
+# #993 control: correct types, names and order, plus a resolved overload
+# set, keep working exactly as before.
+type Apple {
+  weight: Int
+}
+
+type Basket {
+  count: Int
+  label: String
+}
+
+func inspect(basket: view Basket) ret Int {
+  ret basket.count
+}
+
+func fill(basket: mod Basket) {
+  basket.count = basket.count + 1
+}
+
+func twice(n: copy Int) ret Int {
+  ret n * 2
+}
+
+func pair(first: view Int, second: view String) ret Int {
+  ret first + second.length()
+}
+
+func describe(value: view Int) ret String {
+  ret "int {value}"
+}
+
+func describe(value: view String) ret String {
+  ret "string {value}"
+}
+
+func main() ret Int {
+  var basket: Basket = { count: 2, label: "b" }
+  fill(basket: basket)
+  log("F {inspect(basket: basket)} {twice(n: 4)} {pair(first: 1, second: "ab")}")
+  log("{describe(value: 3)} {describe(value: "x")}")
+  ret 0
+}
