@@ -15,15 +15,16 @@ func loadSceneFile(path: view String) pub ret Scene {
 }
 
 type AlbumScenes {
-  # #964: the item sub-scenes the ListView system mounts per pooled row
-  # (`ListView.itemSceneId`), keyed by sceneId — today the History row. Kept
-  # as its own registry because listViewSystem takes a SceneRegistry; the
-  # page scenes below are named fields (see the List(Scene) note above).
-  rowScenes: SceneRegistry
+  # The SUB-scene registry, keyed by sceneId: what a `SceneInstance` node in
+  # any page scene instances (`top-bar`, `nav-tab`; resolved by
+  # mountPageOrError, #978) and what the ListView system mounts per pooled
+  # row (`history-row`, #964). The page scenes below are named fields (see
+  # the List(Scene) note above).
+  subScenes: SceneRegistry
   trackRow: Scene
-  navTabs: Scene
-  navTab: Scene
   miniPlayer: Scene
+  dock: Scene
+  backButton: Scene
   nowPlaying: Scene
   album: Scene
   canvas: Scene
@@ -34,20 +35,21 @@ type AlbumScenes {
   history: Scene
 }
 
-func loadRowScenes() ret SceneRegistry {
-  var rowScenes: SceneRegistry = createSceneRegistry()
-  let historyRowId: String = "history-row"
-  registerScene(reg: rowScenes, key: historyRowId, scene: loadSceneFile(path: historyRowPath))
-  ret rowScenes
+func loadSubScenes() ret SceneRegistry {
+  var subScenes: SceneRegistry = createSceneRegistry()
+  registerScene(reg: subScenes, key: "history-row", scene: loadSceneFile(path: historyRowPath))
+  registerScene(reg: subScenes, key: "nav-tab", scene: loadSceneFile(path: navTabPath))
+  registerScene(reg: subScenes, key: "top-bar", scene: loadSceneFile(path: topBarPath))
+  ret subScenes
 }
 
 func loadAllScenes() pub ret AlbumScenes {
   ret AlbumScenes {
-    rowScenes: loadRowScenes()
+    subScenes: loadSubScenes()
     trackRow: loadSceneFile(path: trackRowPath)
-    navTabs: loadSceneFile(path: navTabsPath)
-    navTab: loadSceneFile(path: navTabPath)
     miniPlayer: loadSceneFile(path: miniPlayerPath)
+    dock: loadSceneFile(path: dockPath)
+    backButton: loadSceneFile(path: backButtonPath)
     nowPlaying: loadSceneFile(path: nowPlayingPath)
     album: loadSceneFile(path: albumPath)
     canvas: loadSceneFile(path: canvasPath)

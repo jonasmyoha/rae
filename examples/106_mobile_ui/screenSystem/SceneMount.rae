@@ -6,6 +6,7 @@ open ui/Ecs
 # the background clear color (the "grey screen of death").
 import ui/Components
 import ui/Registry
+open ui/SceneLoader
 import ui/Scene
 open ecs/Entity
 open ui/SceneInstance
@@ -113,7 +114,9 @@ func mountPageOrError(
   w: view Float
   h: view Float
   sceneLabel: view String
+  subScenes: view SceneRegistry
 ) pub ret EntityId {
+  let pageIdForNested: String = "{pageId}"
   let root: EntityId = mountPage(
     world: world
     pageId: pageId
@@ -123,6 +126,10 @@ func mountPageOrError(
     h: h
   )
   if isNone(this: root) is false {
+    # #978: a node authored as `"SceneInstance": { "sceneId": ..., "params":
+    # { "overrides": [...] } }` (a page's top bar, a nav tab) is mounted here
+    # from the sub-scene registry, under the page's nodeId scope.
+    resolveSceneInstances(world: world, registry: subScenes, pageId: pageIdForNested)
     ret root
   }
   # Build a husk: same shape as the success path, plus the red error

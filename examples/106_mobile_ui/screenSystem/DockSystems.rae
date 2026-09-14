@@ -1,0 +1,145 @@
+open ui/Ecs
+# DockSystems (#978) — the systems behind dock.raescene / back-button.raescene.
+#
+#   anchorBottomSystem  every `AnchorBottom`: Offset.y = layoutH - Rect.h -
+#                       bottomInset, written only when it changes (replaces
+#                       both the authored dock Offset and liftDockForSafeArea).
+#   layerTagSystem      every `LayerTag`: resolve the named layer to a
+#                       LayerRef once (a scene cannot spell an EntityId).
+#   navTabsSystem       every `NavTab`: the tab is active when its `screen`
+#                       names the app's current tab — write the active /
+#                       inactive icon tint onto the tab's Sprite children and
+#                       the label style onto its Text children, and mirror it
+#                       into WidgetState.selected. Compares before writing.
+import ui/Components
+open ecs/Entity
+open ecs/ComponentTable
+open ui/Layer
+
+func anchorBottomSystem(world: mod UiWorld, bottomInset: view Float) pub {
+  let n: Int = componentCount(this: world.anchorBottoms)
+  var i: Int = 0
+  loop i < n {
+    let entity: EntityId = componentEntityAt(this: world.anchorBottoms, i: i)
+    let anchor: AnchorBottom = componentDataAt(this: world.anchorBottoms, i: i)
+    if anchor.enabled and componentHas(this: world.rects, entity: entity) {
+      let r: Rect = componentGet(this: world.rects, entity: entity)
+      let wantedY: Float = world.layoutH - r.size.y - bottomInset
+      var currentY: Float = wantedY - 1.0
+      if componentHas(this: world.offsets, entity: entity) {
+        currentY = componentGet(this: world.offsets, entity: entity).delta.y
+      }
+      if currentY is not wantedY {
+        let off: Offset = { delta: Vec2 { x: 0.0, y: wantedY } }
+        componentSet(this: world.offsets, entity: entity, data: off)
+      }
+    }
+    i = i + 1
+  }
+}
+
+func layerTagSystem(world: mod UiWorld) pub {
+  let n: Int = componentCount(this: world.layerTags)
+  var i: Int = 0
+  loop i < n {
+    let entity: EntityId = componentEntityAt(this: world.layerTags, i: i)
+    if componentHas(this: world.layerRefs, entity: entity) is false {
+      let tag: LayerTag = componentDataAt(this: world.layerTags, i: i)
+      setLayerById(world: world, entity: entity, id: tag.id)
+    }
+    i = i + 1
+  }
+}
+
+func navTabScreenName(screen: Screen) ret String {
+  if screen is Screen.home {
+    ret "home"
+  }
+  if screen is Screen.library {
+    ret "library"
+  }
+  if screen is Screen.search {
+    ret "search"
+  }
+  if screen is Screen.profile {
+    ret "profile"
+  }
+  ret ""
+}
+
+func setTabSpriteTint(world: mod UiWorld, entity: view EntityId, tint: view RgbaColor) {
+  let sp: Sprite = componentGet(this: world.sprites, entity: entity)
+  if sp.tint.r is tint.r and sp.tint.g is tint.g and sp.tint.b is tint.b and sp.tint.a is tint.a {
+    ret
+  }
+  let updated: Sprite = {
+    textureKey: "{sp.textureKey}"
+    tint: tint
+    tintSlot: ""
+    scaleMode: sp.scaleMode
+    tileScale: sp.tileScale
+    nineSlice: sp.nineSlice
+    hasNineSlice: sp.hasNineSlice
+  }
+  componentSet(this: world.sprites, entity: entity, data: updated)
+}
+
+func setTabTextStyle(world: mod UiWorld, entity: view EntityId, styleId: view String) {
+  let t: Text = componentGet(this: world.texts, entity: entity)
+  if t.styleId is styleId {
+    ret
+  }
+  let updated: Text = { text: "{t.text}", styleId: "{styleId}", wrapWidthMode: t.wrapWidthMode }
+  componentSet(this: world.texts, entity: entity, data: updated)
+}
+
+func navTabsSystem(world: mod UiWorld, activeTab: Screen) pub {
+  unsafe {
+    let activeName: String = navTabScreenName(screen: activeTab)
+    let activeTint: RgbaColor = { r: 30, g: 30, b: 36, a: 255 }
+    let inactiveTint: RgbaColor = { r: 130, g: 130, b: 140, a: 255 }
+    let n: Int = componentCount(this: world.navTabs)
+    var i: Int = 0
+    loop i < n {
+      let tab: EntityId = componentEntityAt(this: world.navTabs, i: i)
+      let binding: NavTab = componentDataAt(this: world.navTabs, i: i)
+      let active: Bool = binding.screen is activeName
+      var tint: RgbaColor = inactiveTint
+      var style: String = "tabInactive"
+      if active {
+        tint = activeTint
+        style = "tabActive"
+      }
+      if componentHas(this: world.childrens, entity: tab) {
+        let kids: List(EntityId) = List.create(EntityId, cap: 4)
+        let ch: view Children => componentView(this: world.childrens, entity: tab)
+        var k: Int = 0
+        loop k < ch.ids.length {
+          kids.add(value: rae_ext_rae_buf_get(buf: ch.ids.data, index: k))
+          k = k + 1
+        }
+        loop let child: view EntityId in kids {
+          if componentHas(this: world.sprites, entity: child) {
+            setTabSpriteTint(world: world, entity: child, tint: tint)
+          }
+          if componentHas(this: world.texts, entity: child) {
+            setTabTextStyle(world: world, entity: child, styleId: style)
+          }
+        }
+      }
+      if componentHas(this: world.widgetStates, entity: tab) {
+        let ws: WidgetState = componentGet(this: world.widgetStates, entity: tab)
+        if ws.selected is not active {
+          let updated: WidgetState = {
+            enabled: ws.enabled
+            selected: active
+            loading: ws.loading
+            error: ws.error
+          }
+          componentSet(this: world.widgetStates, entity: tab, data: updated)
+        }
+      }
+      i = i + 1
+    }
+  }
+}
