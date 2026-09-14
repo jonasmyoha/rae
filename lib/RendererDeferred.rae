@@ -486,7 +486,7 @@ func deferredTagAt(renderer: view DeferredRenderer, i: view Int) pub ret Int {
 # presents, so the renderer must not present again). The G-buffer pass fills from
 # the World3d ECS queries (renderSceneWorld + renderSceneSdfWorld); every other tag
 # is scene-independent — it reads G-buffer/depth resources the gbuffer pass already
-# wrote — so those tags ignore the world.
+# wrote — and goes through renderDeferredPass, which takes no world at all.
 func renderDeferredPassWorld(
   renderer: mod DeferredRenderer
   tag: view Int
@@ -495,41 +495,18 @@ func renderDeferredPassWorld(
   light: view Light3d
   aspect: view Float
 ) pub {
-  # Present copies the canvas's offscreen target into the drawable (C glue,
-  # #920); with a UI the 2D endFrame does it after the overlay.
-  if tag is RenderTag.present {
-    if renderer.hasUi {
-      Gpu2d.endFrame(canvas: renderer.canvas)
-    } else {
-      presentFrame(canvas: renderer.canvas)
-    }
-    ret
-  }
-  ensureRendererResources(renderer: renderer)
-  if let resources: mod GpuResources => renderer.gpuResources {
-    renderDeferredPassWith(
+  if tag is not RenderTag.gbuffer {
+    renderDeferredPass(
       renderer: renderer
-      resources: resources
       tag: tag
-      world: world
       camera: camera
       light: light
       aspect: aspect
     )
+    ret
   }
-}
-
-# The manager-backed passes (#904, geometry since #912): every tag but present.
-func renderDeferredPassWith(
-  renderer: mod DeferredRenderer
-  resources: mod GpuResources
-  tag: view Int
-  world: view World3d
-  camera: view Camera3d
-  light: view Light3d
-  aspect: view Float
-) {
-  if tag is RenderTag.gbuffer {
+  ensureRendererResources(renderer: renderer)
+  if let resources: mod GpuResources => renderer.gpuResources {
     beginPass(
       cache: renderer.passes.gbuffer
       resources: resources
@@ -552,6 +529,57 @@ func renderDeferredPassWith(
     )
     endPass(cache: renderer.passes.gbuffer, resources: resources)
   }
+}
+
+# Run one SCENE-INDEPENDENT pass: every tag except gbuffer (which needs a world —
+# renderDeferredPassWorld — or the app's own geometry draws between beginPass and
+# endPass) and the UI overlay. An app that fills the G-buffer itself (skinned,
+# instanced, procedural or grass draws, never the World3d mesh query) dispatches
+# its post-geometry tags here and owns no World3d at all (#994). The gbuffer tag
+# is a no-op here on purpose: there is nothing to draw it from.
+func renderDeferredPass(
+  renderer: mod DeferredRenderer
+  tag: view Int
+  camera: view Camera3d
+  light: view Light3d
+  aspect: view Float
+) pub {
+  if tag is RenderTag.gbuffer {
+    ret
+  }
+  # Present copies the canvas's offscreen target into the drawable (C glue,
+  # #920); with a UI the 2D endFrame does it after the overlay.
+  if tag is RenderTag.present {
+    if renderer.hasUi {
+      Gpu2d.endFrame(canvas: renderer.canvas)
+    } else {
+      presentFrame(canvas: renderer.canvas)
+    }
+    ret
+  }
+  ensureRendererResources(renderer: renderer)
+  if let resources: mod GpuResources => renderer.gpuResources {
+    renderDeferredPassWith(
+      renderer: renderer
+      resources: resources
+      tag: tag
+      camera: camera
+      light: light
+      aspect: aspect
+    )
+  }
+}
+
+# The manager-backed scene-independent passes (#904): every tag but gbuffer and
+# present.
+func renderDeferredPassWith(
+  renderer: mod DeferredRenderer
+  resources: mod GpuResources
+  tag: view Int
+  camera: view Camera3d
+  light: view Light3d
+  aspect: view Float
+) {
   if tag is RenderTag.depthPyramid {
     buildDepthPyramid(
       cache: renderer.passes.pyr
