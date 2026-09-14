@@ -1,0 +1,181 @@
+open ui/Ecs
+# CoverGridSystem (#975) — drives every authored `CoverGrid` component.
+#
+# A cover grid is a DATA LIST: its rows and tiles come from app state (the
+# library filter, the Liked playlist, the rounded-covers setting), so a
+# scene can only author the container. This system (re)materialises the
+# rows beneath each container whenever `state.libraryRevision` moves past
+# the revision the container was last built for (`CoverGrid.builtRevision`,
+# -1 on a fresh mount). It never touches the page's layout above the
+# container; the row containers it creates are the list items' host until
+# #979 turns the tile into a sub-scene instance.
+#
+# Runs every frame from UiRefresh.refreshMountedUi (a no-op unless the
+# revision moved) and once at the end of each page mount, so the tiles exist
+# before the screen-switch hero capture reads them.
+import ui/Components
+open ecs/Entity
+open ecs/ComponentTable
+
+# Tile edge for `cols` columns across the phone content width.
+func coverGridTileSize(cols: view Int, gap: view Float) ret Float {
+  let avail: Float = phoneFrameW - outerPad * 2.0
+  let gapTotal: Float = gap * (cols - 1).toFloat()
+  ret (avail - gapTotal) / cols.toFloat()
+}
+
+# One horizontal row hosting up to `cols` of the already-built `tiles`
+# starting at `startIndex`.
+func buildCoverGridRow(
+  world: mod UiWorld
+  tiles: view List(EntityId)
+  startIndex: view Int
+  cols: view Int
+  tileH: view Float
+  gap: view Float
+) ret EntityId {
+  unsafe {
+    let row: EntityId = createEntity(world: world)
+    setRectFixed(
+      world: world
+      entity: row
+      w: phoneFrameW - outerPad * 2.0
+      h: tileH
+    )
+    let layH: LayoutType = LayoutType.horizontal
+    let alignS: AlignKind = AlignKind.start
+    setLayout(
+      world: world
+      entity: row
+      kind: layH
+      gap: gap
+      alignCross: alignS
+    )
+    let kids: List(EntityId) = List.create(EntityId, cap: cols)
+    var col: Int = 0
+    loop col < cols {
+      let i: Int = startIndex + col
+      if i < tiles.length {
+        kids.add(value: rae_ext_rae_buf_get(buf: tiles.data, index: i))
+      }
+      col = col + 1
+    }
+    attachChildren(world: world, parent: row, kids: kids)
+    ret row
+  }
+}
+
+# Destroy the rows currently under `grid` (each destroy unlinks itself from
+# the container's Children, #972), leaving the container itself untouched.
+func clearCoverGridRows(world: mod UiWorld, grid: view EntityId) {
+  unsafe {
+    if componentHas(this: world.childrens, entity: grid) is false {
+      ret
+    }
+    let old: List(EntityId) = List.create(EntityId, cap: 8)
+    let kids: view Children => componentView(this: world.childrens, entity: grid)
+    var k: Int = 0
+    loop k < kids.ids.length {
+      old.add(value: rae_ext_rae_buf_get(buf: kids.ids.data, index: k))
+      k = k + 1
+    }
+    loop let row: view EntityId in old {
+      destroyEntitySubtree(world: world, root: row)
+    }
+  }
+}
+
+# Build the tiles for one grid from app state, in display order.
+func buildCoverGridTiles(
+  world: mod UiWorld
+  grid: view CoverGrid
+  state: view AppState
+  tileH: view Float
+) ret List(EntityId) {
+  let rounded: Bool = state.settings.roundedAlbumCovers
+  let keys: List(String) = collectLibraryCoverKeys(
+    albums: state.mediaLibrary.albums
+    library: state.library
+  )
+  let tiles: List(EntityId) = List.create(EntityId, cap: keys.length + 1)
+  if grid.source is CoverGridSource.library {
+    # The Liked playlist leads the library grid as a 2x2 cover tile.
+    let coverStems: List(String) = playlistCoverStems(playlist: state.liked, max: 4)
+    tiles.add(value: buildPlaylistCoverTile(
+      world: world
+      coverStems: coverStems
+      size: tileH
+      rounded: rounded
+    ))
+  }
+  loop let key: view String in keys {
+    tiles.add(value: buildLibraryCoverTile(
+      world: world
+      key: key
+      size: tileH
+      rounded: rounded
+    ))
+  }
+  ret tiles
+}
+
+# Materialise (or re-materialise) the rows of one grid container.
+func rebuildCoverGrid(
+  world: mod UiWorld
+  container: view EntityId
+  grid: view CoverGrid
+  state: view AppState
+) {
+  clearCoverGridRows(world: world, grid: container)
+  let cols: Int = grid.columns
+  let tileH: Float = coverGridTileSize(cols: cols, gap: grid.tileGap)
+  let tiles: List(EntityId) = buildCoverGridTiles(
+    world: world
+    grid: grid
+    state: state
+    tileH: tileH
+  )
+  let rows: Int = (tiles.length + cols - 1) / cols
+  let rowKids: List(EntityId) = List.create(EntityId, cap: rows)
+  var i: Int = 0
+  loop i < rows {
+    rowKids.add(value: buildCoverGridRow(
+      world: world
+      tiles: tiles
+      startIndex: i * cols
+      cols: cols
+      tileH: tileH
+      gap: grid.tileGap
+    ))
+    i = i + 1
+  }
+  attachChildren(world: world, parent: container, kids: rowKids)
+  log("[cover-grid] rebuilt {tiles.length} tiles in {rows} rows (revision {state.libraryRevision})")
+}
+
+# Drive every `CoverGrid`: rebuild the ones whose rows predate the current
+# library revision. `scenes` is the tile sub-scene source once #979 lands.
+func coverGridSystem(world: mod UiWorld, state: view AppState, scenes: view AlbumScenes) pub {
+  let n: Int = componentCount(this: world.coverGrids)
+  var i: Int = 0
+  loop i < n {
+    let container: EntityId = componentEntityAt(this: world.coverGrids, i: i)
+    let grid: CoverGrid = componentDataAt(this: world.coverGrids, i: i)
+    if grid.builtRevision is not state.libraryRevision {
+      rebuildCoverGrid(
+        world: world
+        container: container
+        grid: grid
+        state: state
+      )
+      let built: CoverGrid = {
+        columns: grid.columns
+        tileGap: grid.tileGap
+        source: grid.source
+        builtRevision: state.libraryRevision
+      }
+      componentSet(this: world.coverGrids, entity: container, data: built)
+    }
+    i = i + 1
+  }
+}
