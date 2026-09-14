@@ -8,6 +8,8 @@ open ui/LogOverlay
 open ui/Transform
 open ui/renderSystem/RenderSystem
 open ui/visualBoundsSystem/VisualBoundsSystem
+open ui/listViewSystem/ListViewSystem
+open ui/SceneInstance
 open Gpu2dCanvas
 
 # Frame-phase helpers for 106. The app still owns the loop policy, but the
@@ -208,7 +210,12 @@ func runFrameLayoutTransform(
   viewport: view Viewport
   schedule: mod Schedule
   gpuUi: view Gpu2dUi
+  rowScenes: view SceneRegistry
 ) pub {
+  # #964: virtualised lists (the History page) re-bind their pooled rows to
+  # the current scroll before layout, so this frame lays out the rows in
+  # view. Runs every frame; it writes nothing when nothing moved.
+  listViewSystem(world: world, scenes: rowScenes)
   if uiShouldRun(schedule: schedule, world: world, index: uiSystemSafeArea) {
     applySafeAreas(world: world, viewport: viewport)
   }
