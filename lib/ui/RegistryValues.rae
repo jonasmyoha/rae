@@ -7,6 +7,7 @@
 # three authored shapes that are arrays or presence-flagged (styleOverride,
 # SceneInstance overrides, ListView bindings).
 open ui/RegistryOpt
+open ui/ScenePolicy
 open ui/RegistryGeneric
 open ui/ContainerStyle
 import Json
@@ -99,13 +100,23 @@ func parseTextFormat(text: view String) ret TextFormat {
 # -----------------------------------------------------------------
 # Sub-type deserialisers
 # -----------------------------------------------------------------
-func deserInsets(doc: view JsonDoc, theme: view UiTheme, val: view JsonValue) ret Insets {
+func deserInsets(
+  doc: view JsonDoc
+  theme: view UiTheme
+  val: view JsonValue
+  diagnostics: mod List(SceneDiagnostic)
+  sceneId: view String
+  nodeId: view String
+) ret Insets {
   let l: Float = optFloatOrToken(
     doc: doc
     theme: theme
     container: val
     key: "l"
     fallback: 0.0
+    diagnostics: diagnostics
+    sceneId: sceneId
+    nodeId: nodeId
   )
   let t: Float = optFloatOrToken(
     doc: doc
@@ -113,6 +124,9 @@ func deserInsets(doc: view JsonDoc, theme: view UiTheme, val: view JsonValue) re
     container: val
     key: "t"
     fallback: 0.0
+    diagnostics: diagnostics
+    sceneId: sceneId
+    nodeId: nodeId
   )
   let r: Float = optFloatOrToken(
     doc: doc
@@ -120,6 +134,9 @@ func deserInsets(doc: view JsonDoc, theme: view UiTheme, val: view JsonValue) re
     container: val
     key: "r"
     fallback: 0.0
+    diagnostics: diagnostics
+    sceneId: sceneId
+    nodeId: nodeId
   )
   let b: Float = optFloatOrToken(
     doc: doc
@@ -127,6 +144,9 @@ func deserInsets(doc: view JsonDoc, theme: view UiTheme, val: view JsonValue) re
     container: val
     key: "b"
     fallback: 0.0
+    diagnostics: diagnostics
+    sceneId: sceneId
+    nodeId: nodeId
   )
   ret Insets { l: l, t: t, r: r, b: b }
 }
@@ -147,17 +167,79 @@ func deserVec2(doc: view JsonDoc, val: view JsonValue) ret Vec2 {
   ret Vec2 { x: x, y: y }
 }
 
-func deserRgba(doc: view JsonDoc, theme: view UiTheme, val: view JsonValue) ret RgbaColor {
-  # Theme token form: scene authors can write `"fill": "surface"`
-  # instead of `"fill": {r:..,g:..,b:..,a:..}` to pick a color from
-  # the current `activeTheme` in `lib/ui/theme.rae`. The JSON shape
-  # already disambiguates — a literal color is an object, a token
-  # reference is a string — so no sigil is needed. Unknown token
-  # names render magenta via `colorByName` rather than failing
-  # silently, so typos are visible.
+# One hex digit's value, or -1.
+func hexDigitValue(byte: view Int) ret Int {
+  if byte >= 48 and byte <= 57 {
+    ret byte - 48
+  }
+  if byte >= 97 and byte <= 102 {
+    ret byte - 87
+  }
+  if byte >= 65 and byte <= 70 {
+    ret byte - 55
+  }
+  ret 0 - 1
+}
+
+# `"#rrggbb"` / `"#rrggbbaa"` (#996): the third colour spelling beside a palette
+# token and an {r,g,b,a} object, the one the reference scene format uses.
+# Anything else (wrong length, a non-hex digit) is none.
+func parseHexColor(text: view String) ret opt RgbaColor {
+  let length: Int = text.length()
+  if (length is not 7 and length is not 9) or text.byteAt(index: 0) is not 35 {
+    ret none
+  }
+  var channels: List(Int) = { 0, 0, 0, 255 }
+  loop var channel: Int = 0, channel * 2 + 1 < length - 1, ++channel {
+    let high: Int = hexDigitValue(byte: text.byteAt(index: 1 + channel * 2))
+    let low: Int = hexDigitValue(byte: text.byteAt(index: 2 + channel * 2))
+    if high < 0 or low < 0 {
+      ret none
+    }
+    channels.set(index: channel, value: high * 16 + low)
+  }
+  ret RgbaColor {
+    r: channels.copyAtFallback(index: 0, fallback: 0)
+    g: channels.copyAtFallback(index: 1, fallback: 0)
+    b: channels.copyAtFallback(index: 2, fallback: 0)
+    a: channels.copyAtFallback(index: 3, fallback: 255)
+  }
+}
+
+func deserRgba(
+  doc: view JsonDoc
+  theme: view UiTheme
+  val: view JsonValue
+  diagnostics: mod List(SceneDiagnostic)
+  sceneId: view String
+  nodeId: view String
+) ret RgbaColor {
+  # Three spellings, told apart by the JSON shape alone (no sigil): a string
+  # starting with `#` is a hex literal (#996); any other string is a theme
+  # token — a built-in palette slot (`"fill": "surface"`) or a slot the
+  # scene-loaded theme adds — resolved from the current `activeTheme`; an
+  # object is a literal {r,g,b,a}. An unknown token renders magenta via
+  # `colorByName` so typos are visible, and is recorded as an unknownToken
+  # diagnostic.
   let empty: String = ""
   let asStr: String = Json.jsonString(this: val, fallback: empty)
   if asStr.length() > 0 {
+    if let hex: RgbaColor = parseHexColor(text: asStr) {
+      ret hex
+    }
+    if let slot: RgbaColor = colorByNameOpt(theme: theme.active, name: asStr) {
+      ret slot
+    }
+    if themePaletteIndex(theme: theme.resolved, slot: asStr) < 0 {
+      reportSceneDiagnostic(
+        diagnostics: diagnostics
+        sceneId: sceneId
+        nodeId: nodeId
+        kind: SceneDiagnosticKind.unknownToken
+        name: asStr
+        message: "no colour token named {asStr}; rendering magenta"
+      )
+    }
     ret colorByName(theme: theme.active, name: asStr)
   }
   let r: Int = optInt(
@@ -240,6 +322,9 @@ func deserStyleOverride(
   doc: view JsonDoc
   theme: view UiTheme
   val: view JsonValue
+  diagnostics: mod List(SceneDiagnostic)
+  sceneId: view String
+  nodeId: view String
 ) ret StyleOverride {
   var so: StyleOverride = defaultStyleOverride()
   let sizeIdx: Int = Json.field(doc: doc, this: val, key: "size")
@@ -256,7 +341,14 @@ func deserStyleOverride(
   if colorIdx >= 0 {
     so.hasColor = true
     let cv: JsonValue = Json.jsonValueAt(doc: doc, idx: colorIdx)
-    so.color = deserRgba(doc: doc, theme: theme, val: cv)
+    so.color = deserRgba(
+      doc: doc
+      theme: theme
+      val: cv
+      diagnostics: diagnostics
+      sceneId: sceneId
+      nodeId: nodeId
+    )
     let emptySlot: String = ""
     so.colorSlot = Json.jsonString(this: cv, fallback: emptySlot)
   }

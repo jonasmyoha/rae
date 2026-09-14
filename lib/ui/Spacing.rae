@@ -42,6 +42,11 @@ const spaceXL: Float = 24.0
 # `"gap": "spaceM"` instead of `"gap": 12`. Returns 0.0 + a stderr
 # log for unknown names — a visibly-collapsed gap makes typos obvious
 # without crashing the whole scene load.
+# Whether `name` is one of the base scale's five tokens (#996).
+func isSpaceToken(name: view String) pub ret Bool {
+  ret name is "spaceXS" or name is "spaceS" or name is "spaceM" or name is "spaceL" or name is "spaceXL"
+}
+
 func spaceTokenValue(name: view String) pub ret Float {
   let xs: String = "spaceXS"
   let s: String = "spaceS"

@@ -182,6 +182,36 @@ func themeSpaceValue(
   }
 }
 
+# Whether the scene-loaded token tables carry `name` (#996: the loader's
+# unknown-token check, separate from the value lookups' silent fallbacks).
+func themeHasSpace(theme: view ResolvedTheme, name: view String) pub ret Bool {
+  unsafe {
+    var i: Int = 0
+    loop i < theme.spaceNames.length {
+      let n: String = rae_ext_rae_buf_get(buf: theme.spaceNames.data, index: i)
+      if n is name {
+        ret true
+      }
+      i = i + 1
+    }
+    ret false
+  }
+}
+
+func themeHasRadius(theme: view ResolvedTheme, name: view String) pub ret Bool {
+  unsafe {
+    var i: Int = 0
+    loop i < theme.radiusNames.length {
+      let n: String = rae_ext_rae_buf_get(buf: theme.radiusNames.data, index: i)
+      if n is name {
+        ret true
+      }
+      i = i + 1
+    }
+    ret false
+  }
+}
+
 func themeRadiusValue(
   theme: view ResolvedTheme
   name: view String
