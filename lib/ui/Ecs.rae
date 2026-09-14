@@ -336,6 +336,20 @@ func findNodeInPage(world: view UiWorld, pageId: view String, nodeId: view Strin
   ret world.nodeIds.get(k: k)
 }
 
+# The LIVE handle for a `world.nodeIds` index (#972). The map stores only the
+# entity index; the handle's generation must come from the allocator, never be
+# fabricated. The old `id(v: raw)` built `{ index, generation: 0 }`, which is
+# right only until a slot is recycled — after the first page re-mount every
+# scene node resolved to a stale handle, so the Home page's data adapters
+# attached their tiles to dead entities and the page rendered empty. A never-
+# allocated index yields a handle no table matches (generation -1).
+func nodeEntity(world: view UiWorld, index: view Int) pub ret EntityId {
+  ret EntityId {
+    index: index
+    generation: allocatorGeneration(this: world.allocator, index: index)
+  }
+}
+
 # Walk Parent up from `entity` until we hit a `PageRoot`, then return
 # its id. Returns an empty string when no ancestor is a page root —
 # callers should treat that as "no page" / unscoped.
@@ -488,6 +502,13 @@ func destroyEntity(world: mod UiWorld, entity: view EntityId) pub {
 # tree walk to duplicate it.
 func destroyEntitySubtree(world: mod UiWorld, root: view EntityId) pub {
   unsafe {
+    # #972: detach the root from its parent's `Children` cache FIRST. Without
+    # this a destroyed subtree root (the nav-tabs bar, unmounted on every tab
+    # switch) kept its slot in the parent's child list; the entity allocator
+    # then recycled its id for some new entity, so the dock laid out a
+    # phantom extra child per switch and its mini-player + tabs climbed by
+    # one bar height every time the user pressed a menubar button.
+    unlinkFromCurrent(parents: world.parents, childrens: world.childrens, child: root)
     let collected: List(EntityId) = List.create(EntityId, cap: 32)
     collectSubtree(childrens: world.childrens, node: root, out: collected)
     # Destroy in reverse (children before parents).
