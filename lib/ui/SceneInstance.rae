@@ -153,6 +153,22 @@ func addSpriteOverride(list: mod List(SceneOverride), nodeId: own String, value:
   )
 }
 
+# Shorthand for switching a node's Active flag (a data list's optional
+# parts: an empty cell, a placeholder) — the value travels as "true"/"false".
+func addActiveOverride(list: mod List(SceneOverride), nodeId: own String, value: view Bool) {
+  var text: String = "false"
+  if value {
+    text = "true"
+  }
+  addOverride(
+    list: list
+    nodeId: own nodeId
+    componentName: "Active"
+    fieldName: "value"
+    value: own text
+  )
+}
+
 # Sprite tint override. Encodes the colour as `"r,g,b,a"` because the
 # override value channel is currently a plain String — applyOverride
 # parses the four numeric components back out.

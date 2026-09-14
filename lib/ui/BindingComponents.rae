@@ -124,3 +124,35 @@ type LayerTag {
 type NavTab {
   screen: String
 }
+
+# ----- album page (#979) ----------------------------------------------------
+
+# The album/playlist header block: `albumHeaderSystem` writes the caption,
+# title and artist texts and points the hero cover's Sprite (and HeroWidget
+# key) at the collection the app is showing, whenever the collection key it
+# derives from app state moves past `builtKey`.
+type AlbumHeader {
+  captionNodeId: String = "HeroCaption"
+  titleNodeId: String = "HeroTitle"
+  artistNodeId: String = "HeroArtist"
+  coverNodeId: String = "HeroThumb"
+  builtKey: String
+}
+
+# The album page's track rows — a data list: one `track-row` sub-scene per
+# song of the current collection, with the playing row highlighted.
+# `trackListSystem` rebuilds the rows when the collection or the playing song
+# moves past `builtKey`.
+type TrackList {
+  builtKey: String
+}
+
+# ----- now-playing page (#979) ----------------------------------------------
+
+# A progress track whose FIRST child is the fill: the playback system writes
+# the fill's width as `track width x progress` (Rect and ComputedRect, only
+# when it changed) — the app's existing `applyPlaybackToWorld`, now driven
+# by this component instead of a page node-id lookup.
+type ProgressBar {
+  enabled: Bool = true
+}

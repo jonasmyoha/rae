@@ -24,6 +24,7 @@ import ui/Scene
 open ui/SceneInstance
 open ecs/Entity
 open ecs/ComponentTable
+open ecs/hierarchySystem/HierarchySystem
 open ui/Theme
 open ui/renderSystem/RenderSystem
 
@@ -94,87 +95,77 @@ func historyHasArt(entry: view PlayHistoryEntry) pub ret Bool {
   ret entry.textureKey.length() > 0
 }
 
-# Build a single thumb entity. Has-art → sprite bound to the
-# entry's stored textureKey (album stem for local, "spotify-art:<id>"
-# for Spotify). No-art → a visible placeholder rect filled with the
-# theme's `textMuted` color.
-func buildHistoryThumb(
+# One recently-played thumb: the `recent-thumb` sub-scene on a square host.
+# Has-art -> the Art sprite is switched on with the entry's stored textureKey
+# (album stem for local, "spotify-art:<id>" for Spotify) and the placeholder
+# off; no-art -> the authored muted placeholder chip stays, tagged with the
+# entry identity and a loading fade until art lands.
+# The rounded-covers setting strips the authored corner radii when off.
+func mountRecentThumb(
   world: mod UiWorld
+  scenes: view AlbumScenes
   entry: view PlayHistoryEntry
   size: view Float
   rounded: view Bool
+  actionId: view String
 ) ret EntityId {
-  let thumb: EntityId = createEntity(world: world)
+  let host: EntityId = createEntity(world: world)
   setRectFixed(
     world: world
-    entity: thumb
+    entity: host
     w: size
     h: size
   )
-  if rounded {
-    let cr: CornerRadius = { radius: 17.349397590361445 }
-    componentSet(this: world.cornerRadiuses, entity: thumb, data: cr)
-  }
+  let overrides: List(SceneOverride) = emptyOverrides()
   if historyHasArt(entry: entry) {
-    let key: String = "{entry.textureKey}"
-    setSpriteFill(
-      world: world
-      entity: thumb
-      key: key
-      tint: paletteImageTint(theme: world.theme.active)
-    )
-    setHoverScale(world: world, entity: thumb, hoverScale: 1.12)
-  } else {
-    let mutedName: String = "textMuted"
-    let fill: RgbaColor = colorByName(theme: world.theme.active, name: mutedName)
-    let transparent: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
-    var radius: Float = 0.0
-    if rounded {
-      radius = 17.349397590361445
-    }
-    let sp: Shape = {
-      kind: ShapeKind.roundedRect
-      fill: fill
-      stroke: transparent
-      strokeWidth: 0.0
-      radius: radius
-    }
-    componentSet(this: world.shapes, entity: thumb, data: sp)
-    let widgetId: String = "{entry.trackName}:{entry.artistName}"
-    let kind: String = "historyArtPlaceholder"
-    setWidgetIdentity(
-      world: world
-      entity: thumb
-      id: widgetId
-      kind: kind
-    )
-    setWidgetState(
-      world: world
-      entity: thumb
-      enabled: true
-      selected: false
-      loading: true
-      error: false
-    )
-    let source: DataResourceId = dataResourceHistory()
-    let field: DataFieldId = dataFieldAll()
-    setDataDependency(
-      world: world
-      entity: thumb
-      resource: source
-      field: field
-      observedRevision: 0
-    )
-    setOpacityStateStyle(
-      world: world
-      entity: thumb
-      disabledAlpha: 1.0
-      loadingAlpha: 0.72
-      errorAlpha: 0.42
-    )
-    setHoverScale(world: world, entity: thumb, hoverScale: 1.12)
+    addSpriteOverride(list: overrides, nodeId: "Art", value: "{entry.textureKey}")
+    addActiveOverride(list: overrides, nodeId: "Art", value: true)
+    addActiveOverride(list: overrides, nodeId: "Placeholder", value: false)
   }
-  ret thumb
+  addOnClickActionOverride(list: overrides, nodeId: "Thumb", value: "{actionId}")
+  let idx: Int = sceneRegistryIndex(reg: scenes.subScenes, key: "recent-thumb")
+  if idx < 0 {
+    paintErrorBlock(world: world, entity: host, label: "recent-thumb")
+    ret host
+  }
+  let scene: view Scene => sceneRegistryGet(reg: scenes.subScenes, idx: idx)
+  mountOrError(
+    world: world
+    mountEntity: host
+    scene: scene
+    sceneLabel: "recent-thumb"
+    overrides: overrides
+  )
+  if historyHasArt(entry: entry) is false {
+    if let phRaw: Int = world.nodeIds.get(k: "Placeholder") {
+      let placeholder: EntityId = nodeEntity(world: world, index: phRaw)
+      setWidgetIdentity(
+        world: world
+        entity: placeholder
+        id: "{entry.trackName}:{entry.artistName}"
+        kind: "historyArtPlaceholder"
+      )
+      # StateStyle is a runtime table (not authorable), so the loading fade
+      # is applied here.
+      setOpacityStateStyle(
+        world: world
+        entity: placeholder
+        disabledAlpha: 1.0
+        loadingAlpha: 0.72
+        errorAlpha: 0.42
+      )
+    }
+  }
+  if rounded is false {
+    unsafe {
+      let gathered: List(EntityId) = List.create(EntityId, cap: 4)
+      collectSubtree(childrens: world.childrens, node: host, out: gathered)
+      loop let e: view EntityId in gathered {
+        componentRemove(this: world.cornerRadiuses, entity: e)
+      }
+    }
+  }
+  ret host
 }
 
 # One `ListViewRow` per play, newest first (visual 0 = the latest entry).
@@ -327,6 +318,7 @@ func historyListSystem(world: mod UiWorld, state: view AppState) pub {
 # Home or from the full History page).
 func fillRecentlyPlayedStrip(
   world: mod UiWorld
+  scenes: view AlbumScenes
   strip: view EntityId
   history: view PlayHistory
   rounded: view Bool
@@ -342,14 +334,14 @@ func fillRecentlyPlayedStrip(
     loop visual < kidsCount {
       let entryIdx: Int = n - 1 - visual
       let e: PlayHistoryEntry = rae_ext_rae_buf_get(buf: history.entries.data, index: entryIdx)
-      let tile: EntityId = buildHistoryThumb(
+      let tile: EntityId = mountRecentThumb(
         world: world
+        scenes: scenes
         entry: e
         size: recentlyPlayedThumbSize
         rounded: rounded
+        actionId: "history.replay.{entryIdx}"
       )
-      let replayAction: String = "history.replay.{entryIdx}"
-      setOnClick(world: world, entity: tile, actionId: replayAction)
       kids.add(value: tile)
       visual = visual + 1
     }
