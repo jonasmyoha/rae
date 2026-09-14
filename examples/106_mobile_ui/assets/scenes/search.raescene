@@ -11,14 +11,11 @@
         "alignCross": "Start"
       },
       "Padding": "screenEdgePadding",
-      "Shape": {
-        "kind": "Rect",
-        "fill": "surface"
-      },
       "Children": [
         "TopBar",
         "SearchField",
-        "RecentSection"
+        "EmptyState",
+        "Results"
       ]
     },
     "TopBar": {
@@ -80,17 +77,6 @@
           "mode": "Fixed"
         }
       },
-      "Layout": {
-        "type": "Horizontal",
-        "gap": "spaceM",
-        "alignCross": "Center"
-      },
-      "Padding": {
-        "l": "spaceL",
-        "t": "spaceL",
-        "r": "spaceL",
-        "b": "spaceL"
-      },
       "Shape": {
         "kind": "RoundedRect",
         "fill": {
@@ -101,9 +87,24 @@
         },
         "radius": 39.036145
       },
+      "Layout": {
+        "type": "Horizontal",
+        "gap": "spaceM",
+        "alignCross": "Center"
+      },
+      "Padding": {
+        "l": 34.698795,
+        "t": 34.698795,
+        "r": 34.698795,
+        "b": 34.698795
+      },
+      "SearchField": {
+        "query": "",
+        "placeholder": "Search artists, albums, songs…"
+      },
       "Children": [
         "SearchIcon",
-        "SearchPlaceholder"
+        "SearchText"
       ]
     },
     "SearchIcon": {
@@ -118,12 +119,12 @@
         "tint": "textMuted"
       }
     },
-    "SearchPlaceholder": {
+    "SearchText": {
       "Rect": {
         "x": 0.0,
         "y": 0.0,
         "w": 0.0,
-        "h": 52.048193
+        "h": 24.0
       },
       "Size": {
         "w": {
@@ -138,19 +139,19 @@
         "styleId": "muted"
       }
     },
-    "RecentSection": {
+    "EmptyState": {
       "Rect": {
         "x": 0.0,
         "y": 0.0,
         "w": 0.0,
-        "h": 0.0
+        "h": 373.012047
       },
       "Size": {
         "w": {
           "mode": "Fill"
         },
         "h": {
-          "mode": "Fill"
+          "mode": "Fixed"
         }
       },
       "Layout": {
@@ -160,7 +161,9 @@
       },
       "Children": [
         "RecentHeader",
-        "RecentList"
+        "RecentRow1",
+        "RecentRow2",
+        "RecentRow3"
       ]
     },
     "RecentHeader": {
@@ -168,7 +171,7 @@
         "x": 0.0,
         "y": 0.0,
         "w": 0.0,
-        "h": 60.722892
+        "h": 28.0
       },
       "Size": {
         "w": {
@@ -179,11 +182,11 @@
         }
       },
       "Text": {
-        "text": "Recent searches",
-        "styleId": "primary"
+        "text": "Recent",
+        "styleId": "topBarTitle"
       }
     },
-    "RecentList": {
+    "Results": {
       "Rect": {
         "x": 0.0,
         "y": 0.0,
@@ -200,8 +203,147 @@
       },
       "Layout": {
         "type": "Vertical",
-        "gap": "spaceM",
+        "gap": "spaceXS",
         "alignCross": "Start"
+      },
+      "Active": {
+        "value": false
+      },
+      "SearchResults": {
+        "source": "tracks",
+        "maxRows": 12
+      }
+    },
+    "RecentRow1": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 0.0,
+        "h": 78.072289
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Layout": {
+        "type": "Horizontal",
+        "gap": 0.0,
+        "alignCross": "Center"
+      },
+      "Children": [
+        "RecentRow1Label"
+      ]
+    },
+    "RecentRow1Label": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 0.0,
+        "h": 24.0
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Text": {
+        "text": "mitski",
+        "styleId": "trackTitle"
+      }
+    },
+    "RecentRow2": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 0.0,
+        "h": 78.072289
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Layout": {
+        "type": "Horizontal",
+        "gap": 0.0,
+        "alignCross": "Center"
+      },
+      "Children": [
+        "RecentRow2Label"
+      ]
+    },
+    "RecentRow2Label": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 0.0,
+        "h": 24.0
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Text": {
+        "text": "charli xcx · brat",
+        "styleId": "trackTitle"
+      }
+    },
+    "RecentRow3": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 0.0,
+        "h": 78.072289
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Layout": {
+        "type": "Horizontal",
+        "gap": 0.0,
+        "alignCross": "Center"
+      },
+      "Children": [
+        "RecentRow3Label"
+      ]
+    },
+    "RecentRow3Label": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 0.0,
+        "h": 24.0
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Text": {
+        "text": "indie pop 2024",
+        "styleId": "trackTitle"
       }
     }
   },

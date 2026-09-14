@@ -44,6 +44,11 @@ static int g_g2d_touch_n = 0;
 /* Per-frame mouse-wheel accumulator (reset + summed in pollClose, read by
  * gpu2d.wheelMove). Mirrors raylib's GetMouseWheelMove per-frame semantics. */
 static float  g_g2d_wheel = 0.0f;
+/* #976: UTF-8 text typed since the last poll (SDL_EVENT_TEXT_INPUT), drained
+ * once per frame by rae_ext_Gpu2d_textInput. Backspace/enter arrive as key
+ * edges (Sdl3.isKeyPressed) — this carries only the characters. */
+static char   g_g2d_text_input[256];
+static size_t g_g2d_text_input_len = 0;
 /* Set when the OS reports a window resize; consumed (cleared) once by
  * gpu2d.windowResized() so the app rebuilds its layout for the new size. */
 static int    g_g2d_win_resized = 0;
@@ -148,6 +153,9 @@ void rae_ext_Gpu2d_initWindow(int64_t width, int64_t height, rae_String title) {
     g_sdl_win = SDL_CreateWindow(t, (int)width, (int)height, flags);
     if (!g_sdl_win) { fprintf(stderr, "[gpu2d] window failed: %s\n", SDL_GetError()); return; }
     SDL_RaiseWindow(g_sdl_win);
+    /* SDL3 delivers SDL_EVENT_TEXT_INPUT only while text input is started
+     * for the window; on desktop this is free (no on-screen keyboard). */
+    SDL_StartTextInput(g_sdl_win);
 #ifndef __EMSCRIPTEN__
     g_g2d_metal_view = SDL_Metal_CreateView(g_sdl_win);
     if (!g_g2d_metal_view) { fprintf(stderr, "[gpu2d] metal view failed: %s\n", SDL_GetError()); return; }
@@ -255,6 +263,7 @@ rae_Bool rae_ext_Gpu2d_pollClose(void) {
     memset(g_sdl_mouse_released, 0, sizeof(g_sdl_mouse_released));
     for (int ti = 0; ti < g_g2d_touch_n; ti++) g_g2d_touch[ti].pressed = 0;   /* clear edge */
     g_g2d_wheel = 0.0f;
+    g_g2d_text_input_len = 0; g_g2d_text_input[0] = 0;
     SDL_Event e;
     rae_Bool quit = 0;
     while (SDL_PollEvent(&e)) {
@@ -281,6 +290,15 @@ rae_Bool rae_ext_Gpu2d_pollClose(void) {
             case SDL_EVENT_KEY_UP:
                 if (e.key.scancode < SDL_SCANCODE_COUNT) g_sdl_keydown[e.key.scancode] = 0;
                 break;
+            case SDL_EVENT_TEXT_INPUT: {
+                size_t n = strlen(e.text.text);
+                if (g_g2d_text_input_len + n < sizeof(g_g2d_text_input)) {
+                    memcpy(g_g2d_text_input + g_g2d_text_input_len, e.text.text, n);
+                    g_g2d_text_input_len += n;
+                    g_g2d_text_input[g_g2d_text_input_len] = 0;
+                }
+                break;
+            }
             case SDL_EVENT_FINGER_DOWN:
                 if (g_g2d_touch_n < RAE_G2D_MAX_TOUCH) {
                     g_g2d_touch[g_g2d_touch_n].id = e.tfinger.fingerID;
@@ -405,6 +423,8 @@ static void rae_g2d_pointer_design(double* dx, double* dy) {
     *dy = (xf[3] != 0.0f) ? (physY - xf[5]) / xf[3] : physY;
 }
 float rae_ext_Gpu2d_pointerX(void){ double x, y; rae_g2d_pointer_design(&x, &y); return x; }
+/* The characters typed since the last event poll, as one UTF-8 String. */
+rae_String rae_ext_Gpu2d_textInput(void){ return rae_ext_rae_str_from_cstr(g_g2d_text_input); }
 float rae_ext_Gpu2d_pointerY(void){ double x, y; rae_g2d_pointer_design(&x, &y); return y; }
 
 /* Multitouch fingers in design units (#526). touchX/Y clamp to 0 out of range. */

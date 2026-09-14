@@ -1,0 +1,343 @@
+open ui/Ecs
+# SearchSystems (#976) — the two systems behind the scene-driven Search page.
+#
+#   searchFieldSystem   every `SearchField`: while its page is active, append
+#                       this frame's typed characters to `query` and apply
+#                       Backspace; show `query` (or the placeholder while it
+#                       is empty) in the field's first Text child; show the
+#                       page's EmptyState node while the query is empty and
+#                       the page's `SearchResults` container otherwise.
+#   searchResultsSystem every `SearchResults`: when the query of the
+#                       SearchField on the same page differs from the rows
+#                       last built (`builtQuery`), destroy the rows and mount
+#                       one track-row sub-scene per match (title / artist /
+#                       album substring, case-insensitive, capped at
+#                       `maxRows`), each tappable via `song.openref`.
+#
+# Neither system builds page layout: the field, the empty state and the
+# results container are authored in search.raescene; the rows are the data
+# list's items (the same track-row sub-scene the Album page mounts).
+import ui/Components
+import ui/Scene
+open ui/SceneInstance
+open ecs/Entity
+open ecs/ComponentTable
+
+# ----- SearchField ----------------------------------------------------------
+
+# True when the page holding `entity` is active (visible). A page root with no
+# Active component counts as active, like layout does.
+func entityPageActive(world: view UiWorld, entity: view EntityId) ret Bool {
+  let page: String = pageOf(world: world, entity: entity)
+  if page.length() is 0 {
+    ret true
+  }
+  let root: EntityId = findPageRootEntity(world: world, pageId: page)
+  if isNone(this: root) {
+    ret true
+  }
+  if componentHas(this: world.actives, entity: root) is false {
+    ret true
+  }
+  let a: Active = componentGet(this: world.actives, entity: root)
+  ret a.value
+}
+
+# Drop the last character (a whole UTF-8 sequence) of `text`.
+func withoutLastChar(text: view String) ret String {
+  let n: Int = text.length()
+  if n is 0 {
+    ret ""
+  }
+  var cut: Int = n - 1
+  # Step back over UTF-8 continuation bytes (0x80..0xBF) to the character's
+  # lead byte, so a Backspace removes the whole multi-byte character.
+  loop cut > 0 and text.byteAt(index: cut) >= 128 and text.byteAt(index: cut) < 192 {
+    cut = cut - 1
+  }
+  ret text.sub(start: 0, len: cut)
+}
+
+# The field's visible line: its first child carrying a Text.
+func searchFieldTextChild(world: view UiWorld, field: view EntityId) ret EntityId {
+  unsafe {
+    if componentHas(this: world.childrens, entity: field) is false {
+      ret noEntity()
+    }
+    let kids: view Children => componentView(this: world.childrens, entity: field)
+    var k: Int = 0
+    loop k < kids.ids.length {
+      let child: EntityId = rae_ext_rae_buf_get(buf: kids.ids.data, index: k)
+      if componentHas(this: world.texts, entity: child) {
+        ret child
+      }
+      k = k + 1
+    }
+    ret noEntity()
+  }
+}
+
+func setActiveIfDifferent(world: mod UiWorld, entity: view EntityId, active: view Bool) {
+  if isNone(this: entity) {
+    ret
+  }
+  var current: Bool = true
+  if componentHas(this: world.actives, entity: entity) {
+    let a: Active = componentGet(this: world.actives, entity: entity)
+    current = a.value
+  }
+  if current is not active {
+    let flag: Active = { value: active }
+    componentSet(this: world.actives, entity: entity, data: flag)
+  }
+}
+
+func setTextIfDifferent(
+  world: mod UiWorld
+  entity: view EntityId
+  text: view String
+  styleId: view String
+) {
+  if isNone(this: entity) or componentHas(this: world.texts, entity: entity) is false {
+    ret
+  }
+  let current: Text = componentGet(this: world.texts, entity: entity)
+  if current.text is text and current.styleId is styleId {
+    ret
+  }
+  let updated: Text = { text: "{text}", styleId: "{styleId}", wrapWidthMode: current.wrapWidthMode }
+  componentSet(this: world.texts, entity: entity, data: updated)
+}
+
+# The `SearchResults` container on the same page as `field`, if any.
+func searchResultsOnPage(world: view UiWorld, page: view String) ret EntityId {
+  let n: Int = componentCount(this: world.searchResultss)
+  var i: Int = 0
+  loop i < n {
+    let entity: EntityId = componentEntityAt(this: world.searchResultss, i: i)
+    if pageOf(world: world, entity: entity) is page {
+      ret entity
+    }
+    i = i + 1
+  }
+  ret noEntity()
+}
+
+func searchFieldSystem(world: mod UiWorld, input: view InputSystem) pub {
+  let n: Int = componentCount(this: world.searchFields)
+  var i: Int = 0
+  loop i < n {
+    let field: EntityId = componentEntityAt(this: world.searchFields, i: i)
+    let data: SearchField = componentDataAt(this: world.searchFields, i: i)
+    var query: String = "{data.query}"
+    # Typing goes to the field whose page is on screen.
+    if entityPageActive(world: world, entity: field) {
+      var b: Int = 0
+      loop b < input.backspaces {
+        query = withoutLastChar(text: query)
+        b = b + 1
+      }
+      if input.typedText.length() > 0 {
+        query = "{query}{input.typedText}"
+      }
+    }
+    if query is not data.query {
+      let updated: SearchField = {
+        query: "{query}"
+        placeholder: "{data.placeholder}"
+        textStyleId: "{data.textStyleId}"
+        placeholderStyleId: "{data.placeholderStyleId}"
+        emptyStateNodeId: "{data.emptyStateNodeId}"
+      }
+      componentSet(this: world.searchFields, entity: field, data: updated)
+    }
+    # Mirror into the visible line.
+    let line: EntityId = searchFieldTextChild(world: world, field: field)
+    if query.length() > 0 {
+      setTextIfDifferent(
+        world: world
+        entity: line
+        text: query
+        styleId: data.textStyleId
+      )
+    } else {
+      setTextIfDifferent(
+        world: world
+        entity: line
+        text: data.placeholder
+        styleId: data.placeholderStyleId
+      )
+    }
+    # Empty state vs results.
+    let page: String = pageOf(world: world, entity: field)
+    let hasQuery: Bool = query.length() > 0
+    if let emptyRaw: Int = findNodeInPage(world: world, pageId: page, nodeId: data.emptyStateNodeId) {
+      setActiveIfDifferent(
+        world: world
+        entity: nodeEntity(world: world, index: emptyRaw)
+        active: hasQuery is false
+      )
+    }
+    setActiveIfDifferent(
+      world: world
+      entity: searchResultsOnPage(world: world, page: page)
+      active: hasQuery
+    )
+    i = i + 1
+  }
+}
+
+# ----- SearchResults --------------------------------------------------------
+
+# The query of the SearchField on `page` ("" when the page has none).
+func searchQueryOnPage(world: view UiWorld, page: view String) ret String {
+  let n: Int = componentCount(this: world.searchFields)
+  var i: Int = 0
+  loop i < n {
+    let field: EntityId = componentEntityAt(this: world.searchFields, i: i)
+    if pageOf(world: world, entity: field) is page {
+      let data: SearchField = componentDataAt(this: world.searchFields, i: i)
+      ret "{data.query}"
+    }
+    i = i + 1
+  }
+  ret ""
+}
+
+func clearSearchRows(world: mod UiWorld, container: view EntityId) {
+  unsafe {
+    if componentHas(this: world.childrens, entity: container) is false {
+      ret
+    }
+    let old: List(EntityId) = List.create(EntityId, cap: 12)
+    let kids: view Children => componentView(this: world.childrens, entity: container)
+    var k: Int = 0
+    loop k < kids.ids.length {
+      old.add(value: rae_ext_rae_buf_get(buf: kids.ids.data, index: k))
+      k = k + 1
+    }
+    loop let row: view EntityId in old {
+      destroyEntitySubtree(world: world, root: row)
+    }
+  }
+}
+
+# One result row: a track-row sub-scene instance on a fixed-height host,
+# tappable to play that exact song.
+func mountSearchRow(
+  world: mod UiWorld
+  scenes: view AlbumScenes
+  title: view String
+  subtitle: view String
+  actionId: view String
+) ret EntityId {
+  let row: EntityId = createEntity(world: world)
+  setRectFixed(
+    world: world
+    entity: row
+    w: phoneFrameW - outerPad * 2.0
+    h: trackRowH
+  )
+  let overrides: List(SceneOverride) = emptyOverrides()
+  addTextOverride(list: overrides, nodeId: "IdxText", value: "")
+  addTextOverride(list: overrides, nodeId: "TitleText", value: "{title}")
+  addTextOverride(list: overrides, nodeId: "SubtitleText", value: "{subtitle}")
+  let mounted: EntityId = mountOrError(
+    world: world
+    mountEntity: row
+    scene: scenes.trackRow
+    sceneLabel: "track-row"
+    overrides: overrides
+  )
+  setOnClick(world: world, entity: row, actionId: actionId)
+  ret row
+}
+
+func containsFold(haystack: view String, needle: view String) ret Bool {
+  ret haystack.toLower().contains(sub: needle)
+}
+
+func rebuildSearchResults(
+  world: mod UiWorld
+  container: view EntityId
+  results: view SearchResults
+  query: view String
+  state: view AppState
+  scenes: view AlbumScenes
+) {
+  unsafe {
+    clearSearchRows(world: world, container: container)
+    if query.length() is 0 {
+      ret
+    }
+    let needle: String = query.toLower()
+    let rows: List(EntityId) = List.create(EntityId, cap: results.maxRows)
+    let albums: view List(Album) => state.mediaLibrary.albums
+    var a: Int = 0
+    loop a < albums.length and rows.length < results.maxRows {
+      let album: Album = rae_ext_rae_buf_get(buf: albums.data, index: a)
+      let albumHit: Bool = containsFold(haystack: album.album, needle: needle) or containsFold(
+        haystack: album.artist
+        needle: needle
+      )
+      if results.source is SearchSource.albums {
+        if albumHit {
+          rows.add(value: mountSearchRow(
+            world: world
+            scenes: scenes
+            title: album.album
+            subtitle: album.artist
+            actionId: "song.openref.0.{album.stem}"
+          ))
+        }
+      } else {
+        var t: Int = 0
+        loop t < album.tracks.length and rows.length < results.maxRows {
+          let track: Track = rae_ext_rae_buf_get(buf: album.tracks.data, index: t)
+          if albumHit or containsFold(haystack: track.title, needle: needle) {
+            rows.add(value: mountSearchRow(
+              world: world
+              scenes: scenes
+              title: track.title
+              subtitle: "{album.artist} - {album.album}"
+              actionId: "song.openref.{t}.{album.stem}"
+            ))
+          }
+          t = t + 1
+        }
+      }
+      a = a + 1
+    }
+    attachChildren(world: world, parent: container, kids: rows)
+  }
+}
+
+func searchResultsSystem(world: mod UiWorld, state: view AppState, scenes: view AlbumScenes) pub {
+  let n: Int = componentCount(this: world.searchResultss)
+  var i: Int = 0
+  loop i < n {
+    let container: EntityId = componentEntityAt(this: world.searchResultss, i: i)
+    let results: SearchResults = componentDataAt(this: world.searchResultss, i: i)
+    let query: String = searchQueryOnPage(
+      world: world
+      page: pageOf(world: world, entity: container)
+    )
+    if query is not results.builtQuery {
+      rebuildSearchResults(
+        world: world
+        container: container
+        results: results
+        query: query
+        state: state
+        scenes: scenes
+      )
+      let built: SearchResults = {
+        source: results.source
+        maxRows: results.maxRows
+        builtQuery: "{query}"
+      }
+      componentSet(this: world.searchResultss, entity: container, data: built)
+    }
+    i = i + 1
+  }
+}
