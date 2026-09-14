@@ -126,9 +126,10 @@ cd tools/devtools-web && bun run start
 
 ### Track Stats
 
-- Every test/build command stores metrics (durations, pass/fail counts) in `data/devtools.db` via SQLite.
-- The **Stats preview** panel pulls recent entries from the database (default metrics: `tests.duration_ms`, `builds.duration_ms`) so you can see trends without leaving the dashboard.
-- Data can be exported later for Chart.js visualizations; each entry carries metadata (`success`, run id, etc.).
+- Every test/build/example run records metrics (durations, pass/fail counts, performance data) to `data/runtime_metrics.jsonl` in an append-only manner.
+- The file is tracked in git to preserve historical performance trends across the project.
+- The **Stats preview** panel displays recent metrics (default: `tests.duration_ms`, `builds.duration_ms`) pulled from the file; charts show trends without leaving the dashboard.
+- Each metric entry carries metadata (`success`, run id, target, etc.) for contextualization.
 
 ### Browse Rae Test Sources
 
@@ -216,7 +217,9 @@ rae-devtools/
 - **Backend**: Minimal HTTP handlers plus WebSocket broadcaster. Uses child processes for build/test commands and streams stdout/stderr line-by-line.
 - **Frontend**: Single-page layout with sidebar test tree and main content area for build logs/stats/test detail.
 - **Shared Types**: Keep WebSocket messages and HTTP responses type-safe and portable.
-- **Data Folder**: Contains SQLite DB (`devtools.db` or similar). Only the `.gitkeep` file is tracked; DB files stay local.
+- **Data Folder**: Contains:
+  - `runtime_metrics.jsonl` (tracked in git): append-only JSONL file recording metrics from every build/test/example run. Each line is a JSON object with timestamp, metric name, value, and metadata. Multiple entries per metric may exist, but consumer code takes the latest. This is tracked to preserve historical performance data across the project.
+  - `devtools.db` (SQLite, git-ignored): local database for other transient data.
 
 ## Extending Statistics
 

@@ -55,42 +55,18 @@ export class StatsStore {
     }
   }
 
-  /** One entry per metric per day; with `keyExampleId`, per metric per day
-   * PER EXAMPLE (metadata.exampleId), so per-app metrics don't overwrite each
-   * other. */
-  record(metricName: string, metricValue: number, metadata: MetricMetadata = {}, keyExampleId?: string) {
-    const now = new Date();
-    const todayStr = now.toISOString().split("T")[0]; // YYYY-MM-DD
-
-    const entries = this.readAll();
-    
-    // Find if we already have an entry for this metric today
-    // We look for the last one that matches the name and date
-    let index = -1;
-    for (let i = entries.length - 1; i >= 0; i--) {
-      const entry = entries[i];
-      if (entry.metric_name === metricName && entry.timestamp.startsWith(todayStr)) {
-        if (keyExampleId !== undefined && entry.metadata?.exampleId !== keyExampleId) continue;
-        index = i;
-        break;
-      }
-    }
-
+  /** Append-only metrics file. Multiple entries per metric per day are possible
+   * (one per call), but consumer code takes the latest entry per metric. This
+   * design keeps the file append-only and avoids constant git status changes
+   * from read-modify-write cycles. */
+  record(metricName: string, metricValue: number, metadata: MetricMetadata = {}) {
     const newEntry: RuntimeMetricEntry = {
-      timestamp: now.toISOString(),
+      timestamp: new Date().toISOString(),
       metric_name: metricName,
       metric_value: metricValue,
       metadata
     };
-
-    if (index !== -1) {
-      // Update existing entry for today
-      entries[index] = newEntry;
-      this.writeAll(entries);
-    } else {
-      // Append new entry
-      appendFileSync(this.metricsPath, JSON.stringify(newEntry) + "\n");
-    }
+    appendFileSync(this.metricsPath, JSON.stringify(newEntry) + "\n");
   }
 
   recordTestRun(data: TestRunStats) {
@@ -121,8 +97,7 @@ export class StatsStore {
 
   /** Per-example build timing from the compiler's @@RAE_BUILD_TIME@@ line: the
    * full build (emit + cc) and the size-normalised ms per 1,000 processed
-   * lines, one entry per example per day (the daily dedupe is keyed on the
-   * example, not just the metric name, so a Run-all batch keeps every app). */
+   * lines. One entry is appended per example per build. */
   recordExampleBuild(data: ExampleBuildStats) {
     const metadata = {
       runId: data.runId,
@@ -136,8 +111,8 @@ export class StatsStore {
       projectLines: data.projectLines,
       modules: data.modules
     };
-    this.record("examples.build_ms", data.totalMs, metadata, data.exampleId);
-    this.record("examples.build_ms_per_kloc", data.msPerKloc, metadata, data.exampleId);
+    this.record("examples.build_ms", data.totalMs, metadata);
+    this.record("examples.build_ms_per_kloc", data.msPerKloc, metadata);
   }
 
   /** The latest recorded value of `metricName` for every example, keyed by
@@ -173,13 +148,8 @@ export class StatsStore {
         .split("\n")
         .filter(line => line.trim().length > 0)
         .map(line => JSON.parse(line));
-    } catch (e) {
+    } catch {
       return [];
     }
-  }
-
-  private writeAll(entries: RuntimeMetricEntry[]) {
-    const content = entries.map(e => JSON.stringify(e)).join("\n") + "\n";
-    writeFileSync(this.metricsPath, content);
   }
 }
