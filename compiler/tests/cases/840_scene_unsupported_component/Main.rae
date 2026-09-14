@@ -8,11 +8,15 @@ open ui/SceneLoader
 open ecs/Entity
 open ecs/ComponentTable
 
-# A well-formed scene whose one node carries `WobbleFx` — a component that IS in
-# the registry vocabulary (registeredComponentNames) but has no deserialiser arm
-# yet. Before #941 the loader swallowed it silently; now it must fail loudly,
-# naming the scene, node and component. `\{`/`\}` keep the JSON braces literal
-# (a bare `{` starts Rae string interpolation).
+# A well-formed scene whose one node carries `ComputedRect` — a UiWorld table
+# that IS a component, but a DERIVED one the layout system writes; it is never
+# authored, so the reflected registry (#961) excludes it. Before #941 the loader
+# swallowed unknown keys silently; now it must fail loudly, naming the scene,
+# node and component, and say WHY this one cannot be authored. (Before #961 this
+# fixture used `WobbleFx`, "registered but not supported" — every declared
+# component decodes structurally now, so that class no longer exists.)
+# `\{`/`\}` keep the JSON braces literal (a bare `{` starts Rae string
+# interpolation).
 func fxScene() ret String {
   var s: String = ""
   s = s.concat(other: "\{")
@@ -22,7 +26,7 @@ func fxScene() ret String {
   s = s.concat(other: "\"root\":\"Root\",")
   s = s.concat(other: "\"nodes\":\{")
   s = s.concat(other: "\"Root\":\{")
-  s = s.concat(other: "\"WobbleFx\":\{\"amp\":3\}")
+  s = s.concat(other: "\"ComputedRect\":\{\"x\":3\}")
   s = s.concat(other: "\}")
   s = s.concat(other: "\}")
   s = s.concat(other: "\}")

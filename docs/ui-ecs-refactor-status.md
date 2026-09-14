@@ -57,7 +57,12 @@ Ordered by leverage.
    format this must be a diagnostic (`scene X node Y: component Z is not
    supported / not registered`), and the arm-per-component boilerplate is the
    remaining wishlist item — `typeName` landed for exactly this and has 0
-   uses.
+   uses. **LANDED (#941 diagnostic; #959–#961 synthesis):** the registry is
+   one reflected loop over `fields(mod world)` — `T.default()` (declared
+   field defaults) + a `mod any` field loop of the generic `decodeField`
+   (`typeName`-decided arms, `enumFromName` for enums) — with a short fixup
+   block for the non-structural authored shapes; `RegistryDeser.rae` (906
+   lines) is deleted and every declared component decodes structurally.
 4. **Events.** `EventQueue(T)` exists; the UI input path hand-rolls an
    `ActionEvent` list (`appendActionEvent`/`clearActionEvents`). Migrate to
    `EventQueue(UiAction)` drained by systems in schedule order.

@@ -27,8 +27,8 @@ enum SizeMode { fixed, hug, fill }
 # clamp" since Rae lacks an inline `opt Int` literal.
 type SizeAxis {
   mode: SizeMode
-  min: Int
-  max: Int
+  min: Int = -1
+  max: Int = -1
 }
 
 enum LayoutType {
@@ -113,7 +113,7 @@ type RgbaColor {
 # Authored absolute placement. #724: geometry is carried as two Vec2 (top-left
 # `position` and `size` extent) instead of loose x/y/w/h floats, so the same
 # vector helpers apply to a rect's corner and its extent. The .raescene wire
-# format stays flat {x,y,w,h} — deserRect bridges it to these fields.
+# format stays flat {x,y,w,h} — the registry fixup bridges it to these fields (#961).
 type Rect {
   position: Vec2
   size: Vec2
@@ -143,8 +143,8 @@ type Margin {
 }
 
 type SafeArea {
-  enabled: Bool
-  apply: Insets
+  enabled: Bool = true
+  apply: Insets = Insets { l: 1.0, t: 1.0, r: 1.0, b: 1.0 }
   extra: Insets
 }
 
@@ -157,7 +157,7 @@ enum FitMode { contain, cover }
 # `h = w / ratio` (ratio = w/h). Applied by fitSystem AFTER layout,
 # so siblings do not reflow around the corrected height.
 type Aspect {
-  ratio: Float
+  ratio: Float = 1.0
 }
 
 # Uniform-scale a fixed-design subtree to fit its parent's box,
@@ -214,7 +214,7 @@ type TransformFx {
 
 type Sprite {
   textureKey: String
-  tint: RgbaColor
+  tint: RgbaColor = RgbaColor { r: 255, g: 255, b: 255, a: 255 }
   # Palette slot the tint came from (#235). Non-empty => the renderer
   # resolves `tint` from the ACTIVE theme at paint time, so a
   # dark/light toggle is a repaint, not a scene re-parse. Empty => the
@@ -222,7 +222,7 @@ type Sprite {
   # first-frame value / literal fallback.
   tintSlot: String
   scaleMode: ScaleMode
-  tileScale: Vec2
+  tileScale: Vec2 = Vec2 { x: 1.0, y: 1.0 }
   nineSlice: Insets
   hasNineSlice: Bool
 }
@@ -236,7 +236,7 @@ type Text {
 type TextShadow {
   color: RgbaColor
   offset: Vec2
-  softness: Float
+  softness: Float = 1.0
 }
 
 # Tier-2 override in the theme friction ladder (docs/ui-theme-system.md
@@ -276,7 +276,7 @@ type Shadow {
 }
 
 type Opacity {
-  value: Float
+  value: Float = 1.0
 }
 
 type PointerEvents {
@@ -294,7 +294,7 @@ type OnClick {
   actionId: String
   actionIdDouble: String
   actionIdTriple: String
-  maxDelayMs: Int
+  maxDelayMs: Int = 250
 }
 
 type Button {
@@ -302,7 +302,7 @@ type Button {
 }
 
 type Active {
-  value: Bool
+  value: Bool = true
 }
 
 type EditorVisible {
@@ -357,7 +357,7 @@ type HoverScale {
 type GradientFill {
   from: RgbaColor
   to: RgbaColor
-  angle: Float
+  angle: Float = 90.0
 }
 
 # Texture painted at the entity's full bounds BEFORE its children
@@ -371,9 +371,9 @@ type BackdropImage {
 }
 
 type OpticalAlign {
-  enabled: Bool
-  centerX: Bool
-  centerY: Bool
+  enabled: Bool = true
+  centerX: Bool = true
+  centerY: Bool = true
   bias: Vec2
 }
 
@@ -428,7 +428,7 @@ type LayerRef {
 # field is just a presence-tag (Rae has no zero-field structs); it's
 # not read.
 type DebugAnchor {
-  value: Bool
+  value: Bool = true
 }
 
 # Marks an entity as the root of a page subtree. The `id` is the
@@ -495,7 +495,7 @@ type WidgetId {
 }
 
 type WidgetState {
-  enabled: Bool
+  enabled: Bool = true
   selected: Bool
   loading: Bool
   error: Bool
@@ -540,7 +540,7 @@ type RefreshRegion {
   regionKey: String
   resource: DataResourceId
   observedRevision: Int
-  dirty: Bool
+  dirty: Bool = true
 }
 
 # Declarative state -> visual mapping. Carries the visual variants a

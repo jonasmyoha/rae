@@ -677,11 +677,31 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
             Str type_name = expr->as.method_call.object->as.ident;
             AstTypeRef tmp = {0}; AstIdentifierPart part = {0}; part.text = type_name; tmp.parts = &part;
             const AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, &tmp);
-            // Through the C type printer so builtins (Int, String, List(T))
-            // spell correctly as well as user structs.
-            fprintf(out, "((");
-            emit_type_ref_as_c_type(ctx, sub ? sub : &tmp, out, false);
-            fprintf(out, "){0})");
+            const AstTypeRef* eff = sub ? sub : &tmp;
+            // #961: a non-generic user struct has a generated default that
+            // honours declared field defaults; everything else is the zero
+            // value, through the C type printer so builtins (Int, String,
+            // List(T)) spell correctly.
+            Str effbase = get_base_type_name(eff);
+            bool user_struct = false;
+            if (!eff->generic_args && !eff->is_opt) {
+                const AstDecl* td = NULL;
+                for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count; i++) {
+                    const AstDecl* dd = ctx->compiler_ctx->all_decls[i];
+                    if (dd->kind == AST_DECL_TYPE && !dd->as.type_decl.generic_params
+                        && !dd->as.type_decl.specialization_args
+                        && !has_property(dd->as.type_decl.properties, "c_struct")
+                        && str_eq(dd->as.type_decl.name, effbase)) { td = dd; break; }
+                }
+                user_struct = td != NULL && !find_enum_decl(ctx, ctx->module, effbase);
+            }
+            if (user_struct) {
+                fprintf(out, "rae_default_%s_()", rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, (AstTypeRef*)eff));
+            } else {
+                fprintf(out, "((");
+                emit_type_ref_as_c_type(ctx, eff, out, false);
+                fprintf(out, "){0})");
+            }
             break;
         }
         // Built-in static method: Type.fromJson(json: str) → rae_fromJson_TYPE_(str)
