@@ -1,28 +1,27 @@
-open sys/Spotify
 open ui/Ecs
-# Profile-tab world composition. The user-account screen:
+# Profile-tab world composition — the user-account screen:
 #   * top bar "Profile"
-#   * circular avatar
-#   * display name + bio
-#   * Spotify-connection card — live status of the remote player
-#     ("Playing 'Track' by 'Artist'", "Paused", or "Not connected")
-#   * three small stat columns (library counts, total tracks, etc.)
-#   * settings list — placeholder rows with chevrons
+#   * circular avatar, centred, with the handle and a one-line bio under it
+#   * three equal stat columns (live library counts — no fake followers)
+#   * four settings rows: icon, label, chevron — as cards on the page
+#     background so the column reads as one list
 #
-# This used to be the same screen as Library (one big "profile +
-# albums" pile). The catalogue is its own Library tab now; this
-# screen is purely about the user and their connection to Spotify.
+# Everything is centred on the page's vertical axis and every text node is
+# sized to its style's line height (a 43 du body line needs ~56 du; the old
+# 18/28 du rects were pre-rescale numbers and the labels painted over the
+# values). The Spotify-status card that used to sit between the bio and the
+# stats is gone: the dock's mini-player already shows what is playing.
 #
-# Like the Library page, the body owns a `ScrollState` so the
-# settings list can scroll if it overflows.
+# Like the Library page, the body owns a `ScrollState` so the settings list
+# can scroll if it overflows.
 import Files
 import ui/Components
 import ui/layoutSystem/LayoutSystem
 open ecs/ComponentTable
 open ui/renderSystem/RenderSystem
 
-# Local circle shape helper — world_helpers.rae only exposes rect /
-# rounded-rect variants; the avatar needs a true `ShapeKind.circle`.
+# Local shape helpers — world_helpers.rae only exposes plain rect / rounded
+# variants without a stroke; the avatar fallback needs a true circle.
 func setProfileCircleShape(world: mod UiWorld, entity: view EntityId, fill: view RgbaColor) {
   let sh: Shape = {
     kind: ShapeKind.circle
@@ -34,9 +33,37 @@ func setProfileCircleShape(world: mod UiWorld, entity: view EntityId, fill: view
   componentSet(this: world.shapes, entity: entity, data: sh)
 }
 
+func setProfileCardShape(world: mod UiWorld, entity: view EntityId, fill: view RgbaColor) {
+  let sh: Shape = {
+    kind: ShapeKind.roundedRect
+    fill: fill
+    stroke: RgbaColor { r: 0, g: 0, b: 0, a: 0 }
+    strokeWidth: 0.0
+    radius: profileCardRadius
+  }
+  componentSet(this: world.shapes, entity: entity, data: sh)
+}
+
 const profileAvatarSize: Float = 260.2409638554217
 
 const profileAvatarIconSize: Float = 173.49397590361446
+
+# Line heights per text style (font size × ~1.3, so descenders never clip).
+const profileHandleLineH: Float = 56.38554216867469
+
+const profileBioLineH: Float = 47.71084337349397
+
+const profileStatValueLineH: Float = 78.0722891566265
+
+const profileStatLabelLineH: Float = 47.71084337349397
+
+const profileSettingsRowH: Float = 121.44578313253011
+
+const profileSettingsIconSize: Float = 60.722891566265055
+
+const profileSettingsPad: Float = 26.024096385542165
+
+const profileCardRadius: Float = 26.024096385542165
 
 func profileAvatarLoaded(reg: view TextureRegistry, key: view String) ret Bool {
   ret textureHas(reg: reg, key: key)
@@ -100,15 +127,40 @@ func buildProfileAvatar(world: mod UiWorld, reg: view TextureRegistry) ret Entit
   ret avatar
 }
 
-# Stat column: big number on top, small label below.
+# A full-width, centred text line sized to its style's line height.
+func buildProfileTextLine(
+  world: mod UiWorld
+  text: view String
+  styleId: view String
+  w: view Float
+  h: view Float
+) ret EntityId {
+  let line: EntityId = createEntity(world: world)
+  setRectFixed(
+    world: world
+    entity: line
+    w: w
+    h: h
+  )
+  setText(
+    world: world
+    entity: line
+    text: text
+    styleId: styleId
+  )
+  ret line
+}
+
+# Stat column: big number on top, small label below, both centred.
 func buildProfileStatColumn(
   world: mod UiWorld
   value: view String
   label: view String
+  colW: view Float
 ) ret EntityId {
   let col: EntityId = createEntity(world: world)
-  let colW: Float = 238.55421686746988
-  let colH: Float = 121.44578313253011
+  let gap: Float = 4.337349397590361
+  let colH: Float = profileStatValueLineH + gap + profileStatLabelLineH
   setRectFixed(
     world: world
     entity: col
@@ -121,38 +173,23 @@ func buildProfileStatColumn(
     world: world
     entity: col
     kind: layV
-    gap: 2.0
+    gap: gap
     alignCross: alignC
   )
 
-  let valueText: EntityId = createEntity(world: world)
-  setRectFixed(
+  let valueText: EntityId = buildProfileTextLine(
     world: world
-    entity: valueText
-    w: colW
-    h: 28.0
-  )
-  let valueStyle: String = "topBarTitle"
-  setText(
-    world: world
-    entity: valueText
     text: value
-    styleId: valueStyle
-  )
-
-  let labelText: EntityId = createEntity(world: world)
-  setRectFixed(
-    world: world
-    entity: labelText
+    styleId: "statValue"
     w: colW
-    h: 18.0
+    h: profileStatValueLineH
   )
-  let labelStyle: String = "muted"
-  setText(
+  let labelText: EntityId = buildProfileTextLine(
     world: world
-    entity: labelText
     text: label
-    styleId: labelStyle
+    styleId: "statLabel"
+    w: colW
+    h: profileStatLabelLineH
   )
 
   let kids: List(EntityId) = List.create(EntityId, cap: 2)
@@ -162,13 +199,15 @@ func buildProfileStatColumn(
   ret col
 }
 
-# Library-stats row. Pulls live counts from the album catalogue so the
-# numbers stay honest — no fake follower counts.
+# Library-stats row: three equal columns spanning the body width. Pulls
+# live counts from the album catalogue so the numbers stay honest.
 func buildProfileStatsRow(world: mod UiWorld, state: view AppState) ret EntityId {
   unsafe {
     let row: EntityId = createEntity(world: world)
     let rowW: Float = phoneFrameW - outerPad * 2.0
-    let rowH: Float = 130.12048192771084
+    let gap: Float = outerGap
+    let colW: Float = (rowW - gap * 2.0) / 3.0
+    let rowH: Float = profileStatValueLineH + 4.337349397590361 + profileStatLabelLineH
     setRectFixed(
       world: world
       entity: row
@@ -181,10 +220,9 @@ func buildProfileStatsRow(world: mod UiWorld, state: view AppState) ret EntityId
       world: world
       entity: row
       kind: layH
-      gap: 52.04819277108433
+      gap: gap
       alignCross: alignC
     )
-    # spaceXL (full-precision literal; token is 6-dec)
 
     let albumCount: Int = state.mediaLibrary.albums.length
     var trackCount: Int = 0
@@ -200,24 +238,24 @@ func buildProfileStatsRow(world: mod UiWorld, state: view AppState) ret EntityId
     let albumsStr: String = "{albumCount}"
     let tracksStr: String = "{trackCount}"
     let hoursStr: String = "{totalHours}h"
-    let albumsLabel: String = "Albums"
-    let tracksLabel: String = "Tracks"
-    let hoursLabel: String = "Listening"
 
     let albumsCol: EntityId = buildProfileStatColumn(
       world: world
       value: albumsStr
-      label: albumsLabel
+      label: "Albums"
+      colW: colW
     )
     let tracksCol: EntityId = buildProfileStatColumn(
       world: world
       value: tracksStr
-      label: tracksLabel
+      label: "Tracks"
+      colW: colW
     )
     let hoursCol: EntityId = buildProfileStatColumn(
       world: world
       value: hoursStr
-      label: hoursLabel
+      label: "Listening"
+      colW: colW
     )
 
     let kids: List(EntityId) = List.create(EntityId, cap: 3)
@@ -229,130 +267,40 @@ func buildProfileStatsRow(world: mod UiWorld, state: view AppState) ret EntityId
   }
 }
 
-# "Connected to Spotify" card. Shows live status from the C bridge so
-# the user can confirm at a glance whether playback is routed to a
-# real Spotify desktop session. Reads `RAE_UI_NO_SPOTIFY` directly
-# rather than threading the flag through every builder.
-func buildSpotifyStatusCard(world: mod UiWorld) ret EntityId {
-  let optOut: String = getEnv(name: "RAE_UI_NO_SPOTIFY")
-  let spotifyEnabled: Bool = optOut.length() is 0
-  let card: EntityId = createEntity(world: world)
-  let cardW: Float = phoneFrameW - outerPad * 2.0
-  let cardH: Float = 182.16867469879517
-  setRectFixed(
-    world: world
-    entity: card
-    w: cardW
-    h: cardH
-  )
-  let bg: RgbaColor = { r: 30, g: 200, b: 130, a: 255 }
-  setShapeRect(world: world, entity: card, fill: bg)
-  let layV: LayoutType = LayoutType.vertical
-  let alignS: AlignKind = AlignKind.start
-  setLayout(
-    world: world
-    entity: card
-    kind: layV
-    gap: 8.674698795180722
-    alignCross: alignS
-  )
-  # spaceXS (full-precision literal; token is 6-dec)
-  # 14 sits between spaceM (12) and spaceL (16) — deliberate non-token
-  # to fit the card chrome's exact 84-px height. Don't widen the scale
-  # for one site.
-  setPaddingAll(world: world, entity: card, n: 30.361445783132528)
-
-  let title: EntityId = createEntity(world: world)
-  setRectFixed(
-    world: world
-    entity: title
-    w: cardW - 28.0
-    h: 24.0
-  )
-  let titleStyle: String = "topBarTitle"
-  let titleText: String = "Spotify"
-  setText(
-    world: world
-    entity: title
-    text: titleText
-    styleId: titleStyle
-  )
-
-  let line: EntityId = createEntity(world: world)
-  setRectFixed(
-    world: world
-    entity: line
-    w: cardW - 28.0
-    h: 22.0
-  )
-  let bodyStyle: String = "trackArtist"
-  var line1: String = ""
-  if spotifyEnabled is false {
-    line1 = "Disabled (RAE_UI_NO_SPOTIFY=1)"
-  } else {
-    # Read the background poller's warm cache (#279) — no UI-thread osascript.
-    let st: String = Spotify.state()
-    let playingKey: String = "playing"
-    let pausedKey: String = "paused"
-    if st is playingKey {
-      let trk: String = Spotify.trackName()
-      let art: String = Spotify.artistName()
-      line1 = "Playing '{trk}' — {art}"
-    } else {
-      if st is pausedKey {
-        line1 = "Paused"
-      } else {
-        line1 = "Not running"
-      }
-    }
-  }
-  setText(
-    world: world
-    entity: line
-    text: line1
-    styleId: bodyStyle
-  )
-
-  let kids: List(EntityId) = List.create(EntityId, cap: 2)
-  kids.add(value: title)
-  kids.add(value: line)
-  attachChildren(world: world, parent: card, kids: kids)
-  ret card
-}
-
-# One settings row — icon on the left, label center, chevron right.
-# Inert for now (no actionId) — placeholder rows that visually
-# complete the screen without pretending to work.
+# One settings row — a surface card with the icon on the left, the label
+# filling the middle and a chevron the same size as the icon flush right.
+# Inert for now (no actionId) — placeholder rows that visually complete the
+# screen without pretending to work.
 func buildSettingsRow(world: mod UiWorld, iconKey: view String, label: view String) ret EntityId {
   let row: EntityId = createEntity(world: world)
   let rowW: Float = phoneFrameW - outerPad * 2.0
-  let rowH: Float = 121.44578313253011
   setRectFixed(
     world: world
     entity: row
     w: rowW
-    h: rowH
+    h: profileSettingsRowH
   )
+  # A translucent raise rather than the palette's `surface`: in the dark
+  # theme surface equals the page background and the card vanished.
+  let raise: RgbaColor = { r: 255, g: 255, b: 255, a: 14 }
+  setProfileCardShape(world: world, entity: row, fill: raise)
   let layH: LayoutType = LayoutType.horizontal
   let alignC: AlignKind = AlignKind.center
-  # Settings-row icon→label spacing stays at 14 (between spaceM and L)
-  # to match the hand-tuned 28-px icon size; don't widen the scale.
   setLayout(
     world: world
     entity: row
     kind: layH
-    gap: 14.0
+    gap: profileSettingsPad
     alignCross: alignC
   )
-  setPaddingAll(world: world, entity: row, n: 17.349397590361445)
+  setPaddingAll(world: world, entity: row, n: profileSettingsPad)
 
-  let iconSize: Float = 60.722891566265055
   let icon: EntityId = createEntity(world: world)
   setRectFixed(
     world: world
     entity: icon
-    w: iconSize
-    h: iconSize
+    w: profileSettingsIconSize
+    h: profileSettingsIconSize
   )
   setSprite(
     world: world
@@ -361,36 +309,30 @@ func buildSettingsRow(world: mod UiWorld, iconKey: view String, label: view Stri
     tint: paletteIconTint(theme: world.theme.active)
   )
 
-  let labelW: Float = rowW - iconSize - 14.0 - 24.0 - 14.0 - 16.0
-  let labelEnt: EntityId = createEntity(world: world)
-  setRectFixed(
+  # Label takes exactly what is left between the icon and the chevron, so
+  # the chevron lands on the right padding edge of every row.
+  let labelW: Float = rowW - profileSettingsPad * 2.0 - profileSettingsIconSize * 2.0 - profileSettingsPad * 2.0
+  let labelEnt: EntityId = buildProfileTextLine(
     world: world
-    entity: labelEnt
-    w: labelW
-    h: 24.0
-  )
-  let labelStyle: String = "trackTitle"
-  setText(
-    world: world
-    entity: labelEnt
     text: label
-    styleId: labelStyle
+    styleId: "trackTitle"
+    w: labelW
+    h: profileHandleLineH
   )
 
   let chev: EntityId = createEntity(world: world)
   setRectFixed(
     world: world
     entity: chev
-    w: 24.0
-    h: 24.0
+    w: profileSettingsIconSize
+    h: profileSettingsIconSize
   )
   let chevKey: String = "mat:chevron_right"
-  let chevTint: RgbaColor = paletteHero(theme: world.theme.active)
   setSprite(
     world: world
     entity: chev
     key: chevKey
-    tint: chevTint
+    tint: paletteHero(theme: world.theme.active)
   )
 
   let kids: List(EntityId) = List.create(EntityId, cap: 3)
@@ -404,10 +346,9 @@ func buildSettingsRow(world: mod UiWorld, iconKey: view String, label: view Stri
 func buildSettingsList(world: mod UiWorld) ret EntityId {
   let list: EntityId = createEntity(world: world)
   let listW: Float = phoneFrameW - outerPad * 2.0
-  let rowH: Float = 121.44578313253011
-  let gap: Float = 8.674698795180722
+  let gap: Float = 17.349397590361445
   let rowCount: Int = 4
-  let listH: Float = rowH * rowCount.toFloat() + gap * (rowCount - 1).toFloat()
+  let listH: Float = profileSettingsRowH * rowCount.toFloat() + gap * (rowCount - 1).toFloat()
   setRectFixed(
     world: world
     entity: list
@@ -470,47 +411,47 @@ func buildProfileBody(
 
   let avatar: EntityId = buildProfileAvatar(world: world, reg: reg)
 
-  let handle: EntityId = createEntity(world: world)
+  # Handle + bio as one tight block under the avatar.
+  let identity: EntityId = createEntity(world: world)
+  let identityGap: Float = 4.337349397590361
   setRectFixed(
     world: world
-    entity: handle
+    entity: identity
     w: bodyW
-    h: 28.0
+    h: profileHandleLineH + identityGap + profileBioLineH
   )
-  let handleStyle: String = "topBarTitle"
-  let handleText: String = "@violet.tapes"
-  setText(
+  setLayout(
     world: world
-    entity: handle
-    text: handleText
-    styleId: handleStyle
+    entity: identity
+    kind: layV
+    gap: identityGap
+    alignCross: alignC
   )
-
-  let bio: EntityId = createEntity(world: world)
-  setRectFixed(
+  let handle: EntityId = buildProfileTextLine(
     world: world
-    entity: bio
+    text: "@violet.tapes"
+    styleId: "profileHandle"
     w: bodyW
-    h: 18.0
+    h: profileHandleLineH
   )
-  let bioStyle: String = "muted"
-  let bioText: String = "indie pop · dream-punk · playlist lover"
-  setText(
+  let bio: EntityId = buildProfileTextLine(
     world: world
-    entity: bio
-    text: bioText
-    styleId: bioStyle
+    text: "indie pop / dream-punk / playlist lover"
+    styleId: "profileBio"
+    w: bodyW
+    h: profileBioLineH
   )
+  let identityKids: List(EntityId) = List.create(EntityId, cap: 2)
+  identityKids.add(value: handle)
+  identityKids.add(value: bio)
+  attachChildren(world: world, parent: identity, kids: identityKids)
 
-  let card: EntityId = buildSpotifyStatusCard(world: world)
   let stats: EntityId = buildProfileStatsRow(world: world, state: state)
   let settings: EntityId = buildSettingsList(world: world)
 
-  let kids: List(EntityId) = List.create(EntityId, cap: 6)
+  let kids: List(EntityId) = List.create(EntityId, cap: 4)
   kids.add(value: avatar)
-  kids.add(value: handle)
-  kids.add(value: bio)
-  kids.add(value: card)
+  kids.add(value: identity)
   kids.add(value: stats)
   kids.add(value: settings)
   attachChildren(world: world, parent: body, kids: kids)
