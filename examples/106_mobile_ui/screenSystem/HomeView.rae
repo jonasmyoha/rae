@@ -194,7 +194,7 @@ func mountHomePage(
   # Runtime scroll state on the Body container (not authorable —
   # scroll position survives rebuilds via the scrollY argument).
   if let bodyRaw: Int = findNodeInPage(world: world, pageId: homePageId, nodeId: "Body") {
-    let body: EntityId = id(v: bodyRaw)
+    let body: EntityId = nodeEntity(world: world, index: bodyRaw)
     let off: Offset = { delta: Vec2 { x: 0.0, y: scrollY } }
     componentSet(this: world.offsets, entity: body, data: off)
     let scroll: ScrollState = { y: scrollY, velocity: 0.0 }
@@ -210,7 +210,7 @@ func mountHomePage(
     pageId: homePageId
     nodeId: "RecentlyPlayedHeader"
   ) {
-    let header: EntityId = id(v: headerRaw)
+    let header: EntityId = nodeEntity(world: world, index: headerRaw)
     let headerActive: Active = { value: hasRecent }
     componentSet(this: world.actives, entity: header, data: headerActive)
   }
@@ -219,7 +219,7 @@ func mountHomePage(
     pageId: homePageId
     nodeId: "RecentlyPlayedStrip"
   ) {
-    let strip: EntityId = id(v: stripRaw)
+    let strip: EntityId = nodeEntity(world: world, index: stripRaw)
     let stripActive: Active = { value: hasRecent }
     componentSet(this: world.actives, entity: strip, data: stripActive)
     if hasRecent {
@@ -233,7 +233,7 @@ func mountHomePage(
   }
 
   if let gridRaw: Int = findNodeInPage(world: world, pageId: homePageId, nodeId: "CoverGrid") {
-    let grid: EntityId = id(v: gridRaw)
+    let grid: EntityId = nodeEntity(world: world, index: gridRaw)
     fillHomeCoverGrid(
       world: world
       grid: grid

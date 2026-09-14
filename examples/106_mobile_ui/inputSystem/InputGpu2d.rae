@@ -24,6 +24,11 @@ type InputSystem {
   pointer: PointerState
   pressedEntity: EntityId
   uiActions: EventQueue(UiAction)
+  # `RAE_UI_SCREEN_SEQ` scripted taps (#972): the remaining screen names,
+  # the frame counter, and the frames between two scripted taps.
+  scriptedScreens: List(String)
+  scriptedFrame: Int
+  scriptedEvery: Int
 }
 
 func createInputSystem() ret InputSystem {
@@ -37,7 +42,40 @@ func createInputSystem() ret InputSystem {
     }
     pressedEntity: noEntity()
     uiActions: createEventQueue(UiAction)
+    scriptedScreens: scriptedScreenSequence()
+    scriptedFrame: 0
+    scriptedEvery: 20
   }
+}
+
+# `RAE_UI_SCREEN_SEQ="library,home,search"` (#972): a headless way to press
+# the menubar buttons. Every `scriptedEvery` frames the next name is sent as
+# the same `nav.<name>` UiAction a real tab tap produces, so a scripted run
+# exercises the real screen-switch path (nav-bar re-mount, dock re-attach,
+# safe-area re-seed) and a `RAE_GPU2D_SCREENSHOT` at exit shows the result.
+func scriptedScreenSequence() ret List(String) {
+  let seqEnv: String = getEnv(name: "RAE_UI_SCREEN_SEQ")
+  if seqEnv.length() is 0 {
+    ret List.create(String, cap: 0)
+  }
+  ret seqEnv.split(sep: ",")
+}
+
+func sendScriptedTap(input: mod InputSystem) {
+  if input.scriptedScreens.length is 0 {
+    ret
+  }
+  input.scriptedFrame = input.scriptedFrame + 1
+  if input.scriptedFrame % input.scriptedEvery is not 0 {
+    ret
+  }
+  var name: String = ""
+  if let head: String = input.scriptedScreens.copyAt(index: 0) {
+    name = own head
+  }
+  input.scriptedScreens.removeAt(index: 0)
+  log("[screen-seq] tap nav.{name}")
+  eventSend(this: input.uiActions, value: UiAction { entity: noEntity(), actionId: "nav.{name}" })
 }
 
 func pointInEntity(
@@ -140,6 +178,7 @@ func updateInputSystem(input: mod InputSystem, world: view UiWorld, viewport: vi
   # Recycle last frame's action channel (double-buffered), replacing the old
   # clearActionEvents: this frame's clicks produce into a clean queue.
   frameAdvance(this: input.uiActions)
+  sendScriptedTap(input: input)
 
   let mx: Float = viewportPointerX(viewport: viewport)
   let my: Float = viewportPointerY(viewport: viewport)

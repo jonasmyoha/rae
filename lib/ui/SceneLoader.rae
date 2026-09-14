@@ -323,7 +323,7 @@ func dumpScene(world: view UiWorld, scene: view Scene) {
     # Resolve via the world's nodeIds map (more authoritative than our
     # local list — covers later runtime additions too).
     if let entityRaw: Int = world.nodeIds.get(k: node.nodeId) {
-      let entity: EntityId = id(v: entityRaw)
+      let entity: EntityId = nodeEntity(world: world, index: entityRaw)
       var parentStr: String = "(root)"
       if componentHas(this: world.parents, entity: entity) {
         let pl: Parent = componentGet(this: world.parents, entity: entity)

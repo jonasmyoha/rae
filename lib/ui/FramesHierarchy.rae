@@ -190,7 +190,7 @@ func deriveActiveHierarchy(
         detachRaw = value
       }
       if detachRaw >= 0 {
-        let detachEntity: EntityId = id(v: detachRaw)
+        let detachEntity: EntityId = nodeEntity(world: world, index: detachRaw)
         if componentHas(this: world.parents, entity: detachEntity) {
           setParent(
             parents: world.parents
@@ -211,7 +211,7 @@ func deriveActiveHierarchy(
       parentRaw = value
     }
     if parentRaw >= 0 {
-      let parentEntity: EntityId = id(v: parentRaw)
+      let parentEntity: EntityId = nodeEntity(world: world, index: parentRaw)
       # Gather b's mounted children, selection-sorted by sort key.
       let unsorted: List(Int) = List.create(Int, cap: 8)
       var c: Int = 0
@@ -266,7 +266,7 @@ func deriveActiveHierarchy(
           if let value: Int = entityVals.copyAt(index: childNodeIdx) {
             childEntityRaw = value
           }
-          let childEntity: EntityId = id(v: childEntityRaw)
+          let childEntity: EntityId = nodeEntity(world: world, index: childEntityRaw)
           # #726: link via setParent. The children are visited in sort-key order,
           # so setParent's append rebuilds the derived Children cache in exactly
           # that order — matching the old hand-built, hand-sorted list.
