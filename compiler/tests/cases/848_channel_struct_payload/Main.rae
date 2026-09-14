@@ -1,0 +1,123 @@
+# Struct payloads on Channel(T) (#969). Before this, only Channel(Int) was
+# instantiable (the runtime ring stored int64), which forced app code to
+# encode a two-field result as `serial * 2 + okBit`. Now the ring stores
+# `sizeof(T)`-sized slots and the Rae side moves a T in on send and out on
+# receive, so a struct owning a String travels between threads as itself.
+#
+# Two spawn'd producers each send their batch of messages (a serial, a
+# flag, and a String naming the producer); the main thread drains once both
+# have joined and checks per-producer FIFO order plus every String's
+# content. Then a leak round: a channel is freed with messages still
+# buffered (freeChannel drains and drops them), and a plain-Int channel is
+# exercised alongside; the mem-stats outstanding count must not grow.
+# Runs under RAE_MEM_STATS=1 (see the runner's mem-stats case list).
+open Channel
+
+func rae_ext_rae_mem_stats_outstanding() unsafe extern ret Int
+
+type Report {
+  serial: Int
+  ok: Bool
+  label: String
+}
+
+func producer(name: own String, count: copy Int, results: own Channel(Report)) ret Int {
+  var i: Int = 0
+  loop i < count {
+    let label: String = "{name}-{i}"
+    channelSend(this: results, value: Report { serial: i, ok: i % 2 is 0, label: label })
+    i = i + 1
+  }
+  ret count
+}
+
+# Drain everything buffered; returns the number of messages whose serial
+# continued its producer's sequence (order within a producer is FIFO even
+# though the two producers interleave).
+func drainInOrder(results: view Channel(Report), count: copy Int) ret Int {
+  var nextA: Int = 0
+  var nextB: Int = 0
+  var ordered: Int = 0
+  var labelsOk: Int = 0
+  loop pending(this: results) > 0 {
+    let message: Report = receive(this: results)
+    let expectedA: String = "alpha-{message.serial}"
+    let expectedB: String = "beta-{message.serial}"
+    if message.label is expectedA {
+      labelsOk = labelsOk + 1
+      if message.serial is nextA {
+        ordered = ordered + 1
+      }
+      nextA = message.serial + 1
+    }
+    if message.label is expectedB {
+      labelsOk = labelsOk + 1
+      if message.serial is nextB {
+        ordered = ordered + 1
+      }
+      nextB = message.serial + 1
+    }
+    if message.ok is not (message.serial % 2 is 0) {
+      ordered = 0 - 1000
+    }
+  }
+  if labelsOk is not count * 2 {
+    ret 0 - 1
+  }
+  ret ordered
+}
+
+func round(count: copy Int) ret Int {
+  let results: Channel(Report) = createChannel(Report)
+  let alpha: Task(Int) = spawn producer(name: "alpha", count: count, results: results)
+  let beta: Task(Int) = spawn producer(name: "beta", count: count, results: results)
+  let sentA: Int = alpha.get()
+  let sentB: Int = beta.get()
+  let ordered: Int = drainInOrder(results: results, count: count)
+  freeChannel(this: results)
+  ret ordered + sentA + sentB
+}
+
+# Free with messages still buffered: freeChannel must drop them.
+func leftoverRound(count: copy Int) ret Int {
+  let results: Channel(Report) = createChannel(Report)
+  let alpha: Task(Int) = spawn producer(name: "alpha", count: count, results: results)
+  let sentA: Int = alpha.get()
+  let ints: Channel(Int) = createChannel(Int)
+  var i: Int = 0
+  loop i < count {
+    channelSend(this: ints, value: i * 3)
+    i = i + 1
+  }
+  var sum: Int = 0
+  loop pending(this: ints) > 0 {
+    sum = sum + receive(this: ints)
+  }
+  freeChannel(this: ints)
+  freeChannel(this: results)
+  ret sentA + sum
+}
+
+func main() {
+  unsafe {
+    let count: Int = 200
+    let first: Int = round(count: count)
+    log("ordered+sent: {first} (expect {count * 4})")
+    let warm: Int = leftoverRound(count: 20)
+    let baseline: Int = rae_ext_rae_mem_stats_outstanding()
+    var r: Int = 0
+    var total: Int = 0
+    loop r < 20 {
+      total = total + round(count: 50) + leftoverRound(count: 50)
+      r = r + 1
+    }
+    let final: Int = rae_ext_rae_mem_stats_outstanding()
+    let leaked: Int = final - baseline
+    log("rounds: {r} total>0: {total > 0} warm>0: {warm > 0}")
+    if leaked < 20 {
+      log("verdict: OK")
+    } else {
+      log("verdict: LEAK ({leaked} outstanding)")
+    }
+  }
+}

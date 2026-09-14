@@ -293,15 +293,22 @@ already-completed task. Verified ASan/UBSan-clean for the threaded shapes.
 The String interpolation temp pool is `__thread`, so concurrent workers do
 not corrupt each other.
 
-**`Channel(T)` (`lib/Channel.rae`, #271).** A value-type wrapper over an
-opaque runtime handle; MPSC; a fixed int64 ring guarded by a mutex hidden in
-the runtime; `createChannel(T)`, `channelSend`, `pending`, `receive`,
-`received` (monotonic drained count), `freeChannel` (owner, after the worker
-joined). Only `Channel(Int)` is instantiable — struct payloads need boxing
-(#969). No blocking receive, no select: a consumer polls `pending`, a worker
-that wants to sleep uses `sleep(ms:)`. Real use: 106's poll worker posts
-ticks, its artwork workers post `serial * 2 + okBit`, and each calls
-`ui/EventLoop.wake()` (#950) so the UI's `waitEvents` returns at once.
+**`Channel(T)` (`lib/Channel.rae`, #271, #969).** A value-type wrapper over
+an opaque runtime handle; MPSC; a fixed ring of `sizeof(T)`-sized slots
+guarded by a mutex hidden in the runtime; `createChannel(T)`, `channelSend`
+(`value: own T` — moved into the ring), `pending`, `receive` (moved out, the
+caller owns it), `received` (monotonic drained count), `freeChannel` (owner,
+after the producers joined; drains and drops anything still buffered). Any
+value type is a payload: Int, an enum, a POD struct, a struct owning
+Strings/Lists — the runtime only hands out slot indices under its lock, the
+typed store/load is the per-T `rae_ext_rae_buf_set`/`buf_get` specialisation
+List uses, so `Channel(Int)` is the same code with an 8-byte slot (fixture
+848 is the struct-with-String proof, leak-checked). No blocking receive, no
+select: a consumer polls `pending`, a worker that wants to sleep uses
+`sleep(ms:)`. Real use: 106's poll worker posts ticks on a `Channel(Int)`,
+its artwork workers post `ArtworkResult { serial, ok }` on a
+`Channel(ArtworkResult)`, and each calls `ui/EventLoop.wake()` (#950) so the
+UI's `waitEvents` returns at once.
 
 **Not implemented:** `detach` (a fire-and-forget worker; today a persistent
 worker takes a stop channel and is joined at teardown), a truly parallel
@@ -327,8 +334,8 @@ compiled engine, and where it stands:
 - `Task(T)` = heap struct with typed result slot — **done**; status
   (running/completed/failed) and a condition variable — **not yet** (join is
   `pthread_join`).
-- `Channel(T)` = mutex-guarded queue — **done** as MPSC int64; the MPMC +
-  condvar (blocking receive) form is **not yet**.
+- `Channel(T)` = mutex-guarded queue — **done** as MPSC over any value type
+  (#969); the MPMC + condvar (blocking receive) form is **not yet**.
 - Atomics via C11 `<stdatomic.h>` — **not yet**.
 - `parallelLoop` = genuine parallel execution over disjoint shards — **not
   yet** (sequential).
