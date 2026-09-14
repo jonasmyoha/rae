@@ -922,6 +922,23 @@ bool emit_implicit_drops_for_body(CFuncContext* ctx, FILE* out,
     if (!type) continue;
     if (type->is_view || type->is_mod) continue;
     if (ctx->local_moved[idx]) continue;
+    // #969: inside a monomorphized generic body an OWNING local declared as
+    // the bare parameter `T` (`let leftover: T = receive(this)`) is the
+    // concrete type of this instantiation — substitute it so the drop below
+    // sees String / a struct / a List, not the abstract `T` (which reads as
+    // "no heap" and silently leaked the value). Alias-classified locals
+    // (`let val: T = rae_ext_rae_buf_get(...)`) keep skipping as before:
+    // they borrow a container slot the container drops.
+    if (ctx->generic_params && ctx->generic_args && !type->is_opt
+        && !type->generic_args && ctx->local_struct_owns_heap[idx]) {
+      Str tb = get_base_type_name(type);
+      bool is_param = false;
+      for (const AstIdentifierPart* gp = ctx->generic_params; gp; gp = gp->next)
+        if (str_eq(gp->text, tb)) { is_param = true; break; }
+      if (is_param)
+        type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
+                                   ctx->generic_args, (AstTypeRef*)type);
+    }
     // Task(T): join-on-drop. A Task is a RaeTask* (not a cascade-drop
     // struct), so it'd be skipped below — handle it here. rae_task_drop
     // joins (no-op if already get()'d) then frees, so a worker thread

@@ -180,11 +180,10 @@ Everything the app *waits* on runs on Rae workers, not runtime threads
   into `PlaybackState` and the Now Playing texts only when a tick arrived.
   A stop channel + `task.get()` at teardown stand in for `detach`.
 - `assetSystem/ArtworkFetch.rae` — one `spawn`'d worker per album-art
-  download (`Spotify.fetchArtwork`, a blocking atomic curl), posting
-  `serial * 2 + okBit` on one channel; `artworkFetchDrain` settles results
-  once per frame and the History loader (`historySystem/HistoryIo.rae`)
-  uploads textures as they land. `Channel(T)` carries Int payloads today,
-  hence the encoding (#969 adds boxing).
+  download (`Spotify.fetchArtwork`, a blocking atomic curl), posting an
+  `ArtworkResult { serial, ok }` on one `Channel(ArtworkResult)` (#969);
+  `artworkFetchDrain` settles results once per frame and the History loader
+  (`historySystem/HistoryIo.rae`) uploads textures as they land.
 - `lib/sys/Spotify.rae` is only the C ABI: refresh, the mutex-guarded cache
   getters, the transport controls, the blocking fetch.
 

@@ -46,29 +46,51 @@ void rae_task_drop(RaeTask* t) {
   free(t);
 }
 
-/* ----- Channel(T) runtime: MPSC int64 channel (#271) ------------------ */
-/* Backs lib/channel.rae's `Channel(T)`, Rae's first message-passing
- * primitive. Multi-producer, single-consumer: any thread may _send; only
- * the owning consumer thread drains via _recv (after checking _count). A
- * pthread mutex serialises every access and is hidden entirely inside the
- * runtime — ordinary Rae code never locks. `recv_count` is the monotonic
- * read-only observable of consumer progress. Fixed ring (cap chosen large
- * enough for the proof); a send to a full ring is dropped (the proof never
- * overflows). The channel is referenced from Rae by an opaque Int handle
- * (this pointer), so a `spawn`'d by-value copy of Channel(T) shares the one
- * underlying channel. The mutex calls are guarded out for single-threaded
- * wasm, matching RaeTask above. */
+/* ----- Channel(T) runtime: MPSC ring of T-sized slots (#271, #969) ------ */
+/* Backs lib/Channel.rae's `Channel(T)`, Rae's first message-passing
+ * primitive. Multi-producer, single-consumer: any thread may send; only the
+ * owning consumer thread drains. A pthread mutex serialises every access and
+ * is hidden entirely inside the runtime — ordinary Rae code never locks.
+ *
+ * #969: the ring is a byte array of `cap * elem_size`, so ANY Rae value type
+ * is a payload — the element size comes from `sizeof(T)` on the Rae side, and
+ * the Rae side does the typed store/load (`rae_ext_rae_buf_set/get`, the same
+ * per-T specialisation List uses) while this kernel only hands out slot
+ * INDICES under the lock:
+ *   reserve -> (Rae stores into slot) -> commit      one producer step
+ *   take    -> (Rae copies out of slot) -> release   the consumer step
+ * The lock is held across the Rae store/copy, which is a memcpy of T. A full
+ * ring refuses the send (reserve = -1); an empty ring refuses the take. The
+ * consumer moves the bytes out, so the ring never owns a live T after
+ * `release`; `freeChannel` drains what is left (dropping each T in Rae)
+ * before this frees the storage. `recv_count` is the monotonic read-only
+ * observable of consumer progress. Guarded out for single-threaded wasm,
+ * matching RaeTask above. */
 #define RAE_CHAN_CAP 4096
 typedef struct {
   pthread_mutex_t mu;
-  int64_t buf[RAE_CHAN_CAP];
+  uint8_t* buf;        /* cap * elem_size bytes */
+  int64_t elem_size;
+  int64_t cap;
   int64_t head;        /* next index to pop */
   int64_t count;       /* items currently buffered */
   int64_t recv_count;  /* total drained (read-only observable) */
 } RaeChannel;
 
-int64_t rae_ext_rae_chan_new(void) {
+#if !defined(__wasm__) || defined(RAE_WASM_THREADS)
+#define RAE_CHAN_LOCK(c)   pthread_mutex_lock(&(c)->mu)
+#define RAE_CHAN_UNLOCK(c) pthread_mutex_unlock(&(c)->mu)
+#else
+#define RAE_CHAN_LOCK(c)   ((void)0)
+#define RAE_CHAN_UNLOCK(c) ((void)0)
+#endif
+
+int64_t rae_ext_rae_chan_new(int64_t elem_size) {
   RaeChannel* c = (RaeChannel*)malloc(sizeof(RaeChannel));
+  if (elem_size < 1) elem_size = 1;
+  c->elem_size = elem_size;
+  c->cap = RAE_CHAN_CAP;
+  c->buf = (uint8_t*)calloc((size_t)c->cap, (size_t)elem_size);
   c->head = 0; c->count = 0; c->recv_count = 0;
 #if !defined(__wasm__) || defined(RAE_WASM_THREADS)
   pthread_mutex_init(&c->mu, NULL);
@@ -76,64 +98,66 @@ int64_t rae_ext_rae_chan_new(void) {
   return (int64_t)(intptr_t)c;
 }
 
-void rae_ext_rae_chan_send(int64_t ch, int64_t value) {
+/* The slot array, typed on the Rae side as Buffer(T). */
+void* rae_ext_rae_chan_ring(int64_t ch) {
+  RaeChannel* c = (RaeChannel*)(intptr_t)ch;
+  return c ? (void*)c->buf : NULL;
+}
+
+/* Producer: lock and hand out the tail slot, or -1 (and no lock held) when
+ * the ring is full. The caller stores into the slot, then commits. */
+int64_t rae_ext_rae_chan_reserve(int64_t ch) {
+  RaeChannel* c = (RaeChannel*)(intptr_t)ch;
+  if (!c) return -1;
+  RAE_CHAN_LOCK(c);
+  if (c->count >= c->cap) { RAE_CHAN_UNLOCK(c); return -1; }
+  return (c->head + c->count) % c->cap;
+}
+
+void rae_ext_rae_chan_commit(int64_t ch) {
   RaeChannel* c = (RaeChannel*)(intptr_t)ch;
   if (!c) return;
-#if !defined(__wasm__) || defined(RAE_WASM_THREADS)
-  pthread_mutex_lock(&c->mu);
-#endif
-  if (c->count < RAE_CHAN_CAP) {
-    int64_t tail = (c->head + c->count) % RAE_CHAN_CAP;
-    c->buf[tail] = value;
-    c->count++;
-  }
-#if !defined(__wasm__) || defined(RAE_WASM_THREADS)
-  pthread_mutex_unlock(&c->mu);
-#endif
+  c->count++;
+  RAE_CHAN_UNLOCK(c);
+}
+
+/* Consumer: lock and hand out the head slot, or -1 (no lock held) when
+ * empty. The caller copies the value out, then releases. */
+int64_t rae_ext_rae_chan_take(int64_t ch) {
+  RaeChannel* c = (RaeChannel*)(intptr_t)ch;
+  if (!c) return -1;
+  RAE_CHAN_LOCK(c);
+  if (c->count <= 0) { RAE_CHAN_UNLOCK(c); return -1; }
+  return c->head;
+}
+
+void rae_ext_rae_chan_release(int64_t ch) {
+  RaeChannel* c = (RaeChannel*)(intptr_t)ch;
+  if (!c) return;
+  /* The slot's bytes were moved out; zero it so a stale pointer never sits
+   * in the ring (a later diagnostic dump reads clean slots). */
+  memset(c->buf + (size_t)c->head * (size_t)c->elem_size, 0, (size_t)c->elem_size);
+  c->head = (c->head + 1) % c->cap;
+  c->count--;
+  c->recv_count++;
+  RAE_CHAN_UNLOCK(c);
 }
 
 int64_t rae_ext_rae_chan_count(int64_t ch) {
   RaeChannel* c = (RaeChannel*)(intptr_t)ch;
   if (!c) return 0;
-#if !defined(__wasm__) || defined(RAE_WASM_THREADS)
-  pthread_mutex_lock(&c->mu);
-#endif
+  RAE_CHAN_LOCK(c);
   int64_t n = c->count;
-#if !defined(__wasm__) || defined(RAE_WASM_THREADS)
-  pthread_mutex_unlock(&c->mu);
-#endif
+  RAE_CHAN_UNLOCK(c);
   return n;
-}
-
-int64_t rae_ext_rae_chan_recv(int64_t ch) {
-  RaeChannel* c = (RaeChannel*)(intptr_t)ch;
-  if (!c) return 0;
-#if !defined(__wasm__) || defined(RAE_WASM_THREADS)
-  pthread_mutex_lock(&c->mu);
-#endif
-  int64_t v = 0;
-  if (c->count > 0) {
-    v = c->buf[c->head];
-    c->head = (c->head + 1) % RAE_CHAN_CAP;
-    c->count--;
-    c->recv_count++;
-  }
-#if !defined(__wasm__) || defined(RAE_WASM_THREADS)
-  pthread_mutex_unlock(&c->mu);
-#endif
-  return v;
 }
 
 int64_t rae_ext_rae_chan_received(int64_t ch) {
   RaeChannel* c = (RaeChannel*)(intptr_t)ch;
   if (!c) return 0;
-#if !defined(__wasm__) || defined(RAE_WASM_THREADS)
-  pthread_mutex_lock(&c->mu);
-#endif
+  RAE_CHAN_LOCK(c);
   int64_t n = c->recv_count;
-#if !defined(__wasm__) || defined(RAE_WASM_THREADS)
-  pthread_mutex_unlock(&c->mu);
-#endif
+  RAE_CHAN_UNLOCK(c);
   return n;
 }
 
@@ -143,6 +167,7 @@ void rae_ext_rae_chan_free(int64_t ch) {
 #if !defined(__wasm__) || defined(RAE_WASM_THREADS)
   pthread_mutex_destroy(&c->mu);
 #endif
+  free(c->buf);
   free(c);
 }
 

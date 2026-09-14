@@ -274,6 +274,10 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         // the heap the buffer is about to reach via its element drop.
         if (val_expr && val_expr->kind == AST_EXPR_IDENT) {
             const AstTypeRef* vtr = infer_expr_type_ref(ctx, val_expr);
+            // #969: a bare-`T` local is the instantiation's concrete type.
+            if (vtr && ctx->generic_params && ctx->generic_args)
+                vtr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
+                                          ctx->generic_args, (AstTypeRef*)vtr);
             if (vtr && !(vtr->is_view || vtr->is_mod)
                 && type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, vtr, 0)) {
                 mark_expr_moved_if_local(ctx, val_expr);
@@ -854,6 +858,13 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 && !p->type->is_copy && a->value
                 && a->value->kind == AST_EXPR_IDENT) {
                 const AstTypeRef* arg_tr = infer_expr_type_ref(ctx, a->value);
+                // #969: a local typed as the bare generic `T` is the
+                // concrete type of this instantiation — substitute so a
+                // heap-owning T moves (its scope-exit drop is now emitted
+                // for the concrete type, see emit_implicit_drops_for_body).
+                if (arg_tr && ctx->generic_params && ctx->generic_args)
+                    arg_tr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
+                                                 ctx->generic_args, (AstTypeRef*)arg_tr);
                 if (arg_tr && !(arg_tr->is_view || arg_tr->is_mod)
                     && type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, arg_tr, 0)) {
                     mark_expr_moved_if_local(ctx, a->value);

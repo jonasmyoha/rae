@@ -32,6 +32,19 @@
 >
 > Fixture `847_leak_reassign_move_temps` guards all three under
 > `RAE_MEM_STATS=1`.
+>
+> 4. **(#969) An owning local typed as the bare generic parameter drops as
+>    the concrete type.** Inside a monomorphized generic body, `let x: T =
+>    owningCall()` (e.g. `Channel.freeChannel`'s `let leftover: T =
+>    receive(this)`) is dropped at scope exit as the instantiation's T — a
+>    String, a struct, a List — instead of being read as the abstract `T`
+>    (no heap, no drop) and leaking. Alias-classified locals (`let val: T =
+>    rae_ext_rae_buf_get(...)`, `List.get`-style returns) still borrow the
+>    container slot and are never dropped. A function that moves a buf_get
+>    local out (the `receive`/`pop` shape) says so with `ret own val`, which
+>    the alias analysis reads as an owning return — a bare `ret val` of such a
+>    local reads as an alias, and the caller would not drop what it got.
+>    Fixture `848_channel_struct_payload` guards this under `RAE_MEM_STATS=1`.
 
 # Drop semantics, destructors, and defer in Rae
 
