@@ -236,6 +236,73 @@ single helper.
   unrolling instead of arbitrary execution; the type-query precision Odin has, via
   the binding type; no tags, no notes, no sigils.
 
+## Mutable iteration + `fieldSet` + default value (#959)
+
+The read side above (`fieldName`, `typeName`, a `mod` binding for *method
+calls*) was enough for clear/serialize. A generic *decoder* — the registry
+synthesis that replaces one hand-written arm per component (#961) — needs
+two more things: a way to WRITE a field wholesale through the binding, and a
+value to start from. Both are additions to iteration over an EXISTING value;
+neither is construction by reflection (the #774 decision stands).
+
+**`fieldSet(f, value: v)` — wholesale field write.** Inside a `mod` field
+loop, the statement `fieldSet(f, value: v)` (or its UFCS spelling
+`f.set(value: v)`) assigns `v` to the field the binding currently aliases.
+It is a compile-time plain function like `fieldName`: the unroller rewrites
+the statement into the ordinary assignment `x.<field> = v`, so everything
+that holds for an assignment holds here — the value's type must equal the
+field's type (checked per unrolled field, with the diagnostic on the
+`fieldSet` line: `type mismatch: expected Int, got String`), a String or List
+moves/copies under the normal ownership rules, and the old value is dropped.
+There is no runtime `set` method and no phantom member; `fieldSet` outside a
+field loop is simply an unknown function.
+
+```rae
+func fill(comp: mod Comp) {
+  loop let f: mod Int in fields(comp) {
+    fieldSet(f, value: 7)
+  }
+  loop let f: mod String in fields(comp) {
+    f.set(value: "named")
+  }
+}
+```
+
+Wholesale write is the only new capability: `f.set(value:)` assigns the whole
+field; per-field *method* calls through the `mod` binding were already there.
+
+**`T.default()` — the zero value.** A compiler-generated static method with
+the same shape as `T.fromJson(json:)`: it yields the value whose every field
+is zero / `0.0` / `false` / `""` / an empty List / the first enum case /
+`none` for `opt`, recursively for nested structs. It is ONE opaque value
+primitive (the C backend emits `(rae_T){0}`), not field-by-field construction
+— you cannot ask what it did per field, only start from it. `T` may be a
+generic parameter (`func zeroOf(T: type) ret T { ret T.default() }`) or a
+builtin (`Int.default()` is `0`, `String.default()` is `""`). Like
+`fromJson`, constructing a value that contains raw `Ptr` storage this way
+needs an enclosing `unsafe { }` (#896).
+
+A generic decoder is therefore:
+
+```rae
+var comp: T = T.default()
+loop let f: mod any in fields(comp) {
+  # decide per field what to write; fieldName(f) / typeName(f) fold as before
+  f.set(value: decodeField(f, doc: doc))     # #960 supplies decodeField
+}
+componentSet(table, entity, comp)
+```
+
+**Optional fields.** A pattern's optionality is part of the match: an
+`opt T` field is bound only by an `opt T` pattern (the alias then carries the
+`opt`); a plain `T` or `any` pattern skips it. Before #959 the filter ignored
+`opt` and a plain pattern would alias an un-unwrapped optional, which the
+alias binding then rejected.
+
+Fixtures: `843_field_set_default` (both spellings, the generic `W` path, the
+`T.default()` → `toJson` → `fromJson` → `toJson` round-trip, builtin and
+nested-struct defaults), `844_field_set_type_mismatch` (the per-field check).
+
 ## Construction via `fields(Type)` — decided NOT to build (#774)
 
 The clear/serialize halves landed because forgetting a table there is a **silent**
