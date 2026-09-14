@@ -1,0 +1,14 @@
+# `fieldSet` is checked per unrolled field: the value's type must equal the
+# bound field's type (#959). Writing a String into an Int field is rejected.
+type Comp {
+  count: Int
+  label: String
+}
+
+func main() {
+  var comp: Comp = Comp.default()
+  loop let f: mod Int in fields(comp) {
+    fieldSet(f, value: "not an int")
+  }
+  log("{comp.count}")
+}
