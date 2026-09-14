@@ -129,11 +129,12 @@ func boxFrameEnd(canvas: mod Gpu2dCanvas) {
   canvas.flushIndex = 0
   canvas.clipCursor = 0
   canvas.imageDrawCursor = 0
+  # #971: zero each atlas's flush cursor IN PLACE. The copyAt/set form
+  # deep-copied the whole atlas (glyph List included) once per frame per
+  # atlas just to reset one Int.
   loop var ai: Int = 0, ai < canvas.textAtlases.length, ++ai {
-    if let atlas: Gpu2dTextAtlas = canvas.textAtlases.copyAt(index: ai) {
-      var reset: Gpu2dTextAtlas = own atlas
-      reset.flushIndex = 0
-      canvas.textAtlases.set(index: ai, value: own reset)
+    if let atlas: mod Gpu2dTextAtlas => canvas.textAtlases.modAt(index: ai) {
+      atlas.flushIndex = 0
     }
   }
 }
