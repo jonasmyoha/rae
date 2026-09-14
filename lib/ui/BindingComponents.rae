@@ -1,0 +1,126 @@
+# BindingComponents — authored components whose VALUE comes from app state
+# and whose behaviour is a per-app system (docs/ecs-general-architecture.md).
+# A page's layout lives entirely in its .raescene; what a scene cannot
+# express — a live count, a data list, a text field's query, a bottom
+# anchor — is one of these components on the node, decoded from JSON by the
+# reflected registry like any other UiWorld table, and driven every frame by
+# the system named in its comment. Split out of ui/Components.rae (the
+# renderer/layout vocabulary) at the 1,000-line cap (#978).
+open ui/Components
+
+# ----- data-binding components for the profile page (#974) -----------------
+#
+# The page's layout lives entirely in its .raescene; these two components are
+# what a scene cannot express — a value that comes from app state — and a
+# per-frame system drives every instance (docs/ecs-general-architecture.md).
+
+# Which live library count a `ProfileStat` node shows. Authored as the member
+# name: `"ProfileStat": { "stat": "albums" }`.
+enum ProfileStatKind { albums, tracks, listeningHours }
+
+# A Text node whose `text` is a live count from the app's media library. The
+# number never lives in the scene; `profileStatsSystem` writes `Text.text` on
+# the same entity when the count changes (a pure data binding, no layout).
+type ProfileStat {
+  stat: ProfileStatKind
+}
+
+# An avatar slot whose photo may not be loaded yet. Authored on a Stack
+# container with two children: the photo (the child whose `Sprite.textureKey`
+# equals `textureKey`) and an authored placeholder. `avatarSystem` activates
+# the photo once the texture registry holds the key and the placeholder
+# otherwise, so a download that lands later is an `Active` toggle on two
+# children — not a page rebuild.
+type AvatarSource {
+  textureKey: String
+}
+
+# ----- data-list container: a grid of album-cover tiles (#975) -------------
+
+# Which catalogue a `CoverGrid` shows: the user's library (a "Liked" playlist
+# tile first, then one tile per library album) or the Home landing grid (the
+# library albums only).
+enum CoverGridSource { library, home }
+
+# A container whose child rows/tiles are a DATA LIST materialised from app
+# state, not authored. The scene owns the container (its Layout, gap, place
+# in the page); `coverGridSystem` (re)builds the rows beneath it whenever the
+# app-state revision it observes moves, and records that revision in
+# `builtRevision` (-1 = never built, so a fresh mount fills on its first run).
+# `columns` is the column count at the authored phone width; `tileGap` is the
+# gap between tiles in a row and between rows.
+type CoverGrid {
+  columns: Int = 3
+  tileGap: Float = 17.349397590361445
+  source: CoverGridSource
+  builtRevision: Int = -1
+}
+
+# ----- search page: a text field and its result list (#976) ----------------
+
+# A single-line text field authored as a container whose first Text child is
+# the visible line. `query` is the live typed text (the field system appends
+# the frame's typed characters and applies backspaces while the field's page
+# is active); the Text child shows `query` in `textStyleId`, or `placeholder`
+# in `placeholderStyleId` while the query is empty. `emptyStateNodeId` names
+# the page node shown while the query is empty (the sibling `SearchResults`
+# container shows the rest of the time).
+type SearchField {
+  query: String
+  placeholder: String
+  textStyleId: String = "primary"
+  placeholderStyleId: String = "muted"
+  emptyStateNodeId: String = "EmptyState"
+}
+
+# What a `SearchResults` container lists: every catalogue track whose title,
+# artist or album matches the query, or the albums whose title/artist match.
+enum SearchSource { tracks, albums }
+
+# A data-list container of search-result rows. The rows come from app state
+# for the query of the `SearchField` on the same page; the system rebuilds
+# them whenever that query differs from `builtQuery` (the per-container
+# observer cache — "" on a fresh mount) and keeps at most `maxRows`.
+type SearchResults {
+  source: SearchSource
+  maxRows: Int = 12
+  builtQuery: String
+}
+
+# ----- history page: the play-history list binding (#977) -------------------
+
+# Authored next to a `ListView` on the History page's list host. The rows are
+# the app's play history, so the scene cannot carry them: `historyListSystem`
+# writes the host's `ListViewData` from the history whenever its revision
+# moves past `builtRevision` (-1 on a fresh mount), shows the host while
+# there are entries and the page's `emptyStateNodeId` node otherwise. The
+# list re-binds in place — a new play no longer re-mounts the page.
+type HistoryList {
+  emptyStateNodeId: String = "EmptyState"
+  builtRevision: Int = -1
+}
+
+# ----- dock: bottom anchoring, layer membership, nav-tab state (#978) ------
+
+# Pins the entity's bottom edge to the layout extent's bottom: the anchor
+# system writes `Offset.y = layoutH - Rect.h - bottomInset` (the safe-area
+# home-indicator inset the app supplies) whenever either changes. What the
+# bottom dock needs instead of an authored Offset, which cannot know the
+# window height.
+type AnchorBottom {
+  enabled: Bool = true
+}
+
+# Names the paint/hit-test layer an entity belongs to, by the layer id the
+# app created ("dock", "back-button", ...). `LayerRef` holds an EntityId a
+# scene cannot spell; the layer-tag system resolves the id once per entity.
+type LayerTag {
+  id: String
+}
+
+# The screen a nav tab selects. `navTabsSystem` compares it to the app's
+# current tab and writes the active/inactive icon tint and label style onto
+# the tab's Sprite and Text children — so the bar never re-mounts on switch.
+type NavTab {
+  screen: String
+}

@@ -198,15 +198,19 @@ func runFrameLayoutTransform(
   viewport: view Viewport
   schedule: mod Schedule
   gpuUi: view Gpu2dUi
-  rowScenes: view SceneRegistry
+  subScenes: view SceneRegistry
 ) pub {
   # #964: virtualised lists (the History page) re-bind their pooled rows to
   # the current scroll before layout, so this frame lays out the rows in
   # view. Runs every frame; it writes nothing when nothing moved.
-  listViewSystem(world: world, scenes: rowScenes)
+  listViewSystem(world: world, scenes: subScenes)
   if uiShouldRun(schedule: schedule, world: world, index: uiSystemSafeArea) {
     applySafeAreas(world: world, viewport: viewport)
   }
+  # #978: bottom-anchored overlays follow the layout extent and the safe
+  # inset; layer tags resolve for anything mounted since last frame.
+  anchorBottomSystem(world: world, bottomInset: viewport.safeInsetsDu.b)
+  layerTagSystem(world: world)
   if uiShouldRun(schedule: schedule, world: world, index: uiSystemLayout) {
     layoutSystem(world: world)
   }
