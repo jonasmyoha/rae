@@ -4683,6 +4683,88 @@ static bool sema_is_module_name(AstModule* module, Str name) {
     return false;
 }
 
+// #970: is `name` the last path component of ANY reachable module (lib,
+// subfolder, imported, or a project folder namespace)? The narrow
+// sema_is_module_name above only recognizes simply-named imported modules —
+// it misses the prelude (core/Core), subfolder externs (.../Oracle) and
+// project folders (particles/), all of which are valid namespace qualifiers
+// whose calls sema leaves for the backend to resolve. This broader scan keeps
+// sema_report_bad_receiver from flagging those as unknown receivers.
+static bool sema_ci_eq(const char* comp, Str name) {
+    // Case-insensitive equality. A folder namespace is camelCase on disk
+    // (`particles/`) but is qualified PascalCase in code (`Particles.tick()`),
+    // and the backend resolves that case-insensitively — mirror it here so a
+    // valid folder/module qualifier is never flagged as an unknown receiver.
+    if (strlen(comp) != name.len) return false;
+    for (size_t i = 0; i < name.len; i++) {
+        char a = comp[i], b = name.data[i];
+        if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
+        if (b >= 'A' && b <= 'Z') b = (char)(b - 'A' + 'a');
+        if (a != b) return false;
+    }
+    return true;
+}
+static bool sema_name_is_module_component(AstModule* module, Str name) {
+    if (sema_is_module_name(module, name)) return true;
+    for (AstDecl* d = module->decls; d; d = d->next) {
+        if (d->module_name) {
+            const char* slash = strrchr(d->module_name, '/');
+            const char* comp = slash ? slash + 1 : d->module_name;
+            if (sema_ci_eq(comp, name)) return true;
+        }
+        char ns[256]; sema_project_namespace(d, ns, sizeof ns);
+        if (ns[0] != '\0' && sema_ci_eq(ns, name)) return true;
+    }
+    for (const AstImport* imp = module->imports; imp; imp = imp->next) {
+        if (!imp->module) continue;
+        for (AstDecl* d = imp->module->decls; d; d = d->next) {
+            if (!d->module_name) continue;
+            const char* slash = strrchr(d->module_name, '/');
+            const char* comp = slash ? slash + 1 : d->module_name;
+            if (sema_ci_eq(comp, name)) return true;
+        }
+    }
+    return false;
+}
+
+// #970: report a UFCS/method-call or `.member` receiver that is a bare
+// identifier naming NO value in scope. By the time this runs, the module-
+// qualified and `Type.create` rewrites have already broken out, so a
+// remaining bare-ident receiver is meant to be a VALUE. It is valid when it
+// names a value binding (a decl-less symbol is a generic parameter bound to a
+// concrete type — also fine), a module qualifier, a type/enum namespace, a
+// primitive type (the `List.create` sugar), or a `__`-prefixed backend
+// intrinsic. Anything else — an undeclared name (the #950 removed-parameter
+// case) or a bare function name (Rae has no first-class functions) — is an
+// error reported at the receiver's own position, instead of a NULL-typed
+// pass-through that only surfaces as a cryptic gcc "undeclared function".
+static void sema_report_bad_receiver(CompilerContext* ctx, AstModule* module,
+                                     SymbolTable* symbols, const AstExpr* recv) {
+    (void)ctx;
+    if (!recv || recv->kind != AST_EXPR_IDENT) return;
+    Str name = recv->as.ident;
+    if (name.len >= 2 && name.data[0] == '_' && name.data[1] == '_') return;
+    Symbol* sym = symbol_table_lookup(symbols, name);
+    bool is_func = sym && sym->decl && sym->decl->kind == AST_DECL_FUNC;
+    if (sym && !is_func) return;              // value binding, type/enum, or generic param
+    if (sema_arg_is_type_name(symbols, recv)) return;  // primitive type namespace
+    if (sema_name_is_module_component(module, name)) return;
+    Str aliased = sema_resolve_alias(s_current_decl_origin, name);
+    if (aliased.data && sema_name_is_module_component(module, aliased)) return;
+    char buf[256];
+    if (is_func) {
+        snprintf(buf, sizeof(buf),
+            "'%.*s' names a function, not a value: a bare function name is not a value in Rae; call it as %.*s(...), or this name may refer to a binding that no longer exists",
+            (int)name.len, name.data, (int)name.len, name.data);
+    } else {
+        snprintf(buf, sizeof(buf),
+            "unknown value '%.*s': no local, parameter, const, or global by that name is in scope here",
+            (int)name.len, name.data);
+    }
+    diag_error(sema_diag_file(module), (int)recv->line, (int)recv->column, buf);
+    if (module) module->had_error = true;
+}
+
 // Find a module-level `const`/`let` decl named `name` in module `modname`
 // (checking both this module's own decls and its imports). Backs
 // module-qualified value access `modname.name` (e.g. `keys.keyW`) — the const
@@ -4820,7 +4902,26 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
     switch (expr->kind) {
         case AST_EXPR_IDENT: {
             Symbol* sym = symbol_table_lookup(symbols, expr->as.ident);
-            if (sym) { expr->resolved_type = sym->type; break; }
+            if (sym) {
+                // #970: a function name is not a VALUE (Rae has no first-class
+                // functions), so a bare `now` / `now.method()` / `now as T`
+                // where `now` names a function — often a since-removed
+                // parameter whose name now collides with a function, the #950
+                // case — is an error, not a NULL-typed pass-through that only
+                // gcc catches. Not in callee position (is_value_pos is false
+                // there). Type/enum symbols ARE valid here (a namespace before
+                // `.member`, the `List.create` sugar), so only FUNC is barred.
+                if (is_value_pos && sym->decl && sym->decl->kind == AST_DECL_FUNC) {
+                    char buf[256];
+                    snprintf(buf, sizeof(buf),
+                        "'%.*s' names a function, not a value: a bare function name is not a value in Rae; call it as %.*s(...), or this name may refer to a binding that no longer exists",
+                        (int)expr->as.ident.len, expr->as.ident.data,
+                        (int)expr->as.ident.len, expr->as.ident.data);
+                    diag_error(sema_diag_file(module), (int)expr->line, (int)expr->column, buf);
+                    if (module) module->had_error = true;
+                }
+                expr->resolved_type = sym->type; break;
+            }
             // #914: an identifier read as a VALUE (not a call callee, and not the
             // qualifier before a `.member`/`.method(...)` — those name a module or
             // a type/namespace, never a value binding, and are diagnosed by the
@@ -5233,6 +5334,7 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                 }
             }
             sema_analyze_expr(ctx, module, symbols, expr->as.member.object, false);
+            sema_report_bad_receiver(ctx, module, symbols, expr->as.member.object);
             if (expr->as.member.object->resolved_type) {
                 TypeInfo* t = expr->as.member.object->resolved_type; if (t->kind == TYPE_REF) t = t->as.ref.base;
                 if (t->kind == TYPE_STRUCT) {
@@ -5491,7 +5593,16 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                     break;
                 }
             }
+            // #970: by here the module-qualified / Type.create rewrites have
+            // broken out, so a bare-identifier receiver of a UFCS/method call
+            // is a VALUE — resolve it like any other identifier. An undeclared
+            // receiver ('now.epochSeconds()' after the 'now' parameter was
+            // removed, the #950 case) or a bare function name is a Rae-source
+            // error, not a 'rae_epochSeconds()' that only gcc rejects. A module
+            // qualifier, a type/enum namespace, or a generic parameter is left
+            // for the resolution below / the backend.
             sema_analyze_expr(ctx, module, symbols, expr->as.method_call.object, false);
+            sema_report_bad_receiver(ctx, module, symbols, expr->as.method_call.object);
             AstCallArg* marg = expr->as.method_call.args;
             while (marg) { sema_analyze_expr(ctx, module, symbols, marg->value, true); marg = marg->next; }
             if (expr->as.method_call.object->resolved_type) {
