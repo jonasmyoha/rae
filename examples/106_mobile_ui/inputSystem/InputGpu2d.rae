@@ -1,5 +1,7 @@
 open ui/Ecs
 open ui/Layer
+import Sdl3
+open Keys
 # Pointer input for the GPU2D/SDL3-only mobile UI example.
 #
 # Coordinates are in logical points, matching `WorldTransform2D`.
@@ -29,6 +31,14 @@ type InputSystem {
   scriptedScreens: List(String)
   scriptedFrame: Int
   scriptedEvery: Int
+  # #976: this frame's keyboard text — the UTF-8 characters typed since the
+  # last poll and the number of Backspace presses. Consumed by the search
+  # field system; empty/0 on frames with no typing.
+  typedText: String
+  backspaces: Int
+  # `RAE_UI_TYPE` scripted keyboard (#976): the text still to be "typed"
+  # (pasted as one frame's typedText once the screen sequence is done).
+  scriptedType: String
 }
 
 func createInputSystem() ret InputSystem {
@@ -45,6 +55,9 @@ func createInputSystem() ret InputSystem {
     scriptedScreens: scriptedScreenSequence()
     scriptedFrame: 0
     scriptedEvery: 20
+    typedText: ""
+    backspaces: 0
+    scriptedType: getEnv(name: "RAE_UI_TYPE")
   }
 }
 
@@ -186,6 +199,21 @@ func updateInputSystem(input: mod InputSystem, world: view UiWorld, viewport: vi
   # clearActionEvents: this frame's clicks produce into a clean queue.
   frameAdvance(this: input.uiActions)
   sendScriptedTap(input: input)
+  input.typedText = uiTextInput()
+  input.backspaces = 0
+  if Sdl3.isKeyPressed(key: keyBackspace) {
+    input.backspaces = 1
+  }
+  # Scripted keyboard: paste `RAE_UI_TYPE` on the frame after the last
+  # scripted tap has fired, so a headless run can drive a text field.
+  if input.scriptedType.length() > 0 and input.scriptedScreens.length is 0 {
+    input.scriptedFrame = input.scriptedFrame + 1
+    if input.scriptedFrame % input.scriptedEvery is 0 {
+      log("[screen-seq] type \"{input.scriptedType}\"")
+      input.typedText = "{input.scriptedType}"
+      input.scriptedType = ""
+    }
+  }
 
   let mx: Float = viewportPointerX(viewport: viewport)
   let my: Float = viewportPointerY(viewport: viewport)

@@ -222,6 +222,17 @@ func pointerX() ret Float {
   }
 }
 
+# The characters the user typed since the last event poll, as UTF-8 (#976).
+# Empty on frames with no typing. Backspace / Enter are key edges, not text
+# — read them with Sdl3.isKeyPressed(keyBackspace / keyEnter).
+func nativeTextInput() unsafe extern("rae_ext_Gpu2d_textInput") ret String
+
+func textInput() ret String {
+  unsafe {
+    ret nativeTextInput()
+  }
+}
+
 func nativePointerY() unsafe extern("rae_ext_Gpu2d_pointerY") ret Float
 
 func pointerY() ret Float {

@@ -523,6 +523,7 @@ int64_t rae_ext_rae_str_index_of(rae_String s, rae_String sub);
 rae_String rae_ext_rae_str_trim(rae_String s);
 rae_String rae_ext_rae_str_to_lower(rae_String s);
 uint32_t rae_ext_rae_str_at(rae_String s, int64_t index);
+int64_t rae_ext_rae_str_byte_at(rae_String s, int64_t index);
 double rae_ext_rae_str_to_f64(rae_String s);
 int64_t rae_ext_rae_str_to_i64(rae_String s);
 
