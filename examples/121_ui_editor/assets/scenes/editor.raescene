@@ -7,7 +7,7 @@
     "Chrome": {
       "Layout": { "type": "Vertical", "gap": 0, "alignCross": "Stretch" },
       "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fill" } },
-      "Children": ["TopBar", "Spacer", "StatusBar"]
+      "Children": ["TopBar", "DiagnosticsPanel", "Spacer", "StatusBar"]
     },
     "TopBar": {
       "Rect": { "x": 0, "y": 0, "w": 0, "h": 96 },
@@ -49,6 +49,38 @@
       "Rect": { "x": 0, "y": 0, "w": 194, "h": 40 },
       "Size": { "w": { "mode": "Hug" }, "h": { "mode": "Fixed" } },
       "Text": { "text": "no diagnostics", "styleId": "muted", "styleOverride": { "size": 22, "color": "#9ea8c2" } }
+    },
+    "DiagnosticsPanel": {
+      "Rect": { "x": 0, "y": 0, "w": 0, "h": 0 },
+      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Hug" } },
+      "Active": { "value": false },
+      "Shape": { "kind": "Rect", "fill": "#10161eD9", "stroke": "#00000000", "strokeWidth": 0 },
+      "Layout": { "type": "Vertical", "gap": 8, "alignCross": "Stretch" },
+      "Padding": { "l": 24, "t": 12, "r": 24, "b": 12 },
+      "Children": ["PanelTitle", "DiagnosticList"]
+    },
+    "PanelTitle": {
+      "Rect": { "x": 0, "y": 0, "w": 0, "h": 32 },
+      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
+      "Text": { "text": "Diagnostics — D hides", "styleId": "muted", "styleOverride": { "size": 22, "color": "#9ea8c2" } }
+    },
+    "DiagnosticList": {
+      "Rect": { "x": 0, "y": 0, "w": 1000, "h": 540 },
+      "ScrollState": { "y": 0 },
+      "ListView": {
+        "itemSceneId": "diagnostic-row",
+        "itemKeyField": "id",
+        "itemHeight": 84,
+        "itemGap": 6,
+        "visibleItemCount": 6,
+        "overscanRows": 1,
+        "bindings": [
+          { "nodeId": "RowKind", "component": "Text", "field": "text", "itemField": "kind" },
+          { "nodeId": "RowWhere", "component": "Text", "field": "text", "itemField": "where" },
+          { "nodeId": "RowName", "component": "Text", "field": "text", "itemField": "name" },
+          { "nodeId": "RowMessage", "component": "Text", "field": "text", "itemField": "message" }
+        ]
+      }
     },
     "Spacer": {
       "Rect": { "x": 0, "y": 0, "w": 0, "h": 0 },

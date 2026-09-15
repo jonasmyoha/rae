@@ -1,0 +1,84 @@
+{
+  "type": "Scene",
+  "version": 2,
+  "sceneId": "MainMenu",
+  "root": "Screen",
+  "nodes": {
+    "Screen": {
+      "Rect": { "x": 0, "y": 0, "w": 1080, "h": 1920 },
+      "Shape": { "kind": "Rect", "fill": "background", "stroke": "#00000000", "strokeWidth": 0 },
+      "Layout": { "type": "Vertical", "gap": "spaceL", "alignCross": "Center" },
+      "Padding": { "l": "spaceXL", "t": 180, "r": "spaceXL", "b": "spaceXL" },
+      "Children": ["Logo", "Title", "Tagline", "Panel", "Footer"]
+    },
+    "Logo": {
+      "Rect": { "x": 0, "y": 0, "w": 220, "h": 220 },
+      "Sprite": { "textureKey": "logo", "scaleMode": "Fit" },
+      "CornerRadius": { "radius": 48 }
+    },
+    "Title": {
+      "Rect": { "x": 0, "y": 0, "w": 960, "h": 90 },
+      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
+      "Text": { "text": "Orbit Drift — reloaded", "styleId": "title" }
+    },
+    "Tagline": {
+      "Rect": { "x": 0, "y": 0, "w": 960, "h": 40 },
+      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
+      "Text": { "text": "the .rewrite twin: one changed title, one bogus component", "styleId": "caption" },
+      "Telemetry": { "channel": "menu" }
+    },
+    "Panel": {
+      "Rect": { "x": 0, "y": 0, "w": 900, "h": 560 },
+      "Sprite": { "textureKey": "panel", "scaleMode": "Stretch", "nineSlice": { "l": 24, "t": 24, "r": 24, "b": 24 } },
+      "Layout": { "type": "Vertical", "gap": "spaceM", "alignCross": "Stretch" },
+      "Padding": { "l": "spaceL", "t": "spaceL", "r": "spaceL", "b": "spaceL" },
+      "Children": ["PlayButton", "ContinueButton", "SettingsButton"]
+    },
+    "PlayButton": {
+      "Rect": { "x": 0, "y": 0, "w": 0, "h": 130 },
+      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
+      "Shape": { "kind": "RoundedRect", "fill": "accent", "stroke": "#00000000", "strokeWidth": 0, "radius": "radiusPill" },
+      "Shadow": { "blur": 24 },
+      "Layout": { "type": "Horizontal", "gap": 0, "alignCross": "Center" },
+      "OnClick": { "actionId": "menu.play" },
+      "Children": ["PlayLabel"]
+    },
+    "PlayLabel": {
+      "Rect": { "x": 0, "y": 0, "w": 0, "h": 50 },
+      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
+      "Text": { "text": "Play", "styleId": "button" }
+    },
+    "ContinueButton": {
+      "Rect": { "x": 0, "y": 0, "w": 0, "h": 130 },
+      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
+      "Shape": { "kind": "RoundedRect", "fill": "surfaceAlt", "stroke": "outline", "strokeWidth": 3, "radius": "radiusPill" },
+      "Layout": { "type": "Horizontal", "gap": 0, "alignCross": "Center" },
+      "OnClick": { "actionId": "menu.continue" },
+      "Children": ["ContinueLabel"]
+    },
+    "ContinueLabel": {
+      "Rect": { "x": 0, "y": 0, "w": 0, "h": 50 },
+      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
+      "Text": { "text": "Continue", "styleId": "body" }
+    },
+    "SettingsButton": {
+      "Rect": { "x": 0, "y": 0, "w": 0, "h": 130 },
+      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
+      "Shape": { "kind": "RoundedRect", "fill": "surfaceAlt", "stroke": "outline", "strokeWidth": 3, "radius": "radiusPill" },
+      "Layout": { "type": "Horizontal", "gap": 0, "alignCross": "Center" },
+      "OnClick": { "actionId": "menu.settings" },
+      "Children": ["SettingsLabel"]
+    },
+    "SettingsLabel": {
+      "Rect": { "x": 0, "y": 0, "w": 0, "h": 50 },
+      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
+      "Text": { "text": "Settings", "styleId": "body" }
+    },
+    "Footer": {
+      "Rect": { "x": 0, "y": 0, "w": 960, "h": 36 },
+      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
+      "Opacity": { "value": 0.6 },
+      "Text": { "text": "v0.1 — every pixel here is a .raescene node", "styleId": "caption" }
+    }
+  }
+}

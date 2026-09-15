@@ -26,9 +26,34 @@ const fontDirectory: String = "examples/105_ui_counter/assets/"
 
 const chromeScenePath: String = "examples/121_ui_editor/assets/scenes/editor.raescene"
 
-# Fonts from the shared atlas dir; the theme from `<scene dir>/theme.raescene`
-# when the document ships one, else the library default. (loadUiAssets ties
-# both to one directory, and the theme must follow the document.)
+# The chrome's own sub-scenes, registered into the document's registry on
+# every load (one registry serves every ListView, chrome or document).
+const diagnosticRowScenePath: String = "examples/121_ui_editor/assets/scenes/chrome/diagnostic-row.raescene"
+
+# The theme from `<scene dir>/theme.raescene` when the document ships one,
+# else the library default; re-read on every reload (the theme is watched).
+func reloadEditorTheme(gpuUi: mod Gpu2dUi, sceneDirectory: view String, quiet: view Bool) {
+  var theme: ResolvedTheme = createResolvedTheme()
+  var active: Theme = lightTheme()
+  let themePath: String = "{sceneDirectory}theme.raescene"
+  if exists(path: themePath) {
+    let themeScene: Scene = loadSceneFile(path: themePath)
+    theme = parseTheme(scene: themeScene)
+    active = overlayPalette(base: lightTheme(), tokens: theme)
+    if not quiet {
+      log("[ui-editor] theme: {themePath}")
+    }
+  } else {
+    if not quiet {
+      log("[ui-editor] theme: library default (no {themePath})")
+    }
+  }
+  gpuUi.theme = own theme
+  gpuUi.activeTheme = active
+}
+
+# Fonts from the shared atlas dir; the theme follows the document
+# (loadUiAssets ties both to one directory, which a viewer cannot use).
 func createEditorUi(sceneDirectory: view String) ret Gpu2dUi {
   let textFont: SdfFont = SdfText.loadSdfFont(
     jsonPath: "{fontDirectory}Roboto-Regular.mtsdf.json"
@@ -38,23 +63,14 @@ func createEditorUi(sceneDirectory: view String) ret Gpu2dUi {
     jsonPath: "{fontDirectory}MaterialIconsRound-Regular.mtsdf.json"
     rawAtlasPath: "{fontDirectory}MaterialIconsRound-Regular.mtsdf.raw"
   )
-  var theme: ResolvedTheme = createResolvedTheme()
-  var active: Theme = lightTheme()
-  let themePath: String = "{sceneDirectory}theme.raescene"
-  if exists(path: themePath) {
-    let themeScene: Scene = loadSceneFile(path: themePath)
-    theme = parseTheme(scene: themeScene)
-    active = overlayPalette(base: lightTheme(), tokens: theme)
-    log("[ui-editor] theme: {themePath}")
-  } else {
-    log("[ui-editor] theme: library default (no {themePath})")
-  }
-  ret Gpu2dUi {
+  var gpuUi: Gpu2dUi = {
     textFont: own textFont
     iconFont: own iconFont
-    theme: own theme
-    activeTheme: active
+    theme: createResolvedTheme()
+    activeTheme: lightTheme()
   }
+  reloadEditorTheme(gpuUi: gpuUi, sceneDirectory: sceneDirectory, quiet: false)
+  ret gpuUi
 }
 
 func createApp() ret App {
@@ -69,6 +85,8 @@ func createApp() ret App {
 
   var document: SceneDocument = createSceneDocument(path: resolveScenePath())
   let gpuUi: Gpu2dUi = createEditorUi(sceneDirectory: document.directory)
+  var builtinScenePaths: List(String) = List.create(String, cap: 2)
+  builtinScenePaths.add(value: diagnosticRowScenePath)
 
   var world: UiWorld = create()
   seedWorldTheme(world: world, res: gpuUi)
@@ -77,7 +95,11 @@ func createApp() ret App {
   let documentLayer: EntityId = createLayerEntity(world: world, id: "document", order: 0)
   let chromeLayer: EntityId = createLayerEntity(world: world, id: "chrome", order: 100)
 
-  documentLoadSystem(document: document, world: world)
+  let mounted: Bool = documentLoadSystem(
+    document: document
+    world: world
+    builtinScenePaths: builtinScenePaths
+  )
   applyViewport(
     viewport: viewport
     world: world
@@ -97,7 +119,12 @@ func createApp() ret App {
     h: document.designH
   )
   setLayerById(world: world, entity: chromeRoot, id: "chrome")
-  var chrome: ChromeState = { pageRoot: chromeRoot, visible: true }
+  var chrome: ChromeState = { pageRoot: chromeRoot, visible: true, panelOpen: false }
+  # RAE_UI_EDITOR_PANEL=1 opens the diagnostics panel at boot (the headless
+  # gate's screenshot shows it; interactively D toggles it).
+  if getEnv(name: "RAE_UI_EDITOR_PANEL") is "1" {
+    setDiagnosticsPanelOpen(chrome: chrome, world: world, open: true)
+  }
 
   var textures: TextureSearch = createTextureSearch()
   unsafe {
@@ -118,6 +145,8 @@ func createApp() ret App {
     status: document.status
   )
   logDiagnostics(world: world, sceneId: document.scene.sceneId, nodeCount: document.nodeCount)
+  var watch: FileWatch = createFileWatch(now: Gpu2d.nowSeconds())
+  watchRememberMtimes(watch: watch, paths: document.watchedPaths)
 
   var schedule: Schedule = createUiPipeline(world: world)
   unsafe {
@@ -130,6 +159,8 @@ func createApp() ret App {
       viewport: viewport
       chrome: chrome
       textures: own textures
+      watch: own watch
+      builtinScenePaths: own builtinScenePaths
       headless: headless
     }
   }

@@ -209,8 +209,29 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
               cat "$TMP_OUT/render-$SAMPLE.log" "$TMP_OUT/screenshot-$SAMPLE.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
             fi
           done
+          # The watcher (#998): the app opens a COPY of the samples (the repo
+          # files stay untouched), rewrites it itself after 600 ms with the
+          # .rewrite twin (one changed Text, one bogus component), and must log
+          # the reload with exactly 1 diagnostic and still render a frame with
+          # the diagnostics panel open.
+          WATCH_DIR="$TMP_OUT/watch-samples"
+          cp -r ../examples/121_ui_editor/assets/samples "$WATCH_DIR"
+          SCREENSHOT="$TMP_OUT/ui-editor-reload.bmp"
+          if (cd .. && RAE_UI_EDITOR_SCENE="$WATCH_DIR/MainMenu.raescene" RAE_UI_EDITOR_TEST_REWRITE=600 \
+             RAE_UI_EDITOR_PANEL=1 RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=2200 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
+             perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-reload.log" 2>&1 \
+             && grep -qE "\[ui-editor\] mounted MainMenu: [1-9][0-9]* nodes, 0 diagnostics" "$TMP_OUT/render-reload.log" \
+             && grep -qE "\[ui-editor\] reloaded .*MainMenu.raescene \(\+[1-9][0-9]* -[1-9][0-9]* nodes, 1 diagnostics\)" "$TMP_OUT/render-reload.log" \
+             && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=50 \
+                > "$TMP_OUT/screenshot-reload.log" 2>&1; then
+            :
+          else
+            UI_EDITOR_OK=0
+            echo "  watch/reload failed:"
+            cat "$TMP_OUT/render-reload.log" "$TMP_OUT/screenshot-reload.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
+          fi
           if [ "$UI_EDITOR_OK" = "1" ]; then
-            echo "PASS: $EXAMPLE_NAME (3 sample scenes mounted with 0 diagnostics + screenshots)"
+            echo "PASS: $EXAMPLE_NAME (3 sample scenes mounted with 0 diagnostics + screenshots, watch reload with 1 diagnostic)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (ui editor sample gate)"
