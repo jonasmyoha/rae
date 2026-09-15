@@ -1,11 +1,15 @@
 # documentSystem — the viewed `.raescene` as a resource: which file, the parsed
-# scene, the registry its sub-scenes resolve through, the theme beside it and
+# scene, the scene ROOT its references resolve from, the registry its sub-scenes
+# load into, what its `import`s resolve to (theme tokens, textures, fonts) and
 # the page root it is mounted under (docs/ui-editor-design.md §3).
 #
 # Loading is ONE mountPage, exactly like a 106 page; sub-scenes load lazily
-# from `<scene dir>/<sceneId>.raescene` until no instance is left unresolved,
-# then resolveSceneInstances turns whatever is still missing into a red
-# sentinel + diagnostic (the #996 `report` policy). The app creates NO layout
+# from `<root>/<package/Path>.raescene` (#1008: a scene reference is a package
+# path, resolved from the root — the opened scene's directory unless
+# `--scene-root` / RAE_UI_EDITOR_ROOT says otherwise) until no instance is left
+# unresolved, then resolveSceneInstances turns whatever is still missing into a
+# red sentinel + diagnostic (the #996 `report` policy). Nothing is inferred from
+# file names: a theme reaches the page only through its `import` list. The app creates NO layout
 # entities of its own (the #990/#991 rule): the only entities are the mounted
 # scenes' nodes and the two layer roots.
 #
@@ -22,6 +26,7 @@ open ui/Layer
 open ui/Scene
 open ui/SceneFile
 open ui/SceneInstance
+open ui/SceneImports
 open ui/SceneLoader
 open ui/ScenePolicy
 open ui/RegistryOpt
@@ -39,9 +44,14 @@ const listViewSampleRows: Int = 6
 type SceneDocument {
   path: String
   directory: String
+  # The scene root: package paths (`import`, `SceneInstance.sceneId`, a
+  # ListView's row scenes) resolve as `<root>/<path>.raescene`.
+  root: String
   fileName: String
   scene: Scene
   registry: SceneRegistry
+  # What the page and its imports declare: theme tokens, texture map/dirs, fonts.
+  assets: SceneAssets
   pageRoot: EntityId
   designW: Float
   designH: Float
@@ -54,17 +64,47 @@ type SceneDocument {
   reloads: Int
 }
 
-# The scene to open: the first program argument, else RAE_UI_EDITOR_SCENE, else
-# the shipped MainMenu sample.
+# The scene to open: the first positional program argument, else
+# RAE_UI_EDITOR_SCENE, else the shipped MainMenu sample. `--scene-root <dir>`
+# may precede or follow it.
 func resolveScenePath() ret String {
-  if argCount() > 0 {
-    ret argAt(index: 0)
+  loop var i: Int = 0, i < argCount(), ++i {
+    let arg: String = argAt(index: i)
+    if arg is "--scene-root" {
+      i = i + 1
+      continue
+    }
+    if arg.length() > 0 {
+      ret arg
+    }
   }
   let fromEnv: String = getEnv(name: "RAE_UI_EDITOR_SCENE")
   if fromEnv.length() > 0 {
     ret fromEnv
   }
   ret "examples/121_ui_editor/assets/samples/MainMenu.raescene"
+}
+
+# The scene root: `--scene-root <dir>`, else RAE_UI_EDITOR_ROOT, else the opened
+# scene's own directory — the way `rae run` takes the entry file's folder as the
+# project unless `--project` says otherwise. Always ends in a slash.
+func resolveSceneRoot(scenePath: view String) ret String {
+  var root: String = ""
+  loop var i: Int = 0, i + 1 < argCount(), ++i {
+    if argAt(index: i) is "--scene-root" {
+      root = argAt(index: i + 1)
+    }
+  }
+  if root.length() is 0 {
+    root = getEnv(name: "RAE_UI_EDITOR_ROOT")
+  }
+  if root.length() is 0 {
+    ret directoryOf(path: scenePath)
+  }
+  if root.endsWith(suffix: "/") {
+    ret root
+  }
+  ret "{root}/"
 }
 
 func directoryOf(path: view String) ret String {
@@ -87,9 +127,11 @@ func createSceneDocument(path: view String) ret SceneDocument {
   ret SceneDocument {
     path: "{path}"
     directory: directoryOf(path: path)
+    root: resolveSceneRoot(scenePath: path)
     fileName: fileNameOf(path: path)
     scene: parseScene(source: "")
     registry: createSceneRegistry()
+    assets: createSceneAssets()
     pageRoot: noEntity()
     designW: defaultDesignW
     designH: defaultDesignH
@@ -146,13 +188,17 @@ func documentDesignSize(document: mod SceneDocument) {
   }
 }
 
-# Load `<dir>/<sceneId>.raescene` into the registry if it is there and not yet
+# Load `<root>/<sceneId>.raescene` into the registry if it is there and not yet
 # registered. Returns whether a scene was added this call.
-func registerSubSceneFile(document: mod SceneDocument, sceneId: view String) ret Bool {
+func registerSubSceneFile(
+  document: mod SceneDocument
+  world: mod UiWorld
+  sceneId: view String
+) ret Bool {
   if sceneId.length() is 0 or sceneRegistryHas(reg: document.registry, key: sceneId) {
     ret false
   }
-  let path: String = "{document.directory}{sceneId}.raescene"
+  let path: String = scenePackageFile(root: document.root, sceneId: sceneId)
   if not exists(path: path) {
     ret false
   }
@@ -161,6 +207,12 @@ func registerSubSceneFile(document: mod SceneDocument, sceneId: view String) ret
     log("[ui-editor] sub-scene {sceneId} failed to parse: {scene.errorMsg}")
     ret false
   }
+  checkSceneIdMatches(
+    scene: scene
+    sceneId: sceneId
+    path: path
+    diagnostics: world.sceneDiagnostics
+  )
   let key: String = "{sceneId}"
   registerScene(reg: document.registry, key: own key, scene: own scene)
   ret true
@@ -169,29 +221,29 @@ func registerSubSceneFile(document: mod SceneDocument, sceneId: view String) ret
 # One pass over what the mounted world still references: unresolved
 # SceneInstance ids and every ListView's row/state scene ids. Returns whether
 # anything new was registered, so the caller can resolve and go again.
-func registerReferencedSubScenes(document: mod SceneDocument, world: view UiWorld) ret Bool {
+func registerReferencedSubScenes(document: mod SceneDocument, world: mod UiWorld) ret Bool {
   var added: Bool = false
+  var wanted: List(String) = List.create(String, cap: 8)
   let instanceCount: Int = componentCount(this: world.sceneInstances)
   loop var i: Int = 0, i < instanceCount, ++i {
-    let instance: SceneInstance = componentDataAt(this: world.sceneInstances, i: i)
-    if registerSubSceneFile(document: document, sceneId: instance.sceneId) {
-      added = true
-    }
+    let entity: EntityId = componentEntityAt(this: world.sceneInstances, i: i)
+    let instance: view SceneInstance => componentView(this: world.sceneInstances, entity: entity)
+    wanted.add(value: "{instance.sceneId}")
   }
   let listCount: Int = componentCount(this: world.listViews)
   loop var j: Int = 0, j < listCount, ++j {
-    let list: ListView = componentDataAt(this: world.listViews, i: j)
-    if registerSubSceneFile(document: document, sceneId: list.itemSceneId) {
-      added = true
-    }
-    if registerSubSceneFile(document: document, sceneId: list.emptySceneId) {
-      added = true
-    }
-    if registerSubSceneFile(document: document, sceneId: list.loadingSceneId) {
-      added = true
-    }
-    if registerSubSceneFile(document: document, sceneId: list.errorSceneId) {
-      added = true
+    let entity: EntityId = componentEntityAt(this: world.listViews, i: j)
+    let list: view ListView => componentView(this: world.listViews, entity: entity)
+    wanted.add(value: "{list.itemSceneId}")
+    wanted.add(value: "{list.emptySceneId}")
+    wanted.add(value: "{list.loadingSceneId}")
+    wanted.add(value: "{list.errorSceneId}")
+  }
+  loop var k: Int = 0, k < wanted.length, ++k {
+    if let sceneId: String = wanted.copyAt(index: k) {
+      if registerSubSceneFile(document: document, world: world, sceneId: sceneId) {
+        added = true
+      }
     }
   }
   ret added
@@ -270,16 +322,43 @@ func rebuildWatchedPaths(document: mod SceneDocument) {
   document.watchedPaths.add(value: "{document.path}")
   loop var i: Int = 0, i < document.registry.ids.length, ++i {
     if let sceneId: String = document.registry.ids.copyAt(index: i) {
-      let path: String = "{document.directory}{sceneId}.raescene"
+      let path: String = scenePackageFile(root: document.root, sceneId: sceneId)
       if exists(path: path) {
         document.watchedPaths.add(value: path)
       }
     }
   }
-  let themePath: String = "{document.directory}theme.raescene"
-  if exists(path: themePath) {
-    document.watchedPaths.add(value: themePath)
+  loop var j: Int = 0, j < document.assets.importedPaths.length, ++j {
+    if let path: String = document.assets.importedPaths.copyAt(index: j) {
+      document.watchedPaths.add(value: path)
+    }
   }
+}
+
+# A scene written against the old `<dir>/theme.raescene` auto-load (removed in
+# #1008) declares no import while a theme file sits beside it: say which line
+# it needs, instead of silently rendering in the library default theme.
+func reportUnimportedTheme(document: view SceneDocument, world: mod UiWorld) {
+  if sceneImports(scene: document.scene).length > 0 or sceneDeclaresTokens(scene: document.scene) {
+    ret
+  }
+  var themeFile: String = ""
+  if exists(path: "{document.directory}Theme.raescene") {
+    themeFile = "Theme"
+  } else if exists(path: "{document.directory}theme.raescene") {
+    themeFile = "theme"
+  }
+  if themeFile.length() is 0 {
+    ret
+  }
+  reportSceneDiagnostic(
+    diagnostics: world.sceneDiagnostics
+    sceneId: document.fileName
+    nodeId: ""
+    kind: SceneDiagnosticKind.unknownToken
+    name: "import"
+    message: "{themeFile}.raescene beside the scene is not loaded by convention (#1008); add \"import\": [\"Theme\"] to use it"
+  )
 }
 
 # mountPage registers `document/<nodeId>` -> entity but tags no NodeId / Name
@@ -303,17 +382,13 @@ func tagMountedNodeIds(world: mod UiWorld, scene: view Scene, pageId: view Strin
   }
 }
 
-# Parse + register + mount under the `document` layer; on a reload, unmount
-# the previous page first. `builtinScenePaths` are the app's own sub-scenes
-# (the chrome's row scene) that live in the same registry, since the list
-# system resolves every ListView against one registry. Returns whether a page
-# was (re)mounted; a parse failure keeps the last good page and puts the error
-# in the status + diagnostics.
-func documentLoadSystem(
-  document: mod SceneDocument
-  world: mod UiWorld
-  builtinScenePaths: view List(String)
-) ret Bool {
+# Step 1 of a (re)load: parse the file and resolve what it imports. A parse
+# failure keeps the last good page and puts the error in the status +
+# diagnostics; returns whether the document is ready to mount. The theme the
+# page sees is known only after this step (its `import`s name it), so the
+# caller installs it on the world BEFORE documentMountSystem deserialises the
+# nodes — tokens resolve at load time.
+func documentPrepareSystem(document: mod SceneDocument, world: mod UiWorld) ret Bool {
   let scene: Scene = loadSceneFile(path: document.path)
   if scene.ok is false {
     document.status = "parse error: {scene.errorMsg}"
@@ -329,6 +404,30 @@ func documentLoadSystem(
     log("[ui-editor] {document.path}: {document.status}")
     ret false
   }
+  clearSceneDiagnostics(diagnostics: world.sceneDiagnostics)
+  document.scene = scene
+  document.registry = createSceneRegistry()
+  document.assets = resolveSceneAssets(
+    entry: document.scene
+    entryPath: document.path
+    root: document.root
+    registry: document.registry
+    diagnostics: world.sceneDiagnostics
+    sceneLabel: document.fileName
+  )
+  reportUnimportedTheme(document: document, world: world)
+  ret true
+}
+
+# Step 2: register + mount the prepared scene under the `document` layer; on a
+# reload, unmount the previous page first. `builtinScenePaths` are the app's
+# own sub-scenes (the chrome's row scene) that live in the same registry, since
+# the list system resolves every ListView against one registry.
+func documentMountSystem(
+  document: mod SceneDocument
+  world: mod UiWorld
+  builtinScenePaths: view List(String)
+) {
   var scrolls: ScrollSnapshot = {
     nodeIds: List.create(String, cap: 1)
     offsets: List.create(Float, cap: 1)
@@ -337,9 +436,6 @@ func documentLoadSystem(
     scrolls = snapshotDocumentScrolls(world: world)
     unmountPage(world: world, pageId: "document")
   }
-  clearSceneDiagnostics(diagnostics: world.sceneDiagnostics)
-  document.scene = scene
-  document.registry = createSceneRegistry()
   loop var b: Int = 0, b < builtinScenePaths.length, ++b {
     if let builtinPath: String = builtinScenePaths.copyAt(index: b) {
       let builtin: Scene = loadSceneFile(path: builtinPath)
@@ -383,5 +479,4 @@ func documentLoadSystem(
   document.nodeCount = aliveCount(world: world) - before
   document.loaded = true
   document.status = "ok"
-  ret true
 }

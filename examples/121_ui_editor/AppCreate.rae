@@ -11,6 +11,7 @@ open ui/Pipeline
 open ui/Scene
 open ui/SceneFile
 open ui/SceneInstance
+open ui/SceneImports
 open ui/SceneLoader
 open ui/ScenePolicy
 open ui/Theme
@@ -22,51 +23,100 @@ open ecs/Entity
 open ecs/Schedule
 open Gpu2dCanvas
 
-# The shared Roboto MSDF atlas (no per-example font copies, as 119 does).
-const fontDirectory: String = "examples/105_ui_counter/assets/"
+# The viewer's FALLBACK fonts (the shared Roboto + Material atlases, as 119
+# uses) — what a document that declares no `assets.fonts` renders with. A
+# document's own fonts come through its imports (#1008); RAE_UI_EDITOR_FONT /
+# RAE_UI_EDITOR_ICON_FONT (a `.mtsdf.json` path) are viewer-only overrides.
+const fallbackFontDirectory: String = "examples/105_ui_counter/assets/"
 
-const chromeScenePath: String = "examples/121_ui_editor/assets/scenes/editor.raescene"
+const chromeScenePath: String = "examples/121_ui_editor/assets/scenes/Editor.raescene"
 
 # The chrome's own sub-scenes, registered into the document's registry on
 # every load (one registry serves every ListView, chrome or document).
-const diagnosticRowScenePath: String = "examples/121_ui_editor/assets/scenes/chrome/diagnostic-row.raescene"
+const diagnosticRowScenePath: String = "examples/121_ui_editor/assets/scenes/chrome/DiagnosticRow.raescene"
 
-const inspectorScenePath: String = "examples/121_ui_editor/assets/scenes/chrome/inspector.raescene"
+const inspectorScenePath: String = "examples/121_ui_editor/assets/scenes/chrome/Inspector.raescene"
 
-const treeRowScenePath: String = "examples/121_ui_editor/assets/scenes/chrome/tree-row.raescene"
+const treeRowScenePath: String = "examples/121_ui_editor/assets/scenes/chrome/TreeRow.raescene"
 
-# The theme from `<scene dir>/theme.raescene` when the document ships one,
-# else the library default; re-read on every reload (the theme is watched).
-func reloadEditorTheme(gpuUi: mod Gpu2dUi, sceneDirectory: view String, quiet: view Bool) {
+# The theme the document sees: its own token sections, then its `import`s in
+# order (#1008) — nothing is read from the directory. Installed on every
+# (re)load, BEFORE the page mounts, since tokens resolve at load time.
+func applyDocumentTheme(gpuUi: mod Gpu2dUi, document: view SceneDocument, quiet: view Bool) {
   var theme: ResolvedTheme = createResolvedTheme()
-  var active: Theme = lightTheme()
-  let themePath: String = "{sceneDirectory}theme.raescene"
-  if exists(path: themePath) {
-    let themeScene: Scene = loadSceneFile(path: themePath)
-    theme = parseTheme(scene: themeScene)
-    active = overlayPalette(base: lightTheme(), tokens: theme)
-    if not quiet {
-      log("[ui-editor] theme: {themePath}")
-    }
-  } else {
-    if not quiet {
-      log("[ui-editor] theme: library default (no {themePath})")
+  theme = sceneImportedTheme(
+    entry: document.scene
+    assets: document.assets
+    registry: document.registry
+  )
+  if not quiet {
+    if document.assets.importedIds.length > 0 {
+      log("[ui-editor] theme: from {document.fileName} and its imports")
+    } else {
+      log("[ui-editor] theme: {document.fileName} alone (no imports)")
     }
   }
+  gpuUi.activeTheme = overlayPalette(base: lightTheme(), tokens: theme)
   gpuUi.theme = own theme
-  gpuUi.activeTheme = active
 }
 
-# Fonts from the shared atlas dir; the theme follows the document
-# (loadUiAssets ties both to one directory, which a viewer cannot use).
-func createEditorUi(sceneDirectory: view String) ret Gpu2dUi {
+# Which font files the document asks for: the viewer override, else the
+# document's `assets.fonts`, else "" (the fallback atlas).
+func wantedTextFont(document: view SceneDocument) ret String {
+  let override: String = getEnv(name: "RAE_UI_EDITOR_FONT")
+  if override.length() > 0 {
+    ret override
+  }
+  ret "{document.assets.textFontPath}"
+}
+
+func wantedIconFont(document: view SceneDocument) ret String {
+  let override: String = getEnv(name: "RAE_UI_EDITOR_ICON_FONT")
+  if override.length() > 0 {
+    ret override
+  }
+  ret "{document.assets.iconFontPath}"
+}
+
+# Swap the fonts when the document's differ from the loaded ones (an atlas
+# slot is spent per load, so a reload with the same fonts loads nothing).
+func applyDocumentFonts(gpuUi: mod Gpu2dUi, fonts: mod EditorFonts, document: view SceneDocument) {
+  let text: String = wantedTextFont(document: document)
+  if text is not fonts.textFontPath {
+    var font: SdfFont = SdfText.loadSdfFont(
+      jsonPath: "{fallbackFontDirectory}Roboto-Regular.mtsdf.json"
+      rawAtlasPath: "{fallbackFontDirectory}Roboto-Regular.mtsdf.raw"
+    )
+    if text.length() > 0 {
+      font = SdfText.loadSdfFontJson(jsonPath: text)
+    }
+    gpuUi.textFont = own font
+    fonts.textFontPath = text
+  }
+  let icons: String = wantedIconFont(document: document)
+  if icons is not fonts.iconFontPath {
+    var font: SdfFont = SdfText.loadSdfFont(
+      jsonPath: "{fallbackFontDirectory}MaterialIconsRound-Regular.mtsdf.json"
+      rawAtlasPath: "{fallbackFontDirectory}MaterialIconsRound-Regular.mtsdf.raw"
+    )
+    if icons.length() > 0 {
+      font = SdfText.loadSdfFontJson(jsonPath: icons)
+    }
+    gpuUi.iconFont = own font
+    fonts.iconFontPath = icons
+  }
+}
+
+# The fallback fonts and the library default tokens; the document's theme and
+# fonts replace them per load (applyDocumentTheme / applyDocumentFonts).
+func createEditorUi() ret Gpu2dUi {
   let textFont: SdfFont = SdfText.loadSdfFont(
-    jsonPath: "{fontDirectory}Roboto-Regular.mtsdf.json"
-    rawAtlasPath: "{fontDirectory}Roboto-Regular.mtsdf.raw"
+    jsonPath: "{fallbackFontDirectory}Roboto-Regular.mtsdf.json"
+    rawAtlasPath: "{fallbackFontDirectory}Roboto-Regular.mtsdf.raw"
   )
   let iconFont: SdfFont = SdfText.loadSdfFont(
-    jsonPath: "{fontDirectory}MaterialIconsRound-Regular.mtsdf.json"
-    rawAtlasPath: "{fontDirectory}MaterialIconsRound-Regular.mtsdf.raw"
+    jsonPath: "{fallbackFontDirectory}MaterialIconsRound-Regular.mtsdf.json"
+    rawAtlasPath: "{fallbackFontDirectory}MaterialIconsRound-Regular.mtsdf.raw"
   )
   var gpuUi: Gpu2dUi = {
     textFont: own textFont
@@ -74,7 +124,6 @@ func createEditorUi(sceneDirectory: view String) ret Gpu2dUi {
     theme: createResolvedTheme()
     activeTheme: lightTheme()
   }
-  reloadEditorTheme(gpuUi: gpuUi, sceneDirectory: sceneDirectory, quiet: false)
   ret gpuUi
 }
 
@@ -89,7 +138,8 @@ func createApp() ret App {
   var canvas: Gpu2dCanvas = createGpu2dCanvas()
 
   var document: SceneDocument = createSceneDocument(path: resolveScenePath())
-  let gpuUi: Gpu2dUi = createEditorUi(sceneDirectory: document.directory)
+  var gpuUi: Gpu2dUi = createEditorUi()
+  var fonts: EditorFonts = { textFontPath: "", iconFontPath: "" }
   var builtinScenePaths: List(String) = List.create(String, cap: 2)
   builtinScenePaths.add(value: diagnosticRowScenePath)
   builtinScenePaths.add(value: inspectorScenePath)
@@ -103,11 +153,13 @@ func createApp() ret App {
   let chromeLayer: EntityId = createLayerEntity(world: world, id: "chrome", order: 100)
   var inspector: InspectorState = createInspectorState(world: world)
 
-  let mounted: Bool = documentLoadSystem(
-    document: document
-    world: world
-    builtinScenePaths: builtinScenePaths
-  )
+  let mounted: Bool = documentPrepareSystem(document: document, world: world)
+  if mounted {
+    applyDocumentTheme(gpuUi: gpuUi, document: document, quiet: false)
+    reseedWorldTheme(world: world, res: gpuUi)
+    applyDocumentFonts(gpuUi: gpuUi, fonts: fonts, document: document)
+    documentMountSystem(document: document, world: world, builtinScenePaths: builtinScenePaths)
+  }
   applyViewport(
     viewport: viewport
     world: world
@@ -143,7 +195,7 @@ func createApp() ret App {
       search: textures
       world: world
       canvas: canvas
-      sceneDirectory: document.directory
+      assets: document.assets
       sceneId: document.fileName
     )
   }
@@ -176,6 +228,7 @@ func createApp() ret App {
       viewport: viewport
       chrome: chrome
       textures: own textures
+      fonts: fonts
       watch: own watch
       inspector: own inspector
       testSelectNodeId: testSelectNodeId

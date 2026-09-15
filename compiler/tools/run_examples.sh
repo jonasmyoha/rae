@@ -200,25 +200,31 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # (examples/121_ui_editor/references, `make -C examples/121_ui_editor
           # references` to regenerate) — tolerant, and skipped when the
           # machine renders at another DPR than the reference.
-          for SAMPLE in MainMenu Settings CardStrip Coverage; do
-            SCREENSHOT="$TMP_OUT/ui-editor-$SAMPLE.bmp"
+          # SelfContained and split/Page (#1008) are the two `import`/`assets`
+          # shapes: one file with everything inline, and a page importing
+          # `split/Theme` + `split/Assets` by package path from the samples
+          # root (the scene root is passed explicitly, as `--scene-root` would).
+          for SAMPLE in MainMenu Settings CardStrip Coverage SelfContained split/Page; do
+            NAME="$(basename "$SAMPLE")"
+            SCREENSHOT="$TMP_OUT/ui-editor-$NAME.bmp"
             # Coverage animates (#1005): an exact frame at a fixed step keeps
             # its reference deterministic; the static samples use wall-clock.
             SAMPLE_BUDGET="RAE_SDL_HEADLESS_MS=1500"
             if [ "$SAMPLE" = "Coverage" ]; then SAMPLE_BUDGET="RAE_HEADLESS_FRAMES=12 RAE_FIXED_DT=0.05"; fi
             if (cd .. && env RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/$SAMPLE.raescene" \
+               RAE_UI_EDITOR_ROOT="examples/121_ui_editor/assets/samples" \
                RAE_UI_HEADLESS=1 $SAMPLE_BUDGET RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
-               perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-$SAMPLE.log" 2>&1 \
-               && grep -qE "\[ui-editor\] mounted $SAMPLE: [1-9][0-9]* nodes, 0 diagnostics" "$TMP_OUT/render-$SAMPLE.log" \
+               perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-$NAME.log" 2>&1 \
+               && grep -qE "\[ui-editor\] mounted $NAME: [1-9][0-9]* nodes, 0 diagnostics" "$TMP_OUT/render-$NAME.log" \
                && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=50 \
-                  > "$TMP_OUT/screenshot-$SAMPLE.log" 2>&1 \
-               && python3 tools/assert_bmp_diff.py "$SCREENSHOT" "../examples/121_ui_editor/references/$SAMPLE.png" \
-                  --skip-size-mismatch >> "$TMP_OUT/screenshot-$SAMPLE.log" 2>&1; then
+                  > "$TMP_OUT/screenshot-$NAME.log" 2>&1 \
+               && python3 tools/assert_bmp_diff.py "$SCREENSHOT" "../examples/121_ui_editor/references/$NAME.png" \
+                  --skip-size-mismatch >> "$TMP_OUT/screenshot-$NAME.log" 2>&1; then
               :
             else
               UI_EDITOR_OK=0
               echo "  sample $SAMPLE failed:"
-              cat "$TMP_OUT/render-$SAMPLE.log" "$TMP_OUT/screenshot-$SAMPLE.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
+              cat "$TMP_OUT/render-$NAME.log" "$TMP_OUT/screenshot-$NAME.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
             fi
           done
           # The effect systems (#1005): Coverage's AnimFrames / WobbleFx /
@@ -276,7 +282,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/render-select.log" "$TMP_OUT/screenshot-select.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
           fi
           if [ "$UI_EDITOR_OK" = "1" ]; then
-            echo "PASS: $EXAMPLE_NAME (4 samples incl. Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select)"
+            echo "PASS: $EXAMPLE_NAME (6 samples incl. Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (ui editor sample gate)"

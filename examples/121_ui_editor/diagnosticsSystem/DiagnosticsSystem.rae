@@ -2,14 +2,16 @@
 # visible (docs/ui-editor-design.md §3): the loader's `sceneDiagnostics`
 # (unknown component, runtime-only component, unknown token, missing
 # sub-scene, parse error — the #996 `report` policy) plus the textures this
-# system resolves itself. `Sprite.textureKey` is searched in `<scene dir>/`,
-# `<scene dir>/../textures/`, `<scene dir>/../images/` and
-# `$RAE_UI_EDITOR_ASSETS/` as `<key>.png`; a miss registers a hatched
-# placeholder under the key (so the sprite draws a box, not nothing) and records
-# a missingTexture diagnostic. The chrome's counters and status line are
+# system resolves itself. `Sprite.textureKey` resolves through what the scene
+# and its `import`s declare (#1008: the `assets.textures` map, then its dirs as
+# `<dir>/<key>.png`), with `$RAE_UI_EDITOR_ASSETS/<key>.png` as the viewer's
+# own override tried FIRST — nothing is searched by convention; a miss
+# registers a hatched placeholder under the key (so the sprite draws a box, not
+# nothing) and records a missingTexture diagnostic. The chrome's counters and status line are
 # written here from the document + the list; the chrome itself is a scene.
 import Gpu2d
 import String
+open ui/SceneImports
 open Sys
 open ui/Ecs
 open ui/Components
@@ -23,16 +25,17 @@ open Gpu2dCanvas
 const placeholderSize: Int = 64
 
 # The key -> path search state: which keys were already looked up, so the scan
-# over the sprite table is free once every key is settled.
+# over the sprite table is free once every key is settled, and the viewer-only
+# override directory.
 type TextureSearch {
   resolvedKeys: List(String)
-  extraDirectory: String
+  overrideDirectory: String
 }
 
 func createTextureSearch() ret TextureSearch {
   ret TextureSearch {
     resolvedKeys: List.create(String, cap: 16)
-    extraDirectory: getEnv(name: "RAE_UI_EDITOR_ASSETS")
+    overrideDirectory: getEnv(name: "RAE_UI_EDITOR_ASSETS")
   }
 }
 
@@ -47,27 +50,20 @@ func textureKeySettled(search: view TextureSearch, key: view String) ret Bool {
   ret false
 }
 
-# The first `<dir>/<key>.png` that exists, or "".
+# The override directory's `<key>.png` when it exists, else what the scene's
+# assets resolve the key to, else "".
 func findTexturePath(
   search: view TextureSearch
-  sceneDirectory: view String
+  assets: view SceneAssets
   key: view String
 ) ret String {
-  var candidates: List(String) = List.create(String, cap: 4)
-  candidates.add(value: "{sceneDirectory}{key}.png")
-  candidates.add(value: "{sceneDirectory}../textures/{key}.png")
-  candidates.add(value: "{sceneDirectory}../images/{key}.png")
-  if search.extraDirectory.length() > 0 {
-    candidates.add(value: "{search.extraDirectory}/{key}.png")
-  }
-  loop var i: Int = 0, i < candidates.length, ++i {
-    if let candidate: String = candidates.copyAt(index: i) {
-      if exists(path: candidate) {
-        ret candidate
-      }
+  if search.overrideDirectory.length() > 0 {
+    let candidate: String = "{search.overrideDirectory}/{key}.png"
+    if exists(path: candidate) {
+      ret candidate
     }
   }
-  ret ""
+  ret sceneAssetTexturePath(assets: assets, key: key)
 }
 
 # A hatched grey box: diagonal stripes on a lighter field, one packed
@@ -102,7 +98,7 @@ func textureSystem(
   search: mod TextureSearch
   world: mod UiWorld
   canvas: mod Gpu2dCanvas
-  sceneDirectory: view String
+  assets: view SceneAssets
   sceneId: view String
 ) {
   # Every key a sprite shows now or will show (#1005): its textureKey plus its
@@ -142,7 +138,7 @@ func textureSystem(
     if Gpu2d.hasImageKey(canvas: canvas, key: key) {
       continue
     }
-    let path: String = findTexturePath(search: search, sceneDirectory: sceneDirectory, key: key)
+    let path: String = findTexturePath(search: search, assets: assets, key: key)
     if path.length() > 0 {
       let handle: Int = Gpu2d.loadImageKey(canvas: canvas, key: key, path: path)
       if handle > 0 {
@@ -160,7 +156,7 @@ func textureSystem(
       nodeId: nodeLabel
       kind: SceneDiagnosticKind.missingTexture
       name: key
-      message: "no {key}.png beside the scene, in ../textures, ../images or $RAE_UI_EDITOR_ASSETS; drawing a placeholder"
+      message: "no assets.textures map entry or dirs/{key}.png in the scene or its imports (nor $RAE_UI_EDITOR_ASSETS); drawing a placeholder"
     )
   }
 }

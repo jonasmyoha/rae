@@ -6,6 +6,13 @@ open ecs/Schedule
 open ui/renderSystem/RenderSystem
 open Gpu2dCanvas
 
+# Which font files are loaded into gpuUi right now ("" = the fallback atlas),
+# so a reload only spends an atlas slot when the document's fonts change.
+type EditorFonts {
+  textFontPath: String
+  iconFontPath: String
+}
+
 type App {
   gpuUi: Gpu2dUi
   canvas: Gpu2dCanvas
@@ -15,6 +22,7 @@ type App {
   viewport: EditorViewport
   chrome: ChromeState
   textures: TextureSearch
+  fonts: EditorFonts
   watch: FileWatch
   inspector: InspectorState
   testSelectNodeId: String

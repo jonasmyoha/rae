@@ -29,7 +29,7 @@ func toggleChrome(chrome: mod ChromeState, world: mod UiWorld) {
   componentSet(this: world.actives, entity: chrome.pageRoot, data: active)
 }
 
-# A watched file changed: re-read the theme, reload the document (a broken
+# A watched file changed: reload the document (its theme + fonts follow its imports) (a broken
 # save keeps the last good page), refresh textures + chrome, log the delta.
 func reloadDocument(app: mod App) {
   let previousNodes: Int = app.document.nodeCount
@@ -38,14 +38,16 @@ func reloadDocument(app: mod App) {
   if keepSelected.length() is 0 and isNone(this: app.inspector.selected) is false {
     keepSelected = nodeIdOf(world: app.world, entity: app.inspector.selected)
   }
-  reloadEditorTheme(gpuUi: app.gpuUi, sceneDirectory: app.document.directory, quiet: true)
-  seedWorldTheme(world: app.world, res: app.gpuUi)
-  let mounted: Bool = documentLoadSystem(
-    document: app.document
-    world: app.world
-    builtinScenePaths: app.builtinScenePaths
-  )
+  let mounted: Bool = documentPrepareSystem(document: app.document, world: app.world)
   if mounted {
+    applyDocumentTheme(gpuUi: app.gpuUi, document: app.document, quiet: true)
+    reseedWorldTheme(world: app.world, res: app.gpuUi)
+    applyDocumentFonts(gpuUi: app.gpuUi, fonts: app.fonts, document: app.document)
+    documentMountSystem(
+      document: app.document
+      world: app.world
+      builtinScenePaths: app.builtinScenePaths
+    )
     app.document.reloads = app.document.reloads + 1
     applyViewport(
       viewport: app.viewport
@@ -58,7 +60,7 @@ func reloadDocument(app: mod App) {
         search: app.textures
         world: app.world
         canvas: app.canvas
-        sceneDirectory: app.document.directory
+        assets: app.document.assets
         sceneId: app.document.fileName
       )
     }

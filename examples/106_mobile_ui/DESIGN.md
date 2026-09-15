@@ -26,7 +26,7 @@ examples/106_mobile_ui/            the app: ~53 files, one folder per system
   GpuWindow, Headless, HotReloadGlue, AppSettings, FileIo
   inputSystem/ screenSystem/ historySystem/ playbackSystem/ spotifySystem/
   debugSystem/ assetSystem/
-  assets/scenes/*.raescene         12 authored scenes + theme.raescene
+  assets/scenes/*.raescene         12 authored scenes + Theme.raescene
   assets/                          MSDF fonts, icons, album art, catalogue
   app_cache/                       runtime state (gitignored): history,
                                    library, playlists, downloaded artwork
@@ -196,7 +196,7 @@ carries named components (`Rect`, `Layout`, `Text`, `Sprite`, `OnClick`,
 the mini-player, a track row) and per-instance overrides. `lib/ui/Scene*`
 parse and mount; `lib/ui/Registry*` map a component name to its
 deserialiser; an unknown or unsupported component is a fatal diagnostic
-naming the scene and node (#941), never a silent no-op. `theme.raescene`
+naming the scene and node (#941), never a silent no-op. `Theme.raescene`
 declares the tokens (colours, spacing, text styles) that the loader
 resolves through the world's theme resource (`docs/ui-theme-system.md`);
 `RAE_UI_THEME` picks a variant at boot. The registry is still one arm per
