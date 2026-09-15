@@ -1,0 +1,151 @@
+# RenderPaintBox — the geometry helpers the gpu2d painter shares (#1000, split
+# out of RenderSystem.rae at the 1000-line cap): the box an entity paints into
+# (WorldTransform2D scale + hover scale about the TransformFx pivot), the soft
+# drop shadow for `Shadow.blur`, and the `MaskShape` clip.
+open ui/Ecs
+import Gpu2d
+import ui/Components
+open ecs/ComponentTable
+open ecs/Entity
+open Gpu2dCanvas
+
+func g2dColor(color: view RgbaColor) ret Int {
+  ret (color.a shl 24) bitor (color.r shl 16) bitor (color.g shl 8) bitor color.b
+}
+
+func g2dRadius(world: view UiWorld, entity: view EntityId, fallback: view Float) ret Float {
+  if componentHas(this: world.cornerRadiuses, entity: entity) {
+    let cr: CornerRadius = componentGet(this: world.cornerRadiuses, entity: entity)
+    ret cr.radius
+  }
+  ret fallback
+}
+
+func g2dHoverMul(world: view UiWorld, entity: view EntityId) ret Float {
+  if componentHas(this: world.hoverScales, entity: entity) {
+    let hs: HoverScale = componentGet(this: world.hoverScales, entity: entity)
+    ret hs.current
+  }
+  ret 1.0
+}
+
+# The box an entity paints into (#1000): its computed size scaled by the
+# accumulated WorldTransform2D scale (TransformFx.scaleX/Y down the tree) and
+# the hover multiplier, placed about the entity's own TransformFx pivot
+# (centre when it has none — the hover scale's convention). Rotation is
+# carried by the transform but not drawn: gpu2d has no rotated quads yet.
+type PaintBox {
+  x: Float
+  y: Float
+  w: Float
+  h: Float
+  scale: Float
+}
+
+func g2dPaintBox(
+  world: view UiWorld
+  entity: view EntityId
+  wt: view WorldTransform2D
+  cr: view ComputedRect
+) ret PaintBox {
+  let hoverMul: Float = g2dHoverMul(world: world, entity: entity)
+  let scaleX: Float = wt.scale.x * hoverMul
+  let scaleY: Float = wt.scale.y * hoverMul
+  var pivotX: Float = 0.5
+  var pivotY: Float = 0.5
+  if componentHas(this: world.transforms, entity: entity) {
+    let fx: TransformFx = componentGet(this: world.transforms, entity: entity)
+    pivotX = fx.pivot.x
+    pivotY = fx.pivot.y
+  }
+  let w: Float = cr.size.x * scaleX
+  let h: Float = cr.size.y * scaleY
+  var uniform: Float = scaleX
+  if scaleY < uniform {
+    uniform = scaleY
+  }
+  ret PaintBox {
+    x: wt.position.x + (cr.size.x - w) * pivotX
+    y: wt.position.y + (cr.size.y - h) * pivotY
+    w: w
+    h: h
+    scale: uniform
+  }
+}
+
+# `Shadow.blur` (#1000): gpu2d has no blur, so a soft drop shadow is three
+# translucent rounded rects growing by a third of the blur each, offset down
+# by a third of it — under the entity's own shape.
+func paintShadowG(
+  world: view UiWorld
+  entity: view EntityId
+  box: view PaintBox
+  radius: view Float
+  chain255: view Int
+  canvas: mod Gpu2dCanvas
+) {
+  let shadow: Shadow = componentGet(this: world.shadows, entity: entity)
+  if shadow.blur <= 0.0 {
+    ret
+  }
+  let step: Float = shadow.blur / 3.0
+  loop var layer: Int = 0, layer < 3, ++layer {
+    let grow: Float = step * (layer + 1).toFloat()
+    let alpha: Int = (70 - layer * 22) * chain255 / 255
+    Gpu2d.drawRoundedRect(
+      canvas: canvas
+      x: box.x - grow
+      y: box.y - grow + step
+      w: box.w + grow * 2.0
+      h: box.h + grow * 2.0
+      radius: radius + grow
+      color: g2dColor(color: RgbaColor { r: 0, g: 0, b: 0, a: alpha })
+    )
+  }
+}
+
+# The mask's box: the entity's own, or the named source node's (resolved in
+# the entity's page). Returns whether a clip was pushed.
+func pushMaskClipG(world: view UiWorld, entity: view EntityId, canvas: mod Gpu2dCanvas) ret Bool {
+  let mask: MaskShape = componentGet(this: world.maskShapes, entity: entity)
+  var source: EntityId = entity
+  if mask.sourceNodeId.length() > 0 {
+    let page: String = pageOf(world: world, entity: entity)
+    if let index: Int = findNodeInPage(world: world, pageId: page, nodeId: mask.sourceNodeId) {
+      source = nodeEntity(world: world, index: index)
+    }
+  }
+  if componentHas(this: world.computedRects, entity: source) is false or componentHas(
+    this: world.worldTransforms
+    entity: source
+  ) is false {
+    ret false
+  }
+  let cr: ComputedRect = componentGet(this: world.computedRects, entity: source)
+  let wt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: source)
+  var x: Float = wt.position.x
+  var y: Float = wt.position.y
+  var w: Float = cr.size.x
+  var h: Float = cr.size.y
+  var radius: Float = mask.radius
+  if mask.kind is MaskKind.circle {
+    var diameter: Float = w
+    if h < diameter {
+      diameter = h
+    }
+    x = x + (w - diameter) / 2.0
+    y = y + (h - diameter) / 2.0
+    w = diameter
+    h = diameter
+    radius = diameter / 2.0
+  }
+  Gpu2d.pushClipRoundedRect(
+    canvas: canvas
+    x: x
+    y: y
+    w: w
+    h: h
+    radius: radius
+  )
+  ret true
+}
