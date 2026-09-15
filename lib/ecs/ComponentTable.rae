@@ -123,6 +123,11 @@ func componentHas(T: type, this: view ComponentTable(T), entity: view EntityId) 
 #     let r: Rect = componentGet(table, entity: e)
 #     ...
 #   }
+#
+# The value is a SHALLOW struct copy: for a component that owns heap (a List
+# or String field — AnimFrames, ImageSourceResolver) the copy aliases the
+# table's buffers and its drop frees them under the table (#1007). Read such a
+# component through `componentView` / `componentMod` instead.
 func componentGet(T: type, this: view ComponentTable(T), entity: view EntityId) ret T {
   unsafe {
     let idx: Int = componentIndexOf(this, entity: entity)
@@ -286,7 +291,9 @@ func componentEntityAt(T: type, this: view ComponentTable(T), i: view Int) ret E
   }
 }
 
-# Iteration helper: returns the component data at dense index `i`.
+# Iteration helper: returns the component data at dense index `i` — a SHALLOW
+# copy, same caveat as componentGet: pair `componentEntityAt` with
+# `componentView` for a component that owns heap (#1007).
 func componentDataAt(T: type, this: view ComponentTable(T), i: view Int) ret T {
   unsafe {
     let v: T = rae_ext_rae_buf_get(buf: this.denseData.data, index: i)

@@ -868,6 +868,7 @@ static bool sema_is_numeric_kind(TypeKind k);
 static bool sema_is_scalar_kind(TypeKind k);
 static const char* sema_scalar_name(TypeKind k);
 static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstDecl* generic_decl, TypeInfo** args, size_t arg_count, size_t line, size_t column);
+static AstTypeRef* sema_type_ref_of(CompilerContext* ctx, TypeInfo* t);
 
 AstIdentifierPart* clone_parts(CompilerContext* ctx, const AstIdentifierPart* p) {
     if (!p) return NULL;
@@ -1055,7 +1056,14 @@ static AstStmt* clone_stmt(Arena* arena, const AstStmt* stmt) {
     // but the analyzer will overwrite them.
     switch (stmt->kind) {
         case AST_STMT_EXPR: res->as.expr_stmt = clone_expr(arena, stmt->as.expr_stmt); break;
-        case AST_STMT_LET: res->as.let_stmt.value = clone_expr(arena, stmt->as.let_stmt.value); break;
+        case AST_STMT_LET:
+            res->as.let_stmt.value = clone_expr(arena, stmt->as.let_stmt.value);
+            // The written type is re-resolved per specialization: a shared
+            // `let x: T` ref would cache the FIRST instantiation's T on the
+            // template (#1007: `if let member: T` in a generic decoder bound to
+            // List(String) reported every later List(Int) body as a mismatch).
+            res->as.let_stmt.type = clone_type_ref(arena, stmt->as.let_stmt.type);
+            break;
         case AST_STMT_RET: {
             AstReturnArg* head = NULL; AstReturnArg* tail = NULL;
             AstReturnArg* curr = stmt->as.ret_stmt.values;
@@ -1110,10 +1118,23 @@ static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, SymbolT
     else if (spec->kind == AST_DECL_TYPE) spec->as.type_decl.generic_template = generic_decl;
     AstTypeRef* args_tr = NULL; AstTypeRef* last_tr = NULL;
     for (size_t i = 0; i < arg_count; i++) {
-        AstTypeRef* tr = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef));
-        tr->resolved_type = args[i]; tr->next = NULL;
-        tr->parts = arena_alloc(ctx->ast_arena, sizeof(AstIdentifierPart));
-        tr->parts->text = args[i]->name;
+        AstTypeRef* tr = NULL;
+        if (args[i] && args[i]->kind == TYPE_STRUCT && args[i]->as.structure.decl
+            && args[i]->as.structure.generic_count > 0) {
+            // A generic instantiation argument (`decodeField` over a
+            // `List(String)` field): spell the template name with its args,
+            // not the mangled TypeInfo name `List_String`, so the
+            // specialization's params/returns substitute to a real type (#1007).
+            tr = sema_type_ref_of(ctx, args[i]);
+        } else {
+            tr = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef));
+            memset(tr, 0, sizeof(*tr));
+            tr->resolved_type = args[i];
+            tr->parts = arena_alloc(ctx->ast_arena, sizeof(AstIdentifierPart));
+            memset(tr->parts, 0, sizeof(*tr->parts));
+            tr->parts->text = args[i]->name;
+        }
+        tr->next = NULL;
         if (!args_tr) args_tr = tr; else last_tr->next = tr;
         last_tr = tr;
     }
@@ -1634,7 +1655,21 @@ static AstDecl* resolve_function_overload(CompilerContext* ctx, AstModule* modul
                     if (a->value && a->value->resolved_type) {
                         TypeInfo* arg_t = a->value->resolved_type;
                         if (arg_t->kind == TYPE_REF) arg_t = arg_t->as.ref.base;
-                        if (arg_t->kind == TYPE_STRUCT || arg_t->kind == TYPE_BUFFER) {
+                        bool bare_param = false;
+                        for (const AstIdentifierPart* gp = fd->generic_params; gp && p->type; gp = gp->next)
+                            if (str_eq(get_base_type_name(p->type), gp->text)) { bare_param = true; break; }
+                        if (bare_param && arg_t->kind == TYPE_STRUCT && arg_t->as.structure.decl
+                            && arg_t->as.structure.generic_count > 0) {
+                            // A generic INSTANTIATION (`List(String)`) bound to
+                            // a bare-`T` parameter (`fallback: copy T`): its
+                            // TypeInfo name is the mangled `List_String`, which
+                            // bound verbatim fails to resolve (a Void
+                            // specialization, #1007). Spell it as the template
+                            // name plus its args. Container-shaped patterns
+                            // (`this: view ComponentTable(T)`) keep the path
+                            // below, which the backend re-infers per call.
+                            inferred = infer_generic_args(ctx, fd, p->type, sema_type_ref_of(ctx, arg_t));
+                        } else if (arg_t->kind == TYPE_STRUCT || arg_t->kind == TYPE_BUFFER) {
                             AstTypeRef rec_tr = { .parts = arena_alloc(ctx->ast_arena, sizeof(AstIdentifierPart)) };
                             rec_tr.parts->text = (arg_t->kind == TYPE_BUFFER) ? str_from_cstr("Buffer") : arg_t->name;
                             

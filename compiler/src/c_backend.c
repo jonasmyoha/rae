@@ -1370,8 +1370,9 @@ const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
              * lowering below picks it. Without this the receiver of a CHAINED
              * call types as nothing and the next method binds a same-named
              * overload for a different type. */
+            const AstTypeRef* rtr = NULL;
             if (!mdecl) {
-                const AstTypeRef* rtr = infer_expr_type_ref(ctx, expr->as.method_call.object);
+                rtr = infer_expr_type_ref(ctx, expr->as.method_call.object);
                 Str rbase = get_base_type_name(rtr);
                 if (rbase.len > 0) {
                     for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count; i++) {
@@ -1384,6 +1385,34 @@ const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
                         if (!str_eq(get_base_type_name(cfd->params->type), rbase)) continue;
                         mdecl = d; break;
                     }
+                }
+            }
+            /* A MODULE-qualified call (`Json.jsonString(this: v, fallback: "")`)
+             * inside a generic template also carries no decl_link, and its
+             * receiver is a module name with no type at all. Recover the callee
+             * the way the lowering in c_expr.c does — by name — narrowed to the
+             * candidate whose parameter list matches the written arguments
+             * (count and names), so the String-returning result is typed and
+             * the caller can pool-take it before moving it into an `own`
+             * parameter (#1007). */
+            if (!mdecl && !rtr && expr->as.method_call.object->kind == AST_EXPR_IDENT
+                && !is_pointer_type(ctx, expr->as.method_call.object->as.ident)) {
+                uint16_t arg_count = 0;
+                for (const AstCallArg* ca = expr->as.method_call.args; ca; ca = ca->next) arg_count++;
+                for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count; i++) {
+                    const AstDecl* d = ctx->compiler_ctx->all_decls[i];
+                    if (d->kind != AST_DECL_FUNC) continue;
+                    const AstFuncDecl* cfd = &d->as.func_decl;
+                    if (!str_eq(cfd->name, expr->as.method_call.method_name)) continue;
+                    if (cfd->specialization_args || cfd->generic_params) continue;
+                    uint16_t param_count = 0; bool names_match = true;
+                    const AstCallArg* ca = expr->as.method_call.args;
+                    for (const AstParam* pp = cfd->params; pp; pp = pp->next, param_count++) {
+                        if (ca && ca->name.len > 0 && !str_eq(ca->name, pp->name)) names_match = false;
+                        if (ca) ca = ca->next;
+                    }
+                    if (param_count != arg_count || !names_match) continue;
+                    mdecl = d; break;
                 }
             }
             if (!mdecl) break;
