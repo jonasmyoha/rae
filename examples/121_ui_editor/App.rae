@@ -14,6 +14,7 @@ open ui/SceneLoader
 open ui/Pipeline
 open ui/inputSystem/InputSystem
 open ui/listViewSystem/ListViewSystem
+open ui/animationSystem/EffectSystems
 open ui/renderSystem/RenderSystem
 open app3d/UiShell
 open ecs/Entity
@@ -91,6 +92,39 @@ func reloadDocument(app: mod App) {
   }
 }
 
+# The six effect systems in schedule order; true while any is live.
+func effectSystems(
+  app: mod App
+  deltaTime: view Float
+  clock: view Float
+  input: view UiInput
+) ret Bool {
+  var live: Bool = false
+  if animFramesSystem(world: app.world, deltaTime: deltaTime) {
+    live = true
+  }
+  animTriggerSystem(world: app.world)
+  if wobbleFxSystem(world: app.world, time: clock) {
+    live = true
+  }
+  if backgroundPanSystem(world: app.world, time: clock) {
+    live = true
+  }
+  if smokeFxSystem(world: app.world, deltaTime: deltaTime) {
+    live = true
+  }
+  if carouselSystem(
+    world: app.world
+    deltaTime: deltaTime
+    pointerX: input.pointer.x
+    pointerY: input.pointer.y
+    pointerDown: input.pointer.down
+  ) {
+    live = true
+  }
+  ret live
+}
+
 func runApp(app: mod App) ret Int {
   var input: UiInput = createUiInput()
   listViewSystem(world: app.world, scenes: app.document.registry)
@@ -115,6 +149,9 @@ func runApp(app: mod App) ret Int {
   runScheduledUiSystems(schedule: app.schedule, world: app.world, res: app.gpuUi)
   var renderedOnce: Bool = false
   var wokeUp: Bool = false
+  var previousNow: Float64 = Gpu2d.nowSeconds()
+  var animating: Bool = false
+  var effectTime: Float = 0.0
 
   loop not Gpu2d.pollClose() {
     var changed: Bool = viewportSystem(viewport: app.viewport)
@@ -146,6 +183,23 @@ func runApp(app: mod App) ret Int {
     ) {
       changed = true
     }
+    # The effect systems (#1005) run every frame the document has any; while
+    # one is live the loop stays a busy render loop (animating -> frame wait).
+    var deltaTime: Float = (now - previousNow) as Float
+    previousNow = now
+    if deltaTime < 0.0 or deltaTime > 0.25 {
+      deltaTime = 0.016667
+    }
+    effectTime = effectTime + deltaTime
+    animating = effectSystems(
+      app: app
+      deltaTime: deltaTime
+      clock: effectTime
+      input: input
+    )
+    if animating {
+      changed = true
+    }
     if hadEvents or changed {
       listViewSystem(world: app.world, scenes: app.document.registry)
       runScheduledUiSystems(schedule: app.schedule, world: app.world, res: app.gpuUi)
@@ -167,7 +221,7 @@ func runApp(app: mod App) ret Int {
       # The watcher is a poll, so the wait is bounded by its interval while
       # the window can show a reload; a hidden window sleeps on the heartbeat.
       Gpu2d.waitEvents(timeoutSec: nextWaitTimeoutSec(
-        animating: false
+        animating: animating
         mouseDown: false
         pollWatcher: Gpu2d.renderableNow()
         frameSec: 0.016667

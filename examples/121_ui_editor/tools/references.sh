@@ -13,9 +13,13 @@ cd "$REPO_ROOT"
 OUT_DIR="examples/121_ui_editor/references"
 mkdir -p "$OUT_DIR"
 TMP="$(mktemp -d)"
+# Coverage animates (#1005), so its reference is frame 12 at a fixed 50 ms step
+# (deterministic); the static samples take a wall-clock budget.
 for SAMPLE in MainMenu Settings CardStrip Coverage; do
-  RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/$SAMPLE.raescene" \
-  RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$TMP/$SAMPLE.bmp" \
+  BUDGET="RAE_SDL_HEADLESS_MS=1500"
+  if [ "$SAMPLE" = "Coverage" ]; then BUDGET="RAE_HEADLESS_FRAMES=12 RAE_FIXED_DT=0.05"; fi
+  env RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/$SAMPLE.raescene" \
+  RAE_UI_HEADLESS=1 $BUDGET RAE_GPU2D_SCREENSHOT="$TMP/$SAMPLE.bmp" \
   perl -e 'alarm shift; exec @ARGV' 120 \
     compiler/bin/rae run --project examples/121_ui_editor examples/121_ui_editor/Main.rae \
     > "$TMP/$SAMPLE.log" 2>&1 || { echo "render of $SAMPLE failed:"; grep -v '^\[present\]' "$TMP/$SAMPLE.log" | tail -20; exit 1; }
