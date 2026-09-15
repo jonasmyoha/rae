@@ -1,7 +1,10 @@
 # runApp — the passive view loop: the lib/ui systems on the #939 Schedule,
-# the ListView system (rows are placeholder data, documentSystem), `H` toggles
+# the ListView system (rows are placeholder data, documentSystem), the file
+# watcher (a 250 ms poll fed into the wait as `pollWatcher`), `D` the
+# diagnostics panel, `H` toggles
 # the chrome, and the same idle policy as 105 (repaint on wake, ~0% CPU idle).
 import Gpu2d
+import Sys
 import Keys
 import Sdl3
 open ui/Ecs
@@ -24,6 +27,54 @@ func toggleChrome(chrome: mod ChromeState, world: mod UiWorld) {
   componentSet(this: world.actives, entity: chrome.pageRoot, data: active)
 }
 
+# A watched file changed: re-read the theme, reload the document (a broken
+# save keeps the last good page), refresh textures + chrome, log the delta.
+func reloadDocument(app: mod App) {
+  let previousNodes: Int = app.document.nodeCount
+  reloadEditorTheme(gpuUi: app.gpuUi, sceneDirectory: app.document.directory, quiet: true)
+  seedWorldTheme(world: app.world, res: app.gpuUi)
+  let mounted: Bool = documentLoadSystem(
+    document: app.document
+    world: app.world
+    builtinScenePaths: app.builtinScenePaths
+  )
+  if mounted {
+    app.document.reloads = app.document.reloads + 1
+    applyViewport(
+      viewport: app.viewport
+      world: app.world
+      designW: app.document.designW
+      designH: app.document.designH
+    )
+    unsafe {
+      textureSystem(
+        search: app.textures
+        world: app.world
+        canvas: app.canvas
+        sceneDirectory: app.document.directory
+        sceneId: app.document.fileName
+      )
+    }
+  }
+  chromeSyncSystem(
+    world: app.world
+    fileName: app.document.fileName
+    designW: app.document.designW
+    designH: app.document.designH
+    nodeCount: app.document.nodeCount
+    status: app.document.status
+  )
+  watchRememberMtimes(watch: app.watch, paths: app.document.watchedPaths)
+  let diagnostics: Int = app.world.sceneDiagnostics.length
+  if mounted {
+    log(
+      "[ui-editor] reloaded {app.document.path} (+{app.document.nodeCount} -{previousNodes} nodes, {diagnostics} diagnostics)"
+    )
+  } else {
+    log("[ui-editor] reload of {app.document.path} kept the last good page: {app.document.status}")
+  }
+}
+
 func runApp(app: mod App) ret Int {
   var input: UiInput = createUiInput()
   listViewSystem(world: app.world, scenes: app.document.registry)
@@ -37,6 +88,18 @@ func runApp(app: mod App) ret Int {
     let hadEvents: Bool = uiActionCount(world: app.world) > 0
     if Sdl3.isKeyPressed(key: Keys.keyH) {
       toggleChrome(chrome: app.chrome, world: app.world)
+      changed = true
+    }
+    if Sdl3.isKeyPressed(key: Keys.keyD) {
+      setDiagnosticsPanelOpen(chrome: app.chrome, world: app.world, open: not app.chrome.panelOpen)
+      changed = true
+    }
+    let now: Float64 = Gpu2d.nowSeconds()
+    if testRewriteSystem(watch: app.watch, path: app.document.path, now: now) {
+      changed = true
+    }
+    if fileWatchSystem(watch: app.watch, paths: app.document.watchedPaths, now: now) {
+      reloadDocument(app: app)
       changed = true
     }
     if hadEvents or changed {
@@ -57,10 +120,12 @@ func runApp(app: mod App) ret Int {
       Gpu2d.endFrame(canvas: app.canvas)
       renderedOnce = true
     } else {
+      # The watcher is a poll, so the wait is bounded by its interval while
+      # the window can show a reload; a hidden window sleeps on the heartbeat.
       Gpu2d.waitEvents(timeoutSec: nextWaitTimeoutSec(
         animating: false
         mouseDown: false
-        pollWatcher: false
+        pollWatcher: Gpu2d.renderableNow()
         frameSec: 0.016667
         heartbeatSec: idleHeartbeatSec
       ))
