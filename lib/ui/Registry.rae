@@ -419,6 +419,11 @@ func applyAuthoredFixups(
   if name is "Sprite" {
     let sprite: mod Sprite => componentMod(this: world.sprites, entity: entity)
     sprite.tintSlot = slotNameOf(doc: doc, val: val, key: "tint")
+    # Authoring `nineSlice` with any border IS asking for a nine-slice; the
+    # flag need not be spelled out (#1003).
+    if sprite.nineSlice.l > 0.0 or sprite.nineSlice.t > 0.0 or sprite.nineSlice.r > 0.0 or sprite.nineSlice.b > 0.0 {
+      sprite.hasNineSlice = true
+    }
     ret
   }
   if name is "Shape" {

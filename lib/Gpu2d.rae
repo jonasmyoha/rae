@@ -786,6 +786,84 @@ func drawImageKey(
   )
 }
 
+# Rotation (#1003): until clearRotation, every box, image and glyph drawn turns
+# by `angle` radians about (pivotX, pivotY) in design units. Clips stay
+# axis-aligned. Cleared at every beginFrame.
+func setRotation(
+  canvas: mod Gpu2dCanvas
+  angle: copy Float
+  pivotX: copy Float
+  pivotY: copy Float
+) {
+  canvasSetRotation(
+    canvas: canvas
+    angle: angle
+    pivotX: pivotX
+    pivotY: pivotY
+  )
+}
+
+func clearRotation(canvas: mod Gpu2dCanvas) {
+  canvasClearRotation(canvas: canvas)
+}
+
+# Nine-slice (#1003): the image's left/top/right/bottom source pixels keep that
+# thickness (design units) at the destination's edges; the middle stretches.
+func drawImageKeyNineSlice(
+  canvas: mod Gpu2dCanvas
+  key: copy String
+  x: copy Float
+  y: copy Float
+  w: copy Float
+  h: copy Float
+  left: copy Float
+  top: copy Float
+  right: copy Float
+  bottom: copy Float
+  tint: copy Int
+) {
+  canvasDrawImageKeyNineSlice(
+    canvas: canvas
+    key: key
+    x: x
+    y: y
+    w: w
+    h: h
+    left: left
+    top: top
+    right: right
+    bottom: bottom
+    tint: tint
+  )
+}
+
+# Tiled (#1003): the image repeats tileX x tileY times across the rect.
+func drawImageKeyTiled(
+  canvas: mod Gpu2dCanvas
+  key: copy String
+  x: copy Float
+  y: copy Float
+  w: copy Float
+  h: copy Float
+  radius: copy Float
+  tint: copy Int
+  tileX: copy Float
+  tileY: copy Float
+) {
+  canvasDrawImageKeyTiled(
+    canvas: canvas
+    key: key
+    x: x
+    y: y
+    w: w
+    h: h
+    radius: radius
+    tint: tint
+    tileX: tileX
+    tileY: tileY
+  )
+}
+
 # Draw a registered image with ScaleMode semantics:
 # 0 = fit, 1 = fill/cover-crop, 2 = stretch.
 func drawImageKeyScaled(

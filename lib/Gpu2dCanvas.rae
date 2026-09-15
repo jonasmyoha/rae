@@ -171,6 +171,11 @@ type Gpu2dCanvas {
   clipFull: List(Bool)
   clipStack: List(Int)
   currentClip: Int
+  # --- rotation (#1003): every queued box / image / glyph turns by this angle
+  # (radians) about the pivot (design units) until it is cleared; 0 = none ---
+  spinAngle: Float
+  spinPivotX: Float
+  spinPivotY: Float
   # --- box pass ---
   pipeMade: Bool
   pipeline: RenderPipelineId
@@ -204,9 +209,10 @@ type Gpu2dCanvas {
 # Slot budget: one bind group + one clip external per same-clip run per flush
 # for boxes (the UI render system flushes once per entity), one uniform + bind
 # per image draw, two slots per image. Retired per frame and reused.
-const canvasManagerCapacity: Int = 1024
+const canvasManagerCapacity: Int = 2048
 
-const imageUniformFloats: Int = 16
+# rect, tint, params, uv, clip rect, clip params (#1003) — see gpu2d_image.wgsl.
+const imageUniformFloats: Int = 24
 
 # One box primitive = 6 x vec4 (std430): rect, radius, fill, border, params, grad.
 const boxPrimFloats: Int = 24
@@ -236,6 +242,9 @@ func createGpu2dCanvas() ret Gpu2dCanvas {
       clipFull: List.create(Bool, cap: 32)
       clipStack: List.create(Int, cap: 32)
       currentClip: 0
+      spinAngle: 0.0
+      spinPivotX: 0.0
+      spinPivotY: 0.0
       pipeMade: false
       pipeline: noRenderPipelineId()
       prims: List.create(Float, cap: 64 * boxPrimFloats)
@@ -553,8 +562,19 @@ func pushBox(
   gradientAngle: copy Float
   gradientTo: copy Int
 ) {
-  canvas.prims.add(value: x)
-  canvas.prims.add(value: y)
+  # The canvas rotation (#1003): the box's centre turns about the pivot and
+  # the quad itself turns by the same angle in the shader.
+  var boxX: Float = x
+  var boxY: Float = y
+  var boxAngle: Float = angle
+  if canvas.spinAngle is not 0.0 {
+    let centre: SpinPoint = spinPoint(canvas: canvas, x: x + w / 2.0, y: y + h / 2.0)
+    boxX = centre.x - w / 2.0
+    boxY = centre.y - h / 2.0
+    boxAngle = angle + canvas.spinAngle
+  }
+  canvas.prims.add(value: boxX)
+  canvas.prims.add(value: boxY)
   canvas.prims.add(value: w)
   canvas.prims.add(value: h)
   canvas.prims.add(value: radiusTopLeft)
@@ -564,7 +584,7 @@ func pushBox(
   pushPremultiplied(canvas: canvas, color: fill)
   pushPremultiplied(canvas: canvas, color: border)
   canvas.prims.add(value: borderWidth)
-  canvas.prims.add(value: angle)
+  canvas.prims.add(value: boxAngle)
   var gradientFlag: Float = 0.0
   if gradient {
     gradientFlag = 1.0
@@ -573,6 +593,41 @@ func pushBox(
   canvas.prims.add(value: gradientAngle)
   pushPremultiplied(canvas: canvas, color: gradientTo)
   canvas.primClips.add(value: canvas.currentClip)
+}
+
+# Rotation state (#1003): boxes, images and glyphs queued while an angle is set
+# turn about (pivotX, pivotY) in design units. Cleared by canvasClearRotation
+# and at every frame start.
+func canvasSetRotation(
+  canvas: mod Gpu2dCanvas
+  angle: copy Float
+  pivotX: copy Float
+  pivotY: copy Float
+) {
+  canvas.spinAngle = angle
+  canvas.spinPivotX = pivotX
+  canvas.spinPivotY = pivotY
+}
+
+func canvasClearRotation(canvas: mod Gpu2dCanvas) {
+  canvas.spinAngle = 0.0
+}
+
+type SpinPoint {
+  x: Float
+  y: Float
+}
+
+# (x, y) turned about the canvas pivot by the canvas angle.
+func spinPoint(canvas: view Gpu2dCanvas, x: copy Float, y: copy Float) ret SpinPoint {
+  let relX: Float = x - canvas.spinPivotX
+  let relY: Float = y - canvas.spinPivotY
+  let cosA: Float = Math.cos(x: canvas.spinAngle)
+  let sinA: Float = Math.sin(x: canvas.spinAngle)
+  ret SpinPoint {
+    x: canvas.spinPivotX + relX * cosA - relY * sinA
+    y: canvas.spinPivotY + relX * sinA + relY * cosA
+  }
 }
 
 func canvasDrawRect(
