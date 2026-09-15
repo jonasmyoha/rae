@@ -230,8 +230,25 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             echo "  watch/reload failed:"
             cat "$TMP_OUT/render-reload.log" "$TMP_OUT/screenshot-reload.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
           fi
+          # The inspector (#999): RAE_UI_EDITOR_TEST_SELECT selects a document
+          # node at boot as a click would; the log names its components and
+          # the frame carries the outline + panels (tree open too).
+          SCREENSHOT="$TMP_OUT/ui-editor-select.bmp"
+          if (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
+             RAE_UI_EDITOR_TEST_SELECT=PlayButton RAE_UI_EDITOR_TREE=1 \
+             RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
+             perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-select.log" 2>&1 \
+             && grep -qE "\[ui-editor\] selected PlayButton: Rect,.*OnClick" "$TMP_OUT/render-select.log" \
+             && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=50 \
+                > "$TMP_OUT/screenshot-select.log" 2>&1; then
+            :
+          else
+            UI_EDITOR_OK=0
+            echo "  inspector select failed:"
+            cat "$TMP_OUT/render-select.log" "$TMP_OUT/screenshot-select.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
+          fi
           if [ "$UI_EDITOR_OK" = "1" ]; then
-            echo "PASS: $EXAMPLE_NAME (3 sample scenes mounted with 0 diagnostics + screenshots, watch reload with 1 diagnostic)"
+            echo "PASS: $EXAMPLE_NAME (3 samples with 0 diagnostics, watch reload with 1 diagnostic, inspector select)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (ui editor sample gate)"

@@ -11,6 +11,7 @@ open ui/Pipeline
 open ui/Scene
 open ui/SceneFile
 open ui/SceneInstance
+open ui/SceneLoader
 open ui/ScenePolicy
 open ui/Theme
 open ui/ThemeParse
@@ -29,6 +30,10 @@ const chromeScenePath: String = "examples/121_ui_editor/assets/scenes/editor.rae
 # The chrome's own sub-scenes, registered into the document's registry on
 # every load (one registry serves every ListView, chrome or document).
 const diagnosticRowScenePath: String = "examples/121_ui_editor/assets/scenes/chrome/diagnostic-row.raescene"
+
+const inspectorScenePath: String = "examples/121_ui_editor/assets/scenes/chrome/inspector.raescene"
+
+const treeRowScenePath: String = "examples/121_ui_editor/assets/scenes/chrome/tree-row.raescene"
 
 # The theme from `<scene dir>/theme.raescene` when the document ships one,
 # else the library default; re-read on every reload (the theme is watched).
@@ -87,6 +92,8 @@ func createApp() ret App {
   let gpuUi: Gpu2dUi = createEditorUi(sceneDirectory: document.directory)
   var builtinScenePaths: List(String) = List.create(String, cap: 2)
   builtinScenePaths.add(value: diagnosticRowScenePath)
+  builtinScenePaths.add(value: inspectorScenePath)
+  builtinScenePaths.add(value: treeRowScenePath)
 
   var world: UiWorld = create()
   seedWorldTheme(world: world, res: gpuUi)
@@ -94,6 +101,7 @@ func createApp() ret App {
   world.scenePolicy.unknownComponents = UnknownComponentPolicy.report
   let documentLayer: EntityId = createLayerEntity(world: world, id: "document", order: 0)
   let chromeLayer: EntityId = createLayerEntity(world: world, id: "chrome", order: 100)
+  var inspector: InspectorState = createInspectorState(world: world)
 
   let mounted: Bool = documentLoadSystem(
     document: document
@@ -119,6 +127,9 @@ func createApp() ret App {
     h: document.designH
   )
   setLayerById(world: world, entity: chromeRoot, id: "chrome")
+  # The chrome's own sub-scenes (the inspector panel) resolve from the same
+  # registry the document uses.
+  resolveSceneInstances(world: world, registry: document.registry, pageId: "chrome")
   var chrome: ChromeState = { pageRoot: chromeRoot, visible: true, panelOpen: false }
   # RAE_UI_EDITOR_PANEL=1 opens the diagnostics panel at boot (the headless
   # gate's screenshot shows it; interactively D toggles it).
@@ -145,6 +156,12 @@ func createApp() ret App {
     status: document.status
   )
   logDiagnostics(world: world, sceneId: document.scene.sceneId, nodeCount: document.nodeCount)
+  # RAE_UI_EDITOR_TEST_SELECT=<nodeId>: select that node at boot (and again
+  # after every reload), as a click would — the headless gate's hook.
+  let testSelectNodeId: String = getEnv(name: "RAE_UI_EDITOR_TEST_SELECT")
+  if getEnv(name: "RAE_UI_EDITOR_TREE") is "1" {
+    inspector.treeOpen = true
+  }
   var watch: FileWatch = createFileWatch(now: Gpu2d.nowSeconds())
   watchRememberMtimes(watch: watch, paths: document.watchedPaths)
 
@@ -160,6 +177,8 @@ func createApp() ret App {
       chrome: chrome
       textures: own textures
       watch: own watch
+      inspector: own inspector
+      testSelectNodeId: testSelectNodeId
       builtinScenePaths: own builtinScenePaths
       headless: headless
     }
