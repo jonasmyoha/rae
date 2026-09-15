@@ -317,6 +317,22 @@ func themeContainerPadTokenAt(theme: view ResolvedTheme, index: view Int) pub re
 # Resolve a padding token name to its insets against `theme`, or a zero fallback
 # (logged) when undefined. Returns ThemeInsets (not the ECS Insets) to keep this
 # module free of the ui/components dependency.
+# Whether the theme carries a padding preset named `name` (#1000: the loader's
+# unknown-token check; the value lookup below keeps its zero fallback).
+func themeHasPadding(theme: view ResolvedTheme, name: view String) pub ret Bool {
+  unsafe {
+    var i: Int = 0
+    loop i < theme.padNames.length {
+      let n: String = rae_ext_rae_buf_get(buf: theme.padNames.data, index: i)
+      if n is name {
+        ret true
+      }
+      i = i + 1
+    }
+    ret false
+  }
+}
+
 func themePaddingInsets(theme: view ResolvedTheme, name: view String) pub ret ThemeInsets {
   unsafe {
     var i: Int = 0

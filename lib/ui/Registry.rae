@@ -35,7 +35,7 @@ open ui/ContainerStyle
 import Json
 import Sys
 import ui/Theme
-import ui/ThemeResolved
+open ui/ThemeResolved
 open ecs/ComponentTable
 
 # The world's tables that are derived or runtime state, never authored. This
@@ -162,6 +162,19 @@ func applyComponentByName(
   if name is containerStyle {
     let empty: String = ""
     let styleName: String = Json.jsonString(this: val, fallback: empty)
+    if themeContainerIndex(theme: world.theme.resolved, name: styleName) < 0 {
+      # An unknown style is a token miss like any other (#1000): recorded,
+      # and the node keeps whatever Shape / Padding it authored itself.
+      reportSceneDiagnostic(
+        diagnostics: world.sceneDiagnostics
+        sceneId: sceneId
+        nodeId: nodeId
+        kind: SceneDiagnosticKind.unknownToken
+        name: styleName
+        message: "no container style named {styleName} in the theme; ignored"
+      )
+      ret
+    }
     applyContainerStyle(world: world, entity: entity, name: styleName)
     ret
   }
@@ -317,6 +330,16 @@ func applyAuthoredFixups(
     let empty: String = ""
     let asStr: String = Json.jsonString(this: val, fallback: empty)
     if asStr.length() > 0 {
+      if themeHasPadding(theme: world.theme.resolved, name: asStr) is false {
+        reportSceneDiagnostic(
+          diagnostics: world.sceneDiagnostics
+          sceneId: sceneId
+          nodeId: nodeId
+          kind: SceneDiagnosticKind.unknownToken
+          name: asStr
+          message: "no padding preset named {asStr} in the theme; using zero insets"
+        )
+      }
       let ti: ThemeInsets = themePaddingInsets(theme: world.theme.resolved, name: asStr)
       padding.insets = Insets { l: ti.l, t: ti.t, r: ti.r, b: ti.b }
     } else {
