@@ -222,7 +222,11 @@ func tintChannel(color: view Int, shift: view Int) ret Float {
 }
 
 # Queue one image draw for this frame: rect, straight tint (the shader
-# premultiplies), radius, uv window, and the clip active now.
+# premultiplies), radius, uv window, and the clip active now — its rect +
+# radius go into the draw's uniform so the image pipeline rounds a clip the
+# way the box pipeline does (#1003). The canvas rotation turns the rect's
+# centre about the pivot and the quad about its centre; `tiled` makes the
+# shader wrap uv beyond 1.
 func queueImage(
   canvas: mod Gpu2dCanvas
   x: copy Float
@@ -237,11 +241,50 @@ func queueImage(
   u1: copy Float
   v1: copy Float
 ) {
+  queueImageEx(
+    canvas: canvas
+    x: x
+    y: y
+    w: w
+    h: h
+    radius: radius
+    handle: handle
+    tint: tint
+    u0: u0
+    v0: v0
+    u1: u1
+    v1: v1
+    tiled: false
+  )
+}
+
+func queueImageEx(
+  canvas: mod Gpu2dCanvas
+  x: copy Float
+  y: copy Float
+  w: copy Float
+  h: copy Float
+  radius: copy Float
+  handle: copy Int
+  tint: copy Int
+  u0: copy Float
+  v0: copy Float
+  u1: copy Float
+  v1: copy Float
+  tiled: copy Bool
+) {
   if handle < 1 or handle > canvas.images.length {
     ret
   }
-  canvas.imageCommands.add(value: x)
-  canvas.imageCommands.add(value: y)
+  var drawX: Float = x
+  var drawY: Float = y
+  if canvas.spinAngle is not 0.0 {
+    let centre: SpinPoint = spinPoint(canvas: canvas, x: x + w / 2.0, y: y + h / 2.0)
+    drawX = centre.x - w / 2.0
+    drawY = centre.y - h / 2.0
+  }
+  canvas.imageCommands.add(value: drawX)
+  canvas.imageCommands.add(value: drawY)
   canvas.imageCommands.add(value: w)
   canvas.imageCommands.add(value: h)
   canvas.imageCommands.add(value: tintChannel(color: tint, shift: 65536))
@@ -249,15 +292,138 @@ func queueImage(
   canvas.imageCommands.add(value: tintChannel(color: tint, shift: 1))
   canvas.imageCommands.add(value: tintChannel(color: tint, shift: 16777216))
   canvas.imageCommands.add(value: radius)
-  canvas.imageCommands.add(value: 0.0)
-  canvas.imageCommands.add(value: 0.0)
+  canvas.imageCommands.add(value: canvas.spinAngle)
+  var tileFlag: Float = 0.0
+  if tiled {
+    tileFlag = 1.0
+  }
+  canvas.imageCommands.add(value: tileFlag)
   canvas.imageCommands.add(value: 0.0)
   canvas.imageCommands.add(value: u0)
   canvas.imageCommands.add(value: v0)
   canvas.imageCommands.add(value: u1 - u0)
   canvas.imageCommands.add(value: v1 - v0)
+  let clip: Int = canvas.currentClip
+  let rounded: Bool = not clipIsFull(canvas: canvas, clip: clip) and clipFloatAt(
+    list: canvas.clipRadius
+    index: clip
+  ) > 0.0
+  if rounded {
+    canvas.imageCommands.add(value: clipFloatAt(list: canvas.clipX, index: clip))
+    canvas.imageCommands.add(value: clipFloatAt(list: canvas.clipY, index: clip))
+    canvas.imageCommands.add(value: clipFloatAt(list: canvas.clipW, index: clip))
+    canvas.imageCommands.add(value: clipFloatAt(list: canvas.clipH, index: clip))
+    canvas.imageCommands.add(value: clipFloatAt(list: canvas.clipRadius, index: clip))
+    canvas.imageCommands.add(value: 1.0)
+  } else {
+    loop var k: Int = 0, k < 6, ++k {
+      canvas.imageCommands.add(value: 0.0)
+    }
+  }
+  canvas.imageCommands.add(value: 0.0)
+  canvas.imageCommands.add(value: 0.0)
   canvas.imageCommandHandles.add(value: handle)
-  canvas.imageCommandClips.add(value: canvas.currentClip)
+  canvas.imageCommandClips.add(value: clip)
+}
+
+# Nine-slice (#1003): the image's `left/top/right/bottom` source pixels stay
+# that many DESIGN units thick at the destination's edges, the middle
+# stretches — nine sub-rect draws of one texture.
+func canvasDrawImageKeyNineSlice(
+  canvas: mod Gpu2dCanvas
+  key: view String
+  x: copy Float
+  y: copy Float
+  w: copy Float
+  h: copy Float
+  left: copy Float
+  top: copy Float
+  right: copy Float
+  bottom: copy Float
+  tint: copy Int
+) {
+  let handle: Int = canvasImageHandleForKey(canvas: canvas, key: key)
+  if handle <= 0 or handle > canvas.images.length or w <= 0.0 or h <= 0.0 {
+    ret
+  }
+  var imageWidth: Float = 0.0
+  var imageHeight: Float = 0.0
+  if let image: Gpu2dImage = canvas.images.copyAt(index: handle - 1) {
+    imageWidth = image.width.toFloat()
+    imageHeight = image.height.toFloat()
+  }
+  if imageWidth <= 0.0 or imageHeight <= 0.0 {
+    ret
+  }
+  # Borders never exceed half the destination (a tiny box keeps its corners).
+  let borderL: Float = Math.min(a: left, b: w / 2.0)
+  let borderR: Float = Math.min(a: right, b: w / 2.0)
+  let borderT: Float = Math.min(a: top, b: h / 2.0)
+  let borderB: Float = Math.min(a: bottom, b: h / 2.0)
+  let xs: List(Float) = { x, x + borderL, x + w - borderR, x + w }
+  let ys: List(Float) = { y, y + borderT, y + h - borderB, y + h }
+  let us: List(Float) = { 0.0, left / imageWidth, 1.0 - right / imageWidth, 1.0 }
+  let vs: List(Float) = { 0.0, top / imageHeight, 1.0 - bottom / imageHeight, 1.0 }
+  loop var row: Int = 0, row < 3, ++row {
+    loop var column: Int = 0, column < 3, ++column {
+      let x0: Float = xs.copyAtFallback(index: column, fallback: x)
+      let x1: Float = xs.copyAtFallback(index: column + 1, fallback: x)
+      let y0: Float = ys.copyAtFallback(index: row, fallback: y)
+      let y1: Float = ys.copyAtFallback(index: row + 1, fallback: y)
+      if x1 - x0 <= 0.0 or y1 - y0 <= 0.0 {
+        continue
+      }
+      queueImageEx(
+        canvas: canvas
+        x: x0
+        y: y0
+        w: x1 - x0
+        h: y1 - y0
+        radius: 0.0
+        handle: handle
+        tint: tint
+        u0: us.copyAtFallback(index: column, fallback: 0.0)
+        v0: vs.copyAtFallback(index: row, fallback: 0.0)
+        u1: us.copyAtFallback(index: column + 1, fallback: 1.0)
+        v1: vs.copyAtFallback(index: row + 1, fallback: 1.0)
+        tiled: false
+      )
+    }
+  }
+}
+
+# Tiled (#1003): the image repeats `tileX` x `tileY` times across the rect.
+func canvasDrawImageKeyTiled(
+  canvas: mod Gpu2dCanvas
+  key: view String
+  x: copy Float
+  y: copy Float
+  w: copy Float
+  h: copy Float
+  radius: copy Float
+  tint: copy Int
+  tileX: copy Float
+  tileY: copy Float
+) {
+  let handle: Int = canvasImageHandleForKey(canvas: canvas, key: key)
+  if handle <= 0 {
+    ret
+  }
+  queueImageEx(
+    canvas: canvas
+    x: x
+    y: y
+    w: w
+    h: h
+    radius: radius
+    handle: handle
+    tint: tint
+    u0: 0.0
+    v0: 0.0
+    u1: Math.max(a: tileX, b: 0.01)
+    v1: Math.max(a: tileY, b: 0.01)
+    tiled: true
+  )
 }
 
 # Queue an image draw (handle from canvasLoadImage). tint is 0xAARRGGBB applied

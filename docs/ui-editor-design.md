@@ -123,8 +123,8 @@ it (`Coverage` unless a nicer example exists).
 | Overflow | mode None / Clip / ScaleToFitY | yes | Clip (rounded when the node has a radius) | Coverage `Screen` |
 | ExtentAnchor | h | yes | yes (roots) | Coverage |
 | Aspect, ScaleToFit | ratio; mode | yes | yes (fit system) | Coverage `GradientBox` |
-| TransformFx | scaleX scaleY rotation alpha visible pivot anchor | yes | scale about the pivot (#1000), alpha, visible; **rotation is carried by the transform but not drawn** (gpu2d has no rotated quads — follow-up) | CardStrip, Coverage `ScaledBox` |
-| Sprite | textureKey (`mat:` glyph or image), tint, tintSlot, scaleMode Fit / Fill / Stretch, tileScale, nineSlice, hasNineSlice | yes | key, tint, scaleMode; **nineSlice and tileScale are not drawn** (gpu2d images have no sub-rect / tiling — follow-up) | MainMenu, Coverage |
+| TransformFx | scaleX scaleY rotation alpha visible pivot anchor | yes | scale about the pivot (#1000), rotation about the pivot (#1003: boxes, images and glyphs turn; children follow), alpha, visible; `anchor` is accepted but has no layout meaning yet | CardStrip, Coverage `ScaledBox` |
+| Sprite | textureKey (`mat:` glyph or image), tint, tintSlot, scaleMode Fit / Fill / Stretch, tileScale, nineSlice, hasNineSlice | yes | key, tint, scaleMode; nineSlice (borders keep their pixel thickness, authoring any border implies the flag) and tileScale (repeat) since #1003 | MainMenu `Panel`, Coverage `NineSlice` |
 | Text | text, styleId, wrapWidthMode None / NodeWidth, styleOverride | yes | yes | Coverage `WrappedText` |
 | TextShadow | color, offset, softness | yes | yes | Coverage `Heading` |
 | Shape | kind Rect / RoundedRect / Circle, fill, stroke (token, `{r,g,b,a}` or `#hex`), strokeWidth, radius | yes | yes | all |
@@ -132,7 +132,7 @@ it (`Coverage` unless a nicer example exists).
 | Opacity | value | yes | yes, inherited down the tree | Coverage `FadedBox` |
 | GradientFill | from, to, angle | yes | yes | Coverage `GradientBox` |
 | CornerRadius | radius | yes | yes | Coverage |
-| MaskShape | kind Circle / RoundedRect, sourceNodeId, radius | yes | own box: yes (#1000; a masked sprite rounds through its own quad); **`sourceNodeId`: axis-aligned scissor only** (gpu2d rounds clips for boxes, not images/text) | Coverage `CircleMask`, `SourceMasked` |
+| MaskShape | kind Circle / RoundedRect, sourceNodeId, radius | yes | yes — own box or `sourceNodeId`; since #1003 the image and text pipelines round a clip like the box pipeline, so the mask is exact for every primitive | Coverage `CircleMask`, `SourceMasked` |
 | BackdropImage | textureKey | yes | image when registered, glass fallback otherwise | Coverage |
 | HoverScale | restScale hoverScale speed current target | yes | yes (interactive) | Coverage `ShadowBox` |
 | HitArea, OnClick, Button, PointerEvents, ActionBinding | kind radius; actionId actionIdDouble actionIdTriple maxDelayMs; role; enabled cursor blockChildren; actionId role | yes | input only (no pixels) | MainMenu, Coverage |
@@ -148,11 +148,10 @@ it (`Coverage` unless a nicer example exists).
 | BackgroundPan, Carousel, SmokeFx, WobbleFx | as declared | yes | **no runtime system yet** (declared for the format) — follow-up | Coverage |
 | AnimFrames, AnimTrigger | baseKey frames textureKeys fps loopForever onEndTextureKey; event actionId restartOnTrigger | yes (scalars); **`frames` / `textureKeys` List fields do not decode** (same reflection gap) | **no runtime system yet** — follow-up | Coverage `NineSlice` |
 
-Follow-ups queued from this matrix: gpu2d rotated quads + image sub-rects/tiling
-(TransformFx rotation, Sprite nineSlice/tileScale) and rounded clips for images/text
-(sourceNodeId masks); a font-aware Hug measure for Text leaves; the animation
-systems (AnimFrames/AnimTrigger/WobbleFx/BackgroundPan/SmokeFx/Carousel); and the
-compiler's `typeName` of a `List(T)` field.
+Follow-ups queued from this matrix: a font-aware Hug measure for Text leaves (#1004);
+the animation systems (AnimFrames/AnimTrigger/WobbleFx/BackgroundPan/SmokeFx/Carousel,
+#1005); and the compiler's `typeName` of a `List(T)` field (#1006). Rotation,
+nine-slice, tiling and rounded clips for every pipeline landed with #1003.
 
 ## 6. Not in the first versions
 
