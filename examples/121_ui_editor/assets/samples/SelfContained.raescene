@@ -1,0 +1,55 @@
+{
+  "type": "Scene",
+  "version": 2,
+  "sceneId": "SelfContained",
+  "assets": {
+    "textures": { "map": { "badge": "logo.png" } },
+    "fonts": { "text": "../../../105_ui_counter/assets/Roboto-Regular.mtsdf.json" }
+  },
+  "palette": {
+    "background": { "r": 44, "g": 24, "b": 20, "a": 255 },
+    "surface": { "r": 92, "g": 48, "b": 36, "a": 255 },
+    "textPrimary": { "r": 255, "g": 236, "b": 214, "a": 255 },
+    "textMuted": { "r": 214, "g": 180, "b": 150, "a": 255 },
+    "accent": { "r": 255, "g": 196, "b": 64, "a": 255 },
+    "accentText": { "r": 44, "g": 24, "b": 20, "a": 255 },
+    "outline": { "r": 150, "g": 96, "b": 70, "a": 255 }
+  },
+  "space": { "spaceM": 24, "spaceL": 48 },
+  "radius": { "radiusCard": 32 },
+  "text": {
+    "title": { "font": "body", "size": 84, "color": { "r": 255, "g": 236, "b": 214, "a": 255 }, "align": "center" },
+    "body": { "font": "body", "size": 36, "color": { "r": 214, "g": 180, "b": 150, "a": 255 }, "align": "center" }
+  },
+  "root": "Screen",
+  "nodes": {
+    "Screen": {
+      "Rect": { "x": 0, "y": 0, "w": 1080, "h": 1920 },
+      "Shape": { "kind": "Rect", "fill": "background", "stroke": "#00000000", "strokeWidth": 0 },
+      "Layout": { "type": "Vertical", "gap": "spaceL", "alignMain": "Center", "alignCross": "Center" },
+      "Padding": { "l": "spaceL", "t": "spaceL", "r": "spaceL", "b": "spaceL" },
+      "Children": ["Badge", "Title", "Note"]
+    },
+    "Badge": {
+      "Rect": { "x": 0, "y": 0, "w": 360, "h": 360 },
+      "Shape": { "kind": "RoundedRect", "fill": "surface", "stroke": "outline", "strokeWidth": 4, "radius": "radiusCard" },
+      "Padding": { "l": "spaceM", "t": "spaceM", "r": "spaceM", "b": "spaceM" },
+      "Layout": { "type": "Vertical", "gap": 0, "alignMain": "Center", "alignCross": "Center" },
+      "Children": ["BadgeImage"]
+    },
+    "BadgeImage": {
+      "Rect": { "x": 0, "y": 0, "w": 280, "h": 280 },
+      "Sprite": { "textureKey": "badge", "tint": "#FFFFFFFF" }
+    },
+    "Title": {
+      "Rect": { "x": 0, "y": 0, "w": 0, "h": 110 },
+      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
+      "Text": { "text": "One file", "styleId": "title" }
+    },
+    "Note": {
+      "Rect": { "x": 0, "y": 0, "w": 0, "h": 60 },
+      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
+      "Text": { "text": "palette, tokens, textures and font declared inline", "styleId": "body" }
+    }
+  }
+}

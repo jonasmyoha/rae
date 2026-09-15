@@ -485,16 +485,46 @@ static int g_sdf_atlas_w[RAE_SDF_MAX_ATLAS];
 static int g_sdf_atlas_h[RAE_SDF_MAX_ATLAS];
 static int g_sdf_atlas_n = 0;
 
+/* The atlas file is either the raw RGBA8 dump (w*h*4 bytes, the historical
+ * `.mtsdf.raw`) or the PNG msdf-atlas-gen writes directly (#1008): a PNG is
+ * recognised by its magic bytes, decoded with lodepng, and must match the
+ * JSON sidecar's atlas size. */
 int64_t rae_ext_SdfText_loadAtlas(rae_String path, int64_t w, int64_t h) {
     if (!path.data || w <= 0 || h <= 0 || g_sdf_atlas_n >= RAE_SDF_MAX_ATLAS) return 0;
     FILE* f = fopen((const char*)path.data, "rb");
     if (!f) { fprintf(stderr, "[sdf] cannot open %s\n", (const char*)path.data); return 0; }
     size_t bytes = (size_t)w * (size_t)h * 4;
-    unsigned char* px = (unsigned char*)malloc(bytes);
-    if (!px) { fclose(f); return 0; }
-    size_t got = fread(px, 1, bytes, f);
-    fclose(f);
-    if (got != bytes) { free(px); fprintf(stderr, "[sdf] short read on %s\n", (const char*)path.data); return 0; }
+    unsigned char magic[4] = {0};
+    size_t magic_n = fread(magic, 1, 4, f);
+    unsigned char* px = NULL;
+    if (magic_n == 4 && magic[0] == 0x89 && magic[1] == 0x50 && magic[2] == 0x4E && magic[3] == 0x47) {
+        fseek(f, 0, SEEK_END);
+        long len = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        unsigned char* file_bytes = len > 0 ? (unsigned char*)malloc((size_t)len) : NULL;
+        if (!file_bytes || fread(file_bytes, 1, (size_t)len, f) != (size_t)len) {
+            free(file_bytes); fclose(f);
+            fprintf(stderr, "[sdf] short read on %s\n", (const char*)path.data); return 0;
+        }
+        fclose(f);
+        unsigned pw = 0, ph = 0;
+        unsigned err = lodepng_decode32(&px, &pw, &ph, file_bytes, (size_t)len);
+        free(file_bytes);
+        if (err) { fprintf(stderr, "[sdf] %s: %s\n", (const char*)path.data, lodepng_error_text(err)); return 0; }
+        if ((int64_t)pw != w || (int64_t)ph != h) {
+            free(px);
+            fprintf(stderr, "[sdf] %s is %ux%u but its JSON sidecar says %lldx%lld\n",
+                    (const char*)path.data, pw, ph, (long long)w, (long long)h);
+            return 0;
+        }
+    } else {
+        fseek(f, 0, SEEK_SET);
+        px = (unsigned char*)malloc(bytes);
+        if (!px) { fclose(f); return 0; }
+        size_t got = fread(px, 1, bytes, f);
+        fclose(f);
+        if (got != bytes) { free(px); fprintf(stderr, "[sdf] short read on %s\n", (const char*)path.data); return 0; }
+    }
     g_sdf_atlas[g_sdf_atlas_n] = px; g_sdf_atlas_w[g_sdf_atlas_n] = (int)w; g_sdf_atlas_h[g_sdf_atlas_n] = (int)h;
     return ++g_sdf_atlas_n;  /* 1-based */
 }
