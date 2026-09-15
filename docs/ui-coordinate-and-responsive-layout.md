@@ -522,7 +522,7 @@ explicit-`mod List`/parallel-array limits.
   boundaries? (Recommend no initially.)
 - **Frame-only heavy subtrees:** always-instantiated + `Active` toggle, or lazy
   build to avoid constructing large desktop-only trees on phone?
-- **`game-proto1` alignment:** should game proto1 share this du space
+- **`game proto1` alignment:** should game proto1 share this du space
   (`unitScale=3`, 1080-wide phone reference) so its `1080×2280` art lines up 1:1?
 - **Multiple simultaneously-matching frames:** most-specific-then-declared-order
   (recommended) vs explicit numeric priority.

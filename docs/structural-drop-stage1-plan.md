@@ -77,7 +77,7 @@ What does **not** yet exist in tree:
   emission. Live-mode currently relies on string-pool mark/take/
   flush and arena allocation for cleanup — it doesn't run per-struct
   drop helpers because there aren't any in the bytecode pipeline.
-  Phase 1f mobile UI work and game-proto1 both run in compiled
+  Phase 1f mobile UI work and game proto1 both run in compiled
   mode for this reason.
 * **A canonical, user-facing test surface.** Tests 443-449,
   460-464, 482-483 cover individual phases of cascade-drop, but
