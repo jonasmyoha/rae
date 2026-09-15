@@ -25,7 +25,7 @@
 - Lay groundwork for a future **editor view**: a portrait phone window centred inside a larger desktop window, with debug UI in the surrounding margin and a 2D camera (zoom/pan) over the phone for tooling.
 
 This is the structured port of the patterns observed in
-`game-proto1/pixi`, applied to Rae's existing
+`game-proto1 pixi checkout`, applied to Rae's existing
 ECS-driven UI runtime under `lib/ui/`.
 
 ## Current Baseline
@@ -38,7 +38,7 @@ ECS-driven UI runtime under `lib/ui/`.
   intended `SafeArea` + `SafeAreaSystem` shape (lines 222 and 1102) but
   the implementation hasn't been done.
 
-## Reference: Game proto1 Pixi Patterns
+## Reference: Game-Port Pixi Patterns
 
 Source-of-truth references (read-only — used here as a study target):
 
@@ -55,7 +55,7 @@ Source-of-truth references (read-only — used here as a study target):
 
 ### 1. Three Coordinate Systems
 
-Adopt the game proto1 vocabulary, made explicit in a new `lib/ui/viewport.rae`:
+Adopt game proto1 vocabulary, made explicit in a new `lib/ui/viewport.rae`:
 
 | Name              | Meaning                                             | Drives                                |
 | ----------------- | --------------------------------------------------- | ------------------------------------- |

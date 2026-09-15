@@ -1414,7 +1414,7 @@ static char* try_resolve_lib_module(const char* root, const char* normalized) {
 
   // Final fallback: the compiler's own bundled stdlib (relative to the
   // `rae` binary, or $RAE_STDLIB). This is what lets a sibling project
-  // like game-proto1 use the one stdlib without a `lib/` symlink —
+  // like game proto1 use the one stdlib without a `lib/` symlink —
   // it only kicks in when the project doesn't ship its own stdlib.
   const char* stdlib = compiler_stdlib_dir();
   if (stdlib) {

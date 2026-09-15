@@ -267,7 +267,7 @@ materialise.
 A real point in B3's favour: **no native registry growth.** For a
 large codebase with hundreds of cascade-droppable types, B1's
 registration cost is non-trivial. For Rae's actual scale today
-(mobile UI = ~60 types, game-proto1's projected size
+(mobile UI = ~60 types, game proto1's projected size
 similar), B1's registry footprint is small and fixed at module
 load. If Rae ever lands a codebase where native count becomes a
 real cost, B1's per-type natives can be folded into one
