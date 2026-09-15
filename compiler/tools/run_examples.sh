@@ -202,8 +202,12 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # machine renders at another DPR than the reference.
           for SAMPLE in MainMenu Settings CardStrip Coverage; do
             SCREENSHOT="$TMP_OUT/ui-editor-$SAMPLE.bmp"
-            if (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/$SAMPLE.raescene" \
-               RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
+            # Coverage animates (#1005): an exact frame at a fixed step keeps
+            # its reference deterministic; the static samples use wall-clock.
+            SAMPLE_BUDGET="RAE_SDL_HEADLESS_MS=1500"
+            if [ "$SAMPLE" = "Coverage" ]; then SAMPLE_BUDGET="RAE_HEADLESS_FRAMES=12 RAE_FIXED_DT=0.05"; fi
+            if (cd .. && env RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/$SAMPLE.raescene" \
+               RAE_UI_HEADLESS=1 $SAMPLE_BUDGET RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
                perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-$SAMPLE.log" 2>&1 \
                && grep -qE "\[ui-editor\] mounted $SAMPLE: [1-9][0-9]* nodes, 0 diagnostics" "$TMP_OUT/render-$SAMPLE.log" \
                && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=50 \
@@ -217,6 +221,22 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
               cat "$TMP_OUT/render-$SAMPLE.log" "$TMP_OUT/screenshot-$SAMPLE.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
             fi
           done
+          # The effect systems (#1005): Coverage's AnimFrames / WobbleFx /
+          # BackgroundPan+SmokeFx / Carousel nodes must have MOVED between frame
+          # 2 and frame 12 at the same fixed step (assert_bmp_diff MISMATCH is
+          # the pass here: more than 0.5% of pixels differ).
+          EARLY="$TMP_OUT/ui-editor-Coverage-f2.bmp"
+          if (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/Coverage.raescene" \
+             RAE_UI_HEADLESS=1 RAE_HEADLESS_FRAMES=2 RAE_FIXED_DT=0.05 RAE_GPU2D_SCREENSHOT="$EARLY" \
+             perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-Coverage-f2.log" 2>&1 \
+             && ! python3 tools/assert_bmp_diff.py "$TMP_OUT/ui-editor-Coverage.bmp" "$EARLY" --max-diff-pct 0.5 \
+                > "$TMP_OUT/motion-Coverage.log" 2>&1; then
+            :
+          else
+            UI_EDITOR_OK=0
+            echo "  effect motion check failed (Coverage frame 2 vs 12 did not move):"
+            cat "$TMP_OUT/render-Coverage-f2.log" "$TMP_OUT/motion-Coverage.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
+          fi
           # The watcher (#998): the app opens a COPY of the samples (the repo
           # files stay untouched), rewrites it itself after 600 ms with the
           # .rewrite twin (one changed Text, one bogus component), and must log
@@ -256,7 +276,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/render-select.log" "$TMP_OUT/screenshot-select.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
           fi
           if [ "$UI_EDITOR_OK" = "1" ]; then
-            echo "PASS: $EXAMPLE_NAME (4 samples incl. Coverage with 0 diagnostics + reference diffs, watch reload, inspector select)"
+            echo "PASS: $EXAMPLE_NAME (4 samples incl. Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (ui editor sample gate)"

@@ -145,11 +145,11 @@ it (`Coverage` unless a nicer example exists).
 | TextBinding, DataRequest, DataDependency, RefreshRegion, ImageSourceResolver | as declared | yes | data bindings — no editor system feeds them; **`ImageSourceResolver.textureKeys` (a List field) does not decode** (compiler reflection reports a List field as its element type — follow-up) | Coverage |
 | ContainerStyle | a theme container name | yes (an unknown name is an unknownToken diagnostic, #1000) | yes | Coverage `TextBlock`, CoverageCard |
 | ProfileStat, AvatarSource, CoverGrid, SearchField, SearchResults, HistoryList, AnchorBottom, NavTab, AlbumHeader, TrackList, ProgressBar, BottomSheet, PlaybackIcon, PlaybackCover, LikedHeart, TrackText | 106's app bindings | yes | app systems (106) drive them; inert in the editor | Coverage `MetaRow` |
-| BackgroundPan, Carousel, SmokeFx, WobbleFx | as declared | yes | **no runtime system yet** (declared for the format) — follow-up | Coverage |
-| AnimFrames, AnimTrigger | baseKey frames textureKeys fps loopForever onEndTextureKey; event actionId restartOnTrigger | yes (scalars); **`frames` / `textureKeys` List fields do not decode** (same reflection gap) | **no runtime system yet** — follow-up | Coverage `NineSlice` |
+| BackgroundPan, Carousel, SmokeFx, WobbleFx | as declared (+ `Carousel.autoAdvanceSec`, #1005) | yes | yes — lib/ui/animationSystem/EffectSystems.rae (#1005): sine / two-sine runtime offsets, a swipe-or-timer paged container with `previewScale`, puffs recycled from the node's authored children | Coverage `BackdropBox`, `IconSprite`, `CardsRow` |
+| AnimFrames, AnimTrigger | baseKey frames textureKeys fps loopForever onEndTextureKey (+ `frameCount`, #1005); event actionId restartOnTrigger | yes (scalars); **`frames` / `textureKeys` List fields do not decode** (#1006) — author `baseKey` + `frameCount` for `<baseKey><i>` keys instead | yes (#1005): frames advance at fps into Sprite.textureKey, loop or stop on onEndTextureKey; a trigger (actionId, or click/hover on the node) starts / restarts | Coverage `NineSlice` |
 
-Follow-ups queued from this matrix: the animation systems (AnimFrames/AnimTrigger/WobbleFx/BackgroundPan/SmokeFx/Carousel,
-#1005); and the compiler's `typeName` of a `List(T)` field (#1006). Rotation,
+Follow-ups queued from this matrix: the compiler's `typeName` of a `List(T)` field (#1006).
+The effect systems landed with #1005. Rotation,
 nine-slice, tiling and rounded clips for every pipeline landed with #1003.
 
 ## 6. Not in the first versions

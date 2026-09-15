@@ -39,11 +39,25 @@ const uiSystemTransform: Int = 5
 
 const uiSystemHoverScale: Int = 6
 
-const uiSystemVisualBounds: Int = 7
+# #1005: the effect systems (lib/ui/animationSystem/EffectSystems.rae), in
+# the order the app calls them, after hoverScale and before visualBounds.
+const uiSystemAnimFrames: Int = 7
 
-const uiSystemRender: Int = 8
+const uiSystemAnimTrigger: Int = 8
 
-const uiSystemCount: Int = 9
+const uiSystemWobbleFx: Int = 9
+
+const uiSystemBackgroundPan: Int = 10
+
+const uiSystemSmokeFx: Int = 11
+
+const uiSystemCarousel: Int = 12
+
+const uiSystemVisualBounds: Int = 13
+
+const uiSystemRender: Int = 14
+
+const uiSystemCount: Int = 15
 
 # Resolve UiWorld table FIELD names to table ids. A name that is not a
 # ComponentTable field of UiWorld is a registration bug in this file, so it is
@@ -205,6 +219,71 @@ func createUiPipeline(world: view UiWorld) ret Schedule {
     name: "hoverScale"
     reads: ["childrens", "hoverScales", "parents"]
     writes: ["hoverScales"]
+    skipWhenClean: false
+  )
+
+  # The effect systems (#1005): each always runs while its table has rows;
+  # their outputs are the runtime channels the transform pass folds in.
+  uiRegister(
+    schedule: schedule
+    world: world
+    name: "animFrames"
+    reads: ["animFrames", "animStates", "sprites"]
+    writes: ["animStates", "sprites"]
+    skipWhenClean: false
+  )
+  uiRegister(
+    schedule: schedule
+    world: world
+    name: "animTrigger"
+    reads: [
+      "animTriggers"
+      "animFrames"
+      "animStates"
+      "interactions"
+      "sprites"
+    ]
+    writes: ["animStates", "sprites"]
+    skipWhenClean: false
+  )
+  uiRegister(
+    schedule: schedule
+    world: world
+    name: "wobbleFx"
+    reads: ["wobbleFxs"]
+    writes: ["runtimeOffsets"]
+    skipWhenClean: false
+  )
+  uiRegister(
+    schedule: schedule
+    world: world
+    name: "backgroundPan"
+    reads: ["backgroundPans"]
+    writes: ["runtimeOffsets"]
+    skipWhenClean: false
+  )
+  uiRegister(
+    schedule: schedule
+    world: world
+    name: "smokeFx"
+    reads: ["smokeFxs", "smokeStates", "childrens", "transforms"]
+    writes: ["smokeStates", "runtimeOffsets", "opacities", "transforms"]
+    skipWhenClean: false
+  )
+  uiRegister(
+    schedule: schedule
+    world: world
+    name: "carousel"
+    reads: [
+      "carousels"
+      "carouselStates"
+      "childrens"
+      "computedRects"
+      "worldTransforms"
+      "actives"
+      "transforms"
+    ]
+    writes: ["carouselStates", "runtimeOffsets", "transforms"]
     skipWhenClean: false
   )
 

@@ -15,6 +15,7 @@ open ui/Ecs
 open ui/Components
 open ui/ScenePolicy
 open app3d/UiShell
+open ui/animationSystem/EffectSystems
 open ecs/Entity
 open ecs/ComponentTable
 open Gpu2dCanvas
@@ -104,10 +105,32 @@ func textureSystem(
   sceneDirectory: view String
   sceneId: view String
 ) {
+  # Every key a sprite shows now or will show (#1005): its textureKey plus its
+  # AnimFrames sequence (`<baseKey><i>` / textureKeys) and onEndTextureKey.
+  var wanted: List(String) = List.create(String, cap: 16)
+  var wantedEntities: List(EntityId) = List.create(EntityId, cap: 16)
   let spriteCount: Int = componentCount(this: world.sprites)
   loop var i: Int = 0, i < spriteCount, ++i {
     let sprite: Sprite = componentDataAt(this: world.sprites, i: i)
-    let key: String = "{sprite.textureKey}"
+    wanted.add(value: "{sprite.textureKey}")
+    wantedEntities.add(value: componentEntityAt(this: world.sprites, i: i))
+  }
+  let animCount: Int = componentCount(this: world.animFrames)
+  loop var a: Int = 0, a < animCount, ++a {
+    let frames: AnimFrames = componentDataAt(this: world.animFrames, i: a)
+    let owner: EntityId = componentEntityAt(this: world.animFrames, i: a)
+    loop var f: Int = 0, f < animFrameCount(frames: frames), ++f {
+      wanted.add(value: animFrameKey(frames: frames, index: f))
+      wantedEntities.add(value: owner)
+    }
+    if frames.onEndTextureKey.length() > 0 {
+      wanted.add(value: "{frames.onEndTextureKey}")
+      wantedEntities.add(value: owner)
+    }
+  }
+  loop var i: Int = 0, i < wanted.length, ++i {
+    let key: String = wanted.copyAtFallback(index: i, fallback: "")
+    let entity: EntityId = wantedEntities.copyAtFallback(index: i, fallback: noEntity())
     # Empty keys are colour-only sprites; `mat:` keys are icon-font glyphs.
     if key.length() is 0 or key.startsWith(prefix: "mat:") or textureKeySettled(
       search: search
@@ -128,7 +151,6 @@ func textureSystem(
     }
     registerPlaceholderImage(canvas: canvas, key: key)
     var nodeLabel: String = ""
-    let entity: EntityId = componentEntityAt(this: world.sprites, i: i)
     if componentHas(this: world.nodeIdComponents, entity: entity) {
       nodeLabel = "{componentGet(this: world.nodeIdComponents, entity: entity).id}"
     }

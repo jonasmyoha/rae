@@ -709,6 +709,8 @@ type Carousel {
   transitionDuration: Float
   travelFactor: Float
   previewScale: Float
+  # #1005: seconds between automatic page advances; 0 = pages only by swipe.
+  autoAdvanceSec: Float
 }
 
 type SmokeFx {
@@ -729,6 +731,10 @@ type AnimFrames {
   fps: Float
   loopForever: Bool
   onEndTextureKey: String
+  # #1005: with no `textureKeys` the frames are `<baseKey><i>` for i < frameCount
+  # (a sprite-sheet convention, and the only way to author a sequence until
+  # #1006 lets a scene's List fields decode).
+  frameCount: Int
 }
 
 type AnimTrigger {
@@ -801,6 +807,24 @@ type AnimState {
   playing: Bool
   elapsedMs: Float
   frameIndex: Int
+}
+
+# #1005 runtime state of a SmokeFx: one age (ms, < 0 = idle) per pooled child,
+# and the time since the last spawn. Derived, never authored or serialized.
+type SmokeState {
+  ages: List(Float)
+  spawnTimerMs: Float
+}
+
+# #1005 runtime state of a Carousel: the current page, the eased scroll offset
+# (design units, <= 0), the live drag, and the auto-advance timer.
+type CarouselState {
+  page: Int
+  offset: Float
+  dragging: Bool
+  dragStartX: Float
+  dragStartOffset: Float
+  autoTimerSec: Float
 }
 
 # -----------------------------------------------------------------

@@ -56,6 +56,8 @@ func isRuntimeTable(name: view String) ret Bool {
     "SafeInsets"
     "Parent"
     "AnimState"
+    "SmokeState"
+    "CarouselState"
     "VisualBounds"
     "MeasuredText"
     "ScrollPanelState"
@@ -195,11 +197,11 @@ func applyComponentByName(
       table
     ) is not "SafeInsets" and typeName(table) is not "Parent" and typeName(table) is not "AnimState" and typeName(
       table
-    ) is not "VisualBounds" and typeName(table) is not "MeasuredText" and typeName(table) is not "ScrollPanelState" and typeName(
+    ) is not "SmokeState" and typeName(table) is not "CarouselState" and typeName(table) is not "VisualBounds" and typeName(
       table
-    ) is not "Interaction" and typeName(table) is not "StateStyle" and typeName(table) is not "ListViewData" and typeName(
+    ) is not "MeasuredText" and typeName(table) is not "ScrollPanelState" and typeName(table) is not "Interaction" and typeName(
       table
-    ) is not "StyleOverride" {
+    ) is not "StateStyle" and typeName(table) is not "ListViewData" and typeName(table) is not "StyleOverride" {
       if name is authoredNameOf(typeName: typeName(table)) {
         decodeComponent(
           table: table
