@@ -2839,10 +2839,53 @@ static int reflect_metadata_call_kind(const AstExpr* e, Str binding) {
 // own name (`Int` for `count: Int`). This is the canonical component vocabulary
 // the serialize registry and the human-authored scene loader share, as opposed
 // to the slot name (`positions`) that fieldName yields.
-static Str reflect_element_type_name(const AstTypeRef* field_type) {
-    if (field_type && field_type->generic_args && !field_type->generic_args->is_value_arg)
+// The FULL written spelling of a type for `typeName` (#1006): `List(Int)`,
+// `Map(String, Int)`, or a bare `Int` for a non-generic type. Value generic
+// arguments (`Array(Float, cap: 16)`) are dropped — only type arguments are
+// spelled — so the name matches how a decoder would branch. Allocated in the
+// AST arena; recurses so a nested `List(List(Int))` renders in full.
+static Str reflect_full_type_name(Arena* arena, const AstTypeRef* tr) {
+    Str base = reflect_base_name(tr);
+    // Any type argument present (not a value arg like `cap: 16`)?
+    const AstTypeRef* first_type_arg = NULL;
+    for (const AstTypeRef* a = tr ? tr->generic_args : NULL; a; a = a->next) {
+        if (!a->is_value_arg) { first_type_arg = a; break; }
+    }
+    if (!first_type_arg) return base;
+    // Render "base(arg1, arg2, ...)" over the type arguments in order.
+    size_t cap = base.len + 3;
+    for (const AstTypeRef* a = first_type_arg; a; a = a->next) {
+        if (a->is_value_arg) continue;
+        cap += reflect_full_type_name(arena, a).len + 2;
+    }
+    char* buf = arena_alloc(arena, cap + 1);
+    size_t pos = 0;
+    memcpy(buf + pos, base.data, base.len); pos += base.len;
+    buf[pos++] = '(';
+    bool first = true;
+    for (const AstTypeRef* a = first_type_arg; a; a = a->next) {
+        if (a->is_value_arg) continue;
+        if (!first) { buf[pos++] = ','; buf[pos++] = ' '; }
+        first = false;
+        Str inner = reflect_full_type_name(arena, a);
+        memcpy(buf + pos, inner.data, inner.len); pos += inner.len;
+    }
+    buf[pos++] = ')';
+    buf[pos] = '\0';
+    Str out = { .data = buf, .len = pos };
+    return out;
+}
+
+// The name `typeName(binding)` folds to for a field-loop binding (#809/#1006).
+// A `ComponentTable(T)` still yields its ELEMENT `T` (the ECS/scene component
+// vocabulary the serialize registry and scene loader share); every other type
+// yields its full spelling, so a `List(Int)` field is "List(Int)" — a generic
+// decoder can tell a list from a scalar, and never takes the "Int" arm.
+static Str reflect_element_type_name(Arena* arena, const AstTypeRef* field_type) {
+    if (field_type && field_type->generic_args && !field_type->generic_args->is_value_arg
+        && str_eq_cstr(reflect_base_name(field_type), "ComponentTable"))
         return reflect_base_name(field_type->generic_args);
-    return reflect_base_name(field_type);
+    return reflect_full_type_name(arena, field_type);
 }
 
 // One unrolled field's fold context: the binding name the body spells, the
@@ -2905,12 +2948,13 @@ static void reflect_fold_field_name_expr(AstExpr* e, const ReflectFold* rf) {
             if (reflect_metadata_call_kind(e, p->name) != 2) continue;
             const AstTypeRef* sub = substitute_type_ref(rf->ctx, rf->gparams, rf->cargs, p->type);
             if (!sub) sub = p->type;
-            // The parameter's own type is the thing named — `List` for a
-            // `List(String)` argument (the element rule is for field-loop
-            // bindings over `ComponentTable(T)`, #809), so a `List(String)`
-            // field never takes a generic decoder's `"String"` arm (#961).
+            // The parameter's own type, spelled in full (#1006): `List(String)`
+            // for a `List(String)` argument (a `ComponentTable(T)` still folds
+            // to its element `T`, #809), so a generic decoder branching on
+            // `typeName` tells a list from a scalar and never takes the
+            // element's `"String"` arm.
             e->kind = AST_EXPR_STRING;
-            e->as.string_lit = reflect_base_name(sub);
+            e->as.string_lit = reflect_element_type_name(rf->ctx->ast_arena, sub);
             e->resolved_type = NULL;
             e->decl_link = NULL;
             return;
@@ -3128,7 +3172,7 @@ static void reflect_fill_unrolled(CompilerContext* ctx, AstBlock* out,
         AstBlock* iter_body = clone_block(ctx->ast_arena, body);
         ReflectFold rf = {0};
         rf.ctx = ctx; rf.binding = bind_name; rf.field_name = f->name;
-        rf.type_name = reflect_element_type_name(f->type); rf.target = member;
+        rf.type_name = reflect_element_type_name(ctx->ast_arena, f->type); rf.target = member;
         reflect_fold_field_name_block(iter_body, &rf);
         alias->next = iter_body ? iter_body->first : NULL;
         AstStmt* wrapper = arena_alloc(ctx->ast_arena, sizeof(AstStmt));
@@ -4638,6 +4682,30 @@ static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr*
             "cannot convert %.*s to %.*s; they are different types",
             (int)got_s->name.len, got_s->name.data,
             (int)want_s->name.len, want_s->name.data);
+        const char* err_file = s_current_decl_origin ? s_current_decl_origin : NULL;
+        diag_error(err_file, (int)expr->line, (int)expr->column, buf);
+        if (s_current_module) s_current_module->had_error = true;
+        return;
+    }
+    /* #1006: a named STRUCT (e.g. a `List(Int)` specialization) against a
+     * resolved SCALAR is as certain a C error as struct-vs-struct above, and
+     * until now only gcc caught it (a `List(Int)` field passed to a scalar
+     * `view Int` decoder arm). Fire on either direction; Any / opt / pending
+     * create were handled earlier, numeric and scalar-scalar just above. */
+    if (want_s && got_s && want_s != got_s
+        && ((want_s->kind == TYPE_STRUCT && want_s->name.len > 0 && sema_is_scalar_kind(got_s->kind))
+            || (got_s->kind == TYPE_STRUCT && got_s->name.len > 0 && sema_is_scalar_kind(want_s->kind)))) {
+        char wbuf[128]; char gbuf[128];
+        if (want_s->kind == TYPE_STRUCT)
+            snprintf(wbuf, sizeof(wbuf), "%.*s", (int)want_s->name.len, want_s->name.data);
+        else
+            snprintf(wbuf, sizeof(wbuf), "%s", sema_scalar_name(want_s->kind));
+        if (got_s->kind == TYPE_STRUCT)
+            snprintf(gbuf, sizeof(gbuf), "%.*s", (int)got_s->name.len, got_s->name.data);
+        else
+            snprintf(gbuf, sizeof(gbuf), "%s", sema_scalar_name(got_s->kind));
+        char buf[300];
+        snprintf(buf, sizeof(buf), "cannot convert %s to %s; they are different types", gbuf, wbuf);
         const char* err_file = s_current_decl_origin ? s_current_decl_origin : NULL;
         diag_error(err_file, (int)expr->line, (int)expr->column, buf);
         if (s_current_module) s_current_module->had_error = true;
