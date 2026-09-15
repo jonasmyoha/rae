@@ -437,6 +437,39 @@ func paintSpriteG(
     }
   }
   if Gpu2d.hasImageKey(canvas: canvas, key: sp.textureKey) {
+    # Nine-slice and tiling (#1003) take precedence over the scale mode: a
+    # nine-slice keeps its authored borders, a tileScale repeats the image.
+    if sp.hasNineSlice {
+      Gpu2d.drawImageKeyNineSlice(
+        canvas: canvas
+        key: sp.textureKey
+        x: imageX
+        y: imageY
+        w: imageW
+        h: imageH
+        left: sp.nineSlice.l
+        top: sp.nineSlice.t
+        right: sp.nineSlice.r
+        bottom: sp.nineSlice.b
+        tint: g2dColor(color: tint)
+      )
+      ret
+    }
+    if sp.tileScale.x is not 1.0 or sp.tileScale.y is not 1.0 {
+      Gpu2d.drawImageKeyTiled(
+        canvas: canvas
+        key: sp.textureKey
+        x: imageX
+        y: imageY
+        w: imageW
+        h: imageH
+        radius: radius * hoverMul
+        tint: g2dColor(color: tint)
+        tileX: sp.tileScale.x
+        tileY: sp.tileScale.y
+      )
+      ret
+    }
     Gpu2d.drawImageKeyScaled(
       canvas: canvas
       key: sp.textureKey
@@ -711,6 +744,17 @@ func paintEntityG(
   if chain255 < 0 {
     chain255 = 0
   }
+  # The accumulated rotation (#1003): everything this entity paints turns
+  # about its origin — the transform pass already moved the origin so the
+  # authored pivot is the fixed point.
+  if wt.rotation is not 0.0 {
+    Gpu2d.setRotation(
+      canvas: canvas
+      angle: wt.rotation
+      pivotX: wt.position.x
+      pivotY: wt.position.y
+    )
+  }
   if componentHas(this: world.gradientFills, entity: entity) {
     paintGradientG(
       world: world
@@ -766,6 +810,7 @@ func paintEntityG(
   # entities can correctly paint over earlier images/text, matching raylib's
   # immediate-mode painter order.
   Gpu2d.flush(canvas: canvas)
+  Gpu2d.clearRotation(canvas: canvas)
 }
 
 # True when `e` clips its descendants (OverflowPolicy.mode == clip).
