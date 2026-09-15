@@ -1,0 +1,130 @@
+# #1004: a `Size: Hug` Text leaf hugs its glyphs, not its authored Rect. The
+# real width comes from a font measure written into MeasuredText before layout
+# (measureTextForLayout in the visual-bounds pass). This fixture has no font,
+# so it SETS MeasuredText by hand — exactly what the pass writes — and checks
+# that a Hug x Hug chip around a Hug text of Rect w 0 sizes to the text width +
+# padding, while a Fixed-width sibling still uses its authored Rect.
+import String
+import ui/Components
+open ui/Ecs
+open ui/layoutSystem/LayoutSystem
+open ecs/ComponentTable
+
+func hugSize() ret Size {
+  ret Size {
+    w: SizeAxis { mode: SizeMode.hug, min: -1, max: -1 }
+    h: SizeAxis { mode: SizeMode.hug, min: -1, max: -1 }
+  }
+}
+
+func fixedSize() ret Size {
+  ret Size {
+    w: SizeAxis { mode: SizeMode.fixed, min: -1, max: -1 }
+    h: SizeAxis { mode: SizeMode.fixed, min: -1, max: -1 }
+  }
+}
+
+func setRect(
+  world: mod UiWorld
+  entity: view EntityId
+  w: view Float
+  h: view Float
+) {
+  let r: Rect = { position: { x: 0.0, y: 0.0 }, size: { x: w, y: h } }
+  componentSet(this: world.rects, entity: entity, data: r)
+}
+
+func attach(world: mod UiWorld, parent: view EntityId, child: view EntityId) {
+  let pl: Parent = { parent: parent }
+  componentSet(this: world.parents, entity: child, data: pl)
+  var kids: List(EntityId) = List.create(EntityId, cap: 1)
+  if componentHas(this: world.childrens, entity: parent) {
+    let existing: Children = componentGet(this: world.childrens, entity: parent)
+    loop var i: Int = 0, i < existing.ids.length, ++i {
+      if let e: EntityId = existing.ids.copyAt(index: i) {
+        kids.add(value: e)
+      }
+    }
+  }
+  kids.add(value: child)
+  let ch: Children = { ids: own kids }
+  componentSet(this: world.childrens, entity: parent, data: own ch)
+}
+
+func dump(world: view UiWorld, entity: view EntityId, label: view String) {
+  let cr: ComputedRect = componentGet(this: world.computedRects, entity: entity)
+  log("{label} cr=({cr.position.x},{cr.position.y},{cr.size.x},{cr.size.y})")
+}
+
+func main() {
+  let world: UiWorld = createUiWorld()
+
+  # A Hug x Hug chip (12 px padding all round) around a Hug x Hug text leaf.
+  # The text's authored Rect.w is 0 — a designer never types the width.
+  let chip: EntityId = createEntity(world: world)
+  setRect(
+    world: world
+    entity: chip
+    w: 0.0
+    h: 0.0
+  )
+  componentSet(this: world.sizes, entity: chip, data: hugSize())
+  componentSet(
+    this: world.paddings
+    entity: chip
+    data: Padding { insets: { l: 12.0, t: 8.0, r: 12.0, b: 8.0 } }
+  )
+  componentSet(
+    this: world.layouts
+    entity: chip
+    data: Layout {
+      kind: LayoutType.horizontal
+      gap: 0.0
+      alignMain: AlignKind.start
+      alignCross: AlignKind.center
+      columns: 0
+      rowGap: 0.0
+      columnGap: 0.0
+    }
+  )
+
+  let label: EntityId = createEntity(world: world)
+  setRect(
+    world: world
+    entity: label
+    w: 0.0
+    h: 0.0
+  )
+  componentSet(this: world.sizes, entity: label, data: hugSize())
+  componentSet(
+    this: world.texts
+    entity: label
+    data: Text { text: "Hello", styleId: "body", wrapWidthMode: WrapWidthMode.none }
+  )
+  # The font measure the pre-layout pass would write: 140 wide, 24 line box.
+  componentSet(this: world.measuredTexts, entity: label, data: MeasuredText { w: 140.0, h: 24.0 })
+  attach(world: world, parent: chip, child: label)
+
+  # A Fixed-width text sibling keeps its authored Rect (200 wide) even with a
+  # MeasuredText present — proof the change only touches Hug axes.
+  let fixed: EntityId = createEntity(world: world)
+  setRect(
+    world: world
+    entity: fixed
+    w: 200.0
+    h: 30.0
+  )
+  componentSet(this: world.sizes, entity: fixed, data: fixedSize())
+  componentSet(
+    this: world.texts
+    entity: fixed
+    data: Text { text: "Wide", styleId: "body", wrapWidthMode: WrapWidthMode.none }
+  )
+  componentSet(this: world.measuredTexts, entity: fixed, data: MeasuredText { w: 999.0, h: 24.0 })
+
+  layoutSystem(world: world)
+
+  dump(world: world, entity: chip, label: "chip")
+  dump(world: world, entity: label, label: "label")
+  dump(world: world, entity: fixed, label: "fixed")
+}
