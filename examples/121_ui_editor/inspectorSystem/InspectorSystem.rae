@@ -1,0 +1,554 @@
+# inspectorSystem — the read-only inspector (design §3): hover highlights the
+# document node under the pointer, a click selects it, the arrow keys walk the
+# tree (Up/Down siblings, Left parent, Right first child), Esc clears, T
+# toggles a tree panel. The highlights are two `Shape` outline entities on an
+# `overlay` layer that this system MOVES to the target's world rect — the stock
+# render system draws them, there is no special draw path. Hit-testing walks
+# the DOCUMENT page only (deepest node under the pointer, whether or not it has
+# an OnClick), so the chrome can never select itself.
+#
+# RAE_UI_EDITOR_TEST_SELECT=<nodeId>: the headless gate's hook — select that
+# document node at boot as a click would.
+import Gpu2d
+import Keys
+import Sdl3
+import String
+open Sys
+open ui/Ecs
+open ui/Components
+open ui/Layer
+open ui/SceneLoader
+open ui/inputSystem/InputSystem
+open app3d/UiShell
+open ecs/Entity
+open ecs/ComponentTable
+
+# Tree rows: one design unit of indent per depth level.
+const treeIndentPerLevel: Float = 28.0
+
+const treeRowPitch: Float = 44.0
+
+type InspectorState {
+  hovered: EntityId
+  selected: EntityId
+  hoverOutline: EntityId
+  selectOutline: EntityId
+  panelOpen: Bool
+  treeOpen: Bool
+  # The tree list's row order (entity per row), so a row's action maps back.
+  treeEntities: List(EntityId)
+}
+
+func createOutlineEntity(
+  world: mod UiWorld
+  strokeWidth: view Float
+  stroke: view RgbaColor
+) ret EntityId {
+  let entity: EntityId = createEntity(world: world)
+  let rect: Rect = { position: { x: 0.0, y: 0.0 }, size: { x: 0.0, y: 0.0 } }
+  componentSet(this: world.rects, entity: entity, data: rect)
+  let shape: Shape = {
+    kind: ShapeKind.rect
+    fill: RgbaColor { r: 0, g: 0, b: 0, a: 0 }
+    stroke: stroke
+    fillSlot: ""
+    strokeSlot: ""
+    strokeWidth: strokeWidth
+    radius: 0.0
+  }
+  componentSet(this: world.shapes, entity: entity, data: shape)
+  componentSet(this: world.actives, entity: entity, data: Active { value: false })
+  setLayerById(world: world, entity: entity, id: "overlay")
+  ret entity
+}
+
+# The overlay layer + its two outlines. The only entities the app creates
+# beside the layer roots, and they are not layout: the system positions them.
+func createInspectorState(world: mod UiWorld) ret InspectorState {
+  let overlay: EntityId = createLayerEntity(world: world, id: "overlay", order: 200)
+  ret InspectorState {
+    hovered: noEntity()
+    selected: noEntity()
+    hoverOutline: createOutlineEntity(
+      world: world
+      strokeWidth: 3.0
+      stroke: RgbaColor { r: 255, g: 150, b: 64, a: 200 }
+    )
+    selectOutline: createOutlineEntity(
+      world: world
+      strokeWidth: 7.0
+      stroke: RgbaColor { r: 96, g: 200, b: 255, a: 255 }
+    )
+    panelOpen: false
+    treeOpen: false
+    treeEntities: List.create(EntityId, cap: 64)
+  }
+}
+
+# The document scene's root: mountPage mounts the scene's root node ONTO the
+# page-root entity, so the two are the same entity.
+func documentSceneRoot(world: view UiWorld, pageRoot: view EntityId) ret EntityId {
+  ret pageRoot
+}
+
+# Deepest active node under (x, y) in `entity`'s subtree, or none.
+func deepestNodeAt(
+  world: view UiWorld
+  entity: view EntityId
+  x: view Float
+  y: view Float
+) ret EntityId {
+  if uiEntityActive(world: world, entity: entity) is false {
+    ret noEntity()
+  }
+  if componentHas(this: world.childrens, entity: entity) {
+    let children: view Children => componentView(this: world.childrens, entity: entity)
+    loop var i: Int = children.ids.length - 1, i >= 0, --i {
+      let hit: EntityId = deepestNodeAt(
+        world: world
+        entity: children.ids.copyAtFallback(index: i, fallback: noEntity())
+        x: x
+        y: y
+      )
+      if isNone(this: hit) is false {
+        ret hit
+      }
+    }
+  }
+  if uiPointInEntity(
+    world: world
+    entity: entity
+    x: x
+    y: y
+  ) {
+    ret entity
+  }
+  ret noEntity()
+}
+
+func nodeIdOf(world: view UiWorld, entity: view EntityId) ret String {
+  if isNone(this: entity) {
+    ret ""
+  }
+  if componentHas(this: world.nodeIdComponents, entity: entity) {
+    ret "{componentGet(this: world.nodeIdComponents, entity: entity).id}"
+  }
+  ret "entity {entity.index}"
+}
+
+# First node in `entity`'s subtree whose NodeId is `nodeId`.
+func findNodeByIdIn(world: view UiWorld, entity: view EntityId, nodeId: view String) ret EntityId {
+  if isNone(this: entity) {
+    ret noEntity()
+  }
+  if componentHas(this: world.nodeIdComponents, entity: entity) {
+    if componentGet(this: world.nodeIdComponents, entity: entity).id is nodeId {
+      ret entity
+    }
+  }
+  if componentHas(this: world.childrens, entity: entity) {
+    let children: view Children => componentView(this: world.childrens, entity: entity)
+    loop var i: Int = 0, i < children.ids.length, ++i {
+      let found: EntityId = findNodeByIdIn(
+        world: world
+        entity: children.ids.copyAtFallback(index: i, fallback: noEntity())
+        nodeId: nodeId
+      )
+      if isNone(this: found) is false {
+        ret found
+      }
+    }
+  }
+  ret noEntity()
+}
+
+# Move an outline onto `target`'s world rect (or hide it for none).
+func placeOutline(
+  world: mod UiWorld
+  outline: view EntityId
+  target: view EntityId
+  visible: view Bool
+) {
+  var show: Bool = visible and isNone(this: target) is false
+  if show and (componentHas(this: world.worldTransforms, entity: target) is false or componentHas(
+    this: world.computedRects
+    entity: target
+  ) is false) {
+    show = false
+  }
+  componentSet(this: world.actives, entity: outline, data: Active { value: show })
+  if show is false {
+    ret
+  }
+  # A root's layout position is always (0, 0); the translation to the target
+  # is a RuntimeOffset, the transform-time input (the same one a scroll uses).
+  let transform: WorldTransform2D = componentGet(this: world.worldTransforms, entity: target)
+  let computed: ComputedRect = componentGet(this: world.computedRects, entity: target)
+  let rect: mod Rect => componentMod(this: world.rects, entity: outline)
+  rect.size.x = computed.size.x
+  rect.size.y = computed.size.y
+  let offset: RuntimeOffset = { delta: Vec2 { x: transform.position.x, y: transform.position.y } }
+  componentSet(this: world.runtimeOffsets, entity: outline, data: offset)
+}
+
+func parentOf(world: view UiWorld, entity: view EntityId) ret EntityId {
+  if isNone(this: entity) or componentHas(this: world.parents, entity: entity) is false {
+    ret noEntity()
+  }
+  ret componentGet(this: world.parents, entity: entity).parent
+}
+
+# The sibling `step` places away in the parent's Children (clamped).
+func siblingOf(world: view UiWorld, entity: view EntityId, step: view Int) ret EntityId {
+  let parent: EntityId = parentOf(world: world, entity: entity)
+  if isNone(this: parent) or componentHas(this: world.childrens, entity: parent) is false {
+    ret entity
+  }
+  let children: view Children => componentView(this: world.childrens, entity: parent)
+  loop var i: Int = 0, i < children.ids.length, ++i {
+    if children.ids.copyAtFallback(index: i, fallback: noEntity()) is entity {
+      var next: Int = i + step
+      if next < 0 {
+        next = 0
+      }
+      if next > children.ids.length - 1 {
+        next = children.ids.length - 1
+      }
+      ret children.ids.copyAtFallback(index: next, fallback: entity)
+    }
+  }
+  ret entity
+}
+
+func firstChildOf(world: view UiWorld, entity: view EntityId) ret EntityId {
+  if isNone(this: entity) or componentHas(this: world.childrens, entity: entity) is false {
+    ret entity
+  }
+  let children: view Children => componentView(this: world.childrens, entity: entity)
+  if children.ids.length is 0 {
+    ret entity
+  }
+  ret children.ids.copyAtFallback(index: 0, fallback: entity)
+}
+
+# The parent chain as `a > b > c`, stopping at the document scene root.
+func parentChainOf(
+  world: view UiWorld
+  entity: view EntityId
+  sceneRoot: view EntityId
+) ret String {
+  var chain: String = ""
+  var current: EntityId = parentOf(world: world, entity: entity)
+  var guard: Int = 0
+  loop isNone(this: current) is false and guard < 32 {
+    if chain.length() > 0 {
+      chain = "{nodeIdOf(world: world, entity: current)} > {chain}"
+    } else {
+      chain = nodeIdOf(world: world, entity: current)
+    }
+    if current is sceneRoot {
+      current = noEntity()
+    } else {
+      current = parentOf(world: world, entity: current)
+    }
+    guard = guard + 1
+  }
+  if chain.length() is 0 {
+    ret "(root)"
+  }
+  ret chain
+}
+
+# Write the inspector panel from the selection.
+func syncInspectorPanel(
+  world: mod UiWorld
+  inspector: view InspectorState
+  sceneRoot: view EntityId
+) {
+  let selected: EntityId = inspector.selected
+  if isNone(this: selected) {
+    setNodeText(world: world, nodeId: "chrome/InsNodeId", value: "nothing selected")
+    setNodeText(world: world, nodeId: "chrome/InsType", value: "click a node, or use the arrows")
+    setNodeText(world: world, nodeId: "chrome/InsComponents", value: "")
+    setNodeText(world: world, nodeId: "chrome/InsRect", value: "")
+    setNodeText(world: world, nodeId: "chrome/InsParents", value: "")
+    ret
+  }
+  setNodeText(
+    world: world
+    nodeId: "chrome/InsNodeId"
+    value: nodeIdOf(world: world, entity: selected)
+  )
+  var primaryType: String = ""
+  if componentHas(this: world.primaryTypes, entity: selected) {
+    let primary: view PrimaryType => componentView(this: world.primaryTypes, entity: selected)
+    primaryType = "{primary.typeName}"
+  }
+  var label: String = ""
+  if componentHas(this: world.names, entity: selected) {
+    let name: view Name => componentView(this: world.names, entity: selected)
+    label = "{name.label}"
+  }
+  var typeLine: String = "{primaryType} · {label}"
+  if primaryType.length() is 0 {
+    typeLine = "{label}"
+  }
+  if label.length() is 0 {
+    typeLine = "{primaryType}"
+  }
+  setNodeText(world: world, nodeId: "chrome/InsType", value: typeLine)
+  setNodeText(
+    world: world
+    nodeId: "chrome/InsComponents"
+    value: componentNamesFor(world: world, entity: selected)
+  )
+  var rectLine: String = "no computed rect"
+  if componentHas(this: world.computedRects, entity: selected) and componentHas(
+    this: world.worldTransforms
+    entity: selected
+  ) {
+    let transform: WorldTransform2D = componentGet(this: world.worldTransforms, entity: selected)
+    let computed: ComputedRect = componentGet(this: world.computedRects, entity: selected)
+    rectLine = "x {transform.position.x.toInt()}  y {transform.position.y.toInt()}  w {computed.size.x.toInt()}  h {computed.size.y.toInt()}"
+  }
+  setNodeText(world: world, nodeId: "chrome/InsRect", value: rectLine)
+  setNodeText(
+    world: world
+    nodeId: "chrome/InsParents"
+    value: parentChainOf(world: world, entity: selected, sceneRoot: sceneRoot)
+  )
+}
+
+func collectTreeRows(
+  world: view UiWorld
+  entity: view EntityId
+  depth: view Int
+  selected: view EntityId
+  entities: mod List(EntityId)
+  rows: mod List(ListViewRow)
+) {
+  if isNone(this: entity) or rows.length >= 256 {
+    ret
+  }
+  var keys: List(String) = {
+    "id"
+    "label"
+    "indent"
+    "marker"
+    "action"
+  }
+  var values: List(String) = List.create(String, cap: 5)
+  values.add(value: "{entity.index}")
+  values.add(value: nodeIdOf(world: world, entity: entity))
+  values.add(value: "{(depth.toFloat() * treeIndentPerLevel + 12.0).toInt()}")
+  var marker: String = ""
+  if entity is selected {
+    marker = ">"
+  }
+  values.add(value: marker)
+  values.add(value: "inspect:{entity.index}")
+  rows.add(value: ListViewRow { keys: own keys, values: own values })
+  entities.add(value: entity)
+  if componentHas(this: world.childrens, entity: entity) {
+    let children: view Children => componentView(this: world.childrens, entity: entity)
+    loop var i: Int = 0, i < children.ids.length, ++i {
+      collectTreeRows(
+        world: world
+        entity: children.ids.copyAtFallback(index: i, fallback: noEntity())
+        depth: depth + 1
+        selected: selected
+        entities: entities
+        rows: rows
+      )
+    }
+  }
+}
+
+# Rebuild the tree list's rows (DFS of the document, depth as indent, the
+# selection marked). The list's Rect follows the design width and row count.
+func syncTreePanel(
+  world: mod UiWorld
+  inspector: mod InspectorState
+  sceneRoot: view EntityId
+  designW: view Float
+) {
+  let list: EntityId = nodeEntityFor(world: world, nodeId: "chrome/TreeList")
+  if isNone(this: list) {
+    ret
+  }
+  inspector.treeEntities.clear()
+  var rows: List(ListViewRow) = List.create(ListViewRow, cap: 32)
+  collectTreeRows(
+    world: world
+    entity: sceneRoot
+    depth: 0
+    selected: inspector.selected
+    entities: inspector.treeEntities
+    rows: rows
+  )
+  if componentHas(this: world.rects, entity: list) and componentHas(
+    this: world.listViews
+    entity: list
+  ) {
+    let listView: ListView = componentGet(this: world.listViews, entity: list)
+    var shown: Int = rows.length
+    if shown < 1 {
+      shown = 1
+    }
+    if shown > listView.visibleItemCount {
+      shown = listView.visibleItemCount
+    }
+    let rect: mod Rect => componentMod(this: world.rects, entity: list)
+    rect.size.x = designW - 48.0
+    rect.size.y = shown.toFloat() * (listView.itemHeight + listView.itemGap) - listView.itemGap
+  }
+  componentSet(this: world.listViewDatas, entity: list, data: ListViewData { rows: own rows })
+}
+
+func selectNode(inspector: mod InspectorState, world: mod UiWorld, entity: view EntityId) {
+  inspector.selected = entity
+  if isNone(this: entity) {
+    ret
+  }
+  log(
+    "[ui-editor] selected {nodeIdOf(world: world, entity: entity)}: {componentNamesFor(
+      world: world
+      entity: entity
+    )}"
+  )
+}
+
+# Per frame: hover from the pointer, click / arrows / Esc on the selection,
+# tree-row actions, then the outlines and panels. Returns whether anything
+# the frame shows changed.
+func inspectorSystem(
+  inspector: mod InspectorState
+  world: mod UiWorld
+  input: view UiInput
+  pageRoot: view EntityId
+  chromeVisible: view Bool
+  designW: view Float
+) ret Bool {
+  let sceneRoot: EntityId = documentSceneRoot(world: world, pageRoot: pageRoot)
+  var changed: Bool = false
+  let hovered: EntityId = deepestNodeAt(
+    world: world
+    entity: sceneRoot
+    x: input.pointer.x
+    y: input.pointer.y
+  )
+  if hovered is not inspector.hovered {
+    inspector.hovered = hovered
+    changed = true
+  }
+  var selection: EntityId = inspector.selected
+  if input.pointer.pressed and isNone(this: hovered) is false {
+    selection = hovered
+  }
+  if Sdl3.isKeyPressed(key: Keys.keyEscape) {
+    selection = noEntity()
+  }
+  if isNone(this: selection) is false {
+    if Sdl3.isKeyPressed(key: Keys.keyUp) {
+      selection = siblingOf(world: world, entity: selection, step: 0 - 1)
+    }
+    if Sdl3.isKeyPressed(key: Keys.keyDown) {
+      selection = siblingOf(world: world, entity: selection, step: 1)
+    }
+    if Sdl3.isKeyPressed(key: Keys.keyLeft) {
+      let parent: EntityId = parentOf(world: world, entity: selection)
+      if isNone(this: parent) is false and selection is not sceneRoot {
+        selection = parent
+      }
+    }
+    if Sdl3.isKeyPressed(key: Keys.keyRight) {
+      selection = firstChildOf(world: world, entity: selection)
+    }
+  }
+  # A tree row click carries `inspect:<entity index>`.
+  let actionCount: Int = uiActionCount(world: world)
+  loop var a: Int = 0, a < actionCount, ++a {
+    let actionId: String = uiActionAt(world: world, index: a)
+    if actionId.startsWith(prefix: "inspect:") {
+      let index: Int = actionId.sub(start: 8, len: actionId.length() - 8).toInt()
+      loop var t: Int = 0, t < inspector.treeEntities.length, ++t {
+        let candidate: EntityId = inspector.treeEntities.copyAtFallback(
+          index: t
+          fallback: noEntity()
+        )
+        if candidate.index is index {
+          selection = candidate
+        }
+      }
+    }
+  }
+  if Sdl3.isKeyPressed(key: Keys.keyT) {
+    inspector.treeOpen = not inspector.treeOpen
+    setNodeActive(world: world, nodeId: "chrome/TreePanel", value: inspector.treeOpen)
+    changed = true
+  }
+  if selection is not inspector.selected {
+    selectNode(inspector: inspector, world: world, entity: selection)
+    inspector.panelOpen = isNone(this: selection) is false
+    setNodeActive(world: world, nodeId: "chrome/InspectorPanel", value: inspector.panelOpen)
+    changed = true
+  }
+  if changed {
+    syncInspectorPanel(world: world, inspector: inspector, sceneRoot: sceneRoot)
+    syncTreePanel(
+      world: world
+      inspector: inspector
+      sceneRoot: sceneRoot
+      designW: designW
+    )
+  }
+  # Outlines follow the layout of this frame; placed every frame, cheap.
+  placeOutline(
+    world: world
+    outline: inspector.hoverOutline
+    target: inspector.hovered
+    visible: chromeVisible and inspector.hovered is not inspector.selected
+  )
+  placeOutline(
+    world: world
+    outline: inspector.selectOutline
+    target: inspector.selected
+    visible: chromeVisible
+  )
+  ret changed
+}
+
+# After a (re)load the entities are new: drop the selection, or re-find it by
+# node id, and rebuild the panels.
+func inspectorAfterLoad(
+  inspector: mod InspectorState
+  world: mod UiWorld
+  pageRoot: view EntityId
+  designW: view Float
+  selectNodeId: view String
+) {
+  let sceneRoot: EntityId = documentSceneRoot(world: world, pageRoot: pageRoot)
+  inspector.hovered = noEntity()
+  var target: EntityId = noEntity()
+  if selectNodeId.length() > 0 {
+    target = findNodeByIdIn(world: world, entity: sceneRoot, nodeId: selectNodeId)
+  }
+  inspector.selected = noEntity()
+  if isNone(this: target) is false {
+    selectNode(inspector: inspector, world: world, entity: target)
+  } else {
+    if selectNodeId.length() > 0 {
+      log("[ui-editor] select: no node named {selectNodeId}")
+    }
+  }
+  inspector.panelOpen = isNone(this: inspector.selected) is false
+  setNodeActive(world: world, nodeId: "chrome/InspectorPanel", value: inspector.panelOpen)
+  setNodeActive(world: world, nodeId: "chrome/TreePanel", value: inspector.treeOpen)
+  syncInspectorPanel(world: world, inspector: inspector, sceneRoot: sceneRoot)
+  syncTreePanel(
+    world: world
+    inspector: inspector
+    sceneRoot: sceneRoot
+    designW: designW
+  )
+}

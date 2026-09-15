@@ -187,6 +187,24 @@ func listViewSceneBindingCurrent(
     let trueStr: String = "true"
     ret cur.value is (value is trueStr)
   }
+  let paddingName: String = "Padding"
+  if binding.componentName is paddingName {
+    if componentHas(this: world.paddings, entity: entity) is false {
+      ret false
+    }
+    let cur: Padding = componentGet(this: world.paddings, entity: entity)
+    let wanted: Float = value.toFloat()
+    if binding.fieldName is "l" {
+      ret cur.insets.l is wanted
+    }
+    if binding.fieldName is "t" {
+      ret cur.insets.t is wanted
+    }
+    if binding.fieldName is "r" {
+      ret cur.insets.r is wanted
+    }
+    ret cur.insets.b is wanted
+  }
   ret true
 }
 
