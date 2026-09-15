@@ -32,16 +32,27 @@ texture manifest, and a design-resolution + fit rule (now native:
   `Sys.argAt(i)` and the `--` passthrough. `RAE_UI_EDITOR_SCENE=<path>` is the env
   fallback (headless gates use it). No argument → the shipped sample
   `assets/samples/MainMenu.raescene`.
-- **Sub-scenes** referenced by `SceneInstance { sceneId }` resolve to
-  `<scene dir>/<sceneId>.raescene`, loaded lazily into one `SceneRegistry`
-  (recursively). Missing → red sentinel block + diagnostic, the page still mounts.
-- **Theme:** `<scene dir>/theme.raescene` (version 3) if present, else the library
-  default theme. An unresolved token (`"spaceL"`, `"surface"`) is a diagnostic and
-  falls back to the default value, never a crash.
-- **Textures:** `Sprite.textureKey` → the first hit in `<scene dir>/`,
-  `<scene dir>/../textures/`, `<scene dir>/../images/`, then
-  `$RAE_UI_EDITOR_ASSETS/` (`<key>.png`). A miss draws a labelled placeholder
+- **The scene root** (#1008, docs/ui-scene-format.md): every scene reference —
+  `import`, `SceneInstance.sceneId`, a ListView's row scenes — is a package path
+  without extension (`Theme`, `shared/GameAssets`, `cards/HeroCard`) resolved as
+  `<root>/<path>.raescene`. The root is the opened scene's directory unless
+  `--scene-root <dir>` (or `RAE_UI_EDITOR_ROOT`) says otherwise — the way `rae run`
+  takes the entry file's folder as the project unless `--project` is given.
+  Sub-scenes load lazily into one `SceneRegistry` (recursively). Missing → red
+  sentinel block + diagnostic, the page still mounts.
+- **Theme and assets** come ONLY through the scene's `"import": [...]` list (and
+  its own inline token / `assets` blocks) — nothing is read by convention; the
+  old `<dir>/theme.raescene` auto-load is gone, and a scene that still relies on
+  it gets a diagnostic naming the `"import": ["Theme"]` line it needs. An
+  unresolved token (`"spaceL"`, `"surface"`) is a diagnostic and falls back to
+  the default value, never a crash.
+- **Textures:** `Sprite.textureKey` → the scene's (and imports') `assets.textures`
+  `map` entry, else `<dir>/<key>.png` over its `dirs`; `$RAE_UI_EDITOR_ASSETS/<key>.png`
+  is a viewer-only override tried first. A miss draws a labelled placeholder
   (key text on a hatched box), not nothing.
+- **Fonts:** `assets.fonts.text` / `.icons` (a `.mtsdf.json`; the sibling atlas is
+  `.png` or `.raw`), else the viewer's fallback Roboto + Material atlases;
+  `RAE_UI_EDITOR_FONT` / `RAE_UI_EDITOR_ICON_FONT` override.
 - **Window:** default 9:16, `540x960` logical; `RAE_UI_EDITOR_WINDOW=WxH` overrides;
   resizable. **Design resolution** = the root node's authored `Rect` when it has one,
   else `1080x1920`, `RAE_UI_EDITOR_DESIGN=WxH` overrides; fit = contain (letterbox),
@@ -57,7 +68,7 @@ chrome can be hidden for a pure passive view (`H` key).
   like a 106 page) under a `Viewport` node that carries the design resolution and
   the letterbox. Remounted whole on reload.
 - **chrome layer** — authored in the app's OWN `.raescene`
-  (`assets/scenes/editor.raescene`, `chrome/*.raescene` sub-scenes): a top bar (file
+  (`assets/scenes/Editor.raescene`, `chrome/*.raescene` sub-scenes): a top bar (file
   name, design size, node count, diagnostics count, `watching` dot), a status line,
   later the inspector/tree side panel. The chrome is data; the app has no
   `createEntity` for layout.
@@ -72,7 +83,7 @@ the library systems, like 106's `FramePipeline.rae`):
 | folder | system | does |
 |---|---|---|
 | `documentSystem/` | `documentLoadSystem` | parse + register + mount; on failure keep the last good page and show the parse error in the chrome |
-| `watchSystem/` | `fileWatchSystem` | poll `Sys.fileMtime` of the scene, its sub-scenes and theme every 250 ms (only while the window is visible); changed → `documentLoadSystem` remount, scroll preserved |
+| `watchSystem/` | `fileWatchSystem` | poll `Sys.fileMtime` of the scene, its sub-scenes and imports every 250 ms (only while the window is visible); changed → `documentLoadSystem` remount, scroll preserved |
 | `diagnosticsSystem/` | `diagnosticsSystem` | owns `List(SceneDiagnostic)` (unknown component, runtime-only component, unknown token, missing sub-scene, missing texture, parse error); writes the chrome's counter + list (a `ListView` — the `lib/ui` list system, dogfooded) |
 | `inspectorSystem/` | `inspectorSystem` | hover → highlight rect; click → select; overlay with node id, component names (`componentNamesFor`), computed rect; arrow keys walk the tree; `Esc` clears |
 | `viewportSystem/` | `viewportSystem` | design resolution + letterbox from the document; window resize → re-fit |
