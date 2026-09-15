@@ -663,6 +663,30 @@ func applyOverride(world: mod UiWorld, entity: view EntityId, override: view Sce
     componentSet(this: world.rects, entity: entity, data: current)
     ret
   }
+  # `Padding.l/t/r/b` (#999): a per-instance inset, the way a tree row indents
+  # by its depth through a ListView binding.
+  let paddingKey: String = "Padding"
+  if override.componentName is paddingKey {
+    var insets: Padding = { insets: { l: 0.0, t: 0.0, r: 0.0, b: 0.0 } }
+    if componentHas(this: world.paddings, entity: entity) {
+      insets = componentGet(this: world.paddings, entity: entity)
+    }
+    let value: Float = override.valueString.toFloat()
+    if override.fieldName is "l" {
+      insets.insets.l = value
+    }
+    if override.fieldName is "t" {
+      insets.insets.t = value
+    }
+    if override.fieldName is "r" {
+      insets.insets.r = value
+    }
+    if override.fieldName is "b" {
+      insets.insets.b = value
+    }
+    componentSet(this: world.paddings, entity: entity, data: insets)
+    ret
+  }
 }
 
 # Mount `scene` as a resident page identified by `pageId`. Creates a

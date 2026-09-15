@@ -282,6 +282,27 @@ func rebuildWatchedPaths(document: mod SceneDocument) {
   }
 }
 
+# mountPage registers `document/<nodeId>` -> entity but tags no NodeId / Name
+# component (loadScene does; the page mount does not). The inspector names
+# nodes by component, so tag every mounted node of `scene` that has none.
+# Instances of one sub-scene share ids, and the map keeps the last mounted, so
+# only that instance's nodes get their authored id — the others read as their
+# entity index.
+func tagMountedNodeIds(world: mod UiWorld, scene: view Scene, pageId: view String) {
+  loop var i: Int = 0, i < scene.nodes.length, ++i {
+    let node: view SceneNode => nodeAt(this: scene, idx: i)
+    if let raw: Int = world.nodeIds.get(k: "{pageId}/{node.nodeId}") {
+      let entity: EntityId = nodeEntity(world: world, index: raw)
+      if componentHas(this: world.nodeIdComponents, entity: entity) is false {
+        let nodeId: NodeId = { id: "{node.nodeId}" }
+        componentSet(this: world.nodeIdComponents, entity: entity, data: own nodeId)
+        let name: Name = { label: "{node.nodeId}" }
+        componentSet(this: world.names, entity: entity, data: own name)
+      }
+    }
+  }
+}
+
 # Parse + register + mount under the `document` layer; on a reload, unmount
 # the previous page first. `builtinScenePaths` are the app's own sub-scenes
 # (the chrome's row scene) that live in the same registry, since the list
@@ -352,6 +373,11 @@ func documentLoadSystem(
     passes = passes + 1
   }
   seedListViewRows(world: world)
+  tagMountedNodeIds(world: world, scene: document.scene, pageId: "document")
+  loop var r: Int = 0, r < document.registry.ids.length, ++r {
+    let registered: view Scene => sceneRegistryGet(reg: document.registry, idx: r)
+    tagMountedNodeIds(world: world, scene: registered, pageId: "document")
+  }
   restoreDocumentScrolls(world: world, snapshot: scrolls)
   rebuildWatchedPaths(document: document)
   document.nodeCount = aliveCount(world: world) - before
