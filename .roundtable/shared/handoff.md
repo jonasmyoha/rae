@@ -742,7 +742,7 @@ device_px(p) = round(p * dpr) / dpr # snap to device-pixel grid → no blurry ha
 - **Raster asset density (med):** points fix layout, not image sharpness. PNGs still need `@2x/@3x` or supersample-on-load; MSDF text is already covered, so this is image-only.
 - **Non-integer DPR on macOS (low):** scaled Retina modes yield DPR like 1.6–2.0; snapping handles it but mouse-coord rounding must match render rounding or hit-tests drift by ≤1px.
 - **`%`/`fr` scope creep (unknown):** decide now whether percentage lengths are in v1 or deferred — adding them later is a format-version bump. Recommend constraints+flow first, `%` deferred.
-- **game-proto1 coupling (unknown):** the *only* reason to keep a 1080-style space anywhere is if game proto1 shares pixi scene coordinates. That's a separate app from `98_mobile_ui`; confirm before assuming one unit policy spans both repos.
+- **game proto1 coupling (unknown):** the *only* reason to keep a 1080-style space anywhere is if game proto1 shares pixi scene coordinates. That's a separate app from `98_mobile_ui`; confirm before assuming one unit policy spans both repos.
 
 Now updating my memory.[Read] /Users/jonas/Documents/my_own_stuff/own_repos/rae-lang-dev/.roundtable/agents/clo/memory.md
 
@@ -752,7 +752,7 @@ Now updating my memory.[Read] /Users/jonas/Documents/my_own_stuff/own_repos/rae-
 
 Concretely: reference frame **393×852** (a clean ×0.789 rescale of the current `98_mobile_ui` 498×1079, same aspect), adaptation via **Auto Layout + Figma-style Constraints** rather than baked pixels or pervasive `%`, DPR plumbed through `FLAG_WINDOW_HIGHDPI` with **pixel snapping** to keep hairlines crisp. The project's MSDF text work is a real bonus here — text scales from one atlas, so only raster PNGs need `@Nx` variants.
 
-Main risks flagged: the `setLayoutScreenSize` cross-module-global-write limitation, fractional-point blur without snapping, raster asset density, and confirming whether `game-proto1` shares pixi coordinates (the only reason to keep a 1080-space anywhere).
+Main risks flagged: the `setLayoutScreenSize` cross-module-global-write limitation, fractional-point blur without snapping, raster asset density, and confirming whether `game proto1` shares pixi coordinates (the only reason to keep a 1080-space anywhere).
 
 ### Round 1 — Chattie
 I’ll ground this in Rae’s current implementation before proposing the design: I’m checking the existing `spawn` support, VM/C runtime threading hooks, and current tests so the proposal fits the codebase rather than inventing a separate model.
@@ -1983,7 +1983,7 @@ But two refinements to your render-to-texture proposal, and they're exactly the 
 - **Reflow vs letterbox default (medium):** reflow needs constraints to be solid; letterbox is safer but is "phone forever." Recommend reflow default, letterbox as sim mode.
 - **Live parity (medium):** `viewportSystem` + render-texture natives need VM bindings; ties to the value/ref work above.
 - **Stale numbers (low):** the existing plan says `config` is `600×1079`; it's actually `498×1079` — same aspect, rescale math unaffected.
-- **Unknown:** does `game-proto1` (game port) share coordinates with pixi (1080×2280)? If yes, that repo keeps the 1080 space; `98_mobile_ui` does not.
+- **Unknown:** does `game proto1` (game port) share coordinates with pixi (1080×2280)? If yes, that repo keeps the 1080 space; `98_mobile_ui` does not.
 
 Updating memory.
 

@@ -72,12 +72,12 @@ Rae → TypeScript → run anywhere JS does (browser, Node, Electron, Bun, Deno,
 
 **Pros**
 
-- Largest deployable surface area instantly: web demos, devtools embedding, electron apps, hybrid mobile via Capacitor (game-proto1-pixi already ships iOS through this path).
+- Largest deployable surface area instantly: web demos, devtools embedding, electron apps, hybrid mobile via Capacitor (game-proto1 pixi already ships iOS through this path).
 - Browser fonts are *already* world-class — no font work to do for web target.
 - PixiJS / Canvas / WebGL / WebGPU are mature 2D backends with great AA and text.
 - Source-level deploy means no native build for web; iteration loop is instant.
 - TypeScript's structural-type system is compatible with Rae's types; transpile is fairly mechanical.
-- Game-proto1-pixi is an existing proof point that ECS-driven Rae-style UI works at scale in TS + Pixi.
+- Game-proto1 pixi is an existing proof point that ECS-driven Rae-style UI works at scale in TS + Pixi.
 
 **Cons**
 

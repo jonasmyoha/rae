@@ -152,7 +152,7 @@ live in one file.
   Git deps are cloned into `.rae/deps/<name>` (already gitignored).
 - **A registry is deliberately later** (§15 of the packages doc). Path + git
   cover every current consumer — the sibling game projects, `rae_ui`,
-  `game-proto1` — and a registry adds hosting, auth and yanking, none of
+  `game proto1` — and a registry adds hosting, auth and yanking, none of
   which anyone needs yet.
 
 ## 5. What this replaces in a downstream project
