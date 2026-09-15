@@ -210,9 +210,18 @@ func canvasDrawGlyphEx(
   # glyph — O(n^2) per frame and the dominant idle malloc/free churn (114:
   # ~2.8M Buffer allocs / 20 s). A `mod` window grows the List's own storage.
   let clip: Int = canvas.currentClip
+  # The canvas rotation (#1003): the glyph's centre turns about the pivot; the
+  # shader turns the quad about that centre by the same angle (params.w).
+  var glyphX: Float = sx0
+  var glyphY: Float = sy0
+  if canvas.spinAngle is not 0.0 {
+    let centre: SpinPoint = spinPoint(canvas: canvas, x: (sx0 + sx1) / 2.0, y: (sy0 + sy1) / 2.0)
+    glyphX = centre.x - (sx1 - sx0) / 2.0
+    glyphY = centre.y - (sy1 - sy0) / 2.0
+  }
   if let entry: mod Gpu2dTextAtlas => canvas.textAtlases.modAt(index: ai) {
-    entry.glyphs.add(value: sx0)
-    entry.glyphs.add(value: sy0)
+    entry.glyphs.add(value: glyphX)
+    entry.glyphs.add(value: glyphY)
     entry.glyphs.add(value: sx1 - sx0)
     entry.glyphs.add(value: sy1 - sy0)
     entry.glyphs.add(value: u0)
@@ -226,7 +235,7 @@ func canvasDrawGlyphEx(
     entry.glyphs.add(value: pxRange)
     entry.glyphs.add(value: outlineWidth)
     entry.glyphs.add(value: softness)
-    entry.glyphs.add(value: 0.0)
+    entry.glyphs.add(value: canvas.spinAngle)
     entry.glyphs.add(value: tintChannel(color: outlineColor, shift: 65536))
     entry.glyphs.add(value: tintChannel(color: outlineColor, shift: 256))
     entry.glyphs.add(value: tintChannel(color: outlineColor, shift: 1))
@@ -358,24 +367,30 @@ func textFlushAtlas(
     )
   }
   if uploaded {
-    let entries: List(ResourceRef) = List.create(ResourceRef, cap: 4)
-    entries.add(value: bufferRef(id: canvas.viewport))
-    entries.add(value: bufferRef(id: glyphs))
-    entries.add(value: textureViewRef(id: batch.textureView))
-    entries.add(value: samplerRef(id: canvas.imageSampler))
-    if let bind: BindGroupId = createRenderBindGroup(
-      resources: resources
-      pipeline: canvas.textPipeline
-      entries: entries
-    ) {
-      canvas.frameBinds.add(value: bind)
-      var runStart: Int = 0
-      loop runStart < count {
-        let clip: Int = textClipAt(atlas: batch, i: runStart)
-        var runEnd: Int = runStart + 1
-        loop runEnd < count and textClipAt(atlas: batch, i: runEnd) is clip {
-          runEnd = runEnd + 1
-        }
+    # One bind group per same-clip run (#1003): the run's rounded-clip uniform
+    # rides in it, as in the box pass, so text under a rounded clip is cut by
+    # the same SDF and not only by the scissor bbox.
+    var runStart: Int = 0
+    loop runStart < count {
+      let clip: Int = textClipAt(atlas: batch, i: runStart)
+      var runEnd: Int = runStart + 1
+      loop runEnd < count and textClipAt(atlas: batch, i: runEnd) is clip {
+        runEnd = runEnd + 1
+      }
+      let entries: List(ResourceRef) = List.create(ResourceRef, cap: 5)
+      entries.add(value: bufferRef(id: canvas.viewport))
+      entries.add(value: bufferRef(id: glyphs))
+      entries.add(value: textureViewRef(id: batch.textureView))
+      entries.add(value: samplerRef(id: canvas.imageSampler))
+      entries.add(
+        value: bufferRef(id: clipUniformFor(canvas: canvas, resources: resources, clip: clip))
+      )
+      if let bind: BindGroupId = createRenderBindGroup(
+        resources: resources
+        pipeline: canvas.textPipeline
+        entries: entries
+      ) {
+        canvas.frameBinds.add(value: bind)
         g2dScissor(canvas: canvas, clip: clip)
         unsafe {
           let drawn: Bool = recordDrawInPass(
@@ -389,8 +404,8 @@ func textFlushAtlas(
             firstInstance: runStart
           )
         }
-        runStart = runEnd
       }
+      runStart = runEnd
     }
   }
   batch.glyphs.clear()

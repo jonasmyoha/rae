@@ -21,6 +21,7 @@
 #
 # Coordinate convention: x grows right, y grows down (raylib-friendly).
 # rotation is in radians. scale defaults to 1.0. alpha defaults to 1.0.
+import Math
 open ecs/ComponentTable
 open ecs/Query
 import ecs/Transform
@@ -123,8 +124,22 @@ func buildLocalTransforms(world: mod UiWorld) {
     let cr: ComputedRect = componentDataAt(this: world.computedRects, i: i)
     let ro: Vec2 = runtimeOffsetOf(world: world, entity: entity)
     let fx: TransformFx = fxOf(world: world, entity: entity)
+    # The ECS transform rotates about the entity's ORIGIN (its top-left);
+    # TransformFx.pivot asks for a turn about a point inside the box. The
+    # origin is moved so that rotating about it lands the pivot where it was:
+    # origin' = origin + p - R(θ) p, with p the pivot in the box (#1003).
+    var originX: Float = cr.position.x + ro.x
+    var originY: Float = cr.position.y + ro.y
+    if fx.rotation is not 0.0 {
+      let pivotX: Float = cr.size.x * fx.pivot.x
+      let pivotY: Float = cr.size.y * fx.pivot.y
+      let cosR: Float = Math.cos(x: fx.rotation)
+      let sinR: Float = Math.sin(x: fx.rotation)
+      originX = originX + pivotX - (pivotX * cosR - pivotY * sinR)
+      originY = originY + pivotY - (pivotX * sinR + pivotY * cosR)
+    }
     let local: Transform2D = {
-      position: { x: cr.position.x + ro.x, y: cr.position.y + ro.y }
+      position: { x: originX, y: originY }
       rotation: fx.rotation
       scale: { x: fx.scaleX, y: fx.scaleY }
     }
