@@ -192,6 +192,7 @@ func mountUiScene(world: mod UiWorld, path: view String, res: view Gpu2dUi) ret 
 # three. Running a subset is the classic source of a UI that is
 # positioned correctly but hit-tests against last frame's rectangles.
 func runUiSystems(world: mod UiWorld, res: view Gpu2dUi) {
+  measureTextForLayout(world: world, res: res)
   layoutSystem(world: world)
   transformSystem(world: world)
   visualBoundsSystem(world: world, res: res)
@@ -207,6 +208,11 @@ func runUiSystems(world: mod UiWorld, res: view Gpu2dUi) {
 # frame; the schedule owns the order and the dirty state, the app still CALLS
 # the systems (Rae has no first-class function references).
 func runScheduledUiSystems(schedule: mod Schedule, world: mod UiWorld, res: view Gpu2dUi) {
+  # #1004: font-measure Text leaves into MeasuredText BEFORE layout, so a Hug
+  # text hugs its glyphs on the first frame. Compare-before-write means a
+  # stable string does not bump the table generation, so layout still skips
+  # when nothing moved (measuredTexts is a declared layout read).
+  measureTextForLayout(world: world, res: res)
   if uiShouldRun(schedule: schedule, world: world, index: uiSystemLayout) {
     layoutSystem(world: world)
   }

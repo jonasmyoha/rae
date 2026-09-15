@@ -134,3 +134,51 @@ func iconGlyphSize(world: view UiWorld, entity: view EntityId) ret Float {
   }
   ret sz
 }
+
+# #1004: the font measure a Hug Text leaf needs BEFORE layout. Runs ahead of
+# layoutSystem (not with visualBoundsSystem, which runs after layout for
+# centering): plain-text measurement needs only the font + style size, no
+# ComputedRect, so it is correct on the first frame. Writes MeasuredText
+# { w: pen advance, h: line box } for every non-empty Text node, comparing
+# before writing so a stable string does not bump the table generation and
+# re-dirty layout every frame.
+func measureTextForLayout(world: mod UiWorld, res: view Gpu2dUi) pub {
+  let n: Int = componentCount(this: world.texts)
+  var i: Int = 0
+  loop i < n {
+    let entity: EntityId = componentEntityAt(this: world.texts, i: i)
+    let t: Text = componentDataAt(this: world.texts, i: i)
+    if t.text.length() > 0 {
+      var size: Float = resolveTextSize(theme: res.theme, styleId: t.styleId)
+      if componentHas(this: world.styleOverrides, entity: entity) {
+        let so: view StyleOverride => componentView(this: world.styleOverrides, entity: entity)
+        size = styleOverrideSize(base: size, so: so)
+      }
+      let b: SdfTextBounds = SdfText.sdfMeasureTextBounds(
+        font: res.textFont
+        text: t.text
+        sizePx: size
+      )
+      # Width is the pen advance; height is the line box (the font size), not
+      # the tighter ink bounds, so a chip keeps a stable height whether or not
+      # the string has descenders.
+      let measuredW: Float = b.advance
+      let measuredH: Float = size
+      var write: Bool = true
+      if componentHas(this: world.measuredTexts, entity: entity) {
+        let cur: MeasuredText = componentGet(this: world.measuredTexts, entity: entity)
+        if cur.w is measuredW and cur.h is measuredH {
+          write = false
+        }
+      }
+      if write {
+        componentSet(
+          this: world.measuredTexts
+          entity: entity
+          data: MeasuredText { w: measuredW, h: measuredH }
+        )
+      }
+    }
+    i = i + 1
+  }
+}
