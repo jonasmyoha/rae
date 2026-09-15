@@ -21,6 +21,7 @@
 # the backend boundary. Snapping every box here would move centered widgets and
 # make animation shimmer.
 open ui/Ecs
+open ui/renderSystem/RenderPaintBox
 import Gpu2d
 import Gpu2dText
 import SdfText
@@ -71,10 +72,6 @@ func seedWorldThemeFrom(world: mod UiWorld, src: view UiTheme) pub {
   applyResolvedTokens(dst: world.theme.resolved, src: src.resolved)
 }
 
-func g2dColor(color: view RgbaColor) ret Int {
-  ret (color.a shl 24) bitor (color.r shl 16) bitor (color.g shl 8) bitor color.b
-}
-
 func g2dScaleMode(m: view ScaleMode) ret Int {
   if m is ScaleMode.fill {
     ret 1
@@ -88,22 +85,6 @@ func g2dScaleMode(m: view ScaleMode) ret Int {
 func g2dChain(color: view RgbaColor, chain255: view Int) ret RgbaColor {
   let a: Int = (color.a * chain255) / 255
   ret RgbaColor { r: color.r, g: color.g, b: color.b, a: a }
-}
-
-func g2dRadius(world: view UiWorld, entity: view EntityId, fallback: view Float) ret Float {
-  if componentHas(this: world.cornerRadiuses, entity: entity) {
-    let cr: CornerRadius = componentGet(this: world.cornerRadiuses, entity: entity)
-    ret cr.radius
-  }
-  ret fallback
-}
-
-func g2dHoverMul(world: view UiWorld, entity: view EntityId) ret Float {
-  if componentHas(this: world.hoverScales, entity: entity) {
-    let hs: HoverScale = componentGet(this: world.hoverScales, entity: entity)
-    ret hs.current
-  }
-  ret 1.0
 }
 
 func paintShapeG(
@@ -123,11 +104,17 @@ func paintShapeG(
     fillBase = colorByName(theme: world.theme.active, name: sh.fillSlot)
   }
   let fill: RgbaColor = g2dChain(color: fillBase, chain255: chain255)
-  let hoverMul: Float = g2dHoverMul(world: world, entity: entity)
-  let drawW: Float = cr.size.x * hoverMul
-  let drawH: Float = cr.size.y * hoverMul
-  let drawX: Float = wt.position.x + (cr.size.x - drawW) / 2.0
-  let drawY: Float = wt.position.y + (cr.size.y - drawH) / 2.0
+  let box: PaintBox = g2dPaintBox(
+    world: world
+    entity: entity
+    wt: wt
+    cr: cr
+  )
+  let hoverMul: Float = box.scale
+  let drawW: Float = box.w
+  let drawH: Float = box.h
+  let drawX: Float = box.x
+  let drawY: Float = box.y
   if sh.kind is ShapeKind.circle {
     var smaller: Float = cr.size.x
     if cr.size.y < smaller {
@@ -137,12 +124,29 @@ func paintShapeG(
     if r <= 0.0 {
       r = smaller / 2.0
     }
-    Gpu2d.drawRoundedRect(
-      canvas: canvas
-      x: wt.position.x + cr.size.x / 2.0 - r * hoverMul
-      y: wt.position.y + cr.size.y / 2.0 - r * hoverMul
+    let circleBox: PaintBox = {
+      x: box.x + box.w / 2.0 - r * hoverMul
+      y: box.y + box.h / 2.0 - r * hoverMul
       w: r * 2.0 * hoverMul
       h: r * 2.0 * hoverMul
+      scale: hoverMul
+    }
+    if componentHas(this: world.shadows, entity: entity) {
+      paintShadowG(
+        world: world
+        entity: entity
+        box: circleBox
+        radius: r * hoverMul
+        chain255: chain255
+        canvas: canvas
+      )
+    }
+    Gpu2d.drawRoundedRect(
+      canvas: canvas
+      x: circleBox.x
+      y: circleBox.y
+      w: circleBox.w
+      h: circleBox.h
       radius: r * hoverMul
       color: g2dColor(color: fill)
     )
@@ -151,6 +155,16 @@ func paintShapeG(
   var radius: Float = sh.radius
   if radius <= 0.0 {
     radius = g2dRadius(world: world, entity: entity, fallback: 0.0)
+  }
+  if componentHas(this: world.shadows, entity: entity) {
+    paintShadowG(
+      world: world
+      entity: entity
+      box: box
+      radius: radius * hoverMul
+      chain255: chain255
+      canvas: canvas
+    )
   }
   if sh.strokeWidth > 0.0 {
     var strokeBase: RgbaColor = sh.stroke
@@ -194,13 +208,29 @@ func paintGradientG(
 ) {
   let gf: GradientFill = componentGet(this: world.gradientFills, entity: entity)
   let radius: Float = g2dRadius(world: world, entity: entity, fallback: 0.0)
-  let hoverMul: Float = g2dHoverMul(world: world, entity: entity)
-  let drawW: Float = cr.size.x * hoverMul
-  let drawH: Float = cr.size.y * hoverMul
-  let drawX: Float = wt.position.x + (cr.size.x - drawW) / 2.0
-  let drawY: Float = wt.position.y + (cr.size.y - drawH) / 2.0
+  let box: PaintBox = g2dPaintBox(
+    world: world
+    entity: entity
+    wt: wt
+    cr: cr
+  )
+  let hoverMul: Float = box.scale
+  let drawW: Float = box.w
+  let drawH: Float = box.h
+  let drawX: Float = box.x
+  let drawY: Float = box.y
   let from: RgbaColor = g2dChain(color: gf.from, chain255: chain255)
   let to: RgbaColor = g2dChain(color: gf.to, chain255: chain255)
+  if componentHas(this: world.shadows, entity: entity) {
+    paintShadowG(
+      world: world
+      entity: entity
+      box: box
+      radius: radius * hoverMul
+      chain255: chain255
+      canvas: canvas
+    )
+  }
   Gpu2d.drawGradientRect(
     canvas: canvas
     x: drawX
@@ -224,11 +254,17 @@ func paintBackdropG(
 ) {
   let bi: BackdropImage = componentGet(this: world.backdropImages, entity: entity)
   let radius: Float = g2dRadius(world: world, entity: entity, fallback: 0.0)
-  let hoverMul: Float = g2dHoverMul(world: world, entity: entity)
-  let drawW: Float = cr.size.x * hoverMul
-  let drawH: Float = cr.size.y * hoverMul
-  let drawX: Float = wt.position.x + (cr.size.x - drawW) / 2.0
-  let drawY: Float = wt.position.y + (cr.size.y - drawH) / 2.0
+  let box: PaintBox = g2dPaintBox(
+    world: world
+    entity: entity
+    wt: wt
+    cr: cr
+  )
+  let hoverMul: Float = box.scale
+  let drawW: Float = box.w
+  let drawH: Float = box.h
+  let drawX: Float = box.x
+  let drawY: Float = box.y
   if Gpu2d.hasImageKey(canvas: canvas, key: bi.textureKey) {
     let white: RgbaColor = { r: 255, g: 255, b: 255, a: 255 }
     let tint: RgbaColor = g2dChain(color: white, chain255: chain255)
@@ -317,11 +353,17 @@ func paintSpriteG(
     tintBase = colorByName(theme: world.theme.active, name: sp.tintSlot)
   }
   let tint: RgbaColor = g2dChain(color: tintBase, chain255: chain255)
-  let hoverMul: Float = g2dHoverMul(world: world, entity: entity)
-  let drawW: Float = cr.size.x * hoverMul
-  let drawH: Float = cr.size.y * hoverMul
-  let drawX: Float = wt.position.x + (cr.size.x - drawW) / 2.0
-  let drawY: Float = wt.position.y + (cr.size.y - drawH) / 2.0
+  let box: PaintBox = g2dPaintBox(
+    world: world
+    entity: entity
+    wt: wt
+    cr: cr
+  )
+  let hoverMul: Float = box.scale
+  let drawW: Float = box.w
+  let drawH: Float = box.h
+  let drawX: Float = box.x
+  let drawY: Float = box.y
   let matPrefix: String = "mat:"
   if sp.textureKey.startsWith(prefix: matPrefix) {
     let nameLen: Int = sp.textureKey.length() - matPrefix.length()
@@ -367,15 +409,41 @@ func paintSpriteG(
     )
     ret
   }
-  let radius: Float = g2dRadius(world: world, entity: entity, fallback: 0.0)
+  var radius: Float = g2dRadius(world: world, entity: entity, fallback: 0.0)
+  var imageX: Float = drawX
+  var imageY: Float = drawY
+  var imageW: Float = drawW
+  var imageH: Float = drawH
+  # A MaskShape over the sprite's OWN box (#1000): the scissor the subtree
+  # walk pushed is axis-aligned for images, so the rounding comes from the
+  # image quad's own corner radius — a circle is the centred square at half
+  # its side. (A mask sourced from another node stays a rect scissor.)
+  if componentHas(this: world.maskShapes, entity: entity) {
+    let mask: MaskShape = componentGet(this: world.maskShapes, entity: entity)
+    if mask.sourceNodeId.length() is 0 {
+      if mask.kind is MaskKind.circle {
+        var side: Float = drawW
+        if drawH < side {
+          side = drawH
+        }
+        imageX = drawX + (drawW - side) / 2.0
+        imageY = drawY + (drawH - side) / 2.0
+        imageW = side
+        imageH = side
+        radius = side / 2.0 / hoverMul
+      } else {
+        radius = mask.radius
+      }
+    }
+  }
   if Gpu2d.hasImageKey(canvas: canvas, key: sp.textureKey) {
     Gpu2d.drawImageKeyScaled(
       canvas: canvas
       key: sp.textureKey
-      x: drawX
-      y: drawY
-      w: drawW
-      h: drawH
+      x: imageX
+      y: imageY
+      w: imageW
+      h: imageH
       radius: radius * hoverMul
       tint: g2dColor(color: tint)
       scaleMode: g2dScaleMode(m: sp.scaleMode)
@@ -716,6 +784,14 @@ func paintSubtreeG(
   canvas: mod Gpu2dCanvas
 ) {
   unsafe {
+    # MaskShape (#1000): the entity AND its descendants are clipped to a
+    # rounded rect / circle over its own box, or over `sourceNodeId`'s box in
+    # the same page. Pushed before the entity paints so a masked sprite is cut
+    # too, popped after the children walk (gpu2d clips nest).
+    var masked: Bool = false
+    if componentHas(this: world.maskShapes, entity: entity) {
+      masked = pushMaskClipG(world: world, entity: entity, canvas: canvas)
+    }
     paintEntityG(
       world: world
       entity: entity
@@ -723,6 +799,9 @@ func paintSubtreeG(
       canvas: canvas
     )
     if componentHas(this: world.childrens, entity: entity) is false {
+      if masked {
+        Gpu2d.popClipRect(canvas: canvas)
+      }
       ret
     }
     # Clip descendants to this entity's box when it opts in via
@@ -780,6 +859,9 @@ func paintSubtreeG(
       pass = pass + 1
     }
     if clipped {
+      Gpu2d.popClipRect(canvas: canvas)
+    }
+    if masked {
       Gpu2d.popClipRect(canvas: canvas)
     }
   }

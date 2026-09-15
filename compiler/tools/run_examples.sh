@@ -194,14 +194,22 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # diagnostics (every component, token, sub-scene and texture the
           # samples use resolved) and renders a non-blank frame.
           UI_EDITOR_OK=1
-          for SAMPLE in MainMenu Settings CardStrip; do
+          # Coverage (#1000) authors EVERY registered component with every
+          # field; its 0-diagnostics line is the authoring-coverage gate. Each
+          # sample is also compared with its checked-in reference PNG
+          # (examples/121_ui_editor/references, `make -C examples/121_ui_editor
+          # references` to regenerate) — tolerant, and skipped when the
+          # machine renders at another DPR than the reference.
+          for SAMPLE in MainMenu Settings CardStrip Coverage; do
             SCREENSHOT="$TMP_OUT/ui-editor-$SAMPLE.bmp"
             if (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/$SAMPLE.raescene" \
                RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
                perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-$SAMPLE.log" 2>&1 \
                && grep -qE "\[ui-editor\] mounted $SAMPLE: [1-9][0-9]* nodes, 0 diagnostics" "$TMP_OUT/render-$SAMPLE.log" \
                && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=50 \
-                  > "$TMP_OUT/screenshot-$SAMPLE.log" 2>&1; then
+                  > "$TMP_OUT/screenshot-$SAMPLE.log" 2>&1 \
+               && python3 tools/assert_bmp_diff.py "$SCREENSHOT" "../examples/121_ui_editor/references/$SAMPLE.png" \
+                  --skip-size-mismatch >> "$TMP_OUT/screenshot-$SAMPLE.log" 2>&1; then
               :
             else
               UI_EDITOR_OK=0
@@ -248,7 +256,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/render-select.log" "$TMP_OUT/screenshot-select.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
           fi
           if [ "$UI_EDITOR_OK" = "1" ]; then
-            echo "PASS: $EXAMPLE_NAME (3 samples with 0 diagnostics, watch reload with 1 diagnostic, inspector select)"
+            echo "PASS: $EXAMPLE_NAME (4 samples incl. Coverage with 0 diagnostics + reference diffs, watch reload, inspector select)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (ui editor sample gate)"
