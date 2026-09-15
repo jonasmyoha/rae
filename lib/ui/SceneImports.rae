@@ -1,0 +1,457 @@
+# SceneImports — a scene's `import` list and `assets` block (#1008;
+# docs/ui-scene-format.md).
+#
+# Scenes are modules and folders are packages, exactly the Rae rule: a scene
+# reference is a PACKAGE PATH WITHOUT EXTENSION — `Theme`, `shared/GameAssets`,
+# `cards/HeroCard` — PascalCase scene, camelCase folders, resolved from ONE scene
+# root as `<root>/<path>.raescene`. The same form serves the top-level
+# `"import": [...]` and `SceneInstance.sceneId`. Nothing is inferred from file
+# names or directories: no `theme.raescene` auto-load, no walking up.
+#
+# `import` brings a scene's CONFIGURATION into scope — its `assets` block and
+# its theme token sections (palette / space / radius / padding / shadows / text
+# / container) — and mounts nothing (mounting is `SceneInstance`). Resolution
+# is nearest-wins in list order: the scene's own blocks, then each import
+# depth-first (an imported scene may import too), first declaration of a token
+# / texture key / font wins. A cycle is skipped; the depth is capped.
+#
+# `assets` is allowed in ANY scene:
+#
+#   "assets": {
+#     "textures": {
+#       "dirs": ["../textures"],
+#       "map": { "menu.playButton": "../art/Play_Button.png" }
+#     },
+#     "fonts": { "text": "../fonts/Body.mtsdf.json", "icons": "../fonts/Icons.mtsdf.json" }
+#   }
+#
+# Binary data is the opposite of a scene reference: a FILE path WITH its
+# extension, relative to the file that declares it. `map` is key -> file,
+# `dirs` is `<dir>/<key>.png`; lookup is map, then dirs, in resolution order.
+# Fonts are world-level: the first `fonts` declaration wins and a conflicting
+# later one is a diagnostic.
+import Json
+import String
+open Sys
+open ui/Scene
+open ui/SceneFile
+open ui/SceneInstance
+open ui/ScenePolicy
+open ui/ThemeParse
+open ui/ThemeResolved
+
+# The deepest import chain followed before giving up with a diagnostic.
+const sceneImportMaxDepth: Int = 8
+
+# Everything the imports of one page resolve to. Texture entries are already
+# joined to their declaring file's directory; `importedIds` / `importedPaths`
+# list every scene reached, in resolution order (the theme tokens are read from
+# them in that order by sceneImportedTheme; the page's watcher polls the paths).
+type SceneAssets {
+  textureKeys: List(String)
+  texturePaths: List(String)
+  textureDirs: List(String)
+  textFontPath: String
+  iconFontPath: String
+  importedIds: List(String)
+  importedPaths: List(String)
+}
+
+func createSceneAssets() ret SceneAssets {
+  ret SceneAssets {
+    textureKeys: List.create(String, cap: 16)
+    texturePaths: List.create(String, cap: 16)
+    textureDirs: List.create(String, cap: 4)
+    textFontPath: ""
+    iconFontPath: ""
+    importedIds: List.create(String, cap: 4)
+    importedPaths: List.create(String, cap: 4)
+  }
+}
+
+# `<root>/<package/Path>.raescene` — the one place a scene reference becomes a
+# file name. `root` carries its trailing slash.
+func scenePackageFile(root: view String, sceneId: view String) ret String {
+  ret "{root}{sceneId}.raescene"
+}
+
+# The directory of a scene file, with its trailing slash (`./` for a bare name).
+func sceneFileDirectory(path: view String) ret String {
+  let slash: Int = path.lastIndexOf(sub: "/")
+  if slash < 0 {
+    ret "./"
+  }
+  ret path.sub(start: 0, len: slash + 1)
+}
+
+# The top-level `import` array of a parsed scene (empty when absent).
+func sceneImports(scene: view Scene) ret List(String) {
+  var out: List(String) = List.create(String, cap: 4)
+  let doc: view JsonDoc => scene.doc
+  if doc.ok is false {
+    ret out
+  }
+  let root: JsonValue = Json.root(doc: doc)
+  let idx: Int = Json.field(doc: doc, this: root, key: "import")
+  if idx < 0 {
+    ret out
+  }
+  let arr: JsonValue = Json.jsonValueAt(doc: doc, idx: idx)
+  if arr.kind is not JsonKind.array {
+    ret out
+  }
+  loop var i: Int = 0, i < Json.arrayLen(this: arr), ++i {
+    let entry: JsonValue = Json.arrayAt(doc: doc, this: arr, idx: i)
+    let id: String = Json.jsonString(this: entry, fallback: "")
+    if id.length() > 0 {
+      out.add(value: id)
+    }
+  }
+  ret out
+}
+
+# Whether the scene carries theme token sections of its own (a self-contained
+# page, or a config scene).
+func sceneDeclaresTokens(scene: view Scene) ret Bool {
+  let doc: view JsonDoc => scene.doc
+  if doc.ok is false {
+    ret false
+  }
+  let root: JsonValue = Json.root(doc: doc)
+  ret Json.field(doc: doc, this: root, key: "palette") >= 0 or Json.field(
+    doc: doc
+    this: root
+    key: "text"
+  ) >= 0
+}
+
+# A data path from a scene: relative to the declaring file unless absolute.
+func joinAssetPath(directory: view String, relative: view String) ret String {
+  if relative.startsWith(prefix: "/") {
+    ret "{relative}"
+  }
+  ret "{directory}{relative}"
+}
+
+func sceneAssetsHasKey(assets: view SceneAssets, key: view String) ret Bool {
+  loop var i: Int = 0, i < assets.textureKeys.length, ++i {
+    if let existing: String = assets.textureKeys.copyAt(index: i) {
+      if existing is key {
+        ret true
+      }
+    }
+  }
+  ret false
+}
+
+# Merge one scene's `assets` block (nearest-wins: an already-known key, dir or
+# font is kept). `directory` is the declaring file's directory.
+func collectSceneAssetsBlock(
+  assets: mod SceneAssets
+  scene: view Scene
+  directory: view String
+  sceneLabel: view String
+  diagnostics: mod List(SceneDiagnostic)
+) {
+  let doc: view JsonDoc => scene.doc
+  if doc.ok is false {
+    ret
+  }
+  let root: JsonValue = Json.root(doc: doc)
+  let assetsIdx: Int = Json.field(doc: doc, this: root, key: "assets")
+  if assetsIdx < 0 {
+    ret
+  }
+  let block: JsonValue = Json.jsonValueAt(doc: doc, idx: assetsIdx)
+  if block.kind is not JsonKind.object {
+    ret
+  }
+  let texturesIdx: Int = Json.field(doc: doc, this: block, key: "textures")
+  if texturesIdx >= 0 {
+    let textures: JsonValue = Json.jsonValueAt(doc: doc, idx: texturesIdx)
+    let mapIdx: Int = Json.field(doc: doc, this: textures, key: "map")
+    if mapIdx >= 0 {
+      let map: JsonValue = Json.jsonValueAt(doc: doc, idx: mapIdx)
+      if map.kind is JsonKind.object {
+        loop var i: Int = 0, i < Json.objectLen(this: map), ++i {
+          let key: String = Json.objectKeyAt(doc: doc, this: map, idx: i)
+          let value: JsonValue = Json.objectValueAt(doc: doc, this: map, idx: i)
+          let relative: String = Json.jsonString(this: value, fallback: "")
+          if key.length() > 0 and relative.length() > 0 and not sceneAssetsHasKey(
+            assets: assets
+            key: key
+          ) {
+            assets.textureKeys.add(value: "{key}")
+            assets.texturePaths.add(value: joinAssetPath(directory: directory, relative: relative))
+          }
+        }
+      }
+    }
+    let dirsIdx: Int = Json.field(doc: doc, this: textures, key: "dirs")
+    if dirsIdx >= 0 {
+      let dirs: JsonValue = Json.jsonValueAt(doc: doc, idx: dirsIdx)
+      if dirs.kind is JsonKind.array {
+        loop var d: Int = 0, d < Json.arrayLen(this: dirs), ++d {
+          let entry: JsonValue = Json.arrayAt(doc: doc, this: dirs, idx: d)
+          let relative: String = Json.jsonString(this: entry, fallback: "")
+          if relative.length() > 0 {
+            var dir: String = joinAssetPath(directory: directory, relative: relative)
+            if not dir.endsWith(suffix: "/") {
+              dir = "{dir}/"
+            }
+            assets.textureDirs.add(value: dir)
+          }
+        }
+      }
+    }
+  }
+  let fontsIdx: Int = Json.field(doc: doc, this: block, key: "fonts")
+  if fontsIdx >= 0 {
+    let fonts: JsonValue = Json.jsonValueAt(doc: doc, idx: fontsIdx)
+    let textIdx: Int = Json.field(doc: doc, this: fonts, key: "text")
+    if textIdx >= 0 {
+      let relative: String = Json.jsonString(
+        this: Json.jsonValueAt(doc: doc, idx: textIdx)
+        fallback: ""
+      )
+      let path: String = joinAssetPath(directory: directory, relative: relative)
+      if assets.textFontPath.length() is 0 {
+        assets.textFontPath = path
+      } else if path is not assets.textFontPath {
+        reportSceneDiagnostic(
+          diagnostics: diagnostics
+          sceneId: sceneLabel
+          nodeId: ""
+          kind: SceneDiagnosticKind.unknownToken
+          name: "fonts.text"
+          message: "the text font is world-level; {assets.textFontPath} was declared first, {path} is ignored"
+        )
+      }
+    }
+    let iconsIdx: Int = Json.field(doc: doc, this: fonts, key: "icons")
+    if iconsIdx >= 0 {
+      let relative: String = Json.jsonString(
+        this: Json.jsonValueAt(doc: doc, idx: iconsIdx)
+        fallback: ""
+      )
+      let path: String = joinAssetPath(directory: directory, relative: relative)
+      if assets.iconFontPath.length() is 0 {
+        assets.iconFontPath = path
+      } else if path is not assets.iconFontPath {
+        reportSceneDiagnostic(
+          diagnostics: diagnostics
+          sceneId: sceneLabel
+          nodeId: ""
+          kind: SceneDiagnosticKind.unknownToken
+          name: "fonts.icons"
+          message: "the icon font is world-level; {assets.iconFontPath} was declared first, {path} is ignored"
+        )
+      }
+    }
+  }
+}
+
+func sceneAssetsVisited(assets: view SceneAssets, sceneId: view String) ret Bool {
+  loop var i: Int = 0, i < assets.importedIds.length, ++i {
+    if let existing: String = assets.importedIds.copyAt(index: i) {
+      if existing is sceneId {
+        ret true
+      }
+    }
+  }
+  ret false
+}
+
+# Follow `scene`'s imports depth-first from `root`, merging each reached scene's
+# assets and theme tokens into `assets`. Imported scenes are registered in
+# `registry` under their package path (so a later `SceneInstance` of the same
+# id reuses the parse). `sceneLabel` names the importing scene in diagnostics.
+func followSceneImports(
+  assets: mod SceneAssets
+  scene: view Scene
+  root: view String
+  registry: mod SceneRegistry
+  diagnostics: mod List(SceneDiagnostic)
+  sceneLabel: view String
+  depth: view Int
+) {
+  let imports: List(String) = sceneImports(scene: scene)
+  loop var i: Int = 0, i < imports.length, ++i {
+    if let importId: String = imports.copyAt(index: i) {
+      if sceneAssetsVisited(assets: assets, sceneId: importId) {
+        continue
+      }
+      if depth >= sceneImportMaxDepth {
+        reportSceneDiagnostic(
+          diagnostics: diagnostics
+          sceneId: sceneLabel
+          nodeId: ""
+          kind: SceneDiagnosticKind.missingSubScene
+          name: importId
+          message: "import chain deeper than {sceneImportMaxDepth}; {importId} not followed"
+        )
+        continue
+      }
+      let path: String = scenePackageFile(root: root, sceneId: importId)
+      var registryIdx: Int = sceneRegistryIndex(reg: registry, key: importId)
+      if registryIdx < 0 {
+        if not exists(path: path) {
+          reportSceneDiagnostic(
+            diagnostics: diagnostics
+            sceneId: sceneLabel
+            nodeId: ""
+            kind: SceneDiagnosticKind.missingSubScene
+            name: importId
+            message: "no scene {path} for import \"{importId}\""
+          )
+          continue
+        }
+        let loaded: Scene = loadSceneFile(path: path)
+        if loaded.doc.ok is false {
+          reportSceneDiagnostic(
+            diagnostics: diagnostics
+            sceneId: sceneLabel
+            nodeId: ""
+            kind: SceneDiagnosticKind.parseError
+            name: importId
+            message: "import {path}: {loaded.errorMsg}"
+          )
+          continue
+        }
+        checkSceneIdMatches(
+          scene: loaded
+          sceneId: importId
+          path: path
+          diagnostics: diagnostics
+        )
+        let key: String = "{importId}"
+        registerScene(reg: registry, key: own key, scene: own loaded)
+        registryIdx = sceneRegistryIndex(reg: registry, key: importId)
+      }
+      assets.importedIds.add(value: "{importId}")
+      assets.importedPaths.add(value: path)
+      let imported: view Scene => sceneRegistryGet(reg: registry, idx: registryIdx)
+      collectSceneAssetsBlock(
+        assets: assets
+        scene: imported
+        directory: sceneFileDirectory(path: path)
+        sceneLabel: importId
+        diagnostics: diagnostics
+      )
+      followSceneImports(
+        assets: assets
+        scene: imported
+        root: root
+        registry: registry
+        diagnostics: diagnostics
+        sceneLabel: importId
+        depth: depth + 1
+      )
+    }
+  }
+}
+
+# The in-file `sceneId` is a checked assertion against the package path it was
+# reached by (a mismatch is a diagnostic, never a different identity); it is
+# redundant with the path and slated to go.
+func checkSceneIdMatches(
+  scene: view Scene
+  sceneId: view String
+  path: view String
+  diagnostics: mod List(SceneDiagnostic)
+) {
+  if scene.sceneId.length() is 0 or scene.sceneId is sceneId {
+    ret
+  }
+  # A bare file name matches the last package segment too.
+  let slash: Int = sceneId.lastIndexOf(sub: "/")
+  if slash >= 0 and scene.sceneId is sceneId.sub(
+    start: slash + 1
+    len: sceneId.length() - slash - 1
+  ) {
+    ret
+  }
+  reportSceneDiagnostic(
+    diagnostics: diagnostics
+    sceneId: sceneId
+    nodeId: ""
+    kind: SceneDiagnosticKind.unknownToken
+    name: "sceneId"
+    message: "{path} declares sceneId \"{scene.sceneId}\" but is referenced as \"{sceneId}\"; the path is the identity"
+  )
+}
+
+# Resolve everything `entry` (the scene at `entryPath`, opened as the page)
+# declares and imports: its own blocks first, then its imports depth-first.
+func resolveSceneAssets(
+  entry: view Scene
+  entryPath: view String
+  root: view String
+  registry: mod SceneRegistry
+  diagnostics: mod List(SceneDiagnostic)
+  sceneLabel: view String
+) ret SceneAssets {
+  var assets: SceneAssets = createSceneAssets()
+  collectSceneAssetsBlock(
+    assets: assets
+    scene: entry
+    directory: sceneFileDirectory(path: entryPath)
+    sceneLabel: sceneLabel
+    diagnostics: diagnostics
+  )
+  followSceneImports(
+    assets: assets
+    scene: entry
+    root: root
+    registry: registry
+    diagnostics: diagnostics
+    sceneLabel: sceneLabel
+    depth: 0
+  )
+  ret assets
+}
+
+# The theme tokens the page sees: its own sections first, then each imported
+# scene's in resolution order — every lookup is first-match, so the nearest
+# declaration of a token wins.
+func sceneImportedTheme(
+  entry: view Scene
+  assets: view SceneAssets
+  registry: view SceneRegistry
+) ret ResolvedTheme {
+  var theme: ResolvedTheme = createResolvedTheme()
+  parseThemeInto(out: theme, scene: entry)
+  loop var i: Int = 0, i < assets.importedIds.length, ++i {
+    if let importId: String = assets.importedIds.copyAt(index: i) {
+      let idx: Int = sceneRegistryIndex(reg: registry, key: importId)
+      if idx >= 0 {
+        let imported: view Scene => sceneRegistryGet(reg: registry, idx: idx)
+        parseThemeInto(out: theme, scene: imported)
+      }
+    }
+  }
+  ret theme
+}
+
+# The file a texture key resolves to — `map` first, then `<dir>/<key>.png` over
+# the declared dirs — or "" when nothing declares it.
+func sceneAssetTexturePath(assets: view SceneAssets, key: view String) ret String {
+  loop var i: Int = 0, i < assets.textureKeys.length, ++i {
+    if let existing: String = assets.textureKeys.copyAt(index: i) {
+      if existing is key {
+        if let path: String = assets.texturePaths.copyAt(index: i) {
+          ret path
+        }
+      }
+    }
+  }
+  loop var d: Int = 0, d < assets.textureDirs.length, ++d {
+    if let dir: String = assets.textureDirs.copyAt(index: d) {
+      let candidate: String = "{dir}{key}.png"
+      if exists(path: candidate) {
+        ret candidate
+      }
+    }
+  }
+  ret ""
+}

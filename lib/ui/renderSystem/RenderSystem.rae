@@ -62,6 +62,16 @@ func seedWorldTheme(world: mod UiWorld, res: view Gpu2dUi) pub {
   applyResolvedTokens(dst: world.theme.resolved, src: res.theme)
 }
 
+# Seed AGAIN with a different token table (#1008): applyResolvedTokens fills an
+# empty table once, so a world that already carries tokens keeps them — a viewer
+# that reloads a document whose `import`s changed must start from a fresh table
+# before the next page deserialises against it.
+func reseedWorldTheme(world: mod UiWorld, res: view Gpu2dUi) pub {
+  var fresh: ResolvedTheme = createResolvedTheme()
+  world.theme.resolved = own fresh
+  seedWorldTheme(world: world, res: res)
+}
+
 # #764: seed a freshly-created UiWorld's theme from an app-owned UiTheme (e.g. an
 # AppState field). Used by apps that rebuild their world per screen/frame and keep
 # the source-of-truth theme on their persistent state — the copy carries the chosen

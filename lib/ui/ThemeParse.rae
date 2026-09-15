@@ -13,13 +13,22 @@ open ui/ThemeResolved
 # itself failed to parse.
 func parseTheme(scene: view Scene) pub ret ResolvedTheme {
   var out: ResolvedTheme = createResolvedTheme()
+  parseThemeInto(out: out, scene: scene)
+  ret out
+}
+
+# Append `scene`'s token sections onto an existing table (#1008): every lookup
+# is first-match, so parsing scenes in resolution order — the page, then each
+# `import` depth-first — makes the nearest declaration of a token win. A
+# `text` style's `extends` chain resolves within its own file only.
+func parseThemeInto(out: mod ResolvedTheme, scene: view Scene) {
   # Gate on the JSON parsing, NOT full-scene validation: a dedicated
-  # theme.raescene has no `nodes`/`root`, so parseScene leaves
+  # Theme.raescene has no `nodes`/`root`, so parseScene leaves
   # scene.ok=false while still populating scene.doc. The theme sections
   # are all optional; a doc that parsed is enough.
   let doc: view JsonDoc => scene.doc
   if doc.ok is false {
-    ret out
+    ret
   }
   let root: JsonValue = Json.root(doc: doc)
 
@@ -44,7 +53,6 @@ func parseTheme(scene: view Scene) pub ret ResolvedTheme {
   parseThemeContainer(out: out, doc: doc, root: root)
 
   out.ok = true
-  ret out
 }
 
 # Parse the optional `container` section (#237, M6). Each entry:
@@ -746,7 +754,7 @@ func themeDumpResolved(theme: view ResolvedTheme) pub {
 # ================================================================
 # Scene-deserialiser token lookups (#233, Theme M3 / #764).
 #
-# Radius/padding/container tokens live in the theme (theme.raescene) and scene
+# Radius/padding/container tokens live in the theme (Theme.raescene) and scene
 # deserialisation needs them at parse time. These used to be a set of flattened
 # module-global lists (`g_active*`) populated once at boot by setActiveThemeTokens
 # — a redundant SECOND copy of the ResolvedTheme they were filled from. #764
