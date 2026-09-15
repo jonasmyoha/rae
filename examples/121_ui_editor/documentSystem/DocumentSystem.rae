@@ -8,6 +8,11 @@
 # sentinel + diagnostic (the #996 `report` policy). The app creates NO layout
 # entities of its own (the #990/#991 rule): the only entities are the mounted
 # scenes' nodes and the two layer roots.
+#
+# A RELOAD (watchSystem, #998) is the same function again: the new file is
+# parsed FIRST, and only a scene that parses replaces the page — a broken save
+# keeps the last good page on screen with the parse error in the chrome. The
+# document's ScrollStates survive the remount, matched by node id.
 import Json
 import String
 open Sys
@@ -43,6 +48,10 @@ type SceneDocument {
   nodeCount: Int
   loaded: Bool
   status: String
+  # Every file the document depends on (the scene, its registered sub-scenes,
+  # the theme), rebuilt per load — what the watcher polls.
+  watchedPaths: List(String)
+  reloads: Int
 }
 
 # The scene to open: the first program argument, else RAE_UI_EDITOR_SCENE, else
@@ -87,6 +96,8 @@ func createSceneDocument(path: view String) ret SceneDocument {
     nodeCount: 0
     loaded: false
     status: "no document"
+    watchedPaths: List.create(String, cap: 8)
+    reloads: 0
   }
 }
 
@@ -214,26 +225,110 @@ func seedListViewRows(world: mod UiWorld) {
   }
 }
 
-# Parse + register + mount under the `document` layer. On a parse failure the
-# world keeps whatever it had and the status line carries the error.
-func documentLoadSystem(document: mod SceneDocument, world: mod UiWorld) {
-  clearSceneDiagnostics(diagnostics: world.sceneDiagnostics)
-  document.scene = loadSceneFile(path: document.path)
-  documentDesignSize(document: document)
-  if document.scene.ok is false {
-    document.loaded = false
-    document.status = "parse error: {document.scene.errorMsg}"
+# The document page's scroll positions by node id, so a remount can put them
+# back (a reload must not jump a scrolled list to the top).
+type ScrollSnapshot {
+  nodeIds: List(String)
+  offsets: List(Float)
+}
+
+func snapshotDocumentScrolls(world: view UiWorld) ret ScrollSnapshot {
+  var snapshot: ScrollSnapshot = {
+    nodeIds: List.create(String, cap: 4)
+    offsets: List.create(Float, cap: 4)
+  }
+  let count: Int = componentCount(this: world.scrollStates)
+  loop var i: Int = 0, i < count, ++i {
+    let entity: EntityId = componentEntityAt(this: world.scrollStates, i: i)
+    if componentHas(this: world.nodeIdComponents, entity: entity) {
+      let state: ScrollState = componentDataAt(this: world.scrollStates, i: i)
+      snapshot.nodeIds.add(value: "{componentGet(this: world.nodeIdComponents, entity: entity).id}")
+      snapshot.offsets.add(value: state.y)
+    }
+  }
+  ret snapshot
+}
+
+func restoreDocumentScrolls(world: mod UiWorld, snapshot: view ScrollSnapshot) {
+  loop var i: Int = 0, i < snapshot.nodeIds.length, ++i {
+    if let nodeId: String = snapshot.nodeIds.copyAt(index: i) {
+      if let raw: Int = world.nodeIds.get(k: "document/{nodeId}") {
+        let entity: EntityId = nodeEntity(world: world, index: raw)
+        if componentHas(this: world.scrollStates, entity: entity) {
+          let state: mod ScrollState => componentMod(this: world.scrollStates, entity: entity)
+          state.y = snapshot.offsets.copyAtFallback(index: i, fallback: 0.0)
+        }
+      }
+    }
+  }
+}
+
+# The files a reload depends on: the scene, every registered sub-scene that
+# came from the scene's directory, and the theme beside it.
+func rebuildWatchedPaths(document: mod SceneDocument) {
+  document.watchedPaths.clear()
+  document.watchedPaths.add(value: "{document.path}")
+  loop var i: Int = 0, i < document.registry.ids.length, ++i {
+    if let sceneId: String = document.registry.ids.copyAt(index: i) {
+      let path: String = "{document.directory}{sceneId}.raescene"
+      if exists(path: path) {
+        document.watchedPaths.add(value: path)
+      }
+    }
+  }
+  let themePath: String = "{document.directory}theme.raescene"
+  if exists(path: themePath) {
+    document.watchedPaths.add(value: themePath)
+  }
+}
+
+# Parse + register + mount under the `document` layer; on a reload, unmount
+# the previous page first. `builtinScenePaths` are the app's own sub-scenes
+# (the chrome's row scene) that live in the same registry, since the list
+# system resolves every ListView against one registry. Returns whether a page
+# was (re)mounted; a parse failure keeps the last good page and puts the error
+# in the status + diagnostics.
+func documentLoadSystem(
+  document: mod SceneDocument
+  world: mod UiWorld
+  builtinScenePaths: view List(String)
+) ret Bool {
+  let scene: Scene = loadSceneFile(path: document.path)
+  if scene.ok is false {
+    document.status = "parse error: {scene.errorMsg}"
+    clearSceneDiagnostics(diagnostics: world.sceneDiagnostics)
     reportSceneDiagnostic(
       diagnostics: world.sceneDiagnostics
       sceneId: document.fileName
       nodeId: ""
       kind: SceneDiagnosticKind.parseError
       name: document.fileName
-      message: document.scene.errorMsg
+      message: scene.errorMsg
     )
     log("[ui-editor] {document.path}: {document.status}")
-    ret
+    ret false
   }
+  var scrolls: ScrollSnapshot = {
+    nodeIds: List.create(String, cap: 1)
+    offsets: List.create(Float, cap: 1)
+  }
+  if document.loaded {
+    scrolls = snapshotDocumentScrolls(world: world)
+    unmountPage(world: world, pageId: "document")
+  }
+  clearSceneDiagnostics(diagnostics: world.sceneDiagnostics)
+  document.scene = scene
+  document.registry = createSceneRegistry()
+  loop var b: Int = 0, b < builtinScenePaths.length, ++b {
+    if let builtinPath: String = builtinScenePaths.copyAt(index: b) {
+      let builtin: Scene = loadSceneFile(path: builtinPath)
+      if builtin.ok {
+        let key: String = "{builtin.sceneId}"
+        registerScene(reg: document.registry, key: own key, scene: own builtin)
+      }
+    }
+  }
+  documentDesignSize(document: document)
   let overrides: List(SceneOverride) = List.create(SceneOverride, cap: 1)
   let before: Int = aliveCount(world: world)
   document.pageRoot = mountPage(
@@ -257,7 +352,10 @@ func documentLoadSystem(document: mod SceneDocument, world: mod UiWorld) {
     passes = passes + 1
   }
   seedListViewRows(world: world)
+  restoreDocumentScrolls(world: world, snapshot: scrolls)
+  rebuildWatchedPaths(document: document)
   document.nodeCount = aliveCount(world: world) - before
   document.loaded = true
   document.status = "ok"
+  ret true
 }

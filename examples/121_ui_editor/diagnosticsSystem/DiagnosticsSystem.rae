@@ -143,10 +143,78 @@ func textureSystem(
   }
 }
 
-# The chrome's own state: its page root (so H can hide it) and visibility.
+# The chrome's own state: its page root (so H can hide it), its visibility,
+# and whether the diagnostics panel (D) is open.
 type ChromeState {
   pageRoot: EntityId
   visible: Bool
+  panelOpen: Bool
+}
+
+const diagnosticsPanelNode: String = "chrome/DiagnosticsPanel"
+
+func setDiagnosticsPanelOpen(chrome: mod ChromeState, world: mod UiWorld, open: view Bool) {
+  chrome.panelOpen = open
+  setNodeActive(world: world, nodeId: diagnosticsPanelNode, value: open)
+}
+
+# The list's rows: one per diagnostic, `kind · sceneId/nodeId · name · message`
+# as four bound cells. The list's authored width is replaced by the design
+# width minus the panel padding, since the row pool takes its width from the
+# list's Rect when it is built.
+func syncDiagnosticsList(world: mod UiWorld, designW: view Float) {
+  let entity: EntityId = nodeEntityFor(world: world, nodeId: "chrome/DiagnosticList")
+  if isNone(this: entity) {
+    ret
+  }
+  let count: Int = world.sceneDiagnostics.length
+  if componentHas(this: world.rects, entity: entity) and componentHas(
+    this: world.listViews
+    entity: entity
+  ) {
+    let list: ListView = componentGet(this: world.listViews, entity: entity)
+    var shown: Int = count
+    if shown < 1 {
+      shown = 1
+    }
+    if shown > list.visibleItemCount {
+      shown = list.visibleItemCount
+    }
+    let rect: mod Rect => componentMod(this: world.rects, entity: entity)
+    rect.size.x = designW - 48.0
+    rect.size.y = shown.toFloat() * (list.itemHeight + list.itemGap) - list.itemGap
+  }
+  var rows: List(ListViewRow) = List.create(ListViewRow, cap: count + 1)
+  loop var i: Int = 0, i < count, ++i {
+    if let entry: view SceneDiagnostic => world.sceneDiagnostics.viewAt(index: i) {
+      var keys: List(String) = {
+        "id"
+        "kind"
+        "where"
+        "name"
+        "message"
+      }
+      var values: List(String) = List.create(String, cap: 5)
+      values.add(value: "{i}")
+      values.add(value: "{entry.kind.toString()}")
+      values.add(value: "{entry.sceneId}/{entry.nodeId}")
+      values.add(value: "{entry.name}")
+      values.add(value: "{entry.message}")
+      rows.add(value: ListViewRow { keys: own keys, values: own values })
+    }
+  }
+  componentSet(this: world.listViewDatas, entity: entity, data: ListViewData { rows: own rows })
+}
+
+# A literal fill on a chrome node (the counter pill turns red, not a slot).
+func setNodeFillLiteral(world: mod UiWorld, nodeId: view String, fill: view RgbaColor) {
+  let entity: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
+  if isNone(this: entity) or componentHas(this: world.shapes, entity: entity) is false {
+    ret
+  }
+  let shape: mod Shape => componentMod(this: world.shapes, entity: entity)
+  shape.fill = fill
+  shape.fillSlot = ""
 }
 
 # Write the top bar + status line from the document and the diagnostics.
@@ -182,10 +250,19 @@ func chromeSyncSystem(
   }
   setNodeText(world: world, nodeId: "chrome/StatusLine", value: line)
   if count > 0 {
-    setNodeFillSlot(world: world, nodeId: "chrome/DiagnosticsPill", slot: "accent")
+    setNodeFillLiteral(
+      world: world
+      nodeId: "chrome/DiagnosticsPill"
+      fill: RgbaColor { r: 200, g: 40, b: 52, a: 255 }
+    )
   } else {
-    setNodeFillSlot(world: world, nodeId: "chrome/DiagnosticsPill", slot: "surfaceAlt")
+    setNodeFillLiteral(
+      world: world
+      nodeId: "chrome/DiagnosticsPill"
+      fill: RgbaColor { r: 46, g: 54, b: 78, a: 255 }
+    )
   }
+  syncDiagnosticsList(world: world, designW: designW)
 }
 
 # Log every diagnostic once, in the gate's one-line form, after a load.
