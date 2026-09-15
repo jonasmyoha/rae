@@ -1,0 +1,469 @@
+# EffectSystems — the runtime half of the declared effect components (#1005):
+# AnimFrames + AnimTrigger, WobbleFx, BackgroundPan, SmokeFx and Carousel. Each
+# is one system over its table in the shape AnimationSystem.rae set with
+# HoverScale: read the frame's deltaTime (or the clock), mutate the animated
+# field in place, return whether anything is still moving so the host keeps
+# its render pump going (`animating: true` in its wait). Registered on the
+# Schedule after hoverScale (Pipeline.rae); the app calls them per frame.
+#
+# Motion writes go to the runtime channels the transform pass folds in
+# (RuntimeOffset, Opacity, TransformFx scale) — never to layout inputs, so an
+# effect never re-lays-out the page.
+import Math
+import ui/Ecs
+import ui/Components
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Event
+
+const twoPi: Float = 6.28318530718
+
+# The texture key of frame `index`: `textureKeys[frames[index]]` when the
+# lists are authored, else `<baseKey><index>` (see AnimFrames.frameCount).
+func animFrameKey(frames: view AnimFrames, index: view Int) ret String {
+  if frames.textureKeys.length > 0 {
+    var lookup: Int = index
+    if frames.frames.length > 0 {
+      lookup = frames.frames.copyAtFallback(index: index, fallback: index)
+    }
+    ret frames.textureKeys.copyAtFallback(index: lookup, fallback: "")
+  }
+  ret "{frames.baseKey}{index}"
+}
+
+func animFrameCount(frames: view AnimFrames) ret Int {
+  if frames.frames.length > 0 {
+    ret frames.frames.length
+  }
+  if frames.textureKeys.length > 0 {
+    ret frames.textureKeys.length
+  }
+  ret frames.frameCount
+}
+
+func setSpriteKey(world: mod UiWorld, entity: view EntityId, key: view String) {
+  if key.length() is 0 or componentHas(this: world.sprites, entity: entity) is false {
+    ret
+  }
+  let sprite: mod Sprite => componentMod(this: world.sprites, entity: entity)
+  if sprite.textureKey is not key {
+    sprite.textureKey = "{key}"
+  }
+}
+
+# Advance every playing AnimFrames by deltaTime at its fps into its Sprite's
+# textureKey. A sequence without loopForever stops on its last frame and, when
+# onEndTextureKey is set, shows that instead. Returns whether any is playing.
+func animFramesSystem(world: mod UiWorld, deltaTime: view Float) ret Bool {
+  var live: Bool = false
+  let count: Int = componentCount(this: world.animFrames)
+  loop var i: Int = 0, i < count, ++i {
+    let entity: EntityId = componentEntityAt(this: world.animFrames, i: i)
+    let frames: AnimFrames = componentDataAt(this: world.animFrames, i: i)
+    let total: Int = animFrameCount(frames: frames)
+    if total <= 0 or frames.fps <= 0.0 {
+      continue
+    }
+    if componentHas(this: world.animStates, entity: entity) is false {
+      componentSet(
+        this: world.animStates
+        entity: entity
+        data: AnimState { playing: true, elapsedMs: 0.0, frameIndex: 0 }
+      )
+      setSpriteKey(world: world, entity: entity, key: animFrameKey(frames: frames, index: 0))
+    }
+    let state: mod AnimState => componentMod(this: world.animStates, entity: entity)
+    if state.playing is false {
+      continue
+    }
+    live = true
+    state.elapsedMs = state.elapsedMs + deltaTime * 1000.0
+    let frameMs: Float = 1000.0 / frames.fps
+    var advanced: Bool = false
+    loop state.elapsedMs >= frameMs and state.playing {
+      state.elapsedMs = state.elapsedMs - frameMs
+      state.frameIndex = state.frameIndex + 1
+      advanced = true
+      if state.frameIndex >= total {
+        if frames.loopForever {
+          state.frameIndex = 0
+        } else {
+          state.frameIndex = total - 1
+          state.playing = false
+        }
+      }
+    }
+    if advanced {
+      if state.playing is false and frames.onEndTextureKey.length() > 0 {
+        setSpriteKey(world: world, entity: entity, key: frames.onEndTextureKey)
+      } else {
+        setSpriteKey(
+          world: world
+          entity: entity
+          key: animFrameKey(frames: frames, index: state.frameIndex)
+        )
+      }
+    }
+  }
+  ret live
+}
+
+# (Re)start an entity's AnimFrames: the trigger's actionId fired this frame
+# (any entity's UiAction), or its `event` — "click" (pressed) / "hover"
+# (hovered) on the entity itself. restartOnTrigger rewinds a playing sequence;
+# otherwise a trigger only starts a stopped one.
+func animTriggerSystem(world: mod UiWorld) {
+  let count: Int = componentCount(this: world.animTriggers)
+  loop var i: Int = 0, i < count, ++i {
+    let entity: EntityId = componentEntityAt(this: world.animTriggers, i: i)
+    let trigger: AnimTrigger = componentDataAt(this: world.animTriggers, i: i)
+    var fired: Bool = false
+    if trigger.actionId.length() > 0 {
+      loop var a: Int = 0, a < eventCount(this: world.uiActions), ++a {
+        let event: UiAction = eventAt(this: world.uiActions, i: a)
+        if event.actionId is trigger.actionId {
+          fired = true
+        }
+      }
+    }
+    if componentHas(this: world.interactions, entity: entity) {
+      let interaction: Interaction = componentGet(this: world.interactions, entity: entity)
+      if trigger.event is "click" and interaction.pressed {
+        fired = true
+      }
+      if trigger.event is "hover" and interaction.hovered {
+        fired = true
+      }
+    }
+    if fired is false or componentHas(this: world.animFrames, entity: entity) is false {
+      continue
+    }
+    var playing: Bool = false
+    if componentHas(this: world.animStates, entity: entity) {
+      playing = componentGet(this: world.animStates, entity: entity).playing
+    }
+    if playing and trigger.restartOnTrigger is false {
+      continue
+    }
+    componentSet(
+      this: world.animStates
+      entity: entity
+      data: AnimState { playing: true, elapsedMs: 0.0, frameIndex: 0 }
+    )
+    let frames: AnimFrames = componentGet(this: world.animFrames, entity: entity)
+    setSpriteKey(world: world, entity: entity, key: animFrameKey(frames: frames, index: 0))
+  }
+}
+
+func setRuntimeOffset(
+  world: mod UiWorld
+  entity: view EntityId
+  x: view Float
+  y: view Float
+) {
+  componentSet(
+    this: world.runtimeOffsets
+    entity: entity
+    data: RuntimeOffset { delta: Vec2 { x: x, y: y } }
+  )
+}
+
+# WobbleFx: a two-sine vertical bob (amp at freq Hz plus a second harmonic)
+# on the runtime offset. `time` is the clock in seconds.
+func wobbleFxSystem(world: mod UiWorld, time: view Float) ret Bool {
+  let count: Int = componentCount(this: world.wobbleFxs)
+  loop var i: Int = 0, i < count, ++i {
+    let entity: EntityId = componentEntityAt(this: world.wobbleFxs, i: i)
+    let fx: WobbleFx = componentDataAt(this: world.wobbleFxs, i: i)
+    let y: Float = fx.amp * Math.sin(x: time * fx.freq * twoPi) + fx.secondAmp * Math.sin(
+      x: time * fx.secondFreq * twoPi
+    )
+    setRuntimeOffset(
+      world: world
+      entity: entity
+      x: 0.0
+      y: y
+    )
+  }
+  ret count > 0
+}
+
+# BackgroundPan: a slow sine drift of the runtime offset — `amplitude` design
+# units at `speed` radians per second, per axis.
+func backgroundPanSystem(world: mod UiWorld, time: view Float) ret Bool {
+  let count: Int = componentCount(this: world.backgroundPans)
+  loop var i: Int = 0, i < count, ++i {
+    let entity: EntityId = componentEntityAt(this: world.backgroundPans, i: i)
+    let pan: BackgroundPan = componentDataAt(this: world.backgroundPans, i: i)
+    setRuntimeOffset(
+      world: world
+      entity: entity
+      x: pan.amplitudeX * Math.sin(x: time * pan.speedX)
+      y: pan.amplitudeY * Math.sin(x: time * pan.speedY)
+    )
+  }
+  ret count > 0
+}
+
+func childrenOf(world: view UiWorld, entity: view EntityId) ret List(EntityId) {
+  var kids: List(EntityId) = List.create(EntityId, cap: 8)
+  if componentHas(this: world.childrens, entity: entity) {
+    let children: view Children => componentView(this: world.childrens, entity: entity)
+    loop var i: Int = 0, i < children.ids.length, ++i {
+      kids.add(value: children.ids.copyAtFallback(index: i, fallback: noEntity()))
+    }
+  }
+  ret kids
+}
+
+# A deterministic -1..1 jitter per pool slot (no random source needed).
+func slotJitter(slot: view Int) ret Float {
+  ret Math.sin(x: (slot * 7 + 3).toFloat() * 12.9898)
+}
+
+# SmokeFx: the node's authored children are the puff pool (a fixed set — no
+# runtime entity for layout). Every spawnIntervalMs an idle puff starts at
+# the emitter, then drifts (driftX/Y units per second, plus a horizontal
+# jitter), scales from scaleStart to scaleEnd over lifetimeMs and fades out
+# over the last fadeMs. An idle puff is fully transparent.
+func smokeFxSystem(world: mod UiWorld, deltaTime: view Float) ret Bool {
+  var live: Bool = false
+  let count: Int = componentCount(this: world.smokeFxs)
+  loop var i: Int = 0, i < count, ++i {
+    let entity: EntityId = componentEntityAt(this: world.smokeFxs, i: i)
+    let fx: SmokeFx = componentDataAt(this: world.smokeFxs, i: i)
+    let pool: List(EntityId) = childrenOf(world: world, entity: entity)
+    if pool.length is 0 or fx.lifetimeMs <= 0.0 {
+      continue
+    }
+    if componentHas(this: world.smokeStates, entity: entity) is false {
+      var ages: List(Float) = List.create(Float, cap: pool.length)
+      loop var p: Int = 0, p < pool.length, ++p {
+        ages.add(value: 0.0 - 1.0)
+      }
+      componentSet(
+        this: world.smokeStates
+        entity: entity
+        data: SmokeState { ages: own ages, spawnTimerMs: fx.spawnIntervalMs }
+      )
+    }
+    let state: mod SmokeState => componentMod(this: world.smokeStates, entity: entity)
+    loop state.ages.length < pool.length {
+      state.ages.add(value: 0.0 - 1.0)
+    }
+    state.spawnTimerMs = state.spawnTimerMs + deltaTime * 1000.0
+    if state.spawnTimerMs >= fx.spawnIntervalMs and fx.spawnIntervalMs > 0.0 {
+      loop var p: Int = 0, p < pool.length, ++p {
+        if state.ages.copyAtFallback(index: p, fallback: 0.0) < 0.0 {
+          state.ages.set(index: p, value: 0.0)
+          state.spawnTimerMs = 0.0
+          p = pool.length
+        }
+      }
+      if state.spawnTimerMs >= fx.spawnIntervalMs {
+        state.spawnTimerMs = fx.spawnIntervalMs
+      }
+    }
+    loop var p: Int = 0, p < pool.length, ++p {
+      let puff: EntityId = pool.copyAtFallback(index: p, fallback: noEntity())
+      var age: Float = state.ages.copyAtFallback(index: p, fallback: 0.0 - 1.0)
+      var opacity: Float = 0.0
+      var scale: Float = fx.scaleStart
+      var offsetX: Float = 0.0
+      var offsetY: Float = 0.0
+      if age >= 0.0 {
+        age = age + deltaTime * 1000.0
+        if age >= fx.lifetimeMs {
+          age = 0.0 - 1.0
+        } else {
+          live = true
+          let seconds: Float = age / 1000.0
+          let progress: Float = age / fx.lifetimeMs
+          offsetX = fx.driftX * seconds + slotJitter(slot: p) * fx.jitter
+          offsetY = fx.driftY * seconds
+          scale = fx.scaleStart + (fx.scaleEnd - fx.scaleStart) * progress
+          opacity = 1.0
+          if fx.fadeMs > 0.0 {
+            let remaining: Float = fx.lifetimeMs - age
+            if remaining < fx.fadeMs {
+              opacity = remaining / fx.fadeMs
+            }
+          }
+        }
+        state.ages.set(index: p, value: age)
+      }
+      setRuntimeOffset(
+        world: world
+        entity: puff
+        x: offsetX
+        y: offsetY
+      )
+      componentSet(this: world.opacities, entity: puff, data: Opacity { value: opacity })
+      var fx2: TransformFx = defaultTransformFx()
+      if componentHas(this: world.transforms, entity: puff) {
+        fx2 = componentGet(this: world.transforms, entity: puff)
+      }
+      fx2.scaleX = scale
+      fx2.scaleY = scale
+      componentSet(this: world.transforms, entity: puff, data: fx2)
+    }
+  }
+  ret live
+}
+
+# Whether (x, y) in design units lies in the entity's laid-out box.
+func pointOverEntity(
+  world: view UiWorld
+  entity: view EntityId
+  x: view Float
+  y: view Float
+) ret Bool {
+  if componentHas(this: world.worldTransforms, entity: entity) is false or componentHas(
+    this: world.computedRects
+    entity: entity
+  ) is false {
+    ret false
+  }
+  let transform: WorldTransform2D = componentGet(this: world.worldTransforms, entity: entity)
+  let rect: ComputedRect = componentGet(this: world.computedRects, entity: entity)
+  ret x >= transform.position.x and y >= transform.position.y and x <= transform.position.x + rect.size.x and y <= transform.position.y + rect.size.y
+}
+
+func childStrideX(world: view UiWorld, kids: view List(EntityId)) ret Float {
+  if kids.length is 0 {
+    ret 0.0
+  }
+  let first: EntityId = kids.copyAtFallback(index: 0, fallback: noEntity())
+  if kids.length >= 2 {
+    let second: EntityId = kids.copyAtFallback(index: 1, fallback: noEntity())
+    if componentHas(this: world.computedRects, entity: first) and componentHas(
+      this: world.computedRects
+      entity: second
+    ) {
+      ret componentGet(this: world.computedRects, entity: second).position.x - componentGet(
+        this: world.computedRects
+        entity: first
+      ).position.x
+    }
+  }
+  if componentHas(this: world.computedRects, entity: first) {
+    ret componentGet(this: world.computedRects, entity: first).size.x
+  }
+  ret 0.0
+}
+
+# Carousel: swipe-to-page a Horizontal container. While the pointer is down
+# over the container the children follow the drag (the container's runtime
+# offset times travelFactor); on release the page snaps to the nearest one, a
+# drag past swipeThreshold turning it. Between drags the offset eases to the
+# page in transitionDuration seconds; autoAdvanceSec > 0 turns the pages on a
+# timer. Non-current children are scaled to previewScale (their TransformFx
+# scale — an authored TransformFx on a page keeps its other fields).
+func carouselSystem(
+  world: mod UiWorld
+  deltaTime: view Float
+  pointerX: view Float
+  pointerY: view Float
+  pointerDown: view Bool
+) ret Bool {
+  var live: Bool = false
+  let count: Int = componentCount(this: world.carousels)
+  loop var i: Int = 0, i < count, ++i {
+    let entity: EntityId = componentEntityAt(this: world.carousels, i: i)
+    let carousel: Carousel = componentDataAt(this: world.carousels, i: i)
+    let kids: List(EntityId) = childrenOf(world: world, entity: entity)
+    if kids.length is 0 {
+      continue
+    }
+    if componentHas(this: world.carouselStates, entity: entity) is false {
+      componentSet(
+        this: world.carouselStates
+        entity: entity
+        data: CarouselState {
+          page: 0
+          offset: 0.0
+          dragging: false
+          dragStartX: 0.0
+          dragStartOffset: 0.0
+          autoTimerSec: 0.0
+        }
+      )
+    }
+    let state: mod CarouselState => componentMod(this: world.carouselStates, entity: entity)
+    let stride: Float = childStrideX(world: world, kids: kids)
+    let over: Bool = pointOverEntity(
+      world: world
+      entity: entity
+      x: pointerX
+      y: pointerY
+    )
+    if pointerDown and (state.dragging or over) {
+      if state.dragging is false {
+        state.dragging = true
+        state.dragStartX = pointerX
+        state.dragStartOffset = state.offset
+      }
+      state.offset = state.dragStartOffset + (pointerX - state.dragStartX)
+      live = true
+    } else {
+      if state.dragging {
+        state.dragging = false
+        let travelled: Float = state.offset - (0.0 - state.page.toFloat() * stride)
+        if travelled < 0.0 - carousel.swipeThreshold and state.page < kids.length - 1 {
+          state.page = state.page + 1
+        }
+        if travelled > carousel.swipeThreshold and state.page > 0 {
+          state.page = state.page - 1
+        }
+      }
+      if carousel.autoAdvanceSec > 0.0 and kids.length > 1 {
+        state.autoTimerSec = state.autoTimerSec + deltaTime
+        if state.autoTimerSec >= carousel.autoAdvanceSec {
+          state.autoTimerSec = 0.0
+          state.page = (state.page + 1) % kids.length
+        }
+        live = true
+      }
+      let target: Float = 0.0 - state.page.toFloat() * stride
+      let gap: Float = target - state.offset
+      var rate: Float = 1.0
+      if carousel.transitionDuration > 0.0 {
+        rate = deltaTime / carousel.transitionDuration * 4.0
+      }
+      if rate > 1.0 {
+        rate = 1.0
+      }
+      if gap > 0.5 or gap < 0.0 - 0.5 {
+        state.offset = state.offset + gap * rate
+        live = true
+      } else {
+        state.offset = target
+      }
+    }
+    setRuntimeOffset(
+      world: world
+      entity: entity
+      x: state.offset * carousel.travelFactor
+      y: 0.0
+    )
+    if carousel.previewScale > 0.0 and carousel.previewScale is not 1.0 {
+      loop var k: Int = 0, k < kids.length, ++k {
+        let page: EntityId = kids.copyAtFallback(index: k, fallback: noEntity())
+        var fx: TransformFx = defaultTransformFx()
+        if componentHas(this: world.transforms, entity: page) {
+          fx = componentGet(this: world.transforms, entity: page)
+        }
+        var scale: Float = carousel.previewScale
+        if k is state.page {
+          scale = 1.0
+        }
+        if fx.scaleX is not scale or fx.scaleY is not scale {
+          fx.scaleX = scale
+          fx.scaleY = scale
+          componentSet(this: world.transforms, entity: page, data: fx)
+        }
+      }
+    }
+  }
+  ret live
+}
