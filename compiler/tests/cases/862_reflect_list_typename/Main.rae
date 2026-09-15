@@ -1,0 +1,26 @@
+# #1006: `typeName(field)` in a `loop let f in fields(x)` spells the FULL
+# generic type of a field — `List(Int)`, `List(String)` — not the element
+# type it used to fold to (which left a generic decoder unable to tell a list
+# from a scalar). A `ComponentTable(T)` still folds to its element `T` (the
+# ECS/scene component vocabulary), covered by the existing UI fixtures.
+import String
+open ecs/ComponentTable
+
+type Bag {
+  count: Int
+  tags: List(String)
+  frames: List(Int)
+  label: String
+}
+
+func main() {
+  var bag: Bag = {
+    count: 0
+    tags: List.create(String, cap: 1)
+    frames: List.create(Int, cap: 1)
+    label: ""
+  }
+  loop let f: view any in fields(bag) {
+    log("{fieldName(f)}: {typeName(f)}")
+  }
+}
