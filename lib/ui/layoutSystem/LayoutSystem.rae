@@ -330,9 +330,18 @@ func measureNode(world: mod UiWorld, entity: view EntityId, scratch: mod List(En
         measuredH = extent.y + pad.t + pad.b
       }
     } else {
-      # Leaf nodes: their authored rect IS their measure.
+      # Leaf nodes: their authored rect IS their measure — except a Text leaf,
+      # whose Hug size should hug its glyphs. #1004: when a MeasuredText (the
+      # font measure written before layout) is present, it is the leaf's
+      # measure. Fixed/Fill axes ignore MeasuredSize (resolveAxisFromSize uses
+      # the authored rect / parent), so only a `Size: Hug` text axis changes.
       measuredW = rect.size.x
       measuredH = rect.size.y
+      if componentHas(this: world.measuredTexts, entity: entity) {
+        let mt: MeasuredText = componentGet(this: world.measuredTexts, entity: entity)
+        measuredW = mt.w
+        measuredH = mt.h
+      }
     }
 
     measuredW = applyConstraintsW(world: world, entity: entity, w: measuredW)

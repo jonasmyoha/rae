@@ -113,7 +113,7 @@ it (`Coverage` unless a nicer example exists).
 | component | authored fields | loads | draws | shown in |
 |---|---|---|---|---|
 | Rect | x y w h | yes | yes | all |
-| Size | w/h `{mode min max}` Fixed / Fill / Hug | yes | Fixed, Fill; **Hug on a Text leaf measures as its authored Rect** (the layout has no font — follow-up) | Coverage `HugText` |
+| Size | w/h `{mode min max}` Fixed / Fill / Hug | yes | yes — Fixed, Fill, and Hug on a Text leaf hugs its glyphs (#1004: a pre-layout pass writes the font measure into MeasuredText, read by measureNode) | Coverage `HugText` |
 | Layout | type Horizontal / Vertical / Grid / Stack / None, gap, alignMain (incl. SpaceBetween), alignCross, columns, rowGap, columnGap | yes | yes | CardStrip, Coverage `SpriteRow` (grid) |
 | Padding, Margin | l t r b (space tokens) or a padding preset name | yes | yes | all |
 | SafeArea | enabled, apply, extra | yes | yes (app viewport insets are 0 in the editor) | Coverage |
@@ -148,8 +148,7 @@ it (`Coverage` unless a nicer example exists).
 | BackgroundPan, Carousel, SmokeFx, WobbleFx | as declared | yes | **no runtime system yet** (declared for the format) — follow-up | Coverage |
 | AnimFrames, AnimTrigger | baseKey frames textureKeys fps loopForever onEndTextureKey; event actionId restartOnTrigger | yes (scalars); **`frames` / `textureKeys` List fields do not decode** (same reflection gap) | **no runtime system yet** — follow-up | Coverage `NineSlice` |
 
-Follow-ups queued from this matrix: a font-aware Hug measure for Text leaves (#1004);
-the animation systems (AnimFrames/AnimTrigger/WobbleFx/BackgroundPan/SmokeFx/Carousel,
+Follow-ups queued from this matrix: the animation systems (AnimFrames/AnimTrigger/WobbleFx/BackgroundPan/SmokeFx/Carousel,
 #1005); and the compiler's `typeName` of a `List(T)` field (#1006). Rotation,
 nine-slice, tiling and rounded clips for every pipeline landed with #1003.
 

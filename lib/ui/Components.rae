@@ -756,6 +756,17 @@ type MeasuredSize {
   h: Float
 }
 
+# #1004: the font measure of a Text leaf's string (width = pen advance, height
+# = the line box), written before layout by the visual-bounds/text-measure pass
+# so a `Size: Hug` text node hugs its glyphs instead of its authored Rect (which
+# a designer leaves 0). A RUNTIME/derived table: not authorable, never
+# serialized. measureNode reads it for a text leaf; the writer compares before
+# writing so a stable string does not re-dirty layout every frame.
+type MeasuredText {
+  w: Float
+  h: Float
+}
+
 # Layout output: the resolved on-screen box. #724: `position`/`size` Vec2 pair,
 # mirroring the authored Rect.
 type ComputedRect {
