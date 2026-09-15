@@ -1,0 +1,89 @@
+# #1007: a generic decoder fills a struct's `List(String)` / `List(Int)` field
+# from a JSON array through a `mod any` field loop. Three backend fixes at once:
+# a module-qualified String result (`Json.jsonString(...)`) moved straight into
+# `List.add`'s `own` parameter is not also pool-dropped at statement end (the
+# element used to be freed under the list); reflecting a NON-generic local whose
+# fields are generic instantiations specializes `decodeField(List(String))` by
+# its template name (not the mangled `List_String`, which resolved to Void); and
+# the `if let member: T` binding re-resolves T per specialization instead of
+# keeping the first instantiation's type.
+import Json
+
+type Widget {
+  name: String
+  tags: List(String)
+  counts: List(Int)
+  kind: Kind
+}
+
+enum Kind { plain, fancy }
+
+func decodeField(
+  T: type
+  fallback: copy T
+  doc: view JsonDoc
+  val: view JsonValue
+  key: view String
+) ret T {
+  let arr: Int = Json.field(doc: doc, this: val, key: key)
+  if arr < 0 {
+    ret fallback
+  }
+  if typeName(fallback) is "String" {
+    ret Json.jsonString(this: Json.jsonValueAt(doc: doc, idx: arr), fallback: "")
+  }
+  if typeName(fallback) is "List(String)" {
+    var strings: List(String) = List.create(String, cap: 4)
+    let array: JsonValue = Json.jsonValueAt(doc: doc, idx: arr)
+    loop var i: Int = 0, i < Json.arrayLen(this: array), ++i {
+      strings.add(
+        value: Json.jsonString(this: Json.arrayAt(doc: doc, this: array, idx: i), fallback: "")
+      )
+    }
+    ret strings
+  }
+  if typeName(fallback) is "List(Int)" {
+    var ints: List(Int) = List.create(Int, cap: 4)
+    let array: JsonValue = Json.jsonValueAt(doc: doc, idx: arr)
+    loop var i: Int = 0, i < Json.arrayLen(this: array), ++i {
+      ints.add(value: Json.jsonInt(this: Json.arrayAt(doc: doc, this: array, idx: i), fallback: 0))
+    }
+    ret ints
+  }
+  let text: String = Json.jsonString(this: Json.jsonValueAt(doc: doc, idx: arr), fallback: "")
+  if let member: T = enumFromName(T, name: text) {
+    ret member
+  }
+  ret fallback
+}
+
+func decodeWidget(doc: view JsonDoc, val: view JsonValue) ret Widget {
+  var widget: Widget = Widget.default()
+  loop let f: mod any in fields(widget) {
+    f.set(value: decodeField(
+      fallback: f
+      doc: doc
+      val: val
+      key: fieldName(f)
+    ))
+  }
+  ret widget
+}
+
+func main() {
+  let source: String = "\{ \"name\": \"hi\", \"tags\": [\"one\", \"two\"], \"counts\": [10, 20, 30], \"kind\": \"fancy\" \}"
+  let doc: JsonDoc = Json.parseJson(source: source)
+  let root: JsonValue = Json.root(doc: doc)
+  let widget: Widget = decodeWidget(doc: doc, val: root)
+  let firstTag: String = widget.tags.copyAtDefault(index: 0)
+  let secondTag: String = widget.tags.copyAtDefault(index: 1)
+  let lastCount: Int = widget.counts.copyAtDefault(index: 2)
+  log("name={widget.name} kind={widget.kind}")
+  log("tags={widget.tags.length} {firstTag} {secondTag}")
+  log("counts={widget.counts.length} last={lastCount}")
+  let empty: JsonDoc = Json.parseJson(source: "\{ \}")
+  let emptyWidget: Widget = decodeWidget(doc: empty, val: Json.root(doc: empty))
+  log(
+    "missing keys keep defaults: tags={emptyWidget.tags.length} counts={emptyWidget.counts.length}"
+  )
+}

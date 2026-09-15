@@ -59,7 +59,7 @@ func animFramesSystem(world: mod UiWorld, deltaTime: view Float) ret Bool {
   let count: Int = componentCount(this: world.animFrames)
   loop var i: Int = 0, i < count, ++i {
     let entity: EntityId = componentEntityAt(this: world.animFrames, i: i)
-    let frames: AnimFrames = componentDataAt(this: world.animFrames, i: i)
+    let frames: view AnimFrames => componentView(this: world.animFrames, entity: entity)
     let total: Int = animFrameCount(frames: frames)
     if total <= 0 or frames.fps <= 0.0 {
       continue
@@ -150,7 +150,7 @@ func animTriggerSystem(world: mod UiWorld) {
       entity: entity
       data: AnimState { playing: true, elapsedMs: 0.0, frameIndex: 0 }
     )
-    let frames: AnimFrames = componentGet(this: world.animFrames, entity: entity)
+    let frames: view AnimFrames => componentView(this: world.animFrames, entity: entity)
     setSpriteKey(world: world, entity: entity, key: animFrameKey(frames: frames, index: 0))
   }
 }
