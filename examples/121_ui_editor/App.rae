@@ -10,6 +10,7 @@ import Sdl3
 open ui/Ecs
 open ui/Components
 open ui/EventLoop
+open ui/SceneLoader
 open ui/Pipeline
 open ui/inputSystem/InputSystem
 open ui/listViewSystem/ListViewSystem
@@ -31,6 +32,11 @@ func toggleChrome(chrome: mod ChromeState, world: mod UiWorld) {
 # save keeps the last good page), refresh textures + chrome, log the delta.
 func reloadDocument(app: mod App) {
   let previousNodes: Int = app.document.nodeCount
+  # The selection survives by node id (the entities are new after the mount).
+  var keepSelected: String = "{app.testSelectNodeId}"
+  if keepSelected.length() is 0 and isNone(this: app.inspector.selected) is false {
+    keepSelected = nodeIdOf(world: app.world, entity: app.inspector.selected)
+  }
   reloadEditorTheme(gpuUi: app.gpuUi, sceneDirectory: app.document.directory, quiet: true)
   seedWorldTheme(world: app.world, res: app.gpuUi)
   let mounted: Bool = documentLoadSystem(
@@ -65,6 +71,16 @@ func reloadDocument(app: mod App) {
     status: app.document.status
   )
   watchRememberMtimes(watch: app.watch, paths: app.document.watchedPaths)
+  if mounted {
+    resolveSceneInstances(world: app.world, registry: app.document.registry, pageId: "chrome")
+    inspectorAfterLoad(
+      inspector: app.inspector
+      world: app.world
+      pageRoot: app.document.pageRoot
+      designW: app.document.designW
+      selectNodeId: keepSelected
+    )
+  }
   let diagnostics: Int = app.world.sceneDiagnostics.length
   if mounted {
     log(
@@ -77,6 +93,24 @@ func reloadDocument(app: mod App) {
 
 func runApp(app: mod App) ret Int {
   var input: UiInput = createUiInput()
+  listViewSystem(world: app.world, scenes: app.document.registry)
+  runScheduledUiSystems(schedule: app.schedule, world: app.world, res: app.gpuUi)
+  # The first layout has run, so the selection hook can read computed rects.
+  inspectorAfterLoad(
+    inspector: app.inspector
+    world: app.world
+    pageRoot: app.document.pageRoot
+    designW: app.document.designW
+    selectNodeId: app.testSelectNodeId
+  )
+  inspectorSystem(
+    inspector: app.inspector
+    world: app.world
+    input: input
+    pageRoot: app.document.pageRoot
+    chromeVisible: app.chrome.visible
+    designW: app.document.designW
+  )
   listViewSystem(world: app.world, scenes: app.document.registry)
   runScheduledUiSystems(schedule: app.schedule, world: app.world, res: app.gpuUi)
   var renderedOnce: Bool = false
@@ -100,6 +134,16 @@ func runApp(app: mod App) ret Int {
     }
     if fileWatchSystem(watch: app.watch, paths: app.document.watchedPaths, now: now) {
       reloadDocument(app: app)
+      changed = true
+    }
+    if inspectorSystem(
+      inspector: app.inspector
+      world: app.world
+      input: input
+      pageRoot: app.document.pageRoot
+      chromeVisible: app.chrome.visible
+      designW: app.document.designW
+    ) {
       changed = true
     }
     if hadEvents or changed {
