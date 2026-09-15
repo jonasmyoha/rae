@@ -70,18 +70,23 @@ func copyAt(T: type, this: view List(T), index: view Int) ret opt T {
 # `copyAtFallback` returns the caller's own value out of range — the #642
 # rule (the else branch is a value the PROGRAMMER wrote). Prefer it when a
 # meaningful sentinel exists.
+#
+# Delegates to `copyAt` (whose optional payload is deep-copied, #899) so the
+# in-range result is a genuine OWNED copy, not a shallow alias of the list's
+# storage. A bare `ret rae_ext_rae_buf_get(...)` here returned an alias sharing
+# the element's heap (String/List/Map data pointer); the caller that then owned
+# and dropped it double-freed the list's buffer (#1010). `copyAt`'s value
+# accessor deep-copies heap fields, so the returned T is independent.
 func copyAtFallback(
   T: type
   this: view List(T)
   index: view Int
   fallback: T
 ) ret T {
-  unsafe {
-    if index < 0 or index >= this.length {
-      ret fallback
-    }
-    ret rae_ext_rae_buf_get(buf: this.data, index: index)
+  if let value: T = copyAt(this, index: index) {
+    ret value
   }
+  ret fallback
 }
 
 # `copyAtDefault` returns the type's zero value out of range (0, 0.0, false,
@@ -89,14 +94,17 @@ func copyAtFallback(
 # is fine and spelling a sentinel every call would be noise. Use
 # `copyAt` + `if let` when absence must be handled distinctly from a real
 # zero, or `copyAtFallback` when the sentinel matters.
+#
+# Delegates to `copyAt` for the same reason as `copyAtFallback` above: the
+# in-range result must be an OWNED deep copy, not a shallow buffer alias, or a
+# heap element (String/List/Map) is double-freed when the caller drops it
+# (#1010).
 func copyAtDefault(T: type, this: view List(T), index: view Int) ret T {
-  unsafe {
-    if index < 0 or index >= this.length {
-      var defaultValue: T
-      ret defaultValue
-    }
-    ret rae_ext_rae_buf_get(buf: this.data, index: index)
+  if let value: T = copyAt(this, index: index) {
+    ret value
   }
+  var defaultValue: T
+  ret defaultValue
 }
 
 # A read-only window INTO the list's own storage, rather than a copy of the
