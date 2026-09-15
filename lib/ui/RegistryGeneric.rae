@@ -152,19 +152,36 @@ func decodeField(
     }
     ret deserSizeAxis(doc: doc, val: Json.jsonValueAt(doc: doc, idx: idx))
   }
-  # List fields (#1006): `typeName` now spells the full generic type, so a
-  # `List(Int)` / `List(String)` field reaches its OWN arm instead of being
-  # mis-routed to the element's scalar arm (which returned an Int/String into a
-  # List slot). The arm keeps the field's authored default (`ret fallback`);
-  # POPULATING it from the JSON array is #1007 — the reflected `f.set` of a
-  # heap-carrying list into a component double-frees the element buffers when
-  # the component table drops, so a scene's List field stays empty for now (its
-  # unchanged pre-#1006 value) and no scene regresses or crashes.
+  # List fields (#1006/#1007): `typeName` spells the full generic type, so a
+  # `List(Int)` / `List(String)` field reaches its OWN arm and decodes from its
+  # JSON array element by element; an absent key keeps the authored default.
+  # The decode is inlined into the arm rather than a helper: a plain helper
+  # called from a generic specialization is not instantiated by the backend.
   if typeName(fallback) is "List(Int)" {
-    ret fallback
+    let arr: Int = Json.field(doc: doc, this: val, key: key)
+    if arr < 0 {
+      ret fallback
+    }
+    var ints: List(Int) = List.create(Int, cap: 4)
+    let array: JsonValue = Json.jsonValueAt(doc: doc, idx: arr)
+    loop var i: Int = 0, i < Json.arrayLen(this: array), ++i {
+      ints.add(value: Json.jsonInt(this: Json.arrayAt(doc: doc, this: array, idx: i), fallback: 0))
+    }
+    ret ints
   }
   if typeName(fallback) is "List(String)" {
-    ret fallback
+    let arr: Int = Json.field(doc: doc, this: val, key: key)
+    if arr < 0 {
+      ret fallback
+    }
+    var strings: List(String) = List.create(String, cap: 4)
+    let array: JsonValue = Json.jsonValueAt(doc: doc, idx: arr)
+    loop var i: Int = 0, i < Json.arrayLen(this: array), ++i {
+      strings.add(
+        value: Json.jsonString(this: Json.arrayAt(doc: doc, this: array, idx: i), fallback: "")
+      )
+    }
+    ret strings
   }
   # Enum (or nothing): the authored member name, if the key is present.
   let empty: String = ""

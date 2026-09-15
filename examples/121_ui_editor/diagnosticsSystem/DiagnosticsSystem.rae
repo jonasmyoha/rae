@@ -117,8 +117,8 @@ func textureSystem(
   }
   let animCount: Int = componentCount(this: world.animFrames)
   loop var a: Int = 0, a < animCount, ++a {
-    let frames: AnimFrames = componentDataAt(this: world.animFrames, i: a)
     let owner: EntityId = componentEntityAt(this: world.animFrames, i: a)
+    let frames: view AnimFrames => componentView(this: world.animFrames, entity: owner)
     loop var f: Int = 0, f < animFrameCount(frames: frames), ++f {
       wanted.add(value: animFrameKey(frames: frames, index: f))
       wantedEntities.add(value: owner)

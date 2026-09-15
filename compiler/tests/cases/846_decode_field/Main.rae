@@ -3,7 +3,8 @@
 # from a `mod any` field loop it fills a `T.default()` component field by
 # field. Covers each kind: Int, Float (plain and space token), Bool, String,
 # enum (authored PascalCase), a missing key (keeps the default), and the
-# `radius` key's radius-category token.
+# `radius` key's radius-category token, and (#1007) a `List(String)` /
+# `List(Int)` field filled from its JSON array.
 open ui/RegistryGeneric
 open ui/Components
 import Json
@@ -19,6 +20,8 @@ type Widget {
   layout: LayoutType
   align: AlignKind
   untouched: Int
+  tags: List(String)
+  counts: List(Int)
 }
 
 # The diagnostics list + scene/node scope decodeField reports unknown tokens
@@ -48,7 +51,7 @@ func decodeWidget(
 func main() {
   let theme: UiTheme = createUiTheme()
   var diagnostics: List(SceneDiagnostic) = createSceneDiagnostics()
-  let source: String = "\{ \"columns\": 3, \"gap\": \"spaceM\", \"radius\": 12.5, \"visible\": true, \"title\": \"Now Playing\", \"layout\": \"Horizontal\", \"align\": \"SpaceBetween\" \}"
+  let source: String = "\{ \"columns\": 3, \"gap\": \"spaceM\", \"radius\": 12.5, \"visible\": true, \"title\": \"Now Playing\", \"layout\": \"Horizontal\", \"align\": \"SpaceBetween\", \"tags\": [\"one\", \"two\"], \"counts\": [10, 20, 30] \}"
   let doc: JsonDoc = Json.parseJson(source: source)
   let root: JsonValue = Json.root(doc: doc)
   let widget: Widget = decodeWidget(
@@ -65,6 +68,10 @@ func main() {
   log("layout={widget.layout}")
   log("align={widget.align}")
   log("untouched (missing key keeps default)={widget.untouched}")
+  let firstTag: String = widget.tags.copyAtDefault(index: 0)
+  let lastCount: Int = widget.counts.copyAtDefault(index: 2)
+  log("tags={widget.tags.length} first={firstTag}")
+  log("counts={widget.counts.length} last={lastCount}")
 
   # Unknown enum spelling and a plain numeric gap: fallbacks and numbers.
   let source2: String = "\{ \"gap\": 8.0, \"layout\": \"Sideways\" \}"
@@ -77,5 +84,6 @@ func main() {
     diagnostics: diagnostics
   )
   log("gap plain={widget2.gap} layout unknown keeps default={widget2.layout}")
+  log("tags missing keeps default={widget2.tags.length}")
   log("diagnostics={diagnostics.length}")
 }
