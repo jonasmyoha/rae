@@ -142,13 +142,13 @@ it (`Coverage` unless a nicer example exists).
 | ScrollState | y velocity | yes | yes (lists) | Settings |
 | SceneInstance | sceneId, params.overrides[] (Text, Sprite, OnClick, Active, Rect w/h, Padding l/t/r/b) | yes | yes | CardStrip, Coverage `CardsRow` |
 | ListView | itemSceneId itemKeyField itemHeight itemGap visibleItemCount overscanRows bindings[] loadingSceneId emptySceneId errorSceneId | yes | yes (the editor seeds placeholder rows) | Settings, Coverage `ListBlock` |
-| TextBinding, DataRequest, DataDependency, RefreshRegion, ImageSourceResolver | as declared | yes | data bindings — no editor system feeds them; **`ImageSourceResolver.textureKeys` (a List field) does not decode** (compiler reflection reports a List field as its element type — follow-up) | Coverage |
+| TextBinding, DataRequest, DataDependency, RefreshRegion, ImageSourceResolver | as declared | yes | data bindings — no editor system feeds them; **`ImageSourceResolver.textureKeys` (a List field) stays empty**: `typeName` now spells the full generic type (#1006), so it reaches a List arm instead of the element scalar arm, but populating it double-frees on drop — #1007 | Coverage |
 | ContainerStyle | a theme container name | yes (an unknown name is an unknownToken diagnostic, #1000) | yes | Coverage `TextBlock`, CoverageCard |
 | ProfileStat, AvatarSource, CoverGrid, SearchField, SearchResults, HistoryList, AnchorBottom, NavTab, AlbumHeader, TrackList, ProgressBar, BottomSheet, PlaybackIcon, PlaybackCover, LikedHeart, TrackText | 106's app bindings | yes | app systems (106) drive them; inert in the editor | Coverage `MetaRow` |
 | BackgroundPan, Carousel, SmokeFx, WobbleFx | as declared (+ `Carousel.autoAdvanceSec`, #1005) | yes | yes — lib/ui/animationSystem/EffectSystems.rae (#1005): sine / two-sine runtime offsets, a swipe-or-timer paged container with `previewScale`, puffs recycled from the node's authored children | Coverage `BackdropBox`, `IconSprite`, `CardsRow` |
-| AnimFrames, AnimTrigger | baseKey frames textureKeys fps loopForever onEndTextureKey (+ `frameCount`, #1005); event actionId restartOnTrigger | yes (scalars); **`frames` / `textureKeys` List fields do not decode** (#1006) — author `baseKey` + `frameCount` for `<baseKey><i>` keys instead | yes (#1005): frames advance at fps into Sprite.textureKey, loop or stop on onEndTextureKey; a trigger (actionId, or click/hover on the node) starts / restarts | Coverage `NineSlice` |
+| AnimFrames, AnimTrigger | baseKey frames textureKeys fps loopForever onEndTextureKey (+ `frameCount`, #1005); event actionId restartOnTrigger | yes (scalars); **`frames` / `textureKeys` List fields stay empty**: they reach a List arm now (#1006) but populating is #1007 — author `baseKey` + `frameCount` for `<baseKey><i>` keys instead | yes (#1005): frames advance at fps into Sprite.textureKey, loop or stop on onEndTextureKey; a trigger (actionId, or click/hover on the node) starts / restarts | Coverage `NineSlice` |
 
-Follow-ups queued from this matrix: the compiler's `typeName` of a `List(T)` field (#1006).
+Follow-ups queued from this matrix: populating a scene's `List` field (#1007). `typeName` of a `List(T)` field is spelled in full since #1006.
 The effect systems landed with #1005. Rotation,
 nine-slice, tiling and rounded clips for every pipeline landed with #1003.
 

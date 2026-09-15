@@ -152,6 +152,20 @@ func decodeField(
     }
     ret deserSizeAxis(doc: doc, val: Json.jsonValueAt(doc: doc, idx: idx))
   }
+  # List fields (#1006): `typeName` now spells the full generic type, so a
+  # `List(Int)` / `List(String)` field reaches its OWN arm instead of being
+  # mis-routed to the element's scalar arm (which returned an Int/String into a
+  # List slot). The arm keeps the field's authored default (`ret fallback`);
+  # POPULATING it from the JSON array is #1007 — the reflected `f.set` of a
+  # heap-carrying list into a component double-frees the element buffers when
+  # the component table drops, so a scene's List field stays empty for now (its
+  # unchanged pre-#1006 value) and no scene regresses or crashes.
+  if typeName(fallback) is "List(Int)" {
+    ret fallback
+  }
+  if typeName(fallback) is "List(String)" {
+    ret fallback
+  }
   # Enum (or nothing): the authored member name, if the key is present.
   let empty: String = ""
   let text: String = optString(

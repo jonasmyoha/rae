@@ -1,0 +1,12 @@
+# #1006: a List where a scalar is expected was only caught by gcc, with a .c
+# line — the gap that let a generic decoder silently pass a `List(Int)` field
+# to a scalar `view Int` arm. Sema now flags it at the .rae site (#993 family).
+func wantInt(n: view Int) ret Int {
+  ret n
+}
+
+func main() {
+  var xs: List(Int) = List.create(Int, cap: 1)
+  xs.add(value: 7)
+  log("{wantInt(n: xs)}")
+}
