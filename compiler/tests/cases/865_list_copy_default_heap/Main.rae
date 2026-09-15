@@ -1,0 +1,50 @@
+# #1010: `copyAtDefault` / `copyAtFallback` on a heap-carrying element type
+# (here `List(String)`) must return an OWNED deep copy, not a shallow alias of
+# the list's storage. The old bodies did `ret rae_ext_rae_buf_get(...)`, handing
+# back a String that shared the element's heap pointer; a caller that then owned
+# and dropped the value double-freed the list's buffer at scope exit
+# (drop_struct -> List_drop -> str_free of an already-freed pointer). The
+# elements below are HEAP strings (interpolated), because a string LITERAL has a
+# static buffer whose double-drop is a silent no-op and would hide the bug.
+type Bag {
+  items: List(String)
+}
+
+func createBag() ret Bag {
+  var items: List(String) = List.create(String, cap: 4)
+  loop var i: Int = 0, i < 3, ++i {
+    items.add(value: "item-{i}-heap")
+  }
+  ret Bag { items: items }
+}
+
+# Read an element out through the two total accessors and hand it back up. The
+# returned String OUTLIVES this call and is owned by `main`'s own list, while
+# `bag.items` still owns the original element — two independent heaps only if
+# the accessor deep-copied.
+func viaDefault(bag: view Bag, i: view Int) ret String {
+  ret bag.items.copyAtDefault(index: i)
+}
+
+func viaFallback(bag: view Bag, i: view Int) ret String {
+  ret bag.items.copyAtFallback(index: i, fallback: "missing")
+}
+
+func main() {
+  let bag: Bag = createBag()
+
+  # In-range reads that escape into an independently-owned list.
+  var owned: List(String) = List.create(String, cap: 4)
+  owned.add(value: viaDefault(bag: bag, i: 0))
+  owned.add(value: viaFallback(bag: bag, i: 2))
+
+  # Out-of-range: default zero value, and the caller's sentinel.
+  let missDefault: String = bag.items.copyAtDefault(index: 9)
+  let missFallback: String = bag.items.copyAtFallback(index: 9, fallback: "sentinel")
+
+  log("default[0]={owned.copyAtDefault(index: 0)}")
+  log("fallback[2]={owned.copyAtDefault(index: 1)}")
+  log("missDefault=[{missDefault}]")
+  log("missFallback={missFallback}")
+  log("bag still intact: {bag.items.copyAtDefault(index: 1)}")
+}
