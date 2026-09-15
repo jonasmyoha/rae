@@ -1,0 +1,103 @@
+# watchSystem — the passive watcher half of the viewer (design §3): every 250 ms,
+# while the window is visible (or the run is headless), stat the document's
+# watched files (scene, registered sub-scenes, theme); a changed mtime asks for
+# a reload. The poll is a timer, not a wake source, so the loop passes
+# `pollWatcher` to its wait (docs/ui-render-loop-performance.md): a blocking
+# wait would only notice the edit on the next mouse wiggle.
+#
+# RAE_UI_EDITOR_TEST_REWRITE=<n>: the headless gate's hook. After n ms the app
+# itself copies `<open path minus .raescene>.rewrite.raescene` over the open
+# path, once, so the reload is exercised with no second process racing the
+# screenshot.
+import Gpu2d
+open Sys
+
+const watchPollSec: Float64 = 0.25
+
+type FileWatch {
+  mtimes: List(Float64)
+  lastPollAt: Float64
+  rewriteAtSec: Float64  # < 0 = no test rewrite
+  rewriteDone: Bool
+  changes: Int
+}
+
+func createFileWatch(now: view Float64) ret FileWatch {
+  var rewriteAt: Float64 = 0.0 - 1.0
+  let rewrite: String = getEnv(name: "RAE_UI_EDITOR_TEST_REWRITE")
+  if rewrite.length() > 0 {
+    rewriteAt = now + (rewrite.toInt().toFloat() / 1000.0) as Float64
+  }
+  ret FileWatch {
+    mtimes: List.create(Float64, cap: 8)
+    lastPollAt: now
+    rewriteAtSec: rewriteAt
+    rewriteDone: false
+    changes: 0
+  }
+}
+
+# Take the current mtimes as the baseline (after every load, so the reload the
+# load itself caused is not seen again).
+func watchRememberMtimes(watch: mod FileWatch, paths: view List(String)) {
+  watch.mtimes.clear()
+  loop var i: Int = 0, i < paths.length, ++i {
+    if let path: String = paths.copyAt(index: i) {
+      watch.mtimes.add(value: fileModTime(path: path))
+    }
+  }
+}
+
+# Whether the watcher should poll now: only when the frame could show the
+# result, at the poll interval.
+func watchDue(watch: view FileWatch, now: view Float64) ret Bool {
+  if Gpu2d.renderableNow() is false {
+    ret false
+  }
+  ret now - watch.lastPollAt >= watchPollSec
+}
+
+# Poll the watched files; true when any mtime moved since the last remember.
+func fileWatchSystem(watch: mod FileWatch, paths: view List(String), now: view Float64) ret Bool {
+  if watchDue(watch: watch, now: now) is false {
+    ret false
+  }
+  watch.lastPollAt = now
+  var changed: Bool = false
+  loop var i: Int = 0, i < paths.length, ++i {
+    if let path: String = paths.copyAt(index: i) {
+      let current: Float64 = fileModTime(path: path)
+      let known: Float64 = watch.mtimes.copyAtFallback(index: i, fallback: 0.0)
+      if current is not known {
+        changed = true
+      }
+    }
+  }
+  if changed {
+    watch.changes = watch.changes + 1
+  }
+  ret changed
+}
+
+# The test hook: copy the `.rewrite.raescene` twin over the open scene once
+# the deadline passes. Returns whether the copy happened this call.
+func testRewriteSystem(watch: mod FileWatch, path: view String, now: view Float64) ret Bool {
+  if watch.rewriteDone or watch.rewriteAtSec < 0.0 or now < watch.rewriteAtSec {
+    ret false
+  }
+  watch.rewriteDone = true
+  let suffix: String = ".raescene"
+  var stem: String = "{path}"
+  if path.endsWith(suffix: suffix) {
+    stem = path.sub(start: 0, len: path.length() - suffix.length())
+  }
+  let source: String = "{stem}.rewrite.raescene"
+  if let content: String = readFile(path: source) {
+    if writeFile(path: path, content: content) {
+      log("[ui-editor] test rewrite: {source} -> {path}")
+      ret true
+    }
+  }
+  log("[ui-editor] test rewrite: {source} is not readable")
+  ret false
+}
