@@ -217,10 +217,13 @@ an in-memory render + compare per module; no content cache is warranted.
 
 Enforcement: the test runner exports `RAE_FORMAT=check` per case (`off` for
 345/346/348), `tools/format-check-tree.sh` runs `rae format --check` over the
-whole active tree before every full suite run (excluding the format fixtures'
-inputs, the lexer fixtures 006/015/019, the CRLF fixtures and — since they do
-not parse — the expected-parse-error fixtures), and `run_examples.sh` runs the
-gate in check mode. `tools/test-format-cli.sh` proves the integration: a dirty
+whole active source tree, including real `.rae` / `.raepack` files under
+`docs/`, before every full suite run (excluding the format fixtures' inputs,
+the lexer fixtures 006/015/019, the CRLF fixtures and — since they do not parse
+— the expected-parse-error fixtures), and `run_examples.sh` runs the gate in
+check mode. Historical syntax comparisons and prose samples use `.rae.txt`, so
+they remain documentation rather than compiler input. `tools/test-format-cli.sh`
+proves the integration: a dirty
 project is rejected by `rae build --check-format`, formatted by a plain build,
 and passes the check afterwards; an over-cap source fails the build untouched.
 Discoverability: `rae init` writes an AGENTS.md carrying the formatting
