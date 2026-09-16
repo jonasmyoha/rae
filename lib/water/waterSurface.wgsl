@@ -56,6 +56,9 @@ struct Water {
 @group(0) @binding(10) var cascadeNorm2: texture_2d<f32>;
 @group(0) @binding(11) var cascadeSampler: sampler;   // repeat: the cascades tile
 
+const oceanFogStartFarRatio: f32 = 0.65;
+const oceanFogEndFarRatio: f32 = 0.92;
+
 // The cascade maps carry a mip chain (#1002, WaterFftMips): level L is the
 // 2x2 box average of level L-1. Sampling the level whose texel matches the
 // footprint of the sample is the band-limit that keeps the sum of cascades
@@ -428,6 +431,21 @@ fn fs(i: VsOut) -> @location(0) vec4<f32> {
   }
   colour += W.sunColor.rgb * highlight * 0.7;
   alpha = max(alpha, highlight * 0.8);
+
+  // Open-ocean aerial perspective: the radial grid reaches beyond the far
+  // plane, then dissolves into the sampled sky before clipping can expose its
+  // edge. Keeping this in the surface pass also fades distant FFT repetition,
+  // refraction, whitecaps and glints together. Lakes and rivers stay crisp.
+  if (realisticPath && W.tuning.z > 1.5) {
+    let viewDistance = length(i.world.xy - W.camera.xy);
+    let fog = smoothstep(
+      W.horizon.w * oceanFogStartFarRatio,
+      W.horizon.w * oceanFogEndFarRatio,
+      viewDistance
+    );
+    colour = mix(colour, W.horizon.rgb, fog);
+    alpha = max(alpha, fog);
+  }
 
   return vec4<f32>(colour, alpha);
 }
