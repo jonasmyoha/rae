@@ -36,8 +36,33 @@ The root is an input, defaulted from what you opened, never discovered:
 - the 121 viewer: the opened scene's directory, unless `--scene-root <dir>`
   (or `RAE_UI_EDITOR_ROOT`) says otherwise — mirroring `rae run`, whose
   project is the entry file's folder unless `--project` is given;
-- an app that mounts scenes from Rae code passes the root explicitly
-  (`scenePackageFile(root:, sceneId:)` in `lib/ui/SceneImports.rae`).
+- an app that mounts scenes from Rae code passes the root explicitly to
+  `mountSceneWithImports`:
+
+      var gpuUi: Gpu2dUi = loadUiFonts(
+        directory: "assets/"
+        textFontName: "FallbackBody"
+        iconFontName: "FallbackIcons"
+      )
+      var world: UiWorld = create()
+      var canvas: Gpu2dCanvas = createGpu2dCanvas()
+      var sceneRegistry: SceneRegistry = createSceneRegistry()
+      let root: EntityId = mountSceneWithImports(
+        world: world
+        root: "assets/"
+        sceneId: "screens/MainMenu"
+        resources: gpuUi
+        canvas: canvas
+        registry: sceneRegistry
+      )
+
+  The mount resolves `assets/screens/MainMenu.raescene`, its imports and every
+  reachable `SceneInstance` / `ListView` scene from that same root. It installs
+  the imported theme before deserialising components, loads declared text and
+  icon fonts with `loadSdfFontJson`, resolves mounted sprite/animation textures
+  through `assets.textures`, and keeps `gpuUi`'s fonts as fallbacks when the
+  package declares none. The app owns `sceneRegistry` so later list
+  materialisation can use the same registered sub-scenes.
 
 No walking up for a `.raepack`, no magic files. A sub-scene therefore resolves
 from the root, not from its parent scene's folder.
@@ -123,4 +148,6 @@ PascalCase like every scene). A page that declares no import and no tokens of
 its own while a `Theme.raescene` / `theme.raescene` sits beside it gets a
 diagnostic naming the line to add. Apps that load a theme explicitly
 (`loadUiAssets(themeFile: "Theme.raescene")`) are unaffected — that was never
-a convention, it is a path the app passes.
+a convention, it is a path the app passes. New app code should use
+`mountSceneWithImports`; `loadUiAssets` remains the compatibility path for apps
+that have not yet migrated their scene packages.

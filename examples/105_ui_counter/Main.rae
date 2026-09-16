@@ -8,7 +8,7 @@
 # THE SHAPE OF A RAE UI APP, and the reason it looks like this:
 #
 #   1. The LAYOUT IS DATA. Every node, its nesting, its padding, its colour and
-#      its corner radius live in assets/ui.raescene. There is no markup in this
+#      its corner radius live in assets/Ui.raescene. There is no markup in this
 #      file and no builder chain — the tree is a document, so a designer can
 #      move a button without touching Rae, and a diff of a layout change reads
 #      as a layout change.
@@ -28,10 +28,9 @@
 import Gpu2d
 import String
 open Sys
-import ui/Scene
 open ui/EventLoop
 # The node helpers (setNodeText / setNodeActive / setNodeFillSlot) and the
-# loadUiAssets + runUiSystems bootstrap live here. The `app3d/` in the path is
+# scene-package mounting + runUiSystems bootstrap live here. The `app3d/` in the path is
 # historical -- the module imports core, gpu2d, sdf_text and lib/ui and nothing
 # 3D, and its own header calls it "the lib/ui bootstrap every example was
 # copying". A 2D UI app is exactly its audience.
@@ -42,9 +41,7 @@ open ecs/Schedule
 open ui/inputSystem/InputSystem
 open ui/layoutSystem/LayoutSystem
 open ui/renderSystem/RenderSystem
-open ui/SceneFile
-open ui/SceneLoader
-open ui/ThemeResolved
+open ui/SceneInstance
 open ui/Transform
 open ecs/Entity
 open Gpu2dCanvas
@@ -186,29 +183,25 @@ func main() ret Int {
   var canvas: Gpu2dCanvas = createGpu2dCanvas()  # #907: the app-owned 2D canvas (box + image passes)
 
   let base: String = "examples/105_ui_counter/assets/"
-  # Fonts and theme in one call. The theme's palette is bridged into the active
-  # theme here, which is what makes the slot names in the .raescene ("surface",
-  # "accent") resolve to real colours at paint time.
-  let gpuUi: Gpu2dUi = loadUiAssets(
-    dir: base
+  # These are fallbacks for a scene package that declares no fonts. Ui imports
+  # Theme, whose assets block selects the same atlases through the package
+  # resolver and whose tokens replace the empty fallback theme before mount.
+  var gpuUi: Gpu2dUi = loadUiFonts(
+    directory: base
     textFontName: "Roboto-Regular"
     iconFontName: "MaterialIconsRound-Regular"
-    themeFile: "Theme.raescene"
   )
 
   var world: UiWorld = create()
-  # #764: install the app's theme (palette + scene tokens) onto this world.
-  seedWorldTheme(world: world, res: gpuUi)
-  world.layoutW = designW.toFloat()
-  world.layoutH = designH.toFloat()
-
-  let scene: Scene = loadSceneFile(path: "{base}ui.raescene")
-  if scene.ok is false {
-    log("[ui] scene failed to load: {scene.errorMsg}")
-    Gpu2d.closeWindow()
-    ret 1
-  }
-  let root: EntityId = loadScene(world: world, scene: scene)
+  var sceneRegistry: SceneRegistry = createSceneRegistry()
+  let root: EntityId = mountSceneWithImports(
+    world: world
+    root: base
+    sceneId: "Ui"
+    resources: gpuUi
+    canvas: canvas
+    registry: sceneRegistry
+  )
   if isNone(this: root) {
     log("[ui] scene mounted no root")
     Gpu2d.closeWindow()
