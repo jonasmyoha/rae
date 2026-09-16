@@ -84,7 +84,7 @@ export class TestLogTailer {
     this.runId = id ?? randomUUID();
     this.markerRun = marker;
     this.passed = 0; this.failed = 0; this.startedAt = Date.now();
-    this.broadcast({ type: "test-run-started", runId: this.runId, mode: "all", command: "external", cwd: this.logPath, targetId: "external", targetLabel: "Agent run (live log)", timestamp: new Date().toISOString() });
+    this.broadcast({ type: "test-run-started", runId: this.runId, mode: "all", command: "external", cwd: this.logPath, targetId: "external", targetLabel: "Agent run (live log)", timestamp: new Date().toISOString(), lastDurationMs: this.stats?.lastTestDurationMs() ?? null });
   }
 
   private ingest(chunk: string) {

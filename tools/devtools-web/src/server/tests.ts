@@ -104,7 +104,9 @@ export class TestRunner {
       parallel
     };
 
-    this.broadcast(createRunStartedMessage(runId, mode, batchLabel, cwd));
+    this.broadcast(
+      createRunStartedMessage(runId, mode, batchLabel, cwd, this.stats?.lastTestDurationMs() ?? null)
+    );
     this.startNextTarget();
   }
 
@@ -391,7 +393,8 @@ function createRunStartedMessage(
   runId: string,
   mode: TestRunMode,
   targetLabel: string,
-  cwd: string
+  cwd: string,
+  lastDurationMs: number | null
 ): TestRunStartedMessage {
   return {
     type: "test-run-started",
@@ -401,6 +404,7 @@ function createRunStartedMessage(
     targetId: "all",
     targetLabel,
     cwd,
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    lastDurationMs
   };
 }

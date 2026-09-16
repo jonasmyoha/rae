@@ -488,6 +488,9 @@
       let timerDone = false;
       let timerEndMs = 0;
       let timerFailed = false;
+      // The last recorded run's duration (server-supplied), shown as
+      // "elapsed / last 5:50" while the run is live: an expectation, not a bound.
+      let timerLastMs = 0;
       function fmtElapsed(ms) {
         const s = Math.max(0, ms) / 1000;
         if (s < 60) return s.toFixed(1) + "s";
@@ -500,7 +503,15 @@
           timerEl.textContent = fmtElapsed(timerEndMs - timerStartMs);
           timerEl.dataset.state = timerFailed ? "failure" : "success";
         } else {
-          timerEl.textContent = fmtElapsed(Date.now() - timerStartMs);
+          timerEl.textContent = "";
+          timerEl.append(fmtElapsed(Date.now() - timerStartMs));
+          if (timerLastMs > 0) {
+            const est = document.createElement("span");
+            est.className = "run-timer__estimate";
+            est.title = "Duration of the last recorded test run — what to expect, not a limit";
+            est.textContent = " / last " + fmtElapsed(timerLastMs);
+            timerEl.append(est);
+          }
           timerEl.dataset.state = "running";
         }
       }
@@ -540,6 +551,7 @@
             statusEl.className = "test-status" + (data.done ? " is-done" : " is-running");
             if (data.size !== lastSize) { lastSize = data.size; render(data.content); }
             timerStartMs = Number(data.startedAt) || 0;
+            timerLastMs = Number(data.lastDurationMs) || 0;
             timerDone = !!data.done;
             timerEndMs = Number(data.endedAt) || Date.now();
             timerFailed = /\bResults:\s+\d+ passed,\s+[1-9]\d* failed/.test(data.content) || /^FAIL:/m.test(data.content);
