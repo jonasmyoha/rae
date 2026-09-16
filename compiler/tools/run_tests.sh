@@ -58,6 +58,12 @@ if [ -z "$TEST_NAME_FILTER" ] && [ -f "tools/format-check-tree.sh" ]; then
   if ! bash tools/format-check-tree.sh; then TREE_CHECK_FAILED=1; fi
   echo
 fi
+# #1016: the banned-terms gate, same place (skipped where no term list exists).
+TERMS_CHECK_FAILED=0
+if [ -z "$TEST_NAME_FILTER" ] && [ -f "tools/banned-terms-gate.sh" ]; then
+  if ! bash tools/banned-terms-gate.sh; then TERMS_CHECK_FAILED=1; fi
+  echo
+fi
 
 for TARGET in "${TARGETS[@]}"; do
   echo "Testing target: $TARGET"
@@ -476,6 +482,7 @@ if [ -z "$TEST_NAME_FILTER" ] && [ -f "tools/test-packages-cli.sh" ]; then
 fi
 
 if [ "$TREE_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
+if [ "$TERMS_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ $FAILED -gt 0 ]; then
   exit 1
 fi

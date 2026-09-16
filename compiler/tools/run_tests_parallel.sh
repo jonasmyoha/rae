@@ -51,6 +51,13 @@ if [ -f tools/format-check-tree.sh ]; then
   if bash tools/format-check-tree.sh; then TREE_CHECK=0; fi
   echo
 fi
+# #1016: the banned-terms gate is one more pre-suite "case" (SKIP counts as a
+# pass: a machine without the term list is not a failure).
+TERMS_CHECK=1
+if [ -f tools/banned-terms-gate.sh ]; then
+  if bash tools/banned-terms-gate.sh; then TERMS_CHECK=0; fi
+  echo
+fi
 echo "Running Rae tests (PARALLEL: $TOTAL cases, $JOBS jobs)..."
 echo
 START=$(date +%s)
@@ -79,6 +86,7 @@ for n in $NAMES; do
 done
 
 if [ "$TREE_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
+if [ "$TERMS_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 # #917: the format-CLI behavior checks (traversal, --check/--json, mtime,
 # permissions, atomic write, over-cap) — one extra "case" folded into the run.
 if [ -f tools/test-format-cli.sh ]; then
