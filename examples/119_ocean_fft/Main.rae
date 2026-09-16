@@ -121,19 +121,15 @@ func buildScene(
 }
 
 func skyForHour(hour: copy Float) ret Sky {
-  let sunDir: Vec3 = sunDirForHour(hour: hour)
-  let height: Float = sunHeightForHour(hour: hour)
-  let warm: Float = 1.0 - height
-  let sunColor: Vec3 = Vec3.create(x: 1.0, y: 0.92 - 0.35 * warm, z: 0.85 - 0.6 * warm)
-  let zenith: Vec3 = Vec3.create(x: 0.16 + 0.1 * warm, y: 0.38, z: 0.8 - 0.25 * warm)
-  let horizon: Vec3 = Vec3.create(x: 0.7 + 0.2 * warm, y: 0.78, z: 0.88 - 0.3 * warm)
-  ret createSkyStylised(
-    sunDir: sunDir
-    sunColor: Vec3.vscale(a: sunColor, s: 2.5 + 3.0 * height)
-    zenith: zenith
-    horizon: horizon
-    bands: 4.0
+  let daylight: Float = daylightFactorForHour(hour: hour)
+  var sky: Sky = createSkyProcedural(
+    sunDir: sunDirForHour(hour: hour)
+    sunColor: sunColorForHour(hour: hour)
+    turbidity: 3.0
   )
+  sky.exposure = daylight
+  sky.sunDiscIntensity = sky.sunDiscIntensity * daylight
+  ret sky
 }
 
 func main() ret Int {
@@ -142,7 +138,9 @@ func main() ret Int {
 
   # Match the lake's depth and shoreline fixture; extend the bed to the horizon.
   let planeData: MeshData = makePlane(size: 6000.0, segments: 1)
-  var renderer: DeferredRenderer = createDeferredRendererWithUi()
+  var hour: Float = 15.5
+  var sky: Sky = skyForHour(hour: hour)
+  var renderer: DeferredRenderer = createDeferredRendererWithUiSky(sky: sky)
   let ground: MeshHandle = uploadMeshData(renderer: renderer, meshData: planeData)
   let boxData: MeshData = makeBox(size: 1.0)
   let box: MeshHandle = uploadMeshData(renderer: renderer, meshData: boxData)
@@ -193,13 +191,10 @@ func main() ret Int {
   toggleCameraRigMode(rig: cameraRig, camera: camera)
   var light: Light3d = defaultLight3d()
 
-  var hour: Float = 15.5
-  var sky: Sky = skyForHour(hour: hour)
   # Reuse the existing shared-widget font atlas; no per-example asset copies.
   var debugHud: DebugHud = createDebugHud(
     fontBase: "examples/114_walker_character/assets/Roboto-Regular"
   )
-  setRendererSky(renderer: renderer, sky: sky)
   let graphStatus: Int = compileDeferred(renderer: renderer)
   if graphStatus is not 0 {
     log("deferred graph invalid: {statusName(status: graphStatus)}")
