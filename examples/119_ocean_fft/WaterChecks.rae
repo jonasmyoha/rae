@@ -155,6 +155,20 @@ func verifyWaterReleased(resources: view GpuResources) ret Bool {
   ret live is 0 and pending is 0
 }
 
+# Water emits several hundred dependency triples per FFT frame. Completed
+# submission slices must be compacted away; otherwise this CPU arena grows
+# without changing any of the native WebGPU object counts.
+func verifyWaterDependencyArena(resources: view GpuResources) ret Bool {
+  let limit: Int = resources.capacity * 32
+  if resources.depKinds.length > limit {
+    log(
+      "[water tiers] dependency arena grew to {resources.depKinds.length} entries (limit {limit})"
+    )
+    ret false
+  }
+  ret true
+}
+
 # ----- two systems on one manager (#873) --------------------------------------
 # The twin is alive for frames twinStart..twinEnd of stage 1 (frames 6..11,
 # whose tier is stable): created after the primary's frame-6 rebuild settled,
