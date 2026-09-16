@@ -11,6 +11,11 @@
 # `realistic` uses FFT cascades. Both are described by the same body data.
 import Math
 import Vec3
+import Noise
+
+const oceanMacroBroadScale: Float = 1.0 / 1400.0
+
+const oceanMacroDetailScale: Float = 1.0 / 500.0
 
 enum WaterKind { ocean, lake, river }
 
@@ -31,6 +36,34 @@ type GerstnerWave {
 type WaterWaves {
   first: GerstnerWave
   second: GerstnerWave
+}
+
+# World-space weather energy shared by the rendered FFT surface and its CPU
+# readback queries. It drifts slowly with the wave clock, never with the camera.
+# Keep the constants and arithmetic aligned with waterSurface.wgsl.
+func oceanMacroEnergy(x: view Float, y: view Float, time: view Float) ret Float {
+  let driftX: Float = time * 0.35
+  let driftY: Float = time * 0.12
+  let broad: Float = Noise.value2(
+    x: (x + driftX) * oceanMacroBroadScale
+    y: (y + driftY) * oceanMacroBroadScale
+    seed: 1301
+  )
+  let detail: Float = Noise.value2(
+    x: (x - driftX * 0.4) * oceanMacroDetailScale
+    y: (y - driftY * 0.4) * oceanMacroDetailScale
+    seed: 2909
+  )
+  let weather: Float = broad * 0.72 + detail * 0.28
+  var blend: Float = (weather - 0.28) / (0.72 - 0.28)
+  if blend < 0.0 {
+    blend = 0.0
+  }
+  if blend > 1.0 {
+    blend = 1.0
+  }
+  blend = blend * blend * (3.0 - 2.0 * blend)
+  ret 0.25 + (1.35 - 0.25) * blend
 }
 
 type WaterBody {

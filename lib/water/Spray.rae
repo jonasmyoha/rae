@@ -160,14 +160,21 @@ func emitCrests(
       let jitterY: Float = (Math.cos(x: index * 78.233 + spray.phase) * 0.5) * cell
       let x: Float = centreX - sprayRadius + (gx.toFloat() + 0.5) * cell + jitterX
       let y: Float = centreY - sprayRadius + (gy.toFloat() + 0.5) * cell + jitterY
-      let jacobian: Float = fftCacheSumJacobian(cache: waterSystem.surfaceCache, x: x, y: y)
+      let energy: Float = oceanMacroEnergy(x: x, y: y, time: waterSystem.time)
+      let rawJacobian: Float = fftCacheSumJacobian(cache: waterSystem.surfaceCache, x: x, y: y)
+      let jacobian: Float = 1.0 - (1.0 - rawJacobian) * energy * energy
       if jacobian < smallest {
         smallest = jacobian
       }
       if jacobian < sprayJacobianThreshold {
         crests = crests + 1
         if bursts < sprayMaxBursts {
-          let displacement: Vec3 = fftCacheDisplacement(cache: waterSystem.surfaceCache, x: x, y: y)
+          let rawDisplacement: Vec3 = fftCacheDisplacement(
+            cache: waterSystem.surfaceCache
+            x: x
+            y: y
+          )
+          let displacement: Vec3 = Vec3.vscale(a: rawDisplacement, s: energy)
           # The crest is where the grid point ENDS UP (with its horizontal
           # displacement), at the surface height there; a folded surface
           # (J < 0) throws harder.

@@ -128,10 +128,14 @@ func verifyKnownWaterCache(waterSystem: mod WaterSystem, resources: mod GpuResou
   }
   loop var point: Int = 0, point < 3, ++point {
     let x: Float = (point - 1).toFloat() * body.cascadeTile0 / 12.0
-    var expected: Float = body.centre.z
+    var rawHeight: Float = 0.0
     loop var i: Int = 0, i < body.cascadeCount, ++i {
-      expected = expected + Math.cos(x: 6.2831853 * 3.0 * x / fftCacheTile(body: body, cascade: i))
+      rawHeight = rawHeight + Math.cos(
+        x: 6.2831853 * 3.0 * x / fftCacheTile(body: body, cascade: i)
+      )
     }
+    let energy: Float = oceanMacroEnergy(x: x, y: 0.0, time: 0.0)
+    let expected: Float = body.centre.z + rawHeight * energy
     if let sample: FftSurfaceSample = sampleFftSurface(
       cache: waterSystem.surfaceCache
       body: body
@@ -141,7 +145,7 @@ func verifyKnownWaterCache(waterSystem: mod WaterSystem, resources: mod GpuResou
       maxAge: 0.0
     ) {
       # Includes 32-grid interpolation and half-texel phase of the drawn map.
-      if Math.abs(value: sample.height - expected) > 0.13 * body.cascadeCount.toFloat() {
+      if Math.abs(value: sample.height - expected) > 0.13 * body.cascadeCount.toFloat() * energy {
         log("[water cache] wave height {sample.height}, expected {expected}")
         ok = false
       }
@@ -157,7 +161,7 @@ func verifyKnownWaterCache(waterSystem: mod WaterSystem, resources: mod GpuResou
   if not drainWaterCache(waterSystem: waterSystem, resources: resources) {
     ok = false
   }
-  var temporalHeight: Float = body.centre.z
+  var temporalRawHeight: Float = 0.0
   loop var i: Int = 0, i < body.cascadeCount, ++i {
     let waveNumber: Float = 6.2831853 * 3.0 / fftCacheTile(body: body, cascade: i)
     var depth: Float = waveNumber * body.waterDepth
@@ -169,8 +173,10 @@ func verifyKnownWaterCache(waterSystem: mod WaterSystem, resources: mod GpuResou
       x: 9.81 * waveNumber * (exponential - 1.0) / (exponential + 1.0)
     )
     let time: Float = waterSystem.fftSampleTimes.copyAtFallback(index: i, fallback: 0.0)
-    temporalHeight = temporalHeight + Math.cos(x: frequency * time)
+    temporalRawHeight = temporalRawHeight + Math.cos(x: frequency * time)
   }
+  let temporalEnergy: Float = oceanMacroEnergy(x: 0.0, y: 0.0, time: 0.7)
+  let temporalHeight: Float = body.centre.z + temporalRawHeight * temporalEnergy
   if let sample: FftSurfaceSample = sampleFftSurface(
     cache: waterSystem.surfaceCache
     body: body
@@ -179,7 +185,7 @@ func verifyKnownWaterCache(waterSystem: mod WaterSystem, resources: mod GpuResou
     now: 0.7
     maxAge: 1.0
   ) {
-    if Math.abs(value: sample.height - temporalHeight) > 0.13 * body.cascadeCount.toFloat() {
+    if Math.abs(value: sample.height - temporalHeight) > 0.13 * body.cascadeCount.toFloat() * temporalEnergy {
       ok = false
     }
   } else {
