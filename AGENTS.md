@@ -324,6 +324,13 @@ Do not introduce features that increase expressive power at the cost of clarity,
 - **Git operations**:
   - **Commit frequently**: Always commit meaningful work before moving on to the next task in the `QUEUE`.
   - **Commit messages**: Use good, clear, and descriptive commit messages that explain *why* the change was made.
+  - **Co-author every commit**: End every commit message with a
+    `Co-authored-by: <exact LLM model name> <GitHub-associated email>` trailer.
+    Name the model as precisely as the agent can, rather than using only the
+    product or agent name. Codex uses the repository's GitHub co-author identity
+    `codex@openai.com`; for example, GPT-5.6 Sol writes
+    `Co-authored-by: GPT-5.6 Sol <codex@openai.com>`. Other agents use their
+    established GitHub-associated identity and their exact current model name.
   - Suggest committing and/or pushing when there is meaningful work and a good state to push, but do not push unless explicitly told.
   - When asked to push, commit and push first, then continue with the next task without pushing at the end.
   - **Pull with rebase and autostash before pushing.** Use `git pull --rebase --autostash`
