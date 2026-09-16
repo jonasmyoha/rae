@@ -292,3 +292,22 @@ fn post(@builtin(global_invocation_id) gid: vec3<u32>) {
   textureStore(normalOut, p, vec4<f32>(normal, 0.0));
   textureStore(jacobianOut, p, vec4<f32>(clamp(1.0 - jacobian, 0.0, 1.0), jacobian, 0.0, 0.0));
 }
+
+// Mip downsample (#1002): level L of a cascade map is the 2x2 box average of
+// level L-1. Displacement, Jacobian and foam average plainly; the normal is
+// averaged UNnormalised so its shortened length records the slope variance
+// the level hides (the surface shader's Toksvig roughness).
+@group(0) @binding(0) var mipSrc: texture_2d<f32>;
+@group(0) @binding(1) var mipDst: texture_storage_2d<rgba16float, write>;
+
+@compute @workgroup_size(8, 8)
+fn mip(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let extent = textureDimensions(mipDst);
+  if (gid.x >= extent.x || gid.y >= extent.y) { return; }
+  let p = vec2<i32>(gid.xy) * 2;
+  let sum = textureLoad(mipSrc, p, 0)
+          + textureLoad(mipSrc, p + vec2<i32>(1, 0), 0)
+          + textureLoad(mipSrc, p + vec2<i32>(0, 1), 0)
+          + textureLoad(mipSrc, p + vec2<i32>(1, 1), 0);
+  textureStore(mipDst, vec2<i32>(gid.xy), sum * 0.25);
+}
