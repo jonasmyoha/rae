@@ -343,7 +343,10 @@ const server = Bun.serve<SocketData>({
       const startMatch = raw.match(/@@RAE_RUN_START (\d+)-/);
       const startedAt = startMatch ? Number(startMatch[1]) * 1000 : null;
       const endedAt = done ? f.lastModified : null;
-      return new Response(JSON.stringify({ size: content.length, content, path: logPath, exists: true, done, startedAt, endedAt }), {
+      // The last recorded run's duration, so the tab can show "elapsed / last"
+      // while a run is live — what to expect, not a limit.
+      const lastDurationMs = statsStore.lastTestDurationMs();
+      return new Response(JSON.stringify({ size: content.length, content, path: logPath, exists: true, done, startedAt, endedAt, lastDurationMs }), {
         headers: { "Content-Type": "application/json" }
       });
     }
