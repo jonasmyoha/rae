@@ -82,17 +82,22 @@ type DebugOverlay {
   customLine: String
 }
 
+# `RAE_DEBUG_OVERLAY=0` in the environment creates the widget with everything
+# off, whatever the app asked for — a clean frame for screenshots and
+# references without a per-app flag. Any other value (or unset) is the app's
+# own choice.
 func createDebugOverlay(
   button: view Bool
   fps: view Bool
   memory: view Bool
   heartbeat: view Bool
 ) ret DebugOverlay {
+  let hidden: Bool = Sys.getEnv(name: "RAE_DEBUG_OVERLAY") is "0"
   ret DebugOverlay {
-    wantButton: button
-    wantFps: fps
-    wantMemory: memory
-    wantHeartbeat: heartbeat
+    wantButton: button and not hidden
+    wantFps: fps and not hidden
+    wantMemory: memory and not hidden
+    wantHeartbeat: heartbeat and not hidden
     open: false
     screenW: 0.0
     screenH: 0.0
