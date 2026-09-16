@@ -112,40 +112,46 @@ func componentHas(T: type, this: view ComponentTable(T), entity: view EntityId) 
   ret componentIndexOf(this, entity: entity) >= 0
 }
 
-# Read the component for `entity`. Caller must check `componentHas`
-# first — if the component is missing, this returns whatever sits at
-# dense index 0 (or junk if the table is empty). The compromise is
-# deliberate: returning `opt T` for struct types triggers a separate
-# C-backend papercut that we don't want to step on for every component
-# access. The check-then-read pattern is:
+# Copy one dense component into an optional payload. Returning the raw slot
+# through `opt T` is the compiler's value-copy boundary: heap fields are copied
+# recursively before the payload leaves this function (#899).
+func componentCopyAt(T: type, this: view ComponentTable(T), i: view Int) ret opt T {
+  unsafe {
+    if i < 0 or i >= this.denseData.length {
+      ret none
+    }
+    ret rae_ext_rae_buf_get(buf: this.denseData.data, index: i)
+  }
+}
+
+# Read the component for `entity`. Caller must check `componentHas` first — if
+# the component is missing, this returns the value at dense index 0, or T's
+# default when the table is empty. The check-then-read pattern is:
 #
 #   if componentHas(table, entity: e) {
 #     let r: Rect = componentGet(table, entity: e)
 #     ...
 #   }
 #
-# The value is a SHALLOW struct copy: for a component that owns heap (a List
-# or String field — AnimFrames, ImageSourceResolver) the copy aliases the
-# table's buffers and its drop frees them under the table (#1007). Read such a
-# component through `componentView` / `componentMod` instead.
+# The value is an owned deep copy. Heap-carrying fields such as String and List
+# are independent of the table's stored component; use `componentView` when a
+# read-only borrow is enough and no copy is wanted.
 func componentGet(T: type, this: view ComponentTable(T), entity: view EntityId) ret T {
-  unsafe {
-    let idx: Int = componentIndexOf(this, entity: entity)
-    var safeIdx: Int = idx
-    if safeIdx < 0 {
-      safeIdx = 0
-    }
-    let v: T = rae_ext_rae_buf_get(buf: this.denseData.data, index: safeIdx)
-    ret v
+  let idx: Int = componentIndexOf(this, entity: entity)
+  var safeIdx: Int = idx
+  if safeIdx < 0 {
+    safeIdx = 0
   }
+  if let value: T = componentCopyAt(this: this, i: safeIdx) {
+    ret value
+  }
+  ret T.default()
 }
 
-# Borrow a read-only reference into the table's storage. Use this
-# instead of `componentGet` whenever the component type transitively
-# owns heap (a List, a StringMap, a String — anything where a shallow
-# struct memcpy would alias the table's heap). The `view T` return
-# makes Rae treat the binding as a borrow: no auto-drop, no
-# ownership claim, just a window into the world's memory.
+# Borrow a read-only reference into the table's storage. Use this instead of
+# `componentGet` in hot paths or whenever an independent owned value is not
+# needed. The `view T` return makes Rae treat the binding as a borrow: no
+# auto-drop, no ownership claim, just a window into the world's memory.
 func componentView(T: type, this: view ComponentTable(T), entity: view EntityId) ret view T {
   unsafe {
     let idx: Int = componentIndexOf(this, entity: entity)
@@ -291,12 +297,12 @@ func componentEntityAt(T: type, this: view ComponentTable(T), i: view Int) ret E
   }
 }
 
-# Iteration helper: returns the component data at dense index `i` — a SHALLOW
-# copy, same caveat as componentGet: pair `componentEntityAt` with
-# `componentView` for a component that owns heap (#1007).
+# Iteration helper: returns an owned deep copy of the component at dense index
+# `i`. Use `queryViewAt` or pair `componentEntityAt` with `componentView` when a
+# borrowed hot-path read is enough.
 func componentDataAt(T: type, this: view ComponentTable(T), i: view Int) ret T {
-  unsafe {
-    let v: T = rae_ext_rae_buf_get(buf: this.denseData.data, index: i)
-    ret v
+  if let value: T = componentCopyAt(this: this, i: i) {
+    ret value
   }
+  ret T.default()
 }
