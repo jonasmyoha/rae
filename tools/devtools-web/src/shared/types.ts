@@ -100,6 +100,10 @@ export type TestRunStartedMessage = {
   targetId: string;
   targetLabel: string;
   timestamp: string;
+  /** Wall-clock duration of the last recorded test run (any outcome), so the
+   * dashboard can show "elapsed / last" while this one runs; null until a
+   * run has been recorded. */
+  lastDurationMs: number | null;
 };
 
 export type TestRunOutputMessage = {

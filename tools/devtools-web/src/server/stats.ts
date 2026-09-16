@@ -128,6 +128,16 @@ export class StatsStore {
     return out;
   }
 
+  /** The duration of the most recent recorded test run, or null when none has
+   * been recorded yet — the estimate the dashboard timer shows next to the
+   * live elapsed time ("2:14 / last 5:50"), so a waiting user knows roughly
+   * how long a run takes. Any recorded run counts, passed or failed: it is a
+   * wall-clock expectation, not a promise. */
+  lastTestDurationMs(): number | null {
+    const runs = this.listRecentMetrics("tests.duration_ms", 1);
+    return runs.length > 0 && Number.isFinite(runs[0]!.value) ? runs[0]!.value : null;
+  }
+
   listRecentMetrics(metricName: string, limit = 20) {
     const all = this.readAll();
     return all

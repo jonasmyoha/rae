@@ -657,7 +657,7 @@ function handleTestRunStarted(event) {
   latestRunId = event.runId;
   lastTestTargetLabel = event.targetLabel;
   setTestStatus(`Running (${event.mode})`, "is-running", event.targetLabel);
-  startTestTimer();
+  startTestTimer(event.lastDurationMs);
   setTestButtonsDisabled(true);
   clearTestLog();
   allTestLogLines = [];
@@ -1248,6 +1248,11 @@ function setTestStatus(label, modifierClass, targetLabel) {
 // tailer bridges those in as external runs).
 let testTimerInterval = null;
 let testTimerStart = 0;
+// The last recorded run's duration (from the run-started event, which the
+// server reads out of the metrics log) — shown after the live elapsed time as
+// "elapsed / last" so the reader knows what to expect. It is an expectation,
+// not a bound: a run may well finish earlier or later.
+let testTimerLastMs = null;
 
 function formatElapsed(ms) {
   const totalSeconds = ms / 1000;
@@ -1257,18 +1262,31 @@ function formatElapsed(ms) {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
-function setTestTimerText(ms) {
-  if (testTimer) testTimer.textContent = formatElapsed(ms);
+function setTestTimerText(ms, withEstimate = false) {
+  if (!testTimer) return;
+  const elapsed = formatElapsed(ms);
+  if (withEstimate && Number.isFinite(testTimerLastMs) && testTimerLastMs > 0) {
+    testTimer.innerHTML = "";
+    testTimer.append(elapsed);
+    const estimate = document.createElement("span");
+    estimate.className = "run-timer__estimate";
+    estimate.title = "Duration of the last recorded test run — what to expect, not a limit";
+    estimate.textContent = ` / last ${formatElapsed(testTimerLastMs)}`;
+    testTimer.append(estimate);
+    return;
+  }
+  testTimer.textContent = elapsed;
 }
 
-function startTestTimer() {
+function startTestTimer(lastDurationMs = null) {
   if (!testTimer) return;
   if (testTimerInterval) clearInterval(testTimerInterval);
   testTimerStart = Date.now();
+  testTimerLastMs = Number.isFinite(lastDurationMs) ? lastDurationMs : null;
   testTimer.dataset.state = "running";
-  setTestTimerText(0);
+  setTestTimerText(0, true);
   testTimerInterval = setInterval(() => {
-    setTestTimerText(Date.now() - testTimerStart);
+    setTestTimerText(Date.now() - testTimerStart, true);
   }, 100);
 }
 
