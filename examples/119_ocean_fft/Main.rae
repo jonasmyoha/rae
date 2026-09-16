@@ -485,6 +485,9 @@ func main() ret Int {
     waterSystem.bodies.set(index: 0, value: endingBody)
   }
   if let resources: mod GpuResources => gpuManager {
+    if tierCheck and not verifyWaterDependencyArena(resources: resources) {
+      checksOk = false
+    }
     waterShutdown(waterSystem: waterSystem, resources: resources)
     shutdown(resources: resources)
     if tierCheck {
