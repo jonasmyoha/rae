@@ -303,13 +303,7 @@ func createApp() ret App {
     var light: Light3d = defaultLight3d()
     # #905/#921: the renderer owns the mesh + skin stores the walker parts,
     # terrain / grass / water meshes are uploaded into, so it exists first.
-    var renderer: DeferredRenderer = createDeferredRendererWithUiSky(sky: createSkyStylised(
-      sunDir: light.sunDir
-      sunColor: light.sunColor
-      zenith: Vec3.create(x: 0.16, y: 0.34, z: 0.62)
-      horizon: Vec3.create(x: 0.74, y: 0.80, z: 0.72)
-      bands: 3.0
-    ))
+    var renderer: DeferredRenderer = createDeferredRendererWithUi()
 
     let pngBytes: List(Int) = Sys.readFileBytes(path: "{assets}walker_palette.png")
     var atlasW: Int = 0
@@ -667,11 +661,14 @@ func createApp() ret App {
     settingsApplyToWorld(settingsState: settings, world: uiWorld)
     settings.open = false
     applyWalkerPanel(world: uiWorld, open: settings.open)
-    renderer.sky = settingsBuildSky(
-      settingsState: settings
-      data: hosekData
-      turbidity: 3.0
-      groundAlbedo: 0.30
+    setRendererSky(
+      renderer: renderer
+      sky: settingsBuildSky(
+        settingsState: settings
+        data: hosekData
+        turbidity: 3.0
+        groundAlbedo: 0.30
+      )
     )
     light.sunDir = settingsSunDir(settingsState: settings)
     light.sunColor = settingsSunColor(settingsState: settings)
