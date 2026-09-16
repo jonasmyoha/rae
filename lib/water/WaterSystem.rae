@@ -480,6 +480,20 @@ func uploadWaterUniform(
       sunColor = sky.sunColor
       zenith = sky.zenithColor
       horizon = sky.horizonColor
+      if sky.kind is SkyKind.procedural {
+        let zenithDirection: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
+        # Sample the horizon away from the sun so its glow does not tint the
+        # entire approximation. At noon the azimuth is undefined; east is an
+        # equivalent stable direction for the rotationally symmetric model.
+        var horizonDirection: Vec3 = Vec3.create(x: sky.sunDir.x, y: sky.sunDir.y, z: 0.0)
+        if Vec3.vlenSq(a: horizonDirection) < 0.0001 {
+          horizonDirection = Vec3.create(x: 1.0, y: 0.0, z: 0.0)
+        } else {
+          horizonDirection = Vec3.vnorm(a: horizonDirection)
+        }
+        zenith = radiance(sky: sky, dir: zenithDirection)
+        horizon = radiance(sky: sky, dir: horizonDirection)
+      }
     }
     put4(
       uniform: waterSystem.uniform

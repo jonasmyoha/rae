@@ -343,7 +343,7 @@ fn fs(i: VsOut) -> @location(0) vec4<f32> {
   colour = mix(colour, vec3<f32>(0.96, 0.98, 1.0), foam * 0.85);
   alpha = max(alpha, foam * 0.9);
 
-  // Reflection: the stylised sky hemisphere along the reflected view ray,
+  // Reflection: the two-sample sky approximation along the reflected view ray,
   // weighted by Schlick Fresnel (F0 = 0.02, water's normal-incidence reflectance).
   var n = normalize(i.nrm);
   if (realisticPath) { n = normalize(vec3<f32>(-cascade.xy, 1.0)); }
@@ -354,7 +354,7 @@ fn fs(i: VsOut) -> @location(0) vec4<f32> {
   let r = reflect(-toCamera, n);
   var skyTint = mix(W.horizon.rgb, W.zenith.rgb, clamp(r.z, 0.0, 1.0));
   // Desktop SSR (#854): a mirrored opaque scene where the reflected ray hits
-  // it on screen; the stylised sky stays the fallback for misses, rays that
+  // it on screen; the sampled sky stays the fallback for misses, rays that
   // leave the screen and the mobile tier (W.ssr.x = 0 skips the march).
   if (W.ssr.x > 0.5) {
     // Trace from a normal flattened toward up: the full FFT normal scatters
