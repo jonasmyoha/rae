@@ -37,6 +37,18 @@ type FftSurfaceSample {
   generation: Int
 }
 
+func fftSurfaceEnergy(
+  body: view WaterBody
+  x: view Float
+  y: view Float
+  time: view Float
+) ret Float {
+  if body.meshMode is 2 {
+    ret oceanMacroEnergy(x: x, y: y, time: time)
+  }
+  ret 1.0
+}
+
 func createFftSurfaceCache(body: view WaterBody) ret FftSurfaceCache {
   var cascades: List(FftCascadeCache) = List.create(FftCascadeCache, cap: 3)
   loop var i: Int = 0, i < 3, ++i {
@@ -251,11 +263,25 @@ func sampleFftSurface(
   # Bounded damped fixed-point inversion of world = grid + displacementXY.
   # Folded surfaces can have multiple roots; expose residual to the caller.
   loop var iteration: Int = 0, iteration < 16, ++iteration {
-    let displacement: Vec3 = fftCacheDisplacement(cache: cache, x: px, y: py)
+    let rawDisplacement: Vec3 = fftCacheDisplacement(cache: cache, x: px, y: py)
+    let energy: Float = fftSurfaceEnergy(
+      body: body
+      x: px
+      y: py
+      time: now
+    )
+    let displacement: Vec3 = Vec3.vscale(a: rawDisplacement, s: energy)
     px = px + (x - displacement.x - px) * 0.5
     py = py + (y - displacement.y - py) * 0.5
   }
-  let displacement: Vec3 = fftCacheDisplacement(cache: cache, x: px, y: py)
+  let rawDisplacement: Vec3 = fftCacheDisplacement(cache: cache, x: px, y: py)
+  let energy: Float = fftSurfaceEnergy(
+    body: body
+    x: px
+    y: py
+    time: now
+  )
+  let displacement: Vec3 = Vec3.vscale(a: rawDisplacement, s: energy)
   let inversionError: Float = Math.abs(value: px + displacement.x - x) + Math.abs(
     value: py + displacement.y - y
   )

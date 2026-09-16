@@ -58,6 +58,8 @@ struct Water {
 
 const oceanFogStartFarRatio: f32 = 0.65;
 const oceanFogEndFarRatio: f32 = 0.92;
+const oceanMacroBroadScale: f32 = 1.0 / 1400.0;
+const oceanMacroDetailScale: f32 = 1.0 / 500.0;
 
 // The cascade maps carry a mip chain (#1002, WaterFftMips): level L is the
 // 2x2 box average of level L-1. Sampling the level whose texel matches the
@@ -134,6 +136,7 @@ struct VsOut {
   @location(4) distortUvB: vec2<f32>,
   @location(5) bakedFoam: f32,   // river: curvature foam baked into the mesh (#833)
   @location(6) gridXy: vec2<f32>, // undisplaced world xy (cascade lookups in the fragment)
+  @location(7) macroEnergy: f32,  // broad calm/rough weather regions for the FFT ocean
 };
 
 const TAU: f32 = 6.28318530718;
@@ -159,6 +162,17 @@ fn waveGridFactor(wavelength: f32) -> f32 {
   return smoothstep(2.0, 4.0, wavelength / cell);
 }
 
+// A slowly drifting, world-space weather field. Two broad value-noise scales
+// are enough to break the FFT tiles into kilometre-sized calm and rough areas;
+// evaluating it per vertex keeps the cost independent of screen resolution.
+fn oceanMacroEnergy(xy: vec2<f32>, time: f32) -> f32 {
+  let drift = vec2<f32>(time * 0.35, time * 0.12);
+  let broad = raeNoiseValue2((xy + drift) * oceanMacroBroadScale, 1301u);
+  let detail = raeNoiseValue2((xy - drift * 0.4) * oceanMacroDetailScale, 2909u);
+  let weather = broad * 0.72 + detail * 0.28;
+  return mix(0.25, 1.35, smoothstep(0.28, 0.72, weather));
+}
+
 @vertex
 fn vs(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) uv: vec2<f32>) -> VsOut {
   var o: VsOut;
@@ -176,6 +190,7 @@ fn vs(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) uv: vec
   let t = W.camera.w;
   var disp = vec3<f32>(0.0, 0.0, 0.0);
   var dn = vec3<f32>(0.0, 0.0, 0.0);
+  var macroEnergy = 1.0;
   // A wave the grid cannot sample (under ~2 cells) aliases into wide bands,
   // so its amplitude fades out (Water.waveGridFactor is the CPU mirror, #857).
   var wave0 = W.wave0;
@@ -190,7 +205,10 @@ fn vs(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) uv: vec
   // radial grid the ring spacing, which grows with the distance from the centre.
   var cell = W.centre.w;
   if (centred) { cell = max(W.grid.y, length(p.xy) * W.grid.x); }
-  if (realistic) { disp = cascadeDisplacement(base.xy, cell); }
+  if (realistic) {
+    if (centred) { macroEnergy = oceanMacroEnergy(base.xy, t); }
+    disp = cascadeDisplacement(base.xy, cell) * macroEnergy;
+  }
   let world = base + disp;
   o.world = world;
   o.gridXy = base.xy;
@@ -207,6 +225,7 @@ fn vs(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) uv: vec
   o.distortUvA = noiseXy * 0.08 + vec2<f32>(t * 0.05, -t * 0.03);
   o.distortUvB = noiseXy * 0.08 + vec2<f32>(-t * 0.04, t * 0.06);
   o.bakedFoam = select(0.0, n.z, river);
+  o.macroEnergy = macroEnergy;
   o.nrm = normalize(vec3<f32>(-dn.x, -dn.y, 1.0 - dn.z));
   var clip = F.viewProj * vec4<f32>(world, 1.0);
   // Jitter LAST, matching the G-buffer pass (#397), so the surface sits in the
@@ -339,6 +358,11 @@ fn fs(i: VsOut) -> @location(0) vec4<f32> {
   var cascade = vec4<f32>(0.0);
   if (realisticPath) {
     cascade = cascadeSlopeFoam(i.gridXy);
+    cascade = vec4<f32>(
+      cascade.xy * i.macroEnergy,
+      cascade.z * i.macroEnergy * i.macroEnergy,
+      cascade.w * i.macroEnergy
+    );
     let shoreline = smoothstep(-0.03, 0.03, 0.15 - foamT);
     let whitecap = clamp(cascade.z, 0.0, 1.0) * smoothstep(0.25, 0.65, ripple);
     foam = max(shoreline, whitecap);
