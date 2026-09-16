@@ -1,4 +1,4 @@
-.PHONY: all dev build test stop setup devtools-install devtools-lint devtools-test gemini claude codex llm up
+.PHONY: all dev build test stop setup install-hooks banned-terms-gate devtools-install devtools-lint devtools-test gemini claude codex llm up
 
 SESSION_DIR ?= $(HOME)/.ws
 PROJECT_KEY := rae
@@ -26,6 +26,22 @@ stop:
 
 setup:
 	@./setup.sh
+
+# The banned-terms gate (#1016) on its own: every tracked text file plus the
+# messages of origin/main..HEAD, against the term list OUTSIDE the repo
+# ($RAE_BANNED_TERMS_FILE, default ~/.config/rae/banned-terms.txt). The full
+# suite runs it too; this is the quick standalone form.
+banned-terms-gate:
+	@bash compiler/tools/banned-terms-gate.sh
+
+# Opt-in git hooks (#1016): pre-commit checks the STAGED changes, commit-msg
+# the message, both against the same list. Git never versions .git/hooks, so
+# each clone installs them on purpose; idempotent (symlinks, so they track
+# the repo's copy).
+install-hooks:
+	@ln -sfn "$(CURDIR)/tools/git-hooks/pre-commit" .git/hooks/pre-commit
+	@ln -sfn "$(CURDIR)/tools/git-hooks/commit-msg" .git/hooks/commit-msg
+	@echo "installed pre-commit + commit-msg hooks -> tools/git-hooks/ (banned-terms gate)"
 
 devtools-install:
 	@cd tools/devtools-web && bun install --frozen-lockfile

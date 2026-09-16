@@ -657,6 +657,20 @@ the change could actually alter what is drawn. If you would rather the user run
 it, ending with a note asking them to is still fine — but it is no longer
 required, and "NO VISUAL TESTS" in an older task brief is not a hard bar.
 
+**Banned-terms gate (#1016).** A handful of external project/product names
+must never appear in this repository — not in code, docs, `QUEUE.md`, or
+commit messages (three history rewrites so far). The gate
+`compiler/tools/banned-terms-gate.sh` greps every tracked text file and the
+messages of `origin/main..HEAD` against a term list that lives OUTSIDE the
+repo (`$RAE_BANNED_TERMS_FILE`, default `~/.config/rae/banned-terms.txt`, one
+case-insensitive term per line — never commit that list). It runs as the
+second pre-suite case of every full run, right after `format-check-tree`; on
+a machine without the list it prints `SKIP` and passes. Standalone:
+`make banned-terms-gate`. Install the opt-in git hooks once per clone with
+`make install-hooks` (`pre-commit` checks the staged changes, `commit-msg`
+the message) so a slip is refused before it becomes a commit. Refer to such
+a project as "game proto1" (or similar) instead.
+
 **Only ONE test run at a time.** Concurrent `make test` / `watch-tests.sh`
 processes corrupt each other's build cache and interleave the shared log, which
 shows up as spurious failures. Before starting a run, KILL any earlier one:
