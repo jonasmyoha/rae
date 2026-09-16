@@ -217,7 +217,6 @@ the section keys are what matter, not the filename.
 {
   "type": "Scene",
   "version": 3,
-  "sceneId": "theme",
   "palette": { "surface": {"r":15,"g":15,"b":18,"a":255}, "…": "…" },
   "text": {
     "body":      { "font": "body", "size": 43.4, "color": "textPrimary" },

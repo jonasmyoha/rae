@@ -365,13 +365,14 @@ func documentPrepareSystem(document: mod SceneDocument, world: mod UiWorld) ret 
 }
 
 # Step 2: register + mount the prepared scene under the `document` layer; on a
-# reload, unmount the previous page first. `builtinScenePaths` are the app's
-# own sub-scenes (the chrome's row scene) that live in the same registry, since
-# the list system resolves every ListView against one registry.
+# reload, unmount the previous page first. The builtin paths and package ids
+# are the app's own sub-scenes (the chrome's rows) that live in the same
+# registry, since the list system resolves every ListView against one registry.
 func documentMountSystem(
   document: mod SceneDocument
   world: mod UiWorld
   builtinScenePaths: view List(String)
+  builtinSceneIds: view List(String)
 ) {
   var scrolls: ScrollSnapshot = {
     nodeIds: List.create(String, cap: 1)
@@ -383,16 +384,17 @@ func documentMountSystem(
   }
   loop var b: Int = 0, b < builtinScenePaths.length, ++b {
     if let builtinPath: String = builtinScenePaths.copyAt(index: b) {
-      let builtin: Scene = loadSceneFile(path: builtinPath)
-      if builtin.ok {
-        let key: String = "{builtin.sceneId}"
-        registerSceneTransitive(
-          sceneId: own key
-          scene: own builtin
-          root: document.root
-          registry: document.registry
-          diagnostics: world.sceneDiagnostics
-        )
+      if let builtinSceneId: String = builtinSceneIds.copyAt(index: b) {
+        let builtin: Scene = loadScenePackageFile(path: builtinPath, sceneId: builtinSceneId)
+        if builtin.ok {
+          registerSceneTransitive(
+            sceneId: own builtinSceneId
+            scene: own builtin
+            root: document.root
+            registry: document.registry
+            diagnostics: world.sceneDiagnostics
+          )
+        }
       }
     }
   }

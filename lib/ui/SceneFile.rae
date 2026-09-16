@@ -8,10 +8,37 @@ import ui/Scene
 # $RAE_STDLIB for a "lib/..." path, and a loud diagnostic on a miss (#937).
 func nativeSceneReadFile(path: String) unsafe extern("rae_ext_rae_gb_read_shader") ret String
 
+# Derive the zero-folder package identity from a file path. Package-aware
+# callers replace this with the full root-relative identity they already used
+# to resolve the file.
+func sceneIdentityFromFilePath(path: view String) ret String {
+  let slash: Int = path.lastIndexOf(sub: "/")
+  var start: Int = slash + 1
+  if start < 0 {
+    start = 0
+  }
+  var length: Int = path.length() - start
+  if path.endsWith(suffix: ".raescene") {
+    length = length - 9
+  }
+  ret path.sub(start: start, len: length)
+}
+
 func loadSceneFile(path: view String) pub ret Scene {
   var source: String = ""
   unsafe {
     source = nativeSceneReadFile(path: path)
   }
-  ret parseScene(source: source)
+  let scene: Scene = parseScene(source: source)
+  scene.sceneId = sceneIdentityFromFilePath(path: path)
+  ret scene
+}
+
+# Resolve a package scene from its root-relative identity. The path chooses
+# the file and `sceneId` records that same path for diagnostics and scoping;
+# document contents never supply a competing identity.
+func loadScenePackageFile(path: view String, sceneId: view String) ret Scene {
+  let scene: Scene = loadSceneFile(path: path)
+  scene.sceneId = "{sceneId}"
+  ret scene
 }

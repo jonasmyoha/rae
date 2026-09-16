@@ -51,4 +51,24 @@ func main() {
   let oi: Int = themeTextStyleIndex(theme: theme, styleId: "orphan")
   let oSize: Int = theme.textSizes.copyAt(index: oi).toInt()
   log("orphan size={oSize}")
+
+  # A page style may inherit a style appended later from an imported scene.
+  let pageScene: Scene = parseScene(
+    source: r#"{ "type":"Scene", "text": { "pageTitle": { "extends":"importedBase", "size":22 } } }"#
+  )
+  let importedScene: Scene = parseScene(
+    source: r#"{ "type":"Scene", "text": { "importedBase": { "font":"display", "weight":700, "color":"accent" } } }"#
+  )
+  var merged: ResolvedTheme = createResolvedTheme()
+  parseThemeInto(out: merged, scene: pageScene)
+  parseThemeInto(out: merged, scene: importedScene)
+  resolveThemeTextExtends(theme: merged)
+  let pageTitleIndex: Int = themeTextStyleIndex(theme: merged, styleId: "pageTitle")
+  let pageTitleFont: String = merged.textFonts.copyAtDefault(index: pageTitleIndex)
+  let pageTitleSize: Int = merged.textSizes.copyAtDefault(index: pageTitleIndex).toInt()
+  let pageTitleWeight: Int = merged.textWeights.copyAtDefault(index: pageTitleIndex).toInt()
+  let pageTitleColor: String = merged.textColorSlots.copyAtDefault(index: pageTitleIndex)
+  log(
+    "cross-file font={pageTitleFont} size={pageTitleSize} weight={pageTitleWeight} color={pageTitleColor}"
+  )
 }
