@@ -22,7 +22,6 @@ func fxScene() ret String {
   s = s.concat(other: "\{")
   s = s.concat(other: "\"type\":\"Scene\",")
   s = s.concat(other: "\"version\":2,")
-  s = s.concat(other: "\"sceneId\":\"fx-demo\",")
   s = s.concat(other: "\"root\":\"Root\",")
   s = s.concat(other: "\"nodes\":\{")
   s = s.concat(other: "\"Root\":\{")
@@ -35,6 +34,7 @@ func fxScene() ret String {
 
 func main() {
   let scene: Scene = parseScene(source: fxScene())
+  scene.sceneId = "fx-demo"
   log("scene.ok = {scene.ok}")
   let world: UiWorld = createUiWorld()
   log("loading scene with an unsupported component...")

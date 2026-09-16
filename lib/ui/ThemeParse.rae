@@ -14,13 +14,15 @@ open ui/ThemeResolved
 func parseTheme(scene: view Scene) pub ret ResolvedTheme {
   var out: ResolvedTheme = createResolvedTheme()
   parseThemeInto(out: out, scene: scene)
+  resolveThemeTextExtends(theme: out)
   ret out
 }
 
 # Append `scene`'s token sections onto an existing table (#1008): every lookup
 # is first-match, so parsing scenes in resolution order — the page, then each
-# `import` depth-first — makes the nearest declaration of a token win. A
-# `text` style's `extends` chain resolves within its own file only.
+# `import` depth-first — makes the nearest declaration of a token win. Text
+# declarations retain their direct parent until the complete merged table
+# is passed to resolveThemeTextExtends.
 func parseThemeInto(out: mod ResolvedTheme, scene: view Scene) {
   # Gate on the JSON parsing, NOT full-scene validation: a dedicated
   # Theme.raescene has no `nodes`/`root`, so parseScene leaves
@@ -326,141 +328,256 @@ func parseThemeShadows(out: mod ResolvedTheme, doc: view JsonDoc, root: view Jso
 }
 
 func parseThemeText(out: mod ResolvedTheme, doc: view JsonDoc, root: view JsonValue) {
-  let idx: Int = Json.field(doc: doc, this: root, key: "text")
-  if idx < 0 {
+  let index: Int = Json.field(doc: doc, this: root, key: "text")
+  if index < 0 {
     ret
   }
-  let sec: JsonValue = Json.jsonValueAt(doc: doc, idx: idx)
-  if sec.kind is not JsonKind.object {
+  let section: JsonValue = Json.jsonValueAt(doc: doc, idx: index)
+  if section.kind is not JsonKind.object {
     ret
   }
-  let n: Int = Json.objectLen(this: sec)
-  var i: Int = 0
-  loop i < n {
-    let name: String = Json.objectKeyAt(doc: doc, this: sec, idx: i)
-    let chain: List(Int) = themeResolveChain(
-      doc: doc
-      section: sec
-      name: name
-      kind: "text"
-    )
-    # Accumulator defaults (§3 "every field has a default").
+  loop var i: Int = 0, i < Json.objectLen(this: section), ++i {
+    let name: String = Json.objectKeyAt(doc: doc, this: section, idx: i)
+    let bag: JsonValue = Json.objectValueAt(doc: doc, this: section, idx: i)
+    var parentName: String = ""
+    var fieldMask: Int = 0
     var font: String = "body"
     var size: Float = 43.373494
     var weight: Float = 400.0
     var lineHeight: Float = 1.0
     var tracking: Float = 0.0
     var colorSlot: String = "textPrimary"
-    var colR: Int = 0
-    var colG: Int = 0
-    var colB: Int = 0
-    var colA: Int = 255
+    var colorR: Int = 0
+    var colorG: Int = 0
+    var colorB: Int = 0
+    var colorA: Int = 255
     var shadowName: String = ""
     var align: Int = themeAlignStart
-    var c: Int = 0
-    loop c < chain.length {
-      if let bagIdx: Int = chain.copyAt(index: c) {
-        let bag: JsonValue = Json.jsonValueAt(doc: doc, idx: bagIdx)
-        # Strings
-        let fontIdx: Int = Json.field(doc: doc, this: bag, key: "font")
-        if fontIdx >= 0 {
-          let fv: JsonValue = Json.jsonValueAt(doc: doc, idx: fontIdx)
-          let empty: String = ""
-          font = Json.jsonString(this: fv, fallback: empty)
-        }
-        size = themeReadFloatField(
-          doc: doc
-          obj: bag
-          key: "size"
-          fallback: size
-        )
-        weight = themeReadFloatField(
-          doc: doc
-          obj: bag
-          key: "weight"
-          fallback: weight
-        )
-        lineHeight = themeReadFloatField(
-          doc: doc
-          obj: bag
-          key: "lineHeight"
-          fallback: lineHeight
-        )
-        tracking = themeReadFloatField(
-          doc: doc
-          obj: bag
-          key: "tracking"
-          fallback: tracking
-        )
-        # color: string slot OR inline object.
-        let colIdx: Int = Json.field(doc: doc, this: bag, key: "color")
-        if colIdx >= 0 {
-          let col: JsonValue = Json.jsonValueAt(doc: doc, idx: colIdx)
-          if col.kind is JsonKind.string {
-            let empty2: String = ""
-            colorSlot = Json.jsonString(this: col, fallback: empty2)
-          } else {
-            if col.kind is JsonKind.object {
-              colorSlot = ""
-              colR = themeReadIntField(
-                doc: doc
-                obj: col
-                key: "r"
-                fallback: colR
-              )
-              colG = themeReadIntField(
-                doc: doc
-                obj: col
-                key: "g"
-                fallback: colG
-              )
-              colB = themeReadIntField(
-                doc: doc
-                obj: col
-                key: "b"
-                fallback: colB
-              )
-              colA = themeReadIntField(
-                doc: doc
-                obj: col
-                key: "a"
-                fallback: colA
-              )
-            }
-          }
-        }
-        # shadow token name (string).
-        let shIdx: Int = Json.field(doc: doc, this: bag, key: "shadow")
-        if shIdx >= 0 {
-          let sh: JsonValue = Json.jsonValueAt(doc: doc, idx: shIdx)
-          let empty3: String = ""
-          shadowName = Json.jsonString(this: sh, fallback: empty3)
-        }
-        # align keyword.
-        let alIdx: Int = Json.field(doc: doc, this: bag, key: "align")
-        if alIdx >= 0 {
-          let al: JsonValue = Json.jsonValueAt(doc: doc, idx: alIdx)
-          let empty4: String = ""
-          let alStr: String = Json.jsonString(this: al, fallback: empty4)
-          align = themeParseAlign(text: alStr, fallback: align)
-        }
-      }
-      c = c + 1
+
+    let extendsIndex: Int = Json.field(doc: doc, this: bag, key: "extends")
+    if extendsIndex >= 0 {
+      parentName = Json.jsonString(
+        this: Json.jsonValueAt(doc: doc, idx: extendsIndex)
+        fallback: ""
+      )
     }
+    let fontIndex: Int = Json.field(doc: doc, this: bag, key: "font")
+    if fontIndex >= 0 {
+      fieldMask = fieldMask + 1
+      font = Json.jsonString(this: Json.jsonValueAt(doc: doc, idx: fontIndex), fallback: "")
+    }
+    if Json.field(doc: doc, this: bag, key: "size") >= 0 {
+      fieldMask = fieldMask + 2
+      size = themeReadFloatField(
+        doc: doc
+        obj: bag
+        key: "size"
+        fallback: size
+      )
+    }
+    if Json.field(doc: doc, this: bag, key: "weight") >= 0 {
+      fieldMask = fieldMask + 4
+      weight = themeReadFloatField(
+        doc: doc
+        obj: bag
+        key: "weight"
+        fallback: weight
+      )
+    }
+    if Json.field(doc: doc, this: bag, key: "lineHeight") >= 0 {
+      fieldMask = fieldMask + 8
+      lineHeight = themeReadFloatField(
+        doc: doc
+        obj: bag
+        key: "lineHeight"
+        fallback: lineHeight
+      )
+    }
+    if Json.field(doc: doc, this: bag, key: "tracking") >= 0 {
+      fieldMask = fieldMask + 16
+      tracking = themeReadFloatField(
+        doc: doc
+        obj: bag
+        key: "tracking"
+        fallback: tracking
+      )
+    }
+    let colorIndex: Int = Json.field(doc: doc, this: bag, key: "color")
+    if colorIndex >= 0 {
+      fieldMask = fieldMask + 32
+      let color: JsonValue = Json.jsonValueAt(doc: doc, idx: colorIndex)
+      if color.kind is JsonKind.string {
+        colorSlot = Json.jsonString(this: color, fallback: "")
+      } else if color.kind is JsonKind.object {
+        colorSlot = ""
+        colorR = themeReadIntField(
+          doc: doc
+          obj: color
+          key: "r"
+          fallback: colorR
+        )
+        colorG = themeReadIntField(
+          doc: doc
+          obj: color
+          key: "g"
+          fallback: colorG
+        )
+        colorB = themeReadIntField(
+          doc: doc
+          obj: color
+          key: "b"
+          fallback: colorB
+        )
+        colorA = themeReadIntField(
+          doc: doc
+          obj: color
+          key: "a"
+          fallback: colorA
+        )
+      }
+    }
+    let shadowIndex: Int = Json.field(doc: doc, this: bag, key: "shadow")
+    if shadowIndex >= 0 {
+      fieldMask = fieldMask + 64
+      shadowName = Json.jsonString(this: Json.jsonValueAt(doc: doc, idx: shadowIndex), fallback: "")
+    }
+    let alignIndex: Int = Json.field(doc: doc, this: bag, key: "align")
+    if alignIndex >= 0 {
+      fieldMask = fieldMask + 128
+      let alignText: String = Json.jsonString(
+        this: Json.jsonValueAt(doc: doc, idx: alignIndex)
+        fallback: ""
+      )
+      align = themeParseAlign(text: alignText, fallback: align)
+    }
+
     out.textNames.add(value: name)
+    out.textExtends.add(value: parentName)
+    out.textFieldMasks.add(value: fieldMask)
     out.textFonts.add(value: font)
     out.textSizes.add(value: size)
     out.textWeights.add(value: weight)
     out.textLineHeights.add(value: lineHeight)
     out.textTrackings.add(value: tracking)
     out.textColorSlots.add(value: colorSlot)
-    out.textColorR.add(value: colR)
-    out.textColorG.add(value: colG)
-    out.textColorB.add(value: colB)
-    out.textColorA.add(value: colA)
+    out.textColorR.add(value: colorR)
+    out.textColorG.add(value: colorG)
+    out.textColorB.add(value: colorB)
+    out.textColorA.add(value: colorA)
     out.textShadowNames.add(value: shadowName)
     out.textAligns.add(value: align)
-    i = i + 1
+  }
+}
+
+func themeTextMaskHas(mask: view Int, field: view Int) ret Bool {
+  ret (mask / field) % 2 is 1
+}
+
+# Walk the already-merged nearest-first text table. Name lookup deliberately
+# uses themeTextStyleIndex, so a page declaration shadows an imported one both
+# as a requested style and as an extends parent.
+func themeMergedTextChain(theme: view ResolvedTheme, name: view String) ret List(Int) {
+  let up: List(Int) = List.create(Int, cap: 4)
+  let seen: List(String) = List.create(String, cap: 4)
+  var currentName: String = "{name}"
+  var steps: Int = 0
+  var walking: Bool = true
+  loop walking {
+    let index: Int = themeTextStyleIndex(theme: theme, styleId: currentName)
+    if index < 0 {
+      if steps > 0 {
+        log("[theme] text style '{name}' extends unknown '{currentName}' — chain truncated")
+      }
+      walking = false
+    } else {
+      up.add(value: index)
+      seen.add(value: "{currentName}")
+      var parentName: String = ""
+      if let parent: String = theme.textExtends.copyAt(index: index) {
+        parentName = "{parent}"
+      }
+      if parentName.length() is 0 {
+        walking = false
+      } else if themeSeenName(seen: seen, name: parentName) {
+        log("[theme] text style '{name}' extends chain has a cycle at '{parentName}' — truncated")
+        walking = false
+      } else if steps + 1 > themeMaxExtendsDepth {
+        log("[theme] text style '{name}' extends deeper than {themeMaxExtendsDepth} — truncated")
+        walking = false
+      } else {
+        steps = steps + 1
+        currentName = "{parentName}"
+      }
+    }
+  }
+  ret themeReverseIntList(src: up)
+}
+
+# Flatten text inheritance only after parseThemeInto has appended every page
+# and imported declaration. Runtime consumers still read a flat table.
+func resolveThemeTextExtends(theme: mod ResolvedTheme) {
+  loop var target: Int = 0, target < theme.textNames.length, ++target {
+    let name: String = theme.textNames.copyAtDefault(index: target)
+    let chain: List(Int) = themeMergedTextChain(theme: theme, name: name)
+    var font: String = "body"
+    var size: Float = 43.373494
+    var weight: Float = 400.0
+    var lineHeight: Float = 1.0
+    var tracking: Float = 0.0
+    var colorSlot: String = "textPrimary"
+    var colorR: Int = 0
+    var colorG: Int = 0
+    var colorB: Int = 0
+    var colorA: Int = 255
+    var shadowName: String = ""
+    var align: Int = themeAlignStart
+    loop var chainIndex: Int = 0, chainIndex < chain.length, ++chainIndex {
+      let source: Int = chain.copyAtDefault(index: chainIndex)
+      let mask: Int = theme.textFieldMasks.copyAtDefault(index: source)
+      if themeTextMaskHas(mask: mask, field: 1) {
+        let sourceFont: String = theme.textFonts.copyAtDefault(index: source)
+        font = "{sourceFont}"
+      }
+      if themeTextMaskHas(mask: mask, field: 2) {
+        size = theme.textSizes.copyAtDefault(index: source)
+      }
+      if themeTextMaskHas(mask: mask, field: 4) {
+        weight = theme.textWeights.copyAtDefault(index: source)
+      }
+      if themeTextMaskHas(mask: mask, field: 8) {
+        lineHeight = theme.textLineHeights.copyAtDefault(index: source)
+      }
+      if themeTextMaskHas(mask: mask, field: 16) {
+        tracking = theme.textTrackings.copyAtDefault(index: source)
+      }
+      if themeTextMaskHas(mask: mask, field: 32) {
+        let sourceColorSlot: String = theme.textColorSlots.copyAtDefault(index: source)
+        colorSlot = "{sourceColorSlot}"
+        colorR = theme.textColorR.copyAtDefault(index: source)
+        colorG = theme.textColorG.copyAtDefault(index: source)
+        colorB = theme.textColorB.copyAtDefault(index: source)
+        colorA = theme.textColorA.copyAtDefault(index: source)
+      }
+      if themeTextMaskHas(mask: mask, field: 64) {
+        let sourceShadowName: String = theme.textShadowNames.copyAtDefault(index: source)
+        shadowName = "{sourceShadowName}"
+      }
+      if themeTextMaskHas(mask: mask, field: 128) {
+        align = theme.textAligns.copyAtDefault(index: source)
+      }
+    }
+    theme.textFonts.set(index: target, value: "{font}")
+    theme.textSizes.set(index: target, value: size)
+    theme.textWeights.set(index: target, value: weight)
+    theme.textLineHeights.set(index: target, value: lineHeight)
+    theme.textTrackings.set(index: target, value: tracking)
+    theme.textColorSlots.set(index: target, value: "{colorSlot}")
+    theme.textColorR.set(index: target, value: colorR)
+    theme.textColorG.set(index: target, value: colorG)
+    theme.textColorB.set(index: target, value: colorB)
+    theme.textColorA.set(index: target, value: colorA)
+    theme.textShadowNames.set(index: target, value: "{shadowName}")
+    theme.textAligns.set(index: target, value: align)
   }
 }
 

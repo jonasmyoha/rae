@@ -140,10 +140,14 @@ func createApp() ret App {
   var document: SceneDocument = createSceneDocument(path: resolveScenePath())
   var gpuUi: Gpu2dUi = createEditorUi()
   var fonts: EditorFonts = { textFontPath: "", iconFontPath: "" }
-  var builtinScenePaths: List(String) = List.create(String, cap: 2)
+  var builtinScenePaths: List(String) = List.create(String, cap: 3)
+  var builtinSceneIds: List(String) = List.create(String, cap: 3)
   builtinScenePaths.add(value: diagnosticRowScenePath)
+  builtinSceneIds.add(value: "chrome/DiagnosticRow")
   builtinScenePaths.add(value: inspectorScenePath)
+  builtinSceneIds.add(value: "chrome/Inspector")
   builtinScenePaths.add(value: treeRowScenePath)
+  builtinSceneIds.add(value: "chrome/TreeRow")
 
   var world: UiWorld = create()
   seedWorldTheme(world: world, res: gpuUi)
@@ -158,7 +162,12 @@ func createApp() ret App {
     applyDocumentTheme(gpuUi: gpuUi, document: document, quiet: false)
     reseedWorldTheme(world: world, res: gpuUi)
     applyDocumentFonts(gpuUi: gpuUi, fonts: fonts, document: document)
-    documentMountSystem(document: document, world: world, builtinScenePaths: builtinScenePaths)
+    documentMountSystem(
+      document: document
+      world: world
+      builtinScenePaths: builtinScenePaths
+      builtinSceneIds: builtinSceneIds
+    )
   }
   applyViewport(
     viewport: viewport
@@ -233,6 +242,7 @@ func createApp() ret App {
       inspector: own inspector
       testSelectNodeId: testSelectNodeId
       builtinScenePaths: own builtinScenePaths
+      builtinSceneIds: own builtinSceneIds
       headless: headless
     }
   }

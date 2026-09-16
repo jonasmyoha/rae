@@ -96,7 +96,7 @@ func partAScene() ret String {
   var s: String = ""
   s = s.concat(other: "\{")
   s = s.concat(other: "\"type\":\"Scene\",\"version\":2,")
-  s = s.concat(other: "\"sceneId\":\"lv-demo\",\"root\":\"List\",")
+  s = s.concat(other: "\"root\":\"List\",")
   s = s.concat(other: "\"nodes\":\{\"List\":\{")
   s = s.concat(other: "\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":400\},")
   s = s.concat(other: "\"ListView\":\{")
@@ -114,6 +114,7 @@ func main() {
   let rowScenes: SceneRegistry = createSceneRegistry()
   # ----- Part A: ListView deserialises from a scene (#941 arm) -----
   let scene: Scene = parseScene(source: partAScene())
+  scene.sceneId = "lv-demo"
   log("scene ok: {scene.ok}")
   let sceneWorld: UiWorld = createUiWorld()
   loadScene(world: sceneWorld, scene: scene)

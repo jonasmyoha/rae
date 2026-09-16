@@ -541,7 +541,6 @@ Validated file format:
 {
   "type": "Scene",
   "version": 2,
-  "sceneId": "profile",
   "root": "ProfileRoot",
   "nodes": {
     "ProfileRoot": {
@@ -558,7 +557,7 @@ Validation rules:
 
 - `type` must be `Scene`
 - `version` must be `2`
-- `sceneId` must be a string
+- the root-relative package path is the scene identity; it is not repeated in the file
 - `root` must be a string and must exist in `nodes`
 - every node id must match the internal node id pattern
 - every child reference in `Children` must point to an existing node

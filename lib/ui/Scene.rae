@@ -6,7 +6,6 @@
 # {
 #   "type": "Scene",
 #   "version": 2,
-#   "sceneId": "music-player-album",
 #   "root": "AlbumRoot",
 #   "nodes": {
 #     "AlbumRoot": {
@@ -152,13 +151,6 @@ func parseScene(source: view String) ret Scene {
   if version is not 2 {
     scene.errorMsg = "version must be 2"
     ret scene
-  }
-
-  # sceneId (optional but recorded for diagnostics + scene-instance scoping).
-  let sceneIdIdx: Int = Json.field(doc: doc, this: root, key: "sceneId")
-  if sceneIdIdx >= 0 {
-    let sceneIdVal: JsonValue = Json.jsonValueAt(doc: doc, idx: sceneIdIdx)
-    scene.sceneId = Json.jsonString(this: sceneIdVal, fallback: empty)
   }
 
   # `root` is required and must name a node.
