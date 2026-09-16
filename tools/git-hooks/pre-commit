@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Opt-in pre-commit hook (#1016): refuse a commit whose STAGED changes contain
+# a banned term. Installed by `make install-hooks` (git does not version
+# hooks). No term list on this machine -> the gate skips and the commit goes
+# through. Bypass once with `git commit --no-verify` if you must.
+exec bash "$(git rev-parse --show-toplevel)/compiler/tools/banned-terms-gate.sh" --staged

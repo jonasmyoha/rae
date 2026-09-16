@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Opt-in commit-msg hook (#1016): refuse a commit whose MESSAGE contains a
+# banned term (the tree hook cannot see the message). Installed by
+# `make install-hooks`. No term list on this machine -> skipped.
+exec bash "$(git rev-parse --show-toplevel)/compiler/tools/banned-terms-gate.sh" --message "$1"
