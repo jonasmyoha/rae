@@ -96,6 +96,82 @@ func createTextureViewMip(
   }
 }
 
+# A view over the WHOLE mip chain of `texture` — what a sampler with a mipmap
+# filter reads (the water cascades, #1002): `createTextureView` stops at level
+# 0, and a level-0 view is what a storage write wants; a sampled read that is
+# to average with distance needs every level in one view.
+func createTextureViewMips(
+  resources: mod GpuResources
+  texture: view TextureId
+) ret opt TextureViewId {
+  if isValidTexture(resources: resources, id: texture) is false {
+    ret none
+  }
+  let slot: Int = findFreeSlot(table: resources.textureViews, capacity: resources.capacity)
+  if slot < 0 {
+    ret none
+  }
+  unsafe {
+    let textureHandle: Ptr = slotHandle(table: resources.textures, slot: texture.slot)
+    let descriptor: WGPUTextureViewDescriptor = {
+      format: wgpuTextureGetFormat(texture: textureHandle)
+      dimension: WGPUTextureViewDimension_2D
+      baseMipLevel: 0 as UInt32
+      mipLevelCount: wgpuTextureGetMipLevelCount(texture: textureHandle)
+      baseArrayLayer: 0 as UInt32
+      arrayLayerCount: 1 as UInt32
+      aspect: WGPUTextureAspect_All
+    }
+    let handle: Ptr = wgpuTextureCreateView(texture: textureHandle, descriptor: descriptor)
+    if handle is webgpuNull() {
+      ret none
+    }
+    storeHandle(table: resources.textureViews, slot: slot, handle: handle)
+  }
+  resources.textureViews.parentSlot.set(index: slot, value: texture.slot)
+  resources.textureViews.parentGeneration.set(index: slot, value: texture.generation)
+  ret TextureViewId {
+    managerTag: resources.managerTag
+    slot: slot
+    generation: slotGeneration(table: resources.textureViews, slot: slot)
+  }
+}
+
+# A trilinear sampler (linear between mip levels too) with one address mode on
+# every axis — for a mip-chained texture whose far samples must average, not
+# point-sample (the water cascades). `createSamplerWith` stays nearest-mip for
+# the single-level textures everything else reads.
+func createSamplerMipped(resources: mod GpuResources, addressMode: view Int32) ret opt SamplerId {
+  let slot: Int = findFreeSlot(table: resources.samplers, capacity: resources.capacity)
+  if slot < 0 {
+    ret none
+  }
+  unsafe {
+    let descriptor: WGPUSamplerDescriptor = {
+      addressModeU: addressMode
+      addressModeV: addressMode
+      addressModeW: addressMode
+      magFilter: WGPUFilterMode_Linear
+      minFilter: WGPUFilterMode_Linear
+      mipmapFilter: WGPUMipmapFilterMode_Linear
+      lodMinClamp: 0.0
+      lodMaxClamp: 32.0
+      compare: WGPUCompareFunction_Undefined
+      maxAnisotropy: 1 as UInt16
+    }
+    let handle: Ptr = wgpuDeviceCreateSampler(device: webgpuDevice(), descriptor: descriptor)
+    if handle is webgpuNull() {
+      ret none
+    }
+    storeHandle(table: resources.samplers, slot: slot, handle: handle)
+  }
+  ret SamplerId {
+    managerTag: resources.managerTag
+    slot: slot
+    generation: slotGeneration(table: resources.samplers, slot: slot)
+  }
+}
+
 # The native texture handle (null for an invalid ID), for a raw encode that
 # copies between two manager textures.
 func textureHandle(resources: view GpuResources, id: view TextureId) unsafe ret Ptr {

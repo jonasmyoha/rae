@@ -86,17 +86,39 @@ func createSurfaceGpu() ret WaterSurfaceGpu {
   }
 }
 
-# Cascade c, map m -> index c * waterCascadeMaps + m in both lists.
+# Mip chain of a cascade map (#1002): levels 0..log2(size), so 1024 -> 11.
+const fftMaxMips: Int = fftMaxStages + 1
+
+# The displacement and normal maps carry a mip chain; the foam map (2) is a
+# readback source only and stays single-level.
+const waterMippedMaps: Int = 2
+
+# Cascade c, map m -> index c * waterCascadeMaps + m in `textures` and `views`
+# (`views` is LEVEL 0: what the FFT post pass writes and the readback copies).
+# `sampleViews` is the whole mip chain of the same texture, what the surface
+# shader samples with a trilinear sampler (#1002). `mipViews` / `mipBinds` are
+# the per-level storage views and downsample binds of the two mipped maps:
+# (c * waterMippedMaps + m) * fftMaxMips + level, level >= 1.
 type WaterCascadeGpu {
   textures: List(TextureId)
   views: List(TextureViewId)
+  sampleViews: List(TextureViewId)
+  mipViews: List(TextureViewId)
+  mipBinds: List(BindGroupId)
 }
 
 func createCascadeGpu() ret WaterCascadeGpu {
   ret WaterCascadeGpu {
     textures: fillTextureIds(count: waterCascadeCount * waterCascadeMaps)
     views: fillTextureViewIds(count: waterCascadeCount * waterCascadeMaps)
+    sampleViews: fillTextureViewIds(count: waterCascadeCount * waterCascadeMaps)
+    mipViews: fillTextureViewIds(count: waterCascadeCount * waterMippedMaps * fftMaxMips)
+    mipBinds: fillBindGroupIds(count: waterCascadeCount * waterMippedMaps * fftMaxMips)
   }
+}
+
+func waterMipIndex(cascade: view Int, map: view Int, level: view Int) ret Int {
+  ret (cascade * waterMippedMaps + map) * fftMaxMips + level
 }
 
 func waterCascadeIndex(cascade: view Int, map: view Int) ret Int {
@@ -124,6 +146,7 @@ type WaterFftGpu {
   transposePipeline: PipelineId
   fieldOutPipeline: PipelineId
   postPipeline: PipelineId
+  mipPipeline: PipelineId
   workTextures: List(TextureId)
   workViews: List(TextureViewId)
   stageUniforms: List(BufferId)
@@ -152,6 +175,7 @@ func createFftGpu() ret WaterFftGpu {
     transposePipeline: noPipelineId()
     fieldOutPipeline: noPipelineId()
     postPipeline: noPipelineId()
+    mipPipeline: noPipelineId()
     workTextures: fillTextureIds(count: fftWorkTextures)
     workViews: fillTextureViewIds(count: fftWorkTextures)
     stageUniforms: fillBufferIds(count: fftMaxStages)

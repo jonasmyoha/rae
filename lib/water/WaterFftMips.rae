@@ -1,0 +1,234 @@
+# WaterFftMips — the mip chains of the FFT cascade maps (#1002).
+#
+# The surface shader samples the displacement and normal maps in world space
+# at whatever footprint the geometry gives it: a vertex on the camera-centred
+# radial grid covers a cell of a metre underfoot to tens of metres at the
+# horizon, and a far pixel covers many texels. Point-sampling a single-level
+# map there is aliasing — the short waves fold into wide bands that re-phase
+# every metre the mesh snaps to the camera, which reads as the sea speeding
+# up whenever the camera moves — and the earlier answer (fading a cascade out
+# past a threshold) traded that for a muddy sea.
+#
+# Band-limiting is the correct answer: each map carries a mip chain, rebuilt
+# right after the FFT post pass writes level 0, and the shader samples the
+# level whose texel matches its footprint (the vertex from its cell size, the
+# pixel from its derivatives). A vertex then sees the AVERAGE of the waves its
+# cell cannot carry, continuously, and a far pixel averages instead of
+# picking one texel. The normal map is box-averaged UNnormalised on purpose:
+# the length of an averaged normal is how much wave slope the level hides,
+# which the shader turns into roughness (Toksvig), so distant water goes
+# calm and matte, never glassy.
+#
+# Per cascade and per mipped map, one downsample dispatch per level: a 2x2 box
+# from level L-1 (sampled view) into level L (storage view). Binds are made
+# once with the maps; the dispatches join the FFT update's single submit.
+open gpu/GpuArgs
+open gpu/GpuIds
+open gpu/GpuLifetime
+open gpu/GpuRender
+open gpu/GpuResources
+open gpu/GpuTextures
+open water/WaterGpuIds
+open water/WaterSystem
+open webgpu/WebgpuEnums
+
+# Levels 0..log2(size).
+func fftMipLevels(size: view Int) ret Int {
+  var levels: Int = 1
+  var extent: Int = size
+  loop extent > 1 {
+    extent = extent / 2
+    levels = levels + 1
+  }
+  if levels > fftMaxMips {
+    ret fftMaxMips
+  }
+  ret levels
+}
+
+# A cascade map with a full mip chain: `views` keeps the level-0 view (what
+# the FFT post pass writes and the readback copies), `sampleViews` the whole
+# chain for the surface sampler, `mipViews` one storage view per level >= 1.
+func createMippedCascadeMap(
+  waterSystem: mod WaterSystem
+  resources: mod GpuResources
+  size: view Int
+  cascade: view Int
+  map: view Int
+  usage: view UInt64
+) ret Bool {
+  let levels: Int = fftMipLevels(size: size)
+  let index: Int = waterCascadeIndex(cascade: cascade, map: map)
+  if let texture: TextureId = createTextureMipped(
+    resources: resources
+    width: size
+    height: size
+    format: WGPUTextureFormat_RGBA16Float
+    usage: usage
+    mipLevels: levels
+  ) {
+    var ok: Bool = true
+    if let levelZero: TextureViewId = createTextureViewMip(
+      resources: resources
+      texture: texture
+      mip: 0
+    ) {
+      waterSystem.cascades.views.set(index: index, value: levelZero)
+    } else {
+      ok = false
+    }
+    if let chain: TextureViewId = createTextureViewMips(resources: resources, texture: texture) {
+      waterSystem.cascades.sampleViews.set(index: index, value: chain)
+    } else {
+      ok = false
+    }
+    loop var level: Int = 1, level < levels, ++level {
+      if let levelView: TextureViewId = createTextureViewMip(
+        resources: resources
+        texture: texture
+        mip: level
+      ) {
+        waterSystem.cascades.mipViews.set(
+          index: waterMipIndex(cascade: cascade, map: map, level: level)
+          value: levelView
+        )
+      } else {
+        ok = false
+      }
+    }
+    if ok {
+      waterSystem.cascades.textures.set(index: index, value: texture)
+      ret true
+    }
+    # A view slot ran out part-way (the manager's capacity): take back every
+    # view made for this map, then the texture, so nothing half-made lingers.
+    retireTextureView(
+      resources: resources
+      id: waterSystem.cascades.views.copyAtFallback(index: index, fallback: noTextureViewId())
+    )
+    waterSystem.cascades.views.set(index: index, value: noTextureViewId())
+    retireTextureView(
+      resources: resources
+      id: waterSystem.cascades.sampleViews.copyAtFallback(index: index, fallback: noTextureViewId())
+    )
+    waterSystem.cascades.sampleViews.set(index: index, value: noTextureViewId())
+    loop var level2: Int = 1, level2 < levels, ++level2 {
+      let mipIndex: Int = waterMipIndex(cascade: cascade, map: map, level: level2)
+      retireTextureView(
+        resources: resources
+        id: waterSystem.cascades.mipViews.copyAtFallback(
+          index: mipIndex
+          fallback: noTextureViewId()
+        )
+      )
+      waterSystem.cascades.mipViews.set(index: mipIndex, value: noTextureViewId())
+    }
+    retireTexture(resources: resources, id: texture)
+    log(
+      "[water fft] cascade {cascade} map {map}: the manager ran out of texture-view slots for the mip chain"
+    )
+  }
+  ret false
+}
+
+# The downsample pipeline and one bind per (cascade, mipped map, level >= 1):
+# source = the previous level's storage view read as a texture, destination =
+# this level's storage view.
+func ensureFftMips(
+  waterSystem: mod WaterSystem
+  resources: mod GpuResources
+  wgsl: view String
+  cascadeCount: view Int
+  size: view Int
+) {
+  if not isValidPipeline(resources: resources, id: waterSystem.fft.mipPipeline) {
+    if let mipPipeline: PipelineId = createComputePipeline(
+      resources: resources
+      wgsl: wgsl
+      entryPoint: "mip"
+    ) {
+      waterSystem.fft.mipPipeline = mipPipeline
+    }
+  }
+  if not isValidPipeline(resources: resources, id: waterSystem.fft.mipPipeline) {
+    ret
+  }
+  let levels: Int = fftMipLevels(size: size)
+  loop var cascade: Int = 0, cascade < cascadeCount, ++cascade {
+    loop var map: Int = 0, map < waterMippedMaps, ++map {
+      loop var level: Int = 1, level < levels, ++level {
+        var source: TextureViewId = waterSystem.cascades.views.copyAtFallback(
+          index: waterCascadeIndex(cascade: cascade, map: map)
+          fallback: noTextureViewId()
+        )
+        if level > 1 {
+          source = waterSystem.cascades.mipViews.copyAtFallback(
+            index: waterMipIndex(cascade: cascade, map: map, level: level - 1)
+            fallback: noTextureViewId()
+          )
+        }
+        let entries: List(ResourceRef) = List.create(ResourceRef, cap: 2)
+        entries.add(value: textureViewRef(id: source))
+        entries.add(
+          value: textureViewRef(
+            id: waterSystem.cascades.mipViews.copyAtFallback(
+              index: waterMipIndex(cascade: cascade, map: map, level: level)
+              fallback: noTextureViewId()
+            )
+          )
+        )
+        if let bind: BindGroupId = createComputeBindGroupOrdered(
+          resources: resources
+          pipeline: waterSystem.fft.mipPipeline
+          entries: entries
+        ) {
+          waterSystem.cascades.mipBinds.set(
+            index: waterMipIndex(cascade: cascade, map: map, level: level)
+            value: bind
+          )
+        }
+      }
+    }
+  }
+}
+
+# Queue the downsamples of one cascade's mipped maps behind its post pass.
+func addFftMipDispatches(
+  commands: mod List(ComputeCommand)
+  waterSystem: view WaterSystem
+  cascade: view Int
+  size: view Int
+) {
+  let levels: Int = fftMipLevels(size: size)
+  loop var map: Int = 0, map < waterMippedMaps, ++map {
+    var extent: Int = size
+    loop var level: Int = 1, level < levels, ++level {
+      extent = extent / 2
+      if extent < 1 {
+        extent = 1
+      }
+      var groups: Int = extent / 8
+      if groups * 8 < extent {
+        groups = groups + 1
+      }
+      commands.add(value: computeCommand(
+        pipeline: waterSystem.fft.mipPipeline
+        bindGroup: waterSystem.cascades.mipBinds.copyAtFallback(
+          index: waterMipIndex(cascade: cascade, map: map, level: level)
+          fallback: noBindGroupId()
+        )
+        workgroupsX: groups
+        workgroupsY: groups
+        workgroupsZ: 1
+      ))
+    }
+  }
+}
+
+func releaseFftMips(waterSystem: mod WaterSystem, resources: mod GpuResources) {
+  retireBindGroupIds(resources: resources, list: waterSystem.cascades.mipBinds)
+  retireTextureViewIds(resources: resources, list: waterSystem.cascades.mipViews)
+  retireTextureViewIds(resources: resources, list: waterSystem.cascades.sampleViews)
+  retirePipeline(resources: resources, id: waterSystem.fft.mipPipeline)
+  waterSystem.fft.mipPipeline = noPipelineId()
+}

@@ -1,4 +1,5 @@
 open water/WaterReadback
+open water/WaterFftMips
 # WaterFft — the FFT ocean's GPU side (#831 slice 1, #849, #850), split out of
 # WaterSystem.rae at the 1000-line cap. Owns the cascade maps, the one-time
 # spectrum + butterfly bake, the per-frame evolution + Stockham inverse FFT into
@@ -98,16 +99,29 @@ func waterFftStep(waterSystem: mod WaterSystem, resources: mod GpuResources) {
   if not waterSystem.cascadesMade {
     loop var cascade: Int = 0, cascade < body.cascadeCount, ++cascade {
       loop var map: Int = 0, map < waterCascadeMaps, ++map {
-        createMap(
-          resources: resources
-          width: body.fftSize
-          height: body.fftSize
-          format: WGPUTextureFormat_RGBA16Float
-          usage: cascadeMapUsage
-          textures: waterSystem.cascades.textures
-          views: waterSystem.cascades.views
-          index: waterCascadeIndex(cascade: cascade, map: map)
-        )
+        # Displacement + normal carry a mip chain (#1002, WaterFftMips); the
+        # foam map is a readback source only.
+        if map < waterMippedMaps {
+          createMippedCascadeMap(
+            waterSystem: waterSystem
+            resources: resources
+            size: body.fftSize
+            cascade: cascade
+            map: map
+            usage: cascadeMapUsage
+          )
+        } else {
+          createMap(
+            resources: resources
+            width: body.fftSize
+            height: body.fftSize
+            format: WGPUTextureFormat_RGBA16Float
+            usage: cascadeMapUsage
+            textures: waterSystem.cascades.textures
+            views: waterSystem.cascades.views
+            index: waterCascadeIndex(cascade: cascade, map: map)
+          )
+        }
       }
     }
     waterSystem.cascadesMade = true
@@ -605,6 +619,13 @@ func ensureFftFrameGpu(waterSystem: mod WaterSystem, resources: mod GpuResources
       waterSystem.fft.postBinds.set(index: cascade, value: postBind)
     }
   }
+  ensureFftMips(
+    waterSystem: waterSystem
+    resources: resources
+    wgsl: source
+    cascadeCount: body.cascadeCount
+    size: size
+  )
   waterSystem.fftFrameMade = true
 }
 
@@ -773,6 +794,12 @@ func waterFftUpdate(waterSystem: mod WaterSystem, resources: mod GpuResources, t
       width: size
       height: size
     )
+    addFftMipDispatches(
+      commands: commands
+      waterSystem: waterSystem
+      cascade: cascade2
+      size: size
+    )
   }
   let timed: Bool = beginWaterPerf(performance: waterSystem.performance, resources: resources)
   var submitted: Bool = false
@@ -881,6 +908,7 @@ func releaseCascades(waterSystem: mod WaterSystem, resources: mod GpuResources) 
     ret
   }
   waterSystem.cascadesMade = false
+  releaseFftMips(waterSystem: waterSystem, resources: resources)
   retireTextureViewIds(resources: resources, list: waterSystem.cascades.views)
   retireTextureIds(resources: resources, list: waterSystem.cascades.textures)
 }

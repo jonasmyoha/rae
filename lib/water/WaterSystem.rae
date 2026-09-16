@@ -42,6 +42,7 @@ open water/WaterGpuIds
 open water/WaterGpuBridge
 open GbufferUnderwater
 open gpu/GpuResources
+open gpu/GpuTextures
 open gpu/GpuLifetime
 open gpu/GpuRender
 open gpu/GpuRenderTransfer
@@ -76,6 +77,20 @@ func cascadeView(
   map: view Int
 ) ret TextureViewId {
   ret waterSystem.cascades.views.copyAtFallback(
+    index: waterCascadeIndex(cascade: cascade, map: map)
+    fallback: noTextureViewId()
+  )
+}
+
+# The whole mip chain of a cascade map (#1002) — what the surface shader
+# samples; `cascadeView` is level 0 alone (the FFT's write target, the
+# readback's copy source).
+func cascadeSampleView(
+  waterSystem: view WaterSystem
+  cascade: view Int
+  map: view Int
+) ret TextureViewId {
+  ret waterSystem.cascades.sampleViews.copyAtFallback(
     index: waterCascadeIndex(cascade: cascade, map: map)
     fallback: noTextureViewId()
   )
@@ -297,8 +312,10 @@ func ensureWaterPipeline(
     waterSystem.surface.litSampler = litSampler
   }
   # The cascades TILE: world.xy / tile runs far outside [0, 1], so they need a
-  # repeating sampler (clamp-to-edge stretches the edge texels into streaks).
-  if let cascadeSampler: SamplerId = createSamplerWith(
+  # repeating sampler (clamp-to-edge stretches the edge texels into streaks) —
+  # trilinear, since the maps carry a mip chain the shader picks a level of
+  # per vertex and per pixel (#1002, WaterFftMips).
+  if let cascadeSampler: SamplerId = createSamplerMipped(
     resources: resources
     addressMode: WGPUAddressMode_Repeat
   ) {
@@ -335,7 +352,7 @@ func ensureWaterBind(
   # them the layout cannot be satisfied — draw nothing until they exist.
   if not isValidTextureView(
     resources: resources
-    id: cascadeView(waterSystem: waterSystem, cascade: 0, map: 1)
+    id: cascadeSampleView(waterSystem: waterSystem, cascade: 0, map: 1)
   ) {
     ret
   }
@@ -373,12 +390,12 @@ func ensureWaterBind(
     }
     entries.add(
       value: textureViewRef(
-        id: cascadeView(waterSystem: waterSystem, cascade: sourceCascade, map: 0)
+        id: cascadeSampleView(waterSystem: waterSystem, cascade: sourceCascade, map: 0)
       )
     )
     entries.add(
       value: textureViewRef(
-        id: cascadeView(waterSystem: waterSystem, cascade: sourceCascade, map: 1)
+        id: cascadeSampleView(waterSystem: waterSystem, cascade: sourceCascade, map: 1)
       )
     )
   }

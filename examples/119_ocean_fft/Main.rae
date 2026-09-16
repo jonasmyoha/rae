@@ -255,9 +255,11 @@ func main() ret Int {
   var spray: SprayEmitter = createSprayEmitter(renderer: renderer, body: ocean)
   # The App-owned GPU manager (#873): water's pipelines, maps and readbacks are
   # typed IDs in it, passed explicitly to every water operation. Sized for two
-  # simultaneously active water systems (the tier check runs a twin).
+  # simultaneously active water systems (the tier check runs a twin) at the
+  # largest tier: three 512 cascades carry ten mip levels each (#1002), a view
+  # and a downsample bind per level and map.
   var idIssuer: IdIssuer = IdIssuer.create()
-  var gpuManager: opt GpuResources = GpuResources.create(issuer: idIssuer, capacity: 160)
+  var gpuManager: opt GpuResources = GpuResources.create(issuer: idIssuer, capacity: 320)
   var twin: WaterSystem = createWaterSystem(
     renderer: renderer
     body: createOceanRealistic(surfaceZ: 0.0)
