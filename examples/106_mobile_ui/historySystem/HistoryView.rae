@@ -12,8 +12,8 @@ open ui/Ecs
 # oldest-first. Rendering walks the list from the tail so the most
 # recent play sits at the top of the page, matching user intuition.
 #
-# #964/#977: the page is assets/scenes/history.raescene and the list is the
-# lib/ui `ListView` authored there over `history-row.raescene` (bindings and
+# #964/#977: the page is assets/scenes/History.raescene and the list is the
+# lib/ui `ListView` authored there over `HistoryRow.raescene` (bindings and
 # window size included). This file only turns the play history into
 # `ListViewData` rows (one cell per bound field) through the `HistoryList`
 # component's system; windowing, recycling and the scroll translation are
@@ -95,7 +95,7 @@ func historyHasArt(entry: view PlayHistoryEntry) pub ret Bool {
   ret entry.textureKey.length() > 0
 }
 
-# One recently-played thumb: the `recent-thumb` sub-scene as its own square
+# One recently-played thumb: the `RecentThumb` sub-scene as its own square
 # root (#990: host-less).
 # Has-art -> the Art sprite is switched on with the entry's stored textureKey
 # (album stem for local, "spotify-art:<id>" for Spotify) and the placeholder
@@ -120,7 +120,7 @@ func mountRecentThumb(
   let host: EntityId = mountRegistrySubSceneOrError(
     world: world
     reg: scenes.subScenes
-    sceneId: "recent-thumb"
+    sceneId: "RecentThumb"
     overrides: overrides
     w: size
     h: size
@@ -197,9 +197,9 @@ func historyListData(history: view PlayHistory) ret ListViewData {
 }
 
 # ----- the History page (#977, SCENE-DRIVEN) -------------------------------
-# assets/scenes/history.raescene owns the page: top bar, the `EmptyState`
+# assets/scenes/History.raescene owns the page: top bar, the `EmptyState`
 # line and the `Body` list host carrying the authored `ListView` (the
-# `history-row` sub-scene, its bindings, the window size) plus a
+# `HistoryRow` sub-scene, its bindings, the window size) plus a
 # `HistoryList` binding component. This mount is one mountPageOrError + the
 # Body's runtime ScrollState; `historyListSystem` below feeds the rows.
 func mountHistoryPage(
@@ -212,7 +212,7 @@ func mountHistoryPage(
   let scene: view Scene => scenes.history
   let overrides: List(SceneOverride) = emptyOverrides()
   let pageIdCopy: String = "{historyPageId}"
-  let historyLabel: String = "history"
+  let historyLabel: String = "History"
   let mount: EntityId = mountPageOrError(
     world: world
     pageId: own pageIdCopy
@@ -299,7 +299,7 @@ func historyListSystem(world: mod UiWorld, state: view AppState) pub {
 
 # Materialise the most-recent plays into an existing strip container
 # (the scene-authored `RecentlyPlayedStrip` node on Home — the
-# container's size/layout/gap live in home.raescene since #213; this
+# container's size/layout/gap live in Home.raescene since #213; this
 # is the data adapter). Capped at `recentlyPlayedPreviewMax` and
 # emits one tile per entry, newest-first. Each tile fires
 # `history.replay.N` with the *real* entries index baked in (so the

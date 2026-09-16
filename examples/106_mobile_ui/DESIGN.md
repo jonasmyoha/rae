@@ -26,7 +26,7 @@ examples/106_mobile_ui/            the app: ~53 files, one folder per system
   GpuWindow, Headless, HotReloadGlue, AppSettings, FileIo
   inputSystem/ screenSystem/ historySystem/ playbackSystem/ spotifySystem/
   debugSystem/ assetSystem/
-  assets/scenes/*.raescene         12 authored scenes + Theme.raescene
+  assets/scenes/*.raescene         21 authored scenes + Theme.raescene
   assets/                          MSDF fonts, icons, album art, catalogue
   app_cache/                       runtime state (gitignored): history,
                                    library, playlists, downloaded artwork

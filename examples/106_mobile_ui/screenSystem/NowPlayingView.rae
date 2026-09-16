@@ -1,5 +1,5 @@
 open ui/Ecs
-# Now-playing screen: mounts `music-player-now-playing.raescene`. The
+# Now-playing screen: mounts `MusicPlayerNowPlaying.raescene`. The
 # time labels are overridden at mount from the active track; every other
 # data-bound node carries a binding component driven per frame (#981).
 import ui/Components
@@ -34,7 +34,7 @@ func mountNowPlayingPage(
   let album: Album = activeAlbum(state: state)
   let track: Track = trackAt(album: album, idx: state.currentTrackIndex)
 
-  # The page is assets/scenes/music-player-now-playing.raescene (#979): the
+  # The page is assets/scenes/MusicPlayerNowPlaying.raescene (#979): the
   # shared top bar as a sub-scene instance and the player block. The play
   # icon, cover, heart and title/artist are authored `PlaybackIcon` /
   # `PlaybackCover` / `LikedHeart` / `TrackText` bindings driven by their
@@ -55,7 +55,7 @@ func mountNowPlayingPage(
     overrides: npOverrides
     w: viewport.areaDuW
     h: viewport.areaDuH
-    sceneLabel: "music-player-now-playing"
+    sceneLabel: "MusicPlayerNowPlaying"
     subScenes: scenes.subScenes
   )
   attachSafeAreaEdges(

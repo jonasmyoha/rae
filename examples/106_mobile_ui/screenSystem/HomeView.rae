@@ -2,7 +2,7 @@ open ui/Ecs
 # Home-tab world composition — SCENE-DRIVEN since #213. The page
 # skeleton (root padding/gap, "Recently played" header text + action,
 # strip and grid containers) is authored in
-# assets/scenes/home.raescene; this module keeps only what a template
+# assets/scenes/Home.raescene; this module keeps only what a template
 # cannot express:
 #   * data extraction (album keys, history entries, settings flags)
 #   * list materialisation (recent thumbs; the cover grid is a CoverGrid
@@ -82,7 +82,7 @@ func homeScrollMin(albums: view List(Album), history: view PlayHistory) pub ret 
 
 # Mount the Home page from its scene template, then run the data
 # adapters over the mounted nodes. Node ids referenced here must
-# exist in home.raescene: Body / RecentlyPlayedHeader /
+# exist in Home.raescene: Body / RecentlyPlayedHeader /
 # RecentlyPlayedStrip / CoverGrid.
 func mountHomePage(
   world: mod UiWorld
@@ -94,7 +94,7 @@ func mountHomePage(
   let scene: view Scene => scenes.home
   let overrides: List(SceneOverride) = emptyOverrides()
   let pageIdCopy: String = "{homePageId}"
-  let homeLabel: String = "home"
+  let homeLabel: String = "Home"
   let mount: EntityId = mountPageOrError(
     world: world
     pageId: own pageIdCopy

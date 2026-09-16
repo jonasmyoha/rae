@@ -9,7 +9,7 @@ open ui/Ecs
 # straight under the container and creates no entity of its own. It
 # (re)materialises the tiles whenever `state.libraryRevision` moves past the
 # revision the container was last built for (`CoverGrid.builtRevision`, -1 on
-# a fresh mount); the tiles are `cover-tile` / `playlist-tile` sub-scene
+# a fresh mount); the tiles are `CoverTile` / `PlaylistTile` sub-scene
 # instances (#979, host-less since #990).
 #
 # Runs every frame from UiRefresh.refreshMountedUi (a no-op unless the
@@ -77,7 +77,7 @@ func mountTileScene(
   )
 }
 
-# One album-cover tile: the `cover-tile` sub-scene with its Sprite pointed at
+# One album-cover tile: the `CoverTile` sub-scene with its Sprite pointed at
 # the album's cover, and the per-item data the scene cannot carry — the hero
 # key and the widget id, both the album stem — written as component data.
 # The rounded-covers setting drops the authored CornerRadius when off.
@@ -93,7 +93,7 @@ func mountCoverTile(
   let tile: EntityId = mountTileScene(
     world: world
     scenes: scenes
-    sceneId: "cover-tile"
+    sceneId: "CoverTile"
     tileH: tileH
     overrides: overrides
   )
@@ -110,7 +110,7 @@ func mountCoverTile(
   ret tile
 }
 
-# The Liked playlist's 2x2 tile: the `playlist-tile` sub-scene with up to four
+# The Liked playlist's 2x2 tile: the `PlaylistTile` sub-scene with up to four
 # cover Sprites switched on (an empty cell keeps its authored placeholder).
 func mountPlaylistTile(
   world: mod UiWorld
@@ -132,7 +132,7 @@ func mountPlaylistTile(
   let tile: EntityId = mountTileScene(
     world: world
     scenes: scenes
-    sceneId: "playlist-tile"
+    sceneId: "PlaylistTile"
     tileH: tileH
     overrides: overrides
   )
