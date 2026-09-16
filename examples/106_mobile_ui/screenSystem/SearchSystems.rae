@@ -15,8 +15,8 @@ open ui/Ecs
 #                       `maxRows`), each tappable via `song.openref`.
 #
 # Neither system builds page layout: the field, the empty state and the
-# results container are authored in search.raescene; the rows are the data
-# list's items (the same track-row sub-scene the Album page mounts).
+# results container are authored in Search.raescene; the rows are the data
+# list's items (the same TrackRow sub-scene the Album page mounts).
 import ui/Components
 import ui/Scene
 open ui/SceneInstance
@@ -222,7 +222,7 @@ func clearSearchRows(world: mod UiWorld, container: view EntityId) {
   }
 }
 
-# One result row: a track-row sub-scene as its own root (#990: host-less),
+# One result row: a TrackRow sub-scene as its own root (#990: host-less),
 # tappable to play that exact song.
 func mountSearchRow(
   world: mod UiWorld
@@ -238,7 +238,7 @@ func mountSearchRow(
   let row: EntityId = mountSubSceneOrError(
     world: world
     scene: scenes.trackRow
-    sceneLabel: "track-row"
+    sceneLabel: "TrackRow"
     overrides: overrides
     w: phoneFrameW - outerPad * 2.0
     h: trackRowH

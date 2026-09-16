@@ -1,12 +1,12 @@
 open ui/Ecs
-# Search tab — SCENE-DRIVEN (#976). assets/scenes/search.raescene owns the
+# Search tab — SCENE-DRIVEN (#976). assets/scenes/Search.raescene owns the
 # page: top bar, the search field (a rounded pill with a `mat:search` icon and
 # the placeholder line), the `EmptyState` block shown while nothing is typed
 # (the "Recent" header + three stub rows) and the `Results` list container.
 # What a scene cannot express is authored as components the two systems in
 # SearchSystems.rae drive: `SearchField { query, placeholder }` on the field
 # (typing goes into `query`, the line mirrors it) and `SearchResults { source }`
-# on the container (one track-row sub-scene per catalogue match).
+# on the container (one TrackRow sub-scene per catalogue match).
 import ui/Scene
 open ui/SceneInstance
 open ecs/Entity
@@ -21,7 +21,7 @@ func mountSearchPage(
   let scene: view Scene => scenes.search
   let overrides: List(SceneOverride) = emptyOverrides()
   let pageIdCopy: String = "{searchPageId}"
-  let searchLabel: String = "search"
+  let searchLabel: String = "Search"
   let mount: EntityId = mountPageOrError(
     world: world
     pageId: own pageIdCopy

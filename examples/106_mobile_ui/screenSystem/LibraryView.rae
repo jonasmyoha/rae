@@ -1,9 +1,9 @@
 open ui/Ecs
 # Library screen — the local album catalogue as a 3-column grid of cover
 # tiles, each tappable via `album.open` to push the Album sub-page. The page
-# is SCENE-DRIVEN (#975): assets/scenes/library.raescene owns the skeleton and
-# the `CoverGrid` container, CoverGridSystem mounts the `cover-tile` /
-# `playlist-tile` sub-scenes (#979); this module keeps the library-key adapter
+# is SCENE-DRIVEN (#975): assets/scenes/Library.raescene owns the skeleton and
+# the `CoverGrid` container, CoverGridSystem mounts the `CoverTile` /
+# `PlaylistTile` sub-scenes (#979); this module keeps the library-key adapter
 # shared with the Home grid.
 import Files
 import ui/Components
@@ -44,7 +44,7 @@ func collectLibraryCoverKeys(
 
 # Persistent-world entrypoint (#975, SCENE-DRIVEN). The page skeleton — top
 # bar, scrollable Body, the CoverGrid container with its Layout/gap — is
-# authored in assets/scenes/library.raescene; the container carries a
+# authored in assets/scenes/Library.raescene; the container carries a
 # `CoverGrid { columns: 3, source: library }` component and coverGridSystem
 # materialises the tile rows beneath it from app state (and again whenever
 # the library changes, so an album removed via the bottom sheet drops out).
@@ -59,7 +59,7 @@ func mountLibraryPage(
   let scene: view Scene => scenes.library
   let overrides: List(SceneOverride) = emptyOverrides()
   let pageIdCopy: String = "{libraryPageId}"
-  let libraryLabel: String = "library"
+  let libraryLabel: String = "Library"
   let mount: EntityId = mountPageOrError(
     world: world
     pageId: own pageIdCopy
