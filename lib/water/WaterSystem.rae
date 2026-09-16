@@ -42,6 +42,7 @@ open water/WaterGpuIds
 open water/WaterGpuBridge
 open GbufferUnderwater
 open gpu/GpuResources
+open gpu/GpuDependencies
 open gpu/GpuTextures
 open gpu/GpuLifetime
 open gpu/GpuRender
@@ -223,6 +224,12 @@ func waterSubmit(
 
 func waterPollSubmissions(waterSystem: mod WaterSystem, resources: mod GpuResources) {
   pollSubmissions(inFlight: waterSystem.inFlight, resources: resources)
+  # Submission dependency slices live in the manager's shared append arena.
+  # Water records FFT, readback and surface work every frame, so retired
+  # submissions must be removed from that arena just as Gpu2dCanvas removes
+  # its per-frame slices. Without this relocation the GPU object tables stay
+  # flat while the three CPU dependency Lists grow forever.
+  compactDependencies(resources: resources)
 }
 
 func waterDrainSubmissions(waterSystem: mod WaterSystem, resources: mod GpuResources) {
