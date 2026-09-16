@@ -20,8 +20,9 @@
 # one-offs like the debug panel's literal ink).
 #
 # STYLE INHERITANCE (§4): text styles and shadow tokens may carry
-# `"extends": "<other>"` — single parent, FLATTENED HERE at load
-# (child fields win). Runtime never walks a chain. Depth is capped at
+# `"extends": "<other>"` — single parent, flattened after the page and all
+# imported token tables have been appended (child fields win). Runtime never
+# walks a chain. Depth is capped at
 # 4; an unknown parent or a cycle is a loud error (logged) and the
 # chain is truncated there, mirroring the scene-loader diagnostic
 # tone. Flatten-at-load keeps ResolvedTheme free of recursion and
@@ -86,6 +87,10 @@ type ResolvedTheme {
   shadowSoft: List(Float)
   # text styles (flattened).
   textNames: List(String)
+  # Load-time metadata retained until the complete page + imports table is
+  # flattened. Runtime consumers continue to read the value lists below.
+  textExtends: List(String)
+  textFieldMasks: List(Int)
   textFonts: List(String)
   textSizes: List(Float)
   textWeights: List(Float)
@@ -137,6 +142,8 @@ func createResolvedTheme() pub ret ResolvedTheme {
     shadowOffY: List.create(Float, cap: 8)
     shadowSoft: List.create(Float, cap: 8)
     textNames: List.create(String, cap: 32)
+    textExtends: List.create(String, cap: 32)
+    textFieldMasks: List.create(Int, cap: 32)
     textFonts: List.create(String, cap: 32)
     textSizes: List.create(Float, cap: 32)
     textWeights: List.create(Float, cap: 32)

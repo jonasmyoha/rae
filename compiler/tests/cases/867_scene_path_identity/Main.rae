@@ -1,0 +1,34 @@
+import Json
+import String
+import ui/Components
+open ui/Ecs
+import ui/Registry
+open ui/Scene
+open ui/SceneFile
+open ui/SceneImports
+open ui/SceneInstance
+open ui/SceneLoader
+open ui/ScenePolicy
+open ecs/Entity
+open ecs/ComponentTable
+
+func main() {
+  let path: String = "tests/cases/867_scene_path_identity/Legacy.raescene"
+  let scene: Scene = loadSceneFile(path: path)
+  var registry: SceneRegistry = createSceneRegistry()
+  var diagnostics: List(SceneDiagnostic) = List.create(SceneDiagnostic, cap: 1)
+  let assets: SceneAssets = resolveSceneAssets(
+    entry: scene
+    entryPath: path
+    root: "tests/cases/867_scene_path_identity/"
+    registry: registry
+    diagnostics: diagnostics
+    sceneLabel: scene.sceneId
+  )
+  log(
+    "identity={scene.sceneId} diagnostics={diagnostics.length} imports={assets.importedIds.length}"
+  )
+  if let diagnostic: view SceneDiagnostic => diagnostics.viewAt(index: 0) {
+    log("{diagnostic.name}: {diagnostic.message}")
+  }
+}

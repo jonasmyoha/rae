@@ -17,9 +17,9 @@ and a reference is the path from the scene root with no extension:
 
 `CoverageCard` (today's bare id) is simply the zero-folder case. The extension
 is a property of the file on disk, never of the reference — the format can be
-renamed later and no scene changes. The in-file `"sceneId"` is redundant with
-the path; while it exists it is a checked assertion (a mismatch is a
-diagnostic, never a different identity) and it is slated to go.
+renamed later and no scene changes. There is no top-level `"sceneId"`: the
+root-relative package path is the identity. A legacy document that still
+writes the field gets `sceneId is the path; remove the field`.
 
 Binary data is the opposite: **a file path with its extension, relative to the
 file that declares it** — `"../art/Play_Button.png"`,
@@ -69,7 +69,7 @@ from the root, not from its parent scene's folder.
 
 ## 3. `import`: configuration into scope, nothing mounted
 
-    { "type": "Scene", "version": 2, "sceneId": "Battle",
+    { "type": "Scene", "version": 2,
       "import": ["Theme", "shared/GameAssets"],
       "root": "Screen", "nodes": { ... } }
 
@@ -82,11 +82,12 @@ qualified/bare distinction.
 
 Resolution is **nearest-wins in list order**: the scene's own blocks first,
 then each import depth-first (an imported scene may import too), first
-declaration of a token / texture key / font wins. A cycle is skipped, the depth
+declaration of a token / texture key / font wins. A text style may `extends` a
+style from any imported scene; the chain is flattened after the full
+nearest-first table is assembled. A cycle is skipped, the depth
 is capped (8) with a diagnostic, a missing or unparsable import is a diagnostic
 and the page still mounts. A `SceneInstance` child resolves through its own
-file + imports, then the mounting page's resolved set. A `text` style's
-`extends` chain resolves within its own file.
+file + imports, then the mounting page's resolved set.
 
 A "config scene" is just a scene with no nodes (`version: 3`, no `root`): the
 file name carries no meaning, `Theme` and `Assets` below are conventions of

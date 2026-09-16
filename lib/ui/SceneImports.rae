@@ -306,7 +306,7 @@ func followSceneImports(
           )
           continue
         }
-        let loaded: Scene = loadSceneFile(path: path)
+        let loaded: Scene = loadScenePackageFile(path: path, sceneId: importId)
         if loaded.doc.ok is false {
           reportSceneDiagnostic(
             diagnostics: diagnostics
@@ -318,7 +318,7 @@ func followSceneImports(
           )
           continue
         }
-        checkSceneIdMatches(
+        reportLegacySceneId(
           scene: loaded
           sceneId: importId
           path: path
@@ -351,24 +351,20 @@ func followSceneImports(
   }
 }
 
-# The in-file `sceneId` is a checked assertion against the package path it was
-# reached by (a mismatch is a diagnostic, never a different identity); it is
-# redundant with the path and slated to go.
-func checkSceneIdMatches(
+# Identity comes only from the package path. Keep a targeted migration
+# diagnostic for old documents instead of silently treating their field as an
+# assertion or a second source of truth.
+func reportLegacySceneId(
   scene: view Scene
   sceneId: view String
   path: view String
   diagnostics: mod List(SceneDiagnostic)
 ) {
-  if scene.sceneId.length() is 0 or scene.sceneId is sceneId {
+  if scene.doc.ok is false {
     ret
   }
-  # A bare file name matches the last package segment too.
-  let slash: Int = sceneId.lastIndexOf(sub: "/")
-  if slash >= 0 and scene.sceneId is sceneId.sub(
-    start: slash + 1
-    len: sceneId.length() - slash - 1
-  ) {
+  let root: JsonValue = Json.root(doc: scene.doc)
+  if Json.field(doc: scene.doc, this: root, key: "sceneId") < 0 {
     ret
   }
   reportSceneDiagnostic(
@@ -377,7 +373,7 @@ func checkSceneIdMatches(
     nodeId: ""
     kind: SceneDiagnosticKind.unknownToken
     name: "sceneId"
-    message: "{path} declares sceneId \"{scene.sceneId}\" but is referenced as \"{sceneId}\"; the path is the identity"
+    message: "{path}: sceneId is the path; remove the field"
   )
 }
 
@@ -469,7 +465,7 @@ func registerSceneReferencesRecursive(
         # before either consumer actually needs the reference.
         continue
       }
-      let referenced: Scene = loadSceneFile(path: path)
+      let referenced: Scene = loadScenePackageFile(path: path, sceneId: sceneId)
       if referenced.ok is false {
         reportSceneDiagnostic(
           diagnostics: diagnostics
@@ -481,7 +477,7 @@ func registerSceneReferencesRecursive(
         )
         continue
       }
-      checkSceneIdMatches(
+      reportLegacySceneId(
         scene: referenced
         sceneId: sceneId
         path: path
@@ -552,6 +548,12 @@ func resolveSceneAssets(
   sceneLabel: view String
 ) ret SceneAssets {
   var assets: SceneAssets = createSceneAssets()
+  reportLegacySceneId(
+    scene: entry
+    sceneId: sceneLabel
+    path: entryPath
+    diagnostics: diagnostics
+  )
   collectSceneAssetsBlock(
     assets: assets
     scene: entry
@@ -590,6 +592,7 @@ func sceneImportedTheme(
       }
     }
   }
+  resolveThemeTextExtends(theme: theme)
   ret theme
 }
 
