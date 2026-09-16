@@ -16,9 +16,9 @@ func loadSceneFile(path: view String) pub ret Scene {
 
 type AlbumScenes {
   # The SUB-scene registry, keyed by sceneId: what a `SceneInstance` node in
-  # any page scene instances (`top-bar`, `nav-tab`; resolved by
+  # any page scene instances (`TopBar`, `NavTab`; resolved by
   # mountPageOrError, #978) and what the ListView system mounts per pooled
-  # row (`history-row`, #964). The page scenes below are named fields (see
+  # row (`HistoryRow`, #964). The page scenes below are named fields (see
   # the List(Scene) note above).
   subScenes: SceneRegistry
   trackRow: Scene
@@ -38,18 +38,18 @@ type AlbumScenes {
 
 func loadSubScenes() ret SceneRegistry {
   var subScenes: SceneRegistry = createSceneRegistry()
-  registerScene(reg: subScenes, key: "history-row", scene: loadSceneFile(path: historyRowPath))
-  registerScene(reg: subScenes, key: "nav-tab", scene: loadSceneFile(path: navTabPath))
-  registerScene(reg: subScenes, key: "top-bar", scene: loadSceneFile(path: topBarPath))
-  registerScene(reg: subScenes, key: "cover-tile", scene: loadSceneFile(path: coverTilePath))
-  registerScene(reg: subScenes, key: "playlist-tile", scene: loadSceneFile(path: playlistTilePath))
-  registerScene(reg: subScenes, key: "recent-thumb", scene: loadSceneFile(path: recentThumbPath))
+  registerScene(reg: subScenes, key: "HistoryRow", scene: loadSceneFile(path: historyRowPath))
+  registerScene(reg: subScenes, key: "NavTab", scene: loadSceneFile(path: navTabPath))
+  registerScene(reg: subScenes, key: "TopBar", scene: loadSceneFile(path: topBarPath))
+  registerScene(reg: subScenes, key: "CoverTile", scene: loadSceneFile(path: coverTilePath))
+  registerScene(reg: subScenes, key: "PlaylistTile", scene: loadSceneFile(path: playlistTilePath))
+  registerScene(reg: subScenes, key: "RecentThumb", scene: loadSceneFile(path: recentThumbPath))
   registerScene(
     reg: subScenes
-    key: "sheet-action-row"
+    key: "SheetActionRow"
     scene: loadSceneFile(path: sheetActionRowPath)
   )
-  registerScene(reg: subScenes, key: "mini-player", scene: loadSceneFile(path: miniPlayerPath))
+  registerScene(reg: subScenes, key: "MiniPlayer", scene: loadSceneFile(path: miniPlayerPath))
   ret subScenes
 }
 

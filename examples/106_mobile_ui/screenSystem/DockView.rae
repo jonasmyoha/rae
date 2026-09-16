@@ -1,11 +1,11 @@
 open ui/Ecs
 # The bottom dock and the floating back button — SCENE-DRIVEN (#978).
 #
-# assets/scenes/dock.raescene owns the dock: a full-width root (ExtentAnchor
+# assets/scenes/Dock.raescene owns the dock: a full-width root (ExtentAnchor
 # fill, the soft GradientFill shadow, the padding that extends it above the
 # controls, the Vertical layout whose negative gap tucks the mini-player's
 # lower half behind the tab capsule), the `MiniPlayer` slot and the `NavTabs`
-# capsule whose four tabs are `nav-tab` sub-scene instances with authored
+# capsule whose four tabs are `NavTab` sub-scene instances with authored
 # overrides (icon, label, the nav action on every visible node) plus a
 # `NavTab { screen }` binding. What a scene cannot express is a component a
 # system drives (DockSystems.rae): `AnchorBottom` pins the dock to the layout
@@ -13,7 +13,7 @@ open ui/Ecs
 # the active styling — so the bar is mounted ONCE and never re-mounted on a
 # tab switch (the #972 re-attach path is gone).
 #
-# assets/scenes/back-button.raescene is the floating back button, mounted once
+# assets/scenes/BackButton.raescene is the floating back button, mounted once
 # as its own page and shown (setPageActive) only while a sub-page is open.
 #
 # The mini-player is the dock's authored `MiniPlayer` SceneInstance (#981):
@@ -71,7 +71,7 @@ func mountBackButtonOverlay(
     overrides: emptyOverrides()
     w: world.layoutW
     h: world.layoutH
-    sceneLabel: "back-button"
+    sceneLabel: "BackButton"
     subScenes: scenes.subScenes
   )
   setPageActive(world: world, pageId: backButtonPageId, active: isSubPage(state: state))
@@ -79,7 +79,7 @@ func mountBackButtonOverlay(
   ret mount
 }
 
-# The bottom dock — mounted once from dock.raescene, then the mini-player is
+# The bottom dock — mounted once from Dock.raescene, then the mini-player is
 # mounted into its authored `MiniPlayer` slot as its own page. Tagged
 # `PageRoot{"dock"}` by the mount. Returns the dock entity.
 func mountBottomDockOverlay(
@@ -98,7 +98,7 @@ func mountBottomDockOverlay(
     overrides: emptyOverrides()
     w: world.layoutW
     h: dockHeight()
-    sceneLabel: "dock"
+    sceneLabel: "Dock"
     subScenes: scenes.subScenes
   )
 

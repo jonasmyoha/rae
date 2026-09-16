@@ -2,7 +2,7 @@ open ui/Ecs
 # Album-screen world composition (reference: `screens/music_player_screen_2.png`).
 #
 # The page — top bar, hero block, action buttons, play/shuffle pills, the
-# track-list container and the spacer — is assets/scenes/album.raescene
+# track-list container and the spacer — is assets/scenes/Album.raescene
 # (#979); the header texts / cover and the track rows are data bindings
 # driven by AlbumSystems.rae. This module keeps the collection resolution
 # (album vs playlist) and the scroll-clamp geometry.
@@ -15,7 +15,7 @@ open ecs/ComponentTable
 
 # Height of the album header scene: top bar (48) + hero (96) +
 # actions (44) + pills (56) + 3 inter-row gaps of `outerGap` (12).
-# Kept in sync with `album.raescene`'s authored row heights —
+# Kept in sync with `Album.raescene`'s authored row heights —
 # editing one without the other will mis-place the track list.
 func albumHeaderHeight() ret Float {
   let rowSum: Float = topBarH + heroBlockH + actionsRowH + pillsRowH
@@ -72,7 +72,7 @@ func collectionScrollFloorForState(state: view AppState) pub ret Float {
   ret collectionScrollMin(rowCount: cv.rows.length)
 }
 
-# Persistent-world entrypoint (#979, SCENE-DRIVEN). assets/scenes/album.raescene
+# Persistent-world entrypoint (#979, SCENE-DRIVEN). assets/scenes/Album.raescene
 # owns the whole page — top bar, hero block, action buttons, play/shuffle
 # pills, the `TrackList` container (Size h Hug) and the bottom spacer — and
 # the mount is one mountPageOrError plus the root's runtime ScrollState. The
@@ -98,7 +98,7 @@ func mountAlbumPage(
     overrides: overrides
     w: viewport.areaDuW
     h: viewport.areaDuH
-    sceneLabel: "album"
+    sceneLabel: "Album"
     subScenes: scenes.subScenes
   )
   # The whole page scrolls: the root carries the ScrollState the scroll FSM

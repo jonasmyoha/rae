@@ -14,7 +14,7 @@ open ui/Ecs
 #
 # Neither builds page layout: the header nodes, the list container (Size h
 # Hug, so it grows with its rows) and the spacer are authored in
-# album.raescene; the rows are the data list's items.
+# Album.raescene; the rows are the data list's items.
 import ui/Components
 import ui/Scene
 open ui/SceneInstance
@@ -132,7 +132,7 @@ func clearTrackRows(world: mod UiWorld, container: view EntityId) {
   }
 }
 
-# One track row: the `track-row` sub-scene as its own root (#990: host-less) with the
+# One track row: the `TrackRow` sub-scene as its own root (#990: host-less) with the
 # song's number / title / subtitle, the playing highlight, the widget tags
 # and the whole-row `song.openref.<index>.<stem>` click.
 func mountTrackRow(
@@ -157,7 +157,7 @@ func mountTrackRow(
   let row: EntityId = mountSubSceneOrError(
     world: world
     scene: scenes.trackRow
-    sceneLabel: "track-row"
+    sceneLabel: "TrackRow"
     overrides: overrides
     w: phoneFrameW - outerPad * 2.0
     h: trackRowH

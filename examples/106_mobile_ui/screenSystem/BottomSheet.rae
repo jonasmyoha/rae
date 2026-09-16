@@ -14,12 +14,12 @@ open ui/Ecs
 #   * `closeBottomSheet(state)` (or scrim tap → `sheet.dismiss`)
 #     hides it. The `epoch` field bumps on every mutation; the
 #     `BottomSheet` component's `builtEpoch` trails it.
-#   * Layout (#980): the whole overlay is `bottom-sheet.raescene` — a
+#   * Layout (#980): the whole overlay is `BottomSheet.raescene` — a
 #     dialog-layer root (Active false at rest), a Fill scrim, and a
 #     bottom-anchored panel — mounted once per world by
 #     `mountBottomSheetOverlay`. `bottomSheetSystem` drives every
 #     instance: root Active follows `visible`, and when `epoch` moves
-#     it re-mounts one `sheet-action-row` sub-scene per action into the
+#     it re-mounts one `SheetActionRow` sub-scene per action into the
 #     panel and sizes the panel from the row count. Nothing here builds
 #     layout entities; the row hosts are the per-item sub-scene mounts.
 #   * Render layer: the existing "dialog" layer (order 300, via the
@@ -96,14 +96,14 @@ func mountBottomSheetOverlay(
     overrides: emptyOverrides()
     w: world.layoutW
     h: world.layoutH
-    sceneLabel: "bottom-sheet"
+    sceneLabel: "BottomSheet"
     subScenes: scenes.subScenes
   )
   bottomSheetSystem(world: world, sheet: sheet, scenes: scenes)
   ret root
 }
 
-# One action row: the `sheet-action-row` sub-scene as its own root (#990:
+# One action row: the `SheetActionRow` sub-scene as its own root (#990:
 # host-less; its authored `Size { w: Fill, h: Fixed }` now applies),
 # with the label and actionId as overrides and the widget identity (the
 # actionId) plus its loading/disabled fade — StateStyle is a runtime table
