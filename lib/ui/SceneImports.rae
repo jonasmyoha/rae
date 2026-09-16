@@ -381,6 +381,166 @@ func checkSceneIdMatches(
   )
 }
 
+# The scene files referenced by `SceneInstance` and `ListView` component bags.
+# This reads the parsed document directly, before any node has been mounted, so
+# a parent scene's own references can be registered before the resolver sees it.
+func appendSceneReference(
+  references: mod List(String)
+  doc: view JsonDoc
+  component: view JsonValue
+  fieldName: view String
+) {
+  let fieldIdx: Int = Json.field(doc: doc, this: component, key: fieldName)
+  if fieldIdx < 0 {
+    ret
+  }
+  let value: JsonValue = Json.jsonValueAt(doc: doc, idx: fieldIdx)
+  let sceneId: String = Json.jsonString(this: value, fallback: "")
+  if sceneId.length() > 0 and not references.contains(value: sceneId) {
+    references.add(value: sceneId)
+  }
+}
+
+func sceneReferences(scene: view Scene) ret List(String) {
+  var references: List(String) = List.create(String, cap: 8)
+  loop var i: Int = 0, i < scene.nodes.length, ++i {
+    let node: view SceneNode => nodeAt(this: scene, idx: i)
+    let bag: JsonValue = Json.jsonValueAt(doc: scene.doc, idx: node.componentsValueIdx)
+    let instanceIdx: Int = Json.field(doc: scene.doc, this: bag, key: "SceneInstance")
+    if instanceIdx >= 0 {
+      let instance: JsonValue = Json.jsonValueAt(doc: scene.doc, idx: instanceIdx)
+      appendSceneReference(
+        references: references
+        doc: scene.doc
+        component: instance
+        fieldName: "sceneId"
+      )
+    }
+    let listViewIdx: Int = Json.field(doc: scene.doc, this: bag, key: "ListView")
+    if listViewIdx >= 0 {
+      let listView: JsonValue = Json.jsonValueAt(doc: scene.doc, idx: listViewIdx)
+      appendSceneReference(
+        references: references
+        doc: scene.doc
+        component: listView
+        fieldName: "itemSceneId"
+      )
+      appendSceneReference(
+        references: references
+        doc: scene.doc
+        component: listView
+        fieldName: "loadingSceneId"
+      )
+      appendSceneReference(
+        references: references
+        doc: scene.doc
+        component: listView
+        fieldName: "emptySceneId"
+      )
+      appendSceneReference(
+        references: references
+        doc: scene.doc
+        component: listView
+        fieldName: "errorSceneId"
+      )
+    }
+  }
+  ret references
+}
+
+func registerSceneReferencesRecursive(
+  scene: view Scene
+  root: view String
+  registry: mod SceneRegistry
+  diagnostics: mod List(SceneDiagnostic)
+  visited: mod List(String)
+) {
+  let references: List(String) = sceneReferences(scene: scene)
+  loop var i: Int = 0, i < references.length, ++i {
+    if let sceneId: String = references.copyAt(index: i) {
+      if visited.contains(value: sceneId) {
+        continue
+      }
+      visited.add(value: "{sceneId}")
+      let path: String = scenePackageFile(root: root, sceneId: sceneId)
+      if not exists(path: path) {
+        # The resolver reports a mounted missing SceneInstance. ListView keeps
+        # its existing unavailable-scene behavior; do not invent a diagnostic
+        # before either consumer actually needs the reference.
+        continue
+      }
+      let referenced: Scene = loadSceneFile(path: path)
+      if referenced.ok is false {
+        reportSceneDiagnostic(
+          diagnostics: diagnostics
+          sceneId: sceneId
+          nodeId: ""
+          kind: SceneDiagnosticKind.parseError
+          name: sceneId
+          message: "referenced scene {path}: {referenced.errorMsg}"
+        )
+        continue
+      }
+      checkSceneIdMatches(
+        scene: referenced
+        sceneId: sceneId
+        path: path
+        diagnostics: diagnostics
+      )
+      registerSceneReferencesRecursive(
+        scene: referenced
+        root: root
+        registry: registry
+        diagnostics: diagnostics
+        visited: visited
+      )
+      if not sceneRegistryHas(reg: registry, key: sceneId) {
+        let key: String = "{sceneId}"
+        registerScene(reg: registry, key: own key, scene: own referenced)
+      }
+    }
+  }
+}
+
+# Register every scene reachable from `scene` before the first instance resolve
+# pass. `visited` makes shared children and cycles finite. Referenced files are
+# resolved from the entry scene root, exactly like imports.
+func registerSceneReferencesTransitive(
+  scene: view Scene
+  root: view String
+  registry: mod SceneRegistry
+  diagnostics: mod List(SceneDiagnostic)
+) {
+  var visited: List(String) = List.create(String, cap: 16)
+  registerSceneReferencesRecursive(
+    scene: scene
+    root: root
+    registry: registry
+    diagnostics: diagnostics
+    visited: visited
+  )
+}
+
+# Registration entry point for an already-loaded scene (for example the 121
+# viewer's chrome scenes). Its reachable file references are registered first.
+func registerSceneTransitive(
+  sceneId: own String
+  scene: own Scene
+  root: view String
+  registry: mod SceneRegistry
+  diagnostics: mod List(SceneDiagnostic)
+) {
+  registerSceneReferencesTransitive(
+    scene: scene
+    root: root
+    registry: registry
+    diagnostics: diagnostics
+  )
+  if not sceneRegistryHas(reg: registry, key: sceneId) {
+    registerScene(reg: registry, key: own sceneId, scene: own scene)
+  }
+}
+
 # Resolve everything `entry` (the scene at `entryPath`, opened as the page)
 # declares and imports: its own blocks first, then its imports depth-first.
 func resolveSceneAssets(

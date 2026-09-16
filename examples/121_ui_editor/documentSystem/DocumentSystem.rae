@@ -3,11 +3,11 @@
 # load into, what its `import`s resolve to (theme tokens, textures, fonts) and
 # the page root it is mounted under (docs/ui-editor-design.md §3).
 #
-# Loading is ONE mountPage, exactly like a 106 page; sub-scenes load lazily
-# from `<root>/<package/Path>.raescene` (#1008: a scene reference is a package
+# Loading is ONE mountPage, exactly like a 106 page; sub-scenes load
+# transitively from `<root>/<package/Path>.raescene` (#1008: a scene reference is a package
 # path, resolved from the root — the opened scene's directory unless
-# `--scene-root` / RAE_UI_EDITOR_ROOT says otherwise) until no instance is left
-# unresolved, then resolveSceneInstances turns whatever is still missing into a
+# `--scene-root` / RAE_UI_EDITOR_ROOT says otherwise) before the page resolves
+# any instance. resolveSceneInstances turns whatever is still missing into a
 # red sentinel + diagnostic (the #996 `report` policy). Nothing is inferred from
 # file names: a theme reaches the page only through its `import` list. The app creates NO layout
 # entities of its own (the #990/#991 rule): the only entities are the mounted
@@ -188,67 +188,6 @@ func documentDesignSize(document: mod SceneDocument) {
   }
 }
 
-# Load `<root>/<sceneId>.raescene` into the registry if it is there and not yet
-# registered. Returns whether a scene was added this call.
-func registerSubSceneFile(
-  document: mod SceneDocument
-  world: mod UiWorld
-  sceneId: view String
-) ret Bool {
-  if sceneId.length() is 0 or sceneRegistryHas(reg: document.registry, key: sceneId) {
-    ret false
-  }
-  let path: String = scenePackageFile(root: document.root, sceneId: sceneId)
-  if not exists(path: path) {
-    ret false
-  }
-  let scene: Scene = loadSceneFile(path: path)
-  if scene.ok is false {
-    log("[ui-editor] sub-scene {sceneId} failed to parse: {scene.errorMsg}")
-    ret false
-  }
-  checkSceneIdMatches(
-    scene: scene
-    sceneId: sceneId
-    path: path
-    diagnostics: world.sceneDiagnostics
-  )
-  let key: String = "{sceneId}"
-  registerScene(reg: document.registry, key: own key, scene: own scene)
-  ret true
-}
-
-# One pass over what the mounted world still references: unresolved
-# SceneInstance ids and every ListView's row/state scene ids. Returns whether
-# anything new was registered, so the caller can resolve and go again.
-func registerReferencedSubScenes(document: mod SceneDocument, world: mod UiWorld) ret Bool {
-  var added: Bool = false
-  var wanted: List(String) = List.create(String, cap: 8)
-  let instanceCount: Int = componentCount(this: world.sceneInstances)
-  loop var i: Int = 0, i < instanceCount, ++i {
-    let entity: EntityId = componentEntityAt(this: world.sceneInstances, i: i)
-    let instance: view SceneInstance => componentView(this: world.sceneInstances, entity: entity)
-    wanted.add(value: "{instance.sceneId}")
-  }
-  let listCount: Int = componentCount(this: world.listViews)
-  loop var j: Int = 0, j < listCount, ++j {
-    let entity: EntityId = componentEntityAt(this: world.listViews, i: j)
-    let list: view ListView => componentView(this: world.listViews, entity: entity)
-    wanted.add(value: "{list.itemSceneId}")
-    wanted.add(value: "{list.emptySceneId}")
-    wanted.add(value: "{list.loadingSceneId}")
-    wanted.add(value: "{list.errorSceneId}")
-  }
-  loop var k: Int = 0, k < wanted.length, ++k {
-    if let sceneId: String = wanted.copyAt(index: k) {
-      if registerSubSceneFile(document: document, world: world, sceneId: sceneId) {
-        added = true
-      }
-    }
-  }
-  ret added
-}
-
 # A passive viewer has no app data behind a ListView, so every list gets a few
 # placeholder rows whose cells name their bound field — the row scene draws.
 func seedListViewRows(world: mod UiWorld) {
@@ -415,6 +354,12 @@ func documentPrepareSystem(document: mod SceneDocument, world: mod UiWorld) ret 
     diagnostics: world.sceneDiagnostics
     sceneLabel: document.fileName
   )
+  registerSceneReferencesTransitive(
+    scene: document.scene
+    root: document.root
+    registry: document.registry
+    diagnostics: world.sceneDiagnostics
+  )
   reportUnimportedTheme(document: document, world: world)
   ret true
 }
@@ -441,7 +386,13 @@ func documentMountSystem(
       let builtin: Scene = loadSceneFile(path: builtinPath)
       if builtin.ok {
         let key: String = "{builtin.sceneId}"
-        registerScene(reg: document.registry, key: own key, scene: own builtin)
+        registerSceneTransitive(
+          sceneId: own key
+          scene: own builtin
+          root: document.root
+          registry: document.registry
+          diagnostics: world.sceneDiagnostics
+        )
       }
     }
   }
@@ -457,17 +408,9 @@ func documentMountSystem(
     h: document.designH
   )
   setLayerById(world: world, entity: document.pageRoot, id: "document")
-  # Sub-scenes: load what the world references, resolve, and repeat while
-  # resolving exposed new references (a sub-scene's own instances).
-  var passes: Int = 0
-  loop passes < 16 {
-    let added: Bool = registerReferencedSubScenes(document: document, world: world)
-    resolveSceneInstances(world: world, registry: document.registry, pageId: "document")
-    if not added {
-      passes = 16
-    }
-    passes = passes + 1
-  }
+  # The complete reachable scene graph was registered during preparation, so
+  # the resolver can safely mount nested instances in its own depth loop.
+  resolveSceneInstances(world: world, registry: document.registry, pageId: "document")
   seedListViewRows(world: world)
   tagMountedNodeIds(world: world, scene: document.scene, pageId: "document")
   loop var r: Int = 0, r < document.registry.ids.length, ++r {
