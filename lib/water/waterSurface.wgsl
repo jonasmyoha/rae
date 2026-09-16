@@ -56,41 +56,31 @@ struct Water {
 @group(0) @binding(10) var cascadeNorm2: texture_2d<f32>;
 @group(0) @binding(11) var cascadeSampler: sampler;   // repeat: the cascades tile
 
-// The longest wave a cascade owns: the first keeps everything up to its tile,
-// the others start at the band hand-over (cascadeBandBins cells of their own
-// tile, WaterFft.cascadeBandHigh).
-fn cascadeLongestWave(cascade: i32) -> f32 {
-  if (cascade == 1) { return W.cascades.y / W.grid.w; }
-  if (cascade == 2) { return W.cascades.z / W.grid.w; }
+// The cascade maps carry a mip chain (#1002, WaterFftMips): level L is the
+// 2x2 box average of level L-1. Sampling the level whose texel matches the
+// footprint of the sample is the band-limit that keeps the sum of cascades
+// honest at every distance — a vertex sees the average of the waves its grid
+// cell cannot carry (so the pattern no longer re-phases when the centred mesh
+// snaps to the camera), and a far pixel averages texels instead of picking one.
+fn cascadeTile(cascade: i32) -> f32 {
+  if (cascade == 1) { return W.cascades.y; }
+  if (cascade == 2) { return W.cascades.z; }
   return W.cascades.x;
 }
-// Vertex-side sampling limit (#1002), the FFT twin of waveGridFactor: a cascade
-// whose longest wave spans under ~4 grid cells is faded out of the vertex
-// displacement (full above 8). Sampled on far, coarse cells the short cascades
-// alias into wide bands that re-shuffle every metre the centred mesh snaps to,
-// which reads as the sea speeding up / jittering whenever the camera moves.
-fn cascadeVertexWeight(cascade: i32, cell: f32) -> f32 {
-  if (cell <= 0.0) { return 1.0; }
-  return smoothstep(4.0, 8.0, cascadeLongestWave(cascade) / cell);
-}
-// Pixel-side limit (#1002): the maps have no mips, so once a pixel's footprint
-// on the water covers a few texels of a cascade its normal and Jacobian are
-// point samples of unrelated waves — a sparkle that decorrelates with every
-// camera step. Fade such a cascade out of the slope and foam instead.
-fn cascadePixelWeight(cascade: i32, footprint: f32) -> f32 {
-  if (W.grid.z <= 0.0) { return 1.0; }
-  var tile = W.cascades.x;
-  if (cascade == 1) { tile = W.cascades.y; }
-  if (cascade == 2) { tile = W.cascades.z; }
-  let texel = tile / W.grid.z;
-  return 1.0 - smoothstep(1.5, 4.0, footprint / texel);
+// The mip level whose texel is `footprint` world metres wide, for a map of
+// W.grid.z texels across `tile` metres. Level 0 is the full map; the chain
+// ends at the 1x1 mean (log2 of the map size).
+fn cascadeLod(cascade: i32, footprint: f32) -> f32 {
+  if (W.grid.z <= 0.0 || footprint <= 0.0) { return 0.0; }
+  let texel = cascadeTile(cascade) / W.grid.z;
+  return clamp(log2(footprint / texel), 0.0, log2(W.grid.z));
 }
 // Sum the cascades' displacement at world xy (each tiles its own size), each
-// weighted by what the grid cell under the vertex can sample.
+// at the level a `cell`-metre grid cell can sample.
 fn cascadeDisplacement(xy: vec2<f32>, cell: f32) -> vec3<f32> {
-  var d = textureSampleLevel(cascadeDisp0, cascadeSampler, xy / W.cascades.x, 0.0).xyz * cascadeVertexWeight(0, cell);
-  if (W.centre.z > 1.5) { d += textureSampleLevel(cascadeDisp1, cascadeSampler, xy / W.cascades.y, 0.0).xyz * cascadeVertexWeight(1, cell); }
-  if (W.centre.z > 2.5) { d += textureSampleLevel(cascadeDisp2, cascadeSampler, xy / W.cascades.z, 0.0).xyz * cascadeVertexWeight(2, cell); }
+  var d = textureSampleLevel(cascadeDisp0, cascadeSampler, xy / W.cascades.x, cascadeLod(0, cell)).xyz;
+  if (W.centre.z > 1.5) { d += textureSampleLevel(cascadeDisp1, cascadeSampler, xy / W.cascades.y, cascadeLod(1, cell)).xyz; }
+  if (W.centre.z > 2.5) { d += textureSampleLevel(cascadeDisp2, cascadeSampler, xy / W.cascades.z, cascadeLod(2, cell)).xyz; }
   return d;
 }
 // Slopes add across cascades (a normal is -slope, 1). Whitecaps come from the
@@ -99,28 +89,33 @@ fn cascadeDisplacement(xy: vec2<f32>, cell: f32) -> vec3<f32> {
 fn foamFromJacobian(j: f32) -> f32 {
   return clamp((0.5 - j) * 2.0, 0.0, 1.0);
 }
-fn cascadeSlopeFoam(xy: vec2<f32>) -> vec3<f32> {
+fn cascadeSlopeFoam(xy: vec2<f32>) -> vec4<f32> {
   var slope = vec2<f32>(0.0);
   var foam = 0.0;
-  // World metres this pixel covers on the still surface (the sampling footprint).
+  // Toksvig: an averaged normal is shorter than 1 by the slope variance its
+  // mip level hides; the sum of those shortfalls widens the sun glint so far
+  // water reads as a calm, matte field rather than a mirror.
+  var hidden = 0.0;
+  // The pixel's footprint on the still surface picks the level, explicitly,
+  // so the three cascades and the two maps agree on it.
   let footprint = max(length(dpdx(xy)), length(dpdy(xy)));
-  let w0 = cascadePixelWeight(0, footprint);
-  let n0 = textureSample(cascadeNorm0, cascadeSampler, xy / W.cascades.x).xyz;
-  slope += -n0.xy / max(n0.z, 0.05) * w0;
-  foam += foamFromJacobian(textureSample(cascadeDisp0, cascadeSampler, xy / W.cascades.x).w) * w0;
+  let n0 = textureSampleLevel(cascadeNorm0, cascadeSampler, xy / W.cascades.x, cascadeLod(0, footprint)).xyz;
+  slope += -n0.xy / max(n0.z, 0.05);
+  hidden += 1.0 - clamp(length(n0), 0.0, 1.0);
+  foam += foamFromJacobian(textureSampleLevel(cascadeDisp0, cascadeSampler, xy / W.cascades.x, cascadeLod(0, footprint)).w);
   if (W.centre.z > 1.5) {
-    let w1 = cascadePixelWeight(1, footprint);
-    let n1 = textureSample(cascadeNorm1, cascadeSampler, xy / W.cascades.y).xyz;
-    slope += -n1.xy / max(n1.z, 0.05) * w1;
-    foam += foamFromJacobian(textureSample(cascadeDisp1, cascadeSampler, xy / W.cascades.y).w) * w1;
+    let n1 = textureSampleLevel(cascadeNorm1, cascadeSampler, xy / W.cascades.y, cascadeLod(1, footprint)).xyz;
+    slope += -n1.xy / max(n1.z, 0.05);
+    hidden += 1.0 - clamp(length(n1), 0.0, 1.0);
+    foam += foamFromJacobian(textureSampleLevel(cascadeDisp1, cascadeSampler, xy / W.cascades.y, cascadeLod(1, footprint)).w);
   }
   if (W.centre.z > 2.5) {
-    let w2 = cascadePixelWeight(2, footprint);
-    let n2 = textureSample(cascadeNorm2, cascadeSampler, xy / W.cascades.z).xyz;
-    slope += -n2.xy / max(n2.z, 0.05) * w2;
-    foam += foamFromJacobian(textureSample(cascadeDisp2, cascadeSampler, xy / W.cascades.z).w) * w2;
+    let n2 = textureSampleLevel(cascadeNorm2, cascadeSampler, xy / W.cascades.z, cascadeLod(2, footprint)).xyz;
+    slope += -n2.xy / max(n2.z, 0.05);
+    hidden += 1.0 - clamp(length(n2), 0.0, 1.0);
+    foam += foamFromJacobian(textureSampleLevel(cascadeDisp2, cascadeSampler, xy / W.cascades.z, cascadeLod(2, footprint)).w);
   }
-  return vec3<f32>(slope, foam);
+  return vec4<f32>(slope, foam, clamp(hidden, 0.0, 1.0));
 }
 
 struct VsOut {
@@ -338,7 +333,7 @@ fn fs(i: VsOut) -> @location(0) vec4<f32> {
   // (Jacobian < 1 -> foam), streaked by the noise; the shoreline depth foam
   // (cutoff ~0 in the shallows) stays.
   let realisticPath = W.cascades.w > 0.5;
-  var cascade = vec3<f32>(0.0);
+  var cascade = vec4<f32>(0.0);
   if (realisticPath) {
     cascade = cascadeSlopeFoam(i.gridXy);
     let shoreline = smoothstep(-0.03, 0.03, 0.15 - foamT);
@@ -410,11 +405,21 @@ fn fs(i: VsOut) -> @location(0) vec4<f32> {
   let toSun = normalize(-W.sun.xyz);
   let ndl = clamp(dot(n, toSun), 0.0, 1.0);
   let h = normalize(toSun + toCamera);
-  let spec = pow(clamp(dot(n, h), 0.0, 1.0), W.sunColor.w);
+  // Realistic: Toksvig — the slope the sampled mip level averaged away
+  // (cascade.w) lowers the Blinn-Phong exponent and the glint's energy, so a
+  // distant, band-limited pixel gets a broad soft highlight, not a mirror.
+  var shininess = W.sunColor.w;
+  var glintScale = 1.0;
+  if (realisticPath) {
+    let keep = 1.0 - cascade.w;
+    shininess = max(W.sunColor.w * keep / (1.0 + W.sunColor.w * cascade.w), 2.0);
+    glintScale = shininess / W.sunColor.w;
+  }
+  let spec = pow(clamp(dot(n, h), 0.0, 1.0), shininess);
   var highlight = smoothstep(W.sun.w - 0.03, W.sun.w + 0.03, spec);
   if (realisticPath) {
     colour *= 0.85 + 0.15 * ndl;
-    highlight = spec;
+    highlight = spec * glintScale;
   } else {
     colour *= 0.78 + 0.22 * smoothstep(0.25, 0.32, ndl);
     // The stepped glint on the Gerstner normals tiles into a checkerboard at
