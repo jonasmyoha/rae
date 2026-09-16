@@ -240,13 +240,12 @@ nested heap-owning field.
    `drop(T)` overload for container fields. It tripped two distinct
    problems that need a deeper redesign before relanding:
 
-   - **Aliasing.** `let ch: Children = componentGet(...)` shallow-
-     copies a struct that aliases world storage. Auto-dropping `ch`
-     on scope exit freed the storage the world still pointed at,
-     corrupting the heap. Gating Layer 5 to fire only on bindings
-     constructed in-place (struct literal / auto-init) sidesteps
-     this, but means the "transferred ownership of a return value"
-     case (createUiWorld, parseScene, …) still leaks.
+   - **Aliasing (historical).** `let ch: Children = componentGet(...)` once
+     shallow-copied a struct that aliased world storage. Auto-dropping `ch` on
+     scope exit freed the storage the world still pointed at. The current
+     `componentGet` / `componentDataAt` route through an optional value-copy
+     boundary and recursively copy heap fields, so their returned value is now
+     independently owned; `componentView` remains the no-copy read path.
    - **Mangler interaction.** Calling `rae_mangle_specialized_function`
      for `drop(T)` on every container-typed field of every struct
      reachable in the program forced the mangler to specialise types
