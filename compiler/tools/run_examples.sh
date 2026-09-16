@@ -227,6 +227,23 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
               cat "$TMP_OUT/render-$NAME.log" "$TMP_OUT/screenshot-$NAME.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
             fi
           done
+          # NestedPage (#1011) is page -> sub-scene -> sub-sub-scene. The
+          # registry must contain both descendants before the first resolve;
+          # otherwise report policy consumes the child marker as missing.
+          SCREENSHOT="$TMP_OUT/ui-editor-NestedPage.bmp"
+          if (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/NestedPage.raescene" \
+             RAE_UI_EDITOR_ROOT="examples/121_ui_editor/assets/samples" \
+             RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
+             perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-NestedPage.log" 2>&1 \
+             && grep -qE '\[ui-editor\] mounted NestedPage: [1-9][0-9]* nodes, 0 diagnostics' "$TMP_OUT/render-NestedPage.log" \
+             && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=20 \
+                > "$TMP_OUT/screenshot-NestedPage.log" 2>&1; then
+            :
+          else
+            UI_EDITOR_OK=0
+            echo "  nested sub-scene sample failed:"
+            cat "$TMP_OUT/render-NestedPage.log" "$TMP_OUT/screenshot-NestedPage.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
+          fi
           # The effect systems (#1005): Coverage's AnimFrames / WobbleFx /
           # BackgroundPan+SmokeFx / Carousel nodes must have MOVED between frame
           # 2 and frame 12 at the same fixed step (assert_bmp_diff MISMATCH is
@@ -282,7 +299,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/render-select.log" "$TMP_OUT/screenshot-select.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
           fi
           if [ "$UI_EDITOR_OK" = "1" ]; then
-            echo "PASS: $EXAMPLE_NAME (6 samples incl. Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select)"
+            echo "PASS: $EXAMPLE_NAME (7 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (ui editor sample gate)"
