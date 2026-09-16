@@ -689,14 +689,18 @@ identifies follow-up work that doesn't fit the current turn.
   still-open tasks into the root queue and delete the duplicate.
 
 - SUMU may create this file when queue features are used.
-- SUMU updates queue item status markers — `[>sumu]` (or
-  `[>claude]`) for in-progress and `[x]` for done. Leave those
-  markers to SUMU; you don't need to update them yourself.
-- **You may freely append new items.** Use the next unused numeric
-  id, the `[ ]` unchecked marker, and keep each item to a single
-  line so SUMU's regex-style edits don't fight you. Example:
+- SUMU writes the RUNNING marker (`[>sumu]` / `[>claude]`) when it
+  dispatches a task; the agent that ran it writes the OUTCOME marker on
+  the same line as its last act (`[x]` / `[failed]` / `[question]` /
+  `[postponed]`, in the same commit as the work) — see the per-task brief.
+- **You may freely append new items — WITHOUT an id.** A task's `#id`
+  is an 8-digit number SUMU mints when it next loads the file; never
+  guess a `#<next id>` (a guessed number collides with one guessed
+  elsewhere, and a collision deletes a task). Use the `[ ]` marker and
+  keep each item to a single line so SUMU's regex-style edits don't
+  fight you. Line order is queue order (top = next). Example:
 
-    `- [ ] #196 Implement docs/ownership-model.md: …`
+    `- [ ] Implement docs/ownership-model.md: …`
 
 - Keep manual edits simple (single-line items, no multi-line
   formatting) to avoid merge conflicts with SUMU's status updates.
