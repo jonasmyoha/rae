@@ -159,7 +159,10 @@ it (`Coverage` unless a nicer example exists).
 | BackgroundPan, Carousel, SmokeFx, WobbleFx | as declared (+ `Carousel.autoAdvanceSec`, #1005) | yes | yes — lib/ui/animationSystem/EffectSystems.rae (#1005): sine / two-sine runtime offsets, a swipe-or-timer paged container with `previewScale`, puffs recycled from the node's authored children | Coverage `BackdropBox`, `IconSprite`, `CardsRow` |
 | AnimFrames, AnimTrigger | baseKey frames textureKeys fps loopForever onEndTextureKey (+ `frameCount`, #1005); event actionId restartOnTrigger | yes — the `frames` / `textureKeys` List fields decode from their JSON arrays (#1007; Coverage's `NineSlice` authors `frames: [0, 1, 2]`), or author `baseKey` + `frameCount` for `<baseKey><i>` keys | yes (#1005): frames advance at fps into Sprite.textureKey, loop or stop on onEndTextureKey; a trigger (actionId, or click/hover on the node) starts / restarts | Coverage `NineSlice` |
 
-`typeName` of a `List(T)` field is spelled in full since #1006, and a scene's `List(Int)` / `List(String)` field is populated from its JSON array since #1007 (read a List-carrying component through `componentView`, never by value — `componentGet` / `componentDataAt` copy the struct shallowly and the copy's drop would free the table's buffers).
+`typeName` of a `List(T)` field is spelled in full since #1006, and a scene's
+`List(Int)` / `List(String)` field is populated from its JSON array since #1007.
+`componentGet` / `componentDataAt` now return an independent deep copy of such a
+component; use `componentView` in read-only hot paths to avoid that copy.
 The effect systems landed with #1005. Rotation,
 nine-slice, tiling and rounded clips for every pipeline landed with #1003.
 

@@ -1,0 +1,57 @@
+# componentGet / componentDataAt return owned component values. A component
+# with String and List(String) fields must be copied recursively: storing the
+# returned values elsewhere and dropping both copies must leave the table's
+# original intact. The unused `copy T` parameter loop also proves that the
+# callee releases the independent copies it receives.
+import Sys
+open ecs/ComponentTable
+open ecs/Entity
+
+func rae_ext_rae_mem_stats_outstanding() unsafe extern ret Int
+
+type HeapComponent {
+  label: String
+  items: List(String)
+}
+
+func createHeapComponent(seed: view Int) ret HeapComponent {
+  var items: List(String) = List.create(String, cap: 2)
+  items.add(value: "item-{seed}-heap")
+  ret HeapComponent { label: "label-{seed}-heap", items: items }
+}
+
+func discard(value: copy HeapComponent) {
+  # The parameter is intentionally unused. Its callee-owned recursive copy
+  # must still be released on fallthrough.
+}
+
+func main() {
+  unsafe {
+    var table: ComponentTable(HeapComponent) = createComponentTable(HeapComponent)
+    let entity: EntityId = id(v: 7)
+    componentSet(this: table, entity: entity, data: createHeapComponent(seed: 1))
+
+    var copies: List(HeapComponent) = List.create(HeapComponent, cap: 2)
+    copies.add(value: componentGet(this: table, entity: entity))
+    copies.add(value: componentDataAt(this: table, i: 0))
+
+    let first: mod HeapComponent => copies.modAt(index: 0)
+    first.items.add(value: "copy-only")
+    first.label = "changed-copy"
+
+    let original: view HeapComponent => componentView(this: table, entity: entity)
+    log("copies={copies.length} firstItems={first.items.length}")
+    log("original={original.label} items={original.items.length}")
+
+    # Warm the generated deep-copy/drop paths before taking the allocation
+    # baseline, then repeat enough times to expose an unused-copy-param leak.
+    let copySource: HeapComponent = componentGet(this: table, entity: entity)
+    discard(value: copySource)
+    let baseline: Int = rae_ext_rae_mem_stats_outstanding()
+    loop var i: Int = 0, i < 1000, ++i {
+      discard(value: copySource)
+    }
+    let leaked: Int = rae_ext_rae_mem_stats_outstanding() - baseline
+    log("unused copy param leaked={leaked}")
+  }
+}

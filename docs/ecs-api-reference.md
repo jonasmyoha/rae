@@ -51,7 +51,7 @@ func createComponentTable(T: type) ret ComponentTable(T)
 
 func componentSet(this: mod ComponentTable(T), entity: view EntityId, data: own T)
 func componentHas(this: view ComponentTable(T), entity: view EntityId) ret Bool
-func componentGet(this: view ComponentTable(T), entity: view EntityId) ret T          # a COPY
+func componentGet(this: view ComponentTable(T), entity: view EntityId) ret T          # owned deep copy
 func componentView(this: view ComponentTable(T), entity: view EntityId) ret view T    # read-only alias
 func componentMod(this: mod ComponentTable(T), entity: view EntityId) ret mod T        # write-through alias
 func componentRemove(this: mod ComponentTable(T), entity: view EntityId)               # ordered? no — swap-remove
@@ -59,7 +59,7 @@ func componentCount(this: view ComponentTable(T)) ret Int
 
 # Dense iteration (index 0..count):
 func componentEntityAt(this: view ComponentTable(T), i: view Int) ret EntityId
-func componentDataAt(this: view ComponentTable(T), i: view Int) ret T
+func componentDataAt(this: view ComponentTable(T), i: view Int) ret T                  # owned deep copy
 
 # Change tracking:
 func componentTableGeneration(this: view ComponentTable(T)) ret Int    # bumped on any set/mod/remove
@@ -69,6 +69,11 @@ func componentModStamp(this: view ComponentTable(T), entity: view EntityId) ret 
 `componentMod` returning a live `mod T` is the #1 ECS ergonomic — drive an entity
 in place, no copy-out/mutate/set-back. Dense order is insertion order UNTIL the
 first non-tail `componentRemove` — see the iteration-order contract below.
+
+`componentGet` and `componentDataAt` return independent owned values, including
+recursive copies of String/List/Map fields. Prefer `componentView` / `queryViewAt`
+for read-only per-frame walks where that copy is unnecessary; use the value
+accessors when the result must outlive or be mutated independently of the table.
 
 ### Iteration-order contract (#810)
 
