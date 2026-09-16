@@ -38,14 +38,15 @@ open ui/SceneFile
 open ui/SceneInstance
 
 # Which sky model the dialog is asking for. Deliberately not SkyKind: that enum
-# also carries `none`, `hdri` and `stylised`, which are not choices this dialog
-# offers. Mapping to SkyKind is the app's job, because only the app knows what
-# to build a Sky out of.
-enum SettingsSkyModel { preetham, hosek, solid }
+# also carries `none` and `hdri`, which are not choices this dialog offers.
+# Mapping to SkyKind is the app's job, because only the app knows what to build
+# a Sky out of.
+enum SettingsSkyModel { preetham, hosek, stylised, solid }
 
 # Preetham: the default sky across the examples — the analytic model, listed
 # first here and first in the panel.
 # Hosek-Wilkie: the fitted physical model.
+# Stylised: a painted, three-band palette with the same time-of-day sun.
 # A flat colour. Not a lesser sky — it is the control case: with no gradient
 # and no sun disc, anything still varying across the background is coming from
 # somewhere else, which is how you tell a sky bug from a lighting bug.
@@ -339,6 +340,10 @@ func settingsHandleAction(settingsState: mod SettingsState, actionId: view Strin
     settingsState.skyModel = SettingsSkyModel.preetham
     ret true
   }
+  if actionId is "settings.sky.stylised" {
+    settingsState.skyModel = SettingsSkyModel.stylised
+    ret true
+  }
   if actionId is "settings.sky.solid" {
     settingsState.skyModel = SettingsSkyModel.solid
     ret true
@@ -538,6 +543,11 @@ func settingsApplyToWorld(settingsState: view SettingsState, world: mod UiWorld)
   )
   setNodeFillSlot(
     world: world
+    nodeId: "SettingsSkyStylised"
+    slot: settingsSlotFor(on: settingsState.skyModel is SettingsSkyModel.stylised)
+  )
+  setNodeFillSlot(
+    world: world
     nodeId: "SettingsSkySolid"
     slot: settingsSlotFor(on: settingsState.skyModel is SettingsSkyModel.solid)
   )
@@ -680,6 +690,18 @@ func settingsBuildSky(
     pre.exposure = day
     pre.sunDiscIntensity = pre.sunDiscIntensity * day
     ret pre
+  }
+  if settingsState.skyModel is SettingsSkyModel.stylised {
+    var painted: Sky = createSkyStylised(
+      sunDir: dir
+      sunColor: col
+      zenith: Vec3.create(x: 0.16, y: 0.34, z: 0.62)
+      horizon: Vec3.create(x: 0.74, y: 0.80, z: 0.72)
+      bands: 3.0
+    )
+    painted.exposure = day
+    painted.sunDiscIntensity = painted.sunDiscIntensity * day
+    ret painted
   }
   var hos: Sky = createSkyHosek(
     data: data
