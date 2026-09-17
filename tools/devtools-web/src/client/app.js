@@ -3265,8 +3265,21 @@ async function runAllExamples() {
     appendExampleOutput(`\n--- AUTOMATED RUN: ${example.name} (${targetId}) ---`, "stdout");
 
     const beforeRunIdx = allExampleLogLines.length;
-    await triggerExampleRun("run", targetId);
-    const runId = activeExampleRunId;
+    // The id of THIS run, from the run response itself. It used to be read
+    // from activeExampleRunId, which the socket event sets a moment later, so
+    // the batch often captured null, never matched the app-start marker, sat
+    // out the whole 120 s build budget and then blamed the build.
+    const runId = (await triggerExampleRun("run", targetId)) ?? activeExampleRunId;
+    if (!runId) {
+      batchResults.push({
+        id: example.id,
+        name: example.name,
+        success: false,
+        skipped: false,
+        errors: ["the run could not be started"]
+      });
+      continue;
+    }
 
     // Two budgets, not one. The compiler prints @@RAE_APP_START@@ (server:
     // example-app-started) the moment the built binary is exec'd, so the
@@ -3533,6 +3546,14 @@ async function triggerExampleRun(mode = "run", targetId = null, actionId = null)
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
+    // The run id comes back in the response so a caller has it the moment
+    // the run exists. The `example-run-started` socket event carries the same
+    // id but races the response, and `activeExampleRunId` is only set by that
+    // event — reading it right after this call used to yield null.
+    const body = await response.json().catch(() => null);
+    const runId = typeof body?.runId === "string" ? body.runId : null;
+    if (runId && !activeExampleRunId) activeExampleRunId = runId;
+    return runId;
   } catch (error) {
     recordError("Example run", getErrorMessage(error));
     setExampleStatus("error", "is-failure", target.label);
@@ -3541,6 +3562,7 @@ async function triggerExampleRun(mode = "run", targetId = null, actionId = null)
     exampleWatchActive = false;
     updateExampleButtons();
   }
+  return null;
 }
 
 // Stop the SELECTED example's run only. With concurrent runs, an unqualified
