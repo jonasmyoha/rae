@@ -1,7 +1,21 @@
 import sys
 
+# The lock file lives in the OS temp directory, not in the project: `lockFile`
+# creates it if it is missing, so nothing has to be checked in for the example
+# to run, and it is deleted again once the lock is released.
+func lockPath() ret String {
+  let tempDir: String = getEnv(name: "TMPDIR")
+  if tempDir.length() is 0 {
+    ret "/tmp/rae_example_27.lock"
+  }
+  if tempDir.endsWith(suffix: "/") {
+    ret "{tempDir}rae_example_27.lock"
+  }
+  ret "{tempDir}/rae_example_27.lock"
+}
+
 func main() {
-  let path: String = "data.lock"
+  let path: String = lockPath()
 
   log("Attempting to lock {path}...")
   if lockFile(path: path) {
@@ -17,6 +31,7 @@ func main() {
     } else {
       log("ERROR: Failed to release lock.")
     }
+    delete(path: path)
   } else {
     log("ERROR: Could not acquire lock.")
   }
