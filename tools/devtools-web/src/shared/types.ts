@@ -221,6 +221,21 @@ export type ExampleBuildTimingMessage = {
   timestamp: string;
 };
 
+/** The compiler's `@@RAE_BUILD_PROGRESS@@` line (compiler/src/progress.h),
+ * streamed every 500 ms and at each phase change while a build runs under
+ * RAE_PROGRESS=lines: the phase it is in and its 0..1 completion estimate.
+ * The raw line is NOT echoed as output — the client draws it as a bar. */
+export type ExampleBuildProgressMessage = {
+  type: "example-build-progress";
+  runId: string;
+  exampleId?: string;
+  entry: string;
+  phase: "load" | "sema" | "emit" | "cc";
+  fraction: number;
+  elapsedMs: number;
+  timestamp: string;
+};
+
 /** The compiler's `@@RAE_APP_START@@` line: the build is done and the app
  * binary is now running. Lets a driver budget build and run separately. */
 export type ExampleAppStartedMessage = {
@@ -333,6 +348,7 @@ export type ServerEvent =
   | ExampleRunStartedMessage
   | ExampleRunOutputMessage
   | ExampleBuildTimingMessage
+  | ExampleBuildProgressMessage
   | ExampleAppStartedMessage
   | ExampleRunCompletedMessage
   | ExampleRunErrorMessage
