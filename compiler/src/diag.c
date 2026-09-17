@@ -1,6 +1,7 @@
 /* diag.c - Diagnostic implementation */
 
 #include "diag.h"
+#include "progress.h"
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -70,6 +71,7 @@ void diag_ctx_error(DiagState* state, const char* file, int line, int col, const
 }
 
 void diag_ctx_report(DiagState* state, const char* file, int line, int col, const char* message) {
+  progress_hide();
   state->error_count++;
   if (g_diag_quiet) return;
   fprintf(stderr, "%s:%d:%d: %s\n", simplify_path(file), line, col, message);
@@ -82,6 +84,7 @@ void diag_ctx_report(DiagState* state, const char* file, int line, int col, cons
 // A non-fatal WARNING: prints but does NOT increment error_count, so the build
 // still succeeds (used by the no-globals warning, #763).
 void diag_ctx_warn(DiagState* state, const char* file, int line, int col, const char* message) {
+  progress_hide();
   (void)state;
   if (g_diag_quiet) return;
   fprintf(stderr, "%s:%d:%d: warning: %s\n", simplify_path(file), line, col, message);
@@ -98,6 +101,7 @@ void diag_ctx_reset(DiagState* state) {
 }
 
 void diag_ctx_fatal(DiagState* state, const char* message) {
+  progress_hide();
   state->had_fatal = true;
   fprintf(stderr, "fatal error: %s\n", message);
   exit(1);

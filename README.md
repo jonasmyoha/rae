@@ -399,6 +399,13 @@ browser bundle; `rae watch` rebuilds and restarts on save, and an app using
 `lib/hot_reload` keeps its state across the restart. `rae init` scaffolds a
 project.
 
+On a terminal, `rae run` and `rae build` show a two-line progress display
+while they work — an activity ticker (one dot a second, wrapping) over a
+twenty-cell bar that estimates the build from the shares each phase (module
+loading, sema, C emission, the C compiler) took the last time this entry was
+built (kept under `.rae/apps/`). It is only drawn on a TTY, so pipes and the
+test suite never see it; `RAE_PROGRESS=off` turns it off.
+
 ### One layout: the compiler formats first
 
 Rae has one canonical source layout and the compiler is its authority — there
