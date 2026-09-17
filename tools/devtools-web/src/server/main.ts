@@ -547,7 +547,7 @@ const server = Bun.serve<SocketData>({
       const mode = resolveExampleMode(payload);
       const rawTargetId = typeof payload.targetId === "string" ? payload.targetId : undefined;
       const targetId = rawTargetId ?? action?.targetId ?? undefined;
-      await exampleRunner.run(entry, {
+      const runId = await exampleRunner.run(entry, {
         mode,
         targetId,
         profile: resolveExampleProfile(payload),
@@ -557,7 +557,7 @@ const server = Bun.serve<SocketData>({
           ? { id: action.id!, label: action.label ?? action.id!, command: action.command! }
           : undefined
       });
-      return new Response(JSON.stringify({ ok: true }), {
+      return new Response(JSON.stringify({ ok: true, runId: runId ?? null }), {
         headers: { "Content-Type": "application/json" }
       });
     }
