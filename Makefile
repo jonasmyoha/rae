@@ -24,8 +24,17 @@ test-examples:
 stop:
 	@$(MAKE) -C tools/devtools-web stop
 
+# First-time setup: Devtools Web dependencies (when Bun is installed) and the
+# compiler.
 setup:
-	@./setup.sh
+	@if command -v bun >/dev/null 2>&1; then \
+	  echo "Installing Devtools Web dependencies..."; \
+	  (cd tools/devtools-web && bun install --frozen-lockfile); \
+	else \
+	  echo "warning: Bun is not installed; skipping Devtools Web dependencies (install Bun, then: make devtools-install)" >&2; \
+	fi
+	@$(MAKE) -C compiler build
+	@echo "Setup complete. Compiler: ./compiler/bin/rae   Devtools Web: make dev"
 
 # The banned-terms gate (#1016) on its own: every tracked text file plus the
 # messages of origin/main..HEAD, against the term list OUTSIDE the repo

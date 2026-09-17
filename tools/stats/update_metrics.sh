@@ -110,7 +110,7 @@ cat > "$LATEST_FILE" <<NOTE
 Rae compiler metrics
 Timestamp: $TIMESTAMP
 Commit: $CURRENT_COMMIT
-Source directory: $SRC_DIR
+Source directory: compiler/src
 Source files (.c/.h): $FILE_COUNT
 Total lines: $LINE_COUNT
 NOTE

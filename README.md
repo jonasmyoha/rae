@@ -439,7 +439,7 @@ example, runs each one natively or in the browser with a click, and shows build
 health, the test tree and history.
 
 ```sh
-./setup.sh     # installs Devtools dependencies and builds the compiler
+make setup     # installs Devtools dependencies and builds the compiler
 make dev       # http://localhost:3000
 ```
 
