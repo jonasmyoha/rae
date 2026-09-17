@@ -47,7 +47,13 @@ func main() {
     now: 3.0
     maxAge: 2.0
   ) {
-    if Math.abs(value: sample.height - 14.0) < 0.001 and sample.displacement.x is 6.0 and sample.displacement.y is -3.0 and sample.signedJacobians.z < 0.0 and sample.sampleTimes.x is 1.0 and sample.sampleTimes.z is 3.0 {
+    # The raw cascade sum is (6, -3, 9); a realistic ocean scales it by the
+    # weather energy at the resolved grid point, so recover that energy from
+    # the x component and check the other components against the same factor.
+    let energy: Float = sample.displacement.x / 6.0
+    if energy >= 0.25 and energy <= 1.35 and Math.abs(value: sample.height - 5.0 - 9.0 * energy) < 0.001 and Math.abs(
+      value: sample.displacement.y + 3.0 * energy
+    ) < 0.001 and sample.signedJacobians.z < 0.0 and sample.sampleTimes.x is 1.0 and sample.sampleTimes.z is 3.0 {
       log("cascade sums, signed Jacobians, ages and inversion OK")
     }
   }
@@ -99,8 +105,12 @@ func main() {
     now: 1.0
     maxAge: 0.0
   ) {
-    # The surface over x=7 originated at x=5, because displacement.x = 2.
-    if Math.abs(value: sample.height - 5.0 - Math.cos(x: 6.2831853 * 5.0 / 32.0)) < 0.01 {
+    # The surface over x=7 originated at x = 7 - displacement.x (raw
+    # displacement.x = 2, scaled by the weather energy, which the wave height
+    # is scaled by too).
+    let energy: Float = sample.displacement.x / 2.0
+    let origin: Float = 7.0 - sample.displacement.x
+    if Math.abs(value: sample.height - 5.0 - energy * Math.cos(x: 6.2831853 * origin / 32.0)) < 0.01 {
       log("known wave with horizontal inversion OK")
     }
     if let wrapped: FftSurfaceSample = sampleFftSurface(
@@ -111,7 +121,13 @@ func main() {
       now: 1.0
       maxAge: 0.0
     ) {
-      if Math.abs(value: wrapped.height - sample.height) < 0.001 {
+      # A different world position sees a different weather energy, so compare
+      # the wave shape after taking that factor out: both samples must land on
+      # the same cosine of their (wrapped) origin.
+      let wrappedEnergy: Float = wrapped.displacement.x / 2.0
+      let wrappedOrigin: Float = -57.0 - wrapped.displacement.x
+      let wrappedWave: Float = (wrapped.height - 5.0) / wrappedEnergy
+      if Math.abs(value: wrappedWave - Math.cos(x: 6.2831853 * wrappedOrigin / 32.0)) < 0.01 {
         log("negative and positive tile wrapping OK")
       }
     }
