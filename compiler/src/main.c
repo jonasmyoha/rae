@@ -137,6 +137,9 @@ typedef struct {
  *   @@RAE_APP_START@@ entry=<path>
  *   @@RAE_APP_EXIT@@ entry=<path> code=<n> run_ms=<n>
  *
+ * With RAE_PROGRESS=lines the build also streams its progress estimate
+ * (progress.h): `@@RAE_BUILD_PROGRESS@@ phase=<k> fraction=<f> elapsed_ms=<n>`.
+ *
  * They go to stderr, unbuffered, so they never interleave with the program's
  * own stdout; the test runner strips the `@@RAE_` lines before comparing. */
 static long long g_build_total_lines = 0;

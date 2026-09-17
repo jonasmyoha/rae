@@ -406,6 +406,9 @@ function handleServerEvent(payload) {
     case "example-build-timing":
       handleExampleBuildTiming(payload);
       break;
+    case "example-build-progress":
+      handleExampleBuildProgress(payload);
+      break;
     case "example-app-started":
       handleExampleAppStarted(payload);
       break;
@@ -846,6 +849,29 @@ function handleExampleBuildTiming(event) {
     return;
   }
   appendExampleOutput(`⏱ ${formatBuildTiming(event)}`, "stdout");
+}
+
+// The compiler's build-progress estimate, drawn in the status chip the same
+// way the compiler draws it on a terminal (compiler/src/progress.h): a
+// twenty-cell bar of dots and the phase name. Only for the selected run; the
+// app-started event that follows replaces it with "running".
+const BUILD_PROGRESS_CELLS = 20;
+const BUILD_PROGRESS_PHASES = {
+  load: "loading modules",
+  sema: "sema",
+  emit: "emitting C",
+  cc: "compiling C"
+};
+
+function handleExampleBuildProgress(event) {
+  if (event.runId !== activeExampleRunId || !isExampleEventRelevant(event.exampleId, event.entry)) {
+    return;
+  }
+  let filled = Math.round(event.fraction * BUILD_PROGRESS_CELLS);
+  if (filled >= BUILD_PROGRESS_CELLS) filled = BUILD_PROGRESS_CELLS - 1;
+  const bar = ".".repeat(filled) + " ".repeat(BUILD_PROGRESS_CELLS - filled);
+  const phase = BUILD_PROGRESS_PHASES[event.phase] ?? event.phase;
+  setExampleStatus(`[${bar}] ${phase}`, "is-running is-building", lastExampleTargetLabel);
 }
 
 function handleExampleAppStarted(event) {
@@ -2812,9 +2838,9 @@ function resolveExampleEntry(example, targetId) {
 function setExampleStatus(label, modifierClass, targetLabel) {
   if (!exampleStatusChip) return;
   exampleStatusChip.textContent = targetLabel ? `${label} · ${targetLabel}` : label;
-  exampleStatusChip.classList.remove("is-running", "is-success", "is-failure");
+  exampleStatusChip.classList.remove("is-running", "is-success", "is-failure", "is-building");
   if (modifierClass) {
-    exampleStatusChip.classList.add(modifierClass);
+    exampleStatusChip.classList.add(...modifierClass.split(" "));
   }
 }
 

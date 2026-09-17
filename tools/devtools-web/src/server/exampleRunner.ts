@@ -14,6 +14,7 @@ import type {
   ExampleRunSummary,
   ServerEvent,
   ExampleBuildTimingMessage,
+  ExampleBuildProgressMessage,
   ExampleAppStartedMessage
 } from "../shared/types";
 import type { RaeDevtoolsConfig, TargetConfig } from "./config";
@@ -100,7 +101,11 @@ export class ExampleRunner {
     const child = spawn(prepared.command, {
       cwd,
       shell: true,
-      env: process.env,
+      // RAE_PROGRESS=lines: the compiler streams its build-progress estimate
+      // as `@@RAE_BUILD_PROGRESS@@` lines instead of drawing a terminal bar
+      // (stderr is our pipe, not a TTY); handleSentinel turns them into
+      // typed events the client renders.
+      env: { ...process.env, RAE_PROGRESS: "lines" },
       detached: true
     });
 
@@ -190,7 +195,9 @@ export class ExampleRunner {
 
     for (const line of lines) {
       if (!line.trim() && stream === "stdout") continue;
-      this.broadcastLine(run, stream, line);
+      // Progress lines arrive twice a second; they are a display, not
+      // output, so they never reach the log.
+      if (!line.startsWith("@@RAE_BUILD_PROGRESS@@")) this.broadcastLine(run, stream, line);
       if (line.startsWith("@@RAE_")) this.handleSentinel(run, line);
     }
   }
@@ -238,6 +245,19 @@ export class ExampleRunner {
         ...timing,
         timestamp
       } satisfies ExampleBuildTimingMessage);
+    } else if (line.startsWith("@@RAE_BUILD_PROGRESS@@")) {
+      const phase = fields.phase;
+      if (phase !== "load" && phase !== "sema" && phase !== "emit" && phase !== "cc") return;
+      this.broadcast({
+        type: "example-build-progress",
+        runId: run.id,
+        exampleId: run.exampleId,
+        entry: run.entry,
+        phase,
+        fraction: Math.min(1, Math.max(0, num("fraction"))),
+        elapsedMs: num("elapsed_ms"),
+        timestamp
+      } satisfies ExampleBuildProgressMessage);
     } else if (line.startsWith("@@RAE_APP_START@@")) {
       this.broadcast({
         type: "example-app-started",

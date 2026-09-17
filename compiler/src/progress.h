@@ -19,7 +19,13 @@
  * is, so the bar under-promises rather than over-promises.
  *
  * Shown only when stderr is a terminal and RAE_PROGRESS is not `off`, so
- * pipes (the devtools, the test runner, `rae watch` children) never see it.
+ * pipes (the test runner, `rae watch` children) never see it. A driver that
+ * holds stderr in a pipe and wants to draw its own bar sets
+ * RAE_PROGRESS=lines: nothing is drawn, and instead a machine-readable line
+ *
+ *   @@RAE_BUILD_PROGRESS@@ phase=<load|sema|emit|cc> fraction=<0..1> elapsed_ms=<n>
+ *
+ * goes out every 500 ms and at each phase change (the devtools does this).
  * A ticker thread redraws every 200 ms; diagnostics call progress_hide()
  * first so an error line is never written over the bar. */
 
