@@ -64,7 +64,8 @@ SRCS = $(SRC_DIR)/main.c \
        $(SRC_DIR)/c_stmt.c \
        $(SRC_DIR)/ownership.c \
        $(SRC_DIR)/raepack.c \
-       $(SRC_DIR)/mangler.c
+       $(SRC_DIR)/mangler.c \
+       $(SRC_DIR)/progress.c
 
 EXT_SRCS = ../third_party/tinyexpr/rae_tinyexpr.c ../third_party/monocypher/monocypher.c
 

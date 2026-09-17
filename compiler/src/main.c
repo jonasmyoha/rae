@@ -49,6 +49,7 @@
 #include "raepack.h"
 #include "raepack.h"
 #include "sys_thread.h"
+#include "progress.h"
 #include "../runtime/rae_runtime.h"
 
 typedef struct {
@@ -221,7 +222,11 @@ static bool build_c_backend_output(const char* entry_file,
                                    bool no_implicit,
                                    bool* out_uses_sdl3,
                                    bool* out_uses_webgpu,
-                                   WatchSources* out_sources);
+                                   WatchSources* out_sources,
+                                   ProgressPhase progress_last);
+static void watch_channel_id(const char* project_root, const char* entry,
+                             char* out, size_t out_size);
+static bool ensure_directory_p(const char* path);
 static bool ensure_directory_tree(const char* dir_path);
 static bool ensure_parent_directory(const char* file_path);
 static bool copy_runtime_assets(const char* dest_dir);
@@ -1523,6 +1528,7 @@ static bool module_graph_load_module(ModuleGraph* graph,
     long long lines = count_source_lines(source, file_size);
     g_build_total_lines += lines;
     g_build_modules++;
+    progress_module_loaded((int)g_build_modules);
     if (graph->root_path && strncmp(path_to_check, graph->root_path, strlen(graph->root_path)) == 0) {
       g_build_project_lines += lines;
     }
@@ -2271,10 +2277,39 @@ static bool build_c_backend_output(const char* entry_file,
                                    bool no_implicit,
                                    bool* out_uses_sdl3,
                                    bool* out_uses_webgpu,
-                                   WatchSources* out_sources) {
+                                   WatchSources* out_sources,
+                                   ProgressPhase progress_last) {
   diag_reset();
   build_timing_reset();
   long long emit_started_ms = rae_now_ms();
+  /* The terminal progress display (progress.h) runs from here through
+   * `progress_last`; the caller that ends the pipeline ends it
+   * (gcc_link_c_to_binary, or the --emit-c build that stops after emission).
+   * Every failure exit below ends it first so no error is printed over the
+   * bar. Its last-build record lives in the app's own `.rae/apps/<app>/`
+   * directory, the one `rae run` and `rae watch` already give each app. */
+  {
+    char cwd_abs[PATH_MAX];
+    if (!getcwd(cwd_abs, sizeof(cwd_abs))) snprintf(cwd_abs, sizeof(cwd_abs), ".");
+    char channel_id[128];
+    watch_channel_id(project_root, entry_file, channel_id, sizeof(channel_id));
+    char record_dir[PATH_MAX];
+    snprintf(record_dir, sizeof(record_dir), "%s/.rae/apps/%s", cwd_abs, channel_id);
+    /* The channel is named after the project root, which is the cwd for a
+     * plain `rae run <file>` — so the file name also carries a hash of the
+     * entry path, or every example run from the repo root would share one
+     * estimate. */
+    char abs_entry[PATH_MAX];
+    const char* hashed = realpath(entry_file, abs_entry) ? abs_entry : entry_file;
+    unsigned long long entry_hash = 1469598103934665603ull;
+    for (const unsigned char* c = (const unsigned char*)hashed; *c; c++) {
+      entry_hash = (entry_hash ^ *c) * 1099511628211ull;
+    }
+    char record_path[PATH_MAX];
+    snprintf(record_path, sizeof(record_path), "%s/build-progress-%08llx", record_dir,
+             entry_hash & 0xffffffffull);
+    progress_begin(ensure_directory_p(record_dir) ? record_path : NULL, progress_last);
+  }
   Arena* arena = arena_create(RAE_C_BACKEND_ARENA_CAPACITY);
   if (!arena) {
     diag_fatal("could not allocate arena");
@@ -2282,11 +2317,13 @@ static bool build_c_backend_output(const char* entry_file,
   ModuleGraph graph;
   if (!module_graph_init(&graph, arena, project_root)) {
     arena_destroy(arena);
+    progress_end(false);
     return false;
   }
   if (!module_graph_build(&graph, entry_file, NULL, no_implicit)) {
     module_graph_free(&graph);
     arena_destroy(arena);
+    progress_end(false);
     return false;
   }
   WatchSources collected_sources;
@@ -2296,6 +2333,7 @@ static bool build_c_backend_output(const char* entry_file,
       watch_sources_clear(&collected_sources);
       module_graph_free(&graph);
       arena_destroy(arena);
+      progress_end(false);
       return false;
     }
   }
@@ -2354,13 +2392,16 @@ static bool build_c_backend_output(const char* entry_file,
   CompilerContext ctx;
   compiler_init(&ctx, arena);
   
+  progress_phase(PROGRESS_SEMA);
   if (!sema_analyze_module(&ctx, &merged)) {
       module_graph_free(&graph);
       arena_destroy(arena);
+      progress_end(false);
       return false;
   }
 
   int errs_before_emit = diag_error_count();
+  progress_phase(PROGRESS_EMIT);
   bool ok = c_backend_emit_module(&ctx, &merged, out_file);
   /* The backend reports semantic errors it can only see with full type
    * information (a reference returned to a temporary, for one). Emission
@@ -2386,6 +2427,7 @@ static bool build_c_backend_output(const char* entry_file,
   }
   watch_sources_clear(&collected_sources);
   g_build_emit_ms = rae_now_ms() - emit_started_ms;
+  if (!ok) progress_end(false);
   return ok;
 }
 
@@ -2400,10 +2442,6 @@ static bool build_c_backend_output(const char* entry_file,
 /* Defined with the watch supervisor below; used by the plain `run` path to give
  * each app its own directory (hot-reload channel + window geometry). */
 #define RAE_HOT_RELOAD_DIR_ENV "RAE_HOT_RELOAD_DIR"
-static void watch_channel_id(const char* project_root, const char* entry,
-                             char* out, size_t out_size);
-static bool ensure_directory_p(const char* path);
-
 static bool gcc_link_c_to_binary(const char* entry_rae_file,
                                  const char* c_path,
                                  const char* out_bin,
@@ -2468,7 +2506,10 @@ static bool gcc_link_c_to_binary(const char* entry_rae_file,
            c_path, runtime_dir, extra_c_files, out_bin);
 
   long long cc_started_ms = rae_now_ms();
-  if (system(cmd) != 0) {
+  progress_phase(PROGRESS_CC);
+  int cc_rc = system(cmd);
+  progress_end(cc_rc == 0);
+  if (cc_rc != 0) {
     fprintf(stderr, "error: failed to compile C output\n");
     return false;
   }
@@ -2721,7 +2762,7 @@ static int run_compiled_file(const RunOptions* run_opts, const char* project_roo
 
   bool uses_sdl3 = false;
   bool uses_webgpu = false;
-  if (!build_c_backend_output(file_path, project_root, temp_c, run_opts->no_implicit, &uses_sdl3, &uses_webgpu, NULL)) {
+  if (!build_c_backend_output(file_path, project_root, temp_c, run_opts->no_implicit, &uses_sdl3, &uses_webgpu, NULL, PROGRESS_CC)) {
     if (chdired && have_saved) { if (chdir(saved_cwd) != 0) {} }
     return 1;
   }
@@ -3705,7 +3746,9 @@ static int run_command(const char* cmd, int argc, char** argv) {
                                           build_opts.no_implicit,
                                           &b_sdl3,
                                           &b_webgpu,
-                                          NULL);
+                                          NULL,
+                                          PROGRESS_EMIT);
+        progress_end(okc);
         // Record which non-toolchain-bundled libs the program imports next to
         // the emitted C, so `rae watch` (which emits via this subprocess) can
         // link SDL3 / wgpu-native rather than assuming a plain program.
@@ -3743,7 +3786,9 @@ static int run_command(const char* cmd, int argc, char** argv) {
                                           build_opts.no_implicit,
                                           &b_sdl3,
                                           &b_webgpu,
-                                          NULL);
+                                          NULL,
+                                          PROGRESS_EMIT);
+        progress_end(okc);
         bool linked = okc && emcc_link_c_to_web(build_opts.entry_path,
                                                 temp_c,
                                                 build_opts.out_path,
