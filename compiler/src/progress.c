@@ -13,10 +13,15 @@
 /* After progress_hide() the ticker stays quiet this long, so a burst of
  * diagnostic lines is not interleaved with redraws. */
 #define PROGRESS_QUIET_MS 400
+/* In `lines` mode a progress line goes out this often (and at every phase
+ * change); a driver redrawing a bar does not need more. */
+#define PROGRESS_LINE_MS 500
 
 static const char* const phase_names[PROGRESS_PHASES] = {
   "loading modules", "sema", "emitting C", "compiling C"
 };
+/* The same phases as one word each, for the machine-readable line. */
+static const char* const phase_keys[PROGRESS_PHASES] = { "load", "sema", "emit", "cc" };
 
 /* Before the first recorded build: the rough shape of a mid-sized example
  * at -O2 (the C compiler dominates). */
@@ -28,6 +33,8 @@ static struct {
   sys_mutex_t lock;
   sys_thread_t thread;
   bool stop;
+  bool lines;                 /* RAE_PROGRESS=lines: sentinel lines, no drawing */
+  long long last_line_ms;
   bool drawn;                 /* the two lines are currently on screen */
   long long quiet_until_ms;   /* no redraw before this (after a hide) */
   long long started_ms;
@@ -96,6 +103,16 @@ static double estimate(long long now) {
   return done / (double)total;
 }
 
+/* `lines` mode, with the lock held: one machine-readable line to stderr, the
+ * same channel as the build-timing sentinels (main.c "Build timing"), for a
+ * driver such as the devtools that holds the compiler's stderr in a pipe. */
+static void emit_line(long long now) {
+  fprintf(stderr, "@@RAE_BUILD_PROGRESS@@ phase=%s fraction=%.3f elapsed_ms=%lld\n",
+          phase_keys[g.phase], estimate(now), now - g.started_ms);
+  fflush(stderr);
+  g.last_line_ms = now;
+}
+
 /* Called with the lock held. */
 static void draw(long long now) {
   char activity[PROGRESS_ACTIVITY_CELLS + 1];
@@ -139,7 +156,11 @@ static void* ticker(void* arg) {
       break;
     }
     long long now = now_ms();
-    if (now >= g.quiet_until_ms) draw(now);
+    if (g.lines) {
+      if (now - g.last_line_ms >= PROGRESS_LINE_MS) emit_line(now);
+    } else if (now >= g.quiet_until_ms) {
+      draw(now);
+    }
     sys_mutex_unlock(&g.lock);
   }
   return NULL;
@@ -148,8 +169,10 @@ static void* ticker(void* arg) {
 void progress_begin(const char* record_path, ProgressPhase last_phase) {
   const char* env = getenv("RAE_PROGRESS");
   if (env && (strcmp(env, "off") == 0 || strcmp(env, "0") == 0)) return;
-  if (!isatty(STDERR_FILENO)) return;
+  bool lines = env && strcmp(env, "lines") == 0;
+  if (!lines && !isatty(STDERR_FILENO)) return;
   memset(&g, 0, sizeof(g));
+  g.lines = lines;
   if (record_path) snprintf(g.record_path, sizeof(g.record_path), "%s", record_path);
   g.last_phase = last_phase;
   read_record();
@@ -171,6 +194,7 @@ void progress_phase(ProgressPhase phase) {
   g.phase_ms[g.phase] = now - g.phase_started_ms;
   g.phase = phase;
   g.phase_started_ms = now;
+  if (g.lines) emit_line(now);
   sys_mutex_unlock(&g.lock);
 }
 
