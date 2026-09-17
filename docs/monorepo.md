@@ -20,7 +20,7 @@ QUEUE.md                  single development queue
 Run common commands from the repository root:
 
 ```sh
-./setup.sh                # install Devtools dependencies and build Rae
+make setup                # install Devtools dependencies and build Rae
 make build                # build compiler/bin/rae
 make test                 # compiler test suite
 make devtools-lint        # type-check Devtools Web
