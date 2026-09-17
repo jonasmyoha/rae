@@ -68,10 +68,14 @@ export class ExampleRunner {
     private stats?: StatsStore
   ) {}
 
-  async run(entry: string, options: ExampleRunOptions = {}) {
+  // Resolves to the new run's id (undefined when nothing was started) so the
+  // HTTP caller learns it from the response itself: the `example-run-started`
+  // broadcast races the response on the socket, and a client that needs the
+  // id right away (the Run-all batch) must not depend on which lands first.
+  async run(entry: string, options: ExampleRunOptions = {}): Promise<string | undefined> {
     if (!entry) {
       this.broadcastStatus("Example entry path missing.");
-      return;
+      return undefined;
     }
 
     // Replace only this app's own run. Re-pressing Run/Watch on an app that
@@ -86,7 +90,7 @@ export class ExampleRunner {
       action?.id ? "action" : options.mode ?? (options.watch ? "watch" : "run");
     const prepared = this.prepareCommand(target, entry, mode, action, options.profile);
     if (!prepared) {
-      return;
+      return undefined;
     }
 
     const runId = randomUUID();
@@ -176,6 +180,7 @@ export class ExampleRunner {
       } satisfies ExampleRunCompletedMessage);
       this.forget(run);
     });
+    return runId;
   }
 
   private flushLines(run: ActiveRun, chunk: string, stream: "stdout" | "stderr") {
