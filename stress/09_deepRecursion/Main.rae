@@ -1,0 +1,15 @@
+# Foot gun: recursion ten million frames deep.
+#
+# The stack runs out. Today the process just dies: exit code 1 and not one
+# word on stderr — no "stack overflow", no hint which function. This case
+# asserts that current behaviour (the exit code AND the empty stderr).
+func down(n: view Int) ret Int {
+  if n is 0 {
+    ret 0
+  }
+  ret 1 + down(n: n - 1)
+}
+
+func main() {
+  log("depth 10000000: {down(n: 10000000)}")
+}

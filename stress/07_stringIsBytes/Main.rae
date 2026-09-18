@@ -1,0 +1,11 @@
+# Foot gun: a string that is not plain ASCII, measured and cut.
+#
+# "héllo👋" is six characters. Today `length()` answers 10 — it counts UTF-8
+# bytes — and `sub(start: 1, len: 1)` returns the first byte of the
+# two-byte `é`, which prints as the replacement character. This case asserts
+# that current behaviour.
+func main() {
+  let s: String = "héllo👋"
+  log("length {s.length()}")
+  log("sub(1,1) [{s.sub(start: 1, len: 1)}]")
+}
