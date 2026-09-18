@@ -28,33 +28,22 @@ func wrap32(value: view Int) ret Int {
   ret value bitand 0xffffffff
 }
 
-# The low 32 bits of `a * b` for two 32-bit operands, WITHOUT the 64-bit
-# product: a 32-bit hash step multiplied by a 32-bit constant can pass
-# Int.max, and Int overflow is a runtime error in the dev profile
-# (docs/integer-semantics.md). Split `b` into halves so every partial product
-# stays under 2^48 — the same low word WGSL's u32 multiply produces.
-func mul32(a: view Int, b: view Int) ret Int {
-  let low: Int = wrap32(value: a) * (b bitand 0xffff)
-  let high: Int = (wrap32(value: a) * (b shr 16)) bitand 0xffff
-  ret wrap32(value: low + (high shl 16))
-}
-
 # Chris Wellons-style 32-bit finalizer. Every operation is masked so Rae's
 # signed 64-bit Int produces the same low word as WGSL u32 arithmetic.
 func hashWord(value: view Int) pub ret Int {
   var h: Int = wrap32(value: value)
   h = wrap32(value: h bitxor (h shr 16))
-  h = mul32(a: h, b: 0x7feb352d)
+  h = wrap32(value: h * 0x7feb352d)
   h = wrap32(value: h bitxor (h shr 15))
-  h = mul32(a: h, b: 0x846ca68b)
+  h = wrap32(value: h * 0x846ca68b)
   h = wrap32(value: h bitxor (h shr 16))
   ret h
 }
 
 func hashLattice2(x: view Int, y: view Int, seed: view Int) ret Int {
   var h: Int = wrap32(value: seed bitxor 0x9e3779b9)
-  h = hashWord(value: h bitxor mul32(a: x, b: 0x85ebca6b))
-  h = hashWord(value: h bitxor mul32(a: y, b: 0xc2b2ae35))
+  h = hashWord(value: h bitxor wrap32(value: x * 0x85ebca6b))
+  h = hashWord(value: h bitxor wrap32(value: y * 0xc2b2ae35))
   ret h
 }
 
@@ -65,7 +54,7 @@ func hashLattice3(
   seed: view Int
 ) ret Int {
   var h: Int = hashLattice2(x: x, y: y, seed: seed)
-  h = hashWord(value: h bitxor mul32(a: z, b: 0x27d4eb2f))
+  h = hashWord(value: h bitxor wrap32(value: z * 0x27d4eb2f))
   ret h
 }
 

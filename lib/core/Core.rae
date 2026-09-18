@@ -43,6 +43,18 @@ func runtimeError(message: view String) {
   }
 }
 
+# A runtime warning from library code: prints `warning: <message>` to stderr
+# and the program CONTINUES. For a request the library can safely decline —
+# a List write past the end is dropped, and this line is what keeps that
+# from being silent (docs/collections.md). The same in every build profile.
+func rae_ext_rae_runtime_warning(message: String) unsafe extern
+
+func runtimeWarning(message: view String) {
+  unsafe {
+    rae_ext_rae_runtime_warning(message: message)
+  }
+}
+
 func nativeNowMs() unsafe extern("rae_ext_nowMs") ret Int
 
 func nowMs() ret Int {

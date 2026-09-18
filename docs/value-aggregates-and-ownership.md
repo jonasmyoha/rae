@@ -216,21 +216,22 @@ contiguous 16-byte value, which is the precondition for the SIMD lowering in
   behave as for any value type. An array of primitives never *needs* `own`,
   since copying is total.
 
-### 1.7 Bounds policy: constant-checked always, dynamic-checked in debug
+### 1.7 Bounds policy: constant-checked at compile time, dynamic-checked always
 
-Three cases, deliberately different:
-
-| Index | Debug | Release |
-|---|---|---|
-| Compile-time constant | **compile error** if out of range | compile error |
-| Dynamic | runtime check, abort with location | **unchecked** |
+| Index | Every build profile |
+|---|---|
+| Compile-time constant | **compile error** if out of range |
+| Dynamic | runtime check; out of range prints the location and aborts |
 
 Constant indices dominate matrix code (`m[5]`, `m[10]`) and verifying them
-costs nothing, so an out-of-range constant should never reach runtime.
-Dynamic indices in a per-joint inner loop must not pay a branch in release
-builds. This is a stated policy, not an accident — and it is the one part of
-this design where a later reversal (always-checked) would be a performance
-regression, so it is called out for explicit approval.
+costs nothing, so an out-of-range constant never reaches runtime. A dynamic
+index is checked in every build: an out-of-range `Array` access would read
+or write past a C array, and Rae is always bounds-checked — the benchmarks
+are made that way. (An earlier revision of this section proposed compiling
+the check out of release builds for the per-joint inner loops; it was listed
+as an open question, implemented by #655 before it was answered, and
+reversed in 2026-09 — answer recorded in Part 4. The branch is predictable
+and its cost in those loops was never measured to matter.)
 
 ### 1.8 Interaction with existing generics
 
@@ -428,6 +429,8 @@ Grouped by what each proves. Every test is a compiler test case under
 
 1. **Bounds policy (§1.7)** — unchecked dynamic indexing in release is a
    deliberate performance choice. Approve, or require always-checked?
+   **Answered 2026-09: always-checked.** Rae has no dev/release semantic
+   differences (docs/integer-semantics.md "One behaviour, every profile").
 2. **`copy` as the sanctioned fix** — this makes `copy` appear in ordinary
    container code (`list.add(value: copy name)`). Acceptable ergonomics, or
    should `add` take `copy T` and copy implicitly?

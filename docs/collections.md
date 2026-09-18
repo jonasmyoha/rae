@@ -56,7 +56,7 @@ files use them, and they are the first of a family of containers that will grow.
 Keeping them in the prelude would auto-load a map into every compile unit that
 never asked for one. `List` earns its prelude seat; a hash map does not.
 
-## Out-of-range access: reads miss, writes trap
+## Out-of-range access: reads miss, writes are dropped with a warning
 
 `List` has two answers for an index that does not exist, and they are not the
 same answer on purpose:
@@ -65,18 +65,18 @@ same answer on purpose:
 |---|---|
 | `copyAt(index:)`, `viewAt`, `modAt` | return `none` — a read may miss, and the caller says what happens with `if let` |
 | `copyAtFallback(index:, fallback:)` | return the fallback |
-| `set(index:, value:)`, `insert(index:, value:)`, `remove(index:)`, `swapRemove(index:)` | **runtime error**: `runtime error: List.set: index 10 is out of range for length 3`, exit code 70 |
+| `set(index:, value:)`, `insert(index:, value:)`, `remove(index:)`, `swapRemove(index:)` | bounds-checked, **dropped**, and reported: `warning: List.set: index 10 is out of range for length 3` on stderr; the program continues |
 
 A read past the end is a question ("is there something at 10?") and the
-optional is the honest reply. A *write* past the end cannot be meant: there
-is no slot for it, so there is nothing the program can have wanted except to
-be told. `set` used to drop the write silently — no error, no growth, exit 0
-— which stress case `stress/08_silentNoOpWrite` asserted as the foot gun it
-was; the same rule applied to `insert`/`remove`, which returned quietly. A
-Bool result was considered and rejected: nothing forces a caller to look at
-it, so it is a silent drop with extra steps.
+optional is the honest reply. A write past the end has no slot to land in,
+so it is dropped — but never quietly: `set` used to drop the write with no
+word at all, which stress case `stress/08_silentNoOpWrite` asserted as the
+foot gun it was (a bug found by archaeology). Stopping the program instead
+(an exception, a panic, a trap) was considered and rejected: a shipped game
+or UI that dies on a dropped write is worse for its user than one that
+carries on. So: check, drop, warn — **the same in every build profile**.
 
-The trap is `runtimeError(message:)` in `lib/core/Core.rae`, the library's
-counterpart to the compiler's own Int traps (`docs/integer-semantics.md`):
-one line on stderr, exit 70, in every profile. A write whose index may be out
-of range checks `length` first, or `add`s.
+The warning is `runtimeWarning(message:)` in `lib/core/Core.rae`; its
+sibling `runtimeError(message:)` (one line, exit 70) is for a state the
+program cannot continue from, and List does not use it. A write whose index
+may be out of range checks `length` first, or `add`s.

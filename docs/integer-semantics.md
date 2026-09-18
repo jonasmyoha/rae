@@ -35,19 +35,27 @@ IEEE infinity, as everywhere else.
 
 ## Overflow of `+`, `-`, `*`
 
-Profile-dependent, the same policy as array bounds checks:
-
-| profile | `Int.max + 1` |
-|---|---|
-| dev (`rae run --profile dev`, `-O0 -g`) | **runtime error** `integer overflow in +` (`-`, `*` likewise), exit 70 |
-| release (the default, `-O2 -DNDEBUG`) | **wraps** two's-complement: `-9223372036854775808` |
-
-The dev check is one compiler builtin (`__builtin_add_overflow`) per
-operation; the release path computes in unsigned arithmetic so the wrap is
+**Wraps two's-complement, in every build profile**: `Int.max + 1` is
+`-9223372036854775808`. Computed in unsigned arithmetic so the wrap is
 defined behaviour, not undefined behaviour an optimizer may assume away.
+This is what every language with fixed-size integers does in production
+(Java, Go, C#, Rust in release), and what a hash such as `lib/Noise`'s
+32-bit finalizer relies on.
 
-This is Rust's rule (debug panics, release wraps), with Go's compile-time
-rejection of a constant zero divisor.
+A dev-only overflow check (Rust's debug rule) was tried and dropped on
+purpose: Rae has no dev/release semantic differences — a program that passed
+its tests must behave identically when shipped — so the two builds differ
+only in optimisation flags. See "One behaviour, every profile" below.
+
+## One behaviour, every profile
+
+The dev profile (`rae run --profile dev`, `-O0 -g`) and the release profile
+(the default, `-O2 -DNDEBUG`) differ **only** in C compiler flags. Every
+check the runtime makes — `Int` division, `List` bounds, `Array` bounds, the
+crash handler — is made in both. Two exceptions existed in 2026-09 and were
+removed the same month: `Array` dynamic-index checks compiled out of release
+(never approved; `docs/value-aggregates-and-ownership.md` §1.7) and the
+dev-only overflow trap above.
 
 ## What is NOT covered (yet)
 
@@ -55,7 +63,7 @@ rejection of a constant zero divisor.
   other widths keep the bare C operator: division by zero there is still
   undefined behaviour, and overflow wraps in every profile.
 - `++` / `--` and compound forms that do not go through a binary `+`/`-`
-  expression wrap in every profile.
+  expression are plain C increments (they wrap as well).
 - Shifts are unchecked.
 
 ## Crashes: the runtime's one line
