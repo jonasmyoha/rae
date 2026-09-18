@@ -180,6 +180,16 @@ func ensureRendererResources(renderer: mod DeferredRenderer) pub {
   )
 }
 
+# Use the app's own terrain palette (a copy of lib/terrain_palette.wgsl with the
+# RAE_TERRAIN_* albedos recalibrated for this app's grade — see that file). For
+# an app whose cwd is not its project root, which the examples are.
+func rendererSetTerrainPalette(renderer: mod DeferredRenderer, path: view String) {
+  ensureRendererResources(renderer: renderer)
+  if let resources: mod GpuResources => renderer.gpuResources {
+    terrainSetPalette(cache: renderer.passes.gbuffer, resources: resources, path: path)
+  }
+}
+
 # #905: upload a static mesh into the renderer's MeshStore (the geometry pass
 # cache owns it; every deferred pass resolves MeshHandles there).
 func uploadMesh(
