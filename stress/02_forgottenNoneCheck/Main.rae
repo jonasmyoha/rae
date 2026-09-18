@@ -1,0 +1,20 @@
+# Foot gun: a lookup that may find nothing, used as if it always does.
+#
+# `find` returns `opt Int` — a value or `none`. Rae has no null that can
+# masquerade as an Int: the optional must be opened with `if let` before the
+# value inside can be used. Assigning it straight to an `Int` is a compile
+# error, so the "not found" path can never be forgotten.
+func find(xs: view List(Int), want: view Int) ret opt Int {
+  loop let x: view Int in xs {
+    if x is want {
+      ret x
+    }
+  }
+  ret none
+}
+
+func main() {
+  let xs: List(Int) = [1, 2]
+  let forced: Int = find(xs: xs, want: 9)
+  log("found {forced}")
+}

@@ -1,0 +1,37 @@
+pack HiddenAliasing {
+  format: "raepack"
+  version: 1
+  defaultTarget: compiled
+  name: "Hidden aliasing"
+  description: "Two names for one container: growing the list through one name changes the other. Rae copies; most languages share."
+  category: "Stress"
+  targets: {
+    target compiled: {
+      label: "Compiled"
+      entry: "Main.rae"
+      sources: {
+        source: {
+          path: "."
+          emit: compiled
+        }
+      }
+    }
+  }
+  stress: {
+    verdict: "handles"
+    expect: {
+      outcome: "run"
+      exitCode: 0
+      stdout: "a.items 3  b.items 4"
+    }
+    elsewhere: {
+      python: "a.items is also 4 — the assignment binds a second name to the same list"
+      javascript: "a.items is also 4 — objects are references"
+      java: "a.items is also 4 — object references, a .clone() would be needed"
+      go: "a.items is also 4 when the append fits the shared backing array, 3 when it reallocates — depends on capacity"
+      rust: "compile error: `a` was moved into `b`; a .clone() makes it 3, matching Rae"
+      c: "a copy of the struct copies the pointer inside it; both names see 4"
+    }
+    fixedBy: ""
+  }
+}

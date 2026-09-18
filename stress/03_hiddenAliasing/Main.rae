@@ -1,0 +1,16 @@
+# Foot gun: two names, one container — a change through one shows up in the
+# other.
+#
+# In Rae a struct holding a List is a VALUE. `var b: Box = a` gives `b` its
+# own list; growing `b.items` leaves `a.items` exactly as it was. No shared
+# heap behind two names, and nothing to remember about references vs values.
+type Box {
+  items: List(Int)
+}
+
+func main() {
+  var a: Box = { items: [1, 2, 3] }
+  var b: Box = a
+  b.items.add(value: 4)
+  log("a.items {a.items.length}  b.items {b.items.length}")
+}
