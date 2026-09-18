@@ -98,10 +98,87 @@ func concat(this: view String, other: view String) ret String {
   }
 }
 
+# Byte-indexed substring: `start` and `len` are BYTES (like `length()`),
+# but the cut never lands inside a character — a range that starts or ends
+# inside a multi-byte UTF-8 sequence is widened to whole characters, so the
+# result is always valid UTF-8 (docs/strings.md). For character positions use
+# `charSub`.
 func sub(this: view String, start: view Int, len: view Int) ret String {
   unsafe {
     ret rae_str_sub(s: this, start: start, len: len)
   }
+}
+
+# ----- characters (code points), on top of the byte API (docs/strings.md) --
+#
+# `length()`, `sub`, `at`, `byteAt`, `indexOf` are BYTE-indexed: fast, and
+# what file formats, protocols and text layout want. These three count and
+# index CHARACTERS (Unicode code points) instead. They walk the string, so
+# they are O(n) — fine for a label, not for a loop over a large text; walk
+# bytes with `at`/`byteAt` there.
+
+# Number of characters (code points) — 6 for "héllo👋", where `length()` is 10.
+func charCount(this: view String) ret Int {
+  var count: Int = 0
+  var i: Int = 0
+  let n: Int = this.length()
+  loop i < n {
+    let byte: Int = this.byteAt(index: i)
+    # Every byte that is not a continuation byte (0x80..0xBF) starts a
+    # character.
+    if byte < 128 or byte >= 192 {
+      count = count + 1
+    }
+    i = i + 1
+  }
+  ret count
+}
+
+# The byte offset where character `index` starts; `length()` when `index`
+# is past the end. The one walk the character API is built on.
+func charByteOffset(this: view String, index: view Int) ret Int {
+  if index < 0 {
+    ret 0
+  }
+  var seen: Int = 0
+  var i: Int = 0
+  let n: Int = this.length()
+  loop i < n {
+    let byte: Int = this.byteAt(index: i)
+    if byte < 128 or byte >= 192 {
+      if seen is index {
+        ret i
+      }
+      seen = seen + 1
+    }
+    i = i + 1
+  }
+  ret n
+}
+
+# The character at character position `index` (0 when out of range) — `at`
+# with a character index instead of a byte index.
+func charAt(this: view String, index: view Int) ret Char32 {
+  let offset: Int = this.charByteOffset(index: index)
+  if offset >= this.length() {
+    ret 0
+  }
+  ret this.at(index: offset)
+}
+
+# `count` characters starting at character position `start`, as a new
+# String — `sub` with character positions. Out-of-range positions clamp like
+# `sub`; an empty range is the empty string.
+func charSub(this: view String, start: view Int, count: view Int) ret String {
+  if count <= 0 {
+    ret ""
+  }
+  let from: Int = this.charByteOffset(index: start)
+  let to: Int = this.charByteOffset(index: start + count)
+  if from >= to {
+    ret ""
+  }
+  ret this.sub(start: from, len: to - from)
 }
 
 func contains(this: view String, sub: view String) ret Bool {
@@ -270,9 +347,11 @@ func toLower(this: view String) ret String {
   var i: Int = 0
   let n: Int = this.length()
   loop i < n {
+    # `sub` hands back the WHOLE character the byte belongs to, so step by
+    # its byte length — a multi-byte character is copied through once.
     let ch: String = this.sub(start: i, len: 1)
     out = out.concat(other: String.lowerAsciiByte(ch: ch))
-    i = i + 1
+    i = i + ch.length()
   }
   ret out
 }

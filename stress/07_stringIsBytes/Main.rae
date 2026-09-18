@@ -1,11 +1,13 @@
 # Foot gun: a string that is not plain ASCII, measured and cut.
 #
-# "héllo👋" is six characters. Today `length()` answers 10 — it counts UTF-8
-# bytes — and `sub(start: 1, len: 1)` returns the first byte of the
-# two-byte `é`, which prints as the replacement character. This case asserts
-# that current behaviour.
+# "héllo👋" is six characters and ten UTF-8 bytes. Rae's `length()` and
+# `sub` are BYTE-indexed (docs/strings.md) — but `sub` never cuts inside a
+# character: a range that lands in the middle of `é` is widened to the whole
+# `é`, so the result is always valid text. `charCount` / `charAt` / `charSub`
+# count and index characters when that is what you mean.
 func main() {
   let s: String = "héllo👋"
-  log("length {s.length()}")
+  log("length {s.length()}  charCount {s.charCount()}")
   log("sub(1,1) [{s.sub(start: 1, len: 1)}]")
+  log("charSub(1,1) [{s.charSub(start: 1, count: 1)}]  charAt(5) {s.charAt(index: 5)}")
 }
