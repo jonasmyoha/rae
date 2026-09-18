@@ -3365,6 +3365,10 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       }
       fprintf(out, "RaeTask* __task; } __raespawn_args_%s;\n", mangled);
       fprintf(out, "RAE_UNUSED static void* __raespawn_thunk_%s(void* __vp) {\n", mangled);
+      /* The crash handler runs on an alternate signal stack, which is per
+       * thread: without one of its own a worker's stack overflow dies
+       * silent (the handler has nowhere to run). */
+      fprintf(out, "  rae_thread_install_altstack();\n");
       fprintf(out, "  __raespawn_args_%s* __a = (__raespawn_args_%s*)__vp;\n", mangled, mangled);
       if (!is_void) fprintf(out, "  *(%s*)__a->__task->result = %s(", rt, mangled);
       else fprintf(out, "  %s(", mangled);

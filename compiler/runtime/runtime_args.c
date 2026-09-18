@@ -8,6 +8,15 @@ static int g_rae_arg_count = 0;
 static char** g_rae_arg_values = NULL;
 
 void rae_runtime_set_args(int argc, char** argv) {
+#ifndef __wasm__
+  /* The crash handler's "in <program>": argv[0]'s basename, a pointer into
+   * argv that stays valid for the whole run. */
+  if (argc > 0 && argv && argv[0] && argv[0][0] && strcmp(g_rae_program_name, "program") == 0) {
+    const char* base = argv[0];
+    for (const char* p = argv[0]; *p; p++) if (*p == '/') base = p + 1;
+    g_rae_program_name = base;
+  }
+#endif
   if (argc > 0 && argv) {
     g_rae_arg_count = argc - 1;
     g_rae_arg_values = argv + 1;

@@ -3,7 +3,7 @@ pack DeepRecursion {
   version: 1
   defaultTarget: compiled
   name: "Deep recursion"
-  description: "Ten million frames of recursion. Today the process dies with exit 1 and not one word on stderr."
+  description: "Ten million frames of recursion. The runtime reports `rae: stack overflow (deep recursion?) in <program>` and exits non-zero. It used to die with exit 1 and not one word."
   category: "Stress"
   targets: {
     target compiled: {
@@ -18,12 +18,12 @@ pack DeepRecursion {
     }
   }
   stress: {
-    verdict: "footgun"
+    verdict: "handles"
     expect: {
       outcome: "run"
       exitCode: 1
       stdout: ""
-      stderr: ""
+      stderrMatches: "^rae: stack overflow \\(deep recursion\\?\\) in .*Main\\.rae$"
     }
     elsewhere: {
       python: "RecursionError with a traceback (at a depth of about 1,000 by default)"
@@ -31,8 +31,8 @@ pack DeepRecursion {
       java: "StackOverflowError with a stack trace"
       go: "succeeds — goroutine stacks grow on demand (up to 1 GB)"
       rust: "aborts with `thread main has overflowed its stack`"
-      c: "segmentation fault, no message — like Rae"
+      c: "segmentation fault, no message"
     }
-    fixedBy: ""
+    fixedBy: "#26662952 — the crash handler runs on a sigaltstack (main thread + every spawned worker) and tells a stack fault from a bad address"
   }
 }

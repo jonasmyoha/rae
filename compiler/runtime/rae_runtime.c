@@ -18,6 +18,11 @@
  * compiles for the WASM target. */
 #ifndef __wasm__
 #include <signal.h>
+/* ucontext_t for the crash handler's stack-pointer read: signal.h already
+ * provides it on macOS (sys/ucontext.h); glibc wants the header itself. */
+#if defined(__linux__) || defined(__GLIBC__)
+#include <ucontext.h>
+#endif
 #endif
 
 #ifdef _WIN32

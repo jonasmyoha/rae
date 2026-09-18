@@ -1,8 +1,10 @@
 # Foot gun: recursion ten million frames deep.
 #
-# The stack runs out. Today the process just dies: exit code 1 and not one
-# word on stderr — no "stack overflow", no hint which function. This case
-# asserts that current behaviour (the exit code AND the empty stderr).
+# The stack runs out. Rae's runtime catches the overflow on an alternate
+# signal stack and says so in one line — `rae: stack overflow (deep
+# recursion?) in <program>` — and exits non-zero. A genuine bad-address
+# fault is reported as `segmentation fault` instead, with a C backtrace, so
+# the two are never confused.
 func down(n: view Int) ret Int {
   if n is 0 {
     ret 0

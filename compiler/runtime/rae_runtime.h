@@ -579,6 +579,9 @@ rae_String rae_ext_rae_str_sub(rae_String s, int64_t start, int64_t len);
 /* A library-level runtime error (lib/core Core.rae runtimeError): one line on
  * stderr, exit RAE_TRAP_EXIT_CODE. runtime_filesystem.c. */
 void rae_ext_rae_runtime_error(rae_String message);
+/* runtime_core_memory.c: per-thread alternate signal stack for the crash
+ * handler; the emitted spawn thunk calls it first. No-op on WASM. */
+void rae_thread_install_altstack(void);
 rae_Bool rae_ext_rae_str_contains(rae_String s, rae_String sub);
 rae_Bool rae_ext_rae_str_starts_with(rae_String s, rae_String prefix);
 rae_Bool rae_ext_rae_str_ends_with(rae_String s, rae_String suffix);
