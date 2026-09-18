@@ -903,10 +903,33 @@ static void pp_block(const RaePackBlock* block, FILE* out, int indent) {
   fprintf(out, "}");
 }
 
+/* A string value re-escaped the way the lexer reads it (the same set as
+ * pretty_writer's pp_write_string_body): the parsed value holds the REAL
+ * characters, so a `\n` escape in the source is a newline here, and writing
+ * it back raw would split the literal across two lines and break the file. */
+static void pp_string(FILE* out, Str s) {
+  fputc('"', out);
+  for (size_t i = 0; i < s.len; i++) {
+    char c = s.data[i];
+    switch (c) {
+      case '"': fputs("\\\"", out); break;
+      case '\\': fputs("\\\\", out); break;
+      case '\n': fputs("\\n", out); break;
+      case '\r': fputs("\\r", out); break;
+      case '\t': fputs("\\t", out); break;
+      case '\0': fputs("\\0", out); break;
+      case '{': fputs("\\{", out); break;
+      case '}': fputs("\\}", out); break;
+      default: fputc(c, out); break;
+    }
+  }
+  fputc('"', out);
+}
+
 static void pp_value(const RaePackValue* value, FILE* out, int indent) {
   switch (value->kind) {
     case RAEPACK_VALUE_STRING:
-      fprintf(out, "\"%.*s\"", (int)value->as.string.len, value->as.string.data);
+      pp_string(out, value->as.string);
       break;
     case RAEPACK_VALUE_INT:
       fprintf(out, "%lld", (long long)value->as.integer);

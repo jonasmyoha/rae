@@ -1,0 +1,37 @@
+pack TemporariesInALoop {
+  format: "raepack"
+  version: 1
+  defaultTarget: compiled
+  name: "Temporaries in a loop"
+  description: "Two million short-lived strings in a hot loop. Rae frees each at scope end, so the process does not grow; garbage-collected languages pay a collector, C pays attention."
+  category: "Stress"
+  targets: {
+    target compiled: {
+      label: "Compiled"
+      entry: "Main.rae"
+      sources: {
+        source: {
+          path: "."
+          emit: compiled
+        }
+      }
+    }
+  }
+  stress: {
+    verdict: "handles"
+    expect: {
+      outcome: "run"
+      exitCode: 0
+      stdoutMatches: "^total 22888890\nrss [0-9]+ -> [0-9]+ KB, grew ([0-9][0-9]?[0-9]?|[1-3][0-9][0-9][0-9]) KB$"
+    }
+    elsewhere: {
+      python: "fine, via reference counting — but every iteration pays an allocation and a refcount dance"
+      javascript: "fine, after garbage-collection pauses; heap grows between collections"
+      java: "fine, after garbage-collection pauses; the young generation churns"
+      go: "fine, with the garbage collector running alongside; heap grows to the GC target first"
+      rust: "fine — dropped at scope end exactly like Rae"
+      c: "leaks unless every string is freed by hand; one missing free is 2,000,000 leaks"
+    }
+    fixedBy: ""
+  }
+}
