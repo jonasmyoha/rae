@@ -46,6 +46,15 @@ void rae_ext_rae_runtime_error(rae_String message) {
   exit(RAE_TRAP_EXIT_CODE);
 }
 
+/* A library-level runtime WARNING: one line on stderr, and the program goes
+ * on. For a request the library can safely decline (a List write past the
+ * end is dropped) — the bug is never silent, and the program never stops. */
+void rae_ext_rae_runtime_warning(rae_String message) {
+  fprintf(stderr, "warning: %.*s\n", (int)message.len,
+          message.data ? (const char*)message.data : "");
+  fflush(stderr);
+}
+
 rae_String rae_ext_rae_sys_get_env(rae_String name) {
   if (!name.data) return (rae_String){NULL, 0, 0, 0};
   const char* val = getenv((const char*)name.data);

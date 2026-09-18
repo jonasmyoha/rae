@@ -1,16 +1,19 @@
-# docs/collections.md: a read past the end is `none`, a write past the end
-# is a runtime error (exit 70) — never a silent drop. The trap message names
-# the call, the index and the length; this program ends at the `set`.
+# docs/collections.md: a read past the end is `none`; a write past the end is
+# bounds-checked, dropped and reported on stderr — the program continues, in
+# every build profile. The warning names the call, the index and the length.
 func main() {
-  var xs: List(Int) = [1, 2, 3]
-  if let missing: Int = xs.copyAt(index: 10) {
+  var numbers: List(Int) = [1, 2, 3]
+  if let missing: Int = numbers.copyAt(index: 10) {
     log("read {missing}")
   } else {
     log("copyAt(10) is none")
   }
-  log("copyAtFallback(10) {xs.copyAtFallback(index: 10, fallback: -1)}")
-  xs.set(index: 2, value: 30)
-  log("set(2) ok: {xs.copyAtFallback(index: 2, fallback: 0)}")
-  xs.set(index: 10, value: 5)
-  log("not reached: length {xs.length}")
+  log("copyAtFallback(10) {numbers.copyAtFallback(index: 10, fallback: -1)}")
+  numbers.set(index: 2, value: 30)
+  log("set(2) ok: {numbers.copyAtFallback(index: 2, fallback: 0)}")
+  numbers.set(index: 10, value: 5)
+  numbers.insert(index: 11, value: 6)
+  numbers.remove(index: -1)
+  numbers.swapRemove(index: 3)
+  log("still running: length {numbers.length}")
 }

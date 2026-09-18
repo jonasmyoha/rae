@@ -1,11 +1,13 @@
 # Foot gun: writing past the end of a list.
 #
-# `xs` has three elements; index 10 does not exist. A write there cannot be
-# meant, so Rae makes it a runtime error that names the call, the index and
-# the length (docs/collections.md) — never a silent drop. A READ past the end
-# is different: `copyAt` returns `none`, because a read may honestly miss.
+# `numbers` has three elements; index 10 does not exist. Rae bounds-checks
+# the write and DROPS it — the program keeps running — but says so on
+# stderr, naming the call, the index and the length (docs/collections.md).
+# Never silent: a dropped write nobody hears about is a bug found by
+# archaeology. A READ past the end is `none` from `copyAt`, because a read
+# may honestly miss.
 func main() {
-  var xs: List(Int) = [1, 2, 3]
-  xs.set(index: 10, value: 5)
-  log("length {xs.length}")
+  var numbers: List(Int) = [1, 2, 3]
+  numbers.set(index: 10, value: 5)
+  log("length {numbers.length}")
 }

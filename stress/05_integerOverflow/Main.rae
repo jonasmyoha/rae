@@ -4,10 +4,9 @@
 # Rae defines both (docs/integer-semantics.md). Dividing by zero is a runtime
 # error in every profile: one line naming the source position, exit code 70,
 # never a silent 0. (A divisor that is a constant zero does not even compile;
-# this one is computed so the runtime has to catch it.) Overflow is checked
-# in the dev profile — `rae run --profile dev` stops at `big + one` with
-# "integer overflow in +" — and wraps two's-complement in release, which is
-# what this run (release) prints on the first line.
+# this one is computed so the runtime has to catch it.) Overflow of `+ - *`
+# wraps two's-complement — defined, and the same in every build profile —
+# which is what the first line prints.
 import Sys
 
 func main() {
