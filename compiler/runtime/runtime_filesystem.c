@@ -35,6 +35,17 @@ void rae_ext_rae_sys_exit(int64_t code) {
   exit((int)code);
 }
 
+/* A library-level runtime error (docs/integer-semantics.md "trap"): one line
+ * on stderr and exit RAE_TRAP_EXIT_CODE, the same shape as the compiler's own
+ * Int traps minus the source position a library function does not have.
+ * Used by lib/core for a List index past the end. */
+void rae_ext_rae_runtime_error(rae_String message) {
+  fprintf(stderr, "runtime error: %.*s\n", (int)message.len,
+          message.data ? (const char*)message.data : "");
+  fflush(stderr);
+  exit(RAE_TRAP_EXIT_CODE);
+}
+
 rae_String rae_ext_rae_sys_get_env(rae_String name) {
   if (!name.data) return (rae_String){NULL, 0, 0, 0};
   const char* val = getenv((const char*)name.data);

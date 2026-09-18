@@ -132,6 +132,11 @@ func modAt(T: type, this: mod List(T), index: view Int) ret opt mod T {
   }
 }
 
+# Overwrite the element at `index`, dropping the old one. An index past the
+# end is a runtime error (docs/collections.md): the write cannot be meant —
+# there is no slot for it — and dropping it silently used to be exactly the
+# foot gun stress case 08 asserts. Reads that may miss use `copyAt` (opt) /
+# `copyAtFallback`; a write that may miss checks `length` first, or `add`s.
 func set(
   T: type
   this: mod List(T)
@@ -140,13 +145,15 @@ func set(
 ) {
   unsafe {
     if index < 0 or index >= this.length {
-      ret
+      runtimeError(message: "List.set: index {index} is out of range for length {this.length}")
     }
     rae_ext_rae_buf_drop_at(buf: this.data, index: index)
     rae_ext_rae_buf_set(buf: this.data, index: index, value: value)
   }
 }
 
+# Insert before `index` (`index` may equal `length`: an append). Past that
+# is a runtime error, like `set`.
 func insert(
   T: type
   this: mod List(T)
@@ -155,7 +162,7 @@ func insert(
 ) {
   unsafe {
     if index < 0 or index > this.length {
-      ret
+      runtimeError(message: "List.insert: index {index} is out of range for length {this.length}")
     }
     if this.length is this.cap {
       grow(this)
@@ -187,10 +194,12 @@ func pop(T: type, this: mod List(T)) ret T {
   }
 }
 
+# Remove the element at `index`, shifting the tail down. Past the end is a
+# runtime error, like `set`.
 func remove(T: type, this: mod List(T), index: view Int) {
   unsafe {
     if index < 0 or index >= this.length {
-      ret
+      runtimeError(message: "List.remove: index {index} is out of range for length {this.length}")
     }
     rae_ext_rae_buf_drop_at(buf: this.data, index: index)
     # Shift elements to the left
@@ -213,7 +222,9 @@ func remove(T: type, this: mod List(T), index: view Int) {
 func swapRemove(T: type, this: mod List(T), index: view Int) {
   unsafe {
     if index < 0 or index >= this.length {
-      ret
+      runtimeError(
+        message: "List.swapRemove: index {index} is out of range for length {this.length}"
+      )
     }
     let last: Int = this.length - 1
     if index is last {

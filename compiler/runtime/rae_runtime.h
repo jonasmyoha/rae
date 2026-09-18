@@ -576,6 +576,9 @@ int64_t rae_ext_rae_str_compare(rae_String a, rae_String b);
 rae_Bool rae_ext_rae_str_eq(rae_String a, rae_String b);
 int64_t rae_ext_rae_str_hash(rae_String s);
 rae_String rae_ext_rae_str_sub(rae_String s, int64_t start, int64_t len);
+/* A library-level runtime error (lib/core Core.rae runtimeError): one line on
+ * stderr, exit RAE_TRAP_EXIT_CODE. runtime_filesystem.c. */
+void rae_ext_rae_runtime_error(rae_String message);
 rae_Bool rae_ext_rae_str_contains(rae_String s, rae_String sub);
 rae_Bool rae_ext_rae_str_starts_with(rae_String s, rae_String prefix);
 rae_Bool rae_ext_rae_str_ends_with(rae_String s, rae_String suffix);

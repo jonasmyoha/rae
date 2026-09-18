@@ -1,8 +1,9 @@
 # Foot gun: writing past the end of a list.
 #
-# `xs` has three elements; index 10 does not exist. Today `set` does
-# nothing at all: no error, no growth, exit 0 — the write is dropped on the
-# floor. This case asserts that current behaviour.
+# `xs` has three elements; index 10 does not exist. A write there cannot be
+# meant, so Rae makes it a runtime error that names the call, the index and
+# the length (docs/collections.md) — never a silent drop. A READ past the end
+# is different: `copyAt` returns `none`, because a read may honestly miss.
 func main() {
   var xs: List(Int) = [1, 2, 3]
   xs.set(index: 10, value: 5)
