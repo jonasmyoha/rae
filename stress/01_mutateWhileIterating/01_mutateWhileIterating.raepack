@@ -1,0 +1,36 @@
+pack MutateWhileIterating {
+  format: "raepack"
+  version: 1
+  defaultTarget: compiled
+  name: "Mutate while iterating"
+  description: "Add to a list inside a loop over that list. Rae refuses at compile time; most languages let it through and misbehave at run time."
+  category: "Stress"
+  targets: {
+    target compiled: {
+      label: "Compiled"
+      entry: "Main.rae"
+      sources: {
+        source: {
+          path: "."
+          emit: compiled
+        }
+      }
+    }
+  }
+  stress: {
+    verdict: "handles"
+    expect: {
+      outcome: "compile-error"
+      diagnostic: "cannot mutate a List while a collection loop borrows its elements"
+    }
+    elsewhere: {
+      python: "runs; the new element is visited too, so the loop can run away or skip"
+      javascript: "runs; a growing array makes the loop never end"
+      java: "throws ConcurrentModificationException at run time"
+      go: "runs; range copies the slice header, the append is silently invisible to the loop"
+      rust: "compile error: cannot borrow `xs` as mutable because it is also borrowed as immutable"
+      c: "undefined behaviour: the loop walks memory that realloc may have moved"
+    }
+    fixedBy: ""
+  }
+}

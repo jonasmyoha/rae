@@ -1,0 +1,15 @@
+# Foot gun: adding to a list while a loop is walking that same list.
+#
+# `loop let x: view Int in xs` borrows each element of `xs` in turn. Inside
+# that loop, `xs.add(...)` would grow (and possibly move) the storage the
+# borrow points into. Rae refuses to compile this — the loop holds the list,
+# so nothing may change it until the loop ends.
+func main() {
+  var xs: List(Int) = [1, 2, 3]
+  loop let x: view Int in xs {
+    if x is 2 {
+      xs.add(value: 99)
+    }
+  }
+  log("length {xs.length}")
+}

@@ -1,4 +1,4 @@
-.PHONY: all dev build test stop setup install-hooks banned-terms-gate devtools-install devtools-lint devtools-test gemini claude codex llm up
+.PHONY: all dev build test stop setup install-hooks banned-terms-gate stress devtools-install devtools-lint devtools-test gemini claude codex llm up
 
 SESSION_DIR ?= $(HOME)/.ws
 PROJECT_KEY := rae
@@ -42,6 +42,14 @@ setup:
 # suite runs it too; this is the quick standalone form.
 banned-terms-gate:
 	@bash compiler/tools/banned-terms-gate.sh
+
+# The stress cases (docs/stress-tests.md): every stress/NN_*/ program held to
+# the verdict its pack declares — a "handles" case must show the good
+# outcome, a "footgun" case must still show the bad one (FIXED? fails: flip
+# the case). Seconds; the full suite runs it too. RAE_STRESS_FILTER scopes it.
+stress:
+	@$(MAKE) -C compiler build
+	@bash stress/run.sh
 
 # Opt-in git hooks (#1016): pre-commit checks the STAGED changes, commit-msg
 # the message, both against the same list. Git never versions .git/hooks, so

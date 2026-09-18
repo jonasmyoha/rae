@@ -58,6 +58,13 @@ if [ -f tools/banned-terms-gate.sh ]; then
   if bash tools/banned-terms-gate.sh; then TERMS_CHECK=0; fi
   echo
 fi
+# The stress cases (docs/stress-tests.md): one more pre-suite "case". A
+# "footgun" case that stops reproducing FAILS here on purpose (the ratchet).
+STRESS_CHECK=1
+if [ -f ../stress/run.sh ]; then
+  if bash ../stress/run.sh; then STRESS_CHECK=0; fi
+  echo
+fi
 echo "Running Rae tests (PARALLEL: $TOTAL cases, $JOBS jobs)..."
 echo
 START=$(date +%s)
@@ -87,6 +94,7 @@ done
 
 if [ "$TREE_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$TERMS_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
+if [ "$STRESS_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 # #917: the format-CLI behavior checks (traversal, --check/--json, mtime,
 # permissions, atomic write, over-cap) — one extra "case" folded into the run.
 if [ -f tools/test-format-cli.sh ]; then

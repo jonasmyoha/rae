@@ -64,6 +64,13 @@ if [ -z "$TEST_NAME_FILTER" ] && [ -f "tools/banned-terms-gate.sh" ]; then
   if ! bash tools/banned-terms-gate.sh; then TERMS_CHECK_FAILED=1; fi
   echo
 fi
+# The stress cases (docs/stress-tests.md), same place: a "footgun" case that
+# stops reproducing FAILS on purpose (the ratchet).
+STRESS_CHECK_FAILED=0
+if [ -z "$TEST_NAME_FILTER" ] && [ -f "../stress/run.sh" ]; then
+  if ! bash ../stress/run.sh; then STRESS_CHECK_FAILED=1; fi
+  echo
+fi
 
 for TARGET in "${TARGETS[@]}"; do
   echo "Testing target: $TARGET"
@@ -483,6 +490,7 @@ fi
 
 if [ "$TREE_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$TERMS_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
+if [ "$STRESS_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ $FAILED -gt 0 ]; then
   exit 1
 fi
