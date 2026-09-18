@@ -29,7 +29,83 @@ void rae_flush_stdout(void) {
  * Re-raising the signal lets the OS still record the crash + dump core.
  * (WASM has no POSIX signals; the host runtime reports traps itself.) */
 #ifndef __wasm__
-static void rae_crash_handler(int sig) {
+/* The program's name for the crash lines, set by rae_runtime_set_args (a
+ * pointer into argv, so it is valid for the whole run and needs no
+ * allocation in the handler). "program" until main has run. */
+static const char* g_rae_program_name = "program";
+
+/* The main thread's stack, recorded at install time, so the handler can tell
+ * a stack overflow (a fault in or just below the stack) from any other bad
+ * address. The guard page sits below `lo`; RAE_STACK_SLOP widens the test to
+ * cover a frame that jumped past it. */
+static uintptr_t g_rae_main_stack_lo = 0;
+static uintptr_t g_rae_main_stack_hi = 0;
+#define RAE_STACK_SLOP (1u << 20)
+
+static void rae_record_main_stack(void) {
+#if defined(__APPLE__)
+  pthread_t self = pthread_self();
+  uintptr_t hi = (uintptr_t)pthread_get_stackaddr_np(self);
+  uintptr_t size = (uintptr_t)pthread_get_stacksize_np(self);
+  g_rae_main_stack_hi = hi;
+  g_rae_main_stack_lo = hi - size;
+#elif defined(__linux__) || defined(__GLIBC__)
+  pthread_attr_t attr;
+  if (pthread_getattr_np(pthread_self(), &attr) == 0) {
+    void* addr = NULL; size_t size = 0;
+    if (pthread_attr_getstack(&attr, &addr, &size) == 0) {
+      g_rae_main_stack_lo = (uintptr_t)addr;
+      g_rae_main_stack_hi = (uintptr_t)addr + size;
+    }
+    pthread_attr_destroy(&attr);
+  }
+#endif
+}
+
+/* The faulting thread's stack pointer from the signal context, so a worker
+ * thread's overflow (whose stack bounds were never recorded) is recognised by
+ * the fault landing just below its SP. 0 where the register is not known. */
+static uintptr_t rae_context_sp(void* uctx) {
+  if (!uctx) return 0;
+  ucontext_t* uc = (ucontext_t*)uctx;
+#if defined(__APPLE__) && defined(__aarch64__)
+  return (uintptr_t)uc->uc_mcontext->__ss.__sp;
+#elif defined(__APPLE__) && defined(__x86_64__)
+  return (uintptr_t)uc->uc_mcontext->__ss.__rsp;
+#elif defined(__linux__) && defined(__aarch64__)
+  return (uintptr_t)uc->uc_mcontext.sp;
+#elif defined(__linux__) && defined(__x86_64__)
+  return (uintptr_t)uc->uc_mcontext.gregs[REG_RSP];
+#else
+  (void)uc;
+  return 0;
+#endif
+}
+
+static int rae_fault_is_stack_overflow(int sig, siginfo_t* info, void* uctx) {
+  if (sig != SIGSEGV && sig != SIGBUS) return 0;
+  uintptr_t addr = info ? (uintptr_t)info->si_addr : 0;
+  if (g_rae_main_stack_hi && addr >= g_rae_main_stack_lo - RAE_STACK_SLOP
+      && addr < g_rae_main_stack_hi) return 1;
+  uintptr_t sp = rae_context_sp(uctx);
+  if (sp && addr >= sp - RAE_STACK_SLOP && addr <= sp + 4096) return 1;
+  return 0;
+}
+
+/* Async-signal-safe: write(2) only, strings precomputed or constant. */
+static void rae_crash_write(const char* s) { if (s) write(STDERR_FILENO, s, strlen(s)); }
+
+static void rae_crash_handler(int sig, siginfo_t* info, void* uctx) {
+  /* A stack overflow gets ONE plain line and no backtrace: the frames are
+   * ten thousand copies of the same function, and the handler is running
+   * on the small alternate stack. This is the case that used to die silent
+   * — without sigaltstack the handler itself had no stack to run on. */
+  if (rae_fault_is_stack_overflow(sig, info, uctx)) {
+    rae_crash_write("rae: stack overflow (deep recursion?) in ");
+    rae_crash_write(g_rae_program_name);
+    rae_crash_write("\n");
+    _exit(128 + sig);
+  }
   const char* name = "signal";
   switch (sig) {
     case SIGSEGV: name = "SIGSEGV (invalid memory access)"; break;
@@ -38,7 +114,17 @@ static void rae_crash_handler(int sig) {
     case SIGILL:  name = "SIGILL (illegal instruction)"; break;
     case SIGABRT: name = "SIGABRT (abort)"; break;
   }
-  /* Async-signal-safe path: write(2) only. */
+  /* One Rae-worded line first, the same shape as the stack-overflow line,
+   * then the C-level detail. */
+  rae_crash_write("rae: ");
+  rae_crash_write(sig == SIGSEGV ? "segmentation fault (invalid memory access)"
+                  : sig == SIGBUS ? "bus error (misaligned or unmapped access)"
+                  : sig == SIGFPE ? "arithmetic fault"
+                  : sig == SIGILL ? "illegal instruction"
+                  : sig == SIGABRT ? "abort" : "fatal signal");
+  rae_crash_write(" in ");
+  rae_crash_write(g_rae_program_name);
+  rae_crash_write("\n");
   const char* prefix = "\n[rae crash] caught ";
   write(STDERR_FILENO, prefix, strlen(prefix));
   write(STDERR_FILENO, name, strlen(name));
@@ -62,22 +148,55 @@ static void rae_crash_handler(int sig) {
   _exit(128 + sig);
 }
 
+/* Every spawned worker calls this first (the emitted spawn thunk): the
+ * alternate signal stack is per thread, and a worker without one would
+ * overflow silently — exactly the main-thread bug this file just fixed.
+ * Thread-local storage, so nothing to free at thread exit. */
+void rae_thread_install_altstack(void) {
+  static __thread char alt_stack[64 * 1024];
+  stack_t ss;
+  memset(&ss, 0, sizeof(ss));
+  ss.ss_sp = alt_stack;
+  ss.ss_size = sizeof(alt_stack);
+  ss.ss_flags = 0;
+  sigaltstack(&ss, NULL);
+}
+
 __attribute__((constructor))
 static void rae_install_crash_handler(void) {
   /* Skip if user explicitly disables (e.g. when running under a debugger
    * that wants the raw signal). */
   if (getenv("RAE_NO_CRASH_HANDLER")) return;
+  /* `rae run` executes a temporary binary; it passes the source entry it
+   * stands for in RAE_PROGRAM so the crash line names the program the
+   * reader has open, not rae_compiled_<pid>.bin. A `rae build` binary has
+   * no such variable and is named after argv[0] (rae_runtime_set_args). */
+  const char* program = getenv("RAE_PROGRAM");
+  if (program && program[0]) g_rae_program_name = program;
+  rae_record_main_stack();
+  /* An alternate signal stack: a stack overflow leaves no room for the
+   * handler on the thread's own stack, so without this the kernel killed
+   * the process before a byte was written — exit 1, nothing on stderr. */
+  static char alt_stack[64 * 1024];
+  stack_t ss;
+  memset(&ss, 0, sizeof(ss));
+  ss.ss_sp = alt_stack;
+  ss.ss_size = sizeof(alt_stack);
+  ss.ss_flags = 0;
+  sigaltstack(&ss, NULL);
   struct sigaction sa;
   memset(&sa, 0, sizeof(sa));
-  sa.sa_handler = rae_crash_handler;
+  sa.sa_sigaction = rae_crash_handler;
   sigemptyset(&sa.sa_mask);
-  sa.sa_flags = SA_NODEFER | SA_RESETHAND;
+  sa.sa_flags = SA_NODEFER | SA_RESETHAND | SA_SIGINFO | SA_ONSTACK;
   sigaction(SIGSEGV, &sa, NULL);
   sigaction(SIGBUS,  &sa, NULL);
   sigaction(SIGFPE,  &sa, NULL);
   sigaction(SIGILL,  &sa, NULL);
   sigaction(SIGABRT, &sa, NULL);
 }
+#else
+void rae_thread_install_altstack(void) {}
 #endif /* !__wasm__ (crash handler) */
 
 /* ---- Allocation stats (opt-in via RAE_MEM_STATS=1) ----
