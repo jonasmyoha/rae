@@ -148,14 +148,6 @@ body {
   color: var(--text-muted);
 }
 
-/* The build-progress bar in the chip: monospace so the twenty cells and
- * their spaces keep their width. */
-.test-status.is-building {
-  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-weight: 500;
-  white-space: pre;
-}
-
 .test-status.is-running {
   border-color: rgba(154, 161, 185, 0.8);
   color: var(--text);
@@ -421,6 +413,37 @@ button.btn-build-test:hover:not(:disabled) {
 .terminal-line.stdout { color: #c8d9ff; }
 .terminal-line.stderr { color: var(--danger); }
 .terminal-line.warning { color: var(--warning); }
+/* Machine lines: the compiler's @@RAE_…@@ sentinels and [wgpu-report]. */
+.terminal-line.machine { color: #e8933a; opacity: 0.85; }
+
+/* The build progress bar, pinned above the example terminal while the
+ * compiler works; removed when the app starts. */
+.build-progress {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0 0 0.75rem;
+  width: 100%;
+  box-sizing: border-box;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+.build-progress__track {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(154, 161, 185, 0.18);
+  overflow: hidden;
+}
+.build-progress__fill {
+  height: 100%;
+  width: 2%;
+  border-radius: 3px;
+  background: #58a6ff;
+  transition: width 0.4s ease-out;
+}
+.build-progress__label { white-space: nowrap; flex: 0 0 auto; }
 
 .terminal-actions {
   display: flex;
