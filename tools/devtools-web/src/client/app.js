@@ -149,17 +149,38 @@ const exampleLineClassifier = makeStreamClassifier();
 // Returns true if a captured line should count as a *real* error for
 // pass/fail accounting. gcc/clang warnings, raylib's INFO/WARNING console
 // chatter, and our own status markers don't count.
+// Which stderr lines count as a FAILURE in a Run-all report. Everything a
+// program writes to stderr is not an error: the compiler's machine-readable
+// sentinels (@@RAE_…@@), the renderer's per-frame resource reports, the
+// runtime's warnings and the crash handler's [rae crash] backtrace preamble
+// all go there. Only a line that reads as an error (a Rae diagnostic
+// `file:line:col: message`, a `runtime error:`, a `rae:` crash line, a C
+// compiler error, `error:` anywhere) is one. Unknown stderr text is NOT
+// treated as an error — until the batch actually saw its output lines (a
+// bug fixed with the Stress tab), this function ran on nothing and every
+// example passed; the moment it saw them, ten featured examples went red on
+// their sentinels alone.
 function isRealError(text, stream) {
   if (stream !== "stderr") return false;
   if (!text || !text.trim()) return false;
   if (text.startsWith("●")) return false;
+  if (/^@@RAE_[A-Z_]+@@/.test(text)) return false;
+  if (/^\[wgpu-report\b/.test(text)) return false;
+  if (/^(warning|note):/.test(text)) return false;
+  if (/^\S+:\d+: warning:/.test(text)) return false;
   if (/\bwarning:/.test(text)) return false;
   if (/^\d+\s+warnings?\s+generated/i.test(text)) return false;
   if (/^INFO:/.test(text) || /^WARNING:/.test(text)) return false;
   if (/^\s*(\d+\s*)?\|/.test(text)) return false;
   if (/^\s*\^/.test(text)) return false;
   if (/^\s*~+/.test(text)) return false;
-  return true;
+  // What an error LOOKS like; anything else on stderr is chatter.
+  if (/^\S+:\d+(:\d+)?: /.test(text)) return true;      // Rae / C diagnostic with a position
+  if (/\b(runtime )?error\b/i.test(text)) return true;   // `error:`, `runtime error:`, `fatal error:`
+  if (/^rae: /.test(text)) return true;                  // the crash handler's one-liners
+  if (/^\[rae crash\]/.test(text)) return true;
+  if (/\b(panic|abort|segmentation fault|trace trap|killed)\b/i.test(text)) return true;
+  return false;
 }
 let raeSyntax = null;
 let testDirectoryMap = new Map();
