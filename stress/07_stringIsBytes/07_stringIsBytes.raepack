@@ -1,0 +1,37 @@
+pack StringIsBytes {
+  format: "raepack"
+  version: 1
+  defaultTarget: compiled
+  name: "Strings are bytes"
+  description: "The six-character string héllo👋 has length() 10 (UTF-8 bytes, not characters), and sub(start: 1, len: 1) cuts inside the two-byte é, printing a replacement character."
+  category: "Stress"
+  targets: {
+    target compiled: {
+      label: "Compiled"
+      entry: "Main.rae"
+      sources: {
+        source: {
+          path: "."
+          emit: compiled
+        }
+      }
+    }
+  }
+  stress: {
+    verdict: "footgun"
+    expect: {
+      outcome: "run"
+      exitCode: 0
+      stdoutMatches: "^length 10\nsub\\(1,1\\) \\[.\\]$"
+    }
+    elsewhere: {
+      python: "len is 6 (code points); s[1] is é"
+      javascript: "length is 7 (UTF-16 units — the emoji counts twice); s[1] is é"
+      java: "length() is 7 (UTF-16 units); charAt(1) is é"
+      go: "len is 10 (bytes) like Rae, but range walks runes and utf8.RuneCountInString is 6"
+      rust: "len() is 10 (bytes) like Rae, but s[1..2] PANICS at a non-boundary instead of producing garbage"
+      c: "strlen is 10; s[1] is one byte of é"
+    }
+    fixedBy: ""
+  }
+}

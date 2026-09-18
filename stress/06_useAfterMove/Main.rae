@@ -1,0 +1,17 @@
+# Foot gun: hand a value to a function that takes it over, then keep using
+# it.
+#
+# `own` reads as "the callee now owns this list". Today it does not move:
+# the callee works on a copy, adds to it and reports 4, while the caller's
+# list is untouched at 3 and still usable — with no diagnostic that the value
+# was handed away. This case asserts that current behaviour.
+func consume(xs: own List(Int)) ret Int {
+  xs.add(value: 4)
+  ret xs.length
+}
+
+func main() {
+  var xs: List(Int) = [1, 2, 3]
+  let n: Int = consume(xs: xs)
+  log("caller sees {xs.length}, callee returned {n}")
+}

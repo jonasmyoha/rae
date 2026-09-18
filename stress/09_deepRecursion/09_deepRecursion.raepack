@@ -1,0 +1,38 @@
+pack DeepRecursion {
+  format: "raepack"
+  version: 1
+  defaultTarget: compiled
+  name: "Deep recursion"
+  description: "Ten million frames of recursion. Today the process dies with exit 1 and not one word on stderr."
+  category: "Stress"
+  targets: {
+    target compiled: {
+      label: "Compiled"
+      entry: "Main.rae"
+      sources: {
+        source: {
+          path: "."
+          emit: compiled
+        }
+      }
+    }
+  }
+  stress: {
+    verdict: "footgun"
+    expect: {
+      outcome: "run"
+      exitCode: 1
+      stdout: ""
+      stderr: ""
+    }
+    elsewhere: {
+      python: "RecursionError with a traceback (at a depth of about 1,000 by default)"
+      javascript: "RangeError: Maximum call stack size exceeded"
+      java: "StackOverflowError with a stack trace"
+      go: "succeeds — goroutine stacks grow on demand (up to 1 GB)"
+      rust: "aborts with `thread main has overflowed its stack`"
+      c: "segmentation fault, no message — like Rae"
+    }
+    fixedBy: ""
+  }
+}

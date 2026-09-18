@@ -1,0 +1,38 @@
+pack SilentNoOpWrite {
+  format: "raepack"
+  version: 1
+  defaultTarget: compiled
+  name: "Silent no-op write"
+  description: "set(index: 10, …) on a 3-element list does nothing: no error, no growth, exit 0. Every other language either fails loudly, grows the list, or corrupts memory — none drops the write."
+  category: "Stress"
+  targets: {
+    target compiled: {
+      label: "Compiled"
+      entry: "Main.rae"
+      sources: {
+        source: {
+          path: "."
+          emit: compiled
+        }
+      }
+    }
+  }
+  stress: {
+    verdict: "footgun"
+    expect: {
+      outcome: "run"
+      exitCode: 0
+      stdout: "length 3"
+      stderr: ""
+    }
+    elsewhere: {
+      python: "IndexError: list assignment index out of range"
+      javascript: "the array grows to 11 with holes — a different foot gun"
+      java: "IndexOutOfBoundsException"
+      go: "run-time panic: index out of range [10] with length 3"
+      rust: "panics: index out of bounds"
+      c: "writes past the buffer — memory corruption"
+    }
+    fixedBy: ""
+  }
+}

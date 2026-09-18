@@ -1,0 +1,38 @@
+pack IntegerOverflow {
+  format: "raepack"
+  version: 1
+  defaultTarget: compiled
+  name: "Integer overflow and division by zero"
+  description: "Int.max + 1 wraps silently, and 7 / 0 evaluates to 0 — exit 0, no diagnostic. No other language returns 0 there."
+  category: "Stress"
+  targets: {
+    target compiled: {
+      label: "Compiled"
+      entry: "Main.rae"
+      sources: {
+        source: {
+          path: "."
+          emit: compiled
+        }
+      }
+    }
+  }
+  stress: {
+    verdict: "footgun"
+    expect: {
+      outcome: "run"
+      exitCode: 0
+      stdout: "wrapped: -9223372036854775808\ndiv0: 0"
+      stderr: ""
+    }
+    elsewhere: {
+      python: "no overflow (arbitrary precision); ZeroDivisionError on 7 / 0"
+      javascript: "no Int: 2**63 loses precision as a double; 7 / 0 is Infinity"
+      java: "wraps to Long.MIN_VALUE; ArithmeticException on 7 / 0"
+      go: "wraps; run-time panic on 7 / 0 (a constant 7 / 0 is a compile error)"
+      rust: "panics in debug, wraps in release; always panics on 7 / 0 (constant: compile error)"
+      c: "signed overflow is undefined behaviour; 7 / 0 is undefined behaviour (usually SIGFPE)"
+    }
+    fixedBy: ""
+  }
+}
