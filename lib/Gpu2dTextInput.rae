@@ -1,0 +1,30 @@
+# Gpu2dTextInput — OS text input for the Gpu2d window: the characters the
+# user typed (#976) and the switch that turns text input on while a text
+# field is on screen. Split from Gpu2d.rae, which is at the 1,000-line cap.
+# The extern surface is the same runtime_gpu2d_platform.c the rest of Gpu2d
+# uses.
+
+# The characters the user typed since the last event poll, as UTF-8 (#976).
+# Empty on frames with no typing. Backspace / Enter are key edges, not text
+# — read them with Sdl3.isKeyPressed(keyBackspace / keyEnter).
+func nativeTextInput() unsafe extern("rae_ext_Gpu2d_textInput") ret String
+
+func textInput() ret String {
+  unsafe {
+    ret nativeTextInput()
+  }
+}
+
+# Turn OS text input on while a text field is on screen, off otherwise — call
+# it every frame with the current state (idempotent). Off, the window gets raw
+# key events only, which is what a game wants: with it on, the OS treats the
+# window as a text field, and on macOS holding a key opens the press-and-hold
+# accent popover. `textInput()` only delivers text while it is on. Never on
+# under a headless run.
+func nativeSetTextInput(active: Bool) unsafe extern("rae_ext_Gpu2d_setTextInput")
+
+func setTextInput(active: view Bool) {
+  unsafe {
+    nativeSetTextInput(active: active)
+  }
+}

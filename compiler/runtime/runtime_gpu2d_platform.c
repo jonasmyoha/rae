@@ -192,13 +192,13 @@ void rae_ext_Gpu2d_initWindow(int64_t width, int64_t height, rae_String title) {
     if (!g_sdl_win) { fprintf(stderr, "[gpu2d] window failed: %s\n", SDL_GetError()); return; }
     if (!headless) {
         SDL_RaiseWindow(g_sdl_win);
-        /* SDL3 delivers SDL_EVENT_TEXT_INPUT only while text input is started
-         * for the window; on desktop this is free (no on-screen keyboard).
-         * Skipped headless (#983): a started text-input window still accepts
-         * stray terminal keystrokes typed during an automated run — a Space
-         * toggled playback and a stray "to" filled a search field mid-capture. */
-        SDL_StartTextInput(g_sdl_win);
     }
+    /* Text input is NOT started here. SDL3 delivers SDL_EVENT_TEXT_INPUT only
+     * while text input is started for the window, and starting it makes the
+     * whole window a text field to the OS: on macOS, holding a key then opens
+     * the press-and-hold accent popover (e -> è é ê …) — in a game that reads
+     * WASD. An app turns it on while a text field is on screen
+     * (rae_ext_Gpu2d_setTextInput, Gpu2d.setTextInput) and off again. */
 #ifndef __EMSCRIPTEN__
     g_g2d_metal_view = SDL_Metal_CreateView(g_sdl_win);
     if (!g_g2d_metal_view) { fprintf(stderr, "[gpu2d] metal view failed: %s\n", SDL_GetError()); return; }
@@ -502,6 +502,21 @@ static void rae_g2d_pointer_design(double* dx, double* dy) {
 float rae_ext_Gpu2d_pointerX(void){ double x, y; rae_g2d_pointer_design(&x, &y); return x; }
 /* The characters typed since the last event poll, as one UTF-8 String. */
 rae_String rae_ext_Gpu2d_textInput(void){ return rae_ext_rae_str_from_cstr(g_g2d_text_input); }
+
+/* Start / stop SDL text input for the window: on while a text field is on
+ * screen, off otherwise (see the note at window creation). Idempotent — the
+ * app calls it every frame with its current state. Never started headless
+ * (#983): a text-input window accepts stray terminal keystrokes during an
+ * automated run. */
+static int g_g2d_text_input_active = 0;
+void rae_ext_Gpu2d_setTextInput(rae_Bool active) {
+    if (!g_sdl_win) return;
+    int want = active ? 1 : 0;
+    if (want && rae_g2d_headless_requested()) want = 0;
+    if (want == g_g2d_text_input_active) return;
+    g_g2d_text_input_active = want;
+    if (want) SDL_StartTextInput(g_sdl_win); else SDL_StopTextInput(g_sdl_win);
+}
 float rae_ext_Gpu2d_pointerY(void){ double x, y; rae_g2d_pointer_design(&x, &y); return y; }
 
 /* Multitouch fingers in design units (#526). touchX/Y clamp to 0 out of range. */
