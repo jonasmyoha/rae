@@ -40,13 +40,14 @@ void rae_task_drop(RaeTask* t);     /* join (if not joined) + free; scope-exit d
 #endif
 
 /* Array(T, cap: N) dynamic bounds policy (docs/value-aggregates-and-ownership.md
- * §1.7): a dynamic (non-constant) index is checked in debug builds and
- * unchecked in release. Constant indices are rejected at compile time by sema,
- * so only dynamic subscripts reach this. `NDEBUG` is defined by the release
- * profile (-O2 -DNDEBUG) and absent from dev (-O0 -g), so the check compiles to
- * a bare index in release — zero cost in the skinning/matrix inner loops the
- * policy is written to protect. The macro evaluates `idx` exactly once. */
-#ifndef NDEBUG
+ * §1.7): a dynamic (non-constant) index is checked in EVERY build profile.
+ * Constant indices are rejected at compile time by sema, so only dynamic
+ * subscripts reach this. An out-of-range index would read or write past a C
+ * array — memory corruption — so the only safe answer is to stop: one line
+ * with the location, then abort. (Until 2026-09 the check was compiled out
+ * of release builds for the skinning inner loops; that exception was never
+ * approved and is gone — Rae is always bounds-checked.) The macro evaluates
+ * `idx` exactly once. */
 static inline int64_t rae_array_bounds_check(int64_t idx, int64_t cap,
                                              const char* file, int line) {
     if (idx < 0 || idx >= cap) {
@@ -60,25 +61,22 @@ static inline int64_t rae_array_bounds_check(int64_t idx, int64_t cap,
 }
 #define RAE_ARRAY_IDX(idx, cap, file, line) \
     rae_array_bounds_check((int64_t)(idx), (int64_t)(cap), (file), (line))
-#else
-#define RAE_ARRAY_IDX(idx, cap, file, line) (idx)
-#endif
 
 /* ---- Int arithmetic (docs/integer-semantics.md) ----
  *
  * The C backend routes every `+ - * / %` on `Int` (signed 64-bit) through
- * these, so the language defines what C leaves undefined:
- *   - `/` and `%` by zero are a runtime error in EVERY profile: one line
+ * these, so the language defines what C leaves undefined — and defines it
+ * the SAME way in every build profile (a program that passed its tests
+ * behaves identically when shipped):
+ *   - `/` and `%` by zero are a runtime error: one line
  *     `file:line: runtime error: division by zero` and exit RAE_TRAP_EXIT_CODE.
  *     Returning 0 (what the bare C divide happened to do on arm64) or a
- *     SIGFPE are both wrong answers for a language that promises defined
- *     behaviour. `Int.min / -1` (the one other overflowing divide) traps too.
- *   - `+ - *` overflow is a runtime error in the dev profile (checked with the
- *     compiler builtins, one branch each) and WRAPS two's-complement in the
- *     release profile (-DNDEBUG), computed in unsigned so it is defined, not
- *     UB the optimizer may assume away. Same policy as RAE_ARRAY_IDX: the
- *     check where it is cheap to find the bug, the bare instruction where
- *     the inner loop runs.
+ *     SIGFPE are both wrong answers. `Int.min / -1` (the one other
+ *     overflowing divide) traps too.
+ *   - `+ - *` WRAP two's-complement, computed in unsigned so the wrap is
+ *     defined behaviour rather than UB the optimizer may assume away. This is
+ *     what every language with fixed-size integers does in production, and
+ *     what a hash (lib/Noise) relies on.
  * A constant divisor of zero never reaches here: sema rejects it. */
 #define RAE_TRAP_EXIT_CODE 70   /* sysexits EX_SOFTWARE: an internal, defined trap, not a crash */
 static inline void rae_int_trap(const char* file, int line, const char* what) {
@@ -96,23 +94,6 @@ static inline int64_t rae_int_mod(int64_t a, int64_t b, const char* file, int li
     if (b == -1) return 0;   /* Int.min % -1 is 0 mathematically, UB in C */
     return a % b;
 }
-#ifndef NDEBUG
-static inline int64_t rae_int_add(int64_t a, int64_t b, const char* file, int line) {
-    int64_t r;
-    if (__builtin_add_overflow(a, b, &r)) rae_int_trap(file, line, "integer overflow in +");
-    return r;
-}
-static inline int64_t rae_int_sub(int64_t a, int64_t b, const char* file, int line) {
-    int64_t r;
-    if (__builtin_sub_overflow(a, b, &r)) rae_int_trap(file, line, "integer overflow in -");
-    return r;
-}
-static inline int64_t rae_int_mul(int64_t a, int64_t b, const char* file, int line) {
-    int64_t r;
-    if (__builtin_mul_overflow(a, b, &r)) rae_int_trap(file, line, "integer overflow in *");
-    return r;
-}
-#else
 static inline int64_t rae_int_add(int64_t a, int64_t b, const char* file, int line) {
     (void)file; (void)line; return (int64_t)((uint64_t)a + (uint64_t)b);
 }
@@ -122,7 +103,6 @@ static inline int64_t rae_int_sub(int64_t a, int64_t b, const char* file, int li
 static inline int64_t rae_int_mul(int64_t a, int64_t b, const char* file, int line) {
     (void)file; (void)line; return (int64_t)((uint64_t)a * (uint64_t)b);
 }
-#endif
 
 typedef uint32_t rae_Char32;
 typedef uint32_t rae_Char;
@@ -579,6 +559,7 @@ rae_String rae_ext_rae_str_sub(rae_String s, int64_t start, int64_t len);
 /* A library-level runtime error (lib/core Core.rae runtimeError): one line on
  * stderr, exit RAE_TRAP_EXIT_CODE. runtime_filesystem.c. */
 void rae_ext_rae_runtime_error(rae_String message);
+void rae_ext_rae_runtime_warning(rae_String message);
 /* runtime_core_memory.c: per-thread alternate signal stack for the crash
  * handler; the emitted spawn thunk calls it first. No-op on WASM. */
 void rae_thread_install_altstack(void);

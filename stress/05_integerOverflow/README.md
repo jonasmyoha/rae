@@ -31,11 +31,10 @@ Exit code 70 from the program (`rae run` reports 1). The rules
 - A divisor that is a **constant zero does not compile**: `7 / 0`,
   `x % (1 - 1)` and `x / zeroConst` are all rejected by sema, which is why
   this program computes its zero.
-- `+ - *` overflow is a **runtime error in the dev profile**
-  (`rae run --profile dev` stops at `big + one` with `integer overflow in +`)
-  and **wraps two's-complement in release** — the first line above. The
-  check where it is cheap to find the bug, the bare instruction where the
-  inner loop runs; the same policy as array bounds.
+- `+ - *` overflow **wraps two's-complement** — the first line above —
+  defined behaviour (computed unsigned), the same in every build profile.
+  Rae has no dev/release semantic differences; a dev-only overflow check was
+  tried and dropped for that reason.
 
 ## Elsewhere
 
@@ -48,7 +47,7 @@ Exit code 70 from the program (`rae run` reports 1). The rules
 | Rust | panics in debug, wraps in release; always panics on `7 / 0` (constant: compile error) |
 | C | signed overflow is undefined behaviour; `7 / 0` is undefined behaviour (usually `SIGFPE`) |
 
-Rae's rules are Rust's, with Go's compile-time check for a constant divisor.
+Rae's rules are Java's and Go's for overflow (wrap), Python's and Go's for a zero divisor (stop), with Go's compile-time check for a constant divisor.
 
 ## Expected outcome
 
