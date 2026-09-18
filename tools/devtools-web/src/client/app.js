@@ -125,6 +125,10 @@ function makeStreamClassifier() {
   return {
     classify(text, stream) {
       if (stream !== "stderr") { lastLevel = null; return stream; }
+      // Machine lines on stderr — the compiler's @@RAE_…@@ sentinels and the
+      // renderer's per-frame [wgpu-report] — are neither errors nor warnings:
+      // orange, so the eye skips them and red keeps meaning "something broke".
+      if (/^@@RAE_[A-Z_]+@@/.test(text) || /^\[wgpu-report\b/.test(text)) { lastLevel = null; return "machine"; }
       if (/\berror:/.test(text)) { lastLevel = "error"; return "stderr"; }
       if (/\bwarning:/.test(text)) { lastLevel = "warning"; return "warning"; }
       const isContinuation = /^\s*(\d+\s*)?\|/.test(text)
@@ -832,6 +836,7 @@ function handleExampleRunStarted(event) {
           : "running";
   setExampleStatus(label, "is-running", event.targetLabel);
   clearExampleOutput();
+  if (exampleOutput) exampleOutput.innerHTML = "";   // no placeholder line under a live run
   allExampleLogLines = [];
   appendExampleOutput(
     `▶ [${event.targetLabel}] ${label} ${event.entry}`,
@@ -892,7 +897,6 @@ function handleExampleBuildTiming(event) {
 // way the compiler draws it on a terminal (compiler/src/progress.h): a
 // twenty-cell bar of dots and the phase name. Only for the selected run; the
 // app-started event that follows replaces it with "running".
-const BUILD_PROGRESS_CELLS = 20;
 const BUILD_PROGRESS_PHASES = {
   load: "loading modules",
   sema: "sema",
@@ -900,15 +904,40 @@ const BUILD_PROGRESS_PHASES = {
   cc: "compiling C"
 };
 
+// The build progress lives in the terminal pane — the devtools' "CLI part" —
+// as a real bar pinned above the output, not as text in a status chip. It
+// appears on the first progress event of the selected run and is removed the
+// moment the app starts (or the run ends), so the pane is plain output again.
 function handleExampleBuildProgress(event) {
   if (event.runId !== activeExampleRunId || !isExampleEventRelevant(event.exampleId, event.entry)) {
     return;
   }
-  let filled = Math.round(event.fraction * BUILD_PROGRESS_CELLS);
-  if (filled >= BUILD_PROGRESS_CELLS) filled = BUILD_PROGRESS_CELLS - 1;
-  const bar = ".".repeat(filled) + " ".repeat(BUILD_PROGRESS_CELLS - filled);
   const phase = BUILD_PROGRESS_PHASES[event.phase] ?? event.phase;
-  setExampleStatus(`[${bar}] ${phase}`, "is-running is-building", lastExampleTargetLabel);
+  renderBuildProgressBar(event.fraction, phase);
+}
+
+function renderBuildProgressBar(fraction, phase) {
+  const wrapper = exampleOutput?.parentElement;
+  if (!wrapper) return;
+  let bar = wrapper.querySelector(".build-progress");
+  if (!bar) {
+    bar = document.createElement("div");
+    bar.className = "build-progress";
+    bar.innerHTML =
+      `<div class="build-progress__track"><div class="build-progress__fill"></div></div>` +
+      `<span class="build-progress__label"></span>`;
+    wrapper.insertBefore(bar, exampleOutput);
+  }
+  // Never full before the build is done — the compiler caps its own estimate
+  // at 97% for the same reason.
+  const percent = Math.min(97, Math.max(2, Math.round(fraction * 100)));
+  bar.querySelector(".build-progress__fill").style.width = `${percent}%`;
+  bar.querySelector(".build-progress__label").textContent = `building — ${phase}`;
+}
+
+function clearBuildProgressBar() {
+  const bar = exampleOutput?.parentElement?.querySelector(".build-progress");
+  if (bar) bar.remove();
 }
 
 function handleExampleAppStarted(event) {
@@ -916,6 +945,7 @@ function handleExampleAppStarted(event) {
   if (event.runId !== activeExampleRunId || !isExampleEventRelevant(event.exampleId, event.entry)) {
     return;
   }
+  clearBuildProgressBar();
   setExampleStatus("running", "is-running", lastExampleTargetLabel);
 }
 
@@ -949,6 +979,7 @@ async function loadExampleBuildStats() {
 function handleExampleRunCompleted(event) {
   activeExampleRuns.delete(event.runId);
   exampleRunExitCodes.set(event.runId, event.exitCode ?? null);
+  if (event.runId === activeExampleRunId) clearBuildProgressBar();
   // Keep the timing markers until the batch loop has read them; the map is
   // tiny and cleared by the next Run-all.
   if (pendingExampleRunId && pendingExampleRunId === event.exampleId) {
@@ -2900,7 +2931,7 @@ function resolveExampleEntry(example, targetId) {
 function setExampleStatus(label, modifierClass, targetLabel) {
   if (!exampleStatusChip) return;
   exampleStatusChip.textContent = targetLabel ? `${label} · ${targetLabel}` : label;
-  exampleStatusChip.classList.remove("is-running", "is-success", "is-failure", "is-building");
+  exampleStatusChip.classList.remove("is-running", "is-success", "is-failure");
   if (modifierClass) {
     exampleStatusChip.classList.add(...modifierClass.split(" "));
   }
@@ -2910,6 +2941,7 @@ function clearExampleOutput() {
   if (!exampleOutput) return;
   exampleOutput.innerHTML = `<div class="terminal-line">Run an example to see output.</div>`;
   exampleLineClassifier.reset();
+  clearBuildProgressBar();
 }
 
 function appendExampleOutput(text, stream = "stdout") {
