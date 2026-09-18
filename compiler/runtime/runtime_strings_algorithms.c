@@ -64,11 +64,23 @@ int64_t rae_ext_rae_str_hash(rae_String s) {
   return (int64_t)hash;
 }
 
+/* Byte-indexed substring that never cuts a character (docs/strings.md): a
+ * `start` inside a multi-byte UTF-8 sequence moves back to that character's
+ * first byte, an end inside one moves forward past its last byte, so the
+ * result is whole characters and valid UTF-8. `sub(start: 1, len: 1)` of
+ * "héllo" is "é" (two bytes), never a lone 0xC3. Continuation bytes are
+ * 0x80..0xBF; a byte that is not one starts a character. */
+static int is_utf8_continuation(uint8_t b) { return (b & 0xC0) == 0x80; }
+
 rae_String rae_ext_rae_str_sub(rae_String s, int64_t start, int64_t len) {
   if (!s.data) return (rae_String){NULL, 0, 0, 0};
   if (start < 0) start = 0;
   if (start >= s.len) return (rae_String){NULL, 0, 0, 0};
-  if (start + len > s.len) len = s.len - start;
+  if (len <= 0) return (rae_String){NULL, 0, 0, 0};
+  int64_t end = (len > s.len - start) ? s.len : start + len;
+  while (start > 0 && is_utf8_continuation(s.data[start])) start--;
+  while (end < s.len && is_utf8_continuation(s.data[end])) end++;
+  len = end - start;
   if (len <= 0) return (rae_String){NULL, 0, 0, 0};
 
   uint8_t* result_data = malloc((size_t)len + 1);

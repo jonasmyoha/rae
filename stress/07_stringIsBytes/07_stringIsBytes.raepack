@@ -3,7 +3,7 @@ pack StringIsBytes {
   version: 1
   defaultTarget: compiled
   name: "Strings are bytes"
-  description: "The six-character string héllo👋 has length() 10 (UTF-8 bytes, not characters), and sub(start: 1, len: 1) cuts inside the two-byte é, printing a replacement character."
+  description: "length() and sub are byte-indexed, but sub never cuts a character (a range inside é widens to the whole é), and charCount / charAt / charSub count characters. It used to print a lone byte."
   category: "Stress"
   targets: {
     target compiled: {
@@ -18,11 +18,11 @@ pack StringIsBytes {
     }
   }
   stress: {
-    verdict: "footgun"
+    verdict: "handles"
     expect: {
       outcome: "run"
       exitCode: 0
-      stdoutMatches: "^length 10\nsub\\(1,1\\) \\[.\\]$"
+      stdout: "length 10  charCount 6\nsub(1,1) [é]\ncharSub(1,1) [é]  charAt(5) 👋"
     }
     elsewhere: {
       python: "len is 6 (code points); s[1] is é"
@@ -32,6 +32,6 @@ pack StringIsBytes {
       rust: "len() is 10 (bytes) like Rae, but s[1..2] PANICS at a non-boundary instead of producing garbage"
       c: "strlen is 10; s[1] is one byte of é"
     }
-    fixedBy: ""
+    fixedBy: "#75219451 — sub widens to character boundaries in the runtime; charCount/charAt/charSub in lib/String.rae"
   }
 }
