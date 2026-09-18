@@ -84,6 +84,29 @@ export type ExampleDescriptor = {
   thumbnail?: string;
   /** URLs of all screenshots for the detail view, thumbnail first. */
   screenshots?: string[];
+  /** Which root the record was scanned from. A "stress" record is a foot-gun
+   * case (docs/stress-tests.md): its file paths are relative to the examples
+   * root like every other record (`../stress/<id>/…`), and `stress` carries
+   * the pack's verdict + expectation. */
+  origin?: "examples" | "stress";
+  stress?: StressInfo;
+};
+
+/** The `stress` block of a stress case's pack — the verdict it sits on and
+ * the outcome the runner (stress/run.sh) holds it to. */
+export type StressInfo = {
+  verdict: "handles" | "footgun";
+  expect: {
+    outcome: "compile-error" | "run";
+    diagnostic?: string;
+    exitCode?: number;
+    stdout?: string;
+    stdoutMatches?: string;
+    stderr?: string;
+  };
+  /** What the same program does in other languages, keyed by language. */
+  elsewhere: Record<string, string>;
+  fixedBy?: string;
 };
 
 export type ExampleRunMode = "run" | "watch" | "build" | "action";

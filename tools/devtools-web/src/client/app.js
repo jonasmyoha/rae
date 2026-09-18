@@ -214,6 +214,13 @@ const EXAMPLE_COLLECTIONS = {
   raytracer: {
     title: "Raytracer",
     subtitle: "Path tracers from One Weekend to interactive WebGPU — Live, Compiled and WASM."
+  },
+  // The foot-gun cases (docs/stress-tests.md). Membership is the record's
+  // origin (scanned from stress/), not a category; the subtitle is the
+  // scoreboard, rendered by renderStressScoreboard.
+  stress: {
+    title: "Stress",
+    subtitle: "Small programs that poke one classic language foot gun each — and say in the open whether Rae handles it or still gets it wrong."
   }
 };
 // Category labels (.raepack "category") owned by a non-default collection.
@@ -261,6 +268,13 @@ let batchResults = [];
 // separately, the example page shows the last build cost.
 const exampleBuildTimings = new Map();
 const exampleAppStartedAt = new Map();
+// runId -> exit code, from example-run-completed; the stress verdict needs it.
+const exampleRunExitCodes = new Map();
+// runId -> every output line of that run, uncapped, kept until the next
+// Run-all. The verdict (single run and batch) reads THIS, not the panel's
+// allExampleLogLines: that array is replaced when a run starts, so a "slice
+// from where we were" taken before the start event saw nothing.
+const exampleRunLines = new Map();
 // Latest build cost per example, from /api/stats/example-builds + live events.
 let exampleBuildStats = {};
 let lastExampleTargetLabel = "";
@@ -816,6 +830,8 @@ function handleExampleRunOutput(event) {
     run.lines.push({ text: event.line, stream: event.stream });
     if (run.lines.length > RUN_LOG_LIMIT) run.lines.splice(0, run.lines.length - RUN_LOG_LIMIT);
   }
+  if (!exampleRunLines.has(event.runId)) exampleRunLines.set(event.runId, []);
+  exampleRunLines.get(event.runId).push({ text: event.line, stream: event.stream });
   if (event.runId !== activeExampleRunId || !isExampleEventRelevant(event.exampleId, event.entry)) {
     return;
   }
@@ -911,6 +927,7 @@ async function loadExampleBuildStats() {
 
 function handleExampleRunCompleted(event) {
   activeExampleRuns.delete(event.runId);
+  exampleRunExitCodes.set(event.runId, event.exitCode ?? null);
   // Keep the timing markers until the batch loop has read them; the map is
   // tiny and cleared by the next Run-all.
   if (pendingExampleRunId && pendingExampleRunId === event.exampleId) {
@@ -928,6 +945,19 @@ function handleExampleRunCompleted(event) {
     }) in ${duration}s`,
     event.success ? "stdout" : "stderr"
   );
+  // A stress case: say what the run PROVED, under the output, the same way
+  // stress/run.sh prints it. A FIXED? is a call to action, not an error.
+  const stressExample = getSelectedExample();
+  if (stressExample?.stress && event.mode === "run") {
+    const verdict = computeStressVerdict(
+      stressExample.stress,
+      event.exitCode ?? null,
+      exampleRunLines.get(event.runId) ?? [],
+      exampleAppStartedAt.has(event.runId)
+    );
+    appendExampleOutput(`◆ ${verdict.line}`, verdict.kind === "fixed" ? "stderr" : "stdout");
+    renderStressVerdictLine(verdict);
+  }
   const label =
     event.mode === "watch"
       ? event.success
@@ -1913,6 +1943,9 @@ function exampleBelongsToCollection(example, collection) {
   // there would make SPECIAL_EXAMPLE_CATEGORIES swallow the featured examples'
   // real categories and empty out the other tabs.
   if (collection === "featured") return example.featured === true;
+  // Stress cases live in their own tab and nowhere else.
+  if (collection === "stress") return example.origin === "stress";
+  if (example.origin === "stress") return false;
   const cats = COLLECTION_CATEGORIES[collection];
   if (cats) return cats.includes(example.category);
   // Default "examples" collection: everything NOT owned by another collection.
@@ -1934,6 +1967,7 @@ function applyExampleCollection(collection) {
   if (subtitleEl) subtitleEl.textContent = meta.subtitle;
 
   const visible = examplesForCurrentCollection();
+  if (currentExampleCollection === "stress") renderStressScoreboard(visible);
   // Spell out what "Run all" will actually start. The label cannot say it
   // without growing to a sentence, and the scope being invisible is what made
   // the button surprising in the first place.
@@ -1951,7 +1985,7 @@ function applyExampleCollection(collection) {
     // of the running-apps dock. The run keeps going and stays reachable there.
     const first = visible[0] ?? null;
     selectedExampleId = first ? first.id : null;
-    selectedExampleFile = first ? (first.files[0]?.path ?? null) : null;
+    selectedExampleFile = first ? defaultExampleFile(first) : null;
     resetExampleArtifacts();
     if (selectedExampleFile) loadExampleSource(selectedExampleFile);
   }
@@ -1984,6 +2018,10 @@ function renderExampleList() {
 
   visibleExamples.forEach(ex => {
     let category = ex.category;
+    // Stress: two shelves, the wins first. The label carries the count.
+    if (currentExampleCollection === "stress") {
+      category = ex.stress?.verdict === "footgun" ? STRESS_GROUP_FOOTGUN : STRESS_GROUP_HANDLES;
+    }
     
     if (!category) {
       const num = parseInt(ex.id.split('_')[0]);
@@ -2040,12 +2078,13 @@ function renderExampleList() {
           : '';
       const num = exampleNumber(example);
       const numBadge = num ? `<span class="example-num">${num}</span>` : '';
+      const stressBadge = example.stress ? stressVerdictBadge(example.stress.verdict) : '';
       // The list thumbnail is the example's primary screenshot, if it has one.
       const thumb = example.thumbnail
         ? `<img class="example-thumb" src="${example.thumbnail}" alt="" loading="lazy" />`
         : '';
 
-      button.innerHTML = `${thumb}<div class="example-card__text"><h4>${numBadge}${displayName}${hiddenBadge}${featuredBadge}</h4><p>${targetSummary}</p></div>`;
+      button.innerHTML = `${thumb}<div class="example-card__text"><h4>${numBadge}${displayName}${hiddenBadge}${featuredBadge}${stressBadge}</h4><p>${example.stress ? escapeHtml(example.description ?? "") : targetSummary}</p></div>`;
       
       button.addEventListener("click", () => {
         // Selecting another example leaves any running app alone; the dock
@@ -2053,7 +2092,7 @@ function renderExampleList() {
         const previousId = selectedExampleId;
         selectedExampleId = example.id;
         if (previousId !== selectedExampleId) resetExampleArtifacts();
-        selectedExampleFile = example.files[0]?.path ?? null;
+        selectedExampleFile = defaultExampleFile(example);
         renderExampleList();
         renderExampleDetail();
         if (selectedExampleFile) loadExampleSource(selectedExampleFile);
@@ -2152,6 +2191,7 @@ function renderExampleDetail() {
       exampleScreenshotsEl.hidden = true;
       exampleScreenshotsEl.innerHTML = "";
     }
+    renderStressPanel(null);
     exampleRunActive = false;
     exampleWatchActive = false;
     if (exampleCustomActions) {
@@ -2182,6 +2222,7 @@ function renderExampleDetail() {
   exampleEntryLabel.textContent = details.join(" · ");
   renderExampleBuildStat();
   renderExampleScreenshots(example);
+  renderStressPanel(example);
   updateExampleButtons();
   renderExampleFiles(example);
   loadExampleDownloads(example.id);
@@ -3222,6 +3263,8 @@ async function runAllExamples() {
   batchResults = [];
   exampleBuildTimings.clear();
   exampleAppStartedAt.clear();
+  exampleRunExitCodes.clear();
+  exampleRunLines.clear();
   hideBatchReport();
   
   // THIS TAB'S examples, not every example there is. The same list the sidebar
@@ -3343,9 +3386,26 @@ async function runAllExamples() {
     // warnings (gcc/clang) and raylib's INFO/WARNING console output are
     // not failures. Interactive examples that ran the full 10s window
     // without crashing pass too.
-    const runLines = allExampleLogLines.slice(beforeRunIdx);
+    // The run's own lines, by run id — allExampleLogLines is replaced when
+    // the run starts, so a slice from beforeRunIdx saw nothing past the
+    // first example and no batch ever reported an error line.
+    const runLines = exampleRunLines.get(runId) ?? allExampleLogLines.slice(beforeRunIdx);
     const errorLines = runLines.filter(l => isRealError(l.text, l.stream)).map(l => l.text);
-    const success = errorLines.length === 0;
+    let success = errorLines.length === 0;
+    // A stress case is judged by its verdict, not by error lines: a footgun
+    // that prints a compile error on purpose is a pass, a FIXED? is not.
+    let stressVerdict = null;
+    if (example.stress) {
+      stressVerdict = computeStressVerdict(
+        example.stress,
+        exampleRunExitCodes.get(runId) ?? null,
+        runLines,
+        appStart !== null
+      );
+      success = stressVerdict.kind !== "fixed" && stressVerdict.kind !== "fail";
+      errorLines.length = 0;
+      if (!success) errorLines.push(stressVerdict.line);
+    }
 
     // A build that never finished is a failure even with no error line: the
     // app was never exercised.
@@ -3359,7 +3419,8 @@ async function runAllExamples() {
       buildMs: timing?.totalMs ?? null,
       msPerKloc: timing?.msPerKloc ?? null,
       lines: timing?.lines ?? null,
-      ranMs: appStart !== null ? Math.max(0, Date.now() - appStart) : null
+      ranMs: appStart !== null ? Math.max(0, Date.now() - appStart) : null,
+      stressVerdict
     });
     
     // Short pause between examples
@@ -3368,6 +3429,10 @@ async function runAllExamples() {
   
   isBatchRunning = false;
   pushStatusItem(`Completed batch run of ${collectionTitle} examples.`);
+  if (currentExampleCollection === "stress") {
+    recordStressRun(batchResults);
+    renderStressScoreboard(examplesForCurrentCollection());
+  }
   renderBatchReport();
 }
 
@@ -3414,6 +3479,20 @@ function renderBatchReport() {
     }
     table.appendChild(tbody);
     content.appendChild(table);
+  }
+  // Stress: one verdict line per case, the shelves' colours, before the
+  // problem list (a FIXED? is listed there too, as the call to action it is).
+  const verdicts = batchResults.filter(r => r.stressVerdict);
+  if (verdicts.length > 0) {
+    const list = document.createElement("div");
+    list.className = "stress-verdicts";
+    for (const r of verdicts) {
+      const row = document.createElement("div");
+      row.className = `stress-verdict stress-verdict--${r.stressVerdict.kind}`;
+      row.textContent = r.stressVerdict.line;
+      list.appendChild(row);
+    }
+    content.appendChild(list);
   }
   const problemResults = batchResults.filter(r => !r.success);
   
@@ -4167,6 +4246,172 @@ function setActiveView(targetView) {
   }
 }
 
+// ---- Stress tab (docs/stress-tests.md) --------------------------------------
+//
+// A stress case is an example record with origin "stress" and a `stress`
+// block: the shelf it sits on (`handles` / `footgun`) and the outcome the
+// runner holds it to. The tab shows the two shelves, a scoreboard, and for
+// the selected case its README + "elsewhere" table; a run ends with a verdict
+// line computed HERE the same way stress/run.sh computes it, so the page and
+// the shell runner never disagree.
+const STRESS_GROUP_HANDLES = "Rae handles it";
+const STRESS_GROUP_FOOTGUN = "Rae still gets it wrong";
+const STRESS_LAST_RUN_KEY = "rae-devtools-stress-last-run";
+
+function stressVerdictBadge(verdict) {
+  return verdict === "footgun"
+    ? ' <span class="badge badge--footgun">footgun</span>'
+    : ' <span class="badge badge--handles">handles</span>';
+}
+
+// The entry (Main.rae) first for a stress case — the pack file is not what
+// the reader came for. Other examples keep their first listed file.
+function defaultExampleFile(example) {
+  if (example.origin === "stress" && example.entry) return example.entry;
+  return example.files[0]?.path ?? null;
+}
+
+// The same comparison as stress/run.sh, over the run's captured lines.
+// Returns { kind: "handles" | "footgun" | "fixed" | "fail", line }.
+//   handles  a `handles` case showed the good outcome
+//   footgun  a `footgun` case still reproduces
+//   fixed    a `footgun` case no longer reproduces — flip it (FIXED?)
+//   fail     a `handles` case did not show the good outcome
+function computeStressVerdict(stress, exitCode, lines, appStarted) {
+  const expect = stress.expect;
+  const own = lines.filter((l) => !/^@@RAE_/.test(l.text) && !/^[●◆⏱]/.test(l.text) && !/^--- /.test(l.text));
+  const stdout = own.filter((l) => l.stream === "stdout").map((l) => l.text).join("\n");
+  const stderr = own.filter((l) => l.stream === "stderr").map((l) => l.text).join("\n");
+  let matched = true;
+  let why = "";
+  if (expect.outcome === "compile-error") {
+    if (appStarted || exitCode === 0) {
+      matched = false; why = "expected a compile error, the program compiled";
+    } else if (!own.some((l) => l.text.includes(expect.diagnostic ?? ""))) {
+      matched = false; why = `compile failed but not with "${expect.diagnostic}"`;
+    } else {
+      why = "compile error as expected";
+    }
+  } else {
+    if (!appStarted) {
+      matched = false; why = "did not compile";
+    } else if (expect.exitCode !== undefined && exitCode !== expect.exitCode) {
+      matched = false; why = `expected exit ${expect.exitCode}, got ${exitCode}`;
+    } else if (expect.stdout !== undefined && stdout !== expect.stdout) {
+      matched = false; why = `stdout differs: got ${stdout.slice(0, 100).replace(/\n/g, "|")}`;
+    } else if (expect.stdoutMatches !== undefined && !new RegExp(expect.stdoutMatches, "m").test(stdout)) {
+      matched = false; why = `stdout does not match /${expect.stdoutMatches}/: got ${stdout.slice(0, 100).replace(/\n/g, "|")}`;
+    } else if (expect.stderr !== undefined && stderr !== expect.stderr) {
+      matched = false; why = `stderr differs: got ${stderr.slice(0, 100).replace(/\n/g, "|")}`;
+    } else {
+      why = `exit ${exitCode}, output as expected`;
+    }
+  }
+  if (stress.verdict === "handles") {
+    return matched
+      ? { kind: "handles", line: `HANDLES — ${why}` }
+      : { kind: "fail", line: `FAIL — ${why}` };
+  }
+  return matched
+    ? { kind: "footgun", line: `FOOTGUN — still reproduces (${why})` }
+    : { kind: "fixed", line: `FIXED? — ${why}. The foot gun no longer reproduces: move this case to verdict "handles", assert the fix in expect, fill in fixedBy.` };
+}
+
+function renderStressVerdictLine(verdict) {
+  const panel = document.getElementById("example-stress-panel");
+  if (!panel) return;
+  let el = panel.querySelector(".stress-panel__verdict");
+  if (!el) {
+    el = document.createElement("p");
+    el.className = "stress-panel__verdict";
+    panel.appendChild(el);
+  }
+  el.className = `stress-panel__verdict stress-verdict stress-verdict--${verdict.kind}`;
+  el.textContent = `last run: ${verdict.line}`;
+}
+
+// The scoreboard in the hero subtitle: the shelves' sizes from the packs,
+// and the outcome of the last Run-all over the tab (kept in localStorage).
+function renderStressScoreboard(visible) {
+  const subtitleEl = document.getElementById("examples-hero-subtitle");
+  if (!subtitleEl) return;
+  const handles = visible.filter((e) => e.stress?.verdict === "handles").length;
+  const footguns = visible.filter((e) => e.stress?.verdict === "footgun").length;
+  let last = "";
+  try {
+    const saved = JSON.parse(localStorage.getItem(STRESS_LAST_RUN_KEY) ?? "null");
+    if (saved?.at) {
+      const when = new Date(saved.at).toISOString().slice(0, 10);
+      last = ` · last run ${when}: ${saved.handles} handled, ${saved.footguns} still reproduce` +
+        (saved.fixed ? `, ${saved.fixed} FIXED? to flip` : "") +
+        (saved.failed ? `, ${saved.failed} failed` : "");
+    }
+  } catch (_) { /* no record */ }
+  subtitleEl.textContent =
+    `Rae handles ${handles} · still gets ${footguns} wrong${last}. ${EXAMPLE_COLLECTIONS.stress.subtitle}`;
+}
+
+function recordStressRun(results) {
+  const counts = { at: Date.now(), handles: 0, footguns: 0, fixed: 0, failed: 0 };
+  for (const r of results) {
+    const kind = r.stressVerdict?.kind;
+    if (kind === "handles") counts.handles++;
+    else if (kind === "footgun") counts.footguns++;
+    else if (kind === "fixed") counts.fixed++;
+    else if (kind === "fail") counts.failed++;
+  }
+  try { localStorage.setItem(STRESS_LAST_RUN_KEY, JSON.stringify(counts)); } catch (_) { /* private mode */ }
+}
+
+// The case's README (rendered markdown) and the "elsewhere" table from its
+// pack — a real table, the Rae row highlighted — above the source viewer.
+let stressPanelFor = null;
+async function renderStressPanel(example) {
+  const panel = document.getElementById("example-stress-panel");
+  if (!panel) return;
+  if (!example?.stress) {
+    panel.hidden = true;
+    panel.innerHTML = "";
+    stressPanelFor = null;
+    return;
+  }
+  if (stressPanelFor === example.id) return;
+  stressPanelFor = example.id;
+  panel.hidden = false;
+  const stress = example.stress;
+  const expect = stress.expect;
+  const expectText = expect.outcome === "compile-error"
+    ? `compile error containing "${expect.diagnostic ?? ""}"`
+    : [
+        expect.exitCode !== undefined ? `exit ${expect.exitCode}` : null,
+        expect.stdout !== undefined ? `stdout "${expect.stdout.replace(/\n/g, "⏎")}"` : null,
+        expect.stdoutMatches !== undefined ? `stdout matches /${expect.stdoutMatches}/` : null,
+        expect.stderr !== undefined ? (expect.stderr === "" ? "stderr empty" : `stderr "${expect.stderr}"`) : null
+      ].filter(Boolean).join(", ");
+  const readmePath = example.entry.replace(/Main\.rae$/, "README.md");
+  let readmeHtml = "";
+  try {
+    const res = await fetch(`/api/examples/source?path=${encodeURIComponent(readmePath)}`, { cache: "no-store" });
+    if (res.ok) {
+      const data = await res.json();
+      readmeHtml = renderMarkdown(data.contents ?? "");
+    }
+  } catch (_) { /* no README */ }
+  if (stressPanelFor !== example.id) return;   // the user moved on meanwhile
+  const langs = Object.keys(stress.elsewhere);
+  const rows = [
+    `<tr class="is-rae"><th>Rae</th><td>${escapeHtml(expectText)}${stress.verdict === "footgun" ? " — <em>the current behaviour, asserted</em>" : ""}</td></tr>`,
+    ...langs.map((lang) => `<tr><th>${escapeHtml(lang)}</th><td>${escapeHtml(stress.elsewhere[lang])}</td></tr>`)
+  ].join("");
+  panel.innerHTML =
+    `<div class="stress-panel__head">${stressVerdictBadge(stress.verdict)}` +
+    `<span class="stress-panel__expect">expects: ${escapeHtml(expectText)}</span>` +
+    (stress.fixedBy ? `<span class="stress-panel__fixed">fixed by ${escapeHtml(stress.fixedBy)}</span>` : "") +
+    `</div>` +
+    `<div class="stress-panel__readme readme">${readmeHtml}</div>` +
+    `<table class="stress-elsewhere"><thead><tr><th>language</th><th>what this program does</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
 // The "Why?" page renders the repo-root README.md (#640): markdown -> HTML with
 // Rae code blocks syntax-highlighted (highlightRae) and the XKCD comic. Fetched
 // once, then cached.
@@ -4243,6 +4488,25 @@ function renderMarkdown(md) {
       const level = heading[1].length;
       out.push(`<h${level}>${renderInline(heading[2])}</h${level}>`);
       i += 1;
+      continue;
+    }
+
+    // GFM table: a `|` row, a `|---|` separator row, then `|` rows. The
+    // stress-case READMEs carry their "elsewhere" table this way.
+    if (/^\s*\|/.test(line) && i + 1 < lines.length && /^\s*\|?\s*:?-{2,}/.test(lines[i + 1])) {
+      flushAll();
+      const cells = (row) => row.trim().replace(/^\||\|$/g, "").split("|").map((c) => renderInline(c.trim()));
+      const head = cells(line);
+      i += 2;
+      const body = [];
+      while (i < lines.length && /^\s*\|/.test(lines[i])) {
+        body.push(cells(lines[i]));
+        i += 1;
+      }
+      out.push(
+        `<table class="readme-table"><thead><tr>${head.map((h) => `<th>${h}</th>`).join("")}</tr></thead>` +
+        `<tbody>${body.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join("")}</tr>`).join("")}</tbody></table>`
+      );
       continue;
     }
 
