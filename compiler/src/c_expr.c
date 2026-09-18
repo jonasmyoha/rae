@@ -22,6 +22,23 @@
 // (e.g. the Array bounds check). The file path is written as an escaped C string
 // literal so a path containing a quote or backslash cannot break the generated
 // C. The line is the indexing expression's own line.
+/* An expression built only from integer literals, negation and arithmetic —
+ * a C constant expression. Such an expression keeps the bare C operator
+ * instead of the checked Int helper: a helper call is not a constant
+ * expression, so it cannot initialise a module-level `let` (a C static), and
+ * a constant divisor of zero is already a sema error so nothing is lost. */
+static bool expr_is_const_int(const AstExpr* expr) {
+    if (!expr) return false;
+    switch (expr->kind) {
+        case AST_EXPR_INTEGER: return true;
+        case AST_EXPR_UNARY: return expr->as.unary.op == AST_UNARY_NEG && expr_is_const_int(expr->as.unary.operand);
+        case AST_EXPR_BINARY:
+            return expr->as.binary.op >= AST_BIN_ADD && expr->as.binary.op <= AST_BIN_MOD
+                   && expr_is_const_int(expr->as.binary.lhs) && expr_is_const_int(expr->as.binary.rhs);
+        default: return false;
+    }
+}
+
 static void emit_c_source_location(CFuncContext* ctx, const AstExpr* expr,
                                    FILE* out) {
     const char* file = (ctx && ctx->module && ctx->module->file_path)
@@ -506,6 +523,41 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
        * the grouping being emitted is the AST's own. */
       bool is_shift_op = expr->as.binary.op == AST_BIN_SHL || expr->as.binary.op == AST_BIN_SHR;
       int operand_prec = is_shift_op ? PREC_MUL : prec;
+      /* `+ - * / %` on Int (signed 64-bit) go through the runtime's checked
+       * helpers (rae_runtime.h "Int arithmetic"): division by zero traps in
+       * every profile, overflow traps in dev and wraps in release. Other
+       * widths, UInt64 and floats keep the bare C operator. The type is the
+       * one the expression settled on above (`picked`, when it is a
+       * primitive); an untyped operand pair (rare — `Any`) stays bare. */
+      {
+        const char* int_helper = NULL;
+        bool int_typed = ctx->has_expected_type && !ctx->expected_type.is_opt
+                         && (str_eq_cstr(get_base_type_name(&ctx->expected_type), "Int")
+                             || str_eq_cstr(get_base_type_name(&ctx->expected_type), "Int64"));
+        if (int_typed && is_arith_or_cmp && !expr_is_const_int(expr)) {
+          switch (expr->as.binary.op) {
+            case AST_BIN_ADD: int_helper = "rae_int_add"; break;
+            case AST_BIN_SUB: int_helper = "rae_int_sub"; break;
+            case AST_BIN_MUL: int_helper = "rae_int_mul"; break;
+            case AST_BIN_DIV: int_helper = "rae_int_div"; break;
+            case AST_BIN_MOD: int_helper = "rae_int_mod"; break;
+            default: break;
+          }
+        }
+        if (int_helper) {
+          fprintf(out, "%s(", int_helper);
+          emit_expr(ctx, expr->as.binary.lhs, out, PREC_LOWEST, false, false);
+          fprintf(out, ", ");
+          emit_expr(ctx, expr->as.binary.rhs, out, PREC_LOWEST, false, false);
+          fprintf(out, ", ");
+          emit_c_source_location(ctx, expr, out);
+          fprintf(out, ")");
+          ctx->has_expected_type = had_exp_bin;
+          ctx->expected_type = saved_exp_bin;
+          ctx->suppress_opt_unbox = saved_unbox;
+          break;
+        }
+      }
       if (is_bool_op) fprintf(out, "(bool)("); if (prec < parent_prec) fprintf(out, "(");
       emit_expr(ctx, expr->as.binary.lhs, out, operand_prec, false, false);
       switch (expr->as.binary.op) {

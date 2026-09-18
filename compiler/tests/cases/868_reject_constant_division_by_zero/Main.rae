@@ -1,0 +1,13 @@
+# A divisor that folds to integer zero is a compile error, not a runtime
+# trap (docs/integer-semantics.md): the literal, a folded expression, and a
+# const all count. `x / 0.0` is not (an IEEE infinity), and a divisor the
+# compiler cannot fold is the runtime's business.
+const zeroConst: Int = 0
+
+func main() {
+  let a: Int = 7 / 0
+  let b: Int = 7 % (1 - 1)
+  let c: Int = 7 / zeroConst
+  let d: Float = 7.0 / 0.0
+  log("{a} {b} {c} {d}")
+}
