@@ -216,12 +216,13 @@ func mountPageOrError(
     h: h
   )
   let label: String = sceneLabel
+  # `pageId` was moved into mountPage above; the copy is what is still ours.
   log(
-    "[scene-error] mount failed for page {pageId} (scene.ok={scene.ok}, scene.errorMsg={scene.errorMsg})"
+    "[scene-error] mount failed for page {pageIdForNested} (scene.ok={scene.ok}, scene.errorMsg={scene.errorMsg})"
   )
   paintErrorBlock(world: world, entity: husk, label: label)
   var copiedId: String = ""
-  copiedId = copiedId.concat(other: pageId)
+  copiedId = copiedId.concat(other: pageIdForNested)
   let pr: PageRoot = { id: own copiedId }
   componentSet(this: world.pageRoots, entity: husk, data: own pr)
   ret husk

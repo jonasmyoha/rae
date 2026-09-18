@@ -629,7 +629,10 @@ static bool sema_create_was_attempted(const AstExpr* e);
 //     flag per explicitly dropped local, so scope exit releases exactly once
 //     on every path.
 
-typedef struct DroppedSet { Str names[64]; int count; } DroppedSet;
+/* Names that are "gone" on some path into a point: released by
+ * `x.drop()`, or MOVED into an `own T` parameter. `moved[i]` says which, so
+ * the diagnostic can say what happened to the value. */
+typedef struct DroppedSet { Str names[64]; bool moved[64]; int count; } DroppedSet;
 
 static bool dropped_has(const DroppedSet* set, Str name) {
     for (int i = 0; i < set->count; i++) if (str_eq(set->names[i], name)) return true;
@@ -637,15 +640,28 @@ static bool dropped_has(const DroppedSet* set, Str name) {
 }
 static void dropped_add(DroppedSet* set, Str name) {
     if (dropped_has(set, name) || set->count >= 64) return;
+    set->moved[set->count] = false;
+    set->names[set->count++] = name;
+}
+static void moved_add(DroppedSet* set, Str name) {
+    if (dropped_has(set, name) || set->count >= 64) return;
+    set->moved[set->count] = true;
     set->names[set->count++] = name;
 }
 static void dropped_remove(DroppedSet* set, Str name) {
     for (int i = 0; i < set->count; i++) {
-        if (str_eq(set->names[i], name)) { set->names[i] = set->names[--set->count]; return; }
+        if (str_eq(set->names[i], name)) {
+            --set->count;
+            set->names[i] = set->names[set->count];
+            set->moved[i] = set->moved[set->count];
+            return;
+        }
     }
 }
 static void dropped_union(DroppedSet* into, const DroppedSet* from) {
-    for (int i = 0; i < from->count; i++) dropped_add(into, from->names[i]);
+    for (int i = 0; i < from->count; i++) {
+        if (from->moved[i]) moved_add(into, from->names[i]); else dropped_add(into, from->names[i]);
+    }
 }
 
 typedef struct LifecycleFlow {
@@ -683,11 +699,19 @@ static void flow_check_expr(LifecycleFlow* flow, const AstExpr* e, const Dropped
     for (int i = 0; i < set->count; i++) {
         if (!sema_expr_mentions_ident(e, set->names[i])) continue;
         Str name = set->names[i];
-        char buf[240];
-        snprintf(buf, sizeof buf,
-                 "use of '%.*s' after '%.*s.drop()': the value was released and consumed on a path "
-                 "reaching here; assign it a new value before using it again",
-                 (int)name.len, name.data, (int)name.len, name.data);
+        char buf[300];
+        if (set->moved[i]) {
+            snprintf(buf, sizeof buf,
+                     "use of moved value '%.*s': it was passed to a parameter declared 'own' on a path "
+                     "reaching here, so the callee owns it now; assign '%.*s' a new value before using it "
+                     "again, or pass a copy (`\"{%.*s}\"`, or a `copy T` parameter) if the caller needs it",
+                     (int)name.len, name.data, (int)name.len, name.data, (int)name.len, name.data);
+        } else {
+            snprintf(buf, sizeof buf,
+                     "use of '%.*s' after '%.*s.drop()': the value was released and consumed on a path "
+                     "reaching here; assign it a new value before using it again",
+                     (int)name.len, name.data, (int)name.len, name.data);
+        }
         flow_report(flow, e->line ? e->line : line, e->line ? e->column : col, buf);
     }
 }
@@ -733,6 +757,39 @@ static void flow_sweep_create(LifecycleFlow* flow, const AstExpr* e) {
     }
 }
 
+/* After a statement's own uses are checked: every argument sema marked as
+ * moving a local (sema_check_own_args) takes that name out of play for the
+ * statements that follow. Walks into nested calls too. */
+static void flow_sweep_moves_args(DroppedSet* set, const AstCallArg* a);
+static void flow_sweep_moves(DroppedSet* set, const AstExpr* e) {
+    if (!e) return;
+    switch (e->kind) {
+        case AST_EXPR_CALL: flow_sweep_moves(set, e->as.call.callee); flow_sweep_moves_args(set, e->as.call.args); break;
+        case AST_EXPR_METHOD_CALL: flow_sweep_moves(set, e->as.method_call.object); flow_sweep_moves_args(set, e->as.method_call.args); break;
+        case AST_EXPR_BINARY: flow_sweep_moves(set, e->as.binary.lhs); flow_sweep_moves(set, e->as.binary.rhs); break;
+        case AST_EXPR_UNARY: case AST_EXPR_OWN: case AST_EXPR_BOX: case AST_EXPR_UNBOX: flow_sweep_moves(set, e->as.unary.operand); break;
+        case AST_EXPR_CAST: flow_sweep_moves(set, e->as.cast.operand); break;
+        case AST_EXPR_MEMBER: flow_sweep_moves(set, e->as.member.object); break;
+        case AST_EXPR_INDEX: flow_sweep_moves(set, e->as.index.target); flow_sweep_moves(set, e->as.index.index); break;
+        case AST_EXPR_OBJECT:
+            for (const AstObjectField* f = e->as.object_literal.fields; f; f = f->next) flow_sweep_moves(set, f->value);
+            break;
+        case AST_EXPR_INTERP:
+            for (const AstInterpPart* p = e->as.interp.parts; p; p = p->next) flow_sweep_moves(set, p->value);
+            break;
+        default: break;
+    }
+}
+static void flow_sweep_moves_args(DroppedSet* set, const AstCallArg* a) {
+    for (; a; a = a->next) {
+        flow_sweep_moves(set, a->value);
+        if (a->moves_local && a->value) {
+            const AstExpr* moved = a->value->kind == AST_EXPR_OWN ? a->value->as.unary.operand : a->value;
+            if (moved && moved->kind == AST_EXPR_IDENT) moved_add(set, moved->as.ident);
+        }
+    }
+}
+
 static void flow_block(LifecycleFlow* flow, const AstBlock* block, DroppedSet* set);
 static void flow_stmt(LifecycleFlow* flow, const AstStmt* s, DroppedSet* set) {
     if (!s) return;
@@ -740,16 +797,19 @@ static void flow_stmt(LifecycleFlow* flow, const AstStmt* s, DroppedSet* set) {
         case AST_STMT_LET:
             flow_sweep_create(flow, s->as.let_stmt.value);
             flow_check_expr(flow, s->as.let_stmt.value, set, s->line, s->column);
+            flow_sweep_moves(set, s->as.let_stmt.value);
             dropped_remove(set, s->as.let_stmt.name);   /* a new binding is live */
             if (!s->as.let_stmt.is_bind) flow_declare(flow, s->as.let_stmt.name, s->as.let_stmt.type);
             break;
         case AST_STMT_DESTRUCT:
             flow_sweep_create(flow, s->as.destruct_stmt.call);
             flow_check_expr(flow, s->as.destruct_stmt.call, set, s->line, s->column);
+            flow_sweep_moves(set, s->as.destruct_stmt.call);
             break;
         case AST_STMT_ASSIGN: {
             flow_sweep_create(flow, s->as.assign_stmt.value);
             flow_check_expr(flow, s->as.assign_stmt.value, set, s->line, s->column);
+            flow_sweep_moves(set, s->as.assign_stmt.value);
             const AstExpr* t = s->as.assign_stmt.target;
             if (t && t->kind == AST_EXPR_IDENT) dropped_remove(set, t->as.ident);   /* reinitialised */
             else flow_check_expr(flow, t, set, s->line, s->column);
@@ -764,6 +824,7 @@ static void flow_stmt(LifecycleFlow* flow, const AstStmt* s, DroppedSet* set) {
                 && flow_is_hook_name(flow, e->as.method_call.object->as.ident);
             flow_check_expr(flow, e, set, s->line, s->column);   /* dropping twice is a use */
             if (is_drop) dropped_add(set, e->as.method_call.object->as.ident);
+            flow_sweep_moves(set, e);
             break;
         }
         case AST_STMT_RET:
@@ -5173,6 +5234,13 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                 // which the VM treats as value types. String/List/Map/struct/
                 // Buffer borrows are rejected — pass them as own or copy.
                 AstExpr* sp_call = expr->as.unary.operand;
+                // A spawn does NOT move an `own` argument: the spawn site
+                // deep-copies a caller lvalue for the worker (513), so the
+                // caller keeps its value. Undo the move mark sema_check_own_args
+                // put on the inner call's arguments.
+                if (sp_call && sp_call->kind == AST_EXPR_CALL) {
+                    for (AstCallArg* sa = sp_call->as.call.args; sa; sa = sa->next) sa->moves_local = false;
+                }
                 if (sp_call && sp_call->kind == AST_EXPR_CALL && sp_call->decl_link &&
                     sp_call->decl_link->kind == AST_DECL_FUNC) {
                     for (AstParam* p = sp_call->decl_link->as.func_decl.params; p; p = p->next) {
@@ -6624,6 +6692,19 @@ static void sema_check_own_args(CompilerContext* ctx, AstModule* module, SymbolT
                 argtr.resolved_type = a->value->resolved_type;
                 if (argtr.resolved_type->kind == TYPE_REF) argtr.resolved_type = argtr.resolved_type->as.ref.base;
                 owns_heap = type_needs_cascade_drop(ctx, module, &argtr, 0);
+            }
+        }
+        /* The move itself (docs/ownership-model.md "Function-call rule"):
+         * a bare local, or `own x`, handed to `own T` of a heap-owning type
+         * is consumed — codegen skips the caller's scope-exit drop and the
+         * callee drops it. Record it on the argument so the lifecycle pass
+         * (flow_stmt) rejects a later use of that local. A view/mod
+         * parameter or a global is not a move and is reported just below. */
+        if (p->type && p->type->is_own && owns_heap && a->value) {
+            const AstExpr* moved = a->value->kind == AST_EXPR_OWN ? a->value->as.unary.operand : a->value;
+            if (moved && moved->kind == AST_EXPR_IDENT) {
+                Symbol* sym = symbol_table_lookup(symbols, moved->as.ident);
+                if (sym && !sym->is_non_owning && sym->scope_depth > 0) a->moves_local = true;
             }
         }
         if (p->type && p->type->is_own && owns_heap

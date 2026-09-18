@@ -1,0 +1,32 @@
+# A local handed to an `own T` parameter (T owning heap) is MOVED: the
+# callee owns it, and any later use on a path reaching from the call is a
+# compile error (docs/ownership-model.md). Reassigning makes the name live
+# again; a branch that did not move keeps it usable only on that branch;
+# `spawn` deep-copies and is not a move; a copy (`"{s}"`) is not a move.
+func consume(xs: own List(Int)) ret Int {
+  ret xs.length
+}
+
+func take(text: own String) ret Int {
+  ret text.length()
+}
+
+func main() {
+  var xs: List(Int) = [1, 2, 3]
+  let n: Int = consume(xs: xs)
+  log("after move: {xs.length} {n}")
+  xs = [4]
+  log("reassigned: {xs.length}")
+
+  let s: String = "abc"
+  let a: Int = take(text: "{s}")
+  log("copy passed, still mine: {s} {a}")
+  let b: Int = take(text: own s)
+  log("explicit move, then use: {s} {b}")
+
+  var maybe: String = "m"
+  if n > 2 {
+    let c: Int = take(text: maybe)
+  }
+  log("moved on one path: {maybe}")
+}
