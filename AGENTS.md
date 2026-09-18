@@ -487,18 +487,27 @@ The compiler has one version, `compiler/VERSION` — a single semver line
 `main.c`). `rae --version` (or `-v`) prints it; `rae --version --json` prints
 `{ version, tag, commit, date, dirty }` for tooling.
 
-- **Pre-1.0 semver, MINOR is the breaking axis.** While the version is `0.x`:
-  a **MINOR** bump means a breaking change to the language, the compiler CLI,
-  or `lib/` (a function signature moved, a keyword changed, a module
-  renamed); a **PATCH** bump is compatible (fixes, additions, new
-  diagnostics). `1.0.0` is deferred until the language stops moving.
+- **Pre-1.0: PATCH is the working axis, MINOR is a named milestone.** While
+  the version is `0.x`, the language is moving and breaking changes are
+  routine, so they do NOT bump MINOR: a breaking change to the language, the
+  CLI or `lib/` bumps **PATCH** (`0.1.7` -> `0.1.8`), the same as a fix or an
+  addition. **MINOR moves only when the maintainer names a milestone**
+  (`0.1` -> `0.2`) — never by an agent on its own. (The earlier rule
+  "MINOR per breaking change" took the version from 0.7 to 0.10 in one day
+  of 2026-09 queue work; it was reset to 0.1.7 and the rule changed, since
+  none of those versions had been tagged.) `1.0.0` is deferred until the
+  language stops moving.
 - **Bump discipline: in the SAME commit as the change, not after.** A commit
-  that changes a `lib/` signature or CLI behaviour bumps `compiler/VERSION`'s
-  MINOR component in that same commit and says so in the commit message. A
-  compatible fix/addition bumps PATCH the same way when it's the kind of
-  change users should be able to tell apart from the last release (routine
+  that changes language, `lib/` or CLI behaviour in a way users should be
+  able to tell apart from the last release bumps `compiler/VERSION`'s PATCH
+  component in that same commit and says so in the commit message (routine
   queue work does not need a bump on every commit — use judgement: bump when
-  the change is release-notes-worthy, not for every diagnostic tweak).
+  the change is release-notes-worthy, not for every diagnostic tweak; a
+  breaking change is always release-notes-worthy).
+- **Consequence for `.raepack` requirements:** a bare `rae: { version: "0.1" }`
+  is a caret on MINOR (`>=0.1.0 <0.2.0`) and therefore means "this milestone
+  line", not "compatible" — a breaking 0.1.8 satisfies it. A project that
+  must pin an exact compiler writes the explicit range `">=0.1.7 <0.1.8"`.
 - **A release is a tag, nothing else.** `git tag -a v0.1.0` on the commit
   that bumps `compiler/VERSION` to `0.1.0` — no release branches, no build
   artifacts; the toolchain is a source checkout, so the tag IS the release.

@@ -34,10 +34,13 @@ for a language whose toolchain is a sibling git checkout, not a download.
 ## 1. The compiler has a version (#930)
 
 - **Semantic versioning, pre-1.0.** `MAJOR.MINOR.PATCH`, starting at `0.1.0`.
-  While `0.x`: a **MINOR** bump means a breaking change to the language, the
-  compiler CLI or `lib/` (a function signature moved, a keyword changed, a
-  module renamed); a **PATCH** bump is compatible (fixes, additions, new
-  diagnostics). `1.0.0` is deferred until the language stops moving.
+  While `0.x` the language is moving and breaking changes are routine, so
+  **PATCH is the working axis**: a breaking change to the language, the CLI
+  or `lib/` bumps PATCH like a fix or an addition does. **MINOR is a named
+  milestone** (`0.1` -> `0.2`) that only the maintainer declares. (Revised
+  2026-09-18: the original "MINOR per breaking change" rule went from 0.7 to
+  0.10 in one day of queue work with no tag in between; the version was reset
+  to 0.1.7.) `1.0.0` is deferred until the language stops moving.
 - **One source of truth: `compiler/VERSION`** — a single line, `0.1.0`. The
   build bakes it into the binary together with `git describe`, so:
   - on the tagged commit: `rae --version` → `rae 0.1.0 (a1b2c3d 2026-09-13)`
@@ -49,9 +52,9 @@ for a language whose toolchain is a sibling git checkout, not a download.
 - **A release is a tag.** `git tag -a v0.1.0` on the commit that bumps
   `compiler/VERSION`; nothing else. No branches, no artifacts yet: the toolchain
   is a source checkout, so a tag IS the release.
-- **Bump discipline** goes into `AGENTS.md`: a commit that changes a `lib/`
-  signature or CLI behaviour bumps MINOR in the same commit and says so in the
-  message; the queue's `[compiler]`/`[lib]` tasks state which bump they carry.
+- **Bump discipline** goes into `AGENTS.md`: a commit that changes language,
+  `lib/` or CLI behaviour in a release-notes-worthy way bumps PATCH in the
+  same commit and says so in the message; MINOR is never bumped by an agent.
   The first tag is cut once the current in-flight renderer slices land.
 
 ## 2. The project says which Rae it needs (#931)
@@ -70,9 +73,11 @@ pack Studio {
 ```
 
 - **Requirement grammar:** a bare version is a caret requirement (`"0.3"` and
-  `"0.3.1"` both mean `>=0.3.1 <0.4.0` on the patch given, since MINOR is the
-  breaking axis pre-1.0); explicit `">=0.3.0 <0.5.0"` for anything else. No
-  wildcards beyond that; keep it small.
+  `"0.3.1"` both mean `>=0.3.1 <0.4.0` on the patch given). Note what that
+  promises pre-1.0: since PATCH carries breaking changes, a caret means "this
+  milestone line", not "compatible" — a project that needs an exact compiler
+  writes the explicit range (`">=0.1.7 <0.1.8"`). Explicit `">=0.3.0 <0.5.0"`
+  for anything else. No wildcards beyond that; keep it small.
 - **Enforced by the compiler, at the start of `rae run` / `build` / `watch`**,
   BEFORE the format preflight: it reads the project's pack, compares its own
   version, and on mismatch fails with both numbers and the repair:
