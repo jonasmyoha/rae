@@ -1,14 +1,21 @@
 # Foot gun: arithmetic that has no right answer — the largest Int plus one,
 # and a division by zero.
 #
-# Today Rae wraps the overflow silently to the smallest Int, and `7 / 0`
-# evaluates to 0: the program exits 0 with two wrong numbers and no
-# diagnostic. That is the current behaviour, and this case asserts it so the
-# day it changes is noticed.
+# Rae defines both (docs/integer-semantics.md). Dividing by zero is a runtime
+# error in every profile: one line naming the source position, exit code 70,
+# never a silent 0. (A divisor that is a constant zero does not even compile;
+# this one is computed so the runtime has to catch it.) Overflow is checked
+# in the dev profile — `rae run --profile dev` stops at `big + one` with
+# "integer overflow in +" — and wraps two's-complement in release, which is
+# what this run (release) prints on the first line.
+import Sys
+
 func main() {
   var big: Int = 9223372036854775807
-  big = big + 1
+  let one: Int = Sys.argCount() + 1
+  big = big + one
   log("wrapped: {big}")
-  let bad: Int = 7 / 0
+  let zero: Int = one - 1
+  let bad: Int = 7 / zero
   log("div0: {bad}")
 }

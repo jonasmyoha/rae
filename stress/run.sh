@@ -18,7 +18,8 @@
 #                                       timeout, exit with expect.exitCode and
 #                                       print exactly expect.stdout (or match
 #                                       expect.stdoutMatches, a regex); an
-#                                       expect.stderr of "" asserts EMPTY stderr
+#                                       expect.stderr of "" asserts EMPTY stderr;
+#                                       expect.stderrMatches is a regex over it
 #
 # One line per case; exit 1 if any case fails. RAE_STRESS_FILTER="01_x 05_y"
 # scopes the run like RAE_EXAMPLE_FILTER does for the examples gate.
@@ -48,7 +49,7 @@ def field(name):
     if m.group(2) is None: return m.group(1)
     return m.group(2).encode("utf-8").decode("unicode_escape").encode("latin-1").decode("utf-8")
 out = {}
-for k in ("verdict", "outcome", "exitCode", "stdout", "stdoutMatches", "diagnostic", "stderr", "fixedBy"):
+for k in ("verdict", "outcome", "exitCode", "stdout", "stdoutMatches", "diagnostic", "stderr", "stderrMatches", "fixedBy"):
     v = field(k)
     if v is not None: out[k] = v
     else: out[k] = ""
@@ -130,6 +131,8 @@ for dir in stress/*/; do
         matched=0; why="stdout does not match /$E_stdoutMatches/: got $(printf '%s' "$actual_out" | head -c 100 | tr '\n' '|')"
       elif [ "$E_stderr_set" = "1" ] && [ "$actual_err" != "$E_stderr" ]; then
         matched=0; why="stderr differs: got $(printf '%s' "$actual_err" | head -c 100 | tr '\n' '|')"
+      elif [ "$E_stderrMatches_set" = "1" ] && ! regex_matches "$E_stderrMatches" "$run_err.clean"; then
+        matched=0; why="stderr does not match /$E_stderrMatches/: got $(printf '%s' "$actual_err" | head -c 100 | tr '\n' '|')"
       else
         why="exit $run_rc, output as expected"
       fi

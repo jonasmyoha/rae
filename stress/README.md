@@ -62,6 +62,7 @@ stress: {
     exitCode: 0                                      # run
     stdout: "line one\nline two"                     # run: exact (or stdoutMatches: a regex)
     stderr: ""                                       # run, optional: exact — "" asserts silence
+    stderrMatches: "runtime error: division by zero" # run, optional: a regex over stderr
   }
   elsewhere: {                        # what the same program does in other languages
     python: "…"

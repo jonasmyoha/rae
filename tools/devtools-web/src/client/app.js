@@ -4303,6 +4303,8 @@ function computeStressVerdict(stress, exitCode, lines, appStarted) {
       matched = false; why = `stdout does not match /${expect.stdoutMatches}/: got ${stdout.slice(0, 100).replace(/\n/g, "|")}`;
     } else if (expect.stderr !== undefined && stderr !== expect.stderr) {
       matched = false; why = `stderr differs: got ${stderr.slice(0, 100).replace(/\n/g, "|")}`;
+    } else if (expect.stderrMatches !== undefined && !new RegExp(expect.stderrMatches, "m").test(stderr)) {
+      matched = false; why = `stderr does not match /${expect.stderrMatches}/: got ${stderr.slice(0, 100).replace(/\n/g, "|")}`;
     } else {
       why = `exit ${exitCode}, output as expected`;
     }
@@ -4386,7 +4388,8 @@ async function renderStressPanel(example) {
         expect.exitCode !== undefined ? `exit ${expect.exitCode}` : null,
         expect.stdout !== undefined ? `stdout "${expect.stdout.replace(/\n/g, "⏎")}"` : null,
         expect.stdoutMatches !== undefined ? `stdout matches /${expect.stdoutMatches}/` : null,
-        expect.stderr !== undefined ? (expect.stderr === "" ? "stderr empty" : `stderr "${expect.stderr}"`) : null
+        expect.stderr !== undefined ? (expect.stderr === "" ? "stderr empty" : `stderr "${expect.stderr}"`) : null,
+        expect.stderrMatches !== undefined ? `stderr matches /${expect.stderrMatches}/` : null
       ].filter(Boolean).join(", ");
   const readmePath = example.entry.replace(/Main\.rae$/, "README.md");
   let readmeHtml = "";

@@ -1,6 +1,8 @@
 # 05 — Integer overflow and division by zero
 
-**Verdict: `footgun`** — Rae prints two wrong numbers and exits 0.
+**Verdict: `handles`** — division by zero is a runtime error with a source
+position; overflow is defined per profile. (Flipped from `footgun`: it used to
+print `0` for `7 / 0` and exit 0.)
 
 ## The foot gun
 
@@ -9,21 +11,31 @@ divided by zero.
 
 ```rae
 var big: Int = 9223372036854775807
-big = big + 1
-let bad: Int = 7 / 0
+big = big + one          # one == 1, computed at run time
+let bad: Int = 7 / zero  # zero == 0, computed at run time
 ```
 
-## What Rae does today
+## What Rae does
 
 ```
 wrapped: -9223372036854775808
-div0: 0
+…/Main.rae:19: runtime error: division by zero
 ```
 
-Exit code 0, nothing on stderr. The overflow wraps silently to the smallest
-`Int`, and `7 / 0` evaluates to `0` — the C backend emits a guarded divide
-that returns 0. Silently wrong with a clean exit is the worst outcome on
-either shelf; no other language on this table answers 0.
+Exit code 70 from the program (`rae run` reports 1). The rules
+(`docs/integer-semantics.md`):
+
+- `/` and `%` by zero are a **runtime error in every profile** — one line
+  naming the file and line, exit 70, never a silent 0. `Int.min / -1` traps
+  the same way.
+- A divisor that is a **constant zero does not compile**: `7 / 0`,
+  `x % (1 - 1)` and `x / zeroConst` are all rejected by sema, which is why
+  this program computes its zero.
+- `+ - *` overflow is a **runtime error in the dev profile**
+  (`rae run --profile dev` stops at `big + one` with `integer overflow in +`)
+  and **wraps two's-complement in release** — the first line above. The
+  check where it is cheap to find the bug, the bare instruction where the
+  inner loop runs; the same policy as array bounds.
 
 ## Elsewhere
 
@@ -36,8 +48,9 @@ either shelf; no other language on this table answers 0.
 | Rust | panics in debug, wraps in release; always panics on `7 / 0` (constant: compile error) |
 | C | signed overflow is undefined behaviour; `7 / 0` is undefined behaviour (usually `SIGFPE`) |
 
-## Expected outcome (the current bug, asserted)
+Rae's rules are Rust's, with Go's compile-time check for a constant divisor.
 
-Exit 0, stdout exactly the two lines above, stderr empty. When the compiler
-traps or diagnoses this, the runner prints `FIXED?` and this case must be
-flipped to `handles`.
+## Expected outcome
+
+Exit 1 (via `rae run`), stdout exactly `wrapped: -9223372036854775808`,
+stderr matching `Main.rae:<line>: runtime error: division by zero`.

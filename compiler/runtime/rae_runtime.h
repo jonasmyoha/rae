@@ -64,6 +64,66 @@ static inline int64_t rae_array_bounds_check(int64_t idx, int64_t cap,
 #define RAE_ARRAY_IDX(idx, cap, file, line) (idx)
 #endif
 
+/* ---- Int arithmetic (docs/integer-semantics.md) ----
+ *
+ * The C backend routes every `+ - * / %` on `Int` (signed 64-bit) through
+ * these, so the language defines what C leaves undefined:
+ *   - `/` and `%` by zero are a runtime error in EVERY profile: one line
+ *     `file:line: runtime error: division by zero` and exit RAE_TRAP_EXIT_CODE.
+ *     Returning 0 (what the bare C divide happened to do on arm64) or a
+ *     SIGFPE are both wrong answers for a language that promises defined
+ *     behaviour. `Int.min / -1` (the one other overflowing divide) traps too.
+ *   - `+ - *` overflow is a runtime error in the dev profile (checked with the
+ *     compiler builtins, one branch each) and WRAPS two's-complement in the
+ *     release profile (-DNDEBUG), computed in unsigned so it is defined, not
+ *     UB the optimizer may assume away. Same policy as RAE_ARRAY_IDX: the
+ *     check where it is cheap to find the bug, the bare instruction where
+ *     the inner loop runs.
+ * A constant divisor of zero never reaches here: sema rejects it. */
+#define RAE_TRAP_EXIT_CODE 70   /* sysexits EX_SOFTWARE: an internal, defined trap, not a crash */
+static inline void rae_int_trap(const char* file, int line, const char* what) {
+    fprintf(stderr, "%s:%d: runtime error: %s\n", file, line, what);
+    fflush(stderr);
+    exit(RAE_TRAP_EXIT_CODE);
+}
+static inline int64_t rae_int_div(int64_t a, int64_t b, const char* file, int line) {
+    if (b == 0) rae_int_trap(file, line, "division by zero");
+    if (a == INT64_MIN && b == -1) rae_int_trap(file, line, "integer overflow: Int.min / -1");
+    return a / b;
+}
+static inline int64_t rae_int_mod(int64_t a, int64_t b, const char* file, int line) {
+    if (b == 0) rae_int_trap(file, line, "division by zero (modulo)");
+    if (b == -1) return 0;   /* Int.min % -1 is 0 mathematically, UB in C */
+    return a % b;
+}
+#ifndef NDEBUG
+static inline int64_t rae_int_add(int64_t a, int64_t b, const char* file, int line) {
+    int64_t r;
+    if (__builtin_add_overflow(a, b, &r)) rae_int_trap(file, line, "integer overflow in +");
+    return r;
+}
+static inline int64_t rae_int_sub(int64_t a, int64_t b, const char* file, int line) {
+    int64_t r;
+    if (__builtin_sub_overflow(a, b, &r)) rae_int_trap(file, line, "integer overflow in -");
+    return r;
+}
+static inline int64_t rae_int_mul(int64_t a, int64_t b, const char* file, int line) {
+    int64_t r;
+    if (__builtin_mul_overflow(a, b, &r)) rae_int_trap(file, line, "integer overflow in *");
+    return r;
+}
+#else
+static inline int64_t rae_int_add(int64_t a, int64_t b, const char* file, int line) {
+    (void)file; (void)line; return (int64_t)((uint64_t)a + (uint64_t)b);
+}
+static inline int64_t rae_int_sub(int64_t a, int64_t b, const char* file, int line) {
+    (void)file; (void)line; return (int64_t)((uint64_t)a - (uint64_t)b);
+}
+static inline int64_t rae_int_mul(int64_t a, int64_t b, const char* file, int line) {
+    (void)file; (void)line; return (int64_t)((uint64_t)a * (uint64_t)b);
+}
+#endif
+
 typedef uint32_t rae_Char32;
 typedef uint32_t rae_Char;
 

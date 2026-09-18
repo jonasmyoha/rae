@@ -103,6 +103,7 @@ export type StressInfo = {
     stdout?: string;
     stdoutMatches?: string;
     stderr?: string;
+    stderrMatches?: string;
   };
   /** What the same program does in other languages, keyed by language. */
   elsewhere: Record<string, string>;
