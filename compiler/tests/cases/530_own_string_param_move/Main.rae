@@ -30,12 +30,13 @@ func main() {
   content = embellish(content: own content, suffix: "!")
   log(content)
 
-  # Standalone move + scope-exit: no double free, and the source
-  # reads as empty afterwards (moved-out, not dangling).
+  # Standalone move + scope-exit: no double free. The source is moved
+  # out; reading it afterwards is a compile error (use of moved value),
+  # so the test only reports what the callee consumed.
   var gone: String = ""
   gone = gone.concat(other: "abcdef")
   let n: Int = consume(string: own gone)
-  log("consumed {n} moved-len {gone.length()}")
+  log("consumed {n}")
 
   # Chained own-param forwarding.
   var tag: String = ""

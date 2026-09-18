@@ -35,7 +35,10 @@ func caseDeepCopy() {
 }
 
 # Case 2: caller→callee chain. The struct-literal inside the callee
-# must NOT free the caller's String when p goes out of scope.
+# must NOT free the caller's String when p goes out of scope. The callee
+# takes `own`, so the caller hands it a COPY (`"{callerSrc}"`) and keeps
+# its own — passing `callerSrc` itself would move it, and reading it
+# afterwards is a compile error (use of moved value).
 func makeParser(source: own String) ret Parser {
   let p: Parser = { source: source, pos: 0 }
   ret p
@@ -43,7 +46,7 @@ func makeParser(source: own String) ret Parser {
 
 func caseCallerCallee() {
   let callerSrc: String = "fixture {2}"
-  let p: Parser = makeParser(source: callerSrc)
+  let p: Parser = makeParser(source: "{callerSrc}")
   log("case2.src: {callerSrc}")
   log("case2.p:   {p.source}")
 }

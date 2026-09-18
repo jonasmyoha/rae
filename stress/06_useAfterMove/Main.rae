@@ -1,10 +1,10 @@
 # Foot gun: hand a value to a function that takes it over, then keep using
 # it.
 #
-# `own` reads as "the callee now owns this list". Today it does not move:
-# the callee works on a copy, adds to it and reports 4, while the caller's
-# list is untouched at 3 and still usable — with no diagnostic that the value
-# was handed away. This case asserts that current behaviour.
+# `own` means the callee owns the list from here on — it will free it when
+# it is done. So the caller's `xs` is gone after the call, and reading it is
+# refused at compile time: "use of moved value". A caller that needs the
+# list afterwards passes a copy, or the callee declares `copy T`.
 func consume(xs: own List(Int)) ret Int {
   xs.add(value: 4)
   ret xs.length

@@ -176,7 +176,16 @@ Only mark moved in **ownership-consuming contexts**:
 - Emit the value of `x` as usual.
 - Mark local `x` moved.
 - Ensure the moved local is not dropped later.
-- Eventually reject use-after-move.
+- **Use-after-move is rejected (done, #96111662).** A local passed to an
+  `own T` parameter of a heap-owning type — bare or as `own x` — is
+  consumed, and any later use of that name on a path reaching from the
+  call is a compile error: `use of moved value 'x'`. The check is the
+  same dataflow pass as use-after-`drop()` (sema `flow_stmt`): a move on
+  one branch poisons the name after the branch, a `let`/assignment of the
+  name makes it live again, and `spawn f(x: local)` is NOT a move — the
+  spawn site deep-copies the argument for the worker. A caller that needs
+  the value afterwards passes a copy (`"{x}"`) or the callee declares
+  `copy T`. Stress case `stress/06_useAfterMove` asserts it.
 
 ### 7. For function calls
 

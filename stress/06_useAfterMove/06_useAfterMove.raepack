@@ -3,7 +3,7 @@ pack UseAfterMove {
   version: 1
   defaultTarget: compiled
   name: "Use after move"
-  description: "Hand a list to an own parameter and keep using it. Today own copies: the callee sees 4, the caller still sees 3, and nothing says the value was handed away."
+  description: "Hand a list to an own parameter and keep using it. own is a move: the later use is a compile error, use of moved value. It used to compile and read a dangling value."
   category: "Stress"
   targets: {
     target compiled: {
@@ -18,11 +18,10 @@ pack UseAfterMove {
     }
   }
   stress: {
-    verdict: "footgun"
+    verdict: "handles"
     expect: {
-      outcome: "run"
-      exitCode: 0
-      stdout: "caller sees 3, callee returned 4"
+      outcome: "compile-error"
+      diagnostic: "use of moved value 'xs'"
     }
     elsewhere: {
       python: "no moves; the callee mutates the shared list, the caller sees 4"
@@ -32,6 +31,6 @@ pack UseAfterMove {
       rust: "compile error: use of moved value `xs`"
       c: "no moves; whatever the pointer points at is shared"
     }
-    fixedBy: ""
+    fixedBy: "#96111662 — sema marks the moving argument and the lifecycle dataflow pass rejects a later use"
   }
 }

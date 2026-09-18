@@ -1,13 +1,15 @@
 # 06 — Use after move
 
-**Verdict: `footgun`** — `own` does not move; the value stays usable with no
-diagnostic.
+**Verdict: `handles`** — the later use is a compile error. (Flipped from
+`footgun`: it used to compile, and the caller read a value the callee had
+already taken over.)
 
 ## The foot gun
 
 A function that takes a value over, and a caller that keeps using it. The
 languages with moves make this a compile error; the languages without moves
-share the container so both sides see every change.
+share the container so both sides see every change; C++ leaves a
+valid-but-unspecified husk behind.
 
 ```rae
 func consume(xs: own List(Int)) ret Int {
@@ -19,15 +21,24 @@ let n: Int = consume(xs: xs)
 log("caller sees {xs.length}, callee returned {n}")
 ```
 
-## What Rae does today
+## What Rae does
 
 ```
-caller sees 3, callee returned 4
+Main.rae:16:6: use of moved value 'xs': it was passed to a parameter declared 'own'
+on a path reaching here, so the callee owns it now; assign 'xs' a new value before
+using it again, or pass a copy (`"{xs}"`, or a `copy T` parameter) if the caller
+needs it
 ```
 
-Exit 0. The callee got a copy: it added to its own list and reported 4, the
-caller's list is untouched at 3 and still in scope. `own` promises a transfer
-of ownership and delivers a copy, and nothing tells the caller either way.
+`own T` is a move (`docs/ownership-model.md`): the callee owns the value and
+frees it; the caller's binding is consumed. The check is dataflow — a move on
+one branch of an `if` poisons the name after the `if`, a reassignment makes it
+live again, and `spawn f(xs: data)` is not a move (the spawn site deep-copies
+for the worker).
+
+What it used to do was worse than a copy: the callee got the list, grew it
+(reallocating the buffer), and freed it at exit, while the caller's `xs` still
+pointed at the old storage — `xs.length` read 3 from a dangling struct.
 
 ## Elsewhere
 
@@ -40,8 +51,6 @@ of ownership and delivers a copy, and nothing tells the caller either way.
 | Rust | compile error: `use of moved value: xs` |
 | C | no moves; whatever the pointer points at is shared |
 
-## Expected outcome (the current bug, asserted)
+## Expected outcome
 
-Exit 0, stdout exactly `caller sees 3, callee returned 4`. When `own` becomes
-a real move (a later use is a compile error) this case flips to `handles`
-with `outcome: compile-error`.
+Compile error containing `use of moved value 'xs'`.

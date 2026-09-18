@@ -512,8 +512,7 @@ func buildSwitchRow(
     alignCross: AlignKind.center
   )
   # Data-oriented widget tags (#220): identity + on/off state + action
-  # binding as queryable component data. Copies taken BEFORE
-  # setOnClickAction consumes `actionId` (own param). The switch
+  # binding as queryable component data. The switch
   # visuals are still mount-baked — the debug menu re-mounts on every
   # toggle — but systems can now read which toggles exist and which
   # are on straight from the widgetStates table.
@@ -536,7 +535,9 @@ func buildSwitchRow(
   let bindRole: String = "primary"
   let binding: ActionBinding = { actionId: own bindId, role: own bindRole }
   componentSet(this: world.actionBindings, entity: row, data: own binding)
-  setOnClickAction(world: world, entity: row, actionId: actionId)
+  # `setOnClickAction` takes `own`: hand it a copy, the row's own `actionId`
+  # is still tagged onto the switch pill below (a moved value cannot be read).
+  setOnClickAction(world: world, entity: row, actionId: "{actionId}")
 
   let label: EntityId = createEntity(world: world)
   let labelW: Float = width - debugSwitchW - debugRowGap
