@@ -94,7 +94,7 @@ else
 TEST_RUNNER = tools/run_tests_parallel.sh
 endif
 
-.PHONY: all build test test-examples clean smoke install uninstall c-surface-gate FORCE
+.PHONY: all build test test-examples stress clean smoke install uninstall c-surface-gate FORCE
 
 all: build
 
@@ -174,6 +174,11 @@ test: build
 test-examples: build
 	@chmod +x tools/run_examples.sh
 	@RAE_RUN_EXAMPLES=1 ./tools/run_examples.sh
+
+# The stress cases (docs/stress-tests.md) on their own; `make test` runs them
+# as one pre-suite case too.
+stress: build
+	@bash ../stress/run.sh
 
 smoke: build
 	@chmod +x tools/smoke.sh

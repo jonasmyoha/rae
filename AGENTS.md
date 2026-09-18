@@ -678,6 +678,15 @@ a machine without the list it prints `SKIP` and passes. Standalone:
 the message) so a slip is refused before it becomes a commit. Refer to such
 a project as "game proto1" (or similar) instead.
 
+**Stress cases (docs/stress-tests.md).** `stress/NN_name/` holds small
+foot-gun programs on two shelves: `handles` (Rae does the right thing) and
+`footgun` (Rae still gets it wrong — the case asserts the CURRENT bad
+behaviour verbatim). `stress/run.sh` (`make stress`, `RAE_STRESS_FILTER` to
+scope) runs as one pre-suite case of every full run right after the
+banned-terms gate; a `footgun` that stops reproducing FAILS as `FIXED?` on
+purpose — flip it to `handles` in the same commit as the compiler fix, with
+`fixedBy` filled in. Never "fix" a FIXED? by loosening its expect.
+
 **Only ONE test run at a time.** Concurrent `make test` / `watch-tests.sh`
 processes corrupt each other's build cache and interleave the shared log, which
 shows up as spurious failures. Before starting a run, KILL any earlier one:
