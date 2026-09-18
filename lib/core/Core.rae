@@ -30,6 +30,19 @@ func logS(value: Any) {
   }
 }
 
+# A runtime error raised by library code (docs/collections.md, docs/
+# integer-semantics.md): prints `runtime error: <message>` to stderr and ends
+# the program with exit code 70 — the same trap the compiler's own Int checks
+# use. For a state the caller could not have asked for on purpose (an index
+# past the end); never for ordinary failure, which is an `opt` or a Bool.
+func rae_ext_rae_runtime_error(message: String) unsafe extern
+
+func runtimeError(message: view String) {
+  unsafe {
+    rae_ext_rae_runtime_error(message: message)
+  }
+}
+
 func nativeNowMs() unsafe extern("rae_ext_nowMs") ret Int
 
 func nowMs() ret Int {

@@ -3,7 +3,7 @@ pack SilentNoOpWrite {
   version: 1
   defaultTarget: compiled
   name: "Silent no-op write"
-  description: "set(index: 10, …) on a 3-element list does nothing: no error, no growth, exit 0. Every other language either fails loudly, grows the list, or corrupts memory — none drops the write."
+  description: "set(index: 10, …) on a 3-element list is a runtime error naming the index and the length, exit 70; a read past the end is none. It used to drop the write silently with exit 0."
   category: "Stress"
   targets: {
     target compiled: {
@@ -18,12 +18,12 @@ pack SilentNoOpWrite {
     }
   }
   stress: {
-    verdict: "footgun"
+    verdict: "handles"
     expect: {
       outcome: "run"
-      exitCode: 0
-      stdout: "length 3"
-      stderr: ""
+      exitCode: 1
+      stdout: ""
+      stderr: "runtime error: List.set: index 10 is out of range for length 3"
     }
     elsewhere: {
       python: "IndexError: list assignment index out of range"
@@ -33,6 +33,6 @@ pack SilentNoOpWrite {
       rust: "panics: index out of bounds"
       c: "writes past the buffer — memory corruption"
     }
-    fixedBy: ""
+    fixedBy: "#77471032 — List.set/insert/remove/swapRemove trap through Core.runtimeError"
   }
 }
