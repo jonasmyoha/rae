@@ -166,22 +166,34 @@ func sysFileExists(path: copy String) ret Bool {
 # too) overrides the shared lib default; anything else — example 114 on neutral
 # ACES — uses the default. This is what keeps the game's grade-specific numbers
 # out of the shared lib: the two apps are no longer bound to one calibration.
-func terrainPaletteWgsl() ret String {
+func terrainPaletteWgsl(cache: view GbufferCache) ret String {
+  if cache.terrainPalettePath.length() > 0 and sysFileExists(path: cache.terrainPalettePath) {
+    ret gbReadWgsl(path: cache.terrainPalettePath)
+  }
   if sysFileExists(path: "assets/terrain_palette.wgsl") {
     ret gbReadWgsl(path: "assets/terrain_palette.wgsl")
   }
   ret gbReadWgsl(path: "lib/terrain_palette.wgsl")
 }
 
+# Point the terrain at an app's own palette file by path — for an app whose
+# cwd is not its project root (the examples run from the repo root, so the
+# cwd-relative `assets/terrain_palette.wgsl` lookup cannot find theirs). Call
+# before the first terrain draw; the pipeline composes the palette once.
+func terrainSetPalette(cache: mod GbufferCache, resources: mod GpuResources, path: view String) {
+  cache.terrainPalettePath = "{path}"
+  resetTerrainPipeline(cache: cache, resources: resources)
+}
+
 # Compose the terrain-splat shader from the aligned WGSL files (noise + biome +
 # palette + terrain), read once at pipeline build. See lib/terrain_splat.wgsl /
 # #533. The palette is composed BEFORE terrain_detail so its RAE_TERRAIN_*
 # constants are in scope for the material ramps.
-func terrainSplatWgsl() ret String {
+func terrainSplatWgsl(cache: view GbufferCache) ret String {
   let islandSrc: String = islandParamsWgsl()
   let noiseSrc: String = gbReadWgsl(path: "lib/noise.wgsl")
   let biomeSrc: String = gbReadWgsl(path: "lib/world_biome.wgsl")
-  let paletteSrc: String = terrainPaletteWgsl()
+  let paletteSrc: String = terrainPaletteWgsl(cache: cache)
   let detailSrc: String = gbReadWgsl(path: "lib/terrain_detail.wgsl")
   let terrSrc: String = gbReadWgsl(path: "lib/terrain_splat.wgsl")
   ret islandSrc.concat(other: noiseSrc).concat(other: "\n").concat(other: biomeSrc).concat(
@@ -194,7 +206,7 @@ func terrainSplatWgsl() ret String {
 func ensureTerrainPipeline(cache: mod GbufferCache, resources: mod GpuResources) {
   if not cache.terrainPipeMade {
     cache.terrainPipeMade = true
-    let composed: String = terrainSplatWgsl()
+    let composed: String = terrainSplatWgsl(cache: cache)
     cache.terrainPipeline = createGbufferPipeline(
       resources: resources
       wgsl: composed

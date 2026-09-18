@@ -525,6 +525,39 @@ func worldFindLand(x: view Float, y: view Float, cfg: view BiomeConfig) pub ret 
   ret Vec3.create(x: 0.0, y: 0.0, z: 0.0)
 }
 
+# Is (x, y) a meadow — land whose dominant material is grass by a clear margin?
+# Used to place a spawn on grass rather than on the first bit of beach.
+func worldIsGrass(x: view Float, y: view Float, cfg: view BiomeConfig) pub ret Bool {
+  let sample: WorldSample = sampleWorld(x: x, y: y, cfg: cfg)
+  ret sample.wGrass >= 0.85
+}
+
+# Nearest MEADOW to (x, y) — the same spiral as worldFindLand, asking for grass
+# instead of any land, then any land as the fallback. A character spawned on
+# the beach (which is what land near the coast usually is) starts in sand and
+# surf; a character spawned here starts in the grass.
+func worldFindGrass(x: view Float, y: view Float, cfg: view BiomeConfig) pub ret Vec3 {
+  if worldIsGrass(x: x, y: y, cfg: cfg) {
+    ret Vec3.create(x: x, y: y, z: 0.0)
+  }
+  var ring: Int = 1
+  loop ring <= worldLandSearchRings {
+    let radius: Float = ring.toFloat() * worldLandSearchStep
+    var spoke: Int = 0
+    loop spoke < worldLandSearchSpokes {
+      let angle: Float = spoke.toFloat() / worldLandSearchSpokes.toFloat() * 6.2831853
+      let sx: Float = x + Math.cos(x: angle) * radius
+      let sy: Float = y + Math.sin(x: angle) * radius
+      if worldIsGrass(x: sx, y: sy, cfg: cfg) {
+        ret Vec3.create(x: sx, y: sy, z: 0.0)
+      }
+      spoke = spoke + 1
+    }
+    ring = ring + 1
+  }
+  ret worldFindLand(x: x, y: y, cfg: cfg)
+}
+
 # Does a prop of this kind belong here? `minGrass` is how much grass material the
 # kind needs: vegetation wants a real meadow, rock is happy on sand or stone and
 # passes 0. Nothing at all stands in the sea.

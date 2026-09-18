@@ -169,9 +169,12 @@ func renderGbufferPass(
   if characterSystem.toon {
     grassToonGen = 1
   }
-  let grassView: GrassViewSettings = GrassConfig.grassThirdPersonSettings(
+  var grassView: GrassViewSettings = GrassConfig.grassThirdPersonSettings(
     groundColor: walkerGroundColor()
   )
+  # Blade tips only a little lighter than the ground: the painted meadow this
+  # example is graded against is one green, not roots-to-mint.
+  grassView.tipLighten = 1.5
   let heroPos: Vec3 = controllerOf(world: world, entity: characterSystem.heroEntity).position
   grassGenerate(
     grass: grassCompute
