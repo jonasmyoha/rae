@@ -1,0 +1,29 @@
+# docs/strings.md: length()/sub are byte-indexed and sub never cuts inside a
+# character (the range widens to whole characters); charCount/charAt/charSub
+# count and index code points.
+func main() {
+  let s: String = "héllo👋"
+  log("length {s.length()}  charCount {s.charCount()}")
+  log(
+    "sub(1,1) [{s.sub(start: 1, len: 1)}]  sub(0,2) [{s.sub(start: 0, len: 2)}]  sub(6,1) [{s.sub(
+      start: 6
+      len: 1
+    )}]  sub(7,2) [{s.sub(start: 7, len: 2)}]"
+  )
+  log(
+    "charAt(1) {s.charAt(index: 1)}  charAt(5) {s.charAt(index: 5)}  charAt(9) {s.charAt(index: 9)}"
+  )
+  log(
+    "charSub(1,3) [{s.charSub(start: 1, count: 3)}]  charSub(4,2) [{s.charSub(start: 4, count: 2)}]  charSub(5,5) [{s.charSub(
+      start: 5
+      count: 5
+    )}]  charSub(9,1) [{s.charSub(start: 9, count: 1)}]"
+  )
+  let ascii: String = "plain"
+  log(
+    "ascii sub(1,3) [{ascii.sub(start: 1, len: 3)}]  charCount {ascii.charCount()}  charSub(4,9) [{ascii.charSub(
+      start: 4
+      count: 9
+    )}]"
+  )
+}
