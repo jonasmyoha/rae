@@ -1,4 +1,5 @@
 open ui/Ecs
+import Gpu2dTextInput
 # SearchSystems (#976) — the two systems behind the scene-driven Search page.
 #
 #   searchFieldSystem   every `SearchField`: while its page is active, append
@@ -125,6 +126,17 @@ func searchResultsOnPage(world: view UiWorld, page: view String) ret EntityId {
 
 func searchFieldSystem(world: mod UiWorld, input: view InputSystem) pub {
   let n: Int = componentCount(this: world.searchFields)
+  # OS text input is on exactly while a search field's page is on screen;
+  # everywhere else the window takes raw keys (no accent popover on macOS).
+  var fieldOnScreen: Bool = false
+  var f: Int = 0
+  loop f < n {
+    if entityPageActive(world: world, entity: componentEntityAt(this: world.searchFields, i: f)) {
+      fieldOnScreen = true
+    }
+    f = f + 1
+  }
+  Gpu2dTextInput.setTextInput(active: fieldOnScreen)
   var i: Int = 0
   loop i < n {
     let field: EntityId = componentEntityAt(this: world.searchFields, i: i)
