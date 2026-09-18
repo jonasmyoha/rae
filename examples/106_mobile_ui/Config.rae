@@ -140,9 +140,10 @@ let playlistTilePath: String = "examples/106_mobile_ui/assets/scenes/PlaylistTil
 
 let recentThumbPath: String = "examples/106_mobile_ui/assets/scenes/RecentThumb.raescene"
 
-# Per-album data. Each `albumsFolder/<stem>/` carries `cover.jpg` and
-# `album.json`. The `album_loader.rae` module walks this folder at
-# boot. See `tools/migrate_to_album_folders.py` for the layout.
+# Per-album data. Each `albumsFolder/<stem>/` carries `album.json`; the
+# cover is downloaded from its `artworkUrl` into app_cache/ on first run
+# (a local `cover.jpg` next to the album.json overrides it, gitignored).
+# The `album_loader.rae` module walks this folder at boot.
 let albumsFolder: String = "examples/106_mobile_ui/assets/albums"
 
 # Persistent UI state — active album stem, active track index, and

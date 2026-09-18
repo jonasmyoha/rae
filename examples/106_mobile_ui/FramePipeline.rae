@@ -162,15 +162,17 @@ func syncFrameData(
     applyOverlaysToWorld(world: world, playback: playback, state: appState)
   }
 
+  # Settle the artwork downloads that landed since last frame (#950), then
+  # let the loaders upload them / start the next ones — album covers first
+  # (they are fetched too, when not on disk), then the history art.
+  artworkFetchDrain(queue: appState.artworkFetch)
   let loadingCovers: Bool = cascadeAssets(
     reg: texReg
     albums: appState.mediaLibrary.albums
     budget: 2
     load: appState.assetLoad
+    fetches: appState.artworkFetch
   )
-  # Settle the artwork downloads that landed since last frame (#950), then
-  # let the loader upload them / start the next ones.
-  artworkFetchDrain(queue: appState.artworkFetch)
   let loadingHistoryArt: Bool = loadCachedHistoryArtChunk(
     history: appState.playHistory
     reg: texReg
