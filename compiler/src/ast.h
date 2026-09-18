@@ -88,6 +88,10 @@ typedef struct AstCallArg {
   Str name;
   AstExpr* value;
   struct AstCallArg* next;
+  /* Set by sema when this argument MOVES a caller local into an `own T`
+   * parameter of a heap-owning type (docs/ownership-model.md): the lifecycle
+   * pass then reports any later use of that local as use after move. */
+  bool moves_local;
 } AstCallArg;
 
 typedef struct AstObjectField {
