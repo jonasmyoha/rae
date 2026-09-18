@@ -42,7 +42,7 @@ This is what every language with fixed-size integers does in production
 (Java, Go, C#, Rust in release), and what a hash such as `lib/Noise`'s
 32-bit finalizer relies on.
 
-A dev-only overflow check (Rust's debug rule) was tried and dropped on
+A dev-only overflow check (Rust's debug rule) was tried and removed on
 purpose: Rae has no dev/release semantic differences — a program that passed
 its tests must behave identically when shipped — so the two builds differ
 only in optimisation flags. See "One behaviour, every profile" below.

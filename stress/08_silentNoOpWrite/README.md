@@ -1,8 +1,8 @@
 # 08 — Silent no-op write
 
-**Verdict: `handles`** — the write is bounds-checked and dropped, and the
-program says so. (Flipped from `footgun`: it used to be dropped without a
-word.)
+**Verdict: `handles`** — the write is bounds-checked and ignored, and the
+program says so on stderr. (Flipped from `footgun`: it used to be ignored
+without a word.)
 
 ## The foot gun
 
@@ -23,12 +23,12 @@ length 3                                                       (stdout)
 
 Exit 0. The rule (`docs/collections.md`): a **read** past the end may miss,
 so `copyAt` returns `none` and `copyAtFallback` its fallback; a **write**
-past the end is checked, dropped, and reported on stderr — `set`, `insert`,
+past the end is checked, ignored, and reported on stderr — `set`, `insert`,
 `remove` and `swapRemove` alike, in every build profile. The program never
 stops for it, and the bug is never silent. Stopping the program (an
 exception, a panic) was considered and rejected: a shipped game or UI that
-dies on a dropped write is worse for its user than one that carries on;
-dropping it *quietly* was rejected too, because that hides the bug forever.
+dies on an ignored write is worse for its user than one that carries on;
+ignoring it *quietly* was rejected too, because that hides the bug forever.
 
 The sweep this rule forced found one real caller in the tree:
 `lib/compress/Inflate.rae` wrote `offs[16]` on a 16-element list every time
