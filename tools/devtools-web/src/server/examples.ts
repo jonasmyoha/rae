@@ -6,7 +6,8 @@ import type {
   ExampleActionDescriptor,
   ExampleDescriptor,
   ExampleFileDescriptor,
-  ExampleFileKind
+  ExampleFileKind,
+  StressInfo
 } from "../shared/types";
 
 /** Extension → viewer kind. Anything in `TEXT_EXTENSIONS` is fetched
@@ -94,6 +95,7 @@ type ExampleMetadata = {
    * example does not have to leave 3D Renderer to be featured. */
   featured?: boolean;
   webgpu?: boolean;
+  stress?: StressInfo;
 };
 
 type ExampleActionMetadata = {
@@ -194,19 +196,45 @@ export async function listExamples(
   root: string,
   compilerBinPath: string
 ): Promise<ExampleDescriptor[]> {
+  ACTION_REGISTRY.clear();
+  return scanExampleRoot(root, compilerBinPath, "", "examples");
+}
+
+/** The stress cases (docs/stress-tests.md): the same scan over the stress
+ * root, with every path written relative to the EXAMPLES root
+ * (`../stress/<id>/…`) so the source viewer, the asset reader and the runner
+ * — all of which resolve against that root — need no second code path. The
+ * action registry is left alone: listExamples owns it. */
+export async function listStressCases(
+  stressRoot: string,
+  examplesRoot: string,
+  compilerBinPath: string
+): Promise<ExampleDescriptor[]> {
+  const relative = path.relative(examplesRoot, stressRoot).split(path.sep).join(path.posix.sep);
+  return scanExampleRoot(stressRoot, compilerBinPath, relative + "/", "stress");
+}
+
+async function scanExampleRoot(
+  root: string,
+  compilerBinPath: string,
+  pathPrefix: string,
+  origin: "examples" | "stress"
+): Promise<ExampleDescriptor[]> {
   const entries = await safeReadDir(root);
   const examples: ExampleDescriptor[] = [];
-  ACTION_REGISTRY.clear();
 
   for (const entry of entries) {
     if (entry.name.startsWith(".")) continue;
     if (entry.name === "legacy") continue; // Skip legacy folder
-    const relativePath = entry.name;
+    // A stress case is a numbered folder; the README and run.sh are not cases.
+    if (origin === "stress" && !(entry.isDirectory() && /^\d/.test(entry.name))) continue;
+    const relativePath = pathPrefix + entry.name;
     const fullPath = path.join(root, entry.name);
 
     if (entry.isFile() && entry.name.endsWith(".rae")) {
       const single = makeSingleFileExample(relativePath);
       single.absolutePath = fullPath;
+      single.origin = origin;
       examples.push(single);
       continue;
     }
@@ -238,6 +266,8 @@ export async function listExamples(
         wasmCapability
       );
       descriptor.absolutePath = fullPath;
+      descriptor.origin = origin;
+      if (metadata?.stress) descriptor.stress = metadata.stress;
       if (normalizedActions.length) {
         descriptor.actions = normalizedActions.map((action) => ({
           id: action.id!,
@@ -331,7 +361,7 @@ async function detectWasmCapability(
 }
 
 function makeMultiFileExample(
-  id: string,
+  idPath: string,
   entry: string,
   files: ExampleFileDescriptor[],
   metadata: ExampleMetadata | null,
@@ -379,6 +409,9 @@ function makeMultiFileExample(
   const defaultTargetId =
     packInfo?.defaultTargetId
     ?? (typeof metadata?.defaultTargetId === "string" ? metadata.defaultTargetId : undefined);
+  // The id is the folder name; a stress case's path carries a `../stress/`
+  // prefix that must not leak into it (screenshots, actions, the URL).
+  const id = path.posix.basename(idPath);
   const descriptor: ExampleDescriptor = {
     id,
     name: metadata?.name ?? id,
@@ -469,6 +502,13 @@ async function safeReadDir(dir: string) {
   }
 }
 
+/** Roots a relative example path may resolve into besides the examples root
+ * itself: the stress root (its records' paths are `../stress/<id>/…`). */
+let EXTRA_ROOTS: string[] = [];
+export function setExtraExampleRoots(roots: string[]) {
+  EXTRA_ROOTS = roots.map((root) => path.resolve(root));
+}
+
 export async function readExampleFile(root: string, relativePath: string): Promise<string> {
   const safePath = sanitizePath(root, relativePath);
   return readFile(safePath, "utf8");
@@ -493,7 +533,8 @@ export async function writeExampleFile(root: string, relativePath: string, conte
 function sanitizePath(root: string, relativePath: string): string {
   const resolvedRoot = path.resolve(root);
   const resolved = path.resolve(resolvedRoot, relativePath);
-  if (!resolved.startsWith(resolvedRoot)) {
+  const inside = (base: string) => resolved === base || resolved.startsWith(base + path.sep);
+  if (!inside(resolvedRoot) && !EXTRA_ROOTS.some(inside)) {
     throw new Error("Invalid example path");
   }
   return resolved;
@@ -608,8 +649,48 @@ function parseRaePackMetadata(contents: string): ExampleMetadata {
   if (actionsBlock) {
     metadata.actions = parseRaePackActions(actionsBlock);
   }
+  const stressBlock = readTopLevelBlock(contents, "stress");
+  if (stressBlock) {
+    const stress = parseRaePackStress(stressBlock);
+    if (stress) metadata.stress = stress;
+  }
 
   return metadata;
+}
+
+/** The `stress` block (docs/stress-tests.md): verdict, expect, elsewhere,
+ * fixedBy. A block without a valid verdict/outcome is dropped so a
+ * half-written pack cannot show up as a case with no expectation. */
+function parseRaePackStress(block: string): StressInfo | undefined {
+  const verdict = readTopLevelStringField(block, "verdict");
+  if (verdict !== "handles" && verdict !== "footgun") return undefined;
+  const expectBlock = readTopLevelBlock(block, "expect");
+  if (!expectBlock) return undefined;
+  const outcome = readTopLevelStringField(expectBlock, "outcome");
+  if (outcome !== "compile-error" && outcome !== "run") return undefined;
+  const expect: StressInfo["expect"] = { outcome };
+  const diagnostic = readTopLevelStringField(expectBlock, "diagnostic");
+  if (diagnostic !== undefined) expect.diagnostic = diagnostic;
+  const exitCode = readNumericField(expectBlock, "exitCode");
+  if (exitCode !== undefined) expect.exitCode = exitCode;
+  const stdout = readTopLevelStringField(expectBlock, "stdout");
+  if (stdout !== undefined) expect.stdout = stdout;
+  const stdoutMatches = readTopLevelStringField(expectBlock, "stdoutMatches");
+  if (stdoutMatches !== undefined) expect.stdoutMatches = stdoutMatches;
+  const stderr = readTopLevelStringField(expectBlock, "stderr");
+  if (stderr !== undefined) expect.stderr = stderr;
+  const elsewhere: Record<string, string> = {};
+  const elsewhereBlock = readTopLevelBlock(block, "elsewhere");
+  if (elsewhereBlock) {
+    for (const line of elsewhereBlock.split("\n")) {
+      const match = /^\s*([A-Za-z][A-Za-z0-9]*):\s*"/.exec(line);
+      if (!match) continue;
+      const value = readTopLevelStringField(elsewhereBlock, match[1]!);
+      if (value !== undefined) elsewhere[match[1]!] = value;
+    }
+  }
+  const fixedBy = readTopLevelStringField(block, "fixedBy");
+  return { verdict, expect, elsewhere, fixedBy: fixedBy || undefined };
 }
 
 function parseRaePackActions(actionsBlock: string): ExampleActionMetadata[] {
