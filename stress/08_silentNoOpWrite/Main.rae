@@ -1,10 +1,10 @@
 # Foot gun: writing past the end of a list.
 #
 # `numbers` has three elements; index 10 does not exist. Rae bounds-checks
-# the write and DROPS it — the program keeps running — but says so on
-# stderr, naming the call, the index and the length (docs/collections.md).
-# Never silent: a dropped write nobody hears about is a bug found by
-# archaeology. A READ past the end is `none` from `copyAt`, because a read
+# the write and IGNORES it — the list is unchanged, the program keeps
+# running — but says so on stderr, naming the call, the index and the length
+# (docs/collections.md). Never silent: an ignored write nobody hears about is
+# a bug found by archaeology. A READ past the end is `none` from `copyAt`, because a read
 # may honestly miss.
 func main() {
   var numbers: List(Int) = [1, 2, 3]
