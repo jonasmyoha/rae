@@ -1,0 +1,36 @@
+pack ForgottenNoneCheck {
+  format: "raepack"
+  version: 1
+  defaultTarget: compiled
+  name: "Forgotten none check"
+  description: "Use a lookup that may find nothing as if it always does. Rae refuses at compile time; elsewhere it is the null-pointer crash."
+  category: "Stress"
+  targets: {
+    target compiled: {
+      label: "Compiled"
+      entry: "Main.rae"
+      sources: {
+        source: {
+          path: "."
+          emit: compiled
+        }
+      }
+    }
+  }
+  stress: {
+    verdict: "handles"
+    expect: {
+      outcome: "compile-error"
+      diagnostic: "optional not unwrapped"
+    }
+    elsewhere: {
+      python: "runs; None reaches the caller and blows up later with TypeError or AttributeError"
+      javascript: "runs; undefined leaks and fails later as `undefined is not a function` or NaN"
+      java: "runs; NullPointerException at the first use, far from the lookup"
+      go: "runs; the zero value (0) or a nil dereference panic, depending on the return type"
+      rust: "compile error unless you write `.unwrap()`, which panics at run time on None"
+      c: "runs; a NULL or sentinel value is used as data, undefined behaviour"
+    }
+    fixedBy: ""
+  }
+}

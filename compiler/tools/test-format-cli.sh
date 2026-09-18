@@ -112,5 +112,14 @@ cp "$WORK/Over.rae" "$WORK/proj/Over.rae"; cp "$WORK/Over.rae" "$WORK/Over.bak2"
 OUT=$(env -u RAE_FORMAT "$BIN" build --target compiled --emit-c --out "$WORK/proj.c" "$WORK/proj/Main.rae" 2>&1); RC=$?
 if [ $RC -ne 0 ] && echo "$OUT" | grep -q "split the module" && cmp -s "$WORK/proj/Over.rae" "$WORK/Over.bak2"; then ok preflight_over_cap_fails_build; else bad preflight_over_cap_fails_build "rc=$RC"; fi
 
+# 10. a .raepack string value keeps its escapes: the parsed value holds the
+#     real characters, so the printer must re-escape `\n` / `"` / `\\` / `{`,
+#     or one format pass splits the literal over two lines and the pack no
+#     longer parses (found by a stress pack carrying a regex with a newline).
+mkdir -p "$WORK/esc" && printf 'func main() {\n}\n' > "$WORK/esc/Main.rae"
+printf 'pack Esc {\n  format: "raepack"\n  version: 1\n  defaultTarget: compiled\n  note: "a\\nb \\"q\\" \\\\ \\{x\\}"\n  targets: {\n    target compiled: {\n      label: "C"\n      entry: "Main.rae"\n      sources: {\n        source: {\n          path: "."\n          emit: compiled\n        }\n      }\n    }\n  }\n}\n' > "$WORK/esc/esc.raepack"
+OUT=$("$BIN" format --stdout "$WORK/esc/esc.raepack" 2>&1); RC=$?
+if [ $RC -eq 0 ] && [ "$OUT" = "$(cat "$WORK/esc/esc.raepack")" ]; then ok raepack_string_escapes_kept; else bad raepack_string_escapes_kept "rc=$RC out=$(printf '%s' "$OUT" | grep note | head -c 80)"; fi
+
 echo "format-cli: $PASS passed, $FAIL failed"
 [ $FAIL -eq 0 ]

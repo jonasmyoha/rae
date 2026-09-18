@@ -1,0 +1,20 @@
+# Foot gun: millions of short-lived strings in a hot loop.
+#
+# Every iteration builds a fresh String and drops it at the end of the body.
+# Rae frees each one when its scope ends — no garbage collector to pause for,
+# no manual free to forget — so the process stays the size it started at.
+# The program prints the resident set before and after so the runner can hold
+# the growth under 4 MB.
+import Sys
+
+func main() {
+  let before: Int = Sys.processRssKb()
+  var total: Int = 0
+  loop var i: Int = 0, i < 2000000, ++i {
+    let s: String = "item {i}"
+    total = total + s.length()
+  }
+  let after: Int = Sys.processRssKb()
+  log("total {total}")
+  log("rss {before} -> {after} KB, grew {after - before} KB")
+}
