@@ -2798,6 +2798,10 @@ static int run_compiled_file(const RunOptions* run_opts, const char* project_roo
     const char* stdlib = compiler_stdlib_dir();
     if (stdlib && stdlib[0]) setenv("RAE_STDLIB", stdlib, 0);
   }
+  /* The crash handler names the program in its one-line report; the temp
+   * binary's own name would say nothing, so hand it the entry (relative as
+   * the user wrote it) — see runtime_core_memory.c rae_install_crash_handler. */
+  setenv("RAE_PROGRAM", run_opts->input_path ? run_opts->input_path : file_path, 1);
   fprintf(stderr, "@@RAE_APP_START@@ entry=%s\n", file_path);
   fflush(stderr);
   long long app_started_ms = rae_now_ms();

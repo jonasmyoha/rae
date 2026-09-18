@@ -57,3 +57,22 @@ rejection of a constant zero divisor.
 - `++` / `--` and compound forms that do not go through a binary `+`/`-`
   expression wrap in every profile.
 - Shifts are unchecked.
+
+## Crashes: the runtime's one line
+
+The same "say what happened, in one line, then exit non-zero" rule covers
+the faults the compiler cannot check for. A crash handler in the runtime
+(`compiler/runtime/runtime_core_memory.c`) runs on an **alternate signal
+stack** — on the main thread and on every spawned worker — so it can speak
+even when the fault is the stack itself:
+
+| fault | stderr | exit |
+|---|---|---|
+| stack overflow (a fault inside or just below the faulting thread's stack) | `rae: stack overflow (deep recursion?) in <program>` — one line, no backtrace | 128 + signal |
+| any other bad memory access | `rae: segmentation fault (invalid memory access) in <program>`, then the `[rae crash]` C-level backtrace | 128 + signal |
+| `SIGBUS` / `SIGFPE` / `SIGILL` / `SIGABRT` | `rae: bus error … / arithmetic fault / illegal instruction / abort in <program>`, then the backtrace | 128 + signal |
+
+`<program>` is the entry `rae run` was given (`RAE_PROGRAM`, set by `rae run`)
+or `argv[0]` of a built binary. `RAE_NO_CRASH_HANDLER=1` disables the handler
+for a debugger that wants the raw signal. No-op on WASM, where the host
+reports traps. Stress case `stress/09_deepRecursion` asserts the overflow line.
