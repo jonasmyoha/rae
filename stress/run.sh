@@ -58,6 +58,21 @@ for k, v in out.items():
 PY
 }
 
+# stdoutMatches: a Python regex over the WHOLE captured stdout (trailing
+# newline dropped), ^/$ per line. Not grep: grep matches line by line and
+# splits a pattern at a newline into several, so a multi-line expectation
+# would pass on its first line alone. Invalid UTF-8 bytes in the output
+# survive as lone characters (surrogateescape), so a case can assert them.
+regex_matches() {  # $1 = regex, $2 = file
+  python3 - "$1" "$2" <<'PY'
+import re, sys
+pattern = sys.argv[1]
+data = open(sys.argv[2], "rb").read().decode("utf-8", "surrogateescape")
+if data.endswith("\n"): data = data[:-1]
+sys.exit(0 if re.search(pattern, data, re.M) else 1)
+PY
+}
+
 PASSED=0; FAILED=0; RAN=0
 for dir in stress/*/; do
   name="$(basename "$dir")"
@@ -111,7 +126,7 @@ for dir in stress/*/; do
         matched=0; why="expected exit $E_exitCode, got $run_rc"
       elif [ "$E_stdout_set" = "1" ] && [ "$actual_out" != "$E_stdout" ]; then
         matched=0; why="stdout differs: got $(printf '%s' "$actual_out" | head -c 100 | tr '\n' '|')"
-      elif [ "$E_stdoutMatches_set" = "1" ] && ! printf '%s' "$actual_out" | grep -qE -- "$E_stdoutMatches"; then
+      elif [ "$E_stdoutMatches_set" = "1" ] && ! regex_matches "$E_stdoutMatches" "$run_out"; then
         matched=0; why="stdout does not match /$E_stdoutMatches/: got $(printf '%s' "$actual_out" | head -c 100 | tr '\n' '|')"
       elif [ "$E_stderr_set" = "1" ] && [ "$actual_err" != "$E_stderr" ]; then
         matched=0; why="stderr differs: got $(printf '%s' "$actual_err" | head -c 100 | tr '\n' '|')"

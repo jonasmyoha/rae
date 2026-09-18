@@ -1,0 +1,14 @@
+# Foot gun: arithmetic that has no right answer — the largest Int plus one,
+# and a division by zero.
+#
+# Today Rae wraps the overflow silently to the smallest Int, and `7 / 0`
+# evaluates to 0: the program exits 0 with two wrong numbers and no
+# diagnostic. That is the current behaviour, and this case asserts it so the
+# day it changes is noticed.
+func main() {
+  var big: Int = 9223372036854775807
+  big = big + 1
+  log("wrapped: {big}")
+  let bad: Int = 7 / 0
+  log("div0: {bad}")
+}
