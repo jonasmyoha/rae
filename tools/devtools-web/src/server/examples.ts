@@ -679,6 +679,8 @@ function parseRaePackStress(block: string): StressInfo | undefined {
   if (stdoutMatches !== undefined) expect.stdoutMatches = stdoutMatches;
   const stderr = readTopLevelStringField(expectBlock, "stderr");
   if (stderr !== undefined) expect.stderr = stderr;
+  const stderrMatches = readTopLevelStringField(expectBlock, "stderrMatches");
+  if (stderrMatches !== undefined) expect.stderrMatches = stderrMatches;
   const elsewhere: Record<string, string> = {};
   const elsewhereBlock = readTopLevelBlock(block, "elsewhere");
   if (elsewhereBlock) {

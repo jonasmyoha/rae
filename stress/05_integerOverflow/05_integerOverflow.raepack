@@ -3,7 +3,7 @@ pack IntegerOverflow {
   version: 1
   defaultTarget: compiled
   name: "Integer overflow and division by zero"
-  description: "Int.max + 1 wraps silently, and 7 / 0 evaluates to 0 — exit 0, no diagnostic. No other language returns 0 there."
+  description: "Division by zero is a runtime error with a source position and exit 70 (a constant zero does not compile); overflow traps in the dev profile and wraps in release. It used to return 0 with exit 0."
   category: "Stress"
   targets: {
     target compiled: {
@@ -18,12 +18,12 @@ pack IntegerOverflow {
     }
   }
   stress: {
-    verdict: "footgun"
+    verdict: "handles"
     expect: {
       outcome: "run"
-      exitCode: 0
-      stdout: "wrapped: -9223372036854775808\ndiv0: 0"
-      stderr: ""
+      exitCode: 1
+      stdout: "wrapped: -9223372036854775808"
+      stderrMatches: "^.*Main\\.rae:[0-9]+: runtime error: division by zero$"
     }
     elsewhere: {
       python: "no overflow (arbitrary precision); ZeroDivisionError on 7 / 0"
@@ -33,6 +33,6 @@ pack IntegerOverflow {
       rust: "panics in debug, wraps in release; always panics on 7 / 0 (constant: compile error)"
       c: "signed overflow is undefined behaviour; 7 / 0 is undefined behaviour (usually SIGFPE)"
     }
-    fixedBy: ""
+    fixedBy: "#82802533 — rae_int_div/mod/add/sub/mul in rae_runtime.h, the constant-zero divisor error in sema"
   }
 }

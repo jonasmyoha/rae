@@ -5099,6 +5099,20 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
         case AST_EXPR_CHAR: expr->resolved_type = type_get_char(ctx->type_registry); break;
         case AST_EXPR_BINARY:
             sema_analyze_expr(ctx, module, symbols, expr->as.binary.lhs, true); sema_analyze_expr(ctx, module, symbols, expr->as.binary.rhs, true);
+            /* A divisor that is a compile-time integer zero is an error here,
+             * not a trap later: `x / 0`, `x % 0`, `x / (1 - 1)`, `x / zeroConst`
+             * (docs/integer-semantics.md). A float zero is left to the
+             * runtime — `x / 0.0` is an IEEE infinity, not a foot gun. */
+            if (expr->as.binary.op == AST_BIN_DIV || expr->as.binary.op == AST_BIN_MOD) {
+                ConstResult divisor = const_eval(symbols, expr->as.binary.rhs);
+                if (divisor.ok && divisor.numeric && !divisor.is_float && divisor.i == 0) {
+                    diag_error(sema_diag_file(module), (int)expr->line, (int)expr->column,
+                               expr->as.binary.op == AST_BIN_DIV
+                                   ? "division by zero: the divisor is the constant 0"
+                                   : "division by zero: the modulus is the constant 0");
+                    module->had_error = true;
+                }
+            }
             if (expr->as.binary.op >= AST_BIN_LT && expr->as.binary.op <= AST_BIN_OR) expr->resolved_type = type_get_bool(ctx->type_registry);
             /* Arithmetic on references yields a VALUE, not a reference. Taking
              * the lhs type verbatim made `a - b` inherit `view Float64` when a
