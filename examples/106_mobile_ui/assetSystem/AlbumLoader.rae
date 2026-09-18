@@ -1,13 +1,19 @@
 open Files
 # Load every `assets/albums/<stem>/album.json` into a typed `Album`
 # list at boot. The host pipes the list through `asset_loader.rae`
-# (which loads `cover.jpg` for each into the texture registry),
+# (which loads each album's cover into the texture registry),
 # through `album_view.rae` (track rows + duration display), and
 # through `profile_view.rae` (grid). No path is hard-coded outside
 # `config.rae`.
 #
-# album.json schema (see `tools/fetch_album_metadata.py` +
-# `tools/fetch_tracks.py`):
+# The repository carries only the metadata. Cover art is third-party
+# and is never committed: `coverPath` is a local `cover.jpg` next to
+# the album.json when one has been dropped there (gitignored), and
+# otherwise the app cache file the asset loader downloads from
+# `artworkUrl` at run time (`cachedAlbumCoverPath`) — until it lands
+# the renderer draws its neutral placeholder tile.
+#
+# album.json schema:
 #
 #   {
 #     "artist": "Mitski",
@@ -29,6 +35,7 @@ open Files
 # as the stable identity key (used by `currentAlbumStem` in
 # `state.json`).
 import Json
+import Sys
 
 # ----- types ---------------------------------------------------------
 type Track {
@@ -51,9 +58,14 @@ type Album {
   genre: String
   # "ok" / "fallback" / "unmatched".
   status: String
-  # Path to the album's cover relative to `rae run`'s cwd. The
-  # asset loader feeds this straight into `textureLoad`.
+  # Path to the album's cover relative to `rae run`'s cwd: the local
+  # override next to the album.json if present, else the app-cache
+  # file the download lands in. The asset loader loads it once it
+  # exists and fetches it from `artworkUrl` when it does not.
   coverPath: String
+  # Where the cover can be downloaded from ("" = unknown; the loader
+  # then tries an iTunes Search lookup by artist + album).
+  artworkUrl: String
   tracks: List(Track)
   # Sum of `tracks[*].durationMs`. 0 when tracks is empty.
   totalDurationMs: Int
@@ -204,9 +216,26 @@ func stubAlbum(stem: view String, coverPath: view String) ret Album {
     genre: empty
     status: empty
     coverPath: coverPath
+    artworkUrl: empty
     tracks: List.create(Track, cap: 0)
     totalDurationMs: 0
   }
+}
+
+# The cover file the download of `stem`'s art lands in (app cache,
+# gitignored, survives restarts).
+func cachedAlbumCoverPath(stem: view String) pub ret String {
+  ret "{appCacheAlbumArtDir}/album-{stem}.jpg"
+}
+
+# `coverPath` for an album folder: a cover dropped next to the album.json
+# wins, otherwise the app-cache download target.
+func resolveCoverPath(folder: view String, stem: view String) ret String {
+  let local: String = "{folder}/{stem}/cover.jpg"
+  if Sys.exists(path: local) {
+    ret local
+  }
+  ret cachedAlbumCoverPath(stem: stem)
 }
 
 # Parse a single album.json blob into an Album.
@@ -222,6 +251,7 @@ func parseAlbum(source: view String, stem: view String, coverPath: view String) 
   let yearKey: String = "year"
   let genreKey: String = "genre"
   let statusKey: String = "status"
+  let artworkKey: String = "artworkUrl"
   let durKey: String = "albumDurationMs"
   ret Album {
     stem: stem
@@ -231,6 +261,7 @@ func parseAlbum(source: view String, stem: view String, coverPath: view String) 
     genre: fieldString(doc: doc, obj: root, key: genreKey)
     status: fieldString(doc: doc, obj: root, key: statusKey)
     coverPath: coverPath
+    artworkUrl: fieldString(doc: doc, obj: root, key: artworkKey)
     tracks: parseTracks(doc: doc, root: root)
     totalDurationMs: fieldInt(doc: doc, obj: root, key: durKey)
   }
@@ -242,7 +273,7 @@ func loadAlbum(folder: view String, stem: view String) pub ret Album {
   unsafe {
     let copiedStem: String = stem
     let jsonPath: String = "{folder}/{copiedStem}/album.json"
-    let coverPath: String = "{folder}/{copiedStem}/cover.jpg"
+    let coverPath: String = resolveCoverPath(folder: folder, stem: copiedStem)
     let source: String = rae_ext_rae_sys_read_file(path: jsonPath)
     if source.length() is 0 {
       log("[album-loader] {jsonPath} missing or empty")
@@ -273,7 +304,7 @@ func loadAllAlbums(folder: view String) pub ret List(Album) {
         let jsonPath: String = "{copiedFolder}/{stem}/album.json"
         let source: String = rae_ext_rae_sys_read_file(path: jsonPath)
         if source.length() > 0 {
-          let coverPath: String = "{copiedFolder}/{stem}/cover.jpg"
+          let coverPath: String = resolveCoverPath(folder: copiedFolder, stem: stem)
           let a: Album = parseAlbum(source: source, stem: stem, coverPath: coverPath)
           result.add(value: a)
         }

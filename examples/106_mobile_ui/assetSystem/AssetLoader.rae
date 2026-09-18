@@ -3,9 +3,17 @@ open ui/Ecs
 # `album_loader.rae` — every album's cover becomes a gpu2d image key under
 # `<stem>`. Material icons go through the font atlas, not this registry.
 #
+# Covers are not in the repository (third-party art): a cover file that is
+# not on disk is downloaded from the album's `artworkUrl` (or an iTunes
+# Search lookup by artist + album when there is none) through the same
+# background artwork queue the history art uses, into the app cache, and
+# uploaded when it lands. Until then the renderer draws its neutral
+# placeholder for the missing image key.
+#
 # The avatar uses the album cover at `avatarAlbumStem` (see
 # `config.rae`) circle-cropped at load time. Missing → placeholder.
 import Files
+import Sys
 
 # Registry key the texture for an album cover lives under. The stem
 # is the stable identity — it survives folder reshuffles and tracks
@@ -30,7 +38,9 @@ func loadAlbumCovers(reg: mod TextureRegistry, albums: view List(Album)) pub {
     loop i < albums.length {
       let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: i)
       let key: String = albumCoverKey(stem: a.stem)
-      if textureHas(reg: reg, key: key) is false {
+      # Only what is on disk: a cover still to be downloaded is the
+      # progressive loader's job (cascadeGpu2dAssets).
+      if textureHas(reg: reg, key: key) is false and Sys.exists(path: a.coverPath) {
         # Two fresh String allocations — neither aliases `a`'s storage,
         # so the cover keeps loading even if `albums` is dropped before
         # the next refresh.
@@ -57,6 +67,9 @@ func loadAvatar(reg: mod TextureRegistry, albums: view List(Album)) pub {
       ret
     }
     let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: idx)
+    if Sys.exists(path: a.coverPath) is false {
+      ret
+    }
     let avatarKey: String = profileAvatarKey()
     let avatarPath: String = a.coverPath
     let copiedKey: String = "{avatarKey}"
@@ -78,12 +91,14 @@ func cascadeAssets(
   albums: view List(Album)
   budget: view Int
   load: mod AssetLoad
+  fetches: mod ArtworkFetchQueue
 ) pub ret Bool {
   ret cascadeGpu2dAssets(
     reg: reg
     albums: albums
     budget: budget
     load: load
+    fetches: fetches
   )
 }
 
@@ -118,6 +133,7 @@ func cascadeGpu2dAssets(
   albums: view List(Album)
   budget: view Int
   load: mod AssetLoad
+  fetches: mod ArtworkFetchQueue
 ) pub ret Bool {
   unsafe {
     if albums.length is not load.coversSeenLen {
@@ -129,6 +145,9 @@ func cascadeGpu2dAssets(
     if load.coversLoaded is false {
       var i: Int = 0
       var loaded: Int = 0
+      # Covers still owed: not on the GPU, not given up on. A download in
+      # flight counts, so the latch below waits for it instead of closing.
+      var outstanding: Int = 0
       loop i < albums.length {
         if loaded >= budget {
           ret true
@@ -137,16 +156,26 @@ func cascadeGpu2dAssets(
         # Inline the key builder as a call arg (don't bind a `let`) so its
         # heap stays a pool temp freed by this function's scope flush.
         if textureHas(reg: reg, key: albumCoverKey(stem: a.stem)) is false {
-          let h: Int = textureLoad(reg: reg, key: albumCoverKey(stem: a.stem), path: a.coverPath)
-          loaded = loaded + 1
+          if textureFailedPath(reg: reg, path: a.coverPath) is false {
+            let step: Int = ensureAlbumCover(reg: reg, album: a, fetches: fetches)
+            if step is coverStepUploaded {
+              loaded = loaded + 1
+            }
+            if step is not coverStepFailed {
+              outstanding = outstanding + 1
+            }
+          }
         }
         i = i + 1
       }
-      # A full pass that registered nothing means every cover is present —
-      # latch so future frames skip the scan entirely.
-      if loaded is 0 {
+      # A full pass with nothing left owed means every cover is present (or
+      # given up on) — latch so future frames skip the scan entirely. A
+      # pass that only waited on downloads stays unlatched but is NOT busy:
+      # the worker wakes the event loop when a file lands.
+      if outstanding is 0 {
         load.coversLoaded = true
-      } else {
+      }
+      if loaded > 0 {
         busy = true
       }
     }
@@ -156,13 +185,78 @@ func cascadeGpu2dAssets(
         let idx: Int = findAlbumIndex(albums: albums, stem: avatarAlbumStem)
         if idx >= 0 {
           let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: idx)
-          let h: Int = textureLoad(reg: reg, key: profileAvatarKey(), path: a.coverPath)
+          # The avatar is that album's cover, so it is ready exactly when the
+          # cover's own upload (above) has happened or the file gave up.
+          if Sys.exists(path: a.coverPath) {
+            let h: Int = textureLoad(reg: reg, key: profileAvatarKey(), path: a.coverPath)
+            busy = true
+          } else if textureFailedPath(reg: reg, path: a.coverPath) {
+            load.avatarLoaded = true
+          }
+        } else {
+          load.avatarLoaded = true
         }
-        busy = true
       } else {
         load.avatarLoaded = true
       }
     }
     ret busy
   }
+}
+
+const coverStepWaiting: Int = 0
+
+const coverStepUploaded: Int = 1
+
+const coverStepFailed: Int = 2
+
+# One step towards having `album`'s cover on the GPU: upload the file when
+# it is on disk, otherwise make sure a download is running (started once,
+# from `artworkUrl` with the iTunes Search fallback) and pick up its result.
+# A file that does not decode is deleted when it is a cache download (a
+# truncated fetch — the next pass re-fetches) and marked failed when it is a
+# local override, so a genuinely bad image cannot loop.
+func ensureAlbumCover(
+  reg: mod TextureRegistry
+  album: view Album
+  fetches: mod ArtworkFetchQueue
+) ret Int {
+  let path: String = "{album.coverPath}"
+  if Sys.exists(path: path) {
+    let h: Int = textureLoad(reg: reg, key: albumCoverKey(stem: album.stem), path: path)
+    if h > 0 {
+      ret coverStepUploaded
+    }
+    if path.startsWith(prefix: appCacheAlbumArtDir) and textureFiredPath(reg: reg, path: path) is false {
+      let removed: Bool = Sys.delete(path: path)
+      ret coverStepWaiting
+    }
+    textureMarkFailedPath(reg: reg, path: path)
+    ret coverStepFailed
+  }
+  let status: Int = artworkFetchStatus(queue: fetches, outPath: path)
+  if status is artworkStatusFetched {
+    let h: Int = textureLoad(reg: reg, key: albumCoverKey(stem: album.stem), path: path)
+    if h > 0 {
+      ret coverStepUploaded
+    }
+    textureMarkFailedPath(reg: reg, path: path)
+    ret coverStepFailed
+  }
+  if status is artworkStatusFailed {
+    textureMarkFailedPath(reg: reg, path: path)
+    ret coverStepFailed
+  }
+  if textureFiredPath(reg: reg, path: path) is false {
+    let started: Bool = artworkFetchStartWithFallback(
+      queue: fetches
+      url: album.artworkUrl
+      term: "{album.artist} {album.album}"
+      outPath: path
+    )
+    if started {
+      textureMarkFiredPath(reg: reg, path: path)
+    }
+  }
+  ret coverStepWaiting
 }
