@@ -1,6 +1,8 @@
 # 08 — Silent no-op write
 
-**Verdict: `footgun`** — a write past the end is dropped without a word.
+**Verdict: `handles`** — a write past the end is a runtime error that names
+the index and the length. (Flipped from `footgun`: it used to be dropped
+without a word, exit 0.)
 
 ## The foot gun
 
@@ -12,16 +14,23 @@ xs.set(index: 10, value: 5)
 log("length {xs.length}")
 ```
 
-## What Rae does today
+## What Rae does
 
 ```
-length 3
+runtime error: List.set: index 10 is out of range for length 3
 ```
 
-Exit 0, stderr empty. `set` did nothing: no error, no growth, the value is
-gone. Every language on the table does *something* with the write — fails
-loudly, grows the list, or corrupts memory. Silently dropping it is the one
-behaviour nobody chose.
+Exit code 70 from the program (`rae run` reports 1); the `log` line is never
+reached. The rule (`docs/collections.md`): a **read** past the end may miss,
+so `copyAt` returns `none` and `copyAtFallback` returns the fallback; a
+**write** past the end cannot be meant — there is no slot for it — so `set`,
+`insert`, `remove` and `swapRemove` trap through `runtimeError`, the
+library's counterpart to the compiler's Int traps. A Bool result was
+rejected: nothing forces a caller to look at it.
+
+The sweep this rule forced found one real caller in the tree:
+`lib/compress/Inflate.rae` wrote `offs[16]` on a 16-element list every time
+it built a Huffman table — harmless only because that entry was never read.
 
 ## Elsewhere
 
@@ -34,7 +43,6 @@ behaviour nobody chose.
 | Rust | panics: `index out of bounds` |
 | C | writes past the buffer — memory corruption |
 
-## Expected outcome (the current bug, asserted)
+## Expected outcome
 
-Exit 0, stdout exactly `length 3`, stderr empty. When `set` traps (or returns
-a result the caller must handle) this case flips to `handles`.
+Exit 1 (via `rae run`), stdout empty, stderr exactly the trap line above.

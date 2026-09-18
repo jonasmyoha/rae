@@ -35,8 +35,11 @@ func buildHuff(lengths: view List(Int), value: view Int) ret Huff {
     counts.set(index: len, value: bufAt(list: counts, index: len) + 1)
     i = i + 1
   }
-  # offs[len] = first symbol-array index for codes of this length.
-  let offs: List(Int) = zeros(count: 16)
+  # offs[len] = first symbol-array index for codes of this length. Sized
+  # 17, not 16: the loop below fills offs[len + 1] up to len = 15, and that
+  # last entry (offs[16], never read) used to be a write past the end that
+  # `set` silently dropped — it is a runtime error now.
+  let offs: List(Int) = zeros(count: 17)
   var len2: Int = 1
   loop len2 < 16 {
     offs.set(
