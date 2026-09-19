@@ -1,0 +1,249 @@
+# The action table — what a tap MEANS, as data (docs/ecs-general-architecture.md).
+#
+# Every `OnClick.actionId` a scene (or a list row, or the debug menu) can fire
+# is a row here: the id, its `ActionKind` and a fixed payload (the screen a
+# nav tab selects). The input phase looks a fired id up (`lookupAction`) and
+# pushes the typed `AppCommand` onto the app's command queue; the command
+# systems (ActionSystems.rae) consume kinds, never strings. A TEMPLATED id
+# (`history.replay.{index}`, `album.open.{stem}`, `playlist.open.{id}`,
+# `song.openref.{index}.{stem}`) is one row whose payload is parsed ONCE, in
+# the lookup, into the command's `index` / `text` fields.
+#
+# Built once next to the screen table (`App.actions`); `actionAudit`
+# (ActionAudit.rae) walks every id the loaded scenes can fire and asserts a
+# row for each, so a new authored id without a row fails the 106 gate.
+open ecs/Entity
+
+enum ActionKind {
+  none
+  navigateTab
+  pushSubPage
+  pop
+  openAlbum
+  openPlaylist
+  playbackToggle
+  playbackNext
+  playbackPrev
+  playTrack
+  replayHistory
+  toggleLike
+  openSheet
+  closeSheet
+  libraryRemove
+  canvasToggle
+  canvasClose
+  debug
+}
+
+# No behaviour yet — an authored placeholder (`nav.unset`, the empty id)
+# or a control the app does not implement (shuffle / repeat / add /
+# download). Fires nothing.
+# navigation (navigationSystem)
+# playback (playbackCommandSystem)
+# the bottom sheet + the library (sheetCommandSystem)
+# the canvas overlay (canvasCommandSystem)
+# the in-app debug UI: consumed by dispatchDebugAction (debugSystem), which
+# keeps its own ids; the row only records that the id is known.
+
+# One row: the id (a template's prefix, without the payload), what it does
+# and its fixed payload.
+type ActionEntry {
+  id: String
+  kind: ActionKind
+  # `template`: the fired id is `<id>.<payload>`; the payload is parsed by kind.
+  template: Bool
+  screen: Screen
+  # openSheet: which menu (`sheetMenuActions`).
+  menu: String
+}
+
+# The typed command a fired id becomes. `screen` for the navigation kinds,
+# `text` the album stem / playlist id, `index` the track / history index.
+type AppCommand {
+  kind: ActionKind
+  screen: Screen
+  text: String
+  index: Int
+}
+
+type ActionTable {
+  entries: List(ActionEntry)
+}
+
+# A lookup's verdict: whether a row knows the id, and the command it makes.
+type ActionLookup {
+  found: Bool
+  command: AppCommand
+}
+
+func actionRow(
+  id: view String
+  kind: view ActionKind
+  template: view Bool
+  screen: view Screen
+  menu: view String
+) ret ActionEntry {
+  ret ActionEntry {
+    id: "{id}"
+    kind: kind
+    template: template
+    screen: screen
+    menu: "{menu}"
+  }
+}
+
+func plainRow(id: view String, kind: view ActionKind) ret ActionEntry {
+  ret actionRow(
+    id: id
+    kind: kind
+    template: false
+    screen: Screen.home
+    menu: ""
+  )
+}
+
+func templateRow(id: view String, kind: view ActionKind) ret ActionEntry {
+  ret actionRow(
+    id: id
+    kind: kind
+    template: true
+    screen: Screen.home
+    menu: ""
+  )
+}
+
+func navRow(id: view String, kind: view ActionKind, screen: view Screen) ret ActionEntry {
+  ret actionRow(
+    id: id
+    kind: kind
+    template: false
+    screen: screen
+    menu: ""
+  )
+}
+
+# Tab structure: Home / Library / Search / Profile are the four bottom-nav
+# tabs. Album, Player and History are sub-pages — Album reached by tapping a
+# cover tile, Player by the mini-player, History by the "Recently played"
+# header.
+func createActionTable() ret ActionTable {
+  let rows: List(ActionEntry) = List.create(ActionEntry, cap: 32)
+  rows.add(value: navRow(id: "nav.home", kind: ActionKind.navigateTab, screen: Screen.home))
+  rows.add(value: navRow(id: "nav.library", kind: ActionKind.navigateTab, screen: Screen.library))
+  rows.add(value: navRow(id: "nav.search", kind: ActionKind.navigateTab, screen: Screen.search))
+  rows.add(value: navRow(id: "nav.profile", kind: ActionKind.navigateTab, screen: Screen.profile))
+  rows.add(value: navRow(id: "nav.nowPlaying", kind: ActionKind.pushSubPage, screen: Screen.player))
+  rows.add(value: navRow(id: "nav.history", kind: ActionKind.pushSubPage, screen: Screen.history))
+  rows.add(value: plainRow(id: "nav.back", kind: ActionKind.pop))
+  rows.add(value: plainRow(id: "nav.unset", kind: ActionKind.none))
+  rows.add(value: plainRow(id: "", kind: ActionKind.none))
+  rows.add(value: templateRow(id: "album.open", kind: ActionKind.openAlbum))
+  rows.add(value: templateRow(id: "playlist.open", kind: ActionKind.openPlaylist))
+  rows.add(value: templateRow(id: "song.openref", kind: ActionKind.playTrack))
+  rows.add(value: templateRow(id: "history.replay", kind: ActionKind.replayHistory))
+  rows.add(value: plainRow(id: "playback.toggle", kind: ActionKind.playbackToggle))
+  rows.add(value: plainRow(id: "playback.play", kind: ActionKind.playbackToggle))
+  rows.add(value: plainRow(id: "playback.next", kind: ActionKind.playbackNext))
+  rows.add(value: plainRow(id: "playback.prev", kind: ActionKind.playbackPrev))
+  rows.add(value: plainRow(id: "playback.like", kind: ActionKind.toggleLike))
+  rows.add(value: plainRow(id: "playback.shuffle", kind: ActionKind.none))
+  rows.add(value: plainRow(id: "playback.repeat", kind: ActionKind.none))
+  rows.add(value: plainRow(id: "track.add", kind: ActionKind.none))
+  rows.add(value: plainRow(id: "track.download", kind: ActionKind.none))
+  rows.add(value: actionRow(
+    id: "track.more"
+    kind: ActionKind.openSheet
+    template: false
+    screen: Screen.home
+    menu: "album"
+  ))
+  rows.add(value: plainRow(id: "sheet.dismiss", kind: ActionKind.closeSheet))
+  rows.add(value: plainRow(id: "sheet.cancel", kind: ActionKind.closeSheet))
+  rows.add(value: plainRow(id: "library.remove", kind: ActionKind.libraryRemove))
+  rows.add(value: plainRow(id: "canvas.toggle", kind: ActionKind.canvasToggle))
+  rows.add(value: plainRow(id: "canvas.close", kind: ActionKind.canvasClose))
+  rows.add(value: plainRow(id: "debug.toggleMenu", kind: ActionKind.debug))
+  rows.add(value: plainRow(id: "debug.toggleTheme", kind: ActionKind.debug))
+  rows.add(value: plainRow(id: "debug.toggleLabels", kind: ActionKind.debug))
+  rows.add(value: plainRow(id: "debug.toggleInputOutlines", kind: ActionKind.debug))
+  rows.add(value: plainRow(id: "debug.dismiss", kind: ActionKind.debug))
+  ret ActionTable { entries: own rows }
+}
+
+# The bottom sheet's menus, as data: which choices a `openSheet` row offers.
+# Every choice's id is itself a table row.
+func sheetMenuActions(menu: view String) ret List(BottomSheetAction) {
+  let actions: List(BottomSheetAction) = List.create(BottomSheetAction, cap: 2)
+  if menu is "album" {
+    actions.add(value: own mkSheetAction(label: "Remove from library", actionId: "library.remove"))
+    actions.add(value: own mkSheetAction(label: "Cancel", actionId: "sheet.cancel"))
+  }
+  ret actions
+}
+
+func noCommand() ret AppCommand {
+  ret AppCommand { kind: ActionKind.none, screen: Screen.home, text: "", index: -1 }
+}
+
+# Parse a template row's payload — the part after `<id>.` — by kind:
+#   album.open.{stem} / playlist.open.{id}     -> text
+#   history.replay.{index}                     -> index
+#   song.openref.{index}.{stem}                -> index + text (stems have no '.')
+func templateCommand(entry: view ActionEntry, payload: view String) ret AppCommand {
+  var command: AppCommand = noCommand()
+  command.kind = entry.kind
+  command.screen = entry.screen
+  if entry.kind is ActionKind.replayHistory {
+    command.index = payload.toInt()
+    ret command
+  }
+  if entry.kind is ActionKind.playTrack {
+    let dot: Int = payload.indexOf(sub: ".")
+    if dot > 0 {
+      command.index = payload.sub(start: 0, len: dot).toInt()
+      command.text = payload.sub(start: dot + 1, len: payload.length() - dot - 1)
+    } else {
+      command.index = payload.toInt()
+    }
+    ret command
+  }
+  command.text = "{payload}"
+  if entry.kind is ActionKind.openPlaylist and command.text.length() is 0 {
+    command.text = "liked"
+  }
+  ret command
+}
+
+# The command for a fired id: an exact row, or a template row whose
+# `<id>.` prefixes it (payload parsed; the bare id = an empty payload).
+# `found` false when no row knows it.
+func lookupAction(table: view ActionTable, actionId: view String) ret ActionLookup {
+  loop let entry: view ActionEntry in table.entries {
+    if entry.template {
+      # A template's bare id (a row scene's authored default before its
+      # binding fills the payload) is the row with an empty payload.
+      if entry.id is actionId {
+        ret ActionLookup { found: true, command: templateCommand(entry: entry, payload: "") }
+      }
+      let prefix: String = "{entry.id}."
+      if actionId.startsWith(prefix: prefix) {
+        let payload: String = actionId.sub(
+          start: prefix.length()
+          len: actionId.length() - prefix.length()
+        )
+        ret ActionLookup { found: true, command: templateCommand(entry: entry, payload: payload) }
+      }
+    } else if entry.id is actionId {
+      ret ActionLookup {
+        found: true
+        command: AppCommand {
+          kind: entry.kind
+          screen: entry.screen
+          text: "{entry.menu}"
+          index: -1
+        }
+      }
+    }
+  }
+  ret ActionLookup { found: false, command: noCommand() }
+}

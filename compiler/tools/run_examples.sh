@@ -310,7 +310,9 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           fi
         elif [ "$EXAMPLE_NAME" = "106_mobile_ui" ]; then
           # The mobile UI (#1023): a Home screenshot proves the scene-driven
-          # pages render; a scripted drag (RAE_UI_DRAG, inputSystem/ScrollInput)
+          # pages render and the action audit line proves every id the world
+          # can fire has an action-table row (actionSystem/ActionAudit); a
+          # scripted drag (RAE_UI_DRAG, inputSystem/ScrollInput)
           # on the Library page pulls past the laid-out floor of its authored
           # `ScrollRoot`, rubber-bands, and the spring settles EXACTLY at that
           # floor — the `[scroll-drag] settled` line's scrollY must equal its
@@ -321,12 +323,13 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              perl -e 'alarm shift; exec @ARGV' 40 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
              && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=50 \
                 > "$TMP_OUT/screenshot.log" 2>&1 \
+             && grep -aEq '\[action-audit\] ids=[1-9][0-9]* unknown=0$' "$TMP_OUT/render.log" \
              && (cd .. && RAE_UI_SCREEN=library RAE_UI_NO_SPOTIFY=1 RAE_UI_DRAG=-1500 \
              RAE_AUTO_EXIT_SEC=4 RAE_SDL_HEADLESS_MS=4000 \
              perl -e 'alarm shift; exec @ARGV' 40 "$TMP_OUT/app") > "$TMP_OUT/drag.log" 2>&1 \
              && grep -q '\[scroll-drag\] released scrollY=' "$TMP_OUT/drag.log" \
              && grep -Eq '\[scroll-drag\] settled scrollY=(-[0-9.]+) floor=\1$' "$TMP_OUT/drag.log"; then
-            echo "PASS: $EXAMPLE_NAME (Home screenshot + scripted drag springs back to the ScrollRoot floor: $(grep '\[scroll-drag\] settled' "$TMP_OUT/drag.log"))"
+            echo "PASS: $EXAMPLE_NAME (Home screenshot, action audit clean, scripted drag springs back to the ScrollRoot floor: $(grep '\[scroll-drag\] settled' "$TMP_OUT/drag.log"))"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (mobile UI screenshot / scripted drag gate)"

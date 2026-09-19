@@ -17,7 +17,8 @@ open ui/LogOverlay
 #   * scene_mount.rae      — mountOrError + visible error sentinel
 #   * album_view.rae       — album-screen builders, including buildAlbumWorld
 #   * now_playing_view.rae — buildNowPlayingWorld
-#   * screen_router.rae    — Screen enum, buildScreenWorld, dispatchActions
+#   * screen_router.rae    — Screen enum, the screen table, buildScreenWorld
+#   * actionSystem/        — the action table + the command systems (what a tap does)
 #   * album_loader.rae     — Album / Track structs + loadAllAlbums (album.json)
 #   * asset_loader.rae     — GPU2D image-key loading (per-album cover + avatar)
 import FileWatch
@@ -75,8 +76,8 @@ func createApp() ret App {
   let albums: List(Album) = loadAllAlbums(folder: albumsFolder)
   var appState: AppState = createAppState(albums: albums, theme: own bootTheme)
   # Mock playback state — survives world rebuilds; both the album
-  # mini-player and the now-playing screen mutate it through
-  # `dispatchActions`. Created here so `restoreAppState` below can
+  # mini-player and the now-playing screen mutate it through the
+  # playback command system (actionSystem/). Created here so `restoreAppState` below can
   # populate `elapsedSec` + `isPlaying` from `state.json` before
   # the screenshot / stress / main loop branches.
   let playback: PlaybackState = createPlaybackState()
@@ -166,6 +167,8 @@ func createApp() ret App {
       waitTraceEnabled: waitTraceEnabled
       loopDebugEnabled: loopDebugEnabled
       loopDebugFrame: loopDebugFrame
+      actions: createActionTable()
+      commands: createEventQueue(AppCommand)
     }
   }
 }

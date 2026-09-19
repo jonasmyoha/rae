@@ -1,0 +1,370 @@
+# The command systems — what happens when an action fires, one system per
+# concern (docs/ecs-systems-and-data-observation.md §4):
+#
+#   actionCommandSystem   UiAction (a fired id) -> AppCommand, through the
+#                         action table; the only place an id string is read.
+#   playbackCommandSystem playbackToggle / next / prev / playTrack /
+#                         replayHistory / toggleLike: the PlaybackState, the
+#                         play history, the liked playlist, Spotify.
+#   sheetCommandSystem    openSheet / closeSheet / libraryRemove: the bottom
+#                         sheet and the curated library.
+#   canvasCommandSystem   canvasToggle / canvasClose: the canvas overlay flag.
+#   navigationSystem      navigateTab / pushSubPage / pop / openAlbum /
+#                         openPlaylist: the ONLY writer of `AppState.tab`, the
+#                         sub-page stack and the browsed collection. Runs
+#                         LAST, so a `pop` another system sends this frame
+#                         (libraryRemove) is consumed in the same frame.
+#
+# `runAppCommands` runs them in that order over the app's command queue
+# (`App.commands`, an ecs `EventQueue`) and advances the queue at the end.
+# Every system drains by index up to the live count, so a command sent
+# mid-drain is still seen by the systems after it.
+open sys/Spotify
+open ui/Ecs
+open ecs/Event
+open ecs/Entity
+
+# UiAction -> AppCommand. Unknown ids are logged and dropped — the audit
+# (ActionAudit.rae) makes that a gate failure before it is ever a runtime one.
+func actionCommandSystem(
+  input: view InputSystem
+  table: view ActionTable
+  commands: mod EventQueue(AppCommand)
+) {
+  let n: Int = eventCount(this: input.uiActions)
+  var i: Int = 0
+  loop i < n {
+    let action: UiAction = eventAt(this: input.uiActions, i: i)
+    log("[action] {action.actionId} (entity {action.entity})")
+    let lookup: ActionLookup = lookupAction(table: table, actionId: action.actionId)
+    if lookup.found {
+      if lookup.command.kind is not ActionKind.none and lookup.command.kind is not ActionKind.debug {
+        # A fresh command (own strings): the lookup's copy is dropped here.
+        let command: AppCommand = {
+          kind: lookup.command.kind
+          screen: lookup.command.screen
+          text: "{lookup.command.text}"
+          index: lookup.command.index
+        }
+        eventSend(this: commands, value: own command)
+      }
+    } else {
+      log("[action] no table row for {action.actionId} — ignored")
+    }
+    i = i + 1
+  }
+}
+
+# Record a local-catalogue play in the history and (Spotify mode) play it.
+func startTrack(
+  state: mod AppState
+  playback: mod PlaybackState
+  stem: view String
+  trackIndex: view Int
+  spotifyEnabled: view Bool
+) {
+  # The playing song's album becomes the browsed stem so the mini-player /
+  # now-playing / history all resolve against it.
+  state.currentAlbumStem = "{stem}"
+  state.currentTrackIndex = trackIndex
+  # Mark this track as actually playing — the views read these two fields
+  # to decide which row to highlight.
+  playback.playingAlbumStem = "{stem}"
+  playback.playingTrackIndex = trackIndex
+  setPlaybackPlaying(state: playback, value: true)
+  # Point the nowPlaying cover at this local album's stem-keyed texture and
+  # bump the instance revision (#268) so the Hero + mini-player covers
+  # observe the change and re-point by identity.
+  setNowPlayingArt(state: playback, artKey: stem)
+  # Record the pick in play history so Home's "Recently played" row + the
+  # History sub-page see it.
+  let album: Album = activeAlbum(state: state)
+  let track: Track = trackAt(album: album, idx: trackIndex)
+  let entry: PlayHistoryEntry = {
+    trackName: "{track.title}"
+    artistName: "{album.artist}"
+    albumName: "{album.album}"
+    albumStem: "{stem}"
+    artworkUrl: ""
+    # Local entries reuse the boot-loaded album-stem texture.
+    textureKey: "{stem}"
+    durationSec: track.durationMs.toFloat() / 1000.0
+    playedAt: uiNowSeconds()
+  }
+  recordPlay(history: state.playHistory, entry: own entry)
+  saveHistoryToJson(history: state.playHistory, path: historyFilePath)
+  if spotifyEnabled {
+    let query: String = spotifySearchQuery(
+      artist: album.artist
+      title: track.title
+      album: album.album
+    )
+    log("[spotify] play track query={query}")
+    Spotify.playQuery(query: query)
+  }
+}
+
+# Replay a history entry: local-catalogue entries also flip the browsed
+# album / track so the Album page would land on the right row if opened.
+func replayHistoryEntry(
+  state: mod AppState
+  playback: mod PlaybackState
+  index: view Int
+  spotifyEnabled: view Bool
+) {
+  unsafe {
+    let total: Int = state.playHistory.entries.length
+    if index < 0 or index >= total {
+      ret
+    }
+    let entry: PlayHistoryEntry = rae_ext_rae_buf_get(
+      buf: state.playHistory.entries.data
+      index: index
+    )
+    if entry.albumStem.length() > 0 {
+      state.currentAlbumStem = "{entry.albumStem}"
+      let albumIndex: Int = findAlbumIndex(albums: state.mediaLibrary.albums, stem: entry.albumStem)
+      if albumIndex >= 0 {
+        let album: Album = rae_ext_rae_buf_get(
+          buf: state.mediaLibrary.albums.data
+          index: albumIndex
+        )
+        let trackCount: Int = album.tracks.length
+        var j: Int = 0
+        loop j < trackCount {
+          let track: Track = rae_ext_rae_buf_get(buf: album.tracks.data, index: j)
+          if track.title is entry.trackName {
+            state.currentTrackIndex = j
+            j = trackCount
+          } else {
+            j = j + 1
+          }
+        }
+      }
+    }
+    playback.playingAlbumStem = "{entry.albumStem}"
+    playback.playingTrackIndex = state.currentTrackIndex
+    setPlaybackPlaying(state: playback, value: true)
+    # Cover follows the replayed entry's own texture key (#268) — the local
+    # stem for catalogue entries, or the spotify-art key otherwise.
+    setNowPlayingArt(state: playback, artKey: entry.textureKey)
+    if spotifyEnabled {
+      let query: String = spotifySearchQuery(
+        artist: entry.artistName
+        title: entry.trackName
+        album: entry.albumName
+      )
+      log("[spotify] history-replay query={query}")
+      Spotify.playQuery(query: query)
+    }
+  }
+}
+
+# Heart button: toggle the browsed track (what the user is staring at, not
+# necessarily what is audibly playing) in the Liked Songs playlist and
+# persist. `likedHeartSystem` re-reads the membership every frame.
+func toggleLiked(state: mod AppState) {
+  let stem: view String => state.currentAlbumStem
+  if stem.length() is 0 {
+    ret
+  }
+  let added: Bool = playlistToggleTrack(
+    playlist: state.liked
+    stem: stem
+    trackIndex: state.currentTrackIndex
+  )
+  if added {
+    log("[liked] +{stem} track {state.currentTrackIndex}")
+  } else {
+    log("[liked] -{stem} track {state.currentTrackIndex}")
+  }
+  savePlaylist(playlist: state.liked)
+  state.libraryRevision = state.libraryRevision + 1
+}
+
+# Play / pause. In Spotify mode Spotify owns the play-state: flip the cached
+# state to its opposite (the background poller's cache, #279 — no UI-thread
+# osascript; at worst one poll interval stale) and let the 1 Hz poll mirror
+# it back. Locally it is a PlaybackSystem command (#265), applied in the
+# frame's Apply(A) phase by `processCommands`.
+func togglePlaybackCommand(playback: mod PlaybackState, spotifyEnabled: view Bool) {
+  if spotifyEnabled is false {
+    enqueuePlaybackToggle(this: playback)
+    ret
+  }
+  let current: String = Spotify.state()
+  log("[spotify] toggle: state={current}")
+  if current is "playing" {
+    Spotify.pause()
+    setPlaybackPlaying(state: playback, value: false)
+  } else {
+    Spotify.play()
+    setPlaybackPlaying(state: playback, value: true)
+  }
+}
+
+func playbackCommandSystem(
+  commands: view EventQueue(AppCommand)
+  state: mod AppState
+  playback: mod PlaybackState
+  spotifyEnabled: view Bool
+) {
+  var i: Int = 0
+  loop i < eventCount(this: commands) {
+    let command: AppCommand = eventAt(this: commands, i: i)
+    if command.kind is ActionKind.playbackToggle {
+      togglePlaybackCommand(playback: playback, spotifyEnabled: spotifyEnabled)
+    }
+    # The local mock has no "next / previous track" yet — Spotify mode is
+    # the only consumer.
+    if command.kind is ActionKind.playbackNext and spotifyEnabled {
+      log("[spotify] next")
+      Spotify.next()
+    }
+    if command.kind is ActionKind.playbackPrev and spotifyEnabled {
+      log("[spotify] previous")
+      Spotify.previous()
+    }
+    if command.kind is ActionKind.playTrack {
+      # Track-row tap: real music players just start playing the song — no
+      # view change. A row without a stem plays the browsed album's track.
+      var stem: String = "{state.currentAlbumStem}"
+      if command.text.length() > 0 {
+        stem = "{command.text}"
+      }
+      var trackIndex: Int = command.index
+      if trackIndex < 0 {
+        trackIndex = 0
+      }
+      startTrack(
+        state: state
+        playback: playback
+        stem: stem
+        trackIndex: trackIndex
+        spotifyEnabled: spotifyEnabled
+      )
+    }
+    if command.kind is ActionKind.replayHistory {
+      replayHistoryEntry(
+        state: state
+        playback: playback
+        index: command.index
+        spotifyEnabled: spotifyEnabled
+      )
+    }
+    if command.kind is ActionKind.toggleLike {
+      toggleLiked(state: state)
+    }
+    i = i + 1
+  }
+}
+
+# The bottom sheet and the curated library. `libraryRemove` removes the
+# browsed album from the library (the catalogue keeps the cover + metadata
+# for history rows), closes the sheet and sends a `pop` so the user lands
+# back where they came from.
+func sheetCommandSystem(commands: mod EventQueue(AppCommand), state: mod AppState) {
+  var i: Int = 0
+  loop i < eventCount(this: commands) {
+    let command: AppCommand = eventAt(this: commands, i: i)
+    if command.kind is ActionKind.openSheet {
+      openBottomSheet(sheet: state.bottomSheet, actions: own sheetMenuActions(menu: command.text))
+    }
+    if command.kind is ActionKind.closeSheet {
+      closeBottomSheet(sheet: state.bottomSheet)
+    }
+    if command.kind is ActionKind.libraryRemove {
+      removeFromLibrary(library: state.library, stem: state.currentAlbumStem)
+      saveLibraryToJson(library: state.library, path: libraryFilePath)
+      state.libraryRevision = state.libraryRevision + 1
+      closeBottomSheet(sheet: state.bottomSheet)
+      let pop: AppCommand = { kind: ActionKind.pop, screen: Screen.home, text: "", index: -1 }
+      eventSend(this: commands, value: pop)
+    }
+    i = i + 1
+  }
+}
+
+# The canvas overlay (S5 demo): only the flag flips here; the input phase
+# re-applies the canvas scene's states when it changed.
+func canvasCommandSystem(commands: view EventQueue(AppCommand), state: mod AppState) {
+  var i: Int = 0
+  loop i < eventCount(this: commands) {
+    let command: AppCommand = eventAt(this: commands, i: i)
+    if command.kind is ActionKind.canvasToggle {
+      state.canvasOpen = state.canvasOpen is false
+    }
+    if command.kind is ActionKind.canvasClose {
+      state.canvasOpen = false
+    }
+    i = i + 1
+  }
+}
+
+# Navigation: the tab, the sub-page stack and the browsed collection.
+func navigationSystem(commands: view EventQueue(AppCommand), state: mod AppState) {
+  var i: Int = 0
+  loop i < eventCount(this: commands) {
+    let command: AppCommand = eventAt(this: commands, i: i)
+    if command.kind is ActionKind.navigateTab {
+      setTab(state: state, tab: command.screen)
+    }
+    if command.kind is ActionKind.pushSubPage {
+      pushSubPage(state: state, screen: command.screen)
+    }
+    if command.kind is ActionKind.pop {
+      popSubPage(state: state)
+    }
+    if command.kind is ActionKind.openAlbum {
+      # Cover-tile tap: open the album's track list as a sub-page — NOT a
+      # play action; the user picks the song from there. A cover always
+      # shows the album, never a playlist.
+      if command.text.length() > 0 {
+        state.currentAlbumStem = "{command.text}"
+        state.currentTrackIndex = 0
+      }
+      state.viewingPlaylist = false
+      pushSubPage(state: state, screen: Screen.album)
+    }
+    if command.kind is ActionKind.openPlaylist {
+      # Playlist tile: the same sub-page the album view uses; `viewingPlaylist`
+      # flips the collection resolution. The hero cover points at the
+      # playlist's first cover so the shared header shows something
+      # representative.
+      state.currentPlaylistId = "{command.text}"
+      state.viewingPlaylist = true
+      let coverStems: List(String) = playlistCoverStems(playlist: state.liked, max: 1)
+      if coverStems.length > 0 {
+        state.currentAlbumStem = "{coverStems.copyAt(index: 0)}"
+      }
+      state.currentTrackIndex = 0
+      pushSubPage(state: state, screen: Screen.album)
+    }
+    i = i + 1
+  }
+}
+
+# One frame of commands, in system order, then the queue advances. Returns
+# the visible screen after navigation, which the caller compares against the
+# shown one to decide a switch.
+func runAppCommands(
+  input: view InputSystem
+  table: view ActionTable
+  commands: mod EventQueue(AppCommand)
+  state: mod AppState
+  playback: mod PlaybackState
+  spotifyEnabled: view Bool
+) ret Screen {
+  actionCommandSystem(input: input, table: table, commands: commands)
+  playbackCommandSystem(
+    commands: commands
+    state: state
+    playback: playback
+    spotifyEnabled: spotifyEnabled
+  )
+  sheetCommandSystem(commands: commands, state: state)
+  canvasCommandSystem(commands: commands, state: state)
+  navigationSystem(commands: commands, state: state)
+  frameAdvance(this: commands)
+  ret visibleScreen(state: state)
+}
