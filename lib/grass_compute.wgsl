@@ -124,6 +124,15 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let bx = cellX + (jx - 0.5) * spacing * 0.9;
   let by = cellY + (jy - 0.5) * spacing * 0.9;
   if (grassDrawnWeight(vec2<f32>(bx, by)) < GRASS_MIN_WEIGHT) { return; }
+  // Roads overlay the grass biome. Reject their painted footprint outright;
+  // shrinking blades leaves conspicuous stubble on dirt. Keep only a narrow
+  // fringe where the road overlay is below ten percent.
+  if (raeBiomePath(vec2<f32>(bx, by)) > 0.10) { return; }
+  let clusterStrength = clamp(G.e.w, 0.0, 1.0);
+  if (clusterStrength > 0.0) {
+    let tuft = smoothstep(0.25, 0.70, 0.5 + 0.5 * perlin2(vec2<f32>(bx, by) * 0.65, 173u));
+    if (hash2u(cellI, 179u) > mix(1.0, tuft, clusterStrength)) { return; }
+  }
   let bz = terrainHeight(bx, by, G.a.z);
   let yaw = hp * 6.2831853;
   let hHeight = hash2u(cellI, 61u);
