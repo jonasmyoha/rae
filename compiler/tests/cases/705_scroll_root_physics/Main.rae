@@ -1,18 +1,20 @@
 open ui/Ecs
 open ui/Components
-open ui/ScrollPanel
+open ui/scrollRootSystem/ScrollRootSystem
 open ui/inputSystem/InputSystem
 open ui/Transform
 open ecs/Entity
 open ecs/ComponentTable
+open ecs/hierarchySystem/HierarchySystem
 
-# #729: ScrollPanel state is now an ECS component (ScrollPanelState) keyed by the
-# viewport entity, with iOS-style scroll physics (drag -> release momentum ->
-# friction decay; rubber-band + spring-back past a bound). This drives
-# updateScrollPanel deterministically and checks the feel: a drag moves the
-# offset 1:1 in-bounds, releasing hands the lift velocity to a momentum fling that
-# keeps moving and decays to rest, and a fling that overshoots the bottom springs
-# back to the bound.
+# A `ScrollRoot` on the content node inside a clipped viewport (the former
+# ScrollPanel shape, #729) with the lib iOS-style scroll physics (drag -> release
+# momentum -> friction decay; rubber-band + spring-back past a bound). This drives
+# updateScrollRoot deterministically and checks the feel: a drag moves the
+# position 1:1 in-bounds, releasing hands the lift velocity to a momentum fling
+# that keeps moving and decays to rest, and a fling that overshoots the bottom
+# springs back to the floor. The floor is the laid-out geometry: content 3000
+# tall in a 100-tall viewport -> -2900. Positions are <= 0 (content slid up).
 func setupNode(
   world: mod UiWorld
   nodeId: view String
@@ -46,11 +48,11 @@ func step(
     pressed: pressed
     released: released
   }
-  ret updateScrollPanel(world: world, viewport: panel, input: input)
+  ret updateScrollRoot(world: world, entity: panel, input: input)
 }
 
 func offsetOf(world: view UiWorld, panel: view EntityId) ret Float {
-  ret componentGet(this: world.scrollPanels, entity: panel).offset
+  ret componentGet(this: world.scrollStates, entity: panel).y
 }
 
 # Round a Float to the nearest Int so momentum trace lines are stable/readable.
@@ -87,8 +89,25 @@ func main() {
     h: 3000.0
   )
 
-  let panel: EntityId = createScrollPanel(world: world, viewportId: "vp", contentId: "content")
-  log("panel is viewport: {panel.index is vp.index}")
+  setParent(
+    parents: world.parents
+    childrens: world.childrens
+    child: content
+    parent: vp
+  )
+  let root: ScrollRoot = {
+    axis: ScrollAxis.y
+    floor: ScrollFloorMode.content
+    fixedFloor: 0.0
+    endInset: 0.0
+  }
+  componentSet(this: world.scrollRoots, entity: content, data: root)
+  let memory: ScrollMemory = createScrollMemory()
+  scrollRootSystem(world: world, memory: memory)
+  let panel: EntityId = findScrollRoot(world: world)
+  log("root is content: {panel.index is content.index}")
+  let range: ScrollRange = scrollRootRange(world: world, entity: panel)
+  log("floor: {roundI(value: range.floor)} window: {roundI(value: range.window)}")
 
   var input: UiInput = createUiInput()
 
@@ -163,14 +182,14 @@ func main() {
   }
   let settled: Float = offsetOf(world: world, panel: panel)
   log(
-    "momentum settled offset={roundI(value: settled)} inBounds={settled >= 0.0 and settled <= 2900.0}"
+    "momentum settled offset={roundI(value: settled)} inBounds={settled <= 0.0 and settled >= -2900.0}"
   )
 
   # ----- rubber-band + spring-back past the BOTTOM bound -----
   # Press INSIDE the 100-tall viewport, then drag the finger up 800/frame for
-  # several frames. As the offset creeps past the bottom bound (2900) each further
+  # several frames. As the position creeps past the floor (-2900) each further
   # delta is rubber-band-damped, so it overshoots only a little; releasing lets the
-  # spring pull it back to exactly the bound.
+  # spring pull it back to exactly the floor.
   step(
     world: world
     panel: panel
@@ -196,7 +215,7 @@ func main() {
     )
   }
   let overshoot: Float = offsetOf(world: world, panel: panel)
-  log("overshoot past bottom > range: {overshoot > 2900.0}")
+  log("overshoot past floor: {overshoot < -2900.0}")
   step(
     world: world
     panel: panel

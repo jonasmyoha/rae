@@ -442,32 +442,52 @@ type PageRoot {
   id: String
 }
 
-# Per-page scroll position. Lives on the entity that owns the scroll
-# behaviour (typically the page root or a scrollable body inside it)
-# so a persistent UiWorld can preserve scroll across page switches —
-# the scroll position survives as long as the entity does. The
-# scrolling system reads `.y` and applies it as an `Offset.delta.y`
-# (or uses it directly in layout). `velocity` is the per-frame
-# momentum, retained so a fling continues across a render dip.
+# The ONE authored scroll component. Put it on the node that MOVES: the
+# scrolled body of a page, or the Hug content inside a clipped viewport. The
+# `scrollRootSystem` (ui/scrollRootSystem) seeds its `ScrollState` on mount
+# (restored from a `ScrollMemory` by page id) and the position is applied as a
+# `RuntimeOffset` on the same entity — a transform-time translation, never a
+# relayout. The scroll FLOOR (the most-negative position) is computed from the
+# laid-out geometry, not authored: with `floor: content` it is how far the
+# root's content — its own box, or the children that overflow it — extends past
+# the window its parent shows (the smaller of the root's box and its parent's
+# content box), minus `endInset`, the far-end length an overlay (a dock, a
+# toolbar) covers. `floor: fixed` uses `fixedFloor` verbatim. A root whose
+# content fits is inert: floor 0, nothing to scroll.
+#
+#     "Body": { "ScrollRoot": { "axis": "y", "floor": "content", "endInset": 390 } }
+#
+# Authored as `"axis": "y"` / `"x"` and `"floor": "content"` / `"fixed"`.
+enum ScrollAxis { y, x }
+
+enum ScrollFloorMode { content, fixed }
+
+type ScrollRoot {
+  axis: ScrollAxis
+  floor: ScrollFloorMode
+  fixedFloor: Float
+  endInset: Float
+}
+
+# Per-root scroll position. Lives on the `ScrollRoot` entity, so a
+# persistent UiWorld preserves scroll across page switches — the position
+# survives as long as the entity does. `y` is the position along the root's
+# axis (more negative = content shifted up / left; 0 = at rest at the start;
+# it may overshoot the [floor, 0] range while rubber-banding); `velocity` is
+# the per-frame momentum, retained so a fling continues across a render dip.
+# A virtual `ListView` host reads it too (ui/listViewSystem).
 type ScrollState {
   y: Float
   velocity: Float
 }
 
-# #729: per-panel scroll state, keyed by the panel's VIEWPORT entity. Replaces the
-# out-of-world, string-keyed `ScrollPanel` struct — the content node is resolved
-# to an entity ONCE (at attach) and stored here, so the per-frame update reads
-# this component instead of re-resolving node-id strings. Carries iOS-style scroll
-# physics (see lib/ui/scrollPhysics.rae): `offset` is how far the content has
-# slid UP and may overshoot the [0, range] bounds during a rubber-band; `velocity`
-# is the momentum after a fling; `d0..d2` are the last three damped drag deltas,
-# from which release velocity is picked ("velocity at lift").
-type ScrollPanelState {
-  content: EntityId
-  offset: Float
-  velocity: Float
+# Runtime state of the lib drag/wheel physics (`updateScrollRoot`), keyed by the
+# ScrollRoot entity: whether a drag is live, the pointer position it last saw
+# along the axis, and the last three damped drag deltas from which the release
+# velocity is picked ("velocity at lift"). Never authored or serialized.
+type ScrollDrag {
   dragging: Bool
-  lastPointerY: Float
+  lastPointer: Float
   d0: Float
   d1: Float
   d2: Float

@@ -1,0 +1,496 @@
+# ScrollRootSystem — scrolling as DATA (docs/ecs-general-architecture.md).
+#
+# A scene authors `ScrollRoot` on the node that moves (ui/Components); this
+# system owns everything that used to be hand-seeded per page:
+#
+#   * `scrollRootSystem` seeds the root's `ScrollState` on mount — the
+#     position restored from a `ScrollMemory` resource by page id, so a page
+#     re-mounted after a data change (or a hot-reload restart) lands where it
+#     was — and keeps the memory current from the live positions.
+#   * `findScrollRoot` (ui/Ecs) is the target query: the ScrollRoot on the
+#     active page.
+#   * `scrollRootRange` is the FLOOR, computed from the laid-out geometry:
+#     how far the root's content extends past the window its parent shows,
+#     minus the authored `endInset`. Nothing to scroll → inert.
+#   * `updateScrollRoot` is the lib drag / wheel / momentum / spring physics
+#     (iOS feel via ui/ScrollPhysics) for an app that does not carry its own
+#     scroll state machine; it replaces the former ScrollPanel (#729).
+#
+# The position is a `RuntimeOffset` on the root (`applyScrollPosition`): a
+# transform-time translation of the subtree, never a relayout.
+import Gpu2d
+open ui/Ecs
+open ui/Components
+open ui/inputSystem/InputSystem
+open ui/Transform
+open ui/ScrollPhysics
+open ui/layoutSystem/LayoutSystem
+open collections/StringMap
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Hierarchy
+
+# Where each page's scroll position is when its root is not mounted: page
+# id -> position along the axis. An app resource (on its session) that outlives
+# world rebuilds; the hot-reload restore writes the restored page into it and
+# `scrollRootSystem` keeps it current.
+type ScrollMemory {
+  positions: StringMap(Float)
+}
+
+func createScrollMemory() ret ScrollMemory {
+  ret ScrollMemory { positions: StringMap.create(Float, cap: 8) }
+}
+
+func rememberScroll(memory: mod ScrollMemory, pageId: view String, position: view Float) {
+  memory.positions.set(k: "{pageId}", value: position)
+}
+
+# Forget a page's position, so its next mount starts at the top — what a
+# page entered afresh (its data rebuilt) wants.
+func forgetScroll(memory: mod ScrollMemory, pageId: view String) {
+  memory.positions.remove(k: pageId)
+}
+
+func recallScroll(memory: view ScrollMemory, pageId: view String) ret Float {
+  if let position: Float = memory.positions.get(k: pageId) {
+    ret position
+  }
+  ret 0.0
+}
+
+# The scroll bounds of one root this frame. `active` is false until the root
+# is laid out or when its content fits — a root with nothing to scroll is
+# inert, and an app's physics skips it. `floor` is the most-negative position
+# (<= 0); `window` the visible length along the axis, the rubber-band's
+# reference dimension.
+type ScrollRange {
+  active: Bool
+  floor: Float
+  window: Float
+}
+
+func axisLength(root: view ScrollRoot, size: view Vec2) ret Float {
+  if root.axis is ScrollAxis.x {
+    ret size.x
+  }
+  ret size.y
+}
+
+func axisFarEdge(root: view ScrollRoot, rect: view ComputedRect) ret Float {
+  if root.axis is ScrollAxis.x {
+    ret rect.position.x + rect.size.x
+  }
+  ret rect.position.y + rect.size.y
+}
+
+func axisPaddingEnd(root: view ScrollRoot, insets: view Insets) ret Float {
+  if root.axis is ScrollAxis.x {
+    ret insets.r
+  }
+  ret insets.b
+}
+
+func axisPaddingSum(root: view ScrollRoot, insets: view Insets) ret Float {
+  if root.axis is ScrollAxis.x {
+    ret insets.l + insets.r
+  }
+  ret insets.t + insets.b
+}
+
+# How far the root's content reaches from the root's start edge: the far edge
+# of the children its layout placed (in the root's own coordinates, so a
+# `Fill` body whose grid overflows it measures the grid, not the body) plus
+# the root's end padding after the last child; the root's own length when it
+# has no children. A VIRTUAL `ListView` host keeps only a window of rows live,
+# so its content is the whole data list: rows × pitch (ui/listViewSystem
+# places row i at i × pitch).
+func scrollContentExtent(
+  world: view UiWorld
+  entity: view EntityId
+  root: view ScrollRoot
+) ret Float {
+  let padEnd: Float = axisPaddingEnd(
+    root: root
+    insets: entityPadding(world: world, entity: entity)
+  )
+  var extent: Float = 0.0
+  var measured: Bool = false
+  if componentHas(this: world.listViews, entity: entity) and componentHas(
+    this: world.listViewDatas
+    entity: entity
+  ) {
+    let listView: ListView = componentGet(this: world.listViews, entity: entity)
+    if listView.mode is ListViewMode.virtual {
+      let count: Int = componentGet(this: world.listViewDatas, entity: entity).rows.length
+      if count > 0 {
+        let pitch: Float = listView.itemHeight + listView.itemGap
+        extent = count.toFloat() * pitch - listView.itemGap + padEnd
+        measured = true
+      }
+    }
+  }
+  if componentHas(this: world.childrens, entity: entity) {
+    let children: view Children => componentView(this: world.childrens, entity: entity)
+    loop var i: Int = 0, i < children.ids.length, ++i {
+      let child: EntityId = children.ids.copyAtFallback(index: i, fallback: noEntity())
+      if componentHas(this: world.computedRects, entity: child) {
+        let rect: ComputedRect = componentGet(this: world.computedRects, entity: child)
+        let far: Float = axisFarEdge(root: root, rect: rect) + padEnd
+        if far > extent {
+          extent = far
+        }
+        measured = true
+      }
+    }
+  }
+  if measured is false {
+    let ownRect: ComputedRect = componentGet(this: world.computedRects, entity: entity)
+    extent = axisLength(root: root, size: ownRect.size)
+  }
+  ret extent
+}
+
+# The length of the root the parent shows: the smaller of the root's own box
+# and the parent's content box (a Hug content taller than its clipped
+# viewport scrolls by the viewport's height; a Fill body by its own).
+func scrollWindowLength(
+  world: view UiWorld
+  entity: view EntityId
+  root: view ScrollRoot
+) ret Float {
+  let ownRect: ComputedRect = componentGet(this: world.computedRects, entity: entity)
+  var window: Float = axisLength(root: root, size: ownRect.size)
+  if componentHas(this: world.parents, entity: entity) {
+    let parent: EntityId = componentGet(this: world.parents, entity: entity).parent
+    if componentHas(this: world.computedRects, entity: parent) {
+      let parentRect: ComputedRect = componentGet(this: world.computedRects, entity: parent)
+      let parentBox: Float = axisLength(root: root, size: parentRect.size) - axisPaddingSum(
+        root: root
+        insets: entityPadding(world: world, entity: parent)
+      )
+      if parentBox < window {
+        window = parentBox
+      }
+    }
+  }
+  ret window
+}
+
+func scrollRootRange(world: view UiWorld, entity: view EntityId) ret ScrollRange {
+  let inert: ScrollRange = { active: false, floor: 0.0, window: 1.0 }
+  if isNone(this: entity) {
+    ret inert
+  }
+  if componentHas(this: world.scrollRoots, entity: entity) is false {
+    ret inert
+  }
+  if componentHas(this: world.computedRects, entity: entity) is false {
+    ret inert
+  }
+  let root: ScrollRoot = componentGet(this: world.scrollRoots, entity: entity)
+  let window: Float = scrollWindowLength(world: world, entity: entity, root: root)
+  if root.floor is ScrollFloorMode.fixed {
+    ret ScrollRange { active: root.fixedFloor < 0.0, floor: root.fixedFloor, window: window }
+  }
+  let extent: Float = scrollContentExtent(world: world, entity: entity, root: root)
+  let overflow: Float = extent - (window - root.endInset)
+  if overflow <= 0.0 {
+    ret ScrollRange { active: false, floor: 0.0, window: window }
+  }
+  ret ScrollRange { active: true, floor: 0.0 - overflow, window: window }
+}
+
+# Apply a position: the RuntimeOffset along the root's axis (a transform-time
+# translation) and the ScrollState it mirrors. Writes the offset only on a
+# real change — a per-frame write to an unchanged offset keeps the render
+# cache permanently dirty (#407).
+func applyScrollPosition(
+  world: mod UiWorld
+  entity: view EntityId
+  root: view ScrollRoot
+  position: view Float
+) {
+  var want: Vec2 = { x: 0.0, y: position }
+  if root.axis is ScrollAxis.x {
+    want = { x: position, y: 0.0 }
+  }
+  var changed: Bool = true
+  if componentHas(this: world.runtimeOffsets, entity: entity) {
+    let current: Vec2 = componentGet(this: world.runtimeOffsets, entity: entity).delta
+    changed = current.x is not want.x or current.y is not want.y
+  }
+  if changed {
+    let offset: RuntimeOffset = { delta: want }
+    componentSet(this: world.runtimeOffsets, entity: entity, data: offset)
+  }
+  if componentHas(this: world.scrollStates, entity: entity) {
+    let state: mod ScrollState => componentMod(this: world.scrollStates, entity: entity)
+    state.y = position
+  }
+}
+
+# Seed every ScrollRoot that has no ScrollState yet (a fresh mount) from the
+# memory, applying the position as the root's RuntimeOffset; record every
+# seeded root's live position back into the memory when it moved. Idempotent
+# and cheap (a handful of roots) — run it after a mount and once per frame.
+func scrollRootSystem(world: mod UiWorld, memory: mod ScrollMemory) {
+  let n: Int = componentCount(this: world.scrollRoots)
+  loop var i: Int = 0, i < n, ++i {
+    let entity: EntityId = componentEntityAt(this: world.scrollRoots, i: i)
+    let pageId: String = pageOf(world: world, entity: entity)
+    if componentHas(this: world.scrollStates, entity: entity) is false {
+      let position: Float = recallScroll(memory: memory, pageId: pageId)
+      let seeded: ScrollState = { y: position, velocity: 0.0 }
+      componentSet(this: world.scrollStates, entity: entity, data: seeded)
+      let root: ScrollRoot = componentGet(this: world.scrollRoots, entity: entity)
+      applyScrollPosition(
+        world: world
+        entity: entity
+        root: root
+        position: position
+      )
+    } else {
+      let state: ScrollState = componentGet(this: world.scrollStates, entity: entity)
+      if state.y is not recallScroll(memory: memory, pageId: pageId) {
+        rememberScroll(memory: memory, pageId: pageId, position: state.y)
+      }
+    }
+  }
+}
+
+# ----- the lib physics (former ScrollPanel, #729) ---------------------------
+
+# Wheel notches are small integers; this turns one into a useful jump without
+# making a trackpad flick fly past the whole panel.
+const scrollWheelStep: Float = 48.0
+
+# Rubber-band spring back to the bound after an overshoot. Per-frame coefficients
+# (~60 fps). tension 0.08 + friction 0.56 is a NEAR-CRITICALLY-DAMPED spring
+# (ζ ≈ 0.99): a soft eased return that settles AT the bound WITHOUT overshooting
+# back past it (an underdamped spring would fling the position back into range
+# and scroll away from where the finger left it). Matches 106's tuned feel.
+const springTension: Float = 0.08
+
+const springFriction: Float = 0.56
+
+# Momentum fling decay per frame while inside the bounds — a long, smooth glide.
+const momentumFriction: Float = 0.97
+
+# Below these, momentum/spring is settled and snapped to rest. 1 px / 0.3 px·frame
+# is just under human perception on a 60 Hz display, so it cuts the asymptotic tail
+# with no visible jump.
+const scrollVelEps: Float = 0.3
+
+const scrollPosEps: Float = 1.0
+
+func scrollAbs(value: view Float) ret Float {
+  if value < 0.0 {
+    ret 0.0 - value
+  }
+  ret value
+}
+
+# Is the pointer over the root's window? The window is the parent's box when
+# the root has one (the clipped viewport around a Hug content), else the root's
+# own. POSITION comes from WorldTransform2D, SIZE from ComputedRect —
+# ComputedRect is PARENT-LOCAL, so a panel nested three deep reports x=12
+# while sitting at x=952 on screen.
+func pointerOverScrollRoot(
+  world: view UiWorld
+  entity: view EntityId
+  x: view Float
+  y: view Float
+) ret Bool {
+  var window: EntityId = entity
+  if componentHas(this: world.parents, entity: entity) {
+    let parent: EntityId = componentGet(this: world.parents, entity: entity).parent
+    if componentHas(this: world.computedRects, entity: parent) and componentHas(
+      this: world.worldTransforms
+      entity: parent
+    ) {
+      window = parent
+    }
+  }
+  if componentHas(this: world.computedRects, entity: window) is false {
+    ret false
+  }
+  if componentHas(this: world.worldTransforms, entity: window) is false {
+    ret false
+  }
+  let r: ComputedRect = componentGet(this: world.computedRects, entity: window)
+  let wt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: window)
+  if x < wt.position.x or x > wt.position.x + r.size.x {
+    ret false
+  }
+  if y < wt.position.y or y > wt.position.y + r.size.y {
+    ret false
+  }
+  ret true
+}
+
+func pointerAlongAxis(root: view ScrollRoot, input: view UiInput) ret Float {
+  if root.axis is ScrollAxis.x {
+    ret input.pointer.x
+  }
+  ret input.pointer.y
+}
+
+# One frame of scroll on `entity`. Returns true when the position moved, so a
+# caller can repaint only on frames that scrolled (including every momentum /
+# spring frame). Inert (false) when the root is not laid out or its content
+# fits. The whole state is read into locals, stepped, and written back — no
+# mod-borrow is held across the read-only geometry queries.
+func updateScrollRoot(world: mod UiWorld, entity: view EntityId, input: view UiInput) ret Bool {
+  if isNone(this: entity) {
+    ret false
+  }
+  if componentHas(this: world.scrollRoots, entity: entity) is false {
+    ret false
+  }
+  let root: ScrollRoot = componentGet(this: world.scrollRoots, entity: entity)
+  var state: ScrollState = { y: 0.0, velocity: 0.0 }
+  if componentHas(this: world.scrollStates, entity: entity) {
+    state = componentGet(this: world.scrollStates, entity: entity)
+  }
+  var drag: ScrollDrag = {
+    dragging: false
+    lastPointer: 0.0
+    d0: 0.0
+    d1: 0.0
+    d2: 0.0
+  }
+  if componentHas(this: world.scrollDrags, entity: entity) {
+    drag = componentGet(this: world.scrollDrags, entity: entity)
+  }
+  let before: Float = state.y
+  let range: ScrollRange = scrollRootRange(world: world, entity: entity)
+
+  if range.active is false {
+    # Content fits. Reset rather than leaving a stale position behind: a panel
+    # that shrinks while scrolled would otherwise keep a gap at the top.
+    drag.dragging = false
+    componentSet(this: world.scrollDrags, entity: entity, data: drag)
+    if before is not 0.0 {
+      applyScrollPosition(
+        world: world
+        entity: entity
+        root: root
+        position: 0.0
+      )
+      let rest: mod ScrollState => componentMod(this: world.scrollStates, entity: entity)
+      rest.velocity = 0.0
+    }
+    ret before is not 0.0
+  }
+
+  let floor: Float = range.floor
+  let dim: Float = range.window
+  let inside: Bool = pointerOverScrollRoot(
+    world: world
+    entity: entity
+    x: input.pointer.x
+    y: input.pointer.y
+  )
+  let pointer: Float = pointerAlongAxis(root: root, input: input)
+
+  # ----- press / release -----
+  if input.pointer.pressed and inside {
+    drag.dragging = true
+    drag.lastPointer = pointer
+    state.velocity = 0.0
+    drag.d0 = 0.0
+    drag.d1 = 0.0
+    drag.d2 = 0.0
+  }
+  if input.pointer.released or input.pointer.down is false {
+    if drag.dragging {
+      # Hand the finger's lift velocity to the momentum fling.
+      state.velocity = pickReleaseVelocity(d0: drag.d0, d1: drag.d1, d2: drag.d2)
+    }
+    drag.dragging = false
+  }
+
+  # ----- wheel (only while hovering the window) -----
+  let wheel: Float = Gpu2d.wheelMove()
+  if inside and wheel is not 0.0 {
+    let raw: Float = wheel * scrollWheelStep
+    state.y = state.y + dampedDelta(
+      current: state.y
+      delta: raw
+      low: floor
+      high: 0.0
+      dim: dim
+    )
+  }
+
+  if drag.dragging {
+    # ----- drag: content follows the finger 1:1, rubber-banded near a bound -----
+    let rawDelta: Float = pointer - drag.lastPointer
+    drag.lastPointer = pointer
+    let damped: Float = dampedDelta(
+      current: state.y
+      delta: rawDelta
+      low: floor
+      high: 0.0
+      dim: dim
+    )
+    state.y = state.y + damped
+    # Keep the last three damped deltas; release velocity is picked from them.
+    drag.d2 = drag.d1
+    drag.d1 = drag.d0
+    drag.d0 = damped
+  } else {
+    # ----- momentum + rubber-band spring (not dragging) -----
+    if state.y > 0.0 or state.y < floor {
+      var target: Float = 0.0
+      if state.y < floor {
+        target = floor
+      }
+      state.velocity = springStepVelocity(
+        pos: state.y
+        velocity: state.velocity
+        target: target
+        tension: springTension
+        friction: springFriction
+      )
+      state.y = state.y + state.velocity
+      if scrollAbs(value: state.y - target) < scrollPosEps and scrollAbs(value: state.velocity) < scrollVelEps {
+        state.y = target
+        state.velocity = 0.0
+      }
+    } else {
+      # In bounds: momentum fling, decaying under friction.
+      if scrollAbs(value: state.velocity) > scrollVelEps {
+        state.y = state.y + state.velocity
+        state.velocity = state.velocity * momentumFriction
+      } else {
+        state.velocity = 0.0
+      }
+    }
+  }
+
+  componentSet(this: world.scrollDrags, entity: entity, data: drag)
+  componentSet(this: world.scrollStates, entity: entity, data: state)
+  if state.y is not before {
+    applyScrollPosition(
+      world: world
+      entity: entity
+      root: root
+      position: state.y
+    )
+  }
+  ret before is not state.y
+}
+
+# Whether the root is mid-drag, so a caller can suppress its own pointer
+# handling — a drag that started on the panel should not also orbit the camera.
+func scrollRootDragging(world: view UiWorld, entity: view EntityId) ret Bool {
+  if isNone(this: entity) {
+    ret false
+  }
+  if componentHas(this: world.scrollDrags, entity: entity) is false {
+    ret false
+  }
+  ret componentGet(this: world.scrollDrags, entity: entity).dragging
+}

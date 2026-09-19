@@ -1,31 +1,29 @@
 open ui/Ecs
 open ui/EventLoop
 open ui/WindowGeometry
+open ui/scrollRootSystem/ScrollRootSystem
 
 # Frame phase 0 — the wait policy. Decides how long to block for OS events
 # (busy-render while interacting / animating / loading, one frame while
 # playback ticks, the watcher cadence otherwise, the idle cap when nothing
 # moves), writes the scroll bounds + animation flags the later phases read
 # into the tick, waits, and turns the close / auto-exit conditions into
-# `session.running = false`. Nothing here touches the world.
+# `session.running = false`. The world is only read, for the scroll bounds.
 func frameWaitSystem(
   app: mod App
   session: mod AppSession
+  world: view UiWorld
   frame: view WorldFrame
   tick: mod FrameTick
 ) {
-  let appState: view AppState => app.appState
   let playback: view PlaybackState => app.playback
   let scrollFsm: view ScrollFsm => session.scrollFsm
-  # Per-frame scroll bounds. Wrong floor → spring never settles.
-  let sb: ScrollBounds = scrollBoundsForScreen(
-    screen: session.currentScreen
-    appState: appState
-    cachedAlbumScrollFloor: session.cachedAlbumScrollFloor
-    pages: app.screenPages
-  )
-  tick.scrollOnThisScreen = sb.scrollable
-  tick.scrollFloor = sb.floor
+  # Per-frame scroll bounds: the active page's ScrollRoot and its laid-out
+  # floor (lib/ui/scrollRootSystem). Wrong floor → spring never settles; a
+  # root not yet laid out, or whose content fits, is inert.
+  let range: ScrollRange = scrollRootRange(world: world, entity: frame.scrollTarget)
+  tick.scrollOnThisScreen = range.active
+  tick.scrollFloor = range.floor
   # Treat in-flight scroll momentum / spring as an animation so the event
   # loop wakes at frame cadence (~16 ms) instead of the file-watcher's idle
   # poll (50 ms / ~20 fps). Otherwise the spring-back after release renders

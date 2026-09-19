@@ -54,7 +54,6 @@ func mountLibraryPage(
   scenes: view AlbumScenes
   state: view AppState
   playback: view PlaybackState
-  scrollY: view Float
   viewport: view Viewport
 ) pub ret EntityId {
   let scene: view Scene => scenes.library
@@ -77,16 +76,6 @@ func mountLibraryPage(
     top: 1.0
     bottom: 0.0
   )
-
-  # Runtime scroll state on the Body container (scroll position survives
-  # re-mounts via the scrollY argument) — the same pattern Home uses.
-  if let bodyRaw: Int = findNodeInPage(world: world, pageId: libraryPageId, nodeId: "Body") {
-    let body: EntityId = nodeEntity(world: world, index: bodyRaw)
-    let off: Offset = { delta: Vec2 { x: 0.0, y: scrollY } }
-    componentSet(this: world.offsets, entity: body, data: off)
-    let scroll: ScrollState = { y: scrollY, velocity: 0.0 }
-    componentSet(this: world.scrollStates, entity: body, data: scroll)
-  }
 
   # First fill now: the screen switch captures the hero tile right after
   # the mount, before the per-frame system would run (#996).

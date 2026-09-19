@@ -84,8 +84,9 @@ type UiWorld {
   layerRefs: ComponentTable(LayerRef)
   debugAnchors: ComponentTable(DebugAnchor)
   pageRoots: ComponentTable(PageRoot)
+  scrollRoots: ComponentTable(ScrollRoot)
   scrollStates: ComponentTable(ScrollState)
-  scrollPanels: ComponentTable(ScrollPanelState)
+  scrollDrags: ComponentTable(ScrollDrag)
   interactions: ComponentTable(Interaction)
   widgetIds: ComponentTable(WidgetId)
   widgetStates: ComponentTable(WidgetState)
@@ -257,8 +258,9 @@ func createUiWorld() ret UiWorld {
     layerRefs: ComponentTable.create(LayerRef)
     debugAnchors: ComponentTable.create(DebugAnchor)
     pageRoots: ComponentTable.create(PageRoot)
+    scrollRoots: ComponentTable.create(ScrollRoot)
     scrollStates: ComponentTable.create(ScrollState)
-    scrollPanels: ComponentTable.create(ScrollPanelState)
+    scrollDrags: ComponentTable.create(ScrollDrag)
     interactions: ComponentTable.create(Interaction)
     widgetIds: ComponentTable.create(WidgetId)
     widgetStates: ComponentTable.create(WidgetState)
@@ -477,21 +479,20 @@ func isPageActive(world: view UiWorld, pageId: view String) pub ret Bool {
   ret a.value
 }
 
-# Return the scroll-target entity for the currently active page.
-# Iterates `world.scrollStates` (at most one per scrollable page —
-# typically one or two total) and picks the first whose owning
-# PageRoot ancestor is Active=true. Falls back to the first
-# scrollState entity if no PageRoot is found (legacy single-page
-# worlds). Returns `noEntity()` when nothing scrolls.
-func findScrollTarget(world: view UiWorld) pub ret EntityId {
-  let n: Int = componentCount(this: world.scrollStates)
+# The scroll target of the currently active page: the `ScrollRoot` whose
+# owning PageRoot is Active (a query over the ScrollRoot table — at most one
+# per scrollable page, typically a handful in total). Falls back to the first
+# ScrollRoot when no page is active (a single-page world with no PageRoot).
+# `noEntity()` when nothing scrolls.
+func findScrollRoot(world: view UiWorld) pub ret EntityId {
+  let n: Int = componentCount(this: world.scrollRoots)
   if n is 0 {
     ret noEntity()
   }
   var i: Int = 0
-  let fallback: EntityId = componentEntityAt(this: world.scrollStates, i: 0)
+  let fallback: EntityId = componentEntityAt(this: world.scrollRoots, i: 0)
   loop i < n {
-    let e: EntityId = componentEntityAt(this: world.scrollStates, i: i)
+    let e: EntityId = componentEntityAt(this: world.scrollRoots, i: i)
     let pid: String = pageOf(world: world, entity: e)
     if pid.length() > 0 {
       if isPageActive(world: world, pageId: pid) {

@@ -47,9 +47,27 @@ type ScrollFsm {
   # Spring + momentum paths gate on `now - lastWheelTime > 0.05`
   # so they don't fight live wheel input.
   lastWheelTime: Float64
+
+  # `RAE_UI_DRAG=<dy>` scripted drag (headless gate): a synthetic finger
+  # presses mid-screen on frame `scriptStartFrame`, moves `scriptDy` over
+  # `scriptMoveFrames` frames and lifts; the run logs `[scroll-drag]` lines
+  # (release velocity, the settled position and floor) so a log can verify
+  # drag -> fling -> settle without a real pointer. `scriptDy` 0 = off.
+  scriptDy: Float
+  scriptFrame: Int
+  scriptReported: Bool
 }
 
+const scriptStartFrame: Int = 10
+
+const scriptMoveFrames: Int = 20
+
 func createScrollFsm(initialScrollY: view Float) ret ScrollFsm {
+  var scriptDy: Float = 0.0
+  let dragEnv: String = getEnv(name: "RAE_UI_DRAG")
+  if dragEnv.length() > 0 {
+    scriptDy = dragEnv.toFloat()
+  }
   let f: ScrollFsm = {
     scrollY: initialScrollY
     velocity: 0.0
@@ -62,8 +80,33 @@ func createScrollFsm(initialScrollY: view Float) ret ScrollFsm {
     delta1: 0.0
     delta2: 0.0
     lastWheelTime: 0.0 - 1.0
+    scriptDy: scriptDy
+    scriptFrame: 0
+    scriptReported: false
   }
   ret f
+}
+
+# The scripted finger this frame: where it is and whether it is down.
+type ScriptedPointer {
+  x: Float
+  y: Float
+  down: Bool
+}
+
+func scriptedPointer(fsm: mod ScrollFsm, viewport: view Viewport) ret ScriptedPointer {
+  fsm.scriptFrame = fsm.scriptFrame + 1
+  let x: Float = viewport.layoutW * 0.5
+  let startY: Float = viewport.layoutH * 0.5
+  let moved: Int = fsm.scriptFrame - scriptStartFrame
+  if moved < 0 {
+    ret ScriptedPointer { x: x, y: startY, down: false }
+  }
+  if moved > scriptMoveFrames {
+    ret ScriptedPointer { x: x, y: startY + fsm.scriptDy, down: false }
+  }
+  let progress: Float = moved.toFloat() / scriptMoveFrames.toFloat()
+  ret ScriptedPointer { x: x, y: startY + fsm.scriptDy * progress, down: true }
 }
 
 # Drag + spring + momentum physics. Returns true on the frame the
@@ -85,9 +128,15 @@ func applyDragPhysics(
   }
 
   var dragJustReleased: Bool = false
-  let curMouseX: Float = viewportPointerX(viewport: viewport)
-  let curMouseY: Float = viewportPointerY(viewport: viewport)
-  let curMouseDown: Bool = uiPointerButtonDown(button: mouseButtonLeft)
+  var curMouseX: Float = viewportPointerX(viewport: viewport)
+  var curMouseY: Float = viewportPointerY(viewport: viewport)
+  var curMouseDown: Bool = uiPointerButtonDown(button: mouseButtonLeft)
+  if fsm.scriptDy is not 0.0 {
+    let scripted: ScriptedPointer = scriptedPointer(fsm: fsm, viewport: viewport)
+    curMouseX = scripted.x
+    curMouseY = scripted.y
+    curMouseDown = scripted.down
+  }
   # 10pt activation distance — matches iOS UIPanGestureRecognizer.
   # Lower values cross natural hand-tremor on click and silently drop
   # release-clicks.
@@ -134,6 +183,11 @@ func applyDragPhysics(
       if fsm.active {
         fsm.velocity = pickReleaseVelocity(d0: fsm.delta0, d1: fsm.delta1, d2: fsm.delta2)
         dragJustReleased = true
+        if fsm.scriptDy is not 0.0 {
+          log(
+            "[scroll-drag] released scrollY={fsm.scrollY} velocity={fsm.velocity} floor={scrollFloor}"
+          )
+        }
       }
       fsm.active = false
     }
@@ -199,6 +253,16 @@ func applyDragPhysics(
   }
   fsm.mouseY = curMouseY
   fsm.prevDown = curMouseDown
+  # The scripted drag reports once, the first frame it is at rest after the
+  # lift: in bounds, no momentum left.
+  if fsm.scriptDy is not 0.0 and fsm.scriptReported is false {
+    let lifted: Bool = fsm.scriptFrame > scriptStartFrame + scriptMoveFrames + 1
+    let inBounds: Bool = fsm.scrollY <= scrollMax and fsm.scrollY >= scrollMin
+    if lifted and inBounds and fsm.velocity is 0.0 {
+      fsm.scriptReported = true
+      log("[scroll-drag] settled scrollY={fsm.scrollY} floor={scrollFloor}")
+    }
+  }
   ret dragJustReleased
 }
 

@@ -5,6 +5,7 @@ open ecs/Entity
 open ecs/ComponentTable
 open ui/layoutSystem/LayoutSystem
 open ui/Transform
+open ui/scrollRootSystem/ScrollRootSystem
 
 # Persistent-world screen-switch handler. Called from the inner loop
 # once per frame after `dispatchActions` has chosen `nextScreen`:
@@ -17,11 +18,16 @@ open ui/Transform
 # Returns a `ScreenSwitchResult` the caller copies back into its
 # locals — `currentScreen`, cached album/track values, scrollTarget,
 # hero pending flags, and the outer-rebuild `switching` signal.
+#
+# Scroll across re-mounts is the session's `ScrollMemory` (lib/ui/
+# scrollRootSystem): a page re-mounted for FRESH data (Home / History /
+# Library on entry, the album on a stem change) forgets its position first so
+# it lands at the top; a page re-mounted in place (the album on a track
+# change) keeps it, because the memory still holds where the user was.
 type ScreenSwitchResult {
   newScreen: Screen
   newScrollTarget: EntityId
   cachedTrackDurMs: Int
-  cachedAlbumScrollFloor: Float
   cachedAlbumStem: String
   cachedTrackIndex: Int
   switching: Bool
@@ -38,6 +44,7 @@ func handleScreenSwitch(
   schedule: mod Schedule
   input: mod InputSystem
   scrollFsm: mod ScrollFsm
+  scrollMemory: mod ScrollMemory
   watcher: mod FileWatcher
   willSwitch: view Bool
   currentScreen: view Screen
@@ -46,7 +53,6 @@ func handleScreenSwitch(
   cachedAlbumStem: view String
   cachedTrackIndex: view Int
   cachedTrackDurMs: view Int
-  cachedAlbumScrollFloor: view Float
   heroDuration: view Float
   prevPendingSrc: view Bool
   prevPendingHeroTargetPageId: view String
@@ -57,7 +63,6 @@ func handleScreenSwitch(
     newScreen: currentScreen
     newScrollTarget: scrollTarget
     cachedTrackDurMs: cachedTrackDurMs
-    cachedAlbumScrollFloor: cachedAlbumScrollFloor
     cachedAlbumStem: "{cachedAlbumStem}"
     cachedTrackIndex: cachedTrackIndex
     switching: false
@@ -78,12 +83,12 @@ func handleScreenSwitch(
   # tracks (and hence the highlight target) are new too.
   if stemChangedNow {
     unmountPage(world: world, pageId: albumPageId)
+    forgetScroll(memory: scrollMemory, pageId: albumPageId)
     let freshAlbum: EntityId = mountAlbumPage(
       world: world
       scenes: scenes
       state: appState
       playback: playback
-      scrollY: 0.0
       viewport: viewport
     )
     unmountPage(world: world, pageId: playerPageId)
@@ -110,18 +115,16 @@ func handleScreenSwitch(
     if trackChangedNow {
       # Album page re-mounts so the now-playing row gets its highlight
       # Shape; Player page re-mounts so its hero / title reflects the
-      # new track. Preserve the album's current scroll position across
-      # the re-mount — the user picked a track from a specific row, so
-      # snapping back to the top would yank the list out from under
-      # them.
-      let preservedScrollY: Float = scrollFsm.scrollY
+      # new track. The album's scroll position survives the re-mount
+      # through the scroll memory — the user picked a track from a
+      # specific row, so snapping back to the top would yank the list
+      # out from under them.
       unmountPage(world: world, pageId: albumPageId)
       let freshAlbum: EntityId = mountAlbumPage(
         world: world
         scenes: scenes
         state: appState
         playback: playback
-        scrollY: preservedScrollY
         viewport: viewport
       )
       unmountPage(world: world, pageId: playerPageId)
@@ -146,16 +149,16 @@ func handleScreenSwitch(
       let activeAlbumNow1: Album = activeAlbum(state: appState)
       let activeTrackNow1: Track = trackAt(album: activeAlbumNow1, idx: appState.currentTrackIndex)
       result.cachedTrackDurMs = activeTrackNow1.durationMs
-      result.cachedAlbumScrollFloor = collectionScrollFloorForState(state: appState)
       result.cachedAlbumStem = "{appState.currentAlbumStem}"
       result.cachedTrackIndex = appState.currentTrackIndex
       # The current page is still active — re-mount above cleared
       # its Active state, restore it so the page actually renders.
       setPageActive(world: world, pageId: outgoingPageId, active: true)
-      # Scroll target was just destroyed by `unmountPage`; point the
-      # FSM at the freshly-mounted page's ScrollState so wheel/drag
-      # keeps working on the new album entity.
-      result.newScrollTarget = findScrollTarget(world: world)
+      # Scroll target was just destroyed by `unmountPage`; seed the fresh
+      # root from the memory and point the FSM at it so wheel/drag keeps
+      # working on the new album entity.
+      scrollRootSystem(world: world, memory: scrollMemory)
+      result.newScrollTarget = findScrollRoot(world: world)
     }
     if fileWatch.checkForChanges(watcher: watcher, now: uiNowSeconds()) {
       scenes = loadAllScenes()
@@ -172,22 +175,22 @@ func handleScreenSwitch(
   # mount) and the boot-mounted instance has stale empty data.
   if nextScreen is Screen.home {
     unmountPage(world: world, pageId: homePageId)
+    forgetScroll(memory: scrollMemory, pageId: homePageId)
     let freshHome: EntityId = mountHomePage(
       world: world
       scenes: scenes
       state: appState
       playback: playback
-      scrollY: 0.0
       viewport: viewport
     )
   }
   if nextScreen is Screen.history {
     unmountPage(world: world, pageId: historyPageId)
+    forgetScroll(memory: scrollMemory, pageId: historyPageId)
     let freshHist: EntityId = mountHistoryPage(
       world: world
       scenes: scenes
       state: appState
-      scrollY: 0.0
       viewport: viewport
     )
   }
@@ -195,16 +198,19 @@ func handleScreenSwitch(
     # Re-mount with the current library filter — albums removed
     # via the bottom-sheet drop out of the grid here.
     unmountPage(world: world, pageId: libraryPageId)
+    forgetScroll(memory: scrollMemory, pageId: libraryPageId)
     let freshLib: EntityId = mountLibraryPage(
       world: world
       scenes: scenes
       state: appState
       playback: playback
-      scrollY: 0.0
       viewport: viewport
     )
   }
   setPageActive(world: world, pageId: incomingPageId, active: true)
+  # Seed the ScrollRoot of whatever was just re-mounted (top for a fresh
+  # page, the remembered position for an in-place re-mount).
+  scrollRootSystem(world: world, memory: scrollMemory)
 
   # #978: the nav-tabs bar and the back button are resident. The active
   # tab is a component the nav-tabs system restyles in place; the back
@@ -265,7 +271,6 @@ func handleScreenSwitch(
     let activeAlbumNow: Album = activeAlbum(state: appState)
     let activeTrackNow: Track = trackAt(album: activeAlbumNow, idx: appState.currentTrackIndex)
     result.cachedTrackDurMs = activeTrackNow.durationMs
-    result.cachedAlbumScrollFloor = collectionScrollFloorForState(state: appState)
     result.cachedAlbumStem = "{appState.currentAlbumStem}"
     result.cachedTrackIndex = appState.currentTrackIndex
     let trackDurSec2: Float = result.cachedTrackDurMs.toFloat() / 1000.0
@@ -274,9 +279,9 @@ func handleScreenSwitch(
     }
   }
   # Persistent per-page scroll: read the new page's ScrollState.y.
-  # Entities survive screen changes; page re-mounts re-seed scrollY=0
-  # on the new entity.
-  result.newScrollTarget = findScrollTarget(world: world)
+  # Entities survive screen changes; a re-mounted page was re-seeded from
+  # the scroll memory above.
+  result.newScrollTarget = findScrollRoot(world: world)
   if isNone(this: result.newScrollTarget) {
     scrollFsm.scrollY = 0.0
   } else {
@@ -288,7 +293,6 @@ func handleScreenSwitch(
     }
   }
   scrollFsm.velocity = 0.0
-  updateScrollOffset(world: world, target: result.newScrollTarget, scrollY: scrollFsm.scrollY)
   # Entity ids on the new screen are unrelated to the outgoing one;
   # drop any held-press id so the next screen's release doesn't
   # accidentally match a stale id.
