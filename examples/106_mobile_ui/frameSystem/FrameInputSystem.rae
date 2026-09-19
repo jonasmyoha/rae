@@ -4,6 +4,7 @@ open ecs/Entity
 open ecs/ComponentTable
 open ui/EventLoop
 open ui/Theme
+open ui/scrollRootSystem/ScrollRootSystem
 
 # Frame phase 1 — input. The hot-reload signal, the pointer/keyboard input
 # system, the live-resize probe, the scroll physics, the action dispatch, the
@@ -48,12 +49,18 @@ func frameInputSystem(
     frame.switching = true
   }
 
-  # Re-resolve the active scroll root before consuming input. The first Home
-  # frame can have a stale/no scroll target until another rebuild trigger
-  # (resize or page switch) refreshes it.
-  let frameScrollTarget: EntityId = findScrollTarget(world: world)
+  # Seed any freshly mounted ScrollRoot and keep the scroll memory current,
+  # then re-resolve the active page's root before consuming input. The first
+  # Home frame can have a stale/no scroll target until another rebuild trigger
+  # (resize or page switch) refreshes it. A new target also refreshes the
+  # bounds the wait phase read from the old one.
+  scrollRootSystem(world: world, memory: session.scrollMemory)
+  let frameScrollTarget: EntityId = findScrollRoot(world: world)
   if frameScrollTarget is not frame.scrollTarget {
     frame.scrollTarget = frameScrollTarget
+    let range: ScrollRange = scrollRootRange(world: world, entity: frame.scrollTarget)
+    tick.scrollOnThisScreen = range.active
+    tick.scrollFloor = range.floor
     scrollFsm.velocity = 0.0
     if isNone(this: frame.scrollTarget) {
       scrollFsm.scrollY = 0.0

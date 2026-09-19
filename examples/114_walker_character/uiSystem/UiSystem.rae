@@ -46,7 +46,7 @@ open app3d/Playback
 open HotReload
 open ui/LogOverlay
 open ui/WindowGeometry
-open ui/ScrollPanel
+open ui/scrollRootSystem/ScrollRootSystem
 open ui/EventLoop
 open ui/DebugOverlay
 open ui/VirtualJoystick
@@ -82,9 +82,9 @@ func uiUpdate(
   if walkerMenuTapped(world: inputSystem.world) {
     toggleWalkerPanel(settings: inputSystem.settings, world: inputSystem.world)
   }
-  let scrolled: Bool = updateScrollPanel(
+  let scrolled: Bool = updateScrollRoot(
     world: inputSystem.world
-    viewport: inputSystem.panelScroll
+    entity: inputSystem.panelScroll
     input: inputSystem.ui
   )
   if updateDebugOverlay(
@@ -260,9 +260,9 @@ func uiUpdate(
   if terrainSystem.toon is not characterSystem.toon {
     setInfiniteTerrainToon(terrainSystem: terrainSystem, toon: characterSystem.toon)
   }
-  # `scrolled`: updateScrollPanel writes the new offset into an Offset
-  # component, and only transformSystem (inside runUiSystems) turns that into
-  # screen positions. Without it the wheel moved nothing until the next
+  # `scrolled`: updateScrollRoot writes the new position into a RuntimeOffset,
+  # and only transformSystem (inside runUiSystems) turns that into screen
+  # positions. Without it the wheel moved nothing until the next
   # relayout — again masked by the time-of-day animation while it runs.
   if uiActionCount(world: inputSystem.world) > 0 or settingsChanged or scrolled {
     runUiSystems(world: inputSystem.world, res: inputSystem.gpuUi)

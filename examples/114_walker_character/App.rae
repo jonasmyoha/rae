@@ -66,7 +66,7 @@ open app3d/Playback
 open HotReload
 open ui/LogOverlay
 open ui/WindowGeometry
-open ui/ScrollPanel
+open ui/scrollRootSystem/ScrollRootSystem
 open ui/EventLoop
 open ui/DebugOverlay
 open ui/VirtualJoystick
@@ -638,11 +638,12 @@ func createApp() ret App {
     setNodeText(world: uiWorld, nodeId: "SpeedLabel", value: "Speed {pct0}%")
     runUiSystems(world: uiWorld, res: gpuUi)
 
-    var panelScroll: EntityId = createScrollPanel(
-      world: uiWorld
-      viewportId: "SidePanelBody"
-      contentId: "SidePanelContent"
-    )
+    # The scene authors a `ScrollRoot` on SidePanelContent (the Hug content
+    # inside the clipped SidePanelBody); the lib system seeds its state, and
+    # the floor is the laid-out overflow.
+    var panelScrollMemory: ScrollMemory = createScrollMemory()
+    scrollRootSystem(world: uiWorld, memory: panelScrollMemory)
+    var panelScroll: EntityId = findScrollRoot(world: uiWorld)
     # The menu button is an ECS node in the same top row as the camera bar, so the
     # two hug to one height and resize together (lib/ui/CornerMenuButton).
     let menuOk: Bool = mountCornerMenuButton(
