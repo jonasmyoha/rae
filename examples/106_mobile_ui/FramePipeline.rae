@@ -104,7 +104,6 @@ func syncFrameData(
   # only then is there a new snapshot worth mirroring into the world.
   pollSpotify(
     state: spotifyState
-    world: world
     reg: texReg
     playback: playback
     appState: appState
@@ -122,6 +121,11 @@ func syncFrameData(
     scenes: scenes
     reg: texReg
   )
+  # Spotify's live now-playing text is a binding too: `spotifyBindingSystem`
+  # writes the `TextBinding` nodes from the snapshot the poll just published,
+  # and self-gates on `SpotifyState.revision` (a no-op in local mode). Runs
+  # AFTER the observation so a live Spotify track wins over the browsed one.
+  spotifyBindingSystem(world: world, state: spotifyState)
 
   # Settle the artwork downloads that landed since last frame (#950), then
   # let the loaders upload them / start the next ones — album covers first

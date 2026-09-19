@@ -50,6 +50,21 @@ type SpotifyState {
   # poll tick) until it resolves — empty when nothing is in flight.
   coverAppliedPath: String
   coverPendingPath: String
+  # The live now-playing snapshot the bindings read (spotifyBindingSystem):
+  # the current title / artist / album. `revision` bumps whenever one of them
+  # changes, so the binding system runs only then; `builtRevision` is the last
+  # one it wrote. The poll writes the snapshot; the binding system writes the
+  # `TextBinding { key: "spotify.title" | "spotify.artist" | "spotify.album" }`
+  # nodes from it — no more per-poll node patching.
+  title: String
+  artist: String
+  album: String
+  revision: Int
+  builtRevision: Int
+  # RAE_UI_SPOTIFY_FAKE="Title|Artist|Album" seeds the snapshot at boot (the
+  # real osascript poll stays off), so a headless run proves the binding
+  # writes the node text without a running Spotify. Empty in normal use.
+  fake: String
 }
 
 func createSpotifyState() pub ret SpotifyState {
@@ -61,13 +76,40 @@ func createSpotifyState() pub ret SpotifyState {
   # propagate ad-hoc env vars, so the feature silently no-op'd for
   # users who didn't run from a manually-prepared shell.
   let optOut: String = getEnv(name: "RAE_UI_NO_SPOTIFY")
-  let enabled: Bool = optOut.length() is 0
+  let fake: String = getEnv(name: "RAE_UI_SPOTIFY_FAKE")
+  var enabled: Bool = optOut.length() is 0
+  # A fake snapshot seeds the bindings and turns the real poll OFF, so it
+  # never calls osascript in a headless run.
+  var title: String = ""
+  var artist: String = ""
+  var album: String = ""
+  var revision: Int = 0
+  if fake.length() > 0 {
+    enabled = false
+    let parts: List(String) = fake.split(sep: "|")
+    if let first: String = parts.copyAt(index: 0) {
+      title = own first
+    }
+    if let second: String = parts.copyAt(index: 1) {
+      artist = own second
+    }
+    if let third: String = parts.copyAt(index: 2) {
+      album = own third
+    }
+    revision = 1
+  }
   ret SpotifyState {
     enabled: enabled
     lastTrackId: ""
     artKey: "spotify-current"
     coverAppliedPath: ""
     coverPendingPath: ""
+    title: own title
+    artist: own artist
+    album: own album
+    revision: revision
+    builtRevision: 0
+    fake: own fake
   }
 }
 
@@ -263,12 +305,13 @@ func syncNowPlayingCoverFinish(
 # has passed for a re-poll. When it does poll:
 #   * mirrors Spotify's actual play/pause state into `playback.isPlaying`
 #     so PlaybackState revision invalidation keeps play buttons in sync,
-#   * updates NowPlaying / mini-player title + artist text,
+#   * publishes the live title / artist / album onto SpotifyState (bumping
+#     `revision`), which `spotifyBindingSystem` writes onto the `TextBinding`
+#     nodes — the poll no longer patches Text nodes itself,
 #   * on track change: downloads art and points the nowPlaying cover at
 #     the spotify-current texture key (the covers observe + re-point, #268).
 func pollSpotify(
   state: mod SpotifyState
-  world: mod UiWorld
   reg: mod TextureRegistry
   playback: mod PlaybackState
   appState: mod AppState
@@ -302,11 +345,16 @@ func pollSpotify(
   if dur > 0.0 {
     playback.durationSec = dur
   }
-  # Text updates run every poll — cheap, and handles the "user
-  # paused/resumed in Spotify directly" case without extra logic.
-  trackTextWriteAll(world: world, title: track.trackName, artist: track.artistName)
-  # The M:SS time labels are `PlaybackTime` bindings on the mirrored
-  # playback position / duration above — nothing to write here.
+  # Publish the live snapshot the bindings read, bumping `revision` only when
+  # a field changed so `spotifyBindingSystem` (and it alone) rewrites the
+  # bound Text nodes. The M:SS time labels are `PlaybackTime` bindings on the
+  # mirrored playback position / duration above — nothing to write here.
+  updateSpotifySnapshot(
+    state: state
+    title: track.trackName
+    artist: track.artistName
+    album: track.albumName
+  )
   # Track-change → re-fetch artwork. Compare trackId, not artworkUrl
   # (Spotify sometimes reports a slightly different art URL between
   # polls for the same track during playback).
@@ -366,4 +414,52 @@ func pollSpotify(
   # per-frame `rebindAlbumCoversToSpotify` walk that matched a stale
   # browsed stem and so never followed a Spotify track change (§1).
   setNowPlayingArt(state: playback, artKey: state.artKey)
+}
+
+# Write the live now-playing snapshot, bumping `revision` only when a field
+# actually changed — so `spotifyBindingSystem` runs only on a real change.
+func updateSpotifySnapshot(
+  state: mod SpotifyState
+  title: view String
+  artist: view String
+  album: view String
+) {
+  if state.title is title and state.artist is artist and state.album is album {
+    ret
+  }
+  state.title = "{title}"
+  state.artist = "{artist}"
+  state.album = "{album}"
+  state.revision = state.revision + 1
+}
+
+# The now-playing text as DATA: every node with a `TextBinding` whose key is a
+# `spotify.*` source gets the matching field of the live snapshot written to
+# its `Text.text`. Runs only when `SpotifyState.revision` moved past the last
+# one it wrote (`builtRevision`) — the poll bumps the revision, this reacts.
+# Local mode leaves the revision at 0, so this never fights `trackTextSystem`.
+func spotifyBindingSystem(world: mod UiWorld, state: mod SpotifyState) pub {
+  if state.revision is state.builtRevision {
+    ret
+  }
+  let n: Int = componentCount(this: world.textBindings)
+  var i: Int = 0
+  loop i < n {
+    let entity: EntityId = componentEntityAt(this: world.textBindings, i: i)
+    let binding: TextBinding = componentDataAt(this: world.textBindings, i: i)
+    if binding.key is "spotify.title" {
+      writeTrackText(world: world, entity: entity, value: state.title)
+    }
+    if binding.key is "spotify.artist" {
+      writeTrackText(world: world, entity: entity, value: state.artist)
+    }
+    if binding.key is "spotify.album" {
+      writeTrackText(world: world, entity: entity, value: state.album)
+    }
+    i = i + 1
+  }
+  state.builtRevision = state.revision
+  if state.fake.length() > 0 {
+    log("[spotify-bind] title={state.title} artist={state.artist} album={state.album}")
+  }
 }

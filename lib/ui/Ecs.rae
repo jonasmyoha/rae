@@ -516,6 +516,30 @@ func findScrollRoot(world: view UiWorld) pub ret EntityId {
 # and systemIfDirty into a re-rendered frame without
 # tearing down and rebuilding the world. No-op when `target` is
 # `noEntity()` or carries neither component.
+# Point a `Sprite`'s texture at `key`, preserving its other fields. Returns
+# whether it wrote — an equal key is left alone, since componentSet bumps the
+# table generation regardless. The one place binding systems (playback icon /
+# cover, the Spotify view) re-point a sprite by data.
+func setSpriteKey(world: mod UiWorld, entity: view EntityId, key: view String) pub ret Bool {
+  if componentHas(this: world.sprites, entity: entity) is false {
+    ret false
+  }
+  let current: Sprite = componentGet(this: world.sprites, entity: entity)
+  if current.textureKey is key {
+    ret false
+  }
+  let next: Sprite = {
+    textureKey: "{key}"
+    tint: current.tint
+    scaleMode: current.scaleMode
+    tileScale: current.tileScale
+    nineSlice: current.nineSlice
+    hasNineSlice: current.hasNineSlice
+  }
+  componentSet(this: world.sprites, entity: entity, data: next)
+  ret true
+}
+
 func updateScrollOffset(world: mod UiWorld, target: view EntityId, scrollY: view Float) pub {
   if isNone(this: target) {
     ret

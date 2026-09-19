@@ -40,28 +40,6 @@ func coverKeyResolved(
 }
 
 # Re-point one Sprite's textureKey by identity, preserving every other field.
-# Returns whether it wrote (an equal key is left alone: componentSet bumps
-# the table generation whether or not the value differs).
-func repointSprite(world: mod UiWorld, entity: view EntityId, key: view String) ret Bool {
-  if componentHas(this: world.sprites, entity: entity) is false {
-    ret false
-  }
-  let cur: Sprite = componentGet(this: world.sprites, entity: entity)
-  if cur.textureKey is key {
-    ret false
-  }
-  let next: Sprite = {
-    textureKey: "{key}"
-    tint: cur.tint
-    scaleMode: cur.scaleMode
-    tileScale: cur.tileScale
-    nineSlice: cur.nineSlice
-    hasNineSlice: cur.hasNineSlice
-  }
-  componentSet(this: world.sprites, entity: entity, data: next)
-  ret true
-}
-
 # Every `PlaybackIcon`: the play/pause glyph and the selected flag follow
 # `isPlaying`, observed through `PlaybackState.revision`. Returns whether any
 # icon changed (the caller re-syncs the widget styles on that).
@@ -73,7 +51,7 @@ func playbackIconSystem(world: mod UiWorld, playback: view PlaybackState) pub re
     let entity: EntityId = componentEntityAt(this: world.playbackIcons, i: i)
     let icon: PlaybackIcon = componentDataAt(this: world.playbackIcons, i: i)
     if icon.builtRevision is not playback.revision {
-      repointSprite(world: world, entity: entity, key: playbackIconKey(playback: playback))
+      setSpriteKey(world: world, entity: entity, key: playbackIconKey(playback: playback))
       setWidgetSelected(world: world, entity: entity, selected: playback.isPlaying)
       let built: PlaybackIcon = { builtRevision: playback.revision }
       componentSet(this: world.playbackIcons, entity: entity, data: built)
@@ -107,14 +85,14 @@ func playbackCoverSystem(
           playback: playback
           browsedStem: state.currentAlbumStem
         )
-        repointSprite(world: world, entity: entity, key: seed)
+        setSpriteKey(world: world, entity: entity, key: seed)
       } else if playback.nowPlayingArtKey.length() > 0 {
         let key: String = coverKeyResolved(
           reg: reg
           playback: playback
           browsedStem: playback.playingAlbumStem
         )
-        repointSprite(world: world, entity: entity, key: key)
+        setSpriteKey(world: world, entity: entity, key: key)
       }
       let built: PlaybackCover = { builtRevision: playback.nowPlayingRevision }
       componentSet(this: world.playbackCovers, entity: entity, data: built)
@@ -284,24 +262,6 @@ func playbackTimeSystem(world: mod UiWorld, playback: view PlaybackState) pub {
       writeTrackText(world: world, entity: entity, value: label)
       let built: PlaybackTime = { kind: binding.kind, builtSecond: second }
       componentSet(this: world.playbackTimes, entity: entity, data: built)
-    }
-    i = i + 1
-  }
-}
-
-# Overwrite every `TrackText` with externally-sourced names (the Spotify
-# poll mirrors the real player's track). The built key is left alone, so the
-# local binding does not fight it until the browsed track actually changes.
-func trackTextWriteAll(world: mod UiWorld, title: view String, artist: view String) pub {
-  let n: Int = componentCount(this: world.trackTexts)
-  var i: Int = 0
-  loop i < n {
-    let entity: EntityId = componentEntityAt(this: world.trackTexts, i: i)
-    let binding: TrackText = componentDataAt(this: world.trackTexts, i: i)
-    if binding.field is "artist" {
-      writeTrackText(world: world, entity: entity, value: artist)
-    } else {
-      writeTrackText(world: world, entity: entity, value: title)
     }
     i = i + 1
   }

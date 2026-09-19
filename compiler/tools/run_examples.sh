@@ -319,6 +319,9 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # `ScrollRoot`, rubber-bands, and the spring settles EXACTLY at that
           # floor — the `[scroll-drag] settled` line's scrollY must equal its
           # floor, which verifies drag -> release -> spring without a pointer.
+          # Finally a fake Spotify snapshot (RAE_UI_SPOTIFY_FAKE) proves the
+          # now-playing text is a binding: spotifyBindingSystem writes the
+          # TextBinding nodes from SpotifyState (spotifySystem/SpotifyView).
           SCREENSHOT="$TMP_OUT/mobile-ui.bmp"
           if (cd .. && RAE_UI_SCREEN=home RAE_UI_NO_SPOTIFY=1 RAE_AUTO_EXIT_SEC=1 \
              RAE_SDL_HEADLESS_MS=1000 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
@@ -334,12 +337,16 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              RAE_AUTO_EXIT_SEC=4 RAE_SDL_HEADLESS_MS=4000 \
              perl -e 'alarm shift; exec @ARGV' 40 "$TMP_OUT/app") > "$TMP_OUT/drag.log" 2>&1 \
              && grep -q '\[scroll-drag\] released scrollY=' "$TMP_OUT/drag.log" \
-             && grep -Eq '\[scroll-drag\] settled scrollY=(-[0-9.]+) floor=\1$' "$TMP_OUT/drag.log"; then
-            echo "PASS: $EXAMPLE_NAME (Home screenshot, action audit clean, idle frame runs 0 app systems, scripted drag springs back to the ScrollRoot floor: $(grep '\[scroll-drag\] settled' "$TMP_OUT/drag.log"))"
+             && grep -Eq '\[scroll-drag\] settled scrollY=(-[0-9.]+) floor=\1$' "$TMP_OUT/drag.log" \
+             && (cd .. && RAE_UI_SCREEN=player RAE_UI_SPOTIFY_FAKE='Bound Title|Bound Artist|Bound Album' \
+             RAE_UI_PAUSED=1 RAE_AUTO_EXIT_SEC=2 RAE_SDL_HEADLESS_MS=2000 \
+             perl -e 'alarm shift; exec @ARGV' 40 "$TMP_OUT/app") > "$TMP_OUT/spotify.log" 2>&1 \
+             && grep -aq '\[spotify-bind\] title=Bound Title artist=Bound Artist' "$TMP_OUT/spotify.log"; then
+            echo "PASS: $EXAMPLE_NAME (Home screenshot, action audit clean, idle frame runs 0 app systems, scripted drag springs back to the ScrollRoot floor + Spotify text bound: $(grep '\[scroll-drag\] settled' "$TMP_OUT/drag.log"))"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (mobile UI screenshot / scripted drag gate)"
-            cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" "$TMP_OUT/idle.log" "$TMP_OUT/drag.log" 2>/dev/null | grep -av '^\[present\]' | sed 's/^/  /'
+            cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" "$TMP_OUT/idle.log" "$TMP_OUT/drag.log" "$TMP_OUT/spotify.log" 2>/dev/null | grep -av '^\[present\]' | sed 's/^/  /'
             ((FAILED++))
           fi
         elif [ "$EXAMPLE_NAME" = "119_ocean_fft" ]; then
