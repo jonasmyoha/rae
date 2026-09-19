@@ -1,5 +1,6 @@
 #include "sema.h"
 #include "array_methods.h"
+#include "shader_compose.h"
 #include "type.h"
 #include "ast.h"
 #include "diag.h"
@@ -930,6 +931,7 @@ static bool sema_is_numeric_kind(TypeKind k);
 static bool sema_is_scalar_kind(TypeKind k);
 static const char* sema_scalar_name(TypeKind k);
 static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstDecl* generic_decl, TypeInfo** args, size_t arg_count, size_t line, size_t column);
+static bool sema_shader_from_call(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr);
 static AstTypeRef* sema_type_ref_of(CompilerContext* ctx, TypeInfo* t);
 
 AstIdentifierPart* clone_parts(CompilerContext* ctx, const AstIdentifierPart* p) {
@@ -5381,6 +5383,15 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                 expr->resolved_type = type_get_string(ctx->type_registry);
                 break;
             }
+            /* `shader(files: [...])` is evaluated HERE, at compile time: the
+             * call node becomes the composed `Shader { ... }` literal
+             * (sema_shader_from_call) and is analysed as that. */
+            if (!expr->decl_link && expr->as.call.callee->kind == AST_EXPR_IDENT
+                && str_eq_cstr(expr->as.call.callee->as.ident, "shader")
+                && !symbol_table_lookup(symbols, expr->as.call.callee->as.ident)) {
+                if (sema_shader_from_call(ctx, module, symbols, expr)) sema_analyze_expr(ctx, module, symbols, expr, true);
+                break;
+            }
             sema_analyze_expr(ctx, module, symbols, expr->as.call.callee, false);
             AstCallArg* arg = expr->as.call.args;
             while (arg) { sema_analyze_expr(ctx, module, symbols, arg->value, true); arg = arg->next; }
@@ -6498,6 +6509,169 @@ static bool sema_check_value_arg(AstModule* module, ConstResult r, Str arg_name,
         return false;
     }
     *out = (int64_t)r.i;
+    return true;
+}
+
+
+/* ---------------------------------------------------------------------
+ * `shader(files: ["a.wgsl", "b.wgsl"])` — a declared shader composition
+ * (docs/shaders-and-the-compiler.md, shader_compose.h). The argument must be
+ * a literal list of string literals: a shader is a build-time fact. The
+ * parts are resolved, read, composed and validated with naga NOW, and the
+ * call node is rewritten in place into
+ *   Shader { text: "<composed>", sources: ["<resolved>", ...], generation: 0 }
+ * so the backend embeds the text as a C string literal with no new code.
+ * Returns false after reporting when the call is malformed. */
+static AstExpr* sema_new_string_expr(CompilerContext* ctx, const char* text, size_t len, size_t line, size_t column) {
+    AstExpr* e = arena_alloc(ctx->ast_arena, sizeof(AstExpr));
+    memset(e, 0, sizeof(*e));
+    e->kind = AST_EXPR_STRING;
+    char* copy = arena_alloc(ctx->ast_arena, len + 1);
+    memcpy(copy, text, len); copy[len] = '\0';
+    e->as.string_lit = (Str){ copy, len };
+    e->line = line; e->column = column;
+    return e;
+}
+
+static void sema_register_shader_part(CompilerContext* ctx, const char* path) {
+    for (size_t i = 0; i < ctx->shader_part_count; i++)
+        if (strcmp(ctx->shader_parts[i], path) == 0) return;
+    if (ctx->shader_part_count == ctx->shader_part_cap) {
+        size_t ncap = ctx->shader_part_cap ? ctx->shader_part_cap * 2 : 16;
+        const char** grown = arena_alloc(ctx->ast_arena, sizeof(const char*) * ncap);
+        if (ctx->shader_part_count) memcpy(grown, ctx->shader_parts, sizeof(const char*) * ctx->shader_part_count);
+        ctx->shader_parts = grown; ctx->shader_part_cap = ncap;
+    }
+    ctx->shader_parts[ctx->shader_part_count++] = path;
+}
+
+static bool sema_shader_from_call(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr) {
+    (void)symbols;
+    const char* file = sema_diag_file(module);
+    AstCallArg* files_arg = expr->as.call.args;
+    bool shape_ok = files_arg && !files_arg->next && files_arg->name.len > 0
+        && str_eq_cstr(files_arg->name, "files") && files_arg->value
+        && files_arg->value->kind == AST_EXPR_COLLECTION_LITERAL
+        && files_arg->value->as.collection.elements;
+    size_t count = 0;
+    if (shape_ok) {
+        for (AstCollectionElement* el = files_arg->value->as.collection.elements; el; el = el->next) {
+            if (el->key || !el->value || el->value->kind != AST_EXPR_STRING) { shape_ok = false; break; }
+            count++;
+        }
+    }
+    if (!shape_ok) {
+        diag_error(file, (int)expr->line, (int)expr->column,
+                   "shader(files: [...]) takes one argument, 'files', a literal list of string literals "
+                   "naming the WGSL parts in order (e.g. shader(files: [\"lib/noise.wgsl\", \"assets/main.wgsl\"])) — "
+                   "a shader is composed and validated at build time, so its parts cannot be computed");
+        module->had_error = true;
+        expr->resolved_type = type_get_void(ctx->type_registry);
+        return false;
+    }
+    const char** paths = arena_alloc(ctx->ast_arena, sizeof(const char*) * count);
+    size_t i = 0;
+    for (AstCollectionElement* el = files_arg->value->as.collection.elements; el; el = el->next) {
+        Str lit = el->value->as.string_lit;
+        char* c = arena_alloc(ctx->ast_arena, lit.len + 1);
+        memcpy(c, lit.data, lit.len); c[lit.len] = '\0';
+        paths[i++] = c;
+    }
+    char err[2048];
+    ShaderComposition composition;
+    if (!shader_compose(ctx->ast_arena, file, ctx->project_root, ctx->stdlib_dir, paths, count, &composition, err, sizeof err)) {
+        diag_error(file, (int)expr->line, (int)expr->column, err);
+        module->had_error = true;
+        expr->resolved_type = type_get_void(ctx->type_registry);
+        return false;
+    }
+    for (i = 0; i < count; i++) sema_register_shader_part(ctx, composition.resolved[i]);
+
+    int bad_part = -1, bad_line = -1;
+    ShaderValidation verdict = shader_validate(&composition, paths, err, sizeof err, &bad_part, &bad_line);
+    const char* mode = getenv("RAE_SHADER_VALIDATE");
+    bool require = mode && strcmp(mode, "require") == 0;
+    if (verdict == SHADER_INVALID) {
+        char buf[2600];
+        if (bad_part >= 0)
+            snprintf(buf, sizeof buf, "shader validation failed (naga): %s — at %s:%d (part %d of the composition)",
+                     err, paths[bad_part], bad_line, bad_part + 1);
+        else
+            snprintf(buf, sizeof buf, "shader validation failed (naga): %s", err);
+        diag_error(file, (int)expr->line, (int)expr->column, buf);
+        module->had_error = true;
+        expr->resolved_type = type_get_void(ctx->type_registry);
+        return false;
+    }
+    if (verdict == SHADER_NAGA_MISSING) {
+        if (require) {
+            diag_error(file, (int)expr->line, (int)expr->column,
+                       "shader not validated: naga not found and RAE_SHADER_VALIDATE=require "
+                       "(install it with 'cargo install naga-cli', or set RAE_NAGA to the executable)");
+            module->had_error = true;
+            expr->resolved_type = type_get_void(ctx->type_registry);
+            return false;
+        }
+        if (!ctx->shader_validation_warned) {
+            ctx->shader_validation_warned = true;
+            diag_warn(file, (int)expr->line, (int)expr->column,
+                      "shader not validated: naga not found (cargo install naga-cli); "
+                      "set RAE_SHADER_VALIDATE=off to silence");
+        }
+    }
+
+    /* Rewrite: Shader { text, sources, generation }. */
+    AstTypeRef* shader_type = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef));
+    memset(shader_type, 0, sizeof(*shader_type));
+    shader_type->parts = arena_alloc(ctx->ast_arena, sizeof(AstIdentifierPart));
+    memset(shader_type->parts, 0, sizeof(AstIdentifierPart));
+    shader_type->parts->text = str_from_cstr("Shader");
+    shader_type->line = expr->line; shader_type->column = expr->column;
+
+    AstObjectField* text_field = arena_alloc(ctx->ast_arena, sizeof(AstObjectField));
+    memset(text_field, 0, sizeof(*text_field));
+    text_field->name = str_from_cstr("text");
+    text_field->value = sema_new_string_expr(ctx, composition.text, composition.text_len, expr->line, expr->column);
+
+    AstExpr* sources = arena_alloc(ctx->ast_arena, sizeof(AstExpr));
+    memset(sources, 0, sizeof(*sources));
+    sources->kind = AST_EXPR_COLLECTION_LITERAL;
+    sources->as.collection.is_bracketed = true;
+    sources->line = expr->line; sources->column = expr->column;
+    AstCollectionElement* tail = NULL;
+    for (i = 0; i < count; i++) {
+        AstCollectionElement* el = arena_alloc(ctx->ast_arena, sizeof(AstCollectionElement));
+        memset(el, 0, sizeof(*el));
+        el->value = sema_new_string_expr(ctx, composition.resolved[i], strlen(composition.resolved[i]), expr->line, expr->column);
+        if (tail) tail->next = el; else sources->as.collection.elements = el;
+        tail = el;
+    }
+    AstObjectField* sources_field = arena_alloc(ctx->ast_arena, sizeof(AstObjectField));
+    memset(sources_field, 0, sizeof(*sources_field));
+    sources_field->name = str_from_cstr("sources");
+    sources_field->value = sources;
+
+    AstExpr* zero = arena_alloc(ctx->ast_arena, sizeof(AstExpr));
+    memset(zero, 0, sizeof(*zero));
+    zero->kind = AST_EXPR_INTEGER;
+    zero->as.integer = str_from_cstr("0");
+    zero->line = expr->line; zero->column = expr->column;
+    AstObjectField* generation_field = arena_alloc(ctx->ast_arena, sizeof(AstObjectField));
+    memset(generation_field, 0, sizeof(*generation_field));
+    generation_field->name = str_from_cstr("generation");
+    generation_field->value = zero;
+
+    text_field->next = sources_field;
+    sources_field->next = generation_field;
+
+    size_t line = expr->line, column = expr->column;
+    memset(&expr->as, 0, sizeof(expr->as));
+    expr->kind = AST_EXPR_OBJECT;
+    expr->line = line; expr->column = column;
+    expr->decl_link = NULL;
+    expr->resolved_type = NULL;
+    expr->as.object_literal.type = shader_type;
+    expr->as.object_literal.fields = text_field;
     return true;
 }
 

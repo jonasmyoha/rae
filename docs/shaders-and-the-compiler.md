@@ -30,44 +30,63 @@ running app. So:
   generated WGSL text prepended to the file, so the composed text is different
   per run and cannot be checked before that run.
 
-## The design: a declared composition
+## The design: a declared composition (built 2026-09-19)
 
 A shader becomes a **compile-time value**. The composition is written in Rae,
 where the compiler can see it:
 
 ```rae
-# lib/GrassCompute.rae
+# lib/GrassCompute.rae — inside the function that creates the pipeline (a
+# module-level `let` that owns heap is a global, which Rae forbids; the value
+# lives on the resource that owns the pipeline)
 let grassComputeShader: Shader = shader(
   files: ["lib/noise.wgsl", "lib/world_biome.wgsl", "lib/grass_compute.wgsl"]
 )
 ```
 
 `shader(files:)` is a plain function form the compiler recognises (no `@`
-sigil — AGENTS.md), and its argument must be a literal list of string literals:
-a shader is a build-time fact, not a run-time computation. At `rae build` /
-`run` / `watch` the compiler:
+sigil — AGENTS.md; `compiler/src/sema.c` `sema_shader_from_call`,
+`compiler/src/shader_compose.c`), and its argument must be a literal list of
+string literals: a shader is a build-time fact, not a run-time computation
+(anything else is a compile error). At `rae build` / `run` / `watch` the
+compiler:
 
-1. **Resolves** each path the way the runtime does today — the project's own
-   file first (`assets/…`, the project's `lib/`), then the toolchain stdlib
-   (`$RAE_STDLIB`) for `lib/…`. A missing file is a compile error at the
-   `shader(...)` line, not a "shader file not found" print frames later.
-2. **Composes** the text in the written order, with one `\n` between parts and
-   a `// --- <path>` marker line before each part, so a wgpu or naga message
-   can be mapped back to the file it came from.
+1. **Resolves** each path: next to the `.rae` file that declares the shader
+   first (an `assets/…` part), then against the project root (a project's
+   own `lib/`), then the toolchain stdlib for a `lib/…` path — the order the
+   runtime's `rae_ext_rae_gb_read_shader` used, plus the declaring file's
+   directory so an example's assets resolve whatever the cwd. A missing file
+   is a compile error at the `shader(...)` line naming every path tried, not
+   a "shader file not found" print frames later.
+2. **Composes** the text in the written order, with a `// --- <path>` marker
+   line before each part, so a wgpu or naga message can be mapped back to
+   the file it came from.
 3. **Validates** the composed text with `naga` (wgpu's own WGSL front end, as a
    CLI). Any parse or validation error is a **compile error** on the
-   `shader(...)` line, quoting naga's message with the part file and line
-   translated from the composed offset. If `naga` is not installed the build
-   warns once (`warning: shader not validated: naga not found; install with
-   'cargo install naga-cli' or set RAE_SHADER_VALIDATE=off`) and continues;
-   `RAE_SHADER_VALIDATE=require` (what the test suite and the examples gate
-   set) turns the missing tool into an error, so CI never silently skips.
-4. **Embeds** the composed text in the binary as a `Shader` value. The runtime
-   never reads a `.wgsl` file from disk again: no cwd dependence, no
-   `RAE_STDLIB` lookup, no `rae_ext_rae_gb_read_shader`.
+   `shader(...)` line, quoting naga's message with the location translated
+   back to the part file and line: `shader validation failed (naga): no
+   definition in scope for identifier: raeBiomeSample — at
+   assets/lighting.wgsl:4 (part 2 of the composition)`. If `naga` is not
+   installed the build warns once (`warning: shader not validated: naga not
+   found (cargo install naga-cli); set RAE_SHADER_VALIDATE=off to silence`)
+   and continues; `RAE_SHADER_VALIDATE=require` (what the test suite and the
+   examples gate set) turns the missing tool into an error, so CI never
+   silently skips; `RAE_SHADER_VALIDATE=off` skips validation; `RAE_NAGA`
+   points at the executable (otherwise `PATH`, then `~/.cargo/bin/naga`).
+4. **Embeds** the composed text in the binary: the call node becomes the
+   literal `Shader { text: "<composed>", sources: [<resolved paths>],
+   generation: 0 }`, so the text is a C string literal in the emitted program.
+   The runtime never reads a `.wgsl` file for a declared shader: no cwd
+   dependence, no `RAE_STDLIB` lookup, no `rae_ext_rae_gb_read_shader` — and
+   nothing to preload for a WASM build.
 5. **Registers** the files as build inputs: `rae watch` rebuilds when a `.wgsl`
    part changes, exactly as it does for a `.rae` file — this is the shader
    hot reload we already have, for free.
+
+Tests: `compiler/tests/cases/872_shader_compose` (three parts, the composed
+text), `873_shader_naga_error` (a part referencing a name a missing part
+defines: naga's message at the part file and line), `874_shader_missing_part`,
+`875_shader_not_literal`.
 
 ### The `Shader` type
 
@@ -157,8 +176,10 @@ Two rules keep that door open, and they apply from the first task:
 toolchain dependency** like gcc — a separate executable the compiler runs, not
 a library linked into the compiler or the app. `make setup` installs it when
 `cargo` is present and says how to get it otherwise; `rae toolchain status`
-reports whether it is found. Validation is `naga <composed.wgsl>` on a temp
-file; exit code and stderr are the verdict.
+prints the executable it will run (`naga: /Users/you/.cargo/bin/naga`) or
+that it is missing. Validation is `naga --input-kind wgsl <tempfile>` on a
+temp copy of the composed text; the exit code and the `error:` /
+`file:LINE:COL` lines of its output are the verdict.
 
 Alternatives considered: linking wgpu-native into the compiler to create a
 headless device and call `wgpuDeviceCreateShaderModule` (a 30 MB dylib in the
@@ -186,7 +207,9 @@ frame.
 
 ## Queue
 
-See `QUEUE.md`: the compile-time construct + validation + watch inputs; the
-`override` constants in the pipeline creators; the lib/runtime migration; naga
-in the toolchain setup. The in-process swap is documented above and not
-queued.
+The compile-time construct, validation, embedding, watch inputs and naga in
+the toolchain setup are built (2026-09-19). Still queued: the `override`
+constants in the pipeline creators and the lib/renderer migration (the
+pipeline creators still take a `String`; a lib module composes with
+`gbReadWgsl` until it migrates). The in-process swap is documented above and
+not queued.
