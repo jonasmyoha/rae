@@ -1,0 +1,39 @@
+# CoverStyleSystem — the cover-rounding toggle (#981). Every `CoverStyle`
+# node's `CornerRadius` follows one boolean: rounded -> `CornerRadius{radius}`
+# (added on a fresh mount, where the scene authors none), square -> the
+# component removed, so a missing-texture placeholder falls back to the
+# renderer's own radius exactly as the per-cover code it replaced did. This is
+# the ONE place a cover's corner is set from the setting, for the Now Playing
+# hero, the mini-player thumb, the cover-grid tiles and the recently-played
+# thumbs alike. Change-disciplined: writes only when the CornerRadius does not
+# already match, so an idle frame (or an unchanged setting) bumps nothing.
+open ui/Ecs
+open ui/Components
+open ecs/Entity
+open ecs/ComponentTable
+
+func coverStyleSystem(world: mod UiWorld, rounded: view Bool) pub {
+  let n: Int = componentCount(this: world.coverStyles)
+  var i: Int = 0
+  loop i < n {
+    let entity: EntityId = componentEntityAt(this: world.coverStyles, i: i)
+    let style: CoverStyle = componentDataAt(this: world.coverStyles, i: i)
+    let has: Bool = componentHas(this: world.cornerRadiuses, entity: entity)
+    if rounded {
+      var needsSet: Bool = has is false
+      if has {
+        let current: CornerRadius = componentGet(this: world.cornerRadiuses, entity: entity)
+        if current.radius is not style.radius {
+          needsSet = true
+        }
+      }
+      if needsSet {
+        let radius: CornerRadius = { radius: style.radius }
+        componentSet(this: world.cornerRadiuses, entity: entity, data: radius)
+      }
+    } else if has {
+      componentRemove(this: world.cornerRadiuses, entity: entity)
+    }
+    i = i + 1
+  }
+}
