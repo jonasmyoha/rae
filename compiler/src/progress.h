@@ -5,13 +5,9 @@
 
 /* A minimal build progress display for `rae run` / `rae build` on a terminal:
  *
- *   ....
  *   [........            ] sema
  *
- * The first line is an activity ticker — one dot per second, ten cells, and
- * once they are full the dots are replaced by spaces one per second from the
- * left, so the line keeps moving even when the phase below cannot report
- * finer progress. The second line is the estimate: twenty cells filled from
+ * One line, redrawn in place: twenty cells filled from
  * the share of the build each phase took LAST time (kept under the app's
  * `.rae/apps/<app>/` directory; sensible defaults before the first build) and
  * how far into the current phase we are by elapsed time — the module loader

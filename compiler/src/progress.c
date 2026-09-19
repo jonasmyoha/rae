@@ -8,7 +8,6 @@
 #include <unistd.h>
 
 #define PROGRESS_CELLS 20
-#define PROGRESS_ACTIVITY_CELLS 10
 #define PROGRESS_TICK_MS 200
 /* After progress_hide() the ticker stays quiet this long, so a burst of
  * diagnostic lines is not interleaved with redraws. */
@@ -35,7 +34,7 @@ static struct {
   bool stop;
   bool lines;                 /* RAE_PROGRESS=lines: sentinel lines, no drawing */
   long long last_line_ms;
-  bool drawn;                 /* the two lines are currently on screen */
+  bool drawn;                 /* the bar line is currently on screen */
   long long quiet_until_ms;   /* no redraw before this (after a hide) */
   long long started_ms;
   ProgressPhase phase;
@@ -113,27 +112,14 @@ static void emit_line(long long now) {
   g.last_line_ms = now;
 }
 
-/* Called with the lock held. */
+/* Called with the lock held. One line: `[....      ] phase`, redrawn in place. */
 static void draw(long long now) {
-  char activity[PROGRESS_ACTIVITY_CELLS + 1];
-  int second = (int)((now - g.started_ms) / 1000) % (2 * PROGRESS_ACTIVITY_CELLS);
-  for (int i = 0; i < PROGRESS_ACTIVITY_CELLS; i++) {
-    bool dot = second < PROGRESS_ACTIVITY_CELLS ? i <= second
-                                                : i > second - PROGRESS_ACTIVITY_CELLS;
-    activity[i] = dot ? '.' : ' ';
-  }
-  activity[PROGRESS_ACTIVITY_CELLS] = '\0';
-
   char bar[PROGRESS_CELLS + 1];
   int filled = (int)(estimate(now) * PROGRESS_CELLS + 0.5);
   if (filled >= PROGRESS_CELLS) filled = PROGRESS_CELLS - 1;  /* full means done, and we are not */
   for (int i = 0; i < PROGRESS_CELLS; i++) bar[i] = i < filled ? '.' : ' ';
   bar[PROGRESS_CELLS] = '\0';
-
-  /* Redraw in place: back up to the first line when the pair is already
-   * there, clear each line to its end, leave the cursor after the bar. */
-  if (g.drawn) fputs("\r\033[1A", stderr);
-  fprintf(stderr, "%s\033[K\n[%s] %s\033[K", activity, bar, phase_names[g.phase]);
+  fprintf(stderr, "\r[%s] %s\033[K", bar, phase_names[g.phase]);
   fflush(stderr);
   g.drawn = true;
 }
@@ -141,7 +127,7 @@ static void draw(long long now) {
 /* Called with the lock held. */
 static void clear(void) {
   if (!g.drawn) return;
-  fputs("\r\033[K\033[1A\033[K", stderr);
+  fputs("\r\033[K", stderr);
   fflush(stderr);
   g.drawn = false;
 }
