@@ -26,8 +26,24 @@ the flagship UI example (106) and the `.raescene`-driven UI system in
 - 3D examples migrated onto `World3d` + the shared renderer; `Scene3d`
   deleted (#793–#797). Naming/namespace renames, canonical `rae format`.
 - 106 was touched heavily (≈420 file-touches in 10 days) — but for the 2D
-  renderer C→Rae slices (#907–#920), globals, renames and formatting. **Its
-  application shape was not refactored.**
+  renderer C→Rae slices (#907–#920), globals, renames and formatting. Its
+  application shape was not refactored at that point. **LANDED 2026-09-19:**
+  the 850-line `runApp` loop — ~30 loop-scoped locals hand-carried between
+  the frame phases through result structs — is now resources + systems. The
+  run's state is the `AppSession` resource (route, hero transition, scroll
+  FSM, input system, debug UI, watchers, caches — `AppSession.rae`), each
+  built world's state a `WorldFrame` (schedule, scroll target, render cache,
+  the rebuild flag), and one frame's derived values a `FrameTick`. The loop
+  body is four frame systems in `frameSystem/` — `frameWaitSystem` (wait
+  policy), `frameInputSystem` (reload signal, input, resize, scroll physics,
+  dispatch, Apply(A), UI diff, theme), `frameUpdateSystem` (data sync,
+  layout/transform, hero animation, render gate, hover), `frameRenderSystem`
+  (paint, screen switch, debug cleanup) — plus `WorldBuildSystem.rae` for the
+  outer rebuild; every one takes `app`, `session`, `world`, `frame`, `tick`
+  as `mod` parameters and nothing else crosses a phase. `runApp` is 40
+  lines. Verified pixel-for-pixel on all seven screens (the only run-to-run
+  differences are the timing text in the log overlay strip, before and
+  after) and by the 106 gate.
 - The games' HUDs already run on `UiWorld` + `.raescene` (112, 114, both
   prototypes), so the shared-UI-system premise holds: fixes in `lib/ui` flow to
   every game.
@@ -103,6 +119,9 @@ Ordered by leverage.
    last one.
 
 ## 3. Remaining — 106 specifically
+
+(Items 1–3 below landed; the application shape — the loop as resources +
+frame systems — landed 2026-09-19, see §1.)
 
 1. **`Main.rae` is one 958-line `main` function** (cap 1000; the formatter
    refuses to write over-cap files). Split into `App`/`AppTypes`/`AppCreate`

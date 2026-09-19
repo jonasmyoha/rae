@@ -1,0 +1,158 @@
+open HotReload
+open ui/Ecs
+open ui/Pipeline
+open ecs/Schedule
+open ecs/Entity
+open ui/EventLoop
+import FileWatch
+
+# The interactive session's state as RESOURCES (docs/ecs-resources.md): what
+# used to be ~30 locals of the one 850-line `runApp` loop, hand-carried
+# between the frame phases through result structs. Three records, by
+# lifetime:
+#
+#   * AppSession — outlives every world rebuild: the route, the hero
+#     transition, the scroll FSM, the input system, the debug UI, the
+#     watchers, the per-frame caches. Created once by createAppSession
+#     after the stress / screenshot modes have declined the run.
+#   * WorldFrame — per built world: its schedule, scroll target, render
+#     cache and the "rebuild me" flag. Fresh from createWorldFrame at every
+#     outer-loop rebuild.
+#   * FrameTick  — one frame's derived values (wait policy, scroll bounds,
+#     the input dispatch verdict, `now`, activity), written by the frame
+#     systems in order (frameSystem/): wait -> input -> update -> render.
+#
+# Every frame system takes `app`, the session, the world, the world frame
+# and the tick as `mod` parameters; nothing else crosses a phase boundary.
+type AppSession {
+  running: Bool
+  currentScreen: Screen
+  # Data hot reload: the watched `.raescene` files (polled at 4 Hz).
+  watcher: FileWatcher
+  # Hot-reload signal from `rae watch` (snapshot state + exit 0 on reload).
+  reloadWatcher: ReloadSignalWatcher
+  # Tracks the previous frame's `debug.menuOpen` so the loop can detect
+  # open/close transitions (blurred-backdrop lifecycle).
+  prevMenuOpen: Bool
+  # Hero (album cover) transition between screens.
+  anim: HeroAnim
+  heroDuration: Float
+  pendingSrc: Bool
+  pendingDst: Bool
+  # Page id of the destination hero entity hidden when the animation
+  # started, so the end-of-animation cleanup unhides the SAME entity.
+  pendingHeroTargetPageId: String
+  # Defers startHeroTransition from the rebuild to the first frame, so the
+  # clock does not tick during layout.
+  transitionArmed: Bool
+  # In-app debug UI; persists across world rebuilds.
+  debug: DebugSystem
+  # Drag / wheel / momentum / spring scroll physics (inputSystem/ScrollInput).
+  scrollFsm: ScrollFsm
+  # Active-album / track cache — refreshed only on album/track change, so the
+  # hot loop never deep-copies a 15-25 track Album.
+  cachedAlbumStem: String
+  cachedTrackIndex: Int
+  cachedTrackDurMs: Int
+  cachedAlbumScrollFloor: Float
+  uiRefresh: UiRefreshCache
+  lastHoverAnimDirty: Bool
+  lastFrameTime: Float64
+  # InputSystem outlives world rebuilds so a held press carries
+  # `pressedEntity` across them.
+  input: InputSystem
+  lastHoveredEntity: EntityId
+  lastCursorKind: Int
+  lastMouseButtons: Int
+  # True while album covers / history art are still streaming in.
+  assetsLoading: Bool
+  # One display frame at the monitor refresh rate; paces the wait + render cap.
+  targetFrameSec: Float
+  lastRenderTime: Float64
+  # Any activity keeps the loop rendering at display cadence until this deadline.
+  renderUntil: Float64
+}
+
+type WorldFrame {
+  schedule: Schedule
+  scrollTarget: EntityId
+  renderCache: RenderCache
+  forceRender: Bool
+  lastPressed: EntityId
+  # True once something asked for an outer-loop world rebuild (screen
+  # switch, resize, theme, debug toggle, data hot reload).
+  switching: Bool
+}
+
+type FrameTick {
+  timeout: Float
+  scrollOnThisScreen: Bool
+  scrollFloor: Float
+  scrollAnimating: Bool
+  playbackAnimating: Bool
+  busyAnimating: Bool
+  dragJustReleased: Bool
+  nextScreen: Screen
+  hadActions: Bool
+  willSwitch: Bool
+  now: Float64
+  animating: Bool
+  active: Bool
+}
+
+# The session for an interactive run. Seeds the active TAB from the restored
+# screen (sub-pages do not survive across launches — rebooting always returns
+# to the tab's base page) and the scroll position from the restore / the
+# RAE_UI_SCROLL hook.
+func createAppSession(app: mod App) ret AppSession {
+  let restored: RestoredState = restoreStartState()
+  app.appState.tab = restored.screen
+  ret AppSession {
+    running: true
+    currentScreen: visibleScreen(state: app.appState)
+    watcher: createSceneWatcher()
+    reloadWatcher: createReloadSignalWatcher()
+    prevMenuOpen: false
+    anim: createHeroAnim()
+    heroDuration: 0.30
+    pendingSrc: false
+    pendingDst: false
+    pendingHeroTargetPageId: ""
+    transitionArmed: false
+    debug: createBootDebugSystem(viewport: app.viewport)
+    scrollFsm: createScrollFsm(initialScrollY: initialScrollY(restored: restored))
+    cachedAlbumStem: ""
+    cachedTrackIndex: 0 - 1
+    cachedTrackDurMs: 0
+    cachedAlbumScrollFloor: 0.0
+    uiRefresh: createUiRefreshCache(historyRevision: 0)
+    lastHoverAnimDirty: false
+    lastFrameTime: 0.0
+    input: createInputSystem()
+    lastHoveredEntity: noEntity()
+    lastCursorKind: cursorArrow
+    lastMouseButtons: 0
+    assetsLoading: true
+    targetFrameSec: displayFrameSec()
+    lastRenderTime: 0.0
+    renderUntil: 0.0
+  }
+}
+
+func createFrameTick(session: view AppSession) ret FrameTick {
+  ret FrameTick {
+    timeout: 0.0
+    scrollOnThisScreen: false
+    scrollFloor: 0.0
+    scrollAnimating: false
+    playbackAnimating: false
+    busyAnimating: false
+    dragJustReleased: false
+    nextScreen: session.currentScreen
+    hadActions: false
+    willSwitch: false
+    now: 0.0
+    animating: false
+    active: false
+  }
+}

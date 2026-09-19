@@ -1,0 +1,129 @@
+open ui/Ecs
+open ui/Pipeline
+open ecs/Schedule
+open ecs/Entity
+open ui/EventLoop
+open ui/animationSystem/AnimationSystem
+open ecs/Event
+
+# Frame phase 2 — update. The data sync (playback / Spotify / history /
+# assets update state first; the UI-diff and overlay systems translate the
+# changed data into component mutations), the layout + transform re-run,
+# the hero animation, and the render-gate decision with the hover easing.
+# Writes `now`, `animating` and `active` into the tick.
+func frameUpdateSystem(
+  app: mod App
+  session: mod AppSession
+  world: mod UiWorld
+  frame: mod WorldFrame
+  tick: mod FrameTick
+) {
+  let appState: mod AppState => app.appState
+  let playback: mod PlaybackState => app.playback
+  let input: view InputSystem => session.input
+  tick.now = uiNowSeconds()
+  var applyPlaybackFrame: Bool = false
+  if frame.forceRender or tick.hadActions {
+    applyPlaybackFrame = true
+  }
+  if playback.isPlaying {
+    let wheelAgeSec: Float = (tick.now - session.scrollFsm.lastWheelTime) as Float
+    if wheelAgeSec >= 0.25 {
+      applyPlaybackFrame = true
+    }
+  }
+  let dataSync: FrameDataSyncResult = syncFrameData(
+    world: world
+    scenes: app.scenes
+    appState: appState
+    playback: playback
+    spotifyState: app.spotifyState
+    spotifyPoller: app.spotifyPoller
+    texReg: app.texReg
+    uiRefresh: session.uiRefresh
+    visible: session.currentScreen
+    viewport: app.viewport
+    now: tick.now
+    applyPlaybackFrame: applyPlaybackFrame
+  )
+  session.assetsLoading = dataSync.assetsLoading
+
+  # Re-run layout + transform if any tracked component changed since last
+  # frame (scroll handlers mutate Offset in place). Both short-circuit when
+  # no input table generation bumped. Runs BEFORE the active check so a
+  # scroll-only frame still ends up dirty downstream: Offset mutate → layout
+  # reruns → ComputedRect bumps → transform reruns → WorldTransform2D bumps →
+  # cacheDirty trips → active.
+  runFrameLayoutTransform(
+    world: world
+    viewport: app.viewport
+    schedule: frame.schedule
+    gpuUi: app.gpuUi
+    subScenes: app.scenes.subScenes
+  )
+
+  let animResult: FrameAnimationResult = runFrameAnimation(
+    world: world
+    anim: session.anim
+    appState: appState
+    willSwitch: tick.willSwitch
+    now: tick.now
+    heroDuration: session.heroDuration
+    transitionArmed: session.transitionArmed
+    pendingSrc: session.pendingSrc
+    pendingHeroTargetPageId: session.pendingHeroTargetPageId
+  )
+  tick.animating = animResult.animating
+  session.transitionArmed = animResult.transitionArmed
+  session.pendingSrc = animResult.pendingSrc
+  session.pendingHeroTargetPageId = "{animResult.pendingHeroTargetPageId}"
+
+  # Frame-gate decision: does anything warrant a full begin/render/endDrawing
+  # this frame? Inputs: forceRender, dirty caches, input events, hover/button
+  # changes for the debug-outline overlay (RenderDecide.rae).
+  let activeDecision: RenderActiveDecision = decideActive(
+    world: world
+    renderCache: frame.renderCache
+    input: input
+    debug: session.debug
+    forceRender: frame.forceRender
+    animating: tick.animating
+    prevPressed: frame.lastPressed
+    prevHovered: session.lastHoveredEntity
+    prevMouseButtons: session.lastMouseButtons
+    viewport: app.viewport
+  )
+  tick.active = activeDecision.active or session.assetsLoading
+  let currentHovered: EntityId = activeDecision.currentHovered
+  syncDesktopCursor(world: world, hovered: currentHovered, lastKind: session.lastCursorKind)
+  # hoverScale is a lib/ui system too: gated through the schedule like the
+  # rest (its declared sets never skip today).
+  if uiShouldRun(schedule: frame.schedule, world: world, index: uiSystemHoverScale) {
+    session.lastHoverAnimDirty = hoverScaleSystem(
+      world: world
+      hovered: currentHovered
+      deltaTime: (tick.now - session.lastFrameTime) as Float
+    )
+  }
+  session.lastFrameTime = tick.now
+  if session.lastHoverAnimDirty {
+    tick.active = true
+  }
+  # Any activity this frame extends the active-render window.
+  if tick.active {
+    session.renderUntil = tick.now + 0.5
+  }
+  session.lastHoveredEntity = currentHovered
+  session.lastMouseButtons = activeDecision.currentMouseButtons
+  frame.lastPressed = input.pressedEntity
+
+  # Render decision trace: whether we'll paint this frame and why. If
+  # `active=false` repeatedly while the UI is visibly frozen, the bug is in
+  # the dirty signals; if `active=true` but the UI is frozen, it is
+  # downstream in renderSystem / endDrawing.
+  if app.loopDebugEnabled {
+    log(
+      "[loop {app.loopDebugFrame}] uiActions={eventCount(this: input.uiActions)} pressed={input.pressedEntity.index} animating={tick.animating} active={tick.active} decide={activeDecision.active} assets={session.assetsLoading} hover={session.lastHoverAnimDirty}"
+    )
+  }
+}
