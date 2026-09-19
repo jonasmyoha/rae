@@ -2,6 +2,7 @@ open ui/Ecs
 open ui/EventLoop
 open ui/WindowGeometry
 open ui/scrollRootSystem/ScrollRootSystem
+open ecs/ComponentTable
 
 # Frame phase 0 — the wait policy. Decides how long to block for OS events
 # (busy-render while interacting / animating / loading, one frame while
@@ -55,7 +56,8 @@ func frameWaitSystem(
   # every frame as fast as the machine allows (no FPS cap). Playback alone
   # stays on the throttled 60Hz path so a playing song doesn't peg a core.
   # Idle → blocking event-wait (~0% CPU).
-  tick.busyAnimating = session.anim.active or tick.scrollAnimating or session.lastHoverAnimDirty or session.assetsLoading or uiPointerButtonDown(
+  let heroInFlight: Bool = componentCount(this: world.heroTransitions) > 0
+  tick.busyAnimating = heroInFlight or tick.scrollAnimating or session.lastHoverAnimDirty or session.assetsLoading or uiPointerButtonDown(
     button: mouseButtonLeft
   )
   tick.timeout = 0.0
@@ -76,7 +78,7 @@ func frameWaitSystem(
     app.loopDebugFrame = app.loopDebugFrame + 1
     let mouseDown: Bool = uiPointerButtonDown(button: mouseButtonLeft)
     log(
-      "[loop {app.loopDebugFrame}] screen={screenToInt(s: session.currentScreen)} scrollY={scrollFsm.scrollY} vel={scrollFsm.velocity} animA={session.anim.active} animP={playback.isPlaying} animS={tick.scrollAnimating} mouse={mouseDown} timeout={tick.timeout}"
+      "[loop {app.loopDebugFrame}] screen={screenToInt(s: session.currentScreen)} scrollY={scrollFsm.scrollY} vel={scrollFsm.velocity} animA={heroInFlight} animP={playback.isPlaying} animS={tick.scrollAnimating} mouse={mouseDown} timeout={tick.timeout}"
     )
   }
   # When RAE_AUTO_EXIT_SEC is set, clamp the wait so the deadline actually

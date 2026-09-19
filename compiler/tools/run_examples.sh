@@ -319,9 +319,13 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # `ScrollRoot`, rubber-bands, and the spring settles EXACTLY at that
           # floor — the `[scroll-drag] settled` line's scrollY must equal its
           # floor, which verifies drag -> release -> spring without a pointer.
-          # Finally a fake Spotify snapshot (RAE_UI_SPOTIFY_FAKE) proves the
+          # A fake Spotify snapshot (RAE_UI_SPOTIFY_FAKE) proves the
           # now-playing text is a binding: spotifyBindingSystem writes the
           # TextBinding nodes from SpotifyState (spotifySystem/SpotifyView).
+          # Finally a Library -> album tap runs the hero transition as an
+          # ECS entity (ui/animationSystem/HeroTransitionSystem): the log
+          # must show it start (t=0, both rects) and land (done), and the
+          # resting frame after it is non-blank.
           SCREENSHOT="$TMP_OUT/mobile-ui.bmp"
           if (cd .. && RAE_UI_SCREEN=home RAE_UI_NO_SPOTIFY=1 RAE_AUTO_EXIT_SEC=1 \
              RAE_SDL_HEADLESS_MS=1000 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
@@ -341,12 +345,18 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              && (cd .. && RAE_UI_SCREEN=player RAE_UI_SPOTIFY_FAKE='Bound Title|Bound Artist|Bound Album' \
              RAE_UI_PAUSED=1 RAE_AUTO_EXIT_SEC=2 RAE_SDL_HEADLESS_MS=2000 \
              perl -e 'alarm shift; exec @ARGV' 40 "$TMP_OUT/app") > "$TMP_OUT/spotify.log" 2>&1 \
-             && grep -aq '\[spotify-bind\] title=Bound Title artist=Bound Artist' "$TMP_OUT/spotify.log"; then
-            echo "PASS: $EXAMPLE_NAME (Home screenshot, action audit clean, idle frame runs 0 app systems, scripted drag springs back to the ScrollRoot floor + Spotify text bound: $(grep '\[scroll-drag\] settled' "$TMP_OUT/drag.log"))"
+             && grep -aq '\[spotify-bind\] title=Bound Title artist=Bound Artist' "$TMP_OUT/spotify.log" \
+             && (cd .. && RAE_UI_SCREEN=library RAE_UI_SCREEN_SEQ='album.open.bjork_post' RAE_UI_NO_SPOTIFY=1 \
+             RAE_UI_PAUSED=1 RAE_AUTO_EXIT_SEC=3 RAE_SDL_HEADLESS_MS=3000 RAE_GPU2D_SCREENSHOT="$TMP_OUT/hero.bmp" \
+             perl -e 'alarm shift; exec @ARGV' 40 "$TMP_OUT/app") > "$TMP_OUT/hero.log" 2>&1 \
+             && grep -aq '\[hero\] start key=bjork_post from=' "$TMP_OUT/hero.log" \
+             && grep -aq '\[hero\] done key=bjork_post' "$TMP_OUT/hero.log" \
+             && python3 tools/assert_nonblank_bmp.py "$TMP_OUT/hero.bmp" --min-colors=50 > "$TMP_OUT/hero-shot.log" 2>&1; then
+            echo "PASS: $EXAMPLE_NAME (Home screenshot, action audit clean, idle frame runs 0 app systems, scripted drag springs back to the ScrollRoot floor + Spotify text bound + hero transition flies and lands: $(grep '\[scroll-drag\] settled' "$TMP_OUT/drag.log"))"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (mobile UI screenshot / scripted drag gate)"
-            cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" "$TMP_OUT/idle.log" "$TMP_OUT/drag.log" "$TMP_OUT/spotify.log" 2>/dev/null | grep -av '^\[present\]' | sed 's/^/  /'
+            cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" "$TMP_OUT/idle.log" "$TMP_OUT/drag.log" "$TMP_OUT/spotify.log" "$TMP_OUT/hero.log" "$TMP_OUT/hero-shot.log" 2>/dev/null | grep -av '^\[present\]' | sed 's/^/  /'
             ((FAILED++))
           fi
         elif [ "$EXAMPLE_NAME" = "119_ocean_fft" ]; then

@@ -65,7 +65,8 @@ func playbackIconSystem(world: mod UiWorld, playback: view PlaybackState) pub re
 # Every `PlaybackCover`: seeded once from the browsed album (so a fresh mount
 # shows the browsed cover), then re-pointed to the playing track's art when
 # `nowPlayingRevision` moves — by identity, no re-mount. Nothing playing yet
-# leaves the browsed cover untouched. Returns whether any cover changed.
+# leaves the browsed cover untouched; its `HeroWidget` key follows the
+# browsed stem. Returns whether any cover changed.
 func playbackCoverSystem(
   world: mod UiWorld
   playback: view PlaybackState
@@ -97,6 +98,16 @@ func playbackCoverSystem(
       let built: PlaybackCover = { builtRevision: playback.nowPlayingRevision }
       componentSet(this: world.playbackCovers, entity: entity, data: built)
       changed = true
+    }
+    # The cover's `HeroWidget` key is the browsed album's stem (a scene
+    # authors the `"albumCover"` placeholder), so a page-to-page hero
+    # transition finds it by the same key as the tile it flies from.
+    if componentHas(this: world.heroWidgets, entity: entity) {
+      let hero: HeroWidget = componentGet(this: world.heroWidgets, entity: entity)
+      if hero.key is not state.currentAlbumStem {
+        let bound: HeroWidget = { key: "{state.currentAlbumStem}" }
+        componentSet(this: world.heroWidgets, entity: entity, data: bound)
+      }
     }
     i = i + 1
   }

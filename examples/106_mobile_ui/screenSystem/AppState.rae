@@ -12,10 +12,10 @@ open ecs/Entity
 # tracks which album the user is currently inside.
 #
 # Texture-registry keys for album covers are exactly the album
-# `stem`, so `state.currentAlbumStem` doubles as the hero-rebind
-# target: scenes author the placeholder `"albumCover"` key and
-# main.rae calls `rebindHero(world, "albumCover", state.currentAlbumStem)`
-# after building Album / NowPlaying worlds.
+# `stem`, so `state.currentAlbumStem` doubles as the hero key: scenes
+# author the placeholder `"albumCover"` and the cover bindings
+# (playbackCoverSystem, albumHeaderSystem, the tile list bindings) write
+# the stem onto each `HeroWidget`.
 type AppState {
   # #764: the app-owned theme (active palette + scene token tables + repaint gen).
   # Was the module-global activeTheme/g_active* — 106 rebuilds its UiWorld per

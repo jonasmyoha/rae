@@ -6,18 +6,21 @@ open ecs/ComponentTable
 open ui/layoutSystem/LayoutSystem
 open ui/Transform
 open ui/scrollRootSystem/ScrollRootSystem
+open ui/animationSystem/HeroTransitionSystem
 
 # Persistent-world screen-switch handler. Called from the inner loop
 # once per frame after `dispatchActions` has chosen `nextScreen`:
 #   * willSwitch=true  → unmount the affected pages, re-mount with
-#                        fresh data, re-bind heroes, capture hero
-#                        rects, arm the transition, flip Active.
+#                        fresh data, flip Active, and spawn the hero
+#                        transition entity when both pages show the
+#                        same `HeroWidget` key (ui/animationSystem/
+#                        HeroTransitionSystem).
 #   * willSwitch=false → poll the hot-reload watcher and possibly
 #                        force an outer rebuild.
 #
 # Returns a `ScreenSwitchResult` the caller copies back into its
 # locals — `currentScreen`, cached album/track values, scrollTarget,
-# hero pending flags, and the outer-rebuild `switching` signal.
+# and the outer-rebuild `switching` signal.
 #
 # Scroll across re-mounts is the session's `ScrollMemory` (lib/ui/
 # scrollRootSystem): a page re-mounted for FRESH data (Home / History /
@@ -31,8 +34,6 @@ type ScreenSwitchResult {
   cachedAlbumStem: String
   cachedTrackIndex: Int
   switching: Bool
-  pendingSrc: Bool
-  pendingHeroTargetPageId: String
 }
 
 func handleScreenSwitch(
@@ -40,7 +41,6 @@ func handleScreenSwitch(
   scenes: mod AlbumScenes
   playback: mod PlaybackState
   appState: mod AppState
-  anim: mod HeroAnim
   schedule: mod Schedule
   input: mod InputSystem
   scrollFsm: mod ScrollFsm
@@ -53,9 +53,6 @@ func handleScreenSwitch(
   cachedAlbumStem: view String
   cachedTrackIndex: view Int
   cachedTrackDurMs: view Int
-  heroDuration: view Float
-  prevPendingSrc: view Bool
-  prevPendingHeroTargetPageId: view String
   viewport: view Viewport
   reg: view TextureRegistry
 ) ret ScreenSwitchResult {
@@ -66,8 +63,6 @@ func handleScreenSwitch(
     cachedAlbumStem: "{cachedAlbumStem}"
     cachedTrackIndex: cachedTrackIndex
     switching: false
-    pendingSrc: prevPendingSrc
-    pendingHeroTargetPageId: "{prevPendingHeroTargetPageId}"
   }
 
   let outgoingPageId: String = pageIdForScreen(screen: currentScreen)
@@ -99,7 +94,10 @@ func handleScreenSwitch(
       scenes: scenes
       viewport: viewport
     )
-    rebindHero(world: world, fromKey: "albumCover", toKey: appState.currentAlbumStem)
+    # The fresh album page's header binding runs now (not just in the next
+    # observation pass) so its hero carries the stem the transition below
+    # looks for.
+    albumHeaderSystem(world: world, state: appState)
     # Dock stays mounted; its MiniThumb cover follows the nowPlaying
     # instance revision through its `PlaybackCover` binding (#268, #981)
     # rather than an imperative patch here — so it shows what's *playing*,
@@ -132,7 +130,7 @@ func handleScreenSwitch(
         scenes: scenes
         viewport: viewport
       )
-      rebindHero(world: world, fromKey: "albumCover", toKey: appState.currentAlbumStem)
+      albumHeaderSystem(world: world, state: appState)
       setPageActive(world: world, pageId: albumPageId, active: false)
       setPageActive(world: world, pageId: playerPageId, active: false)
     }
@@ -198,42 +196,32 @@ func handleScreenSwitch(
   # the notch reserve until something else dirties the layout.
   let switchSafe: Insets = applySafeAreas(world: world, viewport: viewport)
 
-  # Hero animation. Both source and target live in the same persistent
-  # world; capture them back-to-back, page-scoped, so the lookup picks
-  # the right entity on each side. The intermediate layout+transform
-  # flush gives the freshly-mounted target page a valid WorldTransform2D
-  # before we read its rect.
+  # Hero transition. Both source and target live in the same persistent
+  # world: the outgoing page's `HeroWidget` for the browsed album and the
+  # incoming page's. The intermediate layout+transform flush gives the
+  # freshly-mounted target page a valid WorldTransform2D before its rect
+  # is read; `spawnHeroTransition` then creates the overlay entity that
+  # flies between the two (ui/animationSystem/HeroTransitionSystem) and
+  # hides the destination until it lands.
   let heroKey: String = appState.currentAlbumStem
-  let gotSrc: Bool = captureHeroSourceOnPage(
-    anim: anim
-    world: world
-    pageId: outgoingPageId
-    key: heroKey
-  )
-  if gotSrc {
+  let heroSource: EntityId = findHeroOnPage(world: world, pageId: outgoingPageId, key: heroKey)
+  if isNone(this: heroSource) is false {
     if uiShouldRun(schedule: schedule, world: world, index: uiSystemLayout) {
       layoutSystem(world: world)
     }
     if uiShouldRun(schedule: schedule, world: world, index: uiSystemTransform) {
       transformSystem(world: world)
     }
-    let gotDst: Bool = captureHeroTargetOnPage(
-      anim: anim
+    let heroTarget: EntityId = findHeroOnPage(world: world, pageId: incomingPageId, key: heroKey)
+    let started: Bool = spawnHeroTransition(
       world: world
-      pageId: incomingPageId
       key: heroKey
+      source: heroSource
+      target: heroTarget
+      now: uiNowSeconds()
+      duration: heroTransitionSec
+      layerId: "dialog"
     )
-    # The hero fly-between-pages overlay is not drawn on the gpu2d backend
-    # (HeroGpu2d.rae keeps only the capture helpers), so hiding the
-    # destination art while the transition "runs" had exactly one visible
-    # effect: every page landed with its album cover blacked out for the
-    # duration, then popped in. The rects are still captured above for the
-    # day the overlay comes back; until then the destination stays visible
-    # and no transition is armed.
-    if gotDst {
-      result.pendingSrc = false
-      result.pendingHeroTargetPageId = ""
-    }
   }
 
   result.newScreen = nextScreen
