@@ -696,6 +696,13 @@ banned-terms gate; a `footgun` that stops reproducing FAILS as `FIXED?` on
 purpose — flip it to `handles` in the same commit as the compiler fix, with
 `fixedBy` filled in. Never "fix" a FIXED? by loosening its expect.
 
+**naga is a test-suite dependency (2026-09-19).** A declared shader
+(`shader(files: [...])`, docs/shaders-and-the-compiler.md) is validated with
+the `naga` CLI at build time, and `run_tests.sh` / `run_examples.sh` set
+`RAE_SHADER_VALIDATE=require`, so a machine without it FAILS every shader
+fixture instead of silently skipping. `make setup` installs it
+(`cargo install naga-cli`); `rae toolchain status` shows which one is found.
+
 **Only ONE test run at a time.** Concurrent `make test` / `watch-tests.sh`
 processes corrupt each other's build cache and interleave the shared log, which
 shows up as spurious failures. Before starting a run, KILL any earlier one:

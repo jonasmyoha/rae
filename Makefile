@@ -34,6 +34,14 @@ setup:
 	  echo "warning: Bun is not installed; skipping Devtools Web dependencies (install Bun, then: make devtools-install)" >&2; \
 	fi
 	@$(MAKE) -C compiler build
+	@if command -v naga >/dev/null 2>&1 || [ -x "$$HOME/.cargo/bin/naga" ]; then \
+	  echo "naga found: declared shaders are validated at build time"; \
+	elif command -v cargo >/dev/null 2>&1; then \
+	  echo "Installing naga-cli (the WGSL validator shader(files:) runs at build time)..."; \
+	  cargo install naga-cli; \
+	else \
+	  echo "warning: naga not installed and cargo is not available; declared shaders will not be validated at build time (install Rust, then: cargo install naga-cli)" >&2; \
+	fi
 	@echo "Setup complete. Compiler: ./compiler/bin/rae   Devtools Web: make dev"
 
 # The banned-terms gate (#1016) on its own: every tracked text file plus the

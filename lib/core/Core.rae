@@ -55,6 +55,20 @@ func runtimeWarning(message: view String) {
   }
 }
 
+# A declared shader composition (docs/shaders-and-the-compiler.md). Produced
+# only by the compile-time construct `shader(files: ["lib/noise.wgsl", ...])`:
+# the compiler resolves the parts at build time, composes them in order (a
+# `// --- <path>` marker before each), validates the text with naga and
+# embeds it here — the runtime never opens a `.wgsl` file for it. A Shader is
+# a VALUE, never collapsed to a String at a call site: `sources` (the
+# resolved part paths) and `generation` are what an in-process reload will
+# use to re-compose and swap the pipeline that owns it.
+type Shader {
+  text: String
+  sources: List(String)
+  generation: Int
+}
+
 func nativeNowMs() unsafe extern("rae_ext_nowMs") ret Int
 
 func nowMs() ret Int {
