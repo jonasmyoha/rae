@@ -394,6 +394,21 @@ RAE_SKY_WGSL
 "fn fresnel(VoH: f32, f0: vec3<f32>) -> vec3<f32> {\n"
 "  return f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - VoH, 5.0);\n"
 "}\n"
+/* Ambient (environment) specular: the split-sum BRDF integral, Karis'
+ * analytic fit (UE4 mobile), scale/bias on f0 by roughness and NoV. This
+ * replaces `fresnel(NoV, f0) * (1 - 0.7 * rough)`, which was a Schlick term
+ * for a MIRROR: at a grazing view it went to 1 on any surface, so a low
+ * third-person camera saw the sky poured over the ground — the meadow and
+ * the road greyed out with distance, and no albedo could fix it. The fit is
+ * ~0.03 for a rough dielectric where the old term reached 0.34. */
+"fn envBrdf(f0: vec3<f32>, rough: f32, NoV: f32) -> vec3<f32> {\n"
+"  let c0 = vec4<f32>(-1.0, -0.0275, -0.572, 0.022);\n"
+"  let c1 = vec4<f32>(1.0, 0.0425, 1.04, -0.04);\n"
+"  let r = rough * c0 + c1;\n"
+"  let a004 = min(r.x * r.x, exp2(-9.28 * NoV)) * r.x + r.y;\n"
+"  let ab = vec2<f32>(-1.04, 1.04) * a004 + r.zw;\n"
+"  return f0 * ab.x + vec3<f32>(ab.y);\n"
+"}\n"
 "@fragment\n"
 "fn fs(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {\n"
 "  let px = vec2<i32>(pos.xy);\n"
@@ -485,7 +500,7 @@ RAE_SKY_WGSL
  * The forward pass blends on N.y because it predates the convention — that
  * disagreement is real and tracked, and this is the correct one. */
 "  let hemi = mix(L.ambGround.rgb, L.ambSky.rgb, N.z * 0.5 + 0.5);\n"
-"  let ambF = fresnel(NoV, f0);\n"
+"  let ambF = envBrdf(f0, rough, NoV);\n"
 /* TOON (#396), rebuilt to match how stylised shaders actually work.
  *
  * The first attempt quantised the PBR result — floor(N.L * bands) times
@@ -564,7 +579,7 @@ RAE_SKY_WGSL
 "  }\n"
 "  var ssao = 1.0;\n"
 "  if (aoW > 0.0) { ssao = aoSum / aoW; }\n"
-"  let ambient = (hemi * albedo * (1.0 - metallic) + hemi * ambF * (1.0 - rough * 0.7)) * ao * ssao;\n"
+"  let ambient = (hemi * albedo * (1.0 - metallic) + hemi * ambF) * ao * ssao;\n"
 /* Emissive tints by albedo, matching how it is authored: an emitter's base
  * colour IS the colour it emits, which is why one scalar suffices. */
 "  let emit = albedo * emissive;\n"
