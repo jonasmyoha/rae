@@ -19,45 +19,6 @@ open ecs/Entity
 open ecs/ComponentTable
 open ui/renderSystem/RenderSystem
 
-# Persistent-world entrypoint. Mounts the profile page into `world` and
-# returns the page-root entity, tagged `PageRoot{profilePageId}` by the mount.
-func mountProfilePage(
-  world: mod UiWorld
-  reg: view TextureRegistry
-  scenes: view AlbumScenes
-  state: view AppState
-  viewport: view Viewport
-) pub ret EntityId {
-  let scene: view Scene => scenes.profile
-  let overrides: List(SceneOverride) = emptyOverrides()
-  let pageIdCopy: String = "{profilePageId}"
-  let profileLabel: String = "Profile"
-  let mount: EntityId = mountPageOrError(
-    world: world
-    pageId: own pageIdCopy
-    scene: scene
-    overrides: overrides
-    w: viewport.areaDuW
-    h: viewport.areaDuH
-    sceneLabel: profileLabel
-    subScenes: scenes.subScenes
-  )
-  # Reserve the notch at the top edge; safeAreaSystem folds the active device
-  # preset's inset in. Applied here so an in-place re-mount keeps the tag.
-  attachSafeAreaEdges(
-    world: world
-    entity: mount
-    top: 1.0
-    bottom: 0.0
-  )
-
-  # First-frame values: the per-frame systems run again before every render,
-  # but a fresh mount should never show the scene's placeholder "0".
-  profileStatsSystem(world: world, state: state)
-  avatarSystem(world: world, reg: reg)
-  ret mount
-}
-
 # ----- ProfileStat system --------------------------------------------------
 
 # The live text for one stat kind. Pulls counts from the album catalogue so

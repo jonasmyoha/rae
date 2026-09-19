@@ -104,10 +104,20 @@ transient loader cursors (`historyArt`, `artworkFetch`, `assetLoad`). It is
 saved to `app_cache/` on every action and at exit, restored at boot.
 
 One `UiWorld` holds every screen at once. Screens are **page entities**: a
-`ScreenPage` table (`createScreenPages()`) lists each screen's page id, the
-page root is tagged `PageRoot{id}`, and switching screens toggles `Active` on
-the pages (`buildAppWorldFor(visible)`). There are no per-screen world
-builders and no `if screen is` ladders in the router.
+`ScreenPage` table (`createScreenPages()`) lists each screen's page id (also
+the key of its scene in `AlbumScenes.pages` and the name a `NavTab`
+selects), its label and whether it is re-mounted afresh on entry; ONE
+`mountScreenPage` (screenSystem/ScreenPageMount.rae) mounts every row — a
+single `mountPageOrError`, nothing per page — the page root is tagged
+`PageRoot{id}`, and switching screens toggles `Active` on the pages
+(`buildAppWorldFor(visible)`). The safe-area reserve and the centred extent
+are the scene root's authored `SafeArea` / `ExtentAnchor`; every value from
+app state is a binding component its system writes in the observation step
+before the first paint (the lists, the profile stats, the album header, the
+playback texts and M:SS times, the Home "Recently played" `HasHistory`
+gate), so a fresh mount needs no first run. There are no per-screen world
+builders, no per-page mounters and no `if screen is` ladders in the app
+outside the saved-state ordinal map.
 
 Scrolling is data too: the scene authors a `ScrollRoot` on the node that
 scrolls (`"Body": { "ScrollRoot": { "axis": "y", "floor": "content",

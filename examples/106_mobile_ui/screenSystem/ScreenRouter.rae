@@ -45,31 +45,120 @@ enum Screen {
 # `History` is the full play-history sub-page. Pushed from a tap
 # on the "Recently played" header on Home. NOT a tab.
 
-# One row per screen — the page entity's id (#948). The router LOOKS UP rows
-# in this table instead of branching on the `Screen` enum: the old
-# `if screen is …` ladders in pageIdForScreen / buildAppWorld /
-# buildScreenWorld are gone. Each mounted page root already carries a lib
-# `PageRoot{id}` with the same `pageId`, so a row resolves to its entity with
-# `findPageRootEntity` — the pages ARE entities; this is the data the router
-# needs about them. Whether and how far a page scrolls is not a row property
-# any more: the scene authors a `ScrollRoot` on the scrolling node and the lib
-# scrollRootSystem computes the floor from the laid-out content.
+# One row per screen (#948): the page entity's id — which is also the key of
+# its scene in `AlbumScenes.pages` and the name a `NavTab` selects — the
+# human label (the mount-failure block, the `[state] saved` log) and whether
+# the page is re-mounted afresh on entry. The router LOOKS UP rows in this
+# table instead of branching on the `Screen` enum: there is no `if screen
+# is …` ladder left in the app outside the saved-state ordinal map. Every
+# page is mounted by the ONE `mountScreenPage` (ScreenPageMount.rae) from
+# its row; each mounted page root carries a lib `PageRoot{id}` with the same
+# `pageId`, so a row resolves to its entity with `findPageRootEntity` — the
+# pages ARE entities; this is the data the router needs about them. Whether
+# and how far a page scrolls is not a row property: the scene authors a
+# `ScrollRoot` on the scrolling node and the lib scrollRootSystem computes the
+# floor from the laid-out content; the safe-area reserve is the scene's
+# authored `SafeArea` too.
+#
+# `refreshOnEntry` is false for every page today: the lists re-bind in place
+# from their sources (#996) and the Home "Recently played" section follows
+# the history through `HasHistory`, so a page entered again shows current
+# data — and keeps its scroll position — without a re-mount. A page that
+# ever needs a fresh mount on entry flips the flag, not the code.
 type ScreenPage {
   screen: Screen
   pageId: String
+  label: String
+  refreshOnEntry: Bool
 }
 
 # The table, built by its cold callers (screen switch, world rebuild).
 func createScreenPages() ret List(ScreenPage) {
   let rows: List(ScreenPage) = List.create(ScreenPage, cap: 7)
-  rows.add(value: ScreenPage { screen: Screen.home, pageId: "{homePageId}" })
-  rows.add(value: ScreenPage { screen: Screen.library, pageId: "{libraryPageId}" })
-  rows.add(value: ScreenPage { screen: Screen.album, pageId: "{albumPageId}" })
-  rows.add(value: ScreenPage { screen: Screen.player, pageId: "{playerPageId}" })
-  rows.add(value: ScreenPage { screen: Screen.search, pageId: "{searchPageId}" })
-  rows.add(value: ScreenPage { screen: Screen.profile, pageId: "{profilePageId}" })
-  rows.add(value: ScreenPage { screen: Screen.history, pageId: "{historyPageId}" })
+  rows.add(
+    value: ScreenPage {
+      screen: Screen.home
+      pageId: "{homePageId}"
+      label: "Home"
+      refreshOnEntry: false
+    }
+  )
+  rows.add(
+    value: ScreenPage {
+      screen: Screen.library
+      pageId: "{libraryPageId}"
+      label: "Library"
+      refreshOnEntry: false
+    }
+  )
+  rows.add(
+    value: ScreenPage {
+      screen: Screen.album
+      pageId: "{albumPageId}"
+      label: "Album"
+      refreshOnEntry: false
+    }
+  )
+  rows.add(
+    value: ScreenPage {
+      screen: Screen.player
+      pageId: "{playerPageId}"
+      label: "Player"
+      refreshOnEntry: false
+    }
+  )
+  rows.add(
+    value: ScreenPage {
+      screen: Screen.search
+      pageId: "{searchPageId}"
+      label: "Search"
+      refreshOnEntry: false
+    }
+  )
+  rows.add(
+    value: ScreenPage {
+      screen: Screen.profile
+      pageId: "{profilePageId}"
+      label: "Profile"
+      refreshOnEntry: false
+    }
+  )
+  rows.add(
+    value: ScreenPage {
+      screen: Screen.history
+      pageId: "{historyPageId}"
+      label: "History"
+      refreshOnEntry: false
+    }
+  )
   ret rows
+}
+
+# The row for a screen (the player's when the screen has no row).
+func screenPageFor(screen: view Screen) ret ScreenPage {
+  let pages: List(ScreenPage) = createScreenPages()
+  loop let page: view ScreenPage in pages {
+    if page.screen is screen {
+      ret ScreenPage {
+        screen: page.screen
+        pageId: "{page.pageId}"
+        label: "{page.label}"
+        refreshOnEntry: page.refreshOnEntry
+      }
+    }
+  }
+  ret ScreenPage {
+    screen: Screen.player
+    pageId: "{playerPageId}"
+    label: "Player"
+    refreshOnEntry: false
+  }
+}
+
+# The human label of a screen (log lines).
+func pageLabelForScreen(screen: view Screen) ret String {
+  let page: ScreenPage = screenPageFor(screen: screen)
+  ret "{page.label}"
 }
 
 func buildScreenWorld(
@@ -93,16 +182,10 @@ func buildScreenWorld(
   )
 }
 
-# Maps a Screen to the PageRoot id used for its mount. Symmetric to
-# the `mountXxxPage` calls in each screen builder.
+# Maps a Screen to the PageRoot id its page is mounted under.
 func pageIdForScreen(screen: Screen) pub ret String {
-  let pages: List(ScreenPage) = createScreenPages()
-  loop let page: view ScreenPage in pages {
-    if page.screen is screen {
-      ret "{page.pageId}"
-    }
-  }
-  ret "{playerPageId}"
+  let page: ScreenPage = screenPageFor(screen: screen)
+  ret "{page.pageId}"
 }
 
 # Persistent-world entrypoint: one UiWorld with ALL four screen pages
@@ -150,60 +233,20 @@ func buildAppWorldFor(
   # layer entities ("content" / "dock" / "back-button" / "dialog" /
   # "debug") already exist and look them up by id.
   createStandardLayers(world: world)
-  let homePage: EntityId = mountHomePage(
-    world: world
-    scenes: scenes
-    state: state
-    playback: playback
-    viewport: viewport
-  )
-  let libraryPage: EntityId = mountLibraryPage(
-    world: world
-    scenes: scenes
-    state: state
-    playback: playback
-    viewport: viewport
-  )
-  let albumPage: EntityId = mountAlbumPage(
-    world: world
-    scenes: scenes
-    state: state
-    playback: playback
-    viewport: viewport
-  )
-  let nowPlayingPage: EntityId = mountNowPlayingPage(
-    world: world
-    scenes: scenes
-    playback: playback
-    state: state
-    reg: texReg
-    viewport: viewport
-  )
-  let profilePage: EntityId = mountProfilePage(
-    world: world
-    reg: texReg
-    scenes: scenes
-    state: state
-    viewport: viewport
-  )
-  let searchPage: EntityId = mountSearchPage(world: world, scenes: scenes, viewport: viewport)
-  let historyPage: EntityId = mountHistoryPage(
-    world: world
-    scenes: scenes
-    state: state
-    viewport: viewport
-  )
-
-  # Visibility: only the `visible` screen's page is Active=true. Each page root
-  # was tagged PageRoot{id} by its mount above, so the ScreenPage table resolves
-  # every page entity by id — no per-screen branch.
+  # Every page from the table, by the one mounter; only the `visible`
+  # screen's page is Active=true. The page's data (lists, stats, the
+  # album header, the playback texts) lands through its binding components
+  # when the frame's observation step runs before the first paint.
   let pages: List(ScreenPage) = createScreenPages()
   loop let page: view ScreenPage in pages {
-    let root: EntityId = findPageRootEntity(world: world, pageId: page.pageId)
-    if isNone(this: root) is false {
-      let active: Active = { value: page.screen is visible }
-      componentSet(this: world.actives, entity: root, data: active)
-    }
+    let root: EntityId = mountScreenPage(
+      world: world
+      page: page
+      scenes: scenes
+      viewport: viewport
+    )
+    let active: Active = { value: page.screen is visible }
+    componentSet(this: world.actives, entity: root, data: active)
   }
 
   # Shared overlays — always Active.

@@ -1,8 +1,8 @@
-# ScreenSafeArea — the safe-area and top-bar layout of the screen router
-# (#918 split of ScreenRouter for the 1000-line cap): applySafeAreas and the
-# dock lift, the safe-area edge attachment, the page top bar and the
-# history-view refresh. ScreenRouter keeps the Screen enum, the world
-# builders, the app state and dispatchActions.
+# ScreenSafeArea — the safe-area pass of the screen router (#918 split of
+# ScreenRouter for the 1000-line cap): applySafeAreas writes the device
+# insets onto every scene-authored `SafeArea` (each page root carries one).
+# ScreenRouter keeps the Screen enum, the world builders, the app state and
+# dispatchActions.
 open sys/Spotify
 open ui/Ecs
 import ui/Scene
@@ -26,67 +26,6 @@ open ui/safeAreaSystem/SafeAreaSystem
 func applySafeAreas(world: mod UiWorld, viewport: view Viewport) pub ret Insets {
   safeAreaSystem(world: world, insets: viewport.safeInsetsDu)
   ret viewport.safeInsetsDu
-}
-
-# Configure a full-screen page root: a `SafeArea` (per-edge `apply`
-# multipliers gate which device insets fold into padding — 1.0 honour,
-# 0.0 ignore; L/R stay 0 since presets have no horizontal insets) plus an
-# `ExtentAnchor.center` so the phone-width page stays a centered column on
-# a wide desktop window rather than left-aligning. The bottom toolbar uses
-# ExtentAnchor.fill instead (edge-to-edge); overlays keep the default left.
-func attachSafeAreaEdges(
-  world: mod UiWorld
-  entity: view EntityId
-  top: view Float
-  bottom: view Float
-) pub {
-  let sa: SafeArea = {
-    enabled: true
-    apply: Insets { l: 0.0, t: top, r: 0.0, b: bottom }
-    extra: Insets { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }
-  }
-  componentSet(this: world.safeAreas, entity: entity, data: sa)
-  let anchor: ExtentAnchor = { h: HExtent.center }
-  componentSet(this: world.extentAnchors, entity: entity, data: anchor)
-}
-
-# Re-mount Home / History in place when `playHistory` has grown
-# since the last frame and one of them is the currently-visible
-# screen. Catches the case where pollSpotify (or a `song.open.N`
-# tap from another screen) appends an entry — the user shouldn't
-# have to tab-switch to see it. Cheap: the entries.length compare
-# short-circuits when nothing changed.
-func refreshHistoryViewsIfNeeded(
-  world: mod UiWorld
-  scenes: view AlbumScenes
-  state: view AppState
-  playback: view PlaybackState
-  visible: view Screen
-  cachedRevision: view Int
-  viewport: view Viewport
-) pub ret Int {
-  # Observe PlayHistory's §7 revision (bumped on every append) rather than
-  # diffing the List length (#944): both fire on append, but the revision also
-  # catches an append that evicts at cap (length unchanged) and never re-keys
-  # off a stale length.
-  let n: Int = state.playHistory.revision
-  if n is cachedRevision {
-    ret cachedRevision
-  }
-  if visible is Screen.home {
-    unmountPage(world: world, pageId: homePageId)
-    let h: EntityId = mountHomePage(
-      world: world
-      scenes: scenes
-      state: state
-      playback: playback
-      viewport: viewport
-    )
-    setPageActive(world: world, pageId: homePageId, active: true)
-  }
-  # The History page needs no re-mount: its HistoryList system re-binds the
-  # ListView rows in place on the same revision (#977).
-  ret n
 }
 
 # Material icon key for the play button in the current state. Used by
