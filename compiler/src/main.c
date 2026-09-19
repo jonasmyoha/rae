@@ -44,6 +44,7 @@
 #include "../build/version_gen.h"
 #include "c_backend.h"
 #include "sema.h"
+#include "shader_compose.h"
 #include "mangler.h"
 #include "bindgen.h"
 #include "raepack.h"
@@ -1300,6 +1301,44 @@ static bool watch_sources_add_file(WatchSources* sources, const char* path) {
   return watch_sources_add_dir(sources, dir_buffer);
 }
 
+/* The WGSL parts the last build_c_backend_output composed shaders from
+ * (shader_compose.h), for the `.deps` sidecar `rae watch` reads: the emit
+ * runs in a subprocess, so this is how the parts reach the supervisor. */
+static char** g_last_shader_parts = NULL;
+static size_t g_last_shader_part_count = 0;
+static void record_shader_parts(const CompilerContext* ctx) {
+  for (size_t i = 0; i < g_last_shader_part_count; i++) free(g_last_shader_parts[i]);
+  free(g_last_shader_parts);
+  g_last_shader_parts = NULL;
+  g_last_shader_part_count = 0;
+  if (!ctx->shader_part_count) return;
+  g_last_shader_parts = malloc(sizeof(char*) * ctx->shader_part_count);
+  if (!g_last_shader_parts) return;
+  for (size_t i = 0; i < ctx->shader_part_count; i++) {
+    g_last_shader_parts[i] = strdup(ctx->shader_parts[i]);
+    if (!g_last_shader_parts[i]) break;
+    g_last_shader_part_count = i + 1;
+  }
+}
+
+/* The `shader <path>` lines of a build's `.deps` sidecar, into the watch set. */
+static void watch_collect_shader_parts(const char* build_dir, WatchSources* sources) {
+  if (!build_dir || !build_dir[0]) return;
+  char deps_path[PATH_MAX];
+  snprintf(deps_path, sizeof(deps_path), "%s/app.c.deps", build_dir);
+  FILE* df = fopen(deps_path, "r");
+  if (!df) return;
+  char line[PATH_MAX + 16];
+  while (fgets(line, sizeof(line), df)) {
+    if (strncmp(line, "shader ", 7) != 0) continue;
+    char* path = line + 7;
+    size_t n = strlen(path);
+    while (n > 0 && (path[n - 1] == '\n' || path[n - 1] == '\r')) path[--n] = '\0';
+    if (n) watch_sources_add_file(sources, path);
+  }
+  fclose(df);
+}
+
 static bool module_graph_collect_watch_sources(const ModuleGraph* graph, WatchSources* sources) {
   for (ModuleNode* node = graph->head; node; node = node->next) {
     if (!watch_sources_add_file(sources, node->file_path)) {
@@ -2394,6 +2433,10 @@ static bool build_c_backend_output(const char* entry_file,
 
   CompilerContext ctx;
   compiler_init(&ctx, arena);
+  /* `shader(files: [...])` resolves its parts against the project root and
+   * the toolchain stdlib (shader_compose.h). */
+  ctx.project_root = graph.root_path;
+  ctx.stdlib_dir = compiler_stdlib_dir();
   
   progress_phase(PROGRESS_SEMA);
   if (!sema_analyze_module(&ctx, &merged)) {
@@ -2401,6 +2444,20 @@ static bool build_c_backend_output(const char* entry_file,
       arena_destroy(arena);
       progress_end(false);
       return false;
+  }
+  /* Every WGSL part a shader was composed of is a build input: `rae watch`
+   * rebuilds when one changes, exactly as for a `.rae` file. */
+  record_shader_parts(&ctx);
+  if (out_sources) {
+    for (size_t i = 0; i < ctx.shader_part_count; i++) {
+      if (!watch_sources_add_file(&collected_sources, ctx.shader_parts[i])) {
+        watch_sources_clear(&collected_sources);
+        module_graph_free(&graph);
+        arena_destroy(arena);
+        progress_end(false);
+        return false;
+      }
+    }
   }
 
   int errs_before_emit = diag_error_count();
@@ -3223,6 +3280,9 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
   watch_sources_init(&sources);
   watch_collect_rae_sources(watch_root, &sources, 0);
   watch_collect_companion_libs(watch_root, &sources);
+  char last_build_dir[PATH_MAX];
+  snprintf(last_build_dir, sizeof(last_build_dir), "%s/build-%lld", channel_build_root, build_seq);
+  watch_collect_shader_parts(last_build_dir, &sources);
   WatchState ws;
   watch_state_init(&ws, entry);
   watch_state_apply_sources(&ws, &sources);
@@ -3372,6 +3432,7 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
     watch_sources_init(&new_sources);
     watch_collect_rae_sources(watch_root, &new_sources, 0);
     watch_collect_companion_libs(watch_root, &new_sources);
+    watch_collect_shader_parts(last_build_dir, &new_sources);
     watch_state_apply_sources(&ws, &new_sources);
 
     char new_bin[PATH_MAX] = {0};
@@ -3384,6 +3445,16 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
 
       bool rebuilt = watch_build_into_dir(entry, project_root, build_dir, new_bin, run_opts->profile);
       watch_state_absorb_formatted(&ws, build_dir);
+      if (rebuilt) {
+        /* A rebuilt program may compose new shader parts: watch them now. */
+        snprintf(last_build_dir, sizeof(last_build_dir), "%s", build_dir);
+        WatchSources with_parts;
+        watch_sources_init(&with_parts);
+        watch_collect_rae_sources(watch_root, &with_parts, 0);
+        watch_collect_companion_libs(watch_root, &with_parts);
+        watch_collect_shader_parts(last_build_dir, &with_parts);
+        watch_state_apply_sources(&ws, &with_parts);
+      }
       if (!rebuilt) {
         char msg[128];
         snprintf(msg, sizeof(msg), "build %s failed", build_id);
@@ -3767,6 +3838,10 @@ static int run_command(const char* cmd, int argc, char** argv) {
             fprintf(df, "%s %s\n",
                     b_sdl3 ? "sdl3" : "-",
                     b_webgpu ? "webgpu" : "-");
+            /* The shader parts the program was composed from, one per line,
+             * so `rae watch` treats a `.wgsl` edit as a source change. */
+            for (size_t si = 0; si < g_last_shader_part_count; si++)
+              fprintf(df, "shader %s\n", g_last_shader_parts[si]);
             fclose(df);
           }
           /* #919: the files the format preflight rewrote, one per line, so
@@ -4188,6 +4263,10 @@ static int toolchain_status(const char* root) {
   build_compiler_version_string(version, sizeof(version));
   printf("rae %s (%s %s)\n", version, RAE_GIT_COMMIT, RAE_GIT_DATE);
   printf("checkout: %s\n", root ? root : "(unknown)");
+  /* The shader validator `shader(files: [...])` runs at build time
+   * (shader_compose.h): a build-time toolchain dependency like the C compiler. */
+  const char* naga = shader_naga_path();
+  printf("naga: %s\n", naga ? naga : "not found — shaders are not validated (cargo install naga-cli)");
 
   char cwd[PATH_MAX];
   if (!getcwd(cwd, sizeof(cwd))) return 0;

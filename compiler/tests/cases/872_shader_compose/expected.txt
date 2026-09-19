@@ -1,0 +1,13 @@
+parts 3 generation 0
+// --- assets/constants.wgsl
+const raeScale: f32 = 4.0;
+// --- assets/helper.wgsl
+fn helper(p: vec2<f32>) -> f32 {
+  return p.x * 2.0;
+}
+// --- assets/main.wgsl
+@compute @workgroup_size(1) fn main() {
+  let x = helper(vec2<f32>(1.0, 2.0)) * raeScale;
+}
+
+first part ends with constants.wgsl: true

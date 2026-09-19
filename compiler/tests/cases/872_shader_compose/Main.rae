@@ -1,0 +1,16 @@
+# `shader(files: [...])` (docs/shaders-and-the-compiler.md): the parts are
+# resolved and read at BUILD time, composed in the written order with a
+# `// --- <path>` marker before each, validated with naga, and embedded — a
+# Shader value carries the text, the resolved part paths and a generation.
+# No `.wgsl` is opened at run time: the assets could be deleted after the
+# build and this program would print the same thing.
+func main() {
+  let compute: Shader = shader(
+    files: ["assets/constants.wgsl", "assets/helper.wgsl", "assets/main.wgsl"]
+  )
+  log("parts {compute.sources.length()} generation {compute.generation}")
+  log("{compute.text}")
+  if let first: view String => compute.sources.viewAt(index: 0) {
+    log("first part ends with constants.wgsl: {first.endsWith(suffix: "assets/constants.wgsl")}")
+  }
+}

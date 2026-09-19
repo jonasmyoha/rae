@@ -97,6 +97,10 @@ for TARGET in "${TARGETS[@]}"; do
       345_*|346_*|348_*) export RAE_FORMAT=off ;;
       *) export RAE_FORMAT=check ;;
     esac
+    # A declared shader (`shader(files: [...])`) is validated with naga at
+    # build time; under the suite a missing naga is an ERROR, never a silent
+    # skip (docs/shaders-and-the-compiler.md). `cargo install naga-cli`.
+    export RAE_SHADER_VALIDATE="${RAE_SHADER_VALIDATE:-require}"
 
     # Apply name filter if provided
     if [ -n "$TEST_NAME_FILTER" ]; then

@@ -606,6 +606,16 @@ typedef struct CompilerContext {
 
     // Sema: expected type for return-type generic inference
     const AstTypeRef* sema_expected_type;
+
+    // `shader(files: [...])` (shader_compose.h): where parts resolve from,
+    // and every part file the program's shaders were composed of — `rae
+    // watch` treats them as build inputs.
+    const char* project_root;
+    const char* stdlib_dir;
+    const char** shader_parts;
+    size_t shader_part_count;
+    size_t shader_part_cap;
+    bool shader_validation_warned;
 } CompilerContext;
 
 void compiler_init(CompilerContext* ctx, Arena* ast_arena);
