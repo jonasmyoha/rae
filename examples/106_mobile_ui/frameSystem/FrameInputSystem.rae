@@ -1,0 +1,164 @@
+open HotReload
+open ui/Ecs
+open ecs/Entity
+open ecs/ComponentTable
+open ui/EventLoop
+open ui/Theme
+
+# Frame phase 1 — input. The hot-reload signal, the pointer/keyboard input
+# system, the live-resize probe, the scroll physics, the action dispatch, the
+# playback command inbox, the UI-diff refresh and the theme toggle — the
+# pipeline's "Input -> Apply(A) -> Observation refresh" steps
+# (docs/ecs-systems-and-data-observation.md §4). Writes the dispatch verdict
+# (`nextScreen`, `hadActions`, `willSwitch`) into the tick.
+func frameInputSystem(
+  app: mod App
+  session: mod AppSession
+  world: mod UiWorld
+  frame: mod WorldFrame
+  tick: mod FrameTick
+) {
+  let appState: mod AppState => app.appState
+  let playback: mod PlaybackState => app.playback
+  let scrollFsm: mod ScrollFsm => session.scrollFsm
+  let input: mod InputSystem => session.input
+  # Hot-reload poll. If `rae watch` signalled a fresh build, snapshot
+  # route + scroll into .rae/state.json and exit 0. The supervisor sees the
+  # clean exit, swaps in the new binary, and the next boot resumes on the
+  # same screen at the same scroll (restoreStartState).
+  let sig: ReloadSignal = pollReloadSignal(w: session.reloadWatcher)
+  if sig.verb is ReloadVerb.reload {
+    saveStateAndExit(screen: session.currentScreen, scrollY: scrollFsm.scrollY)
+  }
+
+  updateInputSystem(input: input, world: world, viewport: app.viewport)
+  # #976: the frame's keyboard text goes to the active page's search field.
+  searchFieldSystem(world: world, input: input)
+  # Live-window resize. Detected by POLLING the live framebuffer-derived
+  # extent every frame and comparing to the applied one — robust vs relying
+  # on OS resize-event delivery. When the extent changed, record it and
+  # request a rebuild; the gpu2d design resolution is applied next to
+  # buildAppWorld, so the current frame keeps rendering the old world at its
+  # matching resolution until the rebuild swaps both atomically.
+  let liveViewport: Viewport = createViewportFromWindow()
+  let extentChanged: Bool = liveViewport.layoutW is not app.viewport.layoutW or liveViewport.layoutH is not app.viewport.layoutH
+  if extentChanged {
+    app.viewport = liveViewport
+    setDebugScreenSize(debug: session.debug, w: app.viewport.layoutW, h: app.viewport.layoutH)
+    frame.switching = true
+  }
+
+  # Re-resolve the active scroll root before consuming input. The first Home
+  # frame can have a stale/no scroll target until another rebuild trigger
+  # (resize or page switch) refreshes it.
+  let frameScrollTarget: EntityId = findScrollTarget(world: world)
+  if frameScrollTarget is not frame.scrollTarget {
+    frame.scrollTarget = frameScrollTarget
+    scrollFsm.velocity = 0.0
+    if isNone(this: frame.scrollTarget) {
+      scrollFsm.scrollY = 0.0
+    } else {
+      if componentHas(this: world.scrollStates, entity: frame.scrollTarget) {
+        let activeScroll: ScrollState = componentGet(
+          this: world.scrollStates
+          entity: frame.scrollTarget
+        )
+        scrollFsm.scrollY = activeScroll.y
+      } else {
+        scrollFsm.scrollY = 0.0
+      }
+    }
+  }
+
+  # Drag + momentum + spring-back physics (inputSystem/ScrollInput). True on
+  # the frame a drag just ended so the dispatch below skips the release-click
+  # on whatever's under the cursor.
+  tick.dragJustReleased = applyDragPhysics(
+    fsm: scrollFsm
+    world: world
+    viewport: app.viewport
+    scrollTarget: frame.scrollTarget
+    scrollOnThisScreen: tick.scrollOnThisScreen
+    scrollFloor: tick.scrollFloor
+    rubberDim: app.viewport.layoutH
+  )
+  # Mouse-wheel / trackpad scroll must run before layout/transform and
+  # render, or the first Home wheel event is invisible until another
+  # wake/rebuild path refreshes the frame.
+  applyWheelScroll(
+    fsm: scrollFsm
+    world: world
+    scrollTarget: frame.scrollTarget
+    scrollOnThisScreen: tick.scrollOnThisScreen
+    scrollFloor: tick.scrollFloor
+    rubberDim: app.viewport.layoutH
+  )
+
+  # Input dispatch. Action handlers enqueue commands + mutate AppState /
+  # data-source revisions; dependent UI visuals are refreshed by the
+  # UI-diff step below.
+  let inputDispatch: FrameInputDispatchResult = runFrameInputDispatch(
+    input: input
+    currentScreen: session.currentScreen
+    playback: playback
+    appState: appState
+    world: world
+    debug: session.debug
+    scenes: app.scenes
+    spotifyEnabled: app.spotifyState.enabled
+    dragJustReleased: tick.dragJustReleased
+  )
+  tick.nextScreen = inputDispatch.nextScreen
+  tick.hadActions = inputDispatch.hadActions
+
+  # Apply(A): the PlaybackSystem drains its own command inbox and applies
+  # play/pause (etc.) to its own state before the observation refresh reads
+  # it (#265).
+  processCommands(this: playback)
+
+  # UI diff/rebuild trigger. Runs after input so component visuals depending
+  # on changed app/playback data update from data, not direct patches inside
+  # action handlers.
+  refreshUiDiffs(
+    world: world
+    scenes: app.scenes
+    appState: appState
+    playback: playback
+    visible: session.currentScreen
+    cache: session.uiRefresh
+    viewport: app.viewport
+    applyOverlaySync: inputDispatch.hadActions
+    reg: app.texReg
+  )
+
+  # In-app debug UI: a true return means at least one state bit flipped;
+  # the world rebuild repaints the handful of code-driven colours.
+  if inputDispatch.debugChanged {
+    frame.switching = true
+  }
+
+  # Theme toggle: press T to swap between light and dark. Scene colours store
+  # slot NAMES and re-resolve against the new active theme on the next paint;
+  # code-driven colours still bake into components, so the world rebuild
+  # re-derives them (queue #259 to migrate those to slots).
+  let keyT: Int = 84
+  if uiIsKeyPressed(key: keyT) {
+    let cur: Theme = appState.theme.active
+    if cur.mode is ThemeMode.light {
+      appState.theme.active = darkTheme()
+      appState.theme.generation = appState.theme.generation + 1
+      log("[theme] -> dark (gen {appState.theme.generation})")
+    } else {
+      appState.theme.active = lightTheme()
+      appState.theme.generation = appState.theme.generation + 1
+      log("[theme] -> light (gen {appState.theme.generation})")
+    }
+    frame.switching = true
+  }
+
+  # Decide the screen change BEFORE drawing, but always draw the frame
+  # afterwards: the input edge state advances with the platform event pump,
+  # so every interactive iteration must reach the frame boundary before
+  # switching worlds.
+  tick.willSwitch = tick.nextScreen is not session.currentScreen
+}

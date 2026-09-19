@@ -1,0 +1,120 @@
+open ui/Ecs
+open ui/EventLoop
+open ui/WindowGeometry
+
+# Frame phase 0 — the wait policy. Decides how long to block for OS events
+# (busy-render while interacting / animating / loading, one frame while
+# playback ticks, the watcher cadence otherwise, the idle cap when nothing
+# moves), writes the scroll bounds + animation flags the later phases read
+# into the tick, waits, and turns the close / auto-exit conditions into
+# `session.running = false`. Nothing here touches the world.
+func frameWaitSystem(
+  app: mod App
+  session: mod AppSession
+  frame: view WorldFrame
+  tick: mod FrameTick
+) {
+  let appState: view AppState => app.appState
+  let playback: view PlaybackState => app.playback
+  let scrollFsm: view ScrollFsm => session.scrollFsm
+  # Per-frame scroll bounds. Wrong floor → spring never settles.
+  let sb: ScrollBounds = scrollBoundsForScreen(
+    screen: session.currentScreen
+    appState: appState
+    cachedAlbumScrollFloor: session.cachedAlbumScrollFloor
+    pages: app.screenPages
+  )
+  tick.scrollOnThisScreen = sb.scrollable
+  tick.scrollFloor = sb.floor
+  # Treat in-flight scroll momentum / spring as an animation so the event
+  # loop wakes at frame cadence (~16 ms) instead of the file-watcher's idle
+  # poll (50 ms / ~20 fps). Otherwise the spring-back after release renders
+  # chunky because the physics step only runs once per OS event wake.
+  let scrollOOB: Bool = scrollFsm.scrollY > 0.0 or scrollFsm.scrollY < tick.scrollFloor
+  var velAbs: Float = scrollFsm.velocity
+  if velAbs < 0.0 {
+    velAbs = 0.0 - velAbs
+  }
+  # Recent-wheel (0.25s) counts as animating: wheel scroll drives scrollY
+  # per-event with velocity==0, so without it the loop idles at the ~20Hz
+  # watcher poll between wheel events.
+  tick.scrollAnimating = false
+  if velAbs > 0.05 or scrollOOB or ((uiNowSeconds() - scrollFsm.lastWheelTime) < 0.25) {
+    tick.scrollAnimating = true
+  }
+  # Suppress the playback-driven 60Hz animation gate while the user is
+  # wheel-scrolling (the per-frame playback tick competed with scroll).
+  # Progress resumes ~250ms after the last wheel tick.
+  let scrollActiveTimeSec: Float = (uiNowSeconds() - scrollFsm.lastWheelTime) as Float
+  let recentlyScrolling: Bool = scrollActiveTimeSec < 0.25
+  tick.playbackAnimating = false
+  if playback.isPlaying {
+    if recentlyScrolling is false {
+      tick.playbackAnimating = true
+    }
+  }
+  # Interaction/transition motion → busy-render: poll (timeout 0), paint
+  # every frame as fast as the machine allows (no FPS cap). Playback alone
+  # stays on the throttled 60Hz path so a playing song doesn't peg a core.
+  # Idle → blocking event-wait (~0% CPU).
+  tick.busyAnimating = session.anim.active or tick.scrollAnimating or session.lastHoverAnimDirty or session.assetsLoading or uiPointerButtonDown(
+    button: mouseButtonLeft
+  )
+  tick.timeout = 0.0
+  if tick.busyAnimating is false {
+    tick.timeout = nextWaitTimeoutSec(
+      animating: tick.playbackAnimating or uiNowSeconds() < session.renderUntil
+      mouseDown: false
+      pollWatcher: true
+      frameSec: session.targetFrameSec
+      heartbeatSec: 0.0
+    )
+  }
+  # Heartbeat: prints once per frame BEFORE the wait. If this line stops
+  # appearing in the log, the loop has stalled inside the frame body (not in
+  # waitEventsTimeout). If it keeps printing but UI doesn't update, the input
+  # or render phase is being skipped — check the post-wait line.
+  if app.loopDebugEnabled {
+    app.loopDebugFrame = app.loopDebugFrame + 1
+    let mouseDown: Bool = uiPointerButtonDown(button: mouseButtonLeft)
+    log(
+      "[loop {app.loopDebugFrame}] screen={screenToInt(s: session.currentScreen)} scrollY={scrollFsm.scrollY} vel={scrollFsm.velocity} animA={session.anim.active} animP={playback.isPlaying} animS={tick.scrollAnimating} mouse={mouseDown} timeout={tick.timeout}"
+    )
+  }
+  # When RAE_AUTO_EXIT_SEC is set, clamp the wait so the deadline actually
+  # fires on time — otherwise an idle iteration could sleep for the idle cap
+  # (30 s) past the requested exit time.
+  if app.autoExitSec > 0.0 {
+    let elapsed: Float = (uiNowSeconds() - app.bootTime) as Float
+    let remaining: Float = app.autoExitSec - elapsed
+    if remaining < tick.timeout {
+      tick.timeout = remaining
+    }
+    if tick.timeout < 0.001 {
+      tick.timeout = 0.001
+    }
+  }
+  updateWindowGeometry(g: app.windowGeom, now: uiNowSeconds(), resized: uiIsWindowResized())
+  let preWait: Float64 = uiNowSeconds()
+  uiWaitEvents(timeoutSec: tick.timeout)
+  let waitDt: Float = (uiNowSeconds() - preWait) as Float
+  if app.waitTraceEnabled {
+    if waitDt > 0.005 {
+      log("[wait] dt={waitDt} timeout={tick.timeout}")
+    }
+  }
+  # Post-wait trace. If dt ≈ timeout the wait ran to its full cap (no OS
+  # event woke us) — diagnostic for "stuck on idle".
+  if app.loopDebugEnabled {
+    log("[loop {app.loopDebugFrame}] wait dt={waitDt}")
+  }
+  if uiWindowShouldClose() {
+    session.running = false
+  } else if app.autoExitSec > 0.0 and uiNowSeconds() - app.bootTime > app.autoExitSec {
+    # RAE_AUTO_EXIT_SEC fired — clean self-shutdown so test harnesses don't
+    # leave orphaned binaries owning the GPU context. Falls through to the
+    # teardown at the end of runApp.
+    log("[auto-exit] reached {app.autoExitSec}s wall-clock; shutting down")
+    session.running = false
+  }
+}

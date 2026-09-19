@@ -1,0 +1,117 @@
+open ui/Ecs
+open ui/Pipeline
+open ecs/Schedule
+open ecs/Entity
+open ui/EventLoop
+open ui/fitSystem/FitSystem
+open ui/layoutSystem/LayoutSystem
+open ui/Transform
+
+# The outer-loop rebuild: the persistent world for the current route
+# (every screen page + dock / back overlays mounted once; setPageActive flips
+# visibility per nav), the schedule + first layout pass over it, and the
+# world frame that carries its per-world state (AppSession.rae).
+func refreshActiveAlbumCache(app: mod App, session: mod AppSession) {
+  # Cache the active-album bounds + active-track duration so the hot loop
+  # never deep-copies a 15-25 track Album. Recompute only when stem or track
+  # index actually changes — the user has navigated, so one copy is fine.
+  let appState: mod AppState => app.appState
+  let stemChanged: Bool = appState.currentAlbumStem is session.cachedAlbumStem is false
+  let trackChanged: Bool = appState.currentTrackIndex is not session.cachedTrackIndex
+  if stemChanged or trackChanged {
+    let activeAlbumNow: Album = activeAlbum(state: appState)
+    let activeTrackNow: Track = trackAt(album: activeAlbumNow, idx: appState.currentTrackIndex)
+    session.cachedTrackDurMs = activeTrackNow.durationMs
+    session.cachedAlbumScrollFloor = collectionScrollFloorForState(state: appState)
+    # Fresh allocation so the cached stem doesn't alias
+    # `appState.currentAlbumStem`'s heap (dropped on its next assignment).
+    session.cachedAlbumStem = "{appState.currentAlbumStem}"
+    session.cachedTrackIndex = appState.currentTrackIndex
+  }
+  let trackDurSec: Float = session.cachedTrackDurMs.toFloat() / 1000.0
+  if trackDurSec > 0.0 {
+    app.playback.durationSec = trackDurSec
+  }
+}
+
+func buildSessionWorld(app: mod App, session: mod AppSession) ret UiWorld {
+  let appState: mod AppState => app.appState
+  let world: UiWorld = buildAppWorld(
+    scenes: app.scenes
+    playback: app.playback
+    state: appState
+    texReg: app.texReg
+    scrollY: session.scrollFsm.scrollY
+    viewport: app.viewport
+  )
+  session.uiRefresh.historyRevision = appState.playHistory.revision
+  # Apply the gpu2d design-resolution transform together with the
+  # freshly-built world so the two never disagree (doing it in the
+  # resize-detection step painted one glitchy frame: the OLD world laid out
+  # at the old extent through the NEW design resolution).
+  uiSetDesignResolution(width: app.viewport.layoutW, height: app.viewport.layoutH, fit: 0)
+  # Rebind any scene-authored `"albumCover"` placeholder hero + sprite to the
+  # user's current album, so the hero animation finds matching keys on every
+  # page. Always runs — the default `currentAlbumStem` is already the
+  # profile-side key.
+  rebindHero(world: world, fromKey: "albumCover", toKey: appState.currentAlbumStem)
+  # Layer the debug-UI entities (button + optional menu overlay) onto the
+  # world BEFORE layout runs so they participate in measure/place.
+  addDebugLayer(world: world, debug: session.debug)
+  ret world
+}
+
+# The per-world frame state: ONE Schedule per world (#949), fresh per rebuild
+# (a new world's table generations start at 0, so its first judgement always
+# runs; from then on every lib/ui system in the frame is gated by
+# `uiShouldRun` off its declared sets), the first layout / fit / transform
+# pass, the scroll target, and a render cache that forces the first paint.
+func createWorldFrame(world: mod UiWorld) ret WorldFrame {
+  var schedule: Schedule = createUiPipeline(world: world)
+  if uiShouldRun(schedule: schedule, world: world, index: uiSystemLayout) {
+    layoutSystem(world: world)
+  }
+  # Art-direction pass (#212 S6): Aspect + ScaleToFit run between layout and
+  # transform. Change-gated, so an idle frame with an unchanged layout
+  # writes nothing.
+  if uiShouldRun(schedule: schedule, world: world, index: uiSystemFit) {
+    fitSystem(world: world)
+  }
+  if uiShouldRun(schedule: schedule, world: world, index: uiSystemTransform) {
+    transformSystem(world: world)
+  }
+  # The scroll-target entity for this world: scroll handlers mutate its
+  # Offset + ScrollState in place every frame, which is what lets
+  # wheel/drag/momentum/spring run WITHOUT tearing the world down per tick.
+  ret WorldFrame {
+    schedule: own schedule
+    scrollTarget: findScrollTarget(world: world)
+    renderCache: createRenderCache()
+    forceRender: true
+    lastPressed: noEntity()
+    switching: false
+  }
+}
+
+# The world's first state: the playback overlay (so the first frame doesn't
+# flash an empty progress bar), and the destination half of an in-flight hero
+# transition — the previous world stashed the source rect; now that this one
+# is laid out, capture the target rect and hide the destination hero so the
+# overlay can paint it. The clock is NOT started here (that waits for the
+# first frame: `transitionArmed`).
+func armSessionWorld(app: mod App, session: mod AppSession, world: mod UiWorld) {
+  let appState: mod AppState => app.appState
+  applyOverlaysToWorld(world: world, playback: app.playback, state: appState)
+  if session.pendingDst {
+    let captured: Bool = captureHeroTarget(
+      anim: session.anim
+      world: world
+      key: appState.currentAlbumStem
+    )
+    if captured {
+      setHeroVisible(world: world, key: appState.currentAlbumStem, visible: false)
+      session.transitionArmed = true
+    }
+    session.pendingDst = false
+  }
+}
