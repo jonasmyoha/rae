@@ -1,0 +1,433 @@
+# The observation phase as DATA (docs/ecs-systems-and-data-observation.md §4,
+# #268): every app binding system is REGISTERED on a lib/ecs `Schedule` with
+# its input sets — the app resources it reads, as `source*` revision flags
+# (the history / library / playback revisions, the browsed collection, the
+# sheet epoch, the settings, the texture registry), and the world tables it
+# reads (its own binding table, so a fresh mount is seen; `searchFields` for
+# the query — not `computedRects`, whose generation moves every frame) — and
+# the runner asks
+# the schedule whether a system's inputs moved before calling it. Rae has no
+# function references, so the runner still names the call per index; the
+# schedule owns the declarations and the dirty state, exactly like the lib
+# UI pipeline (ui/Pipeline). An idle frame — nothing playing, nothing
+# changed — runs ZERO app systems; the `[loop]` trace counts them.
+#
+# The combined generation an entry is judged on is the sum of its source
+# revisions, its read tables' generations and the live entity count — all
+# monotonic or content-keyed, so the sum moves iff an input did.
+open ui/Ecs
+open ecs/Schedule
+open ecs/Entity
+open ecs/ComponentTable
+open assetSystem/GpuAssetRegistry
+
+# The app resources a binding system can observe — a flag bitmask (combine
+# with `bitor`), each with ONE revision number the runner reads
+# (`appSourcesRevision`):
+#   sourceHistory       PlayHistory.revision — every recorded play
+#   sourceLibrary       AppState.libraryRevision — the curated library + the
+#                       liked playlist
+#   sourcePlayback      PlaybackState.revision — play / pause, the playing track
+#   sourceNowPlaying    PlaybackState.nowPlayingRevision — the now-playing art
+#   sourcePlaybackClock position + duration to the millisecond: moves every
+#                       frame while playing, never while paused
+#   sourceSheet         BottomSheetState.epoch — open / close
+#   sourceCollection    the browsed collection: album stem, track index, playlist
+#   sourceSettings      AppSettings — the rounded-covers flag
+#   sourceTheme         AppState.theme.generation
+#   sourceTextures      the texture registry revision — a cover / avatar loaded
+const sourceHistory: Int = 1
+
+const sourceLibrary: Int = 2
+
+const sourcePlayback: Int = 4
+
+const sourceNowPlaying: Int = 8
+
+const sourcePlaybackClock: Int = 16
+
+const sourceSheet: Int = 32
+
+const sourceCollection: Int = 64
+
+const sourceSettings: Int = 128
+
+const sourceTheme: Int = 256
+
+const sourceTextures: Int = 512
+
+func hasSource(sources: view Int, flag: view Int) ret Bool {
+  ret (sources bitand flag) is not 0
+}
+
+func appSourcesRevision(
+  sources: view Int
+  state: view AppState
+  playback: view PlaybackState
+  reg: view TextureRegistry
+) ret Int {
+  var sum: Int = 0
+  if hasSource(sources: sources, flag: sourceHistory) {
+    sum = sum + state.playHistory.revision
+  }
+  if hasSource(sources: sources, flag: sourceLibrary) {
+    sum = sum + state.libraryRevision
+  }
+  if hasSource(sources: sources, flag: sourcePlayback) {
+    sum = sum + playback.revision
+  }
+  if hasSource(sources: sources, flag: sourceNowPlaying) {
+    sum = sum + playback.nowPlayingRevision
+  }
+  if hasSource(sources: sources, flag: sourcePlaybackClock) {
+    sum = sum + (playback.elapsedSec * 1000.0).toInt() + (playback.durationSec * 1000.0).toInt()
+  }
+  if hasSource(sources: sources, flag: sourceSheet) {
+    sum = sum + state.bottomSheet.epoch
+  }
+  if hasSource(sources: sources, flag: sourceCollection) {
+    let key: String = "{state.currentAlbumStem}|{state.currentTrackIndex}|{state.viewingPlaylist}|{state.currentPlaylistId}"
+    sum = sum + key.hash()
+  }
+  if hasSource(sources: sources, flag: sourceSettings) and state.settings.roundedAlbumCovers {
+    sum = sum + 1
+  }
+  if hasSource(sources: sources, flag: sourceTheme) {
+    sum = sum + state.theme.generation
+  }
+  if hasSource(sources: sources, flag: sourceTextures) {
+    sum = sum + reg.images.revision
+  }
+  ret sum
+}
+
+# One registered app system: its schedule entry index, its sources, and a
+# per-frame run count for the trace.
+type AppObserver {
+  name: String
+  sources: Int
+}
+
+# The observation schedule: the lib Schedule (declared read tables + dirty
+# state) plus the app-side source declarations, in run order.
+type AppObservation {
+  schedule: Schedule
+  observers: List(AppObserver)
+  # The trace of the last run: how many systems ran and which.
+  ranCount: Int
+  ranNames: String
+}
+
+# The system indices — the order they run in. `registerAppObservers` adds
+# them in exactly this order, so an index IS the schedule entry.
+const observeHasHistory: Int = 0
+
+const observePlaybackIcon: Int = 1
+
+const observePlaybackCover: Int = 2
+
+const observeLikedHeart: Int = 3
+
+const observeTrackText: Int = 4
+
+const observeBottomSheet: Int = 5
+
+const observeProfileStats: Int = 6
+
+const observeAvatar: Int = 7
+
+const observeListSource: Int = 8
+
+const observeHistoryList: Int = 9
+
+const observeAlbumHeader: Int = 10
+
+const observeProgress: Int = 11
+
+const observeCount: Int = 12
+
+func registerAppObserver(
+  observation: mod AppObservation
+  world: view UiWorld
+  name: view String
+  sources: view Int
+  tables: view List(String)
+) {
+  let reads: List(Int) = List.create(Int, cap: tables.length)
+  loop let table: view String in tables {
+    let id: Int = tableIdByName(UiWorld, world: world, name: table)
+    if id < 0 {
+      log("[observe] {name}: no UiWorld table named {table}")
+    } else {
+      reads.add(value: id)
+    }
+  }
+  let index: Int = addDeclaredSystem(
+    schedule: observation.schedule
+    name: name
+    reads: own reads
+    writes: List.create(Int, cap: 0)
+    skipWhenClean: false
+  )
+  observation.observers.add(value: AppObserver { name: "{name}", sources: sources })
+}
+
+# The app's observation schedule. One `createAppObservation` per app; the
+# declarations are what each system READS — change a system's inputs, change
+# its row.
+func createAppObservation(world: view UiWorld) ret AppObservation {
+  var observation: AppObservation = {
+    schedule: createSchedule()
+    observers: List.create(AppObserver, cap: observeCount)
+    ranCount: 0
+    ranNames: ""
+  }
+  let hasHistorySources: Int = sourceHistory
+  let hasHistoryTables: List(String) = ["hasHistories"]
+  registerAppObserver(
+    observation: observation
+    world: world
+    name: "hasHistory"
+    sources: hasHistorySources
+    tables: hasHistoryTables
+  )
+  let playbackIconSources: Int = sourcePlayback
+  let playbackIconTables: List(String) = ["playbackIcons"]
+  registerAppObserver(
+    observation: observation
+    world: world
+    name: "playbackIcon"
+    sources: playbackIconSources
+    tables: playbackIconTables
+  )
+  let playbackCoverSources: Int = sourceNowPlaying bitor sourceCollection bitor sourceSettings bitor sourceTextures
+  let playbackCoverTables: List(String) = ["playbackCovers"]
+  registerAppObserver(
+    observation: observation
+    world: world
+    name: "playbackCover"
+    sources: playbackCoverSources
+    tables: playbackCoverTables
+  )
+  let likedHeartSources: Int = sourceLibrary bitor sourceCollection
+  let likedHeartTables: List(String) = ["likedHearts"]
+  registerAppObserver(
+    observation: observation
+    world: world
+    name: "likedHeart"
+    sources: likedHeartSources
+    tables: likedHeartTables
+  )
+  let trackTextSources: Int = sourceCollection bitor sourcePlaybackClock
+  let trackTextTables: List(String) = ["trackTexts"]
+  registerAppObserver(
+    observation: observation
+    world: world
+    name: "trackText"
+    sources: trackTextSources
+    tables: trackTextTables
+  )
+  let bottomSheetSources: Int = sourceSheet
+  let bottomSheetTables: List(String) = ["bottomSheets"]
+  registerAppObserver(
+    observation: observation
+    world: world
+    name: "bottomSheet"
+    sources: bottomSheetSources
+    tables: bottomSheetTables
+  )
+  let profileStatsSources: Int = sourceLibrary
+  let profileStatsTables: List(String) = ["profileStats"]
+  registerAppObserver(
+    observation: observation
+    world: world
+    name: "profileStats"
+    sources: profileStatsSources
+    tables: profileStatsTables
+  )
+  let avatarSources: Int = sourceTextures
+  let avatarTables: List(String) = ["avatarSources"]
+  registerAppObserver(
+    observation: observation
+    world: world
+    name: "avatar"
+    sources: avatarSources
+    tables: avatarTables
+  )
+  let listSourceSources: Int = sourceLibrary bitor sourceSettings bitor sourceHistory bitor sourceCollection bitor sourcePlayback bitor sourceSheet
+  let listSourceTables: List(String) = ["listSources", "searchFields"]
+  registerAppObserver(
+    observation: observation
+    world: world
+    name: "listSource"
+    sources: listSourceSources
+    tables: listSourceTables
+  )
+  let historyListSources: Int = sourceHistory
+  let historyListTables: List(String) = ["historyLists"]
+  registerAppObserver(
+    observation: observation
+    world: world
+    name: "historyList"
+    sources: historyListSources
+    tables: historyListTables
+  )
+  let albumHeaderSources: Int = sourceCollection bitor sourceLibrary
+  let albumHeaderTables: List(String) = ["albumHeaders"]
+  registerAppObserver(
+    observation: observation
+    world: world
+    name: "albumHeader"
+    sources: albumHeaderSources
+    tables: albumHeaderTables
+  )
+  let progressSources: Int = sourcePlaybackClock bitor sourcePlayback
+  let progressTables: List(String) = ["progressBars"]
+  registerAppObserver(
+    observation: observation
+    world: world
+    name: "progress"
+    sources: progressSources
+    tables: progressTables
+  )
+  ret observation
+}
+
+# The combined generation entry `index` is judged on this frame.
+func observerGeneration(
+  observation: view AppObservation
+  world: view UiWorld
+  index: view Int
+  state: view AppState
+  playback: view PlaybackState
+  reg: view TextureRegistry
+) ret Int {
+  var sum: Int = declaredReadGeneration(
+    UiWorld
+    world: world
+    schedule: observation.schedule
+    index: index
+  )
+  sum = sum + worldAliveCount(UiWorld, world: world)
+  if let observer: view AppObserver => observation.observers.viewAt(index: index) {
+    sum = sum + appSourcesRevision(
+      sources: observer.sources
+      state: state
+      playback: playback
+      reg: reg
+    )
+  }
+  ret sum
+}
+
+# The call behind entry `index` (no function references in Rae).
+func runAppObserver(
+  index: view Int
+  world: mod UiWorld
+  state: view AppState
+  playback: view PlaybackState
+  scenes: view AlbumScenes
+  reg: view TextureRegistry
+) {
+  if index is observeHasHistory {
+    hasHistorySystem(world: world, state: state)
+  }
+  if index is observePlaybackIcon {
+    let changed: Bool = playbackIconSystem(world: world, playback: playback)
+  }
+  if index is observePlaybackCover {
+    let changed: Bool = playbackCoverSystem(
+      world: world
+      playback: playback
+      state: state
+      reg: reg
+    )
+  }
+  if index is observeLikedHeart {
+    let changed: Bool = likedHeartSystem(
+      world: world
+      liked: state.liked
+      stem: state.currentAlbumStem
+      trackIndex: state.currentTrackIndex
+    )
+  }
+  if index is observeTrackText {
+    trackTextSystem(world: world, state: state, playback: playback)
+  }
+  if index is observeBottomSheet {
+    bottomSheetSystem(world: world, sheet: state.bottomSheet)
+  }
+  if index is observeProfileStats {
+    profileStatsSystem(world: world, state: state)
+  }
+  if index is observeAvatar {
+    avatarSystem(world: world, reg: reg)
+  }
+  if index is observeListSource {
+    listSourceSystem(
+      world: world
+      state: state
+      playback: playback
+      scenes: scenes
+    )
+  }
+  if index is observeHistoryList {
+    historyListSystem(world: world, state: state)
+  }
+  if index is observeAlbumHeader {
+    albumHeaderSystem(world: world, state: state)
+  }
+  if index is observeProgress {
+    applyPlaybackToWorld(world: world, state: playback)
+  }
+}
+
+# One observation pass: every registered system whose inputs moved since its
+# last run, in order. Returns how many ran (also kept in `ranCount` /
+# `ranNames` for the `[loop]` trace). Runs at every point of the frame where
+# the data may have moved — after the commands, and after the Spotify mirror —
+# and costs nothing when nothing did.
+func runAppObservation(
+  observation: mod AppObservation
+  world: mod UiWorld
+  state: view AppState
+  playback: view PlaybackState
+  scenes: view AlbumScenes
+  reg: view TextureRegistry
+) ret Int {
+  var ran: Int = 0
+  var names: String = ""
+  var index: Int = 0
+  loop index < observeCount {
+    let generation: Int = observerGeneration(
+      observation: observation
+      world: world
+      index: index
+      state: state
+      playback: playback
+      reg: reg
+    )
+    if shouldRun(schedule: observation.schedule, index: index, readGeneration: generation) {
+      runAppObserver(
+        index: index
+        world: world
+        state: state
+        playback: playback
+        scenes: scenes
+        reg: reg
+      )
+      ran = ran + 1
+      names = "{names} {scheduleName(schedule: observation.schedule, index: index)}"
+    }
+    index = index + 1
+  }
+  observation.ranCount = observation.ranCount + ran
+  observation.ranNames = "{observation.ranNames}{names}"
+  ret ran
+}
+
+# Reset the trace at the start of a frame.
+func beginObservationFrame(observation: mod AppObservation) {
+  observation.ranCount = 0
+  observation.ranNames = ""
+}

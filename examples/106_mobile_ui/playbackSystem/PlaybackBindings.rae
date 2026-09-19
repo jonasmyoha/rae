@@ -6,8 +6,9 @@ open ui/Ecs
 # Now Playing page share one binding and no page-id lookups: it reads the
 # app / playback state, compares against the component's observed revision
 # or key, and writes the node's Sprite / Text / WidgetState only on a change.
-# They run every frame from `refreshMountedUi`, before the first paint of a
-# fresh mount too, so a page needs no first run of its own.
+# Each is a row of the app's observation schedule (observeSystem/
+# AppObservation) and runs only when a declared source moved — before the
+# first paint of a fresh mount too, so a page needs no first run of its own.
 #
 # Layering (docs/ecs-systems-and-data-observation.md §5.2): these OBSERVE
 # the data systems (PlaybackState, the liked playlist, the browsed album)
@@ -341,32 +342,4 @@ func trackTextWriteAll(world: mod UiWorld, title: view String, artist: view Stri
     }
     i = i + 1
   }
-}
-
-# The playback bindings, in one call: the per-frame step of
-# `refreshMountedUi` and the once-at-mount run. Returns whether a playback
-# widget's state changed, so the caller runs the widget-style sync
-# (`applyOverlaysToWorld`) that frame — the icon and heart visuals are
-# StateStyle swaps applied there.
-func playbackBindingsSystems(
-  world: mod UiWorld
-  playback: view PlaybackState
-  state: view AppState
-  reg: view TextureRegistry
-) pub ret Bool {
-  let iconChanged: Bool = playbackIconSystem(world: world, playback: playback)
-  let coverChanged: Bool = playbackCoverSystem(
-    world: world
-    playback: playback
-    state: state
-    reg: reg
-  )
-  let heartChanged: Bool = likedHeartSystem(
-    world: world
-    liked: state.liked
-    stem: state.currentAlbumStem
-    trackIndex: state.currentTrackIndex
-  )
-  trackTextSystem(world: world, state: state, playback: playback)
-  ret iconChanged or coverChanged or heartChanged
 }

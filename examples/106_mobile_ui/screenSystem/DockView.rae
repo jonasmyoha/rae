@@ -144,15 +144,10 @@ func mountBottomDockOverlay(
     forcedFrameId: forcedName
   )
 
-  # First run of the dock's systems so the very first frame is right.
+  # First run of the dock's layer + nav-tab systems so the very first frame
+  # is right; the playback bindings land in the frame's observation pass.
   layerTagSystem(world: world)
   navTabsSystem(world: world, activeTab: activeTab)
-  playbackBindingsSystems(
-    world: world
-    playback: playback
-    state: state
-    reg: reg
-  )
 
   # Canvas overlay (#212 S5/S6 demo) — mounted here because every screen
   # builder already calls mountBottomDockOverlay, and the mount is

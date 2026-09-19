@@ -9,6 +9,7 @@ open ui/Transform
 open ui/renderSystem/RenderSystem
 open ui/visualBoundsSystem/VisualBoundsSystem
 open ui/listViewSystem/ListViewSystem
+open ui/widgetStyleSystem/WidgetStyleSystem
 open ui/SceneInstance
 open Gpu2dCanvas
 
@@ -82,44 +83,8 @@ func runFrameInputDispatch(
   }
 }
 
-type FrameUiRefreshResult {
-  historyChanged: Bool
-  playbackChanged: Bool
-}
-
-func refreshUiDiffs(
-  world: mod UiWorld
-  scenes: view AlbumScenes
-  appState: view AppState
-  playback: view PlaybackState
-  visible: view Screen
-  cache: mod UiRefreshCache
-  viewport: view Viewport
-  applyOverlaySync: view Bool
-  reg: view TextureRegistry
-) pub ret FrameUiRefreshResult {
-  let refreshed: UiRefreshResult = refreshMountedUi(
-    world: world
-    scenes: scenes
-    state: appState
-    playback: playback
-    visible: visible
-    cache: cache
-    viewport: viewport
-    reg: reg
-  )
-  if applyOverlaySync or refreshed.playbackChanged {
-    applyOverlaysToWorld(world: world, playback: playback, state: appState)
-  }
-  ret FrameUiRefreshResult {
-    historyChanged: refreshed.historyChanged
-    playbackChanged: refreshed.playbackChanged
-  }
-}
-
 type FrameDataSyncResult {
   assetsLoading: Bool
-  playbackChanged: Bool
 }
 
 func syncFrameData(
@@ -130,16 +95,10 @@ func syncFrameData(
   spotifyState: mod SpotifyState
   spotifyPoller: view SpotifyPoller
   texReg: mod TextureRegistry
-  uiRefresh: mod UiRefreshCache
-  visible: view Screen
-  viewport: view Viewport
+  observation: mod AppObservation
   now: view Float64
-  applyPlaybackFrame: view Bool
 ) pub ret FrameDataSyncResult {
   advancePlayback(state: playback, now: now)
-  if applyPlaybackFrame {
-    applyOverlaysToWorld(world: world, playback: playback, state: appState)
-  }
 
   # The poll worker (#950) refreshed the cache off-thread and posted a tick;
   # only then is there a new snapshot worth mirroring into the world.
@@ -152,19 +111,17 @@ func syncFrameData(
     now: Time.atSeconds(s: now)
     ticked: spotifyPollerTicked(poller: spotifyPoller)
   )
-  let spotifyRefresh: UiRefreshResult = refreshMountedUi(
+  # Observation (B): whatever the clock tick / the Spotify mirror moved lands
+  # this frame — every app system judged from its declared sources
+  # (observeSystem/AppObservation); nothing runs when nothing moved.
+  let observed: Int = runAppObservation(
+    observation: observation
     world: world
-    scenes: scenes
     state: appState
     playback: playback
-    visible: visible
-    cache: uiRefresh
-    viewport: viewport
+    scenes: scenes
     reg: texReg
   )
-  if spotifyRefresh.playbackChanged {
-    applyOverlaysToWorld(world: world, playback: playback, state: appState)
-  }
 
   # Settle the artwork downloads that landed since last frame (#950), then
   # let the loaders upload them / start the next ones — album covers first
@@ -184,10 +141,7 @@ func syncFrameData(
     loader: appState.historyArt
     fetches: appState.artworkFetch
   )
-  ret FrameDataSyncResult {
-    assetsLoading: loadingCovers or loadingHistoryArt
-    playbackChanged: spotifyRefresh.playbackChanged
-  }
+  ret FrameDataSyncResult { assetsLoading: loadingCovers or loadingHistoryArt }
 }
 
 # The lib/ui system phase, driven by the #939 Schedule (#949): each system is
@@ -208,6 +162,12 @@ func runFrameLayoutTransform(
   # the current scroll before layout, so this frame lays out the rows in
   # view. Runs every frame; it writes nothing when nothing moved.
   listViewSystem(world: world, scenes: subScenes)
+  # widgetStyleSystem: WidgetState / StateStyle -> the widget's visuals
+  # (pressed offsets, icon swaps, tints); change-disciplined, before layout
+  # because it writes offsets.
+  if uiShouldRun(schedule: schedule, world: world, index: uiSystemWidgetStyle) {
+    widgetStyleSystem(world: world)
+  }
   if uiShouldRun(schedule: schedule, world: world, index: uiSystemSafeArea) {
     applySafeAreas(world: world, viewport: viewport)
   }
