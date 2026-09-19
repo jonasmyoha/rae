@@ -1,0 +1,84 @@
+open ui/Ecs
+open ui/EventLoop
+open ui/LogOverlay
+
+# Frame phase 3 — render, then the screen switch. The GPU2D paint (dirty
+# detection decides whether this frame paints; busy animation renders every
+# iteration), the persistent-world screen switch (per-page re-mount + hero
+# arming + Active flip, or the data hot-reload poll that may request a
+# rebuild), and the frosted-glass debug cleanup.
+func frameRenderSystem(
+  app: mod App
+  session: mod AppSession
+  world: mod UiWorld
+  frame: mod WorldFrame
+  tick: view FrameTick
+) {
+  let appState: mod AppState => app.appState
+  let frameRender: FrameRenderResult = renderGpu2dFrame(
+    world: world
+    gpuUi: app.gpuUi
+    canvas: app.texReg.canvas
+    debug: session.debug
+    logView: app.logView
+    logW: app.viewport.layoutW
+    logH: app.viewport.layoutH
+    renderCache: frame.renderCache
+    bg: palettePageBg(theme: appState.theme.active)
+    now: tick.now
+    targetFrameSec: session.targetFrameSec
+    lastRenderTime: session.lastRenderTime
+    busyAnimating: tick.busyAnimating
+    active: tick.active
+    forceRender: frame.forceRender
+    renderUntil: session.renderUntil
+    switching: frame.switching
+  )
+  frame.forceRender = frameRender.forceRender
+  session.lastRenderTime = frameRender.lastRenderTime
+  # Persistent-world screen switch (screenSystem/ScreenSwitch). On
+  # willSwitch: per-page re-mount + hero arming + Active flip. Otherwise the
+  # hot-reload watcher poll, which may request an outer rebuild.
+  let switchResult: ScreenSwitchResult = handleScreenSwitch(
+    world: world
+    scenes: app.scenes
+    playback: app.playback
+    appState: appState
+    anim: session.anim
+    schedule: frame.schedule
+    input: session.input
+    scrollFsm: session.scrollFsm
+    watcher: session.watcher
+    willSwitch: tick.willSwitch
+    currentScreen: session.currentScreen
+    nextScreen: tick.nextScreen
+    scrollTarget: frame.scrollTarget
+    cachedAlbumStem: session.cachedAlbumStem
+    cachedTrackIndex: session.cachedTrackIndex
+    cachedTrackDurMs: session.cachedTrackDurMs
+    cachedAlbumScrollFloor: session.cachedAlbumScrollFloor
+    heroDuration: session.heroDuration
+    prevPendingSrc: session.pendingSrc
+    prevPendingHeroTargetPageId: session.pendingHeroTargetPageId
+    viewport: app.viewport
+    reg: app.texReg
+  )
+  session.currentScreen = switchResult.newScreen
+  frame.scrollTarget = switchResult.newScrollTarget
+  session.cachedTrackDurMs = switchResult.cachedTrackDurMs
+  session.cachedAlbumScrollFloor = switchResult.cachedAlbumScrollFloor
+  session.cachedAlbumStem = "{switchResult.cachedAlbumStem}"
+  session.cachedTrackIndex = switchResult.cachedTrackIndex
+  if switchResult.switching {
+    frame.switching = true
+  }
+  session.pendingSrc = switchResult.pendingSrc
+  session.pendingHeroTargetPageId = "{switchResult.pendingHeroTargetPageId}"
+
+  # Frosted-glass cleanup. 106's GPU2D path does not capture a backdrop
+  # texture; this only clears the debug state.
+  if session.debug.menuOpen is false and session.prevMenuOpen {
+    setDebugHasBlur(debug: session.debug, value: false)
+  }
+  session.prevMenuOpen = session.debug.menuOpen
+}
