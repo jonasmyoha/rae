@@ -118,7 +118,16 @@ Ordered by leverage.
    `RegistryDeser.rae` 777. Registry synthesis (item 3) is what shrinks the
    last one.
 
-## 3. Remaining — 106 specifically
+## 3. Remaining — 106 specifically — CLOSED
+
+**All items below have landed. 106 is now THE reference UI-in-ECS example;
+its shape, the full component→system table and the "how to add a page" recipe
+are documented in `docs/ui-ecs-106-reference.md`, with the measured
+invariants (`findNodeInPage` = 0 outside SceneMount, `is Screen.` = 0 outside
+the persistence ordinal map, an idle frame running zero app systems, a page =
+its scene + a ≤~30-line producer).** The one remaining imperative refresh —
+the Album/Player pages re-mounting on a browsed stem/track change in
+`ScreenSwitch.rae` — is recorded there as a tracked follow-up, not a blocker.
 
 (Items 1–3 below landed; the application shape — the loop as resources +
 frame systems — landed 2026-09-19, see §1.)
