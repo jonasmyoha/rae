@@ -50,7 +50,6 @@ func buildSessionWorld(app: mod App, session: mod AppSession) ret UiWorld {
   # Every id the world can fire has an action-table row (the 106 gate
   # asserts the `[action-audit]` line).
   let audit: ActionAuditResult = actionAudit(world: world, table: app.actions)
-  session.uiRefresh.historyRevision = appState.playHistory.revision
   # Apply the gpu2d design-resolution transform together with the
   # freshly-built world so the two never disagree (doing it in the
   # resize-detection step painted one glitchy frame: the OLD world laid out
@@ -92,6 +91,7 @@ func createWorldFrame(world: mod UiWorld) ret WorldFrame {
   # the world down per tick.
   ret WorldFrame {
     schedule: own schedule
+    observation: createAppObservation(world: world)
     scrollTarget: findScrollRoot(world: world)
     renderCache: createRenderCache()
     forceRender: true
@@ -100,15 +100,14 @@ func createWorldFrame(world: mod UiWorld) ret WorldFrame {
   }
 }
 
-# The world's first state: the playback overlay (so the first frame doesn't
-# flash an empty progress bar), and the destination half of an in-flight hero
+# The world's first state: the destination half of an in-flight hero
 # transition — the previous world stashed the source rect; now that this one
 # is laid out, capture the target rect and hide the destination hero so the
 # overlay can paint it. The clock is NOT started here (that waits for the
-# first frame: `transitionArmed`).
+# first frame: `transitionArmed`). The bindings (progress bar, icons, lists)
+# land in the first frame's observation pass, before its paint.
 func armSessionWorld(app: mod App, session: mod AppSession, world: mod UiWorld) {
   let appState: mod AppState => app.appState
-  applyOverlaysToWorld(world: world, playback: app.playback, state: appState)
   if session.pendingDst {
     let captured: Bool = captureHeroTarget(
       anim: session.anim

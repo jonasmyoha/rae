@@ -172,7 +172,7 @@ frame systems — landed 2026-09-19, see §1.)
    Rae has no function references, so the app calls the systems and the
    schedule owns the declarations and dirty state. 106 is the reference for a
    Schedule-driven UI app.
-5. `ActionEvent` → `EventQueue`; `UiRefreshCache` revisions → `changedSince`.
+5. `ActionEvent` → `EventQueue` (done: the action table + `App.commands`); `UiRefreshCache` → the observation schedule (done: `observeSystem/AppObservation`, `source*` revision flags + declared tables).
 6. History windowing → `lib/ui` `ListView` (item 2.6). **LANDED (#964).**
 7. Background I/O (Spotify poller, artwork curl) → `spawn` + `Channel` + an
    event-loop `wake()` (parallelism plan §5). **LANDED (#950):** the runtime's

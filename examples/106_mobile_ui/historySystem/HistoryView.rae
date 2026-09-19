@@ -122,7 +122,7 @@ func setHistoryActive(world: mod UiWorld, entity: view EntityId, active: view Bo
 # Drive every `HistoryList`: when the play history's revision moved past the
 # rows last built, rewrite the host's ListViewData (the listViewSystem re-binds
 # its pooled rows in place on its next run) and show the host or the page's
-# empty-state node. Runs every frame from UiRefresh (a no-op at idle) and once
+# empty-state node. Runs from the observation schedule when the history moved, and once
 # at mount.
 func historyListSystem(world: mod UiWorld, state: view AppState) pub {
   let n: Int = componentCount(this: world.historyLists)

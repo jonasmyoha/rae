@@ -125,18 +125,17 @@ func frameInputSystem(
   # it (#265).
   processCommands(this: playback)
 
-  # UI diff/rebuild trigger. Runs after input so component visuals depending
-  # on changed app/playback data update from data, not direct patches inside
-  # action handlers.
-  refreshUiDiffs(
+  # Observation (A): every app binding system whose declared sources or
+  # tables moved — the commands above, a mount, a typed query — runs now, so
+  # component visuals follow the data, never a patch inside an action
+  # handler (observeSystem/AppObservation).
+  beginObservationFrame(observation: frame.observation)
+  let observed: Int = runAppObservation(
+    observation: frame.observation
     world: world
-    scenes: app.scenes
-    appState: appState
+    state: appState
     playback: playback
-    visible: session.currentScreen
-    cache: session.uiRefresh
-    viewport: app.viewport
-    applyOverlaySync: inputDispatch.hadActions
+    scenes: app.scenes
     reg: app.texReg
   )
 
