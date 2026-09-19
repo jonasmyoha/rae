@@ -102,31 +102,12 @@ func mountBottomDockOverlay(
     subScenes: scenes.subScenes
   )
 
-  # The mini-player is the dock's authored `MiniPlayer` SceneInstance (#981),
-  # resolved by mountPageOrError under the dock's page id. Its CARD extends
-  # by exactly the nav-tabs height, so the gradient starts at the menubar
-  # bottom edge and its visible content remains the original miniPlayerH top
-  # slice. Extra bottom padding equal to the overlap keeps the row contents
-  # centred in that visible slice.
-  let miniOverlap: Float = navTabsH
-  if let slotRaw: Int = findNodeInPage(world: world, pageId: dockPageId, nodeId: "MiniPlayer") {
-    let mini: EntityId = nodeEntity(world: world, index: slotRaw)
-    if componentHas(this: world.paddings, entity: mini) {
-      let curPad: Padding = componentGet(this: world.paddings, entity: mini)
-      let grownPad: Padding = {
-        insets: Insets {
-          l: curPad.insets.l
-          t: curPad.insets.t
-          r: curPad.insets.r
-          b: curPad.insets.b + miniOverlap
-        }
-      }
-      componentSet(this: world.paddings, entity: mini, data: grownPad)
-    } else {
-      let freshPad: Padding = { insets: Insets { l: 0.0, t: 0.0, r: 0.0, b: miniOverlap } }
-      componentSet(this: world.paddings, entity: mini, data: freshPad)
-    }
-  }
+  # The mini-player is the dock's authored `MiniPlayer` SceneInstance (#981).
+  # Its CARD extends by exactly the nav-tabs height, so the gradient starts at
+  # the menubar bottom edge and its visible content remains the original
+  # miniPlayerH top slice; the extra bottom padding that keeps the row
+  # contents centred in that slice is authored into MiniPlayer.raescene's root
+  # padding (a static `spaceS + navTabsH`), not poked in here.
   # Frames S3 (#210): select + overlay the mini-player scene's device frame
   # (its nodes live under the dock's page id). The forced id comes from the
   # S2 device simulator (activeDeviceFrame folds RAE_UI_FRAME +

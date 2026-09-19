@@ -83,7 +83,17 @@ type SearchField {
   placeholder: String
   textStyleId: String = "primary"
   placeholderStyleId: String = "muted"
-  emptyStateNodeId: String = "EmptyState"
+}
+
+# Shown only while a page-level list is EMPTY (the History page's "nothing
+# played yet" block, the Search page's "Recent" stub before a query). Authored
+# on the empty node; `emptyStateSystem` sets its `Active` from `key`:
+#   "history" -> the play history has no entries
+#   "search"  -> the page's SearchField query is blank
+enum EmptyStateKind { history, search }
+
+type EmptyState {
+  kind: EmptyStateKind
 }
 
 # ----- history page: the play-history list binding (#977) -------------------
@@ -95,7 +105,6 @@ type SearchField {
 # there are entries and the page's `emptyStateNodeId` node otherwise. The
 # list re-binds in place — a new play no longer re-mounts the page.
 type HistoryList {
-  emptyStateNodeId: String = "EmptyState"
   builtRevision: Int = -1
 }
 
@@ -137,12 +146,12 @@ type NavTab {
 # title and artist texts and points the hero cover's Sprite (and HeroWidget
 # key) at the collection the app is showing, whenever the collection key it
 # derives from app state moves past `builtKey`.
+# Marks the album page's HERO COVER node (the Sprite + HeroWidget): the
+# collection's cover stem is written onto it by `albumHeaderSystem` whenever
+# the browsed collection changes. The caption / title / artist Texts are
+# their own `TextBinding { key: "album.caption" | "album.title" |
+# "album.artist" }` — the same system writes those from the CollectionView.
 type AlbumHeader {
-  captionNodeId: String = "HeroCaption"
-  titleNodeId: String = "HeroTitle"
-  artistNodeId: String = "HeroArtist"
-  coverNodeId: String = "HeroThumb"
-  builtKey: String
 }
 
 # ----- now-playing page (#979) ----------------------------------------------
@@ -156,8 +165,15 @@ type AlbumHeader {
 # from `BottomSheetState.visible` and sizes the `panelNodeId` panel's Rect
 # from its row count; the rows themselves are the panel's `ListView` +
 # `ListSource { source: sheet }` (#996).
+# On the sheet's overlay ROOT: `bottomSheetSystem` toggles its `Active` from
+# `BottomSheetState.visible`. The panel that grows with the action count is a
+# separate `SheetPanel` on the panel node.
 type BottomSheet {
-  panelNodeId: String = "Panel"
+}
+
+# On the bottom sheet's PANEL node: `bottomSheetSystem` sizes it to
+# `rowHeight * actionCount` plus the panel's padding + gaps.
+type SheetPanel {
   rowHeight: Float = 121.44578313253011
 }
 

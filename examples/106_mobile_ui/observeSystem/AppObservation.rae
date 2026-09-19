@@ -149,7 +149,9 @@ const observePlaybackTime: Int = 12
 
 const observeCoverStyle: Int = 13
 
-const observeCount: Int = 14
+const observeEmptyState: Int = 14
+
+const observeCount: Int = 15
 
 func registerAppObserver(
   observation: mod AppObservation
@@ -313,6 +315,15 @@ func createAppObservation(world: view UiWorld) ret AppObservation {
     sources: coverStyleSources
     tables: coverStyleTables
   )
+  let emptyStateSources: Int = sourceHistory
+  let emptyStateTables: List(String) = ["emptyStates", "searchFields"]
+  registerAppObserver(
+    observation: observation
+    world: world
+    name: "emptyState"
+    sources: emptyStateSources
+    tables: emptyStateTables
+  )
   ret observation
 }
 
@@ -408,6 +419,9 @@ func runAppObserver(
   }
   if index is observeCoverStyle {
     coverStyleSystem(world: world, rounded: state.settings.roundedAlbumCovers)
+  }
+  if index is observeEmptyState {
+    emptyStateSystem(world: world, state: state)
   }
 }
 
