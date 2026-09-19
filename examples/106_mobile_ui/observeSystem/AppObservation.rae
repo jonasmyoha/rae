@@ -4,7 +4,9 @@
 # (the history / library / playback revisions, the browsed collection, the
 # sheet epoch, the settings, the texture registry), and the world tables it
 # reads (its own binding table, so a fresh mount is seen; `searchFields` for
-# the query — not `computedRects`, whose generation moves every frame) — and
+# the query; `computedRects` for the progress row, which must re-run once the
+# player page is laid out — its generation is stable at idle since the flow
+# ListView reconcile no longer re-borrows Children every frame) — and
 # the runner asks
 # the schedule whether a system's inputs moved before calling it. Rae has no
 # function references, so the runner still names the call per index; the
@@ -289,7 +291,7 @@ func createAppObservation(world: view UiWorld) ret AppObservation {
     tables: albumHeaderTables
   )
   let progressSources: Int = sourcePlaybackClock bitor sourcePlayback
-  let progressTables: List(String) = ["progressBars"]
+  let progressTables: List(String) = ["progressBars", "computedRects"]
   registerAppObserver(
     observation: observation
     world: world

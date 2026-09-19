@@ -813,13 +813,18 @@ func listViewSyncFlow(world: mod UiWorld, entity: view EntityId, scenes: view Sc
       e2 = e2 + 1
     }
     # Children order = data order (any non-row children keep their place
-    # ahead of the rows).
+    # ahead of the rows). Compare through a `view` first and take the `mod`
+    # borrow only when the order actually changed: componentMod bumps the
+    # Children generation eagerly, so an unconditional borrow would re-dirty
+    # layout every frame even when nothing moved (an idle busy-loop).
     if componentHas(this: world.childrens, entity: entity) {
-      let ch: mod Children => componentMod(this: world.childrens, entity: entity)
-      let kept: List(EntityId) = List.create(EntityId, cap: ch.ids.length)
+      let currentIds: List(EntityId) = List.create(EntityId, cap: 8)
+      let kept: List(EntityId) = List.create(EntityId, cap: 8)
+      let chv: view Children => componentView(this: world.childrens, entity: entity)
       var i: Int = 0
-      loop i < ch.ids.length {
-        let child: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
+      loop i < chv.ids.length {
+        let child: EntityId = rae_ext_rae_buf_get(buf: chv.ids.data, index: i)
+        currentIds.add(value: child)
         if componentHas(this: world.listViewRowKeys, entity: child) is false {
           kept.add(value: child)
         }
@@ -828,12 +833,12 @@ func listViewSyncFlow(world: mod UiWorld, entity: view EntityId, scenes: view Sc
       loop let rowRoot: view EntityId in ordered {
         kept.add(value: rowRoot)
       }
-      var same: Bool = kept.length is ch.ids.length
+      var same: Bool = kept.length is currentIds.length
       if same {
         var k: Int = 0
         loop k < kept.length {
           let a: EntityId = rae_ext_rae_buf_get(buf: kept.data, index: k)
-          let b: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: k)
+          let b: EntityId = rae_ext_rae_buf_get(buf: currentIds.data, index: k)
           if a is not b {
             same = false
           }
@@ -841,6 +846,7 @@ func listViewSyncFlow(world: mod UiWorld, entity: view EntityId, scenes: view Sc
         }
       }
       if same is false {
+        let ch: mod Children => componentMod(this: world.childrens, entity: entity)
         ch.ids = kept
       }
     }
