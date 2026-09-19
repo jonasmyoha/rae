@@ -230,6 +230,28 @@ func applyScrollPosition(
   }
 }
 
+# Reset every ScrollRoot on `pageId` to the top, in place (no re-mount): the
+# ScrollState and the RuntimeOffset both go to 0. Used when a persistent page
+# is repointed at fresh content — e.g. the album page showing a different
+# album — so the new content starts at the top instead of the old scroll.
+func resetScrollRootOnPage(world: mod UiWorld, pageId: view String) pub {
+  let n: Int = componentCount(this: world.scrollRoots)
+  var i: Int = 0
+  loop i < n {
+    let entity: EntityId = componentEntityAt(this: world.scrollRoots, i: i)
+    if pageOf(world: world, entity: entity) is pageId {
+      let root: ScrollRoot = componentGet(this: world.scrollRoots, entity: entity)
+      applyScrollPosition(
+        world: world
+        entity: entity
+        root: root
+        position: 0.0
+      )
+    }
+    i = i + 1
+  }
+}
+
 # Seed every ScrollRoot that has no ScrollState yet (a fresh mount) from the
 # memory, applying the position as the root's RuntimeOffset; record every
 # seeded root's live position back into the memory when it moved. Idempotent

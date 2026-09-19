@@ -10,23 +10,27 @@ open ui/animationSystem/HeroTransitionSystem
 
 # Persistent-world screen-switch handler. Called from the inner loop
 # once per frame after `dispatchActions` has chosen `nextScreen`:
-#   * willSwitch=true  → unmount the affected pages, re-mount with
-#                        fresh data, flip Active, and spawn the hero
-#                        transition entity when both pages show the
-#                        same `HeroWidget` key (ui/animationSystem/
+#   * willSwitch=true  → flip Active, re-mount only a page whose row asks
+#                        (`ScreenPage.refreshOnEntry`), and spawn the hero
+#                        transition entity when both pages show the same
+#                        `HeroWidget` key (ui/animationSystem/
 #                        HeroTransitionSystem).
 #   * willSwitch=false → poll the hot-reload watcher and possibly
 #                        force an outer rebuild.
+#
+# A browsed stem / track change is NOT a re-mount: the album track-row
+# highlight and the player header are bindings the observation pass updates
+# in place (the album ScrollRoot is reset to the top on a new album).
 #
 # Returns a `ScreenSwitchResult` the caller copies back into its
 # locals — `currentScreen`, cached album/track values, scrollTarget,
 # and the outer-rebuild `switching` signal.
 #
-# Scroll across re-mounts is the session's `ScrollMemory` (lib/ui/
-# scrollRootSystem): a page re-mounted for FRESH data (Home / History /
-# Library on entry, the album on a stem change) forgets its position first so
-# it lands at the top; a page re-mounted in place (the album on a track
-# change) keeps it, because the memory still holds where the user was.
+# Scroll across a re-mount is the session's `ScrollMemory` (lib/ui/
+# scrollRootSystem): a page re-mounted for FRESH data (a `refreshOnEntry`
+# page) forgets its position first so it lands at the top. The album, which
+# is NOT re-mounted on a stem change, is instead reset in place
+# (`resetScrollRootOnPage`) so a new album starts at the top.
 type ScreenSwitchResult {
   newScreen: Screen
   newScrollTarget: EntityId
@@ -70,70 +74,18 @@ func handleScreenSwitch(
   let stemChangedNow: Bool = appState.currentAlbumStem is cachedAlbumStem is false
   let trackChangedNow: Bool = appState.currentTrackIndex is not cachedTrackIndex
 
-  # Per-page re-mount on data change. Runs regardless of whether a
-  # screen change is happening — tapping a track row inside an album
-  # changes `currentTrackIndex` but keeps the visible screen the same,
-  # and we still need to re-mount the album page so the track-row
-  # highlight follows the user's selection. Stem change implies the
-  # tracks (and hence the highlight target) are new too.
-  let albumPage: ScreenPage = screenPageFor(screen: Screen.album)
-  let playerPage: ScreenPage = screenPageFor(screen: Screen.player)
+  # Data change WITHOUT a re-mount. The album track-row highlight and the
+  # player header are bindings: the album `TrackList` ListSource keys its rows
+  # on the playing stem|index (so the selected row re-binds in place), and the
+  # player's `PlaybackCover` / `TrackText` / `PlaybackTime` follow the browsed
+  # collection + `nowPlayingRevision`. The command phase already moved those,
+  # so the observation pass this frame updates both pages in place — the album
+  # and player stay mounted, which is also what lets the hero transition below
+  # read the (already-laid-out) incoming hero. Opening a DIFFERENT album is
+  # the one thing a binding does not cover: reset the album's scroll to the
+  # top, since the persistent page keeps the previous album's offset.
   if stemChangedNow {
-    unmountPage(world: world, pageId: albumPageId)
-    forgetScroll(memory: scrollMemory, pageId: albumPageId)
-    let freshAlbum: EntityId = mountScreenPage(
-      world: world
-      page: albumPage
-      scenes: scenes
-      viewport: viewport
-    )
-    unmountPage(world: world, pageId: playerPageId)
-    let freshNP: EntityId = mountScreenPage(
-      world: world
-      page: playerPage
-      scenes: scenes
-      viewport: viewport
-    )
-    # The fresh album page's header binding runs now (not just in the next
-    # observation pass) so its hero carries the stem the transition below
-    # looks for.
-    albumHeaderSystem(world: world, state: appState)
-    # Dock stays mounted; its MiniThumb cover follows the nowPlaying
-    # instance revision through its `PlaybackCover` binding (#268, #981)
-    # rather than an imperative patch here — so it shows what's *playing*,
-    # not merely the browsed album.
-    # Freshly-mounted pages have no Active component → default to
-    # active=true. Explicitly deactivate; the `setPageActive(incoming,
-    # true)` call below re-activates whichever page is the real
-    # destination on a willSwitch=true frame.
-    setPageActive(world: world, pageId: albumPageId, active: false)
-    setPageActive(world: world, pageId: playerPageId, active: false)
-  } else {
-    if trackChangedNow {
-      # Album page re-mounts so the now-playing row gets its highlight
-      # Shape; Player page re-mounts so its hero / title reflects the
-      # new track. The album's scroll position survives the re-mount
-      # through the scroll memory — the user picked a track from a
-      # specific row, so snapping back to the top would yank the list
-      # out from under them.
-      unmountPage(world: world, pageId: albumPageId)
-      let freshAlbum: EntityId = mountScreenPage(
-        world: world
-        page: albumPage
-        scenes: scenes
-        viewport: viewport
-      )
-      unmountPage(world: world, pageId: playerPageId)
-      let freshNP: EntityId = mountScreenPage(
-        world: world
-        page: playerPage
-        scenes: scenes
-        viewport: viewport
-      )
-      albumHeaderSystem(world: world, state: appState)
-      setPageActive(world: world, pageId: albumPageId, active: false)
-      setPageActive(world: world, pageId: playerPageId, active: false)
-    }
+    resetScrollRootOnPage(world: world, pageId: albumPageId)
   }
 
   if willSwitch is false {
@@ -145,14 +97,8 @@ func handleScreenSwitch(
       result.cachedTrackDurMs = activeTrackNow1.durationMs
       result.cachedAlbumStem = "{appState.currentAlbumStem}"
       result.cachedTrackIndex = appState.currentTrackIndex
-      # The current page is still active — re-mount above cleared
-      # its Active state, restore it so the page actually renders.
-      setPageActive(world: world, pageId: outgoingPageId, active: true)
-      # Scroll target was just destroyed by `unmountPage`; seed the fresh
-      # root from the memory and point the FSM at it so wheel/drag keeps
-      # working on the new album entity.
-      scrollRootSystem(world: world, memory: scrollMemory)
-      result.newScrollTarget = findScrollRoot(world: world)
+      # No re-mount: the album/player pages stayed mounted and active, so the
+      # scroll target is unchanged (a stem change reset its offset above).
     }
     if fileWatch.checkForChanges(watcher: watcher, now: uiNowSeconds()) {
       scenes = loadAllScenes()
