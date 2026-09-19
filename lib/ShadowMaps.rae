@@ -64,10 +64,6 @@ const shadowDefaultCascades: Int = 3
 
 const shadowSkinnedKeyBit: Int = 1099511627776  # 1 << 40: the skinned half of a batch key
 
-func nativeSmWgslStatic() unsafe extern("rae_sm_wgsl_static") ret Buffer(Any)
-
-func nativeSmWgslSkinned() unsafe extern("rae_sm_wgsl_skinned") ret Buffer(Any)
-
 type ShadowCache {
   objectsMade: Bool
   texture: TextureId
@@ -185,15 +181,11 @@ func ensureShadowObjects(shadow: mod ShadowCache, resources: mod GpuResources) {
     ret
   }
   shadow.objectsMade = true
-  var staticSource: String = ""
-  var skinnedSource: String = ""
-  unsafe {
-    staticSource = String.fromCStr(s: nativeSmWgslStatic())
-    skinnedSource = String.fromCStr(s: nativeSmWgslSkinned())
-  }
+  let staticShader: Shader = shader(files: ["lib/shadow_static.wgsl"])
+  let skinnedShader: Shader = shader(files: ["lib/shadow_skinned.wgsl"])
   if let pipeline: RenderPipelineId = createDepthPipeline(
     resources: resources
-    wgsl: staticSource
+    shader: staticShader
     vertexEntry: "vs"
     spec: casterPipelineSpec(skinned: false)
   ) {
@@ -201,7 +193,7 @@ func ensureShadowObjects(shadow: mod ShadowCache, resources: mod GpuResources) {
   }
   if let pipeline: RenderPipelineId = createDepthPipeline(
     resources: resources
-    wgsl: skinnedSource
+    shader: skinnedShader
     vertexEntry: "vs"
     spec: casterPipelineSpec(skinned: true)
   ) {

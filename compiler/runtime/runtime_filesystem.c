@@ -78,7 +78,9 @@ rae_String rae_ext_rae_sys_read_file(rae_String path) {
   return (rae_String){buffer, (int64_t)len, (int64_t)len + 1, 1};
 }
 
-/* #935: shader-asset read with stdlib resolution + a loud miss. See the header. */
+/* #935: stdlib-asset read (scenes, sky data) with stdlib resolution + a loud
+ * miss. See the header. Shaders no longer come through here: a declared
+ * `shader(files:)` is composed and embedded at build. */
 static rae_String rae_read_whole_file(const char* path) {
   FILE* f = fopen(path, "rb");
   if (!f) return (rae_String){NULL, 0, 0, 0};
@@ -95,7 +97,7 @@ static rae_String rae_read_whole_file(const char* path) {
   return (rae_String){buffer, (int64_t)len, (int64_t)len + 1, 1};
 }
 
-rae_String rae_ext_rae_gb_read_shader(rae_String path) {
+rae_String rae_ext_rae_read_asset(rae_String path) {
   if (!path.data) return (rae_String){NULL, 0, 0, 0};
   const char* p = (const char*)path.data;
 
@@ -115,8 +117,7 @@ rae_String rae_ext_rae_gb_read_shader(rae_String path) {
     if (viaStdlib.data) return viaStdlib;
   }
 
-  /* 3. Nowhere: fail loudly at the point of the miss, not frames later inside
-   *    WGPU shader-module creation staring at an empty source. */
+  /* 3. Nowhere: fail loudly at the point of the miss. */
   if (stdlib && stdlib[0]) {
     fprintf(stderr,
             "error: could not read stdlib asset '%s' (also tried $RAE_STDLIB=%s). "

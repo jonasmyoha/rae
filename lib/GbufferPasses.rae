@@ -135,10 +135,11 @@ func ensureCompositeObjects(cache: mod CompositePassCache, resources: mod GpuRes
     ret
   }
   cache.pipeMade = true
+  let compositeShader: Shader = shader(files: ["lib/deferred_composite.wgsl"])
   unsafe {
     cache.pipeline = createFullscreenPipeline(
       resources: resources
-      wgsl: gbCompositeWgsl()
+      shader: compositeShader
       format: g2dFormat() as Int32
     )
   }
@@ -330,13 +331,12 @@ func ssaoPass(
   }
   if not cache.pipeMade {
     cache.pipeMade = true
-    unsafe {
-      cache.pipeline = createFullscreenPipeline(
-        resources: resources
-        wgsl: gbAoWgsl()
-        format: WGPUTextureFormat_R8Unorm
-      )
-    }
+    let aoShader: Shader = shader(files: ["lib/gbuffer_octahedral.wgsl", "lib/deferred_ao.wgsl"])
+    cache.pipeline = createFullscreenPipeline(
+      resources: resources
+      shader: aoShader
+      format: WGPUTextureFormat_R8Unorm
+    )
   }
   let uploaded: Bool = uploadSsaoUniform(
     targets: targets

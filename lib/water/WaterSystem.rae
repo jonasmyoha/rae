@@ -252,13 +252,8 @@ func primaryBody(waterSystem: view WaterSystem) ret WaterBody {
   ret createLakeToon(surfaceZ: 0.0, extent: 1.0)
 }
 
-func waterSurfaceWgsl() ret String {
-  let noiseSrc: String = gbReadWgsl(path: "lib/noise.wgsl")
-  let surfaceSrc: String = gbReadWgsl(path: "lib/water/waterSurface.wgsl")
-  if surfaceSrc.length() is 0 {
-    ret surfaceSrc
-  }
-  ret noiseSrc.concat(other: "\n").concat(other: surfaceSrc)
+func waterSurfaceShader() ret Shader {
+  ret shader(files: ["lib/noise.wgsl", "lib/water/waterSurface.wgsl"])
 }
 
 # The surface pipeline: the geometry pass's vertex layout (pos/nrm/uv, stride 32),
@@ -274,13 +269,7 @@ func ensureWaterPipeline(
     ret
   }
   waterSystem.pipeMade = true
-  let source: String = waterSurfaceWgsl()
-  if source.length() is 0 {
-    log(
-      "[water] lib/water/waterSurface.wgsl not readable from the working directory — run from the repo root; water is not drawn"
-    )
-    ret
-  }
+  let source: Shader = waterSurfaceShader()
   let attributes: List(VertexAttributeSpec) = List.create(VertexAttributeSpec, cap: 3)
   attributes.add(value: { format: WGPUVertexFormat_Float32x3, offset: 0, location: 0 })
   attributes.add(value: { format: WGPUVertexFormat_Float32x3, offset: 12, location: 1 })
@@ -300,7 +289,7 @@ func ensureWaterPipeline(
   }
   if let pipeline: RenderPipelineId = createRenderPipeline(
     resources: resources
-    wgsl: source
+    shader: source
     vertexEntry: "vs"
     fragmentEntry: "fs"
     spec: spec

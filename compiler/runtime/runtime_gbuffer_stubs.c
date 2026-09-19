@@ -27,30 +27,17 @@ _Static_assert(sizeof(rae_Mat4) == 16 * sizeof(float),
 int64_t rae_gb_prepare(void){ return 0; }
 int64_t rae_gb_offscreen_w(void)        { return 0; }
 int64_t rae_gb_offscreen_h(void)        { return 0; }
-const char* rae_gb_wgsl(void)      { return ""; }
-const char* rae_gb_skin_wgsl(void) { return ""; }
 void rae_gb_submit(void* cmd)           { (void)cmd; }
-const char* rae_gb_sdf_wgsl(void) { return ""; }
-const char* rae_gb_view_wgsl(void)  { return ""; }
 int64_t rae_g2d_format(void)        { return 0; }
 void rae_ext_Gbuffer_present(void* texture, int64_t width, int64_t height) { (void)texture; (void)width; (void)height; }
 void rae_ext_Gbuffer_shutdown(void) {}
 
 /* The post passes are Rae manager objects (#923); C keeps the WGSL sources
  * and the deferred prepare. */
-const char* rae_gb_ao_wgsl(void)   { return ""; }
-const char* rae_gb_light_wgsl(void)          { return ""; }
-const char* rae_gb_taa_wgsl(void)            { return ""; }
-const char* rae_gb_pyr_from_depth_wgsl(void) { return ""; }
-const char* rae_gb_pyr_reduce_wgsl(void)     { return ""; }
 int64_t rae_gb_deferred_prepare(void)        { return 0; }
-const char* rae_gb_composite_wgsl(void)      { return ""; }
 
 /* Shadows (#382/#925): the ShadowCache is Rae; C keeps the WGSL and the forward
  * binds' borrowed inputs. Stubbed for builds without the GPU backend. */
-const char* rae_sm_wgsl_static(void)  { return ""; }
-const char* rae_sm_wgsl_skinned(void) { return ""; }
-const char* rae_sm_wgsl_sdf(void)     { return ""; }
 void rae_g3d_set_shadow_inputs(void* frame_ubuf, void* array_view, void* sampler) {
     (void)frame_ubuf; (void)array_view; (void)sampler;
 }

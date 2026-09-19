@@ -52,19 +52,22 @@ type BiomeConfig {
 # now. The proper home for a genuinely runtime-variable island IS the already-threaded
 # BiomeConfig (it carries islandRadius/islandFalloff per call): a future #41 grow sets
 # those fields on the config an app owns and rebuilds the pipelines, rather than
-# mutating a global. defaultBiomeConfig() seeds from these; islandParamsWgsl() bakes
-# the same values into the composed terrain/grass shaders, so the CPU field and the
-# GPU const still track one source and never disagree about where the coast is.
+# mutating a global. defaultBiomeConfig() seeds from these; islandConstants() hands
+# the same values to the terrain/grass pipelines, so the CPU field and the GPU
+# override still track one source and never disagree about where the coast is.
 const defaultIslandRadius: Float = 60.0
 
 const defaultIslandFalloff: Float = 22.0
 
-# The two island-size consts, generated as WGSL text and PREPENDED to the composed
-# terrain/grass shaders (GbufferTerrain.terrainSplatWgsl, GrassCompute.wgsl)
-# so the GPU field uses the same radius as the CPU. worldBiome.wgsl no longer declares
-# them. Regenerated on every pipeline build.
-func islandParamsWgsl() pub ret String {
-  ret "const RAE_BIOME_ISLAND_RADIUS: f32 = {defaultIslandRadius};\nconst RAE_BIOME_ISLAND_FALLOFF: f32 = {defaultIslandFalloff};\n"
+# The two island-size values as pipeline-creation constants for the terrain and
+# grass shaders (world_biome.wgsl declares them as `override`s), so the GPU
+# field uses the same radius as the CPU while the composed shader text stays
+# static and validated at build. Set at every pipeline build.
+func islandConstants() ret List(ShaderConstant) {
+  var constants: List(ShaderConstant) = List.create(ShaderConstant, cap: 2)
+  constants.add(value: { name: "RAE_BIOME_ISLAND_RADIUS", value: defaultIslandRadius })
+  constants.add(value: { name: "RAE_BIOME_ISLAND_FALLOFF", value: defaultIslandFalloff })
+  ret constants
 }
 
 func defaultBiomeConfig() pub ret BiomeConfig {

@@ -25,7 +25,23 @@ type DepthPipelineSpec {
   depthBiasSlopeScale: Float
 }
 
+# A depth-only pipeline from a DECLARED shader (`shader(files: [...])`).
 func createDepthPipeline(
+  resources: mod GpuResources
+  shader: view Shader
+  vertexEntry: view String
+  spec: view DepthPipelineSpec
+) ret opt RenderPipelineId {
+  ret createDepthPipelineSource(
+    resources: resources
+    wgsl: shader.text
+    vertexEntry: vertexEntry
+    spec: spec
+  )
+}
+
+# The primitive under it: a depth-only pipeline from WGSL TEXT.
+func createDepthPipelineSource(
   resources: mod GpuResources
   wgsl: view String
   vertexEntry: view String

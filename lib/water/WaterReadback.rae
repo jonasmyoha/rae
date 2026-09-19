@@ -44,13 +44,10 @@ func ensureWaterReadback(waterSystem: mod WaterSystem, resources: mod GpuResourc
   if isValidPipeline(resources: resources, id: waterSystem.cache.pipeline) {
     ret true
   }
-  let source: String = gbReadWgsl(path: "lib/water/waterReadback.wgsl")
-  if source.length() is 0 {
-    ret false
-  }
+  let readbackShader: Shader = shader(files: ["lib/water/waterReadback.wgsl"])
   if let pipeline: PipelineId = createComputePipeline(
     resources: resources
-    wgsl: source
+    shader: readbackShader
     entryPoint: "capture"
   ) {
     waterSystem.cache.pipeline = pipeline

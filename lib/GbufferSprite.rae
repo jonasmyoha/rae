@@ -135,13 +135,10 @@ func ensureSpritePipeline(
 ) {
   if not cache.pipeMade {
     cache.pipeMade = true
-    var composed: String = ""
-    unsafe {
-      composed = gbReadWgsl(path: "lib/sprite_billboard.wgsl")
-    }
+    let billboardShader: Shader = shader(files: ["lib/sprite_billboard.wgsl"])
     if let pipeline: RenderPipelineId = createRenderPipeline(
       resources: resources
-      wgsl: composed
+      shader: billboardShader
       vertexEntry: "vs"
       fragmentEntry: "fs"
       spec: gbufferProceduralPipelineSpec()

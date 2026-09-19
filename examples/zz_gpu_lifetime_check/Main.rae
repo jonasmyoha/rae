@@ -89,10 +89,11 @@ func checkComputeAndCopy(resources: mod GpuResources) ret Bool {
       size: 64
       usage: WGPUBufferUsage_MapRead + WGPUBufferUsage_CopyDst
     ) {
-      if let pipeline: PipelineId = createComputePipeline(
+      if let pipeline: PipelineId = createComputePipelineSource(
         resources: resources
         wgsl: kernelSource()
         entryPoint: "main"
+        constants: noShaderConstants()
       ) {
         let buffers: List(BufferId) = List.create(BufferId, cap: 1)
         buffers.add(value: storage)
@@ -295,10 +296,11 @@ func checkRepeated(resources: mod GpuResources) ret Bool {
     size: 64
     usage: WGPUBufferUsage_Storage + WGPUBufferUsage_CopySrc
   ) {
-    if let pipeline: PipelineId = createComputePipeline(
+    if let pipeline: PipelineId = createComputePipelineSource(
       resources: resources
       wgsl: kernelSource()
       entryPoint: "main"
+      constants: noShaderConstants()
     ) {
       let buffers: List(BufferId) = List.create(BufferId, cap: 1)
       buffers.add(value: storage)

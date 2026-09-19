@@ -137,14 +137,14 @@ func createMippedCascadeMap(
 func ensureFftMips(
   waterSystem: mod WaterSystem
   resources: mod GpuResources
-  wgsl: view String
+  shader: view Shader
   cascadeCount: view Int
   size: view Int
 ) {
   if not isValidPipeline(resources: resources, id: waterSystem.fft.mipPipeline) {
     if let mipPipeline: PipelineId = createComputePipeline(
       resources: resources
-      wgsl: wgsl
+      shader: shader
       entryPoint: "mip"
     ) {
       waterSystem.fft.mipPipeline = mipPipeline

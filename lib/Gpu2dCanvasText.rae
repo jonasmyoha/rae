@@ -26,23 +26,14 @@ func ensureTextPipeline(canvas: mod Gpu2dCanvas, resources: mod GpuResources) {
     ret
   }
   canvas.textPipeMade = true
-  var source: String = ""
-  unsafe {
-    source = nativeG2dBoxReadFile(path: "lib/gpu2d_text.wgsl")
-  }
-  if source.length() is 0 {
-    log(
-      "[gpu2d] lib/gpu2d_text.wgsl not readable from the working directory — run from the repo root; 2D text is skipped"
-    )
-    ret
-  }
+  let textShader: Shader = shader(files: ["lib/gpu2d_text.wgsl"])
   var format: Int = 0
   unsafe {
     format = nativeG2dBoxFormat()
   }
   if let pipeline: RenderPipelineId = createRenderPipeline(
     resources: resources
-    wgsl: source
+    shader: textShader
     vertexEntry: "vs"
     fragmentEntry: "fs"
     spec: boxPipelineSpec(format: format as Int32)

@@ -69,6 +69,19 @@ type Shader {
   generation: Int
 }
 
+# A pipeline-creation constant: the value of a WGSL `override` declaration,
+# set when the pipeline is created (WGPUConstantEntry). This is how a runtime
+# parameter reaches a DECLARED shader — the composed text stays static and
+# validated at build, and the value travels beside it.
+type ShaderConstant {
+  name: String
+  value: Float
+}
+
+func noShaderConstants() ret List(ShaderConstant) {
+  ret List.create(ShaderConstant, cap: 0)
+}
+
 func nativeNowMs() unsafe extern("rae_ext_nowMs") ret Int
 
 func nowMs() ret Int {

@@ -370,12 +370,19 @@ func createApp() ret App {
       Sys.exit(code: 1)
     }
 
-    # The ground palette calibrated for this example's neutral ACES grade —
-    # a painted meadow green, sand that reads as sand rather than snow.
-    rendererSetTerrainPalette(
+    # The ground palette and grass style calibrated for this example's neutral
+    # ACES grade — a painted meadow green, sand that reads as sand rather than
+    # snow — composed with the lib terrain parts and validated at build.
+    rendererSetTerrainShader(
       renderer: renderer
-      path: "{assets}terrain_palette.wgsl"
-      grassStylePath: "{assets}terrain_grass.wgsl"
+      shader: shader(files: [
+        "lib/noise.wgsl"
+        "lib/world_biome.wgsl"
+        "assets/terrain_palette.wgsl"
+        "assets/terrain_grass.wgsl"
+        "lib/terrain_detail.wgsl"
+        "lib/terrain_splat.wgsl"
+      ])
     )
     var terrainSystem: TerrainSystem = createTerrainSystem(
       renderer: renderer

@@ -1,5 +1,6 @@
 // Terrain ground palette for the walker example — this app's copy of
-// lib/terrain_palette.wgsl (composed instead of it by rendererSetTerrainPalette).
+// lib/terrain_palette.wgsl (listed instead of it in the terrain shader App.rae
+// declares and hands to rendererSetTerrainShader).
 //
 // The lib default carries the game proto's calibration: albedos measured for
 // its PBR-Neutral grade, where sand is pushed to the albedo ceiling to survive

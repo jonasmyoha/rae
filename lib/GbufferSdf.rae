@@ -83,15 +83,12 @@ func ensureSdfObjects(sdf: mod SdfPassCache, resources: mod GpuResources) {
     ret
   }
   sdf.pipeMade = true
-  var source: String = ""
-  unsafe {
-    source = String.fromCStr(s: gbSdfWgsl())
-  }
+  let sdfShader: Shader = shader(files: ["lib/gbuffer_octahedral.wgsl", "lib/gbuffer_sdf.wgsl"])
   # The geometry pass's 3 targets + reverse-Z depth, no vertex buffer, no cull:
   # a fullscreen triangle that writes its own frag_depth.
   if let pipeline: RenderPipelineId = createRenderPipeline(
     resources: resources
-    wgsl: source
+    shader: sdfShader
     vertexEntry: "vs"
     fragmentEntry: "fs"
     spec: sdfPipelineSpec()

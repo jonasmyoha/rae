@@ -12,7 +12,6 @@ import Keys
 import Image
 import Filesystem
 import Vec3
-open NoiseWgsl
 
 type Transform3d {
   position: Vec3
@@ -214,7 +213,7 @@ func extractScene(
 }
 
 func buildGpu3d(
-  wgsl: view String
+  wgsl: view Shader
   sceneData: view List(Float)
   params: view List(Int)
   pixels: view Int
@@ -224,15 +223,13 @@ func buildGpu3d(
     sceneBuf: Gpu.storageF32(data: sceneData.data, count: sceneData.length)
     outBuf: Gpu.allocU32(count: pixels)
     paramsBuf: Gpu.uniformU32(data: params.data, count: 8)
-    kernel: Gpu.kernel(wgsl: wgsl, entry: "main")
+    kernel: Gpu.kernelShader(shader: wgsl, entry: "main")
   }
 }
 
-func rae_ext_rae_sys_read_file(path: String) unsafe extern ret String
-
 func main() {
   let scene: Scene3d = buildScene()
-  let wgsl: String = loadNoiseShader(path: "examples/108_gpu3d_procedural/raymarch.wgsl")
+  let wgsl: Shader = shader(files: ["lib/noise.wgsl", "raymarch.wgsl"])
   Sdl3.initWindow(width: 1280, height: 720, title: "Rae 3D — Procedural Scene — GPT-5.6-Sol")
   Sdl3.setTargetFPS(fps: 0)
 

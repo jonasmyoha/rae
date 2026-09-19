@@ -594,14 +594,14 @@ void rae_runtime_set_args(int argc, char** argv);
 int64_t rae_ext_rae_sys_arg_count(void);
 rae_String rae_ext_rae_sys_arg_at(int64_t index);
 rae_String rae_ext_rae_sys_read_file(rae_String path);
-/* #935: read a WGSL/stdlib shader asset. Tries the path as given (cwd-relative,
- * so a project's own lib/ or an assets/ override still wins), then — for a
+/* #935: read a stdlib asset (a .raescene, the sky dataset). Tries the path as
+ * given (cwd-relative, so a project's own copy still wins), then — for a
  * "lib/..." path — joins it against $RAE_STDLIB (the toolchain stdlib dir the
  * compiler exports, so a project needs no local lib/ copy). If the file is
  * found nowhere it fails LOUDLY (a stderr diagnostic naming the path) and
- * returns empty, instead of silently feeding an empty WGSL source into GPU
- * shader-module creation and crashing frames later. */
-rae_String rae_ext_rae_gb_read_shader(rae_String path);
+ * returns empty. Shaders never come through here: a `shader(files:)`
+ * composition is read, validated and embedded by the compiler. */
+rae_String rae_ext_rae_read_asset(rae_String path);
 /* Binary counterpart: a Buffer of one-byte-per-Int values, for container
  * formats whose content is not text. */
 void* rae_ext_rae_sys_read_file_bytes(rae_String path, rae_Mod_Int64 out);
@@ -924,7 +924,6 @@ int64_t rae_gb_sprite_tex_gen(void);
 void rae_gb_sprite_array_init(int64_t w, int64_t h, int64_t layers);
 void rae_gb_sprite_array_write(int64_t layer, const int64_t* pixels, int64_t w, int64_t h);
 /* G-buffer metaball clusters are Rae manager objects (#922); C keeps the WGSL. */
-const char* rae_gb_sdf_wgsl(void);
 /* #921: the skinned meshes + palette are the Rae SkinStore's (no rae_gb_skin_* accessors). */
 /* One-command-buffer submit for the raw-encoder passes (shadow, fullscreen,
  * transparent, the legacy GpuTiming): a general FFI gap, not renderer state. */
@@ -941,10 +940,7 @@ int64_t rae_gb_offscreen_h(void);
 void   rae_gb_set_render_scale(double s);
 double rae_gb_render_scale(void);
 /* Render pipelines + WGSL shader modules created in Rae (#503). */
-const char* rae_gb_wgsl(void);
-const char* rae_gb_skin_wgsl(void);
 /* G-buffer inspector built in Rae (#503). */
-const char* rae_gb_view_wgsl(void);
 int64_t rae_g2d_format(void);
 /* #920: the presentable target is the Rae canvas's texture; C reports the
  * configured surface and borrows the texture for present / readback. */
@@ -953,16 +949,10 @@ int64_t rae_g2d_surface_width(void);
 int64_t rae_g2d_surface_height(void);
 /* Deferred passes migrated to Rae (#504): composite first. */
 int64_t rae_gb_deferred_prepare(void);
-const char* rae_gb_composite_wgsl(void);
 void* rae_gb_composite_source_view(void);
 int64_t rae_gb_composite_source_index(void);
 /* SSAO pass in Rae (#504). */
 void rae_gb_ssao_upload(float camX, float camY, float camZ);
-const char* rae_gb_ao_wgsl(void);
-const char* rae_gb_light_wgsl(void);
-const char* rae_gb_taa_wgsl(void);
-const char* rae_gb_pyr_from_depth_wgsl(void);
-const char* rae_gb_pyr_reduce_wgsl(void);
 void* rae_gb_ao_view(void);
 void* rae_gb_light_ubuf(void);
 int64_t rae_gb_light_bytes(void);
@@ -1002,9 +992,6 @@ void* rae_gb_pyr_rt_view(int64_t i);
 /* Shadow cascades (#925): the ShadowCache (lib/ShadowMaps.rae) owns the targets,
  * pipelines, queue and passes; C keeps the WGSL and receives the three sampled
  * inputs BORROWED for the forward scene / skin binds. */
-const char* rae_sm_wgsl_static(void);
-const char* rae_sm_wgsl_skinned(void);
-const char* rae_sm_wgsl_sdf(void);
 void rae_g3d_set_shadow_inputs(void* frame_ubuf, void* array_view, void* sampler);
 /* gpu2d frame lifecycle in Rae (#504). */
 void rae_g2d_frame_reset(void);

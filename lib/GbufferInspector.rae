@@ -21,7 +21,6 @@ open gpu/GpuArgs
 open gpu/GpuIds
 
 # C exposes the inspector WGSL and the presentable format/view.
-func gbViewWgsl() unsafe extern("rae_gb_view_wgsl") ret Buffer(Any)
 
 # #764: the inspector's state was module-level globals; it is per-frame state a
 # deferred renderer owns, so it lives in ViewPassCache on RenderPasses. #904:
@@ -53,10 +52,13 @@ func ensureViewPipeline(cache: mod ViewPassCache, resources: mod GpuResources) {
     ret
   }
   cache.pipeMade = true
+  let inspectShader: Shader = shader(
+    files: ["lib/gbuffer_octahedral.wgsl", "lib/gbuffer_inspect.wgsl"]
+  )
   unsafe {
     cache.pipeline = createFullscreenPipeline(
       resources: resources
-      wgsl: gbViewWgsl()
+      shader: inspectShader
       format: g2dFormat() as Int32
     )
   }

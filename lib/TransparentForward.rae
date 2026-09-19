@@ -191,19 +191,10 @@ func ensureTransparentPipeline(
   # (run the app from the repo root — the example gates `cd ..` for this).
   # An empty read must NOT reach wgpu: a module with no `vs` entry point makes
   # createRenderPipeline abort the process with an unhelpful validation error.
-  var source: String = ""
-  unsafe {
-    source = gbReadWgsl(path: "lib/transparentForward.wgsl")
-  }
-  if source.length() is 0 {
-    log(
-      "[transparentForward] lib/transparentForward.wgsl not readable from the working directory — run from the repo root; transparent draws are skipped"
-    )
-    ret
-  }
+  let forwardShader: Shader = shader(files: ["lib/transparentForward.wgsl"])
   if let pipeline: RenderPipelineId = createRenderPipeline(
     resources: resources
-    wgsl: source
+    shader: forwardShader
     vertexEntry: "vs"
     fragmentEntry: "fs"
     spec: transparentPipelineSpec(litFormat: litFormat)

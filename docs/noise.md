@@ -38,14 +38,13 @@ All functions are deterministic, seeded, allocation-free, and safe to call from 
 
 ## WGSL integration
 
-Shaders that need noise load through:
+Shaders that need noise list the prelude as the first part of their declared
+composition (docs/shaders-and-the-compiler.md):
 
 ```rae
-open NoiseWgsl
-
-let wgsl: String = loadNoiseShader(path: "examples/my_demo/render.wgsl")
+let render: Shader = shader(files: ["lib/noise.wgsl", "render.wgsl"])
 ```
 
-The prelude is read and concatenated only when the pipeline is created. Rendering then runs compiled WGSL functions such as `raeNoiseSimplex3`, `raeNoiseFbm2`, and `raeNoiseDomainWarp3` without per-frame file or string work.
+The parts are composed, validated with naga and embedded at build; rendering then runs compiled WGSL functions such as `raeNoiseSimplex3`, `raeNoiseFbm2`, and `raeNoiseDomainWarp3` with no file or string work at all.
 
-WGSL has no standard include directive, so host-side composition is the portable sharing mechanism. The `raeNoise` prefix keeps the shared functions from colliding with application shader helpers.
+WGSL has no standard include directive, so composition is the portable sharing mechanism. The `raeNoise` prefix keeps the shared functions from colliding with application shader helpers.

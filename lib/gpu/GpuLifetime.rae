@@ -97,12 +97,65 @@ func liveSubmissionCount(resources: view GpuResources) ret Int {
 
 # ----- dependency arena ------------------------------------------------
 
-# A compute pipeline from inline WGSL with an auto layout. The shader module is
-# released once the pipeline holds it.
+# The WGPU entries for `constants`. The keys alias the constants' own name
+# storage (toCStr), so `constants` must outlive the pipeline creation — it is
+# the caller's borrowed list, which it does.
+func shaderConstantEntries(
+  constants: view List(ShaderConstant)
+) unsafe ret List(WGPUConstantEntry) {
+  var entries: List(WGPUConstantEntry) = List.create(WGPUConstantEntry, cap: constants.length)
+  unsafe {
+    loop let constant: view ShaderConstant in constants {
+      entries.add(
+        value: {
+          key: { data: constant.name.toCStr(), length: WGPU_STRLEN }
+          value: constant.value as Float64
+        }
+      )
+    }
+  }
+  ret entries
+}
+
+# A compute pipeline from a DECLARED shader (`shader(files: [...])`) with an
+# auto layout. The shader module is released once the pipeline holds it.
 func createComputePipeline(
+  resources: mod GpuResources
+  shader: view Shader
+  entryPoint: view String
+) ret opt PipelineId {
+  let noConstants: List(ShaderConstant) = noShaderConstants()
+  ret createComputePipelineSource(
+    resources: resources
+    wgsl: shader.text
+    entryPoint: entryPoint
+    constants: noConstants
+  )
+}
+
+# The same, with `override` constants set at creation.
+func createComputePipelineWithConstants(
+  resources: mod GpuResources
+  shader: view Shader
+  entryPoint: view String
+  constants: view List(ShaderConstant)
+) ret opt PipelineId {
+  ret createComputePipelineSource(
+    resources: resources
+    wgsl: shader.text
+    entryPoint: entryPoint
+    constants: constants
+  )
+}
+
+# The primitive under both: a compute pipeline from WGSL TEXT. For text a
+# program builds at run time (a generated kernel); a shader that exists as
+# files is declared with `shader(files:)` and validated at build instead.
+func createComputePipelineSource(
   resources: mod GpuResources
   wgsl: view String
   entryPoint: view String
+  constants: view List(ShaderConstant)
 ) ret opt PipelineId {
   if wgsl.length() is 0 or entryPoint.length() is 0 {
     ret none
@@ -129,8 +182,14 @@ func createComputePipeline(
       ret none
     }
     let entryC: Buffer(Any) = entryPoint.toCStr()
+    let entries: List(WGPUConstantEntry) = shaderConstantEntries(constants: constants)
     let pipelineDescriptor: WGPUComputePipelineDescriptor = {
-      compute: { module: shaderModule, entryPoint: { data: entryC, length: WGPU_STRLEN } }
+      compute: {
+        module: shaderModule
+        entryPoint: { data: entryC, length: WGPU_STRLEN }
+        constantCount: entries.length as UInt64
+        constants: entries.data
+      }
     }
     let handle: Ptr = wgpuDeviceCreateComputePipeline(
       device: webgpuDevice()
