@@ -20,6 +20,7 @@ open ecs/Schedule
 open ecs/Entity
 open ecs/ComponentTable
 open assetSystem/GpuAssetRegistry
+open ui/coverStyleSystem/CoverStyleSystem
 
 # The app resources a binding system can observe — a flag bitmask (combine
 # with `bitor`), each with ONE revision number the runner reads
@@ -144,7 +145,11 @@ const observeAlbumHeader: Int = 10
 
 const observeProgress: Int = 11
 
-const observeCount: Int = 12
+const observePlaybackTime: Int = 12
+
+const observeCoverStyle: Int = 13
+
+const observeCount: Int = 14
 
 func registerAppObserver(
   observation: mod AppObservation
@@ -200,7 +205,7 @@ func createAppObservation(world: view UiWorld) ret AppObservation {
     sources: playbackIconSources
     tables: playbackIconTables
   )
-  let playbackCoverSources: Int = sourceNowPlaying bitor sourceCollection bitor sourceSettings bitor sourceTextures
+  let playbackCoverSources: Int = sourceNowPlaying bitor sourceCollection bitor sourceTextures
   let playbackCoverTables: List(String) = ["playbackCovers"]
   registerAppObserver(
     observation: observation
@@ -290,6 +295,24 @@ func createAppObservation(world: view UiWorld) ret AppObservation {
     sources: progressSources
     tables: progressTables
   )
+  let playbackTimeSources: Int = sourcePlaybackClock
+  let playbackTimeTables: List(String) = ["playbackTimes"]
+  registerAppObserver(
+    observation: observation
+    world: world
+    name: "playbackTime"
+    sources: playbackTimeSources
+    tables: playbackTimeTables
+  )
+  let coverStyleSources: Int = sourceSettings
+  let coverStyleTables: List(String) = ["coverStyles"]
+  registerAppObserver(
+    observation: observation
+    world: world
+    name: "coverStyle"
+    sources: coverStyleSources
+    tables: coverStyleTables
+  )
   ret observation
 }
 
@@ -352,7 +375,7 @@ func runAppObserver(
     )
   }
   if index is observeTrackText {
-    trackTextSystem(world: world, state: state, playback: playback)
+    trackTextSystem(world: world, state: state)
   }
   if index is observeBottomSheet {
     bottomSheetSystem(world: world, sheet: state.bottomSheet)
@@ -379,6 +402,12 @@ func runAppObserver(
   }
   if index is observeProgress {
     applyPlaybackToWorld(world: world, state: playback)
+  }
+  if index is observePlaybackTime {
+    playbackTimeSystem(world: world, playback: playback)
+  }
+  if index is observeCoverStyle {
+    coverStyleSystem(world: world, rounded: state.settings.roundedAlbumCovers)
   }
 }
 
