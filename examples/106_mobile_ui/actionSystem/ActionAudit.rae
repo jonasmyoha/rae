@@ -1,0 +1,114 @@
+# The action audit: every id the built world can fire has a row in the
+# action table. Walks the world's `OnClick` and `ActionBinding` components
+# (every mounted page, the dock, the back button, the debug button), every
+# `ListView` binding that writes an `OnClick.actionId` (its prefix is the
+# template a row's payload completes) and every bottom-sheet menu, and logs
+# ONE line — `[action-audit] ids=N unknown=M` plus one line per unknown id —
+# which the 106 example gate asserts on. Runs at every world build; a new
+# authored id without a table row fails the gate, never a user's tap.
+open ui/Ecs
+open ecs/Entity
+open ecs/ComponentTable
+
+type ActionAuditResult {
+  ids: Int
+  unknown: Int
+}
+
+func auditId(
+  table: view ActionTable
+  actionId: view String
+  where: view String
+  result: mod ActionAuditResult
+) {
+  result.ids = result.ids + 1
+  let lookup: ActionLookup = lookupAction(table: table, actionId: actionId)
+  if lookup.found is false {
+    result.unknown = result.unknown + 1
+    log("[action-audit] unknown action id '{actionId}' ({where})")
+  }
+}
+
+func actionAudit(world: view UiWorld, table: view ActionTable) ret ActionAuditResult {
+  unsafe {
+    var result: ActionAuditResult = { ids: 0, unknown: 0 }
+    let clicks: Int = componentCount(this: world.onClicks)
+    var i: Int = 0
+    loop i < clicks {
+      let click: OnClick = componentDataAt(this: world.onClicks, i: i)
+      auditId(
+        table: table
+        actionId: click.actionId
+        where: "OnClick"
+        result: result
+      )
+      if click.actionIdDouble.length() > 0 {
+        auditId(
+          table: table
+          actionId: click.actionIdDouble
+          where: "OnClick double"
+          result: result
+        )
+      }
+      if click.actionIdTriple.length() > 0 {
+        auditId(
+          table: table
+          actionId: click.actionIdTriple
+          where: "OnClick triple"
+          result: result
+        )
+      }
+      i = i + 1
+    }
+    let bindings: Int = componentCount(this: world.actionBindings)
+    i = 0
+    loop i < bindings {
+      let binding: ActionBinding = componentDataAt(this: world.actionBindings, i: i)
+      auditId(
+        table: table
+        actionId: binding.actionId
+        where: "ActionBinding"
+        result: result
+      )
+      i = i + 1
+    }
+    # A list row's click is `prefix + <cell> + suffix`; the prefix is a
+    # template row (or the whole id, when the cell is the payload).
+    let lists: Int = componentCount(this: world.listViews)
+    i = 0
+    loop i < lists {
+      let listView: ListView = componentDataAt(this: world.listViews, i: i)
+      let count: Int = listView.bindings.length
+      var b: Int = 0
+      loop b < count {
+        let binding: ListViewBinding = rae_ext_rae_buf_get(buf: listView.bindings.data, index: b)
+        if binding.componentName is "OnClick" and binding.prefix.length() > 0 {
+          auditId(
+            table: table
+            actionId: "{binding.prefix}0"
+            where: "ListView binding prefix"
+            result: result
+          )
+        }
+        b = b + 1
+      }
+      i = i + 1
+    }
+    # The bottom-sheet menus a row opens.
+    loop let entry: view ActionEntry in table.entries {
+      if entry.kind is ActionKind.openSheet {
+        let actions: List(BottomSheetAction) = sheetMenuActions(menu: entry.menu)
+        loop let action: view BottomSheetAction in actions {
+          auditId(
+            table: table
+            actionId: action.actionId
+            where: "sheet menu {entry.menu}"
+            result: result
+          )
+        }
+      }
+    }
+    log("[action-audit] ids={result.ids} unknown={result.unknown}")
+    ret result
+  }
+}

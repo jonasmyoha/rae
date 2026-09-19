@@ -1,0 +1,238 @@
+# AppState — the app's persisted + navigational state (docs/ecs-resources.md):
+# the theme, the media library, the browsed album/track, the tab and the
+# sub-page stack, the play history, liked/playlists, the bottom sheet and the
+# loader cursors. Owned by `App`; the command systems (actionSystem/) are the
+# only writers of the navigation fields. Split out of ScreenRouter.rae, which
+# keeps the Screen enum, the screen table and the world builders.
+open ui/Ecs
+open ecs/Entity
+
+# App-side state the command systems read and write. Owns the
+# parsed album list (loaded once at boot from `albumsFolder`) and
+# tracks which album the user is currently inside.
+#
+# Texture-registry keys for album covers are exactly the album
+# `stem`, so `state.currentAlbumStem` doubles as the hero-rebind
+# target: scenes author the placeholder `"albumCover"` key and
+# main.rae calls `rebindHero(world, "albumCover", state.currentAlbumStem)`
+# after building Album / NowPlaying worlds.
+type AppState {
+  # #764: the app-owned theme (active palette + scene token tables + repaint gen).
+  # Was the module-global activeTheme/g_active* — 106 rebuilds its UiWorld per
+  # frame, so the theme lives on this persistent state and each new world is seeded
+  # from it (seedWorldThemeFrom); the T-key + debug toggles write back here.
+  theme: UiTheme
+  # The album catalog, owned by its own ECS system (#266). Read
+  # through `state.mediaLibrary.albums`; see `MediaLibrarySystem`
+  # in `album_loader.rae`.
+  mediaLibrary: MediaLibrarySystem
+  # Stem of the album the user is currently viewing. Matches one
+  # entry's `Album.stem`. Empty string before the first
+  # `loadAllAlbums` call.
+  currentAlbumStem: String
+  # Active track within the current album (0-based, clamped to
+  # the track count at use sites). Drives the NowPlaying / mini-
+  # player text overrides and the playback position.
+  currentTrackIndex: Int
+  # Which of the four bottom-nav tabs is currently active. Drives
+  # the highlight through DockSystems.navTabsSystem (#978).
+  # Stays put while the user drills into sub-pages — so navigating
+  # Profile → Album (sub-page) → NowPlaying (sub-page) keeps the
+  # Profile tab highlighted.
+  tab: Screen
+  # Stack of sub-pages layered on top of the tab's base screen.
+  # Empty → the tab's own page is visible (the four base pages
+  # for the four tabs). Non-empty → the top entry is visible
+  # and a floating back button is shown. `dispatchActions` pushes
+  # for album.open / song.open and pops for nav.back.
+  #
+  # Stored as `List(Int)` (Screen ordinals via `screenToInt` /
+  # `intToScreen`) because the C backend's deep-copy synthesis
+  # for `List(EnumType)` is incomplete — it emits unknown-type
+  # references for the per-Enum deep-copy helper. Wrapping at
+  # the push/pop sites costs one int convert each way.
+  subPageStack: List(Int)
+  # Append-only log of what the user (or Spotify) has played this
+  # session. Feeds the "Recently played" row on Home and the full
+  # History sub-page. See `play_history.rae` for the schema.
+  playHistory: PlayHistory
+  # Stems the user currently keeps in their library. Catalog albums
+  # missing from this list still exist (covers + metadata) but are
+  # hidden from Home / Library views. See `library_data.rae`.
+  library: List(String)
+  # #975: bumped whenever `library` or `liked` changes shape — the
+  # CoverGrid system observes it to rebuild the Home / Library tiles.
+  libraryRevision: Int
+  # The user's "Liked Songs" playlist. Just an ordered list of
+  # (albumStem, trackIndex) pairs the heart button toggles. The
+  # ship default lives at assets/playlists/liked.json; user mutations land in
+  # app_cache/metadata/playlists/liked.json. See
+  # `playlist_data.rae`.
+  liked: Playlist
+  # When true, the Album sub-page renders the playlist named by
+  # `currentPlaylistId` instead of `currentAlbumStem`'s album — the
+  # album view is DRY and drives both (see `buildCurrentCollection`).
+  # Set by `playlist.open`, cleared by `album.open` / tab switches.
+  viewingPlaylist: Bool
+  currentPlaylistId: String
+  # iOS-style action sheet — opened by the three-dots button on
+  # track rows / album pages. See `bottom_sheet.rae`. Not persisted
+  # across launches; defaults to invisible.
+  bottomSheet: BottomSheetState
+  # UI preferences (code-only flags — no settings UI yet). See
+  # `app_settings.rae`.
+  settings: AppSettings
+  # Whether the canvas overlay (S5 "canvasOpen" scene state) is
+  # showing. Flipped by the `canvas.toggle` / `canvas.close` actions;
+  # RAE_UI_CANVAS=1 opens it at boot for headless proofs. Not
+  # persisted. See canvas_view.rae.
+  canvasOpen: Bool
+  # #789: progressive-loader cursors that used to be module-global `var`s.
+  # Transient (not persisted): the History-artwork scan cursor and the album/
+  # avatar asset-registration latches.
+  historyArt: HistoryArtLoader
+  # #950: the background artwork downloads the History loader kicks off
+  # (spawn'd curl workers + their result channel). Transient.
+  artworkFetch: ArtworkFetchQueue
+  assetLoad: AssetLoad
+}
+
+func createAppState(albums: own List(Album), theme: own UiTheme) pub ret AppState {
+  unsafe {
+    # Default the active stem to the first album in the list — the
+    # static Album / NowPlaying scenes hero-animate against whatever
+    # cover the Profile grid has at that index, and the user's first
+    # tap on a tile overwrites it. Empty list → empty stem (the
+    # placeholder cover sticks around).
+    var firstStem: String = ""
+    if albums.length > 0 {
+      let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: 0)
+      firstStem = "{a.stem}"
+    }
+    # Start with an empty library — main.rae's restoreLibrary call
+    # seeds it from the catalog on first launch or rebuilds from disk
+    # on subsequent ones.
+    let likedId: String = "liked"
+    let likedTitle: String = "Liked Songs"
+    let liked: Playlist = createPlaylist(id: own likedId, title: own likedTitle)
+    ret AppState {
+      theme: own theme
+      mediaLibrary: createMediaLibrary(albums: albums)
+      currentAlbumStem: firstStem
+      currentTrackIndex: 0
+      tab: Screen.home
+      subPageStack: List.create(Int, cap: 4)
+      playHistory: createPlayHistory(cap: 100)
+      library: List.create(String, cap: 8)
+      libraryRevision: 0
+      liked: own liked
+      viewingPlaylist: false
+      currentPlaylistId: ""
+      bottomSheet: createBottomSheetState()
+      settings: createAppSettings()
+      canvasOpen: false
+      historyArt: createHistoryArtLoader()
+      artworkFetch: createArtworkFetchQueue()
+      assetLoad: createAssetLoad()
+    }
+  }
+}
+
+# Screen the user currently sees. Top of `subPageStack` if any
+# sub-pages are open, else the active tab's base page. Convert
+# the Int ordinal back to Screen via `intToScreen`.
+func visibleScreen(state: view AppState) pub ret Screen {
+  unsafe {
+    let n: Int = state.subPageStack.length
+    if n > 0 {
+      let top: Int = n - 1
+      let code: Int = rae_ext_rae_buf_get(buf: state.subPageStack.data, index: top)
+      ret intToScreen(value: code)
+    }
+    ret state.tab
+  }
+}
+
+# True when a sub-page is open (something on the stack). Used by
+# the view builders to decide whether to mount the floating
+# back-button overlay.
+func isSubPage(state: view AppState) pub ret Bool {
+  ret state.subPageStack.length > 0
+}
+
+# Push `screen` onto the sub-page stack. Mutates state in place.
+# Used by `album.open` (push Album) and `song.open` (push
+# NowPlaying).
+func pushSubPage(state: mod AppState, screen: view Screen) pub {
+  let code: Int = screenToInt(s: screen)
+  state.subPageStack.add(value: code)
+}
+
+# Pop the top of the sub-page stack. No-op when the stack is
+# empty (the user can't go back from a tab's base page).
+# Screen is an enum with no heap fields, so the length-truncate
+# trick is safe — no per-entry drop required.
+func popSubPage(state: mod AppState) pub {
+  let n: Int = state.subPageStack.length
+  if n > 0 {
+    state.subPageStack.length = n - 1
+  }
+}
+
+# Switch the active bottom-nav tab. Clears the sub-page stack —
+# tapping a tab always returns the user to that tab's home page,
+# never to whatever sub-page was open last.
+func setTab(state: mod AppState, tab: view Screen) pub {
+  state.tab = tab
+  state.subPageStack.length = 0
+  # Leaving for a tab home clears any open-playlist view state.
+  state.viewingPlaylist = false
+}
+
+# Helper for view-building paths that need the active album as a
+# concrete Album value (rather than chasing the index through
+# `state.mediaLibrary.albums` themselves). Returns a stub Album when the stem
+# isn't found — caller can still render the row but every field
+# will be empty.
+func activeAlbum(state: view AppState) pub ret Album {
+  unsafe {
+    let idx: Int = findAlbumIndex(albums: state.mediaLibrary.albums, stem: state.currentAlbumStem)
+    if idx < 0 {
+      let empty: String = ""
+      ret Album {
+        stem: empty
+        artist: empty
+        album: empty
+        year: 0
+        genre: empty
+        status: empty
+        coverPath: empty
+        artworkUrl: empty
+        tracks: List.create(Track, cap: 0)
+        totalDurationMs: 0
+      }
+    }
+    ret rae_ext_rae_buf_get(buf: state.mediaLibrary.albums.data, index: idx)
+  }
+}
+
+# Build the `spotify:search:` query. Matches SUMU's working AppleScript
+# implementation exactly: a plain "<title> <artist>" string, title
+# first. That ordering biases Spotify's top hit onto the right song.
+#
+# Field operators (`track:` / `artist:` / `album:`) were tried and made
+# it WORSE through the `spotify:search:` URI — `play track` plays the
+# top result, the operators aren't ranked the way the search box ranks
+# them, and an `album:` clause that doesn't match Spotify's exact album
+# title (deluxe editions, remasters) drops the match entirely. `album`
+# is kept in the signature for callers but intentionally unused.
+func spotifySearchQuery(
+  artist: view String
+  title: view String
+  album: view String
+) pub ret String {
+  unsafe {
+    let unused: Int = album.length()
+    ret "{title} {artist}"
+  }
+}

@@ -17,7 +17,8 @@ open ui/LogOverlay
 #   * scene_mount.rae      — mountOrError + visible error sentinel
 #   * album_view.rae       — album-screen builders, including buildAlbumWorld
 #   * now_playing_view.rae — buildNowPlayingWorld
-#   * screen_router.rae    — Screen enum, buildScreenWorld, dispatchActions
+#   * screen_router.rae    — Screen enum, the screen table, buildScreenWorld
+#   * actionSystem/        — the action table + the command systems (what a tap does)
 #   * album_loader.rae     — Album / Track structs + loadAllAlbums (album.json)
 #   * asset_loader.rae     — GPU2D image-key loading (per-album cover + avatar)
 import FileWatch
@@ -57,4 +58,9 @@ type App {
   waitTraceEnabled: Bool
   loopDebugEnabled: Bool
   loopDebugFrame: Int
+  # What a fired action id means (actionSystem/ActionTable), built once; and
+  # the per-frame command channel the input phase fills from it and the
+  # command systems drain (actionSystem/ActionSystems).
+  actions: ActionTable
+  commands: EventQueue(AppCommand)
 }

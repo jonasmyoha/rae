@@ -47,6 +47,9 @@ func buildSessionWorld(app: mod App, session: mod AppSession) ret UiWorld {
   # the session's scroll memory (the restored position at boot, the page's last
   # position on a rebuild).
   scrollRootSystem(world: world, memory: session.scrollMemory)
+  # Every id the world can fire has an action-table row (the 106 gate
+  # asserts the `[action-audit]` line).
+  let audit: ActionAuditResult = actionAudit(world: world, table: app.actions)
   session.uiRefresh.historyRevision = appState.playHistory.revision
   # Apply the gpu2d design-resolution transform together with the
   # freshly-built world so the two never disagree (doing it in the

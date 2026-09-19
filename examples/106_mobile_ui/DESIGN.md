@@ -143,9 +143,12 @@ waitEvents(timeout)          hybrid loop: 0 while animating/interacting,
                              nextWaitTimeoutSec(...) when idle (§5)
 pollClose + gather input     lib/ui inputSystem over the world
 applyWheelScroll             scroll FSM (inputSystem/ScrollInput.rae)
-1. runFrameInputDispatch     hit-test, uiActions EventQueue -> action handlers
-                             mutate AppState / issue commands; may pick a
-                             next screen
+1. runFrameInputDispatch     hit-test; each fired id -> the action table ->
+                             a typed AppCommand on App.commands; the command
+                             systems (navigation, playback, sheet, canvas)
+                             consume kinds, never id strings; navigation
+                             alone writes the tab / sub-page stack and
+                             picks the next screen
 2. processCommands(playback) Apply(A): the PlaybackSystem drains its inbox
 3. refreshUiDiffs +          observation: revision ints on resources
    syncFrameData             (history, playback, sheet) -> component edits;
