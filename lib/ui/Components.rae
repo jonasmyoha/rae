@@ -663,8 +663,29 @@ type ListViewBinding {
   suffix: String
 }
 
+# How a ListView materialises its rows (#996):
+#   * `virtual` — a windowed, recycled pool of rows the system positions itself
+#     (Offset per row, the scroll as the list's RuntimeOffset); for long lists.
+#   * `flow` — EVERY row is a live child and the container's own authored
+#     `Layout` places them (a `Grid` with `columns`, a `Horizontal` strip, a
+#     `Vertical` stack); rows are KEYED, so a data change re-binds the rows
+#     whose key stayed and creates/destroys only the difference — entity ids,
+#     hover state and hero captures survive. For the short lists a screen
+#     shows whole: a cover grid, a recently-played strip, a track list.
+enum ListViewMode { virtual, flow }
+
+# One entry of `ListView.rowScenes`: the sub-scene to mount for rows whose
+# `rowKindField` cell equals `kind`. Authored as an object:
+#   "rowScenes": { "album": "CoverTile", "playlist": "PlaylistTile" }
+type ListViewRowScene {
+  kind: String
+  sceneId: String
+}
+
 type ListView {
   itemSceneId: String
+  # The row cell that identifies a row across data changes (flow mode: a
+  # rebind reuses the row entity whose key matches). "" = the row index.
   itemKeyField: String
   itemHeight: Float
   itemGap: Float
@@ -674,6 +695,23 @@ type ListView {
   loadingSceneId: String
   emptySceneId: String
   errorSceneId: String
+  mode: ListViewMode
+  # The row cell naming the row's KIND, looked up in `rowScenes`; rows whose
+  # kind has no entry (or an empty cell) mount `itemSceneId`.
+  rowKindField: String
+  rowScenes: List(ListViewRowScene)
+  # Flow-mode row size. `itemWidth` 0 = square (`itemHeight`); with
+  # `fitToColumns` the side is derived from the container's width and its
+  # Grid layout's `columns` / `columnGap` (a cover grid's tile side).
+  itemWidth: Float
+  fitToColumns: Bool
+}
+
+# Runtime (#996): the key + sub-scene a flow-mode row entity was materialised
+# for, so a rebind can reuse it. On the row root; never authored.
+type ListViewRowKey {
+  key: String
+  sceneId: String
 }
 
 # ----- ListView data model (#945) ------------------------------------------

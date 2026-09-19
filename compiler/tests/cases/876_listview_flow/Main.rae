@@ -1,0 +1,249 @@
+# #996: ListView FLOW mode — the one data-list mechanism for the short lists a
+# screen shows whole. Headless, from scene JSON:
+#   A. a `mode: "Flow"` ListView with a Grid layout, `rowKindField` +
+#      `rowScenes` (one grid mixing two tile scenes), `fitToColumns` (the tile
+#      side from the container width / columns / gap), and per-row bindings
+#      (Sprite key, OnClick template = prefix + key, HeroWidget key, WidgetId).
+#   B. keyed rebind: a data change reuses the row entities whose key stayed,
+#      creates the new ones, destroys the ones that went, and the child order
+#      is the data order.
+#   C. a horizontal strip with `itemWidth` rows.
+import Json
+import String
+import ui/Components
+open ui/Ecs
+import ui/Registry
+open ui/Scene
+open ui/SceneLoader
+open ui/listViewSystem/ListViewSystem
+open ui/SceneInstance
+open ecs/Entity
+open ecs/ComponentTable
+
+func cell(
+  keys: mod List(String)
+  values: mod List(String)
+  key: view String
+  value: view String
+) {
+  keys.add(value: "{key}")
+  values.add(value: "{value}")
+}
+
+func tileRow(key: view String, kind: view String) ret ListViewRow {
+  let keys: List(String) = List.create(String, cap: 3)
+  let values: List(String) = List.create(String, cap: 3)
+  cell(
+    keys: keys
+    values: values
+    key: "key"
+    value: key
+  )
+  cell(
+    keys: keys
+    values: values
+    key: "kind"
+    value: kind
+  )
+  cell(
+    keys: keys
+    values: values
+    key: "art"
+    value: "art-{key}"
+  )
+  ret ListViewRow { keys: own keys, values: own values }
+}
+
+func tileScene(rootId: view String, artId: view String) ret String {
+  var s: String = ""
+  s = s.concat(other: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"{rootId}\",\"nodes\":\{")
+  s = s.concat(other: "\"{rootId}\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":10,\"h\":10\},")
+  s = s.concat(other: "\"OnClick\":\{\"actionId\":\"\"\},\"Children\":[\"{artId}\"]\},")
+  s = s.concat(other: "\"{artId}\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":10,\"h\":10\},")
+  s = s.concat(other: "\"Sprite\":\{\"textureKey\":\"placeholder\"\}\}")
+  s = s.concat(other: "\}\}")
+  ret s
+}
+
+func gridScene() ret String {
+  var s: String = ""
+  s = s.concat(
+    other: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Grid\",\"nodes\":\{\"Grid\":\{"
+  )
+  s = s.concat(other: "\"Rect\":\{\"x\":0,\"y\":0,\"w\":310,\"h\":600\},")
+  s = s.concat(
+    other: "\"Layout\":\{\"type\":\"Grid\",\"columns\":2,\"columnGap\":10,\"rowGap\":10\},"
+  )
+  s = s.concat(
+    other: "\"ListView\":\{\"mode\":\"Flow\",\"itemKeyField\":\"key\",\"rowKindField\":\"kind\","
+  )
+  s = s.concat(
+    other: "\"itemSceneId\":\"CoverTile\",\"rowScenes\":\{\"playlist\":\"PlaylistTile\"\},"
+  )
+  s = s.concat(other: "\"fitToColumns\":true,\"itemHeight\":0,")
+  s = s.concat(other: "\"bindings\":[")
+  s = s.concat(
+    other: "\{\"nodeId\":\"Art\",\"component\":\"Sprite\",\"field\":\"textureKey\",\"itemField\":\"art\"\},"
+  )
+  s = s.concat(
+    other: "\{\"nodeId\":\"Tile\",\"component\":\"OnClick\",\"field\":\"actionId\",\"itemField\":\"key\",\"prefix\":\"album.open.\"\},"
+  )
+  s = s.concat(
+    other: "\{\"nodeId\":\"Tile\",\"component\":\"HeroWidget\",\"field\":\"key\",\"itemField\":\"key\"\},"
+  )
+  s = s.concat(
+    other: "\{\"nodeId\":\"Tile\",\"component\":\"WidgetId\",\"field\":\"kind\",\"itemField\":\"kind\"\}"
+  )
+  s = s.concat(other: "]\}\}\}\}")
+  ret s
+}
+
+func stripScene() ret String {
+  var s: String = ""
+  s = s.concat(
+    other: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Strip\",\"nodes\":\{\"Strip\":\{"
+  )
+  s = s.concat(other: "\"Rect\":\{\"x\":0,\"y\":0,\"w\":600,\"h\":120\},")
+  s = s.concat(other: "\"Layout\":\{\"type\":\"Horizontal\",\"columnGap\":8\},")
+  s = s.concat(
+    other: "\"ListView\":\{\"mode\":\"Flow\",\"itemKeyField\":\"key\",\"itemSceneId\":\"CoverTile\","
+  )
+  s = s.concat(other: "\"itemWidth\":96,\"itemHeight\":120,\"bindings\":[]\}\}\}\}")
+  ret s
+}
+
+func rowIds(world: view UiWorld, listEntity: view EntityId) ret List(String) {
+  let out: List(String) = List.create(String, cap: 8)
+  unsafe {
+    if componentHas(this: world.childrens, entity: listEntity) is false {
+      ret out
+    }
+    let ch: view Children => componentView(this: world.childrens, entity: listEntity)
+    var i: Int = 0
+    loop i < ch.ids.length {
+      let row: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
+      let identity: ListViewRowKey = componentGet(this: world.listViewRowKeys, entity: row)
+      out.add(value: "{identity.key}@{row.index}")
+      i = i + 1
+    }
+  }
+  ret out
+}
+
+func describeRows(world: view UiWorld, listEntity: view EntityId) ret String {
+  var s: String = ""
+  loop let id: view String in rowIds(world: world, listEntity: listEntity) {
+    s = s.concat(other: "{id} ")
+  }
+  ret s.trim()
+}
+
+func rowNodeText(world: view UiWorld, row: view EntityId, nodeId: view String) ret String {
+  let page: String = "listRow{row.index}"
+  if let raw: Int = findNodeInPage(world: world, pageId: page, nodeId: nodeId) {
+    let entity: EntityId = nodeEntity(world: world, index: raw)
+    if componentHas(this: world.sprites, entity: entity) {
+      ret componentGet(this: world.sprites, entity: entity).textureKey
+    }
+    if componentHas(this: world.onClicks, entity: entity) {
+      ret componentGet(this: world.onClicks, entity: entity).actionId
+    }
+  }
+  ret "(missing)"
+}
+
+func main() {
+  let registry: SceneRegistry = createSceneRegistry()
+  let cover: Scene = parseScene(source: tileScene(rootId: "Tile", artId: "Art"))
+  cover.sceneId = "CoverTile"
+  registerScene(reg: registry, key: "CoverTile", scene: own cover)
+  let playlist: Scene = parseScene(source: tileScene(rootId: "Tile", artId: "Art"))
+  playlist.sceneId = "PlaylistTile"
+  registerScene(reg: registry, key: "PlaylistTile", scene: own playlist)
+
+  # ----- A: the grid, mixed tile kinds, fitted side, bindings -----
+  let world: UiWorld = createUiWorld()
+  let grid: Scene = parseScene(source: gridScene())
+  grid.sceneId = "grid"
+  loadScene(world: world, scene: grid)
+  var listEntity: EntityId = noEntity()
+  if let raw: Int = world.nodeIds.get(k: "Grid") {
+    listEntity = id(v: raw)
+  }
+  let lv: ListView = componentGet(this: world.listViews, entity: listEntity)
+  log(
+    "mode flow: {lv.mode is ListViewMode.flow} rowScenes: {lv.rowScenes.length} fit: {lv.fitToColumns}"
+  )
+  let rows: List(ListViewRow) = List.create(ListViewRow, cap: 4)
+  rows.add(value: tileRow(key: "liked", kind: "playlist"))
+  rows.add(value: tileRow(key: "abbey", kind: "album"))
+  rows.add(value: tileRow(key: "kind", kind: "album"))
+  componentSet(this: world.listViewDatas, entity: listEntity, data: ListViewData { rows: own rows })
+  listViewSystem(world: world, scenes: registry)
+  log("rows: {describeRows(world: world, listEntity: listEntity)}")
+  unsafe {
+    let ch: view Children => componentView(this: world.childrens, entity: listEntity)
+    let first: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: 0)
+    let second: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: 1)
+    let firstKey: ListViewRowKey = componentGet(this: world.listViewRowKeys, entity: first)
+    let secondKey: ListViewRowKey = componentGet(this: world.listViewRowKeys, entity: second)
+    log("scenes: {firstKey.sceneId} {secondKey.sceneId}")
+    let rect: Rect = componentGet(this: world.rects, entity: second)
+    log("tile side: {rect.size.x.toInt()}x{rect.size.y.toInt()} (310 - 10) / 2")
+    log("art: {rowNodeText(world: world, row: second, nodeId: "Art")}")
+    log("click: {rowNodeText(world: world, row: second, nodeId: "Tile")}")
+    let hero: HeroWidget = componentGet(this: world.heroWidgets, entity: second)
+    let widget: WidgetId = componentGet(this: world.widgetIds, entity: second)
+    log("hero: {hero.key} widget kind: {widget.kind}")
+  }
+  let aliveA: Int = aliveCount(world: world)
+
+  # ----- B: keyed rebind — drop "abbey", add "help", reorder -----
+  let before: List(String) = rowIds(world: world, listEntity: listEntity)
+  let rows2: List(ListViewRow) = List.create(ListViewRow, cap: 4)
+  rows2.add(value: tileRow(key: "kind", kind: "album"))
+  rows2.add(value: tileRow(key: "liked", kind: "playlist"))
+  rows2.add(value: tileRow(key: "help", kind: "album"))
+  componentSet(
+    this: world.listViewDatas
+    entity: listEntity
+    data: ListViewData { rows: own rows2 }
+  )
+  listViewSystem(world: world, scenes: registry)
+  log("rows: {describeRows(world: world, listEntity: listEntity)}")
+  let after: List(String) = rowIds(world: world, listEntity: listEntity)
+  let likedBefore: String = before.copyAtFallback(index: 0, fallback: "")
+  let likedAfter: String = after.copyAtFallback(index: 1, fallback: "")
+  let kindBefore: String = before.copyAtFallback(index: 2, fallback: "")
+  let kindAfter: String = after.copyAtFallback(index: 0, fallback: "")
+  log("kept entities: {likedBefore is likedAfter} {kindBefore is kindAfter}")
+  log("alive unchanged (one out, one in): {aliveCount(world: world) is aliveA}")
+  # An unchanged rebind touches nothing: same ids, same order.
+  listViewSystem(world: world, scenes: registry)
+  log("stable: {describeRows(world: world, listEntity: listEntity)}")
+
+  # ----- C: a horizontal strip with fixed-width rows -----
+  let stripWorld: UiWorld = createUiWorld()
+  let strip: Scene = parseScene(source: stripScene())
+  strip.sceneId = "strip"
+  loadScene(world: stripWorld, scene: strip)
+  var stripEntity: EntityId = noEntity()
+  if let raw: Int = stripWorld.nodeIds.get(k: "Strip") {
+    stripEntity = id(v: raw)
+  }
+  let thumbs: List(ListViewRow) = List.create(ListViewRow, cap: 3)
+  thumbs.add(value: tileRow(key: "a", kind: "album"))
+  thumbs.add(value: tileRow(key: "b", kind: "album"))
+  componentSet(
+    this: stripWorld.listViewDatas
+    entity: stripEntity
+    data: ListViewData { rows: own thumbs }
+  )
+  listViewSystem(world: stripWorld, scenes: registry)
+  unsafe {
+    let ch: view Children => componentView(this: stripWorld.childrens, entity: stripEntity)
+    let thumb: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: 1)
+    let rect: Rect = componentGet(this: stripWorld.rects, entity: thumb)
+    log("strip rows: {ch.ids.length} thumb: {rect.size.x.toInt()}x{rect.size.y.toInt()}")
+  }
+}

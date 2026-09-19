@@ -410,6 +410,26 @@ func deserSceneInstanceOverrides(
   }
 }
 
+# `ListView.rowScenes` (#996): an object of kind -> sub-scene id.
+func deserListViewRowScenes(doc: view JsonDoc, val: view JsonValue) ret List(ListViewRowScene) {
+  var scenes: List(ListViewRowScene) = List.create(ListViewRowScene, cap: 2)
+  let idx: Int = Json.field(doc: doc, this: val, key: "rowScenes")
+  if idx < 0 {
+    ret scenes
+  }
+  let obj: JsonValue = Json.jsonValueAt(doc: doc, idx: idx)
+  let n: Int = Json.objectLen(this: obj)
+  var i: Int = 0
+  loop i < n {
+    let kind: String = Json.objectKeyAt(doc: doc, this: obj, idx: i)
+    let value: JsonValue = Json.objectValueAt(doc: doc, this: obj, idx: i)
+    let sceneId: String = Json.jsonString(this: value, fallback: "")
+    scenes.add(value: { kind: kind, sceneId: sceneId })
+    i = i + 1
+  }
+  ret scenes
+}
+
 # `ListView.bindings`: an array of {nodeId, component, field, itemField,
 # prefix, suffix} records.
 func deserListViewBindings(doc: view JsonDoc, val: view JsonValue) ret List(ListViewBinding) {

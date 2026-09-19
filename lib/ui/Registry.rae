@@ -64,6 +64,7 @@ func isRuntimeTable(name: view String) ret Bool {
     "Interaction"
     "StateStyle"
     "ListViewData"
+    "ListViewRowKey"
     "StyleOverride"
   ]
   var i: Int = 0
@@ -201,7 +202,9 @@ func applyComponentByName(
       table
     ) is not "MeasuredText" and typeName(table) is not "ScrollPanelState" and typeName(table) is not "Interaction" and typeName(
       table
-    ) is not "StateStyle" and typeName(table) is not "ListViewData" and typeName(table) is not "StyleOverride" {
+    ) is not "StateStyle" and typeName(table) is not "ListViewData" and typeName(table) is not "ListViewRowKey" and typeName(
+      table
+    ) is not "StyleOverride" {
       if name is authoredNameOf(typeName: typeName(table)) {
         decodeComponent(
           table: table
@@ -495,6 +498,7 @@ func applyAuthoredFixups(
   if name is "ListView" {
     let listView: mod ListView => componentMod(this: world.listViews, entity: entity)
     listView.bindings = deserListViewBindings(doc: doc, val: val)
+    listView.rowScenes = deserListViewRowScenes(doc: doc, val: val)
     ret
   }
 }

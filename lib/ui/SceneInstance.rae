@@ -663,6 +663,65 @@ func applyOverride(world: mod UiWorld, entity: view EntityId, override: view Sce
     componentSet(this: world.rects, entity: entity, data: current)
     ret
   }
+  # Per-row identity and style a data list writes onto its row roots (#996):
+  # `HeroWidget.key` (a tile that takes part in the hero transition),
+  # `WidgetId.id` / `.kind` (the data-driven widget identity), `CornerRadius.
+  # radius` (0 REMOVES the component — square corners), `WidgetState.loading`.
+  let heroKey: String = "HeroWidget"
+  if override.componentName is heroKey {
+    let hero: HeroWidget = { key: "{override.valueString}" }
+    componentSet(this: world.heroWidgets, entity: entity, data: hero)
+    ret
+  }
+  let widgetIdKey: String = "WidgetId"
+  if override.componentName is widgetIdKey {
+    var current: WidgetId = { id: "", kind: "" }
+    if componentHas(this: world.widgetIds, entity: entity) {
+      current = componentGet(this: world.widgetIds, entity: entity)
+    }
+    let idField: String = "id"
+    if override.fieldName is idField {
+      current.id = "{override.valueString}"
+    } else {
+      current.kind = "{override.valueString}"
+    }
+    componentSet(this: world.widgetIds, entity: entity, data: current)
+    ret
+  }
+  let cornerKey: String = "CornerRadius"
+  if override.componentName is cornerKey {
+    let radius: Float = override.valueString.toFloat()
+    if radius <= 0.0 {
+      componentRemove(this: world.cornerRadiuses, entity: entity)
+    } else {
+      let corner: CornerRadius = { radius: radius }
+      componentSet(this: world.cornerRadiuses, entity: entity, data: corner)
+    }
+    ret
+  }
+  let widgetStateKey: String = "WidgetState"
+  if override.componentName is widgetStateKey {
+    var current: WidgetState = { enabled: true, selected: false, loading: false, error: false }
+    if componentHas(this: world.widgetStates, entity: entity) {
+      current = componentGet(this: world.widgetStates, entity: entity)
+    }
+    let trueStr: String = "true"
+    let v: Bool = override.valueString is trueStr
+    if override.fieldName is "enabled" {
+      current.enabled = v
+    }
+    if override.fieldName is "selected" {
+      current.selected = v
+    }
+    if override.fieldName is "loading" {
+      current.loading = v
+    }
+    if override.fieldName is "error" {
+      current.error = v
+    }
+    componentSet(this: world.widgetStates, entity: entity, data: current)
+    ret
+  }
   # `Padding.l/t/r/b` (#999): a per-instance inset, the way a tree row indents
   # by its depth through a ListView binding.
   let paddingKey: String = "Padding"
