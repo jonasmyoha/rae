@@ -66,7 +66,7 @@ tap does, what Spotify's state means for the play button, what is persisted
 │    images, layers; presented through SDL3     │
 ├──────────────────────────────────────────────┤
 │ 5. Behaviours                                 │  lib/ui/inputSystem, animation-
-│    input/hit-test/actions, animation, scroll, │  System, ScrollPhysics/Panel,
+│    input/hit-test/actions, animation, scroll, │  System, ScrollPhysics/Root,
 │    widget style, list view, overlays          │  widgetStyleSystem, listView-
 │                                               │  System, LogOverlay/DebugOverlay
 └──────────────────────────────────────────────┘
@@ -104,10 +104,25 @@ transient loader cursors (`historyArt`, `artworkFetch`, `assetLoad`). It is
 saved to `app_cache/` on every action and at exit, restored at boot.
 
 One `UiWorld` holds every screen at once. Screens are **page entities**: a
-`ScreenPage` table (`createScreenPages()`) lists each screen's page id and
-scroll policy as data, the page root is tagged `PageRoot{id}`, and switching
-screens toggles `Active` on the pages (`buildAppWorldFor(visible)`). There
-are no per-screen world builders and no `if screen is` ladders in the router.
+`ScreenPage` table (`createScreenPages()`) lists each screen's page id, the
+page root is tagged `PageRoot{id}`, and switching screens toggles `Active` on
+the pages (`buildAppWorldFor(visible)`). There are no per-screen world
+builders and no `if screen is` ladders in the router.
+
+Scrolling is data too: the scene authors a `ScrollRoot` on the node that
+scrolls (`"Body": { "ScrollRoot": { "axis": "y", "floor": "content",
+"endInset": … } }`; the album page root itself), and the lib
+`scrollRootSystem` (lib/ui/scrollRootSystem) seeds its `ScrollState` from the
+session's `ScrollMemory` (page id -> position; the hot-reload restore writes
+the restored screen into it) and computes the floor from the LAID-OUT content
+— the far edge of the root's children (a virtual `ListView` host counts its
+whole data list) against the window the parent shows, minus `endInset`, the
+length the dock overlay covers (`miniPlayer + navTabs + safe lift + a gap`,
+448.99 for a `Body`; 466.34 for the album root, which also carries the page
+padding). No page carries a height formula; `findScrollRoot(world)` is the
+per-frame target query (the root on the Active page); a root whose content
+fits is inert. The drag / wheel / spring FSM stays the app's
+(`inputSystem/ScrollInput.rae`) and only reads the range.
 
 ## 4. The frame
 
@@ -192,7 +207,7 @@ Everything the app *waits* on runs on Rae workers, not runtime threads
 Screens are authored in `assets/scenes/*.raescene` — the RUICS JSON format
 (`docs/game-proto1-ruics-ecs-reference.md`): a node tree where each node
 carries named components (`Rect`, `Layout`, `Text`, `Sprite`, `OnClick`,
-`ScrollPanel`, `ListView`, …), with `SceneInstance` for reuse (the nav tabs,
+`ScrollRoot`, `ListView`, …), with `SceneInstance` for reuse (the nav tabs,
 the mini-player, a track row) and per-instance overrides. `lib/ui/Scene*`
 parse and mount; `lib/ui/Registry*` map a component name to its
 deserialiser; an unknown or unsupported component is a fatal diagnostic

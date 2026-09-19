@@ -1,5 +1,6 @@
 open HotReload
 open ui/Ecs
+open ui/scrollRootSystem/ScrollRootSystem
 open ui/Pipeline
 open ecs/Schedule
 open ecs/Entity
@@ -49,12 +50,16 @@ type AppSession {
   debug: DebugSystem
   # Drag / wheel / momentum / spring scroll physics (inputSystem/ScrollInput).
   scrollFsm: ScrollFsm
+  # Where every page's scroll is (page id -> position): the lib scrollRootSystem
+  # seeds a freshly mounted `ScrollRoot` from it and keeps it current, so a
+  # page re-mounted on a data change lands where it was; the hot-reload
+  # restore writes the restored screen's position into it at boot.
+  scrollMemory: ScrollMemory
   # Active-album / track cache — refreshed only on album/track change, so the
   # hot loop never deep-copies a 15-25 track Album.
   cachedAlbumStem: String
   cachedTrackIndex: Int
   cachedTrackDurMs: Int
-  cachedAlbumScrollFloor: Float
   uiRefresh: UiRefreshCache
   lastHoverAnimDirty: Bool
   lastFrameTime: Float64
@@ -75,6 +80,7 @@ type AppSession {
 
 type WorldFrame {
   schedule: Schedule
+  # The active page's `ScrollRoot` (findScrollRoot), re-resolved per frame.
   scrollTarget: EntityId
   renderCache: RenderCache
   forceRender: Bool
@@ -103,10 +109,18 @@ type FrameTick {
 # The session for an interactive run. Seeds the active TAB from the restored
 # screen (sub-pages do not survive across launches — rebooting always returns
 # to the tab's base page) and the scroll position from the restore / the
-# RAE_UI_SCROLL hook.
+# RAE_UI_SCROLL hook — into the scroll memory under the restored screen's page
+# id, which is what the scrollRootSystem seeds that page's `ScrollRoot` from.
 func createAppSession(app: mod App) ret AppSession {
   let restored: RestoredState = restoreStartState()
   app.appState.tab = restored.screen
+  let restoredScrollY: Float = initialScrollY(restored: restored)
+  let scrollMemory: ScrollMemory = createScrollMemory()
+  rememberScroll(
+    memory: scrollMemory
+    pageId: pageIdForScreen(screen: visibleScreen(state: app.appState))
+    position: restoredScrollY
+  )
   ret AppSession {
     running: true
     currentScreen: visibleScreen(state: app.appState)
@@ -120,11 +134,11 @@ func createAppSession(app: mod App) ret AppSession {
     pendingHeroTargetPageId: ""
     transitionArmed: false
     debug: createBootDebugSystem(viewport: app.viewport)
-    scrollFsm: createScrollFsm(initialScrollY: initialScrollY(restored: restored))
+    scrollFsm: createScrollFsm(initialScrollY: restoredScrollY)
+    scrollMemory: own scrollMemory
     cachedAlbumStem: ""
     cachedTrackIndex: 0 - 1
     cachedTrackDurMs: 0
-    cachedAlbumScrollFloor: 0.0
     uiRefresh: createUiRefreshCache(historyRevision: 0)
     lastHoverAnimDirty: false
     lastFrameTime: 0.0

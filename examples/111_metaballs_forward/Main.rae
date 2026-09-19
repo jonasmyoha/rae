@@ -66,7 +66,7 @@ open ui/Transform
 open ui/EventLoop
 open ui/LogOverlay
 open ui/WindowGeometry
-open ui/ScrollPanel
+open ui/scrollRootSystem/ScrollRootSystem
 open ui/DebugOverlay
 open ui/CornerMenuButton
 open HotReload
@@ -372,11 +372,12 @@ func main() ret Int {
   var lastSettingsScene: Int = settings.scene
   # The panel outgrew its space once the rendering toggles landed, so it
   # scrolls: wheel when the pointer is over it, drag anywhere inside it.
-  var panelScroll: EntityId = createScrollPanel(
-    world: uiWorld
-    viewportId: "SidePanelBody"
-    contentId: "SidePanelContent"
-  )
+  # The scene authors a `ScrollRoot` on SidePanelContent (the Hug content inside
+  # the clipped SidePanelBody); the lib system seeds its state, and the floor is
+  # the laid-out overflow.
+  var panelScrollMemory: ScrollMemory = createScrollMemory()
+  scrollRootSystem(world: uiWorld, memory: panelScrollMemory)
+  var panelScroll: EntityId = findScrollRoot(world: uiWorld)
   var renderedOnce: Bool = false
   var lastLogRevision: Int = 0 - 1
   # Once, not per frame: this is a gate assertion, not a readout.
@@ -448,7 +449,7 @@ func main() ret Int {
     # Refresh the readout about once a second. This is deliberately the
 
     updateUiInput(input: uiInput, world: uiWorld)
-    let scrolled: Bool = updateScrollPanel(world: uiWorld, viewport: panelScroll, input: uiInput)
+    let scrolled: Bool = updateScrollRoot(world: uiWorld, entity: panelScroll, input: uiInput)
     # The debug button sits over the side panel, so a press it takes has to be
     # withdrawn from the UI world or the same click works the control beneath.
     if updateDebugOverlay(
@@ -560,8 +561,8 @@ func main() ret Int {
     # `settingsChanged` too: a slider DRAG produces no action and does not dirty
     # the demo UI, so without it the knob's new rect only reached the screen when
     # the release finally produced one (see 113 for the same gate).
-    # `scrolled` too: updateScrollPanel writes the new offset into an Offset
-    # component, and only transformSystem turns that into screen positions —
+    # `scrolled` too: updateScrollRoot writes the new position into a
+    # RuntimeOffset, and only transformSystem turns that into screen positions —
     # without it the wheel moved nothing until the next relayout.
     if uiLayoutDirty or extentChanged or settingsChanged or scrolled {
       layoutSystem(world: uiWorld)

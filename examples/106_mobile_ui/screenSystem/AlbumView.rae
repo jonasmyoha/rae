@@ -5,50 +5,14 @@ open ui/Ecs
 # track-list container and the spacer — is assets/scenes/Album.raescene
 # (#979); the header texts / cover and the track rows are data bindings
 # driven by AlbumSystems.rae. This module keeps the collection resolution
-# (album vs playlist) and the scroll-clamp geometry.
+# (album vs playlist); the scroll is the root's authored `ScrollRoot`
+# (lib/ui/scrollRootSystem), its floor the laid-out track list.
 import ui/Components
 import ui/Scene
 open ecs/Entity
 open ui/renderSystem/RenderSystem
 open ui/SceneInstance
 open ecs/ComponentTable
-
-# Height of the album header scene: top bar (48) + hero (96) +
-# actions (44) + pills (56) + 3 inter-row gaps of `outerGap` (12).
-# Kept in sync with `Album.raescene`'s authored row heights —
-# editing one without the other will mis-place the track list.
-func albumHeaderHeight() ret Float {
-  let rowSum: Float = topBarH + heroBlockH + actionsRowH + pillsRowH
-  let gaps: Float = outerGap * 3.0
-  ret rowSum + gaps
-}
-
-# Total vertical content of the view (header + track list with
-# inter-row gaps) for a given row count. Used by the scroll clamp so
-# the user can scroll far enough to reveal every row but not infinitely
-# past the end.
-func collectionContentHeight(rowCount: view Int) ret Float {
-  var visible: Int = rowCount
-  if visible < 1 {
-    visible = 1
-  }
-  let tracksH: Float = trackRowH * visible.toFloat() + trackGap * (visible - 1).toFloat()
-  ret albumHeaderHeight() + outerGap + tracksH
-}
-
-# Scroll clamp for a given row count. The viewport is everything between
-# the top padding and the bottom dock overlay (mini-player + nav-tabs).
-# Content shorter than viewport → 0 (no scroll). Else `-(overflow)` so
-# scrolling stops once the last row sits just above the dock.
-func collectionScrollMin(rowCount: view Int) ret Float {
-  let viewport: Float = phoneFrameH - outerPad * 2.0 - miniPlayerH - navTabsH - outerGap
-  let content: Float = collectionContentHeight(rowCount: rowCount)
-  let overflow: Float = content - viewport
-  if overflow <= 0.0 {
-    ret 0.0
-  }
-  ret 0.0 - overflow
-}
 
 # Resolve whichever collection the album sub-page should currently show
 # — the user's open playlist when `viewingPlaylist`, otherwise the
@@ -64,18 +28,10 @@ func buildCurrentCollection(state: view AppState) pub ret CollectionView {
   ret collectionFromAlbum(album: album)
 }
 
-# Scroll floor for the album sub-page given the current view (album or
-# playlist). Replaces the old album-only `albumScrollMin`; cached by
-# main.rae / screen_switch on stem/track change.
-func collectionScrollFloorForState(state: view AppState) pub ret Float {
-  let cv: CollectionView = buildCurrentCollection(state: state)
-  ret collectionScrollMin(rowCount: cv.rows.length)
-}
-
 # Persistent-world entrypoint (#979, SCENE-DRIVEN). assets/scenes/Album.raescene
 # owns the whole page — top bar, hero block, action buttons, play/shuffle
-# pills, the `TrackList` container (Size h Hug) and the bottom spacer — and
-# the mount is one mountPageOrError plus the root's runtime ScrollState. The
+# pills, the `TrackList` container (Size h Hug) and the root's `ScrollRoot`
+# (the whole page scrolls) — and the mount is one mountPageOrError. The
 # data lands through two binding components (lib/ui/BindingComponents.rae):
 # `AlbumHeader` on the Hero node and `TrackList` on the list container, driven
 # by AlbumSystems.rae every frame and once here so the first frame is right.
@@ -85,7 +41,6 @@ func mountAlbumPage(
   scenes: view AlbumScenes
   state: view AppState
   playback: view PlaybackState
-  scrollY: view Float
   viewport: view Viewport
 ) pub ret EntityId {
   let scene: view Scene => scenes.album
@@ -101,12 +56,6 @@ func mountAlbumPage(
     sceneLabel: "Album"
     subScenes: scenes.subScenes
   )
-  # The whole page scrolls: the root carries the ScrollState the scroll FSM
-  # drives and the Offset it moves.
-  let off: Offset = { delta: Vec2 { x: 0.0, y: scrollY } }
-  componentSet(this: world.offsets, entity: mount, data: off)
-  let scroll: ScrollState = { y: scrollY, velocity: 0.0 }
-  componentSet(this: world.scrollStates, entity: mount, data: scroll)
   attachSafeAreaEdges(
     world: world
     entity: mount

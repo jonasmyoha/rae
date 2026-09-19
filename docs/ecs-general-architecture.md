@@ -138,8 +138,9 @@ sync by index" is always an entity table in disguise.
   docstring admits "~a dozen lookups/entity" per frame (`ecs.rae:117-118`);
   (b) `Parent`+`Children` are both stored and can desync, with **no referential
   integrity** on destroy (`ecs.rae:798-804`); (c) helper structs bolted outside
-  the world and keyed by **strings** (`ScrollPanel` re-resolves `viewportId`
-  strings every frame, `scroll_panel.rae:31,54`); (d) **scalar geometry** —
+  the world and keyed by **strings** (the former `ScrollPanel` re-resolved
+  `viewportId` strings every frame — since folded into the authored
+  `ScrollRoot` + `scrollRootSystem`); (d) **scalar geometry** —
   `Rect{x,y,w,h}`, `WorldTransform{x,y,scaleX,scaleY,rotation,alpha}`
   (`components.rae:150`, `:765`) — with `Vec2` used only for offsets/pivots and
   even abused as a size tuple (`layout.rae:406`); (e) a **duplicate `Vec2`** in
@@ -345,7 +346,7 @@ four-place pattern at scale.
 | Entity | UI node (already an entity) | unchanged |
 | Component | ~65 tables (`components.rae`) — good | keep; move geometry onto `Vec2` (`Rect{position,size}`, `Transform2D`); drop duplicate `Vec2` |
 | System | `layoutSystem`/`transformSystem`/`renderSystemGpu2d`/… | `LayoutSystem/`, `TransformSystem/`, `RenderSystem/`, `HierarchySystem/` (owns Parent/Children) |
-| Becomes ECS storage | `ScrollPanel`, `UiInput`, string `nodeIds` | `ScrollState`/`Interaction` components keyed by `EntityId`, not strings |
+| Becomes ECS storage | `ScrollPanel` (now `ScrollRoot`), `UiInput`, string `nodeIds` | `ScrollState`/`Interaction` components keyed by `EntityId`, not strings |
 | Already good | sparse-set tables, change-detection, dirty-skip systems | keep as the shared core |
 | Fights ECS | recursive `Children` walks; `Parent`/`Children` desync; string identity; immediate-mode paint | depth-sorted iteration; `HierarchySystem` maintains `Children`; entity identity; a `DrawCommand` extract buffer |
 

@@ -48,6 +48,7 @@ func frameRenderSystem(
     schedule: frame.schedule
     input: session.input
     scrollFsm: session.scrollFsm
+    scrollMemory: session.scrollMemory
     watcher: session.watcher
     willSwitch: tick.willSwitch
     currentScreen: session.currentScreen
@@ -56,7 +57,6 @@ func frameRenderSystem(
     cachedAlbumStem: session.cachedAlbumStem
     cachedTrackIndex: session.cachedTrackIndex
     cachedTrackDurMs: session.cachedTrackDurMs
-    cachedAlbumScrollFloor: session.cachedAlbumScrollFloor
     heroDuration: session.heroDuration
     prevPendingSrc: session.pendingSrc
     prevPendingHeroTargetPageId: session.pendingHeroTargetPageId
@@ -66,7 +66,6 @@ func frameRenderSystem(
   session.currentScreen = switchResult.newScreen
   frame.scrollTarget = switchResult.newScrollTarget
   session.cachedTrackDurMs = switchResult.cachedTrackDurMs
-  session.cachedAlbumScrollFloor = switchResult.cachedAlbumScrollFloor
   session.cachedAlbumStem = "{switchResult.cachedAlbumStem}"
   session.cachedTrackIndex = switchResult.cachedTrackIndex
   if switchResult.switching {

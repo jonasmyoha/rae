@@ -45,137 +45,31 @@ enum Screen {
 # `History` is the full play-history sub-page. Pushed from a tap
 # on the "Recently played" header on Home. NOT a tab.
 
-# Per-screen scroll bounds. `scrollable=false` means wheel / drag
-# is dropped on that screen. `floor` is the most-negative scrollY
-# the page allows. main.rae's per-frame scroll bounds block is a
-# thin wrapper around this.
-type ScrollBounds {
-  scrollable: Bool
-  floor: Float
-}
-
-# How a scrollable screen's floor is found. A property of the PAGE ROW, not of
-# the screen: adding a screen picks one of these, it does not add a branch.
-enum ScrollFloor {
-  none
-  constant
-  homeContent
-  historyContent
-  albumCached
-}
-
-# One row per screen — the page entity's id and its scroll policy (#948). The
-# router LOOKS UP rows in this table instead of branching on the `Screen` enum:
-# the old `if screen is …` ladders in pageIdForScreen / scrollBoundsForScreen /
-# buildAppWorld / buildScreenWorld are gone. Each mounted page root already
-# carries a lib `PageRoot{id}` with the same `pageId`, so a row resolves to its
-# entity with `findPageRootEntity` — the pages ARE entities; this is the data
-# the router needs about them.
+# One row per screen — the page entity's id (#948). The router LOOKS UP rows
+# in this table instead of branching on the `Screen` enum: the old
+# `if screen is …` ladders in pageIdForScreen / buildAppWorld /
+# buildScreenWorld are gone. Each mounted page root already carries a lib
+# `PageRoot{id}` with the same `pageId`, so a row resolves to its entity with
+# `findPageRootEntity` — the pages ARE entities; this is the data the router
+# needs about them. Whether and how far a page scrolls is not a row property
+# any more: the scene authors a `ScrollRoot` on the scrolling node and the lib
+# scrollRootSystem computes the floor from the laid-out content.
 type ScreenPage {
   screen: Screen
   pageId: String
-  scrollable: Bool
-  scrollFloor: ScrollFloor
-  scrollFloorConst: Float
 }
 
-# The table. Built once per app (App.screenPages) for the per-frame path, and
-# locally by the cold callers (screen switch, world rebuild).
+# The table, built by its cold callers (screen switch, world rebuild).
 func createScreenPages() ret List(ScreenPage) {
   let rows: List(ScreenPage) = List.create(ScreenPage, cap: 7)
-  rows.add(value: ScreenPage {
-    screen: Screen.home
-    pageId: "{homePageId}"
-    scrollable: true
-    scrollFloor: ScrollFloor.homeContent
-    scrollFloorConst: 0.0
-  })
-  rows.add(value: ScreenPage {
-    screen: Screen.library
-    pageId: "{libraryPageId}"
-    scrollable: true
-    scrollFloor: ScrollFloor.constant
-    scrollFloorConst: 0.0 - 1050.0
-  })
-  rows.add(value: ScreenPage {
-    screen: Screen.album
-    pageId: "{albumPageId}"
-    scrollable: true
-    scrollFloor: ScrollFloor.albumCached
-    scrollFloorConst: 0.0
-  })
-  rows.add(value: ScreenPage {
-    screen: Screen.player
-    pageId: "{playerPageId}"
-    scrollable: false
-    scrollFloor: ScrollFloor.none
-    scrollFloorConst: 0.0
-  })
-  rows.add(value: ScreenPage {
-    screen: Screen.search
-    pageId: "{searchPageId}"
-    scrollable: false
-    scrollFloor: ScrollFloor.none
-    scrollFloorConst: 0.0
-  })
-  rows.add(value: ScreenPage {
-    screen: Screen.profile
-    pageId: "{profilePageId}"
-    scrollable: false
-    scrollFloor: ScrollFloor.none
-    scrollFloorConst: 0.0
-  })
-  rows.add(value: ScreenPage {
-    screen: Screen.history
-    pageId: "{historyPageId}"
-    scrollable: true
-    scrollFloor: ScrollFloor.historyContent
-    scrollFloorConst: 0.0
-  })
+  rows.add(value: ScreenPage { screen: Screen.home, pageId: "{homePageId}" })
+  rows.add(value: ScreenPage { screen: Screen.library, pageId: "{libraryPageId}" })
+  rows.add(value: ScreenPage { screen: Screen.album, pageId: "{albumPageId}" })
+  rows.add(value: ScreenPage { screen: Screen.player, pageId: "{playerPageId}" })
+  rows.add(value: ScreenPage { screen: Screen.search, pageId: "{searchPageId}" })
+  rows.add(value: ScreenPage { screen: Screen.profile, pageId: "{profilePageId}" })
+  rows.add(value: ScreenPage { screen: Screen.history, pageId: "{historyPageId}" })
   ret rows
-}
-
-# Resolve a row's floor from app state. Dispatches on the row's ScrollFloor
-# KIND (a closed set of strategies), never on the screen.
-func scrollFloorOf(
-  page: view ScreenPage
-  appState: view AppState
-  cachedAlbumScrollFloor: view Float
-) ret Float {
-  if page.scrollFloor is ScrollFloor.homeContent {
-    ret homeScrollMin(albums: appState.mediaLibrary.albums, history: appState.playHistory)
-  }
-  if page.scrollFloor is ScrollFloor.historyContent {
-    ret historyScrollMin(history: appState.playHistory)
-  }
-  if page.scrollFloor is ScrollFloor.albumCached {
-    ret cachedAlbumScrollFloor
-  }
-  if page.scrollFloor is ScrollFloor.constant {
-    ret page.scrollFloorConst
-  }
-  ret 0.0
-}
-
-func scrollBoundsForScreen(
-  screen: view Screen
-  appState: view AppState
-  cachedAlbumScrollFloor: view Float
-  pages: view List(ScreenPage)
-) pub ret ScrollBounds {
-  loop let page: view ScreenPage in pages {
-    if page.screen is screen {
-      ret ScrollBounds {
-        scrollable: page.scrollable
-        floor: scrollFloorOf(
-          page: page
-          appState: appState
-          cachedAlbumScrollFloor: cachedAlbumScrollFloor
-        )
-      }
-    }
-  }
-  ret ScrollBounds { scrollable: false, floor: 0.0 }
 }
 
 func buildScreenWorld(
@@ -184,7 +78,6 @@ func buildScreenWorld(
   playback: view PlaybackState
   state: view AppState
   texReg: view TextureRegistry
-  scrollY: view Float
   viewport: view Viewport
 ) pub ret UiWorld {
   # A "world for one screen" is the persistent world with that screen visible
@@ -196,7 +89,6 @@ func buildScreenWorld(
     playback: playback
     state: state
     texReg: texReg
-    scrollY: scrollY
     viewport: viewport
   )
 }
@@ -225,7 +117,6 @@ func buildAppWorld(
   playback: view PlaybackState
   state: view AppState
   texReg: view TextureRegistry
-  scrollY: view Float
   viewport: view Viewport
 ) pub ret UiWorld {
   ret buildAppWorldFor(
@@ -234,7 +125,6 @@ func buildAppWorld(
     playback: playback
     state: state
     texReg: texReg
-    scrollY: scrollY
     viewport: viewport
   )
 }
@@ -247,7 +137,6 @@ func buildAppWorldFor(
   playback: view PlaybackState
   state: view AppState
   texReg: view TextureRegistry
-  scrollY: view Float
   viewport: view Viewport
 ) ret UiWorld {
   let world: UiWorld = create()
@@ -266,7 +155,6 @@ func buildAppWorldFor(
     scenes: scenes
     state: state
     playback: playback
-    scrollY: scrollY
     viewport: viewport
   )
   let libraryPage: EntityId = mountLibraryPage(
@@ -274,7 +162,6 @@ func buildAppWorldFor(
     scenes: scenes
     state: state
     playback: playback
-    scrollY: scrollY
     viewport: viewport
   )
   let albumPage: EntityId = mountAlbumPage(
@@ -282,7 +169,6 @@ func buildAppWorldFor(
     scenes: scenes
     state: state
     playback: playback
-    scrollY: scrollY
     viewport: viewport
   )
   let nowPlayingPage: EntityId = mountNowPlayingPage(
@@ -298,7 +184,6 @@ func buildAppWorldFor(
     reg: texReg
     scenes: scenes
     state: state
-    scrollY: scrollY
     viewport: viewport
   )
   let searchPage: EntityId = mountSearchPage(world: world, scenes: scenes, viewport: viewport)
@@ -306,7 +191,6 @@ func buildAppWorldFor(
     world: world
     scenes: scenes
     state: state
-    scrollY: scrollY
     viewport: viewport
   )
 

@@ -57,36 +57,6 @@ func historyEntryCount(history: view PlayHistory) pub ret Int {
   ret history.entries.length
 }
 
-# Total vertical extent of the History page body. Used by the
-# scroll clamp so the user can pull the bottom rows into view.
-func historyContentHeight(history: view PlayHistory) pub ret Float {
-  let n: Int = history.entries.length
-  if n is 0 {
-    ret 0.0
-  }
-  ret historyRowH * n.toFloat() + historyRowGap * (n - 1).toFloat()
-}
-
-func historyScrollMin(history: view PlayHistory) pub ret Float {
-  let viewport: Float = phoneFrameH - outerPad * 2.0 - miniPlayerH - navTabsH - outerGap - topBarH
-  let content: Float = historyContentHeight(history: history)
-  let overflow: Float = content - viewport
-  if overflow <= 0.0 {
-    ret 0.0
-  }
-  ret 0.0 - overflow
-}
-
-# Body content box (the scrolling region). Pure constants so the mount and
-# the scroll clamp agree exactly.
-func historyBodyW() pub ret Float {
-  ret phoneFrameW - outerPad * 2.0
-}
-
-func historyBodyH() pub ret Float {
-  ret phoneFrameH - topBarH - navTabsH - outerGap * 4.0 - outerPad * 2.0
-}
-
 # True when the entry has a textureKey the registry can paint.
 # Local entries set it to the album stem; Spotify entries set it
 # to the per-trackId key registered by `loadHistoryEntryArt`. Empty
@@ -138,13 +108,13 @@ func historyListData(history: view PlayHistory) ret ListViewData {
 # assets/scenes/History.raescene owns the page: top bar, the `EmptyState`
 # line and the `Body` list host carrying the authored `ListView` (the
 # `HistoryRow` sub-scene, its bindings, the window size) plus a
-# `HistoryList` binding component. This mount is one mountPageOrError + the
-# Body's runtime ScrollState; `historyListSystem` below feeds the rows.
+# `HistoryList` binding component and the `ScrollRoot` the app's scroll FSM
+# drives. This mount is one mountPageOrError; `historyListSystem` below feeds
+# the rows.
 func mountHistoryPage(
   world: mod UiWorld
   scenes: view AlbumScenes
   state: view AppState
-  scrollY: view Float
   viewport: view Viewport
 ) pub ret EntityId {
   let scene: view Scene => scenes.history
@@ -167,13 +137,6 @@ func mountHistoryPage(
     top: 1.0
     bottom: 0.0
   )
-  # The list host carries the ScrollState the app's scroll FSM drives; the
-  # listViewSystem turns it into the rows' RuntimeOffset.
-  if let bodyRaw: Int = findNodeInPage(world: world, pageId: historyPageId, nodeId: "Body") {
-    let body: EntityId = nodeEntity(world: world, index: bodyRaw)
-    let scroll: ScrollState = { y: scrollY, velocity: 0.0 }
-    componentSet(this: world.scrollStates, entity: body, data: scroll)
-  }
   # First fill now, so the rows exist before this frame's layout.
   historyListSystem(world: world, state: state)
   ret mount

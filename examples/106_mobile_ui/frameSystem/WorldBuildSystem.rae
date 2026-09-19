@@ -1,5 +1,6 @@
 open ui/Ecs
 open ui/Pipeline
+open ui/scrollRootSystem/ScrollRootSystem
 open ecs/Schedule
 open ecs/Entity
 open ui/EventLoop
@@ -22,7 +23,6 @@ func refreshActiveAlbumCache(app: mod App, session: mod AppSession) {
     let activeAlbumNow: Album = activeAlbum(state: appState)
     let activeTrackNow: Track = trackAt(album: activeAlbumNow, idx: appState.currentTrackIndex)
     session.cachedTrackDurMs = activeTrackNow.durationMs
-    session.cachedAlbumScrollFloor = collectionScrollFloorForState(state: appState)
     # Fresh allocation so the cached stem doesn't alias
     # `appState.currentAlbumStem`'s heap (dropped on its next assignment).
     session.cachedAlbumStem = "{appState.currentAlbumStem}"
@@ -41,9 +41,12 @@ func buildSessionWorld(app: mod App, session: mod AppSession) ret UiWorld {
     playback: app.playback
     state: appState
     texReg: app.texReg
-    scrollY: session.scrollFsm.scrollY
     viewport: app.viewport
   )
+  # Every page's authored `ScrollRoot` gets its ScrollState + RuntimeOffset from
+  # the session's scroll memory (the restored position at boot, the page's last
+  # position on a rebuild).
+  scrollRootSystem(world: world, memory: session.scrollMemory)
   session.uiRefresh.historyRevision = appState.playHistory.revision
   # Apply the gpu2d design-resolution transform together with the
   # freshly-built world so the two never disagree (doing it in the
@@ -80,12 +83,13 @@ func createWorldFrame(world: mod UiWorld) ret WorldFrame {
   if uiShouldRun(schedule: schedule, world: world, index: uiSystemTransform) {
     transformSystem(world: world)
   }
-  # The scroll-target entity for this world: scroll handlers mutate its
-  # Offset + ScrollState in place every frame, which is what lets
-  # wheel/drag/momentum/spring run WITHOUT tearing the world down per tick.
+  # The scroll-target entity for this world — the active page's ScrollRoot:
+  # scroll handlers mutate its RuntimeOffset + ScrollState in place every
+  # frame, which is what lets wheel/drag/momentum/spring run WITHOUT tearing
+  # the world down per tick.
   ret WorldFrame {
     schedule: own schedule
-    scrollTarget: findScrollTarget(world: world)
+    scrollTarget: findScrollRoot(world: world)
     renderCache: createRenderCache()
     forceRender: true
     lastPressed: noEntity()

@@ -10,8 +10,6 @@ open ui/Ecs
 #     activates the photo child once its texture is loaded, else the authored
 #     placeholder child. A photo that lands mid-session is a toggle on two
 #     children, not the full world rebuild it used to trigger.
-#   * the Body's runtime `ScrollState` (scroll position survives re-mounts via
-#     the scrollY argument), the same pattern Home uses.
 # Both systems are idempotent: they compare before writing, so an idle frame
 # bumps no component generation and the render cache stays clean.
 import ui/Components
@@ -28,7 +26,6 @@ func mountProfilePage(
   reg: view TextureRegistry
   scenes: view AlbumScenes
   state: view AppState
-  scrollY: view Float
   viewport: view Viewport
 ) pub ret EntityId {
   let scene: view Scene => scenes.profile
@@ -53,14 +50,6 @@ func mountProfilePage(
     top: 1.0
     bottom: 0.0
   )
-
-  if let bodyRaw: Int = findNodeInPage(world: world, pageId: profilePageId, nodeId: "Body") {
-    let body: EntityId = nodeEntity(world: world, index: bodyRaw)
-    let off: Offset = { delta: Vec2 { x: 0.0, y: scrollY } }
-    componentSet(this: world.offsets, entity: body, data: off)
-    let scroll: ScrollState = { y: scrollY, velocity: 0.0 }
-    componentSet(this: world.scrollStates, entity: body, data: scroll)
-  }
 
   # First-frame values: the per-frame systems run again before every render,
   # but a fresh mount should never show the scene's placeholder "0".
