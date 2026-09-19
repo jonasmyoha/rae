@@ -162,7 +162,6 @@ func searchFieldSystem(world: mod UiWorld, input: view InputSystem) pub {
         placeholder: "{data.placeholder}"
         textStyleId: "{data.textStyleId}"
         placeholderStyleId: "{data.placeholderStyleId}"
-        emptyStateNodeId: "{data.emptyStateNodeId}"
       }
       componentSet(this: world.searchFields, entity: field, data: updated)
     }
@@ -183,16 +182,11 @@ func searchFieldSystem(world: mod UiWorld, input: view InputSystem) pub {
         styleId: data.placeholderStyleId
       )
     }
-    # Empty state vs results.
+    # Results vs empty state. The results container follows the query here;
+    # the page's `EmptyState { kind: search }` node is toggled by
+    # `emptyStateSystem` (no page + node-id lookup).
     let page: String = pageOf(world: world, entity: field)
     let hasQuery: Bool = query.length() > 0
-    if let emptyRaw: Int = findNodeInPage(world: world, pageId: page, nodeId: data.emptyStateNodeId) {
-      setActiveIfDifferent(
-        world: world
-        entity: nodeEntity(world: world, index: emptyRaw)
-        active: hasQuery is false
-      )
-    }
     setActiveIfDifferent(
       world: world
       entity: searchResultsOnPage(world: world, page: page)

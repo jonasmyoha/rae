@@ -121,9 +121,9 @@ func setHistoryActive(world: mod UiWorld, entity: view EntityId, active: view Bo
 
 # Drive every `HistoryList`: when the play history's revision moved past the
 # rows last built, rewrite the host's ListViewData (the listViewSystem re-binds
-# its pooled rows in place on its next run) and show the host or the page's
-# empty-state node. Runs from the observation schedule when the history moved, and once
-# at mount.
+# its pooled rows in place on its next run) and show the host. The page's
+# empty-state node follows the history through `emptyStateSystem`. Runs from
+# the observation schedule when the history moved, and once at mount.
 func historyListSystem(world: mod UiWorld, state: view AppState) pub {
   let n: Int = componentCount(this: world.historyLists)
   var i: Int = 0
@@ -137,23 +137,11 @@ func historyListSystem(world: mod UiWorld, state: view AppState) pub {
         data: historyListData(history: state.playHistory)
       )
       let hasEntries: Bool = state.playHistory.entries.length > 0
+      # The host shows while there are entries; the page's `EmptyState`
+      # node (an authored `EmptyState { kind: history }`) is toggled by
+      # `emptyStateSystem`, no page + node-id lookup here.
       setHistoryActive(world: world, entity: host, active: hasEntries)
-      let page: String = pageOf(world: world, entity: host)
-      if let emptyRaw: Int = findNodeInPage(
-        world: world
-        pageId: page
-        nodeId: binding.emptyStateNodeId
-      ) {
-        setHistoryActive(
-          world: world
-          entity: nodeEntity(world: world, index: emptyRaw)
-          active: hasEntries is false
-        )
-      }
-      let built: HistoryList = {
-        emptyStateNodeId: "{binding.emptyStateNodeId}"
-        builtRevision: state.playHistory.revision
-      }
+      let built: HistoryList = { builtRevision: state.playHistory.revision }
       componentSet(this: world.historyLists, entity: host, data: built)
     }
     i = i + 1

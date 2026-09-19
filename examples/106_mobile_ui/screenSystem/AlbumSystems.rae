@@ -1,20 +1,15 @@
 open ui/Ecs
-# AlbumSystems (#979) — the systems behind the scene-driven album page.
+# AlbumSystems (#979) — the system behind the scene-driven album page header.
 #
-#   albumHeaderSystem  every `AlbumHeader`: when the collection key derived
-#                      from app state (album stem / playlist view / library
-#                      revision) moves past `builtKey`, write the caption,
-#                      title and artist Texts and point the hero cover's
-#                      Sprite and HeroWidget at the collection's cover stem.
-#   trackListSystem    every `TrackList`: when that key or the playing song
-#                      moves past `builtKey`, destroy the rows and mount one
-#                      `track-row` sub-scene per CollectionRow — the playing
-#                      row highlighted with the accent pill and marked
-#                      selected — each tappable via `song.openref`.
+#   albumHeaderSystem  the caption / title / artist Texts carry a
+#                      `TextBinding { key: "album.caption" | "album.title" |
+#                      "album.artist" }` and the hero cover an `AlbumHeader`
+#                      marker; this writes them from the browsed
+#                      `CollectionView`. Gated by the observation schedule on
+#                      the collection / library sources.
 #
-# Neither builds page layout: the header nodes, the list container (Size h
-# Hug, so it grows with its rows) and the spacer are authored in
-# Album.raescene; the rows are the data list's items.
+# It builds no layout: the header nodes are authored in Album.raescene; the
+# track rows are the page's `ListView` + `ListSource` (listSystem/ListSources).
 import ui/Components
 import ui/Scene
 open ui/SceneInstance
@@ -26,90 +21,73 @@ func albumCollectionKey(state: view AppState) ret String {
   ret "{state.currentAlbumStem}|{state.viewingPlaylist}|{state.currentPlaylistId}|{state.libraryRevision}"
 }
 
-func setPageTextIfDifferent(
-  world: mod UiWorld
-  page: view String
-  nodeId: view String
-  text: view String
-) {
-  if let raw: Int = findNodeInPage(world: world, pageId: page, nodeId: nodeId) {
-    let entity: EntityId = nodeEntity(world: world, index: raw)
-    if componentHas(this: world.texts, entity: entity) {
-      let current: Text = componentGet(this: world.texts, entity: entity)
-      if current.text is not text {
-        let updated: Text = {
-          text: "{text}"
-          styleId: "{current.styleId}"
-          wrapWidthMode: current.wrapWidthMode
-        }
-        componentSet(this: world.texts, entity: entity, data: updated)
-      }
-    }
+# Write a `Text.text` in place, keeping its style — the same compare-before-
+# write discipline the old node-poke used, now keyed off the node's
+# `TextBinding`, not a page + node-id lookup.
+func writeAlbumText(world: mod UiWorld, entity: view EntityId, text: view String) {
+  if componentHas(this: world.texts, entity: entity) is false {
+    ret
   }
+  let current: Text = componentGet(this: world.texts, entity: entity)
+  if current.text is text {
+    ret
+  }
+  let updated: Text = {
+    text: "{text}"
+    styleId: "{current.styleId}"
+    wrapWidthMode: current.wrapWidthMode
+  }
+  componentSet(this: world.texts, entity: entity, data: updated)
 }
 
+# The album page's header, entirely from data (#979): the caption / title /
+# artist Texts carry a `TextBinding { key: "album.caption" | "album.title" |
+# "album.artist" }` and the hero cover an `AlbumHeader` marker. This writes
+# them from the browsed `CollectionView`. Gated by the observation schedule on
+# the collection / library sources, so it runs on a real change (or a mount),
+# never per idle frame; compare-before-write keeps an unchanged value from
+# bumping a table.
 func albumHeaderSystem(world: mod UiWorld, state: view AppState) pub {
-  let key: String = albumCollectionKey(state: state)
-  let n: Int = componentCount(this: world.albumHeaders)
+  let cv: CollectionView = buildCurrentCollection(state: state)
+  let nb: Int = componentCount(this: world.textBindings)
   var i: Int = 0
-  loop i < n {
-    let header: EntityId = componentEntityAt(this: world.albumHeaders, i: i)
-    let binding: AlbumHeader = componentDataAt(this: world.albumHeaders, i: i)
-    if binding.builtKey is not key {
-      let page: String = pageOf(world: world, entity: header)
-      let cv: CollectionView = buildCurrentCollection(state: state)
-      setPageTextIfDifferent(
-        world: world
-        page: page
-        nodeId: binding.captionNodeId
-        text: cv.caption
-      )
-      setPageTextIfDifferent(
-        world: world
-        page: page
-        nodeId: binding.titleNodeId
-        text: cv.title
-      )
-      setPageTextIfDifferent(
-        world: world
-        page: page
-        nodeId: binding.artistNodeId
-        text: cv.artist
-      )
-      if cv.coverStem.length() > 0 {
-        if let coverRaw: Int = findNodeInPage(
-          world: world
-          pageId: page
-          nodeId: binding.coverNodeId
-        ) {
-          let cover: EntityId = nodeEntity(world: world, index: coverRaw)
-          if componentHas(this: world.sprites, entity: cover) {
-            let sp: Sprite = componentGet(this: world.sprites, entity: cover)
-            if sp.textureKey is not cv.coverStem {
-              let updated: Sprite = {
-                textureKey: "{cv.coverStem}"
-                tint: sp.tint
-                tintSlot: "{sp.tintSlot}"
-                scaleMode: sp.scaleMode
-                tileScale: sp.tileScale
-                nineSlice: sp.nineSlice
-                hasNineSlice: sp.hasNineSlice
-              }
-              componentSet(this: world.sprites, entity: cover, data: updated)
-            }
-          }
-          setHeroWidget(world: world, entity: cover, key: "{cv.coverStem}")
-        }
-      }
-      let built: AlbumHeader = {
-        captionNodeId: "{binding.captionNodeId}"
-        titleNodeId: "{binding.titleNodeId}"
-        artistNodeId: "{binding.artistNodeId}"
-        coverNodeId: "{binding.coverNodeId}"
-        builtKey: "{key}"
-      }
-      componentSet(this: world.albumHeaders, entity: header, data: built)
+  loop i < nb {
+    let entity: EntityId = componentEntityAt(this: world.textBindings, i: i)
+    let binding: TextBinding = componentDataAt(this: world.textBindings, i: i)
+    if binding.key is "album.caption" {
+      writeAlbumText(world: world, entity: entity, text: cv.caption)
+    }
+    if binding.key is "album.title" {
+      writeAlbumText(world: world, entity: entity, text: cv.title)
+    }
+    if binding.key is "album.artist" {
+      writeAlbumText(world: world, entity: entity, text: cv.artist)
     }
     i = i + 1
+  }
+  if cv.coverStem.length() is 0 {
+    ret
+  }
+  let nc: Int = componentCount(this: world.albumHeaders)
+  var c: Int = 0
+  loop c < nc {
+    let cover: EntityId = componentEntityAt(this: world.albumHeaders, i: c)
+    if componentHas(this: world.sprites, entity: cover) {
+      let sp: Sprite = componentGet(this: world.sprites, entity: cover)
+      if sp.textureKey is not cv.coverStem {
+        let updated: Sprite = {
+          textureKey: "{cv.coverStem}"
+          tint: sp.tint
+          tintSlot: "{sp.tintSlot}"
+          scaleMode: sp.scaleMode
+          tileScale: sp.tileScale
+          nineSlice: sp.nineSlice
+          hasNineSlice: sp.hasNineSlice
+        }
+        componentSet(this: world.sprites, entity: cover, data: updated)
+      }
+    }
+    setHeroWidget(world: world, entity: cover, key: "{cv.coverStem}")
+    c = c + 1
   }
 }
