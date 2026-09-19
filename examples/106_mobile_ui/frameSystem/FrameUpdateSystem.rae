@@ -4,12 +4,13 @@ open ecs/Schedule
 open ecs/Entity
 open ui/EventLoop
 open ui/animationSystem/AnimationSystem
+open ui/animationSystem/HeroTransitionSystem
 open ecs/Event
 
 # Frame phase 2 — update. The data sync (the playback clock, the Spotify
 # mirror and the asset loaders update state; the observation pass translates
 # what moved into component mutations), the layout + transform re-run,
-# the hero animation, and the render-gate decision with the hover easing.
+# the hero transition step, and the render-gate decision with the hover easing.
 # Writes `now`, `animating` and `active` into the tick.
 func frameUpdateSystem(
   app: mod App
@@ -35,6 +36,12 @@ func frameUpdateSystem(
   )
   session.assetsLoading = dataSync.assetsLoading
 
+  # The hero transition entities in flight (ui/animationSystem/
+  # HeroTransitionSystem): eased along a step, revealed + destroyed when they
+  # land. Before layout, so this frame's layout/transform place the new box
+  # and the paint below shows it.
+  tick.animating = heroTransitionSystem(world: world, now: tick.now)
+
   # Re-run layout + transform if any tracked component changed since last
   # frame (scroll handlers mutate Offset in place). Both short-circuit when
   # no input table generation bumped. Runs BEFORE the active check so a
@@ -48,22 +55,6 @@ func frameUpdateSystem(
     gpuUi: app.gpuUi
     subScenes: app.scenes.subScenes
   )
-
-  let animResult: FrameAnimationResult = runFrameAnimation(
-    world: world
-    anim: session.anim
-    appState: appState
-    willSwitch: tick.willSwitch
-    now: tick.now
-    heroDuration: session.heroDuration
-    transitionArmed: session.transitionArmed
-    pendingSrc: session.pendingSrc
-    pendingHeroTargetPageId: session.pendingHeroTargetPageId
-  )
-  tick.animating = animResult.animating
-  session.transitionArmed = animResult.transitionArmed
-  session.pendingSrc = animResult.pendingSrc
-  session.pendingHeroTargetPageId = "{animResult.pendingHeroTargetPageId}"
 
   # Frame-gate decision: does anything warrant a full begin/render/endDrawing
   # this frame? Inputs: forceRender, dirty caches, input events, hover/button

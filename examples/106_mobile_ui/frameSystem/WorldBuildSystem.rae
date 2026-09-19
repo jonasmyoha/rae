@@ -55,11 +55,6 @@ func buildSessionWorld(app: mod App, session: mod AppSession) ret UiWorld {
   # resize-detection step painted one glitchy frame: the OLD world laid out
   # at the old extent through the NEW design resolution).
   uiSetDesignResolution(width: app.viewport.layoutW, height: app.viewport.layoutH, fit: 0)
-  # Rebind any scene-authored `"albumCover"` placeholder hero + sprite to the
-  # user's current album, so the hero animation finds matching keys on every
-  # page. Always runs — the default `currentAlbumStem` is already the
-  # profile-side key.
-  rebindHero(world: world, fromKey: "albumCover", toKey: appState.currentAlbumStem)
   # Layer the debug-UI entities (button + optional menu overlay) onto the
   # world BEFORE layout runs so they participate in measure/place.
   addDebugLayer(world: world, debug: session.debug)
@@ -97,27 +92,5 @@ func createWorldFrame(world: mod UiWorld) ret WorldFrame {
     forceRender: true
     lastPressed: noEntity()
     switching: false
-  }
-}
-
-# The world's first state: the destination half of an in-flight hero
-# transition — the previous world stashed the source rect; now that this one
-# is laid out, capture the target rect and hide the destination hero so the
-# overlay can paint it. The clock is NOT started here (that waits for the
-# first frame: `transitionArmed`). The bindings (progress bar, icons, lists)
-# land in the first frame's observation pass, before its paint.
-func armSessionWorld(app: mod App, session: mod AppSession, world: mod UiWorld) {
-  let appState: mod AppState => app.appState
-  if session.pendingDst {
-    let captured: Bool = captureHeroTarget(
-      anim: session.anim
-      world: world
-      key: appState.currentAlbumStem
-    )
-    if captured {
-      setHeroVisible(world: world, key: appState.currentAlbumStem, visible: false)
-      session.transitionArmed = true
-    }
-    session.pendingDst = false
   }
 }

@@ -4,9 +4,9 @@ open ui/LogOverlay
 
 # Frame phase 3 — render, then the screen switch. The GPU2D paint (dirty
 # detection decides whether this frame paints; busy animation renders every
-# iteration), the persistent-world screen switch (per-page re-mount + hero
-# arming + Active flip, or the data hot-reload poll that may request a
-# rebuild), and the frosted-glass debug cleanup.
+# iteration), the persistent-world screen switch (per-page re-mount + Active
+# flip + the hero transition entity, or the data hot-reload poll that may
+# request a rebuild), and the frosted-glass debug cleanup.
 func frameRenderSystem(
   app: mod App
   session: mod AppSession
@@ -37,14 +37,13 @@ func frameRenderSystem(
   frame.forceRender = frameRender.forceRender
   session.lastRenderTime = frameRender.lastRenderTime
   # Persistent-world screen switch (screenSystem/ScreenSwitch). On
-  # willSwitch: per-page re-mount + hero arming + Active flip. Otherwise the
-  # hot-reload watcher poll, which may request an outer rebuild.
+  # willSwitch: per-page re-mount + Active flip + the hero transition.
+  # Otherwise the hot-reload watcher poll, which may request an outer rebuild.
   let switchResult: ScreenSwitchResult = handleScreenSwitch(
     world: world
     scenes: app.scenes
     playback: app.playback
     appState: appState
-    anim: session.anim
     schedule: frame.schedule
     input: session.input
     scrollFsm: session.scrollFsm
@@ -57,9 +56,6 @@ func frameRenderSystem(
     cachedAlbumStem: session.cachedAlbumStem
     cachedTrackIndex: session.cachedTrackIndex
     cachedTrackDurMs: session.cachedTrackDurMs
-    heroDuration: session.heroDuration
-    prevPendingSrc: session.pendingSrc
-    prevPendingHeroTargetPageId: session.pendingHeroTargetPageId
     viewport: app.viewport
     reg: app.texReg
   )
@@ -71,8 +67,6 @@ func frameRenderSystem(
   if switchResult.switching {
     frame.switching = true
   }
-  session.pendingSrc = switchResult.pendingSrc
-  session.pendingHeroTargetPageId = "{switchResult.pendingHeroTargetPageId}"
 
   # Frosted-glass cleanup. 106's GPU2D path does not capture a backdrop
   # texture; this only clears the debug state.

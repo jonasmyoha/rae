@@ -157,15 +157,23 @@ applyWheelScroll             scroll FSM (inputSystem/ScrollInput.rae)
                              (idle frame: zero app systems). Spotify tick ->
                              mirror, then a second pass; artwork/asset loaders;
                              the History window re-rows in place on scroll
-4. runFrameLayoutTransform   safeArea -> layout -> fit -> transform ->
+4. heroTransitionSystem      lib/ui: every `HeroTransition` entity in flight
+                             (a plain Sprite + CornerRadius root in the
+                             dialog layer) eases from its source rect to its
+                             destination's; on landing the destination hero
+                             is revealed and the entity destroyed
+   runFrameLayoutTransform   safeArea -> layout -> fit -> transform ->
                              visualBounds, each gated by uiShouldRun on the
                              world's Schedule (dirty tables skip)
-5. runFrameAnimation         hero transition, hover scale, scroll spring
+5. hoverScaleSystem          hover scale (the scroll spring is the input FSM)
 6. decideActive + render     RenderDecide: did anything change? if so
                              renderGpu2dFrame records + presents the canvas
 7. handleScreenSwitch        after the frame, only when input picked a new
-                             screen: toggle pages, hero capture, re-run
-                             layout/transform for the first frame there
+                             screen: toggle pages, re-run layout/transform
+                             for the first frame there, and spawn the hero
+                             transition entity when both pages carry a
+                             `HeroWidget` with the browsed album's key and
+                             the source is on screen
 ```
 
 The mapping onto the ECS phase list in

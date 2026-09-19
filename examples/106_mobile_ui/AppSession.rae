@@ -35,17 +35,6 @@ type AppSession {
   # Tracks the previous frame's `debug.menuOpen` so the loop can detect
   # open/close transitions (blurred-backdrop lifecycle).
   prevMenuOpen: Bool
-  # Hero (album cover) transition between screens.
-  anim: HeroAnim
-  heroDuration: Float
-  pendingSrc: Bool
-  pendingDst: Bool
-  # Page id of the destination hero entity hidden when the animation
-  # started, so the end-of-animation cleanup unhides the SAME entity.
-  pendingHeroTargetPageId: String
-  # Defers startHeroTransition from the rebuild to the first frame, so the
-  # clock does not tick during layout.
-  transitionArmed: Bool
   # In-app debug UI; persists across world rebuilds.
   debug: DebugSystem
   # Drag / wheel / momentum / spring scroll physics (inputSystem/ScrollInput).
@@ -129,12 +118,6 @@ func createAppSession(app: mod App) ret AppSession {
     watcher: createSceneWatcher()
     reloadWatcher: createReloadSignalWatcher()
     prevMenuOpen: false
-    anim: createHeroAnim()
-    heroDuration: 0.30
-    pendingSrc: false
-    pendingDst: false
-    pendingHeroTargetPageId: ""
-    transitionArmed: false
     debug: createBootDebugSystem(viewport: app.viewport)
     scrollFsm: createScrollFsm(initialScrollY: restoredScrollY)
     scrollMemory: own scrollMemory
