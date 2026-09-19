@@ -67,6 +67,12 @@ type GrassCompute {
   # Unset = defaultGrassComputeShader() (the lib noise + biome field).
   computeShaderSet: Bool
   computeShader: Shader
+  # The `override` constants handed to the app's compute shader at pipeline
+  # creation. wgpu rejects an entry the shader does not declare, so an app
+  # surface names exactly its own (grassSetComputeShaderWithConstants); the
+  # plain setter keeps the lib island pair for a surface built on
+  # lib/world_biome.wgsl.
+  computeConstants: List(ShaderConstant)
   made: Bool
   drawBindMade: Bool
   uniformArgs: ArgWriter
@@ -89,6 +95,7 @@ func createGrassCompute() ret GrassCompute {
   ret GrassCompute {
     computeShaderSet: false
     computeShader: { text: "", sources: List.create(String, cap: 0), generation: 0 }
+    computeConstants: List.create(ShaderConstant, cap: 0)
     made: false
     drawBindMade: false
     uniformArgs: createArgs(uniform: true)
@@ -121,7 +128,23 @@ func defaultGrassComputeShader() ret Shader {
 # lib/grass_compute.wgsl. Declared in the app so a surface that drifts from
 # the grass pass fails the app's build, not its first frame.
 func grassSetComputeShader(grass: mod GrassCompute, shader: own Shader) {
+  grassSetComputeShaderWithConstants(
+    grass: grass
+    shader: shader
+    constants: WorldBiome.islandConstants()
+  )
+}
+
+# The same, with the app's own `override` constants — a surface that is not the
+# lib island biome declares its own overrides (a venue's dimensions, say) and
+# must not receive the island pair, which its shader does not declare.
+func grassSetComputeShaderWithConstants(
+  grass: mod GrassCompute
+  shader: own Shader
+  constants: own List(ShaderConstant)
+) {
   grass.computeShader = shader
+  grass.computeConstants = constants
   grass.computeShaderSet = true
   resetGrassPipeline(grass: grass)
 }
@@ -136,7 +159,7 @@ func grassComputePipeline(
       resources: resources
       shader: grass.computeShader
       entryPoint: "main"
-      constants: WorldBiome.islandConstants()
+      constants: grass.computeConstants
     )
   }
   let computeShader: Shader = defaultGrassComputeShader()
