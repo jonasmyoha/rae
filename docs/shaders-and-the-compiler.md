@@ -212,7 +212,12 @@ is now a declared composition, and the runtime opens no `.wgsl` file:
   in place of the lib parts — example 114); the by-path setter
   `rendererSetTerrainPalette` and the cwd-relative `assets/` probe are gone.
   The grass pass's `surfaceShader` text became `grassSetComputeShader(grass:,
-  shader:)`, a declared composition ending in `lib/grass_compute.wgsl`.
+  shader:)`, a declared composition ending in `lib/grass_compute.wgsl`; it
+  keeps the island `override` pair, so a surface over `lib/world_biome.wgsl`
+  is unchanged. A surface that is NOT the island biome (its own overrides —
+  a venue's dimensions, say) uses `grassSetComputeShaderWithConstants(grass:,
+  shader:, constants:)`: wgpu rejects an `override` entry the shader does not
+  declare, so an app's constants must be exactly its own.
 - **The lib compositions** (GbufferSprite, GbufferTerrain, GbufferUnderwater,
   Gpu2dCanvas / -Image / -Text, GrassCompute, TransparentForward,
   water/WaterFft, water/WaterReadback, water/WaterSystem) are `shader(files:)`
