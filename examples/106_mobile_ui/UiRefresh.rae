@@ -35,6 +35,7 @@ func refreshMountedUi(
     world: world
     scenes: scenes
     state: state
+    playback: playback
     visible: visible
     cachedRevision: cache.historyRevision
     viewport: viewport
@@ -47,26 +48,24 @@ func refreshMountedUi(
     state: state
     reg: reg
   )
-  # #980: the action sheet follows BottomSheetState (visible + epoch) in place.
-  bottomSheetSystem(world: world, sheet: state.bottomSheet, scenes: scenes)
+  # #980: the action sheet follows BottomSheetState.visible in place.
+  bottomSheetSystem(world: world, sheet: state.bottomSheet)
   # #974: the profile page's data bindings. Both compare before writing, so
   # they cost nothing at idle and need no observer revision of their own.
   profileStatsSystem(world: world, state: state)
   avatarSystem(world: world, reg: reg)
-  # #975: Home / Library cover grids follow state.libraryRevision.
-  coverGridSystem(world: world, state: state, scenes: scenes)
-  # #976: search result rows follow the SearchField's query.
-  searchResultsSystem(world: world, state: state, scenes: scenes)
-  # #977: the History page's rows follow playHistory.revision in place.
-  historyListSystem(world: world, state: state)
-  # #979: the album page's header + track rows follow the collection / playing song.
-  albumHeaderSystem(world: world, state: state)
-  trackListSystem(
+  # #996: every data list (cover grids, search results, album tracks, the
+  # sheet's actions, the recently-played strip) follows its ListSource's key.
+  listSourceSystem(
     world: world
     state: state
     playback: playback
     scenes: scenes
   )
+  # #977: the History page's rows follow playHistory.revision in place.
+  historyListSystem(world: world, state: state)
+  # #979: the album page's header follows the collection.
+  albumHeaderSystem(world: world, state: state)
 
   ret UiRefreshResult {
     historyChanged: cache.historyRevision is not oldHistory

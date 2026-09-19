@@ -39,6 +39,7 @@ import Json
 open ecs/Entity
 open ecs/hierarchySystem/HierarchySystem
 open ecs/ComponentTable
+open ui/RegistryGeneric
 
 # -----------------------------------------------------------------
 # Types
@@ -720,6 +721,76 @@ func applyOverride(world: mod UiWorld, entity: view EntityId, override: view Sce
       current.error = v
     }
     componentSet(this: world.widgetStates, entity: entity, data: current)
+    ret
+  }
+  # `Shape.kind` ("Rect" / "RoundedRect" / "Circle"), `Shape.fillSlot` (a
+  # palette slot; "" keeps the literal fill) and `Shape.radius`: a row's
+  # highlight state as data (the playing track's pill).
+  let shapeKey: String = "Shape"
+  if override.componentName is shapeKey {
+    if componentHas(this: world.shapes, entity: entity) is false {
+      ret
+    }
+    let cur: mod Shape => componentMod(this: world.shapes, entity: entity)
+    if override.fieldName is "kind" {
+      if let kind: ShapeKind = enumFromName(
+        ShapeKind
+        name: authoredEnumName(text: override.valueString)
+      ) {
+        cur.kind = kind
+      }
+    }
+    if override.fieldName is "fillSlot" {
+      cur.fillSlot = "{override.valueString}"
+    }
+    if override.fieldName is "radius" {
+      cur.radius = override.valueString.toFloat()
+    }
+    ret
+  }
+  # `StateStyle.disabledAlpha/loadingAlpha/errorAlpha`: the opacity a widget
+  # fades to per WidgetState. StateStyle is a runtime table, so a scene cannot
+  # author it; a data list binds it onto its rows.
+  let stateStyleKey: String = "StateStyle"
+  if override.componentName is stateStyleKey {
+    if componentHas(this: world.stateStyles, entity: entity) is false {
+      let noColor: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
+      let zero: Vec2 = { x: 0.0, y: 0.0 }
+      let fresh: StateStyle = {
+        spriteKey: ""
+        spriteKeySelected: ""
+        tint: noColor
+        tintSelected: noColor
+        tintSlot: ""
+        tintSelectedSlot: ""
+        hasTint: false
+        shapeFill: noColor
+        shapeFillSelected: noColor
+        shapeFillSlot: ""
+        shapeFillSelectedSlot: ""
+        hasShapeFill: false
+        offset: zero
+        offsetSelected: zero
+        hasOffset: false
+        textStyle: ""
+        textStyleSelected: ""
+        disabledAlpha: 1.0
+        loadingAlpha: 1.0
+        errorAlpha: 1.0
+      }
+      componentSet(this: world.stateStyles, entity: entity, data: fresh)
+    }
+    let cur: mod StateStyle => componentMod(this: world.stateStyles, entity: entity)
+    let alpha: Float = override.valueString.toFloat()
+    if override.fieldName is "disabledAlpha" {
+      cur.disabledAlpha = alpha
+    }
+    if override.fieldName is "loadingAlpha" {
+      cur.loadingAlpha = alpha
+    }
+    if override.fieldName is "errorAlpha" {
+      cur.errorAlpha = alpha
+    }
     ret
   }
   # `Padding.l/t/r/b` (#999): a per-instance inset, the way a tree row indents

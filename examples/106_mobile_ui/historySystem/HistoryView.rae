@@ -95,68 +95,6 @@ func historyHasArt(entry: view PlayHistoryEntry) pub ret Bool {
   ret entry.textureKey.length() > 0
 }
 
-# One recently-played thumb: the `RecentThumb` sub-scene as its own square
-# root (#990: host-less).
-# Has-art -> the Art sprite is switched on with the entry's stored textureKey
-# (album stem for local, "spotify-art:<id>" for Spotify) and the placeholder
-# off; no-art -> the authored muted placeholder chip stays, tagged with the
-# entry identity and a loading fade until art lands.
-# The rounded-covers setting strips the authored corner radii when off.
-func mountRecentThumb(
-  world: mod UiWorld
-  scenes: view AlbumScenes
-  entry: view PlayHistoryEntry
-  size: view Float
-  rounded: view Bool
-  actionId: view String
-) ret EntityId {
-  var overrides: List(SceneOverride) = emptyOverrides()
-  if historyHasArt(entry: entry) {
-    addSpriteOverride(list: overrides, nodeId: "Art", value: "{entry.textureKey}")
-    addActiveOverride(list: overrides, nodeId: "Art", value: true)
-    addActiveOverride(list: overrides, nodeId: "Placeholder", value: false)
-  }
-  addOnClickActionOverride(list: overrides, nodeId: "Thumb", value: "{actionId}")
-  let host: EntityId = mountRegistrySubSceneOrError(
-    world: world
-    reg: scenes.subScenes
-    sceneId: "RecentThumb"
-    overrides: overrides
-    w: size
-    h: size
-  )
-  if historyHasArt(entry: entry) is false {
-    if let phRaw: Int = world.nodeIds.get(k: "Placeholder") {
-      let placeholder: EntityId = nodeEntity(world: world, index: phRaw)
-      setWidgetIdentity(
-        world: world
-        entity: placeholder
-        id: "{entry.trackName}:{entry.artistName}"
-        kind: "historyArtPlaceholder"
-      )
-      # StateStyle is a runtime table (not authorable), so the loading fade
-      # is applied here.
-      setOpacityStateStyle(
-        world: world
-        entity: placeholder
-        disabledAlpha: 1.0
-        loadingAlpha: 0.72
-        errorAlpha: 0.42
-      )
-    }
-  }
-  if rounded is false {
-    unsafe {
-      let gathered: List(EntityId) = List.create(EntityId, cap: 4)
-      collectSubtree(childrens: world.childrens, node: host, out: gathered)
-      loop let e: view EntityId in gathered {
-        componentRemove(this: world.cornerRadiuses, entity: e)
-      }
-    }
-  }
-  ret host
-}
-
 # One `ListViewRow` per play, newest first (visual 0 = the latest entry).
 # The cells are exactly what the bindings read: the texts, the replay
 # action with the REAL entries index baked in, the art key, and the
@@ -305,35 +243,3 @@ func historyListSystem(world: mod UiWorld, state: view AppState) pub {
 # `history.replay.N` with the *real* entries index baked in (so the
 # dispatcher logic stays index-stable whether the user taps from
 # Home or from the full History page).
-func fillRecentlyPlayedStrip(
-  world: mod UiWorld
-  scenes: view AlbumScenes
-  strip: view EntityId
-  history: view PlayHistory
-  rounded: view Bool
-) pub {
-  unsafe {
-    let n: Int = history.entries.length
-    var kidsCount: Int = recentlyPlayedPreviewMax
-    if n < kidsCount {
-      kidsCount = n
-    }
-    let kids: List(EntityId) = List.create(EntityId, cap: kidsCount)
-    var visual: Int = 0
-    loop visual < kidsCount {
-      let entryIdx: Int = n - 1 - visual
-      let e: PlayHistoryEntry = rae_ext_rae_buf_get(buf: history.entries.data, index: entryIdx)
-      let tile: EntityId = mountRecentThumb(
-        world: world
-        scenes: scenes
-        entry: e
-        size: recentlyPlayedThumbSize
-        rounded: rounded
-        actionId: "history.replay.{entryIdx}"
-      )
-      kids.add(value: tile)
-      visual = visual + 1
-    }
-    attachChildren(world: world, parent: strip, kids: kids)
-  }
-}

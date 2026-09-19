@@ -46,6 +46,7 @@ open ui/SceneInstance
 open ecs/Entity
 open ecs/ComponentTable
 open ecs/hierarchySystem/HierarchySystem
+open ui/RegistryGeneric
 
 # The nodeId page a pooled row's sub-scene is mounted under, so several rows
 # of the same scene coexist in `world.nodeIds`.
@@ -245,6 +246,38 @@ func listViewSceneBindingCurrent(
       ret cur.loading is wanted
     }
     ret cur.error is wanted
+  }
+  let shapeName: String = "Shape"
+  if binding.componentName is shapeName {
+    if componentHas(this: world.shapes, entity: entity) is false {
+      ret true
+    }
+    let cur: view Shape => componentView(this: world.shapes, entity: entity)
+    if binding.fieldName is "fillSlot" {
+      ret cur.fillSlot is value
+    }
+    if binding.fieldName is "radius" {
+      ret cur.radius is value.toFloat()
+    }
+    if let kind: ShapeKind = enumFromName(ShapeKind, name: authoredEnumName(text: value)) {
+      ret cur.kind is kind
+    }
+    ret true
+  }
+  let stateStyleName: String = "StateStyle"
+  if binding.componentName is stateStyleName {
+    if componentHas(this: world.stateStyles, entity: entity) is false {
+      ret false
+    }
+    let cur: view StateStyle => componentView(this: world.stateStyles, entity: entity)
+    let wanted: Float = value.toFloat()
+    if binding.fieldName is "disabledAlpha" {
+      ret cur.disabledAlpha is wanted
+    }
+    if binding.fieldName is "loadingAlpha" {
+      ret cur.loadingAlpha is wanted
+    }
+    ret cur.errorAlpha is wanted
   }
   let paddingName: String = "Padding"
   if binding.componentName is paddingName {
@@ -583,23 +616,37 @@ func listViewRowKeyOf(lv: view ListView, row: view ListViewRow, index: view Int)
   ret "{index}"
 }
 
-# A flow row's side: `itemWidth` (0 = square), or — `fitToColumns` — the
-# container's width split by its Grid layout's columns and gap.
+# A flow row's size. The container's INNER width (its laid-out ComputedRect,
+# else its authored Rect, else the page extent, minus its Padding) is the
+# reference: with `fitToColumns` the
+# side is that width split by the Grid layout's columns and gap (a cover
+# grid's tile); otherwise the row is `itemWidth` wide (0 = the inner width, a
+# full-width track row) and `itemHeight` tall (0 = square).
 func listViewFlowRowSize(
   world: view UiWorld
   listEntity: view EntityId
   lv: view ListView
 ) ret Vec2 {
+  # The laid-out width is authoritative once layout has run; before the first
+  # layout (the mount that fills the list) the authored Rect stands in, so the
+  # rows exist for that first layout pass and are resized on the next frame.
+  var containerW: Float = 0.0
+  if componentHas(this: world.computedRects, entity: listEntity) {
+    containerW = componentGet(this: world.computedRects, entity: listEntity).size.x
+  }
+  if containerW <= 0.0 and componentHas(this: world.rects, entity: listEntity) {
+    containerW = componentGet(this: world.rects, entity: listEntity).size.x
+  }
+  if containerW <= 0.0 {
+    containerW = world.layoutW
+  }
+  if componentHas(this: world.paddings, entity: listEntity) {
+    let pad: Padding = componentGet(this: world.paddings, entity: listEntity)
+    containerW = containerW - pad.insets.l - pad.insets.r
+  }
   var w: Float = lv.itemWidth
   var h: Float = lv.itemHeight
   if lv.fitToColumns {
-    var containerW: Float = 0.0
-    if componentHas(this: world.rects, entity: listEntity) {
-      containerW = componentGet(this: world.rects, entity: listEntity).size.x
-    }
-    if containerW <= 0.0 and componentHas(this: world.computedRects, entity: listEntity) {
-      containerW = componentGet(this: world.computedRects, entity: listEntity).size.x
-    }
     var cols: Int = 1
     var gap: Float = 0.0
     if componentHas(this: world.layouts, entity: listEntity) {
@@ -614,7 +661,10 @@ func listViewFlowRowSize(
     h = side
   }
   if w <= 0.0 {
-    w = h
+    w = containerW
+  }
+  if h <= 0.0 {
+    h = w
   }
   ret Vec2 { x: w, y: h }
 }
@@ -630,20 +680,22 @@ func listViewBuildFlowRow(
   scenes: view SceneRegistry
 ) ret EntityId {
   let rowRoot: EntityId = createEntity(world: world)
-  let r: Rect = { position: { x: 0.0, y: 0.0 }, size: { x: size.x, y: size.y } }
-  componentSet(this: world.rects, entity: rowRoot, data: r)
   let identity: ListViewRowKey = { key: "{key}", sceneId: "{sceneId}" }
   componentSet(this: world.listViewRowKeys, entity: rowRoot, data: identity)
   if sceneId.length() > 0 and sceneRegistryHas(reg: scenes, key: sceneId) {
     let idx: Int = sceneRegistryIndex(reg: scenes, key: sceneId)
     let scene: view Scene => sceneRegistryGet(reg: scenes, idx: idx)
+    # The row root IS the scene's root (#990, host-less): its authored
+    # placement — `Size`, `Align`, `Layout` — applies, the container's
+    # Layout places it, and only its Rect is the list's row size.
     let overrides: List(SceneOverride) = emptyOverrides()
-    mountSceneInstanceIntoPage(
+    mountSceneInstanceImpl(
       world: world
       mountEntity: rowRoot
       scene: scene
       overrides: overrides
       pageId: listViewRowPage(rowRoot: rowRoot)
+      keepRootPlacement: true
     )
   } else {
     # No sub-scene: one bare child per distinct binding node id (skeleton row).
@@ -660,6 +712,8 @@ func listViewBuildFlowRow(
       k = k + 1
     }
   }
+  let r: Rect = { position: { x: 0.0, y: 0.0 }, size: { x: size.x, y: size.y } }
+  componentSet(this: world.rects, entity: rowRoot, data: r)
   ret rowRoot
 }
 
