@@ -28,8 +28,8 @@ binding components (`ListView`+`ListSource`, `TextBinding`, `PlaybackIcon`,
 `ScrollRoot`, `HasHistory`, …), each written by one system registered on an
 observation `Schedule` with the data sources it reads, so an idle frame runs
 zero of them. The loop body is four frame systems. No page is found by walking
-node ids, no screen is chosen by an `if screen is …` ladder, and (almost — see
-§7) no page is unmounted to refresh its data.
+node ids, no screen is chosen by an `if screen is …` ladder, and no page is
+unmounted to refresh its data (§7).
 
 ---
 
@@ -230,14 +230,16 @@ at all (it is scene + shared playback bindings). Search and Album carry a larger
 per-frame system (text input; the header + row highlight) beyond the producer —
 those are the honest upper bound, not 30.
 
-**Almost zero unmount-to-refresh.** No page is unmounted to refresh a *list* —
-the lists rebind in place through `ListSource`, and the Home/History/Library
-entry re-mount is gone (`ScreenPage.refreshOnEntry` is false for every page).
-The **one remaining** unmount-to-refresh is in `ScreenSwitch.rae`: the Album and
-Player pages are unmounted and re-mounted when the browsed **stem or track
-index** changes, to move the track-row highlight and the player hero. This is a
-known gap, tracked as a follow-up (bind the track-row selection + the player
-header so a track change is a component write, not a page rebuild).
+**Zero unmount-to-refresh.** No page is unmounted to refresh its data. Lists
+rebind in place through `ListSource`; a browsed **stem or track change** — the
+album track-row highlight and the player header — is a component write the
+observation pass picks up in place (the album `TrackList` source keys on the
+playing stem|index; the player is `PlaybackCover`/`TrackText`/`PlaybackTime`),
+with the album's `ScrollRoot` reset to the top on a new album
+(`resetScrollRootOnPage`). The only `unmountPage`/`mountScreenPage` left in
+`ScreenSwitch.rae` is the `ScreenPage.refreshOnEntry` path — a deliberate
+re-mount hook for a page that wants fresh mount on entry, false for every page
+today (so it never fires).
 
 ---
 
