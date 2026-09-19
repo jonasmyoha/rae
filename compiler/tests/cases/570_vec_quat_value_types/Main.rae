@@ -29,7 +29,7 @@ func main() {
 
   # The matrix form of the same rotation must agree with rotating directly.
   let qm: Mat4 = Quat.toMat4(q: q)
-  log("quatMat col0y={qm.m[1]} zeroish={qm.m[0] < 0.001}")
+  log("quatMat col0y={mat4Get(m: qm, i: 1)} zeroish={mat4Get(m: qm, i: 0) < 0.001}")
 
   # slerp: midpoint is exactly 45 degrees, and t=1 reproduces the target.
   let i: Quat = Quat.identity()

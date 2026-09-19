@@ -61,12 +61,14 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
                 const AstFuncDecl* d = NULL;
                 {
                     Str receiver_base = {0};
+                    long long receiver_cap = -1;
                     if (expr->as.call.args) {
                         const AstTypeRef* recv_tr = infer_expr_type_ref(ctx, expr->as.call.args->value);
                         if (recv_tr && ctx->generic_params && ctx->generic_args) {
                             recv_tr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, recv_tr);
                         }
                         if (recv_tr) receiver_base = get_base_type_name(recv_tr);
+                        receiver_cap = rae_array_ref_cap(recv_tr);
                     }
                     const AstFuncDecl* generic_fallback = NULL;
                     for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count && !d; i++) {
@@ -80,7 +82,11 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
                         // Prefer matching receiver base when first param is "this".
                         if (dd->as.func_decl.params && str_eq_cstr(dd->as.func_decl.params->name, "this") && receiver_base.len > 0) {
                             Str param_base = get_base_type_name(dd->as.func_decl.params->type);
-                            if (str_eq(param_base, receiver_base)) { d = &dd->as.func_decl; break; }
+                            /* Array(T, cap: N) wrappers exist once per cap. */
+                            bool cap_ok = !str_eq_cstr(param_base, "Array")
+                                || rae_array_ref_cap(dd->as.func_decl.params->type) == receiver_cap;
+                            if (str_eq(param_base, receiver_base) && cap_ok) { d = &dd->as.func_decl; break; }
+                            if (!cap_ok) continue;
                         }
                         if (!generic_fallback) generic_fallback = &dd->as.func_decl;
                     }

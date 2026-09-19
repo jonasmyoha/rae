@@ -1,16 +1,30 @@
-# Array(T, cap: N) end to end (#352, slice 2): zero-init, indexing, and
-# the property the whole feature exists for — assignment COPIES.
+# Array(T, cap: N) end to end (#352, slice 2): zero-init, the List-shaped
+# access API, and the property the whole feature exists for — assignment
+# COPIES.
 #
 # If Array lowered to a bare C array instead of a struct wrapping one, the
 # copy below would alias and a0 would read 99. That is the aliasing bug
 # class the struct wrapper exists to prevent (§1.5).
 func main() {
   var a: Array(Float, cap: 4) = Array(Float, cap: 4)
-  a[0] = 1.5
-  a[3] = 9.25
-  log("a0={a[0]} a3={a[3]} unset={a[1]}")
+  a.set(index: 0, value: 1.5)
+  a.set(index: 3, value: 9.25)
+  let a0: Float = a.copyAtFallback(index: 0, fallback: -1.0)
+  let a3: Float = a.copyAtFallback(index: 3, fallback: -1.0)
+  let unset: Float = a.copyAtFallback(index: 1, fallback: -1.0)
+  log("a0={a0} a3={a3} unset={unset} length={a.length()}")
 
   var b: Array(Float, cap: 4) = a
-  b[0] = 99.0
-  log("copy independent: a0={a[0]} b0={b[0]}")
+  b.set(index: 0, value: 99.0)
+  let b0: Float = b.copyAtFallback(index: 0, fallback: -1.0)
+  log("copy independent: a0={a.copyAtFallback(index: 0, fallback: -1.0)} b0={b0}")
+
+  if let third: Float = a.copyAt(index: 3) {
+    log("copyAt(3)={third}")
+  }
+  if let missing: Float = a.copyAt(index: 4) {
+    log("wrong {missing}")
+  } else {
+    log("copyAt(4) is none")
+  }
 }

@@ -235,7 +235,7 @@ func fitShadowCascades(
 
     var c: Int = 0
     loop c < 16 {
-      vp.add(value: lightViewProj.m[c])
+      vp.add(value: lightViewProj.m.copyAtFallback(index: c, fallback: 0.0))
       c = c + 1
     }
     splits.add(value: sliceFar)
@@ -265,7 +265,7 @@ func cascadeMatrix(c: view ShadowCascades, index: view Int) pub ret Mat4 {
   var i: Int = 0
   loop i < 16 {
     if let value: Float = c.viewProj.copyAt(index: index * 16 + i) {
-      m.m[i] = value
+      m.m.set(index: i, value: value)
     }
     i = i + 1
   }

@@ -314,21 +314,29 @@ func uploadFrameUniform(
   var jittered: Mat4 = viewProj
   var c: Int = 0
   loop c < 4 {
-    jittered.m[c * 4] = jittered.m[c * 4] + jx * jittered.m[c * 4 + 3]
-    jittered.m[c * 4 + 1] = jittered.m[c * 4 + 1] + jy * jittered.m[c * 4 + 3]
+    jittered.m.set(
+      index: c * 4
+      value: jittered.m.copyAtFallback(index: c * 4, fallback: 0.0) + jx * jittered.m.copyAtFallback(
+        index: c * 4 + 3
+        fallback: 0.0
+      )
+    )
+    jittered.m.set(
+      index: c * 4 + 1
+      value: jittered.m.copyAtFallback(index: c * 4 + 1, fallback: 0.0) + jy * jittered.m.copyAtFallback(
+        index: c * 4 + 3
+        fallback: 0.0
+      )
+    )
     c = c + 1
   }
   cache.viewProjJittered = jittered
   cache.frameFloats.clear()
-  var i: Int = 0
-  loop i < 16 {
-    cache.frameFloats.add(value: viewProj.m[i])
-    i = i + 1
+  loop let column: Float in viewProj.m {
+    cache.frameFloats.add(value: column)
   }
-  i = 0
-  loop i < 16 {
-    cache.frameFloats.add(value: cache.prevViewProj.m[i])
-    i = i + 1
+  loop let column: Float in cache.prevViewProj.m {
+    cache.frameFloats.add(value: column)
   }
   cache.frameFloats.add(value: jx)
   cache.frameFloats.add(value: jy)

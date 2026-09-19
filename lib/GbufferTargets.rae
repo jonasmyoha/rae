@@ -419,10 +419,8 @@ func taaEnd(targets: mod DeferredTargets) {
 
 func pushMatrixColumns(targets: mod DeferredTargets, m: view Mat4) {
   targets.columns.clear()
-  var i: Int = 0
-  loop i < 16 {
-    targets.columns.add(value: m.m[i])
-    i = i + 1
+  loop let column: Float in m.m {
+    targets.columns.add(value: column)
   }
   let pushed: Bool = pushMat4(writer: targets.args, columns: targets.columns)
 }

@@ -12,13 +12,18 @@ type Mat4 {
 func main() {
   var palette: List(Mat4) = List.create(Mat4, cap: 4)
   var a: Mat4 = { m: Array(Float, cap: 16) }
-  a.m[0] = 1.0
+  a.m.set(index: 0, value: 1.0)
   palette.add(value: a)
-  a.m[0] = 99.0
+  a.m.set(index: 0, value: 99.0)
   palette.add(value: a)
   if let first: Mat4 = palette.copyAt(index: 0) {
     if let second: Mat4 = palette.copyAt(index: 1) {
-      log("len={palette.length} p0={first.m[0]} p1={second.m[0]}")
+      log(
+        "len={palette.length} p0={first.m.copyAtFallback(index: 0, fallback: 0.0)} p1={second.m.copyAtFallback(
+          index: 0
+          fallback: 0.0
+        )}"
+      )
     }
   }
 }

@@ -2,27 +2,36 @@
 #
 # Array(String, cap: N) must cascade — each element gets dropped — while
 # Array(Float, cap: N) must emit NO drop code at all. The primitive case
-# is the renderer's, and it has to stay exactly free.
+# is the renderer's, and it has to stay exactly free. `set` releases the
+# element it overwrites, so the second write to slot 0 does not leak.
 #
 # The loop is the real assertion: a missing drop leaks and a double drop
 # aborts, so completing 2000 iterations cleanly is what proves the
 # per-element cascade is correct rather than merely present.
 func makeNames(tag: view String) ret Array(String, cap: 2) {
   var names: Array(String, cap: 2) = Array(String, cap: 2)
-  names[0] = "first-{tag}"
-  names[1] = "second-{tag}"
+  names.set(index: 0, value: "zeroth-{tag}")
+  names.set(index: 0, value: "first-{tag}")
+  names.set(index: 1, value: "second-{tag}")
   ret names
 }
 
 func main() {
   let names: Array(String, cap: 2) = makeNames(tag: "x")
-  log("n0={names[0]} n1={names[1]}")
+  log(
+    "n0={names.copyAtFallback(index: 0, fallback: "")} n1={names.copyAtFallback(
+      index: 1
+      fallback: ""
+    )}"
+  )
 
   var i: Int = 0
   loop i < 2000 {
     let tmp: Array(String, cap: 2) = makeNames(tag: "{i}")
-    if tmp[0].length() < 1 {
-      log("empty")
+    if let first: view String => tmp.viewAt(index: 0) {
+      if first.length() < 1 {
+        log("empty")
+      }
     }
     i = i + 1
   }

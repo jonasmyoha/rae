@@ -199,10 +199,8 @@ func underwaterInverseViewProj(
   )
   let inverse: Mat4 = mat4Inverse(a: mat4Mul(a: proj, b: viewM))
   cache.columns.clear()
-  var i: Int = 0
-  loop i < 16 {
-    cache.columns.add(value: inverse.m[i])
-    i = i + 1
+  loop let column: Float in inverse.m {
+    cache.columns.add(value: column)
   }
 }
 
