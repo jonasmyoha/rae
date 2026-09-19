@@ -192,6 +192,24 @@ func rendererSetTerrainShader(renderer: mod DeferredRenderer, shader: own Shader
   }
 }
 
+# As rendererSetTerrainShader, but with the app's own island-size `override` constants for a
+# runtime-variable island (#41). The lib default path (no app terrain shader) is unchanged.
+func rendererSetTerrainShaderWithConstants(
+  renderer: mod DeferredRenderer
+  shader: own Shader
+  constants: own List(ShaderConstant)
+) {
+  ensureRendererResources(renderer: renderer)
+  if let resources: mod GpuResources => renderer.gpuResources {
+    terrainSetShaderWithConstants(
+      cache: renderer.passes.gbuffer
+      resources: resources
+      shader: shader
+      constants: constants
+    )
+  }
+}
+
 # #905: upload a static mesh into the renderer's MeshStore (the geometry pass
 # cache owns it; every deferred pass resolves MeshHandles there).
 func uploadMesh(

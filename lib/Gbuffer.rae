@@ -136,6 +136,12 @@ type GbufferCache {
   # place of the lib defaults. Unset = GbufferTerrain.defaultTerrainShader().
   terrainShaderSet: Bool
   terrainShader: Shader
+  # The island-size `override` constants handed to the terrain pipeline at creation
+  # (mirrors GrassCompute.computeConstants). Empty until an app sets a terrain shader:
+  # terrainSetShader seeds it with WorldBiome.islandConstants() (the lib default), and
+  # terrainSetShaderWithConstants replaces it with the app's own — so a growing island
+  # can hand the pipeline a runtime radius/falloff instead of the baked const.
+  terrainConstants: List(ShaderConstant)
   meshes: MeshStore  # #905: the static mesh store (vertex/index buffers per MeshHandle)
   skins: SkinStore  # #921: the skinned meshes + the joint palette buffer
   sdf: SdfPassCache  # #922: the metaball clusters' pipeline / uniforms / binds
@@ -178,6 +184,7 @@ func createGbufferCache() pub ret GbufferCache {
       terrainBlend: 0.0
       terrainShaderSet: false
       terrainShader: { text: "", sources: List.create(String, cap: 0), generation: 0 }
+      terrainConstants: List.create(ShaderConstant, cap: 0)
       meshes: createMeshStore()
       skins: createSkinStore()
       sdf: createSdfPassCache()
