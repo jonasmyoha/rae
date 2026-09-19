@@ -196,66 +196,6 @@ func runFrameLayoutTransform(
   }
 }
 
-type FrameAnimationResult {
-  animating: Bool
-  pendingSrc: Bool
-  transitionArmed: Bool
-  pendingHeroTargetPageId: String
-}
-
-func runFrameAnimation(
-  world: mod UiWorld
-  anim: mod HeroAnim
-  appState: view AppState
-  willSwitch: view Bool
-  now: view Float64
-  heroDuration: view Float
-  transitionArmed: view Bool
-  pendingSrc: view Bool
-  pendingHeroTargetPageId: view String
-) pub ret FrameAnimationResult {
-  var nextTransitionArmed: Bool = transitionArmed
-  var nextPendingSrc: Bool = pendingSrc
-  var nextPendingHeroTargetPageId: String = "{pendingHeroTargetPageId}"
-
-  if nextTransitionArmed {
-    startHeroTransition(
-      anim: anim
-      key: "{appState.currentAlbumStem}"
-      durationSec: heroDuration
-      now: now
-    )
-    nextTransitionArmed = false
-  }
-
-  let animating: Bool = updateHeroAnim(anim: anim, now: now)
-  if animating is false {
-    if nextPendingSrc {
-      if willSwitch is false {
-        if nextPendingHeroTargetPageId.length() > 0 {
-          setHeroVisibleOnPage(
-            world: world
-            pageId: nextPendingHeroTargetPageId
-            key: appState.currentAlbumStem
-            visible: true
-          )
-        } else {
-          setHeroVisible(world: world, key: appState.currentAlbumStem, visible: true)
-        }
-        nextPendingHeroTargetPageId = ""
-        nextPendingSrc = false
-      }
-    }
-  }
-
-  ret FrameAnimationResult {
-    animating: animating
-    pendingSrc: nextPendingSrc
-    transitionArmed: nextTransitionArmed
-    pendingHeroTargetPageId: own nextPendingHeroTargetPageId
-  }
-}
-
 type FrameRenderResult {
   forceRender: Bool
   # Float64: this holds an epoch TIMESTAMP, not a duration. An f32 near

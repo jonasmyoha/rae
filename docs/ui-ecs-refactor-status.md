@@ -158,7 +158,7 @@ frame systems — landed 2026-09-19, see §1.)
    where an enum belongs: the persistence ordinal map
    (`screenToInt`/`intToScreen`) and the nav-tab → screen mapping.
 4. **Hand-rolled frame sequencing** (`runFrameInputDispatch` →
-   `runFrameLayoutTransform` → `runFrameAnimation` → render) → `Schedule`
+   `runFrameLayoutTransform` → the hero/hover animation systems → render) → `Schedule`
    entries with `shouldRun`. **LANDED (#949):** the two hand-written
    `LayoutCache`/`TransformCache` objects are gone; one `Schedule`
    (`createUiPipeline`) per world now gates every lib/ui system in the frame
