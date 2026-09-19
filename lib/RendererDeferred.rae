@@ -180,29 +180,15 @@ func ensureRendererResources(renderer: mod DeferredRenderer) pub {
   )
 }
 
-# Use the app's own terrain palette (a copy of lib/terrain_palette.wgsl with the
-# RAE_TERRAIN_* albedos recalibrated for this app's grade — see that file). For
-# an app whose cwd is not its project root, which the examples are.
-func rendererSetTerrainPalette(renderer: mod DeferredRenderer, path: view String) {
-  rendererSetTerrainPalette(renderer: renderer, path: path, grassStylePath: "")
-}
-
-# Optional grassStylePath defines terrainGrassColor(position, variation) -> vec3<f32>.
-# It returns linear albedo; shared biome weights, roads and shore blending stay
-# in terrain_detail.wgsl. Empty keeps the original grass variation.
-func rendererSetTerrainPalette(
-  renderer: mod DeferredRenderer
-  path: view String
-  grassStylePath: view String
-) {
+# Use the app's own terrain shader: the six-part terrain composition with the
+# app's grade-calibrated palette (a copy of lib/terrain_palette.wgsl with the
+# RAE_TERRAIN_* albedos recalibrated for its grade) and/or its grass style in
+# place of the lib parts — declared in the app with `shader(files: [...])`, so
+# its `assets/` parts resolve next to its own files (GbufferTerrain.terrainSetShader).
+func rendererSetTerrainShader(renderer: mod DeferredRenderer, shader: own Shader) {
   ensureRendererResources(renderer: renderer)
   if let resources: mod GpuResources => renderer.gpuResources {
-    terrainSetPalette(
-      cache: renderer.passes.gbuffer
-      resources: resources
-      path: path
-      grassStylePath: grassStylePath
-    )
+    terrainSetShader(cache: renderer.passes.gbuffer, resources: resources, shader: shader)
   }
 }
 

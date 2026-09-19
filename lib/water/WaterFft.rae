@@ -157,8 +157,8 @@ func log2Int(n: view Int) ret Int {
   ret stages
 }
 
-func fftWgsl() ret String {
-  ret gbReadWgsl(path: "lib/water/waterFft.wgsl")
+func fftShader() ret Shader {
+  ret shader(files: ["lib/water/waterFft.wgsl"])
 }
 
 # Pipelines, textures and bind groups for the spectrum bake. Each compute entry
@@ -168,26 +168,19 @@ func ensureFftGpu(waterSystem: mod WaterSystem, resources: mod GpuResources) {
   if waterSystem.fftGpuMade {
     ret
   }
-  let source: String = fftWgsl()
-  if source.length() is 0 {
-    log(
-      "[water fft] lib/water/waterFft.wgsl not readable from the working directory — run from the repo root; the spectrum is not baked"
-    )
-    waterSystem.fftGpuMade = true
-    ret
-  }
+  let source: Shader = fftShader()
   let body: WaterBody = primaryBody(waterSystem: waterSystem)
   let size: Int = body.fftSize
   if let spectrumPipeline: PipelineId = createComputePipeline(
     resources: resources
-    wgsl: source
+    shader: source
     entryPoint: "spectrum"
   ) {
     waterSystem.fft.spectrumPipeline = spectrumPipeline
   }
   if let butterflyPipeline: PipelineId = createComputePipeline(
     resources: resources
-    wgsl: source
+    shader: source
     entryPoint: "butterfly"
   ) {
     waterSystem.fft.butterflyPipeline = butterflyPipeline
@@ -445,45 +438,41 @@ func ensureFftFrameGpu(waterSystem: mod WaterSystem, resources: mod GpuResources
   if not isValidPipeline(resources: resources, id: waterSystem.fft.spectrumPipeline) {
     ret
   }
-  let source: String = fftWgsl()
-  if source.length() is 0 {
-    waterSystem.fftFrameMade = true
-    ret
-  }
+  let source: Shader = fftShader()
   let body: WaterBody = primaryBody(waterSystem: waterSystem)
   let size: Int = body.fftSize
   let stages: Int = log2Int(n: size)
   if let evolvePipeline: PipelineId = createComputePipeline(
     resources: resources
-    wgsl: source
+    shader: source
     entryPoint: "evolve"
   ) {
     waterSystem.fft.evolvePipeline = evolvePipeline
   }
   if let stockhamPipeline: PipelineId = createComputePipeline(
     resources: resources
-    wgsl: source
+    shader: source
     entryPoint: "stockham"
   ) {
     waterSystem.fft.stockhamPipeline = stockhamPipeline
   }
   if let transposePipeline: PipelineId = createComputePipeline(
     resources: resources
-    wgsl: source
+    shader: source
     entryPoint: "transpose"
   ) {
     waterSystem.fft.transposePipeline = transposePipeline
   }
   if let fieldOutPipeline: PipelineId = createComputePipeline(
     resources: resources
-    wgsl: source
+    shader: source
     entryPoint: "fieldOut"
   ) {
     waterSystem.fft.fieldOutPipeline = fieldOutPipeline
   }
   if let postPipeline: PipelineId = createComputePipeline(
     resources: resources
-    wgsl: source
+    shader: source
     entryPoint: "post"
   ) {
     waterSystem.fft.postPipeline = postPipeline
@@ -622,7 +611,7 @@ func ensureFftFrameGpu(waterSystem: mod WaterSystem, resources: mod GpuResources
   ensureFftMips(
     waterSystem: waterSystem
     resources: resources
-    wgsl: source
+    shader: source
     cascadeCount: body.cascadeCount
     size: size
   )

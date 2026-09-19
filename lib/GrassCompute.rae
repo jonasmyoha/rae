@@ -61,10 +61,12 @@ const grassBladeVerts: Int = 6
 # together with the manager. Copying it copies IDs only; grassShutdown /
 # ensureGrassGpu retire through the manager.
 type GrassCompute {
-  # Optional WGSL defining raeTerrainHeight(vec2<f32>, f32) -> f32 and
-  # raeBiomeGrassWeight(vec2<f32>) -> f32. Empty keeps the default biome.
-  # Set before first generation; resetGrassPipeline after changing it.
-  surfaceShader: String
+  # The app's own compute shader (grassSetComputeShader): a declared
+  # composition ending in lib/grass_compute.wgsl whose earlier parts define
+  # raeTerrainHeight(vec2<f32>, f32) -> f32 and raeBiomeSample(vec2<f32>).
+  # Unset = defaultGrassComputeShader() (the lib noise + biome field).
+  computeShaderSet: Bool
+  computeShader: Shader
   made: Bool
   drawBindMade: Bool
   uniformArgs: ArgWriter
@@ -85,7 +87,8 @@ type GrassCompute {
 
 func createGrassCompute() ret GrassCompute {
   ret GrassCompute {
-    surfaceShader: ""
+    computeShaderSet: false
+    computeShader: { text: "", sources: List.create(String, cap: 0), generation: 0 }
     made: false
     drawBindMade: false
     uniformArgs: createArgs(uniform: true)
@@ -105,27 +108,48 @@ func createGrassCompute() ret GrassCompute {
   }
 }
 
-# Compute-pass source: the shared noise + biome field, then the grass pass
-# itself. Mirrors how the terrain splat pipeline composes its shader.
-func wgsl(surfaceShader: view String) ret String {
-  unsafe {
-    if surfaceShader.length() > 0 {
-      ret surfaceShader.concat(other: "\n").concat(
-        other: Gbuffer.gbReadWgsl(path: "lib/grass_compute.wgsl")
-      )
-    }
-    let islandSrc: String = WorldBiome.islandParamsWgsl()
-    let noiseSrc: String = Gbuffer.gbReadWgsl(path: "lib/noise.wgsl")
-    let biomeSrc: String = Gbuffer.gbReadWgsl(path: "lib/world_biome.wgsl")
-    let grassSrc: String = Gbuffer.gbReadWgsl(path: "lib/grass_compute.wgsl")
-    ret islandSrc.concat(other: noiseSrc).concat(other: "\n").concat(other: biomeSrc).concat(
-      other: "\n"
-    ).concat(other: grassSrc)
-  }
+# The compute-pass shader: the shared noise + biome field, then the grass pass
+# itself — the same parts the terrain splat pipeline composes, declared and
+# validated at build (docs/shaders-and-the-compiler.md). The island size is
+# the `override` pair WorldBiome.islandConstants() sets at pipeline creation.
+func defaultGrassComputeShader() ret Shader {
+  ret shader(files: ["lib/noise.wgsl", "lib/world_biome.wgsl", "lib/grass_compute.wgsl"])
 }
 
-# Force a grass-pipeline rebuild on the next frame — the island radius is baked into
-# the composed compute shader, so growing the island (#41) must recompose it.
+# Use an app's own compute shader — a declared composition whose earlier parts
+# define the surface (raeTerrainHeight / raeBiomeSample) and whose last part is
+# lib/grass_compute.wgsl. Declared in the app so a surface that drifts from
+# the grass pass fails the app's build, not its first frame.
+func grassSetComputeShader(grass: mod GrassCompute, shader: own Shader) {
+  grass.computeShader = shader
+  grass.computeShaderSet = true
+  resetGrassPipeline(grass: grass)
+}
+
+# The compute pipeline from the app's shader when one was set, else the lib's.
+func grassComputePipeline(
+  grass: view GrassCompute
+  resources: mod GpuResources
+) ret opt PipelineId {
+  if grass.computeShaderSet {
+    ret createComputePipelineWithConstants(
+      resources: resources
+      shader: grass.computeShader
+      entryPoint: "main"
+      constants: WorldBiome.islandConstants()
+    )
+  }
+  let computeShader: Shader = defaultGrassComputeShader()
+  ret createComputePipelineWithConstants(
+    resources: resources
+    shader: computeShader
+    entryPoint: "main"
+    constants: WorldBiome.islandConstants()
+  )
+}
+
+# Force a grass-pipeline rebuild on the next frame — the island radius is an
+# `override` set at pipeline creation, so growing the island (#41) must rebuild it.
 func resetGrassPipeline(grass: mod GrassCompute) {
   grass.made = false
   # The draw bind group is auto-layouted from the OLD render pipeline; invalidate it
@@ -230,11 +254,7 @@ func ensureGrassGpu(grass: mod GrassCompute, resources: mod GpuResources) {
   # terrain-height definition with everything else that touches the ground.
   # Carrying its own copy is what left blades standing on a height field the
   # terrain had already moved off.
-  if let computePipeline: PipelineId = createComputePipeline(
-    resources: resources
-    wgsl: wgsl(surfaceShader: grass.surfaceShader)
-    entryPoint: "main"
-  ) {
+  if let computePipeline: PipelineId = grassComputePipeline(grass: grass, resources: resources) {
     grass.computePipeline = computePipeline
     let entries: List(ResourceRef) = List.create(ResourceRef, cap: 3)
     entries.add(value: bufferRef(id: grass.uniform))
@@ -248,13 +268,10 @@ func ensureGrassGpu(grass: mod GrassCompute, resources: mod GpuResources) {
       grass.computeBind = computeBind
     }
   }
-  var renderSource: String = ""
-  unsafe {
-    renderSource = Gbuffer.gbReadWgsl(path: "lib/grass_render.wgsl")
-  }
+  let renderShader: Shader = shader(files: ["lib/grass_render.wgsl"])
   if let renderPipeline: RenderPipelineId = createRenderPipeline(
     resources: resources
-    wgsl: renderSource
+    shader: renderShader
     vertexEntry: "vs"
     fragmentEntry: "fs"
     spec: gbufferProceduralPipelineSpec()
@@ -265,9 +282,7 @@ func ensureGrassGpu(grass: mod GrassCompute, resources: mod GpuResources) {
     resources: resources
     id: grass.renderPipeline
   ) {
-    log(
-      "[grass] GPU objects could not be created (shader files readable from the repo root?); grass is not drawn"
-    )
+    log("[grass] GPU objects could not be created; grass is not drawn")
   }
 }
 

@@ -421,12 +421,53 @@ type RenderPipelineSpec {
   cullMode: Int32
 }
 
+# A render pipeline from a DECLARED shader (`shader(files: [...])`).
 func createRenderPipeline(
+  resources: mod GpuResources
+  shader: view Shader
+  vertexEntry: view String
+  fragmentEntry: view String
+  spec: view RenderPipelineSpec
+) ret opt RenderPipelineId {
+  let noConstants: List(ShaderConstant) = noShaderConstants()
+  ret createRenderPipelineSource(
+    resources: resources
+    wgsl: shader.text
+    vertexEntry: vertexEntry
+    fragmentEntry: fragmentEntry
+    spec: spec
+    constants: noConstants
+  )
+}
+
+# The same, with `override` constants set at creation (both stages).
+func createRenderPipelineWithConstants(
+  resources: mod GpuResources
+  shader: view Shader
+  vertexEntry: view String
+  fragmentEntry: view String
+  spec: view RenderPipelineSpec
+  constants: view List(ShaderConstant)
+) ret opt RenderPipelineId {
+  ret createRenderPipelineSource(
+    resources: resources
+    wgsl: shader.text
+    vertexEntry: vertexEntry
+    fragmentEntry: fragmentEntry
+    spec: spec
+    constants: constants
+  )
+}
+
+# The primitive under both: a render pipeline from WGSL TEXT (a program that
+# builds its shader at run time). Files are declared with `shader(files:)`.
+func createRenderPipelineSource(
   resources: mod GpuResources
   wgsl: view String
   vertexEntry: view String
   fragmentEntry: view String
   spec: view RenderPipelineSpec
+  constants: view List(ShaderConstant)
 ) ret opt RenderPipelineId {
   if wgsl.length() is 0 or vertexEntry.length() is 0 or fragmentEntry.length() is 0 {
     ret none
@@ -526,15 +567,16 @@ func createRenderPipeline(
     }
     let vertexC: Buffer(Any) = vertexEntry.toCStr()
     let fragmentC: Buffer(Any) = fragmentEntry.toCStr()
+    let entries: List(WGPUConstantEntry) = shaderConstantEntries(constants: constants)
     var fragments: List(WGPUFragmentState) = List.create(WGPUFragmentState, cap: 1)
-    fragments.add(
-      value: {
-        module: shaderModule
-        entryPoint: { data: fragmentC, length: WGPU_STRLEN }
-        targetCount: targets.length as UInt64
-        targets: targets.data
-      }
-    )
+    fragments.add(value: {
+      module: shaderModule
+      entryPoint: { data: fragmentC, length: WGPU_STRLEN }
+      constantCount: entries.length as UInt64
+      constants: entries.data
+      targetCount: targets.length as UInt64
+      targets: targets.data
+    })
     var depths: List(WGPUDepthStencilState) = List.create(WGPUDepthStencilState, cap: 1)
     var writeFlag: Int32 = WGPUOptionalBool_False
     if spec.depthWrite {
@@ -565,6 +607,8 @@ func createRenderPipeline(
         vertex: {
           module: shaderModule
           entryPoint: { data: vertexC, length: WGPU_STRLEN }
+          constantCount: entries.length as UInt64
+          constants: entries.data
           bufferCount: bufferCount as UInt64
           buffers: layouts.data
         }
@@ -582,6 +626,8 @@ func createRenderPipeline(
         vertex: {
           module: shaderModule
           entryPoint: { data: vertexC, length: WGPU_STRLEN }
+          constantCount: entries.length as UInt64
+          constants: entries.data
           bufferCount: bufferCount as UInt64
           buffers: layouts.data
         }

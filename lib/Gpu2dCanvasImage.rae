@@ -24,23 +24,14 @@ func ensureImagePipeline(canvas: mod Gpu2dCanvas, resources: mod GpuResources) {
     ret
   }
   canvas.imagePipeMade = true
-  var source: String = ""
-  unsafe {
-    source = nativeG2dBoxReadFile(path: "lib/gpu2d_image.wgsl")
-  }
-  if source.length() is 0 {
-    log(
-      "[gpu2d] lib/gpu2d_image.wgsl not readable from the working directory — run from the repo root; 2D images are skipped"
-    )
-    ret
-  }
+  let imageShader: Shader = shader(files: ["lib/gpu2d_image.wgsl"])
   var format: Int = 0
   unsafe {
     format = nativeG2dBoxFormat()
   }
   if let pipeline: RenderPipelineId = createRenderPipeline(
     resources: resources
-    wgsl: source
+    shader: imageShader
     vertexEntry: "vs"
     fragmentEntry: "fs"
     spec: boxPipelineSpec(format: format as Int32)

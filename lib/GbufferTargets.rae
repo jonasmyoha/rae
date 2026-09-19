@@ -320,28 +320,32 @@ func ensureDeferredPipelines(targets: mod DeferredTargets, resources: mod GpuRes
     ret
   }
   targets.pipesMade = true
-  unsafe {
-    targets.lightPipeline = createFullscreenPipeline(
-      resources: resources
-      wgsl: gbLightWgsl()
-      format: targets.litFormat
-    )
-    targets.taaPipeline = createFullscreenPipeline(
-      resources: resources
-      wgsl: gbTaaWgsl()
-      format: targets.litFormat
-    )
-    targets.pyrFromDepth = createFullscreenPipeline(
-      resources: resources
-      wgsl: gbPyrFromDepthWgsl()
-      format: WGPUTextureFormat_R32Float
-    )
-    targets.pyrReduce = createFullscreenPipeline(
-      resources: resources
-      wgsl: gbPyrReduceWgsl()
-      format: WGPUTextureFormat_R32Float
-    )
-  }
+  let lightShader: Shader = shader(
+    files: ["lib/gbuffer_octahedral.wgsl", "lib/sky_hosek.wgsl", "lib/deferred_light.wgsl"]
+  )
+  let taaShader: Shader = shader(files: ["lib/deferred_taa.wgsl"])
+  let pyramidFromDepthShader: Shader = shader(files: ["lib/deferred_pyramid_from_depth.wgsl"])
+  let pyramidReduceShader: Shader = shader(files: ["lib/deferred_pyramid_reduce.wgsl"])
+  targets.lightPipeline = createFullscreenPipeline(
+    resources: resources
+    shader: lightShader
+    format: targets.litFormat
+  )
+  targets.taaPipeline = createFullscreenPipeline(
+    resources: resources
+    shader: taaShader
+    format: targets.litFormat
+  )
+  targets.pyrFromDepth = createFullscreenPipeline(
+    resources: resources
+    shader: pyramidFromDepthShader
+    format: WGPUTextureFormat_R32Float
+  )
+  targets.pyrReduce = createFullscreenPipeline(
+    resources: resources
+    shader: pyramidReduceShader
+    format: WGPUTextureFormat_R32Float
+  )
   if let uniform: BufferId = createBuffer(
     resources: resources
     size: lightUniformFloats * 4

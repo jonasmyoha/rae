@@ -66,148 +66,18 @@
 /* #912: the static / skin / terrain pipelines and bind groups are manager IDs
  * on the Rae side (lib/Gbuffer.rae, lib/GbufferTerrain.rae); #906: so are the
  * frame uniform, the draws buffer, the draw cursor and the frame's command
- * encoder / render pass (a manager Recording per frame). C keeps the WGSL
- * sources, the frame-derived uniform MATH below and a "pass open" flag for
- * the metaball prep, which still runs here. */
+ * encoder / render pass (a manager Recording per frame). The geometry shaders
+ * are lib/gbuffer_static.wgsl / lib/gbuffer_skinned.wgsl (+ the shared
+ * lib/gbuffer_octahedral.wgsl), declared with `shader(files:)` in
+ * lib/GbufferResources.rae and validated at build. C keeps the frame-derived
+ * uniform MATH below and a "pass open" flag for the metaball prep, which
+ * still runs here. */
 
 /* #923: the frame-derived matrices (viewProj, the jittered one, the previous
  * frame's, the clear colour) live on the Rae GbufferCache; nothing in C
  * reconstructs positions any more. */
 /* #904: the inspector pipeline / uniform / bind are manager IDs on the Rae
- * side (lib/GbufferInspector.rae); C exposes only the inspector WGSL. */
-
-/* Octahedral normal encoding. A unit vector has two degrees of freedom;
- * this is the area-preserving map onto two channels. The lower hemisphere
- * folds outward across the |x|+|y|=1 diamond, which is what octWrap does. */
-#define GB_OCT_WGSL \
-"fn octWrap(v: vec2<f32>) -> vec2<f32> {\n" \
-"  let s = vec2<f32>(select(-1.0, 1.0, v.x >= 0.0), select(-1.0, 1.0, v.y >= 0.0));\n" \
-"  return (vec2<f32>(1.0) - abs(v.yx)) * s;\n" \
-"}\n" \
-"fn octEncode(n: vec3<f32>) -> vec2<f32> {\n" \
-"  var p = n.xy * (1.0 / (abs(n.x) + abs(n.y) + abs(n.z)));\n" \
-"  if (n.z < 0.0) { p = octWrap(p); }\n" \
-"  return p * 0.5 + vec2<f32>(0.5);\n" \
-"}\n" \
-"fn octDecode(e: vec2<f32>) -> vec3<f32> {\n" \
-"  let f = e * 2.0 - vec2<f32>(1.0);\n" \
-"  var n = vec3<f32>(f.x, f.y, 1.0 - abs(f.x) - abs(f.y));\n" \
-"  let t = max(-n.z, 0.0);\n" \
-"  n = vec3<f32>(n.x + select(t, -t, n.x >= 0.0),\n" \
-"                n.y + select(t, -t, n.y >= 0.0), n.z);\n" \
-"  return normalize(n);\n" \
-"}\n"
-
-/* PROCEDURAL BIG-BRICK MASONRY (#62). No textures in this renderer, so the castle's
- * brick is computed from world position: big old-castle courses, staggered rows,
- * recessed mortar, per-brick shade, ROUNDED faces and an ANALYTIC normal that dips
- * into the seams (the "bumps at the seams" — no image normal map). Triplanar face
- * pick so every box/tower face is bricked. Gated per instance by the caller. */
-#define GB_BRICK_WGSL \
-"struct BrickOut { albedo: vec3<f32>, nrm: vec3<f32> };\n" \
-"fn gbBrick(wpos: vec3<f32>, n: vec3<f32>, base: vec3<f32>) -> BrickOut {\n" \
-"  let an = abs(n);\n" \
-"  if (n.z > 0.6) { var top: BrickOut; top.albedo = base * 0.9; top.nrm = n; return top; }\n" \
-"  var u: f32; var v: f32; var tU: vec3<f32>; var tV: vec3<f32>;\n" \
-"  if (an.z >= an.x && an.z >= an.y) { u = wpos.x; v = wpos.y; tU = vec3<f32>(1.0,0.0,0.0); tV = vec3<f32>(0.0,1.0,0.0); }\n" \
-"  else if (an.x >= an.y) { u = wpos.y; v = wpos.z; tU = vec3<f32>(0.0,1.0,0.0); tV = vec3<f32>(0.0,0.0,1.0); }\n" \
-"  else { u = wpos.x; v = wpos.z; tU = vec3<f32>(1.0,0.0,0.0); tV = vec3<f32>(0.0,0.0,1.0); }\n" \
-"  let bw = 1.35; let bh = 0.58;\n" \
-"  let row = floor(v / bh);\n" \
-"  let stagger = (row - 2.0 * floor(row * 0.5)) * (bw * 0.5);\n" \
-"  let uu = u + stagger;\n" \
-"  let cu = fract(uu / bw);\n" \
-"  let cv = fract(v / bh);\n" \
-"  let du = min(cu, 1.0 - cu) * bw;\n" \
-"  let dv = min(cv, 1.0 - cv) * bh;\n" \
-"  let dm = min(du, dv);\n" \
-"  let mortarHalf = 0.05;\n" \
-"  let bevel = 0.14;\n" \
-"  let mortar = 1.0 - smoothstep(mortarHalf, mortarHalf + bevel, dm);\n" \
-"  let bid = floor(uu / bw) * 3.0 + row * 7.0;\n" \
-"  let vary = fract(sin(bid * 12.9898) * 43758.5453);\n" \
-"  let brickCol = base * (0.92 + 0.14 * vary);\n" \
-"  let mortarCol = base * vec3<f32>(0.70, 0.68, 0.66);\n" \
-"  var o: BrickOut;\n" \
-"  o.albedo = mix(brickCol, mortarCol, mortar);\n" \
-"  let bevelAmt = mortar * (1.0 - mortar) * 4.0;\n" \
-"  var perturb = vec3<f32>(0.0);\n" \
-"  if (du <= dv) { let dir = select(1.0, -1.0, cu < 0.5); perturb = tU * dir; }\n" \
-"  else { let dir = select(1.0, -1.0, cv < 0.5); perturb = tV * dir; }\n" \
-"  o.nrm = normalize(n + perturb * (bevelAmt * 0.55));\n" \
-"  return o;\n" \
-"}\n"
-
-/* PROCEDURAL ROOF TILES (#63), deliberately DIFFERENT from the wall brick: rounded
- * FISH-SCALE shingles in overlapping staggered courses, not a rectangular grid. The
- * surface is parameterised along/around the slope (tangent frame from the normal), so
- * courses stack up a cone and wrap around it. Each scale is a rounded dome — the albedo
- * brightens on the dome and darkens in the gaps, and the ANALYTIC normal bulges radially
- * so the scales catch light with real relief (the "bumps at the seams" for roofs). */
-#define GB_ROOFTILE_WGSL \
-"fn gbRoofTiles(wpos: vec3<f32>, n: vec3<f32>, base: vec3<f32>) -> BrickOut {\n" \
-"  let hl = max(length(vec2<f32>(n.x, n.y)), 1e-4);\n" \
-"  let horizN = vec2<f32>(n.x, n.y) / hl;\n" \
-"  let tU = vec3<f32>(-horizN.y, horizN.x, 0.0);\n" \
-"  let tV = normalize(cross(tU, n));\n" \
-"  let hu = dot(wpos, tU);\n" \
-"  let hv = dot(wpos, tV);\n" \
-"  let tw = 0.72; let th = 0.55;\n" \
-"  let row = floor(hv / th);\n" \
-"  let stag = (row - 2.0 * floor(row * 0.5)) * 0.5;\n" \
-"  let cu = fract(hu / tw + stag) - 0.5;\n" \
-"  let cv = fract(hv / th) - 0.32;\n" \
-"  let dxs = cu;\n" \
-"  let dys = cv * 0.92;\n" \
-"  let rr = sqrt(dxs * dxs + dys * dys);\n" \
-"  let edge = smoothstep(0.33, 0.47, rr);\n" \
-"  let dome = 1.0 - edge;\n" \
-"  let bid = floor(hu / tw + stag) * 5.0 + row * 11.0;\n" \
-"  let vary = fract(sin(bid * 34.11) * 4113.7);\n" \
-"  var o: BrickOut;\n" \
-"  o.albedo = base * (0.74 + 0.30 * dome + 0.14 * vary) * (1.0 - 0.34 * edge);\n" \
-"  let slope = smoothstep(0.04, 0.40, rr) * dome;\n" \
-"  var dir = vec2<f32>(dxs, dys);\n" \
-"  if (rr > 1e-4) { dir = dir / rr; }\n" \
-"  let perturb = tU * dir.x + tV * dir.y;\n" \
-"  o.nrm = normalize(n + perturb * (slope * 0.95));\n" \
-"  return o;\n" \
-"}\n"
-
-/* PROCEDURAL FLAG EMBLEM (#131). No textures in this renderer, so a unit badge is
- * computed from the mesh UV: a WHITE roundel near the TOP of the banner (with padding),
- * carrying a white symbol per unit type — archer = bow + arrow, infantry = crossed
- * swords, cavalry = horseshoe. The banner is ~4:1 tall so the u-radius is ~4x the
- * v-radius to keep the roundel circular in world space. `codeF` (from params.w) selects
- * the symbol. Returns the flag's base colour outside the badge, so it composites over
- * the team-tinted cloth. Deforms WITH the fabric since it lives in UV. */
-#define GB_EMBLEM_WGSL \
-"fn gbEmblem(uv: vec2<f32>, base: vec3<f32>, codeF: f32) -> vec3<f32> {\n" \
-"  let vc = 0.17; let ru = 0.34; let rv = 0.085;\n" \
-"  let a = (uv.x - 0.5) / ru;\n" \
-"  let b = (uv.y - vc) / rv;\n" \
-"  let r = length(vec2<f32>(a, b));\n" \
-"  if (r > 1.18) { return base; }\n" \
-"  let white = vec3<f32>(0.95, 0.95, 0.92);\n" \
-"  if (abs(r - 0.92) < 0.13) { return white; }\n" \
-"  if (r >= 0.80) { return base; }\n" \
-"  var em = false;\n" \
-"  let code = i32(round(codeF));\n" \
-"  if (code >= 12) {\n" \
-"    em = (abs(r - 0.58) < 0.15) && !(b > 0.28 && abs(a) < 0.44);\n" \
-"  } else if (code == 11) {\n" \
-"    em = (abs(a - b) < 0.16 || abs(a + b) < 0.16) && r < 0.70;\n" \
-"  } else {\n" \
-"    let bd = length(vec2<f32>(a + 0.70, b * 0.9));\n" \
-"    let bow = (abs(bd - 0.55) < 0.12) && a < 0.05;\n" \
-"    let shaft = (abs(b) < 0.11) && a > -0.55 && a < 0.55;\n" \
-"    let hu = (abs(b - (0.55 - a)) < 0.13) && a > 0.12 && a < 0.55;\n" \
-"    let hd = (abs(b + (0.55 - a)) < 0.13) && a > 0.12 && a < 0.55;\n" \
-"    em = bow || shaft || hu || hd;\n" \
-"  }\n" \
-"  if (em) { return white; }\n" \
-"  return base;\n" \
-"}\n"
+ * side (lib/GbufferInspector.rae); its shader is lib/gbuffer_inspect.wgsl. */
 
 /* Shading models, in the 2 bits rgb10a2's alpha provides. Values are the
  * quantisation points of those 2 bits so a round-trip through the texture
@@ -224,11 +94,6 @@
  * mixing is the case worth having. It costs nothing here because the 2
  * bits were already allocated and this value was spare. */
 #define GB_MODE_TOON     1.0f
-/* WGSL-literal forms of the same constants, so the deferred SDF pass
- * cannot drift from the raster pass's encoding. */
-#define GB_MODE_LIT_WGSL       "0.0"
-#define GB_MODE_EMISSIVE_WGSL  "0.33333333"
-#define GB_EMISSIVE_LOG_K_WGSL "6.91"
 
 /* Emissive is stored as log(1+E)/K and decoded as exp(e*K)-1, which fits
  * roughly [0, 1000] of linear radiance into one 8-bit channel. */
@@ -255,279 +120,6 @@
  * pixel opted out of temporal accumulation", which is distinguishable from
  * every encoded velocity precisely because zero motion is 128/255. */
 #define GB_MOTION_ZERO (128.0f / 255.0f)
-#define GB_MOTION_ZERO_WGSL "0.50196078"   /* 128.0/255.0 */
-
-/* Geometry pass. The vertex stage is deliberately close to the forward
- * one — the same mesh layout feeds both — but the fragment stage does no
- * lighting at all: it resolves the material and writes it out. That is the
- * whole point of the split. */
-static const char* GB_WGSL =
-"struct Frame {\n"
-"  viewProj: mat4x4<f32>,\n"
-"  prevViewProj: mat4x4<f32>,\n"
-"  jitter: vec4<f32>,\n"   /* xy = this frame's sub-pixel clip offset (#397) */
-"};\n"
-"struct DrawU {\n"
-"  model: mat4x4<f32>,\n"
-"  prevModel: mat4x4<f32>,\n"
-"  albedoMetallic: vec4<f32>,\n"
-"  params: vec4<f32>,\n"          /* x = roughness, y = emissive (encoded), z = mode */
-"};\n"
-"@group(0) @binding(0) var<uniform> F: Frame;\n"
-"@group(0) @binding(1) var<storage, read> draws: array<DrawU>;\n"
-GB_OCT_WGSL
-"struct VsOut {\n"
-"  @builtin(position) pos: vec4<f32>,\n"
-"  @location(0) nrm: vec3<f32>,\n"
-"  @location(1) @interpolate(flat) inst: u32,\n"
-"  @location(2) clipNow: vec4<f32>,\n"
-"  @location(3) clipPrev: vec4<f32>,\n"
-"  @location(4) wpos: vec3<f32>,\n"   /* world position, for procedural brick (#62) */
-"  @location(5) uv: vec2<f32>,\n"     /* mesh UV, for the procedural flag emblem (#131) */
-"};\n"
-GB_BRICK_WGSL
-GB_ROOFTILE_WGSL
-GB_EMBLEM_WGSL
-"@vertex\n"
-"fn vs(@builtin(instance_index) ii: u32,\n"
-"      @location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) uv: vec2<f32>) -> VsOut {\n"
-"  let d = draws[ii];\n"
-"  var o: VsOut;\n"
-"  let world = d.model * vec4<f32>(p, 1.0);\n"
-"  o.wpos = world.xyz;\n"
-"  o.pos = F.viewProj * world;\n"
-/* Uniform-scale normal transform, matching the forward pass's documented
- * constraint. Non-uniform scale needs transpose(inverse(model)); when that
- * arrives it must arrive in both pipelines at once or the two frames will
- * disagree about which way a surface faces. */
-"  o.nrm = normalize((d.model * vec4<f32>(n, 0.0)).xyz);\n"
-"  o.uv = uv;\n"
-"  o.inst = ii;\n"
-/* Motion (#390): where this vertex is now, and where the SAME vertex was
- * last frame — its previous model through the previous view-projection.
- * Both unjittered; if a jitter is added later it is a rasterisation
- * offset, not scene motion, and including it would make every static
- * pixel appear to move. */
-"  o.clipNow = o.pos;\n"
-"  o.clipPrev = F.prevViewProj * (d.prevModel * vec4<f32>(p, 1.0));\n"
-/* Jitter LAST, after clipNow is captured (#397). It is a rasterisation
- * offset, not scene motion: including it in the motion vector would make
- * every static pixel appear to move by the jitter delta, which is the
- * one thing guaranteed to defeat the filter it exists to feed. */
-"  o.pos = vec4<f32>(o.pos.xy + F.jitter.xy * o.pos.w, o.pos.zw);\n"
-"  return o;\n"
-"}\n"
-"struct FsOut {\n"
-"  @location(0) gba: vec4<f32>,\n"
-"  @location(1) gbb: vec4<f32>,\n"
-"  @location(2) gbc: vec4<f32>,\n"
-"};\n"
-"@fragment\n"
-"fn fs(in: VsOut) -> FsOut {\n"
-"  let d = draws[in.inst];\n"
-/* Renormalise: interpolation across a triangle shortens the normal, and a
- * G-buffer normal that is not unit length quietly biases every dot product
- * the lighting pass takes. Do it BEFORE encoding — octDecode normalises on
- * the way out, which would hide the error rather than prevent it. */
-"  let n = normalize(in.nrm);\n"
-"  let oct = octEncode(n);\n"
-/* Roughness is clamped at write time, not read time, so every consumer
- * gets the same floor without having to remember it. A zero-roughness GGX
- * lobe is a division by zero at the highlight. */
-"  let rough = clamp(d.params.x, 0.045, 1.0);\n"
-/* Motion vectors, now REAL (#390). UV-space displacement since last
- * frame, biased into an unsigned 8-bit channel: 128/255 is zero, and it
- * is the one value rgba8unorm reproduces exactly, which is why the clear
- * colour uses it too. The decode is the paired
- * `raw * 2 - 256/255` — the two must change together. */
-"  let now = in.clipNow.xy / in.clipNow.w;\n"
-"  let prev = in.clipPrev.xy / in.clipPrev.w;\n"
-"  let motion = (now - prev) * vec2<f32>(0.5, -0.5);\n"
-/* Clamp before biasing: a fast object can move more than half a screen in
- * one frame, and wrapping would encode huge motion as tiny motion — the
- * worst possible failure for a temporal filter, since it looks valid. */
-"  let mEnc = clamp(motion, vec2<f32>(-0.5), vec2<f32>(0.5)) + vec2<f32>(" GB_MOTION_ZERO_WGSL ");\n"
-/* Procedural brick (#62): when the per-instance brick flag (params.w) is set,
- * replace the flat albedo + geometric normal with the masonry surface. Off (the
- * default) leaves the write byte-identical, so no other instanced draw changes. */
-"  var albedoOut = d.albedoMetallic.rgb;\n"
-"  var nrmOut = n;\n"
-"  if (d.params.w > 9.5) {\n"
-"    albedoOut = gbEmblem(in.uv, albedoOut, d.params.w);\n" /* #131 flag unit emblem (>=10) */
-"  } else if (d.params.w > 1.5) {\n"
-"    let rt = gbRoofTiles(in.wpos, n, albedoOut);\n"    /* #63 roof shingles (flag 2) */
-"    albedoOut = rt.albedo;\n"
-"    nrmOut = rt.nrm;\n"
-"  } else if (d.params.w > 0.5) {\n"
-"    let bk = gbBrick(in.wpos, n, albedoOut);\n"        /* #62 wall brick (flag 1) */
-"    albedoOut = bk.albedo;\n"
-"    nrmOut = bk.nrm;\n"
-"  }\n"
-"  let octB = octEncode(nrmOut);\n"
-"  var o: FsOut;\n"
-"  o.gba = vec4<f32>(octB.x, octB.y, 0.5, d.params.z);\n"
-"  o.gbb = vec4<f32>(albedoOut, rough);\n"
-"  o.gbc = vec4<f32>(mEnc.x, mEnc.y,\n"
-"                     clamp(d.albedoMetallic.a, 0.0, 1.0), d.params.y);\n"
-"  return o;\n"
-"}\n";
-
-
-/* ----- skinned geometry into the G-buffer (#391) ---------------------
- *
- * The deferred counterpart of runtime_gpu3d_skin.c's forward pipeline.
- * Same 20-float vertex format, same joint palette, same linear blend —
- * only the fragment output differs, writing packed surface attributes
- * instead of lit colour. That is the whole point of deferred: a second
- * GEOMETRY kind needs a second geometry pipeline, not a second lighting
- * path.
- *
- * The palette is SHARED with the forward and shadow pipelines rather than
- * duplicated. One buffer, one upload, three readers: two decoders of one
- * format is how a pose ends up subtly sheared in exactly one pass.
- */
-static const char* GB_SKIN_WGSL =
-"struct Frame {\n"
-"  viewProj: mat4x4<f32>,\n"
-"  prevViewProj: mat4x4<f32>,\n"
-"  jitter: vec4<f32>,\n"
-"};\n"
-"struct DrawU {\n"
-"  model: mat4x4<f32>,\n"
-"  prevModel: mat4x4<f32>,\n"
-"  albedoMetallic: vec4<f32>,\n"
-"  params: vec4<f32>,\n"
-"};\n"
-"@group(0) @binding(0) var<uniform> F: Frame;\n"
-"@group(0) @binding(1) var<storage, read> draws: array<DrawU>;\n"
-"@group(0) @binding(2) var<storage, read> palette: array<vec4<f32>>;\n"
-GB_OCT_WGSL
-/* `base` is this instance's palette offset in vec4 rows (paletteIndex *
- * jointCount * 3). It comes from the per-instance DrawU (params.w) so instances
- * of the same mesh can each read their own animation palette out of one shared
- * palette array — GPU animation instancing (#547). Today every instance packs
- * base = 0, so this reads palette[j*3+..] exactly as before. */
-"fn jointMat(j: u32, base: u32) -> mat4x4<f32> {\n"
-"  let r0 = palette[base + j * 3u + 0u];\n"
-"  let r1 = palette[base + j * 3u + 1u];\n"
-"  let r2 = palette[base + j * 3u + 2u];\n"
-"  return mat4x4<f32>(\n"
-"    vec4<f32>(r0.x, r1.x, r2.x, 0.0),\n"
-"    vec4<f32>(r0.y, r1.y, r2.y, 0.0),\n"
-"    vec4<f32>(r0.z, r1.z, r2.z, 0.0),\n"
-"    vec4<f32>(r0.w, r1.w, r2.w, 1.0));\n"
-"}\n"
-"struct VsOut {\n"
-"  @builtin(position) pos: vec4<f32>,\n"
-"  @location(0) nrm: vec3<f32>,\n"
-"  @location(1) @interpolate(flat) inst: u32,\n"
-"  @location(2) clipNow: vec4<f32>,\n"
-"  @location(3) clipPrev: vec4<f32>,\n"
-"  @location(4) vcol: vec3<f32>,\n"
-"};\n"
-"@vertex\n"
-"fn vs(@builtin(instance_index) ii: u32,\n"
-"      @location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) uv: vec2<f32>,\n"
-"      @location(3) jf: vec4<f32>, @location(4) w: vec4<f32>,\n"
-"      @location(5) vc: vec4<f32>) -> VsOut {\n"
-"  let d = draws[ii];\n"
-"  let j = vec4<u32>(u32(jf.x), u32(jf.y), u32(jf.z), u32(jf.w));\n"
-/* Per-instance palette offset (0 for all instances today). */
-"  let pbase = u32(max(d.params.w, 0.0));\n"
-"  var skin = jointMat(j.x, pbase) * w.x;\n"
-"  skin = skin + jointMat(j.y, pbase) * w.y;\n"
-"  skin = skin + jointMat(j.z, pbase) * w.z;\n"
-"  skin = skin + jointMat(j.w, pbase) * w.w;\n"
-"  let sp = skin * vec4<f32>(p, 1.0);\n"
-"  var o: VsOut;\n"
-"  o.pos = F.viewProj * (d.model * vec4<f32>(sp.xyz, 1.0));\n"
-"  let sn = skin * vec4<f32>(n, 0.0);\n"
-"  o.nrm = normalize((d.model * vec4<f32>(sn.xyz, 0.0)).xyz);\n"
-"  o.inst = ii;\n"
-"  o.vcol = vc.rgb;\n"
-"  o.clipNow = o.pos;\n"
-/* NO PREVIOUS PALETTE EXISTS, so a skinned vertex reports only its OBJECT
- * motion, not its limb motion. Velocity is therefore right for a
- * character sliding across the screen and wrong for a swinging arm: TAA
- * will smear the latter until a previous-frame palette is kept. The
- * forward path has the identical limitation and the identical note —
- * stated in both rather than discovered in an image. */
-"  o.clipPrev = F.prevViewProj * (d.prevModel * vec4<f32>(sp.xyz, 1.0));\n"
-"  o.pos = vec4<f32>(o.pos.xy + F.jitter.xy * o.pos.w, o.pos.zw);\n"
-"  return o;\n"
-"}\n"
-"struct FsOut {\n"
-"  @location(0) gba: vec4<f32>,\n"
-"  @location(1) gbb: vec4<f32>,\n"
-"  @location(2) gbc: vec4<f32>,\n"
-"};\n"
-"@fragment\n"
-"fn fs(in: VsOut) -> FsOut {\n"
-"  let d = draws[in.inst];\n"
-"  let n = normalize(in.nrm);\n"
-"  let oct = octEncode(n);\n"
-"  let rough = clamp(d.params.x, 0.045, 1.0);\n"
-"  let now = in.clipNow.xy / in.clipNow.w;\n"
-"  let prev = in.clipPrev.xy / in.clipPrev.w;\n"
-"  let motion = (now - prev) * vec2<f32>(0.5, -0.5);\n"
-"  let mEnc = clamp(motion, vec2<f32>(-0.5), vec2<f32>(0.5)) + vec2<f32>(" GB_MOTION_ZERO_WGSL ");\n"
-"  var o: FsOut;\n"
-"  o.gba = vec4<f32>(oct.x, oct.y, 0.5, d.params.z);\n"
-/* Vertex colour MULTIPLIES the material's base colour, exactly as in the
- * forward skinned shader (#378) — white is a no-op, so a model with no
- * baked colour is unaffected. */
-"  o.gbb = vec4<f32>(d.albedoMetallic.rgb * in.vcol, rough);\n"
-"  o.gbc = vec4<f32>(mEnc.x, mEnc.y,\n"
-"                     clamp(d.albedoMetallic.a, 0.0, 1.0), d.params.y);\n"
-"  return o;\n"
-"}\n";
-
-/* G-buffer inspector. Fullscreen triangle, textureLoad by pixel (1:1, so
- * no sampler), one channel selected by a uniform. */
-static const char* GB_VIEW_WGSL =
-"@group(0) @binding(0) var<uniform> P: vec4<f32>;\n"   /* x = mode, y = zNear, z = zFar */
-"@group(0) @binding(1) var gbaTex: texture_2d<f32>;\n"
-"@group(0) @binding(2) var gbbTex: texture_2d<f32>;\n"
-"@group(0) @binding(3) var gbcTex: texture_2d<f32>;\n"
-"@group(0) @binding(4) var depthTex: texture_depth_2d;\n"
-GB_OCT_WGSL
-"@vertex\n"
-"fn vs(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4<f32> {\n"
-"  var points = array<vec2<f32>, 3>(\n"
-"    vec2<f32>(-1.0, -1.0), vec2<f32>(3.0, -1.0), vec2<f32>(-1.0, 3.0));\n"
-"  return vec4<f32>(points[vi], 0.0, 1.0);\n"
-"}\n"
-"@fragment\n"
-"fn fs(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {\n"
-"  let px = vec2<i32>(pos.xy);\n"
-"  let mode = i32(P.x);\n"
-"  var c = vec3<f32>(0.0);\n"
-"  if (mode == 2) {\n"
-/* Decode, then remap to [0,1] so the sign is visible rather than clipped
- * to black on every surface facing away from an axis. */
-"    let n = octDecode(textureLoad(gbaTex, px, 0).xy);\n"
-"    c = n * 0.5 + vec3<f32>(0.5);\n"
-"  } else if (mode == 3) {\n"
-/* Material view: metallic in red, roughness in green, the emissive/AO
- * channel in blue — the three scalars that decide how a pixel shades. */
-"    let gbb = textureLoad(gbbTex, px, 0);\n"
-"    let gbc = textureLoad(gbcTex, px, 0);\n"
-"    c = vec3<f32>(gbc.z, gbb.a, gbc.w);\n"
-"  } else if (mode == 4) {\n"
-/* Reverse-Z (#367): the NEAR plane is 1 and far is 0, so a raw display is
- * inverted relative to intuition as well as bunched. Linearise, which also
- * puts near back at 0 where a reader expects it. */
-"    let d = textureLoad(depthTex, px, 0);\n"
-"    let zn = P.y; let zf = P.z;\n"
-"    let lin = (zf * zn) / max(d * (zf - zn) + zn, 1e-6);\n"
-"    c = vec3<f32>(clamp((lin - zn) / max(zf - zn, 1e-6), 0.0, 1.0));\n"
-"  } else {\n"
-"    c = textureLoad(gbbTex, px, 0).rgb;\n"
-"  }\n"
-/* The inspector writes the presentable (LDR, gamma) target, so encode.
- * Albedo and material are authored in [0,1] and displayed as authored. */
-"  return vec4<f32>(pow(c, vec3<f32>(1.0 / 2.2)), 1.0);\n"
-"}\n";
 
 /* The G-buffer is sized to the offscreen target, and reallocated on
  * resize. These are the deferred frame's OWN textures: the graph declares
@@ -539,21 +131,15 @@ GB_OCT_WGSL
  * back via rae_gb_set_target, using the C accessors for size / resize check /
  * release / commit above. */
 
-/* The static + skinned geometry render pipelines and their WGSL shader modules
- * are now created in Rae (lib/gbuffer.rae: ensurePipelines) over the bindings.
- * C exposes the WGSL source and the entry-point names as string accessors (the
- * shaders stay as source, per #503), plus setters that store the created
- * pipelines back into the globals so the draws, the render pass and the bind
- * groups read them unchanged. */
+/* The static + skinned geometry render pipelines are created in Rae
+ * (lib/GbufferResources.rae: ensurePipelines) from the declared shaders. */
 /* Grass generation compute shader (grass epic #486). Writes one DrawU record
  * per blade into a storage buffer, entirely on the GPU: a grid of blades around
  * the player, jittered by a lattice hash, dropped onto the terrain via the SAME
  * analytic height field as the CPU terrain mesh (perlin2 ported from lib/noise —
  * so blades sit exactly on the ground), swayed by the wind model matching
  * walker_grass's grassGust. No CPU per-blade work, no readback. The DrawU layout
- * mirrors GB_WGSL's (model, prevModel, albedoMetallic, params). */
-const char* rae_gb_wgsl(void)      { return GB_WGSL; }
-const char* rae_gb_skin_wgsl(void) { return GB_SKIN_WGSL; }
+ * mirrors lib/gbuffer_static.wgsl's (model, prevModel, albedoMetallic, params). */
 /* The grass shaders are Rae assets since #874: lib/grass_compute.wgsl (composed in
  * Rae with the biome + noise chunks) and lib/grass_render.wgsl; the grass GPU objects
  * are typed IDs in the App-owned manager, so the C slot store is gone too. */
@@ -564,10 +150,9 @@ const char* rae_gb_skin_wgsl(void) { return GB_SKIN_WGSL; }
 
 /* The G-buffer inspector (pipeline + uniform + bind group + the fullscreen
  * pass) is built in Rae (lib/GbufferInspector.rae, #503) and, since #904, its
- * objects are manager IDs there. C exposes the inspector WGSL and the
+ * objects are manager IDs there. C exposes the
  * presentable target's format + view; Rae rebuilds the bind (which samples the
  * G-buffer views) when gb_targets_gen changes. */
-const char* rae_gb_view_wgsl(void)  { return GB_VIEW_WGSL; }
 int64_t rae_g2d_format(void)        { return (int64_t)g_g2d_fmt; }
 
 /* Mirror of the Rae-side `Mat4` layout for the extern boundary; see the

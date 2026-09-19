@@ -197,20 +197,23 @@ func ensureStaticBind(cache: mod GbufferCache, resources: mod GpuResources) {
   }
 }
 
-# A G-buffer pipeline from WGSL source (entry points vs / fs) — the manager
-# owns it; an invalid ID comes back when creation failed.
+# A G-buffer pipeline from a declared shader (entry points vs / fs) — the
+# manager owns it; an invalid ID comes back when creation failed. `constants`
+# are the shader's `override` values for this pipeline.
 func createGbufferPipeline(
   resources: mod GpuResources
-  wgsl: view String
+  shader: view Shader
+  constants: view List(ShaderConstant)
   stride: copy Int
   attributes: own List(VertexAttributeSpec)
-) pub ret RenderPipelineId {
-  if let pipeline: RenderPipelineId = createRenderPipeline(
+) ret RenderPipelineId {
+  if let pipeline: RenderPipelineId = createRenderPipelineWithConstants(
     resources: resources
-    wgsl: wgsl
+    shader: shader
     vertexEntry: "vs"
     fragmentEntry: "fs"
     spec: gbufferPipelineSpec(stride: stride, attributes: attributes)
+    constants: constants
   ) {
     ret pipeline
   }
@@ -222,15 +225,17 @@ func ensurePipelines(cache: mod GbufferCache, resources: mod GpuResources) {
     ret
   }
   cache.pipelinesMade = true
-  var staticSource: String = ""
-  var skinSource: String = ""
-  unsafe {
-    staticSource = String.fromCStr(s: gbWgsl())
-    skinSource = String.fromCStr(s: gbSkinWgsl())
-  }
+  let noConstants: List(ShaderConstant) = noShaderConstants()
+  let staticShader: Shader = shader(
+    files: ["lib/gbuffer_octahedral.wgsl", "lib/gbuffer_static.wgsl"]
+  )
+  let skinShader: Shader = shader(
+    files: ["lib/gbuffer_octahedral.wgsl", "lib/gbuffer_skinned.wgsl"]
+  )
   cache.staticPipeline = createGbufferPipeline(
     resources: resources
-    wgsl: staticSource
+    shader: staticShader
+    constants: noConstants
     stride: 32
     attributes: gbufferStaticAttributes()
   )
@@ -240,7 +245,8 @@ func ensurePipelines(cache: mod GbufferCache, resources: mod GpuResources) {
   skinAttributes.add(value: { format: WGPUVertexFormat_Float32x4, offset: 64, location: 5 })
   cache.skinPipeline = createGbufferPipeline(
     resources: resources
-    wgsl: skinSource
+    shader: skinShader
+    constants: noConstants
     stride: 80
     attributes: skinAttributes
   )

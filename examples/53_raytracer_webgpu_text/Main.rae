@@ -210,7 +210,7 @@ func sceneFloats(cam: view Camera, world: view List(Sphere)) ret List(Float) {
 }
 
 func buildGpuRT(
-  wgsl: view String
+  wgsl: view Shader
   scene: view List(Float)
   boxes: view List(Float)
   tris: view List(Float)
@@ -229,7 +229,7 @@ func buildGpuRT(
     accumBuf: Gpu.allocF32(count: pixels * 4)
     outBuf: Gpu.allocU32(count: pixels)
     paramsBuf: Gpu.uniformU32(data: params.data, count: 12)
-    kernel: Gpu.kernel(wgsl: wgsl, entry: "main")
+    kernel: Gpu.kernelShader(shader: wgsl, entry: "main")
   }
 }
 
@@ -270,8 +270,6 @@ func drawLabel(
   )
 }
 
-func rae_ext_rae_sys_read_file(path: String) unsafe extern ret String
-
 func main() {
   unsafe {
     let maxDepth: Int = 8
@@ -306,7 +304,7 @@ func main() {
     )
 
     let dir: String = "examples/53_raytracer_webgpu_text/"
-    let wgsl: String = rae_ext_rae_sys_read_file(path: "{dir}accum.wgsl")
+    let wgsl: Shader = shader(files: ["accum.wgsl"])
     let font: SdfFont = loadSdfFont(
       jsonPath: "{dir}assets/Roboto-Regular.mtsdf.json"
       rawAtlasPath: "{dir}assets/Roboto-Regular.mtsdf.raw"

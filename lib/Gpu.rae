@@ -90,6 +90,14 @@ func kernel(wgsl: view String, entry: view String) ret Int {
   }
 }
 
+# The same from a DECLARED shader (`shader(files: [...])`, composed and
+# validated at build — docs/shaders-and-the-compiler.md).
+func kernelShader(shader: view Shader, entry: view String) ret Int {
+  unsafe {
+    ret nativeKernel(wgsl: shader.text, entry: entry)
+  }
+}
+
 # Bind `bufCount` buffer handles to @binding(0..n) in order and dispatch a
 # gx*gy*gz grid of workgroups. Blocks until the GPU finishes.
 func nativeRun(

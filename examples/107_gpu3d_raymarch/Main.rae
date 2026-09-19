@@ -16,7 +16,6 @@ import Image
 import Filesystem
 import Math
 import Vec3
-open NoiseWgsl
 
 type Transform3d {
   x: Float
@@ -57,8 +56,6 @@ type Gpu3dRt {
   outBuf: Int
   kernel: Int
 }
-
-func rae_ext_rae_sys_read_file(path: String) unsafe extern ret String
 
 func addMaterial(
   scene: mod Scene3d
@@ -291,7 +288,7 @@ func packCamera(pos: view Vec3, fwd: view Vec3, aspect: view Float) ret List(Flo
 }
 
 func buildGpu3d(
-  wgsl: view String
+  wgsl: view Shader
   camera: view List(Float)
   objects: view List(Float)
   materials: view List(Float)
@@ -305,7 +302,7 @@ func buildGpu3d(
     objectBuf: Gpu.storageF32(data: objects.data, count: objects.length)
     materialBuf: Gpu.storageF32(data: materials.data, count: materials.length)
     outBuf: Gpu.allocU32(count: pixels)
-    kernel: Gpu.kernel(wgsl: wgsl, entry: "main")
+    kernel: Gpu.kernelShader(shader: wgsl, entry: "main")
   }
 }
 
@@ -320,7 +317,7 @@ func fillPixels(width: view Int, height: view Int) ret List(Int) {
 }
 
 func main() {
-  let wgsl: String = loadNoiseShader(path: "examples/107_gpu3d_raymarch/raymarch.wgsl")
+  let wgsl: Shader = shader(files: ["lib/noise.wgsl", "raymarch.wgsl"])
   let scene: Scene3d = buildScene3d()
   let objects: List(Float) = packObjects(scene: scene)
   let materials: List(Float) = packMaterials(scene: scene)

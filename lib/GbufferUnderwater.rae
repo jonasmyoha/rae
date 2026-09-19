@@ -113,16 +113,10 @@ func ensureUnderwaterObjects(
   cache.pipeMade = true
   # The shader is an asset read relative to the working directory like every
   # lib/*.wgsl; an empty read must not reach wgpu (no `vs` entry point aborts).
-  let source: String = gbReadWgsl(path: "lib/underwaterFog.wgsl")
-  if source.length() is 0 {
-    log(
-      "[underwater] lib/underwaterFog.wgsl not readable from the working directory — run from the repo root; the underwater fog is skipped"
-    )
-    ret
-  }
+  let fogShader: Shader = shader(files: ["lib/underwaterFog.wgsl"])
   if let pipeline: RenderPipelineId = createRenderPipeline(
     resources: resources
-    wgsl: source
+    shader: fogShader
     vertexEntry: "vs"
     fragmentEntry: "fs"
     spec: fullscreenPipelineSpec(format: litFormat)

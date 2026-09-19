@@ -3,10 +3,10 @@ import ui/Scene
 
 # The runtime returns an empty String on failure. Keep this non-optional bridge
 # until the C backend's opt-String return path is representation-safe.
-# Stdlib scenes (lib/app3d/scenes/*.raescene) are read through the same
-# toolchain-aware reader as the stdlib shaders: the path as given first, then
-# $RAE_STDLIB for a "lib/..." path, and a loud diagnostic on a miss (#937).
-func nativeSceneReadFile(path: String) unsafe extern("rae_ext_rae_gb_read_shader") ret String
+# Stdlib scenes (lib/app3d/scenes/*.raescene) are read through the
+# toolchain-aware asset reader: the path as given first, then $RAE_STDLIB for
+# a "lib/..." path, and a loud diagnostic on a miss (#937).
+func nativeSceneReadFile(path: String) unsafe extern("rae_ext_rae_read_asset") ret String
 
 # Derive the zero-folder package identity from a file path. Package-aware
 # callers replace this with the full root-relative identity they already used

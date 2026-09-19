@@ -200,12 +200,13 @@ func main() ret Int {
                 depthCompare: WGPUCompareFunction_Always
                 cullMode: WGPUCullMode_None
               }
-              if let pipeline: RenderPipelineId = createRenderPipeline(
+              if let pipeline: RenderPipelineId = createRenderPipelineSource(
                 resources: resources
                 wgsl: shaderSource()
                 vertexEntry: "vs"
                 fragmentEntry: "fs"
                 spec: spec
+                constants: noShaderConstants()
               ) {
                 let entries: List(ResourceRef) = List.create(ResourceRef, cap: 1)
                 entries.add(value: externalRef(id: adopted))
