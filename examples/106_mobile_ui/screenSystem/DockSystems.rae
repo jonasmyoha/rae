@@ -51,22 +51,6 @@ func layerTagSystem(world: mod UiWorld) pub {
   }
 }
 
-func navTabScreenName(screen: Screen) ret String {
-  if screen is Screen.home {
-    ret "home"
-  }
-  if screen is Screen.library {
-    ret "library"
-  }
-  if screen is Screen.search {
-    ret "search"
-  }
-  if screen is Screen.profile {
-    ret "profile"
-  }
-  ret ""
-}
-
 func setTabSpriteTint(world: mod UiWorld, entity: view EntityId, tint: view RgbaColor) {
   let sp: Sprite = componentGet(this: world.sprites, entity: entity)
   if sp.tint.r is tint.r and sp.tint.g is tint.g and sp.tint.b is tint.b and sp.tint.a is tint.a {
@@ -95,7 +79,9 @@ func setTabTextStyle(world: mod UiWorld, entity: view EntityId, styleId: view St
 
 func navTabsSystem(world: mod UiWorld, activeTab: Screen) pub {
   unsafe {
-    let activeName: String = navTabScreenName(screen: activeTab)
+    # A tab's authored `NavTab.screen` is the page id of the screen it
+    # selects — the same id the ScreenPage table gives the active tab.
+    let activeName: String = pageIdForScreen(screen: activeTab)
     let activeTint: RgbaColor = { r: 30, g: 30, b: 36, a: 255 }
     let inactiveTint: RgbaColor = { r: 130, g: 130, b: 140, a: 255 }
     let n: Int = componentCount(this: world.navTabs)

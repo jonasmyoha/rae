@@ -104,44 +104,6 @@ func historyListData(history: view PlayHistory) ret ListViewData {
   }
 }
 
-# ----- the History page (#977, SCENE-DRIVEN) -------------------------------
-# assets/scenes/History.raescene owns the page: top bar, the `EmptyState`
-# line and the `Body` list host carrying the authored `ListView` (the
-# `HistoryRow` sub-scene, its bindings, the window size) plus a
-# `HistoryList` binding component and the `ScrollRoot` the app's scroll FSM
-# drives. This mount is one mountPageOrError; `historyListSystem` below feeds
-# the rows.
-func mountHistoryPage(
-  world: mod UiWorld
-  scenes: view AlbumScenes
-  state: view AppState
-  viewport: view Viewport
-) pub ret EntityId {
-  let scene: view Scene => scenes.history
-  let overrides: List(SceneOverride) = emptyOverrides()
-  let pageIdCopy: String = "{historyPageId}"
-  let historyLabel: String = "History"
-  let mount: EntityId = mountPageOrError(
-    world: world
-    pageId: own pageIdCopy
-    scene: scene
-    overrides: overrides
-    w: viewport.areaDuW
-    h: viewport.areaDuH
-    sceneLabel: historyLabel
-    subScenes: scenes.subScenes
-  )
-  attachSafeAreaEdges(
-    world: world
-    entity: mount
-    top: 1.0
-    bottom: 0.0
-  )
-  # First fill now, so the rows exist before this frame's layout.
-  historyListSystem(world: world, state: state)
-  ret mount
-}
-
 func setHistoryActive(world: mod UiWorld, entity: view EntityId, active: view Bool) {
   if isNone(this: entity) {
     ret
