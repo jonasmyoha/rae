@@ -17,9 +17,9 @@ open gpu/GpuLifetime
 open gpu/GpuRender
 open gpu/GpuIds
 
-# Force a terrain-pipeline rebuild on the next draw. The island radius is baked
-# into the composed shader as a const (islandParamsWgsl), so growing the island
-# (#41) must recompose it. The old pipeline and its bind group are RETIRED here
+# Force a terrain-pipeline rebuild on the next draw. The island radius is an
+# `override` set at pipeline creation (islandConstants), so growing the island
+# (#41) must rebuild it. The old pipeline and its bind group are RETIRED here
 # (#912: manager-owned, released once nothing in flight uses them — a resizing
 # island no longer leaks a pipeline per grow). The bind group is auto-layouted
 # from the OLD pipeline and is invalid against the new one (wgpu auto-layouts
@@ -153,90 +153,63 @@ func ensureTerrainTexDefaults(cache: mod GbufferCache, resources: mod GpuResourc
   }
 }
 
-func nativeSysFileExists(path: String) unsafe extern("rae_ext_rae_sys_exists") ret Bool
-
-func sysFileExists(path: copy String) ret Bool {
-  unsafe {
-    ret nativeSysFileExists(path: path)
-  }
+# The terrain-splat shader: a DECLARED composition of the aligned WGSL parts
+# (docs/shaders-and-the-compiler.md) — noise + biome + palette + grass style +
+# detail + splat, validated at build. The palette is composed BEFORE
+# terrain_detail so its RAE_TERRAIN_* constants are in scope for the material
+# ramps. The island size is not text: it is the `override` pair
+# WorldBiome.islandConstants() sets at pipeline creation.
+func defaultTerrainShader() ret Shader {
+  ret shader(files: [
+    "lib/noise.wgsl"
+    "lib/world_biome.wgsl"
+    "lib/terrain_palette.wgsl"
+    "lib/terrain_grass.wgsl"
+    "lib/terrain_detail.wgsl"
+    "lib/terrain_splat.wgsl"
+  ])
 }
 
-# The grade-calibrated RAE_TERRAIN_* palette, PER APP (#13). An app that ships its
-# own calibrated copy at assets/terrain_palette.wgsl (which the iOS bundle carries
-# too) overrides the shared lib default; anything else — example 114 on neutral
-# ACES — uses the default. This is what keeps the game's grade-specific numbers
-# out of the shared lib: the two apps are no longer bound to one calibration.
-func terrainPaletteWgsl(cache: view GbufferCache) ret String {
-  if cache.terrainPalettePath.length() > 0 and sysFileExists(path: cache.terrainPalettePath) {
-    ret gbReadWgsl(path: cache.terrainPalettePath)
-  }
-  if sysFileExists(path: "assets/terrain_palette.wgsl") {
-    ret gbReadWgsl(path: "assets/terrain_palette.wgsl")
-  }
-  ret gbReadWgsl(path: "lib/terrain_palette.wgsl")
-}
-
-# Point the terrain at an app's own palette file by path — for an app whose
-# cwd is not its project root (the examples run from the repo root, so the
-# cwd-relative `assets/terrain_palette.wgsl` lookup cannot find theirs). Call
-# before the first terrain draw; the pipeline composes the palette once.
-func terrainSetPalette(cache: mod GbufferCache, resources: mod GpuResources, path: view String) {
-  terrainSetPalette(
-    cache: cache
-    resources: resources
-    path: path
-    grassStylePath: ""
-  )
-}
-
-func terrainSetPalette(
-  cache: mod GbufferCache
-  resources: mod GpuResources
-  path: view String
-  grassStylePath: view String
-) {
-  cache.terrainPalettePath = "{path}"
-  cache.terrainGrassStylePath = "{grassStylePath}"
+# Use an app's own terrain shader — the same six-part composition with the
+# app's grade-calibrated palette (a copy of lib/terrain_palette.wgsl) and/or
+# its grass style (`terrainGrassColor(position, variation) -> vec3<f32>`) in
+# place of the lib parts:
+#
+#   terrainSetShader(cache: …, resources: …, shader: shader(files: [
+#     "lib/noise.wgsl", "lib/world_biome.wgsl", "assets/terrain_palette.wgsl",
+#     "lib/terrain_grass.wgsl", "lib/terrain_detail.wgsl", "lib/terrain_splat.wgsl"
+#   ]))
+#
+# Declared in the APP, so the parts resolve next to its own files whatever the
+# cwd, and a palette that drifts from the lib parts fails the app's build, not
+# its first frame. Call before the first terrain draw; the pipeline is rebuilt.
+func terrainSetShader(cache: mod GbufferCache, resources: mod GpuResources, shader: own Shader) {
+  cache.terrainShader = shader
+  cache.terrainShaderSet = true
   resetTerrainPipeline(cache: cache, resources: resources)
-}
-
-# Read directly through the borrowed path; no temporary owner aliases cache storage.
-func terrainGrassStyleWgsl(cache: view GbufferCache) ret String {
-  if cache.terrainGrassStylePath.length() > 0 {
-    ret gbReadWgsl(path: cache.terrainGrassStylePath)
-  }
-  ret gbReadWgsl(path: "lib/terrain_grass.wgsl")
-}
-
-# Compose the terrain-splat shader from the aligned WGSL files (noise + biome +
-# palette + terrain), read once at pipeline build. See lib/terrain_splat.wgsl /
-# #533. The palette is composed BEFORE terrain_detail so its RAE_TERRAIN_*
-# constants are in scope for the material ramps.
-func terrainSplatWgsl(cache: view GbufferCache) ret String {
-  let islandSrc: String = islandParamsWgsl()
-  let noiseSrc: String = gbReadWgsl(path: "lib/noise.wgsl")
-  let biomeSrc: String = gbReadWgsl(path: "lib/world_biome.wgsl")
-  let paletteSrc: String = terrainPaletteWgsl(cache: cache)
-  let grassSrc: String = terrainGrassStyleWgsl(cache: cache)
-  let detailSrc: String = gbReadWgsl(path: "lib/terrain_detail.wgsl")
-  let terrSrc: String = gbReadWgsl(path: "lib/terrain_splat.wgsl")
-  ret islandSrc.concat(other: noiseSrc).concat(other: "\n").concat(other: biomeSrc).concat(
-    other: "\n"
-  ).concat(other: paletteSrc).concat(other: "\n").concat(other: grassSrc).concat(other: "\n").concat(
-    other: detailSrc
-  ).concat(other: "\n").concat(other: terrSrc)
 }
 
 func ensureTerrainPipeline(cache: mod GbufferCache, resources: mod GpuResources) {
   if not cache.terrainPipeMade {
     cache.terrainPipeMade = true
-    let composed: String = terrainSplatWgsl(cache: cache)
-    cache.terrainPipeline = createGbufferPipeline(
-      resources: resources
-      wgsl: composed
-      stride: 32
-      attributes: gbufferStaticAttributes()
-    )
+    if cache.terrainShaderSet {
+      cache.terrainPipeline = createGbufferPipeline(
+        resources: resources
+        shader: cache.terrainShader
+        constants: islandConstants()
+        stride: 32
+        attributes: gbufferStaticAttributes()
+      )
+    } else {
+      let terrainShader: Shader = defaultTerrainShader()
+      cache.terrainPipeline = createGbufferPipeline(
+        resources: resources
+        shader: terrainShader
+        constants: islandConstants()
+        stride: 32
+        attributes: gbufferStaticAttributes()
+      )
+    }
   }
   # A bind group from the TERRAIN pipeline's own layout (wgpu auto-layouts are
   # pipeline-exclusive, so the static bind group can't be reused) — frame uniform

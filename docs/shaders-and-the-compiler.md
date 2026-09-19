@@ -186,30 +186,64 @@ headless device and call `wgpuDeviceCreateShaderModule` (a 30 MB dylib in the
 compiler and a GPU at build time — no); Google's `tint` (equivalent, but wgpu
 is what actually runs our shaders, so naga's verdict is the one that matters).
 
-## Migration
+## Migration (done 2026-09-19)
 
-Thirteen lib modules compose shaders through `gbReadWgsl` (Gbuffer, GbufferSprite,
-GbufferTerrain, GbufferUnderwater, Gpu2dCanvas / -Image / -Text, GrassCompute,
-NoiseWgsl, TransparentForward, water/WaterFft, water/WaterReadback,
-water/WaterSystem) and five runtime C files carry or read shader text
-(runtime_gpu2d_box / _image / _text, runtime_gpu3d_gbuffer, and the deferred
-lighting shader as a C string in runtime_gpu3d_deferred.c). The migration
-moves each to a `shader(...)` declaration; the C-string shaders move into
-`.wgsl` files under `lib/` so they are validated like the rest. The island
-params become `override` constants; the terrain palette becomes a part the app
-lists. `rae_ext_rae_gb_read_shader` and `gbReadWgsl` are deleted at the end —
-the runtime reads no shader from disk.
+Every shader the deferred renderer, the 2D canvas, the water and the grass use
+is now a declared composition, and the runtime opens no `.wgsl` file:
+
+- **Pipeline creators take a `view Shader`.** `createComputePipeline`,
+  `createRenderPipeline`, `createDepthPipeline` (lib/gpu), `createGbufferPipeline`
+  and `createFullscreenPipeline` (lib/Gbuffer*) take `shader: view Shader`;
+  `createComputePipelineWithConstants` / `createRenderPipelineWithConstants`
+  add `constants: view List(ShaderConstant)` — the `override` values, passed
+  through as `WGPUConstantEntry` on the compute / vertex / fragment stage.
+  The text primitives survive as `create*PipelineSource(wgsl: view String, …)`
+  for a program that genuinely builds WGSL at run time (the `zz_gpu_*`
+  self-tests); `Gpu.kernelShader(shader:, entry:)` is the compute wrapper's
+  form. `ShaderConstant { name, value }` and `noShaderConstants()` are core.
+- **Runtime parameters are `override`s.** `world_biome.wgsl` declares
+  `override RAE_BIOME_ISLAND_RADIUS: f32 = 60.0;` / `…FALLOFF = 22.0;`;
+  `WorldBiome.islandConstants()` hands the values to the terrain and grass
+  pipelines at creation (`islandParamsWgsl` is gone), so their composed text
+  is static and validated.
+- **An app's palette is a part it lists.** `rendererSetTerrainShader(renderer:,
+  shader:)` / `terrainSetShader` take the app's own six-part terrain
+  composition (its `assets/terrain_palette.wgsl` + `assets/terrain_grass.wgsl`
+  in place of the lib parts — example 114); the by-path setter
+  `rendererSetTerrainPalette` and the cwd-relative `assets/` probe are gone.
+  The grass pass's `surfaceShader` text became `grassSetComputeShader(grass:,
+  shader:)`, a declared composition ending in `lib/grass_compute.wgsl`.
+- **The lib compositions** (GbufferSprite, GbufferTerrain, GbufferUnderwater,
+  Gpu2dCanvas / -Image / -Text, GrassCompute, TransparentForward,
+  water/WaterFft, water/WaterReadback, water/WaterSystem) are `shader(files:)`
+  declarations inside the function that creates the pipeline; `NoiseWgsl.rae`
+  is gone (examples 107/108 declare `["lib/noise.wgsl", "raymarch.wgsl"]`).
+- **The C-string shaders are files.** The thirteen WGSL strings the runtime
+  kept (`rae_gb_*_wgsl`, `rae_sm_wgsl_*`) were extracted through the real C
+  preprocessor into `lib/gbuffer_static.wgsl`, `gbuffer_skinned.wgsl`,
+  `gbuffer_inspect.wgsl`, `gbuffer_sdf.wgsl`, `deferred_light.wgsl`,
+  `deferred_ao.wgsl`, `deferred_taa.wgsl`, `deferred_composite.wgsl`,
+  `deferred_pyramid_from_depth.wgsl`, `deferred_pyramid_reduce.wgsl`,
+  `shadow_static.wgsl`, `shadow_skinned.wgsl`, `shadow_sdf.wgsl`, with the
+  shared blocks factored into parts — `lib/gbuffer_octahedral.wgsl` (the normal
+  encode, composed before every G-buffer reader/writer) and
+  `lib/sky_hosek.wgsl` (composed before `deferred_light.wgsl`). The accessors,
+  their stubs and `runtime_gpu3d_gbuffer_sdf.c` are deleted.
+- **What is left in C:** the LEGACY forward renderer (`runtime_gpu3d.c` and
+  its skin / sdf / sky / ssao files) still creates its own pipelines in C from
+  its own strings (`G3D_SHADOW_FN_WGSL`, `runtime_sky_wgsl.h`); it is not the
+  supported renderer and is untouched. `rae_ext_rae_gb_read_shader` became
+  `rae_ext_rae_read_asset`, the stdlib asset reader for `.raescene` files and
+  the sky dataset — no shader goes through it. The WASM preload list no
+  longer carries `lib/noise.wgsl`.
 
 The sibling game projects compose the same lib shaders; they migrate by
-replacing their `gbReadWgsl` calls the same way, and from then on a lib file
-that drifts from its neighbour fails *their* build instead of their first
-frame.
+declaring their compositions the same way (their terrain palette through
+`rendererSetTerrainShader`, their grass surface through
+`grassSetComputeShader`), and from then on a lib file that drifts from its
+neighbour fails *their* build instead of their first frame.
 
 ## Queue
 
-The compile-time construct, validation, embedding, watch inputs and naga in
-the toolchain setup are built (2026-09-19). Still queued: the `override`
-constants in the pipeline creators and the lib/renderer migration (the
-pipeline creators still take a `String`; a lib module composes with
-`gbReadWgsl` until it migrates). The in-process swap is documented above and
-not queued.
+Everything above is built (2026-09-19). The in-process swap is documented
+above and not queued.

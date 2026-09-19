@@ -7,10 +7,11 @@ ambient BRDF remains in place.
 
 ## Material hook
 
-The existing two-argument `rendererSetTerrainPalette(renderer:, path:)` keeps
-its behaviour. Its three-argument overload also accepts `grassStylePath:`.
-An empty style path selects `lib/terrain_grass.wgsl`, which reproduces the
-original scalar grass variation. A supplied file defines:
+The app declares its own terrain composition and hands it to
+`rendererSetTerrainShader(renderer:, shader:)` (docs/shaders-and-the-compiler.md):
+the six lib parts with its own `assets/terrain_palette.wgsl` and, optionally,
+its own grass style in place of `lib/terrain_grass.wgsl` (which reproduces the
+original scalar grass variation). A grass-style part defines:
 
 ```wgsl
 fn terrainGrassColor(position: vec2<f32>, variation: f32) -> vec3<f32>

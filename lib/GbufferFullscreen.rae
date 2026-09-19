@@ -41,16 +41,12 @@ func fullscreenPipelineSpec(format: copy Int32) ret RenderPipelineSpec {
 
 func createFullscreenPipeline(
   resources: mod GpuResources
-  wgsl: view Buffer(Any)
+  shader: view Shader
   format: copy Int32
 ) ret RenderPipelineId {
-  var source: String = ""
-  unsafe {
-    source = String.fromCStr(s: wgsl)
-  }
   if let pipeline: RenderPipelineId = createRenderPipeline(
     resources: resources
-    wgsl: source
+    shader: shader
     vertexEntry: "vs"
     fragmentEntry: "fs"
     spec: fullscreenPipelineSpec(format: format)

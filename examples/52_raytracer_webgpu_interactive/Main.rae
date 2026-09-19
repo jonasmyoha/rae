@@ -59,7 +59,7 @@ func sceneFloats(cam: view Camera, world: view List(Sphere)) ret List(Float) {
 # (Re)create all GPU buffers + the kernel for a given pixel count. Gpu.reset()
 # frees the previous set first, so resizing doesn't leak handles.
 func buildGpuRT(
-  wgsl: view String
+  wgsl: view Shader
   scene: view List(Float)
   params: view List(Int)
   pixels: view Int
@@ -70,11 +70,9 @@ func buildGpuRT(
     accumBuf: Gpu.allocF32(count: pixels * 4)
     outBuf: Gpu.allocU32(count: pixels)
     paramsBuf: Gpu.uniformU32(data: params.data, count: 8)
-    kernel: Gpu.kernel(wgsl: wgsl, entry: "main")
+    kernel: Gpu.kernelShader(shader: wgsl, entry: "main")
   }
 }
-
-func rae_ext_rae_sys_read_file(path: String) unsafe extern ret String
 
 func main() {
   unsafe {
@@ -96,9 +94,7 @@ func main() {
       z: Math.sin(x: pitch)
     )
 
-    let wgsl: String = rae_ext_rae_sys_read_file(
-      path: "examples/52_raytracer_webgpu_interactive/accum.wgsl"
-    )
+    let wgsl: Shader = shader(files: ["accum.wgsl"])
 
     Sdl3.initWindow(
       width: 1280

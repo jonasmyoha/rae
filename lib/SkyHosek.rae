@@ -151,8 +151,8 @@ func readChannel(
 # extern for the same reason. `rae_sys_read_file_text` is not a substitute — it
 # takes a byte RANGE, so it reads nothing without a length.
 # The dataset is a stdlib asset (lib/data/...), so it goes through the
-# toolchain-aware reader like the stdlib shaders and scenes (#937).
-func nativeHosekReadFile(path: String) unsafe extern("rae_ext_rae_gb_read_shader") ret String
+# toolchain-aware asset reader like the stdlib scenes (#937).
+func nativeHosekReadFile(path: String) unsafe extern("rae_ext_rae_read_asset") ret String
 
 func loadHosekDataset(path: view String) pub ret HosekDataset {
   unsafe {

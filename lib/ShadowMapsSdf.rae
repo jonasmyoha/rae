@@ -46,8 +46,6 @@ const shadowSdfSlots: Int = 32  # shadowMaxCascades * shadowSdfMaxClusters
 
 const shadowSdfFar: Float = 1000000000.0  # an "unset" AABB bound
 
-func nativeSmWgslSdf() unsafe extern("rae_sm_wgsl_sdf") ret Buffer(Any)
-
 type ShadowSdfCache {
   pipeMade: Bool
   pipeline: RenderPipelineId
@@ -110,13 +108,10 @@ func ensureShadowSdfObjects(sdf: mod ShadowSdfCache, resources: mod GpuResources
     ret
   }
   sdf.pipeMade = true
-  var source: String = ""
-  unsafe {
-    source = String.fromCStr(s: nativeSmWgslSdf())
-  }
+  let sdfShader: Shader = shader(files: ["lib/shadow_sdf.wgsl"])
   if let pipeline: RenderPipelineId = createDepthPipeline(
     resources: resources
-    wgsl: source
+    shader: sdfShader
     vertexEntry: "vs"
     spec: sdfCasterPipelineSpec()
   ) {

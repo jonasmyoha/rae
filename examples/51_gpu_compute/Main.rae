@@ -7,9 +7,6 @@
 import Io
 import Gpu
 
-# Raw file read (plain String) — avoids the opt-String/none codegen bug.
-func rae_ext_rae_sys_read_file(path: String) unsafe extern ret String
-
 func main() {
   unsafe {
     let n: Int = 1024
@@ -21,11 +18,11 @@ func main() {
       i = i + 1
     }
 
-    let wgsl: String = rae_ext_rae_sys_read_file(path: "examples/51_gpu_compute/square.wgsl")
+    let wgsl: Shader = shader(files: ["square.wgsl"])
 
     let inBuf: Int = Gpu.storageF32(data: input.data, count: n)
     let outBuf: Int = Gpu.allocF32(count: n)
-    let kernel: Int = Gpu.kernel(wgsl: wgsl, entry: "main")
+    let kernel: Int = Gpu.kernelShader(shader: wgsl, entry: "main")
 
     let bufs: List(Int) = List.create(Int, cap: 2)
     bufs.add(value: inBuf)

@@ -2606,19 +2606,19 @@ static bool emcc_link_c_to_web(const char* entry_rae_file,
   /* Shared data the STDLIB reads at runtime, by cwd-relative path. A browser
    * bundle preloading only the example's own assets/ leaves every one of these
    * missing, and each fails quietly in its own way: the settings dialog and
-   * camera bar refuse to mount (their .raescene is not there), a Hosek sky
-   * cooks from an empty table, and the noise shader comes back blank. That is
-   * why 111 and 112 rendered a scene in Chrome but an empty settings panel.
+   * camera bar refuse to mount (their .raescene is not there) and a Hosek sky
+   * cooks from an empty table. That is why 111 and 112 rendered a scene in
+   * Chrome but an empty settings panel. Shaders are NOT on this list: a
+   * `shader(files:)` composition is embedded at build (shader_compose.h).
    *
    * Mapped to the SAME path they are read from, so lib code needs no notion of
    * running in a browser. Anything absent is skipped rather than failing the
    * build -- a project that uses none of this should not have to have lib/. */
   static const char* lib_runtime_paths[] = {
     "lib/app3d/scenes",
-    "lib/data",
-    "lib/noise.wgsl"
+    "lib/data"
   };
-  char preload_lib[3][PATH_MAX * 2 + 4];
+  char preload_lib[2][PATH_MAX * 2 + 4];
   int preload_lib_count = 0;
   snprintf(runtime_c, sizeof(runtime_c), "%s/rae_runtime.c", RAE_RUNTIME_SOURCE_DIR);
   snprintf(shell_html, sizeof(shell_html), "%s/web_shell.html", RAE_RUNTIME_SOURCE_DIR);

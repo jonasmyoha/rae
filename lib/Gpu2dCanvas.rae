@@ -56,8 +56,6 @@ func nativeG2dXform(out: view Buffer(Float)) unsafe extern("rae_g2d_xform")
 # The clip stack stays C (behind the stateless pushClipRect/popClipRect, see
 # #913): C fills a run's 8-float clip uniform and sets the scissor on the pass
 # the canvas hands it.
-func nativeG2dBoxReadFile(path: String) unsafe extern("rae_ext_rae_gb_read_shader") ret String
-
 # CPU image decode stays C (stb_image): a malloc'd RGBA8 buffer + its size,
 # freed with g2dDecodeFree once uploaded. A failed decode logs once in C and
 # returns null.
@@ -310,23 +308,14 @@ func ensureBoxPipeline(canvas: mod Gpu2dCanvas, resources: mod GpuResources) {
   canvas.pipeMade = true
   # Read relative to the working directory like every lib/*.wgsl asset (the
   # example gates run from the repo root). An empty read must not reach wgpu.
-  var source: String = ""
-  unsafe {
-    source = nativeG2dBoxReadFile(path: "lib/gpu2d_box.wgsl")
-  }
-  if source.length() is 0 {
-    log(
-      "[gpu2d] lib/gpu2d_box.wgsl not readable from the working directory — run from the repo root; 2D boxes are skipped"
-    )
-    ret
-  }
+  let boxShader: Shader = shader(files: ["lib/gpu2d_box.wgsl"])
   var format: Int = 0
   unsafe {
     format = nativeG2dBoxFormat()
   }
   if let pipeline: RenderPipelineId = createRenderPipeline(
     resources: resources
-    wgsl: source
+    shader: boxShader
     vertexEntry: "vs"
     fragmentEntry: "fs"
     spec: boxPipelineSpec(format: format as Int32)

@@ -136,10 +136,11 @@ func main() ret Int {
             size: 64
             usage: WGPUBufferUsage_MapRead + WGPUBufferUsage_CopyDst
           ) {
-            if let pipeline: PipelineId = createComputePipeline(
+            if let pipeline: PipelineId = createComputePipelineSource(
               resources: resources
               wgsl: shaderSource()
               entryPoint: "main"
+              constants: noShaderConstants()
             ) {
               let buffers: List(BufferId) = List.create(BufferId, cap: 2)
               buffers.add(value: uniform)

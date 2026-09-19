@@ -75,6 +75,14 @@
 #   rae_g3d_set_shadow_inputs(ubuf, view, sampler) hands the FORWARD scene / skin binds the three
 #   inputs BORROWED (the Renderer3d pushes them before its scene pass; C rebuilds the binds on change)
 #   and rae_gb_deferred_prepare is the device/surface check only — for the record.)
+# (shaders, 2026-09-19: every deferred-renderer WGSL that C kept as a string — rae_gb_{wgsl,skin_wgsl,
+#   view_wgsl,sdf_wgsl,composite_wgsl,ao_wgsl,light_wgsl,taa_wgsl,pyr_from_depth_wgsl,pyr_reduce_wgsl}
+#   and rae_sm_wgsl_{static,skinned,sdf} — is now a lib/*.wgsl file declared with `shader(files:)` in
+#   its Rae module, composed + validated with naga at build and embedded (docs/shaders-and-the-compiler.md);
+#   the accessors and rae_ext_rae_gb_read_shader are gone (the stdlib asset reader is
+#   rae_ext_rae_read_asset, for .raescene / sky data only). The LEGACY forward renderer
+#   (runtime_gpu3d*.c: scene, skin, sdf, sky, ssao) still builds its own pipelines in C from its own
+#   strings — for the record.)
 # (#922 slice b-i: the deferred METABALL clusters are Rae manager objects on the GbufferCache
 #   (lib/GbufferSdf.rae: pipeline over the C-kept rae_gb_sdf_wgsl, frame uniform from the cache's frame
 #   data — inverse of the JITTERED viewProj computed in Rae — per-cluster ball/colour/param buffers +

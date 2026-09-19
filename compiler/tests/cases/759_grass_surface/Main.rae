@@ -1,12 +1,22 @@
+# The grass compute shader is a DECLARED composition (docs/shaders-and-the-
+# compiler.md): the lib default lists noise + biome + the grass pass, and an
+# app supplies its own surface as a composition of its own, set whole. The
+# island size is no longer text in the shader — it is an `override` pair
+# handed to the pipeline (WorldBiome.islandConstants).
 import GrassCompute
+import WorldBiome
 
 func main() ret Int {
-  let custom: String = GrassCompute.wgsl(surfaceShader: "customSurfaceMarker")
-  log(custom.startsWith(prefix: "customSurfaceMarker"))
-  log(not custom.contains(sub: "RAE_BIOME_ISLAND_RADIUS"))
-  let standard: String = GrassCompute.wgsl(surfaceShader: "")
-  log(standard.contains(sub: "RAE_BIOME_ISLAND_RADIUS"))
-  let grassCompute: GrassCompute = GrassCompute.createGrassCompute()
-  log(grassCompute.surfaceShader.length() is 0)
+  let standard: Shader = GrassCompute.defaultGrassComputeShader()
+  log(standard.text.contains(sub: "override RAE_BIOME_ISLAND_RADIUS"))
+  log(standard.text.contains(sub: "// --- lib/grass_compute.wgsl"))
+  log(standard.sources.length() is 3)
+  let constants: List(ShaderConstant) = WorldBiome.islandConstants()
+  log(constants.length() is 2)
+  var grassCompute: GrassCompute = GrassCompute.createGrassCompute()
+  log(not grassCompute.computeShaderSet)
+  GrassCompute.grassSetComputeShader(grass: grassCompute, shader: standard)
+  log(grassCompute.computeShaderSet)
+  log(grassCompute.computeShader.sources.length() is 3)
   ret 0
 }

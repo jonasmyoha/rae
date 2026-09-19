@@ -57,11 +57,6 @@ func gbOffscreenH() ret Int {
 # ----- render pipelines + WGSL shader modules (#503) -------------------------
 # The shaders stay as source: C exposes the WGSL text + entry-point names, Rae
 # builds the modules and pipelines over the bindings.
-func gbWgsl() unsafe extern("rae_gb_wgsl") ret Buffer(Any)
-
-func gbSkinWgsl() unsafe extern("rae_gb_skin_wgsl") ret Buffer(Any)
-
-func nativeGbReadWgsl(path: String) unsafe extern("rae_ext_rae_gb_read_shader") ret String
 
 # One G-buffer render pipeline spec: the shared 3 colour targets + reverse-Z
 # depth (write, Greater), back-face culled, over the caller's vertex layout.
@@ -91,4 +86,3 @@ func gbufferPipelineSpec(
 # The metaball cluster shader (#392): its WGSL stays C source like every
 # other shader; the pipeline, uniforms, buffers and binds are the Rae
 # SdfPassCache's (GbufferSdf.rae, #922).
-func gbSdfWgsl() unsafe extern("rae_gb_sdf_wgsl") ret Buffer(Any)
