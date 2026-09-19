@@ -2024,6 +2024,10 @@ static AstModule merge_module_graph(const ModuleGraph* graph) {
     }
     // Copy the declaration list head
     AstDecl* current = node->module->decls;
+    // A module with no declarations (only directives / comments) contributes
+    // nothing to the merged list; splicing its NULL head would leave `tail`
+    // unset and crash on the next module.
+    if (!current) continue;
     if (!head) {
       head = current;
     } else {

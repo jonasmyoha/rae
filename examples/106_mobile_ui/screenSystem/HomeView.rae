@@ -1,97 +1,36 @@
 open ui/Ecs
-# Home-tab world composition — SCENE-DRIVEN since #213. The page
-# skeleton (root padding/gap, "Recently played" header text + action,
-# strip and grid containers) is authored in
-# assets/scenes/Home.raescene; this module keeps only what a template
-# cannot express:
-#   * data extraction (album keys, history entries, settings flags)
-#   * list materialisation (recent thumbs; the cover grid is a CoverGrid
-#     component driven by CoverGridSystem)
-#   * runtime state wiring (has-history visibility); the scroll is the
-#     Body's authored `ScrollRoot` (lib/ui/scrollRootSystem)
+# Home tab — SCENE-DRIVEN. assets/scenes/Home.raescene owns the page: the
+# "Recently played" header + strip and the cover grid, both data lists
+# (`ListView` + `ListSource`, #996) the app's listSourceSystem feeds. The
+# page is mounted by the one `mountScreenPage` from its ScreenPage row; the
+# scroll is the Body's authored `ScrollRoot` (lib/ui/scrollRootSystem).
+# Tapping any tile fires `album.open` (same path as the Library tiles); the
+# header's `nav.history` action is authored in the scene.
 #
-# Tapping any tile fires `album.open` (same path as the Library
-# tiles); the header's `nav.history` action is authored in the scene.
-#
-# The cover grid's rows are materialised by CoverGridSystem (#975) from the
-# `CoverGrid` component authored on the scene's CoverGrid node.
-import Files
+# What a scene cannot express is one binding component: `HasHistory` on the
+# "Recently played" header and strip — shown only while the play history has
+# entries (layout skips inactive children, so an empty history collapses the
+# section). `hasHistorySystem` below writes `Active` from the history.
 import ui/Components
-import ui/layoutSystem/LayoutSystem
-import ui/Scene
 open ecs/Entity
-open ui/SceneInstance
 open ecs/ComponentTable
-open ui/renderSystem/RenderSystem
 
-# Mount the Home page from its scene template, then run the data
-# adapters over the mounted nodes. Node ids referenced here must
-# exist in Home.raescene: Body / RecentlyPlayedHeader /
-# RecentlyPlayedStrip / CoverGrid.
-func mountHomePage(
-  world: mod UiWorld
-  scenes: view AlbumScenes
-  state: view AppState
-  playback: view PlaybackState
-  viewport: view Viewport
-) pub ret EntityId {
-  let scene: view Scene => scenes.home
-  let overrides: List(SceneOverride) = emptyOverrides()
-  let pageIdCopy: String = "{homePageId}"
-  let homeLabel: String = "Home"
-  let mount: EntityId = mountPageOrError(
-    world: world
-    pageId: own pageIdCopy
-    scene: scene
-    overrides: overrides
-    w: viewport.areaDuW
-    h: viewport.areaDuH
-    sceneLabel: homeLabel
-    subScenes: scenes.subScenes
-  )
-  # Reserve the notch at the top edge; safeAreaSystem folds the active
-  # device preset's inset in. Applied here (not just in buildAppWorld)
-  # so an in-place re-mount keeps the tag.
-  attachSafeAreaEdges(
-    world: world
-    entity: mount
-    top: 1.0
-    bottom: 0.0
-  )
-
-  # Recently played: visibility is data-driven (layout skips inactive
-  # children, so an empty history collapses the section exactly like
-  # the old builder that simply didn't create it).
-  let hasRecent: Bool = state.playHistory.entries.length > 0
-  if let headerRaw: Int = findNodeInPage(
-    world: world
-    pageId: homePageId
-    nodeId: "RecentlyPlayedHeader"
-  ) {
-    let header: EntityId = nodeEntity(world: world, index: headerRaw)
-    let headerActive: Active = { value: hasRecent }
-    componentSet(this: world.actives, entity: header, data: headerActive)
+# Every `HasHistory`: Active follows "the play history has entries", keyed on
+# the history revision so an idle frame writes nothing.
+func hasHistorySystem(world: mod UiWorld, state: view AppState) pub {
+  let revision: Int = state.playHistory.revision
+  let hasEntries: Bool = state.playHistory.entries.length > 0
+  let n: Int = componentCount(this: world.hasHistories)
+  var i: Int = 0
+  loop i < n {
+    let entity: EntityId = componentEntityAt(this: world.hasHistories, i: i)
+    let binding: HasHistory = componentDataAt(this: world.hasHistories, i: i)
+    if binding.builtRevision is not revision {
+      let active: Active = { value: hasEntries }
+      componentSet(this: world.actives, entity: entity, data: active)
+      let built: HasHistory = { builtRevision: revision }
+      componentSet(this: world.hasHistories, entity: entity, data: built)
+    }
+    i = i + 1
   }
-  if let stripRaw: Int = findNodeInPage(
-    world: world
-    pageId: homePageId
-    nodeId: "RecentlyPlayedStrip"
-  ) {
-    let strip: EntityId = nodeEntity(world: world, index: stripRaw)
-    let stripActive: Active = { value: hasRecent }
-    componentSet(this: world.actives, entity: strip, data: stripActive)
-  }
-
-  # The cover grid and the recently-played strip are data lists: the scene's
-  # nodes carry a `ListView` + `ListSource` (#996) and listSourceSystem fills
-  # their rows. Fill now so the screen-switch hero capture right after this
-  # mount finds the tiles.
-  listSourceSystem(
-    world: world
-    state: state
-    playback: playback
-    scenes: scenes
-  )
-
-  ret mount
 }

@@ -71,37 +71,6 @@ func createSpotifyState() pub ret SpotifyState {
   }
 }
 
-# Replace a node's Text.text in place. Walks the page-scoped nodeIds
-# lookup; no-op when the node isn't in the world (e.g. NowPlaying not
-# currently mounted).
-func updateNodeText(
-  world: mod UiWorld
-  pageId: view String
-  nodeId: view String
-  value: view String
-) {
-  var raw: Int = -1
-  if let value: Int = findNodeInPage(world: world, pageId: pageId, nodeId: nodeId) {
-    raw = value
-  } else {
-    ret
-  }
-  let entity: EntityId = nodeEntity(world: world, index: raw)
-  if componentHas(this: world.texts, entity: entity) is false {
-    ret
-  }
-  # Compare BEFORE taking the mod ref: componentMod bumps the table
-  # generation eagerly (it cannot see whether the caller writes), so an
-  # unconditional "update" to an unchanged string marks the render cache
-  # dirty and costs a full repaint. This runs on every poll by design.
-  let cur: view Text => componentView(this: world.texts, entity: entity)
-  if cur.text is value {
-    ret
-  }
-  let slot: mod Text => componentMod(this: world.texts, entity: entity)
-  slot.text = "{value}"
-}
-
 # Compute the History row's texture key for a Spotify entry and, when the
 # artwork isn't cached yet, kick off (or reuse) a background download for
 # it — NEVER blocks the caller (#968; this used to call the blocking
@@ -335,27 +304,9 @@ func pollSpotify(
   }
   # Text updates run every poll — cheap, and handles the "user
   # paused/resumed in Spotify directly" case without extra logic.
-  let nowPlayingPage: String = "player"
   trackTextWriteAll(world: world, title: track.trackName, artist: track.artistName)
-  # Sync the M:SS time labels too. The scene mount path baked these
-  # from the LOCAL track at boot, so without this refresh they show
-  # the wrong duration in Spotify mode.
-  let posMs: Int = (pos * 1000.0).toInt()
-  let durMs: Int = (dur * 1000.0).toInt()
-  let nowStr: String = formatDurationMs(ms: posMs)
-  let totalStr: String = formatDurationMs(ms: durMs)
-  updateNodeText(
-    world: world
-    pageId: nowPlayingPage
-    nodeId: "TimeNow"
-    value: nowStr
-  )
-  updateNodeText(
-    world: world
-    pageId: nowPlayingPage
-    nodeId: "TimeTotal"
-    value: totalStr
-  )
+  # The M:SS time labels are `TrackText` time bindings on the mirrored
+  # playback position / duration above — nothing to write here.
   # Track-change → re-fetch artwork. Compare trackId, not artworkUrl
   # (Spotify sometimes reports a slightly different art URL between
   # polls for the same track during playback).

@@ -30,16 +30,9 @@ func refreshMountedUi(
   reg: view TextureRegistry
 ) pub ret UiRefreshResult {
   let oldHistory: Int = cache.historyRevision
-
-  cache.historyRevision = refreshHistoryViewsIfNeeded(
-    world: world
-    scenes: scenes
-    state: state
-    playback: playback
-    visible: visible
-    cachedRevision: cache.historyRevision
-    viewport: viewport
-  )
+  cache.historyRevision = state.playHistory.revision
+  # The Home "Recently played" section follows the history in place.
+  hasHistorySystem(world: world, state: state)
   # #981: play icon, cover, heart and track text follow playback / the
   # browsed track through their binding components.
   let playbackChanged: Bool = playbackBindingsSystems(

@@ -1,0 +1,50 @@
+open ui/Ecs
+# The ONE page mounter. Every screen page is a `ScreenPage` row
+# (ScreenRouter.createScreenPages) whose scene lives in `AlbumScenes.pages`
+# under the page id; this mounts it — one `mountPageOrError` — and nothing
+# else. What the seven per-page mounters used to add by hand is data now:
+# the safe-area reserve and the centred extent are the scene root's authored
+# `SafeArea` / `ExtentAnchor`, the scroll is its authored `ScrollRoot`, and
+# every value that comes from app state (the lists, the profile stats, the
+# album header, the playback texts and times, the recently-played gate) is a
+# binding component its system writes in the frame's observation step
+# before the first paint — a fresh mount needs no "first run".
+open ui/Scene
+open ecs/Entity
+open ui/SceneInstance
+
+func mountScreenPage(
+  world: mod UiWorld
+  page: view ScreenPage
+  scenes: view AlbumScenes
+  viewport: view Viewport
+) ret EntityId {
+  let pageIdCopy: String = "{page.pageId}"
+  let overrides: List(SceneOverride) = emptyOverrides()
+  let sceneIndex: Int = sceneRegistryIndex(reg: scenes.pages, key: page.pageId)
+  if sceneIndex < 0 {
+    log("[scene-error] no page scene registered for {page.pageId}")
+    let missing: Scene = parseScene(source: "")
+    ret mountPageOrError(
+      world: world
+      pageId: own pageIdCopy
+      scene: missing
+      overrides: overrides
+      w: viewport.areaDuW
+      h: viewport.areaDuH
+      sceneLabel: page.label
+      subScenes: scenes.subScenes
+    )
+  }
+  let scene: view Scene => sceneRegistryGet(reg: scenes.pages, idx: sceneIndex)
+  ret mountPageOrError(
+    world: world
+    pageId: own pageIdCopy
+    scene: scene
+    overrides: overrides
+    w: viewport.areaDuW
+    h: viewport.areaDuH
+    sceneLabel: page.label
+    subScenes: scenes.subScenes
+  )
+}

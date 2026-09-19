@@ -21,22 +21,17 @@ type AlbumScenes {
   # The SUB-scene registry, keyed by sceneId: what a `SceneInstance` node in
   # any page scene instances (`TopBar`, `NavTab`; resolved by
   # mountPageOrError, #978) and what the ListView system mounts per pooled
-  # row (`HistoryRow`, #964). The page scenes below are named fields (see
-  # the List(Scene) note above).
+  # row (`HistoryRow`, #964).
   subScenes: SceneRegistry
+  # The PAGE scenes, keyed by page id: the one `mountScreenPage` looks a
+  # `ScreenPage` row's scene up in (screenSystem/ScreenPageMount).
+  pages: SceneRegistry
   trackRow: Scene
   miniPlayer: Scene
   dock: Scene
   backButton: Scene
-  nowPlaying: Scene
-  album: Scene
   canvas: Scene
   bottomSheet: Scene
-  home: Scene
-  profile: Scene
-  library: Scene
-  search: Scene
-  history: Scene
 }
 
 func loadSubScenes() ret SceneRegistry {
@@ -57,21 +52,27 @@ func loadSubScenes() ret SceneRegistry {
   ret subScenes
 }
 
+func loadPageScenes() ret SceneRegistry {
+  var pages: SceneRegistry = createSceneRegistry()
+  registerScene(reg: pages, key: "{homePageId}", scene: loadSceneFile(path: homePath))
+  registerScene(reg: pages, key: "{libraryPageId}", scene: loadSceneFile(path: libraryPath))
+  registerScene(reg: pages, key: "{albumPageId}", scene: loadSceneFile(path: albumPath))
+  registerScene(reg: pages, key: "{playerPageId}", scene: loadSceneFile(path: nowPlayingPath))
+  registerScene(reg: pages, key: "{searchPageId}", scene: loadSceneFile(path: searchPath))
+  registerScene(reg: pages, key: "{profilePageId}", scene: loadSceneFile(path: profilePath))
+  registerScene(reg: pages, key: "{historyPageId}", scene: loadSceneFile(path: historyPath))
+  ret pages
+}
+
 func loadAllScenes() pub ret AlbumScenes {
   ret AlbumScenes {
     subScenes: loadSubScenes()
+    pages: loadPageScenes()
     trackRow: loadSceneFile(path: trackRowPath)
     miniPlayer: loadSceneFile(path: miniPlayerPath)
     dock: loadSceneFile(path: dockPath)
     backButton: loadSceneFile(path: backButtonPath)
-    nowPlaying: loadSceneFile(path: nowPlayingPath)
-    album: loadSceneFile(path: albumPath)
     canvas: loadSceneFile(path: canvasPath)
     bottomSheet: loadSceneFile(path: bottomSheetPath)
-    home: loadSceneFile(path: homePath)
-    profile: loadSceneFile(path: profilePath)
-    library: loadSceneFile(path: libraryPath)
-    search: loadSceneFile(path: searchPath)
-    history: loadSceneFile(path: historyPath)
   }
 }

@@ -108,40 +108,12 @@ func saveAppState(path: view String, state: view AppState, playback: view Playba
     # to save winX/winY and never read them back, so the position was written every
     # session and applied never.
     let visible: Screen = visibleScreen(state: state)
-    let tabName: String = screenName(s: state.tab)
-    let screenNameStr: String = screenName(s: visible)
+    let tabName: String = pageLabelForScreen(screen: state.tab)
+    let screenNameStr: String = pageLabelForScreen(screen: visible)
     log(
       "[state] saved tab={tabName} (ord {tabOrdinal}) screen={screenNameStr} (ord {visibleOrdinal})"
     )
   }
-}
-
-# Human-readable name for a Screen enum value. Used by the
-# `[state] saved` log line so a glance at the terminal tells you
-# which page the user was on at save time.
-func screenName(s: view Screen) ret String {
-  if s is Screen.home {
-    ret "Home"
-  }
-  if s is Screen.library {
-    ret "Library"
-  }
-  if s is Screen.album {
-    ret "Album"
-  }
-  if s is Screen.player {
-    ret "Player"
-  }
-  if s is Screen.search {
-    ret "Search"
-  }
-  if s is Screen.profile {
-    ret "Profile"
-  }
-  if s is Screen.history {
-    ret "History"
-  }
-  ret "?"
 }
 
 # ----- restore ------------------------------------------------------

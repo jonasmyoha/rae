@@ -6,7 +6,8 @@ open ui/Ecs
 # Now Playing page share one binding and no page-id lookups: it reads the
 # app / playback state, compares against the component's observed revision
 # or key, and writes the node's Sprite / Text / WidgetState only on a change.
-# They run every frame from `refreshMountedUi` and once at mount.
+# They run every frame from `refreshMountedUi`, before the first paint of a
+# fresh mount too, so a page needs no first run of its own.
 #
 # Layering (docs/ecs-systems-and-data-observation.md §5.2): these OBSERVE
 # the data systems (PlaybackState, the liked playlist, the browsed album)
@@ -114,13 +115,52 @@ func playbackCoverSystem(
         )
         repointSprite(world: world, entity: entity, key: key)
       }
-      let built: PlaybackCover = { builtRevision: playback.nowPlayingRevision }
+      let built: PlaybackCover = {
+        builtRevision: playback.nowPlayingRevision
+        builtRounded: cover.builtRounded
+        roundedRadius: cover.roundedRadius
+      }
       componentSet(this: world.playbackCovers, entity: entity, data: built)
+      changed = true
+    }
+    if playbackCoverCornersSystem(world: world, entity: entity, state: state) {
       changed = true
     }
     i = i + 1
   }
   ret changed
+}
+
+# The cover's authored corner radius follows the rounded-covers setting like
+# every other cover: the first sight keeps the authored radius, a flip to
+# square removes the CornerRadius, a flip back restores it.
+func playbackCoverCornersSystem(
+  world: mod UiWorld
+  entity: view EntityId
+  state: view AppState
+) ret Bool {
+  var cover: PlaybackCover = componentGet(this: world.playbackCovers, entity: entity)
+  var want: Int = 0
+  if state.settings.roundedAlbumCovers {
+    want = 1
+  }
+  if cover.builtRounded is want {
+    ret false
+  }
+  if cover.builtRounded < 0 {
+    if componentHas(this: world.cornerRadiuses, entity: entity) {
+      cover.roundedRadius = componentGet(this: world.cornerRadiuses, entity: entity).radius
+    }
+  }
+  if want is 0 {
+    componentRemove(this: world.cornerRadiuses, entity: entity)
+  } else if cover.roundedRadius > 0.0 {
+    let radius: CornerRadius = { radius: cover.roundedRadius }
+    componentSet(this: world.cornerRadiuses, entity: entity, data: radius)
+  }
+  cover.builtRounded = want
+  componentSet(this: world.playbackCovers, entity: entity, data: cover)
+  ret true
 }
 
 # The heart's declarative visuals: outline/filled glyph and white / warm
@@ -214,9 +254,23 @@ func writeTrackText(world: mod UiWorld, entity: view EntityId, value: view Strin
   slot.text = "{value}"
 }
 
+# A time field's key: the whole second it shows, so the label is rewritten
+# once per second while playing and never at rest.
+func trackTimeKey(binding: view TrackText, playback: view PlaybackState) ret String {
+  if binding.field is "timeNow" {
+    ret "now|{playback.elapsedSec.toInt()}"
+  }
+  ret "total|{playback.durationSec.toInt()}"
+}
+
+func isTrackTimeField(binding: view TrackText) ret Bool {
+  ret binding.field is "timeNow" or binding.field is "timeTotal"
+}
+
 # Every `TrackText`: the title / artist of the browsed track, keyed on
-# stem|index so a same-page track change re-binds in place.
-func trackTextSystem(world: mod UiWorld, state: view AppState) pub {
+# stem|index so a same-page track change re-binds in place; the M:SS
+# position / duration labels from the playback state, keyed on the second.
+func trackTextSystem(world: mod UiWorld, state: view AppState, playback: view PlaybackState) pub {
   let key: String = "{state.currentAlbumStem}|{state.currentTrackIndex}"
   let n: Int = componentCount(this: world.trackTexts)
   var stale: Bool = false
@@ -226,7 +280,11 @@ func trackTextSystem(world: mod UiWorld, state: view AppState) pub {
       this: world.trackTexts
       entity: componentEntityAt(this: world.trackTexts, i: i)
     )
-    if binding.builtKey is not key {
+    if isTrackTimeField(binding: binding) {
+      if binding.builtKey is not trackTimeKey(binding: binding, playback: playback) {
+        stale = true
+      }
+    } else if binding.builtKey is not key {
       stale = true
     }
     i = i + 1
@@ -240,7 +298,19 @@ func trackTextSystem(world: mod UiWorld, state: view AppState) pub {
   loop i < n {
     let entity: EntityId = componentEntityAt(this: world.trackTexts, i: i)
     let binding: TrackText = componentDataAt(this: world.trackTexts, i: i)
-    if binding.builtKey is not key {
+    if isTrackTimeField(binding: binding) {
+      let timeKey: String = trackTimeKey(binding: binding, playback: playback)
+      if binding.builtKey is not timeKey {
+        var seconds: Float = playback.durationSec
+        if binding.field is "timeNow" {
+          seconds = playback.elapsedSec
+        }
+        let label: String = formatDurationMs(ms: (seconds * 1000.0).toInt())
+        writeTrackText(world: world, entity: entity, value: label)
+        let builtTime: TrackText = { field: "{binding.field}", builtKey: "{timeKey}" }
+        componentSet(this: world.trackTexts, entity: entity, data: own builtTime)
+      }
+    } else if binding.builtKey is not key {
       if binding.field is "artist" {
         writeTrackText(world: world, entity: entity, value: album.artist)
       } else {
@@ -262,7 +332,9 @@ func trackTextWriteAll(world: mod UiWorld, title: view String, artist: view Stri
   loop i < n {
     let entity: EntityId = componentEntityAt(this: world.trackTexts, i: i)
     let binding: TrackText = componentDataAt(this: world.trackTexts, i: i)
-    if binding.field is "artist" {
+    if isTrackTimeField(binding: binding) {
+      # The times follow the mirrored playback state through the binding.
+    } else if binding.field is "artist" {
       writeTrackText(world: world, entity: entity, value: artist)
     } else {
       writeTrackText(world: world, entity: entity, value: title)
@@ -295,6 +367,6 @@ func playbackBindingsSystems(
     stem: state.currentAlbumStem
     trackIndex: state.currentTrackIndex
   )
-  trackTextSystem(world: world, state: state)
+  trackTextSystem(world: world, state: state, playback: playback)
   ret iconChanged or coverChanged or heartChanged
 }

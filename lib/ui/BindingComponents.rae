@@ -99,6 +99,13 @@ type HistoryList {
   builtRevision: Int = -1
 }
 
+# A node shown only while the play history has entries (the Home page's
+# "Recently played" header and strip): `hasHistorySystem` writes `Active`
+# from the history, so an empty history collapses the section in layout.
+type HasHistory {
+  builtRevision: Int = -1
+}
+
 # ----- dock: bottom anchoring, layer membership, nav-tab state (#978) ------
 
 # Pins the entity's bottom edge to the layout extent's bottom: the anchor
@@ -167,8 +174,14 @@ type PlaybackIcon {
 
 # Now-playing cover: the Sprite key follows the playing track's art
 # (`nowPlayingRevision` observed); seeded from the browsed album at mount.
+# Its authored `CornerRadius` follows the rounded-covers setting like every
+# other cover: the system keeps the authored radius (`roundedRadius`) and
+# removes / restores the component as the setting flips (`builtRounded`:
+# -1 unseen, 0 square, 1 rounded).
 type PlaybackCover {
   builtRevision: Int = -1
+  builtRounded: Int = -1
+  roundedRadius: Float
 }
 
 # Heart / like button: WidgetState.selected follows the liked playlist
@@ -178,8 +191,9 @@ type LikedHeart {
   styled: Bool = false
 }
 
-# Track text: `field` is "title" or "artist"; the Text follows the browsed
-# album + track (`builtKey` = stem|index).
+# Track text: `field` is "title" or "artist" (the Text follows the browsed
+# album + track, `builtKey` = stem|index), or "timeNow" / "timeTotal" (the
+# M:SS playback position / duration, written whenever the second changes).
 type TrackText {
   field: String = "title"
   builtKey: String
