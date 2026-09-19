@@ -53,6 +53,7 @@ func mountLibraryPage(
   world: mod UiWorld
   scenes: view AlbumScenes
   state: view AppState
+  playback: view PlaybackState
   scrollY: view Float
   viewport: view Viewport
 ) pub ret EntityId {
@@ -88,7 +89,12 @@ func mountLibraryPage(
   }
 
   # First fill now: the screen switch captures the hero tile right after
-  # the mount, before the per-frame system would run.
-  coverGridSystem(world: world, state: state, scenes: scenes)
+  # the mount, before the per-frame system would run (#996).
+  listSourceSystem(
+    world: world
+    state: state
+    playback: playback
+    scenes: scenes
+  )
   ret mount
 }
