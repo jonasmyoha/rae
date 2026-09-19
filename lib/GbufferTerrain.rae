@@ -181,8 +181,31 @@ func terrainPaletteWgsl(cache: view GbufferCache) ret String {
 # cwd-relative `assets/terrain_palette.wgsl` lookup cannot find theirs). Call
 # before the first terrain draw; the pipeline composes the palette once.
 func terrainSetPalette(cache: mod GbufferCache, resources: mod GpuResources, path: view String) {
+  terrainSetPalette(
+    cache: cache
+    resources: resources
+    path: path
+    grassStylePath: ""
+  )
+}
+
+func terrainSetPalette(
+  cache: mod GbufferCache
+  resources: mod GpuResources
+  path: view String
+  grassStylePath: view String
+) {
   cache.terrainPalettePath = "{path}"
+  cache.terrainGrassStylePath = "{grassStylePath}"
   resetTerrainPipeline(cache: cache, resources: resources)
+}
+
+# Read directly through the borrowed path; no temporary owner aliases cache storage.
+func terrainGrassStyleWgsl(cache: view GbufferCache) ret String {
+  if cache.terrainGrassStylePath.length() > 0 {
+    ret gbReadWgsl(path: cache.terrainGrassStylePath)
+  }
+  ret gbReadWgsl(path: "lib/terrain_grass.wgsl")
 }
 
 # Compose the terrain-splat shader from the aligned WGSL files (noise + biome +
@@ -194,13 +217,14 @@ func terrainSplatWgsl(cache: view GbufferCache) ret String {
   let noiseSrc: String = gbReadWgsl(path: "lib/noise.wgsl")
   let biomeSrc: String = gbReadWgsl(path: "lib/world_biome.wgsl")
   let paletteSrc: String = terrainPaletteWgsl(cache: cache)
+  let grassSrc: String = terrainGrassStyleWgsl(cache: cache)
   let detailSrc: String = gbReadWgsl(path: "lib/terrain_detail.wgsl")
   let terrSrc: String = gbReadWgsl(path: "lib/terrain_splat.wgsl")
   ret islandSrc.concat(other: noiseSrc).concat(other: "\n").concat(other: biomeSrc).concat(
     other: "\n"
-  ).concat(other: paletteSrc).concat(other: "\n").concat(other: detailSrc).concat(other: "\n").concat(
-    other: terrSrc
-  )
+  ).concat(other: paletteSrc).concat(other: "\n").concat(other: grassSrc).concat(other: "\n").concat(
+    other: detailSrc
+  ).concat(other: "\n").concat(other: terrSrc)
 }
 
 func ensureTerrainPipeline(cache: mod GbufferCache, resources: mod GpuResources) {

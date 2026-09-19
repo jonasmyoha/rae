@@ -11,7 +11,7 @@
 //
 // Recalibrate the same way as the lib file: render, sample the ground in the
 // screenshot, step each channel toward the target by a damped ratio.
-const RAE_TERRAIN_GRASS: vec3<f32> = vec3<f32>(0.060, 0.290, 0.022);
+const RAE_TERRAIN_GRASS: vec3<f32> = vec3<f32>(0.080, 0.245, 0.015);
 const RAE_TERRAIN_SAND:  vec3<f32> = vec3<f32>(0.380, 0.230, 0.075);
 const RAE_TERRAIN_MUD:   vec3<f32> = vec3<f32>(0.220, 0.130, 0.050);
 const RAE_TERRAIN_PATH:  vec3<f32> = vec3<f32>(0.340, 0.150, 0.040);

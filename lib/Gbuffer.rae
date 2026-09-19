@@ -134,6 +134,7 @@ type GbufferCache {
   # The app's own RAE_TERRAIN_* palette file (GbufferTerrain.terrainSetPalette);
   # "" = the cwd-relative assets/terrain_palette.wgsl, then the lib default.
   terrainPalettePath: String
+  terrainGrassStylePath: String
   meshes: MeshStore  # #905: the static mesh store (vertex/index buffers per MeshHandle)
   skins: SkinStore  # #921: the skinned meshes + the joint palette buffer
   sdf: SdfPassCache  # #922: the metaball clusters' pipeline / uniforms / binds
@@ -175,6 +176,7 @@ func createGbufferCache() pub ret GbufferCache {
       terrainAdopted: List.create(ExternalId, cap: 4)
       terrainBlend: 0.0
       terrainPalettePath: ""
+      terrainGrassStylePath: ""
       meshes: createMeshStore()
       skins: createSkinStore()
       sdf: createSdfPassCache()

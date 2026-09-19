@@ -184,9 +184,25 @@ func ensureRendererResources(renderer: mod DeferredRenderer) pub {
 # RAE_TERRAIN_* albedos recalibrated for this app's grade — see that file). For
 # an app whose cwd is not its project root, which the examples are.
 func rendererSetTerrainPalette(renderer: mod DeferredRenderer, path: view String) {
+  rendererSetTerrainPalette(renderer: renderer, path: path, grassStylePath: "")
+}
+
+# Optional grassStylePath defines terrainGrassColor(position, variation) -> vec3<f32>.
+# It returns linear albedo; shared biome weights, roads and shore blending stay
+# in terrain_detail.wgsl. Empty keeps the original grass variation.
+func rendererSetTerrainPalette(
+  renderer: mod DeferredRenderer
+  path: view String
+  grassStylePath: view String
+) {
   ensureRendererResources(renderer: renderer)
   if let resources: mod GpuResources => renderer.gpuResources {
-    terrainSetPalette(cache: renderer.passes.gbuffer, resources: resources, path: path)
+    terrainSetPalette(
+      cache: renderer.passes.gbuffer
+      resources: resources
+      path: path
+      grassStylePath: grassStylePath
+    )
   }
 }
 
