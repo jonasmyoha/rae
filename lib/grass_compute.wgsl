@@ -64,9 +64,21 @@ fn terrainHeight(x: f32, y: f32, groundZ: f32) -> f32 {
   return raeTerrainHeight(vec2<f32>(x, y), groundZ);
 }
 
-// Blades grow only in the grass biome. Without this they scatter across sand and
-// stand out on open water, since the pass places them on a plain grid.
-const GRASS_MIN_WEIGHT: f32 = 0.45;
+// Blades grow only where the ground LOOKS like grass. The classify weight alone
+// is a near-step at the beach line, but the terrain shader re-splits the
+// sand+grass weight over a wide elevation band (terrain_detail.wgsl, #83) so
+// the beach dissolves into the meadow — and blades placed by the raw weight
+// stood on ground painted as sand. This applies the same band (keep
+// GRASS_SANDGRASS_BLUR equal to RAE_SANDGRASS_BLUR) and asks for a clear
+// majority of grass, so no blade stands on the sand texture.
+const GRASS_MIN_WEIGHT: f32 = 0.70;
+const GRASS_SANDGRASS_BLUR: f32 = 0.10;
+fn grassDrawnWeight(p: vec2<f32>) -> f32 {
+  let s = raeBiomeSample(p);
+  let sandHi = RAE_BIOME_WATER_LEVEL + RAE_BIOME_BEACH_BAND;
+  let sgMix = smoothstep(sandHi - GRASS_SANDGRASS_BLUR, sandHi + GRASS_SANDGRASS_BLUR, s.elevation);
+  return (s.wSand + s.wGrass) * sgMix;
+}
 fn mTranslate(t: vec3<f32>) -> mat4x4<f32> {
   return mat4x4<f32>(vec4<f32>(1.0,0.0,0.0,0.0), vec4<f32>(0.0,1.0,0.0,0.0), vec4<f32>(0.0,0.0,1.0,0.0), vec4<f32>(t.x,t.y,t.z,1.0));
 }
@@ -111,7 +123,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let hs = hash2u(cellI, 43u);
   let bx = cellX + (jx - 0.5) * spacing * 0.9;
   let by = cellY + (jy - 0.5) * spacing * 0.9;
-  if (raeBiomeGrassWeight(vec2<f32>(bx, by)) < GRASS_MIN_WEIGHT) { return; }
+  if (grassDrawnWeight(vec2<f32>(bx, by)) < GRASS_MIN_WEIGHT) { return; }
   let bz = terrainHeight(bx, by, G.a.z);
   let yaw = hp * 6.2831853;
   let hHeight = hash2u(cellI, 61u);

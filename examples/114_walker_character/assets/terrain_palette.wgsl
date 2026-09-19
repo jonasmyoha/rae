@@ -11,11 +11,11 @@
 //
 // Recalibrate the same way as the lib file: render, sample the ground in the
 // screenshot, step each channel toward the target by a damped ratio.
-const RAE_TERRAIN_GRASS: vec3<f32> = vec3<f32>(0.068, 0.255, 0.024);
-const RAE_TERRAIN_SAND:  vec3<f32> = vec3<f32>(0.700, 0.470, 0.190);
-const RAE_TERRAIN_MUD:   vec3<f32> = vec3<f32>(0.300, 0.210, 0.100);
-const RAE_TERRAIN_PATH:  vec3<f32> = vec3<f32>(0.420, 0.300, 0.170);
-const RAE_TERRAIN_ROCK:  vec3<f32> = vec3<f32>(0.300, 0.280, 0.240);
+const RAE_TERRAIN_GRASS: vec3<f32> = vec3<f32>(0.060, 0.290, 0.022);
+const RAE_TERRAIN_SAND:  vec3<f32> = vec3<f32>(0.380, 0.230, 0.075);
+const RAE_TERRAIN_MUD:   vec3<f32> = vec3<f32>(0.220, 0.130, 0.050);
+const RAE_TERRAIN_PATH:  vec3<f32> = vec3<f32>(0.340, 0.150, 0.040);
+const RAE_TERRAIN_ROCK:  vec3<f32> = vec3<f32>(0.360, 0.300, 0.220);
 const RAE_TERRAIN_WATER: vec3<f32> = vec3<f32>(0.001, 0.327, 0.599);
 
 // How strongly the noise breaks each material up. The reference meadow is
