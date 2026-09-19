@@ -433,8 +433,8 @@ func shadowQueue(
   if not shadow.enabled or icount < 1 or shadow.drawCount >= shadowMaxDraws {
     ret
   }
-  loop var i: Int = 0, i < 16, ++i {
-    shadow.modelFloats.add(value: model.m[i])
+  loop let column: Float in model.m {
+    shadow.modelFloats.add(value: column)
   }
   var base: Int = paletteBase
   if base < 0 {

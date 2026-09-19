@@ -1,24 +1,28 @@
-# Array as a struct field, through view/mod parameters, and returned by
-# value — the shapes a Mat4 has to survive (#352, slice 2).
+# Array as a struct field, through view/mod parameters, returned by value,
+# and nested — the shapes a Mat4 has to survive (#352, slice 2). Access is
+# List-shaped: `set`, `copyAtFallback`, and `modAt`/`viewAt` aliases.
 type Mat4 {
   m: Array(Float, cap: 16)
 }
 
 func identity() ret Mat4 {
-  let out: Mat4 = { m: Array(Float, cap: 16) }
-  out.m[0] = 1.0
-  out.m[5] = 1.0
-  out.m[10] = 1.0
-  out.m[15] = 1.0
+  var out: Mat4 = { m: Array(Float, cap: 16) }
+  out.m.set(index: 0, value: 1.0)
+  out.m.set(index: 5, value: 1.0)
+  out.m.set(index: 10, value: 1.0)
+  out.m.set(index: 15, value: 1.0)
   ret out
 }
 
 func trace(v: view Array(Float, cap: 16)) ret Float {
-  ret v[0] + v[5] + v[10] + v[15]
+  ret v.copyAtFallback(index: 0, fallback: 0.0) + v.copyAtFallback(index: 5, fallback: 0.0) + v.copyAtFallback(
+    index: 10
+    fallback: 0.0
+  ) + v.copyAtFallback(index: 15, fallback: 0.0)
 }
 
 func scaleFirst(v: mod Array(Float, cap: 16), by: view Float) {
-  v[0] = v[0] * by
+  v.set(index: 0, value: v.copyAtFallback(index: 0, fallback: 0.0) * by)
 }
 
 func main() {
@@ -28,10 +32,25 @@ func main() {
   # A copy passed as `mod` must not write through to the source.
   var mm: Array(Float, cap: 16) = id.m
   scaleFirst(v: mm, by: 4.0)
-  log("mm0={mm[0]} id0={id.m[0]}")
+  log(
+    "mm0={mm.copyAtFallback(index: 0, fallback: 0.0)} id0={id.m.copyAtFallback(
+      index: 0
+      fallback: 0.0
+    )}"
+  )
 
-  # Nested aggregate.
+  # Nested aggregate: modAt aliases the inner array in place.
   var grid: Array(Array(Float, cap: 2), cap: 2) = Array(Array(Float, cap: 2), cap: 2)
-  grid[1][0] = 7.5
-  log("grid={grid[1][0]} zero={grid[0][0]}")
+  if let row: mod Array(Float, cap: 2) => grid.modAt(index: 1) {
+    row.set(index: 0, value: 7.5)
+  }
+  var seen: Float = 0.0
+  var zero: Float = 1.0
+  if let row: view Array(Float, cap: 2) => grid.viewAt(index: 1) {
+    seen = row.copyAtFallback(index: 0, fallback: -1.0)
+  }
+  if let row: view Array(Float, cap: 2) => grid.viewAt(index: 0) {
+    zero = row.copyAtFallback(index: 0, fallback: -1.0)
+  }
+  log("grid={seen} zero={zero}")
 }

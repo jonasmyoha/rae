@@ -18,9 +18,9 @@ func main() {
   )
 
   let w3: WorldTransform3D = componentGet(this: wt3, entity: e1)
-  let m0: Float = w3.matrix.m[0]
-  let m5: Float = w3.matrix.m[5]
-  let m1: Float = w3.matrix.m[1]
+  let m0: Float = w3.matrix.m.copyAtFallback(index: 0, fallback: 0.0)
+  let m5: Float = w3.matrix.m.copyAtFallback(index: 5, fallback: 0.0)
+  let m1: Float = w3.matrix.m.copyAtFallback(index: 1, fallback: 0.0)
   log("wt3 identity m0: {m0} m5: {m5} m1: {m1}")
   log("wt2 present: {componentHas(this: wt2, entity: e1)}")
   log("wt3 present: {componentHas(this: wt3, entity: e1)}")

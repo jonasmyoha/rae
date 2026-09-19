@@ -236,6 +236,35 @@ static AstTypeRef mangler_opt_payload(const AstTypeRef* type) {
     return payload;
 }
 
+/* The cap of an `Array(T, cap: N)` value argument: the count sema folded onto
+ * the node, or the literal itself when this copy of the ref was never
+ * resolved (a template's own signature); -1 when unknown. */
+static long long mangle_array_cap(const AstTypeRef* capa) {
+    if (!capa) return -1;
+    if (capa->value_is_folded) return (long long)capa->value_folded;
+    if (capa->value_expr && capa->value_expr->kind == AST_EXPR_INTEGER) {
+        char buf[32]; size_t n = capa->value_expr->as.integer.len < 31 ? capa->value_expr->as.integer.len : 31;
+        memcpy(buf, capa->value_expr->as.integer.data, n); buf[n] = '\0';
+        return strtoll(buf, NULL, 10);
+    }
+    return -1;
+}
+
+
+/* The cap of an Array type ref (resolved or merely written); -1 if it is not
+ * an Array or the cap is unknown. Receiver-typed method dispatch uses it so
+ * `Array(Float, cap: 16).copyAt` cannot bind to the cap-12 wrappers. */
+long long rae_array_ref_cap(const AstTypeRef* type) {
+    if (!type) return -1;
+    const TypeInfo* at = type->resolved_type;
+    if (at && at->kind == TYPE_REF) at = at->as.ref.base;
+    if (at && at->kind == TYPE_ARRAY) return (long long)at->as.array.count;
+    if (!str_eq_cstr(get_base_type_name(type), "Array")) return -1;
+    for (const AstTypeRef* a = type->generic_args; a; a = a->next)
+        if (a->is_value_arg) return mangle_array_cap(a);
+    return -1;
+}
+
 static void mangle_type_recursive(CompilerContext* ctx, const struct AstIdentifierPart* generic_params, const AstTypeRef* type, char* buf, size_t* pos, size_t cap, bool force_erase) {
     (void)force_erase;
     if (!type) { *pos += snprintf(buf + *pos, cap - *pos, "int64_t"); return; }
@@ -280,7 +309,12 @@ static void mangle_type_recursive(CompilerContext* ctx, const struct AstIdentifi
         const TypeInfo* at = type->resolved_type;
         /* `view`/`mod Array(...)` resolves to a TYPE_REF around the array. */
         if (at && at->kind == TYPE_REF) at = at->as.ref.base;
-        if (at && at->kind == TYPE_ARRAY) {
+        /* A template's own `Array(T, cap: N)` resolved with T still a type
+         * parameter (or nothing); mangle it from the written arguments below
+         * so the specialization substitutes T. */
+        bool elem_is_param = at && at->kind == TYPE_ARRAY
+            && (at->as.array.base->kind == TYPE_GENERIC_PARAM || at->as.array.base->kind == TYPE_VOID);
+        if (at && at->kind == TYPE_ARRAY && !elem_is_param) {
             Str m = type_mangle_name(ctx->ast_arena, (TypeInfo*)at);
             *pos += snprintf(buf + *pos, cap - *pos, "%.*s", (int)m.len, m.data);
             return;
@@ -295,10 +329,11 @@ static void mangle_type_recursive(CompilerContext* ctx, const struct AstIdentifi
                 if (a->is_value_arg) { if (!capa) capa = a; }
                 else if (!elem) elem = a;
             }
-            if (elem && capa && capa->value_is_folded) {
+            long long count = mangle_array_cap(capa);
+            if (elem && count >= 0) {
                 *pos += snprintf(buf + *pos, cap - *pos, "rae_Array_");
                 mangle_type_recursive(ctx, generic_params, elem, buf, pos, cap, false);
-                *pos += snprintf(buf + *pos, cap - *pos, "_%lld", (long long)capa->value_folded);
+                *pos += snprintf(buf + *pos, cap - *pos, "_%lld", count);
                 return;
             }
         }
@@ -379,7 +414,12 @@ static void mangle_type_recursive_specialized(CompilerContext* ctx, const struct
         const TypeInfo* at = type->resolved_type;
         /* `view`/`mod Array(...)` resolves to a TYPE_REF around the array. */
         if (at && at->kind == TYPE_REF) at = at->as.ref.base;
-        if (at && at->kind == TYPE_ARRAY) {
+        /* A template's own `Array(T, cap: N)` resolved with T still a type
+         * parameter (or nothing); mangle it from the written arguments below
+         * so the specialization substitutes T. */
+        bool elem_is_param = at && at->kind == TYPE_ARRAY
+            && (at->as.array.base->kind == TYPE_GENERIC_PARAM || at->as.array.base->kind == TYPE_VOID);
+        if (at && at->kind == TYPE_ARRAY && !elem_is_param) {
             Str m = type_mangle_name(ctx->ast_arena, (TypeInfo*)at);
             *pos += snprintf(buf + *pos, cap - *pos, "%.*s", (int)m.len, m.data);
             return;
@@ -394,10 +434,11 @@ static void mangle_type_recursive_specialized(CompilerContext* ctx, const struct
                 if (a->is_value_arg) { if (!capa) capa = a; }
                 else if (!elem) elem = a;
             }
-            if (elem && capa && capa->value_is_folded) {
+            long long count = mangle_array_cap(capa);
+            if (elem && count >= 0) {
                 *pos += snprintf(buf + *pos, cap - *pos, "rae_Array_");
-                mangle_type_recursive(ctx, generic_params, elem, buf, pos, cap, false);
-                *pos += snprintf(buf + *pos, cap - *pos, "_%lld", (long long)capa->value_folded);
+                mangle_type_recursive_specialized(ctx, generic_params, concrete_args, elem, buf, pos, cap);
+                *pos += snprintf(buf + *pos, cap - *pos, "_%lld", count);
                 return;
             }
         }

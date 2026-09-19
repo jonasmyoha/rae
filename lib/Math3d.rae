@@ -45,15 +45,15 @@ func mat4Zero() pub ret Mat4 {
 
 func mat4Identity() pub ret Mat4 {
   var m: Mat4 = mat4Zero()
-  m.m[0] = 1.0
-  m.m[5] = 1.0
-  m.m[10] = 1.0
-  m.m[15] = 1.0
+  m.m.set(index: 0, value: 1.0)
+  m.m.set(index: 5, value: 1.0)
+  m.m.set(index: 10, value: 1.0)
+  m.m.set(index: 15, value: 1.0)
   ret m
 }
 
 func mat4Get(m: view Mat4, i: view Int) pub ret Float {
-  ret m.m[i]
+  ret m.m.copyAtFallback(index: i, fallback: 0.0)
 }
 
 # Drop the implied (0,0,0,1) row: keep the first three entries of each
@@ -62,9 +62,9 @@ func mat4ToMat3x4(a: view Mat4) pub ret Mat3x4 {
   var o: Mat3x4 = { m: Array(Float, cap: 12) }
   var c: Int = 0
   loop c < 4 {
-    o.m[c * 3] = a.m[c * 4]
-    o.m[c * 3 + 1] = a.m[c * 4 + 1]
-    o.m[c * 3 + 2] = a.m[c * 4 + 2]
+    o.m.set(index: c * 3, value: a.m.copyAtFallback(index: c * 4, fallback: 0.0))
+    o.m.set(index: c * 3 + 1, value: a.m.copyAtFallback(index: c * 4 + 1, fallback: 0.0))
+    o.m.set(index: c * 3 + 2, value: a.m.copyAtFallback(index: c * 4 + 2, fallback: 0.0))
     c = c + 1
   }
   ret o
@@ -77,12 +77,12 @@ func mat3x4ToMat4(a: view Mat3x4) pub ret Mat4 {
   var o: Mat4 = mat4Zero()
   var c: Int = 0
   loop c < 4 {
-    o.m[c * 4] = a.m[c * 3]
-    o.m[c * 4 + 1] = a.m[c * 3 + 1]
-    o.m[c * 4 + 2] = a.m[c * 3 + 2]
+    o.m.set(index: c * 4, value: a.m.copyAtFallback(index: c * 3, fallback: 0.0))
+    o.m.set(index: c * 4 + 1, value: a.m.copyAtFallback(index: c * 3 + 1, fallback: 0.0))
+    o.m.set(index: c * 4 + 2, value: a.m.copyAtFallback(index: c * 3 + 2, fallback: 0.0))
     c = c + 1
   }
-  o.m[15] = 1.0
+  o.m.set(index: 15, value: 1.0)
   ret o
 }
 
@@ -96,10 +96,13 @@ func mat4Mul(a: view Mat4, b: view Mat4) pub ret Mat4 {
       var sum: Float = 0.0
       var k: Int = 0
       loop k < 4 {
-        sum = sum + a.m[k * 4 + r] * b.m[c * 4 + k]
+        sum = sum + a.m.copyAtFallback(index: k * 4 + r, fallback: 0.0) * b.m.copyAtFallback(
+          index: c * 4 + k
+          fallback: 0.0
+        )
         k = k + 1
       }
-      out.m[c * 4 + r] = sum
+      out.m.set(index: c * 4 + r, value: sum)
       r = r + 1
     }
     c = c + 1
@@ -109,17 +112,17 @@ func mat4Mul(a: view Mat4, b: view Mat4) pub ret Mat4 {
 
 func mat4Translate(x: view Float, y: view Float, z: view Float) pub ret Mat4 {
   var m: Mat4 = mat4Identity()
-  m.m[12] = x
-  m.m[13] = y
-  m.m[14] = z
+  m.m.set(index: 12, value: x)
+  m.m.set(index: 13, value: y)
+  m.m.set(index: 14, value: z)
   ret m
 }
 
 func mat4Scale(s: view Float) pub ret Mat4 {
   var m: Mat4 = mat4Identity()
-  m.m[0] = s
-  m.m[5] = s
-  m.m[10] = s
+  m.m.set(index: 0, value: s)
+  m.m.set(index: 5, value: s)
+  m.m.set(index: 10, value: s)
   ret m
 }
 
@@ -129,9 +132,9 @@ func mat4Scale(s: view Float) pub ret Mat4 {
 # geometry.
 func mat4ScaleXYZ(x: view Float, y: view Float, z: view Float) pub ret Mat4 {
   var m: Mat4 = mat4Identity()
-  m.m[0] = x
-  m.m[5] = y
-  m.m[10] = z
+  m.m.set(index: 0, value: x)
+  m.m.set(index: 5, value: y)
+  m.m.set(index: 10, value: z)
   ret m
 }
 
@@ -139,10 +142,10 @@ func mat4RotateX(angle: view Float) pub ret Mat4 {
   var m: Mat4 = mat4Identity()
   let c: Float = Math.cos(x: angle)
   let s: Float = Math.sin(x: angle)
-  m.m[5] = c
-  m.m[6] = s
-  m.m[9] = 0.0 - s
-  m.m[10] = c
+  m.m.set(index: 5, value: c)
+  m.m.set(index: 6, value: s)
+  m.m.set(index: 9, value: 0.0 - s)
+  m.m.set(index: 10, value: c)
   ret m
 }
 
@@ -150,10 +153,10 @@ func mat4RotateY(angle: view Float) pub ret Mat4 {
   var m: Mat4 = mat4Identity()
   let c: Float = Math.cos(x: angle)
   let s: Float = Math.sin(x: angle)
-  m.m[0] = c
-  m.m[2] = 0.0 - s
-  m.m[8] = s
-  m.m[10] = c
+  m.m.set(index: 0, value: c)
+  m.m.set(index: 2, value: 0.0 - s)
+  m.m.set(index: 8, value: s)
+  m.m.set(index: 10, value: c)
   ret m
 }
 
@@ -161,10 +164,10 @@ func mat4RotateZ(angle: view Float) pub ret Mat4 {
   var m: Mat4 = mat4Identity()
   let c: Float = Math.cos(x: angle)
   let s: Float = Math.sin(x: angle)
-  m.m[0] = c
-  m.m[1] = s
-  m.m[4] = 0.0 - s
-  m.m[5] = c
+  m.m.set(index: 0, value: c)
+  m.m.set(index: 1, value: s)
+  m.m.set(index: 4, value: 0.0 - s)
+  m.m.set(index: 5, value: c)
   ret m
 }
 
@@ -193,11 +196,11 @@ func mat4PerspectiveReverseZ(
 ) pub ret Mat4 {
   var m: Mat4 = mat4Zero()
   let f: Float = 1.0 / Math.tan(x: fovYDeg * 0.008726646259971648)  # deg->rad, /2
-  m.m[0] = f / aspect
-  m.m[5] = f
-  m.m[10] = near / (far - near)
-  m.m[11] = 0.0 - 1.0
-  m.m[14] = far * near / (far - near)
+  m.m.set(index: 0, value: f / aspect)
+  m.m.set(index: 5, value: f)
+  m.m.set(index: 10, value: near / (far - near))
+  m.m.set(index: 11, value: 0.0 - 1.0)
+  m.m.set(index: 14, value: far * near / (far - near))
   ret m
 }
 
@@ -209,11 +212,11 @@ func mat4Perspective(
 ) pub ret Mat4 {
   var m: Mat4 = mat4Zero()
   let f: Float = 1.0 / Math.tan(x: fovYDeg * 0.008726646259971648)  # deg->rad, /2
-  m.m[0] = f / aspect
-  m.m[5] = f
-  m.m[10] = far / (near - far)
-  m.m[11] = 0.0 - 1.0
-  m.m[14] = far * near / (near - far)
+  m.m.set(index: 0, value: f / aspect)
+  m.m.set(index: 5, value: f)
+  m.m.set(index: 10, value: far / (near - far))
+  m.m.set(index: 11, value: 0.0 - 1.0)
+  m.m.set(index: 14, value: far * near / (near - far))
   ret m
 }
 
@@ -240,13 +243,13 @@ func mat4Ortho(
   if rl is 0.0 or tb is 0.0 or nf is 0.0 {
     ret mat4Identity()
   }
-  m.m[0] = 2.0 / rl
-  m.m[5] = 2.0 / tb
-  m.m[10] = 1.0 / nf
-  m.m[12] = 0.0 - (right + left) / rl
-  m.m[13] = 0.0 - (top + bottom) / tb
-  m.m[14] = near / nf
-  m.m[15] = 1.0
+  m.m.set(index: 0, value: 2.0 / rl)
+  m.m.set(index: 5, value: 2.0 / tb)
+  m.m.set(index: 10, value: 1.0 / nf)
+  m.m.set(index: 12, value: 0.0 - (right + left) / rl)
+  m.m.set(index: 13, value: 0.0 - (top + bottom) / tb)
+  m.m.set(index: 14, value: near / nf)
+  m.m.set(index: 15, value: 1.0)
   ret m
 }
 
@@ -259,47 +262,101 @@ func mat4Ortho(
 # no-op instead of NaNs. Used by the underwater pass (#855) to invert the
 # frame's view-projection on the CPU.
 func mat4Inverse(a: view Mat4) pub ret Mat4 {
-  let m0: Float = a.m[0]
-  let m1: Float = a.m[1]
-  let m2: Float = a.m[2]
-  let m3: Float = a.m[3]
-  let m4: Float = a.m[4]
-  let m5: Float = a.m[5]
-  let m6: Float = a.m[6]
-  let m7: Float = a.m[7]
-  let m8: Float = a.m[8]
-  let m9: Float = a.m[9]
-  let m10: Float = a.m[10]
-  let m11: Float = a.m[11]
-  let m12: Float = a.m[12]
-  let m13: Float = a.m[13]
-  let m14: Float = a.m[14]
-  let m15: Float = a.m[15]
+  let m0: Float = a.m.copyAtFallback(index: 0, fallback: 0.0)
+  let m1: Float = a.m.copyAtFallback(index: 1, fallback: 0.0)
+  let m2: Float = a.m.copyAtFallback(index: 2, fallback: 0.0)
+  let m3: Float = a.m.copyAtFallback(index: 3, fallback: 0.0)
+  let m4: Float = a.m.copyAtFallback(index: 4, fallback: 0.0)
+  let m5: Float = a.m.copyAtFallback(index: 5, fallback: 0.0)
+  let m6: Float = a.m.copyAtFallback(index: 6, fallback: 0.0)
+  let m7: Float = a.m.copyAtFallback(index: 7, fallback: 0.0)
+  let m8: Float = a.m.copyAtFallback(index: 8, fallback: 0.0)
+  let m9: Float = a.m.copyAtFallback(index: 9, fallback: 0.0)
+  let m10: Float = a.m.copyAtFallback(index: 10, fallback: 0.0)
+  let m11: Float = a.m.copyAtFallback(index: 11, fallback: 0.0)
+  let m12: Float = a.m.copyAtFallback(index: 12, fallback: 0.0)
+  let m13: Float = a.m.copyAtFallback(index: 13, fallback: 0.0)
+  let m14: Float = a.m.copyAtFallback(index: 14, fallback: 0.0)
+  let m15: Float = a.m.copyAtFallback(index: 15, fallback: 0.0)
   var inv: Mat4 = mat4Zero()
-  inv.m[0] = m5 * m10 * m15 - m5 * m11 * m14 - m9 * m6 * m15 + m9 * m7 * m14 + m13 * m6 * m11 - m13 * m7 * m10
-  inv.m[4] = 0.0 - m4 * m10 * m15 + m4 * m11 * m14 + m8 * m6 * m15 - m8 * m7 * m14 - m12 * m6 * m11 + m12 * m7 * m10
-  inv.m[8] = m4 * m9 * m15 - m4 * m11 * m13 - m8 * m5 * m15 + m8 * m7 * m13 + m12 * m5 * m11 - m12 * m7 * m9
-  inv.m[12] = 0.0 - m4 * m9 * m14 + m4 * m10 * m13 + m8 * m5 * m14 - m8 * m6 * m13 - m12 * m5 * m10 + m12 * m6 * m9
-  inv.m[1] = 0.0 - m1 * m10 * m15 + m1 * m11 * m14 + m9 * m2 * m15 - m9 * m3 * m14 - m13 * m2 * m11 + m13 * m3 * m10
-  inv.m[5] = m0 * m10 * m15 - m0 * m11 * m14 - m8 * m2 * m15 + m8 * m3 * m14 + m12 * m2 * m11 - m12 * m3 * m10
-  inv.m[9] = 0.0 - m0 * m9 * m15 + m0 * m11 * m13 + m8 * m1 * m15 - m8 * m3 * m13 - m12 * m1 * m11 + m12 * m3 * m9
-  inv.m[13] = m0 * m9 * m14 - m0 * m10 * m13 - m8 * m1 * m14 + m8 * m2 * m13 + m12 * m1 * m10 - m12 * m2 * m9
-  inv.m[2] = m1 * m6 * m15 - m1 * m7 * m14 - m5 * m2 * m15 + m5 * m3 * m14 + m13 * m2 * m7 - m13 * m3 * m6
-  inv.m[6] = 0.0 - m0 * m6 * m15 + m0 * m7 * m14 + m4 * m2 * m15 - m4 * m3 * m14 - m12 * m2 * m7 + m12 * m3 * m6
-  inv.m[10] = m0 * m5 * m15 - m0 * m7 * m13 - m4 * m1 * m15 + m4 * m3 * m13 + m12 * m1 * m7 - m12 * m3 * m5
-  inv.m[14] = 0.0 - m0 * m5 * m14 + m0 * m6 * m13 + m4 * m1 * m14 - m4 * m2 * m13 - m12 * m1 * m6 + m12 * m2 * m5
-  inv.m[3] = 0.0 - m1 * m6 * m11 + m1 * m7 * m10 + m5 * m2 * m11 - m5 * m3 * m10 - m9 * m2 * m7 + m9 * m3 * m6
-  inv.m[7] = m0 * m6 * m11 - m0 * m7 * m10 - m4 * m2 * m11 + m4 * m3 * m10 + m8 * m2 * m7 - m8 * m3 * m6
-  inv.m[11] = 0.0 - m0 * m5 * m11 + m0 * m7 * m9 + m4 * m1 * m11 - m4 * m3 * m9 - m8 * m1 * m7 + m8 * m3 * m5
-  inv.m[15] = m0 * m5 * m10 - m0 * m6 * m9 - m4 * m1 * m10 + m4 * m2 * m9 + m8 * m1 * m6 - m8 * m2 * m5
-  let det: Float = m0 * inv.m[0] + m1 * inv.m[4] + m2 * inv.m[8] + m3 * inv.m[12]
+  inv.m.set(
+    index: 0
+    value: m5 * m10 * m15 - m5 * m11 * m14 - m9 * m6 * m15 + m9 * m7 * m14 + m13 * m6 * m11 - m13 * m7 * m10
+  )
+  inv.m.set(
+    index: 4
+    value: 0.0 - m4 * m10 * m15 + m4 * m11 * m14 + m8 * m6 * m15 - m8 * m7 * m14 - m12 * m6 * m11 + m12 * m7 * m10
+  )
+  inv.m.set(
+    index: 8
+    value: m4 * m9 * m15 - m4 * m11 * m13 - m8 * m5 * m15 + m8 * m7 * m13 + m12 * m5 * m11 - m12 * m7 * m9
+  )
+  inv.m.set(
+    index: 12
+    value: 0.0 - m4 * m9 * m14 + m4 * m10 * m13 + m8 * m5 * m14 - m8 * m6 * m13 - m12 * m5 * m10 + m12 * m6 * m9
+  )
+  inv.m.set(
+    index: 1
+    value: 0.0 - m1 * m10 * m15 + m1 * m11 * m14 + m9 * m2 * m15 - m9 * m3 * m14 - m13 * m2 * m11 + m13 * m3 * m10
+  )
+  inv.m.set(
+    index: 5
+    value: m0 * m10 * m15 - m0 * m11 * m14 - m8 * m2 * m15 + m8 * m3 * m14 + m12 * m2 * m11 - m12 * m3 * m10
+  )
+  inv.m.set(
+    index: 9
+    value: 0.0 - m0 * m9 * m15 + m0 * m11 * m13 + m8 * m1 * m15 - m8 * m3 * m13 - m12 * m1 * m11 + m12 * m3 * m9
+  )
+  inv.m.set(
+    index: 13
+    value: m0 * m9 * m14 - m0 * m10 * m13 - m8 * m1 * m14 + m8 * m2 * m13 + m12 * m1 * m10 - m12 * m2 * m9
+  )
+  inv.m.set(
+    index: 2
+    value: m1 * m6 * m15 - m1 * m7 * m14 - m5 * m2 * m15 + m5 * m3 * m14 + m13 * m2 * m7 - m13 * m3 * m6
+  )
+  inv.m.set(
+    index: 6
+    value: 0.0 - m0 * m6 * m15 + m0 * m7 * m14 + m4 * m2 * m15 - m4 * m3 * m14 - m12 * m2 * m7 + m12 * m3 * m6
+  )
+  inv.m.set(
+    index: 10
+    value: m0 * m5 * m15 - m0 * m7 * m13 - m4 * m1 * m15 + m4 * m3 * m13 + m12 * m1 * m7 - m12 * m3 * m5
+  )
+  inv.m.set(
+    index: 14
+    value: 0.0 - m0 * m5 * m14 + m0 * m6 * m13 + m4 * m1 * m14 - m4 * m2 * m13 - m12 * m1 * m6 + m12 * m2 * m5
+  )
+  inv.m.set(
+    index: 3
+    value: 0.0 - m1 * m6 * m11 + m1 * m7 * m10 + m5 * m2 * m11 - m5 * m3 * m10 - m9 * m2 * m7 + m9 * m3 * m6
+  )
+  inv.m.set(
+    index: 7
+    value: m0 * m6 * m11 - m0 * m7 * m10 - m4 * m2 * m11 + m4 * m3 * m10 + m8 * m2 * m7 - m8 * m3 * m6
+  )
+  inv.m.set(
+    index: 11
+    value: 0.0 - m0 * m5 * m11 + m0 * m7 * m9 + m4 * m1 * m11 - m4 * m3 * m9 - m8 * m1 * m7 + m8 * m3 * m5
+  )
+  inv.m.set(
+    index: 15
+    value: m0 * m5 * m10 - m0 * m6 * m9 - m4 * m1 * m10 + m4 * m2 * m9 + m8 * m1 * m6 - m8 * m2 * m5
+  )
+  let det: Float = m0 * inv.m.copyAtFallback(index: 0, fallback: 0.0) + m1 * inv.m.copyAtFallback(
+    index: 4
+    fallback: 0.0
+  ) + m2 * inv.m.copyAtFallback(index: 8, fallback: 0.0) + m3 * inv.m.copyAtFallback(
+    index: 12
+    fallback: 0.0
+  )
   if Math.abs(value: det) < 0.000000000001 {
     ret mat4Identity()
   }
   let scale: Float = 1.0 / det
   var i: Int = 0
   loop i < 16 {
-    inv.m[i] = inv.m[i] * scale
+    inv.m.set(index: i, value: inv.m.copyAtFallback(index: i, fallback: 0.0) * scale)
     i = i + 1
   }
   ret inv
@@ -307,9 +364,27 @@ func mat4Inverse(a: view Mat4) pub ret Mat4 {
 
 func mat4TransformPoint(m: view Mat4, p: view Vec3) pub ret Vec3 {
   ret Vec3.create(
-    x: m.m[0] * p.x + m.m[4] * p.y + m.m[8] * p.z + m.m[12]
-    y: m.m[1] * p.x + m.m[5] * p.y + m.m[9] * p.z + m.m[13]
-    z: m.m[2] * p.x + m.m[6] * p.y + m.m[10] * p.z + m.m[14]
+    x: m.m.copyAtFallback(index: 0, fallback: 0.0) * p.x + m.m.copyAtFallback(
+      index: 4
+      fallback: 0.0
+    ) * p.y + m.m.copyAtFallback(index: 8, fallback: 0.0) * p.z + m.m.copyAtFallback(
+      index: 12
+      fallback: 0.0
+    )
+    y: m.m.copyAtFallback(index: 1, fallback: 0.0) * p.x + m.m.copyAtFallback(
+      index: 5
+      fallback: 0.0
+    ) * p.y + m.m.copyAtFallback(index: 9, fallback: 0.0) * p.z + m.m.copyAtFallback(
+      index: 13
+      fallback: 0.0
+    )
+    z: m.m.copyAtFallback(index: 2, fallback: 0.0) * p.x + m.m.copyAtFallback(
+      index: 6
+      fallback: 0.0
+    ) * p.y + m.m.copyAtFallback(index: 10, fallback: 0.0) * p.z + m.m.copyAtFallback(
+      index: 14
+      fallback: 0.0
+    )
   )
 }
 
@@ -363,19 +438,19 @@ func mat4LookAt(
   let uy: Float = rz * fx - rx * fz
   let uz: Float = rx * fy - ry * fx
   var m: Mat4 = mat4Zero()
-  m.m[0] = rx
-  m.m[1] = ux
-  m.m[2] = 0.0 - fx
-  m.m[4] = ry
-  m.m[5] = uy
-  m.m[6] = 0.0 - fy
-  m.m[8] = rz
-  m.m[9] = uz
-  m.m[10] = 0.0 - fz
-  m.m[12] = 0.0 - (rx * eyeX + ry * eyeY + rz * eyeZ)
-  m.m[13] = 0.0 - (ux * eyeX + uy * eyeY + uz * eyeZ)
-  m.m[14] = fx * eyeX + fy * eyeY + fz * eyeZ
-  m.m[15] = 1.0
+  m.m.set(index: 0, value: rx)
+  m.m.set(index: 1, value: ux)
+  m.m.set(index: 2, value: 0.0 - fx)
+  m.m.set(index: 4, value: ry)
+  m.m.set(index: 5, value: uy)
+  m.m.set(index: 6, value: 0.0 - fy)
+  m.m.set(index: 8, value: rz)
+  m.m.set(index: 9, value: uz)
+  m.m.set(index: 10, value: 0.0 - fz)
+  m.m.set(index: 12, value: 0.0 - (rx * eyeX + ry * eyeY + rz * eyeZ))
+  m.m.set(index: 13, value: 0.0 - (ux * eyeX + uy * eyeY + uz * eyeZ))
+  m.m.set(index: 14, value: fx * eyeX + fy * eyeY + fz * eyeZ)
+  m.m.set(index: 15, value: 1.0)
   ret m
 }
 

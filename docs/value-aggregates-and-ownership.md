@@ -216,22 +216,36 @@ contiguous 16-byte value, which is the precondition for the SIMD lowering in
   behave as for any value type. An array of primitives never *needs* `own`,
   since copying is total.
 
-### 1.7 Bounds policy: constant-checked at compile time, dynamic-checked always
+### 1.7 Access and bounds policy: List's API, List's behaviour
 
-| Index | Every build profile |
-|---|---|
-| Compile-time constant | **compile error** if out of range |
-| Dynamic | runtime check; out of range prints the location and aborts |
+An `Array` is accessed exactly like a `List` — there is **no `[]`** on an
+Array in user code. The compiler synthesizes, per cap the program uses, the
+same wrappers `lib/core/List.rae` writes by hand (`compiler/src/
+array_methods.c`), so the two collections read the same at every call site:
 
-Constant indices dominate matrix code (`m[5]`, `m[10]`) and verifying them
-costs nothing, so an out-of-range constant never reaches runtime. A dynamic
-index is checked in every build: an out-of-range `Array` access would read
-or write past a C array, and Rae is always bounds-checked — the benchmarks
-are made that way. (An earlier revision of this section proposed compiling
-the check out of release builds for the per-joint inner loops; it was listed
-as an open question, implemented by #655 before it was answered, and
-reversed in 2026-09 — answer recorded in Part 4. The branch is predictable
-and its cost in those loops was never measured to matter.)
+| call | returns | out of range |
+|---|---|---|
+| `arr.copyAt(index: i)` | `opt T` (a deep copy) | `none` |
+| `arr.viewAt(index: i)` / `arr.modAt(index: i)` | `opt view T` / `opt mod T` (a window into the storage) | `none` |
+| `arr.copyAtFallback(index: i, fallback: v)` | `T` | the caller's `fallback` |
+| `arr.set(index: i, value: v)` | — (releases the element it overwrites) | the write is **ignored** and `warning: Array.set: index 20 is out of range for length 16` goes to stderr; the program continues |
+| `arr.length()` | `Int` | always the cap |
+| `loop let x: view T in arr` / `mod T` / `T` | — | iterates the cap, in place |
+
+One behaviour in every build profile (docs/integer-semantics.md): there is
+no "checked in debug, bare in release", and no build in which an out-of-range
+index stops the program. This replaced the earlier `arr[i]` subscript, which
+returned a bare `T` and therefore had to abort on a dynamic out-of-range index
+— the one indexing in Rae that could stop the program, and for a read of an
+arbitrary `T` "return a zero object" was never an option. (Its constant-index
+compile-time check went with it; `set(index: 20, ...)` on a cap-16 array is a
+runtime warning like `List.set`.) `[]` on an Array now exists only inside
+`unsafe`, as the raw slot the synthesized wrappers are built on — the same
+status as the buffer intrinsics under List.
+
+Matrix code writes `m.set(index: 5, value: 1.0)` and reads
+`m.copyAtFallback(index: 5, fallback: 0.0)` (or `mat4Get`); a whole-matrix
+copy into a GPU buffer is a collection loop, `loop let column: Float in m.m`.
 
 ### 1.8 Interaction with existing generics
 
@@ -429,8 +443,11 @@ Grouped by what each proves. Every test is a compiler test case under
 
 1. **Bounds policy (§1.7)** — unchecked dynamic indexing in release is a
    deliberate performance choice. Approve, or require always-checked?
-   **Answered 2026-09: always-checked.** Rae has no dev/release semantic
-   differences (docs/integer-semantics.md "One behaviour, every profile").
+   **Answered 2026-09: always-checked, and then (2026-09-19) the subscript
+   itself was removed:** Array has List's API and List's out-of-range
+   behaviour (`none` on reads, ignored + warned on writes). Rae has no
+   dev/release semantic differences (docs/integer-semantics.md "One
+   behaviour, every profile") and no indexing that stops the program.
 2. **`copy` as the sanctioned fix** — this makes `copy` appear in ordinary
    container code (`list.add(value: copy name)`). Acceptable ergonomics, or
    should `add` take `copy T` and copy implicitly?

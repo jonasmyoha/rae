@@ -536,6 +536,15 @@ const AstFuncDecl* find_function_overload(const AstModule* module, CFuncContext*
                             }
                         }
                         
+                        /* Array(T, cap: N) wrappers exist once per cap; the
+                         * base name "Array" alone matches every cap. */
+                        if (call_expr && call_expr->kind == AST_EXPR_METHOD_CALL
+                            && rae_array_ref_cap(fd->params->type) >= 0) {
+                            const AstTypeRef* rtr = infer_expr_type_ref(ctx, call_expr->as.method_call.object);
+                            if (rtr && ctx->generic_params && ctx->generic_args)
+                                rtr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, rtr);
+                            if (rae_array_ref_cap(rtr) != rae_array_ref_cap(fd->params->type)) continue;
+                        }
                         if (obj_type.len > 0) {
                             if (types_match(fd_rec_t->name, obj_type)) return fd;
                             const char* mfd = rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, fd->params->type);
@@ -752,7 +761,14 @@ bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* ou
            * with identical layout and no ABI cost.
            * See docs/value-aggregates-and-ownership.md §1.5. */
           if (type->is_view) fprintf(out, "const ");
-          fprintf(out, "%s", type_mangle_name(ctx->compiler_ctx->ast_arena, t).data);
+          /* A template's `Array(T, cap: N)` inside a specialization: the
+           * element is still the type parameter here, so spell the
+           * substituted name (the mangler walks the written arguments). */
+          bool elem_is_param = t->as.array.base->kind == TYPE_GENERIC_PARAM || t->as.array.base->kind == TYPE_VOID;
+          if (elem_is_param && ctx && ctx->generic_params && ctx->generic_args)
+              fprintf(out, "%s", rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, type));
+          else
+              fprintf(out, "%s", type_mangle_name(ctx->compiler_ctx->ast_arena, t).data);
           if (is_ptr) fprintf(out, "*");
           return true;
       }
@@ -1186,12 +1202,31 @@ const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
         case AST_EXPR_INDEX: {
             const TypeInfo* tt = expr->as.index.target ? expr->as.index.target->resolved_type : NULL;
             if (tt && tt->kind == TYPE_REF) tt = tt->as.ref.base;
-            if (tt && tt->kind == TYPE_ARRAY && expr->resolved_type) {
+            if (tt && tt->kind == TYPE_ARRAY && expr->resolved_type
+                && expr->resolved_type->kind != TYPE_GENERIC_PARAM) {
                 if (expr->resolved_type->kind == TYPE_STRING) return &kString_tr;
                 AstTypeRef* tr = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
                 memset(tr, 0, sizeof(*tr));
                 tr->resolved_type = expr->resolved_type;
                 return tr;
+            }
+            /* Inside a generic template body (the core/Array wrappers) sema
+             * recorded nothing on the template's own nodes: read the element
+             * type off the written `Array(T, cap: N)` of the target,
+             * substituted through the current specialization. */
+            {
+                const AstTypeRef* atr = infer_expr_type_ref(ctx, expr->as.index.target);
+                if (atr && ctx->generic_params && ctx->generic_args)
+                    atr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, atr);
+                if (atr && str_eq_cstr(get_base_type_name(atr), "Array")) {
+                    for (const AstTypeRef* a = atr->generic_args; a; a = a->next) {
+                        if (a->is_value_arg) continue;
+                        AstTypeRef* tr = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
+                        *tr = *a; tr->next = NULL;
+                        tr->is_view = false; tr->is_mod = false;
+                        return tr;
+                    }
+                }
             }
             break;
         }

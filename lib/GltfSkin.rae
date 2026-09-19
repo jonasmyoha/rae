@@ -521,7 +521,7 @@ func buildPaletteInto(sk: view Skeleton, out: mod List(Float)) pub {
     if sk.inverseBind.length >= (j + 1) * 16 {
       var c: Int = 0
       loop c < 16 {
-        ib.m[c] = floatAt(list: sk.inverseBind, index: j * 16 + c)
+        ib.m.set(index: c, value: floatAt(list: sk.inverseBind, index: j * 16 + c))
         c = c + 1
       }
     }
@@ -529,10 +529,10 @@ func buildPaletteInto(sk: view Skeleton, out: mod List(Float)) pub {
     # Column-major storage, so row r is elements r, r+4, r+8, r+12.
     var r: Int = 0
     loop r < 3 {
-      out.add(value: m.m[r])
-      out.add(value: m.m[r + 4])
-      out.add(value: m.m[r + 8])
-      out.add(value: m.m[r + 12])
+      out.add(value: m.m.copyAtFallback(index: r, fallback: 0.0))
+      out.add(value: m.m.copyAtFallback(index: r + 4, fallback: 0.0))
+      out.add(value: m.m.copyAtFallback(index: r + 8, fallback: 0.0))
+      out.add(value: m.m.copyAtFallback(index: r + 12, fallback: 0.0))
       r = r + 1
     }
     j = j + 1

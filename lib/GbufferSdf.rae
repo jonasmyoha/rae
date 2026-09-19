@@ -192,8 +192,8 @@ func uploadSdfFrame(
   var prevViewProj: Mat4 = mat4Zero()
   var i: Int = 0
   loop i < 16 {
-    viewProj.m[i] = sdfFrameFloat(cache: cache, index: i)
-    prevViewProj.m[i] = sdfFrameFloat(cache: cache, index: 16 + i)
+    viewProj.m.set(index: i, value: sdfFrameFloat(cache: cache, index: i))
+    prevViewProj.m.set(index: i, value: sdfFrameFloat(cache: cache, index: 16 + i))
     i = i + 1
   }
   let jx: Float = sdfFrameFloat(cache: cache, index: 32)
@@ -201,8 +201,20 @@ func uploadSdfFrame(
   var jittered: Mat4 = viewProj
   var c: Int = 0
   loop c < 4 {
-    jittered.m[c * 4] = jittered.m[c * 4] + jx * jittered.m[c * 4 + 3]
-    jittered.m[c * 4 + 1] = jittered.m[c * 4 + 1] + jy * jittered.m[c * 4 + 3]
+    jittered.m.set(
+      index: c * 4
+      value: jittered.m.copyAtFallback(index: c * 4, fallback: 0.0) + jx * jittered.m.copyAtFallback(
+        index: c * 4 + 3
+        fallback: 0.0
+      )
+    )
+    jittered.m.set(
+      index: c * 4 + 1
+      value: jittered.m.copyAtFallback(index: c * 4 + 1, fallback: 0.0) + jy * jittered.m.copyAtFallback(
+        index: c * 4 + 3
+        fallback: 0.0
+      )
+    )
     c = c + 1
   }
   let inverse: Mat4 = mat4Inverse(a: jittered)
@@ -227,10 +239,8 @@ func uploadSdfFrame(
 
 func pushMatrix(sdf: mod SdfPassCache, m: view Mat4) {
   sdf.columns.clear()
-  var i: Int = 0
-  loop i < 16 {
-    sdf.columns.add(value: m.m[i])
-    i = i + 1
+  loop let column: Float in m.m {
+    sdf.columns.add(value: column)
   }
   let pushed: Bool = pushMat4(writer: sdf.args, columns: sdf.columns)
 }

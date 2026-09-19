@@ -39,29 +39,6 @@ void rae_task_drop(RaeTask* t);     /* join (if not joined) + free; scope-exit d
 #define RAE_UNUSED
 #endif
 
-/* Array(T, cap: N) dynamic bounds policy (docs/value-aggregates-and-ownership.md
- * §1.7): a dynamic (non-constant) index is checked in EVERY build profile.
- * Constant indices are rejected at compile time by sema, so only dynamic
- * subscripts reach this. An out-of-range index would read or write past a C
- * array — memory corruption — so the only safe answer is to stop: one line
- * with the location, then abort. (Until 2026-09 the check was compiled out
- * of release builds for the skinning inner loops; that exception was never
- * approved and is gone — Rae is always bounds-checked.) The macro evaluates
- * `idx` exactly once. */
-static inline int64_t rae_array_bounds_check(int64_t idx, int64_t cap,
-                                             const char* file, int line) {
-    if (idx < 0 || idx >= cap) {
-        fprintf(stderr,
-                "%s:%d: runtime error: index %lld is out of bounds for "
-                "Array(cap: %lld); valid indices are 0..%lld\n",
-                file, line, (long long)idx, (long long)cap, (long long)(cap - 1));
-        abort();
-    }
-    return idx;
-}
-#define RAE_ARRAY_IDX(idx, cap, file, line) \
-    rae_array_bounds_check((int64_t)(idx), (int64_t)(cap), (file), (line))
-
 /* ---- Int arithmetic (docs/integer-semantics.md) ----
  *
  * The C backend routes every `+ - * / %` on `Int` (signed 64-bit) through

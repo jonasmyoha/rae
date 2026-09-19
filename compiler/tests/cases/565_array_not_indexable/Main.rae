@@ -1,0 +1,9 @@
+# `[]` is not part of Array's API: a subscript yields T and would have to
+# stop the program out of range. Access is List-shaped and always optional
+# (copyAt / viewAt / modAt), total with a fallback (copyAtFallback), and
+# writes go through set (docs/value-aggregates-and-ownership.md §1.7).
+func main() {
+  var a: Array(Float, cap: 4) = Array(Float, cap: 4)
+  a[2] = 1.0
+  log("unreachable")
+}

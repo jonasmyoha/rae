@@ -52,4 +52,6 @@ bool is_scalar_primitive_type(Str type_name);
  */
 const char* map_rae_type_to_c(Str type_name);
 
+long long rae_array_ref_cap(const AstTypeRef* type);
+
 #endif /* MANGLER_H */
