@@ -185,6 +185,23 @@ func defaultTerrainShader() ret Shader {
 # its first frame. Call before the first terrain draw; the pipeline is rebuilt.
 func terrainSetShader(cache: mod GbufferCache, resources: mod GpuResources, shader: own Shader) {
   cache.terrainShader = shader
+  cache.terrainConstants = islandConstants()
+  cache.terrainShaderSet = true
+  resetTerrainPipeline(cache: cache, resources: resources)
+}
+
+# The same, with the app's OWN island-size `override` constants (radius/falloff) in place
+# of the lib defaults — the terrain equivalent of grassSetComputeShaderWithConstants, so a
+# growing island (#41) hands the splat pipeline a runtime radius that matches the CPU biome
+# field and the grass compute. The shader's `override RAE_BIOME_ISLAND_*` names must match.
+func terrainSetShaderWithConstants(
+  cache: mod GbufferCache
+  resources: mod GpuResources
+  shader: own Shader
+  constants: own List(ShaderConstant)
+) {
+  cache.terrainShader = shader
+  cache.terrainConstants = constants
   cache.terrainShaderSet = true
   resetTerrainPipeline(cache: cache, resources: resources)
 }
@@ -196,7 +213,7 @@ func ensureTerrainPipeline(cache: mod GbufferCache, resources: mod GpuResources)
       cache.terrainPipeline = createGbufferPipeline(
         resources: resources
         shader: cache.terrainShader
-        constants: islandConstants()
+        constants: cache.terrainConstants
         stride: 32
         attributes: gbufferStaticAttributes()
       )
