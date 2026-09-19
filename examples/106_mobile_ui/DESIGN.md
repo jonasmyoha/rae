@@ -22,7 +22,7 @@ examples/106_mobile_ui/            the app: ~53 files, one folder per system
   Main.rae                         main() = createApp() + runApp(app)
   AppTypes.rae / AppCreate.rae / App.rae
   FramePipeline.rae                the named frame phases (§4)
-  Config, Viewport, WorldHelpers, UiRefresh, RenderDecide, RenderCacheGpu2d,
+  Config, Viewport, WorldHelpers, RenderDecide, RenderCacheGpu2d,
   GpuWindow, Headless, HotReloadGlue, AppSettings, FileIo
   inputSystem/ screenSystem/ historySystem/ playbackSystem/ spotifySystem/
   debugSystem/ assetSystem/
@@ -150,9 +150,12 @@ applyWheelScroll             scroll FSM (inputSystem/ScrollInput.rae)
                              alone writes the tab / sub-page stack and
                              picks the next screen
 2. processCommands(playback) Apply(A): the PlaybackSystem drains its inbox
-3. refreshUiDiffs +          observation: revision ints on resources
-   syncFrameData             (history, playback, sheet) -> component edits;
-                             Spotify tick -> mirror; artwork/asset loaders;
+3. runAppObservation +       observation: every app binding system is a row
+   syncFrameData             of the observation schedule (observeSystem/
+                             AppObservation) declaring the resource revisions
+                             + tables it reads; it runs only when one moved
+                             (idle frame: zero app systems). Spotify tick ->
+                             mirror, then a second pass; artwork/asset loaders;
                              the History window re-rows in place on scroll
 4. runFrameLayoutTransform   safeArea -> layout -> fit -> transform ->
                              visualBounds, each gated by uiShouldRun on the
@@ -178,10 +181,15 @@ body. Two design points:
   inputs are unchanged; fixture 839 proves that judgement equals the hand
   caches it replaced (#949).
 - **Observation is by revision, not by diffing.** Resource-shaped state
-  (`PlayHistory.revision`, `PlaybackState` revision, the sheet epoch) bumps
-  an Int on change and `UiRefreshCache` remembers the last one it reacted
-  to; component tables use `changedSince`. Both are §7 of the observation
-  doc; 106 uses each where it belongs (#944).
+  (`PlayHistory.revision`, `PlaybackState` revision, the sheet epoch, the
+  browsed collection, the settings, the texture registry) bumps an Int on
+  change; each app binding system declares which of those `source*` flags
+  and which world tables it reads (`observeSystem/AppObservation`), and the
+  schedule remembers the combined generation it last ran at — the same
+  `Schedule` + `shouldRun` mechanism the lib pipeline uses. No name list
+  calls systems every frame and no page is ever re-mounted to refresh;
+  the `[loop]` trace prints `appSystems=N <names>` per frame and the 106
+  gate asserts a paused idle frame reports 0.
 
 ## 5. The event loop
 

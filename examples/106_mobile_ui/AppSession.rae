@@ -60,7 +60,6 @@ type AppSession {
   cachedAlbumStem: String
   cachedTrackIndex: Int
   cachedTrackDurMs: Int
-  uiRefresh: UiRefreshCache
   lastHoverAnimDirty: Bool
   lastFrameTime: Float64
   # InputSystem outlives world rebuilds so a held press carries
@@ -80,6 +79,9 @@ type AppSession {
 
 type WorldFrame {
   schedule: Schedule
+  # The app binding systems' schedule (observeSystem/AppObservation): each
+  # judged from its declared sources + tables before it runs.
+  observation: AppObservation
   # The active page's `ScrollRoot` (findScrollRoot), re-resolved per frame.
   scrollTarget: EntityId
   renderCache: RenderCache
@@ -139,7 +141,6 @@ func createAppSession(app: mod App) ret AppSession {
     cachedAlbumStem: ""
     cachedTrackIndex: 0 - 1
     cachedTrackDurMs: 0
-    uiRefresh: createUiRefreshCache(historyRevision: 0)
     lastHoverAnimDirty: false
     lastFrameTime: 0.0
     input: createInputSystem()

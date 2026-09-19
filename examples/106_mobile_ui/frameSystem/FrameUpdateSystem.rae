@@ -6,9 +6,9 @@ open ui/EventLoop
 open ui/animationSystem/AnimationSystem
 open ecs/Event
 
-# Frame phase 2 — update. The data sync (playback / Spotify / history /
-# assets update state first; the UI-diff and overlay systems translate the
-# changed data into component mutations), the layout + transform re-run,
+# Frame phase 2 — update. The data sync (the playback clock, the Spotify
+# mirror and the asset loaders update state; the observation pass translates
+# what moved into component mutations), the layout + transform re-run,
 # the hero animation, and the render-gate decision with the hover easing.
 # Writes `now`, `animating` and `active` into the tick.
 func frameUpdateSystem(
@@ -22,16 +22,6 @@ func frameUpdateSystem(
   let playback: mod PlaybackState => app.playback
   let input: view InputSystem => session.input
   tick.now = uiNowSeconds()
-  var applyPlaybackFrame: Bool = false
-  if frame.forceRender or tick.hadActions {
-    applyPlaybackFrame = true
-  }
-  if playback.isPlaying {
-    let wheelAgeSec: Float = (tick.now - session.scrollFsm.lastWheelTime) as Float
-    if wheelAgeSec >= 0.25 {
-      applyPlaybackFrame = true
-    }
-  }
   let dataSync: FrameDataSyncResult = syncFrameData(
     world: world
     scenes: app.scenes
@@ -40,11 +30,8 @@ func frameUpdateSystem(
     spotifyState: app.spotifyState
     spotifyPoller: app.spotifyPoller
     texReg: app.texReg
-    uiRefresh: session.uiRefresh
-    visible: session.currentScreen
-    viewport: app.viewport
+    observation: frame.observation
     now: tick.now
-    applyPlaybackFrame: applyPlaybackFrame
   )
   session.assetsLoading = dataSync.assetsLoading
 
@@ -123,7 +110,7 @@ func frameUpdateSystem(
   # downstream in renderSystem / endDrawing.
   if app.loopDebugEnabled {
     log(
-      "[loop {app.loopDebugFrame}] uiActions={eventCount(this: input.uiActions)} pressed={input.pressedEntity.index} animating={tick.animating} active={tick.active} decide={activeDecision.active} assets={session.assetsLoading} hover={session.lastHoverAnimDirty}"
+      "[loop {app.loopDebugFrame}] uiActions={eventCount(this: input.uiActions)} pressed={input.pressedEntity.index} animating={tick.animating} active={tick.active} decide={activeDecision.active} assets={session.assetsLoading} hover={session.lastHoverAnimDirty} appSystems={frame.observation.ranCount}{frame.observation.ranNames}"
     )
   }
 }

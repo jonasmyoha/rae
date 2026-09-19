@@ -39,7 +39,6 @@ import Files
 import Sys
 import ui/Components
 open ecs/Entity
-open ui/widgetStyleSystem/WidgetStyleSystem
 open ecs/ComponentTable
 
 let playlistsAssetDir: String = "examples/106_mobile_ui/assets/playlists"
@@ -401,24 +400,4 @@ func savePlaylist(playlist: view Playlist) pub {
       log("[playlist] save failed: {path}")
     }
   }
-}
-
-# Per-frame fan-out: sync playback progress and the liked flags, then
-# let widgetStyleSystem turn WidgetState into visuals for every widget
-# carrying a StateStyle (play/pause icons, hearts, future toggles).
-# Play/pause selected-flags refresh through PlaybackState revision
-# bindings before this runs (refreshMountedUi in main.rae).
-func applyOverlaysToWorld(
-  world: mod UiWorld
-  playback: view PlaybackState
-  state: view AppState
-) pub {
-  applyPlaybackToWorld(world: world, state: playback)
-  likedHeartSystem(
-    world: world
-    liked: state.liked
-    stem: state.currentAlbumStem
-    trackIndex: state.currentTrackIndex
-  )
-  widgetStyleSystem(world: world)
 }
