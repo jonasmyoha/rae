@@ -100,8 +100,8 @@ func createFrame3d() pub ret Frame3d {
 
 func setViewProj(frame: mod Frame3d, m: view Mat4) {
   var i: Int = 0
-  loop i < 16 {
-    frame.data.set(index: i, value: m.m[i])
+  loop let column: Float in m.m {
+    frame.data.set(index: i, value: column)
     i = i + 1
   }
 }

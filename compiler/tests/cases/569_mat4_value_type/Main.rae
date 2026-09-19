@@ -8,19 +8,49 @@ open Math3d
 
 func main() {
   let id: Mat4 = mat4Identity()
-  log("id={id.m[0]} {id.m[5]} {id.m[10]} {id.m[15]} off={id.m[1]}")
+  log(
+    "id={id.m.copyAtFallback(index: 0, fallback: 0.0)} {id.m.copyAtFallback(index: 5, fallback: 0.0)} {id.m.copyAtFallback(
+      index: 10
+      fallback: 0.0
+    )} {id.m.copyAtFallback(index: 15, fallback: 0.0)} off={id.m.copyAtFallback(
+      index: 1
+      fallback: 0.0
+    )}"
+  )
 
   # mat4Mul(a, b) applies b FIRST, then a. T*S must scale then translate,
   # leaving the translation column untouched by the scale.
   let t: Mat4 = mat4Translate(x: 1.0, y: 2.0, z: 3.0)
   let s: Mat4 = mat4Scale(s: 2.0)
   let ts: Mat4 = mat4Mul(a: t, b: s)
-  log("TS diag={ts.m[0]} {ts.m[5]} {ts.m[10]} trans={ts.m[12]} {ts.m[13]} {ts.m[14]}")
+  log(
+    "TS diag={ts.m.copyAtFallback(index: 0, fallback: 0.0)} {ts.m.copyAtFallback(
+      index: 5
+      fallback: 0.0
+    )} {ts.m.copyAtFallback(index: 10, fallback: 0.0)} trans={ts.m.copyAtFallback(
+      index: 12
+      fallback: 0.0
+    )} {ts.m.copyAtFallback(index: 13, fallback: 0.0)} {ts.m.copyAtFallback(
+      index: 14
+      fallback: 0.0
+    )}"
+  )
 
   # Identity is a unit on both sides.
   let ti: Mat4 = mat4Mul(a: t, b: id)
   let it: Mat4 = mat4Mul(a: id, b: t)
-  log("T*I={ti.m[12]} {ti.m[13]} {ti.m[14]} I*T={it.m[12]} {it.m[13]} {it.m[14]}")
+  log(
+    "T*I={ti.m.copyAtFallback(index: 12, fallback: 0.0)} {ti.m.copyAtFallback(
+      index: 13
+      fallback: 0.0
+    )} {ti.m.copyAtFallback(index: 14, fallback: 0.0)} I*T={it.m.copyAtFallback(
+      index: 12
+      fallback: 0.0
+    )} {it.m.copyAtFallback(index: 13, fallback: 0.0)} {it.m.copyAtFallback(
+      index: 14
+      fallback: 0.0
+    )}"
+  )
 
   # Right-handed perspective, WebGPU depth range [0,1].
   let p: Mat4 = mat4Perspective(
@@ -29,7 +59,15 @@ func main() {
     near: 0.1
     far: 100.0
   )
-  log("persp={p.m[0]} {p.m[5]} {p.m[10]} {p.m[11]} {p.m[14]}")
+  log(
+    "persp={p.m.copyAtFallback(index: 0, fallback: 0.0)} {p.m.copyAtFallback(
+      index: 5
+      fallback: 0.0
+    )} {p.m.copyAtFallback(index: 10, fallback: 0.0)} {p.m.copyAtFallback(index: 11, fallback: 0.0)} {p.m.copyAtFallback(
+      index: 14
+      fallback: 0.0
+    )}"
+  )
 
   # Camera at -Y looking at the origin, Z up: right is +X, and the
   # translation row is -(basis . eye).
@@ -44,22 +82,41 @@ func main() {
     upY: 0.0
     upZ: 1.0
   )
-  log("look={v.m[0]} {v.m[5]} {v.m[10]} {v.m[14]}")
+  log(
+    "look={v.m.copyAtFallback(index: 0, fallback: 0.0)} {v.m.copyAtFallback(index: 5, fallback: 0.0)} {v.m.copyAtFallback(
+      index: 10
+      fallback: 0.0
+    )} {v.m.copyAtFallback(index: 14, fallback: 0.0)}"
+  )
 
   # Mat3x4 drops the implied (0,0,0,1) row and restores it exactly for an
   # affine matrix.
   let packed: Mat3x4 = mat4ToMat3x4(a: ts)
   let back: Mat4 = mat3x4ToMat4(a: packed)
   log(
-    "roundtrip={back.m[0]} {back.m[5]} {back.m[10]} {back.m[12]} {back.m[13]} {back.m[14]} {back.m[15]}"
+    "roundtrip={back.m.copyAtFallback(index: 0, fallback: 0.0)} {back.m.copyAtFallback(
+      index: 5
+      fallback: 0.0
+    )} {back.m.copyAtFallback(index: 10, fallback: 0.0)} {back.m.copyAtFallback(
+      index: 12
+      fallback: 0.0
+    )} {back.m.copyAtFallback(index: 13, fallback: 0.0)} {back.m.copyAtFallback(
+      index: 14
+      fallback: 0.0
+    )} {back.m.copyAtFallback(index: 15, fallback: 0.0)}"
   )
 
   # Value semantics: a Mat4 assignment copies, so mutating the copy must
   # leave the source alone. If Mat4 aliased, both would read 42.
   var a: Mat4 = mat4Identity()
   var b: Mat4 = a
-  b.m[0] = 42.0
-  log("copy a0={a.m[0]} b0={b.m[0]}")
+  b.m.set(index: 0, value: 42.0)
+  log(
+    "copy a0={a.m.copyAtFallback(index: 0, fallback: 0.0)} b0={b.m.copyAtFallback(
+      index: 0
+      fallback: 0.0
+    )}"
+  )
 
   # A transform-heavy loop: allocation-free by construction, and a
   # regression that reintroduced per-matrix allocation would show up as a
@@ -69,7 +126,7 @@ func main() {
   loop i < 20000 {
     let r: Mat4 = mat4RotateZ(angle: 0.001 * (i as Float))
     let m: Mat4 = mat4Mul(a: t, b: r)
-    acc = acc + m.m[0]
+    acc = acc + m.m.copyAtFallback(index: 0, fallback: 0.0)
     i = i + 1
   }
   log("loop done i={i} accFinite={acc > 0.0 - 1000000.0}")

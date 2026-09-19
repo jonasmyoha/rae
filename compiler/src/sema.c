@@ -1,4 +1,5 @@
 #include "sema.h"
+#include "array_methods.h"
 #include "type.h"
 #include "ast.h"
 #include "diag.h"
@@ -1355,6 +1356,34 @@ Str get_decl_name(const AstDecl* d) {
         case AST_DECL_GLOBAL_LET: return d->as.let_decl.name;
         default: return (Str){0};
     }
+}
+
+/* An Array receiver only matches a `this: Array(T, cap: N)` pattern with the
+ * SAME cap: infer_generic_args binds T positionally and never looks at the
+ * value argument, so without this every cap's `copyAt` would match every
+ * Array. The cap is read from the pattern's folded value argument, or from
+ * its integer literal when the pattern was never resolved. */
+static int64_t sema_array_pattern_cap(const AstTypeRef* pattern) {
+    if (!pattern) return -1;
+    const TypeInfo* pt = pattern->resolved_type;
+    if (pt && pt->kind == TYPE_REF) pt = pt->as.ref.base;
+    if (pt && pt->kind == TYPE_ARRAY) return pt->as.array.count;
+    for (const AstTypeRef* a = pattern->generic_args; a; a = a->next) {
+        if (!a->is_value_arg) continue;
+        if (a->value_is_folded) return a->value_folded;
+        if (a->value_expr && a->value_expr->kind == AST_EXPR_INTEGER) {
+            char buf[32]; size_t n = a->value_expr->as.integer.len < 31 ? a->value_expr->as.integer.len : 31;
+            memcpy(buf, a->value_expr->as.integer.data, n); buf[n] = '\0';
+            return (int64_t)strtoll(buf, NULL, 10);
+        }
+        return -1;
+    }
+    return -1;
+}
+static bool sema_array_receiver_matches(const AstTypeRef* pattern, const TypeInfo* receiver) {
+    if (!receiver || receiver->kind != TYPE_ARRAY) return true;
+    if (!pattern || !str_eq_cstr(get_base_type_name(pattern), "Array")) return false;
+    return sema_array_pattern_cap(pattern) == receiver->as.array.count;
 }
 
 AstTypeRef* infer_generic_args(CompilerContext* ctx, const AstFuncDecl* func, const AstTypeRef* pattern, const AstTypeRef* concrete_type) {
@@ -3778,7 +3807,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                     char buf[256];
                     snprintf(buf, sizeof(buf),
                         "a '{ }' list literal cannot initialize an %.*s: its capacity is part of its type — "
-                        "construct it with '%.*s(T, cap: N)' (which zero-initializes), then assign elements by index",
+                        "construct it with '%.*s(T, cap: N)' (which zero-initializes), then write elements with 'set(index: i, value: v)'",
                         (int)dbase.len, dbase.data, (int)dbase.len, dbase.data);
                     diag_error(sema_diag_file(module), (int)stmt->line, (int)stmt->column, buf);
                     module->had_error = true;
@@ -4011,15 +4040,18 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                  if (collection_type && collection_type->kind == TYPE_REF) {
                      collection_type = collection_type->as.ref.base;
                  }
-                 if (!sema_struct_template_is(collection_type, "List")
-                     || collection_type->as.structure.generic_count != 1) {
+                 bool is_list = sema_struct_template_is(collection_type, "List")
+                     && collection_type->as.structure.generic_count == 1;
+                 bool is_array = collection_type && collection_type->kind == TYPE_ARRAY;
+                 if (!is_list && !is_array) {
                      diag_error(sema_diag_file(module), (int)stmt->line, (int)stmt->column,
-                                "collection loops currently require a List(T) expression");
+                                "collection loops require a List(T) or Array(T, cap: N) expression");
                      module->had_error = true;
                  } else if (stmt->as.loop_stmt.init
                             && stmt->as.loop_stmt.init->kind == AST_STMT_LET) {
                      AstStmt* binding = stmt->as.loop_stmt.init;
-                     TypeInfo* element_type = collection_type->as.structure.generic_args[0];
+                     TypeInfo* element_type = is_array ? collection_type->as.array.base
+                                                       : collection_type->as.structure.generic_args[0];
                      if (!binding->as.let_stmt.type) {
                          diag_error(sema_diag_file(module), (int)binding->line,
                                     (int)binding->column,
@@ -4035,7 +4067,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                          if (!type_is_same(binding_value_type, element_type)) {
                              diag_error(sema_diag_file(module), (int)binding->line,
                                         (int)binding->column,
-                                        "collection loop binding type must match the List element type");
+                                        "collection loop binding type must match the collection's element type");
                              module->had_error = true;
                          }
                          if (binding->as.let_stmt.type->is_mod
@@ -4044,7 +4076,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                              && !collection->resolved_type->as.ref.is_mod) {
                              diag_error(sema_diag_file(module), (int)binding->line,
                                         (int)binding->column,
-                                        "a 'mod' collection loop requires mutable List storage");
+                                        "a 'mod' collection loop requires mutable collection storage");
                              module->had_error = true;
                          }
                          sema_analyze_stmt(ctx, module, symbols, binding,
@@ -5893,6 +5925,12 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                                 if (!head) head = arg_tr; else tail->next = arg_tr; tail = arg_tr;
                             }
                             rec_tr.generic_args = head;
+                        } else if (rec->kind == TYPE_ARRAY) {
+                            /* `Array(T, cap: N)`: the element binds T positionally
+                             * like a struct's generic argument; the cap is matched
+                             * separately (sema_array_receiver_matches). */
+                            rec_tr.generic_args = sema_type_ref_of(ctx, rec->as.array.base);
+                            rec_tr.resolved_type = rec;
                         }
                     }
                     // Iterate all decls to find the best matching overload for this receiver type
@@ -5905,12 +5943,12 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                         if (!fd->params || !str_eq_cstr(fd->params->name, "this")) continue;
                         if (fd->generic_params && rec) {
                             AstTypeRef* ga = infer_generic_args(ctx, fd, fd->params->type, &rec_tr);
-                            if (ga) { best_decl = dd; break; }
+                            if (ga && sema_array_receiver_matches(fd->params->type, rec)) { best_decl = dd; break; }
                         } else if (!fd->generic_params && rec) {
                             // Non-generic: check receiver type matches this param
                             TypeInfo* pt = sema_resolve_type_internal(ctx, module, symbols, fd->params->type);
                             if (pt && pt->kind == TYPE_REF) pt = pt->as.ref.base;
-                            if (pt == rec || (pt && rec && pt->kind == rec->kind && str_eq(pt->name, rec->name))) {
+                            if (pt == rec || (pt && rec && pt->kind == rec->kind && pt->kind != TYPE_ARRAY && str_eq(pt->name, rec->name))) {
                                 best_decl = dd; break;
                             }
                         }
@@ -5927,11 +5965,11 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                                 if (!fd->params || !str_eq_cstr(fd->params->name, "this")) continue;
                                 if (fd->generic_params && rec) {
                                     AstTypeRef* ga = infer_generic_args(ctx, fd, fd->params->type, &rec_tr);
-                                    if (ga) { best_decl = dd; break; }
+                                    if (ga && sema_array_receiver_matches(fd->params->type, rec)) { best_decl = dd; break; }
                                 } else if (!fd->generic_params && rec) {
                                     TypeInfo* pt = sema_resolve_type_internal(ctx, module, symbols, fd->params->type);
                                     if (pt && pt->kind == TYPE_REF) pt = pt->as.ref.base;
-                                    if (pt == rec || (pt && rec && pt->kind == rec->kind && str_eq(pt->name, rec->name))) {
+                                    if (pt == rec || (pt && rec && pt->kind == rec->kind && pt->kind != TYPE_ARRAY && str_eq(pt->name, rec->name))) {
                                         best_decl = dd; break;
                                     }
                                 }
@@ -6230,44 +6268,34 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                 TypeInfo* t = expr->as.index.target->resolved_type; if (t->kind == TYPE_REF) t = t->as.ref.base;
                 if (t->kind == TYPE_BUFFER) expr->resolved_type = t->as.buffer.base;
                 else if (t->kind == TYPE_STRUCT && sema_struct_template_is(t, "List")) {
-                    /* Bracket indexing is NOT part of List's API.
-                     *
-                     * `[]` belongs to Array(T, cap: N) and to the internal
-                     * Buffer, where the length is part of the type and a
-                     * constant index is checked at compile time. A List's
-                     * length is a runtime value, so brackets could never
-                     * offer that. List access is explicitly optional through
-                     * `at`, `viewAt`, or `modAt`; brackets cannot express the
-                     * required handling of absence.
-                     *
-                     * No Rae code ever used it; it just parsed. */
+                    /* Bracket indexing is NOT part of List's API (nor of
+                     * Array's, below): a subscript yields T and cannot express
+                     * the required handling of absence. List access is
+                     * explicitly optional through `copyAt`, `viewAt` or
+                     * `modAt`. `[]` survives only on the internal Buffer. */
                     diag_error(s_current_decl_origin ? s_current_decl_origin : (module ? module->file_path : NULL),
                                (int)expr->line, (int)expr->column,
                                "a List is not indexed with '[]'; use '.copyAt(index: i)', '.viewAt(index: i)', "
-                               "or '.modAt(index: i)' and handle the optional result. '[]' is for "
-                               "Array(T, cap: N), whose length is part of its type");
+                               "or '.modAt(index: i)' and handle the optional result");
                     if (module) module->had_error = true;
                     if (t->as.structure.generic_count > 0) expr->resolved_type = t->as.structure.generic_args[0];
                 }
                 else if (t->kind == TYPE_ARRAY) {
                     expr->resolved_type = t->as.array.base;
-                    /* Bounds policy (docs/value-aggregates-and-ownership.md §1.7):
-                     * a CONSTANT index is checked at compile time, always, in
-                     * every build. Matrix code is full of constant indices
-                     * (m[5], m[10]) and verifying them costs nothing, so an
-                     * out-of-range constant must never reach runtime. Dynamic
-                     * indices are a separate policy — checked in debug,
-                     * unchecked in release — and are not handled here. */
-                    ConstResult ci = const_eval(symbols, expr->as.index.index);
-                    if (ci.ok && ci.numeric && !ci.is_float &&
-                        (ci.i < 0 || ci.i >= t->as.array.count)) {
-                        char buf[192];
-                        snprintf(buf, sizeof buf,
-                                 "index %lld is out of bounds for Array(cap: %lld); valid indices are 0..%lld",
-                                 (long long)ci.i, (long long)t->as.array.count,
-                                 (long long)(t->as.array.count - 1));
-                        diag_error(module ? module->file_path : NULL,
-                                   (int)expr->line, (int)expr->column, buf);
+                    /* `[]` is not part of Array's API either: an Array has the
+                     * same List-shaped, always-optional access (`copyAt`,
+                     * `viewAt`, `modAt`, `set`), so a subscript that yields T
+                     * — and would have to stop the program out of range — has
+                     * no place in user code. The raw slot survives only inside
+                     * `unsafe`, for the synthesized core/Array wrappers
+                     * (array_methods.h), the way List's wrappers are the only
+                     * callers of the buffer intrinsics. */
+                    if (s_unsafe_depth == 0) {
+                        diag_error(s_current_decl_origin ? s_current_decl_origin : (module ? module->file_path : NULL),
+                                   (int)expr->line, (int)expr->column,
+                                   "an Array is not indexed with '[]'; use '.copyAt(index: i)', '.viewAt(index: i)', "
+                                   "'.modAt(index: i)' and handle the optional result, '.copyAtFallback(index: i, "
+                                   "fallback: v)' for a total read, or '.set(index: i, value: v)' to write");
                         if (module) module->had_error = true;
                     }
                 }
@@ -6473,6 +6501,24 @@ static bool sema_check_value_arg(AstModule* module, ConstResult r, Str arg_name,
     return true;
 }
 
+/* The List-shaped API of Array(T, cap: N) (array_methods.h): the first time a
+ * cap is seen, its method module is synthesized and prepended to the merged
+ * program, so `arr.copyAt(index: i)` resolves like any generic method. */
+static int64_t s_array_caps[256];
+static size_t s_array_cap_count = 0;
+static void sema_ensure_array_methods(CompilerContext* ctx, AstModule* module, int64_t cap) {
+    if (!module || cap <= 0) return;
+    for (size_t i = 0; i < s_array_cap_count; i++) if (s_array_caps[i] == cap) return;
+    if (s_array_cap_count < sizeof(s_array_caps) / sizeof(s_array_caps[0])) s_array_caps[s_array_cap_count++] = cap;
+    AstDecl* decls = array_methods_synthesize(ctx->ast_arena, cap);
+    if (!decls) return;
+    AstDecl* last = decls;
+    while (last->next) last = last->next;
+    last->next = module->decls;
+    module->decls = decls;
+    for (AstDecl* d = decls; d != last->next; d = d->next) register_decl(ctx, d);
+}
+
 static bool sema_resolve_value_arg(AstModule* module, SymbolTable* symbols,
                                    AstTypeRef* arg, int64_t* out) {
     if (arg->value_is_folded) { *out = arg->value_folded; return true; }
@@ -6531,6 +6577,7 @@ static TypeInfo* sema_resolve_array_type(CompilerContext* ctx, AstModule* module
     if (!sema_resolve_value_arg(module, symbols, cap_ref, &count)) return NULL;
 
     TypeInfo* elem = resolve(ctx, module, symbols, elem_ref);
+    sema_ensure_array_methods(ctx, module, count);
     return type_get_array(ctx->type_registry, elem, count);
 }
 
@@ -6594,6 +6641,7 @@ static TypeInfo* sema_array_type_from_call(CompilerContext* ctx, AstModule* modu
         return NULL;
     }
     TypeInfo* arr = type_get_array(ctx->type_registry, elem, count);
+    sema_ensure_array_methods(ctx, module, count);
     /* Register for typedef emission. `let a = Array(Float, cap: 4)` has no
      * type annotation anywhere, so without this the struct would be used and
      * never declared. Registration is keyed on an AstTypeRef, so synthesize

@@ -875,24 +875,10 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                  * parameter, so the target is a value here, never a pointer. */
                 emit_expr(ctx, expr->as.index.target, out, PREC_CALL, false, false);
                 fprintf(out, ".v[");
-                /* Bounds policy (§1.7): a CONSTANT index is already rejected at
-                 * compile time by sema, so emit it raw. A DYNAMIC index is
-                 * wrapped in RAE_ARRAY_IDX, which aborts on an out-of-range
-                 * subscript in debug builds and compiles to the bare index in
-                 * release. Only wrap when the array capacity is known (a
-                 * concrete TYPE_ARRAY), which it always is for `[]`. */
-                bool idx_is_const_lit =
-                    expr->as.index.index->kind == AST_EXPR_INTEGER;
-                if (!idx_is_const_lit && ti && ti->kind == TYPE_ARRAY
-                    && ti->as.array.count > 0) {
-                    fprintf(out, "RAE_ARRAY_IDX(");
-                    emit_expr(ctx, expr->as.index.index, out, PREC_LOWEST, false, false);
-                    fprintf(out, ", %lldLL, ", (long long)ti->as.array.count);
-                    emit_c_source_location(ctx, expr, out);
-                    fprintf(out, ")");
-                } else {
-                    emit_expr(ctx, expr->as.index.index, out, PREC_LOWEST, false, false);
-                }
+                /* The raw slot: sema admits an Array subscript only inside
+                 * `unsafe` (the synthesized core/Array wrappers, which
+                 * bounds-check before reaching it), so no runtime check here. */
+                emit_expr(ctx, expr->as.index.index, out, PREC_LOWEST, false, false);
                 fprintf(out, "]");
                 break;
             }

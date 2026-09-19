@@ -1187,18 +1187,38 @@ static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
         collection_value_type.is_mod = false;
         collection_value_type.is_opt = false;
 
-        /* Snapshot the List header once. This aliases its backing storage but
-         * does not own or drop it. The body iterates directly over `data`, so
-         * there is no optional construction and no per-element bounds check. */
-        fprintf(out, "  {\n    ");
-        emit_type_ref_as_c_type(ctx, &collection_value_type, out, false);
-        fprintf(out, " __rae_collection%d = ", loop_id);
+        /* An Array(T, cap: N) is iterated IN PLACE through a pointer to its
+         * storage (a `mod` binding must write the caller's elements, and a
+         * by-value snapshot would copy all N of them); its length is the cap.
+         * A List's header is snapshotted once instead — that aliases its
+         * backing storage but does not own or drop it. Either way the body
+         * iterates directly over the elements: no optional construction and
+         * no per-element bounds check. */
+        const AstTypeRef* collection_sub = collection_type;
+        if (ctx->generic_params && ctx->generic_args)
+            collection_sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, collection_type);
+        long long array_cap = rae_array_ref_cap(collection_sub);
+        bool collection_is_array = array_cap >= 0;
         bool collection_is_ref = collection_type->is_view || collection_type->is_mod;
-        if (collection_is_ref) fprintf(out, "*(");
-        emit_expr(ctx, stmt->as.loop_stmt.condition, out, PREC_LOWEST, false, false);
-        if (collection_is_ref) fprintf(out, ")");
-        fprintf(out, ";\n    int64_t __rae_collection_length%d = __rae_collection%d.length;\n",
-                loop_id, loop_id);
+        const char* elements = collection_is_array ? "->v" : ".data";
+        fprintf(out, "  {\n    ");
+        if (collection_is_array && collection_type->is_view) fprintf(out, "const ");
+        emit_type_ref_as_c_type(ctx, &collection_value_type, out, false);
+        if (collection_is_array) {
+            /* emit_expr already dereferences a view/mod parameter, so the
+             * expression is the struct itself in every case. */
+            fprintf(out, "* __rae_collection%d = &(", loop_id);
+            emit_expr(ctx, stmt->as.loop_stmt.condition, out, PREC_LOWEST, false, false);
+            fprintf(out, ")");
+            fprintf(out, ";\n    int64_t __rae_collection_length%d = %lldLL;\n", loop_id, array_cap);
+        } else {
+            fprintf(out, " __rae_collection%d = ", loop_id);
+            if (collection_is_ref) fprintf(out, "*(");
+            emit_expr(ctx, stmt->as.loop_stmt.condition, out, PREC_LOWEST, false, false);
+            if (collection_is_ref) fprintf(out, ")");
+            fprintf(out, ";\n    int64_t __rae_collection_length%d = __rae_collection%d.length;\n",
+                    loop_id, loop_id);
+        }
         fprintf(out, "    for (int64_t __rae_collection_index%d = 0; "
                      "__rae_collection_index%d < __rae_collection_length%d; "
                      "__rae_collection_index%d++) {\n",
@@ -1224,9 +1244,9 @@ static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 ctx->compiler_ctx, ctx->generic_params, ctx->generic_args,
                 &binding_value_type);
             fprintf(out, ";\n      rae_deep_copy_%s(&%.*s, "
-                         "&__rae_collection%d.data[__rae_collection_index%d])",
+                         "&__rae_collection%d%s[__rae_collection_index%d])",
                     type_name, (int)binding->as.let_stmt.name.len,
-                    binding->as.let_stmt.name.data, loop_id, loop_id);
+                    binding->as.let_stmt.name.data, loop_id, elements, loop_id);
         } else {
             fprintf(out, " = ");
             if (copy_string) fprintf(out, "rae_string_copy(");
@@ -1234,8 +1254,8 @@ static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 && is_primitive_type(get_base_type_name(binding_type));
             if (primitive_ref) fprintf(out, "{ .ptr = &");
             else if (binding_is_ref) fprintf(out, "&");
-            fprintf(out, "__rae_collection%d.data[__rae_collection_index%d]",
-                    loop_id, loop_id);
+            fprintf(out, "__rae_collection%d%s[__rae_collection_index%d]",
+                    loop_id, elements, loop_id);
             if (primitive_ref) fprintf(out, " }");
             if (copy_string) fprintf(out, ")");
         }
@@ -2213,6 +2233,20 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     && !target_tr->is_view && !target_tr->is_mod;
                 bool is_string_local_reassign = target_is_string
                     && stmt->as.assign_stmt.target->kind == AST_EXPR_IDENT;
+                // An Array slot store (`this[index] = value`, the core/Array
+                // `set` wrapper): the slot OWNS its previous element, so a
+                // whole-value store releases it first — the #965 rule for a
+                // `mod` pointee, applied to the raw slot. Without it every
+                // overwrite of a String / heap-struct element leaked.
+                bool is_array_slot_reassign = !target_is_opt
+                    && stmt->as.assign_stmt.target->kind == AST_EXPR_INDEX
+                    && target_tr && !target_tr->is_view && !target_tr->is_mod
+                    && (target_is_string
+                        || type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, target_tr, 0));
+                if (is_array_slot_reassign) {
+                    const AstTypeRef* arr_tr = infer_expr_type_ref(ctx, stmt->as.assign_stmt.target->as.index.target);
+                    if (!arr_tr || !str_eq_cstr(get_base_type_name(arr_tr), "Array")) is_array_slot_reassign = false;
+                }
                 // Struct-field String reassign: `s.text = newVal` drops
                 // the previous heap held by s.text first, then takes
                 // the new one. Closes the per-iter leak in the ECS
@@ -2310,6 +2344,37 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     else
                         fprintf(out, "); rae_any_drop(__asgp%d); *__asgp%d = __asg%d; }",
                                 tmpn, tmpn, tmpn);
+                    ctx->has_expected_type = had_exp;
+                    ctx->expected_type = saved_exp;
+                } else if (is_array_slot_reassign) {
+                    AstTypeRef elem = *target_tr; elem.next = NULL;
+                    int tmpn = ctx->temp_counter++;
+                    const AstExpr* rhs = stmt->as.assign_stmt.value;
+                    bool rhs_fresh_string = target_is_string && rhs && (
+                        rhs->kind == AST_EXPR_CALL || rhs->kind == AST_EXPR_METHOD_CALL ||
+                        rhs->kind == AST_EXPR_INTERP || rhs->kind == AST_EXPR_BINARY ||
+                        rhs->kind == AST_EXPR_OWN);
+                    fprintf(out, "{ ");
+                    emit_type_ref_as_c_type(ctx, &elem, out, false);
+                    fprintf(out, " __asg%d = ", tmpn);
+                    if (rhs->kind == AST_EXPR_OBJECT && !rhs->as.object_literal.type) {
+                        fprintf(out, "(");
+                        emit_type_ref_as_c_type(ctx, &elem, out, true);
+                        fprintf(out, ")");
+                    }
+                    if (rhs_fresh_string) fprintf(out, "rae_string_pool_take(");
+                    emit_expr(ctx, rhs, out, PREC_LOWEST, false, false);
+                    if (rhs_fresh_string) fprintf(out, ")");
+                    fprintf(out, "; ");
+                    emit_type_ref_as_c_type(ctx, &elem, out, false);
+                    fprintf(out, "* __asgp%d = &(", tmpn);
+                    emit_expr(ctx, stmt->as.assign_stmt.target, out, PREC_LOWEST, true, false);
+                    fprintf(out, ");");
+                    char pname[48];
+                    snprintf(pname, sizeof pname, "(*__asgp%d)", tmpn);
+                    emit_drop_for_value(ctx, out, &elem, pname, true);
+                    fprintf(out, "  *__asgp%d = __asg%d; }", tmpn, tmpn);
+                    if (rhs->kind == AST_EXPR_IDENT || rhs->kind == AST_EXPR_OWN) mark_expr_moved_if_local(ctx, rhs);
                     ctx->has_expected_type = had_exp;
                     ctx->expected_type = saved_exp;
                 } else if (is_string_local_reassign) {

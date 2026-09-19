@@ -451,11 +451,13 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         // (the call may have been written as `set(this, ...)` with `this` as a positional
         // ident, so we cannot rely on `args->name == "this"`).
         Str receiver_base = {0};
+        const AstTypeRef* recv_tr_for_cap = NULL;
         if (expr->as.call.args) {
             const AstTypeRef* recv_tr = infer_expr_type_ref(ctx, expr->as.call.args->value);
             if (recv_tr && ctx->generic_params && ctx->generic_args)
                 recv_tr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, recv_tr);
             if (recv_tr) receiver_base = get_base_type_name(recv_tr);
+            recv_tr_for_cap = recv_tr;
         }
         // Resolve overloads in priority order. Both List(T) and String can
         // export `contains`/`indexOf` etc.; without receiver-typed dispatch
@@ -484,6 +486,10 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             if (has_this && receiver_base.len > 0) {
                 Str param_base = get_base_type_name(candidate->params->type);
                 receiver_matches = str_eq(param_base, receiver_base);
+                /* Array(T, cap: N): one wrapper module per cap, so the cap
+                 * is part of the match (the base name alone is "Array"). */
+                if (receiver_matches && str_eq_cstr(param_base, "Array"))
+                    receiver_matches = rae_array_ref_cap(candidate->params->type) == rae_array_ref_cap(recv_tr_for_cap);
             }
             if (!candidate->generic_params) {
                 if (receiver_matches) { if (!nongeneric_receiver_match) nongeneric_receiver_match = candidate; }
@@ -537,8 +543,14 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         // like `g.grid = createList(initialCap: 200)` where `grid: List(Int)` should
         // override any earlier `createList<String>` specialisation sema may have
         // attached.
+        /* An expected `Any` (a `log(...)` argument, an interpolation part)
+         * says nothing about T and must not override what sema bound from
+         * the receiver (`arr.copyAtFallback(...)` inside `log("{...}")`). */
+        bool expected_is_any = ctx->has_expected_type
+            && (str_eq_cstr(get_base_type_name(&ctx->expected_type), "Any")
+                || (ctx->expected_type.resolved_type && ctx->expected_type.resolved_type->kind == TYPE_ANY));
         if (fd->specialization_args && fd->generic_template && fd->generic_template->kind == AST_DECL_FUNC &&
-            ctx->has_expected_type && !expr->as.call.generic_args) {
+            ctx->has_expected_type && !expected_is_any && !expr->as.call.generic_args) {
             const AstFuncDecl* tmpl = &fd->generic_template->as.func_decl;
             if (tmpl->returns && tmpl->returns->type) {
                 AstTypeRef* re_inferred = infer_generic_args(ctx->compiler_ctx, tmpl, tmpl->returns->type, &ctx->expected_type);

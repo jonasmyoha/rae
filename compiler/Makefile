@@ -46,6 +46,7 @@ SRCS = $(SRC_DIR)/main.c \
        $(SRC_DIR)/diag.c \
        $(SRC_DIR)/type.c \
        $(SRC_DIR)/sema.c \
+       $(SRC_DIR)/array_methods.c \
        $(SRC_DIR)/lexer.c \
        $(SRC_DIR)/ast.c \
        $(SRC_DIR)/parser.c \

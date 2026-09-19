@@ -80,3 +80,12 @@ The warning is `runtimeWarning(message:)` in `lib/core/Core.rae`; its
 sibling `runtimeError(message:)` (one line, exit 70) is for a state the
 program cannot continue from, and List does not use it. A write whose index
 may be out of range checks `length` first, or `add`s.
+
+**`Array(T, cap: N)` has the same API and the same answers** — `copyAt` /
+`viewAt` / `modAt` return `none`, `copyAtFallback` returns the fallback,
+`set` past the cap is ignored with `warning: Array.set: index 20 is out of
+range for length 16`, `length()` is the cap, and a collection loop iterates
+it in place. There is no `[]` on either collection (docs/array-vs-list-
+indexing.md). Array's wrappers are synthesized by the compiler per cap
+(`compiler/src/array_methods.c`) rather than written in `lib/core`, because
+no Rae signature can range over the cap; they are the same code as List's.

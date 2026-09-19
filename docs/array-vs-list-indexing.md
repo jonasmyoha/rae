@@ -1,69 +1,47 @@
-# Decision: `Array[i]` vs `List` indexing — the asymmetry is intentional (#649)
+# Decision: `Array` and `List` are accessed the same way — no `[]` on either (#649, 2026-09-19)
 
-**Decision: `List` does NOT get `[]`.** `Array(T, cap: N)` is indexed with
-`arr[i]`; `List(T)` is accessed with the `copyAt` / `viewAt` / `modAt` triad and
-`if let`. The two spellings reflect two genuinely different abstractions — this
-is not a missing-sugar inconsistency to paper over.
+**Decision: neither `List` nor `Array` has `[]`.** Both are accessed with the
+`copyAt` / `viewAt` / `modAt` triad and `if let`, read totally with
+`copyAtFallback`, written with `set`, and iterated with a collection loop.
 
-## What each does today (verified)
+## History
 
-`Array(T, cap: N)` — fixed size, size is part of the **type**:
-- `arr[i]` is an **lvalue**. `let c: T = arr[i]` reads a **copy**; `arr[i] = v`
-  and `arr[i].field = v` write **in place**; `view`/`mod` bind via `=>`.
-- Returns `T` directly — **not** optional.
-- **Constant** index out of range is a **compile error**
-  (`index 7 is out of bounds for Array(cap: 3); valid indices are 0..2`).
-- A **dynamic** (non-constant) index is **checked in every build**, per
-  `value-aggregates-and-ownership.md` §1.7: an out-of-range dynamic subscript
-  prints a source location and aborts. (#655 first compiled the check out of
-  release builds; that was reversed in 2026-09 — Rae is always
-  bounds-checked.) This is a memory-safety guard emitted in the generated C,
-  not a user-facing language construct, so it is compatible with #642's "no
-  trap/unwrap operator" rule.
+#649 (2026-09) settled that `List` does not get `[]`: a List's length is a
+runtime value, so indexed access is inherently fallible, and Rae makes that
+explicit through optionals rather than a trap. At that time `Array(T, cap: N)`
+kept `arr[i]`, justified by its length being part of the type: a constant
+index was checked at compile time, and a dynamic one was bounds-checked at
+run time and **aborted** out of range.
 
-`List(T)` — dynamic runtime length:
-- `list[i]` is **rejected** by sema with:
-  *"a List is not indexed with '[]'; use '.copyAt(index: i)', '.viewAt(index: i)',
-  or '.modAt(index: i)' and handle the optional result. '[]' is for
-  Array(T, cap: N), whose length is part of its type."*
-- The accessors return `opt T` / `opt view T` / `opt mod T`, consumed with
-  `if let` (#642/#643).
+That abort was the one place in Rae where an index could stop the program —
+and it could not be softened: `arr[i]` returns a bare `T`, and there is no
+"zero object" for an arbitrary `T` to hand back instead. So the subscript was
+removed (queue, 2026-09-19) and Array was given List's API and List's
+behaviour, one behaviour in every build profile:
 
-## Why they differ (and why `[]` on List is the wrong move)
+| | `List(T)` | `Array(T, cap: N)` |
+|---|---|---|
+| `copyAt(index:)` | `opt T`, `none` out of range | same |
+| `viewAt` / `modAt` | `opt view T` / `opt mod T`, aliasing the storage | same |
+| `copyAtFallback(index:, fallback:)` | `T` | same |
+| `set(index:, value:)` | past the end: ignored + `warning: List.set: …` | past the end: ignored + `warning: Array.set: …` |
+| `length` | the runtime length | the cap |
+| `loop let x: view T in xs` | yes | yes |
 
-The size of an `Array` is in its type, so indexing is statically bounded and
-`arr[i] -> T` reads as infallible (constant OOB is caught at compile time). A
-`List`'s length is a runtime value, so indexed access is **inherently fallible**;
-Rae makes that fallibility explicit and unavoidable — the accessors return an
-optional you must `if let`.
+## How Array's methods exist
 
-Giving `List` a `[]` operator would force one of three bad choices, none of which
-actually delivers "consistency":
+`Array` is a compiler builtin (a struct wrapping `T[N]`), so no Rae signature
+can range over its cap. The compiler therefore synthesizes the wrappers as Rae
+source — one small generic module per distinct cap the program uses
+(`compiler/src/array_methods.c`) — parsed by the real parser and resolved,
+specialized and emitted like `lib/core/List.rae`'s. The bodies index the raw
+slot with `this[index]` inside `unsafe`; that subscript is rejected by sema
+everywhere else, the way List's buffer intrinsics are unsafe-only.
 
-1. **`list[i]` returns `opt T`.** Now `[]` yields an optional you must `if let`
-   unwrap — clumsier than just writing `copyAt`, and *inconsistent anyway* with
-   `arr[i] -> T`. Consistency is not achieved; a worse spelling is.
-2. **`list[i]` returns `T`, trapping on OOB.** Rae has **no** trap/panic
-   primitive — the #642 decision deliberately rejected adding one ("the else
-   branch returns a value the programmer wrote, never a compiler-invented one").
-   So this option does not exist without reversing that decision.
-3. **`list[i]` returns `T`, unchecked.** A silent out-of-bounds use-after-read/
-   write — exactly the footgun class #642/#643/#645 worked to eliminate.
+## Why not keep `[]` on Array with a checked-and-continue behaviour
 
-There is a further reason: the `copyAt` / `viewAt` / `modAt` triad (#643) also
-names **copy-vs-alias intent** at every call site, which `[]` cannot express.
-Collapsing List access to `[]` would lose that distinction as well.
-
-The #642 decision record already lists "no `[]`" among the rejected features;
-this note records the specific List-vs-Array rationale.
-
-## Outcome
-
-- `List` keeps the `copyAt`/`viewAt`/`modAt` + `if let` triad; `[]` stays an
-  `Array`-only operator. The existing List-`[]` diagnostic already teaches the
-  correct alternative, so no message change is needed.
-- **No follow-up implementation task** (the follow-up in #649 was conditional on
-  "if `List` gets `[]`" — it does not).
-- Related, already filed, and *separate* from this decision: #655 (make Array's
-  dynamic-index bounds behavior match its docs) and #654 (Array `mod`/`view`
-  element binding copies instead of aliasing).
+A subscript that continues past the end must yield *some* `T`, and inventing
+one is the "compiler-invented value" #642 rejected. Making it yield `opt T`
+would be `copyAt` with a worse spelling, and would still be a different
+operator from what `List` uses. One API for both collections is simpler to
+read, to generate, and to analyse — the language's goals.

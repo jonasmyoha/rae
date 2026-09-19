@@ -235,7 +235,7 @@ func shadowSdfDraw(
   }
   var vp: Mat4 = mat4Identity()
   loop var k: Int = 0, k < 16, ++k {
-    vp.m[k] = floatAt(list: shadow.cascadeVp, index: cascade * 16 + k)
+    vp.m.set(index: k, value: floatAt(list: shadow.cascadeVp, index: cascade * 16 + k))
   }
   let inverse: Mat4 = mat4Inverse(a: vp)
   var span: Float = floatAt(list: shadow.depthRange, index: cascade)
@@ -284,9 +284,27 @@ func shadowSdfDraw(
       if corner >= 4 {
         wz = hi.z
       }
-      let cx: Float = vp.m[0] * wx + vp.m[4] * wy + vp.m[8] * wz + vp.m[12]
-      let cy: Float = vp.m[1] * wx + vp.m[5] * wy + vp.m[9] * wz + vp.m[13]
-      var cw: Float = vp.m[3] * wx + vp.m[7] * wy + vp.m[11] * wz + vp.m[15]
+      let cx: Float = vp.m.copyAtFallback(index: 0, fallback: 0.0) * wx + vp.m.copyAtFallback(
+        index: 4
+        fallback: 0.0
+      ) * wy + vp.m.copyAtFallback(index: 8, fallback: 0.0) * wz + vp.m.copyAtFallback(
+        index: 12
+        fallback: 0.0
+      )
+      let cy: Float = vp.m.copyAtFallback(index: 1, fallback: 0.0) * wx + vp.m.copyAtFallback(
+        index: 5
+        fallback: 0.0
+      ) * wy + vp.m.copyAtFallback(index: 9, fallback: 0.0) * wz + vp.m.copyAtFallback(
+        index: 13
+        fallback: 0.0
+      )
+      var cw: Float = vp.m.copyAtFallback(index: 3, fallback: 0.0) * wx + vp.m.copyAtFallback(
+        index: 7
+        fallback: 0.0
+      ) * wy + vp.m.copyAtFallback(index: 11, fallback: 0.0) * wz + vp.m.copyAtFallback(
+        index: 15
+        fallback: 0.0
+      )
       if cw <= 0.0 {
         cw = 1.0  # ortho: w is 1
       }
@@ -310,14 +328,14 @@ func shadowSdfDraw(
     if not skip {
       shadow.sdf.scratch.clear()
       loop var k: Int = 0, k < 16, ++k {
-        shadow.sdf.scratch.add(value: vp.m[k])
+        shadow.sdf.scratch.add(value: vp.m.copyAtFallback(index: k, fallback: 0.0))
       }
       loop var k: Int = 0, k < 16, ++k {
-        shadow.sdf.scratch.add(value: inverse.m[k])
+        shadow.sdf.scratch.add(value: inverse.m.copyAtFallback(index: k, fallback: 0.0))
       }
-      shadow.sdf.scratch.add(value: 0.0 - vp.m[2])
-      shadow.sdf.scratch.add(value: 0.0 - vp.m[6])
-      shadow.sdf.scratch.add(value: 0.0 - vp.m[10])
+      shadow.sdf.scratch.add(value: 0.0 - vp.m.copyAtFallback(index: 2, fallback: 0.0))
+      shadow.sdf.scratch.add(value: 0.0 - vp.m.copyAtFallback(index: 6, fallback: 0.0))
+      shadow.sdf.scratch.add(value: 0.0 - vp.m.copyAtFallback(index: 10, fallback: 0.0))
       shadow.sdf.scratch.add(value: 0.0)
       shadow.sdf.scratch.add(value: count as Float)
       shadow.sdf.scratch.add(value: blend)

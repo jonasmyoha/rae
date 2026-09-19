@@ -1,0 +1,19 @@
+# docs/value-aggregates-and-ownership.md §1.7: an Array has List's bounds
+# policy, in every build profile. A read past the end is `none`; a write past
+# the end is bounds-checked, ignored and reported on stderr — the program
+# continues. The warning names the call, the index and the length (the cap).
+func main() {
+  var grid: Array(Int, cap: 3) = Array(Int, cap: 3)
+  var index: Int = 5
+  grid.set(index: index, value: 9)
+  if let missing: Int = grid.copyAt(index: index) {
+    log("read {missing}")
+  } else {
+    log("copyAt(5) is none")
+  }
+  log("copyAtFallback(5) {grid.copyAtFallback(index: index, fallback: -1)}")
+  grid.set(index: -1, value: 9)
+  grid.set(index: 2, value: 30)
+  log("set(2) ok: {grid.copyAtFallback(index: 2, fallback: 0)}")
+  log("still running: length {grid.length()}")
+}

@@ -156,9 +156,10 @@ All of this is **orthogonal to `Vec3`**: value-vs-reference access is identical 
   the value copy leaves the whole element being copied per access and forces a
   read-modify-`set` round trip on every mutation — measurable for large components in
   hot per-frame loops.
-- If a system needs absolute max throughput, `Array(T, cap: N)` supports direct
-  inline `arr[i]` (no `opt T`, no bounds branch beyond the peephole). `List` requires
-  `at`/`viewAt`/`modAt`; direct `list[i]` is rejected by sema.
+- `Array(T, cap: N)` is accessed exactly like `List` (`copyAt`/`viewAt`/`modAt`,
+  `copyAtFallback`, `set`, collection loops); neither has `[]` (2026-09-19,
+  docs/array-vs-list-indexing.md). What Array buys is inline, allocation-free
+  storage, not a different access operator.
 
 ## 7. Semantic aliases for vector types
 

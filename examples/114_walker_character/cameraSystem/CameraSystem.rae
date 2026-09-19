@@ -145,9 +145,9 @@ func applyCameraRigHierarchy(cameraSystem: mod CameraSystem, world: mod GameWorl
       entity: cameraSystem.camEntity
     )
     cameraSystem.camera.position = Vec3.create(
-      x: camWorld.matrix.m[12]
-      y: camWorld.matrix.m[13]
-      z: camWorld.matrix.m[14]
+      x: mat4Get(m: camWorld.matrix, i: 12)
+      y: mat4Get(m: camWorld.matrix, i: 13)
+      z: mat4Get(m: camWorld.matrix, i: 14)
     )
   } else {
     let forward: Vec3 = cameraRigForward(rig: cameraSystem.rig)
