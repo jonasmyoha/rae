@@ -150,7 +150,8 @@ fn raeTerrainDetailColor(p: vec2<f32>, bio: vec3<f32>, t: f32) -> vec3<f32> {
   let sgMix = smoothstep(sandHiBlur - RAE_SANDGRASS_BLUR, sandHiBlur + RAE_SANDGRASS_BLUR, bio.x);
   let wGrassC = sgSum * sgMix;
   let wSandC = sgSum * (1.0 - sgMix);
-  let groundBase = raeTerrainVary(RAE_TERRAIN_GRASS, RAE_TERRAIN_VAR_GRASS, v) * wGrassC
+  let grassColor = terrainGrassColor(p, v);
+  let groundBase = grassColor * wGrassC
        + raeTerrainVary(RAE_TERRAIN_SAND,  RAE_TERRAIN_VAR_SAND,  v) * sandWet * wSandC
        + raeTerrainVary(RAE_TERRAIN_MUD,   RAE_TERRAIN_VAR_MUD,   v) * b.wMud
        + raeTerrainVary(RAE_TERRAIN_ROCK,  RAE_TERRAIN_VAR_ROCK,  v) * b.wRock
@@ -182,7 +183,7 @@ fn raeTerrainDetailColor(p: vec2<f32>, bio: vec3<f32>, t: f32) -> vec3<f32> {
   // adds brush-stroke strands on top. Suppressed under water and road.
   let strand = (0.35 + 0.65 * smoothstep(0.30, 0.70, tuft)) * nearGrass
              * (1.0 - b.wWater) * (1.0 - path) * RAE_GRASS_FRINGE_STRENGTH;
-  let ground = mix(roaded, raeTerrainVary(RAE_TERRAIN_GRASS, RAE_TERRAIN_VAR_GRASS, v), strand);
+  let ground = mix(roaded, grassColor, strand);
   // The swash (wet foam tongues washing UP the beach) stays on the ground; the
   // surf line and the water-side foam are the water surface's own (#857).
   let swash = raeWaterSwash(p, bio.x, b.wSand, t);
