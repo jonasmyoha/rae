@@ -88,6 +88,7 @@ func mountHomePage(
   world: mod UiWorld
   scenes: view AlbumScenes
   state: view AppState
+  playback: view PlaybackState
   scrollY: view Float
   viewport: view Viewport
 ) pub ret EntityId {
@@ -146,22 +147,18 @@ func mountHomePage(
     let strip: EntityId = nodeEntity(world: world, index: stripRaw)
     let stripActive: Active = { value: hasRecent }
     componentSet(this: world.actives, entity: strip, data: stripActive)
-    if hasRecent {
-      fillRecentlyPlayedStrip(
-        world: world
-        scenes: scenes
-        strip: strip
-        history: state.playHistory
-        rounded: state.settings.roundedAlbumCovers
-      )
-    }
   }
 
-  # The cover grid is a data list: the scene's CoverGrid node carries a
-  # `CoverGrid { columns: 2, source: home }` component and coverGridSystem
-  # (#975) materialises its rows. Fill now so the screen-switch hero capture
-  # right after this mount finds the tiles.
-  coverGridSystem(world: world, state: state, scenes: scenes)
+  # The cover grid and the recently-played strip are data lists: the scene's
+  # nodes carry a `ListView` + `ListSource` (#996) and listSourceSystem fills
+  # their rows. Fill now so the screen-switch hero capture right after this
+  # mount finds the tiles.
+  listSourceSystem(
+    world: world
+    state: state
+    playback: playback
+    scenes: scenes
+  )
 
   ret mount
 }

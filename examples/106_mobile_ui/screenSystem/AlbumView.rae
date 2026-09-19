@@ -114,7 +114,9 @@ func mountAlbumPage(
     bottom: 0.0
   )
   albumHeaderSystem(world: world, state: state)
-  trackListSystem(
+  # The track rows are the page's `ListView` + `ListSource { albumTracks }`
+  # (#996): fill now so the first frame shows them.
+  listSourceSystem(
     world: world
     state: state
     playback: playback

@@ -1,0 +1,370 @@
+open ui/Ecs
+import ui/Components
+import ui/Scene
+open ui/SceneInstance
+open ui/listViewSystem/ListViewSystem
+open ecs/Entity
+open ecs/ComponentTable
+
+# The app's data lists as DATA (#996). Every list a screen shows — the Home
+# and Library cover grids, the search results, the album's track rows, the
+# bottom sheet's actions, the recently-played strip — is an authored
+# `ListView` (lib/ui, flow mode) on its container node plus a `ListSource`
+# naming the app data that feeds it. This file is the ONLY app code behind
+# them: one producer per source turns app state into `ListViewData` rows
+# (parallel key/value cells the scene's bindings read), and
+# `listSourceSystem` refreshes a host's rows when its source's key moved.
+# The lib `listViewSystem` mounts, re-binds and reconciles the row entities.
+func listCell(row: mod ListViewRow, key: view String, value: own String) {
+  row.keys.add(value: "{key}")
+  row.values.add(value: value)
+}
+
+func newListRow(cap: view Int) ret ListViewRow {
+  ret ListViewRow { keys: List.create(String, cap: cap), values: List.create(String, cap: cap) }
+}
+
+func boolCell(value: view Bool) ret String {
+  if value {
+    ret "true"
+  }
+  ret "false"
+}
+
+# The corner radius a cover carries under the rounded-covers setting: the
+# tile scenes' authored radius when on, 0 (the component is removed) when off.
+func coverRadiusCell(state: view AppState, authored: view Float) ret String {
+  if state.settings.roundedAlbumCovers {
+    ret "{authored}"
+  }
+  ret "0"
+}
+
+# ----- cover grids (Home: the library albums; Library: Liked tile first) -----
+func coverTileRow(state: view AppState, stem: view String) ret ListViewRow {
+  var row: ListViewRow = newListRow(cap: 4)
+  listCell(row: row, key: "key", value: "{stem}")
+  listCell(row: row, key: "kind", value: "album")
+  listCell(row: row, key: "radius", value: coverRadiusCell(state: state, authored: 26.024096))
+  ret row
+}
+
+# The Liked playlist's 2x2 tile: up to four cover cells switched on, the
+# empty cells keeping their authored placeholder; loading while it has none.
+func playlistTileRow(state: view AppState) ret ListViewRow {
+  var row: ListViewRow = newListRow(cap: 16)
+  let stems: List(String) = playlistCoverStems(playlist: state.liked, max: 4)
+  listCell(row: row, key: "key", value: "playlist:liked")
+  listCell(row: row, key: "kind", value: "playlist")
+  var c: Int = 0
+  loop c < 4 {
+    let has: Bool = c < stems.length
+    listCell(row: row, key: "art{c}", value: stems.copyAtFallback(index: c, fallback: "albumCover"))
+    listCell(row: row, key: "has{c}", value: boolCell(value: has))
+    listCell(row: row, key: "empty{c}", value: boolCell(value: has is false))
+    c = c + 1
+  }
+  listCell(row: row, key: "loading", value: boolCell(value: stems.length is 0))
+  listCell(row: row, key: "cellRadius", value: coverRadiusCell(state: state, authored: 13.012048))
+  ret row
+}
+
+func coverGridData(state: view AppState, withPlaylist: view Bool) ret ListViewData {
+  let keys: List(String) = collectLibraryCoverKeys(
+    albums: state.mediaLibrary.albums
+    library: state.library
+  )
+  let rows: List(ListViewRow) = List.create(ListViewRow, cap: keys.length + 1)
+  if withPlaylist {
+    rows.add(value: playlistTileRow(state: state))
+  }
+  loop let stem: view String in keys {
+    rows.add(value: coverTileRow(state: state, stem: stem))
+  }
+  ret ListViewData { rows: own rows }
+}
+
+# ----- search results -------------------------------------------------------
+func searchRow(
+  key: own String
+  title: view String
+  subtitle: view String
+  action: own String
+) ret ListViewRow {
+  var row: ListViewRow = newListRow(cap: 5)
+  listCell(row: row, key: "key", value: key)
+  listCell(row: row, key: "index", value: "")
+  listCell(row: row, key: "title", value: "{title}")
+  listCell(row: row, key: "subtitle", value: "{subtitle}")
+  listCell(row: row, key: "action", value: action)
+  ret row
+}
+
+func containsFold(haystack: view String, needle: view String) ret Bool {
+  ret haystack.toLower().contains(sub: needle)
+}
+
+# Every catalogue track (or album) whose title / artist / album matches the
+# query, at most `maxRows`; no rows for an empty query.
+func searchData(
+  state: view AppState
+  query: view String
+  albumsOnly: view Bool
+  maxRows: view Int
+) ret ListViewData {
+  let rows: List(ListViewRow) = List.create(ListViewRow, cap: maxRows)
+  if query.length() is 0 {
+    ret ListViewData { rows: own rows }
+  }
+  let needle: String = query.toLower()
+  loop let album: view Album in state.mediaLibrary.albums {
+    if rows.length >= maxRows {
+      break
+    }
+    let albumHit: Bool = containsFold(haystack: album.album, needle: needle) or containsFold(
+      haystack: album.artist
+      needle: needle
+    )
+    if albumsOnly {
+      if albumHit {
+        rows.add(value: searchRow(
+          key: "{album.stem}"
+          title: album.album
+          subtitle: album.artist
+          action: "song.openref.0.{album.stem}"
+        ))
+      }
+    } else {
+      var t: Int = 0
+      loop t < album.tracks.length and rows.length < maxRows {
+        if let track: view Track => album.tracks.viewAt(index: t) {
+          if albumHit or containsFold(haystack: track.title, needle: needle) {
+            rows.add(value: searchRow(
+              key: "{album.stem}:{t}"
+              title: track.title
+              subtitle: "{album.artist} - {album.album}"
+              action: "song.openref.{t}.{album.stem}"
+            ))
+          }
+        }
+        t = t + 1
+      }
+    }
+  }
+  ret ListViewData { rows: own rows }
+}
+
+# ----- the album page's track rows -----------------------------------------
+
+# One song of the collection: number, texts, the exact-song click, the
+# widget identity, and the playing highlight (the row's Shape becomes the
+# accent pill only for the song that is playing).
+func trackRow(
+  cr: view CollectionRow
+  visual: view Int
+  playback: view PlaybackState
+) ret ListViewRow {
+  var num: Int = cr.number
+  if num <= 0 {
+    num = visual + 1
+  }
+  var label: String = "{num}"
+  if num < 10 {
+    label = "0{num}"
+  }
+  var playing: Bool = false
+  if playback.playingAlbumStem is cr.albumStem {
+    if cr.trackIndex is playback.playingTrackIndex {
+      playing = true
+    }
+  }
+  var row: ListViewRow = newListRow(cap: 10)
+  listCell(row: row, key: "key", value: "{cr.albumStem}:{cr.trackIndex}")
+  listCell(row: row, key: "index", value: label)
+  listCell(row: row, key: "title", value: "{cr.title}")
+  listCell(row: row, key: "subtitle", value: "{cr.subtitle}")
+  listCell(row: row, key: "action", value: "song.openref.{cr.trackIndex}.{cr.albumStem}")
+  listCell(row: row, key: "widgetKind", value: "trackRow")
+  listCell(row: row, key: "selected", value: boolCell(value: playing))
+  if playing {
+    listCell(row: row, key: "shapeKind", value: "RoundedRect")
+    listCell(row: row, key: "shapeSlot", value: "accent")
+    listCell(row: row, key: "shapeRadius", value: "39.03614457831325")
+  } else {
+    listCell(row: row, key: "shapeKind", value: "Rect")
+    listCell(row: row, key: "shapeSlot", value: "surface")
+    listCell(row: row, key: "shapeRadius", value: "0")
+  }
+  ret row
+}
+
+func albumTracksData(state: view AppState, playback: view PlaybackState) ret ListViewData {
+  let cv: CollectionView = buildCurrentCollection(state: state)
+  let rows: List(ListViewRow) = List.create(ListViewRow, cap: cv.rows.length)
+  var r: Int = 0
+  loop let cr: view CollectionRow in cv.rows {
+    rows.add(value: trackRow(cr: cr, visual: r, playback: playback))
+    r = r + 1
+  }
+  ret ListViewData { rows: own rows }
+}
+
+# ----- the bottom sheet's actions ------------------------------------------
+func sheetData(sheet: view BottomSheetState) ret ListViewData {
+  let rows: List(ListViewRow) = List.create(ListViewRow, cap: sheet.actions.length)
+  loop let action: view BottomSheetAction in sheet.actions {
+    var row: ListViewRow = newListRow(cap: 3)
+    listCell(row: row, key: "key", value: "{action.actionId}")
+    listCell(row: row, key: "label", value: "{action.label}")
+    listCell(row: row, key: "action", value: "{action.actionId}")
+    # The loading / disabled fade StateStyle is a runtime table, so it rides
+    # the row data rather than the scene.
+    listCell(row: row, key: "disabled", value: "0.45")
+    listCell(row: row, key: "loading", value: "0.72")
+    listCell(row: row, key: "error", value: "0.42")
+    rows.add(value: row)
+  }
+  ret ListViewData { rows: own rows }
+}
+
+# ----- the recently-played strip ------------------------------------------
+
+# The newest `recentlyPlayedPreviewMax` plays, newest first, each replaying
+# its REAL history index; the art cell and the placeholder switch follow
+# whether the entry's artwork is loaded.
+func recentData(state: view AppState) ret ListViewData {
+  let history: view PlayHistory => state.playHistory
+  let n: Int = history.entries.length
+  var count: Int = recentlyPlayedPreviewMax
+  if n < count {
+    count = n
+  }
+  let rows: List(ListViewRow) = List.create(ListViewRow, cap: count)
+  var visual: Int = 0
+  loop visual < count {
+    let entryIdx: Int = n - 1 - visual
+    if let entry: view PlayHistoryEntry => history.entries.viewAt(index: entryIdx) {
+      let hasArt: Bool = historyHasArt(entry: entry)
+      var row: ListViewRow = newListRow(cap: 8)
+      listCell(row: row, key: "key", value: "{entryIdx}")
+      listCell(row: row, key: "index", value: "{entryIdx}")
+      listCell(row: row, key: "art", value: "{entry.textureKey}")
+      listCell(row: row, key: "hasArt", value: boolCell(value: hasArt))
+      listCell(row: row, key: "noArt", value: boolCell(value: hasArt is false))
+      listCell(row: row, key: "placeholderId", value: "{entry.trackName}:{entry.artistName}")
+      listCell(row: row, key: "radius", value: coverRadiusCell(state: state, authored: 17.349398))
+      listCell(row: row, key: "phDisabled", value: "1.0")
+      listCell(row: row, key: "phLoading", value: "0.72")
+      listCell(row: row, key: "phError", value: "0.42")
+      rows.add(value: row)
+    }
+    visual = visual + 1
+  }
+  ret ListViewData { rows: own rows }
+}
+
+# ----- the system ----------------------------------------------------------
+
+# The key that identifies a source's current content: when it differs from
+# the host's `builtKey`, the rows are regenerated.
+func listSourceKey(
+  world: view UiWorld
+  host: view EntityId
+  source: view ListSourceKind
+  state: view AppState
+  playback: view PlaybackState
+) ret String {
+  let settings: String = boolCell(value: state.settings.roundedAlbumCovers)
+  if source is ListSourceKind.home or source is ListSourceKind.library {
+    ret "{state.libraryRevision}|{settings}"
+  }
+  if source is ListSourceKind.searchTracks or source is ListSourceKind.searchAlbums {
+    ret searchQueryOnPage(world: world, page: pageOf(world: world, entity: host))
+  }
+  if source is ListSourceKind.albumTracks {
+    ret "{albumCollectionKey(state: state)}|{playback.playingAlbumStem}|{playback.playingTrackIndex}"
+  }
+  if source is ListSourceKind.sheet {
+    ret "{state.bottomSheet.epoch}"
+  }
+  ret "{state.playHistory.revision}|{settings}"
+}
+
+func listViewDataFor(
+  world: view UiWorld
+  host: view EntityId
+  source: view ListSourceKind
+  state: view AppState
+  playback: view PlaybackState
+) ret ListViewData {
+  if source is ListSourceKind.home {
+    ret coverGridData(state: state, withPlaylist: false)
+  }
+  if source is ListSourceKind.library {
+    ret coverGridData(state: state, withPlaylist: true)
+  }
+  if source is ListSourceKind.searchTracks or source is ListSourceKind.searchAlbums {
+    var maxRows: Int = 12
+    if componentHas(this: world.listViews, entity: host) {
+      let lv: ListView = componentGet(this: world.listViews, entity: host)
+      if lv.visibleItemCount > 0 {
+        maxRows = lv.visibleItemCount
+      }
+    }
+    ret searchData(
+      state: state
+      query: searchQueryOnPage(world: world, page: pageOf(world: world, entity: host))
+      albumsOnly: source is ListSourceKind.searchAlbums
+      maxRows: maxRows
+    )
+  }
+  if source is ListSourceKind.albumTracks {
+    ret albumTracksData(state: state, playback: playback)
+  }
+  if source is ListSourceKind.sheet {
+    ret sheetData(sheet: state.bottomSheet)
+  }
+  ret recentData(state: state)
+}
+
+# Refresh every `ListSource` host whose source moved, then let the lib
+# materialise the rows (so a mount or a screen switch sees its tiles at
+# once — the hero capture right after a mount needs them).
+func listSourceSystem(
+  world: mod UiWorld
+  state: view AppState
+  playback: view PlaybackState
+  scenes: view AlbumScenes
+) pub {
+  var changed: Bool = false
+  let n: Int = componentCount(this: world.listSources)
+  var i: Int = 0
+  loop i < n {
+    let host: EntityId = componentEntityAt(this: world.listSources, i: i)
+    let binding: ListSource = componentDataAt(this: world.listSources, i: i)
+    let key: String = listSourceKey(
+      world: world
+      host: host
+      source: binding.source
+      state: state
+      playback: playback
+    )
+    if key is not binding.builtKey {
+      let data: ListViewData = listViewDataFor(
+        world: world
+        host: host
+        source: binding.source
+        state: state
+        playback: playback
+      )
+      componentSet(this: world.listViewDatas, entity: host, data: own data)
+      let built: ListSource = { source: binding.source, builtKey: "{key}" }
+      componentSet(this: world.listSources, entity: host, data: own built)
+      changed = true
+    }
+    i = i + 1
+  }
+  if changed {
+    listViewSystem(world: world, scenes: scenes.subScenes)
+  }
+}
