@@ -1,0 +1,39 @@
+open ui/Ecs
+# EmptyStateSystem — the empty-state blocks as data (#998). A node authored
+# with `EmptyState { kind }` (lib/ui) is shown ONLY while its page-level list
+# is empty; this replaces the two per-page node-id toggles the
+# History and Search views used. Runs from the observation schedule.
+import ui/Components
+open ecs/Entity
+open ecs/ComponentTable
+
+# Is the SearchField on `page` blank? "" (no field on the page) counts as
+# blank, so a search EmptyState with no field just stays shown.
+func searchQueryBlankOnPage(world: view UiWorld, page: view String) ret Bool {
+  ret searchQueryOnPage(world: world, page: page).length() is 0
+}
+
+# Every `EmptyState`: its `Active` follows whether its list is empty —
+# `history` on the play history, `search` on the page's SearchField query.
+func emptyStateSystem(world: mod UiWorld, state: view AppState) pub {
+  let historyEmpty: Bool = state.playHistory.entries.length is 0
+  let n: Int = componentCount(this: world.emptyStates)
+  var i: Int = 0
+  loop i < n {
+    let entity: EntityId = componentEntityAt(this: world.emptyStates, i: i)
+    let binding: EmptyState = componentDataAt(this: world.emptyStates, i: i)
+    var empty: Bool = historyEmpty
+    if binding.kind is EmptyStateKind.search {
+      empty = searchQueryBlankOnPage(world: world, page: pageOf(world: world, entity: entity))
+    }
+    var current: Bool = true
+    if componentHas(this: world.actives, entity: entity) {
+      current = componentGet(this: world.actives, entity: entity).value
+    }
+    if current is not empty {
+      let flag: Active = { value: empty }
+      componentSet(this: world.actives, entity: entity, data: flag)
+    }
+    i = i + 1
+  }
+}

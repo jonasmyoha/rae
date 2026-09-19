@@ -120,11 +120,11 @@ func mountBottomSheetOverlay(
 # data list (ListSources.rae). Runs from the observation schedule on the epoch and
 # once at mount; at idle it is a few comparisons.
 func bottomSheetSystem(world: mod UiWorld, sheet: view BottomSheetState) pub {
-  let n: Int = componentCount(this: world.bottomSheets)
-  var i: Int = 0
-  loop i < n {
-    let root: EntityId = componentEntityAt(this: world.bottomSheets, i: i)
-    let binding: BottomSheet = componentDataAt(this: world.bottomSheets, i: i)
+  # Overlay roots (`BottomSheet`): show / hide from the sheet's visibility.
+  let nr: Int = componentCount(this: world.bottomSheets)
+  var r: Int = 0
+  loop r < nr {
+    let root: EntityId = componentEntityAt(this: world.bottomSheets, i: r)
     var currentActive: Bool = true
     if componentHas(this: world.actives, entity: root) {
       currentActive = componentGet(this: world.actives, entity: root).value
@@ -133,26 +133,29 @@ func bottomSheetSystem(world: mod UiWorld, sheet: view BottomSheetState) pub {
       let active: Active = { value: sheet.visible }
       componentSet(this: world.actives, entity: root, data: active)
     }
-    let pageId: String = pageOf(world: world, entity: root)
-    if let panelRaw: Int = findNodeInPage(world: world, pageId: pageId, nodeId: binding.panelNodeId) {
-      let panel: EntityId = nodeEntity(world: world, index: panelRaw)
-      let pad: Insets = entityPadding(world: world, entity: panel)
-      let layout: Layout = entityLayout(world: world, entity: panel)
-      let rowCount: Int = sheet.actions.length
-      var gaps: Float = 0.0
-      if rowCount > 1 {
-        gaps = layout.gap * (rowCount - 1).toFloat()
-      }
-      let panelH: Float = pad.t + binding.rowHeight * rowCount.toFloat() + gaps + pad.b
-      let current: Rect = entityRect(world: world, entity: panel)
-      if current.size.y is not panelH {
-        let sized: Rect = {
-          position: current.position
-          size: Vec2 { x: current.size.x, y: panelH }
-        }
-        componentSet(this: world.rects, entity: panel, data: sized)
-      }
+    r = r + 1
+  }
+  # Panels (`SheetPanel`): size to the action count. The panel carries its own
+  # padding + layout gap, so this reads them off the panel entity directly —
+  # no page + node-id lookup.
+  let np: Int = componentCount(this: world.sheetPanels)
+  var p: Int = 0
+  loop p < np {
+    let panel: EntityId = componentEntityAt(this: world.sheetPanels, i: p)
+    let binding: SheetPanel = componentDataAt(this: world.sheetPanels, i: p)
+    let pad: Insets = entityPadding(world: world, entity: panel)
+    let layout: Layout = entityLayout(world: world, entity: panel)
+    let rowCount: Int = sheet.actions.length
+    var gaps: Float = 0.0
+    if rowCount > 1 {
+      gaps = layout.gap * (rowCount - 1).toFloat()
     }
-    i = i + 1
+    let panelH: Float = pad.t + binding.rowHeight * rowCount.toFloat() + gaps + pad.b
+    let current: Rect = entityRect(world: world, entity: panel)
+    if current.size.y is not panelH {
+      let sized: Rect = { position: current.position, size: Vec2 { x: current.size.x, y: panelH } }
+      componentSet(this: world.rects, entity: panel, data: sized)
+    }
+    p = p + 1
   }
 }
