@@ -39,6 +39,8 @@ const inspectorScenePath: String = "examples/121_ui_editor/assets/scenes/chrome/
 
 const treeRowScenePath: String = "examples/121_ui_editor/assets/scenes/chrome/TreeRow.raescene"
 
+const projectRowScenePath: String = "examples/121_ui_editor/assets/scenes/chrome/ProjectRow.raescene"
+
 # The theme the document sees: its own token sections, then its `import`s in
 # order (#1008) — nothing is read from the directory. Installed on every
 # (re)load, BEFORE the page mounts, since tokens resolve at load time.
@@ -140,14 +142,16 @@ func createApp() ret App {
   var document: SceneDocument = createSceneDocument(path: resolveScenePath())
   var gpuUi: Gpu2dUi = createEditorUi()
   var fonts: EditorFonts = { textFontPath: "", iconFontPath: "" }
-  var builtinScenePaths: List(String) = List.create(String, cap: 3)
-  var builtinSceneIds: List(String) = List.create(String, cap: 3)
+  var builtinScenePaths: List(String) = List.create(String, cap: 4)
+  var builtinSceneIds: List(String) = List.create(String, cap: 4)
   builtinScenePaths.add(value: diagnosticRowScenePath)
   builtinSceneIds.add(value: "chrome/DiagnosticRow")
   builtinScenePaths.add(value: inspectorScenePath)
   builtinSceneIds.add(value: "chrome/Inspector")
   builtinScenePaths.add(value: treeRowScenePath)
   builtinSceneIds.add(value: "chrome/TreeRow")
+  builtinScenePaths.add(value: projectRowScenePath)
+  builtinSceneIds.add(value: "chrome/ProjectRow")
 
   var world: UiWorld = create()
   seedWorldTheme(world: world, res: gpuUi)
@@ -191,7 +195,17 @@ func createApp() ret App {
   # The chrome's own sub-scenes (the inspector panel) resolve from the same
   # registry the document uses.
   resolveSceneInstances(world: world, registry: document.registry, pageId: "chrome")
-  var chrome: ChromeState = { pageRoot: chromeRoot, visible: true, panelOpen: false }
+  var chrome: ChromeState = {
+    pageRoot: chromeRoot
+    visible: true
+    panelOpen: false
+    projectOpen: false
+  }
+  # A project opens with its scene list showing (P hides it); a bare scene
+  # has no project, so the panel stays hidden.
+  if document.projectPack.length() > 0 {
+    setProjectPanelOpen(chrome: chrome, world: world, open: true)
+  }
   # RAE_UI_EDITOR_PANEL=1 opens the diagnostics panel at boot (the headless
   # gate's screenshot shows it; interactively D toggles it).
   if getEnv(name: "RAE_UI_EDITOR_PANEL") is "1" {
@@ -215,6 +229,13 @@ func createApp() ret App {
     designH: document.designH
     nodeCount: document.nodeCount
     status: document.status
+  )
+  syncProjectPanel(
+    world: world
+    projectName: document.projectName
+    projectScenes: document.projectScenes
+    currentScene: documentPackagePath(document: document)
+    designW: document.designW
   )
   logDiagnostics(world: world, sceneId: document.scene.sceneId, nodeCount: document.nodeCount)
   # RAE_UI_EDITOR_TEST_SELECT=<nodeId>: select that node at boot (and again

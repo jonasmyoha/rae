@@ -47,6 +47,12 @@ type SceneDocument {
   # The scene root: package paths (`import`, `SceneInstance.sceneId`, a
   # ListView's row scenes) resolve as `<root>/<path>.raescene`.
   root: String
+  # The PROJECT, when a `.raepack` was opened (projectSystem): the pack's path
+  # ("" = a bare scene was opened), its `name`, and every scene under its
+  # directory as a package path — the root is then the pack's directory.
+  projectPack: String
+  projectName: String
+  projectScenes: List(String)
   fileName: String
   scene: Scene
   registry: SceneRegistry
@@ -64,13 +70,14 @@ type SceneDocument {
   reloads: Int
 }
 
-# The scene to open: the first positional program argument, else
+# The file to open — a `.raescene`, or a `.raepack` whose directory becomes the
+# project (projectSystem): the first positional program argument, else
 # RAE_UI_EDITOR_SCENE, else the shipped MainMenu sample. `--scene-root <dir>`
-# may precede or follow it.
+# and `--scene <package/Path>` may precede or follow it.
 func resolveScenePath() ret String {
   loop var i: Int = 0, i < argCount(), ++i {
     let arg: String = argAt(index: i)
-    if arg is "--scene-root" {
+    if arg is "--scene-root" or arg is "--scene" {
       i = i + 1
       continue
     }
@@ -83,6 +90,17 @@ func resolveScenePath() ret String {
     ret fromEnv
   }
   ret "examples/121_ui_editor/assets/samples/MainMenu.raescene"
+}
+
+# Which scene of an opened PROJECT to mount first: `--scene <package/Path>`,
+# else RAE_UI_EDITOR_PROJECT_SCENE, else "" (the first scene of the scan).
+func resolveProjectSceneArg() ret String {
+  loop var i: Int = 0, i + 1 < argCount(), ++i {
+    if argAt(index: i) is "--scene" {
+      ret argAt(index: i + 1)
+    }
+  }
+  ret getEnv(name: "RAE_UI_EDITOR_PROJECT_SCENE")
 }
 
 # The scene root: `--scene-root <dir>`, else RAE_UI_EDITOR_ROOT, else the opened
@@ -123,11 +141,62 @@ func fileNameOf(path: view String) ret String {
   ret path.sub(start: slash + 1, len: path.length() - slash - 1)
 }
 
+# A bare scene: root per resolveSceneRoot. A `.raepack`: the pack's directory
+# is the root (`--scene-root` / RAE_UI_EDITOR_ROOT still win, as an explicit
+# override), its scenes are scanned, and the first (or `--scene`'s) is the
+# document. A project with no scene at all keeps an empty path and says so.
 func createSceneDocument(path: view String) ret SceneDocument {
+  var document: SceneDocument = createEmptySceneDocument(path: path)
+  if isPackPath(path: path) {
+    document.projectPack = "{path}"
+    document.projectName = packDisplayName(packPath: path)
+    document.root = resolveSceneRoot(scenePath: directoryOf(path: path))
+    document.projectScenes = collectProjectScenes(root: document.root)
+    var wanted: String = resolveProjectSceneArg()
+    if wanted.length() is 0 {
+      wanted = document.projectScenes.copyAtFallback(index: 0, fallback: "")
+    }
+    if wanted.length() > 0 {
+      setDocumentScene(document: document, packagePath: wanted)
+    } else {
+      document.path = ""
+      document.fileName = fileNameOf(path: path)
+      document.status = "no .raescene under {document.root}"
+    }
+    log("[ui-editor] project {path}: {document.projectScenes.length} scenes under {document.root}")
+  }
+  ret document
+}
+
+# Point an open project's document at one of its scenes (a package path,
+# `assets/scenes/Album`); the root does not move. The caller mounts/reloads.
+func setDocumentScene(document: mod SceneDocument, packagePath: view String) {
+  document.path = scenePackageFile(root: document.root, sceneId: packagePath)
+  document.directory = directoryOf(path: document.path)
+  document.fileName = fileNameOf(path: document.path)
+}
+
+# The package path of the document within its project ("" for a bare scene).
+func documentPackagePath(document: view SceneDocument) ret String {
+  if document.projectPack.length() is 0 or document.path.length() is 0 {
+    ret ""
+  }
+  let start: Int = document.root.length()
+  let stop: Int = document.path.length() - ".raescene".length()
+  if stop <= start {
+    ret ""
+  }
+  ret document.path.sub(start: start, len: stop - start)
+}
+
+func createEmptySceneDocument(path: view String) ret SceneDocument {
   ret SceneDocument {
     path: "{path}"
     directory: directoryOf(path: path)
     root: resolveSceneRoot(scenePath: path)
+    projectPack: ""
+    projectName: ""
+    projectScenes: List.create(String, cap: 1)
     fileName: fileNameOf(path: path)
     scene: parseScene(source: "")
     registry: createSceneRegistry()
@@ -328,6 +397,11 @@ func tagMountedNodeIds(world: mod UiWorld, scene: view Scene, pageId: view Strin
 # caller installs it on the world BEFORE documentMountSystem deserialises the
 # nodes — tokens resolve at load time.
 func documentPrepareSystem(document: mod SceneDocument, world: mod UiWorld) ret Bool {
+  if document.path.length() is 0 {
+    # A project with no scene: nothing to parse, the status already says so.
+    clearSceneDiagnostics(diagnostics: world.sceneDiagnostics)
+    ret false
+  }
   let scene: Scene = loadSceneFile(path: document.path)
   if scene.ok is false {
     document.status = "parse error: {scene.errorMsg}"
