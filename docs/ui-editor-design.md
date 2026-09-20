@@ -65,8 +65,12 @@ texture manifest, and a design-resolution + fit rule (now native:
 - **A `.raepack` as the PROJECT** (#82531251, `projectSystem/`): the same inputs
   (argument, `RAE_UI_EDITOR_SCENE`, later the picker) accept a `.raepack`. Its
   directory becomes the scene ROOT — the `rae run --project` semantics: every
-  package path, `import`, sub-scene, texture dir and font resolves from it
-  (`--scene-root` / `RAE_UI_EDITOR_ROOT` still win, as an explicit override).
+  package path, `import`, sub-scene, texture dir and font resolves from it —
+  or, when the pack DECLARES where its scenes live (`scenes: { root:
+  "assets/scenes" }`, the way `sources` declares where its code lives), that
+  directory under the pack; 106 declares it, so `Theme` / `TrackRow` resolve in
+  the editor exactly as in the app (`--scene-root` / `RAE_UI_EDITOR_ROOT` still
+  win, as an explicit override).
   Every `*.raescene` under it (recursively; dot-dirs, `build`, `node_modules`
   skipped; sorted) is a scene of the project, identified by its package path
   (`assets/scenes/Album`); the first one mounts, or the one named by
