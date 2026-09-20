@@ -137,16 +137,16 @@ func createApp() ret App {
   # bottom-left). First line makes hot reloads visible: a rebuilt binary
   # that failed to relaunch looks identical to one that reloaded and
   # changed nothing, so the generation number is the proof.
-  var logView: LogOverlay = createLogOverlay(
+  var logOverlay: LogOverlay = createLogOverlay(
     capacity: 64
     maxLines: 10
     anchor: logAnchorTopLeft
     fontSize: 13.0
   )
   # Clear the status bar / safe-area inset rather than drawing under it.
-  logView.marginY = 44.0
+  logOverlay.marginY = 44.0
   let reloadGen: Int = nextReloadGeneration()
-  logInfoLine(ov: logView, text: "hot reload {reloadGen}")
+  logInfoLine(ov: logOverlay, text: "hot reload {reloadGen}")
 
   log(
     "[viewport] windowPt={viewport.windowPtW}x{viewport.windowPtH} fbPx={viewport.framebufferPxW}x{viewport.framebufferPxH} dpr={viewport.dpr} unitScale={viewport.unitScale} layout={viewport.layoutW}x{viewport.layoutH} deviceActive={viewport.devicePresetActive} frame={frameName} safe={viewport.safeInsetsDu.l},{viewport.safeInsetsDu.t},{viewport.safeInsetsDu.r},{viewport.safeInsetsDu.b}"
@@ -175,7 +175,7 @@ func createApp() ret App {
       appState: own appState
       playback: own playback
       viewport: viewport
-      logView: own logView
+      logOverlay: own logOverlay
       spotifyState: own spotifyState
       spotifyPoller: own spotifyPoller
       autoExitSec: autoExitSec
@@ -183,7 +183,7 @@ func createApp() ret App {
       waitTraceEnabled: waitTraceEnabled
       loopDebugEnabled: loopDebugEnabled
       loopDebugFrame: loopDebugFrame
-      actions: createActionTable()
+      actionTable: createActionTable()
       commands: createEventQueue(AppCommand)
     }
   }

@@ -9,7 +9,7 @@
 # `song.openref.{index}.{stem}`) is one row whose payload is parsed ONCE, in
 # the lookup, into the command's `index` / `text` fields.
 #
-# Built once next to the screen table (`App.actions`); `actionAudit`
+# Built once next to the screen table (`App.actionTable`); `actionAudit`
 # (ActionAudit.rae) walks every id the loaded scenes can fire and asserts a
 # row for each, so a new authored id without a row fails the 106 gate.
 open ecs/Entity
@@ -217,8 +217,8 @@ func templateCommand(entry: view ActionEntry, payload: view String) ret AppComma
 # The command for a fired id: an exact row, or a template row whose
 # `<id>.` prefixes it (payload parsed; the bare id = an empty payload).
 # `found` false when no row knows it.
-func lookupAction(table: view ActionTable, actionId: view String) ret ActionLookup {
-  loop let entry: view ActionEntry in table.entries {
+func lookupAction(actionTable: view ActionTable, actionId: view String) ret ActionLookup {
+  loop let entry: view ActionEntry in actionTable.entries {
     if entry.template {
       # A template's bare id (a row scene's authored default before its
       # binding fills the payload) is the row with an empty payload.
