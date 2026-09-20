@@ -52,6 +52,41 @@ func packDisplayName(packPath: view String) ret String {
   ret ""
 }
 
+# The pack's declared scene root — `scenes: { root: "assets/scenes" }` — the
+# directory (relative to the pack) its scene references resolve from, the way
+# `sources` says where its code lives. "" when the pack declares none (the
+# pack's own directory is the root then). A line scan like packDisplayName:
+# the first `root:` line inside a `scenes:` block.
+func packSceneRoot(packPath: view String) ret String {
+  if let source: String = readFile(path: packPath) {
+    let lines: List(String) = source.split(sep: "\n")
+    var inScenes: Bool = false
+    loop let line: view String in lines {
+      let trimmed: String = line.trim()
+      if trimmed.startsWith(prefix: "scenes:") {
+        inScenes = true
+        continue
+      }
+      if inScenes and trimmed.startsWith(prefix: "root:") {
+        let open: Int = trimmed.indexOf(sub: "\"")
+        if open < 0 {
+          ret ""
+        }
+        let rest: String = trimmed.sub(start: open + 1, len: trimmed.length() - open - 1)
+        let close: Int = rest.indexOf(sub: "\"")
+        if close < 0 {
+          ret ""
+        }
+        ret rest.sub(start: 0, len: close)
+      }
+      if inScenes and trimmed is "\}" {
+        inScenes = false
+      }
+    }
+  }
+  ret ""
+}
+
 # A directory the scan never enters: VCS state, build output, the compiler's
 # own cache, and every dot-directory (the same set the implicit project scan
 # skips).
