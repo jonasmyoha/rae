@@ -389,6 +389,113 @@ rae_Bool rae_ext_Sdl3_isKeyPressed(int64_t key) {
     return g_sdl_pressed[key] != 0;
 }
 
+/* ---- Native file-open dialog (SDL3) --------------------------------------
+ * SDL_ShowOpenFileDialog is ASYNC: it returns immediately and its callback
+ * fires later during the event pump both backends already run — and MAY run on
+ * a different thread than the requester (SDL docs). So the chosen path is
+ * stashed behind a mutex and handed to the per-frame poll exactly once. The
+ * binding is generic: a set of patterns + a start directory in, a path out; it
+ * knows nothing about the editor and never changes the process working dir.
+ * Headless / tests: RAE_SDL_FILE_DIALOG_RESULT resolves the NEXT request to
+ * that path (empty => cancel) with no window shown; a RAE_SDL_HEADLESS_MS run
+ * never opens a real dialog (it resolves to cancel). Only one dialog is in
+ * flight at a time — a second request while one is open is ignored. */
+static SDL_Mutex* g_sdl_dialog_lock = NULL;   /* guards the fields below */
+static char* g_sdl_dialog_path = NULL;        /* chosen path (malloc'd), NULL = cancel/none */
+static bool g_sdl_dialog_ready = false;       /* a result (path or cancel) is waiting for poll */
+static bool g_sdl_dialog_open = false;        /* a request is in flight */
+
+static SDL_Mutex* rae_sdl_dialog_mutex(void) {
+    if (!g_sdl_dialog_lock) g_sdl_dialog_lock = SDL_CreateMutex();
+    return g_sdl_dialog_lock;
+}
+
+static void rae_sdl_dialog_set_result(const char* path) {
+    SDL_Mutex* m = rae_sdl_dialog_mutex();
+    if (m) SDL_LockMutex(m);
+    SDL_free(g_sdl_dialog_path);
+    g_sdl_dialog_path = (path && path[0]) ? SDL_strdup(path) : NULL;
+    g_sdl_dialog_ready = true;
+    g_sdl_dialog_open = false;
+    if (m) SDL_UnlockMutex(m);
+}
+
+static void SDLCALL rae_sdl_dialog_cb(void* userdata, const char* const* filelist, int filter) {
+    (void)userdata; (void)filter;
+    /* filelist: NULL = error, {NULL} = cancel, else NULL-terminated paths.
+     * We take the first only (allow_many is false). Error and cancel both land
+     * as "no path", i.e. a "" result to the caller. */
+    const char* chosen = (filelist && filelist[0]) ? filelist[0] : NULL;
+    rae_sdl_dialog_set_result(chosen);
+}
+
+/* patterns: filter entries joined with '|', each entry an SDL ';'-pattern
+ * (e.g. "raepack|raescene;json"); "" => no filter (any file). defaultLocation:
+ * the directory the dialog opens in; "" => the platform default. */
+void rae_ext_Sdl3_openFileDialog(rae_String patterns, rae_String defaultLocation) {
+    SDL_Mutex* m = rae_sdl_dialog_mutex();
+    if (m) SDL_LockMutex(m);
+    bool inflight = g_sdl_dialog_open;
+    if (!inflight) g_sdl_dialog_open = true;
+    if (m) SDL_UnlockMutex(m);
+    if (inflight) return;   /* one dialog at a time */
+
+    /* Headless / test overrides: resolve without showing anything. The forced
+     * result wins even with no window, so a windowless test can drive it. */
+    const char* forced = getenv("RAE_SDL_FILE_DIALOG_RESULT");
+    if (forced) { rae_sdl_dialog_set_result(forced); return; }
+    if (getenv("RAE_SDL_HEADLESS_MS")) { rae_sdl_dialog_set_result(NULL); return; }
+    /* No window => nothing to parent a modal to; resolve to cancel rather than
+     * pop a stray dialog in a windowless (e.g. CI) run. */
+    if (!g_sdl_win) { rae_sdl_dialog_set_result(NULL); return; }
+
+    /* Build the SDL filter list from the '|'-joined patterns. The name/pattern
+     * pointers borrow patbuf, which SDL copies synchronously inside the call,
+     * so patbuf is freed right after. */
+    SDL_DialogFileFilter filters[32];
+    int nfilters = 0;
+    char* patbuf = NULL;
+    if (patterns.data && patterns.len > 0) {
+        patbuf = SDL_strndup((const char*)patterns.data, (size_t)patterns.len);
+        char* p = patbuf;
+        while (p && nfilters < 32) {
+            char* bar = strchr(p, '|');
+            if (bar) *bar = '\0';
+            if (*p) { filters[nfilters].name = p; filters[nfilters].pattern = p; nfilters++; }
+            if (!bar) break;
+            p = bar + 1;
+        }
+    }
+    char* locbuf = NULL;
+    if (defaultLocation.data && defaultLocation.len > 0) {
+        locbuf = SDL_strndup((const char*)defaultLocation.data, (size_t)defaultLocation.len);
+    }
+    SDL_ShowOpenFileDialog(rae_sdl_dialog_cb, NULL, g_sdl_win,
+                           nfilters ? filters : NULL, nfilters, locbuf, false);
+    SDL_free(patbuf);
+    SDL_free(locbuf);
+}
+
+/* One-shot: the chosen path exactly once, "" while nothing is waiting (not yet
+ * chosen, or cancelled). Pumps events so the callback can land even on a frame
+ * the app's own loop did not pump. */
+rae_String rae_ext_Sdl3_pollFileDialogResult(void) {
+    rae_String out = (rae_String){NULL, 0, 0, 0};
+    if (g_sdl_win) SDL_PumpEvents();
+    if (!g_sdl_dialog_lock) return out;   /* never requested */
+    SDL_LockMutex(g_sdl_dialog_lock);
+    if (g_sdl_dialog_ready) {
+        if (g_sdl_dialog_path) {
+            out = rae_ext_rae_str_from_cstr((void*)g_sdl_dialog_path);
+            SDL_free(g_sdl_dialog_path);
+            g_sdl_dialog_path = NULL;
+        }
+        g_sdl_dialog_ready = false;   /* delivered exactly once */
+    }
+    SDL_UnlockMutex(g_sdl_dialog_lock);
+    return out;
+}
+
 void rae_ext_Sdl3_updatePixels(const int64_t* pixels, int64_t w, int64_t h) {
     if (!pixels || w <= 0 || h <= 0 || !g_sdl_ren) return;
     int64_t count = w * h;

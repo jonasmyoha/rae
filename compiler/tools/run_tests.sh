@@ -492,6 +492,14 @@ if [ -z "$TEST_NAME_FILTER" ] && [ -f "tools/test-packages-cli.sh" ]; then
   if ! bash tools/test-packages-cli.sh; then FAILED=$((FAILED+1)); fi
 fi
 
+# #44411932: native file-open dialog binding on its env-driven headless path
+# (RAE_SDL_FILE_DIALOG_RESULT / RAE_SDL_HEADLESS_MS), which a single-file
+# fixture cannot set per case. Full run only.
+if [ -z "$TEST_NAME_FILTER" ] && [ -f "tools/test-sdl-file-dialog.sh" ]; then
+  echo
+  if ! bash tools/test-sdl-file-dialog.sh; then FAILED=$((FAILED+1)); fi
+fi
+
 if [ "$TREE_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$TERMS_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$STRESS_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
