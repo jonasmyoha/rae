@@ -163,6 +163,13 @@ func documentOpenPath(
     document.projectPack = "{path}"
     document.projectName = packDisplayName(packPath: path)
     document.root = directoryOf(path: path)
+    let declaredRoot: String = packSceneRoot(packPath: path)
+    if declaredRoot.length() > 0 {
+      # The pack says where its scenes live (`scenes: { root }`, the way
+      # `sources` says where its code lives) — its references resolve from
+      # there, exactly as the app itself resolves them.
+      document.root = "{document.root}{declaredRoot}/"
+    }
     if atBoot {
       document.root = resolveSceneRoot(scenePath: document.root)
     }

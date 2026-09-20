@@ -303,21 +303,21 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           fi
           # A .raepack as the PROJECT (projectSystem): 106's pack opens with
           # its directory as the scene root, all 22 scenes under it scanned
-          # (sorted package paths, the first — assets/scenes/Album — mounted),
-          # the chrome's project panel listing them; RAE_UI_EDITOR_TEST_OPEN=9
-          # then opens the tenth row (assets/scenes/Home) as a tap would — the
-          # reload must name the new file. 106's scenes carry no `import`
-          # (the app installs its theme in code), so the #1008 "add import"
-          # diagnostic is EXPECTED here, not a failure: the mount lines assert
-          # the node counts, not 0 diagnostics.
+          # (sorted package paths from the pack's declared `scenes: { root:
+          # "assets/scenes" }`, the first — Album — mounted), the chrome's
+          # project panel listing them; RAE_UI_EDITOR_TEST_OPEN=9 then opens
+          # the tenth row (Home) as a tap would — the reload must name the new
+          # file. 106's scenes import Theme, so the only diagnostics left are
+          # runtime-loaded textures (album covers, the avatar): the mount
+          # lines assert the node counts, not 0 diagnostics.
           SCREENSHOT="$TMP_OUT/ui-editor-project.bmp"
           if (cd .. && RAE_UI_EDITOR_SCENE="examples/106_mobile_ui/106_mobile_ui.raepack" \
              RAE_UI_EDITOR_TEST_OPEN=9 \
              RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
              perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-project.log" 2>&1 \
-             && grep -qE '\[ui-editor\] project examples/106_mobile_ui/106_mobile_ui.raepack: 22 scenes under examples/106_mobile_ui/' "$TMP_OUT/render-project.log" \
+             && grep -qE '\[ui-editor\] project examples/106_mobile_ui/106_mobile_ui.raepack: 22 scenes under examples/106_mobile_ui/assets/scenes/' "$TMP_OUT/render-project.log" \
              && grep -qE '\[ui-editor\] mounted Album: [1-9][0-9]* nodes' "$TMP_OUT/render-project.log" \
-             && grep -qE '\[ui-editor\] open assets/scenes/Home \(examples/106_mobile_ui/assets/scenes/Home.raescene\)' "$TMP_OUT/render-project.log" \
+             && grep -qE '\[ui-editor\] open Home \(examples/106_mobile_ui/assets/scenes/Home.raescene\)' "$TMP_OUT/render-project.log" \
              && grep -qE '\[ui-editor\] reloaded examples/106_mobile_ui/assets/scenes/Home.raescene \(\+[1-9][0-9]* -[1-9][0-9]* nodes' "$TMP_OUT/render-project.log" \
              && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=20 \
                 > "$TMP_OUT/screenshot-project.log" 2>&1; then
@@ -341,7 +341,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
              perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-picker.log" 2>&1 \
              && grep -qE '\[ui-editor\] mounted MainMenu: [1-9][0-9]* nodes, 0 diagnostics' "$TMP_OUT/render-picker.log" \
-             && grep -qE '\[ui-editor\] project examples/106_mobile_ui/106_mobile_ui.raepack: 22 scenes under examples/106_mobile_ui/' "$TMP_OUT/render-picker.log" \
+             && grep -qE '\[ui-editor\] project examples/106_mobile_ui/106_mobile_ui.raepack: 22 scenes under examples/106_mobile_ui/assets/scenes/' "$TMP_OUT/render-picker.log" \
              && grep -qE '\[ui-editor\] reloaded examples/106_mobile_ui/assets/scenes/Album.raescene \(\+[1-9][0-9]* -[1-9][0-9]* nodes' "$TMP_OUT/render-picker.log" \
              && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=20 \
                 > "$TMP_OUT/screenshot-picker.log" 2>&1; then
