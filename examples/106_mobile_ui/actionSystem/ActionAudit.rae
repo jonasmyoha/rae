@@ -16,20 +16,20 @@ type ActionAuditResult {
 }
 
 func auditId(
-  table: view ActionTable
+  actionTable: view ActionTable
   actionId: view String
   where: view String
   result: mod ActionAuditResult
 ) {
   result.ids = result.ids + 1
-  let lookup: ActionLookup = lookupAction(table: table, actionId: actionId)
+  let lookup: ActionLookup = lookupAction(actionTable: actionTable, actionId: actionId)
   if lookup.found is false {
     result.unknown = result.unknown + 1
     log("[action-audit] unknown action id '{actionId}' ({where})")
   }
 }
 
-func actionAudit(world: view UiWorld, table: view ActionTable) ret ActionAuditResult {
+func actionAudit(world: view UiWorld, actionTable: view ActionTable) ret ActionAuditResult {
   unsafe {
     var result: ActionAuditResult = { ids: 0, unknown: 0 }
     let clicks: Int = componentCount(this: world.onClicks)
@@ -37,14 +37,14 @@ func actionAudit(world: view UiWorld, table: view ActionTable) ret ActionAuditRe
     loop i < clicks {
       let click: OnClick = componentDataAt(this: world.onClicks, i: i)
       auditId(
-        table: table
+        actionTable: actionTable
         actionId: click.actionId
         where: "OnClick"
         result: result
       )
       if click.actionIdDouble.length() > 0 {
         auditId(
-          table: table
+          actionTable: actionTable
           actionId: click.actionIdDouble
           where: "OnClick double"
           result: result
@@ -52,7 +52,7 @@ func actionAudit(world: view UiWorld, table: view ActionTable) ret ActionAuditRe
       }
       if click.actionIdTriple.length() > 0 {
         auditId(
-          table: table
+          actionTable: actionTable
           actionId: click.actionIdTriple
           where: "OnClick triple"
           result: result
@@ -65,7 +65,7 @@ func actionAudit(world: view UiWorld, table: view ActionTable) ret ActionAuditRe
     loop i < bindings {
       let binding: ActionBinding = componentDataAt(this: world.actionBindings, i: i)
       auditId(
-        table: table
+        actionTable: actionTable
         actionId: binding.actionId
         where: "ActionBinding"
         result: result
@@ -84,7 +84,7 @@ func actionAudit(world: view UiWorld, table: view ActionTable) ret ActionAuditRe
         let binding: ListViewBinding = rae_ext_rae_buf_get(buf: listView.bindings.data, index: b)
         if binding.componentName is "OnClick" and binding.prefix.length() > 0 {
           auditId(
-            table: table
+            actionTable: actionTable
             actionId: "{binding.prefix}0"
             where: "ListView binding prefix"
             result: result
@@ -95,12 +95,12 @@ func actionAudit(world: view UiWorld, table: view ActionTable) ret ActionAuditRe
       i = i + 1
     }
     # The bottom-sheet menus a row opens.
-    loop let entry: view ActionEntry in table.entries {
+    loop let entry: view ActionEntry in actionTable.entries {
       if entry.kind is ActionKind.openSheet {
         let actions: List(BottomSheetAction) = sheetMenuActions(menu: entry.menu)
         loop let action: view BottomSheetAction in actions {
           auditId(
-            table: table
+            actionTable: actionTable
             actionId: action.actionId
             where: "sheet menu {entry.menu}"
             result: result

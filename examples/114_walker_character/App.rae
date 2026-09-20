@@ -106,7 +106,7 @@ type InputSystem {
   settings: SettingsState
   panelScroll: EntityId
   dbg: DebugOverlay
-  logView: LogOverlay
+  logOverlay: LogOverlay
   lastLogRevision: Int
 }
 
@@ -212,7 +212,7 @@ func createApp() ret App {
     seedWorldTheme(world: uiWorld, res: gpuUi)
     let uiRoot: EntityId = mountUiScene(world: uiWorld, path: "{assets}ui.raescene", res: gpuUi)
     var uiInput: UiInput = createUiInput()
-    var logView: LogOverlay = createLogOverlay(
+    var logOverlay: LogOverlay = createLogOverlay(
       capacity: 64
       maxLines: 8
       anchor: logAnchorBottomLeft
@@ -225,7 +225,7 @@ func createApp() ret App {
       heartbeat: true
     )
     let reloadGen: Int = nextReloadGeneration()
-    logInfoLine(ov: logView, text: "hot reload {reloadGen}")
+    logInfoLine(ov: logOverlay, text: "hot reload {reloadGen}")
 
     let g: Glb = loadGlb(path: "{assets}walker.glb")
     if g.ok is false {
@@ -528,7 +528,7 @@ func createApp() ret App {
       ) {
         let pctR: Int = speedPercent(value: speed)
         logInfoLine(
-          ov: logView
+          ov: logOverlay
           text: "state restored: clip {clipIndex}, speed {pctR}%, camera and window kept"
         )
       }
@@ -652,7 +652,7 @@ func createApp() ret App {
       hostNodeId: "CornerMenuSlot"
     )
     if menuOk is false {
-      logWarnLine(ov: logView, text: "corner menu button failed to mount")
+      logWarnLine(ov: logOverlay, text: "corner menu button failed to mount")
     }
     let barOk: Bool = mountCameraBar(world: uiWorld, res: gpuUi, hostNodeId: "CameraBarSlot")
     walkerHideCameraChrome(world: uiWorld)
@@ -671,7 +671,7 @@ func createApp() ret App {
       hostNodeId: "SettingsDialogSlot"
     )
     if settingsOk is false {
-      logWarnLine(ov: logView, text: "settings dialog failed to mount")
+      logWarnLine(ov: logOverlay, text: "settings dialog failed to mount")
     }
     settingsApplyToWorld(settingsState: settings, world: uiWorld)
     settings.open = false
@@ -727,7 +727,7 @@ func createApp() ret App {
         settings: own settings
         panelScroll: panelScroll
         dbg: own dbg
-        logView: own logView
+        logOverlay: own logOverlay
         lastLogRevision: 0 - 1
       }
       cameraSystem: {
