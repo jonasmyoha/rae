@@ -167,6 +167,8 @@ type ChromeState {
   pageRoot: EntityId
   visible: Bool
   panelOpen: Bool
+  # The project panel (projectSystem): the opened pack's scene list.
+  projectOpen: Bool
 }
 
 const diagnosticsPanelNode: String = "chrome/DiagnosticsPanel"
@@ -174,6 +176,13 @@ const diagnosticsPanelNode: String = "chrome/DiagnosticsPanel"
 func setDiagnosticsPanelOpen(chrome: mod ChromeState, world: mod UiWorld, open: view Bool) {
   chrome.panelOpen = open
   setNodeActive(world: world, nodeId: diagnosticsPanelNode, value: open)
+}
+
+const projectPanelNode: String = "chrome/ProjectPanel"
+
+func setProjectPanelOpen(chrome: mod ChromeState, world: mod UiWorld, open: view Bool) {
+  chrome.projectOpen = open
+  setNodeActive(world: world, nodeId: projectPanelNode, value: open)
 }
 
 # The list's rows: one per diagnostic, `kind · sceneId/nodeId · name · message`

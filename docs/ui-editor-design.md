@@ -57,6 +57,27 @@ texture manifest, and a design-resolution + fit rule (now native:
   resizable. **Design resolution** = the root node's authored `Rect` when it has one,
   else `1080x1920`, `RAE_UI_EDITOR_DESIGN=WxH` overrides; fit = contain (letterbox),
   so a phone scene stays a phone in any window.
+- **A `.raepack` as the PROJECT** (#82531251, `projectSystem/`): the same inputs
+  (argument, `RAE_UI_EDITOR_SCENE`, later the picker) accept a `.raepack`. Its
+  directory becomes the scene ROOT — the `rae run --project` semantics: every
+  package path, `import`, sub-scene, texture dir and font resolves from it
+  (`--scene-root` / `RAE_UI_EDITOR_ROOT` still win, as an explicit override).
+  Every `*.raescene` under it (recursively; dot-dirs, `build`, `node_modules`
+  skipped; sorted) is a scene of the project, identified by its package path
+  (`assets/scenes/Album`); the first one mounts, or the one named by
+  `--scene <package/Path>` / `RAE_UI_EDITOR_PROJECT_SCENE`. The chrome's project
+  panel (`P` hides it; open by default when a project is loaded) lists them as
+  tappable rows: a tap is the watcher's reload with the new path, so the
+  selection, scroll positions and the watch list follow; the root does not
+  move. `RAE_UI_EDITOR_TEST_OPEN=<index>` is the headless tap. The pack is used
+  for its LOCATION (and its `name` in the panel title) — no dependency
+  resolution. DECIDED: **no `chdir`** — the process working directory is never
+  moved behind the app's back (hidden global state); everything keys off
+  `document.root`, and `dir()` stays the app's own. If a later tool genuinely
+  needs the cwd moved it gets an explicit `Sys.setWorkingDirectory` call, never
+  an implicit one. Note that a project whose scenes get their theme from app
+  code rather than an `import` (106 today) mounts with the #1008 "add
+  `import`" diagnostic — that is the rule doing its job, not the editor's.
 - **Opening a file at runtime** (#44411932): the argument/env inputs above are the
   boot path; a running editor also opens files through the OS "open file" panel.
   That panel is a GENERIC binding in the platform layer, not an editor feature —

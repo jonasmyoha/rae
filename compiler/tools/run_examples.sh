@@ -301,8 +301,34 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             echo "  inspector select failed:"
             cat "$TMP_OUT/render-select.log" "$TMP_OUT/screenshot-select.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
           fi
+          # A .raepack as the PROJECT (projectSystem): 106's pack opens with
+          # its directory as the scene root, all 22 scenes under it scanned
+          # (sorted package paths, the first — assets/scenes/Album — mounted),
+          # the chrome's project panel listing them; RAE_UI_EDITOR_TEST_OPEN=9
+          # then opens the tenth row (assets/scenes/Home) as a tap would — the
+          # reload must name the new file. 106's scenes carry no `import`
+          # (the app installs its theme in code), so the #1008 "add import"
+          # diagnostic is EXPECTED here, not a failure: the mount lines assert
+          # the node counts, not 0 diagnostics.
+          SCREENSHOT="$TMP_OUT/ui-editor-project.bmp"
+          if (cd .. && RAE_UI_EDITOR_SCENE="examples/106_mobile_ui/106_mobile_ui.raepack" \
+             RAE_UI_EDITOR_TEST_OPEN=9 \
+             RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
+             perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-project.log" 2>&1 \
+             && grep -qE '\[ui-editor\] project examples/106_mobile_ui/106_mobile_ui.raepack: 22 scenes under examples/106_mobile_ui/' "$TMP_OUT/render-project.log" \
+             && grep -qE '\[ui-editor\] mounted Album: [1-9][0-9]* nodes' "$TMP_OUT/render-project.log" \
+             && grep -qE '\[ui-editor\] open assets/scenes/Home \(examples/106_mobile_ui/assets/scenes/Home.raescene\)' "$TMP_OUT/render-project.log" \
+             && grep -qE '\[ui-editor\] reloaded examples/106_mobile_ui/assets/scenes/Home.raescene \(\+[1-9][0-9]* -[1-9][0-9]* nodes' "$TMP_OUT/render-project.log" \
+             && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=20 \
+                > "$TMP_OUT/screenshot-project.log" 2>&1; then
+            :
+          else
+            UI_EDITOR_OK=0
+            echo "  project (.raepack) open failed:"
+            cat "$TMP_OUT/render-project.log" "$TMP_OUT/screenshot-project.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
+          fi
           if [ "$UI_EDITOR_OK" = "1" ]; then
-            echo "PASS: $EXAMPLE_NAME (7 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select)"
+            echo "PASS: $EXAMPLE_NAME (7 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select, .raepack project open + switch)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (ui editor sample gate)"
