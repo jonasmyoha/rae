@@ -51,11 +51,11 @@ func createApp() ret App {
   # Remember the window across restarts. Opt-in. The name carries the app id:
   # dir() is ".rae" for every app, so a shared name is a shared window
   # and the 3D examples were restoring this phone-shaped one. See lib/ui.
-  var windowGeom: WindowGeometry = createWindowGeometry(
+  var windowGeometry: WindowGeometry = createWindowGeometry(
     dir: dir()
     name: "window.106_mobile_ui.geometry"
   )
-  restoreWindowGeometry(g: windowGeom)
+  restoreWindowGeometry(g: windowGeometry)
   # Backend-agnostic window/input hooks are no-ops on GPU2D when the SDL3
   # backend already owns the corresponding event state.
   uiInstallWindowCloseWaker()
@@ -67,7 +67,7 @@ func createApp() ret App {
   var bootTheme: UiTheme = createBootTheme(gpuUi: gpuUi)
 
   var scenes: AlbumScenes = loadAllScenes()
-  var texReg: TextureRegistry = createTextureRegistry()  # owns the app's Gpu2dCanvas (#907/#908)
+  var textureRegistry: TextureRegistry = createTextureRegistry()  # owns the app's Gpu2dCanvas (#907/#908)
   ensureAppCacheDirs()
   # Album catalogue (cheap json parse). Per-cover textures are NOT
   # loaded here — the interactive loop streams them in via
@@ -168,10 +168,10 @@ func createApp() ret App {
   # recording encoder, GpuLifetime), so constructing it is an unsafe operation.
   unsafe {
     ret App {
-      windowGeom: own windowGeom
+      windowGeometry: own windowGeometry
       gpuUi: own gpuUi
       scenes: own scenes
-      texReg: own texReg
+      textureRegistry: own textureRegistry
       appState: own appState
       playback: own playback
       viewport: viewport
