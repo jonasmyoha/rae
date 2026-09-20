@@ -327,8 +327,45 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             echo "  project (.raepack) open failed:"
             cat "$TMP_OUT/render-project.log" "$TMP_OUT/screenshot-project.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
           fi
+          # The file picker (#51700883): RAE_UI_EDITOR_TEST_OPEN_FILE=1 requests
+          # the OS dialog after the first frame as O / the Open pill would, and
+          # RAE_SDL_FILE_DIALOG_RESULT answers it headlessly. The choice goes
+          # through the SAME opener as the boot argument: a 106 pack picked from
+          # a bare-scene boot becomes the project (its OWN root — the boot
+          # RAE_UI_EDITOR_ROOT does not pin it) and the reload names Album; a
+          # broken scene keeps the last good page with the parse error.
+          SCREENSHOT="$TMP_OUT/ui-editor-picker.bmp"
+          if (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
+             RAE_UI_EDITOR_ROOT="examples/121_ui_editor/assets/samples" RAE_UI_EDITOR_TEST_OPEN_FILE=1 \
+             RAE_SDL_FILE_DIALOG_RESULT="examples/106_mobile_ui/106_mobile_ui.raepack" \
+             RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
+             perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-picker.log" 2>&1 \
+             && grep -qE '\[ui-editor\] mounted MainMenu: [1-9][0-9]* nodes, 0 diagnostics' "$TMP_OUT/render-picker.log" \
+             && grep -qE '\[ui-editor\] project examples/106_mobile_ui/106_mobile_ui.raepack: 22 scenes under examples/106_mobile_ui/' "$TMP_OUT/render-picker.log" \
+             && grep -qE '\[ui-editor\] reloaded examples/106_mobile_ui/assets/scenes/Album.raescene \(\+[1-9][0-9]* -[1-9][0-9]* nodes' "$TMP_OUT/render-picker.log" \
+             && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=20 \
+                > "$TMP_OUT/screenshot-picker.log" 2>&1; then
+            :
+          else
+            UI_EDITOR_OK=0
+            echo "  file picker (pack) failed:"
+            cat "$TMP_OUT/render-picker.log" "$TMP_OUT/screenshot-picker.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
+          fi
+          printf '{ "type": "Scene", "version": 2, "root": "X", "nodes": { broken' > "$TMP_OUT/Broken.raescene"
+          if (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
+             RAE_UI_EDITOR_ROOT="examples/121_ui_editor/assets/samples" RAE_UI_EDITOR_TEST_OPEN_FILE=1 \
+             RAE_SDL_FILE_DIALOG_RESULT="$TMP_OUT/Broken.raescene" \
+             RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=1500 \
+             perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-picker-broken.log" 2>&1 \
+             && grep -qE '\[ui-editor\] reload of .*Broken.raescene kept the last good page: parse error' "$TMP_OUT/render-picker-broken.log"; then
+            :
+          else
+            UI_EDITOR_OK=0
+            echo "  file picker (broken scene) failed:"
+            cat "$TMP_OUT/render-picker-broken.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
+          fi
           if [ "$UI_EDITOR_OK" = "1" ]; then
-            echo "PASS: $EXAMPLE_NAME (7 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select, .raepack project open + switch)"
+            echo "PASS: $EXAMPLE_NAME (7 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select, .raepack project open + switch, file picker)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (ui editor sample gate)"

@@ -1,0 +1,45 @@
+# StringMap.remove must not break the linear-probe chain (#51700883). With no
+# tombstones, clearing a slot in the middle of a probe run made every key that
+# had probed past it unreachable — the UI editor lost a chrome node id for a
+# frame each time unmountPage removed a page's ids. Fill a small map far past
+# its capacity so runs are long, remove every other key, and check that EVERY
+# surviving key is still found and every removed one is gone — repeated so
+# the shifted entries are exercised as holes themselves.
+open collections/StringMap
+
+func main() {
+  var map: StringMap(Int) = StringMap.create(Int, cap: 8)
+  let total: Int = 200
+  loop var i: Int = 0, i < total, ++i {
+    map.set(k: "page/node{i}", value: i)
+  }
+  var lost: Int = 0
+  var ghosts: Int = 0
+  loop var round: Int = 0, round < 3, ++round {
+    loop var r: Int = round, r < total, ++r {
+      if r % 3 is round {
+        map.remove(k: "page/node{r}")
+      }
+    }
+    loop var c: Int = 0, c < total, ++c {
+      let removed: Bool = c % 3 <= round
+      if let value: Int = map.get(k: "page/node{c}") {
+        if removed {
+          ghosts = ghosts + 1
+        } else if value is not c {
+          lost = lost + 1
+        }
+      } else if not removed {
+        lost = lost + 1
+      }
+    }
+  }
+  log("lost={lost} ghosts={ghosts} length={map.length}")
+  # Re-adding after removals must land and be found too.
+  map.set(k: "page/node1", value: 1001)
+  var back: Int = -1
+  if let value: Int = map.get(k: "page/node1") {
+    back = value
+  }
+  log("readd={back}")
+}

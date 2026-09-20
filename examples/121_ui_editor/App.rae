@@ -2,8 +2,10 @@
 # the ListView system (rows are placeholder data, documentSystem), the file
 # watcher (a 250 ms poll fed into the wait as `pollWatcher`), `D` the
 # diagnostics panel, `P` the project panel (a tap on one of its rows opens
-# that scene of the project — a reload with a new path), `H` toggles
-# the chrome, and the same idle policy as 105 (repaint on wake, ~0% CPU idle).
+# that scene of the project — a reload with a new path), `O` (or the chrome's
+# Open pill) the OS file picker — its choice goes through the same opener as
+# the boot argument (documentOpenPath), so the picker is no second code
+# path, `H` toggles the chrome, and the same idle policy as 105 (repaint on wake, ~0% CPU idle).
 import Gpu2d
 import Sys
 import Keys
@@ -96,6 +98,42 @@ func reloadDocument(app: mod App) {
   }
 }
 
+# Open `path` — a `.raepack` (the project) or a `.raescene` — as the boot
+# argument would: documentOpenPath moves the document, the watcher's reload
+# mounts it (a file that fails to parse keeps the last good page with the
+# error in the chrome), and the project panel follows (shown for a project,
+# hidden for a bare scene).
+func openPath(app: mod App, path: view String) {
+  documentOpenPath(
+    document: app.document
+    path: path
+    wantedScene: ""
+    atBoot: false
+  )
+  log("[ui-editor] open {path} -> {app.document.path}")
+  reloadDocument(app: app)
+  setProjectPanelOpen(
+    chrome: app.chrome
+    world: app.world
+    open: app.document.projectPack.length() > 0
+  )
+  syncProjectPanel(
+    world: app.world
+    projectName: app.document.projectName
+    projectScenes: app.document.projectScenes
+    currentScene: documentPackagePath(document: app.document)
+    designW: app.document.designW
+  )
+}
+
+# The OS file picker (lib/Sdl3 openFileDialog, async): packs and scenes,
+# starting in the document's root. The frame loop polls for the choice.
+func requestOpenFileDialog(app: view App) {
+  let filters: List(String) = { "raepack", "raescene" }
+  Sdl3.openFileDialog(filters: filters, defaultLocation: app.document.root)
+  log("[ui-editor] open file dialog requested (in {app.document.root})")
+}
+
 # Open scene `index` of the project (a chrome row tap, or the headless
 # RAE_UI_EDITOR_TEST_OPEN hook): the document's path moves, the root does
 # not, and the same reload the watcher uses mounts it — the watcher then
@@ -175,6 +213,7 @@ func runApp(app: mod App) ret Int {
   runScheduledUiSystems(schedule: app.schedule, world: app.world, res: app.gpuUi)
   var renderedOnce: Bool = false
   var testOpenIndex: Int = -1
+  var testOpenFile: Bool = Sys.getEnv(name: "RAE_UI_EDITOR_TEST_OPEN_FILE") is "1"
   let testOpen: String = Sys.getEnv(name: "RAE_UI_EDITOR_TEST_OPEN")
   if testOpen.length() > 0 {
     testOpenIndex = testOpen.toInt()
@@ -198,6 +237,24 @@ func runApp(app: mod App) ret Int {
     }
     if Sdl3.isKeyPressed(key: Keys.keyP) {
       setProjectPanelOpen(chrome: app.chrome, world: app.world, open: not app.chrome.projectOpen)
+      changed = true
+    }
+    var wantsDialog: Bool = Sdl3.isKeyPressed(key: Keys.keyO) or uiActionFired(
+      world: app.world
+      actionId: "file.open"
+    )
+    if testOpenFile and renderedOnce {
+      # RAE_UI_EDITOR_TEST_OPEN_FILE=1: request the picker after the first
+      # frame, as O would; RAE_SDL_FILE_DIALOG_RESULT answers it headlessly.
+      wantsDialog = true
+      testOpenFile = false
+    }
+    if wantsDialog {
+      requestOpenFileDialog(app: app)
+    }
+    let picked: String = Sdl3.pollFileDialogResult()
+    if picked.length() > 0 {
+      openPath(app: app, path: picked)
       changed = true
     }
     var openIndex: Int = projectOpenActionIndex(world: app.world)

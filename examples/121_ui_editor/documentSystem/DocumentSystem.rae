@@ -141,18 +141,33 @@ func fileNameOf(path: view String) ret String {
   ret path.sub(start: slash + 1, len: path.length() - slash - 1)
 }
 
-# A bare scene: root per resolveSceneRoot. A `.raepack`: the pack's directory
-# is the root (`--scene-root` / RAE_UI_EDITOR_ROOT still win, as an explicit
-# override), its scenes are scanned, and the first (or `--scene`'s) is the
-# document. A project with no scene at all keeps an empty path and says so.
-func createSceneDocument(path: view String) ret SceneDocument {
-  var document: SceneDocument = createEmptySceneDocument(path: path)
+# ONE opener for every input — the boot argument / RAE_UI_EDITOR_SCENE, a
+# project-panel row, the file picker (#51700883): `path` is a `.raepack` or a
+# `.raescene`. A pack: its directory becomes the root (`--scene-root` /
+# RAE_UI_EDITOR_ROOT still win, as an explicit override), its scenes are
+# scanned, and the first (or `--scene`'s / `wantedScene`'s) is the document. A
+# scene inside the OPEN project's root stays a project scene (the root does
+# not move); any other scene is a bare open — the project is cleared and the
+# root is the scene's own directory, exactly as at boot. `atBoot` is whether
+# the `--scene-root` / RAE_UI_EDITOR_ROOT override applies: it describes the
+# file named on the command line, so a file the user picks LATER gets its own
+# root, never the boot one. The caller mounts or reloads; a project with no
+# scene at all keeps an empty path and says so.
+func documentOpenPath(
+  document: mod SceneDocument
+  path: view String
+  wantedScene: view String
+  atBoot: view Bool
+) {
   if isPackPath(path: path) {
     document.projectPack = "{path}"
     document.projectName = packDisplayName(packPath: path)
-    document.root = resolveSceneRoot(scenePath: directoryOf(path: path))
+    document.root = directoryOf(path: path)
+    if atBoot {
+      document.root = resolveSceneRoot(scenePath: document.root)
+    }
     document.projectScenes = collectProjectScenes(root: document.root)
-    var wanted: String = resolveProjectSceneArg()
+    var wanted: String = "{wantedScene}"
     if wanted.length() is 0 {
       wanted = document.projectScenes.copyAtFallback(index: 0, fallback: "")
     }
@@ -164,7 +179,36 @@ func createSceneDocument(path: view String) ret SceneDocument {
       document.status = "no .raescene under {document.root}"
     }
     log("[ui-editor] project {path}: {document.projectScenes.length} scenes under {document.root}")
+    ret
   }
+  if document.projectPack.length() > 0 and path.startsWith(prefix: document.root) {
+    let start: Int = document.root.length()
+    let stop: Int = path.length() - ".raescene".length()
+    if stop > start {
+      setDocumentScene(document: document, packagePath: path.sub(start: start, len: stop - start))
+      ret
+    }
+  }
+  document.projectPack = ""
+  document.projectName = ""
+  document.projectScenes.clear()
+  document.path = "{path}"
+  document.directory = directoryOf(path: path)
+  document.root = document.directory
+  if atBoot {
+    document.root = resolveSceneRoot(scenePath: path)
+  }
+  document.fileName = fileNameOf(path: path)
+}
+
+func createSceneDocument(path: view String) ret SceneDocument {
+  var document: SceneDocument = createEmptySceneDocument(path: path)
+  documentOpenPath(
+    document: document
+    path: path
+    wantedScene: resolveProjectSceneArg()
+    atBoot: true
+  )
   ret document
 }
 
