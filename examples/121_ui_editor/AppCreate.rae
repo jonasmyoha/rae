@@ -189,6 +189,24 @@ func createApp() ret App {
   # The device frame's safe-area insets reach the page through its own
   # `SafeArea { apply }` nodes, exactly as in the app (zero without a frame).
   safeAreaSystem(world: world, insets: document.safeInsets)
+  # The frame + safe-area guides: an authored overlay between the document
+  # and the chrome, positioned from the frame (RAE_UI_EDITOR_GUIDES=0 hides).
+  var guides: GuideState = createGuides(
+    world: world
+    designW: viewport.designW
+    designH: viewport.designH
+  )
+  if getEnv(name: "RAE_UI_EDITOR_GUIDES") is "0" {
+    setGuidesVisible(guides: guides, world: world, visible: false)
+  }
+  syncGuides(
+    guides: guides
+    world: world
+    designW: viewport.designW
+    designH: viewport.designH
+    columnW: document.columnW
+    safeInsets: document.safeInsets
+  )
 
   # The chrome: the app's own scene on its own layer, sized to the design
   # space (at least the chrome's own 1080x1920, viewportSystem).
@@ -274,6 +292,7 @@ func createApp() ret App {
       fonts: fonts
       watch: own watch
       inspector: own inspector
+      guides: guides
       testSelectNodeId: testSelectNodeId
       builtinScenePaths: own builtinScenePaths
       builtinSceneIds: own builtinSceneIds

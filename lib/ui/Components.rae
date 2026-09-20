@@ -268,6 +268,12 @@ type Shape {
   fillSlot: String
   strokeSlot: String
   strokeWidth: Float
+  # A dashed stroke: `strokeDash` is the segment length and `strokeGap` the
+  # gap, both in design units; 0 = a solid stroke. Dashes run along the four
+  # edges from the top-left corner (corners are square — a guide, not a
+  # pill). The editor's frame and safe-area guides author this.
+  strokeDash: Float
+  strokeGap: Float
   radius: Float
 }
 
@@ -978,6 +984,8 @@ func defaultShape() ret Shape {
     fillSlot: ""
     strokeSlot: ""
     strokeWidth: 0.0
+    strokeDash: 0.0
+    strokeGap: 0.0
     radius: 0.0
   }
 }

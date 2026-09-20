@@ -182,6 +182,33 @@ func paintShapeG(
       strokeBase = colorByName(theme: world.theme.active, name: sh.strokeSlot)
     }
     let stroke: RgbaColor = g2dChain(color: strokeBase, chain255: chain255)
+    if sh.strokeDash > 0.0 {
+      # A dashed stroke: the fill as a plain box, then the dashes as
+      # rect segments along the four edges (square corners; a guide).
+      if fill.a > 0 {
+        Gpu2d.drawRoundedRect(
+          canvas: canvas
+          x: drawX
+          y: drawY
+          w: drawW
+          h: drawH
+          radius: radius * hoverMul
+          color: g2dColor(color: fill)
+        )
+      }
+      paintDashedEdges(
+        canvas: canvas
+        x: drawX
+        y: drawY
+        w: drawW
+        h: drawH
+        width: sh.strokeWidth
+        dash: sh.strokeDash
+        gap: sh.strokeGap
+        color: g2dColor(color: stroke)
+      )
+      ret
+    }
     Gpu2d.drawBox(
       canvas: canvas
       x: drawX

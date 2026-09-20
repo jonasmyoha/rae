@@ -101,6 +101,15 @@ texture manifest, and a design-resolution + fit rule (now native:
   an implicit one. Note that a project whose scenes get their theme from app
   code rather than an `import` (106 today) mounts with the #1008 "add
   `import`" diagnostic — that is the rule doing its job, not the editor's.
+- **Guides:** a dashed outline around the frame (the page column — the design area the
+  document is laid out in) and one around the safe area inside it, each labelled —
+  the reference editor's overlays (docs/ui-editor-reference-features.md §2a). They
+  are an AUTHORED overlay scene, `assets/scenes/chrome/Guides.raescene`, on a
+  `guides` layer between the document and the chrome: plain `Shape` nodes with the
+  dashed stroke (`Shape.strokeDash` / `strokeGap`, painted by the stock render system),
+  positioned from the document's frame by `guideSystem/` after every load. `G`
+  toggles them; `RAE_UI_EDITOR_GUIDES=0` starts hidden. The safe-area guide shows
+  only when the frame has insets.
 - **Opening a file at runtime** (#44411932): the argument/env inputs above are the
   boot path; a running editor also opens files through the OS "open file" panel.
   That panel is a GENERIC binding in the platform layer, not an editor feature —
