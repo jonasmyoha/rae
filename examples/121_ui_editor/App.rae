@@ -1,7 +1,8 @@
 # runApp — the passive view loop: the lib/ui systems on the #939 Schedule,
 # the ListView system (rows are placeholder data, documentSystem), the file
 # watcher (a 250 ms poll fed into the wait as `pollWatcher`), `D` the
-# diagnostics panel, `H` toggles
+# diagnostics panel, `P` the project panel (a tap on one of its rows opens
+# that scene of the project — a reload with a new path), `H` toggles
 # the chrome, and the same idle policy as 105 (repaint on wake, ~0% CPU idle).
 import Gpu2d
 import Sys
@@ -95,6 +96,28 @@ func reloadDocument(app: mod App) {
   }
 }
 
+# Open scene `index` of the project (a chrome row tap, or the headless
+# RAE_UI_EDITOR_TEST_OPEN hook): the document's path moves, the root does
+# not, and the same reload the watcher uses mounts it — the watcher then
+# follows the new file.
+func openProjectScene(app: mod App, index: view Int) {
+  if index < 0 or index >= app.document.projectScenes.length {
+    ret
+  }
+  if let packagePath: String = app.document.projectScenes.copyAt(index: index) {
+    setDocumentScene(document: app.document, packagePath: packagePath)
+    log("[ui-editor] open {packagePath} ({app.document.path})")
+    reloadDocument(app: app)
+    syncProjectPanel(
+      world: app.world
+      projectName: app.document.projectName
+      projectScenes: app.document.projectScenes
+      currentScene: packagePath
+      designW: app.document.designW
+    )
+  }
+}
+
 # The six effect systems in schedule order; true while any is live.
 func effectSystems(
   app: mod App
@@ -151,6 +174,11 @@ func runApp(app: mod App) ret Int {
   listViewSystem(world: app.world, scenes: app.document.registry)
   runScheduledUiSystems(schedule: app.schedule, world: app.world, res: app.gpuUi)
   var renderedOnce: Bool = false
+  var testOpenIndex: Int = -1
+  let testOpen: String = Sys.getEnv(name: "RAE_UI_EDITOR_TEST_OPEN")
+  if testOpen.length() > 0 {
+    testOpenIndex = testOpen.toInt()
+  }
   var wokeUp: Bool = false
   var previousNow: Float64 = Gpu2d.nowSeconds()
   var animating: Bool = false
@@ -166,6 +194,21 @@ func runApp(app: mod App) ret Int {
     }
     if Sdl3.isKeyPressed(key: Keys.keyD) {
       setDiagnosticsPanelOpen(chrome: app.chrome, world: app.world, open: not app.chrome.panelOpen)
+      changed = true
+    }
+    if Sdl3.isKeyPressed(key: Keys.keyP) {
+      setProjectPanelOpen(chrome: app.chrome, world: app.world, open: not app.chrome.projectOpen)
+      changed = true
+    }
+    var openIndex: Int = projectOpenActionIndex(world: app.world)
+    if testOpenIndex >= 0 and renderedOnce {
+      # RAE_UI_EDITOR_TEST_OPEN=<index>: open that project scene after the
+      # first frame, as a row tap would — the headless gate's switch hook.
+      openIndex = testOpenIndex
+      testOpenIndex = -1
+    }
+    if openIndex >= 0 {
+      openProjectScene(app: app, index: openIndex)
       changed = true
     }
     let now: Float64 = Gpu2d.nowSeconds()

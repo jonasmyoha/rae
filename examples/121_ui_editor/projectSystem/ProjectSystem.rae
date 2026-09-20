@@ -1,0 +1,195 @@
+# projectSystem — a `.raepack` opened as the PROJECT (docs/ui-editor-design.md
+# §2): the pack's directory is the scene ROOT (the `rae run --project`
+# semantics — every package path, import, sub-scene, texture dir and font
+# resolves from it), and every `*.raescene` under it is a scene of the
+# project, listed in the chrome so you switch without leaving the app.
+#
+# The pack is used for its LOCATION (and, as a bonus, its `name` for the
+# chrome title); nothing else in it is read here — no dependency resolution.
+# DECIDED: NO chdir. The process working directory is never moved behind the
+# app's back (that is hidden global state); everything that needs the project
+# keys off `document.root`, and `dir()` stays the app's own.
+import Files
+import String
+open Sys
+open ui/Ecs
+open ui/Components
+open ui/SceneLoader
+open app3d/UiShell
+open ecs/Entity
+open ecs/ComponentTable
+
+const packExtension: String = ".raepack"
+
+# The chrome's project list rows carry `open:<index>` as their OnClick action.
+const openActionPrefix: String = "open:"
+
+func isPackPath(path: view String) ret Bool {
+  ret path.endsWith(suffix: packExtension)
+}
+
+# The pack's `name: "..."` line, for the chrome title; "" when absent or the
+# file cannot be read. A line scan, not a pack parse — the pack is a location.
+func packDisplayName(packPath: view String) ret String {
+  if let source: String = readFile(path: packPath) {
+    let lines: List(String) = source.split(sep: "\n")
+    loop let line: view String in lines {
+      let trimmed: String = line.trim()
+      if trimmed.startsWith(prefix: "name:") {
+        let open: Int = trimmed.indexOf(sub: "\"")
+        if open < 0 {
+          ret ""
+        }
+        let rest: String = trimmed.sub(start: open + 1, len: trimmed.length() - open - 1)
+        let close: Int = rest.indexOf(sub: "\"")
+        if close < 0 {
+          ret ""
+        }
+        ret rest.sub(start: 0, len: close)
+      }
+    }
+  }
+  ret ""
+}
+
+# A directory the scan never enters: VCS state, build output, the compiler's
+# own cache, and every dot-directory (the same set the implicit project scan
+# skips).
+func isSkippedDirectory(name: view String) ret Bool {
+  if name.startsWith(prefix: ".") {
+    ret true
+  }
+  ret name is "build" or name is "node_modules"
+}
+
+# In-place insertion sort of package paths (List.sort is numeric-only).
+func sortPackagePaths(paths: mod List(String)) {
+  loop var i: Int = 1, i < paths.length, ++i {
+    var j: Int = i
+    loop j > 0 {
+      let previous: String = paths.copyAtFallback(index: j - 1, fallback: "")
+      let current: String = paths.copyAtFallback(index: j, fallback: "")
+      if previous.compare(other: current) <= 0 {
+        j = 0
+      } else {
+        paths.set(index: j - 1, value: current)
+        paths.set(index: j, value: previous)
+        j = j - 1
+      }
+    }
+  }
+}
+
+# Every `*.raescene` under `root` (recursively, dot-/build dirs skipped) as a
+# package path relative to the root without the extension — the scene's #1008
+# identity (`assets/scenes/Album`). `prefix` is the package path of `folder`
+# ("" at the root, else ends in "/"). Files.listDir is non-recursive and
+# returns nothing for a file, so recursing into every non-scene entry is the
+# directory test.
+func scanProjectScenes(
+  root: view String
+  folder: view String
+  prefix: view String
+  out: mod List(String)
+) {
+  let entries: List(File) = Files.listDir(folder: folder)
+  loop let entry: view File in entries {
+    if entry.isHidden() {
+      continue
+    }
+    if entry.hasExtension(ext: "raescene") {
+      out.add(value: "{prefix}{entry.stem()}")
+      continue
+    }
+    if entry.extension().length() > 0 or isSkippedDirectory(name: entry.name) {
+      continue
+    }
+    scanProjectScenes(
+      root: root
+      folder: "{folder}/{entry.name}"
+      prefix: "{prefix}{entry.name}/"
+      out: out
+    )
+  }
+}
+
+# The project's scenes, sorted. `root` ends in a slash.
+func collectProjectScenes(root: view String) ret List(String) {
+  var scenes: List(String) = List.create(String, cap: 32)
+  let folder: String = root.sub(start: 0, len: root.length() - 1)
+  scanProjectScenes(
+    root: root
+    folder: folder
+    prefix: ""
+    out: scenes
+  )
+  sortPackagePaths(paths: scenes)
+  ret scenes
+}
+
+# `open:<index>` from this frame's fired actions, else -1.
+func projectOpenActionIndex(world: view UiWorld) ret Int {
+  let actionCount: Int = uiActionCount(world: world)
+  loop var a: Int = 0, a < actionCount, ++a {
+    let actionId: String = uiActionAt(world: world, index: a)
+    if actionId.startsWith(prefix: openActionPrefix) {
+      let start: Int = openActionPrefix.length()
+      ret actionId.sub(start: start, len: actionId.length() - start).toInt()
+    }
+  }
+  ret -1
+}
+
+# The chrome's project panel: title + one tappable row per scene of the
+# project (the current one marked). The list's Rect follows the design width
+# and the row count, as the diagnostics and tree lists do.
+func syncProjectPanel(
+  world: mod UiWorld
+  projectName: view String
+  projectScenes: view List(String)
+  currentScene: view String
+  designW: view Float
+) {
+  var title: String = "Project — P hides, click a scene to open it"
+  if projectName.length() > 0 {
+    title = "{projectName} — {projectScenes.length} scenes · P hides, click one to open it"
+  }
+  setNodeText(world: world, nodeId: "chrome/ProjectTitle", value: title)
+  let list: EntityId = nodeEntityFor(world: world, nodeId: "chrome/ProjectList")
+  if isNone(this: list) {
+    ret
+  }
+  if componentHas(this: world.rects, entity: list) and componentHas(
+    this: world.listViews
+    entity: list
+  ) {
+    let listView: ListView = componentGet(this: world.listViews, entity: list)
+    var shown: Int = projectScenes.length
+    if shown < 1 {
+      shown = 1
+    }
+    if shown > listView.visibleItemCount {
+      shown = listView.visibleItemCount
+    }
+    let rect: mod Rect => componentMod(this: world.rects, entity: list)
+    rect.size.x = designW - 48.0
+    rect.size.y = shown.toFloat() * (listView.itemHeight + listView.itemGap) - listView.itemGap
+  }
+  var rows: List(ListViewRow) = List.create(ListViewRow, cap: projectScenes.length + 1)
+  loop var i: Int = 0, i < projectScenes.length, ++i {
+    if let scene: String = projectScenes.copyAt(index: i) {
+      var keys: List(String) = { "id", "label", "marker", "action" }
+      var values: List(String) = List.create(String, cap: 4)
+      values.add(value: "{i}")
+      values.add(value: "{scene}")
+      var marker: String = ""
+      if scene is currentScene {
+        marker = ">"
+      }
+      values.add(value: marker)
+      values.add(value: "{openActionPrefix}{i}")
+      rows.add(value: ListViewRow { keys: own keys, values: own values })
+    }
+  }
+  componentSet(this: world.listViewDatas, entity: list, data: ListViewData { rows: own rows })
+}
