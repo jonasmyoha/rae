@@ -2,7 +2,8 @@
 # the ListView system (rows are placeholder data, documentSystem), the file
 # watcher (a 250 ms poll fed into the wait as `pollWatcher`), `D` the
 # diagnostics panel, `P` the project panel (a tap on one of its rows opens
-# that scene of the project — a reload with a new path), `O` (or the chrome's
+# that scene of the project — a reload with a new path), `G` the frame +
+# safe-area guides, `O` (or the chrome's
 # Open pill) the OS file picker — its choice goes through the same opener as
 # the boot argument (documentOpenPath), so the picker is no second code
 # path, `H` toggles the chrome, and the same idle policy as 105 (repaint on wake, ~0% CPU idle).
@@ -68,6 +69,14 @@ func reloadDocument(app: mod App) {
     )
     sizeChromePage(world: app.world, chromeRoot: app.chrome.pageRoot, viewport: app.viewport)
     safeAreaSystem(world: app.world, insets: app.document.safeInsets)
+    syncGuides(
+      guides: app.guides
+      world: app.world
+      designW: app.viewport.designW
+      designH: app.viewport.designH
+      columnW: app.document.columnW
+      safeInsets: app.document.safeInsets
+    )
     unsafe {
       textureSystem(
         search: app.textures
@@ -244,6 +253,18 @@ func runApp(app: mod App) ret Int {
     }
     if Sdl3.isKeyPressed(key: Keys.keyD) {
       setDiagnosticsPanelOpen(chrome: app.chrome, world: app.world, open: not app.chrome.panelOpen)
+      changed = true
+    }
+    if Sdl3.isKeyPressed(key: Keys.keyG) {
+      setGuidesVisible(guides: app.guides, world: app.world, visible: not app.guides.visible)
+      syncGuides(
+        guides: app.guides
+        world: app.world
+        designW: app.viewport.designW
+        designH: app.viewport.designH
+        columnW: app.document.columnW
+        safeInsets: app.document.safeInsets
+      )
       changed = true
     }
     if Sdl3.isKeyPressed(key: Keys.keyP) {

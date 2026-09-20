@@ -149,3 +149,115 @@ func pushMaskClipG(world: view UiWorld, entity: view EntityId, canvas: mod Gpu2d
   )
   ret true
 }
+
+# One edge of a dashed outline: segments of `dash` then `gap` along the edge,
+# starting at its beginning; a partial last segment is clipped to the edge.
+# `horizontal` runs along x at (x, y) for `length`, else along y.
+func paintDashedEdge(
+  canvas: mod Gpu2dCanvas
+  x: view Float
+  y: view Float
+  length: view Float
+  width: view Float
+  horizontal: view Bool
+  dash: view Float
+  gap: view Float
+  color: view Int
+) {
+  var at: Float = 0.0
+  var guard: Int = 0
+  loop at < length and guard < 4096 {
+    var segment: Float = dash
+    if at + segment > length {
+      segment = length - at
+    }
+    if horizontal {
+      Gpu2d.drawRect(
+        canvas: canvas
+        x: x + at
+        y: y
+        w: segment
+        h: width
+        color: color
+      )
+    } else {
+      Gpu2d.drawRect(
+        canvas: canvas
+        x: x
+        y: y + at
+        w: width
+        h: segment
+        color: color
+      )
+    }
+    at = at + dash + gap
+    guard = guard + 1
+  }
+}
+
+# The four edges of a dashed box, the stroke inside the box like drawBox's
+# border: top and bottom run full width, left and right fill the remaining
+# height between them.
+func paintDashedEdges(
+  canvas: mod Gpu2dCanvas
+  x: view Float
+  y: view Float
+  w: view Float
+  h: view Float
+  width: view Float
+  dash: view Float
+  gap: view Float
+  color: view Int
+) {
+  var step: Float = gap
+  if step < 0.0 {
+    step = 0.0
+  }
+  paintDashedEdge(
+    canvas: canvas
+    x: x
+    y: y
+    length: w
+    width: width
+    horizontal: true
+    dash: dash
+    gap: step
+    color: color
+  )
+  paintDashedEdge(
+    canvas: canvas
+    x: x
+    y: y + h - width
+    length: w
+    width: width
+    horizontal: true
+    dash: dash
+    gap: step
+    color: color
+  )
+  let sideLength: Float = h - width * 2.0
+  if sideLength > 0.0 {
+    paintDashedEdge(
+      canvas: canvas
+      x: x
+      y: y + width
+      length: sideLength
+      width: width
+      horizontal: false
+      dash: dash
+      gap: step
+      color: color
+    )
+    paintDashedEdge(
+      canvas: canvas
+      x: x + w - width
+      y: y + width
+      length: sideLength
+      width: width
+      horizontal: false
+      dash: dash
+      gap: step
+      color: color
+    )
+  }
+}
