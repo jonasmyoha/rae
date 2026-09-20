@@ -58,6 +58,20 @@ texture manifest, and a design-resolution + fit rule (now native:
   else `1080x1920`, `RAE_UI_EDITOR_DESIGN=WxH` overrides; fit = contain (letterbox),
   so a phone scene stays a phone in any window. The design resolution the canvas
   fits is the LARGER of the document's design and the chrome's own `1080x1920`,
+  per axis (below). **Device frame:** a scene that declares `unitScale` (design
+  units per point — every 106 scene says `3`) is authored for a phone, and the
+  editor lays it out in the SAME frame the app does (106's `Viewport.rae`): the
+  extent is the active `ui/DevicePresets` preset in design units (iPhone 15 Pro:
+  393x852 pt x 3 = `1179x2556`), the page is a centered 360pt column (`1080`),
+  and the preset's safe-area insets (59 pt x 3 = `177` top) reach the page
+  through its own `SafeArea { apply }` nodes via `safeAreaSystem`. Without it a
+  106 page mounted 25% shorter, 9% wider and flush to the top — "the same scene,
+  totally different sizes". `RAE_UI_EDITOR_DEVICE=<preset id|none>` picks the
+  preset (default `iphone-15-pro`, 106's own default); a scene without
+  `unitScale` gets no frame and is unchanged. The status line reports the frame
+  (`1179 x 2556 · column 1080 · safe 177`). Not simulated: what the APP composes
+  around a page — its dock, mini player, bound data, downloaded images.
+  The chrome-minimum rule is
   per axis: the chrome shares the canvas, so following a small document (a
   `993x130` row scene) shrank it into the letterboxed strip and took the Open
   button with it. A document smaller than the design keeps its authored size and

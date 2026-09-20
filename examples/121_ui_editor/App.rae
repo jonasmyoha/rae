@@ -19,6 +19,7 @@ open ui/inputSystem/InputSystem
 open ui/listViewSystem/ListViewSystem
 open ui/animationSystem/EffectSystems
 open ui/renderSystem/RenderSystem
+open ui/safeAreaSystem/SafeAreaSystem
 open app3d/UiShell
 open ecs/Entity
 open ecs/ComponentTable
@@ -66,6 +67,7 @@ func reloadDocument(app: mod App) {
       designH: app.document.designH
     )
     sizeChromePage(world: app.world, chromeRoot: app.chrome.pageRoot, viewport: app.viewport)
+    safeAreaSystem(world: app.world, insets: app.document.safeInsets)
     unsafe {
       textureSystem(
         search: app.textures
@@ -81,6 +83,8 @@ func reloadDocument(app: mod App) {
     fileName: app.document.fileName
     designW: app.document.designW
     designH: app.document.designH
+    columnW: app.document.columnW
+    safeTop: app.document.safeInsets.t
     nodeCount: app.document.nodeCount
     status: app.document.status
   )

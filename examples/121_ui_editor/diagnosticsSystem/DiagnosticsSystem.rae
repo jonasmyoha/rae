@@ -250,15 +250,20 @@ func chromeSyncSystem(
   fileName: view String
   designW: view Float
   designH: view Float
+  columnW: view Float
+  safeTop: view Float
   nodeCount: view Int
   status: view String
 ) {
   setNodeText(world: world, nodeId: "chrome/FileName", value: fileName)
-  setNodeText(
-    world: world
-    nodeId: "chrome/DesignSize"
-    value: "{designW.toInt()} x {designH.toInt()}"
-  )
+  var frameLabel: String = "{designW.toInt()} x {designH.toInt()}"
+  if columnW > 0.0 and columnW < designW {
+    frameLabel = "{frameLabel} · column {columnW.toInt()}"
+  }
+  if safeTop > 0.0 {
+    frameLabel = "{frameLabel} · safe {safeTop.toInt()}"
+  }
+  setNodeText(world: world, nodeId: "chrome/DesignSize", value: frameLabel)
   setNodeText(world: world, nodeId: "chrome/NodeCount", value: "{nodeCount} nodes")
   let count: Int = world.sceneDiagnostics.length
   var diagnosticsLabel: String = "no diagnostics"

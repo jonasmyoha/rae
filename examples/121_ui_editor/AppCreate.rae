@@ -18,6 +18,7 @@ open ui/Theme
 open ui/ThemeParse
 open ui/ThemeResolved
 open ui/renderSystem/RenderSystem
+open ui/safeAreaSystem/SafeAreaSystem
 open app3d/UiShell
 open ecs/Entity
 open ecs/Schedule
@@ -185,6 +186,9 @@ func createApp() ret App {
     viewport: viewport
     designH: document.designH
   )
+  # The device frame's safe-area insets reach the page through its own
+  # `SafeArea { apply }` nodes, exactly as in the app (zero without a frame).
+  safeAreaSystem(world: world, insets: document.safeInsets)
 
   # The chrome: the app's own scene on its own layer, sized to the design
   # space (at least the chrome's own 1080x1920, viewportSystem).
@@ -234,6 +238,8 @@ func createApp() ret App {
     fileName: document.fileName
     designW: document.designW
     designH: document.designH
+    columnW: document.columnW
+    safeTop: document.safeInsets.t
     nodeCount: document.nodeCount
     status: document.status
   )
