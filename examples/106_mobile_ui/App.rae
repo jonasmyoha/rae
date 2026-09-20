@@ -53,7 +53,7 @@ func runApp(app: mod App) {
   if runScreenshotMode(
     scenes: app.scenes
     appState: app.appState
-    texReg: app.texReg
+    textureRegistry: app.textureRegistry
     bg: palettePageBg(theme: app.appState.theme.active)
   ) is false {
     var session: AppSession = createAppSession(app: app)
@@ -104,6 +104,6 @@ func runApp(app: mod App) {
   # worker on its stop channel, the artwork downloads by waiting them out.
   stopSpotifyPoller(poller: app.spotifyPoller)
   shutdownArtworkFetchQueue(queue: app.appState.artworkFetch)
-  textureUnloadAll(reg: app.texReg)
+  textureUnloadAll(reg: app.textureRegistry)
   uiCloseWindow()
 }

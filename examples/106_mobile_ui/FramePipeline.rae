@@ -94,7 +94,7 @@ func syncFrameData(
   playback: mod PlaybackState
   spotifyState: mod SpotifyState
   spotifyPoller: view SpotifyPoller
-  texReg: mod TextureRegistry
+  textureRegistry: mod TextureRegistry
   observation: mod AppObservation
   now: view Float64
 ) pub ret FrameDataSyncResult {
@@ -104,7 +104,7 @@ func syncFrameData(
   # only then is there a new snapshot worth mirroring into the world.
   pollSpotify(
     state: spotifyState
-    reg: texReg
+    reg: textureRegistry
     playback: playback
     appState: appState
     now: Time.atSeconds(s: now)
@@ -119,7 +119,7 @@ func syncFrameData(
     state: appState
     playback: playback
     scenes: scenes
-    reg: texReg
+    reg: textureRegistry
   )
   # Spotify's live now-playing text is a binding too: `spotifyBindingSystem`
   # writes the `TextBinding` nodes from the snapshot the poll just published,
@@ -132,7 +132,7 @@ func syncFrameData(
   # (they are fetched too, when not on disk), then the history art.
   artworkFetchDrain(queue: appState.artworkFetch)
   let loadingCovers: Bool = cascadeAssets(
-    reg: texReg
+    reg: textureRegistry
     albums: appState.mediaLibrary.albums
     budget: 2
     load: appState.assetLoad
@@ -140,7 +140,7 @@ func syncFrameData(
   )
   let loadingHistoryArt: Bool = loadCachedHistoryArtChunk(
     history: appState.playHistory
-    reg: texReg
+    reg: textureRegistry
     budget: 4
     loader: appState.historyArt
     fetches: appState.artworkFetch
