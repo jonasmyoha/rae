@@ -102,11 +102,11 @@ func main() ret Int {
   # The name carries the app id, because dir() is ".rae" for every
   # app: a shared file name is a shared window, and this one used to open at
   # the mobile UI example's phone-shaped 599x1259.
-  var windowGeom: WindowGeometry = createWindowGeometry(
+  var windowGeometry: WindowGeometry = createWindowGeometry(
     dir: dir()
     name: "window.{state112AppId}.geometry"
   )
-  restoreWindowGeometry(g: windowGeom)
+  restoreWindowGeometry(windowGeometry: windowGeometry)
   # Design resolution tracks the window's LOGICAL size, so the transform is
   # identity: no letterbox bars, and fonts keep their authored point size
   # instead of shrinking with window width.
@@ -432,7 +432,7 @@ func main() ret Int {
     # so a resize re-runs placement instead of rescaling a fixed canvas.
     var extentChanged: Bool = false
     let resized: Bool = Gpu2d.windowResized()
-    updateWindowGeometry(g: windowGeom, now: now, resized: resized)
+    updateWindowGeometry(windowGeometry: windowGeometry, now: now, resized: resized)
     if resized {
       extentW = windowExtentW()
       extentH = windowExtentH()
