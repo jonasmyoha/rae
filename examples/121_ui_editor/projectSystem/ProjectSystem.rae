@@ -127,6 +127,17 @@ func collectProjectScenes(root: view String) ret List(String) {
   ret scenes
 }
 
+# Whether `actionId` fired this frame (a chrome pill's OnClick).
+func uiActionFired(world: view UiWorld, actionId: view String) ret Bool {
+  let actionCount: Int = uiActionCount(world: world)
+  loop var a: Int = 0, a < actionCount, ++a {
+    if uiActionAt(world: world, index: a) is actionId {
+      ret true
+    }
+  }
+  ret false
+}
+
 # `open:<index>` from this frame's fired actions, else -1.
 func projectOpenActionIndex(world: view UiWorld) ret Int {
   let actionCount: Int = uiActionCount(world: world)
