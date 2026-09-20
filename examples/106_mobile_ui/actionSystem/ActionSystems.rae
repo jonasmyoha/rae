@@ -28,7 +28,7 @@ open ecs/Entity
 # (ActionAudit.rae) makes that a gate failure before it is ever a runtime one.
 func actionCommandSystem(
   input: view InputSystem
-  table: view ActionTable
+  actionTable: view ActionTable
   commands: mod EventQueue(AppCommand)
 ) {
   let n: Int = eventCount(this: input.uiActions)
@@ -36,7 +36,7 @@ func actionCommandSystem(
   loop i < n {
     let action: UiAction = eventAt(this: input.uiActions, i: i)
     log("[action] {action.actionId} (entity {action.entity})")
-    let lookup: ActionLookup = lookupAction(table: table, actionId: action.actionId)
+    let lookup: ActionLookup = lookupAction(actionTable: actionTable, actionId: action.actionId)
     if lookup.found {
       if lookup.command.kind is not ActionKind.none and lookup.command.kind is not ActionKind.debug {
         # A fresh command (own strings): the lookup's copy is dropped here.
@@ -349,13 +349,13 @@ func navigationSystem(commands: view EventQueue(AppCommand), state: mod AppState
 # shown one to decide a switch.
 func runAppCommands(
   input: view InputSystem
-  table: view ActionTable
+  actionTable: view ActionTable
   commands: mod EventQueue(AppCommand)
   state: mod AppState
   playback: mod PlaybackState
   spotifyEnabled: view Bool
 ) ret Screen {
-  actionCommandSystem(input: input, table: table, commands: commands)
+  actionCommandSystem(input: input, actionTable: actionTable, commands: commands)
   playbackCommandSystem(
     commands: commands
     state: state

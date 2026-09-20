@@ -226,7 +226,7 @@ func main() ret Int {
 
   # Diagnostic log overlay (lib/ui/LogOverlay.rae), bottom-left here and
   # top-left in the mobile UI example — same widget, different corner.
-  var logView: LogOverlay = createLogOverlay(
+  var logOverlay: LogOverlay = createLogOverlay(
     capacity: 64
     maxLines: 10
     anchor: logAnchorBottomLeft
@@ -247,12 +247,12 @@ func main() ret Int {
   # to relaunch looks exactly like one that reloaded and changed nothing,
   # so print the launch generation — watching 5 become 6 is the proof.
   let reloadGen: Int = nextReloadGeneration()
-  logInfoLine(ov: logView, text: "hot reload {reloadGen}")
-  logDebugLine(ov: logView, text: "scene1/2/3 loaded, renderer graph compiled")
+  logInfoLine(ov: logOverlay, text: "hot reload {reloadGen}")
+  logDebugLine(ov: logOverlay, text: "scene1/2/3 loaded, renderer graph compiled")
   # Real conditions, not decoration: surface a degraded renderer state so
   # it cannot be mistaken for how the app normally looks.
   if getEnv(name: "RAE_NO_TAA").length() > 0 {
-    logWarnLine(ov: logView, text: "TAA disabled (RAE_NO_TAA) - edges will alias")
+    logWarnLine(ov: logOverlay, text: "TAA disabled (RAE_NO_TAA) - edges will alias")
   }
 
   var uiInput: UiInput = createUiInput()
@@ -268,7 +268,7 @@ func main() ret Int {
     skyModel: SettingsSkyModel.preetham
   )
   if mountSettingsDialog(world: uiWorld, res: gpuUi, hostNodeId: "SettingsDialogSlot") is false {
-    logWarnLine(ov: logView, text: "settings dialog failed to mount")
+    logWarnLine(ov: logOverlay, text: "settings dialog failed to mount")
   }
   settingsApplyToWorld(settingsState: settings, world: uiWorld)
   setTaaEnabled(renderer: renderer, on: settings.taa)  # default FXAA; the settings pane toggles TAA
@@ -303,7 +303,7 @@ func main() ret Int {
       rig: cameraRig
       camera: camera
     ) {
-      logInfoLine(ov: logView, text: "state restored: scene {uiState.activeScene}, camera kept")
+      logInfoLine(ov: logOverlay, text: "state restored: scene {uiState.activeScene}, camera kept")
     }
   }
 
@@ -608,7 +608,7 @@ func main() ret Int {
       lastSavedRevision = uiState.revision
       lastSavedScene = uiState.activeScene
     }
-    let logChanged: Bool = logView.revision is not lastLogRevision
+    let logChanged: Bool = logOverlay.revision is not lastLogRevision
     var needsRender: Bool = sceneAnimating or cameraMoved or uiLayoutDirty or extentChanged or hadUiEvents or logChanged or timeAnimating or scrolled or renderedOnce is false
     if taaSettleFrames > 0 {
       needsRender = true
@@ -829,7 +829,7 @@ func main() ret Int {
           renderSystemGpu2d(world: uiWorld, res: gpuUi, canvas: renderer.canvas)
           # After the app UI, so the diagnostic is never what gets covered up.
           drawLogOverlay(
-            ov: logView
+            ov: logOverlay
             canvas: renderer.canvas
             font: gpuUi.textFont
             screenW: extentW
@@ -842,7 +842,7 @@ func main() ret Int {
             font: gpuUi.textFont
             didRealWork: dbgDidWork
           )
-          lastLogRevision = logView.revision
+          lastLogRevision = logOverlay.revision
         }
         if tag is RenderTag.present {
           Gpu2d.endFrame(canvas: renderer.canvas)

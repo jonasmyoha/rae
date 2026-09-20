@@ -31,7 +31,7 @@ func runFrameInputDispatch(
   world: mod UiWorld
   debug: mod DebugSystem
   scenes: view AlbumScenes
-  actions: view ActionTable
+  actionTable: view ActionTable
   commands: mod EventQueue(AppCommand)
   spotifyEnabled: view Bool
   dragJustReleased: view Bool
@@ -45,7 +45,7 @@ func runFrameInputDispatch(
     # command systems (navigation, playback, sheet, canvas) consume them.
     nextScreen = runAppCommands(
       input: input
-      table: actions
+      actionTable: actionTable
       commands: commands
       state: appState
       playback: playback
@@ -213,7 +213,7 @@ func renderGpu2dFrame(
   gpuUi: view Gpu2dUi
   canvas: mod Gpu2dCanvas
   debug: mod DebugSystem
-  logView: view LogOverlay
+  logOverlay: view LogOverlay
   logW: view Float
   logH: view Float
   renderCache: mod RenderCache
@@ -241,7 +241,7 @@ func renderGpu2dFrame(
     # Shared log overlay (lib/ui/LogOverlay.rae) — top-left here, bottom-left
     # in the 3D example. Drawn last so it is never covered by app UI.
     drawLogOverlay(
-      ov: logView
+      ov: logOverlay
       canvas: canvas
       font: gpuUi.textFont
       screenW: logW
