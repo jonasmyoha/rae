@@ -1,13 +1,29 @@
 # viewportSystem — the window and the letterbox (docs/ui-editor-design.md §2):
 # the window opens 9:16 (540x960 logical, RAE_UI_EDITOR_WINDOW=WxH overrides,
-# resizable), and the DESIGN resolution is the document's, fitted with
-# `contain` so a phone scene stays a phone in any window shape. A resize only
-# re-fits; the layout size the world sees is always the design size.
+# resizable), and the DESIGN resolution is fitted with `contain` so a phone
+# scene stays a phone in any window shape. A resize only re-fits; the layout
+# size the world sees is always the design size.
+#
+# The design resolution is the LARGER of the document's design and the
+# chrome's own 1080x1920, per axis. The chrome and the document share one
+# canvas, so if the design simply followed the document, opening a small
+# scene (a 993x130 list row) shrank the chrome into the letterboxed strip —
+# top bar clipped, status bar and Open button gone. Now the chrome always
+# lays out in at least its own space; a document smaller than that keeps its
+# authored size and sits centered in it (a translation, never a scale — the
+# renderer draws authored pixels 1:1).
 import Gpu2d
 open Sys
 open ui/Ecs
+open ui/Components
 open app3d/UiShell
+open ecs/Entity
+open ecs/ComponentTable
 open ecs/Schedule
+
+const chromeDesignW: Float = 1080.0
+
+const chromeDesignH: Float = 1920.0
 
 const defaultWindowW: Int = 540
 
@@ -46,7 +62,8 @@ func createEditorViewport() ret EditorViewport {
 }
 
 # Point the 2D canvas at the design resolution (fit 0 = contain, letterboxed)
-# and size the world's layout to it.
+# and size the world's layout to it. `designW`/`designH` are the DOCUMENT's;
+# the resolution applied is at least the chrome's.
 func applyViewport(
   viewport: mod EditorViewport
   world: mod UiWorld
@@ -55,9 +72,49 @@ func applyViewport(
 ) {
   viewport.designW = designW
   viewport.designH = designH
-  Gpu2d.setDesignResolution(width: designW, height: designH, fit: 0)
-  world.layoutW = designW
-  world.layoutH = designH
+  if viewport.designW < chromeDesignW {
+    viewport.designW = chromeDesignW
+  }
+  if viewport.designH < chromeDesignH {
+    viewport.designH = chromeDesignH
+  }
+  Gpu2d.setDesignResolution(width: viewport.designW, height: viewport.designH, fit: 0)
+  world.layoutW = viewport.designW
+  world.layoutH = viewport.designH
+}
+
+# Place the document's page root in the design space: centered horizontally
+# (the root's extent anchor) and vertically (a runtime translation, applied
+# in the transform pass like a scroll — no relayout), so a document smaller
+# than the design does not hug the top-left corner under the chrome's bar.
+func placeDocumentPage(
+  world: mod UiWorld
+  pageRoot: view EntityId
+  viewport: view EditorViewport
+  designH: view Float
+) {
+  if isNone(this: pageRoot) {
+    ret
+  }
+  let anchor: ExtentAnchor = { h: HExtent.center }
+  componentSet(this: world.extentAnchors, entity: pageRoot, data: anchor)
+  var slack: Float = viewport.designH - designH
+  if slack < 0.0 {
+    slack = 0.0
+  }
+  let offset: RuntimeOffset = { delta: Vec2 { x: 0.0, y: slack / 2.0 } }
+  componentSet(this: world.runtimeOffsets, entity: pageRoot, data: own offset)
+}
+
+# Size the chrome's page root to the design space on every load (it was
+# mounted with the first document's size; the design can change per file).
+func sizeChromePage(world: mod UiWorld, chromeRoot: view EntityId, viewport: view EditorViewport) {
+  if isNone(this: chromeRoot) or componentHas(this: world.rects, entity: chromeRoot) is false {
+    ret
+  }
+  let rect: mod Rect => componentMod(this: world.rects, entity: chromeRoot)
+  rect.size.x = viewport.designW
+  rect.size.y = viewport.designH
 }
 
 # A window resize re-fits the same design resolution; the layout is unchanged.

@@ -364,6 +364,27 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             echo "  file picker (broken scene) failed:"
             cat "$TMP_OUT/render-picker-broken.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
           fi
+          # A SMALL document must not shrink the chrome (viewportSystem): the
+          # design resolution is at least the chrome's 1080x1920, so after
+          # picking a 993x130 row scene the status bar still reports the
+          # document's own size and the frame still carries the chrome's
+          # top-bar colours — a >= 1080x1920 frame, not a letterboxed strip.
+          SCREENSHOT="$TMP_OUT/ui-editor-small.bmp"
+          if (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
+             RAE_UI_EDITOR_ROOT="examples/121_ui_editor/assets/samples" RAE_UI_EDITOR_TEST_OPEN_FILE=1 \
+             RAE_SDL_FILE_DIALOG_RESULT="examples/106_mobile_ui/assets/scenes/TrackRow.raescene" \
+             RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
+             perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-small.log" 2>&1 \
+             && grep -qE '\[ui-editor\] reloaded examples/106_mobile_ui/assets/scenes/TrackRow.raescene' "$TMP_OUT/render-small.log" \
+             && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=20 \
+                > "$TMP_OUT/screenshot-small.log" 2>&1 \
+             && grep -qE 'non-blank BMP 1080x1920' "$TMP_OUT/screenshot-small.log"; then
+            :
+          else
+            UI_EDITOR_OK=0
+            echo "  small document shrank the chrome:"
+            cat "$TMP_OUT/render-small.log" "$TMP_OUT/screenshot-small.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
+          fi
           if [ "$UI_EDITOR_OK" = "1" ]; then
             echo "PASS: $EXAMPLE_NAME (7 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select, .raepack project open + switch, file picker)"
             ((PASSED++))
