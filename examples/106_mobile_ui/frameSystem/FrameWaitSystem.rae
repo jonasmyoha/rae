@@ -94,7 +94,11 @@ func frameWaitSystem(
       tick.timeout = 0.001
     }
   }
-  updateWindowGeometry(g: app.windowGeometry, now: uiNowSeconds(), resized: uiIsWindowResized())
+  updateWindowGeometry(
+    windowGeometry: app.windowGeometry
+    now: uiNowSeconds()
+    resized: uiIsWindowResized()
+  )
   let preWait: Float64 = uiNowSeconds()
   uiWaitEvents(timeoutSec: tick.timeout)
   let waitDt: Float = (uiNowSeconds() - preWait) as Float

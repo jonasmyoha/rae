@@ -146,7 +146,7 @@ type CharacterSystem {
 
 # Window-geometry + hot-reload persistence. (#555)
 type PersistState {
-  windowGeom: WindowGeometry
+  windowGeometry: WindowGeometry
   lastStateSave: Float64
   stateDirty: Bool
 }
@@ -185,11 +185,11 @@ func createApp() ret App {
       title: "Rae 3D — walker character (animated) [{rendererPathName()}]"
     )
     var idIssuer: IdIssuer = IdIssuer.create()
-    var windowGeom: WindowGeometry = createWindowGeometry(
+    var windowGeometry: WindowGeometry = createWindowGeometry(
       dir: dir()
       name: "window.{state114AppId}.geometry"
     )
-    restoreWindowGeometry(g: windowGeom)
+    restoreWindowGeometry(windowGeometry: windowGeometry)
     let extentW: Float = windowExtentW()
     let extentH: Float = windowExtentH()
     Gpu2d.setDesignResolution(width: extentW, height: extentH, fit: 0)
@@ -767,7 +767,7 @@ func createApp() ret App {
       physicsSystem: { accumulator: 0.0, worldHandle: 0 }
       netSystem: { role: 0, tick: 0 }
       players: createPlayerRoster(count: 1 + cloneCount)
-      persist: { windowGeom: own windowGeom, lastStateSave: startT, stateDirty: false }
+      persist: { windowGeometry: own windowGeometry, lastStateSave: startT, stateDirty: false }
       splashes: own splashes
       waterSystem: own waterSystem
       idIssuer: own idIssuer
