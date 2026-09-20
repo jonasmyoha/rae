@@ -457,6 +457,7 @@ Start on the **Featured** tab — a cross-section of what the language can do:
 | **Metaballs (deferred rendering)** | the 3D renderer, with a settings panel and a sky that moves with the time of day |
 | **3D Renderer — Walker Character** | a skinned, animated glTF character |
 | **Mobile UI — GPU2D** | a phone-shaped application at real app scale |
+| **UI Editor — .raescene viewer** | opens any authored `.raescene` and shows it as the UI system renders it, with a live inspector |
 | **2D Renderer — Animated shapes** | the 2D shape pipeline in motion, with a sound-style EQ visualizer |
 | **Raytracer — GPU + MTSDF text** | a path tracer on the GPU with a crisp text overlay |
 | **Pong** and **Tetris 2D** | complete little games |
