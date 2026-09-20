@@ -7,75 +7,152 @@
     "Screen": {
       "Rect": { "x": 0, "y": 0, "w": 1080, "h": 1920 },
       "Shape": { "kind": "Rect", "fill": "background", "stroke": "#00000000", "strokeWidth": 0 },
-      "Layout": { "type": "Vertical", "gap": "spaceL", "alignCross": "Center" },
-      "Padding": { "l": "spaceXL", "t": 180, "r": "spaceXL", "b": "spaceXL" },
-      "Children": ["Logo", "Title", "Tagline", "Panel", "Footer"]
+      "Layout": { "type": "Vertical", "gap": "spaceM", "alignCross": "Center" },
+      "Padding": { "l": "spaceXL", "t": 200, "r": "spaceXL", "b": "spaceXL" },
+      "Children": ["LogoRing", "Eyebrow", "Title", "Tagline", "Panel", "Stats", "Footer"]
+    },
+    "LogoRing": {
+      "Rect": { "x": 0, "y": 0, "w": 260, "h": 260 },
+      "Shape": { "kind": "Circle", "fill": "surface", "stroke": "accent", "strokeWidth": 6 },
+      "Margin": { "l": 0, "t": 0, "r": 0, "b": 12 },
+      "Layout": { "type": "Vertical", "gap": 0, "alignMain": "Center", "alignCross": "Center" },
+      "Children": ["Logo"]
     },
     "Logo": {
-      "Rect": { "x": 0, "y": 0, "w": 220, "h": 220 },
+      "Rect": { "x": 0, "y": 0, "w": 200, "h": 200 },
       "Sprite": { "textureKey": "logo", "scaleMode": "Fit" },
-      "CornerRadius": { "radius": 48 }
+      "CornerRadius": { "radius": 100 }
+    },
+    "Eyebrow": {
+      "Rect": { "x": 0, "y": 0, "w": 0, "h": 34 },
+      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
+      "Text": { "text": "SEASON THREE", "styleId": "eyebrow" }
     },
     "Title": {
-      "Rect": { "x": 0, "y": 0, "w": 960, "h": 90 },
+      "Rect": { "x": 0, "y": 0, "w": 0, "h": 110 },
       "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
       "Text": { "text": "Orbit Drift", "styleId": "title" }
     },
     "Tagline": {
-      "Rect": { "x": 0, "y": 0, "w": 960, "h": 40 },
+      "Rect": { "x": 0, "y": 0, "w": 0, "h": 40 },
       "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
+      "Margin": { "l": 0, "t": 0, "r": 0, "b": 28 },
       "Text": { "text": "a sample scene shipped with the Rae UI editor", "styleId": "caption" }
     },
     "Panel": {
-      "Rect": { "x": 0, "y": 0, "w": 900, "h": 560 },
-      "Sprite": { "textureKey": "panel", "scaleMode": "Stretch", "nineSlice": { "l": 24, "t": 24, "r": 24, "b": 24 } },
+      "Rect": { "x": 0, "y": 0, "w": 0, "h": 0 },
+      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Hug" } },
+      "Shape": { "kind": "RoundedRect", "fill": "surface", "stroke": "outline", "strokeWidth": 2, "radius": "radiusCard" },
       "Layout": { "type": "Vertical", "gap": "spaceM", "alignCross": "Stretch" },
       "Padding": { "l": "spaceL", "t": "spaceL", "r": "spaceL", "b": "spaceL" },
       "Children": ["PlayButton", "ContinueButton", "SettingsButton"]
     },
     "PlayButton": {
-      "Rect": { "x": 0, "y": 0, "w": 0, "h": 130 },
+      "Rect": { "x": 0, "y": 0, "w": 0, "h": 124 },
       "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
       "Shape": { "kind": "RoundedRect", "fill": "accent", "stroke": "#00000000", "strokeWidth": 0, "radius": "radiusPill" },
-      "Shadow": { "blur": 24 },
-      "Layout": { "type": "Horizontal", "gap": 0, "alignCross": "Center" },
+      "Shadow": { "blur": 28 },
+      "Layout": { "type": "Horizontal", "gap": "spaceS", "alignMain": "Center", "alignCross": "Center" },
       "OnClick": { "actionId": "menu.play" },
-      "Children": ["PlayLabel"]
+      "Children": ["PlayIcon", "PlayLabel"]
+    },
+    "PlayIcon": {
+      "Rect": { "x": 0, "y": 0, "w": 48, "h": 48 },
+      "Sprite": { "textureKey": "mat:play_arrow", "tint": "accentText", "scaleMode": "Fit" }
     },
     "PlayLabel": {
-      "Rect": { "x": 0, "y": 0, "w": 0, "h": 50 },
-      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
+      "Rect": { "x": 0, "y": 0, "w": 140, "h": 52 },
+      "Size": { "w": { "mode": "Hug" }, "h": { "mode": "Fixed" } },
       "Text": { "text": "Play", "styleId": "button" }
     },
     "ContinueButton": {
-      "Rect": { "x": 0, "y": 0, "w": 0, "h": 130 },
+      "Rect": { "x": 0, "y": 0, "w": 0, "h": 124 },
       "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
-      "Shape": { "kind": "RoundedRect", "fill": "surfaceAlt", "stroke": "outline", "strokeWidth": 3, "radius": "radiusPill" },
-      "Layout": { "type": "Horizontal", "gap": 0, "alignCross": "Center" },
+      "Shape": { "kind": "RoundedRect", "fill": "surfaceAlt", "stroke": "outline", "strokeWidth": 2, "radius": "radiusPill" },
+      "Layout": { "type": "Horizontal", "gap": 0, "alignMain": "Center", "alignCross": "Center" },
       "OnClick": { "actionId": "menu.continue" },
       "Children": ["ContinueLabel"]
     },
     "ContinueLabel": {
-      "Rect": { "x": 0, "y": 0, "w": 0, "h": 50 },
+      "Rect": { "x": 0, "y": 0, "w": 0, "h": 52 },
       "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
-      "Text": { "text": "Continue", "styleId": "body" }
+      "Text": { "text": "Continue", "styleId": "buttonSecondary" }
     },
     "SettingsButton": {
-      "Rect": { "x": 0, "y": 0, "w": 0, "h": 130 },
+      "Rect": { "x": 0, "y": 0, "w": 0, "h": 124 },
       "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
-      "Shape": { "kind": "RoundedRect", "fill": "surfaceAlt", "stroke": "outline", "strokeWidth": 3, "radius": "radiusPill" },
-      "Layout": { "type": "Horizontal", "gap": 0, "alignCross": "Center" },
+      "Shape": { "kind": "RoundedRect", "fill": "surfaceAlt", "stroke": "outline", "strokeWidth": 2, "radius": "radiusPill" },
+      "Layout": { "type": "Horizontal", "gap": 0, "alignMain": "Center", "alignCross": "Center" },
       "OnClick": { "actionId": "menu.settings" },
       "Children": ["SettingsLabel"]
     },
     "SettingsLabel": {
-      "Rect": { "x": 0, "y": 0, "w": 0, "h": 50 },
+      "Rect": { "x": 0, "y": 0, "w": 0, "h": 52 },
       "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
-      "Text": { "text": "Settings", "styleId": "body" }
+      "Text": { "text": "Settings", "styleId": "buttonSecondary" }
+    },
+    "Stats": {
+      "Rect": { "x": 0, "y": 0, "w": 0, "h": 150 },
+      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
+      "Margin": { "l": 0, "t": 20, "r": 0, "b": 0 },
+      "Layout": { "type": "Horizontal", "gap": "spaceM", "alignMain": "Center", "alignCross": "Center" },
+      "Children": ["StatWins", "StatStreak", "StatRank"]
+    },
+    "StatWins": {
+      "Rect": { "x": 0, "y": 0, "w": 0, "h": 150 },
+      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
+      "Shape": { "kind": "RoundedRect", "fill": "surface", "stroke": "#00000000", "strokeWidth": 0, "radius": "radiusChip" },
+      "Layout": { "type": "Vertical", "gap": 4, "alignMain": "Center", "alignCross": "Stretch" },
+      "Children": ["StatWinsValue", "StatWinsLabel"]
+    },
+    "StatWinsValue": {
+      "Rect": { "x": 0, "y": 0, "w": 0, "h": 64 },
+      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
+      "Text": { "text": "128", "styleId": "statValue" }
+    },
+    "StatWinsLabel": {
+      "Rect": { "x": 0, "y": 0, "w": 0, "h": 30 },
+      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
+      "Text": { "text": "wins", "styleId": "statLabel" }
+    },
+    "StatStreak": {
+      "Rect": { "x": 0, "y": 0, "w": 0, "h": 150 },
+      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
+      "Shape": { "kind": "RoundedRect", "fill": "surface", "stroke": "#00000000", "strokeWidth": 0, "radius": "radiusChip" },
+      "Layout": { "type": "Vertical", "gap": 4, "alignMain": "Center", "alignCross": "Stretch" },
+      "Children": ["StatStreakValue", "StatStreakLabel"]
+    },
+    "StatStreakValue": {
+      "Rect": { "x": 0, "y": 0, "w": 0, "h": 64 },
+      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
+      "Text": { "text": "7", "styleId": "statValue" }
+    },
+    "StatStreakLabel": {
+      "Rect": { "x": 0, "y": 0, "w": 0, "h": 30 },
+      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
+      "Text": { "text": "streak", "styleId": "statLabel" }
+    },
+    "StatRank": {
+      "Rect": { "x": 0, "y": 0, "w": 0, "h": 150 },
+      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
+      "Shape": { "kind": "RoundedRect", "fill": "surface", "stroke": "#00000000", "strokeWidth": 0, "radius": "radiusChip" },
+      "Layout": { "type": "Vertical", "gap": 4, "alignMain": "Center", "alignCross": "Stretch" },
+      "Children": ["StatRankValue", "StatRankLabel"]
+    },
+    "StatRankValue": {
+      "Rect": { "x": 0, "y": 0, "w": 0, "h": 64 },
+      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
+      "Text": { "text": "#12", "styleId": "statValue" }
+    },
+    "StatRankLabel": {
+      "Rect": { "x": 0, "y": 0, "w": 0, "h": 30 },
+      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
+      "Text": { "text": "rank", "styleId": "statLabel" }
     },
     "Footer": {
-      "Rect": { "x": 0, "y": 0, "w": 960, "h": 36 },
+      "Rect": { "x": 0, "y": 0, "w": 0, "h": 36 },
       "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
+      "Margin": { "l": 0, "t": 24, "r": 0, "b": 0 },
       "Opacity": { "value": 0.6 },
       "Text": { "text": "v0.1 — every pixel here is a .raescene node", "styleId": "caption" }
     }
