@@ -164,7 +164,7 @@ func buildScreenWorld(
   scenes: view AlbumScenes
   playback: view PlaybackState
   state: view AppState
-  texReg: view TextureRegistry
+  textureRegistry: view TextureRegistry
   viewport: view Viewport
 ) pub ret UiWorld {
   # A "world for one screen" is the persistent world with that screen visible
@@ -175,7 +175,7 @@ func buildScreenWorld(
     scenes: scenes
     playback: playback
     state: state
-    texReg: texReg
+    textureRegistry: textureRegistry
     viewport: viewport
   )
 }
@@ -197,7 +197,7 @@ func buildAppWorld(
   scenes: view AlbumScenes
   playback: view PlaybackState
   state: view AppState
-  texReg: view TextureRegistry
+  textureRegistry: view TextureRegistry
   viewport: view Viewport
 ) pub ret UiWorld {
   ret buildAppWorldFor(
@@ -205,7 +205,7 @@ func buildAppWorld(
     scenes: scenes
     playback: playback
     state: state
-    texReg: texReg
+    textureRegistry: textureRegistry
     viewport: viewport
   )
 }
@@ -217,7 +217,7 @@ func buildAppWorldFor(
   scenes: view AlbumScenes
   playback: view PlaybackState
   state: view AppState
-  texReg: view TextureRegistry
+  textureRegistry: view TextureRegistry
   viewport: view Viewport
 ) ret UiWorld {
   let world: UiWorld = create()
@@ -254,7 +254,7 @@ func buildAppWorldFor(
     scenes: scenes
     playback: playback
     state: state
-    reg: texReg
+    reg: textureRegistry
   )
   let back: EntityId = mountBackButtonOverlay(world: world, scenes: scenes, state: state)
   mountBottomSheetOverlay(

@@ -39,15 +39,15 @@ func runHoverStressMode(
   }
 
   let playback: PlaybackState = createPlaybackState()
-  var texReg: TextureRegistry = createTextureRegistry()
+  var textureRegistry: TextureRegistry = createTextureRegistry()
   let viewport: Viewport = createViewportFromWindow()
-  loadAllTextures(reg: texReg, albums: appState.mediaLibrary.albums)
+  loadAllTextures(reg: textureRegistry, albums: appState.mediaLibrary.albums)
   let world: UiWorld = buildScreenWorld(
     screen: Screen.home
     scenes: scenes
     playback: playback
     state: appState
-    texReg: texReg
+    textureRegistry: textureRegistry
     viewport: viewport
   )
   applyViewportExtent(world: world, viewport: viewport)
@@ -66,9 +66,9 @@ func runHoverStressMode(
   loop warm < 120 {
     let hoveredWarm: EntityId = pickHoverEntity(world: world, idx: warm)
     let dirtyWarm: Bool = hoverScaleSystem(world: world, hovered: hoveredWarm, deltaTime: 0.016)
-    uiBeginFrame(canvas: texReg.canvas, clear: palettePageBg(theme: world.theme.active))
-    renderSystemGpu2d(world: world, res: gpuUi, canvas: texReg.canvas)
-    uiEndFrame(canvas: texReg.canvas)
+    uiBeginFrame(canvas: textureRegistry.canvas, clear: palettePageBg(theme: world.theme.active))
+    renderSystemGpu2d(world: world, res: gpuUi, canvas: textureRegistry.canvas)
+    uiEndFrame(canvas: textureRegistry.canvas)
     warm = warm + 1
   }
 
@@ -79,9 +79,9 @@ func runHoverStressMode(
   loop i < stressN {
     let hovered: EntityId = pickHoverEntity(world: world, idx: i)
     let dirty: Bool = hoverScaleSystem(world: world, hovered: hovered, deltaTime: 0.016)
-    uiBeginFrame(canvas: texReg.canvas, clear: palettePageBg(theme: world.theme.active))
-    renderSystemGpu2d(world: world, res: gpuUi, canvas: texReg.canvas)
-    uiEndFrame(canvas: texReg.canvas)
+    uiBeginFrame(canvas: textureRegistry.canvas, clear: palettePageBg(theme: world.theme.active))
+    renderSystemGpu2d(world: world, res: gpuUi, canvas: textureRegistry.canvas)
+    uiEndFrame(canvas: textureRegistry.canvas)
     i = i + 1
     if i - lastLog >= 600 {
       let nowKb: Int = processRssKb()
@@ -131,14 +131,14 @@ func runStressMode(scenes: view AlbumScenes, appState: mod AppState, gpuUi: view
   # Warm-up rebuild so font / texture / scene-loader one-shots don't land
   # in the baseline.
   let stressPlayback: PlaybackState = createPlaybackState()
-  var stressTexReg: TextureRegistry = createTextureRegistry()
+  var stressTextureRegistry: TextureRegistry = createTextureRegistry()
   let stressViewport: Viewport = createViewportFromWindow()
   let warm: UiWorld = buildScreenWorld(
     screen: Screen.album
     scenes: scenes
     playback: stressPlayback
     state: appState
-    texReg: stressTexReg
+    textureRegistry: stressTextureRegistry
     viewport: stressViewport
   )
   applyViewportExtent(world: warm, viewport: stressViewport)
@@ -156,7 +156,7 @@ func runStressMode(scenes: view AlbumScenes, appState: mod AppState, gpuUi: view
       scenes: scenes
       playback: stressPlayback
       state: appState
-      texReg: stressTexReg
+      textureRegistry: stressTextureRegistry
       viewport: stressViewport
     )
     applyViewportExtent(world: sworld, viewport: stressViewport)
