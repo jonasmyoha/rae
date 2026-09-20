@@ -2,11 +2,11 @@
 #
 # OPT IN, in three lines. An app that does not write them does not have this:
 #
-#     var geom: WindowGeometry = createWindowGeometry(
+#     var windowGeometry: WindowGeometry = createWindowGeometry(
 #       dir: dir(), name: "window.{myAppId}.geometry")
-#     restoreWindowGeometry(g: geom)          # after initWindow
+#     restoreWindowGeometry(windowGeometry: windowGeometry)          # after initWindow
 #     ...
-#     updateWindowGeometry(g: geom, now: now, resized: Gpu2d.windowResized())
+#     updateWindowGeometry(windowGeometry: windowGeometry, now: now, resized: Gpu2d.windowResized())
 #
 # This used to live in the runtime, in C, and applied to every app whether or
 # not its author asked for it: the C chose the file path, decided when to write,
@@ -75,14 +75,14 @@ func createWindowGeometry(dir: view String, name: view String) ret WindowGeometr
 # wants to centre itself on first launch needs to know which happened.
 #
 # CALL AFTER initWindow. There is no window to place before that.
-func restoreWindowGeometry(g: mod WindowGeometry) ret Bool {
+func restoreWindowGeometry(windowGeometry: mod WindowGeometry) ret Bool {
   unsafe {
     # Declaration-only marking for now: this module is coupled to the Gpu2d
     # renderer externs (window position/size/dpr), whose unsafe migration lands
     # with the GPU consumers (#876). Opting this file in here would require
     # wrapping those renderer calls too, so the raw read stays unwrapped until
     # then. The extern is still marked `unsafe extern`.
-    let raw: String = rae_ext_rae_sys_read_file(path: g.path)
+    let raw: String = rae_ext_rae_sys_read_file(path: windowGeometry.path)
     if raw.length() < 1 {
       ret false
     }
@@ -102,10 +102,10 @@ func restoreWindowGeometry(g: mod WindowGeometry) ret Bool {
     }
     Gpu2d.setWindowSize(w: w, h: h)
     Gpu2d.setWindowPosition(x: x, y: y)
-    g.lastX = x
-    g.lastY = y
-    g.lastW = w
-    g.lastH = h
+    windowGeometry.lastX = x
+    windowGeometry.lastY = y
+    windowGeometry.lastW = w
+    windowGeometry.lastH = h
     ret true
   }
 }
@@ -115,7 +115,7 @@ func restoreWindowGeometry(g: mod WindowGeometry) ret Bool {
 # setWindowSize takes LOGICAL points — so on a 2x display, saving the physical
 # size and restoring it as logical doubles the window on every launch. It went
 # 900x640 -> 1800x1280 -> 3600x2560 across three runs before this converted.
-func writeWindowGeometry(g: mod WindowGeometry) {
+func writeWindowGeometry(windowGeometry: mod WindowGeometry) {
   let x: Int = Gpu2d.windowPositionX()
   let y: Int = Gpu2d.windowPositionY()
   var scale: Float = Gpu2d.dpr()
@@ -127,15 +127,15 @@ func writeWindowGeometry(g: mod WindowGeometry) {
   if w <= 0 or h <= 0 {
     ret
   }
-  if x is g.lastX and y is g.lastY and w is g.lastW and h is g.lastH {
+  if x is windowGeometry.lastX and y is windowGeometry.lastY and w is windowGeometry.lastW and h is windowGeometry.lastH {
     ret
   }
-  makeDir(path: g.dir)
-  if Sys.writeFile(path: g.path, content: "{x} {y} {w} {h}\n") {
-    g.lastX = x
-    g.lastY = y
-    g.lastW = w
-    g.lastH = h
+  makeDir(path: windowGeometry.dir)
+  if Sys.writeFile(path: windowGeometry.path, content: "{x} {y} {w} {h}\n") {
+    windowGeometry.lastX = x
+    windowGeometry.lastY = y
+    windowGeometry.lastW = w
+    windowGeometry.lastH = h
   }
 }
 
@@ -151,27 +151,31 @@ func writeWindowGeometry(g: mod WindowGeometry) {
 # reading it clears it — and the apps already read it to rebuild their layout.
 # A module that consumed it behind their back would make adding this feature
 # silently break resize handling, which is a rotten trade for one argument.
-func updateWindowGeometry(g: mod WindowGeometry, now: view Float64, resized: view Bool) {
+func updateWindowGeometry(
+  windowGeometry: mod WindowGeometry
+  now: view Float64
+  resized: view Bool
+) {
   if Gpu2d.windowMoved() or resized {
-    g.dirty = true
-    g.dirtyAt = now
+    windowGeometry.dirty = true
+    windowGeometry.dirtyAt = now
   }
-  if g.dirty is false {
+  if windowGeometry.dirty is false {
     ret
   }
-  if (now - g.dirtyAt) as Float < windowGeometrySettleSec {
+  if (now - windowGeometry.dirtyAt) as Float < windowGeometrySettleSec {
     ret
   }
-  g.dirty = false
-  writeWindowGeometry(g: g)
+  windowGeometry.dirty = false
+  writeWindowGeometry(windowGeometry: windowGeometry)
 }
 
 # For an app that would rather write on its own schedule — on quit, say — than
 # let the settle timer do it.
-func flushWindowGeometry(g: mod WindowGeometry) {
-  if g.dirty is false {
+func flushWindowGeometry(windowGeometry: mod WindowGeometry) {
+  if windowGeometry.dirty is false {
     ret
   }
-  g.dirty = false
-  writeWindowGeometry(g: g)
+  windowGeometry.dirty = false
+  writeWindowGeometry(windowGeometry: windowGeometry)
 }
