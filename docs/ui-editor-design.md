@@ -56,7 +56,12 @@ texture manifest, and a design-resolution + fit rule (now native:
 - **Window:** default 9:16, `540x960` logical; `RAE_UI_EDITOR_WINDOW=WxH` overrides;
   resizable. **Design resolution** = the root node's authored `Rect` when it has one,
   else `1080x1920`, `RAE_UI_EDITOR_DESIGN=WxH` overrides; fit = contain (letterbox),
-  so a phone scene stays a phone in any window.
+  so a phone scene stays a phone in any window. The design resolution the canvas
+  fits is the LARGER of the document's design and the chrome's own `1080x1920`,
+  per axis: the chrome shares the canvas, so following a small document (a
+  `993x130` row scene) shrank it into the letterboxed strip and took the Open
+  button with it. A document smaller than the design keeps its authored size and
+  sits centered in it — a translation, never a scale.
 - **A `.raepack` as the PROJECT** (#82531251, `projectSystem/`): the same inputs
   (argument, `RAE_UI_EDITOR_SCENE`, later the picker) accept a `.raepack`. Its
   directory becomes the scene ROOT — the `rae run --project` semantics: every

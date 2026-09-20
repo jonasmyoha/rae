@@ -179,8 +179,15 @@ func createApp() ret App {
     designW: document.designW
     designH: document.designH
   )
+  placeDocumentPage(
+    world: world
+    pageRoot: document.pageRoot
+    viewport: viewport
+    designH: document.designH
+  )
 
-  # The chrome: the app's own scene on its own layer, sized to the design.
+  # The chrome: the app's own scene on its own layer, sized to the design
+  # space (at least the chrome's own 1080x1920, viewportSystem).
   let chromeScene: Scene = loadSceneFile(path: chromeScenePath)
   let chromeOverrides: List(SceneOverride) = List.create(SceneOverride, cap: 1)
   let chromeRoot: EntityId = mountPage(
@@ -188,8 +195,8 @@ func createApp() ret App {
     pageId: "chrome"
     scene: chromeScene
     overrides: chromeOverrides
-    w: document.designW
-    h: document.designH
+    w: viewport.designW
+    h: viewport.designH
   )
   setLayerById(world: world, entity: chromeRoot, id: "chrome")
   # The chrome's own sub-scenes (the inspector panel) resolve from the same
