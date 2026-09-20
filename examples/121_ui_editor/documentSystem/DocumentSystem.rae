@@ -59,8 +59,16 @@ type SceneDocument {
   # What the page and its imports declare: theme tokens, texture map/dirs, fonts.
   assets: SceneAssets
   pageRoot: EntityId
+  # The DESIGN extent the page is laid out in (the device frame when the
+  # scene declares `unitScale`, viewportSystem; else the root's Rect / the
+  # 1080x1920 default) and the page COLUMN mounted inside it.
   designW: Float
   designH: Float
+  columnW: Float
+  # The scene's authored `unitScale` (design units per point), 0 = none.
+  unitScale: Float
+  # The safe-area insets of the frame, in design units (zero without one).
+  safeInsets: Insets
   nodeCount: Int
   loaded: Bool
   status: String
@@ -255,6 +263,9 @@ func createEmptySceneDocument(path: view String) ret SceneDocument {
     pageRoot: noEntity()
     designW: defaultDesignW
     designH: defaultDesignH
+    columnW: defaultDesignW
+    unitScale: 0.0
+    safeInsets: Insets { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }
     nodeCount: 0
     loaded: false
     status: "no document"
@@ -263,13 +274,25 @@ func createEmptySceneDocument(path: view String) ret SceneDocument {
   }
 }
 
-# The design resolution: the root node's authored Rect when it has one, else
-# 1080x1920; RAE_UI_EDITOR_DESIGN=WxH wins over both.
+# The design extent: the root node's authored Rect when it has one, else
+# 1080x1920; RAE_UI_EDITOR_DESIGN=WxH wins over both. Then the DEVICE FRAME
+# (viewportSystem): a scene that declares `unitScale` is authored for a phone
+# — its extent becomes the active preset's size in design units, its page a
+# 360pt column centered in it, with the preset's safe-area insets — the frame
+# 106 lays its pages out in, so the editor shows the same coordinate system.
 func documentDesignSize(document: mod SceneDocument) {
   document.designW = defaultDesignW
   document.designH = defaultDesignH
+  document.unitScale = 0.0
   let scene: view Scene => document.scene
   if scene.ok {
+    let top: JsonValue = Json.root(doc: scene.doc)
+    document.unitScale = optFloat(
+      doc: scene.doc
+      container: top
+      key: "unitScale"
+      fallback: 0.0
+    )
     let rootIdx: Int = sceneNodeIndex(this: scene, nodeId: scene.rootNodeId)
     if rootIdx >= 0 {
       let node: view SceneNode => nodeAt(this: scene, idx: rootIdx)
@@ -305,6 +328,18 @@ func documentDesignSize(document: mod SceneDocument) {
       document.designW = w.toFloat()
       document.designH = h.toFloat()
     }
+  }
+  document.columnW = document.designW
+  document.safeInsets = Insets { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }
+  let frame: EditorDeviceFrame = editorDeviceFrame(unitScale: document.unitScale)
+  if frame.enabled {
+    document.designW = frame.extentW
+    document.designH = frame.extentH
+    document.columnW = frame.columnW
+    document.safeInsets = frame.safeInsets
+    log(
+      "[ui-editor] frame: {frame.presetId} {frame.extentW.toInt()}x{frame.extentH.toInt()} column {frame.columnW.toInt()} safe {frame.safeInsets.l.toInt()},{frame.safeInsets.t.toInt()},{frame.safeInsets.r.toInt()},{frame.safeInsets.b.toInt()}"
+    )
   }
 }
 
@@ -531,7 +566,7 @@ func documentMountSystem(
     pageId: "document"
     scene: document.scene
     overrides: overrides
-    w: document.designW
+    w: document.columnW
     h: document.designH
   )
   setLayerById(world: world, entity: document.pageRoot, id: "document")
