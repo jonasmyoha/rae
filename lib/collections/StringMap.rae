@@ -193,8 +193,45 @@ func remove(V: type, this: mod StringMap(V), k: view String) {
         ret
       }
       if rae_str_eq(a: entry.k, b: k) {
+        # Backward-shift deletion. This is open addressing with linear
+        # probing and NO tombstones, so merely clearing the slot would cut
+        # the probe chain: every key that had probed PAST this slot becomes
+        # unreachable to get/set until something happens to re-insert it
+        # (unmountPage removing a page's node ids used to make a chrome id
+        # vanish for a frame). Walk the run after the hole and pull back
+        # each entry whose home slot is not cyclically inside (hole, probe]
+        # — it belongs before the hole, so it may fill it — carrying the
+        # dead entry along to the final hole (no slot ever holds two
+        # copies of one entry's heap).
         entry.occupied = false
         rae_ext_rae_buf_set(buf: this.data, index: idx, value: entry)
+        # A shallow re-read of the now-dead slot (buf_get copies the struct
+        # bitwise; a `var x = entry` would ask for a deep copy).
+        let dead: StringMapEntry(V) = rae_ext_rae_buf_get(buf: this.data, index: idx)
+        var hole: Int = idx
+        var probe: Int = idx
+        loop true {
+          probe = (probe + 1) % this.cap
+          let next: StringMapEntry(V) = rae_ext_rae_buf_get(buf: this.data, index: probe)
+          if not next.occupied or probe is idx {
+            break
+          }
+          var home: Int = rae_str_hash(s: next.k) % this.cap
+          if home < 0 {
+            home = -home
+          }
+          var stays: Bool = false
+          if hole < probe {
+            stays = home > hole and home <= probe
+          } else {
+            stays = home > hole or home <= probe
+          }
+          if not stays {
+            rae_ext_rae_buf_set(buf: this.data, index: hole, value: next)
+            hole = probe
+          }
+        }
+        rae_ext_rae_buf_set(buf: this.data, index: hole, value: dead)
         this.length = this.length - 1
         ret
       }

@@ -87,9 +87,21 @@ texture manifest, and a design-resolution + fit rule (now native:
   knows nothing about scenes or packs, and NEVER changes the process working
   directory. Headless/tests drive it without a panel: `RAE_SDL_FILE_DIALOG_RESULT`
   resolves the next request to that path (empty => cancel), and a
-  `RAE_SDL_HEADLESS_MS` run never opens a real panel. The editor's own picker (the
-  `O` key / an `Open…` chrome row) and treating a chosen `.raepack` as the project
-  root are follow-up tasks that build on this binding.
+  `RAE_SDL_HEADLESS_MS` run never opens a real panel.
+- **The picker** (#51700883): `O`, or the chrome's `Open (O)` pill (an authored
+  `OnClick` `file.open` row in `Editor.raescene`, not a code-built widget),
+  requests `Sdl3.openFileDialog(filters: ["raepack", "raescene"], defaultLocation:
+  document.root)`; the frame loop polls `pollFileDialogResult()` and a non-empty
+  path goes through **the ONE opener** — `documentOpenPath`, the same function the
+  boot argument / env and the project-panel rows use (`.raepack` → project open,
+  `.raescene` → scene open) — so the picker adds no second code path. Cancel
+  leaves the document untouched; a file that fails to parse keeps the last good
+  page with the error in the chrome (the reload policy). The `--scene-root` /
+  `RAE_UI_EDITOR_ROOT` override describes the file named on the command line, so
+  it applies to the boot open only — a file picked later gets its own root.
+  `RAE_UI_EDITOR_TEST_OPEN_FILE=1` requests the dialog after the first frame for
+  the headless gate, which answers it with `RAE_SDL_FILE_DIALOG_RESULT`.
+  So "Inputs" is: argument, env, project row, picker — one resolver.
 
 ## 3. Architecture (ECS, one `UiWorld`, two layers)
 
