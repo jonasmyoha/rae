@@ -16,6 +16,7 @@ import Gpu2d
 open Sys
 open ui/Ecs
 open ui/Components
+open ui/DevicePresets
 open app3d/UiShell
 open ecs/Entity
 open ecs/ComponentTable
@@ -24,6 +25,64 @@ open ecs/Schedule
 const chromeDesignW: Float = 1080.0
 
 const chromeDesignH: Float = 1920.0
+
+# The page column of a phone-authored scene: 360pt, the conventional phone
+# content width (106's phoneFrameW is exactly 360 x its unitScale 3 = 1080).
+const phoneColumnPt: Float = 360.0
+
+const defaultDeviceId: String = "iphone-15-pro"
+
+# The device frame a phone-authored scene is laid out in — what 106's
+# Viewport.rae computes for the app: the preset's size in design units
+# (pt x unitScale), a centered 360pt column for the page, and the preset's
+# safe-area insets. Enabled when the scene declares `unitScale` and the
+# preset is not "none". RAE_UI_EDITOR_DEVICE=<preset id|none> picks the
+# preset (default iphone-15-pro, 106's own default).
+type EditorDeviceFrame {
+  enabled: Bool
+  presetId: String
+  extentW: Float
+  extentH: Float
+  columnW: Float
+  safeInsets: Insets
+}
+
+func editorDeviceFrame(unitScale: view Float) ret EditorDeviceFrame {
+  var frame: EditorDeviceFrame = {
+    enabled: false
+    presetId: "none"
+    extentW: 0.0
+    extentH: 0.0
+    columnW: 0.0
+    safeInsets: Insets { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }
+  }
+  if unitScale <= 0.0 {
+    ret frame
+  }
+  var id: String = getEnv(name: "RAE_UI_EDITOR_DEVICE")
+  if id.length() is 0 {
+    id = defaultDeviceId
+  }
+  let preset: DevicePreset = devicePresetById(id: id)
+  if preset.width <= 0.0 or preset.height <= 0.0 {
+    ret frame
+  }
+  frame.enabled = true
+  frame.presetId = "{preset.id}"
+  frame.extentW = preset.width * unitScale
+  frame.extentH = preset.height * unitScale
+  frame.columnW = phoneColumnPt * unitScale
+  if frame.columnW > frame.extentW {
+    frame.columnW = frame.extentW
+  }
+  frame.safeInsets = Insets {
+    l: preset.safeLeft * unitScale
+    t: preset.safeTop * unitScale
+    r: preset.safeRight * unitScale
+    b: preset.safeBottom * unitScale
+  }
+  ret frame
+}
 
 const defaultWindowW: Int = 540
 
