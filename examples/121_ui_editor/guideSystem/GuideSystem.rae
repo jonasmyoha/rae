@@ -1,0 +1,146 @@
+# guideSystem — the frame and safe-area guides (docs/ui-editor-design.md §2,
+# the reference editor's overlays): a dashed outline around the page COLUMN
+# (the design area the document is laid out in) and a second one around the
+# SAFE AREA inside it (the device frame's insets), each with a small label.
+# The guides are an AUTHORED scene (assets/scenes/chrome/Guides.raescene) on
+# its own `guides` layer between the document and the chrome — plain `Shape`
+# nodes with a dashed stroke; this system only writes their Rects from the
+# document's frame after every load. `G` toggles them. The safe-area guide
+# shows only when the frame has insets (a scene without `unitScale` has no
+# device frame, so only the design area is outlined).
+open ui/Ecs
+open ui/Components
+open ui/Layer
+open ui/Scene
+open ui/SceneFile
+open ui/SceneInstance
+open app3d/UiShell
+open ecs/Entity
+open ecs/ComponentTable
+
+const guidesScenePath: String = "examples/121_ui_editor/assets/scenes/chrome/Guides.raescene"
+
+const guideLabelInset: Float = 8.0
+
+# The chrome's status bar covers the bottom of the design space; the frame
+# label sits just above it.
+const statusBarClearance: Float = 72.0
+
+type GuideState {
+  pageRoot: EntityId
+  visible: Bool
+}
+
+# Mount the guides page on its layer, sized to the design space.
+func createGuides(world: mod UiWorld, designW: view Float, designH: view Float) ret GuideState {
+  let layer: EntityId = createLayerEntity(world: world, id: "guides", order: 50)
+  let scene: Scene = loadSceneFile(path: guidesScenePath)
+  let overrides: List(SceneOverride) = List.create(SceneOverride, cap: 1)
+  let root: EntityId = mountPage(
+    world: world
+    pageId: "guides"
+    scene: scene
+    overrides: overrides
+    w: designW
+    h: designH
+  )
+  setLayerById(world: world, entity: root, id: "guides")
+  ret GuideState { pageRoot: root, visible: true }
+}
+
+func setGuideRect(
+  world: mod UiWorld
+  nodeId: view String
+  x: view Float
+  y: view Float
+  w: view Float
+  h: view Float
+) {
+  let entity: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
+  if isNone(this: entity) or componentHas(this: world.rects, entity: entity) is false {
+    ret
+  }
+  let rect: mod Rect => componentMod(this: world.rects, entity: entity)
+  rect.position.x = x
+  rect.position.y = y
+  rect.size.x = w
+  rect.size.y = h
+}
+
+# Write the guides from the document's frame: the column centered in the
+# design extent, the safe area inset from it. Call after every load.
+func syncGuides(
+  guides: mod GuideState
+  world: mod UiWorld
+  designW: view Float
+  designH: view Float
+  columnW: view Float
+  safeInsets: view Insets
+) {
+  if componentHas(this: world.rects, entity: guides.pageRoot) {
+    let rect: mod Rect => componentMod(this: world.rects, entity: guides.pageRoot)
+    rect.size.x = designW
+    rect.size.y = designH
+  }
+  var columnX: Float = (designW - columnW) / 2.0
+  if columnX < 0.0 {
+    columnX = 0.0
+  }
+  setGuideRect(
+    world: world
+    nodeId: "guides/FrameGuide"
+    x: columnX
+    y: 0.0
+    w: columnW
+    h: designH
+  )
+  setGuideRect(
+    world: world
+    nodeId: "guides/FrameLabel"
+    x: columnX + guideLabelInset
+    y: designH - 28.0 - guideLabelInset - statusBarClearance
+    w: 400.0
+    h: 28.0
+  )
+  setNodeText(
+    world: world
+    nodeId: "guides/FrameLabel"
+    value: "frame {columnW.toInt()} x {designH.toInt()}"
+  )
+  let hasSafe: Bool = safeInsets.t > 0.0 or safeInsets.b > 0.0 or safeInsets.l > 0.0 or safeInsets.r > 0.0
+  setNodeActive(world: world, nodeId: "guides/SafeAreaGuide", value: hasSafe and guides.visible)
+  setNodeActive(world: world, nodeId: "guides/SafeAreaLabel", value: hasSafe and guides.visible)
+  if hasSafe {
+    let safeX: Float = columnX + safeInsets.l
+    let safeY: Float = safeInsets.t
+    let safeW: Float = columnW - safeInsets.l - safeInsets.r
+    let safeH: Float = designH - safeInsets.t - safeInsets.b
+    setGuideRect(
+      world: world
+      nodeId: "guides/SafeAreaGuide"
+      x: safeX
+      y: safeY
+      w: safeW
+      h: safeH
+    )
+    setGuideRect(
+      world: world
+      nodeId: "guides/SafeAreaLabel"
+      x: safeX + guideLabelInset
+      y: safeY + guideLabelInset
+      w: 400.0
+      h: 28.0
+    )
+    setNodeText(
+      world: world
+      nodeId: "guides/SafeAreaLabel"
+      value: "safe area {safeInsets.l.toInt()},{safeInsets.t.toInt()},{safeInsets.r.toInt()},{safeInsets.b.toInt()}"
+    )
+  }
+}
+
+# `G`: show or hide every guide (the page root's Active).
+func setGuidesVisible(guides: mod GuideState, world: mod UiWorld, visible: view Bool) {
+  guides.visible = visible
+  componentSet(this: world.actives, entity: guides.pageRoot, data: Active { value: visible })
+}
