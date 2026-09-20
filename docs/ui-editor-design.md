@@ -57,6 +57,18 @@ texture manifest, and a design-resolution + fit rule (now native:
   resizable. **Design resolution** = the root node's authored `Rect` when it has one,
   else `1080x1920`, `RAE_UI_EDITOR_DESIGN=WxH` overrides; fit = contain (letterbox),
   so a phone scene stays a phone in any window.
+- **Opening a file at runtime** (#44411932): the argument/env inputs above are the
+  boot path; a running editor also opens files through the OS "open file" panel.
+  That panel is a GENERIC binding in the platform layer, not an editor feature —
+  `lib/Sdl3.rae` `openFileDialog(filters, defaultLocation)` / `pollFileDialogResult()`
+  on SDL3's `SDL_ShowOpenFileDialog`. It is async (request now, the chosen path
+  arrives on a later poll — the same one-shot shape as the `windowResized` flag),
+  knows nothing about scenes or packs, and NEVER changes the process working
+  directory. Headless/tests drive it without a panel: `RAE_SDL_FILE_DIALOG_RESULT`
+  resolves the next request to that path (empty => cancel), and a
+  `RAE_SDL_HEADLESS_MS` run never opens a real panel. The editor's own picker (the
+  `O` key / an `Open…` chrome row) and treating a chosen `.raepack` as the project
+  root are follow-up tasks that build on this binding.
 
 ## 3. Architecture (ECS, one `UiWorld`, two layers)
 
