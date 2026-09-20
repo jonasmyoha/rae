@@ -154,3 +154,57 @@ func isKeyPressed(key: copy Int) ret Bool {
     ret nativeIsKeyPressed(key: key)
   }
 }
+
+# --- Native file-open dialog ---------------------------------------------
+# The OS "open file" panel, on SDL3's SDL_ShowOpenFileDialog. It is ASYNC:
+# `openFileDialog` requests ONE panel and returns immediately; the choice
+# arrives LATER, so the frame loop polls `pollFileDialogResult()` every frame
+# and acts on the first non-empty path — the same one-shot shape as the
+# `windowResized` input flag. This is a generic file picker: it knows nothing
+# about what the path is for and never changes the process working directory.
+#
+#     Sdl3.openFileDialog(filters: ["raepack", "raescene;json"], defaultLocation: dir)
+#     ...
+#     loop ... {
+#       let picked: String = Sdl3.pollFileDialogResult()
+#       if picked.length() > 0 { openThatFile(path: picked) }
+#     }
+#
+# `filters` is a list of extension patterns, each an SDL `;`-separated list
+# WITHOUT dots (`"raepack"`, `"raescene;json"`); an empty list means any file.
+# `defaultLocation` is the directory the panel opens in ("" = platform default).
+# A second request while one panel is still open is ignored.
+# Headless / tests: `RAE_SDL_FILE_DIALOG_RESULT=<path>` resolves the next
+# request to that path (empty => cancel) with no panel shown, and a
+# `RAE_SDL_HEADLESS_MS` run never opens a real panel.
+func nativeOpenFileDialog(
+  patterns: String
+  defaultLocation: String
+) unsafe extern("rae_ext_Sdl3_openFileDialog")
+
+func openFileDialog(filters: view List(String), defaultLocation: view String) {
+  # The C takes one string: the filter entries joined with '|' (each entry is
+  # already a valid SDL ';'-pattern), so passing List(String) across the extern
+  # boundary is unnecessary.
+  var patterns: String = ""
+  loop let filter: view String in filters {
+    if patterns.length() > 0 {
+      patterns = "{patterns}|{filter}"
+    } else {
+      patterns = "{filter}"
+    }
+  }
+  unsafe {
+    nativeOpenFileDialog(patterns: patterns, defaultLocation: "{defaultLocation}")
+  }
+}
+
+# The chosen path, exactly once; "" while nothing is waiting (not chosen yet,
+# or the panel was cancelled). Call once per frame after requesting a dialog.
+func nativePollFileDialogResult() unsafe extern("rae_ext_Sdl3_pollFileDialogResult") ret String
+
+func pollFileDialogResult() ret String {
+  unsafe {
+    ret nativePollFileDialogResult()
+  }
+}

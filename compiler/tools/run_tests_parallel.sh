@@ -106,6 +106,11 @@ if [ -f tools/test-packages-cli.sh ]; then
   echo
   if bash tools/test-packages-cli.sh; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 fi
+# #44411932: native file-open dialog binding, env-driven headless path.
+if [ -f tools/test-sdl-file-dialog.sh ]; then
+  echo
+  if bash tools/test-sdl-file-dialog.sh; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
+fi
 echo
 echo "=========================================="
 echo "Results: $PASSED passed, $FAILED failed"
