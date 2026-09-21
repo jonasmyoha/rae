@@ -4,209 +4,1021 @@
   "root": "Chrome",
   "nodes": {
     "Chrome": {
-      "Layout": { "type": "Vertical", "gap": 0, "alignCross": "Stretch" },
-      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fill" } },
-      "Children": ["TopBar", "DiagnosticsPanel", "InspectorPanel", "TreePanel", "ProjectPanel", "Spacer", "StatusBar"]
+      "Layout": {
+        "type": "Vertical",
+        "gap": 0,
+        "alignCross": "Stretch"
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fill"
+        }
+      },
+      "Children": [
+        "TopBar",
+        "Body",
+        "StatusBar"
+      ]
     },
     "TopBar": {
-      "Rect": { "x": 0, "y": 0, "w": 0, "h": 96 },
-      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
-      "Shape": { "kind": "Rect", "fill": "#10161eE6", "stroke": "#00000000", "strokeWidth": 0 },
-      "Layout": { "type": "Horizontal", "gap": 14, "alignCross": "Center" },
-      "Padding": { "l": 24, "t": 12, "r": 24, "b": 12 },
-      "Children": ["FileName", "BarSpacer", "ZoomPill", "OpenPill", "NodeCount", "DiagnosticsPill"]
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 0,
+        "h": 44
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Shape": {
+        "kind": "Rect",
+        "fill": "#10161eF2",
+        "stroke": "#00000000",
+        "strokeWidth": 0
+      },
+      "Layout": {
+        "type": "Horizontal",
+        "gap": 8,
+        "alignCross": "Center"
+      },
+      "Padding": {
+        "l": 10,
+        "t": 6,
+        "r": 10,
+        "b": 6
+      },
+      "Children": [
+        "LeftToggle",
+        "FileName",
+        "BarSpacer",
+        "ZoomPill",
+        "OpenPill",
+        "NodeCount",
+        "DiagnosticsPill",
+        "RightToggle"
+      ]
+    },
+    "LeftToggle": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 80,
+        "h": 26
+      },
+      "Size": {
+        "w": {
+          "mode": "Hug"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "#2e3650",
+        "stroke": "#00000000",
+        "strokeWidth": 0,
+        "radius": 13
+      },
+      "Layout": {
+        "type": "Horizontal",
+        "gap": 0,
+        "alignMain": "Center",
+        "alignCross": "Center"
+      },
+      "Padding": {
+        "l": 10,
+        "t": 0,
+        "r": 10,
+        "b": 0
+      },
+      "HitArea": {
+        "kind": "Rect"
+      },
+      "OnClick": {
+        "actionId": "panel.left"
+      },
+      "Children": [
+        "LeftToggleLabel"
+      ]
+    },
+    "LeftToggleLabel": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 50,
+        "h": 22
+      },
+      "Size": {
+        "w": {
+          "mode": "Hug"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Text": {
+        "text": "Panels",
+        "styleId": "muted",
+        "styleOverride": {
+          "size": 12,
+          "color": "#f0f3fa"
+        }
+      }
     },
     "FileName": {
-      "Rect": { "x": 0, "y": 0, "w": 300, "h": 40 },
-      "Size": { "w": { "mode": "Hug" }, "h": { "mode": "Fixed" } },
-      "Text": { "text": "scene", "styleId": "h2", "styleOverride": { "size": 28, "color": "#f0f3fa" } }
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 200,
+        "h": 22
+      },
+      "Size": {
+        "w": {
+          "mode": "Hug"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Text": {
+        "text": "scene",
+        "styleId": "h2",
+        "styleOverride": {
+          "size": 14,
+          "color": "#f0f3fa"
+        }
+      }
     },
     "BarSpacer": {
-      "Rect": { "x": 0, "y": 0, "w": 0, "h": 40 },
-      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } }
-    },
-    "DesignSize": {
-      "Rect": { "x": 0, "y": 0, "w": 170, "h": 40 },
-      "Size": { "w": { "mode": "Hug" }, "h": { "mode": "Fixed" } },
-      "Margin": { "l": 0, "t": 0, "r": 24, "b": 0 },
-      "Text": { "text": "1080 x 1920", "styleId": "muted", "styleOverride": { "size": 22, "color": "#9ea8c2" } }
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 0,
+        "h": 22
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      }
     },
     "ZoomPill": {
-      "Rect": { "x": 0, "y": 0, "w": 200, "h": 48 },
-      "Size": { "w": { "mode": "Hug" }, "h": { "mode": "Fixed" } },
-      "Shape": { "kind": "RoundedRect", "fill": "#2e3650", "stroke": "#00000000", "strokeWidth": 0, "radius": 24 },
-      "Layout": { "type": "Horizontal", "gap": 0, "alignCross": "Center" },
-      "Padding": { "l": 6, "t": 0, "r": 6, "b": 0 },
-      "Children": ["ZoomOut", "ZoomLabel", "ZoomIn"]
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 110,
+        "h": 26
+      },
+      "Size": {
+        "w": {
+          "mode": "Hug"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "#2e3650",
+        "stroke": "#00000000",
+        "strokeWidth": 0,
+        "radius": 13
+      },
+      "Layout": {
+        "type": "Horizontal",
+        "gap": 0,
+        "alignCross": "Center"
+      },
+      "Padding": {
+        "l": 4,
+        "t": 0,
+        "r": 4,
+        "b": 0
+      },
+      "Children": [
+        "ZoomOut",
+        "ZoomLabel",
+        "ZoomIn"
+      ]
     },
     "ZoomOut": {
-      "Rect": { "x": 0, "y": 0, "w": 44, "h": 40 },
-      "HitArea": { "kind": "Rect" },
-      "OnClick": { "actionId": "zoom.out" },
-      "Text": { "text": "-", "styleId": "muted", "styleOverride": { "size": 26, "color": "#f0f3fa" }, "align": "center" }
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 22
+      },
+      "HitArea": {
+        "kind": "Rect"
+      },
+      "OnClick": {
+        "actionId": "zoom.out"
+      },
+      "Text": {
+        "text": "-",
+        "styleId": "muted",
+        "styleOverride": {
+          "size": 14,
+          "color": "#f0f3fa"
+        },
+        "align": "center"
+      }
     },
     "ZoomLabel": {
-      "Rect": { "x": 0, "y": 0, "w": 92, "h": 40 },
-      "HitArea": { "kind": "Rect" },
-      "OnClick": { "actionId": "zoom.reset" },
-      "Text": { "text": "100%", "styleId": "muted", "styleOverride": { "size": 22, "color": "#f0f3fa" }, "align": "center" }
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 52,
+        "h": 22
+      },
+      "HitArea": {
+        "kind": "Rect"
+      },
+      "OnClick": {
+        "actionId": "zoom.reset"
+      },
+      "Text": {
+        "text": "100%",
+        "styleId": "muted",
+        "styleOverride": {
+          "size": 12,
+          "color": "#f0f3fa"
+        },
+        "align": "center"
+      }
     },
     "ZoomIn": {
-      "Rect": { "x": 0, "y": 0, "w": 44, "h": 40 },
-      "HitArea": { "kind": "Rect" },
-      "OnClick": { "actionId": "zoom.in" },
-      "Text": { "text": "+", "styleId": "muted", "styleOverride": { "size": 26, "color": "#f0f3fa" }, "align": "center" }
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 22
+      },
+      "HitArea": {
+        "kind": "Rect"
+      },
+      "OnClick": {
+        "actionId": "zoom.in"
+      },
+      "Text": {
+        "text": "+",
+        "styleId": "muted",
+        "styleOverride": {
+          "size": 14,
+          "color": "#f0f3fa"
+        },
+        "align": "center"
+      }
     },
     "OpenPill": {
-      "Rect": { "x": 0, "y": 0, "w": 120, "h": 48 },
-      "Size": { "w": { "mode": "Hug" }, "h": { "mode": "Fixed" } },
-      "Shape": { "kind": "RoundedRect", "fill": "#2e3650", "stroke": "#00000000", "strokeWidth": 0, "radius": 24 },
-      "Layout": { "type": "Horizontal", "gap": 0, "alignCross": "Center" },
-      "Padding": { "l": 14, "t": 0, "r": 14, "b": 0 },
-      "HitArea": { "kind": "Rect" },
-      "OnClick": { "actionId": "file.open" },
-      "Children": ["OpenLabel"]
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 80,
+        "h": 26
+      },
+      "Size": {
+        "w": {
+          "mode": "Hug"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "#2e3650",
+        "stroke": "#00000000",
+        "strokeWidth": 0,
+        "radius": 13
+      },
+      "Layout": {
+        "type": "Horizontal",
+        "gap": 0,
+        "alignMain": "Center",
+        "alignCross": "Center"
+      },
+      "Padding": {
+        "l": 10,
+        "t": 0,
+        "r": 10,
+        "b": 0
+      },
+      "HitArea": {
+        "kind": "Rect"
+      },
+      "OnClick": {
+        "actionId": "file.open"
+      },
+      "Children": [
+        "OpenLabel"
+      ]
     },
     "OpenLabel": {
-      "Rect": { "x": 0, "y": 0, "w": 90, "h": 40 },
-      "Size": { "w": { "mode": "Hug" }, "h": { "mode": "Fixed" } },
-      "Text": { "text": "Open (O)", "styleId": "muted", "styleOverride": { "size": 22, "color": "#f0f3fa" } }
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 56,
+        "h": 22
+      },
+      "Size": {
+        "w": {
+          "mode": "Hug"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Text": {
+        "text": "Open (O)",
+        "styleId": "muted",
+        "styleOverride": {
+          "size": 12,
+          "color": "#f0f3fa"
+        }
+      }
     },
     "NodeCount": {
-      "Rect": { "x": 0, "y": 0, "w": 150, "h": 40 },
-      "Size": { "w": { "mode": "Hug" }, "h": { "mode": "Fixed" } },
-      "Text": { "text": "0 nodes", "styleId": "muted", "styleOverride": { "size": 22, "color": "#9ea8c2" } }
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 70,
+        "h": 22
+      },
+      "Size": {
+        "w": {
+          "mode": "Hug"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Text": {
+        "text": "0 nodes",
+        "styleId": "muted",
+        "styleOverride": {
+          "size": 12,
+          "color": "#9ea8c2"
+        }
+      }
     },
     "DiagnosticsPill": {
-      "Rect": { "x": 0, "y": 0, "w": 230, "h": 48 },
-      "Size": { "w": { "mode": "Hug" }, "h": { "mode": "Fixed" } },
-      "Shape": { "kind": "RoundedRect", "fill": "surfaceAlt", "stroke": "#00000000", "strokeWidth": 0, "radius": 24 },
-      "Layout": { "type": "Horizontal", "gap": 0, "alignCross": "Center" },
-      "Padding": { "l": 14, "t": 0, "r": 14, "b": 0 },
-      "Children": ["DiagnosticsCount"]
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 110,
+        "h": 26
+      },
+      "Size": {
+        "w": {
+          "mode": "Hug"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "surfaceAlt",
+        "stroke": "#00000000",
+        "strokeWidth": 0,
+        "radius": 13
+      },
+      "Layout": {
+        "type": "Horizontal",
+        "gap": 0,
+        "alignCross": "Center"
+      },
+      "Padding": {
+        "l": 10,
+        "t": 0,
+        "r": 10,
+        "b": 0
+      },
+      "Children": [
+        "DiagnosticsCount"
+      ]
     },
     "DiagnosticsCount": {
-      "Rect": { "x": 0, "y": 0, "w": 194, "h": 40 },
-      "Size": { "w": { "mode": "Hug" }, "h": { "mode": "Fixed" } },
-      "Text": { "text": "no diagnostics", "styleId": "muted", "styleOverride": { "size": 22, "color": "#9ea8c2" } }
-    },
-    "DiagnosticsPanel": {
-      "Rect": { "x": 0, "y": 0, "w": 0, "h": 0 },
-      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Hug" } },
-      "Active": { "value": false },
-      "Shape": { "kind": "Rect", "fill": "#10161eD9", "stroke": "#00000000", "strokeWidth": 0 },
-      "Layout": { "type": "Vertical", "gap": 8, "alignCross": "Stretch" },
-      "Padding": { "l": 24, "t": 12, "r": 24, "b": 12 },
-      "Children": ["PanelTitle", "DiagnosticList"]
-    },
-    "PanelTitle": {
-      "Rect": { "x": 0, "y": 0, "w": 0, "h": 32 },
-      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
-      "Text": { "text": "Diagnostics — D hides", "styleId": "muted", "styleOverride": { "size": 22, "color": "#9ea8c2" } }
-    },
-    "DiagnosticList": {
-      "Rect": { "x": 0, "y": 0, "w": 1000, "h": 540 },
-      "ScrollState": { "y": 0 },
-      "ListView": {
-        "itemSceneId": "chrome/DiagnosticRow",
-        "itemKeyField": "id",
-        "itemHeight": 84,
-        "itemGap": 6,
-        "visibleItemCount": 6,
-        "overscanRows": 1,
-        "bindings": [
-          { "nodeId": "RowKind", "component": "Text", "field": "text", "itemField": "kind" },
-          { "nodeId": "RowWhere", "component": "Text", "field": "text", "itemField": "where" },
-          { "nodeId": "RowName", "component": "Text", "field": "text", "itemField": "name" },
-          { "nodeId": "RowMessage", "component": "Text", "field": "text", "itemField": "message" }
-        ]
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 90,
+        "h": 22
+      },
+      "Size": {
+        "w": {
+          "mode": "Hug"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Text": {
+        "text": "no diagnostics",
+        "styleId": "muted",
+        "styleOverride": {
+          "size": 12,
+          "color": "#9ea8c2"
+        }
       }
     },
-    "InspectorPanel": {
-      "Rect": { "x": 0, "y": 0, "w": 0, "h": 0 },
-      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Hug" } },
-      "Active": { "value": false },
-      "SceneInstance": { "sceneId": "chrome/Inspector" }
+    "RightToggle": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 80,
+        "h": 26
+      },
+      "Size": {
+        "w": {
+          "mode": "Hug"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "#2e3650",
+        "stroke": "#00000000",
+        "strokeWidth": 0,
+        "radius": 13
+      },
+      "Layout": {
+        "type": "Horizontal",
+        "gap": 0,
+        "alignMain": "Center",
+        "alignCross": "Center"
+      },
+      "Padding": {
+        "l": 10,
+        "t": 0,
+        "r": 10,
+        "b": 0
+      },
+      "HitArea": {
+        "kind": "Rect"
+      },
+      "OnClick": {
+        "actionId": "panel.right"
+      },
+      "Children": [
+        "RightToggleLabel"
+      ]
     },
-    "TreePanel": {
-      "Rect": { "x": 0, "y": 0, "w": 0, "h": 0 },
-      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Hug" } },
-      "Active": { "value": false },
-      "Shape": { "kind": "Rect", "fill": "#10161eD9", "stroke": "#00000000", "strokeWidth": 0 },
-      "Layout": { "type": "Vertical", "gap": 8, "alignCross": "Stretch" },
-      "Padding": { "l": 24, "t": 12, "r": 24, "b": 12 },
-      "Children": ["TreeTitle", "TreeList"]
-    },
-    "TreeTitle": {
-      "Rect": { "x": 0, "y": 0, "w": 0, "h": 32 },
-      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
-      "Text": { "text": "Tree — T hides, click a row to select", "styleId": "muted", "styleOverride": { "size": 22, "color": "#9ea8c2" } }
-    },
-    "TreeList": {
-      "Rect": { "x": 0, "y": 0, "w": 1000, "h": 400 },
-      "ScrollState": { "y": 0 },
-      "ListView": {
-        "itemSceneId": "chrome/TreeRow",
-        "itemKeyField": "id",
-        "itemHeight": 40,
-        "itemGap": 4,
-        "visibleItemCount": 12,
-        "overscanRows": 1,
-        "bindings": [
-          { "nodeId": "TreeRow", "component": "Padding", "field": "l", "itemField": "indent" },
-          { "nodeId": "TreeRow", "component": "OnClick", "field": "actionId", "itemField": "action" },
-          { "nodeId": "TreeMarker", "component": "Text", "field": "text", "itemField": "marker" },
-          { "nodeId": "TreeLabel", "component": "Text", "field": "text", "itemField": "label" }
-        ]
+    "RightToggleLabel": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 60,
+        "h": 22
+      },
+      "Size": {
+        "w": {
+          "mode": "Hug"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Text": {
+        "text": "Inspector",
+        "styleId": "muted",
+        "styleOverride": {
+          "size": 12,
+          "color": "#f0f3fa"
+        }
       }
+    },
+    "Body": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 0,
+        "h": 0
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fill"
+        }
+      },
+      "Layout": {
+        "type": "Horizontal",
+        "gap": 0,
+        "alignCross": "Stretch"
+      },
+      "Children": [
+        "LeftPanel",
+        "EditArea",
+        "RightPanel"
+      ]
+    },
+    "LeftPanel": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 300,
+        "h": 0
+      },
+      "Size": {
+        "w": {
+          "mode": "Fixed"
+        },
+        "h": {
+          "mode": "Fill"
+        }
+      },
+      "Shape": {
+        "kind": "Rect",
+        "fill": "#10161eF2",
+        "stroke": "#00000000",
+        "strokeWidth": 0
+      },
+      "Layout": {
+        "type": "Vertical",
+        "gap": 10,
+        "alignCross": "Stretch"
+      },
+      "Padding": {
+        "l": 12,
+        "t": 12,
+        "r": 12,
+        "b": 12
+      },
+      "Children": [
+        "ProjectPanel",
+        "TreePanel",
+        "DiagnosticsPanel"
+      ]
+    },
+    "EditArea": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 0,
+        "h": 0
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fill"
+        }
+      }
+    },
+    "RightPanel": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 320,
+        "h": 0
+      },
+      "Size": {
+        "w": {
+          "mode": "Fixed"
+        },
+        "h": {
+          "mode": "Fill"
+        }
+      },
+      "Shape": {
+        "kind": "Rect",
+        "fill": "#10161eF2",
+        "stroke": "#00000000",
+        "strokeWidth": 0
+      },
+      "Layout": {
+        "type": "Vertical",
+        "gap": 10,
+        "alignCross": "Stretch"
+      },
+      "Padding": {
+        "l": 12,
+        "t": 12,
+        "r": 12,
+        "b": 12
+      },
+      "Children": [
+        "InspectorPanel"
+      ]
     },
     "ProjectPanel": {
-      "Rect": { "x": 0, "y": 0, "w": 0, "h": 0 },
-      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Hug" } },
-      "Active": { "value": false },
-      "Shape": { "kind": "Rect", "fill": "#10161eD9", "stroke": "#00000000", "strokeWidth": 0 },
-      "Layout": { "type": "Vertical", "gap": 8, "alignCross": "Stretch" },
-      "Padding": { "l": 24, "t": 12, "r": 24, "b": 12 },
-      "Children": ["ProjectTitle", "ProjectList"]
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 0,
+        "h": 0
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Hug"
+        }
+      },
+      "Active": {
+        "value": false
+      },
+      "Layout": {
+        "type": "Vertical",
+        "gap": 6,
+        "alignCross": "Stretch"
+      },
+      "Children": [
+        "ProjectTitle",
+        "ProjectList"
+      ]
     },
     "ProjectTitle": {
-      "Rect": { "x": 0, "y": 0, "w": 0, "h": 32 },
-      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
-      "Text": { "text": "Project — P hides, click a scene to open it", "styleId": "muted", "styleOverride": { "size": 22, "color": "#9ea8c2" } }
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 0,
+        "h": 18
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Text": {
+        "text": "Project",
+        "styleId": "muted",
+        "styleOverride": {
+          "size": 12,
+          "color": "#8fd3ff"
+        }
+      }
     },
     "ProjectList": {
-      "Rect": { "x": 0, "y": 0, "w": 1000, "h": 400 },
-      "ScrollState": { "y": 0 },
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 276,
+        "h": 200
+      },
+      "ScrollState": {
+        "y": 0
+      },
       "ListView": {
         "itemSceneId": "chrome/ProjectRow",
         "itemKeyField": "id",
-        "itemHeight": 40,
-        "itemGap": 4,
-        "visibleItemCount": 12,
+        "itemHeight": 22,
+        "itemGap": 2,
+        "visibleItemCount": 10,
         "overscanRows": 1,
         "bindings": [
-          { "nodeId": "ProjectRow", "component": "OnClick", "field": "actionId", "itemField": "action" },
-          { "nodeId": "ProjectMarker", "component": "Text", "field": "text", "itemField": "marker" },
-          { "nodeId": "ProjectLabel", "component": "Text", "field": "text", "itemField": "label" }
+          {
+            "nodeId": "ProjectRow",
+            "component": "OnClick",
+            "field": "actionId",
+            "itemField": "action"
+          },
+          {
+            "nodeId": "ProjectMarker",
+            "component": "Text",
+            "field": "text",
+            "itemField": "marker"
+          },
+          {
+            "nodeId": "ProjectLabel",
+            "component": "Text",
+            "field": "text",
+            "itemField": "label"
+          }
         ]
+      },
+      "Overflow": {
+        "mode": "Clip"
       }
     },
-    "Spacer": {
-      "Rect": { "x": 0, "y": 0, "w": 0, "h": 0 },
-      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fill" } }
+    "TreePanel": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 0,
+        "h": 0
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Hug"
+        }
+      },
+      "Active": {
+        "value": true
+      },
+      "Layout": {
+        "type": "Vertical",
+        "gap": 6,
+        "alignCross": "Stretch"
+      },
+      "Children": [
+        "TreeTitle",
+        "TreeList"
+      ]
+    },
+    "TreeTitle": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 0,
+        "h": 18
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Text": {
+        "text": "Hierarchy",
+        "styleId": "muted",
+        "styleOverride": {
+          "size": 12,
+          "color": "#8fd3ff"
+        }
+      }
+    },
+    "TreeList": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 276,
+        "h": 300
+      },
+      "ScrollState": {
+        "y": 0
+      },
+      "ListView": {
+        "itemSceneId": "chrome/TreeRow",
+        "itemKeyField": "id",
+        "itemHeight": 22,
+        "itemGap": 2,
+        "visibleItemCount": 16,
+        "overscanRows": 1,
+        "bindings": [
+          {
+            "nodeId": "TreeRow",
+            "component": "Padding",
+            "field": "l",
+            "itemField": "indent"
+          },
+          {
+            "nodeId": "TreeRow",
+            "component": "OnClick",
+            "field": "actionId",
+            "itemField": "action"
+          },
+          {
+            "nodeId": "TreeMarker",
+            "component": "Text",
+            "field": "text",
+            "itemField": "marker"
+          },
+          {
+            "nodeId": "TreeLabel",
+            "component": "Text",
+            "field": "text",
+            "itemField": "label"
+          }
+        ]
+      },
+      "Overflow": {
+        "mode": "Clip"
+      }
+    },
+    "DiagnosticsPanel": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 0,
+        "h": 0
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Hug"
+        }
+      },
+      "Active": {
+        "value": true
+      },
+      "Layout": {
+        "type": "Vertical",
+        "gap": 6,
+        "alignCross": "Stretch"
+      },
+      "Children": [
+        "PanelTitle",
+        "DiagnosticList"
+      ]
+    },
+    "PanelTitle": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 0,
+        "h": 18
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Text": {
+        "text": "Diagnostics",
+        "styleId": "muted",
+        "styleOverride": {
+          "size": 12,
+          "color": "#8fd3ff"
+        }
+      }
+    },
+    "DiagnosticList": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 276,
+        "h": 240
+      },
+      "ScrollState": {
+        "y": 0
+      },
+      "ListView": {
+        "itemSceneId": "chrome/DiagnosticRow",
+        "itemKeyField": "id",
+        "itemHeight": 46,
+        "itemGap": 4,
+        "visibleItemCount": 5,
+        "overscanRows": 1,
+        "bindings": [
+          {
+            "nodeId": "RowKind",
+            "component": "Text",
+            "field": "text",
+            "itemField": "kind"
+          },
+          {
+            "nodeId": "RowWhere",
+            "component": "Text",
+            "field": "text",
+            "itemField": "where"
+          },
+          {
+            "nodeId": "RowName",
+            "component": "Text",
+            "field": "text",
+            "itemField": "name"
+          },
+          {
+            "nodeId": "RowMessage",
+            "component": "Text",
+            "field": "text",
+            "itemField": "message"
+          }
+        ]
+      },
+      "Overflow": {
+        "mode": "Clip"
+      }
+    },
+    "InspectorPanel": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 0,
+        "h": 0
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Hug"
+        }
+      },
+      "Active": {
+        "value": true
+      },
+      "SceneInstance": {
+        "sceneId": "chrome/Inspector"
+      }
     },
     "StatusBar": {
-      "Rect": { "x": 0, "y": 0, "w": 0, "h": 64 },
-      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
-      "Shape": { "kind": "Rect", "fill": "#10161eE6", "stroke": "#00000000", "strokeWidth": 0 },
-      "Layout": { "type": "Horizontal", "gap": 0, "alignCross": "Center" },
-      "Padding": { "l": 24, "t": 8, "r": 24, "b": 8 },
-      "Children": ["DesignSize", "StatusLine"]
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 0,
+        "h": 26
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Shape": {
+        "kind": "Rect",
+        "fill": "#10161eF2",
+        "stroke": "#00000000",
+        "strokeWidth": 0
+      },
+      "Layout": {
+        "type": "Horizontal",
+        "gap": 12,
+        "alignCross": "Center"
+      },
+      "Padding": {
+        "l": 10,
+        "t": 4,
+        "r": 10,
+        "b": 4
+      },
+      "Children": [
+        "DesignSize",
+        "StatusLine"
+      ]
+    },
+    "DesignSize": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 150,
+        "h": 18
+      },
+      "Size": {
+        "w": {
+          "mode": "Hug"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Text": {
+        "text": "1080 x 1920",
+        "styleId": "muted",
+        "styleOverride": {
+          "size": 11,
+          "color": "#9ea8c2"
+        }
+      }
     },
     "StatusLine": {
-      "Rect": { "x": 0, "y": 0, "w": 0, "h": 40 },
-      "Size": { "w": { "mode": "Fill" }, "h": { "mode": "Fixed" } },
-      "Text": { "text": "H hides the chrome", "styleId": "muted", "styleOverride": { "size": 22, "color": "#9ea8c2" } }
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 0,
+        "h": 18
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Text": {
+        "text": "H hides the chrome",
+        "styleId": "muted",
+        "styleOverride": {
+          "size": 11,
+          "color": "#9ea8c2"
+        }
+      }
     }
   }
 }

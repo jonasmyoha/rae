@@ -53,12 +53,18 @@ texture manifest, and a design-resolution + fit rule (now native:
 - **Fonts:** `assets.fonts.text` / `.icons` (a `.mtsdf.json`; the sibling atlas is
   `.png` or `.raw`), else the viewer's fallback Roboto + Material atlases;
   `RAE_UI_EDITOR_FONT` / `RAE_UI_EDITOR_ICON_FONT` override.
-- **Window:** default 9:16, `540x960` logical; `RAE_UI_EDITOR_WINDOW=WxH` overrides;
-  resizable. **Design resolution** = the root node's authored `Rect` when it has one,
-  else `1080x1920`, `RAE_UI_EDITOR_DESIGN=WxH` overrides; fit = contain (letterbox),
-  so a phone scene stays a phone in any window. The design resolution the canvas
-  fits is the LARGER of the document's design and the chrome's own `1080x1920`,
-  per axis (below). **Device frame:** a scene that declares `unitScale` (design
+- **Window:** the editor is a DESKTOP app: it opens landscape, `1400x900` logical
+  (`RAE_UI_EDITOR_WINDOW=WxH` overrides), resizable, and it works on a phone-sized
+  window too (the panels minimise from the top bar; they always START open). The
+  chrome is authored in logical POINTS: the canvas design resolution is the
+  window's logical size (physical pixels / DPR), re-applied on every resize, so a
+  44pt top bar is 44pt on any display and the chrome never scales with the
+  document. **The document's frame** = the root node's authored `Rect` when it has
+  one, else `1080x1920`, `RAE_UI_EDITOR_DESIGN=WxH` overrides (and the device frame
+  below for a phone-authored scene); the camera FITS the frame into the chrome's
+  `EditArea` on load and zooms/pans it after, so a phone scene stays a phone at any
+  window size. The design-space rule that used to letterbox the chrome into the
+  document's space is gone. **Device frame:** a scene that declares `unitScale` (design
   units per point — every 106 scene says `3`) is authored for a phone, and the
   editor lays it out in the SAME frame the app does (106's `Viewport.rae`): the
   extent is the active `ui/DevicePresets` preset in design units (iPhone 15 Pro:
@@ -71,11 +77,6 @@ texture manifest, and a design-resolution + fit rule (now native:
   `unitScale` gets no frame and is unchanged. The status line reports the frame
   (`1179 x 2556 · column 1080 · safe 177`). Not simulated: what the APP composes
   around a page — its dock, mini player, bound data, downloaded images.
-  The chrome-minimum rule is
-  per axis: the chrome shares the canvas, so following a small document (a
-  `993x130` row scene) shrank it into the letterboxed strip and took the Open
-  button with it. A document smaller than the design keeps its authored size and
-  sits centered in it — a translation, never a scale.
 - **A `.raepack` as the PROJECT** (#82531251, `projectSystem/`): the same inputs
   (argument, `RAE_UI_EDITOR_SCENE`, later the picker) accept a `.raepack`. Its
   directory becomes the scene ROOT — the `rae run --project` semantics: every
@@ -156,10 +157,18 @@ chrome can be hidden for a pure passive view (`H` key).
   like a 106 page) under a `Viewport` node that carries the design resolution and
   the letterbox. Remounted whole on reload.
 - **chrome layer** — authored in the app's OWN `.raescene`
-  (`assets/scenes/Editor.raescene`, `chrome/*.raescene` sub-scenes): a top bar (file
-  name, design size, node count, diagnostics count, `watching` dot), a status line,
-  later the inspector/tree side panel. The chrome is data; the app has no
-  `createEntity` for layout.
+  (`assets/scenes/Editor.raescene`, `chrome/*.raescene` sub-scenes), the desktop
+  editor layout the reference editor uses (docs/ui-editor-reference-features.md §3):
+  a 44pt **top bar** (`Panels` toggle, file name, zoom pill, `Open (O)`, node count,
+  diagnostics pill, `Inspector` toggle), a **Body** row of `LeftPanel` (300pt:
+  Project / Hierarchy / Diagnostics sections as clipped ListViews, `chrome/*Row`
+  rows) · `EditArea` (Fill — the space the camera fits the document into) ·
+  `RightPanel` (320pt: the `chrome/Inspector` instance, always shown, "nothing
+  selected" is a state), and a 26pt **status bar** (frame size, status line). The
+  top-bar toggles fire `panel.left` / `panel.right` and flip the panels' `Active`;
+  `H` hides the whole chrome. The chrome is data; the app has no `createEntity`
+  for layout. Pointer input reaches the document only inside `EditArea`, so a
+  panel over the document never selects through.
 
 Resources on `App` (no globals): `document: SceneDocument { path, mtime, scene,
 registry, theme, pageRoot, designW, designH, diagnostics: List(SceneDiagnostic) }`,

@@ -24,7 +24,7 @@ open ecs/Entity
 open ecs/ComponentTable
 
 # Tree rows: one design unit of indent per depth level.
-const treeIndentPerLevel: Float = 28.0
+const treeIndentPerLevel: Float = 12.0
 
 const treeRowPitch: Float = 44.0
 
@@ -82,9 +82,33 @@ func createInspectorState(world: mod UiWorld) ret InspectorState {
       stroke: RgbaColor { r: 96, g: 200, b: 255, a: 255 }
     )
     panelOpen: false
-    treeOpen: false
+    treeOpen: true
     treeEntities: List.create(EntityId, cap: 64)
   }
+}
+
+# Whether the pointer is inside the chrome's EditArea (true when the chrome
+# has no such node, so a bare document is fully reachable).
+func pointerInEditArea(world: view UiWorld, x: view Float, y: view Float) ret Bool {
+  let entity: EntityId = nodeEntityFor(world: world, nodeId: "chrome/EditArea")
+  if isNone(this: entity) {
+    ret true
+  }
+  if componentHas(this: world.computedRects, entity: entity) is false or componentHas(
+    this: world.worldTransforms
+    entity: entity
+  ) is false {
+    ret true
+  }
+  let rect: ComputedRect = componentGet(this: world.computedRects, entity: entity)
+  let transform: WorldTransform2D = componentGet(this: world.worldTransforms, entity: entity)
+  if x < transform.position.x or y < transform.position.y {
+    ret false
+  }
+  if x > transform.position.x + rect.size.x or y > transform.position.y + rect.size.y {
+    ret false
+  }
+  ret true
 }
 
 # The document scene's root: mountPage mounts the scene's root node ONTO the
@@ -342,7 +366,7 @@ func collectTreeRows(
   var values: List(String) = List.create(String, cap: 5)
   values.add(value: "{entity.index}")
   values.add(value: nodeIdOf(world: world, entity: entity))
-  values.add(value: "{(depth.toFloat() * treeIndentPerLevel + 12.0).toInt()}")
+  values.add(value: "{(depth.toFloat() * treeIndentPerLevel + 6.0).toInt()}")
   var marker: String = ""
   if entity is selected {
     marker = ">"
@@ -401,7 +425,7 @@ func syncTreePanel(
       shown = listView.visibleItemCount
     }
     let rect: mod Rect => componentMod(this: world.rects, entity: list)
-    rect.size.x = designW - 48.0
+    rect.size.x = chromePanelInnerW
     rect.size.y = shown.toFloat() * (listView.itemHeight + listView.itemGap) - listView.itemGap
   }
   componentSet(this: world.listViewDatas, entity: list, data: ListViewData { rows: own rows })
@@ -433,12 +457,21 @@ func inspectorSystem(
 ) ret Bool {
   let sceneRoot: EntityId = documentSceneRoot(world: world, pageRoot: pageRoot)
   var changed: Bool = false
-  let hovered: EntityId = deepestNodeAt(
+  # Only the edit area reaches the document: a pointer over a chrome panel
+  # (which may cover part of the document) hovers and selects nothing.
+  var hovered: EntityId = noEntity()
+  if chromeVisible is false or pointerInEditArea(
     world: world
-    entity: sceneRoot
     x: input.pointer.x
     y: input.pointer.y
-  )
+  ) {
+    hovered = deepestNodeAt(
+      world: world
+      entity: sceneRoot
+      x: input.pointer.x
+      y: input.pointer.y
+    )
+  }
   if hovered is not inspector.hovered {
     inspector.hovered = hovered
     changed = true
@@ -492,7 +525,6 @@ func inspectorSystem(
   if selection is not inspector.selected {
     selectNode(inspector: inspector, world: world, entity: selection)
     inspector.panelOpen = isNone(this: selection) is false
-    setNodeActive(world: world, nodeId: "chrome/InspectorPanel", value: inspector.panelOpen)
     changed = true
   }
   if changed {
@@ -544,7 +576,6 @@ func inspectorAfterLoad(
     }
   }
   inspector.panelOpen = isNone(this: inspector.selected) is false
-  setNodeActive(world: world, nodeId: "chrome/InspectorPanel", value: inspector.panelOpen)
   setNodeActive(world: world, nodeId: "chrome/TreePanel", value: inspector.treeOpen)
   syncInspectorPanel(world: world, inspector: inspector, sceneRoot: sceneRoot)
   syncTreePanel(

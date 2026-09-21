@@ -103,7 +103,11 @@ The reference's panels are screen-space, unscaled, draggable, with per-tab persi
 
 - **Left sidebar** — tabs ("Editor", "Hierarchy"), a scrollable stack of panels, an
   optional docked "create" toolbar (Create button / image / text, inserted after the
-  selection and auto-selected).
+  selection and auto-selected). **Rae — the desktop layout is DONE** (a landscape
+  window in points; left panel with Project / Hierarchy / Diagnostics, a centre
+  `EditArea` the camera fits the document into, a right inspector panel, top-bar
+  toggles that minimise either panel — all authored in `Editor.raescene`); the
+  sections are drafts for the visual-polish task to style.
 - **Hierarchy** — header "Hierarchy (N)"; tree rows 24px with caret collapse, 12px
   indent per depth, label `name · Kind · file · "text preview"`; runtime-only entities
   prefixed and coloured red; selected row tinted; click selects, Shift/Ctrl/Cmd-click
