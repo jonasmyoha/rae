@@ -1,488 +1,227 @@
 {
   "type": "Scene",
   "version": 2,
-  "import": [
-    "Theme"
-  ],
+  "import": ["Theme"],
   "root": "Screen",
   "nodes": {
     "Screen": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 1080,
-        "h": 1920
-      },
-      "Shape": {
-        "kind": "Rect",
-        "fill": "background",
-        "stroke": "#00000000",
-        "strokeWidth": 0
-      },
-      "Layout": {
-        "type": "Vertical",
-        "gap": "spaceM",
-        "alignCross": "Stretch"
-      },
-      "Padding": {
-        "l": "spaceL",
-        "t": 160,
-        "r": "spaceL",
-        "b": "spaceL"
-      },
-      "Children": [
-        "Eyebrow",
-        "Heading",
-        "Strip",
-        "HandRow",
-        "Note"
-      ]
+      "Rect": {"x": 0, "y": 0, "w": 1080, "h": 1920},
+      "Shape": {"kind": "Rect", "fill": "background", "stroke": "#00000000", "strokeWidth": 0},
+      "Layout": {"type": "Vertical", "gap": 28, "alignCross": "Stretch"},
+      "Padding": {"l": 48, "t": 100, "r": 48, "b": 72},
+      "Children": ["Eyebrow", "Heading", "CollectionNote", "Strip", "HandRow", "Details", "Note"],
+      "GradientFill": {"from": "#15252C", "to": "#0C121B", "angle": 100}
     },
     "Heading": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 0,
-        "h": 110
-      },
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 148},
       "Size": {
-        "w": {
-          "mode": "Fill"
-        },
-        "h": {
-          "mode": "Fixed"
-        }
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Fixed"}
       },
-      "Text": {
-        "text": "Your hand",
-        "styleId": "title"
-      }
+      "Text": {"text": "Your hand", "styleId": "display"}
     },
     "Strip": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 0,
-        "h": 520
-      },
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 640},
       "Size": {
-        "w": {
-          "mode": "Fill"
-        },
-        "h": {
-          "mode": "Fixed"
-        }
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Fixed"}
       },
-      "Layout": {
-        "type": "Horizontal",
-        "gap": "spaceM",
-        "alignMain": "SpaceBetween",
-        "alignCross": "Center"
-      },
-      "Children": [
-        "CardOne",
-        "CardTwo",
-        "CardThree"
-      ],
-      "Margin": {
-        "l": 0,
-        "t": 24,
-        "r": 0,
-        "b": 0
-      }
+      "Layout": {"type": "Horizontal", "gap": "spaceM", "alignMain": "SpaceBetween", "alignCross": "Center"},
+      "Children": ["CardOne", "CardTwo", "CardThree"],
+      "Margin": {"l": 0, "t": 72, "r": 0, "b": 0}
     },
     "CardOne": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 300,
-        "h": 460
-      },
+      "Rect": {"x": 0, "y": 0, "w": 300, "h": 460},
       "TransformFx": {
         "scaleX": 1,
         "scaleY": 1,
         "rotation": -0.12,
         "alpha": 1,
         "visible": true,
-        "pivot": {
-          "x": 0.5,
-          "y": 1
-        },
-        "anchor": {
-          "x": 0.5,
-          "y": 1
-        }
-      },
-      "MaskShape": {
-        "kind": "RoundedRect",
-        "sourceNodeId": "",
-        "radius": 36
+        "pivot": {"x": 0.5, "y": 1},
+        "anchor": {"x": 0.5, "y": 1}
       },
       "SceneInstance": {
         "sceneId": "Card",
         "params": {
           "overrides": [
-            {
-              "nodeId": "CardTitle",
-              "component": "Text",
-              "field": "text",
-              "value": "Ember"
-            },
-            {
-              "nodeId": "CardCost",
-              "component": "Text",
-              "field": "text",
-              "value": "3"
-            },
-            {
-              "nodeId": "CardKind",
-              "component": "Text",
-              "field": "text",
-              "value": "spell / common"
-            }
+            {"nodeId": "CardTitle", "component": "Text", "field": "text", "value": "Ember"},
+            {"nodeId": "CardCost", "component": "Text", "field": "text", "value": "3"},
+            {"nodeId": "CardKind", "component": "Text", "field": "text", "value": "spell / common"}
           ]
         }
       }
     },
     "CardTwo": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 300,
-        "h": 460
-      },
+      "Rect": {"x": 0, "y": 0, "w": 300, "h": 460},
       "TransformFx": {
         "scaleX": 1.06,
         "scaleY": 1.06,
         "rotation": 0,
         "alpha": 1,
         "visible": true,
-        "pivot": {
-          "x": 0.5,
-          "y": 1
-        },
-        "anchor": {
-          "x": 0.5,
-          "y": 1
-        }
-      },
-      "MaskShape": {
-        "kind": "RoundedRect",
-        "sourceNodeId": "",
-        "radius": 36
+        "pivot": {"x": 0.5, "y": 1},
+        "anchor": {"x": 0.5, "y": 1}
       },
       "SceneInstance": {
         "sceneId": "Card",
         "params": {
           "overrides": [
-            {
-              "nodeId": "CardTitle",
-              "component": "Text",
-              "field": "text",
-              "value": "Tide"
-            },
-            {
-              "nodeId": "CardCost",
-              "component": "Text",
-              "field": "text",
-              "value": "5"
-            },
-            {
-              "nodeId": "CardKind",
-              "component": "Text",
-              "field": "text",
-              "value": "creature / rare"
-            }
+            {"nodeId": "CardTitle", "component": "Text", "field": "text", "value": "Tide"},
+            {"nodeId": "CardCost", "component": "Text", "field": "text", "value": "5"},
+            {"nodeId": "CardKind", "component": "Text", "field": "text", "value": "creature / rare"},
+            {"nodeId": "ArtIcon", "component": "Sprite", "field": "textureKey", "value": "mat:favorite"}
           ]
         }
-      }
+      },
+      "MaskShape": {"kind": "RoundedRect", "radius": 48, "sourceNodeId": ""}
     },
     "CardThree": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 300,
-        "h": 460
-      },
+      "Rect": {"x": 0, "y": 0, "w": 300, "h": 460},
       "TransformFx": {
         "scaleX": 1,
         "scaleY": 1,
         "rotation": 0.12,
         "alpha": 1,
         "visible": true,
-        "pivot": {
-          "x": 0.5,
-          "y": 1
-        },
-        "anchor": {
-          "x": 0.5,
-          "y": 1
-        }
-      },
-      "MaskShape": {
-        "kind": "RoundedRect",
-        "sourceNodeId": "",
-        "radius": 36
+        "pivot": {"x": 0.5, "y": 1},
+        "anchor": {"x": 0.5, "y": 1}
       },
       "SceneInstance": {
         "sceneId": "Card",
         "params": {
           "overrides": [
-            {
-              "nodeId": "CardTitle",
-              "component": "Text",
-              "field": "text",
-              "value": "Gale"
-            },
-            {
-              "nodeId": "CardCost",
-              "component": "Text",
-              "field": "text",
-              "value": "2"
-            },
-            {
-              "nodeId": "CardKind",
-              "component": "Text",
-              "field": "text",
-              "value": "trap / common"
-            }
+            {"nodeId": "CardTitle", "component": "Text", "field": "text", "value": "Gale"},
+            {"nodeId": "CardCost", "component": "Text", "field": "text", "value": "2"},
+            {"nodeId": "CardKind", "component": "Text", "field": "text", "value": "trap / common"},
+            {"nodeId": "ArtIcon", "component": "Sprite", "field": "textureKey", "value": "mat:whatshot"}
           ]
         }
       }
     },
     "Note": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 0,
-        "h": 36
-      },
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 36},
       "Size": {
-        "w": {
-          "mode": "Fill"
-        },
-        "h": {
-          "mode": "Fixed"
-        }
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Fixed"}
       },
-      "Text": {
-        "text": "three instances of Card.raescene, spaceBetween, masked, rotated",
-        "styleId": "caption"
-      },
-      "Margin": {
-        "l": 0,
-        "t": 16,
-        "r": 0,
-        "b": 0
-      }
+      "Text": {"text": "Three possibilities. Make your next move.", "styleId": "caption"},
+      "Margin": {"l": 0, "t": 16, "r": 0, "b": 0}
     },
     "Eyebrow": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 0,
-        "h": 34
-      },
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 34},
       "Size": {
-        "w": {
-          "mode": "Fill"
-        },
-        "h": {
-          "mode": "Fixed"
-        }
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Fixed"}
       },
-      "Text": {
-        "text": "YOUR TURN",
-        "styleId": "eyebrow"
-      }
+      "Text": {"text": "THE COLLECTION", "styleId": "eyebrow"}
     },
     "HandRow": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 0,
-        "h": 112
-      },
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 112},
       "Size": {
-        "w": {
-          "mode": "Fill"
-        },
-        "h": {
-          "mode": "Fixed"
-        }
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Fixed"}
       },
-      "Margin": {
-        "l": 0,
-        "t": 24,
-        "r": 0,
-        "b": 0
-      },
-      "Layout": {
-        "type": "Horizontal",
-        "gap": "spaceM",
-        "alignMain": "Center",
-        "alignCross": "Center"
-      },
-      "Children": [
-        "ManaPill",
-        "PlayCard",
-        "EndTurn"
-      ]
+      "Margin": {"l": 0, "t": 48, "r": 0, "b": 0},
+      "Layout": {"type": "Horizontal", "gap": "spaceM", "alignMain": "Center", "alignCross": "Center"},
+      "Children": ["ManaPill", "PlayCard", "EndTurn"]
     },
     "ManaPill": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 200,
-        "h": 88
-      },
-      "Shape": {
-        "kind": "RoundedRect",
-        "fill": "surface",
-        "stroke": "outline",
-        "strokeWidth": 2,
-        "radius": "radiusPill"
-      },
-      "Layout": {
-        "type": "Horizontal",
-        "gap": 8,
-        "alignMain": "Center",
-        "alignCross": "Center"
-      },
-      "Children": [
-        "ManaDot",
-        "ManaText"
-      ]
+      "Rect": {"x": 0, "y": 0, "w": 200, "h": 88},
+      "Shape": {"kind": "RoundedRect", "fill": "surface", "stroke": "outline", "strokeWidth": 1, "radius": 44.0},
+      "Layout": {"type": "Horizontal", "gap": 8, "alignMain": "Center", "alignCross": "Center"},
+      "Children": ["ManaDot", "ManaText"]
     },
     "ManaDot": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 22,
-        "h": 22
-      },
-      "Shape": {
-        "kind": "Circle",
-        "fill": "accent",
-        "stroke": "#00000000",
-        "strokeWidth": 0
-      }
+      "Rect": {"x": 0, "y": 0, "w": 22, "h": 22},
+      "Shape": {"kind": "Circle", "fill": "accent", "stroke": "#00000000", "strokeWidth": 0}
     },
     "ManaText": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 110,
-        "h": 44
-      },
+      "Rect": {"x": 0, "y": 0, "w": 110, "h": 44},
       "Size": {
-        "w": {
-          "mode": "Hug"
-        },
-        "h": {
-          "mode": "Fixed"
-        }
+        "w": {"mode": "Hug"},
+        "h": {"mode": "Fixed"}
       },
-      "Text": {
-        "text": "6 / 10",
-        "styleId": "buttonSecondary"
-      }
+      "Text": {"text": "6 / 10", "styleId": "buttonSecondary"}
     },
     "PlayCard": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 360,
-        "h": 100
-      },
-      "Shape": {
-        "kind": "RoundedRect",
-        "fill": "accent",
-        "stroke": "#00000000",
-        "strokeWidth": 0,
-        "radius": "radiusPill"
-      },
-      "Shadow": {
-        "blur": 24
-      },
-      "Layout": {
-        "type": "Horizontal",
-        "gap": 0,
-        "alignMain": "Center",
-        "alignCross": "Center"
-      },
-      "OnClick": {
-        "actionId": "hand.play"
-      },
-      "Children": [
-        "PlayCardLabel"
-      ]
+      "Rect": {"x": 0, "y": 0, "w": 360, "h": 100},
+      "Shape": {"kind": "RoundedRect", "fill": "accent", "stroke": "#00000000", "strokeWidth": 1, "radius": 50.0},
+      "Layout": {"type": "Horizontal", "gap": 0, "alignMain": "Center", "alignCross": "Center"},
+      "OnClick": {"actionId": "hand.play"},
+      "Children": ["PlayCardLabel"],
+      "GradientFill": {"from": "#69C7AC", "to": "#48B498", "angle": 100},
+      "CornerRadius": {"radius": 50.0}
     },
     "PlayCardLabel": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 0,
-        "h": 52
-      },
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 52},
       "Size": {
-        "w": {
-          "mode": "Fill"
-        },
-        "h": {
-          "mode": "Fixed"
-        }
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Fixed"}
       },
-      "Text": {
-        "text": "Play card",
-        "styleId": "button"
-      }
+      "Text": {"text": "Play card", "styleId": "button"}
     },
     "EndTurn": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 230,
-        "h": 88
-      },
-      "Shape": {
-        "kind": "RoundedRect",
-        "fill": "surfaceAlt",
-        "stroke": "outline",
-        "strokeWidth": 2,
-        "radius": "radiusPill"
-      },
-      "Layout": {
-        "type": "Horizontal",
-        "gap": 0,
-        "alignMain": "Center",
-        "alignCross": "Center"
-      },
-      "OnClick": {
-        "actionId": "hand.endTurn"
-      },
-      "Children": [
-        "EndTurnLabel"
-      ]
+      "Rect": {"x": 0, "y": 0, "w": 230, "h": 88},
+      "Shape": {"kind": "RoundedRect", "fill": "surfaceAlt", "stroke": "outline", "strokeWidth": 1, "radius": 44.0},
+      "Layout": {"type": "Horizontal", "gap": 0, "alignMain": "Center", "alignCross": "Center"},
+      "OnClick": {"actionId": "hand.endTurn"},
+      "Children": ["EndTurnLabel"]
     },
     "EndTurnLabel": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 0,
-        "h": 48
-      },
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 48},
       "Size": {
-        "w": {
-          "mode": "Fill"
-        },
-        "h": {
-          "mode": "Fixed"
-        }
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Fixed"}
+      },
+      "Text": {"text": "End turn", "styleId": "buttonSecondary"}
+    },
+    "CollectionNote": {
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 52},
+      "Size": {
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Fixed"}
+      },
+      "Text": {"text": "A hand worth holding.", "styleId": "muted"}
+    },
+    "Details": {
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 320},
+      "Size": {
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Fixed"}
+      },
+      "Shape": {"kind": "RoundedRect", "fill": "#1B2C34", "stroke": "#FFFFFF0C", "strokeWidth": 1, "radius": 48},
+      "Layout": {"type": "Vertical", "gap": 16, "alignCross": "Stretch"},
+      "Padding": {"l": 36, "t": 36, "r": 36, "b": 36},
+      "Children": ["DetailsEyebrow", "DetailsTitle", "DetailsBody"],
+      "Margin": {"l": 0, "t": 40, "r": 0, "b": 8}
+    },
+    "DetailsEyebrow": {
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 36},
+      "Size": {
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Fixed"}
+      },
+      "Text": {"text": "SELECTED  /  RARE", "styleId": "eyebrow"}
+    },
+    "DetailsTitle": {
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 60},
+      "Size": {
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Fixed"}
+      },
+      "Text": {"text": "Tide changes everything.", "styleId": "h2"}
+    },
+    "DetailsBody": {
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 92},
+      "Size": {
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Fixed"}
       },
       "Text": {
-        "text": "End turn",
-        "styleId": "buttonSecondary"
+        "text": "A little patience. A powerful next turn.\nSpend five energy to bring Tide into play.",
+        "styleId": "muted",
+        "wrapWidthMode": "NodeWidth"
       }
     }
   }
