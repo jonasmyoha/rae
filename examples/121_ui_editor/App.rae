@@ -28,6 +28,8 @@ open app3d/UiShell
 open ecs/Entity
 open ecs/ComponentTable
 open Gpu2dCanvas
+open ui/DebugOverlay
+open ecs/Event
 
 const idleHeartbeatSec: Float = 0.5
 
@@ -265,6 +267,9 @@ func runApp(app: mod App) ret Int {
   )
   runScheduledUiSystems(schedule: app.schedule, world: app.world, res: app.gpuUi)
   var renderedOnce: Bool = false
+  # Whether the previous loop iteration painted: what the debug widget's fps
+  # counts (an idle wait-loop iteration is not a frame).
+  var renderedThisFrame: Bool = false
   var testOpenIndex: Int = -1
   var testOpenFile: Bool = Sys.getEnv(name: "RAE_UI_EDITOR_TEST_OPEN_FILE") is "1"
   let testOpen: String = Sys.getEnv(name: "RAE_UI_EDITOR_TEST_OPEN")
@@ -283,7 +288,24 @@ func runApp(app: mod App) ret Int {
       chromeRoot: app.chrome.pageRoot
     )
     var changed: Bool = refit
+    let now: Float64 = Gpu2d.nowSeconds()
+    # The debug widget reads the pointer BEFORE the chrome hit-tests, so a
+    # press on its button (or its open dialog) never reaches the pill under
+    # it: the press is swallowed by voiding this frame's actions.
+    let overlayTookPointer: Bool = updateDebugOverlay(
+      debugOverlay: app.debugOverlay
+      screenW: app.viewport.designW
+      screenH: app.viewport.designH
+      now: now
+      didRealWork: renderedThisFrame
+    )
+    renderedThisFrame = false
     updateUiInput(input: input, world: app.world)
+    if overlayTookPointer or app.debugOverlay.open {
+      eventClear(UiAction, this: app.world.uiActions)
+      input.pressedEntity = noEntity()
+      changed = true
+    }
     let hadEvents: Bool = uiActionCount(world: app.world) > 0
     editArea = editAreaOf(
       world: app.world
@@ -364,7 +386,6 @@ func runApp(app: mod App) ret Int {
       openProjectScene(app: app, index: openIndex)
       changed = true
     }
-    let now: Float64 = Gpu2d.nowSeconds()
     if testRewriteSystem(watch: app.watch, path: app.document.path, now: now) {
       changed = true
     }
@@ -437,8 +458,15 @@ func runApp(app: mod App) ret Int {
         a: 1.0
       )
       renderSystemGpu2d(world: app.world, res: app.gpuUi, canvas: app.canvas)
+      drawDebugOverlay(
+        debugOverlay: app.debugOverlay
+        canvas: app.canvas
+        font: app.gpuUi.textFont
+        didRealWork: true
+      )
       Gpu2d.endFrame(canvas: app.canvas)
       renderedOnce = true
+      renderedThisFrame = true
     } else {
       # The watcher is a poll, so the wait is bounded by its interval while
       # the window can show a reload; a hidden window sleeps on the heartbeat.
