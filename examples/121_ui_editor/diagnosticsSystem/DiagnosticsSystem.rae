@@ -112,29 +112,22 @@ func placeholderSizeFor(
   ret size
 }
 
-# A hatched grey box: diagonal stripes on a lighter field, one packed
-# r | g<<8 | b<<16 | a<<24 per pixel (Gpu2d.registerImageRgba's layout). The
-# stripe period and the border grow with `size`, so the hatch looks the same
-# on screen whatever size it is generated at.
+# Grey diagonal stripes, one packed r | g<<8 | b<<16 | a<<24 per pixel
+# (Gpu2d.registerImageRgba's layout). The stripe period grows with `size`, so
+# the hatch looks the same on screen whatever size it is generated at. No
+# border: the sprite's own CornerRadius / clip shapes the placeholder like it
+# would the real image.
 func registerPlaceholderImage(canvas: mod Gpu2dCanvas, key: view String, size: copy Int) {
   var pixels: List(Int) = List.create(Int, cap: size * size)
   var stripe: Int = size / 8
   if stripe < 8 {
     stripe = 8
   }
-  var border: Int = size / 32
-  if border < 2 {
-    border = 2
-  }
   loop var y: Int = 0, y < size, ++y {
     loop var x: Int = 0, x < size, ++x {
       var shade: Int = 150
       if ((x + y) / stripe) % 2 is 0 {
         shade = 96
-      }
-      let edge: Bool = x < border or y < border or x >= size - border or y >= size - border
-      if edge {
-        shade = 230
       }
       pixels.add(value: shade + shade * 256 + shade * 65536 + 255 * 16777216)
     }
