@@ -36,10 +36,14 @@ func boolStr(b: view Bool) ret String {
 # interpolation `{expr}` collides with the literal `{` we'd need
 # for JSON's opening brace. Result is fixed-shape so the parser
 # (and a human eyeballing the file) doesn't get surprised.
-func saveAppState(path: view String, state: view AppState, playback: view PlaybackState) pub {
+func saveAppState(
+  path: view String
+  state: view AppState
+  playbackSystem: view PlaybackSystem
+) pub {
   unsafe {
-    let elapsedMs: Int = (playback.elapsedSec * 1000.0).toInt()
-    let playingStr: String = boolStr(b: playback.isPlaying)
+    let elapsedMs: Int = (playbackSystem.elapsedSec * 1000.0).toInt()
+    let playingStr: String = boolStr(b: playbackSystem.isPlaying)
     # Session route: which top-level tab, plus SDL desktop window position.
     # Sub-page state (Album / Player / History on top of the stack)
     # is intentionally NOT persisted — restoring deep sub-pages
@@ -129,7 +133,11 @@ func saveAppState(path: view String, state: view AppState, playback: view Playba
 # from before an album rename / deletion shouldn't leave the user
 # staring at an empty stub. Same for `currentTrackIndex` against
 # the matching album's track count.
-func restoreAppState(state: mod AppState, playback: mod PlaybackState, path: view String) pub {
+func restoreAppState(
+  state: mod AppState
+  playbackSystem: mod PlaybackSystem
+  path: view String
+) pub {
   unsafe {
     let source: String = rae_ext_rae_sys_read_file(path: path)
     if source.length() is 0 {
@@ -189,14 +197,14 @@ func restoreAppState(state: mod AppState, playback: mod PlaybackState, path: vie
       if ms < 0 {
         ms = 0
       }
-      playback.elapsedSec = ms.toFloat() / 1000.0
+      playbackSystem.elapsedSec = ms.toFloat() / 1000.0
     }
 
     # Play / pause flag.
     let playingKey: String = "isPlaying"
     let playingFieldIdx: Int = Json.field(doc: doc, this: root, key: playingKey)
     if playingFieldIdx >= 0 {
-      playback.isPlaying = Json.jsonBool(
+      playbackSystem.isPlaying = Json.jsonBool(
         this: Json.jsonValueAt(doc: doc, idx: playingFieldIdx)
         fallback: false
       )
@@ -209,12 +217,12 @@ func restoreAppState(state: mod AppState, playback: mod PlaybackState, path: vie
     # them here preserves the historical meaning. Skipped when
     # isPlaying=false: a paused-at-shutdown session shouldn't pretend
     # a track is playing on the next launch.
-    if playback.isPlaying {
-      playback.playingAlbumStem = "{state.currentAlbumStem}"
-      playback.playingTrackIndex = state.currentTrackIndex
+    if playbackSystem.isPlaying {
+      playbackSystem.playingAlbumStem = "{state.currentAlbumStem}"
+      playbackSystem.playingTrackIndex = state.currentTrackIndex
       # Seed the nowPlaying cover key before the world is built (#268), so
       # the Hero + mini-player covers mount observing the correct revision.
-      setNowPlayingArt(state: playback, artKey: state.currentAlbumStem)
+      setNowPlayingArt(playbackSystem: playbackSystem, artKey: state.currentAlbumStem)
     }
 
     # Session route: restore the top-level tab. The "screen" field stays in the JSON for forward
@@ -235,7 +243,7 @@ func restoreAppState(state: mod AppState, playback: mod PlaybackState, path: vie
     # runtime now (runtime_gpu2d_platform.c), which persists it for every app.
     # Older state files still carry the keys; ignoring them is the migration.
     log(
-      "[state] restored from {path}: stem={state.currentAlbumStem} track={state.currentTrackIndex} ms={(playback.elapsedSec * 1000.0).toInt()} playing={playback.isPlaying}"
+      "[state] restored from {path}: stem={state.currentAlbumStem} track={state.currentTrackIndex} ms={(playbackSystem.elapsedSec * 1000.0).toInt()} playing={playbackSystem.isPlaying}"
     )
   }
 }

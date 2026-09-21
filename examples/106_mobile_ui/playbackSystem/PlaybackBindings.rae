@@ -11,7 +11,7 @@ open ui/Ecs
 # first paint of a fresh mount too, so a page needs no first run of its own.
 #
 # Layering (docs/ecs-systems-and-data-observation.md §5.2): these OBSERVE
-# the data systems (PlaybackState, the liked playlist, the browsed album)
+# the data systems (PlaybackSystem, the liked playlist, the browsed album)
 # and mutate only the UiWorld; the play/pause toggle itself is still a
 # command (`enqueuePlaybackToggle`), never a write from here.
 import ui/Components
@@ -27,34 +27,44 @@ open assetSystem/GpuAssetRegistry
 # the browsed stem — the first LOADED one wins.
 func coverKeyResolved(
   reg: view TextureRegistry
-  playback: view PlaybackState
+  playbackSystem: view PlaybackSystem
   browsedStem: view String
 ) pub ret String {
-  if playback.nowPlayingArtKey.length() > 0 and textureHas(reg: reg, key: playback.nowPlayingArtKey) {
-    ret "{playback.nowPlayingArtKey}"
+  if playbackSystem.nowPlayingArtKey.length() > 0 and textureHas(
+    reg: reg
+    key: playbackSystem.nowPlayingArtKey
+  ) {
+    ret "{playbackSystem.nowPlayingArtKey}"
   }
-  if playback.playingAlbumStem.length() > 0 and textureHas(reg: reg, key: playback.playingAlbumStem) {
-    ret "{playback.playingAlbumStem}"
+  if playbackSystem.playingAlbumStem.length() > 0 and textureHas(
+    reg: reg
+    key: playbackSystem.playingAlbumStem
+  ) {
+    ret "{playbackSystem.playingAlbumStem}"
   }
   ret "{browsedStem}"
 }
 
 # Re-point one Sprite's textureKey by identity, preserving every other field.
 # Every `PlaybackIcon`: the play/pause glyph and the selected flag follow
-# `isPlaying`, observed through `PlaybackState.revision`. Returns whether any
+# `isPlaying`, observed through `PlaybackSystem.revision`. Returns whether any
 # icon changed (the caller re-syncs the widget styles on that).
-func playbackIconSystem(world: mod UiWorld, playback: view PlaybackState) pub ret Bool {
+func playbackIconSystem(world: mod UiWorld, playbackSystem: view PlaybackSystem) pub ret Bool {
   var changed: Bool = false
-  let n: Int = componentCount(this: world.playbackIcons)
+  let n: Int = componentCount(this: playbackSystem.playbackIcons)
   var i: Int = 0
   loop i < n {
-    let entity: EntityId = componentEntityAt(this: world.playbackIcons, i: i)
-    let icon: PlaybackIcon = componentDataAt(this: world.playbackIcons, i: i)
-    if icon.builtRevision is not playback.revision {
-      setSpriteKey(world: world, entity: entity, key: playbackIconKey(playback: playback))
-      setWidgetSelected(world: world, entity: entity, selected: playback.isPlaying)
-      let built: PlaybackIcon = { builtRevision: playback.revision }
-      componentSet(this: world.playbackIcons, entity: entity, data: built)
+    let entity: EntityId = componentEntityAt(this: playbackSystem.playbackIcons, i: i)
+    let icon: PlaybackIcon = componentDataAt(this: playbackSystem.playbackIcons, i: i)
+    if icon.builtRevision is not playbackSystem.revision {
+      setSpriteKey(
+        world: world
+        entity: entity
+        key: playbackIconKey(playbackSystem: playbackSystem)
+      )
+      setWidgetSelected(world: world, entity: entity, selected: playbackSystem.isPlaying)
+      let built: PlaybackIcon = { builtRevision: playbackSystem.revision }
+      componentSet(this: playbackSystem.playbackIcons, entity: entity, data: built)
       changed = true
     }
     i = i + 1
@@ -69,34 +79,34 @@ func playbackIconSystem(world: mod UiWorld, playback: view PlaybackState) pub re
 # browsed stem. Returns whether any cover changed.
 func playbackCoverSystem(
   world: mod UiWorld
-  playback: view PlaybackState
+  playbackSystem: view PlaybackSystem
   state: view AppState
   reg: view TextureRegistry
 ) pub ret Bool {
   var changed: Bool = false
-  let n: Int = componentCount(this: world.playbackCovers)
+  let n: Int = componentCount(this: playbackSystem.playbackCovers)
   var i: Int = 0
   loop i < n {
-    let entity: EntityId = componentEntityAt(this: world.playbackCovers, i: i)
-    let cover: PlaybackCover = componentDataAt(this: world.playbackCovers, i: i)
-    if cover.builtRevision is not playback.nowPlayingRevision {
+    let entity: EntityId = componentEntityAt(this: playbackSystem.playbackCovers, i: i)
+    let cover: PlaybackCover = componentDataAt(this: playbackSystem.playbackCovers, i: i)
+    if cover.builtRevision is not playbackSystem.nowPlayingRevision {
       if cover.builtRevision < 0 {
         let seed: String = coverKeyResolved(
           reg: reg
-          playback: playback
+          playbackSystem: playbackSystem
           browsedStem: state.currentAlbumStem
         )
         setSpriteKey(world: world, entity: entity, key: seed)
-      } else if playback.nowPlayingArtKey.length() > 0 {
+      } else if playbackSystem.nowPlayingArtKey.length() > 0 {
         let key: String = coverKeyResolved(
           reg: reg
-          playback: playback
-          browsedStem: playback.playingAlbumStem
+          playbackSystem: playbackSystem
+          browsedStem: playbackSystem.playingAlbumStem
         )
         setSpriteKey(world: world, entity: entity, key: key)
       }
-      let built: PlaybackCover = { builtRevision: playback.nowPlayingRevision }
-      componentSet(this: world.playbackCovers, entity: entity, data: built)
+      let built: PlaybackCover = { builtRevision: playbackSystem.nowPlayingRevision }
+      componentSet(this: playbackSystem.playbackCovers, entity: entity, data: built)
       changed = true
     }
     # The cover's `HeroWidget` key is the browsed album's stem (a scene
@@ -154,6 +164,7 @@ func installHeartStyle(world: mod UiWorld, entity: view EntityId) {
 # styles. Returns whether any heart changed, so the caller re-syncs the
 # widget styles (the outline/filled swap) that frame.
 func likedHeartSystem(
+  playbackSystem: mod PlaybackSystem
   world: mod UiWorld
   liked: view Playlist
   stem: view String
@@ -164,15 +175,15 @@ func likedHeartSystem(
   if stem.length() > 0 {
     isLiked = playlistContains(playlist: liked, stem: stem, trackIndex: trackIndex)
   }
-  let n: Int = componentCount(this: world.likedHearts)
+  let n: Int = componentCount(this: playbackSystem.likedHearts)
   var i: Int = 0
   loop i < n {
-    let entity: EntityId = componentEntityAt(this: world.likedHearts, i: i)
-    let heart: LikedHeart = componentDataAt(this: world.likedHearts, i: i)
+    let entity: EntityId = componentEntityAt(this: playbackSystem.likedHearts, i: i)
+    let heart: LikedHeart = componentDataAt(this: playbackSystem.likedHearts, i: i)
     if heart.styled is false {
       installHeartStyle(world: world, entity: entity)
       let styled: LikedHeart = { styled: true }
-      componentSet(this: world.likedHearts, entity: entity, data: styled)
+      componentSet(this: playbackSystem.likedHearts, entity: entity, data: styled)
       changed = true
     }
     if stem.length() > 0 {
@@ -208,15 +219,19 @@ func writeTrackText(world: mod UiWorld, entity: view EntityId, value: view Strin
 # Every `TrackText`: the title / artist of the browsed track, keyed on
 # stem|index so a same-page track change re-binds in place. The M:SS time
 # labels are their own `PlaybackTime` binding (playbackTimeSystem).
-func trackTextSystem(world: mod UiWorld, state: view AppState) pub {
+func trackTextSystem(
+  playbackSystem: mod PlaybackSystem
+  world: mod UiWorld
+  state: view AppState
+) pub {
   let key: String = "{state.currentAlbumStem}|{state.currentTrackIndex}"
-  let n: Int = componentCount(this: world.trackTexts)
+  let n: Int = componentCount(this: playbackSystem.trackTexts)
   var stale: Bool = false
   var i: Int = 0
   loop i < n {
     let binding: view TrackText => componentView(
-      this: world.trackTexts
-      entity: componentEntityAt(this: world.trackTexts, i: i)
+      this: playbackSystem.trackTexts
+      entity: componentEntityAt(this: playbackSystem.trackTexts, i: i)
     )
     if binding.builtKey is not key {
       stale = true
@@ -230,8 +245,8 @@ func trackTextSystem(world: mod UiWorld, state: view AppState) pub {
   let track: Track = trackAt(album: album, idx: state.currentTrackIndex)
   i = 0
   loop i < n {
-    let entity: EntityId = componentEntityAt(this: world.trackTexts, i: i)
-    let binding: TrackText = componentDataAt(this: world.trackTexts, i: i)
+    let entity: EntityId = componentEntityAt(this: playbackSystem.trackTexts, i: i)
+    let binding: TrackText = componentDataAt(this: playbackSystem.trackTexts, i: i)
     if binding.builtKey is not key {
       if binding.field is "artist" {
         writeTrackText(world: world, entity: entity, value: album.artist)
@@ -239,7 +254,7 @@ func trackTextSystem(world: mod UiWorld, state: view AppState) pub {
         writeTrackText(world: world, entity: entity, value: track.title)
       }
       let built: TrackText = { field: "{binding.field}", builtKey: "{key}" }
-      componentSet(this: world.trackTexts, entity: entity, data: own built)
+      componentSet(this: playbackSystem.trackTexts, entity: entity, data: own built)
     }
     i = i + 1
   }
@@ -247,32 +262,32 @@ func trackTextSystem(world: mod UiWorld, state: view AppState) pub {
 
 # The whole second a `PlaybackTime` currently shows, so its label is
 # rewritten once per second while playing and never at rest.
-func playbackTimeSecond(kind: view PlaybackTimeKind, playback: view PlaybackState) ret Int {
+func playbackTimeSecond(kind: view PlaybackTimeKind, playbackSystem: view PlaybackSystem) ret Int {
   if kind is PlaybackTimeKind.elapsed {
-    ret playback.elapsedSec.toInt()
+    ret playbackSystem.elapsedSec.toInt()
   }
-  ret playback.durationSec.toInt()
+  ret playbackSystem.durationSec.toInt()
 }
 
 # Every `PlaybackTime`: the M:SS position (`elapsed`) or duration (`total`)
 # from the playback clock, written to `Text.text` only when the whole second
 # changes (`builtSecond`).
-func playbackTimeSystem(world: mod UiWorld, playback: view PlaybackState) pub {
-  let n: Int = componentCount(this: world.playbackTimes)
+func playbackTimeSystem(world: mod UiWorld, playbackSystem: view PlaybackSystem) pub {
+  let n: Int = componentCount(this: playbackSystem.playbackTimes)
   var i: Int = 0
   loop i < n {
-    let entity: EntityId = componentEntityAt(this: world.playbackTimes, i: i)
-    let binding: PlaybackTime = componentDataAt(this: world.playbackTimes, i: i)
-    let second: Int = playbackTimeSecond(kind: binding.kind, playback: playback)
+    let entity: EntityId = componentEntityAt(this: playbackSystem.playbackTimes, i: i)
+    let binding: PlaybackTime = componentDataAt(this: playbackSystem.playbackTimes, i: i)
+    let second: Int = playbackTimeSecond(kind: binding.kind, playbackSystem: playbackSystem)
     if binding.builtSecond is not second {
-      var seconds: Float = playback.durationSec
+      var seconds: Float = playbackSystem.durationSec
       if binding.kind is PlaybackTimeKind.elapsed {
-        seconds = playback.elapsedSec
+        seconds = playbackSystem.elapsedSec
       }
       let label: String = formatDurationMs(ms: (seconds * 1000.0).toInt())
       writeTrackText(world: world, entity: entity, value: label)
       let built: PlaybackTime = { kind: binding.kind, builtSecond: second }
-      componentSet(this: world.playbackTimes, entity: entity, data: built)
+      componentSet(this: playbackSystem.playbackTimes, entity: entity, data: built)
     }
     i = i + 1
   }

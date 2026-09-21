@@ -80,16 +80,16 @@ func createApp() ret App {
   # playback command system (actionSystem/). Created here so `restoreAppState` below can
   # populate `elapsedSec` + `isPlaying` from `state.json` before
   # the screenshot / stress / main loop branches.
-  let playback: PlaybackState = createPlaybackState()
+  let playbackSystem: PlaybackSystem = createPlaybackSystem()
   # Hydrate album/track/position from `state.json` if present.
   # Missing file or stale fields fall back silently to the
   # defaults `createAppState` / `createPlaybackState` set above.
-  restoreAppState(state: appState, playback: playback, path: stateFilePath)
+  restoreAppState(state: appState, playbackSystem: playbackSystem, path: stateFilePath)
   # RAE_UI_PAUSED=1 boots paused whatever `state.json` restored — the
   # headless idle proof (the example gate asserts an idle frame runs zero
-  # app systems, which a ticking playback clock would defeat). Not persisted.
+  # app systems, which a ticking playbackSystem clock would defeat). Not persisted.
   if getEnv(name: "RAE_UI_PAUSED") is "1" {
-    setPlaybackPlaying(state: playback, value: false)
+    setPlaybackPlaying(playbackSystem: playbackSystem, value: false)
   }
   # RAE_UI_ROUNDED_COVERS=0/1 overrides the rounded-covers setting at boot —
   # the pixel proof for albumCoverUpdate (#981) toggling every cover. Empty
@@ -154,8 +154,8 @@ func createApp() ret App {
 
   # Spotify-mode integration. ON by default; opt out with
   # RAE_UI_NO_SPOTIFY=1 or RAE_UI_HEADLESS=1 (would focus Spotify).
-  let spotifyState: SpotifyState = setupSpotify(isHeadless: isHeadless)
-  let spotifyPoller: SpotifyPoller = startSpotifyPoller(enabled: spotifyState.enabled)
+  let spotifySystem: SpotifySystem = setupSpotify(isHeadless: isHeadless)
+  let spotifyPoller: SpotifyPoller = startSpotifyPoller(enabled: spotifySystem.enabled)
 
   let autoExitSec: Float = autoExitSeconds(isHeadless: isHeadless)
   let bootTime: Float64 = uiNowSeconds()
@@ -173,10 +173,10 @@ func createApp() ret App {
       scenes: own scenes
       textureRegistry: own textureRegistry
       appState: own appState
-      playback: own playback
+      musicSystems: createMusicSystems(playbackSystem: own playbackSystem)
       viewport: viewport
       logOverlay: own logOverlay
-      spotifyState: own spotifyState
+      spotifySystem: own spotifySystem
       spotifyPoller: own spotifyPoller
       autoExitSec: autoExitSec
       bootTime: bootTime
@@ -185,7 +185,6 @@ func createApp() ret App {
       loopDebugFrame: loopDebugFrame
       actionTable: createActionTable()
       commands: createEventQueue(AppCommand)
-      albumCoverSystem: createAlbumCoverSystem()
     }
   }
 }

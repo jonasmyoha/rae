@@ -68,19 +68,19 @@ func createBootTheme(gpuUi: view Gpu2dUi) ret UiTheme {
 # local flag: `pollSpotify` gates on `state.enabled`, and `enabled` is also
 # what decides whether the poll worker (`startSpotifyPoller`, #950) polls
 # at all.
-func setupSpotify(isHeadless: view Bool) ret SpotifyState {
-  let spotifyState: SpotifyState = createSpotifyState()
-  var spotifyOn: Bool = spotifyState.enabled
+func setupSpotify(isHeadless: view Bool) ret SpotifySystem {
+  let spotifySystem: SpotifySystem = createSpotifySystem()
+  var spotifyOn: Bool = spotifySystem.enabled
   if isHeadless and spotifyForcedOn() is false {
     spotifyOn = false
-    spotifyState.enabled = false
+    spotifySystem.enabled = false
   }
   if spotifyOn {
     log("[spotify] ON — launches lazily on first play (AppleScript play auto-launches).")
   } else {
     log("[spotify] OFF (RAE_UI_NO_SPOTIFY or RAE_UI_HEADLESS)")
   }
-  ret spotifyState
+  ret spotifySystem
 }
 
 # Self-terminate after `RAE_AUTO_EXIT_SEC` seconds of wall-clock uptime. Used

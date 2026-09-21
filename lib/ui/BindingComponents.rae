@@ -8,33 +8,6 @@
 # renderer/layout vocabulary) at the 1,000-line cap (#978).
 open ui/Components
 
-# ----- data-binding components for the profile page (#974) -----------------
-#
-# The page's layout lives entirely in its .raescene; these two components are
-# what a scene cannot express — a value that comes from app state — and a
-# per-frame system drives every instance (docs/ecs-general-architecture.md).
-
-# Which live library count a `ProfileStat` node shows. Authored as the member
-# name: `"ProfileStat": { "stat": "albums" }`.
-enum ProfileStatKind { albums, tracks, listeningHours }
-
-# A Text node whose `text` is a live count from the app's media library. The
-# number never lives in the scene; `profileStatsSystem` writes `Text.text` on
-# the same entity when the count changes (a pure data binding, no layout).
-type ProfileStat {
-  stat: ProfileStatKind
-}
-
-# An avatar slot whose photo may not be loaded yet. Authored on a Stack
-# container with two children: the photo (the child whose `Sprite.textureKey`
-# equals `textureKey`) and an authored placeholder. `avatarSystem` activates
-# the photo once the texture registry holds the key and the placeholder
-# otherwise, so a download that lands later is an `Active` toggle on two
-# children — not a page rebuild.
-type AvatarSource {
-  textureKey: String
-}
-
 # ----- data-list container: a grid of album-cover tiles (#975) -------------
 
 # ----- data lists: ONE producer component for every list (#996) -----------
@@ -96,25 +69,6 @@ type EmptyState {
   kind: EmptyStateKind
 }
 
-# ----- history page: the play-history list binding (#977) -------------------
-
-# Authored next to a `ListView` on the History page's list host. The rows are
-# the app's play history, so the scene cannot carry them: `historyListSystem`
-# writes the host's `ListViewData` from the history whenever its revision
-# moves past `builtRevision` (-1 on a fresh mount), shows the host while
-# there are entries and the page's `emptyStateNodeId` node otherwise. The
-# list re-binds in place — a new play no longer re-mounts the page.
-type HistoryList {
-  builtRevision: Int = -1
-}
-
-# A node shown only while the play history has entries (the Home page's
-# "Recently played" header and strip): `hasHistorySystem` writes `Active`
-# from the history, so an empty history collapses the section in layout.
-type HasHistory {
-  builtRevision: Int = -1
-}
-
 # ----- dock: bottom anchoring, layer membership, nav-tab state (#978) ------
 
 # Pins the entity's bottom edge to the layout extent's bottom: the anchor
@@ -133,33 +87,6 @@ type LayerTag {
   id: String
 }
 
-# The screen a nav tab selects. `navTabsSystem` compares it to the app's
-# current tab and writes the active/inactive icon tint and label style onto
-# the tab's Sprite and Text children — so the bar never re-mounts on switch.
-type NavTab {
-  screen: String
-}
-
-# ----- album page (#979) ----------------------------------------------------
-
-# The album/playlist header block: `albumHeaderSystem` writes the caption,
-# title and artist texts and points the hero cover's Sprite (and HeroWidget
-# key) at the collection the app is showing, whenever the collection key it
-# derives from app state moves past `builtKey`.
-# Marks the album page's HERO COVER node (the Sprite + HeroWidget): the
-# collection's cover stem is written onto it by `albumHeaderSystem` whenever
-# the browsed collection changes. The caption / title / artist Texts are
-# their own `TextBinding { key: "album.caption" | "album.title" |
-# "album.artist" }` — the same system writes those from the CollectionView.
-type AlbumHeader {
-}
-
-# ----- now-playing page (#979) ----------------------------------------------
-
-# A progress track whose FIRST child is the fill: the playback system writes
-# the fill's width as `track width x progress` (Rect and ComputedRect, only
-# when it changed) — the app's existing `applyPlaybackToWorld`, now driven
-# by this component instead of a page node-id lookup.
 # ----- bottom sheet: the action-sheet overlay binding (#980) ----------------
 # Authored on the sheet's layer root. `bottomSheetSystem` shows/hides the root
 # from `BottomSheetState.visible` and sizes the `panelNodeId` panel's Rect
@@ -177,53 +104,14 @@ type SheetPanel {
   rowHeight: Float = 121.44578313253011
 }
 
-# ----- playback widgets: the data bindings the dock and Now Playing share (#981)
-# Each is authored on the node it drives; the matching system runs every frame
-# from `refreshMountedUi` (and once at mount) and writes only on a change of
-# its observed revision / key, so the same components serve the dock's
-# mini-player and the Now Playing page.
-# Play/pause glyph: the Sprite key follows `PlaybackState.isPlaying` and the
-# WidgetState.selected flag mirrors it (`revision` observed).
-type PlaybackIcon {
-  builtRevision: Int = -1
-}
+# ----- now-playing page (#979) ----------------------------------------------
 
-# Now-playing cover: the Sprite key follows the playing track's art
-# (`nowPlayingRevision` observed); seeded from the browsed album at mount.
-# Its corner rounding is an authored `CornerRadius` like every other cover
-# (the app's AlbumCoverSystem squares / restores it with the setting).
-type PlaybackCover {
-  builtRevision: Int = -1
-}
-
-# Heart / like button: WidgetState.selected follows the liked playlist
-# membership of the browsed track; the outline/filled StateStyle is
-# installed by the system (StateStyle is a runtime table).
-type LikedHeart {
-  styled: Bool = false
-}
-
-# Track text: `field` is "title" or "artist" (the Text follows the browsed
-# album + track, `builtKey` = stem|index), or "timeNow" / "timeTotal" (the
-# M:SS playback position / duration, written whenever the second changes).
-type TrackText {
-  field: String = "title"
-  builtKey: String
-}
-
+# A progress track whose FIRST child is the fill: the playback system writes
+# the fill's width as `track width x progress` (Rect and ComputedRect, only
+# when it changed) — the app's existing `applyPlaybackToWorld`, now driven
+# by this component instead of a page node-id lookup.
 type ProgressBar {
   enabled: Bool = true
-}
-
-# A playback time label: the M:SS position (`elapsed`) or track duration
-# (`total`), read from PlaybackState by `playbackTimeSystem` and written to
-# the node's `Text.text` whenever the whole second changes. Distinct from
-# TrackText (which follows the browsed track's title / artist).
-enum PlaybackTimeKind { elapsed, total }
-
-type PlaybackTime {
-  kind: PlaybackTimeKind
-  builtSecond: Int = -1
 }
 
 # A hero (shared-element) transition in flight: a runtime entity in the
