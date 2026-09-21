@@ -267,6 +267,7 @@ func runApp(app: mod App) ret Int {
   var renderedOnce: Bool = false
   var testOpenIndex: Int = -1
   var testOpenFile: Bool = Sys.getEnv(name: "RAE_UI_EDITOR_TEST_OPEN_FILE") is "1"
+  var testReloadChrome: Bool = Sys.getEnv(name: "RAE_UI_EDITOR_TEST_RELOAD_CHROME") is "1"
   let testOpen: String = Sys.getEnv(name: "RAE_UI_EDITOR_TEST_OPEN")
   if testOpen.length() > 0 {
     testOpenIndex = testOpen.toInt()
@@ -370,6 +371,18 @@ func runApp(app: mod App) ret Int {
     }
     if fileWatchSystem(watch: app.watch, paths: app.document.watchedPaths, now: now) {
       reloadDocument(app: app)
+      changed = true
+    }
+    if fileWatchSystem(watch: app.chromeWatch, paths: app.chromePaths, now: now) {
+      reloadChrome(app: app)
+      changed = true
+    }
+    if testReloadChrome and renderedOnce {
+      # RAE_UI_EDITOR_TEST_RELOAD_CHROME=1: remount the chrome after the first
+      # frame as an edit would — the headless gate's hook; the frame after it
+      # must equal the frame before (panels, camera, selection all kept).
+      testReloadChrome = false
+      reloadChrome(app: app)
       changed = true
     }
     if inspectorSystem(

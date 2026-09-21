@@ -430,8 +430,34 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             echo "  outline pools failed:"
             cat "$TMP_OUT/render-outlines.log" "$TMP_OUT/screenshot-outlines.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
           fi
+          # The chrome hot-reload (chromeReload): RAE_UI_EDITOR_TEST_RELOAD_CHROME=1
+          # remounts the chrome + guides after the first frame as an edit to
+          # Editor.raescene would; with a selection and both outline pools on,
+          # the frame after the remount must be pixel-identical to a run that
+          # never remounted — the panels, camera, selection and pools survive.
+          SHOT_A="$TMP_OUT/ui-editor-chrome-reload.bmp"
+          SHOT_B="$TMP_OUT/ui-editor-chrome-plain.bmp"
+          if (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
+             RAE_UI_EDITOR_ROOT="examples/121_ui_editor/assets/samples" RAE_UI_EDITOR_TEST_RELOAD_CHROME=1 \
+             RAE_UI_EDITOR_OUTLINES=both RAE_UI_EDITOR_TEST_SELECT=PlayButton \
+             RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SHOT_A" \
+             perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-chrome-reload.log" 2>&1 \
+             && grep -qE '\[ui-editor\] reloaded the chrome' "$TMP_OUT/render-chrome-reload.log" \
+             && (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
+             RAE_UI_EDITOR_ROOT="examples/121_ui_editor/assets/samples" \
+             RAE_UI_EDITOR_OUTLINES=both RAE_UI_EDITOR_TEST_SELECT=PlayButton \
+             RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SHOT_B" \
+             perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-chrome-plain.log" 2>&1 \
+             && python3 tools/assert_bmp_diff.py "$SHOT_A" "$SHOT_B" --max-diff-pct 0.01 \
+                > "$TMP_OUT/screenshot-chrome-reload.log" 2>&1; then
+            :
+          else
+            UI_EDITOR_OK=0
+            echo "  chrome hot-reload failed:"
+            cat "$TMP_OUT/render-chrome-reload.log" "$TMP_OUT/screenshot-chrome-reload.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
+          fi
           if [ "$UI_EDITOR_OK" = "1" ]; then
-            echo "PASS: $EXAMPLE_NAME (7 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select, .raepack project open + switch, file picker, camera zoom, outline pools)"
+            echo "PASS: $EXAMPLE_NAME (7 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select, .raepack project open + switch, file picker, camera zoom, outline pools, chrome hot-reload)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (ui editor sample gate)"

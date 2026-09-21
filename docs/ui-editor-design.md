@@ -102,6 +102,15 @@ texture manifest, and a design-resolution + fit rule (now native:
   an implicit one. Note that a project whose scenes get their theme from app
   code rather than an `import` (106 today) mounts with the #1008 "add
   `import`" diagnostic — that is the rule doing its job, not the editor's.
+- **The chrome hot-reloads too** (`chromeSystem/ChromeReload.rae`): `rae watch`
+  restarts the app on a `.rae` change, but a `.raescene` is DATA the app loads at
+  runtime, so reloading it is the app's job — the document watcher already does it
+  for the opened scene, and a second watcher does it for the chrome's own files
+  (`Editor.raescene`, `Guides.raescene`, `chrome/*`): an edit remounts the chrome
+  and guides pages in place, keeping what the user has (the panels' open states,
+  the camera, the selection). `RAE_UI_EDITOR_TEST_RELOAD_CHROME=1` forces one
+  remount after the first frame; the gate asserts the frame after it is
+  pixel-identical to a run that never remounted.
 - **Guides:** a dashed outline around the frame (the page column — the design area the
   document is laid out in) and one around the safe area inside it, each labelled —
   the reference editor's overlays (docs/ui-editor-reference-features.md §2a). They
