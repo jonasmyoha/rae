@@ -22,7 +22,15 @@ open ecs/Entity
 open ecs/ComponentTable
 open Gpu2dCanvas
 
-const placeholderSize: Int = 64
+# The placeholder bitmap's size bounds. It is generated at the size its largest
+# sprite is DRAWN at (authored Rect x the canvas's logical-to-physical scale),
+# so a hero cover does not show a 64 px hatch magnified twentyfold.
+const placeholderMinSize: Int = 64
+
+const placeholderMaxSize: Int = 2048
+
+# When no frame has run yet the canvas scale is 0: assume a 2x display.
+const placeholderFallbackScale: Float = 2.0
 
 # The key -> path search state: which keys were already looked up, so the scan
 # over the sprite table is free once every key is settled, and the viewer-only
@@ -66,17 +74,65 @@ func findTexturePath(
   ret sceneAssetTexturePath(assets: assets, key: key)
 }
 
+# The physical pixel size a placeholder for `key` needs: the largest authored
+# Rect side among the sprites showing it, scaled to physical pixels.
+func placeholderSizeFor(
+  world: view UiWorld
+  canvas: view Gpu2dCanvas
+  wanted: view List(String)
+  wantedEntities: view List(EntityId)
+  key: view String
+) ret Int {
+  var largest: Float = 0.0
+  loop var i: Int = 0, i < wanted.length, ++i {
+    if wanted.copyAtFallback(index: i, fallback: "") is key {
+      let entity: EntityId = wantedEntities.copyAtFallback(index: i, fallback: noEntity())
+      if componentHas(this: world.rects, entity: entity) {
+        let rect: Rect = componentGet(this: world.rects, entity: entity)
+        if rect.size.x > largest {
+          largest = rect.size.x
+        }
+        if rect.size.y > largest {
+          largest = rect.size.y
+        }
+      }
+    }
+  }
+  var scale: Float = xformAt(canvas: canvas, index: 2)
+  if scale <= 0.0 {
+    scale = placeholderFallbackScale
+  }
+  var size: Int = (largest * scale).toInt()
+  if size < placeholderMinSize {
+    size = placeholderMinSize
+  }
+  if size > placeholderMaxSize {
+    size = placeholderMaxSize
+  }
+  ret size
+}
+
 # A hatched grey box: diagonal stripes on a lighter field, one packed
-# r | g<<8 | b<<16 | a<<24 per pixel (Gpu2d.registerImageRgba's layout).
-func registerPlaceholderImage(canvas: mod Gpu2dCanvas, key: view String) {
-  var pixels: List(Int) = List.create(Int, cap: placeholderSize * placeholderSize)
-  loop var y: Int = 0, y < placeholderSize, ++y {
-    loop var x: Int = 0, x < placeholderSize, ++x {
+# r | g<<8 | b<<16 | a<<24 per pixel (Gpu2d.registerImageRgba's layout). The
+# stripe period and the border grow with `size`, so the hatch looks the same
+# on screen whatever size it is generated at.
+func registerPlaceholderImage(canvas: mod Gpu2dCanvas, key: view String, size: copy Int) {
+  var pixels: List(Int) = List.create(Int, cap: size * size)
+  var stripe: Int = size / 8
+  if stripe < 8 {
+    stripe = 8
+  }
+  var border: Int = size / 32
+  if border < 2 {
+    border = 2
+  }
+  loop var y: Int = 0, y < size, ++y {
+    loop var x: Int = 0, x < size, ++x {
       var shade: Int = 150
-      if ((x + y) / 8) % 2 is 0 {
+      if ((x + y) / stripe) % 2 is 0 {
         shade = 96
       }
-      let edge: Bool = x < 2 or y < 2 or x >= placeholderSize - 2 or y >= placeholderSize - 2
+      let edge: Bool = x < border or y < border or x >= size - border or y >= size - border
       if edge {
         shade = 230
       }
@@ -87,8 +143,8 @@ func registerPlaceholderImage(canvas: mod Gpu2dCanvas, key: view String) {
     canvas: canvas
     key: "{key}"
     pixels: pixels.data
-    w: placeholderSize
-    h: placeholderSize
+    w: size
+    h: size
   )
 }
 
@@ -145,7 +201,17 @@ func textureSystem(
         continue
       }
     }
-    registerPlaceholderImage(canvas: canvas, key: key)
+    registerPlaceholderImage(
+      canvas: canvas
+      key: key
+      size: placeholderSizeFor(
+        world: world
+        canvas: canvas
+        wanted: wanted
+        wantedEntities: wantedEntities
+        key: key
+      )
+    )
     var nodeLabel: String = ""
     if componentHas(this: world.nodeIdComponents, entity: entity) {
       nodeLabel = "{componentGet(this: world.nodeIdComponents, entity: entity).id}"
