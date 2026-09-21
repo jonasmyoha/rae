@@ -16,7 +16,7 @@ open Sys
 open ui/Ecs
 open ui/Components
 open ui/ScenePolicy
-open app3d/UiShell
+open ui/BindingComponents
 open ui/animationSystem/EffectSystems
 open ecs/Entity
 open ecs/ComponentTable
@@ -161,73 +161,38 @@ func textureSystem(
   }
 }
 
-# The chrome's own state: its page root (so H can hide it), its visibility,
-# and whether the diagnostics panel (D) is open.
+# The chrome's own state: its page root (so H can hide it) and its
+# visibility. Which panels are open is the panels' own Active (chromeSystem
+# editorPanelOpen); the flags here mirror the last toggle for the key
+# handlers and go away with the one-source-of-truth task.
 type ChromeState {
   pageRoot: EntityId
   visible: Bool
   panelOpen: Bool
-  # The project panel (projectSystem): the opened pack's scene list.
   projectOpen: Bool
-  # The two side panels of the desktop layout (the top bar's toggles).
   leftOpen: Bool
   rightOpen: Bool
 }
 
-# The side panels are 300 / 320 points wide with 12 points of padding; a
-# list inside one is this wide (the row pool takes its width from the list).
-const chromePanelInnerW: Float = 276.0
-
-func setLeftPanelOpen(chrome: mod ChromeState, world: mod UiWorld, open: view Bool) {
-  chrome.leftOpen = open
-  setNodeActive(world: world, nodeId: "chrome/LeftPanel", value: open)
-}
-
-func setRightPanelOpen(chrome: mod ChromeState, world: mod UiWorld, open: view Bool) {
-  chrome.rightOpen = open
-  setNodeActive(world: world, nodeId: "chrome/RightPanel", value: open)
-}
-
-const diagnosticsPanelNode: String = "chrome/DiagnosticsPanel"
-
 func setDiagnosticsPanelOpen(chrome: mod ChromeState, world: mod UiWorld, open: view Bool) {
   chrome.panelOpen = open
-  setNodeActive(world: world, nodeId: diagnosticsPanelNode, value: open)
+  setEditorPanelOpen(world: world, kind: EditorPanelKind.diagnostics, open: open)
 }
-
-const projectPanelNode: String = "chrome/ProjectPanel"
 
 func setProjectPanelOpen(chrome: mod ChromeState, world: mod UiWorld, open: view Bool) {
   chrome.projectOpen = open
-  setNodeActive(world: world, nodeId: projectPanelNode, value: open)
+  setEditorPanelOpen(world: world, kind: EditorPanelKind.project, open: open)
 }
 
-# The list's rows: one per diagnostic, `kind · sceneId/nodeId · name · message`
-# as four bound cells. The list's authored width is replaced by the design
-# width minus the panel padding, since the row pool takes its width from the
-# list's Rect when it is built.
-func syncDiagnosticsList(world: mod UiWorld, designW: view Float) {
-  let entity: EntityId = nodeEntityFor(world: world, nodeId: "chrome/DiagnosticList")
-  if isNone(this: entity) {
+# The diagnostics list's rows: one per diagnostic, `kind · sceneId/nodeId ·
+# name · message` as four bound cells, on the ListView tagged
+# `EditorList { source: diagnostics }`.
+func diagnosticsListSystem(world: mod UiWorld) {
+  let list: EntityId = editorListEntity(world: world, source: EditorListSource.diagnostics)
+  if isNone(this: list) {
     ret
   }
   let count: Int = world.sceneDiagnostics.length
-  if componentHas(this: world.rects, entity: entity) and componentHas(
-    this: world.listViews
-    entity: entity
-  ) {
-    let list: ListView = componentGet(this: world.listViews, entity: entity)
-    var shown: Int = count
-    if shown < 1 {
-      shown = 1
-    }
-    if shown > list.visibleItemCount {
-      shown = list.visibleItemCount
-    }
-    let rect: mod Rect => componentMod(this: world.rects, entity: entity)
-    rect.size.x = chromePanelInnerW
-    rect.size.y = shown.toFloat() * (list.itemHeight + list.itemGap) - list.itemGap
-  }
   var rows: List(ListViewRow) = List.create(ListViewRow, cap: count + 1)
   loop var i: Int = 0, i < count, ++i {
     if let entry: view SceneDiagnostic => world.sceneDiagnostics.viewAt(index: i) {
@@ -247,32 +212,23 @@ func syncDiagnosticsList(world: mod UiWorld, designW: view Float) {
       rows.add(value: ListViewRow { keys: own keys, values: own values })
     }
   }
-  componentSet(this: world.listViewDatas, entity: entity, data: ListViewData { rows: own rows })
+  setEditorListRows(world: world, list: list, rows: own rows)
 }
 
-# A literal fill on a chrome node (the counter pill turns red, not a slot).
-func setNodeFillLiteral(world: mod UiWorld, nodeId: view String, fill: view RgbaColor) {
-  let entity: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
-  if isNone(this: entity) or componentHas(this: world.shapes, entity: entity) is false {
-    ret
-  }
-  let shape: mod Shape => componentMod(this: world.shapes, entity: entity)
-  shape.fill = fill
-  shape.fillSlot = ""
-}
-
-# Write the top bar + status line from the document and the diagnostics.
+# Fill the status from the document + diagnostics and drive the chrome: the
+# bound labels, the count pill, the diagnostics list.
 func chromeSyncSystem(
   world: mod UiWorld
+  status: mod EditorStatus
   fileName: view String
   designW: view Float
   designH: view Float
   columnW: view Float
   safeTop: view Float
   nodeCount: view Int
-  status: view String
+  documentStatus: view String
 ) {
-  setNodeText(world: world, nodeId: "chrome/FileName", value: fileName)
+  status.fileName = "{fileName}"
   var frameLabel: String = "{designW.toInt()} x {designH.toInt()}"
   if columnW > 0.0 and columnW < designW {
     frameLabel = "{frameLabel} · column {columnW.toInt()}"
@@ -280,38 +236,20 @@ func chromeSyncSystem(
   if safeTop > 0.0 {
     frameLabel = "{frameLabel} · safe {safeTop.toInt()}"
   }
-  setNodeText(world: world, nodeId: "chrome/DesignSize", value: frameLabel)
-  setNodeText(world: world, nodeId: "chrome/NodeCount", value: "{nodeCount} nodes")
+  status.designSize = frameLabel
+  status.nodeCount = nodeCount
   let count: Int = world.sceneDiagnostics.length
-  var diagnosticsLabel: String = "no diagnostics"
-  if count is 1 {
-    diagnosticsLabel = "1 diagnostic"
-  }
-  if count > 1 {
-    diagnosticsLabel = "{count} diagnostics"
-  }
-  setNodeText(world: world, nodeId: "chrome/DiagnosticsCount", value: diagnosticsLabel)
-  var line: String = "{status}"
+  status.diagnosticsCount = count
+  var line: String = "{documentStatus}"
   if count > 0 {
     if let first: view SceneDiagnostic => world.sceneDiagnostics.viewAt(index: 0) {
       line = formatSceneDiagnostic(diagnostic: first)
     }
   }
-  setNodeText(world: world, nodeId: "chrome/StatusLine", value: line)
-  if count > 0 {
-    setNodeFillLiteral(
-      world: world
-      nodeId: "chrome/DiagnosticsPill"
-      fill: RgbaColor { r: 200, g: 40, b: 52, a: 255 }
-    )
-  } else {
-    setNodeFillLiteral(
-      world: world
-      nodeId: "chrome/DiagnosticsPill"
-      fill: RgbaColor { r: 46, g: 54, b: 78, a: 255 }
-    )
-  }
-  syncDiagnosticsList(world: world, designW: designW)
+  status.statusLine = line
+  editorTextSystem(world: world, status: status)
+  diagnosticsBadgeSystem(world: world, diagnosticsCount: count)
+  diagnosticsListSystem(world: world)
 }
 
 # Log every diagnostic once, in the gate's one-line form, after a load.

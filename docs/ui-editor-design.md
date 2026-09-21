@@ -169,6 +169,23 @@ chrome can be hidden for a pure passive view (`H` key).
   `H` hides the whole chrome. The chrome is data; the app has no `createEntity`
   for layout. Pointer input reaches the document only inside `EditArea`, so a
   panel over the document never selects through.
+- **The chrome is driven through components, never node ids** (#32499842, the
+  106 shape): every label carries `TextBinding { key: "editor.<name>" }`
+  (`fileName`, `nodeCount`, `diagnosticsCount`, `designSize`, `statusLine`,
+  `zoomLabel`, `projectTitle`, `frameLabel`, `safeAreaLabel`,
+  `inspector.nodeId|type|components|rect|parents`) and `chromeSystem/`'s
+  `editorTextSystem` writes them from the `EditorStatus` resource on `App`; the
+  panels carry `EditorPanel { panel }` and the pills that minimise them
+  `PanelToggle { panel }` (`panelToggleSystem` flips every panel of the kind a
+  fired pill names; the key handlers call `setEditorPanelOpen` by kind); the
+  space the document is fitted into is tagged `EditArea`; the three lists carry
+  `EditorList { source: hierarchy|project|diagnostics }` and one list system
+  each fills their `ListViewData`; the guide shapes and labels carry `GuideRect
+  { kind }`; the count pill `DiagnosticsBadge`. The components are lib tables
+  (`lib/ui/BindingComponents.rae`, the "registry is the world" rule), so the
+  loader deserialises them by reflection like any other; no editor system
+  contains a `chrome/...` string except the page id and the row-scene package
+  ids.
 
 Resources on `App` (no globals): `document: SceneDocument { path, mtime, scene,
 registry, theme, pageRoot, designW, designH, diagnostics: List(SceneDiagnostic) }`,

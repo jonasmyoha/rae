@@ -15,6 +15,7 @@ open Sys
 open ui/Ecs
 open ui/Components
 open ui/SceneLoader
+open ui/BindingComponents
 open app3d/UiShell
 open ecs/Entity
 open ecs/ComponentTable
@@ -186,40 +187,24 @@ func projectOpenActionIndex(world: view UiWorld) ret Int {
   ret -1
 }
 
-# The chrome's project panel: title + one tappable row per scene of the
-# project (the current one marked). The list's Rect follows the design width
-# and the row count, as the diagnostics and tree lists do.
-func syncProjectPanel(
+# The chrome's project panel: the title (status, TextBinding
+# editor.projectTitle) + one tappable row per scene of the project (the
+# current one marked) on the ListView tagged `EditorList { source: project }`.
+func projectListSystem(
   world: mod UiWorld
+  status: mod EditorStatus
   projectName: view String
   projectScenes: view List(String)
   currentScene: view String
-  designW: view Float
 ) {
-  var title: String = "Project — P hides, click a scene to open it"
+  var title: String = "Project"
   if projectName.length() > 0 {
-    title = "{projectName} — {projectScenes.length} scenes · P hides, click one to open it"
+    title = "{projectName} — {projectScenes.length} scenes"
   }
-  setNodeText(world: world, nodeId: "chrome/ProjectTitle", value: title)
-  let list: EntityId = nodeEntityFor(world: world, nodeId: "chrome/ProjectList")
+  status.projectTitle = title
+  let list: EntityId = editorListEntity(world: world, source: EditorListSource.project)
   if isNone(this: list) {
     ret
-  }
-  if componentHas(this: world.rects, entity: list) and componentHas(
-    this: world.listViews
-    entity: list
-  ) {
-    let listView: ListView = componentGet(this: world.listViews, entity: list)
-    var shown: Int = projectScenes.length
-    if shown < 1 {
-      shown = 1
-    }
-    if shown > listView.visibleItemCount {
-      shown = listView.visibleItemCount
-    }
-    let rect: mod Rect => componentMod(this: world.rects, entity: list)
-    rect.size.x = chromePanelInnerW
-    rect.size.y = shown.toFloat() * (listView.itemHeight + listView.itemGap) - listView.itemGap
   }
   var rows: List(ListViewRow) = List.create(ListViewRow, cap: projectScenes.length + 1)
   loop var i: Int = 0, i < projectScenes.length, ++i {
@@ -237,5 +222,6 @@ func syncProjectPanel(
       rows.add(value: ListViewRow { keys: own keys, values: own values })
     }
   }
-  componentSet(this: world.listViewDatas, entity: list, data: ListViewData { rows: own rows })
+  setEditorListRows(world: world, list: list, rows: own rows)
+  editorTextSystem(world: world, status: status)
 }

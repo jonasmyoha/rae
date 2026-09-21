@@ -14,7 +14,7 @@ open ui/Layer
 open ui/Scene
 open ui/SceneFile
 open ui/SceneInstance
-open app3d/UiShell
+open ui/BindingComponents
 open ecs/Entity
 open ecs/ComponentTable
 
@@ -48,30 +48,42 @@ func createGuides(world: mod UiWorld, designW: view Float, designH: view Float) 
   ret GuideState { pageRoot: root, visible: true }
 }
 
-func setGuideRect(
+# Write the Rect of every node tagged with `kind`.
+func setGuideRects(
   world: mod UiWorld
-  nodeId: view String
+  kind: view GuideRectKind
   x: view Float
   y: view Float
   w: view Float
   h: view Float
+  active: view Bool
 ) {
-  let entity: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
-  if isNone(this: entity) or componentHas(this: world.rects, entity: entity) is false {
-    ret
+  let count: Int = componentCount(this: world.guideRects)
+  loop var i: Int = 0, i < count, ++i {
+    let entity: EntityId = componentEntityAt(this: world.guideRects, i: i)
+    let guide: GuideRect = componentDataAt(this: world.guideRects, i: i)
+    if guide.kind is not kind {
+      continue
+    }
+    componentSet(this: world.actives, entity: entity, data: Active { value: active })
+    if componentHas(this: world.rects, entity: entity) {
+      let rect: mod Rect => componentMod(this: world.rects, entity: entity)
+      rect.position.x = x
+      rect.position.y = y
+      rect.size.x = w
+      rect.size.y = h
+    }
   }
-  let rect: mod Rect => componentMod(this: world.rects, entity: entity)
-  rect.position.x = x
-  rect.position.y = y
-  rect.size.x = w
-  rect.size.y = h
 }
 
-# Write the guides from the document's frame: the column centered in the
-# design extent, the safe area inset from it. Call after every load.
+# Write the guides from the document's frame: the column centred in the
+# design extent, the safe area inset from it. Call after every load. The
+# labels' text goes through the status (TextBinding editor.frameLabel /
+# editor.safeAreaLabel); their placement is a GuideRect like the outlines.
 func syncGuides(
   guides: mod GuideState
   world: mod UiWorld
+  status: mod EditorStatus
   designW: view Float
   designH: view Float
   columnW: view Float
@@ -86,61 +98,54 @@ func syncGuides(
   if columnX < 0.0 {
     columnX = 0.0
   }
-  setGuideRect(
+  setGuideRects(
     world: world
-    nodeId: "guides/FrameGuide"
+    kind: GuideRectKind.frame
     x: columnX
     y: 0.0
     w: columnW
     h: designH
+    active: true
   )
-  setGuideRect(
+  setGuideRects(
     world: world
-    nodeId: "guides/FrameLabel"
+    kind: GuideRectKind.frameLabel
     x: columnX + guideLabelInset
     y: designH - 28.0 - guideLabelInset - statusBarClearance
     w: 400.0
     h: 28.0
+    active: true
   )
-  setNodeText(
-    world: world
-    nodeId: "guides/FrameLabel"
-    value: "frame {columnW.toInt()} x {designH.toInt()}"
-  )
+  status.frameLabel = "frame {columnW.toInt()} x {designH.toInt()}"
   let hasSafe: Bool = safeInsets.t > 0.0 or safeInsets.b > 0.0 or safeInsets.l > 0.0 or safeInsets.r > 0.0
-  setNodeActive(world: world, nodeId: "guides/SafeAreaGuide", value: hasSafe and guides.visible)
-  setNodeActive(world: world, nodeId: "guides/SafeAreaLabel", value: hasSafe and guides.visible)
-  if hasSafe {
-    let safeX: Float = columnX + safeInsets.l
-    let safeY: Float = safeInsets.t
-    let safeW: Float = columnW - safeInsets.l - safeInsets.r
-    let safeH: Float = designH - safeInsets.t - safeInsets.b
-    setGuideRect(
-      world: world
-      nodeId: "guides/SafeAreaGuide"
-      x: safeX
-      y: safeY
-      w: safeW
-      h: safeH
-    )
-    setGuideRect(
-      world: world
-      nodeId: "guides/SafeAreaLabel"
-      x: safeX + guideLabelInset
-      y: safeY + guideLabelInset
-      w: 400.0
-      h: 28.0
-    )
-    setNodeText(
-      world: world
-      nodeId: "guides/SafeAreaLabel"
-      value: "safe area {safeInsets.l.toInt()},{safeInsets.t.toInt()},{safeInsets.r.toInt()},{safeInsets.b.toInt()}"
-    )
-  }
+  let safeX: Float = columnX + safeInsets.l
+  let safeY: Float = safeInsets.t
+  let safeW: Float = columnW - safeInsets.l - safeInsets.r
+  let safeH: Float = designH - safeInsets.t - safeInsets.b
+  setGuideRects(
+    world: world
+    kind: GuideRectKind.safeArea
+    x: safeX
+    y: safeY
+    w: safeW
+    h: safeH
+    active: hasSafe
+  )
+  setGuideRects(
+    world: world
+    kind: GuideRectKind.safeAreaLabel
+    x: safeX + guideLabelInset
+    y: safeY + guideLabelInset
+    w: 400.0
+    h: 28.0
+    active: hasSafe
+  )
+  status.safeAreaLabel = "safe area {safeInsets.l.toInt()},{safeInsets.t.toInt()},{safeInsets.r.toInt()},{safeInsets.b.toInt()}"
 }
 
-# `G`: show or hide every guide (the page root's Active).
+# `G`: show or hide every guide — the guides page root is an EditorPanel of
+# kind `guides`, so this is the panel toggle.
 func setGuidesVisible(guides: mod GuideState, world: mod UiWorld, visible: view Bool) {
   guides.visible = visible
-  componentSet(this: world.actives, entity: guides.pageRoot, data: Active { value: visible })
+  setEditorPanelOpen(world: world, kind: EditorPanelKind.guides, open: visible)
 }
