@@ -26,7 +26,10 @@ const guideLabelInset: Float = 8.0
 # label sits just above it.
 const statusBarClearance: Float = 72.0
 
-type GuideState {
+# The guide system owns the guides overlay's authored `GuideRect` components
+# (its table, docs/ecs-systems-own-their-tables.md §3) and its page.
+type GuideSystem {
+  guideRects: ComponentTable(GuideRect)
   pageRoot: EntityId
   # The child that carries the camera and the frame guides (the node
   # authored with Camera2D); the outlines are its screen-space siblings.
@@ -34,7 +37,11 @@ type GuideState {
 }
 
 # Mount the guides page on its layer, sized to the design space.
-func createGuides(world: mod UiWorld, designW: view Float, designH: view Float) ret GuideState {
+func createGuideSystem(
+  world: mod UiWorld
+  designW: view Float
+  designH: view Float
+) ret GuideSystem {
   let layer: EntityId = createLayerEntity(world: world, id: "guides", order: 50)
   let scene: Scene = loadSceneFile(path: guidesScenePath)
   let overrides: List(SceneOverride) = List.create(SceneOverride, cap: 1)
@@ -47,7 +54,11 @@ func createGuides(world: mod UiWorld, designW: view Float, designH: view Float) 
     h: designH
   )
   setLayerById(world: world, entity: root, id: "guides")
-  ret GuideState { pageRoot: root, frameSpace: guidesFrameSpace(world: world, pageRoot: root) }
+  ret GuideSystem {
+    guideRects: ComponentTable.create(GuideRect)
+    pageRoot: root
+    frameSpace: guidesFrameSpace(world: world, pageRoot: root)
+  }
 }
 
 # The guides page's camera entity: the descendant authored with Camera2D.
@@ -64,6 +75,7 @@ func guidesFrameSpace(world: view UiWorld, pageRoot: view EntityId) ret EntityId
 
 # Write the Rect of every node tagged with `kind`.
 func setGuideRects(
+  guideSystem: view GuideSystem
   world: mod UiWorld
   kind: view GuideRectKind
   x: view Float
@@ -72,10 +84,10 @@ func setGuideRects(
   h: view Float
   active: view Bool
 ) {
-  let count: Int = componentCount(this: world.guideRects)
+  let count: Int = componentCount(this: guideSystem.guideRects)
   loop var i: Int = 0, i < count, ++i {
-    let entity: EntityId = componentEntityAt(this: world.guideRects, i: i)
-    let guide: GuideRect = componentDataAt(this: world.guideRects, i: i)
+    let entity: EntityId = componentEntityAt(this: guideSystem.guideRects, i: i)
+    let guide: GuideRect = componentDataAt(this: guideSystem.guideRects, i: i)
     if guide.kind is not kind {
       continue
     }
@@ -95,16 +107,16 @@ func setGuideRects(
 # labels' text goes through the status (TextBinding editor.frameLabel /
 # editor.safeAreaLabel); their placement is a GuideRect like the outlines.
 func syncGuides(
-  guides: mod GuideState
+  guideSystem: mod GuideSystem
   world: mod UiWorld
-  status: mod EditorStatus
+  chromeSystem: mod ChromeSystem
   designW: view Float
   designH: view Float
   columnW: view Float
   safeInsets: view Insets
 ) {
-  if componentHas(this: world.rects, entity: guides.frameSpace) {
-    let rect: mod Rect => componentMod(this: world.rects, entity: guides.frameSpace)
+  if componentHas(this: world.rects, entity: guideSystem.frameSpace) {
+    let rect: mod Rect => componentMod(this: world.rects, entity: guideSystem.frameSpace)
     rect.size.x = designW
     rect.size.y = designH
   }
@@ -113,6 +125,7 @@ func syncGuides(
     columnX = 0.0
   }
   setGuideRects(
+    guideSystem: guideSystem
     world: world
     kind: GuideRectKind.frame
     x: columnX
@@ -122,6 +135,7 @@ func syncGuides(
     active: true
   )
   setGuideRects(
+    guideSystem: guideSystem
     world: world
     kind: GuideRectKind.frameLabel
     x: columnX + guideLabelInset
@@ -130,13 +144,14 @@ func syncGuides(
     h: 28.0
     active: true
   )
-  status.frameLabel = "frame {columnW.toInt()} x {designH.toInt()}"
+  chromeSystem.frameLabel = "frame {columnW.toInt()} x {designH.toInt()}"
   let hasSafe: Bool = safeInsets.t > 0.0 or safeInsets.b > 0.0 or safeInsets.l > 0.0 or safeInsets.r > 0.0
   let safeX: Float = columnX + safeInsets.l
   let safeY: Float = safeInsets.t
   let safeW: Float = columnW - safeInsets.l - safeInsets.r
   let safeH: Float = designH - safeInsets.t - safeInsets.b
   setGuideRects(
+    guideSystem: guideSystem
     world: world
     kind: GuideRectKind.safeArea
     x: safeX
@@ -146,6 +161,7 @@ func syncGuides(
     active: hasSafe
   )
   setGuideRects(
+    guideSystem: guideSystem
     world: world
     kind: GuideRectKind.safeAreaLabel
     x: safeX + guideLabelInset
@@ -154,12 +170,17 @@ func syncGuides(
     h: 28.0
     active: hasSafe
   )
-  status.safeAreaLabel = "safe area {safeInsets.l.toInt()},{safeInsets.t.toInt()},{safeInsets.r.toInt()},{safeInsets.b.toInt()}"
+  chromeSystem.safeAreaLabel = "safe area {safeInsets.l.toInt()},{safeInsets.t.toInt()},{safeInsets.r.toInt()},{safeInsets.b.toInt()}"
 }
 
 # RAE_UI_EDITOR_GUIDES=0: the guides page root is an EditorPanel of kind
 # `guides`, so showing and hiding is the panel's Active (chromeSystem; `G`
 # toggles it the same way).
-func setGuidesVisible(world: mod UiWorld, visible: view Bool) {
-  setEditorPanelOpen(world: world, kind: EditorPanelKind.guides, open: visible)
+func setGuidesVisible(chromeSystem: view ChromeSystem, world: mod UiWorld, visible: view Bool) {
+  setEditorPanelOpen(
+    chromeSystem: chromeSystem
+    world: world
+    kind: EditorPanelKind.guides
+    open: visible
+  )
 }

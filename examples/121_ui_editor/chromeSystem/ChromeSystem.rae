@@ -4,7 +4,7 @@
 # `EditorPanel` / `PanelToggle` on the panels and the pills that minimise
 # them, `EditArea` on the space the document is fitted into, `EditorList` on
 # the three lists and `DiagnosticsBadge` on the count pill; the systems here
-# find them by table and write what the EditorStatus resource says.
+# find them by table and write what the ChromeSystem resource says.
 open ui/Ecs
 open ui/Components
 open ui/BindingComponents
@@ -16,7 +16,19 @@ open ecs/Event
 # What the chrome shows, as data: every `editor.*` text the labels bind to.
 # The app fills it after a load, a selection, a camera move; editorTextSystem
 # writes it into the bound Text nodes.
-type EditorStatus {
+# The chrome system (docs/ecs-systems-own-their-tables.md §3): it OWNS the
+# chrome's authored components — its tables, no longer lib/ui's — and the
+# state its update functions write: the chrome page root (so H can hide it;
+# whether the chrome or a panel is open is the node's own Active, read via
+# chromeVisible / editorPanelOpen, never a mirror) and what the chrome's bound
+# labels show (editorTextSystem writes Text from these fields).
+type ChromeSystem {
+  editorPanels: ComponentTable(EditorPanel)
+  panelToggles: ComponentTable(PanelToggle)
+  editAreas: ComponentTable(EditArea)
+  editorLists: ComponentTable(EditorList)
+  diagnosticsBadges: ComponentTable(DiagnosticsBadge)
+  pageRoot: EntityId
   fileName: String
   nodeCount: Int
   diagnosticsCount: Int
@@ -36,8 +48,14 @@ type EditorStatus {
   inspectorParents: String
 }
 
-func createEditorStatus() ret EditorStatus {
-  ret EditorStatus {
+func createChromeSystem() ret ChromeSystem {
+  ret ChromeSystem {
+    editorPanels: ComponentTable.create(EditorPanel)
+    panelToggles: ComponentTable.create(PanelToggle)
+    editAreas: ComponentTable.create(EditArea)
+    editorLists: ComponentTable.create(EditorList)
+    diagnosticsBadges: ComponentTable.create(DiagnosticsBadge)
+    pageRoot: noEntity()
     fileName: ""
     nodeCount: 0
     diagnosticsCount: 0
@@ -56,57 +74,65 @@ func createEditorStatus() ret EditorStatus {
   }
 }
 
-func editorTextFor(status: view EditorStatus, key: view String) ret String {
+# The chrome root's Active (absent = shown).
+func chromeVisible(world: view UiWorld, chromeSystem: view ChromeSystem) ret Bool {
+  if componentHas(this: world.actives, entity: chromeSystem.pageRoot) is false {
+    ret true
+  }
+  ret componentGet(this: world.actives, entity: chromeSystem.pageRoot).value
+}
+
+func editorTextFor(chromeSystem: view ChromeSystem, key: view String) ret String {
   if key is "editor.fileName" {
-    ret "{status.fileName}"
+    ret "{chromeSystem.fileName}"
   }
   if key is "editor.nodeCount" {
-    ret "{status.nodeCount} nodes"
+    ret "{chromeSystem.nodeCount} nodes"
   }
   if key is "editor.diagnosticsCount" {
-    if status.diagnosticsCount is 0 {
+    if chromeSystem.diagnosticsCount is 0 {
       ret "no diagnostics"
     }
-    if status.diagnosticsCount is 1 {
+    if chromeSystem.diagnosticsCount is 1 {
       ret "1 diagnostic"
     }
-    ret "{status.diagnosticsCount} diagnostics"
+    ret "{chromeSystem.diagnosticsCount} diagnostics"
   }
   if key is "editor.designSize" {
-    ret "{status.designSize}"
+    ret "{chromeSystem.designSize}"
   }
   if key is "editor.statusLine" {
-    ret "{status.statusLine}"
+    ret "{chromeSystem.statusLine}"
   }
   if key is "editor.zoomLabel" {
-    ret "{status.zoomLabel}"
+    ret "{chromeSystem.zoomLabel}"
   }
   if key is "editor.projectTitle" {
-    ret "{status.projectTitle}"
+    ret "{chromeSystem.projectTitle}"
   }
   if key is "editor.frameLabel" {
-    ret "{status.frameLabel}"
+    ret "{chromeSystem.frameLabel}"
   }
   if key is "editor.safeAreaLabel" {
-    ret "{status.safeAreaLabel}"
+    ret "{chromeSystem.safeAreaLabel}"
   }
   if key is "editor.inspector.nodeId" {
-    ret "{status.inspectorNodeId}"
+    ret "{chromeSystem.inspectorNodeId}"
   }
   if key is "editor.inspector.type" {
-    ret "{status.inspectorType}"
+    ret "{chromeSystem.inspectorType}"
   }
   if key is "editor.inspector.components" {
-    ret "{status.inspectorComponents}"
+    ret "{chromeSystem.inspectorComponents}"
   }
   if key is "editor.inspector.appComponents" {
-    ret "{status.inspectorAppComponents}"
+    ret "{chromeSystem.inspectorAppComponents}"
   }
   if key is "editor.inspector.rect" {
-    ret "{status.inspectorRect}"
+    ret "{chromeSystem.inspectorRect}"
   }
   if key is "editor.inspector.parents" {
-    ret "{status.inspectorParents}"
+    ret "{chromeSystem.inspectorParents}"
   }
   ret ""
 }
@@ -115,7 +141,7 @@ func editorTextFor(status: view EditorStatus, key: view String) ret String {
 # status. Other keys (a document's own bindings, 106's `album.title`) are
 # another app's and are left alone. Writes only on change, so an idle frame
 # bumps no table generation.
-func editorTextSystem(world: mod UiWorld, status: view EditorStatus) {
+func editorTextSystem(world: mod UiWorld, chromeSystem: view ChromeSystem) {
   let count: Int = componentCount(this: world.textBindings)
   loop var i: Int = 0, i < count, ++i {
     let entity: EntityId = componentEntityAt(this: world.textBindings, i: i)
@@ -126,7 +152,7 @@ func editorTextSystem(world: mod UiWorld, status: view EditorStatus) {
     if componentHas(this: world.texts, entity: entity) is false {
       continue
     }
-    let value: String = editorTextFor(status: status, key: binding.key)
+    let value: String = editorTextFor(chromeSystem: chromeSystem, key: binding.key)
     let current: view Text => componentView(this: world.texts, entity: entity)
     if current.text is value {
       continue
@@ -137,11 +163,18 @@ func editorTextSystem(world: mod UiWorld, status: view EditorStatus) {
 }
 
 # The diagnostics pill chooses its authored colour for the current state.
-func diagnosticsBadgeSystem(world: mod UiWorld, diagnosticsCount: view Int) {
-  let count: Int = componentCount(this: world.diagnosticsBadges)
+func diagnosticsBadgeSystem(
+  chromeSystem: view ChromeSystem
+  world: mod UiWorld
+  diagnosticsCount: view Int
+) {
+  let count: Int = componentCount(this: chromeSystem.diagnosticsBadges)
   loop var i: Int = 0, i < count, ++i {
-    let entity: EntityId = componentEntityAt(this: world.diagnosticsBadges, i: i)
-    let badge: view DiagnosticsBadge => componentView(this: world.diagnosticsBadges, entity: entity)
+    let entity: EntityId = componentEntityAt(this: chromeSystem.diagnosticsBadges, i: i)
+    let badge: view DiagnosticsBadge => componentView(
+      this: chromeSystem.diagnosticsBadges
+      entity: entity
+    )
     var fill: RgbaColor = badge.clearFill
     if diagnosticsCount > 0 {
       fill = badge.errorFill
@@ -163,11 +196,15 @@ func diagnosticsBadgeSystem(world: mod UiWorld, diagnosticsCount: view Int) {
 
 # Whether any EditorPanel of `kind` is active (the panel's own component is
 # the truth — there is no mirror flag).
-func editorPanelOpen(world: view UiWorld, kind: view EditorPanelKind) ret Bool {
-  let count: Int = componentCount(this: world.editorPanels)
+func editorPanelOpen(
+  chromeSystem: view ChromeSystem
+  world: view UiWorld
+  kind: view EditorPanelKind
+) ret Bool {
+  let count: Int = componentCount(this: chromeSystem.editorPanels)
   loop var i: Int = 0, i < count, ++i {
-    let entity: EntityId = componentEntityAt(this: world.editorPanels, i: i)
-    let panel: EditorPanel = componentDataAt(this: world.editorPanels, i: i)
+    let entity: EntityId = componentEntityAt(this: chromeSystem.editorPanels, i: i)
+    let panel: EditorPanel = componentDataAt(this: chromeSystem.editorPanels, i: i)
     if panel.panel is kind {
       if componentHas(this: world.actives, entity: entity) is false {
         ret true
@@ -178,31 +215,45 @@ func editorPanelOpen(world: view UiWorld, kind: view EditorPanelKind) ret Bool {
   ret false
 }
 
-func setEditorPanelOpen(world: mod UiWorld, kind: view EditorPanelKind, open: view Bool) {
-  let count: Int = componentCount(this: world.editorPanels)
+func setEditorPanelOpen(
+  chromeSystem: view ChromeSystem
+  world: mod UiWorld
+  kind: view EditorPanelKind
+  open: view Bool
+) {
+  let count: Int = componentCount(this: chromeSystem.editorPanels)
   loop var i: Int = 0, i < count, ++i {
-    let entity: EntityId = componentEntityAt(this: world.editorPanels, i: i)
-    let panel: EditorPanel = componentDataAt(this: world.editorPanels, i: i)
+    let entity: EntityId = componentEntityAt(this: chromeSystem.editorPanels, i: i)
+    let panel: EditorPanel = componentDataAt(this: chromeSystem.editorPanels, i: i)
     if panel.panel is kind {
       componentSet(this: world.actives, entity: entity, data: Active { value: open })
     }
   }
 }
 
-func toggleEditorPanel(world: mod UiWorld, kind: view EditorPanelKind) {
-  setEditorPanelOpen(world: world, kind: kind, open: not editorPanelOpen(world: world, kind: kind))
+func toggleEditorPanel(
+  chromeSystem: view ChromeSystem
+  world: mod UiWorld
+  kind: view EditorPanelKind
+) {
+  setEditorPanelOpen(
+    chromeSystem: chromeSystem
+    world: world
+    kind: kind
+    open: not editorPanelOpen(chromeSystem: chromeSystem, world: world, kind: kind)
+  )
 }
 
 # A fired action whose entity carries a PanelToggle flips that panel kind.
 # Returns whether any panel changed.
-func panelToggleSystem(world: mod UiWorld) ret Bool {
+func panelToggleSystem(chromeSystem: view ChromeSystem, world: mod UiWorld) ret Bool {
   var changed: Bool = false
   let count: Int = eventCount(this: world.uiActions)
   loop var a: Int = 0, a < count, ++a {
     let action: UiAction = eventAt(this: world.uiActions, i: a)
-    if componentHas(this: world.panelToggles, entity: action.entity) {
-      let toggle: PanelToggle = componentGet(this: world.panelToggles, entity: action.entity)
-      toggleEditorPanel(world: world, kind: toggle.panel)
+    if componentHas(this: chromeSystem.panelToggles, entity: action.entity) {
+      let toggle: PanelToggle = componentGet(this: chromeSystem.panelToggles, entity: action.entity)
+      toggleEditorPanel(chromeSystem: chromeSystem, world: world, kind: toggle.panel)
       changed = true
     }
   }
@@ -219,12 +270,17 @@ type EditAreaRect {
 
 # The rect of the node tagged EditArea (the space between the panels), or the
 # whole canvas until the chrome has laid out.
-func editAreaOf(world: view UiWorld, canvasW: view Float, canvasH: view Float) ret EditAreaRect {
+func editAreaOf(
+  chromeSystem: view ChromeSystem
+  world: view UiWorld
+  canvasW: view Float
+  canvasH: view Float
+) ret EditAreaRect {
   var area: EditAreaRect = { x: 0.0, y: 0.0, w: canvasW, h: canvasH }
-  if componentCount(this: world.editAreas) is 0 {
+  if componentCount(this: chromeSystem.editAreas) is 0 {
     ret area
   }
-  let entity: EntityId = componentEntityAt(this: world.editAreas, i: 0)
+  let entity: EntityId = componentEntityAt(this: chromeSystem.editAreas, i: 0)
   if componentHas(this: world.computedRects, entity: entity) and componentHas(
     this: world.worldTransforms
     entity: entity
@@ -241,11 +297,21 @@ func editAreaOf(world: view UiWorld, canvasW: view Float, canvasH: view Float) r
   ret area
 }
 
-func pointInEditArea(world: view UiWorld, x: view Float, y: view Float) ret Bool {
-  if componentCount(this: world.editAreas) is 0 {
+func pointInEditArea(
+  chromeSystem: view ChromeSystem
+  world: view UiWorld
+  x: view Float
+  y: view Float
+) ret Bool {
+  if componentCount(this: chromeSystem.editAreas) is 0 {
     ret true
   }
-  let area: EditAreaRect = editAreaOf(world: world, canvasW: 0.0, canvasH: 0.0)
+  let area: EditAreaRect = editAreaOf(
+    chromeSystem: chromeSystem
+    world: world
+    canvasW: 0.0
+    canvasH: 0.0
+  )
   if area.w <= 0.0 {
     ret true
   }
@@ -255,12 +321,16 @@ func pointInEditArea(world: view UiWorld, x: view Float, y: view Float) ret Bool
 # ----- lists ----------------------------------------------------------------
 
 # The ListView tagged with `source`, or none.
-func editorListEntity(world: view UiWorld, source: view EditorListSource) ret EntityId {
-  let count: Int = componentCount(this: world.editorLists)
+func editorListEntity(
+  chromeSystem: view ChromeSystem
+  world: view UiWorld
+  source: view EditorListSource
+) ret EntityId {
+  let count: Int = componentCount(this: chromeSystem.editorLists)
   loop var i: Int = 0, i < count, ++i {
-    let list: EditorList = componentDataAt(this: world.editorLists, i: i)
+    let list: EditorList = componentDataAt(this: chromeSystem.editorLists, i: i)
     if list.source is source {
-      ret componentEntityAt(this: world.editorLists, i: i)
+      ret componentEntityAt(this: chromeSystem.editorLists, i: i)
     }
   }
   ret noEntity()

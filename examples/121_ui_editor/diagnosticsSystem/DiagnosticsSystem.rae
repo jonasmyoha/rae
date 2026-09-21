@@ -35,21 +35,21 @@ const placeholderFallbackScale: Float = 2.0
 # The key -> path search state: which keys were already looked up, so the scan
 # over the sprite table is free once every key is settled, and the viewer-only
 # override directory.
-type TextureSearch {
+type TextureSystem {
   resolvedKeys: List(String)
   overrideDirectory: String
 }
 
-func createTextureSearch() ret TextureSearch {
-  ret TextureSearch {
+func createTextureSystem() ret TextureSystem {
+  ret TextureSystem {
     resolvedKeys: List.create(String, cap: 16)
     overrideDirectory: getEnv(name: "RAE_UI_EDITOR_ASSETS")
   }
 }
 
-func textureKeySettled(search: view TextureSearch, key: view String) ret Bool {
-  loop var i: Int = 0, i < search.resolvedKeys.length, ++i {
-    if let entry: view String => search.resolvedKeys.viewAt(index: i) {
+func textureKeySettled(textureSystem: view TextureSystem, key: view String) ret Bool {
+  loop var i: Int = 0, i < textureSystem.resolvedKeys.length, ++i {
+    if let entry: view String => textureSystem.resolvedKeys.viewAt(index: i) {
       if entry is key {
         ret true
       }
@@ -61,12 +61,12 @@ func textureKeySettled(search: view TextureSearch, key: view String) ret Bool {
 # The override directory's `<key>.png` when it exists, else what the scene's
 # assets resolve the key to, else "".
 func findTexturePath(
-  search: view TextureSearch
+  textureSystem: view TextureSystem
   assets: view SceneAssets
   key: view String
 ) ret String {
-  if search.overrideDirectory.length() > 0 {
-    let candidate: String = "{search.overrideDirectory}/{key}.png"
+  if textureSystem.overrideDirectory.length() > 0 {
+    let candidate: String = "{textureSystem.overrideDirectory}/{key}.png"
     if exists(path: candidate) {
       ret candidate
     }
@@ -143,8 +143,8 @@ func registerPlaceholderImage(canvas: mod Gpu2dCanvas, key: view String, size: c
 
 # Resolve every Sprite.textureKey the world carries that is not settled yet.
 # Runs after a load; the table scan is cheap and every key settles once.
-func textureSystem(
-  search: mod TextureSearch
+func textureUpdate(
+  textureSystem: mod TextureSystem
   world: mod UiWorld
   canvas: mod Gpu2dCanvas
   assets: view SceneAssets
@@ -178,16 +178,16 @@ func textureSystem(
     let entity: EntityId = wantedEntities.copyAtFallback(index: i, fallback: noEntity())
     # Empty keys are colour-only sprites; `mat:` keys are icon-font glyphs.
     if key.length() is 0 or key.startsWith(prefix: "mat:") or textureKeySettled(
-      search: search
+      textureSystem: textureSystem
       key: key
     ) {
       continue
     }
-    search.resolvedKeys.add(value: "{key}")
+    textureSystem.resolvedKeys.add(value: "{key}")
     if Gpu2d.hasImageKey(canvas: canvas, key: key) {
       continue
     }
-    let path: String = findTexturePath(search: search, assets: assets, key: key)
+    let path: String = findTexturePath(textureSystem: textureSystem, assets: assets, key: key)
     if path.length() > 0 {
       let handle: Int = Gpu2d.loadImageKey(canvas: canvas, key: key, path: path)
       if handle > 0 {
@@ -220,26 +220,15 @@ func textureSystem(
   }
 }
 
-# The chrome's own state is its page root (so H can hide it). Whether the
-# chrome or any panel is open is the node's own Active — read it
-# (chromeVisible / chromeSystem's editorPanelOpen), never a mirror.
-type ChromeState {
-  pageRoot: EntityId
-}
-
-# The chrome root's Active (absent = shown).
-func chromeVisible(world: view UiWorld, chrome: view ChromeState) ret Bool {
-  if componentHas(this: world.actives, entity: chrome.pageRoot) is false {
-    ret true
-  }
-  ret componentGet(this: world.actives, entity: chrome.pageRoot).value
-}
-
 # The diagnostics list's rows: one per diagnostic, `kind · sceneId/nodeId ·
 # name · message` as four bound cells, on the ListView tagged
 # `EditorList { source: diagnostics }`.
-func diagnosticsListSystem(world: mod UiWorld) {
-  let list: EntityId = editorListEntity(world: world, source: EditorListSource.diagnostics)
+func diagnosticsListSystem(chromeSystem: view ChromeSystem, world: mod UiWorld) {
+  let list: EntityId = editorListEntity(
+    chromeSystem: chromeSystem
+    world: world
+    source: EditorListSource.diagnostics
+  )
   if isNone(this: list) {
     ret
   }
@@ -293,7 +282,7 @@ func diagnosticsListSystem(world: mod UiWorld) {
 # bound labels, the count pill, the diagnostics list.
 func chromeSyncSystem(
   world: mod UiWorld
-  status: mod EditorStatus
+  chromeSystem: mod ChromeSystem
   fileName: view String
   designW: view Float
   designH: view Float
@@ -302,7 +291,7 @@ func chromeSyncSystem(
   nodeCount: view Int
   documentStatus: view String
 ) {
-  status.fileName = "{fileName}"
+  chromeSystem.fileName = "{fileName}"
   var frameLabel: String = "{designW.toInt()} x {designH.toInt()}"
   if columnW > 0.0 and columnW < designW {
     frameLabel = "{frameLabel} · column {columnW.toInt()}"
@@ -310,20 +299,20 @@ func chromeSyncSystem(
   if safeTop > 0.0 {
     frameLabel = "{frameLabel} · safe {safeTop.toInt()}"
   }
-  status.designSize = frameLabel
-  status.nodeCount = nodeCount
+  chromeSystem.designSize = frameLabel
+  chromeSystem.nodeCount = nodeCount
   let count: Int = world.sceneDiagnostics.length
-  status.diagnosticsCount = count
+  chromeSystem.diagnosticsCount = count
   var line: String = "{documentStatus}"
   if count > 0 {
     if let first: view SceneDiagnostic => world.sceneDiagnostics.viewAt(index: 0) {
       line = formatSceneDiagnostic(diagnostic: first)
     }
   }
-  status.statusLine = line
-  editorTextSystem(world: world, status: status)
-  diagnosticsBadgeSystem(world: world, diagnosticsCount: count)
-  diagnosticsListSystem(world: world)
+  chromeSystem.statusLine = line
+  editorTextSystem(world: world, chromeSystem: chromeSystem)
+  diagnosticsBadgeSystem(chromeSystem: chromeSystem, world: world, diagnosticsCount: count)
+  diagnosticsListSystem(chromeSystem: chromeSystem, world: world)
 }
 
 # Log every diagnostic once, in the gate's one-line form, after a load.

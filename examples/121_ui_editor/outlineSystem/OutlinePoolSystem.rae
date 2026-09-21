@@ -19,6 +19,16 @@ open ecs/hierarchySystem/HierarchySystem
 
 const outlinePoolCap: Int = 512
 
+# The outline-pool system owns the authored `OutlinePool` components (the
+# "Outlines" / "Buttons" pool roots in chrome/Guides.raescene).
+type OutlinePoolSystem {
+  outlinePools: ComponentTable(OutlinePool)
+}
+
+func createOutlinePoolSystem() ret OutlinePoolSystem {
+  ret OutlinePoolSystem { outlinePools: ComponentTable.create(OutlinePool) }
+}
+
 # Every entity of the document subtree that has a world rect (paint order).
 func collectDocumentEntities(world: view UiWorld, entity: view EntityId, out: mod List(EntityId)) {
   if isNone(this: entity) or out.length >= outlinePoolCap {
@@ -136,21 +146,22 @@ func placePooledOutline(world: mod UiWorld, item: view EntityId, target: view En
 # Per frame: every active OutlinePool follows the document's entities.
 # Returns whether any pool grew, shrank or moved (the transform pass must
 # run this frame then).
-func outlinePoolSystem(
+func outlinePoolUpdate(
+  outlinePoolSystem: view OutlinePoolSystem
   world: mod UiWorld
   documentRoot: view EntityId
   scenes: view SceneRegistry
 ) ret Bool {
   var changed: Bool = false
-  let poolCount: Int = componentCount(this: world.outlinePools)
+  let poolCount: Int = componentCount(this: outlinePoolSystem.outlinePools)
   if poolCount is 0 {
     ret false
   }
   var entities: List(EntityId) = List.create(EntityId, cap: 64)
   collectDocumentEntities(world: world, entity: documentRoot, out: entities)
   loop var p: Int = 0, p < poolCount, ++p {
-    let pool: EntityId = componentEntityAt(this: world.outlinePools, i: p)
-    let spec: OutlinePool = componentDataAt(this: world.outlinePools, i: p)
+    let pool: EntityId = componentEntityAt(this: outlinePoolSystem.outlinePools, i: p)
+    let spec: OutlinePool = componentDataAt(this: outlinePoolSystem.outlinePools, i: p)
     var active: Bool = true
     if componentHas(this: world.actives, entity: pool) {
       active = componentGet(this: world.actives, entity: pool).value
