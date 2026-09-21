@@ -67,6 +67,7 @@ func isRuntimeTable(name: view String) ret Bool {
     "ListViewRowKey"
     "HeroTransition"
     "StyleOverride"
+    "BundleRefs"
   ]
   var i: Int = 0
   loop i < runtime.length() {
@@ -205,7 +206,7 @@ func applyComponentByName(
       table
     ) is not "StateStyle" and typeName(table) is not "ListViewData" and typeName(table) is not "ListViewRowKey" and typeName(
       table
-    ) is not "HeroTransition" and typeName(table) is not "StyleOverride" {
+    ) is not "HeroTransition" and typeName(table) is not "StyleOverride" and typeName(table) is not "BundleRefs" {
       if name is authoredNameOf(typeName: typeName(table)) {
         decodeComponent(
           table: table

@@ -1,0 +1,21 @@
+imported bundles: pill,toggle,loopA,loopB,shadowed
+mounted = true, alive = 8
+Plain: rect 0,0 120x44 opacity 0.5 hitArea true
+  names=pill inherited=Rect,Opacity,HitArea overridden=
+Over: rect 0,0 200x44 opacity 0.5 hitArea true
+  names=pill inherited=Opacity,HitArea overridden=Rect
+Nested: rect 0,0 120x44 opacity 0.7 hitArea true
+  names=pill,toggle inherited=Rect,Opacity,HitArea overridden=PanelToggle
+Shared: rect 0,0 120x44 opacity 0.9 hitArea true
+  names=pill,shadowed inherited=Rect,Opacity,HitArea overridden=
+Cyclic: rect no Rect opacity no Opacity hitArea false
+  names=loopB,loopA inherited=Active overridden=
+Missing: rect 1,2 3x4 opacity no Opacity hitArea false
+  names= inherited= overridden=
+pending (app components through bundles): 1
+  Nested PanelToggle {"panel":"right"}
+diagnostics: 3
+  Cyclic: bundleCycle loopA
+  Missing: unknownBundle nope
+  Authored: runtimeOnlyComponent BundleRefs
+live: rect 0,0 120x44 names=pill inherited=Rect,Opacity,HitArea overridden=

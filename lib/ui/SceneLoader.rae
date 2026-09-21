@@ -17,6 +17,8 @@ open ecs/hierarchySystem/HierarchySystem
 open collections/StringMap
 open ecs/ComponentTable
 open ui/ScenePolicy
+open ui/SceneBundles
+open ui/BundleApply
 open ui/Components
 
 # Minimal helper: append an EntityId to a List(EntityId) via a non-generic
@@ -55,6 +57,11 @@ func loadSceneIntoPage(
       )
       ret noEntity()
     }
+
+    # The scene's own `bundles` block (its imports' bundles are the world's
+    # `bundles` resource, seeded by the host).
+    var ownBundles: BundleSet = createBundleSet()
+    parseBundlesInto(out: ownBundles, scene: scene)
 
     # ---------- pass 0: reachability from root ----------
     # Compute the set of nodes reachable from `scene.rootNodeId` via
@@ -161,10 +168,27 @@ func loadSceneIntoPage(
         let defaultName: Name = { label: node.nodeId }
         componentSet(this: world.names, entity: entity, data: defaultName)
 
-        # Walk the node's component bag in declaration order.
+        # Walk the node's component bag in declaration order — or, when the
+        # node lists `bundles`, its EXPANSION (ui/SceneBundles): the bundles'
+        # components merged field-wise under the node's own.
         let bag: JsonValue = Json.jsonValueAt(doc: docView, idx: node.componentsValueIdx)
+        if Json.field(doc: docView, this: bag, key: bundlesKey) >= 0 {
+          applyExpandedBag(
+            world: world
+            entity: entity
+            local: ownBundles
+            doc: docView
+            bag: bag
+            sceneId: scene.sceneId
+            nodeId: node.nodeId
+            skipPlacement: false
+          )
+        }
         let keyCount: Int = Json.objectLen(this: bag)
         var k: Int = 0
+        if Json.field(doc: docView, this: bag, key: bundlesKey) >= 0 {
+          k = keyCount
+        }
         loop k < keyCount {
           let key: String = Json.objectKeyAt(doc: docView, this: bag, idx: k)
           # Children is hierarchy, not a component — handled in pass 3.

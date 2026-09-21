@@ -1,6 +1,7 @@
 open HotReload
 open ui/WindowGeometry
 open ui/Ecs
+open ui/SceneBundles
 open ecs/Event
 open ui/EventLoop
 open ui/LogOverlay
@@ -75,6 +76,9 @@ func createApp() ret App {
   # `appState` is built here so state-dependent blocks below see it.
   let albums: List(Album) = loadAllAlbums(folder: albumsFolder)
   var appState: AppState = createAppState(albums: albums, theme: own bootTheme)
+  # The shared bundles (assets/scenes/Bundles.raescene), parsed once like the
+  # theme and cloned onto every world the router builds.
+  parseBundlesInto(out: appState.bundles, scene: loadSceneFile(path: bundlesPath))
   # Mock playback state — survives world rebuilds; both the album
   # mini-player and the now-playing screen mutate it through the
   # playback command system (actionSystem/). Created here so `restoreAppState` below can

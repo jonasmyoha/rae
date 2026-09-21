@@ -5,6 +5,7 @@
 # only writers of the navigation fields. Split out of ScreenRouter.rae, which
 # keeps the Screen enum, the screen table and the world builders.
 open ui/Ecs
+open ui/SceneBundles
 open ecs/Entity
 
 # App-side state the command systems read and write. Owns the
@@ -22,6 +23,8 @@ type AppState {
   # frame, so the theme lives on this persistent state and each new world is seeded
   # from it (seedWorldThemeFrom); the T-key + debug toggles write back here.
   theme: UiTheme
+  # The shared bundles every world is seeded with (ui/SceneBundles).
+  bundles: BundleSet
   # The album catalog, owned by its own ECS system (#266). Read
   # through `state.mediaLibrary.albums`; see `MediaLibrarySystem`
   # in `album_loader.rae`.
@@ -117,6 +120,7 @@ func createAppState(albums: own List(Album), theme: own UiTheme) pub ret AppStat
     let liked: Playlist = createPlaylist(id: own likedId, title: own likedTitle)
     ret AppState {
       theme: own theme
+      bundles: createBundleSet()
       mediaLibrary: createMediaLibrary(albums: albums)
       currentAlbumStem: firstStem
       currentTrackIndex: 0

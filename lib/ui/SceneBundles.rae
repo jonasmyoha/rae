@@ -1,0 +1,414 @@
+# SceneBundles — named component sets in `.raescene`
+# (docs/ecs-systems-own-their-tables.md §5, docs/ui-scene-format.md §9).
+#
+# A bundle is a NAMED SET OF COMPONENTS WITH VALUES, declared once and applied
+# to any node:
+#
+#   "bundles": {
+#     "pillButton": { "Size": {...}, "Shape": {...}, "HitArea": {} },
+#     "panelToggle": { "bundles": ["pillButton"], "PanelToggle": {} }
+#   }
+#   ...
+#   "LeftToggle": { "bundles": ["panelToggle"], "Rect": {...}, "OnClick": {...} }
+#
+# Expansion happens when the node is DESERIALISED, field-wise at the JSON
+# level: every bundle in the node's list, in order (a bundle's own includes
+# first, then its components, so a bundle overrides what it includes), then
+# the node's own object for that component over it, top-level field by field
+# — later wins, the node wins over every bundle. Merging JSON before decoding
+# means one path serves lib components and an app's own alike: what the lib
+# does not know goes to the pending outbox with the merge already applied.
+#
+# Systems never see bundles: after expansion the world holds ordinary
+# components. The ONLY trace is `BundleRefs` (Components.rae), written by the
+# loader for the round-trip — the names applied, and per component whether
+# the node inherited it whole or overrode a field — never authored by hand.
+#
+# Where bundles come from: the scene's OWN `bundles` block, then the world's
+# `bundles` resource — the imported set the host seeds from the entry scene's
+# `import` list (sceneImportedBundles), first declaration wins, exactly like
+# the theme tokens. A cycle in the includes is a diagnostic, not a hang.
+open ui/Scene
+open ui/SceneImports
+open ui/SceneInstance
+open ui/ScenePolicy
+import Json
+
+# The bundles a node was expanded from: written by the LOADER, never authored
+# — the round-trip's record of which components the node inherited whole and
+# which it overrode a field of. Authoring it is rejected like any runtime
+# table (ui/Registry's never-authored list).
+type BundleRefs {
+  names: List(String)
+  inherited: List(String)
+  overridden: List(String)
+}
+
+# Returns true for the components that the *mount entity* keeps when
+# the scene is mounted (geometry/placement live on the parent of the
+# scene; the scene contributes its inner layout, padding, visuals, and
+# behaviour). RUICS § 6.4.
+func isPlacementComponent(name: view String) ret Bool {
+  if name is "Rect" {
+    ret true
+  }
+  if name is "Size" {
+    ret true
+  }
+  if name is "Align" {
+    ret true
+  }
+  if name is "Offset" {
+    ret true
+  }
+  if name is "Constraints" {
+    ret true
+  }
+  if name is "OverflowPolicy" {
+    ret true
+  }
+  if name is "TransformFx" {
+    ret true
+  }
+  ret false
+}
+
+# The deepest include chain followed before giving up with a diagnostic.
+const bundleMaxDepth: Int = 8
+
+# The key a bundle or a node lists its bundles under.
+const bundlesKey: String = "bundles"
+
+# A bundle set: name -> the bundle object's JSON text (re-serialised).
+type BundleSet {
+  names: List(String)
+  jsons: List(String)
+}
+
+func createBundleSet() ret BundleSet {
+  ret BundleSet { names: List.create(String, cap: 8), jsons: List.create(String, cap: 8) }
+}
+
+# A copy for a world that outlives the set it is seeded from (an app that
+# rebuilds its world per route keeps ONE parsed set and clones it in).
+func cloneBundleSet(set: view BundleSet) ret BundleSet {
+  var duplicate: BundleSet = createBundleSet()
+  loop var i: Int = 0, i < set.names.length, ++i {
+    duplicate.names.add(value: set.names.copyAtFallback(index: i, fallback: ""))
+    duplicate.jsons.add(value: set.jsons.copyAtFallback(index: i, fallback: ""))
+  }
+  ret duplicate
+}
+
+func bundleIndex(set: view BundleSet, name: view String) ret Int {
+  loop var i: Int = 0, i < set.names.length, ++i {
+    if set.names.copyAtFallback(index: i, fallback: "") is name {
+      ret i
+    }
+  }
+  ret -1
+}
+
+# Add every bundle of the scene's top-level `bundles` block that `out` does not
+# have yet (first declaration wins — the nearest scene in resolution order).
+func parseBundlesInto(out: mod BundleSet, scene: view Scene) {
+  let doc: view JsonDoc => scene.doc
+  if doc.ok is false {
+    ret
+  }
+  let root: JsonValue = Json.root(doc: doc)
+  let idx: Int = Json.field(doc: doc, this: root, key: bundlesKey)
+  if idx < 0 {
+    ret
+  }
+  let block: JsonValue = Json.jsonValueAt(doc: doc, idx: idx)
+  let count: Int = Json.objectLen(this: block)
+  loop var i: Int = 0, i < count, ++i {
+    let name: String = Json.objectKeyAt(doc: doc, this: block, idx: i)
+    if bundleIndex(set: out, name: name) >= 0 {
+      continue
+    }
+    let value: JsonValue = Json.objectValueAt(doc: doc, this: block, idx: i)
+    out.names.add(value: "{name}")
+    out.jsons.add(value: Json.stringify(doc: doc, value: value))
+  }
+}
+
+# The bundles a page sees through its imports: the entry scene's own block
+# first, then each imported scene's in resolution order — first declaration
+# wins. The host seeds `world.bundles` with this before mounting, the way it
+# seeds the theme.
+func sceneImportedBundles(
+  entry: view Scene
+  assets: view SceneAssets
+  registry: view SceneRegistry
+) ret BundleSet {
+  var set: BundleSet = createBundleSet()
+  parseBundlesInto(out: set, scene: entry)
+  loop var i: Int = 0, i < assets.importedIds.length, ++i {
+    if let importId: String = assets.importedIds.copyAt(index: i) {
+      let idx: Int = sceneRegistryIndex(reg: registry, key: importId)
+      if idx >= 0 {
+        let imported: view Scene => sceneRegistryGet(reg: registry, idx: idx)
+        parseBundlesInto(out: set, scene: imported)
+      }
+    }
+  }
+  ret set
+}
+
+# One node's expanded component bag: per component its merged object text,
+# and whether the node inherited it from a bundle untouched or authored a
+# field over it (the provenance BundleRefs records for the round-trip).
+type ExpandedComponents {
+  names: List(String)
+  jsons: List(String)
+  inherited: List(Bool)
+  overridden: List(Bool)
+  # The bundle names applied, in application order.
+  applied: List(String)
+}
+
+func createExpandedComponents() ret ExpandedComponents {
+  ret ExpandedComponents {
+    names: List.create(String, cap: 12)
+    jsons: List.create(String, cap: 12)
+    inherited: List.create(Bool, cap: 12)
+    overridden: List.create(Bool, cap: 12)
+    applied: List.create(String, cap: 4)
+  }
+}
+
+func expandedIndex(expanded: view ExpandedComponents, name: view String) ret Int {
+  loop var i: Int = 0, i < expanded.names.length, ++i {
+    if expanded.names.copyAtFallback(index: i, fallback: "") is name {
+      ret i
+    }
+  }
+  ret -1
+}
+
+# Merge `object` (a component's JSON object) into the expansion, top-level
+# field by field: an absent component is added whole; a present one takes
+# each field of `object` over its own. `fromBundle` says which side wrote.
+func mergeComponentObject(
+  expanded: mod ExpandedComponents
+  name: view String
+  doc: view JsonDoc
+  object: view JsonValue
+  fromBundle: view Bool
+) {
+  let existing: Int = expandedIndex(expanded: expanded, name: name)
+  if existing < 0 {
+    expanded.names.add(value: "{name}")
+    expanded.jsons.add(value: Json.stringify(doc: doc, value: object))
+    expanded.inherited.add(value: fromBundle)
+    expanded.overridden.add(value: false)
+    ret
+  }
+  # Field-wise: the existing fields, each replaced by `object`'s when it has
+  # the key, then `object`'s new keys appended. A non-object value (a token
+  # string such as `"Padding": "insetPill"`) replaces the whole component.
+  let baseDoc: JsonDoc = Json.parseJson(
+    source: expanded.jsons.copyAtFallback(index: existing, fallback: "\{\}")
+  )
+  let base: JsonValue = Json.root(doc: baseDoc)
+  var merged: String = ""
+  if Json.objectLen(this: object) is 0 and object.kind is not JsonKind.object {
+    merged = Json.stringify(doc: doc, value: object)
+  } else if base.kind is not JsonKind.object {
+    merged = Json.stringify(doc: doc, value: object)
+  } else {
+    var builder: JsonBuilder = Json.jbObject()
+    let baseCount: Int = Json.objectLen(this: base)
+    loop var i: Int = 0, i < baseCount, ++i {
+      let key: String = Json.objectKeyAt(doc: baseDoc, this: base, idx: i)
+      let overrideIdx: Int = Json.field(doc: doc, this: object, key: key)
+      if overrideIdx >= 0 {
+        Json.jbField(
+          builder: builder
+          key: key
+          valueJson: Json.stringify(doc: doc, value: Json.jsonValueAt(doc: doc, idx: overrideIdx))
+        )
+      } else {
+        Json.jbField(
+          builder: builder
+          key: key
+          valueJson: Json.stringify(
+            doc: baseDoc
+            value: Json.objectValueAt(doc: baseDoc, this: base, idx: i)
+          )
+        )
+      }
+    }
+    let objectCount: Int = Json.objectLen(this: object)
+    loop var i: Int = 0, i < objectCount, ++i {
+      let key: String = Json.objectKeyAt(doc: doc, this: object, idx: i)
+      if Json.field(doc: baseDoc, this: base, key: key) < 0 {
+        Json.jbField(
+          builder: builder
+          key: key
+          valueJson: Json.stringify(
+            doc: doc
+            value: Json.objectValueAt(doc: doc, this: object, idx: i)
+          )
+        )
+      }
+    }
+    merged = Json.jbEndObject(builder: builder)
+  }
+  expanded.jsons.set(index: existing, value: merged)
+  if fromBundle is false {
+    expanded.overridden.set(index: existing, value: true)
+  }
+}
+
+# Apply one bundle (its includes first, then its own components) into the
+# expansion. `chain` is the include path being followed, for the cycle check.
+func expandBundleInto(
+  expanded: mod ExpandedComponents
+  local: view BundleSet
+  imported: view BundleSet
+  name: view String
+  chain: mod List(String)
+  diagnostics: mod List(SceneDiagnostic)
+  sceneId: view String
+  nodeId: view String
+) {
+  loop let seen: view String in chain {
+    if seen is name {
+      reportSceneDiagnostic(
+        diagnostics: diagnostics
+        sceneId: sceneId
+        nodeId: nodeId
+        kind: SceneDiagnosticKind.bundleCycle
+        name: name
+        message: "bundle {name} includes itself (through {chain.length} bundles); the cycle is skipped"
+      )
+      ret
+    }
+  }
+  if chain.length >= bundleMaxDepth {
+    reportSceneDiagnostic(
+      diagnostics: diagnostics
+      sceneId: sceneId
+      nodeId: nodeId
+      kind: SceneDiagnosticKind.bundleCycle
+      name: name
+      message: "bundle {name} nests deeper than {bundleMaxDepth}; stopped"
+    )
+    ret
+  }
+  var json: String = ""
+  let ownIdx: Int = bundleIndex(set: local, name: name)
+  if ownIdx >= 0 {
+    json = local.jsons.copyAtFallback(index: ownIdx, fallback: "")
+  } else {
+    let importedIdx: Int = bundleIndex(set: imported, name: name)
+    if importedIdx < 0 {
+      reportSceneDiagnostic(
+        diagnostics: diagnostics
+        sceneId: sceneId
+        nodeId: nodeId
+        kind: SceneDiagnosticKind.unknownBundle
+        name: name
+        message: "no bundle named {name} in the scene or its imports; ignored"
+      )
+      ret
+    }
+    json = imported.jsons.copyAtFallback(index: importedIdx, fallback: "")
+  }
+  let doc: JsonDoc = Json.parseJson(source: json)
+  let object: JsonValue = Json.root(doc: doc)
+  chain.add(value: "{name}")
+  # Includes first, so this bundle's own components win over theirs.
+  let includesIdx: Int = Json.field(doc: doc, this: object, key: bundlesKey)
+  if includesIdx >= 0 {
+    let includes: JsonValue = Json.jsonValueAt(doc: doc, idx: includesIdx)
+    let includeCount: Int = Json.arrayLen(this: includes)
+    loop var i: Int = 0, i < includeCount, ++i {
+      let includeName: String = Json.jsonString(
+        this: Json.arrayAt(doc: doc, this: includes, idx: i)
+        fallback: ""
+      )
+      expandBundleInto(
+        expanded: expanded
+        local: local
+        imported: imported
+        name: includeName
+        chain: chain
+        diagnostics: diagnostics
+        sceneId: sceneId
+        nodeId: nodeId
+      )
+    }
+  }
+  let count: Int = Json.objectLen(this: object)
+  loop var i: Int = 0, i < count, ++i {
+    let key: String = Json.objectKeyAt(doc: doc, this: object, idx: i)
+    if key is bundlesKey or key is "Children" {
+      continue
+    }
+    mergeComponentObject(
+      expanded: expanded
+      name: key
+      doc: doc
+      object: Json.objectValueAt(doc: doc, this: object, idx: i)
+      fromBundle: true
+    )
+  }
+  expanded.applied.add(value: "{name}")
+  chain.removeLast()
+}
+
+# Expand a node's component bag: its `bundles` list in order, then its own
+# components over them. `bag` may be a bare `bundles` array with no node
+# (applyBundle on a live world passes the node's bag as `none`).
+func expandNodeBundles(
+  local: view BundleSet
+  imported: view BundleSet
+  doc: view JsonDoc
+  bag: view JsonValue
+  diagnostics: mod List(SceneDiagnostic)
+  sceneId: view String
+  nodeId: view String
+) ret ExpandedComponents {
+  var expanded: ExpandedComponents = createExpandedComponents()
+  var chain: List(String) = List.create(String, cap: bundleMaxDepth)
+  let listIdx: Int = Json.field(doc: doc, this: bag, key: bundlesKey)
+  if listIdx >= 0 {
+    let names: JsonValue = Json.jsonValueAt(doc: doc, idx: listIdx)
+    let nameCount: Int = Json.arrayLen(this: names)
+    loop var i: Int = 0, i < nameCount, ++i {
+      let name: String = Json.jsonString(
+        this: Json.arrayAt(doc: doc, this: names, idx: i)
+        fallback: ""
+      )
+      expandBundleInto(
+        expanded: expanded
+        local: local
+        imported: imported
+        name: name
+        chain: chain
+        diagnostics: diagnostics
+        sceneId: sceneId
+        nodeId: nodeId
+      )
+    }
+  }
+  let count: Int = Json.objectLen(this: bag)
+  loop var i: Int = 0, i < count, ++i {
+    let key: String = Json.objectKeyAt(doc: doc, this: bag, idx: i)
+    if key is bundlesKey or key is "Children" {
+      continue
+    }
+    mergeComponentObject(
+      expanded: expanded
+      name: key
+      doc: doc
+      object: Json.objectValueAt(doc: doc, this: bag, idx: i)
+      fromBundle: false
+    )
+  }
+  ret expanded
+}
