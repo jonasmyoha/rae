@@ -1,0 +1,16 @@
+# The music player's OWN authorable components (docs/ecs-systems-own-their-
+# tables.md §3): lib/ui tables until the ECS split step 4 moved them next to
+# the system that reads them. A `.raescene` still authors them by name; the
+# loader parks a name no lib table has in `world.pendingComponents` and
+# applyMusicComponents (MusicSystems.rae) decodes each into its system.
+open ui/Components
+
+# Authored next to a `ListView` on the History page's list host. The rows are
+# the app's play history, so the scene cannot carry them: `historyListSystem`
+# writes the host's `ListViewData` from the history whenever its revision
+# moves past `builtRevision` (-1 on a fresh mount), shows the host while
+# there are entries and the page's `emptyStateNodeId` node otherwise. The
+# list re-binds in place — a new play no longer re-mounts the page.
+type HistoryList {
+  builtRevision: Int = -1
+}

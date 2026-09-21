@@ -17,7 +17,7 @@ func frameWaitSystem(
   frame: view WorldFrame
   tick: mod FrameTick
 ) {
-  let playback: view PlaybackState => app.playback
+  let playbackSystem: view PlaybackSystem => app.musicSystems.playbackSystem
   let scrollFsm: view ScrollFsm => session.scrollFsm
   # Per-frame scroll bounds: the active page's ScrollRoot and its laid-out
   # floor (lib/ui/scrollRootSystem). Wrong floor → spring never settles; a
@@ -41,13 +41,13 @@ func frameWaitSystem(
   if velAbs > 0.05 or scrollOOB or ((uiNowSeconds() - scrollFsm.lastWheelTime) < 0.25) {
     tick.scrollAnimating = true
   }
-  # Suppress the playback-driven 60Hz animation gate while the user is
-  # wheel-scrolling (the per-frame playback tick competed with scroll).
+  # Suppress the playbackSystem-driven 60Hz animation gate while the user is
+  # wheel-scrolling (the per-frame playbackSystem tick competed with scroll).
   # Progress resumes ~250ms after the last wheel tick.
   let scrollActiveTimeSec: Float = (uiNowSeconds() - scrollFsm.lastWheelTime) as Float
   let recentlyScrolling: Bool = scrollActiveTimeSec < 0.25
   tick.playbackAnimating = false
-  if playback.isPlaying {
+  if playbackSystem.isPlaying {
     if recentlyScrolling is false {
       tick.playbackAnimating = true
     }
@@ -78,7 +78,7 @@ func frameWaitSystem(
     app.loopDebugFrame = app.loopDebugFrame + 1
     let mouseDown: Bool = uiPointerButtonDown(button: mouseButtonLeft)
     log(
-      "[loop {app.loopDebugFrame}] screen={screenToInt(s: session.currentScreen)} scrollY={scrollFsm.scrollY} vel={scrollFsm.velocity} animA={heroInFlight} animP={playback.isPlaying} animS={tick.scrollAnimating} mouse={mouseDown} timeout={tick.timeout}"
+      "[loop {app.loopDebugFrame}] screen={screenToInt(s: session.currentScreen)} scrollY={scrollFsm.scrollY} vel={scrollFsm.velocity} animA={heroInFlight} animP={playbackSystem.isPlaying} animS={tick.scrollAnimating} mouse={mouseDown} timeout={tick.timeout}"
     )
   }
   # When RAE_AUTO_EXIT_SEC is set, clamp the wait so the deadline actually

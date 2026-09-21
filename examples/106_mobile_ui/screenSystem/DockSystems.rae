@@ -16,6 +16,16 @@ open ecs/Entity
 open ecs/ComponentTable
 open ui/Layer
 
+# DockSystem (docs/ecs-systems-own-their-tables.md §3): owns the dock's `NavTab` tabs — its
+# authored components are ITS tables, no longer lib/ui's.
+type DockSystem {
+  navTabs: ComponentTable(NavTab)
+}
+
+func createDockSystem() ret DockSystem {
+  ret DockSystem { navTabs: ComponentTable.create(NavTab) }
+}
+
 func anchorBottomSystem(world: mod UiWorld, bottomInset: view Float) pub {
   let n: Int = componentCount(this: world.anchorBottoms)
   var i: Int = 0
@@ -77,18 +87,18 @@ func setTabTextStyle(world: mod UiWorld, entity: view EntityId, styleId: view St
   componentSet(this: world.texts, entity: entity, data: updated)
 }
 
-func navTabsSystem(world: mod UiWorld, activeTab: Screen) pub {
+func navTabsSystem(dockSystem: view DockSystem, world: mod UiWorld, activeTab: Screen) pub {
   unsafe {
     # A tab's authored `NavTab.screen` is the page id of the screen it
     # selects — the same id the ScreenPage table gives the active tab.
     let activeName: String = pageIdForScreen(screen: activeTab)
     let activeTint: RgbaColor = { r: 30, g: 30, b: 36, a: 255 }
     let inactiveTint: RgbaColor = { r: 130, g: 130, b: 140, a: 255 }
-    let n: Int = componentCount(this: world.navTabs)
+    let n: Int = componentCount(this: dockSystem.navTabs)
     var i: Int = 0
     loop i < n {
-      let tab: EntityId = componentEntityAt(this: world.navTabs, i: i)
-      let binding: NavTab = componentDataAt(this: world.navTabs, i: i)
+      let tab: EntityId = componentEntityAt(this: dockSystem.navTabs, i: i)
+      let binding: NavTab = componentDataAt(this: dockSystem.navTabs, i: i)
       let active: Bool = binding.screen is activeName
       var tint: RgbaColor = inactiveTint
       var style: String = "tabInactive"

@@ -1,0 +1,27 @@
+# The music player's OWN authorable components (docs/ecs-systems-own-their-
+# tables.md §3): lib/ui tables until the ECS split step 4 moved them next to
+# the system that reads them. A `.raescene` still authors them by name; the
+# loader parks a name no lib table has in `world.pendingComponents` and
+# applyMusicComponents (MusicSystems.rae) decodes each into its system.
+open ui/Components
+
+# Which live library count a `ProfileStat` node shows. Authored as the member
+# name: `"ProfileStat": { "stat": "albums" }`.
+enum ProfileStatKind { albums, tracks, listeningHours }
+
+# A Text node whose `text` is a live count from the app's media library. The
+# number never lives in the scene; `profileStatsSystem` writes `Text.text` on
+# the same entity when the count changes (a pure data binding, no layout).
+type ProfileStat {
+  stat: ProfileStatKind
+}
+
+# An avatar slot whose photo may not be loaded yet. Authored on a Stack
+# container with two children: the photo (the child whose `Sprite.textureKey`
+# equals `textureKey`) and an authored placeholder. `avatarSystem` activates
+# the photo once the texture registry holds the key and the placeholder
+# otherwise, so a download that lands later is an `Active` toggle on two
+# children — not a page rebuild.
+type AvatarSource {
+  textureKey: String
+}

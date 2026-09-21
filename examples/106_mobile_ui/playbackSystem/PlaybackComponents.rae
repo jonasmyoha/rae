@@ -1,0 +1,51 @@
+# The music player's OWN authorable components (docs/ecs-systems-own-their-
+# tables.md §3): lib/ui tables until the ECS split step 4 moved them next to
+# the system that reads them. A `.raescene` still authors them by name; the
+# loader parks a name no lib table has in `world.pendingComponents` and
+# applyMusicComponents (MusicSystems.rae) decodes each into its system.
+open ui/Components
+
+# A playback time label: the M:SS position (`elapsed`) or track duration
+# (`total`), read from PlaybackSystem by `playbackTimeSystem` and written to
+# the node's `Text.text` whenever the whole second changes. Distinct from
+# TrackText (which follows the browsed track's title / artist).
+enum PlaybackTimeKind { elapsed, total }
+
+# ----- playback widgets: the data bindings the dock and Now Playing share (#981)
+# Each is authored on the node it drives; the matching system runs every frame
+# from `refreshMountedUi` (and once at mount) and writes only on a change of
+# its observed revision / key, so the same components serve the dock's
+# mini-player and the Now Playing page.
+# Play/pause glyph: the Sprite key follows `PlaybackSystem.isPlaying` and the
+# WidgetState.selected flag mirrors it (`revision` observed).
+type PlaybackIcon {
+  builtRevision: Int = -1
+}
+
+# Now-playing cover: the Sprite key follows the playing track's art
+# (`nowPlayingRevision` observed); seeded from the browsed album at mount.
+# Its corner rounding is an authored `CornerRadius` like every other cover
+# (the app's AlbumCoverSystem squares / restores it with the setting).
+type PlaybackCover {
+  builtRevision: Int = -1
+}
+
+# Heart / like button: WidgetState.selected follows the liked playlist
+# membership of the browsed track; the outline/filled StateStyle is
+# installed by the system (StateStyle is a runtime table).
+type LikedHeart {
+  styled: Bool = false
+}
+
+# Track text: `field` is "title" or "artist" (the Text follows the browsed
+# album + track, `builtKey` = stem|index), or "timeNow" / "timeTotal" (the
+# M:SS playback position / duration, written whenever the second changes).
+type TrackText {
+  field: String = "title"
+  builtKey: String
+}
+
+type PlaybackTime {
+  kind: PlaybackTimeKind
+  builtSecond: Int = -1
+}

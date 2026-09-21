@@ -151,7 +151,7 @@ func searchData(
 func trackRow(
   cr: view CollectionRow
   visual: view Int
-  playback: view PlaybackState
+  playbackSystem: view PlaybackSystem
 ) ret ListViewRow {
   var num: Int = cr.number
   if num <= 0 {
@@ -162,8 +162,8 @@ func trackRow(
     label = "0{num}"
   }
   var playing: Bool = false
-  if playback.playingAlbumStem is cr.albumStem {
-    if cr.trackIndex is playback.playingTrackIndex {
+  if playbackSystem.playingAlbumStem is cr.albumStem {
+    if cr.trackIndex is playbackSystem.playingTrackIndex {
       playing = true
     }
   }
@@ -187,12 +187,12 @@ func trackRow(
   ret row
 }
 
-func albumTracksData(state: view AppState, playback: view PlaybackState) ret ListViewData {
+func albumTracksData(state: view AppState, playbackSystem: view PlaybackSystem) ret ListViewData {
   let cv: CollectionView = buildCurrentCollection(state: state)
   let rows: List(ListViewRow) = List.create(ListViewRow, cap: cv.rows.length)
   var r: Int = 0
   loop let cr: view CollectionRow in cv.rows {
-    rows.add(value: trackRow(cr: cr, visual: r, playback: playback))
+    rows.add(value: trackRow(cr: cr, visual: r, playbackSystem: playbackSystem))
     r = r + 1
   }
   ret ListViewData { rows: own rows }
@@ -260,7 +260,7 @@ func listSourceKey(
   host: view EntityId
   source: view ListSourceKind
   state: view AppState
-  playback: view PlaybackState
+  playbackSystem: view PlaybackSystem
 ) ret String {
   let settings: String = boolCell(value: state.settings.roundedAlbumCovers)
   if source is ListSourceKind.home or source is ListSourceKind.library {
@@ -270,7 +270,7 @@ func listSourceKey(
     ret searchQueryOnPage(world: world, page: pageOf(world: world, entity: host))
   }
   if source is ListSourceKind.albumTracks {
-    ret "{albumCollectionKey(state: state)}|{playback.playingAlbumStem}|{playback.playingTrackIndex}"
+    ret "{albumCollectionKey(state: state)}|{playbackSystem.playingAlbumStem}|{playbackSystem.playingTrackIndex}"
   }
   if source is ListSourceKind.sheet {
     ret "{state.bottomSheet.epoch}"
@@ -283,7 +283,7 @@ func listViewDataFor(
   host: view EntityId
   source: view ListSourceKind
   state: view AppState
-  playback: view PlaybackState
+  playbackSystem: view PlaybackSystem
 ) ret ListViewData {
   if source is ListSourceKind.home {
     ret coverGridData(state: state, withPlaylist: false)
@@ -307,7 +307,7 @@ func listViewDataFor(
     )
   }
   if source is ListSourceKind.albumTracks {
-    ret albumTracksData(state: state, playback: playback)
+    ret albumTracksData(state: state, playbackSystem: playbackSystem)
   }
   if source is ListSourceKind.sheet {
     ret sheetData(sheet: state.bottomSheet)
@@ -321,7 +321,7 @@ func listViewDataFor(
 func listSourceSystem(
   world: mod UiWorld
   state: view AppState
-  playback: view PlaybackState
+  playbackSystem: view PlaybackSystem
   scenes: view AlbumScenes
 ) pub {
   var changed: Bool = false
@@ -335,7 +335,7 @@ func listSourceSystem(
       host: host
       source: binding.source
       state: state
-      playback: playback
+      playbackSystem: playbackSystem
     )
     if key is not binding.builtKey {
       let data: ListViewData = listViewDataFor(
@@ -343,7 +343,7 @@ func listSourceSystem(
         host: host
         source: binding.source
         state: state
-        playback: playback
+        playbackSystem: playbackSystem
       )
       componentSet(this: world.listViewDatas, entity: host, data: own data)
       let built: ListSource = { source: binding.source, builtKey: "{key}" }

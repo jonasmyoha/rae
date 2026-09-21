@@ -160,9 +160,10 @@ func pageLabelForScreen(screen: view Screen) ret String {
 }
 
 func buildScreenWorld(
+  dockSystem: view DockSystem
   screen: Screen
   scenes: view AlbumScenes
-  playback: view PlaybackState
+  playbackSystem: view PlaybackSystem
   state: view AppState
   textureRegistry: view TextureRegistry
   viewport: view Viewport
@@ -171,9 +172,10 @@ func buildScreenWorld(
   # (#948): the seven per-screen builders and the ladder that chose between
   # them are gone. Kept for the memory-stress runner, which rebuilds worlds.
   ret buildAppWorldFor(
+    dockSystem: dockSystem
     visible: screen
     scenes: scenes
-    playback: playback
+    playbackSystem: playbackSystem
     state: state
     textureRegistry: textureRegistry
     viewport: viewport
@@ -194,16 +196,18 @@ func pageIdForScreen(screen: Screen) pub ret String {
 # down. Data changes (album / track) still trigger a full rebuild
 # until slice 4b.3 introduces per-page invalidation.
 func buildAppWorld(
+  dockSystem: view DockSystem
   scenes: view AlbumScenes
-  playback: view PlaybackState
+  playbackSystem: view PlaybackSystem
   state: view AppState
   textureRegistry: view TextureRegistry
   viewport: view Viewport
 ) pub ret UiWorld {
   ret buildAppWorldFor(
+    dockSystem: dockSystem
     visible: visibleScreen(state: state)
     scenes: scenes
-    playback: playback
+    playbackSystem: playbackSystem
     state: state
     textureRegistry: textureRegistry
     viewport: viewport
@@ -213,9 +217,10 @@ func buildAppWorld(
 # The persistent world: every screen's page is mounted, and exactly `visible`
 # is Active. Which page is visible is a table walk over the ScreenPage rows.
 func buildAppWorldFor(
+  dockSystem: view DockSystem
   visible: Screen
   scenes: view AlbumScenes
-  playback: view PlaybackState
+  playbackSystem: view PlaybackSystem
   state: view AppState
   textureRegistry: view TextureRegistry
   viewport: view Viewport
@@ -233,7 +238,7 @@ func buildAppWorldFor(
   createStandardLayers(world: world)
   # Every page from the table, by the one mounter; only the `visible`
   # screen's page is Active=true. The page's data (lists, stats, the
-  # album header, the playback texts) lands through its binding components
+  # album header, the playbackSystem texts) lands through its binding components
   # when the frame's observation step runs before the first paint.
   let pages: List(ScreenPage) = createScreenPages()
   loop let page: view ScreenPage in pages {
@@ -249,10 +254,11 @@ func buildAppWorldFor(
 
   # Shared overlays — always Active.
   let dock: EntityId = mountBottomDockOverlay(
+    dockSystem: dockSystem
     world: world
     activeTab: state.tab
     scenes: scenes
-    playback: playback
+    playbackSystem: playbackSystem
     state: state
     reg: textureRegistry
   )
@@ -262,7 +268,7 @@ func buildAppWorldFor(
     scenes: scenes
     sheet: state.bottomSheet
     state: state
-    playback: playback
+    playbackSystem: playbackSystem
   )
   # Responsive safe-area pass. `RAE_UI_DEVICE=<preset>` selects a phone
   # form factor; its notch / home-indicator insets are resolved to

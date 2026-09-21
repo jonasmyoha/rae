@@ -4,7 +4,7 @@
 #   actionCommandSystem   UiAction (a fired id) -> AppCommand, through the
 #                         action table; the only place an id string is read.
 #   playbackCommandSystem playbackToggle / next / prev / playTrack /
-#                         replayHistory / toggleLike: the PlaybackState, the
+#                         replayHistory / toggleLike: the PlaybackSystem, the
 #                         play history, the liked playlist, Spotify.
 #   sheetCommandSystem    openSheet / closeSheet / libraryRemove: the bottom
 #                         sheet and the curated library.
@@ -58,7 +58,7 @@ func actionCommandSystem(
 # Record a local-catalogue play in the history and (Spotify mode) play it.
 func startTrack(
   state: mod AppState
-  playback: mod PlaybackState
+  playbackSystem: mod PlaybackSystem
   stem: view String
   trackIndex: view Int
   spotifyEnabled: view Bool
@@ -69,13 +69,13 @@ func startTrack(
   state.currentTrackIndex = trackIndex
   # Mark this track as actually playing — the views read these two fields
   # to decide which row to highlight.
-  playback.playingAlbumStem = "{stem}"
-  playback.playingTrackIndex = trackIndex
-  setPlaybackPlaying(state: playback, value: true)
+  playbackSystem.playingAlbumStem = "{stem}"
+  playbackSystem.playingTrackIndex = trackIndex
+  setPlaybackPlaying(playbackSystem: playbackSystem, value: true)
   # Point the nowPlaying cover at this local album's stem-keyed texture and
   # bump the instance revision (#268) so the Hero + mini-player covers
   # observe the change and re-point by identity.
-  setNowPlayingArt(state: playback, artKey: stem)
+  setNowPlayingArt(playbackSystem: playbackSystem, artKey: stem)
   # Record the pick in play history so Home's "Recently played" row + the
   # History sub-page see it.
   let album: Album = activeAlbum(state: state)
@@ -108,7 +108,7 @@ func startTrack(
 # album / track so the Album page would land on the right row if opened.
 func replayHistoryEntry(
   state: mod AppState
-  playback: mod PlaybackState
+  playbackSystem: mod PlaybackSystem
   index: view Int
   spotifyEnabled: view Bool
 ) {
@@ -142,12 +142,12 @@ func replayHistoryEntry(
         }
       }
     }
-    playback.playingAlbumStem = "{entry.albumStem}"
-    playback.playingTrackIndex = state.currentTrackIndex
-    setPlaybackPlaying(state: playback, value: true)
+    playbackSystem.playingAlbumStem = "{entry.albumStem}"
+    playbackSystem.playingTrackIndex = state.currentTrackIndex
+    setPlaybackPlaying(playbackSystem: playbackSystem, value: true)
     # Cover follows the replayed entry's own texture key (#268) — the local
     # stem for catalogue entries, or the spotify-art key otherwise.
-    setNowPlayingArt(state: playback, artKey: entry.textureKey)
+    setNowPlayingArt(playbackSystem: playbackSystem, artKey: entry.textureKey)
     if spotifyEnabled {
       let query: String = spotifySearchQuery(
         artist: entry.artistName
@@ -187,33 +187,33 @@ func toggleLiked(state: mod AppState) {
 # osascript; at worst one poll interval stale) and let the 1 Hz poll mirror
 # it back. Locally it is a PlaybackSystem command (#265), applied in the
 # frame's Apply(A) phase by `processCommands`.
-func togglePlaybackCommand(playback: mod PlaybackState, spotifyEnabled: view Bool) {
+func togglePlaybackCommand(playbackSystem: mod PlaybackSystem, spotifyEnabled: view Bool) {
   if spotifyEnabled is false {
-    enqueuePlaybackToggle(this: playback)
+    enqueuePlaybackToggle(this: playbackSystem)
     ret
   }
   let current: String = Spotify.state()
   log("[spotify] toggle: state={current}")
   if current is "playing" {
     Spotify.pause()
-    setPlaybackPlaying(state: playback, value: false)
+    setPlaybackPlaying(playbackSystem: playbackSystem, value: false)
   } else {
     Spotify.play()
-    setPlaybackPlaying(state: playback, value: true)
+    setPlaybackPlaying(playbackSystem: playbackSystem, value: true)
   }
 }
 
 func playbackCommandSystem(
   commands: view EventQueue(AppCommand)
   state: mod AppState
-  playback: mod PlaybackState
+  playbackSystem: mod PlaybackSystem
   spotifyEnabled: view Bool
 ) {
   var i: Int = 0
   loop i < eventCount(this: commands) {
     let command: AppCommand = eventAt(this: commands, i: i)
     if command.kind is ActionKind.playbackToggle {
-      togglePlaybackCommand(playback: playback, spotifyEnabled: spotifyEnabled)
+      togglePlaybackCommand(playbackSystem: playbackSystem, spotifyEnabled: spotifyEnabled)
     }
     # The local mock has no "next / previous track" yet — Spotify mode is
     # the only consumer.
@@ -238,7 +238,7 @@ func playbackCommandSystem(
       }
       startTrack(
         state: state
-        playback: playback
+        playbackSystem: playbackSystem
         stem: stem
         trackIndex: trackIndex
         spotifyEnabled: spotifyEnabled
@@ -247,7 +247,7 @@ func playbackCommandSystem(
     if command.kind is ActionKind.replayHistory {
       replayHistoryEntry(
         state: state
-        playback: playback
+        playbackSystem: playbackSystem
         index: command.index
         spotifyEnabled: spotifyEnabled
       )
@@ -352,14 +352,14 @@ func runAppCommands(
   actionTable: view ActionTable
   commands: mod EventQueue(AppCommand)
   state: mod AppState
-  playback: mod PlaybackState
+  playbackSystem: mod PlaybackSystem
   spotifyEnabled: view Bool
 ) ret Screen {
   actionCommandSystem(input: input, actionTable: actionTable, commands: commands)
   playbackCommandSystem(
     commands: commands
     state: state
-    playback: playback
+    playbackSystem: playbackSystem
     spotifyEnabled: spotifyEnabled
   )
   sheetCommandSystem(commands: commands, state: state)

@@ -161,6 +161,33 @@ one system; the app systems marked *(obs)* are rows of the observation schedule
 | `ScrollRoot` | `scrollRootSystem` + the scroll FSM | lib/ui/scrollRootSystem + `inputSystem/ScrollInput.rae` |
 | `HeroWidget` | `spawnHeroTransition` / `heroTransitionSystem` | lib/ui/animationSystem (key written by the cover binding systems) |
 
+### Who OWNS which table (ECS split step 4, docs/ecs-systems-own-their-tables.md)
+
+The app-specific components above are no longer `UiWorld` tables: each is a
+`ComponentTable` field on the system that reads it, and the systems are the
+fields of `MusicSystems` (`MusicSystems.rae`) on the `App` — the hand-written
+aggregate the two outbox drains (`applyMusicComponents`, `sweepMusicEntities`,
+run by `musicFrameEnd`) and the observation walk. A route rebuild resets the
+tables (`resetMusicTables`); the playback state itself survives it.
+
+| system (type) | owns | absorbed state |
+|---|---|---|
+| `PlaybackSystem` | playbackIcons, playbackCovers, likedHearts, trackTexts, playbackTimes | the former `PlaybackState` (clock, playing track, inbox) |
+| `DockSystem` | navTabs | — |
+| `AlbumSystem` | albumHeaders | — |
+| `ProfileSystem` | profileStats, avatarSources | — |
+| `HistorySystem` | historyLists | — (`PlayHistory` / `HistoryArtLoader` stay on `AppState`: they are app data read everywhere, not the list binding's) |
+| `HomeSystem` | hasHistories | — |
+| `AlbumCoverSystem` | albumCovers, authoredRadii | — |
+| `SpotifySystem` | (no table) | the former `SpotifyState`; `SpotifyPoller` is its worker |
+
+The observers judge "did my input move" from the world tables they still
+declare, their sources, AND their own table's generation
+(`ownTableGeneration`), so a row a ListView mounts — drained into the system
+at frame end — runs the observer next frame. Every update function takes its
+system as the camelCase of its type, `mod` when it writes it, `view` when it
+only reads it.
+
 ### Authored metadata (read at mount, no per-frame system)
 
 `ActionBinding` (id + role — the audit and the debug menu read it),

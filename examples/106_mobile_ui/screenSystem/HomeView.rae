@@ -17,19 +17,30 @@ open ecs/ComponentTable
 
 # Every `HasHistory`: Active follows "the play history has entries", keyed on
 # the history revision so an idle frame writes nothing.
-func hasHistorySystem(world: mod UiWorld, state: view AppState) pub {
+# HomeSystem (docs/ecs-systems-own-their-tables.md §3): owns the home page's `HasHistory` sections
+# — its
+# authored components are ITS tables, no longer lib/ui's.
+type HomeSystem {
+  hasHistories: ComponentTable(HasHistory)
+}
+
+func createHomeSystem() ret HomeSystem {
+  ret HomeSystem { hasHistories: ComponentTable.create(HasHistory) }
+}
+
+func hasHistorySystem(homeSystem: mod HomeSystem, world: mod UiWorld, state: view AppState) pub {
   let revision: Int = state.playHistory.revision
   let hasEntries: Bool = state.playHistory.entries.length > 0
-  let n: Int = componentCount(this: world.hasHistories)
+  let n: Int = componentCount(this: homeSystem.hasHistories)
   var i: Int = 0
   loop i < n {
-    let entity: EntityId = componentEntityAt(this: world.hasHistories, i: i)
-    let binding: HasHistory = componentDataAt(this: world.hasHistories, i: i)
+    let entity: EntityId = componentEntityAt(this: homeSystem.hasHistories, i: i)
+    let binding: HasHistory = componentDataAt(this: homeSystem.hasHistories, i: i)
     if binding.builtRevision is not revision {
       let active: Active = { value: hasEntries }
       componentSet(this: world.actives, entity: entity, data: active)
       let built: HasHistory = { builtRevision: revision }
-      componentSet(this: world.hasHistories, entity: entity, data: built)
+      componentSet(this: homeSystem.hasHistories, entity: entity, data: built)
     }
     i = i + 1
   }

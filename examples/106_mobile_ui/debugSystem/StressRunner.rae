@@ -23,6 +23,7 @@ func pickHoverEntity(world: view UiWorld, idx: view Int) ret EntityId {
 }
 
 func runHoverStressMode(
+  dockSystem: view DockSystem
   scenes: view AlbumScenes
   appState: mod AppState
   gpuUi: view Gpu2dUi
@@ -38,14 +39,15 @@ func runHoverStressMode(
     stressN = stressNEnv.toInt()
   }
 
-  let playback: PlaybackState = createPlaybackState()
+  let playbackSystem: PlaybackSystem = createPlaybackSystem()
   var textureRegistry: TextureRegistry = createTextureRegistry()
   let viewport: Viewport = createViewportFromWindow()
   loadAllTextures(reg: textureRegistry, albums: appState.mediaLibrary.albums)
   let world: UiWorld = buildScreenWorld(
+    dockSystem: dockSystem
     screen: Screen.home
     scenes: scenes
-    playback: playback
+    playbackSystem: playbackSystem
     state: appState
     textureRegistry: textureRegistry
     viewport: viewport
@@ -109,8 +111,18 @@ func runHoverStressMode(
 # external inspection, closes the window, and rets back to main which
 # falls through to its teardown. Returns true if the stress block ran
 # (so main knows to skip the rest of its branches).
-func runStressMode(scenes: view AlbumScenes, appState: mod AppState, gpuUi: view Gpu2dUi) ret Bool {
-  if runHoverStressMode(scenes: scenes, appState: appState, gpuUi: gpuUi) {
+func runStressMode(
+  dockSystem: view DockSystem
+  scenes: view AlbumScenes
+  appState: mod AppState
+  gpuUi: view Gpu2dUi
+) ret Bool {
+  if runHoverStressMode(
+    dockSystem: dockSystem
+    scenes: scenes
+    appState: appState
+    gpuUi: gpuUi
+  ) {
     ret true
   }
 
@@ -130,13 +142,14 @@ func runStressMode(scenes: view AlbumScenes, appState: mod AppState, gpuUi: view
   var lastLog: Int = 0
   # Warm-up rebuild so font / texture / scene-loader one-shots don't land
   # in the baseline.
-  let stressPlayback: PlaybackState = createPlaybackState()
+  let stressPlayback: PlaybackSystem = createPlaybackSystem()
   var stressTextureRegistry: TextureRegistry = createTextureRegistry()
   let stressViewport: Viewport = createViewportFromWindow()
   let warm: UiWorld = buildScreenWorld(
+    dockSystem: dockSystem
     screen: Screen.album
     scenes: scenes
-    playback: stressPlayback
+    playbackSystem: stressPlayback
     state: appState
     textureRegistry: stressTextureRegistry
     viewport: stressViewport
@@ -152,9 +165,10 @@ func runStressMode(scenes: view AlbumScenes, appState: mod AppState, gpuUi: view
       stressScreen = Screen.player
     }
     let sworld: UiWorld = buildScreenWorld(
+      dockSystem: dockSystem
       screen: stressScreen
       scenes: scenes
-      playback: stressPlayback
+      playbackSystem: stressPlayback
       state: appState
       textureRegistry: stressTextureRegistry
       viewport: stressViewport

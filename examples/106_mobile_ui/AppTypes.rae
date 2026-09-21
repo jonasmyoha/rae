@@ -47,10 +47,14 @@ type App {
   scenes: AlbumScenes
   textureRegistry: TextureRegistry
   appState: AppState
-  playback: PlaybackState
+  # The music player's systems that own tables (MusicSystems.rae): playback,
+  # dock, album, profile, history, home, album covers. The App is the
+  # aggregate; this struct is the hand-written list the two outbox drains
+  # and the observation walk.
+  musicSystems: MusicSystems
   viewport: Viewport
   logOverlay: LogOverlay
-  spotifyState: SpotifyState
+  spotifySystem: SpotifySystem
   # #950: the spawn'd osascript poll worker + its channels; joined at teardown.
   spotifyPoller: SpotifyPoller
   autoExitSec: Float
@@ -63,8 +67,4 @@ type App {
   # command systems drain (actionSystem/ActionSystems).
   actionTable: ActionTable
   commands: EventQueue(AppCommand)
-  # The rounded-covers setting's system: owns the `AlbumCover` markers and
-  # the authored radii it squared (albumCoverSystem/). Recreated with the
-  # world on every route rebuild (its rows are that world's entities).
-  albumCoverSystem: AlbumCoverSystem
 }
