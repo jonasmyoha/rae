@@ -234,8 +234,12 @@ from application code and no C renderer code was added.
   `#69C7AC` to the base teal. Colour is a hierarchy cue, not a border on every box.
 - **Chrome palette:** deep green background `#021210`, sidebar `#041A18`,
   raised inspector `#0A3838`, primary text `#E6FAFA`, secondary `#9FC1BD`,
-  mint `#78E6DC` and selected outline `#00E8D2`. The open action uses a
+  mint `#78E6DC` and amber selected outline `#FFA84C`. The open action uses a
   `#086469` to `#043E44` gradient; thin mint edges separate controls.
+  Amber means selection: the selected document bounds use solid amber, hierarchy
+  and project selection markers use soft amber `#FFD69E`, and optional clickable
+  bounds use translucent amber. Hover and passive guides remain mint, so hovering
+  a different node cannot be mistaken for changing the selection.
 - **Sample type scale:** display 128, title 92, h2 42, body 34, secondary 28,
   caption 26, eyebrow 24 design units. Display leading is 1.08; prose is
   1.25–1.30. Compact card and onboarding headings author local overrides.
