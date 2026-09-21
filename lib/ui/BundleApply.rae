@@ -1,0 +1,105 @@
+# BundleApply — applying a node's bundle expansion (ui/SceneBundles) to the
+# world: the merged JSON per component decoded by the ordinary per-name path,
+# then the BundleRefs record. Shared by both loaders (ui/SceneLoader's page
+# load and ui/SceneInstance's instance mount) and by applyBundle for a live
+# entity.
+open ui/Ecs
+open ui/Registry
+open ui/SceneBundles
+open ecs/Entity
+open ecs/ComponentTable
+import Json
+
+# Apply a node's EXPANDED bag: every component the bundles and the node
+# together produce, each decoded from its merged JSON by the ordinary
+# per-name path (a name the lib does not know goes to the pending outbox
+# with the merge applied), then the BundleRefs record for the round-trip.
+func applyExpandedBag(
+  world: mod UiWorld
+  entity: view EntityId
+  local: view BundleSet
+  doc: view JsonDoc
+  bag: view JsonValue
+  sceneId: view String
+  nodeId: view String
+  skipPlacement: view Bool
+) {
+  let expanded: ExpandedComponents = expandNodeBundles(
+    local: local
+    imported: world.bundles
+    doc: doc
+    bag: bag
+    diagnostics: world.sceneDiagnostics
+    sceneId: sceneId
+    nodeId: nodeId
+  )
+  loop var i: Int = 0, i < expanded.names.length, ++i {
+    let name: String = expanded.names.copyAtFallback(index: i, fallback: "")
+    if skipPlacement and isPlacementComponent(name: name) {
+      continue
+    }
+    let merged: JsonDoc = Json.parseJson(
+      source: expanded.jsons.copyAtFallback(index: i, fallback: "\{\}")
+    )
+    applyComponentByName(
+      world: world
+      entity: entity
+      name: name
+      doc: merged
+      val: Json.root(doc: merged)
+      sceneId: sceneId
+      nodeId: nodeId
+    )
+  }
+  var refs: BundleRefs = {
+    names: List.create(String, cap: expanded.applied.length)
+    inherited: List.create(String, cap: expanded.names.length)
+    overridden: List.create(String, cap: expanded.names.length)
+  }
+  loop let applied: view String in expanded.applied {
+    refs.names.add(value: "{applied}")
+  }
+  loop var i: Int = 0, i < expanded.names.length, ++i {
+    let fromBundle: Bool = expanded.inherited.copyAtFallback(index: i, fallback: false)
+    let overrode: Bool = expanded.overridden.copyAtFallback(index: i, fallback: false)
+    if fromBundle and overrode is false {
+      refs.inherited.add(value: expanded.names.copyAtFallback(index: i, fallback: ""))
+    } else if fromBundle {
+      refs.overridden.add(value: expanded.names.copyAtFallback(index: i, fallback: ""))
+    }
+  }
+  componentSet(this: world.bundleRefs, entity: entity, data: refs)
+}
+
+# Apply a bundle to a LIVE entity: the same expansion with no node bag, so
+# code-built UI (a debug menu) uses the authored bundles instead of listing
+# components by hand. Appends the name to the entity's BundleRefs.
+func applyBundle(world: mod UiWorld, entity: view EntityId, name: view String) pub {
+  let source: String = "\{\"bundles\":[{Json.quote(text: name)}]\}"
+  let doc: JsonDoc = Json.parseJson(source: source)
+  let bag: JsonValue = Json.root(doc: doc)
+  let empty: BundleSet = createBundleSet()
+  var previous: List(String) = List.create(String, cap: 4)
+  if componentHas(this: world.bundleRefs, entity: entity) {
+    let existing: view BundleRefs => componentView(this: world.bundleRefs, entity: entity)
+    loop let n: view String in existing.names {
+      previous.add(value: "{n}")
+    }
+  }
+  applyExpandedBag(
+    world: world
+    entity: entity
+    local: empty
+    doc: doc
+    bag: bag
+    sceneId: "live"
+    nodeId: "{entity.index}"
+    skipPlacement: false
+  )
+  if previous.length > 0 {
+    let refs: mod BundleRefs => componentMod(this: world.bundleRefs, entity: entity)
+    loop let n: view String in previous {
+      refs.names.add(value: "{n}")
+    }
+  }
+}

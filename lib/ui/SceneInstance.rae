@@ -40,6 +40,8 @@ open ecs/Entity
 open ecs/hierarchySystem/HierarchySystem
 open ecs/ComponentTable
 open ui/RegistryGeneric
+open ui/SceneBundles
+open ui/BundleApply
 
 # -----------------------------------------------------------------
 # Types
@@ -273,36 +275,6 @@ func addOnClickActionOverride(
 # -----------------------------------------------------------------
 # Mount logic
 # -----------------------------------------------------------------
-
-# Returns true for the components that the *mount entity* keeps when
-# the scene is mounted (geometry/placement live on the parent of the
-# scene; the scene contributes its inner layout, padding, visuals, and
-# behaviour). RUICS § 6.4.
-func isPlacementComponent(name: view String) ret Bool {
-  if name is "Rect" {
-    ret true
-  }
-  if name is "Size" {
-    ret true
-  }
-  if name is "Align" {
-    ret true
-  }
-  if name is "Offset" {
-    ret true
-  }
-  if name is "Constraints" {
-    ret true
-  }
-  if name is "OverflowPolicy" {
-    ret true
-  }
-  if name is "TransformFx" {
-    ret true
-  }
-  ret false
-}
-
 func appendEntityListSI(lst: mod List(EntityId), value: view EntityId) {
   unsafe {
     lst.add(value: value)
@@ -400,6 +372,9 @@ func mountSceneInstanceImpl(
       ret noEntity()
     }
     let nodeCount: Int = scene.nodes.length
+    # The scene's own `bundles` block (the imports' set is world.bundles).
+    var ownBundles: BundleSet = createBundleSet()
+    parseBundlesInto(out: ownBundles, scene: scene)
     let rootIdx: Int = sceneNodeIndex(this: scene, nodeId: scene.rootNodeId)
     if rootIdx < 0 {
       ret noEntity()
@@ -445,6 +420,21 @@ func mountSceneInstanceImpl(
       let bag: JsonValue = Json.jsonValueAt(doc: docView, idx: node.componentsValueIdx)
       let keyCount: Int = Json.objectLen(this: bag)
       var k: Int = 0
+      # A node listing `bundles` mounts its EXPANSION (ui/SceneBundles) instead
+      # of its bare bag; the root's placement is skipped the same way.
+      if Json.field(doc: docView, this: bag, key: bundlesKey) >= 0 {
+        applyExpandedBag(
+          world: world
+          entity: entity
+          local: ownBundles
+          doc: docView
+          bag: bag
+          sceneId: scene.sceneId
+          nodeId: node.nodeId
+          skipPlacement: isRoot and keepRootPlacement is false
+        )
+        k = keyCount
+      }
       loop k < keyCount {
         let key: String = Json.objectKeyAt(doc: docView, this: bag, idx: k)
         let childrenKey: String = "Children"

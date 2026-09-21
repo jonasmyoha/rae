@@ -21,6 +21,7 @@ open ui/SceneLoader
 open ui/inputSystem/InputSystem
 open ui/BindingComponents
 open ui/ScenePolicy
+open ui/SceneBundles
 open app3d/UiShell
 open ecs/Entity
 open ecs/ComponentTable
@@ -304,6 +305,28 @@ func appComponentsLine(world: view UiWorld, entity: view EntityId) ret String {
   ret "not a lib component: {names}"
 }
 
+# The node's bundle provenance (ui/SceneBundles BundleRefs): which bundles it
+# was expanded from, which components it inherited whole (shown dimmed, in
+# brackets) and which it authored a field over — "" for a node without
+# bundles. The per-field diff waits for the save path.
+func bundleProvenanceLine(world: view UiWorld, entity: view EntityId) ret String {
+  if componentHas(this: world.bundleRefs, entity: entity) is false {
+    ret ""
+  }
+  let refs: view BundleRefs => componentView(this: world.bundleRefs, entity: entity)
+  if refs.names.length is 0 {
+    ret ""
+  }
+  var line: String = "  bundles: {refs.names.join(sep: ", ")}"
+  if refs.inherited.length > 0 {
+    line = "{line}  [inherited: {refs.inherited.join(sep: ", ")}]"
+  }
+  if refs.overridden.length > 0 {
+    line = "{line}  overrides: {refs.overridden.join(sep: ", ")}"
+  }
+  ret line
+}
+
 func syncInspectorPanel(
   world: view UiWorld
   chromeSystem: mod ChromeSystem
@@ -340,7 +363,10 @@ func syncInspectorPanel(
   }
   chromeSystem.inspectorType = typeLine
   let componentNames: String = componentNamesFor(world: world, entity: selected)
-  chromeSystem.inspectorComponents = String.replace(this: componentNames, old: ",", new: ", ")
+  chromeSystem.inspectorComponents = "{String.replace(this: componentNames, old: ",", new: ", ")}{bundleProvenanceLine(
+    world: world
+    entity: selected
+  )}"
   chromeSystem.inspectorAppComponents = appComponentsLine(world: world, entity: selected)
   var rectLine: String = "no computed rect"
   if componentHas(this: world.computedRects, entity: selected) and componentHas(

@@ -167,3 +167,73 @@ the input side), a map, a photo view. The camera owns the root's scale and pivot
 root's own alpha / visible / rotation are kept. Compare-before-write: a still camera
 bumps neither table, so an idle frame stays idle. `Coverage.raescene` authors one.
 
+
+## 9. `bundles`: named component sets, applied by name
+
+A **bundle** is a named set of components with values, declared once and
+applied to any node — the `.raescene` answer to "these seven pills repeat the
+same seven components". (The word is Bevy's; not *archetype*, which is a
+storage term Rae's sparse tables would falsely promise.)
+
+```jsonc
+"bundles": {
+  "pill": {
+    "Rect":    {"x": 0, "y": 0, "w": 100, "h": 44},
+    "Size":    {"w": {"mode": "Hug"}, "h": {"mode": "Fixed"}},
+    "Layout":  {"type": "Horizontal", "gap": 0, "alignMain": "Center", "alignCross": "Center"},
+    "Padding": {"l": 12, "t": 0, "r": 12, "b": 0},
+    "HitArea": {"kind": "Rect"},
+    "Shape":   {"kind": "RoundedRect", "fill": "editorButtonSecondary", "radius": 22},
+    "Shadow":  {"blur": 12, "opacity": 0.5, "color": "editorButtonGlow", "hoverOnly": true}
+  },
+  "panelToggle": { "bundles": ["pill"], "PanelToggle": {} }   // a bundle may include bundles
+}
+...
+"OpenPill": {
+  "bundles": ["pill"],
+  "Shape":   {"fill": "editorButtonPrimary"},                 // field-wise over the bundle's Shape
+  "Shadow":  {"opacity": 0.22, "hoverOnly": false},
+  "OnClick": {"actionId": "file.open"},
+  "Children": ["OpenLabel"]
+}
+```
+
+- **Where they come from.** The scene's own top-level `bundles` block, then
+  the bundles of every scene in its `import` list — resolution order,
+  first declaration wins, exactly like the theme tokens. A `Bundles.raescene`
+  next to `Theme.raescene` is the shared form (`"import": ["Theme",
+  "Bundles"]`). Hosts seed `world.bundles` with `sceneImportedBundles` before
+  mounting, the way they seed the theme; 106 parses its `Bundles.raescene`
+  once at boot and clones it onto every world.
+- **Expansion at load, field-wise.** For a node listing `bundles`, each
+  bundle in order — its own includes first, then its components, so a bundle
+  overrides what it includes — then the node's own object for each component
+  over it, top-level field by field. Later wins; the node wins over every
+  bundle; a field the node does not mention keeps the bundle's value. The
+  merge is done on the JSON before decoding, so one path serves lib
+  components and an app's own alike: a component the lib does not know
+  (`PanelToggle`) reaches the pending outbox with the merge applied.
+- **Systems never see bundles.** After expansion the world holds ordinary
+  components. The only trace is `BundleRefs { names, inherited, overridden }`
+  (`ui/SceneBundles`), written by the loader for the round-trip: the bundles
+  applied, the components the node inherited whole, the ones it authored a
+  field over. Authoring `BundleRefs` by hand is rejected like any runtime
+  table. The editor's inspector shows the line (`bundles: pill [inherited:
+  Rect, Size …] overrides: Shape`); the per-field diff on save waits for the
+  editor's save path.
+- **Code-side.** `applyBundle(world, entity, name)` runs the same expansion
+  on a live entity (a debug menu can use the authored bundles instead of
+  listing components), appending to its `BundleRefs`.
+- **Diagnostics, never a hang.** An unknown name is `unknownBundle` (ignored);
+  an include cycle or a chain deeper than 8 is `bundleCycle` (the cycle is
+  skipped, the rest still applies).
+- `ContainerStyle` (§ theme, a Shape + Padding bundle keyed by theme tokens)
+  stays as it is; it becomes an entry of the theme's `bundles` in a later
+  cleanup.
+
+Fixture: `compiler/tests/cases/883_scene_bundles`. Proof in the tree: the
+editor chrome's three pills are one `pill` bundle
+(`examples/121_ui_editor/assets/scenes/Editor.raescene`), 106's Now Playing
+transport buttons are `transportButton` / `transportButtonSmall`
+(`examples/106_mobile_ui/assets/scenes/Bundles.raescene`) — both pixel-identical
+to the hand-written nodes they replaced.

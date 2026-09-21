@@ -35,6 +35,14 @@ the observers add their own table's generation (`ownTableGeneration`). Decided
 while doing it: `PlayHistory` / `HistoryArtLoader` stay on `AppState` (app data,
 not the binding's); the app's systems are ONE `MusicSystems` struct so the
 observation boundary takes one parameter, not seven.
+**Step 5 (bundles, §5) is implemented** (2026-09-22; `docs/ui-scene-format.md`
+§9): `lib/ui/SceneBundles.rae` (BundleSet, BundleRefs, the JSON-level
+field-wise expansion, `sceneImportedBundles`) + `lib/ui/BundleApply.rae`
+(`applyExpandedBag`, `applyBundle`), both loaders expand a node that lists
+`bundles`, `world.bundles` is seeded by the hosts like the theme; the editor's
+inspector shows the provenance line. NOT yet: the save-side per-field diff —
+the editor has no save path (queued as its own task; `BundleRefs` carries what
+it needs). `ContainerStyle` is untouched.
 
 Prompted by the UI editor having to
 call a music-player system to draw a scene the way the music player does.
