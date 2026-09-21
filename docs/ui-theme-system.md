@@ -568,3 +568,29 @@ example 98 rather than to maintain it.
    baking last.
 
 End of design.
+
+### Outlined controls and coloured halos
+
+Application-defined palette names can be used by authored shapes, sprites, text,
+container styles and widget-state colours, alongside the standard palette slots.
+Keep shared role colours in the theme (for example `buttonPrimary`,
+`buttonSecondary`, `buttonEdge`, `buttonGlow`). Put geometry and effects on the
+button entity: a `Shape` defines its fill, stroke and radius; equal width/height
+with radius half the height makes a circular icon control. Its label/icon remains
+an ordinary centred child or text component.
+
+For a hover halo, author the existing shadow component with colour enabled:
+
+```json
+"Shadow": {
+  "blur": 12, "layers": 12, "opacity": 0.5,
+  "hasColor": true, "color": "buttonGlow",
+  "centered": true, "hoverOnly": true
+}
+```
+
+`hoverOnly` reads the entity's `Interaction.hovered` component maintained by the
+input system; the entity must be a hit target. Without these optional fields,
+shadows retain their black, downward-offset appearance. Coloured halos use the
+same bounded layered approximation as ordinary shadows (1–16 draws), not a blur
+texture or a C-side effect. Use them sparingly on interaction, not on every panel.

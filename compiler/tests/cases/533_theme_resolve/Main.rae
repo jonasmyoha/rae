@@ -4,6 +4,8 @@
 open ui/ThemeResolved
 open ui/ThemeParse
 open ui/Scene
+open ui/Theme
+open ui/Components
 
 func main() {
   let src: String = r#"{ "type": "Scene", "palette": { "accent": {"r":72,"g":180,"b":152,"a":255} }, "space": { "spaceM": 12.0 }, "radius": { "radiusCard": 36.0 }, "shadow": { "soft": {"color":{"r":0,"g":0,"b":0,"a":115},"offsetX":3.0,"offsetY":3.0,"softness":8.0}, "softer": {"extends":"soft","color":{"r":0,"g":0,"b":0,"a":100}} }, "text": { "body": {"font":"body","size":43.0,"color":"textPrimary"}, "miniTitle": {"extends":"body","size":39.0,"color":"accentText","shadow":"soft","align":"center"}, "miniMuted": {"extends":"miniTitle","size":30.0,"color":"accentTextMuted"}, "cycleA": {"extends":"cycleB","size":11.0}, "cycleB": {"extends":"cycleA","size":22.0}, "orphan": {"extends":"ghost","size":9.0} } }"#
@@ -70,5 +72,20 @@ func main() {
   let pageTitleColor: String = merged.textColorSlots.copyAtDefault(index: pageTitleIndex)
   log(
     "cross-file font={pageTitleFont} size={pageTitleSize} weight={pageTitleWeight} color={pageTitleColor}"
+  )
+
+  # Custom application roles must resolve beyond the standard palette slots.
+  let roleScene: Scene = parseScene(
+    source: r#"{ "type":"Scene", "palette": { "buttonEdge": {"r":120,"g":230,"b":220,"a":148} } }"#
+  )
+  var uiTheme: UiTheme = createUiTheme()
+  let roles: ResolvedTheme = parseTheme(scene: roleScene)
+  applyResolvedTokens(dst: uiTheme.resolved, src: roles)
+  let edge: RgbaColor = uiThemeColor(theme: uiTheme, name: "buttonEdge")
+  let missing: RgbaColor = uiThemeColor(theme: uiTheme, name: "notDefined")
+  let shadow: Shadow = { blur: 12.0 }
+  log("custom edge={edge.r},{edge.g},{edge.b},{edge.a} missing={missing.r},{missing.g},{missing.b}")
+  log(
+    "shadow defaults colored={shadow.hasColor} centered={shadow.centered} hover={shadow.hoverOnly}"
   )
 }

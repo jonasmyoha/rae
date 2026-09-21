@@ -210,3 +210,24 @@ func colorByNameOpt(theme: view Theme, name: view String) ret opt RgbaColor {
   }
   ret none
 }
+
+# Resolve application-defined palette slots as well as the standard live palette.
+func uiThemeColor(theme: view UiTheme, name: view String) ret RgbaColor {
+  ret paletteColor(active: theme.active, tokens: theme.resolved, name: name)
+}
+
+func paletteColor(active: view Theme, tokens: view ResolvedTheme, name: view String) ret RgbaColor {
+  if let color: RgbaColor = colorByNameOpt(theme: active, name: name) {
+    ret color
+  }
+  let index: Int = themePaletteIndex(theme: tokens, slot: name)
+  if index >= 0 {
+    ret RgbaColor {
+      r: tokens.palR.copyAtFallback(index: index, fallback: 0)
+      g: tokens.palG.copyAtFallback(index: index, fallback: 0)
+      b: tokens.palB.copyAtFallback(index: index, fallback: 0)
+      a: tokens.palA.copyAtFallback(index: index, fallback: 255)
+    }
+  }
+  ret RgbaColor { r: 255, g: 0, b: 255, a: 255 }
+}

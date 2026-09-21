@@ -17,7 +17,7 @@
         "w": {"mode": "Fill"},
         "h": {"mode": "Fixed"}
       },
-      "Shape": {"kind": "Rect", "fill": "#062B29", "stroke": "#00000000", "strokeWidth": 0},
+      "Shape": {"kind": "Rect", "fill": "editorBar", "stroke": "#00000000", "strokeWidth": 0},
       "Layout": {"type": "Horizontal", "gap": 8, "alignCross": "Center"},
       "Padding": {"l": 17, "r": 17, "t": 12, "b": 12},
       "Children": [
@@ -29,8 +29,7 @@
         "NodeCount",
         "DiagnosticsPill",
         "RightToggle"
-      ],
-      "GradientFill": {"from": "#0A3832", "to": "#041A18", "angle": 90}
+      ]
     },
     "LeftToggle": {
       "Rect": {"x": 0, "y": 0, "w": 100, "h": 44},
@@ -38,13 +37,28 @@
         "w": {"mode": "Hug"},
         "h": {"mode": "Fixed"}
       },
-      "Shape": {"kind": "RoundedRect", "fill": "#062B29", "stroke": "#78E6DC18", "strokeWidth": 1, "radius": 22},
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "editorButtonSecondary",
+        "stroke": "editorButtonQuietEdge",
+        "strokeWidth": 1.2,
+        "radius": 22
+      },
       "Layout": {"type": "Horizontal", "gap": 0, "alignMain": "Center", "alignCross": "Center"},
       "Padding": {"l": 12, "t": 0, "r": 12, "b": 0},
       "HitArea": {"kind": "Rect"},
       "OnClick": {"actionId": "panel.left"},
       "Children": ["LeftToggleLabel"],
-      "PanelToggle": {"panel": "left"}
+      "PanelToggle": {"panel": "left"},
+      "Shadow": {
+        "blur": 12,
+        "layers": 12,
+        "opacity": 0.5,
+        "color": "editorButtonGlow",
+        "hasColor": true,
+        "centered": true,
+        "hoverOnly": true
+      }
     },
     "LeftToggleLabel": {
       "Rect": {"x": 0, "y": 0, "w": 62, "h": 32},
@@ -55,7 +69,7 @@
       "Text": {
         "text": "Panels",
         "styleId": "muted",
-        "styleOverride": {"size": 19, "color": "#9FC1BD"}
+        "styleOverride": {"size": 19, "color": "editorButtonText"}
       },
       "OpticalAlign": {
         "enabled": true,
@@ -96,25 +110,40 @@
         "w": {"mode": "Hug"},
         "h": {"mode": "Fixed"}
       },
-      "Shape": {"kind": "RoundedRect", "fill": "#062B29", "stroke": "#78E6DC18", "strokeWidth": 1, "radius": 22},
-      "Layout": {"type": "Horizontal", "gap": 0, "alignCross": "Center"},
+      "Layout": {"type": "Horizontal", "gap": 4, "alignCross": "Center"},
       "Padding": {"l": 5, "t": 0, "r": 5, "b": 0},
       "Children": ["ZoomOut", "ZoomLabel", "ZoomIn"]
     },
     "ZoomOut": {
-      "Rect": {"x": 0, "y": 0, "w": 32, "h": 32},
+      "Rect": {"x": 0, "y": 0, "w": 44, "h": 44},
       "HitArea": {"kind": "Rect"},
       "OnClick": {"actionId": "zoom.out"},
       "Text": {
         "text": "-",
         "styleId": "muted",
-        "styleOverride": {"size": 22, "color": "#9FC1BD"}
+        "styleOverride": {"size": 22, "color": "editorButtonText"}
       },
       "OpticalAlign": {
         "enabled": true,
         "centerX": true,
         "centerY": true,
         "bias": {"x": 0, "y": 0}
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "editorIconFill",
+        "stroke": "editorIconEdge",
+        "strokeWidth": 1.2,
+        "radius": 22
+      },
+      "Shadow": {
+        "blur": 12,
+        "layers": 12,
+        "opacity": 0.5,
+        "color": "editorButtonGlow",
+        "hasColor": true,
+        "centered": true,
+        "hoverOnly": true
       }
     },
     "ZoomLabel": {
@@ -135,19 +164,35 @@
       "TextBinding": {"key": "editor.zoomLabel", "format": "Plain", "prefix": "", "suffix": ""}
     },
     "ZoomIn": {
-      "Rect": {"x": 0, "y": 0, "w": 32, "h": 32},
+      "Rect": {"x": 0, "y": 0, "w": 44, "h": 44},
       "HitArea": {"kind": "Rect"},
       "OnClick": {"actionId": "zoom.in"},
       "Text": {
         "text": "+",
         "styleId": "muted",
-        "styleOverride": {"size": 22, "color": "#9FC1BD"}
+        "styleOverride": {"size": 22, "color": "editorButtonText"}
       },
       "OpticalAlign": {
         "enabled": true,
         "centerX": true,
         "centerY": true,
         "bias": {"x": 0, "y": 0}
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "editorIconFill",
+        "stroke": "editorIconEdge",
+        "strokeWidth": 1.2,
+        "radius": 22
+      },
+      "Shadow": {
+        "blur": 12,
+        "layers": 12,
+        "opacity": 0.5,
+        "color": "editorButtonGlow",
+        "hasColor": true,
+        "centered": true,
+        "hoverOnly": true
       }
     },
     "OpenPill": {
@@ -156,14 +201,27 @@
         "w": {"mode": "Hug"},
         "h": {"mode": "Fixed"}
       },
-      "Shape": {"kind": "RoundedRect", "fill": "#043E44", "stroke": "#78E6DC18", "strokeWidth": 1, "radius": 22},
-      "GradientFill": {"from": "#086469", "to": "#043E44", "angle": 145},
-      "CornerRadius": {"radius": 22},
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "editorButtonPrimary",
+        "stroke": "editorButtonEdge",
+        "strokeWidth": 1.2,
+        "radius": 22
+      },
       "Layout": {"type": "Horizontal", "gap": 0, "alignMain": "Center", "alignCross": "Center"},
       "Padding": {"l": 12, "t": 0, "r": 12, "b": 0},
       "HitArea": {"kind": "Rect"},
       "OnClick": {"actionId": "file.open"},
-      "Children": ["OpenLabel"]
+      "Children": ["OpenLabel"],
+      "Shadow": {
+        "blur": 12,
+        "layers": 12,
+        "opacity": 0.22,
+        "color": "editorButtonGlow",
+        "hasColor": true,
+        "centered": true,
+        "hoverOnly": false
+      }
     },
     "OpenLabel": {
       "Rect": {"x": 0, "y": 0, "w": 70, "h": 32},
@@ -174,7 +232,7 @@
       "Text": {
         "text": "Open (O)",
         "styleId": "muted",
-        "styleOverride": {"size": 19, "color": "#B8F5EE"}
+        "styleOverride": {"size": 19, "color": "editorButtonText"}
       },
       "OpticalAlign": {
         "enabled": true,
@@ -239,13 +297,28 @@
         "w": {"mode": "Hug"},
         "h": {"mode": "Fixed"}
       },
-      "Shape": {"kind": "RoundedRect", "fill": "#062B29", "stroke": "#78E6DC18", "strokeWidth": 1, "radius": 22},
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "editorButtonSecondary",
+        "stroke": "editorButtonQuietEdge",
+        "strokeWidth": 1.2,
+        "radius": 22
+      },
       "Layout": {"type": "Horizontal", "gap": 0, "alignMain": "Center", "alignCross": "Center"},
       "Padding": {"l": 12, "t": 0, "r": 12, "b": 0},
       "HitArea": {"kind": "Rect"},
       "OnClick": {"actionId": "panel.right"},
       "Children": ["RightToggleLabel"],
-      "PanelToggle": {"panel": "right"}
+      "PanelToggle": {"panel": "right"},
+      "Shadow": {
+        "blur": 12,
+        "layers": 12,
+        "opacity": 0.5,
+        "color": "editorButtonGlow",
+        "hasColor": true,
+        "centered": true,
+        "hoverOnly": true
+      }
     },
     "RightToggleLabel": {
       "Rect": {"x": 0, "y": 0, "w": 75, "h": 32},
@@ -256,7 +329,7 @@
       "Text": {
         "text": "Inspector",
         "styleId": "muted",
-        "styleOverride": {"size": 19, "color": "#9FC1BD"}
+        "styleOverride": {"size": 19, "color": "editorButtonText"}
       },
       "OpticalAlign": {
         "enabled": true,

@@ -234,8 +234,8 @@ from application code and no C renderer code was added.
   `#69C7AC` to the base teal. Colour is a hierarchy cue, not a border on every box.
 - **Chrome palette:** deep green background `#021210`, sidebar `#041A18`,
   raised inspector `#0A3838`, primary text `#E6FAFA`, secondary `#9FC1BD`,
-  mint `#78E6DC` and amber selected outline `#FFA84C`. The open action uses a
-  `#086469` to `#043E44` gradient; thin mint edges separate controls.
+  mint `#78E6DC` and amber selected outline `#FFA84C`. The top bar is flat. The open action uses a dark teal fill and a stronger
+  mint edge; secondary pills have a near-black teal fill and a quieter edge.
   Amber means selection: the selected document bounds use solid amber, hierarchy
   and project selection markers use soft amber `#FFD69E`, and optional clickable
   bounds use translucent amber. Hover and passive guides remain mint, so hovering
@@ -273,6 +273,38 @@ The watch-reload twin is regenerated from MainMenu with only the title changed
 and one intentionally unknown `Telemetry` component. All chrome ids, bindings,
 actions and the sample `PlayButton` remain stable. The split/import and inline
 asset examples retain their distinct packaging models.
+
+### Button roles and theme ownership
+
+`assets/scenes/Theme.raescene` owns editor-prefixed colour roles, appended to
+its owned theme on startup and every document load. The prefix keeps these roles
+separate from a document's ordinary `accent`/`surface` palette. Custom palette
+names now resolve through the generic component decoder and shape/sprite painter,
+not only the ten standard palette names.
+
+- **Primary:** Open has `Shape` with `editorButtonPrimary` fill, the stronger
+  `editorButtonEdge` stroke and a restrained coloured halo. No bar-wide gradient.
+- **Secondary:** Panels and Inspector use `editorButtonSecondary` and
+  `editorButtonQuietEdge`. Their halo appears only while hovered.
+- **Circular control:** Zoom minus/plus have equal 44pt dimensions, a 22pt
+  rounded-box radius, no padding and centred glyphs. They use the same outline
+  vocabulary and hover halo. Geometry belongs to these entities, not the palette.
+- **Selection:** amber remains distinct from mint hover and primary actions.
+
+`Shadow` now accepts `color` with `hasColor: true`, `centered` and `hoverOnly`. A centred coloured
+shadow is a glow; `hoverOnly` reads the existing ECS `Interaction.hovered` state.
+The existing defaults remain black, downward-offset and always visible. This is
+bounded translucent geometry in Rae, not a Gaussian CSS blur: at most 16 layers,
+with the editor using 12 only on its few controls. Coverage authors both an
+always-visible colour glow and a hover-only one. It does not add C rendering or
+per-button drawing code. The theme supplies shared colours; authored components
+supply the role, border width, radius, glow amount and interaction condition.
+
+CSS inset-shadow and animated filter/scale transitions are not emulated here.
+The stronger single outline supplies a clean edge without stacked inset rings.
+A future toggle may use existing `WidgetState`/`StateStyle` for its state; these
+editor controls retain their existing actions and do not introduce a pretend
+speaker setting.
 
 ## 4. Loader policy (the library change that makes a viewer possible)
 
@@ -322,7 +354,7 @@ it (`Coverage` unless a nicer example exists).
 | Text | text, styleId, wrapWidthMode None / NodeWidth, styleOverride | yes | yes | Coverage `WrappedText` |
 | TextShadow | color, offset, softness | yes | yes | Coverage `Heading` |
 | Shape | kind Rect / RoundedRect / Circle, fill, stroke (token, `{r,g,b,a}` or `#hex`), strokeWidth, radius | yes | yes | all |
-| Shadow | blur, layers, opacity | yes | yes — bounded translucent layers; defaults preserve the original three-layer shadow | Coverage `ShadowBox` |
+| Shadow | blur, layers, opacity, color, hasColor, centered, hoverOnly | yes | yes — bounded translucent layers; defaults preserve the original three-layer shadow | Coverage `ShadowBox` |
 | Opacity | value | yes | yes, inherited down the tree | Coverage `FadedBox` |
 | GradientFill | from, to, angle | yes | yes | Coverage `GradientBox` |
 | CornerRadius | radius | yes | yes | Coverage |

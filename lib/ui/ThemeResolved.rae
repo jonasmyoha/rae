@@ -381,12 +381,12 @@ func themePaddingInsets(theme: view ResolvedTheme, name: view String) pub ret Th
 }
 
 # #764: element-wise copy the SCENE-DESERIALISER token subsets (space / radius /
-# padding / container) from a source ResolvedTheme into `dst`. Used by
+# padding / container / palette) from a source ResolvedTheme into `dst`. Used by
 # seedWorldTheme to populate a fresh UiWorld's `theme.resolved` from the app's
 # owned ResolvedTheme — a deep copy (fresh list elements), never a shallow
-# heap-pointer aliasing. Only these four subsets are copied because they are the
-# only parts the deserialiser reads off the world; palette colours resolve against
-# `theme.active` and text styles against the Gpu2dUi's own ResolvedTheme. Mirrors
+# heap-pointer aliasing. Custom palette roles also reach the scene decoder and
+# painter; standard slots still use `theme.active`. Text styles use the app's
+# own ResolvedTheme. Mirrors
 # the old setActiveThemeTokens, retargeted from module globals to `dst`. Idempotent
 # via `dst.ok`: a world seeded once is not re-copied.
 func applyResolvedTokens(dst: mod ResolvedTheme, src: view ResolvedTheme) pub {
@@ -401,6 +401,17 @@ func applyResolvedTokens(dst: mod ResolvedTheme, src: view ResolvedTheme) pub {
   # optional deep-copies the String payload, so `dst` owns independent
   # storage.
   var i: Int = 0
+  loop i < src.palNames.length {
+    if let name: String = src.palNames.copyAt(index: i) {
+      dst.palNames.add(value: name)
+      dst.palR.add(value: src.palR.copyAtFallback(index: i, fallback: 0))
+      dst.palG.add(value: src.palG.copyAtFallback(index: i, fallback: 0))
+      dst.palB.add(value: src.palB.copyAtFallback(index: i, fallback: 0))
+      dst.palA.add(value: src.palA.copyAtFallback(index: i, fallback: 255))
+    }
+    i = i + 1
+  }
+  i = 0
   loop i < src.spaceNames.length {
     if let n: String = src.spaceNames.copyAt(index: i) {
       if let value: Float = src.spaceVals.copyAt(index: i) {
