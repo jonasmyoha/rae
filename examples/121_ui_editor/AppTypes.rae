@@ -5,6 +5,7 @@ open ui/Ecs
 open ecs/Schedule
 open ui/renderSystem/RenderSystem
 open Gpu2dCanvas
+open ui/DebugOverlay
 
 # Which font files are loaded into gpuUi right now ("" = the fallback atlas),
 # so a reload only spends an atlas slot when the document's fonts change.
@@ -31,6 +32,11 @@ type App {
   camera: EditorCamera
   # What the chrome's bound labels show (chromeSystem).
   status: EditorStatus
+  # The shared amber fps / memory / heartbeat widget every app carries
+  # (lib/ui/DebugOverlay) — immediate-mode, drawn last so it sits on top of
+  # the chrome. Created with everything off in headless runs so the gate's
+  # screenshots stay deterministic.
+  debugOverlay: DebugOverlay
   testSelectNodeId: String
   builtinScenePaths: List(String)
   builtinSceneIds: List(String)
