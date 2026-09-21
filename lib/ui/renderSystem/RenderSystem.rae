@@ -96,7 +96,7 @@ func paintShapeG(
   # keeps the literal fill.
   var fillBase: RgbaColor = sh.fill
   if sh.fillSlot.length() > 0 {
-    fillBase = colorByName(theme: world.theme.active, name: sh.fillSlot)
+    fillBase = uiThemeColor(theme: world.theme, name: sh.fillSlot)
   }
   let fill: RgbaColor = g2dChain(color: fillBase, chain255: chain255)
   let box: PaintBox = g2dPaintBox(
@@ -165,7 +165,7 @@ func paintShapeG(
   if sh.strokeWidth > 0.0 {
     var strokeBase: RgbaColor = sh.stroke
     if sh.strokeSlot.length() > 0 {
-      strokeBase = colorByName(theme: world.theme.active, name: sh.strokeSlot)
+      strokeBase = uiThemeColor(theme: world.theme, name: sh.strokeSlot)
     }
     let stroke: RgbaColor = g2dChain(color: strokeBase, chain255: chain255)
     if sh.strokeDash > 0.0 {
@@ -373,7 +373,7 @@ func paintSpriteG(
   let sp: view Sprite => componentView(this: world.sprites, entity: entity)
   var tintBase: RgbaColor = sp.tint
   if sp.tintSlot.length() > 0 {
-    tintBase = colorByName(theme: world.theme.active, name: sp.tintSlot)
+    tintBase = uiThemeColor(theme: world.theme, name: sp.tintSlot)
   }
   let tint: RgbaColor = g2dChain(color: tintBase, chain255: chain255)
   let box: PaintBox = g2dPaintBox(
@@ -507,7 +507,7 @@ func paintSpriteG(
     ret
   }
   let fallback: RgbaColor = g2dChain(
-    color: colorByName(theme: world.theme.active, name: "textMuted")
+    color: uiThemeColor(theme: world.theme, name: "textMuted")
     chain255: chain255
   )
   let fallbackRadius: Float = g2dRadius(world: world, entity: entity, fallback: 8.0)
@@ -548,7 +548,11 @@ func paintTextG(
   if componentHas(this: world.styleOverrides, entity: entity) {
     let so: view StyleOverride => componentView(this: world.styleOverrides, entity: entity)
     size = styleOverrideSize(base: size, so: so)
-    baseCol = styleOverrideColor(base: baseCol, so: so, active: world.theme.active)
+    if so.hasColor and so.colorSlot.length() > 0 {
+      baseCol = uiThemeColor(theme: world.theme, name: so.colorSlot)
+    } else {
+      baseCol = styleOverrideColor(base: baseCol, so: so, active: world.theme.active)
+    }
   }
   # An inherited scale (editor camera, scaled parent) scales glyphs + box.
   size = size * wt.scale.x
