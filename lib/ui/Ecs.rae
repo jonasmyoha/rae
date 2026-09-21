@@ -2,6 +2,7 @@
 # #764: the UiWorld carries a `theme: UiTheme` resource (createUiTheme in
 # createUiWorld), so every module that imports ui/ecs must also emit ui/theme.
 open ui/ScenePolicy
+open ui/SceneBundles
 import ui/Theme
 open ecs/Entity
 open ecs/ComponentTable
@@ -78,6 +79,7 @@ type UiWorld {
   editorLockeds: ComponentTable(EditorLocked)
   heroWidgets: ComponentTable(HeroWidget)
   cornerRadiuses: ComponentTable(CornerRadius)
+  bundleRefs: ComponentTable(BundleRefs)
   hoverScales: ComponentTable(HoverScale)
   gradientFills: ComponentTable(GradientFill)
   backdropImages: ComponentTable(BackdropImage)
@@ -223,6 +225,10 @@ type UiWorld {
   # until the app has cleared its own tables and called releaseDeadEntities.
   pendingComponents: List(PendingComponent)
   deadEntities: List(EntityId)
+  # The bundles the mounted pages' imports declare (ui/SceneBundles), seeded
+  # by the host before a mount the way the theme is; a scene's own block is
+  # read by the loader itself.
+  bundles: BundleSet
 }
 
 func createUiWorld() ret UiWorld {
@@ -258,6 +264,7 @@ func createUiWorld() ret UiWorld {
     editorLockeds: ComponentTable.create(EditorLocked)
     heroWidgets: ComponentTable.create(HeroWidget)
     cornerRadiuses: ComponentTable.create(CornerRadius)
+    bundleRefs: ComponentTable.create(BundleRefs)
     hoverScales: ComponentTable.create(HoverScale)
     gradientFills: ComponentTable.create(GradientFill)
     backdropImages: ComponentTable.create(BackdropImage)
@@ -330,6 +337,7 @@ func createUiWorld() ret UiWorld {
     scenePolicy: createScenePolicy()
     sceneDiagnostics: createSceneDiagnostics()
     pendingComponents: createPendingComponents()
+    bundles: createBundleSet()
     deadEntities: List.create(EntityId, cap: 32)
   }
 }

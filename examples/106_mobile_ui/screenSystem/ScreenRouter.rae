@@ -1,4 +1,5 @@
 open ui/Ecs
+open ui/SceneBundles
 # The screens the app can show (the `Screen` enum and the `ScreenPage` table)
 # and the world builders. The app state is screenSystem/AppState.rae; what a
 # tap DOES is the action table + command systems in actionSystem/.
@@ -227,6 +228,7 @@ func buildAppWorldFor(
 ) ret UiWorld {
   let world: UiWorld = create()
   seedWorldThemeFrom(world: world, src: state.theme)  # #764: theme from AppState
+  world.bundles = cloneBundleSet(set: state.bundles)  # the shared Bundles.raescene
   # Publish the active Viewport extent before mounting anything. Builders
   # that need edge-to-edge geometry read `world.layoutW/H`; fixed phone
   # content still uses the `phoneFrameW/phoneFrameH` design constants and is centered

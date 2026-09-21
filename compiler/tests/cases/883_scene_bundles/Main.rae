@@ -1,0 +1,153 @@
+import Json
+import String
+import ui/Components
+open ui/Ecs
+open ui/Registry
+open ui/Scene
+open ui/SceneLoader
+open ui/SceneBundles
+open ui/BundleApply
+open ui/SceneImports
+open ui/SceneInstance
+open ui/ScenePolicy
+open ecs/Entity
+open ecs/ComponentTable
+
+# Bundles (docs/ui-scene-format.md §9): named component sets expanded at
+# load, field-wise. Covers: expansion order (later bundles win over earlier,
+# the node over every bundle), field-wise override (an untouched field keeps
+# the bundle's value), nested bundles (an include's components under the
+# including bundle's), an imported bundle set (first declaration wins), an
+# app component through a bundle (the pending outbox gets the merge), the
+# cycle diagnostic, the unknown-bundle diagnostic, BundleRefs provenance,
+# authoring BundleRefs rejected, and applyBundle on a live entity.
+func sharedBundles() ret String {
+  var s: String = ""
+  s = s.concat(other: "\{")
+  s = s.concat(other: "\"type\":\"Scene\",\"version\":2,")
+  s = s.concat(other: "\"bundles\":\{")
+  s = s.concat(
+    other: "\"pill\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":100,\"h\":40\},\"Opacity\":\{\"value\":0.5\}\},"
+  )
+  s = s.concat(other: "\"shadowed\":\{\"Opacity\":\{\"value\":0.9\}\}")
+  s = s.concat(other: "\}\}")
+  ret s
+}
+
+func scene() ret String {
+  var s: String = ""
+  s = s.concat(other: "\{")
+  s = s.concat(other: "\"type\":\"Scene\",\"version\":2,\"root\":\"Root\",")
+  s = s.concat(other: "\"bundles\":\{")
+  # `pill` here shadows the imported one: the scene's own declaration wins.
+  s = s.concat(
+    other: "\"pill\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":120,\"h\":44\},\"Opacity\":\{\"value\":0.5\},\"HitArea\":\{\}\},"
+  )
+  s = s.concat(
+    other: "\"toggle\":\{\"bundles\":[\"pill\"],\"Opacity\":\{\"value\":0.7\},\"PanelToggle\":\{\"panel\":\"left\"\}\},"
+  )
+  s = s.concat(other: "\"loopA\":\{\"bundles\":[\"loopB\"],\"Active\":\{\"value\":false\}\},")
+  s = s.concat(other: "\"loopB\":\{\"bundles\":[\"loopA\"]\}")
+  s = s.concat(other: "\},")
+  s = s.concat(other: "\"nodes\":\{")
+  s = s.concat(
+    other: "\"Root\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":200\},\"Children\":[\"Plain\",\"Over\",\"Nested\",\"Shared\",\"Cyclic\",\"Missing\",\"Authored\"]\},"
+  )
+  # inherits everything
+  s = s.concat(other: "\"Plain\":\{\"bundles\":[\"pill\"]\},")
+  # overrides ONE field of Rect; Opacity untouched
+  s = s.concat(other: "\"Over\":\{\"bundles\":[\"pill\"],\"Rect\":\{\"w\":200\}\},")
+  # nested: toggle includes pill; toggle's Opacity wins; app component PanelToggle merged
+  s = s.concat(
+    other: "\"Nested\":\{\"bundles\":[\"toggle\"],\"PanelToggle\":\{\"panel\":\"right\"\}\},"
+  )
+  # two bundles: later (shadowed) wins for Opacity; `shadowed` is imported only
+  s = s.concat(other: "\"Shared\":\{\"bundles\":[\"pill\",\"shadowed\"]\},")
+  s = s.concat(other: "\"Cyclic\":\{\"bundles\":[\"loopA\"]\},")
+  s = s.concat(
+    other: "\"Missing\":\{\"bundles\":[\"nope\"],\"Rect\":\{\"x\":1,\"y\":2,\"w\":3,\"h\":4\}\},"
+  )
+  s = s.concat(other: "\"Authored\":\{\"BundleRefs\":\{\"names\":[]\}\}")
+  s = s.concat(other: "\}\}")
+  ret s
+}
+
+func rectOf(world: view UiWorld, entity: view EntityId) ret String {
+  if componentHas(this: world.rects, entity: entity) is false {
+    ret "no Rect"
+  }
+  let r: Rect = componentGet(this: world.rects, entity: entity)
+  ret "{r.position.x.toInt()},{r.position.y.toInt()} {r.size.x.toInt()}x{r.size.y.toInt()}"
+}
+
+func opacityOf(world: view UiWorld, entity: view EntityId) ret String {
+  if componentHas(this: world.opacities, entity: entity) is false {
+    ret "no Opacity"
+  }
+  ret "{componentGet(this: world.opacities, entity: entity).value}"
+}
+
+func refsOf(world: view UiWorld, entity: view EntityId) ret String {
+  if componentHas(this: world.bundleRefs, entity: entity) is false {
+    ret "no BundleRefs"
+  }
+  let refs: view BundleRefs => componentView(this: world.bundleRefs, entity: entity)
+  ret "names={refs.names.join(sep: ",")} inherited={refs.inherited.join(sep: ",")} overridden={refs.overridden.join(
+    sep: ","
+  )}"
+}
+
+func entityNamed(world: view UiWorld, scene: view Scene, nodeId: view String) ret EntityId {
+  if let index: Int = findNodeInPage(world: world, pageId: "", nodeId: nodeId) {
+    ret nodeEntity(world: world, index: index)
+  }
+  ret noEntity()
+}
+
+func main() {
+  var world: UiWorld = createUiWorld()
+  world.scenePolicy.unknownComponents = UnknownComponentPolicy.report
+  # The imported set: seeded the way a host seeds it from `import`.
+  let shared: Scene = parseScene(source: sharedBundles())
+  var registry: SceneRegistry = createSceneRegistry()
+  registerScene(reg: registry, key: "Bundles", scene: shared)
+  let entry: Scene = parseScene(source: scene())
+  var assets: SceneAssets = createSceneAssets()
+  assets.importedIds.add(value: "Bundles")
+  world.bundles = sceneImportedBundles(entry: entry, assets: assets, registry: registry)
+  log("imported bundles: {world.bundles.names.join(sep: ",")}")
+
+  let root: EntityId = loadScene(world: world, scene: entry)
+  log("mounted = {root.index >= 0}, alive = {aliveCount(world: world)}")
+  let nodeIds: List(String) = [
+    "Plain"
+    "Over"
+    "Nested"
+    "Shared"
+    "Cyclic"
+    "Missing"
+  ]
+  loop let nodeId: view String in nodeIds {
+    let e: EntityId = entityNamed(world: world, scene: entry, nodeId: nodeId)
+    log(
+      "{nodeId}: rect {rectOf(world: world, entity: e)} opacity {opacityOf(world: world, entity: e)} hitArea {componentHas(
+        this: world.hitAreas
+        entity: e
+      )}"
+    )
+    log("  {refsOf(world: world, entity: e)}")
+  }
+  log("pending (app components through bundles): {world.pendingComponents.length}")
+  loop let pending: view PendingComponent in world.pendingComponents {
+    log("  {pending.nodeId} {pending.name} {pending.json}")
+  }
+  log("diagnostics: {world.sceneDiagnostics.length}")
+  loop let d: view SceneDiagnostic in world.sceneDiagnostics {
+    log("  {d.nodeId}: {d.kind.toString()} {d.name}")
+  }
+
+  # applyBundle on a live entity: the same expansion, appended to BundleRefs.
+  let live: EntityId = createEntity(world: world)
+  applyBundle(world: world, entity: live, name: "pill")
+  log("live: rect {rectOf(world: world, entity: live)} {refsOf(world: world, entity: live)}")
+}

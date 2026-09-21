@@ -38,6 +38,7 @@ open ui/visualBoundsSystem/VisualBoundsSystem
 open ui/Scene
 open ui/SceneFile
 open ui/SceneImports
+open ui/SceneBundles
 open ui/SceneInstance
 open ui/SceneLoader
 open ui/ScenePolicy
@@ -312,8 +313,10 @@ func mountSceneWithImports(
   }
 
   # Token names are resolved while component bags are deserialised, so the
-  # world must see the imported theme before loadScene runs.
+  # world must see the imported theme before loadScene runs — and the
+  # imported bundles (ui/SceneBundles), expanded at the same moment.
   reseedWorldTheme(world: world, res: resources)
+  world.bundles = sceneImportedBundles(entry: scene, assets: assets, registry: registry)
   world.layoutW = windowExtentW()
   world.layoutH = windowExtentH()
   let mountedRoot: EntityId = loadScene(world: world, scene: scene)

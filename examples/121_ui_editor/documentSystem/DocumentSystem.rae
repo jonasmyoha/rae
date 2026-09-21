@@ -27,6 +27,7 @@ open ui/Scene
 open ui/SceneFile
 open ui/SceneInstance
 open ui/SceneImports
+open ui/SceneBundles
 open ui/SceneLoader
 open ui/ScenePolicy
 open ui/RegistryOpt
@@ -521,6 +522,13 @@ func documentPrepareSystem(document: mod SceneDocument, world: mod UiWorld) ret 
     diagnostics: world.sceneDiagnostics
   )
   reportUnimportedTheme(document: document, world: world)
+  # The bundles the document and its imports declare (ui/SceneBundles): on
+  # the world before the mount expands the nodes that list them.
+  world.bundles = sceneImportedBundles(
+    entry: document.scene
+    assets: document.assets
+    registry: document.registry
+  )
   ret true
 }
 
