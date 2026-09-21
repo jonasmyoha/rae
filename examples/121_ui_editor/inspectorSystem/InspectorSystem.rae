@@ -315,12 +315,14 @@ func syncInspectorPanel(
   status.inspectorType = typeLine
   let componentNames: String = componentNamesFor(world: world, entity: selected)
   status.inspectorComponents = String.replace(this: componentNames, old: ",", new: ", ")
-  # The computed rect in the PARENT's space (design units, camera-independent
-  # — what an author reads as the node's rect), not the on-screen position.
   var rectLine: String = "no computed rect"
-  if componentHas(this: world.computedRects, entity: selected) {
+  if componentHas(this: world.computedRects, entity: selected) and componentHas(
+    this: world.worldTransforms
+    entity: selected
+  ) {
+    let transform: WorldTransform2D = componentGet(this: world.worldTransforms, entity: selected)
     let computed: ComputedRect = componentGet(this: world.computedRects, entity: selected)
-    rectLine = "x {computed.position.x.toInt()}  y {computed.position.y.toInt()}  w {computed.size.x.toInt()}  h {computed.size.y.toInt()}"
+    rectLine = "x {transform.position.x.toInt()}  y {transform.position.y.toInt()}  w {computed.size.x.toInt()}  h {computed.size.y.toInt()}"
   }
   status.inspectorRect = rectLine
   status.inspectorParents = parentChainOf(world: world, entity: selected, sceneRoot: sceneRoot)
