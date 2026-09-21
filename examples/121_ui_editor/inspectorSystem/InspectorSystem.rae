@@ -34,8 +34,6 @@ type InspectorState {
   selected: EntityId
   hoverOutline: EntityId
   selectOutline: EntityId
-  panelOpen: Bool
-  treeOpen: Bool
   # The tree list's row order (entity per row), so a row's action maps back.
   treeEntities: List(EntityId)
 }
@@ -82,8 +80,6 @@ func createInspectorState(world: mod UiWorld) ret InspectorState {
       strokeWidth: 7.0
       stroke: RgbaColor { r: 96, g: 200, b: 255, a: 255 }
     )
-    panelOpen: false
-    treeOpen: true
     treeEntities: List.create(EntityId, cap: 64)
   }
 }
@@ -461,13 +457,11 @@ func inspectorSystem(
     }
   }
   if Sdl3.isKeyPressed(key: Keys.keyT) {
-    inspector.treeOpen = not inspector.treeOpen
-    setEditorPanelOpen(world: world, kind: EditorPanelKind.tree, open: inspector.treeOpen)
+    toggleEditorPanel(world: world, kind: EditorPanelKind.tree)
     changed = true
   }
   if selection is not inspector.selected {
     selectNode(inspector: inspector, world: world, entity: selection)
-    inspector.panelOpen = isNone(this: selection) is false
     changed = true
   }
   if changed {
@@ -518,8 +512,6 @@ func inspectorAfterLoad(
       log("[ui-editor] select: no node named {selectNodeId}")
     }
   }
-  inspector.panelOpen = isNone(this: inspector.selected) is false
-  setEditorPanelOpen(world: world, kind: EditorPanelKind.tree, open: inspector.treeOpen)
   syncInspectorPanel(
     world: world
     status: status

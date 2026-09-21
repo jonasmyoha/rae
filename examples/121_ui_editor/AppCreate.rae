@@ -190,7 +190,7 @@ func createApp() ret App {
     designH: document.designH
   )
   if getEnv(name: "RAE_UI_EDITOR_GUIDES") is "0" {
-    setGuidesVisible(guides: guides, world: world, visible: false)
+    setGuidesVisible(world: world, visible: false)
   }
   syncGuides(
     guides: guides
@@ -228,23 +228,17 @@ func createApp() ret App {
   # The chrome's own sub-scenes (the inspector panel) resolve from the same
   # registry the document uses.
   resolveSceneInstances(world: world, registry: document.registry, pageId: "chrome")
-  var chrome: ChromeState = {
-    pageRoot: chromeRoot
-    visible: true
-    panelOpen: true
-    projectOpen: false
-    leftOpen: true
-    rightOpen: true
-  }
+  var chrome: ChromeState = { pageRoot: chromeRoot }
   # A project opens with its scene list showing (P hides it); a bare scene
-  # has no project, so the panel stays hidden.
+  # has no project, so the panel stays hidden. The panels' Active is the
+  # only record of what is open.
   if document.projectPack.length() > 0 {
-    setProjectPanelOpen(chrome: chrome, world: world, open: true)
+    setEditorPanelOpen(world: world, kind: EditorPanelKind.project, open: true)
   }
   # RAE_UI_EDITOR_PANEL=1 opens the diagnostics panel at boot (the headless
   # gate's screenshot shows it; interactively D toggles it).
   if getEnv(name: "RAE_UI_EDITOR_PANEL") is "1" {
-    setDiagnosticsPanelOpen(chrome: chrome, world: world, open: true)
+    setEditorPanelOpen(world: world, kind: EditorPanelKind.diagnostics, open: true)
   }
 
   applyCamera(
@@ -288,7 +282,7 @@ func createApp() ret App {
   # after every reload), as a click would — the headless gate's hook.
   let testSelectNodeId: String = getEnv(name: "RAE_UI_EDITOR_TEST_SELECT")
   if getEnv(name: "RAE_UI_EDITOR_TREE") is "1" {
-    inspector.treeOpen = true
+    setEditorPanelOpen(world: world, kind: EditorPanelKind.tree, open: true)
   }
   var watch: FileWatch = createFileWatch(now: Gpu2d.nowSeconds())
   watchRememberMtimes(watch: watch, paths: document.watchedPaths)

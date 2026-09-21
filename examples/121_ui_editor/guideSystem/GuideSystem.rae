@@ -28,7 +28,6 @@ const statusBarClearance: Float = 72.0
 
 type GuideState {
   pageRoot: EntityId
-  visible: Bool
 }
 
 # Mount the guides page on its layer, sized to the design space.
@@ -45,7 +44,7 @@ func createGuides(world: mod UiWorld, designW: view Float, designH: view Float) 
     h: designH
   )
   setLayerById(world: world, entity: root, id: "guides")
-  ret GuideState { pageRoot: root, visible: true }
+  ret GuideState { pageRoot: root }
 }
 
 # Write the Rect of every node tagged with `kind`.
@@ -143,9 +142,9 @@ func syncGuides(
   status.safeAreaLabel = "safe area {safeInsets.l.toInt()},{safeInsets.t.toInt()},{safeInsets.r.toInt()},{safeInsets.b.toInt()}"
 }
 
-# `G`: show or hide every guide — the guides page root is an EditorPanel of
-# kind `guides`, so this is the panel toggle.
-func setGuidesVisible(guides: mod GuideState, world: mod UiWorld, visible: view Bool) {
-  guides.visible = visible
+# RAE_UI_EDITOR_GUIDES=0: the guides page root is an EditorPanel of kind
+# `guides`, so showing and hiding is the panel's Active (chromeSystem; `G`
+# toggles it the same way).
+func setGuidesVisible(world: mod UiWorld, visible: view Bool) {
   setEditorPanelOpen(world: world, kind: EditorPanelKind.guides, open: visible)
 }
