@@ -181,13 +181,16 @@ int rae_wgpu_have_rg11b10(void)     { return g_wgpu_have_rg11b10; }   /* #923: t
  * (RAE_WGPU_REPORT) and dumped periodically from the present path, like
  * RAE_MEM_STATS — off by default, a diagnostic for the next leak hunt. */
 /* Periodic live-object report from the present paths (2D and 3D), every 120
- * frames. ON by default for now (#920: the in-flight teardown equivalence is
- * being confirmed from devtools runs); RAE_WGPU_REPORT=0 silences it. */
+ * frames. OPT-IN: RAE_WGPU_REPORT=1 (or any value but 0/off) turns it on. It
+ * was on by default while the ownership slices (#920, #923, #925) and the
+ * 119 leak hunt confirmed their in-flight teardown — every count came back
+ * flat, so it is a diagnostic for the next leak hunt again, not frame noise
+ * in every log. */
 void rae_wgpu_report_periodic(void) {
     static int enabled = -1; static long frame = 0;
     if (enabled < 0) {
         const char* env = getenv("RAE_WGPU_REPORT");
-        enabled = (env && (strcmp(env, "0") == 0 || strcmp(env, "off") == 0)) ? 0 : 1;
+        enabled = (env && env[0] && strcmp(env, "0") != 0 && strcmp(env, "off") != 0) ? 1 : 0;
     }
     if (enabled && (frame++ % 120) == 0) {
         char tag[24]; snprintf(tag, sizeof(tag), "f%ld", frame - 1);
