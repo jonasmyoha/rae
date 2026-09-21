@@ -2920,8 +2920,20 @@ static void watch_sigint_handler(int sig) {
   g_watch_stop = 1;
 }
 
-// Recursively scan `dir` for `*.rae` files, adding each to `sources`.
-// Bounded to a reasonable depth to avoid runaway on symlink loops.
+// A file `rae watch` restarts the app for: a `.rae` source, or a `.raescene`
+// — the program's scene DATA. A scene is loaded by the running app, not
+// compiled in, but `rae watch` is the one dev loop ("edit anything, see it"),
+// so a scene edit restarts the app just like a source edit; an app never
+// needs its own FileWatch over its own scenes.
+static bool watch_is_watched_file(const char* name) {
+  size_t nlen = strlen(name);
+  if (nlen > 4 && strcmp(name + nlen - 4, ".rae") == 0) return true;
+  if (nlen > 9 && strcmp(name + nlen - 9, ".raescene") == 0) return true;
+  return false;
+}
+
+// Recursively scan `dir` for `*.rae` / `*.raescene` files, adding each to
+// `sources`. Bounded to a reasonable depth to avoid runaway on symlink loops.
 static void watch_collect_rae_sources(const char* dir, WatchSources* sources, int depth) {
   if (depth > 12) return;
   DIR* d = opendir(dir);
@@ -2938,8 +2950,7 @@ static void watch_collect_rae_sources(const char* dir, WatchSources* sources, in
     if (S_ISDIR(st.st_mode)) {
       watch_collect_rae_sources(child, sources, depth + 1);
     } else if (S_ISREG(st.st_mode)) {
-      size_t nlen = strlen(ent->d_name);
-      if (nlen > 4 && strcmp(ent->d_name + nlen - 4, ".rae") == 0) {
+      if (watch_is_watched_file(ent->d_name)) {
         watch_sources_add_file(sources, child);
       }
     }
