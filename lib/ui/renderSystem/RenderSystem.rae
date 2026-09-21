@@ -111,20 +111,23 @@ func paintShapeG(
   let drawX: Float = box.x
   let drawY: Float = box.y
   if sh.kind is ShapeKind.circle {
-    # The inherited scale sizes the circle; hover/own scale is applied below.
-    var smaller: Float = cr.size.x * wt.scale.x
-    if cr.size.y * wt.scale.y < smaller {
-      smaller = cr.size.y * wt.scale.y
+    # `box` is already scaled by everything (inherited camera/parent scale,
+    # the node's own TransformFx, hover) — `box.scale` is that whole uniform
+    # factor, so the radius is scaled by it exactly ONCE. Multiplying by
+    # wt.scale as well made the circle grow with the zoom squared.
+    var smaller: Float = box.w
+    if box.h < smaller {
+      smaller = box.h
     }
-    var r: Float = sh.radius * wt.scale.x
+    var r: Float = sh.radius * hoverMul
     if r <= 0.0 {
       r = smaller / 2.0
     }
     let circleBox: PaintBox = {
-      x: box.x + box.w / 2.0 - r * hoverMul
-      y: box.y + box.h / 2.0 - r * hoverMul
-      w: r * 2.0 * hoverMul
-      h: r * 2.0 * hoverMul
+      x: box.x + box.w / 2.0 - r
+      y: box.y + box.h / 2.0 - r
+      w: r * 2.0
+      h: r * 2.0
       scale: hoverMul
     }
     if componentHas(this: world.shadows, entity: entity) {
@@ -132,7 +135,7 @@ func paintShapeG(
         world: world
         entity: entity
         box: circleBox
-        radius: r * hoverMul
+        radius: r
         chain255: chain255
         canvas: canvas
       )
@@ -143,7 +146,7 @@ func paintShapeG(
       y: circleBox.y
       w: circleBox.w
       h: circleBox.h
-      radius: r * hoverMul
+      radius: r
       color: g2dColor(color: fill)
     )
     ret
