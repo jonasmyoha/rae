@@ -1,17 +1,12 @@
-# viewportSystem — the window and the letterbox (docs/ui-editor-design.md §2):
-# the window opens 9:16 (540x960 logical, RAE_UI_EDITOR_WINDOW=WxH overrides,
-# resizable), and the DESIGN resolution is fitted with `contain` so a phone
-# scene stays a phone in any window shape. A resize only re-fits; the layout
-# size the world sees is always the design size.
-#
-# The design resolution is the LARGER of the document's design and the
-# chrome's own 1080x1920, per axis. The chrome and the document share one
-# canvas, so if the design simply followed the document, opening a small
-# scene (a 993x130 list row) shrank the chrome into the letterboxed strip —
-# top bar clipped, status bar and Open button gone. Now the chrome always
-# lays out in at least its own space; a document smaller than that keeps its
-# authored size and sits centered in it (a translation, never a scale — the
-# renderer draws authored pixels 1:1).
+# viewportSystem — the window and the chrome's coordinate space (docs/
+# ui-editor-design.md §2). The editor is a DESKTOP app: the window opens
+# landscape (1400x900 logical, RAE_UI_EDITOR_WINDOW=WxH overrides, resizable)
+# and the chrome is authored in logical POINTS — the design resolution is the
+# window's logical size, re-applied on every resize, so a 44pt top bar is 44pt
+# on any display. The document keeps its own frame (its design extent, column
+# and safe insets — the device frame for a phone-authored scene) and is placed
+# in the chrome's EditArea by the camera (cameraSystem), which fits it on load
+# and zooms/pans it after; the chrome never scales with the document.
 import Gpu2d
 open Sys
 open ui/Ecs
@@ -21,10 +16,6 @@ open app3d/UiShell
 open ecs/Entity
 open ecs/ComponentTable
 open ecs/Schedule
-
-const chromeDesignW: Float = 1080.0
-
-const chromeDesignH: Float = 1920.0
 
 # The page column of a phone-authored scene: 360pt, the conventional phone
 # content width (106's phoneFrameW is exactly 360 x its unitScale 3 = 1080).
@@ -84,9 +75,9 @@ func editorDeviceFrame(unitScale: view Float) ret EditorDeviceFrame {
   ret frame
 }
 
-const defaultWindowW: Int = 540
+const defaultWindowW: Int = 1400
 
-const defaultWindowH: Int = 960
+const defaultWindowH: Int = 900
 
 type EditorViewport {
   windowW: Int
@@ -120,52 +111,42 @@ func createEditorViewport() ret EditorViewport {
   ret envSizeOr(name: "RAE_UI_EDITOR_WINDOW", fallbackW: defaultWindowW, fallbackH: defaultWindowH)
 }
 
-# Point the 2D canvas at the design resolution (fit 0 = contain, letterboxed)
-# and size the world's layout to it. `designW`/`designH` are the DOCUMENT's;
-# the resolution applied is at least the chrome's.
-func applyViewport(
-  viewport: mod EditorViewport
-  world: mod UiWorld
-  designW: view Float
-  designH: view Float
-) {
-  viewport.designW = designW
-  viewport.designH = designH
-  if viewport.designW < chromeDesignW {
-    viewport.designW = chromeDesignW
+# The chrome's design space = the window's logical size (physical pixels over
+# the display's pixel ratio): 1 design unit = 1 point. Applied at boot and on
+# every resize; the world lays out against it.
+func applyChromeViewport(viewport: mod EditorViewport, world: mod UiWorld) {
+  var dpr: Float = Gpu2d.dpr()
+  if dpr <= 0.0 {
+    dpr = 1.0
   }
-  if viewport.designH < chromeDesignH {
-    viewport.designH = chromeDesignH
+  viewport.designW = Gpu2d.windowWidth().toFloat() / dpr
+  viewport.designH = Gpu2d.windowHeight().toFloat() / dpr
+  if viewport.designW <= 0.0 or viewport.designH <= 0.0 {
+    viewport.designW = viewport.windowW.toFloat()
+    viewport.designH = viewport.windowH.toFloat()
   }
   Gpu2d.setDesignResolution(width: viewport.designW, height: viewport.designH, fit: 0)
   world.layoutW = viewport.designW
   world.layoutH = viewport.designH
 }
 
-# Place the document's page root in the design space: centered horizontally
-# by the root's extent anchor. The vertical centering of a document shorter
-# than the design, and every pan/zoom, is the camera's translation
-# (cameraSystem) — `documentHomeY` is the slack it starts from.
-func placeDocumentPage(world: mod UiWorld, pageRoot: view EntityId) {
+# Pin the document's page root to its frame's origin. A scene root may carry
+# `ExtentAnchor: Center` (106's pages do, to centre in the app's wider
+# layout); mounted onto the page root that would centre the page in the
+# WINDOW's layout extent. In the editor the frame is the extent and the
+# camera places the column (documentHomeX), so the root anchors left.
+func pinDocumentPage(world: mod UiWorld, pageRoot: view EntityId) {
   if isNone(this: pageRoot) {
     ret
   }
-  let anchor: ExtentAnchor = { h: HExtent.center }
+  let anchor: ExtentAnchor = { h: HExtent.left }
   componentSet(this: world.extentAnchors, entity: pageRoot, data: anchor)
 }
 
-# The document column's x at 100% (its extent-anchor centering).
-func documentHomeX(viewport: view EditorViewport, columnW: view Float) ret Float {
-  var slack: Float = viewport.designW - columnW
-  if slack < 0.0 {
-    slack = 0.0
-  }
-  ret slack / 2.0
-}
-
-# The vertical slack a document shorter than the design is centered by.
-func documentHomeY(viewport: view EditorViewport, designH: view Float) ret Float {
-  var slack: Float = viewport.designH - designH
+# The document column's x inside its own frame (centered in the frame's
+# extent) — the camera's home; the root itself lays out at (0, 0).
+func documentHomeX(designW: view Float, columnW: view Float) ret Float {
+  var slack: Float = designW - columnW
   if slack < 0.0 {
     slack = 0.0
   }
@@ -183,12 +164,17 @@ func sizeChromePage(world: mod UiWorld, chromeRoot: view EntityId, viewport: vie
   rect.size.y = viewport.designH
 }
 
-# A window resize re-fits the same design resolution; the layout is unchanged.
-# Returns whether the window changed (a repaint is due).
-func viewportSystem(viewport: view EditorViewport) ret Bool {
+# A window resize re-derives the chrome's design space and relayouts the
+# chrome; the caller re-fits the camera. Returns whether the window changed.
+func viewportSystem(
+  viewport: mod EditorViewport
+  world: mod UiWorld
+  chromeRoot: view EntityId
+) ret Bool {
   if Gpu2d.windowResized() is false {
     ret false
   }
-  Gpu2d.setDesignResolution(width: viewport.designW, height: viewport.designH, fit: 0)
+  applyChromeViewport(viewport: viewport, world: world)
+  sizeChromePage(world: world, chromeRoot: chromeRoot, viewport: viewport)
   ret true
 }

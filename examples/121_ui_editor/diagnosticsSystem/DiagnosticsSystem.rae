@@ -169,6 +169,23 @@ type ChromeState {
   panelOpen: Bool
   # The project panel (projectSystem): the opened pack's scene list.
   projectOpen: Bool
+  # The two side panels of the desktop layout (the top bar's toggles).
+  leftOpen: Bool
+  rightOpen: Bool
+}
+
+# The side panels are 300 / 320 points wide with 12 points of padding; a
+# list inside one is this wide (the row pool takes its width from the list).
+const chromePanelInnerW: Float = 276.0
+
+func setLeftPanelOpen(chrome: mod ChromeState, world: mod UiWorld, open: view Bool) {
+  chrome.leftOpen = open
+  setNodeActive(world: world, nodeId: "chrome/LeftPanel", value: open)
+}
+
+func setRightPanelOpen(chrome: mod ChromeState, world: mod UiWorld, open: view Bool) {
+  chrome.rightOpen = open
+  setNodeActive(world: world, nodeId: "chrome/RightPanel", value: open)
 }
 
 const diagnosticsPanelNode: String = "chrome/DiagnosticsPanel"
@@ -208,7 +225,7 @@ func syncDiagnosticsList(world: mod UiWorld, designW: view Float) {
       shown = list.visibleItemCount
     }
     let rect: mod Rect => componentMod(this: world.rects, entity: entity)
-    rect.size.x = designW - 48.0
+    rect.size.x = chromePanelInnerW
     rect.size.y = shown.toFloat() * (list.itemHeight + list.itemGap) - list.itemGap
   }
   var rows: List(ListViewRow) = List.create(ListViewRow, cap: count + 1)
