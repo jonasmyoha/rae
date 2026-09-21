@@ -1,19 +1,80 @@
 # The music player's hand-written aggregate glue (docs/ecs-systems-own-their-
-# tables.md §3.2): one line per app system that owns tables. The two lib
-# outboxes are drained here — the pending authored components into the
-# systems, then whatever nobody claimed reported (this app's own scenes
-# naming a component nobody has is a bug); the dead entities cleared from
-# the systems' tables, then released for reuse.
+# tables.md §3.2): the App IS the aggregate — `MusicSystems` is the one
+# struct that names its systems that own tables, and the two lib outboxes
+# are drained here, one line per system. Nothing else in the app lists them.
 open ui/Ecs
 open ui/Registry
 open ui/ScenePolicy
 open ecs/Entity
 open ecs/World
+open ecs/ComponentTable
 
-func applyMusicComponents(world: mod UiWorld, albumCoverSystem: mod AlbumCoverSystem) {
+type MusicSystems {
+  playbackSystem: PlaybackSystem
+  dockSystem: DockSystem
+  albumSystem: AlbumSystem
+  profileSystem: ProfileSystem
+  historySystem: HistorySystem
+  homeSystem: HomeSystem
+  albumCoverSystem: AlbumCoverSystem
+}
+
+# The playback system is created first (restoreAppState seeds it before the
+# App exists); the rest start empty.
+func createMusicSystems(playbackSystem: own PlaybackSystem) ret MusicSystems {
+  ret MusicSystems {
+    playbackSystem: own playbackSystem
+    dockSystem: createDockSystem()
+    albumSystem: createAlbumSystem()
+    profileSystem: createProfileSystem()
+    historySystem: createHistorySystem()
+    homeSystem: createHomeSystem()
+    albumCoverSystem: createAlbumCoverSystem()
+  }
+}
+
+# A route rebuild makes a new world with new entities: every table's rows
+# were the old world's. The playback state itself (clock, playing track,
+# inbox) survives — it is the one thing here that is not per-entity.
+func resetMusicTables(musicSystems: mod MusicSystems) {
+  musicSystems.playbackSystem.playbackIcons = ComponentTable.create(PlaybackIcon)
+  musicSystems.playbackSystem.playbackCovers = ComponentTable.create(PlaybackCover)
+  musicSystems.playbackSystem.likedHearts = ComponentTable.create(LikedHeart)
+  musicSystems.playbackSystem.trackTexts = ComponentTable.create(TrackText)
+  musicSystems.playbackSystem.playbackTimes = ComponentTable.create(PlaybackTime)
+  musicSystems.dockSystem = createDockSystem()
+  musicSystems.albumSystem = createAlbumSystem()
+  musicSystems.profileSystem = createProfileSystem()
+  musicSystems.historySystem = createHistorySystem()
+  musicSystems.homeSystem = createHomeSystem()
+  musicSystems.albumCoverSystem = createAlbumCoverSystem()
+}
+
+# Drain the pending-components outbox into the systems; what none claims is
+# reported — this app's own scenes naming a component nobody has is a bug
+# (the #941 verdict, unchanged).
+func applyMusicComponents(world: mod UiWorld, musicSystems: mod MusicSystems) {
   var kept: List(PendingComponent) = List.create(PendingComponent, cap: 4)
   loop let pending: view PendingComponent in world.pendingComponents {
-    if applyComponentInto(system: albumCoverSystem, world: world, pending: pending) {
+    if applyComponentInto(system: musicSystems.playbackSystem, world: world, pending: pending) {
+      continue
+    }
+    if applyComponentInto(system: musicSystems.dockSystem, world: world, pending: pending) {
+      continue
+    }
+    if applyComponentInto(system: musicSystems.albumSystem, world: world, pending: pending) {
+      continue
+    }
+    if applyComponentInto(system: musicSystems.profileSystem, world: world, pending: pending) {
+      continue
+    }
+    if applyComponentInto(system: musicSystems.historySystem, world: world, pending: pending) {
+      continue
+    }
+    if applyComponentInto(system: musicSystems.homeSystem, world: world, pending: pending) {
+      continue
+    }
+    if applyComponentInto(system: musicSystems.albumCoverSystem, world: world, pending: pending) {
       continue
     }
     kept.add(value: PendingComponent {
@@ -28,16 +89,24 @@ func applyMusicComponents(world: mod UiWorld, albumCoverSystem: mod AlbumCoverSy
   reportPendingComponents(world: world)
 }
 
-func sweepMusicEntities(world: mod UiWorld, albumCoverSystem: mod AlbumCoverSystem) {
+# Drain the dead-entities outbox: clear each destroyed entity from every
+# system's tables, then let the world recycle the indices.
+func sweepMusicEntities(world: mod UiWorld, musicSystems: mod MusicSystems) {
   loop let entity: view EntityId in world.deadEntities {
-    clearEntityComponents(world: albumCoverSystem, entity: entity)
+    clearEntityComponents(world: musicSystems.playbackSystem, entity: entity)
+    clearEntityComponents(world: musicSystems.dockSystem, entity: entity)
+    clearEntityComponents(world: musicSystems.albumSystem, entity: entity)
+    clearEntityComponents(world: musicSystems.profileSystem, entity: entity)
+    clearEntityComponents(world: musicSystems.historySystem, entity: entity)
+    clearEntityComponents(world: musicSystems.homeSystem, entity: entity)
+    clearEntityComponents(world: musicSystems.albumCoverSystem, entity: entity)
   }
   releaseDeadEntities(world: world)
 }
 
 # The frame end: both drains, in this order (a row a ListView mounted this
 # frame gets its components before anything is recycled).
-func musicFrameEnd(world: mod UiWorld, albumCoverSystem: mod AlbumCoverSystem) {
-  applyMusicComponents(world: world, albumCoverSystem: albumCoverSystem)
-  sweepMusicEntities(world: world, albumCoverSystem: albumCoverSystem)
+func musicFrameEnd(world: mod UiWorld, musicSystems: mod MusicSystems) {
+  applyMusicComponents(world: world, musicSystems: musicSystems)
+  sweepMusicEntities(world: world, musicSystems: musicSystems)
 }

@@ -29,8 +29,8 @@ open assetSystem/GpuAssetRegistry
 #   sourceHistory       PlayHistory.revision — every recorded play
 #   sourceLibrary       AppState.libraryRevision — the curated library + the
 #                       liked playlist
-#   sourcePlayback      PlaybackState.revision — play / pause, the playing track
-#   sourceNowPlaying    PlaybackState.nowPlayingRevision — the now-playing art
+#   sourcePlayback      PlaybackSystem.revision — play / pause, the playing track
+#   sourceNowPlaying    PlaybackSystem.nowPlayingRevision — the now-playing art
 #   sourcePlaybackClock position + duration to the millisecond: moves every
 #                       frame while playing, never while paused
 #   sourceSheet         BottomSheetState.epoch — open / close
@@ -65,7 +65,7 @@ func hasSource(sources: view Int, flag: view Int) ret Bool {
 func appSourcesRevision(
   sources: view Int
   state: view AppState
-  playback: view PlaybackState
+  playbackSystem: view PlaybackSystem
   reg: view TextureRegistry
 ) ret Int {
   var sum: Int = 0
@@ -76,13 +76,13 @@ func appSourcesRevision(
     sum = sum + state.libraryRevision
   }
   if hasSource(sources: sources, flag: sourcePlayback) {
-    sum = sum + playback.revision
+    sum = sum + playbackSystem.revision
   }
   if hasSource(sources: sources, flag: sourceNowPlaying) {
-    sum = sum + playback.nowPlayingRevision
+    sum = sum + playbackSystem.nowPlayingRevision
   }
   if hasSource(sources: sources, flag: sourcePlaybackClock) {
-    sum = sum + (playback.elapsedSec * 1000.0).toInt() + (playback.durationSec * 1000.0).toInt()
+    sum = sum + (playbackSystem.elapsedSec * 1000.0).toInt() + (playbackSystem.durationSec * 1000.0).toInt()
   }
   if hasSource(sources: sources, flag: sourceSheet) {
     sum = sum + state.bottomSheet.epoch
@@ -191,7 +191,7 @@ func createAppObservation(world: view UiWorld) ret AppObservation {
     ranNames: ""
   }
   let hasHistorySources: Int = sourceHistory
-  let hasHistoryTables: List(String) = ["hasHistories"]
+  let hasHistoryTables: List(String) = []
   registerAppObserver(
     observation: observation
     world: world
@@ -200,7 +200,7 @@ func createAppObservation(world: view UiWorld) ret AppObservation {
     tables: hasHistoryTables
   )
   let playbackIconSources: Int = sourcePlayback
-  let playbackIconTables: List(String) = ["playbackIcons"]
+  let playbackIconTables: List(String) = []
   registerAppObserver(
     observation: observation
     world: world
@@ -209,7 +209,7 @@ func createAppObservation(world: view UiWorld) ret AppObservation {
     tables: playbackIconTables
   )
   let playbackCoverSources: Int = sourceNowPlaying bitor sourceCollection bitor sourceTextures
-  let playbackCoverTables: List(String) = ["playbackCovers"]
+  let playbackCoverTables: List(String) = []
   registerAppObserver(
     observation: observation
     world: world
@@ -218,7 +218,7 @@ func createAppObservation(world: view UiWorld) ret AppObservation {
     tables: playbackCoverTables
   )
   let likedHeartSources: Int = sourceLibrary bitor sourceCollection
-  let likedHeartTables: List(String) = ["likedHearts"]
+  let likedHeartTables: List(String) = []
   registerAppObserver(
     observation: observation
     world: world
@@ -227,7 +227,7 @@ func createAppObservation(world: view UiWorld) ret AppObservation {
     tables: likedHeartTables
   )
   let trackTextSources: Int = sourceCollection bitor sourcePlaybackClock
-  let trackTextTables: List(String) = ["trackTexts"]
+  let trackTextTables: List(String) = []
   registerAppObserver(
     observation: observation
     world: world
@@ -245,7 +245,7 @@ func createAppObservation(world: view UiWorld) ret AppObservation {
     tables: bottomSheetTables
   )
   let profileStatsSources: Int = sourceLibrary
-  let profileStatsTables: List(String) = ["profileStats"]
+  let profileStatsTables: List(String) = []
   registerAppObserver(
     observation: observation
     world: world
@@ -254,7 +254,7 @@ func createAppObservation(world: view UiWorld) ret AppObservation {
     tables: profileStatsTables
   )
   let avatarSources: Int = sourceTextures
-  let avatarTables: List(String) = ["avatarSources"]
+  let avatarTables: List(String) = []
   registerAppObserver(
     observation: observation
     world: world
@@ -272,7 +272,7 @@ func createAppObservation(world: view UiWorld) ret AppObservation {
     tables: listSourceTables
   )
   let historyListSources: Int = sourceHistory
-  let historyListTables: List(String) = ["historyLists"]
+  let historyListTables: List(String) = []
   registerAppObserver(
     observation: observation
     world: world
@@ -281,7 +281,7 @@ func createAppObservation(world: view UiWorld) ret AppObservation {
     tables: historyListTables
   )
   let albumHeaderSources: Int = sourceCollection bitor sourceLibrary
-  let albumHeaderTables: List(String) = ["albumHeaders"]
+  let albumHeaderTables: List(String) = []
   registerAppObserver(
     observation: observation
     world: world
@@ -299,7 +299,7 @@ func createAppObservation(world: view UiWorld) ret AppObservation {
     tables: progressTables
   )
   let playbackTimeSources: Int = sourcePlaybackClock
-  let playbackTimeTables: List(String) = ["playbackTimes"]
+  let playbackTimeTables: List(String) = []
   registerAppObserver(
     observation: observation
     world: world
@@ -332,12 +332,51 @@ func createAppObservation(world: view UiWorld) ret AppObservation {
 }
 
 # The combined generation entry `index` is judged on this frame.
+# The generation of the table an observer reads on its own system: which
+# table is which observer's is the same hand-written list as runAppObserver.
+func ownTableGeneration(index: view Int, musicSystems: view MusicSystems) ret Int {
+  if index is observeHasHistory {
+    ret musicSystems.homeSystem.hasHistories.generation
+  }
+  if index is observePlaybackIcon {
+    ret musicSystems.playbackSystem.playbackIcons.generation
+  }
+  if index is observePlaybackCover {
+    ret musicSystems.playbackSystem.playbackCovers.generation
+  }
+  if index is observeLikedHeart {
+    ret musicSystems.playbackSystem.likedHearts.generation
+  }
+  if index is observeTrackText {
+    ret musicSystems.playbackSystem.trackTexts.generation
+  }
+  if index is observeProfileStats {
+    ret musicSystems.profileSystem.profileStats.generation
+  }
+  if index is observeAvatar {
+    ret musicSystems.profileSystem.avatarSources.generation
+  }
+  if index is observeHistoryList {
+    ret musicSystems.historySystem.historyLists.generation
+  }
+  if index is observeAlbumHeader {
+    ret musicSystems.albumSystem.albumHeaders.generation
+  }
+  if index is observePlaybackTime {
+    ret musicSystems.playbackSystem.playbackTimes.generation
+  }
+  if index is observeCoverStyle {
+    ret musicSystems.albumCoverSystem.albumCovers.generation
+  }
+  ret 0
+}
+
 func observerGeneration(
   observation: view AppObservation
   world: view UiWorld
   index: view Int
   state: view AppState
-  playback: view PlaybackState
+  musicSystems: view MusicSystems
   reg: view TextureRegistry
 ) ret Int {
   var sum: Int = declaredReadGeneration(
@@ -347,11 +386,15 @@ func observerGeneration(
     index: index
   )
   sum = sum + worldAliveCount(UiWorld, world: world)
+  # The observer's OWN table (docs/ecs-systems-own-their-tables.md §3): it
+  # lives on the app's system, not the world, so its generation is added by
+  # hand — a mount that fills it (the frame-end drain) runs the observer.
+  sum = sum + ownTableGeneration(index: index, musicSystems: musicSystems)
   if let observer: view AppObserver => observation.observers.viewAt(index: index) {
     sum = sum + appSourcesRevision(
       sources: observer.sources
       state: state
-      playback: playback
+      playbackSystem: musicSystems.playbackSystem
       reg: reg
     )
   }
@@ -362,28 +405,31 @@ func observerGeneration(
 func runAppObserver(
   index: view Int
   world: mod UiWorld
-  albumCoverSystem: mod AlbumCoverSystem
+  musicSystems: mod MusicSystems
   state: view AppState
-  playback: view PlaybackState
   scenes: view AlbumScenes
   reg: view TextureRegistry
 ) {
   if index is observeHasHistory {
-    hasHistorySystem(world: world, state: state)
+    hasHistorySystem(homeSystem: musicSystems.homeSystem, world: world, state: state)
   }
   if index is observePlaybackIcon {
-    let changed: Bool = playbackIconSystem(world: world, playback: playback)
+    let changed: Bool = playbackIconSystem(
+      world: world
+      playbackSystem: musicSystems.playbackSystem
+    )
   }
   if index is observePlaybackCover {
     let changed: Bool = playbackCoverSystem(
       world: world
-      playback: playback
+      playbackSystem: musicSystems.playbackSystem
       state: state
       reg: reg
     )
   }
   if index is observeLikedHeart {
     let changed: Bool = likedHeartSystem(
+      playbackSystem: musicSystems.playbackSystem
       world: world
       liked: state.liked
       stem: state.currentAlbumStem
@@ -391,40 +437,40 @@ func runAppObserver(
     )
   }
   if index is observeTrackText {
-    trackTextSystem(world: world, state: state)
+    trackTextSystem(playbackSystem: musicSystems.playbackSystem, world: world, state: state)
   }
   if index is observeBottomSheet {
     bottomSheetSystem(world: world, sheet: state.bottomSheet)
   }
   if index is observeProfileStats {
-    profileStatsSystem(world: world, state: state)
+    profileStatsSystem(profileSystem: musicSystems.profileSystem, world: world, state: state)
   }
   if index is observeAvatar {
-    avatarSystem(world: world, reg: reg)
+    avatarSystem(profileSystem: musicSystems.profileSystem, world: world, reg: reg)
   }
   if index is observeListSource {
     listSourceSystem(
       world: world
       state: state
-      playback: playback
+      playbackSystem: musicSystems.playbackSystem
       scenes: scenes
     )
   }
   if index is observeHistoryList {
-    historyListSystem(world: world, state: state)
+    historyListSystem(historySystem: musicSystems.historySystem, world: world, state: state)
   }
   if index is observeAlbumHeader {
-    albumHeaderSystem(world: world, state: state)
+    albumHeaderSystem(albumSystem: musicSystems.albumSystem, world: world, state: state)
   }
   if index is observeProgress {
-    applyPlaybackToWorld(world: world, state: playback)
+    applyPlaybackToWorld(world: world, playbackSystem: musicSystems.playbackSystem)
   }
   if index is observePlaybackTime {
-    playbackTimeSystem(world: world, playback: playback)
+    playbackTimeSystem(world: world, playbackSystem: musicSystems.playbackSystem)
   }
   if index is observeCoverStyle {
     albumCoverUpdate(
-      albumCoverSystem: albumCoverSystem
+      albumCoverSystem: musicSystems.albumCoverSystem
       world: world
       rounded: state.settings.roundedAlbumCovers
     )
@@ -440,11 +486,11 @@ func runAppObserver(
 # the data may have moved — after the commands, and after the Spotify mirror —
 # and costs nothing when nothing did.
 func runAppObservation(
+  playbackSystem: view PlaybackSystem
   observation: mod AppObservation
   world: mod UiWorld
-  albumCoverSystem: mod AlbumCoverSystem
+  musicSystems: mod MusicSystems
   state: view AppState
-  playback: view PlaybackState
   scenes: view AlbumScenes
   reg: view TextureRegistry
 ) ret Int {
@@ -457,16 +503,15 @@ func runAppObservation(
       world: world
       index: index
       state: state
-      playback: playback
+      musicSystems: musicSystems
       reg: reg
     )
     if shouldRun(schedule: observation.schedule, index: index, readGeneration: generation) {
       runAppObserver(
         index: index
         world: world
-        albumCoverSystem: albumCoverSystem
+        musicSystems: musicSystems
         state: state
-        playback: playback
         scenes: scenes
         reg: reg
       )

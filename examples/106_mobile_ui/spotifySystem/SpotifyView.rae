@@ -24,14 +24,14 @@ import Time
 open ecs/Entity
 open ecs/ComponentTable
 
-# PlaybackState lives in this example's playback.rae — auto-imported
+# PlaybackSystem lives in this example's playback.rae — auto-imported
 # from the same project directory. We mutate it here to sync the local
 # mock's `isPlaying` from Spotify's reported state so the play-button
-# icon (driven by PlaybackState revision invalidation) matches reality.
+# icon (driven by PlaybackSystem revision invalidation) matches reality.
 
 # Per-app-instance state for the Spotify display layer. One instance
 # lives in main.rae for the whole app lifetime.
-type SpotifyState {
+type SpotifySystem {
   # Toggle read once at boot from RAE_UI_SPOTIFY. False → all the
   # update calls early-out so the local mock continues unchanged.
   enabled: Bool
@@ -67,7 +67,7 @@ type SpotifyState {
   fake: String
 }
 
-func createSpotifyState() pub ret SpotifyState {
+func createSpotifySystem() pub ret SpotifySystem {
   # Spotify mode is ON by default on the assumption that this is what
   # the user actually wants from a music-player example on macOS. Opt
   # OUT with RAE_UI_NO_SPOTIFY=1 (snapshot tests, no-network builds,
@@ -98,7 +98,7 @@ func createSpotifyState() pub ret SpotifyState {
     }
     revision = 1
   }
-  ret SpotifyState {
+  ret SpotifySystem {
     enabled: enabled
     lastTrackId: ""
     artKey: "spotify-current"
@@ -222,14 +222,14 @@ func spotifyCoverOutPath(track: view SpotifyTrack) ret String {
 # Load `state.coverPendingPath` under `state.artKey` and clear the pending
 # marker — the shared "a fetch just landed" tail for both the exists-already
 # fast path and the async-fetch-completed path below.
-func applyNowPlayingCover(state: mod SpotifyState, reg: mod TextureRegistry) {
-  let copiedKey: String = "{state.artKey}"
-  let copiedPath: String = "{state.coverPendingPath}"
+func applyNowPlayingCover(spotifySystem: mod SpotifySystem, reg: mod TextureRegistry) {
+  let copiedKey: String = "{spotifySystem.artKey}"
+  let copiedPath: String = "{spotifySystem.coverPendingPath}"
   let h: Int = textureLoad(reg: reg, key: copiedKey, path: copiedPath)
   if h > 0 {
-    state.coverAppliedPath = "{state.coverPendingPath}"
+    spotifySystem.coverAppliedPath = "{spotifySystem.coverPendingPath}"
   }
-  state.coverPendingPath = ""
+  spotifySystem.coverPendingPath = ""
 }
 
 # Track-change entry point (#968): kicks off — or reuses — a background
@@ -240,22 +240,22 @@ func applyNowPlayingCover(state: mod SpotifyState, reg: mod TextureRegistry) {
 # result on a later frame. A no-op when the wanted file is already applied
 # or already the in-flight target.
 func syncNowPlayingCoverStart(
-  state: mod SpotifyState
+  spotifySystem: mod SpotifySystem
   track: view SpotifyTrack
   reg: mod TextureRegistry
   fetches: mod ArtworkFetchQueue
 ) {
   ensureAppCacheDirs()
   let wantPath: String = spotifyCoverOutPath(track: track)
-  if wantPath is state.coverAppliedPath {
+  if wantPath is spotifySystem.coverAppliedPath {
     ret
   }
-  if wantPath is state.coverPendingPath {
+  if wantPath is spotifySystem.coverPendingPath {
     ret
   }
-  state.coverPendingPath = "{wantPath}"
+  spotifySystem.coverPendingPath = "{wantPath}"
   if Sys.exists(path: wantPath) {
-    applyNowPlayingCover(state: state, reg: reg)
+    applyNowPlayingCover(spotifySystem: spotifySystem, reg: reg)
     ret
   }
   let term: String = "{track.artistName} {track.trackName}"
@@ -267,7 +267,7 @@ func syncNowPlayingCoverStart(
   )
   if started is false {
     # In-flight cap reached — try again on the next track-change tick.
-    state.coverPendingPath = ""
+    spotifySystem.coverPendingPath = ""
   }
 }
 
@@ -280,23 +280,23 @@ func syncNowPlayingCoverStart(
 # and it means a status record another consumer already drained (the two
 # queues share dedup keys by outPath) doesn't strand this caller.
 func syncNowPlayingCoverFinish(
-  state: mod SpotifyState
+  spotifySystem: mod SpotifySystem
   reg: mod TextureRegistry
   fetches: mod ArtworkFetchQueue
 ) {
-  if state.coverPendingPath.length() is 0 {
+  if spotifySystem.coverPendingPath.length() is 0 {
     ret
   }
-  let path: String = "{state.coverPendingPath}"
+  let path: String = "{spotifySystem.coverPendingPath}"
   if Sys.exists(path: path) {
-    applyNowPlayingCover(state: state, reg: reg)
+    applyNowPlayingCover(spotifySystem: spotifySystem, reg: reg)
     ret
   }
   let status: Int = artworkFetchStatus(queue: fetches, outPath: path)
   if status is artworkStatusFetched {
-    applyNowPlayingCover(state: state, reg: reg)
+    applyNowPlayingCover(spotifySystem: spotifySystem, reg: reg)
   } else if status is artworkStatusFailed {
-    state.coverPendingPath = ""
+    spotifySystem.coverPendingPath = ""
   }
   # else pending: nothing to do, check again next frame.
 }
@@ -304,28 +304,28 @@ func syncNowPlayingCoverFinish(
 # Per-frame entry point. Cheap when disabled / when not enough time
 # has passed for a re-poll. When it does poll:
 #   * mirrors Spotify's actual play/pause state into `playback.isPlaying`
-#     so PlaybackState revision invalidation keeps play buttons in sync,
-#   * publishes the live title / artist / album onto SpotifyState (bumping
+#     so PlaybackSystem revision invalidation keeps play buttons in sync,
+#   * publishes the live title / artist / album onto SpotifySystem (bumping
 #     `revision`), which `spotifyBindingSystem` writes onto the `TextBinding`
 #     nodes — the poll no longer patches Text nodes itself,
 #   * on track change: downloads art and points the nowPlaying cover at
 #     the spotify-current texture key (the covers observe + re-point, #268).
 func pollSpotify(
-  state: mod SpotifyState
+  spotifySystem: mod SpotifySystem
   reg: mod TextureRegistry
-  playback: mod PlaybackState
+  playbackSystem: mod PlaybackSystem
   appState: mod AppState
   now: view Timestamp
   ticked: view Bool
 ) pub {
-  if state.enabled is false {
+  if spotifySystem.enabled is false {
     ret
   }
   # #968: pick up a completed cover download every frame, independent of the
   # Spotify poll tick below — a background fetch can land between polls, and
   # this is what makes it appear within a frame instead of waiting up to 1s
   # for the next tick.
-  syncNowPlayingCoverFinish(state: state, reg: reg, fetches: appState.artworkFetch)
+  syncNowPlayingCoverFinish(spotifySystem: spotifySystem, reg: reg, fetches: appState.artworkFetch)
   # `ticked` is the poll worker's "the cache has a new snapshot" cue (#950);
   # between ticks there is nothing new to mirror.
   if ticked is false {
@@ -334,35 +334,35 @@ func pollSpotify(
   let track: SpotifyTrack = Spotify.current()
   let pos: Float = Spotify.position()
   let dur: Float = Spotify.duration()
-  # Mirror Spotify's actual state into the local playback mock so play-button
-  # revision invalidation and the progress/readout state
+  # Mirror Spotify's actual spotifySystem into the local playbackSystem mock so play-button
+  # revision invalidation and the progress/readout spotifySystem
   # match the real player. Includes "user paused in Spotify directly"
   # and "user skipped tracks in Spotify" — both flip within 1Hz here.
   let playingKey: String = "playing"
   let nowPlaying: Bool = track.state is playingKey
-  setPlaybackPlaying(state: playback, value: nowPlaying)
-  playback.elapsedSec = pos
+  setPlaybackPlaying(playbackSystem: playbackSystem, value: nowPlaying)
+  playbackSystem.elapsedSec = pos
   if dur > 0.0 {
-    playback.durationSec = dur
+    playbackSystem.durationSec = dur
   }
   # Publish the live snapshot the bindings read, bumping `revision` only when
   # a field changed so `spotifyBindingSystem` (and it alone) rewrites the
   # bound Text nodes. The M:SS time labels are `PlaybackTime` bindings on the
-  # mirrored playback position / duration above — nothing to write here.
+  # mirrored playbackSystem position / duration above — nothing to write here.
   updateSpotifySnapshot(
-    state: state
+    spotifySystem: spotifySystem
     title: track.trackName
     artist: track.artistName
     album: track.albumName
   )
   # Track-change → re-fetch artwork. Compare trackId, not artworkUrl
   # (Spotify sometimes reports a slightly different art URL between
-  # polls for the same track during playback).
-  let changed: Bool = track.trackId is state.lastTrackId is false
+  # polls for the same track during playbackSystem).
+  let changed: Bool = track.trackId is spotifySystem.lastTrackId is false
   if changed {
-    state.lastTrackId = "{track.trackId}"
+    spotifySystem.lastTrackId = "{track.trackId}"
     syncNowPlayingCoverStart(
-      state: state
+      spotifySystem: spotifySystem
       track: track
       reg: reg
       fetches: appState.artworkFetch
@@ -413,33 +413,33 @@ func pollSpotify(
   # re-point once, then track the texture swap. This replaces the old
   # per-frame `rebindAlbumCoversToSpotify` walk that matched a stale
   # browsed stem and so never followed a Spotify track change (§1).
-  setNowPlayingArt(state: playback, artKey: state.artKey)
+  setNowPlayingArt(playbackSystem: playbackSystem, artKey: spotifySystem.artKey)
 }
 
 # Write the live now-playing snapshot, bumping `revision` only when a field
 # actually changed — so `spotifyBindingSystem` runs only on a real change.
 func updateSpotifySnapshot(
-  state: mod SpotifyState
+  spotifySystem: mod SpotifySystem
   title: view String
   artist: view String
   album: view String
 ) {
-  if state.title is title and state.artist is artist and state.album is album {
+  if spotifySystem.title is title and spotifySystem.artist is artist and spotifySystem.album is album {
     ret
   }
-  state.title = "{title}"
-  state.artist = "{artist}"
-  state.album = "{album}"
-  state.revision = state.revision + 1
+  spotifySystem.title = "{title}"
+  spotifySystem.artist = "{artist}"
+  spotifySystem.album = "{album}"
+  spotifySystem.revision = spotifySystem.revision + 1
 }
 
 # The now-playing text as DATA: every node with a `TextBinding` whose key is a
 # `spotify.*` source gets the matching field of the live snapshot written to
-# its `Text.text`. Runs only when `SpotifyState.revision` moved past the last
+# its `Text.text`. Runs only when `SpotifySystem.revision` moved past the last
 # one it wrote (`builtRevision`) — the poll bumps the revision, this reacts.
 # Local mode leaves the revision at 0, so this never fights `trackTextSystem`.
-func spotifyBindingSystem(world: mod UiWorld, state: mod SpotifyState) pub {
-  if state.revision is state.builtRevision {
+func spotifyBindingSystem(world: mod UiWorld, spotifySystem: mod SpotifySystem) pub {
+  if spotifySystem.revision is spotifySystem.builtRevision {
     ret
   }
   let n: Int = componentCount(this: world.textBindings)
@@ -448,18 +448,20 @@ func spotifyBindingSystem(world: mod UiWorld, state: mod SpotifyState) pub {
     let entity: EntityId = componentEntityAt(this: world.textBindings, i: i)
     let binding: TextBinding = componentDataAt(this: world.textBindings, i: i)
     if binding.key is "spotify.title" {
-      writeTrackText(world: world, entity: entity, value: state.title)
+      writeTrackText(world: world, entity: entity, value: spotifySystem.title)
     }
     if binding.key is "spotify.artist" {
-      writeTrackText(world: world, entity: entity, value: state.artist)
+      writeTrackText(world: world, entity: entity, value: spotifySystem.artist)
     }
     if binding.key is "spotify.album" {
-      writeTrackText(world: world, entity: entity, value: state.album)
+      writeTrackText(world: world, entity: entity, value: spotifySystem.album)
     }
     i = i + 1
   }
-  state.builtRevision = state.revision
-  if state.fake.length() > 0 {
-    log("[spotify-bind] title={state.title} artist={state.artist} album={state.album}")
+  spotifySystem.builtRevision = spotifySystem.revision
+  if spotifySystem.fake.length() > 0 {
+    log(
+      "[spotify-bind] title={spotifySystem.title} artist={spotifySystem.artist} album={spotifySystem.album}"
+    )
   }
 }

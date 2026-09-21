@@ -23,6 +23,21 @@ open ui/renderSystem/RenderSystem
 
 # The live text for one stat kind. Pulls counts from the album catalogue so
 # the numbers stay honest — no fake follower counts.
+# ProfileSystem (docs/ecs-systems-own-their-tables.md §3): owns the profile page's `ProfileStat`
+# counts and `AvatarSource` photo — its
+# authored components are ITS tables, no longer lib/ui's.
+type ProfileSystem {
+  profileStats: ComponentTable(ProfileStat)
+  avatarSources: ComponentTable(AvatarSource)
+}
+
+func createProfileSystem() ret ProfileSystem {
+  ret ProfileSystem {
+    profileStats: ComponentTable.create(ProfileStat)
+    avatarSources: ComponentTable.create(AvatarSource)
+  }
+}
+
 func profileStatText(state: view AppState, stat: ProfileStatKind) ret String {
   unsafe {
     let albumCount: Int = state.mediaLibrary.albums.length
@@ -46,12 +61,16 @@ func profileStatText(state: view AppState, stat: ProfileStatKind) ret String {
 }
 
 # Drive every `ProfileStat`: the Text on the same entity shows the live count.
-func profileStatsSystem(world: mod UiWorld, state: view AppState) pub {
-  let n: Int = componentCount(this: world.profileStats)
+func profileStatsSystem(
+  profileSystem: view ProfileSystem
+  world: mod UiWorld
+  state: view AppState
+) pub {
+  let n: Int = componentCount(this: profileSystem.profileStats)
   var i: Int = 0
   loop i < n {
-    let entity: EntityId = componentEntityAt(this: world.profileStats, i: i)
-    let binding: ProfileStat = componentDataAt(this: world.profileStats, i: i)
+    let entity: EntityId = componentEntityAt(this: profileSystem.profileStats, i: i)
+    let binding: ProfileStat = componentDataAt(this: profileSystem.profileStats, i: i)
     if componentHas(this: world.texts, entity: entity) {
       let wanted: String = profileStatText(state: state, stat: binding.stat)
       # A by-value read (three tiny Texts): the table must not be written
@@ -86,13 +105,17 @@ func setActiveIfChanged(world: mod UiWorld, entity: view EntityId, active: view 
 # Drive every `AvatarSource`: among the container's children, the one whose
 # Sprite shows `textureKey` is the photo; every other child is the placeholder.
 # The photo is active exactly when the registry has the texture.
-func avatarSystem(world: mod UiWorld, reg: view TextureRegistry) pub {
+func avatarSystem(
+  profileSystem: view ProfileSystem
+  world: mod UiWorld
+  reg: view TextureRegistry
+) pub {
   unsafe {
-    let n: Int = componentCount(this: world.avatarSources)
+    let n: Int = componentCount(this: profileSystem.avatarSources)
     var i: Int = 0
     loop i < n {
-      let container: EntityId = componentEntityAt(this: world.avatarSources, i: i)
-      let source: AvatarSource = componentDataAt(this: world.avatarSources, i: i)
+      let container: EntityId = componentEntityAt(this: profileSystem.avatarSources, i: i)
+      let source: AvatarSource = componentDataAt(this: profileSystem.avatarSources, i: i)
       let loaded: Bool = textureHas(reg: reg, key: source.textureKey)
       if componentHas(this: world.childrens, entity: container) {
         let kids: view Children => componentView(this: world.childrens, entity: container)

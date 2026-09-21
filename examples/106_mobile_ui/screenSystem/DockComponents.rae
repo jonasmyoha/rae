@@ -1,0 +1,13 @@
+# The music player's OWN authorable components (docs/ecs-systems-own-their-
+# tables.md §3): lib/ui tables until the ECS split step 4 moved them next to
+# the system that reads them. A `.raescene` still authors them by name; the
+# loader parks a name no lib table has in `world.pendingComponents` and
+# applyMusicComponents (MusicSystems.rae) decodes each into its system.
+open ui/Components
+
+# The screen a nav tab selects. `navTabsSystem` compares it to the app's
+# current tab and writes the active/inactive icon tint and label style onto
+# the tab's Sprite and Text children — so the bar never re-mounts on switch.
+type NavTab {
+  screen: String
+}

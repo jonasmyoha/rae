@@ -26,7 +26,7 @@ type FrameInputDispatchResult {
 func runFrameInputDispatch(
   input: view InputSystem
   currentScreen: view Screen
-  playback: mod PlaybackState
+  playbackSystem: mod PlaybackSystem
   appState: mod AppState
   world: mod UiWorld
   debug: mod DebugSystem
@@ -42,13 +42,13 @@ func runFrameInputDispatch(
 
   if dragJustReleased is false {
     # The fired ids become typed commands through the action table, and the
-    # command systems (navigation, playback, sheet, canvas) consume them.
+    # command systems (navigation, playbackSystem, sheet, canvas) consume them.
     nextScreen = runAppCommands(
       input: input
       actionTable: actionTable
       commands: commands
       state: appState
-      playback: playback
+      playbackSystem: playbackSystem
       spotifyEnabled: spotifyEnabled
     )
   } else {
@@ -65,7 +65,7 @@ func runFrameInputDispatch(
 
   if hadActions {
     if dragJustReleased is false {
-      saveAppState(path: stateFilePath, state: appState, playback: playback)
+      saveAppState(path: stateFilePath, state: appState, playbackSystem: playbackSystem)
     }
   }
 
@@ -89,24 +89,23 @@ type FrameDataSyncResult {
 
 func syncFrameData(
   world: mod UiWorld
-  albumCoverSystem: mod AlbumCoverSystem
+  musicSystems: mod MusicSystems
   scenes: view AlbumScenes
   appState: mod AppState
-  playback: mod PlaybackState
-  spotifyState: mod SpotifyState
+  spotifySystem: mod SpotifySystem
   spotifyPoller: view SpotifyPoller
   textureRegistry: mod TextureRegistry
   observation: mod AppObservation
   now: view Float64
 ) pub ret FrameDataSyncResult {
-  advancePlayback(state: playback, now: now)
+  advancePlayback(playbackSystem: musicSystems.playbackSystem, now: now)
 
   # The poll worker (#950) refreshed the cache off-thread and posted a tick;
   # only then is there a new snapshot worth mirroring into the world.
   pollSpotify(
-    state: spotifyState
+    spotifySystem: spotifySystem
     reg: textureRegistry
-    playback: playback
+    playbackSystem: musicSystems.playbackSystem
     appState: appState
     now: Time.atSeconds(s: now)
     ticked: spotifyPollerTicked(poller: spotifyPoller)
@@ -115,19 +114,19 @@ func syncFrameData(
   # this frame — every app system judged from its declared sources
   # (observeSystem/AppObservation); nothing runs when nothing moved.
   let observed: Int = runAppObservation(
+    playbackSystem: musicSystems.playbackSystem
     observation: observation
     world: world
-    albumCoverSystem: albumCoverSystem
+    musicSystems: musicSystems
     state: appState
-    playback: playback
     scenes: scenes
     reg: textureRegistry
   )
   # Spotify's live now-playing text is a binding too: `spotifyBindingSystem`
   # writes the `TextBinding` nodes from the snapshot the poll just published,
-  # and self-gates on `SpotifyState.revision` (a no-op in local mode). Runs
+  # and self-gates on `SpotifySystem.revision` (a no-op in local mode). Runs
   # AFTER the observation so a live Spotify track wins over the browsed one.
-  spotifyBindingSystem(world: world, state: spotifyState)
+  spotifyBindingSystem(world: world, spotifySystem: spotifySystem)
 
   # Settle the artwork downloads that landed since last frame (#950), then
   # let the loaders upload them / start the next ones — album covers first

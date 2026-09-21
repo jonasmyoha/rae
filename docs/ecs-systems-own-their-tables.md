@@ -26,6 +26,15 @@ albumCoverSystem/AlbumCoverSystem.rae` owns the marker and the authored radii it
 squared; `MusicSystems.rae` is 106's hand-written glue (`applyMusicComponents`,
 `sweepMusicEntities`, `musicFrameEnd`); `lib/ui/coverStyleSystem/` and
 `CoverStyle` are gone, and so is the editor's call.
+**Step 4 (106's systems own their tables) is implemented** (2026-09-22):
+`PlaybackSystem` (absorbs `PlaybackState`), `DockSystem`, `AlbumSystem`,
+`ProfileSystem`, `HistorySystem`, `HomeSystem` + `AlbumCoverSystem`, aggregated
+in `MusicSystems` on the 106 `App`; `SpotifyState` → `SpotifySystem`; the eleven
+components moved next to their systems and off `UiWorld` (71 known components);
+the observers add their own table's generation (`ownTableGeneration`). Decided
+while doing it: `PlayHistory` / `HistoryArtLoader` stay on `AppState` (app data,
+not the binding's); the app's systems are ONE `MusicSystems` struct so the
+observation boundary takes one parameter, not seven.
 
 Prompted by the UI editor having to
 call a music-player system to draw a scene the way the music player does.

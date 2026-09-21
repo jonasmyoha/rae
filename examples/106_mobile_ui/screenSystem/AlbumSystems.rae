@@ -17,6 +17,17 @@ open ecs/Entity
 open ecs/ComponentTable
 
 # What the header and the rows depend on, as one comparable string.
+# AlbumSystem (docs/ecs-systems-own-their-tables.md §3): owns the album page's `AlbumHeader` texts
+# — its
+# authored components are ITS tables, no longer lib/ui's.
+type AlbumSystem {
+  albumHeaders: ComponentTable(AlbumHeader)
+}
+
+func createAlbumSystem() ret AlbumSystem {
+  ret AlbumSystem { albumHeaders: ComponentTable.create(AlbumHeader) }
+}
+
 func albumCollectionKey(state: view AppState) ret String {
   ret "{state.currentAlbumStem}|{state.viewingPlaylist}|{state.currentPlaylistId}|{state.libraryRevision}"
 }
@@ -47,7 +58,11 @@ func writeAlbumText(world: mod UiWorld, entity: view EntityId, text: view String
 # the collection / library sources, so it runs on a real change (or a mount),
 # never per idle frame; compare-before-write keeps an unchanged value from
 # bumping a table.
-func albumHeaderSystem(world: mod UiWorld, state: view AppState) pub {
+func albumHeaderSystem(
+  albumSystem: view AlbumSystem
+  world: mod UiWorld
+  state: view AppState
+) pub {
   let cv: CollectionView = buildCurrentCollection(state: state)
   let nb: Int = componentCount(this: world.textBindings)
   var i: Int = 0
@@ -68,10 +83,10 @@ func albumHeaderSystem(world: mod UiWorld, state: view AppState) pub {
   if cv.coverStem.length() is 0 {
     ret
   }
-  let nc: Int = componentCount(this: world.albumHeaders)
+  let nc: Int = componentCount(this: albumSystem.albumHeaders)
   var c: Int = 0
   loop c < nc {
-    let cover: EntityId = componentEntityAt(this: world.albumHeaders, i: c)
+    let cover: EntityId = componentEntityAt(this: albumSystem.albumHeaders, i: c)
     if componentHas(this: world.sprites, entity: cover) {
       let sp: Sprite = componentGet(this: world.sprites, entity: cover)
       if sp.textureKey is not cv.coverStem {

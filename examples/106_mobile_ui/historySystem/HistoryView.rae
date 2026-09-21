@@ -53,6 +53,17 @@ const recentlyPlayedHeaderH: Float = 52.04819277108433
 
 const recentlyPlayedThumbSize: Float = 138.79518072289156
 
+# HistorySystem (docs/ecs-systems-own-their-tables.md §3): owns the history page's `HistoryList`
+# binding — its
+# authored components are ITS tables, no longer lib/ui's.
+type HistorySystem {
+  historyLists: ComponentTable(HistoryList)
+}
+
+func createHistorySystem() ret HistorySystem {
+  ret HistorySystem { historyLists: ComponentTable.create(HistoryList) }
+}
+
 func historyEntryCount(history: view PlayHistory) pub ret Int {
   ret history.entries.length
 }
@@ -124,12 +135,16 @@ func setHistoryActive(world: mod UiWorld, entity: view EntityId, active: view Bo
 # its pooled rows in place on its next run) and show the host. The page's
 # empty-state node follows the history through `emptyStateSystem`. Runs from
 # the observation schedule when the history moved, and once at mount.
-func historyListSystem(world: mod UiWorld, state: view AppState) pub {
-  let n: Int = componentCount(this: world.historyLists)
+func historyListSystem(
+  historySystem: mod HistorySystem
+  world: mod UiWorld
+  state: view AppState
+) pub {
+  let n: Int = componentCount(this: historySystem.historyLists)
   var i: Int = 0
   loop i < n {
-    let host: EntityId = componentEntityAt(this: world.historyLists, i: i)
-    let binding: HistoryList = componentDataAt(this: world.historyLists, i: i)
+    let host: EntityId = componentEntityAt(this: historySystem.historyLists, i: i)
+    let binding: HistoryList = componentDataAt(this: historySystem.historyLists, i: i)
     if binding.builtRevision is not state.playHistory.revision {
       componentSet(
         this: world.listViewDatas
@@ -142,7 +157,7 @@ func historyListSystem(world: mod UiWorld, state: view AppState) pub {
       # `emptyStateSystem`, no page + node-id lookup here.
       setHistoryActive(world: world, entity: host, active: hasEntries)
       let built: HistoryList = { builtRevision: state.playHistory.revision }
-      componentSet(this: world.historyLists, entity: host, data: built)
+      componentSet(this: historySystem.historyLists, entity: host, data: built)
     }
     i = i + 1
   }

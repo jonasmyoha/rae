@@ -83,10 +83,11 @@ func mountBackButtonOverlay(
 # mounted into its authored `MiniPlayer` slot as its own page. Tagged
 # `PageRoot{"dock"}` by the mount. Returns the dock entity.
 func mountBottomDockOverlay(
+  dockSystem: view DockSystem
   world: mod UiWorld
   activeTab: Screen
   scenes: view AlbumScenes
-  playback: view PlaybackState
+  playbackSystem: view PlaybackSystem
   state: view AppState
   reg: view TextureRegistry
 ) pub ret EntityId {
@@ -126,9 +127,9 @@ func mountBottomDockOverlay(
   )
 
   # First run of the dock's layer + nav-tab systems so the very first frame
-  # is right; the playback bindings land in the frame's observation pass.
+  # is right; the playbackSystem bindings land in the frame's observation pass.
   layerTagSystem(world: world)
-  navTabsSystem(world: world, activeTab: activeTab)
+  navTabsSystem(dockSystem: dockSystem, world: world, activeTab: activeTab)
 
   # Canvas overlay (#212 S5/S6 demo) — mounted here because every screen
   # builder already calls mountBottomDockOverlay, and the mount is

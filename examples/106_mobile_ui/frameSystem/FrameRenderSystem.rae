@@ -40,9 +40,10 @@ func frameRenderSystem(
   # willSwitch: per-page re-mount + Active flip + the hero transition.
   # Otherwise the hot-reload watcher poll, which may request an outer rebuild.
   let switchResult: ScreenSwitchResult = handleScreenSwitch(
+    dockSystem: app.musicSystems.dockSystem
     world: world
     scenes: app.scenes
-    playback: app.playback
+    playbackSystem: app.musicSystems.playbackSystem
     appState: appState
     schedule: frame.schedule
     input: session.input

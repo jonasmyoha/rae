@@ -48,7 +48,12 @@ open Gpu2dCanvas
 # for a rebuild (`frame.switching`), at which point the world is rebuilt.
 func runApp(app: mod App) {
   # Memory-stress and screenshot modes both terminate after their run.
-  if runStressMode(scenes: app.scenes, appState: app.appState, gpuUi: app.gpuUi) {
+  if runStressMode(
+    dockSystem: app.musicSystems.dockSystem
+    scenes: app.scenes
+    appState: app.appState
+    gpuUi: app.gpuUi
+  ) {
     ret
   }
   if runScreenshotMode(
@@ -63,8 +68,8 @@ func runApp(app: mod App) {
       let world: UiWorld = buildSessionWorld(app: app, session: session)
       # A new world, new entities: the cover system starts empty and takes
       # the mounted pages' AlbumCover markers before the first frame observes.
-      app.albumCoverSystem = createAlbumCoverSystem()
-      applyMusicComponents(world: world, albumCoverSystem: app.albumCoverSystem)
+      resetMusicTables(musicSystems: app.musicSystems)
+      applyMusicComponents(world: world, musicSystems: app.musicSystems)
       var frame: WorldFrame = createWorldFrame(world: world)
       loop session.running and frame.switching is false {
         var tick: FrameTick = createFrameTick(session: session)
@@ -100,7 +105,7 @@ func runApp(app: mod App) {
           # Frame end (MusicSystems.rae): the components this app's systems
           # own reach their tables, the rest is reported, and the entities a
           # screen switch unmounted are cleared and recycled.
-          musicFrameEnd(world: world, albumCoverSystem: app.albumCoverSystem)
+          musicFrameEnd(world: world, musicSystems: app.musicSystems)
         }
       }
     }
@@ -108,7 +113,11 @@ func runApp(app: mod App) {
 
   # Final snapshot — captures window-drag-only sessions where no dispatched
   # action fired (and thus no in-loop save ran).
-  saveAppState(path: stateFilePath, state: app.appState, playback: app.playback)
+  saveAppState(
+    path: stateFilePath
+    state: app.appState
+    playbackSystem: app.musicSystems.playbackSystem
+  )
   # #950: join the background workers before the window goes — the poll
   # worker on its stop channel, the artwork downloads by waiting them out.
   stopSpotifyPoller(poller: app.spotifyPoller)

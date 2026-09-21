@@ -20,16 +20,14 @@ func frameUpdateSystem(
   tick: mod FrameTick
 ) {
   let appState: mod AppState => app.appState
-  let playback: mod PlaybackState => app.playback
   let input: view InputSystem => session.input
   tick.now = uiNowSeconds()
   let dataSync: FrameDataSyncResult = syncFrameData(
     world: world
-    albumCoverSystem: app.albumCoverSystem
+    musicSystems: app.musicSystems
     scenes: app.scenes
     appState: appState
-    playback: playback
-    spotifyState: app.spotifyState
+    spotifySystem: app.spotifySystem
     spotifyPoller: app.spotifyPoller
     textureRegistry: app.textureRegistry
     observation: frame.observation

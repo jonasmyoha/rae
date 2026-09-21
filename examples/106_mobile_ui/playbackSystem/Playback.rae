@@ -3,7 +3,7 @@ open ui/Ecs
 #
 # Both the big circular play button on the now-playing screen and the
 # small one in the mini-player on the album screen fire the same
-# `playback.toggle` action. We carry one `PlaybackState` through the
+# `playback.toggle` action. We carry one `PlaybackSystem` through the
 # outer loop in `main.rae`, mutate it from `dispatchActions`, and read
 # it back when building the per-frame icon override + progress fill.
 #
@@ -21,7 +21,7 @@ open ecs/Entity
 open ecs/Queue
 open ecs/ComponentTable
 
-# PlaybackState IS the design's PlaybackSystem — the first ECS "actor"
+# PlaybackSystem IS the design's PlaybackSystem — the first ECS "actor"
 # (docs/ecs-systems-and-data-observation.md §3/§5.1). It owns the
 # playback state + an `inbox` of commands; play/pause is a command
 # (`enqueuePlaybackToggle`) drained in the frame's Apply(A) phase by
@@ -40,7 +40,15 @@ type PlaybackCommand {
   kind: PlaybackCommandKind
 }
 
-type PlaybackState {
+# The playback system (docs/ecs-systems-own-their-tables.md §3): it OWNS the
+# playback widgets' authored components — its tables, no longer lib/ui's —
+# and the playback state its update functions write (was PlaybackSystem).
+type PlaybackSystem {
+  playbackIcons: ComponentTable(PlaybackIcon)
+  playbackCovers: ComponentTable(PlaybackCover)
+  likedHearts: ComponentTable(LikedHeart)
+  trackTexts: ComponentTable(TrackText)
+  playbackTimes: ComponentTable(PlaybackTime)
   isPlaying: Bool
   # Data-dependency revision. UI that depends on play/pause state caches this
   # value and refreshes dependent icon bindings instead of waiting for a
@@ -85,8 +93,13 @@ type PlaybackState {
   inbox: Queue(PlaybackCommand)
 }
 
-func createPlaybackState() pub ret PlaybackState {
-  ret PlaybackState {
+func createPlaybackSystem() pub ret PlaybackSystem {
+  ret PlaybackSystem {
+    playbackIcons: ComponentTable.create(PlaybackIcon)
+    playbackCovers: ComponentTable.create(PlaybackCover)
+    likedHearts: ComponentTable.create(LikedHeart)
+    trackTexts: ComponentTable.create(TrackText)
+    playbackTimes: ComponentTable.create(PlaybackTime)
     isPlaying: false
     revision: 0
     elapsedSec: 0.0
@@ -102,20 +115,20 @@ func createPlaybackState() pub ret PlaybackState {
 
 # Flip the play/pause flag. Called by `dispatchActions` when either
 # play button fires its `playback.toggle` action.
-func togglePlayback(state: mod PlaybackState) pub {
-  if state.isPlaying {
-    setPlaybackPlaying(state: state, value: false)
+func togglePlayback(playbackSystem: mod PlaybackSystem) pub {
+  if playbackSystem.isPlaying {
+    setPlaybackPlaying(playbackSystem: playbackSystem, value: false)
   } else {
-    setPlaybackPlaying(state: state, value: true)
+    setPlaybackPlaying(playbackSystem: playbackSystem, value: true)
   }
 }
 
-func setPlaybackPlaying(state: mod PlaybackState, value: view Bool) pub {
-  if state.isPlaying is value {
+func setPlaybackPlaying(playbackSystem: mod PlaybackSystem, value: view Bool) pub {
+  if playbackSystem.isPlaying is value {
     ret
   }
-  state.isPlaying = value
-  state.revision = state.revision + 1
+  playbackSystem.isPlaying = value
+  playbackSystem.revision = playbackSystem.revision + 1
 }
 
 # Set the currently-playing cover art key and bump the nowPlaying
@@ -123,12 +136,12 @@ func setPlaybackPlaying(state: mod PlaybackState, value: view Bool) pub {
 # + mini-player MiniThumb (`PlaybackCover`) observe this revision and
 # re-point by identity (#268). Idempotent: re-setting the same key is a no-op, so callers can
 # call it every frame / poll without spurious re-paints.
-func setNowPlayingArt(state: mod PlaybackState, artKey: view String) pub {
-  if state.nowPlayingArtKey is artKey {
+func setNowPlayingArt(playbackSystem: mod PlaybackSystem, artKey: view String) pub {
+  if playbackSystem.nowPlayingArtKey is artKey {
     ret
   }
-  state.nowPlayingArtKey = "{artKey}"
-  state.nowPlayingRevision = state.nowPlayingRevision + 1
+  playbackSystem.nowPlayingArtKey = "{artKey}"
+  playbackSystem.nowPlayingRevision = playbackSystem.nowPlayingRevision + 1
 }
 
 # --- PlaybackSystem lifecycle: commands (#265) ---
@@ -136,20 +149,20 @@ func setNowPlayingArt(state: mod PlaybackState, artKey: view String) pub {
 # Input-phase send: enqueue a play/pause toggle. Called from
 # `dispatchActions` (local playback); the toggle itself is applied later,
 # in Apply(A), by `processCommands`.
-func enqueuePlaybackToggle(this: mod PlaybackState) pub {
+func enqueuePlaybackToggle(this: mod PlaybackSystem) pub {
   enqueue(this: this.inbox, value: PlaybackCommand { kind: PlaybackCommandKind.togglePlay })
 }
 
 # Apply-phase: drain the inbox and apply each command to OWN state,
 # holding `mod self`. Runs in the frame's Apply(A) pass (main.rae). The
 # eager revision bump rides `setPlaybackPlaying`.
-func processCommands(this: mod PlaybackState) pub {
+func processCommands(this: mod PlaybackSystem) pub {
   let n: Int = queueCount(this: this.inbox)
   var i: Int = 0
   loop i < n {
     let cmd: PlaybackCommand = queueAt(this: this.inbox, i: i)
     if cmd.kind is PlaybackCommandKind.togglePlay {
-      togglePlayback(state: this)
+      togglePlayback(playbackSystem: this)
     }
     i = i + 1
   }
@@ -162,20 +175,20 @@ func processCommands(this: mod PlaybackState) pub {
 # jump on the first resume after a long pause). When `elapsedSec`
 # reaches `durationSec` we wrap back to 0 and keep playing — the
 # demo-friendly choice, see file-header note.
-func advancePlayback(state: mod PlaybackState, now: view Float64) pub {
+func advancePlayback(playbackSystem: mod PlaybackSystem, now: view Float64) pub {
   var deltaTime: Float = 0.0
-  if state.prevTime >= 0.0 {
-    deltaTime = (now - state.prevTime) as Float
+  if playbackSystem.prevTime >= 0.0 {
+    deltaTime = (now - playbackSystem.prevTime) as Float
   }
-  state.prevTime = now
-  if state.isPlaying {
-    state.elapsedSec = state.elapsedSec + deltaTime
-    if state.elapsedSec >= state.durationSec {
+  playbackSystem.prevTime = now
+  if playbackSystem.isPlaying {
+    playbackSystem.elapsedSec = playbackSystem.elapsedSec + deltaTime
+    if playbackSystem.elapsedSec >= playbackSystem.durationSec {
       # Wrap. Subtract instead of zero so a very large `dt` doesn't
       # lose the carry — though in practice dt is well under 1s.
-      state.elapsedSec = state.elapsedSec - state.durationSec
-      if state.elapsedSec < 0.0 {
-        state.elapsedSec = 0.0
+      playbackSystem.elapsedSec = playbackSystem.elapsedSec - playbackSystem.durationSec
+      if playbackSystem.elapsedSec < 0.0 {
+        playbackSystem.elapsedSec = 0.0
       }
     }
   }
@@ -184,11 +197,11 @@ func advancePlayback(state: mod PlaybackState, now: view Float64) pub {
 # Progress in [0, 1]. Clamped so the rendered fill width can never
 # overshoot the track width when `dt` momentarily pushes elapsedSec
 # past durationSec before the wrap check kicks in.
-func playbackProgress(state: view PlaybackState) pub ret Float {
-  if state.durationSec <= 0.0 {
+func playbackProgress(playbackSystem: view PlaybackSystem) pub ret Float {
+  if playbackSystem.durationSec <= 0.0 {
     ret 0.0
   }
-  let p: Float = state.elapsedSec / state.durationSec
+  let p: Float = playbackSystem.elapsedSec / playbackSystem.durationSec
   if p < 0.0 {
     ret 0.0
   }
@@ -212,13 +225,13 @@ func fillWidthChanged(current: view Float, next: view Float) ret Bool {
   ret delta > 0.05
 }
 
-func applyPlaybackToWorld(world: mod UiWorld, state: view PlaybackState) pub {
+func applyPlaybackToWorld(world: mod UiWorld, playbackSystem: view PlaybackSystem) pub {
   unsafe {
     # Every `ProgressBar` (#979): the fill is the track's first child. Read
     # the track's laid-out width from its ComputedRect, scale by progress and
     # write the fill's ComputedRect — and its authored Rect, so a later
     # layout pass keeps the width instead of resetting it.
-    let p: Float = playbackProgress(state: state)
+    let p: Float = playbackProgress(playbackSystem: playbackSystem)
     let n: Int = componentCount(this: world.progressBars)
     var i: Int = 0
     loop i < n {

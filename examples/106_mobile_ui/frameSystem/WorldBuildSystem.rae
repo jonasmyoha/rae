@@ -30,15 +30,16 @@ func refreshActiveAlbumCache(app: mod App, session: mod AppSession) {
   }
   let trackDurSec: Float = session.cachedTrackDurMs.toFloat() / 1000.0
   if trackDurSec > 0.0 {
-    app.playback.durationSec = trackDurSec
+    app.musicSystems.playbackSystem.durationSec = trackDurSec
   }
 }
 
 func buildSessionWorld(app: mod App, session: mod AppSession) ret UiWorld {
   let appState: mod AppState => app.appState
   let world: UiWorld = buildAppWorld(
+    dockSystem: app.musicSystems.dockSystem
     scenes: app.scenes
-    playback: app.playback
+    playbackSystem: app.musicSystems.playbackSystem
     state: appState
     textureRegistry: app.textureRegistry
     viewport: app.viewport

@@ -41,9 +41,10 @@ type ScreenSwitchResult {
 }
 
 func handleScreenSwitch(
+  dockSystem: view DockSystem
   world: mod UiWorld
   scenes: mod AlbumScenes
-  playback: mod PlaybackState
+  playbackSystem: mod PlaybackSystem
   appState: mod AppState
   schedule: mod Schedule
   input: mod InputSystem
@@ -131,7 +132,7 @@ func handleScreenSwitch(
   # #978: the nav-tabs bar and the back button are resident. The active
   # tab is a component the nav-tabs system restyles in place; the back
   # button's page is shown while a sub-page is open.
-  navTabsSystem(world: world, activeTab: appState.tab)
+  navTabsSystem(dockSystem: dockSystem, world: world, activeTab: appState.tab)
   setPageActive(world: world, pageId: backButtonPageId, active: isSubPage(state: appState))
 
   # Re-seed safe-area insets onto the freshly re-mounted page BEFORE the
@@ -181,7 +182,7 @@ func handleScreenSwitch(
     result.cachedTrackIndex = appState.currentTrackIndex
     let trackDurSec2: Float = result.cachedTrackDurMs.toFloat() / 1000.0
     if trackDurSec2 > 0.0 {
-      playback.durationSec = trackDurSec2
+      playbackSystem.durationSec = trackDurSec2
     }
   }
   # Persistent per-page scroll: read the new page's ScrollState.y.

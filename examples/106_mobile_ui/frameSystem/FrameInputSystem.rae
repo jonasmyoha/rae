@@ -20,7 +20,7 @@ func frameInputSystem(
   tick: mod FrameTick
 ) {
   let appState: mod AppState => app.appState
-  let playback: mod PlaybackState => app.playback
+  let playbackSystem: mod PlaybackSystem => app.musicSystems.playbackSystem
   let scrollFsm: mod ScrollFsm => session.scrollFsm
   let input: mod InputSystem => session.input
   # Hot-reload poll. If `rae watch` signalled a fresh build, snapshot
@@ -107,14 +107,14 @@ func frameInputSystem(
   let inputDispatch: FrameInputDispatchResult = runFrameInputDispatch(
     input: input
     currentScreen: session.currentScreen
-    playback: playback
+    playbackSystem: playbackSystem
     appState: appState
     world: world
     debug: session.debug
     scenes: app.scenes
     actionTable: app.actionTable
     commands: app.commands
-    spotifyEnabled: app.spotifyState.enabled
+    spotifyEnabled: app.spotifySystem.enabled
     dragJustReleased: tick.dragJustReleased
   )
   tick.nextScreen = inputDispatch.nextScreen
@@ -123,7 +123,7 @@ func frameInputSystem(
   # Apply(A): the PlaybackSystem drains its own command inbox and applies
   # play/pause (etc.) to its own state before the observation refresh reads
   # it (#265).
-  processCommands(this: playback)
+  processCommands(this: playbackSystem)
 
   # Observation (A): every app binding system whose declared sources or
   # tables moved — the commands above, a mount, a typed query — runs now, so
@@ -131,11 +131,11 @@ func frameInputSystem(
   # handler (observeSystem/AppObservation).
   beginObservationFrame(observation: frame.observation)
   let observed: Int = runAppObservation(
+    playbackSystem: playbackSystem
     observation: frame.observation
     world: world
-    albumCoverSystem: app.albumCoverSystem
+    musicSystems: app.musicSystems
     state: appState
-    playback: playback
     scenes: app.scenes
     reg: app.textureRegistry
   )
