@@ -384,6 +384,7 @@ void rae_ext_rae_log_list_typed(void* data, int64_t length, int64_t capacity, in
 void rae_ext_rae_log_stream_list_typed(void* data, int64_t length, int64_t capacity, int elem_kind);
 
 rae_String rae_ext_rae_str_from_cstr(const void* s);
+rae_String rae_ext_rae_str_from_codepoint(int64_t code);
 rae_String rae_ext_rae_str_from_buf(const uint8_t* data, int64_t len);
 void* rae_ext_rae_str_to_cstr(rae_String s);
 // Free `s.data` only when `s.is_owned`. Safe to call on borrowed

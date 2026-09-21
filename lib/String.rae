@@ -43,6 +43,17 @@ func fromCStr(s: view Buffer(Any)) unsafe ret String {
   }
 }
 
+func rae_ext_rae_str_from_codepoint(code: Int) unsafe extern ret String
+
+# One Unicode scalar (a code point, e.g. 8212 for the em dash) as a String —
+# its 1..4 UTF-8 bytes. A value outside U+0000..U+10FFFF, or in the
+# surrogate range, becomes U+FFFD. The inverse of `at`.
+func fromCodepoint(code: view Int) ret String {
+  unsafe {
+    ret rae_ext_rae_str_from_codepoint(code: code)
+  }
+}
+
 # Hands out a raw pointer aliasing this String's storage; the caller must not
 # let it outlive the String. Delegates that obligation, so it is unsafe.
 func toCStr(this: view String) unsafe ret Buffer(Any) {
