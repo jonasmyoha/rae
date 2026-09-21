@@ -1,0 +1,289 @@
+# chromeSystem — the editor's chrome is driven through COMPONENTS, never node
+# ids (#32499842; the 106 shape, docs/ecs-general-architecture.md). The
+# chrome scene authors `TextBinding { key: "editor.<name>" }` on every label,
+# `EditorPanel` / `PanelToggle` on the panels and the pills that minimise
+# them, `EditArea` on the space the document is fitted into, `EditorList` on
+# the three lists and `DiagnosticsBadge` on the count pill; the systems here
+# find them by table and write what the EditorStatus resource says.
+open ui/Ecs
+open ui/Components
+open ui/BindingComponents
+open app3d/UiShell
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Event
+
+# What the chrome shows, as data: every `editor.*` text the labels bind to.
+# The app fills it after a load, a selection, a camera move; editorTextSystem
+# writes it into the bound Text nodes.
+type EditorStatus {
+  fileName: String
+  nodeCount: Int
+  diagnosticsCount: Int
+  designSize: String
+  statusLine: String
+  zoomLabel: String
+  projectTitle: String
+  frameLabel: String
+  safeAreaLabel: String
+  inspectorNodeId: String
+  inspectorType: String
+  inspectorComponents: String
+  inspectorRect: String
+  inspectorParents: String
+}
+
+func createEditorStatus() ret EditorStatus {
+  ret EditorStatus {
+    fileName: ""
+    nodeCount: 0
+    diagnosticsCount: 0
+    designSize: ""
+    statusLine: ""
+    zoomLabel: "100%"
+    projectTitle: "Project"
+    frameLabel: ""
+    safeAreaLabel: ""
+    inspectorNodeId: "nothing selected"
+    inspectorType: "click a node, or use the arrows"
+    inspectorComponents: ""
+    inspectorRect: ""
+    inspectorParents: ""
+  }
+}
+
+func editorTextFor(status: view EditorStatus, key: view String) ret String {
+  if key is "editor.fileName" {
+    ret "{status.fileName}"
+  }
+  if key is "editor.nodeCount" {
+    ret "{status.nodeCount} nodes"
+  }
+  if key is "editor.diagnosticsCount" {
+    if status.diagnosticsCount is 0 {
+      ret "no diagnostics"
+    }
+    if status.diagnosticsCount is 1 {
+      ret "1 diagnostic"
+    }
+    ret "{status.diagnosticsCount} diagnostics"
+  }
+  if key is "editor.designSize" {
+    ret "{status.designSize}"
+  }
+  if key is "editor.statusLine" {
+    ret "{status.statusLine}"
+  }
+  if key is "editor.zoomLabel" {
+    ret "{status.zoomLabel}"
+  }
+  if key is "editor.projectTitle" {
+    ret "{status.projectTitle}"
+  }
+  if key is "editor.frameLabel" {
+    ret "{status.frameLabel}"
+  }
+  if key is "editor.safeAreaLabel" {
+    ret "{status.safeAreaLabel}"
+  }
+  if key is "editor.inspector.nodeId" {
+    ret "{status.inspectorNodeId}"
+  }
+  if key is "editor.inspector.type" {
+    ret "{status.inspectorType}"
+  }
+  if key is "editor.inspector.components" {
+    ret "{status.inspectorComponents}"
+  }
+  if key is "editor.inspector.rect" {
+    ret "{status.inspectorRect}"
+  }
+  if key is "editor.inspector.parents" {
+    ret "{status.inspectorParents}"
+  }
+  ret ""
+}
+
+# Every `TextBinding` whose key is an `editor.*` key gets its Text from the
+# status. Other keys (a document's own bindings, 106's `album.title`) are
+# another app's and are left alone. Writes only on change, so an idle frame
+# bumps no table generation.
+func editorTextSystem(world: mod UiWorld, status: view EditorStatus) {
+  let count: Int = componentCount(this: world.textBindings)
+  loop var i: Int = 0, i < count, ++i {
+    let entity: EntityId = componentEntityAt(this: world.textBindings, i: i)
+    let binding: view TextBinding => componentView(this: world.textBindings, entity: entity)
+    if binding.key.startsWith(prefix: "editor.") is false {
+      continue
+    }
+    if componentHas(this: world.texts, entity: entity) is false {
+      continue
+    }
+    let value: String = editorTextFor(status: status, key: binding.key)
+    let current: view Text => componentView(this: world.texts, entity: entity)
+    if current.text is value {
+      continue
+    }
+    let text: mod Text => componentMod(this: world.texts, entity: entity)
+    text.text = value
+  }
+}
+
+# The diagnostics pill: red with a count, the muted surface without.
+func diagnosticsBadgeSystem(world: mod UiWorld, diagnosticsCount: view Int) {
+  var fill: RgbaColor = { r: 46, g: 54, b: 78, a: 255 }
+  if diagnosticsCount > 0 {
+    fill = RgbaColor { r: 200, g: 40, b: 52, a: 255 }
+  }
+  let count: Int = componentCount(this: world.diagnosticsBadges)
+  loop var i: Int = 0, i < count, ++i {
+    let entity: EntityId = componentEntityAt(this: world.diagnosticsBadges, i: i)
+    if componentHas(this: world.shapes, entity: entity) is false {
+      continue
+    }
+    let current: Shape = componentGet(this: world.shapes, entity: entity)
+    if current.fill.r is fill.r and current.fill.g is fill.g and current.fill.b is fill.b and current.fillSlot.length() is 0 {
+      continue
+    }
+    let shape: mod Shape => componentMod(this: world.shapes, entity: entity)
+    shape.fill = fill
+    shape.fillSlot = ""
+  }
+}
+
+# ----- panels ---------------------------------------------------------------
+
+# Whether any EditorPanel of `kind` is active (the panel's own component is
+# the truth — there is no mirror flag).
+func editorPanelOpen(world: view UiWorld, kind: view EditorPanelKind) ret Bool {
+  let count: Int = componentCount(this: world.editorPanels)
+  loop var i: Int = 0, i < count, ++i {
+    let entity: EntityId = componentEntityAt(this: world.editorPanels, i: i)
+    let panel: EditorPanel = componentDataAt(this: world.editorPanels, i: i)
+    if panel.panel is kind {
+      if componentHas(this: world.actives, entity: entity) is false {
+        ret true
+      }
+      ret componentGet(this: world.actives, entity: entity).value
+    }
+  }
+  ret false
+}
+
+func setEditorPanelOpen(world: mod UiWorld, kind: view EditorPanelKind, open: view Bool) {
+  let count: Int = componentCount(this: world.editorPanels)
+  loop var i: Int = 0, i < count, ++i {
+    let entity: EntityId = componentEntityAt(this: world.editorPanels, i: i)
+    let panel: EditorPanel = componentDataAt(this: world.editorPanels, i: i)
+    if panel.panel is kind {
+      componentSet(this: world.actives, entity: entity, data: Active { value: open })
+    }
+  }
+}
+
+func toggleEditorPanel(world: mod UiWorld, kind: view EditorPanelKind) {
+  setEditorPanelOpen(world: world, kind: kind, open: not editorPanelOpen(world: world, kind: kind))
+}
+
+# A fired action whose entity carries a PanelToggle flips that panel kind.
+# Returns whether any panel changed.
+func panelToggleSystem(world: mod UiWorld) ret Bool {
+  var changed: Bool = false
+  let count: Int = eventCount(this: world.uiActions)
+  loop var a: Int = 0, a < count, ++a {
+    let action: UiAction = eventAt(this: world.uiActions, i: a)
+    if componentHas(this: world.panelToggles, entity: action.entity) {
+      let toggle: PanelToggle = componentGet(this: world.panelToggles, entity: action.entity)
+      toggleEditorPanel(world: world, kind: toggle.panel)
+      changed = true
+    }
+  }
+  ret changed
+}
+
+# ----- the edit area --------------------------------------------------------
+type EditAreaRect {
+  x: Float
+  y: Float
+  w: Float
+  h: Float
+}
+
+# The rect of the node tagged EditArea (the space between the panels), or the
+# whole canvas until the chrome has laid out.
+func editAreaOf(world: view UiWorld, canvasW: view Float, canvasH: view Float) ret EditAreaRect {
+  var area: EditAreaRect = { x: 0.0, y: 0.0, w: canvasW, h: canvasH }
+  if componentCount(this: world.editAreas) is 0 {
+    ret area
+  }
+  let entity: EntityId = componentEntityAt(this: world.editAreas, i: 0)
+  if componentHas(this: world.computedRects, entity: entity) and componentHas(
+    this: world.worldTransforms
+    entity: entity
+  ) {
+    let rect: ComputedRect = componentGet(this: world.computedRects, entity: entity)
+    let transform: WorldTransform2D = componentGet(this: world.worldTransforms, entity: entity)
+    if rect.size.x > 0.0 and rect.size.y > 0.0 {
+      area.x = transform.position.x
+      area.y = transform.position.y
+      area.w = rect.size.x
+      area.h = rect.size.y
+    }
+  }
+  ret area
+}
+
+func pointInEditArea(world: view UiWorld, x: view Float, y: view Float) ret Bool {
+  if componentCount(this: world.editAreas) is 0 {
+    ret true
+  }
+  let area: EditAreaRect = editAreaOf(world: world, canvasW: 0.0, canvasH: 0.0)
+  if area.w <= 0.0 {
+    ret true
+  }
+  ret x >= area.x and y >= area.y and x <= area.x + area.w and y <= area.y + area.h
+}
+
+# ----- lists ----------------------------------------------------------------
+
+# The ListView tagged with `source`, or none.
+func editorListEntity(world: view UiWorld, source: view EditorListSource) ret EntityId {
+  let count: Int = componentCount(this: world.editorLists)
+  loop var i: Int = 0, i < count, ++i {
+    let list: EditorList = componentDataAt(this: world.editorLists, i: i)
+    if list.source is source {
+      ret componentEntityAt(this: world.editorLists, i: i)
+    }
+  }
+  ret noEntity()
+}
+
+# The side panels are 300 / 320 points wide with 12 points of padding; a
+# list inside one is this wide (the row pool takes its width from the list's
+# authored Rect — queued to follow layout instead).
+const chromePanelInnerW: Float = 276.0
+
+# Size the list to its row count (capped at its visible count) and hand it
+# the rows.
+func setEditorListRows(world: mod UiWorld, list: view EntityId, rows: own List(ListViewRow)) {
+  if isNone(this: list) {
+    ret
+  }
+  if componentHas(this: world.rects, entity: list) and componentHas(
+    this: world.listViews
+    entity: list
+  ) {
+    let listView: ListView = componentGet(this: world.listViews, entity: list)
+    var shown: Int = rows.length
+    if shown < 1 {
+      shown = 1
+    }
+    if shown > listView.visibleItemCount {
+      shown = listView.visibleItemCount
+    }
+    let rect: mod Rect => componentMod(this: world.rects, entity: list)
+    rect.size.x = chromePanelInnerW
+    rect.size.y = shown.toFloat() * (listView.itemHeight + listView.itemGap) - listView.itemGap
+  }
+  componentSet(this: world.listViewDatas, entity: list, data: ListViewData { rows: own rows })
+}

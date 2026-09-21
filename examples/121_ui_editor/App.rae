@@ -62,6 +62,7 @@ func reloadDocument(app: mod App) {
     syncGuides(
       guides: app.guides
       world: app.world
+      status: app.status
       designW: app.document.designW
       designH: app.document.designH
       columnW: app.document.columnW
@@ -86,6 +87,7 @@ func reloadDocument(app: mod App) {
     applyCamera(
       camera: app.camera
       world: app.world
+      status: app.status
       documentRoot: app.document.pageRoot
       guidesRoot: app.guides.pageRoot
     )
@@ -101,13 +103,14 @@ func reloadDocument(app: mod App) {
   }
   chromeSyncSystem(
     world: app.world
+    status: app.status
     fileName: app.document.fileName
     designW: app.document.designW
     designH: app.document.designH
     columnW: app.document.columnW
     safeTop: app.document.safeInsets.t
     nodeCount: app.document.nodeCount
-    status: app.document.status
+    documentStatus: app.document.status
   )
   watchRememberMtimes(watch: app.watch, paths: app.document.watchedPaths)
   if mounted {
@@ -115,8 +118,8 @@ func reloadDocument(app: mod App) {
     inspectorAfterLoad(
       inspector: app.inspector
       world: app.world
+      status: app.status
       pageRoot: app.document.pageRoot
-      designW: app.document.designW
       selectNodeId: keepSelected
     )
   }
@@ -149,12 +152,12 @@ func openPath(app: mod App, path: view String) {
     world: app.world
     open: app.document.projectPack.length() > 0
   )
-  syncProjectPanel(
+  projectListSystem(
     world: app.world
+    status: app.status
     projectName: app.document.projectName
     projectScenes: app.document.projectScenes
     currentScene: documentPackagePath(document: app.document)
-    designW: app.document.designW
   )
 }
 
@@ -178,12 +181,12 @@ func openProjectScene(app: mod App, index: view Int) {
     setDocumentScene(document: app.document, packagePath: packagePath)
     log("[ui-editor] open {packagePath} ({app.document.path})")
     reloadDocument(app: app)
-    syncProjectPanel(
+    projectListSystem(
       world: app.world
+      status: app.status
       projectName: app.document.projectName
       projectScenes: app.document.projectScenes
       currentScene: packagePath
-      designW: app.document.designW
     )
   }
 }
@@ -229,23 +232,23 @@ func runApp(app: mod App) ret Int {
   inspectorAfterLoad(
     inspector: app.inspector
     world: app.world
+    status: app.status
     pageRoot: app.document.pageRoot
-    designW: app.document.designW
     selectNodeId: app.testSelectNodeId
   )
   inspectorSystem(
     inspector: app.inspector
     world: app.world
+    status: app.status
     input: input
     pageRoot: app.document.pageRoot
     chromeVisible: app.chrome.visible
-    designW: app.document.designW
   )
   listViewSystem(world: app.world, scenes: app.document.registry)
   runScheduledUiSystems(schedule: app.schedule, world: app.world, res: app.gpuUi)
   # The chrome has laid out: fit the document into the edit area (and apply
   # RAE_UI_EDITOR_ZOOM), then let the transform pass pick the camera up.
-  var editArea: EditArea = editAreaOf(
+  var editArea: EditAreaRect = editAreaOf(
     world: app.world
     canvasW: app.viewport.designW
     canvasH: app.viewport.designH
@@ -255,6 +258,7 @@ func runApp(app: mod App) ret Int {
   applyCamera(
     camera: app.camera
     world: app.world
+    status: app.status
     documentRoot: app.document.pageRoot
     guidesRoot: app.guides.pageRoot
   )
@@ -285,18 +289,15 @@ func runApp(app: mod App) ret Int {
       canvasW: app.viewport.designW
       canvasH: app.viewport.designH
     )
-    if uiActionFired(world: app.world, actionId: "panel.left") {
-      setLeftPanelOpen(chrome: app.chrome, world: app.world, open: not app.chrome.leftOpen)
+    if panelToggleSystem(world: app.world) {
       changed = true
     }
-    if uiActionFired(world: app.world, actionId: "panel.right") {
-      setRightPanelOpen(chrome: app.chrome, world: app.world, open: not app.chrome.rightOpen)
-      changed = true
-    }
+    editorTextSystem(world: app.world, status: app.status)
     if cameraInputSystem(camera: app.camera, world: app.world, area: editArea) {
       applyCamera(
         camera: app.camera
         world: app.world
+        status: app.status
         documentRoot: app.document.pageRoot
         guidesRoot: app.guides.pageRoot
       )
@@ -315,8 +316,9 @@ func runApp(app: mod App) ret Int {
       syncGuides(
         guides: app.guides
         world: app.world
-        designW: app.viewport.designW
-        designH: app.viewport.designH
+        status: app.status
+        designW: app.document.designW
+        designH: app.document.designH
         columnW: app.document.columnW
         safeInsets: app.document.safeInsets
       )
@@ -366,10 +368,10 @@ func runApp(app: mod App) ret Int {
     if inspectorSystem(
       inspector: app.inspector
       world: app.world
+      status: app.status
       input: input
       pageRoot: app.document.pageRoot
       chromeVisible: app.chrome.visible
-      designW: app.document.designW
     ) {
       changed = true
     }
@@ -407,6 +409,7 @@ func runApp(app: mod App) ret Int {
         applyCamera(
           camera: app.camera
           world: app.world
+          status: app.status
           documentRoot: app.document.pageRoot
           guidesRoot: app.guides.pageRoot
         )
