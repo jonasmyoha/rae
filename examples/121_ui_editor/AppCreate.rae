@@ -210,6 +210,8 @@ func createApp() ret App {
     frameW: document.designW
     frameH: document.designH
     homeX: documentHomeX(designW: document.designW, columnW: document.columnW)
+    documentRoot: document.pageRoot
+    guidesRoot: guides.pageRoot
   )
 
   # The chrome: the app's own scene on its own layer, sized to the design
@@ -240,14 +242,6 @@ func createApp() ret App {
   if getEnv(name: "RAE_UI_EDITOR_PANEL") is "1" {
     setEditorPanelOpen(world: world, kind: EditorPanelKind.diagnostics, open: true)
   }
-
-  applyCamera(
-    camera: camera
-    world: world
-    status: status
-    documentRoot: document.pageRoot
-    guidesRoot: guides.pageRoot
-  )
 
   var textures: TextureSearch = createTextureSearch()
   unsafe {
