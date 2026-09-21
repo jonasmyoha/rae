@@ -29,6 +29,9 @@ type EditorStatus {
   inspectorNodeId: String
   inspectorType: String
   inspectorComponents: String
+  # The selected node's authored components no lib table matched — an app's
+  # own, kept as authored; "" when none.
+  inspectorAppComponents: String
   inspectorRect: String
   inspectorParents: String
 }
@@ -47,6 +50,7 @@ func createEditorStatus() ret EditorStatus {
     inspectorNodeId: "nothing selected"
     inspectorType: "click a node, or use the arrows"
     inspectorComponents: ""
+    inspectorAppComponents: ""
     inspectorRect: ""
     inspectorParents: ""
   }
@@ -94,6 +98,9 @@ func editorTextFor(status: view EditorStatus, key: view String) ret String {
   }
   if key is "editor.inspector.components" {
     ret "{status.inspectorComponents}"
+  }
+  if key is "editor.inspector.appComponents" {
+    ret "{status.inspectorAppComponents}"
   }
   if key is "editor.inspector.rect" {
     ret "{status.inspectorRect}"

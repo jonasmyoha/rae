@@ -58,6 +58,9 @@ func main() {
 
   # Unmount; entities for Root/Body/Footer should be gone from alive.
   unmountPage(world: world, pageId: pageId)
+  # A destroyed index is recycled only once the app has swept its own tables
+  # and released it (the dead-entities outbox); this test has no app tables.
+  releaseDeadEntities(world: world)
   log("alive after unmount: {aliveCount(world: world)}")
   if let bodyGone: Int = findNodeInPage(world: world, pageId: pageId, nodeId: "Body") {
     log("body after unmount: {bodyGone} (leaked!)")

@@ -1,6 +1,7 @@
 open HotReload
 open ui/WindowGeometry
 open ui/Ecs
+open ui/Registry
 open ui/Pipeline
 open ecs/Schedule
 open ecs/Event
@@ -92,6 +93,11 @@ func runApp(app: mod App) {
             frame: frame
             tick: tick
           )
+          # Frame end: the authored components no lib table matched are
+          # unknown (this app's own components still live on UiWorld until
+          # the ECS split moves them), and the entities a screen switch
+          # unmounted can have their indices recycled.
+          uiFrameEnd(world: world)
         }
       }
     }

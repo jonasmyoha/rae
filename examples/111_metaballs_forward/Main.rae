@@ -55,6 +55,7 @@ open Scene3d
 open Scene3dFile
 open SceneAnimation
 open ui/Ecs
+open ui/Registry
 open ui/inputSystem/InputSystem
 open ui/layoutSystem/LayoutSystem
 open ui/renderSystem/RenderSystem
@@ -816,6 +817,9 @@ func main() ret Int {
         world3dPrevTransformSystem(world: scene3.world)
       }
     }
+    # Frame end: report the authored components no lib table matched (this app
+    # has no tables of its own) and recycle the indices of destroyed entities.
+    uiFrameEnd(world: uiWorld)
   }
   # Final flush: the throttle may have a pending change when the loop ends.
   # Headless runs neither read nor write the snapshot — a smoke test must

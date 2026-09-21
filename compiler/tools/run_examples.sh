@@ -266,8 +266,9 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           fi
           # The watcher (#998): the app opens a COPY of the samples (the repo
           # files stay untouched), rewrites it itself after 600 ms with the
-          # .rewrite twin (one changed Text, one bogus component), and must log
-          # the reload with exactly 1 diagnostic and still render a frame with
+          # .rewrite twin (one changed Text, one component no lib table has —
+          # an app's own, KEPT as authored, not an error), and must log
+          # the reload with 0 diagnostics + 1 kept and still render a frame with
           # the diagnostics panel open.
           WATCH_DIR="$TMP_OUT/watch-samples"
           cp -r ../examples/121_ui_editor/assets/samples "$WATCH_DIR"
@@ -276,7 +277,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              RAE_UI_EDITOR_PANEL=1 RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=2200 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
              perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-reload.log" 2>&1 \
              && grep -qE "\[ui-editor\] mounted MainMenu: [1-9][0-9]* nodes, 0 diagnostics" "$TMP_OUT/render-reload.log" \
-             && grep -qE "\[ui-editor\] reloaded .*MainMenu.raescene \(\+[1-9][0-9]* -[1-9][0-9]* nodes, 1 diagnostics\)" "$TMP_OUT/render-reload.log" \
+             && grep -qE "\[ui-editor\] reloaded .*MainMenu.raescene \(\+[1-9][0-9]* -[1-9][0-9]* nodes, 0 diagnostics, 1 app components kept\)" "$TMP_OUT/render-reload.log" \
              && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=50 \
                 > "$TMP_OUT/screenshot-reload.log" 2>&1; then
             :

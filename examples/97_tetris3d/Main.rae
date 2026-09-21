@@ -10,6 +10,7 @@ open RendererDeferred
 open Rendergraph
 open Scene3d
 open ui/DebugOverlay
+open ui/Registry
 open ui/Ecs
 open ui/renderSystem/RenderSystem
 open Gpu2dCanvas
@@ -183,6 +184,9 @@ func main() ret Int {
         debug: dbg
       )
     }
+    # Frame end: report the authored components no lib table matched (this app
+    # has no tables of its own) and recycle the indices of destroyed entities.
+    uiFrameEnd(world: uiWorld)
   }
 
   if testMode {

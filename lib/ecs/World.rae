@@ -85,6 +85,25 @@ func allocEntity(this: mod EntityAllocator) ret EntityId {
 # the sparse slot map (swap the last entry into the hole, fix the moved entity's
 # recorded slot, pop, clear this slot).
 func freeEntity(this: mod EntityAllocator, entity: view EntityId) {
+  retireEntity(this: this, entity: entity)
+  recycleEntityIndex(this: this, entity: entity)
+}
+
+# The free-list half of freeEntity: make the index allocatable again. Only
+# valid for an entity that was retired; a world that defers reuse (UiWorld's
+# dead-entities outbox) calls this once the app has swept its own tables.
+func recycleEntityIndex(this: mod EntityAllocator, entity: view EntityId) {
+  if entity.index < 0 {
+    ret
+  }
+  appendIntList(lst: this.freeList, value: entity.index)
+}
+
+# The liveness half of freeEntity: bump the slot's generation (stale handles
+# compare unequal, isAlive is false) and drop the entity from the live set —
+# WITHOUT returning the index to the free list, so nothing can be allocated
+# into it yet.
+func retireEntity(this: mod EntityAllocator, entity: view EntityId) {
   let idx: Int = entity.index
   if idx < 0 {
     ret
@@ -92,7 +111,6 @@ func freeEntity(this: mod EntityAllocator, entity: view EntityId) {
   ensureIntSlots(lst: this.generations, index: idx)
   let cur: Int = intListAt(lst: this.generations, index: idx)
   setIntListAt(lst: this.generations, index: idx, value: cur + 1)
-  appendIntList(lst: this.freeList, value: idx)
   # O(1) removal from the dense `alive` list.
   if idx >= this.aliveSlot.length {
     ret

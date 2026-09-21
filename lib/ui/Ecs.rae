@@ -236,6 +236,13 @@ type UiWorld {
   # serialized; the field loops over ComponentTable(any) skip them.
   scenePolicy: ScenePolicy
   sceneDiagnostics: List(SceneDiagnostic)
+  # The two OUTBOXES through which lib reaches the app's own tables without a
+  # callback (docs/ecs-systems-own-their-tables.md §3.2): authored components
+  # no UiWorld table matched, waiting for the app's systems (or, in an editor,
+  # deliberately kept); and destroyed entities whose index is NOT recycled
+  # until the app has cleared its own tables and called releaseDeadEntities.
+  pendingComponents: List(PendingComponent)
+  deadEntities: List(EntityId)
 }
 
 func createUiWorld() ret UiWorld {
@@ -362,6 +369,8 @@ func createUiWorld() ret UiWorld {
     uiActions: createEventQueue(UiAction)
     scenePolicy: createScenePolicy()
     sceneDiagnostics: createSceneDiagnostics()
+    pendingComponents: createPendingComponents()
+    deadEntities: List.create(EntityId, cap: 32)
   }
 }
 
@@ -601,10 +610,44 @@ func destroyEntity(world: mod UiWorld, entity: view EntityId) pub {
   # silently rotted whenever a table was added (see #756). clearEntityComponents
   # unrolls `fields(world)` to one componentRemove per ComponentTable field.
   clearEntityComponents(world: world, entity: entity)
-  # Finally: recycle the index, bump its generation (so a stale handle compares
-  # unequal to any future entity reusing the slot), and drop it from the live
-  # set in O(1). All of that now lives in the shared entity core (#706).
-  freeEntity(this: world.allocator, entity: entity)
+  # A pending authored component of this entity has nowhere to go any more.
+  dropPendingComponentsOf(world: world, entity: entity)
+  # Retire, do not free: bump the generation (a stale handle compares unequal)
+  # and drop the entity from the live set NOW — isAlive/aliveCount are exact
+  # immediately — but keep the index OUT of the free list until the app has
+  # cleared the entity from its own systems' tables and called
+  # releaseDeadEntities (the dead-entities outbox, §3.2). Recycling the index
+  # first would let a new entity inherit the old one's rows in an app table.
+  retireEntity(this: world.allocator, entity: entity)
+  world.deadEntities.add(value: entity)
+}
+
+# Hand every retired index back to the allocator for reuse. The app calls this
+# once per frame AFTER its own systems have cleared the dead entities from
+# their tables (and after any unmount); an app with no tables of its own calls
+# it right after the lib pipeline.
+func releaseDeadEntities(world: mod UiWorld) pub {
+  loop let entity: view EntityId in world.deadEntities {
+    recycleEntityIndex(this: world.allocator, entity: entity)
+  }
+  world.deadEntities.clear()
+}
+
+# Remove the pending rows that name `entity` (swap-remove; order is not part
+# of the outbox's contract).
+func dropPendingComponentsOf(world: mod UiWorld, entity: view EntityId) {
+  var i: Int = 0
+  loop i < world.pendingComponents.length {
+    var hit: Bool = false
+    if let pending: view PendingComponent => world.pendingComponents.viewAt(index: i) {
+      hit = pending.entity is entity
+    }
+    if hit {
+      world.pendingComponents.swapRemove(index: i)
+    } else {
+      i = i + 1
+    }
+  }
 }
 
 # Recursively destroy `root` and every descendant via the Children
