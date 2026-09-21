@@ -190,8 +190,8 @@ type PlaybackIcon {
 
 # Now-playing cover: the Sprite key follows the playing track's art
 # (`nowPlayingRevision` observed); seeded from the browsed album at mount.
-# Its corner rounding is a `CoverStyle` on the same node (coverStyleSystem),
-# shared with every other cover.
+# Its corner rounding is an authored `CornerRadius` like every other cover
+# (the app's AlbumCoverSystem squares / restores it with the setting).
 type PlaybackCover {
   builtRevision: Int = -1
 }
@@ -213,16 +213,6 @@ type TrackText {
 
 type ProgressBar {
   enabled: Bool = true
-}
-
-# A cover image whose corner radius follows a boolean "rounded covers" style
-# toggle (an app setting). `coverStyleSystem(world, rounded)` sets the node's
-# CornerRadius to `radius` when rounded and REMOVES it (sharp, so a
-# missing-texture placeholder still uses the renderer's own fallback radius)
-# when not — ONE system for every cover, so the setting flips them all at
-# once. `radius` is the rounded corner: a pixel value or a `radius*` token.
-type CoverStyle {
-  radius: Float = 0.0
 }
 
 # A playback time label: the M:SS position (`elapsed`) or track duration

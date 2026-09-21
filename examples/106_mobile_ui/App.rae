@@ -61,6 +61,10 @@ func runApp(app: mod App) {
     loop session.running {
       refreshActiveAlbumCache(app: app, session: session)
       let world: UiWorld = buildSessionWorld(app: app, session: session)
+      # A new world, new entities: the cover system starts empty and takes
+      # the mounted pages' AlbumCover markers before the first frame observes.
+      app.albumCoverSystem = createAlbumCoverSystem()
+      applyMusicComponents(world: world, albumCoverSystem: app.albumCoverSystem)
       var frame: WorldFrame = createWorldFrame(world: world)
       loop session.running and frame.switching is false {
         var tick: FrameTick = createFrameTick(session: session)
@@ -93,11 +97,10 @@ func runApp(app: mod App) {
             frame: frame
             tick: tick
           )
-          # Frame end: the authored components no lib table matched are
-          # unknown (this app's own components still live on UiWorld until
-          # the ECS split moves them), and the entities a screen switch
-          # unmounted can have their indices recycled.
-          uiFrameEnd(world: world)
+          # Frame end (MusicSystems.rae): the components this app's systems
+          # own reach their tables, the rest is reported, and the entities a
+          # screen switch unmounted are cleared and recycled.
+          musicFrameEnd(world: world, albumCoverSystem: app.albumCoverSystem)
         }
       }
     }

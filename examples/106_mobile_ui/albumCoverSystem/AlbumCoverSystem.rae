@@ -1,0 +1,72 @@
+# AlbumCoverSystem — the "rounded album covers" setting as an app system
+# (docs/ecs-systems-own-their-tables.md §4; was lib/ui's coverStyleSystem).
+#
+# The rounding itself is DATA: every cover node authors a generic
+# `CornerRadius`, so the scene is rounded by itself in any renderer — the
+# app, the editor, a screenshot tool. What is the app's is the SETTING that
+# varies it: `AlbumCover {}` marks which nodes it applies to, and this system
+# removes their CornerRadius while the setting is off — remembering the
+# authored radius in its own table — and restores it when it comes back on.
+# Idempotent per node (a cover mounted while the setting is off is squared
+# on the next observation), and it writes only when a node is not already
+# in the requested state, so an idle frame bumps nothing.
+open ui/Ecs
+open ui/Components
+open ecs/Entity
+open ecs/ComponentTable
+
+# The marker: "this node is an album cover the rounding setting applies to".
+type AlbumCover {
+}
+
+# The authored CornerRadius of a cover the setting squared, so turning the
+# setting back on restores exactly what the scene said.
+type AuthoredRadius {
+  radius: Float = 0.0
+}
+
+type AlbumCoverSystem {
+  albumCovers: ComponentTable(AlbumCover)
+  authoredRadii: ComponentTable(AuthoredRadius)
+}
+
+func createAlbumCoverSystem() ret AlbumCoverSystem {
+  ret AlbumCoverSystem {
+    albumCovers: ComponentTable.create(AlbumCover)
+    authoredRadii: ComponentTable.create(AuthoredRadius)
+  }
+}
+
+func albumCoverUpdate(
+  albumCoverSystem: mod AlbumCoverSystem
+  world: mod UiWorld
+  rounded: view Bool
+) {
+  let count: Int = componentCount(this: albumCoverSystem.albumCovers)
+  loop var i: Int = 0, i < count, ++i {
+    let entity: EntityId = componentEntityAt(this: albumCoverSystem.albumCovers, i: i)
+    let hasRadius: Bool = componentHas(this: world.cornerRadiuses, entity: entity)
+    if rounded {
+      if hasRadius is false and componentHas(this: albumCoverSystem.authoredRadii, entity: entity) {
+        let authored: AuthoredRadius = componentGet(
+          this: albumCoverSystem.authoredRadii
+          entity: entity
+        )
+        componentSet(
+          this: world.cornerRadiuses
+          entity: entity
+          data: CornerRadius { radius: authored.radius }
+        )
+        componentRemove(this: albumCoverSystem.authoredRadii, entity: entity)
+      }
+    } else if hasRadius {
+      let current: CornerRadius = componentGet(this: world.cornerRadiuses, entity: entity)
+      componentSet(
+        this: albumCoverSystem.authoredRadii
+        entity: entity
+        data: AuthoredRadius { radius: current.radius }
+      )
+      componentRemove(this: world.cornerRadiuses, entity: entity)
+    }
+  }
+}
