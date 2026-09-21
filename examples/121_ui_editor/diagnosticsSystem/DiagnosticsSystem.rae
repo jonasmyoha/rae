@@ -161,27 +161,19 @@ func textureSystem(
   }
 }
 
-# The chrome's own state: its page root (so H can hide it) and its
-# visibility. Which panels are open is the panels' own Active (chromeSystem
-# editorPanelOpen); the flags here mirror the last toggle for the key
-# handlers and go away with the one-source-of-truth task.
+# The chrome's own state is its page root (so H can hide it). Whether the
+# chrome or any panel is open is the node's own Active — read it
+# (chromeVisible / chromeSystem's editorPanelOpen), never a mirror.
 type ChromeState {
   pageRoot: EntityId
-  visible: Bool
-  panelOpen: Bool
-  projectOpen: Bool
-  leftOpen: Bool
-  rightOpen: Bool
 }
 
-func setDiagnosticsPanelOpen(chrome: mod ChromeState, world: mod UiWorld, open: view Bool) {
-  chrome.panelOpen = open
-  setEditorPanelOpen(world: world, kind: EditorPanelKind.diagnostics, open: open)
-}
-
-func setProjectPanelOpen(chrome: mod ChromeState, world: mod UiWorld, open: view Bool) {
-  chrome.projectOpen = open
-  setEditorPanelOpen(world: world, kind: EditorPanelKind.project, open: open)
+# The chrome root's Active (absent = shown).
+func chromeVisible(world: view UiWorld, chrome: view ChromeState) ret Bool {
+  if componentHas(this: world.actives, entity: chrome.pageRoot) is false {
+    ret true
+  }
+  ret componentGet(this: world.actives, entity: chrome.pageRoot).value
 }
 
 # The diagnostics list's rows: one per diagnostic, `kind · sceneId/nodeId ·

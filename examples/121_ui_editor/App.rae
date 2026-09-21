@@ -30,9 +30,8 @@ open Gpu2dCanvas
 
 const idleHeartbeatSec: Float = 0.5
 
-func toggleChrome(chrome: mod ChromeState, world: mod UiWorld) {
-  chrome.visible = not chrome.visible
-  let active: Active = { value: chrome.visible }
+func toggleChrome(chrome: view ChromeState, world: mod UiWorld) {
+  let active: Active = { value: not chromeVisible(world: world, chrome: chrome) }
   componentSet(this: world.actives, entity: chrome.pageRoot, data: active)
 }
 
@@ -147,9 +146,9 @@ func openPath(app: mod App, path: view String) {
   )
   log("[ui-editor] open {path} -> {app.document.path}")
   reloadDocument(app: app)
-  setProjectPanelOpen(
-    chrome: app.chrome
+  setEditorPanelOpen(
     world: app.world
+    kind: EditorPanelKind.project
     open: app.document.projectPack.length() > 0
   )
   projectListSystem(
@@ -242,7 +241,7 @@ func runApp(app: mod App) ret Int {
     status: app.status
     input: input
     pageRoot: app.document.pageRoot
-    chromeVisible: app.chrome.visible
+    chromeVisible: chromeVisible(world: app.world, chrome: app.chrome)
   )
   listViewSystem(world: app.world, scenes: app.document.registry)
   runScheduledUiSystems(schedule: app.schedule, world: app.world, res: app.gpuUi)
@@ -308,11 +307,11 @@ func runApp(app: mod App) ret Int {
       changed = true
     }
     if Sdl3.isKeyPressed(key: Keys.keyD) {
-      setDiagnosticsPanelOpen(chrome: app.chrome, world: app.world, open: not app.chrome.panelOpen)
+      toggleEditorPanel(world: app.world, kind: EditorPanelKind.diagnostics)
       changed = true
     }
     if Sdl3.isKeyPressed(key: Keys.keyG) {
-      setGuidesVisible(guides: app.guides, world: app.world, visible: not app.guides.visible)
+      toggleEditorPanel(world: app.world, kind: EditorPanelKind.guides)
       syncGuides(
         guides: app.guides
         world: app.world
@@ -325,7 +324,7 @@ func runApp(app: mod App) ret Int {
       changed = true
     }
     if Sdl3.isKeyPressed(key: Keys.keyP) {
-      setProjectPanelOpen(chrome: app.chrome, world: app.world, open: not app.chrome.projectOpen)
+      toggleEditorPanel(world: app.world, kind: EditorPanelKind.project)
       changed = true
     }
     var wantsDialog: Bool = Sdl3.isKeyPressed(key: Keys.keyO) or uiActionFired(
@@ -371,7 +370,7 @@ func runApp(app: mod App) ret Int {
       status: app.status
       input: input
       pageRoot: app.document.pageRoot
-      chromeVisible: app.chrome.visible
+      chromeVisible: chromeVisible(world: app.world, chrome: app.chrome)
     ) {
       changed = true
     }
