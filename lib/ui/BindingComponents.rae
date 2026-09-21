@@ -290,6 +290,8 @@ enum EditorPanelKind {
   project
   diagnostics
   guides
+  outlines
+  buttons
 }
 
 type EditorPanel {
@@ -322,4 +324,24 @@ type GuideRect {
 
 # The diagnostics count pill: its fill follows the count (red when > 0).
 type DiagnosticsBadge {
+}
+
+# The editor's hover / selection outline: an authored Shape node the
+# inspector positions over the hovered / selected document node (Rect size
+# + RuntimeOffset from the target's world transform), or hides.
+enum OutlineRole { hover, selection }
+
+type OutlineFor {
+  role: OutlineRole
+}
+
+# An outline POOL (#12306774): one instance of `itemSceneId` per matched
+# document entity — every entity (`all`) or every entity with an OnClick
+# (`buttons`) — mounted as the node's children and positioned like the
+# hover outline. The reference editor's "Outlines" / "Buttons" toggles.
+enum OutlineMatch { all, buttons }
+
+type OutlinePool {
+  matches: OutlineMatch
+  itemSceneId: String
 }
