@@ -22,7 +22,6 @@ open ecs/Schedule
 open ecs/Entity
 open ecs/ComponentTable
 open assetSystem/GpuAssetRegistry
-open ui/coverStyleSystem/CoverStyleSystem
 
 # The app resources a binding system can observe — a flag bitmask (combine
 # with `bitor`), each with ONE revision number the runner reads
@@ -308,14 +307,17 @@ func createAppObservation(world: view UiWorld) ret AppObservation {
     sources: playbackTimeSources
     tables: playbackTimeTables
   )
-  let coverStyleSources: Int = sourceSettings
-  let coverStyleTables: List(String) = ["coverStyles"]
+  # The rounded-covers setting: on a settings change, and when a cover
+  # mounts (its authored CornerRadius bumps that table) so a cover mounted
+  # while the setting is off is squared too.
+  let albumCoverSources: Int = sourceSettings
+  let albumCoverTables: List(String) = ["cornerRadiuses"]
   registerAppObserver(
     observation: observation
     world: world
-    name: "coverStyle"
-    sources: coverStyleSources
-    tables: coverStyleTables
+    name: "albumCover"
+    sources: albumCoverSources
+    tables: albumCoverTables
   )
   let emptyStateSources: Int = sourceHistory
   let emptyStateTables: List(String) = ["emptyStates", "searchFields"]
@@ -360,6 +362,7 @@ func observerGeneration(
 func runAppObserver(
   index: view Int
   world: mod UiWorld
+  albumCoverSystem: mod AlbumCoverSystem
   state: view AppState
   playback: view PlaybackState
   scenes: view AlbumScenes
@@ -420,7 +423,11 @@ func runAppObserver(
     playbackTimeSystem(world: world, playback: playback)
   }
   if index is observeCoverStyle {
-    coverStyleSystem(world: world, rounded: state.settings.roundedAlbumCovers)
+    albumCoverUpdate(
+      albumCoverSystem: albumCoverSystem
+      world: world
+      rounded: state.settings.roundedAlbumCovers
+    )
   }
   if index is observeEmptyState {
     emptyStateSystem(world: world, state: state)
@@ -435,6 +442,7 @@ func runAppObserver(
 func runAppObservation(
   observation: mod AppObservation
   world: mod UiWorld
+  albumCoverSystem: mod AlbumCoverSystem
   state: view AppState
   playback: view PlaybackState
   scenes: view AlbumScenes
@@ -456,6 +464,7 @@ func runAppObservation(
       runAppObserver(
         index: index
         world: world
+        albumCoverSystem: albumCoverSystem
         state: state
         playback: playback
         scenes: scenes

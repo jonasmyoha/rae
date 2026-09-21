@@ -1,0 +1,43 @@
+# The music player's hand-written aggregate glue (docs/ecs-systems-own-their-
+# tables.md §3.2): one line per app system that owns tables. The two lib
+# outboxes are drained here — the pending authored components into the
+# systems, then whatever nobody claimed reported (this app's own scenes
+# naming a component nobody has is a bug); the dead entities cleared from
+# the systems' tables, then released for reuse.
+open ui/Ecs
+open ui/Registry
+open ui/ScenePolicy
+open ecs/Entity
+open ecs/World
+
+func applyMusicComponents(world: mod UiWorld, albumCoverSystem: mod AlbumCoverSystem) {
+  var kept: List(PendingComponent) = List.create(PendingComponent, cap: 4)
+  loop let pending: view PendingComponent in world.pendingComponents {
+    if applyComponentInto(system: albumCoverSystem, world: world, pending: pending) {
+      continue
+    }
+    kept.add(value: PendingComponent {
+      entity: pending.entity
+      name: "{pending.name}"
+      json: "{pending.json}"
+      sceneId: "{pending.sceneId}"
+      nodeId: "{pending.nodeId}"
+    })
+  }
+  world.pendingComponents = own kept
+  reportPendingComponents(world: world)
+}
+
+func sweepMusicEntities(world: mod UiWorld, albumCoverSystem: mod AlbumCoverSystem) {
+  loop let entity: view EntityId in world.deadEntities {
+    clearEntityComponents(world: albumCoverSystem, entity: entity)
+  }
+  releaseDeadEntities(world: world)
+}
+
+# The frame end: both drains, in this order (a row a ListView mounted this
+# frame gets its components before anything is recycled).
+func musicFrameEnd(world: mod UiWorld, albumCoverSystem: mod AlbumCoverSystem) {
+  applyMusicComponents(world: world, albumCoverSystem: albumCoverSystem)
+  sweepMusicEntities(world: world, albumCoverSystem: albumCoverSystem)
+}

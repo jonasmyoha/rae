@@ -154,7 +154,7 @@ one system; the app systems marked *(obs)* are rows of the observation schedule
 | `HistoryList` | `historyListSystem` *(obs)* | `historySystem/HistoryView.rae` |
 | `HasHistory` | `hasHistorySystem` *(obs)* | `screenSystem/HomeView.rae` |
 | `EmptyState` | `emptyStateSystem` *(obs)* | `screenSystem/EmptyStateSystem.rae` |
-| `CoverStyle` | `coverStyleSystem` *(obs)* | lib/ui/coverStyleSystem |
+| `AlbumCover` (+ authored `CornerRadius`) | `albumCoverUpdate` *(obs)* | albumCoverSystem/AlbumCoverSystem — the app's own table (ECS split step 3): the rounding is scene data, the setting removes / restores it |
 | `BottomSheet` / `SheetPanel` | `bottomSheetSystem` *(obs)* | `screenSystem/BottomSheet.rae` |
 | `SearchField` | `searchFieldSystem` | `screenSystem/SearchSystems.rae` (input phase) |
 | `NavTab` | `navTabsSystem` | `screenSystem/DockSystems.rae` (on switch) |
