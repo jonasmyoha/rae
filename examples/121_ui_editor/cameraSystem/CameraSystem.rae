@@ -1,0 +1,231 @@
+# cameraSystem — zoom and pan of the DOCUMENT (docs/ui-editor-design.md §2,
+# the reference editor's camera, docs/ui-editor-reference-features.md §7).
+# The camera is a scale + offset applied to the document page root and the
+# guides page root as a TransformFx (scale about the origin) plus a
+# RuntimeOffset — the transform-pass inputs a scroll uses — so the stock
+# transform, render and input systems do the rest: an inherited world scale
+# sizes every box, glyph, clip and hit test. The chrome is untouched.
+#
+# `canvas` coordinates below are the canvas design space (what Gpu2d.pointerX
+# reports); a document point d sits at origin + d * zoom, where the document
+# origin is its column's layout position under the camera. The wheel zooms
+# about the cursor (0.25x .. 5x); the middle button drags the view; the
+# chrome's zoom pill steps +-10% about the canvas centre and its "100%" label
+# resets. RAE_UI_EDITOR_ZOOM=<factor> boots zoomed (the headless gate).
+import Gpu2d
+import Sdl3
+open Sys
+open ui/Ecs
+open ui/Components
+open app3d/UiShell
+open ecs/Entity
+open ecs/ComponentTable
+
+const zoomMin: Float = 0.25
+
+const zoomMax: Float = 5.0
+
+const zoomWheelStep: Float = 0.1
+
+const zoomButtonStep: Float = 0.1
+
+type EditorCamera {
+  zoom: Float
+  # The guides root's translation (canvas units); the document root gets the
+  # same camera with its column offset folded in.
+  offsetX: Float
+  offsetY: Float
+  # Where the document sits at 100% with no pan: the column's x and the
+  # vertical centering slack of a document shorter than the design.
+  homeX: Float
+  homeY: Float
+  # Middle-drag pan state.
+  panning: Bool
+  lastPointerX: Float
+  lastPointerY: Float
+}
+
+func createEditorCamera() ret EditorCamera {
+  var camera: EditorCamera = {
+    zoom: 1.0
+    offsetX: 0.0
+    offsetY: 0.0
+    homeX: 0.0
+    homeY: 0.0
+    panning: false
+    lastPointerX: 0.0
+    lastPointerY: 0.0
+  }
+  ret camera
+}
+
+# RAE_UI_EDITOR_ZOOM=<factor>: boot zoomed about the canvas centre (the
+# headless gate's hook). Call once the home is set.
+func bootCameraZoom(camera: mod EditorCamera, canvasW: view Float, canvasH: view Float) {
+  let boot: String = getEnv(name: "RAE_UI_EDITOR_ZOOM")
+  if boot.length() is 0 {
+    ret
+  }
+  zoomCameraAbout(
+    camera: camera
+    zoom: boot.toFloat()
+    aboutX: canvasW / 2.0
+    aboutY: canvasH / 2.0
+  )
+  log(
+    "[ui-editor] zoom {(camera.zoom * 100.0 + 0.5).toInt()}% offset {camera.offsetX.toInt()},{camera.offsetY.toInt()}"
+  )
+}
+
+func clampZoom(zoom: view Float) ret Float {
+  if zoom < zoomMin {
+    ret zoomMin
+  }
+  if zoom > zoomMax {
+    ret zoomMax
+  }
+  ret zoom
+}
+
+# Home = the frame's placement at 100% (called after every load): the
+# document column's x and the vertical slack. The pan is kept.
+func setCameraHome(camera: mod EditorCamera, homeX: view Float, homeY: view Float) {
+  camera.homeX = homeX
+  camera.homeY = homeY
+}
+
+func resetCamera(camera: mod EditorCamera) {
+  camera.zoom = 1.0
+  camera.offsetX = 0.0
+  camera.offsetY = 0.0
+}
+
+# Zoom so the canvas point (aboutX, aboutY) stays where it is.
+func zoomCameraAbout(
+  camera: mod EditorCamera
+  zoom: view Float
+  aboutX: view Float
+  aboutY: view Float
+) {
+  let next: Float = clampZoom(zoom: zoom)
+  if next is camera.zoom {
+    ret
+  }
+  let ratio: Float = next / camera.zoom
+  camera.offsetX = aboutX - (aboutX - camera.offsetX) * ratio
+  camera.offsetY = aboutY - (aboutY - camera.offsetY) * ratio
+  camera.zoom = next
+}
+
+func setRootTransform(
+  world: mod UiWorld
+  root: view EntityId
+  zoom: view Float
+  offsetX: view Float
+  offsetY: view Float
+) {
+  if isNone(this: root) {
+    ret
+  }
+  let fx: TransformFx = {
+    scaleX: zoom
+    scaleY: zoom
+    rotation: 0.0
+    alpha: 1.0
+    visible: true
+    pivot: Vec2 { x: 0.0, y: 0.0 }
+    anchor: Vec2 { x: 0.0, y: 0.0 }
+  }
+  componentSet(this: world.transforms, entity: root, data: fx)
+  let offset: RuntimeOffset = { delta: Vec2 { x: offsetX, y: offsetY } }
+  componentSet(this: world.runtimeOffsets, entity: root, data: own offset)
+}
+
+# Write the camera onto the two roots. The document root's layout position
+# is already (homeX, 0) (the column, centered by its extent anchor), so its
+# runtime offset is the camera translation of that origin minus the layout
+# position; the guides root lays out at (0, 0).
+func applyCamera(
+  camera: view EditorCamera
+  world: mod UiWorld
+  documentRoot: view EntityId
+  guidesRoot: view EntityId
+) {
+  let z: Float = camera.zoom
+  setRootTransform(
+    world: world
+    root: guidesRoot
+    zoom: z
+    offsetX: camera.offsetX
+    offsetY: camera.offsetY
+  )
+  setRootTransform(
+    world: world
+    root: documentRoot
+    zoom: z
+    offsetX: camera.offsetX + camera.homeX * z - camera.homeX
+    offsetY: camera.offsetY + camera.homeY * z
+  )
+  setNodeText(world: world, nodeId: "chrome/ZoomLabel", value: "{(z * 100.0 + 0.5).toInt()}%")
+}
+
+# Per-frame input: wheel = zoom about the cursor, middle drag = pan, the
+# chrome pill's actions. Returns whether the camera moved.
+func cameraInputSystem(
+  camera: mod EditorCamera
+  world: view UiWorld
+  canvasW: view Float
+  canvasH: view Float
+) ret Bool {
+  var moved: Bool = false
+  let pointerX: Float = Gpu2d.pointerX()
+  let pointerY: Float = Gpu2d.pointerY()
+  let wheel: Float = Gpu2d.wheelMove()
+  if wheel is not 0.0 {
+    zoomCameraAbout(
+      camera: camera
+      zoom: camera.zoom * (1.0 + zoomWheelStep * wheel)
+      aboutX: pointerX
+      aboutY: pointerY
+    )
+    moved = true
+  }
+  let middle: Bool = Sdl3.isMouseButtonDown(button: 2)
+  if middle {
+    if camera.panning {
+      camera.offsetX = camera.offsetX + (pointerX - camera.lastPointerX)
+      camera.offsetY = camera.offsetY + (pointerY - camera.lastPointerY)
+      moved = true
+    }
+    camera.panning = true
+    camera.lastPointerX = pointerX
+    camera.lastPointerY = pointerY
+  } else {
+    camera.panning = false
+  }
+  let centreX: Float = canvasW / 2.0
+  let centreY: Float = canvasH / 2.0
+  if uiActionFired(world: world, actionId: "zoom.in") {
+    zoomCameraAbout(
+      camera: camera
+      zoom: camera.zoom + zoomButtonStep
+      aboutX: centreX
+      aboutY: centreY
+    )
+    moved = true
+  }
+  if uiActionFired(world: world, actionId: "zoom.out") {
+    zoomCameraAbout(
+      camera: camera
+      zoom: camera.zoom - zoomButtonStep
+      aboutX: centreX
+      aboutY: centreY
+    )
+    moved = true
+  }
+  if uiActionFired(world: world, actionId: "zoom.reset") {
+    resetCamera(camera: camera)
+    moved = true
+  }
+  ret moved
+}

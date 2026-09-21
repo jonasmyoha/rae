@@ -53,10 +53,27 @@ func g2dPaintBox(
   let scaleY: Float = wt.scale.y * hoverMul
   var pivotX: Float = 0.5
   var pivotY: Float = 0.5
+  # The entity's OWN scale (its TransformFx, times hover) grows the box about
+  # its pivot; the scale it INHERITS from ancestors (an editor camera, a scaled
+  # parent) has already placed its origin, so it only sizes the box. Using
+  # the total scale for the pivot offset made every child of a scaled parent
+  # drift by (1 - scale) * pivot of its size.
+  var ownX: Float = hoverMul
+  var ownY: Float = hoverMul
   if componentHas(this: world.transforms, entity: entity) {
     let fx: TransformFx = componentGet(this: world.transforms, entity: entity)
     pivotX = fx.pivot.x
     pivotY = fx.pivot.y
+    ownX = fx.scaleX * hoverMul
+    ownY = fx.scaleY * hoverMul
+  }
+  var inheritedX: Float = 1.0
+  var inheritedY: Float = 1.0
+  if ownX is not 0.0 {
+    inheritedX = scaleX / ownX
+  }
+  if ownY is not 0.0 {
+    inheritedY = scaleY / ownY
   }
   let w: Float = cr.size.x * scaleX
   let h: Float = cr.size.y * scaleY
@@ -65,8 +82,8 @@ func g2dPaintBox(
     uniform = scaleY
   }
   ret PaintBox {
-    x: wt.position.x + (cr.size.x - w) * pivotX
-    y: wt.position.y + (cr.size.y - h) * pivotY
+    x: wt.position.x + cr.size.x * inheritedX * (1.0 - ownX) * pivotX
+    y: wt.position.y + cr.size.y * inheritedY * (1.0 - ownY) * pivotY
     w: w
     h: h
     scale: uniform
@@ -125,9 +142,9 @@ func pushMaskClipG(world: view UiWorld, entity: view EntityId, canvas: mod Gpu2d
   let wt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: source)
   var x: Float = wt.position.x
   var y: Float = wt.position.y
-  var w: Float = cr.size.x
-  var h: Float = cr.size.y
-  var radius: Float = mask.radius
+  var w: Float = cr.size.x * wt.scale.x
+  var h: Float = cr.size.y * wt.scale.y
+  var radius: Float = mask.radius * wt.scale.x
   if mask.kind is MaskKind.circle {
     var diameter: Float = w
     if h < diameter {

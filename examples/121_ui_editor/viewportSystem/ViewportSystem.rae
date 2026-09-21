@@ -143,26 +143,33 @@ func applyViewport(
 }
 
 # Place the document's page root in the design space: centered horizontally
-# (the root's extent anchor) and vertically (a runtime translation, applied
-# in the transform pass like a scroll — no relayout), so a document smaller
-# than the design does not hug the top-left corner under the chrome's bar.
-func placeDocumentPage(
-  world: mod UiWorld
-  pageRoot: view EntityId
-  viewport: view EditorViewport
-  designH: view Float
-) {
+# by the root's extent anchor. The vertical centering of a document shorter
+# than the design, and every pan/zoom, is the camera's translation
+# (cameraSystem) — `documentHomeY` is the slack it starts from.
+func placeDocumentPage(world: mod UiWorld, pageRoot: view EntityId) {
   if isNone(this: pageRoot) {
     ret
   }
   let anchor: ExtentAnchor = { h: HExtent.center }
   componentSet(this: world.extentAnchors, entity: pageRoot, data: anchor)
+}
+
+# The document column's x at 100% (its extent-anchor centering).
+func documentHomeX(viewport: view EditorViewport, columnW: view Float) ret Float {
+  var slack: Float = viewport.designW - columnW
+  if slack < 0.0 {
+    slack = 0.0
+  }
+  ret slack / 2.0
+}
+
+# The vertical slack a document shorter than the design is centered by.
+func documentHomeY(viewport: view EditorViewport, designH: view Float) ret Float {
   var slack: Float = viewport.designH - designH
   if slack < 0.0 {
     slack = 0.0
   }
-  let offset: RuntimeOffset = { delta: Vec2 { x: 0.0, y: slack / 2.0 } }
-  componentSet(this: world.runtimeOffsets, entity: pageRoot, data: own offset)
+  ret slack / 2.0
 }
 
 # Size the chrome's page root to the design space on every load (it was

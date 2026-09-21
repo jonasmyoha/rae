@@ -386,8 +386,27 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             echo "  small document shrank the chrome:"
             cat "$TMP_OUT/render-small.log" "$TMP_OUT/screenshot-small.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
           fi
+          # The camera (cameraSystem): RAE_UI_EDITOR_ZOOM=2 boots the document at
+          # 200% about the canvas centre; the log names the zoom and the frame
+          # is still the chrome's 1080x1920 (only the document scaled).
+          SCREENSHOT="$TMP_OUT/ui-editor-zoom.bmp"
+          if (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
+             RAE_UI_EDITOR_ROOT="examples/121_ui_editor/assets/samples" RAE_UI_EDITOR_ZOOM=2 \
+             RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
+             perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-zoom.log" 2>&1 \
+             && grep -qE '\[ui-editor\] zoom 200% offset -540,-960' "$TMP_OUT/render-zoom.log" \
+             && grep -qE '\[ui-editor\] mounted MainMenu: [1-9][0-9]* nodes, 0 diagnostics' "$TMP_OUT/render-zoom.log" \
+             && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=50 \
+                > "$TMP_OUT/screenshot-zoom.log" 2>&1 \
+             && grep -qE 'non-blank BMP 1080x1920' "$TMP_OUT/screenshot-zoom.log"; then
+            :
+          else
+            UI_EDITOR_OK=0
+            echo "  camera zoom failed:"
+            cat "$TMP_OUT/render-zoom.log" "$TMP_OUT/screenshot-zoom.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
+          fi
           if [ "$UI_EDITOR_OK" = "1" ]; then
-            echo "PASS: $EXAMPLE_NAME (7 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select, .raepack project open + switch, file picker)"
+            echo "PASS: $EXAMPLE_NAME (7 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select, .raepack project open + switch, file picker, camera zoom)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (ui editor sample gate)"
