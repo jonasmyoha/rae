@@ -6,6 +6,7 @@ open ecs/Schedule
 open ui/renderSystem/RenderSystem
 open Gpu2dCanvas
 open ui/DebugOverlay
+open ui/WindowGeometry
 
 # Which font files are loaded into gpuUi right now ("" = the fallback atlas),
 # so a reload only spends an atlas slot when the document's fonts change.
@@ -37,6 +38,11 @@ type App {
   # the chrome. Created with everything off in headless runs so the gate's
   # screenshots stay deterministic.
   debugOverlay: DebugOverlay
+  # Where the user put the window, remembered across restarts (a `rae watch`
+  # reload is a restart) — the lib opt-in 106 uses, keyed by app id. Not
+  # restored or written in headless runs, so the gate's window is always the
+  # authored 1400x900.
+  windowGeometry: WindowGeometry
   testSelectNodeId: String
   builtinScenePaths: List(String)
   builtinSceneIds: List(String)
