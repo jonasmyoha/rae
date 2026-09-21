@@ -276,7 +276,12 @@ func runApp(app: mod App) ret Int {
   if testOpen.length() > 0 {
     testOpenIndex = testOpen.toInt()
   }
-  var wokeUp: Bool = false
+  # What the pointer was over / pressing on the previous iteration: a change
+  # is a real reason to paint (hover glow starts, pill pressed), a timeout
+  # wake is not — otherwise the idle editor repaints on every watcher poll
+  # (20 Hz) and never sleeps.
+  var previousHovered: EntityId = noEntity()
+  var previousPressed: EntityId = noEntity()
   var previousNow: Float64 = Gpu2d.nowSeconds()
   var animating: Bool = false
   var effectTime: Float = 0.0
@@ -307,6 +312,9 @@ func runApp(app: mod App) ret Int {
       changed = true
     }
     let hadEvents: Bool = uiActionCount(world: app.world) > 0
+    let inputChanged: Bool = input.hoveredEntity is not previousHovered or input.pressedEntity is not previousPressed or input.pointer.down
+    previousHovered = input.hoveredEntity
+    previousPressed = input.pressedEntity
     editArea = editAreaOf(
       world: app.world
       canvasW: app.viewport.designW
@@ -447,8 +455,7 @@ func runApp(app: mod App) ret Int {
         runScheduledUiSystems(schedule: app.schedule, world: app.world, res: app.gpuUi)
       }
     }
-    let needsRender: Bool = hadEvents or changed or wokeUp or renderedOnce is false
-    wokeUp = false
+    let needsRender: Bool = hadEvents or changed or inputChanged or renderedOnce is false
     if Gpu2d.shouldRenderFrame(appNeedsRender: needsRender) {
       Gpu2d.beginFrame(
         canvas: app.canvas
@@ -477,7 +484,6 @@ func runApp(app: mod App) ret Int {
         frameSec: 0.016667
         heartbeatSec: idleHeartbeatSec
       ))
-      wokeUp = true
     }
   }
   canvasShutdown(canvas: app.canvas)
