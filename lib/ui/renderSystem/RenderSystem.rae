@@ -82,21 +82,6 @@ func seedWorldThemeFrom(world: mod UiWorld, src: view UiTheme) pub {
   applyResolvedTokens(dst: world.theme.resolved, src: src.resolved)
 }
 
-func g2dScaleMode(m: view ScaleMode) ret Int {
-  if m is ScaleMode.fill {
-    ret 1
-  }
-  if m is ScaleMode.stretch {
-    ret 2
-  }
-  ret 0
-}
-
-func g2dChain(color: view RgbaColor, chain255: view Int) ret RgbaColor {
-  let a: Int = (color.a * chain255) / 255
-  ret RgbaColor { r: color.r, g: color.g, b: color.b, a: a }
-}
-
 func paintShapeG(
   world: view UiWorld
   entity: view EntityId
@@ -607,6 +592,10 @@ func paintTextG(
   }
   var drawX: Float = wt.position.x
   var drawY: Float = wt.position.y + size
+  if resolveTextIsVCentered(theme: res.theme, styleId: t.styleId) {
+    # The style centres its line box [top, top + size] in the node's box.
+    drawY = wt.position.y + (boxH - size) / 2.0 + size
+  }
   if centerX or rightX {
     let bounds: SdfTextBounds = visualBoundsAt(
       world: world

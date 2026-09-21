@@ -353,6 +353,7 @@ func parseThemeText(out: mod ResolvedTheme, doc: view JsonDoc, root: view JsonVa
     var colorA: Int = 255
     var shadowName: String = ""
     var align: Int = themeAlignStart
+    var vAlign: Int = themeVAlignTop
 
     let extendsIndex: Int = Json.field(doc: doc, this: bag, key: "extends")
     if extendsIndex >= 0 {
@@ -450,6 +451,15 @@ func parseThemeText(out: mod ResolvedTheme, doc: view JsonDoc, root: view JsonVa
       )
       align = themeParseAlign(text: alignText, fallback: align)
     }
+    let vAlignIndex: Int = Json.field(doc: doc, this: bag, key: "vAlign")
+    if vAlignIndex >= 0 {
+      fieldMask = fieldMask + 256
+      let vAlignText: String = Json.jsonString(
+        this: Json.jsonValueAt(doc: doc, idx: vAlignIndex)
+        fallback: ""
+      )
+      vAlign = themeParseVAlign(text: vAlignText, fallback: vAlign)
+    }
 
     out.textNames.add(value: name)
     out.textExtends.add(value: parentName)
@@ -466,6 +476,7 @@ func parseThemeText(out: mod ResolvedTheme, doc: view JsonDoc, root: view JsonVa
     out.textColorA.add(value: colorA)
     out.textShadowNames.add(value: shadowName)
     out.textAligns.add(value: align)
+    out.textVAligns.add(value: vAlign)
   }
 }
 
@@ -531,6 +542,7 @@ func resolveThemeTextExtends(theme: mod ResolvedTheme) {
     var colorA: Int = 255
     var shadowName: String = ""
     var align: Int = themeAlignStart
+    var vAlign: Int = themeVAlignTop
     loop var chainIndex: Int = 0, chainIndex < chain.length, ++chainIndex {
       let source: Int = chain.copyAtDefault(index: chainIndex)
       let mask: Int = theme.textFieldMasks.copyAtDefault(index: source)
@@ -565,6 +577,9 @@ func resolveThemeTextExtends(theme: mod ResolvedTheme) {
       if themeTextMaskHas(mask: mask, field: 128) {
         align = theme.textAligns.copyAtDefault(index: source)
       }
+      if themeTextMaskHas(mask: mask, field: 256) {
+        vAlign = theme.textVAligns.copyAtDefault(index: source)
+      }
     }
     theme.textFonts.set(index: target, value: "{font}")
     theme.textSizes.set(index: target, value: size)
@@ -578,6 +593,7 @@ func resolveThemeTextExtends(theme: mod ResolvedTheme) {
     theme.textColorA.set(index: target, value: colorA)
     theme.textShadowNames.set(index: target, value: "{shadowName}")
     theme.textAligns.set(index: target, value: align)
+    theme.textVAligns.set(index: target, value: vAlign)
   }
 }
 
@@ -661,6 +677,16 @@ func themeReverseIntList(src: view List(Int)) ret List(Int) {
     i = i - 1
   }
   ret out
+}
+
+func themeParseVAlign(text: view String, fallback: view Int) ret Int {
+  if text is "top" {
+    ret themeVAlignTop
+  }
+  if text is "center" {
+    ret themeVAlignCenter
+  }
+  ret fallback
 }
 
 func themeParseAlign(text: view String, fallback: view Int) ret Int {
