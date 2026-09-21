@@ -24,6 +24,8 @@ open ecs/Entity
 open ecs/Schedule
 open Gpu2dCanvas
 open ui/DebugOverlay
+open ui/WindowGeometry
+open HotReload
 
 # The viewer's FALLBACK fonts (the shared Roboto + Material atlases, as 119
 # uses) — what a document that declares no `assets.fonts` renders with. A
@@ -152,6 +154,18 @@ func createApp() ret App {
     height: viewport.windowH
     title: "Rae UI Editor — .raescene viewer"
   )
+  # Remember the window across restarts (opt-in, see lib/ui/WindowGeometry);
+  # the name carries the app id since dir() is the same ".rae" for every app.
+  var windowGeometry: WindowGeometry = createWindowGeometry(
+    dir: dir()
+    name: "window.121_ui_editor.geometry"
+  )
+  # Any headless budget (RAE_UI_HEADLESS / RAE_SDL_HEADLESS_MS /
+  # RAE_HEADLESS_FRAMES) keeps the authored window: a hidden window cannot
+  # resize its surface, and a gate must not inherit the user's desk layout.
+  if Gpu2d.headlessRequested() is false {
+    restoreWindowGeometry(windowGeometry: windowGeometry)
+  }
   var canvas: Gpu2dCanvas = createGpu2dCanvas()
 
   var document: SceneDocument = createSceneDocument(path: resolveScenePath())
@@ -329,6 +343,7 @@ func createApp() ret App {
       builtinScenePaths: own builtinScenePaths
       builtinSceneIds: own builtinSceneIds
       headless: headless
+      windowGeometry: own windowGeometry
       debugOverlay: createDebugOverlay(
         button: not headless
         fps: not headless
