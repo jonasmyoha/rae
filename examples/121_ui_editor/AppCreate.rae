@@ -63,8 +63,15 @@ func applyDocumentTheme(gpuUi: mod Gpu2dUi, document: view SceneDocument, quiet:
       log("[ui-editor] theme: {document.fileName} alone (no imports)")
     }
   }
+  appendEditorTheme(theme: theme)
   gpuUi.activeTheme = overlayPalette(base: lightTheme(), tokens: theme)
   gpuUi.theme = own theme
+}
+
+# Chrome palette roles are owned by the editor, separate from document tokens.
+func appendEditorTheme(theme: mod ResolvedTheme) {
+  let scene: Scene = loadSceneFile(path: "examples/121_ui_editor/assets/scenes/Theme.raescene")
+  parseThemeInto(out: theme, scene: scene)
 }
 
 # Which font files the document asks for: the viewer override, else the
@@ -131,6 +138,8 @@ func createEditorUi() ret Gpu2dUi {
     theme: createResolvedTheme()
     activeTheme: lightTheme()
   }
+  appendEditorTheme(theme: gpuUi.theme)
+  gpuUi.activeTheme = overlayPalette(base: lightTheme(), tokens: gpuUi.theme)
   ret gpuUi
 }
 

@@ -119,6 +119,14 @@ func paintShadowG(
   canvas: mod Gpu2dCanvas
 ) {
   let shadow: Shadow = componentGet(this: world.shadows, entity: entity)
+  if shadow.hoverOnly {
+    if componentHas(this: world.interactions, entity: entity) is false {
+      ret
+    }
+    if componentGet(this: world.interactions, entity: entity).hovered is false {
+      ret
+    }
+  }
   if shadow.blur <= 0.0 {
     ret
   }
@@ -136,12 +144,19 @@ func paintShadowG(
   if opacity > 1.0 {
     opacity = 1.0
   }
+  var color: RgbaColor = { r: 0, g: 0, b: 0, a: 255 }
+  if shadow.hasColor {
+    color = shadow.color
+  }
   let step: Float = shadow.blur / layers.toFloat()
-  let offset: Float = shadow.blur / 3.0
+  var offset: Float = shadow.blur / 3.0
+  if shadow.centered {
+    offset = 0.0
+  }
   loop var layer: Int = 0, layer < layers, ++layer {
     let grow: Float = step * (layer + 1).toFloat()
     let falloff: Float = (70.0 - layer.toFloat() * 66.0 / layers.toFloat()) * 3.0 / layers.toFloat()
-    let alpha: Int = (falloff * opacity).toInt() * chain255 / 255
+    let alpha: Int = (falloff * opacity).toInt() * chain255 / 255 * color.a / 255
     Gpu2d.drawRoundedRect(
       canvas: canvas
       x: box.x - grow
@@ -149,7 +164,7 @@ func paintShadowG(
       w: box.w + grow * 2.0
       h: box.h + grow * 2.0
       radius: radius + grow
-      color: g2dColor(color: RgbaColor { r: 0, g: 0, b: 0, a: alpha })
+      color: g2dColor(color: RgbaColor { r: color.r, g: color.g, b: color.b, a: alpha })
     )
   }
 }
