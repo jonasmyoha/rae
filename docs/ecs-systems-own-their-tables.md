@@ -20,6 +20,12 @@ from their ad-hoc state structs; `EditorSystems.rae` holds the hand-written
 `examples/121_ui_editor/chromeSystem/EditorComponents.rae`, off `UiWorld`
 (83 known components now, 81 registered). Update functions that only read a
 system take it `view` (15 of the 29 chrome-system parameters).
+**Step 3 (rounded covers as data, §4) is implemented** (2026-09-22): the eight
+cover nodes author `CornerRadius` + `AlbumCover {}`; `examples/106_mobile_ui/
+albumCoverSystem/AlbumCoverSystem.rae` owns the marker and the authored radii it
+squared; `MusicSystems.rae` is 106's hand-written glue (`applyMusicComponents`,
+`sweepMusicEntities`, `musicFrameEnd`); `lib/ui/coverStyleSystem/` and
+`CoverStyle` are gone, and so is the editor's call.
 
 Prompted by the UI editor having to
 call a music-player system to draw a scene the way the music player does.

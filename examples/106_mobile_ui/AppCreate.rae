@@ -92,7 +92,7 @@ func createApp() ret App {
     setPlaybackPlaying(state: playback, value: false)
   }
   # RAE_UI_ROUNDED_COVERS=0/1 overrides the rounded-covers setting at boot —
-  # the pixel proof for coverStyleSystem (#981) toggling every cover. Empty
+  # the pixel proof for albumCoverUpdate (#981) toggling every cover. Empty
   # keeps the createAppSettings default. Not persisted.
   let roundedEnv: String = getEnv(name: "RAE_UI_ROUNDED_COVERS")
   if roundedEnv is "0" {
@@ -185,6 +185,7 @@ func createApp() ret App {
       loopDebugFrame: loopDebugFrame
       actionTable: createActionTable()
       commands: createEventQueue(AppCommand)
+      albumCoverSystem: createAlbumCoverSystem()
     }
   }
 }

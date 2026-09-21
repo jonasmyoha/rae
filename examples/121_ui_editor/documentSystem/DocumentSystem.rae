@@ -30,7 +30,6 @@ open ui/SceneImports
 open ui/SceneLoader
 open ui/ScenePolicy
 open ui/RegistryOpt
-open ui/coverStyleSystem/CoverStyleSystem
 open ecs/Entity
 open ecs/ComponentTable
 
@@ -580,10 +579,6 @@ func documentMountSystem(
     let registered: view Scene => sceneRegistryGet(reg: document.registry, idx: r)
     tagMountedNodeIds(world: world, scene: registered, pageId: "document")
   }
-  # A `CoverStyle` node's corner is set by the app's setting at runtime, not
-  # authored as a CornerRadius (#981). The editor shows the app's default —
-  # covers rounded — so the scene looks as it does on first launch.
-  coverStyleSystem(world: world, rounded: true)
   restoreDocumentScrolls(world: world, snapshot: scrolls)
   rebuildWatchedPaths(document: document)
   document.nodeCount = aliveCount(world: world) - before
