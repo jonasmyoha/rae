@@ -35,7 +35,10 @@ type GuideState {
 
 # Mount the guides page on its layer, sized to the design space.
 func createGuides(world: mod UiWorld, designW: view Float, designH: view Float) ret GuideState {
-  let layer: EntityId = createLayerEntity(world: world, id: "guides", order: 50)
+  # The layer is created once; a chrome reload remounts the page onto it.
+  if isNone(this: findLayerEntity(world: world, id: "guides")) {
+    let layer: EntityId = createLayerEntity(world: world, id: "guides", order: 50)
+  }
   let scene: Scene = loadSceneFile(path: guidesScenePath)
   let overrides: List(SceneOverride) = List.create(SceneOverride, cap: 1)
   let root: EntityId = mountPage(
