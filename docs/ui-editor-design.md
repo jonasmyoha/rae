@@ -212,7 +212,7 @@ the library systems, like 106's `FramePipeline.rae`):
 | folder | system | does |
 |---|---|---|
 | `documentSystem/` | `documentLoadSystem` | parse + register + mount; on failure keep the last good page and show the parse error in the chrome |
-| `watchSystem/` | `fileWatchSystem` | poll `Sys.fileMtime` of the scene, its sub-scenes and imports every 250 ms (only while the window is visible); changed → `documentLoadSystem` remount, scroll preserved |
+| `watchSystem/` | `fileWatchSystem` | poll `Sys.fileMtime` of the OPENED document, its sub-scenes and imports every 250 ms (only while the window is visible); changed → `documentLoadSystem` remount, scroll preserved. This is for the document, which may live in another project; the editor's own chrome scenes are NOT watched here — under `rae watch` a chrome edit restarts the editor like any `.rae`/`.raescene` edit (docs/hot-reload-plan.md) |
 | `diagnosticsSystem/` | `diagnosticsSystem` | owns `List(SceneDiagnostic)` (unknown component, runtime-only component, unknown token, missing sub-scene, missing texture, parse error); writes the chrome's counter + list (a `ListView` — the `lib/ui` list system, dogfooded) |
 | `inspectorSystem/` | `inspectorSystem` | hover → highlight rect; click → select; overlay with node id, component names (`componentNamesFor`), computed rect; arrow keys walk the tree; `Esc` clears |
 | `viewportSystem/` | `viewportSystem` | design resolution + letterbox from the document; window resize → re-fit |
