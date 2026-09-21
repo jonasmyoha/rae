@@ -1,0 +1,201 @@
+# outlinePoolSystem — the reference editor's "Outlines" and "Buttons"
+# toggles (docs/ui-editor-reference-features.md §2b) as authored outline
+# POOLS: a node in chrome/Guides.raescene tagged `OutlinePool { match,
+# itemSceneId }` gets one mounted instance of `itemSceneId` per matched
+# document entity (every entity, or every entity with an OnClick), each
+# positioned over its target like the hover outline — the ListView row-pool
+# shape, one authored scene per row. The pool node's Active is the toggle
+# (an EditorPanel of kind outlines / buttons: `N` / `B`); while it is off the
+# pool is emptied so nothing is laid out or drawn.
+open ui/Ecs
+open ui/Components
+open ui/BindingComponents
+open ui/Scene
+open ui/SceneInstance
+open ui/SceneLoader
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/hierarchySystem/HierarchySystem
+
+const outlinePoolCap: Int = 512
+
+# Every entity of the document subtree that has a world rect (paint order).
+func collectDocumentEntities(world: view UiWorld, entity: view EntityId, out: mod List(EntityId)) {
+  if isNone(this: entity) or out.length >= outlinePoolCap {
+    ret
+  }
+  if componentHas(this: world.computedRects, entity: entity) and componentHas(
+    this: world.worldTransforms
+    entity: entity
+  ) {
+    out.add(value: entity)
+  }
+  if componentHas(this: world.childrens, entity: entity) {
+    let children: view Children => componentView(this: world.childrens, entity: entity)
+    loop var i: Int = 0, i < children.ids.length, ++i {
+      collectDocumentEntities(
+        world: world
+        entity: children.ids.copyAtFallback(index: i, fallback: noEntity())
+        out: out
+      )
+    }
+  }
+}
+
+func poolMatches(world: view UiWorld, matches: view OutlineMatch, entity: view EntityId) ret Bool {
+  if matches is OutlineMatch.buttons {
+    ret componentHas(this: world.onClicks, entity: entity)
+  }
+  ret true
+}
+
+# Grow or shrink the pool node's children to exactly `wanted` instances of
+# the outline scene.
+func sizeOutlinePool(
+  world: mod UiWorld
+  pool: view EntityId
+  itemSceneId: view String
+  wanted: view Int
+  scenes: view SceneRegistry
+) ret Bool {
+  var changed: Bool = false
+  var have: Int = 0
+  if componentHas(this: world.childrens, entity: pool) {
+    have = componentView(this: world.childrens, entity: pool).ids.length
+  }
+  loop have > wanted {
+    let children: view Children => componentView(this: world.childrens, entity: pool)
+    let last: EntityId = children.ids.copyAtFallback(index: have - 1, fallback: noEntity())
+    destroyEntitySubtree(world: world, root: last)
+    have = have - 1
+    changed = true
+  }
+  if have < wanted {
+    let idx: Int = sceneRegistryIndex(reg: scenes, key: itemSceneId)
+    if idx < 0 {
+      ret changed
+    }
+    let scene: view Scene => sceneRegistryGet(reg: scenes, idx: idx)
+    loop have < wanted {
+      let item: EntityId = createEntity(world: world)
+      let rect: Rect = { position: { x: 0.0, y: 0.0 }, size: { x: 0.0, y: 0.0 } }
+      componentSet(this: world.rects, entity: item, data: rect)
+      setParent(
+        parents: world.parents
+        childrens: world.childrens
+        child: item
+        parent: pool
+      )
+      let overrides: List(SceneOverride) = emptyOverrides()
+      mountSceneInstanceIntoPage(
+        world: world
+        mountEntity: item
+        scene: scene
+        overrides: overrides
+        pageId: "guides"
+      )
+      have = have + 1
+      changed = true
+    }
+  }
+  ret changed
+}
+
+# Place pooled instance `item` over `target` (compare-before-write); true
+# if anything was written.
+func placePooledOutline(world: mod UiWorld, item: view EntityId, target: view EntityId) ret Bool {
+  var changed: Bool = false
+  let transform: WorldTransform2D = componentGet(this: world.worldTransforms, entity: target)
+  let computed: ComputedRect = componentGet(this: world.computedRects, entity: target)
+  let w: Float = computed.size.x * transform.scale.x
+  let h: Float = computed.size.y * transform.scale.y
+  if componentHas(this: world.rects, entity: item) {
+    let current: Rect = componentGet(this: world.rects, entity: item)
+    if current.size.x is not w or current.size.y is not h {
+      let rect: mod Rect => componentMod(this: world.rects, entity: item)
+      rect.size.x = w
+      rect.size.y = h
+      changed = true
+    }
+  }
+  var write: Bool = true
+  if componentHas(this: world.runtimeOffsets, entity: item) {
+    let current: Vec2 = componentGet(this: world.runtimeOffsets, entity: item).delta
+    if current.x is transform.position.x and current.y is transform.position.y {
+      write = false
+    }
+  }
+  if write {
+    let offset: RuntimeOffset = { delta: Vec2 { x: transform.position.x, y: transform.position.y } }
+    componentSet(this: world.runtimeOffsets, entity: item, data: own offset)
+    changed = true
+  }
+  ret changed
+}
+
+# Per frame: every active OutlinePool follows the document's entities.
+# Returns whether any pool grew, shrank or moved (the transform pass must
+# run this frame then).
+func outlinePoolSystem(
+  world: mod UiWorld
+  documentRoot: view EntityId
+  scenes: view SceneRegistry
+) ret Bool {
+  var changed: Bool = false
+  let poolCount: Int = componentCount(this: world.outlinePools)
+  if poolCount is 0 {
+    ret false
+  }
+  var entities: List(EntityId) = List.create(EntityId, cap: 64)
+  collectDocumentEntities(world: world, entity: documentRoot, out: entities)
+  loop var p: Int = 0, p < poolCount, ++p {
+    let pool: EntityId = componentEntityAt(this: world.outlinePools, i: p)
+    let spec: OutlinePool = componentDataAt(this: world.outlinePools, i: p)
+    var active: Bool = true
+    if componentHas(this: world.actives, entity: pool) {
+      active = componentGet(this: world.actives, entity: pool).value
+    }
+    if active is false {
+      if sizeOutlinePool(
+        world: world
+        pool: pool
+        itemSceneId: spec.itemSceneId
+        wanted: 0
+        scenes: scenes
+      ) {
+        changed = true
+      }
+      continue
+    }
+    var matched: List(EntityId) = List.create(EntityId, cap: entities.length)
+    loop var i: Int = 0, i < entities.length, ++i {
+      let entity: EntityId = entities.copyAtFallback(index: i, fallback: noEntity())
+      if poolMatches(world: world, matches: spec.matches, entity: entity) {
+        matched.add(value: entity)
+      }
+    }
+    if sizeOutlinePool(
+      world: world
+      pool: pool
+      itemSceneId: spec.itemSceneId
+      wanted: matched.length
+      scenes: scenes
+    ) {
+      changed = true
+    }
+    if componentHas(this: world.childrens, entity: pool) is false {
+      continue
+    }
+    let children: view Children => componentView(this: world.childrens, entity: pool)
+    loop var i: Int = 0, i < matched.length and i < children.ids.length, ++i {
+      if placePooledOutline(
+        world: world
+        item: children.ids.copyAtFallback(index: i, fallback: noEntity())
+        target: matched.copyAtFallback(index: i, fallback: noEntity())
+      ) {
+        changed = true
+      }
+    }
+  }
+  ret changed
+}

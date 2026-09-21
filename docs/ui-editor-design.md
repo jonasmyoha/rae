@@ -186,6 +186,21 @@ chrome can be hidden for a pure passive view (`H` key).
   loader deserialises them by reflection like any other; no editor system
   contains a `chrome/...` string except the page id and the row-scene package
   ids.
+- **Outlines are authored too** (#12306774): the inspector's hover and selection
+  outlines are `HoverOutline` / `SelectionOutline` Shape nodes in `Guides.raescene`
+  tagged `OutlineFor { role }` (the reference's styles: hover `#28f0ff` w2 α0.6,
+  selection `#ff4fd8` w2.5 α0.9); the inspector only positions them (Rect size +
+  RuntimeOffset from the target's world transform, compare-before-write — a moved
+  outline is a frame change so the transform pass runs). The reference's
+  "Outlines" and "Buttons" toggles are `OutlinePool { matches: all|buttons,
+  itemSceneId }` nodes: `outlineSystem/` keeps one mounted instance of the
+  authored outline scene (`chrome/NodeOutline`, `chrome/ButtonOutline`) per
+  matched document entity, the ListView row-pool shape; `N` / `B` toggle them
+  (EditorPanel kinds `outlines` / `buttons`), `RAE_UI_EDITOR_OUTLINES=nodes|
+  buttons|both` boots with them on. Since the guides root's child `FrameSpace`
+  carries the `Camera2D`, the outlines are its screen-space siblings. The app
+  creates no entity of its own any more except the layer roots and pool
+  instances of authored scenes.
 
 Resources on `App` (no globals): `document: SceneDocument { path, mtime, scene,
 registry, theme, pageRoot, designW, designH, diagnostics: List(SceneDiagnostic) }`,

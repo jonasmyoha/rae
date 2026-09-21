@@ -84,9 +84,11 @@ the editor simulates a device viewport smaller than the design.
 | "Hidden" label | under a selected node whose alpha is 0 (the editor bumps it to 0.5 so it can be seen) | — |
 | Entity name labels toggle | white 10px `<id> <name|type>` at each rect's top-left | — |
 
-Port note: the two Rae outlines should become authored nodes in `Guides.raescene` too
-(`SelectionOutline`, `HoverOutline`), so the whole overlay set is one scene and the
-inspector system only positions them — the same move the guides made.
+**Rae — DONE (#12306774):** the hover and selection outlines are authored nodes in
+`Guides.raescene` (`OutlineFor { role }`, the reference's colours), and the "All
+outlines" / "Button outlines" toggles are authored outline POOLS (`OutlinePool`,
+one mounted outline scene per matched entity; `N` / `B`). Not ported: the
+runtime-only colour variants, the "Hidden" label, name labels, the marquee.
 
 ### 2c. Render preview
 

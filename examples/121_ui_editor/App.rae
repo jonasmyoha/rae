@@ -3,7 +3,8 @@
 # watcher (a 250 ms poll fed into the wait as `pollWatcher`), `D` the
 # diagnostics panel, `P` the project panel (a tap on one of its rows opens
 # that scene of the project — a reload with a new path), `G` the frame +
-# safe-area guides, the wheel zooms the document about the cursor and a
+# safe-area guides, `N` / `B` outline every node / every button, the wheel zooms the document about
+# the cursor and a
 # middle drag pans it (the chrome's zoom pill steps, its 100% resets), `O`
 # (or the chrome's
 # Open pill) the OS file picker — its choice goes through the same opener as
@@ -75,7 +76,7 @@ func reloadDocument(app: mod App) {
       frameH: app.document.designH
       homeX: documentHomeX(designW: app.document.designW, columnW: app.document.columnW)
       documentRoot: app.document.pageRoot
-      guidesRoot: app.guides.pageRoot
+      guidesRoot: app.guides.frameSpace
     )
     fitCamera(
       camera: app.camera
@@ -322,6 +323,14 @@ func runApp(app: mod App) ret Int {
       )
       changed = true
     }
+    if Sdl3.isKeyPressed(key: Keys.keyN) {
+      toggleEditorPanel(world: app.world, kind: EditorPanelKind.outlines)
+      changed = true
+    }
+    if Sdl3.isKeyPressed(key: Keys.keyB) {
+      toggleEditorPanel(world: app.world, kind: EditorPanelKind.buttons)
+      changed = true
+    }
     if Sdl3.isKeyPressed(key: Keys.keyP) {
       toggleEditorPanel(world: app.world, kind: EditorPanelKind.project)
       changed = true
@@ -370,6 +379,14 @@ func runApp(app: mod App) ret Int {
       input: input
       pageRoot: app.document.pageRoot
       chromeVisible: chromeVisible(world: app.world, chrome: app.chrome)
+    ) {
+      changed = true
+    }
+    # The outline pools (N: every node, B: every button) follow the document.
+    if outlinePoolSystem(
+      world: app.world
+      documentRoot: app.document.pageRoot
+      scenes: app.document.registry
     ) {
       changed = true
     }

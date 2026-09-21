@@ -28,6 +28,9 @@ const statusBarClearance: Float = 72.0
 
 type GuideState {
   pageRoot: EntityId
+  # The child that carries the camera and the frame guides (the node
+  # authored with Camera2D); the outlines are its screen-space siblings.
+  frameSpace: EntityId
 }
 
 # Mount the guides page on its layer, sized to the design space.
@@ -44,7 +47,19 @@ func createGuides(world: mod UiWorld, designW: view Float, designH: view Float) 
     h: designH
   )
   setLayerById(world: world, entity: root, id: "guides")
-  ret GuideState { pageRoot: root }
+  ret GuideState { pageRoot: root, frameSpace: guidesFrameSpace(world: world, pageRoot: root) }
+}
+
+# The guides page's camera entity: the descendant authored with Camera2D.
+func guidesFrameSpace(world: view UiWorld, pageRoot: view EntityId) ret EntityId {
+  let count: Int = componentCount(this: world.cameras)
+  loop var i: Int = 0, i < count, ++i {
+    let entity: EntityId = componentEntityAt(this: world.cameras, i: i)
+    if pageOf(world: world, entity: entity) is "guides" {
+      ret entity
+    }
+  }
+  ret pageRoot
 }
 
 # Write the Rect of every node tagged with `kind`.
@@ -88,8 +103,8 @@ func syncGuides(
   columnW: view Float
   safeInsets: view Insets
 ) {
-  if componentHas(this: world.rects, entity: guides.pageRoot) {
-    let rect: mod Rect => componentMod(this: world.rects, entity: guides.pageRoot)
+  if componentHas(this: world.rects, entity: guides.frameSpace) {
+    let rect: mod Rect => componentMod(this: world.rects, entity: guides.frameSpace)
     rect.size.x = designW
     rect.size.y = designH
   }
