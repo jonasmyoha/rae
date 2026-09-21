@@ -11,6 +11,15 @@ tables of their own; the editor keeps what it does not know (inspector line,
 info rows, `N app components kept` in its mount/reload log). One deviation
 from the text below: `applyComponentInto` also takes `world: mod UiWorld`,
 because decoding needs the theme (token values) and the diagnostics list.
+**Step 2 (the editor's systems own their tables) is implemented** (2026-09-22):
+`ChromeSystem` (5 tables + page root + the bound-label fields), `GuideSystem`
+(guideRects), `InspectorSystem` (outlineFors + hover/selection), `OutlinePoolSystem`
+(outlinePools), plus `CameraSystem` / `ViewportSystem` / `TextureSystem` renamed
+from their ad-hoc state structs; `EditorSystems.rae` holds the hand-written
+`applyEditorComponents` / `sweepEditorEntities`; the eight components live in
+`examples/121_ui_editor/chromeSystem/EditorComponents.rae`, off `UiWorld`
+(83 known components now, 81 registered). Update functions that only read a
+system take it `view` (15 of the 29 chrome-system parameters).
 
 Prompted by the UI editor having to
 call a music-player system to draw a scene the way the music player does.

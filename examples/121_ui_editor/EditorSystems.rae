@@ -1,0 +1,87 @@
+# The editor's hand-written aggregate glue (docs/ecs-systems-own-their-tables.md
+# §3.2): the App IS the aggregate of its systems, and the two lib outboxes are
+# drained here, one line per system that owns tables. Nothing else in the
+# editor lists its systems.
+open ui/Ecs
+open ui/Registry
+open ui/ScenePolicy
+open ecs/Entity
+open ecs/World
+
+# Drain the pending-components outbox into the editor's own tables. What no
+# editor system claims STAYS pending on purpose: it is a component of the
+# document's app, kept as authored (the editor's rule from step 1) — the
+# inspector shows it, the diagnostics list counts it as INFO. Called after
+# every mount point (the chrome and guides at boot, a document load or reload,
+# and once per frame for the rows a ListView or an outline pool instantiates).
+func applyEditorComponents(
+  world: mod UiWorld
+  chromeSystem: mod ChromeSystem
+  guideSystem: mod GuideSystem
+  inspectorSystem: mod InspectorSystem
+  outlinePoolSystem: mod OutlinePoolSystem
+) {
+  var kept: List(PendingComponent) = List.create(PendingComponent, cap: 8)
+  loop let pending: view PendingComponent in world.pendingComponents {
+    if applyComponentInto(system: chromeSystem, world: world, pending: pending) {
+      continue
+    }
+    if applyComponentInto(system: guideSystem, world: world, pending: pending) {
+      continue
+    }
+    if applyComponentInto(system: inspectorSystem, world: world, pending: pending) {
+      continue
+    }
+    if applyComponentInto(system: outlinePoolSystem, world: world, pending: pending) {
+      continue
+    }
+    kept.add(value: PendingComponent {
+      entity: pending.entity
+      name: "{pending.name}"
+      json: "{pending.json}"
+      sceneId: "{pending.sceneId}"
+      nodeId: "{pending.nodeId}"
+    })
+  }
+  world.pendingComponents = own kept
+}
+
+# Drain the dead-entities outbox: clear each destroyed entity from every
+# editor table, then let the world recycle the indices. Once per frame after
+# the systems, and after any unmount whose entities must not linger.
+func sweepEditorEntities(
+  world: mod UiWorld
+  chromeSystem: mod ChromeSystem
+  guideSystem: mod GuideSystem
+  inspectorSystem: mod InspectorSystem
+  outlinePoolSystem: mod OutlinePoolSystem
+) {
+  loop let entity: view EntityId in world.deadEntities {
+    clearEntityComponents(world: chromeSystem, entity: entity)
+    clearEntityComponents(world: guideSystem, entity: entity)
+    clearEntityComponents(world: inspectorSystem, entity: entity)
+    clearEntityComponents(world: outlinePoolSystem, entity: entity)
+  }
+  releaseDeadEntities(world: world)
+}
+
+# The App-level spellings: the aggregate names its systems once, here.
+func applyEditorComponentsOf(app: mod App) {
+  applyEditorComponents(
+    world: app.world
+    chromeSystem: app.chromeSystem
+    guideSystem: app.guideSystem
+    inspectorSystem: app.inspectorSystem
+    outlinePoolSystem: app.outlinePoolSystem
+  )
+}
+
+func sweepEditorEntitiesOf(app: mod App) {
+  sweepEditorEntities(
+    world: app.world
+    chromeSystem: app.chromeSystem
+    guideSystem: app.guideSystem
+    inspectorSystem: app.inspectorSystem
+    outlinePoolSystem: app.outlinePoolSystem
+  )
+}

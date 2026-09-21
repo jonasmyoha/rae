@@ -34,9 +34,9 @@ open ecs/Event
 
 const idleHeartbeatSec: Float = 0.5
 
-func toggleChrome(chrome: view ChromeState, world: mod UiWorld) {
-  let active: Active = { value: not chromeVisible(world: world, chrome: chrome) }
-  componentSet(this: world.actives, entity: chrome.pageRoot, data: active)
+func toggleChrome(chromeSystem: view ChromeSystem, world: mod UiWorld) {
+  let active: Active = { value: not chromeVisible(world: world, chromeSystem: chromeSystem) }
+  componentSet(this: world.actives, entity: chromeSystem.pageRoot, data: active)
 }
 
 # A watched file changed: reload the document (its theme + fonts follow its imports) (a broken
@@ -45,8 +45,8 @@ func reloadDocument(app: mod App) {
   let previousNodes: Int = app.document.nodeCount
   # The selection survives by node id (the entities are new after the mount).
   var keepSelected: String = "{app.testSelectNodeId}"
-  if keepSelected.length() is 0 and isNone(this: app.inspector.selected) is false {
-    keepSelected = nodeIdOf(world: app.world, entity: app.inspector.selected)
+  if keepSelected.length() is 0 and isNone(this: app.inspectorSystem.selected) is false {
+    keepSelected = nodeIdOf(world: app.world, entity: app.inspectorSystem.selected)
   }
   let mounted: Bool = documentPrepareSystem(document: app.document, world: app.world)
   if mounted {
@@ -60,12 +60,17 @@ func reloadDocument(app: mod App) {
       builtinSceneIds: app.builtinSceneIds
     )
     app.document.reloads = app.document.reloads + 1
+    # The unmounted page's entities are swept from the editor's tables before
+    # their indices are recycled; the new page's authored editor components
+    # (if a document carries any) reach their systems.
+    sweepEditorEntitiesOf(app: app)
+    applyEditorComponentsOf(app: app)
     pinDocumentPage(world: app.world, pageRoot: app.document.pageRoot)
     safeAreaSystem(world: app.world, insets: app.document.safeInsets)
     syncGuides(
-      guides: app.guides
+      guideSystem: app.guideSystem
       world: app.world
-      status: app.status
+      chromeSystem: app.chromeSystem
       designW: app.document.designW
       designH: app.document.designH
       columnW: app.document.columnW
@@ -74,26 +79,27 @@ func reloadDocument(app: mod App) {
     # A new page root: the camera follows the new frame (fitted into the
     # edit area) and is written onto the new entity.
     setCameraFrame(
-      camera: app.camera
+      cameraSystem: app.cameraSystem
       frameW: app.document.designW
       frameH: app.document.designH
       homeX: documentHomeX(designW: app.document.designW, columnW: app.document.columnW)
       documentRoot: app.document.pageRoot
-      guidesRoot: app.guides.frameSpace
+      guidesRoot: app.guideSystem.frameSpace
     )
     fitCamera(
-      camera: app.camera
+      cameraSystem: app.cameraSystem
       world: app.world
-      status: app.status
+      chromeSystem: app.chromeSystem
       area: editAreaOf(
+        chromeSystem: app.chromeSystem
         world: app.world
-        canvasW: app.viewport.designW
-        canvasH: app.viewport.designH
+        canvasW: app.viewportSystem.designW
+        canvasH: app.viewportSystem.designH
       )
     )
     unsafe {
-      textureSystem(
-        search: app.textures
+      textureUpdate(
+        textureSystem: app.textureSystem
         world: app.world
         canvas: app.canvas
         assets: app.document.assets
@@ -103,7 +109,7 @@ func reloadDocument(app: mod App) {
   }
   chromeSyncSystem(
     world: app.world
-    status: app.status
+    chromeSystem: app.chromeSystem
     fileName: app.document.fileName
     designW: app.document.designW
     designH: app.document.designH
@@ -116,9 +122,9 @@ func reloadDocument(app: mod App) {
   if mounted {
     resolveSceneInstances(world: app.world, registry: app.document.registry, pageId: "chrome")
     inspectorAfterLoad(
-      inspector: app.inspector
+      inspectorSystem: app.inspectorSystem
       world: app.world
-      status: app.status
+      chromeSystem: app.chromeSystem
       pageRoot: app.document.pageRoot
       selectNodeId: keepSelected
     )
@@ -152,13 +158,14 @@ func openPath(app: mod App, path: view String) {
   log("[ui-editor] open {path} -> {app.document.path}")
   reloadDocument(app: app)
   setEditorPanelOpen(
+    chromeSystem: app.chromeSystem
     world: app.world
     kind: EditorPanelKind.project
     open: app.document.projectPack.length() > 0
   )
   projectListSystem(
     world: app.world
-    status: app.status
+    chromeSystem: app.chromeSystem
     projectName: app.document.projectName
     projectScenes: app.document.projectScenes
     currentScene: documentPackagePath(document: app.document)
@@ -187,7 +194,7 @@ func openProjectScene(app: mod App, index: view Int) {
     reloadDocument(app: app)
     projectListSystem(
       world: app.world
-      status: app.status
+      chromeSystem: app.chromeSystem
       projectName: app.document.projectName
       projectScenes: app.document.projectScenes
       currentScene: packagePath
@@ -234,19 +241,19 @@ func runApp(app: mod App) ret Int {
   runScheduledUiSystems(schedule: app.schedule, world: app.world, res: app.gpuUi)
   # The first layout has run, so the selection hook can read computed rects.
   inspectorAfterLoad(
-    inspector: app.inspector
+    inspectorSystem: app.inspectorSystem
     world: app.world
-    status: app.status
+    chromeSystem: app.chromeSystem
     pageRoot: app.document.pageRoot
     selectNodeId: app.testSelectNodeId
   )
-  inspectorSystem(
-    inspector: app.inspector
+  inspectorUpdate(
+    inspectorSystem: app.inspectorSystem
     world: app.world
-    status: app.status
+    chromeSystem: app.chromeSystem
     input: input
     pageRoot: app.document.pageRoot
-    chromeVisible: chromeVisible(world: app.world, chrome: app.chrome)
+    chromeVisible: chromeVisible(world: app.world, chromeSystem: app.chromeSystem)
   )
   listViewSystem(world: app.world, scenes: app.document.registry)
   runScheduledUiSystems(schedule: app.schedule, world: app.world, res: app.gpuUi)
@@ -254,20 +261,21 @@ func runApp(app: mod App) ret Int {
   # RAE_UI_EDITOR_ZOOM) — a Camera2D write the lib cameraSystem folds into
   # the roots' transforms on the next pipeline run.
   var editArea: EditAreaRect = editAreaOf(
+    chromeSystem: app.chromeSystem
     world: app.world
-    canvasW: app.viewport.designW
-    canvasH: app.viewport.designH
+    canvasW: app.viewportSystem.designW
+    canvasH: app.viewportSystem.designH
   )
   fitCamera(
-    camera: app.camera
+    cameraSystem: app.cameraSystem
     world: app.world
-    status: app.status
+    chromeSystem: app.chromeSystem
     area: editArea
   )
   bootCameraZoom(
-    camera: app.camera
+    cameraSystem: app.cameraSystem
     world: app.world
-    status: app.status
+    chromeSystem: app.chromeSystem
     area: editArea
   )
   runScheduledUiSystems(schedule: app.schedule, world: app.world, res: app.gpuUi)
@@ -293,10 +301,10 @@ func runApp(app: mod App) ret Int {
 
   loop not Gpu2d.pollClose() {
     let resized: Bool = Gpu2d.windowResized()
-    var refit: Bool = viewportSystem(
-      viewport: app.viewport
+    var refit: Bool = viewportUpdate(
+      viewportSystem: app.viewportSystem
       world: app.world
-      chromeRoot: app.chrome.pageRoot
+      chromeRoot: app.chromeSystem.pageRoot
       resized: resized
     )
     var changed: Bool = refit
@@ -309,8 +317,8 @@ func runApp(app: mod App) ret Int {
     # it: the press is swallowed by voiding this frame's actions.
     let overlayTookPointer: Bool = updateDebugOverlay(
       debugOverlay: app.debugOverlay
-      screenW: app.viewport.designW
-      screenH: app.viewport.designH
+      screenW: app.viewportSystem.designW
+      screenH: app.viewportSystem.designH
       now: now
       didRealWork: renderedThisFrame
     )
@@ -326,36 +334,45 @@ func runApp(app: mod App) ret Int {
     previousHovered = input.hoveredEntity
     previousPressed = input.pressedEntity
     editArea = editAreaOf(
+      chromeSystem: app.chromeSystem
       world: app.world
-      canvasW: app.viewport.designW
-      canvasH: app.viewport.designH
+      canvasW: app.viewportSystem.designW
+      canvasH: app.viewportSystem.designH
     )
-    if panelToggleSystem(world: app.world) {
+    if panelToggleSystem(chromeSystem: app.chromeSystem, world: app.world) {
       changed = true
     }
-    editorTextSystem(world: app.world, status: app.status)
+    editorTextSystem(world: app.world, chromeSystem: app.chromeSystem)
     if cameraInputSystem(
-      camera: app.camera
+      cameraSystem: app.cameraSystem
       world: app.world
-      status: app.status
+      chromeSystem: app.chromeSystem
       area: editArea
     ) {
       changed = true
     }
     if Sdl3.isKeyPressed(key: Keys.keyH) {
-      toggleChrome(chrome: app.chrome, world: app.world)
+      toggleChrome(chromeSystem: app.chromeSystem, world: app.world)
       changed = true
     }
     if Sdl3.isKeyPressed(key: Keys.keyD) {
-      toggleEditorPanel(world: app.world, kind: EditorPanelKind.diagnostics)
+      toggleEditorPanel(
+        chromeSystem: app.chromeSystem
+        world: app.world
+        kind: EditorPanelKind.diagnostics
+      )
       changed = true
     }
     if Sdl3.isKeyPressed(key: Keys.keyG) {
-      toggleEditorPanel(world: app.world, kind: EditorPanelKind.guides)
-      syncGuides(
-        guides: app.guides
+      toggleEditorPanel(
+        chromeSystem: app.chromeSystem
         world: app.world
-        status: app.status
+        kind: EditorPanelKind.guides
+      )
+      syncGuides(
+        guideSystem: app.guideSystem
+        world: app.world
+        chromeSystem: app.chromeSystem
         designW: app.document.designW
         designH: app.document.designH
         columnW: app.document.columnW
@@ -364,15 +381,27 @@ func runApp(app: mod App) ret Int {
       changed = true
     }
     if Sdl3.isKeyPressed(key: Keys.keyN) {
-      toggleEditorPanel(world: app.world, kind: EditorPanelKind.outlines)
+      toggleEditorPanel(
+        chromeSystem: app.chromeSystem
+        world: app.world
+        kind: EditorPanelKind.outlines
+      )
       changed = true
     }
     if Sdl3.isKeyPressed(key: Keys.keyB) {
-      toggleEditorPanel(world: app.world, kind: EditorPanelKind.buttons)
+      toggleEditorPanel(
+        chromeSystem: app.chromeSystem
+        world: app.world
+        kind: EditorPanelKind.buttons
+      )
       changed = true
     }
     if Sdl3.isKeyPressed(key: Keys.keyP) {
-      toggleEditorPanel(world: app.world, kind: EditorPanelKind.project)
+      toggleEditorPanel(
+        chromeSystem: app.chromeSystem
+        world: app.world
+        kind: EditorPanelKind.project
+      )
       changed = true
     }
     var wantsDialog: Bool = Sdl3.isKeyPressed(key: Keys.keyO) or uiActionFired(
@@ -411,18 +440,19 @@ func runApp(app: mod App) ret Int {
       reloadDocument(app: app)
       changed = true
     }
-    if inspectorSystem(
-      inspector: app.inspector
+    if inspectorUpdate(
+      inspectorSystem: app.inspectorSystem
       world: app.world
-      status: app.status
+      chromeSystem: app.chromeSystem
       input: input
       pageRoot: app.document.pageRoot
-      chromeVisible: chromeVisible(world: app.world, chrome: app.chrome)
+      chromeVisible: chromeVisible(world: app.world, chromeSystem: app.chromeSystem)
     ) {
       changed = true
     }
     # The outline pools (N: every node, B: every button) follow the document.
-    if outlinePoolSystem(
+    if outlinePoolUpdate(
+      outlinePoolSystem: app.outlinePoolSystem
       world: app.world
       documentRoot: app.document.pageRoot
       scenes: app.document.registry
@@ -453,13 +483,14 @@ func runApp(app: mod App) ret Int {
         # The chrome relaid out for the new window: fit the document into
         # the new edit area and run the transform pass again.
         fitCamera(
-          camera: app.camera
+          cameraSystem: app.cameraSystem
           world: app.world
-          status: app.status
+          chromeSystem: app.chromeSystem
           area: editAreaOf(
+            chromeSystem: app.chromeSystem
             world: app.world
-            canvasW: app.viewport.designW
-            canvasH: app.viewport.designH
+            canvasW: app.viewportSystem.designW
+            canvasH: app.viewportSystem.designH
           )
         )
         runScheduledUiSystems(schedule: app.schedule, world: app.world, res: app.gpuUi)
@@ -472,11 +503,12 @@ func runApp(app: mod App) ret Int {
         "[ui-editor] window {Gpu2d.designWidth().toInt()}x{Gpu2d.designHeight().toInt()} at ({Gpu2d.windowPositionX()}, {Gpu2d.windowPositionY()})"
       )
     }
-    # Frame end. The editor NEVER reports pending components: what no lib
-    # table matched is an app's own component, kept on the node as authored
+    # Frame end. The editor NEVER reports pending components: what no editor
+    # system claims is the document app's own, kept on the node as authored
     # (docs/ecs-systems-own-their-tables.md §4) and shown in the inspector.
-    # Only the dead entities of a reload / unmount are released.
-    releaseDeadEntities(world: app.world)
+    # The dead entities of a reload / unmount are swept from the editor's
+    # tables, then released.
+    sweepEditorEntitiesOf(app: app)
     let needsRender: Bool = hadEvents or changed or inputChanged or renderedOnce is false
     if Gpu2d.shouldRenderFrame(appNeedsRender: needsRender) {
       Gpu2d.beginFrame(

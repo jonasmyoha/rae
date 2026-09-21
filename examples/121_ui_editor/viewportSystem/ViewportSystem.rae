@@ -29,7 +29,7 @@ const defaultDeviceId: String = "iphone-15-pro"
 # safe-area insets. Enabled when the scene declares `unitScale` and the
 # preset is not "none". RAE_UI_EDITOR_DEVICE=<preset id|none> picks the
 # preset (default iphone-15-pro, 106's own default).
-type EditorDeviceFrame {
+type DeviceFrame {
   enabled: Bool
   presetId: String
   extentW: Float
@@ -38,8 +38,8 @@ type EditorDeviceFrame {
   safeInsets: Insets
 }
 
-func editorDeviceFrame(unitScale: view Float) ret EditorDeviceFrame {
-  var frame: EditorDeviceFrame = {
+func editorDeviceFrame(unitScale: view Float) ret DeviceFrame {
+  var frame: DeviceFrame = {
     enabled: false
     presetId: "none"
     extentW: 0.0
@@ -79,7 +79,7 @@ const defaultWindowW: Int = 1400
 
 const defaultWindowH: Int = 900
 
-type EditorViewport {
+type ViewportSystem {
   windowW: Int
   windowH: Int
   designW: Float
@@ -87,8 +87,8 @@ type EditorViewport {
 }
 
 # `WxH` from `name`, or the defaults when unset or malformed.
-func envSizeOr(name: view String, fallbackW: view Int, fallbackH: view Int) ret EditorViewport {
-  var viewport: EditorViewport = {
+func envSizeOr(name: view String, fallbackW: view Int, fallbackH: view Int) ret ViewportSystem {
+  var viewportSystem: ViewportSystem = {
     windowW: fallbackW
     windowH: fallbackH
     designW: fallbackW.toFloat()
@@ -100,34 +100,34 @@ func envSizeOr(name: view String, fallbackW: view Int, fallbackH: view Int) ret 
     let w: Int = text.sub(start: 0, len: x).toInt()
     let h: Int = text.sub(start: x + 1, len: text.length() - x - 1).toInt()
     if w > 0 and h > 0 {
-      viewport.windowW = w
-      viewport.windowH = h
+      viewportSystem.windowW = w
+      viewportSystem.windowH = h
     }
   }
-  ret viewport
+  ret viewportSystem
 }
 
-func createEditorViewport() ret EditorViewport {
+func createViewportSystem() ret ViewportSystem {
   ret envSizeOr(name: "RAE_UI_EDITOR_WINDOW", fallbackW: defaultWindowW, fallbackH: defaultWindowH)
 }
 
 # The chrome's design space = the window's logical size (physical pixels over
 # the display's pixel ratio): 1 design unit = 1 point. Applied at boot and on
 # every resize; the world lays out against it.
-func applyChromeViewport(viewport: mod EditorViewport, world: mod UiWorld) {
+func applyChromeViewport(viewportSystem: mod ViewportSystem, world: mod UiWorld) {
   var dpr: Float = Gpu2d.dpr()
   if dpr <= 0.0 {
     dpr = 1.0
   }
-  viewport.designW = Gpu2d.windowWidth().toFloat() / dpr
-  viewport.designH = Gpu2d.windowHeight().toFloat() / dpr
-  if viewport.designW <= 0.0 or viewport.designH <= 0.0 {
-    viewport.designW = viewport.windowW.toFloat()
-    viewport.designH = viewport.windowH.toFloat()
+  viewportSystem.designW = Gpu2d.windowWidth().toFloat() / dpr
+  viewportSystem.designH = Gpu2d.windowHeight().toFloat() / dpr
+  if viewportSystem.designW <= 0.0 or viewportSystem.designH <= 0.0 {
+    viewportSystem.designW = viewportSystem.windowW.toFloat()
+    viewportSystem.designH = viewportSystem.windowH.toFloat()
   }
-  Gpu2d.setDesignResolution(width: viewport.designW, height: viewport.designH, fit: 0)
-  world.layoutW = viewport.designW
-  world.layoutH = viewport.designH
+  Gpu2d.setDesignResolution(width: viewportSystem.designW, height: viewportSystem.designH, fit: 0)
+  world.layoutW = viewportSystem.designW
+  world.layoutH = viewportSystem.designH
 }
 
 # Pin the document's page root to its frame's origin. A scene root may carry
@@ -155,21 +155,25 @@ func documentHomeX(designW: view Float, columnW: view Float) ret Float {
 
 # Size the chrome's page root to the design space on every load (it was
 # mounted with the first document's size; the design can change per file).
-func sizeChromePage(world: mod UiWorld, chromeRoot: view EntityId, viewport: view EditorViewport) {
+func sizeChromePage(
+  world: mod UiWorld
+  chromeRoot: view EntityId
+  viewportSystem: view ViewportSystem
+) {
   if isNone(this: chromeRoot) or componentHas(this: world.rects, entity: chromeRoot) is false {
     ret
   }
   let rect: mod Rect => componentMod(this: world.rects, entity: chromeRoot)
-  rect.size.x = viewport.designW
-  rect.size.y = viewport.designH
+  rect.size.x = viewportSystem.designW
+  rect.size.y = viewportSystem.designH
 }
 
 # A window resize re-derives the chrome's design space and relayouts the
 # chrome; the caller re-fits the camera. Returns whether the window changed.
 # `resized` is this frame's one-shot Gpu2d.windowResized(), read ONCE by the
 # loop (reading clears it) and shared with the window-geometry writer.
-func viewportSystem(
-  viewport: mod EditorViewport
+func viewportUpdate(
+  viewportSystem: mod ViewportSystem
   world: mod UiWorld
   chromeRoot: view EntityId
   resized: view Bool
@@ -180,12 +184,12 @@ func viewportSystem(
   # The platform reports a resize on the first frame of a new window too;
   # only a size that actually differs is a resize (a spurious one would
   # re-fit the camera and cancel a boot zoom).
-  let beforeW: Float = viewport.designW
-  let beforeH: Float = viewport.designH
-  applyChromeViewport(viewport: viewport, world: world)
-  if viewport.designW is beforeW and viewport.designH is beforeH {
+  let beforeW: Float = viewportSystem.designW
+  let beforeH: Float = viewportSystem.designH
+  applyChromeViewport(viewportSystem: viewportSystem, world: world)
+  if viewportSystem.designW is beforeW and viewportSystem.designH is beforeH {
     ret false
   }
-  sizeChromePage(world: world, chromeRoot: chromeRoot, viewport: viewport)
+  sizeChromePage(world: world, chromeRoot: chromeRoot, viewportSystem: viewportSystem)
   ret true
 }

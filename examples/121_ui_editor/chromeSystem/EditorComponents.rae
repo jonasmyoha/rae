@@ -1,0 +1,75 @@
+# The editor's OWN authorable components (docs/ecs-systems-own-their-tables.md
+# §3): they were lib/ui tables until the ECS split step 2 moved them here, to
+# the systems that read them. A `.raescene` still authors them by name — the
+# loader parks a name no lib table has in `world.pendingComponents`, and
+# `applyEditorComponents` (EditorSystems.rae) decodes each into the owning
+# system's table with the same generic decoder the lib uses.
+open ui/Components
+
+# Which chrome panel a node IS (`EditorPanel`) or which one a pill TOGGLES
+# (`PanelToggle`): the panel system flips every EditorPanel of the requested
+# kind — a click on the pill, or a key the app maps to the kind.
+enum EditorPanelKind {
+  left
+  right
+  tree
+  project
+  diagnostics
+  guides
+  outlines
+  buttons
+}
+
+type EditorPanel {
+  panel: EditorPanelKind
+}
+
+type PanelToggle {
+  panel: EditorPanelKind
+}
+
+# The space between the panels the document is fitted into (cameraSystem
+# reads the tagged node's computed rect; the inspector only hovers inside it).
+type EditArea {
+}
+
+# Which editor data feeds a chrome ListView (one list system per source).
+enum EditorListSource { hierarchy, project, diagnostics }
+
+type EditorList {
+  source: EditorListSource
+}
+
+# The frame / safe-area guides (an authored overlay scene): the guide system
+# writes each tagged node's Rect from the document's frame.
+enum GuideRectKind { frame, safeArea, frameLabel, safeAreaLabel }
+
+type GuideRect {
+  kind: GuideRectKind
+}
+
+# The diagnostics count pill: state colours belong to the authored node.
+type DiagnosticsBadge {
+  clearFill: RgbaColor = RgbaColor { r: 46, g: 54, b: 78, a: 255 }
+  errorFill: RgbaColor = RgbaColor { r: 200, g: 40, b: 52, a: 255 }
+}
+
+# The editor's hover / selection outline: an authored Shape node the
+# inspector positions over the hovered / selected document node (Rect size
+# + RuntimeOffset from the target's world transform), or hides.
+enum OutlineRole { hover, selection }
+
+type OutlineFor {
+  role: OutlineRole
+}
+
+# An outline POOL (#12306774): one instance of `itemSceneId` per matched
+# document entity — every entity (`all`) or every entity with an OnClick
+# (`buttons`) — mounted as the node's children and positioned like the
+# hover outline. The reference editor's "Outlines" / "Buttons" toggles.
+enum OutlineMatch { all, buttons }
+
+type OutlinePool {
+  matches: OutlineMatch
+  itemSceneId: String
+}
