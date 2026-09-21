@@ -344,6 +344,17 @@ rae restart                 # manual: poke .rae/reload.signal = "restart"
 `rae watch` is the dev-loop entry point: it builds, exec's the
 app, watches sources + data, and drives the protocol above.
 
+**What is watched (implemented, 2026-09-21):** every `*.rae` under the
+project root and the companion `lib/` directories, the WGSL parts the
+last build composed shaders from, and every `*.raescene` under the same
+roots. A scene is data the running app loads, so no build sees it — but
+`rae watch` is the one dev loop ("edit anything, see it"), so a scene
+edit restarts the app exactly like a source edit. An app never needs its
+own `FileWatch` over its own scenes; `lib/FileWatch.rae` is for data the
+app picks at RUNTIME from outside its tree (the UI editor watching a
+document it opened from another project). `compiler/tools/test-watch-scene-data.sh`
+asserts the restart.
+
 `rae reload` / `rae restart` are convenience commands for IDE
 keybindings or external tooling (Vim's `:! rae reload`, etc.).
 

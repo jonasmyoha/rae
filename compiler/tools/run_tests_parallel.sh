@@ -111,6 +111,13 @@ if [ -f tools/test-sdl-file-dialog.sh ]; then
   echo
   if bash tools/test-sdl-file-dialog.sh; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 fi
+# `rae watch` restarts on a `.raescene` change too (the scene is app data no
+# build sees; the supervisor is the one dev loop). Runs a real supervisor on a
+# tiny CLI program — a few seconds.
+if [ -f tools/test-watch-scene-data.sh ]; then
+  echo
+  if bash tools/test-watch-scene-data.sh; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
+fi
 echo
 echo "=========================================="
 echo "Results: $PASSED passed, $FAILED failed"
