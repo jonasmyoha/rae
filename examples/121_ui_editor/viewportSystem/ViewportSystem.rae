@@ -166,12 +166,15 @@ func sizeChromePage(world: mod UiWorld, chromeRoot: view EntityId, viewport: vie
 
 # A window resize re-derives the chrome's design space and relayouts the
 # chrome; the caller re-fits the camera. Returns whether the window changed.
+# `resized` is this frame's one-shot Gpu2d.windowResized(), read ONCE by the
+# loop (reading clears it) and shared with the window-geometry writer.
 func viewportSystem(
   viewport: mod EditorViewport
   world: mod UiWorld
   chromeRoot: view EntityId
+  resized: view Bool
 ) ret Bool {
-  if Gpu2d.windowResized() is false {
+  if resized is false {
     ret false
   }
   # The platform reports a resize on the first frame of a new window too;

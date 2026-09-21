@@ -29,6 +29,7 @@ open ecs/Entity
 open ecs/ComponentTable
 open Gpu2dCanvas
 open ui/DebugOverlay
+open ui/WindowGeometry
 open ecs/Event
 
 const idleHeartbeatSec: Float = 0.5
@@ -287,13 +288,18 @@ func runApp(app: mod App) ret Int {
   var effectTime: Float = 0.0
 
   loop not Gpu2d.pollClose() {
+    let resized: Bool = Gpu2d.windowResized()
     var refit: Bool = viewportSystem(
       viewport: app.viewport
       world: app.world
       chromeRoot: app.chrome.pageRoot
+      resized: resized
     )
     var changed: Bool = refit
     let now: Float64 = Gpu2d.nowSeconds()
+    if Gpu2d.headlessRequested() is false {
+      updateWindowGeometry(windowGeometry: app.windowGeometry, now: now, resized: resized)
+    }
     # The debug widget reads the pointer BEFORE the chrome hit-tests, so a
     # press on its button (or its open dialog) never reaches the pill under
     # it: the press is swallowed by voiding this frame's actions.
@@ -455,6 +461,13 @@ func runApp(app: mod App) ret Int {
         runScheduledUiSystems(schedule: app.schedule, world: app.world, res: app.gpuUi)
       }
     }
+    if renderedOnce is false {
+      # The platform applies a restored size/position on its event pump, so
+      # the first frame is the earliest honest report of where the window is.
+      log(
+        "[ui-editor] window {Gpu2d.designWidth().toInt()}x{Gpu2d.designHeight().toInt()} at ({Gpu2d.windowPositionX()}, {Gpu2d.windowPositionY()})"
+      )
+    }
     let needsRender: Bool = hadEvents or changed or inputChanged or renderedOnce is false
     if Gpu2d.shouldRenderFrame(appNeedsRender: needsRender) {
       Gpu2d.beginFrame(
@@ -485,6 +498,9 @@ func runApp(app: mod App) ret Int {
         heartbeatSec: idleHeartbeatSec
       ))
     }
+  }
+  if Gpu2d.headlessRequested() is false {
+    flushWindowGeometry(windowGeometry: app.windowGeometry)
   }
   canvasShutdown(canvas: app.canvas)
   Gpu2d.closeWindow()
