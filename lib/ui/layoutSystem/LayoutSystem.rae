@@ -344,6 +344,28 @@ func measureNode(world: mod UiWorld, entity: view EntityId, scratch: mod List(En
       }
     }
 
+    # A pooled (virtual) ListView that hugs its height is as tall as its
+    # visible rows: min(rows, visibleItemCount) pitches minus the last gap,
+    # plus its padding (#71098456). Its children are the pooled row window,
+    # which slides with the scroll, so their extent is not the list's size.
+    if componentHas(this: world.listViews, entity: entity) {
+      let lv: view ListView => componentView(this: world.listViews, entity: entity)
+      if lv.mode is ListViewMode.virtual {
+        var shown: Int = 1
+        if componentHas(this: world.listViewDatas, entity: entity) {
+          shown = componentView(this: world.listViewDatas, entity: entity).rows.length
+        }
+        if shown < 1 {
+          shown = 1
+        }
+        if shown > lv.visibleItemCount {
+          shown = lv.visibleItemCount
+        }
+        let pad: Insets = entityPadding(world: world, entity: entity)
+        measuredH = shown.toFloat() * (lv.itemHeight + lv.itemGap) - lv.itemGap + pad.t + pad.b
+      }
+    }
+
     measuredW = applyConstraintsW(world: world, entity: entity, w: measuredW)
     measuredH = applyConstraintsH(world: world, entity: entity, h: measuredH)
 
