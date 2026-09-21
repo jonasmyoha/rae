@@ -3,11 +3,6 @@
 # populate. All plain data; no methods. The ECS storage in `ecs.rae`
 # parameterises ComponentTable(T) over each of these.
 #
-# Mirrors the inventory in
-# `rae/docs/game-proto1-ruics-ecs-reference.md` § 3 — see
-# `examples/98_mobile_ui/DESIGN.md` for the subset the music player
-# actually needs in phase 1.
-
 # -----------------------------------------------------------------
 # Sub-types and enums shared across components
 # -----------------------------------------------------------------
@@ -279,6 +274,9 @@ type Shape {
 
 type Shadow {
   blur: Float
+  # More layers soften the approximation; defaults preserve existing scenes.
+  layers: Int = 3
+  opacity: Float = 1.0
 }
 
 type Opacity {

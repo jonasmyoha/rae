@@ -159,12 +159,12 @@ chrome can be hidden for a pure passive view (`H` key).
 - **chrome layer** — authored in the app's OWN `.raescene`
   (`assets/scenes/Editor.raescene`, `chrome/*.raescene` sub-scenes), the desktop
   editor layout the reference editor uses (docs/ui-editor-reference-features.md §3):
-  a 44pt **top bar** (`Panels` toggle, file name, zoom pill, `Open (O)`, node count,
-  diagnostics pill, `Inspector` toggle), a **Body** row of `LeftPanel` (300pt:
+  a 58pt **top bar** (`Panels` toggle, file name, zoom pill, `Open (O)`, node count,
+  diagnostics pill, `Inspector` toggle), a **Body** row of `LeftPanel` (264pt:
   Project / Hierarchy / Diagnostics sections as clipped ListViews, `chrome/*Row`
   rows) · `EditArea` (Fill — the space the camera fits the document into) ·
-  `RightPanel` (320pt: the `chrome/Inspector` instance, always shown, "nothing
-  selected" is a state), and a 26pt **status bar** (frame size, status line). The
+  `RightPanel` (296pt: the `chrome/Inspector` instance, always shown, "nothing
+  selected" is a state), and a 32pt **status bar** (frame size, status line). The
   top-bar toggles fire `panel.left` / `panel.right` and flip the panels' `Active`;
   `H` hides the whole chrome. The chrome is data; the app has no `createEntity`
   for layout. Pointer input reaches the document only inside `EditArea`, so a
@@ -220,6 +220,45 @@ the library systems, like 106's `FramePipeline.rae`):
 Rendering is the stock `lib/ui` render system; the highlight is a `Shape` entity on
 a third `overlay` layer driven by `inspectorSystem`, not a special draw path.
 
+### Chrome and sample visual tokens
+
+The visual pass replaces heavy outlined panels and equally weighted actions with
+charcoal elevations, a large title, a single teal primary pill, and quieter
+secondary actions. The orbital illustration, progress card, card artwork,
+settings rows and all chrome remain authored scene nodes. No widget is drawn
+from application code and no C renderer code was added.
+
+- **Palette:** background `#0C121B`, surface `#18222C`, raised surface `#24333D`,
+  primary text `#EEF4F3`, secondary text `#9DACB5`, accent `#48B498` (72,180,152).
+  Surface gradients stay close in value; the accent gradient runs from
+  `#69C7AC` to the base teal. Colour is a hierarchy cue, not a border on every box.
+- **Sample type scale:** display 128, title 92, h2 42, body 34, secondary 28,
+  caption 26, eyebrow 24 design units. Display leading is 1.08; prose is
+  1.25–1.30. Compact card and onboarding headings author local overrides.
+  Buttons explicitly centre labels on both axes. Chrome uses authored `OpticalAlign`,
+  colour and 11–15pt size overrides, independent of the loaded document's styles.
+- **Spacing:** 8 / 16 / 24 / 40 / 64, with 64-unit sample gutters and 32-unit
+  card padding. The main menu pairs its secondary actions and gives progress its
+  own card. Settings keeps 144-unit rows with 16-unit separation.
+- **Rounding:** sample cards 48, hero sheets 56, compact stat tiles 40;
+  button radius is exactly half the button's height. Desktop chrome pills are
+  34pt high with a 17pt radius; the inspector surface has a 20pt radius.
+  Gradient nodes explicitly author `CornerRadius`, which is the gradient
+  renderer's rounding input. Rounded-box ring nodes retain their authored stroke.
+- **Shadows:** `Shadow { blur: 24, layers: 12, opacity: 0.32 }` gives a subtle
+  layered edge. The pure-Rae renderer bounds layers to 1–16 and opacity to 0–1;
+  existing scenes retain the original three layers and full opacity by default.
+  Each layer is a draw, so this is used on selected large surfaces, not every row.
+- **Status:** `DiagnosticsBadge.clearFill` and `errorFill` are authored colours;
+  the existing ECS system only chooses between them. Defaults preserve previous
+  scenes. Coverage authors these fields and the new Shadow fields, while retaining
+  its component inventory, animation, list, mask and nested-scene exercises.
+
+The watch-reload twin is regenerated from MainMenu with only the title changed
+and one intentionally unknown `Telemetry` component. All chrome ids, bindings,
+actions and the sample `PlayButton` remain stable. The split/import and inline
+asset examples retain their distinct packaging models.
+
 ## 4. Loader policy (the library change that makes a viewer possible)
 
 `applyComponentByName` today calls `exit(1)` on a component it does not know. That
@@ -268,7 +307,7 @@ it (`Coverage` unless a nicer example exists).
 | Text | text, styleId, wrapWidthMode None / NodeWidth, styleOverride | yes | yes | Coverage `WrappedText` |
 | TextShadow | color, offset, softness | yes | yes | Coverage `Heading` |
 | Shape | kind Rect / RoundedRect / Circle, fill, stroke (token, `{r,g,b,a}` or `#hex`), strokeWidth, radius | yes | yes | all |
-| Shadow | blur | yes | yes — a soft drop shadow (three growing translucent layers, #1000) | Coverage `ShadowBox` |
+| Shadow | blur, layers, opacity | yes | yes — bounded translucent layers; defaults preserve the original three-layer shadow | Coverage `ShadowBox` |
 | Opacity | value | yes | yes, inherited down the tree | Coverage `FadedBox` |
 | GradientFill | from, to, angle | yes | yes | Coverage `GradientBox` |
 | CornerRadius | radius | yes | yes | Coverage |

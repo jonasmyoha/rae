@@ -305,7 +305,7 @@ func syncInspectorPanel(
     let name: view Name => componentView(this: world.names, entity: selected)
     label = "{name.label}"
   }
-  var typeLine: String = "{primaryType} · {label}"
+  var typeLine: String = "{primaryType} / {label}"
   if primaryType.length() is 0 {
     typeLine = "{label}"
   }
@@ -313,7 +313,8 @@ func syncInspectorPanel(
     typeLine = "{primaryType}"
   }
   status.inspectorType = typeLine
-  status.inspectorComponents = componentNamesFor(world: world, entity: selected)
+  let componentNames: String = componentNamesFor(world: world, entity: selected)
+  status.inspectorComponents = String.replace(this: componentNames, old: ",", new: ", ")
   var rectLine: String = "no computed rect"
   if componentHas(this: world.computedRects, entity: selected) and componentHas(
     this: world.worldTransforms
