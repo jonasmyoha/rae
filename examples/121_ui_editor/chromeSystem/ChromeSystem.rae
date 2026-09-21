@@ -258,32 +258,12 @@ func editorListEntity(world: view UiWorld, source: view EditorListSource) ret En
   ret noEntity()
 }
 
-# The side panels are 300 / 320 points wide with 12 points of padding; a
-# list inside one is this wide (the row pool takes its width from the list's
-# authored Rect — queued to follow layout instead).
-const chromePanelInnerW: Float = 276.0
-
-# Size the list to its row count (capped at its visible count) and hand it
-# the rows.
+# Hand the list its rows. Its width is layout's (`Size: { w: Fill }` fills
+# the panel) and its height follows the visible row count (`h: Hug`, the
+# ListView rule in the layout measure pass) — nothing to size here.
 func setEditorListRows(world: mod UiWorld, list: view EntityId, rows: own List(ListViewRow)) {
   if isNone(this: list) {
     ret
-  }
-  if componentHas(this: world.rects, entity: list) and componentHas(
-    this: world.listViews
-    entity: list
-  ) {
-    let listView: ListView = componentGet(this: world.listViews, entity: list)
-    var shown: Int = rows.length
-    if shown < 1 {
-      shown = 1
-    }
-    if shown > listView.visibleItemCount {
-      shown = listView.visibleItemCount
-    }
-    let rect: mod Rect => componentMod(this: world.rects, entity: list)
-    rect.size.x = chromePanelInnerW
-    rect.size.y = shown.toFloat() * (listView.itemHeight + listView.itemGap) - listView.itemGap
   }
   componentSet(this: world.listViewDatas, entity: list, data: ListViewData { rows: own rows })
 }

@@ -347,15 +347,22 @@ func listViewBuildRow(
   scenes: view SceneRegistry
 ) ret EntityId {
   let rowRoot: EntityId = createEntity(world: world)
-  # The row's placement is the list's: full list width, one item height. (A
-  # sub-scene's ROOT placement components are skipped on mount, as for any
-  # scene instance — the host positions the instance.)
+  # The row's placement is the list's: it FILLS the list's computed content
+  # width (so a `Size: Fill` list, a resize or a panel toggle re-widths the
+  # rows through layout, #71098456) and is one item high. (A sub-scene's
+  # ROOT placement components are skipped on mount, as for any scene
+  # instance — the host positions the instance.)
   var rowW: Float = 0.0
   if componentHas(this: world.rects, entity: listEntity) {
     rowW = componentGet(this: world.rects, entity: listEntity).size.x
   }
   let r: Rect = { position: { x: 0.0, y: 0.0 }, size: { x: rowW, y: lv.itemHeight } }
   componentSet(this: world.rects, entity: rowRoot, data: r)
+  let size: Size = {
+    w: SizeAxis { mode: SizeMode.fill, min: -1, max: -1 }
+    h: SizeAxis { mode: SizeMode.fixed, min: -1, max: -1 }
+  }
+  componentSet(this: world.sizes, entity: rowRoot, data: size)
   if listViewUsesScene(lv: lv, scenes: scenes) {
     let idx: Int = sceneRegistryIndex(reg: scenes, key: lv.itemSceneId)
     let scene: view Scene => sceneRegistryGet(reg: scenes, idx: idx)
