@@ -176,6 +176,34 @@ uint32_t rae_ext_rae_str_at(rae_String s, int64_t index) {
   return (uint32_t)c;
 }
 
+/* #81444309: the inverse of rae_ext_rae_str_at — one Unicode scalar as a
+ * fresh UTF-8 String (1..4 bytes). Out-of-range values and the surrogate
+ * range encode U+FFFD, the replacement character. The JSON parser's \uXXXX
+ * decoding is built on this. */
+rae_String rae_ext_rae_str_from_codepoint(int64_t code) {
+  uint32_t cp = (uint32_t)code;
+  if (code < 0 || code > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) cp = 0xFFFD;
+  char buf[5];
+  int n = 0;
+  if (cp < 0x80) {
+    buf[n++] = (char)cp;
+  } else if (cp < 0x800) {
+    buf[n++] = (char)(0xC0 | (cp >> 6));
+    buf[n++] = (char)(0x80 | (cp & 0x3F));
+  } else if (cp < 0x10000) {
+    buf[n++] = (char)(0xE0 | (cp >> 12));
+    buf[n++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+    buf[n++] = (char)(0x80 | (cp & 0x3F));
+  } else {
+    buf[n++] = (char)(0xF0 | (cp >> 18));
+    buf[n++] = (char)(0x80 | ((cp >> 12) & 0x3F));
+    buf[n++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+    buf[n++] = (char)(0x80 | (cp & 0x3F));
+  }
+  buf[n] = '\0';
+  return rae_ext_rae_str_from_cstr((const void*)buf);
+}
+
 double rae_ext_rae_str_to_f64(rae_String s) {
   if (!s.data) return 0.0;
   return atof((const char*)s.data);

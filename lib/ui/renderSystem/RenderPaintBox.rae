@@ -13,6 +13,23 @@ func g2dColor(color: view RgbaColor) ret Int {
   ret (color.a shl 24) bitor (color.r shl 16) bitor (color.g shl 8) bitor color.b
 }
 
+# Sprite scale mode -> the gpu2d draw call's mode code.
+func g2dScaleMode(m: view ScaleMode) ret Int {
+  if m is ScaleMode.fill {
+    ret 1
+  }
+  if m is ScaleMode.stretch {
+    ret 2
+  }
+  ret 0
+}
+
+# A colour with the subtree's accumulated alpha (0..255) applied.
+func g2dChain(color: view RgbaColor, chain255: view Int) ret RgbaColor {
+  let a: Int = (color.a * chain255) / 255
+  ret RgbaColor { r: color.r, g: color.g, b: color.b, a: a }
+}
+
 func g2dRadius(world: view UiWorld, entity: view EntityId, fallback: view Float) ret Float {
   if componentHas(this: world.cornerRadiuses, entity: entity) {
     let cr: CornerRadius = componentGet(this: world.cornerRadiuses, entity: entity)

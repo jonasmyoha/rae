@@ -110,6 +110,19 @@ func resolveTextIsCentered(theme: view ResolvedTheme, styleId: view String) pub 
   ret false
 }
 
+# Whether the style centres its line box vertically in the node's box
+# (`"vAlign": "center"`); false = the baseline sits at top + size.
+func resolveTextIsVCentered(theme: view ResolvedTheme, styleId: view String) pub ret Bool {
+  let i: Int = themeTextStyleIndex(theme: theme, styleId: styleId)
+  if i < 0 {
+    ret false
+  }
+  if let vertical: Int = theme.textVAligns.copyAt(index: i) {
+    ret vertical is themeVAlignCenter
+  }
+  ret false
+}
+
 func resolveTextIsRightAligned(theme: view ResolvedTheme, styleId: view String) pub ret Bool {
   let i: Int = themeTextStyleIndex(theme: theme, styleId: styleId)
   if i < 0 {

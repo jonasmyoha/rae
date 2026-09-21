@@ -42,6 +42,13 @@ open ui/ThemeParse
 const themeMaxExtendsDepth: Int = 4
 
 # Align codes stored in textAligns: 0 start, 1 center, 2 end.
+# Vertical codes stored in textVAligns: 0 top (the baseline sits at top +
+# size, the historical placement), 1 center (the line box is centred in
+# the node's box — a button label centres once, in its style; #81444309).
+const themeVAlignTop: Int = 0
+
+const themeVAlignCenter: Int = 1
+
 const themeAlignStart: Int = 0
 
 const themeAlignCenter: Int = 1
@@ -105,6 +112,7 @@ type ResolvedTheme {
   # "" => no shadow.
   textShadowNames: List(String)
   textAligns: List(Int)
+  textVAligns: List(Int)
   # container/button styles (#237, M6): composite bundles that reference
   # other tokens. Each entry names a background palette slot, a radius
   # token, a padding token, and a text style — the "five visual
@@ -156,6 +164,7 @@ func createResolvedTheme() pub ret ResolvedTheme {
     textColorA: List.create(Int, cap: 32)
     textShadowNames: List.create(String, cap: 32)
     textAligns: List.create(Int, cap: 32)
+    textVAligns: List.create(Int, cap: 32)
     containerNames: List.create(String, cap: 8)
     containerBgSlots: List.create(String, cap: 8)
     containerRadiusTokens: List.create(String, cap: 8)

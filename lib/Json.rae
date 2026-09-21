@@ -359,8 +359,9 @@ func pushField(fields: mod List(JsonField), key: own String, valueIdx: view Int)
 
 # Parse a JSON string literal starting at `"`. Consumes through the
 # closing `"`. Backslash escapes recognised: `"`, `\`, `/`, `b`, `f`,
-# `n`, `r`, `t`. Unicode `\uXXXX` sequences are passed through as-is for
-# now (caller can normalise later if needed).
+# `n`, `r`, `t`, and `\uXXXX` — decoded to UTF-8 (#81444309), a high
+# surrogate followed by `\u` + a low surrogate as one supplementary
+# character, a lone surrogate as U+FFFD, a malformed escape passed through.
 func parseString(jsonParser: mod JsonParser) ret String {
   if not Json.consume(jsonParser: jsonParser, c: '"') {
     jsonParser.ok = false
@@ -412,9 +413,12 @@ func parseString(jsonParser: mod JsonParser) ret String {
                     if esc is 'f' {
                       one = ""
                     } else {
-                      # \uXXXX or unknown: pass through as raw 1 byte
-                      # (good enough for ASCII-heavy scene files)
-                      one = jsonParser.source.sub(start: jsonParser.pos, len: 1)
+                      if esc is 'u' {
+                        one = Json.parseUnicodeEscape(jsonParser: jsonParser)
+                      } else {
+                        # unknown: pass the escaped byte through
+                        one = jsonParser.source.sub(start: jsonParser.pos, len: 1)
+                      }
                     }
                   }
                 }
@@ -433,6 +437,61 @@ func parseString(jsonParser: mod JsonParser) ret String {
   # Reached end of source without closing quote.
   jsonParser.ok = false
   ret result
+}
+
+# The value of the hex digit at `pos`, or -1 (hex digits are ASCII, so the
+# one-byte substring is the character).
+func hexDigitAt(jsonParser: view JsonParser, pos: view Int) ret Int {
+  if pos >= jsonParser.source.length() {
+    ret -1
+  }
+  let digits: String = "0123456789abcdef"
+  let one: String = jsonParser.source.sub(start: pos, len: 1).toLower()
+  if one.length() is not 1 {
+    ret -1
+  }
+  ret digits.indexOf(sub: one)
+}
+
+# The four hex digits starting at `pos` as a code unit, or -1.
+func hexQuadAt(jsonParser: view JsonParser, pos: view Int) ret Int {
+  var value: Int = 0
+  loop var i: Int = 0, i < 4, ++i {
+    let digit: Int = Json.hexDigitAt(jsonParser: jsonParser, pos: pos + i)
+    if digit < 0 {
+      ret -1
+    }
+    value = value * 16 + digit
+  }
+  ret value
+}
+
+# Called with the parser ON the `u` of a unicode escape: decode the four hex
+# digits (and a following backslash-u + low surrogate when this is a high
+# one) to UTF-8 and leave the parser on the LAST consumed character (the
+# caller steps once more). A malformed escape decodes to nothing, consuming
+# only the `u`.
+func parseUnicodeEscape(jsonParser: mod JsonParser) ret String {
+  let unit: Int = Json.hexQuadAt(jsonParser: jsonParser, pos: jsonParser.pos + 1)
+  if unit < 0 {
+    ret ""
+  }
+  jsonParser.pos = jsonParser.pos + 4
+  var code: Int = unit
+  if unit >= 55296 and unit <= 56319 {
+    # A high surrogate: pair it with the low surrogate escaped right after.
+    let next: Int = jsonParser.pos + 1
+    if next + 1 < jsonParser.source.length() {
+      if jsonParser.source.at(index: next) is '\\' and jsonParser.source.at(index: next + 1) is 'u' {
+        let low: Int = Json.hexQuadAt(jsonParser: jsonParser, pos: next + 2)
+        if low >= 56320 and low <= 57343 {
+          code = 65536 + (unit - 55296) * 1024 + (low - 56320)
+          jsonParser.pos = next + 5
+        }
+      }
+    }
+  }
+  ret String.fromCodepoint(code: code)
 }
 
 # Consume a JSON number (int or float). `\-?\d+(\.\d+)?([eE][+-]?\d+)?`.

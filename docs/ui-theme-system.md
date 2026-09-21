@@ -175,6 +175,7 @@ A `TextStyle` is a named bundle:
 | `color` | **palette slot name** | stored as the slot (`"accentText"`), resolved against the active palette at use — this is what makes theme switching not require scene re-parse |
 | `shadow` | shadow token name or inline (none default) | see §5 shadows |
 | `align` | enum start/center/end | replaces `textStyleIsCentered` / `IsRightAligned` |
+| `vAlign` | enum top/center | vertical placement in the node's box: `top` (default) puts the baseline at top + size; `center` centres the line box, so a `button` style centres its label once for every button (#81444309). Per-node ink centring stays `OpticalAlign`. |
 | future | any | new fields default; old theme files stay valid |
 
 **Extensibility rule:** every field has a defined default, and a style
