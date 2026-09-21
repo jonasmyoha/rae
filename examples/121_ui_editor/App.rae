@@ -124,9 +124,13 @@ func reloadDocument(app: mod App) {
     )
   }
   let diagnostics: Int = app.world.sceneDiagnostics.length
+  var kept: String = ""
+  if app.world.pendingComponents.length > 0 {
+    kept = ", {app.world.pendingComponents.length} app components kept"
+  }
   if mounted {
     log(
-      "[ui-editor] reloaded {app.document.path} (+{app.document.nodeCount} -{previousNodes} nodes, {diagnostics} diagnostics)"
+      "[ui-editor] reloaded {app.document.path} (+{app.document.nodeCount} -{previousNodes} nodes, {diagnostics} diagnostics{kept})"
     )
   } else {
     log("[ui-editor] reload of {app.document.path} kept the last good page: {app.document.status}")
@@ -468,6 +472,11 @@ func runApp(app: mod App) ret Int {
         "[ui-editor] window {Gpu2d.designWidth().toInt()}x{Gpu2d.designHeight().toInt()} at ({Gpu2d.windowPositionX()}, {Gpu2d.windowPositionY()})"
       )
     }
+    # Frame end. The editor NEVER reports pending components: what no lib
+    # table matched is an app's own component, kept on the node as authored
+    # (docs/ecs-systems-own-their-tables.md §4) and shown in the inspector.
+    # Only the dead entities of a reload / unmount are released.
+    releaseDeadEntities(world: app.world)
     let needsRender: Bool = hadEvents or changed or inputChanged or renderedOnce is false
     if Gpu2d.shouldRenderFrame(appNeedsRender: needsRender) {
       Gpu2d.beginFrame(

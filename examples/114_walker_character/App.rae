@@ -57,6 +57,7 @@ open app3d/CameraRig
 open app3d/CharacterController
 open app3d/SettingsDialog
 open ui/CornerMenuButton
+open ui/Registry
 open SkyHosek
 open app3d/UiShell
 open app3d/ControlPanel
@@ -825,6 +826,9 @@ func runWalkerApp() ret Int {
         )
       }
     }
+    # Frame end: report the authored components no lib table matched (this app
+    # has no tables of its own) and recycle the indices of destroyed entities.
+    uiFrameEnd(world: app.inputSystem.world)
   }
   if let resources: mod GpuResources => app.gpuResources {
     grassShutdown(grass: app.grassCompute, resources: resources)

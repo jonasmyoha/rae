@@ -5,6 +5,7 @@ import Sys
 open app3d/UiShell
 open Math
 open ui/Ecs
+open ui/Registry
 open ui/DebugOverlay
 open ui/renderSystem/RenderSystem
 open Gpu2dCanvas
@@ -937,6 +938,9 @@ func main() ret Int {
       didRealWork: true
     )
     Gpu2d.endFrame(canvas: canvas)
+    # Frame end: report the authored components no lib table matched (this app
+    # has no tables of its own) and recycle the indices of destroyed entities.
+    uiFrameEnd(world: world)
   }
   canvasShutdown(canvas: canvas)
   Gpu2d.closeWindow()

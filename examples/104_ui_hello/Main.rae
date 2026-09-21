@@ -19,6 +19,7 @@ import String
 import ui/Scene
 open app3d/UiShell
 open ui/Ecs
+open ui/Registry
 open ui/Pipeline
 open ecs/Schedule
 open ui/EventLoop
@@ -140,6 +141,9 @@ func main() ret Int {
       ))
       wokeUp = true
     }
+    # Frame end: report the authored components no lib table matched (this app
+    # has no tables of its own) and recycle the indices of destroyed entities.
+    uiFrameEnd(world: world)
   }
 
   canvasShutdown(canvas: canvas)

@@ -7,6 +7,8 @@
 #
 # Diagnostics are appended in load order and never removed by the loader; a
 # tool clears the list itself between loads (`clearSceneDiagnostics`).
+open ecs/Entity
+
 enum UnknownComponentPolicy { fail, report }
 
 type ScenePolicy {
@@ -38,6 +40,25 @@ type SceneDiagnostic {
 
 func createSceneDiagnostics() ret List(SceneDiagnostic) {
   ret List.create(SceneDiagnostic, cap: 16)
+}
+
+# An authored component the loader had no UiWorld table for — NOT an error at
+# load time any more (docs/ecs-systems-own-their-tables.md §3.2): it waits in
+# `world.pendingComponents` for the app to apply it into one of ITS systems'
+# tables (`applyComponentInto`), or to report it (`reportUnknownComponent`,
+# the old #941 verdict). An editor that never drains the outbox is how a scene
+# keeps components the editor does not know. `json` is the component object's
+# text (re-serialised), so the app decodes it without the loader's JsonDoc.
+type PendingComponent {
+  entity: EntityId
+  name: String
+  json: String
+  sceneId: String
+  nodeId: String
+}
+
+func createPendingComponents() ret List(PendingComponent) {
+  ret List.create(PendingComponent, cap: 8)
 }
 
 func reportSceneDiagnostic(

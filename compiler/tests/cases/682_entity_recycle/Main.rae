@@ -16,6 +16,9 @@ func main() {
   # give `a` an Active component, then destroy it
   componentSet(this: world.actives, entity: a, data: Active { value: true })
   destroyEntity(world: world, entity: a)
+  # UiWorld defers index reuse until the app releases its dead entities (the
+  # dead-entities outbox); with nothing of its own to sweep, release at once.
+  releaseDeadEntities(world: world)
 
   # recreate: reuses a's index with a bumped generation
   let c: EntityId = createEntity(world: world)

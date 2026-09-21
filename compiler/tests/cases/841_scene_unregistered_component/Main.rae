@@ -2,7 +2,7 @@ import Json
 import String
 import ui/Components
 open ui/Ecs
-import ui/Registry
+open ui/Registry
 open ui/Scene
 open ui/SceneLoader
 open ecs/Entity
@@ -34,6 +34,10 @@ func main() {
   let world: UiWorld = createUiWorld()
   log("loading scene with an unregistered component...")
   let rootEntity: EntityId = loadScene(world: world, scene: scene)
+  # An unregistered name is no longer the loader's verdict: it waits in the
+  # pending outbox for an app system to claim it. With no app tables, every
+  # pending component is unknown — reporting it is the #941 exit.
+  reportPendingComponents(world: world)
   # Unreachable: loadScene aborts on the unregistered component (#941).
   log("unreachable rootEntity = {rootEntity.index}")
 }

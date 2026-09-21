@@ -234,19 +234,19 @@ func applyComponentByName(
     ret
   }
 
-  # No table matched. For an app's OWN scenes a `.raescene` component the
-  # loader cannot apply is a CORRECTNESS BUG, not a thing to swallow (#941):
-  # fail loudly, naming the scene, node and component. A tool opening OTHER
-  # people's scenes sets `world.scenePolicy.unknownComponents = report`
-  # (#996): the same two cases become a SceneDiagnostic and the node mounts
-  # with the components it has. The two cases, so the author knows which:
+  # No UiWorld table matched. Two cases, so the author knows which:
   #   - the name is a world table that is derived / runtime state, never
-  #     authored (ComputedRect, Parent, ...) -> "not authorable";
-  #   - the name is no component at all (a typo, or a non-UI component such
-  #     as a 3D `Transform3d` in a UI scene) -> "not registered".
-  let report: Bool = world.scenePolicy.unknownComponents is UnknownComponentPolicy.report
+  #     authored (ComputedRect, Parent, ...): a bug in the scene whatever app
+  #     loads it — fail (#941) or, under the `report` policy (#996), a
+  #     SceneDiagnostic;
+  #   - the name is no lib component: it may be one of the APP's own
+  #     (docs/ecs-systems-own-their-tables.md §3.2), which the loader cannot
+  #     know. It goes to the pending outbox; the app applies it into its
+  #     systems' tables (applyComponentInto) or reports it
+  #     (reportUnknownComponent — the old verdict, fail or diagnostic). An
+  #     editor leaves it pending: that is how it keeps what it does not know.
   if isRuntimeTable(name: name) {
-    if report {
+    if world.scenePolicy.unknownComponents is UnknownComponentPolicy.report {
       reportSceneDiagnostic(
         diagnostics: world.sceneDiagnostics
         sceneId: sceneId
@@ -260,21 +260,89 @@ func applyComponentByName(
     log(
       "[scene] {sceneId} node {nodeId}: component {name} is a runtime/derived table and cannot be authored"
     )
-  } else {
-    if report {
-      reportSceneDiagnostic(
-        diagnostics: world.sceneDiagnostics
-        sceneId: sceneId
-        nodeId: nodeId
-        kind: SceneDiagnosticKind.unknownComponent
-        name: name
-        message: "{name} is not a registered component"
-      )
-      ret
-    }
-    log("[scene] {sceneId} node {nodeId}: component {name} is not registered")
+    exit(code: 1)
   }
+  world.pendingComponents.add(value: PendingComponent {
+    entity: entity
+    name: "{name}"
+    json: Json.stringify(doc: doc, value: val)
+    sceneId: "{sceneId}"
+    nodeId: "{nodeId}"
+  })
+}
+
+# Apply one pending component into the table of `system` whose component type
+# the pending name matches: the same compile-time `fields(system)` loop the
+# world loader runs, instantiated per system type. `system` is a struct of
+# ComponentTable fields (an app system that owns its authored components,
+# docs/ecs-systems-own-their-tables.md §3); `world` supplies the theme for
+# token values and the diagnostics list. False when no table matched — the
+# caller tries its next system, or reports.
+func applyComponentInto(
+  S: type
+  system: mod S
+  world: mod UiWorld
+  pending: view PendingComponent
+) ret Bool {
+  var applied: Bool = false
+  loop let table: mod ComponentTable(any) in fields(system) {
+    if pending.name is authoredNameOf(typeName: typeName(table)) {
+      let doc: JsonDoc = Json.parseJson(source: pending.json)
+      decodeComponent(
+        table: table
+        entity: pending.entity
+        doc: doc
+        val: Json.root(doc: doc)
+        theme: world.theme
+        diagnostics: world.sceneDiagnostics
+        sceneId: pending.sceneId
+        nodeId: pending.nodeId
+      )
+      applied = true
+    }
+  }
+  ret applied
+}
+
+# The #941 verdict for a pending component no system claimed: under the
+# default `fail` policy an app's own scene naming a component nobody has is
+# a correctness bug — fail loudly, naming scene, node and component; under
+# `report` (#996, a tool opening other people's scenes) it is a
+# SceneDiagnostic and the node keeps the components it has.
+func reportUnknownComponent(world: mod UiWorld, pending: view PendingComponent) {
+  if world.scenePolicy.unknownComponents is UnknownComponentPolicy.report {
+    reportSceneDiagnostic(
+      diagnostics: world.sceneDiagnostics
+      sceneId: pending.sceneId
+      nodeId: pending.nodeId
+      kind: SceneDiagnosticKind.unknownComponent
+      name: pending.name
+      message: "{pending.name} is not a registered component"
+    )
+    ret
+  }
+  log("[scene] {pending.sceneId} node {pending.nodeId}: component {pending.name} is not registered")
   exit(code: 1)
+}
+
+# The frame-end drain of BOTH outboxes for an app with no tables of its own
+# (docs/ecs-systems-own-their-tables.md §3.2): every pending component is
+# unknown, every dead entity can be recycled. An app with systems that own
+# tables writes its own version: apply / clear per system, then these two.
+func uiFrameEnd(world: mod UiWorld) {
+  reportPendingComponents(world: world)
+  releaseDeadEntities(world: world)
+}
+
+# For an app with no components of its own: everything still pending is
+# unknown. Report each and empty the outbox. Called once per frame after the
+# app's systems (a ListView row or a sub-scene instance can mount mid-frame),
+# and right after a load whose verdict the caller wants immediately.
+func reportPendingComponents(world: mod UiWorld) {
+  loop let pending: view PendingComponent in world.pendingComponents {
+    reportUnknownComponent(world: world, pending: pending)
+  }
+  world.pendingComponents.clear()
 }
 
 # The authored shapes that are not field-structural, patched onto the

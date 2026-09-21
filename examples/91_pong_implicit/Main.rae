@@ -4,6 +4,7 @@ import Keys
 import Sys
 open app3d/UiShell
 open ui/Ecs
+open ui/Registry
 open ui/renderSystem/RenderSystem
 open Gpu2dCanvas
 
@@ -295,6 +296,9 @@ func main() ret Int {
     )
     renderSystemGpu2d(world: world, res: uiResources, canvas: canvas)
     Gpu2d.endFrame(canvas: canvas)
+    # Frame end: report the authored components no lib table matched (this app
+    # has no tables of its own) and recycle the indices of destroyed entities.
+    uiFrameEnd(world: world)
   }
 
   canvasShutdown(canvas: canvas)

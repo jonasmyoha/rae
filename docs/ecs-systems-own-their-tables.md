@@ -1,7 +1,18 @@
 # Systems own their tables: splitting UiWorld, app components, and bundles
 
 Status: **design, approved direction** (2026-09-21; supersedes the
-"extension world" draft of the same day). Prompted by the UI editor having to
+"extension world" draft of the same day). **Step 1 (§3.2, the two outboxes)
+is implemented** (2026-09-22): `world.pendingComponents` /
+`applyComponentInto` / `reportUnknownComponent` / `reportPendingComponents`
+in `lib/ui/Registry.rae`, `world.deadEntities` / `releaseDeadEntities` in
+`lib/ui/Ecs.rae` (the allocator's `freeEntity` split into `retireEntity` +
+`recycleEntityIndex`, `lib/ecs/World.rae`), `uiFrameEnd` for apps with no
+tables of their own; the editor keeps what it does not know (inspector line,
+info rows, `N app components kept` in its mount/reload log). One deviation
+from the text below: `applyComponentInto` also takes `world: mod UiWorld`,
+because decoding needs the theme (token values) and the diagnostics list.
+
+Prompted by the UI editor having to
 call a music-player system to draw a scene the way the music player does.
 Related: `ecs-general-architecture.md`, `compile-time-reflection.md`,
 `ui-editor-design.md`, `ui-scene-format.md`. The C++ ancestor of this shape
