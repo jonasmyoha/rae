@@ -20,6 +20,7 @@ open ui/Layer
 open ui/SceneLoader
 open ui/inputSystem/InputSystem
 open ui/BindingComponents
+open ui/ScenePolicy
 open app3d/UiShell
 open ecs/Entity
 open ecs/ComponentTable
@@ -279,6 +280,25 @@ func parentChainOf(
 
 # Fill the inspector's status texts from the selection (TextBinding
 # editor.inspector.* in chrome/Inspector.raescene).
+# "not a lib component: Foo, Bar" — the selected node's pending (app-owned)
+# components, read-only; "" when it has none.
+func appComponentsLine(world: view UiWorld, entity: view EntityId) ret String {
+  var names: String = ""
+  loop let pending: view PendingComponent in world.pendingComponents {
+    if pending.entity is entity {
+      if names.length() > 0 {
+        names = "{names}, {pending.name}"
+      } else {
+        names = "{pending.name}"
+      }
+    }
+  }
+  if names.length() is 0 {
+    ret ""
+  }
+  ret "not a lib component: {names}"
+}
+
 func syncInspectorPanel(
   world: view UiWorld
   status: mod EditorStatus
@@ -290,6 +310,7 @@ func syncInspectorPanel(
     status.inspectorNodeId = "nothing selected"
     status.inspectorType = "click a node, or use the arrows"
     status.inspectorComponents = ""
+    status.inspectorAppComponents = ""
     status.inspectorRect = ""
     status.inspectorParents = ""
     ret
@@ -315,6 +336,7 @@ func syncInspectorPanel(
   status.inspectorType = typeLine
   let componentNames: String = componentNamesFor(world: world, entity: selected)
   status.inspectorComponents = String.replace(this: componentNames, old: ",", new: ", ")
+  status.inspectorAppComponents = appComponentsLine(world: world, entity: selected)
   var rectLine: String = "no computed rect"
   if componentHas(this: world.computedRects, entity: selected) and componentHas(
     this: world.worldTransforms

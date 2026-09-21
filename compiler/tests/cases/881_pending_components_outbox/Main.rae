@@ -1,0 +1,119 @@
+import Json
+import String
+import ui/Components
+open ui/Ecs
+open ui/Registry
+open ui/Scene
+open ui/SceneLoader
+open ui/ScenePolicy
+open ecs/Entity
+open ecs/ComponentTable
+
+# The pending-components outbox (docs/ecs-systems-own-their-tables.md §3.2):
+# an authored component no UiWorld table matches is no longer the loader's
+# verdict — it waits in `world.pendingComponents` for an APP system that owns
+# a table for it. `applyComponentInto` is the one generic decoder over a
+# system struct's ComponentTable fields; what no system claims is reported
+# (the old #941 verdict) by reportUnknownComponent / reportPendingComponents.
+
+# An app's own component and the system that owns its table.
+type AlbumCover {
+  radius: Float = 0.0
+  label: String = ""
+}
+
+type Favourite {
+  count: Int = 0
+}
+
+type AlbumCoverSystem {
+  albumCovers: ComponentTable(AlbumCover)
+  favourites: ComponentTable(Favourite)
+}
+
+func createAlbumCoverSystem() ret AlbumCoverSystem {
+  ret AlbumCoverSystem {
+    albumCovers: ComponentTable.create(AlbumCover)
+    favourites: ComponentTable.create(Favourite)
+  }
+}
+
+func appScene() ret String {
+  var s: String = ""
+  s = s.concat(other: "\{")
+  s = s.concat(other: "\"type\":\"Scene\",")
+  s = s.concat(other: "\"version\":2,")
+  s = s.concat(other: "\"root\":\"Root\",")
+  s = s.concat(other: "\"nodes\":\{")
+  s = s.concat(other: "\"Root\":\{")
+  s = s.concat(other: "\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":200\},")
+  s = s.concat(other: "\"Children\":[\"Hero\",\"Tile\"]")
+  s = s.concat(other: "\},")
+  s = s.concat(other: "\"Hero\":\{")
+  s = s.concat(other: "\"Rect\":\{\"x\":0,\"y\":0,\"w\":100,\"h\":100\},")
+  s = s.concat(other: "\"AlbumCover\":\{\"radius\":12.5,\"label\":\"hero\"\},")
+  s = s.concat(other: "\"Favourite\":\{\"count\":3\}")
+  s = s.concat(other: "\},")
+  s = s.concat(other: "\"Tile\":\{")
+  s = s.concat(other: "\"Rect\":\{\"x\":0,\"y\":0,\"w\":50,\"h\":50\},")
+  s = s.concat(other: "\"AlbumCover\":\{\},")
+  s = s.concat(other: "\"PlaylistTile\":\{\"slot\":2\}")
+  s = s.concat(other: "\}")
+  s = s.concat(other: "\}")
+  s = s.concat(other: "\}")
+  ret s
+}
+
+func main() {
+  var world: UiWorld = createUiWorld()
+  world.scenePolicy.unknownComponents = UnknownComponentPolicy.report
+  let scene: Scene = parseScene(source: appScene())
+  let rootEntity: EntityId = loadScene(world: world, scene: scene)
+  log("mounted = {rootEntity.index >= 0}, alive = {aliveCount(world: world)}")
+  # The loader applied the lib components and parked the rest, in order.
+  log("pending after load: {world.pendingComponents.length}")
+  loop let pending: view PendingComponent in world.pendingComponents {
+    log("  {pending.sceneId}/{pending.nodeId} {pending.name} {pending.json}")
+  }
+  log("diagnostics after load: {world.sceneDiagnostics.length}")
+
+  # The app drains the outbox into its system: two of the three names are its.
+  var albumCoverSystem: AlbumCoverSystem = createAlbumCoverSystem()
+  var kept: List(PendingComponent) = List.create(PendingComponent, cap: 4)
+  loop let pending: view PendingComponent in world.pendingComponents {
+    if applyComponentInto(system: albumCoverSystem, world: world, pending: pending) {
+      continue
+    }
+    kept.add(value: PendingComponent {
+      entity: pending.entity
+      name: "{pending.name}"
+      json: "{pending.json}"
+      sceneId: "{pending.sceneId}"
+      nodeId: "{pending.nodeId}"
+    })
+  }
+  log("albumCovers: {componentCount(this: albumCoverSystem.albumCovers)}")
+  log("favourites: {componentCount(this: albumCoverSystem.favourites)}")
+  let hero: EntityId = componentEntityAt(this: albumCoverSystem.favourites, i: 0)
+  let cover: AlbumCover = componentGet(this: albumCoverSystem.albumCovers, entity: hero)
+  let favourite: Favourite = componentGet(this: albumCoverSystem.favourites, entity: hero)
+  log("hero cover radius={cover.radius} label={cover.label} favourite count={favourite.count}")
+  log("unclaimed: {kept.length}")
+
+  # What no system claimed is reported — under `report`, a diagnostic.
+  loop let pending: view PendingComponent in kept {
+    reportUnknownComponent(world: world, pending: pending)
+  }
+  world.pendingComponents.clear()
+  log("diagnostics after report: {world.sceneDiagnostics.length}")
+  if let first: view SceneDiagnostic => world.sceneDiagnostics.viewAt(index: 0) {
+    log("  {first.nodeId}: {first.kind.toString()} {first.name}")
+  }
+
+  # A destroyed entity takes its pending rows with it.
+  let scene2: Scene = parseScene(source: appScene())
+  let root2: EntityId = loadScene(world: world, scene: scene2)
+  log("pending after second load: {world.pendingComponents.length}")
+  destroyEntitySubtree(world: world, root: root2)
+  log("pending after destroy: {world.pendingComponents.length}")
+}

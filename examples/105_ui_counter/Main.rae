@@ -29,6 +29,7 @@ import Gpu2d
 import String
 open Sys
 open ui/EventLoop
+open ui/Registry
 # The node helpers (setNodeText / setNodeActive / setNodeFillSlot) and the
 # scene-package mounting + runUiSystems bootstrap live here. The `app3d/` in the path is
 # historical -- the module imports core, gpu2d, sdf_text and lib/ui and nothing
@@ -325,6 +326,9 @@ func main() ret Int {
       ))
       wokeUp = true
     }
+    # Frame end: report the authored components no lib table matched (this app
+    # has no tables of its own) and recycle the indices of destroyed entities.
+    uiFrameEnd(world: world)
   }
 
   canvasShutdown(canvas: canvas)
