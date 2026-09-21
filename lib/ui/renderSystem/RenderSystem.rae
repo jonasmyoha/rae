@@ -126,11 +126,12 @@ func paintShapeG(
   let drawX: Float = box.x
   let drawY: Float = box.y
   if sh.kind is ShapeKind.circle {
-    var smaller: Float = cr.size.x
-    if cr.size.y < smaller {
-      smaller = cr.size.y
+    # The inherited scale sizes the circle; hover/own scale is applied below.
+    var smaller: Float = cr.size.x * wt.scale.x
+    if cr.size.y * wt.scale.y < smaller {
+      smaller = cr.size.y * wt.scale.y
     }
-    var r: Float = sh.radius
+    var r: Float = sh.radius * wt.scale.x
     if r <= 0.0 {
       r = smaller / 2.0
     }
@@ -564,6 +565,10 @@ func paintTextG(
     size = styleOverrideSize(base: size, so: so)
     baseCol = styleOverrideColor(base: baseCol, so: so, active: world.theme.active)
   }
+  # An inherited scale (editor camera, scaled parent) scales glyphs + box.
+  size = size * wt.scale.x
+  let boxW: Float = cr.size.x * wt.scale.x
+  let boxH: Float = cr.size.y * wt.scale.y
   let col: RgbaColor = g2dChain(color: baseCol, chain255: chain255)
   var boldWidth: Float = 0.0
   if weight > 450.0 {
@@ -612,10 +617,10 @@ func paintTextG(
       res: res
     )
     if centerX {
-      drawX = wt.position.x + cr.size.x / 2.0 - (bounds.left + bounds.right) / 2.0
+      drawX = wt.position.x + boxW / 2.0 - (bounds.left + bounds.right) / 2.0
     }
     if rightX {
-      drawX = wt.position.x + cr.size.x - bounds.right
+      drawX = wt.position.x + boxW - bounds.right
     }
   }
   if optical.enabled {
@@ -628,10 +633,10 @@ func paintTextG(
       res: res
     )
     if optical.centerX {
-      drawX = wt.position.x + cr.size.x / 2.0 - (bounds.left + bounds.right) / 2.0 + optical.bias.x
+      drawX = wt.position.x + boxW / 2.0 - (bounds.left + bounds.right) / 2.0 + optical.bias.x
     }
     if optical.centerY {
-      drawY = wt.position.y + cr.size.y / 2.0 - (bounds.top + bounds.bottom) / 2.0 + optical.bias.y
+      drawY = wt.position.y + boxH / 2.0 - (bounds.top + bounds.bottom) / 2.0 + optical.bias.y
     }
   }
   if t.wrapWidthMode is WrapWidthMode.nodeWidth {
@@ -644,7 +649,7 @@ func paintTextG(
       y: drawY
       sizePx: size
       color: g2dColor(color: col)
-      maxWidth: cr.size.x
+      maxWidth: boxW
       lineHeight: lineHeight
       outlineWidth: boldWidth
       outlineColor: g2dColor(color: col)
@@ -904,17 +909,17 @@ func paintSubtreeG(
               canvas: canvas
               x: cwt.position.x
               y: cwt.position.y
-              w: ccr.size.x
-              h: ccr.size.y
-              radius: crad
+              w: ccr.size.x * cwt.scale.x
+              h: ccr.size.y * cwt.scale.y
+              radius: crad * cwt.scale.x
             )
           } else {
             Gpu2d.pushClipRect(
               canvas: canvas
               x: cwt.position.x
               y: cwt.position.y
-              w: ccr.size.x
-              h: ccr.size.y
+              w: ccr.size.x * cwt.scale.x
+              h: ccr.size.y * cwt.scale.y
             )
           }
           clipped = true

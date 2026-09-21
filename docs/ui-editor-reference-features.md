@@ -195,10 +195,11 @@ generation-counter idea Rae's component tables already carry.
 - Pan: middle-drag always; left-drag in the Pointer tool; Alt/Cmd-drag in any tool;
   6px drag threshold; smoothed by a per-frame lerp (0.35).
 - A design-space pointer readout inverts camera + layout transforms.
-**Rae:** the canvas has one design-resolution transform; a camera is a scale + offset
-on the document layer's root (`TransformFx` scale is not honoured by the renderer yet
-— that is the lib gap to close first, and it unlocks the "fit a small document into
-the chrome space by scaling" option the design-space rule currently avoids).
+**Rae — DONE (#99444501):** the camera is a scale + offset on the document and guides
+roots (`cameraSystem/`); `lib/ui` now honours an inherited world scale in the paint
+box, glyphs, clips, masks and hit tests. Wheel zooms about the cursor (0.25x–5x),
+middle drag pans, the chrome's `−` / `100%` / `+` pill steps and resets. Not ported:
+the modifier-key speed factors and the per-frame lerp smoothing.
 
 ## 8. Keyboard
 
