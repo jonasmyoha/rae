@@ -6,14 +6,17 @@
 # transform, render and input systems do the rest: an inherited world scale
 # sizes every box, glyph, clip and hit test. The chrome is untouched.
 #
-# `canvas` coordinates below are the canvas design space (what Gpu2d.pointerX
-# reports); a document point d sits at origin + d * zoom, where the document
-# origin is its column's layout position under the camera. The wheel zooms
-# about the cursor (0.25x .. 5x); the middle button drags the view; the
-# chrome's zoom pill steps +-10% about the canvas centre and its "100%" label
-# resets. RAE_UI_EDITOR_ZOOM=<factor> boots zoomed (the headless gate).
+# `canvas` coordinates below are the chrome's design space in points (what
+# Gpu2d.pointerX reports); a document FRAME point f sits at offset + f * zoom.
+# On load the frame is FITTED into the chrome's EditArea (the space between
+# the panels); the wheel then zooms about the cursor (0.25x .. 5x), the middle
+# button drags the view, the chrome's zoom pill steps +-10% about the area's
+# centre and its "100%" label shows the frame at 1 point per design unit,
+# centred; `F` fits again. RAE_UI_EDITOR_ZOOM=<factor> boots zoomed (the
+# headless gate).
 import Gpu2d
 import Sdl3
+import Keys
 open Sys
 open ui/Ecs
 open ui/Components
@@ -29,16 +32,52 @@ const zoomWheelStep: Float = 0.1
 
 const zoomButtonStep: Float = 0.1
 
+# The margin the fit leaves around the frame, in points.
+const fitMargin: Float = 24.0
+
+# The chrome's edit area — the space between the panels the document is
+# fitted into; (0, 0, canvasW, canvasH) until the chrome has laid out.
+type EditArea {
+  x: Float
+  y: Float
+  w: Float
+  h: Float
+}
+
+func editAreaOf(world: view UiWorld, canvasW: view Float, canvasH: view Float) ret EditArea {
+  var area: EditArea = { x: 0.0, y: 0.0, w: canvasW, h: canvasH }
+  let entity: EntityId = nodeEntityFor(world: world, nodeId: "chrome/EditArea")
+  if isNone(this: entity) {
+    ret area
+  }
+  if componentHas(this: world.computedRects, entity: entity) and componentHas(
+    this: world.worldTransforms
+    entity: entity
+  ) {
+    let rect: ComputedRect = componentGet(this: world.computedRects, entity: entity)
+    let transform: WorldTransform2D = componentGet(this: world.worldTransforms, entity: entity)
+    if rect.size.x > 0.0 and rect.size.y > 0.0 {
+      area.x = transform.position.x
+      area.y = transform.position.y
+      area.w = rect.size.x
+      area.h = rect.size.y
+    }
+  }
+  ret area
+}
+
 type EditorCamera {
   zoom: Float
-  # The guides root's translation (canvas units); the document root gets the
-  # same camera with its column offset folded in.
+  # The frame's translation in the chrome's space (the guides root's); the
+  # document root gets the same camera with its column offset folded in.
   offsetX: Float
   offsetY: Float
-  # Where the document sits at 100% with no pan: the column's x and the
-  # vertical centering slack of a document shorter than the design.
+  # The document column's x inside its frame (0 for a full-width document).
   homeX: Float
   homeY: Float
+  # The frame's extent, for fit / centre.
+  frameW: Float
+  frameH: Float
   # Middle-drag pan state.
   panning: Bool
   lastPointerX: Float
@@ -52,6 +91,8 @@ func createEditorCamera() ret EditorCamera {
     offsetY: 0.0
     homeX: 0.0
     homeY: 0.0
+    frameW: 1080.0
+    frameH: 1920.0
     panning: false
     lastPointerX: 0.0
     lastPointerY: 0.0
@@ -61,17 +102,12 @@ func createEditorCamera() ret EditorCamera {
 
 # RAE_UI_EDITOR_ZOOM=<factor>: boot zoomed about the canvas centre (the
 # headless gate's hook). Call once the home is set.
-func bootCameraZoom(camera: mod EditorCamera, canvasW: view Float, canvasH: view Float) {
+func bootCameraZoom(camera: mod EditorCamera, area: view EditArea) {
   let boot: String = getEnv(name: "RAE_UI_EDITOR_ZOOM")
   if boot.length() is 0 {
     ret
   }
-  zoomCameraAbout(
-    camera: camera
-    zoom: boot.toFloat()
-    aboutX: canvasW / 2.0
-    aboutY: canvasH / 2.0
-  )
+  centerCamera(camera: camera, area: area, zoom: boot.toFloat())
   log(
     "[ui-editor] zoom {(camera.zoom * 100.0 + 0.5).toInt()}% offset {camera.offsetX.toInt()},{camera.offsetY.toInt()}"
   )
@@ -87,17 +123,41 @@ func clampZoom(zoom: view Float) ret Float {
   ret zoom
 }
 
-# Home = the frame's placement at 100% (called after every load): the
-# document column's x and the vertical slack. The pan is kept.
-func setCameraHome(camera: mod EditorCamera, homeX: view Float, homeY: view Float) {
+# The frame (called after every load): its extent and the column's x in it.
+func setCameraFrame(
+  camera: mod EditorCamera
+  frameW: view Float
+  frameH: view Float
+  homeX: view Float
+) {
+  camera.frameW = frameW
+  camera.frameH = frameH
   camera.homeX = homeX
-  camera.homeY = homeY
+  camera.homeY = 0.0
 }
 
-func resetCamera(camera: mod EditorCamera) {
-  camera.zoom = 1.0
-  camera.offsetX = 0.0
-  camera.offsetY = 0.0
+# Centre the frame in the edit area at `zoom`.
+func centerCamera(camera: mod EditorCamera, area: view EditArea, zoom: view Float) {
+  camera.zoom = clampZoom(zoom: zoom)
+  camera.offsetX = area.x + (area.w - camera.frameW * camera.zoom) / 2.0
+  camera.offsetY = area.y + (area.h - camera.frameH * camera.zoom) / 2.0
+}
+
+# Fit the whole frame into the edit area with a margin, centred.
+func fitCamera(camera: mod EditorCamera, area: view EditArea) {
+  var zoomW: Float = 1.0
+  var zoomH: Float = 1.0
+  if camera.frameW > 0.0 {
+    zoomW = (area.w - fitMargin * 2.0) / camera.frameW
+  }
+  if camera.frameH > 0.0 {
+    zoomH = (area.h - fitMargin * 2.0) / camera.frameH
+  }
+  var zoom: Float = zoomW
+  if zoomH < zoom {
+    zoom = zoomH
+  }
+  centerCamera(camera: camera, area: area, zoom: zoom)
 }
 
 # Zoom so the canvas point (aboutX, aboutY) stays where it is.
@@ -141,10 +201,10 @@ func setRootTransform(
   componentSet(this: world.runtimeOffsets, entity: root, data: own offset)
 }
 
-# Write the camera onto the two roots. The document root's layout position
-# is already (homeX, 0) (the column, centered by its extent anchor), so its
-# runtime offset is the camera translation of that origin minus the layout
-# position; the guides root lays out at (0, 0).
+# Write the camera onto the two roots. Both lay out at (0, 0); the document
+# root is the column, which sits at homeX inside the frame, so it gets the
+# frame's translation plus the scaled column offset; the guides root is the
+# frame itself.
 func applyCamera(
   camera: view EditorCamera
   world: mod UiWorld
@@ -163,7 +223,7 @@ func applyCamera(
     world: world
     root: documentRoot
     zoom: z
-    offsetX: camera.offsetX + camera.homeX * z - camera.homeX
+    offsetX: camera.offsetX + camera.homeX * z
     offsetY: camera.offsetY + camera.homeY * z
   )
   setNodeText(world: world, nodeId: "chrome/ZoomLabel", value: "{(z * 100.0 + 0.5).toInt()}%")
@@ -174,8 +234,7 @@ func applyCamera(
 func cameraInputSystem(
   camera: mod EditorCamera
   world: view UiWorld
-  canvasW: view Float
-  canvasH: view Float
+  area: view EditArea
 ) ret Bool {
   var moved: Bool = false
   let pointerX: Float = Gpu2d.pointerX()
@@ -203,8 +262,8 @@ func cameraInputSystem(
   } else {
     camera.panning = false
   }
-  let centreX: Float = canvasW / 2.0
-  let centreY: Float = canvasH / 2.0
+  let centreX: Float = area.x + area.w / 2.0
+  let centreY: Float = area.y + area.h / 2.0
   if uiActionFired(world: world, actionId: "zoom.in") {
     zoomCameraAbout(
       camera: camera
@@ -224,7 +283,11 @@ func cameraInputSystem(
     moved = true
   }
   if uiActionFired(world: world, actionId: "zoom.reset") {
-    resetCamera(camera: camera)
+    centerCamera(camera: camera, area: area, zoom: 1.0)
+    moved = true
+  }
+  if Sdl3.isKeyPressed(key: Keys.keyF) {
+    fitCamera(camera: camera, area: area)
     moved = true
   }
   ret moved

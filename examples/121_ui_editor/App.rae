@@ -57,29 +57,31 @@ func reloadDocument(app: mod App) {
       builtinSceneIds: app.builtinSceneIds
     )
     app.document.reloads = app.document.reloads + 1
-    applyViewport(
-      viewport: app.viewport
-      world: app.world
-      designW: app.document.designW
-      designH: app.document.designH
-    )
-    placeDocumentPage(world: app.world, pageRoot: app.document.pageRoot)
-    sizeChromePage(world: app.world, chromeRoot: app.chrome.pageRoot, viewport: app.viewport)
+    pinDocumentPage(world: app.world, pageRoot: app.document.pageRoot)
     safeAreaSystem(world: app.world, insets: app.document.safeInsets)
     syncGuides(
       guides: app.guides
       world: app.world
-      designW: app.viewport.designW
-      designH: app.viewport.designH
+      designW: app.document.designW
+      designH: app.document.designH
       columnW: app.document.columnW
       safeInsets: app.document.safeInsets
     )
-    # A new page root: the camera's home follows the new frame and is
-    # written onto the new entity (the pan and zoom are kept).
-    setCameraHome(
+    # A new page root: the camera follows the new frame (fitted into the
+    # edit area) and is written onto the new entity.
+    setCameraFrame(
       camera: app.camera
-      homeX: documentHomeX(viewport: app.viewport, columnW: app.document.columnW)
-      homeY: documentHomeY(viewport: app.viewport, designH: app.document.designH)
+      frameW: app.document.designW
+      frameH: app.document.designH
+      homeX: documentHomeX(designW: app.document.designW, columnW: app.document.columnW)
+    )
+    fitCamera(
+      camera: app.camera
+      area: editAreaOf(
+        world: app.world
+        canvasW: app.viewport.designW
+        canvasH: app.viewport.designH
+      )
     )
     applyCamera(
       camera: app.camera
@@ -241,6 +243,22 @@ func runApp(app: mod App) ret Int {
   )
   listViewSystem(world: app.world, scenes: app.document.registry)
   runScheduledUiSystems(schedule: app.schedule, world: app.world, res: app.gpuUi)
+  # The chrome has laid out: fit the document into the edit area (and apply
+  # RAE_UI_EDITOR_ZOOM), then let the transform pass pick the camera up.
+  var editArea: EditArea = editAreaOf(
+    world: app.world
+    canvasW: app.viewport.designW
+    canvasH: app.viewport.designH
+  )
+  fitCamera(camera: app.camera, area: editArea)
+  bootCameraZoom(camera: app.camera, area: editArea)
+  applyCamera(
+    camera: app.camera
+    world: app.world
+    documentRoot: app.document.pageRoot
+    guidesRoot: app.guides.pageRoot
+  )
+  runScheduledUiSystems(schedule: app.schedule, world: app.world, res: app.gpuUi)
   var renderedOnce: Bool = false
   var testOpenIndex: Int = -1
   var testOpenFile: Bool = Sys.getEnv(name: "RAE_UI_EDITOR_TEST_OPEN_FILE") is "1"
@@ -254,15 +272,28 @@ func runApp(app: mod App) ret Int {
   var effectTime: Float = 0.0
 
   loop not Gpu2d.pollClose() {
-    var changed: Bool = viewportSystem(viewport: app.viewport)
+    var refit: Bool = viewportSystem(
+      viewport: app.viewport
+      world: app.world
+      chromeRoot: app.chrome.pageRoot
+    )
+    var changed: Bool = refit
     updateUiInput(input: input, world: app.world)
     let hadEvents: Bool = uiActionCount(world: app.world) > 0
-    if cameraInputSystem(
-      camera: app.camera
+    editArea = editAreaOf(
       world: app.world
       canvasW: app.viewport.designW
       canvasH: app.viewport.designH
-    ) {
+    )
+    if uiActionFired(world: app.world, actionId: "panel.left") {
+      setLeftPanelOpen(chrome: app.chrome, world: app.world, open: not app.chrome.leftOpen)
+      changed = true
+    }
+    if uiActionFired(world: app.world, actionId: "panel.right") {
+      setRightPanelOpen(chrome: app.chrome, world: app.world, open: not app.chrome.rightOpen)
+      changed = true
+    }
+    if cameraInputSystem(camera: app.camera, world: app.world, area: editArea) {
       applyCamera(
         camera: app.camera
         world: app.world
@@ -362,6 +393,25 @@ func runApp(app: mod App) ret Int {
     if hadEvents or changed {
       listViewSystem(world: app.world, scenes: app.document.registry)
       runScheduledUiSystems(schedule: app.schedule, world: app.world, res: app.gpuUi)
+      if refit {
+        # The chrome relaid out for the new window: fit the document into
+        # the new edit area and run the transform pass again.
+        fitCamera(
+          camera: app.camera
+          area: editAreaOf(
+            world: app.world
+            canvasW: app.viewport.designW
+            canvasH: app.viewport.designH
+          )
+        )
+        applyCamera(
+          camera: app.camera
+          world: app.world
+          documentRoot: app.document.pageRoot
+          guidesRoot: app.guides.pageRoot
+        )
+        runScheduledUiSystems(schedule: app.schedule, world: app.world, res: app.gpuUi)
+      }
     }
     let needsRender: Bool = hadEvents or changed or wokeUp or renderedOnce is false
     wokeUp = false

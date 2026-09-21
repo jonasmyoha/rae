@@ -174,13 +174,10 @@ func createApp() ret App {
       builtinSceneIds: builtinSceneIds
     )
   }
-  applyViewport(
-    viewport: viewport
-    world: world
-    designW: document.designW
-    designH: document.designH
-  )
-  placeDocumentPage(world: world, pageRoot: document.pageRoot)
+  # The chrome's space is the window in points; the document keeps its own
+  # frame and is fitted into the EditArea by the camera below.
+  applyChromeViewport(viewport: viewport, world: world)
+  pinDocumentPage(world: world, pageRoot: document.pageRoot)
   # The device frame's safe-area insets reach the page through its own
   # `SafeArea { apply }` nodes, exactly as in the app (zero without a frame).
   safeAreaSystem(world: world, insets: document.safeInsets)
@@ -188,8 +185,8 @@ func createApp() ret App {
   # and the chrome, positioned from the frame (RAE_UI_EDITOR_GUIDES=0 hides).
   var guides: GuideState = createGuides(
     world: world
-    designW: viewport.designW
-    designH: viewport.designH
+    designW: document.designW
+    designH: document.designH
   )
   if getEnv(name: "RAE_UI_EDITOR_GUIDES") is "0" {
     setGuidesVisible(guides: guides, world: world, visible: false)
@@ -197,19 +194,21 @@ func createApp() ret App {
   syncGuides(
     guides: guides
     world: world
-    designW: viewport.designW
-    designH: viewport.designH
+    designW: document.designW
+    designH: document.designH
     columnW: document.columnW
     safeInsets: document.safeInsets
   )
-  # The camera: zoom + pan on the document and guides roots (chrome untouched).
+  # The camera: zoom + pan on the document and guides roots (chrome
+  # untouched). Fitted into the EditArea once the chrome has laid out
+  # (runApp), which also honours RAE_UI_EDITOR_ZOOM.
   var camera: EditorCamera = createEditorCamera()
-  setCameraHome(
+  setCameraFrame(
     camera: camera
-    homeX: documentHomeX(viewport: viewport, columnW: document.columnW)
-    homeY: documentHomeY(viewport: viewport, designH: document.designH)
+    frameW: document.designW
+    frameH: document.designH
+    homeX: documentHomeX(designW: document.designW, columnW: document.columnW)
   )
-  bootCameraZoom(camera: camera, canvasW: viewport.designW, canvasH: viewport.designH)
 
   # The chrome: the app's own scene on its own layer, sized to the design
   # space (at least the chrome's own 1080x1920, viewportSystem).
@@ -230,8 +229,10 @@ func createApp() ret App {
   var chrome: ChromeState = {
     pageRoot: chromeRoot
     visible: true
-    panelOpen: false
+    panelOpen: true
     projectOpen: false
+    leftOpen: true
+    rightOpen: true
   }
   # A project opens with its scene list showing (P hides it); a bare scene
   # has no project, so the panel stays hidden.

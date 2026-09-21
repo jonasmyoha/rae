@@ -250,12 +250,13 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # The effect systems (#1005): Coverage's AnimFrames / WobbleFx /
           # BackgroundPan+SmokeFx / Carousel nodes must have MOVED between frame
           # 2 and frame 12 at the same fixed step (assert_bmp_diff MISMATCH is
-          # the pass here: more than 0.5% of pixels differ).
+          # the pass here: more than 0.1% of pixels differ — the document is a
+          # sixth of the desktop window now).
           EARLY="$TMP_OUT/ui-editor-Coverage-f2.bmp"
           if (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/Coverage.raescene" \
              RAE_UI_HEADLESS=1 RAE_HEADLESS_FRAMES=2 RAE_FIXED_DT=0.05 RAE_GPU2D_SCREENSHOT="$EARLY" \
              perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-Coverage-f2.log" 2>&1 \
-             && ! python3 tools/assert_bmp_diff.py "$TMP_OUT/ui-editor-Coverage.bmp" "$EARLY" --max-diff-pct 0.5 \
+             && ! python3 tools/assert_bmp_diff.py "$TMP_OUT/ui-editor-Coverage.bmp" "$EARLY" --max-diff-pct 0.1 \
                 > "$TMP_OUT/motion-Coverage.log" 2>&1; then
             :
           else
@@ -365,11 +366,10 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             echo "  file picker (broken scene) failed:"
             cat "$TMP_OUT/render-picker-broken.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
           fi
-          # A SMALL document must not shrink the chrome (viewportSystem): the
-          # design resolution is at least the chrome's 1080x1920, so after
-          # picking a 993x130 row scene the status bar still reports the
-          # document's own size and the frame still carries the chrome's
-          # top-bar colours — a >= 1080x1920 frame, not a letterboxed strip.
+          # A SMALL document must not shrink the chrome: the chrome's design
+          # space is the window in points and the document is fitted into the
+          # edit area by the camera, so after picking a 993x130 row scene the
+          # frame is still the full window with the chrome drawn.
           SCREENSHOT="$TMP_OUT/ui-editor-small.bmp"
           if (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
              RAE_UI_EDITOR_ROOT="examples/121_ui_editor/assets/samples" RAE_UI_EDITOR_TEST_OPEN_FILE=1 \
@@ -379,7 +379,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              && grep -qE '\[ui-editor\] reloaded examples/106_mobile_ui/assets/scenes/TrackRow.raescene' "$TMP_OUT/render-small.log" \
              && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=20 \
                 > "$TMP_OUT/screenshot-small.log" 2>&1 \
-             && grep -qE 'non-blank BMP 1080x1920' "$TMP_OUT/screenshot-small.log"; then
+             && grep -qE 'non-blank BMP' "$TMP_OUT/screenshot-small.log"; then
             :
           else
             UI_EDITOR_OK=0
@@ -387,18 +387,18 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/render-small.log" "$TMP_OUT/screenshot-small.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
           fi
           # The camera (cameraSystem): RAE_UI_EDITOR_ZOOM=2 boots the document at
-          # 200% about the canvas centre; the log names the zoom and the frame
-          # is still the chrome's 1080x1920 (only the document scaled).
+          # 200% centred in the edit area; the log names the zoom and the
+          # frame is the whole window (only the document scaled).
           SCREENSHOT="$TMP_OUT/ui-editor-zoom.bmp"
           if (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
              RAE_UI_EDITOR_ROOT="examples/121_ui_editor/assets/samples" RAE_UI_EDITOR_ZOOM=2 \
              RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
              perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-zoom.log" 2>&1 \
-             && grep -qE '\[ui-editor\] zoom 200% offset -540,-960' "$TMP_OUT/render-zoom.log" \
+             && grep -qE '\[ui-editor\] zoom 200% offset' "$TMP_OUT/render-zoom.log" \
              && grep -qE '\[ui-editor\] mounted MainMenu: [1-9][0-9]* nodes, 0 diagnostics' "$TMP_OUT/render-zoom.log" \
              && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=50 \
                 > "$TMP_OUT/screenshot-zoom.log" 2>&1 \
-             && grep -qE 'non-blank BMP 1080x1920' "$TMP_OUT/screenshot-zoom.log"; then
+             && grep -qE 'non-blank BMP' "$TMP_OUT/screenshot-zoom.log"; then
             :
           else
             UI_EDITOR_OK=0
