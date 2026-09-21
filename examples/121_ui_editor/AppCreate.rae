@@ -180,12 +180,7 @@ func createApp() ret App {
     designW: document.designW
     designH: document.designH
   )
-  placeDocumentPage(
-    world: world
-    pageRoot: document.pageRoot
-    viewport: viewport
-    designH: document.designH
-  )
+  placeDocumentPage(world: world, pageRoot: document.pageRoot)
   # The device frame's safe-area insets reach the page through its own
   # `SafeArea { apply }` nodes, exactly as in the app (zero without a frame).
   safeAreaSystem(world: world, insets: document.safeInsets)
@@ -207,6 +202,14 @@ func createApp() ret App {
     columnW: document.columnW
     safeInsets: document.safeInsets
   )
+  # The camera: zoom + pan on the document and guides roots (chrome untouched).
+  var camera: EditorCamera = createEditorCamera()
+  setCameraHome(
+    camera: camera
+    homeX: documentHomeX(viewport: viewport, columnW: document.columnW)
+    homeY: documentHomeY(viewport: viewport, designH: document.designH)
+  )
+  bootCameraZoom(camera: camera, canvasW: viewport.designW, canvasH: viewport.designH)
 
   # The chrome: the app's own scene on its own layer, sized to the design
   # space (at least the chrome's own 1080x1920, viewportSystem).
@@ -240,6 +243,13 @@ func createApp() ret App {
   if getEnv(name: "RAE_UI_EDITOR_PANEL") is "1" {
     setDiagnosticsPanelOpen(chrome: chrome, world: world, open: true)
   }
+
+  applyCamera(
+    camera: camera
+    world: world
+    documentRoot: document.pageRoot
+    guidesRoot: guides.pageRoot
+  )
 
   var textures: TextureSearch = createTextureSearch()
   unsafe {
@@ -293,6 +303,7 @@ func createApp() ret App {
       watch: own watch
       inspector: own inspector
       guides: guides
+      camera: camera
       testSelectNodeId: testSelectNodeId
       builtinScenePaths: own builtinScenePaths
       builtinSceneIds: own builtinSceneIds

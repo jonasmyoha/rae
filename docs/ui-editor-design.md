@@ -110,6 +110,17 @@ texture manifest, and a design-resolution + fit rule (now native:
   positioned from the document's frame by `guideSystem/` after every load. `G`
   toggles them; `RAE_UI_EDITOR_GUIDES=0` starts hidden. The safe-area guide shows
   only when the frame has insets.
+- **Camera** (#99444501, `cameraSystem/`): the wheel zooms the DOCUMENT about the
+  cursor (0.25x–5x, 10% per notch), a middle-button drag pans it, and the chrome's
+  zoom pill (`−` / `100%` / `+`, authored `OnClick` rows in the top bar) steps ±10%
+  about the canvas centre — its label click resets to 100%. The camera is a scale
+  + offset written as a `TransformFx` (scale about the origin) and a
+  `RuntimeOffset` on the document page root and the guides root, the same
+  transform-pass inputs a scroll uses; the chrome is untouched. `lib/ui` now
+  honours an INHERITED world scale everywhere it reads a rect — paint box (own
+  scale grows about the pivot, inherited scale only sizes), glyph size and
+  placement, clip and mask rects, hit-testing — so the stock systems do the rest.
+  `RAE_UI_EDITOR_ZOOM=<factor>` boots zoomed (the headless gate's hook).
 - **Opening a file at runtime** (#44411932): the argument/env inputs above are the
   boot path; a running editor also opens files through the OS "open file" panel.
   That panel is a GENERIC binding in the platform layer, not an editor feature —

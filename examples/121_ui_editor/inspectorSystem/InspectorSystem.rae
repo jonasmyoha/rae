@@ -187,8 +187,8 @@ func placeOutline(
   let transform: WorldTransform2D = componentGet(this: world.worldTransforms, entity: target)
   let computed: ComputedRect = componentGet(this: world.computedRects, entity: target)
   let rect: mod Rect => componentMod(this: world.rects, entity: outline)
-  rect.size.x = computed.size.x
-  rect.size.y = computed.size.y
+  rect.size.x = computed.size.x * transform.scale.x
+  rect.size.y = computed.size.y * transform.scale.y
   let offset: RuntimeOffset = { delta: Vec2 { x: transform.position.x, y: transform.position.y } }
   componentSet(this: world.runtimeOffsets, entity: outline, data: offset)
 }
