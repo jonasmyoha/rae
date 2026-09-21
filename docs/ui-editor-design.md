@@ -228,14 +228,19 @@ secondary actions. The orbital illustration, progress card, card artwork,
 settings rows and all chrome remain authored scene nodes. No widget is drawn
 from application code and no C renderer code was added.
 
-- **Palette:** background `#0C121B`, surface `#18222C`, raised surface `#24333D`,
+- **Sample palette:** background `#0C121B`, surface `#18222C`, raised surface `#24333D`,
   primary text `#EEF4F3`, secondary text `#9DACB5`, accent `#48B498` (72,180,152).
   Surface gradients stay close in value; the accent gradient runs from
   `#69C7AC` to the base teal. Colour is a hierarchy cue, not a border on every box.
+- **Chrome palette:** deep green background `#021210`, sidebar `#041A18`,
+  raised inspector `#0A3838`, primary text `#E6FAFA`, secondary `#9FC1BD`,
+  mint `#78E6DC` and selected outline `#00E8D2`. The open action uses a
+  `#086469` to `#043E44` gradient; thin mint edges separate controls.
 - **Sample type scale:** display 128, title 92, h2 42, body 34, secondary 28,
   caption 26, eyebrow 24 design units. Display leading is 1.08; prose is
   1.25–1.30. Compact card and onboarding headings author local overrides.
-  Buttons explicitly centre labels on both axes. Chrome uses authored `OpticalAlign`,
+  The main-menu action labels use `OpticalAlign` to centre visible glyph bounds
+  on both axes, rather than centring the font line box with its descender space. Chrome uses authored `OpticalAlign`,
   colour and 11–15pt size overrides, independent of the loaded document's styles.
 - **Spacing:** 8 / 16 / 24 / 40 / 64, with 64-unit sample gutters and 32-unit
   card padding. The main menu pairs its secondary actions and gives progress its
