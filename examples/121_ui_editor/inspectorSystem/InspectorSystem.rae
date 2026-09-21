@@ -32,54 +32,18 @@ const treeRowPitch: Float = 44.0
 type InspectorState {
   hovered: EntityId
   selected: EntityId
-  hoverOutline: EntityId
-  selectOutline: EntityId
   # The tree list's row order (entity per row), so a row's action maps back.
   treeEntities: List(EntityId)
 }
 
-func createOutlineEntity(
-  world: mod UiWorld
-  strokeWidth: view Float
-  stroke: view RgbaColor
-) ret EntityId {
-  let entity: EntityId = createEntity(world: world)
-  let rect: Rect = { position: { x: 0.0, y: 0.0 }, size: { x: 0.0, y: 0.0 } }
-  componentSet(this: world.rects, entity: entity, data: rect)
-  let shape: Shape = {
-    kind: ShapeKind.rect
-    fill: RgbaColor { r: 0, g: 0, b: 0, a: 0 }
-    stroke: stroke
-    fillSlot: ""
-    strokeSlot: ""
-    strokeWidth: strokeWidth
-    strokeDash: 0.0
-    strokeGap: 0.0
-    radius: 0.0
-  }
-  componentSet(this: world.shapes, entity: entity, data: shape)
-  componentSet(this: world.actives, entity: entity, data: Active { value: false })
-  setLayerById(world: world, entity: entity, id: "overlay")
-  ret entity
-}
-
-# The overlay layer + its two outlines. The only entities the app creates
-# beside the layer roots, and they are not layout: the system positions them.
+# The inspector's own state: the hovered / selected document entities and
+# the hierarchy list's row entities. Its outlines are AUTHORED nodes in
+# chrome/Guides.raescene tagged OutlineFor { role } that placeOutlines moves;
+# the app creates no entity for them.
 func createInspectorState(world: mod UiWorld) ret InspectorState {
-  let overlay: EntityId = createLayerEntity(world: world, id: "overlay", order: 200)
   ret InspectorState {
     hovered: noEntity()
     selected: noEntity()
-    hoverOutline: createOutlineEntity(
-      world: world
-      strokeWidth: 3.0
-      stroke: RgbaColor { r: 255, g: 150, b: 64, a: 200 }
-    )
-    selectOutline: createOutlineEntity(
-      world: world
-      strokeWidth: 7.0
-      stroke: RgbaColor { r: 96, g: 200, b: 255, a: 255 }
-    )
     treeEntities: List.create(EntityId, cap: 64)
   }
 }
@@ -161,13 +125,18 @@ func findNodeByIdIn(world: view UiWorld, entity: view EntityId, nodeId: view Str
   ret noEntity()
 }
 
-# Move an outline onto `target`'s world rect (or hide it for none).
+# Move an outline node onto `target`'s world rect (or hide it for none). The
+# node is an absolute child of the guides root, so its Rect position stays
+# (0, 0) and the translation is a RuntimeOffset — the transform-time input a
+# scroll uses — while the size is the target's scaled size. Returns whether
+# anything was written: an outline that moved needs the transform pass to
+# run this frame (compare-before-write keeps an idle frame idle).
 func placeOutline(
   world: mod UiWorld
   outline: view EntityId
   target: view EntityId
   visible: view Bool
-) {
+) ret Bool {
   var show: Bool = visible and isNone(this: target) is false
   if show and (componentHas(this: world.worldTransforms, entity: target) is false or componentHas(
     this: world.computedRects
@@ -175,19 +144,69 @@ func placeOutline(
   ) is false) {
     show = false
   }
-  componentSet(this: world.actives, entity: outline, data: Active { value: show })
-  if show is false {
-    ret
+  var changed: Bool = false
+  var wasShown: Bool = true
+  if componentHas(this: world.actives, entity: outline) {
+    wasShown = componentGet(this: world.actives, entity: outline).value
   }
-  # A root's layout position is always (0, 0); the translation to the target
-  # is a RuntimeOffset, the transform-time input (the same one a scroll uses).
+  if wasShown is not show {
+    componentSet(this: world.actives, entity: outline, data: Active { value: show })
+    changed = true
+  }
+  if show is false {
+    ret changed
+  }
   let transform: WorldTransform2D = componentGet(this: world.worldTransforms, entity: target)
   let computed: ComputedRect = componentGet(this: world.computedRects, entity: target)
-  let rect: mod Rect => componentMod(this: world.rects, entity: outline)
-  rect.size.x = computed.size.x * transform.scale.x
-  rect.size.y = computed.size.y * transform.scale.y
-  let offset: RuntimeOffset = { delta: Vec2 { x: transform.position.x, y: transform.position.y } }
-  componentSet(this: world.runtimeOffsets, entity: outline, data: offset)
+  let w: Float = computed.size.x * transform.scale.x
+  let h: Float = computed.size.y * transform.scale.y
+  if componentHas(this: world.rects, entity: outline) {
+    let current: Rect = componentGet(this: world.rects, entity: outline)
+    if current.size.x is not w or current.size.y is not h {
+      let rect: mod Rect => componentMod(this: world.rects, entity: outline)
+      rect.size.x = w
+      rect.size.y = h
+      changed = true
+    }
+  }
+  var writeOffset: Bool = true
+  if componentHas(this: world.runtimeOffsets, entity: outline) {
+    let current: Vec2 = componentGet(this: world.runtimeOffsets, entity: outline).delta
+    if current.x is transform.position.x and current.y is transform.position.y {
+      writeOffset = false
+    }
+  }
+  if writeOffset {
+    let offset: RuntimeOffset = { delta: Vec2 { x: transform.position.x, y: transform.position.y } }
+    componentSet(this: world.runtimeOffsets, entity: outline, data: own offset)
+    changed = true
+  }
+  ret changed
+}
+
+# Every node tagged OutlineFor { role } follows its target; true if any moved.
+func placeOutlines(
+  world: mod UiWorld
+  role: view OutlineRole
+  target: view EntityId
+  visible: view Bool
+) ret Bool {
+  var changed: Bool = false
+  let count: Int = componentCount(this: world.outlineFors)
+  loop var i: Int = 0, i < count, ++i {
+    let tag: OutlineFor = componentDataAt(this: world.outlineFors, i: i)
+    if tag.role is role {
+      if placeOutline(
+        world: world
+        outline: componentEntityAt(this: world.outlineFors, i: i)
+        target: target
+        visible: visible
+      ) {
+        changed = true
+      }
+    }
+  }
+  ret changed
 }
 
 func parentOf(world: view UiWorld, entity: view EntityId) ret EntityId {
@@ -474,18 +493,22 @@ func inspectorSystem(
     syncTreePanel(world: world, inspector: inspector, sceneRoot: sceneRoot)
   }
   # Outlines follow the layout of this frame; placed every frame, cheap.
-  placeOutline(
+  if placeOutlines(
     world: world
-    outline: inspector.hoverOutline
+    role: OutlineRole.hover
     target: inspector.hovered
     visible: chromeVisible and inspector.hovered is not inspector.selected
-  )
-  placeOutline(
+  ) {
+    changed = true
+  }
+  if placeOutlines(
     world: world
-    outline: inspector.selectOutline
+    role: OutlineRole.selection
     target: inspector.selected
     visible: chromeVisible
-  )
+  ) {
+    changed = true
+  }
   ret changed
 }
 

@@ -410,8 +410,28 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             echo "  camera zoom failed:"
             cat "$TMP_OUT/render-zoom.log" "$TMP_OUT/screenshot-zoom.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
           fi
+          # The outline pools (outlineSystem): RAE_UI_EDITOR_OUTLINES=both boots
+          # with the "every node" and "every button" pools on — one authored
+          # outline instance per matched document entity, positioned over it —
+          # so the frame must differ clearly from the plain reference.
+          SCREENSHOT="$TMP_OUT/ui-editor-outlines.bmp"
+          if (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
+             RAE_UI_EDITOR_ROOT="examples/121_ui_editor/assets/samples" RAE_UI_EDITOR_OUTLINES=both \
+             RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
+             perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-outlines.log" 2>&1 \
+             && grep -qE '\[ui-editor\] mounted MainMenu: [1-9][0-9]* nodes, 0 diagnostics' "$TMP_OUT/render-outlines.log" \
+             && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=50 \
+                > "$TMP_OUT/screenshot-outlines.log" 2>&1 \
+             && ! python3 tools/assert_bmp_diff.py "$SCREENSHOT" "../examples/121_ui_editor/references/MainMenu.png" \
+                  --max-diff-pct 0.3 >> "$TMP_OUT/screenshot-outlines.log" 2>&1; then
+            :
+          else
+            UI_EDITOR_OK=0
+            echo "  outline pools failed:"
+            cat "$TMP_OUT/render-outlines.log" "$TMP_OUT/screenshot-outlines.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
+          fi
           if [ "$UI_EDITOR_OK" = "1" ]; then
-            echo "PASS: $EXAMPLE_NAME (7 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select, .raepack project open + switch, file picker, camera zoom)"
+            echo "PASS: $EXAMPLE_NAME (7 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select, .raepack project open + switch, file picker, camera zoom, outline pools)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (ui editor sample gate)"
