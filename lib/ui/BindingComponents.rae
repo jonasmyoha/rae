@@ -261,6 +261,18 @@ type HeroTransition {
   duration: Float
 }
 
+# A camera on a page or layer ROOT (#11920833): zoom about the root's origin
+# and a translation, in the parent's units. The lib cameraSystem (ui/
+# cameraSystem, in the Pipeline before transform) derives the root's
+# TransformFx scale and RuntimeOffset from it, so ANY app zooms or pans a page
+# by writing one component — the editor's wheel/drag, a map, a photo view.
+# Default identity: `"Camera2D": {}` is a no-op until something writes it.
+type Camera2D {
+  zoom: Float = 1.0
+  offsetX: Float = 0.0
+  offsetY: Float = 0.0
+}
+
 # ----- the UI editor's chrome (examples/121_ui_editor, #32499842) -----------
 #
 # The editor's chrome is an authored scene like any page; these components

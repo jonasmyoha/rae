@@ -388,7 +388,10 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           fi
           # The camera (cameraSystem): RAE_UI_EDITOR_ZOOM=2 boots the document at
           # 200% centred in the edit area; the log names the zoom and the
-          # frame is the whole window (only the document scaled).
+          # frame is the whole window (only the document scaled) — and it must
+          # DIFFER from the fitted reference by more than 20% of its pixels, so
+          # a zoom that is logged but not rendered (a spurious first-frame
+          # resize once re-fitted it) fails.
           SCREENSHOT="$TMP_OUT/ui-editor-zoom.bmp"
           if (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
              RAE_UI_EDITOR_ROOT="examples/121_ui_editor/assets/samples" RAE_UI_EDITOR_ZOOM=2 \
@@ -398,7 +401,9 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              && grep -qE '\[ui-editor\] mounted MainMenu: [1-9][0-9]* nodes, 0 diagnostics' "$TMP_OUT/render-zoom.log" \
              && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=50 \
                 > "$TMP_OUT/screenshot-zoom.log" 2>&1 \
-             && grep -qE 'non-blank BMP' "$TMP_OUT/screenshot-zoom.log"; then
+             && grep -qE 'non-blank BMP' "$TMP_OUT/screenshot-zoom.log" \
+             && ! python3 tools/assert_bmp_diff.py "$SCREENSHOT" "../examples/121_ui_editor/references/MainMenu.png" \
+                  --max-diff-pct 20 >> "$TMP_OUT/screenshot-zoom.log" 2>&1; then
             :
           else
             UI_EDITOR_OK=0

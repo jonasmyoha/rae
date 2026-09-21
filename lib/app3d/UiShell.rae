@@ -26,6 +26,7 @@ open SdfText
 open ui/Ecs
 open ecs/Event
 open ui/Pipeline
+open ui/cameraSystem/CameraSystem
 open ecs/Schedule
 open ui/Components
 open ui/Registry
@@ -371,6 +372,9 @@ func runScheduledUiSystems(schedule: mod Schedule, world: mod UiWorld, res: view
   measureTextForLayout(world: world, res: res)
   if uiShouldRun(schedule: schedule, world: world, index: uiSystemLayout) {
     layoutSystem(world: world)
+  }
+  if uiShouldRun(schedule: schedule, world: world, index: uiSystemCamera) {
+    cameraSystem(world: world)
   }
   if uiShouldRun(schedule: schedule, world: world, index: uiSystemTransform) {
     transformSystem(world: world)

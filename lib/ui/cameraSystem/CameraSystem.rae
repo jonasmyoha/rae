@@ -1,0 +1,41 @@
+# cameraSystem — a `Camera2D` on a page or layer root becomes the root's
+# TransformFx scale (about the origin) and RuntimeOffset, the two
+# transform-pass inputs a scroll already uses; the stock transform, render
+# and input systems then carry an inherited scale through every descendant
+# (box, glyphs, clips, hit tests). Runs in the ui Pipeline right before
+# transform. Compare-before-write: a camera that did not move bumps neither
+# table, so an idle frame stays idle. The camera OWNS the root's scale and
+# pivot; a root's own alpha / visible / rotation are kept.
+open ui/Ecs
+open ui/Components
+open ecs/Entity
+open ecs/ComponentTable
+
+func cameraSystem(world: mod UiWorld) {
+  let count: Int = componentCount(this: world.cameras)
+  loop var i: Int = 0, i < count, ++i {
+    let entity: EntityId = componentEntityAt(this: world.cameras, i: i)
+    let camera: Camera2D = componentDataAt(this: world.cameras, i: i)
+    var fx: TransformFx = defaultTransformFx()
+    if componentHas(this: world.transforms, entity: entity) {
+      fx = componentGet(this: world.transforms, entity: entity)
+    }
+    if fx.scaleX is not camera.zoom or fx.scaleY is not camera.zoom or fx.pivot.x is not 0.0 or fx.pivot.y is not 0.0 {
+      fx.scaleX = camera.zoom
+      fx.scaleY = camera.zoom
+      fx.pivot = Vec2 { x: 0.0, y: 0.0 }
+      fx.anchor = Vec2 { x: 0.0, y: 0.0 }
+      componentSet(this: world.transforms, entity: entity, data: fx)
+    }
+    var current: Vec2 = { x: 0.0, y: 0.0 }
+    var hasOffset: Bool = false
+    if componentHas(this: world.runtimeOffsets, entity: entity) {
+      current = componentGet(this: world.runtimeOffsets, entity: entity).delta
+      hasOffset = true
+    }
+    if hasOffset is false or current.x is not camera.offsetX or current.y is not camera.offsetY {
+      let offset: RuntimeOffset = { delta: Vec2 { x: camera.offsetX, y: camera.offsetY } }
+      componentSet(this: world.runtimeOffsets, entity: entity, data: own offset)
+    }
+  }
+}

@@ -152,3 +152,18 @@ diagnostic naming the line to add. Apps that load a theme explicitly
 a convention, it is a path the app passes. New app code should use
 `mountSceneWithImports`; `loadUiAssets` remains the compatibility path for apps
 that have not yet migrated their scene packages.
+
+## 8. `Camera2D`: zoom and pan a page by writing one component
+
+A page or layer ROOT may carry `"Camera2D": { "zoom": 1, "offsetX": 0, "offsetY": 0 }`
+(default identity, so the bare `{}` is a no-op). The lib `cameraSystem` (registered in
+the ui Pipeline between `fit` and `transform`, `lib/ui/cameraSystem/`) derives the
+root's `TransformFx` scale (about the origin) and `RuntimeOffset` from it every frame it
+changes — the two transform-pass inputs a scroll already uses — and the stock transform,
+render and input systems carry the inherited scale through every descendant (boxes,
+glyphs, clips, masks, hit tests). So ANY app zooms or pans a page by writing one
+component: the UI editor's wheel / middle-drag / zoom pill (its `cameraSystem/` is only
+the input side), a map, a photo view. The camera owns the root's scale and pivot; the
+root's own alpha / visible / rotation are kept. Compare-before-write: a still camera
+bumps neither table, so an idle frame stays idle. `Coverage.raescene` authors one.
+
