@@ -240,14 +240,22 @@ func createApp() ret App {
     guidesRoot: guides.frameSpace
   )
 
-  # The chrome: the app's own scene on its own layer, sized to the window
-  # (chromeReload mounts it the same way after an edit).
-  let chromeRoot: EntityId = mountChrome(
+  # The chrome: the app's own scene on its own layer, sized to the design
+  # space (at least the chrome's own 1080x1920, viewportSystem).
+  let chromeScene: Scene = loadSceneFile(path: chromeScenePath)
+  let chromeOverrides: List(SceneOverride) = List.create(SceneOverride, cap: 1)
+  let chromeRoot: EntityId = mountPage(
     world: world
-    registry: document.registry
-    designW: viewport.designW
-    designH: viewport.designH
+    pageId: "chrome"
+    scene: chromeScene
+    overrides: chromeOverrides
+    w: viewport.designW
+    h: viewport.designH
   )
+  setLayerById(world: world, entity: chromeRoot, id: "chrome")
+  # The chrome's own sub-scenes (the inspector panel) resolve from the same
+  # registry the document uses.
+  resolveSceneInstances(world: world, registry: document.registry, pageId: "chrome")
   var chrome: ChromeState = { pageRoot: chromeRoot }
   # A project opens with its scene list showing (P hides it); a bare scene
   # has no project, so the panel stays hidden. The panels' Active is the
@@ -298,10 +306,6 @@ func createApp() ret App {
   }
   var watch: FileWatch = createFileWatch(now: Gpu2d.nowSeconds())
   watchRememberMtimes(watch: watch, paths: document.watchedPaths)
-  # The chrome's own files are watched too (chromeReload).
-  var chromePaths: List(String) = chromeScenePaths(builtinScenePaths: builtinScenePaths)
-  var chromeWatch: FileWatch = createFileWatch(now: Gpu2d.nowSeconds())
-  watchRememberMtimes(watch: chromeWatch, paths: chromePaths)
 
   var schedule: Schedule = createUiPipeline(world: world)
   unsafe {
@@ -316,8 +320,6 @@ func createApp() ret App {
       textures: own textures
       fonts: fonts
       watch: own watch
-      chromeWatch: own chromeWatch
-      chromePaths: own chromePaths
       inspector: own inspector
       guides: guides
       camera: camera
