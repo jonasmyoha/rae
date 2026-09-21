@@ -74,21 +74,18 @@ func reloadDocument(app: mod App) {
       frameW: app.document.designW
       frameH: app.document.designH
       homeX: documentHomeX(designW: app.document.designW, columnW: app.document.columnW)
+      documentRoot: app.document.pageRoot
+      guidesRoot: app.guides.pageRoot
     )
     fitCamera(
       camera: app.camera
+      world: app.world
+      status: app.status
       area: editAreaOf(
         world: app.world
         canvasW: app.viewport.designW
         canvasH: app.viewport.designH
       )
-    )
-    applyCamera(
-      camera: app.camera
-      world: app.world
-      status: app.status
-      documentRoot: app.document.pageRoot
-      guidesRoot: app.guides.pageRoot
     )
     unsafe {
       textureSystem(
@@ -246,20 +243,24 @@ func runApp(app: mod App) ret Int {
   listViewSystem(world: app.world, scenes: app.document.registry)
   runScheduledUiSystems(schedule: app.schedule, world: app.world, res: app.gpuUi)
   # The chrome has laid out: fit the document into the edit area (and apply
-  # RAE_UI_EDITOR_ZOOM), then let the transform pass pick the camera up.
+  # RAE_UI_EDITOR_ZOOM) — a Camera2D write the lib cameraSystem folds into
+  # the roots' transforms on the next pipeline run.
   var editArea: EditAreaRect = editAreaOf(
     world: app.world
     canvasW: app.viewport.designW
     canvasH: app.viewport.designH
   )
-  fitCamera(camera: app.camera, area: editArea)
-  bootCameraZoom(camera: app.camera, area: editArea)
-  applyCamera(
+  fitCamera(
     camera: app.camera
     world: app.world
     status: app.status
-    documentRoot: app.document.pageRoot
-    guidesRoot: app.guides.pageRoot
+    area: editArea
+  )
+  bootCameraZoom(
+    camera: app.camera
+    world: app.world
+    status: app.status
+    area: editArea
   )
   runScheduledUiSystems(schedule: app.schedule, world: app.world, res: app.gpuUi)
   var renderedOnce: Bool = false
@@ -292,14 +293,12 @@ func runApp(app: mod App) ret Int {
       changed = true
     }
     editorTextSystem(world: app.world, status: app.status)
-    if cameraInputSystem(camera: app.camera, world: app.world, area: editArea) {
-      applyCamera(
-        camera: app.camera
-        world: app.world
-        status: app.status
-        documentRoot: app.document.pageRoot
-        guidesRoot: app.guides.pageRoot
-      )
+    if cameraInputSystem(
+      camera: app.camera
+      world: app.world
+      status: app.status
+      area: editArea
+    ) {
       changed = true
     }
     if Sdl3.isKeyPressed(key: Keys.keyH) {
@@ -399,18 +398,13 @@ func runApp(app: mod App) ret Int {
         # the new edit area and run the transform pass again.
         fitCamera(
           camera: app.camera
+          world: app.world
+          status: app.status
           area: editAreaOf(
             world: app.world
             canvasW: app.viewport.designW
             canvasH: app.viewport.designH
           )
-        )
-        applyCamera(
-          camera: app.camera
-          world: app.world
-          status: app.status
-          documentRoot: app.document.pageRoot
-          guidesRoot: app.guides.pageRoot
         )
         runScheduledUiSystems(schedule: app.schedule, world: app.world, res: app.gpuUi)
       }

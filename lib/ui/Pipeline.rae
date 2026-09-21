@@ -35,29 +35,32 @@ const uiSystemLayout: Int = 3
 
 const uiSystemFit: Int = 4
 
-const uiSystemTransform: Int = 5
+# #11920833: a Camera2D on a root becomes its TransformFx + RuntimeOffset.
+const uiSystemCamera: Int = 5
 
-const uiSystemHoverScale: Int = 6
+const uiSystemTransform: Int = 6
+
+const uiSystemHoverScale: Int = 7
 
 # #1005: the effect systems (lib/ui/animationSystem/EffectSystems.rae), in
 # the order the app calls them, after hoverScale and before visualBounds.
-const uiSystemAnimFrames: Int = 7
+const uiSystemAnimFrames: Int = 8
 
-const uiSystemAnimTrigger: Int = 8
+const uiSystemAnimTrigger: Int = 9
 
-const uiSystemWobbleFx: Int = 9
+const uiSystemWobbleFx: Int = 10
 
-const uiSystemBackgroundPan: Int = 10
+const uiSystemBackgroundPan: Int = 11
 
-const uiSystemSmokeFx: Int = 11
+const uiSystemSmokeFx: Int = 12
 
-const uiSystemCarousel: Int = 12
+const uiSystemCarousel: Int = 13
 
-const uiSystemVisualBounds: Int = 13
+const uiSystemVisualBounds: Int = 14
 
-const uiSystemRender: Int = 14
+const uiSystemRender: Int = 15
 
-const uiSystemCount: Int = 15
+const uiSystemCount: Int = 16
 
 # Resolve UiWorld table FIELD names to table ids. A name that is not a
 # ComponentTable field of UiWorld is a registration bug in this file, so it is
@@ -191,6 +194,18 @@ func createUiPipeline(world: view UiWorld) ret Schedule {
     ]
     writes: ["computedRects"]
     skipWhenClean: false
+  )
+
+  # cameraSystem — a root's Camera2D into its TransformFx + RuntimeOffset,
+  # right before transform folds them (compare-before-write, so a still
+  # camera leaves both tables' generations alone).
+  uiRegister(
+    schedule: schedule
+    world: world
+    name: "camera"
+    reads: ["cameras", "transforms", "runtimeOffsets"]
+    writes: ["transforms", "runtimeOffsets"]
+    skipWhenClean: true
   )
 
   # transformSystem — the set TransformCache tracked. Its outputs

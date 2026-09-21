@@ -174,7 +174,15 @@ func viewportSystem(
   if Gpu2d.windowResized() is false {
     ret false
   }
+  # The platform reports a resize on the first frame of a new window too;
+  # only a size that actually differs is a resize (a spurious one would
+  # re-fit the camera and cancel a boot zoom).
+  let beforeW: Float = viewport.designW
+  let beforeH: Float = viewport.designH
   applyChromeViewport(viewport: viewport, world: world)
+  if viewport.designW is beforeW and viewport.designH is beforeH {
+    ret false
+  }
   sizeChromePage(world: world, chromeRoot: chromeRoot, viewport: viewport)
   ret true
 }
