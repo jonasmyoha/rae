@@ -132,7 +132,7 @@ texture manifest, and a design-resolution + fit rule (now native:
   directory. Headless/tests drive it without a panel: `RAE_SDL_FILE_DIALOG_RESULT`
   resolves the next request to that path (empty => cancel), and a
   `RAE_SDL_HEADLESS_MS` run never opens a real panel.
-- **The picker** (#51700883): `O`, or the chrome's `Open (O)` pill (an authored
+- **The picker** (#51700883): `O`, or the chrome's `Open...` pill (the `O` key does the same) (an authored
   `OnClick` `file.open` row in `Editor.raescene`, not a code-built widget),
   requests `Sdl3.openFileDialog(filters: ["raepack", "raescene"], defaultLocation:
   document.root)`; the frame loop polls `pollFileDialogResult()` and a non-empty
@@ -159,7 +159,7 @@ chrome can be hidden for a pure passive view (`H` key).
 - **chrome layer** — authored in the app's OWN `.raescene`
   (`assets/scenes/Editor.raescene`, `chrome/*.raescene` sub-scenes), the desktop
   editor layout the reference editor uses (docs/ui-editor-reference-features.md §3):
-  a 76pt **top bar** (`Panels` toggle, file name, zoom pill, `Open (O)`, node count,
+  a 76pt **top bar** (`Panels` toggle, file name, zoom pill, `Open...`, node count,
   diagnostics pill, `Inspector` toggle), a **Body** row of `LeftPanel` (328pt:
   Project / Hierarchy / Diagnostics sections as clipped ListViews, `chrome/*Row`
   rows) · `EditArea` (Fill — the space the camera fits the document into) ·
