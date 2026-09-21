@@ -107,9 +107,9 @@ func g2dPaintBox(
   }
 }
 
-# `Shadow.blur` (#1000): gpu2d has no blur, so a soft drop shadow is three
-# translucent rounded rects growing by a third of the blur each, offset down
-# by a third of it — under the entity's own shape.
+# A bounded stack of translucent shapes approximates a soft shadow in Rae.
+# Three layers at opacity 1 preserve the original appearance; authored scenes
+# can opt into a finer falloff. Alpha is normalized by layer count.
 func paintShadowG(
   world: view UiWorld
   entity: view EntityId
@@ -122,14 +122,30 @@ func paintShadowG(
   if shadow.blur <= 0.0 {
     ret
   }
-  let step: Float = shadow.blur / 3.0
-  loop var layer: Int = 0, layer < 3, ++layer {
+  var layers: Int = shadow.layers
+  if layers < 1 {
+    layers = 1
+  }
+  if layers > 16 {
+    layers = 16
+  }
+  var opacity: Float = shadow.opacity
+  if opacity < 0.0 {
+    opacity = 0.0
+  }
+  if opacity > 1.0 {
+    opacity = 1.0
+  }
+  let step: Float = shadow.blur / layers.toFloat()
+  let offset: Float = shadow.blur / 3.0
+  loop var layer: Int = 0, layer < layers, ++layer {
     let grow: Float = step * (layer + 1).toFloat()
-    let alpha: Int = (70 - layer * 22) * chain255 / 255
+    let falloff: Float = (70.0 - layer.toFloat() * 66.0 / layers.toFloat()) * 3.0 / layers.toFloat()
+    let alpha: Int = (falloff * opacity).toInt() * chain255 / 255
     Gpu2d.drawRoundedRect(
       canvas: canvas
       x: box.x - grow
-      y: box.y - grow + step
+      y: box.y - grow + offset
       w: box.w + grow * 2.0
       h: box.h + grow * 2.0
       radius: radius + grow

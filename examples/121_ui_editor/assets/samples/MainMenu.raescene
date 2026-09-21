@@ -1,655 +1,363 @@
 {
   "type": "Scene",
   "version": 2,
-  "import": [
-    "Theme"
-  ],
+  "import": ["Theme"],
   "root": "Screen",
   "nodes": {
     "Screen": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 1080,
-        "h": 1920
-      },
-      "Shape": {
-        "kind": "Rect",
-        "fill": "background",
-        "stroke": "#00000000",
-        "strokeWidth": 0
-      },
-      "Layout": {
-        "type": "Vertical",
-        "gap": "spaceM",
-        "alignCross": "Center"
-      },
-      "Padding": {
-        "l": "spaceXL",
-        "t": 200,
-        "r": "spaceXL",
-        "b": "spaceXL"
-      },
-      "Children": [
-        "LogoRing",
-        "Eyebrow",
-        "Title",
-        "Tagline",
-        "Panel",
-        "Stats",
-        "Footer"
-      ]
+      "Rect": {"x": 0, "y": 0, "w": 1080, "h": 1920},
+      "Shape": {"kind": "Rect", "fill": "background", "stroke": "#00000000", "strokeWidth": 0},
+      "Layout": {"type": "Vertical", "gap": 24, "alignCross": "Center"},
+      "Padding": {"l": 64, "t": 100, "r": 64, "b": 72},
+      "Children": ["Eyebrow", "Title", "Tagline", "LogoRing", "Panel", "Stats", "Milestone", "Footer"],
+      "GradientFill": {"from": "#15252C", "to": "#0C121B", "angle": 100}
     },
     "LogoRing": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 260,
-        "h": 260
+      "Rect": {"x": 0, "y": 0, "w": 952, "h": 420},
+      "Shape": {"kind": "RoundedRect", "fill": "#183730", "stroke": "#FFFFFF0C", "strokeWidth": 1, "radius": 56},
+      "Margin": {"l": 0, "t": 0, "r": 0, "b": 16},
+      "Children": ["OrbitOuter", "OrbitInner", "OrbitPlanet", "OrbitMoon", "HeroEyebrow", "HeroTitle", "HeroNote", "Logo"],
+      "Size": {
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Fixed"}
       },
-      "Shape": {
-        "kind": "Circle",
-        "fill": "surface",
-        "stroke": "accent",
-        "strokeWidth": 6
-      },
-      "Margin": {
-        "l": 0,
-        "t": 0,
-        "r": 0,
-        "b": 12
-      },
-      "Layout": {
-        "type": "Vertical",
-        "gap": 0,
-        "alignMain": "Center",
-        "alignCross": "Center"
-      },
-      "Children": [
-        "Logo"
-      ]
+      "GradientFill": {"from": "#244D48", "to": "#15232F", "angle": 25},
+      "Shadow": {"blur": 24, "layers": 12, "opacity": 0.32},
+      "CornerRadius": {"radius": 56},
+      "MaskShape": {"kind": "RoundedRect", "sourceNodeId": "", "radius": 56}
     },
     "Logo": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 200,
-        "h": 200
-      },
-      "Sprite": {
-        "textureKey": "logo",
-        "scaleMode": "Fit"
-      },
-      "CornerRadius": {
-        "radius": 100
-      }
+      "Rect": {"x": 800, "y": 210, "w": 56, "h": 56},
+      "Sprite": {"textureKey": "logo", "scaleMode": "Fit"},
+      "CornerRadius": {"radius": 28}
     },
     "Eyebrow": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 0,
-        "h": 34
-      },
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 34},
       "Size": {
-        "w": {
-          "mode": "Fill"
-        },
-        "h": {
-          "mode": "Fixed"
-        }
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Fixed"}
       },
-      "Text": {
-        "text": "SEASON THREE",
-        "styleId": "eyebrow"
-      }
+      "Text": {"text": "ORBIT DRIFT  /  SEASON 03", "styleId": "eyebrow"}
     },
     "Title": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 0,
-        "h": 110
-      },
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 152},
       "Size": {
-        "w": {
-          "mode": "Fill"
-        },
-        "h": {
-          "mode": "Fixed"
-        }
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Fixed"}
       },
-      "Text": {
-        "text": "Orbit Drift",
-        "styleId": "title"
-      }
+      "Text": {"text": "Orbit Drift", "styleId": "display"}
     },
     "Tagline": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 0,
-        "h": 40
-      },
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 52},
       "Size": {
-        "w": {
-          "mode": "Fill"
-        },
-        "h": {
-          "mode": "Fixed"
-        }
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Fixed"}
       },
-      "Margin": {
-        "l": 0,
-        "t": 0,
-        "r": 0,
-        "b": 28
-      },
-      "Text": {
-        "text": "a sample scene shipped with the Rae UI editor",
-        "styleId": "caption"
-      }
+      "Margin": {"l": 0, "t": 0, "r": 0, "b": 24},
+      "Text": {"text": "Find your rhythm. Take the next orbit.", "styleId": "muted"}
     },
     "Panel": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 0,
-        "h": 0
-      },
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 0},
       "Size": {
-        "w": {
-          "mode": "Fill"
-        },
-        "h": {
-          "mode": "Hug"
-        }
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Hug"}
       },
-      "Shape": {
-        "kind": "RoundedRect",
-        "fill": "surface",
-        "stroke": "outline",
-        "strokeWidth": 2,
-        "radius": "radiusCard"
-      },
-      "Layout": {
-        "type": "Vertical",
-        "gap": "spaceM",
-        "alignCross": "Stretch"
-      },
-      "Padding": {
-        "l": "spaceL",
-        "t": "spaceL",
-        "r": "spaceL",
-        "b": "spaceL"
-      },
-      "Children": [
-        "PlayButton",
-        "ContinueButton",
-        "SettingsButton"
-      ]
+      "Shape": {"kind": "RoundedRect", "fill": "surface", "stroke": "#FFFFFF0C", "strokeWidth": 1, "radius": 56},
+      "Layout": {"type": "Vertical", "gap": 20, "alignCross": "Stretch"},
+      "Padding": {"l": 28, "t": 28, "r": 28, "b": 28},
+      "Children": ["PlayButton", "SecondaryActions"],
+      "GradientFill": {"from": "#202C36", "to": "#18222C", "angle": 110},
+      "Shadow": {"blur": 24, "layers": 12, "opacity": 0.32},
+      "CornerRadius": {"radius": 56}
     },
     "PlayButton": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 0,
-        "h": 124
-      },
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 128},
       "Size": {
-        "w": {
-          "mode": "Fill"
-        },
-        "h": {
-          "mode": "Fixed"
-        }
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Fixed"}
       },
-      "Shape": {
-        "kind": "RoundedRect",
-        "fill": "accent",
-        "stroke": "#00000000",
-        "strokeWidth": 0,
-        "radius": "radiusPill"
-      },
-      "Shadow": {
-        "blur": 28
-      },
-      "Layout": {
-        "type": "Horizontal",
-        "gap": "spaceS",
-        "alignMain": "Center",
-        "alignCross": "Center"
-      },
-      "OnClick": {
-        "actionId": "menu.play"
-      },
-      "Children": [
-        "PlayIcon",
-        "PlayLabel"
-      ]
+      "Shape": {"kind": "RoundedRect", "fill": "accent", "stroke": "#00000000", "strokeWidth": 1, "radius": 64.0},
+      "Layout": {"type": "Horizontal", "gap": "spaceS", "alignMain": "Center", "alignCross": "Center"},
+      "OnClick": {"actionId": "menu.play"},
+      "Children": ["PlayIcon", "PlayLabel"],
+      "GradientFill": {"from": "#69C7AC", "to": "#48B498", "angle": 100},
+      "CornerRadius": {"radius": 64.0}
     },
     "PlayIcon": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 48,
-        "h": 48
-      },
-      "Sprite": {
-        "textureKey": "mat:play_arrow",
-        "tint": "accentText",
-        "scaleMode": "Fit"
-      }
+      "Rect": {"x": 0, "y": 0, "w": 48, "h": 48},
+      "Sprite": {"textureKey": "mat:play_arrow", "tint": "accentText", "scaleMode": "Fit"}
     },
     "PlayLabel": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 140,
-        "h": 52
-      },
+      "Rect": {"x": 0, "y": 0, "w": 220, "h": 52},
       "Size": {
-        "w": {
-          "mode": "Hug"
-        },
-        "h": {
-          "mode": "Fixed"
-        }
+        "w": {"mode": "Hug"},
+        "h": {"mode": "Fixed"}
       },
-      "Text": {
-        "text": "Play",
-        "styleId": "button"
-      }
+      "Text": {"text": "Start a run", "styleId": "button"}
     },
     "ContinueButton": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 0,
-        "h": 124
-      },
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 104},
       "Size": {
-        "w": {
-          "mode": "Fill"
-        },
-        "h": {
-          "mode": "Fixed"
-        }
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Fixed"}
       },
-      "Shape": {
-        "kind": "RoundedRect",
-        "fill": "surfaceAlt",
-        "stroke": "outline",
-        "strokeWidth": 2,
-        "radius": "radiusPill"
-      },
-      "Layout": {
-        "type": "Horizontal",
-        "gap": 0,
-        "alignMain": "Center",
-        "alignCross": "Center"
-      },
-      "OnClick": {
-        "actionId": "menu.continue"
-      },
-      "Children": [
-        "ContinueLabel"
-      ]
+      "Shape": {"kind": "RoundedRect", "fill": "surfaceAlt", "stroke": "outline", "strokeWidth": 1, "radius": 52.0},
+      "Layout": {"type": "Horizontal", "gap": 0, "alignMain": "Center", "alignCross": "Center"},
+      "OnClick": {"actionId": "menu.continue"},
+      "Children": ["ContinueLabel"]
     },
     "ContinueLabel": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 0,
-        "h": 52
-      },
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 52},
       "Size": {
-        "w": {
-          "mode": "Fill"
-        },
-        "h": {
-          "mode": "Fixed"
-        }
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Fixed"}
       },
-      "Text": {
-        "text": "Continue",
-        "styleId": "buttonSecondary"
-      }
+      "Text": {"text": "Continue", "styleId": "buttonSecondary"}
     },
     "SettingsButton": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 0,
-        "h": 124
-      },
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 104},
       "Size": {
-        "w": {
-          "mode": "Fill"
-        },
-        "h": {
-          "mode": "Fixed"
-        }
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Fixed"}
       },
-      "Shape": {
-        "kind": "RoundedRect",
-        "fill": "surfaceAlt",
-        "stroke": "outline",
-        "strokeWidth": 2,
-        "radius": "radiusPill"
-      },
-      "Layout": {
-        "type": "Horizontal",
-        "gap": 0,
-        "alignMain": "Center",
-        "alignCross": "Center"
-      },
-      "OnClick": {
-        "actionId": "menu.settings"
-      },
-      "Children": [
-        "SettingsLabel"
-      ]
+      "Shape": {"kind": "RoundedRect", "fill": "surfaceAlt", "stroke": "outline", "strokeWidth": 1, "radius": 52.0},
+      "Layout": {"type": "Horizontal", "gap": 0, "alignMain": "Center", "alignCross": "Center"},
+      "OnClick": {"actionId": "menu.settings"},
+      "Children": ["SettingsLabel"]
     },
     "SettingsLabel": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 0,
-        "h": 52
-      },
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 52},
       "Size": {
-        "w": {
-          "mode": "Fill"
-        },
-        "h": {
-          "mode": "Fixed"
-        }
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Fixed"}
       },
-      "Text": {
-        "text": "Settings",
-        "styleId": "buttonSecondary"
-      }
+      "Text": {"text": "Settings", "styleId": "buttonSecondary"}
     },
     "Stats": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 0,
-        "h": 150
-      },
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 172},
       "Size": {
-        "w": {
-          "mode": "Fill"
-        },
-        "h": {
-          "mode": "Fixed"
-        }
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Fixed"}
       },
-      "Margin": {
-        "l": 0,
-        "t": 20,
-        "r": 0,
-        "b": 0
-      },
-      "Layout": {
-        "type": "Horizontal",
-        "gap": "spaceM",
-        "alignMain": "Center",
-        "alignCross": "Center"
-      },
-      "Children": [
-        "StatWins",
-        "StatStreak",
-        "StatRank"
-      ]
+      "Margin": {"l": 0, "t": 20, "r": 0, "b": 0},
+      "Layout": {"type": "Horizontal", "gap": "spaceM", "alignMain": "Center", "alignCross": "Center"},
+      "Children": ["StatWins", "StatStreak", "StatRank"]
     },
     "StatWins": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 0,
-        "h": 150
-      },
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 172},
       "Size": {
-        "w": {
-          "mode": "Fill"
-        },
-        "h": {
-          "mode": "Fixed"
-        }
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Fixed"}
       },
-      "Shape": {
-        "kind": "RoundedRect",
-        "fill": "surface",
-        "stroke": "#00000000",
-        "strokeWidth": 0,
-        "radius": "radiusChip"
-      },
-      "Layout": {
-        "type": "Vertical",
-        "gap": 4,
-        "alignMain": "Center",
-        "alignCross": "Stretch"
-      },
-      "Children": [
-        "StatWinsValue",
-        "StatWinsLabel"
-      ]
+      "Shape": {"kind": "RoundedRect", "fill": "surface", "stroke": "#FFFFFF0C", "strokeWidth": 0, "radius": 40},
+      "Layout": {"type": "Vertical", "gap": 4, "alignMain": "Center", "alignCross": "Stretch"},
+      "Children": ["StatWinsValue", "StatWinsLabel"],
+      "GradientFill": {"from": "#202C36", "to": "#18222C", "angle": 110},
+      "CornerRadius": {"radius": 40}
     },
     "StatWinsValue": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 0,
-        "h": 64
-      },
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 64},
       "Size": {
-        "w": {
-          "mode": "Fill"
-        },
-        "h": {
-          "mode": "Fixed"
-        }
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Fixed"}
       },
-      "Text": {
-        "text": "128",
-        "styleId": "statValue"
-      }
+      "Text": {"text": "128", "styleId": "statValue"}
     },
     "StatWinsLabel": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 0,
-        "h": 30
-      },
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 30},
       "Size": {
-        "w": {
-          "mode": "Fill"
-        },
-        "h": {
-          "mode": "Fixed"
-        }
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Fixed"}
       },
-      "Text": {
-        "text": "wins",
-        "styleId": "statLabel"
-      }
+      "Text": {"text": "TOTAL WINS", "styleId": "statLabel"}
     },
     "StatStreak": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 0,
-        "h": 150
-      },
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 172},
       "Size": {
-        "w": {
-          "mode": "Fill"
-        },
-        "h": {
-          "mode": "Fixed"
-        }
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Fixed"}
       },
-      "Shape": {
-        "kind": "RoundedRect",
-        "fill": "surface",
-        "stroke": "#00000000",
-        "strokeWidth": 0,
-        "radius": "radiusChip"
-      },
-      "Layout": {
-        "type": "Vertical",
-        "gap": 4,
-        "alignMain": "Center",
-        "alignCross": "Stretch"
-      },
-      "Children": [
-        "StatStreakValue",
-        "StatStreakLabel"
-      ]
+      "Shape": {"kind": "RoundedRect", "fill": "surface", "stroke": "#FFFFFF0C", "strokeWidth": 0, "radius": 40},
+      "Layout": {"type": "Vertical", "gap": 4, "alignMain": "Center", "alignCross": "Stretch"},
+      "Children": ["StatStreakValue", "StatStreakLabel"],
+      "GradientFill": {"from": "#202C36", "to": "#18222C", "angle": 110},
+      "CornerRadius": {"radius": 40}
     },
     "StatStreakValue": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 0,
-        "h": 64
-      },
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 64},
       "Size": {
-        "w": {
-          "mode": "Fill"
-        },
-        "h": {
-          "mode": "Fixed"
-        }
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Fixed"}
       },
-      "Text": {
-        "text": "7",
-        "styleId": "statValue"
-      }
+      "Text": {"text": "7", "styleId": "statValue"}
     },
     "StatStreakLabel": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 0,
-        "h": 30
-      },
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 30},
       "Size": {
-        "w": {
-          "mode": "Fill"
-        },
-        "h": {
-          "mode": "Fixed"
-        }
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Fixed"}
       },
-      "Text": {
-        "text": "streak",
-        "styleId": "statLabel"
-      }
+      "Text": {"text": "DAY STREAK", "styleId": "statLabel"}
     },
     "StatRank": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 0,
-        "h": 150
-      },
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 172},
       "Size": {
-        "w": {
-          "mode": "Fill"
-        },
-        "h": {
-          "mode": "Fixed"
-        }
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Fixed"}
       },
-      "Shape": {
-        "kind": "RoundedRect",
-        "fill": "surface",
-        "stroke": "#00000000",
-        "strokeWidth": 0,
-        "radius": "radiusChip"
-      },
-      "Layout": {
-        "type": "Vertical",
-        "gap": 4,
-        "alignMain": "Center",
-        "alignCross": "Stretch"
-      },
-      "Children": [
-        "StatRankValue",
-        "StatRankLabel"
-      ]
+      "Shape": {"kind": "RoundedRect", "fill": "surface", "stroke": "#FFFFFF0C", "strokeWidth": 0, "radius": 40},
+      "Layout": {"type": "Vertical", "gap": 4, "alignMain": "Center", "alignCross": "Stretch"},
+      "Children": ["StatRankValue", "StatRankLabel"],
+      "GradientFill": {"from": "#202C36", "to": "#18222C", "angle": 110},
+      "CornerRadius": {"radius": 40}
     },
     "StatRankValue": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 0,
-        "h": 64
-      },
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 64},
       "Size": {
-        "w": {
-          "mode": "Fill"
-        },
-        "h": {
-          "mode": "Fixed"
-        }
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Fixed"}
       },
-      "Text": {
-        "text": "#12",
-        "styleId": "statValue"
-      }
+      "Text": {"text": "#12", "styleId": "statValue"}
     },
     "StatRankLabel": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 0,
-        "h": 30
-      },
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 30},
       "Size": {
-        "w": {
-          "mode": "Fill"
-        },
-        "h": {
-          "mode": "Fixed"
-        }
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Fixed"}
       },
-      "Text": {
-        "text": "rank",
-        "styleId": "statLabel"
-      }
+      "Text": {"text": "WORLD RANK", "styleId": "statLabel"}
     },
     "Footer": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 0,
-        "h": 36
-      },
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 36},
       "Size": {
-        "w": {
-          "mode": "Fill"
-        },
-        "h": {
-          "mode": "Fixed"
-        }
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Fixed"}
       },
-      "Margin": {
-        "l": 0,
-        "t": 24,
-        "r": 0,
-        "b": 0
+      "Margin": {"l": 0, "t": 16, "r": 0, "b": 0},
+      "Opacity": {"value": 0.6},
+      "Text": {"text": "Your next best starts here.", "styleId": "caption"}
+    },
+    "OrbitOuter": {
+      "Rect": {"x": 490, "y": -110, "w": 430, "h": 430},
+      "Shape": {"kind": "RoundedRect", "fill": "#00000000", "stroke": "#91CBBB28", "strokeWidth": 2, "radius": 215.0}
+    },
+    "OrbitInner": {
+      "Rect": {"x": 545, "y": -55, "w": 320, "h": 320},
+      "Shape": {"kind": "RoundedRect", "fill": "#00000000", "stroke": "#91CBBB48", "strokeWidth": 2, "radius": 160.0}
+    },
+    "OrbitPlanet": {
+      "Rect": {"x": 608, "y": 2, "w": 204, "h": 204},
+      "Shape": {"kind": "Circle", "fill": "accent", "stroke": "#FFFFFF20", "strokeWidth": 2},
+      "GradientFill": {"from": "#8FD3BD", "to": "#267E70", "angle": 130},
+      "CornerRadius": {"radius": 102}
+    },
+    "OrbitMoon": {
+      "Rect": {"x": 533, "y": 150, "w": 34, "h": 34},
+      "Shape": {"kind": "Circle", "fill": "#CEE5DD", "strokeWidth": 0}
+    },
+    "HeroEyebrow": {
+      "Rect": {"x": 48, "y": 52, "w": 430, "h": 34},
+      "Size": {
+        "w": {"mode": "Fixed"},
+        "h": {"mode": "Fixed"}
       },
-      "Opacity": {
-        "value": 0.6
+      "Text": {"text": "THE LONG WAY HOME", "styleId": "eyebrow"}
+    },
+    "HeroTitle": {
+      "Rect": {"x": 48, "y": 236, "w": 620, "h": 62},
+      "Size": {
+        "w": {"mode": "Fixed"},
+        "h": {"mode": "Fixed"}
+      },
+      "Text": {"text": "A little further.", "styleId": "h2"}
+    },
+    "HeroNote": {
+      "Rect": {"x": 48, "y": 306, "w": 790, "h": 46},
+      "Size": {
+        "w": {"mode": "Fixed"},
+        "h": {"mode": "Fixed"}
+      },
+      "Text": {"text": "One more run. A new personal best.", "styleId": "muted"}
+    },
+    "SecondaryActions": {
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 104},
+      "Size": {
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Fixed"}
+      },
+      "Layout": {"type": "Horizontal", "gap": 20, "alignCross": "Center"},
+      "Children": ["ContinueButton", "SettingsButton"]
+    },
+    "Milestone": {
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 200},
+      "Size": {
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Fixed"}
+      },
+      "Shape": {"kind": "RoundedRect", "fill": "#18262E", "stroke": "#FFFFFF0C", "strokeWidth": 1, "radius": 48},
+      "Layout": {"type": "Vertical", "gap": 16, "alignCross": "Stretch"},
+      "Padding": {"l": 32, "t": 32, "r": 32, "b": 32},
+      "Children": ["MilestoneHeader", "MilestoneProgress", "MilestoneNote"],
+      "Margin": {"l": 0, "t": 12, "r": 0, "b": 12}
+    },
+    "MilestoneHeader": {
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 48},
+      "Size": {
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Fixed"}
+      },
+      "Layout": {"type": "Horizontal", "gap": 20, "alignCross": "Center"},
+      "Children": ["MilestoneTitle", "MilestoneValue"]
+    },
+    "MilestoneTitle": {
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 40},
+      "Size": {
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Fixed"}
+      },
+      "Text": {"text": "THE NEXT MILESTONE", "styleId": "eyebrow"}
+    },
+    "MilestoneValue": {
+      "Rect": {"x": 0, "y": 0, "w": 210, "h": 48},
+      "Size": {
+        "w": {"mode": "Fixed"},
+        "h": {"mode": "Fixed"}
       },
       "Text": {
-        "text": "v0.1 — every pixel here is a .raescene node",
-        "styleId": "caption"
+        "text": "150 wins",
+        "styleId": "h2",
+        "styleOverride": {"size": 34}
+      },
+      "OpticalAlign": {
+        "enabled": true,
+        "centerX": false,
+        "centerY": false,
+        "bias": {"x": 0, "y": 0}
+      }
+    },
+    "MilestoneProgress": {
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 8},
+      "Size": {
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Fixed"}
+      },
+      "Shape": {"kind": "RoundedRect", "fill": "#334C50", "stroke": "#00000000", "strokeWidth": 1, "radius": 4},
+      "Children": ["MilestoneFill"]
+    },
+    "MilestoneFill": {
+      "Rect": {"x": 0, "y": 0, "w": 650, "h": 8},
+      "Shape": {"kind": "RoundedRect", "fill": "accent", "stroke": "#00000000", "strokeWidth": 1, "radius": 4}
+    },
+    "MilestoneNote": {
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 40},
+      "Size": {
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Fixed"}
+      },
+      "Text": {
+        "text": "22 more wins. You are closer than ever.",
+        "styleId": "muted",
+        "styleOverride": {"size": 26}
       }
     }
   }

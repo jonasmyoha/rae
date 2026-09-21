@@ -129,20 +129,21 @@ func editorTextSystem(world: mod UiWorld, status: view EditorStatus) {
   }
 }
 
-# The diagnostics pill: red with a count, the muted surface without.
+# The diagnostics pill chooses its authored colour for the current state.
 func diagnosticsBadgeSystem(world: mod UiWorld, diagnosticsCount: view Int) {
-  var fill: RgbaColor = { r: 46, g: 54, b: 78, a: 255 }
-  if diagnosticsCount > 0 {
-    fill = RgbaColor { r: 200, g: 40, b: 52, a: 255 }
-  }
   let count: Int = componentCount(this: world.diagnosticsBadges)
   loop var i: Int = 0, i < count, ++i {
     let entity: EntityId = componentEntityAt(this: world.diagnosticsBadges, i: i)
+    let badge: view DiagnosticsBadge => componentView(this: world.diagnosticsBadges, entity: entity)
+    var fill: RgbaColor = badge.clearFill
+    if diagnosticsCount > 0 {
+      fill = badge.errorFill
+    }
     if componentHas(this: world.shapes, entity: entity) is false {
       continue
     }
     let current: Shape = componentGet(this: world.shapes, entity: entity)
-    if current.fill.r is fill.r and current.fill.g is fill.g and current.fill.b is fill.b and current.fillSlot.length() is 0 {
+    if current.fill.r is fill.r and current.fill.g is fill.g and current.fill.b is fill.b and current.fill.a is fill.a and current.fillSlot.length() is 0 {
       continue
     }
     let shape: mod Shape => componentMod(this: world.shapes, entity: entity)
