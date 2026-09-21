@@ -192,7 +192,7 @@ func projectOpenActionIndex(world: view UiWorld) ret Int {
 # current one marked) on the ListView tagged `EditorList { source: project }`.
 func projectListSystem(
   world: mod UiWorld
-  status: mod EditorStatus
+  chromeSystem: mod ChromeSystem
   projectName: view String
   projectScenes: view List(String)
   currentScene: view String
@@ -201,8 +201,12 @@ func projectListSystem(
   if projectName.length() > 0 {
     title = "{projectName} — {projectScenes.length} scenes"
   }
-  status.projectTitle = title
-  let list: EntityId = editorListEntity(world: world, source: EditorListSource.project)
+  chromeSystem.projectTitle = title
+  let list: EntityId = editorListEntity(
+    chromeSystem: chromeSystem
+    world: world
+    source: EditorListSource.project
+  )
   if isNone(this: list) {
     ret
   }
@@ -223,5 +227,5 @@ func projectListSystem(
     }
   }
   setEditorListRows(world: world, list: list, rows: own rows)
-  editorTextSystem(world: world, status: status)
+  editorTextSystem(world: world, chromeSystem: chromeSystem)
 }

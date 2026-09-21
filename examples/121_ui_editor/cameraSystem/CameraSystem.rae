@@ -1,6 +1,6 @@
 # cameraSystem — the INPUT side of zoom and pan (docs/ui-editor-design.md §2,
-# the reference editor's camera, docs/ui-editor-reference-features.md §7).
-# The camera itself is the lib `Camera2D` component on the guides page root
+# the reference editor's cameraSystem, docs/ui-editor-reference-features.md §7).
+# The cameraSystem itself is the lib `Camera2D` component on the guides page root
 # (the frame's translation and zoom in the chrome's space); the document
 # page root carries a derived Camera2D with the column offset folded in. The
 # lib cameraSystem (ui/cameraSystem, in the Pipeline) turns both into the
@@ -31,11 +31,11 @@ const zoomButtonStep: Float = 0.1
 # The margin the fit leaves around the frame, in points.
 const fitMargin: Float = 24.0
 
-# The editor's camera INPUT state: which roots carry the Camera2D, the
+# The editor's cameraSystem INPUT state: which roots carry the Camera2D, the
 # frame's extent and column (for fit / centre / the document's derived
 # offset), and the middle-drag pan in progress. Zoom and offset are NOT here
 # — read them from the component (cameraOf).
-type EditorCamera {
+type CameraSystem {
   guidesRoot: EntityId
   documentRoot: EntityId
   frameW: Float
@@ -47,8 +47,8 @@ type EditorCamera {
   lastPointerY: Float
 }
 
-func createEditorCamera() ret EditorCamera {
-  ret EditorCamera {
+func createCameraSystem() ret CameraSystem {
+  ret CameraSystem {
     guidesRoot: noEntity()
     documentRoot: noEntity()
     frameW: 1080.0
@@ -73,104 +73,107 @@ func clampZoom(zoom: view Float) ret Float {
 # The frame and its roots (called after every load — the document root is a
 # new entity then): the extent, the column's x, and the two roots to write.
 func setCameraFrame(
-  camera: mod EditorCamera
+  cameraSystem: mod CameraSystem
   frameW: view Float
   frameH: view Float
   homeX: view Float
   documentRoot: view EntityId
   guidesRoot: view EntityId
 ) {
-  camera.frameW = frameW
-  camera.frameH = frameH
-  camera.homeX = homeX
-  camera.documentRoot = documentRoot
-  camera.guidesRoot = guidesRoot
+  cameraSystem.frameW = frameW
+  cameraSystem.frameH = frameH
+  cameraSystem.homeX = homeX
+  cameraSystem.documentRoot = documentRoot
+  cameraSystem.guidesRoot = guidesRoot
 }
 
-# The camera as the world has it: the guides root's Camera2D (identity
+# The cameraSystem as the world has it: the guides root's Camera2D (identity
 # until something wrote one).
-func cameraOf(camera: view EditorCamera, world: view UiWorld) ret Camera2D {
-  if isNone(this: camera.guidesRoot) or componentHas(this: world.cameras, entity: camera.guidesRoot) is false {
+func cameraOf(cameraSystem: view CameraSystem, world: view UiWorld) ret Camera2D {
+  if isNone(this: cameraSystem.guidesRoot) or componentHas(
+    this: world.cameras
+    entity: cameraSystem.guidesRoot
+  ) is false {
     ret Camera2D { zoom: 1.0, offsetX: 0.0, offsetY: 0.0 }
   }
-  ret componentGet(this: world.cameras, entity: camera.guidesRoot)
+  ret componentGet(this: world.cameras, entity: cameraSystem.guidesRoot)
 }
 
-# Write the camera: the guides root gets it as is; the document root gets it
+# Write the cameraSystem: the guides root gets it as is; the document root gets it
 # with the column offset folded in (the column sits at homeX inside the
 # frame). The zoom label follows.
 func writeCamera(
-  camera: view EditorCamera
+  cameraSystem: view CameraSystem
   world: mod UiWorld
-  status: mod EditorStatus
+  chromeSystem: mod ChromeSystem
   next: view Camera2D
 ) {
-  if isNone(this: camera.guidesRoot) is false {
+  if isNone(this: cameraSystem.guidesRoot) is false {
     componentSet(
       this: world.cameras
-      entity: camera.guidesRoot
+      entity: cameraSystem.guidesRoot
       data: Camera2D { zoom: next.zoom, offsetX: next.offsetX, offsetY: next.offsetY }
     )
   }
-  if isNone(this: camera.documentRoot) is false {
+  if isNone(this: cameraSystem.documentRoot) is false {
     componentSet(
       this: world.cameras
-      entity: camera.documentRoot
+      entity: cameraSystem.documentRoot
       data: Camera2D {
         zoom: next.zoom
-        offsetX: next.offsetX + camera.homeX * next.zoom
+        offsetX: next.offsetX + cameraSystem.homeX * next.zoom
         offsetY: next.offsetY
       }
     )
   }
-  status.zoomLabel = "{(next.zoom * 100.0 + 0.5).toInt()}%"
+  chromeSystem.zoomLabel = "{(next.zoom * 100.0 + 0.5).toInt()}%"
 }
 
 # Centre the frame in the edit area at `zoom`.
 func centerCamera(
-  camera: view EditorCamera
+  cameraSystem: view CameraSystem
   world: mod UiWorld
-  status: mod EditorStatus
+  chromeSystem: mod ChromeSystem
   area: view EditAreaRect
   zoom: view Float
 ) {
   let z: Float = clampZoom(zoom: zoom)
   let next: Camera2D = {
     zoom: z
-    offsetX: area.x + (area.w - camera.frameW * z) / 2.0
-    offsetY: area.y + (area.h - camera.frameH * z) / 2.0
+    offsetX: area.x + (area.w - cameraSystem.frameW * z) / 2.0
+    offsetY: area.y + (area.h - cameraSystem.frameH * z) / 2.0
   }
   writeCamera(
-    camera: camera
+    cameraSystem: cameraSystem
     world: world
-    status: status
+    chromeSystem: chromeSystem
     next: next
   )
 }
 
 # Fit the whole frame into the edit area with a margin, centred.
 func fitCamera(
-  camera: view EditorCamera
+  cameraSystem: view CameraSystem
   world: mod UiWorld
-  status: mod EditorStatus
+  chromeSystem: mod ChromeSystem
   area: view EditAreaRect
 ) {
   var zoomW: Float = 1.0
   var zoomH: Float = 1.0
-  if camera.frameW > 0.0 {
-    zoomW = (area.w - fitMargin * 2.0) / camera.frameW
+  if cameraSystem.frameW > 0.0 {
+    zoomW = (area.w - fitMargin * 2.0) / cameraSystem.frameW
   }
-  if camera.frameH > 0.0 {
-    zoomH = (area.h - fitMargin * 2.0) / camera.frameH
+  if cameraSystem.frameH > 0.0 {
+    zoomH = (area.h - fitMargin * 2.0) / cameraSystem.frameH
   }
   var zoom: Float = zoomW
   if zoomH < zoom {
     zoom = zoomH
   }
   centerCamera(
-    camera: camera
+    cameraSystem: cameraSystem
     world: world
-    status: status
+    chromeSystem: chromeSystem
     area: area
     zoom: zoom
   )
@@ -178,14 +181,14 @@ func fitCamera(
 
 # Zoom so the canvas point (aboutX, aboutY) stays where it is.
 func zoomCameraAbout(
-  camera: view EditorCamera
+  cameraSystem: view CameraSystem
   world: mod UiWorld
-  status: mod EditorStatus
+  chromeSystem: mod ChromeSystem
   zoom: view Float
   aboutX: view Float
   aboutY: view Float
 ) {
-  let current: Camera2D = cameraOf(camera: camera, world: world)
+  let current: Camera2D = cameraOf(cameraSystem: cameraSystem, world: world)
   let z: Float = clampZoom(zoom: zoom)
   if z is current.zoom {
     ret
@@ -197,9 +200,9 @@ func zoomCameraAbout(
     offsetY: aboutY - (aboutY - current.offsetY) * ratio
   }
   writeCamera(
-    camera: camera
+    cameraSystem: cameraSystem
     world: world
-    status: status
+    chromeSystem: chromeSystem
     next: next
   )
 }
@@ -207,9 +210,9 @@ func zoomCameraAbout(
 # RAE_UI_EDITOR_ZOOM=<factor>: boot zoomed about the area's centre (the
 # headless gate's hook). Call after the fit.
 func bootCameraZoom(
-  camera: view EditorCamera
+  cameraSystem: view CameraSystem
   world: mod UiWorld
-  status: mod EditorStatus
+  chromeSystem: mod ChromeSystem
   area: view EditAreaRect
 ) {
   let boot: String = getEnv(name: "RAE_UI_EDITOR_ZOOM")
@@ -217,24 +220,24 @@ func bootCameraZoom(
     ret
   }
   centerCamera(
-    camera: camera
+    cameraSystem: cameraSystem
     world: world
-    status: status
+    chromeSystem: chromeSystem
     area: area
     zoom: boot.toFloat()
   )
-  let now: Camera2D = cameraOf(camera: camera, world: world)
+  let now: Camera2D = cameraOf(cameraSystem: cameraSystem, world: world)
   log(
     "[ui-editor] zoom {(now.zoom * 100.0 + 0.5).toInt()}% offset {now.offsetX.toInt()},{now.offsetY.toInt()}"
   )
 }
 
 # Per-frame input: wheel = zoom about the cursor, middle drag = pan, the
-# chrome pill's actions, `F` = fit. Returns whether the camera moved.
+# chrome pill's actions, `F` = fit. Returns whether the cameraSystem moved.
 func cameraInputSystem(
-  camera: mod EditorCamera
+  cameraSystem: mod CameraSystem
   world: mod UiWorld
-  status: mod EditorStatus
+  chromeSystem: mod ChromeSystem
   area: view EditAreaRect
 ) ret Bool {
   var moved: Bool = false
@@ -242,11 +245,11 @@ func cameraInputSystem(
   let pointerY: Float = Gpu2d.pointerY()
   let wheel: Float = Gpu2d.wheelMove()
   if wheel is not 0.0 {
-    let current: Camera2D = cameraOf(camera: camera, world: world)
+    let current: Camera2D = cameraOf(cameraSystem: cameraSystem, world: world)
     zoomCameraAbout(
-      camera: camera
+      cameraSystem: cameraSystem
       world: world
-      status: status
+      chromeSystem: chromeSystem
       zoom: current.zoom * (1.0 + zoomWheelStep * wheel)
       aboutX: pointerX
       aboutY: pointerY
@@ -255,35 +258,35 @@ func cameraInputSystem(
   }
   let middle: Bool = Sdl3.isMouseButtonDown(button: 2)
   if middle {
-    if camera.panning {
-      let current: Camera2D = cameraOf(camera: camera, world: world)
+    if cameraSystem.panning {
+      let current: Camera2D = cameraOf(cameraSystem: cameraSystem, world: world)
       let next: Camera2D = {
         zoom: current.zoom
-        offsetX: current.offsetX + (pointerX - camera.lastPointerX)
-        offsetY: current.offsetY + (pointerY - camera.lastPointerY)
+        offsetX: current.offsetX + (pointerX - cameraSystem.lastPointerX)
+        offsetY: current.offsetY + (pointerY - cameraSystem.lastPointerY)
       }
       writeCamera(
-        camera: camera
+        cameraSystem: cameraSystem
         world: world
-        status: status
+        chromeSystem: chromeSystem
         next: next
       )
       moved = true
     }
-    camera.panning = true
-    camera.lastPointerX = pointerX
-    camera.lastPointerY = pointerY
+    cameraSystem.panning = true
+    cameraSystem.lastPointerX = pointerX
+    cameraSystem.lastPointerY = pointerY
   } else {
-    camera.panning = false
+    cameraSystem.panning = false
   }
   let centreX: Float = area.x + area.w / 2.0
   let centreY: Float = area.y + area.h / 2.0
   if uiActionFired(world: world, actionId: "zoom.in") {
-    let current: Camera2D = cameraOf(camera: camera, world: world)
+    let current: Camera2D = cameraOf(cameraSystem: cameraSystem, world: world)
     zoomCameraAbout(
-      camera: camera
+      cameraSystem: cameraSystem
       world: world
-      status: status
+      chromeSystem: chromeSystem
       zoom: current.zoom + zoomButtonStep
       aboutX: centreX
       aboutY: centreY
@@ -291,11 +294,11 @@ func cameraInputSystem(
     moved = true
   }
   if uiActionFired(world: world, actionId: "zoom.out") {
-    let current: Camera2D = cameraOf(camera: camera, world: world)
+    let current: Camera2D = cameraOf(cameraSystem: cameraSystem, world: world)
     zoomCameraAbout(
-      camera: camera
+      cameraSystem: cameraSystem
       world: world
-      status: status
+      chromeSystem: chromeSystem
       zoom: current.zoom - zoomButtonStep
       aboutX: centreX
       aboutY: centreY
@@ -304,9 +307,9 @@ func cameraInputSystem(
   }
   if uiActionFired(world: world, actionId: "zoom.reset") {
     centerCamera(
-      camera: camera
+      cameraSystem: cameraSystem
       world: world
-      status: status
+      chromeSystem: chromeSystem
       area: area
       zoom: 1.0
     )
@@ -314,9 +317,9 @@ func cameraInputSystem(
   }
   if Sdl3.isKeyPressed(key: Keys.keyF) {
     fitCamera(
-      camera: camera
+      cameraSystem: cameraSystem
       world: world
-      status: status
+      chromeSystem: chromeSystem
       area: area
     )
     moved = true

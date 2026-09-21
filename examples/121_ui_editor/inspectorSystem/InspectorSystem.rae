@@ -30,7 +30,10 @@ const treeIndentPerLevel: Float = 12.0
 
 const treeRowPitch: Float = 44.0
 
-type InspectorState {
+# The inspector system owns the authored `OutlineFor` components (the hover /
+# selection outline nodes in chrome/Guides.raescene) and its own state.
+type InspectorSystem {
+  outlineFors: ComponentTable(OutlineFor)
   hovered: EntityId
   selected: EntityId
   # The tree list's row order (entity per row), so a row's action maps back.
@@ -41,8 +44,9 @@ type InspectorState {
 # the hierarchy list's row entities. Its outlines are AUTHORED nodes in
 # chrome/Guides.raescene tagged OutlineFor { role } that placeOutlines moves;
 # the app creates no entity for them.
-func createInspectorState(world: mod UiWorld) ret InspectorState {
-  ret InspectorState {
+func createInspectorSystem(world: mod UiWorld) ret InspectorSystem {
+  ret InspectorSystem {
+    outlineFors: ComponentTable.create(OutlineFor)
     hovered: noEntity()
     selected: noEntity()
     treeEntities: List.create(EntityId, cap: 64)
@@ -187,19 +191,20 @@ func placeOutline(
 
 # Every node tagged OutlineFor { role } follows its target; true if any moved.
 func placeOutlines(
+  inspectorSystem: view InspectorSystem
   world: mod UiWorld
   role: view OutlineRole
   target: view EntityId
   visible: view Bool
 ) ret Bool {
   var changed: Bool = false
-  let count: Int = componentCount(this: world.outlineFors)
+  let count: Int = componentCount(this: inspectorSystem.outlineFors)
   loop var i: Int = 0, i < count, ++i {
-    let tag: OutlineFor = componentDataAt(this: world.outlineFors, i: i)
+    let tag: OutlineFor = componentDataAt(this: inspectorSystem.outlineFors, i: i)
     if tag.role is role {
       if placeOutline(
         world: world
-        outline: componentEntityAt(this: world.outlineFors, i: i)
+        outline: componentEntityAt(this: inspectorSystem.outlineFors, i: i)
         target: target
         visible: visible
       ) {
@@ -301,21 +306,21 @@ func appComponentsLine(world: view UiWorld, entity: view EntityId) ret String {
 
 func syncInspectorPanel(
   world: view UiWorld
-  status: mod EditorStatus
-  inspector: view InspectorState
+  chromeSystem: mod ChromeSystem
+  inspectorSystem: view InspectorSystem
   sceneRoot: view EntityId
 ) {
-  let selected: EntityId = inspector.selected
+  let selected: EntityId = inspectorSystem.selected
   if isNone(this: selected) {
-    status.inspectorNodeId = "nothing selected"
-    status.inspectorType = "click a node, or use the arrows"
-    status.inspectorComponents = ""
-    status.inspectorAppComponents = ""
-    status.inspectorRect = ""
-    status.inspectorParents = ""
+    chromeSystem.inspectorNodeId = "nothing selected"
+    chromeSystem.inspectorType = "click a node, or use the arrows"
+    chromeSystem.inspectorComponents = ""
+    chromeSystem.inspectorAppComponents = ""
+    chromeSystem.inspectorRect = ""
+    chromeSystem.inspectorParents = ""
     ret
   }
-  status.inspectorNodeId = nodeIdOf(world: world, entity: selected)
+  chromeSystem.inspectorNodeId = nodeIdOf(world: world, entity: selected)
   var primaryType: String = ""
   if componentHas(this: world.primaryTypes, entity: selected) {
     let primary: view PrimaryType => componentView(this: world.primaryTypes, entity: selected)
@@ -333,10 +338,10 @@ func syncInspectorPanel(
   if label.length() is 0 {
     typeLine = "{primaryType}"
   }
-  status.inspectorType = typeLine
+  chromeSystem.inspectorType = typeLine
   let componentNames: String = componentNamesFor(world: world, entity: selected)
-  status.inspectorComponents = String.replace(this: componentNames, old: ",", new: ", ")
-  status.inspectorAppComponents = appComponentsLine(world: world, entity: selected)
+  chromeSystem.inspectorComponents = String.replace(this: componentNames, old: ",", new: ", ")
+  chromeSystem.inspectorAppComponents = appComponentsLine(world: world, entity: selected)
   var rectLine: String = "no computed rect"
   if componentHas(this: world.computedRects, entity: selected) and componentHas(
     this: world.worldTransforms
@@ -346,8 +351,12 @@ func syncInspectorPanel(
     let computed: ComputedRect = componentGet(this: world.computedRects, entity: selected)
     rectLine = "x {transform.position.x.toInt()}  y {transform.position.y.toInt()}  w {computed.size.x.toInt()}  h {computed.size.y.toInt()}"
   }
-  status.inspectorRect = rectLine
-  status.inspectorParents = parentChainOf(world: world, entity: selected, sceneRoot: sceneRoot)
+  chromeSystem.inspectorRect = rectLine
+  chromeSystem.inspectorParents = parentChainOf(
+    world: world
+    entity: selected
+    sceneRoot: sceneRoot
+  )
 }
 
 func collectTreeRows(
@@ -398,26 +407,35 @@ func collectTreeRows(
 # Rebuild the hierarchy list's rows (DFS of the document, depth as indent,
 # the selection marked) on the ListView tagged `EditorList { source:
 # hierarchy }`.
-func syncTreePanel(world: mod UiWorld, inspector: mod InspectorState, sceneRoot: view EntityId) {
-  let list: EntityId = editorListEntity(world: world, source: EditorListSource.hierarchy)
+func syncTreePanel(
+  chromeSystem: view ChromeSystem
+  world: mod UiWorld
+  inspectorSystem: mod InspectorSystem
+  sceneRoot: view EntityId
+) {
+  let list: EntityId = editorListEntity(
+    chromeSystem: chromeSystem
+    world: world
+    source: EditorListSource.hierarchy
+  )
   if isNone(this: list) {
     ret
   }
-  inspector.treeEntities.clear()
+  inspectorSystem.treeEntities.clear()
   var rows: List(ListViewRow) = List.create(ListViewRow, cap: 32)
   collectTreeRows(
     world: world
     entity: sceneRoot
     depth: 0
-    selected: inspector.selected
-    entities: inspector.treeEntities
+    selected: inspectorSystem.selected
+    entities: inspectorSystem.treeEntities
     rows: rows
   )
   setEditorListRows(world: world, list: list, rows: own rows)
 }
 
-func selectNode(inspector: mod InspectorState, world: mod UiWorld, entity: view EntityId) {
-  inspector.selected = entity
+func selectNode(inspectorSystem: mod InspectorSystem, world: mod UiWorld, entity: view EntityId) {
+  inspectorSystem.selected = entity
   if isNone(this: entity) {
     ret
   }
@@ -432,10 +450,10 @@ func selectNode(inspector: mod InspectorState, world: mod UiWorld, entity: view 
 # Per frame: hover from the pointer, click / arrows / Esc on the selection,
 # tree-row actions, then the outlines and panels. Returns whether anything
 # the frame shows changed.
-func inspectorSystem(
-  inspector: mod InspectorState
+func inspectorUpdate(
+  inspectorSystem: mod InspectorSystem
   world: mod UiWorld
-  status: mod EditorStatus
+  chromeSystem: mod ChromeSystem
   input: view UiInput
   pageRoot: view EntityId
   chromeVisible: view Bool
@@ -445,7 +463,12 @@ func inspectorSystem(
   # Only the edit area reaches the document: a pointer over a chrome panel
   # (which may cover part of the document) hovers and selects nothing.
   var hovered: EntityId = noEntity()
-  if chromeVisible is false or pointInEditArea(world: world, x: input.pointer.x, y: input.pointer.y) {
+  if chromeVisible is false or pointInEditArea(
+    chromeSystem: chromeSystem
+    world: world
+    x: input.pointer.x
+    y: input.pointer.y
+  ) {
     hovered = deepestNodeAt(
       world: world
       entity: sceneRoot
@@ -453,11 +476,11 @@ func inspectorSystem(
       y: input.pointer.y
     )
   }
-  if hovered is not inspector.hovered {
-    inspector.hovered = hovered
+  if hovered is not inspectorSystem.hovered {
+    inspectorSystem.hovered = hovered
     changed = true
   }
-  var selection: EntityId = inspector.selected
+  var selection: EntityId = inspectorSystem.selected
   if input.pointer.pressed and isNone(this: hovered) is false {
     selection = hovered
   }
@@ -487,8 +510,8 @@ func inspectorSystem(
     let actionId: String = uiActionAt(world: world, index: a)
     if actionId.startsWith(prefix: "inspect:") {
       let index: Int = actionId.sub(start: 8, len: actionId.length() - 8).toInt()
-      loop var t: Int = 0, t < inspector.treeEntities.length, ++t {
-        let candidate: EntityId = inspector.treeEntities.copyAtFallback(
+      loop var t: Int = 0, t < inspectorSystem.treeEntities.length, ++t {
+        let candidate: EntityId = inspectorSystem.treeEntities.copyAtFallback(
           index: t
           fallback: noEntity()
         )
@@ -499,35 +522,42 @@ func inspectorSystem(
     }
   }
   if Sdl3.isKeyPressed(key: Keys.keyT) {
-    toggleEditorPanel(world: world, kind: EditorPanelKind.tree)
+    toggleEditorPanel(chromeSystem: chromeSystem, world: world, kind: EditorPanelKind.tree)
     changed = true
   }
-  if selection is not inspector.selected {
-    selectNode(inspector: inspector, world: world, entity: selection)
+  if selection is not inspectorSystem.selected {
+    selectNode(inspectorSystem: inspectorSystem, world: world, entity: selection)
     changed = true
   }
   if changed {
     syncInspectorPanel(
       world: world
-      status: status
-      inspector: inspector
+      chromeSystem: chromeSystem
+      inspectorSystem: inspectorSystem
       sceneRoot: sceneRoot
     )
-    syncTreePanel(world: world, inspector: inspector, sceneRoot: sceneRoot)
+    syncTreePanel(
+      chromeSystem: chromeSystem
+      world: world
+      inspectorSystem: inspectorSystem
+      sceneRoot: sceneRoot
+    )
   }
   # Outlines follow the layout of this frame; placed every frame, cheap.
   if placeOutlines(
+    inspectorSystem: inspectorSystem
     world: world
     role: OutlineRole.hover
-    target: inspector.hovered
-    visible: chromeVisible and inspector.hovered is not inspector.selected
+    target: inspectorSystem.hovered
+    visible: chromeVisible and inspectorSystem.hovered is not inspectorSystem.selected
   ) {
     changed = true
   }
   if placeOutlines(
+    inspectorSystem: inspectorSystem
     world: world
     role: OutlineRole.selection
-    target: inspector.selected
+    target: inspectorSystem.selected
     visible: chromeVisible
   ) {
     changed = true
@@ -538,21 +568,21 @@ func inspectorSystem(
 # After a (re)load the entities are new: drop the selection, or re-find it by
 # node id, and rebuild the panels.
 func inspectorAfterLoad(
-  inspector: mod InspectorState
+  inspectorSystem: mod InspectorSystem
   world: mod UiWorld
-  status: mod EditorStatus
+  chromeSystem: mod ChromeSystem
   pageRoot: view EntityId
   selectNodeId: view String
 ) {
   let sceneRoot: EntityId = documentSceneRoot(world: world, pageRoot: pageRoot)
-  inspector.hovered = noEntity()
+  inspectorSystem.hovered = noEntity()
   var target: EntityId = noEntity()
   if selectNodeId.length() > 0 {
     target = findNodeByIdIn(world: world, entity: sceneRoot, nodeId: selectNodeId)
   }
-  inspector.selected = noEntity()
+  inspectorSystem.selected = noEntity()
   if isNone(this: target) is false {
-    selectNode(inspector: inspector, world: world, entity: target)
+    selectNode(inspectorSystem: inspectorSystem, world: world, entity: target)
   } else {
     if selectNodeId.length() > 0 {
       log("[ui-editor] select: no node named {selectNodeId}")
@@ -560,9 +590,14 @@ func inspectorAfterLoad(
   }
   syncInspectorPanel(
     world: world
-    status: status
-    inspector: inspector
+    chromeSystem: chromeSystem
+    inspectorSystem: inspectorSystem
     sceneRoot: sceneRoot
   )
-  syncTreePanel(world: world, inspector: inspector, sceneRoot: sceneRoot)
+  syncTreePanel(
+    chromeSystem: chromeSystem
+    world: world
+    inspectorSystem: inspectorSystem
+    sceneRoot: sceneRoot
+  )
 }
