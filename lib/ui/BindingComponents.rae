@@ -260,3 +260,54 @@ type HeroTransition {
   startedAt: Float64
   duration: Float
 }
+
+# ----- the UI editor's chrome (examples/121_ui_editor, #32499842) -----------
+#
+# The editor's chrome is an authored scene like any page; these components
+# are how its systems find what to drive WITHOUT node ids — the same shape as
+# the 106 bindings above. Labels use `TextBinding { key: "editor.<name>" }`
+# (editorTextSystem writes Text from the EditorStatus resource on App).
+
+# Which chrome panel a node IS (`EditorPanel`) or which one a pill TOGGLES
+# (`PanelToggle`): the panel system flips every EditorPanel of the requested
+# kind — a click on the pill, or a key the app maps to the kind.
+enum EditorPanelKind {
+  left
+  right
+  tree
+  project
+  diagnostics
+  guides
+}
+
+type EditorPanel {
+  panel: EditorPanelKind
+}
+
+type PanelToggle {
+  panel: EditorPanelKind
+}
+
+# The space between the panels the document is fitted into (cameraSystem
+# reads the tagged node's computed rect; the inspector only hovers inside it).
+type EditArea {
+}
+
+# Which editor data feeds a chrome ListView (one list system per source).
+enum EditorListSource { hierarchy, project, diagnostics }
+
+type EditorList {
+  source: EditorListSource
+}
+
+# The frame / safe-area guides (an authored overlay scene): the guide system
+# writes each tagged node's Rect from the document's frame.
+enum GuideRectKind { frame, safeArea, frameLabel, safeAreaLabel }
+
+type GuideRect {
+  kind: GuideRectKind
+}
+
+# The diagnostics count pill: its fill follows the count (red when > 0).
+type DiagnosticsBadge {
+}

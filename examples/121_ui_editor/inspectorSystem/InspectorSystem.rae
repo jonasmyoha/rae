@@ -19,6 +19,7 @@ open ui/Components
 open ui/Layer
 open ui/SceneLoader
 open ui/inputSystem/InputSystem
+open ui/BindingComponents
 open app3d/UiShell
 open ecs/Entity
 open ecs/ComponentTable
@@ -85,30 +86,6 @@ func createInspectorState(world: mod UiWorld) ret InspectorState {
     treeOpen: true
     treeEntities: List.create(EntityId, cap: 64)
   }
-}
-
-# Whether the pointer is inside the chrome's EditArea (true when the chrome
-# has no such node, so a bare document is fully reachable).
-func pointerInEditArea(world: view UiWorld, x: view Float, y: view Float) ret Bool {
-  let entity: EntityId = nodeEntityFor(world: world, nodeId: "chrome/EditArea")
-  if isNone(this: entity) {
-    ret true
-  }
-  if componentHas(this: world.computedRects, entity: entity) is false or componentHas(
-    this: world.worldTransforms
-    entity: entity
-  ) is false {
-    ret true
-  }
-  let rect: ComputedRect = componentGet(this: world.computedRects, entity: entity)
-  let transform: WorldTransform2D = componentGet(this: world.worldTransforms, entity: entity)
-  if x < transform.position.x or y < transform.position.y {
-    ret false
-  }
-  if x > transform.position.x + rect.size.x or y > transform.position.y + rect.size.y {
-    ret false
-  }
-  ret true
 }
 
 # The document scene's root: mountPage mounts the scene's root node ONTO the
@@ -285,26 +262,24 @@ func parentChainOf(
   ret chain
 }
 
-# Write the inspector panel from the selection.
+# Fill the inspector's status texts from the selection (TextBinding
+# editor.inspector.* in chrome/Inspector.raescene).
 func syncInspectorPanel(
-  world: mod UiWorld
+  world: view UiWorld
+  status: mod EditorStatus
   inspector: view InspectorState
   sceneRoot: view EntityId
 ) {
   let selected: EntityId = inspector.selected
   if isNone(this: selected) {
-    setNodeText(world: world, nodeId: "chrome/InsNodeId", value: "nothing selected")
-    setNodeText(world: world, nodeId: "chrome/InsType", value: "click a node, or use the arrows")
-    setNodeText(world: world, nodeId: "chrome/InsComponents", value: "")
-    setNodeText(world: world, nodeId: "chrome/InsRect", value: "")
-    setNodeText(world: world, nodeId: "chrome/InsParents", value: "")
+    status.inspectorNodeId = "nothing selected"
+    status.inspectorType = "click a node, or use the arrows"
+    status.inspectorComponents = ""
+    status.inspectorRect = ""
+    status.inspectorParents = ""
     ret
   }
-  setNodeText(
-    world: world
-    nodeId: "chrome/InsNodeId"
-    value: nodeIdOf(world: world, entity: selected)
-  )
+  status.inspectorNodeId = nodeIdOf(world: world, entity: selected)
   var primaryType: String = ""
   if componentHas(this: world.primaryTypes, entity: selected) {
     let primary: view PrimaryType => componentView(this: world.primaryTypes, entity: selected)
@@ -322,12 +297,8 @@ func syncInspectorPanel(
   if label.length() is 0 {
     typeLine = "{primaryType}"
   }
-  setNodeText(world: world, nodeId: "chrome/InsType", value: typeLine)
-  setNodeText(
-    world: world
-    nodeId: "chrome/InsComponents"
-    value: componentNamesFor(world: world, entity: selected)
-  )
+  status.inspectorType = typeLine
+  status.inspectorComponents = componentNamesFor(world: world, entity: selected)
   var rectLine: String = "no computed rect"
   if componentHas(this: world.computedRects, entity: selected) and componentHas(
     this: world.worldTransforms
@@ -337,12 +308,8 @@ func syncInspectorPanel(
     let computed: ComputedRect = componentGet(this: world.computedRects, entity: selected)
     rectLine = "x {transform.position.x.toInt()}  y {transform.position.y.toInt()}  w {computed.size.x.toInt()}  h {computed.size.y.toInt()}"
   }
-  setNodeText(world: world, nodeId: "chrome/InsRect", value: rectLine)
-  setNodeText(
-    world: world
-    nodeId: "chrome/InsParents"
-    value: parentChainOf(world: world, entity: selected, sceneRoot: sceneRoot)
-  )
+  status.inspectorRect = rectLine
+  status.inspectorParents = parentChainOf(world: world, entity: selected, sceneRoot: sceneRoot)
 }
 
 func collectTreeRows(
@@ -390,15 +357,11 @@ func collectTreeRows(
   }
 }
 
-# Rebuild the tree list's rows (DFS of the document, depth as indent, the
-# selection marked). The list's Rect follows the design width and row count.
-func syncTreePanel(
-  world: mod UiWorld
-  inspector: mod InspectorState
-  sceneRoot: view EntityId
-  designW: view Float
-) {
-  let list: EntityId = nodeEntityFor(world: world, nodeId: "chrome/TreeList")
+# Rebuild the hierarchy list's rows (DFS of the document, depth as indent,
+# the selection marked) on the ListView tagged `EditorList { source:
+# hierarchy }`.
+func syncTreePanel(world: mod UiWorld, inspector: mod InspectorState, sceneRoot: view EntityId) {
+  let list: EntityId = editorListEntity(world: world, source: EditorListSource.hierarchy)
   if isNone(this: list) {
     ret
   }
@@ -412,23 +375,7 @@ func syncTreePanel(
     entities: inspector.treeEntities
     rows: rows
   )
-  if componentHas(this: world.rects, entity: list) and componentHas(
-    this: world.listViews
-    entity: list
-  ) {
-    let listView: ListView = componentGet(this: world.listViews, entity: list)
-    var shown: Int = rows.length
-    if shown < 1 {
-      shown = 1
-    }
-    if shown > listView.visibleItemCount {
-      shown = listView.visibleItemCount
-    }
-    let rect: mod Rect => componentMod(this: world.rects, entity: list)
-    rect.size.x = chromePanelInnerW
-    rect.size.y = shown.toFloat() * (listView.itemHeight + listView.itemGap) - listView.itemGap
-  }
-  componentSet(this: world.listViewDatas, entity: list, data: ListViewData { rows: own rows })
+  setEditorListRows(world: world, list: list, rows: own rows)
 }
 
 func selectNode(inspector: mod InspectorState, world: mod UiWorld, entity: view EntityId) {
@@ -450,21 +397,17 @@ func selectNode(inspector: mod InspectorState, world: mod UiWorld, entity: view 
 func inspectorSystem(
   inspector: mod InspectorState
   world: mod UiWorld
+  status: mod EditorStatus
   input: view UiInput
   pageRoot: view EntityId
   chromeVisible: view Bool
-  designW: view Float
 ) ret Bool {
   let sceneRoot: EntityId = documentSceneRoot(world: world, pageRoot: pageRoot)
   var changed: Bool = false
   # Only the edit area reaches the document: a pointer over a chrome panel
   # (which may cover part of the document) hovers and selects nothing.
   var hovered: EntityId = noEntity()
-  if chromeVisible is false or pointerInEditArea(
-    world: world
-    x: input.pointer.x
-    y: input.pointer.y
-  ) {
+  if chromeVisible is false or pointInEditArea(world: world, x: input.pointer.x, y: input.pointer.y) {
     hovered = deepestNodeAt(
       world: world
       entity: sceneRoot
@@ -519,7 +462,7 @@ func inspectorSystem(
   }
   if Sdl3.isKeyPressed(key: Keys.keyT) {
     inspector.treeOpen = not inspector.treeOpen
-    setNodeActive(world: world, nodeId: "chrome/TreePanel", value: inspector.treeOpen)
+    setEditorPanelOpen(world: world, kind: EditorPanelKind.tree, open: inspector.treeOpen)
     changed = true
   }
   if selection is not inspector.selected {
@@ -528,13 +471,13 @@ func inspectorSystem(
     changed = true
   }
   if changed {
-    syncInspectorPanel(world: world, inspector: inspector, sceneRoot: sceneRoot)
-    syncTreePanel(
+    syncInspectorPanel(
       world: world
+      status: status
       inspector: inspector
       sceneRoot: sceneRoot
-      designW: designW
     )
+    syncTreePanel(world: world, inspector: inspector, sceneRoot: sceneRoot)
   }
   # Outlines follow the layout of this frame; placed every frame, cheap.
   placeOutline(
@@ -557,8 +500,8 @@ func inspectorSystem(
 func inspectorAfterLoad(
   inspector: mod InspectorState
   world: mod UiWorld
+  status: mod EditorStatus
   pageRoot: view EntityId
-  designW: view Float
   selectNodeId: view String
 ) {
   let sceneRoot: EntityId = documentSceneRoot(world: world, pageRoot: pageRoot)
@@ -576,12 +519,12 @@ func inspectorAfterLoad(
     }
   }
   inspector.panelOpen = isNone(this: inspector.selected) is false
-  setNodeActive(world: world, nodeId: "chrome/TreePanel", value: inspector.treeOpen)
-  syncInspectorPanel(world: world, inspector: inspector, sceneRoot: sceneRoot)
-  syncTreePanel(
+  setEditorPanelOpen(world: world, kind: EditorPanelKind.tree, open: inspector.treeOpen)
+  syncInspectorPanel(
     world: world
+    status: status
     inspector: inspector
     sceneRoot: sceneRoot
-    designW: designW
   )
+  syncTreePanel(world: world, inspector: inspector, sceneRoot: sceneRoot)
 }
