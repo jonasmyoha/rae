@@ -58,7 +58,7 @@ texture manifest, and a design-resolution + fit rule (now native:
   window too (the panels minimise from the top bar; they always START open). The
   chrome is authored in logical POINTS: the canvas design resolution is the
   window's logical size (physical pixels / DPR), re-applied on every resize, so a
-  44pt top bar is 44pt on any display and the chrome never scales with the
+  76pt top bar is 76pt on any display and the chrome never scales with the
   document. **The document's frame** = the root node's authored `Rect` when it has
   one, else `1080x1920`, `RAE_UI_EDITOR_DESIGN=WxH` overrides (and the device frame
   below for a phone-authored scene); the camera FITS the frame into the chrome's
@@ -159,12 +159,12 @@ chrome can be hidden for a pure passive view (`H` key).
 - **chrome layer** — authored in the app's OWN `.raescene`
   (`assets/scenes/Editor.raescene`, `chrome/*.raescene` sub-scenes), the desktop
   editor layout the reference editor uses (docs/ui-editor-reference-features.md §3):
-  a 58pt **top bar** (`Panels` toggle, file name, zoom pill, `Open (O)`, node count,
-  diagnostics pill, `Inspector` toggle), a **Body** row of `LeftPanel` (264pt:
+  a 76pt **top bar** (`Panels` toggle, file name, zoom pill, `Open (O)`, node count,
+  diagnostics pill, `Inspector` toggle), a **Body** row of `LeftPanel` (328pt:
   Project / Hierarchy / Diagnostics sections as clipped ListViews, `chrome/*Row`
   rows) · `EditArea` (Fill — the space the camera fits the document into) ·
-  `RightPanel` (296pt: the `chrome/Inspector` instance, always shown, "nothing
-  selected" is a state), and a 32pt **status bar** (frame size, status line). The
+  `RightPanel` (384pt: the `chrome/Inspector` instance, always shown, "nothing
+  selected" is a state), and a 42pt **status bar** (frame size, status line). The
   top-bar toggles fire `panel.left` / `panel.right` and flip the panels' `Active`;
   `H` hides the whole chrome. The chrome is data; the app has no `createEntity`
   for layout. Pointer input reaches the document only inside `EditArea`, so a
@@ -245,13 +245,19 @@ from application code and no C renderer code was added.
   1.25–1.30. Compact card and onboarding headings author local overrides.
   The main-menu action labels use `OpticalAlign` to centre visible glyph bounds
   on both axes, rather than centring the font line box with its descender space. Chrome uses authored `OpticalAlign`,
-  colour and 11–15pt size overrides, independent of the loaded document's styles.
+  colour and 17–24pt size overrides, independent of the loaded document's styles.
+- **Desktop readability:** chrome uses 19pt controls, tree rows and inspector
+  details, 22pt file names, 24pt inspector headings and 17pt section/status text.
+  These are authored logical sizes, equivalent to roughly 150% text scaling from
+  a compact desktop UI; controls grow more gently, to 44pt pills and 38pt list
+  rows. Wider 328/384pt sidebars accommodate the type. The canvas retains its
+  independent document zoom; larger chrome never changes scene design units.
 - **Spacing:** 8 / 16 / 24 / 40 / 64, with 64-unit sample gutters and 32-unit
   card padding. The main menu pairs its secondary actions and gives progress its
   own card. Settings keeps 144-unit rows with 16-unit separation.
 - **Rounding:** sample cards 48, hero sheets 56, compact stat tiles 40;
   button radius is exactly half the button's height. Desktop chrome pills are
-  34pt high with a 17pt radius; the inspector surface has a 20pt radius.
+  44pt high with a 22pt radius; the inspector surface has a 20pt radius.
   Gradient nodes explicitly author `CornerRadius`, which is the gradient
   renderer's rounding input. Rounded-box ring nodes retain their authored stroke.
 - **Shadows:** `Shadow { blur: 24, layers: 12, opacity: 0.32 }` gives a subtle
