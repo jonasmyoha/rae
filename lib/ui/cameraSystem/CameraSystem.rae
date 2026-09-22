@@ -10,8 +10,9 @@ open ui/Ecs
 open ui/Components
 open ecs/Entity
 open ecs/ComponentTable
+open ui/UiSystems
 
-func cameraSystem(world: mod UiWorld) {
+func cameraSystem(world: mod UiWorld, uiSystems: mod UiSystems) {
   let count: Int = componentCount(this: world.cameras)
   loop var i: Int = 0, i < count, ++i {
     let entity: EntityId = componentEntityAt(this: world.cameras, i: i)
@@ -29,13 +30,13 @@ func cameraSystem(world: mod UiWorld) {
     }
     var current: Vec2 = { x: 0.0, y: 0.0 }
     var hasOffset: Bool = false
-    if componentHas(this: world.runtimeOffsets, entity: entity) {
-      current = componentGet(this: world.runtimeOffsets, entity: entity).delta
+    if componentHas(this: uiSystems.transform2d.runtimeOffsets, entity: entity) {
+      current = componentGet(this: uiSystems.transform2d.runtimeOffsets, entity: entity).delta
       hasOffset = true
     }
     if hasOffset is false or current.x is not camera.offsetX or current.y is not camera.offsetY {
       let offset: RuntimeOffset = { delta: Vec2 { x: camera.offsetX, y: camera.offsetY } }
-      componentSet(this: world.runtimeOffsets, entity: entity, data: own offset)
+      componentSet(this: uiSystems.transform2d.runtimeOffsets, entity: entity, data: own offset)
     }
   }
 }

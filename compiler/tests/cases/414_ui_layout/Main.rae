@@ -85,8 +85,11 @@ func dumpEntity(
   label: view String
 ) {
   var cr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: entity)
-  var wt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: entity)
-  let wv: WorldVisual = worldVisualOf(world: world, entity: entity)
+  var wt: WorldTransform2D = componentGet(
+    this: uiSystems.transform2d.worldTransforms
+    entity: entity
+  )
+  let wv: WorldVisual = worldVisualOf(world: world, uiSystems: uiSystems, entity: entity)
   log(
     "{label} cr=({cr.position.x},{cr.position.y},{cr.size.x},{cr.size.y}) wt=({wt.position.x},{wt.position.y}) alpha={wv.alpha} visible={wv.visible}"
   )

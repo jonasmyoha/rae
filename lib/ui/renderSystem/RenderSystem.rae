@@ -86,6 +86,7 @@ func seedWorldThemeFrom(world: mod UiWorld, src: view UiTheme) pub {
 
 func paintShapeG(
   world: view UiWorld
+  uiSystems: view UiSystems
   entity: view EntityId
   wt: view WorldTransform2D
   cr: view ComputedRect
@@ -135,6 +136,7 @@ func paintShapeG(
     if componentHas(this: world.shadows, entity: entity) {
       paintShadowG(
         world: world
+        uiSystems: uiSystems
         entity: entity
         box: circleBox
         radius: r
@@ -160,6 +162,7 @@ func paintShapeG(
   if componentHas(this: world.shadows, entity: entity) {
     paintShadowG(
       world: world
+      uiSystems: uiSystems
       entity: entity
       box: box
       radius: radius * hoverMul
@@ -667,12 +670,15 @@ func paintEntityG(
   if componentHas(this: uiSystems.layout.computedRects, entity: entity) is false {
     ret
   }
-  if componentHas(this: world.worldTransforms, entity: entity) is false {
+  if componentHas(this: uiSystems.transform2d.worldTransforms, entity: entity) is false {
     ret
   }
   let cr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: entity)
-  let wt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: entity)
-  let wv: WorldVisual = worldVisualOf(world: world, entity: entity)
+  let wt: WorldTransform2D = componentGet(
+    this: uiSystems.transform2d.worldTransforms
+    entity: entity
+  )
+  let wv: WorldVisual = worldVisualOf(world: world, uiSystems: uiSystems, entity: entity)
   if wv.visible is false {
     ret
   }
@@ -700,6 +706,7 @@ func paintEntityG(
   if componentHas(this: world.gradientFills, entity: entity) {
     paintGradientG(
       world: world
+      uiSystems: uiSystems
       entity: entity
       wt: wt
       cr: cr
@@ -709,6 +716,7 @@ func paintEntityG(
   } else if componentHas(this: world.shapes, entity: entity) {
     paintShapeG(
       world: world
+      uiSystems: uiSystems
       entity: entity
       wt: wt
       cr: cr
@@ -807,9 +815,12 @@ func paintSubtreeG(
     var clipped: Bool = false
     if entityClipsChildrenG(world: world, entity: entity) {
       if componentHas(this: uiSystems.layout.computedRects, entity: entity) {
-        if componentHas(this: world.worldTransforms, entity: entity) {
+        if componentHas(this: uiSystems.transform2d.worldTransforms, entity: entity) {
           let ccr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: entity)
-          let cwt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: entity)
+          let cwt: WorldTransform2D = componentGet(
+            this: uiSystems.transform2d.worldTransforms
+            entity: entity
+          )
           let crad: Float = g2dRadius(world: world, entity: entity, fallback: 0.0)
           if crad > 0.0 {
             Gpu2d.pushClipRoundedRect(

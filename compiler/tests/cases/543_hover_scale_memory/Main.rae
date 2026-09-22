@@ -8,6 +8,7 @@ open ui/animationSystem/AnimationSystem
 open ui/Layer
 open ecs/ComponentTable
 open ui/UiSystems
+open ui/buttonSystem/ButtonHoverScale
 
 func rae_ext_rae_mem_stats_outstanding() unsafe extern ret Int
 
@@ -15,7 +16,12 @@ func rae_ext_rae_mem_stats_buf_outstanding() unsafe extern ret Int
 
 func rae_ext_rae_mem_stats_buf_outstanding_bytes() unsafe extern ret Int
 
-func addCover(world: mod UiWorld, x: view Float, y: view Float) ret EntityId {
+func addCover(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  x: view Float
+  y: view Float
+) ret EntityId {
   let e: EntityId = createEntity(world: world)
   let wt: WorldTransform2D = { position: { x: x, y: y }, rotation: 0.0, scale: { x: 1.0, y: 1.0 } }
   let click: OnClick = {
@@ -31,7 +37,7 @@ func addCover(world: mod UiWorld, x: view Float, y: view Float) ret EntityId {
     current: 1.0
     target: 1.0
   }
-  componentSet(this: world.worldTransforms, entity: e, data: wt)
+  componentSet(this: uiSystems.transform2d.worldTransforms, entity: e, data: wt)
   componentSet(this: world.onClicks, entity: e, data: click)
   componentSet(this: world.hoverScales, entity: e, data: hs)
   ret e
@@ -46,17 +52,37 @@ func main() {
   unsafe {
     let world: UiWorld = createUiWorld()
     var uiSystems: UiSystems = createUiSystems()
-    let a: EntityId = addCover(world: world, x: 0.0, y: 0.0)
-    let b: EntityId = addCover(world: world, x: 260.0, y: 0.0)
-    let c: EntityId = addCover(world: world, x: 0.0, y: 260.0)
-    let d: EntityId = addCover(world: world, x: 260.0, y: 260.0)
+    let a: EntityId = addCover(
+      world: world
+      uiSystems: uiSystems
+      x: 0.0
+      y: 0.0
+    )
+    let b: EntityId = addCover(
+      world: world
+      uiSystems: uiSystems
+      x: 260.0
+      y: 0.0
+    )
+    let c: EntityId = addCover(
+      world: world
+      uiSystems: uiSystems
+      x: 0.0
+      y: 260.0
+    )
+    let d: EntityId = addCover(
+      world: world
+      uiSystems: uiSystems
+      x: 260.0
+      y: 260.0
+    )
 
     # Warm up generic specializations and component-table growth before
     # taking the baseline.
     var warm: Int = 0
     loop warm < 100 {
       let ignored: Int = collectOnce(world: world, uiSystems: uiSystems)
-      let anim: Bool = hoverScaleSystem(
+      let anim: Bool = buttonHoverScaleUpdate(
         world: world
         uiSystems: uiSystems
         hovered: a
@@ -85,7 +111,7 @@ func main() {
         hovered = d
       }
       checksum = checksum + collectOnce(world: world, uiSystems: uiSystems)
-      let anim: Bool = hoverScaleSystem(
+      let anim: Bool = buttonHoverScaleUpdate(
         world: world
         uiSystems: uiSystems
         hovered: hovered

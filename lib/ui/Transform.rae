@@ -50,11 +50,15 @@ func opacity(world: view UiWorld, entity: view EntityId) ret Float {
 # when the transform pass hasn't written one (e.g. an entity with no
 # ComputedRect). Consumers read this instead of the old WorldTransform.alpha /
 # .visible fields.
-func worldVisualOf(world: view UiWorld, entity: view EntityId) ret WorldVisual {
-  if componentHas(this: world.worldVisuals, entity: entity) is false {
+func worldVisualOf(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entity: view EntityId
+) ret WorldVisual {
+  if componentHas(this: uiSystems.transform2d.worldVisuals, entity: entity) is false {
     ret WorldVisual { alpha: 1.0, visible: true }
   }
-  let wv: WorldVisual = componentGet(this: world.worldVisuals, entity: entity)
+  let wv: WorldVisual = componentGet(this: uiSystems.transform2d.worldVisuals, entity: entity)
   ret wv
 }
 
@@ -82,11 +86,15 @@ func computedRectOf(
 # layout. Scrolling writes this instead of `Offset` so a scroll step
 # reruns only transform (a cheap translation of the subtree) and never
 # the full layout pass — the key to smooth scrolling. Absent → (0,0).
-func runtimeOffsetOf(world: view UiWorld, entity: view EntityId) ret Vec2 {
-  if componentHas(this: world.runtimeOffsets, entity: entity) is false {
+func runtimeOffsetOf(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entity: view EntityId
+) ret Vec2 {
+  if componentHas(this: uiSystems.transform2d.runtimeOffsets, entity: entity) is false {
     ret Vec2 { x: 0.0, y: 0.0 }
   }
-  let ro: RuntimeOffset = componentGet(this: world.runtimeOffsets, entity: entity)
+  let ro: RuntimeOffset = componentGet(this: uiSystems.transform2d.runtimeOffsets, entity: entity)
   ret ro.delta
 }
 
@@ -127,7 +135,7 @@ func buildLocalTransforms(world: mod UiWorld, uiSystems: view UiSystems) {
   loop var i: Int = 0, i < componentCount(this: uiSystems.layout.computedRects), ++i {
     let entity: EntityId = componentEntityAt(this: uiSystems.layout.computedRects, i: i)
     let cr: ComputedRect = componentDataAt(this: uiSystems.layout.computedRects, i: i)
-    let ro: Vec2 = runtimeOffsetOf(world: world, entity: entity)
+    let ro: Vec2 = runtimeOffsetOf(world: world, uiSystems: uiSystems, entity: entity)
     let fx: TransformFx = fxOf(world: world, entity: entity)
     # The ECS transform rotates about the entity's ORIGIN (its top-left);
     # TransformFx.pivot asks for a turn about a point inside the box. The
@@ -148,7 +156,7 @@ func buildLocalTransforms(world: mod UiWorld, uiSystems: view UiSystems) {
       rotation: fx.rotation
       scale: { x: fx.scaleX, y: fx.scaleY }
     }
-    componentSet(this: world.localTransforms, entity: entity, data: local)
+    componentSet(this: uiSystems.transform2d.localTransforms, entity: entity, data: local)
   }
 }
 
@@ -162,7 +170,7 @@ func accumulateVisibility(world: mod UiWorld, uiSystems: view UiSystems) {
   # scan-and-skip. Each root's WorldVisual is computed independently, so the
   # dense walk order (unchanged from the old loop) does not affect the result.
   let roots: List(QueryMatch) = without(
-    dataTable: world.localTransforms
+    dataTable: uiSystems.transform2d.localTransforms
     tagTable: uiSystems.hierarchy.parents
   )
   loop let row: view QueryMatch in roots {
@@ -173,7 +181,7 @@ func accumulateVisibility(world: mod UiWorld, uiSystems: view UiSystems) {
       parentAlpha: 1.0
       parentVisible: true
     )
-    componentSet(this: world.worldVisuals, entity: entity, data: wv)
+    componentSet(this: uiSystems.transform2d.worldVisuals, entity: entity, data: wv)
   }
   # Parented entities, parent before child.
   let order: view List(EntityId) => depthOrder(
@@ -185,14 +193,18 @@ func accumulateVisibility(world: mod UiWorld, uiSystems: view UiSystems) {
     if let entity: EntityId = order.copyAt(index: i) {
       if componentHas(this: uiSystems.hierarchy.parents, entity: entity) {
         let link: Parent = componentGet(this: uiSystems.hierarchy.parents, entity: entity)
-        let parentWv: WorldVisual = worldVisualOf(world: world, entity: link.parent)
+        let parentWv: WorldVisual = worldVisualOf(
+          world: world
+          uiSystems: uiSystems
+          entity: link.parent
+        )
         let wv: WorldVisual = composeVisual(
           world: world
           entity: entity
           parentAlpha: parentWv.alpha
           parentVisible: parentWv.visible
         )
-        componentSet(this: world.worldVisuals, entity: entity, data: wv)
+        componentSet(this: uiSystems.transform2d.worldVisuals, entity: entity, data: wv)
       }
     }
   }
@@ -209,8 +221,8 @@ func transformSystem(world: mod UiWorld, uiSystems: view UiSystems) {
   buildLocalTransforms(world: world, uiSystems: uiSystems)
   transformSystem2D(
     orderState: world.hierarchyOrder
-    transforms: world.localTransforms
-    worldTransforms: world.worldTransforms
+    transforms: uiSystems.transform2d.localTransforms
+    worldTransforms: uiSystems.transform2d.worldTransforms
     parents: uiSystems.hierarchy.parents
     childrens: world.childrens
   )
@@ -262,7 +274,7 @@ func createTransformCache() pub ret TransformCache {
 #
 # Conservative-but-correct: never skips when in doubt. The component tables here
 # cover every read inside buildLocalTransforms / transformSystem2D /
-# accumulateVisibility; we don't track `world.worldTransforms` itself (nor the
+# accumulateVisibility; we don't track `uiSystems.transform2d.worldTransforms` itself (nor the
 # derived localTransforms / worldVisuals) because we're the only writer
 # and any external mutation would still be observable through one of
 # the other tables (e.g. setHeroVisible reads computedRects first).
@@ -277,7 +289,10 @@ func systemIfDirty(
   let txGen: Int = componentTableGeneration(TransformFx, this: world.transforms)
   let chGen: Int = componentTableGeneration(Children, this: world.childrens)
   let plGen: Int = componentTableGeneration(Parent, this: uiSystems.hierarchy.parents)
-  let roGen: Int = componentTableGeneration(RuntimeOffset, this: world.runtimeOffsets)
+  let roGen: Int = componentTableGeneration(
+    RuntimeOffset
+    this: uiSystems.transform2d.runtimeOffsets
+  )
   let entityCount: Int = world.allocator.alive.length
 
   var dirty: Bool = false

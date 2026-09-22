@@ -62,6 +62,19 @@ entity. Not the pipeline's *signatures* per system (`layoutSystem(world,
 uiSystems)` rather than `layoutSystem(world, layoutSystem)`): one aggregate
 parameter everywhere was the simple form; splitting it per system is a
 follow-up if it earns its churn.
+**Step 6b is implemented** (2026-09-22): `Transform2dSystem { localTransforms,
+worldTransforms, worldVisuals, runtimeOffsets }`, `AnimationSystem { animStates,
+smokeStates, carouselStates }`, `HeroTransitionSystem { heroTransitions }`,
+`ButtonSystem { interactions }` on `UiSystems`; the button behaviour is
+gathered in `lib/ui/buttonSystem/` — `buttonInteractionClear/Mark` (was
+inputSystem), `buttonStyleUpdate` (ButtonStyle.rae, was widgetStyleSystem),
+`buttonHoverScaleUpdate` (ButtonHoverScale.rae, was hoverScaleSystem) — as ONE
+type and module, not one function: the three keep their pipeline stages
+(style before layout, hover scale after transform) because merging them
+would move the hover scale a frame earlier and change what is drawn. Stage
+order and 839's judgement unchanged (transform's declared counts drop to its
+own tables). `UiWorld` now holds only authored tables, `childrens`, the
+resources and the allocator.
 
 Prompted by the UI editor having to
 call a music-player system to draw a scene the way the music player does.

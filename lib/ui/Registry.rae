@@ -193,17 +193,11 @@ func applyComponentByName(
     # The same list as isRuntimeTable, spelled as literal tests so it folds:
     # `typeName(table)` is a literal per table, so this `if` is decided at
     # compile time and an excluded table instantiates no decoder at all.
-    if typeName(table) is not "Children" and typeName(table) is not "Transform2D" and typeName(
+    if typeName(table) is not "Children" and typeName(table) is not "VisualBounds" and typeName(
       table
-    ) is not "WorldTransform2D" and typeName(table) is not "WorldVisual" and typeName(table) is not "RuntimeOffset" and typeName(
+    ) is not "ScrollDrag" and typeName(table) is not "StateStyle" and typeName(table) is not "ListViewData" and typeName(
       table
-    ) is not "AnimState" and typeName(table) is not "SmokeState" and typeName(table) is not "CarouselState" and typeName(
-      table
-    ) is not "VisualBounds" and typeName(table) is not "ScrollDrag" and typeName(table) is not "Interaction" and typeName(
-      table
-    ) is not "StateStyle" and typeName(table) is not "ListViewData" and typeName(table) is not "ListViewRowKey" and typeName(
-      table
-    ) is not "HeroTransition" and typeName(table) is not "StyleOverride" and typeName(table) is not "BundleRefs" {
+    ) is not "ListViewRowKey" and typeName(table) is not "StyleOverride" and typeName(table) is not "BundleRefs" {
       if name is authoredNameOf(typeName: typeName(table)) {
         decodeComponent(
           table: table
