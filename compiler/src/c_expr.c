@@ -143,14 +143,31 @@ static void emit_to_string_expr(CFuncContext* ctx, const AstExpr* operand, FILE*
         emit_expr(ctx, operand, out, PREC_LOWEST, false, false);
         ctx->suppress_opt_unbox = saved_unbox;
         fprintf(out, "); __ostr%d.has ? ", oid);
-        if (payload_is_user_struct) {
-            const char* pmangled = rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, &(AstTypeRef){.parts = &(AstIdentifierPart){.text = base}});
-            fprintf(out, "rae_to_str_%s_(&__ostr%d.value)", pmangled, oid);
-        } else {
-            fprintf(out, "rae_ext_rae_str(__ostr%d.value)", oid);
+        (void)payload_is_user_struct;
+        {
+            AstTypeRef payload = *tr; payload.is_opt = false; payload.next = NULL;
+            char inner[64]; snprintf(inner, sizeof inner, "__ostr%d.value", oid);
+            rae_value_to_str_expr(ctx->compiler_ctx, ctx->module, &payload, inner, out);
         }
         fprintf(out, " : (rae_String){(uint8_t*)\"none\", 4}; }))");
         return;
+    }
+    // A List(T): its generated toString (elements recursively). The operand
+    // is captured into a temp so the formatter can take its address.
+    if (tr && !tr->is_opt && str_eq_cstr(base, "List") && tr->generic_args) {
+        const AstTypeRef* sub = tr;
+        if (ctx->generic_params && ctx->generic_args) {
+            const AstTypeRef* s2 = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr);
+            if (s2) sub = s2;
+        }
+        const char* mangled = rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, (AstTypeRef*)sub);
+        if (mangled) {
+            int lid = ctx->temp_counter++;
+            fprintf(out, "(__extension__ ({ %s __lstr%d = (", mangled, lid);
+            emit_expr(ctx, operand, out, PREC_LOWEST, false, false);
+            fprintf(out, "); rae_to_str_%s_(&__lstr%d); }))", mangled, lid);
+            return;
+        }
     }
     const AstDecl* d = (base.len > 0) ? find_type_decl(ctx, ctx->module, base) : NULL;
     bool is_user_struct = d && d->kind == AST_DECL_TYPE

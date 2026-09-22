@@ -1226,6 +1226,52 @@ const AstTypeRef* c_call_enum_name_opt_string_type(CFuncContext* ctx) {
     return tr;
 }
 
+// The C expression that formats the value `cexpr` of type `type` as a
+// rae_String — the ONE rule for toString / interpolation of any value:
+//   primitives, String, Char, Bool -> rae_ext_rae_str(X)      (the _Generic)
+//   enum                           -> rae_enum_toString_<E>((int64_t)X)
+//   user struct                    -> rae_to_str_<T>_(&X)     (generated)
+//   List(T)                        -> rae_to_str_<List(T)>_(&X) (generated, recursive)
+//   opt T (struct rep)             -> X.has ? <payload rule> : "none"
+//   c_struct / Ptr / Buffer / other -> a "<Type>" placeholder, never a C error
+void rae_value_to_str_expr(CompilerContext* ctx, const AstModule* module, const AstTypeRef* type, const char* cexpr, FILE* out) {
+    CFuncContext lctx = {0}; lctx.compiler_ctx = ctx; lctx.module = (AstModule*)module;
+    Str base = get_base_type_name(type);
+    if (type && type->is_opt && !type->is_view && !type->is_mod && rae_opt_is_struct_rep(&lctx, type)) {
+        AstTypeRef payload = *type; payload.is_opt = false; payload.next = NULL;
+        char inner[512]; snprintf(inner, sizeof inner, "(%s).value", cexpr);
+        fprintf(out, "((%s).has ? ", cexpr);
+        rae_value_to_str_expr(ctx, module, &payload, inner, out);
+        fprintf(out, " : (rae_String){(uint8_t*)\"none\", 4})");
+        return;
+    }
+    if (type && type->is_opt) { fprintf(out, "rae_ext_rae_str((%s))", cexpr); return; }
+    if (base.len > 0 && find_enum_decl(&lctx, module, base)) {
+        fprintf(out, "rae_enum_toString_%.*s((int64_t)(%s))", (int)base.len, base.data, cexpr);
+        return;
+    }
+    if (str_eq_cstr(base, "List") && type->generic_args) {
+        const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, (AstTypeRef*)type);
+        if (mangled) { fprintf(out, "rae_to_str_%s_(&(%s))", mangled, cexpr); return; }
+    }
+    const AstDecl* d = (base.len > 0) ? find_type_decl(&lctx, module, base) : NULL;
+    bool is_user_struct = d && d->kind == AST_DECL_TYPE
+        && !has_property(d->as.type_decl.properties, "c_struct")
+        && !d->as.type_decl.generic_params && !type->generic_args;
+    if (is_user_struct) {
+        const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, &(AstTypeRef){.parts = &(AstIdentifierPart){.text = base}});
+        fprintf(out, "rae_to_str_%s_(&(%s))", mangled, cexpr);
+        return;
+    }
+    bool is_c_struct = d && d->kind == AST_DECL_TYPE && has_property(d->as.type_decl.properties, "c_struct");
+    if (is_c_struct || type->generic_args || (d && d->kind == AST_DECL_TYPE && d->as.type_decl.generic_params)
+        || str_eq_cstr(base, "Ptr") || str_eq_cstr(base, "Buffer") || str_eq_cstr(base, "Array")) {
+        fprintf(out, "(rae_String){(uint8_t*)\"<%.*s>\", %d}", (int)base.len, base.data, (int)base.len + 2);
+        return;
+    }
+    fprintf(out, "rae_ext_rae_str((%s))", cexpr);
+}
+
 const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
     if (!expr) return NULL;
     // Cache primitive literal type-refs in static storage so callers can hold a
@@ -2537,6 +2583,9 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   // Generate rae_to_str_TYPE_ for non-c_struct user types so interpolation
   // (`"{p}"`) and `.toString()` produce the same "{ 10, 20 }" output the
   // Live VM gives. The _Generic-based rae_ext_rae_str macro can't be
+  // (rae_value_to_str_expr is defined above the backend entry; it is the
+  // ONE formatter every generated toString and every interpolation site
+  // uses for a value of a given type.)
   // extended for user types, so we emit a per-type function and switch
   // call sites to call it directly when the arg type is a user struct.
   // Emit forward declarations first so structs can reference each other
@@ -2548,6 +2597,19 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       const AstTypeDecl* td = &d->as.type_decl;
       if (earlier_same_named_type(ctx, i, td->name)) continue;
       const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, &(AstTypeRef){.parts = &(AstIdentifierPart){.text = td->name}});
+      fprintf(out, "RAE_UNUSED static rae_String rae_to_str_%s_(const %s* this);\n", mangled, mangled);
+  }
+  // toString for every List(T) instantiation: `[a, b, c]`, each element
+  // through its own formatter (rae_value_to_str_expr), recursively — a
+  // List(Pair) prints its structs, a List(opt Int) its `none`s, a
+  // List(List(Int)) its inner lists. Forward-declared first (a struct's
+  // toString may reference a list's and vice versa).
+  for (size_t i = 0; i < ctx->generic_type_count; i++) {
+      const AstTypeRef* gt = ctx->generic_types[i];
+      if (!gt || !gt->parts || gt->is_opt || gt->is_view || gt->is_mod) continue;
+      if (!str_eq_cstr(get_base_type_name(gt), "List") || !gt->generic_args) continue;
+      const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, (AstTypeRef*)gt);
+      if (!mangled) continue;
       fprintf(out, "RAE_UNUSED static rae_String rae_to_str_%s_(const %s* this);\n", mangled, mangled);
   }
   fprintf(out, "\n");
@@ -2598,9 +2660,12 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
                   fprintf(out, "  __out = rae_ext_rae_str_concat(__out, this->%.*s.has ? rae_to_str_%s_(&this->%.*s.value) : (rae_String){(uint8_t*)\"none\", 4});\n",
                       nl, nd, fmangled, nl, nd);
               } else if (!has_generic_args && !is_generic_template && !is_c_struct) {
-                  // scalar / String / Char / Bool / enum -> _Generic on value.
-                  fprintf(out, "  __out = rae_ext_rae_str_concat(__out, this->%.*s.has ? rae_ext_rae_str(this->%.*s.value) : (rae_String){(uint8_t*)\"none\", 4});\n",
-                      nl, nd, nl, nd);
+                  // scalar / String / Char / Bool / enum: the shared formatter
+                  // (an enum payload prints its member name, not its ordinal).
+                  char fexpr[512]; snprintf(fexpr, sizeof fexpr, "this->%.*s", nl, nd);
+                  fprintf(out, "  __out = rae_ext_rae_str_concat(__out, ");
+                  rae_value_to_str_expr(ctx, module, f->type, fexpr, out);
+                  fprintf(out, ");\n");
               } else {
                   fprintf(out, "  __out = rae_ext_rae_str_concat(__out, this->%.*s.has ? (rae_String){(uint8_t*)\"<opt>\", 5} : (rae_String){(uint8_t*)\"none\", 4});\n",
                       nl, nd);
@@ -2609,6 +2674,11 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
               const char* fmangled = rae_mangle_type_specialized(ctx, NULL, NULL, &(AstTypeRef){.parts = &(AstIdentifierPart){.text = fbase}});
               fprintf(out, "  __out = rae_ext_rae_str_concat(__out, rae_to_str_%s_(&this->%.*s));\n",
                   fmangled, (int)f->name.len, f->name.data);
+          } else if (has_generic_args && str_eq_cstr(fbase, "List") && !is_opt_field) {
+              char fexpr[512]; snprintf(fexpr, sizeof fexpr, "this->%.*s", (int)f->name.len, f->name.data);
+              fprintf(out, "  __out = rae_ext_rae_str_concat(__out, ");
+              rae_value_to_str_expr(ctx, module, f->type, fexpr, out);
+              fprintf(out, ");\n");
           } else if ((is_c_struct || has_generic_args || is_generic_template
                       || str_eq_cstr(fbase, "Ptr")) && !is_opt_field) {
               fprintf(out, "  __out = rae_ext_rae_str_concat(__out, (rae_String){(uint8_t*)\"<%.*s>\", %d});\n",
@@ -2620,6 +2690,34 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       }
       fprintf(out, "  __out = rae_ext_rae_str_concat(__out, (rae_String){(uint8_t*)\" }\", 2});\n");
       fprintf(out, "  return __out;\n}\n\n");
+  }
+
+  // (List(T) toString definitions follow; their forward declarations sit with
+  // the struct ones above, since either may call the other.)
+  fprintf(out, "\n");
+  {
+    const char** done = malloc(sizeof(char*) * (ctx->generic_type_count + 1)); size_t done_count = 0;
+    for (size_t i = 0; i < ctx->generic_type_count; i++) {
+      const AstTypeRef* gt = ctx->generic_types[i];
+      if (!gt || !gt->parts || gt->is_opt || gt->is_view || gt->is_mod) continue;
+      if (!str_eq_cstr(get_base_type_name(gt), "List") || !gt->generic_args) continue;
+      const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, (AstTypeRef*)gt);
+      if (!mangled) continue;
+      bool dup = false;
+      for (size_t k = 0; k < done_count; k++) if (strcmp(done[k], mangled) == 0) { dup = true; break; }
+      if (dup) continue;
+      done[done_count++] = mangled;
+      AstTypeRef elem = *gt->generic_args; elem.next = NULL;
+      fprintf(out, "RAE_UNUSED static rae_String rae_to_str_%s_(const %s* this) {\n", mangled, mangled);
+      fprintf(out, "  rae_String __out = (rae_String){(uint8_t*)\"[\", 1};\n");
+      fprintf(out, "  for (int64_t __i = 0; __i < this->length; __i++) {\n");
+      fprintf(out, "    if (__i > 0) __out = rae_ext_rae_str_concat(__out, (rae_String){(uint8_t*)\", \", 2});\n");
+      fprintf(out, "    __out = rae_ext_rae_str_concat(__out, ");
+      rae_value_to_str_expr(ctx, module, &elem, "this->data[__i]", out);
+      fprintf(out, ");\n  }\n");
+      fprintf(out, "  return rae_ext_rae_str_concat(__out, (rae_String){(uint8_t*)\"]\", 1});\n}\n\n");
+    }
+    free(done);
   }
 
   // Layer 5 (docs/scope-exit-dealloc.md) — synthesised per-struct

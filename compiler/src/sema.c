@@ -7127,7 +7127,15 @@ static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, AstModule* mod
         }
     }
     if (!base) base = type_get_void(ctx->type_registry);
-    if (type_ref->is_opt) base = type_get_opt(ctx->type_registry, base);
+    if (type_ref->is_opt) {
+        base = type_get_opt(ctx->type_registry, base);
+        /* A struct-rep `opt T` (`let maybe: opt Int = 5`, a List(opt Int)
+         * element, ...) must have its `rae_opt_<T>` typedef emitted; the
+         * backend collects those from the registered generic types, so a
+         * plain local's type ref must register too (it used to be collected
+         * only from struct fields, params and returns). */
+        register_generic_type(ctx, type_ref);
+    }
     if (type_ref->is_view) base = type_get_ref(ctx->type_registry, base, false);
     else if (type_ref->is_mod) base = type_get_ref(ctx->type_registry, base, true);
     type_ref->resolved_type = base; return base;
