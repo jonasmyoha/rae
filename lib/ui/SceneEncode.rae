@@ -1,0 +1,683 @@
+# SceneEncode — a component of the world in the `.raescene` grammar: the
+# value encoders and the inverse of ui/Registry's applyAuthoredFixups (Rect
+# {x,y,w,h}, Layout `type`, the flattened insets, palette slots, Text's
+# styleOverride, …), plus the machine form used to tell "changed since the
+# fresh decode". ui/SceneWriter walks a page and calls these.
+open ui/Ecs
+open ui/UiSystems
+open ui/Components
+open ui/BindingComponents
+open ui/ScenePolicy
+open ui/Registry
+open ui/RegistryOpt
+open ui/RegistryValues
+open ecs/Entity
+open ecs/ComponentTable
+import Json
+import String
+
+# ---------------------------------------------------------------------------
+# Value encoders: a field's authored spelling.
+# ---------------------------------------------------------------------------
+func jsonNumber(value: view Float) ret String {
+  ret Json.jbNumber(value: value)
+}
+
+func jsonInt(value: view Int) ret String {
+  ret "{value}"
+}
+
+func jsonBool(value: view Bool) ret String {
+  if value {
+    ret "true"
+  }
+  ret "false"
+}
+
+# An enum member as the samples spell it: the member name with its head
+# capitalised (`vertical` -> "Vertical"); the loader lowercases the head back.
+func authoredEnumText(name: view String) ret String {
+  if name.length() is 0 {
+    ret Json.quote(text: "")
+  }
+  let head: String = name.sub(start: 0, len: 1)
+  let tail: String = name.sub(start: 1, len: name.length() - 1)
+  ret Json.quote(text: "{upperAscii(letter: head)}{tail}")
+}
+
+# The upper-case of one ASCII letter (an enum member starts with a-z).
+func upperAscii(letter: view String) ret String {
+  let lower: String = "abcdefghijklmnopqrstuvwxyz"
+  let upper: String = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+  let index: Int = lower.indexOf(sub: letter)
+  if index < 0 {
+    ret "{letter}"
+  }
+  ret upper.sub(start: index, len: 1)
+}
+
+func encodeRgba(color: view RgbaColor) ret String {
+  ret "\{\"r\": {color.r}, \"g\": {color.g}, \"b\": {color.b}, \"a\": {color.a}\}"
+}
+
+func encodeInsets(insets: view Insets) ret String {
+  ret "\{\"l\": {jsonNumber(value: insets.l)}, \"t\": {jsonNumber(value: insets.t)}, \"r\": {jsonNumber(
+    value: insets.r
+  )}, \"b\": {jsonNumber(value: insets.b)}\}"
+}
+
+func encodeVec2(v: view Vec2) ret String {
+  ret "\{\"x\": {jsonNumber(value: v.x)}, \"y\": {jsonNumber(value: v.y)}\}"
+}
+
+func encodeSizeAxis(axis: view SizeAxis) ret String {
+  var text: String = "\{\"mode\": {authoredEnumText(name: axis.mode.toString())}"
+  if axis.min >= 0 {
+    text = "{text}, \"min\": {axis.min}"
+  }
+  if axis.max >= 0 {
+    text = "{text}, \"max\": {axis.max}"
+  }
+  ret "{text}\}"
+}
+
+func encodeStringList(items: view List(String)) ret String {
+  var builder: JsonBuilder = Json.jbArray()
+  loop let item: view String in items {
+    Json.jbItem(builder: builder, valueJson: Json.quote(text: item))
+  }
+  ret Json.jbEndArray(builder: builder)
+}
+
+func encodeIntList(items: view List(Int)) ret String {
+  var builder: JsonBuilder = Json.jbArray()
+  loop let item: view Int in items {
+    Json.jbItem(builder: builder, valueJson: "{item}")
+  }
+  ret Json.jbEndArray(builder: builder)
+}
+
+func encodeFloatList(items: view List(Float)) ret String {
+  var builder: JsonBuilder = Json.jbArray()
+  loop let item: view Float in items {
+    Json.jbItem(builder: builder, valueJson: jsonNumber(value: item))
+  }
+  ret Json.jbEndArray(builder: builder)
+}
+
+# One field's JSON text, or "" for a field the grammar does not author (an
+# EntityId, a runtime list).
+func encodeField(T: type, value: view T) ret String {
+  if typeName(value) is "Int" {
+    ret jsonInt(value: value)
+  }
+  if typeName(value) is "Float" {
+    ret jsonNumber(value: value)
+  }
+  if typeName(value) is "Bool" {
+    ret jsonBool(value: value)
+  }
+  if typeName(value) is "String" {
+    ret Json.quote(text: value)
+  }
+  if typeName(value) is "RgbaColor" {
+    ret encodeRgba(color: value)
+  }
+  if typeName(value) is "Insets" {
+    ret encodeInsets(insets: value)
+  }
+  if typeName(value) is "Vec2" {
+    ret encodeVec2(v: value)
+  }
+  if typeName(value) is "SizeAxis" {
+    ret encodeSizeAxis(axis: value)
+  }
+  if typeName(value) is "List(String)" {
+    ret encodeStringList(items: value)
+  }
+  if typeName(value) is "List(Int)" {
+    ret encodeIntList(items: value)
+  }
+  if typeName(value) is "List(Float)" {
+    ret encodeFloatList(items: value)
+  }
+  if typeName(value) is "EntityId" {
+    ret ""
+  }
+  # Anything else — an enum, a runtime list — is not field-structural here:
+  # the enum fields are written by the component arms below (a generic body
+  # cannot name an enum member for an arbitrary T), the lists are runtime.
+  ret ""
+}
+
+# The generic component object: every field the grammar authors, in field
+# order — the mirror of decodeComponent. `skip` names the fields a fixup
+# arm writes in another spelling (comma-separated, matched whole).
+func encodeComponent(T: type, value: view T, skip: view String) ret String {
+  var builder: JsonBuilder = Json.jbObject()
+  loop let f: view any in fields(value) {
+    let name: String = fieldName(f)
+    if skipHas(skip: skip, name: name) is false {
+      let text: String = encodeField(value: f)
+      if text.length() > 0 {
+        Json.jbField(builder: builder, key: name, valueJson: text)
+      }
+    }
+  }
+  ret Json.jbEndObject(builder: builder)
+}
+
+# `{...}` + extra members: append `, "k": v` pairs (each `extra` entry is one
+# `"k": v` text) to a generic object.
+func withMembers(base: view String, extra: view List(String)) ret String {
+  var inner: String = base.sub(start: 1, len: base.length() - 2)
+  loop let member: view String in extra {
+    if inner.length() > 0 {
+      inner = "{inner}, {member}"
+    } else {
+      inner = "{member}"
+    }
+  }
+  ret "\{{inner}\}"
+}
+
+func enumMember(key: view String, name: view String) ret String {
+  ret "{Json.quote(text: key)}: {authoredEnumText(name: name)}"
+}
+
+func skipHas(skip: view String, name: view String) ret Bool {
+  if skip.length() is 0 {
+    ret false
+  }
+  let parts: List(String) = skip.split(sep: ",")
+  loop let part: view String in parts {
+    if part is name {
+      ret true
+    }
+  }
+  ret false
+}
+
+# ---------------------------------------------------------------------------
+# The inverse fixups: the authored spellings that are not field-structural.
+# ---------------------------------------------------------------------------
+
+# The colour of a Shape / Sprite / StyleOverride slot: the palette slot NAME
+# when the author used one (it must keep tracking the theme), else the value.
+func encodeColorOrSlot(color: view RgbaColor, slot: view String) ret String {
+  if slot.length() > 0 {
+    ret Json.quote(text: slot)
+  }
+  ret encodeRgba(color: color)
+}
+
+func encodeRect(rect: view Rect) ret String {
+  ret "\{\"x\": {jsonNumber(value: rect.position.x)}, \"y\": {jsonNumber(value: rect.position.y)}, \"w\": {jsonNumber(
+    value: rect.size.x
+  )}, \"h\": {jsonNumber(value: rect.size.y)}\}"
+}
+
+func encodeLayout(layout: view Layout) ret String {
+  var builder: JsonBuilder = Json.jbObject()
+  Json.jbField(
+    builder: builder
+    key: "type"
+    valueJson: authoredEnumText(name: layout.kind.toString())
+  )
+  Json.jbField(builder: builder, key: "gap", valueJson: jsonNumber(value: layout.gap))
+  Json.jbField(
+    builder: builder
+    key: "alignMain"
+    valueJson: authoredEnumText(name: layout.alignMain.toString())
+  )
+  Json.jbField(
+    builder: builder
+    key: "alignCross"
+    valueJson: authoredEnumText(name: layout.alignCross.toString())
+  )
+  if layout.columns > 0 {
+    Json.jbField(builder: builder, key: "columns", valueJson: "{layout.columns}")
+  }
+  if layout.rowGap is not 0.0 {
+    Json.jbField(builder: builder, key: "rowGap", valueJson: jsonNumber(value: layout.rowGap))
+  }
+  if layout.columnGap is not 0.0 {
+    Json.jbField(builder: builder, key: "columnGap", valueJson: jsonNumber(value: layout.columnGap))
+  }
+  ret Json.jbEndObject(builder: builder)
+}
+
+func encodeAlign(align: view Align) ret String {
+  var builder: JsonBuilder = Json.jbObject()
+  if align.hasX {
+    Json.jbField(builder: builder, key: "x", valueJson: authoredEnumText(name: align.x.toString()))
+  }
+  if align.hasY {
+    Json.jbField(builder: builder, key: "y", valueJson: authoredEnumText(name: align.y.toString()))
+  }
+  ret Json.jbEndObject(builder: builder)
+}
+
+func encodeTextShadow(shadow: view TextShadow) ret String {
+  let base: String = encodeComponent(value: shadow, skip: "offset")
+  let inner: String = base.sub(start: 1, len: base.length() - 2)
+  var sep: String = ", "
+  if inner.length() is 0 {
+    sep = ""
+  }
+  ret "\{{inner}{sep}\"offsetX\": {jsonNumber(value: shadow.offset.x)}, \"offsetY\": {jsonNumber(
+    value: shadow.offset.y
+  )}\}"
+}
+
+func encodeOpticalAlign(optical: view OpticalAlign) ret String {
+  let base: String = encodeComponent(value: optical, skip: "bias")
+  let inner: String = base.sub(start: 1, len: base.length() - 2)
+  var sep: String = ", "
+  if inner.length() is 0 {
+    sep = ""
+  }
+  ret "\{{inner}{sep}\"biasX\": {jsonNumber(value: optical.bias.x)}, \"biasY\": {jsonNumber(
+    value: optical.bias.y
+  )}\}"
+}
+
+func encodeSprite(sprite: view Sprite) ret String {
+  let base: String = encodeComponent(value: sprite, skip: "tint,tintSlot,hasNineSlice")
+  let extra: List(String) = [
+    "\"tint\": {encodeColorOrSlot(color: sprite.tint, slot: sprite.tintSlot)}"
+    enumMember(key: "scaleMode", name: sprite.scaleMode.toString())
+  ]
+  ret withMembers(base: base, extra: extra)
+}
+
+func encodeShape(shape: view Shape) ret String {
+  let base: String = encodeComponent(value: shape, skip: "fill,fillSlot,stroke,strokeSlot")
+  let extra: List(String) = [
+    enumMember(key: "kind", name: shape.kind.toString())
+    "\"fill\": {encodeColorOrSlot(color: shape.fill, slot: shape.fillSlot)}"
+    "\"stroke\": {encodeColorOrSlot(color: shape.stroke, slot: shape.strokeSlot)}"
+  ]
+  ret withMembers(base: base, extra: extra)
+}
+
+# Text with its namespaced style override (a sparse component of its own).
+func encodeText(world: view UiWorld, entity: view EntityId, text: view Text) ret String {
+  let wrap: List(String) = [enumMember(key: "wrapWidthMode", name: text.wrapWidthMode.toString())]
+  let base: String = withMembers(base: encodeComponent(value: text, skip: ""), extra: wrap)
+  if componentHas(this: world.styleOverrides, entity: entity) is false {
+    ret base
+  }
+  let override: view StyleOverride => componentView(this: world.styleOverrides, entity: entity)
+  var builder: JsonBuilder = Json.jbObject()
+  if override.hasSize {
+    Json.jbField(builder: builder, key: "size", valueJson: jsonNumber(value: override.size))
+  }
+  if override.hasColor {
+    Json.jbField(
+      builder: builder
+      key: "color"
+      valueJson: encodeColorOrSlot(color: override.color, slot: override.colorSlot)
+    )
+  }
+  let inner: String = base.sub(start: 1, len: base.length() - 2)
+  ret "\{{inner}, \"styleOverride\": {Json.jbEndObject(builder: builder)}\}"
+}
+
+func encodeDataDependency(dep: view DataDependency) ret String {
+  let base: String = encodeComponent(value: dep, skip: "resource,field")
+  let inner: String = base.sub(start: 1, len: base.length() - 2)
+  var sep: String = ", "
+  if inner.length() is 0 {
+    sep = ""
+  }
+  ret "\{{inner}{sep}\"sourceKey\": {Json.quote(text: dep.resource.toString())}, \"fieldKey\": {Json.quote(
+    text: dep.field.toString()
+  )}\}"
+}
+
+func encodeRefreshRegion(region: view RefreshRegion) ret String {
+  let base: String = encodeComponent(value: region, skip: "resource")
+  let inner: String = base.sub(start: 1, len: base.length() - 2)
+  var sep: String = ", "
+  if inner.length() is 0 {
+    sep = ""
+  }
+  ret "\{{inner}{sep}\"sourceKey\": {Json.quote(text: region.resource.toString())}\}"
+}
+
+func encodeSceneInstance(instance: view SceneInstance) ret String {
+  var builder: JsonBuilder = Json.jbObject()
+  Json.jbField(builder: builder, key: "sceneId", valueJson: Json.quote(text: instance.sceneId))
+  if instance.overrideNodeIds.length > 0 {
+    var overrides: JsonBuilder = Json.jbArray()
+    loop var i: Int = 0, i < instance.overrideNodeIds.length, ++i {
+      var one: JsonBuilder = Json.jbObject()
+      Json.jbField(
+        builder: one
+        key: "nodeId"
+        valueJson: Json.quote(text: instance.overrideNodeIds.copyAtFallback(index: i, fallback: ""))
+      )
+      Json.jbField(
+        builder: one
+        key: "component"
+        valueJson: Json.quote(
+          text: instance.overrideComponents.copyAtFallback(index: i, fallback: "")
+        )
+      )
+      Json.jbField(
+        builder: one
+        key: "field"
+        valueJson: Json.quote(text: instance.overrideFields.copyAtFallback(index: i, fallback: ""))
+      )
+      Json.jbField(
+        builder: one
+        key: "value"
+        valueJson: Json.quote(text: instance.overrideValues.copyAtFallback(index: i, fallback: ""))
+      )
+      Json.jbItem(builder: overrides, valueJson: Json.jbEndObject(builder: one))
+    }
+    var params: JsonBuilder = Json.jbObject()
+    Json.jbField(builder: params, key: "overrides", valueJson: Json.jbEndArray(builder: overrides))
+    Json.jbField(builder: builder, key: "params", valueJson: Json.jbEndObject(builder: params))
+  }
+  ret Json.jbEndObject(builder: builder)
+}
+
+func encodeListView(listView: view ListView) ret String {
+  let base: String = encodeComponent(value: listView, skip: "bindings,rowScenes")
+  var builder: JsonBuilder = Json.jbObject()
+  let doc: JsonDoc = Json.parseJson(source: base)
+  let root: JsonValue = Json.root(doc: doc)
+  let count: Int = Json.objectLen(this: root)
+  loop var i: Int = 0, i < count, ++i {
+    Json.jbField(
+      builder: builder
+      key: Json.objectKeyAt(doc: doc, this: root, idx: i)
+      valueJson: Json.stringify(doc: doc, value: Json.objectValueAt(doc: doc, this: root, idx: i))
+    )
+  }
+  if listView.bindings.length > 0 {
+    var bindings: JsonBuilder = Json.jbArray()
+    loop let binding: view ListViewBinding in listView.bindings {
+      var one: JsonBuilder = Json.jbObject()
+      Json.jbField(builder: one, key: "nodeId", valueJson: Json.quote(text: binding.nodeId))
+      Json.jbField(
+        builder: one
+        key: "component"
+        valueJson: Json.quote(text: binding.componentName)
+      )
+      Json.jbField(builder: one, key: "field", valueJson: Json.quote(text: binding.fieldName))
+      Json.jbField(builder: one, key: "itemField", valueJson: Json.quote(text: binding.itemField))
+      if binding.prefix.length() > 0 {
+        Json.jbField(builder: one, key: "prefix", valueJson: Json.quote(text: binding.prefix))
+      }
+      Json.jbItem(builder: bindings, valueJson: Json.jbEndObject(builder: one))
+    }
+    Json.jbField(builder: builder, key: "bindings", valueJson: Json.jbEndArray(builder: bindings))
+  }
+  Json.jbField(
+    builder: builder
+    key: "mode"
+    valueJson: authoredEnumText(name: listView.mode.toString())
+  )
+  if listView.rowScenes.length > 0 {
+    var rowScenes: JsonBuilder = Json.jbObject()
+    loop let row: view ListViewRowScene in listView.rowScenes {
+      Json.jbField(builder: rowScenes, key: row.kind, valueJson: Json.quote(text: row.sceneId))
+    }
+    Json.jbField(
+      builder: builder
+      key: "rowScenes"
+      valueJson: Json.jbEndObject(builder: rowScenes)
+    )
+  }
+  ret Json.jbEndObject(builder: builder)
+}
+
+# A component of `entity` in the authored grammar, "" when the name is no
+# authored table of the world (or the entity has none).
+func authoredComponentJson(
+  world: view UiWorld
+  entity: view EntityId
+  name: view String
+) ret String {
+  if name is "Rect" {
+    if componentHas(this: world.rects, entity: entity) {
+      let value: Rect = componentGet(this: world.rects, entity: entity)
+      ret encodeRect(rect: value)
+    }
+    ret ""
+  }
+  if name is "Layout" {
+    if componentHas(this: world.layouts, entity: entity) {
+      let value: Layout = componentGet(this: world.layouts, entity: entity)
+      ret encodeLayout(layout: value)
+    }
+    ret ""
+  }
+  if name is "Padding" {
+    if componentHas(this: world.paddings, entity: entity) {
+      let value: Padding = componentGet(this: world.paddings, entity: entity)
+      ret encodeInsets(insets: value.insets)
+    }
+    ret ""
+  }
+  if name is "Margin" {
+    if componentHas(this: world.margins, entity: entity) {
+      let value: Margin = componentGet(this: world.margins, entity: entity)
+      ret encodeInsets(insets: value.insets)
+    }
+    ret ""
+  }
+  if name is "Offset" {
+    if componentHas(this: world.offsets, entity: entity) {
+      let value: Offset = componentGet(this: world.offsets, entity: entity)
+      ret encodeVec2(v: value.delta)
+    }
+    ret ""
+  }
+  if name is "Align" {
+    if componentHas(this: world.aligns, entity: entity) {
+      let value: Align = componentGet(this: world.aligns, entity: entity)
+      ret encodeAlign(align: value)
+    }
+    ret ""
+  }
+  if name is "TextShadow" {
+    if componentHas(this: world.textShadows, entity: entity) {
+      let value: TextShadow = componentGet(this: world.textShadows, entity: entity)
+      ret encodeTextShadow(shadow: value)
+    }
+    ret ""
+  }
+  if name is "OpticalAlign" {
+    if componentHas(this: world.opticalAligns, entity: entity) {
+      let value: OpticalAlign = componentGet(this: world.opticalAligns, entity: entity)
+      ret encodeOpticalAlign(optical: value)
+    }
+    ret ""
+  }
+  if name is "Sprite" {
+    if componentHas(this: world.sprites, entity: entity) {
+      let value: Sprite = componentGet(this: world.sprites, entity: entity)
+      ret encodeSprite(sprite: value)
+    }
+    ret ""
+  }
+  if name is "Shape" {
+    if componentHas(this: world.shapes, entity: entity) {
+      let value: Shape = componentGet(this: world.shapes, entity: entity)
+      ret encodeShape(shape: value)
+    }
+    ret ""
+  }
+  if name is "Text" {
+    if componentHas(this: world.texts, entity: entity) {
+      let value: Text = componentGet(this: world.texts, entity: entity)
+      ret encodeText(world: world, entity: entity, text: value)
+    }
+    ret ""
+  }
+  if name is "DataDependency" {
+    if componentHas(this: world.dataDependencies, entity: entity) {
+      let value: DataDependency = componentGet(this: world.dataDependencies, entity: entity)
+      ret encodeDataDependency(dep: value)
+    }
+    ret ""
+  }
+  if name is "RefreshRegion" {
+    if componentHas(this: world.refreshRegions, entity: entity) {
+      let value: RefreshRegion = componentGet(this: world.refreshRegions, entity: entity)
+      ret encodeRefreshRegion(region: value)
+    }
+    ret ""
+  }
+  if name is "SceneInstance" {
+    if componentHas(this: world.sceneInstances, entity: entity) {
+      let value: SceneInstance = componentGet(this: world.sceneInstances, entity: entity)
+      ret encodeSceneInstance(instance: value)
+    }
+    ret ""
+  }
+  if name is "ListView" {
+    if componentHas(this: world.listViews, entity: entity) {
+      let value: ListView = componentGet(this: world.listViews, entity: entity)
+      ret encodeListView(listView: value)
+    }
+    ret ""
+  }
+  if name is "TextBinding" {
+    if componentHas(this: world.textBindings, entity: entity) {
+      let value: TextBinding = componentGet(this: world.textBindings, entity: entity)
+      let extra: List(String) = [enumMember(key: "format", name: value.format.toString())]
+      ret withMembers(base: encodeComponent(value: value, skip: ""), extra: extra)
+    }
+    ret ""
+  }
+  if name is "ScrollRoot" {
+    if componentHas(this: world.scrollRoots, entity: entity) {
+      let value: ScrollRoot = componentGet(this: world.scrollRoots, entity: entity)
+      let extra: List(String) = [
+        enumMember(key: "axis", name: value.axis.toString())
+        enumMember(key: "floor", name: value.floor.toString())
+      ]
+      ret withMembers(base: encodeComponent(value: value, skip: ""), extra: extra)
+    }
+    ret ""
+  }
+  if name is "ImageSourceResolver" {
+    if componentHas(this: world.imageSourceResolvers, entity: entity) {
+      let value: ImageSourceResolver = componentGet(
+        this: world.imageSourceResolvers
+        entity: entity
+      )
+      let extra: List(String) = [enumMember(key: "mode", name: value.mode.toString())]
+      ret withMembers(base: encodeComponent(value: value, skip: ""), extra: extra)
+    }
+    ret ""
+  }
+  if name is "Overflow" {
+    if componentHas(this: world.overflows, entity: entity) {
+      let value: OverflowPolicy = componentGet(this: world.overflows, entity: entity)
+      let extra: List(String) = [enumMember(key: "mode", name: value.mode.toString())]
+      ret withMembers(base: encodeComponent(value: value, skip: ""), extra: extra)
+    }
+    ret ""
+  }
+  if name is "MaskShape" {
+    if componentHas(this: world.maskShapes, entity: entity) {
+      let value: MaskShape = componentGet(this: world.maskShapes, entity: entity)
+      let extra: List(String) = [enumMember(key: "kind", name: value.kind.toString())]
+      ret withMembers(base: encodeComponent(value: value, skip: ""), extra: extra)
+    }
+    ret ""
+  }
+  if name is "ListSource" {
+    if componentHas(this: world.listSources, entity: entity) {
+      let value: ListSource = componentGet(this: world.listSources, entity: entity)
+      let extra: List(String) = [enumMember(key: "source", name: value.source.toString())]
+      ret withMembers(base: encodeComponent(value: value, skip: ""), extra: extra)
+    }
+    ret ""
+  }
+  if name is "EmptyState" {
+    if componentHas(this: world.emptyStates, entity: entity) {
+      let value: EmptyState = componentGet(this: world.emptyStates, entity: entity)
+      let extra: List(String) = [enumMember(key: "kind", name: value.kind.toString())]
+      ret withMembers(base: encodeComponent(value: value, skip: ""), extra: extra)
+    }
+    ret ""
+  }
+  if name is "Carousel" {
+    if componentHas(this: world.carousels, entity: entity) {
+      let value: Carousel = componentGet(this: world.carousels, entity: entity)
+      let extra: List(String) = [enumMember(key: "axis", name: value.axis.toString())]
+      ret withMembers(base: encodeComponent(value: value, skip: ""), extra: extra)
+    }
+    ret ""
+  }
+  # Every other authored table: the field-structural encoding.
+  var text: String = ""
+  loop let table: view ComponentTable(any) in fields(world) {
+    if isRuntimeTable(name: typeName(table)) is false and name is authoredNameOf(
+      typeName: typeName(table)
+    ) {
+      text = tableAuthoredJson(table: table, entity: entity)
+    }
+  }
+  ret text
+}
+
+# The generic encoders instantiated per table type (a `T` the fields loop
+# cannot name itself).
+func tableAuthoredJson(T: type, table: view ComponentTable(T), entity: view EntityId) ret String {
+  if componentHas(this: table, entity: entity) is false {
+    ret ""
+  }
+  let value: T = componentGet(this: table, entity: entity)
+  ret encodeComponent(value: value, skip: "")
+}
+
+func tableMachineJson(T: type, table: view ComponentTable(T), entity: view EntityId) ret String {
+  if componentHas(this: table, entity: entity) is false {
+    ret ""
+  }
+  let value: T = componentGet(this: table, entity: entity)
+  ret value.toJson()
+}
+
+# The machine form of a component (its compiler toJson), for the "did it
+# change since the fresh decode" test; "" when absent.
+func machineComponentJson(
+  world: view UiWorld
+  entity: view EntityId
+  name: view String
+) ret String {
+  var text: String = ""
+  loop let table: view ComponentTable(any) in fields(world) {
+    if isRuntimeTable(name: typeName(table)) is false and name is authoredNameOf(
+      typeName: typeName(table)
+    ) {
+      text = tableMachineJson(table: table, entity: entity)
+    }
+  }
+  # Text's override rides along.
+  if name is "Text" and componentHas(this: world.styleOverrides, entity: entity) {
+    let override: StyleOverride = componentGet(this: world.styleOverrides, entity: entity)
+    text = "{text}|{override.toJson()}"
+  }
+  ret text
+}
+
+# Every authored table the entity carries, by authored name — the "added
+# since the source" scan.
+func authoredNamesOf(world: view UiWorld, entity: view EntityId) ret List(String) {
+  var names: List(String) = List.create(String, cap: 16)
+  loop let table: view ComponentTable(any) in fields(world) {
+    if isRuntimeTable(name: typeName(table)) is false and componentHas(this: table, entity: entity) {
+      names.add(value: authoredNameOf(typeName: typeName(table)))
+    }
+  }
+  ret names
+}

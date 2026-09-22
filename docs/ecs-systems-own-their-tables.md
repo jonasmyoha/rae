@@ -4,9 +4,10 @@ Status: **implemented** (2026-09-22) — step 1 `92f537c8` (the two outboxes),
 step 2 `0cd5a646` (the editor's systems), step 3 `5c407572` (covers as data),
 step 4 `c830dea5` (106's systems), step 5 `d18f727f` (bundles), step 6a
 `c84dc54d` (Layout / SafeArea / Hierarchy), step 6b `531503cc` (Transform2d /
-Animation / HeroTransition / Button). Open: the editor's save path (queued) —
-the save-side bundle diff and the verbatim round-trip of pending components
-wait for it. Written 2026-09-21 as the approved design (superseding the
+Animation / HeroTransition / Button). The editor's save path landed too
+(`lib/ui/SceneWriter.rae`, fixture 884): pending components round-trip
+verbatim, a bundled node keeps its `bundles` list and only its own overrides
+(the author's text is written back when the world still equals it). Written 2026-09-21 as the approved design (superseding the
 "extension world" draft of the same day); the per-step notes below record
 where the implementation deviated. **Step 1 (§3.2, the two outboxes)
 is implemented** (2026-09-22): `world.pendingComponents` /

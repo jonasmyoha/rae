@@ -219,8 +219,9 @@ storage term Rae's sparse tables would falsely promise.)
   applied, the components the node inherited whole, the ones it authored a
   field over. Authoring `BundleRefs` by hand is rejected like any runtime
   table. The editor's inspector shows the line (`bundles: pill [inherited:
-  Rect, Size …] overrides: Shape`); the per-field diff on save waits for the
-  editor's save path.
+  Rect, Size …] overrides: Shape`). On save (`lib/ui/SceneWriter`) a bundled
+  node is written as its `bundles` list plus its own component objects —
+  the inherited ones are not expanded into the file.
 - **Code-side.** `applyBundle(world, entity, name)` runs the same expansion
   on a live entity (a debug menu can use the authored bundles instead of
   listing components), appending to its `BundleRefs`.
