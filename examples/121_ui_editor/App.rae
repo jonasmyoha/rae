@@ -573,7 +573,14 @@ func runApp(app: mod App) ret Int {
         didRealWork: true
       )
       Gpu2d.endFrame(canvas: app.canvas)
-      renderedOnce = true
+      # The first frame counts only once it reached the screen: right after
+      # the window opens the surface can still report Occluded for a frame or
+      # two (a benign startup transient), and a frame that was rendered but
+      # not presented must not switch the loop to its idle wait — that left
+      # the editor black until the first mouse move.
+      if renderedOnce is false and (Gpu2d.lastPresentOk() or Gpu2d.headlessRequested()) {
+        renderedOnce = true
+      }
       renderedThisFrame = true
     } else {
       # The watcher is a poll, so the wait is bounded by its interval while
