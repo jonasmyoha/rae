@@ -1,0 +1,38 @@
+# `enumName(E, value: v)` — the mirror of enumFromName (#960): the member name
+# of an enum value as `opt String`, and the constant none when E is a generic
+# parameter instantiated with a NON-enum. That second half is what lets a
+# generic encoder try the enum path last without a per-type arm: a struct or
+# a scalar instantiation costs a constant and compiles (no `toString` is
+# demanded of a type that has none).
+enum Direction { north, east, south }
+
+type Pair {
+  x: Int
+  y: Int
+}
+
+func describe(T: type, value: view T) ret String {
+  if let name: String = enumName(T, value: value) {
+    ret "enum {name}"
+  }
+  ret "not an enum"
+}
+
+func main() {
+  let east: Direction = Direction.east
+  let north: Direction = Direction.north
+  log("direct: {describe(value: east)}")
+  log("direct first: {describe(value: north)}")
+  let pair: Pair = { x: 1, y: 2 }
+  log("struct: {describe(value: pair)}")
+  let count: Int = 7
+  log("int: {describe(value: count)}")
+  let text: String = "hello"
+  log("string: {describe(value: text)}")
+  # The round trip with enumFromName.
+  if let back: Direction = enumFromName(Direction, name: "south") {
+    if let name: String = enumName(Direction, value: back) {
+      log("round trip: {name}")
+    }
+  }
+}

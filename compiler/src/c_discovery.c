@@ -24,6 +24,24 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
     // #960: an enumFromName call needs its `opt E` struct-rep type emitted;
     // its name argument is walked like any expression. Checked BEFORE the
     // type-arg hoist below, which would move `E` out of the argument list.
+    if (c_call_enum_name_type(expr)) {
+        const AstTypeRef* ot = c_call_enum_name_opt_string_type(ctx);
+        CompilerContext* cc = ctx->compiler_ctx;
+        register_generic_type(cc, ot);
+        bool dup = false;
+        for (size_t i = 0; i < cc->demanded_opt_type_count && !dup; i++)
+            if (type_refs_equal(cc->demanded_opt_types[i], ot)) dup = true;
+        if (!dup) {
+            if (cc->demanded_opt_type_count >= cc->demanded_opt_type_cap) {
+                size_t nc = cc->demanded_opt_type_cap ? cc->demanded_opt_type_cap * 2 : 16;
+                cc->demanded_opt_types = realloc((void*)cc->demanded_opt_types, nc * sizeof(*cc->demanded_opt_types));
+                cc->demanded_opt_type_cap = nc;
+            }
+            cc->demanded_opt_types[cc->demanded_opt_type_count++] = ot;
+        }
+        discover_specializations_expr_impl(ctx, expr->as.call.args->next->value);
+        return;
+    }
     if (c_call_enum_from_name_type(expr)) {
         const AstTypeRef* ot = c_call_enum_from_name_opt_type(ctx, expr);
         if (ot) {

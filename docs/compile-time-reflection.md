@@ -332,6 +332,31 @@ if let kind: LayoutType = enumFromName(LayoutType, name: "horizontal") {
 ret LayoutType.none
 ```
 
+**`enumName(E, value: v)` → `opt String`** (2026-09-22). The mirror: the
+member name of `v` for an enum `E`, through the `toString` every enum already
+has; and, like `enumFromName`, the constant `none` when `E` is a generic
+parameter instantiated with a non-enum — so a generic ENCODER tries the enum
+path last with no per-type arm and a struct / scalar instantiation compiles
+(no `toString` is demanded of a type that has none; a plain `value.toString()`
+in the dead branch would not compile in C). The scene writer's field encoder
+is the consumer (`lib/ui/SceneEncode.rae`).
+
+```rae
+func encodeField(T: type, value: view T) ret String {
+  if typeName(value) is "Int" { ... }
+  ...
+  if let member: String = enumName(T, value: value) {
+    ret quote(text: member)
+  }
+  ret ""
+}
+```
+
+Fixed alongside: a generic `view T` parameter instantiated with an ENUM
+printed the `rae_View_Int64` wrapper in its C signature (sema types every
+enum as Int, so the resolved-TypeInfo fast path took the Int arm) while
+callers passed and the body read an `int64_t*` — now both take the enum path.
+
 **`typeName(x)` on a generic-typed parameter.** Inside a field loop
 `typeName(f)` folded to the field's type name already (#809). It now also
 answers for a *parameter* whose type is (or contains) a generic parameter:
