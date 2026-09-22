@@ -111,6 +111,25 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         }
         return true;
     }
+    // `enumName(E, value: v)` -> `opt String`: the member's name through the
+    // enum's generated toString for an enum E; the constant none for any other
+    // instantiation, so a generic ENCODER can try the enum path last the way
+    // a decoder tries enumFromName.
+    if (c_call_enum_name_type(expr)) {
+        const AstTypeRef* et = c_call_enum_name_enum_type(ctx, expr);
+        Str ename = get_base_type_name(et);
+        const AstTypeRef* ot = c_call_enum_name_opt_string_type(ctx);
+        const char* optm = rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, (AstTypeRef*)ot);
+        if (find_enum_decl(ctx, ctx->module, ename)) {
+            fprintf(out, "({ %s __eo = {0}; __eo.has = 1; __eo.value = rae_enum_toString_%.*s((int64_t)(",
+                    optm, (int)ename.len, ename.data);
+            emit_expr(ctx, expr->as.call.args->next->value, out, PREC_LOWEST, false, false);
+            fprintf(out, ")); __eo; })");
+        } else {
+            fprintf(out, "((%s){0})", optm);
+        }
+        return true;
+    }
     // Hoist a type argument out of the value-arg list if present —
     // new generic-call syntax. See c_backend.c for the helper.
     AstExpr* hoisted = hoist_type_arg_if_present(ctx, expr);

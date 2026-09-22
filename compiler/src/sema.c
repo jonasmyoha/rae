@@ -5342,6 +5342,38 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                 expr->resolved_type = type_get_opt(ctx->type_registry, et ? et : type_get_void(ctx->type_registry));
                 break;
             }
+            // The mirror of enumFromName: `enumName(E, value: v)` — the member
+            // name of `v` as `opt String` (none for a non-enum instantiation of
+            // a generic E, so a generic encoder may try the enum path last).
+            if (expr->as.call.callee && expr->as.call.callee->kind == AST_EXPR_IDENT
+                && str_eq_cstr(expr->as.call.callee->as.ident, "enumName")) {
+                AstCallArg* ta = expr->as.call.args;
+                AstCallArg* va = ta ? ta->next : NULL;
+                if (!ta || !va || va->next || ta->name.len != 0 || !ta->value
+                    || ta->value->kind != AST_EXPR_IDENT || !va->value
+                    || !str_eq_cstr(va->name, "value")) {
+                    diag_error(sema_diag_file(module), (int)expr->line, (int)expr->column,
+                               "enumName takes an enum type and `value: E` — enumName(Kind, value: kind)");
+                    module->had_error = true;
+                    expr->resolved_type = type_get_void(ctx->type_registry);
+                    break;
+                }
+                sema_analyze_expr(ctx, module, symbols, va->value, true);
+                AstTypeRef* etr = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef)); memset(etr, 0, sizeof *etr);
+                etr->parts = arena_alloc(ctx->ast_arena, sizeof(AstIdentifierPart)); memset(etr->parts, 0, sizeof *etr->parts);
+                etr->parts->text = ta->value->as.ident;
+                etr->line = ta->value->line; etr->column = ta->value->column;
+                TypeInfo* et = sema_resolve_type_internal(ctx, module, symbols, etr);
+                Symbol* esym = symbol_table_lookup(symbols, etr->parts->text);
+                bool is_generic = (et && et->kind == TYPE_GENERIC_PARAM) || (esym && !esym->decl);
+                if (!is_generic && !sema_typeref_is_enum(symbols, etr)) {
+                    diag_error(sema_diag_file(module), (int)ta->value->line, (int)ta->value->column,
+                               "enumName requires an enum type (or a generic type parameter)");
+                    module->had_error = true;
+                }
+                expr->resolved_type = type_get_opt(ctx->type_registry, type_get_string(ctx->type_registry));
+                break;
+            }
             // #960: `typeName(x)` on a GENERIC-typed parameter: a String the
             // backend folds to the concrete type's name per instantiation (and
             // decides `typeName(x) is "..."` arms with). Inside a field loop the

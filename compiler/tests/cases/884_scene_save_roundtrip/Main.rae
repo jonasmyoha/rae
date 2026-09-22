@@ -251,6 +251,27 @@ func main() {
   let rootEntity: EntityId = pageRootOf(world: edited, scene: scene)
   let rect: mod Rect => componentMod(this: edited.rects, entity: rootEntity)
   rect.size.x = 640.0
+  # Components ADDED at runtime, with enum fields: the generic encoder names
+  # the members (enumName), the Layout arm spells `kind` as `type`.
+  componentSet(
+    this: edited.shapes
+    entity: rootEntity
+    data: Shape { kind: ShapeKind.circle, radius: 12.0 }
+  )
+  componentSet(
+    this: edited.layouts
+    entity: rootEntity
+    data: Layout {
+      kind: LayoutType.horizontal
+      alignMain: AlignKind.center
+      alignCross: AlignKind.end
+    }
+  )
+  componentSet(
+    this: edited.scrollRoots
+    entity: rootEntity
+    data: ScrollRoot { axis: ScrollAxis.x }
+  )
   let fresh: UiWorld = freshDecodeOf(world: edited, uiSystems: editedSystems, scene: scene)
   let text: String = writeSceneText(
     world: edited
@@ -265,4 +286,33 @@ func main() {
       sub: "\"Rect\": \{\"x\": 1, \"y\": 2, \"w\": 640, \"h\": 200\}"
     )}"
   )
+  log("added shape kind named: {text.contains(sub: "\"kind\": \"Circle\"")}")
+  log(
+    "added layout enums named: {text.contains(sub: "\"type\": \"Horizontal\"") and text.contains(
+      sub: "\"alignCross\": \"End\""
+    )}"
+  )
+  log("added scroll axis named: {text.contains(sub: "\"axis\": \"X\"")}")
+  # ... and they come back: save, reload, compare the machine forms.
+  let editedPath: String = "{fixture}.edited"
+  writeFile(path: editedPath, content: text)
+  var reloaded: UiWorld = createUiWorld()
+  var reloadedSystems: UiSystems = createUiSystems()
+  let reloadedScene: Scene = loadInto(
+    world: reloaded
+    uiSystems: reloadedSystems
+    path: editedPath
+    root: "{getEnv(name: "TMPDIR")}/"
+  )
+  var editProblems: List(String) = List.create(String, cap: 4)
+  compareNode(
+    a: edited
+    b: reloaded
+    entity: rootEntity
+    problems: editProblems
+  )
+  loop let problem: view String in editProblems {
+    log("  edited: {problem}")
+  }
+  log("edited world round-trips: {editProblems.length is 0}")
 }

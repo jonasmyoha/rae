@@ -731,9 +731,17 @@ bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* ou
               gp = gp->next; arg = arg->next;
           }
       }
-      // DEBUG:
-      // fprintf(stderr, "emit_type_ref_as_c_type: kind=%d name=%.*s\n", t->kind, (int)t->name.len, t->name.data);
-
+      /* Sema types every enum as Int, so a `view <Enum>` ref (spelled by
+       * its enum name, resolved to TYPE_INT — e.g. a specialised `view T`
+       * with T = Direction) must NOT take the Int fast path below: that
+       * prints the rae_View_Int64 wrapper, while callers pass and the body
+       * reads an `int64_t*` for a view enum (the un-resolved path, further
+       * down). Same C type from both paths. */
+      if (t->kind == TYPE_INT && ctx && ctx->module && type->parts && !type->parts->next
+          && find_enum_decl(ctx, ctx->module, type->parts->text)) {
+          fprintf(out, "int64_t"); if (is_ptr) fprintf(out, "*");
+          return true;
+      }
       if (t->kind == TYPE_INT) {
           const char* inm = rae_int_c_name(t->as.integer.bits, t->as.integer.is_unsigned);
           bool is_canonical_int = (t->as.integer.bits == 64 && !t->as.integer.is_unsigned);
@@ -1178,6 +1186,46 @@ const AstTypeRef* c_call_enum_from_name_opt_type(CFuncContext* ctx, const AstExp
     return tr;
 }
 
+// The mirror of enumFromName: is `expr` the intrinsic call
+// `enumName(E, value: v)`? Returns the enum-type identifier expression (E).
+const AstExpr* c_call_enum_name_type(const AstExpr* expr) {
+    if (!expr || expr->kind != AST_EXPR_CALL || !expr->as.call.callee
+        || expr->as.call.callee->kind != AST_EXPR_IDENT
+        || !str_eq_cstr(expr->as.call.callee->as.ident, "enumName")) return NULL;
+    const AstCallArg* ta = expr->as.call.args;
+    if (!ta || !ta->next || ta->next->next || !ta->value || ta->value->kind != AST_EXPR_IDENT) return NULL;
+    return ta->value;
+}
+
+// E of an enumName call, substituted through the generic context (not opt).
+const AstTypeRef* c_call_enum_name_enum_type(CFuncContext* ctx, const AstExpr* expr) {
+    const AstExpr* te = c_call_enum_name_type(expr);
+    if (!te) return NULL;
+    AstTypeRef* tr = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
+    memset(tr, 0, sizeof *tr);
+    tr->parts = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstIdentifierPart));
+    memset(tr->parts, 0, sizeof *tr->parts);
+    tr->parts->text = te->as.ident;
+    AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr);
+    if (sub && sub != tr) {
+        AstTypeRef* copy = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
+        *copy = *sub; copy->next = NULL; tr = copy;
+    }
+    tr->is_opt = false; tr->is_view = false; tr->is_mod = false;
+    return tr;
+}
+
+// The `opt String` every enumName call yields.
+const AstTypeRef* c_call_enum_name_opt_string_type(CFuncContext* ctx) {
+    AstTypeRef* tr = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
+    memset(tr, 0, sizeof *tr);
+    tr->parts = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstIdentifierPart));
+    memset(tr->parts, 0, sizeof *tr->parts);
+    tr->parts->text.data = "String"; tr->parts->text.len = 6;
+    tr->is_opt = true;
+    return tr;
+}
+
 const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
     if (!expr) return NULL;
     // Cache primitive literal type-refs in static storage so callers can hold a
@@ -1304,6 +1352,7 @@ const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
                 const AstTypeRef* et = c_call_enum_from_name_opt_type(ctx, expr);
                 if (et) return et;
             }
+            if (c_call_enum_name_type(expr)) return c_call_enum_name_opt_string_type(ctx);
             if (expr->decl_link && expr->decl_link->kind == AST_DECL_FUNC) {
                 const AstTypeRef* crt = expr->decl_link->as.func_decl.returns
                     ? expr->decl_link->as.func_decl.returns->type : NULL;
