@@ -1,0 +1,268 @@
+import Files
+import Json
+import String
+open Sys
+open ui/Ecs
+open ui/UiSystems
+open ui/Components
+open ui/Scene
+open ui/SceneFile
+open ui/SceneLoader
+open ui/SceneInstance
+open ui/SceneImports
+open ui/SceneBundles
+open ui/ScenePolicy
+open ui/SceneWriter
+open ui/SceneEncode
+open ui/ThemeResolved
+open ui/Registry
+open ecs/Entity
+open ecs/ComponentTable
+
+# The scene SAVE path (ui/SceneWriter): every 121 sample and every 106 scene
+# loads, saves, and the saved text loads to the SAME world — every authored
+# table of every node equal in its machine form, the pending (app)
+# components equal verbatim — and a scene with a made-up component keeps it.
+# Then an edit: a Rect changed in the world is saved in the grammar and comes
+# back changed (the encoder side).
+
+# Load `path` the way a host does: the entry's imports resolved from `root`
+# (theme tokens + bundles), unknown components parked (report policy).
+func loadInto(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  path: view String
+  root: view String
+) ret Scene {
+  let scene: Scene = loadScenePackageFile(path: path, sceneId: "roundtrip")
+  var registry: SceneRegistry = createSceneRegistry()
+  let assets: SceneAssets = resolveSceneAssets(
+    entry: scene
+    entryPath: path
+    root: root
+    registry: registry
+    diagnostics: world.sceneDiagnostics
+    sceneLabel: "roundtrip"
+  )
+  registerSceneReferencesTransitive(
+    scene: scene
+    root: root
+    registry: registry
+    diagnostics: world.sceneDiagnostics
+  )
+  let theme: ResolvedTheme = sceneImportedTheme(entry: scene, assets: assets, registry: registry)
+  applyResolvedTokens(dst: world.theme.resolved, src: theme)
+  world.bundles = sceneImportedBundles(entry: scene, assets: assets, registry: registry)
+  world.scenePolicy.unknownComponents = UnknownComponentPolicy.report
+  if scene.ok {
+    loadScene(world: world, uiSystems: uiSystems, scene: scene)
+  }
+  ret scene
+}
+
+func pageRootOf(world: view UiWorld, scene: view Scene) ret EntityId {
+  if let index: Int = findNodeInPage(world: world, pageId: "", nodeId: scene.rootNodeId) {
+    ret nodeEntity(world: world, index: index)
+  }
+  ret noEntity()
+}
+
+# Compare node `entity` of `a` with its namesake in `b`: every authored table
+# in machine form, and the pending components' names + json.
+func compareNode(
+  a: view UiWorld
+  b: view UiWorld
+  entity: view EntityId
+  problems: mod List(String)
+) {
+  let nodeId: String = "{componentGet(this: a.nodeIdComponents, entity: entity).id}"
+  var other: EntityId = noEntity()
+  if let index: Int = findNodeInPage(world: b, pageId: "", nodeId: nodeId) {
+    other = nodeEntity(world: b, index: index)
+  }
+  if isNone(this: other) {
+    problems.add(value: "{nodeId}: missing after save")
+    ret
+  }
+  let names: List(String) = authoredNamesOf(world: a, entity: entity)
+  loop let name: view String in names {
+    if name is "BundleRefs" {
+      continue
+    }
+    let left: String = machineComponentJson(world: a, entity: entity, name: name)
+    let right: String = machineComponentJson(world: b, entity: other, name: name)
+    if left is not right {
+      problems.add(value: "{nodeId}.{name}: {left} != {right}")
+    }
+  }
+  let namesB: List(String) = authoredNamesOf(world: b, entity: other)
+  loop let name: view String in namesB {
+    if name is "BundleRefs" {
+      continue
+    }
+    if machineComponentJson(world: a, entity: entity, name: name).length() is 0 {
+      problems.add(value: "{nodeId}.{name}: appeared after save")
+    }
+  }
+  loop let pending: view PendingComponent in a.pendingComponents {
+    if pending.entity is entity {
+      var found: Bool = false
+      loop let candidate: view PendingComponent in b.pendingComponents {
+        if candidate.entity is other and candidate.name is pending.name {
+          found = true
+          if candidate.json is not pending.json {
+            problems.add(
+              value: "{nodeId}.{pending.name}: pending {pending.json} != {candidate.json}"
+            )
+          }
+        }
+      }
+      if found is false {
+        problems.add(value: "{nodeId}.{pending.name}: pending component lost")
+      }
+    }
+  }
+  if componentHas(this: a.childrens, entity: entity) {
+    let children: view Children => componentView(this: a.childrens, entity: entity)
+    loop let child: view EntityId in children.ids {
+      if componentHas(this: a.nodeIdComponents, entity: child) {
+        compareNode(
+          a: a
+          b: b
+          entity: child
+          problems: problems
+        )
+      }
+    }
+  }
+}
+
+# load -> save -> load; the count of differences (0 = round-trips).
+func roundTrip(path: view String, root: view String, savedPath: view String) ret Int {
+  var a: UiWorld = createUiWorld()
+  var aSystems: UiSystems = createUiSystems()
+  let scene: Scene = loadInto(
+    world: a
+    uiSystems: aSystems
+    path: path
+    root: root
+  )
+  if scene.ok is false {
+    # A Theme / Bundles scene has no page (no root / nodes): nothing to save.
+    log("  {path}: not a page ({scene.errorMsg}) - skipped")
+    ret 0
+  }
+  let pageRoot: EntityId = pageRootOf(world: a, scene: scene)
+  let fresh: UiWorld = freshDecodeOf(world: a, uiSystems: aSystems, scene: scene)
+  let text: String = writeSceneText(
+    world: a
+    uiSystems: aSystems
+    fresh: fresh
+    scene: scene
+    pageRoot: pageRoot
+    pageId: ""
+  )
+  writeFile(path: savedPath, content: text)
+  var b: UiWorld = createUiWorld()
+  var bSystems: UiSystems = createUiSystems()
+  let saved: Scene = loadInto(
+    world: b
+    uiSystems: bSystems
+    path: savedPath
+    root: root
+  )
+  if saved.ok is false {
+    log("  {path}: the SAVED text did not parse ({saved.errorMsg})")
+    ret 1
+  }
+  var problems: List(String) = List.create(String, cap: 8)
+  compareNode(
+    a: a
+    b: b
+    entity: pageRoot
+    problems: problems
+  )
+  if aliveCount(world: a) is not aliveCount(world: b) {
+    problems.add(value: "alive {aliveCount(world: a)} != {aliveCount(world: b)}")
+  }
+  loop let problem: view String in problems {
+    log("  {path}: {problem}")
+  }
+  ret problems.length
+}
+
+func roundTripFolder(folder: view String, root: view String) ret Int {
+  var failures: Int = 0
+  var count: Int = 0
+  let entries: List(File) = Files.listDirByExt(folder: folder, ext: "raescene")
+  loop let entry: view File in entries {
+    let path: String = "{folder}/{entry.name}"
+    let saved: String = "{getEnv(name: "TMPDIR")}/rae_roundtrip_{entry.name}"
+    let problems: Int = roundTrip(path: path, root: root, savedPath: saved)
+    if problems > 0 {
+      failures = failures + 1
+    }
+    count = count + 1
+  }
+  log("{folder}: {count} scenes, {failures} with differences")
+  ret failures
+}
+
+func main() {
+  var total: Int = 0
+  total = total + roundTripFolder(
+    folder: "../examples/121_ui_editor/assets/samples"
+    root: "../examples/121_ui_editor/assets/samples/"
+  )
+  total = total + roundTripFolder(
+    folder: "../examples/106_mobile_ui/assets/scenes"
+    root: "../examples/106_mobile_ui/assets/scenes/"
+  )
+  log("round-trip differences: {total}")
+
+  # A made-up component survives the save verbatim.
+  let fixture: String = "{getEnv(name: "TMPDIR")}/rae_roundtrip_madeup.raescene"
+  writeFile(
+    path: fixture
+    content: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Root\",\"nodes\":\{\"Root\":\{\"Rect\":\{\"x\":1,\"y\":2,\"w\":300,\"h\":200\},\"MadeUp\":\{\"level\":3,\"tag\":\"hero\"\}\}\}\}"
+  )
+  let madeUp: Int = roundTrip(
+    path: fixture
+    root: "{getEnv(name: "TMPDIR")}/"
+    savedPath: "{fixture}.saved"
+  )
+  log("made-up component round-trips: {madeUp is 0}")
+  if let saved: String = readFile(path: "{fixture}.saved") {
+    log(
+      "saved keeps MadeUp: {saved.contains(sub: "\"MadeUp\": \{\"level\": 3, \"tag\": \"hero\"\}")}"
+    )
+  }
+
+  # An EDIT is saved in the grammar: change Root's Rect in the world, save,
+  # reload — the new rect comes back, everything else unchanged.
+  var edited: UiWorld = createUiWorld()
+  var editedSystems: UiSystems = createUiSystems()
+  let scene: Scene = loadInto(
+    world: edited
+    uiSystems: editedSystems
+    path: fixture
+    root: "{getEnv(name: "TMPDIR")}/"
+  )
+  let rootEntity: EntityId = pageRootOf(world: edited, scene: scene)
+  let rect: mod Rect => componentMod(this: edited.rects, entity: rootEntity)
+  rect.size.x = 640.0
+  let fresh: UiWorld = freshDecodeOf(world: edited, uiSystems: editedSystems, scene: scene)
+  let text: String = writeSceneText(
+    world: edited
+    uiSystems: editedSystems
+    fresh: fresh
+    scene: scene
+    pageRoot: rootEntity
+    pageId: ""
+  )
+  log(
+    "edited rect saved: {text.contains(
+      sub: "\"Rect\": \{\"x\": 1, \"y\": 2, \"w\": 640, \"h\": 200\}"
+    )}"
+  )
+}
