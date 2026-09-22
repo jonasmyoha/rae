@@ -11,9 +11,9 @@
 # strings, theme tokens like "gap":"spaceM", flat {x,y,w,h}) is a different,
 # hand-friendly grammar and keeps its loader in registry.rae
 # (applyComponentByName); that loader is not a serializer and is not replaced.
-# The full machine round-trip additionally waits on the compiler parsing enums in
-# `fromJson` (#767) — until then a snapshot of a component with an enum field
-# reloads that field as 0.
+# The machine round-trip handles enum fields: the synthesized `toJson` writes an
+# enum by its member NAME ("kind": "large") and `fromJson` restores it from that
+# name (#767, done) — a snapshot of a component with an enum field round-trips.
 open ecs/Registry
 
 # Keyed by the UiWorld FIELD name (#768): the machine snapshot

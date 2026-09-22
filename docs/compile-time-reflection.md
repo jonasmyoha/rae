@@ -32,6 +32,29 @@ Iterating a struct's fields is the **existing collection loop** with a
 binding's required explicit type is the **filter**, `any` is the type wildcard, and
 slot metadata is read through **compile-time plain functions** like `fieldName(x)`.
 
+## Every reflection builtin, at a glance
+
+All of these are compile-time plain functions the compiler folds — never phantom
+members, always called with parens, reachable via UFCS. `E` / `T` are a type; the
+rest are values.
+
+| builtin | result | what it gives |
+|---|---|---|
+| `fields(value)` / `value.fields()` | loop sequence | the value's fields, one per unrolled iteration (the binding type filters; `any` is the wildcard) |
+| `fieldName(binding)` | `String` | the slot name the binding came from (`"rects"`), a literal |
+| `typeName(binding)` | `String` | the binding's type name, a literal — a field loop over `ComponentTable(T)` folds to the element (`"Rect"`); a parameter folds to its OWN full type, generic args included (`"List(String)"`) |
+| `fieldSet(f, value: v)` / `f.set(value: v)` | — | wholesale write of the field a `mod` field-loop binding aliases |
+| `enumFromName(E, name: s)` | `opt E` | the member of `E` named `s`, else `none` (a non-enum instantiation of a generic `E`: the constant `none`) |
+| `enumName(E, value: v)` | `opt String` | the member name of `v` (a non-enum instantiation: `none`) |
+| `enumMembers(E)` | `List(String)` | every member name, declaration order (a non-enum instantiation: `[]`) |
+| `enumCount(E)` | `Int` | the member count (a non-enum instantiation: `0`) |
+| `value.toJson()` / `T.fromJson(json:)` | `String` / `T` | synthesized machine round-trip; an enum field is written and read by its member NAME |
+| `value.toString()` / `"{value}"` | `String` | the value in Rae's own literal spelling, per instantiation (`Point { x: 1, y: 2 }`, `[1, 2]`, an enum's member name) |
+| `equals(a: x, b: y)` | `Bool` | deep value equality, per type (structs field by field, lists element-wise, `Ptr`/`Buffer` by identity) |
+
+`fields(Type)` — the field set of a TYPE, for constructing a value — is deliberately
+NOT built (see the section at the end). Everything above walks or reads a VALUE.
+
 ## Building block 1 — the collection loop Rae already has
 
 Real code today:
@@ -412,11 +435,14 @@ answers for a *parameter* whose type is (or contains) a generic parameter:
 `func decode(T: type, fallback: copy T, ...) { if typeName(fallback) is
 "Int" { ... } }`. In the template it is a String; in each instantiation it
 is that instantiation's concrete type name, folded to a literal. For a
-parameter the name is the type's OWN base name — `List` for a `List(String)`
-argument — where a field-loop binding over `ComponentTable(Position)` folds
-to the element `Position` (#809): the parameter IS the thing, the table
-holds the thing. (So a `List(String)` field never takes a decoder's `"String"`
-arm.)
+parameter the name is the type's OWN FULL name, generic arguments included —
+`List(String)` for a `List(String)` argument, `List(Int)` for a `List(Int)`
+one (verified in fixture 890) — where a field-loop binding over
+`ComponentTable(Position)` folds to the element `Position` (#809): the
+parameter IS the thing, the table holds the thing. This is what lets one
+decoder body branch a `List(Int)` field to its own arm
+(`RegistryGeneric.rae`: `if typeName(fallback) is "List(Int)"`) instead of a
+scalar arm; a `List(String)` parameter never takes a `"String"` arm.
 
 **Constant `if` is decided at fold time.** Wherever the compiler folds these
 queries — a field-loop body per field, a generic body per instantiation — an
