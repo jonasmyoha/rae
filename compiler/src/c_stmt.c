@@ -1817,12 +1817,34 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     Str var_name = stmt->as.let_stmt.name;
                     Str et_base = get_base_type_name(elem_type);
                     bool elem_is_any = str_eq_cstr(et_base, "Any") || str_eq_cstr(et_base, "RaeAny");
+                    bool saved_has_exp_le = ctx->has_expected_type;
+                    AstTypeRef saved_exp_le = ctx->expected_type;
                     for (const AstCollectionElement* e = stmt->as.let_stmt.value->as.collection.elements; e; e = e->next) {
                         fprintf(out, "  %s(&%.*s, ", add_name, (int)var_name.len, var_name.data);
                         if (elem_is_any) fprintf(out, "rae_any((");
+                        // The element's expected type is the list's element type,
+                        // so a nested collection literal (`[[1, 2], [3]]` — each
+                        // `[1, 2]` is itself a List(Int) literal) knows what to
+                        // lower to instead of failing for want of a declared type.
+                        ctx->has_expected_type = true;
+                        ctx->expected_type = *elem_type;
                         emit_expr(ctx, e->value, out, PREC_LOWEST, false, false);
+                        ctx->has_expected_type = saved_has_exp_le;
+                        ctx->expected_type = saved_exp_le;
                         if (elem_is_any) fprintf(out, "))");
                         fprintf(out, ");\n");
+                        // `add(value: own T)` MOVES the element into the list, so
+                        // a heap-owning local element (`[inner]` where inner is a
+                        // List/String/struct that owns heap) must not also be
+                        // dropped at scope exit — the list owns it now. The direct
+                        // `.add()` path marks this in c_call.c; the literal lowers
+                        // add() by hand, so mark it here too. A POD element (Int)
+                        // owns no heap and is unaffected; a literal/call element is
+                        // not a local and is skipped by mark_expr_moved_if_local.
+                        if (e->value && e->value->kind == AST_EXPR_IDENT
+                            && type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, elem_type, 0)) {
+                            mark_expr_moved_if_local(ctx, e->value);
+                        }
                     }
                     // Register generic type for struct emission
                     register_generic_type(ctx->compiler_ctx, list_type);
