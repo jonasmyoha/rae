@@ -1,0 +1,29 @@
+# A List literal of heap-owning structs (a struct owning a String) used to
+# SIGABRT at scope exit: the element and the source local both owned the
+# String, so it was freed twice. `[left]` MOVES the local into the list, so
+# the list is the sole owner and drops it exactly once.
+type Pair {
+  label: String
+  n: Int
+}
+
+func main() {
+  # From local elements.
+  let home: Pair = { label: "home", n: 1 }
+  let away: Pair = { label: "away", n: 2 }
+  let fromLocals: List(Pair) = [home, away]
+  log("fromLocals: {fromLocals.length}")
+
+  # Inline struct literals as elements.
+  let inlineList: List(Pair) = [Pair { label: "a", n: 10 }, Pair { label: "b", n: 20 }]
+  log("inline: {inlineList.length}")
+
+  # Read an element back out (a copy) and iterate — the list still owns its
+  # elements, dropped once at scope exit.
+  if let first: Pair = fromLocals.copyAt(index: 0) {
+    log("first: {first.label} {first.n}")
+  }
+  loop let pair: view Pair in inlineList {
+    log("  {pair.label} {pair.n}")
+  }
+}
