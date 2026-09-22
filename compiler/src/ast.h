@@ -365,6 +365,15 @@ struct AstStmt {
     struct {
       AstExpr* subject;
       AstMatchCase* cases;
+      // `match let` (#11773361): the opt-unwrapping binding written before the
+      // arms, exactly the `if let` grammar. NULL for a plain `match`, whose
+      // subject is `subject` instead. Sema validates the arms (a `case none`
+      // is REQUIRED here and forbidden on a plain match) and then rewrites the
+      // statement into `if let <binding> { match <name> { value arms } } else
+      // { <none arm> }`, so ownership, drop and exhaustiveness are the
+      // existing ones. The formatter renders the SOURCE shape, so the rewrite
+      // must stay in sema — it never runs for `rae format`.
+      AstStmt* binding;
     } match_stmt;
     struct {
       AstExpr* target;

@@ -754,6 +754,7 @@ static AstStmt* parse_statement(Parser* parser);
 static AstExpr* parse_collection_literal(Parser* parser, const Token* start_token);
 static AstExpr* parse_list_literal(Parser* parser, const Token* start_token);
 static AstExpr* parse_match_expression(Parser* parser, const Token* start_token);
+static AstStmt* parse_binding_statement(Parser* parser, const Token* kw_token, bool is_var, bool is_const, bool require_type);
 static AstExpr* parse_typed_literal(Parser* parser, const Token* start_token, AstTypeRef* type_hint);
 static AstTypeRef* parse_type_ref_from_ident(Parser* parser, const Token* ident_token);
 static AstExpr* finish_call(Parser* parser, AstExpr* callee, const Token* start_token);
@@ -1818,7 +1819,33 @@ static AstStmt* parse_defer_statement(Parser* parser, const Token* token) {
 
 static AstStmt* parse_match_statement(Parser* parser, const Token* match_token) {
   AstStmt* stmt = new_stmt(parser, AST_STMT_MATCH, match_token);
-  stmt->as.match_stmt.subject = parse_expression(parser);
+  stmt->as.match_stmt.binding = NULL;
+  // `match let name: T = lookup(...)` — the opt-shaped twin of `if let`: the
+  // `let` IS the unwrap, so the arms match the PAYLOAD and `case none` is the
+  // absent arm. Same binding grammar as `if let`, no parentheses.
+  if (parser_check(parser, TOK_KW_LET)) {
+    const Token* let_token = parser_peek(parser);
+    parser_advance(parser);
+    AstStmt* bind = parse_binding_statement(parser, let_token, false, false, /*require_type=*/false);
+    if (bind && bind->kind == AST_STMT_LET) {
+      AstTypeRef* bt = bind->as.let_stmt.type;
+      if (!bt) {
+        parser_error(parser, let_token,
+          "'match let' needs the binding's type: 'view T'/'mod T' with '=>', or 'T' with '='");
+      } else if (!bind->as.let_stmt.value) {
+        parser_error(parser, let_token, "'match let' requires an initializer");
+      } else {
+        // The reference form binds an optional reference (the same null test
+        // `if let` uses); the owned form transfers the payload. Sema builds
+        // the `if let` this lowers to and reuses both paths as they are.
+        if (bt->is_view || bt->is_mod) bt->is_opt = true;
+        stmt->as.match_stmt.binding = bind;
+      }
+    }
+    stmt->as.match_stmt.subject = NULL;
+  } else {
+    stmt->as.match_stmt.subject = parse_expression(parser);
+  }
   parser_consume(parser, TOK_LBRACE, "expected '{' after match subject");
   AstMatchCase* cases = NULL;
   bool saw_default = false;

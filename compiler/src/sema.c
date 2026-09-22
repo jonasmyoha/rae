@@ -922,6 +922,7 @@ static void sema_analyze_decl(CompilerContext* ctx, AstModule* module, SymbolTab
 static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr, bool is_value_pos);
 static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstStmt* stmt, TypeInfo* current_return_type);
 static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstTypeRef* type_ref);
+static bool sema_rewrite_match_let(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstStmt* stmt);
 static void sema_check_own_args(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, const AstFuncDecl* fd, AstCallArg* args, bool skip_receiver);
 static bool expr_is_owning(SymbolTable* symbols, const AstExpr* e);
 static TypeInfo* sema_array_type_from_call(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr);
@@ -4144,7 +4145,30 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
              }
              break;
         case AST_STMT_MATCH: {
+            // `match let name: T = lookup(...)` — the opt-shaped twin of
+            // `if let`. The arms match the PAYLOAD and `case none` is the
+            // absent arm; validated here, then REWRITTEN into
+            //     if let name: T = lookup(...) { match name { <value arms> } }
+            //     else { <none arm> }
+            // so ownership/drop (#623) and the exhaustiveness rules are the
+            // existing ones, and the bound name is naturally in scope in the
+            // value arms but not in the `none` arm.
+            if (stmt->as.match_stmt.binding) {
+                if (!sema_rewrite_match_let(ctx, module, symbols, stmt)) break;
+                sema_analyze_stmt(ctx, module, symbols, stmt, current_return_type);
+                break;
+            }
             if (stmt->as.match_stmt.subject) sema_analyze_expr(ctx, module, symbols, stmt->as.match_stmt.subject, true);
+            // A plain match's subject cannot be absent, so it never has a
+            // `none` arm — the subject's TYPE decides the arm list.
+            for (AstMatchCase* mc = stmt->as.match_stmt.cases; mc; mc = mc->next) {
+                if (mc->pattern && mc->pattern->kind == AST_EXPR_NONE) {
+                    diag_error(sema_diag_file(module), (int)mc->pattern->line, (int)mc->pattern->column,
+                        "a plain 'match' has no 'case none': its subject cannot be absent "
+                        "(use 'match let name: T = <opt>' to unwrap and match in one statement)");
+                    module->had_error = true;
+                }
+            }
             bool has_default = false;
             const AstDecl* enum_decl = NULL;
             Str enum_name = {0};
@@ -4369,6 +4393,115 @@ static bool sema_module_declares_func(const AstModule* module, const char* name)
     for (const AstDecl* d = module ? module->decls : NULL; d; d = d->next)
         if (d->kind == AST_DECL_FUNC && str_eq_cstr(d->as.func_decl.name, name)) return true;
     return false;
+}
+
+// `match let` -> `if let { match } else { }` (#11773361). Validates the two
+// rules that are the construct's own — the subject must be an `opt`, and the
+// `none` arm is REQUIRED — then rewrites `stmt` IN PLACE. Everything else (a
+// missing enum member, a stray `default` on an enum, a required `default` on
+// an Int/String) is the inner match's existing check, and `default` therefore
+// cannot cover `none`: the none arm is lifted out before that check runs.
+// Returns false when it reported an error and the statement is unusable.
+static bool sema_rewrite_match_let(CompilerContext* ctx, AstModule* module,
+                                   SymbolTable* symbols, AstStmt* stmt) {
+    AstStmt* bind = stmt->as.match_stmt.binding;
+    AstExpr* subject = bind->as.let_stmt.value;
+    sema_analyze_expr(ctx, module, symbols, subject, true);
+
+    // The `let` IS the unwrap, so the subject must be an opt.
+    TypeInfo* st = subject->resolved_type;
+    if (st && st->kind == TYPE_REF) st = st->as.ref.base;
+    if (st && st->kind != TYPE_OPT && st->kind != TYPE_GENERIC_PARAM) {
+        diag_error(sema_diag_file(module), (int)subject->line, (int)subject->column,
+            "the subject is not an opt; use 'match'");
+        module->had_error = true;
+        return false;
+    }
+
+    // Split the arms: the `none` arm is the else block, the rest stay.
+    AstMatchCase* value_head = NULL; AstMatchCase* value_tail = NULL;
+    AstBlock* none_block = NULL;
+    size_t none_line = 0, none_column = 0;
+    for (AstMatchCase* mc = stmt->as.match_stmt.cases; mc; ) {
+        AstMatchCase* next = mc->next;
+        bool is_none = mc->pattern && mc->pattern->kind == AST_EXPR_NONE && !mc->or_patterns;
+        if (is_none) {
+            if (none_block) {
+                diag_error(sema_diag_file(module), (int)mc->pattern->line, (int)mc->pattern->column,
+                    "'match let' already has a 'case none' arm");
+                module->had_error = true;
+            }
+            none_block = mc->block;
+            none_line = mc->pattern->line; none_column = mc->pattern->column;
+        } else {
+            mc->next = NULL;
+            if (!value_tail) value_head = mc; else value_tail->next = mc;
+            value_tail = mc;
+        }
+        mc = next;
+    }
+    (void)none_line; (void)none_column;
+    if (!none_block) {
+        diag_error(sema_diag_file(module), (int)stmt->line, (int)stmt->column,
+            "'match let' requires a 'case none' arm: the subject is an opt, so its absence "
+            "is a case a reader must see (add 'case none { }')");
+        module->had_error = true;
+        return false;
+    }
+    if (!value_head) {
+        diag_error(sema_diag_file(module), (int)stmt->line, (int)stmt->column,
+            "'match let' needs at least one value arm besides 'case none'");
+        module->had_error = true;
+        return false;
+    }
+
+    // The inner `match <name> { <value arms> }`.
+    AstStmt* inner = arena_alloc(ctx->ast_arena, sizeof(AstStmt));
+    memset(inner, 0, sizeof *inner);
+    inner->kind = AST_STMT_MATCH;
+    inner->line = stmt->line; inner->column = stmt->column;
+    AstExpr* name_ref = arena_alloc(ctx->ast_arena, sizeof(AstExpr));
+    memset(name_ref, 0, sizeof *name_ref);
+    name_ref->kind = AST_EXPR_IDENT;
+    name_ref->as.ident = bind->as.let_stmt.name;
+    name_ref->line = stmt->line; name_ref->column = stmt->column;
+    inner->as.match_stmt.subject = name_ref;
+    inner->as.match_stmt.cases = value_head;
+    inner->as.match_stmt.binding = NULL;
+
+    AstBlock* then_block = arena_alloc(ctx->ast_arena, sizeof(AstBlock));
+    memset(then_block, 0, sizeof *then_block);
+    then_block->first = inner;
+
+    // Become the `if let`. A reference binding keeps the `name is not none`
+    // test the parser builds for `if let`; an owned binding leaves the
+    // condition NULL and the backend tests the optional it materialises.
+    AstStmt* saved_next = stmt->next;
+    size_t line = stmt->line, column = stmt->column;
+    memset(&stmt->as, 0, sizeof stmt->as);
+    stmt->kind = AST_STMT_IF;
+    stmt->line = line; stmt->column = column;
+    stmt->next = saved_next;
+    stmt->as.if_stmt.binding = bind;
+    stmt->as.if_stmt.then_block = then_block;
+    stmt->as.if_stmt.else_block = none_block;
+    stmt->as.if_stmt.condition = NULL;
+    if (bind->as.let_stmt.is_bind) {
+        AstExpr* lhs = arena_alloc(ctx->ast_arena, sizeof(AstExpr));
+        memset(lhs, 0, sizeof *lhs);
+        lhs->kind = AST_EXPR_IDENT; lhs->as.ident = bind->as.let_stmt.name;
+        lhs->line = line; lhs->column = column;
+        AstExpr* rhs = arena_alloc(ctx->ast_arena, sizeof(AstExpr));
+        memset(rhs, 0, sizeof *rhs);
+        rhs->kind = AST_EXPR_NONE; rhs->line = line; rhs->column = column;
+        AstExpr* cond = arena_alloc(ctx->ast_arena, sizeof(AstExpr));
+        memset(cond, 0, sizeof *cond);
+        cond->kind = AST_EXPR_BINARY; cond->as.binary.op = AST_BIN_NEQ;
+        cond->as.binary.lhs = lhs; cond->as.binary.rhs = rhs;
+        cond->line = line; cond->column = column;
+        stmt->as.if_stmt.condition = cond;
+    }
+    return true;
 }
 
 static bool sema_typeref_is_enum(SymbolTable* symbols, const AstTypeRef* tr) {

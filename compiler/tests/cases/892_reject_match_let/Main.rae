@@ -1,0 +1,83 @@
+# The arm list a `match let` must have: the subject's TYPE decides it, the
+# same rule `default` already follows.
+enum Kind { small, large }
+
+# (1) an opt subject always needs `case none` — its absence is a case.
+func missingNone(text: view String) {
+  match let kind: Kind = enumFromName(Kind, name: text) {
+    case Kind.small {
+      log("s")
+    }
+    case Kind.large {
+      log("l")
+    }
+  }
+}
+
+# (2) an enum subject must still name every member.
+func missingMember(text: view String) {
+  match let kind: Kind = enumFromName(Kind, name: text) {
+    case Kind.small {
+      log("s")
+    }
+    case none {
+      log("n")
+    }
+  }
+}
+
+# (3) ... and still forbids `default` (#621).
+func strayDefault(text: view String) {
+  match let kind: Kind = enumFromName(Kind, name: text) {
+    case Kind.small {
+      log("s")
+    }
+    case Kind.large {
+      log("l")
+    }
+    default {
+      log("d")
+    }
+    case none {
+      log("n")
+    }
+  }
+}
+
+# (4) the `let` IS the unwrap, so a non-opt subject is not a `match let`.
+func notOpt(count: view Int) {
+  match let value: Int = count {
+    case 3 {
+      log("three")
+    }
+    default {
+      log("other")
+    }
+    case none {
+      log("n")
+    }
+  }
+}
+
+# (5) a plain `match` never has a `case none` — its subject cannot be absent.
+func plainNone(count: view Int) {
+  match count {
+    case 3 {
+      log("three")
+    }
+    case none {
+      log("n")
+    }
+    default {
+      log("other")
+    }
+  }
+}
+
+func main() {
+  missingNone(text: "small")
+  missingMember(text: "small")
+  strayDefault(text: "small")
+  notOpt(count: 3)
+  plainNone(count: 3)
+}
