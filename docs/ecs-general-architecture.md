@@ -297,6 +297,41 @@ registerComponent(reg, name: "Transform3D", save: transform3dToJson, load: trans
   parser-only today), so `toJson` has somewhere to write. This is the one real
   library gap for round-tripping (editor save).
 
+### 2.7.1 Which tables the loader knows — the world's, plus the systems' own (2026-09-22)
+
+"The registry IS the world" was the rule until the ECS split
+(`docs/ecs-systems-own-their-tables.md`): a `.raescene` component was
+authorable iff it was a `ComponentTable` field on `UiWorld`, because the
+loader is one compile-time loop over `fields(world)`. It is now **"the
+world's tables, plus the systems' own, drained through the outboxes"**:
+
+- `UiWorld` keeps only the *shared, authored* tables (`Rect`, `Text`,
+  `Sprite`, …), the authoritative `Children`, the resources and the
+  allocator — the tables with no better owner.
+- A **system owns what it derives or what only it reads**. The lib's
+  derived tables live on `UiSystems` (`lib/ui/UiSystems.rae`: `LayoutSystem`,
+  `SafeAreaSystem`, `HierarchySystem`, `Transform2dSystem`, `AnimationSystem`,
+  `HeroTransitionSystem`, `ButtonSystem`), handed to the pipeline and every
+  reader as `uiSystems: view | mod UiSystems`. An app's own components live on
+  its systems (106's `MusicSystems`, the editor's `ChromeSystem` and friends).
+- A component is therefore authorable if it is a `UiWorld` table **or** a
+  `ComponentTable` on a system the app drains: the loader applies what the
+  world has and parks the rest in `world.pendingComponents`; the app's
+  hand-written `apply…Components` decodes each into its system with the ONE
+  generic `applyComponentInto(S: type, system, world, pending)` and reports
+  what nobody claims (`reportUnknownComponent`, the old #941 verdict). A
+  destroyed entity goes to `world.deadEntities` and is recycled only after the
+  app has cleared its own tables (`releaseDeadEntities`). No callbacks: two
+  lists, drained once per frame.
+- The editor never drains: what stays pending is exactly "the components the
+  editor does not know", kept as authored.
+
+**The 3D side is NOT in this shape yet.** `World3d` (`lib/Scene3d.rae`) and the
+3D examples still keep their derived tables on the world; they are the same
+refactor later — `Transform3dSystem` as the sibling of `Transform2dSystem`,
+the render / camera systems owning the tables they derive — once the UI side
+has lived with it. Do not start that refactor as a side effect of a UI task.
+
 
 ### 2.8 Resources — world-global singletons, named as such
 Every real program has state with exactly one instance: the frame clock, input,

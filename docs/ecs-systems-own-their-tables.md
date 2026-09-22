@@ -1,7 +1,14 @@
 # Systems own their tables: splitting UiWorld, app components, and bundles
 
-Status: **design, approved direction** (2026-09-21; supersedes the
-"extension world" draft of the same day). **Step 1 (§3.2, the two outboxes)
+Status: **implemented** (2026-09-22) — step 1 `92f537c8` (the two outboxes),
+step 2 `0cd5a646` (the editor's systems), step 3 `5c407572` (covers as data),
+step 4 `c830dea5` (106's systems), step 5 `d18f727f` (bundles), step 6a
+`c84dc54d` (Layout / SafeArea / Hierarchy), step 6b `531503cc` (Transform2d /
+Animation / HeroTransition / Button). Open: the editor's save path (queued) —
+the save-side bundle diff and the verbatim round-trip of pending components
+wait for it. Written 2026-09-21 as the approved design (superseding the
+"extension world" draft of the same day); the per-step notes below record
+where the implementation deviated. **Step 1 (§3.2, the two outboxes)
 is implemented** (2026-09-22): `world.pendingComponents` /
 `applyComponentInto` / `reportUnknownComponent` / `reportPendingComponents`
 in `lib/ui/Registry.rae`, `world.deadEntities` / `releaseDeadEntities` in
@@ -400,10 +407,15 @@ Order: 1 → 2 → 3 → 4, then 5 and 6 in either order. Step 2 before 4 becaus
 the editor must preserve unknown components before 106's components leave
 lib (or it cannot open a 106 scene at all).
 
-**The 3D examples are not in this pass.** `World3d` (`lib/Scene3d.rae`) and
-the 3D examples keep their shape for now; they are the same refactor later —
-`Transform3dSystem` as the sibling of `Transform2dSystem`, the render/camera
-systems owning their derived tables — once the UI side has proven it.
+**The 3D examples are not in this pass — and still are not after 6b.**
+`World3d` (`lib/Scene3d.rae`) and the 3D examples (110–119, 114's `GameWorld`)
+keep their derived tables on the world; they are the same refactor later —
+`Transform3dSystem` as the sibling of `Transform2dSystem`, the render / camera
+systems owning the tables they derive, the same `uiSystems`-style aggregate
+handed to their pipeline — once the UI side has lived with it. Nothing in the
+UI split touched them (the rewrite scripts skipped 114's own
+`GameWorld.parents` / `worldTransforms` and 97's own `cameraSystem` on
+purpose); do not start that refactor as a side effect of a UI task.
 
 ## 7. Decisions (taken 2026-09-21)
 

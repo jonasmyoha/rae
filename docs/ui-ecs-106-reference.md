@@ -188,6 +188,12 @@ at frame end — runs the observer next frame. Every update function takes its
 system as the camelCase of its type, `mod` when it writes it, `view` when it
 only reads it.
 
+The lib side is split the same way (steps 6a/6b): the derived tables —
+computed rects, measured sizes, safe insets, parents, transforms, animation
+states, hero transitions, interactions — live on `UiSystems`
+(`lib/ui/UiSystems.rae`), which 106 owns as `App.uiSystems`, recreated with
+each route's world, and hands to every lib call as `uiSystems`.
+
 ### Authored metadata (read at mount, no per-frame system)
 
 `ActionBinding` (id + role — the audit and the debug menu read it),

@@ -475,6 +475,53 @@ func scheduleShouldRun(schedule: mod Schedule, index: view Int, readGeneration: 
 The manual per-frame call order in the examples is the seam a richer scheduler
 would own (see the wishlist).
 
+## Systems own their tables — `lib/ui/UiSystems.rae`, the outboxes, bundles (2026-09-22)
+
+The ECS split (`docs/ecs-systems-own-their-tables.md`) added this surface:
+
+```rae
+# lib/ui/UiSystems.rae — the lib's derived tables, on the system that derives them
+type UiSystems { layout: LayoutSystem, safeArea: SafeAreaSystem, hierarchy: HierarchySystem,
+                 transform2d: Transform2dSystem, animation: AnimationSystem,
+                 heroTransition: HeroTransitionSystem, button: ButtonSystem }
+func createUiSystems() ret UiSystems
+func clearUiSystemsEntity(uiSystems: mod UiSystems, entity: view EntityId)
+# every lib system / reader: `world: mod UiWorld, uiSystems: view | mod UiSystems`
+func uiShouldRun(schedule: mod Schedule, world: view UiWorld, uiSystems: view UiSystems, index: view Int) ret Bool
+#   = declared world generation + uiSystemsReadGeneration (Pipeline.rae lists per stage)
+
+# lib/ui/Registry.rae — the pending-components outbox
+type PendingComponent { entity: EntityId, name: String, json: String, sceneId: String, nodeId: String }
+#   world.pendingComponents: what the loader had no UiWorld table for
+func applyComponentInto(S: type, system: mod S, world: mod UiWorld, pending: view PendingComponent) ret Bool
+func reportUnknownComponent(world: mod UiWorld, pending: view PendingComponent)   # fail / diagnostic
+func reportPendingComponents(world: mod UiWorld)                                   # apps with no tables
+func uiFrameEnd(world: mod UiWorld, uiSystems: mod UiSystems)                      # report + release
+
+# lib/ui/Ecs.rae — the dead-entities outbox
+#   destroyEntity / destroyEntitySubtree / unmountPage RETIRE the entity (isAlive false at once)
+#   and queue it on world.deadEntities; the index is recycled only by
+func releaseDeadEntities(world: mod UiWorld, uiSystems: mod UiSystems)
+# lib/ecs/World.rae: freeEntity = retireEntity + recycleEntityIndex
+
+# lib/ui/buttonSystem/ — the button behaviour, gathered (one type, three phases)
+func buttonInteractionClear / buttonInteractionMark   # from the hit test (stage input)
+func buttonStyleUpdate(world, uiSystems)               # StateStyle swap (stage widgetStyle)
+func buttonHoverScaleUpdate(world, uiSystems, hovered, deltaTime) ret Bool   # stage hoverScale
+
+# lib/ui/SceneBundles.rae + BundleApply.rae — named component sets (ui-scene-format.md §9)
+type BundleSet; type BundleRefs { names, inherited, overridden }   # BundleRefs: loader-written, never authored
+func parseBundlesInto(out: mod BundleSet, scene: view Scene)
+func sceneImportedBundles(entry: view Scene, assets: view SceneAssets, registry: view SceneRegistry) ret BundleSet
+#   -> world.bundles, seeded by the host before a mount, like the theme
+func applyBundle(world: mod UiWorld, entity: view EntityId, name: view String)   # on a live entity
+```
+
+The apps' hand-written aggregates: `examples/106_mobile_ui/MusicSystems.rae`
+(`applyMusicComponents`, `sweepMusicEntities`, `musicFrameEnd`) and
+`examples/121_ui_editor/EditorSystems.rae` (`applyEditorComponents`,
+`sweepEditorEntities`) — one line per system that owns tables.
+
 ## See also
 
 - `ecs-general-architecture.md` — why ECS is Rae's default architecture.
