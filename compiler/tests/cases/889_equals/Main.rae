@@ -1,0 +1,94 @@
+# equals(a:, b:) — deep value equality for any type: primitives and Strings
+# by value, enums by ordinal, structs field by field, List(T) element-wise,
+# opt T by presence then value. Works in a generic body too.
+enum Kind { small, large }
+
+type Point {
+  x: Int
+  y: Int
+}
+
+type Pair {
+  first: Point
+  label: String
+}
+
+type Bag {
+  kind: Kind
+  items: List(Int)
+  tag: opt Kind
+  where: opt Point
+}
+
+func same(T: type, a: view T, b: view T) ret Bool {
+  ret equals(a: a, b: b)
+}
+
+func main() {
+  log("int: {equals(a: 1, b: 1)} {equals(a: 1, b: 2)}")
+  log("float: {equals(a: 1.5, b: 1.5)} {equals(a: 1.5, b: 2.5)}")
+  log("bool: {equals(a: true, b: true)} {equals(a: true, b: false)}")
+  log("string: {equals(a: "hi", b: "hi")} {equals(a: "hi", b: "ho")}")
+  log("enum: {equals(a: Kind.small, b: Kind.small)} {equals(a: Kind.small, b: Kind.large)}")
+
+  let origin: Point = { x: 0, y: 0 }
+  let alsoOrigin: Point = { x: 0, y: 0 }
+  let unit: Point = { x: 1, y: 1 }
+  log("struct: {equals(a: origin, b: alsoOrigin)} {equals(a: origin, b: unit)}")
+
+  # Nested struct + a String field.
+  let left: Pair = { first: origin, label: "home" }
+  let right: Pair = { first: alsoOrigin, label: "home" }
+  let moved: Pair = { first: unit, label: "home" }
+  let renamed: Pair = { first: origin, label: "away" }
+  log(
+    "nested: {equals(a: left, b: right)} {equals(a: left, b: moved)} {equals(a: left, b: renamed)}"
+  )
+
+  # List(T), element-wise, including a List of structs.
+  let ints: List(Int) = [1, 2, 3]
+  let sameInts: List(Int) = [1, 2, 3]
+  let shorter: List(Int) = [1, 2]
+  let otherInts: List(Int) = [1, 2, 4]
+  log(
+    "list: {equals(a: ints, b: sameInts)} {equals(a: ints, b: shorter)} {equals(
+      a: ints
+      b: otherInts
+    )}"
+  )
+  # A list of STRUCTS, compared element by element, field by field. (The
+  # elements are POD: a list literal built from a local whose struct owns
+  # heap double-frees at scope exit — a pre-existing bug, queued separately.)
+  let points: List(Point) = [origin, unit]
+  let samePoints: List(Point) = [alsoOrigin, unit]
+  let otherPoints: List(Point) = [origin, origin]
+  log("list of structs: {equals(a: points, b: samePoints)} {equals(a: points, b: otherPoints)}")
+
+  # opt T: presence first, then the value.
+  let some: opt Int = 5
+  let alsoSome: opt Int = 5
+  let otherSome: opt Int = 6
+  let nothing: opt Int = none
+  let alsoNothing: opt Int = none
+  log("opt: {equals(a: some, b: alsoSome)} {equals(a: some, b: otherSome)}")
+  log("opt none: {equals(a: nothing, b: alsoNothing)} {equals(a: some, b: nothing)}")
+
+  # A struct carrying a List and two opt fields, one of them a struct.
+  let bag: Bag = { kind: Kind.large, items: ints, tag: Kind.small, where: origin }
+  let sameBag: Bag = { kind: Kind.large, items: sameInts, tag: Kind.small, where: alsoOrigin }
+  let otherBag: Bag = { kind: Kind.large, items: otherInts, tag: Kind.small, where: origin }
+  let untagged: Bag = { kind: Kind.large, items: ints, tag: none, where: origin }
+  log(
+    "bag: {equals(a: bag, b: sameBag)} {equals(a: bag, b: otherBag)} {equals(a: bag, b: untagged)}"
+  )
+
+  # The same rule inside a generic body.
+  log("generic int: {same(a: 1, b: 1)} {same(a: 1, b: 2)}")
+  log("generic string: {same(a: "hi", b: "hi")} {same(a: "hi", b: "ho")}")
+  let small: Kind = Kind.small
+  let large: Kind = Kind.large
+  log("generic enum: {same(a: small, b: small)} {same(a: small, b: large)}")
+  log("generic struct: {same(a: left, b: right)} {same(a: left, b: moved)}")
+  log("generic list: {same(a: ints, b: sameInts)} {same(a: ints, b: otherInts)}")
+  log("generic opt: {same(a: some, b: alsoSome)} {same(a: some, b: nothing)}")
+}

@@ -1245,6 +1245,19 @@ static const AstExpr* c_call_enum_unary_type(const AstExpr* expr, const char* na
     if (!ta || ta->next || ta->name.len != 0 || !ta->value || ta->value->kind != AST_EXPR_IDENT) return NULL;
     return ta->value;
 }
+// Is `expr` the intrinsic call `equals(a: x, b: y)`? Returns the `a` argument
+// node (its `->next` is `b`), or NULL.
+const AstExpr* c_call_equals_args(const AstExpr* expr) {
+    if (!expr || expr->kind != AST_EXPR_CALL || !expr->as.call.callee
+        || expr->as.call.callee->kind != AST_EXPR_IDENT
+        || !str_eq_cstr(expr->as.call.callee->as.ident, "equals")) return NULL;
+    const AstCallArg* aa = expr->as.call.args;
+    if (!aa || !aa->next || aa->next->next) return NULL;
+    if (!str_eq_cstr(aa->name, "a") || !str_eq_cstr(aa->next->name, "b")) return NULL;
+    if (!aa->value || !aa->next->value) return NULL;
+    return aa->value;
+}
+
 const AstExpr* c_call_enum_members_type(const AstExpr* expr) { return c_call_enum_unary_type(expr, "enumMembers"); }
 const AstExpr* c_call_enum_count_type(const AstExpr* expr) { return c_call_enum_unary_type(expr, "enumCount"); }
 
@@ -1333,6 +1346,70 @@ void rae_value_to_str_expr(CompilerContext* ctx, const AstModule* module, const 
         return;
     }
     fprintf(out, "rae_ext_rae_str((%s))", cexpr);
+}
+
+// The C expression that compares the values `aexpr` and `bexpr` of type `type`
+// — the ONE rule for `equals(a:, b:)` of any value, the mirror of
+// rae_value_to_str_expr:
+//   primitives, Char, Bool, enum   -> (A) == (B)          (an enum by ordinal)
+//   String                         -> rae_ext_rae_str_eq(A, B)
+//   user struct                    -> rae_eq_<T>_(&A, &B)     (generated)
+//   List(T)                        -> rae_eq_<List(T)>_(&A, &B) (generated, recursive)
+//   opt T (struct rep)             -> presence, then the payload rule
+//   Ptr / Buffer                   -> pointer IDENTITY, not the pointee
+//   c_struct / Array / other       -> memcmp of the bytes
+void rae_value_equals_expr(CompilerContext* ctx, const AstModule* module, const AstTypeRef* type,
+                           const char* aexpr, const char* bexpr, FILE* out) {
+    CFuncContext lctx = {0}; lctx.compiler_ctx = ctx; lctx.module = (AstModule*)module;
+    Str base = get_base_type_name(type);
+    if (type && type->is_opt && !type->is_view && !type->is_mod && rae_opt_is_struct_rep(&lctx, type)) {
+        AstTypeRef payload = *type; payload.is_opt = false; payload.next = NULL;
+        char ai[512], bi[512];
+        snprintf(ai, sizeof ai, "(%s).value", aexpr);
+        snprintf(bi, sizeof bi, "(%s).value", bexpr);
+        fprintf(out, "(((%s).has == (%s).has) && (!(%s).has || ", aexpr, bexpr, aexpr);
+        rae_value_equals_expr(ctx, module, &payload, ai, bi, out);
+        fprintf(out, "))");
+        return;
+    }
+    if (base.len > 0 && str_eq_cstr(base, "String") && !type->generic_args && !type->is_opt) {
+        fprintf(out, "rae_ext_rae_str_eq((%s), (%s))", aexpr, bexpr);
+        return;
+    }
+    if (base.len > 0 && find_enum_decl(&lctx, module, base)) {
+        fprintf(out, "((%s) == (%s))", aexpr, bexpr);
+        return;
+    }
+    if (str_eq_cstr(base, "List") && type->generic_args) {
+        const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, (AstTypeRef*)type);
+        if (mangled) { fprintf(out, "rae_eq_%s_(&(%s), &(%s))", mangled, aexpr, bexpr); return; }
+    }
+    const AstDecl* d = (base.len > 0) ? find_type_decl(&lctx, module, base) : NULL;
+    bool is_user_struct = d && d->kind == AST_DECL_TYPE
+        && !has_property(d->as.type_decl.properties, "c_struct")
+        && !d->as.type_decl.generic_params && !type->generic_args;
+    if (is_user_struct) {
+        const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, &(AstTypeRef){.parts = &(AstIdentifierPart){.text = base}});
+        fprintf(out, "rae_eq_%s_(&(%s), &(%s))", mangled, aexpr, bexpr);
+        return;
+    }
+    // A Ptr / Buffer is compared by IDENTITY: the same allocation, not the same
+    // contents (the element count is not in the type, so there is nothing to
+    // walk). docs/compile-time-reflection.md says so.
+    if (str_eq_cstr(base, "Ptr") || str_eq_cstr(base, "Buffer")) {
+        fprintf(out, "((%s) == (%s))", aexpr, bexpr);
+        return;
+    }
+    bool is_c_struct = d && d->kind == AST_DECL_TYPE && has_property(d->as.type_decl.properties, "c_struct");
+    bool is_array = type->resolved_type && type->resolved_type->kind == TYPE_ARRAY;
+    if (is_c_struct || is_array || type->generic_args
+        || (d && d->kind == AST_DECL_TYPE && d->as.type_decl.generic_params)) {
+        // A foreign struct, an Array(T, cap: N) or a container this compiler
+        // has no per-type comparison for: the bytes.
+        fprintf(out, "(memcmp(&(%s), &(%s), sizeof(%s)) == 0)", aexpr, bexpr, aexpr);
+        return;
+    }
+    fprintf(out, "((%s) == (%s))", aexpr, bexpr);
 }
 
 const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
@@ -2750,6 +2827,71 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       rae_value_to_str_expr(ctx, module, &elem, "this->data[__i]", true, out);
       fprintf(out, ");\n  }\n");
       fprintf(out, "  return rae_ext_rae_str_concat(__out, (rae_String){(uint8_t*)\"]\", 1});\n}\n\n");
+    }
+    free(done);
+  }
+
+  // equals(a:, b:) — the mirror of the toString block above: one
+  // rae_eq_<T>_ per non-generic user struct and one per List(T)
+  // instantiation, each field / element compared through the ONE rule
+  // (rae_value_equals_expr), recursively. Forward declarations first, since
+  // a struct's comparison may call a list's and vice versa.
+  for (size_t i = 0; i < ctx->all_decl_count; i++) {
+      const AstDecl* d = ctx->all_decls[i];
+      if (d->kind != AST_DECL_TYPE || d->as.type_decl.generic_params) continue;
+      if (has_property(d->as.type_decl.properties, "c_struct")) continue;
+      const AstTypeDecl* td = &d->as.type_decl;
+      if (earlier_same_named_type(ctx, i, td->name)) continue;
+      const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, &(AstTypeRef){.parts = &(AstIdentifierPart){.text = td->name}});
+      fprintf(out, "RAE_UNUSED static rae_Bool rae_eq_%s_(const %s* a, const %s* b);\n", mangled, mangled, mangled);
+  }
+  for (size_t i = 0; i < ctx->generic_type_count; i++) {
+      const AstTypeRef* gt = ctx->generic_types[i];
+      if (!gt || !gt->parts || gt->is_opt || gt->is_view || gt->is_mod) continue;
+      if (!str_eq_cstr(get_base_type_name(gt), "List") || !gt->generic_args) continue;
+      const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, (AstTypeRef*)gt);
+      if (!mangled) continue;
+      fprintf(out, "RAE_UNUSED static rae_Bool rae_eq_%s_(const %s* a, const %s* b);\n", mangled, mangled, mangled);
+  }
+  fprintf(out, "\n");
+  for (size_t i = 0; i < ctx->all_decl_count; i++) {
+      const AstDecl* d = ctx->all_decls[i];
+      if (d->kind != AST_DECL_TYPE || d->as.type_decl.generic_params) continue;
+      if (has_property(d->as.type_decl.properties, "c_struct")) continue;
+      const AstTypeDecl* td = &d->as.type_decl;
+      if (earlier_same_named_type(ctx, i, td->name)) continue;
+      const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, &(AstTypeRef){.parts = &(AstIdentifierPart){.text = td->name}});
+      fprintf(out, "RAE_UNUSED static rae_Bool rae_eq_%s_(const %s* a, const %s* b) {\n", mangled, mangled, mangled);
+      for (const AstTypeField* f = td->fields; f; f = f->next) {
+          if (!f->type) continue;
+          int nl = (int)f->name.len; const char* nd = f->name.data;
+          char ae[512], be[512];
+          snprintf(ae, sizeof ae, "a->%.*s", nl, nd);
+          snprintf(be, sizeof be, "b->%.*s", nl, nd);
+          fprintf(out, "  if (!(");
+          rae_value_equals_expr(ctx, module, f->type, ae, be, out);
+          fprintf(out, ")) return 0;\n");
+      }
+      fprintf(out, "  return 1;\n}\n\n");
+  }
+  {
+    const char** done = malloc(sizeof(char*) * (ctx->generic_type_count + 1)); size_t done_count = 0;
+    for (size_t i = 0; i < ctx->generic_type_count; i++) {
+      const AstTypeRef* gt = ctx->generic_types[i];
+      if (!gt || !gt->parts || gt->is_opt || gt->is_view || gt->is_mod) continue;
+      if (!str_eq_cstr(get_base_type_name(gt), "List") || !gt->generic_args) continue;
+      const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, (AstTypeRef*)gt);
+      if (!mangled) continue;
+      bool dup = false;
+      for (size_t k = 0; k < done_count; k++) if (strcmp(done[k], mangled) == 0) { dup = true; break; }
+      if (dup) continue;
+      done[done_count++] = mangled;
+      AstTypeRef elem = *gt->generic_args; elem.next = NULL;
+      fprintf(out, "RAE_UNUSED static rae_Bool rae_eq_%s_(const %s* a, const %s* b) {\n", mangled, mangled, mangled);
+      fprintf(out, "  if (a->length != b->length) return 0;\n");
+      fprintf(out, "  for (int64_t __i = 0; __i < a->length; __i++) {\n    if (!(");
+      rae_value_equals_expr(ctx, module, &elem, "a->data[__i]", "b->data[__i]", out);
+      fprintf(out, ")) return 0;\n  }\n  return 1;\n}\n\n");
     }
     free(done);
   }
