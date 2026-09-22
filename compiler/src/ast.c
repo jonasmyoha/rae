@@ -579,7 +579,15 @@ static void dump_assign_stmt(const AstStmt* stmt, FILE* out, int indent) {
 static void dump_match_stmt(const AstStmt* stmt, FILE* out, int indent) {
   print_indent(out, indent);
   fputs("match ", out);
-  dump_expr(stmt->as.match_stmt.subject, out);
+  if (stmt->as.match_stmt.binding) {
+    const AstStmt* bind = stmt->as.match_stmt.binding;
+    fputs("let ", out);
+    fprintf(out, "%.*s", (int)bind->as.let_stmt.name.len, bind->as.let_stmt.name.data);
+    fputs(bind->as.let_stmt.is_bind ? " => " : " = ", out);
+    dump_expr(bind->as.let_stmt.value, out);
+  } else {
+    dump_expr(stmt->as.match_stmt.subject, out);
+  }
   fputc('\n', out);
   AstMatchCase* cases = stmt->as.match_stmt.cases;
   while (cases) {

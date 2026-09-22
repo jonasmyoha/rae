@@ -1,0 +1,107 @@
+# `match let` — unwrap an `opt T` and match it in one statement (the
+# opt-shaped twin of `if let`). The `let` IS the unwrap, so the arms match the
+# PAYLOAD and `case none` is the absent arm, always its own case: a `default`
+# never covers it.
+enum Kind { small, medium, large }
+
+# An enum whose members include one literally named `none`: `case LayoutType.none`
+# (the member) and `case none` (the subject is absent) are different arms.
+enum LayoutType { none, horizontal, vertical }
+
+func lookup(index: view Int) ret opt Int {
+  if index < 3 {
+    ret index * 10
+  }
+  ret none
+}
+
+func main() {
+  let layoutNames: List(String) = ["none", "horizontal", "nope"]
+  loop let text: view String in layoutNames {
+    match let kind: LayoutType = enumFromName(LayoutType, name: text) {
+      case LayoutType.none {
+        log("{text} -> the member named none ({kind})")
+      }
+      case LayoutType.horizontal {
+        log("{text} -> horizontal")
+      }
+      case LayoutType.vertical {
+        log("{text} -> vertical")
+      }
+      case none {
+        log("{text} -> absent, not a member")
+      }
+    }
+  }
+
+  # An ENUM subject: every member named, no `default`, plus `none`.
+  let names: List(String) = ["small", "medium", "large", "nope"]
+  loop let text: view String in names {
+    match let kind: Kind = enumFromName(Kind, name: text) {
+      case Kind.small {
+        log("{text} -> small ({kind})")
+      }
+      case Kind.medium {
+        log("{text} -> medium ({kind})")
+      }
+      case Kind.large {
+        log("{text} -> large ({kind})")
+      }
+      case none {
+        log("{text} -> no such member")
+      }
+    }
+  }
+
+  # Or-patterns group members, exactly as in a plain match.
+  match let kind: Kind = enumFromName(Kind, name: "medium") {
+    case Kind.small, Kind.large {
+      log("edge: {kind}")
+    }
+    case Kind.medium {
+      log("middle: {kind}")
+    }
+    case none {
+      log("absent")
+    }
+  }
+
+  # An INT subject: `default` is required AND does not cover `none` —
+  # index 3 returns none and reaches `case none`, not `default`.
+  loop var i: Int = 0, i < 4, ++i {
+    match let value: Int = lookup(index: i) {
+      case 0 {
+        log("{i} -> zero")
+      }
+      default {
+        log("{i} -> value {value}")
+      }
+      case none {
+        log("{i} -> absent")
+      }
+    }
+  }
+
+  # The bound name is usable in every value arm, and a `match let` nests
+  # inside a loop and inside another arm.
+  loop var i: Int = 1, i < 3, ++i {
+    match let value: Int = lookup(index: i) {
+      default {
+        match let kind: Kind = enumFromName(Kind, name: "large") {
+          case Kind.small, Kind.medium {
+            log("{i}: {value} is {kind}")
+          }
+          case Kind.large {
+            log("{i}: {value} doubled is {value * 2} ({kind})")
+          }
+          case none {
+            log("{i}: {value} nameless")
+          }
+        }
+      }
+      case none {
+        log("{i}: absent")
+      }
+    }
+  }
+}

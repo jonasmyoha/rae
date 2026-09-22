@@ -307,7 +307,22 @@ static void pp_print_if_body(PrettyPrinter* pp, const AstStmt* stmt) {
 static void pp_print_match_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
   pp_stmt_prologue(pp, stmt->line);
   pp_write(pp, "match ");
-  pp_expr(pp, stmt->as.match_stmt.subject);
+  if (stmt->as.match_stmt.binding) {
+    /* `match let name: T = expr` / `match let name: view T => place` — the
+     * same spelling `if let` gets (the parser marks the reference form's type
+     * `opt` for its own null test; the source never spells it). */
+    const AstStmt* bind = stmt->as.match_stmt.binding;
+    pp_write(pp, "let ");
+    pp_write_str(pp, bind->as.let_stmt.name);
+    pp_write(pp, ": ");
+    AstTypeRef shown = *bind->as.let_stmt.type;
+    if (bind->as.let_stmt.is_bind) shown.is_opt = false;
+    pp_write_type(pp, &shown);
+    pp_write(pp, bind->as.let_stmt.is_bind ? " => " : " = ");
+    pp_expr(pp, bind->as.let_stmt.value);
+  } else {
+    pp_expr(pp, stmt->as.match_stmt.subject);
+  }
   pp_space(pp);
   pp_begin_block(pp);
   const AstMatchCase* current = stmt->as.match_stmt.cases;
