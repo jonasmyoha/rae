@@ -1497,7 +1497,24 @@ AstTypeRef* infer_generic_args_multi(CompilerContext* ctx, const AstFuncDecl* fu
 // generic parameter rather than a value? Used to tell `createList(Float)`
 // (type arg only, value param `cap` missing) from `createList(Float, cap: 0)`.
 static bool sema_arg_is_type_name(SymbolTable* symbols, const AstExpr* v) {
-    if (!v || v->kind != AST_EXPR_IDENT) return false;
+    if (!v) return false;
+    // A generic-type instantiation written as a call — `List(Int)`,
+    // `Map(String, Int)` — is a positional TYPE argument, exactly like a bare
+    // `Int`. The callee names a (generic) type and every argument is itself a
+    // type, positionally. This lets `List.create(List(Int), cap: n)` construct
+    // a list whose element type is itself a list, the same as `create(Int, …)`.
+    if (v->kind == AST_EXPR_CALL) {
+        const AstExpr* callee = v->as.call.callee;
+        if (!callee || callee->kind != AST_EXPR_IDENT) return false;
+        Symbol* cs = symbol_table_lookup(symbols, callee->as.ident);
+        bool callee_is_type = cs && cs->decl
+            && (cs->decl->kind == AST_DECL_TYPE || cs->decl->kind == AST_DECL_ENUM);
+        if (!callee_is_type) return false;
+        for (const AstCallArg* a = v->as.call.args; a; a = a->next)
+            if (a->name.len != 0 || !sema_arg_is_type_name(symbols, a->value)) return false;
+        return true;
+    }
+    if (v->kind != AST_EXPR_IDENT) return false;
     Str n = v->as.ident;
     static const char* const prims[] = {
         "Int","Int64","Int32","Int16","Int8","UInt64","UInt32","UInt16","UInt8",
@@ -4652,6 +4669,16 @@ static bool sema_create_was_attempted(const AstExpr* e) {
     for (int i = 0; i < s_create_attempted_count; i++) if (s_create_attempted[i] == e) return true;
     return false;
 }
+/* A `create` rewritten from a QUALIFIED generic-template call whose leading
+ * positional argument restates the element type (`List.create(List(Int),
+ * cap: n)`). Only these may keep a leading type argument; a bare
+ * `create(String, cap: 4)` still must not (#880). */
+static const AstExpr* s_create_qualified_element[128];
+static int s_create_qualified_element_count;
+static bool sema_create_is_qualified_element(const AstExpr* e) {
+    for (int i = 0; i < s_create_qualified_element_count; i++) if (s_create_qualified_element[i] == e) return true;
+    return false;
+}
 
 static bool sema_resolve_create(CompilerContext* ctx, AstModule* module, SymbolTable* symbols,
                                 AstExpr* expr, TypeInfo* expected);
@@ -4685,12 +4712,34 @@ static bool sema_resolve_create(CompilerContext* ctx, AstModule* module, SymbolT
     const char* file = sema_diag_file(module);
     if (!sema_create_was_attempted(expr) && s_create_attempted_count < 512)
         s_create_attempted[s_create_attempted_count++] = expr;
-    if (expr->as.call.args && sema_arg_is_type_name(symbols, expr->as.call.args->value)) {
-        diag_error(file, (int)expr->line, (int)expr->column,
-                   "'create' takes no positional type argument; write 'List(String).create(...)' "
-                   "or give the binding its type so the constructor is chosen by it");
-        module->had_error = true;
-        return false;
+    // A leading positional TYPE argument (`List.create(List(Int), cap: n)`) is
+    // normally rejected — a bare `create(Int, …)` should rely on the binding's
+    // type. But when the constructed type IS known (the binding gave it) and it
+    // is a generic instance, the explicit element type is a redundant, correct
+    // restatement, not an ambiguity: let it resolve with the type arg counted as
+    // the constructor's `T` parameter, the same as `create(Int, cap:)`.
+    {
+        TypeInfo* et = expected;
+        if (et && et->kind == TYPE_REF) et = et->as.ref.base;
+        if (et && et->kind == TYPE_OPT) et = et->as.opt.base;
+        bool expected_is_generic_inst = et
+            && (et->kind == TYPE_GENERIC_INST
+                || ((et->kind == TYPE_STRUCT || et->kind == TYPE_GENERIC_INST)
+                    && et->as.structure.generic_count > 0));
+        if (expr->as.call.args && sema_arg_is_type_name(symbols, expr->as.call.args->value)) {
+            if (!expected_is_generic_inst || !sema_create_is_qualified_element(expr)) {
+                diag_error(file, (int)expr->line, (int)expr->column,
+                           "'create' takes no positional type argument; write 'List(String).create(...)' "
+                           "or give the binding its type so the constructor is chosen by it");
+                module->had_error = true;
+                return false;
+            }
+            // The element type is redundant with the binding type that already
+            // fixes T, and it is not a VALUE argument — drop it so the arity
+            // matches the constructor's value parameters (just `cap`), and T is
+            // inferred from the constructed type below.
+            expr->as.call.args = expr->as.call.args->next;
+        }
     }
     TypeInfo* target = expected;
     /* A produced value may be passed to a `view`/`mod` parameter; the constructor
@@ -6110,6 +6159,21 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
             // positions with no expected type, e.g. `ret`).
             if (str_eq_cstr(expr->as.method_call.method_name, "create")) {
                 TypeInfo* ct = sema_type_qualifier_type(ctx, module, symbols, expr->as.method_call.object);
+                // `List.create(List(Int), cap: n)`: a BARE generic-type qualifier
+                // (`List`, no args) plus a leading positional TYPE argument names
+                // the element type explicitly. The qualifier alone resolves to the
+                // template, which cannot construct anything; leave the call pending
+                // so the binding's real type (`List(List(Int))`) drives the
+                // constructor resolution below. `List(Int).create(...)` (a full
+                // instance qualifier) still resolves here directly.
+                bool bare_generic_qualifier = ct
+                    && (ct->kind == TYPE_STRUCT || ct->kind == TYPE_GENERIC_INST)
+                    && ct->as.structure.decl
+                    && ct->as.structure.decl->kind == AST_DECL_TYPE
+                    && ct->as.structure.decl->as.type_decl.generic_params
+                    && ct->as.structure.generic_count == 0;
+                bool defer_to_binding_type = bare_generic_qualifier && expr->as.method_call.args
+                    && sema_arg_is_type_name(symbols, expr->as.method_call.args->value);
                 if (ct) {
                     AstCallArg* cargs = expr->as.method_call.args;
                     for (AstCallArg* a = cargs; a; a = a->next) sema_analyze_expr(ctx, module, symbols, a->value, true);
@@ -6123,7 +6187,15 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                     expr->as.call.args = cargs;
                     expr->as.call.generic_args = NULL;
                     expr->decl_link = NULL;
-                    sema_resolve_create(ctx, module, symbols, expr, ct);
+                    // A bare generic qualifier with a leading type arg
+                    // (`List.create(List(Int), cap: n)`) cannot be resolved from
+                    // the template — leave it a PENDING create CALL so the
+                    // binding's concrete type drives resolution (the constructor
+                    // path sees `AST_EXPR_CALL` with a NULL decl_link).
+                    if (!defer_to_binding_type)
+                        sema_resolve_create(ctx, module, symbols, expr, ct);
+                    else if (s_create_qualified_element_count < 128)
+                        s_create_qualified_element[s_create_qualified_element_count++] = expr;
                     break;
                 }
             }

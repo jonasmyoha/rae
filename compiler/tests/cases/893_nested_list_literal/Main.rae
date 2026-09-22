@@ -1,0 +1,24 @@
+# List(List(Int)) built both ways, interpolated, leaving scope cleanly.
+# Regression: a nested-list literal local used to double-drop its element at
+# scope exit (the element was MOVED into the list but dropped again), and
+# `List.create(List(Int), cap: n)` was rejected outright.
+func main() {
+  # (1) From a local element: `[inner]` MOVES inner into the list, which then
+  # owns it — inner is not dropped again at scope exit.
+  let inner: List(Int) = [1, 2]
+  let fromLocal: List(List(Int)) = [inner]
+  log("fromLocal: {fromLocal}")
+
+  # (2) Inline element literals: each `[..]` lowers as a List(Int).
+  let literalForm: List(List(Int)) = [[1, 2], [3]]
+  log("literalForm: {literalForm}")
+
+  # (3) The List.create form with a List(Int) element type, filled from local
+  # element lists (each `add` moves its element in).
+  var built: List(List(Int)) = List.create(List(Int), cap: 2)
+  let firstRow: List(Int) = [4, 5]
+  let secondRow: List(Int) = [6]
+  built.add(value: firstRow)
+  built.add(value: secondRow)
+  log("built: {built}")
+}
