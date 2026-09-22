@@ -1,0 +1,30 @@
+# enumMembers(E) / enumCount(E): the member names (declaration order) and
+# their count, as compile-time queries — per instantiation in a generic
+# body, where a non-enum E yields the empty list / 0.
+enum Kind { small, medium, large }
+
+type Point {
+  x: Int
+  y: Int
+}
+
+func describeMembers(E: type) {
+  let names: List(String) = enumMembers(E)
+  log("count {enumCount(E)}, members {names}")
+}
+
+func main() {
+  let names: List(String) = enumMembers(Kind)
+  log("Kind: {names} ({enumCount(Kind)})")
+  # Round trip: every listed name resolves to the member at that index.
+  loop var i: Int = 0, i < names.length, ++i {
+    if let name: String = names.copyAt(index: i) {
+      if let member: Kind = enumFromName(Kind, name: name) {
+        log("  {i}: {name} -> {member} ({member is Kind.medium})")
+      }
+    }
+  }
+  describeMembers(Kind)
+  describeMembers(Point)
+  describeMembers(Int)
+}

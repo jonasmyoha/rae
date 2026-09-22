@@ -130,6 +130,26 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         }
         return true;
     }
+    // `enumMembers(E)` -> List(String) of the member names (a fresh list,
+    // owned by the caller); `enumCount(E)` -> Int. Per instantiation: a
+    // generic E that is not an enum yields the empty list / 0, so a generic
+    // body can ask without an arm.
+    if (c_call_enum_members_type(expr)) {
+        Str ename = c_call_enum_query_name(ctx, c_call_enum_members_type(expr));
+        if (ename.len > 0) fprintf(out, "rae_enum_members_%.*s()", (int)ename.len, ename.data);
+        else fprintf(out, "((rae_List_rae_String){0})");
+        return true;
+    }
+    if (c_call_enum_count_type(expr)) {
+        Str ename = c_call_enum_query_name(ctx, c_call_enum_count_type(expr));
+        int64_t count = 0;
+        if (ename.len > 0) {
+            const AstDecl* ed = find_enum_decl(ctx, ctx->module, ename);
+            for (const AstEnumMember* m = ed ? ed->as.enum_decl.members : NULL; m; m = m->next) count++;
+        }
+        fprintf(out, "((int64_t)%lldLL)", (long long)count);
+        return true;
+    }
     // Hoist a type argument out of the value-arg list if present —
     // new generic-call syntax. See c_backend.c for the helper.
     AstExpr* hoisted = hoist_type_arg_if_present(ctx, expr);
