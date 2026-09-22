@@ -90,14 +90,10 @@ func compareNode(
     if name is "BundleRefs" {
       continue
     }
-    # By VALUE — `equals` on the component itself, field by field, rather
-    # than on its encoded text. When the values DO differ, the encoded forms
-    # decide whether it is a round-trip failure: the writer prints a Float
-    # rounded (Json.jbNumber), so a saved 47.710844 reloads as 47.7108 and
-    # is unequal by value while the format round-tripped exactly what it
-    # wrote. That tolerance is the format's, not equals' — a queued task
-    # makes the writer round-trippable, and then this falls away.
-    var same: Bool = true
+    # By VALUE — `equals` on the component itself, field by field. The scene
+    # writer emits a shortest round-trippable Float (Json.jbNumber), so a
+    # saved coordinate reloads as the SAME value; the comparison is now exact,
+    # and the encoded forms are used only to DESCRIBE a real difference.
     if let byValue: Bool = componentEqualsByName(
       world: a
       other: b
@@ -105,12 +101,9 @@ func compareNode(
       otherEntity: other
       name: name
     ) {
-      same = byValue
-    }
-    if same is false {
-      let left: String = machineComponentJson(world: a, entity: entity, name: name)
-      let right: String = machineComponentJson(world: b, entity: other, name: name)
-      if left is not right {
+      if byValue is false {
+        let left: String = machineComponentJson(world: a, entity: entity, name: name)
+        let right: String = machineComponentJson(world: b, entity: other, name: name)
         problems.add(value: "{nodeId}.{name}: {left} != {right}")
       }
     }

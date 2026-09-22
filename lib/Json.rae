@@ -801,7 +801,7 @@ func stringify(doc: view JsonDoc, value: view JsonValue) ret String {
       ret "false"
     }
     case JsonKind.number {
-      ret "{value.asNumber}"
+      ret jbNumber(value: value.asNumber)
     }
     case JsonKind.string {
       ret quote(text: value.asString)
@@ -865,8 +865,16 @@ func jbBool(value: view Bool) ret String {
   ret "false"
 }
 
+func nativeJsonNumber(value: Float) unsafe extern("rae_ext_json_number") ret String
+
+# The shortest decimal that round-trips this Float exactly (reload parses it
+# back to the same value). Plain `"{value}"` uses %g (6 significant digits),
+# which is LOSSY — a saved coordinate reloaded as a different value and
+# repeated save cycles eroded it.
 func jbNumber(value: view Float) ret String {
-  ret "{value}"
+  unsafe {
+    ret nativeJsonNumber(value: value)
+  }
 }
 
 func jbString(value: view String) ret String {

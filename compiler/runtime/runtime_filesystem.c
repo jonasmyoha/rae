@@ -389,6 +389,28 @@ rae_String rae_ext_rae_str_f64_ptr(const double* v) {
   return rae_ext_rae_str_f64(*v);
 }
 
+/* JSON number formatting for the .raescene writer: the SHORTEST decimal that
+ * round-trips the 32-bit float (through double->float on reload via strtod).
+ * `%g` defaults to 6 significant digits, so an authored 47.710842 saved as
+ * "47.7108" reloaded as a DIFFERENT value and repeated save cycles eroded
+ * coordinates. Try increasing precision and keep the shortest string whose
+ * `(float)strtod(...)` equals the original; normal coordinates never reach
+ * scientific notation. */
+rae_String rae_ext_json_number(float v) {
+  double d = (double)v;
+  char best[40]; int best_len = -1;
+  for (int prec = 1; prec <= 9; prec++) {
+    char tmp[40];
+    int len = snprintf(tmp, sizeof tmp, "%.*g", prec, d);
+    if (len > 0 && len < (int)sizeof tmp && (float)strtod(tmp, NULL) == v
+        && (best_len < 0 || len < best_len)) {
+      best_len = len; memcpy(best, tmp, (size_t)len + 1);
+    }
+  }
+  if (best_len < 0) best_len = snprintf(best, sizeof best, "%.9g", d);
+  return rae_str_from_buf_impl((uint8_t*)best, best_len, RAE_SITE_FLOAT_TO_STR);
+}
+
 /* Float (f32) views. Formatting promotes to double, so the shared f64
  * formatter produces the same text a plain Float would. */
 rae_String rae_ext_rae_str_f32_ptr(const float* v) {
