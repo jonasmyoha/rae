@@ -1,0 +1,32 @@
+# Pins the two facts docs/compile-time-reflection.md states (task #78944462):
+#   1. typeName of a generic PARAMETER is the type's OWN FULL name, generic
+#      arguments included — "List(String)", not the base "List".
+#   2. an enum field survives toJson -> fromJson by its member NAME, not as 0.
+enum Kind { small, medium, large }
+
+type Pair {
+  kind: Kind
+  count: Int
+}
+
+func typeOf(T: type, value: view T) ret String {
+  ret typeName(value)
+}
+
+func main() {
+  # 1. typeName on a parameter: the full generic type.
+  let ints: List(Int) = [1, 2]
+  let words: List(String) = ["a"]
+  log("List(Int) param: {typeOf(value: ints)}")
+  log("List(String) param: {typeOf(value: words)}")
+  log("String param: {typeOf(value: "x")}")
+
+  # 2. enum field round-trips through toJson/fromJson by name.
+  let p: Pair = { kind: Kind.large, count: 7 }
+  let json: String = p.toJson()
+  log("toJson names the enum: {json}")
+  let back: Pair = Pair.fromJson(json)
+  log("fromJson restores it: {back.kind} (not 0)")
+  let manual: Pair = Pair.fromJson("\{\"kind\": \"medium\", \"count\": 3\}")
+  log("fromJson by name: {manual.kind}")
+}
