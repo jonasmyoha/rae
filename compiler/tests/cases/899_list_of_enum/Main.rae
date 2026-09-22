@@ -1,0 +1,28 @@
+# A List of enum members. An enum is int-backed (TYPE_INT), so the TypeInfo
+# spelling of `List(Kind)` used to collide with `List(Int)` and the enum
+# instantiation was deduped away — its typedef, toString and eq were never
+# generated. The canonical rule is that an enum KEEPS ITS NAME: List(Kind) is
+# a distinct C type, so its toString names the members like an enum does
+# everywhere else.
+enum Kind { small, medium, large }
+
+func main() {
+  # The member NAMES, not the ordinals.
+  let kinds: List(Kind) = [Kind.small, Kind.large, Kind.medium]
+  log("kinds: {kinds}")
+  log("count: {kinds.length}")
+
+  # A List(Int) coexists — same int64 element underneath, different type.
+  let counts: List(Int) = [0, 1, 2]
+  log("counts: {counts}")
+
+  # Read an element back out and compare it.
+  if let first: Kind = kinds.copyAt(index: 0) {
+    log("first: {first} isSmall {first is Kind.small}")
+  }
+
+  # Through equals (the element's enum identity is kept).
+  log("eq: {equals(a: kinds, b: kinds)}")
+  let others: List(Kind) = [Kind.small, Kind.large]
+  log("eq diff: {equals(a: kinds, b: others)}")
+}
