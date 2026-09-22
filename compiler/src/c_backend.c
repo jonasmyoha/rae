@@ -455,6 +455,43 @@ void register_function_specialization(CompilerContext* ctx, const AstFuncDecl* d
     ctx->specialized_func_count++;
 }
 
+/* Does `type` carry an ENUM generic argument (at any depth)?
+ *
+ * This is the ONE place the two manglers disagree. Sema types every enum as
+ * TYPE_INT (docs/match-and-sum-types.md: enums are int-backed so both cast
+ * directions and arithmetic type-check), so the TypeInfo mangler
+ * (`type_mangle_name`) spells `List(Kind)` as `rae_List_int64_t` — the enum's
+ * NAME is not in the TypeInfo at all — while the AstTypeRef mangler
+ * (`rae_mangle_type_specialized`) reads the written name and spells it
+ * `rae_List_rae_Kind`.
+ *
+ * The canonical rule is that an enum KEEPS ITS NAME: `List(Kind)` is a
+ * distinct C type from `List(Int)`, so its toString can name the members the
+ * way an enum prints everywhere else. Every site that would otherwise use the
+ * TypeInfo spelling asks this predicate first, so the AstTypeRef spelling is
+ * preferred ONLY where the two actually diverge — a type with no enum argument
+ * (List(EntityId), List(String), Map(...)) is untouched and keeps taking the
+ * existing path. */
+bool rae_type_ref_has_enum_arg(CompilerContext* ctx, const AstModule* module, const AstTypeRef* type) {
+    (void)module;
+    if (!type || !ctx) return false;
+    for (const AstTypeRef* arg = type->generic_args; arg; arg = arg->next) {
+        if (arg->is_value_arg) continue;
+        Str ab = get_base_type_name(arg);
+        // Scan the whole program's decls rather than one module: this runs
+        // during registration, where `current_module` is often unset, and an
+        // enum name is unique program-wide anyway.
+        if (ab.len > 0) {
+            for (size_t i = 0; i < ctx->all_decl_count; i++) {
+                const AstDecl* d = ctx->all_decls[i];
+                if (d->kind == AST_DECL_ENUM && types_match(d->as.enum_decl.name, ab)) return true;
+            }
+        }
+        if (rae_type_ref_has_enum_arg(ctx, module, arg)) return true;
+    }
+    return false;
+}
+
 void register_generic_type(CompilerContext* ctx, const AstTypeRef* type) {
     if (!type || !is_concrete_type(type)) return;
     if ((uintptr_t)type < 0x1000) return;
@@ -496,7 +533,24 @@ void register_generic_type(CompilerContext* ctx, const AstTypeRef* type) {
     Str base = {0};
     if (type->parts) base = type->parts->text; else if (type->resolved_type) base = type->resolved_type->name;
     if (base.len > 0) { if (str_eq_cstr(base, "Void") || str_eq_cstr(base, "void") || is_primitive_type(base)) return; }
-    for (size_t i = 0; i < ctx->generic_type_count; i++) { if (type_refs_equal(ctx->generic_types[i], type)) goto scan_args; }
+    // type_refs_equal calls `List(Kind)` and `List(Int)` EQUAL (an enum's
+    // resolved TypeInfo is the shared TYPE_INT), which deduped the enum
+    // instantiation away so its typedef/toString/eq were never generated.
+    // When an enum argument is involved, distinguish by the mangled name —
+    // that name IS the C typedef's identity. Types without an enum argument
+    // keep the original identity test untouched.
+    bool this_has_enum_arg = rae_type_ref_has_enum_arg(ctx, ctx->current_module, type);
+    const char* this_mangled = this_has_enum_arg
+        ? rae_mangle_type_specialized(ctx, NULL, NULL, (AstTypeRef*)type) : NULL;
+    for (size_t i = 0; i < ctx->generic_type_count; i++) {
+        const AstTypeRef* other = ctx->generic_types[i];
+        if (!type_refs_equal(other, type)) continue;
+        if (this_has_enum_arg) {
+            const char* om = rae_mangle_type_specialized(ctx, NULL, NULL, (AstTypeRef*)other);
+            if (this_mangled && om && strcmp(this_mangled, om) != 0) continue;  // the enum twin
+        }
+        goto scan_args;
+    }
     RAE_GROW1(ctx->generic_types, ctx->generic_type_count, ctx->generic_type_cap);
     ctx->generic_types[ctx->generic_type_count++] = type;
 scan_args:
@@ -810,6 +864,12 @@ bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* ou
               && has_property(sdecl->as.type_decl.properties, "c_struct");
           if (is_c_struct) {
               fprintf(out, "%.*s", (int)t->name.len, t->name.data);
+          } else if (type->parts && type->generic_args
+                     && rae_type_ref_has_enum_arg(ctx->compiler_ctx, ctx->module, type)) {
+              // The enum-argument case: the TypeInfo spelling would erase the
+              // enum to int64 and collide with the Int instantiation, whose
+              // typedef/toString are a DIFFERENT type. Use the written name.
+              fprintf(out, "%s", rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)type));
           } else {
               const char* name = type_mangle_name(ctx->compiler_ctx->ast_arena, t).data;
               fprintf(out, "%s", name);
@@ -2237,6 +2297,17 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   fprintf(out, "\n");
   EmittedTypeList emitted = { .items = malloc(sizeof(char*) * 1024), .capacity = 1024, .count = 0 };
   EmittedTypeList visiting = { .items = malloc(sizeof(char*) * 1024), .capacity = 1024, .count = 0 };
+  // An enum is an int64_t at the C level, but because an enum KEEPS ITS NAME in
+  // the mangled spelling, `rae_<Enum>` appears as a real C type wherever an enum
+  // is a generic element (a List(Kind) typedef, its deep-copy's sizeof/casts).
+  // Alias it so those spellings resolve; the layout is identical.
+  for (size_t i = 0; i < ctx->all_decl_count; i++) {
+      const AstDecl* d = ctx->all_decls[i];
+      if (d->kind != AST_DECL_ENUM) continue;
+      fprintf(out, "typedef int64_t rae_%.*s;\n",
+          (int)d->as.enum_decl.name.len, d->as.enum_decl.name.data);
+  }
+  fprintf(out, "\n");
   for (size_t i = 0; i < ctx->generic_type_count; i++) emit_type_recursive(ctx, module, ctx->generic_types[i], out, &emitted, &visiting);
 
   // Emit enum definitions as #define constants
