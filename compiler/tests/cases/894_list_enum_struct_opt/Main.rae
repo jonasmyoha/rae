@@ -1,17 +1,34 @@
-# Struct literals as list elements and as opt payloads (found in #77360967),
-# interpolated through toString.
+# Three shapes that used to fail, together in ONE program (found in #77360967):
+#   1. a List of ENUM members  — the List(Kind) instantiation had no C typedef
+#      (its TypeInfo spelling collided with List(Int) and was deduped away)
+#   2. a list literal of STRUCT literals, with no named intermediates
+#   3. a bare struct literal as an OPT payload
+# all interpolated through toString. Keeping them in one compilation unit is
+# the point: each registers its own typedef/toString, and the enum list must
+# stay distinct from a plain List(Int) living alongside it.
+enum Kind { small, medium, large }
+
 type Pair {
   x: Int
   y: Int
 }
 
 func main() {
-  # A list literal of struct literals, no named intermediates.
+  # (1) A List of enum members — the member NAMES, not the ordinals — and a
+  # List(Int) alongside it, which is a different type with the same element
+  # size underneath.
+  let kinds: List(Kind) = [Kind.small, Kind.large, Kind.medium]
+  log("kinds: {kinds}")
+  let counts: List(Int) = [0, 1, 2]
+  log("counts: {counts}")
+
+  # (2) A list literal of struct literals, no named intermediates.
   let pairs: List(Pair) = [Pair { x: 1, y: 2 }, Pair { x: 3, y: 4 }]
   log("pairs: {pairs}")
 
-  # A bare struct literal as an opt payload (the type is on the left, so the
-  # RHS is bare braces), and `none`.
+  # (3) A bare struct literal as an opt payload (the type is on the left, so
+  # the RHS is bare braces — `= Pair { ... }` is the type written twice), and
+  # `none`.
   let maybe: opt Pair = { x: 7, y: 8 }
   log("maybe: {maybe}")
   let nothing: opt Pair = none
