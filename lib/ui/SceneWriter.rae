@@ -1,0 +1,507 @@
+# SceneWriter — a mounted page back to the `.raescene` grammar (the inverse of
+# ui/Registry's applyComponentByName + applyAuthoredFixups).
+#
+# The rule that keeps the file an AUTHOR's file: a component that still equals
+# a fresh decode of its authored text is written back VERBATIM from the parsed
+# source, so theme tokens (`"gap": "spaceM"`, `"fill": "accent"`, `"Padding":
+# "insetPill"`), hex colours and the author's field order survive a save. Only
+# a component the app changed — or added — is encoded from the world, in the
+# same grammar (the inverse fixups below); everything the world holds beyond
+# its authored tables (derived caches, the loader's default Name / NodeId,
+# BundleRefs, the runtime rows of a ListView) is not a node's data and is not
+# written. A node's pending app components (the outbox, kept verbatim as
+# their JSON) are written as they were read. Headers (`type`, `version`,
+# `import`, `assets`, `unitScale`, `bundles`, …) come from the parsed file.
+#
+# Layout of the output is canonical: 2-space indent, one node per block, a
+# component on one line when it is a flat object (the samples' style),
+# multi-line when nested.
+open ui/Ecs
+open ui/UiSystems
+open ui/Components
+open ui/BindingComponents
+open ui/Scene
+open ui/SceneLoader
+open ui/SceneInstance
+open ui/SceneBundles
+open ui/ScenePolicy
+open ui/Registry
+open ui/RegistryOpt
+open ui/RegistryValues
+open ui/ThemeResolved
+open ui/SceneEncode
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Registry
+import Json
+import String
+
+# ---------------------------------------------------------------------------
+# Pretty printing — the canonical layout.
+# ---------------------------------------------------------------------------
+func isScalar(value: view JsonValue) ret Bool {
+  ret value.kind is not JsonKind.object and value.kind is not JsonKind.array
+}
+
+func allScalar(doc: view JsonDoc, value: view JsonValue) ret Bool {
+  if value.kind is JsonKind.object {
+    let count: Int = Json.objectLen(this: value)
+    loop var i: Int = 0, i < count, ++i {
+      if isScalar(value: Json.objectValueAt(doc: doc, this: value, idx: i)) is false {
+        ret false
+      }
+    }
+    ret true
+  }
+  if value.kind is JsonKind.array {
+    let count: Int = Json.arrayLen(this: value)
+    loop var i: Int = 0, i < count, ++i {
+      if isScalar(value: Json.arrayAt(doc: doc, this: value, idx: i)) is false {
+        ret false
+      }
+    }
+    ret true
+  }
+  ret true
+}
+
+func indentText(depth: view Int) ret String {
+  var text: String = ""
+  loop var i: Int = 0, i < depth, ++i {
+    text = "{text}  "
+  }
+  ret text
+}
+
+# `{"k": v, "k2": v2}` / `["a", "b"]` on one line.
+func inlineValue(doc: view JsonDoc, value: view JsonValue) ret String {
+  if value.kind is JsonKind.object {
+    var text: String = "\{"
+    let count: Int = Json.objectLen(this: value)
+    loop var i: Int = 0, i < count, ++i {
+      if i > 0 {
+        text = "{text}, "
+      }
+      text = "{text}{Json.quote(text: Json.objectKeyAt(doc: doc, this: value, idx: i))}: {inlineValue(
+        doc: doc
+        value: Json.objectValueAt(doc: doc, this: value, idx: i)
+      )}"
+    }
+    ret "{text}\}"
+  }
+  if value.kind is JsonKind.array {
+    var text: String = "["
+    let count: Int = Json.arrayLen(this: value)
+    loop var i: Int = 0, i < count, ++i {
+      if i > 0 {
+        text = "{text}, "
+      }
+      text = "{text}{inlineValue(doc: doc, value: Json.arrayAt(doc: doc, this: value, idx: i))}"
+    }
+    ret "{text}]"
+  }
+  ret Json.stringify(doc: doc, value: value)
+}
+
+# A value at `depth`: flat and short -> one line, else one member per line.
+func prettyValue(doc: view JsonDoc, value: view JsonValue, depth: view Int) ret String {
+  if isScalar(value: value) {
+    ret Json.stringify(doc: doc, value: value)
+  }
+  # One line for a flat value (a component's scalars); one member per line
+  # as soon as a member nests — the samples' rule for Size, Shadow, …
+  if allScalar(doc: doc, value: value) {
+    ret inlineValue(doc: doc, value: value)
+  }
+  let pad: String = indentText(depth: depth + 1)
+  let close: String = indentText(depth: depth)
+  if value.kind is JsonKind.object {
+    let count: Int = Json.objectLen(this: value)
+    if count is 0 {
+      ret "\{\}"
+    }
+    var text: String = "\{\n"
+    loop var i: Int = 0, i < count, ++i {
+      var sep: String = ",\n"
+      if i is count - 1 {
+        sep = "\n"
+      }
+      text = "{text}{pad}{Json.quote(text: Json.objectKeyAt(doc: doc, this: value, idx: i))}: {prettyValue(
+        doc: doc
+        value: Json.objectValueAt(doc: doc, this: value, idx: i)
+        depth: depth + 1
+      )}{sep}"
+    }
+    ret "{text}{close}\}"
+  }
+  let count: Int = Json.arrayLen(this: value)
+  if count is 0 {
+    ret "[]"
+  }
+  var text: String = "[\n"
+  loop var i: Int = 0, i < count, ++i {
+    var sep: String = ",\n"
+    if i is count - 1 {
+      sep = "\n"
+    }
+    text = "{text}{pad}{prettyValue(
+      doc: doc
+      value: Json.arrayAt(doc: doc, this: value, idx: i)
+      depth: depth + 1
+    )}{sep}"
+  }
+  ret "{text}{close}]"
+}
+
+func prettyJsonText(source: view String, depth: view Int) ret String {
+  let doc: JsonDoc = Json.parseJson(source: source)
+  ret prettyValue(doc: doc, value: Json.root(doc: doc), depth: depth)
+}
+
+# ---------------------------------------------------------------------------
+# The writer.
+# ---------------------------------------------------------------------------
+
+# A member line of a node's bag: `"Key": <value>` at node depth.
+func bagMember(key: view String, valueJson: view String) ret String {
+  ret "      {Json.quote(text: key)}: {prettyJsonText(source: valueJson, depth: 3)}"
+}
+
+# The pending (app) components of `entity`, verbatim from the outbox.
+func pendingJsonFor(world: view UiWorld, entity: view EntityId, name: view String) ret String {
+  loop let pending: view PendingComponent in world.pendingComponents {
+    if pending.entity is entity and pending.name is name {
+      ret "{pending.json}"
+    }
+  }
+  ret ""
+}
+
+# A runtime row (a ListView's materialised row, a RuntimeOnly-tagged
+# entity): not this file's node. `RuntimeOnly { value: false }` is authored
+# data, not a tag — the value decides.
+func isRowEntity(world: view UiWorld, entity: view EntityId) ret Bool {
+  if componentHas(this: world.listViewRowKeys, entity: entity) {
+    ret true
+  }
+  if componentHas(this: world.runtimeOnlys, entity: entity) {
+    ret componentGet(this: world.runtimeOnlys, entity: entity).value
+  }
+  ret false
+}
+
+func nodeIdOfEntity(world: view UiWorld, entity: view EntityId) ret String {
+  if componentHas(this: world.nodeIdComponents, entity: entity) {
+    ret "{componentView(this: world.nodeIdComponents, entity: entity).id}"
+  }
+  ret ""
+}
+
+# Whether the fresh decode has the same component (present, equal).
+func unchangedSinceSource(
+  world: view UiWorld
+  entity: view EntityId
+  fresh: view UiWorld
+  freshEntity: view EntityId
+  name: view String
+) ret Bool {
+  if isNone(this: freshEntity) {
+    ret false
+  }
+  let live: String = machineComponentJson(world: world, entity: entity, name: name)
+  let decoded: String = machineComponentJson(world: fresh, entity: freshEntity, name: name)
+  ret live.length() > 0 and live is decoded
+}
+
+# One node and, recursively, its children. `depth` is for the walk only —
+# every node block sits at the same indentation under "nodes".
+func writeNode(
+  out: mod List(String)
+  outIds: mod List(String)
+  world: view UiWorld
+  uiSystems: view UiSystems
+  fresh: view UiWorld
+  scene: view Scene
+  entity: view EntityId
+  pageId: view String
+  visited: mod List(String)
+) {
+  let nodeId: String = nodeIdOfEntity(world: world, entity: entity)
+  if nodeId.length() is 0 {
+    ret
+  }
+  loop let seen: view String in visited {
+    if seen is nodeId {
+      ret
+    }
+  }
+  visited.add(value: "{nodeId}")
+  var freshEntity: EntityId = noEntity()
+  if let index: Int = findNodeInPage(world: fresh, pageId: "", nodeId: nodeId) {
+    freshEntity = nodeEntity(world: fresh, index: index)
+  }
+  let doc: view JsonDoc => scene.doc
+  let sourceIndex: Int = sceneNodeIndex(this: scene, nodeId: nodeId)
+  var members: List(String) = List.create(String, cap: 12)
+  var written: List(String) = List.create(String, cap: 12)
+  # Where the author wrote Children (-1: they did not; it goes last).
+  var childrenSlot: Int = -1
+  var inherited: List(String) = List.create(String, cap: 8)
+  if componentHas(this: world.bundleRefs, entity: entity) {
+    let refs: view BundleRefs => componentView(this: world.bundleRefs, entity: entity)
+    loop let name: view String in refs.inherited {
+      inherited.add(value: "{name}")
+    }
+  }
+  # 1. The authored bag, in the author's order: verbatim when unchanged.
+  if sourceIndex >= 0 {
+    let node: view SceneNode => nodeAt(this: scene, idx: sourceIndex)
+    let bag: JsonValue = Json.jsonValueAt(doc: doc, idx: node.componentsValueIdx)
+    let count: Int = Json.objectLen(this: bag)
+    loop var k: Int = 0, k < count, ++k {
+      let key: String = Json.objectKeyAt(doc: doc, this: bag, idx: k)
+      let value: JsonValue = Json.objectValueAt(doc: doc, this: bag, idx: k)
+      if key is "Children" {
+        childrenSlot = members.length
+        continue
+      }
+      if key is bundlesKey {
+        members.add(value: bagMember(key: key, valueJson: Json.stringify(doc: doc, value: value)))
+        written.add(value: "{key}")
+        continue
+      }
+      let pendingJson: String = pendingJsonFor(world: world, entity: entity, name: key)
+      if pendingJson.length() > 0 {
+        members.add(value: bagMember(key: key, valueJson: pendingJson))
+        written.add(value: "{key}")
+        continue
+      }
+      let live: String = machineComponentJson(world: world, entity: entity, name: key)
+      if live.length() is 0 {
+        # Not a table of this world (an app's component another app drained,
+        # or the node's own override over a bundle): the author's text.
+        members.add(value: bagMember(key: key, valueJson: Json.stringify(doc: doc, value: value)))
+        written.add(value: "{key}")
+        continue
+      }
+      if unchangedSinceSource(
+        world: world
+        entity: entity
+        fresh: fresh
+        freshEntity: freshEntity
+        name: key
+      ) or listHas(items: inherited, name: key) {
+        members.add(value: bagMember(key: key, valueJson: Json.stringify(doc: doc, value: value)))
+      } else {
+        members.add(
+          value: bagMember(
+            key: key
+            valueJson: authoredComponentJson(world: world, entity: entity, name: key)
+          )
+        )
+      }
+      written.add(value: "{key}")
+    }
+  }
+  # 2. Components the world has that the author did not write: added at
+  # runtime — unless they are what the loader adds itself (Name / NodeId
+  # defaults, the Text override, a bundle's inherited ones).
+  let names: List(String) = authoredNamesOf(world: world, entity: entity)
+  loop let name: view String in names {
+    if listHas(items: written, name: name) or listHas(items: inherited, name: name) {
+      continue
+    }
+    if name is "StyleOverride" or name is "NodeId" or name is "Name" or name is "PageRoot" or name is "BundleRefs" {
+      if name is "Name" {
+        let label: String = "{componentView(this: world.names, entity: entity).label}"
+        if label is not nodeId {
+          members.add(
+            value: bagMember(
+              key: name
+              valueJson: authoredComponentJson(world: world, entity: entity, name: name)
+            )
+          )
+        }
+      }
+      continue
+    }
+    let text: String = authoredComponentJson(world: world, entity: entity, name: name)
+    if text.length() > 0 {
+      members.add(value: bagMember(key: name, valueJson: text))
+    }
+  }
+  # 3. Pending (app) components the author did not write either.
+  loop let pending: view PendingComponent in world.pendingComponents {
+    if pending.entity is entity and listHas(items: written, name: pending.name) is false {
+      members.add(value: bagMember(key: pending.name, valueJson: pending.json))
+      written.add(value: "{pending.name}")
+    }
+  }
+  # 4. Children, in the world's order; a SceneInstance's mounted subtree is
+  # the child scene's, not this file's.
+  var childIds: List(String) = List.create(String, cap: 8)
+  var childEntities: List(EntityId) = List.create(EntityId, cap: 8)
+  let isInstance: Bool = componentHas(this: world.sceneInstances, entity: entity)
+  if isInstance is false and componentHas(this: world.childrens, entity: entity) {
+    let children: view Children => componentView(this: world.childrens, entity: entity)
+    loop let child: view EntityId in children.ids {
+      if isRowEntity(world: world, entity: child) {
+        continue
+      }
+      let childId: String = nodeIdOfEntity(world: world, entity: child)
+      if childId.length() > 0 {
+        childIds.add(value: childId)
+        childEntities.add(value: child)
+      }
+    }
+  }
+  if childIds.length > 0 {
+    let childrenMember: String = bagMember(
+      key: "Children"
+      valueJson: encodeStringList(items: childIds)
+    )
+    if childrenSlot >= 0 and childrenSlot < members.length {
+      members.insert(index: childrenSlot, value: childrenMember)
+    } else {
+      members.add(value: childrenMember)
+    }
+  }
+  # Emit the block.
+  var block: String = "    {Json.quote(text: nodeId)}: \{\n"
+  loop var i: Int = 0, i < members.length, ++i {
+    var sep: String = ",\n"
+    if i is members.length - 1 {
+      sep = "\n"
+    }
+    block = "{block}{members.copyAtFallback(index: i, fallback: "")}{sep}"
+  }
+  if members.length is 0 {
+    block = "    {Json.quote(text: nodeId)}: \{"
+  }
+  block = "{block}    \}"
+  out.add(value: own block)
+  outIds.add(value: "{nodeId}")
+  loop let child: view EntityId in childEntities {
+    writeNode(
+      out: out
+      outIds: outIds
+      world: world
+      uiSystems: uiSystems
+      fresh: fresh
+      scene: scene
+      entity: child
+      pageId: pageId
+      visited: visited
+    )
+  }
+}
+
+func listHas(items: view List(String), name: view String) ret Bool {
+  loop let item: view String in items {
+    if item is name {
+      ret true
+    }
+  }
+  ret false
+}
+
+# The page under `pageRoot` as `.raescene` text. `scene` is the parsed source
+# the page was mounted from (headers and the authors' text come from it);
+# `fresh` is a world the same scene was freshly loaded into with the same
+# theme (loadScene, pageId ""), the reference for "unchanged".
+func writeSceneText(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  fresh: view UiWorld
+  scene: view Scene
+  pageRoot: view EntityId
+  pageId: view String
+) ret String {
+  let doc: view JsonDoc => scene.doc
+  let root: JsonValue = Json.root(doc: doc)
+  var text: String = "\{\n"
+  # Headers first, in the author's order; `root` follows the mounted root.
+  let rootId: String = nodeIdOfEntity(world: world, entity: pageRoot)
+  let count: Int = Json.objectLen(this: root)
+  var wroteRoot: Bool = false
+  loop var i: Int = 0, i < count, ++i {
+    let key: String = Json.objectKeyAt(doc: doc, this: root, idx: i)
+    if key is "nodes" {
+      continue
+    }
+    if key is "root" {
+      text = "{text}  \"root\": {Json.quote(text: rootId)},\n"
+      wroteRoot = true
+      continue
+    }
+    text = "{text}  {Json.quote(text: key)}: {prettyValue(
+      doc: doc
+      value: Json.objectValueAt(doc: doc, this: root, idx: i)
+      depth: 1
+    )},\n"
+  }
+  if wroteRoot is false {
+    text = "{text}  \"root\": {Json.quote(text: rootId)},\n"
+  }
+  var blocks: List(String) = List.create(String, cap: 64)
+  var blockIds: List(String) = List.create(String, cap: 64)
+  var visited: List(String) = List.create(String, cap: 64)
+  writeNode(
+    out: blocks
+    outIds: blockIds
+    world: world
+    uiSystems: uiSystems
+    fresh: fresh
+    scene: scene
+    entity: pageRoot
+    pageId: pageId
+    visited: visited
+  )
+  # Nodes in the AUTHOR's order (the source file's), then the ones the world
+  # added, in walk order.
+  var ordered: List(String) = List.create(String, cap: blocks.length)
+  var placed: List(Bool) = List.create(Bool, cap: blocks.length)
+  loop var i: Int = 0, i < blocks.length, ++i {
+    placed.add(value: false)
+  }
+  loop var n: Int = 0, n < scene.nodes.length, ++n {
+    let sourceId: String = "{nodeAt(this: scene, idx: n).nodeId}"
+    loop var i: Int = 0, i < blockIds.length, ++i {
+      if placed.copyAtFallback(index: i, fallback: true) is false and blockIds.copyAtFallback(
+        index: i
+        fallback: ""
+      ) is sourceId {
+        ordered.add(value: blocks.copyAtFallback(index: i, fallback: ""))
+        placed.set(index: i, value: true)
+      }
+    }
+  }
+  loop var i: Int = 0, i < blocks.length, ++i {
+    if placed.copyAtFallback(index: i, fallback: true) is false {
+      ordered.add(value: blocks.copyAtFallback(index: i, fallback: ""))
+    }
+  }
+  text = "{text}  \"nodes\": \{\n"
+  loop var i: Int = 0, i < ordered.length, ++i {
+    var sep: String = ",\n"
+    if i is ordered.length - 1 {
+      sep = "\n"
+    }
+    text = "{text}{ordered.copyAtFallback(index: i, fallback: "")}{sep}"
+  }
+  ret "{text}  \}\n\}\n"
+}
+
+# The reference world for a save: the same scene freshly decoded with the
+# live world's theme, bundles and policy.
+func freshDecodeOf(world: view UiWorld, uiSystems: view UiSystems, scene: view Scene) ret UiWorld {
+  var fresh: UiWorld = createUiWorld()
+  var freshSystems: UiSystems = createUiSystems()
+  fresh.theme.active = world.theme.active
+  fresh.theme.generation = world.theme.generation
+  applyResolvedTokens(dst: fresh.theme.resolved, src: world.theme.resolved)
+  fresh.bundles = cloneBundleSet(set: world.bundles)
+  fresh.scenePolicy.unknownComponents = UnknownComponentPolicy.report
+  loadScene(world: fresh, uiSystems: freshSystems, scene: scene)
+  ret fresh
+}

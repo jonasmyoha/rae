@@ -308,6 +308,9 @@ func runApp(app: mod App) ret Int {
     res: app.gpuUi
   )
   var renderedOnce: Bool = false
+  # RAE_UI_EDITOR_TEST_SAVE=<path>: save the document there once after the
+  # first frame, as Cmd+S would — the headless gate's hook.
+  var testSavePath: String = Sys.getEnv(name: "RAE_UI_EDITOR_TEST_SAVE")
   # Whether the previous loop iteration painted: what the debug widget's fps
   # counts (an idle wait-loop iteration is not a frame).
   var renderedThisFrame: Bool = false
@@ -431,6 +434,19 @@ func runApp(app: mod App) ret Int {
         world: app.world
         kind: EditorPanelKind.project
       )
+      changed = true
+    }
+    # Cmd/Ctrl+S: the document back to its file (documentSystem/DocumentSave).
+    let commandHeld: Bool = Sdl3.isKeyDown(key: Keys.keyLGui) or Sdl3.isKeyDown(key: Keys.keyRGui) or Sdl3.isKeyDown(
+      key: Keys.keyLCtrl
+    ) or Sdl3.isKeyDown(key: Keys.keyRCtrl)
+    if commandHeld and Sdl3.isKeyPressed(key: Keys.keyS) {
+      saveDocument(app: app)
+      changed = true
+    }
+    if testSavePath.length() > 0 and renderedOnce {
+      saveDocumentTo(app: app, path: testSavePath)
+      testSavePath = ""
       changed = true
     }
     var wantsDialog: Bool = Sdl3.isKeyPressed(key: Keys.keyO) or uiActionFired(

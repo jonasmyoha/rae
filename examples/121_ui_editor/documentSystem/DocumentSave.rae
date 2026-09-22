@@ -1,0 +1,49 @@
+# DocumentSave — the document page back to its file (docs/ui-editor-design.md).
+#
+# Cmd/Ctrl+S writes the mounted document to `document.path` through
+# lib/ui/SceneWriter: every component that still equals its authored text is
+# written back verbatim (tokens, hex colours, the author's order survive), a
+# changed one in the grammar, the node's app components (the pending outbox)
+# as they were read, the headers from the parsed file. Canonical layout.
+# `RAE_UI_EDITOR_TEST_SAVE=<path>` saves there once after the first frame —
+# the headless gate's hook.
+import Sys
+open ui/Ecs
+open ui/UiSystems
+open ui/SceneWriter
+open ecs/Entity
+open ecs/ComponentTable
+
+# Write the document to `path`; the node count written, -1 on failure.
+func saveDocumentTo(app: mod App, path: view String) ret Int {
+  if app.document.loaded is false or isNone(this: app.document.pageRoot) {
+    log("[ui-editor] nothing to save")
+    ret -1
+  }
+  let fresh: UiWorld = freshDecodeOf(
+    world: app.world
+    uiSystems: app.uiSystems
+    scene: app.document.scene
+  )
+  let text: String = writeSceneText(
+    world: app.world
+    uiSystems: app.uiSystems
+    fresh: fresh
+    scene: app.document.scene
+    pageRoot: app.document.pageRoot
+    pageId: "document"
+  )
+  if Sys.writeFile(path: path, content: text) is false {
+    log("[ui-editor] could not write {path}")
+    app.chromeSystem.statusLine = "could not write {path}"
+    ret -1
+  }
+  let nodes: Int = app.document.nodeCount
+  log("[ui-editor] saved {path} ({nodes} nodes)")
+  app.chromeSystem.statusLine = "saved {app.document.fileName}"
+  ret nodes
+}
+
+func saveDocument(app: mod App) ret Int {
+  ret saveDocumentTo(app: app, path: app.document.path)
+}

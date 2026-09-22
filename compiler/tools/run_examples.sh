@@ -431,8 +431,33 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             echo "  outline pools failed:"
             cat "$TMP_OUT/render-outlines.log" "$TMP_OUT/screenshot-outlines.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
           fi
+          # The save path (documentSystem/DocumentSave, lib/ui/SceneWriter):
+          # RAE_UI_EDITOR_TEST_SAVE writes the document after the first frame
+          # as Cmd+S would; the saved file must open in the editor with the
+          # same node count and render pixel-identical to the reference (the
+          # unit fixture 884 proves every sample and 106 scene round-trips).
+          SAVED="$TMP_OUT/saved-MainMenu.raescene"
+          SCREENSHOT="$TMP_OUT/ui-editor-saved.bmp"
+          if (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
+             RAE_UI_EDITOR_ROOT="examples/121_ui_editor/assets/samples" RAE_UI_EDITOR_TEST_SAVE="$SAVED" \
+             RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=1500 \
+             perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-save.log" 2>&1 \
+             && grep -qE '\[ui-editor\] saved .*saved-MainMenu.raescene \(40 nodes\)' "$TMP_OUT/render-save.log" \
+             && (cd .. && RAE_UI_EDITOR_SCENE="$SAVED" \
+             RAE_UI_EDITOR_ROOT="examples/121_ui_editor/assets/samples" \
+             RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
+             perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-saved.log" 2>&1 \
+             && grep -qE '\[ui-editor\] mounted saved-MainMenu: 40 nodes, 0 diagnostics' "$TMP_OUT/render-saved.log" \
+             && python3 tools/assert_bmp_diff.py "$SCREENSHOT" "../examples/121_ui_editor/references/MainMenu.png" \
+                  --max-diff-pct 0.3 > "$TMP_OUT/screenshot-saved.log" 2>&1; then
+            :
+          else
+            UI_EDITOR_OK=0
+            echo "  save path failed:"
+            cat "$TMP_OUT/render-save.log" "$TMP_OUT/render-saved.log" "$TMP_OUT/screenshot-saved.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
+          fi
           if [ "$UI_EDITOR_OK" = "1" ]; then
-            echo "PASS: $EXAMPLE_NAME (7 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select, .raepack project open + switch, file picker, camera zoom, outline pools)"
+            echo "PASS: $EXAMPLE_NAME (7 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select, .raepack project open + switch, file picker, camera zoom, outline pools, save path)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (ui editor sample gate)"
