@@ -1,0 +1,42 @@
+# toString / interpolation for List(T) and opt T: `[a, b, c]` with every
+# element through its own formatter, recursively; `none` or the value for an
+# opt. Reachable from both `"{x}"` and `x.toString()`.
+enum Kind { small, large }
+
+type Pair {
+  x: Int
+  y: Int
+}
+
+type Bag {
+  label: String
+  items: List(Int)
+  kind: opt Kind
+}
+
+func main() {
+  let ints: List(Int) = [1, 2, 3]
+  log("ints: {ints}")
+  log("ints toString: {ints.toString()}")
+  let words: List(String) = ["a", "b"]
+  log("words: {words}")
+  let first: Pair = { x: 1, y: 2 }
+  let second: Pair = { x: 3, y: 4 }
+  let pairs: List(Pair) = [first, second]
+  log("pairs: {pairs}")
+  let empty: List(Int) = List.create(Int, cap: 0)
+  log("empty: {empty}")
+  let some: opt Int = 5
+  log("some: {some}")
+  let nothing: opt Int = none
+  log("none: {nothing}")
+  let seven: Pair = { x: 7, y: 8 }
+  let pair: opt Pair = seven
+  log("opt pair: {pair}")
+  let one: opt Int = 1
+  let two: opt Int = none
+  let maybes: List(opt Int) = [one, two]
+  log("maybes: {maybes}")
+  let bag: Bag = { label: "bag", items: [9, 8], kind: Kind.large }
+  log("bag: {bag}")
+}
