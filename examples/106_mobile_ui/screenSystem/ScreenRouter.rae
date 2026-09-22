@@ -12,6 +12,7 @@ open ui/renderSystem/RenderSystem
 open ui/Layer
 open ecs/ComponentTable
 open ui/safeAreaSystem/SafeAreaSystem
+open ui/UiSystems
 
 enum Screen {
   home
@@ -161,6 +162,7 @@ func pageLabelForScreen(screen: view Screen) ret String {
 }
 
 func buildScreenWorld(
+  uiSystems: mod UiSystems
   dockSystem: view DockSystem
   screen: Screen
   scenes: view AlbumScenes
@@ -173,6 +175,7 @@ func buildScreenWorld(
   # (#948): the seven per-screen builders and the ladder that chose between
   # them are gone. Kept for the memory-stress runner, which rebuilds worlds.
   ret buildAppWorldFor(
+    uiSystems: uiSystems
     dockSystem: dockSystem
     visible: screen
     scenes: scenes
@@ -197,6 +200,7 @@ func pageIdForScreen(screen: Screen) pub ret String {
 # down. Data changes (album / track) still trigger a full rebuild
 # until slice 4b.3 introduces per-page invalidation.
 func buildAppWorld(
+  uiSystems: mod UiSystems
   dockSystem: view DockSystem
   scenes: view AlbumScenes
   playbackSystem: view PlaybackSystem
@@ -205,6 +209,7 @@ func buildAppWorld(
   viewport: view Viewport
 ) pub ret UiWorld {
   ret buildAppWorldFor(
+    uiSystems: uiSystems
     dockSystem: dockSystem
     visible: visibleScreen(state: state)
     scenes: scenes
@@ -218,6 +223,7 @@ func buildAppWorld(
 # The persistent world: every screen's page is mounted, and exactly `visible`
 # is Active. Which page is visible is a table walk over the ScreenPage rows.
 func buildAppWorldFor(
+  uiSystems: mod UiSystems
   dockSystem: view DockSystem
   visible: Screen
   scenes: view AlbumScenes
@@ -246,6 +252,7 @@ func buildAppWorldFor(
   loop let page: view ScreenPage in pages {
     let root: EntityId = mountScreenPage(
       world: world
+      uiSystems: uiSystems
       page: page
       scenes: scenes
       viewport: viewport
@@ -258,15 +265,22 @@ func buildAppWorldFor(
   let dock: EntityId = mountBottomDockOverlay(
     dockSystem: dockSystem
     world: world
+    uiSystems: uiSystems
     activeTab: state.tab
     scenes: scenes
     playbackSystem: playbackSystem
     state: state
     reg: textureRegistry
   )
-  let back: EntityId = mountBackButtonOverlay(world: world, scenes: scenes, state: state)
+  let back: EntityId = mountBackButtonOverlay(
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    state: state
+  )
   mountBottomSheetOverlay(
     world: world
+    uiSystems: uiSystems
     scenes: scenes
     sheet: state.bottomSheet
     state: state
@@ -285,7 +299,7 @@ func buildAppWorldFor(
   # inset. Runs on every rebuild, including the resize path (main.rae
   # sets switching=true on viewport extent changes), so the active
   # viewport's insets stay in sync with the selected simulator preset.
-  let safe: Insets = applySafeAreas(world: world, viewport: viewport)
+  let safe: Insets = applySafeAreas(world: world, uiSystems: uiSystems, viewport: viewport)
   # #978: the dock's bottom anchoring (and the safe-area lift) is the
   # AnchorBottom system's; run it once so the first layout is right.
   anchorBottomSystem(world: world, bottomInset: safe.b)

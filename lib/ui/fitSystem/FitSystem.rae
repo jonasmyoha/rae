@@ -30,6 +30,7 @@
 # size — glyphs don't scale; keep boards to sprites/shapes.
 open ecs/ComponentTable
 open ecs/Query
+open ui/UiSystems
 
 # 0.01 du ≈ 1/300 pt: far below one physical pixel at any DPR, so
 # gating on it can't suppress a visible change.
@@ -45,16 +46,17 @@ func fitDiffers(a: view Float, b: view Float) ret Bool {
 # already produced a ComputedRect for.
 func fitWriteRect(
   world: mod UiWorld
+  uiSystems: mod UiSystems
   entity: view EntityId
   x: view Float
   y: view Float
   w: view Float
   h: view Float
 ) {
-  if componentHas(this: world.computedRects, entity: entity) is false {
+  if componentHas(this: uiSystems.layout.computedRects, entity: entity) is false {
     ret
   }
-  let cur: ComputedRect = componentGet(this: world.computedRects, entity: entity)
+  let cur: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: entity)
   var dirty: Bool = false
   if fitDiffers(a: cur.position.x, b: x) {
     dirty = true
@@ -71,7 +73,7 @@ func fitWriteRect(
   if dirty is false {
     ret
   }
-  let cr: mod ComputedRect => componentMod(this: world.computedRects, entity: entity)
+  let cr: mod ComputedRect => componentMod(this: uiSystems.layout.computedRects, entity: entity)
   cr.position.x = x
   cr.position.y = y
   cr.size.x = w
@@ -81,7 +83,12 @@ func fitWriteRect(
 # Rewrite every descendant's ComputedRect as `authored Rect * s`.
 # ComputedRect coordinates are parent-local, so uniform scaling per
 # level composes to a uniform subtree scale.
-func fitScaleSubtree(world: mod UiWorld, entity: view EntityId, s: view Float) {
+func fitScaleSubtree(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  entity: view EntityId
+  s: view Float
+) {
   unsafe {
     if componentHas(this: world.childrens, entity: entity) is false {
       ret
@@ -95,6 +102,7 @@ func fitScaleSubtree(world: mod UiWorld, entity: view EntityId, s: view Float) {
         let r: Rect = componentGet(this: world.rects, entity: cid)
         fitWriteRect(
           world: world
+          uiSystems: uiSystems
           entity: cid
           x: r.position.x * s
           y: r.position.y * s
@@ -102,7 +110,12 @@ func fitScaleSubtree(world: mod UiWorld, entity: view EntityId, s: view Float) {
           h: r.size.y * s
         )
       }
-      fitScaleSubtree(world: world, entity: cid, s: s)
+      fitScaleSubtree(
+        world: world
+        uiSystems: uiSystems
+        entity: cid
+        s: s
+      )
       i = i + 1
     }
   }
@@ -110,18 +123,23 @@ func fitScaleSubtree(world: mod UiWorld, entity: view EntityId, s: view Float) {
 
 # Apply one ScaleToFit entity: compute s against the parent's padded
 # content box, center the design rect inside it, scale the subtree.
-func fitApplyOne(world: mod UiWorld, entity: view EntityId, mode: view FitMode) {
-  if componentHas(this: world.parents, entity: entity) is false {
+func fitApplyOne(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  entity: view EntityId
+  mode: view FitMode
+) {
+  if componentHas(this: uiSystems.hierarchy.parents, entity: entity) is false {
     ret
   }
-  let pl: Parent = componentGet(this: world.parents, entity: entity)
-  if componentHas(this: world.computedRects, entity: pl.parent) is false {
+  let pl: Parent = componentGet(this: uiSystems.hierarchy.parents, entity: entity)
+  if componentHas(this: uiSystems.layout.computedRects, entity: pl.parent) is false {
     ret
   }
   if componentHas(this: world.rects, entity: entity) is false {
     ret
   }
-  let pcr: ComputedRect = componentGet(this: world.computedRects, entity: pl.parent)
+  let pcr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: pl.parent)
   let design: Rect = componentGet(this: world.rects, entity: entity)
   if design.size.x <= 0.0 {
     ret
@@ -165,33 +183,45 @@ func fitApplyOne(world: mod UiWorld, entity: view EntityId, mode: view FitMode) 
   let y: Float = padT + (availH - h) / 2.0
   fitWriteRect(
     world: world
+    uiSystems: uiSystems
     entity: entity
     x: x
     y: y
     w: w
     h: h
   )
-  fitScaleSubtree(world: world, entity: entity, s: s)
+  fitScaleSubtree(
+    world: world
+    uiSystems: uiSystems
+    entity: entity
+    s: s
+  )
 }
 
 # Run both art-direction passes. Call between ifDirty and
 # systemIfDirty every frame — cheap when the aspect /
 # scale-to-fit tables are empty or nothing changed.
-func fitSystem(world: mod UiWorld) pub {
+func fitSystem(world: mod UiWorld, uiSystems: mod UiSystems) pub {
   # Aspect ∧ ComputedRect join (#807/#940): only entities that carry BOTH an
   # Aspect and a ComputedRect can be corrected, so query2 walks the smaller of
   # the two tables and probes the other by index instead of scanning every
   # Aspect and re-looking-up its ComputedRect. componentDataAt reads each side
   # by its dense index (no sparse probe, no generation bump); queryModAt writes
   # ONLY on a real change, keeping the same change-gated bump as componentMod.
-  let hits: List(Query2Match) = query2(tableA: world.aspects, tableB: world.computedRects)
+  let hits: List(Query2Match) = query2(
+    tableA: world.aspects
+    tableB: uiSystems.layout.computedRects
+  )
   loop let row: view Query2Match in hits {
     let a: Aspect = componentDataAt(this: world.aspects, i: row.indexA)
     if a.ratio > 0.0 {
-      let cur: ComputedRect = componentDataAt(this: world.computedRects, i: row.indexB)
+      let cur: ComputedRect = componentDataAt(this: uiSystems.layout.computedRects, i: row.indexB)
       let targetH: Float = cur.size.x / a.ratio
       if fitDiffers(a: cur.size.y, b: targetH) {
-        let cr: mod ComputedRect => queryModAt(table: world.computedRects, denseIndex: row.indexB)
+        let cr: mod ComputedRect => queryModAt(
+          table: uiSystems.layout.computedRects
+          denseIndex: row.indexB
+        )
         cr.size.y = targetH
       }
     }
@@ -201,7 +231,12 @@ func fitSystem(world: mod UiWorld) pub {
   loop i < n {
     let e: EntityId = componentEntityAt(this: world.scaleToFits, i: i)
     let stf: ScaleToFit = componentDataAt(this: world.scaleToFits, i: i)
-    fitApplyOne(world: world, entity: e, mode: stf.mode)
+    fitApplyOne(
+      world: world
+      uiSystems: uiSystems
+      entity: e
+      mode: stf.mode
+    )
     i = i + 1
   }
 }

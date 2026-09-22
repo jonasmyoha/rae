@@ -33,6 +33,7 @@ open ecs/ComponentTable
 open ecs/hierarchySystem/HierarchySystem
 open ui/layoutSystem/LayoutSystem
 open ui/Theme
+open ui/UiSystems
 
 let bottomSheetPageId: String = "bottom-sheet"
 
@@ -85,6 +86,7 @@ func closeBottomSheet(sheet: mod BottomSheetState) pub {
 # frame and the panel anchors to its bottom — on every device preset.
 func mountBottomSheetOverlay(
   world: mod UiWorld
+  uiSystems: mod UiSystems
   scenes: view AlbumScenes
   sheet: view BottomSheetState
   state: view AppState
@@ -93,6 +95,7 @@ func mountBottomSheetOverlay(
   let pageIdCopy: String = "{bottomSheetPageId}"
   let root: EntityId = mountPageOrError(
     world: world
+    uiSystems: uiSystems
     pageId: own pageIdCopy
     scene: scenes.bottomSheet
     overrides: emptyOverrides()
@@ -105,11 +108,12 @@ func mountBottomSheetOverlay(
   # (#996); fill them now so the first frame after a mount is right.
   listSourceSystem(
     world: world
+    uiSystems: uiSystems
     state: state
     playbackSystem: playbackSystem
     scenes: scenes
   )
-  bottomSheetSystem(world: world, sheet: sheet)
+  bottomSheetSystem(world: world, uiSystems: uiSystems, sheet: sheet)
   ret root
 }
 
@@ -119,7 +123,11 @@ func mountBottomSheetOverlay(
 # system seats it on the bottom edge. The rows themselves are the panel's
 # data list (ListSources.rae). Runs from the observation schedule on the epoch and
 # once at mount; at idle it is a few comparisons.
-func bottomSheetSystem(world: mod UiWorld, sheet: view BottomSheetState) pub {
+func bottomSheetSystem(
+  world: mod UiWorld
+  uiSystems: view UiSystems
+  sheet: view BottomSheetState
+) pub {
   # Overlay roots (`BottomSheet`): show / hide from the sheet's visibility.
   let nr: Int = componentCount(this: world.bottomSheets)
   var r: Int = 0
@@ -143,7 +151,7 @@ func bottomSheetSystem(world: mod UiWorld, sheet: view BottomSheetState) pub {
   loop p < np {
     let panel: EntityId = componentEntityAt(this: world.sheetPanels, i: p)
     let binding: SheetPanel = componentDataAt(this: world.sheetPanels, i: p)
-    let pad: Insets = entityPadding(world: world, entity: panel)
+    let pad: Insets = entityPadding(world: world, uiSystems: uiSystems, entity: panel)
     let layout: Layout = entityLayout(world: world, entity: panel)
     let rowCount: Int = sheet.actions.length
     var gaps: Float = 0.0

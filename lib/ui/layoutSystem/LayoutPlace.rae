@@ -11,6 +11,7 @@
 # visible.
 open ecs/ComponentTable
 open ecs/hierarchySystem/HierarchySystem
+open ui/UiSystems
 
 # Write `entity`'s ComputedRect from a parent-relative position (plus its
 # own Offset, a post-layout shift) and its already-resolved own size. This
@@ -19,6 +20,7 @@ open ecs/hierarchySystem/HierarchySystem
 # children in turn (#731).
 func writeComputedRect(
   world: mod UiWorld
+  uiSystems: mod UiSystems
   entity: view EntityId
   localX: view Float
   localY: view Float
@@ -30,15 +32,16 @@ func writeComputedRect(
     position: { x: localX + off.x, y: localY + off.y }
     size: { x: ownW, y: ownH }
   }
-  componentSet(this: world.computedRects, entity: entity, data: cr)
+  componentSet(this: uiSystems.layout.computedRects, entity: entity, data: cr)
 }
 
 # Resolve and write a layout ROOT's own ComputedRect: size from the world
 # layout extent, x from the ExtentAnchor. Roots have no parent to place
 # them, so the compute loop seeds them on arrival before placing children.
-func seedRoot(world: mod UiWorld, entity: view EntityId) {
+func seedRoot(world: mod UiWorld, uiSystems: mod UiSystems, entity: view EntityId) {
   let resolved: Vec2 = resolveOwnSize(
     world: world
+    uiSystems: uiSystems
     entity: entity
     parentAvailW: world.layoutW
     parentAvailH: world.layoutH
@@ -58,6 +61,7 @@ func seedRoot(world: mod UiWorld, entity: view EntityId) {
   }
   writeComputedRect(
     world: world
+    uiSystems: uiSystems
     entity: entity
     localX: rootX
     localY: 0.0
@@ -71,7 +75,12 @@ func seedRoot(world: mod UiWorld, entity: view EntityId) {
 # a root); its size IS the resolved own size the old recursion threaded down
 # as ownW/ownH. Children get their ComputedRects here; the depth-order loop
 # visits each later to place THEIR children (#731).
-func placeChildren(world: mod UiWorld, entity: view EntityId, scratch: mod List(EntityId)) {
+func placeChildren(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  entity: view EntityId
+  scratch: mod List(EntityId)
+) {
   unsafe {
     activeChildrenInto(world: world, entity: entity, out: scratch)
     let kids: view List(EntityId) => scratch
@@ -82,14 +91,14 @@ func placeChildren(world: mod UiWorld, entity: view EntityId, scratch: mod List(
 
     var ownW: Float = 0.0
     var ownH: Float = 0.0
-    if componentHas(this: world.computedRects, entity: entity) {
-      let cr: ComputedRect = componentGet(this: world.computedRects, entity: entity)
+    if componentHas(this: uiSystems.layout.computedRects, entity: entity) {
+      let cr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: entity)
       ownW = cr.size.x
       ownH = cr.size.y
     }
 
     let layout: Layout = entityLayout(world: world, entity: entity)
-    let pad: Insets = entityPadding(world: world, entity: entity)
+    let pad: Insets = entityPadding(world: world, uiSystems: uiSystems, entity: entity)
     let contentX: Float = pad.l
     let contentY: Float = pad.t
     var contentW: Float = ownW - pad.l - pad.r
@@ -104,6 +113,7 @@ func placeChildren(world: mod UiWorld, entity: view EntityId, scratch: mod List(
     if layout.kind is LayoutType.horizontal {
       placeHorizontal(
         world: world
+        uiSystems: uiSystems
         kids: kids
         contentX: contentX
         contentY: contentY
@@ -118,6 +128,7 @@ func placeChildren(world: mod UiWorld, entity: view EntityId, scratch: mod List(
     if layout.kind is LayoutType.vertical {
       placeVertical(
         world: world
+        uiSystems: uiSystems
         kids: kids
         contentX: contentX
         contentY: contentY
@@ -132,6 +143,7 @@ func placeChildren(world: mod UiWorld, entity: view EntityId, scratch: mod List(
     if layout.kind is LayoutType.stack {
       placeStack(
         world: world
+        uiSystems: uiSystems
         kids: kids
         contentX: contentX
         contentY: contentY
@@ -143,6 +155,7 @@ func placeChildren(world: mod UiWorld, entity: view EntityId, scratch: mod List(
     if layout.kind is LayoutType.grid {
       placeGrid(
         world: world
+        uiSystems: uiSystems
         kids: kids
         contentX: contentX
         contentY: contentY
@@ -160,6 +173,7 @@ func placeChildren(world: mod UiWorld, entity: view EntityId, scratch: mod List(
       let crect: Rect = entityRect(world: world, entity: cid)
       let resolved: Vec2 = resolveOwnSize(
         world: world
+        uiSystems: uiSystems
         entity: cid
         parentAvailW: contentW
         parentAvailH: contentH
@@ -167,6 +181,7 @@ func placeChildren(world: mod UiWorld, entity: view EntityId, scratch: mod List(
       )
       writeComputedRect(
         world: world
+        uiSystems: uiSystems
         entity: cid
         localX: contentX + crect.position.x
         localY: contentY + crect.position.y
@@ -183,6 +198,7 @@ func placeChildren(world: mod UiWorld, entity: view EntityId, scratch: mod List(
 # -----------------------------------------------------------------
 func placeHorizontal(
   world: mod UiWorld
+  uiSystems: mod UiSystems
   kids: view List(EntityId)
   contentX: view Float
   contentY: view Float
@@ -206,6 +222,7 @@ func placeHorizontal(
       } else {
         let r: Vec2 = resolveOwnSize(
           world: world
+          uiSystems: uiSystems
           entity: cid
           parentAvailW: contentW
           parentAvailH: contentH
@@ -263,6 +280,7 @@ func placeHorizontal(
       } else {
         let r: Vec2 = resolveOwnSize(
           world: world
+          uiSystems: uiSystems
           entity: cid
           parentAvailW: contentW
           parentAvailH: contentH
@@ -277,6 +295,7 @@ func placeHorizontal(
       } else {
         let r: Vec2 = resolveOwnSize(
           world: world
+          uiSystems: uiSystems
           entity: cid
           parentAvailW: contentW
           parentAvailH: contentH
@@ -296,6 +315,7 @@ func placeHorizontal(
 
       writeComputedRect(
         world: world
+        uiSystems: uiSystems
         entity: cid
         localX: cursorX
         localY: crossY
@@ -310,6 +330,7 @@ func placeHorizontal(
 
 func placeVertical(
   world: mod UiWorld
+  uiSystems: mod UiSystems
   kids: view List(EntityId)
   contentX: view Float
   contentY: view Float
@@ -332,6 +353,7 @@ func placeVertical(
       } else {
         let r: Vec2 = resolveOwnSize(
           world: world
+          uiSystems: uiSystems
           entity: cid
           parentAvailW: contentW
           parentAvailH: contentH
@@ -382,6 +404,7 @@ func placeVertical(
       } else {
         let r: Vec2 = resolveOwnSize(
           world: world
+          uiSystems: uiSystems
           entity: cid
           parentAvailW: contentW
           parentAvailH: contentH
@@ -396,6 +419,7 @@ func placeVertical(
       } else {
         let r: Vec2 = resolveOwnSize(
           world: world
+          uiSystems: uiSystems
           entity: cid
           parentAvailW: contentW
           parentAvailH: contentH
@@ -415,6 +439,7 @@ func placeVertical(
 
       writeComputedRect(
         world: world
+        uiSystems: uiSystems
         entity: cid
         localX: crossX
         localY: cursorY
@@ -434,6 +459,7 @@ func placeVertical(
 # resolves its own size and sits at its cell's top-left.
 func placeGrid(
   world: mod UiWorld
+  uiSystems: mod UiSystems
   kids: view List(EntityId)
   contentX: view Float
   contentY: view Float
@@ -463,6 +489,7 @@ func placeGrid(
       let cid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: i)
       let resolved: Vec2 = resolveOwnSize(
         world: world
+        uiSystems: uiSystems
         entity: cid
         parentAvailW: contentW
         parentAvailH: contentH
@@ -504,6 +531,7 @@ func placeGrid(
           }
           writeComputedRect(
             world: world
+            uiSystems: uiSystems
             entity: cid
             localX: cursorX
             localY: cursorY
@@ -522,6 +550,7 @@ func placeGrid(
 
 func placeStack(
   world: mod UiWorld
+  uiSystems: mod UiSystems
   kids: view List(EntityId)
   contentX: view Float
   contentY: view Float
@@ -535,6 +564,7 @@ func placeStack(
       let cid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: i)
       let resolved: Vec2 = resolveOwnSize(
         world: world
+        uiSystems: uiSystems
         entity: cid
         parentAvailW: contentW
         parentAvailH: contentH
@@ -574,6 +604,7 @@ func placeStack(
 
       writeComputedRect(
         world: world
+        uiSystems: uiSystems
         entity: cid
         localX: cx
         localY: cy
@@ -594,23 +625,28 @@ func placeStack(
 # loop reaches them. Roots are gated on `rects` to match the old
 # root condition (alive, no Parent, has Rect).
 # -----------------------------------------------------------------
-func computeLinear(world: mod UiWorld) {
+func computeLinear(world: mod UiWorld, uiSystems: mod UiSystems) {
   unsafe {
     let order: view List(EntityId) => depthOrder(
       state: world.hierarchyOrder
-      parents: world.parents
+      parents: uiSystems.hierarchy.parents
       childrens: world.childrens
     )
     var scratch: List(EntityId) = List.create(EntityId, cap: 8)
     loop var i: Int = 0, i < order.length, ++i {
       if let entity: EntityId = order.copyAt(index: i) {
         if layoutActive(world: world, entity: entity) {
-          if componentHas(this: world.parents, entity: entity) is false {
+          if componentHas(this: uiSystems.hierarchy.parents, entity: entity) is false {
             if componentHas(this: world.rects, entity: entity) {
-              seedRoot(world: world, entity: entity)
+              seedRoot(world: world, uiSystems: uiSystems, entity: entity)
             }
           }
-          placeChildren(world: world, entity: entity, scratch: scratch)
+          placeChildren(
+            world: world
+            uiSystems: uiSystems
+            entity: entity
+            scratch: scratch
+          )
         }
       }
     }
@@ -618,11 +654,11 @@ func computeLinear(world: mod UiWorld) {
     let alive: view List(EntityId) => world.allocator.alive
     loop var k: Int = 0, k < alive.length, ++k {
       let entity: EntityId = rae_ext_rae_buf_get(buf: alive.data, index: k)
-      if componentHas(this: world.parents, entity: entity) is false {
+      if componentHas(this: uiSystems.hierarchy.parents, entity: entity) is false {
         if componentHas(this: world.childrens, entity: entity) is false {
           if componentHas(this: world.rects, entity: entity) {
             if layoutActive(world: world, entity: entity) {
-              seedRoot(world: world, entity: entity)
+              seedRoot(world: world, uiSystems: uiSystems, entity: entity)
             }
           }
         }

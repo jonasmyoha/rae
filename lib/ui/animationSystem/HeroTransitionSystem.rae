@@ -18,16 +18,22 @@ open ui/Components
 open ui/Layer
 open ecs/Entity
 open ecs/ComponentTable
+open ui/UiSystems
 
 # The `HeroWidget` with `key` under the page `pageId`, or noEntity().
-func findHeroOnPage(world: view UiWorld, pageId: view String, key: view String) pub ret EntityId {
+func findHeroOnPage(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  pageId: view String
+  key: view String
+) pub ret EntityId {
   let n: Int = componentCount(this: world.heroWidgets)
   var i: Int = 0
   loop i < n {
     let entity: EntityId = componentEntityAt(this: world.heroWidgets, i: i)
     let hero: HeroWidget = componentDataAt(this: world.heroWidgets, i: i)
     if hero.key is key {
-      let page: String = pageOf(world: world, entity: entity)
+      let page: String = pageOf(world: world, uiSystems: uiSystems, entity: entity)
       if page is pageId {
         ret entity
       }
@@ -37,22 +43,22 @@ func findHeroOnPage(world: view UiWorld, pageId: view String, key: view String) 
   ret noEntity()
 }
 
-func heroPlaced(world: view UiWorld, entity: view EntityId) ret Bool {
+func heroPlaced(world: view UiWorld, uiSystems: view UiSystems, entity: view EntityId) ret Bool {
   if isNone(this: entity) {
     ret false
   }
   if componentHas(this: world.worldTransforms, entity: entity) is false {
     ret false
   }
-  ret componentHas(this: world.computedRects, entity: entity)
+  ret componentHas(this: uiSystems.layout.computedRects, entity: entity)
 }
 
 # Is any of the hero's box inside the world's extent? A source the user
 # cannot see (a grid tile scrolled out of view) makes no shared-element
 # transition: the destination just appears, as without one.
-func heroOnScreen(world: view UiWorld, entity: view EntityId) ret Bool {
+func heroOnScreen(world: view UiWorld, uiSystems: view UiSystems, entity: view EntityId) ret Bool {
   let at: WorldTransform2D = componentGet(this: world.worldTransforms, entity: entity)
-  let box: ComputedRect = componentGet(this: world.computedRects, entity: entity)
+  let box: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: entity)
   if at.position.x + box.size.x <= 0.0 or at.position.x >= world.layoutW {
     ret false
   }
@@ -116,6 +122,7 @@ func placeHeroBox(
 # when either side has no laid-out box yet or the source is off screen.
 func spawnHeroTransition(
   world: mod UiWorld
+  uiSystems: view UiSystems
   key: view String
   source: view EntityId
   target: view EntityId
@@ -123,19 +130,19 @@ func spawnHeroTransition(
   duration: view Float
   layerId: view String
 ) pub ret Bool {
-  if heroPlaced(world: world, entity: source) is false {
+  if heroPlaced(world: world, uiSystems: uiSystems, entity: source) is false {
     ret false
   }
-  if heroPlaced(world: world, entity: target) is false {
+  if heroPlaced(world: world, uiSystems: uiSystems, entity: target) is false {
     ret false
   }
-  if heroOnScreen(world: world, entity: source) is false {
+  if heroOnScreen(world: world, uiSystems: uiSystems, entity: source) is false {
     ret false
   }
   let sourceAt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: source)
-  let sourceBox: ComputedRect = componentGet(this: world.computedRects, entity: source)
+  let sourceBox: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: source)
   let targetAt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: target)
-  let targetBox: ComputedRect = componentGet(this: world.computedRects, entity: target)
+  let targetBox: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: target)
   let flight: EntityId = createEntity(world: world)
   let transition: HeroTransition = {
     key: "{key}"

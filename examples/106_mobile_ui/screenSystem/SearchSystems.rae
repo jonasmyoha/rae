@@ -23,13 +23,18 @@ import ui/Scene
 open ui/SceneInstance
 open ecs/Entity
 open ecs/ComponentTable
+open ui/UiSystems
 
 # ----- SearchField ----------------------------------------------------------
 
 # True when the page holding `entity` is active (visible). A page root with no
 # Active component counts as active, like layout does.
-func entityPageActive(world: view UiWorld, entity: view EntityId) ret Bool {
-  let page: String = pageOf(world: world, entity: entity)
+func entityPageActive(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entity: view EntityId
+) ret Bool {
+  let page: String = pageOf(world: world, uiSystems: uiSystems, entity: entity)
   if page.length() is 0 {
     ret true
   }
@@ -112,14 +117,18 @@ func setTextIfDifferent(
 
 # The search-results list host (`ListSource { searchTracks | searchAlbums }`)
 # on the same page as `field`, if any.
-func searchResultsOnPage(world: view UiWorld, page: view String) ret EntityId {
+func searchResultsOnPage(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  page: view String
+) ret EntityId {
   let n: Int = componentCount(this: world.listSources)
   var i: Int = 0
   loop i < n {
     let entity: EntityId = componentEntityAt(this: world.listSources, i: i)
     let binding: ListSource = componentDataAt(this: world.listSources, i: i)
     let isSearch: Bool = binding.source is ListSourceKind.searchTracks or binding.source is ListSourceKind.searchAlbums
-    if isSearch and pageOf(world: world, entity: entity) is page {
+    if isSearch and pageOf(world: world, uiSystems: uiSystems, entity: entity) is page {
       ret entity
     }
     i = i + 1
@@ -127,14 +136,18 @@ func searchResultsOnPage(world: view UiWorld, page: view String) ret EntityId {
   ret noEntity()
 }
 
-func searchFieldSystem(world: mod UiWorld, input: view InputSystem) pub {
+func searchFieldSystem(world: mod UiWorld, uiSystems: view UiSystems, input: view InputSystem) pub {
   let n: Int = componentCount(this: world.searchFields)
   # OS text input is on exactly while a search field's page is on screen;
   # everywhere else the window takes raw keys (no accent popover on macOS).
   var fieldOnScreen: Bool = false
   var f: Int = 0
   loop f < n {
-    if entityPageActive(world: world, entity: componentEntityAt(this: world.searchFields, i: f)) {
+    if entityPageActive(
+      world: world
+      uiSystems: uiSystems
+      entity: componentEntityAt(this: world.searchFields, i: f)
+    ) {
       fieldOnScreen = true
     }
     f = f + 1
@@ -146,7 +159,7 @@ func searchFieldSystem(world: mod UiWorld, input: view InputSystem) pub {
     let data: SearchField = componentDataAt(this: world.searchFields, i: i)
     var query: String = "{data.query}"
     # Typing goes to the field whose page is on screen.
-    if entityPageActive(world: world, entity: field) {
+    if entityPageActive(world: world, uiSystems: uiSystems, entity: field) {
       var b: Int = 0
       loop b < input.backspaces {
         query = withoutLastChar(text: query)
@@ -185,11 +198,11 @@ func searchFieldSystem(world: mod UiWorld, input: view InputSystem) pub {
     # Results vs empty state. The results container follows the query here;
     # the page's `EmptyState { kind: search }` node is toggled by
     # `emptyStateSystem` (no page + node-id lookup).
-    let page: String = pageOf(world: world, entity: field)
+    let page: String = pageOf(world: world, uiSystems: uiSystems, entity: field)
     let hasQuery: Bool = query.length() > 0
     setActiveIfDifferent(
       world: world
-      entity: searchResultsOnPage(world: world, page: page)
+      entity: searchResultsOnPage(world: world, uiSystems: uiSystems, page: page)
       active: hasQuery
     )
     i = i + 1
@@ -198,12 +211,16 @@ func searchFieldSystem(world: mod UiWorld, input: view InputSystem) pub {
 
 # The live query of the `SearchField` on `page` ("" when the page has none) —
 # what the page's search-results ListSource keys its rows on.
-func searchQueryOnPage(world: view UiWorld, page: view String) ret String {
+func searchQueryOnPage(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  page: view String
+) ret String {
   let n: Int = componentCount(this: world.searchFields)
   var i: Int = 0
   loop i < n {
     let field: EntityId = componentEntityAt(this: world.searchFields, i: i)
-    if pageOf(world: world, entity: field) is page {
+    if pageOf(world: world, uiSystems: uiSystems, entity: field) is page {
       let data: SearchField = componentDataAt(this: world.searchFields, i: i)
       ret "{data.query}"
     }

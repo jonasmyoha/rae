@@ -14,6 +14,7 @@ open ui/Registry
 open ui/Ecs
 open ui/renderSystem/RenderSystem
 open Gpu2dCanvas
+open ui/UiSystems
 
 func renderFrame(
   renderer: mod DeferredRenderer
@@ -22,6 +23,7 @@ func renderFrame(
   camera: view Camera3d
   light: view Light3d
   uiWorld: mod UiWorld
+  uiSystems: view UiSystems
   uiResources: view Gpu2dUi
   debug: mod DebugOverlay
 ) {
@@ -32,7 +34,12 @@ func renderFrame(
     let tag: Int = deferredTagAt(renderer: renderer, i: passIndex)
     if tag is RenderTag.uiOverlay {
       Gpu2d.beginFrameLoad(canvas: renderer.canvas)
-      renderSystemGpu2d(world: uiWorld, res: uiResources, canvas: renderer.canvas)
+      renderSystemGpu2d(
+        world: uiWorld
+        uiSystems: uiSystems
+        res: uiResources
+        canvas: renderer.canvas
+      )
       drawNextPiecePreview(kind: game.nextKind, canvas: renderer.canvas)
       drawDebugOverlay(
         debugOverlay: debug
@@ -98,10 +105,12 @@ func main() ret Int {
     themeFile: "Theme.raescene"
   )
   var uiWorld: UiWorld = create()
+  var uiSystems: UiSystems = createUiSystems()
   # #764: install the app's theme (palette + scene tokens) onto this world.
   seedWorldTheme(world: uiWorld, res: uiResources)
   let uiRoot: EntityId = mountUiScene(
     world: uiWorld
+    uiSystems: uiSystems
     path: "examples/97_tetris3d/assets/ui.raescene"
     res: uiResources
   )
@@ -144,7 +153,7 @@ func main() ret Int {
   var inputEdges: InputEdges = createInputEdges()
   loop not Gpu2d.pollClose() {
     pollInputEdges(edges: inputEdges)
-    let resized: Bool = resizeUiToWindow(world: uiWorld, res: uiResources)
+    let resized: Bool = resizeUiToWindow(world: uiWorld, uiSystems: uiSystems, res: uiResources)
     let now: Float64 = Gpu2d.nowSeconds()
     if updateDebugOverlay(
       debugOverlay: dbg
@@ -171,7 +180,7 @@ func main() ret Int {
       }
     }
     syncTetrisHud(uiWorld: uiWorld, game: game, state: hudState)
-    runUiSystems(world: uiWorld, res: uiResources)
+    runUiSystems(world: uiWorld, uiSystems: uiSystems, res: uiResources)
     if Gpu2d.renderGate() {
       renderFrame(
         renderer: renderer
@@ -180,13 +189,14 @@ func main() ret Int {
         camera: camera
         light: light
         uiWorld: uiWorld
+        uiSystems: uiSystems
         uiResources: uiResources
         debug: dbg
       )
     }
     # Frame end: report the authored components no lib table matched (this app
     # has no tables of its own) and recycle the indices of destroyed entities.
-    uiFrameEnd(world: uiWorld)
+    uiFrameEnd(world: uiWorld, uiSystems: uiSystems)
   }
 
   if testMode {

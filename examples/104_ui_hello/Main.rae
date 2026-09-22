@@ -30,6 +30,7 @@ open ui/SceneFile
 open ui/SceneLoader
 open ui/Transform
 open Gpu2dCanvas
+open ui/UiSystems
 
 const designW: Int = 440
 
@@ -70,6 +71,8 @@ func main() ret Int {
   )
 
   var world: UiWorld = create()
+
+  var uiSystems: UiSystems = createUiSystems()
   # #764: install the app's theme (palette + scene tokens) onto this world.
   seedWorldTheme(world: world, res: gpuUi)
   world.layoutW = designW.toFloat()
@@ -81,7 +84,7 @@ func main() ret Int {
     Gpu2d.closeWindow()
     ret 1
   }
-  loadScene(world: world, scene: scene)
+  loadScene(world: world, uiSystems: uiSystems, scene: scene)
 
   var value: Int = initialValue
   setNodeText(world: world, nodeId: "ValueText", value: "Value: {value}!")
@@ -91,16 +94,21 @@ func main() ret Int {
   # runScheduledUiSystems runs the render-prep ones each gated by `uiShouldRun`
   # (layout/transform skip when their inputs are unchanged; see lib/ui/Pipeline).
   var schedule: Schedule = createUiPipeline(world: world)
-  runScheduledUiSystems(schedule: schedule, world: world, res: gpuUi)
+  runScheduledUiSystems(
+    schedule: schedule
+    world: world
+    uiSystems: uiSystems
+    res: gpuUi
+  )
 
   var input: UiInput = createUiInput()
   var renderedOnce: Bool = false
   var wokeUp: Bool = false
 
   loop not Gpu2d.pollClose() {
-    var changed: Bool = resizeUiToWindow(world: world, res: gpuUi)
+    var changed: Bool = resizeUiToWindow(world: world, uiSystems: uiSystems, res: gpuUi)
 
-    updateUiInput(input: input, world: world)
+    updateUiInput(input: input, world: world, uiSystems: uiSystems)
     let hadEvents: Bool = uiActionCount(world: world) > 0
 
     let next: Int = applyActions(value: value, world: world)
@@ -111,7 +119,12 @@ func main() ret Int {
     }
 
     if hadEvents or changed {
-      runScheduledUiSystems(schedule: schedule, world: world, res: gpuUi)
+      runScheduledUiSystems(
+        schedule: schedule
+        world: world
+        uiSystems: uiSystems
+        res: gpuUi
+      )
     }
 
     # Draw when something changed, when the OS woke us, and for the first frame
@@ -125,7 +138,12 @@ func main() ret Int {
         b: 0.08
         a: 1.0
       )
-      renderSystemGpu2d(world: world, res: gpuUi, canvas: canvas)
+      renderSystemGpu2d(
+        world: world
+        uiSystems: uiSystems
+        res: gpuUi
+        canvas: canvas
+      )
       Gpu2d.endFrame(canvas: canvas)
       renderedOnce = true
       wokeUp = false
@@ -143,7 +161,7 @@ func main() ret Int {
     }
     # Frame end: report the authored components no lib table matched (this app
     # has no tables of its own) and recycle the indices of destroyed entities.
-    uiFrameEnd(world: world)
+    uiFrameEnd(world: world, uiSystems: uiSystems)
   }
 
   canvasShutdown(canvas: canvas)

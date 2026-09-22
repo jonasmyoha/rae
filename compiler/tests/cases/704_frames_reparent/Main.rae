@@ -9,6 +9,7 @@ open ui/Frames
 open ecs/hierarchySystem/HierarchySystem
 open ecs/Entity
 open ecs/ComponentTable
+open ui/UiSystems
 
 # #726: the UI hierarchy is the general lib/ecs Parent/Children maintained by
 # HierarchySystem — the UI sets only Parent (via setParent), never a Children
@@ -92,8 +93,14 @@ func dump(world: view UiWorld, pageId: view String, label: view String) {
 func main() {
   let scene: Scene = parseScene(source: buildScene())
   var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
   let pageId: String = "p"
-  let root: EntityId = loadSceneIntoPage(world: world, scene: scene, pageId: pageId)
+  let root: EntityId = loadSceneIntoPage(
+    world: world
+    uiSystems: uiSystems
+    scene: scene
+    pageId: pageId
+  )
   log("root: {root.index}")
 
   # Authored tree (before any frame is applied): Mover under SlotA.
@@ -102,6 +109,7 @@ func main() {
   # Phone (default, no reparent) — Mover stays under SlotA.
   let phoneIdx: Int = applySceneFramesToPage(
     world: world
+    uiSystems: uiSystems
     scene: scene
     pageId: pageId
     windowPtW: 400.0
@@ -112,6 +120,7 @@ func main() {
   # Desktop (minPtW 700) reparents Mover -> SlotB.
   let deskIdx: Int = applySceneFramesToPage(
     world: world
+    uiSystems: uiSystems
     scene: scene
     pageId: pageId
     windowPtW: 800.0
@@ -122,6 +131,7 @@ func main() {
   # Back to Phone — Mover must return to SlotA and NOT linger under SlotB.
   let phone2Idx: Int = applySceneFramesToPage(
     world: world
+    uiSystems: uiSystems
     scene: scene
     pageId: pageId
     windowPtW: 400.0

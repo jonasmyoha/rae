@@ -7,6 +7,7 @@ open ui/Ecs
 open ui/Registry
 open ui/renderSystem/RenderSystem
 open Gpu2dCanvas
+open ui/UiSystems
 
 const canvasW: Float = 800.0
 
@@ -26,10 +27,12 @@ func main() ret Int {
     themeFile: "Theme.raescene"
   )
   var world: UiWorld = create()
+  var uiSystems: UiSystems = createUiSystems()
   # #764: install the app's theme (palette + scene tokens) onto this world.
   seedWorldTheme(world: world, res: uiResources)
   let uiRoot: EntityId = mountUiScene(
     world: world
+    uiSystems: uiSystems
     path: "examples/95_easing_2d/assets/ui.raescene"
     res: uiResources
   )
@@ -39,7 +42,7 @@ func main() ret Int {
   let fixedTestFrame: Bool = getEnv(name: "RAE_EASING_TEST_FRAME").length() > 0
 
   loop not Gpu2d.pollClose() {
-    let resized: Bool = resizeUiToWindow(world: world, res: uiResources)
+    let resized: Bool = resizeUiToWindow(world: world, uiSystems: uiSystems, res: uiResources)
     var elapsed: Float = (Gpu2d.nowSeconds() - cycleStart) as Float
     if fixedTestFrame {
       elapsed = 1.0
@@ -106,11 +109,16 @@ func main() ret Int {
       to: ballColor
       angleDeg: 45.0
     )
-    renderSystemGpu2d(world: world, res: uiResources, canvas: canvas)
+    renderSystemGpu2d(
+      world: world
+      uiSystems: uiSystems
+      res: uiResources
+      canvas: canvas
+    )
     Gpu2d.endFrame(canvas: canvas)
     # Frame end: report the authored components no lib table matched (this app
     # has no tables of its own) and recycle the indices of destroyed entities.
-    uiFrameEnd(world: world)
+    uiFrameEnd(world: world, uiSystems: uiSystems)
   }
 
   canvasShutdown(canvas: canvas)

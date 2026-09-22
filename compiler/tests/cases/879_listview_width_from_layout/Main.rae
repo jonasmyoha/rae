@@ -16,6 +16,7 @@ open ui/SceneInstance
 open ui/layoutSystem/LayoutSystem
 open ecs/Entity
 open ecs/ComponentTable
+open ui/UiSystems
 
 func pageScene() ret String {
   var s: String = ""
@@ -46,7 +47,11 @@ func dataRow(index: view Int) ret ListViewRow {
   ret ListViewRow { keys: own keys, values: own values }
 }
 
-func rowWidths(world: view UiWorld, listEntity: view EntityId) ret String {
+func rowWidths(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  listEntity: view EntityId
+) ret String {
   var out: String = ""
   if componentHas(this: world.childrens, entity: listEntity) is false {
     ret "none"
@@ -54,29 +59,34 @@ func rowWidths(world: view UiWorld, listEntity: view EntityId) ret String {
   let children: view Children => componentView(this: world.childrens, entity: listEntity)
   loop var i: Int = 0, i < children.ids.length, ++i {
     let row: EntityId = children.ids.copyAtFallback(index: i, fallback: noEntity())
-    if componentHas(this: world.computedRects, entity: row) {
-      let rect: ComputedRect = componentGet(this: world.computedRects, entity: row)
+    if componentHas(this: uiSystems.layout.computedRects, entity: row) {
+      let rect: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: row)
       out = "{out} {rect.size.x.toInt()}"
     }
   }
   ret out
 }
 
-func listSize(world: view UiWorld, listEntity: view EntityId) ret String {
-  if componentHas(this: world.computedRects, entity: listEntity) is false {
+func listSize(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  listEntity: view EntityId
+) ret String {
+  if componentHas(this: uiSystems.layout.computedRects, entity: listEntity) is false {
     ret "none"
   }
-  let rect: ComputedRect = componentGet(this: world.computedRects, entity: listEntity)
+  let rect: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: listEntity)
   ret "{rect.size.x.toInt()}x{rect.size.y.toInt()}"
 }
 
 func main() {
   let world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
   world.layoutW = 1000.0
   world.layoutH = 800.0
   let page: Scene = parseScene(source: pageScene())
   page.sceneId = "page"
-  loadScene(world: world, scene: page)
+  loadScene(world: world, uiSystems: uiSystems, scene: page)
   var listEntity: EntityId = noEntity()
   if let raw: Int = world.nodeIds.get(k: "List") {
     listEntity = id(v: raw)
@@ -87,24 +97,30 @@ func main() {
   }
   componentSet(this: world.listViewDatas, entity: listEntity, data: ListViewData { rows: own rows })
   let registry: SceneRegistry = createSceneRegistry()
-  listViewSystem(world: world, scenes: registry)
-  layoutSystem(world: world)
+  listViewSystem(world: world, uiSystems: uiSystems, scenes: registry)
+  layoutSystem(world: world, uiSystems: uiSystems)
   # 1000 wide page, 20 + 20 padding: the list and every pooled row are 960
   # wide; 3 visible rows of 30 with 4 gaps: 98 tall.
-  log("list: {listSize(world: world, listEntity: listEntity)} (960x98)")
-  log("rows:{rowWidths(world: world, listEntity: listEntity)} (960 each)")
+  log("list: {listSize(world: world, uiSystems: uiSystems, listEntity: listEntity)} (960x98)")
+  log("rows:{rowWidths(world: world, uiSystems: uiSystems, listEntity: listEntity)} (960 each)")
   # A narrower extent (a window resize, a panel opening) re-widths the rows
   # through layout alone — the list system did not run again.
   world.layoutW = 600.0
-  layoutSystem(world: world)
-  log("after resize list: {listSize(world: world, listEntity: listEntity)} (560x98)")
-  log("after resize rows:{rowWidths(world: world, listEntity: listEntity)} (560 each)")
+  layoutSystem(world: world, uiSystems: uiSystems)
+  log(
+    "after resize list: {listSize(world: world, uiSystems: uiSystems, listEntity: listEntity)} (560x98)"
+  )
+  log(
+    "after resize rows:{rowWidths(world: world, uiSystems: uiSystems, listEntity: listEntity)} (560 each)"
+  )
   # Fewer rows than the visible count: the list hugs the rows it has.
   let two: List(ListViewRow) = List.create(ListViewRow, cap: 2)
   two.add(value: dataRow(index: 0))
   two.add(value: dataRow(index: 1))
   componentSet(this: world.listViewDatas, entity: listEntity, data: ListViewData { rows: own two })
-  listViewSystem(world: world, scenes: registry)
-  layoutSystem(world: world)
-  log("two rows list: {listSize(world: world, listEntity: listEntity)} (560x64)")
+  listViewSystem(world: world, uiSystems: uiSystems, scenes: registry)
+  layoutSystem(world: world, uiSystems: uiSystems)
+  log(
+    "two rows list: {listSize(world: world, uiSystems: uiSystems, listEntity: listEntity)} (560x64)"
+  )
 }

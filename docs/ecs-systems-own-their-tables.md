@@ -43,6 +43,25 @@ field-wise expansion, `sceneImportedBundles`) + `lib/ui/BundleApply.rae`
 inspector shows the provenance line. NOT yet: the save-side per-field diff —
 the editor has no save path (queued as its own task; `BundleRefs` carries what
 it needs). `ContainerStyle` is untouched.
+**Step 6a (LayoutSystem, SafeAreaSystem, HierarchySystem own their derived
+tables) is implemented** (2026-09-22): `lib/ui/UiSystems.rae` holds the three
+system types and the `UiSystems` aggregate (`createUiSystems`,
+`clearUiSystemsEntity`); `measuredSizes` / `measuredTexts` / `computedRects` /
+`layoutScales` / `safeInsets` / `parents` are gone from `UiWorld` (`childrens`
+stays); every reader takes `uiSystems: view UiSystems`, every writer `mod`, the
+apps own it next to their world (121 `App.uiSystems`, 106 `App.uiSystems`
+rebuilt with each route's world, 114 `InputSystem.uiSystems`, the UiShell
+examples a local). The schedule keeps its judgement: `uiShouldRun(schedule,
+world, uiSystems, index)` adds `uiSystemsReadGeneration` — the system tables
+each stage reads, listed by hand in Pipeline.rae — to the declared world
+generation (`shouldRunDeclaredPlus`); fixture 839 proves the declared schedule
+still equals the hand-written caches on every frame (its declared counts drop
+by the moved tables: layout 9 reads / 0 writes, transform 5 / 3).
+`releaseDeadEntities(world, uiSystems)` clears the systems' rows with the
+entity. Not the pipeline's *signatures* per system (`layoutSystem(world,
+uiSystems)` rather than `layoutSystem(world, layoutSystem)`): one aggregate
+parameter everywhere was the simple form; splitting it per system is a
+follow-up if it earns its churn.
 
 Prompted by the UI editor having to
 call a music-player system to draw a scene the way the music player does.

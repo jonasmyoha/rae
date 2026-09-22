@@ -1,6 +1,7 @@
 open ui/Ecs
 open ecs/Event
 open ecs/Entity
+open ui/UiSystems
 
 # Per-frame "did anything change?" gate. With the wait-events loop,
 # the inner loop iterates only when an OS event arrived or our timeout
@@ -27,6 +28,7 @@ type RenderActiveDecision {
 
 func decideActive(
   world: view UiWorld
+  uiSystems: view UiSystems
   renderCache: mod RenderCache
   input: view InputSystem
   debug: view DebugSystem
@@ -39,7 +41,7 @@ func decideActive(
 ) ret RenderActiveDecision {
   var active: Bool = forceRender
   if active is false {
-    if cacheDirty(world: world, cache: renderCache) {
+    if cacheDirty(world: world, uiSystems: uiSystems, cache: renderCache) {
       active = true
     }
   }
@@ -77,7 +79,12 @@ func decideActive(
   # mirrored when the debug overlay needs it.
   let mx: Float = viewportPointerX(viewport: viewport)
   let my: Float = viewportPointerY(viewport: viewport)
-  let currentHovered: EntityId = hitTest(world: world, x: mx, y: my)
+  let currentHovered: EntityId = hitTest(
+    world: world
+    uiSystems: uiSystems
+    x: mx
+    y: my
+  )
   var currentMouseButtons: Int = 0
   if debug.showInputOutlines {
     # Same bitfield layout as drawDebugLabels' "button:" read-out:

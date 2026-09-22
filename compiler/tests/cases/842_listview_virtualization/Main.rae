@@ -16,6 +16,7 @@ open ui/listViewSystem/ListViewSystem
 open ui/SceneInstance
 open ecs/Entity
 open ecs/ComponentTable
+open ui/UiSystems
 
 const rowCount: Int = 10000
 
@@ -122,7 +123,8 @@ func main() {
   scene.sceneId = "lv-demo"
   log("scene ok: {scene.ok}")
   let sceneWorld: UiWorld = createUiWorld()
-  loadScene(world: sceneWorld, scene: scene)
+  var uiSystems: UiSystems = createUiSystems()
+  loadScene(world: sceneWorld, uiSystems: uiSystems, scene: scene)
   if let listRaw: Int = sceneWorld.nodeIds.get(k: "List") {
     let listNode: EntityId = id(v: listRaw)
     let has: Bool = componentHas(this: sceneWorld.listViews, entity: listNode)
@@ -143,13 +145,15 @@ func main() {
 
   # ----- Part B: 10k rows stay bounded + recycle on scroll -----
   let world: UiWorld = createUiWorld()
+  # Part B's own systems (Part A's belong to sceneWorld).
+  uiSystems = createUiSystems()
   let listEntity: EntityId = createEntity(world: world)
   componentSet(this: world.listViews, entity: listEntity, data: makeListView())
   componentSet(this: world.listViewDatas, entity: listEntity, data: buildData(count: rowCount))
   let scroll0: ScrollState = { y: 0.0, velocity: 0.0 }
   componentSet(this: world.scrollStates, entity: listEntity, data: scroll0)
 
-  listViewSystem(world: world, scenes: rowScenes)
+  listViewSystem(world: world, uiSystems: uiSystems, scenes: rowScenes)
   let aliveTop: Int = aliveCount(world: world)
   log("rows: {rowCount}")
   log("alive at top: {aliveTop}")
@@ -159,7 +163,7 @@ func main() {
   let midY: Float = 0.0 - 200000.0
   let mid: ScrollState = { y: midY, velocity: 0.0 }
   componentSet(this: world.scrollStates, entity: listEntity, data: mid)
-  listViewSystem(world: world, scenes: rowScenes)
+  listViewSystem(world: world, uiSystems: uiSystems, scenes: rowScenes)
   let aliveMid: Int = aliveCount(world: world)
   log("alive at mid: {aliveMid}")
   log("mid top row: {topRowLabel(world: world, listEntity: listEntity)}")
@@ -168,7 +172,7 @@ func main() {
   let endY: Float = 0.0 - (rowCount - 1).toFloat() * rowPitch
   let endS: ScrollState = { y: endY, velocity: 0.0 }
   componentSet(this: world.scrollStates, entity: listEntity, data: endS)
-  listViewSystem(world: world, scenes: rowScenes)
+  listViewSystem(world: world, uiSystems: uiSystems, scenes: rowScenes)
   let aliveEnd: Int = aliveCount(world: world)
   log("alive at end: {aliveEnd}")
 

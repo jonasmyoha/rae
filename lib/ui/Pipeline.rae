@@ -24,6 +24,7 @@ open ecs/Entity
 open ecs/ComponentTable
 open ecs/Schedule
 open ui/Ecs
+open ui/UiSystems
 
 const uiSystemInput: Int = 0
 
@@ -107,7 +108,6 @@ func createUiPipeline(world: view UiWorld) ret Schedule {
     reads: [
       "actives"
       "childrens"
-      "computedRects"
       "interactions"
       "layerRoots"
       "onClicks"
@@ -147,8 +147,8 @@ func createUiPipeline(world: view UiWorld) ret Schedule {
     schedule: schedule
     world: world
     name: "safeArea"
-    reads: ["safeAreas", "safeInsets"]
-    writes: ["safeInsets"]
+    reads: ["safeAreas"]
+    writes: List.create(String, cap: 0)
     skipWhenClean: false
   )
 
@@ -171,10 +171,8 @@ func createUiPipeline(world: view UiWorld) ret Schedule {
       "actives"
       "aligns"
       "childrens"
-      "parents"
-      "measuredTexts"
     ]
-    writes: ["measuredSizes", "computedRects"]
+    writes: List.create(String, cap: 0)
     skipWhenClean: true
   )
 
@@ -186,13 +184,11 @@ func createUiPipeline(world: view UiWorld) ret Schedule {
     reads: [
       "aspects"
       "childrens"
-      "computedRects"
       "paddings"
-      "parents"
       "rects"
       "scaleToFits"
     ]
-    writes: ["computedRects"]
+    writes: List.create(String, cap: 0)
     skipWhenClean: false
   )
 
@@ -215,12 +211,10 @@ func createUiPipeline(world: view UiWorld) ret Schedule {
     world: world
     name: "transform"
     reads: [
-      "computedRects"
       "actives"
       "opacities"
       "transforms"
       "childrens"
-      "parents"
       "runtimeOffsets"
     ]
     writes: ["localTransforms", "worldTransforms", "worldVisuals"]
@@ -232,7 +226,7 @@ func createUiPipeline(world: view UiWorld) ret Schedule {
     schedule: schedule
     world: world
     name: "hoverScale"
-    reads: ["childrens", "hoverScales", "parents"]
+    reads: ["childrens", "hoverScales"]
     writes: ["hoverScales"]
     skipWhenClean: false
   )
@@ -293,7 +287,6 @@ func createUiPipeline(world: view UiWorld) ret Schedule {
       "carousels"
       "carouselStates"
       "childrens"
-      "computedRects"
       "worldTransforms"
       "actives"
       "transforms"
@@ -307,13 +300,7 @@ func createUiPipeline(world: view UiWorld) ret Schedule {
     schedule: schedule
     world: world
     name: "visualBounds"
-    reads: [
-      "computedRects"
-      "sprites"
-      "styleOverrides"
-      "texts"
-      "visualBounds"
-    ]
+    reads: ["sprites", "styleOverrides", "texts", "visualBounds"]
     writes: ["visualBounds"]
     skipWhenClean: false
   )
@@ -327,7 +314,6 @@ func createUiPipeline(world: view UiWorld) ret Schedule {
       "aligns"
       "backdropImages"
       "childrens"
-      "computedRects"
       "cornerRadiuses"
       "gradientFills"
       "hoverScales"
@@ -351,11 +337,43 @@ func createUiPipeline(world: view UiWorld) ret Schedule {
 
 # Should the UI system at `index` run this frame? The declared-set judgement
 # over this world (see shouldRunDeclared).
-func uiShouldRun(schedule: mod Schedule, world: view UiWorld, index: view Int) ret Bool {
-  ret shouldRunDeclared(
+# The generations of the tables the stage at `index` reads on the lib
+# SYSTEMS (docs/ecs-systems-own-their-tables.md §3.1) — the derived tables
+# are no longer world fields the declared sets can name, so what each stage
+# reads of them is listed here by hand, next to the declarations above:
+#   input, fit, camera, hoverScale, anim*, visualBounds, render: computedRects
+#   layout: parents, measuredTexts (it writes measuredSizes / computedRects)
+#   transform: computedRects, parents
+#   safeArea: safeInsets
+func uiSystemsReadGeneration(uiSystems: view UiSystems, index: view Int) ret Int {
+  let rects: Int = componentTableGeneration(this: uiSystems.layout.computedRects)
+  let parents: Int = componentTableGeneration(this: uiSystems.hierarchy.parents)
+  if index is uiSystemLayout {
+    ret parents + componentTableGeneration(this: uiSystems.layout.measuredTexts)
+  }
+  if index is uiSystemTransform {
+    ret rects + parents
+  }
+  if index is uiSystemSafeArea {
+    ret componentTableGeneration(this: uiSystems.safeArea.safeInsets)
+  }
+  if index is uiSystemWidgetStyle {
+    ret 0
+  }
+  ret rects
+}
+
+func uiShouldRun(
+  schedule: mod Schedule
+  world: view UiWorld
+  uiSystems: view UiSystems
+  index: view Int
+) ret Bool {
+  ret shouldRunDeclaredPlus(
     UiWorld
     schedule: schedule
     world: world
     index: index
+    extraGeneration: uiSystemsReadGeneration(uiSystems: uiSystems, index: index)
   )
 }

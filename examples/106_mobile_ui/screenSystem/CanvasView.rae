@@ -27,11 +27,17 @@ open ecs/Entity
 open ui/Layer
 open ui/SceneInstance
 open ui/Frames
+open ui/UiSystems
 
 # Re-apply the canvas scene's frame + states for the current
 # AppState.canvasOpen. Cheap; safe to call any time the page is
 # mounted.
-func applyCanvasState(world: mod UiWorld, scenes: view AlbumScenes, state: view AppState) pub {
+func applyCanvasState(
+  world: mod UiWorld
+  uiSystems: view UiSystems
+  scenes: view AlbumScenes
+  state: view AppState
+) pub {
   let scene: view Scene => scenes.canvas
   if scene.ok is false {
     ret
@@ -46,6 +52,7 @@ func applyCanvasState(world: mod UiWorld, scenes: view AlbumScenes, state: view 
   }
   let frameIdx: Int = applySceneFramesToPageWithStates(
     world: world
+    uiSystems: uiSystems
     scene: scene
     pageId: canvasPageId
     windowPtW: framePtW
@@ -59,12 +66,18 @@ func applyCanvasState(world: mod UiWorld, scenes: view AlbumScenes, state: view 
 # Called from mountBottomDockOverlay so every screen build has it.
 func mountCanvasOverlay(
   world: mod UiWorld
+  uiSystems: mod UiSystems
   scenes: view AlbumScenes
   state: view AppState
 ) pub ret EntityId {
   let existing: EntityId = findPageRootEntity(world: world, pageId: canvasPageId)
   if isNone(this: existing) is false {
-    applyCanvasState(world: world, scenes: scenes, state: state)
+    applyCanvasState(
+      world: world
+      uiSystems: uiSystems
+      scenes: scenes
+      state: state
+    )
     ret existing
   }
   let scene: view Scene => scenes.canvas
@@ -84,6 +97,7 @@ func mountCanvasOverlay(
   let canvasLabel: String = "Canvas"
   let mount: EntityId = mountPageOrError(
     world: world
+    uiSystems: uiSystems
     pageId: own pageIdCopy
     scene: scene
     overrides: overrides
@@ -96,6 +110,11 @@ func mountCanvasOverlay(
   # button (200); below debug (400).
   let dialogLayer: String = "dialog"
   setLayerById(world: world, entity: mount, id: dialogLayer)
-  applyCanvasState(world: world, scenes: scenes, state: state)
+  applyCanvasState(
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    state: state
+  )
   ret mount
 }

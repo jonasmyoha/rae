@@ -1,6 +1,7 @@
 open ecs/Entity
 open ecs/ComponentTable
 open ui/Ecs
+open ui/UiSystems
 
 # #703: EntityId is a generational handle { index, generation }. Recycling that
 # bumps the generation is #704 — here we prove the FIELD exists and that `is`
@@ -9,6 +10,7 @@ open ui/Ecs
 # bumped generation, so e3.index == e1.index but e1 is not e3 (generations differ).
 func main() {
   var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
   let e1: EntityId = createEntity(world: world)
   let e2: EntityId = createEntity(world: world)
   log("e1 index={e1.index} gen={e1.generation}")
@@ -19,7 +21,7 @@ func main() {
   log("noEntity isNone: {isNone(this: noEntity())}")
   log("e1 isNone: {isNone(this: e1)}")
   destroyEntity(world: world, entity: e1)
-  releaseDeadEntities(world: world)
+  releaseDeadEntities(world: world, uiSystems: uiSystems)
   let e3: EntityId = createEntity(world: world)
   log("e3 index={e3.index} e1==e3: {e1 is e3}")
 }

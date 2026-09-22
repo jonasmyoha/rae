@@ -9,6 +9,7 @@ open ecs/Entity
 open ecs/hierarchySystem/HierarchySystem
 open ecs/ComponentTable
 open ui/Frames
+open ui/UiSystems
 
 # The two loader-directive keys a frame's node bag may carry.
 func isHierarchyDirectiveKey(key: view String) ret Bool {
@@ -91,6 +92,7 @@ func hierarchyWouldCycle(
 # child at index o; a Parent directive without `order` appends.
 func deriveActiveHierarchy(
   world: mod UiWorld
+  uiSystems: view UiSystems
   scene: view Scene
   frames: view FrameSet
   frameIdx: view Int
@@ -191,9 +193,9 @@ func deriveActiveHierarchy(
       }
       if detachRaw >= 0 {
         let detachEntity: EntityId = nodeEntity(world: world, index: detachRaw)
-        if componentHas(this: world.parents, entity: detachEntity) {
+        if componentHas(this: uiSystems.hierarchy.parents, entity: detachEntity) {
           setParent(
-            parents: world.parents
+            parents: uiSystems.hierarchy.parents
             childrens: world.childrens
             child: detachEntity
             parent: noEntity()
@@ -271,7 +273,7 @@ func deriveActiveHierarchy(
           # so setParent's append rebuilds the derived Children cache in exactly
           # that order — matching the old hand-built, hand-sorted list.
           setParent(
-            parents: world.parents
+            parents: uiSystems.hierarchy.parents
             childrens: world.childrens
             child: childEntity
             parent: parentEntity

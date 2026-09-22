@@ -47,6 +47,7 @@ open ecs/Entity
 open ecs/ComponentTable
 open ecs/hierarchySystem/HierarchySystem
 open ui/RegistryGeneric
+open ui/UiSystems
 
 # The nodeId page a pooled row's sub-scene is mounted under, so several rows
 # of the same scene coexist in `world.nodeIds`.
@@ -341,6 +342,7 @@ func listViewApplySceneBinding(
 # per distinct binding nodeId, in distinct order so slot k == distinctNodeIds[k].
 func listViewBuildRow(
   world: mod UiWorld
+  uiSystems: view UiSystems
   listEntity: view EntityId
   lv: view ListView
   distinct: view List(String)
@@ -369,6 +371,7 @@ func listViewBuildRow(
     let overrides: List(SceneOverride) = emptyOverrides()
     mountSceneInstanceIntoPage(
       world: world
+      uiSystems: uiSystems
       mountEntity: rowRoot
       scene: scene
       overrides: overrides
@@ -380,7 +383,7 @@ func listViewBuildRow(
   loop k < distinct.length {
     let child: EntityId = createEntity(world: world)
     setParent(
-      parents: world.parents
+      parents: uiSystems.hierarchy.parents
       childrens: world.childrens
       child: child
       parent: rowRoot
@@ -483,7 +486,12 @@ func listViewWindowCount(lv: view ListView) ret Int {
 }
 
 # One ListView entity: reconcile its pooled row window to the current scroll.
-func listViewSyncEntity(world: mod UiWorld, entity: view EntityId, scenes: view SceneRegistry) {
+func listViewSyncEntity(
+  world: mod UiWorld
+  uiSystems: view UiSystems
+  entity: view EntityId
+  scenes: view SceneRegistry
+) {
   unsafe {
     let lv: ListView = componentGet(this: world.listViews, entity: entity)
     let sceneRow: Bool = listViewUsesScene(lv: lv, scenes: scenes)
@@ -536,20 +544,21 @@ func listViewSyncEntity(world: mod UiWorld, entity: view EntityId, scenes: view 
     var poolCount: Int = pool.length
     loop poolCount > target {
       let victim: EntityId = rae_ext_rae_buf_get(buf: pool.data, index: poolCount - 1)
-      destroyEntitySubtree(world: world, root: victim)
+      destroyEntitySubtree(world: world, uiSystems: uiSystems, root: victim)
       poolCount = poolCount - 1
     }
     # Grow: build fresh rows and parent them under the ListView.
     loop poolCount < target {
       let rowRoot: EntityId = listViewBuildRow(
         world: world
+        uiSystems: uiSystems
         listEntity: entity
         lv: lv
         distinct: distinct
         scenes: scenes
       )
       setParent(
-        parents: world.parents
+        parents: uiSystems.hierarchy.parents
         childrens: world.childrens
         child: rowRoot
         parent: entity
@@ -631,6 +640,7 @@ func listViewRowKeyOf(lv: view ListView, row: view ListViewRow, index: view Int)
 # full-width track row) and `itemHeight` tall (0 = square).
 func listViewFlowRowSize(
   world: view UiWorld
+  uiSystems: view UiSystems
   listEntity: view EntityId
   lv: view ListView
 ) ret Vec2 {
@@ -638,8 +648,8 @@ func listViewFlowRowSize(
   # layout (the mount that fills the list) the authored Rect stands in, so the
   # rows exist for that first layout pass and are resized on the next frame.
   var containerW: Float = 0.0
-  if componentHas(this: world.computedRects, entity: listEntity) {
-    containerW = componentGet(this: world.computedRects, entity: listEntity).size.x
+  if componentHas(this: uiSystems.layout.computedRects, entity: listEntity) {
+    containerW = componentGet(this: uiSystems.layout.computedRects, entity: listEntity).size.x
   }
   if containerW <= 0.0 and componentHas(this: world.rects, entity: listEntity) {
     containerW = componentGet(this: world.rects, entity: listEntity).size.x
@@ -680,6 +690,7 @@ func listViewFlowRowSize(
 # the row's own nodeId page and its identity recorded for the next rebind.
 func listViewBuildFlowRow(
   world: mod UiWorld
+  uiSystems: view UiSystems
   lv: view ListView
   sceneId: view String
   key: view String
@@ -698,6 +709,7 @@ func listViewBuildFlowRow(
     let overrides: List(SceneOverride) = emptyOverrides()
     mountSceneInstanceImpl(
       world: world
+      uiSystems: uiSystems
       mountEntity: rowRoot
       scene: scene
       overrides: overrides
@@ -711,7 +723,7 @@ func listViewBuildFlowRow(
     loop k < distinct.length {
       let child: EntityId = createEntity(world: world)
       setParent(
-        parents: world.parents
+        parents: uiSystems.hierarchy.parents
         childrens: world.childrens
         child: child
         parent: rowRoot
@@ -725,7 +737,12 @@ func listViewBuildFlowRow(
 }
 
 # One flow-mode ListView: reconcile its child rows to the data rows by key.
-func listViewSyncFlow(world: mod UiWorld, entity: view EntityId, scenes: view SceneRegistry) {
+func listViewSyncFlow(
+  world: mod UiWorld
+  uiSystems: view UiSystems
+  entity: view EntityId
+  scenes: view SceneRegistry
+) {
   unsafe {
     let lv: ListView = componentGet(this: world.listViews, entity: entity)
     var count: Int = 0
@@ -749,7 +766,12 @@ func listViewSyncFlow(world: mod UiWorld, entity: view EntityId, scenes: view Sc
     loop let unused: view EntityId in existing {
       reused.add(value: false)
     }
-    let size: Vec2 = listViewFlowRowSize(world: world, listEntity: entity, lv: lv)
+    let size: Vec2 = listViewFlowRowSize(
+      world: world
+      uiSystems: uiSystems
+      listEntity: entity
+      lv: lv
+    )
     let ordered: List(EntityId) = List.create(EntityId, cap: count)
     let distinct: List(String) = listViewDistinctNodeIds(lv: lv)
     var d: Int = 0
@@ -778,6 +800,7 @@ func listViewSyncFlow(world: mod UiWorld, entity: view EntityId, scenes: view Sc
       if isNone(this: rowRoot) {
         rowRoot = listViewBuildFlowRow(
           world: world
+          uiSystems: uiSystems
           lv: lv
           sceneId: sceneId
           key: key
@@ -785,7 +808,7 @@ func listViewSyncFlow(world: mod UiWorld, entity: view EntityId, scenes: view Sc
           scenes: scenes
         )
         setParent(
-          parents: world.parents
+          parents: uiSystems.hierarchy.parents
           childrens: world.childrens
           child: rowRoot
           parent: entity
@@ -815,7 +838,7 @@ func listViewSyncFlow(world: mod UiWorld, entity: view EntityId, scenes: view Sc
     loop e2 < existing.length {
       if reused.copyAtFallback(index: e2, fallback: true) is false {
         let victim: EntityId = rae_ext_rae_buf_get(buf: existing.data, index: e2)
-        destroyEntitySubtree(world: world, root: victim)
+        destroyEntitySubtree(world: world, uiSystems: uiSystems, root: victim)
       }
       e2 = e2 + 1
     }
@@ -916,7 +939,7 @@ func listViewApplyFlowRow(
 # before layout, so the current window's rows are laid out this frame.
 # `scenes` supplies the item sub-scenes (`ListView.itemSceneId`); pass an empty
 # registry for bindings-only rows.
-func listViewSystem(world: mod UiWorld, scenes: view SceneRegistry) pub {
+func listViewSystem(world: mod UiWorld, uiSystems: view UiSystems, scenes: view SceneRegistry) pub {
   unsafe {
     let n: Int = componentCount(this: world.listViews)
     # Collect entity ids first: syncing mutates childrens/entities, which must
@@ -932,9 +955,19 @@ func listViewSystem(world: mod UiWorld, scenes: view SceneRegistry) pub {
       let entity: EntityId = rae_ext_rae_buf_get(buf: entities.data, index: e)
       let lv: ListView = componentGet(this: world.listViews, entity: entity)
       if lv.mode is ListViewMode.flow {
-        listViewSyncFlow(world: world, entity: entity, scenes: scenes)
+        listViewSyncFlow(
+          world: world
+          uiSystems: uiSystems
+          entity: entity
+          scenes: scenes
+        )
       } else {
-        listViewSyncEntity(world: world, entity: entity, scenes: scenes)
+        listViewSyncEntity(
+          world: world
+          uiSystems: uiSystems
+          entity: entity
+          scenes: scenes
+        )
       }
       e = e + 1
     }

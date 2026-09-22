@@ -25,6 +25,7 @@ open ui/SceneBundles
 open app3d/UiShell
 open ecs/Entity
 open ecs/ComponentTable
+open ui/UiSystems
 
 # Tree rows: one design unit of indent per depth level.
 const treeIndentPerLevel: Float = 12.0
@@ -63,6 +64,7 @@ func documentSceneRoot(world: view UiWorld, pageRoot: view EntityId) ret EntityI
 # Deepest active node under (x, y) in `entity`'s subtree, or none.
 func deepestNodeAt(
   world: view UiWorld
+  uiSystems: view UiSystems
   entity: view EntityId
   x: view Float
   y: view Float
@@ -75,6 +77,7 @@ func deepestNodeAt(
     loop var i: Int = children.ids.length - 1, i >= 0, --i {
       let hit: EntityId = deepestNodeAt(
         world: world
+        uiSystems: uiSystems
         entity: children.ids.copyAtFallback(index: i, fallback: noEntity())
         x: x
         y: y
@@ -86,6 +89,7 @@ func deepestNodeAt(
   }
   if uiPointInEntity(
     world: world
+    uiSystems: uiSystems
     entity: entity
     x: x
     y: y
@@ -139,13 +143,14 @@ func findNodeByIdIn(world: view UiWorld, entity: view EntityId, nodeId: view Str
 # run this frame (compare-before-write keeps an idle frame idle).
 func placeOutline(
   world: mod UiWorld
+  uiSystems: view UiSystems
   outline: view EntityId
   target: view EntityId
   visible: view Bool
 ) ret Bool {
   var show: Bool = visible and isNone(this: target) is false
   if show and (componentHas(this: world.worldTransforms, entity: target) is false or componentHas(
-    this: world.computedRects
+    this: uiSystems.layout.computedRects
     entity: target
   ) is false) {
     show = false
@@ -163,7 +168,7 @@ func placeOutline(
     ret changed
   }
   let transform: WorldTransform2D = componentGet(this: world.worldTransforms, entity: target)
-  let computed: ComputedRect = componentGet(this: world.computedRects, entity: target)
+  let computed: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: target)
   let w: Float = computed.size.x * transform.scale.x
   let h: Float = computed.size.y * transform.scale.y
   if componentHas(this: world.rects, entity: outline) {
@@ -194,6 +199,7 @@ func placeOutline(
 func placeOutlines(
   inspectorSystem: view InspectorSystem
   world: mod UiWorld
+  uiSystems: view UiSystems
   role: view OutlineRole
   target: view EntityId
   visible: view Bool
@@ -205,6 +211,7 @@ func placeOutlines(
     if tag.role is role {
       if placeOutline(
         world: world
+        uiSystems: uiSystems
         outline: componentEntityAt(this: inspectorSystem.outlineFors, i: i)
         target: target
         visible: visible
@@ -216,16 +223,21 @@ func placeOutlines(
   ret changed
 }
 
-func parentOf(world: view UiWorld, entity: view EntityId) ret EntityId {
-  if isNone(this: entity) or componentHas(this: world.parents, entity: entity) is false {
+func parentOf(world: view UiWorld, uiSystems: view UiSystems, entity: view EntityId) ret EntityId {
+  if isNone(this: entity) or componentHas(this: uiSystems.hierarchy.parents, entity: entity) is false {
     ret noEntity()
   }
-  ret componentGet(this: world.parents, entity: entity).parent
+  ret componentGet(this: uiSystems.hierarchy.parents, entity: entity).parent
 }
 
 # The sibling `step` places away in the parent's Children (clamped).
-func siblingOf(world: view UiWorld, entity: view EntityId, step: view Int) ret EntityId {
-  let parent: EntityId = parentOf(world: world, entity: entity)
+func siblingOf(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entity: view EntityId
+  step: view Int
+) ret EntityId {
+  let parent: EntityId = parentOf(world: world, uiSystems: uiSystems, entity: entity)
   if isNone(this: parent) or componentHas(this: world.childrens, entity: parent) is false {
     ret entity
   }
@@ -259,11 +271,12 @@ func firstChildOf(world: view UiWorld, entity: view EntityId) ret EntityId {
 # The parent chain as `a > b > c`, stopping at the document scene root.
 func parentChainOf(
   world: view UiWorld
+  uiSystems: view UiSystems
   entity: view EntityId
   sceneRoot: view EntityId
 ) ret String {
   var chain: String = ""
-  var current: EntityId = parentOf(world: world, entity: entity)
+  var current: EntityId = parentOf(world: world, uiSystems: uiSystems, entity: entity)
   var guard: Int = 0
   loop isNone(this: current) is false and guard < 32 {
     if chain.length() > 0 {
@@ -274,7 +287,7 @@ func parentChainOf(
     if current is sceneRoot {
       current = noEntity()
     } else {
-      current = parentOf(world: world, entity: current)
+      current = parentOf(world: world, uiSystems: uiSystems, entity: current)
     }
     guard = guard + 1
   }
@@ -329,6 +342,7 @@ func bundleProvenanceLine(world: view UiWorld, entity: view EntityId) ret String
 
 func syncInspectorPanel(
   world: view UiWorld
+  uiSystems: view UiSystems
   chromeSystem: mod ChromeSystem
   inspectorSystem: view InspectorSystem
   sceneRoot: view EntityId
@@ -369,17 +383,21 @@ func syncInspectorPanel(
   )}"
   chromeSystem.inspectorAppComponents = appComponentsLine(world: world, entity: selected)
   var rectLine: String = "no computed rect"
-  if componentHas(this: world.computedRects, entity: selected) and componentHas(
+  if componentHas(this: uiSystems.layout.computedRects, entity: selected) and componentHas(
     this: world.worldTransforms
     entity: selected
   ) {
     let transform: WorldTransform2D = componentGet(this: world.worldTransforms, entity: selected)
-    let computed: ComputedRect = componentGet(this: world.computedRects, entity: selected)
+    let computed: ComputedRect = componentGet(
+      this: uiSystems.layout.computedRects
+      entity: selected
+    )
     rectLine = "x {transform.position.x.toInt()}  y {transform.position.y.toInt()}  w {computed.size.x.toInt()}  h {computed.size.y.toInt()}"
   }
   chromeSystem.inspectorRect = rectLine
   chromeSystem.inspectorParents = parentChainOf(
     world: world
+    uiSystems: uiSystems
     entity: selected
     sceneRoot: sceneRoot
   )
@@ -479,6 +497,7 @@ func selectNode(inspectorSystem: mod InspectorSystem, world: mod UiWorld, entity
 func inspectorUpdate(
   inspectorSystem: mod InspectorSystem
   world: mod UiWorld
+  uiSystems: view UiSystems
   chromeSystem: mod ChromeSystem
   input: view UiInput
   pageRoot: view EntityId
@@ -492,11 +511,13 @@ func inspectorUpdate(
   if chromeVisible is false or pointInEditArea(
     chromeSystem: chromeSystem
     world: world
+    uiSystems: uiSystems
     x: input.pointer.x
     y: input.pointer.y
   ) {
     hovered = deepestNodeAt(
       world: world
+      uiSystems: uiSystems
       entity: sceneRoot
       x: input.pointer.x
       y: input.pointer.y
@@ -515,13 +536,23 @@ func inspectorUpdate(
   }
   if isNone(this: selection) is false {
     if Sdl3.isKeyPressed(key: Keys.keyUp) {
-      selection = siblingOf(world: world, entity: selection, step: 0 - 1)
+      selection = siblingOf(
+        world: world
+        uiSystems: uiSystems
+        entity: selection
+        step: 0 - 1
+      )
     }
     if Sdl3.isKeyPressed(key: Keys.keyDown) {
-      selection = siblingOf(world: world, entity: selection, step: 1)
+      selection = siblingOf(
+        world: world
+        uiSystems: uiSystems
+        entity: selection
+        step: 1
+      )
     }
     if Sdl3.isKeyPressed(key: Keys.keyLeft) {
-      let parent: EntityId = parentOf(world: world, entity: selection)
+      let parent: EntityId = parentOf(world: world, uiSystems: uiSystems, entity: selection)
       if isNone(this: parent) is false and selection is not sceneRoot {
         selection = parent
       }
@@ -558,6 +589,7 @@ func inspectorUpdate(
   if changed {
     syncInspectorPanel(
       world: world
+      uiSystems: uiSystems
       chromeSystem: chromeSystem
       inspectorSystem: inspectorSystem
       sceneRoot: sceneRoot
@@ -573,6 +605,7 @@ func inspectorUpdate(
   if placeOutlines(
     inspectorSystem: inspectorSystem
     world: world
+    uiSystems: uiSystems
     role: OutlineRole.hover
     target: inspectorSystem.hovered
     visible: chromeVisible and inspectorSystem.hovered is not inspectorSystem.selected
@@ -582,6 +615,7 @@ func inspectorUpdate(
   if placeOutlines(
     inspectorSystem: inspectorSystem
     world: world
+    uiSystems: uiSystems
     role: OutlineRole.selection
     target: inspectorSystem.selected
     visible: chromeVisible
@@ -596,6 +630,7 @@ func inspectorUpdate(
 func inspectorAfterLoad(
   inspectorSystem: mod InspectorSystem
   world: mod UiWorld
+  uiSystems: view UiSystems
   chromeSystem: mod ChromeSystem
   pageRoot: view EntityId
   selectNodeId: view String
@@ -616,6 +651,7 @@ func inspectorAfterLoad(
   }
   syncInspectorPanel(
     world: world
+    uiSystems: uiSystems
     chromeSystem: chromeSystem
     inspectorSystem: inspectorSystem
     sceneRoot: sceneRoot

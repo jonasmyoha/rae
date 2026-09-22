@@ -33,6 +33,7 @@ open ui/ScenePolicy
 open ui/RegistryOpt
 open ecs/Entity
 open ecs/ComponentTable
+open ui/UiSystems
 
 const defaultDesignW: Float = 1080.0
 
@@ -539,6 +540,7 @@ func documentPrepareSystem(document: mod SceneDocument, world: mod UiWorld) ret 
 func documentMountSystem(
   document: mod SceneDocument
   world: mod UiWorld
+  uiSystems: view UiSystems
   builtinScenePaths: view List(String)
   builtinSceneIds: view List(String)
 ) {
@@ -548,7 +550,7 @@ func documentMountSystem(
   }
   if document.loaded {
     scrolls = snapshotDocumentScrolls(world: world)
-    unmountPage(world: world, pageId: "document")
+    unmountPage(world: world, uiSystems: uiSystems, pageId: "document")
   }
   loop var b: Int = 0, b < builtinScenePaths.length, ++b {
     if let builtinPath: String = builtinScenePaths.copyAt(index: b) {
@@ -571,6 +573,7 @@ func documentMountSystem(
   let before: Int = aliveCount(world: world)
   document.pageRoot = mountPage(
     world: world
+    uiSystems: uiSystems
     pageId: "document"
     scene: document.scene
     overrides: overrides
@@ -580,7 +583,12 @@ func documentMountSystem(
   setLayerById(world: world, entity: document.pageRoot, id: "document")
   # The complete reachable scene graph was registered during preparation, so
   # the resolver can safely mount nested instances in its own depth loop.
-  resolveSceneInstances(world: world, registry: document.registry, pageId: "document")
+  resolveSceneInstances(
+    world: world
+    uiSystems: uiSystems
+    registry: document.registry
+    pageId: "document"
+  )
   seedListViewRows(world: world)
   tagMountedNodeIds(world: world, scene: document.scene, pageId: "document")
   loop var r: Int = 0, r < document.registry.ids.length, ++r {

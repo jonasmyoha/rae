@@ -7,6 +7,7 @@ import ui/Ecs
 import ui/Components
 open ecs/Entity
 open ecs/ComponentTable
+open ui/UiSystems
 
 # Layer-root entity factory. Creates a parentless entity with a
 # `LayerRoot { id, order }` component — no Rect / Layout / Sprite,
@@ -94,7 +95,7 @@ func entityLayerOrder(world: view UiWorld, entity: view EntityId) pub ret Int {
 # Collect every parentless root with a WorldTransform2D, in ascending
 # Layer order. Used by both `renderSystem` (painter's algorithm) and
 # the input hit-test (which walks the result in reverse).
-func collectPaintableRoots(world: view UiWorld) pub ret List(EntityId) {
+func collectPaintableRoots(world: view UiWorld, uiSystems: view UiSystems) pub ret List(EntityId) {
   unsafe {
     let roots: List(EntityId) = List.create(EntityId, cap: 16)
     let alive: view List(EntityId) => world.allocator.alive
@@ -102,7 +103,7 @@ func collectPaintableRoots(world: view UiWorld) pub ret List(EntityId) {
     var i: Int = 0
     loop i < n {
       let e: EntityId = rae_ext_rae_buf_get(buf: alive.data, index: i)
-      if componentHas(this: world.parents, entity: e) is false {
+      if componentHas(this: uiSystems.hierarchy.parents, entity: e) is false {
         if componentHas(this: world.worldTransforms, entity: e) {
           roots.add(value: e)
         }

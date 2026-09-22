@@ -7,6 +7,7 @@ open ui/EventLoop
 open ui/fitSystem/FitSystem
 open ui/layoutSystem/LayoutSystem
 open ui/Transform
+open ui/UiSystems
 
 # The outer-loop rebuild: the persistent world for the current route
 # (every screen page + dock / back overlays mounted once; setPageActive flips
@@ -37,6 +38,7 @@ func refreshActiveAlbumCache(app: mod App, session: mod AppSession) {
 func buildSessionWorld(app: mod App, session: mod AppSession) ret UiWorld {
   let appState: mod AppState => app.appState
   let world: UiWorld = buildAppWorld(
+    uiSystems: app.uiSystems
     dockSystem: app.musicSystems.dockSystem
     scenes: app.scenes
     playbackSystem: app.musicSystems.playbackSystem
@@ -47,7 +49,7 @@ func buildSessionWorld(app: mod App, session: mod AppSession) ret UiWorld {
   # Every page's authored `ScrollRoot` gets its ScrollState + RuntimeOffset from
   # the session's scroll memory (the restored position at boot, the page's last
   # position on a rebuild).
-  scrollRootSystem(world: world, memory: session.scrollMemory)
+  scrollRootSystem(world: world, uiSystems: app.uiSystems, memory: session.scrollMemory)
   # Every id the world can fire has an action-table row (the 106 gate
   # asserts the `[action-audit]` line).
   let audit: ActionAuditResult = actionAudit(world: world, actionTable: app.actionTable)
@@ -58,7 +60,7 @@ func buildSessionWorld(app: mod App, session: mod AppSession) ret UiWorld {
   uiSetDesignResolution(width: app.viewport.layoutW, height: app.viewport.layoutH, fit: 0)
   # Layer the debug-UI entities (button + optional menu overlay) onto the
   # world BEFORE layout runs so they participate in measure/place.
-  addDebugLayer(world: world, debug: session.debug)
+  addDebugLayer(world: world, uiSystems: app.uiSystems, debug: session.debug)
   ret world
 }
 
@@ -67,19 +69,34 @@ func buildSessionWorld(app: mod App, session: mod AppSession) ret UiWorld {
 # runs; from then on every lib/ui system in the frame is gated by
 # `uiShouldRun` off its declared sets), the first layout / fit / transform
 # pass, the scroll target, and a render cache that forces the first paint.
-func createWorldFrame(world: mod UiWorld) ret WorldFrame {
+func createWorldFrame(world: mod UiWorld, uiSystems: mod UiSystems) ret WorldFrame {
   var schedule: Schedule = createUiPipeline(world: world)
-  if uiShouldRun(schedule: schedule, world: world, index: uiSystemLayout) {
-    layoutSystem(world: world)
+  if uiShouldRun(
+    schedule: schedule
+    world: world
+    uiSystems: uiSystems
+    index: uiSystemLayout
+  ) {
+    layoutSystem(world: world, uiSystems: uiSystems)
   }
   # Art-direction pass (#212 S6): Aspect + ScaleToFit run between layout and
   # transform. Change-gated, so an idle frame with an unchanged layout
   # writes nothing.
-  if uiShouldRun(schedule: schedule, world: world, index: uiSystemFit) {
-    fitSystem(world: world)
+  if uiShouldRun(
+    schedule: schedule
+    world: world
+    uiSystems: uiSystems
+    index: uiSystemFit
+  ) {
+    fitSystem(world: world, uiSystems: uiSystems)
   }
-  if uiShouldRun(schedule: schedule, world: world, index: uiSystemTransform) {
-    transformSystem(world: world)
+  if uiShouldRun(
+    schedule: schedule
+    world: world
+    uiSystems: uiSystems
+    index: uiSystemTransform
+  ) {
+    transformSystem(world: world, uiSystems: uiSystems)
   }
   # The scroll-target entity for this world — the active page's ScrollRoot:
   # scroll handlers mutate its RuntimeOffset + ScrollState in place every
@@ -88,7 +105,7 @@ func createWorldFrame(world: mod UiWorld) ret WorldFrame {
   ret WorldFrame {
     schedule: own schedule
     observation: createAppObservation(world: world)
-    scrollTarget: findScrollRoot(world: world)
+    scrollTarget: findScrollRoot(world: world, uiSystems: uiSystems)
     renderCache: createRenderCache()
     forceRender: true
     lastPressed: noEntity()

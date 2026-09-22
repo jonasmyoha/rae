@@ -58,6 +58,7 @@ open ui/inputSystem/InputSystem
 open ui/renderSystem/RenderSystem
 open app3d/RenderScale
 open Gpu2dCanvas
+open ui/UiSystems
 
 # The deferred renderer + dynamic-resolution controller (#552). Lives with the
 # RenderSystem — the App just aggregates it.
@@ -294,6 +295,7 @@ func renderGbufferPass(
 
 # ----- render phase: animation sample + render-graph walk ------------------
 func renderApp(
+  uiSystems: view UiSystems
   cameraSystem: mod CameraSystem
   characterSystem: mod CharacterSystem
   frame: mod Frame
@@ -545,6 +547,7 @@ func renderApp(
         Gpu2d.beginFrameLoad(canvas: renderSystem.renderer.canvas)
         renderSystemGpu2d(
           world: inputSystem.world
+          uiSystems: uiSystems
           res: inputSystem.gpuUi
           canvas: renderSystem.renderer.canvas
         )

@@ -2,6 +2,7 @@ open ecs/Entity
 open ecs/ComponentTable
 open ecs/World
 open ui/Ecs
+open ui/UiSystems
 
 # #704: the EntityAllocator recycles freed indices and bumps the slot's
 # generation on destroy, so a reused index carries a higher generation and an
@@ -10,6 +11,7 @@ open ui/Ecs
 # recycled entity's component.
 func main() {
   var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
   let a: EntityId = createEntity(world: world)
   log("a index={a.index} gen={a.generation}")
 
@@ -18,7 +20,7 @@ func main() {
   destroyEntity(world: world, entity: a)
   # UiWorld defers index reuse until the app releases its dead entities (the
   # dead-entities outbox); with nothing of its own to sweep, release at once.
-  releaseDeadEntities(world: world)
+  releaseDeadEntities(world: world, uiSystems: uiSystems)
 
   # recreate: reuses a's index with a bumped generation
   let c: EntityId = createEntity(world: world)

@@ -12,9 +12,11 @@ open ui/Ecs
 open ui/Scene
 open ecs/Entity
 open ui/SceneInstance
+open ui/UiSystems
 
 func mountScreenPage(
   world: mod UiWorld
+  uiSystems: mod UiSystems
   page: view ScreenPage
   scenes: view AlbumScenes
   viewport: view Viewport
@@ -27,6 +29,7 @@ func mountScreenPage(
     let missing: Scene = parseScene(source: "")
     ret mountPageOrError(
       world: world
+      uiSystems: uiSystems
       pageId: own pageIdCopy
       scene: missing
       overrides: overrides
@@ -39,6 +42,7 @@ func mountScreenPage(
   let scene: view Scene => sceneRegistryGet(reg: scenes.pages, idx: sceneIndex)
   ret mountPageOrError(
     world: world
+    uiSystems: uiSystems
     pageId: own pageIdCopy
     scene: scene
     overrides: overrides

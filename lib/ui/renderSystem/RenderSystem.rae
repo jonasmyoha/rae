@@ -22,6 +22,7 @@
 # make animation shimmer.
 open ui/Ecs
 open ui/renderSystem/RenderPaintBox
+open ui/renderSystem/RenderFills
 import Gpu2d
 import Gpu2dText
 import SdfText
@@ -34,6 +35,7 @@ import ui/ThemeResolved
 import ui/TextStyle
 open ecs/ComponentTable
 open Gpu2dCanvas
+open ui/UiSystems
 
 # Per-app gpu2d render resources, passed to renderSystemGpu2d each frame.
 type Gpu2dUi {
@@ -219,105 +221,6 @@ func paintShapeG(
     h: drawH
     radius: radius * hoverMul
     color: g2dColor(color: fill)
-  )
-}
-
-# GradientFill uses the gpu2d box shader's gradient mode so dock shadows and
-# dialog scrims stay in the same painter-order pipeline as normal shapes.
-func paintGradientG(
-  world: view UiWorld
-  entity: view EntityId
-  wt: view WorldTransform2D
-  cr: view ComputedRect
-  chain255: view Int
-  canvas: mod Gpu2dCanvas
-) {
-  let gf: GradientFill = componentGet(this: world.gradientFills, entity: entity)
-  let radius: Float = g2dRadius(world: world, entity: entity, fallback: 0.0)
-  let box: PaintBox = g2dPaintBox(
-    world: world
-    entity: entity
-    wt: wt
-    cr: cr
-  )
-  let hoverMul: Float = box.scale
-  let drawW: Float = box.w
-  let drawH: Float = box.h
-  let drawX: Float = box.x
-  let drawY: Float = box.y
-  let from: RgbaColor = g2dChain(color: gf.from, chain255: chain255)
-  let to: RgbaColor = g2dChain(color: gf.to, chain255: chain255)
-  if componentHas(this: world.shadows, entity: entity) {
-    paintShadowG(
-      world: world
-      entity: entity
-      box: box
-      radius: radius * hoverMul
-      chain255: chain255
-      canvas: canvas
-    )
-  }
-  Gpu2d.drawGradientRect(
-    canvas: canvas
-    x: drawX
-    y: drawY
-    w: drawW
-    h: drawH
-    radius: radius * hoverMul
-    from: g2dColor(color: from)
-    to: g2dColor(color: to)
-    angleDeg: gf.angle
-  )
-}
-
-func paintBackdropG(
-  world: view UiWorld
-  entity: view EntityId
-  wt: view WorldTransform2D
-  cr: view ComputedRect
-  chain255: view Int
-  canvas: mod Gpu2dCanvas
-) {
-  let bi: BackdropImage = componentGet(this: world.backdropImages, entity: entity)
-  let radius: Float = g2dRadius(world: world, entity: entity, fallback: 0.0)
-  let box: PaintBox = g2dPaintBox(
-    world: world
-    entity: entity
-    wt: wt
-    cr: cr
-  )
-  let hoverMul: Float = box.scale
-  let drawW: Float = box.w
-  let drawH: Float = box.h
-  let drawX: Float = box.x
-  let drawY: Float = box.y
-  if Gpu2d.hasImageKey(canvas: canvas, key: bi.textureKey) {
-    let white: RgbaColor = { r: 255, g: 255, b: 255, a: 255 }
-    let tint: RgbaColor = g2dChain(color: white, chain255: chain255)
-    Gpu2d.drawImageKey(
-      canvas: canvas
-      key: bi.textureKey
-      x: drawX
-      y: drawY
-      w: drawW
-      h: drawH
-      radius: radius * hoverMul
-      tint: g2dColor(color: tint)
-    )
-    ret
-  }
-  # Raylib uses captured blur textures for BackdropImage. gpu2d does not have
-  # framebuffer capture yet, so paint a stable translucent glass fallback.
-  let fallback: RgbaColor = { r: 18, g: 22, b: 30, a: 210 }
-  let chained: RgbaColor = g2dChain(color: fallback, chain255: chain255)
-  Gpu2d.drawRoundedRect(
-    canvas: canvas
-    x: drawX
-    y: drawY
-    w: drawW
-    h: drawH
-    radius: radius * hoverMul
-    color: g2dColor(color: chained)
   )
 }
 
@@ -756,17 +659,18 @@ func paintTextG(
 
 func paintEntityG(
   world: view UiWorld
+  uiSystems: view UiSystems
   entity: view EntityId
   res: view Gpu2dUi
   canvas: mod Gpu2dCanvas
 ) {
-  if componentHas(this: world.computedRects, entity: entity) is false {
+  if componentHas(this: uiSystems.layout.computedRects, entity: entity) is false {
     ret
   }
   if componentHas(this: world.worldTransforms, entity: entity) is false {
     ret
   }
-  let cr: ComputedRect = componentGet(this: world.computedRects, entity: entity)
+  let cr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: entity)
   let wt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: entity)
   let wv: WorldVisual = worldVisualOf(world: world, entity: entity)
   if wv.visible is false {
@@ -862,6 +766,7 @@ func entityClipsChildrenG(world: view UiWorld, entity: view EntityId) ret Bool {
 
 func paintSubtreeG(
   world: view UiWorld
+  uiSystems: view UiSystems
   entity: view EntityId
   res: view Gpu2dUi
   canvas: mod Gpu2dCanvas
@@ -873,10 +778,16 @@ func paintSubtreeG(
     # too, popped after the children walk (gpu2d clips nest).
     var masked: Bool = false
     if componentHas(this: world.maskShapes, entity: entity) {
-      masked = pushMaskClipG(world: world, entity: entity, canvas: canvas)
+      masked = pushMaskClipG(
+        world: world
+        uiSystems: uiSystems
+        entity: entity
+        canvas: canvas
+      )
     }
     paintEntityG(
       world: world
+      uiSystems: uiSystems
       entity: entity
       res: res
       canvas: canvas
@@ -895,9 +806,9 @@ func paintSubtreeG(
     # flushes, so pushing here and popping after the children walk scopes it.
     var clipped: Bool = false
     if entityClipsChildrenG(world: world, entity: entity) {
-      if componentHas(this: world.computedRects, entity: entity) {
+      if componentHas(this: uiSystems.layout.computedRects, entity: entity) {
         if componentHas(this: world.worldTransforms, entity: entity) {
-          let ccr: ComputedRect = componentGet(this: world.computedRects, entity: entity)
+          let ccr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: entity)
           let cwt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: entity)
           let crad: Float = g2dRadius(world: world, entity: entity, fallback: 0.0)
           if crad > 0.0 {
@@ -932,6 +843,7 @@ func paintSubtreeG(
         if subtreeHoverPaintRank(world: world, entity: cid) is pass {
           paintSubtreeG(
             world: world
+            uiSystems: uiSystems
             entity: cid
             res: res
             canvas: canvas
@@ -952,13 +864,14 @@ func paintSubtreeG(
 
 func gpu2dLayerRange(
   world: view UiWorld
+  uiSystems: view UiSystems
   res: view Gpu2dUi
   canvas: mod Gpu2dCanvas
   minOrder: view Int
   maxOrder: view Int
 ) pub {
   unsafe {
-    let roots: List(EntityId) = collectPaintableRoots(world: world)
+    let roots: List(EntityId) = collectPaintableRoots(world: world, uiSystems: uiSystems)
     let m: Int = roots.length
     var p: Int = 0
     loop p < m {
@@ -969,6 +882,7 @@ func gpu2dLayerRange(
           if ord < maxOrder {
             paintSubtreeG(
               world: world
+              uiSystems: uiSystems
               entity: root
               res: res
               canvas: canvas
@@ -982,11 +896,17 @@ func gpu2dLayerRange(
 }
 
 # Render `world` on the gpu2d backend. Call between Gpu2d.beginFrame/endFrame.
-func renderSystemGpu2d(world: view UiWorld, res: view Gpu2dUi, canvas: mod Gpu2dCanvas) pub {
+func renderSystemGpu2d(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  res: view Gpu2dUi
+  canvas: mod Gpu2dCanvas
+) pub {
   let allRangeLow: Int = 0 - 1000000
   let allRangeHi: Int = 1000000
   gpu2dLayerRange(
     world: world
+    uiSystems: uiSystems
     res: res
     canvas: canvas
     minOrder: allRangeLow

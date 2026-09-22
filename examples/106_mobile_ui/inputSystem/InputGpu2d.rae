@@ -9,6 +9,7 @@ open ecs/Entity
 open ecs/ComponentTable
 open ecs/Event
 open ui/Transform
+open ui/UiSystems
 
 let inputNoEntity: EntityId = { index: 0 - 1, generation: 0 }
 
@@ -100,6 +101,7 @@ func sendScriptedTap(input: mod InputSystem) {
 
 func pointInEntity(
   world: view UiWorld
+  uiSystems: view UiSystems
   entity: view EntityId
   x: view Float
   y: view Float
@@ -107,14 +109,14 @@ func pointInEntity(
   if componentHas(this: world.worldTransforms, entity: entity) is false {
     ret false
   }
-  if componentHas(this: world.computedRects, entity: entity) is false {
+  if componentHas(this: uiSystems.layout.computedRects, entity: entity) is false {
     ret false
   }
   let wt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: entity)
   if worldVisualOf(world: world, entity: entity).visible is false {
     ret false
   }
-  let cr: ComputedRect = componentGet(this: world.computedRects, entity: entity)
+  let cr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: entity)
   if x < wt.position.x {
     ret false
   }
@@ -132,6 +134,7 @@ func pointInEntity(
 
 func hitTestEntity(
   world: view UiWorld
+  uiSystems: view UiSystems
   entity: view EntityId
   x: view Float
   y: view Float
@@ -145,6 +148,7 @@ func hitTestEntity(
         let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
         let hit: EntityId = hitTestEntity(
           world: world
+          uiSystems: uiSystems
           entity: cid
           x: x
           y: y
@@ -159,6 +163,7 @@ func hitTestEntity(
     if componentHas(this: world.onClicks, entity: entity) {
       if pointInEntity(
         world: world
+        uiSystems: uiSystems
         entity: entity
         x: x
         y: y
@@ -170,9 +175,14 @@ func hitTestEntity(
   }
 }
 
-func hitTest(world: view UiWorld, x: view Float, y: view Float) ret EntityId {
+func hitTest(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  x: view Float
+  y: view Float
+) ret EntityId {
   unsafe {
-    let roots: List(EntityId) = collectPaintableRoots(world: world)
+    let roots: List(EntityId) = collectPaintableRoots(world: world, uiSystems: uiSystems)
     let n: Int = roots.length
     var i: Int = n - 1
     loop i >= 0 {
@@ -180,6 +190,7 @@ func hitTest(world: view UiWorld, x: view Float, y: view Float) ret EntityId {
       if componentHas(this: world.layerRoots, entity: e) is false {
         let hit: EntityId = hitTestEntity(
           world: world
+          uiSystems: uiSystems
           entity: e
           x: x
           y: y
@@ -194,7 +205,12 @@ func hitTest(world: view UiWorld, x: view Float, y: view Float) ret EntityId {
   }
 }
 
-func updateInputSystem(input: mod InputSystem, world: view UiWorld, viewport: view Viewport) {
+func updateInputSystem(
+  input: mod InputSystem
+  world: view UiWorld
+  uiSystems: view UiSystems
+  viewport: view Viewport
+) {
   # Recycle last frame's action channel (double-buffered), replacing the old
   # clearActionEvents: this frame's clicks produce into a clean queue.
   frameAdvance(this: input.uiActions)
@@ -238,12 +254,22 @@ func updateInputSystem(input: mod InputSystem, world: view UiWorld, viewport: vi
   input.pointer = nextPointer
 
   if pressed {
-    input.pressedEntity = hitTest(world: world, x: mx, y: my)
+    input.pressedEntity = hitTest(
+      world: world
+      uiSystems: uiSystems
+      x: mx
+      y: my
+    )
     log("[input] press at ({mx},{my}) -> pressedEntity={input.pressedEntity.index}")
   }
 
   if released {
-    var hit: EntityId = hitTest(world: world, x: mx, y: my)
+    var hit: EntityId = hitTest(
+      world: world
+      uiSystems: uiSystems
+      x: mx
+      y: my
+    )
     log("[input] release at ({mx},{my}) -> hit={hit.index} pressed={input.pressedEntity.index}")
     if isNone(this: hit) is false {
       if hit is input.pressedEntity {
