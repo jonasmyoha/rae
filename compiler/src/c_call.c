@@ -648,6 +648,35 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 if (re_inferred) { concrete = re_inferred; fd = tmpl; }
             }
         }
+        // Sema keys a generic specialization through TypeInfo, where an enum is
+        // the shared TYPE_INT and its NAME is gone — so `describe(value: kinds)`
+        // with `kinds: List(Kind)` bound T to List(Int) and called the Int
+        // toString, printing ordinals instead of member names. The ARGUMENTS at
+        // this call site still carry the written spelling, so re-infer from them
+        // and prefer that binding ONLY when it actually carries an enum — the
+        // one case the two spellings disagree (docs: an enum keeps its name).
+        // Every other specialization keeps exactly the binding sema chose.
+        if (!concrete && fd->specialization_args && fd->generic_template
+            && fd->generic_template->kind == AST_DECL_FUNC && !expr->as.call.generic_args) {
+            const AstFuncDecl* tmpl = &fd->generic_template->as.func_decl;
+            if (tmpl->generic_params) {
+                const AstTypeRef* patterns[32]; const AstTypeRef* concretes[32]; size_t np = 0;
+                const AstParam* p = tmpl->params;
+                const AstCallArg* a = expr->as.call.args;
+                while (p && a && np < 32) {
+                    const AstTypeRef* arg_tr = infer_expr_type_ref(ctx, a->value);
+                    if (arg_tr && ctx->generic_params && ctx->generic_args)
+                        arg_tr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, arg_tr);
+                    patterns[np] = p->type; concretes[np] = arg_tr; np++;
+                    p = p->next; a = a->next;
+                }
+                AstTypeRef* re_args = infer_generic_args_multi(ctx->compiler_ctx, tmpl, patterns, concretes, np);
+                bool carries_enum = false;
+                for (const AstTypeRef* tr = re_args; tr && !carries_enum; tr = tr->next)
+                    if (rae_type_ref_has_enum_arg(ctx->compiler_ctx, ctx->module, tr)) carries_enum = true;
+                if (carries_enum) { concrete = re_args; fd = tmpl; }
+            }
+        }
         if (concrete) {
             // already resolved above
         } else if (expr->as.call.generic_args) {
