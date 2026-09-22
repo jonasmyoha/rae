@@ -1033,8 +1033,11 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             // element drop becomes a double-free. pool_take detaches
             // the heap from the pool before the call so the callee
             // claims a stable pointer.
+            // An `any` parameter boxes its argument (rae_any(...)) — a
+            // RaeAny is not a String, so it is never pool-taken.
             bool wrap_pool_take_arg = false;
             if (p && p->type && !(p->type->is_view || p->type->is_mod)
+                && !needs_box
                 && a->value
                 && (a->value->kind == AST_EXPR_CALL ||
                     a->value->kind == AST_EXPR_METHOD_CALL ||
