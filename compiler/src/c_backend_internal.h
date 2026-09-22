@@ -199,6 +199,7 @@ const AstFuncDecl* find_function_overload(const AstModule* module, CFuncContext*
 const AstExpr* c_call_enum_from_name_type(const AstExpr* expr);
 const AstTypeRef* c_call_enum_from_name_opt_type(CFuncContext* ctx, const AstExpr* expr);
 void rae_value_to_str_expr(CompilerContext* ctx, const AstModule* module, const AstTypeRef* type, const char* cexpr, bool nested, FILE* out);
+bool rae_type_ref_has_enum_arg(CompilerContext* ctx, const AstModule* module, const AstTypeRef* type);
 void rae_value_equals_expr(CompilerContext* ctx, const AstModule* module, const AstTypeRef* type,
                            const char* aexpr, const char* bexpr, FILE* out);
 const AstExpr* c_call_equals_args(const AstExpr* expr);
