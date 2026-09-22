@@ -1234,14 +1234,22 @@ const AstTypeRef* c_call_enum_name_opt_string_type(CFuncContext* ctx) {
 //   List(T)                        -> rae_to_str_<List(T)>_(&X) (generated, recursive)
 //   opt T (struct rep)             -> X.has ? <payload rule> : "none"
 //   c_struct / Ptr / Buffer / other -> a "<Type>" placeholder, never a C error
-void rae_value_to_str_expr(CompilerContext* ctx, const AstModule* module, const AstTypeRef* type, const char* cexpr, FILE* out) {
+// `nested` is true inside a literal (a struct field, a list element): there a
+// String is quoted, so the whole prints as the source would spell it.
+void rae_value_to_str_expr(CompilerContext* ctx, const AstModule* module, const AstTypeRef* type, const char* cexpr, bool nested, FILE* out) {
     CFuncContext lctx = {0}; lctx.compiler_ctx = ctx; lctx.module = (AstModule*)module;
     Str base = get_base_type_name(type);
+    if (nested && !type->is_opt && !type->generic_args && str_eq_cstr(base, "String")) {
+        // A String inside a literal is spelled quoted, as the source spells it
+        // (no escaping — the same rule the generated toJson uses).
+        fprintf(out, "rae_ext_rae_str_concat(rae_ext_rae_str_concat((rae_String){(uint8_t*)\"\\\"\", 1}, (%s)), (rae_String){(uint8_t*)\"\\\"\", 1})", cexpr);
+        return;
+    }
     if (type && type->is_opt && !type->is_view && !type->is_mod && rae_opt_is_struct_rep(&lctx, type)) {
         AstTypeRef payload = *type; payload.is_opt = false; payload.next = NULL;
         char inner[512]; snprintf(inner, sizeof inner, "(%s).value", cexpr);
         fprintf(out, "((%s).has ? ", cexpr);
-        rae_value_to_str_expr(ctx, module, &payload, inner, out);
+        rae_value_to_str_expr(ctx, module, &payload, inner, nested, out);
         fprintf(out, " : (rae_String){(uint8_t*)\"none\", 4})");
         return;
     }
@@ -2581,13 +2589,13 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   }
 
   // Generate rae_to_str_TYPE_ for non-c_struct user types so interpolation
-  // (`"{p}"`) and `.toString()` produce the same "{ 10, 20 }" output the
-  // Live VM gives. The _Generic-based rae_ext_rae_str macro can't be
-  // (rae_value_to_str_expr is defined above the backend entry; it is the
+  // (`"{p}"`) and `.toString()` print the value in Rae's own literal
+  // spelling: `Point { x: 10, y: 20 }`. The _Generic-based rae_ext_rae_str
+  // macro can't be extended for user types, so we emit a per-type function
+  // and switch call sites to call it directly when the arg type is a user
+  // struct. (rae_value_to_str_expr, defined above the backend entry, is the
   // ONE formatter every generated toString and every interpolation site
   // uses for a value of a given type.)
-  // extended for user types, so we emit a per-type function and switch
-  // call sites to call it directly when the arg type is a user struct.
   // Emit forward declarations first so structs can reference each other
   // regardless of source order.
   for (size_t i = 0; i < ctx->all_decl_count; i++) {
@@ -2621,72 +2629,23 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       if (earlier_same_named_type(ctx, i, td->name)) continue;
       const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, &(AstTypeRef){.parts = &(AstIdentifierPart){.text = td->name}});
 
+      // The literal spelling: `Pair { x: 1, y: 2, kind: large }` — the declared
+      // type name, every field `name: value` in declaration order, each value
+      // through the ONE formatter (rae_value_to_str_expr, nested: a String
+      // is quoted, an enum is its member name, a struct / List / opt recurses).
       fprintf(out, "RAE_UNUSED static rae_String rae_to_str_%s_(const %s* this) {\n", mangled, mangled);
-      fprintf(out, "  rae_String __out = (rae_String){(uint8_t*)\"{ \", 2};\n");
+      fprintf(out, "  rae_String __out = (rae_String){(uint8_t*)\"%.*s {\", %d};\n",
+          (int)td->name.len, td->name.data, (int)td->name.len + 2);
       bool first = true;
       for (const AstTypeField* f = td->fields; f; f = f->next) {
-          if (!first) fprintf(out, "  __out = rae_ext_rae_str_concat(__out, (rae_String){(uint8_t*)\", \", 2});\n");
+          int nl = (int)f->name.len; const char* nd = f->name.data;
+          fprintf(out, "  __out = rae_ext_rae_str_concat(__out, (rae_String){(uint8_t*)\"%s%.*s: \", %d});\n",
+              first ? " " : ", ", nl, nd, nl + (first ? 3 : 4));
           first = false;
-          Str fbase = get_base_type_name(f->type);
-          // opt T fields are stored as RaeAny; routing through the _Generic
-          // macro picks rae_ext_rae_str_any. Nested concrete user structs go
-          // through their own rae_to_str_; c_struct fields (raylib Color etc.)
-          // and generic instantiations (List(Int), Map(K,V)) have no entry in
-          // the _Generic macro, so render them as a "<Type>" placeholder
-          // rather than hit a compile error.
-          CFuncContext lookup_ctx = {.compiler_ctx = ctx, .module = module};
-          const AstDecl* fd = find_type_decl(&lookup_ctx, module, fbase);
-          bool is_user_struct = fd && fd->kind == AST_DECL_TYPE
-              && !has_property(fd->as.type_decl.properties, "c_struct")
-              && !fd->as.type_decl.generic_params;
-          bool is_c_struct = fd && fd->kind == AST_DECL_TYPE
-              && has_property(fd->as.type_decl.properties, "c_struct");
-          bool has_generic_args = f->type && f->type->generic_args;
-          bool is_generic_template = fd && fd->kind == AST_DECL_TYPE && fd->as.type_decl.generic_params;
-          bool is_opt_field = f->type && f->type->is_opt;
-          CFuncContext _sctx = {0}; _sctx.compiler_ctx = ctx; _sctx.module = module;
-          bool is_opt_struct_field = is_opt_field && f->type && !f->type->is_view
-              && !f->type->is_mod && rae_opt_is_struct_rep(&_sctx, f->type);
-          if (is_opt_struct_field) {
-              // A struct-rep opt field is `struct rae_opt_<T>` (#651). Format
-              // `.value` per representation when present, else "none" (matching
-              // the Live VM). Scalars/String/Char/Bool/enum route through the
-              // _Generic rae_ext_rae_str on the concrete `.value`; a nested user
-              // struct payload uses its own rae_to_str_. Aggregates without a
-              // formatter fall back to a "<opt>" placeholder.
-              int nl = (int)f->name.len; const char* nd = f->name.data;
-              if (is_user_struct) {
-                  const char* fmangled = rae_mangle_type_specialized(ctx, NULL, NULL, &(AstTypeRef){.parts = &(AstIdentifierPart){.text = fbase}});
-                  fprintf(out, "  __out = rae_ext_rae_str_concat(__out, this->%.*s.has ? rae_to_str_%s_(&this->%.*s.value) : (rae_String){(uint8_t*)\"none\", 4});\n",
-                      nl, nd, fmangled, nl, nd);
-              } else if (!has_generic_args && !is_generic_template && !is_c_struct) {
-                  // scalar / String / Char / Bool / enum: the shared formatter
-                  // (an enum payload prints its member name, not its ordinal).
-                  char fexpr[512]; snprintf(fexpr, sizeof fexpr, "this->%.*s", nl, nd);
-                  fprintf(out, "  __out = rae_ext_rae_str_concat(__out, ");
-                  rae_value_to_str_expr(ctx, module, f->type, fexpr, out);
-                  fprintf(out, ");\n");
-              } else {
-                  fprintf(out, "  __out = rae_ext_rae_str_concat(__out, this->%.*s.has ? (rae_String){(uint8_t*)\"<opt>\", 5} : (rae_String){(uint8_t*)\"none\", 4});\n",
-                      nl, nd);
-              }
-          } else if (is_user_struct && !is_opt_field && !has_generic_args) {
-              const char* fmangled = rae_mangle_type_specialized(ctx, NULL, NULL, &(AstTypeRef){.parts = &(AstIdentifierPart){.text = fbase}});
-              fprintf(out, "  __out = rae_ext_rae_str_concat(__out, rae_to_str_%s_(&this->%.*s));\n",
-                  fmangled, (int)f->name.len, f->name.data);
-          } else if (has_generic_args && str_eq_cstr(fbase, "List") && !is_opt_field) {
-              char fexpr[512]; snprintf(fexpr, sizeof fexpr, "this->%.*s", (int)f->name.len, f->name.data);
-              fprintf(out, "  __out = rae_ext_rae_str_concat(__out, ");
-              rae_value_to_str_expr(ctx, module, f->type, fexpr, out);
-              fprintf(out, ");\n");
-          } else if ((is_c_struct || has_generic_args || is_generic_template
-                      || str_eq_cstr(fbase, "Ptr")) && !is_opt_field) {
-              fprintf(out, "  __out = rae_ext_rae_str_concat(__out, (rae_String){(uint8_t*)\"<%.*s>\", %d});\n",
-                  (int)fbase.len, fbase.data, (int)fbase.len + 2);
-          } else {
-              fprintf(out, "  __out = rae_ext_rae_str_concat(__out, rae_ext_rae_str(this->%.*s));\n",
-                  (int)f->name.len, f->name.data);
-          }
+          char fexpr[512]; snprintf(fexpr, sizeof fexpr, "this->%.*s", nl, nd);
+          fprintf(out, "  __out = rae_ext_rae_str_concat(__out, ");
+          rae_value_to_str_expr(ctx, module, f->type, fexpr, true, out);
+          fprintf(out, ");\n");
       }
       fprintf(out, "  __out = rae_ext_rae_str_concat(__out, (rae_String){(uint8_t*)\" }\", 2});\n");
       fprintf(out, "  return __out;\n}\n\n");
@@ -2713,7 +2672,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       fprintf(out, "  for (int64_t __i = 0; __i < this->length; __i++) {\n");
       fprintf(out, "    if (__i > 0) __out = rae_ext_rae_str_concat(__out, (rae_String){(uint8_t*)\", \", 2});\n");
       fprintf(out, "    __out = rae_ext_rae_str_concat(__out, ");
-      rae_value_to_str_expr(ctx, module, &elem, "this->data[__i]", out);
+      rae_value_to_str_expr(ctx, module, &elem, "this->data[__i]", true, out);
       fprintf(out, ");\n  }\n");
       fprintf(out, "  return rae_ext_rae_str_concat(__out, (rae_String){(uint8_t*)\"]\", 1});\n}\n\n");
     }
