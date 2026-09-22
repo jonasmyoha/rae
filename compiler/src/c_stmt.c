@@ -318,6 +318,14 @@ void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
   // (no malloc, no RaeAny box). String copies its payload; aggregates deep-copy
   // when needed; scalars assign directly.
   AstTypeRef opt_for_name = payload; opt_for_name.is_opt = true;
+  // A bare object literal payload (`opt Pair = { x: 1, y: 2 }`) carries no
+  // type of its own; give it the payload type so it emits Pair's fields.
+  bool saved_has_exp_box = ctx->has_expected_type;
+  AstTypeRef saved_exp_box = ctx->expected_type;
+  if (value->kind == AST_EXPR_OBJECT && !value->as.object_literal.type) {
+    ctx->has_expected_type = true;
+    ctx->expected_type = payload;
+  }
   if (rae_opt_is_struct_rep(ctx, &opt_for_name)) {
     const char* optm = rae_opt_type_name(ctx, &opt_for_name);
     int optn = (int)ctx->temp_counter++;
@@ -347,8 +355,12 @@ void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
       }
     }
     fprintf(out, "__opt%d; }))", optn);
+    ctx->has_expected_type = saved_has_exp_box;
+    ctx->expected_type = saved_exp_box;
     return;
   }
+  ctx->has_expected_type = saved_has_exp_box;
+  ctx->expected_type = saved_exp_box;
 
   // Non-struct-rep payload (`Any`): keep the inline RaeAny box.
   if (c_type_is_plain_string(&payload)) {
@@ -1876,6 +1888,14 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                         Str val_base = get_base_type_name(val_tr);
                         // Don't box if value is already RaeAny (e.g. another opt result)
                         if (!str_eq_cstr(val_base, "Any") && val_base.len > 0) needs_box = true;
+                    }
+                    // A bare struct literal `{ x: 1, y: 2 }` into an `opt Pair`
+                    // binding has no inferable type of its own — its type is the
+                    // opt payload from the LHS. Box it so it becomes the opt's
+                    // `.value`, not a bogus opt-struct designated initializer.
+                    if (stmt->as.let_stmt.value->kind == AST_EXPR_OBJECT
+                        && !stmt->as.let_stmt.value->as.object_literal.type) {
+                        needs_box = true;
                     }
                 }
                 // Stage 4: if the let captures a String, detach any temp-pool
