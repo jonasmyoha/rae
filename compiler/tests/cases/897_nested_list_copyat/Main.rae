@@ -1,0 +1,27 @@
+# Reading an element back out of a List(List(Int)) via copyAt yields an
+# `opt List(Int)`. Its drop calls the inner List(Int) drop, which used to be
+# emitted AFTER the opt-drop body — an implicit-declaration C error. The inner
+# List(T) drop is now forward-declared before the opt(List(T)) drop.
+func main() {
+  let inner: List(Int) = [1, 2]
+  let nested: List(List(Int)) = [inner, [3]]
+  log("nested: {nested}")
+
+  if let row: List(Int) = nested.copyAt(index: 0) {
+    log("row0: {row}")
+  }
+  if let row: List(Int) = nested.copyAt(index: 1) {
+    log("row1: {row}")
+  }
+  # Out of range yields none — the some-arm is skipped.
+  if let row: List(Int) = nested.copyAt(index: 9) {
+    log("row9: {row}")
+  }
+
+  # Also from the List.create form, filled and read back.
+  var built: List(List(Int)) = List.create(List(Int), cap: 2)
+  built.add(value: [4, 5])
+  if let row: List(Int) = built.copyAt(index: 0) {
+    log("built0: {row}")
+  }
+}
