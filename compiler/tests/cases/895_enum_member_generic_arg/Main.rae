@@ -1,0 +1,30 @@
+# A direct enum member (`Kind.large`) passed as a generic argument now binds
+# T to its enum type, exactly as a local of that type does. Before, the call
+# emitted an undeclared `..._describe_rae_T_` because the member access did
+# not infer to its enum type.
+enum Kind { small, medium, large }
+
+func describe(T: type, value: view T) ret String {
+  ret value.toString()
+}
+
+func same(T: type, a: view T, b: view T) ret Bool {
+  ret equals(a: a, b: b)
+}
+
+func main() {
+  # Direct member as the generic argument — toString.
+  log("direct: {describe(value: Kind.large)}")
+  log("direct small: {describe(value: Kind.small)}")
+
+  # The same value via a local, for parity.
+  let kind: Kind = Kind.medium
+  log("local: {describe(value: kind)}")
+
+  # Direct members through a generic equals.
+  log("eq same: {same(a: Kind.large, b: Kind.large)}")
+  log("eq diff: {same(a: Kind.small, b: Kind.large)}")
+
+  # Mixed: a direct member and a local of the same enum.
+  log("eq mixed: {same(a: Kind.medium, b: kind)}")
+}

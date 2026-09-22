@@ -1512,6 +1512,20 @@ const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
             return NULL;
         }
         case AST_EXPR_MEMBER: {
+            // A direct enum member access (`Kind.large`): the object is an
+            // enum NAME, not a value, so the struct-field path below cannot
+            // type it. Its type is the enum itself — return a type-ref naming
+            // it, so a generic call `describe(value: Kind.large)` binds T=Kind
+            // exactly as `let k: Kind = Kind.large; describe(value: k)` does.
+            if (expr->as.member.object->kind == AST_EXPR_IDENT
+                && find_enum_decl(ctx, ctx->module, expr->as.member.object->as.ident)) {
+                AstTypeRef* etr = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
+                memset(etr, 0, sizeof *etr);
+                etr->parts = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstIdentifierPart));
+                memset(etr->parts, 0, sizeof *etr->parts);
+                etr->parts->text = expr->as.member.object->as.ident;
+                return etr;
+            }
             const AstTypeRef* obj_tr = infer_expr_type_ref(ctx, expr->as.member.object);
             // #961: inside a generic instantiation the object may be typed by a
             // type PARAMETER (`var comp: T`); resolve it to the concrete struct
