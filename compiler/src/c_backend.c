@@ -2433,6 +2433,28 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
     if (opt_entries[i].needs_copy)
       fprintf(out, "RAE_UNUSED static void rae_deep_copy_%s(%s* dst, const %s* src);\n",
               opt_entries[i].optm, opt_entries[i].optm, opt_entries[i].optm);
+    // An `opt List(T)` (etc.) drop body calls the CONTAINER's own drop
+    // (`rae_core_List_drop_...`), which is a generic-function specialization
+    // whose forward declaration lives in a LATER block. Emit it here too, so
+    // the opt-drop body — which is emitted before that block — has a
+    // declaration in scope instead of an implicit one (a C error, and a
+    // `static` redeclaration clash with the real forward decl). The extra
+    // forward decl is a harmless duplicate. (`if let row: List(Int) =
+    // nested.copyAt(index: 0)` over a List(List(Int)) tripped this.)
+    if (opt_entries[i].needs_drop) {
+      OptHelperEntry* e = &opt_entries[i];
+      Str pbase = get_base_type_name(&e->payload);
+      if (is_drop_target_type(&e->payload) && e->payload.generic_args) {
+        CFuncContext octx = {0}; octx.compiler_ctx = ctx; octx.module = module;
+        const AstFuncDecl* drop_fd = find_drop_overload_for(&octx, pbase);
+        if (drop_fd) {
+          register_function_specialization(ctx, drop_fd, e->payload.generic_args);
+          const char* fn = rae_mangle_specialized_function(ctx, drop_fd, e->payload.generic_args);
+          const char* pm = rae_mangle_type_specialized(ctx, NULL, NULL, &e->payload);
+          fprintf(out, "RAE_UNUSED static void %s(%s* this);\n", fn, pm);
+        }
+      }
+    }
   }
   if (opt_entry_count > 0) fprintf(out, "\n");
 
