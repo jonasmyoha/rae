@@ -144,9 +144,17 @@ func encodeField(T: type, value: view T) ret String {
   if typeName(value) is "EntityId" {
     ret ""
   }
-  # Anything else — an enum, a runtime list — is not field-structural here:
-  # the enum fields are written by the component arms below (a generic body
-  # cannot name an enum member for an arbitrary T), the lists are runtime.
+  if typeName(value) is "List(ListViewBinding)" or typeName(value) is "List(ListViewRowScene)" or typeName(
+    value
+  ) is "List(ListViewRow)" or typeName(value) is "List(EntityId)" {
+    ret ""
+  }
+  # An enum: its member name (`enumName` is the constant none for any other
+  # T, so this last arm compiles for every instantiation — the mirror of the
+  # decoder's enumFromName).
+  if let member: String = enumName(T, value: value) {
+    ret authoredEnumText(name: member)
+  }
   ret ""
 }
 
@@ -179,10 +187,6 @@ func withMembers(base: view String, extra: view List(String)) ret String {
     }
   }
   ret "\{{inner}\}"
-}
-
-func enumMember(key: view String, name: view String) ret String {
-  ret "{Json.quote(text: key)}: {authoredEnumText(name: name)}"
 }
 
 func skipHas(skip: view String, name: view String) ret Bool {
@@ -286,7 +290,6 @@ func encodeSprite(sprite: view Sprite) ret String {
   let base: String = encodeComponent(value: sprite, skip: "tint,tintSlot,hasNineSlice")
   let extra: List(String) = [
     "\"tint\": {encodeColorOrSlot(color: sprite.tint, slot: sprite.tintSlot)}"
-    enumMember(key: "scaleMode", name: sprite.scaleMode.toString())
   ]
   ret withMembers(base: base, extra: extra)
 }
@@ -294,7 +297,6 @@ func encodeSprite(sprite: view Sprite) ret String {
 func encodeShape(shape: view Shape) ret String {
   let base: String = encodeComponent(value: shape, skip: "fill,fillSlot,stroke,strokeSlot")
   let extra: List(String) = [
-    enumMember(key: "kind", name: shape.kind.toString())
     "\"fill\": {encodeColorOrSlot(color: shape.fill, slot: shape.fillSlot)}"
     "\"stroke\": {encodeColorOrSlot(color: shape.stroke, slot: shape.strokeSlot)}"
   ]
@@ -303,8 +305,7 @@ func encodeShape(shape: view Shape) ret String {
 
 # Text with its namespaced style override (a sparse component of its own).
 func encodeText(world: view UiWorld, entity: view EntityId, text: view Text) ret String {
-  let wrap: List(String) = [enumMember(key: "wrapWidthMode", name: text.wrapWidthMode.toString())]
-  let base: String = withMembers(base: encodeComponent(value: text, skip: ""), extra: wrap)
+  let base: String = encodeComponent(value: text, skip: "")
   if componentHas(this: world.styleOverrides, entity: entity) is false {
     ret base
   }
@@ -544,76 +545,6 @@ func authoredComponentJson(
     if componentHas(this: world.listViews, entity: entity) {
       let value: ListView = componentGet(this: world.listViews, entity: entity)
       ret encodeListView(listView: value)
-    }
-    ret ""
-  }
-  if name is "TextBinding" {
-    if componentHas(this: world.textBindings, entity: entity) {
-      let value: TextBinding = componentGet(this: world.textBindings, entity: entity)
-      let extra: List(String) = [enumMember(key: "format", name: value.format.toString())]
-      ret withMembers(base: encodeComponent(value: value, skip: ""), extra: extra)
-    }
-    ret ""
-  }
-  if name is "ScrollRoot" {
-    if componentHas(this: world.scrollRoots, entity: entity) {
-      let value: ScrollRoot = componentGet(this: world.scrollRoots, entity: entity)
-      let extra: List(String) = [
-        enumMember(key: "axis", name: value.axis.toString())
-        enumMember(key: "floor", name: value.floor.toString())
-      ]
-      ret withMembers(base: encodeComponent(value: value, skip: ""), extra: extra)
-    }
-    ret ""
-  }
-  if name is "ImageSourceResolver" {
-    if componentHas(this: world.imageSourceResolvers, entity: entity) {
-      let value: ImageSourceResolver = componentGet(
-        this: world.imageSourceResolvers
-        entity: entity
-      )
-      let extra: List(String) = [enumMember(key: "mode", name: value.mode.toString())]
-      ret withMembers(base: encodeComponent(value: value, skip: ""), extra: extra)
-    }
-    ret ""
-  }
-  if name is "Overflow" {
-    if componentHas(this: world.overflows, entity: entity) {
-      let value: OverflowPolicy = componentGet(this: world.overflows, entity: entity)
-      let extra: List(String) = [enumMember(key: "mode", name: value.mode.toString())]
-      ret withMembers(base: encodeComponent(value: value, skip: ""), extra: extra)
-    }
-    ret ""
-  }
-  if name is "MaskShape" {
-    if componentHas(this: world.maskShapes, entity: entity) {
-      let value: MaskShape = componentGet(this: world.maskShapes, entity: entity)
-      let extra: List(String) = [enumMember(key: "kind", name: value.kind.toString())]
-      ret withMembers(base: encodeComponent(value: value, skip: ""), extra: extra)
-    }
-    ret ""
-  }
-  if name is "ListSource" {
-    if componentHas(this: world.listSources, entity: entity) {
-      let value: ListSource = componentGet(this: world.listSources, entity: entity)
-      let extra: List(String) = [enumMember(key: "source", name: value.source.toString())]
-      ret withMembers(base: encodeComponent(value: value, skip: ""), extra: extra)
-    }
-    ret ""
-  }
-  if name is "EmptyState" {
-    if componentHas(this: world.emptyStates, entity: entity) {
-      let value: EmptyState = componentGet(this: world.emptyStates, entity: entity)
-      let extra: List(String) = [enumMember(key: "kind", name: value.kind.toString())]
-      ret withMembers(base: encodeComponent(value: value, skip: ""), extra: extra)
-    }
-    ret ""
-  }
-  if name is "Carousel" {
-    if componentHas(this: world.carousels, entity: entity) {
-      let value: Carousel = componentGet(this: world.carousels, entity: entity)
-      let extra: List(String) = [enumMember(key: "axis", name: value.axis.toString())]
-      ret withMembers(base: encodeComponent(value: value, skip: ""), extra: extra)
     }
     ret ""
   }
