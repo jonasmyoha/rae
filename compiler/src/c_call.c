@@ -130,6 +130,58 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         }
         return true;
     }
+    // `equals(a: x, b: y)` -> Bool: the value comparison for the operands'
+    // type, folded per instantiation in a generic body. Both sides are
+    // captured into temps so an operand that is a call is evaluated once.
+    if (c_call_equals_args(expr)) {
+        const AstExpr* av = expr->as.call.args->value;
+        const AstExpr* bv = expr->as.call.args->next->value;
+        const AstTypeRef* tr = infer_expr_type_ref(ctx, av);
+        if (!tr) tr = infer_expr_type_ref(ctx, bv);
+        // A direct member access `Enum.member` does not infer to the enum
+        // type (the same recovery emit_to_string_expr does): name it from
+        // the object so the comparison takes the enum path.
+        AstTypeRef enum_tr;
+        if (!tr || get_base_type_name(tr).len == 0) {
+            const AstExpr* probe = (av->kind == AST_EXPR_MEMBER) ? av : bv;
+            if (probe && probe->kind == AST_EXPR_MEMBER
+                && probe->as.member.object->kind == AST_EXPR_IDENT
+                && find_enum_decl(ctx, ctx->module, probe->as.member.object->as.ident)) {
+                memset(&enum_tr, 0, sizeof enum_tr);
+                enum_tr.parts = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstIdentifierPart));
+                memset(enum_tr.parts, 0, sizeof *enum_tr.parts);
+                enum_tr.parts->text = probe->as.member.object->as.ident;
+                tr = &enum_tr;
+            }
+        }
+        AstTypeRef value_tr;
+        if (tr) {
+            const AstTypeRef* sub = tr;
+            if (ctx->generic_params && ctx->generic_args) {
+                const AstTypeRef* s2 = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr);
+                if (s2) sub = s2;
+            }
+            value_tr = *sub; value_tr.next = NULL;
+            // view/mod are how the value ARRIVED, not what it is.
+            value_tr.is_view = false; value_tr.is_mod = false;
+            int eid = ctx->temp_counter++;
+            char an[64], bn[64];
+            snprintf(an, sizeof an, "__eqa%d", eid);
+            snprintf(bn, sizeof bn, "__eqb%d", eid);
+            fprintf(out, "(__extension__ ({ __typeof__(");
+            emit_expr(ctx, av, out, PREC_LOWEST, false, false);
+            fprintf(out, ") %s = (", an);
+            emit_expr(ctx, av, out, PREC_LOWEST, false, false);
+            fprintf(out, "); __typeof__(");
+            emit_expr(ctx, bv, out, PREC_LOWEST, false, false);
+            fprintf(out, ") %s = (", bn);
+            emit_expr(ctx, bv, out, PREC_LOWEST, false, false);
+            fprintf(out, "); (rae_Bool)(");
+            rae_value_equals_expr(ctx->compiler_ctx, ctx->module, &value_tr, an, bn, out);
+            fprintf(out, "); }))");
+            return true;
+        }
+    }
     // `enumMembers(E)` -> List(String) of the member names (a fresh list,
     // owned by the caller); `enumCount(E)` -> Int. Per instantiation: a
     // generic E that is not an enum yields the empty list / 0, so a generic

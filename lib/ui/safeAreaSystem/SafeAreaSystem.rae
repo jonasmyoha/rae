@@ -33,7 +33,7 @@ func safeAreaSystem(world: mod UiWorld, uiSystems: mod UiSystems, insets: view I
         var changed: Bool = true
         if componentHas(this: uiSystems.safeArea.safeInsets, entity: e) {
           let cur: SafeInsets = componentGet(this: uiSystems.safeArea.safeInsets, entity: e)
-          if insetsEqual(a: cur.insets, b: insets) {
+          if equals(a: cur.insets, b: insets) {
             changed = false
           }
         }
@@ -47,20 +47,4 @@ func safeAreaSystem(world: mod UiWorld, uiSystems: mod UiSystems, insets: view I
       i = i + 1
     }
   }
-}
-
-func insetsEqual(a: view Insets, b: view Insets) ret Bool {
-  if a.l is not b.l {
-    ret false
-  }
-  if a.t is not b.t {
-    ret false
-  }
-  if a.r is not b.r {
-    ret false
-  }
-  if a.b is not b.b {
-    ret false
-  }
-  ret true
 }
