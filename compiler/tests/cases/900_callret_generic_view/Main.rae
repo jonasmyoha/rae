@@ -1,0 +1,35 @@
+# A CALL that returns a value, passed to a generic `view T` param, must
+# materialise the argument with the SUBSTITUTED element type. It used to emit
+# the template placeholder in the compound-literal cast — `(rae_T[1]){...}`,
+# an undeclared C type — for a call whose result needs a borrowed temporary.
+enum Kind { small, large }
+
+type Point {
+  x: Int
+  y: Int
+}
+
+func describe(T: type, value: view T) ret String {
+  ret value.toString()
+}
+
+func makeKind() ret Kind {
+  ret Kind.large
+}
+
+func makePoint() ret Point {
+  ret Point { x: 3, y: 4 }
+}
+
+func makeInt() ret Int {
+  ret 7
+}
+
+func main() {
+  # The enum case from the report — prints the member name, not an ordinal.
+  log("kind: {describe(value: makeKind())}")
+  # A struct-returning call through the same generic view param.
+  log("point: {describe(value: makePoint())}")
+  # A plain scalar, for parity.
+  log("int: {describe(value: makeInt())}")
+}
