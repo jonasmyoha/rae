@@ -580,6 +580,63 @@ func tableMachineJson(T: type, table: view ComponentTable(T), entity: view Entit
 
 # The machine form of a component (its compiler toJson), for the "did it
 # change since the fresh decode" test; "" when absent.
+# Compare ONE component of `entity` in the table `this` with the same
+# component of `other` in the world `otherWorld` (#884's round-trip check).
+#
+# Two worlds cannot be walked in lockstep — a `fields()` loop walks the fields
+# of ONE value, so there is no iteration that holds a's table and b's together.
+# The binding TYPE is the filter, though: inside this generic body T is the
+# concrete component type, so `loop let that: view ComponentTable(T) in
+# fields(otherWorld)` unrolls to exactly the one table of that type. Then
+# `equals` compares the two component VALUES field by field — no toJson text
+# in between.
+func componentEqualsIn(
+  T: type
+  this: view ComponentTable(T)
+  otherWorld: view UiWorld
+  entity: view EntityId
+  otherEntity: view EntityId
+) ret Bool {
+  loop let that: view ComponentTable(T) in fields(otherWorld) {
+    if componentHas(this: this, entity: entity) is false {
+      ret componentHas(this: that, entity: otherEntity) is false
+    }
+    if componentHas(this: that, entity: otherEntity) is false {
+      ret false
+    }
+    let mine: view T => componentView(this: this, entity: entity)
+    let theirs: view T => componentView(this: that, entity: otherEntity)
+    ret equals(a: mine, b: theirs)
+  }
+  ret false
+}
+
+# The authored component `name` of `entity` in `a`, compared with the same
+# component of `otherEntity` in `b` — by VALUE (componentEqualsIn), not by
+# their encoded text. `none` when no authored table carries that name.
+func componentEqualsByName(
+  world: view UiWorld
+  other: view UiWorld
+  entity: view EntityId
+  otherEntity: view EntityId
+  name: view String
+) ret opt Bool {
+  var answer: opt Bool = none
+  loop let table: view ComponentTable(any) in fields(world) {
+    if isRuntimeTable(name: typeName(table)) is false and name is authoredNameOf(
+      typeName: typeName(table)
+    ) {
+      answer = componentEqualsIn(
+        this: table
+        otherWorld: other
+        entity: entity
+        otherEntity: otherEntity
+      )
+    }
+  }
+  ret answer
+}
+
 func machineComponentJson(
   world: view UiWorld
   entity: view EntityId

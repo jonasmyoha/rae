@@ -375,6 +375,37 @@ func describeMembers(E: type) {
 }                                                 # Point: count 0, members []
 ```
 
+**`equals(a: x, b: y)` → `Bool`** (2026-09-22). Deep VALUE equality for any
+type, including a generic one: primitives, `Char` and `Bool` by value, `String`
+by content, enums by ordinal, structs field by field, `List(T)` element-wise
+(length first), `opt T` by presence and then the value — all recursive, so a
+struct holding a list of structs compares all the way down. A **`Ptr` or
+`Buffer` field compares by pointer IDENTITY**, not by what it points at: the
+element count is not in the type, so there is nothing to walk. A foreign
+(`c_struct`) or `Array` field compares its bytes.
+
+It is an intrinsic rather than a `lib/core` generic over `fields()` **because
+`fields()` cannot express it**: the loop walks the fields of ONE value, and
+there is no paired iteration that would hold `a`'s field and `b`'s together —
+a nested loop over `b` cannot be narrowed to the matching field, since the
+per-field arms are runtime code, not per-instantiation arms. So the compiler
+folds `equals` per type, the same way it generates each type's `toString`.
+
+```rae
+if equals(a: current.insets, b: insets) {   # was a hand-written insetsEqual
+  ret
+}
+```
+
+A generic body can compare two `T`s with it (`func same(T: type, a: view T,
+b: view T) ret Bool { ret equals(a: a, b: b) }`), which is what the scene
+round-trip check uses: `componentEqualsIn` in `lib/ui/SceneEncode.rae` compares
+two worlds' components by value instead of by their encoded text. That helper
+also shows the filter trick that makes a second world reachable — inside a
+generic body the binding type `ComponentTable(T)` names the CONCRETE component
+type, so `loop let that: view ComponentTable(T) in fields(otherWorld)` unrolls
+to exactly one table.
+
 **`typeName(x)` on a generic-typed parameter.** Inside a field loop
 `typeName(f)` folded to the field's type name already (#809). It now also
 answers for a *parameter* whose type is (or contains) a generic parameter:

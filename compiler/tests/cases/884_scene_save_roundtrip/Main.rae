@@ -68,7 +68,8 @@ func pageRootOf(world: view UiWorld, scene: view Scene) ret EntityId {
 }
 
 # Compare node `entity` of `a` with its namesake in `b`: every authored table
-# in machine form, and the pending components' names + json.
+# by VALUE (`equals` through componentEqualsByName — the encoded text is only
+# used to REPORT a difference), and the pending components' names + json.
 func compareNode(
   a: view UiWorld
   b: view UiWorld
@@ -89,10 +90,29 @@ func compareNode(
     if name is "BundleRefs" {
       continue
     }
-    let left: String = machineComponentJson(world: a, entity: entity, name: name)
-    let right: String = machineComponentJson(world: b, entity: other, name: name)
-    if left is not right {
-      problems.add(value: "{nodeId}.{name}: {left} != {right}")
+    # By VALUE — `equals` on the component itself, field by field, rather
+    # than on its encoded text. When the values DO differ, the encoded forms
+    # decide whether it is a round-trip failure: the writer prints a Float
+    # rounded (Json.jbNumber), so a saved 47.710844 reloads as 47.7108 and
+    # is unequal by value while the format round-tripped exactly what it
+    # wrote. That tolerance is the format's, not equals' — a queued task
+    # makes the writer round-trippable, and then this falls away.
+    var same: Bool = true
+    if let byValue: Bool = componentEqualsByName(
+      world: a
+      other: b
+      entity: entity
+      otherEntity: other
+      name: name
+    ) {
+      same = byValue
+    }
+    if same is false {
+      let left: String = machineComponentJson(world: a, entity: entity, name: name)
+      let right: String = machineComponentJson(world: b, entity: other, name: name)
+      if left is not right {
+        problems.add(value: "{nodeId}.{name}: {left} != {right}")
+      }
     }
   }
   let namesB: List(String) = authoredNamesOf(world: b, entity: other)

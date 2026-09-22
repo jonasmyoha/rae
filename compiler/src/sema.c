@@ -3565,6 +3565,19 @@ static void reflect_expand_stmt_concrete(CompilerContext* ctx, const AstModule* 
             AstDecl* decl = wt ? reflect_find_struct_decl(module, reflect_base_name(wt)) : NULL;
             AstTypeRef* pattern = binding->as.let_stmt.type;
             bool want_mod = pattern->is_mod, want_view = pattern->is_view;
+            // The binding type is the FILTER, so it must be spelled in the
+            // INSTANTIATION's terms: a `loop let t: view ComponentTable(T)`
+            // inside a generic body filters on the concrete T, not on the
+            // literal name "T" (which matches no field and silently unrolled
+            // to nothing). Modes are the binding's own, not the argument's.
+            if (gparams && cargs) {
+                AstTypeRef* concrete_pattern = substitute_type_ref(ctx, gparams, cargs, pattern);
+                if (concrete_pattern) {
+                    concrete_pattern->is_view = want_view;
+                    concrete_pattern->is_mod = want_mod;
+                    pattern = concrete_pattern;
+                }
+            }
             if (decl && decl->kind == AST_DECL_TYPE && decl->as.type_decl.fields
                 && (want_mod || want_view)) {
                 size_t line = stmt->line, column = stmt->column;
@@ -4349,6 +4362,15 @@ static bool sema_is_numeric_kind(TypeKind k) {
 // True if the type ref names an enum declaration. Enums have no dedicated
 // TypeKind (they resolve to Void in sema), so they are recognised by the written
 // type name resolving to an AST_DECL_ENUM symbol.
+// Does the program declare a plain function of this name? A user definition
+// WINS over an intrinsic of the same spelling (nothing declares `equals`
+// today; this keeps the name from being permanently reserved).
+static bool sema_module_declares_func(const AstModule* module, const char* name) {
+    for (const AstDecl* d = module ? module->decls : NULL; d; d = d->next)
+        if (d->kind == AST_DECL_FUNC && str_eq_cstr(d->as.func_decl.name, name)) return true;
+    return false;
+}
+
 static bool sema_typeref_is_enum(SymbolTable* symbols, const AstTypeRef* tr) {
     if (!tr || !tr->parts || tr->parts->text.len == 0) return false;
     Symbol* sym = symbol_table_lookup(symbols, tr->parts->text);
@@ -5348,6 +5370,31 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                     module->had_error = true;
                 }
                 expr->resolved_type = type_get_opt(ctx->type_registry, et ? et : type_get_void(ctx->type_registry));
+                break;
+            }
+            // `equals(a: x, b: y)` -> Bool: deep value equality for ANY type,
+            // including a generic one — primitives/enums by value, Strings by
+            // content, structs field by field, List(T) element-wise, opt T by
+            // presence then value, Ptr/Buffer by identity. A `fields()` loop
+            // cannot express this in Rae (it walks the fields of ONE value;
+            // there is no paired iteration to line a's field up with b's), so
+            // it is a compile-time plain function the backend folds per type.
+            if (expr->as.call.callee && expr->as.call.callee->kind == AST_EXPR_IDENT
+                && str_eq_cstr(expr->as.call.callee->as.ident, "equals")
+                && !sema_module_declares_func(module, "equals")) {
+                AstCallArg* aa = expr->as.call.args;
+                AstCallArg* ba = aa ? aa->next : NULL;
+                if (!aa || !ba || ba->next || !str_eq_cstr(aa->name, "a")
+                    || !str_eq_cstr(ba->name, "b") || !aa->value || !ba->value) {
+                    diag_error(sema_diag_file(module), (int)expr->line, (int)expr->column,
+                               "equals takes two values of the same type — equals(a: left, b: right)");
+                    module->had_error = true;
+                    expr->resolved_type = type_get_void(ctx->type_registry);
+                    break;
+                }
+                sema_analyze_expr(ctx, module, symbols, aa->value, true);
+                sema_analyze_expr(ctx, module, symbols, ba->value, true);
+                expr->resolved_type = type_get_bool(ctx->type_registry);
                 break;
             }
             // `enumMembers(E)` -> List(String) (every member name, declaration

@@ -21,19 +21,6 @@
 import ui/Theme
 open ecs/ComponentTable
 
-func rgbaEquals(a: view RgbaColor, b: view RgbaColor) ret Bool {
-  if a.r is not b.r {
-    ret false
-  }
-  if a.g is not b.g {
-    ret false
-  }
-  if a.b is not b.b {
-    ret false
-  }
-  ret a.a is b.a
-}
-
 # ----- variant readers (fresh scalar/String copies, no struct copy) --
 func styleWantSpriteKey(
   world: view UiWorld
@@ -152,7 +139,7 @@ func spriteTintDiffers(
     ret false
   }
   let cur: view Sprite => componentView(this: world.sprites, entity: entity)
-  ret rgbaEquals(a: cur.tint, b: wantTint) is false
+  ret equals(a: cur.tint, b: wantTint) is false
 }
 
 func textStyleDiffers(world: view UiWorld, entity: view EntityId, wantStyle: view String) ret Bool {
@@ -175,7 +162,7 @@ func shapeFillDiffers(
     ret false
   }
   let cur: view Shape => componentView(this: world.shapes, entity: entity)
-  ret rgbaEquals(a: cur.fill, b: wantFill) is false
+  ret equals(a: cur.fill, b: wantFill) is false
 }
 
 func offsetDiffers(world: view UiWorld, entity: view EntityId, wantOffset: view Vec2) ret Bool {
