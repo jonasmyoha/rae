@@ -1,0 +1,62 @@
+# `.toString()` and `"{value}"` in a GENERIC body dispatch per instantiation
+# to the type's own toString — the same forms a concrete call prints.
+enum Kind { small, large }
+
+type Point {
+  x: Int
+  y: Int
+}
+
+type Marker {
+  label: String
+  at: Point
+  kind: Kind
+  counts: List(Int)
+}
+
+func describe(T: type, value: view T) ret String {
+  ret value.toString()
+}
+
+func interpolate(T: type, value: view T) ret String {
+  ret "<{value}>"
+}
+
+func listFields(T: type, comp: view T) {
+  loop let f: view any in fields(comp) {
+    log("  {fieldName(f)}: {f}")
+  }
+}
+
+func main() {
+  let count: Int = 42
+  let ratio: Float = 1.5
+  let flag: Bool = true
+  let word: String = "hello"
+  let kind: Kind = Kind.large
+  let point: Point = { x: 3, y: 4 }
+  let ints: List(Int) = [1, 2, 3]
+  let some: opt Int = 7
+  let nothing: opt Int = none
+  log("int: {describe(value: count)}")
+  log("float: {describe(value: ratio)}")
+  log("bool: {describe(value: flag)}")
+  log("string: {describe(value: word)}")
+  log("enum: {describe(value: kind)}")
+  log("struct: {describe(value: point)}")
+  log("list: {describe(value: ints)}")
+  log("opt some: {describe(value: some)}")
+  log("opt none: {describe(value: nothing)}")
+  let maybePoint: opt Point = point
+  log("opt struct: {describe(value: maybePoint)}")
+  log("interp opt struct: {interpolate(value: maybePoint)}")
+  log("interp int: {interpolate(value: count)}")
+  log("interp string: {interpolate(value: word)}")
+  log("interp enum: {interpolate(value: kind)}")
+  log("interp struct: {interpolate(value: point)}")
+  log("interp list: {interpolate(value: ints)}")
+  log("interp opt: {interpolate(value: some)}")
+  let marker: Marker = { label: "spawn", at: { x: 1, y: 2 }, kind: Kind.small, counts: [5, 6] }
+  log("fields of {describe(value: marker)}:")
+  listFields(comp: marker)
+}
