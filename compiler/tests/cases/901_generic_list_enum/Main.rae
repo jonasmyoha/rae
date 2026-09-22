@@ -1,0 +1,29 @@
+# A List(enum) passed through a generic `view T`. Sema keys a specialization
+# through TypeInfo, where an enum is the shared TYPE_INT, so T bound to
+# List(Int) and the body called the Int toString — printing ordinals. The
+# call site re-infers from the written argument type when it carries an enum,
+# and the specialization dedup no longer collapses List(Kind) onto List(Int).
+enum Kind { small, medium, large }
+
+enum Mode { fast, slow }
+
+func describe(T: type, value: view T) ret String {
+  ret value.toString()
+}
+
+func main() {
+  let kinds: List(Kind) = [Kind.small, Kind.large, Kind.medium]
+  # Directly, and through the generic — both name the members.
+  log("direct: {kinds}")
+  log("generic: {describe(value: kinds)}")
+
+  # A second enum specializes separately, and List(Int) is untouched.
+  let modes: List(Mode) = [Mode.slow, Mode.fast]
+  log("modes: {describe(value: modes)}")
+  let ints: List(Int) = [1, 2]
+  log("ints: {describe(value: ints)}")
+
+  # A bare enum through the same generic.
+  let one: Kind = Kind.large
+  log("bare: {describe(value: one)}")
+}

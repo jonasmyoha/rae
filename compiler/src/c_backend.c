@@ -443,6 +443,18 @@ void register_function_specialization(CompilerContext* ctx, const AstFuncDecl* d
                 // their WRITTEN args, so differing written names are distinct.
                 if (a->parts && b->parts && (uintptr_t)a->parts >= 0x1000 && (uintptr_t)b->parts >= 0x1000
                     && !str_eq(a->parts->text, b->parts->text)) { match = false; break; }
+                // ... and the same for an enum NESTED in the argument
+                // (`List(Kind)` vs `List(Int)`): the written top-level names
+                // both read "List", and type_refs_equal then calls them equal
+                // because the enum element resolves to the shared TYPE_INT — so
+                // the enum specialization was deduped away and its body never
+                // emitted. Compare the mangled spelling, which keeps the name.
+                if (rae_type_ref_has_enum_arg(ctx, ctx->current_module, a)
+                    || rae_type_ref_has_enum_arg(ctx, ctx->current_module, b)) {
+                    const char* am = rae_mangle_type_specialized(ctx, NULL, NULL, (AstTypeRef*)a);
+                    const char* bm = rae_mangle_type_specialized(ctx, NULL, NULL, (AstTypeRef*)b);
+                    if (am && bm && strcmp(am, bm) != 0) { match = false; break; }
+                }
                 if (!type_refs_equal(a, b)) { match = false; break; }
                 a = a->next; b = b->next;
             }
