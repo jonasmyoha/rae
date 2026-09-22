@@ -29,6 +29,7 @@
 import ui/layoutSystem/LayoutPlace
 open ecs/ComponentTable
 open ecs/hierarchySystem/HierarchySystem
+open ui/UiSystems
 
 # The layout root measures against `world.layoutW` / `world.layoutH`
 # (the live layout extent, set by the app from the window size) — the
@@ -150,7 +151,11 @@ func rootExtentAnchor(world: view UiWorld, entity: view EntityId) ret HExtent {
   ret a.h
 }
 
-func entityPadding(world: view UiWorld, entity: view EntityId) ret Insets {
+func entityPadding(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entity: view EntityId
+) ret Insets {
   var base: Insets = { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }
   if componentHas(this: world.paddings, entity: entity) {
     let p: Padding = componentGet(this: world.paddings, entity: entity)
@@ -167,8 +172,8 @@ func entityPadding(world: view UiWorld, entity: view EntityId) ret Insets {
     ret base
   }
   var insets: Insets = { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }
-  if componentHas(this: world.safeInsets, entity: entity) {
-    let si: SafeInsets = componentGet(this: world.safeInsets, entity: entity)
+  if componentHas(this: uiSystems.safeArea.safeInsets, entity: entity) {
+    let si: SafeInsets = componentGet(this: uiSystems.safeArea.safeInsets, entity: entity)
     insets = si.insets
   }
   ret Insets {
@@ -254,7 +259,12 @@ func activeChildrenInto(world: view UiWorld, entity: view EntityId, out: mod Lis
 # MeasuredSize is the authored rect (set so the parent's measure
 # can still fall back to a real number).
 # -----------------------------------------------------------------
-func measureNode(world: mod UiWorld, entity: view EntityId, scratch: mod List(EntityId)) {
+func measureNode(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  entity: view EntityId
+  scratch: mod List(EntityId)
+) {
   unsafe {
     activeChildrenInto(world: world, entity: entity, out: scratch)
     let kids: view List(EntityId) => scratch
@@ -262,7 +272,7 @@ func measureNode(world: mod UiWorld, entity: view EntityId, scratch: mod List(En
 
     # Compute the container's measured size from its children.
     let layout: Layout = entityLayout(world: world, entity: entity)
-    let pad: Insets = entityPadding(world: world, entity: entity)
+    let pad: Insets = entityPadding(world: world, uiSystems: uiSystems, entity: entity)
     let rect: Rect = entityRect(world: world, entity: entity)
 
     var measuredW: Float = rect.size.x
@@ -274,8 +284,8 @@ func measureNode(world: mod UiWorld, entity: view EntityId, scratch: mod List(En
       var j: Int = 0
       loop j < n {
         let cid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: j)
-        let cw: Float = childMeasuredW(world: world, entity: cid)
-        let ch: Float = childMeasuredH(world: world, entity: cid)
+        let cw: Float = childMeasuredW(world: world, uiSystems: uiSystems, entity: cid)
+        let ch: Float = childMeasuredH(world: world, uiSystems: uiSystems, entity: cid)
         if layout.kind is LayoutType.horizontal {
           sumMain = sumMain + cw
           if ch > maxCross {
@@ -325,7 +335,12 @@ func measureNode(world: mod UiWorld, entity: view EntityId, scratch: mod List(En
         measuredH = maxCross + pad.t + pad.b
       }
       if layout.kind is LayoutType.grid {
-        let extent: Vec2 = measureGrid(world: world, kids: kids, layout: layout)
+        let extent: Vec2 = measureGrid(
+          world: world
+          uiSystems: uiSystems
+          kids: kids
+          layout: layout
+        )
         measuredW = extent.x + pad.l + pad.r
         measuredH = extent.y + pad.t + pad.b
       }
@@ -337,8 +352,8 @@ func measureNode(world: mod UiWorld, entity: view EntityId, scratch: mod List(En
       # the authored rect / parent), so only a `Size: Hug` text axis changes.
       measuredW = rect.size.x
       measuredH = rect.size.y
-      if componentHas(this: world.measuredTexts, entity: entity) {
-        let mt: MeasuredText = componentGet(this: world.measuredTexts, entity: entity)
+      if componentHas(this: uiSystems.layout.measuredTexts, entity: entity) {
+        let mt: MeasuredText = componentGet(this: uiSystems.layout.measuredTexts, entity: entity)
         measuredW = mt.w
         measuredH = mt.h
       }
@@ -361,7 +376,7 @@ func measureNode(world: mod UiWorld, entity: view EntityId, scratch: mod List(En
         if shown > lv.visibleItemCount {
           shown = lv.visibleItemCount
         }
-        let pad: Insets = entityPadding(world: world, entity: entity)
+        let pad: Insets = entityPadding(world: world, uiSystems: uiSystems, entity: entity)
         measuredH = shown.toFloat() * (lv.itemHeight + lv.itemGap) - lv.itemGap + pad.t + pad.b
       }
     }
@@ -370,7 +385,7 @@ func measureNode(world: mod UiWorld, entity: view EntityId, scratch: mod List(En
     measuredH = applyConstraintsH(world: world, entity: entity, h: measuredH)
 
     let ms: MeasuredSize = { w: measuredW, h: measuredH }
-    componentSet(this: world.measuredSizes, entity: entity, data: ms)
+    componentSet(this: uiSystems.layout.measuredSizes, entity: entity, data: ms)
   }
 }
 
@@ -388,7 +403,12 @@ func gridColumns(layout: view Layout) ret Int {
 # tall as its tallest, so a grid of equal tiles is exactly the rows-of-
 # Horizontal-containers it replaces; `columnGap` / `rowGap` sit between cells.
 # Returns the content extent (no padding).
-func measureGrid(world: view UiWorld, kids: view List(EntityId), layout: view Layout) ret Vec2 {
+func measureGrid(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  kids: view List(EntityId)
+  layout: view Layout
+) ret Vec2 {
   unsafe {
     let n: Int = kids.length
     let cols: Int = gridColumns(layout: layout)
@@ -408,8 +428,8 @@ func measureGrid(world: view UiWorld, kids: view List(EntityId), layout: view La
         let i: Int = r * cols + k
         if i < n {
           let cid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: i)
-          let cw: Float = childMeasuredW(world: world, entity: cid)
-          let ch: Float = childMeasuredH(world: world, entity: cid)
+          let cw: Float = childMeasuredW(world: world, uiSystems: uiSystems, entity: cid)
+          let ch: Float = childMeasuredH(world: world, uiSystems: uiSystems, entity: cid)
           if ch > rowH {
             rowH = ch
           }
@@ -443,27 +463,37 @@ func measureGrid(world: view UiWorld, kids: view List(EntityId), layout: view La
 # the linear equivalent of the old post-order recursion (#731). Entities in
 # no hierarchy (no Parent AND no Children) are absent from the depth order;
 # measure them directly so a lone root still gets a MeasuredSize for compute.
-func measureLinear(world: mod UiWorld) {
+func measureLinear(world: mod UiWorld, uiSystems: mod UiSystems) {
   unsafe {
     let order: view List(EntityId) => depthOrder(
       state: world.hierarchyOrder
-      parents: world.parents
+      parents: uiSystems.hierarchy.parents
       childrens: world.childrens
     )
     var scratch: List(EntityId) = List.create(EntityId, cap: 8)
     var i: Int = order.length - 1
     loop i >= 0 {
       if let entity: EntityId = order.copyAt(index: i) {
-        measureNode(world: world, entity: entity, scratch: scratch)
+        measureNode(
+          world: world
+          uiSystems: uiSystems
+          entity: entity
+          scratch: scratch
+        )
       }
       i = i - 1
     }
     let alive: view List(EntityId) => world.allocator.alive
     loop var k: Int = 0, k < alive.length, ++k {
       let entity: EntityId = rae_ext_rae_buf_get(buf: alive.data, index: k)
-      if componentHas(this: world.parents, entity: entity) is false {
+      if componentHas(this: uiSystems.hierarchy.parents, entity: entity) is false {
         if componentHas(this: world.childrens, entity: entity) is false {
-          measureNode(world: world, entity: entity, scratch: scratch)
+          measureNode(
+            world: world
+            uiSystems: uiSystems
+            entity: entity
+            scratch: scratch
+          )
         }
       }
     }
@@ -473,12 +503,16 @@ func measureLinear(world: mod UiWorld) {
 # Helper — return the resolved measured width for `entity`. Hug
 # nodes use their MeasuredSize; Fill nodes use their authored rect
 # (parent will overwrite during compute pass anyway); Fixed uses rect.
-func childMeasuredW(world: view UiWorld, entity: view EntityId) ret Float {
+func childMeasuredW(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entity: view EntityId
+) ret Float {
   let size: Size = entitySize(world: world, entity: entity)
   let rect: Rect = entityRect(world: world, entity: entity)
   var measuredW: Float = rect.size.x
-  if componentHas(this: world.measuredSizes, entity: entity) {
-    let ms: MeasuredSize = componentGet(this: world.measuredSizes, entity: entity)
+  if componentHas(this: uiSystems.layout.measuredSizes, entity: entity) {
+    let ms: MeasuredSize = componentGet(this: uiSystems.layout.measuredSizes, entity: entity)
     measuredW = ms.w
   }
   ret resolveAxisFromSize(
@@ -491,12 +525,16 @@ func childMeasuredW(world: view UiWorld, entity: view EntityId) ret Float {
   )
 }
 
-func childMeasuredH(world: view UiWorld, entity: view EntityId) ret Float {
+func childMeasuredH(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entity: view EntityId
+) ret Float {
   let size: Size = entitySize(world: world, entity: entity)
   let rect: Rect = entityRect(world: world, entity: entity)
   var measuredH: Float = rect.size.y
-  if componentHas(this: world.measuredSizes, entity: entity) {
-    let ms: MeasuredSize = componentGet(this: world.measuredSizes, entity: entity)
+  if componentHas(this: uiSystems.layout.measuredSizes, entity: entity) {
+    let ms: MeasuredSize = componentGet(this: uiSystems.layout.measuredSizes, entity: entity)
     measuredH = ms.h
   }
   ret resolveAxisFromSize(
@@ -521,6 +559,7 @@ func childMeasuredH(world: view UiWorld, entity: view EntityId) ret Float {
 # are -1.0 when unknown (Fill then falls back to authored rect).
 func resolveOwnSize(
   world: view UiWorld
+  uiSystems: view UiSystems
   entity: view EntityId
   parentAvailW: view Float
   parentAvailH: view Float
@@ -530,8 +569,8 @@ func resolveOwnSize(
   let rect: Rect = entityRect(world: world, entity: entity)
   var measuredW: Float = rect.size.x
   var measuredH: Float = rect.size.y
-  if componentHas(this: world.measuredSizes, entity: entity) {
-    let ms: MeasuredSize = componentGet(this: world.measuredSizes, entity: entity)
+  if componentHas(this: uiSystems.layout.measuredSizes, entity: entity) {
+    let ms: MeasuredSize = componentGet(this: uiSystems.layout.measuredSizes, entity: entity)
     measuredW = ms.w
     measuredH = ms.h
   }
@@ -561,9 +600,9 @@ func resolveOwnSize(
 # cached depth order (#713): measure bottom-up (reverse), compute
 # top-down (forward). No per-frame tree recursion.
 # -----------------------------------------------------------------
-func layoutSystem(world: mod UiWorld) {
-  measureLinear(world: world)
-  computeLinear(world: world)
+func layoutSystem(world: mod UiWorld, uiSystems: mod UiSystems) {
+  measureLinear(world: world, uiSystems: uiSystems)
+  computeLinear(world: world, uiSystems: uiSystems)
 }
 
 # -----------------------------------------------------------------
@@ -621,7 +660,7 @@ func createLayoutCache() pub ret LayoutCache {
 # entire layoutSystem once or skips it entirely. It does NOT short-
 # circuit any of the inner measure/compute iterations — those run to
 # convergence as before each time the wrapper actually fires.
-func ifDirty(world: mod UiWorld, cache: mod LayoutCache) pub ret Bool {
+func ifDirty(world: mod UiWorld, uiSystems: mod UiSystems, cache: mod LayoutCache) pub ret Bool {
   let rGen: Int = componentTableGeneration(Rect, this: world.rects)
   let szGen: Int = componentTableGeneration(Size, this: world.sizes)
   let lyGen: Int = componentTableGeneration(Layout, this: world.layouts)
@@ -631,7 +670,7 @@ func ifDirty(world: mod UiWorld, cache: mod LayoutCache) pub ret Bool {
   let acGen: Int = componentTableGeneration(Active, this: world.actives)
   let alGen: Int = componentTableGeneration(Align, this: world.aligns)
   let chGen: Int = componentTableGeneration(Children, this: world.childrens)
-  let plGen: Int = componentTableGeneration(Parent, this: world.parents)
+  let plGen: Int = componentTableGeneration(Parent, this: uiSystems.hierarchy.parents)
   let entityCount: Int = world.allocator.alive.length
 
   var dirty: Bool = false
@@ -673,7 +712,7 @@ func ifDirty(world: mod UiWorld, cache: mod LayoutCache) pub ret Bool {
     ret false
   }
 
-  layoutSystem(world: world)
+  layoutSystem(world: world, uiSystems: uiSystems)
   cache.rectsGen = rGen
   cache.sizesGen = szGen
   cache.layoutsGen = lyGen

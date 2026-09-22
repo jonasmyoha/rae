@@ -4,6 +4,7 @@ open ui/Ecs
 open ui/layoutSystem/LayoutSystem
 open ui/Transform
 open ecs/ComponentTable
+open ui/UiSystems
 
 # Build a small ECS world by hand and run layout + transform on it.
 # Tree:
@@ -51,7 +52,12 @@ func setShapeRect(
   componentSet(this: world.shapes, entity: entity, data: shape)
 }
 
-func attachChildren(world: mod UiWorld, parent: view EntityId, kids: view List(EntityId)) {
+func attachChildren(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  parent: view EntityId
+  kids: view List(EntityId)
+) {
   unsafe {
     let kidsCopy: List(EntityId) = List.create(EntityId, cap: kids.length)
     var i: Int = 0
@@ -59,7 +65,7 @@ func attachChildren(world: mod UiWorld, parent: view EntityId, kids: view List(E
       let kid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: i)
       kidsCopy.add(value: kid)
       let pl: Parent = { parent: parent }
-      componentSet(this: world.parents, entity: kid, data: pl)
+      componentSet(this: uiSystems.hierarchy.parents, entity: kid, data: pl)
       i = i + 1
     }
     # `own kidsCopy` transfers ownership of the freshly-built list into
@@ -72,8 +78,13 @@ func attachChildren(world: mod UiWorld, parent: view EntityId, kids: view List(E
   }
 }
 
-func dumpEntity(world: view UiWorld, entity: view EntityId, label: view String) {
-  var cr: ComputedRect = componentGet(this: world.computedRects, entity: entity)
+func dumpEntity(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entity: view EntityId
+  label: view String
+) {
+  var cr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: entity)
   var wt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: entity)
   let wv: WorldVisual = worldVisualOf(world: world, entity: entity)
   log(
@@ -83,6 +94,7 @@ func dumpEntity(world: view UiWorld, entity: view EntityId, label: view String) 
 
 func main() {
   let world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
 
   let root: EntityId = createEntity(world: world)
   setRectFixed(
@@ -153,7 +165,12 @@ func main() {
   let headerKids: List(EntityId) = List.create(EntityId, cap: 2)
   headerKids.add(value: iconA)
   headerKids.add(value: iconB)
-  attachChildren(world: world, parent: header, kids: headerKids)
+  attachChildren(
+    world: world
+    uiSystems: uiSystems
+    parent: header
+    kids: headerKids
+  )
 
   let body: EntityId = createEntity(world: world)
   setRectFixed(
@@ -189,28 +206,83 @@ func main() {
   rootKids.add(value: header)
   rootKids.add(value: body)
   rootKids.add(value: footer)
-  attachChildren(world: world, parent: root, kids: rootKids)
+  attachChildren(
+    world: world
+    uiSystems: uiSystems
+    parent: root
+    kids: rootKids
+  )
 
   log("alive = {aliveCount(world: world)}")
 
-  layoutSystem(world: world)
-  transformSystem(world: world)
+  layoutSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
 
   log("--- positions ---")
-  dumpEntity(world: world, entity: root, label: "Root")
-  dumpEntity(world: world, entity: header, label: "  Header")
-  dumpEntity(world: world, entity: iconA, label: "    IconA")
-  dumpEntity(world: world, entity: iconB, label: "    IconB")
-  dumpEntity(world: world, entity: body, label: "  Body")
-  dumpEntity(world: world, entity: footer, label: "  Footer")
+  dumpEntity(
+    world: world
+    uiSystems: uiSystems
+    entity: root
+    label: "Root"
+  )
+  dumpEntity(
+    world: world
+    uiSystems: uiSystems
+    entity: header
+    label: "  Header"
+  )
+  dumpEntity(
+    world: world
+    uiSystems: uiSystems
+    entity: iconA
+    label: "    IconA"
+  )
+  dumpEntity(
+    world: world
+    uiSystems: uiSystems
+    entity: iconB
+    label: "    IconB"
+  )
+  dumpEntity(
+    world: world
+    uiSystems: uiSystems
+    entity: body
+    label: "  Body"
+  )
+  dumpEntity(
+    world: world
+    uiSystems: uiSystems
+    entity: footer
+    label: "  Footer"
+  )
 
   # Inactive subtree: set Header inactive and re-run transform.
   log("--- toggle Header.Active=false ---")
   let inactive: Active = { value: false }
   componentSet(this: world.actives, entity: header, data: inactive)
-  transformSystem(world: world)
-  dumpEntity(world: world, entity: header, label: "  Header")
-  dumpEntity(world: world, entity: iconA, label: "    IconA")
-  dumpEntity(world: world, entity: iconB, label: "    IconB")
-  dumpEntity(world: world, entity: body, label: "  Body")
+  transformSystem(world: world, uiSystems: uiSystems)
+  dumpEntity(
+    world: world
+    uiSystems: uiSystems
+    entity: header
+    label: "  Header"
+  )
+  dumpEntity(
+    world: world
+    uiSystems: uiSystems
+    entity: iconA
+    label: "    IconA"
+  )
+  dumpEntity(
+    world: world
+    uiSystems: uiSystems
+    entity: iconB
+    label: "    IconB"
+  )
+  dumpEntity(
+    world: world
+    uiSystems: uiSystems
+    entity: body
+    label: "  Body"
+  )
 }

@@ -29,6 +29,7 @@ open collections/StringMap
 open ecs/Entity
 open ecs/ComponentTable
 open ecs/Hierarchy
+open ui/UiSystems
 
 # Where each page's scroll position is when its root is not mounted: page
 # id -> position along the axis. An app resource (on its session) that outlives
@@ -107,12 +108,13 @@ func axisPaddingSum(root: view ScrollRoot, insets: view Insets) ret Float {
 # places row i at i × pitch).
 func scrollContentExtent(
   world: view UiWorld
+  uiSystems: view UiSystems
   entity: view EntityId
   root: view ScrollRoot
 ) ret Float {
   let padEnd: Float = axisPaddingEnd(
     root: root
-    insets: entityPadding(world: world, entity: entity)
+    insets: entityPadding(world: world, uiSystems: uiSystems, entity: entity)
   )
   var extent: Float = 0.0
   var measured: Bool = false
@@ -134,8 +136,8 @@ func scrollContentExtent(
     let children: view Children => componentView(this: world.childrens, entity: entity)
     loop var i: Int = 0, i < children.ids.length, ++i {
       let child: EntityId = children.ids.copyAtFallback(index: i, fallback: noEntity())
-      if componentHas(this: world.computedRects, entity: child) {
-        let rect: ComputedRect = componentGet(this: world.computedRects, entity: child)
+      if componentHas(this: uiSystems.layout.computedRects, entity: child) {
+        let rect: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: child)
         let far: Float = axisFarEdge(root: root, rect: rect) + padEnd
         if far > extent {
           extent = far
@@ -145,7 +147,7 @@ func scrollContentExtent(
     }
   }
   if measured is false {
-    let ownRect: ComputedRect = componentGet(this: world.computedRects, entity: entity)
+    let ownRect: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: entity)
     extent = axisLength(root: root, size: ownRect.size)
   }
   ret extent
@@ -156,18 +158,22 @@ func scrollContentExtent(
 # viewport scrolls by the viewport's height; a Fill body by its own).
 func scrollWindowLength(
   world: view UiWorld
+  uiSystems: view UiSystems
   entity: view EntityId
   root: view ScrollRoot
 ) ret Float {
-  let ownRect: ComputedRect = componentGet(this: world.computedRects, entity: entity)
+  let ownRect: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: entity)
   var window: Float = axisLength(root: root, size: ownRect.size)
-  if componentHas(this: world.parents, entity: entity) {
-    let parent: EntityId = componentGet(this: world.parents, entity: entity).parent
-    if componentHas(this: world.computedRects, entity: parent) {
-      let parentRect: ComputedRect = componentGet(this: world.computedRects, entity: parent)
+  if componentHas(this: uiSystems.hierarchy.parents, entity: entity) {
+    let parent: EntityId = componentGet(this: uiSystems.hierarchy.parents, entity: entity).parent
+    if componentHas(this: uiSystems.layout.computedRects, entity: parent) {
+      let parentRect: ComputedRect = componentGet(
+        this: uiSystems.layout.computedRects
+        entity: parent
+      )
       let parentBox: Float = axisLength(root: root, size: parentRect.size) - axisPaddingSum(
         root: root
-        insets: entityPadding(world: world, entity: parent)
+        insets: entityPadding(world: world, uiSystems: uiSystems, entity: parent)
       )
       if parentBox < window {
         window = parentBox
@@ -177,7 +183,11 @@ func scrollWindowLength(
   ret window
 }
 
-func scrollRootRange(world: view UiWorld, entity: view EntityId) ret ScrollRange {
+func scrollRootRange(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entity: view EntityId
+) ret ScrollRange {
   let inert: ScrollRange = { active: false, floor: 0.0, window: 1.0 }
   if isNone(this: entity) {
     ret inert
@@ -185,15 +195,25 @@ func scrollRootRange(world: view UiWorld, entity: view EntityId) ret ScrollRange
   if componentHas(this: world.scrollRoots, entity: entity) is false {
     ret inert
   }
-  if componentHas(this: world.computedRects, entity: entity) is false {
+  if componentHas(this: uiSystems.layout.computedRects, entity: entity) is false {
     ret inert
   }
   let root: ScrollRoot = componentGet(this: world.scrollRoots, entity: entity)
-  let window: Float = scrollWindowLength(world: world, entity: entity, root: root)
+  let window: Float = scrollWindowLength(
+    world: world
+    uiSystems: uiSystems
+    entity: entity
+    root: root
+  )
   if root.floor is ScrollFloorMode.fixed {
     ret ScrollRange { active: root.fixedFloor < 0.0, floor: root.fixedFloor, window: window }
   }
-  let extent: Float = scrollContentExtent(world: world, entity: entity, root: root)
+  let extent: Float = scrollContentExtent(
+    world: world
+    uiSystems: uiSystems
+    entity: entity
+    root: root
+  )
   let overflow: Float = extent - (window - root.endInset)
   if overflow <= 0.0 {
     ret ScrollRange { active: false, floor: 0.0, window: window }
@@ -234,12 +254,12 @@ func applyScrollPosition(
 # ScrollState and the RuntimeOffset both go to 0. Used when a persistent page
 # is repointed at fresh content — e.g. the album page showing a different
 # album — so the new content starts at the top instead of the old scroll.
-func resetScrollRootOnPage(world: mod UiWorld, pageId: view String) pub {
+func resetScrollRootOnPage(world: mod UiWorld, uiSystems: view UiSystems, pageId: view String) pub {
   let n: Int = componentCount(this: world.scrollRoots)
   var i: Int = 0
   loop i < n {
     let entity: EntityId = componentEntityAt(this: world.scrollRoots, i: i)
-    if pageOf(world: world, entity: entity) is pageId {
+    if pageOf(world: world, uiSystems: uiSystems, entity: entity) is pageId {
       let root: ScrollRoot = componentGet(this: world.scrollRoots, entity: entity)
       applyScrollPosition(
         world: world
@@ -256,11 +276,11 @@ func resetScrollRootOnPage(world: mod UiWorld, pageId: view String) pub {
 # memory, applying the position as the root's RuntimeOffset; record every
 # seeded root's live position back into the memory when it moved. Idempotent
 # and cheap (a handful of roots) — run it after a mount and once per frame.
-func scrollRootSystem(world: mod UiWorld, memory: mod ScrollMemory) {
+func scrollRootSystem(world: mod UiWorld, uiSystems: view UiSystems, memory: mod ScrollMemory) {
   let n: Int = componentCount(this: world.scrollRoots)
   loop var i: Int = 0, i < n, ++i {
     let entity: EntityId = componentEntityAt(this: world.scrollRoots, i: i)
-    let pageId: String = pageOf(world: world, entity: entity)
+    let pageId: String = pageOf(world: world, uiSystems: uiSystems, entity: entity)
     if componentHas(this: world.scrollStates, entity: entity) is false {
       let position: Float = recallScroll(memory: memory, pageId: pageId)
       let seeded: ScrollState = { y: position, velocity: 0.0 }
@@ -320,27 +340,28 @@ func scrollAbs(value: view Float) ret Float {
 # while sitting at x=952 on screen.
 func pointerOverScrollRoot(
   world: view UiWorld
+  uiSystems: view UiSystems
   entity: view EntityId
   x: view Float
   y: view Float
 ) ret Bool {
   var window: EntityId = entity
-  if componentHas(this: world.parents, entity: entity) {
-    let parent: EntityId = componentGet(this: world.parents, entity: entity).parent
-    if componentHas(this: world.computedRects, entity: parent) and componentHas(
+  if componentHas(this: uiSystems.hierarchy.parents, entity: entity) {
+    let parent: EntityId = componentGet(this: uiSystems.hierarchy.parents, entity: entity).parent
+    if componentHas(this: uiSystems.layout.computedRects, entity: parent) and componentHas(
       this: world.worldTransforms
       entity: parent
     ) {
       window = parent
     }
   }
-  if componentHas(this: world.computedRects, entity: window) is false {
+  if componentHas(this: uiSystems.layout.computedRects, entity: window) is false {
     ret false
   }
   if componentHas(this: world.worldTransforms, entity: window) is false {
     ret false
   }
-  let r: ComputedRect = componentGet(this: world.computedRects, entity: window)
+  let r: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: window)
   let wt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: window)
   if x < wt.position.x or x > wt.position.x + r.size.x {
     ret false
@@ -363,7 +384,12 @@ func pointerAlongAxis(root: view ScrollRoot, input: view UiInput) ret Float {
 # spring frame). Inert (false) when the root is not laid out or its content
 # fits. The whole state is read into locals, stepped, and written back — no
 # mod-borrow is held across the read-only geometry queries.
-func updateScrollRoot(world: mod UiWorld, entity: view EntityId, input: view UiInput) ret Bool {
+func updateScrollRoot(
+  world: mod UiWorld
+  uiSystems: view UiSystems
+  entity: view EntityId
+  input: view UiInput
+) ret Bool {
   if isNone(this: entity) {
     ret false
   }
@@ -386,7 +412,7 @@ func updateScrollRoot(world: mod UiWorld, entity: view EntityId, input: view UiI
     drag = componentGet(this: world.scrollDrags, entity: entity)
   }
   let before: Float = state.y
-  let range: ScrollRange = scrollRootRange(world: world, entity: entity)
+  let range: ScrollRange = scrollRootRange(world: world, uiSystems: uiSystems, entity: entity)
 
   if range.active is false {
     # Content fits. Reset rather than leaving a stale position behind: a panel
@@ -410,6 +436,7 @@ func updateScrollRoot(world: mod UiWorld, entity: view EntityId, input: view UiI
   let dim: Float = range.window
   let inside: Bool = pointerOverScrollRoot(
     world: world
+    uiSystems: uiSystems
     entity: entity
     x: input.pointer.x
     y: input.pointer.y

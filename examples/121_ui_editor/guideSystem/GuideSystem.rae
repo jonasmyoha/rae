@@ -17,6 +17,7 @@ open ui/SceneInstance
 open ui/BindingComponents
 open ecs/Entity
 open ecs/ComponentTable
+open ui/UiSystems
 
 const guidesScenePath: String = "examples/121_ui_editor/assets/scenes/chrome/Guides.raescene"
 
@@ -39,6 +40,7 @@ type GuideSystem {
 # Mount the guides page on its layer, sized to the design space.
 func createGuideSystem(
   world: mod UiWorld
+  uiSystems: view UiSystems
   designW: view Float
   designH: view Float
 ) ret GuideSystem {
@@ -47,6 +49,7 @@ func createGuideSystem(
   let overrides: List(SceneOverride) = List.create(SceneOverride, cap: 1)
   let root: EntityId = mountPage(
     world: world
+    uiSystems: uiSystems
     pageId: "guides"
     scene: scene
     overrides: overrides
@@ -57,16 +60,20 @@ func createGuideSystem(
   ret GuideSystem {
     guideRects: ComponentTable.create(GuideRect)
     pageRoot: root
-    frameSpace: guidesFrameSpace(world: world, pageRoot: root)
+    frameSpace: guidesFrameSpace(world: world, uiSystems: uiSystems, pageRoot: root)
   }
 }
 
 # The guides page's camera entity: the descendant authored with Camera2D.
-func guidesFrameSpace(world: view UiWorld, pageRoot: view EntityId) ret EntityId {
+func guidesFrameSpace(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  pageRoot: view EntityId
+) ret EntityId {
   let count: Int = componentCount(this: world.cameras)
   loop var i: Int = 0, i < count, ++i {
     let entity: EntityId = componentEntityAt(this: world.cameras, i: i)
-    if pageOf(world: world, entity: entity) is "guides" {
+    if pageOf(world: world, uiSystems: uiSystems, entity: entity) is "guides" {
       ret entity
     }
   }

@@ -6,6 +6,7 @@ open ui/EventLoop
 open ui/animationSystem/AnimationSystem
 open ui/animationSystem/HeroTransitionSystem
 open ecs/Event
+open ui/UiSystems
 
 # Frame phase 2 — update. The data sync (the playback clock, the Spotify
 # mirror and the asset loaders update state; the observation pass translates
@@ -16,6 +17,7 @@ func frameUpdateSystem(
   app: mod App
   session: mod AppSession
   world: mod UiWorld
+  uiSystems: mod UiSystems
   frame: mod WorldFrame
   tick: mod FrameTick
 ) {
@@ -24,6 +26,7 @@ func frameUpdateSystem(
   tick.now = uiNowSeconds()
   let dataSync: FrameDataSyncResult = syncFrameData(
     world: world
+    uiSystems: app.uiSystems
     musicSystems: app.musicSystems
     scenes: app.scenes
     appState: appState
@@ -49,6 +52,7 @@ func frameUpdateSystem(
   # cacheDirty trips → active.
   runFrameLayoutTransform(
     world: world
+    uiSystems: app.uiSystems
     viewport: app.viewport
     schedule: frame.schedule
     gpuUi: app.gpuUi
@@ -60,6 +64,7 @@ func frameUpdateSystem(
   # changes for the debug-outline overlay (RenderDecide.rae).
   let activeDecision: RenderActiveDecision = decideActive(
     world: world
+    uiSystems: app.uiSystems
     renderCache: frame.renderCache
     input: input
     debug: session.debug
@@ -75,9 +80,15 @@ func frameUpdateSystem(
   syncDesktopCursor(world: world, hovered: currentHovered, lastKind: session.lastCursorKind)
   # hoverScale is a lib/ui system too: gated through the schedule like the
   # rest (its declared sets never skip today).
-  if uiShouldRun(schedule: frame.schedule, world: world, index: uiSystemHoverScale) {
+  if uiShouldRun(
+    schedule: frame.schedule
+    world: world
+    uiSystems: uiSystems
+    index: uiSystemHoverScale
+  ) {
     session.lastHoverAnimDirty = hoverScaleSystem(
       world: world
+      uiSystems: app.uiSystems
       hovered: currentHovered
       deltaTime: (tick.now - session.lastFrameTime) as Float
     )

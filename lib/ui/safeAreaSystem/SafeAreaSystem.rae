@@ -14,8 +14,9 @@
 #
 # See rae/docs/ui-viewport-and-safe-area-plan.md (Phase 1, item 2).
 open ecs/ComponentTable
+open ui/UiSystems
 
-func safeAreaSystem(world: mod UiWorld, insets: view Insets) {
+func safeAreaSystem(world: mod UiWorld, uiSystems: mod UiSystems, insets: view Insets) {
   unsafe {
     let alive: view List(EntityId) => world.allocator.alive
     let n: Int = alive.length
@@ -30,8 +31,8 @@ func safeAreaSystem(world: mod UiWorld, insets: view Insets) {
         # keeps the component generation stable so any future tracking,
         # and the render caches, stay clean at idle.
         var changed: Bool = true
-        if componentHas(this: world.safeInsets, entity: e) {
-          let cur: SafeInsets = componentGet(this: world.safeInsets, entity: e)
+        if componentHas(this: uiSystems.safeArea.safeInsets, entity: e) {
+          let cur: SafeInsets = componentGet(this: uiSystems.safeArea.safeInsets, entity: e)
           if insetsEqual(a: cur.insets, b: insets) {
             changed = false
           }
@@ -40,7 +41,7 @@ func safeAreaSystem(world: mod UiWorld, insets: view Insets) {
           let payload: SafeInsets = {
             insets: Insets { l: insets.l, t: insets.t, r: insets.r, b: insets.b }
           }
-          componentSet(this: world.safeInsets, entity: e, data: payload)
+          componentSet(this: uiSystems.safeArea.safeInsets, entity: e, data: payload)
         }
       }
       i = i + 1

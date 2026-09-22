@@ -9,6 +9,7 @@ open ui/Transform
 open ui/animationSystem/AnimationSystem
 open ui/renderSystem/RenderSystem
 open Gpu2dCanvas
+open ui/UiSystems
 
 func pickHoverEntity(world: view UiWorld, idx: view Int) ret EntityId {
   let n: Int = componentCount(this: world.hoverScales)
@@ -23,6 +24,7 @@ func pickHoverEntity(world: view UiWorld, idx: view Int) ret EntityId {
 }
 
 func runHoverStressMode(
+  uiSystems: mod UiSystems
   dockSystem: view DockSystem
   scenes: view AlbumScenes
   appState: mod AppState
@@ -44,6 +46,7 @@ func runHoverStressMode(
   let viewport: Viewport = createViewportFromWindow()
   loadAllTextures(reg: textureRegistry, albums: appState.mediaLibrary.albums)
   let world: UiWorld = buildScreenWorld(
+    uiSystems: uiSystems
     dockSystem: dockSystem
     screen: Screen.home
     scenes: scenes
@@ -56,6 +59,7 @@ func runHoverStressMode(
   var schedule: Schedule = createUiPipeline(world: world)
   runFrameLayoutTransform(
     world: world
+    uiSystems: uiSystems
     viewport: viewport
     schedule: schedule
     gpuUi: gpuUi
@@ -67,9 +71,19 @@ func runHoverStressMode(
   var warm: Int = 0
   loop warm < 120 {
     let hoveredWarm: EntityId = pickHoverEntity(world: world, idx: warm)
-    let dirtyWarm: Bool = hoverScaleSystem(world: world, hovered: hoveredWarm, deltaTime: 0.016)
+    let dirtyWarm: Bool = hoverScaleSystem(
+      world: world
+      uiSystems: uiSystems
+      hovered: hoveredWarm
+      deltaTime: 0.016
+    )
     uiBeginFrame(canvas: textureRegistry.canvas, clear: palettePageBg(theme: world.theme.active))
-    renderSystemGpu2d(world: world, res: gpuUi, canvas: textureRegistry.canvas)
+    renderSystemGpu2d(
+      world: world
+      uiSystems: uiSystems
+      res: gpuUi
+      canvas: textureRegistry.canvas
+    )
     uiEndFrame(canvas: textureRegistry.canvas)
     warm = warm + 1
   }
@@ -80,9 +94,19 @@ func runHoverStressMode(
   var lastLog: Int = 0
   loop i < stressN {
     let hovered: EntityId = pickHoverEntity(world: world, idx: i)
-    let dirty: Bool = hoverScaleSystem(world: world, hovered: hovered, deltaTime: 0.016)
+    let dirty: Bool = hoverScaleSystem(
+      world: world
+      uiSystems: uiSystems
+      hovered: hovered
+      deltaTime: 0.016
+    )
     uiBeginFrame(canvas: textureRegistry.canvas, clear: palettePageBg(theme: world.theme.active))
-    renderSystemGpu2d(world: world, res: gpuUi, canvas: textureRegistry.canvas)
+    renderSystemGpu2d(
+      world: world
+      uiSystems: uiSystems
+      res: gpuUi
+      canvas: textureRegistry.canvas
+    )
     uiEndFrame(canvas: textureRegistry.canvas)
     i = i + 1
     if i - lastLog >= 600 {
@@ -112,12 +136,14 @@ func runHoverStressMode(
 # falls through to its teardown. Returns true if the stress block ran
 # (so main knows to skip the rest of its branches).
 func runStressMode(
+  uiSystems: mod UiSystems
   dockSystem: view DockSystem
   scenes: view AlbumScenes
   appState: mod AppState
   gpuUi: view Gpu2dUi
 ) ret Bool {
   if runHoverStressMode(
+    uiSystems: uiSystems
     dockSystem: dockSystem
     scenes: scenes
     appState: appState
@@ -146,6 +172,7 @@ func runStressMode(
   var stressTextureRegistry: TextureRegistry = createTextureRegistry()
   let stressViewport: Viewport = createViewportFromWindow()
   let warm: UiWorld = buildScreenWorld(
+    uiSystems: uiSystems
     dockSystem: dockSystem
     screen: Screen.album
     scenes: scenes
@@ -155,8 +182,8 @@ func runStressMode(
     viewport: stressViewport
   )
   applyViewportExtent(world: warm, viewport: stressViewport)
-  layoutSystem(world: warm)
-  transformSystem(world: warm)
+  layoutSystem(world: warm, uiSystems: uiSystems)
+  transformSystem(world: warm, uiSystems: uiSystems)
   let baselineKb: Int = processRssKb()
   log("[stress] baseline rss_kb={baselineKb}")
   loop stressI < stressN {
@@ -165,6 +192,7 @@ func runStressMode(
       stressScreen = Screen.player
     }
     let sworld: UiWorld = buildScreenWorld(
+      uiSystems: uiSystems
       dockSystem: dockSystem
       screen: stressScreen
       scenes: scenes
@@ -174,8 +202,8 @@ func runStressMode(
       viewport: stressViewport
     )
     applyViewportExtent(world: sworld, viewport: stressViewport)
-    layoutSystem(world: sworld)
-    transformSystem(world: sworld)
+    layoutSystem(world: sworld, uiSystems: uiSystems)
+    transformSystem(world: sworld, uiSystems: uiSystems)
     stressI = stressI + 1
     if stressI - lastLog >= 5000 {
       let nowKb: Int = processRssKb()

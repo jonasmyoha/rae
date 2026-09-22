@@ -9,6 +9,7 @@ open ui/Registry
 open ui/DebugOverlay
 open ui/renderSystem/RenderSystem
 open Gpu2dCanvas
+open ui/UiSystems
 
 const canvasW: Float = 800.0
 
@@ -840,10 +841,12 @@ func main() ret Int {
     heartbeat: false
   )
   var world: UiWorld = create()
+  var uiSystems: UiSystems = createUiSystems()
   # #764: install the app's theme (palette + scene tokens) onto this world.
   seedWorldTheme(world: world, res: uiResources)
   let uiRoot: EntityId = mountUiScene(
     world: world
+    uiSystems: uiSystems
     path: "examples/94_tetris2d/assets/ui.raescene"
     res: uiResources
   )
@@ -887,7 +890,7 @@ func main() ret Int {
       didRealWork: true
     ) {
     }
-    let resized: Bool = resizeUiToWindow(world: world, res: uiResources)
+    let resized: Bool = resizeUiToWindow(world: world, uiSystems: uiSystems, res: uiResources)
     # Input: Global (Menu/GameOver)
     if game.state is GameState.gameOver {
       # R key
@@ -920,7 +923,7 @@ func main() ret Int {
     }
     setNodeActive(world: world, nodeId: "PauseText", value: game.state is GameState.paused)
     setNodeActive(world: world, nodeId: "GameOverPanel", value: game.state is GameState.gameOver)
-    runUiSystems(world: world, res: uiResources)
+    runUiSystems(world: world, uiSystems: uiSystems, res: uiResources)
 
     Gpu2d.beginFrame(
       canvas: canvas
@@ -930,7 +933,12 @@ func main() ret Int {
       a: 1.0
     )
     drawGame(canvas: canvas, game: game)
-    renderSystemGpu2d(world: world, res: uiResources, canvas: canvas)
+    renderSystemGpu2d(
+      world: world
+      uiSystems: uiSystems
+      res: uiResources
+      canvas: canvas
+    )
     drawDebugOverlay(
       debugOverlay: dbg
       canvas: canvas
@@ -940,7 +948,7 @@ func main() ret Int {
     Gpu2d.endFrame(canvas: canvas)
     # Frame end: report the authored components no lib table matched (this app
     # has no tables of its own) and recycle the indices of destroyed entities.
-    uiFrameEnd(world: world)
+    uiFrameEnd(world: world, uiSystems: uiSystems)
   }
   canvasShutdown(canvas: canvas)
   Gpu2d.closeWindow()

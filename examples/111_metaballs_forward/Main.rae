@@ -82,6 +82,7 @@ open app3d/UiShell
 open Sky
 open Gpu2dCanvas
 open SkyHosek
+open ui/UiSystems
 
 type DemoUiResource {
   paused: Bool
@@ -201,27 +202,40 @@ func main() ret Int {
   )
 
   var uiWorld: UiWorld = create()
+
+  var uiSystems: UiSystems = createUiSystems()
   # #764: install the app's theme (palette + scene tokens) onto this world.
   seedWorldTheme(world: uiWorld, res: gpuUi)
   uiWorld.layoutW = extentW
   uiWorld.layoutH = extentH
   let uiScene: Scene = loadSceneFile(path: "{base}ui.raescene")
-  let uiRoot: EntityId = loadScene(world: uiWorld, scene: uiScene)
+  let uiRoot: EntityId = loadScene(world: uiWorld, uiSystems: uiSystems, scene: uiScene)
   # The camera readout bar is the SHARED component; this scene supplies
   # only the slot it mounts into. Example 113 mounts the same one.
   # The menu button is an ECS node in the same top row as the camera bar, so
   # the two hug to one height and resize together (lib/ui/CornerMenuButton).
-  mountCornerMenuButton(world: uiWorld, res: gpuUi, hostNodeId: "CornerMenuSlot")
-  mountCameraBar(world: uiWorld, res: gpuUi, hostNodeId: "CameraBarSlot")
+  mountCornerMenuButton(
+    world: uiWorld
+    uiSystems: uiSystems
+    res: gpuUi
+    hostNodeId: "CornerMenuSlot"
+  )
+  mountCameraBar(
+    world: uiWorld
+    uiSystems: uiSystems
+    res: gpuUi
+    hostNodeId: "CameraBarSlot"
+  )
   anchorUiToExtent(
     world: uiWorld
+    uiSystems: uiSystems
     res: gpuUi
     w: extentW
     h: extentH
   )
-  layoutSystem(world: uiWorld)
-  transformSystem(world: uiWorld)
-  visualBoundsSystem(world: uiWorld, res: gpuUi)
+  layoutSystem(world: uiWorld, uiSystems: uiSystems)
+  transformSystem(world: uiWorld, uiSystems: uiSystems)
+  visualBoundsSystem(world: uiWorld, uiSystems: uiSystems, res: gpuUi)
 
   # Diagnostic log overlay (lib/ui/LogOverlay.rae), bottom-left here and
   # top-left in the mobile UI example — same widget, different corner.
@@ -266,10 +280,15 @@ func main() ret Int {
     hour: 12.0
     skyModel: SettingsSkyModel.preetham
   )
-  if mountSettingsDialog(world: uiWorld, res: gpuUi, hostNodeId: "SettingsDialogSlot") is false {
+  if mountSettingsDialog(
+    world: uiWorld
+    uiSystems: uiSystems
+    res: gpuUi
+    hostNodeId: "SettingsDialogSlot"
+  ) is false {
     logWarnLine(ov: logOverlay, text: "settings dialog failed to mount")
   }
-  settingsApplyToWorld(settingsState: settings, world: uiWorld)
+  settingsApplyToWorld(settingsState: settings, world: uiWorld, uiSystems: uiSystems)
   applySettingsPanelOpen(world: uiWorld, open: settings.open)
   var camera: Camera3d = scene1.camera
   var cameraRig: CameraRig = createCameraRig(camera: camera)
@@ -319,9 +338,9 @@ func main() ret Int {
   }
   let initialUiLayoutDirty: Bool = syncDemoUi(world: uiWorld, state: uiState)
   if initialUiLayoutDirty {
-    layoutSystem(world: uiWorld)
-    transformSystem(world: uiWorld)
-    visualBoundsSystem(world: uiWorld, res: gpuUi)
+    layoutSystem(world: uiWorld, uiSystems: uiSystems)
+    transformSystem(world: uiWorld, uiSystems: uiSystems)
+    visualBoundsSystem(world: uiWorld, uiSystems: uiSystems, res: gpuUi)
   }
   syncCameraBar(world: uiWorld, rig: cameraRig, camera: camera)
 
@@ -377,8 +396,8 @@ func main() ret Int {
   # the clipped SidePanelBody); the lib system seeds its state, and the floor is
   # the laid-out overflow.
   var panelScrollMemory: ScrollMemory = createScrollMemory()
-  scrollRootSystem(world: uiWorld, memory: panelScrollMemory)
-  var panelScroll: EntityId = findScrollRoot(world: uiWorld)
+  scrollRootSystem(world: uiWorld, uiSystems: uiSystems, memory: panelScrollMemory)
+  var panelScroll: EntityId = findScrollRoot(world: uiWorld, uiSystems: uiSystems)
   var renderedOnce: Bool = false
   var lastLogRevision: Int = 0 - 1
   # Once, not per frame: this is a gate assertion, not a readout.
@@ -439,6 +458,7 @@ func main() ret Int {
         uiWorld.layoutH = extentH
         anchorUiToExtent(
           world: uiWorld
+          uiSystems: uiSystems
           res: gpuUi
           w: extentW
           h: extentH
@@ -449,8 +469,13 @@ func main() ret Int {
 
     # Refresh the readout about once a second. This is deliberately the
 
-    updateUiInput(input: uiInput, world: uiWorld)
-    let scrolled: Bool = updateScrollRoot(world: uiWorld, entity: panelScroll, input: uiInput)
+    updateUiInput(input: uiInput, world: uiWorld, uiSystems: uiSystems)
+    let scrolled: Bool = updateScrollRoot(
+      world: uiWorld
+      uiSystems: uiSystems
+      entity: panelScroll
+      input: uiInput
+    )
     # The debug button sits over the side panel, so a press it takes has to be
     # withdrawn from the UI world or the same click works the control beneath.
     if updateDebugOverlay(
@@ -505,13 +530,28 @@ func main() ret Int {
       }
       sa = sa + 1
     }
-    if settingsUpdatePointer(settingsState: settings, world: uiWorld, input: uiInput) {
+    if settingsUpdatePointer(
+      settingsState: settings
+      world: uiWorld
+      uiSystems: uiSystems
+      input: uiInput
+    ) {
       settingsChanged = true
     }
-    if settingsUpdateLatitudePointer(settingsState: settings, world: uiWorld, input: uiInput) {
+    if settingsUpdateLatitudePointer(
+      settingsState: settings
+      world: uiWorld
+      uiSystems: uiSystems
+      input: uiInput
+    ) {
       settingsChanged = true
     }
-    if settingsUpdateDatePointer(settingsState: settings, world: uiWorld, input: uiInput) {
+    if settingsUpdateDatePointer(
+      settingsState: settings
+      world: uiWorld
+      uiSystems: uiSystems
+      input: uiInput
+    ) {
       settingsChanged = true
     }
     # The clock, if it is running. This example PARKS in waitEvents when nothing
@@ -554,7 +594,7 @@ func main() ret Int {
       # Pause is the shared control now; uiState still owns the flag the rest
       # of this example reads.
       uiState.paused = settings.playing is false
-      settingsApplyToWorld(settingsState: settings, world: uiWorld)
+      settingsApplyToWorld(settingsState: settings, world: uiWorld, uiSystems: uiSystems)
       applySettingsPanelOpen(world: uiWorld, open: settings.open)
       stateDirty = true
     }
@@ -566,9 +606,9 @@ func main() ret Int {
     # RuntimeOffset, and only transformSystem turns that into screen positions —
     # without it the wheel moved nothing until the next relayout.
     if uiLayoutDirty or extentChanged or settingsChanged or scrolled {
-      layoutSystem(world: uiWorld)
-      transformSystem(world: uiWorld)
-      visualBoundsSystem(world: uiWorld, res: gpuUi)
+      layoutSystem(world: uiWorld, uiSystems: uiSystems)
+      transformSystem(world: uiWorld, uiSystems: uiSystems)
+      visualBoundsSystem(world: uiWorld, uiSystems: uiSystems, res: gpuUi)
     }
 
     # Pause freezes the SIMULATION, not the camera. With no modal dialog
@@ -780,7 +820,12 @@ func main() ret Int {
         }
         if tag is tagUiOverlay {
           Gpu2d.beginFrameLoad(canvas: canvas)
-          renderSystemGpu2d(world: uiWorld, res: gpuUi, canvas: canvas)
+          renderSystemGpu2d(
+            world: uiWorld
+            uiSystems: uiSystems
+            res: gpuUi
+            canvas: canvas
+          )
           # After the app UI, so the diagnostic is never what gets covered up.
           drawLogOverlay(
             ov: logOverlay
@@ -819,7 +864,7 @@ func main() ret Int {
     }
     # Frame end: report the authored components no lib table matched (this app
     # has no tables of its own) and recycle the indices of destroyed entities.
-    uiFrameEnd(world: uiWorld)
+    uiFrameEnd(world: uiWorld, uiSystems: uiSystems)
   }
   # Final flush: the throttle may have a pending change when the loop ends.
   # Headless runs neither read nor write the snapshot — a smoke test must

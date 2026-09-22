@@ -7,9 +7,11 @@ open ui/Ecs
 open ui/layoutSystem/LayoutSystem
 open ui/Transform
 open ecs/ComponentTable
+open ui/UiSystems
 
 func main() {
   let world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
   let root: EntityId = createEntity(world: world)
   let r: Rect = { position: { x: 0.0, y: 0.0 }, size: { x: 200.0, y: 100.0 } }
   componentSet(this: world.rects, entity: root, data: r)
@@ -19,28 +21,28 @@ func main() {
   }
   componentSet(this: world.sizes, entity: root, data: sz)
 
-  layoutSystem(world: world)
+  layoutSystem(world: world, uiSystems: uiSystems)
 
   let cache: TransformCache = createTransformCache()
 
   # First call: cache is fresh (-1 sentinels), inputs have non-sentinel
   # generations from the layout pass, so dirty=true → runs.
-  let firstRan: Bool = systemIfDirty(world: world, cache: cache)
+  let firstRan: Bool = systemIfDirty(world: world, uiSystems: uiSystems, cache: cache)
   log("first-ran={firstRan}")
 
   # Second call: nothing has mutated the inputs since the cache was
   # updated, so dirty=false → skips. The expensive `composeTransform`
   # walk is bypassed entirely.
-  let secondRan: Bool = systemIfDirty(world: world, cache: cache)
+  let secondRan: Bool = systemIfDirty(world: world, uiSystems: uiSystems, cache: cache)
   log("second-ran={secondRan}")
 
   # Touching an input table (Active here) flips the cache to dirty.
   let inactive: Active = { value: false }
   componentSet(this: world.actives, entity: root, data: inactive)
-  let thirdRan: Bool = systemIfDirty(world: world, cache: cache)
+  let thirdRan: Bool = systemIfDirty(world: world, uiSystems: uiSystems, cache: cache)
   log("after-mut-ran={thirdRan}")
 
   # And the next call after that re-skips.
-  let fourthRan: Bool = systemIfDirty(world: world, cache: cache)
+  let fourthRan: Bool = systemIfDirty(world: world, uiSystems: uiSystems, cache: cache)
   log("idle-again-ran={fourthRan}")
 }

@@ -7,6 +7,7 @@ open ui/Scene
 open ui/SceneLoader
 open ecs/Entity
 open ecs/ComponentTable
+open ui/UiSystems
 
 # A well-formed scene whose one node carries `Wibble` — a name that is NOT a
 # known component at all (a typo, or a non-UI component authored into a UI
@@ -32,8 +33,9 @@ func main() {
   scene.sceneId = "fx-demo"
   log("scene.ok = {scene.ok}")
   let world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
   log("loading scene with an unregistered component...")
-  let rootEntity: EntityId = loadScene(world: world, scene: scene)
+  let rootEntity: EntityId = loadScene(world: world, uiSystems: uiSystems, scene: scene)
   # An unregistered name is no longer the loader's verdict: it waits in the
   # pending outbox for an app system to claim it. With no app tables, every
   # pending component is unknown — reporting it is the #941 exit.

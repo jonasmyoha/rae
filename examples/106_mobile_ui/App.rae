@@ -1,6 +1,7 @@
 open HotReload
 open ui/WindowGeometry
 open ui/Ecs
+open ui/UiSystems
 open ui/Registry
 open ui/Pipeline
 open ecs/Schedule
@@ -49,6 +50,7 @@ open Gpu2dCanvas
 func runApp(app: mod App) {
   # Memory-stress and screenshot modes both terminate after their run.
   if runStressMode(
+    uiSystems: app.uiSystems
     dockSystem: app.musicSystems.dockSystem
     scenes: app.scenes
     appState: app.appState
@@ -65,12 +67,14 @@ func runApp(app: mod App) {
     var session: AppSession = createAppSession(app: app)
     loop session.running {
       refreshActiveAlbumCache(app: app, session: session)
+      # A new world: the lib systems' derived tables start empty with it.
+      app.uiSystems = createUiSystems()
       let world: UiWorld = buildSessionWorld(app: app, session: session)
       # A new world, new entities: the cover system starts empty and takes
       # the mounted pages' AlbumCover markers before the first frame observes.
       resetMusicTables(musicSystems: app.musicSystems)
       applyMusicComponents(world: world, musicSystems: app.musicSystems)
-      var frame: WorldFrame = createWorldFrame(world: world)
+      var frame: WorldFrame = createWorldFrame(world: world, uiSystems: app.uiSystems)
       loop session.running and frame.switching is false {
         var tick: FrameTick = createFrameTick(session: session)
         frameWaitSystem(
@@ -92,6 +96,7 @@ func runApp(app: mod App) {
             app: app
             session: session
             world: world
+            uiSystems: app.uiSystems
             frame: frame
             tick: tick
           )
@@ -105,7 +110,7 @@ func runApp(app: mod App) {
           # Frame end (MusicSystems.rae): the components this app's systems
           # own reach their tables, the rest is reported, and the entities a
           # screen switch unmounted are cleared and recycled.
-          musicFrameEnd(world: world, musicSystems: app.musicSystems)
+          musicFrameEnd(world: world, uiSystems: app.uiSystems, musicSystems: app.musicSystems)
         }
       }
     }

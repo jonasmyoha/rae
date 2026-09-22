@@ -32,9 +32,14 @@ func frameInputSystem(
     saveStateAndExit(screen: session.currentScreen, scrollY: scrollFsm.scrollY)
   }
 
-  updateInputSystem(input: input, world: world, viewport: app.viewport)
+  updateInputSystem(
+    input: input
+    world: world
+    uiSystems: app.uiSystems
+    viewport: app.viewport
+  )
   # #976: the frame's keyboard text goes to the active page's search field.
-  searchFieldSystem(world: world, input: input)
+  searchFieldSystem(world: world, uiSystems: app.uiSystems, input: input)
   # Live-window resize. Detected by POLLING the live framebuffer-derived
   # extent every frame and comparing to the applied one — robust vs relying
   # on OS resize-event delivery. When the extent changed, record it and
@@ -54,11 +59,15 @@ func frameInputSystem(
   # Home frame can have a stale/no scroll target until another rebuild trigger
   # (resize or page switch) refreshes it. A new target also refreshes the
   # bounds the wait phase read from the old one.
-  scrollRootSystem(world: world, memory: session.scrollMemory)
-  let frameScrollTarget: EntityId = findScrollRoot(world: world)
+  scrollRootSystem(world: world, uiSystems: app.uiSystems, memory: session.scrollMemory)
+  let frameScrollTarget: EntityId = findScrollRoot(world: world, uiSystems: app.uiSystems)
   if frameScrollTarget is not frame.scrollTarget {
     frame.scrollTarget = frameScrollTarget
-    let range: ScrollRange = scrollRootRange(world: world, entity: frame.scrollTarget)
+    let range: ScrollRange = scrollRootRange(
+      world: world
+      uiSystems: app.uiSystems
+      entity: frame.scrollTarget
+    )
     tick.scrollOnThisScreen = range.active
     tick.scrollFloor = range.floor
     scrollFsm.velocity = 0.0
@@ -110,6 +119,7 @@ func frameInputSystem(
     playbackSystem: playbackSystem
     appState: appState
     world: world
+    uiSystems: app.uiSystems
     debug: session.debug
     scenes: app.scenes
     actionTable: app.actionTable
@@ -134,6 +144,7 @@ func frameInputSystem(
     playbackSystem: playbackSystem
     observation: frame.observation
     world: world
+    uiSystems: app.uiSystems
     musicSystems: app.musicSystems
     state: appState
     scenes: app.scenes

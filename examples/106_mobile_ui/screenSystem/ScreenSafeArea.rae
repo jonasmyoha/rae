@@ -16,6 +16,7 @@ open ui/renderSystem/RenderSystem
 open ui/Layer
 open ecs/ComponentTable
 open ui/safeAreaSystem/SafeAreaSystem
+open ui/UiSystems
 
 # Write the active Viewport's safe insets (in design units) onto every
 # SafeArea-tagged entity; return the insets so the
@@ -23,8 +24,12 @@ open ui/safeAreaSystem/SafeAreaSystem
 # Idempotent — safe to call every frame; safeAreaSystem skips entities
 # whose insets are unchanged, so it never dirties the layout at idle.
 # Reads world.layoutW/H, so it must run after applyViewportExtent.
-func applySafeAreas(world: mod UiWorld, viewport: view Viewport) pub ret Insets {
-  safeAreaSystem(world: world, insets: viewport.safeInsetsDu)
+func applySafeAreas(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  viewport: view Viewport
+) pub ret Insets {
+  safeAreaSystem(world: world, uiSystems: uiSystems, insets: viewport.safeInsetsDu)
   ret viewport.safeInsetsDu
 }
 

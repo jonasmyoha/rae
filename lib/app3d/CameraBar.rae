@@ -40,6 +40,7 @@ open app3d/UiShell
 open app3d/CameraRig
 open Scene3d
 open ecs/Entity
+open ui/UiSystems
 
 # The action the mode button emits. Exposed so an app can respond to it
 # without duplicating the string that lives in the scene file.
@@ -96,7 +97,12 @@ func app3dSceneDir() pub ret String {
 # what it contains. Returns false when the host id is not in the world,
 # which is the one mistake worth reporting: everything else degrades to a
 # missing label.
-func mountCameraBar(world: mod UiWorld, res: view Gpu2dUi, hostNodeId: view String) pub ret Bool {
+func mountCameraBar(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  res: view Gpu2dUi
+  hostNodeId: view String
+) pub ret Bool {
   let host: EntityId = nodeEntityFor(world: world, nodeId: hostNodeId)
   if isNone(this: host) {
     ret false
@@ -108,6 +114,7 @@ func mountCameraBar(world: mod UiWorld, res: view Gpu2dUi, hostNodeId: view Stri
   let overrides: List(SceneOverride) = List.create(SceneOverride, cap: 0)
   let root: EntityId = mountSceneInstance(
     world: world
+    uiSystems: uiSystems
     mountEntity: host
     scene: scene
     overrides: overrides
@@ -115,7 +122,7 @@ func mountCameraBar(world: mod UiWorld, res: view Gpu2dUi, hostNodeId: view Stri
   if isNone(this: root) {
     ret false
   }
-  runUiSystems(world: world, res: res)
+  runUiSystems(world: world, uiSystems: uiSystems, res: res)
   ret true
 }
 
@@ -163,6 +170,7 @@ func syncCameraBar(world: mod UiWorld, rig: view CameraRig, camera: view Camera3
 # edits the scene.
 func fitCameraBar(
   world: mod UiWorld
+  uiSystems: mod UiSystems
   res: view Gpu2dUi
   hostNodeId: view String
   availW: view Float
@@ -173,7 +181,7 @@ func fitCameraBar(
     setNodeActive(world: world, nodeId: readoutId(index: i), value: true)
     i = i + 1
   }
-  runUiSystems(world: world, res: res)
+  runUiSystems(world: world, uiSystems: uiSystems, res: res)
   # At most one drop per readout, so this terminates even if the host is
   # narrower than the mode button alone — in which case the button stays
   # and overflows, which is the lesser failure.
@@ -187,7 +195,7 @@ func fitCameraBar(
       ret
     }
     setNodeActive(world: world, nodeId: readoutId(index: visible), value: false)
-    runUiSystems(world: world, res: res)
+    runUiSystems(world: world, uiSystems: uiSystems, res: res)
     guard = guard + 1
   }
 }

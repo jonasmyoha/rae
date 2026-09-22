@@ -22,6 +22,7 @@ open ecs/Schedule
 open ecs/Entity
 open ecs/ComponentTable
 open assetSystem/GpuAssetRegistry
+open ui/UiSystems
 
 # The app resources a binding system can observe — a flag bitmask (combine
 # with `bitor`), each with ONE revision number the runner reads
@@ -405,6 +406,7 @@ func observerGeneration(
 func runAppObserver(
   index: view Int
   world: mod UiWorld
+  uiSystems: mod UiSystems
   musicSystems: mod MusicSystems
   state: view AppState
   scenes: view AlbumScenes
@@ -440,7 +442,7 @@ func runAppObserver(
     trackTextSystem(playbackSystem: musicSystems.playbackSystem, world: world, state: state)
   }
   if index is observeBottomSheet {
-    bottomSheetSystem(world: world, sheet: state.bottomSheet)
+    bottomSheetSystem(world: world, uiSystems: uiSystems, sheet: state.bottomSheet)
   }
   if index is observeProfileStats {
     profileStatsSystem(profileSystem: musicSystems.profileSystem, world: world, state: state)
@@ -451,6 +453,7 @@ func runAppObserver(
   if index is observeListSource {
     listSourceSystem(
       world: world
+      uiSystems: uiSystems
       state: state
       playbackSystem: musicSystems.playbackSystem
       scenes: scenes
@@ -463,7 +466,11 @@ func runAppObserver(
     albumHeaderSystem(albumSystem: musicSystems.albumSystem, world: world, state: state)
   }
   if index is observeProgress {
-    applyPlaybackToWorld(world: world, playbackSystem: musicSystems.playbackSystem)
+    applyPlaybackToWorld(
+      world: world
+      uiSystems: uiSystems
+      playbackSystem: musicSystems.playbackSystem
+    )
   }
   if index is observePlaybackTime {
     playbackTimeSystem(world: world, playbackSystem: musicSystems.playbackSystem)
@@ -476,7 +483,7 @@ func runAppObserver(
     )
   }
   if index is observeEmptyState {
-    emptyStateSystem(world: world, state: state)
+    emptyStateSystem(world: world, uiSystems: uiSystems, state: state)
   }
 }
 
@@ -489,6 +496,7 @@ func runAppObservation(
   playbackSystem: view PlaybackSystem
   observation: mod AppObservation
   world: mod UiWorld
+  uiSystems: mod UiSystems
   musicSystems: mod MusicSystems
   state: view AppState
   scenes: view AlbumScenes
@@ -510,6 +518,7 @@ func runAppObservation(
       runAppObserver(
         index: index
         world: world
+        uiSystems: uiSystems
         musicSystems: musicSystems
         state: state
         scenes: scenes

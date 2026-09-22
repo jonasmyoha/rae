@@ -7,6 +7,7 @@ open ui/Ecs
 import ui/Components
 open ecs/ComponentTable
 open ecs/hierarchySystem/HierarchySystem
+open ui/UiSystems
 
 # Default Size — both axes Fixed. Most rows use Fixed sizes.
 func makeFixed() pub ret Size {
@@ -337,7 +338,12 @@ func setPaddingAll(world: mod UiWorld, entity: view EntityId, n: view Float) pub
   componentSet(this: world.paddings, entity: entity, data: pad)
 }
 
-func attachChildren(world: mod UiWorld, parent: view EntityId, kids: view List(EntityId)) pub {
+func attachChildren(
+  world: mod UiWorld
+  uiSystems: view UiSystems
+  parent: view EntityId
+  kids: view List(EntityId)
+) pub {
   unsafe {
     # #726: set only the authoritative Parent link; HierarchySystem.setParent keeps
     # the derived Children cache in lock-step, appending in call (= input) order.
@@ -345,7 +351,7 @@ func attachChildren(world: mod UiWorld, parent: view EntityId, kids: view List(E
     loop i < kids.length {
       let kid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: i)
       setParent(
-        parents: world.parents
+        parents: uiSystems.hierarchy.parents
         childrens: world.childrens
         child: kid
         parent: parent

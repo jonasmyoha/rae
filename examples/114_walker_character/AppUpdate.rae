@@ -58,7 +58,11 @@ open app3d/RenderScale
 # ----- per-frame timing + resize -------------------------------------------
 func frameBegin(app: mod App) {
   Profile.tick(profiler: app.profiler)
-  resizeUiToWindow(world: app.inputSystem.world, res: app.inputSystem.gpuUi)
+  resizeUiToWindow(
+    world: app.inputSystem.world
+    uiSystems: app.inputSystem.uiSystems
+    res: app.inputSystem.gpuUi
+  )
   let now: Float64 = Gpu2d.nowSeconds()
   var deltaTime: Float = (now - app.frame.prevT) as Float
   app.frame.prevT = now
@@ -130,6 +134,7 @@ func updateApp(app: mod App) {
   # the local sim; the matching publish runs after it, below.
   netApplyRemote(netSystem: app.netSystem, world: app.world)
   let uiTick: UiTick = uiUpdate(
+    uiSystems: app.inputSystem.uiSystems
     cameraSystem: app.cameraSystem
     characterSystem: app.characterSystem
     frame: app.frame
@@ -146,6 +151,7 @@ func updateApp(app: mod App) {
   let scrolled: Bool = uiTick.scrolled
 
   let camTick: CameraTick = cameraUpdate(
+    uiSystems: app.inputSystem.uiSystems
     cameraSystem: app.cameraSystem
     inputSystem: app.inputSystem
     persist: app.persist

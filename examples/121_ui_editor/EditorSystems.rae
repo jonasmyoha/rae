@@ -7,6 +7,7 @@ open ui/Registry
 open ui/ScenePolicy
 open ecs/Entity
 open ecs/World
+open ui/UiSystems
 
 # Drain the pending-components outbox into the editor's own tables. What no
 # editor system claims STAYS pending on purpose: it is a component of the
@@ -51,6 +52,7 @@ func applyEditorComponents(
 # the systems, and after any unmount whose entities must not linger.
 func sweepEditorEntities(
   world: mod UiWorld
+  uiSystems: mod UiSystems
   chromeSystem: mod ChromeSystem
   guideSystem: mod GuideSystem
   inspectorSystem: mod InspectorSystem
@@ -62,7 +64,7 @@ func sweepEditorEntities(
     clearEntityComponents(world: inspectorSystem, entity: entity)
     clearEntityComponents(world: outlinePoolSystem, entity: entity)
   }
-  releaseDeadEntities(world: world)
+  releaseDeadEntities(world: world, uiSystems: uiSystems)
 }
 
 # The App-level spellings: the aggregate names its systems once, here.
@@ -79,6 +81,7 @@ func applyEditorComponentsOf(app: mod App) {
 func sweepEditorEntitiesOf(app: mod App) {
   sweepEditorEntities(
     world: app.world
+    uiSystems: app.uiSystems
     chromeSystem: app.chromeSystem
     guideSystem: app.guideSystem
     inspectorSystem: app.inspectorSystem

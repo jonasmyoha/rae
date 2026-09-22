@@ -1,6 +1,7 @@
 open HotReload
 open ui/WindowGeometry
 open ui/Ecs
+open ui/UiSystems
 open ecs/Event
 open ui/EventLoop
 open ui/LogOverlay
@@ -52,6 +53,9 @@ type App {
   # aggregate; this struct is the hand-written list the two outbox drains
   # and the observation walk.
   musicSystems: MusicSystems
+  # The lib systems' derived tables (ui/UiSystems) for the CURRENT world:
+  # rebuilt with it on every route rebuild (their rows are that world's).
+  uiSystems: UiSystems
   viewport: Viewport
   logOverlay: LogOverlay
   spotifySystem: SpotifySystem

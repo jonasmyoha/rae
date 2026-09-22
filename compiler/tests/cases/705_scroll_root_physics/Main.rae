@@ -6,6 +6,7 @@ open ui/Transform
 open ecs/Entity
 open ecs/ComponentTable
 open ecs/hierarchySystem/HierarchySystem
+open ui/UiSystems
 
 # A `ScrollRoot` on the content node inside a clipped viewport (the former
 # ScrollPanel shape, #729) with the lib iOS-style scroll physics (drag -> release
@@ -17,13 +18,14 @@ open ecs/hierarchySystem/HierarchySystem
 # tall in a 100-tall viewport -> -2900. Positions are <= 0 (content slid up).
 func setupNode(
   world: mod UiWorld
+  uiSystems: mod UiSystems
   nodeId: view String
   w: view Float
   h: view Float
 ) ret EntityId {
   let e: EntityId = createEntity(world: world)
   componentSet(
-    this: world.computedRects
+    this: uiSystems.layout.computedRects
     entity: e
     data: ComputedRect { position: { x: 0.0, y: 0.0 }, size: { x: w, y: h } }
   )
@@ -33,6 +35,7 @@ func setupNode(
 
 func step(
   world: mod UiWorld
+  uiSystems: view UiSystems
   panel: view EntityId
   input: mod UiInput
   x: view Float
@@ -48,7 +51,12 @@ func step(
     pressed: pressed
     released: released
   }
-  ret updateScrollRoot(world: world, entity: panel, input: input)
+  ret updateScrollRoot(
+    world: world
+    uiSystems: uiSystems
+    entity: panel
+    input: input
+  )
 }
 
 func offsetOf(world: view UiWorld, panel: view EntityId) ret Float {
@@ -65,10 +73,12 @@ func roundI(value: view Float) ret Int {
 
 func main() {
   var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
   # Viewport 100 tall at screen origin; content 3000 tall -> range 2900 (plenty of
   # room so momentum settles well inside the bounds).
   let vp: EntityId = setupNode(
     world: world
+    uiSystems: uiSystems
     nodeId: "vp"
     w: 100.0
     h: 100.0
@@ -84,13 +94,14 @@ func main() {
   )
   let content: EntityId = setupNode(
     world: world
+    uiSystems: uiSystems
     nodeId: "content"
     w: 100.0
     h: 3000.0
   )
 
   setParent(
-    parents: world.parents
+    parents: uiSystems.hierarchy.parents
     childrens: world.childrens
     child: content
     parent: vp
@@ -103,10 +114,10 @@ func main() {
   }
   componentSet(this: world.scrollRoots, entity: content, data: root)
   let memory: ScrollMemory = createScrollMemory()
-  scrollRootSystem(world: world, memory: memory)
-  let panel: EntityId = findScrollRoot(world: world)
+  scrollRootSystem(world: world, uiSystems: uiSystems, memory: memory)
+  let panel: EntityId = findScrollRoot(world: world, uiSystems: uiSystems)
   log("root is content: {panel.index is content.index}")
-  let range: ScrollRange = scrollRootRange(world: world, entity: panel)
+  let range: ScrollRange = scrollRootRange(world: world, uiSystems: uiSystems, entity: panel)
   log("floor: {roundI(value: range.floor)} window: {roundI(value: range.window)}")
 
   var input: UiInput = createUiInput()
@@ -115,6 +126,7 @@ func main() {
   # offset grows 1:1 while in bounds).
   step(
     world: world
+    uiSystems: uiSystems
     panel: panel
     input: input
     x: 50.0
@@ -126,6 +138,7 @@ func main() {
   log("press   offset={roundI(value: offsetOf(world: world, panel: panel))}")
   step(
     world: world
+    uiSystems: uiSystems
     panel: panel
     input: input
     x: 50.0
@@ -137,6 +150,7 @@ func main() {
   log("drag1   offset={roundI(value: offsetOf(world: world, panel: panel))}")
   step(
     world: world
+    uiSystems: uiSystems
     panel: panel
     input: input
     x: 50.0
@@ -150,6 +164,7 @@ func main() {
   # Release: the lift velocity (~20/frame) becomes a momentum fling.
   step(
     world: world
+    uiSystems: uiSystems
     panel: panel
     input: input
     x: 50.0
@@ -167,6 +182,7 @@ func main() {
   loop moving {
     moving = step(
       world: world
+      uiSystems: uiSystems
       panel: panel
       input: input
       x: 50.0
@@ -192,6 +208,7 @@ func main() {
   # spring pull it back to exactly the floor.
   step(
     world: world
+    uiSystems: uiSystems
     panel: panel
     input: input
     x: 50.0
@@ -205,6 +222,7 @@ func main() {
     y = y - 800.0
     step(
       world: world
+      uiSystems: uiSystems
       panel: panel
       input: input
       x: 50.0
@@ -218,6 +236,7 @@ func main() {
   log("overshoot past floor: {overshoot < -2900.0}")
   step(
     world: world
+    uiSystems: uiSystems
     panel: panel
     input: input
     x: 50.0
@@ -231,6 +250,7 @@ func main() {
   loop m2 {
     m2 = step(
       world: world
+      uiSystems: uiSystems
       panel: panel
       input: input
       x: 50.0

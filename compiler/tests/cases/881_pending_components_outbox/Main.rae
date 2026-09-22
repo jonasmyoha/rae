@@ -8,6 +8,7 @@ open ui/SceneLoader
 open ui/ScenePolicy
 open ecs/Entity
 open ecs/ComponentTable
+open ui/UiSystems
 
 # The pending-components outbox (docs/ecs-systems-own-their-tables.md §3.2):
 # an authored component no UiWorld table matches is no longer the loader's
@@ -66,9 +67,10 @@ func appScene() ret String {
 
 func main() {
   var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
   world.scenePolicy.unknownComponents = UnknownComponentPolicy.report
   let scene: Scene = parseScene(source: appScene())
-  let rootEntity: EntityId = loadScene(world: world, scene: scene)
+  let rootEntity: EntityId = loadScene(world: world, uiSystems: uiSystems, scene: scene)
   log("mounted = {rootEntity.index >= 0}, alive = {aliveCount(world: world)}")
   # The loader applied the lib components and parked the rest, in order.
   log("pending after load: {world.pendingComponents.length}")
@@ -112,8 +114,8 @@ func main() {
 
   # A destroyed entity takes its pending rows with it.
   let scene2: Scene = parseScene(source: appScene())
-  let root2: EntityId = loadScene(world: world, scene: scene2)
+  let root2: EntityId = loadScene(world: world, uiSystems: uiSystems, scene: scene2)
   log("pending after second load: {world.pendingComponents.length}")
-  destroyEntitySubtree(world: world, root: root2)
+  destroyEntitySubtree(world: world, uiSystems: uiSystems, root: root2)
   log("pending after destroy: {world.pendingComponents.length}")
 }

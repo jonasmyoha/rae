@@ -11,10 +11,16 @@ import ui/Scene
 open ecs/Entity
 open ui/SceneInstance
 open ecs/ComponentTable
+open ui/UiSystems
 
 # Decorate `entity` as a glaring red error block with a label. Used
 # when scene mounting fails. Caller has already set the entity's Rect/Size.
-func paintErrorBlock(world: mod UiWorld, entity: view EntityId, label: view String) pub {
+func paintErrorBlock(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  entity: view EntityId
+  label: view String
+) pub {
   let red: RgbaColor = { r: 220, g: 32, b: 48, a: 255 }
   let shape: Shape = {
     kind: ShapeKind.roundedRect
@@ -45,7 +51,12 @@ func paintErrorBlock(world: mod UiWorld, entity: view EntityId, label: view Stri
 
   let kids: List(EntityId) = List.create(EntityId, cap: 1)
   kids.add(value: txt)
-  attachChildren(world: world, parent: entity, kids: kids)
+  attachChildren(
+    world: world
+    uiSystems: uiSystems
+    parent: entity
+    kids: kids
+  )
 }
 
 # Mount a scene under `mountEntity`. On failure log + paint the entity
@@ -53,6 +64,7 @@ func paintErrorBlock(world: mod UiWorld, entity: view EntityId, label: view Stri
 # a non-negative id).
 func mountOrError(
   world: mod UiWorld
+  uiSystems: mod UiSystems
   mountEntity: view EntityId
   scene: view Scene
   sceneLabel: view String
@@ -60,6 +72,7 @@ func mountOrError(
 ) pub ret EntityId {
   let result: EntityId = mountSceneInstance(
     world: world
+    uiSystems: uiSystems
     mountEntity: mountEntity
     scene: scene
     overrides: overrides
@@ -69,7 +82,12 @@ func mountOrError(
     log(
       "[scene-error] mount failed for {label} (entity {mountEntity.index}, scene.ok={scene.ok}, scene.errorMsg={scene.errorMsg})"
     )
-    paintErrorBlock(world: world, entity: mountEntity, label: label)
+    paintErrorBlock(
+      world: world
+      uiSystems: uiSystems
+      entity: mountEntity
+      label: label
+    )
     ret mountEntity
   }
   ret result
@@ -83,6 +101,7 @@ func mountOrError(
 # the same failure signal `mountOrError` paints on a page.
 func mountSubSceneOrError(
   world: mod UiWorld
+  uiSystems: mod UiSystems
   scene: view Scene
   sceneLabel: view String
   overrides: mod List(SceneOverride)
@@ -95,7 +114,12 @@ func mountSubSceneOrError(
     w: w
     h: h
   )
-  let mounted: EntityId = mountSubScene(world: world, scene: scene, overrides: overrides)
+  let mounted: EntityId = mountSubScene(
+    world: world
+    uiSystems: uiSystems
+    scene: scene
+    overrides: overrides
+  )
   if isNone(this: mounted) {
     let label: String = sceneLabel
     log(
@@ -108,7 +132,12 @@ func mountSubSceneOrError(
       w: w
       h: h
     )
-    paintErrorBlock(world: world, entity: sentinel, label: label)
+    paintErrorBlock(
+      world: world
+      uiSystems: uiSystems
+      entity: sentinel
+      label: label
+    )
     ret sentinel
   }
   ret mounted
@@ -118,6 +147,7 @@ func mountSubSceneOrError(
 # registry does not know is the same visible failure as a broken scene.
 func mountRegistrySubSceneOrError(
   world: mod UiWorld
+  uiSystems: mod UiSystems
   reg: view SceneRegistry
   sceneId: view String
   overrides: mod List(SceneOverride)
@@ -135,12 +165,18 @@ func mountRegistrySubSceneOrError(
       w: w
       h: h
     )
-    paintErrorBlock(world: world, entity: sentinel, label: label)
+    paintErrorBlock(
+      world: world
+      uiSystems: uiSystems
+      entity: sentinel
+      label: label
+    )
     ret sentinel
   }
   let scene: view Scene => sceneRegistryGet(reg: reg, idx: idx)
   ret mountSubSceneOrError(
     world: world
+    uiSystems: uiSystems
     scene: scene
     sceneLabel: sceneId
     overrides: overrides
@@ -154,6 +190,7 @@ func mountRegistrySubSceneOrError(
 # error block when mounting fails.
 func buildSimpleSceneInstance(
   world: mod UiWorld
+  uiSystems: mod UiSystems
   scene: view Scene
   w: view Float
   h: view Float
@@ -169,6 +206,7 @@ func buildSimpleSceneInstance(
   let noOverrides: List(SceneOverride) = emptyOverrides()
   let mounted: EntityId = mountOrError(
     world: world
+    uiSystems: uiSystems
     mountEntity: mount
     scene: scene
     sceneLabel: label
@@ -184,6 +222,7 @@ func buildSimpleSceneInstance(
 # root entity in both the success and the failure case.
 func mountPageOrError(
   world: mod UiWorld
+  uiSystems: mod UiSystems
   pageId: own String
   scene: view Scene
   overrides: view List(SceneOverride)
@@ -195,6 +234,7 @@ func mountPageOrError(
   let pageIdForNested: String = "{pageId}"
   let root: EntityId = mountPage(
     world: world
+    uiSystems: uiSystems
     pageId: pageId
     scene: scene
     overrides: overrides
@@ -205,7 +245,12 @@ func mountPageOrError(
     # #978: a node authored as `"SceneInstance": { "sceneId": ..., "params":
     # { "overrides": [...] } }` (a page's top bar, a nav tab) is mounted here
     # from the sub-scene registry, under the page's nodeId scope.
-    resolveSceneInstances(world: world, registry: subScenes, pageId: pageIdForNested)
+    resolveSceneInstances(
+      world: world
+      uiSystems: uiSystems
+      registry: subScenes
+      pageId: pageIdForNested
+    )
     ret root
   }
   # Build a husk: same shape as the success path, plus the red error
@@ -222,7 +267,12 @@ func mountPageOrError(
   log(
     "[scene-error] mount failed for page {pageIdForNested} (scene.ok={scene.ok}, scene.errorMsg={scene.errorMsg})"
   )
-  paintErrorBlock(world: world, entity: husk, label: label)
+  paintErrorBlock(
+    world: world
+    uiSystems: uiSystems
+    entity: husk
+    label: label
+  )
   var copiedId: String = ""
   copiedId = copiedId.concat(other: pageIdForNested)
   let pr: PageRoot = { id: own copiedId }

@@ -3,6 +3,7 @@ open ecs/ComponentTable
 open ecs/World
 open ui/Ecs
 import ui/Components
+open ui/UiSystems
 
 # The dead-entities outbox (docs/ecs-systems-own-their-tables.md §3.2): a
 # UiWorld destroy retires the entity at once (isAlive false, aliveCount exact,
@@ -11,6 +12,7 @@ import ui/Components
 # releaseDeadEntities. Recycling first would let a new entity inherit them.
 func main() {
   var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
   let a: EntityId = createEntity(world: world)
   let b: EntityId = createEntity(world: world)
   componentSet(this: world.actives, entity: a, data: Active { value: true })
@@ -26,7 +28,7 @@ func main() {
   log("c index={c.index} reused a: {c.index is a.index}")
 
   # Released: the next allocation takes a's index, with a bumped generation.
-  releaseDeadEntities(world: world)
+  releaseDeadEntities(world: world, uiSystems: uiSystems)
   log("dead after release={world.deadEntities.length}")
   let d: EntityId = createEntity(world: world)
   log(
@@ -40,9 +42,9 @@ func main() {
   var kids: Children = { ids: List.create(EntityId, cap: 1) }
   kids.ids.add(value: child)
   componentSet(this: world.childrens, entity: root, data: kids)
-  destroyEntitySubtree(world: world, root: root)
+  destroyEntitySubtree(world: world, uiSystems: uiSystems, root: root)
   log("subtree dead={world.deadEntities.length} alive={aliveCount(world: world)}")
-  releaseDeadEntities(world: world)
+  releaseDeadEntities(world: world, uiSystems: uiSystems)
   let e: EntityId = createEntity(world: world)
   let f: EntityId = createEntity(world: world)
   log(

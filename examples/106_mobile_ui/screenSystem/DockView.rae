@@ -27,6 +27,7 @@ open ui/SceneInstance
 open ecs/ComponentTable
 open ui/Layer
 open ui/Frames
+open ui/UiSystems
 
 const floatingDockInset: Float = 52.04819277108433
 
@@ -57,6 +58,7 @@ func dockBlurKey() pub ret String {
 # open — the screen switch flips its page Active instead of re-mounting it.
 func mountBackButtonOverlay(
   world: mod UiWorld
+  uiSystems: mod UiSystems
   scenes: view AlbumScenes
   state: view AppState
 ) pub ret EntityId {
@@ -66,6 +68,7 @@ func mountBackButtonOverlay(
   let pageIdCopy: String = "{backButtonPageId}"
   let mount: EntityId = mountPageOrError(
     world: world
+    uiSystems: uiSystems
     pageId: own pageIdCopy
     scene: scenes.backButton
     overrides: emptyOverrides()
@@ -85,6 +88,7 @@ func mountBackButtonOverlay(
 func mountBottomDockOverlay(
   dockSystem: view DockSystem
   world: mod UiWorld
+  uiSystems: mod UiSystems
   activeTab: Screen
   scenes: view AlbumScenes
   playbackSystem: view PlaybackSystem
@@ -94,6 +98,7 @@ func mountBottomDockOverlay(
   let dockPageIdCopy: String = "{dockPageId}"
   let dock: EntityId = mountPageOrError(
     world: world
+    uiSystems: uiSystems
     pageId: own dockPageIdCopy
     scene: scenes.dock
     overrides: emptyOverrides()
@@ -120,6 +125,7 @@ func mountBottomDockOverlay(
   let forcedName: String = frameIdName(id: deviceFrame.forcedFrameId)
   applySceneFramesToPage(
     world: world
+    uiSystems: uiSystems
     scene: scenes.miniPlayer
     pageId: dockPageId
     windowPtW: world.layoutW / unitScale
@@ -134,7 +140,12 @@ func mountBottomDockOverlay(
   # Canvas overlay (#212 S5/S6 demo) — mounted here because every screen
   # builder already calls mountBottomDockOverlay, and the mount is
   # idempotent (a resident page survives screen switches).
-  let canvasMount: EntityId = mountCanvasOverlay(world: world, scenes: scenes, state: state)
+  let canvasMount: EntityId = mountCanvasOverlay(
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    state: state
+  )
   ret dock
 }
 

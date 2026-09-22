@@ -10,6 +10,7 @@ import ui/Registry
 open ui/Scene
 open ui/SceneInstance
 open ecs/Entity
+open ui/UiSystems
 
 func tinyScene(rootId: view String) ret String {
   var s: String = ""
@@ -34,6 +35,7 @@ func tinyScene(rootId: view String) ret String {
 
 func main() {
   let world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
 
   let sceneA: Scene = parseScene(source: tinyScene(rootId: "sceneA"))
   let sceneB: Scene = parseScene(source: tinyScene(rootId: "sceneB"))
@@ -48,6 +50,7 @@ func main() {
   let pageB: String = "page-b"
   var rootA: EntityId = mountPage(
     world: world
+    uiSystems: uiSystems
     pageId: "{pageA}"
     scene: sceneA
     overrides: noOverrides
@@ -56,6 +59,7 @@ func main() {
   )
   var rootB: EntityId = mountPage(
     world: world
+    uiSystems: uiSystems
     pageId: "{pageB}"
     scene: sceneB
     overrides: noOverrides
@@ -85,7 +89,7 @@ func main() {
   # pageOf walks Parent up from the Body entity back to its PageRoot.
   if let bodyARaw: Int = findNodeInPage(world: world, pageId: pageA, nodeId: "Body") {
     let bodyAEntity: EntityId = id(v: bodyARaw)
-    let owningPage: String = pageOf(world: world, entity: bodyAEntity)
+    let owningPage: String = pageOf(world: world, uiSystems: uiSystems, entity: bodyAEntity)
     log("pageOf(bodyA)={owningPage}")
   } else {
     log("bodyA missing")

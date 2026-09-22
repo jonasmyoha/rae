@@ -1,6 +1,7 @@
 open ui/Ecs
 import ui/Components
 open ecs/ComponentTable
+open ui/UiSystems
 
 # Renderer-independent dirty cache copied locally so 106 does not import
 # legacy render modules just to decide whether a frame needs repainting.
@@ -34,8 +35,12 @@ func createRenderCache() pub ret RenderCache {
   }
 }
 
-func cacheDirty(world: view UiWorld, cache: mod RenderCache) pub ret Bool {
-  let crGen: Int = componentTableGeneration(ComputedRect, this: world.computedRects)
+func cacheDirty(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  cache: mod RenderCache
+) pub ret Bool {
+  let crGen: Int = componentTableGeneration(ComputedRect, this: uiSystems.layout.computedRects)
   let wtGen: Int = componentTableGeneration(WorldTransform2D, this: world.worldTransforms)
   let shGen: Int = componentTableGeneration(Shape, this: world.shapes)
   let spGen: Int = componentTableGeneration(Sprite, this: world.sprites)
@@ -43,7 +48,7 @@ func cacheDirty(world: view UiWorld, cache: mod RenderCache) pub ret Bool {
   let acGen: Int = componentTableGeneration(Active, this: world.actives)
   let opGen: Int = componentTableGeneration(Opacity, this: world.opacities)
   let chGen: Int = componentTableGeneration(Children, this: world.childrens)
-  let plGen: Int = componentTableGeneration(Parent, this: world.parents)
+  let plGen: Int = componentTableGeneration(Parent, this: uiSystems.hierarchy.parents)
   let ocGen: Int = componentTableGeneration(OnClick, this: world.onClicks)
   let entityCount: Int = world.allocator.alive.length
 

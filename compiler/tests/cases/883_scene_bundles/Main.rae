@@ -12,6 +12,7 @@ open ui/SceneInstance
 open ui/ScenePolicy
 open ecs/Entity
 open ecs/ComponentTable
+open ui/UiSystems
 
 # Bundles (docs/ui-scene-format.md §9): named component sets expanded at
 # load, field-wise. Covers: expansion order (later bundles win over earlier,
@@ -106,6 +107,7 @@ func entityNamed(world: view UiWorld, scene: view Scene, nodeId: view String) re
 
 func main() {
   var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
   world.scenePolicy.unknownComponents = UnknownComponentPolicy.report
   # The imported set: seeded the way a host seeds it from `import`.
   let shared: Scene = parseScene(source: sharedBundles())
@@ -117,7 +119,7 @@ func main() {
   world.bundles = sceneImportedBundles(entry: entry, assets: assets, registry: registry)
   log("imported bundles: {world.bundles.names.join(sep: ",")}")
 
-  let root: EntityId = loadScene(world: world, scene: entry)
+  let root: EntityId = loadScene(world: world, uiSystems: uiSystems, scene: entry)
   log("mounted = {root.index >= 0}, alive = {aliveCount(world: world)}")
   let nodeIds: List(String) = [
     "Plain"
