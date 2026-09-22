@@ -1075,7 +1075,8 @@ AstTypeRef* try_as_type_arg(CFuncContext* ctx, const AstExpr* val) {
     // `let String = 0; foo(String, ...)` passes a value, not a type.
     if (get_local_type_ref(ctx, name)) return NULL;
     bool is_type = is_primitive_type(name) || str_eq_cstr(name, "Ptr")
-        || (ctx->module && find_type_decl(ctx, ctx->module, name) != NULL);
+        || (ctx->module && find_type_decl(ctx, ctx->module, name) != NULL)
+        || (ctx->module && find_enum_decl(ctx, ctx->module, name) != NULL);  // an enum is a type argument too
     // Inside a generic function body, the bound generic param is also
     // a valid type expression — e.g. `createIntMap(V)` body calls
     // `createInt64Map(V, initialCap: …)` where V resolves to a type.
@@ -1231,6 +1232,52 @@ const AstTypeRef* c_call_enum_name_opt_string_type(CFuncContext* ctx) {
     memset(tr->parts, 0, sizeof *tr->parts);
     tr->parts->text.data = "String"; tr->parts->text.len = 6;
     tr->is_opt = true;
+    return tr;
+}
+
+// enumMembers(E) / enumCount(E): is `expr` one of those intrinsic calls (one
+// positional type-identifier argument)? Returns the E identifier expression.
+static const AstExpr* c_call_enum_unary_type(const AstExpr* expr, const char* name) {
+    if (!expr || expr->kind != AST_EXPR_CALL || !expr->as.call.callee
+        || expr->as.call.callee->kind != AST_EXPR_IDENT
+        || !str_eq_cstr(expr->as.call.callee->as.ident, name)) return NULL;
+    const AstCallArg* ta = expr->as.call.args;
+    if (!ta || ta->next || ta->name.len != 0 || !ta->value || ta->value->kind != AST_EXPR_IDENT) return NULL;
+    return ta->value;
+}
+const AstExpr* c_call_enum_members_type(const AstExpr* expr) { return c_call_enum_unary_type(expr, "enumMembers"); }
+const AstExpr* c_call_enum_count_type(const AstExpr* expr) { return c_call_enum_unary_type(expr, "enumCount"); }
+
+// The enum name an enumMembers / enumCount call asks about, E substituted
+// through the generic context (empty when the instantiation is not an enum).
+Str c_call_enum_query_name(CFuncContext* ctx, const AstExpr* te) {
+    Str empty = {0};
+    if (!te) return empty;
+    AstTypeRef* tr = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
+    memset(tr, 0, sizeof *tr);
+    tr->parts = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstIdentifierPart));
+    memset(tr->parts, 0, sizeof *tr->parts);
+    tr->parts->text = te->as.ident;
+    AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr);
+    if (sub) tr = sub;
+    Str name = get_base_type_name(tr);
+    if (tr->is_opt || tr->generic_args || !find_enum_decl(ctx, ctx->module, name)) return empty;
+    return name;
+}
+
+// The `List(String)` every enumMembers call yields.
+const AstTypeRef* c_call_list_string_type(CFuncContext* ctx) {
+    AstTypeRef* tr = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
+    memset(tr, 0, sizeof *tr);
+    tr->parts = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstIdentifierPart));
+    memset(tr->parts, 0, sizeof *tr->parts);
+    tr->parts->text.data = "List"; tr->parts->text.len = 4;
+    AstTypeRef* arg = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
+    memset(arg, 0, sizeof *arg);
+    arg->parts = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstIdentifierPart));
+    memset(arg->parts, 0, sizeof *arg->parts);
+    arg->parts->text.data = "String"; arg->parts->text.len = 6;
+    tr->generic_args = arg;
     return tr;
 }
 
@@ -1415,6 +1462,8 @@ const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
                 if (et) return et;
             }
             if (c_call_enum_name_type(expr)) return c_call_enum_name_opt_string_type(ctx);
+            if (c_call_enum_members_type(expr)) return c_call_list_string_type(ctx);
+            if (c_call_enum_count_type(expr)) return &kInt_tr;
             if (expr->decl_link && expr->decl_link->kind == AST_DECL_FUNC) {
                 const AstTypeRef* crt = expr->decl_link->as.func_decl.returns
                     ? expr->decl_link->as.func_decl.returns->type : NULL;
@@ -2143,6 +2192,24 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
                   (int)m->name.len, (int)m->name.len, m->name.data, (int)m->name.len, (long long)idx++);
           }
           fprintf(out, "  return -1;\n}\n");
+          // enumMembers(E): every member name in declaration order, as a fresh
+          // List(String) of static literals (the caller owns the list; the
+          // elements are borrowed, so its drop frees only the buffer).
+          {
+              int64_t count = 0;
+              for (const AstEnumMember* m = d->as.enum_decl.members; m; m = m->next) count++;
+              fprintf(out, "RAE_UNUSED static rae_List_rae_String rae_enum_members_%.*s(void) {\n",
+                  (int)d->as.enum_decl.name.len, d->as.enum_decl.name.data);
+              fprintf(out, "  rae_List_rae_String __l = {0};\n");
+              fprintf(out, "  __l.data = (rae_String*)rae_ext_rae_buf_alloc(%lld, sizeof(rae_String));\n", (long long)(count > 0 ? count : 1));
+              fprintf(out, "  __l.length = %lld; __l.cap = %lld;\n", (long long)count, (long long)(count > 0 ? count : 1));
+              idx = 0;
+              for (const AstEnumMember* m = d->as.enum_decl.members; m; m = m->next) {
+                  fprintf(out, "  __l.data[%lld] = (rae_String){(uint8_t*)\"%.*s\", %d};\n",
+                      (long long)idx++, (int)m->name.len, m->name.data, (int)m->name.len);
+              }
+              fprintf(out, "  return __l;\n}\n");
+          }
           fprintf(out, "\n");
       }
   }

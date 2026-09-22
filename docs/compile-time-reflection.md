@@ -357,6 +357,24 @@ printed the `rae_View_Int64` wrapper in its C signature (sema types every
 enum as Int, so the resolved-TypeInfo fast path took the Int arm) while
 callers passed and the body read an `int64_t*` — now both take the enum path.
 
+**`enumMembers(E)` → `List(String)` and `enumCount(E)` → `Int`** (2026-09-22).
+The member names of an enum `E` in declaration order — a fresh list the caller
+owns (bind it to a local) — and their count, folded per instantiation the same
+way: a generic `E` instantiated with a struct or a scalar yields the empty list
+/ `0`, so a generic body can ask without an arm. The editor's inspector offers
+an enum field's members as a picker from `enumMembers`; a validator checks an
+authored name against the list without parsing. The three answer each other:
+`enumFromName(E, name: name)` for every name in `enumMembers(E)` is the member
+at that index, and `enumName` of it is the name again. An enum name is also
+accepted as an explicit type argument (`describe(Kind)`), like a struct's.
+
+```rae
+func describeMembers(E: type) {
+  let names: List(String) = enumMembers(E)
+  log("count {enumCount(E)}, members {names}")   # Kind: count 3, members ["small", "medium", "large"]
+}                                                 # Point: count 0, members []
+```
+
 **`typeName(x)` on a generic-typed parameter.** Inside a field loop
 `typeName(f)` folded to the field's type name already (#809). It now also
 answers for a *parameter* whose type is (or contains) a generic parameter:

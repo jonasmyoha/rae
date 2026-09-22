@@ -5350,6 +5350,51 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                 expr->resolved_type = type_get_opt(ctx->type_registry, et ? et : type_get_void(ctx->type_registry));
                 break;
             }
+            // `enumMembers(E)` -> List(String) (every member name, declaration
+            // order) and `enumCount(E)` -> Int: compile-time queries on an enum
+            // type; a generic E instantiated with a non-enum yields the empty
+            // list / 0 (folded per instantiation by the backend).
+            if (expr->as.call.callee && expr->as.call.callee->kind == AST_EXPR_IDENT
+                && (str_eq_cstr(expr->as.call.callee->as.ident, "enumMembers")
+                    || str_eq_cstr(expr->as.call.callee->as.ident, "enumCount"))) {
+                bool is_members = str_eq_cstr(expr->as.call.callee->as.ident, "enumMembers");
+                AstCallArg* ta = expr->as.call.args;
+                if (!ta || ta->next || ta->name.len != 0 || !ta->value || ta->value->kind != AST_EXPR_IDENT) {
+                    diag_error(sema_diag_file(module), (int)expr->line, (int)expr->column,
+                               is_members ? "enumMembers takes one enum type — enumMembers(Kind)"
+                                          : "enumCount takes one enum type — enumCount(Kind)");
+                    module->had_error = true;
+                    expr->resolved_type = type_get_void(ctx->type_registry);
+                    break;
+                }
+                AstTypeRef* etr = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef)); memset(etr, 0, sizeof *etr);
+                etr->parts = arena_alloc(ctx->ast_arena, sizeof(AstIdentifierPart)); memset(etr->parts, 0, sizeof *etr->parts);
+                etr->parts->text = ta->value->as.ident;
+                etr->line = ta->value->line; etr->column = ta->value->column;
+                TypeInfo* et = sema_resolve_type_internal(ctx, module, symbols, etr);
+                Symbol* esym = symbol_table_lookup(symbols, etr->parts->text);
+                bool is_generic = (et && et->kind == TYPE_GENERIC_PARAM) || (esym && !esym->decl);
+                if (!is_generic && !sema_typeref_is_enum(symbols, etr)) {
+                    diag_error(sema_diag_file(module), (int)ta->value->line, (int)ta->value->column,
+                               is_members ? "enumMembers requires an enum type (or a generic type parameter)"
+                                          : "enumCount requires an enum type (or a generic type parameter)");
+                    module->had_error = true;
+                }
+                if (is_members) {
+                    AstTypeRef* ltr = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef)); memset(ltr, 0, sizeof *ltr);
+                    ltr->parts = arena_alloc(ctx->ast_arena, sizeof(AstIdentifierPart)); memset(ltr->parts, 0, sizeof *ltr->parts);
+                    ltr->parts->text = str_from_cstr("List");
+                    AstTypeRef* str_arg = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef)); memset(str_arg, 0, sizeof *str_arg);
+                    str_arg->parts = arena_alloc(ctx->ast_arena, sizeof(AstIdentifierPart)); memset(str_arg->parts, 0, sizeof *str_arg->parts);
+                    str_arg->parts->text = str_from_cstr("String");
+                    ltr->generic_args = str_arg;
+                    ltr->line = expr->line; ltr->column = expr->column;
+                    expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, ltr);
+                } else {
+                    expr->resolved_type = type_get_int(ctx->type_registry);
+                }
+                break;
+            }
             // The mirror of enumFromName: `enumName(E, value: v)` — the member
             // name of `v` as `opt String` (none for a non-enum instantiation of
             // a generic E, so a generic encoder may try the enum path last).

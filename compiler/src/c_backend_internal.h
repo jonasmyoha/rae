@@ -202,6 +202,10 @@ void rae_value_to_str_expr(CompilerContext* ctx, const AstModule* module, const 
 const AstExpr* c_call_enum_name_type(const AstExpr* expr);
 const AstTypeRef* c_call_enum_name_enum_type(CFuncContext* ctx, const AstExpr* expr);
 const AstTypeRef* c_call_enum_name_opt_string_type(CFuncContext* ctx);
+const AstExpr* c_call_enum_members_type(const AstExpr* expr);
+const AstExpr* c_call_enum_count_type(const AstExpr* expr);
+Str c_call_enum_query_name(CFuncContext* ctx, const AstExpr* te);
+const AstTypeRef* c_call_list_string_type(CFuncContext* ctx);
 const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr);
 Str infer_expr_type(CFuncContext* ctx, const AstExpr* expr);
 

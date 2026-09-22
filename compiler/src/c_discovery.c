@@ -42,6 +42,10 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
         discover_specializations_expr_impl(ctx, expr->as.call.args->next->value);
         return;
     }
+    // enumMembers(E) yields a List(String): make sure its C type (and drop)
+    // exist even when no Rae code spells one; enumCount(E) is a constant.
+    if (c_call_enum_members_type(expr)) { register_generic_type(ctx->compiler_ctx, c_call_list_string_type(ctx)); return; }
+    if (c_call_enum_count_type(expr)) return;
     if (c_call_enum_from_name_type(expr)) {
         const AstTypeRef* ot = c_call_enum_from_name_opt_type(ctx, expr);
         if (ot) {
