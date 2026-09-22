@@ -1,0 +1,27 @@
+# A 3-level (and deeper) nested-list literal used to miscompile: the
+# element-type expected-type propagation and the createList/add/drop
+# registration only reached the outermost list, so the middle levels' calls
+# hit undeclared C symbols. Discovery now recurses with the element type as
+# the expected type, registering every level.
+func main() {
+  # Built inline, three levels deep.
+  let deep: List(List(List(Int))) = [[[7]], [[8, 9]]]
+  log("deep: {deep}")
+
+  # Read a middle list, then an inner list, back out.
+  if let mid: List(List(Int)) = deep.copyAt(index: 1) {
+    log("mid: {mid}")
+    if let inner: List(Int) = mid.copyAt(index: 0) {
+      log("inner: {inner}")
+    }
+  }
+
+  # A middle-level local as an element, mixed with an inline one.
+  let row: List(List(Int)) = [[1, 2], [3]]
+  let mixed: List(List(List(Int))) = [row, [[4]]]
+  log("mixed: {mixed}")
+
+  # Four levels — the recursion is not depth-limited.
+  let quad: List(List(List(List(Int)))) = [[[[1]]], [[[2, 3]]]]
+  log("quad: {quad}")
+}
