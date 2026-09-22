@@ -26,6 +26,7 @@ open Gpu2dCanvas
 open ui/DebugOverlay
 open ui/WindowGeometry
 open HotReload
+open ui/UiSystems
 
 # The viewer's FALLBACK fonts (the shared Roboto + Material atlases, as 119
 # uses) — what a document that declares no `assets.fonts` renders with. A
@@ -187,6 +188,8 @@ func createApp() ret App {
   builtinSceneIds.add(value: "chrome/ButtonOutline")
 
   var world: UiWorld = create()
+
+  var uiSystems: UiSystems = createUiSystems()
   var chromeSystem: ChromeSystem = createChromeSystem()
   seedWorldTheme(world: world, res: gpuUi)
   # A viewer opens OTHER people's scenes: report what it cannot apply, never exit.
@@ -203,6 +206,7 @@ func createApp() ret App {
     documentMountSystem(
       document: document
       world: world
+      uiSystems: uiSystems
       builtinScenePaths: builtinScenePaths
       builtinSceneIds: builtinSceneIds
     )
@@ -213,11 +217,12 @@ func createApp() ret App {
   pinDocumentPage(world: world, pageRoot: document.pageRoot)
   # The device frame's safe-area insets reach the page through its own
   # `SafeArea { apply }` nodes, exactly as in the app (zero without a frame).
-  safeAreaSystem(world: world, insets: document.safeInsets)
+  safeAreaSystem(world: world, uiSystems: uiSystems, insets: document.safeInsets)
   # The frame + safe-area guides: an authored overlay between the document
   # and the chrome, positioned from the frame (RAE_UI_EDITOR_GUIDES=0 hides).
   var guideSystem: GuideSystem = createGuideSystem(
     world: world
+    uiSystems: uiSystems
     designW: document.designW
     designH: document.designH
   )
@@ -281,6 +286,7 @@ func createApp() ret App {
   let chromeOverrides: List(SceneOverride) = List.create(SceneOverride, cap: 1)
   let chromeRoot: EntityId = mountPage(
     world: world
+    uiSystems: uiSystems
     pageId: "chrome"
     scene: chromeScene
     overrides: chromeOverrides
@@ -290,7 +296,12 @@ func createApp() ret App {
   setLayerById(world: world, entity: chromeRoot, id: "chrome")
   # The chrome's own sub-scenes (the inspector panel) resolve from the same
   # registry the document uses.
-  resolveSceneInstances(world: world, registry: document.registry, pageId: "chrome")
+  resolveSceneInstances(
+    world: world
+    uiSystems: uiSystems
+    registry: document.registry
+    pageId: "chrome"
+  )
   chromeSystem.pageRoot = chromeRoot
   # The chrome's and the inspector panel's authored editor components waited
   # in the pending outbox: into the editor's own tables now, before anything
@@ -373,6 +384,7 @@ func createApp() ret App {
       gpuUi: own gpuUi
       canvas: own canvas
       world: own world
+      uiSystems: own uiSystems
       schedule: own schedule
       document: own document
       viewportSystem: viewportSystem

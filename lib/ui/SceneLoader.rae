@@ -20,6 +20,7 @@ open ui/ScenePolicy
 open ui/SceneBundles
 open ui/BundleApply
 open ui/Components
+open ui/UiSystems
 
 # Minimal helper: append an EntityId to a List(EntityId) via a non-generic
 # function. Same workaround as the ones in ecs.rae — needed when the
@@ -29,17 +30,23 @@ func appendEntityListSL(lst: mod List(EntityId), value: view EntityId) {
   lst.add(value: value)
 }
 
-func loadScene(world: mod UiWorld, scene: view Scene) ret EntityId {
-  ret loadSceneIntoPage(world: world, scene: scene, pageId: "")
+func loadScene(world: mod UiWorld, uiSystems: view UiSystems, scene: view Scene) ret EntityId {
+  ret loadSceneIntoPage(
+    world: world
+    uiSystems: uiSystems
+    scene: scene
+    pageId: ""
+  )
 }
 
 # Same as `loadScene` but writes nodeIds under a `pageId/`-prefixed key
 # in `world.nodeIds`. Use `pageId: ""` for the unscoped path (the
 # default rebuild-only flow). The scene's root entity is returned and
 # also tagged with `PageRoot { id: pageId }` when `pageId` is non-empty,
-# so `pageOf(world, entity)` can walk back up to find the owning page.
+# so `pageOf(uiSystems: uiSystems, world, entity)` can walk back up to find the owning page.
 func loadSceneIntoPage(
   world: mod UiWorld
+  uiSystems: view UiSystems
   scene: view Scene
   pageId: view String
 ) pub ret EntityId {
@@ -239,7 +246,7 @@ func loadSceneIntoPage(
               # maintains the derived Children cache, appending in call (= authored)
               # order so the child order matches the old hand-built Children list.
               setParent(
-                parents: world.parents
+                parents: uiSystems.hierarchy.parents
                 childrens: world.childrens
                 child: childEntity
                 parent: parentEntity
@@ -286,6 +293,7 @@ func loadSceneIntoPage(
 # stays consistent end-to-end.
 func resolveSceneInstances(
   world: mod UiWorld
+  uiSystems: view UiSystems
   registry: view SceneRegistry
   pageId: view String
 ) pub {
@@ -327,6 +335,7 @@ func resolveSceneInstances(
           }
           mountSceneInstanceIntoPage(
             world: world
+            uiSystems: uiSystems
             mountEntity: entity
             scene: scene
             overrides: overrides
@@ -389,7 +398,7 @@ func paintMissingSubSceneSentinel(world: mod UiWorld, entity: view EntityId) {
 # entity list with its NodeId, parent, and the names of components
 # attached to it. Doesn't pretty-print component data — just the
 # inventory. Stable order: by NodeId in scene.nodes.
-func dumpScene(world: view UiWorld, scene: view Scene) {
+func dumpScene(world: view UiWorld, uiSystems: view UiSystems, scene: view Scene) {
   let n: Int = scene.nodes.length
   var i: Int = 0
   loop i < n {
@@ -400,8 +409,8 @@ func dumpScene(world: view UiWorld, scene: view Scene) {
     if let entityRaw: Int = world.nodeIds.get(k: node.nodeId) {
       let entity: EntityId = nodeEntity(world: world, index: entityRaw)
       var parentStr: String = "(root)"
-      if componentHas(this: world.parents, entity: entity) {
-        let pl: Parent = componentGet(this: world.parents, entity: entity)
+      if componentHas(this: uiSystems.hierarchy.parents, entity: entity) {
+        let pl: Parent = componentGet(this: uiSystems.hierarchy.parents, entity: entity)
         parentStr = "parent=ent{pl.parent.index}"
       }
       var comps: String = componentNamesFor(world: world, entity: entity)

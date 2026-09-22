@@ -9,6 +9,7 @@ open ui/SceneInstance
 open ui/ScenePolicy
 open ecs/Entity
 open ecs/ComponentTable
+open ui/UiSystems
 
 # The loader policy for FOREIGN scenes (#996). The same scene that aborts the
 # process under the default `fail` (841 covers that) loads under `report`:
@@ -70,8 +71,9 @@ func main() {
   scene.sceneId = "card-game"
   log("scene.ok = {scene.ok}")
   let world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
   world.scenePolicy.unknownComponents = UnknownComponentPolicy.report
-  let rootEntity: EntityId = loadScene(world: world, scene: scene)
+  let rootEntity: EntityId = loadScene(world: world, uiSystems: uiSystems, scene: scene)
   # `Foo` waited in the pending outbox (no lib table, maybe an app's); no
   # system here claims it, so reporting it is what turns it into the
   # unknownComponent diagnostic — at the end of the list, after the load.
@@ -79,14 +81,21 @@ func main() {
   log("mounted root = {rootEntity.index >= 0}, alive = {aliveCount(world: world)}")
   # The empty registry: `CardView` is nobody's sub-scene.
   let registry: SceneRegistry = createSceneRegistry()
-  resolveSceneInstances(world: world, registry: registry, pageId: "")
+  resolveSceneInstances(
+    world: world
+    uiSystems: uiSystems
+    registry: registry
+    pageId: ""
+  )
 
   # The node with the unknown components still mounted with the ones it has.
   if let rootRaw: Int = world.nodeIds.get(k: "Root") {
     let root: EntityId = id(v: rootRaw)
     let layout: Layout = componentGet(this: world.layouts, entity: root)
     log("Root Layout kind={layout.kind} gap={layout.gap} (unknown token kept the default)")
-    log("Root has ComputedRect = {componentHas(this: world.computedRects, entity: root)}")
+    log(
+      "Root has ComputedRect = {componentHas(this: uiSystems.layout.computedRects, entity: root)}"
+    )
   }
 
   # Hex colours decode to the same RgbaColor as their {r,g,b,a} twins.

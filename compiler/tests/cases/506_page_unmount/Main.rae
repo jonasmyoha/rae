@@ -9,6 +9,7 @@ import ui/Registry
 open ui/Scene
 open ui/SceneInstance
 open ecs/Entity
+open ui/UiSystems
 
 func tinyScene(rootId: view String) ret String {
   var s: String = ""
@@ -36,6 +37,7 @@ func tinyScene(rootId: view String) ret String {
 
 func main() {
   let world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
   let pageId: String = "demo"
   let noOverrides: List(SceneOverride) = emptyOverrides()
 
@@ -43,6 +45,7 @@ func main() {
   let scene1: Scene = parseScene(source: tinyScene(rootId: "demo"))
   let r1: EntityId = mountPage(
     world: world
+    uiSystems: uiSystems
     pageId: "{pageId}"
     scene: scene1
     overrides: noOverrides
@@ -57,10 +60,10 @@ func main() {
   }
 
   # Unmount; entities for Root/Body/Footer should be gone from alive.
-  unmountPage(world: world, pageId: pageId)
+  unmountPage(world: world, uiSystems: uiSystems, pageId: pageId)
   # A destroyed index is recycled only once the app has swept its own tables
   # and released it (the dead-entities outbox); this test has no app tables.
-  releaseDeadEntities(world: world)
+  releaseDeadEntities(world: world, uiSystems: uiSystems)
   log("alive after unmount: {aliveCount(world: world)}")
   if let bodyGone: Int = findNodeInPage(world: world, pageId: pageId, nodeId: "Body") {
     log("body after unmount: {bodyGone} (leaked!)")
@@ -74,6 +77,7 @@ func main() {
   let scene2: Scene = parseScene(source: tinyScene(rootId: "demo"))
   let r2: EntityId = mountPage(
     world: world
+    uiSystems: uiSystems
     pageId: "{pageId}"
     scene: scene2
     overrides: noOverrides

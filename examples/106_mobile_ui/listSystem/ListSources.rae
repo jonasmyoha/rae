@@ -5,6 +5,7 @@ open ui/SceneInstance
 open ui/listViewSystem/ListViewSystem
 open ecs/Entity
 open ecs/ComponentTable
+open ui/UiSystems
 
 # The app's data lists as DATA (#996). Every list a screen shows — the Home
 # and Library cover grids, the search results, the album's track rows, the
@@ -257,6 +258,7 @@ func recentData(state: view AppState) ret ListViewData {
 # the host's `builtKey`, the rows are regenerated.
 func listSourceKey(
   world: view UiWorld
+  uiSystems: view UiSystems
   host: view EntityId
   source: view ListSourceKind
   state: view AppState
@@ -267,7 +269,11 @@ func listSourceKey(
     ret "{state.libraryRevision}|{settings}"
   }
   if source is ListSourceKind.searchTracks or source is ListSourceKind.searchAlbums {
-    ret searchQueryOnPage(world: world, page: pageOf(world: world, entity: host))
+    ret searchQueryOnPage(
+      world: world
+      uiSystems: uiSystems
+      page: pageOf(world: world, uiSystems: uiSystems, entity: host)
+    )
   }
   if source is ListSourceKind.albumTracks {
     ret "{albumCollectionKey(state: state)}|{playbackSystem.playingAlbumStem}|{playbackSystem.playingTrackIndex}"
@@ -280,6 +286,7 @@ func listSourceKey(
 
 func listViewDataFor(
   world: view UiWorld
+  uiSystems: view UiSystems
   host: view EntityId
   source: view ListSourceKind
   state: view AppState
@@ -301,7 +308,11 @@ func listViewDataFor(
     }
     ret searchData(
       state: state
-      query: searchQueryOnPage(world: world, page: pageOf(world: world, entity: host))
+      query: searchQueryOnPage(
+        world: world
+        uiSystems: uiSystems
+        page: pageOf(world: world, uiSystems: uiSystems, entity: host)
+      )
       albumsOnly: source is ListSourceKind.searchAlbums
       maxRows: maxRows
     )
@@ -320,6 +331,7 @@ func listViewDataFor(
 # once — the hero capture right after a mount needs them).
 func listSourceSystem(
   world: mod UiWorld
+  uiSystems: view UiSystems
   state: view AppState
   playbackSystem: view PlaybackSystem
   scenes: view AlbumScenes
@@ -332,6 +344,7 @@ func listSourceSystem(
     let binding: ListSource = componentDataAt(this: world.listSources, i: i)
     let key: String = listSourceKey(
       world: world
+      uiSystems: uiSystems
       host: host
       source: binding.source
       state: state
@@ -340,6 +353,7 @@ func listSourceSystem(
     if key is not binding.builtKey {
       let data: ListViewData = listViewDataFor(
         world: world
+        uiSystems: uiSystems
         host: host
         source: binding.source
         state: state
@@ -353,6 +367,6 @@ func listSourceSystem(
     i = i + 1
   }
   if changed {
-    listViewSystem(world: world, scenes: scenes.subScenes)
+    listViewSystem(world: world, uiSystems: uiSystems, scenes: scenes.subScenes)
   }
 }

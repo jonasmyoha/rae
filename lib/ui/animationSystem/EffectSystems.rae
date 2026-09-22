@@ -15,6 +15,7 @@ import ui/Components
 open ecs/Entity
 open ecs/ComponentTable
 open ecs/Event
+open ui/UiSystems
 
 const twoPi: Float = 6.28318530718
 
@@ -314,40 +315,45 @@ func smokeFxSystem(world: mod UiWorld, deltaTime: view Float) ret Bool {
 # Whether (x, y) in design units lies in the entity's laid-out box.
 func pointOverEntity(
   world: view UiWorld
+  uiSystems: view UiSystems
   entity: view EntityId
   x: view Float
   y: view Float
 ) ret Bool {
   if componentHas(this: world.worldTransforms, entity: entity) is false or componentHas(
-    this: world.computedRects
+    this: uiSystems.layout.computedRects
     entity: entity
   ) is false {
     ret false
   }
   let transform: WorldTransform2D = componentGet(this: world.worldTransforms, entity: entity)
-  let rect: ComputedRect = componentGet(this: world.computedRects, entity: entity)
+  let rect: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: entity)
   ret x >= transform.position.x and y >= transform.position.y and x <= transform.position.x + rect.size.x and y <= transform.position.y + rect.size.y
 }
 
-func childStrideX(world: view UiWorld, kids: view List(EntityId)) ret Float {
+func childStrideX(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  kids: view List(EntityId)
+) ret Float {
   if kids.length is 0 {
     ret 0.0
   }
   let first: EntityId = kids.copyAtFallback(index: 0, fallback: noEntity())
   if kids.length >= 2 {
     let second: EntityId = kids.copyAtFallback(index: 1, fallback: noEntity())
-    if componentHas(this: world.computedRects, entity: first) and componentHas(
-      this: world.computedRects
+    if componentHas(this: uiSystems.layout.computedRects, entity: first) and componentHas(
+      this: uiSystems.layout.computedRects
       entity: second
     ) {
-      ret componentGet(this: world.computedRects, entity: second).position.x - componentGet(
-        this: world.computedRects
+      ret componentGet(this: uiSystems.layout.computedRects, entity: second).position.x - componentGet(
+        this: uiSystems.layout.computedRects
         entity: first
       ).position.x
     }
   }
-  if componentHas(this: world.computedRects, entity: first) {
-    ret componentGet(this: world.computedRects, entity: first).size.x
+  if componentHas(this: uiSystems.layout.computedRects, entity: first) {
+    ret componentGet(this: uiSystems.layout.computedRects, entity: first).size.x
   }
   ret 0.0
 }
@@ -361,6 +367,7 @@ func childStrideX(world: view UiWorld, kids: view List(EntityId)) ret Float {
 # scale — an authored TransformFx on a page keeps its other fields).
 func carouselSystem(
   world: mod UiWorld
+  uiSystems: view UiSystems
   deltaTime: view Float
   pointerX: view Float
   pointerY: view Float
@@ -390,9 +397,10 @@ func carouselSystem(
       )
     }
     let state: mod CarouselState => componentMod(this: world.carouselStates, entity: entity)
-    let stride: Float = childStrideX(world: world, kids: kids)
+    let stride: Float = childStrideX(world: world, uiSystems: uiSystems, kids: kids)
     let over: Bool = pointOverEntity(
       world: world
+      uiSystems: uiSystems
       entity: entity
       x: pointerX
       y: pointerY

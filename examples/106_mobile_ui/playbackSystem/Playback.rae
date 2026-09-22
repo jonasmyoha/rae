@@ -20,6 +20,7 @@ import ui/Components
 open ecs/Entity
 open ecs/Queue
 open ecs/ComponentTable
+open ui/UiSystems
 
 # PlaybackSystem IS the design's PlaybackSystem — the first ECS "actor"
 # (docs/ecs-systems-and-data-observation.md §3/§5.1). It owns the
@@ -225,7 +226,11 @@ func fillWidthChanged(current: view Float, next: view Float) ret Bool {
   ret delta > 0.05
 }
 
-func applyPlaybackToWorld(world: mod UiWorld, playbackSystem: view PlaybackSystem) pub {
+func applyPlaybackToWorld(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  playbackSystem: view PlaybackSystem
+) pub {
   unsafe {
     # Every `ProgressBar` (#979): the fill is the track's first child. Read
     # the track's laid-out width from its ComputedRect, scale by progress and
@@ -242,8 +247,11 @@ func applyPlaybackToWorld(world: mod UiWorld, playbackSystem: view PlaybackSyste
         if kids.ids.length > 0 {
           let fillEntity: EntityId = rae_ext_rae_buf_get(buf: kids.ids.data, index: 0)
           var trackW: Float = 0.0
-          if componentHas(this: world.computedRects, entity: trackEntity) {
-            let tcr: ComputedRect = componentGet(this: world.computedRects, entity: trackEntity)
+          if componentHas(this: uiSystems.layout.computedRects, entity: trackEntity) {
+            let tcr: ComputedRect = componentGet(
+              this: uiSystems.layout.computedRects
+              entity: trackEntity
+            )
             trackW = tcr.size.x
           }
           let fillW: Float = trackW * p
@@ -253,14 +261,17 @@ func applyPlaybackToWorld(world: mod UiWorld, playbackSystem: view PlaybackSyste
           # write marks layout dirty, layout reflows, the frame repaints and
           # re-arms `renderUntil`). Paused playback reports a constant
           # progress, so the equality check settles it.
-          if componentHas(this: world.computedRects, entity: fillEntity) {
-            let fcr: ComputedRect = componentGet(this: world.computedRects, entity: fillEntity)
+          if componentHas(this: uiSystems.layout.computedRects, entity: fillEntity) {
+            let fcr: ComputedRect = componentGet(
+              this: uiSystems.layout.computedRects
+              entity: fillEntity
+            )
             if fillWidthChanged(current: fcr.size.x, next: fillW) {
               let nextCr: ComputedRect = {
                 position: { x: fcr.position.x, y: fcr.position.y }
                 size: { x: fillW, y: fcr.size.y }
               }
-              componentSet(this: world.computedRects, entity: fillEntity, data: nextCr)
+              componentSet(this: uiSystems.layout.computedRects, entity: fillEntity, data: nextCr)
             }
           }
           if componentHas(this: world.rects, entity: fillEntity) {

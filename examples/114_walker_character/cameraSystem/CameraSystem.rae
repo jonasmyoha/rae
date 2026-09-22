@@ -57,6 +57,7 @@ open ui/Ecs
 open ui/Components
 open ui/inputSystem/InputSystem
 open ui/renderSystem/RenderSystem
+open ui/UiSystems
 
 # Camera rig + camera + scene light. (#548)
 # #744: `rigEntity` and `camEntity` are the two GameWorld entities that express
@@ -166,6 +167,7 @@ type CameraTick {
 # bundle, the persist dirty flag, and the world + hero entity to read the
 # followed controller — not the whole App.
 func cameraUpdate(
+  uiSystems: mod UiSystems
   cameraSystem: mod CameraSystem
   inputSystem: mod InputSystem
   persist: mod PersistState
@@ -196,6 +198,7 @@ func cameraUpdate(
     rig: cameraSystem.rig
     moveStick: inputSystem.moveStick
     world: inputSystem.world
+    uiSystems: uiSystems
   )
   let cameraMoved: Bool = updateCameraRig(
     rig: cameraSystem.rig

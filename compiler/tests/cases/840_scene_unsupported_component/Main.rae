@@ -7,6 +7,7 @@ open ui/Scene
 open ui/SceneLoader
 open ecs/Entity
 open ecs/ComponentTable
+open ui/UiSystems
 
 # A well-formed scene whose one node carries `ComputedRect` — a UiWorld table
 # that IS a component, but a DERIVED one the layout system writes; it is never
@@ -37,8 +38,9 @@ func main() {
   scene.sceneId = "fx-demo"
   log("scene.ok = {scene.ok}")
   let world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
   log("loading scene with an unsupported component...")
-  let rootEntity: EntityId = loadScene(world: world, scene: scene)
+  let rootEntity: EntityId = loadScene(world: world, uiSystems: uiSystems, scene: scene)
   # Unreachable: loadScene aborts on the unsupported component (#941).
   log("unreachable rootEntity = {rootEntity.index}")
 }

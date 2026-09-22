@@ -54,6 +54,7 @@ open ui/Ecs
 open ui/Components
 open ui/inputSystem/InputSystem
 open ui/renderSystem/RenderSystem
+open ui/UiSystems
 
 # What a UI tick reports back to updateApp for the render decision.
 type UiTick {
@@ -62,6 +63,7 @@ type UiTick {
 }
 
 func uiUpdate(
+  uiSystems: mod UiSystems
   cameraSystem: mod CameraSystem
   characterSystem: mod CharacterSystem
   frame: mod Frame
@@ -74,7 +76,7 @@ func uiUpdate(
   deltaTime: copy Float
   now: copy Float64
 ) ret UiTick {
-  updateUiInput(input: inputSystem.ui, world: inputSystem.world)
+  updateUiInput(input: inputSystem.ui, world: inputSystem.world, uiSystems: uiSystems)
   # The corner menu is a UI-world node, so its press is an action and the
   # action->layout gate below lays out the panel it toggles. (As an overlay
   # button its toggle ran no layout; that only went unnoticed because the
@@ -84,6 +86,7 @@ func uiUpdate(
   }
   let scrolled: Bool = updateScrollRoot(
     world: inputSystem.world
+    uiSystems: uiSystems
     entity: inputSystem.panelScroll
     input: inputSystem.ui
   )
@@ -203,6 +206,7 @@ func uiUpdate(
   if settingsUpdatePointer(
     settingsState: inputSystem.settings
     world: inputSystem.world
+    uiSystems: uiSystems
     input: inputSystem.ui
   ) {
     settingsChanged = true
@@ -210,6 +214,7 @@ func uiUpdate(
   if settingsUpdateLatitudePointer(
     settingsState: inputSystem.settings
     world: inputSystem.world
+    uiSystems: uiSystems
     input: inputSystem.ui
   ) {
     settingsChanged = true
@@ -217,6 +222,7 @@ func uiUpdate(
   if settingsUpdateDatePointer(
     settingsState: inputSystem.settings
     world: inputSystem.world
+    uiSystems: uiSystems
     input: inputSystem.ui
   ) {
     settingsChanged = true
@@ -246,14 +252,22 @@ func uiUpdate(
     }
     let pctS: Int = speedPercent(value: characterSystem.speed)
     setNodeText(world: inputSystem.world, nodeId: "SpeedLabel", value: "Speed {pctS}%")
-    settingsApplyToWorld(settingsState: inputSystem.settings, world: inputSystem.world)
+    settingsApplyToWorld(
+      settingsState: inputSystem.settings
+      world: inputSystem.world
+      uiSystems: uiSystems
+    )
     applyWalkerPanel(world: inputSystem.world, open: inputSystem.settings.open)
     persist.stateDirty = true
   }
   if clipHit.length() > 0 or transportHit.length() > 0 {
     inputSystem.settings.speed = characterSystem.speed
     inputSystem.settings.toon = characterSystem.toon
-    settingsApplyToWorld(settingsState: inputSystem.settings, world: inputSystem.world)
+    settingsApplyToWorld(
+      settingsState: inputSystem.settings
+      world: inputSystem.world
+      uiSystems: uiSystems
+    )
     applyWalkerPanel(world: inputSystem.world, open: inputSystem.settings.open)
     persist.stateDirty = true
   }
@@ -265,7 +279,7 @@ func uiUpdate(
   # positions. Without it the wheel moved nothing until the next
   # relayout — again masked by the time-of-day animation while it runs.
   if uiActionCount(world: inputSystem.world) > 0 or settingsChanged or scrolled {
-    runUiSystems(world: inputSystem.world, res: inputSystem.gpuUi)
+    runUiSystems(world: inputSystem.world, uiSystems: uiSystems, res: inputSystem.gpuUi)
   }
   ret UiTick { settingsChanged: settingsChanged, scrolled: scrolled }
 }

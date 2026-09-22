@@ -76,6 +76,7 @@ open ui/Components
 open ui/inputSystem/InputSystem
 open ui/renderSystem/RenderSystem
 open app3d/RenderScale
+open ui/UiSystems
 
 const clipTransitionDuration: Float = 0.28
 
@@ -100,6 +101,8 @@ type InputSystem {
   moveStick: VirtualJoystick
   ui: UiInput
   world: UiWorld
+  # The lib UI systems' derived tables (ui/UiSystems), next to the world.
+  uiSystems: UiSystems
   gpuUi: Gpu2dUi
   clipPanel: ControlPanel
   transport: ControlPanel
@@ -209,9 +212,15 @@ func createApp() ret App {
       themeFile: "Theme.raescene"
     )
     var uiWorld: UiWorld = create()
+    var uiSystems: UiSystems = createUiSystems()
     # #764: install the app's theme (palette + scene tokens) onto this world.
     seedWorldTheme(world: uiWorld, res: gpuUi)
-    let uiRoot: EntityId = mountUiScene(world: uiWorld, path: "{assets}ui.raescene", res: gpuUi)
+    let uiRoot: EntityId = mountUiScene(
+      world: uiWorld
+      uiSystems: uiSystems
+      path: "{assets}ui.raescene"
+      res: gpuUi
+    )
     var uiInput: UiInput = createUiInput()
     var logOverlay: LogOverlay = createLogOverlay(
       capacity: 64
@@ -481,11 +490,21 @@ func createApp() ret App {
       actionId: "clip.run"
       group: 1
     )
-    buildControlPanel(panel: clipPanel, world: uiWorld, res: gpuUi)
+    buildControlPanel(
+      panel: clipPanel
+      world: uiWorld
+      uiSystems: uiSystems
+      res: gpuUi
+    )
 
     var transport: ControlPanel = createControlPanel(hostNodeId: "TransportRow")
     transport.buttonW = 84.0
-    buildControlPanel(panel: transport, world: uiWorld, res: gpuUi)
+    buildControlPanel(
+      panel: transport
+      world: uiWorld
+      uiSystems: uiSystems
+      res: gpuUi
+    )
 
     # Character-switch buttons (#546): Prev / Next cycle the controlled character,
     # the same as Page Up/Down and keys 1/2. Momentary (group 0), not a selection.
@@ -505,7 +524,12 @@ func createApp() ret App {
       actionId: "char.next"
       group: 0
     )
-    buildControlPanel(panel: charPanel, world: uiWorld, res: gpuUi)
+    buildControlPanel(
+      panel: charPanel
+      world: uiWorld
+      uiSystems: uiSystems
+      res: gpuUi
+    )
     setNodeText(
       world: uiWorld
       nodeId: "CharacterReadout"
@@ -637,25 +661,31 @@ func createApp() ret App {
     )
     let pct0: Int = speedPercent(value: speed)
     setNodeText(world: uiWorld, nodeId: "SpeedLabel", value: "Speed {pct0}%")
-    runUiSystems(world: uiWorld, res: gpuUi)
+    runUiSystems(world: uiWorld, uiSystems: uiSystems, res: gpuUi)
 
     # The scene authors a `ScrollRoot` on SidePanelContent (the Hug content
     # inside the clipped SidePanelBody); the lib system seeds its state, and
     # the floor is the laid-out overflow.
     var panelScrollMemory: ScrollMemory = createScrollMemory()
-    scrollRootSystem(world: uiWorld, memory: panelScrollMemory)
-    var panelScroll: EntityId = findScrollRoot(world: uiWorld)
+    scrollRootSystem(world: uiWorld, uiSystems: uiSystems, memory: panelScrollMemory)
+    var panelScroll: EntityId = findScrollRoot(world: uiWorld, uiSystems: uiSystems)
     # The menu button is an ECS node in the same top row as the camera bar, so the
     # two hug to one height and resize together (lib/ui/CornerMenuButton).
     let menuOk: Bool = mountCornerMenuButton(
       world: uiWorld
+      uiSystems: uiSystems
       res: gpuUi
       hostNodeId: "CornerMenuSlot"
     )
     if menuOk is false {
       logWarnLine(ov: logOverlay, text: "corner menu button failed to mount")
     }
-    let barOk: Bool = mountCameraBar(world: uiWorld, res: gpuUi, hostNodeId: "CameraBarSlot")
+    let barOk: Bool = mountCameraBar(
+      world: uiWorld
+      uiSystems: uiSystems
+      res: gpuUi
+      hostNodeId: "CameraBarSlot"
+    )
     walkerHideCameraChrome(world: uiWorld)
     var settings: SettingsState = createSettingsState(
       scene: 1
@@ -668,13 +698,14 @@ func createApp() ret App {
     setTaaEnabled(renderer: renderer, on: settings.taa)  # default FXAA; the settings pane toggles TAA
     let settingsOk: Bool = mountSettingsDialog(
       world: uiWorld
+      uiSystems: uiSystems
       res: gpuUi
       hostNodeId: "SettingsDialogSlot"
     )
     if settingsOk is false {
       logWarnLine(ov: logOverlay, text: "settings dialog failed to mount")
     }
-    settingsApplyToWorld(settingsState: settings, world: uiWorld)
+    settingsApplyToWorld(settingsState: settings, world: uiWorld, uiSystems: uiSystems)
     settings.open = false
     applyWalkerPanel(world: uiWorld, open: settings.open)
     setRendererSky(
@@ -721,6 +752,7 @@ func createApp() ret App {
         moveStick: own moveStick
         ui: own uiInput
         world: own uiWorld
+        uiSystems: own uiSystems
         gpuUi: gpuUi
         clipPanel: own clipPanel
         transport: own transport
@@ -780,6 +812,8 @@ func createApp() ret App {
 
 # ----- the loop ------------------------------------------------------------
 func runWalkerApp() ret Int {
+  var uiSystems: UiSystems = createUiSystems()
+
   var app: App = createApp()
   # A stream through the meadow (#833), baked once against the terrain.
   addMeadowRiver(
@@ -811,6 +845,7 @@ func runWalkerApp() ret Int {
     } else {
       if let resources: mod GpuResources => app.gpuResources {
         renderApp(
+          uiSystems: uiSystems
           cameraSystem: app.cameraSystem
           characterSystem: app.characterSystem
           frame: app.frame
@@ -828,7 +863,7 @@ func runWalkerApp() ret Int {
     }
     # Frame end: report the authored components no lib table matched (this app
     # has no tables of its own) and recycle the indices of destroyed entities.
-    uiFrameEnd(world: app.inputSystem.world)
+    uiFrameEnd(world: app.inputSystem.world, uiSystems: uiSystems)
   }
   if let resources: mod GpuResources => app.gpuResources {
     grassShutdown(grass: app.grassCompute, resources: resources)

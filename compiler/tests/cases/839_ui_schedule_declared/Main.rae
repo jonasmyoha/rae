@@ -14,6 +14,7 @@ open ui/layoutSystem/LayoutSystem
 open ui/Transform
 open ecs/ComponentTable
 open ecs/Schedule
+open ui/UiSystems
 
 type Compare {
   frame: String
@@ -26,14 +27,29 @@ type Compare {
 func frame(
   label: view String
   world: mod UiWorld
+  uiSystems: mod UiSystems
   layoutCache: mod LayoutCache
   transformCache: mod TransformCache
   schedule: mod Schedule
 ) ret Compare {
-  let cacheLayout: Bool = ifDirty(world: world, cache: layoutCache)
-  let schedLayout: Bool = uiShouldRun(schedule: schedule, world: world, index: uiSystemLayout)
-  let cacheTransform: Bool = systemIfDirty(world: world, cache: transformCache)
-  let schedTransform: Bool = uiShouldRun(schedule: schedule, world: world, index: uiSystemTransform)
+  let cacheLayout: Bool = ifDirty(world: world, uiSystems: uiSystems, cache: layoutCache)
+  let schedLayout: Bool = uiShouldRun(
+    schedule: schedule
+    world: world
+    uiSystems: uiSystems
+    index: uiSystemLayout
+  )
+  let cacheTransform: Bool = systemIfDirty(
+    world: world
+    uiSystems: uiSystems
+    cache: transformCache
+  )
+  let schedTransform: Bool = uiShouldRun(
+    schedule: schedule
+    world: world
+    uiSystems: uiSystems
+    index: uiSystemTransform
+  )
   log(
     "{label}: layout cache={cacheLayout} sched={schedLayout} | transform cache={cacheTransform} sched={schedTransform}"
   )
@@ -46,6 +62,7 @@ func frame(
 
 func main() {
   let world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
   let sched: Schedule = createUiPipeline(world: world)
 
   # (a) order + count
@@ -95,6 +112,7 @@ func main() {
   let f1: Compare = frame(
     label: "first"
     world: world
+    uiSystems: uiSystems
     layoutCache: layoutCache
     transformCache: transformCache
     schedule: sched
@@ -104,6 +122,7 @@ func main() {
   let f2: Compare = frame(
     label: "idle"
     world: world
+    uiSystems: uiSystems
     layoutCache: layoutCache
     transformCache: transformCache
     schedule: sched
@@ -117,6 +136,7 @@ func main() {
   let f3: Compare = frame(
     label: "actives"
     world: world
+    uiSystems: uiSystems
     layoutCache: layoutCache
     transformCache: transformCache
     schedule: sched
@@ -129,6 +149,7 @@ func main() {
   let f4: Compare = frame(
     label: "texts"
     world: world
+    uiSystems: uiSystems
     layoutCache: layoutCache
     transformCache: transformCache
     schedule: sched
@@ -140,6 +161,7 @@ func main() {
   let f5: Compare = frame(
     label: "bareEntity"
     world: world
+    uiSystems: uiSystems
     layoutCache: layoutCache
     transformCache: transformCache
     schedule: sched
@@ -152,6 +174,7 @@ func main() {
   let f6: Compare = frame(
     label: "opacities"
     world: world
+    uiSystems: uiSystems
     layoutCache: layoutCache
     transformCache: transformCache
     schedule: sched
@@ -165,6 +188,7 @@ func main() {
   let f7: Compare = frame(
     label: "extentAnchors"
     world: world
+    uiSystems: uiSystems
     layoutCache: layoutCache
     transformCache: transformCache
     schedule: sched

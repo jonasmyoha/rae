@@ -3,6 +3,7 @@
 # createUiWorld), so every module that imports ui/ecs must also emit ui/theme.
 open ui/ScenePolicy
 open ui/SceneBundles
+open ui/UiSystems
 import ui/Theme
 open ecs/Entity
 open ecs/ComponentTable
@@ -153,9 +154,6 @@ type UiWorld {
   childrens: ComponentTable(Children)
 
   # ----- derived / runtime-only -----
-  measuredSizes: ComponentTable(MeasuredSize)
-  measuredTexts: ComponentTable(MeasuredText)  # #1004: font measure of a Hug Text leaf
-  computedRects: ComponentTable(ComputedRect)
   # #727: the local Transform2D per entity (ComputedRect position + scroll +
   # authored rotation/scale), the input the general lib/ecs TransformSystem folds
   # into worldTransforms over the depth order. Rebuilt each transform pass.
@@ -163,9 +161,6 @@ type UiWorld {
   worldTransforms: ComponentTable(WorldTransform2D)
   worldVisuals: ComponentTable(WorldVisual)
   runtimeOffsets: ComponentTable(RuntimeOffset)
-  layoutScales: ComponentTable(LayoutScale)
-  safeInsets: ComponentTable(SafeInsets)
-  parents: ComponentTable(Parent)
   animStates: ComponentTable(AnimState)
   smokeStates: ComponentTable(SmokeState)  # #1005 runtime
   carouselStates: ComponentTable(CarouselState)  # #1005 runtime
@@ -315,16 +310,10 @@ func createUiWorld() ret UiWorld {
     animTriggers: ComponentTable.create(AnimTrigger)
     wobbleFxs: ComponentTable.create(WobbleFx)
     childrens: ComponentTable.create(Children)
-    measuredSizes: ComponentTable.create(MeasuredSize)
-    measuredTexts: ComponentTable.create(MeasuredText)
-    computedRects: ComponentTable.create(ComputedRect)
     localTransforms: ComponentTable.create(Transform2D)
     worldTransforms: ComponentTable.create(WorldTransform2D)
     worldVisuals: ComponentTable.create(WorldVisual)
     runtimeOffsets: ComponentTable.create(RuntimeOffset)
-    layoutScales: ComponentTable.create(LayoutScale)
-    safeInsets: ComponentTable.create(SafeInsets)
-    parents: ComponentTable.create(Parent)
     animStates: ComponentTable.create(AnimState)
     smokeStates: ComponentTable.create(SmokeState)
     carouselStates: ComponentTable.create(CarouselState)
@@ -423,7 +412,7 @@ func nodeEntity(world: view UiWorld, index: view Int) pub ret EntityId {
 # Walk Parent up from `entity` until we hit a `PageRoot`, then return
 # its id. Returns an empty string when no ancestor is a page root —
 # callers should treat that as "no page" / unscoped.
-func pageOf(world: view UiWorld, entity: view EntityId) pub ret String {
+func pageOf(world: view UiWorld, uiSystems: view UiSystems, entity: view EntityId) pub ret String {
   # Explicit construction (not `let cur: EntityId = entity`) — the
   # Live VM treats the latter as a view-ref bind and then refuses
   # the reassignment inside the loop.
@@ -433,10 +422,10 @@ func pageOf(world: view UiWorld, entity: view EntityId) pub ret String {
       let r: PageRoot = componentGet(this: world.pageRoots, entity: cur)
       ret r.id
     }
-    if componentHas(this: world.parents, entity: cur) is false {
+    if componentHas(this: uiSystems.hierarchy.parents, entity: cur) is false {
       ret ""
     }
-    let pl: Parent = componentGet(this: world.parents, entity: cur)
+    let pl: Parent = componentGet(this: uiSystems.hierarchy.parents, entity: cur)
     cur = { index: pl.parent.index, generation: pl.parent.generation }
   }
   ret ""
@@ -497,7 +486,7 @@ func isPageActive(world: view UiWorld, pageId: view String) pub ret Bool {
 # per scrollable page, typically a handful in total). Falls back to the first
 # ScrollRoot when no page is active (a single-page world with no PageRoot).
 # `noEntity()` when nothing scrolls.
-func findScrollRoot(world: view UiWorld) pub ret EntityId {
+func findScrollRoot(world: view UiWorld, uiSystems: view UiSystems) pub ret EntityId {
   let n: Int = componentCount(this: world.scrollRoots)
   if n is 0 {
     ret noEntity()
@@ -506,7 +495,7 @@ func findScrollRoot(world: view UiWorld) pub ret EntityId {
   let fallback: EntityId = componentEntityAt(this: world.scrollRoots, i: 0)
   loop i < n {
     let e: EntityId = componentEntityAt(this: world.scrollRoots, i: i)
-    let pid: String = pageOf(world: world, entity: e)
+    let pid: String = pageOf(world: world, uiSystems: uiSystems, entity: e)
     if pid.length() > 0 {
       if isPageActive(world: world, pageId: pid) {
         ret e
@@ -594,8 +583,11 @@ func destroyEntity(world: mod UiWorld, entity: view EntityId) pub {
 # once per frame AFTER its own systems have cleared the dead entities from
 # their tables (and after any unmount); an app with no tables of its own calls
 # it right after the lib pipeline.
-func releaseDeadEntities(world: mod UiWorld) pub {
+func releaseDeadEntities(world: mod UiWorld, uiSystems: mod UiSystems) pub {
   loop let entity: view EntityId in world.deadEntities {
+    # The lib systems' own rows (docs/ecs-systems-own-their-tables.md §3.1)
+    # go with the entity, like the world's did in destroyEntity.
+    clearUiSystemsEntity(uiSystems: uiSystems, entity: entity)
     recycleEntityIndex(this: world.allocator, entity: entity)
   }
   world.deadEntities.clear()
@@ -627,7 +619,7 @@ func dropPendingComponentsOf(world: mod UiWorld, entity: view EntityId) {
 # the shared lib/ecs HierarchySystem `collectSubtree` (#722) — UiWorld
 # stores the standard ecs `Children` cache, so there is no UI-local
 # tree walk to duplicate it.
-func destroyEntitySubtree(world: mod UiWorld, root: view EntityId) pub {
+func destroyEntitySubtree(world: mod UiWorld, uiSystems: view UiSystems, root: view EntityId) pub {
   unsafe {
     # #972: detach the root from its parent's `Children` cache FIRST. Without
     # this a destroyed subtree root (the nav-tabs bar, unmounted on every tab
@@ -635,7 +627,7 @@ func destroyEntitySubtree(world: mod UiWorld, root: view EntityId) pub {
     # then recycled its id for some new entity, so the dock laid out a
     # phantom extra child per switch and its mini-player + tabs climbed by
     # one bar height every time the user pressed a menubar button.
-    unlinkFromCurrent(parents: world.parents, childrens: world.childrens, child: root)
+    unlinkFromCurrent(parents: uiSystems.hierarchy.parents, childrens: world.childrens, child: root)
     let collected: List(EntityId) = List.create(EntityId, cap: 32)
     collectSubtree(childrens: world.childrens, node: root, out: collected)
     # Destroy in reverse (children before parents).
@@ -653,13 +645,13 @@ func destroyEntitySubtree(world: mod UiWorld, root: view EntityId) pub {
 # subtree, and sweep `world.nodeIds` for keys with the `"<pageId>/"`
 # prefix so a future page with the same id starts clean. No-op when
 # no page with that id is mounted.
-func unmountPage(world: mod UiWorld, pageId: view String) pub {
+func unmountPage(world: mod UiWorld, uiSystems: view UiSystems, pageId: view String) pub {
   unsafe {
     let root: EntityId = findPageRootEntity(world: world, pageId: pageId)
     if isNone(this: root) {
       ret
     }
-    destroyEntitySubtree(world: world, root: root)
+    destroyEntitySubtree(world: world, uiSystems: uiSystems, root: root)
     # Sweep nodeIds keyed under `"<pageId>/"`. The pageOf walk
     # already knows about nested PageRoot ancestors but we only
     # remove the directly-named prefix here; nested pages that share

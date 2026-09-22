@@ -7,6 +7,7 @@ open ui/Scene
 open ui/SceneLoader
 open ecs/Entity
 open ecs/ComponentTable
+open ui/UiSystems
 
 # Build a minimal .raescene-shaped JSON via concat. `{` starts string
 # interpolation in Rae so we have to escape every `{` and `}` with
@@ -63,13 +64,15 @@ func main() {
   }
 
   let world: UiWorld = createUiWorld()
-  var rootEntity: EntityId = loadScene(world: world, scene: scene)
+
+  var uiSystems: UiSystems = createUiSystems()
+  var rootEntity: EntityId = loadScene(world: world, uiSystems: uiSystems, scene: scene)
   log("rootEntity = {rootEntity.index}")
   log("alive = {aliveCount(world: world)}")
   log("nodeIds map size = {world.nodeIds.length}")
 
   log("--- entity dump ---")
-  dumpScene(world: world, scene: scene)
+  dumpScene(world: world, uiSystems: uiSystems, scene: scene)
 
   # Confirm a couple of components actually got the right values.
   log("--- component spot-checks ---")

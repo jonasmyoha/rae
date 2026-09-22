@@ -90,6 +90,7 @@ open ecs/Entity
 open ecs/hierarchySystem/HierarchySystem
 open ecs/ComponentTable
 open ui/FramesHierarchy
+open ui/UiSystems
 
 type FrameSet {
   names: List(String)
@@ -628,6 +629,7 @@ func overriddenNodeIds(
 # order) so field conflicts resolve deterministically.
 func applyFrameToPage(
   world: mod UiWorld
+  uiSystems: view UiSystems
   scene: view Scene
   frames: view FrameSet
   states: view StateSet
@@ -687,6 +689,7 @@ func applyFrameToPage(
   if haveHierarchyDirectives(scene: scene, frames: frames) {
     deriveActiveHierarchy(
       world: world
+      uiSystems: uiSystems
       scene: scene
       frames: frames
       frameIdx: frameIdx
@@ -704,6 +707,7 @@ func applyFrameToPage(
 # (re)mount — the table is a few JsonDoc lookups.
 func applySceneFramesToPage(
   world: mod UiWorld
+  uiSystems: view UiSystems
   scene: view Scene
   pageId: view String
   windowPtW: view Float
@@ -712,6 +716,7 @@ func applySceneFramesToPage(
   let noStates: List(String) = List.create(String, cap: 1)
   ret applySceneFramesToPageWithStates(
     world: world
+    uiSystems: uiSystems
     scene: scene
     pageId: pageId
     windowPtW: windowPtW
@@ -726,6 +731,7 @@ func applySceneFramesToPage(
 # handles deactivation, no inverse bags needed.
 func applySceneFramesToPageWithStates(
   world: mod UiWorld
+  uiSystems: view UiSystems
   scene: view Scene
   pageId: view String
   windowPtW: view Float
@@ -746,6 +752,7 @@ func applySceneFramesToPageWithStates(
   )
   applyFrameToPage(
     world: world
+    uiSystems: uiSystems
     scene: scene
     frames: frames
     states: states

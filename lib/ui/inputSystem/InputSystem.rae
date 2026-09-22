@@ -9,6 +9,7 @@ import Gpu2d
 open ecs/Entity
 open ecs/ComponentTable
 open ecs/Event
+open ui/UiSystems
 
 type UiPointerState {
   x: Float
@@ -51,6 +52,7 @@ func uiEntityActive(world: view UiWorld, entity: view EntityId) ret Bool {
 
 func uiPointInEntity(
   world: view UiWorld
+  uiSystems: view UiSystems
   entity: view EntityId
   x: view Float
   y: view Float
@@ -61,14 +63,14 @@ func uiPointInEntity(
   if componentHas(this: world.worldTransforms, entity: entity) is false {
     ret false
   }
-  if componentHas(this: world.computedRects, entity: entity) is false {
+  if componentHas(this: uiSystems.layout.computedRects, entity: entity) is false {
     ret false
   }
   let wt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: entity)
   if worldVisualOf(world: world, entity: entity).visible is false {
     ret false
   }
-  let cr: ComputedRect = componentGet(this: world.computedRects, entity: entity)
+  let cr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: entity)
   if x < wt.position.x {
     ret false
   }
@@ -86,6 +88,7 @@ func uiPointInEntity(
 
 func uiHitTestEntity(
   world: view UiWorld
+  uiSystems: view UiSystems
   entity: view EntityId
   x: view Float
   y: view Float
@@ -101,6 +104,7 @@ func uiHitTestEntity(
         let child: EntityId = rae_ext_rae_buf_get(buf: children.ids.data, index: i)
         let hit: EntityId = uiHitTestEntity(
           world: world
+          uiSystems: uiSystems
           entity: child
           x: x
           y: y
@@ -114,6 +118,7 @@ func uiHitTestEntity(
     if componentHas(this: world.onClicks, entity: entity) {
       if uiPointInEntity(
         world: world
+        uiSystems: uiSystems
         entity: entity
         x: x
         y: y
@@ -125,15 +130,21 @@ func uiHitTestEntity(
   }
 }
 
-func uiHitTest(world: view UiWorld, x: view Float, y: view Float) pub ret EntityId {
+func uiHitTest(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  x: view Float
+  y: view Float
+) pub ret EntityId {
   unsafe {
-    let roots: List(EntityId) = collectPaintableRoots(world: world)
+    let roots: List(EntityId) = collectPaintableRoots(world: world, uiSystems: uiSystems)
     var i: Int = roots.length - 1
     loop i >= 0 {
       let root: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: i)
       if componentHas(this: world.layerRoots, entity: root) is false {
         let hit: EntityId = uiHitTestEntity(
           world: world
+          uiSystems: uiSystems
           entity: root
           x: x
           y: y
@@ -200,7 +211,7 @@ func entityPressed(world: view UiWorld, entity: view EntityId) pub ret Bool {
   ret componentGet(this: world.interactions, entity: entity).pressed
 }
 
-func updateUiInput(input: mod UiInput, world: mod UiWorld) pub {
+func updateUiInput(input: mod UiInput, world: mod UiWorld, uiSystems: view UiSystems) pub {
   # Recycle last frame's action channel: frameAdvance swaps in the empty spare so
   # this frame's input produces into a clean queue (the old clearUiActions).
   frameAdvance(this: world.uiActions)
@@ -220,7 +231,12 @@ func updateUiInput(input: mod UiInput, world: mod UiWorld) pub {
     pressed: pressed
     released: released
   }
-  input.hoveredEntity = uiHitTest(world: world, x: x, y: y)
+  input.hoveredEntity = uiHitTest(
+    world: world
+    uiSystems: uiSystems
+    x: x
+    y: y
+  )
   if pressed {
     input.pressedEntity = input.hoveredEntity
   }

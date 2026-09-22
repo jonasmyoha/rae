@@ -46,6 +46,7 @@ open ui/SceneInstance
 open ui/Transform
 open ecs/Entity
 open Gpu2dCanvas
+open ui/UiSystems
 
 # Phone-shaped, and the same numbers the scene was authored against so nothing
 # has to be scaled at load.
@@ -194,9 +195,12 @@ func main() ret Int {
   )
 
   var world: UiWorld = create()
+
+  var uiSystems: UiSystems = createUiSystems()
   var sceneRegistry: SceneRegistry = createSceneRegistry()
   let root: EntityId = mountSceneWithImports(
     world: world
+    uiSystems: uiSystems
     root: base
     sceneId: "Ui"
     resources: gpuUi
@@ -240,7 +244,12 @@ func main() ret Int {
   # runScheduledUiSystems runs the render-prep ones each gated by `uiShouldRun`
   # (layout/transform skip when their inputs are unchanged; see lib/ui/Pipeline).
   var schedule: Schedule = createUiPipeline(world: world)
-  runScheduledUiSystems(schedule: schedule, world: world, res: gpuUi)
+  runScheduledUiSystems(
+    schedule: schedule
+    world: world
+    uiSystems: uiSystems
+    res: gpuUi
+  )
 
   var input: UiInput = createUiInput()
   # Has a frame actually reached the screen yet? A window is not presentable the
@@ -254,9 +263,9 @@ func main() ret Int {
     # One call handles the whole resize: it consumes the event, converts pixels
     # to POINTS (a UI laid out in pixels renders half-size on a retina display),
     # re-points the design resolution and re-runs the systems.
-    var changed: Bool = resizeUiToWindow(world: world, res: gpuUi)
+    var changed: Bool = resizeUiToWindow(world: world, uiSystems: uiSystems, res: gpuUi)
 
-    updateUiInput(input: input, world: world)
+    updateUiInput(input: input, world: world, uiSystems: uiSystems)
     let hadEvents: Bool = uiActionCount(world: world) > 0
 
     if applyActions(state: state, world: world) {
@@ -281,7 +290,12 @@ func main() ret Int {
       # The order is not a detail: bounds computed before layout are last
       # frame's bounds. The Schedule owns that order and skips layout/transform
       # when their declared inputs did not change.
-      runScheduledUiSystems(schedule: schedule, world: world, res: gpuUi)
+      runScheduledUiSystems(
+        schedule: schedule
+        world: world
+        uiSystems: uiSystems
+        res: gpuUi
+      )
     }
 
     # DECIDED FRESH EVERY ITERATION, which is the whole point. An earlier
@@ -307,7 +321,12 @@ func main() ret Int {
         b: 0.08
         a: 1.0
       )
-      renderSystemGpu2d(world: world, res: gpuUi, canvas: canvas)
+      renderSystemGpu2d(
+        world: world
+        uiSystems: uiSystems
+        res: gpuUi
+        canvas: canvas
+      )
       Gpu2d.endFrame(canvas: canvas)
       renderedOnce = true
     } else {
@@ -328,7 +347,7 @@ func main() ret Int {
     }
     # Frame end: report the authored components no lib table matched (this app
     # has no tables of its own) and recycle the indices of destroyed entities.
-    uiFrameEnd(world: world)
+    uiFrameEnd(world: world, uiSystems: uiSystems)
   }
 
   canvasShutdown(canvas: canvas)

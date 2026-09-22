@@ -12,6 +12,7 @@ open ui/listViewSystem/ListViewSystem
 open ui/widgetStyleSystem/WidgetStyleSystem
 open ui/SceneInstance
 open Gpu2dCanvas
+open ui/UiSystems
 
 # Frame-phase helpers for 106. The app still owns the loop policy, but the
 # systems now run through explicit phases: input dispatch, UI refresh/data sync,
@@ -29,6 +30,7 @@ func runFrameInputDispatch(
   playbackSystem: mod PlaybackSystem
   appState: mod AppState
   world: mod UiWorld
+  uiSystems: view UiSystems
   debug: mod DebugSystem
   scenes: view AlbumScenes
   actionTable: view ActionTable
@@ -60,7 +62,12 @@ func runFrameInputDispatch(
 
   let canvasChanged: Bool = appState.canvasOpen is not canvasOpenBefore
   if canvasChanged {
-    applyCanvasState(world: world, scenes: scenes, state: appState)
+    applyCanvasState(
+      world: world
+      uiSystems: uiSystems
+      scenes: scenes
+      state: appState
+    )
   }
 
   if hadActions {
@@ -89,6 +96,7 @@ type FrameDataSyncResult {
 
 func syncFrameData(
   world: mod UiWorld
+  uiSystems: mod UiSystems
   musicSystems: mod MusicSystems
   scenes: view AlbumScenes
   appState: mod AppState
@@ -117,6 +125,7 @@ func syncFrameData(
     playbackSystem: musicSystems.playbackSystem
     observation: observation
     world: world
+    uiSystems: uiSystems
     musicSystems: musicSystems
     state: appState
     scenes: scenes
@@ -158,6 +167,7 @@ func syncFrameData(
 # declarations and the dirty state.
 func runFrameLayoutTransform(
   world: mod UiWorld
+  uiSystems: mod UiSystems
   viewport: view Viewport
   schedule: mod Schedule
   gpuUi: view Gpu2dUi
@@ -166,34 +176,64 @@ func runFrameLayoutTransform(
   # #964: virtualised lists (the History page) re-bind their pooled rows to
   # the current scroll before layout, so this frame lays out the rows in
   # view. Runs every frame; it writes nothing when nothing moved.
-  listViewSystem(world: world, scenes: subScenes)
+  listViewSystem(world: world, uiSystems: uiSystems, scenes: subScenes)
   # widgetStyleSystem: WidgetState / StateStyle -> the widget's visuals
   # (pressed offsets, icon swaps, tints); change-disciplined, before layout
   # because it writes offsets.
-  if uiShouldRun(schedule: schedule, world: world, index: uiSystemWidgetStyle) {
+  if uiShouldRun(
+    schedule: schedule
+    world: world
+    uiSystems: uiSystems
+    index: uiSystemWidgetStyle
+  ) {
     widgetStyleSystem(world: world)
   }
-  if uiShouldRun(schedule: schedule, world: world, index: uiSystemSafeArea) {
-    applySafeAreas(world: world, viewport: viewport)
+  if uiShouldRun(
+    schedule: schedule
+    world: world
+    uiSystems: uiSystems
+    index: uiSystemSafeArea
+  ) {
+    applySafeAreas(world: world, uiSystems: uiSystems, viewport: viewport)
   }
   # #978: bottom-anchored overlays follow the layout extent and the safe
   # inset; layer tags resolve for anything mounted since last frame.
   anchorBottomSystem(world: world, bottomInset: viewport.safeInsetsDu.b)
   layerTagSystem(world: world)
-  if uiShouldRun(schedule: schedule, world: world, index: uiSystemLayout) {
-    layoutSystem(world: world)
+  if uiShouldRun(
+    schedule: schedule
+    world: world
+    uiSystems: uiSystems
+    index: uiSystemLayout
+  ) {
+    layoutSystem(world: world, uiSystems: uiSystems)
   }
-  if uiShouldRun(schedule: schedule, world: world, index: uiSystemFit) {
-    fitSystem(world: world)
+  if uiShouldRun(
+    schedule: schedule
+    world: world
+    uiSystems: uiSystems
+    index: uiSystemFit
+  ) {
+    fitSystem(world: world, uiSystems: uiSystems)
   }
-  if uiShouldRun(schedule: schedule, world: world, index: uiSystemTransform) {
-    transformSystem(world: world)
+  if uiShouldRun(
+    schedule: schedule
+    world: world
+    uiSystems: uiSystems
+    index: uiSystemTransform
+  ) {
+    transformSystem(world: world, uiSystems: uiSystems)
   }
   # Measured centering (#219): cache glyph bounds once per change so
   # the render pass reads them instead of remeasuring every frame.
   # Needs mod world + the fonts, so it runs here, before render.
-  if uiShouldRun(schedule: schedule, world: world, index: uiSystemVisualBounds) {
-    visualBoundsSystem(world: world, res: gpuUi)
+  if uiShouldRun(
+    schedule: schedule
+    world: world
+    uiSystems: uiSystems
+    index: uiSystemVisualBounds
+  ) {
+    visualBoundsSystem(world: world, uiSystems: uiSystems, res: gpuUi)
   }
 }
 
@@ -211,6 +251,7 @@ type FrameRenderResult {
 
 func renderGpu2dFrame(
   world: mod UiWorld
+  uiSystems: view UiSystems
   gpuUi: view Gpu2dUi
   canvas: mod Gpu2dCanvas
   debug: mod DebugSystem
@@ -231,7 +272,12 @@ func renderGpu2dFrame(
   let frameDue: Bool = busyAnimating or forceRender or (now - lastRenderTime) >= targetFrameSec * 0.85
   if (busyAnimating or active or forceRender or now < renderUntil) and frameDue and switching is false {
     uiBeginFrame(canvas: canvas, clear: bg)
-    renderSystemGpu2d(world: world, res: gpuUi, canvas: canvas)
+    renderSystemGpu2d(
+      world: world
+      uiSystems: uiSystems
+      res: gpuUi
+      canvas: canvas
+    )
     updateAndRenderDebugOverlayGpu2d(
       debug: debug
       canvas: canvas
@@ -249,7 +295,7 @@ func renderGpu2dFrame(
       screenH: logH
     )
     uiEndFrame(canvas: canvas)
-    cacheDirty(world: world, cache: renderCache)
+    cacheDirty(world: world, uiSystems: uiSystems, cache: renderCache)
     ret FrameRenderResult {
       forceRender: uiLastPresentOk() is false
       lastRenderTime: now

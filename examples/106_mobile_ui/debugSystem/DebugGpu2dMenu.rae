@@ -14,6 +14,7 @@ import ui/Components
 open ecs/ComponentTable
 open ecs/hierarchySystem/HierarchySystem
 open Gpu2dCanvas
+open ui/UiSystems
 
 func setOffset(
   world: mod UiWorld
@@ -297,14 +298,19 @@ func dbgSetPaddingAll(world: mod UiWorld, entity: view EntityId, n: view Float) 
   componentSet(this: world.paddings, entity: entity, data: pad)
 }
 
-func attachKids(world: mod UiWorld, parent: view EntityId, kids: view List(EntityId)) {
+func attachKids(
+  world: mod UiWorld
+  uiSystems: view UiSystems
+  parent: view EntityId
+  kids: view List(EntityId)
+) {
   unsafe {
     # #726: set only Parent; HierarchySystem.setParent maintains Children.
     var i: Int = 0
     loop i < kids.length {
       let k: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: i)
       setParent(
-        parents: world.parents
+        parents: uiSystems.hierarchy.parents
         childrens: world.childrens
         child: k
         parent: parent
@@ -314,7 +320,11 @@ func attachKids(world: mod UiWorld, parent: view EntityId, kids: view List(Entit
   }
 }
 
-func buildDebugButton(world: mod UiWorld, debug: view DebugSystem) ret EntityId {
+func buildDebugButton(
+  world: mod UiWorld
+  uiSystems: view UiSystems
+  debug: view DebugSystem
+) ret EntityId {
   let button: EntityId = createEntity(world: world)
   setFixedRect(
     world: world
@@ -355,11 +365,16 @@ func buildDebugButton(world: mod UiWorld, debug: view DebugSystem) ret EntityId 
   )
   let kids: List(EntityId) = List.create(EntityId, cap: 1)
   kids.add(value: label)
-  attachKids(world: world, parent: button, kids: kids)
+  attachKids(
+    world: world
+    uiSystems: uiSystems
+    parent: button
+    kids: kids
+  )
   ret button
 }
 
-func buildDebugIconButton(world: mod UiWorld) ret EntityId {
+func buildDebugIconButton(world: mod UiWorld, uiSystems: view UiSystems) ret EntityId {
   let button: EntityId = createEntity(world: world)
   setFixedRect(
     world: world
@@ -399,11 +414,16 @@ func buildDebugIconButton(world: mod UiWorld) ret EntityId {
   )
   let kids: List(EntityId) = List.create(EntityId, cap: 1)
   kids.add(value: icon)
-  attachKids(world: world, parent: button, kids: kids)
+  attachKids(
+    world: world
+    uiSystems: uiSystems
+    parent: button
+    kids: kids
+  )
   ret button
 }
 
-func buildDebugCloseButton(world: mod UiWorld) ret EntityId {
+func buildDebugCloseButton(world: mod UiWorld, uiSystems: view UiSystems) ret EntityId {
   let button: EntityId = createEntity(world: world)
   setFixedRect(
     world: world
@@ -443,11 +463,20 @@ func buildDebugCloseButton(world: mod UiWorld) ret EntityId {
   )
   let kids: List(EntityId) = List.create(EntityId, cap: 2)
   kids.add(value: label)
-  attachKids(world: world, parent: button, kids: kids)
+  attachKids(
+    world: world
+    uiSystems: uiSystems
+    parent: button
+    kids: kids
+  )
   ret button
 }
 
-func buildDebugMenuTitle(world: mod UiWorld, panelW: view Float) ret EntityId {
+func buildDebugMenuTitle(
+  world: mod UiWorld
+  uiSystems: view UiSystems
+  panelW: view Float
+) ret EntityId {
   let title: EntityId = createEntity(world: world)
   setFixedRect(
     world: world
@@ -493,12 +522,18 @@ func buildDebugMenuTitle(world: mod UiWorld, panelW: view Float) ret EntityId {
 
   let kids: List(EntityId) = List.create(EntityId, cap: 2)
   kids.add(value: label)
-  attachKids(world: world, parent: title, kids: kids)
+  attachKids(
+    world: world
+    uiSystems: uiSystems
+    parent: title
+    kids: kids
+  )
   ret title
 }
 
 func buildSwitchRow(
   world: mod UiWorld
+  uiSystems: view UiSystems
   labelText: own String
   actionId: own String
   on: view Bool
@@ -618,16 +653,30 @@ func buildSwitchRow(
 
   let pillKids: List(EntityId) = List.create(EntityId, cap: 1)
   pillKids.add(value: knob)
-  attachKids(world: world, parent: pill, kids: pillKids)
+  attachKids(
+    world: world
+    uiSystems: uiSystems
+    parent: pill
+    kids: pillKids
+  )
 
   let rowKids: List(EntityId) = List.create(EntityId, cap: 2)
   rowKids.add(value: label)
   rowKids.add(value: pill)
-  attachKids(world: world, parent: row, kids: rowKids)
+  attachKids(
+    world: world
+    uiSystems: uiSystems
+    parent: row
+    kids: rowKids
+  )
   ret row
 }
 
-func buildDebugMenuOverlay(world: mod UiWorld, debug: view DebugSystem) ret EntityId {
+func buildDebugMenuOverlay(
+  world: mod UiWorld
+  uiSystems: view UiSystems
+  debug: view DebugSystem
+) ret EntityId {
   let backdrop: EntityId = createEntity(world: world)
   setFixedRect(
     world: world
@@ -687,6 +736,7 @@ func buildDebugMenuOverlay(world: mod UiWorld, debug: view DebugSystem) ret Enti
 
   let themeRow: EntityId = buildSwitchRow(
     world: world
+    uiSystems: uiSystems
     labelText: "Dark theme"
     actionId: debugActionToggleTheme
     on: world.theme.active.mode is ThemeMode.dark
@@ -694,6 +744,7 @@ func buildDebugMenuOverlay(world: mod UiWorld, debug: view DebugSystem) ret Enti
   )
   let labelsRow: EntityId = buildSwitchRow(
     world: world
+    uiSystems: uiSystems
     labelText: "FPS / mem labels"
     actionId: debugActionToggleLabels
     on: debug.showLabels
@@ -701,6 +752,7 @@ func buildDebugMenuOverlay(world: mod UiWorld, debug: view DebugSystem) ret Enti
   )
   let outlinesRow: EntityId = buildSwitchRow(
     world: world
+    uiSystems: uiSystems
     labelText: "Input outlines"
     actionId: debugActionToggleInputOutlines
     on: debug.showInputOutlines
@@ -711,9 +763,14 @@ func buildDebugMenuOverlay(world: mod UiWorld, debug: view DebugSystem) ret Enti
   rows.add(value: themeRow)
   rows.add(value: labelsRow)
   rows.add(value: outlinesRow)
-  attachKids(world: world, parent: content, kids: rows)
+  attachKids(
+    world: world
+    uiSystems: uiSystems
+    parent: content
+    kids: rows
+  )
 
-  let closeX: EntityId = buildDebugIconButton(world: world)
+  let closeX: EntityId = buildDebugIconButton(world: world, uiSystems: uiSystems)
   setAlign(
     world: world
     entity: closeX
@@ -727,7 +784,7 @@ func buildDebugMenuOverlay(world: mod UiWorld, debug: view DebugSystem) ret Enti
     y: debugPanelPadding
   )
 
-  let closeButton: EntityId = buildDebugCloseButton(world: world)
+  let closeButton: EntityId = buildDebugCloseButton(world: world, uiSystems: uiSystems)
   setAlign(
     world: world
     entity: closeButton
@@ -741,18 +798,28 @@ func buildDebugMenuOverlay(world: mod UiWorld, debug: view DebugSystem) ret Enti
     y: 0.0 - debugPanelPadding
   )
 
-  let title: EntityId = buildDebugMenuTitle(world: world, panelW: panelW)
+  let title: EntityId = buildDebugMenuTitle(world: world, uiSystems: uiSystems, panelW: panelW)
 
   let panelKids: List(EntityId) = List.create(EntityId, cap: 4)
   panelKids.add(value: content)
   panelKids.add(value: title)
   panelKids.add(value: closeX)
   panelKids.add(value: closeButton)
-  attachKids(world: world, parent: panel, kids: panelKids)
+  attachKids(
+    world: world
+    uiSystems: uiSystems
+    parent: panel
+    kids: panelKids
+  )
 
   let backdropKids: List(EntityId) = List.create(EntityId, cap: 1)
   backdropKids.add(value: panel)
-  attachKids(world: world, parent: backdrop, kids: backdropKids)
+  attachKids(
+    world: world
+    uiSystems: uiSystems
+    parent: backdrop
+    kids: backdropKids
+  )
   ret backdrop
 }
 

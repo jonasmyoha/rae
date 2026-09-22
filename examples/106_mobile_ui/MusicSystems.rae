@@ -8,6 +8,7 @@ open ui/ScenePolicy
 open ecs/Entity
 open ecs/World
 open ecs/ComponentTable
+open ui/UiSystems
 
 type MusicSystems {
   playbackSystem: PlaybackSystem
@@ -91,7 +92,11 @@ func applyMusicComponents(world: mod UiWorld, musicSystems: mod MusicSystems) {
 
 # Drain the dead-entities outbox: clear each destroyed entity from every
 # system's tables, then let the world recycle the indices.
-func sweepMusicEntities(world: mod UiWorld, musicSystems: mod MusicSystems) {
+func sweepMusicEntities(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  musicSystems: mod MusicSystems
+) {
   loop let entity: view EntityId in world.deadEntities {
     clearEntityComponents(world: musicSystems.playbackSystem, entity: entity)
     clearEntityComponents(world: musicSystems.dockSystem, entity: entity)
@@ -101,12 +106,12 @@ func sweepMusicEntities(world: mod UiWorld, musicSystems: mod MusicSystems) {
     clearEntityComponents(world: musicSystems.homeSystem, entity: entity)
     clearEntityComponents(world: musicSystems.albumCoverSystem, entity: entity)
   }
-  releaseDeadEntities(world: world)
+  releaseDeadEntities(world: world, uiSystems: uiSystems)
 }
 
 # The frame end: both drains, in this order (a row a ListView mounted this
 # frame gets its components before anything is recycled).
-func musicFrameEnd(world: mod UiWorld, musicSystems: mod MusicSystems) {
+func musicFrameEnd(world: mod UiWorld, uiSystems: mod UiSystems, musicSystems: mod MusicSystems) {
   applyMusicComponents(world: world, musicSystems: musicSystems)
-  sweepMusicEntities(world: world, musicSystems: musicSystems)
+  sweepMusicEntities(world: world, uiSystems: uiSystems, musicSystems: musicSystems)
 }

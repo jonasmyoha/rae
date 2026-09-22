@@ -6,16 +6,21 @@ open ui/Ecs
 import ui/Components
 open ecs/Entity
 open ecs/ComponentTable
+open ui/UiSystems
 
 # Is the SearchField on `page` blank? "" (no field on the page) counts as
 # blank, so a search EmptyState with no field just stays shown.
-func searchQueryBlankOnPage(world: view UiWorld, page: view String) ret Bool {
-  ret searchQueryOnPage(world: world, page: page).length() is 0
+func searchQueryBlankOnPage(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  page: view String
+) ret Bool {
+  ret searchQueryOnPage(world: world, uiSystems: uiSystems, page: page).length() is 0
 }
 
 # Every `EmptyState`: its `Active` follows whether its list is empty —
 # `history` on the play history, `search` on the page's SearchField query.
-func emptyStateSystem(world: mod UiWorld, state: view AppState) pub {
+func emptyStateSystem(world: mod UiWorld, uiSystems: view UiSystems, state: view AppState) pub {
   let historyEmpty: Bool = state.playHistory.entries.length is 0
   let n: Int = componentCount(this: world.emptyStates)
   var i: Int = 0
@@ -24,7 +29,11 @@ func emptyStateSystem(world: mod UiWorld, state: view AppState) pub {
     let binding: EmptyState = componentDataAt(this: world.emptyStates, i: i)
     var empty: Bool = historyEmpty
     if binding.kind is EmptyStateKind.search {
-      empty = searchQueryBlankOnPage(world: world, page: pageOf(world: world, entity: entity))
+      empty = searchQueryBlankOnPage(
+        world: world
+        uiSystems: uiSystems
+        page: pageOf(world: world, uiSystems: uiSystems, entity: entity)
+      )
     }
     var current: Bool = true
     if componentHas(this: world.actives, entity: entity) {

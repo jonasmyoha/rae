@@ -37,6 +37,7 @@ import Sys
 import ui/Theme
 open ui/ThemeResolved
 open ecs/ComponentTable
+open ui/UiSystems
 
 # The world's tables that are derived or runtime state, never authored. This
 # runtime list serves the vocabulary and the diagnostic; the loader's loop
@@ -47,19 +48,19 @@ func isRuntimeTable(name: view String) ret Bool {
   let runtime: List(String) = [
     "Children"
     "MeasuredSize"
+    "MeasuredText"
     "ComputedRect"
+    "LayoutScale"
+    "SafeInsets"
+    "Parent"
     "Transform2D"
     "WorldTransform2D"
     "WorldVisual"
     "RuntimeOffset"
-    "LayoutScale"
-    "SafeInsets"
-    "Parent"
     "AnimState"
     "SmokeState"
     "CarouselState"
     "VisualBounds"
-    "MeasuredText"
     "ScrollDrag"
     "Interaction"
     "StateStyle"
@@ -192,17 +193,13 @@ func applyComponentByName(
     # The same list as isRuntimeTable, spelled as literal tests so it folds:
     # `typeName(table)` is a literal per table, so this `if` is decided at
     # compile time and an excluded table instantiates no decoder at all.
-    if typeName(table) is not "Children" and typeName(table) is not "MeasuredSize" and typeName(
+    if typeName(table) is not "Children" and typeName(table) is not "Transform2D" and typeName(
       table
-    ) is not "ComputedRect" and typeName(table) is not "Transform2D" and typeName(table) is not "WorldTransform2D" and typeName(
+    ) is not "WorldTransform2D" and typeName(table) is not "WorldVisual" and typeName(table) is not "RuntimeOffset" and typeName(
       table
-    ) is not "WorldVisual" and typeName(table) is not "RuntimeOffset" and typeName(table) is not "LayoutScale" and typeName(
+    ) is not "AnimState" and typeName(table) is not "SmokeState" and typeName(table) is not "CarouselState" and typeName(
       table
-    ) is not "SafeInsets" and typeName(table) is not "Parent" and typeName(table) is not "AnimState" and typeName(
-      table
-    ) is not "SmokeState" and typeName(table) is not "CarouselState" and typeName(table) is not "VisualBounds" and typeName(
-      table
-    ) is not "MeasuredText" and typeName(table) is not "ScrollDrag" and typeName(table) is not "Interaction" and typeName(
+    ) is not "VisualBounds" and typeName(table) is not "ScrollDrag" and typeName(table) is not "Interaction" and typeName(
       table
     ) is not "StateStyle" and typeName(table) is not "ListViewData" and typeName(table) is not "ListViewRowKey" and typeName(
       table
@@ -330,9 +327,9 @@ func reportUnknownComponent(world: mod UiWorld, pending: view PendingComponent) 
 # (docs/ecs-systems-own-their-tables.md §3.2): every pending component is
 # unknown, every dead entity can be recycled. An app with systems that own
 # tables writes its own version: apply / clear per system, then these two.
-func uiFrameEnd(world: mod UiWorld) {
+func uiFrameEnd(world: mod UiWorld, uiSystems: mod UiSystems) {
   reportPendingComponents(world: world)
-  releaseDeadEntities(world: world)
+  releaseDeadEntities(world: world, uiSystems: uiSystems)
 }
 
 # For an app with no components of its own: everything still pending is

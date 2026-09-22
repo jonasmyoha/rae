@@ -1,0 +1,63 @@
+# The lib UI systems that OWN their derived tables (docs/ecs-systems-own-
+# their-tables.md §3.1): what a system derives lives on the system, not on
+# the world. `UiWorld` keeps the authored shared tables (many readers, no
+# better owner), the hierarchy's authoritative `Children`, the resources and
+# the allocator; these structs keep what one pass computes for the others.
+#
+# `UiSystems` is the aggregate an app (or app3d/UiShell) owns next to its
+# world and hands to the pipeline and to every function that reads a derived
+# table — `mod` for the owner writing, `view` for a reader. It grows in the
+# second half of the split (Transform2dSystem, AnimationSystem, ButtonSystem).
+open ui/Components
+open ecs/Hierarchy
+open ecs/ComponentTable
+
+# layoutSystem's output: measured sizes, the font measure of Hug text leaves,
+# the computed rects, and the per-subtree layout scale.
+type LayoutSystem {
+  measuredSizes: ComponentTable(MeasuredSize)
+  measuredTexts: ComponentTable(MeasuredText)
+  computedRects: ComponentTable(ComputedRect)
+  layoutScales: ComponentTable(LayoutScale)
+}
+
+# safeAreaSystem's output: the resolved insets per SafeArea node.
+type SafeAreaSystem {
+  safeInsets: ComponentTable(SafeInsets)
+}
+
+# The hierarchy's DERIVED half: `Parent` per child, rebuilt from the
+# authoritative `Children` on the world.
+type HierarchySystem {
+  parents: ComponentTable(Parent)
+}
+
+type UiSystems {
+  layout: LayoutSystem
+  safeArea: SafeAreaSystem
+  hierarchy: HierarchySystem
+}
+
+func createUiSystems() ret UiSystems {
+  ret UiSystems {
+    layout: LayoutSystem {
+      measuredSizes: ComponentTable.create(MeasuredSize)
+      measuredTexts: ComponentTable.create(MeasuredText)
+      computedRects: ComponentTable.create(ComputedRect)
+      layoutScales: ComponentTable.create(LayoutScale)
+    }
+    safeArea: SafeAreaSystem { safeInsets: ComponentTable.create(SafeInsets) }
+    hierarchy: HierarchySystem { parents: ComponentTable.create(Parent) }
+  }
+}
+
+# Drop every row of `entity` from the systems' tables — the world's
+# destroyEntity does the same for its own; the two together are "gone".
+func clearUiSystemsEntity(uiSystems: mod UiSystems, entity: view EntityId) {
+  componentRemove(this: uiSystems.layout.measuredSizes, entity: entity)
+  componentRemove(this: uiSystems.layout.measuredTexts, entity: entity)
+  componentRemove(this: uiSystems.layout.computedRects, entity: entity)
+  componentRemove(this: uiSystems.layout.layoutScales, entity: entity)
+  componentRemove(this: uiSystems.safeArea.safeInsets, entity: entity)
+  componentRemove(this: uiSystems.hierarchy.parents, entity: entity)
+}

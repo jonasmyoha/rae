@@ -16,6 +16,7 @@ open ui/SceneLoader
 open ecs/Entity
 open ecs/ComponentTable
 open ecs/hierarchySystem/HierarchySystem
+open ui/UiSystems
 
 const outlinePoolCap: Int = 512
 
@@ -30,11 +31,16 @@ func createOutlinePoolSystem() ret OutlinePoolSystem {
 }
 
 # Every entity of the document subtree that has a world rect (paint order).
-func collectDocumentEntities(world: view UiWorld, entity: view EntityId, out: mod List(EntityId)) {
+func collectDocumentEntities(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entity: view EntityId
+  out: mod List(EntityId)
+) {
   if isNone(this: entity) or out.length >= outlinePoolCap {
     ret
   }
-  if componentHas(this: world.computedRects, entity: entity) and componentHas(
+  if componentHas(this: uiSystems.layout.computedRects, entity: entity) and componentHas(
     this: world.worldTransforms
     entity: entity
   ) {
@@ -45,6 +51,7 @@ func collectDocumentEntities(world: view UiWorld, entity: view EntityId, out: mo
     loop var i: Int = 0, i < children.ids.length, ++i {
       collectDocumentEntities(
         world: world
+        uiSystems: uiSystems
         entity: children.ids.copyAtFallback(index: i, fallback: noEntity())
         out: out
       )
@@ -63,6 +70,7 @@ func poolMatches(world: view UiWorld, matches: view OutlineMatch, entity: view E
 # the outline scene.
 func sizeOutlinePool(
   world: mod UiWorld
+  uiSystems: view UiSystems
   pool: view EntityId
   itemSceneId: view String
   wanted: view Int
@@ -76,7 +84,7 @@ func sizeOutlinePool(
   loop have > wanted {
     let children: view Children => componentView(this: world.childrens, entity: pool)
     let last: EntityId = children.ids.copyAtFallback(index: have - 1, fallback: noEntity())
-    destroyEntitySubtree(world: world, root: last)
+    destroyEntitySubtree(world: world, uiSystems: uiSystems, root: last)
     have = have - 1
     changed = true
   }
@@ -91,7 +99,7 @@ func sizeOutlinePool(
       let rect: Rect = { position: { x: 0.0, y: 0.0 }, size: { x: 0.0, y: 0.0 } }
       componentSet(this: world.rects, entity: item, data: rect)
       setParent(
-        parents: world.parents
+        parents: uiSystems.hierarchy.parents
         childrens: world.childrens
         child: item
         parent: pool
@@ -99,6 +107,7 @@ func sizeOutlinePool(
       let overrides: List(SceneOverride) = emptyOverrides()
       mountSceneInstanceIntoPage(
         world: world
+        uiSystems: uiSystems
         mountEntity: item
         scene: scene
         overrides: overrides
@@ -113,10 +122,15 @@ func sizeOutlinePool(
 
 # Place pooled instance `item` over `target` (compare-before-write); true
 # if anything was written.
-func placePooledOutline(world: mod UiWorld, item: view EntityId, target: view EntityId) ret Bool {
+func placePooledOutline(
+  world: mod UiWorld
+  uiSystems: view UiSystems
+  item: view EntityId
+  target: view EntityId
+) ret Bool {
   var changed: Bool = false
   let transform: WorldTransform2D = componentGet(this: world.worldTransforms, entity: target)
-  let computed: ComputedRect = componentGet(this: world.computedRects, entity: target)
+  let computed: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: target)
   let w: Float = computed.size.x * transform.scale.x
   let h: Float = computed.size.y * transform.scale.y
   if componentHas(this: world.rects, entity: item) {
@@ -149,6 +163,7 @@ func placePooledOutline(world: mod UiWorld, item: view EntityId, target: view En
 func outlinePoolUpdate(
   outlinePoolSystem: view OutlinePoolSystem
   world: mod UiWorld
+  uiSystems: view UiSystems
   documentRoot: view EntityId
   scenes: view SceneRegistry
 ) ret Bool {
@@ -158,7 +173,12 @@ func outlinePoolUpdate(
     ret false
   }
   var entities: List(EntityId) = List.create(EntityId, cap: 64)
-  collectDocumentEntities(world: world, entity: documentRoot, out: entities)
+  collectDocumentEntities(
+    world: world
+    uiSystems: uiSystems
+    entity: documentRoot
+    out: entities
+  )
   loop var p: Int = 0, p < poolCount, ++p {
     let pool: EntityId = componentEntityAt(this: outlinePoolSystem.outlinePools, i: p)
     let spec: OutlinePool = componentDataAt(this: outlinePoolSystem.outlinePools, i: p)
@@ -169,6 +189,7 @@ func outlinePoolUpdate(
     if active is false {
       if sizeOutlinePool(
         world: world
+        uiSystems: uiSystems
         pool: pool
         itemSceneId: spec.itemSceneId
         wanted: 0
@@ -187,6 +208,7 @@ func outlinePoolUpdate(
     }
     if sizeOutlinePool(
       world: world
+      uiSystems: uiSystems
       pool: pool
       itemSceneId: spec.itemSceneId
       wanted: matched.length
@@ -201,6 +223,7 @@ func outlinePoolUpdate(
     loop var i: Int = 0, i < matched.length and i < children.ids.length, ++i {
       if placePooledOutline(
         world: world
+        uiSystems: uiSystems
         item: children.ids.copyAtFallback(index: i, fallback: noEntity())
         target: matched.copyAtFallback(index: i, fallback: noEntity())
       ) {

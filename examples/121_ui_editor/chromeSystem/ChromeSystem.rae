@@ -12,6 +12,7 @@ open app3d/UiShell
 open ecs/Entity
 open ecs/ComponentTable
 open ecs/Event
+open ui/UiSystems
 
 # What the chrome shows, as data: every `editor.*` text the labels bind to.
 # The app fills it after a load, a selection, a camera move; editorTextSystem
@@ -273,6 +274,7 @@ type EditAreaRect {
 func editAreaOf(
   chromeSystem: view ChromeSystem
   world: view UiWorld
+  uiSystems: view UiSystems
   canvasW: view Float
   canvasH: view Float
 ) ret EditAreaRect {
@@ -281,11 +283,11 @@ func editAreaOf(
     ret area
   }
   let entity: EntityId = componentEntityAt(this: chromeSystem.editAreas, i: 0)
-  if componentHas(this: world.computedRects, entity: entity) and componentHas(
+  if componentHas(this: uiSystems.layout.computedRects, entity: entity) and componentHas(
     this: world.worldTransforms
     entity: entity
   ) {
-    let rect: ComputedRect = componentGet(this: world.computedRects, entity: entity)
+    let rect: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: entity)
     let transform: WorldTransform2D = componentGet(this: world.worldTransforms, entity: entity)
     if rect.size.x > 0.0 and rect.size.y > 0.0 {
       area.x = transform.position.x
@@ -300,6 +302,7 @@ func editAreaOf(
 func pointInEditArea(
   chromeSystem: view ChromeSystem
   world: view UiWorld
+  uiSystems: view UiSystems
   x: view Float
   y: view Float
 ) ret Bool {
@@ -309,6 +312,7 @@ func pointInEditArea(
   let area: EditAreaRect = editAreaOf(
     chromeSystem: chromeSystem
     world: world
+    uiSystems: uiSystems
     canvasW: 0.0
     canvasH: 0.0
   )

@@ -14,6 +14,7 @@ import ui/Components
 open ecs/ComponentTable
 open ecs/hierarchySystem/HierarchySystem
 open Gpu2dCanvas
+open ui/UiSystems
 
 let debugActionToggleMenu: String = "debug.toggleMenu"
 
@@ -252,12 +253,12 @@ func currentDebugFPS(debug: view DebugSystem) pub ret Float {
   ret debug.lastFps
 }
 
-func addDebugLayer(world: mod UiWorld, debug: mod DebugSystem) pub {
+func addDebugLayer(world: mod UiWorld, uiSystems: view UiSystems, debug: mod DebugSystem) pub {
   let hasAnchor: Bool = applyDebugAnchor(world: world, debug: debug)
-  let button: EntityId = buildDebugButton(world: world, debug: debug)
+  let button: EntityId = buildDebugButton(world: world, uiSystems: uiSystems, debug: debug)
   setLayerById(world: world, entity: button, id: "debug")
   if debug.menuOpen {
-    let menu: EntityId = buildDebugMenuOverlay(world: world, debug: debug)
+    let menu: EntityId = buildDebugMenuOverlay(world: world, uiSystems: uiSystems, debug: debug)
     setLayerById(world: world, entity: menu, id: "debug")
   }
 }

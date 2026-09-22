@@ -7,6 +7,7 @@ open ui/layoutSystem/LayoutSystem
 open ui/Transform
 open ui/scrollRootSystem/ScrollRootSystem
 open ui/animationSystem/HeroTransitionSystem
+open ui/UiSystems
 
 # Persistent-world screen-switch handler. Called from the inner loop
 # once per frame after `dispatchActions` has chosen `nextScreen`:
@@ -43,6 +44,7 @@ type ScreenSwitchResult {
 func handleScreenSwitch(
   dockSystem: view DockSystem
   world: mod UiWorld
+  uiSystems: mod UiSystems
   scenes: mod AlbumScenes
   playbackSystem: mod PlaybackSystem
   appState: mod AppState
@@ -86,7 +88,7 @@ func handleScreenSwitch(
   # the one thing a binding does not cover: reset the album's scroll to the
   # top, since the persistent page keeps the previous album's offset.
   if stemChangedNow {
-    resetScrollRootOnPage(world: world, pageId: albumPageId)
+    resetScrollRootOnPage(world: world, uiSystems: uiSystems, pageId: albumPageId)
   }
 
   if willSwitch is false {
@@ -115,10 +117,11 @@ func handleScreenSwitch(
   # follow their data in place (ScreenPage.refreshOnEntry).
   let incomingPage: ScreenPage = screenPageFor(screen: nextScreen)
   if incomingPage.refreshOnEntry {
-    unmountPage(world: world, pageId: incomingPageId)
+    unmountPage(world: world, uiSystems: uiSystems, pageId: incomingPageId)
     forgetScroll(memory: scrollMemory, pageId: incomingPageId)
     let fresh: EntityId = mountScreenPage(
       world: world
+      uiSystems: uiSystems
       page: incomingPage
       scenes: scenes
       viewport: viewport
@@ -127,7 +130,7 @@ func handleScreenSwitch(
   setPageActive(world: world, pageId: incomingPageId, active: true)
   # Seed the ScrollRoot of whatever was just re-mounted (top for a fresh
   # page, the remembered position for an in-place re-mount).
-  scrollRootSystem(world: world, memory: scrollMemory)
+  scrollRootSystem(world: world, uiSystems: uiSystems, memory: scrollMemory)
 
   # #978: the nav-tabs bar and the back button are resident. The active
   # tab is a component the nav-tabs system restyles in place; the back
@@ -141,7 +144,7 @@ func handleScreenSwitch(
   # SafeInsets is not a layout dirty input, the per-frame applySafeAreas
   # in main.rae seeds it too late to trigger a relayout, silently losing
   # the notch reserve until something else dirties the layout.
-  let switchSafe: Insets = applySafeAreas(world: world, viewport: viewport)
+  let switchSafe: Insets = applySafeAreas(world: world, uiSystems: uiSystems, viewport: viewport)
 
   # Hero transition. Both source and target live in the same persistent
   # world: the outgoing page's `HeroWidget` for the browsed album and the
@@ -151,17 +154,38 @@ func handleScreenSwitch(
   # flies between the two (ui/animationSystem/HeroTransitionSystem) and
   # hides the destination until it lands.
   let heroKey: String = appState.currentAlbumStem
-  let heroSource: EntityId = findHeroOnPage(world: world, pageId: outgoingPageId, key: heroKey)
+  let heroSource: EntityId = findHeroOnPage(
+    world: world
+    uiSystems: uiSystems
+    pageId: outgoingPageId
+    key: heroKey
+  )
   if isNone(this: heroSource) is false {
-    if uiShouldRun(schedule: schedule, world: world, index: uiSystemLayout) {
-      layoutSystem(world: world)
+    if uiShouldRun(
+      schedule: schedule
+      world: world
+      uiSystems: uiSystems
+      index: uiSystemLayout
+    ) {
+      layoutSystem(world: world, uiSystems: uiSystems)
     }
-    if uiShouldRun(schedule: schedule, world: world, index: uiSystemTransform) {
-      transformSystem(world: world)
+    if uiShouldRun(
+      schedule: schedule
+      world: world
+      uiSystems: uiSystems
+      index: uiSystemTransform
+    ) {
+      transformSystem(world: world, uiSystems: uiSystems)
     }
-    let heroTarget: EntityId = findHeroOnPage(world: world, pageId: incomingPageId, key: heroKey)
+    let heroTarget: EntityId = findHeroOnPage(
+      world: world
+      uiSystems: uiSystems
+      pageId: incomingPageId
+      key: heroKey
+    )
     let started: Bool = spawnHeroTransition(
       world: world
+      uiSystems: uiSystems
       key: heroKey
       source: heroSource
       target: heroTarget
@@ -188,7 +212,7 @@ func handleScreenSwitch(
   # Persistent per-page scroll: read the new page's ScrollState.y.
   # Entities survive screen changes; a re-mounted page was re-seeded from
   # the scroll memory above.
-  result.newScrollTarget = findScrollRoot(world: world)
+  result.newScrollTarget = findScrollRoot(world: world, uiSystems: uiSystems)
   if isNone(this: result.newScrollTarget) {
     scrollFsm.scrollY = 0.0
   } else {

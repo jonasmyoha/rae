@@ -13,6 +13,7 @@ import ui/IconCodepoints
 import ui/ThemeResolved
 open ui/Ecs
 open ecs/ComponentTable
+open ui/UiSystems
 
 # Recompute + cache `e`'s bounds when the (text, size, icon-font) key
 # changed; no-op when the cache is already fresh.
@@ -67,7 +68,7 @@ func refreshVisualBounds(
 # its current on-screen size (min of the drawn width/height, matching
 # the paint path). Extra strings that never need centering cost one
 # measure on change and nothing per frame.
-func visualBoundsSystem(world: mod UiWorld, res: view Gpu2dUi) pub {
+func visualBoundsSystem(world: mod UiWorld, uiSystems: view UiSystems, res: view Gpu2dUi) pub {
   let matPrefix: String = "mat:"
   var n: Int = componentCount(this: world.texts)
   var i: Int = 0
@@ -102,7 +103,7 @@ func visualBoundsSystem(world: mod UiWorld, res: view Gpu2dUi) pub {
       let name: String = sp.textureKey.sub(start: matPrefix.length(), len: nameLen)
       let glyph: String = iconText(name: name)
       if glyph.length() > 0 {
-        let sz: Float = iconGlyphSize(world: world, entity: entity)
+        let sz: Float = iconGlyphSize(world: world, uiSystems: uiSystems, entity: entity)
         refreshVisualBounds(
           world: world
           entity: entity
@@ -120,11 +121,15 @@ func visualBoundsSystem(world: mod UiWorld, res: view Gpu2dUi) pub {
 # The on-screen glyph size the icon paint path uses: min of the
 # hover-scaled draw width/height. Kept in one place so the system
 # measures at exactly the size paint asks for (cache stays fresh).
-func iconGlyphSize(world: view UiWorld, entity: view EntityId) ret Float {
-  if componentHas(this: world.computedRects, entity: entity) is false {
+func iconGlyphSize(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entity: view EntityId
+) ret Float {
+  if componentHas(this: uiSystems.layout.computedRects, entity: entity) is false {
     ret 0.0
   }
-  let cr: ComputedRect = componentGet(this: world.computedRects, entity: entity)
+  let cr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: entity)
   let hoverMul: Float = g2dHoverMul(world: world, entity: entity)
   let drawW: Float = cr.size.x * hoverMul
   let drawH: Float = cr.size.y * hoverMul
@@ -142,7 +147,7 @@ func iconGlyphSize(world: view UiWorld, entity: view EntityId) ret Float {
 # { w: pen advance, h: line box } for every non-empty Text node, comparing
 # before writing so a stable string does not bump the table generation and
 # re-dirty layout every frame.
-func measureTextForLayout(world: mod UiWorld, res: view Gpu2dUi) pub {
+func measureTextForLayout(world: mod UiWorld, uiSystems: mod UiSystems, res: view Gpu2dUi) pub {
   let n: Int = componentCount(this: world.texts)
   var i: Int = 0
   loop i < n {
@@ -165,15 +170,15 @@ func measureTextForLayout(world: mod UiWorld, res: view Gpu2dUi) pub {
       let measuredW: Float = b.advance
       let measuredH: Float = size
       var write: Bool = true
-      if componentHas(this: world.measuredTexts, entity: entity) {
-        let cur: MeasuredText = componentGet(this: world.measuredTexts, entity: entity)
+      if componentHas(this: uiSystems.layout.measuredTexts, entity: entity) {
+        let cur: MeasuredText = componentGet(this: uiSystems.layout.measuredTexts, entity: entity)
         if cur.w is measuredW and cur.h is measuredH {
           write = false
         }
       }
       if write {
         componentSet(
-          this: world.measuredTexts
+          this: uiSystems.layout.measuredTexts
           entity: entity
           data: MeasuredText { w: measuredW, h: measuredH }
         )

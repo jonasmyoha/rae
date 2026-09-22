@@ -31,6 +31,7 @@ open Gpu2dCanvas
 open ui/DebugOverlay
 open ui/WindowGeometry
 open ecs/Event
+open ui/UiSystems
 
 const idleHeartbeatSec: Float = 0.5
 
@@ -56,6 +57,7 @@ func reloadDocument(app: mod App) {
     documentMountSystem(
       document: app.document
       world: app.world
+      uiSystems: app.uiSystems
       builtinScenePaths: app.builtinScenePaths
       builtinSceneIds: app.builtinSceneIds
     )
@@ -66,7 +68,7 @@ func reloadDocument(app: mod App) {
     sweepEditorEntitiesOf(app: app)
     applyEditorComponentsOf(app: app)
     pinDocumentPage(world: app.world, pageRoot: app.document.pageRoot)
-    safeAreaSystem(world: app.world, insets: app.document.safeInsets)
+    safeAreaSystem(world: app.world, uiSystems: app.uiSystems, insets: app.document.safeInsets)
     syncGuides(
       guideSystem: app.guideSystem
       world: app.world
@@ -93,6 +95,7 @@ func reloadDocument(app: mod App) {
       area: editAreaOf(
         chromeSystem: app.chromeSystem
         world: app.world
+        uiSystems: app.uiSystems
         canvasW: app.viewportSystem.designW
         canvasH: app.viewportSystem.designH
       )
@@ -120,10 +123,16 @@ func reloadDocument(app: mod App) {
   )
   watchRememberMtimes(watch: app.watch, paths: app.document.watchedPaths)
   if mounted {
-    resolveSceneInstances(world: app.world, registry: app.document.registry, pageId: "chrome")
+    resolveSceneInstances(
+      world: app.world
+      uiSystems: app.uiSystems
+      registry: app.document.registry
+      pageId: "chrome"
+    )
     inspectorAfterLoad(
       inspectorSystem: app.inspectorSystem
       world: app.world
+      uiSystems: app.uiSystems
       chromeSystem: app.chromeSystem
       pageRoot: app.document.pageRoot
       selectNodeId: keepSelected
@@ -225,6 +234,7 @@ func effectSystems(
   }
   if carouselSystem(
     world: app.world
+    uiSystems: app.uiSystems
     deltaTime: deltaTime
     pointerX: input.pointer.x
     pointerY: input.pointer.y
@@ -237,12 +247,18 @@ func effectSystems(
 
 func runApp(app: mod App) ret Int {
   var input: UiInput = createUiInput()
-  listViewSystem(world: app.world, scenes: app.document.registry)
-  runScheduledUiSystems(schedule: app.schedule, world: app.world, res: app.gpuUi)
+  listViewSystem(world: app.world, uiSystems: app.uiSystems, scenes: app.document.registry)
+  runScheduledUiSystems(
+    schedule: app.schedule
+    world: app.world
+    uiSystems: app.uiSystems
+    res: app.gpuUi
+  )
   # The first layout has run, so the selection hook can read computed rects.
   inspectorAfterLoad(
     inspectorSystem: app.inspectorSystem
     world: app.world
+    uiSystems: app.uiSystems
     chromeSystem: app.chromeSystem
     pageRoot: app.document.pageRoot
     selectNodeId: app.testSelectNodeId
@@ -250,19 +266,26 @@ func runApp(app: mod App) ret Int {
   inspectorUpdate(
     inspectorSystem: app.inspectorSystem
     world: app.world
+    uiSystems: app.uiSystems
     chromeSystem: app.chromeSystem
     input: input
     pageRoot: app.document.pageRoot
     chromeVisible: chromeVisible(world: app.world, chromeSystem: app.chromeSystem)
   )
-  listViewSystem(world: app.world, scenes: app.document.registry)
-  runScheduledUiSystems(schedule: app.schedule, world: app.world, res: app.gpuUi)
+  listViewSystem(world: app.world, uiSystems: app.uiSystems, scenes: app.document.registry)
+  runScheduledUiSystems(
+    schedule: app.schedule
+    world: app.world
+    uiSystems: app.uiSystems
+    res: app.gpuUi
+  )
   # The chrome has laid out: fit the document into the edit area (and apply
   # RAE_UI_EDITOR_ZOOM) — a Camera2D write the lib cameraSystem folds into
   # the roots' transforms on the next pipeline run.
   var editArea: EditAreaRect = editAreaOf(
     chromeSystem: app.chromeSystem
     world: app.world
+    uiSystems: app.uiSystems
     canvasW: app.viewportSystem.designW
     canvasH: app.viewportSystem.designH
   )
@@ -278,7 +301,12 @@ func runApp(app: mod App) ret Int {
     chromeSystem: app.chromeSystem
     area: editArea
   )
-  runScheduledUiSystems(schedule: app.schedule, world: app.world, res: app.gpuUi)
+  runScheduledUiSystems(
+    schedule: app.schedule
+    world: app.world
+    uiSystems: app.uiSystems
+    res: app.gpuUi
+  )
   var renderedOnce: Bool = false
   # Whether the previous loop iteration painted: what the debug widget's fps
   # counts (an idle wait-loop iteration is not a frame).
@@ -323,7 +351,7 @@ func runApp(app: mod App) ret Int {
       didRealWork: renderedThisFrame
     )
     renderedThisFrame = false
-    updateUiInput(input: input, world: app.world)
+    updateUiInput(input: input, world: app.world, uiSystems: app.uiSystems)
     if overlayTookPointer or app.debugOverlay.open {
       eventClear(UiAction, this: app.world.uiActions)
       input.pressedEntity = noEntity()
@@ -336,6 +364,7 @@ func runApp(app: mod App) ret Int {
     editArea = editAreaOf(
       chromeSystem: app.chromeSystem
       world: app.world
+      uiSystems: app.uiSystems
       canvasW: app.viewportSystem.designW
       canvasH: app.viewportSystem.designH
     )
@@ -443,6 +472,7 @@ func runApp(app: mod App) ret Int {
     if inspectorUpdate(
       inspectorSystem: app.inspectorSystem
       world: app.world
+      uiSystems: app.uiSystems
       chromeSystem: app.chromeSystem
       input: input
       pageRoot: app.document.pageRoot
@@ -454,6 +484,7 @@ func runApp(app: mod App) ret Int {
     if outlinePoolUpdate(
       outlinePoolSystem: app.outlinePoolSystem
       world: app.world
+      uiSystems: app.uiSystems
       documentRoot: app.document.pageRoot
       scenes: app.document.registry
     ) {
@@ -477,8 +508,13 @@ func runApp(app: mod App) ret Int {
       changed = true
     }
     if hadEvents or changed {
-      listViewSystem(world: app.world, scenes: app.document.registry)
-      runScheduledUiSystems(schedule: app.schedule, world: app.world, res: app.gpuUi)
+      listViewSystem(world: app.world, uiSystems: app.uiSystems, scenes: app.document.registry)
+      runScheduledUiSystems(
+        schedule: app.schedule
+        world: app.world
+        uiSystems: app.uiSystems
+        res: app.gpuUi
+      )
       if refit {
         # The chrome relaid out for the new window: fit the document into
         # the new edit area and run the transform pass again.
@@ -489,11 +525,17 @@ func runApp(app: mod App) ret Int {
           area: editAreaOf(
             chromeSystem: app.chromeSystem
             world: app.world
+            uiSystems: app.uiSystems
             canvasW: app.viewportSystem.designW
             canvasH: app.viewportSystem.designH
           )
         )
-        runScheduledUiSystems(schedule: app.schedule, world: app.world, res: app.gpuUi)
+        runScheduledUiSystems(
+          schedule: app.schedule
+          world: app.world
+          uiSystems: app.uiSystems
+          res: app.gpuUi
+        )
       }
     }
     if renderedOnce is false {
@@ -518,7 +560,12 @@ func runApp(app: mod App) ret Int {
         b: 0.05
         a: 1.0
       )
-      renderSystemGpu2d(world: app.world, res: app.gpuUi, canvas: app.canvas)
+      renderSystemGpu2d(
+        world: app.world
+        uiSystems: app.uiSystems
+        res: app.gpuUi
+        canvas: app.canvas
+      )
       drawDebugOverlay(
         debugOverlay: app.debugOverlay
         canvas: app.canvas

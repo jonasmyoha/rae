@@ -42,6 +42,7 @@ open ecs/ComponentTable
 open ui/RegistryGeneric
 open ui/SceneBundles
 open ui/BundleApply
+open ui/UiSystems
 
 # -----------------------------------------------------------------
 # Types
@@ -296,12 +297,14 @@ func appendEntityListSI(lst: mod List(EntityId), value: view EntityId) {
 # - `overrides` is applied last, after the whole subtree is built.
 func mountSceneInstance(
   world: mod UiWorld
+  uiSystems: view UiSystems
   mountEntity: view EntityId
   scene: view Scene
   overrides: view List(SceneOverride)
 ) ret EntityId {
   ret mountSceneInstanceIntoPage(
     world: world
+    uiSystems: uiSystems
     mountEntity: mountEntity
     scene: scene
     overrides: overrides
@@ -317,6 +320,7 @@ func mountSceneInstance(
 # typically tags an enclosing entity. `mountPage` does both at once.
 func mountSceneInstanceIntoPage(
   world: mod UiWorld
+  uiSystems: view UiSystems
   mountEntity: view EntityId
   scene: view Scene
   overrides: view List(SceneOverride)
@@ -324,6 +328,7 @@ func mountSceneInstanceIntoPage(
 ) ret EntityId {
   ret mountSceneInstanceImpl(
     world: world
+    uiSystems: uiSystems
     mountEntity: mountEntity
     scene: scene
     overrides: overrides
@@ -341,6 +346,7 @@ func mountSceneInstanceIntoPage(
 # Returns `noEntity()` (and creates nothing) when the scene is not ok.
 func mountSubScene(
   world: mod UiWorld
+  uiSystems: view UiSystems
   scene: view Scene
   overrides: view List(SceneOverride)
 ) ret EntityId {
@@ -350,6 +356,7 @@ func mountSubScene(
   let root: EntityId = createEntity(world: world)
   let mounted: EntityId = mountSceneInstanceImpl(
     world: world
+    uiSystems: uiSystems
     mountEntity: root
     scene: scene
     overrides: overrides
@@ -361,6 +368,7 @@ func mountSubScene(
 
 func mountSceneInstanceImpl(
   world: mod UiWorld
+  uiSystems: view UiSystems
   mountEntity: view EntityId
   scene: view Scene
   overrides: view List(SceneOverride)
@@ -482,7 +490,7 @@ func mountSceneInstanceImpl(
             # #726: set only Parent; HierarchySystem.setParent keeps the derived
             # Children cache in lock-step (authored order via call order).
             setParent(
-              parents: world.parents
+              parents: uiSystems.hierarchy.parents
               childrens: world.childrens
               child: childEntity
               parent: parentEntity
@@ -823,6 +831,7 @@ func applyOverride(world: mod UiWorld, entity: view EntityId, override: view Sce
 # we don't dedup. Use `findPageRootEntity` to gate idempotently.
 func mountPage(
   world: mod UiWorld
+  uiSystems: view UiSystems
   pageId: own String
   scene: view Scene
   overrides: view List(SceneOverride)
@@ -842,6 +851,7 @@ func mountPage(
   componentSet(this: world.sizes, entity: root, data: size)
   let mounted: EntityId = mountSceneInstanceIntoPage(
     world: world
+    uiSystems: uiSystems
     mountEntity: root
     scene: scene
     overrides: overrides

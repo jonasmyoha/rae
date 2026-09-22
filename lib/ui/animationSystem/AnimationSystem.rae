@@ -18,6 +18,7 @@ import ui/Ecs
 import ui/Components
 open ecs/Entity
 open ecs/ComponentTable
+open ui/UiSystems
 
 # Move `current` toward `target` by an exponential ease at `speed`
 # units per second. Snaps to `target` when `|target - current|` is
@@ -106,6 +107,7 @@ func subtreeHoverPaintRank(world: view UiWorld, entity: view EntityId) pub ret I
 # Depth-guarded against malformed cycles.
 func hoverScaleContains(
   world: view UiWorld
+  uiSystems: view UiSystems
   entity: view EntityId
   ancestor: view EntityId
 ) ret Bool {
@@ -115,10 +117,10 @@ func hoverScaleContains(
   var cur: EntityId = entity
   var guard: Int = 0
   loop guard < 64 {
-    if componentHas(this: world.parents, entity: cur) is false {
+    if componentHas(this: uiSystems.hierarchy.parents, entity: cur) is false {
       ret false
     }
-    let p: Parent = componentGet(this: world.parents, entity: cur)
+    let p: Parent = componentGet(this: uiSystems.hierarchy.parents, entity: cur)
     if p.parent is ancestor {
       ret true
     }
@@ -133,6 +135,7 @@ func hoverScaleContains(
 # hovered). Returns true if any entity is still animating.
 func hoverScaleSystem(
   world: mod UiWorld
+  uiSystems: view UiSystems
   hovered: view EntityId
   deltaTime: view Float
 ) pub ret Bool {
@@ -156,7 +159,12 @@ func hoverScaleSystem(
     let entity: EntityId = componentEntityAt(this: world.hoverScales, i: i)
     let hs: HoverScale = componentGet(this: world.hoverScales, entity: entity)
     var target: Float = hs.restScale
-    if hoverScaleContains(world: world, entity: entity, ancestor: hovered) {
+    if hoverScaleContains(
+      world: world
+      uiSystems: uiSystems
+      entity: entity
+      ancestor: hovered
+    ) {
       target = hs.hoverScale
     }
     let next: Float = easeTowards(

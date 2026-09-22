@@ -19,6 +19,7 @@ open ui/listViewSystem/ListViewSystem
 open ui/SceneInstance
 open ecs/Entity
 open ecs/ComponentTable
+open ui/UiSystems
 
 func cell(
   keys: mod List(String)
@@ -163,9 +164,10 @@ func main() {
 
   # ----- A: the grid, mixed tile kinds, fitted side, bindings -----
   let world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
   let grid: Scene = parseScene(source: gridScene())
   grid.sceneId = "grid"
-  loadScene(world: world, scene: grid)
+  loadScene(world: world, uiSystems: uiSystems, scene: grid)
   var listEntity: EntityId = noEntity()
   if let raw: Int = world.nodeIds.get(k: "Grid") {
     listEntity = id(v: raw)
@@ -179,7 +181,7 @@ func main() {
   rows.add(value: tileRow(key: "abbey", kind: "album"))
   rows.add(value: tileRow(key: "kind", kind: "album"))
   componentSet(this: world.listViewDatas, entity: listEntity, data: ListViewData { rows: own rows })
-  listViewSystem(world: world, scenes: registry)
+  listViewSystem(world: world, uiSystems: uiSystems, scenes: registry)
   log("rows: {describeRows(world: world, listEntity: listEntity)}")
   unsafe {
     let ch: view Children => componentView(this: world.childrens, entity: listEntity)
@@ -209,7 +211,7 @@ func main() {
     entity: listEntity
     data: ListViewData { rows: own rows2 }
   )
-  listViewSystem(world: world, scenes: registry)
+  listViewSystem(world: world, uiSystems: uiSystems, scenes: registry)
   log("rows: {describeRows(world: world, listEntity: listEntity)}")
   let after: List(String) = rowIds(world: world, listEntity: listEntity)
   let likedBefore: String = before.copyAtFallback(index: 0, fallback: "")
@@ -219,14 +221,14 @@ func main() {
   log("kept entities: {likedBefore is likedAfter} {kindBefore is kindAfter}")
   log("alive unchanged (one out, one in): {aliveCount(world: world) is aliveA}")
   # An unchanged rebind touches nothing: same ids, same order.
-  listViewSystem(world: world, scenes: registry)
+  listViewSystem(world: world, uiSystems: uiSystems, scenes: registry)
   log("stable: {describeRows(world: world, listEntity: listEntity)}")
 
   # ----- C: a horizontal strip with fixed-width rows -----
   let stripWorld: UiWorld = createUiWorld()
   let strip: Scene = parseScene(source: stripScene())
   strip.sceneId = "strip"
-  loadScene(world: stripWorld, scene: strip)
+  loadScene(world: stripWorld, uiSystems: uiSystems, scene: strip)
   var stripEntity: EntityId = noEntity()
   if let raw: Int = stripWorld.nodeIds.get(k: "Strip") {
     stripEntity = id(v: raw)
@@ -239,7 +241,7 @@ func main() {
     entity: stripEntity
     data: ListViewData { rows: own thumbs }
   )
-  listViewSystem(world: stripWorld, scenes: registry)
+  listViewSystem(world: stripWorld, uiSystems: uiSystems, scenes: registry)
   unsafe {
     let ch: view Children => componentView(this: stripWorld.childrens, entity: stripEntity)
     let thumb: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: 1)

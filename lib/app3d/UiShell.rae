@@ -48,6 +48,7 @@ open ui/ThemeParse
 open ui/Transform
 open ecs/Entity
 open ecs/ComponentTable
+open ui/UiSystems
 
 # ----- window extent --------------------------------------------------
 func windowExtentW() ret Float {
@@ -265,6 +266,7 @@ func loadMountedSceneTextures(
 # fallback atlas in place.
 func mountSceneWithImports(
   world: mod UiWorld
+  uiSystems: mod UiSystems
   root: view String
   sceneId: view String
   resources: mod Gpu2dUi
@@ -319,18 +321,23 @@ func mountSceneWithImports(
   world.bundles = sceneImportedBundles(entry: scene, assets: assets, registry: registry)
   world.layoutW = windowExtentW()
   world.layoutH = windowExtentH()
-  let mountedRoot: EntityId = loadScene(world: world, scene: scene)
+  let mountedRoot: EntityId = loadScene(world: world, uiSystems: uiSystems, scene: scene)
   if isNone(this: mountedRoot) {
     ret mountedRoot
   }
-  resolveSceneInstances(world: world, registry: registry, pageId: "")
+  resolveSceneInstances(
+    world: world
+    uiSystems: uiSystems
+    registry: registry
+    pageId: ""
+  )
   loadMountedSceneTextures(
     world: world
     canvas: canvas
     assets: assets
     sceneId: sceneId
   )
-  runUiSystems(world: world, res: resources)
+  runUiSystems(world: world, uiSystems: uiSystems, res: resources)
   ret mountedRoot
 }
 
@@ -339,23 +346,28 @@ func mountSceneWithImports(
 # identical everywhere and the one that is easy to forget (setting
 # layoutW/layoutH before the first layout pass, without which everything
 # lays out against a zero-sized root).
-func mountUiScene(world: mod UiWorld, path: view String, res: view Gpu2dUi) ret EntityId {
+func mountUiScene(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  path: view String
+  res: view Gpu2dUi
+) ret EntityId {
   world.layoutW = windowExtentW()
   world.layoutH = windowExtentH()
   let scene: Scene = loadSceneFile(path: path)
-  let root: EntityId = loadScene(world: world, scene: scene)
-  runUiSystems(world: world, res: res)
+  let root: EntityId = loadScene(world: world, uiSystems: uiSystems, scene: scene)
+  runUiSystems(world: world, uiSystems: uiSystems, res: res)
   ret root
 }
 
 # Layout -> transform -> visual bounds, in that order and always all
 # three. Running a subset is the classic source of a UI that is
 # positioned correctly but hit-tests against last frame's rectangles.
-func runUiSystems(world: mod UiWorld, res: view Gpu2dUi) {
-  measureTextForLayout(world: world, res: res)
-  layoutSystem(world: world)
-  transformSystem(world: world)
-  visualBoundsSystem(world: world, res: res)
+func runUiSystems(world: mod UiWorld, uiSystems: mod UiSystems, res: view Gpu2dUi) {
+  measureTextForLayout(world: world, uiSystems: uiSystems, res: res)
+  layoutSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+  visualBoundsSystem(world: world, uiSystems: uiSystems, res: res)
 }
 
 # The same three render-prep systems, but driven by a #939 `Schedule`
@@ -367,29 +379,54 @@ func runUiSystems(world: mod UiWorld, res: view Gpu2dUi) {
 # app builds the schedule once with `createUiPipeline(world)` and calls this per
 # frame; the schedule owns the order and the dirty state, the app still CALLS
 # the systems (Rae has no first-class function references).
-func runScheduledUiSystems(schedule: mod Schedule, world: mod UiWorld, res: view Gpu2dUi) {
+func runScheduledUiSystems(
+  schedule: mod Schedule
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  res: view Gpu2dUi
+) {
   # #1004: font-measure Text leaves into MeasuredText BEFORE layout, so a Hug
   # text hugs its glyphs on the first frame. Compare-before-write means a
   # stable string does not bump the table generation, so layout still skips
   # when nothing moved (measuredTexts is a declared layout read).
-  measureTextForLayout(world: world, res: res)
-  if uiShouldRun(schedule: schedule, world: world, index: uiSystemLayout) {
-    layoutSystem(world: world)
+  measureTextForLayout(world: world, uiSystems: uiSystems, res: res)
+  if uiShouldRun(
+    schedule: schedule
+    world: world
+    uiSystems: uiSystems
+    index: uiSystemLayout
+  ) {
+    layoutSystem(world: world, uiSystems: uiSystems)
   }
-  if uiShouldRun(schedule: schedule, world: world, index: uiSystemCamera) {
+  if uiShouldRun(
+    schedule: schedule
+    world: world
+    uiSystems: uiSystems
+    index: uiSystemCamera
+  ) {
     cameraSystem(world: world)
   }
-  if uiShouldRun(schedule: schedule, world: world, index: uiSystemTransform) {
-    transformSystem(world: world)
+  if uiShouldRun(
+    schedule: schedule
+    world: world
+    uiSystems: uiSystems
+    index: uiSystemTransform
+  ) {
+    transformSystem(world: world, uiSystems: uiSystems)
   }
-  if uiShouldRun(schedule: schedule, world: world, index: uiSystemVisualBounds) {
-    visualBoundsSystem(world: world, res: res)
+  if uiShouldRun(
+    schedule: schedule
+    world: world
+    uiSystems: uiSystems
+    index: uiSystemVisualBounds
+  ) {
+    visualBoundsSystem(world: world, uiSystems: uiSystems, res: res)
   }
 }
 
 # Re-fit the world to the window after a resize. Returns whether anything
 # changed, which the caller feeds into its redraw decision.
-func resizeUiToWindow(world: mod UiWorld, res: view Gpu2dUi) ret Bool {
+func resizeUiToWindow(world: mod UiWorld, uiSystems: mod UiSystems, res: view Gpu2dUi) ret Bool {
   if Gpu2d.windowResized() is false {
     ret false
   }
@@ -401,7 +438,7 @@ func resizeUiToWindow(world: mod UiWorld, res: view Gpu2dUi) ret Bool {
   Gpu2d.setDesignResolution(width: w, height: h, fit: 0)
   world.layoutW = w
   world.layoutH = h
-  runUiSystems(world: world, res: res)
+  runUiSystems(world: world, uiSystems: uiSystems, res: res)
   ret true
 }
 

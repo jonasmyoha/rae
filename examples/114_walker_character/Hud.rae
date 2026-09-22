@@ -15,6 +15,7 @@ open ui/VirtualJoystick
 open app3d/CameraRig
 open ui/safeAreaSystem/SafeAreaSystem
 open Gpu2dCanvas
+open ui/UiSystems
 
 # Update the touch stick AND tell the camera rig to exclude its region, so on a
 # phone one finger drives the joystick while another rotates the camera (#526).
@@ -22,6 +23,7 @@ func updateWalkerTouch(
   rig: mod CameraRig
   moveStick: mod VirtualJoystick
   world: mod UiWorld
+  uiSystems: mod UiSystems
 ) pub ret Bool {
   # Feed the OS safe-area insets (notch / home indicator, design units) into the
   # ECS so UiRoot's padding reserves them — the whole UI, top bar included, sits
@@ -32,7 +34,7 @@ func updateWalkerTouch(
     r: Gpu2d.safeRight()
     b: Gpu2d.safeBottom()
   }
-  safeAreaSystem(world: world, insets: safe)
+  safeAreaSystem(world: world, uiSystems: uiSystems, insets: safe)
   let active: Bool = updateVirtualJoystick(joy: moveStick)
   # Hand the camera the joystick's exclusion zone (same radius the stick grabs
   # with) + the owned finger id: a press inside the zone is the stick's, outside

@@ -9,6 +9,7 @@ import ui/Components
 open ui/Ecs
 open ui/layoutSystem/LayoutSystem
 open ecs/ComponentTable
+open ui/UiSystems
 
 func hugSize() ret Size {
   ret Size {
@@ -34,9 +35,14 @@ func setRect(
   componentSet(this: world.rects, entity: entity, data: r)
 }
 
-func attach(world: mod UiWorld, parent: view EntityId, child: view EntityId) {
+func attach(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  parent: view EntityId
+  child: view EntityId
+) {
   let pl: Parent = { parent: parent }
-  componentSet(this: world.parents, entity: child, data: pl)
+  componentSet(this: uiSystems.hierarchy.parents, entity: child, data: pl)
   var kids: List(EntityId) = List.create(EntityId, cap: 1)
   if componentHas(this: world.childrens, entity: parent) {
     let existing: Children = componentGet(this: world.childrens, entity: parent)
@@ -51,13 +57,19 @@ func attach(world: mod UiWorld, parent: view EntityId, child: view EntityId) {
   componentSet(this: world.childrens, entity: parent, data: own ch)
 }
 
-func dump(world: view UiWorld, entity: view EntityId, label: view String) {
-  let cr: ComputedRect = componentGet(this: world.computedRects, entity: entity)
+func dump(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entity: view EntityId
+  label: view String
+) {
+  let cr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: entity)
   log("{label} cr=({cr.position.x},{cr.position.y},{cr.size.x},{cr.size.y})")
 }
 
 func main() {
   let world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
 
   # A Hug x Hug chip (12 px padding all round) around a Hug x Hug text leaf.
   # The text's authored Rect.w is 0 — a designer never types the width.
@@ -102,8 +114,17 @@ func main() {
     data: Text { text: "Hello", styleId: "body", wrapWidthMode: WrapWidthMode.none }
   )
   # The font measure the pre-layout pass would write: 140 wide, 24 line box.
-  componentSet(this: world.measuredTexts, entity: label, data: MeasuredText { w: 140.0, h: 24.0 })
-  attach(world: world, parent: chip, child: label)
+  componentSet(
+    this: uiSystems.layout.measuredTexts
+    entity: label
+    data: MeasuredText { w: 140.0, h: 24.0 }
+  )
+  attach(
+    world: world
+    uiSystems: uiSystems
+    parent: chip
+    child: label
+  )
 
   # A Fixed-width text sibling keeps its authored Rect (200 wide) even with a
   # MeasuredText present — proof the change only touches Hug axes.
@@ -120,11 +141,30 @@ func main() {
     entity: fixed
     data: Text { text: "Wide", styleId: "body", wrapWidthMode: WrapWidthMode.none }
   )
-  componentSet(this: world.measuredTexts, entity: fixed, data: MeasuredText { w: 999.0, h: 24.0 })
+  componentSet(
+    this: uiSystems.layout.measuredTexts
+    entity: fixed
+    data: MeasuredText { w: 999.0, h: 24.0 }
+  )
 
-  layoutSystem(world: world)
+  layoutSystem(world: world, uiSystems: uiSystems)
 
-  dump(world: world, entity: chip, label: "chip")
-  dump(world: world, entity: label, label: "label")
-  dump(world: world, entity: fixed, label: "fixed")
+  dump(
+    world: world
+    uiSystems: uiSystems
+    entity: chip
+    label: "chip"
+  )
+  dump(
+    world: world
+    uiSystems: uiSystems
+    entity: label
+    label: "label"
+  )
+  dump(
+    world: world
+    uiSystems: uiSystems
+    entity: fixed
+    label: "fixed"
+  )
 }

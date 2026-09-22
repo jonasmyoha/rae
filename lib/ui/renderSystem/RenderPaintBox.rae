@@ -8,6 +8,7 @@ import ui/Components
 open ecs/ComponentTable
 open ecs/Entity
 open Gpu2dCanvas
+open ui/UiSystems
 
 func g2dColor(color: view RgbaColor) ret Int {
   ret (color.a shl 24) bitor (color.r shl 16) bitor (color.g shl 8) bitor color.b
@@ -171,22 +172,27 @@ func paintShadowG(
 
 # The mask's box: the entity's own, or the named source node's (resolved in
 # the entity's page). Returns whether a clip was pushed.
-func pushMaskClipG(world: view UiWorld, entity: view EntityId, canvas: mod Gpu2dCanvas) ret Bool {
+func pushMaskClipG(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entity: view EntityId
+  canvas: mod Gpu2dCanvas
+) ret Bool {
   let mask: MaskShape = componentGet(this: world.maskShapes, entity: entity)
   var source: EntityId = entity
   if mask.sourceNodeId.length() > 0 {
-    let page: String = pageOf(world: world, entity: entity)
+    let page: String = pageOf(world: world, uiSystems: uiSystems, entity: entity)
     if let index: Int = findNodeInPage(world: world, pageId: page, nodeId: mask.sourceNodeId) {
       source = nodeEntity(world: world, index: index)
     }
   }
-  if componentHas(this: world.computedRects, entity: source) is false or componentHas(
+  if componentHas(this: uiSystems.layout.computedRects, entity: source) is false or componentHas(
     this: world.worldTransforms
     entity: source
   ) is false {
     ret false
   }
-  let cr: ComputedRect = componentGet(this: world.computedRects, entity: source)
+  let cr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: source)
   let wt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: source)
   var x: Float = wt.position.x
   var y: Float = wt.position.y

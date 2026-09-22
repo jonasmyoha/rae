@@ -1,0 +1,111 @@
+# RenderFills — the gradient and backdrop painters split from RenderSystem
+# (the file cap): GradientFill through the gpu2d box shader's gradient mode,
+# BackdropImage as the tinted, clipped image behind a node.
+open ui/Ecs
+open ui/UiSystems
+open ui/renderSystem/RenderPaintBox
+import Gpu2d
+import ui/Components
+import ui/Theme
+import ui/ThemeResolved
+open ecs/ComponentTable
+open Gpu2dCanvas
+
+# GradientFill uses the gpu2d box shader's gradient mode so dock shadows and
+# dialog scrims stay in the same painter-order pipeline as normal shapes.
+func paintGradientG(
+  world: view UiWorld
+  entity: view EntityId
+  wt: view WorldTransform2D
+  cr: view ComputedRect
+  chain255: view Int
+  canvas: mod Gpu2dCanvas
+) {
+  let gf: GradientFill = componentGet(this: world.gradientFills, entity: entity)
+  let radius: Float = g2dRadius(world: world, entity: entity, fallback: 0.0)
+  let box: PaintBox = g2dPaintBox(
+    world: world
+    entity: entity
+    wt: wt
+    cr: cr
+  )
+  let hoverMul: Float = box.scale
+  let drawW: Float = box.w
+  let drawH: Float = box.h
+  let drawX: Float = box.x
+  let drawY: Float = box.y
+  let from: RgbaColor = g2dChain(color: gf.from, chain255: chain255)
+  let to: RgbaColor = g2dChain(color: gf.to, chain255: chain255)
+  if componentHas(this: world.shadows, entity: entity) {
+    paintShadowG(
+      world: world
+      entity: entity
+      box: box
+      radius: radius * hoverMul
+      chain255: chain255
+      canvas: canvas
+    )
+  }
+  Gpu2d.drawGradientRect(
+    canvas: canvas
+    x: drawX
+    y: drawY
+    w: drawW
+    h: drawH
+    radius: radius * hoverMul
+    from: g2dColor(color: from)
+    to: g2dColor(color: to)
+    angleDeg: gf.angle
+  )
+}
+
+func paintBackdropG(
+  world: view UiWorld
+  entity: view EntityId
+  wt: view WorldTransform2D
+  cr: view ComputedRect
+  chain255: view Int
+  canvas: mod Gpu2dCanvas
+) {
+  let bi: BackdropImage = componentGet(this: world.backdropImages, entity: entity)
+  let radius: Float = g2dRadius(world: world, entity: entity, fallback: 0.0)
+  let box: PaintBox = g2dPaintBox(
+    world: world
+    entity: entity
+    wt: wt
+    cr: cr
+  )
+  let hoverMul: Float = box.scale
+  let drawW: Float = box.w
+  let drawH: Float = box.h
+  let drawX: Float = box.x
+  let drawY: Float = box.y
+  if Gpu2d.hasImageKey(canvas: canvas, key: bi.textureKey) {
+    let white: RgbaColor = { r: 255, g: 255, b: 255, a: 255 }
+    let tint: RgbaColor = g2dChain(color: white, chain255: chain255)
+    Gpu2d.drawImageKey(
+      canvas: canvas
+      key: bi.textureKey
+      x: drawX
+      y: drawY
+      w: drawW
+      h: drawH
+      radius: radius * hoverMul
+      tint: g2dColor(color: tint)
+    )
+    ret
+  }
+  # Raylib uses captured blur textures for BackdropImage. gpu2d does not have
+  # framebuffer capture yet, so paint a stable translucent glass fallback.
+  let fallback: RgbaColor = { r: 18, g: 22, b: 30, a: 210 }
+  let chained: RgbaColor = g2dChain(color: fallback, chain255: chain255)
+  Gpu2d.drawRoundedRect(
+    canvas: canvas
+    x: drawX
+    y: drawY
+    w: drawW
+    h: drawH
+    radius: radius * hoverMul
+    color: g2dColor(color: chained)
+  )
+}
