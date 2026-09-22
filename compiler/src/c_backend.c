@@ -479,6 +479,14 @@ void register_generic_type(CompilerContext* ctx, const AstTypeRef* type) {
                 ? type->resolved_type->as.opt.base
                 : (payload->parts ? NULL : type->resolved_type);
             register_generic_type(ctx, payload);
+            // The opt type ITSELF is an emitted typedef (`struct rae_opt_<T>`),
+            // so it is registered too — even over a primitive payload, which
+            // the primitive/kind early-outs below would otherwise skip (a lone
+            // `let some: opt Int = 7` had no rae_opt_int64_t).
+            for (size_t i = 0; i < ctx->generic_type_count; i++) { if (type_refs_equal(ctx->generic_types[i], type)) return; }
+            RAE_GROW1(ctx->generic_types, ctx->generic_type_count, ctx->generic_type_cap);
+            ctx->generic_types[ctx->generic_type_count++] = type;
+            return;
         }
     }
     if (type->resolved_type && type->resolved_type->kind < TYPE_STRUCT) {

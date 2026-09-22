@@ -108,6 +108,25 @@ extern int rae_func_count_param_refs(const AstFuncDecl* fd, Str name);
 // so user types route through the per-type function emitted in c_backend.c.
 static void emit_to_string_expr(CFuncContext* ctx, const AstExpr* operand, FILE* out) {
     const AstTypeRef* tr = infer_expr_type_ref(ctx, operand);
+    // In a generic body the operand's type may be the parameter `T`: the
+    // instantiation being emitted knows the concrete type, so substitute it
+    // first — then the rules below dispatch per instantiation (an enum to its
+    // member name, a struct / List to its generated toString) instead of
+    // falling into the String arm of the _Generic macro.
+    AstTypeRef substituted_local;
+    if (tr && ctx->generic_params && ctx->generic_args) {
+        const AstTypeRef* substituted = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr);
+        if (substituted) {
+            // T = opt X through a `view T` parameter: the instantiation passes
+            // the struct-rep opt by value, so format it as the value it is.
+            substituted_local = *substituted;
+            if (substituted_local.is_opt && (substituted_local.is_view || substituted_local.is_mod)
+                && rae_opt_is_struct_rep(ctx, &substituted_local)) {
+                substituted_local.is_view = false; substituted_local.is_mod = false;
+            }
+            tr = &substituted_local;
+        }
+    }
     Str base = get_base_type_name(tr);
     // A direct enum member access `Enum.member` may not infer to the enum type;
     // recover the enum name from the object so it stringifies to the name too.
@@ -162,10 +181,16 @@ static void emit_to_string_expr(CFuncContext* ctx, const AstExpr* operand, FILE*
         }
         const char* mangled = rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, (AstTypeRef*)sub);
         if (mangled) {
+            // The operand may be the list itself or a pointer to it (a `view`
+            // alias such as a field-loop binding is emitted undereferenced);
+            // _Generic picks the address either way, without copying the list.
             int lid = ctx->temp_counter++;
-            fprintf(out, "(__extension__ ({ %s __lstr%d = (", mangled, lid);
+            fprintf(out, "(__extension__ ({ __typeof__(");
             emit_expr(ctx, operand, out, PREC_LOWEST, false, false);
-            fprintf(out, "); rae_to_str_%s_(&__lstr%d); }))", mangled, lid);
+            fprintf(out, ") __lstr%d = (", lid);
+            emit_expr(ctx, operand, out, PREC_LOWEST, false, false);
+            fprintf(out, "); rae_to_str_%s_(_Generic((__lstr%d), %s*: *(%s**)&__lstr%d, const %s*: *(const %s**)&__lstr%d, default: &__lstr%d)); }))",
+                mangled, lid, mangled, mangled, lid, mangled, mangled, lid, lid);
             return;
         }
     }

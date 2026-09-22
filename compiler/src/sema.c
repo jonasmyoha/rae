@@ -1406,7 +1406,11 @@ AstTypeRef* infer_generic_args(CompilerContext* ctx, const AstFuncDecl* func, co
             AstTypeRef* bare = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef));
             *bare = *concrete_type; bare->next = NULL;
             bare->is_view = false; bare->is_mod = false; bare->is_own = false;
-            bare->is_copy = false; bare->is_val = false; bare->is_opt = false;
+            bare->is_copy = false; bare->is_val = false;
+            // `opt` IS part of the type argument: an `opt Int` passed to
+            // `value: view T` binds T = opt Int (a pattern `value: opt T`
+            // binds T to the payload instead).
+            if (pattern->is_opt) bare->is_opt = false;
             match = bare;
         } else if (bases_align) {
         const AstTypeRef* p_arg = pattern->generic_args; const AstTypeRef* r_arg = concrete_type->generic_args;
@@ -1458,7 +1462,11 @@ AstTypeRef* infer_generic_args_multi(CompilerContext* ctx, const AstFuncDecl* fu
                 AstTypeRef* bare = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef));
                 *bare = *conc; bare->next = NULL;
                 bare->is_view = false; bare->is_mod = false; bare->is_own = false;
-                bare->is_copy = false; bare->is_val = false; bare->is_opt = false;
+                bare->is_copy = false; bare->is_val = false;
+                // `opt` IS part of the type argument (an `opt Int` binds
+                // T = opt Int); only a pattern that spells `opt T` itself
+                // binds T to the payload.
+                if (pat->is_opt) bare->is_opt = false;
                 binding[gi] = bare; break;
             }
             // Base names must align so the generic_args match positionally
