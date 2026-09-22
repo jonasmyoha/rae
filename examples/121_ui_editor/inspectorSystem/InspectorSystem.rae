@@ -149,7 +149,7 @@ func placeOutline(
   visible: view Bool
 ) ret Bool {
   var show: Bool = visible and isNone(this: target) is false
-  if show and (componentHas(this: world.worldTransforms, entity: target) is false or componentHas(
+  if show and (componentHas(this: uiSystems.transform2d.worldTransforms, entity: target) is false or componentHas(
     this: uiSystems.layout.computedRects
     entity: target
   ) is false) {
@@ -167,7 +167,10 @@ func placeOutline(
   if show is false {
     ret changed
   }
-  let transform: WorldTransform2D = componentGet(this: world.worldTransforms, entity: target)
+  let transform: WorldTransform2D = componentGet(
+    this: uiSystems.transform2d.worldTransforms
+    entity: target
+  )
   let computed: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: target)
   let w: Float = computed.size.x * transform.scale.x
   let h: Float = computed.size.y * transform.scale.y
@@ -181,15 +184,15 @@ func placeOutline(
     }
   }
   var writeOffset: Bool = true
-  if componentHas(this: world.runtimeOffsets, entity: outline) {
-    let current: Vec2 = componentGet(this: world.runtimeOffsets, entity: outline).delta
+  if componentHas(this: uiSystems.transform2d.runtimeOffsets, entity: outline) {
+    let current: Vec2 = componentGet(this: uiSystems.transform2d.runtimeOffsets, entity: outline).delta
     if current.x is transform.position.x and current.y is transform.position.y {
       writeOffset = false
     }
   }
   if writeOffset {
     let offset: RuntimeOffset = { delta: Vec2 { x: transform.position.x, y: transform.position.y } }
-    componentSet(this: world.runtimeOffsets, entity: outline, data: own offset)
+    componentSet(this: uiSystems.transform2d.runtimeOffsets, entity: outline, data: own offset)
     changed = true
   }
   ret changed
@@ -384,10 +387,13 @@ func syncInspectorPanel(
   chromeSystem.inspectorAppComponents = appComponentsLine(world: world, entity: selected)
   var rectLine: String = "no computed rect"
   if componentHas(this: uiSystems.layout.computedRects, entity: selected) and componentHas(
-    this: world.worldTransforms
+    this: uiSystems.transform2d.worldTransforms
     entity: selected
   ) {
-    let transform: WorldTransform2D = componentGet(this: world.worldTransforms, entity: selected)
+    let transform: WorldTransform2D = componentGet(
+      this: uiSystems.transform2d.worldTransforms
+      entity: selected
+    )
     let computed: ComputedRect = componentGet(
       this: uiSystems.layout.computedRects
       entity: selected

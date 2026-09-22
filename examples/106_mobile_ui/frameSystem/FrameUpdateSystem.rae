@@ -7,6 +7,7 @@ open ui/animationSystem/AnimationSystem
 open ui/animationSystem/HeroTransitionSystem
 open ecs/Event
 open ui/UiSystems
+open ui/buttonSystem/ButtonHoverScale
 
 # Frame phase 2 — update. The data sync (the playback clock, the Spotify
 # mirror and the asset loaders update state; the observation pass translates
@@ -42,7 +43,7 @@ func frameUpdateSystem(
   # HeroTransitionSystem): eased along a step, revealed + destroyed when they
   # land. Before layout, so this frame's layout/transform place the new box
   # and the paint below shows it.
-  tick.animating = heroTransitionSystem(world: world, now: tick.now)
+  tick.animating = heroTransitionSystem(world: world, uiSystems: uiSystems, now: tick.now)
 
   # Re-run layout + transform if any tracked component changed since last
   # frame (scroll handlers mutate Offset in place). Both short-circuit when
@@ -86,7 +87,7 @@ func frameUpdateSystem(
     uiSystems: uiSystems
     index: uiSystemHoverScale
   ) {
-    session.lastHoverAnimDirty = hoverScaleSystem(
+    session.lastHoverAnimDirty = buttonHoverScaleUpdate(
       world: world
       uiSystems: app.uiSystems
       hovered: currentHovered

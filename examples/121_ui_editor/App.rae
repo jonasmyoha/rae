@@ -219,17 +219,17 @@ func effectSystems(
   input: view UiInput
 ) ret Bool {
   var live: Bool = false
-  if animFramesSystem(world: app.world, deltaTime: deltaTime) {
+  if animFramesSystem(world: app.world, uiSystems: app.uiSystems, deltaTime: deltaTime) {
     live = true
   }
-  animTriggerSystem(world: app.world)
-  if wobbleFxSystem(world: app.world, time: clock) {
+  animTriggerSystem(world: app.world, uiSystems: app.uiSystems)
+  if wobbleFxSystem(world: app.world, uiSystems: app.uiSystems, time: clock) {
     live = true
   }
-  if backgroundPanSystem(world: app.world, time: clock) {
+  if backgroundPanSystem(world: app.world, uiSystems: app.uiSystems, time: clock) {
     live = true
   }
-  if smokeFxSystem(world: app.world, deltaTime: deltaTime) {
+  if smokeFxSystem(world: app.world, uiSystems: app.uiSystems, deltaTime: deltaTime) {
     live = true
   }
   if carouselSystem(

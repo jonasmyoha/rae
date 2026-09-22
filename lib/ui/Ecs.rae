@@ -93,7 +93,6 @@ type UiWorld {
   scrollRoots: ComponentTable(ScrollRoot)
   scrollStates: ComponentTable(ScrollState)
   scrollDrags: ComponentTable(ScrollDrag)
-  interactions: ComponentTable(Interaction)
   widgetIds: ComponentTable(WidgetId)
   widgetStates: ComponentTable(WidgetState)
   dataDependencies: ComponentTable(DataDependency)
@@ -136,7 +135,6 @@ type UiWorld {
   bottomSheets: ComponentTable(BottomSheet)
   # #981: playback time labels + the cover-rounding style toggle.
   # Runtime: hero transitions in flight (ui/animationSystem/HeroTransitionSystem).
-  heroTransitions: ComponentTable(HeroTransition)
   # Authored: empty-state visibility + the bottom sheet's growing panel.
   emptyStates: ComponentTable(EmptyState)
   sheetPanels: ComponentTable(SheetPanel)
@@ -157,13 +155,6 @@ type UiWorld {
   # #727: the local Transform2D per entity (ComputedRect position + scroll +
   # authored rotation/scale), the input the general lib/ecs TransformSystem folds
   # into worldTransforms over the depth order. Rebuilt each transform pass.
-  localTransforms: ComponentTable(Transform2D)
-  worldTransforms: ComponentTable(WorldTransform2D)
-  worldVisuals: ComponentTable(WorldVisual)
-  runtimeOffsets: ComponentTable(RuntimeOffset)
-  animStates: ComponentTable(AnimState)
-  smokeStates: ComponentTable(SmokeState)  # #1005 runtime
-  carouselStates: ComponentTable(CarouselState)  # #1005 runtime
 
   # ----- RESOURCES (world-global singletons, #753) -----
   # These are RESOURCES, not components: one per world, so they are plain fields
@@ -272,7 +263,6 @@ func createUiWorld() ret UiWorld {
     scrollRoots: ComponentTable.create(ScrollRoot)
     scrollStates: ComponentTable.create(ScrollState)
     scrollDrags: ComponentTable.create(ScrollDrag)
-    interactions: ComponentTable.create(Interaction)
     widgetIds: ComponentTable.create(WidgetId)
     widgetStates: ComponentTable.create(WidgetState)
     dataDependencies: ComponentTable.create(DataDependency)
@@ -300,7 +290,6 @@ func createUiWorld() ret UiWorld {
     layerTags: ComponentTable.create(LayerTag)
     progressBars: ComponentTable.create(ProgressBar)
     bottomSheets: ComponentTable.create(BottomSheet)
-    heroTransitions: ComponentTable.create(HeroTransition)
     emptyStates: ComponentTable.create(EmptyState)
     sheetPanels: ComponentTable.create(SheetPanel)
     backgroundPans: ComponentTable.create(BackgroundPan)
@@ -310,13 +299,6 @@ func createUiWorld() ret UiWorld {
     animTriggers: ComponentTable.create(AnimTrigger)
     wobbleFxs: ComponentTable.create(WobbleFx)
     childrens: ComponentTable.create(Children)
-    localTransforms: ComponentTable.create(Transform2D)
-    worldTransforms: ComponentTable.create(WorldTransform2D)
-    worldVisuals: ComponentTable.create(WorldVisual)
-    runtimeOffsets: ComponentTable.create(RuntimeOffset)
-    animStates: ComponentTable.create(AnimState)
-    smokeStates: ComponentTable.create(SmokeState)
-    carouselStates: ComponentTable.create(CarouselState)
     msdfState: createMsdfState()
     layoutW: 600.0
     layoutH: 1300.0
@@ -535,7 +517,12 @@ func setSpriteKey(world: mod UiWorld, entity: view EntityId, key: view String) p
   ret true
 }
 
-func updateScrollOffset(world: mod UiWorld, target: view EntityId, scrollY: view Float) pub {
+func updateScrollOffset(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  target: view EntityId
+  scrollY: view Float
+) pub {
   if isNone(this: target) {
     ret
   }
@@ -545,7 +532,7 @@ func updateScrollOffset(world: mod UiWorld, target: view EntityId, scrollY: view
   # transform pass — not the full layout — so scrolling stays smooth on
   # large pages. The target's authored `Offset` base is left untouched.
   let ro: RuntimeOffset = { delta: Vec2 { x: 0.0, y: scrollY } }
-  componentSet(this: world.runtimeOffsets, entity: target, data: own ro)
+  componentSet(this: uiSystems.transform2d.runtimeOffsets, entity: target, data: own ro)
   if componentHas(this: world.scrollStates, entity: target) {
     let s: mod ScrollState => componentMod(this: world.scrollStates, entity: target)
     s.y = scrollY

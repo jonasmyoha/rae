@@ -502,13 +502,16 @@ func listViewSyncEntity(
     # The scroll is a runtime translation of the whole list (transform-time,
     # never a relayout); the rows sit at their content offsets below.
     var scrolled: Bool = true
-    if componentHas(this: world.runtimeOffsets, entity: entity) {
-      let cur: RuntimeOffset = componentGet(this: world.runtimeOffsets, entity: entity)
+    if componentHas(this: uiSystems.transform2d.runtimeOffsets, entity: entity) {
+      let cur: RuntimeOffset = componentGet(
+        this: uiSystems.transform2d.runtimeOffsets
+        entity: entity
+      )
       scrolled = cur.delta.y is not scrollY
     }
     if scrolled {
       let ro: RuntimeOffset = { delta: Vec2 { x: 0.0, y: scrollY } }
-      componentSet(this: world.runtimeOffsets, entity: entity, data: ro)
+      componentSet(this: uiSystems.transform2d.runtimeOffsets, entity: entity, data: ro)
     }
     var count: Int = 0
     if componentHas(this: world.listViewDatas, entity: entity) {

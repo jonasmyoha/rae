@@ -3,6 +3,7 @@ open ui/EventLoop
 open ui/WindowGeometry
 open ui/scrollRootSystem/ScrollRootSystem
 open ecs/ComponentTable
+open ui/UiSystems
 
 # Frame phase 0 — the wait policy. Decides how long to block for OS events
 # (busy-render while interacting / animating / loading, one frame while
@@ -14,6 +15,7 @@ func frameWaitSystem(
   app: mod App
   session: mod AppSession
   world: view UiWorld
+  uiSystems: view UiSystems
   frame: view WorldFrame
   tick: mod FrameTick
 ) {
@@ -60,7 +62,7 @@ func frameWaitSystem(
   # every frame as fast as the machine allows (no FPS cap). Playback alone
   # stays on the throttled 60Hz path so a playing song doesn't peg a core.
   # Idle → blocking event-wait (~0% CPU).
-  let heroInFlight: Bool = componentCount(this: world.heroTransitions) > 0
+  let heroInFlight: Bool = componentCount(this: uiSystems.heroTransition.heroTransitions) > 0
   tick.busyAnimating = heroInFlight or tick.scrollAnimating or session.lastHoverAnimDirty or session.assetsLoading or uiPointerButtonDown(
     button: mouseButtonLeft
   )

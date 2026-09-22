@@ -99,7 +99,7 @@ func fractionForX(
     ret 0.0
   }
   # Screen x, for the same reason as pointInNode.
-  let sx: Float = nodeScreenX(world: world, entity: entity)
+  let sx: Float = nodeScreenX(world: world, uiSystems: uiSystems, entity: entity)
   ret sliderClamp(value: (x - sx) / r.size.x, lo: 0.0, hi: 1.0)
 }
 
@@ -244,19 +244,25 @@ func debugNodeRect(world: view UiWorld, uiSystems: view UiSystems, nodeId: view 
 # compares screen coordinates to local ones, so a press is never inside and the
 # control is silently inert. uiHitTest gets this right (wt.position.x + cr.size.x) and is the
 # reference; these helpers now match it.
-func nodeScreenX(world: view UiWorld, entity: view EntityId) ret Float {
-  if componentHas(this: world.worldTransforms, entity: entity) is false {
+func nodeScreenX(world: view UiWorld, uiSystems: view UiSystems, entity: view EntityId) ret Float {
+  if componentHas(this: uiSystems.transform2d.worldTransforms, entity: entity) is false {
     ret 0.0
   }
-  let wt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: entity)
+  let wt: WorldTransform2D = componentGet(
+    this: uiSystems.transform2d.worldTransforms
+    entity: entity
+  )
   ret wt.position.x
 }
 
-func nodeScreenY(world: view UiWorld, entity: view EntityId) ret Float {
-  if componentHas(this: world.worldTransforms, entity: entity) is false {
+func nodeScreenY(world: view UiWorld, uiSystems: view UiSystems, entity: view EntityId) ret Float {
+  if componentHas(this: uiSystems.transform2d.worldTransforms, entity: entity) is false {
     ret 0.0
   }
-  let wt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: entity)
+  let wt: WorldTransform2D = componentGet(
+    this: uiSystems.transform2d.worldTransforms
+    entity: entity
+  )
   ret wt.position.y
 }
 
@@ -275,8 +281,8 @@ func pointInNode(
     ret false
   }
   let r: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: entity)
-  let sx: Float = nodeScreenX(world: world, entity: entity)
-  let sy: Float = nodeScreenY(world: world, entity: entity)
+  let sx: Float = nodeScreenX(world: world, uiSystems: uiSystems, entity: entity)
+  let sy: Float = nodeScreenY(world: world, uiSystems: uiSystems, entity: entity)
   if x < sx or x > sx + r.size.x {
     ret false
   }
@@ -305,7 +311,7 @@ func fractionAcrossNode(
     ret 0.0
   }
   # Screen x, for the same reason as pointInNode.
-  let sx: Float = nodeScreenX(world: world, entity: entity)
+  let sx: Float = nodeScreenX(world: world, uiSystems: uiSystems, entity: entity)
   ret sliderClamp(value: (x - sx) / r.size.x, lo: 0.0, hi: 1.0)
 }
 

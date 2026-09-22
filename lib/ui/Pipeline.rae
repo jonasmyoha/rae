@@ -105,15 +105,8 @@ func createUiPipeline(world: view UiWorld) ret Schedule {
     schedule: schedule
     world: world
     name: "input"
-    reads: [
-      "actives"
-      "childrens"
-      "interactions"
-      "layerRoots"
-      "onClicks"
-      "worldTransforms"
-    ]
-    writes: ["interactions"]
+    reads: ["actives", "childrens", "layerRoots", "onClicks"]
+    writes: List.create(String, cap: 0)
     skipWhenClean: false
   )
 
@@ -199,8 +192,8 @@ func createUiPipeline(world: view UiWorld) ret Schedule {
     schedule: schedule
     world: world
     name: "camera"
-    reads: ["cameras", "transforms", "runtimeOffsets"]
-    writes: ["transforms", "runtimeOffsets"]
+    reads: ["cameras", "transforms"]
+    writes: ["transforms"]
     skipWhenClean: true
   )
 
@@ -210,14 +203,8 @@ func createUiPipeline(world: view UiWorld) ret Schedule {
     schedule: schedule
     world: world
     name: "transform"
-    reads: [
-      "actives"
-      "opacities"
-      "transforms"
-      "childrens"
-      "runtimeOffsets"
-    ]
-    writes: ["localTransforms", "worldTransforms", "worldVisuals"]
+    reads: ["actives", "opacities", "transforms", "childrens"]
+    writes: List.create(String, cap: 0)
     skipWhenClean: true
   )
 
@@ -237,22 +224,16 @@ func createUiPipeline(world: view UiWorld) ret Schedule {
     schedule: schedule
     world: world
     name: "animFrames"
-    reads: ["animFrames", "animStates", "sprites"]
-    writes: ["animStates", "sprites"]
+    reads: ["animFrames", "sprites"]
+    writes: ["sprites"]
     skipWhenClean: false
   )
   uiRegister(
     schedule: schedule
     world: world
     name: "animTrigger"
-    reads: [
-      "animTriggers"
-      "animFrames"
-      "animStates"
-      "interactions"
-      "sprites"
-    ]
-    writes: ["animStates", "sprites"]
+    reads: ["animTriggers", "animFrames", "sprites"]
+    writes: ["sprites"]
     skipWhenClean: false
   )
   uiRegister(
@@ -260,7 +241,7 @@ func createUiPipeline(world: view UiWorld) ret Schedule {
     world: world
     name: "wobbleFx"
     reads: ["wobbleFxs"]
-    writes: ["runtimeOffsets"]
+    writes: List.create(String, cap: 0)
     skipWhenClean: false
   )
   uiRegister(
@@ -268,30 +249,23 @@ func createUiPipeline(world: view UiWorld) ret Schedule {
     world: world
     name: "backgroundPan"
     reads: ["backgroundPans"]
-    writes: ["runtimeOffsets"]
+    writes: List.create(String, cap: 0)
     skipWhenClean: false
   )
   uiRegister(
     schedule: schedule
     world: world
     name: "smokeFx"
-    reads: ["smokeFxs", "smokeStates", "childrens", "transforms"]
-    writes: ["smokeStates", "runtimeOffsets", "opacities", "transforms"]
+    reads: ["smokeFxs", "childrens", "transforms"]
+    writes: ["opacities", "transforms"]
     skipWhenClean: false
   )
   uiRegister(
     schedule: schedule
     world: world
     name: "carousel"
-    reads: [
-      "carousels"
-      "carouselStates"
-      "childrens"
-      "worldTransforms"
-      "actives"
-      "transforms"
-    ]
-    writes: ["carouselStates", "runtimeOffsets", "transforms"]
+    reads: ["carousels", "childrens", "actives", "transforms"]
+    writes: ["transforms"]
     skipWhenClean: false
   )
 
@@ -326,7 +300,6 @@ func createUiPipeline(world: view UiWorld) ret Schedule {
       "texts"
       "textShadows"
       "visualBounds"
-      "worldTransforms"
     ]
     writes: List.create(String, cap: 0)
     skipWhenClean: false
@@ -341,24 +314,51 @@ func createUiPipeline(world: view UiWorld) ret Schedule {
 # SYSTEMS (docs/ecs-systems-own-their-tables.md §3.1) — the derived tables
 # are no longer world fields the declared sets can name, so what each stage
 # reads of them is listed here by hand, next to the declarations above:
-#   input, fit, camera, hoverScale, anim*, visualBounds, render: computedRects
-#   layout: parents, measuredTexts (it writes measuredSizes / computedRects)
-#   transform: computedRects, parents
-#   safeArea: safeInsets
+#   every stage after layout: computedRects; plus per stage —
+#   input: worldTransforms, interactions      layout: parents, measuredTexts
+#   camera: runtimeOffsets                    transform: parents, runtimeOffsets
+#   animFrames: animStates                    animTrigger: interactions, animStates
+#   smokeFx: smokeStates                      carousel: worldTransforms, carouselStates
+#   render: worldTransforms                   safeArea: safeInsets
 func uiSystemsReadGeneration(uiSystems: view UiSystems, index: view Int) ret Int {
   let rects: Int = componentTableGeneration(this: uiSystems.layout.computedRects)
   let parents: Int = componentTableGeneration(this: uiSystems.hierarchy.parents)
-  if index is uiSystemLayout {
-    ret parents + componentTableGeneration(this: uiSystems.layout.measuredTexts)
+  let worldTransforms: Int = componentTableGeneration(this: uiSystems.transform2d.worldTransforms)
+  let runtimeOffsets: Int = componentTableGeneration(this: uiSystems.transform2d.runtimeOffsets)
+  let interactions: Int = componentTableGeneration(this: uiSystems.button.interactions)
+  let animStates: Int = componentTableGeneration(this: uiSystems.animation.animStates)
+  if index is uiSystemInput {
+    ret rects + worldTransforms + interactions
   }
-  if index is uiSystemTransform {
-    ret rects + parents
+  if index is uiSystemWidgetStyle {
+    ret 0
   }
   if index is uiSystemSafeArea {
     ret componentTableGeneration(this: uiSystems.safeArea.safeInsets)
   }
-  if index is uiSystemWidgetStyle {
-    ret 0
+  if index is uiSystemLayout {
+    ret parents + componentTableGeneration(this: uiSystems.layout.measuredTexts)
+  }
+  if index is uiSystemCamera {
+    ret rects + runtimeOffsets
+  }
+  if index is uiSystemTransform {
+    ret rects + parents + runtimeOffsets
+  }
+  if index is uiSystemAnimFrames {
+    ret rects + animStates
+  }
+  if index is uiSystemAnimTrigger {
+    ret rects + interactions + animStates
+  }
+  if index is uiSystemSmokeFx {
+    ret rects + componentTableGeneration(this: uiSystems.animation.smokeStates)
+  }
+  if index is uiSystemCarousel {
+    ret rects + worldTransforms + componentTableGeneration(this: uiSystems.animation.carouselStates)
+  }
+  if index is uiSystemRender {
+    ret rects + worldTransforms
   }
   ret rects
 }

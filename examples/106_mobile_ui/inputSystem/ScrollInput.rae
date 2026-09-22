@@ -1,5 +1,6 @@
 open ui/Ecs
 open ui/ScrollPhysics
+open ui/UiSystems
 
 # iOS-style drag + trackpad/wheel scroll physics for the Profile and
 # Album screens.
@@ -114,6 +115,7 @@ func scriptedPointer(fsm: mod ScrollFsm, viewport: view Viewport) ret ScriptedPo
 func applyDragPhysics(
   fsm: mod ScrollFsm
   world: mod UiWorld
+  uiSystems: mod UiSystems
   viewport: view Viewport
   scrollTarget: view EntityId
   scrollOnThisScreen: view Bool
@@ -175,7 +177,12 @@ func applyDragPhysics(
         fsm.delta2 = fsm.delta1
         fsm.delta1 = fsm.delta0
         fsm.delta0 = eff
-        updateScrollOffset(world: world, target: scrollTarget, scrollY: fsm.scrollY)
+        updateScrollOffset(
+          world: world
+          uiSystems: uiSystems
+          target: scrollTarget
+          scrollY: fsm.scrollY
+        )
       }
     }
   } else {
@@ -232,7 +239,12 @@ func applyDragPhysics(
           fsm.scrollY = target
           fsm.velocity = 0.0
         }
-        updateScrollOffset(world: world, target: scrollTarget, scrollY: fsm.scrollY)
+        updateScrollOffset(
+          world: world
+          uiSystems: uiSystems
+          target: scrollTarget
+          scrollY: fsm.scrollY
+        )
       }
     } else {
       # In-bounds momentum decay (drag-release fling).
@@ -244,7 +256,12 @@ func applyDragPhysics(
         if absVel > 0.3 {
           fsm.scrollY = fsm.scrollY + fsm.velocity
           fsm.velocity = fsm.velocity * 0.97
-          updateScrollOffset(world: world, target: scrollTarget, scrollY: fsm.scrollY)
+          updateScrollOffset(
+            world: world
+            uiSystems: uiSystems
+            target: scrollTarget
+            scrollY: fsm.scrollY
+          )
         } else {
           fsm.velocity = 0.0
         }
@@ -275,6 +292,7 @@ func applyDragPhysics(
 func applyWheelScroll(
   fsm: mod ScrollFsm
   world: mod UiWorld
+  uiSystems: mod UiSystems
   scrollTarget: view EntityId
   scrollOnThisScreen: view Bool
   scrollFloor: view Float
@@ -324,5 +342,10 @@ func applyWheelScroll(
   # are gated on `wheelQuiet` so they don't fight us.
   fsm.velocity = 0.0
   fsm.lastWheelTime = uiNowSeconds()
-  updateScrollOffset(world: world, target: scrollTarget, scrollY: fsm.scrollY)
+  updateScrollOffset(
+    world: world
+    uiSystems: uiSystems
+    target: scrollTarget
+    scrollY: fsm.scrollY
+  )
 }

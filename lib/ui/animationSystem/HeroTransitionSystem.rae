@@ -47,7 +47,7 @@ func heroPlaced(world: view UiWorld, uiSystems: view UiSystems, entity: view Ent
   if isNone(this: entity) {
     ret false
   }
-  if componentHas(this: world.worldTransforms, entity: entity) is false {
+  if componentHas(this: uiSystems.transform2d.worldTransforms, entity: entity) is false {
     ret false
   }
   ret componentHas(this: uiSystems.layout.computedRects, entity: entity)
@@ -57,7 +57,10 @@ func heroPlaced(world: view UiWorld, uiSystems: view UiSystems, entity: view Ent
 # cannot see (a grid tile scrolled out of view) makes no shared-element
 # transition: the destination just appears, as without one.
 func heroOnScreen(world: view UiWorld, uiSystems: view UiSystems, entity: view EntityId) ret Bool {
-  let at: WorldTransform2D = componentGet(this: world.worldTransforms, entity: entity)
+  let at: WorldTransform2D = componentGet(
+    this: uiSystems.transform2d.worldTransforms
+    entity: entity
+  )
   let box: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: entity)
   if at.position.x + box.size.x <= 0.0 or at.position.x >= world.layoutW {
     ret false
@@ -139,9 +142,15 @@ func spawnHeroTransition(
   if heroOnScreen(world: world, uiSystems: uiSystems, entity: source) is false {
     ret false
   }
-  let sourceAt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: source)
+  let sourceAt: WorldTransform2D = componentGet(
+    this: uiSystems.transform2d.worldTransforms
+    entity: source
+  )
   let sourceBox: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: source)
-  let targetAt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: target)
+  let targetAt: WorldTransform2D = componentGet(
+    this: uiSystems.transform2d.worldTransforms
+    entity: target
+  )
   let targetBox: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: target)
   let flight: EntityId = createEntity(world: world)
   let transition: HeroTransition = {
@@ -191,7 +200,7 @@ func spawnHeroTransition(
   log(
     "[hero] start key={key} from=({transition.fromX},{transition.fromY} {transition.fromW}x{transition.fromH}) to=({transition.toX},{transition.toY} {transition.toW}x{transition.toH})"
   )
-  componentSet(this: world.heroTransitions, entity: flight, data: own transition)
+  componentSet(this: uiSystems.heroTransition.heroTransitions, entity: flight, data: own transition)
   setHeroVisible(world: world, entity: target, visible: false)
   ret true
 }
@@ -203,20 +212,27 @@ func lerp(from: view Float, to: view Float, t: view Float) ret Float {
 # Advance every transition in flight. Returns whether any is still moving
 # (the host keeps rendering at frame cadence while true). A finished one
 # reveals its target and is destroyed.
-func heroTransitionSystem(world: mod UiWorld, now: view Float64) pub ret Bool {
-  let n: Int = componentCount(this: world.heroTransitions)
+func heroTransitionSystem(
+  world: mod UiWorld
+  uiSystems: view UiSystems
+  now: view Float64
+) pub ret Bool {
+  let n: Int = componentCount(this: uiSystems.heroTransition.heroTransitions)
   if n is 0 {
     ret false
   }
   let flights: List(EntityId) = List.create(EntityId, cap: n)
   var i: Int = 0
   loop i < n {
-    flights.add(value: componentEntityAt(this: world.heroTransitions, i: i))
+    flights.add(value: componentEntityAt(this: uiSystems.heroTransition.heroTransitions, i: i))
     i = i + 1
   }
   var moving: Bool = false
   loop let flight: view EntityId in flights {
-    let transition: HeroTransition = componentGet(this: world.heroTransitions, entity: flight)
+    let transition: HeroTransition = componentGet(
+      this: uiSystems.heroTransition.heroTransitions
+      entity: flight
+    )
     var t: Float = 1.0
     if transition.duration > 0.0 {
       t = ((now - transition.startedAt) as Float) / transition.duration
