@@ -147,7 +147,7 @@ static void emit_to_string_expr(CFuncContext* ctx, const AstExpr* operand, FILE*
         {
             AstTypeRef payload = *tr; payload.is_opt = false; payload.next = NULL;
             char inner[64]; snprintf(inner, sizeof inner, "__ostr%d.value", oid);
-            rae_value_to_str_expr(ctx->compiler_ctx, ctx->module, &payload, inner, out);
+            rae_value_to_str_expr(ctx->compiler_ctx, ctx->module, &payload, inner, false, out);
         }
         fprintf(out, " : (rae_String){(uint8_t*)\"none\", 4}; }))");
         return;
