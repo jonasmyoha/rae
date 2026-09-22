@@ -227,6 +227,7 @@ func scrollRootRange(
 # cache permanently dirty (#407).
 func applyScrollPosition(
   world: mod UiWorld
+  uiSystems: mod UiSystems
   entity: view EntityId
   root: view ScrollRoot
   position: view Float
@@ -236,13 +237,13 @@ func applyScrollPosition(
     want = { x: position, y: 0.0 }
   }
   var changed: Bool = true
-  if componentHas(this: world.runtimeOffsets, entity: entity) {
-    let current: Vec2 = componentGet(this: world.runtimeOffsets, entity: entity).delta
+  if componentHas(this: uiSystems.transform2d.runtimeOffsets, entity: entity) {
+    let current: Vec2 = componentGet(this: uiSystems.transform2d.runtimeOffsets, entity: entity).delta
     changed = current.x is not want.x or current.y is not want.y
   }
   if changed {
     let offset: RuntimeOffset = { delta: want }
-    componentSet(this: world.runtimeOffsets, entity: entity, data: offset)
+    componentSet(this: uiSystems.transform2d.runtimeOffsets, entity: entity, data: offset)
   }
   if componentHas(this: world.scrollStates, entity: entity) {
     let state: mod ScrollState => componentMod(this: world.scrollStates, entity: entity)
@@ -254,7 +255,7 @@ func applyScrollPosition(
 # ScrollState and the RuntimeOffset both go to 0. Used when a persistent page
 # is repointed at fresh content — e.g. the album page showing a different
 # album — so the new content starts at the top instead of the old scroll.
-func resetScrollRootOnPage(world: mod UiWorld, uiSystems: view UiSystems, pageId: view String) pub {
+func resetScrollRootOnPage(world: mod UiWorld, uiSystems: mod UiSystems, pageId: view String) pub {
   let n: Int = componentCount(this: world.scrollRoots)
   var i: Int = 0
   loop i < n {
@@ -263,6 +264,7 @@ func resetScrollRootOnPage(world: mod UiWorld, uiSystems: view UiSystems, pageId
       let root: ScrollRoot = componentGet(this: world.scrollRoots, entity: entity)
       applyScrollPosition(
         world: world
+        uiSystems: uiSystems
         entity: entity
         root: root
         position: 0.0
@@ -276,7 +278,7 @@ func resetScrollRootOnPage(world: mod UiWorld, uiSystems: view UiSystems, pageId
 # memory, applying the position as the root's RuntimeOffset; record every
 # seeded root's live position back into the memory when it moved. Idempotent
 # and cheap (a handful of roots) — run it after a mount and once per frame.
-func scrollRootSystem(world: mod UiWorld, uiSystems: view UiSystems, memory: mod ScrollMemory) {
+func scrollRootSystem(world: mod UiWorld, uiSystems: mod UiSystems, memory: mod ScrollMemory) {
   let n: Int = componentCount(this: world.scrollRoots)
   loop var i: Int = 0, i < n, ++i {
     let entity: EntityId = componentEntityAt(this: world.scrollRoots, i: i)
@@ -288,6 +290,7 @@ func scrollRootSystem(world: mod UiWorld, uiSystems: view UiSystems, memory: mod
       let root: ScrollRoot = componentGet(this: world.scrollRoots, entity: entity)
       applyScrollPosition(
         world: world
+        uiSystems: uiSystems
         entity: entity
         root: root
         position: position
@@ -349,7 +352,7 @@ func pointerOverScrollRoot(
   if componentHas(this: uiSystems.hierarchy.parents, entity: entity) {
     let parent: EntityId = componentGet(this: uiSystems.hierarchy.parents, entity: entity).parent
     if componentHas(this: uiSystems.layout.computedRects, entity: parent) and componentHas(
-      this: world.worldTransforms
+      this: uiSystems.transform2d.worldTransforms
       entity: parent
     ) {
       window = parent
@@ -358,11 +361,14 @@ func pointerOverScrollRoot(
   if componentHas(this: uiSystems.layout.computedRects, entity: window) is false {
     ret false
   }
-  if componentHas(this: world.worldTransforms, entity: window) is false {
+  if componentHas(this: uiSystems.transform2d.worldTransforms, entity: window) is false {
     ret false
   }
   let r: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: window)
-  let wt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: window)
+  let wt: WorldTransform2D = componentGet(
+    this: uiSystems.transform2d.worldTransforms
+    entity: window
+  )
   if x < wt.position.x or x > wt.position.x + r.size.x {
     ret false
   }
@@ -386,7 +392,7 @@ func pointerAlongAxis(root: view ScrollRoot, input: view UiInput) ret Float {
 # mod-borrow is held across the read-only geometry queries.
 func updateScrollRoot(
   world: mod UiWorld
-  uiSystems: view UiSystems
+  uiSystems: mod UiSystems
   entity: view EntityId
   input: view UiInput
 ) ret Bool {
@@ -422,6 +428,7 @@ func updateScrollRoot(
     if before is not 0.0 {
       applyScrollPosition(
         world: world
+        uiSystems: uiSystems
         entity: entity
         root: root
         position: 0.0
@@ -524,6 +531,7 @@ func updateScrollRoot(
   if state.y is not before {
     applyScrollPosition(
       world: world
+      uiSystems: uiSystems
       entity: entity
       root: root
       position: state.y

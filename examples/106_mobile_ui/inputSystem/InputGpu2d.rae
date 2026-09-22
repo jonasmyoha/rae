@@ -106,14 +106,17 @@ func pointInEntity(
   x: view Float
   y: view Float
 ) ret Bool {
-  if componentHas(this: world.worldTransforms, entity: entity) is false {
+  if componentHas(this: uiSystems.transform2d.worldTransforms, entity: entity) is false {
     ret false
   }
   if componentHas(this: uiSystems.layout.computedRects, entity: entity) is false {
     ret false
   }
-  let wt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: entity)
-  if worldVisualOf(world: world, entity: entity).visible is false {
+  let wt: WorldTransform2D = componentGet(
+    this: uiSystems.transform2d.worldTransforms
+    entity: entity
+  )
+  if worldVisualOf(world: world, uiSystems: uiSystems, entity: entity).visible is false {
     ret false
   }
   let cr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: entity)

@@ -129,9 +129,9 @@ one system; the app systems marked *(obs)* are rows of the observation schedule
 | `WorldTransform2D` (derived) `ExtentAnchor` | `transformSystem` |
 | `SafeArea` | `safeAreaSystem` (app calls `applySafeAreas`) |
 | `AnchorBottom` `LayerTag` | `anchorBottomSystem` / `layerTagSystem` (app, DockSystems) |
-| `HoverScale` | `hoverScaleSystem` |
+| `HoverScale` | `buttonHoverScaleUpdate` (lib/ui/buttonSystem) |
 | `PointerEvents` `OnClick` `Active` | input system + render visibility |
-| `WidgetId` `WidgetState` `StateStyle` | `widgetStyleSystem` |
+| `WidgetId` `WidgetState` `StateStyle` | `buttonStyleUpdate` (lib/ui/buttonSystem) |
 | `SceneInstance` | resolved at mount (`resolveSceneInstances`) |
 
 ### Binding components (one system each)

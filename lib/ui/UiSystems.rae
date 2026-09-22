@@ -9,6 +9,8 @@
 # table — `mod` for the owner writing, `view` for a reader. It grows in the
 # second half of the split (Transform2dSystem, AnimationSystem, ButtonSystem).
 open ui/Components
+open ui/BindingComponents
+import ecs/Transform
 open ecs/Hierarchy
 open ecs/ComponentTable
 
@@ -32,10 +34,43 @@ type HierarchySystem {
   parents: ComponentTable(Parent)
 }
 
+# transformSystem's output: the local and world 2D transforms, the world
+# visual (opacity / visibility chain) and the runtime offsets systems write.
+# Spelled with the dimension: Transform3dSystem is the 3D sibling to come.
+type Transform2dSystem {
+  localTransforms: ComponentTable(Transform2D)
+  worldTransforms: ComponentTable(WorldTransform2D)
+  worldVisuals: ComponentTable(WorldVisual)
+  runtimeOffsets: ComponentTable(RuntimeOffset)
+}
+
+# The effect systems' per-entity runtime state (#1005).
+type AnimationSystem {
+  animStates: ComponentTable(AnimState)
+  smokeStates: ComponentTable(SmokeState)
+  carouselStates: ComponentTable(CarouselState)
+}
+
+# The shared-element transitions in flight (HeroTransitionSystem writes,
+# an app's frame wait reads `view`).
+type HeroTransitionSystem {
+  heroTransitions: ComponentTable(HeroTransition)
+}
+
+# The button system (buttonSystem/): the per-entity pointer state it derives
+# (hovered / pressed) — its style swap and hover scale read it from here.
+type ButtonSystem {
+  interactions: ComponentTable(Interaction)
+}
+
 type UiSystems {
   layout: LayoutSystem
   safeArea: SafeAreaSystem
   hierarchy: HierarchySystem
+  transform2d: Transform2dSystem
+  animation: AnimationSystem
+  heroTransition: HeroTransitionSystem
+  button: ButtonSystem
 }
 
 func createUiSystems() ret UiSystems {
@@ -48,6 +83,19 @@ func createUiSystems() ret UiSystems {
     }
     safeArea: SafeAreaSystem { safeInsets: ComponentTable.create(SafeInsets) }
     hierarchy: HierarchySystem { parents: ComponentTable.create(Parent) }
+    transform2d: Transform2dSystem {
+      localTransforms: ComponentTable.create(Transform2D)
+      worldTransforms: ComponentTable.create(WorldTransform2D)
+      worldVisuals: ComponentTable.create(WorldVisual)
+      runtimeOffsets: ComponentTable.create(RuntimeOffset)
+    }
+    animation: AnimationSystem {
+      animStates: ComponentTable.create(AnimState)
+      smokeStates: ComponentTable.create(SmokeState)
+      carouselStates: ComponentTable.create(CarouselState)
+    }
+    heroTransition: HeroTransitionSystem { heroTransitions: ComponentTable.create(HeroTransition) }
+    button: ButtonSystem { interactions: ComponentTable.create(Interaction) }
   }
 }
 
@@ -60,4 +108,13 @@ func clearUiSystemsEntity(uiSystems: mod UiSystems, entity: view EntityId) {
   componentRemove(this: uiSystems.layout.layoutScales, entity: entity)
   componentRemove(this: uiSystems.safeArea.safeInsets, entity: entity)
   componentRemove(this: uiSystems.hierarchy.parents, entity: entity)
+  componentRemove(this: uiSystems.transform2d.localTransforms, entity: entity)
+  componentRemove(this: uiSystems.transform2d.worldTransforms, entity: entity)
+  componentRemove(this: uiSystems.transform2d.worldVisuals, entity: entity)
+  componentRemove(this: uiSystems.transform2d.runtimeOffsets, entity: entity)
+  componentRemove(this: uiSystems.animation.animStates, entity: entity)
+  componentRemove(this: uiSystems.animation.smokeStates, entity: entity)
+  componentRemove(this: uiSystems.animation.carouselStates, entity: entity)
+  componentRemove(this: uiSystems.heroTransition.heroTransitions, entity: entity)
+  componentRemove(this: uiSystems.button.interactions, entity: entity)
 }

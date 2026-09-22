@@ -1,0 +1,82 @@
+# ButtonSystem — the press / hover behaviour of a button, gathered from the
+# three places it used to live (docs/ecs-systems-own-their-tables.md §3.1):
+#
+#   buttonInteractionClear / buttonInteractionMark   (was inputSystem)
+#     the per-entity pointer state, `Interaction { hovered, pressed }`, on
+#     the system's own table — updateUiInput calls them from the hit test;
+#   buttonStyleUpdate  (ButtonStyle.rae, was widgetStyleSystem)
+#     WidgetState / StateStyle -> the widget's visuals, before layout;
+#   buttonHoverScaleUpdate  (ButtonHoverScale.rae, was hoverScaleSystem)
+#     the HoverScale ease, after the transform pass.
+#
+# The three run at the pipeline stages they always did — merging them into
+# one call would move the hover scale a frame earlier and the style swap a
+# stage later, i.e. change what is drawn — so `ButtonSystem` is one TYPE and
+# one module, not one function. The authored Button / OnClick / HitArea /
+# HoverScale / StateStyle components stay on the world.
+open ui/Ecs
+open ui/UiSystems
+open ui/Components
+open ecs/Entity
+open ecs/ComponentTable
+
+# #729: per-entity pointer state lives in `Interaction` components. At most two
+# entities carry one at a time (the hovered one and the pressed one), so the whole
+# table is kept in step by clearing the two from LAST frame and marking the two for
+# THIS frame — no per-entity scan. Merge the flags so an entity that is both
+# hovered and pressed gets a single {hovered:true, pressed:true}.
+func buttonInteractionClear(world: mod UiWorld, uiSystems: mod UiSystems, entity: view EntityId) {
+  if isNone(this: entity) {
+    ret
+  }
+  if componentHas(this: uiSystems.button.interactions, entity: entity) {
+    componentRemove(this: uiSystems.button.interactions, entity: entity)
+  }
+}
+
+func buttonInteractionMark(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  entity: view EntityId
+  hovered: view Bool
+  pressed: view Bool
+) {
+  if isNone(this: entity) {
+    ret
+  }
+  var state: Interaction = { hovered: false, pressed: false }
+  if componentHas(this: uiSystems.button.interactions, entity: entity) {
+    state = componentGet(this: uiSystems.button.interactions, entity: entity)
+  }
+  if hovered {
+    state.hovered = true
+  }
+  if pressed {
+    state.pressed = true
+  }
+  componentSet(this: uiSystems.button.interactions, entity: entity, data: state)
+}
+
+# Read a per-entity interaction flag (default false when the entity carries no
+# Interaction), for render/style systems that want to react to hover/press.
+func entityHovered(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entity: view EntityId
+) pub ret Bool {
+  if componentHas(this: uiSystems.button.interactions, entity: entity) is false {
+    ret false
+  }
+  ret componentGet(this: uiSystems.button.interactions, entity: entity).hovered
+}
+
+func entityPressed(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entity: view EntityId
+) pub ret Bool {
+  if componentHas(this: uiSystems.button.interactions, entity: entity) is false {
+    ret false
+  }
+  ret componentGet(this: uiSystems.button.interactions, entity: entity).pressed
+}

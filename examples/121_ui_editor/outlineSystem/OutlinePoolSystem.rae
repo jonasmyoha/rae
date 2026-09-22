@@ -41,7 +41,7 @@ func collectDocumentEntities(
     ret
   }
   if componentHas(this: uiSystems.layout.computedRects, entity: entity) and componentHas(
-    this: world.worldTransforms
+    this: uiSystems.transform2d.worldTransforms
     entity: entity
   ) {
     out.add(value: entity)
@@ -129,7 +129,10 @@ func placePooledOutline(
   target: view EntityId
 ) ret Bool {
   var changed: Bool = false
-  let transform: WorldTransform2D = componentGet(this: world.worldTransforms, entity: target)
+  let transform: WorldTransform2D = componentGet(
+    this: uiSystems.transform2d.worldTransforms
+    entity: target
+  )
   let computed: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: target)
   let w: Float = computed.size.x * transform.scale.x
   let h: Float = computed.size.y * transform.scale.y
@@ -143,15 +146,15 @@ func placePooledOutline(
     }
   }
   var write: Bool = true
-  if componentHas(this: world.runtimeOffsets, entity: item) {
-    let current: Vec2 = componentGet(this: world.runtimeOffsets, entity: item).delta
+  if componentHas(this: uiSystems.transform2d.runtimeOffsets, entity: item) {
+    let current: Vec2 = componentGet(this: uiSystems.transform2d.runtimeOffsets, entity: item).delta
     if current.x is transform.position.x and current.y is transform.position.y {
       write = false
     }
   }
   if write {
     let offset: RuntimeOffset = { delta: Vec2 { x: transform.position.x, y: transform.position.y } }
-    componentSet(this: world.runtimeOffsets, entity: item, data: own offset)
+    componentSet(this: uiSystems.transform2d.runtimeOffsets, entity: item, data: own offset)
     changed = true
   }
   ret changed

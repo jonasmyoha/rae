@@ -284,11 +284,14 @@ func editAreaOf(
   }
   let entity: EntityId = componentEntityAt(this: chromeSystem.editAreas, i: 0)
   if componentHas(this: uiSystems.layout.computedRects, entity: entity) and componentHas(
-    this: world.worldTransforms
+    this: uiSystems.transform2d.worldTransforms
     entity: entity
   ) {
     let rect: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: entity)
-    let transform: WorldTransform2D = componentGet(this: world.worldTransforms, entity: entity)
+    let transform: WorldTransform2D = componentGet(
+      this: uiSystems.transform2d.worldTransforms
+      entity: entity
+    )
     if rect.size.x > 0.0 and rect.size.y > 0.0 {
       area.x = transform.position.x
       area.y = transform.position.y

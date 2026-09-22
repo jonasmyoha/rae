@@ -113,6 +113,7 @@ func g2dPaintBox(
 # can opt into a finer falloff. Alpha is normalized by layer count.
 func paintShadowG(
   world: view UiWorld
+  uiSystems: view UiSystems
   entity: view EntityId
   box: view PaintBox
   radius: view Float
@@ -121,10 +122,10 @@ func paintShadowG(
 ) {
   let shadow: Shadow = componentGet(this: world.shadows, entity: entity)
   if shadow.hoverOnly {
-    if componentHas(this: world.interactions, entity: entity) is false {
+    if componentHas(this: uiSystems.button.interactions, entity: entity) is false {
       ret
     }
-    if componentGet(this: world.interactions, entity: entity).hovered is false {
+    if componentGet(this: uiSystems.button.interactions, entity: entity).hovered is false {
       ret
     }
   }
@@ -187,13 +188,16 @@ func pushMaskClipG(
     }
   }
   if componentHas(this: uiSystems.layout.computedRects, entity: source) is false or componentHas(
-    this: world.worldTransforms
+    this: uiSystems.transform2d.worldTransforms
     entity: source
   ) is false {
     ret false
   }
   let cr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: source)
-  let wt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: source)
+  let wt: WorldTransform2D = componentGet(
+    this: uiSystems.transform2d.worldTransforms
+    entity: source
+  )
   var x: Float = wt.position.x
   var y: Float = wt.position.y
   var w: Float = cr.size.x * wt.scale.x

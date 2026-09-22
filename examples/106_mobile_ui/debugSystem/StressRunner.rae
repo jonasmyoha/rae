@@ -10,6 +10,7 @@ open ui/animationSystem/AnimationSystem
 open ui/renderSystem/RenderSystem
 open Gpu2dCanvas
 open ui/UiSystems
+open ui/buttonSystem/ButtonHoverScale
 
 func pickHoverEntity(world: view UiWorld, idx: view Int) ret EntityId {
   let n: Int = componentCount(this: world.hoverScales)
@@ -71,7 +72,7 @@ func runHoverStressMode(
   var warm: Int = 0
   loop warm < 120 {
     let hoveredWarm: EntityId = pickHoverEntity(world: world, idx: warm)
-    let dirtyWarm: Bool = hoverScaleSystem(
+    let dirtyWarm: Bool = buttonHoverScaleUpdate(
       world: world
       uiSystems: uiSystems
       hovered: hoveredWarm
@@ -94,7 +95,7 @@ func runHoverStressMode(
   var lastLog: Int = 0
   loop i < stressN {
     let hovered: EntityId = pickHoverEntity(world: world, idx: i)
-    let dirty: Bool = hoverScaleSystem(
+    let dirty: Bool = buttonHoverScaleUpdate(
       world: world
       uiSystems: uiSystems
       hovered: hovered

@@ -55,7 +55,11 @@ func setSpriteKey(world: mod UiWorld, entity: view EntityId, key: view String) {
 # Advance every playing AnimFrames by deltaTime at its fps into its Sprite's
 # textureKey. A sequence without loopForever stops on its last frame and, when
 # onEndTextureKey is set, shows that instead. Returns whether any is playing.
-func animFramesSystem(world: mod UiWorld, deltaTime: view Float) ret Bool {
+func animFramesSystem(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  deltaTime: view Float
+) ret Bool {
   var live: Bool = false
   let count: Int = componentCount(this: world.animFrames)
   loop var i: Int = 0, i < count, ++i {
@@ -65,15 +69,15 @@ func animFramesSystem(world: mod UiWorld, deltaTime: view Float) ret Bool {
     if total <= 0 or frames.fps <= 0.0 {
       continue
     }
-    if componentHas(this: world.animStates, entity: entity) is false {
+    if componentHas(this: uiSystems.animation.animStates, entity: entity) is false {
       componentSet(
-        this: world.animStates
+        this: uiSystems.animation.animStates
         entity: entity
         data: AnimState { playing: true, elapsedMs: 0.0, frameIndex: 0 }
       )
       setSpriteKey(world: world, entity: entity, key: animFrameKey(frames: frames, index: 0))
     }
-    let state: mod AnimState => componentMod(this: world.animStates, entity: entity)
+    let state: mod AnimState => componentMod(this: uiSystems.animation.animStates, entity: entity)
     if state.playing is false {
       continue
     }
@@ -113,7 +117,7 @@ func animFramesSystem(world: mod UiWorld, deltaTime: view Float) ret Bool {
 # (any entity's UiAction), or its `event` — "click" (pressed) / "hover"
 # (hovered) on the entity itself. restartOnTrigger rewinds a playing sequence;
 # otherwise a trigger only starts a stopped one.
-func animTriggerSystem(world: mod UiWorld) {
+func animTriggerSystem(world: mod UiWorld, uiSystems: mod UiSystems) {
   let count: Int = componentCount(this: world.animTriggers)
   loop var i: Int = 0, i < count, ++i {
     let entity: EntityId = componentEntityAt(this: world.animTriggers, i: i)
@@ -127,8 +131,11 @@ func animTriggerSystem(world: mod UiWorld) {
         }
       }
     }
-    if componentHas(this: world.interactions, entity: entity) {
-      let interaction: Interaction = componentGet(this: world.interactions, entity: entity)
+    if componentHas(this: uiSystems.button.interactions, entity: entity) {
+      let interaction: Interaction = componentGet(
+        this: uiSystems.button.interactions
+        entity: entity
+      )
       if trigger.event is "click" and interaction.pressed {
         fired = true
       }
@@ -140,14 +147,14 @@ func animTriggerSystem(world: mod UiWorld) {
       continue
     }
     var playing: Bool = false
-    if componentHas(this: world.animStates, entity: entity) {
-      playing = componentGet(this: world.animStates, entity: entity).playing
+    if componentHas(this: uiSystems.animation.animStates, entity: entity) {
+      playing = componentGet(this: uiSystems.animation.animStates, entity: entity).playing
     }
     if playing and trigger.restartOnTrigger is false {
       continue
     }
     componentSet(
-      this: world.animStates
+      this: uiSystems.animation.animStates
       entity: entity
       data: AnimState { playing: true, elapsedMs: 0.0, frameIndex: 0 }
     )
@@ -158,12 +165,13 @@ func animTriggerSystem(world: mod UiWorld) {
 
 func setRuntimeOffset(
   world: mod UiWorld
+  uiSystems: mod UiSystems
   entity: view EntityId
   x: view Float
   y: view Float
 ) {
   componentSet(
-    this: world.runtimeOffsets
+    this: uiSystems.transform2d.runtimeOffsets
     entity: entity
     data: RuntimeOffset { delta: Vec2 { x: x, y: y } }
   )
@@ -171,7 +179,7 @@ func setRuntimeOffset(
 
 # WobbleFx: a two-sine vertical bob (amp at freq Hz plus a second harmonic)
 # on the runtime offset. `time` is the clock in seconds.
-func wobbleFxSystem(world: mod UiWorld, time: view Float) ret Bool {
+func wobbleFxSystem(world: mod UiWorld, uiSystems: mod UiSystems, time: view Float) ret Bool {
   let count: Int = componentCount(this: world.wobbleFxs)
   loop var i: Int = 0, i < count, ++i {
     let entity: EntityId = componentEntityAt(this: world.wobbleFxs, i: i)
@@ -181,6 +189,7 @@ func wobbleFxSystem(world: mod UiWorld, time: view Float) ret Bool {
     )
     setRuntimeOffset(
       world: world
+      uiSystems: uiSystems
       entity: entity
       x: 0.0
       y: y
@@ -191,13 +200,14 @@ func wobbleFxSystem(world: mod UiWorld, time: view Float) ret Bool {
 
 # BackgroundPan: a slow sine drift of the runtime offset — `amplitude` design
 # units at `speed` radians per second, per axis.
-func backgroundPanSystem(world: mod UiWorld, time: view Float) ret Bool {
+func backgroundPanSystem(world: mod UiWorld, uiSystems: mod UiSystems, time: view Float) ret Bool {
   let count: Int = componentCount(this: world.backgroundPans)
   loop var i: Int = 0, i < count, ++i {
     let entity: EntityId = componentEntityAt(this: world.backgroundPans, i: i)
     let pan: BackgroundPan = componentDataAt(this: world.backgroundPans, i: i)
     setRuntimeOffset(
       world: world
+      uiSystems: uiSystems
       entity: entity
       x: pan.amplitudeX * Math.sin(x: time * pan.speedX)
       y: pan.amplitudeY * Math.sin(x: time * pan.speedY)
@@ -227,7 +237,7 @@ func slotJitter(slot: view Int) ret Float {
 # the emitter, then drifts (driftX/Y units per second, plus a horizontal
 # jitter), scales from scaleStart to scaleEnd over lifetimeMs and fades out
 # over the last fadeMs. An idle puff is fully transparent.
-func smokeFxSystem(world: mod UiWorld, deltaTime: view Float) ret Bool {
+func smokeFxSystem(world: mod UiWorld, uiSystems: mod UiSystems, deltaTime: view Float) ret Bool {
   var live: Bool = false
   let count: Int = componentCount(this: world.smokeFxs)
   loop var i: Int = 0, i < count, ++i {
@@ -237,18 +247,18 @@ func smokeFxSystem(world: mod UiWorld, deltaTime: view Float) ret Bool {
     if pool.length is 0 or fx.lifetimeMs <= 0.0 {
       continue
     }
-    if componentHas(this: world.smokeStates, entity: entity) is false {
+    if componentHas(this: uiSystems.animation.smokeStates, entity: entity) is false {
       var ages: List(Float) = List.create(Float, cap: pool.length)
       loop var p: Int = 0, p < pool.length, ++p {
         ages.add(value: 0.0 - 1.0)
       }
       componentSet(
-        this: world.smokeStates
+        this: uiSystems.animation.smokeStates
         entity: entity
         data: SmokeState { ages: own ages, spawnTimerMs: fx.spawnIntervalMs }
       )
     }
-    let state: mod SmokeState => componentMod(this: world.smokeStates, entity: entity)
+    let state: mod SmokeState => componentMod(this: uiSystems.animation.smokeStates, entity: entity)
     loop state.ages.length < pool.length {
       state.ages.add(value: 0.0 - 1.0)
     }
@@ -295,6 +305,7 @@ func smokeFxSystem(world: mod UiWorld, deltaTime: view Float) ret Bool {
       }
       setRuntimeOffset(
         world: world
+        uiSystems: uiSystems
         entity: puff
         x: offsetX
         y: offsetY
@@ -320,13 +331,16 @@ func pointOverEntity(
   x: view Float
   y: view Float
 ) ret Bool {
-  if componentHas(this: world.worldTransforms, entity: entity) is false or componentHas(
+  if componentHas(this: uiSystems.transform2d.worldTransforms, entity: entity) is false or componentHas(
     this: uiSystems.layout.computedRects
     entity: entity
   ) is false {
     ret false
   }
-  let transform: WorldTransform2D = componentGet(this: world.worldTransforms, entity: entity)
+  let transform: WorldTransform2D = componentGet(
+    this: uiSystems.transform2d.worldTransforms
+    entity: entity
+  )
   let rect: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: entity)
   ret x >= transform.position.x and y >= transform.position.y and x <= transform.position.x + rect.size.x and y <= transform.position.y + rect.size.y
 }
@@ -367,7 +381,7 @@ func childStrideX(
 # scale — an authored TransformFx on a page keeps its other fields).
 func carouselSystem(
   world: mod UiWorld
-  uiSystems: view UiSystems
+  uiSystems: mod UiSystems
   deltaTime: view Float
   pointerX: view Float
   pointerY: view Float
@@ -382,9 +396,9 @@ func carouselSystem(
     if kids.length is 0 {
       continue
     }
-    if componentHas(this: world.carouselStates, entity: entity) is false {
+    if componentHas(this: uiSystems.animation.carouselStates, entity: entity) is false {
       componentSet(
-        this: world.carouselStates
+        this: uiSystems.animation.carouselStates
         entity: entity
         data: CarouselState {
           page: 0
@@ -396,7 +410,10 @@ func carouselSystem(
         }
       )
     }
-    let state: mod CarouselState => componentMod(this: world.carouselStates, entity: entity)
+    let state: mod CarouselState => componentMod(
+      this: uiSystems.animation.carouselStates
+      entity: entity
+    )
     let stride: Float = childStrideX(world: world, uiSystems: uiSystems, kids: kids)
     let over: Bool = pointOverEntity(
       world: world
@@ -450,6 +467,7 @@ func carouselSystem(
     }
     setRuntimeOffset(
       world: world
+      uiSystems: uiSystems
       entity: entity
       x: state.offset * carousel.travelFactor
       y: 0.0
