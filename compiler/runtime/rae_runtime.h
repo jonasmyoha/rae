@@ -635,6 +635,7 @@ rae_String rae_ext_rae_str_i64(int64_t v);
 rae_String rae_ext_rae_str_u64(uint64_t v);  // #817
 rae_String rae_ext_rae_str_i64_ptr(const int64_t* v);
 rae_String rae_ext_rae_str_f64(double v);
+rae_String rae_ext_json_number(float v);
 rae_String rae_ext_rae_str_f64_ptr(const double* v);
 rae_String rae_ext_rae_str_f32_ptr(const float* v);
 rae_String rae_ext_rae_str_bool(rae_Bool v);
