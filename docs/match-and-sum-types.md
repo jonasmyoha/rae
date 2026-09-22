@@ -51,9 +51,11 @@ Properties that are already right (and match modern languages, not C):
   out on enums too (recommended to DISALLOW on enums — see "`default`" below).
 - **Expression form** — `match` can produce a value.
 - `enum Foo { a b c }` — plain value enums, `Foo.a`, and `if x is Foo.a`.
-- Optional type `opt T`; `none`; `is not none` / `is none`; `if let v: T = expr {…}`.
+- Optional type `opt T`; `none`; `is not none` / `is none`; `if let v: T = expr {…}`,
+  and its opt-shaped twin `match let v: T = expr { … case none {…} }` (see below).
 
-Not present: `switch`, `break`, `continue`, enum payloads, `Result`, tuples.
+Not present: `switch`, enum payloads, `Result`, tuples. (`break` / `continue` landed
+with #623.)
 
 ## `default`: the subject's type decides (enum = no default; Int/String = default) — IMPLEMENTED (#621)
 
@@ -127,6 +129,53 @@ the *legitimate* grouping use a `default` would otherwise serve on an enum. For 
 For enums this is intentionally **stricter than Rust (`_` wildcard) / Swift (`default`)**
 — the wildcard is exactly what erodes the guarantee — while Int/String matching lands
 right where those languages already put it. No new syntax is needed.
+
+## `match let`: unwrap an `opt T` and match it in one statement — IMPLEMENTED (#11773361)
+
+The opt-shaped twin of `if let`, for what a lookup returns — `enumFromName(Kind,
+name: text)` is an `opt Kind`, and so is any find/parse. Without it the shape is a
+nested staircase: `if let kind: Kind = … { match kind { … } } else { … }`.
+
+```rae
+match let kind: Kind = enumFromName(Kind, name: text) {
+  case Kind.small  { … }
+  case Kind.medium { … }
+  case Kind.large  { … }
+  case none        { … }        # REQUIRED: the subject is an opt
+}
+```
+
+Every rule follows from something that already exists:
+
+- **The binding is written with its type on the left**, exactly the `if let`
+  grammar (`T` with `=`, or `view T` / `mod T` with `=>`) — no inference, as
+  everywhere else. The `let` IS the unwrap, so the arms match the PAYLOAD.
+- **`case none` uses the existing `none` literal** — no new keyword — and is
+  **required** for an opt subject: leaving it out is the same class of compile
+  error as a missing enum member.
+- **The subject's TYPE decides the arm list**, the same rule `default` already
+  follows. An enum subject still forbids `default` (#621) and must name every
+  member; an Int/String/struct subject still requires `default`.
+- **`default` does NOT cover `none`.** `none` is always its own arm, so the
+  absent case is one a reader sees rather than one a catch-all swallows.
+- **The bound name is in scope in every value arm, not in the `none` arm** —
+  there is nothing to name there.
+- **`match let` is only for an `opt T` subject.** On a non-opt it is a compile
+  error (`the subject is not an opt; use 'match'`), exactly as `if let` on a
+  non-opt is meaningless. Conversely a plain `match` never has a `case none`:
+  its subject cannot be absent.
+- **It lowers to `if let` + `match`** (an if/else chain, no C switch), so
+  ownership and drop are the existing ones (#623) and exhaustiveness is the
+  existing check. Sema rewrites `match let name: T = e { … case none { N } }`
+  into `if let name: T = e { match name { … } } else { N }` after validating
+  the two rules that are the construct's own; the formatter renders the SOURCE
+  shape, so the rewrite never runs for `rae format`.
+
+No parentheses, same brace blocks as `if` / `match`. Fixtures: `891_match_let`
+(enum subject with all members + none, or-patterns, an Int subject where index 3
+reaches `case none` and not `default`, the bound name used in arms, and a nested
+`match let` inside a loop) and `892_reject_match_let` (missing `none`, missing
+member, stray `default`, a non-opt subject, and `case none` on a plain `match`).
 
 ## Where this helps the app architecture (example 114)
 

@@ -355,6 +355,19 @@ if let kind: LayoutType = enumFromName(LayoutType, name: "horizontal") {
 ret LayoutType.none
 ```
 
+Its result is an `opt E`, so **`match let`** unwraps it and branches on the
+member in one statement, with the not-a-member case spelled out
+(docs/match-and-sum-types.md §`match let`):
+
+```rae
+match let kind: LayoutType = enumFromName(LayoutType, name: text) {
+  case LayoutType.horizontal { ret horizontalLayout() }
+  case LayoutType.vertical   { ret verticalLayout() }
+  case LayoutType.none       { ret noLayout() }
+  case none                  { ret unknownLayoutName(text: text) }   # not a member
+}
+```
+
 **`enumName(E, value: v)` → `opt String`** (2026-09-22). The mirror: the
 member name of `v` for an enum `E`, through the `toString` every enum already
 has; and, like `enumFromName`, the constant `none` when `E` is a generic

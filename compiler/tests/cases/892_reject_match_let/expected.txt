@@ -1,0 +1,15 @@
+tests/cases/892_reject_match_let/Main.rae:7:3: 'match let' requires a 'case none' arm: the subject is an opt, so its absence is a case a reader must see (add 'case none { }')
+     7 |   match let kind: Kind = enumFromName(Kind, name: text) {
+       |   ^~~~
+tests/cases/892_reject_match_let/Main.rae:19:3: non-exhaustive match on enum 'Kind': missing case 'Kind.large' (add it)
+    19 |   match let kind: Kind = enumFromName(Kind, name: text) {
+       |   ^~~~
+tests/cases/892_reject_match_let/Main.rae:31:3: match on enum 'Kind' must not use a 'default' arm; name every variant (remove 'default' and add the missing cases, or group them with an or-pattern)
+    31 |   match let kind: Kind = enumFromName(Kind, name: text) {
+       |   ^~~~
+tests/cases/892_reject_match_let/Main.rae:49:26: the subject is not an opt; use 'match'
+    49 |   match let value: Int = count {
+       |                          ^~~~
+tests/cases/892_reject_match_let/Main.rae:68:10: a plain 'match' has no 'case none': its subject cannot be absent (use 'match let name: T = <opt>' to unwrap and match in one statement)
+    68 |     case none {
+       |          ^~~~
