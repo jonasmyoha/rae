@@ -1341,8 +1341,13 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                     emit_expr(ctx, a->value, out, PREC_LOWEST, false, pass_view_through);
                     fprintf(out, ")), (__rae_stmt_tmp%d_set = 1), &__rae_stmt_tmp%d)", tmp_id, tmp_id);
                 } else {
+                    // Use the SUBSTITUTED param type: for a generic `view T`
+                    // callee the compound-literal cast must be the concrete
+                    // element type (`Kind`), not the template placeholder `T`
+                    // (`(rae_T[1]){...}` — `rae_T` is undeclared). base_concrete
+                    // already carries the substitution computed above.
                     fprintf(out, "((");
-                    emit_type_ref_as_c_type(ctx, &base_type, out, false);
+                    emit_type_ref_as_c_type(ctx, base_concrete, out, false);
                     fprintf(out, "[1]){ ");
                     emit_expr(ctx, a->value, out, PREC_LOWEST, false, pass_view_through);
                     fprintf(out, " })");
