@@ -1,0 +1,113 @@
+# inspectorSystem/ComponentEdit — adding and removing a component by NAME.
+#
+# A component is not only a bag of editable fields: it is present or absent on
+# an entity, and the editor has to be able to change that. Both operations
+# walk every `ComponentTable` of the world and match `typeName(table)`, so
+# nothing here names a component and a new one is editable the day it is added
+# to `UiWorld` — the same reflection route the generated widgets take.
+#
+# Over a SELECTION both operations are set-shaped, and deliberately asymmetric
+# in the same way the reference editor is: ADD applies to every selected
+# entity that lacks the component (adding to one that has it would wipe its
+# values), REMOVE strips it from every selected entity that has it. Each
+# returns how many entities it actually changed, so the caller can say so
+# rather than guessing.
+open ui/Ecs
+open ecs/Entity
+open ecs/ComponentTable
+
+# `T` is inferred from the `ComponentTable(any)` binding at the call site, so
+# `T.default()` names a real type here. This is the decoder's own trick
+# (`var comp: T = T.default()` in lib/ui/RegistryGeneric.rae).
+func addDefaultComponent(T: type, table: mod ComponentTable(T), entity: view EntityId) {
+  componentSet(this: table, entity: entity, data: T.default())
+}
+
+# Add `name` to every selected entity that does NOT already have it, at the
+# type's default value. Returns how many gained it.
+#
+# An entity that already carries the component is skipped rather than reset:
+# "add" must never be a destructive operation on a node that was already
+# configured, which is the one way this could quietly lose authored work.
+func addComponentToSelection(
+  world: mod UiWorld
+  selection: view List(EntityId)
+  name: view String
+) ret Int {
+  var added: Int = 0
+  loop let table: mod ComponentTable(any) in fields(world) {
+    if typeName(table) is name {
+      loop let entity: view EntityId in selection {
+        if isNone(this: entity) is false and componentHas(this: table, entity: entity) is false {
+          addDefaultComponent(table: table, entity: entity)
+          added = added + 1
+        }
+      }
+    }
+  }
+  ret added
+}
+
+# Strip `name` from every selected entity that has it. Returns how many lost
+# it — 0 means the selection never carried it.
+func removeComponentFromSelection(
+  world: mod UiWorld
+  selection: view List(EntityId)
+  name: view String
+) ret Int {
+  var removed: Int = 0
+  loop let table: mod ComponentTable(any) in fields(world) {
+    if typeName(table) is name {
+      loop let entity: view EntityId in selection {
+        if isNone(this: entity) is false and componentHas(this: table, entity: entity) {
+          componentRemove(this: table, entity: entity)
+          removed = removed + 1
+        }
+      }
+    }
+  }
+  ret removed
+}
+
+# Every component the world knows, in table order. This is the add-list's
+# source: it needs no registry of its own, because the world's own field set
+# IS the list of components that exist.
+func allComponentNames(world: view UiWorld, out: mod List(String)) {
+  out.clear()
+  loop let table: view ComponentTable(any) in fields(world) {
+    out.add(value: typeName(table))
+  }
+}
+
+# Whether `name` survives the filter. An empty filter passes everything, and
+# the match is case-insensitive substring so `tran` finds `TransformFx`
+# without the user having to know where the capital letters fall.
+func matchesComponentFilter(name: view String, filter: view String) ret Bool {
+  if filter.length() is 0 {
+    ret true
+  }
+  ret name.toLower().indexOf(sub: filter.toLower()) >= 0
+}
+
+# Whether EVERY selected entity already carries `name` — such a component is
+# not offered in the add list, because adding it would change nothing.
+func selectionHasAll(
+  world: view UiWorld
+  selection: view List(EntityId)
+  name: view String
+) ret Bool {
+  if selection.length is 0 {
+    ret false
+  }
+  var missing: Int = 0
+  loop let table: view ComponentTable(any) in fields(world) {
+    if typeName(table) is name {
+      loop let entity: view EntityId in selection {
+        if isNone(this: entity) is false and componentHas(this: table, entity: entity) is false {
+          missing = missing + 1
+        }
+      }
+    }
+  }
+  ret missing is 0
+}

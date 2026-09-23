@@ -392,6 +392,44 @@ inspector is read-only until the DAW/editor capability design
 (`ui-ecs-refactor-status.md` §2.7) lands; the app is shaped so those are new
 systems, not rewrites.
 
+## Adding and removing a component (#57156455)
+
+A component is not only a bag of editable fields — it is present or absent on
+an entity. `inspectorSystem/ComponentEdit.rae` changes that by NAME, walking
+every `ComponentTable` of the world and matching `typeName(table)`, so nothing
+names a component and a new one becomes add/removable the day it joins
+`UiWorld`. Adding needs a default value, which is `T.default()` inside a tiny
+generic helper — `T` is inferred from the `ComponentTable(any)` binding, the
+same trick the decoder uses.
+
+Over a selection the two are deliberately **asymmetric**:
+
+| | applies to |
+|---|---|
+| add | every selected entity that does NOT have it |
+| remove | every selected entity that DOES have it |
+
+Add skips an entity that already carries the component rather than resetting
+it — "add" must never be destructive on a node someone already configured,
+which is the one way this could quietly lose authored work. Both report how
+many entities actually changed (`removed Shape from 1` of a 2-node selection),
+because that count is the only way to tell a real edit from a click on a
+component only some of the selection had.
+
+**The filter.** The add list is every component the world knows — ~79 rows —
+so it is unusable without narrowing, which is what makes the filter part of
+this feature rather than a nicety. It matches case-insensitively on a
+substring, so `tran` finds `TransformFx` without knowing where the capitals
+fall, and it narrows BOTH the present-component list and the add list.
+
+There is no text-input widget in the editor yet (that is the per-field input
+task), so the filter is typed with a **focus mode**: `/` focuses it, letters
+type, Backspace deletes, Esc clears and unfocuses. Focus is not optional
+here — the editor binds BARE letters as panel shortcuts (`H`, `D`, `G`, `N`,
+`B`, `P`), so without a mode, typing a filter would toggle half the chrome.
+`App.rae` gates exactly that block on `filterFocused`; everything below it
+carries a modifier and so cannot be typed text.
+
 ## What DRIVES a value, inline with it (#21438052)
 
 Rae's Rect is authored in a `.raescene` and then routinely overwritten by the

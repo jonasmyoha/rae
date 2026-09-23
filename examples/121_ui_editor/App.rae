@@ -333,6 +333,15 @@ func runApp(app: mod App) ret Int {
     script: app.testTreeClicks
     scene: app.document.scene
   )
+  runTestComponent(
+    inspectorSystem: app.inspectorSystem
+    world: app.world
+    uiSystems: app.uiSystems
+    chromeSystem: app.chromeSystem
+    pageRoot: app.document.pageRoot
+    scene: app.document.scene
+    script: app.testComponent
+  )
   var renderedOnce: Bool = false
   # RAE_UI_EDITOR_TEST_SAVE=<path>: save the document there once after the
   # first frame, as Cmd+S would — the headless gate's hook.
@@ -409,58 +418,63 @@ func runApp(app: mod App) ret Int {
     ) {
       changed = true
     }
-    if Sdl3.isKeyPressed(key: Keys.keyH) {
-      toggleChrome(chromeSystem: app.chromeSystem, world: app.world)
-      changed = true
-    }
-    if Sdl3.isKeyPressed(key: Keys.keyD) {
-      toggleEditorPanel(
-        chromeSystem: app.chromeSystem
-        world: app.world
-        kind: EditorPanelKind.diagnostics
-      )
-      changed = true
-    }
-    if Sdl3.isKeyPressed(key: Keys.keyG) {
-      toggleEditorPanel(
-        chromeSystem: app.chromeSystem
-        world: app.world
-        kind: EditorPanelKind.guides
-      )
-      syncGuides(
-        guideSystem: app.guideSystem
-        world: app.world
-        chromeSystem: app.chromeSystem
-        designW: app.document.designW
-        designH: app.document.designH
-        columnW: app.document.columnW
-        safeInsets: app.document.safeInsets
-      )
-      changed = true
-    }
-    if Sdl3.isKeyPressed(key: Keys.keyN) {
-      toggleEditorPanel(
-        chromeSystem: app.chromeSystem
-        world: app.world
-        kind: EditorPanelKind.outlines
-      )
-      changed = true
-    }
-    if Sdl3.isKeyPressed(key: Keys.keyB) {
-      toggleEditorPanel(
-        chromeSystem: app.chromeSystem
-        world: app.world
-        kind: EditorPanelKind.buttons
-      )
-      changed = true
-    }
-    if Sdl3.isKeyPressed(key: Keys.keyP) {
-      toggleEditorPanel(
-        chromeSystem: app.chromeSystem
-        world: app.world
-        kind: EditorPanelKind.project
-      )
-      changed = true
+    # While the inspector filter has focus the BARE letters type into it
+    # instead of toggling panels (#57156455). Cmd+S and the rest below are
+    # unaffected: they carry a modifier, so they cannot be typed text.
+    if app.inspectorSystem.filterFocused is false {
+      if Sdl3.isKeyPressed(key: Keys.keyH) {
+        toggleChrome(chromeSystem: app.chromeSystem, world: app.world)
+        changed = true
+      }
+      if Sdl3.isKeyPressed(key: Keys.keyD) {
+        toggleEditorPanel(
+          chromeSystem: app.chromeSystem
+          world: app.world
+          kind: EditorPanelKind.diagnostics
+        )
+        changed = true
+      }
+      if Sdl3.isKeyPressed(key: Keys.keyG) {
+        toggleEditorPanel(
+          chromeSystem: app.chromeSystem
+          world: app.world
+          kind: EditorPanelKind.guides
+        )
+        syncGuides(
+          guideSystem: app.guideSystem
+          world: app.world
+          chromeSystem: app.chromeSystem
+          designW: app.document.designW
+          designH: app.document.designH
+          columnW: app.document.columnW
+          safeInsets: app.document.safeInsets
+        )
+        changed = true
+      }
+      if Sdl3.isKeyPressed(key: Keys.keyN) {
+        toggleEditorPanel(
+          chromeSystem: app.chromeSystem
+          world: app.world
+          kind: EditorPanelKind.outlines
+        )
+        changed = true
+      }
+      if Sdl3.isKeyPressed(key: Keys.keyB) {
+        toggleEditorPanel(
+          chromeSystem: app.chromeSystem
+          world: app.world
+          kind: EditorPanelKind.buttons
+        )
+        changed = true
+      }
+      if Sdl3.isKeyPressed(key: Keys.keyP) {
+        toggleEditorPanel(
+          chromeSystem: app.chromeSystem
+          world: app.world
+          kind: EditorPanelKind.project
+        )
+        changed = true
+      }
     }
     # Cmd/Ctrl+S: the document back to its file (documentSystem/DocumentSave).
     let commandHeld: Bool = Sdl3.isKeyDown(key: Keys.keyLGui) or Sdl3.isKeyDown(key: Keys.keyRGui) or Sdl3.isKeyDown(

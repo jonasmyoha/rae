@@ -20,6 +20,7 @@ open inspectorSystem/NodeQuery
 open inspectorSystem/RectWidget
 open ui/Scene
 open inspectorSystem/ComponentWidget
+open inspectorSystem/ComponentEdit
 
 # The inspector renders the COMPOSITE of the whole selection. There is no
 # single-selection path: n=1 is this code with one member, which is why a
@@ -142,7 +143,29 @@ func syncInspectorPanel(
   # per reflected field, folded over the selection. Rect is bespoke and
   # contributes no rows here; its line is the one above.
   var widgetRows: List(ListViewRow) = List.create(ListViewRow, cap: 64)
+  # The filter box (#57156455). No text-input widget exists yet, so `/`
+  # focuses it and letters type into it; the row shows the state either way so
+  # there is something to aim at.
+  var filterRow: String = "filter: {inspectorSystem.componentFilter}"
+  if inspectorSystem.filterFocused {
+    filterRow = "filter: {inspectorSystem.componentFilter}_  (esc to clear)"
+  } else {
+    if inspectorSystem.componentFilter.length() is 0 {
+      filterRow = "filter: / to search components"
+    }
+  }
+  addWidgetRow(
+    rows: widgetRows
+    id: "filter"
+    name: filterRow
+    value: ""
+    indent: 0
+    action: ""
+  )
   loop let tally: view ComponentTally in componentTallies {
+    if matchesComponentFilter(name: tally.name, filter: inspectorSystem.componentFilter) is false {
+      continue
+    }
     if widgetOverride(name: tally.name).bespoke {
       continue
     }
@@ -168,8 +191,9 @@ func syncInspectorPanel(
       rows: widgetRows
       id: "{tally.name}"
       name: header
-      value: ""
+      value: "remove"
       indent: 0
+      action: "compRemove:{tally.name}"
     )
     loop let row: view ListViewRow in fieldRows {
       addWidgetRow(
@@ -178,8 +202,42 @@ func syncInspectorPanel(
         name: row.values.copyAtDefault(index: 1)
         value: row.values.copyAtDefault(index: 2)
         indent: 1
+        action: ""
       )
     }
+  }
+  # The ADD list: every component the world knows that the selection does not
+  # already carry in full, narrowed by the same filter. Unfiltered this is
+  # ~79 rows, which is exactly why the filter earns its place.
+  var addable: List(String) = List.create(String, cap: 96)
+  allComponentNames(world: world, out: addable)
+  var offered: Int = 0
+  loop let candidate: view String in addable {
+    if matchesComponentFilter(name: candidate, filter: inspectorSystem.componentFilter) is false {
+      continue
+    }
+    if selectionHasAll(world: world, selection: inspectorSystem.selection, name: candidate) {
+      continue
+    }
+    if offered is 0 {
+      addWidgetRow(
+        rows: widgetRows
+        id: "add"
+        name: "add component"
+        value: ""
+        indent: 0
+        action: ""
+      )
+    }
+    offered = offered + 1
+    addWidgetRow(
+      rows: widgetRows
+      id: "add.{candidate}"
+      name: "{candidate}"
+      value: "add"
+      indent: 1
+      action: "compAdd:{candidate}"
+    )
   }
   chromeSystem.inspectorWidgets = widgetRowsSummary(rows: widgetRows)
   setWidgetRows(world: world, chromeSystem: chromeSystem, rows: own widgetRows)
