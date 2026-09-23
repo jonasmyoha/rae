@@ -227,6 +227,18 @@ func runTestTreeClicks(
     }
     # `parent` is not a click: it walks the whole selection up a level, the
     # affordance the click-through gesture cannot express.
+    # `treeFilter:<text>`: what typing into the hierarchy filter produces.
+    # Sets the same state the `F`-focused keystrokes write.
+    if trimmed.startsWith(prefix: "treeFilter:") {
+      inspectorSystem.treeFilter = trimmed.sub(start: 11, len: trimmed.length() - 11)
+      syncTreePanel(
+        chromeSystem: chromeSystem
+        world: world
+        inspectorSystem: inspectorSystem
+        sceneRoot: sceneRoot
+      )
+      continue
+    }
     # `collapse:<nodeId>` / `expand:<nodeId>`: the chevron's effect without a
     # pointer. Writes the same `collapsedNodeIds` the chevron action does.
     if trimmed.startsWith(prefix: "collapse:") or trimmed.startsWith(prefix: "expand:") {
@@ -332,6 +344,7 @@ func logInspectorPanel(
     }
   }
   log("[ui-editor] tree rows ({inspectorSystem.treeEntities.length}): {visible}")
+  log("[ui-editor] tree header: {chromeSystem.treeHeader}")
   log("[ui-editor] inspector: {inspectorSummaryLine(chromeSystem: chromeSystem)}")
 }
 

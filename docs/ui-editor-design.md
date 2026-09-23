@@ -392,6 +392,46 @@ inspector is read-only until the DAW/editor capability design
 (`ui-ecs-refactor-status.md` §2.7) lands; the app is shaped so those are new
 systems, not rewrites.
 
+## What a hierarchy row says (#89663819)
+
+A row reads `Name - Kind`, plus a value preview where one exists, so a node
+can be identified WITHOUT selecting it — the thing that makes a long tree
+navigable:
+
+```
+Screen - Shape
+Title - Text  "Orbit Dr..."
+ParentMount - Shape
+```
+
+`Kind` is the authored `PrimaryType` when there is one, else derived from the
+components the node actually carries, most specific first (a node with a
+ListView is a List whatever else it has; a bare container is a Node). The
+PREVIEW is deliberately only two cases — a Text node's string and a scene
+instance's file — because those are where a node's identity lives in its data
+rather than its name; a preview of nothing is noise in a narrow panel. It
+truncates at 8 characters: the row already spends its width on `Name - Kind`,
+and a longer preview is clipped by the panel edge mid-word, which reads as
+broken rather than truncated. A node carrying bundles appends `+<bundle>`.
+
+**The header carries the node count and the filter** — `Hierarchy (40)`, or
+`Hierarchy (11)  filter: stat` — so the panel says how much of the tree you
+are looking at without selecting anything.
+
+**The filter keeps ANCESTORS of a match.** Hiding a non-matching parent would
+cut its matching descendants out of the tree entirely, so a node survives when
+anything beneath it matches. It matches against the whole row label, so
+filtering `orbit` finds `Title` by its TEXT, not just nodes named Orbit\*.
+It has its own focus key, `F`, mutually exclusive with the component list's
+`/` — two filters, two panels, one keyboard.
+
+**Not done: which scene FILE a mounted subtree came from.** The loader removes
+the `SceneInstance` marker once it mounts (`lib/ui/SceneLoader.rae`, "clear the
+marker so the next loop pass doesn't re-mount"), and `SceneScope` is declared
+but never written, so after load nothing on a mounted entity records its source
+file. `BundleRefs` tracks BUNDLE provenance, which is why `+<bundle>` works and
+the file does not. See the split-out task.
+
 ## The selected-row plate (#38090472)
 
 A selected row is a rounded plate, not a glyph: `chrome/TreeRow` carries a
