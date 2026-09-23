@@ -374,8 +374,8 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              RAE_UI_HEADLESS=1 RAE_UI_EDITOR_TREE=1 RAE_SDL_HEADLESS_MS=1200 \
              RAE_UI_EDITOR_TEST_TREE_CLICKS="PlayButton" \
              perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-widgets1.log" 2>&1 \
-             && grep -qaF "widgets Size: w=SizeAxis { mode: fill, min: -1, max: -1 } h=SizeAxis { mode: fixed, min: -1, max: -1 }; Layout: kind=horizontal [none|horizontal|vertical|grid|stack] gap=16" "$TMP_OUT/render-widgets1.log" \
-             && grep -qaF "; OnClick: actionId=menu.play maxDelayMs=250; Name: label=PlayButton; NodeId: id=PlayButton" "$TMP_OUT/render-widgets1.log" \
+             && grep -qaF "widgets Size: w=SizeAxis { mode: fill, min: -1, max: -1 } h=SizeAxis { mode: fixed, min: -1, max: -1 }; Layout: kind=horizontal [none|horizontal|vertical|grid|stack] gap=16 · was spaceS" "$TMP_OUT/render-widgets1.log" \
+             && grep -qaF "; OnClick: actionId=menu.play maxDelayMs=250; Name: label=PlayButton · computed; NodeId: id=PlayButton · computed" "$TMP_OUT/render-widgets1.log" \
              && ! grep -qaF "Children:" "$TMP_OUT/render-widgets1.log" \
              && (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
                 RAE_UI_HEADLESS=1 RAE_UI_EDITOR_TREE=1 RAE_SDL_HEADLESS_MS=1200 \
@@ -397,6 +397,31 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             UI_EDITOR_OK=0
             echo "  generated component widgets failed:"
             cat "$TMP_OUT/render-widgets1.log" "$TMP_OUT/render-widgets2.log" "$TMP_OUT/render-widgets3.log" "$TMP_OUT/render-widgets4.log" 2>/dev/null | grep -av '^\[present\]' | cut -c1-400 | sed 's/^/    /'
+          fi
+          # What DRIVES a value, inline with it (#21438052). The generated
+          # widgets tag each field with where its value came from, read back
+          # from the parsed scene:
+          #   `· computed`  — nothing in the .raescene authored this component
+          #     on this node (Name and NodeId are made by the loader), so the
+          #     value cannot be traced to the author at all
+          #   `· was <x>`   — the author DID write this field and the live
+          #     value differs; here a `gap` authored as the theme token
+          #     `spaceS`, resolved to 16
+          # An authored value still equal to what the author wrote stays quiet,
+          # and an enum's picker must NOT be compared (that would call every
+          # enum overridden), which `kind=roundedRect` with no tag pins.
+          if (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
+             RAE_UI_HEADLESS=1 RAE_UI_EDITOR_TREE=1 RAE_SDL_HEADLESS_MS=1200 \
+             RAE_UI_EDITOR_TEST_TREE_CLICKS="PlayButton" \
+             perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-driver.log" 2>&1 \
+             && grep -qaF "Name: label=PlayButton · computed" "$TMP_OUT/render-driver.log" \
+             && grep -qaF "gap=16 · was spaceS" "$TMP_OUT/render-driver.log" \
+             && grep -qaF "kind=roundedRect [rect|roundedRect|circle] fill=" "$TMP_OUT/render-driver.log"; then
+            :
+          else
+            UI_EDITOR_OK=0
+            echo "  value provenance failed:"
+            grep -av '^\[present\]' "$TMP_OUT/render-driver.log" 2>/dev/null | cut -c1-400 | sed 's/^/    /'
           fi
           # Click-through cycling (#73816378). A canvas click lands on the
           # DEEPEST hit, which is almost never the node you meant; clicking the
@@ -633,7 +658,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/render-save.log" "$TMP_OUT/render-saved.log" "$TMP_OUT/screenshot-saved.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
           fi
           if [ "$UI_EDITOR_OK" = "1" ]; then
-            echo "PASS: $EXAMPLE_NAME (7 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select, composite multi-selection inspector, generated component widgets, canvas selection gestures, click-through cycling, hierarchy multi-selection, Rect widget multi-select read+write, .raepack project open + switch, file picker, camera zoom, outline pools, save path)"
+            echo "PASS: $EXAMPLE_NAME (7 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select, composite multi-selection inspector, generated component widgets, value provenance, canvas selection gestures, click-through cycling, hierarchy multi-selection, Rect widget multi-select read+write, .raepack project open + switch, file picker, camera zoom, outline pools, save path)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (ui editor sample gate)"
