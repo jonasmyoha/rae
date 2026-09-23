@@ -398,6 +398,29 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             echo "  generated component widgets failed:"
             cat "$TMP_OUT/render-widgets1.log" "$TMP_OUT/render-widgets2.log" "$TMP_OUT/render-widgets3.log" "$TMP_OUT/render-widgets4.log" 2>/dev/null | grep -av '^\[present\]' | cut -c1-400 | sed 's/^/    /'
           fi
+          # The selected-row PLATE (#38090472). A screenshot diff, not a log
+          # line: this is a purely visual change, and the whole requirement is
+          # that it "look right with MANY rows selected". Three rows selected
+          # must match the checked-in TreeSelection.png, in which the ACTIVE
+          # row (LogoRing) is a brighter token than the two other selected
+          # rows — one flat colour could not say which row the inspector
+          # describes or which one the arrows walk from.
+          SCREENSHOT="$TMP_OUT/ui-editor-treeplate.bmp"
+          if (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
+             RAE_UI_HEADLESS=1 RAE_UI_EDITOR_TREE=1 RAE_SDL_HEADLESS_MS=1500 \
+             RAE_UI_EDITOR_TEST_TREE_CLICKS="Title cmd:Tagline cmd:LogoRing" \
+             RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
+             perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-treeplate.log" 2>&1 \
+             && grep -qaF "Title,Tagline,LogoRing active LogoRing" "$TMP_OUT/render-treeplate.log" \
+             && python3 tools/assert_bmp_diff.py "$SCREENSHOT" \
+                  "../examples/121_ui_editor/references/TreeSelection.png" \
+                  --skip-size-mismatch > "$TMP_OUT/screenshot-treeplate.log" 2>&1; then
+            :
+          else
+            UI_EDITOR_OK=0
+            echo "  hierarchy selected-row plate failed:"
+            cat "$TMP_OUT/render-treeplate.log" "$TMP_OUT/screenshot-treeplate.log" 2>/dev/null | grep -av '^\[present\]' | cut -c1-260 | sed 's/^/    /'
+          fi
           # Collapse / expand the hierarchy (#72481430). Three runs:
           #   collapse hides a subtree — LogoRing's four descendants leave the
           #     visible rows, 40 -> 32, and expanding restores them
@@ -751,7 +774,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/render-save.log" "$TMP_OUT/render-saved.log" "$TMP_OUT/screenshot-saved.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
           fi
           if [ "$UI_EDITOR_OK" = "1" ]; then
-            echo "PASS: $EXAMPLE_NAME (7 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select, composite multi-selection inspector, generated component widgets, value provenance, component add/remove/filter, select parent + identity, hierarchy collapse/expand, canvas selection gestures, click-through cycling, hierarchy multi-selection, Rect widget multi-select read+write, .raepack project open + switch, file picker, camera zoom, outline pools, save path)"
+            echo "PASS: $EXAMPLE_NAME (7 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select, composite multi-selection inspector, generated component widgets, value provenance, component add/remove/filter, select parent + identity, hierarchy collapse/expand, selected-row plate, canvas selection gestures, click-through cycling, hierarchy multi-selection, Rect widget multi-select read+write, .raepack project open + switch, file picker, camera zoom, outline pools, save path)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (ui editor sample gate)"

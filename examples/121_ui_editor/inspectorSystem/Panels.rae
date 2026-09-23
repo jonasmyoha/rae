@@ -401,12 +401,38 @@ func subtreeHasSelection(
   ret false
 }
 
-# The row marker: `>` for the ACTIVE node (the one the inspector describes),
-# `-` for the other selected rows, and `*` for a COLLAPSED row hiding a
-# selected descendant. Three glyphs rather than one because with a range
-# selected, "which of these is the arrow keys' origin" is not guessable from a
-# uniform highlight, and a collapsed row that silently hid part of the
-# selection would be worse still.
+# The selection PLATE for a row: the palette token `Shape.fillSlot` resolves,
+# or "" for a row that is not selected (an empty slot falls back to the row's
+# own literal fill, which is transparent — so an unselected tree renders
+# exactly as it did before the plate existed).
+#
+# TWO tokens, not one. With many rows selected a single flat colour cannot say
+# which row the inspector is describing or which one the arrow keys walk from
+# — the question a one-row selection never has to answer. Both come from the
+# palette, so a theme change carries them.
+func treeRowFillSlot(
+  selection: view List(EntityId)
+  entity: view EntityId
+  selected: view EntityId
+) ret String {
+  if entity is selected {
+    ret "editorRowActive"
+  }
+  loop var i: Int = 0, i < selection.length, ++i {
+    if let member: EntityId = selection.copyAt(index: i) {
+      if member is entity {
+        ret "editorRowSelected"
+      }
+    }
+  }
+  ret ""
+}
+
+# The row marker is now ONLY `*`: a COLLAPSED row hiding a selected
+# descendant. The `>` / `-` glyphs are gone because the plate says the same
+# thing in colour — but `*` cannot go with them, since such a row is not
+# itself selected and so has no plate to speak for it. The column stays even
+# when empty, so the label keeps its indent.
 func treeRowMarker(
   world: view UiWorld
   selection: view List(EntityId)
@@ -414,16 +440,6 @@ func treeRowMarker(
   selected: view EntityId
   hidden: view Bool
 ) ret String {
-  if entity is selected {
-    ret ">"
-  }
-  loop var i: Int = 0, i < selection.length, ++i {
-    if let member: EntityId = selection.copyAt(index: i) {
-      if member is entity {
-        ret "-"
-      }
-    }
-  }
   if hidden and subtreeHasSelection(world: world, entity: entity, selection: selection) {
     ret "*"
   }
@@ -465,11 +481,12 @@ func collectTreeRows(
     "label"
     "indent"
     "marker"
+    "fillSlot"
     "action"
     "chevron"
     "chevronAction"
   }
-  var values: List(String) = List.create(String, cap: 7)
+  var values: List(String) = List.create(String, cap: 8)
   values.add(value: "{entity.index}")
   values.add(value: "{nodeId}")
   values.add(value: "{(depth.toFloat() * treeIndentPerLevel + 6.0).toInt()}")
@@ -480,6 +497,7 @@ func collectTreeRows(
     selected: selected
     hidden: isCollapsed
   ))
+  values.add(value: treeRowFillSlot(selection: selection, entity: entity, selected: selected))
   values.add(value: "inspect:{entity.index}")
   values.add(value: chevron)
   values.add(value: chevronAction)
