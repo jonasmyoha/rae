@@ -329,6 +329,35 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             echo "  canvas selection failed:"
             cat "$TMP_OUT/render-clicks.log" "$TMP_OUT/render-deselect.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
           fi
+          # The inspector is MULTI-SELECTION only (#82314313): it renders the
+          # COMPOSITE of the whole selection, and n=1 is that same code path
+          # with one member rather than a separate single-selection mode.
+          # Two runs, and the pair is the point:
+          #   n=1 — the component line carries NO (have/total) suffix, because
+          #     every count equals the total. Identical to what a single
+          #     selection always showed, which is what proves there is no
+          #     second rendering path to drift.
+          #   n=2 — a Button plus its own Label: the header becomes
+          #     "Selection (2): <ids>", the line is the UNION of both nodes'
+          #     components, and everything only ONE of them carries is marked
+          #     partial. Rect/Size/Name/NodeId stay bare because both have them.
+          if (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
+             RAE_UI_HEADLESS=1 RAE_UI_EDITOR_TREE=1 RAE_SDL_HEADLESS_MS=1200 \
+             RAE_UI_EDITOR_TEST_TREE_CLICKS="PlayButton" \
+             perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-inspect1.log" 2>&1 \
+             && grep -qaF "inspector: PlayButton | PlayButton | Rect, Size, Layout, Shape, OnClick, Name, NodeId, Children" "$TMP_OUT/render-inspect1.log" \
+             && (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
+                RAE_UI_HEADLESS=1 RAE_UI_EDITOR_TREE=1 RAE_SDL_HEADLESS_MS=1200 \
+                RAE_UI_EDITOR_TEST_TREE_CLICKS="PlayButton cmd:PlayLabel" \
+                perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-inspect2.log" 2>&1 \
+             && grep -qaF "Selection (2): PlayButton,PlayLabel" "$TMP_OUT/render-inspect2.log" \
+             && grep -qaF "Rect, Size, Layout (1/2), Shape (1/2), OnClick (1/2), Name, NodeId, Children (1/2), Text (1/2)" "$TMP_OUT/render-inspect2.log"; then
+            :
+          else
+            UI_EDITOR_OK=0
+            echo "  composite inspector failed:"
+            cat "$TMP_OUT/render-inspect1.log" "$TMP_OUT/render-inspect2.log" 2>/dev/null | grep -av '^\[present\]' | sed 's/^/    /'
+          fi
           # Click-through cycling (#73816378). A canvas click lands on the
           # DEEPEST hit, which is almost never the node you meant; clicking the
           # same spot again steps one level UP the hit stack. Two runs:
@@ -557,7 +586,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/render-save.log" "$TMP_OUT/render-saved.log" "$TMP_OUT/screenshot-saved.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
           fi
           if [ "$UI_EDITOR_OK" = "1" ]; then
-            echo "PASS: $EXAMPLE_NAME (7 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select, canvas selection gestures, click-through cycling, hierarchy multi-selection, Rect widget multi-select read+write, .raepack project open + switch, file picker, camera zoom, outline pools, save path)"
+            echo "PASS: $EXAMPLE_NAME (7 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select, composite multi-selection inspector, canvas selection gestures, click-through cycling, hierarchy multi-selection, Rect widget multi-select read+write, .raepack project open + switch, file picker, camera zoom, outline pools, save path)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (ui editor sample gate)"
