@@ -392,6 +392,38 @@ inspector is read-only until the DAW/editor capability design
 (`ui-ecs-refactor-status.md` §2.7) lands; the app is shaped so those are new
 systems, not rewrites.
 
+## Select parent, and the identity block (#23728694)
+
+**Select parent walks the whole SET up the tree.** The click-through gesture
+walks ONE node up the hit stack under the cursor; this is the operation a
+gesture cannot express, so it is an explicit affordance: a `select parent` row
+in the inspector and the `U` key.
+
+Two decisions:
+
+- **Siblings collapse.** Two selected children of one Button become that one
+  Button, not the same node twice — the result is deduplicated, or "select
+  parent" on a set of siblings would return a selection full of duplicates.
+- **A node already at the scene root contributes ITSELF.** Dropping it would
+  silently shrink the selection whenever it contained a top-level node, and a
+  Select parent that sometimes deselects is worse than one that sometimes does
+  nothing. If nothing in the selection can move up, the operation reports no
+  change and the selection is untouched.
+
+**The identity block** heads the component list at n=1 (an entity id, a name
+and a parent are per-entity facts, and the header already names a
+multi-selection):
+
+```
+identity: entity=#10 gen 0  node=PlayButton  name=PlayButton  type=(none)
+          parent=Panel #9   children=PlayIcon #11, PlayLabel #12
+```
+
+That is what turns the panel from a property sheet into an ECS debugger: these
+are the ids diagnostics print, so they can be matched up by eye. The child list
+truncates at eight with a `+N more`, so a container with fifty children does
+not push the panel off screen.
+
 ## Adding and removing a component (#57156455)
 
 A component is not only a bag of editable fields — it is present or absent on

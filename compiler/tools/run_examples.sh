@@ -374,14 +374,14 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              RAE_UI_HEADLESS=1 RAE_UI_EDITOR_TREE=1 RAE_SDL_HEADLESS_MS=1200 \
              RAE_UI_EDITOR_TEST_TREE_CLICKS="PlayButton" \
              perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-widgets1.log" 2>&1 \
-             && grep -qaF "widgets filter: / to search components:; Size: w=SizeAxis { mode: fill, min: -1, max: -1 } h=SizeAxis { mode: fixed, min: -1, max: -1 }; Layout: kind=horizontal [none|horizontal|vertical|grid|stack] gap=16 · was spaceS" "$TMP_OUT/render-widgets1.log" \
+             && grep -qaF "select parent:; filter: / to search components:; Size: w=SizeAxis { mode: fill, min: -1, max: -1 } h=SizeAxis { mode: fixed, min: -1, max: -1 }; Layout: kind=horizontal [none|horizontal|vertical|grid|stack] gap=16 · was spaceS" "$TMP_OUT/render-widgets1.log" \
              && grep -qaF "; OnClick: actionId=menu.play maxDelayMs=250; Name: label=PlayButton · computed; NodeId: id=PlayButton · computed" "$TMP_OUT/render-widgets1.log" \
              && ! grep -qaF "Children:" "$TMP_OUT/render-widgets1.log" \
              && (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
                 RAE_UI_HEADLESS=1 RAE_UI_EDITOR_TREE=1 RAE_SDL_HEADLESS_MS=1200 \
                 RAE_UI_EDITOR_TEST_TREE_CLICKS="PlayButton cmd:PlayLabel" \
                 perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-widgets2.log" 2>&1 \
-             && grep -qaF "widgets filter: / to search components:; Size: w=— h=SizeAxis { mode: fixed, min: -1, max: -1 }; Layout (1/2): kind=horizontal" "$TMP_OUT/render-widgets2.log" \
+             && grep -qaF "widgets select parent:; filter: / to search components:; Size: w=— h=SizeAxis { mode: fixed, min: -1, max: -1 }; Layout (1/2): kind=horizontal" "$TMP_OUT/render-widgets2.log" \
              && (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/Coverage.raescene" \
                 RAE_UI_HEADLESS=1 RAE_UI_EDITOR_TREE=1 RAE_HEADLESS_FRAMES=3 RAE_FIXED_DT=0.05 \
                 RAE_UI_EDITOR_TEST_TREE_CLICKS="FadedBox" \
@@ -397,6 +397,32 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             UI_EDITOR_OK=0
             echo "  generated component widgets failed:"
             cat "$TMP_OUT/render-widgets1.log" "$TMP_OUT/render-widgets2.log" "$TMP_OUT/render-widgets3.log" "$TMP_OUT/render-widgets4.log" 2>/dev/null | grep -av '^\[present\]' | cut -c1-400 | sed 's/^/    /'
+          fi
+          # Select parent over the SET, and the identity block (#23728694).
+          # The click-through gesture walks ONE node up the stack under the
+          # cursor; this walks the whole selection up the tree, which a gesture
+          # cannot express. Two selected SIBLINGS must collapse to their one
+          # shared parent — the dedup is the whole point, or selecting two
+          # children of a Button would "select parent" into the same node
+          # twice. The identity block is n=1 only and carries the entity id,
+          # node id, name, primary type, parent and children, so the ids in
+          # diagnostics can be matched by eye.
+          if (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
+             RAE_UI_HEADLESS=1 RAE_UI_EDITOR_TREE=1 RAE_SDL_HEADLESS_MS=1200 \
+             RAE_UI_EDITOR_TEST_TREE_CLICKS="PlayLabel cmd:PlayIcon parent" \
+             perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-parent.log" 2>&1 \
+             && grep -qaF "select parent (1): PlayButton" "$TMP_OUT/render-parent.log" \
+             && grep -qaF "identity: entity=#10 gen 0 node=PlayButton name=PlayButton type=(none) parent=Panel #9 children=PlayIcon #11, PlayLabel #12" "$TMP_OUT/render-parent.log" \
+             && (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
+                RAE_UI_HEADLESS=1 RAE_UI_EDITOR_TREE=1 RAE_SDL_HEADLESS_MS=1200 \
+                RAE_UI_EDITOR_TEST_TREE_CLICKS="PlayLabel cmd:ContinueLabel parent" \
+                perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-parent2.log" 2>&1 \
+             && grep -qaF "select parent (2): PlayButton,ContinueButton" "$TMP_OUT/render-parent2.log"; then
+            :
+          else
+            UI_EDITOR_OK=0
+            echo "  select parent / identity failed:"
+            cat "$TMP_OUT/render-parent.log" "$TMP_OUT/render-parent2.log" 2>/dev/null | grep -av '^\[present\]' | cut -c1-300 | sed 's/^/    /'
           fi
           # Add / remove a component, and the filter (#57156455). Three runs,
           # each going through the same functions the panel's own rows call:
@@ -424,7 +450,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
                 RAE_UI_EDITOR_TEST_TREE_CLICKS="PlayButton" \
                 RAE_UI_EDITOR_TEST_COMPONENT="filter:tran" \
                 perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-comp3.log" 2>&1 \
-             && grep -qaF "widgets filter: tran:; add component: TransformFx=add" "$TMP_OUT/render-comp3.log"; then
+             && grep -qaF "filter: tran:; add component: TransformFx=add" "$TMP_OUT/render-comp3.log"; then
             :
           else
             UI_EDITOR_OK=0
@@ -691,7 +717,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/render-save.log" "$TMP_OUT/render-saved.log" "$TMP_OUT/screenshot-saved.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
           fi
           if [ "$UI_EDITOR_OK" = "1" ]; then
-            echo "PASS: $EXAMPLE_NAME (7 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select, composite multi-selection inspector, generated component widgets, value provenance, component add/remove/filter, canvas selection gestures, click-through cycling, hierarchy multi-selection, Rect widget multi-select read+write, .raepack project open + switch, file picker, camera zoom, outline pools, save path)"
+            echo "PASS: $EXAMPLE_NAME (7 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select, composite multi-selection inspector, generated component widgets, value provenance, component add/remove/filter, select parent + identity, canvas selection gestures, click-through cycling, hierarchy multi-selection, Rect widget multi-select read+write, .raepack project open + switch, file picker, camera zoom, outline pools, save path)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (ui editor sample gate)"
