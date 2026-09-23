@@ -1,5 +1,12 @@
+func rae_ext_benchmarkOpaqueIndex(index: Int) unsafe extern ret Int
 
-func rae_ext_benchmarkOpaqueIndex(index: Int) extern ret Int
+# The constant-access scenario's index, laundered through C so the optimiser
+# cannot see it is 137, fold the bounds check away and measure nothing.
+func opaqueIndex(index: view Int) ret Int {
+  unsafe {
+    ret rae_ext_benchmarkOpaqueIndex(index: index)
+  }
+}
 
 type Particle {
   px: Int
@@ -53,7 +60,7 @@ func intSequential(values: view List(Int), passes: view Int) {
   loop pass < passes {
     var index: Int = 0
     loop index < values.length {
-      if let value: Int = values.at(index: index) {
+      if let value: Int = values.copyAt(index: index) {
         checksum = checksum + value
       }
       index = index + 1
@@ -90,12 +97,12 @@ func intCollectionView(values: view List(Int), passes: view Int) {
 }
 
 func intConstant(values: view List(Int), operations: view Int) {
-  let constantIndex: Int = rae_ext_benchmarkOpaqueIndex(index: 137)
+  let constantIndex: Int = opaqueIndex(index: 137)
   let startNs: Int = nowNs()
   var checksum: Int = 0
   var iteration: Int = 0
   loop iteration < operations {
-    if let value: Int = values.at(index: constantIndex) {
+    if let value: Int = values.copyAt(index: constantIndex) {
       checksum = checksum + value
     }
     iteration = iteration + 1
@@ -109,7 +116,7 @@ func intStrided(values: view List(Int), operations: view Int) {
   var index: Int = 0
   var iteration: Int = 0
   loop iteration < operations {
-    if let value: Int = values.at(index: index) {
+    if let value: Int = values.copyAt(index: index) {
       checksum = checksum + value
     }
     index = (index + 4) % values.length
@@ -124,7 +131,7 @@ func intRandom(values: view List(Int), operations: view Int) {
   var iteration: Int = 0
   loop iteration < operations {
     let index: Int = (iteration * 48271 + 17) % values.length
-    if let value: Int = values.at(index: index) {
+    if let value: Int = values.copyAt(index: index) {
       checksum = checksum + value
     }
     iteration = iteration + 1
@@ -141,7 +148,7 @@ func intMostlyValid(values: view List(Int), operations: view Int) {
     if iteration % 1000 is 0 {
       index = values.length
     }
-    if let value: Int = values.at(index: index) {
+    if let value: Int = values.copyAt(index: index) {
       checksum = checksum + value
     }
     iteration = iteration + 1
@@ -158,7 +165,7 @@ func intMixedInvalid(values: view List(Int), operations: view Int) {
     if iteration % 4 is 0 {
       index = -1
     }
-    if let value: Int = values.at(index: index) {
+    if let value: Int = values.copyAt(index: index) {
       checksum = checksum + value
     }
     iteration = iteration + 1
@@ -173,7 +180,7 @@ func structSequentialValue(particles: view List(Particle), passes: view Int) {
   loop pass < passes {
     var index: Int = 0
     loop index < particles.length {
-      if let particle: Particle = particles.at(index: index) {
+      if let particle: Particle = particles.copyAt(index: index) {
         checksum = checksum + particle.px + particle.vz + particle.mass
       }
       index = index + 1
