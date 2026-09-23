@@ -52,6 +52,19 @@ const buttonOutlineScenePath: String = "examples/121_ui_editor/assets/scenes/chr
 
 const selectionOutlineItemScenePath: String = "examples/121_ui_editor/assets/scenes/chrome/SelectionOutlineItem.raescene"
 
+# Append one builtin scene. A function rather than a bare `.add` of a literal
+# so the path and its id are named at the call site, in the one order the
+# pair is ever written.
+func addBuiltinScene(
+  builtinScenes: mod List(BuiltinScene)
+  path: view String
+  sceneId: view String
+) {
+  builtinScenes.add(
+    value: BuiltinScene { path: stringCopy(string: path), sceneId: stringCopy(string: sceneId) }
+  )
+}
+
 # The theme the document sees: its own token sections, then its `import`s in
 # order (#1008) — nothing is read from the directory. Installed on every
 # (re)load, BEFORE the page mounts, since tokens resolve at load time.
@@ -174,22 +187,40 @@ func createApp() ret App {
   var document: SceneDocument = createSceneDocument(path: resolveScenePath())
   var gpuUi: Gpu2dUi = createEditorUi()
   var fonts: EditorFonts = { textFontPath: "", iconFontPath: "" }
-  var builtinScenePaths: List(String) = List.create(String, cap: 7)
-  var builtinSceneIds: List(String) = List.create(String, cap: 7)
-  builtinScenePaths.add(value: diagnosticRowScenePath)
-  builtinSceneIds.add(value: "chrome/DiagnosticRow")
-  builtinScenePaths.add(value: inspectorScenePath)
-  builtinSceneIds.add(value: "chrome/Inspector")
-  builtinScenePaths.add(value: treeRowScenePath)
-  builtinSceneIds.add(value: "chrome/TreeRow")
-  builtinScenePaths.add(value: projectRowScenePath)
-  builtinSceneIds.add(value: "chrome/ProjectRow")
-  builtinScenePaths.add(value: nodeOutlineScenePath)
-  builtinSceneIds.add(value: "chrome/NodeOutline")
-  builtinScenePaths.add(value: buttonOutlineScenePath)
-  builtinSceneIds.add(value: "chrome/ButtonOutline")
-  builtinScenePaths.add(value: selectionOutlineItemScenePath)
-  builtinSceneIds.add(value: "chrome/SelectionOutlineItem")
+  # One add per scene: the path and the id it registers under are written
+  # together, so there is no order to keep two lists in.
+  var builtinScenes: List(BuiltinScene) = List.create(BuiltinScene, cap: 7)
+  addBuiltinScene(
+    builtinScenes: builtinScenes
+    path: diagnosticRowScenePath
+    sceneId: "chrome/DiagnosticRow"
+  )
+  addBuiltinScene(
+    builtinScenes: builtinScenes
+    path: inspectorScenePath
+    sceneId: "chrome/Inspector"
+  )
+  addBuiltinScene(builtinScenes: builtinScenes, path: treeRowScenePath, sceneId: "chrome/TreeRow")
+  addBuiltinScene(
+    builtinScenes: builtinScenes
+    path: projectRowScenePath
+    sceneId: "chrome/ProjectRow"
+  )
+  addBuiltinScene(
+    builtinScenes: builtinScenes
+    path: nodeOutlineScenePath
+    sceneId: "chrome/NodeOutline"
+  )
+  addBuiltinScene(
+    builtinScenes: builtinScenes
+    path: buttonOutlineScenePath
+    sceneId: "chrome/ButtonOutline"
+  )
+  addBuiltinScene(
+    builtinScenes: builtinScenes
+    path: selectionOutlineItemScenePath
+    sceneId: "chrome/SelectionOutlineItem"
+  )
 
   var world: UiWorld = create()
 
@@ -211,8 +242,7 @@ func createApp() ret App {
       document: document
       world: world
       uiSystems: uiSystems
-      builtinScenePaths: builtinScenePaths
-      builtinSceneIds: builtinSceneIds
+      builtinScenes: builtinScenes
     )
   }
   # The chrome's space is the window in points; the document keeps its own
@@ -407,8 +437,7 @@ func createApp() ret App {
       testSetRect: testSetRect
       testClicks: testClicks
       testTreeClicks: testTreeClicks
-      builtinScenePaths: own builtinScenePaths
-      builtinSceneIds: own builtinSceneIds
+      builtinScenes: own builtinScenes
       headless: headless
       windowGeometry: own windowGeometry
       debugOverlay: createDebugOverlay(
