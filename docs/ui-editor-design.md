@@ -218,7 +218,7 @@ the library systems, like 106's `FramePipeline.rae`):
 | (lib outbox) | `world.pendingComponents` | an authored component no lib table matches is an APP's own (docs/ecs-systems-own-their-tables.md §4): the editor never reports it — it stays on the node as authored, the inspector lists it under "not a lib component", the diagnostics list shows it as an `appComponent` INFO row (the red pill counts only real diagnostics), and the mount/reload log says `N app components kept` |
 | `watchSystem/` | `fileWatchSystem` | poll `Sys.fileMtime` of the OPENED document, its sub-scenes and imports every 250 ms (only while the window is visible); changed → `documentLoadSystem` remount, scroll preserved. This is for the document, which may live in another project; the editor's own chrome scenes are NOT watched here — under `rae watch` a chrome edit restarts the editor like any `.rae`/`.raescene` edit (docs/hot-reload-plan.md) |
 | `diagnosticsSystem/` | `diagnosticsSystem` | owns `List(SceneDiagnostic)` (unknown component, runtime-only component, unknown token, missing sub-scene, missing texture, parse error); writes the chrome's counter + list (a `ListView` — the `lib/ui` list system, dogfooded) |
-| `inspectorSystem/` | `inspectorSystem` | hover → highlight rect; click → select; overlay with node id, component names (`componentNamesFor`), computed rect; arrow keys walk the tree; `Esc` clears |
+| `inspectorSystem/` | `inspectorSystem` | hover → highlight rect; click → select (see *Canvas selection* below); overlay with node id, component names (`componentNamesFor`), computed rect; arrow keys walk the tree; `Esc` clears |
 | `viewportSystem/` | `viewportSystem` | design resolution + letterbox from the document; window resize → re-fit |
 
 Rendering is the stock `lib/ui` render system; the highlight is a `Shape` entity on
@@ -391,3 +391,47 @@ Writing scenes back (the "editor" half), a file picker, drag-to-move, undo. The
 inspector is read-only until the DAW/editor capability design
 (`ui-ecs-refactor-status.md` §2.7) lands; the app is shaped so those are new
 systems, not rewrites.
+
+## Canvas selection (#20778145)
+
+The editor keeps ONE selection set — `InspectorSystem.selection`, with
+`selection`'s last member as the ANCHOR (`selected`) — and the canvas, the
+hierarchy and the inspector all read it. Every path that changes it goes
+through `applySelect(… mode: SelectMode)`, so the panels cannot grow two
+vocabularies for the one set:
+
+| gesture | mode | effect |
+|---|---|---|
+| click | `replace` | the set becomes exactly the hit node |
+| click on empty canvas | `replace` | the set is CLEARED |
+| Cmd/Ctrl+click | `toggle` | in if it was out, out if it was in |
+| Shift+click | `add` | in, never out |
+| Alt/Opt+click | `subtract` | out, never in |
+
+Three decisions are worth keeping:
+
+- **A modified click on empty canvas does nothing.** Only a plain click
+  clears. Someone holding Shift to extend a selection and missing the node is
+  asking to add nothing, not to throw the set away, and losing a carefully
+  built selection to a near-miss is what makes an editor feel hostile.
+- **`subtract` is separate from `toggle`** even though a toggle can remove.
+  With stacked nodes a toggle is ambiguous about which one you meant to drop,
+  and "remove this" is worth being able to say without first knowing the
+  state. When several modifiers are held they are ranked by specificity —
+  subtract, then toggle, then add — so a stray Shift never silently turns an
+  Alt+click into an add.
+- **A press on chrome is not a click on empty canvas.** `onCanvas` gates both
+  the hover and the click; without it every press on a panel toggle would
+  clear the selection.
+
+Selected nodes other than the anchor are outlined by an `OutlinePool` with
+`matches: "selection"` (`chrome/SelectionOutlineItem`). The anchor keeps its
+own single `OutlineFor { role: selection }` outline, so a selection of one
+renders exactly as it did before multi-selection existed.
+
+`RAE_UI_EDITOR_TEST_CLICKS` replays a script of canvas clicks through that same
+gesture path once after the first layout — `"[mod:]<nodeId>"` clicks the middle
+of a node's on-screen rect, `"[mod:]at:<x>,<y>"` clicks raw coordinates (how
+you click empty canvas), and the run logs the resulting set. That is what the
+example gate asserts; there is deliberately no back door that sets the
+selection directly, since one would pass while the real gesture was broken.

@@ -309,6 +309,15 @@ func runApp(app: mod App) ret Int {
     uiSystems: app.uiSystems
     res: app.gpuUi
   )
+  # The camera has been fitted and the pipeline re-run, so world transforms are
+  # final: a scripted canvas click now lands where a real one would.
+  runTestClicks(
+    inspectorSystem: app.inspectorSystem
+    world: app.world
+    uiSystems: app.uiSystems
+    pageRoot: app.document.pageRoot
+    script: app.testClicks
+  )
   var renderedOnce: Bool = false
   # RAE_UI_EDITOR_TEST_SAVE=<path>: save the document there once after the
   # first frame, as Cmd+S would — the headless gate's hook.
@@ -505,6 +514,8 @@ func runApp(app: mod App) ret Int {
       uiSystems: app.uiSystems
       documentRoot: app.document.pageRoot
       scenes: app.document.registry
+      selection: app.inspectorSystem.selection
+      anchor: app.inspectorSystem.selected
     ) {
       changed = true
     }

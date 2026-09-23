@@ -535,6 +535,155 @@ func selectNode(inspectorSystem: mod InspectorSystem, world: mod UiWorld, entity
   )
 }
 
+# How a click changes the selection. The canvas, the hierarchy and every
+# keyboard path funnel through `applySelect` with one of these, so the two
+# panels cannot grow two different vocabularies for the one shared set.
+#
+#   replace  — plain click: the selection becomes exactly this node, and a
+#              plain click on EMPTY space clears it (there was previously no
+#              way to deselect at all).
+#   toggle   — Cmd/Ctrl+click: in if it was out, out if it was in.
+#   add      — Shift+click: in, and never out. The hierarchy spends this on
+#              range extension (#16096994); on the canvas there is no range,
+#              so it is a plain additive click.
+#   subtract — Alt/Opt+click: out, and never in. Distinct from `toggle`
+#              because with stacked nodes a toggle is ambiguous about which
+#              one you meant to drop, and "remove this" is worth being able
+#              to say without having to know the current state.
+enum SelectMode { replace, toggle, add, subtract }
+
+# Which mode the modifier keys currently held ask for.
+#
+# Several modifiers at once are ranked by how specific they are: subtract is
+# an explicit "not this one", so it wins over toggle, which in turn is more
+# specific than add. Ranking them (rather than declaring the combination
+# invalid) means a stray Shift never silently turns an Alt+click into an add.
+func pointerSelectMode() ret SelectMode {
+  if Sdl3.isKeyDown(key: Keys.keyLAlt) or Sdl3.isKeyDown(key: Keys.keyRAlt) {
+    ret SelectMode.subtract
+  }
+  let meta: Bool = Sdl3.isKeyDown(key: Keys.keyLGui) or Sdl3.isKeyDown(key: Keys.keyRGui)
+  let control: Bool = Sdl3.isKeyDown(key: Keys.keyLCtrl) or Sdl3.isKeyDown(key: Keys.keyRCtrl)
+  if meta or control {
+    ret SelectMode.toggle
+  }
+  if Sdl3.isKeyDown(key: Keys.keyLShift) or Sdl3.isKeyDown(key: Keys.keyRShift) {
+    ret SelectMode.add
+  }
+  ret SelectMode.replace
+}
+
+func isSelected(inspectorSystem: view InspectorSystem, entity: view EntityId) ret Bool {
+  loop var i: Int = 0, i < inspectorSystem.selection.length, ++i {
+    if let member: EntityId = inspectorSystem.selection.copyAt(index: i) {
+      if member is entity {
+        ret true
+      }
+    }
+  }
+  ret false
+}
+
+# The ONE way the selection set changes. Returns whether it actually changed,
+# so the caller only resyncs the panels when there is something new to show.
+#
+# A modified click on empty space does NOTHING: only a plain click clears. A
+# user holding Shift to extend a selection and missing the node is asking to
+# add nothing, not to throw the selection away — and losing a carefully built
+# set to a near-miss is exactly the kind of thing that makes an editor feel
+# hostile.
+func applySelect(
+  inspectorSystem: mod InspectorSystem
+  world: mod UiWorld
+  entity: view EntityId
+  mode: view SelectMode
+) ret Bool {
+  if mode is SelectMode.replace {
+    if isNone(this: entity) {
+      if inspectorSystem.selection.length is 0 {
+        ret false
+      }
+      selectNode(inspectorSystem: inspectorSystem, world: world, entity: noEntity())
+      log("[ui-editor] deselected")
+      ret true
+    }
+    if inspectorSystem.selection.length is 1 and inspectorSystem.selected is entity {
+      ret false
+    }
+    selectNode(inspectorSystem: inspectorSystem, world: world, entity: entity)
+    ret true
+  }
+  if isNone(this: entity) {
+    ret false
+  }
+  let already: Bool = isSelected(inspectorSystem: inspectorSystem, entity: entity)
+  if mode is SelectMode.add and already {
+    ret false
+  }
+  if mode is SelectMode.subtract and already is false {
+    ret false
+  }
+  # Every surviving case is a flip: `add` reached here only when the node was
+  # out, `subtract` only when it was in, and `toggle` means flip by
+  # definition. So the three modes differ purely in the guards above, and
+  # `selectAddNode` — which toggles — is the single mutation.
+  selectAddNode(inspectorSystem: inspectorSystem, world: world, entity: entity)
+  log(
+    "[ui-editor] selection ({inspectorSystem.selection.length}): {selectionNodeIds(
+      inspectorSystem: inspectorSystem
+      world: world
+    )}"
+  )
+  ret true
+}
+
+# The selected node ids, in selection order — the headless gate's assertion
+# surface, and what a future "Selection (n)" label in the panel will read.
+func selectionNodeIds(inspectorSystem: view InspectorSystem, world: view UiWorld) ret String {
+  if inspectorSystem.selection.length is 0 {
+    ret "none"
+  }
+  var line: String = ""
+  loop var i: Int = 0, i < inspectorSystem.selection.length, ++i {
+    if let member: EntityId = inspectorSystem.selection.copyAt(index: i) {
+      let name: String = nodeIdOf(world: world, entity: member)
+      if line.length() is 0 {
+        line = "{name}"
+      } else {
+        line = "{line},{name}"
+      }
+    }
+  }
+  ret line
+}
+
+# A click at a point of the CANVAS, with the modifiers that were held. The
+# live pointer and the headless click hook both come through here, so the
+# gate exercises the real gesture rather than a shortcut around it.
+func canvasSelectAt(
+  inspectorSystem: mod InspectorSystem
+  world: mod UiWorld
+  uiSystems: view UiSystems
+  sceneRoot: view EntityId
+  x: view Float
+  y: view Float
+  mode: view SelectMode
+) ret Bool {
+  let hit: EntityId = deepestNodeAt(
+    world: world
+    uiSystems: uiSystems
+    entity: sceneRoot
+    x: x
+    y: y
+  )
+  ret applySelect(
+    inspectorSystem: inspectorSystem
+    world: world
+    entity: hit
+    mode: mode
+  )
+}
+
 # Per frame: hover from the pointer, click / arrows / Esc on the selection,
 # tree-row actions, then the outlines and panels. Returns whether anything
 # the frame shows changed.
@@ -551,14 +700,20 @@ func inspectorUpdate(
   var changed: Bool = false
   # Only the edit area reaches the document: a pointer over a chrome panel
   # (which may cover part of the document) hovers and selects nothing.
-  var hovered: EntityId = noEntity()
-  if chromeVisible is false or pointInEditArea(
+  # Whether the pointer is over the CANVAS this frame. It gates both halves of
+  # the click: a press on a chrome panel must not hover a document node, and
+  # — the reason this is now a named local — must not read as a click on
+  # empty canvas either, or every press on the `I` toggle would silently
+  # throw the selection away.
+  let onCanvas: Bool = chromeVisible is false or pointInEditArea(
     chromeSystem: chromeSystem
     world: world
     uiSystems: uiSystems
     x: input.pointer.x
     y: input.pointer.y
-  ) {
+  )
+  var hovered: EntityId = noEntity()
+  if onCanvas {
     hovered = deepestNodeAt(
       world: world
       uiSystems: uiSystems
@@ -571,10 +726,25 @@ func inspectorUpdate(
     inspectorSystem.hovered = hovered
     changed = true
   }
-  var selection: EntityId = inspectorSystem.selected
-  if input.pointer.pressed and isNone(this: hovered) is false {
-    selection = hovered
+  # The canvas click goes straight through the selection funnel with whatever
+  # modifiers are held — including the empty-space case, which is the whole
+  # point: a plain click that hits nothing clears the set.
+  if input.pointer.pressed and onCanvas {
+    if canvasSelectAt(
+      inspectorSystem: inspectorSystem
+      world: world
+      uiSystems: uiSystems
+      sceneRoot: sceneRoot
+      x: input.pointer.x
+      y: input.pointer.y
+      mode: pointerSelectMode()
+    ) {
+      changed = true
+    }
   }
+  # The keyboard paths below still move a single ANCHOR and replace the set;
+  # arrow-key range extension belongs to the hierarchy's own task.
+  var selection: EntityId = inspectorSystem.selected
   if Sdl3.isKeyPressed(key: Keys.keyEscape) {
     selection = noEntity()
   }
@@ -627,8 +797,14 @@ func inspectorUpdate(
     changed = true
   }
   if selection is not inspectorSystem.selected {
-    selectNode(inspectorSystem: inspectorSystem, world: world, entity: selection)
-    changed = true
+    if applySelect(
+      inspectorSystem: inspectorSystem
+      world: world
+      entity: selection
+      mode: SelectMode.replace
+    ) {
+      changed = true
+    }
   }
   if changed {
     syncInspectorPanel(
