@@ -34,6 +34,14 @@ const treeIndentPerLevel: Float = 12.0
 
 const treeRowPitch: Float = 44.0
 
+# How far a click may drift and still count as "the same spot" for
+# click-through cycling (#73816378). A few screen pixels, so a shaky hand keeps
+# stepping up the stack instead of silently restarting at the deepest node.
+# This is a DISTANCE threshold and the only one the gesture has: there is no
+# press-and-hold and no double-click timeout, so the same spot ten seconds
+# later still continues the cycle.
+const clickCycleSlop: Float = 4.0
+
 # The inspector system owns the authored `OutlineFor` components (the hover /
 # selection outline nodes in chrome/Guides.raescene) and its own state.
 type InspectorSystem {
@@ -53,6 +61,19 @@ type InspectorSystem {
   # shift-clicking twice re-spans from the same origin instead of ratcheting
   # the range outward one click at a time.
   rangeAnchor: EntityId
+  # Click-through cycling (#73816378): where the last plain canvas click
+  # landed, and how deep into that point's hit stack the selection now is.
+  # `cycleActive` is cleared by every selection change that is NOT the next
+  # click of this cycle, so a click on a neighbouring node cannot inherit a
+  # stale depth.
+  cycleX: Float
+  cycleY: Float
+  cycleDepth: Int
+  cycleActive: Bool
+  # The hit stack of the current cycle point, deepest first. Held on the
+  # system rather than rebuilt per step so the cycle walks ONE stack: a
+  # relayout between clicks cannot renumber the steps under the user.
+  cycleStack: List(EntityId)
   # The tree list's row order (entity per row), so a row's action maps back.
   # This is also the order a Shift-range spans, which is why the range is
   # over the VISIBLE rows and not over the hierarchy: what the user is
@@ -71,6 +92,11 @@ func createInspectorSystem(world: mod UiWorld) ret InspectorSystem {
     selected: noEntity()
     selection: List.create(EntityId, cap: 8)
     rangeAnchor: noEntity()
+    cycleX: 0.0
+    cycleY: 0.0
+    cycleDepth: 0
+    cycleActive: false
+    cycleStack: List.create(EntityId, cap: 8)
     treeEntities: List.create(EntityId, cap: 64)
   }
 }
@@ -196,160 +222,6 @@ func selectAddNode(
   }
   inspectorSystem.selection.add(value: entity)
   inspectorSystem.selected = entity
-}
-
-func syncInspectorPanel(
-  world: view UiWorld
-  uiSystems: view UiSystems
-  chromeSystem: mod ChromeSystem
-  inspectorSystem: view InspectorSystem
-  sceneRoot: view EntityId
-) {
-  let selected: EntityId = inspectorSystem.selected
-  if isNone(this: selected) {
-    chromeSystem.inspectorNodeId = "nothing selected"
-    chromeSystem.inspectorType = "click a node, or use the arrows"
-    chromeSystem.inspectorComponents = ""
-    chromeSystem.inspectorAppComponents = ""
-    chromeSystem.inspectorRect = ""
-    chromeSystem.inspectorParents = ""
-    ret
-  }
-  chromeSystem.inspectorNodeId = nodeIdOf(world: world, entity: selected)
-  var primaryType: String = ""
-  if componentHas(this: world.primaryTypes, entity: selected) {
-    let primary: view PrimaryType => componentView(this: world.primaryTypes, entity: selected)
-    primaryType = "{primary.typeName}"
-  }
-  var label: String = ""
-  if componentHas(this: world.names, entity: selected) {
-    let name: view Name => componentView(this: world.names, entity: selected)
-    label = "{name.label}"
-  }
-  var typeLine: String = "{primaryType} / {label}"
-  if primaryType.length() is 0 {
-    typeLine = "{label}"
-  }
-  if label.length() is 0 {
-    typeLine = "{primaryType}"
-  }
-  chromeSystem.inspectorType = typeLine
-  let componentNames: String = componentNamesFor(world: world, entity: selected)
-  chromeSystem.inspectorComponents = "{String.replace(this: componentNames, old: ",", new: ", ")}{bundleProvenanceLine(
-    world: world
-    entity: selected
-  )}"
-  chromeSystem.inspectorAppComponents = appComponentsLine(world: world, entity: selected)
-  # The Rect widget, over the WHOLE selection: a field the selected entities
-  # agree on shows its value, one they differ on shows the mixed marker, and
-  # each carries what drives it (#54986153).
-  chromeSystem.inspectorRect = rectWidgetLine(
-    world: world
-    uiSystems: uiSystems
-    selection: inspectorSystem.selection
-  )
-  chromeSystem.inspectorParents = parentChainOf(
-    world: world
-    uiSystems: uiSystems
-    entity: selected
-    sceneRoot: sceneRoot
-  )
-}
-
-# The row marker: `>` for the ACTIVE node (the one the inspector describes),
-# `-` for the other selected rows. Two glyphs rather than one because with a
-# range selected, "which of these is the arrow keys' origin" is not guessable
-# from a uniform highlight.
-func treeRowMarker(
-  selection: view List(EntityId)
-  entity: view EntityId
-  selected: view EntityId
-) ret String {
-  if entity is selected {
-    ret ">"
-  }
-  loop var i: Int = 0, i < selection.length, ++i {
-    if let member: EntityId = selection.copyAt(index: i) {
-      if member is entity {
-        ret "-"
-      }
-    }
-  }
-  ret ""
-}
-
-func collectTreeRows(
-  world: view UiWorld
-  entity: view EntityId
-  depth: view Int
-  selected: view EntityId
-  selection: view List(EntityId)
-  entities: mod List(EntityId)
-  rows: mod List(ListViewRow)
-) {
-  if isNone(this: entity) or rows.length >= 256 {
-    ret
-  }
-  var keys: List(String) = {
-    "id"
-    "label"
-    "indent"
-    "marker"
-    "action"
-  }
-  var values: List(String) = List.create(String, cap: 5)
-  values.add(value: "{entity.index}")
-  values.add(value: nodeIdOf(world: world, entity: entity))
-  values.add(value: "{(depth.toFloat() * treeIndentPerLevel + 6.0).toInt()}")
-  values.add(value: treeRowMarker(selection: selection, entity: entity, selected: selected))
-  values.add(value: "inspect:{entity.index}")
-  rows.add(value: ListViewRow { keys: own keys, values: own values })
-  entities.add(value: entity)
-  if componentHas(this: world.childrens, entity: entity) {
-    let children: view Children => componentView(this: world.childrens, entity: entity)
-    loop var i: Int = 0, i < children.ids.length, ++i {
-      collectTreeRows(
-        world: world
-        entity: children.ids.copyAtFallback(index: i, fallback: noEntity())
-        depth: depth + 1
-        selected: selected
-        selection: selection
-        entities: entities
-        rows: rows
-      )
-    }
-  }
-}
-
-# Rebuild the hierarchy list's rows (DFS of the document, depth as indent,
-# the selection marked) on the ListView tagged `EditorList { source:
-# hierarchy }`.
-func syncTreePanel(
-  chromeSystem: view ChromeSystem
-  world: mod UiWorld
-  inspectorSystem: mod InspectorSystem
-  sceneRoot: view EntityId
-) {
-  let list: EntityId = editorListEntity(
-    chromeSystem: chromeSystem
-    world: world
-    source: EditorListSource.hierarchy
-  )
-  if isNone(this: list) {
-    ret
-  }
-  inspectorSystem.treeEntities.clear()
-  var rows: List(ListViewRow) = List.create(ListViewRow, cap: 32)
-  collectTreeRows(
-    world: world
-    entity: sceneRoot
-    depth: 0
-    selected: inspectorSystem.selected
-    selection: inspectorSystem.selection
-    entities: inspectorSystem.treeEntities
-    rows: rows
-  )
-  setEditorListRows(world: world, list: list, rows: own rows)
 }
 
 # Replace the selection with exactly `entity` (a plain click). Every path that
@@ -523,6 +395,12 @@ func applySelect(
   entity: view EntityId
   mode: view SelectMode
 ) ret Bool {
+  # Any selection change ends the current click-through cycle. `canvasSelectAt`
+  # re-arms it immediately afterwards for its own click, so the ONLY thing that
+  # survives here is a cycle whose next step is the very next canvas click —
+  # which is exactly the reset rule: a tree click, an arrow key, Esc or a
+  # modifier click all leave no stale depth behind.
+  inspectorSystem.cycleActive = false
   if mode is SelectMode.range {
     if isNone(this: entity) {
       ret false
@@ -597,6 +475,16 @@ func selectionNodeIds(inspectorSystem: view InspectorSystem, world: view UiWorld
 # A click at a point of the CANVAS, with the modifiers that were held. The
 # live pointer and the headless click hook both come through here, so the
 # gate exercises the real gesture rather than a shortcut around it.
+# Whether (x, y) is the same spot as the click that armed the cycle.
+func sameCycleSpot(inspectorSystem: view InspectorSystem, x: view Float, y: view Float) ret Bool {
+  if inspectorSystem.cycleActive is false {
+    ret false
+  }
+  let dx: Float = x - inspectorSystem.cycleX
+  let dy: Float = y - inspectorSystem.cycleY
+  ret dx * dx + dy * dy <= clickCycleSlop * clickCycleSlop
+}
+
 func canvasSelectAt(
   inspectorSystem: mod InspectorSystem
   world: mod UiWorld
@@ -606,19 +494,82 @@ func canvasSelectAt(
   y: view Float
   mode: view SelectMode
 ) ret Bool {
-  let hit: EntityId = deepestNodeAt(
-    world: world
-    uiSystems: uiSystems
-    entity: sceneRoot
-    x: x
-    y: y
+  # A MODIFIED click never cycles. Cmd/Shift/Alt are asking to change the set,
+  # and stepping up the stack at the same time would make the result depend on
+  # how many times you had already clicked there — two gestures fighting over
+  # one press. They take the deepest hit, as a first plain click does.
+  if mode is not SelectMode.replace {
+    ret applySelect(
+      inspectorSystem: inspectorSystem
+      world: world
+      entity: deepestNodeAt(
+        world: world
+        uiSystems: uiSystems
+        entity: sceneRoot
+        x: x
+        y: y
+      )
+      mode: mode
+    )
+  }
+  let stepping: Bool = sameCycleSpot(inspectorSystem: inspectorSystem, x: x, y: y)
+  if stepping is false {
+    hitStackAt(
+      world: world
+      uiSystems: uiSystems
+      sceneRoot: sceneRoot
+      x: x
+      y: y
+      out: inspectorSystem.cycleStack
+    )
+  }
+  if inspectorSystem.cycleStack.length is 0 {
+    # Empty canvas: clear the selection, as a plain click there always did.
+    ret applySelect(
+      inspectorSystem: inspectorSystem
+      world: world
+      entity: noEntity()
+      mode: SelectMode.replace
+    )
+  }
+  var depth: Int = 0
+  if stepping {
+    # One level UP the stack, wrapping back to the deepest at the top, so
+    # repeated clicks cycle sprite -> Button -> row -> page -> sprite.
+    depth = (inspectorSystem.cycleDepth + 1) % inspectorSystem.cycleStack.length
+  }
+  let picked: EntityId = inspectorSystem.cycleStack.copyAtFallback(
+    index: depth
+    fallback: noEntity()
   )
-  ret applySelect(
+  let changed: Bool = applySelect(
     inspectorSystem: inspectorSystem
     world: world
-    entity: hit
-    mode: mode
+    entity: picked
+    mode: SelectMode.replace
   )
+  # Re-arm AFTER applySelect, which cleared the cycle. The point is the one
+  # that armed it, not this click's coordinates: otherwise a hand drifting
+  # `clickCycleSlop` per click would walk across the canvas without ever
+  # leaving the cycle.
+  if stepping is false {
+    inspectorSystem.cycleX = x
+    inspectorSystem.cycleY = y
+  }
+  inspectorSystem.cycleDepth = depth
+  inspectorSystem.cycleActive = true
+  if stepping {
+    # Only the STEPS are logged, not every canvas click: `applySelect` already
+    # names what got selected, and the one thing that line cannot show is how
+    # deep into the stack under the cursor you now are.
+    log(
+      "[ui-editor] cycle {depth + 1}/{inspectorSystem.cycleStack.length}: {nodeIdOf(
+        world: world
+        entity: picked
+      )}"
+    )
+  }
+  ret changed
 }
 
 # Per frame: hover from the pointer, click / arrows / Esc on the selection,

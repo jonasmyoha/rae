@@ -329,6 +329,33 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             echo "  canvas selection failed:"
             cat "$TMP_OUT/render-clicks.log" "$TMP_OUT/render-deselect.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
           fi
+          # Click-through cycling (#73816378). A canvas click lands on the
+          # DEEPEST hit, which is almost never the node you meant; clicking the
+          # same spot again steps one level UP the hit stack. Two runs:
+          #   the cycle — five clicks on one spot walk PlayLabel -> PlayButton
+          #     -> Panel -> Screen and WRAP back to PlayLabel, so the last
+          #     selection proves both the stepping and the wrap
+          #   the reset — a modifier click in between is "another route", so
+          #     the next plain click starts again at the deepest node instead
+          #     of inheriting a stale depth
+          if (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
+             RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=1200 \
+             RAE_UI_EDITOR_TEST_CLICKS="PlayButton PlayButton PlayButton PlayButton PlayButton" \
+             perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-cycle.log" 2>&1 \
+             && grep -qF "cycle 2/4: PlayButton" "$TMP_OUT/render-cycle.log" \
+             && grep -qF "cycle 4/4: Screen" "$TMP_OUT/render-cycle.log" \
+             && grep -qF "clicks [PlayButton PlayButton PlayButton PlayButton PlayButton] -> PlayLabel" "$TMP_OUT/render-cycle.log" \
+             && (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
+                RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=1200 \
+                RAE_UI_EDITOR_TEST_CLICKS="PlayButton PlayButton cmd:Title PlayButton" \
+                perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-cycle-reset.log" 2>&1 \
+             && grep -qF "clicks [PlayButton PlayButton cmd:Title PlayButton] -> PlayLabel" "$TMP_OUT/render-cycle-reset.log"; then
+            :
+          else
+            UI_EDITOR_OK=0
+            echo "  click-through cycling failed:"
+            cat "$TMP_OUT/render-cycle.log" "$TMP_OUT/render-cycle-reset.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
+          fi
           # Hierarchy multi-selection (#16096994). The tree drives the SAME
           # selection set as the canvas, with the same modifier vocabulary —
           # except that Shift spans a contiguous range of visible rows rather
@@ -530,7 +557,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/render-save.log" "$TMP_OUT/render-saved.log" "$TMP_OUT/screenshot-saved.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
           fi
           if [ "$UI_EDITOR_OK" = "1" ]; then
-            echo "PASS: $EXAMPLE_NAME (7 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select, canvas selection gestures, hierarchy multi-selection, Rect widget multi-select read+write, .raepack project open + switch, file picker, camera zoom, outline pools, save path)"
+            echo "PASS: $EXAMPLE_NAME (7 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select, canvas selection gestures, click-through cycling, hierarchy multi-selection, Rect widget multi-select read+write, .raepack project open + switch, file picker, camera zoom, outline pools, save path)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (ui editor sample gate)"

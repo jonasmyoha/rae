@@ -1,0 +1,174 @@
+# inspectorSystem/Panels — what the inspector and the hierarchy SHOW.
+#
+# The rendering half of the inspector: the property panel's lines and the
+# hierarchy list's rows. Split from InspectorSystem.rae, which owns the state
+# and the selection funnel, purely to keep both under the 1,000-line cap —
+# these read `InspectorSystem` but never change it, which is why the panels
+# can move out and the state cannot.
+import String
+open Sys
+open ui/Ecs
+open ui/Components
+open ui/SceneLoader
+open ui/BindingComponents
+open ui/SceneBundles
+open ecs/Entity
+open ecs/ComponentTable
+open ui/UiSystems
+open app3d/UiShell
+open inspectorSystem/NodeQuery
+open inspectorSystem/RectWidget
+
+func syncInspectorPanel(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  chromeSystem: mod ChromeSystem
+  inspectorSystem: view InspectorSystem
+  sceneRoot: view EntityId
+) {
+  let selected: EntityId = inspectorSystem.selected
+  if isNone(this: selected) {
+    chromeSystem.inspectorNodeId = "nothing selected"
+    chromeSystem.inspectorType = "click a node, or use the arrows"
+    chromeSystem.inspectorComponents = ""
+    chromeSystem.inspectorAppComponents = ""
+    chromeSystem.inspectorRect = ""
+    chromeSystem.inspectorParents = ""
+    ret
+  }
+  chromeSystem.inspectorNodeId = nodeIdOf(world: world, entity: selected)
+  var primaryType: String = ""
+  if componentHas(this: world.primaryTypes, entity: selected) {
+    let primary: view PrimaryType => componentView(this: world.primaryTypes, entity: selected)
+    primaryType = "{primary.typeName}"
+  }
+  var label: String = ""
+  if componentHas(this: world.names, entity: selected) {
+    let name: view Name => componentView(this: world.names, entity: selected)
+    label = "{name.label}"
+  }
+  var typeLine: String = "{primaryType} / {label}"
+  if primaryType.length() is 0 {
+    typeLine = "{label}"
+  }
+  if label.length() is 0 {
+    typeLine = "{primaryType}"
+  }
+  chromeSystem.inspectorType = typeLine
+  let componentNames: String = componentNamesFor(world: world, entity: selected)
+  chromeSystem.inspectorComponents = "{String.replace(this: componentNames, old: ",", new: ", ")}{bundleProvenanceLine(
+    world: world
+    entity: selected
+  )}"
+  chromeSystem.inspectorAppComponents = appComponentsLine(world: world, entity: selected)
+  # The Rect widget, over the WHOLE selection: a field the selected entities
+  # agree on shows its value, one they differ on shows the mixed marker, and
+  # each carries what drives it (#54986153).
+  chromeSystem.inspectorRect = rectWidgetLine(
+    world: world
+    uiSystems: uiSystems
+    selection: inspectorSystem.selection
+  )
+  chromeSystem.inspectorParents = parentChainOf(
+    world: world
+    uiSystems: uiSystems
+    entity: selected
+    sceneRoot: sceneRoot
+  )
+}
+
+# The row marker: `>` for the ACTIVE node (the one the inspector describes),
+# `-` for the other selected rows. Two glyphs rather than one because with a
+# range selected, "which of these is the arrow keys' origin" is not guessable
+# from a uniform highlight.
+func treeRowMarker(
+  selection: view List(EntityId)
+  entity: view EntityId
+  selected: view EntityId
+) ret String {
+  if entity is selected {
+    ret ">"
+  }
+  loop var i: Int = 0, i < selection.length, ++i {
+    if let member: EntityId = selection.copyAt(index: i) {
+      if member is entity {
+        ret "-"
+      }
+    }
+  }
+  ret ""
+}
+
+func collectTreeRows(
+  world: view UiWorld
+  entity: view EntityId
+  depth: view Int
+  selected: view EntityId
+  selection: view List(EntityId)
+  entities: mod List(EntityId)
+  rows: mod List(ListViewRow)
+) {
+  if isNone(this: entity) or rows.length >= 256 {
+    ret
+  }
+  var keys: List(String) = {
+    "id"
+    "label"
+    "indent"
+    "marker"
+    "action"
+  }
+  var values: List(String) = List.create(String, cap: 5)
+  values.add(value: "{entity.index}")
+  values.add(value: nodeIdOf(world: world, entity: entity))
+  values.add(value: "{(depth.toFloat() * treeIndentPerLevel + 6.0).toInt()}")
+  values.add(value: treeRowMarker(selection: selection, entity: entity, selected: selected))
+  values.add(value: "inspect:{entity.index}")
+  rows.add(value: ListViewRow { keys: own keys, values: own values })
+  entities.add(value: entity)
+  if componentHas(this: world.childrens, entity: entity) {
+    let children: view Children => componentView(this: world.childrens, entity: entity)
+    loop var i: Int = 0, i < children.ids.length, ++i {
+      collectTreeRows(
+        world: world
+        entity: children.ids.copyAtFallback(index: i, fallback: noEntity())
+        depth: depth + 1
+        selected: selected
+        selection: selection
+        entities: entities
+        rows: rows
+      )
+    }
+  }
+}
+
+# Rebuild the hierarchy list's rows (DFS of the document, depth as indent,
+# the selection marked) on the ListView tagged `EditorList { source:
+# hierarchy }`.
+func syncTreePanel(
+  chromeSystem: view ChromeSystem
+  world: mod UiWorld
+  inspectorSystem: mod InspectorSystem
+  sceneRoot: view EntityId
+) {
+  let list: EntityId = editorListEntity(
+    chromeSystem: chromeSystem
+    world: world
+    source: EditorListSource.hierarchy
+  )
+  if isNone(this: list) {
+    ret
+  }
+  inspectorSystem.treeEntities.clear()
+  var rows: List(ListViewRow) = List.create(ListViewRow, cap: 32)
+  collectTreeRows(
+    world: world
+    entity: sceneRoot
+    depth: 0
+    selected: inspectorSystem.selected
+    selection: inspectorSystem.selection
+    entities: inspectorSystem.treeEntities
+    rows: rows
+  )
+  setEditorListRows(world: world, list: list, rows: own rows)
+}
