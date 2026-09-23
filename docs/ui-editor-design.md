@@ -526,11 +526,17 @@ Three decisions are worth keeping:
 
 A click lands on the DEEPEST hit, which is almost never the node you meant —
 you click a Play sprite and you want its Button. Clicking the **same spot
-again** steps one level UP the hit stack, wrapping at the top:
+again** steps one level UP the hit stack; past the top comes **nothing
+selected**, and then it wraps to the deepest:
 
 ```
-PlayLabel -> PlayButton -> Panel -> Screen -> PlayLabel -> …
+PlayLabel -> PlayButton -> Panel -> Screen -> (nothing) -> PlayLabel -> …
 ```
+
+The "nothing" step exists because every click on the canvas lands on
+*something*, so without it there was no way to empty the selection with the
+mouse held still (#66601047). A click on genuinely empty canvas still just
+clears and arms no cycle.
 
 `hitStackAt` builds that stack deepest-first: the deepest hit, then each
 ancestor whose own bounds also contain the point. An ancestor that does *not*

@@ -532,12 +532,19 @@ func canvasSelectAt(
       mode: SelectMode.replace
     )
   }
+  # The cycle has one position MORE than the stack: after the top comes
+  # "nothing selected", then it wraps to the deepest. Without that extra
+  # step there is no way to deselect with the mouse held still — every click
+  # lands on something, so the set can never empty (#66601047).
+  let positions: Int = inspectorSystem.cycleStack.length + 1
   var depth: Int = 0
   if stepping {
-    # One level UP the stack, wrapping back to the deepest at the top, so
-    # repeated clicks cycle sprite -> Button -> row -> page -> sprite.
-    depth = (inspectorSystem.cycleDepth + 1) % inspectorSystem.cycleStack.length
+    # One level UP the stack: sprite -> Button -> row -> page -> nothing ->
+    # sprite.
+    depth = (inspectorSystem.cycleDepth + 1) % positions
   }
+  # Past the top of the stack `copyAtFallback` yields none, and a plain
+  # replace with none is exactly the clear.
   let picked: EntityId = inspectorSystem.cycleStack.copyAtFallback(
     index: depth
     fallback: noEntity()
@@ -562,12 +569,11 @@ func canvasSelectAt(
     # Only the STEPS are logged, not every canvas click: `applySelect` already
     # names what got selected, and the one thing that line cannot show is how
     # deep into the stack under the cursor you now are.
-    log(
-      "[ui-editor] cycle {depth + 1}/{inspectorSystem.cycleStack.length}: {nodeIdOf(
-        world: world
-        entity: picked
-      )}"
-    )
+    var pickedName: String = nodeIdOf(world: world, entity: picked)
+    if isNone(this: picked) {
+      pickedName = "nothing"
+    }
+    log("[ui-editor] cycle {depth + 1}/{positions}: {pickedName}")
   }
   ret changed
 }
