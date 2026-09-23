@@ -534,15 +534,14 @@ func documentPrepareSystem(document: mod SceneDocument, world: mod UiWorld) ret 
 }
 
 # Step 2: register + mount the prepared scene under the `document` layer; on a
-# reload, unmount the previous page first. The builtin paths and package ids
-# are the app's own sub-scenes (the chrome's rows) that live in the same
-# registry, since the list system resolves every ListView against one registry.
+# reload, unmount the previous page first. `builtinScenes` are the app's own
+# sub-scenes (the chrome's rows) that live in the same registry, since the list
+# system resolves every ListView against one registry.
 func documentMountSystem(
   document: mod SceneDocument
   world: mod UiWorld
   uiSystems: view UiSystems
-  builtinScenePaths: view List(String)
-  builtinSceneIds: view List(String)
+  builtinScenes: view List(BuiltinScene)
 ) {
   var scrolls: ScrollSnapshot = {
     nodeIds: List.create(String, cap: 1)
@@ -552,20 +551,17 @@ func documentMountSystem(
     scrolls = snapshotDocumentScrolls(world: world)
     unmountPage(world: world, uiSystems: uiSystems, pageId: "document")
   }
-  loop var b: Int = 0, b < builtinScenePaths.length, ++b {
-    if let builtinPath: String = builtinScenePaths.copyAt(index: b) {
-      if let builtinSceneId: String = builtinSceneIds.copyAt(index: b) {
-        let builtin: Scene = loadScenePackageFile(path: builtinPath, sceneId: builtinSceneId)
-        if builtin.ok {
-          registerSceneTransitive(
-            sceneId: own builtinSceneId
-            scene: own builtin
-            root: document.root
-            registry: document.registry
-            diagnostics: world.sceneDiagnostics
-          )
-        }
-      }
+  loop let entry: view BuiltinScene in builtinScenes {
+    let builtin: Scene = loadScenePackageFile(path: entry.path, sceneId: entry.sceneId)
+    if builtin.ok {
+      let sceneId: String = stringCopy(string: entry.sceneId)
+      registerSceneTransitive(
+        sceneId: own sceneId
+        scene: own builtin
+        root: document.root
+        registry: document.registry
+        diagnostics: world.sceneDiagnostics
+      )
     }
   }
   documentDesignSize(document: document)

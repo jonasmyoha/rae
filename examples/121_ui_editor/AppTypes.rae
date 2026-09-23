@@ -16,6 +16,20 @@ type EditorFonts {
   iconFontPath: String
 }
 
+# One chrome sub-scene the binary ships with: where its file is, and the
+# package id the rest of the editor addresses it by. The two travel together
+# because they are one fact — a path without its id registers a template
+# nothing can find, and an id without its path is a dangling reference.
+#
+# Previously these were two parallel `List(String)`s zipped by index, which
+# nothing enforced: a misaligned pair registered a row template under the
+# wrong id and surfaced far away as a missing ListView template. `sceneId` is
+# a plain String by decision (docs/stringly-typed-ids.md, #78790621).
+type BuiltinScene {
+  path: String
+  sceneId: String
+}
+
 type App {
   gpuUi: Gpu2dUi
   canvas: Gpu2dCanvas
@@ -61,7 +75,8 @@ type App {
   # RAE_UI_EDITOR_TEST_TREE_CLICKS: the same, for hierarchy rows — where
   # Shift spans a range instead of adding one node.
   testTreeClicks: String
-  builtinScenePaths: List(String)
-  builtinSceneIds: List(String)
+  # The chrome's own sub-scenes, re-registered into the document's registry on
+  # every (re)load — one registry serves every ListView, chrome or document.
+  builtinScenes: List(BuiltinScene)
   headless: Bool
 }
