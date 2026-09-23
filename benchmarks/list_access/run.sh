@@ -20,13 +20,17 @@ run_with_timeout 300 make -C "$RAE_ROOT/compiler" build >/dev/null
 echo "Compiling benchmarks..."
 run_with_timeout 300 "$RAE_BIN" build --target compiled --profile release --emit-c \
   --out "$BUILD/rae_generated.c" "$HERE/rae/Main.rae"
+# This benchmark is pure compute — no window, no GPU — so it links only what
+# the Rae runtime itself needs. (It used to link raylib and the GL/Cocoa stack
+# from the pre-SDL3 era, which both failed on a machine without raylib and
+# pulled a renderer into a List-indexing measurement.) The runtime's Objective-C
+# helpers are why Foundation is still required.
 run_with_timeout 300 cc -std=c11 -O2 -DNDEBUG \
   -include "$HERE/c/opaque_index.h" "$BUILD/rae_generated.c" \
   "$HERE/c/opaque_index.c" \
-  "$RAE_ROOT/compiler/runtime/rae_runtime.c" \
-  -I"$RAE_ROOT/compiler/runtime" -I/opt/homebrew/include \
-  /opt/homebrew/lib/libraylib.a -framework CoreVideo -framework IOKit \
-  -framework Cocoa -framework OpenGL -framework ImageIO -framework CoreGraphics \
+  "$BUILD/rae_runtime.c" \
+  -I"$BUILD" \
+  -framework Foundation -framework ImageIO -framework CoreGraphics \
   -o "$BUILD/rae_list_access"
 run_with_timeout 120 cc -std=c11 -O3 -DNDEBUG "$HERE/c/list_access.c" -o "$BUILD/c_list_access"
 run_with_timeout 180 rustc -C opt-level=3 -C debuginfo=0 "$HERE/rust/list_access.rs" \
