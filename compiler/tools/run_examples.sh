@@ -398,6 +398,40 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             echo "  generated component widgets failed:"
             cat "$TMP_OUT/render-widgets1.log" "$TMP_OUT/render-widgets2.log" "$TMP_OUT/render-widgets3.log" "$TMP_OUT/render-widgets4.log" 2>/dev/null | grep -av '^\[present\]' | cut -c1-400 | sed 's/^/    /'
           fi
+          # Collapse / expand the hierarchy (#72481430). Three runs:
+          #   collapse hides a subtree — LogoRing's four descendants leave the
+          #     visible rows, 40 -> 32, and expanding restores them
+          #   a Shift-RANGE spans only VISIBLE rows: Title..Panel is twelve
+          #     rows expanded and four with LogoRing collapsed, which is the
+          #     whole point of keying the range on the visible list
+          #   collapsing KEEPS hidden descendants selected (dropping them would
+          #     silently shrink a set the user built)
+          if (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
+             RAE_UI_HEADLESS=1 RAE_UI_EDITOR_TREE=1 RAE_SDL_HEADLESS_MS=1200 \
+             RAE_UI_EDITOR_TEST_TREE_CLICKS="collapse:LogoRing Screen" \
+             perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-collapse.log" 2>&1 \
+             && grep -qaF "tree rows (32): Screen,Eyebrow,Title,Tagline,LogoRing,Panel," "$TMP_OUT/render-collapse.log" \
+             && (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
+                RAE_UI_HEADLESS=1 RAE_UI_EDITOR_TREE=1 RAE_SDL_HEADLESS_MS=1200 \
+                RAE_UI_EDITOR_TEST_TREE_CLICKS="collapse:LogoRing expand:LogoRing Screen" \
+                perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-expand.log" 2>&1 \
+             && grep -qaF "tree rows (40): Screen,Eyebrow,Title,Tagline,LogoRing,OrbitOuter," "$TMP_OUT/render-expand.log" \
+             && (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
+                RAE_UI_HEADLESS=1 RAE_UI_EDITOR_TREE=1 RAE_SDL_HEADLESS_MS=1200 \
+                RAE_UI_EDITOR_TEST_TREE_CLICKS="collapse:LogoRing Title shift:Panel" \
+                perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-range.log" 2>&1 \
+             && grep -qaF "tree clicks [collapse:LogoRing Title shift:Panel] -> Title,Tagline,LogoRing,Panel active Panel" "$TMP_OUT/render-range.log" \
+             && (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
+                RAE_UI_HEADLESS=1 RAE_UI_EDITOR_TREE=1 RAE_SDL_HEADLESS_MS=1200 \
+                RAE_UI_EDITOR_TEST_TREE_CLICKS="OrbitOuter cmd:OrbitInner collapse:LogoRing" \
+                perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-keep.log" 2>&1 \
+             && grep -qaF "OrbitOuter,OrbitInner active OrbitInner" "$TMP_OUT/render-keep.log"; then
+            :
+          else
+            UI_EDITOR_OK=0
+            echo "  hierarchy collapse/expand failed:"
+            cat "$TMP_OUT/render-collapse.log" "$TMP_OUT/render-expand.log" "$TMP_OUT/render-range.log" "$TMP_OUT/render-keep.log" 2>/dev/null | grep -av '^\[present\]' | cut -c1-260 | sed 's/^/    /'
+          fi
           # Select parent over the SET, and the identity block (#23728694).
           # The click-through gesture walks ONE node up the stack under the
           # cursor; this walks the whole selection up the tree, which a gesture
@@ -717,7 +751,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/render-save.log" "$TMP_OUT/render-saved.log" "$TMP_OUT/screenshot-saved.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
           fi
           if [ "$UI_EDITOR_OK" = "1" ]; then
-            echo "PASS: $EXAMPLE_NAME (7 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select, composite multi-selection inspector, generated component widgets, value provenance, component add/remove/filter, select parent + identity, canvas selection gestures, click-through cycling, hierarchy multi-selection, Rect widget multi-select read+write, .raepack project open + switch, file picker, camera zoom, outline pools, save path)"
+            echo "PASS: $EXAMPLE_NAME (7 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select, composite multi-selection inspector, generated component widgets, value provenance, component add/remove/filter, select parent + identity, hierarchy collapse/expand, canvas selection gestures, click-through cycling, hierarchy multi-selection, Rect widget multi-select read+write, .raepack project open + switch, file picker, camera zoom, outline pools, save path)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (ui editor sample gate)"
