@@ -14,6 +14,19 @@ run_with_timeout() {
   perl -e 'alarm shift; exec @ARGV' "$seconds" "$@"
 }
 
+# A benchmark on a busy machine measures contention, not performance. This has
+# already produced one committed set of numbers where EVERY language, including
+# the untouched C and Rust controls, looked 3-250% slower than the run before —
+# the machine was at load 61 under an unrelated test suite. Refuse by default;
+# BENCH_ALLOW_LOAD=1 overrides when you know what you are doing.
+LOAD=$(uptime | sed 's/.*load averages*:[ ]*//' | awk '{print $1}')
+CORES=$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)
+if [ "${BENCH_ALLOW_LOAD:-0}" != "1" ] && awk "BEGIN{exit !($LOAD > $CORES * 0.3)}"; then
+  echo "refusing to benchmark: load average $LOAD on $CORES cores." >&2
+  echo "Wait for the machine to go idle, or set BENCH_ALLOW_LOAD=1 to override." >&2
+  exit 1
+fi
+
 echo "Building Rae compiler..."
 run_with_timeout 300 make -C "$RAE_ROOT/compiler" build >/dev/null
 
