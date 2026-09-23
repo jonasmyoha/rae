@@ -392,8 +392,8 @@ func nodePreviewOf(world: view UiWorld, entity: view EntityId) ret String {
   if componentHas(this: world.texts, entity: entity) {
     let text: view Text => componentView(this: world.texts, entity: entity)
     # Short on purpose: the row already spends its width on `Name - Kind`,
-    # and the panel is ~345px. A longer preview is clipped by the panel edge
-    # mid-word, which reads as broken rather than truncated.
+    # and the panel's inner width is ~346px. A longer preview is clipped by
+    # the panel edge mid-word, which reads as broken rather than truncated.
     let preview: String = truncated(text: text.text, limit: 8)
     if preview.length() > 0 {
       ret "\"{preview}\""
