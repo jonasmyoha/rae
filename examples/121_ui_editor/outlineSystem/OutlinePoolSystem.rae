@@ -59,9 +59,32 @@ func collectDocumentEntities(
   }
 }
 
-func poolMatches(world: view UiWorld, matches: view OutlineMatch, entity: view EntityId) ret Bool {
+func poolMatches(
+  world: view UiWorld
+  matches: view OutlineMatch
+  entity: view EntityId
+  selection: view List(EntityId)
+  anchor: view EntityId
+) ret Bool {
   if matches is OutlineMatch.buttons {
     ret componentHas(this: world.onClicks, entity: entity)
+  }
+  if matches is OutlineMatch.selection {
+    # The anchor is deliberately skipped: it already has the single selection
+    # outline, and drawing both over it would double its stroke. So for a
+    # selection of one this pool is empty and the canvas looks exactly as it
+    # did before multi-selection existed.
+    if entity is anchor {
+      ret false
+    }
+    loop var i: Int = 0, i < selection.length, ++i {
+      if let member: EntityId = selection.copyAt(index: i) {
+        if member is entity {
+          ret true
+        }
+      }
+    }
+    ret false
   }
   ret true
 }
@@ -169,6 +192,8 @@ func outlinePoolUpdate(
   uiSystems: view UiSystems
   documentRoot: view EntityId
   scenes: view SceneRegistry
+  selection: view List(EntityId)
+  anchor: view EntityId
 ) ret Bool {
   var changed: Bool = false
   let poolCount: Int = componentCount(this: outlinePoolSystem.outlinePools)
@@ -205,7 +230,13 @@ func outlinePoolUpdate(
     var matched: List(EntityId) = List.create(EntityId, cap: entities.length)
     loop var i: Int = 0, i < entities.length, ++i {
       let entity: EntityId = entities.copyAtFallback(index: i, fallback: noEntity())
-      if poolMatches(world: world, matches: spec.matches, entity: entity) {
+      if poolMatches(
+        world: world
+        matches: spec.matches
+        entity: entity
+        selection: selection
+        anchor: anchor
+      ) {
         matched.add(value: entity)
       }
     }

@@ -303,6 +303,32 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             echo "  inspector select failed:"
             cat "$TMP_OUT/render-select.log" "$TMP_OUT/screenshot-select.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
           fi
+          # Canvas selection gestures (#20778145). One run replays a script of
+          # real canvas clicks through the live gesture path, so what is gated
+          # is the gesture, not a back door into the selection set:
+          #   PlayButton          plain click -> exactly the deepest hit
+          #   shift:ContinueButton  Shift adds
+          #   cmd:PlayButton        Cmd toggles that one back out
+          #   shift:at:4,4          a MODIFIED click on empty canvas does
+          #                         nothing (near-misses must not destroy a set)
+          #   at:4,4                a PLAIN click on empty canvas clears it —
+          #                         the deselect that did not exist before
+          if (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
+             RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=1200 \
+             RAE_UI_EDITOR_TEST_CLICKS="PlayButton shift:ContinueButton cmd:PlayButton shift:at:4,4" \
+             perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-clicks.log" 2>&1 \
+             && grep -qF "clicks [PlayButton shift:ContinueButton cmd:PlayButton shift:at:4,4] -> ContinueLabel" "$TMP_OUT/render-clicks.log" \
+             && (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
+                RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=1200 \
+                RAE_UI_EDITOR_TEST_CLICKS="PlayButton shift:ContinueButton at:4,4" \
+                perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-deselect.log" 2>&1 \
+             && grep -qF "clicks [PlayButton shift:ContinueButton at:4,4] -> none" "$TMP_OUT/render-deselect.log"; then
+            :
+          else
+            UI_EDITOR_OK=0
+            echo "  canvas selection failed:"
+            cat "$TMP_OUT/render-clicks.log" "$TMP_OUT/render-deselect.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
+          fi
           # The Rect component widget (#54986153): the inspector reads and
           # writes a SELECTION SET, never one entity. Two nodes are selected,
           # so `h` starts MIXED ("—" — the buttons differ in height) while the
@@ -477,7 +503,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/render-save.log" "$TMP_OUT/render-saved.log" "$TMP_OUT/screenshot-saved.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
           fi
           if [ "$UI_EDITOR_OK" = "1" ]; then
-            echo "PASS: $EXAMPLE_NAME (7 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select, Rect widget multi-select read+write, .raepack project open + switch, file picker, camera zoom, outline pools, save path)"
+            echo "PASS: $EXAMPLE_NAME (7 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select, canvas selection gestures, Rect widget multi-select read+write, .raepack project open + switch, file picker, camera zoom, outline pools, save path)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (ui editor sample gate)"
