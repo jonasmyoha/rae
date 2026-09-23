@@ -252,7 +252,7 @@ func loadSkeleton(glb: view Glb, skinIndex: view Int) pub ret Skeleton {
     glb: glb
     obj: skin
     key: "inverseBindMatrices"
-    fallback: 0 - 1
+    fallback: -1
   )
   let inverseBind: List(Float) = readFloats(glb: glb, index: ibmAcc)
 
@@ -265,7 +265,7 @@ func loadSkeleton(glb: view Glb, skinIndex: view Int) pub ret Skeleton {
   let localS: List(Float) = List.create(Float, cap: nodeCount * 3)
   var n: Int = 0
   loop n < nodeCount {
-    parent.add(value: 0 - 1)
+    parent.add(value: -1)
     nodeNames.add(value: "")
     # Defaults are the glTF-specified ones, applied per CHANNEL: a node
     # with only a rotation still has unit scale and no translation, and
@@ -331,7 +331,7 @@ func loadSkeleton(glb: view Glb, skinIndex: view Int) pub ret Skeleton {
       let cv: JsonValue = valueAt(doc: glb.doc, idx: cIdx)
       var k: Int = 0
       loop k < arrayLen(this: cv) {
-        let child: Int = jsonInt(this: arrayAt(doc: glb.doc, this: cv, idx: k), fallback: 0 - 1)
+        let child: Int = jsonInt(this: arrayAt(doc: glb.doc, this: cv, idx: k), fallback: -1)
         if child >= 0 and child < nodeCount {
           parent.set(index: child, value: n)
         }
@@ -487,7 +487,7 @@ func nodeWorldMatrix(sk: view Skeleton, node: view Int) ret Mat4 {
   var guard: Int = 0
   loop cur >= 0 and guard < sk.nodeCount + 1 {
     m = mat4Mul(a: nodeLocalMatrix(sk: sk, node: cur), b: m)
-    cur = intAt(list: sk.parent, index: cur, fallback: 0 - 1)
+    cur = intAt(list: sk.parent, index: cur, fallback: -1)
     guard = guard + 1
   }
   ret m
@@ -609,7 +609,7 @@ func nodeByName(sk: view Skeleton, name: view String) ret Int {
     }
     i = i + 1
   }
-  ret 0 - 1
+  ret -1
 }
 
 # Load an animation, RETARGETED onto `sk` by joint name.
@@ -658,13 +658,13 @@ func loadClip(glb: view Glb, animIndex: view Int, sk: view Skeleton) pub ret Cli
       glb: glb
       obj: target
       key: "node"
-      fallback: 0 - 1
+      fallback: -1
     )
     let pathName: String = jsonString(
       this: objField(glb: glb, obj: target, key: "path")
       fallback: ""
     )
-    var p: Int = 0 - 1
+    var p: Int = -1
     if pathName is "translation" {
       p = pathTranslation
     }
@@ -688,7 +688,7 @@ func loadClip(glb: view Glb, animIndex: view Int, sk: view Skeleton) pub ret Cli
           glb: glb
           obj: ch
           key: "sampler"
-          fallback: 0 - 1
+          fallback: -1
         )
         let sampler: JsonValue = arrayAt(doc: glb.doc, this: samplers, idx: samplerIdx)
         let interpName: String = jsonString(
@@ -711,13 +711,13 @@ func loadClip(glb: view Glb, animIndex: view Int, sk: view Skeleton) pub ret Cli
           glb: glb
           obj: sampler
           key: "input"
-          fallback: 0 - 1
+          fallback: -1
         )
         let outAcc: Int = intField(
           glb: glb
           obj: sampler
           key: "output"
-          fallback: 0 - 1
+          fallback: -1
         )
         let t: List(Float) = readFloats(glb: glb, index: inAcc)
         let v: List(Float) = readFloats(glb: glb, index: outAcc)

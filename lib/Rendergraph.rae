@@ -192,8 +192,8 @@ func createRenderGraph() pub ret RenderGraph {
     edges: List.create(Edge, cap: 64)
     order: List.create(Int, cap: 16)
     status: graphOk
-    errorPass: 0 - 1
-    errorResource: 0 - 1
+    errorPass: -1
+    errorResource: -1
   }
 }
 
@@ -290,7 +290,7 @@ func passModifies(
 # writer per resource per frame; compile() reports a violation rather than
 # picking one arbitrarily.
 func writerOf(renderGraph: view RenderGraph, resource: view Int) ret Int {
-  var last: Int = 0 - 1
+  var last: Int = -1
   var i: Int = 0
   loop i < renderGraph.edges.length {
     let e: Edge = graphEdgeAt(edges: renderGraph.edges, index: i)
@@ -310,7 +310,7 @@ func producerBefore(
   resource: view Int
   edgeIndex: view Int
 ) ret Int {
-  var prev: Int = 0 - 1
+  var prev: Int = -1
   var i: Int = 0
   loop i < edgeIndex {
     let e: Edge = graphEdgeAt(edges: renderGraph.edges, index: i)
@@ -338,8 +338,8 @@ func resourceLifetime(renderGraph: view RenderGraph, resource: view Int) ret Int
 func compile(renderGraph: mod RenderGraph) pub ret Int {
   renderGraph.order = List.create(Int, cap: renderGraph.passes.length)
   renderGraph.status = graphOk
-  renderGraph.errorPass = 0 - 1
-  renderGraph.errorResource = 0 - 1
+  renderGraph.errorPass = -1
+  renderGraph.errorResource = -1
 
   # --- validation: at most one writer per resource ---
   var i: Int = 0
@@ -411,7 +411,7 @@ func compile(renderGraph: mod RenderGraph) pub ret Int {
             # wants the finished contents). A modifier waits only for the
             # producer immediately BEFORE it, so a chain sequences
             # correctly instead of deadlocking on itself.
-            var dep: Int = 0 - 1
+            var dep: Int = -1
             if e.isModify {
               dep = producerBefore(renderGraph: renderGraph, resource: e.resource, edgeIndex: k)
             } else {

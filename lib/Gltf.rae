@@ -343,7 +343,7 @@ func accessorAt(glb: view Glb, index: view Int) pub ret Accessor {
     glb: glb
     obj: acc
     key: "bufferView"
-    fallback: 0 - 1
+    fallback: -1
   )
   if bvIndex < 0 {
     # A bufferView-less accessor is legal and means "all zeros" (used for
@@ -477,25 +477,25 @@ func loadPrimitive(glb: view Glb, meshIndex: view Int, primIndex: view Int) pub 
     glb: glb
     obj: attrs
     key: "POSITION"
-    fallback: 0 - 1
+    fallback: -1
   )
   let nrmAcc: Int = intField(
     glb: glb
     obj: attrs
     key: "NORMAL"
-    fallback: 0 - 1
+    fallback: -1
   )
   let uvAcc: Int = intField(
     glb: glb
     obj: attrs
     key: "TEXCOORD_0"
-    fallback: 0 - 1
+    fallback: -1
   )
   let idxAcc: Int = intField(
     glb: glb
     obj: prim
     key: "indices"
-    fallback: 0 - 1
+    fallback: -1
   )
 
   let verts: List(Float) = List.create(Float, cap: 0)

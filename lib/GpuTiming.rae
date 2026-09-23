@@ -139,11 +139,11 @@ func frameBegin(timing: mod GpuTiming) pub {
 func passBegin(timing: mod GpuTiming, name: view String) pub ret Int {
   unsafe {
     if timing.enabled is false {
-      ret 0 - 1
+      ret -1
     }
     let idx: Int = timing.count
     if idx >= gtMaxPasses {
-      ret 0 - 1
+      ret -1
     }
     timing.names.add(value: "{name}")
     timing.tsw.set(

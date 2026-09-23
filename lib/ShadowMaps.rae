@@ -559,12 +559,9 @@ func drawShadowCasters(
 ) {
   var i: Int = 0
   loop i < shadow.drawCount {
-    let key: Int = shadow.casterKeys.copyAtFallback(index: i, fallback: 0 - 1)
+    let key: Int = shadow.casterKeys.copyAtFallback(index: i, fallback: -1)
     var runEnd: Int = i + 1
-    loop runEnd < shadow.drawCount and shadow.casterKeys.copyAtFallback(
-      index: runEnd
-      fallback: 0 - 1
-    ) is key {
+    loop runEnd < shadow.drawCount and shadow.casterKeys.copyAtFallback(index: runEnd, fallback: -1) is key {
       runEnd = runEnd + 1
     }
     var pipeline: RenderPipelineId = shadow.staticPipeline

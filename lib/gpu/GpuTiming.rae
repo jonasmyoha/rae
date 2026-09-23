@@ -49,14 +49,14 @@ func unavailableTiming(resources: view GpuResources) ret GpuTiming {
       managerTag: resources.managerTag
       maxPasses: 0
       querySet: webgpuNull()
-      resolve: { managerTag: 0, slot: 0 - 1, generation: 0 }
-      readback: { managerTag: 0, slot: 0 - 1, generation: 0 }
+      resolve: { managerTag: 0, slot: -1, generation: 0 }
+      readback: { managerTag: 0, slot: -1, generation: 0 }
       periodNs: 1.0
       writes: List.create(WGPUPassTimestampWrites, cap: 1)
       passCount: 0
       sampling: false
-      current: { managerTag: 0, slot: 0 - 1, generation: 0 }
-      lastTotalUs: 0 - 1
+      current: { managerTag: 0, slot: -1, generation: 0 }
+      lastTotalUs: -1
     }
   }
 }
@@ -117,8 +117,8 @@ func createGpuTiming(resources: mod GpuResources, maxPasses: view Int) ret GpuTi
           writes: own writes
           passCount: 0
           sampling: false
-          current: { managerTag: 0, slot: 0 - 1, generation: 0 }
-          lastTotalUs: 0 - 1
+          current: { managerTag: 0, slot: -1, generation: 0 }
+          lastTotalUs: -1
         }
       }
     }
@@ -149,11 +149,11 @@ func beginTimingFrame(timing: mod GpuTiming) {
 # indices. Returns the pass index, or -1 when unavailable or the budget is full.
 func timedPass(timing: mod GpuTiming) ret Int {
   if timing.available is false {
-    ret 0 - 1
+    ret -1
   }
   let index: Int = timing.passCount
   if index >= timing.maxPasses {
-    ret 0 - 1
+    ret -1
   }
   unsafe {
     timing.writes.set(
