@@ -335,3 +335,113 @@ func entityLabelOf(world: view UiWorld, entity: view EntityId) ret String {
   }
   ret "{nodeIdOf(world: world, entity: entity)} #{entity.index}"
 }
+
+# `...` at `limit` characters. A tree row is one line in a narrow panel, so a
+# long Text node's string has to be cut somewhere; cutting it here keeps the
+# decision in one place rather than in every caller.
+func truncated(text: view String, limit: view Int) ret String {
+  let flat: String = text.replace(old: "\n", new: " ").trim()
+  if flat.length() <= limit {
+    ret flat
+  }
+  ret "{flat.sub(start: 0, len: limit)}..."
+}
+
+# What KIND of node this is, for the row's `Name - Kind`. The authored
+# `PrimaryType` wins when there is one; otherwise the kind is derived from the
+# components the node actually carries, most specific first — a node with a
+# ListView is a List whatever else it has, and a bare container is a Node.
+func nodeKindOf(world: view UiWorld, entity: view EntityId) ret String {
+  let authored: String = nodePrimaryType(world: world, entity: entity)
+  if authored.length() > 0 {
+    ret authored
+  }
+  if componentHas(this: world.sceneInstances, entity: entity) {
+    ret "Scene"
+  }
+  if componentHas(this: world.listViews, entity: entity) {
+    ret "List"
+  }
+  if componentHas(this: world.texts, entity: entity) {
+    ret "Text"
+  }
+  if componentHas(this: world.sprites, entity: entity) {
+    ret "Sprite"
+  }
+  if componentHas(this: world.shapes, entity: entity) {
+    ret "Shape"
+  }
+  if componentHas(this: world.layouts, entity: entity) {
+    ret "Layout"
+  }
+  ret "Node"
+}
+
+# The row's value PREVIEW: the thing that lets you find a node without
+# selecting it. A Text node previews its string, a scene instance previews the
+# file it came from — those are the two cases where a node's identity is in
+# its data rather than its name. "" for everything else; a preview of nothing
+# is just noise in a narrow panel.
+func nodePreviewOf(world: view UiWorld, entity: view EntityId) ret String {
+  if componentHas(this: world.sceneInstances, entity: entity) {
+    let instance: view SceneInstance => componentView(this: world.sceneInstances, entity: entity)
+    if instance.sceneId.length() > 0 {
+      ret "{instance.sceneId}"
+    }
+  }
+  if componentHas(this: world.texts, entity: entity) {
+    let text: view Text => componentView(this: world.texts, entity: entity)
+    # Short on purpose: the row already spends its width on `Name - Kind`,
+    # and the panel is ~345px. A longer preview is clipped by the panel edge
+    # mid-word, which reads as broken rather than truncated.
+    let preview: String = truncated(text: text.text, limit: 8)
+    if preview.length() > 0 {
+      ret "\"{preview}\""
+    }
+  }
+  ret ""
+}
+
+# The whole row label: `Name - Kind` plus the preview, plus a `+` when the node
+# carries bundle provenance (it came from a template rather than being written
+# here). Assembled in one place so the tree and any future list agree.
+func treeRowLabelOf(world: view UiWorld, entity: view EntityId) ret String {
+  var line: String = "{nodeIdOf(world: world, entity: entity)} - {nodeKindOf(
+    world: world
+    entity: entity
+  )}"
+  let preview: String = nodePreviewOf(world: world, entity: entity)
+  if preview.length() > 0 {
+    line = "{line}  {preview}"
+  }
+  if componentHas(this: world.bundleRefs, entity: entity) {
+    let refs: view BundleRefs => componentView(this: world.bundleRefs, entity: entity)
+    if refs.names.length > 0 {
+      line = "{line}  +{refs.names.join(sep: "+")}"
+    }
+  }
+  ret line
+}
+
+# Does this node, or anything under it, match `filter`? A tree filter that hid
+# non-matching ANCESTORS would cut matches out of the tree entirely, so a
+# parent survives when a descendant matches — the row stays as context.
+func treeRowMatches(world: view UiWorld, entity: view EntityId, filter: view String) ret Bool {
+  if filter.length() is 0 {
+    ret true
+  }
+  if treeRowLabelOf(world: world, entity: entity).toLower().indexOf(sub: filter.toLower()) >= 0 {
+    ret true
+  }
+  if componentHas(this: world.childrens, entity: entity) is false {
+    ret false
+  }
+  let children: view Children => componentView(this: world.childrens, entity: entity)
+  loop var i: Int = 0, i < children.ids.length, ++i {
+    let child: EntityId = children.ids.copyAtFallback(index: i, fallback: noEntity())
+    if isNone(this: child) is false and treeRowMatches(world: world, entity: child, filter: filter) {
+      ret true
+    }
+  }
+  ret false
+}

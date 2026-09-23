@@ -72,6 +72,11 @@ type InspectorSystem {
   # without a mode, typing a filter would toggle half the chrome.
   componentFilter: String
   filterFocused: Bool
+  # The HIERARCHY filter (#89663819), with its own focus. Two filters, two
+  # panels: `/` types into the component list, `F` into the tree. They are
+  # mutually exclusive — one keyboard cannot feed both.
+  treeFilter: String
+  treeFilterFocused: Bool
   # Collapsed rows, by NODE ID rather than entity or row index (#72481430).
   # The tree rebuilds constantly and a reload recreates every entity, so an
   # entity handle or an index would lose the state on the next keystroke;
@@ -104,6 +109,8 @@ func createInspectorSystem(world: mod UiWorld) ret InspectorSystem {
     collapsedNodeIds: List.create(String, cap: 8)
     componentFilter: ""
     filterFocused: false
+    treeFilter: ""
+    treeFilterFocused: false
     treeEntities: List.create(EntityId, cap: 64)
   }
 }
@@ -370,7 +377,32 @@ func inspectorUpdate(
   # why App.rae gates those on `filterFocused`.
   if Sdl3.isKeyPressed(key: Keys.keySlash) {
     inspectorSystem.filterFocused = true
+    inspectorSystem.treeFilterFocused = false
     changed = true
+  }
+  if Sdl3.isKeyPressed(key: Keys.keyF) and inspectorSystem.filterFocused is false {
+    inspectorSystem.treeFilterFocused = true
+    changed = true
+  }
+  if inspectorSystem.treeFilterFocused {
+    if Sdl3.isKeyPressed(key: Keys.keyEscape) {
+      inspectorSystem.treeFilter = ""
+      inspectorSystem.treeFilterFocused = false
+      changed = true
+    }
+    if Sdl3.isKeyPressed(key: Keys.keyBackspace) {
+      let length: Int = inspectorSystem.treeFilter.length()
+      if length > 0 {
+        inspectorSystem.treeFilter = inspectorSystem.treeFilter.sub(start: 0, len: length - 1)
+        changed = true
+      }
+    }
+    loop var letter: Int = 0, letter < 26, ++letter {
+      if Sdl3.isKeyPressed(key: Keys.keyA + letter) {
+        inspectorSystem.treeFilter = "{inspectorSystem.treeFilter}{letterText(index: letter)}"
+        changed = true
+      }
+    }
   }
   if inspectorSystem.filterFocused {
     if Sdl3.isKeyPressed(key: Keys.keyEscape) {
