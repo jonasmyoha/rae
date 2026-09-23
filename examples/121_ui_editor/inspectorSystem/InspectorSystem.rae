@@ -26,6 +26,7 @@ open app3d/UiShell
 open ecs/Entity
 open ecs/ComponentTable
 open ui/UiSystems
+open inspectorSystem/RectWidget
 
 # Tree rows: one design unit of indent per depth level.
 const treeIndentPerLevel: Float = 12.0
@@ -37,7 +38,14 @@ const treeRowPitch: Float = 44.0
 type InspectorSystem {
   outlineFors: ComponentTable(OutlineFor)
   hovered: EntityId
+  # The ANCHOR of the selection: the entity the outline follows and the arrow
+  # keys walk from. It is always `selection`'s last element, never a second
+  # source of truth.
   selected: EntityId
+  # The SELECTION SET (#54986153). Every component widget reads this, so a
+  # single selection is just the n=1 case and no widget has a single-entity
+  # path to generalise later.
+  selection: List(EntityId)
   # The tree list's row order (entity per row), so a row's action maps back.
   treeEntities: List(EntityId)
 }
@@ -51,6 +59,7 @@ func createInspectorSystem(world: mod UiWorld) ret InspectorSystem {
     outlineFors: ComponentTable.create(OutlineFor)
     hovered: noEntity()
     selected: noEntity()
+    selection: List.create(EntityId, cap: 8)
     treeEntities: List.create(EntityId, cap: 64)
   }
 }
@@ -343,6 +352,38 @@ func bundleProvenanceLine(world: view UiWorld, entity: view EntityId) ret String
   ret line
 }
 
+# Add `entity` to the selection and make it the anchor, or drop it when it is
+# already selected (a modifier-click). Kept beside `selectNode` so both halves
+# of the selection contract live in one place.
+func selectAddNode(
+  inspectorSystem: mod InspectorSystem
+  world: mod UiWorld
+  entity: view EntityId
+) {
+  if isNone(this: entity) {
+    ret
+  }
+  loop var i: Int = 0, i < inspectorSystem.selection.length, ++i {
+    if let member: EntityId = inspectorSystem.selection.copyAt(index: i) {
+      if member is entity {
+        inspectorSystem.selection.removeAt(index: i)
+        var anchor: EntityId = noEntity()
+        if inspectorSystem.selection.length > 0 {
+          if let last: EntityId = inspectorSystem.selection.copyAt(
+            index: inspectorSystem.selection.length - 1
+          ) {
+            anchor = last
+          }
+        }
+        inspectorSystem.selected = anchor
+        ret
+      }
+    }
+  }
+  inspectorSystem.selection.add(value: entity)
+  inspectorSystem.selected = entity
+}
+
 func syncInspectorPanel(
   world: view UiWorld
   uiSystems: view UiSystems
@@ -385,22 +426,14 @@ func syncInspectorPanel(
     entity: selected
   )}"
   chromeSystem.inspectorAppComponents = appComponentsLine(world: world, entity: selected)
-  var rectLine: String = "no computed rect"
-  if componentHas(this: uiSystems.layout.computedRects, entity: selected) and componentHas(
-    this: uiSystems.transform2d.worldTransforms
-    entity: selected
-  ) {
-    let transform: WorldTransform2D = componentGet(
-      this: uiSystems.transform2d.worldTransforms
-      entity: selected
-    )
-    let computed: ComputedRect = componentGet(
-      this: uiSystems.layout.computedRects
-      entity: selected
-    )
-    rectLine = "x {transform.position.x.toInt()}  y {transform.position.y.toInt()}  w {computed.size.x.toInt()}  h {computed.size.y.toInt()}"
-  }
-  chromeSystem.inspectorRect = rectLine
+  # The Rect widget, over the WHOLE selection: a field the selected entities
+  # agree on shows its value, one they differ on shows the mixed marker, and
+  # each carries what drives it (#54986153).
+  chromeSystem.inspectorRect = rectWidgetLine(
+    world: world
+    uiSystems: uiSystems
+    selection: inspectorSystem.selection
+  )
   chromeSystem.inspectorParents = parentChainOf(
     world: world
     uiSystems: uiSystems
@@ -484,11 +517,16 @@ func syncTreePanel(
   setEditorListRows(world: world, list: list, rows: own rows)
 }
 
+# Replace the selection with exactly `entity` (a plain click). Every path that
+# changes the selection goes through here or `selectAddNode`, so the anchor and
+# the set can never disagree.
 func selectNode(inspectorSystem: mod InspectorSystem, world: mod UiWorld, entity: view EntityId) {
   inspectorSystem.selected = entity
+  inspectorSystem.selection.clear()
   if isNone(this: entity) {
     ret
   }
+  inspectorSystem.selection.add(value: entity)
   log(
     "[ui-editor] selected {nodeIdOf(world: world, entity: entity)}: {componentNamesFor(
       world: world
@@ -640,6 +678,7 @@ func inspectorAfterLoad(
   chromeSystem: mod ChromeSystem
   pageRoot: view EntityId
   selectNodeId: view String
+  setRect: view String
 ) {
   let sceneRoot: EntityId = documentSceneRoot(world: world, pageRoot: pageRoot)
   inspectorSystem.hovered = noEntity()
@@ -648,12 +687,59 @@ func inspectorAfterLoad(
     target = findNodeByIdIn(world: world, entity: sceneRoot, nodeId: selectNodeId)
   }
   inspectorSystem.selected = noEntity()
-  if isNone(this: target) is false {
-    selectNode(inspectorSystem: inspectorSystem, world: world, entity: target)
-  } else {
-    if selectNodeId.length() > 0 {
-      log("[ui-editor] select: no node named {selectNodeId}")
+  inspectorSystem.selection.clear()
+  # `a,b,c` selects several nodes: the headless hook has to be able to produce
+  # a real n>1 selection, or the composite half of every widget goes untested.
+  if selectNodeId.indexOf(sub: ",") >= 0 {
+    let ids: List(String) = selectNodeId.split(sep: ",")
+    loop let id: view String in ids {
+      let trimmed: String = id.trim()
+      if trimmed.length() is 0 {
+        continue
+      }
+      let found: EntityId = findNodeByIdIn(world: world, entity: sceneRoot, nodeId: trimmed)
+      if isNone(this: found) is false {
+        selectAddNode(inspectorSystem: inspectorSystem, world: world, entity: found)
+      } else {
+        log("[ui-editor] select: no node named {trimmed}")
+      }
     }
+  } else {
+    if isNone(this: target) is false {
+      selectNode(inspectorSystem: inspectorSystem, world: world, entity: target)
+    } else {
+      if selectNodeId.length() > 0 {
+        log("[ui-editor] select: no node named {selectNodeId}")
+      }
+    }
+  }
+  # The widget's model, as a line the headless gate can assert without pixels:
+  # the composite value per field and what drives it, for however many nodes
+  # the hook selected.
+  if selectNodeId.length() > 0 {
+    let rectLine: String = rectWidgetLine(
+      world: world
+      uiSystems: uiSystems
+      selection: inspectorSystem.selection
+    )
+    log("[ui-editor] rect ({inspectorSystem.selection.length}): {rectLine}")
+  }
+  # `<field>=<value>` drives the widget's WRITE half from the same hook: one
+  # edit goes to every selected entity, which is the part a single-selection
+  # inspector would have let us skip.
+  if setRect.length() > 0 {
+    let written: Int = applyRectEdit(
+      world: world
+      uiSystems: uiSystems
+      selection: inspectorSystem.selection
+      edit: setRect
+    )
+    let afterLine: String = rectWidgetLine(
+      world: world
+      uiSystems: uiSystems
+      selection: inspectorSystem.selection
+    )
+    log("[ui-editor] rect set {setRect} -> {written}: {afterLine}")
   }
   syncInspectorPanel(
     world: world

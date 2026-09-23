@@ -367,6 +367,7 @@ func createApp() ret App {
   # RAE_UI_EDITOR_TEST_SELECT=<nodeId>: select that node at boot (and again
   # after every reload), as a click would — the headless gate's hook.
   let testSelectNodeId: String = getEnv(name: "RAE_UI_EDITOR_TEST_SELECT")
+  let testSetRect: String = getEnv(name: "RAE_UI_EDITOR_TEST_SET_RECT")
   if getEnv(name: "RAE_UI_EDITOR_TREE") is "1" {
     setEditorPanelOpen(
       chromeSystem: chromeSystem
@@ -397,6 +398,7 @@ func createApp() ret App {
       cameraSystem: cameraSystem
       outlinePoolSystem: own outlinePoolSystem
       testSelectNodeId: testSelectNodeId
+      testSetRect: testSetRect
       builtinScenePaths: own builtinScenePaths
       builtinSceneIds: own builtinSceneIds
       headless: headless

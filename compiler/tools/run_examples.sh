@@ -303,6 +303,26 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             echo "  inspector select failed:"
             cat "$TMP_OUT/render-select.log" "$TMP_OUT/screenshot-select.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
           fi
+          # The Rect component widget (#54986153): the inspector reads and
+          # writes a SELECTION SET, never one entity. Two nodes are selected,
+          # so `h` starts MIXED ("—" — the buttons differ in height) while the
+          # fields they agree on show a value plus what DRIVES it ("0 layout",
+          # "0 fill"). One `h=64` edit then goes to BOTH of them, which is what
+          # turns the mixed field into an agreeing one — the write-to-all
+          # convention every later widget copies.
+          if (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
+             RAE_UI_EDITOR_TEST_SELECT=PlayButton,ContinueButton \
+             RAE_UI_EDITOR_TEST_SET_RECT=h=64 \
+             RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=1200 \
+             perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-rect.log" 2>&1 \
+             && grep -qF "[ui-editor] rect (2): x 0 layout  y 0 layout  w 0 fill  h —" "$TMP_OUT/render-rect.log" \
+             && grep -qF "[ui-editor] rect set h=64 -> 2: x 0 layout  y 0 layout  w 0 fill  h 64" "$TMP_OUT/render-rect.log"; then
+            :
+          else
+            UI_EDITOR_OK=0
+            echo "  rect widget failed:"
+            grep -v '^\[present\]' "$TMP_OUT/render-rect.log" 2>/dev/null | sed 's/^/    /'
+          fi
           # A .raepack as the PROJECT (projectSystem): 106's pack opens with
           # its directory as the scene root, all 23 scenes under it scanned
           # (sorted package paths from the pack's declared `scenes: { root:
@@ -457,7 +477,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/render-save.log" "$TMP_OUT/render-saved.log" "$TMP_OUT/screenshot-saved.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
           fi
           if [ "$UI_EDITOR_OK" = "1" ]; then
-            echo "PASS: $EXAMPLE_NAME (7 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select, .raepack project open + switch, file picker, camera zoom, outline pools, save path)"
+            echo "PASS: $EXAMPLE_NAME (7 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select, Rect widget multi-select read+write, .raepack project open + switch, file picker, camera zoom, outline pools, save path)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (ui editor sample gate)"
