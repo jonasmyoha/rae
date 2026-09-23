@@ -392,6 +392,22 @@ inspector is read-only until the DAW/editor capability design
 (`ui-ecs-refactor-status.md` §2.7) lands; the app is shaped so those are new
 systems, not rewrites.
 
+## The side panels are the same width
+
+`LeftPanel` and `RightPanel` are both **384** wide. They were 328 and 384,
+which pushed the `EditArea` — and so the document centred inside it — 28pt
+left of the window centre. Measured on a 2800px render: the chrome background
+ran 654px on the left against 766px on the right; it is 766/766 now.
+
+They were matched to the WIDER of the two rather than the narrower, which also
+relieved the hierarchy rows: `Name - Kind "preview"` was clipping at the old
+panel's ~290pt inner width and fits at ~346pt.
+
+Keep them equal. A fixed-width pair is what makes the canvas centred, so
+changing one without the other silently re-introduces the offset — and the
+reference screenshots, which frame the whole window, will shift by exactly
+half the difference.
+
 ## What a hierarchy row says (#89663819)
 
 A row reads `Name - Kind`, plus a value preview where one exists, so a node
