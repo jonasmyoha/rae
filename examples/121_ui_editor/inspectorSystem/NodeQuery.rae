@@ -297,3 +297,41 @@ func hitStackAt(
     walk = parentOf(world: world, uiSystems: uiSystems, entity: walk)
   }
 }
+
+# The node ids of `entity`'s children, comma separated, with their entity
+# indices — the hierarchy half of the identity block. Truncated at eight, so a
+# container with fifty children does not push the whole panel off screen.
+func childIdsOf(world: view UiWorld, entity: view EntityId) ret String {
+  if isNone(this: entity) or componentHas(this: world.childrens, entity: entity) is false {
+    ret ""
+  }
+  let children: view Children => componentView(this: world.childrens, entity: entity)
+  var line: String = ""
+  var shown: Int = 0
+  loop var i: Int = 0, i < children.ids.length, ++i {
+    if shown >= 8 {
+      ret "{line}, +{children.ids.length - shown} more"
+    }
+    let child: EntityId = children.ids.copyAtFallback(index: i, fallback: noEntity())
+    if isNone(this: child) {
+      continue
+    }
+    let text: String = "{nodeIdOf(world: world, entity: child)} #{child.index}"
+    if line.length() is 0 {
+      line = "{text}"
+    } else {
+      line = "{line}, {text}"
+    }
+    shown = shown + 1
+  }
+  ret line
+}
+
+# `<nodeId> #<index>` for a node, or "" for none — how one entity is named in
+# the identity block and beside a diagnostic.
+func entityLabelOf(world: view UiWorld, entity: view EntityId) ret String {
+  if isNone(this: entity) {
+    ret ""
+  }
+  ret "{nodeIdOf(world: world, entity: entity)} #{entity.index}"
+}

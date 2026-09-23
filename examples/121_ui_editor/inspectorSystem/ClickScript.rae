@@ -225,6 +225,17 @@ func runTestTreeClicks(
     if trimmed.length() is 0 {
       continue
     }
+    # `parent` is not a click: it walks the whole selection up a level, the
+    # affordance the click-through gesture cannot express.
+    if trimmed is "parent" {
+      selectParentOfSelection(
+        inspectorSystem: inspectorSystem
+        world: world
+        uiSystems: uiSystems
+        sceneRoot: sceneRoot
+      )
+      continue
+    }
     runTestTreeClick(
       inspectorSystem: inspectorSystem
       world: world
