@@ -143,6 +143,100 @@ func syncInspectorPanel(
   # per reflected field, folded over the selection. Rect is bespoke and
   # contributes no rows here; its line is the one above.
   var widgetRows: List(ListViewRow) = List.create(ListViewRow, cap: 64)
+  # The IDENTITY block (#23728694): who this node is, and where it sits. Shown
+  # at n=1 only — an entity id, a name and a parent are per-entity facts, and
+  # the header already names a multi-selection. This is what turns the panel
+  # from a property sheet into an ECS debugger: the ids here are the ones
+  # diagnostics print, so they can be matched up by eye.
+  if members is 1 {
+    let anchor: EntityId = inspectorSystem.selected
+    addWidgetRow(
+      rows: widgetRows
+      id: "identity"
+      name: "identity"
+      value: ""
+      indent: 0
+      action: ""
+    )
+    addWidgetRow(
+      rows: widgetRows
+      id: "identity.entity"
+      name: "entity"
+      value: "#{anchor.index} gen {anchor.generation}"
+      indent: 1
+      action: ""
+    )
+    addWidgetRow(
+      rows: widgetRows
+      id: "identity.node"
+      name: "node"
+      value: nodeIdOf(world: world, entity: anchor)
+      indent: 1
+      action: ""
+    )
+    var identityName: String = ""
+    if componentHas(this: world.names, entity: anchor) {
+      identityName = "{componentView(this: world.names, entity: anchor).label}"
+    }
+    addWidgetRow(
+      rows: widgetRows
+      id: "identity.name"
+      name: "name"
+      value: identityName
+      indent: 1
+      action: ""
+    )
+    var identityType: String = nodePrimaryType(world: world, entity: anchor)
+    if identityType.length() is 0 {
+      identityType = "(none)"
+    }
+    addWidgetRow(
+      rows: widgetRows
+      id: "identity.type"
+      name: "type"
+      value: identityType
+      indent: 1
+      action: ""
+    )
+    var parentLabel: String = entityLabelOf(
+      world: world
+      entity: parentOf(world: world, uiSystems: uiSystems, entity: anchor)
+    )
+    if parentLabel.length() is 0 {
+      parentLabel = "(none)"
+    }
+    addWidgetRow(
+      rows: widgetRows
+      id: "identity.parent"
+      name: "parent"
+      value: parentLabel
+      indent: 1
+      action: ""
+    )
+    var childLabels: String = childIdsOf(world: world, entity: anchor)
+    if childLabels.length() is 0 {
+      childLabels = "(none)"
+    }
+    addWidgetRow(
+      rows: widgetRows
+      id: "identity.children"
+      name: "children"
+      value: childLabels
+      indent: 1
+      action: ""
+    )
+  }
+  # Select parent, over the WHOLE selection — the operation the click-through
+  # gesture cannot express, since that walks one node up the stack under the
+  # cursor rather than the set up the tree.
+  addWidgetRow(
+    rows: widgetRows
+    id: "selectParent"
+    name: "select parent"
+    value: "U"
+    indent: 0
+    action: "selectParent"
+  )
   # The filter box (#57156455). No text-input widget exists yet, so `/`
   # focuses it and letters type into it; the row shows the state either way so
   # there is something to aim at.
