@@ -358,6 +358,46 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             echo "  composite inspector failed:"
             cat "$TMP_OUT/render-inspect1.log" "$TMP_OUT/render-inspect2.log" 2>/dev/null | grep -av '^\[present\]' | sed 's/^/    /'
           fi
+          # Generated component widgets (#24323144). No widget is written per
+          # component: every ComponentTable of the world is walked by
+          # reflection and its fields rendered over the selection. Three runs:
+          #   n=1 PlayButton — Layout's enum field shows the current member AND
+          #     the picker from enumMembers; OnClick, Shape, Name, NodeId all
+          #     get rows with no code naming them; Rect is bespoke (no rows);
+          #     Children has only a hidden List(EntityId) so it gets no header.
+          #   n=2 Button+Label — a component only one of them carries heads its
+          #     rows "Layout (1/2)"; a shared field folds to its value.
+          #   Coverage FadedBox / HugText — the hand-written override table adds
+          #     Opacity's range+step; HugText (parent Layout AND own Align) is
+          #     the node that used to crash RectWidget's driver fold.
+          if (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
+             RAE_UI_HEADLESS=1 RAE_UI_EDITOR_TREE=1 RAE_SDL_HEADLESS_MS=1200 \
+             RAE_UI_EDITOR_TEST_TREE_CLICKS="PlayButton" \
+             perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-widgets1.log" 2>&1 \
+             && grep -qaF "widgets Size: w=SizeAxis { mode: fill, min: -1, max: -1 } h=SizeAxis { mode: fixed, min: -1, max: -1 }; Layout: kind=horizontal [none|horizontal|vertical|grid|stack] gap=16" "$TMP_OUT/render-widgets1.log" \
+             && grep -qaF "; OnClick: actionId=menu.play maxDelayMs=250; Name: label=PlayButton; NodeId: id=PlayButton" "$TMP_OUT/render-widgets1.log" \
+             && ! grep -qaF "Children:" "$TMP_OUT/render-widgets1.log" \
+             && (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
+                RAE_UI_HEADLESS=1 RAE_UI_EDITOR_TREE=1 RAE_SDL_HEADLESS_MS=1200 \
+                RAE_UI_EDITOR_TEST_TREE_CLICKS="PlayButton cmd:PlayLabel" \
+                perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-widgets2.log" 2>&1 \
+             && grep -qaF "widgets Size: w=— h=SizeAxis { mode: fixed, min: -1, max: -1 }; Layout (1/2): kind=horizontal" "$TMP_OUT/render-widgets2.log" \
+             && (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/Coverage.raescene" \
+                RAE_UI_HEADLESS=1 RAE_UI_EDITOR_TREE=1 RAE_HEADLESS_FRAMES=3 RAE_FIXED_DT=0.05 \
+                RAE_UI_EDITOR_TEST_TREE_CLICKS="FadedBox" \
+                perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-widgets3.log" 2>&1 \
+             && grep -qaF "Opacity: value=0.35 [0..1] ±0.05" "$TMP_OUT/render-widgets3.log" \
+             && (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/Coverage.raescene" \
+                RAE_UI_HEADLESS=1 RAE_UI_EDITOR_TREE=1 RAE_HEADLESS_FRAMES=3 RAE_FIXED_DT=0.05 \
+                RAE_UI_EDITOR_TEST_TREE_CLICKS="HugText" \
+                perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-widgets4.log" 2>&1 \
+             && grep -qaF "inspector: HugText | HugText | Rect, Size, Layout, Padding, Align" "$TMP_OUT/render-widgets4.log"; then
+            :
+          else
+            UI_EDITOR_OK=0
+            echo "  generated component widgets failed:"
+            cat "$TMP_OUT/render-widgets1.log" "$TMP_OUT/render-widgets2.log" "$TMP_OUT/render-widgets3.log" "$TMP_OUT/render-widgets4.log" 2>/dev/null | grep -av '^\[present\]' | cut -c1-400 | sed 's/^/    /'
+          fi
           # Click-through cycling (#73816378). A canvas click lands on the
           # DEEPEST hit, which is almost never the node you meant; clicking the
           # same spot again steps one level UP the hit stack. Two runs:
@@ -586,7 +626,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/render-save.log" "$TMP_OUT/render-saved.log" "$TMP_OUT/screenshot-saved.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
           fi
           if [ "$UI_EDITOR_OK" = "1" ]; then
-            echo "PASS: $EXAMPLE_NAME (7 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select, composite multi-selection inspector, canvas selection gestures, click-through cycling, hierarchy multi-selection, Rect widget multi-select read+write, .raepack project open + switch, file picker, camera zoom, outline pools, save path)"
+            echo "PASS: $EXAMPLE_NAME (7 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select, composite multi-selection inspector, generated component widgets, canvas selection gestures, click-through cycling, hierarchy multi-selection, Rect widget multi-select read+write, .raepack project open + switch, file picker, camera zoom, outline pools, save path)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (ui editor sample gate)"

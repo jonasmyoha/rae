@@ -144,7 +144,9 @@ func rectFieldDriver(
   if isNone(this: parent) is false and componentHas(this: world.layouts, entity: parent) {
     let layout: view Layout => componentView(this: world.layouts, entity: parent)
     if layout.kind is not LayoutType.none {
-      driver = "layout"
+      # An OWNED copy, not the literal: the layout+align case reassigns
+      # `driver` below, and reassigning over a static literal frees it.
+      driver = stringCopy(string: "layout")
     }
   }
   if componentHas(this: world.aligns, entity: entity) {
@@ -155,7 +157,9 @@ func rectFieldDriver(
     }
     if aligned {
       if driver.length() is 0 {
-        driver = "align"
+        # An OWNED copy, not the literal: the layout+align case reassigns
+        # `driver` below, and reassigning over a static literal frees it.
+        driver = stringCopy(string: "align")
       } else {
         driver = "{driver}+align"
       }
@@ -206,7 +210,9 @@ func selectionRectField(
     if seen is false {
       seen = true
       common = value
-      driver = entityDriver
+      # An owned copy: `entityDriver` drops at the end of this iteration, and a
+      # plain assignment would leave `driver` aliasing freed memory.
+      driver = "{entityDriver}"
       continue
     }
     if value is not common {

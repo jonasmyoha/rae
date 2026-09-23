@@ -52,6 +52,13 @@ rest are values.
 | `value.toString()` / `"{value}"` | `String` | the value in Rae's own literal spelling, per instantiation (`Point { x: 1, y: 2 }`, `[1, 2]`, an enum's member name) |
 | `equals(a: x, b: y)` | `Bool` | deep value equality, per type (structs field by field, lists element-wise, `Ptr`/`Buffer` by identity) |
 
+A consumer worth reading as the idiom in full: the UI editor's generated
+component widgets (`examples/121_ui_editor/inspectorSystem/ComponentWidget.rae`,
+docs/ui-editor-design.md) walk `fields(world)` over `ComponentTable(any)`,
+infer `T` into a generic helper, and render `fields(value)` with `enumMembers(F)`
+as the picker — one component editor for every component, with no dispatch.
+Note the unrolled-loop rule there: no `continue` inside a `fields()` loop.
+
 `fields(Type)` — the field set of a TYPE, for constructing a value — is deliberately
 NOT built (see the section at the end). Everything above walks or reads a VALUE.
 

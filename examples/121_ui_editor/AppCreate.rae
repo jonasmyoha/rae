@@ -52,6 +52,8 @@ const buttonOutlineScenePath: String = "examples/121_ui_editor/assets/scenes/chr
 
 const selectionOutlineItemScenePath: String = "examples/121_ui_editor/assets/scenes/chrome/SelectionOutlineItem.raescene"
 
+const componentRowScenePath: String = "examples/121_ui_editor/assets/scenes/chrome/ComponentRow.raescene"
+
 # Append one builtin scene. A function rather than a bare `.add` of a literal
 # so the path and its id are named at the call site, in the one order the
 # pair is ever written.
@@ -189,7 +191,7 @@ func createApp() ret App {
   var fonts: EditorFonts = { textFontPath: "", iconFontPath: "" }
   # One add per scene: the path and the id it registers under are written
   # together, so there is no order to keep two lists in.
-  var builtinScenes: List(BuiltinScene) = List.create(BuiltinScene, cap: 7)
+  var builtinScenes: List(BuiltinScene) = List.create(BuiltinScene, cap: 8)
   addBuiltinScene(
     builtinScenes: builtinScenes
     path: diagnosticRowScenePath
@@ -220,6 +222,11 @@ func createApp() ret App {
     builtinScenes: builtinScenes
     path: selectionOutlineItemScenePath
     sceneId: "chrome/SelectionOutlineItem"
+  )
+  addBuiltinScene(
+    builtinScenes: builtinScenes
+    path: componentRowScenePath
+    sceneId: "chrome/ComponentRow"
   )
 
   var world: UiWorld = create()

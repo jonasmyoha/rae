@@ -18,6 +18,7 @@ open ui/UiSystems
 open app3d/UiShell
 open inspectorSystem/NodeQuery
 open inspectorSystem/RectWidget
+open inspectorSystem/ComponentWidget
 
 # The inspector renders the COMPOSITE of the whole selection. There is no
 # single-selection path: n=1 is this code with one member, which is why a
@@ -44,6 +45,8 @@ func syncInspectorPanel(
     chromeSystem.inspectorAppComponents = ""
     chromeSystem.inspectorRect = ""
     chromeSystem.inspectorParents = ""
+    chromeSystem.inspectorWidgets = ""
+    setWidgetRows(world: world, chromeSystem: chromeSystem, rows: List.create(ListViewRow, cap: 1))
     ret
   }
   if members is 1 {
@@ -131,6 +134,73 @@ func syncInspectorPanel(
     uiSystems: uiSystems
     selection: inspectorSystem.selection
   )
+  # Every other component gets its GENERATED widget (#24323144): a header row
+  # per component in the union — carrying the partial count — then one row
+  # per reflected field, folded over the selection. Rect is bespoke and
+  # contributes no rows here; its line is the one above.
+  var widgetRows: List(ListViewRow) = List.create(ListViewRow, cap: 64)
+  loop let tally: view ComponentTally in componentTallies {
+    if widgetOverride(name: tally.name).bespoke {
+      continue
+    }
+    # Render the fields first: a component whose every field is hidden
+    # (Children is only a List(EntityId)) gets no header either, rather than
+    # a heading over nothing.
+    var fieldRows: List(ListViewRow) = List.create(ListViewRow, cap: 16)
+    componentWidgetRows(
+      world: world
+      selection: inspectorSystem.selection
+      name: tally.name
+      rows: fieldRows
+    )
+    if fieldRows.length is 0 {
+      continue
+    }
+    var header: String = "{tally.name}"
+    if tally.count < members {
+      header = "{tally.name} ({tally.count}/{members})"
+    }
+    addWidgetRow(
+      rows: widgetRows
+      id: "{tally.name}"
+      name: header
+      value: ""
+      indent: 0
+    )
+    loop let row: view ListViewRow in fieldRows {
+      addWidgetRow(
+        rows: widgetRows
+        id: row.values.copyAtDefault(index: 0)
+        name: row.values.copyAtDefault(index: 1)
+        value: row.values.copyAtDefault(index: 2)
+        indent: 1
+      )
+    }
+  }
+  chromeSystem.inspectorWidgets = widgetRowsSummary(rows: widgetRows)
+  setWidgetRows(world: world, chromeSystem: chromeSystem, rows: own widgetRows)
+}
+
+# Hand the generated rows to the `components` ListView, and switch the list
+# OFF when there are none: a virtual ListView that hugs its height measures
+# at least ONE row even when empty, and that phantom row would push the
+# parent-chain line down in the nothing-selected panel for no reason.
+func setWidgetRows(
+  world: mod UiWorld
+  chromeSystem: view ChromeSystem
+  rows: own List(ListViewRow)
+) {
+  let list: EntityId = editorListEntity(
+    chromeSystem: chromeSystem
+    world: world
+    source: EditorListSource.components
+  )
+  if isNone(this: list) {
+    ret
+  }
+  let active: Active = { value: rows.length > 0 }
+  componentSet(this: world.actives, entity: list, data: active)
+  setEditorListRows(world: world, list: list, rows: own rows)
 }
 
 # The row marker: `>` for the ACTIVE node (the one the inspector describes),
@@ -300,6 +370,9 @@ func inspectorSummaryLine(chromeSystem: view ChromeSystem) ret String {
   var line: String = "{chromeSystem.inspectorNodeId} | {chromeSystem.inspectorType} | {chromeSystem.inspectorComponents}"
   if chromeSystem.inspectorAppComponents.length() > 0 {
     line = "{line} | {chromeSystem.inspectorAppComponents}"
+  }
+  if chromeSystem.inspectorWidgets.length() > 0 {
+    line = "{line} | widgets {chromeSystem.inspectorWidgets}"
   }
   ret line
 }

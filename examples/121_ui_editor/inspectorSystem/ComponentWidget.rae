@@ -1,0 +1,289 @@
+# inspectorSystem/ComponentWidget — the DEFAULT widget for every component,
+# generated from reflection, plus the hand-written override that refines it.
+#
+# Nothing here names a component. `componentWidgetRows` walks every
+# ComponentTable of the world (`fields(world)`), picks the one whose element
+# type is the component asked for, and hands it to a generic helper whose `T`
+# is inferred from the table — inside which `fields(value)` renders the
+# element's fields. Add a component to UiWorld and it gets a widget with no
+# edit here: the long tail is free.
+#
+# What reflection gives: field ORDER (declaration order), field NAME, field
+# TYPE, an enum's MEMBER LIST (`enumMembers`), and the value's text
+# (`"{f}"`). What it does not: range, step, unit, read-only, grouping. Those
+# are per-component EDITOR concerns, so they live in `widgetOverride` — a plain
+# Rae table keyed by component name — not in the language. No `@` attribute,
+# no field keyword: a decision recorded in docs/ui-editor-design.md.
+#
+# Every widget reads the SELECTION SET (the RectWidget conventions): a field
+# the selected entities agree on shows its value, one they differ on shows
+# the mixed marker.
+open ui/Ecs
+open ui/Components
+open ecs/Entity
+open ecs/ComponentTable
+open inspectorSystem/RectWidget
+
+# Field types that are runtime plumbing, never something a person edits: a
+# handle, a list of handles, a ListView's materialised rows. Hidden by TYPE so
+# no override has to name them.
+func widgetHiddenType(name: view String) ret Bool {
+  ret name is "EntityId" or name is "List(EntityId)" or name is "List(ListViewBinding)" or name is "List(ListViewRow)" or name is "List(ListViewRowScene)"
+}
+
+# The hand-written refinement for one component key. Every field is a
+# default the generator applies when the override says nothing.
+type WidgetSpec {
+  # A component that has its own bespoke editor: the generic rows are
+  # suppressed and the bespoke one (RectWidget's line) is what shows.
+  bespoke: Bool
+  # Comma-separated field names the widget leaves out (computed or runtime).
+  hideFields: String
+  # Rendered after a numeric value: "px", "°", "×".
+  unit: String
+  # The edit increment a future numeric input steps by; 0 = none declared.
+  step: Float
+  hasRange: Bool
+  min: Float
+  max: Float
+}
+
+func defaultWidgetSpec() ret WidgetSpec {
+  ret WidgetSpec {
+    bespoke: false
+    hideFields: ""
+    unit: ""
+    step: 0.0
+    hasRange: false
+    min: 0.0
+    max: 0.0
+  }
+}
+
+# The override table: the few components that deserve more than the default.
+# Merged the way the reference editor merges its custom entries over the
+# generated ones — by component key, with everything unlisted falling through
+# to `defaultWidgetSpec`.
+func widgetOverride(name: view String) ret WidgetSpec {
+  var spec: WidgetSpec = defaultWidgetSpec()
+  if name is "Rect" {
+    # The one bespoke widget: RectWidget carries the driver annotation the
+    # generic rows cannot know (what the layout produced vs what was authored).
+    spec.bespoke = true
+  }
+  if name is "Padding" or name is "Margin" or name is "Offset" {
+    spec.unit = "px"
+  }
+  if name is "Opacity" {
+    spec.step = 0.05
+    spec.hasRange = true
+    spec.min = 0.0
+    spec.max = 1.0
+  }
+  if name is "ScrollState" or name is "ScrollDrag" or name is "ListViewRowKey" {
+    # Runtime state a system writes every frame; showing it invites edits
+    # that are overwritten before the next paint.
+    spec.hideFields = "y,x,startX,startY,key,sceneId"
+  }
+  ret spec
+}
+
+func specHides(spec: view WidgetSpec, field: view String) ret Bool {
+  if spec.hideFields.length() is 0 {
+    ret false
+  }
+  let parts: List(String) = spec.hideFields.split(sep: ",")
+  loop let part: view String in parts {
+    if part is field {
+      ret true
+    }
+  }
+  ret false
+}
+
+# One field's display text. F is inferred from a `view any` field-loop
+# binding, so inside here it is a real type: `enumMembers(F)` is the picker
+# list for an enum field and `[]` for anything else, and `"{f}"` is the
+# value's own spelling. Returns "" for a field the widget does not show.
+func fieldWidgetText(F: type, f: view F, spec: view WidgetSpec) ret String {
+  if widgetHiddenType(name: typeName(f)) {
+    ret ""
+  }
+  let members: List(String) = enumMembers(F)
+  if members.length > 0 {
+    # An enum: the current member, then the picker in brackets — what a
+    # dropdown offers. ASCII on purpose: the chrome font has no ⌄ glyph.
+    ret "{f} [{members.join(sep: "|")}]"
+  }
+  # A unit applies to a number and to the value-structs that are only
+  # numbers (Insets, Vec2): `Padding.insets` is px through and through.
+  let numeric: Bool = typeName(f) is "Float" or typeName(f) is "Int"
+  if numeric or typeName(f) is "Insets" or typeName(f) is "Vec2" {
+    var text: String = "{f}"
+    if spec.unit.length() > 0 {
+      text = "{text} {spec.unit}"
+    }
+    if spec.hasRange {
+      text = "{text} [{spec.min}..{spec.max}]"
+    }
+    if spec.step > 0.0 {
+      text = "{text} ±{spec.step}"
+    }
+    ret text
+  }
+  ret "{f}"
+}
+
+# Render one entity's component as parallel field-name / field-text lists (in
+# field order). Parallel on purpose and strictly local: the fold below
+# compares column i of every entity, and the same T guarantees equal length.
+func componentFieldTexts(
+  T: type
+  value: view T
+  spec: view WidgetSpec
+  names: mod List(String)
+  texts: mod List(String)
+) {
+  # No `continue` in here: a fields() loop is UNROLLED by the compiler into
+  # straight-line code per field, so a `continue` has no enclosing loop in
+  # the emitted C. Nested `if`s express the same skip.
+  loop let f: view any in fields(value) {
+    let name: String = fieldName(f)
+    if specHides(spec: spec, field: name) is false {
+      let text: String = fieldWidgetText(f: f, spec: spec)
+      if text.length() > 0 {
+        names.add(value: "{name}")
+        texts.add(value: "{text}")
+      }
+    }
+  }
+}
+
+func addWidgetRow(
+  rows: mod List(ListViewRow)
+  id: view String
+  name: view String
+  value: view String
+  indent: view Int
+) {
+  var keys: List(String) = List.create(String, cap: 4)
+  var values: List(String) = List.create(String, cap: 4)
+  keys.add(value: "id")
+  values.add(value: "{id}")
+  keys.add(value: "name")
+  values.add(value: "{name}")
+  keys.add(value: "value")
+  values.add(value: "{value}")
+  keys.add(value: "indent")
+  values.add(value: "{indent}")
+  rows.add(value: ListViewRow { keys: own keys, values: own values })
+}
+
+# The widget for `table`'s component over the WHOLE selection: one row per
+# field, the common text or the mixed marker. T is inferred from the
+# ComponentTable(any) loop binding in `componentWidgetRows`.
+func tableWidgetRows(
+  T: type
+  table: view ComponentTable(T)
+  selection: view List(EntityId)
+  name: view String
+  spec: view WidgetSpec
+  rows: mod List(ListViewRow)
+) {
+  var names: List(String) = List.create(String, cap: 8)
+  var common: List(String) = List.create(String, cap: 8)
+  var mixed: List(Bool) = List.create(Bool, cap: 8)
+  var seen: Bool = false
+  loop let entity: view EntityId in selection {
+    if componentHas(this: table, entity: entity) is false {
+      continue
+    }
+    let value: view T => componentView(this: table, entity: entity)
+    if seen is false {
+      seen = true
+      componentFieldTexts(
+        value: value
+        spec: spec
+        names: names
+        texts: common
+      )
+      loop var i: Int = 0, i < common.length, ++i {
+        mixed.add(value: false)
+      }
+      continue
+    }
+    var scratchNames: List(String) = List.create(String, cap: 8)
+    var texts: List(String) = List.create(String, cap: 8)
+    componentFieldTexts(
+      value: value
+      spec: spec
+      names: scratchNames
+      texts: texts
+    )
+    loop var i: Int = 0, i < common.length and i < texts.length, ++i {
+      if common.copyAtDefault(index: i) is not texts.copyAtDefault(index: i) {
+        mixed.set(index: i, value: true)
+      }
+    }
+  }
+  loop var i: Int = 0, i < names.length, ++i {
+    let field: String = names.copyAtDefault(index: i)
+    var text: String = common.copyAtDefault(index: i)
+    if mixed.copyAtDefault(index: i) {
+      text = "{mixedMarker}"
+    }
+    addWidgetRow(
+      rows: rows
+      id: "{name}.{field}"
+      name: "{field}"
+      value: text
+      indent: 1
+    )
+  }
+}
+
+# The generated widget for component `name`, appended to `rows`. Walks every
+# table of the world — no dispatch, no list of components anywhere.
+func componentWidgetRows(
+  world: view UiWorld
+  selection: view List(EntityId)
+  name: view String
+  rows: mod List(ListViewRow)
+) {
+  let spec: WidgetSpec = widgetOverride(name: name)
+  if spec.bespoke {
+    ret
+  }
+  loop let table: view ComponentTable(any) in fields(world) {
+    if typeName(table) is name {
+      tableWidgetRows(
+        table: table
+        selection: selection
+        name: name
+        spec: spec
+        rows: rows
+      )
+      ret
+    }
+  }
+}
+
+# The rows as one line — `Comp: field=value field=value; Comp2: …` — for the
+# headless gate, which asserts the generated widgets without pixels.
+func widgetRowsSummary(rows: view List(ListViewRow)) ret String {
+  var line: String = ""
+  loop let row: view ListViewRow in rows {
+    let indent: String = row.values.copyAtDefault(index: 3)
+    let name: String = row.values.copyAtDefault(index: 1)
+    let value: String = row.values.copyAtDefault(index: 2)
+    if indent is "0" {
+      if line.length() > 0 {
+        line = "{line}; "
+      }
+      line = "{line}{name}:"
+      continue
+    }
+    line = "{line} {name}={value}"
+  }
+  ret line
+}
