@@ -392,6 +392,27 @@ inspector is read-only until the DAW/editor capability design
 (`ui-ecs-refactor-status.md` §2.7) lands; the app is shaped so those are new
 systems, not rewrites.
 
+## The headless hooks resync the tree (#85867026)
+
+`RAE_UI_EDITOR_TEST_*_CLICKS` make a selection AFTER `inspectorAfterLoad` has
+already built the hierarchy rows against the EMPTY selection. Every row cell
+that carries selection — the `>` / `-` marker, a highlight plate's theme token
+— was therefore bound to nothing in every headless screenshot, and the loop's
+own list/layout pass is gated on `changed`, which a scripted hook never sets.
+So `logInspectorPanel` now resyncs the TREE panel as well as the inspector,
+and the boot path runs `listViewSystem` + the scheduled systems once more
+after the hooks, so re-bound rows are laid out before the first frame.
+
+That blind spot produced a false bug report: a `Shape.fillSlot` ListView row
+binding was "silently inert" on the hierarchy's virtual-mode list. It is not.
+Fixture `902_listview_virtual_shape_binding` pins the lib behaviour headlessly
+— a virtual list delivers the binding to the row scene's ROOT and to a CHILD,
+on the first bind and on a same-key rebind where only that cell changes — and
+with the harness fixed, the same binding and an existing token turn a
+three-row selection into 121,076 changed pixels in the hierarchy strip. The
+one thing that could still be silent, a slot NAME the palette does not have,
+is not silent either: `paletteColor` paints it magenta.
+
 ## Select parent, and the identity block (#23728694)
 
 **Select parent walks the whole SET up the tree.** The click-through gesture
