@@ -160,7 +160,7 @@ func checkComputeAndCopy(resources: mod GpuResources) ret Bool {
               if retireSubmission(resources: resources, id: submission) is false {
                 ret fail(message: "retireSubmission")
               }
-              if pollSubmission(resources: resources, id: submission) is not (0 - 1) {
+              if pollSubmission(resources: resources, id: submission) is not (-1) {
                 ret fail(message: "retired submission still polls")
               }
               # Early retirement: retire the storage buffer while a new
@@ -314,7 +314,7 @@ func checkRepeated(resources: mod GpuResources) ret Bool {
         samplers: noSamplers
       ) {
         var round: Int = 0
-        var lastSlot: Int = 0 - 1
+        var lastSlot: Int = -1
         loop round < 3 {
           if let recording: Recording = beginRecording(resources: resources) {
             if recordCompute(
@@ -416,7 +416,7 @@ func main() ret Int {
               ret 1
             }
             if let submission: SubmissionId = submit(resources: managerA, recording: recording) {
-              if pollSubmission(resources: managerB, id: submission) is not (0 - 1) {
+              if pollSubmission(resources: managerB, id: submission) is not (-1) {
                 ret 1
               }
               if awaitSubmission(resources: managerA, id: submission) is not 1 {

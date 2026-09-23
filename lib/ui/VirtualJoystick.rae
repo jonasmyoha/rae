@@ -49,7 +49,7 @@ func createVirtualJoystick(
     baseRadius: 0.0
     knobRadius: 0.0
     active: false
-    grabbedId: 0 - 1
+    grabbedId: -1
     knobX: 0.0
     knobY: 0.0
     valueX: 0.0
@@ -102,7 +102,7 @@ func updateVirtualJoystick(joy: mod VirtualJoystick) pub ret Bool {
       # — drop it so the grab below re-decides by zone, else a reused id keeps the
       # stick and the camera fighting over one finger.
       if joy.grabbedId >= 0 and id is joy.grabbedId and pressed {
-        joy.grabbedId = 0 - 1
+        joy.grabbedId = -1
       }
       if joy.grabbedId >= 0 and id is joy.grabbedId {
         px = tx
@@ -121,7 +121,7 @@ func updateVirtualJoystick(joy: mod VirtualJoystick) pub ret Bool {
       index = index + 1
     }
     if found is false {
-      joy.grabbedId = 0 - 1
+      joy.grabbedId = -1
     }
     joy.active = found
   } else {

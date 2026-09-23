@@ -89,8 +89,8 @@ func addDeclaredSystem(
     reads: own reads
     writes: own writes
     skipWhenClean: skipWhenClean
-    lastGeneration: 0 - 1
-    lastEntityCount: 0 - 1
+    lastGeneration: -1
+    lastEntityCount: -1
   })
   ret index
 }
@@ -133,7 +133,7 @@ func shouldRun(schedule: mod Schedule, index: view Int, readGeneration: view Int
 # registration bug, never as "no such read".
 func tableIdByName(W: type, world: view W, name: view String) ret Int {
   var index: Int = 0
-  var found: Int = 0 - 1
+  var found: Int = -1
   loop let table: view ComponentTable(any) in fields(world) {
     if found < 0 {
       if fieldName(table) is name {

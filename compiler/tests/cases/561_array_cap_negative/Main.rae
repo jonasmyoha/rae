@@ -1,4 +1,8 @@
 # A negative cap is caught at compile time, not by the C compiler.
+#
+# The cap is spelled `0 - 1` rather than `-1` ON PURPOSE: the check has to fold
+# a constant EXPRESSION, not just recognise a negative literal. Everywhere else
+# in the tree that spelling was a habit and is now `-1`; here it is the subject.
 func main() {
   let a: Array(Float, cap: 0 - 1) = Array(Float, cap: 0 - 1)
   log("unreachable")

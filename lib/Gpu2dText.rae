@@ -156,7 +156,7 @@ func drawTextWrappedEx(
   }
   let n: Int = text.length()
   var lineStart: Int = 0
-  var lastSpace: Int = 0 - 1
+  var lastSpace: Int = -1
   var width: Float = 0.0
   var baseline: Float = y
   var lines: Int = 0
@@ -182,7 +182,7 @@ func drawTextWrappedEx(
       baseline = baseline + lineHeight
       i = i + 1
       lineStart = i
-      lastSpace = 0 - 1
+      lastSpace = -1
       width = 0.0
     } else {
       let advance: Float = glyphAdvance(font: font, cp: cp, sizePx: sizePx)
@@ -214,7 +214,7 @@ func drawTextWrappedEx(
         baseline = baseline + lineHeight
         lineStart = nextStart
         i = nextStart
-        lastSpace = 0 - 1
+        lastSpace = -1
         width = 0.0
       } else {
         width = width + advance

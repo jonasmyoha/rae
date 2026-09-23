@@ -50,7 +50,7 @@ func byteAt(bytes: view List(UInt8), index: view Int) ret Int {
   if let b: UInt8 = bytes.copyAt(index: index) {
     ret b as Int
   }
-  ret 0 - 1
+  ret -1
 }
 
 # The adopter: this check owns a raw uniform buffer (the adopter's obligation,
@@ -172,7 +172,7 @@ func main() ret Int {
             ) {
               # The adopted external uniform.
               let adopter: Adopter = createAdopter()
-              var adopted: ExternalId = { managerTag: 0, slot: 0 - 1, generation: 0 }
+              var adopted: ExternalId = { managerTag: 0, slot: -1, generation: 0 }
               var adoptedOk: Bool = false
               if let id: ExternalId = adoptColourBuffer(adopter: adopter, resources: resources) {
                 adopted = id

@@ -821,7 +821,7 @@ func submit(resources: mod GpuResources, recording: mod Recording) ret opt Submi
 # retired, so repeated polling is safe.
 func pollSubmission(resources: mod GpuResources, id: view SubmissionId) ret Int {
   if isValidSubmission(resources: resources, id: id) is false {
-    ret 0 - 1
+    ret -1
   }
   if intAt(list: resources.submissions.completed, index: id.slot) is 1 {
     ret 1

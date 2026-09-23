@@ -158,12 +158,12 @@ func resetPaletteArena(arena: mod PaletteArena) pub {
 # pass as `paletteBase`, or -1 when the shared buffer is full.
 func paletteReserve(arena: mod PaletteArena, jointCount: copy Int) pub ret Int {
   if jointCount <= 0 {
-    ret 0 - 1
+    ret -1
   }
   let need: Int = jointCount * paletteRowsPerJoint
   if arena.cursor + need > arena.capacity {
     arena.overflow = true
-    ret 0 - 1
+    ret -1
   }
   let base: Int = arena.cursor
   arena.cursor = arena.cursor + need

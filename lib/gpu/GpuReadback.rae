@@ -34,7 +34,7 @@ func liveReadbackCount(resources: view GpuResources) ret Int {
 func mappedSourceSlot(resources: view GpuResources, readbackSlot: view Int) ret Int {
   let start: Int = intAt(list: resources.readbacks.depStart, index: readbackSlot)
   if intAt(list: resources.readbacks.depCount, index: readbackSlot) < 1 {
-    ret 0 - 1
+    ret -1
   }
   ret intAt(list: resources.depSlots, index: start)
 }
@@ -124,7 +124,7 @@ func startReadback(
 # The terminal state is cached; polling after it keeps answering the same value.
 func pollReadback(resources: mod GpuResources, id: view ReadbackId) ret Int {
   if isValidReadback(resources: resources, id: id) is false {
-    ret 0 - 1
+    ret -1
   }
   let cached: Int = intAt(list: resources.readbacks.completed, index: id.slot)
   if cached is 1 {
@@ -151,7 +151,7 @@ func pollReadback(resources: mod GpuResources, id: view ReadbackId) ret Int {
 # The requested byte count of a readback, or -1 for an invalid ID.
 func readbackByteCount(resources: view GpuResources, id: view ReadbackId) ret Int {
   if isValidReadback(resources: resources, id: id) is false {
-    ret 0 - 1
+    ret -1
   }
   ret intAt(list: resources.readbacks.nativeIndex, index: id.slot)
 }

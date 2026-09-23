@@ -362,6 +362,12 @@ If the task turns out to be larger than expected, split it and explain.
 - Avoid premature optimization
 - Do not refactor unrelated code “while here”
 - Keep commits logically scoped
+- **A negative number is written `-1`, never `0 - 1`.** Unary minus works
+  everywhere a literal does — `let a: Int = -1`, `index: -1`, `ret -1`,
+  `fallback: -1`, `x > -1`. The `0 - 1` spelling was a habit from an era when
+  it did not, and it spread to 199 places across 87 files before anyone asked
+  why (#61593435); the tree is now clean of it, apart from one fixture where
+  folding a constant EXPRESSION is the test's subject. Do not reintroduce it.
 - **Rule of thumb for packages**: If an app or example doesn't strictly need a `.raepack` file (or isn't specifically demonstrating `.raepack` features), do NOT include one. Default compiler behavior should be preferred whenever possible.
 
 Compiler code should favor:

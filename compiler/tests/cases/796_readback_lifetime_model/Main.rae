@@ -40,7 +40,7 @@ func createManager(capacity: view Int) ret Manager {
   let bufferLive: List(Int) = List.create(Int, cap: capacity)
   var i: Int = 0
   loop i < capacity {
-    slots.add(value: { live: 0, generation: 0, completed: 0, sourceBuffer: 0 - 1 })
+    slots.add(value: { live: 0, generation: 0, completed: 0, sourceBuffer: -1 })
     requests.add(value: { outcome: 0, released: 0 })
     bufferPins.add(value: 0)
     bufferLive.add(value: 1)
@@ -61,7 +61,7 @@ func slotAt(manager: view Manager, index: view Int) ret Slot {
   if let slot: Slot = manager.slots.copyAt(index: index) {
     ret slot
   }
-  ret Slot { live: 0, generation: 0, completed: 0, sourceBuffer: 0 - 1 }
+  ret Slot { live: 0, generation: 0, completed: 0, sourceBuffer: -1 }
 }
 
 func intAt(list: view List(Int), index: view Int) ret Int {
@@ -79,7 +79,7 @@ func findFree(manager: view Manager) ret Int {
     }
     i = i + 1
   }
-  ret 0 - 1
+  ret -1
 }
 
 func bufferIsMapped(manager: view Manager, bufferSlot: view Int) ret Bool {
@@ -136,7 +136,7 @@ func isValid(manager: view Manager, id: view ReadbackId) ret Bool {
 
 func pollReadback(manager: mod Manager, id: view ReadbackId) ret Int {
   if isValid(manager: manager, id: id) is false {
-    ret 0 - 1
+    ret -1
   }
   let slot: Slot = slotAt(manager: manager, index: id.slot)
   if slot.completed is 1 {
@@ -183,7 +183,7 @@ func retireReadback(manager: mod Manager, id: view ReadbackId) ret Bool {
   manager.bufferPins.set(index: slot.sourceBuffer, value: pins)
   manager.slots.set(
     index: id.slot
-    value: { live: 0, generation: slot.generation + 1, completed: 0, sourceBuffer: 0 - 1 }
+    value: { live: 0, generation: slot.generation + 1, completed: 0, sourceBuffer: -1 }
   )
   ret true
 }
@@ -220,7 +220,7 @@ func main() {
     log("poll success: {pollReadback(manager: manager, id: readOk)}")
     log("poll again cached: {pollReadback(manager: manager, id: readOk)}")
     # A failing readback in the other slot; then the pool is full (busy).
-    if let readFail: ReadbackId = startReadback(manager: manager, bufferSlot: 1, outcome: 0 - 1) {
+    if let readFail: ReadbackId = startReadback(manager: manager, bufferSlot: 1, outcome: -1) {
       log(
         "busy defer (slots full): {startReadback(manager: manager, bufferSlot: 5, outcome: 1) is none}"
       )
@@ -238,7 +238,7 @@ func main() {
     log("cancelled invalid: {isValid(manager: manager, id: reuse) is false}")
   }
   # Device loss: two live readbacks released once each by shutdown.
-  var readbackX: ReadbackId = { slot: 0 - 1, generation: 0 }
+  var readbackX: ReadbackId = { slot: -1, generation: 0 }
   if let x: ReadbackId = startReadback(manager: manager, bufferSlot: 0, outcome: 0) {
     readbackX = x
   }

@@ -138,7 +138,7 @@ func artworkFetchIndexOf(jobs: view List(ArtworkFetchJob), outPath: view String)
     }
     i = i + 1
   }
-  ret 0 - 1
+  ret -1
 }
 
 # True when `outPath` already names an in-flight or finished-unread job —
@@ -157,7 +157,7 @@ func artworkFetchAlreadyKnown(queue: view ArtworkFetchQueue, outPath: view Strin
 # since the two start functions spawn different worker bodies.
 func artworkFetchReserve(queue: mod ArtworkFetchQueue, outPath: view String) ret Int {
   if queue.inFlight.length() >= artworkFetchMaxInFlight {
-    ret 0 - 1
+    ret -1
   }
   let serial: Int = queue.nextSerial
   queue.nextSerial = serial + 1
@@ -238,7 +238,7 @@ func artworkFetchDrain(queue: mod ArtworkFetchQueue) {
   loop pending(this: queue.results) > 0 {
     let message: ArtworkResult = receive(this: queue.results)
     let serial: Int = message.serial
-    var index: Int = 0 - 1
+    var index: Int = -1
     var i: Int = 0
     loop i < queue.inFlight.length() and index < 0 {
       if let job: view ArtworkFetchJob => queue.inFlight.viewAt(index: i) {

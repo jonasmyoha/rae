@@ -284,7 +284,7 @@ func texelBytes(format: view Int32) ret Int {
   if (format is WGPUTextureFormat_RGBA32Float) {
     ret 16
   }
-  ret 0 - 1
+  ret -1
 }
 
 # Copies a 2D texture's level 0 into a buffer laid out row by row with
@@ -309,7 +309,7 @@ func recordCopyTextureToBuffer(
   if width < 1 or height < 1 {
     ret false
   }
-  var texel: Int = 0 - 1
+  var texel: Int = -1
   unsafe {
     texel = texelBytes(
       format: wgpuTextureGetFormat(

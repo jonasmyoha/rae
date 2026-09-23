@@ -473,7 +473,7 @@ func buildDeferredGraph(withUi: view Bool) ret DeferredRenderer {
     # second write would be rejected as two writers; declaring it as a plain
     # read would not order it after composite. `passModifies` is the only
     # honest statement, and the graph derives composite -> ui -> present.
-    var ui: Int = 0 - 1
+    var ui: Int = -1
     if withUi {
       ui = addPass(
         renderGraph: renderGraph

@@ -527,7 +527,7 @@ func grassGeneratedCount() ret Int {
 # when the readback failed.
 func grassReadVisible(grass: mod GrassCompute, resources: mod GpuResources) ret Int {
   if not isValidBuffer(resources: resources, id: grass.staging) {
-    ret 0 - 1
+    ret -1
   }
   var copied: Bool = false
   if let recording: Recording = beginRecording(resources: resources) {
@@ -550,10 +550,10 @@ func grassReadVisible(grass: mod GrassCompute, resources: mod GpuResources) ret 
     }
   }
   if not copied {
-    ret 0 - 1
+    ret -1
   }
   pollSubmissions(inFlight: grass.inFlight, resources: resources)
-  var visible: Int = 0 - 1
+  var visible: Int = -1
   if let read: ReadbackId = startReadback(
     resources: resources
     buffer: grass.staging

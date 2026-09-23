@@ -11,7 +11,7 @@ func byteAt(writer: view ArgWriter, index: view Int) ret Int {
   if let b: UInt8 = writer.bytes.copyAt(index: index) {
     ret b as Int
   }
-  ret 0 - 1
+  ret -1
 }
 
 func main() {
@@ -67,7 +67,7 @@ func main() {
   # A fresh writer for exact little-endian byte checks.
   var raw: ArgWriter = createArgs(uniform: false)
   pushU32(writer: raw, value: 305419896)  # 0x12345678
-  pushI32(writer: raw, value: 0 - 2)  # 0xFFFFFFFE
+  pushI32(writer: raw, value: -2)  # 0xFFFFFFFE
   pushF32(writer: raw, value: 1.0)  # 0x3F800000
   log(
     "u32 bytes {byteAt(writer: raw, index: 0)} {byteAt(writer: raw, index: 1)} {byteAt(
