@@ -318,6 +318,14 @@ func runApp(app: mod App) ret Int {
     pageRoot: app.document.pageRoot
     script: app.testClicks
   )
+  # The tree rows exist by now (inspectorAfterLoad synced the panel), which a
+  # Shift-range needs: it spans VISIBLE rows.
+  runTestTreeClicks(
+    inspectorSystem: app.inspectorSystem
+    world: app.world
+    pageRoot: app.document.pageRoot
+    script: app.testTreeClicks
+  )
   var renderedOnce: Bool = false
   # RAE_UI_EDITOR_TEST_SAVE=<path>: save the document there once after the
   # first frame, as Cmd+S would — the headless gate's hook.

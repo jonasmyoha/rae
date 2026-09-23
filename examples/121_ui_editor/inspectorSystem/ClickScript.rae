@@ -1,19 +1,22 @@
-# inspectorSystem/CanvasClicks — the headless driver for canvas selection.
+# inspectorSystem/ClickScript — the headless driver for selection gestures.
 #
-# Canvas selection is a POINTER gesture, so the only honest way to test it is
-# to click points on the canvas. This module turns a small script from the
-# environment into exactly that: each step resolves to a screen point, picks
-# up a modifier, and goes through the same `canvasSelectAt` the live pointer
-# uses — never a shortcut that sets the selection directly, because a
-# shortcut would pass while the real gesture was broken.
+# Selection is a POINTER gesture on both surfaces, so the only honest way to
+# test it is to click things. This module turns a small script from the
+# environment into exactly that: each step picks up a modifier and goes
+# through the same funnel the live click uses — never a shortcut that sets
+# the selection directly, because a shortcut would pass while the real
+# gesture was broken.
 #
 #   RAE_UI_EDITOR_TEST_CLICKS="PlayButton cmd:ContinueButton alt:PlayButton at:4,4"
 #
+#   RAE_UI_EDITOR_TEST_TREE_CLICKS="Play shift:Continue cmd:Play"
+#
 # A step is `[modifier:]target`. The modifier is one of `shift`, `cmd`,
-# `ctrl` or `alt` (absent = a plain click). The target is either a node id,
-# in which case the click lands in the middle of that node's current on-screen
-# rect, or `at:<x>,<y>` for raw screen coordinates — which is how you click
-# EMPTY canvas, the case that has no node to name.
+# `ctrl` or `alt` (absent = a plain click). On the CANVAS the target is either
+# a node id, in which case the click lands in the middle of that node's
+# current on-screen rect, or `at:<x>,<y>` for raw screen coordinates — which
+# is how you click EMPTY canvas, the case that has no node to name. In the
+# TREE the target is always a node id, since a row IS a node.
 import String
 open ui/Ecs
 open ui/Components
@@ -149,5 +152,75 @@ func runTestClicks(
       inspectorSystem: inspectorSystem
       world: world
     )}"
+  )
+}
+
+# Replay one tree-row click. Everything from the entity onward is the live
+# path — the same `applySelect` with the same `treeSelectMode` mapping, so
+# the range, the anchor and the markers are the real ones. Only the row's
+# `inspect:<index>` action id is bypassed, because there is no pointer to
+# generate it.
+func runTestTreeClick(
+  inspectorSystem: mod InspectorSystem
+  world: mod UiWorld
+  sceneRoot: view EntityId
+  step: view String
+) {
+  var mode: SelectMode = SelectMode.replace
+  var rest: String = "{step}"
+  let colon: Int = step.indexOf(sub: ":")
+  if colon > 0 {
+    mode = selectModeFromName(name: step.sub(start: 0, len: colon))
+    rest = step.sub(start: colon + 1, len: step.length() - colon - 1)
+    # The tree spends Shift on a RANGE, not an add — the one place the two
+    # surfaces read the same modifier differently.
+    if mode is SelectMode.add {
+      mode = SelectMode.range
+    }
+  }
+  let target: EntityId = findNodeByIdIn(world: world, entity: sceneRoot, nodeId: rest)
+  if isNone(this: target) {
+    log("[ui-editor] tree click: no node named {rest}")
+    ret
+  }
+  applySelect(
+    inspectorSystem: inspectorSystem
+    world: world
+    entity: target
+    mode: mode
+  )
+}
+
+# Run a tree-click script, then log the set and the marked rows. The markers
+# are logged too because "which row is active" is a separate question from
+# "which rows are selected", and a range makes the difference visible.
+func runTestTreeClicks(
+  inspectorSystem: mod InspectorSystem
+  world: mod UiWorld
+  pageRoot: view EntityId
+  script: view String
+) {
+  if script.length() is 0 {
+    ret
+  }
+  let sceneRoot: EntityId = documentSceneRoot(world: world, pageRoot: pageRoot)
+  let steps: List(String) = script.split(sep: " ")
+  loop let step: view String in steps {
+    let trimmed: String = step.trim()
+    if trimmed.length() is 0 {
+      continue
+    }
+    runTestTreeClick(
+      inspectorSystem: inspectorSystem
+      world: world
+      sceneRoot: sceneRoot
+      step: trimmed
+    )
+  }
+  log(
+    "[ui-editor] tree clicks [{script}] -> {selectionNodeIds(
+      inspectorSystem: inspectorSystem
+      world: world
+    )} active {nodeIdOf(world: world, entity: inspectorSystem.selected)}"
   )
 }
