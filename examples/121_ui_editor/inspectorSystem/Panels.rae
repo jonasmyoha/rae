@@ -18,6 +18,7 @@ open ui/UiSystems
 open app3d/UiShell
 open inspectorSystem/NodeQuery
 open inspectorSystem/RectWidget
+open ui/Scene
 open inspectorSystem/ComponentWidget
 
 # The inspector renders the COMPOSITE of the whole selection. There is no
@@ -36,6 +37,8 @@ func syncInspectorPanel(
   chromeSystem: mod ChromeSystem
   inspectorSystem: view InspectorSystem
   sceneRoot: view EntityId
+  # The parsed document, for what the AUTHOR wrote (#21438052).
+  scene: view Scene
 ) {
   let members: Int = inspectorSystem.selection.length
   if members is 0 {
@@ -151,6 +154,7 @@ func syncInspectorPanel(
       world: world
       selection: inspectorSystem.selection
       name: tally.name
+      scene: scene
       rows: fieldRows
     )
     if fieldRows.length is 0 {

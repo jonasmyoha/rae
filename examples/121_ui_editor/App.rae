@@ -136,6 +136,7 @@ func reloadDocument(app: mod App) {
       pageRoot: app.document.pageRoot
       selectNodeId: keepSelected
       setRect: ""
+      scene: app.document.scene
     )
   }
   let diagnostics: Int = app.world.sceneDiagnostics.length
@@ -263,6 +264,7 @@ func runApp(app: mod App) ret Int {
     pageRoot: app.document.pageRoot
     selectNodeId: app.testSelectNodeId
     setRect: app.testSetRect
+    scene: app.document.scene
   )
   inspectorUpdate(
     inspectorSystem: app.inspectorSystem
@@ -272,6 +274,7 @@ func runApp(app: mod App) ret Int {
     input: input
     pageRoot: app.document.pageRoot
     chromeVisible: chromeVisible(world: app.world, chromeSystem: app.chromeSystem)
+    scene: app.document.scene
   )
   listViewSystem(world: app.world, uiSystems: app.uiSystems, scenes: app.document.registry)
   runScheduledUiSystems(
@@ -317,6 +320,7 @@ func runApp(app: mod App) ret Int {
     chromeSystem: app.chromeSystem
     pageRoot: app.document.pageRoot
     script: app.testClicks
+    scene: app.document.scene
   )
   # The tree rows exist by now (inspectorAfterLoad synced the panel), which a
   # Shift-range needs: it spans VISIBLE rows.
@@ -327,6 +331,7 @@ func runApp(app: mod App) ret Int {
     chromeSystem: app.chromeSystem
     pageRoot: app.document.pageRoot
     script: app.testTreeClicks
+    scene: app.document.scene
   )
   var renderedOnce: Bool = false
   # RAE_UI_EDITOR_TEST_SAVE=<path>: save the document there once after the
@@ -514,6 +519,7 @@ func runApp(app: mod App) ret Int {
       input: input
       pageRoot: app.document.pageRoot
       chromeVisible: chromeVisible(world: app.world, chromeSystem: app.chromeSystem)
+      scene: app.document.scene
     ) {
       changed = true
     }

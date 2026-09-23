@@ -26,6 +26,7 @@ open app3d/UiShell
 open ecs/Entity
 open ecs/ComponentTable
 open ui/UiSystems
+open ui/Scene
 open inspectorSystem/NodeQuery
 open inspectorSystem/RectWidget
 
@@ -589,6 +590,7 @@ func inspectorUpdate(
   input: view UiInput
   pageRoot: view EntityId
   chromeVisible: view Bool
+  scene: view Scene
 ) ret Bool {
   let sceneRoot: EntityId = documentSceneRoot(world: world, pageRoot: pageRoot)
   var changed: Bool = false
@@ -727,6 +729,7 @@ func inspectorUpdate(
       chromeSystem: chromeSystem
       inspectorSystem: inspectorSystem
       sceneRoot: sceneRoot
+      scene: scene
     )
     syncTreePanel(
       chromeSystem: chromeSystem
@@ -769,6 +772,7 @@ func inspectorAfterLoad(
   pageRoot: view EntityId
   selectNodeId: view String
   setRect: view String
+  scene: view Scene
 ) {
   let sceneRoot: EntityId = documentSceneRoot(world: world, pageRoot: pageRoot)
   inspectorSystem.hovered = noEntity()
@@ -837,6 +841,7 @@ func inspectorAfterLoad(
     chromeSystem: chromeSystem
     inspectorSystem: inspectorSystem
     sceneRoot: sceneRoot
+    scene: scene
   )
   syncTreePanel(
     chromeSystem: chromeSystem

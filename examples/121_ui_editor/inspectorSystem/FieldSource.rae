@@ -1,0 +1,183 @@
+# inspectorSystem/FieldSource — where a field's current value CAME FROM.
+#
+# The inspector shows live component values, and for a laid-out node the live
+# value is routinely not the one in the `.raescene`: the layout system
+# overwrites Rect, a Size mode decides an extent, the loader fills defaults.
+# A bare number cannot say which happened, and that is the most confusing
+# thing about editing a laid-out node.
+#
+# What Rae can actually answer, and what it cannot:
+#
+#   * WHICH SYSTEM wrote a value — NOT available. `ComponentTable` carries a
+#     table-level `generation` and per-entity `denseStamps`, but those record
+#     WHEN a component last changed, not WHO changed it, and no system
+#     declares what it writes. RectWidget's `layout` / `fill` / `align` tags
+#     are INFERRED from configuration (the entity's Size mode, a parent
+#     carrying a Layout, its own Align) — per-component knowledge that only a
+#     bespoke widget can have.
+#   * WHETHER THE AUTHOR WROTE IT — available, exactly. The parsed scene is
+#     still in memory, so a node's authored component bag can be read back and
+#     compared with what is live now.
+#
+# So this module answers the second question for EVERY component, which is the
+# general half of "what drives this value": authored and untouched, authored
+# and since overridden, or never authored at all.
+import Json
+import String
+open ui/Ecs
+open ui/Scene
+
+# Where a field's live value came from.
+#
+#   unknown    — the node is not in this document's scene (a sub-scene node,
+#                for instance). Make NO claim rather than a wrong one.
+#   computed   — the node IS in the scene and the component is absent from its
+#                authored bag: nothing in the file put this here.
+#   defaulted  — the component was authored, this field was not: it holds the
+#                type's default.
+#   authored   — the field was authored and the live value still matches it.
+#   overridden — the field was authored and the live value DIFFERS. Something
+#                wrote over the author, which is the case worth seeing.
+enum FieldSource {
+  unknown
+  computed
+  defaulted
+  authored
+  overridden
+}
+
+# The authored value's text, and whether it could be read at all. An object or
+# array authored value (`Insets`, a nested `SizeAxis`) is not compared —
+# `readable` is false and the verdict stays `authored`, because we know the
+# author wrote it but not cheaply whether it still matches.
+type AuthoredValue {
+  text: String
+  readable: Bool
+}
+
+func missingAuthoredValue() ret AuthoredValue {
+  ret AuthoredValue { text: "", readable: false }
+}
+
+# A scalar JSON value as text, in the spelling the live side prints. Numbers
+# go through Float so `0` and `0.0` cannot disagree on formatting alone. An
+# object or array is deliberately NOT readable: comparing a nested authored
+# value with a live one needs a decode, which is the save path's job, not a
+# panel's.
+func authoredScalarText(value: view JsonValue) ret AuthoredValue {
+  if value.kind is JsonKind.string {
+    ret AuthoredValue { text: "{value.asString}", readable: true }
+  }
+  if value.kind is JsonKind.bool {
+    ret AuthoredValue { text: "{value.asBool}", readable: true }
+  }
+  if value.kind is JsonKind.number {
+    ret AuthoredValue { text: "{value.asNumber}", readable: true }
+  }
+  ret missingAuthoredValue()
+}
+
+# Compare live text with authored text, tolerantly. An enum is authored in the
+# scene's PascalCase spelling (`"Fill"`) and prints in Rae's member spelling
+# (`fill`), so the comparison is case-insensitive; everything else is exact.
+func sameValueText(live: view String, authored: view String) ret Bool {
+  if live is authored {
+    ret true
+  }
+  ret live.toLower() is authored.toLower()
+}
+
+# The authored value of `component`.`field` on `nodeId`, if the scene has one.
+func authoredFieldValue(
+  scene: view Scene
+  nodeId: view String
+  component: view String
+  field: view String
+  found: mod Bool
+  componentAuthored: mod Bool
+  fieldAuthored: mod Bool
+) ret AuthoredValue {
+  found = false
+  componentAuthored = false
+  fieldAuthored = false
+  let index: Int = sceneNodeIndex(this: scene, nodeId: nodeId)
+  if index < 0 {
+    ret missingAuthoredValue()
+  }
+  found = true
+  let doc: view JsonDoc => scene.doc
+  let node: view SceneNode => nodeAt(this: scene, idx: index)
+  let bag: JsonValue = Json.jsonValueAt(doc: doc, idx: node.componentsValueIdx)
+  let componentIdx: Int = Json.field(doc: doc, this: bag, key: component)
+  if componentIdx < 0 {
+    ret missingAuthoredValue()
+  }
+  componentAuthored = true
+  let componentValue: JsonValue = Json.jsonValueAt(doc: doc, idx: componentIdx)
+  let fieldIdx: Int = Json.field(doc: doc, this: componentValue, key: field)
+  if fieldIdx < 0 {
+    ret missingAuthoredValue()
+  }
+  fieldAuthored = true
+  ret authoredScalarText(value: Json.jsonValueAt(doc: doc, idx: fieldIdx))
+}
+
+# The verdict for one field, and the authored text a caller can show beside an
+# overridden value.
+type FieldProvenance {
+  source: FieldSource
+  authoredText: String
+}
+
+func fieldProvenance(
+  scene: view Scene
+  nodeId: view String
+  component: view String
+  field: view String
+  liveText: view String
+) ret FieldProvenance {
+  var found: Bool = false
+  var componentAuthored: Bool = false
+  var fieldAuthored: Bool = false
+  let authored: AuthoredValue = authoredFieldValue(
+    scene: scene
+    nodeId: nodeId
+    component: component
+    field: field
+    found: found
+    componentAuthored: componentAuthored
+    fieldAuthored: fieldAuthored
+  )
+  if found is false {
+    ret FieldProvenance { source: FieldSource.unknown, authoredText: "" }
+  }
+  if componentAuthored is false {
+    ret FieldProvenance { source: FieldSource.computed, authoredText: "" }
+  }
+  if fieldAuthored is false {
+    ret FieldProvenance { source: FieldSource.defaulted, authoredText: "" }
+  }
+  if authored.readable is false {
+    # Authored, but a nested value this module does not compare.
+    ret FieldProvenance { source: FieldSource.authored, authoredText: "" }
+  }
+  if sameValueText(live: liveText, authored: authored.text) {
+    ret FieldProvenance { source: FieldSource.authored, authoredText: "" }
+  }
+  ret FieldProvenance { source: FieldSource.overridden, authoredText: "{authored.text}" }
+}
+
+# The tag shown after the value. An OVERRIDDEN field names what the author
+# wrote, so the two states the task cares about cannot be confused: a value
+# that replaced an authored one reads `was 0`, a value nothing authored reads
+# `computed`. An untouched authored value says nothing — the common case
+# should be the quiet one.
+func fieldSourceTag(provenance: view FieldProvenance) ret String {
+  if provenance.source is FieldSource.overridden {
+    ret "was {provenance.authoredText}"
+  }
+  if provenance.source is FieldSource.computed {
+    ret "computed"
+  }
+  ret ""
+}
