@@ -119,7 +119,7 @@ func findFree(table: view Table, capacity: view Int) ret Int {
     }
     slot = slot + 1
   }
-  ret 0 - 1
+  ret -1
 }
 
 func isLive(
@@ -469,7 +469,7 @@ func isValidSubmission(manager: view Manager, id: view SubmissionId) ret Bool {
 # Stands in for a poll that observed completion: -1 invalid, 1 completed.
 func complete(manager: mod Manager, id: view SubmissionId) ret Int {
   if isValidSubmission(manager: manager, id: id) is false {
-    ret 0 - 1
+    ret -1
   }
   if intAt(list: manager.submissions.completed, index: id.slot) is 1 {
     ret 1

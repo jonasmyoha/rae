@@ -109,7 +109,7 @@ func underwaterSelect(
   camera: view Camera3d
   light: view Light3d
 ) ret UnderwaterParams {
-  var best: Int = 0 - 1
+  var best: Int = -1
   var bestSurface: Float = 0.0
   var bestSubmersion: Float = 0.0
   var stillLevel: Bool = false
@@ -142,7 +142,7 @@ func underwaterSelect(
     }
   }
   if best < 0 {
-    waterSystem.underwaterBody = 0 - 1
+    waterSystem.underwaterBody = -1
     ret noUnderwater()
   }
   waterSystem.underwaterBody = best

@@ -146,7 +146,7 @@ func createSlotTable(capacity: view Int, empty: copy Ptr) ret SlotTable {
       handles: own handles
       useCount: createIntList(capacity: capacity, value: 0)
       retired: createIntList(capacity: capacity, value: 0)
-      parentSlot: createIntList(capacity: capacity, value: 0 - 1)
+      parentSlot: createIntList(capacity: capacity, value: -1)
       parentGeneration: createIntList(capacity: capacity, value: 0)
       nativeIndex: createIntList(capacity: capacity, value: 0)
       depStart: createIntList(capacity: capacity, value: 0)
@@ -174,7 +174,7 @@ func findFreeSlot(table: view SlotTable, capacity: view Int) ret Int {
     }
     slot = slot + 1
   }
-  ret 0 - 1
+  ret -1
 }
 
 func slotIsLive(
@@ -676,7 +676,7 @@ func createBuffer(
 # The authoritative size, re-queried from the native buffer. -1 for an invalid ID.
 func bufferSize(resources: view GpuResources, id: view BufferId) ret Int {
   if isValidBuffer(resources: resources, id: id) is false {
-    ret 0 - 1
+    ret -1
   }
   unsafe {
     ret wgpuBufferGetSize(buffer: slotHandle(table: resources.buffers, slot: id.slot)) as Int
@@ -845,7 +845,7 @@ func createTexture(
 
 func textureWidth(resources: view GpuResources, id: view TextureId) ret Int {
   if isValidTexture(resources: resources, id: id) is false {
-    ret 0 - 1
+    ret -1
   }
   unsafe {
     ret wgpuTextureGetWidth(texture: slotHandle(table: resources.textures, slot: id.slot)) as Int
@@ -854,7 +854,7 @@ func textureWidth(resources: view GpuResources, id: view TextureId) ret Int {
 
 func textureHeight(resources: view GpuResources, id: view TextureId) ret Int {
   if isValidTexture(resources: resources, id: id) is false {
-    ret 0 - 1
+    ret -1
   }
   unsafe {
     ret wgpuTextureGetHeight(texture: slotHandle(table: resources.textures, slot: id.slot)) as Int

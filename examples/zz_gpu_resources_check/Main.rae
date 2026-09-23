@@ -150,7 +150,7 @@ func checkIdentity(issuer: mod IdIssuer) ret Bool {
           if isValidBuffer(resources: managerA, id: idB) {
             ret fail(message: "wrong owner accepted (B in A)")
           }
-          if bufferSize(resources: managerB, id: idA) is not (0 - 1) {
+          if bufferSize(resources: managerB, id: idA) is not (-1) {
             ret fail(message: "wrong owner size leaked")
           }
           let copied: BufferId = idA
@@ -307,7 +307,7 @@ func escapedId(issuer: mod IdIssuer) ret BufferId {
       ret id
     }
   }
-  ret BufferId { managerTag: 0, slot: 0 - 1, generation: 0 }
+  ret BufferId { managerTag: 0, slot: -1, generation: 0 }
 }
 
 func checkScopeExit(issuer: mod IdIssuer) ret Bool {

@@ -110,11 +110,11 @@ func externalRef(id: view ExternalId) ret ResourceRef {
 }
 
 func skipRef() ret ResourceRef {
-  ret ResourceRef { refKind: refSkip, managerTag: 0, slot: 0 - 1, generation: 0 }
+  ret ResourceRef { refKind: refSkip, managerTag: 0, slot: -1, generation: 0 }
 }
 
 func noRef() ret ResourceRef {
-  ret ResourceRef { refKind: refBuffer, managerTag: 0, slot: 0 - 1, generation: 0 }
+  ret ResourceRef { refKind: refBuffer, managerTag: 0, slot: -1, generation: 0 }
 }
 
 # The slot-table kind a reference pins and validates against.
@@ -146,7 +146,7 @@ func isValidRef(resources: view GpuResources, ref: view ResourceRef) ret Bool {
 # An external's sub-kind (buffer or texture view); -1 when not an external.
 func externalKind(resources: view GpuResources, ref: view ResourceRef) ret Int {
   if ref.refKind is not refExternal {
-    ret 0 - 1
+    ret -1
   }
   ret intAt(list: resources.externals.nativeIndex, index: ref.slot)
 }
@@ -179,7 +179,7 @@ func refHandle(resources: view GpuResources, ref: view ResourceRef) unsafe ret P
 # The authoritative native size of a buffer reference (manager or external).
 func refBufferSize(resources: view GpuResources, ref: view ResourceRef) ret Int {
   if refIsBuffer(resources: resources, ref: ref) is false {
-    ret 0 - 1
+    ret -1
   }
   unsafe {
     ret wgpuBufferGetSize(buffer: refHandle(resources: resources, ref: ref)) as Int

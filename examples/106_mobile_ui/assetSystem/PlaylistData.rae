@@ -209,10 +209,10 @@ func parsePlaylistItem(doc: view JsonDoc, entry: view JsonValue) ret PlaylistIte
   }
   let idxKey: String = "trackIndex"
   let idxFieldIdx: Int = Json.field(doc: doc, this: entry, key: idxKey)
-  var ti: Int = 0 - 1
+  var ti: Int = -1
   if idxFieldIdx >= 0 {
     let idxVal: JsonValue = Json.jsonValueAt(doc: doc, idx: idxFieldIdx)
-    ti = Json.jsonInt(this: idxVal, fallback: 0 - 1)
+    ti = Json.jsonInt(this: idxVal, fallback: -1)
   }
   let plKey: String = "playlistId"
   let plFieldIdx: Int = Json.field(doc: doc, this: entry, key: plKey)

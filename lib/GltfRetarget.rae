@@ -83,7 +83,7 @@ func findJointByKey(sk: view Skeleton, key: view String) ret Int {
     }
     n = n + 1
   }
-  ret 0 - 1
+  ret -1
 }
 
 # Read/write a quaternion packed at slot `i` of a flat `x,y,z,w` List(Float).
@@ -134,7 +134,7 @@ func accumModelRot(
     var n: Int = 0
     loop n < nodeCount {
       if boolAt(list: done, index: n, fallback: false) is false {
-        let p: Int = intAt(list: parent, index: n, fallback: 0 - 1)
+        let p: Int = intAt(list: parent, index: n, fallback: -1)
         let lq: Quat = quatFromList(a: localR, i: n)
         if p < 0 {
           quatIntoList(a: out, i: n, q: lq)
@@ -183,7 +183,7 @@ func cloneSourceForSampling(from: view Skeleton, fromBind: view SkeletonPose) re
   let parent: List(Int) = List.create(Int, cap: from.parent.length)
   i = 0
   loop i < from.parent.length {
-    parent.add(value: intAt(list: from.parent, index: i, fallback: 0 - 1))
+    parent.add(value: intAt(list: from.parent, index: i, fallback: -1))
     i = i + 1
   }
   ret Skeleton {
@@ -266,7 +266,7 @@ func retargetClip(
   let srcOfDst: List(Int) = List.create(Int, cap: to.nodeCount)
   var d: Int = 0
   loop d < to.nodeCount {
-    var s: Int = 0 - 1
+    var s: Int = -1
     if let dstName: String = to.nodeNames.copyAt(index: d) {
       let key: String = jointNameKey(name: dstName)
       var skip: Bool = false
@@ -291,7 +291,7 @@ func retargetClip(
   let chanDst: List(Int) = List.create(Int, cap: to.nodeCount)
   d = 0
   loop d < to.nodeCount {
-    if intAt(list: srcOfDst, index: d, fallback: 0 - 1) >= 0 {
+    if intAt(list: srcOfDst, index: d, fallback: -1) >= 0 {
       chanDst.add(value: d)
     }
     d = d + 1
@@ -335,7 +335,7 @@ func retargetClip(
     # Mdst_key for every dst node.
     var dd: Int = 0
     loop dd < to.nodeCount {
-      let src: Int = intAt(list: srcOfDst, index: dd, fallback: 0 - 1)
+      let src: Int = intAt(list: srcOfDst, index: dd, fallback: -1)
       var a: Quat = Quat.identity()
       if src >= 0 {
         let mk: Quat = quatFromList(a: msrcKey, i: src)
@@ -350,7 +350,7 @@ func retargetClip(
     var m: Int = 0
     loop m < matched {
       let node: Int = intAt(list: chanDst, index: m, fallback: 0)
-      let pnode: Int = intAt(list: to.parent, index: node, fallback: 0 - 1)
+      let pnode: Int = intAt(list: to.parent, index: node, fallback: -1)
       let mkeyN: Quat = quatFromList(a: mdstKey, i: node)
       var rlocal: Quat = mkeyN
       if pnode >= 0 {
@@ -423,7 +423,7 @@ func retargetedChannelCount(c: view Clip, from: view Skeleton, to: view Skeleton
   var kept: Int = 0
   var ch: Int = 0
   loop ch < c.targetNode.length {
-    let srcNode: Int = intAt(list: c.targetNode, index: ch, fallback: 0 - 1)
+    let srcNode: Int = intAt(list: c.targetNode, index: ch, fallback: -1)
     if srcNode >= 0 and srcNode < from.nodeNames.length and intAt(
       list: c.path
       index: ch

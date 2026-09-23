@@ -171,7 +171,7 @@ func resolveCameraPointer(rig: mod CameraRig) {
       # by region. Without this the camera and stick fight over one finger and
       # never release it (the "input goes to both" bug).
       if rig.camGrabId >= 0 and id is rig.camGrabId and pressed {
-        rig.camGrabId = 0 - 1
+        rig.camGrabId = -1
       }
       if rig.camGrabId >= 0 and id is rig.camGrabId {
         # Hold: keep our finger wherever it goes, even into the joystick zone.
@@ -192,7 +192,7 @@ func resolveCameraPointer(rig: mod CameraRig) {
       index = index + 1
     }
     if found is false {
-      rig.camGrabId = 0 - 1
+      rig.camGrabId = -1
     }
     rig.camPointerDown = found
   } else {
@@ -236,9 +236,9 @@ func createCameraRig(camera: view Camera3d) pub ret CameraRig {
     lastX: 0.0
     lastY: 0.0
     camTouchOn: false
-    camExcludeId: 0 - 1
+    camExcludeId: -1
     camJoyActive: false
-    camGrabId: 0 - 1
+    camGrabId: -1
     camZoneX: 0.0
     camZoneY: 0.0
     camZoneR: 0.0 - 1.0

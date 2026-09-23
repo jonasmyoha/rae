@@ -52,7 +52,7 @@ func main() ret Int {
 
   # Out of range CLAMPS rather than failing: a slider or a corrupt saved value
   # must not be able to produce a date that does not exist.
-  let low: CalendarDate = dateFromDayOfYear(year: 2025, dayOfYear: 0 - 5)
+  let low: CalendarDate = dateFromDayOfYear(year: 2025, dayOfYear: -5)
   let high: CalendarDate = dateFromDayOfYear(year: 2025, dayOfYear: 400)
   check(label: "below range clamps to 1 Jan", ok: low.month is 1 and low.day is 1)
   check(label: "above range clamps to 31 Dec", ok: high.month is 12 and high.day is 31)
