@@ -392,6 +392,29 @@ inspector is read-only until the DAW/editor capability design
 (`ui-ecs-refactor-status.md` §2.7) lands; the app is shaped so those are new
 systems, not rewrites.
 
+## The selected-row plate (#38090472)
+
+A selected row is a rounded plate, not a glyph: `chrome/TreeRow` carries a
+`Shape { kind: RoundedRect, radius: 10 }` whose fill is transparent until a
+row binds `Shape.fillSlot` to a palette token, so an UNSELECTED tree renders
+exactly as it did before the plate existed — the checked-in sample references
+still match to the pixel.
+
+**TWO tokens, not one.** `editorRowActive` for the node the inspector
+describes and the arrow keys walk from, `editorRowSelected` for the rest.
+With many rows selected a single flat colour cannot say which row is which —
+the question a one-row selection never has to answer, and the reason the task
+asked for this to "look right with MANY rows selected". Both are palette
+entries, so a theme change carries them and nothing is hardcoded.
+
+The `>` and `-` markers are gone, replaced by the plate. **`*` stays**: a
+COLLAPSED row hiding a selected descendant is not itself selected, so it has
+no plate to speak for it (#72481430). The marker column remains even when
+empty so the label keeps its indent.
+
+`references/TreeSelection.png` pins this as a screenshot diff of a three-row
+selection — a log line cannot check a colour.
+
 ## Collapsing the hierarchy (#72481430)
 
 A row with children carries a chevron (`v` expanded, `>` collapsed); a LEAF
