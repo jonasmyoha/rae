@@ -426,6 +426,49 @@ Three decisions are worth keeping:
   the hover and the click; without it every press on a panel toggle would
   clear the selection.
 
+### Click the same spot again to go up (#73816378)
+
+A click lands on the DEEPEST hit, which is almost never the node you meant —
+you click a Play sprite and you want its Button. Clicking the **same spot
+again** steps one level UP the hit stack, wrapping at the top:
+
+```
+PlayLabel -> PlayButton -> Panel -> Screen -> PlayLabel -> …
+```
+
+`hitStackAt` builds that stack deepest-first: the deepest hit, then each
+ancestor whose own bounds also contain the point. An ancestor that does *not*
+contain the point is skipped rather than ending the walk — a Hug container laid
+out to zero on one axis would otherwise cut the stack off below nodes the user
+can plainly see under the cursor.
+
+Three decisions:
+
+- **"Same spot" is a distance threshold and nothing else** (`clickCycleSlop`,
+  4 px). There is no press-and-hold and no double-click timeout: clicking the
+  same spot ten seconds later still continues the cycle. A few pixels of slop
+  means a shaky hand keeps stepping instead of silently restarting.
+- **The threshold is measured from the point that ARMED the cycle**, not from
+  the previous click. Measuring from the previous click would let a hand
+  drifting 4 px per click walk clear across the canvas without ever leaving
+  the cycle.
+- **A modified click never cycles.** Cmd/Shift/Alt are asking to change the
+  set; stepping up the stack at the same time would make the result depend on
+  how many times you had already clicked there. They take the deepest hit, as
+  a first plain click does.
+
+The stack is captured when the cycle arms and held on `InspectorSystem`, so a
+relayout between clicks cannot renumber the steps under the user. `applySelect`
+clears `cycleActive` on EVERY selection change and `canvasSelectAt` re-arms it
+immediately for its own click — so the reset rule ("a tree click, an arrow key,
+Esc or a modifier click ends the cycle") falls out of one assignment rather
+than a list of cases to keep in sync.
+
+Each step selects through the shared set, so the hierarchy marks the new active
+row (`>`) and the inspector follows. Scrolling that row into view is the one
+piece still missing, and belongs to the hierarchy's own expand/collapse +
+scroll task.
+
 ### The hierarchy (#16096994)
 
 The tree drives the SAME set with the same vocabulary, with one difference
