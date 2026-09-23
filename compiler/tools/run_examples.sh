@@ -374,14 +374,14 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              RAE_UI_HEADLESS=1 RAE_UI_EDITOR_TREE=1 RAE_SDL_HEADLESS_MS=1200 \
              RAE_UI_EDITOR_TEST_TREE_CLICKS="PlayButton" \
              perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-widgets1.log" 2>&1 \
-             && grep -qaF "widgets Size: w=SizeAxis { mode: fill, min: -1, max: -1 } h=SizeAxis { mode: fixed, min: -1, max: -1 }; Layout: kind=horizontal [none|horizontal|vertical|grid|stack] gap=16 · was spaceS" "$TMP_OUT/render-widgets1.log" \
+             && grep -qaF "widgets filter: / to search components:; Size: w=SizeAxis { mode: fill, min: -1, max: -1 } h=SizeAxis { mode: fixed, min: -1, max: -1 }; Layout: kind=horizontal [none|horizontal|vertical|grid|stack] gap=16 · was spaceS" "$TMP_OUT/render-widgets1.log" \
              && grep -qaF "; OnClick: actionId=menu.play maxDelayMs=250; Name: label=PlayButton · computed; NodeId: id=PlayButton · computed" "$TMP_OUT/render-widgets1.log" \
              && ! grep -qaF "Children:" "$TMP_OUT/render-widgets1.log" \
              && (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
                 RAE_UI_HEADLESS=1 RAE_UI_EDITOR_TREE=1 RAE_SDL_HEADLESS_MS=1200 \
                 RAE_UI_EDITOR_TEST_TREE_CLICKS="PlayButton cmd:PlayLabel" \
                 perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-widgets2.log" 2>&1 \
-             && grep -qaF "widgets Size: w=— h=SizeAxis { mode: fixed, min: -1, max: -1 }; Layout (1/2): kind=horizontal" "$TMP_OUT/render-widgets2.log" \
+             && grep -qaF "widgets filter: / to search components:; Size: w=— h=SizeAxis { mode: fixed, min: -1, max: -1 }; Layout (1/2): kind=horizontal" "$TMP_OUT/render-widgets2.log" \
              && (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/Coverage.raescene" \
                 RAE_UI_HEADLESS=1 RAE_UI_EDITOR_TREE=1 RAE_HEADLESS_FRAMES=3 RAE_FIXED_DT=0.05 \
                 RAE_UI_EDITOR_TEST_TREE_CLICKS="FadedBox" \
@@ -397,6 +397,39 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             UI_EDITOR_OK=0
             echo "  generated component widgets failed:"
             cat "$TMP_OUT/render-widgets1.log" "$TMP_OUT/render-widgets2.log" "$TMP_OUT/render-widgets3.log" "$TMP_OUT/render-widgets4.log" 2>/dev/null | grep -av '^\[present\]' | cut -c1-400 | sed 's/^/    /'
+          fi
+          # Add / remove a component, and the filter (#57156455). Three runs,
+          # each going through the same functions the panel's own rows call:
+          #   remove over a MULTI-selection strips the component only from the
+          #     nodes that have it — PlayButton has Shape and PlayLabel does
+          #     not, so "from 1" of a 2-node selection is the whole asymmetry
+          #   add applies to EVERY selected node that lacks it ("to 2")
+          #   the filter narrows BOTH lists at once: with `tran` no present
+          #     component matches and the add list is just TransformFx, which
+          #     is what makes a ~79-entry add list usable at all
+          if (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
+             RAE_UI_HEADLESS=1 RAE_UI_EDITOR_TREE=1 RAE_SDL_HEADLESS_MS=1200 \
+             RAE_UI_EDITOR_TEST_TREE_CLICKS="PlayButton cmd:PlayLabel" \
+             RAE_UI_EDITOR_TEST_COMPONENT="remove:Shape" \
+             perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-comp1.log" 2>&1 \
+             && grep -qaF "removed Shape from 1" "$TMP_OUT/render-comp1.log" \
+             && (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
+                RAE_UI_HEADLESS=1 RAE_UI_EDITOR_TREE=1 RAE_SDL_HEADLESS_MS=1200 \
+                RAE_UI_EDITOR_TEST_TREE_CLICKS="PlayButton cmd:PlayLabel" \
+                RAE_UI_EDITOR_TEST_COMPONENT="add:Constraints" \
+                perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-comp2.log" 2>&1 \
+             && grep -qaF "added Constraints to 2" "$TMP_OUT/render-comp2.log" \
+             && (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
+                RAE_UI_HEADLESS=1 RAE_UI_EDITOR_TREE=1 RAE_SDL_HEADLESS_MS=1200 \
+                RAE_UI_EDITOR_TEST_TREE_CLICKS="PlayButton" \
+                RAE_UI_EDITOR_TEST_COMPONENT="filter:tran" \
+                perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-comp3.log" 2>&1 \
+             && grep -qaF "widgets filter: tran:; add component: TransformFx=add" "$TMP_OUT/render-comp3.log"; then
+            :
+          else
+            UI_EDITOR_OK=0
+            echo "  component add/remove/filter failed:"
+            cat "$TMP_OUT/render-comp1.log" "$TMP_OUT/render-comp2.log" "$TMP_OUT/render-comp3.log" 2>/dev/null | grep -av '^\[present\]' | cut -c1-300 | sed 's/^/    /'
           fi
           # What DRIVES a value, inline with it (#21438052). The generated
           # widgets tag each field with where its value came from, read back
@@ -658,7 +691,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/render-save.log" "$TMP_OUT/render-saved.log" "$TMP_OUT/screenshot-saved.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
           fi
           if [ "$UI_EDITOR_OK" = "1" ]; then
-            echo "PASS: $EXAMPLE_NAME (7 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select, composite multi-selection inspector, generated component widgets, value provenance, canvas selection gestures, click-through cycling, hierarchy multi-selection, Rect widget multi-select read+write, .raepack project open + switch, file picker, camera zoom, outline pools, save path)"
+            echo "PASS: $EXAMPLE_NAME (7 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select, composite multi-selection inspector, generated component widgets, value provenance, component add/remove/filter, canvas selection gestures, click-through cycling, hierarchy multi-selection, Rect widget multi-select read+write, .raepack project open + switch, file picker, camera zoom, outline pools, save path)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (ui editor sample gate)"

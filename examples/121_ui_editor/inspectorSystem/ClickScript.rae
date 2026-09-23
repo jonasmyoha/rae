@@ -25,6 +25,7 @@ open ui/Scene
 open ecs/Entity
 open ecs/ComponentTable
 open inspectorSystem/InspectorSystem
+open inspectorSystem/ComponentEdit
 
 # A point to click, and whether one could be resolved at all.
 type ClickPoint {
@@ -266,4 +267,62 @@ func logInspectorPanel(
     scene: scene
   )
   log("[ui-editor] inspector: {inspectorSummaryLine(chromeSystem: chromeSystem)}")
+}
+
+# Replay a component-list operation against the current selection:
+#
+#   RAE_UI_EDITOR_TEST_COMPONENT="add:Constraints"   add to every selected node
+#   RAE_UI_EDITOR_TEST_COMPONENT="remove:Shape"      strip from those that have it
+#   RAE_UI_EDITOR_TEST_COMPONENT="filter:tran"       narrow the component list
+#
+# Add and remove go through the SAME functions the panel's rows call, so what
+# the gate exercises is the real edit, not a shortcut around it. The filter is
+# set directly because the keystroke path has no headless keyboard.
+func runTestComponent(
+  inspectorSystem: mod InspectorSystem
+  world: mod UiWorld
+  uiSystems: view UiSystems
+  chromeSystem: mod ChromeSystem
+  pageRoot: view EntityId
+  scene: view Scene
+  script: view String
+) {
+  if script.length() is 0 {
+    ret
+  }
+  let colon: Int = script.indexOf(sub: ":")
+  if colon <= 0 {
+    log("[ui-editor] component: expected add:/remove:/filter:<name>, got {script}")
+    ret
+  }
+  let verb: String = script.sub(start: 0, len: colon)
+  let name: String = script.sub(start: colon + 1, len: script.length() - colon - 1)
+  if verb is "filter" {
+    inspectorSystem.componentFilter = "{name}"
+    log("[ui-editor] component filter: {name}")
+  }
+  if verb is "add" {
+    let added: Int = addComponentToSelection(
+      world: world
+      selection: inspectorSystem.selection
+      name: name
+    )
+    log("[ui-editor] added {name} to {added}")
+  }
+  if verb is "remove" {
+    let removed: Int = removeComponentFromSelection(
+      world: world
+      selection: inspectorSystem.selection
+      name: name
+    )
+    log("[ui-editor] removed {name} from {removed}")
+  }
+  logInspectorPanel(
+    inspectorSystem: inspectorSystem
+    world: world
+    uiSystems: uiSystems
+    chromeSystem: chromeSystem
+    sceneRoot: documentSceneRoot(world: world, pageRoot: pageRoot)
+    scene: scene
+  )
 }
