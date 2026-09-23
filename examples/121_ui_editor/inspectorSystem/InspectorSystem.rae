@@ -29,6 +29,7 @@ open ui/UiSystems
 open ui/Scene
 open inspectorSystem/NodeQuery
 open inspectorSystem/RectWidget
+open inspectorSystem/ComponentEdit
 
 # Tree rows: one design unit of indent per depth level.
 const treeIndentPerLevel: Float = 12.0
@@ -75,6 +76,12 @@ type InspectorSystem {
   # system rather than rebuilt per step so the cycle walks ONE stack: a
   # relayout between clicks cannot renumber the steps under the user.
   cycleStack: List(EntityId)
+  # The component-list filter (#57156455): the typed text, and whether the
+  # keyboard is currently feeding it. `/` focuses, Esc clears and unfocuses.
+  # Focus matters because the editor binds BARE letters as panel shortcuts —
+  # without a mode, typing a filter would toggle half the chrome.
+  componentFilter: String
+  filterFocused: Bool
   # The tree list's row order (entity per row), so a row's action maps back.
   # This is also the order a Shift-range spans, which is why the range is
   # over the VISIBLE rows and not over the hierarchy: what the user is
@@ -98,6 +105,8 @@ func createInspectorSystem(world: mod UiWorld) ret InspectorSystem {
     cycleDepth: 0
     cycleActive: false
     cycleStack: List.create(EntityId, cap: 8)
+    componentFilter: ""
+    filterFocused: false
     treeEntities: List.create(EntityId, cap: 64)
   }
 }
@@ -281,6 +290,12 @@ enum SelectMode {
 # of rows instead of adding one. Everything else — Cmd/Ctrl toggles, Alt/Opt
 # subtracts, plain replaces — is literally the same call, which is the point:
 # one vocabulary, one funnel, two surfaces.
+# The lowercase letter for a 0-based alphabet index.
+func letterText(index: view Int) ret String {
+  let alphabet: String = "abcdefghijklmnopqrstuvwxyz"
+  ret alphabet.sub(start: index, len: 1)
+}
+
 func treeSelectMode() ret SelectMode {
   let mode: SelectMode = pointerSelectMode()
   if mode is SelectMode.add {
@@ -666,6 +681,67 @@ func inspectorUpdate(
             changed = true
           }
         }
+      }
+    }
+  }
+  # Component add / remove from the inspector's own rows (#57156455). Both
+  # act on the WHOLE selection, and both report how many entities actually
+  # changed — "removed Shape from 2" is the only way to tell a real edit from
+  # a click on a component only one of the selected nodes had.
+  loop var a: Int = 0, a < actionCount, ++a {
+    let actionId: String = uiActionAt(world: world, index: a)
+    if actionId.startsWith(prefix: "compRemove:") {
+      let name: String = actionId.sub(start: 11, len: actionId.length() - 11)
+      let removed: Int = removeComponentFromSelection(
+        world: world
+        selection: inspectorSystem.selection
+        name: name
+      )
+      log("[ui-editor] removed {name} from {removed}")
+      changed = true
+    }
+    if actionId.startsWith(prefix: "compAdd:") {
+      let name: String = actionId.sub(start: 8, len: actionId.length() - 8)
+      let added: Int = addComponentToSelection(
+        world: world
+        selection: inspectorSystem.selection
+        name: name
+      )
+      log("[ui-editor] added {name} to {added}")
+      changed = true
+    }
+  }
+  # The component filter (#57156455). `/` focuses it; while focused the letter
+  # keys type into it instead of firing the editor's panel shortcuts, which is
+  # why App.rae gates those on `filterFocused`.
+  if Sdl3.isKeyPressed(key: Keys.keySlash) {
+    inspectorSystem.filterFocused = true
+    changed = true
+  }
+  if inspectorSystem.filterFocused {
+    if Sdl3.isKeyPressed(key: Keys.keyEscape) {
+      inspectorSystem.componentFilter = ""
+      inspectorSystem.filterFocused = false
+      changed = true
+    }
+    if Sdl3.isKeyPressed(key: Keys.keyBackspace) {
+      let length: Int = inspectorSystem.componentFilter.length()
+      if length > 0 {
+        inspectorSystem.componentFilter = inspectorSystem.componentFilter.sub(
+          start: 0
+          len: length - 1
+        )
+        changed = true
+      }
+    }
+    # keyA..keyZ are contiguous scancodes, so the alphabet is one loop rather
+    # than 26 arms.
+    loop var letter: Int = 0, letter < 26, ++letter {
+      if Sdl3.isKeyPressed(key: Keys.keyA + letter) {
+        inspectorSystem.componentFilter = "{inspectorSystem.componentFilter}{letterText(
+          index: letter
+        )}"
+        changed = true
       }
     }
   }

@@ -173,9 +173,12 @@ func addWidgetRow(
   name: view String
   value: view String
   indent: view Int
+  # The `OnClick.actionId` this row binds. "" for a row that does nothing —
+  # a field row — so only the affordances are clickable.
+  action: view String
 ) {
-  var keys: List(String) = List.create(String, cap: 4)
-  var values: List(String) = List.create(String, cap: 4)
+  var keys: List(String) = List.create(String, cap: 5)
+  var values: List(String) = List.create(String, cap: 5)
   keys.add(value: "id")
   values.add(value: "{id}")
   keys.add(value: "name")
@@ -184,6 +187,8 @@ func addWidgetRow(
   values.add(value: "{value}")
   keys.add(value: "indent")
   values.add(value: "{indent}")
+  keys.add(value: "action")
+  values.add(value: "{action}")
   rows.add(value: ListViewRow { keys: own keys, values: own values })
 }
 
@@ -272,6 +277,7 @@ func tableWidgetRows(
       name: "{field}"
       value: text
       indent: 1
+      action: ""
     )
   }
 }
