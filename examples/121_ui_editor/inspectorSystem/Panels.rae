@@ -453,10 +453,15 @@ func collectTreeRows(
   selected: view EntityId
   selection: view List(EntityId)
   collapsed: view List(String)
+  filter: view String
   entities: mod List(EntityId)
   rows: mod List(ListViewRow)
 ) {
   if isNone(this: entity) or rows.length >= 256 {
+    ret
+  }
+  # Filtered out, and nothing beneath matches either: the whole branch goes.
+  if treeRowMatches(world: world, entity: entity, filter: filter) is false {
     ret
   }
   let nodeId: String = nodeIdOf(world: world, entity: entity)
@@ -488,7 +493,7 @@ func collectTreeRows(
   }
   var values: List(String) = List.create(String, cap: 8)
   values.add(value: "{entity.index}")
-  values.add(value: "{nodeId}")
+  values.add(value: treeRowLabelOf(world: world, entity: entity))
   values.add(value: "{(depth.toFloat() * treeIndentPerLevel + 6.0).toInt()}")
   values.add(value: treeRowMarker(
     world: world
@@ -519,6 +524,7 @@ func collectTreeRows(
         selected: selected
         selection: selection
         collapsed: collapsed
+        filter: filter
         entities: entities
         rows: rows
       )
@@ -530,7 +536,7 @@ func collectTreeRows(
 # the selection marked) on the ListView tagged `EditorList { source:
 # hierarchy }`.
 func syncTreePanel(
-  chromeSystem: view ChromeSystem
+  chromeSystem: mod ChromeSystem
   world: mod UiWorld
   inspectorSystem: mod InspectorSystem
   sceneRoot: view EntityId
@@ -552,9 +558,21 @@ func syncTreePanel(
     selected: inspectorSystem.selected
     selection: inspectorSystem.selection
     collapsed: inspectorSystem.collapsedNodeIds
+    filter: inspectorSystem.treeFilter
     entities: inspectorSystem.treeEntities
     rows: rows
   )
+  # The header carries the node count and the filter, so the panel says how
+  # much of the tree you are looking at without selecting anything.
+  var header: String = "Hierarchy ({rows.length})"
+  if inspectorSystem.treeFilterFocused {
+    header = "Hierarchy ({rows.length})  filter: {inspectorSystem.treeFilter}_"
+  } else {
+    if inspectorSystem.treeFilter.length() > 0 {
+      header = "Hierarchy ({rows.length})  filter: {inspectorSystem.treeFilter}"
+    }
+  }
+  chromeSystem.treeHeader = header
   setEditorListRows(world: world, list: list, rows: own rows)
 }
 

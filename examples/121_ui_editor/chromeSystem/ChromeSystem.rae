@@ -39,6 +39,8 @@ type ChromeSystem {
   projectTitle: String
   frameLabel: String
   safeAreaLabel: String
+  # The hierarchy panel's header: "Hierarchy (n)" plus the filter (#89663819).
+  treeHeader: String
   inspectorNodeId: String
   inspectorType: String
   inspectorComponents: String
@@ -69,6 +71,7 @@ func createChromeSystem() ret ChromeSystem {
     projectTitle: "Project"
     frameLabel: ""
     safeAreaLabel: ""
+    treeHeader: "Hierarchy"
     inspectorNodeId: "nothing selected"
     inspectorType: "click a node, or use the arrows"
     inspectorComponents: ""
@@ -120,6 +123,9 @@ func editorTextFor(chromeSystem: view ChromeSystem, key: view String) ret String
   }
   if key is "editor.safeAreaLabel" {
     ret "{chromeSystem.safeAreaLabel}"
+  }
+  if key is "editor.tree.header" {
+    ret "{chromeSystem.treeHeader}"
   }
   if key is "editor.inspector.nodeId" {
     ret "{chromeSystem.inspectorNodeId}"
