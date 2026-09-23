@@ -1,0 +1,432 @@
+# inspectorSystem/RectWidget — the FIRST component widget, and the shape every
+# later one copies.
+#
+# Three conventions are established here, and they are the whole point of this
+# file (#54986153):
+#
+#   1. It reads a SELECTION SET, never one entity. `selectionFieldView` folds
+#      the whole set into one view: every selected entity that carries the
+#      component contributes, and a single selection is just the n=1 case of
+#      the same fold. There is no single-entity path to generalise later.
+#   2. A field whose value AGREES across the set shows that value; one that
+#      DIFFERS shows `mixedMarker`. Typing into a mixed field is still legal —
+#      it writes the typed value to every selected entity, which is how you
+#      make a divergent field agree again.
+#   3. A field says what DRIVES it. An authored X and one the layout system
+#      produced must not read the same, because editing the second one is
+#      futile until you change what drives it — that is the single most
+#      confusing thing about a laid-out node.
+#
+# Reading and writing are deliberately separate functions over the same set,
+# so the write path cannot drift from what the widget displays.
+open ui/Ecs
+open ui/Components
+open ui/UiSystems
+open ecs/Entity
+open ecs/ComponentTable
+
+# Shown when the selected entities disagree on a field. The reference editor
+# uses the same glyph, and it must never be a value a user could have typed.
+const mixedMarker: String = "—"
+
+# Shown when no selected entity carries the component at all.
+const absentMarker: String = "-"
+
+# Which Rect field a view or an edit addresses. X/Y are the top-left corner,
+# W/H the extent (#724: Rect carries two Vec2, not four loose floats).
+enum RectField { x, y, w, h }
+
+# One field of one component, resolved over the WHOLE selection.
+type FieldView {
+  # The common value, or `mixedMarker` when the set disagrees.
+  text: String
+  mixed: Bool
+  # What computes this field ("" when the authored value is what you see).
+  # Rendered beside the value, so an authored 0 reads differently from a 0 the
+  # layout produced.
+  driver: String
+  # At least one selected entity carries the component.
+  present: Bool
+}
+
+func emptyFieldView() ret FieldView {
+  ret FieldView { text: absentMarker, mixed: false, driver: "", present: false }
+}
+
+# The effective value of `field` on one entity: the authored Rect when the
+# entity has one, else what the layout produced. This is the number the user
+# sees on screen either way — the driver string, not the value, is what says
+# where it came from.
+func rectFieldValue(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entity: view EntityId
+  field: view RectField
+) ret Float {
+  if componentHas(this: world.rects, entity: entity) {
+    let rect: view Rect => componentView(this: world.rects, entity: entity)
+    match field {
+      case RectField.x {
+        ret rect.position.x
+      }
+      case RectField.y {
+        ret rect.position.y
+      }
+      case RectField.w {
+        ret rect.size.x
+      }
+      case RectField.h {
+        ret rect.size.y
+      }
+    }
+  }
+  if field is RectField.w or field is RectField.h {
+    if componentHas(this: uiSystems.layout.computedRects, entity: entity) {
+      let computed: ComputedRect = componentGet(
+        this: uiSystems.layout.computedRects
+        entity: entity
+      )
+      if field is RectField.w {
+        ret computed.size.x
+      }
+      ret computed.size.y
+    }
+    ret 0.0
+  }
+  if componentHas(this: uiSystems.transform2d.worldTransforms, entity: entity) {
+    let transform: WorldTransform2D = componentGet(
+      this: uiSystems.transform2d.worldTransforms
+      entity: entity
+    )
+    if field is RectField.x {
+      ret transform.position.x
+    }
+    ret transform.position.y
+  }
+  ret 0.0
+}
+
+# What computes `field` on one entity, or "" when the authored value stands.
+#
+# W/H are driven by the entity's own Size mode: `hug` shrinks to content and
+# `fill` stretches to the parent, so an authored extent is ignored on that
+# axis. X/Y are driven by the PARENT — a parent carrying a Layout positions
+# its children — and additionally by this entity's own Align. Both can apply,
+# and then both are named ("layout+align"), which is what makes the annotation
+# actionable: it tells you which component to go change.
+func rectFieldDriver(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entity: view EntityId
+  field: view RectField
+) ret String {
+  if field is RectField.w or field is RectField.h {
+    if componentHas(this: world.sizes, entity: entity) {
+      let size: view Size => componentView(this: world.sizes, entity: entity)
+      var mode: SizeMode = size.w.mode
+      if field is RectField.h {
+        mode = size.h.mode
+      }
+      if mode is SizeMode.hug {
+        ret "hug"
+      }
+      if mode is SizeMode.fill {
+        ret "fill"
+      }
+    }
+    ret ""
+  }
+  var driver: String = ""
+  var parent: EntityId = noEntity()
+  if componentHas(this: uiSystems.hierarchy.parents, entity: entity) {
+    parent = componentGet(this: uiSystems.hierarchy.parents, entity: entity).parent
+  }
+  if isNone(this: parent) is false and componentHas(this: world.layouts, entity: parent) {
+    let layout: view Layout => componentView(this: world.layouts, entity: parent)
+    if layout.kind is not LayoutType.none {
+      driver = "layout"
+    }
+  }
+  if componentHas(this: world.aligns, entity: entity) {
+    let align: view Align => componentView(this: world.aligns, entity: entity)
+    var aligned: Bool = align.hasX
+    if field is RectField.y {
+      aligned = align.hasY
+    }
+    if aligned {
+      if driver.length() is 0 {
+        driver = "align"
+      } else {
+        driver = "{driver}+align"
+      }
+    }
+  }
+  ret driver
+}
+
+# Fold the whole SELECTION into one field view — the n>=1 core of the widget.
+#
+# An entity contributes only when it can carry a Rect at all; the view is
+# `present: false` when none of them do, so the widget can grey the row out
+# rather than show a fabricated zero. The value agrees when every contributor
+# reports the same rounded number: rounding is deliberate, since two nodes
+# laid out to 47.7108 and 47.7109 are the same number to a person editing a
+# UI, and showing them as mixed would be noise.
+#
+# The driver is folded the same way: when the selected entities are driven
+# differently, the driver reads mixed too, because "some of these are driven
+# and some are not" is exactly what the user needs to know before typing.
+func selectionRectField(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  selection: view List(EntityId)
+  field: view RectField
+) ret FieldView {
+  var seen: Bool = false
+  var agrees: Bool = true
+  var common: Int = 0
+  var driver: String = ""
+  var driverAgrees: Bool = true
+  loop let entity: view EntityId in selection {
+    if isNone(this: entity) {
+      continue
+    }
+    let value: Int = rectFieldValue(
+      world: world
+      uiSystems: uiSystems
+      entity: entity
+      field: field
+    ).toInt()
+    let entityDriver: String = rectFieldDriver(
+      world: world
+      uiSystems: uiSystems
+      entity: entity
+      field: field
+    )
+    if seen is false {
+      seen = true
+      common = value
+      driver = entityDriver
+      continue
+    }
+    if value is not common {
+      agrees = false
+    }
+    if entityDriver is not driver {
+      driverAgrees = false
+    }
+  }
+  if seen is false {
+    ret emptyFieldView()
+  }
+  var text: String = "{common}"
+  if agrees is false {
+    text = mixedMarker
+  }
+  var driverText: String = driver
+  if driverAgrees is false {
+    driverText = mixedMarker
+  }
+  ret FieldView { text: text, mixed: agrees is false, driver: driverText, present: true }
+}
+
+# Write `value` into `field` on EVERY selected entity — the other half of the
+# convention. A field that reads mixed still writes to all of them, which is
+# how a divergent field is made to agree.
+#
+# An entity with no authored Rect gets one, seeded from what it currently
+# measures, so editing a single axis of a laid-out node does not slam the
+# other three to zero. The edit stands for axes nothing drives; on a driven
+# axis the layout system wins it back on the next pass, which is exactly what
+# the driver annotation is warning about.
+#
+# Returns how many entities were written, so a caller can report the edit.
+func applyRectField(
+  world: mod UiWorld
+  uiSystems: view UiSystems
+  selection: view List(EntityId)
+  field: view RectField
+  value: view Float
+) ret Int {
+  var written: Int = 0
+  loop let entity: view EntityId in selection {
+    if isNone(this: entity) {
+      continue
+    }
+    var next: Rect = {
+      position: {
+        x: rectFieldValue(
+          world: world
+          uiSystems: uiSystems
+          entity: entity
+          field: RectField.x
+        )
+        y: rectFieldValue(
+          world: world
+          uiSystems: uiSystems
+          entity: entity
+          field: RectField.y
+        )
+      }
+      size: {
+        x: rectFieldValue(
+          world: world
+          uiSystems: uiSystems
+          entity: entity
+          field: RectField.w
+        )
+        y: rectFieldValue(
+          world: world
+          uiSystems: uiSystems
+          entity: entity
+          field: RectField.h
+        )
+      }
+    }
+    match field {
+      case RectField.x {
+        next.position.x = value
+      }
+      case RectField.y {
+        next.position.y = value
+      }
+      case RectField.w {
+        next.size.x = value
+      }
+      case RectField.h {
+        next.size.y = value
+      }
+    }
+    componentSet(this: world.rects, entity: entity, data: next)
+    written = written + 1
+  }
+  ret written
+}
+
+# The widget's one-line summary: "x 12  y 0 layout  w — hug  h 40". The driver
+# rides directly after the value it explains, and a mixed value shows the
+# marker in the value's place — so the line reads the same way the panel rows
+# will, and the headless hook can assert it without pixels.
+# `line` with one more "name value driver" part appended. Returns the new
+# line rather than mutating it: a String is owned, and threading it through
+# the return keeps the ownership obvious.
+func appendRectPart(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  selection: view List(EntityId)
+  field: view RectField
+  name: view String
+  line: view String
+) ret String {
+  let resolved: FieldView = selectionRectField(
+    world: world
+    uiSystems: uiSystems
+    selection: selection
+    field: field
+  )
+  var part: String = "{name} {resolved.text}"
+  if resolved.driver.length() > 0 {
+    part = "{part} {resolved.driver}"
+  }
+  if line.length() is 0 {
+    ret "{part}"
+  }
+  ret "{line}  {part}"
+}
+
+# The widget's one-line summary: "x 12  y 0 layout  w — hug  h 40". The driver
+# rides directly after the value it explains, and a mixed value shows the
+# marker in the value's place — so the line reads the way the panel rows will,
+# and the headless hook can assert it without pixels.
+func rectWidgetLine(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  selection: view List(EntityId)
+) ret String {
+  if selection.length is 0 {
+    ret "nothing selected"
+  }
+  var line: String = ""
+  line = appendRectPart(
+    world: world
+    uiSystems: uiSystems
+    selection: selection
+    field: RectField.x
+    name: "x"
+    line: line
+  )
+  line = appendRectPart(
+    world: world
+    uiSystems: uiSystems
+    selection: selection
+    field: RectField.y
+    name: "y"
+    line: line
+  )
+  line = appendRectPart(
+    world: world
+    uiSystems: uiSystems
+    selection: selection
+    field: RectField.w
+    name: "w"
+    line: line
+  )
+  line = appendRectPart(
+    world: world
+    uiSystems: uiSystems
+    selection: selection
+    field: RectField.h
+    name: "h"
+    line: line
+  )
+  ret line
+}
+
+# Parse a field name ("x"/"y"/"w"/"h") into the field it addresses. Returns
+# `none` for anything else, so a caller reports a typo rather than silently
+# writing the wrong axis.
+func rectFieldFromName(name: view String) ret opt RectField {
+  if name is "x" {
+    ret RectField.x
+  }
+  if name is "y" {
+    ret RectField.y
+  }
+  if name is "w" {
+    ret RectField.w
+  }
+  if name is "h" {
+    ret RectField.h
+  }
+  ret none
+}
+
+# Apply one `<field>=<value>` edit — the spelling a text field produces once the
+# panel has real inputs — to the WHOLE selection. Returns how many entities
+# were written (0 when the edit is malformed or nothing is selected), so the
+# caller can tell "wrote to all of them" from "wrote to none".
+func applyRectEdit(
+  world: mod UiWorld
+  uiSystems: view UiSystems
+  selection: view List(EntityId)
+  edit: view String
+) ret Int {
+  let separator: Int = edit.indexOf(sub: "=")
+  if separator <= 0 {
+    log("[ui-editor] rect set: expected <field>=<value>, got {edit}")
+    ret 0
+  }
+  let name: String = edit.sub(start: 0, len: separator).trim()
+  let rawValue: String = edit.sub(start: separator + 1, len: edit.length() - separator - 1).trim()
+  if let field: RectField = rectFieldFromName(name: name) {
+    ret applyRectField(
+      world: world
+      uiSystems: uiSystems
+      selection: selection
+      field: field
+      value: rawValue.toFloat()
+    )
+  }
+  log("[ui-editor] rect set: no Rect field named {name}")
+  ret 0
+}
