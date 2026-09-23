@@ -1,0 +1,169 @@
+# A VIRTUAL (default-mode) ListView delivers a `Shape.fillSlot` row binding to
+# the row scene's ROOT and to a CHILD, on the first bind and on a same-key
+# rebind where only that non-key cell changes (a highlight flipping on a row
+# whose label stays). Pinned because it was reported as silently inert — the
+# report was a test-harness blind spot (#85867026), and this is the proof the
+# lib path is sound: the Text binding is the control, the row that loses its
+# slot must read back "" again.
+import Json
+import String
+import ui/Components
+open ui/Ecs
+import ui/Registry
+open ui/Scene
+open ui/SceneLoader
+open ui/listViewSystem/ListViewSystem
+open ui/SceneInstance
+open ecs/Entity
+open ecs/ComponentTable
+open ui/UiSystems
+
+func cell(
+  keys: mod List(String)
+  values: mod List(String)
+  key: view String
+  value: view String
+) {
+  keys.add(value: "{key}")
+  values.add(value: "{value}")
+}
+
+func row(label: view String, slot: view String) ret ListViewRow {
+  let keys: List(String) = List.create(String, cap: 4)
+  let values: List(String) = List.create(String, cap: 4)
+  cell(
+    keys: keys
+    values: values
+    key: "id"
+    value: label
+  )
+  cell(
+    keys: keys
+    values: values
+    key: "label"
+    value: label
+  )
+  cell(
+    keys: keys
+    values: values
+    key: "fillSlot"
+    value: slot
+  )
+  ret ListViewRow { keys: own keys, values: own values }
+}
+
+func rowScene() ret String {
+  var s: String = ""
+  s = s.concat(other: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Row\",\"nodes\":\{")
+  s = s.concat(other: "\"Row\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":30\},")
+  s = s.concat(other: "\"Shape\":\{\"kind\":\"RoundedRect\",\"fill\":\"#00000000\",\"radius\":8\},")
+  s = s.concat(other: "\"Children\":[\"Label\"]\},")
+  s = s.concat(other: "\"Label\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":200,\"h\":30\},")
+  s = s.concat(other: "\"Shape\":\{\"kind\":\"RoundedRect\",\"fill\":\"#00000000\",\"radius\":8\},")
+  s = s.concat(other: "\"Text\":\{\"text\":\"x\"\}\}")
+  s = s.concat(other: "\}\}")
+  ret s
+}
+
+func listScene() ret String {
+  var s: String = ""
+  s = s.concat(
+    other: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"List\",\"nodes\":\{\"List\":\{"
+  )
+  s = s.concat(other: "\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":200\},")
+  s = s.concat(other: "\"ListView\":\{\"itemSceneId\":\"RowScene\",\"itemKeyField\":\"id\",")
+  s = s.concat(other: "\"itemHeight\":30,\"itemGap\":2,\"visibleItemCount\":4,\"overscanRows\":0,")
+  s = s.concat(other: "\"bindings\":[")
+  s = s.concat(
+    other: "\{\"nodeId\":\"Row\",\"component\":\"Shape\",\"field\":\"fillSlot\",\"itemField\":\"fillSlot\"\},"
+  )
+  s = s.concat(
+    other: "\{\"nodeId\":\"Label\",\"component\":\"Shape\",\"field\":\"fillSlot\",\"itemField\":\"fillSlot\"\},"
+  )
+  s = s.concat(
+    other: "\{\"nodeId\":\"Label\",\"component\":\"Text\",\"field\":\"text\",\"itemField\":\"label\"\}"
+  )
+  s = s.concat(other: "]\}\}\}\}")
+  ret s
+}
+
+func describe(world: view UiWorld, rowEntity: view EntityId, nodeId: view String) ret String {
+  let page: String = "listRow{rowEntity.index}"
+  if let raw: Int = findNodeInPage(world: world, pageId: page, nodeId: nodeId) {
+    let entity: EntityId = nodeEntity(world: world, index: raw)
+    var out: String = "{nodeId}#{entity.index}"
+    if componentHas(this: world.shapes, entity: entity) {
+      out = "{out} fillSlot='{componentView(this: world.shapes, entity: entity).fillSlot}'"
+    } else {
+      out = "{out} NO-SHAPE"
+    }
+    if componentHas(this: world.texts, entity: entity) {
+      out = "{out} text='{componentView(this: world.texts, entity: entity).text}'"
+    }
+    ret out
+  }
+  ret "{nodeId} (not found in {page})"
+}
+
+func main() {
+  let registry: SceneRegistry = createSceneRegistry()
+  let rs: Scene = parseScene(source: rowScene())
+  rs.sceneId = "RowScene"
+  registerScene(reg: registry, key: "RowScene", scene: own rs)
+  let world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  let ls: Scene = parseScene(source: listScene())
+  ls.sceneId = "list"
+  loadScene(world: world, uiSystems: uiSystems, scene: ls)
+  var listEntity: EntityId = noEntity()
+  if let raw: Int = world.nodeIds.get(k: "List") {
+    listEntity = id(v: raw)
+  }
+  let lv: ListView = componentGet(this: world.listViews, entity: listEntity)
+  log("mode virtual: {lv.mode is ListViewMode.virtual} bindings: {lv.bindings.length}")
+  let rows: List(ListViewRow) = List.create(ListViewRow, cap: 3)
+  rows.add(value: row(label: "one", slot: "accent"))
+  rows.add(value: row(label: "two", slot: ""))
+  componentSet(this: world.listViewDatas, entity: listEntity, data: ListViewData { rows: own rows })
+  listViewSystem(world: world, uiSystems: uiSystems, scenes: registry)
+  unsafe {
+    let ch: view Children => componentView(this: world.childrens, entity: listEntity)
+    log("row entities: {ch.ids.length}")
+    var i: Int = 0
+    loop i < ch.ids.length {
+      let r: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
+      log("row {i}: root#{r.index} rootHasShape={componentHas(this: world.shapes, entity: r)}")
+      log("  {describe(world: world, rowEntity: r, nodeId: "Row")}")
+      log("  {describe(world: world, rowEntity: r, nodeId: "Label")}")
+      i = i + 1
+    }
+  }
+  # --- REBIND with the SAME keys: only the non-key cell `fillSlot` changes.
+  # This is what the editor does on every selection change: the labels stay,
+  # the plate token flips. Row "two" gains a slot, row "one" loses its slot.
+  let rows2: List(ListViewRow) = List.create(ListViewRow, cap: 3)
+  rows2.add(value: row(label: "one", slot: ""))
+  rows2.add(value: row(label: "two", slot: "accent"))
+  componentSet(
+    this: world.listViewDatas
+    entity: listEntity
+    data: ListViewData { rows: own rows2 }
+  )
+  listViewSystem(world: world, uiSystems: uiSystems, scenes: registry)
+  log("--- after same-key rebind (expect one='' two='accent') ---")
+  unsafe {
+    let ch: view Children => componentView(this: world.childrens, entity: listEntity)
+    var i: Int = 0
+    loop i < ch.ids.length {
+      let r: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
+      log(
+        "row {i}: {describe(world: world, rowEntity: r, nodeId: "Row")} | {describe(
+          world: world
+          rowEntity: r
+          nodeId: "Label"
+        )}"
+      )
+      i = i + 1
+    }
+  }
+}

@@ -262,7 +262,7 @@ func runTestTreeClicks(
 # Sync the panel and log what it now shows. The script drives the real
 # gestures, so this is the composite an interactive user would be looking at.
 func logInspectorPanel(
-  inspectorSystem: view InspectorSystem
+  inspectorSystem: mod InspectorSystem
   world: view UiWorld
   uiSystems: view UiSystems
   chromeSystem: mod ChromeSystem
@@ -276,6 +276,16 @@ func logInspectorPanel(
     inspectorSystem: inspectorSystem
     sceneRoot: sceneRoot
     scene: scene
+  )
+  # The TREE rows too — they carry the selection (marker / plate cells), and a
+  # scripted selection made after boot would otherwise leave them bound to
+  # the empty selection `inspectorAfterLoad` built them with. That blind spot
+  # produced a false "binding is inert" report (#85867026).
+  syncTreePanel(
+    chromeSystem: chromeSystem
+    world: world
+    inspectorSystem: inspectorSystem
+    sceneRoot: sceneRoot
   )
   log("[ui-editor] inspector: {inspectorSummaryLine(chromeSystem: chromeSystem)}")
 }
