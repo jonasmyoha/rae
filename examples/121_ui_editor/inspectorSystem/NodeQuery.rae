@@ -1,0 +1,214 @@
+# inspectorSystem/NodeQuery — read-only questions about a document node.
+#
+# Hit testing, node ids, and walking the hierarchy: everything the inspector
+# asks ABOUT the document, as opposed to what it does to the selection or
+# draws in the panels. None of it touches `InspectorSystem`, which is exactly
+# why it can live here — the selection code in InspectorSystem.rae opens this
+# module, and nothing here needs to open that one back.
+import String
+open ui/Ecs
+open ui/Components
+open ui/SceneLoader
+open ui/SceneBundles
+open ui/BindingComponents
+open ui/inputSystem/InputSystem
+open ecs/Entity
+open ecs/ComponentTable
+open ui/UiSystems
+
+# The document scene's root: mountPage mounts the scene's root node ONTO the
+# page-root entity, so the two are the same entity.
+func documentSceneRoot(world: view UiWorld, pageRoot: view EntityId) ret EntityId {
+  ret pageRoot
+}
+
+# Deepest active node under (x, y) in `entity`'s subtree, or none.
+func deepestNodeAt(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entity: view EntityId
+  x: view Float
+  y: view Float
+) ret EntityId {
+  if uiEntityActive(world: world, entity: entity) is false {
+    ret noEntity()
+  }
+  if componentHas(this: world.childrens, entity: entity) {
+    let children: view Children => componentView(this: world.childrens, entity: entity)
+    loop var i: Int = children.ids.length - 1, i >= 0, --i {
+      let hit: EntityId = deepestNodeAt(
+        world: world
+        uiSystems: uiSystems
+        entity: children.ids.copyAtFallback(index: i, fallback: noEntity())
+        x: x
+        y: y
+      )
+      if isNone(this: hit) is false {
+        ret hit
+      }
+    }
+  }
+  if uiPointInEntity(
+    world: world
+    uiSystems: uiSystems
+    entity: entity
+    x: x
+    y: y
+  ) {
+    ret entity
+  }
+  ret noEntity()
+}
+
+func nodeIdOf(world: view UiWorld, entity: view EntityId) ret String {
+  if isNone(this: entity) {
+    ret ""
+  }
+  if componentHas(this: world.nodeIdComponents, entity: entity) {
+    ret "{componentGet(this: world.nodeIdComponents, entity: entity).id}"
+  }
+  ret "entity {entity.index}"
+}
+
+# First node in `entity`'s subtree whose NodeId is `nodeId`.
+func findNodeByIdIn(world: view UiWorld, entity: view EntityId, nodeId: view String) ret EntityId {
+  if isNone(this: entity) {
+    ret noEntity()
+  }
+  if componentHas(this: world.nodeIdComponents, entity: entity) {
+    if componentGet(this: world.nodeIdComponents, entity: entity).id is nodeId {
+      ret entity
+    }
+  }
+  if componentHas(this: world.childrens, entity: entity) {
+    let children: view Children => componentView(this: world.childrens, entity: entity)
+    loop var i: Int = 0, i < children.ids.length, ++i {
+      let found: EntityId = findNodeByIdIn(
+        world: world
+        entity: children.ids.copyAtFallback(index: i, fallback: noEntity())
+        nodeId: nodeId
+      )
+      if isNone(this: found) is false {
+        ret found
+      }
+    }
+  }
+  ret noEntity()
+}
+
+func parentOf(world: view UiWorld, uiSystems: view UiSystems, entity: view EntityId) ret EntityId {
+  if isNone(this: entity) or componentHas(this: uiSystems.hierarchy.parents, entity: entity) is false {
+    ret noEntity()
+  }
+  ret componentGet(this: uiSystems.hierarchy.parents, entity: entity).parent
+}
+
+# The sibling `step` places away in the parent's Children (clamped).
+func siblingOf(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entity: view EntityId
+  step: view Int
+) ret EntityId {
+  let parent: EntityId = parentOf(world: world, uiSystems: uiSystems, entity: entity)
+  if isNone(this: parent) or componentHas(this: world.childrens, entity: parent) is false {
+    ret entity
+  }
+  let children: view Children => componentView(this: world.childrens, entity: parent)
+  loop var i: Int = 0, i < children.ids.length, ++i {
+    if children.ids.copyAtFallback(index: i, fallback: noEntity()) is entity {
+      var next: Int = i + step
+      if next < 0 {
+        next = 0
+      }
+      if next > children.ids.length - 1 {
+        next = children.ids.length - 1
+      }
+      ret children.ids.copyAtFallback(index: next, fallback: entity)
+    }
+  }
+  ret entity
+}
+
+func firstChildOf(world: view UiWorld, entity: view EntityId) ret EntityId {
+  if isNone(this: entity) or componentHas(this: world.childrens, entity: entity) is false {
+    ret entity
+  }
+  let children: view Children => componentView(this: world.childrens, entity: entity)
+  if children.ids.length is 0 {
+    ret entity
+  }
+  ret children.ids.copyAtFallback(index: 0, fallback: entity)
+}
+
+# The parent chain as `a > b > c`, stopping at the document scene root.
+func parentChainOf(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entity: view EntityId
+  sceneRoot: view EntityId
+) ret String {
+  var chain: String = ""
+  var current: EntityId = parentOf(world: world, uiSystems: uiSystems, entity: entity)
+  var guard: Int = 0
+  loop isNone(this: current) is false and guard < 32 {
+    if chain.length() > 0 {
+      chain = "{nodeIdOf(world: world, entity: current)} > {chain}"
+    } else {
+      chain = nodeIdOf(world: world, entity: current)
+    }
+    if current is sceneRoot {
+      current = noEntity()
+    } else {
+      current = parentOf(world: world, uiSystems: uiSystems, entity: current)
+    }
+    guard = guard + 1
+  }
+  if chain.length() is 0 {
+    ret "(root)"
+  }
+  ret chain
+}
+
+# Fill the inspector's status texts from the selection (TextBinding
+# editor.inspector.* in chrome/Inspector.raescene).
+# "not a lib component: Foo, Bar" — the selected node's pending (app-owned)
+# components, read-only; "" when it has none.
+func appComponentsLine(world: view UiWorld, entity: view EntityId) ret String {
+  var names: String = ""
+  loop let pending: view PendingComponent in world.pendingComponents {
+    if pending.entity is entity {
+      if names.length() > 0 {
+        names = "{names}, {pending.name}"
+      } else {
+        names = "{pending.name}"
+      }
+    }
+  }
+  if names.length() is 0 {
+    ret ""
+  }
+  ret "not a lib component: {names}"
+}
+
+# The node's bundle provenance (ui/SceneBundles BundleRefs): which bundles it
+# was expanded from, which components it inherited whole (shown dimmed, in
+# brackets) and which it authored a field over — "" for a node without
+# bundles. The per-field diff waits for the save path.
+func bundleProvenanceLine(world: view UiWorld, entity: view EntityId) ret String {
+  if componentHas(this: world.bundleRefs, entity: entity) is false {
+    ret ""
+  }
+  let refs: view BundleRefs => componentView(this: world.bundleRefs, entity: entity)
+  if refs.names.length is 0 {
+    ret ""
+  }
+  var line: String = "  bundles: {refs.names.join(sep: ", ")}"
+  if refs.inherited.length > 0 {
+    line = "{line}  [inherited: {refs.inherited.join(sep: ", ")}]"
+  }
+  if refs.overridden.length > 0 {
+    line = "{line}  overrides: {refs.overridden.join(sep: ", ")}"
+  }
+  ret line
+}

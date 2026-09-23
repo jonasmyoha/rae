@@ -26,6 +26,7 @@ open app3d/UiShell
 open ecs/Entity
 open ecs/ComponentTable
 open ui/UiSystems
+open inspectorSystem/NodeQuery
 open inspectorSystem/RectWidget
 
 # Tree rows: one design unit of indent per depth level.
@@ -38,15 +39,24 @@ const treeRowPitch: Float = 44.0
 type InspectorSystem {
   outlineFors: ComponentTable(OutlineFor)
   hovered: EntityId
-  # The ANCHOR of the selection: the entity the outline follows and the arrow
-  # keys walk from. It is always `selection`'s last element, never a second
-  # source of truth.
+  # The ACTIVE node: the one the outline follows, the inspector describes and
+  # the arrow keys walk from. Always a member of `selection` (or none).
   selected: EntityId
   # The SELECTION SET (#54986153). Every component widget reads this, so a
   # single selection is just the n=1 case and no widget has a single-entity
   # path to generalise later.
   selection: List(EntityId)
+  # Where a Shift-range starts (#16096994). A file browser has THREE pieces of
+  # selection state, not two, and collapsing them is what makes Shift+click
+  # feel wrong: the set, the active row, and the range anchor. A plain /
+  # Cmd / Alt click moves the anchor here; a Shift+click does NOT, so
+  # shift-clicking twice re-spans from the same origin instead of ratcheting
+  # the range outward one click at a time.
+  rangeAnchor: EntityId
   # The tree list's row order (entity per row), so a row's action maps back.
+  # This is also the order a Shift-range spans, which is why the range is
+  # over the VISIBLE rows and not over the hierarchy: what the user is
+  # selecting is the run of rows they can see between two clicks.
   treeEntities: List(EntityId)
 }
 
@@ -60,88 +70,9 @@ func createInspectorSystem(world: mod UiWorld) ret InspectorSystem {
     hovered: noEntity()
     selected: noEntity()
     selection: List.create(EntityId, cap: 8)
+    rangeAnchor: noEntity()
     treeEntities: List.create(EntityId, cap: 64)
   }
-}
-
-# The document scene's root: mountPage mounts the scene's root node ONTO the
-# page-root entity, so the two are the same entity.
-func documentSceneRoot(world: view UiWorld, pageRoot: view EntityId) ret EntityId {
-  ret pageRoot
-}
-
-# Deepest active node under (x, y) in `entity`'s subtree, or none.
-func deepestNodeAt(
-  world: view UiWorld
-  uiSystems: view UiSystems
-  entity: view EntityId
-  x: view Float
-  y: view Float
-) ret EntityId {
-  if uiEntityActive(world: world, entity: entity) is false {
-    ret noEntity()
-  }
-  if componentHas(this: world.childrens, entity: entity) {
-    let children: view Children => componentView(this: world.childrens, entity: entity)
-    loop var i: Int = children.ids.length - 1, i >= 0, --i {
-      let hit: EntityId = deepestNodeAt(
-        world: world
-        uiSystems: uiSystems
-        entity: children.ids.copyAtFallback(index: i, fallback: noEntity())
-        x: x
-        y: y
-      )
-      if isNone(this: hit) is false {
-        ret hit
-      }
-    }
-  }
-  if uiPointInEntity(
-    world: world
-    uiSystems: uiSystems
-    entity: entity
-    x: x
-    y: y
-  ) {
-    ret entity
-  }
-  ret noEntity()
-}
-
-func nodeIdOf(world: view UiWorld, entity: view EntityId) ret String {
-  if isNone(this: entity) {
-    ret ""
-  }
-  if componentHas(this: world.nodeIdComponents, entity: entity) {
-    ret "{componentGet(this: world.nodeIdComponents, entity: entity).id}"
-  }
-  ret "entity {entity.index}"
-}
-
-# First node in `entity`'s subtree whose NodeId is `nodeId`.
-func findNodeByIdIn(world: view UiWorld, entity: view EntityId, nodeId: view String) ret EntityId {
-  if isNone(this: entity) {
-    ret noEntity()
-  }
-  if componentHas(this: world.nodeIdComponents, entity: entity) {
-    if componentGet(this: world.nodeIdComponents, entity: entity).id is nodeId {
-      ret entity
-    }
-  }
-  if componentHas(this: world.childrens, entity: entity) {
-    let children: view Children => componentView(this: world.childrens, entity: entity)
-    loop var i: Int = 0, i < children.ids.length, ++i {
-      let found: EntityId = findNodeByIdIn(
-        world: world
-        entity: children.ids.copyAtFallback(index: i, fallback: noEntity())
-        nodeId: nodeId
-      )
-      if isNone(this: found) is false {
-        ret found
-      }
-    }
-  }
-  ret noEntity()
 }
 
 # Move an outline node onto `target`'s world rect (or hide it for none). The
@@ -235,123 +166,6 @@ func placeOutlines(
   ret changed
 }
 
-func parentOf(world: view UiWorld, uiSystems: view UiSystems, entity: view EntityId) ret EntityId {
-  if isNone(this: entity) or componentHas(this: uiSystems.hierarchy.parents, entity: entity) is false {
-    ret noEntity()
-  }
-  ret componentGet(this: uiSystems.hierarchy.parents, entity: entity).parent
-}
-
-# The sibling `step` places away in the parent's Children (clamped).
-func siblingOf(
-  world: view UiWorld
-  uiSystems: view UiSystems
-  entity: view EntityId
-  step: view Int
-) ret EntityId {
-  let parent: EntityId = parentOf(world: world, uiSystems: uiSystems, entity: entity)
-  if isNone(this: parent) or componentHas(this: world.childrens, entity: parent) is false {
-    ret entity
-  }
-  let children: view Children => componentView(this: world.childrens, entity: parent)
-  loop var i: Int = 0, i < children.ids.length, ++i {
-    if children.ids.copyAtFallback(index: i, fallback: noEntity()) is entity {
-      var next: Int = i + step
-      if next < 0 {
-        next = 0
-      }
-      if next > children.ids.length - 1 {
-        next = children.ids.length - 1
-      }
-      ret children.ids.copyAtFallback(index: next, fallback: entity)
-    }
-  }
-  ret entity
-}
-
-func firstChildOf(world: view UiWorld, entity: view EntityId) ret EntityId {
-  if isNone(this: entity) or componentHas(this: world.childrens, entity: entity) is false {
-    ret entity
-  }
-  let children: view Children => componentView(this: world.childrens, entity: entity)
-  if children.ids.length is 0 {
-    ret entity
-  }
-  ret children.ids.copyAtFallback(index: 0, fallback: entity)
-}
-
-# The parent chain as `a > b > c`, stopping at the document scene root.
-func parentChainOf(
-  world: view UiWorld
-  uiSystems: view UiSystems
-  entity: view EntityId
-  sceneRoot: view EntityId
-) ret String {
-  var chain: String = ""
-  var current: EntityId = parentOf(world: world, uiSystems: uiSystems, entity: entity)
-  var guard: Int = 0
-  loop isNone(this: current) is false and guard < 32 {
-    if chain.length() > 0 {
-      chain = "{nodeIdOf(world: world, entity: current)} > {chain}"
-    } else {
-      chain = nodeIdOf(world: world, entity: current)
-    }
-    if current is sceneRoot {
-      current = noEntity()
-    } else {
-      current = parentOf(world: world, uiSystems: uiSystems, entity: current)
-    }
-    guard = guard + 1
-  }
-  if chain.length() is 0 {
-    ret "(root)"
-  }
-  ret chain
-}
-
-# Fill the inspector's status texts from the selection (TextBinding
-# editor.inspector.* in chrome/Inspector.raescene).
-# "not a lib component: Foo, Bar" — the selected node's pending (app-owned)
-# components, read-only; "" when it has none.
-func appComponentsLine(world: view UiWorld, entity: view EntityId) ret String {
-  var names: String = ""
-  loop let pending: view PendingComponent in world.pendingComponents {
-    if pending.entity is entity {
-      if names.length() > 0 {
-        names = "{names}, {pending.name}"
-      } else {
-        names = "{pending.name}"
-      }
-    }
-  }
-  if names.length() is 0 {
-    ret ""
-  }
-  ret "not a lib component: {names}"
-}
-
-# The node's bundle provenance (ui/SceneBundles BundleRefs): which bundles it
-# was expanded from, which components it inherited whole (shown dimmed, in
-# brackets) and which it authored a field over — "" for a node without
-# bundles. The per-field diff waits for the save path.
-func bundleProvenanceLine(world: view UiWorld, entity: view EntityId) ret String {
-  if componentHas(this: world.bundleRefs, entity: entity) is false {
-    ret ""
-  }
-  let refs: view BundleRefs => componentView(this: world.bundleRefs, entity: entity)
-  if refs.names.length is 0 {
-    ret ""
-  }
-  var line: String = "  bundles: {refs.names.join(sep: ", ")}"
-  if refs.inherited.length > 0 {
-    line = "{line}  [inherited: {refs.inherited.join(sep: ", ")}]"
-  }
-  if refs.overridden.length > 0 {
-    line = "{line}  overrides: {refs.overridden.join(sep: ", ")}"
-  }
-  ret line
-}
-
 # Add `entity` to the selection and make it the anchor, or drop it when it is
 # already selected (a modifier-click). Kept beside `selectNode` so both halves
 # of the selection contract live in one place.
@@ -442,11 +256,34 @@ func syncInspectorPanel(
   )
 }
 
+# The row marker: `>` for the ACTIVE node (the one the inspector describes),
+# `-` for the other selected rows. Two glyphs rather than one because with a
+# range selected, "which of these is the arrow keys' origin" is not guessable
+# from a uniform highlight.
+func treeRowMarker(
+  selection: view List(EntityId)
+  entity: view EntityId
+  selected: view EntityId
+) ret String {
+  if entity is selected {
+    ret ">"
+  }
+  loop var i: Int = 0, i < selection.length, ++i {
+    if let member: EntityId = selection.copyAt(index: i) {
+      if member is entity {
+        ret "-"
+      }
+    }
+  }
+  ret ""
+}
+
 func collectTreeRows(
   world: view UiWorld
   entity: view EntityId
   depth: view Int
   selected: view EntityId
+  selection: view List(EntityId)
   entities: mod List(EntityId)
   rows: mod List(ListViewRow)
 ) {
@@ -464,11 +301,7 @@ func collectTreeRows(
   values.add(value: "{entity.index}")
   values.add(value: nodeIdOf(world: world, entity: entity))
   values.add(value: "{(depth.toFloat() * treeIndentPerLevel + 6.0).toInt()}")
-  var marker: String = ""
-  if entity is selected {
-    marker = ">"
-  }
-  values.add(value: marker)
+  values.add(value: treeRowMarker(selection: selection, entity: entity, selected: selected))
   values.add(value: "inspect:{entity.index}")
   rows.add(value: ListViewRow { keys: own keys, values: own values })
   entities.add(value: entity)
@@ -480,6 +313,7 @@ func collectTreeRows(
         entity: children.ids.copyAtFallback(index: i, fallback: noEntity())
         depth: depth + 1
         selected: selected
+        selection: selection
         entities: entities
         rows: rows
       )
@@ -511,6 +345,7 @@ func syncTreePanel(
     entity: sceneRoot
     depth: 0
     selected: inspectorSystem.selected
+    selection: inspectorSystem.selection
     entities: inspectorSystem.treeEntities
     rows: rows
   )
@@ -550,7 +385,18 @@ func selectNode(inspectorSystem: mod InspectorSystem, world: mod UiWorld, entity
 #              because with stacked nodes a toggle is ambiguous about which
 #              one you meant to drop, and "remove this" is worth being able
 #              to say without having to know the current state.
-enum SelectMode { replace, toggle, add, subtract }
+#   range    — Shift+click IN THE TREE: select the contiguous run of visible
+#              rows between the range anchor and this row. The canvas has no
+#              row order, so there Shift stays a plain `add`; the modifier is
+#              the same key, and what a RANGE means is simply a property of
+#              the surface you clicked.
+enum SelectMode {
+  replace
+  toggle
+  add
+  subtract
+  range
+}
 
 # Which mode the modifier keys currently held ask for.
 #
@@ -558,6 +404,18 @@ enum SelectMode { replace, toggle, add, subtract }
 # an explicit "not this one", so it wins over toggle, which in turn is more
 # specific than add. Ranking them (rather than declaring the combination
 # invalid) means a stray Shift never silently turns an Alt+click into an add.
+# The tree's mapping: identical to the canvas except that Shift spans a range
+# of rows instead of adding one. Everything else — Cmd/Ctrl toggles, Alt/Opt
+# subtracts, plain replaces — is literally the same call, which is the point:
+# one vocabulary, one funnel, two surfaces.
+func treeSelectMode() ret SelectMode {
+  let mode: SelectMode = pointerSelectMode()
+  if mode is SelectMode.add {
+    ret SelectMode.range
+  }
+  ret mode
+}
+
 func pointerSelectMode() ret SelectMode {
   if Sdl3.isKeyDown(key: Keys.keyLAlt) or Sdl3.isKeyDown(key: Keys.keyRAlt) {
     ret SelectMode.subtract
@@ -592,18 +450,97 @@ func isSelected(inspectorSystem: view InspectorSystem, entity: view EntityId) re
 # add nothing, not to throw the selection away — and losing a carefully built
 # set to a near-miss is exactly the kind of thing that makes an editor feel
 # hostile.
+# The row index of `entity` in the tree's visible order, or -1.
+func treeRowOf(inspectorSystem: view InspectorSystem, entity: view EntityId) ret Int {
+  loop var i: Int = 0, i < inspectorSystem.treeEntities.length, ++i {
+    if let row: EntityId = inspectorSystem.treeEntities.copyAt(index: i) {
+      if row is entity {
+        ret i
+      }
+    }
+  }
+  ret 0 - 1
+}
+
+# Select the contiguous run of visible rows between the range anchor and
+# `entity`. The set is REPLACED by the run rather than unioned with it, which
+# is what lets a second Shift+click shrink a range that overshot — the
+# behaviour every file browser has and the reason the anchor must not move.
+#
+# Falls back to a plain replace when either end is not on screen (the anchor's
+# row can be collapsed away, or the tree may not have been built yet), since
+# a range with no origin is just a click.
+func applyRange(
+  inspectorSystem: mod InspectorSystem
+  world: mod UiWorld
+  entity: view EntityId
+) ret Bool {
+  let toRow: Int = treeRowOf(inspectorSystem: inspectorSystem, entity: entity)
+  var fromRow: Int = treeRowOf(
+    inspectorSystem: inspectorSystem
+    entity: inspectorSystem.rangeAnchor
+  )
+  if toRow < 0 {
+    # The clicked node is not a visible row at all — the tree panel is closed,
+    # or it has not been built yet. A range over rows that are not on screen
+    # is meaningless, so degrade to a plain click rather than doing nothing:
+    # Shift+arrow must still move the active node with the tree hidden.
+    selectNode(inspectorSystem: inspectorSystem, world: world, entity: entity)
+    ret true
+  }
+  if fromRow < 0 {
+    fromRow = toRow
+  }
+  var first: Int = fromRow
+  var last: Int = toRow
+  if first > last {
+    first = toRow
+    last = fromRow
+  }
+  let anchor: EntityId = inspectorSystem.rangeAnchor
+  inspectorSystem.selection.clear()
+  loop var i: Int = first, i <= last, ++i {
+    if let row: EntityId = inspectorSystem.treeEntities.copyAt(index: i) {
+      inspectorSystem.selection.add(value: row)
+    }
+  }
+  inspectorSystem.selected = entity
+  # The anchor deliberately survives the range: `selectNode` / `selectAddNode`
+  # would have moved it, which is why a range does not go through them.
+  inspectorSystem.rangeAnchor = anchor
+  log(
+    "[ui-editor] selection ({inspectorSystem.selection.length}): {selectionNodeIds(
+      inspectorSystem: inspectorSystem
+      world: world
+    )}"
+  )
+  ret true
+}
+
 func applySelect(
   inspectorSystem: mod InspectorSystem
   world: mod UiWorld
   entity: view EntityId
   mode: view SelectMode
 ) ret Bool {
+  if mode is SelectMode.range {
+    if isNone(this: entity) {
+      ret false
+    }
+    ret applyRange(inspectorSystem: inspectorSystem, world: world, entity: entity)
+  }
+  # Every non-range gesture re-origins the range: after a plain, toggling or
+  # subtracting click, the next Shift+click spans from THAT row.
+  if isNone(this: entity) is false {
+    inspectorSystem.rangeAnchor = entity
+  }
   if mode is SelectMode.replace {
     if isNone(this: entity) {
       if inspectorSystem.selection.length is 0 {
         ret false
       }
       selectNode(inspectorSystem: inspectorSystem, world: world, entity: noEntity())
+      inspectorSystem.rangeAnchor = noEntity()
       log("[ui-editor] deselected")
       ret true
     }
@@ -742,11 +679,48 @@ func inspectorUpdate(
       changed = true
     }
   }
-  # The keyboard paths below still move a single ANCHOR and replace the set;
-  # arrow-key range extension belongs to the hierarchy's own task.
+  # A tree row click carries `inspect:<entity index>` — an ENTITY index, not a
+  # row index, so the live tree can rebuild under the user (it refreshes
+  # constantly) without a click landing on whatever slid into that row.
+  #
+  # It runs BEFORE the keyboard block reads the active node, and goes straight
+  # through the funnel rather than via the `selection` local below: a
+  # Cmd+click that removes the ACTIVE row does not move the active node, and
+  # the local's `is not selected` guard would have swallowed it.
+  let actionCount: Int = uiActionCount(world: world)
+  loop var a: Int = 0, a < actionCount, ++a {
+    let actionId: String = uiActionAt(world: world, index: a)
+    if actionId.startsWith(prefix: "inspect:") {
+      let index: Int = actionId.sub(start: 8, len: actionId.length() - 8).toInt()
+      loop var t: Int = 0, t < inspectorSystem.treeEntities.length, ++t {
+        let candidate: EntityId = inspectorSystem.treeEntities.copyAtFallback(
+          index: t
+          fallback: noEntity()
+        )
+        if candidate.index is index {
+          if applySelect(
+            inspectorSystem: inspectorSystem
+            world: world
+            entity: candidate
+            mode: treeSelectMode()
+          ) {
+            changed = true
+          }
+        }
+      }
+    }
+  }
+  # The arrows walk the active node; Shift+arrow spans a range to wherever it
+  # lands, so extending with the keyboard and extending with the mouse are the
+  # same operation over the same anchor.
   var selection: EntityId = inspectorSystem.selected
+  var keyboardMode: SelectMode = SelectMode.replace
+  if Sdl3.isKeyDown(key: Keys.keyLShift) or Sdl3.isKeyDown(key: Keys.keyRShift) {
+    keyboardMode = SelectMode.range
+  }
   if Sdl3.isKeyPressed(key: Keys.keyEscape) {
     selection = noEntity()
+    keyboardMode = SelectMode.replace
   }
   if isNone(this: selection) is false {
     if Sdl3.isKeyPressed(key: Keys.keyUp) {
@@ -775,23 +749,6 @@ func inspectorUpdate(
       selection = firstChildOf(world: world, entity: selection)
     }
   }
-  # A tree row click carries `inspect:<entity index>`.
-  let actionCount: Int = uiActionCount(world: world)
-  loop var a: Int = 0, a < actionCount, ++a {
-    let actionId: String = uiActionAt(world: world, index: a)
-    if actionId.startsWith(prefix: "inspect:") {
-      let index: Int = actionId.sub(start: 8, len: actionId.length() - 8).toInt()
-      loop var t: Int = 0, t < inspectorSystem.treeEntities.length, ++t {
-        let candidate: EntityId = inspectorSystem.treeEntities.copyAtFallback(
-          index: t
-          fallback: noEntity()
-        )
-        if candidate.index is index {
-          selection = candidate
-        }
-      }
-    }
-  }
   if Sdl3.isKeyPressed(key: Keys.keyT) {
     toggleEditorPanel(chromeSystem: chromeSystem, world: world, kind: EditorPanelKind.tree)
     changed = true
@@ -801,7 +758,7 @@ func inspectorUpdate(
       inspectorSystem: inspectorSystem
       world: world
       entity: selection
-      mode: SelectMode.replace
+      mode: keyboardMode
     ) {
       changed = true
     }
