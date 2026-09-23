@@ -227,6 +227,39 @@ func runTestTreeClicks(
     }
     # `parent` is not a click: it walks the whole selection up a level, the
     # affordance the click-through gesture cannot express.
+    # `collapse:<nodeId>` / `expand:<nodeId>`: the chevron's effect without a
+    # pointer. Writes the same `collapsedNodeIds` the chevron action does.
+    if trimmed.startsWith(prefix: "collapse:") or trimmed.startsWith(prefix: "expand:") {
+      let wantCollapsed: Bool = trimmed.startsWith(prefix: "collapse:")
+      var nodeId: String = trimmed.sub(start: 7, len: trimmed.length() - 7)
+      if wantCollapsed {
+        nodeId = trimmed.sub(start: 9, len: trimmed.length() - 9)
+      }
+      var at: Int = 0 - 1
+      loop var i: Int = 0, i < inspectorSystem.collapsedNodeIds.length, ++i {
+        if let name: String = inspectorSystem.collapsedNodeIds.copyAt(index: i) {
+          if name is nodeId {
+            at = i
+          }
+        }
+      }
+      if wantCollapsed and at < 0 {
+        inspectorSystem.collapsedNodeIds.add(value: "{nodeId}")
+      }
+      if wantCollapsed is false and at >= 0 {
+        inspectorSystem.collapsedNodeIds.removeAt(index: at)
+      }
+      # Rebuild the rows NOW, as a chevron click does (it sets `changed`, which
+      # resyncs the panel). Without this a following `shift:` would range over
+      # the pre-collapse rows.
+      syncTreePanel(
+        chromeSystem: chromeSystem
+        world: world
+        inspectorSystem: inspectorSystem
+        sceneRoot: sceneRoot
+      )
+      continue
+    }
     if trimmed is "parent" {
       selectParentOfSelection(
         inspectorSystem: inspectorSystem
@@ -287,6 +320,18 @@ func logInspectorPanel(
     inspectorSystem: inspectorSystem
     sceneRoot: sceneRoot
   )
+  # Read the rows AFTER the resync above: `treeEntities` is rebuilt there, and
+  # logging it earlier reports the previous sync's tree.
+  var visible: String = ""
+  loop let row: view EntityId in inspectorSystem.treeEntities {
+    let name: String = nodeIdOf(world: world, entity: row)
+    if visible.length() is 0 {
+      visible = "{name}"
+    } else {
+      visible = "{visible},{name}"
+    }
+  }
+  log("[ui-editor] tree rows ({inspectorSystem.treeEntities.length}): {visible}")
   log("[ui-editor] inspector: {inspectorSummaryLine(chromeSystem: chromeSystem)}")
 }
 

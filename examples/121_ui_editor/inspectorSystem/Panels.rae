@@ -359,14 +359,60 @@ func setWidgetRows(
   setEditorListRows(world: world, list: list, rows: own rows)
 }
 
+# Is `nodeId` collapsed?
+func treeCollapsed(collapsed: view List(String), nodeId: view String) ret Bool {
+  loop let name: view String in collapsed {
+    if name is nodeId {
+      ret true
+    }
+  }
+  ret false
+}
+
+# Does the subtree under `entity` (excluding it) contain a selected node? Used
+# to mark a COLLAPSED row that is hiding part of the selection — collapsing
+# keeps descendants selected (dropping them would silently shrink a set the
+# user built), so the row has to say that something is in there.
+func subtreeHasSelection(
+  world: view UiWorld
+  entity: view EntityId
+  selection: view List(EntityId)
+) ret Bool {
+  if componentHas(this: world.childrens, entity: entity) is false {
+    ret false
+  }
+  let children: view Children => componentView(this: world.childrens, entity: entity)
+  loop var i: Int = 0, i < children.ids.length, ++i {
+    let child: EntityId = children.ids.copyAtFallback(index: i, fallback: noEntity())
+    if isNone(this: child) {
+      continue
+    }
+    loop var k: Int = 0, k < selection.length, ++k {
+      if let member: EntityId = selection.copyAt(index: k) {
+        if member is child {
+          ret true
+        }
+      }
+    }
+    if subtreeHasSelection(world: world, entity: child, selection: selection) {
+      ret true
+    }
+  }
+  ret false
+}
+
 # The row marker: `>` for the ACTIVE node (the one the inspector describes),
-# `-` for the other selected rows. Two glyphs rather than one because with a
-# range selected, "which of these is the arrow keys' origin" is not guessable
-# from a uniform highlight.
+# `-` for the other selected rows, and `*` for a COLLAPSED row hiding a
+# selected descendant. Three glyphs rather than one because with a range
+# selected, "which of these is the arrow keys' origin" is not guessable from a
+# uniform highlight, and a collapsed row that silently hid part of the
+# selection would be worse still.
 func treeRowMarker(
+  world: view UiWorld
   selection: view List(EntityId)
   entity: view EntityId
   selected: view EntityId
+  hidden: view Bool
 ) ret String {
   if entity is selected {
     ret ">"
@@ -378,6 +424,9 @@ func treeRowMarker(
       }
     }
   }
+  if hidden and subtreeHasSelection(world: world, entity: entity, selection: selection) {
+    ret "*"
+  }
   ret ""
 }
 
@@ -387,11 +436,29 @@ func collectTreeRows(
   depth: view Int
   selected: view EntityId
   selection: view List(EntityId)
+  collapsed: view List(String)
   entities: mod List(EntityId)
   rows: mod List(ListViewRow)
 ) {
   if isNone(this: entity) or rows.length >= 256 {
     ret
+  }
+  let nodeId: String = nodeIdOf(world: world, entity: entity)
+  var hasChildren: Bool = false
+  if componentHas(this: world.childrens, entity: entity) {
+    hasChildren = componentView(this: world.childrens, entity: entity).ids.length > 0
+  }
+  let isCollapsed: Bool = treeCollapsed(collapsed: collapsed, nodeId: nodeId)
+  # A leaf has no chevron at all: a disclosure control that discloses nothing
+  # is the classic way a tree lies about its shape.
+  var chevron: String = ""
+  var chevronAction: String = ""
+  if hasChildren {
+    chevron = "v"
+    if isCollapsed {
+      chevron = ">"
+    }
+    chevronAction = "treeToggle:{nodeId}"
   }
   var keys: List(String) = {
     "id"
@@ -399,15 +466,31 @@ func collectTreeRows(
     "indent"
     "marker"
     "action"
+    "chevron"
+    "chevronAction"
   }
-  var values: List(String) = List.create(String, cap: 5)
+  var values: List(String) = List.create(String, cap: 7)
   values.add(value: "{entity.index}")
-  values.add(value: nodeIdOf(world: world, entity: entity))
+  values.add(value: "{nodeId}")
   values.add(value: "{(depth.toFloat() * treeIndentPerLevel + 6.0).toInt()}")
-  values.add(value: treeRowMarker(selection: selection, entity: entity, selected: selected))
+  values.add(value: treeRowMarker(
+    world: world
+    selection: selection
+    entity: entity
+    selected: selected
+    hidden: isCollapsed
+  ))
   values.add(value: "inspect:{entity.index}")
+  values.add(value: chevron)
+  values.add(value: chevronAction)
   rows.add(value: ListViewRow { keys: own keys, values: own values })
   entities.add(value: entity)
+  # A collapsed node contributes its own row and stops. `entities` therefore
+  # holds exactly the VISIBLE rows, which is what makes a Shift-range span
+  # what the user can see rather than the whole DFS (#72481430).
+  if isCollapsed {
+    ret
+  }
   if componentHas(this: world.childrens, entity: entity) {
     let children: view Children => componentView(this: world.childrens, entity: entity)
     loop var i: Int = 0, i < children.ids.length, ++i {
@@ -417,6 +500,7 @@ func collectTreeRows(
         depth: depth + 1
         selected: selected
         selection: selection
+        collapsed: collapsed
         entities: entities
         rows: rows
       )
@@ -449,6 +533,7 @@ func syncTreePanel(
     depth: 0
     selected: inspectorSystem.selected
     selection: inspectorSystem.selection
+    collapsed: inspectorSystem.collapsedNodeIds
     entities: inspectorSystem.treeEntities
     rows: rows
   )
