@@ -392,7 +392,9 @@ inspector is read-only until the DAW/editor capability design
 (`ui-ecs-refactor-status.md` §2.7) lands; the app is shaped so those are new
 systems, not rewrites.
 
-## Canvas selection (#20778145)
+## Selection (#20778145, #16096994)
+
+### The canvas
 
 The editor keeps ONE selection set — `InspectorSystem.selection`, with
 `selection`'s last member as the ANCHOR (`selected`) — and the canvas, the
@@ -424,13 +426,43 @@ Three decisions are worth keeping:
   the hover and the click; without it every press on a panel toggle would
   clear the selection.
 
+### The hierarchy (#16096994)
+
+The tree drives the SAME set with the same vocabulary, with one difference
+that a row order makes possible: **Shift spans a contiguous RANGE** of visible
+rows instead of adding a single node (`treeSelectMode` maps `add` → `range`;
+everything else passes through unchanged). Arrow keys move the active node and
+Shift+arrow spans to wherever it lands, so extending by keyboard and extending
+by mouse are one operation over one anchor.
+
+That range is why selection state is THREE fields and not two — collapsing
+them is what makes Shift+click feel wrong in a hand-rolled tree:
+
+| field | meaning | moved by |
+|---|---|---|
+| `selection` | the set | every gesture |
+| `selected` | the ACTIVE node — what the inspector describes, where arrows start | every gesture |
+| `rangeAnchor` | where a Shift-range spans FROM | plain / Cmd / Alt click, arrows — **not** Shift |
+
+Because a Shift+click does not move the anchor, a second Shift+click re-spans
+from the same origin rather than ratcheting the range outward, so a range that
+overshot can be shrunk. The range also REPLACES the set rather than unioning
+with it, which is the other half of being able to shrink.
+
+Rows key on node identity, never row index: the row's action id carries the
+ENTITY index, so the live tree (which rebuilds constantly) cannot hand a click
+to whatever slid into that row. The marker column shows `>` for the active
+node and `-` for the other selected rows — two glyphs, because with a range
+selected "which of these is the arrow keys' origin" is not guessable from a
+uniform highlight.
+
 Selected nodes other than the anchor are outlined by an `OutlinePool` with
 `matches: "selection"` (`chrome/SelectionOutlineItem`). The anchor keeps its
 own single `OutlineFor { role: selection }` outline, so a selection of one
 renders exactly as it did before multi-selection existed.
 
-`RAE_UI_EDITOR_TEST_CLICKS` replays a script of canvas clicks through that same
-gesture path once after the first layout — `"[mod:]<nodeId>"` clicks the middle
+`RAE_UI_EDITOR_TEST_CLICKS` (canvas) and `RAE_UI_EDITOR_TEST_TREE_CLICKS`
+(hierarchy rows) replay a script of clicks through that same gesture path once after the first layout — `"[mod:]<nodeId>"` clicks the middle
 of a node's on-screen rect, `"[mod:]at:<x>,<y>"` clicks raw coordinates (how
 you click empty canvas), and the run logs the resulting set. That is what the
 example gate asserts; there is deliberately no back door that sets the
