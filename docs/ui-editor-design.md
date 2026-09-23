@@ -392,6 +392,67 @@ inspector is read-only until the DAW/editor capability design
 (`ui-ecs-refactor-status.md` §2.7) lands; the app is shaped so those are new
 systems, not rewrites.
 
+## Component widgets are generated from reflection (#24323144)
+
+No widget is written per component. `inspectorSystem/ComponentWidget.rae`
+walks every `ComponentTable` of `UiWorld` — `loop let table: view
+ComponentTable(any) in fields(world)` — picks the one whose `typeName(table)`
+is the component asked for, and hands it to a generic helper whose `T` is
+**inferred from that binding**. Inside the helper `T` is a real type, so
+`componentView` yields a `view T` and `fields(value)` renders its fields.
+Add a component to `UiWorld` and it has a widget; nothing here names one.
+
+What a field row shows, all from reflection: the field's **name**, its value in
+Rae's own spelling (`"{f}"` — `SizeAxis { mode: fixed, min: -1, max: -1 }`),
+and for an **enum** the current member plus the picker list
+(`kind=horizontal [none|horizontal|vertical|grid|stack]`, from
+`enumMembers(F)`, which folds to `[]` for a non-enum so the same line
+compiles for every field type). Field ORDER is declaration order. Every row
+folds over the SELECTION SET with the RectWidget conventions — common value or
+the mixed marker — and a component only some of the selection carries heads
+its rows with `(have/total)`.
+
+**The override table.** `widgetOverride(name) ret WidgetSpec` is the
+hand-written refinement, keyed by component name and merged over the
+generated default exactly the way the reference editor merges custom entries
+over generated ones. Today it carries: `bespoke` (Rect — RectWidget's line
+with its driver annotation replaces the generic rows), `hideFields`
+(runtime state such as `ScrollState.y`, rewritten every frame), `unit`
+(`px` on Padding/Margin/Offset), and `step` / `min` / `max` (Opacity:
+`±0.05 [0..1]`). Fields whose TYPE is runtime plumbing — `EntityId`,
+`List(EntityId)`, a ListView's materialised rows — are hidden by type so no
+override has to list them, and a component with no visible field gets no
+header (Children).
+
+**Decided: no language change for the metadata.** The task allowed one. Range,
+step, unit, read-only and grouping are per-component EDITOR concerns, and
+every way of putting them on the type was worse than a table:
+
+- an `@range(0, 1)` attribute is the `@`-sigil vocabulary AGENTS.md rules out;
+- a field keyword (`opacity: Float range 0 1 step 0.05`) is a real language
+  feature whose only consumer is one tool's inspector, and it would put
+  presentation (a unit, an increment) into a type that the layout system,
+  the scene loader and the serializer also read;
+- what reflection ALREADY gives — name, type, order, enum members, value text
+  — is everything that is a property of the type. What is missing is
+  precisely what is not.
+
+If a second consumer of per-field metadata appears (a serializer wanting
+`read-only`, say), the shape to reach for is a compile-time plain function
+over the FIELD in the spirit of `fieldName` / `typeName` — never a sigil.
+
+**A compiler gap this hit.** A `fields()` loop is UNROLLED into straight-line
+code per field, so `continue` inside one has no enclosing loop. Sema rejects
+that in a plain or directly-called generic body — but NOT when the generic's
+`T` is inferred through a `ComponentTable(any)` field-loop binding; there the
+bare `continue` reaches the C compiler. Nested `if`s express the skip; the
+bug is queued with its repro.
+
+The generated widgets render as the `components` ListView
+(`chrome/ComponentRow`, one row per field, indent from the row cell), and
+`RAE_UI_EDITOR_TEST_*_CLICKS` logs them as one `widgets Comp: f=v …; Comp2: …`
+line the example gate asserts.
+
 ## The inspector is multi-selection only (#82314313)
 
 There is no single-selection code path. `syncInspectorPanel` renders the
