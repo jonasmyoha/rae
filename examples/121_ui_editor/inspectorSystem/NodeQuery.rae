@@ -174,7 +174,11 @@ func parentChainOf(
 # editor.inspector.* in chrome/Inspector.raescene).
 # "not a lib component: Foo, Bar" — the selected node's pending (app-owned)
 # components, read-only; "" when it has none.
-func appComponentsLine(world: view UiWorld, entity: view EntityId) ret String {
+# The app components this entity carries that `lib` does not know — comma
+# joined, bare. The inspector tallies these across a selection exactly like
+# the lib components, so this returns the NAMES and leaves the wording to the
+# caller.
+func pendingComponentNames(world: view UiWorld, entity: view EntityId) ret String {
   var names: String = ""
   loop let pending: view PendingComponent in world.pendingComponents {
     if pending.entity is entity {
@@ -185,10 +189,39 @@ func appComponentsLine(world: view UiWorld, entity: view EntityId) ret String {
       }
     }
   }
-  if names.length() is 0 {
-    ret ""
+  ret names
+}
+
+# The node's authored type, or "" when it has none.
+func nodePrimaryType(world: view UiWorld, entity: view EntityId) ret String {
+  if componentHas(this: world.primaryTypes, entity: entity) {
+    let primary: view PrimaryType => componentView(this: world.primaryTypes, entity: entity)
+    ret "{primary.typeName}"
   }
-  ret "not a lib component: {names}"
+  ret ""
+}
+
+# `<PrimaryType> / <Name>`, dropping either half when it is absent. This is
+# the node's own identity, so a selection that AGREES on it can still show it
+# — and at n=1 it always agrees.
+func nodeTypeLine(world: view UiWorld, entity: view EntityId) ret String {
+  var primaryType: String = ""
+  if componentHas(this: world.primaryTypes, entity: entity) {
+    let primary: view PrimaryType => componentView(this: world.primaryTypes, entity: entity)
+    primaryType = "{primary.typeName}"
+  }
+  var label: String = ""
+  if componentHas(this: world.names, entity: entity) {
+    let name: view Name => componentView(this: world.names, entity: entity)
+    label = "{name.label}"
+  }
+  if primaryType.length() is 0 {
+    ret label
+  }
+  if label.length() is 0 {
+    ret primaryType
+  }
+  ret "{primaryType} / {label}"
 }
 
 # The node's bundle provenance (ui/SceneBundles BundleRefs): which bundles it

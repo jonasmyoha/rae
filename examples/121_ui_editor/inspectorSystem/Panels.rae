@@ -19,6 +19,16 @@ open app3d/UiShell
 open inspectorSystem/NodeQuery
 open inspectorSystem/RectWidget
 
+# The inspector renders the COMPOSITE of the whole selection. There is no
+# single-selection path: n=1 is this code with one member, which is why a
+# single selection cannot drift from what multi-selection shows.
+#
+# The header names the selection, the component lines are the UNION with a
+# `(have/total)` suffix on anything only some of them carry, and each value
+# line shows the common value or a mixed marker. Per-entity meta (the node's
+# own type, its parent chain) appears when the selection agrees on it —
+# which at n=1 it always does, so a single selection naturally reads as the
+# richer editor without a branch that says so.
 func syncInspectorPanel(
   world: view UiWorld
   uiSystems: view UiSystems
@@ -26,8 +36,8 @@ func syncInspectorPanel(
   inspectorSystem: view InspectorSystem
   sceneRoot: view EntityId
 ) {
-  let selected: EntityId = inspectorSystem.selected
-  if isNone(this: selected) {
+  let members: Int = inspectorSystem.selection.length
+  if members is 0 {
     chromeSystem.inspectorNodeId = "nothing selected"
     chromeSystem.inspectorType = "click a node, or use the arrows"
     chromeSystem.inspectorComponents = ""
@@ -36,31 +46,83 @@ func syncInspectorPanel(
     chromeSystem.inspectorParents = ""
     ret
   }
-  chromeSystem.inspectorNodeId = nodeIdOf(world: world, entity: selected)
-  var primaryType: String = ""
-  if componentHas(this: world.primaryTypes, entity: selected) {
-    let primary: view PrimaryType => componentView(this: world.primaryTypes, entity: selected)
-    primaryType = "{primary.typeName}"
+  if members is 1 {
+    chromeSystem.inspectorNodeId = nodeIdOf(world: world, entity: inspectorSystem.selected)
+  } else {
+    chromeSystem.inspectorNodeId = "Selection ({members}): {selectionNodeIds(
+      inspectorSystem: inspectorSystem
+      world: world
+    )}"
   }
-  var label: String = ""
-  if componentHas(this: world.names, entity: selected) {
-    let name: view Name => componentView(this: world.names, entity: selected)
-    label = "{name.label}"
+  var componentTallies: List(ComponentTally) = List.create(ComponentTally, cap: 16)
+  var appTallies: List(ComponentTally) = List.create(ComponentTally, cap: 8)
+  var typeLine: String = ""
+  var parentLine: String = ""
+  var typeAgrees: Bool = true
+  var parentAgrees: Bool = true
+  var seen: Bool = false
+  loop let entity: view EntityId in inspectorSystem.selection {
+    if isNone(this: entity) {
+      continue
+    }
+    tallyComponentNames(
+      tallies: componentTallies
+      names: componentNamesFor(world: world, entity: entity)
+    )
+    tallyComponentNames(
+      tallies: appTallies
+      names: pendingComponentNames(world: world, entity: entity)
+    )
+    # At n=1 the identity line is `Type / Name`; above that it folds the TYPE
+    # only. A name is per-entity meta — two Text nodes are always named
+    # differently — so folding it would report every multi-selection as mixed
+    # and hide the one thing they genuinely share.
+    var entityType: String = nodePrimaryType(world: world, entity: entity)
+    if members is 1 {
+      entityType = nodeTypeLine(world: world, entity: entity)
+    }
+    let entityParents: String = parentChainOf(
+      world: world
+      uiSystems: uiSystems
+      entity: entity
+      sceneRoot: sceneRoot
+    )
+    if seen is false {
+      seen = true
+      # Interpolated, not assigned: `entityType` is an owned String that drops
+      # at the end of this iteration, so a plain assignment would leave
+      # `typeLine` pointing at a freed buffer — which showed up as NUL bytes
+      # in the panel.
+      typeLine = "{entityType}"
+      parentLine = "{entityParents}"
+      continue
+    }
+    if entityType is not typeLine {
+      typeAgrees = false
+    }
+    if entityParents is not parentLine {
+      parentAgrees = false
+    }
   }
-  var typeLine: String = "{primaryType} / {label}"
-  if primaryType.length() is 0 {
-    typeLine = "{label}"
+  if typeAgrees is false {
+    typeLine = "{mixedMarker}"
   }
-  if label.length() is 0 {
-    typeLine = "{primaryType}"
+  if parentAgrees is false {
+    parentLine = "{mixedMarker}"
   }
   chromeSystem.inspectorType = typeLine
-  let componentNames: String = componentNamesFor(world: world, entity: selected)
-  chromeSystem.inspectorComponents = "{String.replace(this: componentNames, old: ",", new: ", ")}{bundleProvenanceLine(
-    world: world
-    entity: selected
-  )}"
-  chromeSystem.inspectorAppComponents = appComponentsLine(world: world, entity: selected)
+  chromeSystem.inspectorParents = parentLine
+  var components: String = compositeLine(tallies: componentTallies, members: members)
+  if members is 1 {
+    components = "{components}{bundleProvenanceLine(world: world, entity: inspectorSystem.selected)}"
+  }
+  chromeSystem.inspectorComponents = components
+  let appComponents: String = compositeLine(tallies: appTallies, members: members)
+  if appComponents.length() is 0 {
+    chromeSystem.inspectorAppComponents = ""
+  } else {
+    chromeSystem.inspectorAppComponents = "not a lib component: {appComponents}"
+  }
   # The Rect widget, over the WHOLE selection: a field the selected entities
   # agree on shows its value, one they differ on shows the mixed marker, and
   # each carries what drives it (#54986153).
@@ -68,12 +130,6 @@ func syncInspectorPanel(
     world: world
     uiSystems: uiSystems
     selection: inspectorSystem.selection
-  )
-  chromeSystem.inspectorParents = parentChainOf(
-    world: world
-    uiSystems: uiSystems
-    entity: selected
-    sceneRoot: sceneRoot
   )
 }
 
@@ -171,4 +227,79 @@ func syncTreePanel(
     rows: rows
   )
   setEditorListRows(world: world, list: list, rows: own rows)
+}
+
+# One component of the composite: its name, and how many of the selected
+# entities carry it. The count is what makes a PARTIAL component visible —
+# a component on some of the selection but not all is a different thing from
+# one they all share, and editing it will reach fewer nodes than you think.
+type ComponentTally {
+  name: String
+  count: Int
+}
+
+func tallyIndexOf(tallies: view List(ComponentTally), name: view String) ret Int {
+  loop var i: Int = 0, i < tallies.length, ++i {
+    if let tally: view ComponentTally => tallies.viewAt(index: i) {
+      if tally.name is name {
+        ret i
+      }
+    }
+  }
+  ret -1
+}
+
+# Tally `names` (a comma-joined component list) into `tallies`, keeping first-
+# seen order. `componentNamesFor` emits a FIXED order per entity, so first-seen
+# across the selection is the same canonical order, not an accident of which
+# node happened to be clicked first.
+func tallyComponentNames(tallies: mod List(ComponentTally), names: view String) {
+  let parts: List(String) = names.split(sep: ",")
+  loop let part: view String in parts {
+    let name: String = part.trim()
+    if name.length() is 0 {
+      continue
+    }
+    let at: Int = tallyIndexOf(tallies: tallies, name: name)
+    if at < 0 {
+      tallies.add(value: ComponentTally { name: stringCopy(string: name), count: 1 })
+      continue
+    }
+    if let tally: mod ComponentTally => tallies.modAt(index: at) {
+      tally.count = tally.count + 1
+    }
+  }
+}
+
+# Render a tally as the composite line: the UNION of the selection's
+# components, each one carried by only SOME of them suffixed `(have/total)`.
+# At n=1 every count equals the total, so the suffix never appears and the
+# line is exactly what a single selection always showed — the n=1 case of the
+# same code path, not a separate branch.
+func compositeLine(tallies: view List(ComponentTally), members: view Int) ret String {
+  var line: String = ""
+  loop let tally: view ComponentTally in tallies {
+    var part: String = "{tally.name}"
+    if tally.count < members {
+      part = "{tally.name} ({tally.count}/{members})"
+    }
+    if line.length() is 0 {
+      line = "{part}"
+    } else {
+      line = "{line}, {part}"
+    }
+  }
+  ret line
+}
+
+# The panel's lines as one string, for the headless gate. Read from
+# `chromeSystem` AFTER a sync rather than recomputed, so what is asserted is
+# literally what the panel shows — a second renderer here could agree with the
+# test and still disagree with the screen.
+func inspectorSummaryLine(chromeSystem: view ChromeSystem) ret String {
+  var line: String = "{chromeSystem.inspectorNodeId} | {chromeSystem.inspectorType} | {chromeSystem.inspectorComponents}"
+  if chromeSystem.inspectorAppComponents.length() > 0 {
+    line = "{line} | {chromeSystem.inspectorAppComponents}"
+  }
+  ret line
 }

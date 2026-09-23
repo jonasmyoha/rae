@@ -126,6 +126,7 @@ func runTestClicks(
   inspectorSystem: mod InspectorSystem
   world: mod UiWorld
   uiSystems: view UiSystems
+  chromeSystem: mod ChromeSystem
   pageRoot: view EntityId
   script: view String
 ) {
@@ -152,6 +153,13 @@ func runTestClicks(
       inspectorSystem: inspectorSystem
       world: world
     )}"
+  )
+  logInspectorPanel(
+    inspectorSystem: inspectorSystem
+    world: world
+    uiSystems: uiSystems
+    chromeSystem: chromeSystem
+    sceneRoot: sceneRoot
   )
 }
 
@@ -197,6 +205,8 @@ func runTestTreeClick(
 func runTestTreeClicks(
   inspectorSystem: mod InspectorSystem
   world: mod UiWorld
+  uiSystems: view UiSystems
+  chromeSystem: mod ChromeSystem
   pageRoot: view EntityId
   script: view String
 ) {
@@ -223,4 +233,30 @@ func runTestTreeClicks(
       world: world
     )} active {nodeIdOf(world: world, entity: inspectorSystem.selected)}"
   )
+  logInspectorPanel(
+    inspectorSystem: inspectorSystem
+    world: world
+    uiSystems: uiSystems
+    chromeSystem: chromeSystem
+    sceneRoot: sceneRoot
+  )
+}
+
+# Sync the panel and log what it now shows. The script drives the real
+# gestures, so this is the composite an interactive user would be looking at.
+func logInspectorPanel(
+  inspectorSystem: view InspectorSystem
+  world: view UiWorld
+  uiSystems: view UiSystems
+  chromeSystem: mod ChromeSystem
+  sceneRoot: view EntityId
+) {
+  syncInspectorPanel(
+    world: world
+    uiSystems: uiSystems
+    chromeSystem: chromeSystem
+    inspectorSystem: inspectorSystem
+    sceneRoot: sceneRoot
+  )
+  log("[ui-editor] inspector: {inspectorSummaryLine(chromeSystem: chromeSystem)}")
 }

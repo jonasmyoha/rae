@@ -392,6 +392,41 @@ inspector is read-only until the DAW/editor capability design
 (`ui-ecs-refactor-status.md` §2.7) lands; the app is shaped so those are new
 systems, not rewrites.
 
+## The inspector is multi-selection only (#82314313)
+
+There is no single-selection code path. `syncInspectorPanel` renders the
+COMPOSITE of `inspectorSystem.selection`, and **n=1 is that same code with one
+member** — which is what stops a single selection from drifting away from what
+multi-selection shows.
+
+| line | n = 1 | n > 1 |
+|---|---|---|
+| header | the node id | `Selection (n): id, id, …` |
+| identity | `Type / Name` | the shared **type**, or the mixed marker |
+| components | the node's components | the UNION, each partial one `(have/total)` |
+| Rect | the value | common value or mixed, per field (#54986153) |
+| parents | the parent chain | the chain when all agree, else mixed |
+
+Two decisions are worth keeping:
+
+- **A partial component is marked `(have/total)`, not just flagged.** `Layout
+  (1/2)` says an edit there will reach one of the two selected nodes. A bare
+  "partial" marker would leave the reader counting.
+- **The identity line folds the TYPE but not the NAME.** A name is per-entity
+  meta — two Text nodes are always named differently — so folding it would
+  report every multi-selection as mixed and hide the one thing they share. At
+  n=1 the name is shown, which is the "slightly more capable editor" a single
+  selection gets: not a branch that says `if single`, just a field that only
+  agrees when there is one member.
+
+The union keeps `componentNamesFor`'s fixed per-entity order, so first-seen
+order across the selection is the canonical order rather than an accident of
+which node was clicked first.
+
+One Rae gotcha this hit: assigning an owned `String` local into a variable that
+outlives the loop iteration leaves it dangling — it showed up as NUL bytes in
+the panel text. Interpolate (`line = "{value}"`) to make a new String instead.
+
 ## Selection (#20778145, #16096994)
 
 ### The canvas
