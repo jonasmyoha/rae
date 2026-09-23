@@ -342,6 +342,18 @@ func runApp(app: mod App) ret Int {
     scene: app.document.scene
     script: app.testComponent
   )
+  # The scripted hooks above may have changed the selection AFTER the boot
+  # layout, and the loop's own list/layout pass is gated on `changed`, which
+  # a scripted hook does not set. Run them once more here so the re-bound
+  # rows (the tree's selection cells) are laid out before the first frame —
+  # the other half of the harness blind spot behind #85867026.
+  listViewSystem(world: app.world, uiSystems: app.uiSystems, scenes: app.document.registry)
+  runScheduledUiSystems(
+    schedule: app.schedule
+    world: app.world
+    uiSystems: app.uiSystems
+    res: app.gpuUi
+  )
   var renderedOnce: Bool = false
   # RAE_UI_EDITOR_TEST_SAVE=<path>: save the document there once after the
   # first frame, as Cmd+S would — the headless gate's hook.
