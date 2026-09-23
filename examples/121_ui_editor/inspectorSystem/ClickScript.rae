@@ -21,6 +21,7 @@ import String
 open ui/Ecs
 open ui/Components
 open ui/UiSystems
+open ui/Scene
 open ecs/Entity
 open ecs/ComponentTable
 open inspectorSystem/InspectorSystem
@@ -129,6 +130,7 @@ func runTestClicks(
   chromeSystem: mod ChromeSystem
   pageRoot: view EntityId
   script: view String
+  scene: view Scene
 ) {
   if script.length() is 0 {
     ret
@@ -160,6 +162,7 @@ func runTestClicks(
     uiSystems: uiSystems
     chromeSystem: chromeSystem
     sceneRoot: sceneRoot
+    scene: scene
   )
 }
 
@@ -209,6 +212,7 @@ func runTestTreeClicks(
   chromeSystem: mod ChromeSystem
   pageRoot: view EntityId
   script: view String
+  scene: view Scene
 ) {
   if script.length() is 0 {
     ret
@@ -239,6 +243,7 @@ func runTestTreeClicks(
     uiSystems: uiSystems
     chromeSystem: chromeSystem
     sceneRoot: sceneRoot
+    scene: scene
   )
 }
 
@@ -250,6 +255,7 @@ func logInspectorPanel(
   uiSystems: view UiSystems
   chromeSystem: mod ChromeSystem
   sceneRoot: view EntityId
+  scene: view Scene
 ) {
   syncInspectorPanel(
     world: world
@@ -257,6 +263,7 @@ func logInspectorPanel(
     chromeSystem: chromeSystem
     inspectorSystem: inspectorSystem
     sceneRoot: sceneRoot
+    scene: scene
   )
   log("[ui-editor] inspector: {inspectorSummaryLine(chromeSystem: chromeSystem)}")
 }

@@ -392,6 +392,48 @@ inspector is read-only until the DAW/editor capability design
 (`ui-ecs-refactor-status.md` §2.7) lands; the app is shaped so those are new
 systems, not rewrites.
 
+## What DRIVES a value, inline with it (#21438052)
+
+Rae's Rect is authored in a `.raescene` and then routinely overwritten by the
+layout system, so a bare number in the inspector cannot say which won. Every
+generated field row now carries where its value came from
+(`inspectorSystem/FieldSource.rae`):
+
+| tag | meaning |
+|---|---|
+| *(none)* | authored, and the live value still equals what the author wrote |
+| `· was <x>` | the author wrote `<x>` here and the live value DIFFERS |
+| `· computed` | the component is absent from this node's authored bag — nothing in the file put it here |
+
+`Name: label=PlayButton · computed` is the loader's own doing; `gap=16 · was
+spaceS` is a theme token resolved to a number. The two states the task cared
+about — authored-but-overridden versus purely computed — are different tags,
+and the overridden one names the authored value rather than merely flagging it.
+
+**What Rae can and cannot answer.** WHICH SYSTEM wrote a value is *not*
+available: `ComponentTable` carries a table-level `generation` and per-entity
+`denseStamps`, but those record WHEN a component last changed, not WHO changed
+it, and no system declares what it writes. So the general annotation is
+provenance against the parsed scene, which is exact. RectWidget's `layout` /
+`fill` / `align` tags remain the bespoke exception — they are INFERRED from
+configuration (the entity's Size mode, a parent carrying a Layout, its own
+Align), per-component knowledge only a hand-written widget can have.
+
+Three limits, deliberate:
+
+- **A mixed field makes no claim.** With the selection disagreeing there is no
+  single authored value to have been overridden.
+- **The picker is not compared.** An enum renders `kind=roundedRect
+  [rect|roundedRect|circle]`; comparing that decorated text with the author's
+  `"RoundedRect"` would call every enum overridden, so the comparison uses the
+  undecorated value and is case-insensitive (the scene spells enums
+  PascalCase).
+- **A node not in the document's scene gets no tag at all.** Sub-scene nodes
+  live in another file and `SceneScope` is never populated, so the module stays
+  silent rather than claiming `computed` about a node it simply cannot see.
+  Nested authored values (an `Insets`) are likewise reported as authored but
+  not compared — comparing those needs a decode, which is the save path's job.
+
 ## Component widgets are generated from reflection (#24323144)
 
 No widget is written per component. `inspectorSystem/ComponentWidget.rae`

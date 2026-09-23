@@ -19,10 +19,13 @@
 # the selected entities agree on shows its value, one they differ on shows
 # the mixed marker.
 open ui/Ecs
+open inspectorSystem/NodeQuery
 open ui/Components
 open ecs/Entity
 open ecs/ComponentTable
+open ui/Scene
 open inspectorSystem/RectWidget
+open inspectorSystem/FieldSource
 
 # Field types that are runtime plumbing, never something a person edits: a
 # handle, a list of handles, a ListView's materialised rows. Hidden by TYPE so
@@ -143,6 +146,10 @@ func componentFieldTexts(
   spec: view WidgetSpec
   names: mod List(String)
   texts: mod List(String)
+  # The UNDECORATED value, for the provenance comparison: `texts` carries the
+  # enum picker and any unit/range, and comparing those with what the author
+  # wrote would call every enum overridden.
+  raws: mod List(String)
 ) {
   # No `continue` in here: a fields() loop is UNROLLED by the compiler into
   # straight-line code per field, so a `continue` has no enclosing loop in
@@ -154,6 +161,7 @@ func componentFieldTexts(
       if text.length() > 0 {
         names.add(value: "{name}")
         texts.add(value: "{text}")
+        raws.add(value: "{f}")
       }
     }
   }
@@ -184,16 +192,22 @@ func addWidgetRow(
 # ComponentTable(any) loop binding in `componentWidgetRows`.
 func tableWidgetRows(
   T: type
+  world: view UiWorld
   table: view ComponentTable(T)
   selection: view List(EntityId)
   name: view String
   spec: view WidgetSpec
+  scene: view Scene
   rows: mod List(ListViewRow)
 ) {
   var names: List(String) = List.create(String, cap: 8)
   var common: List(String) = List.create(String, cap: 8)
   var mixed: List(Bool) = List.create(Bool, cap: 8)
   var seen: Bool = false
+  # The node whose values filled `common`. Provenance is read against THIS
+  # node: it is the one whose text is on screen wherever the selection agrees.
+  var firstNodeId: String = ""
+  var commonRaw: List(String) = List.create(String, cap: 8)
   loop let entity: view EntityId in selection {
     if componentHas(this: table, entity: entity) is false {
       continue
@@ -201,11 +215,13 @@ func tableWidgetRows(
     let value: view T => componentView(this: table, entity: entity)
     if seen is false {
       seen = true
+      firstNodeId = nodeIdOf(world: world, entity: entity)
       componentFieldTexts(
         value: value
         spec: spec
         names: names
         texts: common
+        raws: commonRaw
       )
       loop var i: Int = 0, i < common.length, ++i {
         mixed.add(value: false)
@@ -214,11 +230,13 @@ func tableWidgetRows(
     }
     var scratchNames: List(String) = List.create(String, cap: 8)
     var texts: List(String) = List.create(String, cap: 8)
+    var scratchRaw: List(String) = List.create(String, cap: 8)
     componentFieldTexts(
       value: value
       spec: spec
       names: scratchNames
       texts: texts
+      raws: scratchRaw
     )
     loop var i: Int = 0, i < common.length and i < texts.length, ++i {
       if common.copyAtDefault(index: i) is not texts.copyAtDefault(index: i) {
@@ -231,6 +249,22 @@ func tableWidgetRows(
     var text: String = common.copyAtDefault(index: i)
     if mixed.copyAtDefault(index: i) {
       text = "{mixedMarker}"
+    } else {
+      # What PRODUCED this value, beside the value itself (#21438052). Only
+      # where the selection AGREES: with a mixed field there is no single
+      # authored value to have been overridden. Applied here, over plain
+      # Strings, rather than inside the reflection loop — the generic stays
+      # pure field-walking and provenance layers on top.
+      let tag: String = fieldSourceTag(provenance: fieldProvenance(
+        scene: scene
+        nodeId: firstNodeId
+        component: name
+        field: field
+        liveText: commonRaw.copyAtDefault(index: i)
+      ))
+      if tag.length() > 0 {
+        text = "{text} · {tag}"
+      }
     }
     addWidgetRow(
       rows: rows
@@ -248,6 +282,7 @@ func componentWidgetRows(
   world: view UiWorld
   selection: view List(EntityId)
   name: view String
+  scene: view Scene
   rows: mod List(ListViewRow)
 ) {
   let spec: WidgetSpec = widgetOverride(name: name)
@@ -257,10 +292,12 @@ func componentWidgetRows(
   loop let table: view ComponentTable(any) in fields(world) {
     if typeName(table) is name {
       tableWidgetRows(
+        world: world
         table: table
         selection: selection
         name: name
         spec: spec
+        scene: scene
         rows: rows
       )
       ret
