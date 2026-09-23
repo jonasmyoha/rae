@@ -34,8 +34,6 @@ open inspectorSystem/ComponentEdit
 # Tree rows: one design unit of indent per depth level.
 const treeIndentPerLevel: Float = 12.0
 
-const treeRowPitch: Float = 44.0
-
 # The inspector system owns the authored `OutlineFor` components (the hover /
 # selection outline nodes in chrome/Guides.raescene) and its own state.
 type InspectorSystem {
@@ -74,6 +72,12 @@ type InspectorSystem {
   # without a mode, typing a filter would toggle half the chrome.
   componentFilter: String
   filterFocused: Bool
+  # Collapsed rows, by NODE ID rather than entity or row index (#72481430).
+  # The tree rebuilds constantly and a reload recreates every entity, so an
+  # entity handle or an index would lose the state on the next keystroke;
+  # a node id is the one thing that survives both. Nothing clears this on
+  # reload — that IS the persistence.
+  collapsedNodeIds: List(String)
   # The tree list's row order (entity per row), so a row's action maps back.
   # This is also the order a Shift-range spans, which is why the range is
   # over the VISIBLE rows and not over the hierarchy: what the user is
@@ -97,6 +101,7 @@ func createInspectorSystem(world: mod UiWorld) ret InspectorSystem {
     cycleDepth: 0
     cycleActive: false
     cycleStack: List.create(EntityId, cap: 8)
+    collapsedNodeIds: List.create(String, cap: 8)
     componentFilter: ""
     filterFocused: false
     treeEntities: List.create(EntityId, cap: 64)
@@ -308,6 +313,32 @@ func inspectorUpdate(
         name: name
       )
       log("[ui-editor] added {name} to {added}")
+      changed = true
+    }
+  }
+  # Chevron clicks: collapse / expand, keyed on the node id the row carries
+  # (#72481430). Handled BEFORE the row's own `inspect:` action so a click on
+  # the chevron toggles rather than also selecting — they are different
+  # targets inside one row and only one of them should win.
+  loop var a: Int = 0, a < actionCount, ++a {
+    let actionId: String = uiActionAt(world: world, index: a)
+    if actionId.startsWith(prefix: "treeToggle:") {
+      let nodeId: String = actionId.sub(start: 11, len: actionId.length() - 11)
+      var found: Int = 0 - 1
+      loop var i: Int = 0, i < inspectorSystem.collapsedNodeIds.length, ++i {
+        if let name: String = inspectorSystem.collapsedNodeIds.copyAt(index: i) {
+          if name is nodeId {
+            found = i
+          }
+        }
+      }
+      if found >= 0 {
+        inspectorSystem.collapsedNodeIds.removeAt(index: found)
+        log("[ui-editor] expanded {nodeId}")
+      } else {
+        inspectorSystem.collapsedNodeIds.add(value: "{nodeId}")
+        log("[ui-editor] collapsed {nodeId}")
+      }
       changed = true
     }
   }

@@ -392,6 +392,36 @@ inspector is read-only until the DAW/editor capability design
 (`ui-ecs-refactor-status.md` §2.7) lands; the app is shaped so those are new
 systems, not rewrites.
 
+## Collapsing the hierarchy (#72481430)
+
+A row with children carries a chevron (`v` expanded, `>` collapsed); a LEAF
+carries none, because a disclosure control that discloses nothing is how a
+tree lies about its shape. The chevron is its own hit target inside the row
+with its own `treeToggle:<nodeId>` action, handled BEFORE the row's
+`inspect:` — one click, one meaning.
+
+**Collapsed state is keyed on NODE ID**, never an entity or a row index. The
+tree rebuilds on every selection change and a reload recreates every entity,
+so either of those would lose the state on the next keystroke; a node id
+survives both. Nothing clears the list on reload — that IS the persistence.
+
+Two consequences fall out of collapsing in `collectTreeRows` rather than
+filtering afterwards:
+
+- **A Shift-range spans only VISIBLE rows.** `treeEntities` is built by the
+  same walk, so a collapsed subtree is simply not in it. With `LogoRing`
+  expanded, `Title` → Shift+`Panel` is twelve rows; collapsed, it is four.
+  Nothing in the range code changed.
+- **Collapsing KEEPS hidden descendants selected.** Dropping them would
+  silently shrink a set the user built. The collapsed parent then shows `*`
+  to say it is hiding part of the selection — a third marker beside `>` for
+  the active node and `-` for the other selected rows.
+
+Scroll-into-view is NOT here; see the split-out task. The arithmetic works
+(`index=39 → scrollY=-1350` for a 40-row tree), but writing that to the
+list's `ScrollState` blanks the panel once the scroll passes one viewport
+height, so shipping it would regress the tree.
+
 ## The headless hooks resync the tree (#85867026)
 
 `RAE_UI_EDITOR_TEST_*_CLICKS` make a selection AFTER `inspectorAfterLoad` has
