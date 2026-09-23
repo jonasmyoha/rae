@@ -1,0 +1,153 @@
+# inspectorSystem/CanvasClicks — the headless driver for canvas selection.
+#
+# Canvas selection is a POINTER gesture, so the only honest way to test it is
+# to click points on the canvas. This module turns a small script from the
+# environment into exactly that: each step resolves to a screen point, picks
+# up a modifier, and goes through the same `canvasSelectAt` the live pointer
+# uses — never a shortcut that sets the selection directly, because a
+# shortcut would pass while the real gesture was broken.
+#
+#   RAE_UI_EDITOR_TEST_CLICKS="PlayButton cmd:ContinueButton alt:PlayButton at:4,4"
+#
+# A step is `[modifier:]target`. The modifier is one of `shift`, `cmd`,
+# `ctrl` or `alt` (absent = a plain click). The target is either a node id,
+# in which case the click lands in the middle of that node's current on-screen
+# rect, or `at:<x>,<y>` for raw screen coordinates — which is how you click
+# EMPTY canvas, the case that has no node to name.
+import String
+open ui/Ecs
+open ui/Components
+open ui/UiSystems
+open ecs/Entity
+open ecs/ComponentTable
+open inspectorSystem/InspectorSystem
+
+# A point to click, and whether one could be resolved at all.
+type ClickPoint {
+  x: Float
+  y: Float
+  ok: Bool
+}
+
+# The centre of `entity` in screen space, from the transform and computed
+# rect this frame's layout produced — the same numbers the hit test reads.
+func nodeCenterOf(uiSystems: view UiSystems, entity: view EntityId) ret ClickPoint {
+  if componentHas(this: uiSystems.transform2d.worldTransforms, entity: entity) is false {
+    ret ClickPoint { x: 0.0, y: 0.0, ok: false }
+  }
+  if componentHas(this: uiSystems.layout.computedRects, entity: entity) is false {
+    ret ClickPoint { x: 0.0, y: 0.0, ok: false }
+  }
+  let transform: WorldTransform2D = componentGet(
+    this: uiSystems.transform2d.worldTransforms
+    entity: entity
+  )
+  let computed: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: entity)
+  ret ClickPoint {
+    x: transform.position.x + computed.size.x * transform.scale.x * 0.5
+    y: transform.position.y + computed.size.y * transform.scale.y * 0.5
+    ok: true
+  }
+}
+
+func selectModeFromName(name: view String) ret SelectMode {
+  if name is "shift" {
+    ret SelectMode.add
+  }
+  if name is "cmd" or name is "ctrl" {
+    ret SelectMode.toggle
+  }
+  if name is "alt" {
+    ret SelectMode.subtract
+  }
+  ret SelectMode.replace
+}
+
+# Run one `[modifier:]target` step.
+func runTestClick(
+  inspectorSystem: mod InspectorSystem
+  world: mod UiWorld
+  uiSystems: view UiSystems
+  sceneRoot: view EntityId
+  step: view String
+) {
+  var mode: SelectMode = SelectMode.replace
+  var rest: String = "{step}"
+  let colon: Int = step.indexOf(sub: ":")
+  if colon > 0 {
+    let head: String = step.sub(start: 0, len: colon)
+    if head is not "at" {
+      mode = selectModeFromName(name: head)
+      rest = step.sub(start: colon + 1, len: step.length() - colon - 1)
+    }
+  }
+  var x: Float = 0.0
+  var y: Float = 0.0
+  if rest.startsWith(prefix: "at:") {
+    let point: String = rest.sub(start: 3, len: rest.length() - 3)
+    let comma: Int = point.indexOf(sub: ",")
+    if comma <= 0 {
+      log("[ui-editor] click: expected at:<x>,<y>, got {rest}")
+      ret
+    }
+    x = point.sub(start: 0, len: comma).toFloat()
+    y = point.sub(start: comma + 1, len: point.length() - comma - 1).toFloat()
+  } else {
+    let target: EntityId = findNodeByIdIn(world: world, entity: sceneRoot, nodeId: rest)
+    if isNone(this: target) {
+      log("[ui-editor] click: no node named {rest}")
+      ret
+    }
+    let center: ClickPoint = nodeCenterOf(uiSystems: uiSystems, entity: target)
+    if center.ok is false {
+      log("[ui-editor] click: {rest} has no on-screen rect")
+      ret
+    }
+    x = center.x
+    y = center.y
+  }
+  canvasSelectAt(
+    inspectorSystem: inspectorSystem
+    world: world
+    uiSystems: uiSystems
+    sceneRoot: sceneRoot
+    x: x
+    y: y
+    mode: mode
+  )
+}
+
+# Run the whole script, then log the resulting set once. The trailing line is
+# what the example gate asserts: the gesture sequence in, the selection out.
+func runTestClicks(
+  inspectorSystem: mod InspectorSystem
+  world: mod UiWorld
+  uiSystems: view UiSystems
+  pageRoot: view EntityId
+  script: view String
+) {
+  if script.length() is 0 {
+    ret
+  }
+  let sceneRoot: EntityId = documentSceneRoot(world: world, pageRoot: pageRoot)
+  let steps: List(String) = script.split(sep: " ")
+  loop let step: view String in steps {
+    let trimmed: String = step.trim()
+    if trimmed.length() is 0 {
+      continue
+    }
+    runTestClick(
+      inspectorSystem: inspectorSystem
+      world: world
+      uiSystems: uiSystems
+      sceneRoot: sceneRoot
+      step: trimmed
+    )
+  }
+  log(
+    "[ui-editor] clicks [{script}] -> {selectionNodeIds(
+      inspectorSystem: inspectorSystem
+      world: world
+    )}"
+  )
+}

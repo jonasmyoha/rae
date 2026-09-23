@@ -67,7 +67,11 @@ type OutlineFor {
 # document entity — every entity (`all`) or every entity with an OnClick
 # (`buttons`) — mounted as the node's children and positioned like the
 # hover outline. The reference editor's "Outlines" / "Buttons" toggles.
-enum OutlineMatch { all, buttons }
+# Which document entities a pool outlines. `selection` is the MULTI-SELECTION
+# outline: the anchor keeps its own single `OutlineFor { role: selection }`
+# outline, so this pool draws the OTHER selected nodes — without it a
+# Cmd+click adds a node to the set with nothing on screen to show for it.
+enum OutlineMatch { all, buttons, selection }
 
 type OutlinePool {
   matches: OutlineMatch

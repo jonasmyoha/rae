@@ -50,6 +50,8 @@ const nodeOutlineScenePath: String = "examples/121_ui_editor/assets/scenes/chrom
 
 const buttonOutlineScenePath: String = "examples/121_ui_editor/assets/scenes/chrome/ButtonOutline.raescene"
 
+const selectionOutlineItemScenePath: String = "examples/121_ui_editor/assets/scenes/chrome/SelectionOutlineItem.raescene"
+
 # The theme the document sees: its own token sections, then its `import`s in
 # order (#1008) — nothing is read from the directory. Installed on every
 # (re)load, BEFORE the page mounts, since tokens resolve at load time.
@@ -172,8 +174,8 @@ func createApp() ret App {
   var document: SceneDocument = createSceneDocument(path: resolveScenePath())
   var gpuUi: Gpu2dUi = createEditorUi()
   var fonts: EditorFonts = { textFontPath: "", iconFontPath: "" }
-  var builtinScenePaths: List(String) = List.create(String, cap: 6)
-  var builtinSceneIds: List(String) = List.create(String, cap: 6)
+  var builtinScenePaths: List(String) = List.create(String, cap: 7)
+  var builtinSceneIds: List(String) = List.create(String, cap: 7)
   builtinScenePaths.add(value: diagnosticRowScenePath)
   builtinSceneIds.add(value: "chrome/DiagnosticRow")
   builtinScenePaths.add(value: inspectorScenePath)
@@ -186,6 +188,8 @@ func createApp() ret App {
   builtinSceneIds.add(value: "chrome/NodeOutline")
   builtinScenePaths.add(value: buttonOutlineScenePath)
   builtinSceneIds.add(value: "chrome/ButtonOutline")
+  builtinScenePaths.add(value: selectionOutlineItemScenePath)
+  builtinSceneIds.add(value: "chrome/SelectionOutlineItem")
 
   var world: UiWorld = create()
 
@@ -368,6 +372,7 @@ func createApp() ret App {
   # after every reload), as a click would — the headless gate's hook.
   let testSelectNodeId: String = getEnv(name: "RAE_UI_EDITOR_TEST_SELECT")
   let testSetRect: String = getEnv(name: "RAE_UI_EDITOR_TEST_SET_RECT")
+  let testClicks: String = getEnv(name: "RAE_UI_EDITOR_TEST_CLICKS")
   if getEnv(name: "RAE_UI_EDITOR_TREE") is "1" {
     setEditorPanelOpen(
       chromeSystem: chromeSystem
@@ -399,6 +404,7 @@ func createApp() ret App {
       outlinePoolSystem: own outlinePoolSystem
       testSelectNodeId: testSelectNodeId
       testSetRect: testSetRect
+      testClicks: testClicks
       builtinScenePaths: own builtinScenePaths
       builtinSceneIds: own builtinSceneIds
       headless: headless
