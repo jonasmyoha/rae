@@ -212,3 +212,55 @@ func bundleProvenanceLine(world: view UiWorld, entity: view EntityId) ret String
   }
   ret line
 }
+
+# Every node under the point, deepest FIRST: the deepest hit, then each of its
+# ancestors whose own bounds also contain the point, up to and including the
+# scene root. This is the stack a repeated click steps up (#73816378) — click
+# a Play sprite and the stack is sprite -> Button -> row -> page.
+#
+# Ancestors that do NOT contain the point are skipped rather than ending the
+# walk: a Hug container laid out to zero on one axis, or a child that overflows
+# its parent, would otherwise cut the stack off below the nodes a user can
+# plainly see under the cursor.
+func hitStackAt(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  sceneRoot: view EntityId
+  x: view Float
+  y: view Float
+  out: mod List(EntityId)
+) {
+  out.clear()
+  let deepest: EntityId = deepestNodeAt(
+    world: world
+    uiSystems: uiSystems
+    entity: sceneRoot
+    x: x
+    y: y
+  )
+  if isNone(this: deepest) {
+    ret
+  }
+  out.add(value: deepest)
+  var walk: EntityId = parentOf(world: world, uiSystems: uiSystems, entity: deepest)
+  # Bounded by the tree's depth; the guard is against a malformed parent cycle,
+  # not against normal nesting.
+  loop var steps: Int = 0, steps < 64, ++steps {
+    if isNone(this: walk) {
+      ret
+    }
+    if uiPointInEntity(
+      world: world
+      uiSystems: uiSystems
+      entity: walk
+      x: x
+      y: y
+    ) {
+      out.add(value: walk)
+    }
+    if walk is sceneRoot {
+      ret
+    }
+    walk = parentOf(world: world, uiSystems: uiSystems, entity: walk)
+  }
+}
