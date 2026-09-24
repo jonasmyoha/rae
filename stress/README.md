@@ -87,3 +87,7 @@ stress: {
   `handles`, `expect` to the good outcome, `fixedBy` filled in.
 - No assets, no windows, no timing-dependent output. Every case runs in well
   under a second.
+
+Case `10_stringAssignAlias` verifies that String reassignment copies a stored
+source before releasing the previous destination. It prints `value2` after
+all loop-local sources have left scope (`handles`).
