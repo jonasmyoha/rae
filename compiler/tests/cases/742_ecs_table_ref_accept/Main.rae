@@ -52,7 +52,7 @@ func main() {
     )}"
   )
 
-  loop let entityId: EntityId, q: mod Position in forEach(table: world.positions) {
+  loop let entityId: EntityId, q: mod Position in query(table: world.positions) {
     componentSet(this: extra, entityId: entityId, data: Position { x: q.x * 2 })  # a table NOT joined
   }
   log("extra: {componentGet(this: extra, entityId: e).x}")

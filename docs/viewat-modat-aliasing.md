@@ -112,7 +112,7 @@ sema error; `copyAt` + `if let` and mutation of a *different* List still allowed
 
 #658 landed for `List.viewAt` / `List.modAt` bindings. The ECS element accessors
 — `componentMod` / `componentView` (by entity) and `queryModAt` / `queryViewAt`
-(by dense index), plus the `queryNViewX` / `forEachView` accessors — return the
+(by dense index), plus the `queryNViewX` / `queryView` accessors — return the
 same kind of pointer into a table's dense storage; #814 extended the rule to them
 (plain `let … =>` bindings and `if let`), rejecting `componentSet` /
 `componentRemove` / `clearEntityComponents` on the same table while the reference

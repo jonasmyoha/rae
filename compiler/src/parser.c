@@ -2254,7 +2254,7 @@ static AstStmt* parse_if_statement(Parser* parser, const Token* if_token) {
 //   }
 //
 // Rules (all diagnosed here, at parse time):
-//   - the iterable must be a query2 / query3 / query4 / query5 / forEach call
+//   - the iterable must be a query / query2 / query3 / query4 / query5 call
 //     (bare, or module-qualified as `Query.query2(...)`, which is mirrored onto
 //     the accessors);
 //   - an optional FIRST binding typed `EntityId` receives the entity;
@@ -2403,14 +2403,14 @@ static AstStmt* parse_query_loop(Parser* parser, AstStmt* stmt, bool has_let,
     else if (str_eq_cstr(fname, "query3")) { arity = 3; match_type = "Query3Match"; }
     else if (str_eq_cstr(fname, "query4")) { arity = 4; match_type = "Query4Match"; }
     else if (str_eq_cstr(fname, "query5")) { arity = 5; match_type = "Query5Match"; }
-    else if (str_eq_cstr(fname, "forEach")) { arity = 1; match_type = "QueryMatch"; single_table = true; }
+    else if (str_eq_cstr(fname, "query"))  { arity = 1; match_type = "QueryMatch"; single_table = true; }
   }
 
   bool ok = true;
   if (arity == 0) {
     parser_error(parser, first_name,
                  "a query loop (`loop let entityId: EntityId, a: mod A, b: view B in ...`) must iterate a "
-                 "query2, query3, query4, query5, or forEach call");
+                 "query, query2, query3, query4, or query5 call");
     ok = false;
   }
 

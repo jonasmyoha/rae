@@ -146,7 +146,7 @@ func query3(
   ret matches
 }
 
-# ----- single-table dense forEach (#709) -------------------------------------
+# ----- single-table dense query (#709) -------------------------------------
 
 # One (entity, dense-index) pair for a SINGLE table. Same shape the join matches
 # use, so a single-table walk reads through the same view/mod accessors.
@@ -157,11 +157,11 @@ type QueryMatch {
 
 # Walk EVERY entity in one table, in dense order — no join, no probe. This is the
 # single-table base case of a query: for a system that touches one component
-# kind (e.g. advance every AnimState), forEach hands back the whole dense set so
+# kind (e.g. advance every AnimState), query hands back the whole dense set so
 # the body reads/writes each via queryViewAt / queryModAt by `index`. The dense
 # index equals the loop position, so it addresses `table` directly with no
 # lookup.
-func forEach(T: type, table: view ComponentTable(T)) ret List(QueryMatch) {
+func query(T: type, table: view ComponentTable(T)) ret List(QueryMatch) {
   let count: Int = componentCount(this: table)
   let matches: List(QueryMatch) = List.create(QueryMatch, cap: 16)
   loop var i: Int = 0, i < count, ++i {
@@ -210,8 +210,8 @@ func query3ViewC(C: type, tableC: view ComponentTable(C), hit: view Query3Match)
   }
 }
 
-# Read the component for a single-table forEach match through a `view` ref.
-func forEachView(T: type, table: view ComponentTable(T), hit: view QueryMatch) ret view T {
+# Read the component for a single-table query match through a `view` ref.
+func queryView(T: type, table: view ComponentTable(T), hit: view QueryMatch) ret view T {
   unsafe {
     ret view rae_ext_rae_buf_get(buf: table.denseData.data, index: hit.index)
   }
@@ -526,7 +526,7 @@ func query5ViewE(E: type, tableE: view ComponentTable(E), hit: view Query5Match)
 
 # Entities in `dataTable` that are NOT present in `tagTable`. Each match's
 # `index` is the entity's dense slot in the DATA table (read/write it via
-# forEachView / queryModAt by index); the tag has no payload.
+# queryView / queryModAt by index); the tag has no payload.
 func without(
   D: type
   T: type

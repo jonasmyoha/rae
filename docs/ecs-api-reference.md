@@ -145,7 +145,7 @@ which is not the same as *proven safe*.
 
 6. **The ECS element-reference rule (#814):** the same guard for
    `componentMod`/`componentView`/`queryModAt`/`queryViewAt` (and the
-   `queryNViewX`/`forEachView` accessors) against `componentSet`/`componentRemove`/
+   `queryNViewX`/`queryView` accessors) against `componentSet`/`componentRemove`/
    `clearEntityComponents` on the *same* table — detailed under "Element
    references" below.
 
@@ -263,7 +263,7 @@ func queryViewAt(table: view ComponentTable(T), denseIndex: view Int) ret view T
 ```
 
 `tagged(D, T, dataTable, tagTable)` is `query2` specialised to "data table
-filtered by a zero-field tag" — the **with T** filter. `forEach` / `forEachView`
+filtered by a zero-field tag" — the **with T** filter. `query` / `queryView`
 iterate one table.
 
 The query ladder is FIXED at `query2`..`query5` (each hand-written in the same
@@ -298,7 +298,7 @@ loop let entityId: EntityId, p: mod Pos, v: view Vel in query2(tableA: pos, tabl
 }
 ```
 
-- Iterates a `query2`..`query5` or `forEach` call (bare, or `Query.`-qualified).
+- Iterates a `query` or `query2`..`query5` call (bare, or `Query.`-qualified).
 - An optional leading `name: EntityId` binding receives the entity.
 - The remaining bindings map POSITIONALLY to the joined tables (binding 1 ↔
   `tableA`, …) and must be `mod` or `view`: a `mod` binding writes through to the

@@ -2724,7 +2724,7 @@ static bool sema_stmt_mutates_collection(const AstStmt* stmt,
 // ===== #814: the ECS element-reference borrow rule ==========================
 //
 // componentMod / componentView (by entity), queryModAt / queryViewAt (by dense
-// index) and the queryNViewX / forEachView accessors return a pointer into a
+// index) and the queryView / queryNViewX accessors return a pointer into a
 // ComponentTable's dense storage — the same kind of pointer List.viewAt/modAt
 // returns — so the same hazard applies: a STRUCTURAL mutation of that table
 // while the reference is live is a silent use-after-free. componentSet of a new
@@ -2738,7 +2738,7 @@ static bool sema_stmt_mutates_collection(const AstStmt* stmt,
 static bool sema_is_table_element_accessor(Str name) {
     if (str_eq_cstr(name, "componentMod") || str_eq_cstr(name, "componentView")
         || str_eq_cstr(name, "queryModAt") || str_eq_cstr(name, "queryViewAt")
-        || str_eq_cstr(name, "forEachView")) return true;
+        || str_eq_cstr(name, "queryView")) return true;
     // query2ViewA .. query5ViewE
     return name.len == 11 && strncmp(name.data, "query", 5) == 0
         && name.data[5] >= '2' && name.data[5] <= '5'
