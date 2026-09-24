@@ -1,0 +1,44 @@
+open ecs/ComponentTable
+open ui/Scene
+
+type Component {
+  count: Int
+}
+
+type World {
+  components: ComponentTable(Component)
+}
+
+func fieldTexts(
+  T: type
+  value: view T
+  scene: view Scene
+  node: view String
+  name: view String
+) {
+  loop let field: view any in fields(value) {
+    log("{node}:{name}:{fieldName(field)}={field}; nodes={scene.nodes.length}")
+  }
+}
+
+func tableRows(T: type, table: view ComponentTable(T), scene: view Scene) {
+  let value: T = T.default()
+  fieldTexts(
+    value: value
+    scene: scene
+    node: "node"
+    name: "component"
+  )
+}
+
+func walk(W: type, world: view W, scene: view Scene) {
+  loop let table: view ComponentTable(any) in fields(world) {
+    tableRows(table: table, scene: scene)
+  }
+}
+
+func main() {
+  let world: World = { components: ComponentTable.create(Component) }
+  let scene: Scene = Scene.default()
+  walk(world: world, scene: scene)
+}
