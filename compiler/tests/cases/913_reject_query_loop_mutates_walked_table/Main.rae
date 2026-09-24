@@ -1,0 +1,23 @@
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Query
+
+# The single-table query loop walks the table's packed rows by index with no
+# snapshot, so the #814 rule is what keeps that index valid: while a body
+# binding aliases a row of the walked table, structurally mutating THAT table
+# (componentSet of a new entity, componentRemove) is rejected at compile time —
+# exactly as it is for a join's tables (743).
+type Score {
+  value: Int
+}
+
+func main() {
+  var scores: ComponentTable(Score) = ComponentTable.create(Score)
+  let e: EntityId = { index: 1, generation: 0 }
+  let f: EntityId = { index: 2, generation: 0 }
+  componentSet(this: scores, entityId: e, data: Score { value: 1 })
+  loop let entityId: EntityId, score: mod Score in query(table: scores) {
+    score.value = score.value + 1
+    componentSet(this: scores, entityId: f, data: Score { value: 0 })
+  }
+}

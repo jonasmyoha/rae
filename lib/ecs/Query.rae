@@ -210,6 +210,22 @@ func query3ViewC(C: type, tableC: view ComponentTable(C), hit: view Query3Match)
   }
 }
 
+# The two reads the single-table QUERY LOOP is lowered onto (#72253723): the
+# packed row count and the entity at a dense index. The loop sugar
+# `loop let entityId: EntityId, x: view T in query(table: t)` walks
+# 0..queryCount(t) directly, binding queryEntityAt / queryViewAt / queryModAt at
+# each index, so a per-frame system allocates nothing — the `query(...)` call
+# itself is never made. Both are the ComponentTable accessors under the query
+# spelling, so a `Query.`-qualified loop resolves them the same way it resolves
+# `Query.queryViewAt`.
+func queryCount(T: type, table: view ComponentTable(T)) ret Int {
+  ret componentCount(this: table)
+}
+
+func queryEntityAt(T: type, table: view ComponentTable(T), denseIndex: view Int) ret EntityId {
+  ret componentEntityAt(this: table, i: denseIndex)
+}
+
 # Read the component for a single-table query match through a `view` ref.
 func queryView(T: type, table: view ComponentTable(T), hit: view QueryMatch) ret view T {
   unsafe {
