@@ -361,7 +361,7 @@ it (`Coverage` unless a nicer example exists).
 | Shape | kind Rect / RoundedRect / Circle, fill, stroke (token, `{r,g,b,a}` or `#hex`), strokeWidth, radius | yes | yes | all |
 | Shadow | blur, layers, opacity, color, hasColor, centered, hoverOnly | yes | yes — bounded translucent layers; defaults preserve the original three-layer shadow | Coverage `ShadowBox` |
 | Opacity | value | yes | yes, inherited down the tree | Coverage `FadedBox` |
-| GradientFill | from, to, angle | yes | yes | Coverage `GradientBox` |
+| GradientFill | from, to, fromSlot, toSlot, angle | yes | yes — literals or live palette slots | Coverage `GradientBox` |
 | CornerRadius | radius | yes | yes | Coverage |
 | MaskShape | kind Circle / RoundedRect, sourceNodeId, radius | yes | yes — own box or `sourceNodeId`; since #1003 the image and text pipelines round a clip like the box pipeline, so the mask is exact for every primitive | Coverage `CircleMask`, `SourceMasked` |
 | BackdropImage | textureKey | yes | image when registered, glass fallback otherwise | Coverage |
@@ -494,14 +494,14 @@ the file does not. See the split-out task.
 
 ## The selected-row plate (#38090472)
 
-A selected row is a rounded plate, not a glyph: `chrome/TreeRow` carries a
-`Shape { kind: RoundedRect, radius: 10 }` whose fill is transparent until a
-row binds `Shape.fillSlot` to a palette token, so an UNSELECTED tree renders
-exactly as it did before the plate existed — the checked-in sample references
-still match to the pixel.
+A selected row is a rounded gradient plate, not a glyph: `chrome/TreeRow`
+carries a transparent `GradientFill` until a row binds its `fromSlot` and
+`toSlot`. Unselected rows therefore stay transparent, while live theme changes
+re-resolve both ends of a selected row's gradient.
 
-**TWO tokens, not one.** `editorRowActive` for the node the inspector
-describes and the arrow keys walk from, `editorRowSelected` for the rest.
+**TWO token pairs, not one.** `editorRowActiveFrom/To` mark the node the
+inspector describes and the arrow keys walk from;
+`editorRowSelectedFrom/To` mark the rest.
 With many rows selected a single flat colour cannot say which row is which —
 the question a one-row selection never has to answer, and the reason the task
 asked for this to "look right with MANY rows selected". Both are palette
@@ -517,11 +517,13 @@ selection — a log line cannot check a colour.
 
 ## Collapsing the hierarchy (#72481430)
 
-A row with children carries a chevron (`v` expanded, `>` collapsed); a LEAF
-carries none, because a disclosure control that discloses nothing is how a
-tree lies about its shape. The chevron is its own hit target inside the row
-with its own `treeToggle:<nodeId>` action, handled BEFORE the row's
-`inspect:` — one click, one meaning.
+A row with children carries an authored vector chevron: two rounded Shape
+strokes form the expanded or collapsed icon, coloured by
+`editorTreeChevron`. A leaf carries neither icon. Each icon is its own hit
+target with `treeToggle:<nodeId>`, handled before the row's `inspect:` action.
+The row also authors six one-level guide cells. Bindings activate the first N
+for depth N, so each level contributes both 12 du of indentation and a subtle
+`editorTreeGuide` vertical rule without code-drawn chrome.
 
 **Collapsed state is keyed on NODE ID**, never an entity or a row index. The
 tree rebuilds on every selection change and a reload recreates every entity,

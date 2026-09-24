@@ -477,27 +477,32 @@ func subtreeHasSelection(
   ret false
 }
 
-# The selection PLATE for a row: the palette token `Shape.fillSlot` resolves,
-# or "" for a row that is not selected (an empty slot falls back to the row's
-# own literal fill, which is transparent — so an unselected tree renders
-# exactly as it did before the plate existed).
+# The selection plate is a theme gradient. Empty slots keep the authored
+# transparent literals, so an unselected row costs no special branch in paint.
 #
 # TWO tokens, not one. With many rows selected a single flat colour cannot say
 # which row the inspector is describing or which one the arrow keys walk from
 # — the question a one-row selection never has to answer. Both come from the
 # palette, so a theme change carries them.
-func treeRowFillSlot(
+func treeRowGradientSlot(
   selection: view List(EntityId)
   entity: view EntityId
   selected: view EntityId
+  from: view Bool
 ) ret String {
   if entity is selected {
-    ret "editorRowActive"
+    if from {
+      ret "editorRowActiveFrom"
+    }
+    ret "editorRowActiveTo"
   }
   loop var i: Int = 0, i < selection.length, ++i {
     if let member: EntityId = selection.copyAt(index: i) {
       if member is entity {
-        ret "editorRowSelected"
+        if from {
+          ret "editorRowSelectedFrom"
+        }
+        ret "editorRowSelectedTo"
       }
     }
   }
@@ -548,29 +553,30 @@ func collectTreeRows(
   let isCollapsed: Bool = treeCollapsed(collapsed: collapsed, nodeId: nodeId)
   # A leaf has no chevron at all: a disclosure control that discloses nothing
   # is the classic way a tree lies about its shape.
-  var chevron: String = ""
   var chevronAction: String = ""
   if hasChildren {
-    chevron = "v"
-    if isCollapsed {
-      chevron = ">"
-    }
     chevronAction = "treeToggle:{nodeId}"
   }
   var keys: List(String) = {
     "id"
     "label"
-    "indent"
     "marker"
-    "fillSlot"
     "action"
-    "chevron"
+    "expanded"
+    "collapsed"
     "chevronAction"
+    "gradientFrom"
+    "gradientTo"
+    "guide1"
+    "guide2"
+    "guide3"
+    "guide4"
+    "guide5"
+    "guide6"
   }
-  var values: List(String) = List.create(String, cap: 8)
+  var values: List(String) = List.create(String, cap: 15)
   values.add(value: "{entity.index}")
   values.add(value: treeRowLabelOf(world: world, entity: entity))
-  values.add(value: "{(depth.toFloat() * treeIndentPerLevel + 6.0).toInt()}")
   values.add(value: treeRowMarker(
     world: world
     selection: selection
@@ -578,10 +584,28 @@ func collectTreeRows(
     selected: selected
     hidden: isCollapsed
   ))
-  values.add(value: treeRowFillSlot(selection: selection, entity: entity, selected: selected))
   values.add(value: "inspect:{entity.index}")
-  values.add(value: chevron)
+  values.add(value: "{hasChildren and isCollapsed is false}")
+  values.add(value: "{hasChildren and isCollapsed}")
   values.add(value: chevronAction)
+  values.add(value: treeRowGradientSlot(
+    selection: selection
+    entity: entity
+    selected: selected
+    from: true
+  ))
+  values.add(value: treeRowGradientSlot(
+    selection: selection
+    entity: entity
+    selected: selected
+    from: false
+  ))
+  values.add(value: "{depth >= 1}")
+  values.add(value: "{depth >= 2}")
+  values.add(value: "{depth >= 3}")
+  values.add(value: "{depth >= 4}")
+  values.add(value: "{depth >= 5}")
+  values.add(value: "{depth >= 6}")
   rows.add(value: ListViewRow { keys: own keys, values: own values })
   entities.add(value: entity)
   # A collapsed node contributes its own row and stops. `entities` therefore
