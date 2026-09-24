@@ -42,9 +42,9 @@ func hoverScaleContains(
   ret false
 }
 
-# Step every HoverScale entity by one frame. `hovered` is the
-# topmost cursor-hit entity (use `noEntity()` when nothing is
-# hovered). Returns true if any entity is still animating.
+# Step every HoverScale entity by one frame. `hovered` is the topmost
+# cursor-hit entity (use `noEntity()` when nothing is hovered); its Interaction
+# also selects the authored pressed scale. Returns true while any animates.
 func buttonHoverScaleUpdate(
   world: mod UiWorld
   uiSystems: view UiSystems
@@ -71,13 +71,17 @@ func buttonHoverScaleUpdate(
     let entity: EntityId = componentEntityAt(this: world.hoverScales, i: i)
     let hs: HoverScale = componentGet(this: world.hoverScales, entity: entity)
     var target: Float = hs.restScale
-    if hoverScaleContains(
+    let containsHover: Bool = hoverScaleContains(
       world: world
       uiSystems: uiSystems
       entity: entity
       ancestor: hovered
-    ) {
+    )
+    if containsHover {
       target = hs.hoverScale
+    }
+    if containsHover and entityPressed(world: world, uiSystems: uiSystems, entity: hovered) {
+      target = hs.pressedScale
     }
     let next: Float = easeTowards(
       current: hs.current

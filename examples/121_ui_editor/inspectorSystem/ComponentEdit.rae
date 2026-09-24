@@ -111,3 +111,46 @@ func selectionHasAll(
   }
   ret missing is 0
 }
+
+# One inspector affordance action. Removal is deliberately two-step: the first
+# press arms the named component and the second confirms it. Clicking another
+# action cancels the pending removal.
+func applyComponentAction(
+  inspectorSystem: mod InspectorSystem
+  world: mod UiWorld
+  actionId: view String
+) ret Bool {
+  if actionId is "compToggleAdd" {
+    inspectorSystem.addComponentsCollapsed = inspectorSystem.addComponentsCollapsed is false
+    inspectorSystem.pendingRemoveComponent = ""
+    ret true
+  }
+  if actionId.startsWith(prefix: "compRemove:") {
+    let name: String = actionId.sub(start: 11, len: actionId.length() - 11)
+    if inspectorSystem.pendingRemoveComponent is name {
+      let removed: Int = removeComponentFromSelection(
+        world: world
+        selection: inspectorSystem.selection
+        name: name
+      )
+      inspectorSystem.pendingRemoveComponent = ""
+      log("[ui-editor] removed {name} from {removed}")
+    } else {
+      inspectorSystem.pendingRemoveComponent = "{name}"
+      log("[ui-editor] confirm removing {name}")
+    }
+    ret true
+  }
+  if actionId.startsWith(prefix: "compAdd:") {
+    let name: String = actionId.sub(start: 8, len: actionId.length() - 8)
+    let added: Int = addComponentToSelection(
+      world: world
+      selection: inspectorSystem.selection
+      name: name
+    )
+    inspectorSystem.pendingRemoveComponent = ""
+    log("[ui-editor] added {name} to {added}")
+    ret true
+  }
+  ret false
+}

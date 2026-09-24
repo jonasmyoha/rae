@@ -177,8 +177,58 @@ func addWidgetRow(
   # a field row — so only the affordances are clickable.
   action: view String
 ) {
-  var keys: List(String) = List.create(String, cap: 5)
-  var values: List(String) = List.create(String, cap: 5)
+  addWidgetRowWithAffordance(
+    rows: rows
+    id: id
+    name: name
+    value: value
+    indent: indent
+    rowAction: action
+    affordanceAction: ""
+    affordanceIcon: ""
+    affordanceFill: "editorIconFill"
+  )
+}
+
+# A component add/remove row keeps the row itself inert and gives the action a
+# dedicated authored pill. Ordinary rows use `addWidgetRow` above, preserving
+# their whole-row actions for Rect editing and selection helpers.
+func addWidgetAffordanceRow(
+  rows: mod List(ListViewRow)
+  id: view String
+  name: view String
+  value: view String
+  indent: view Int
+  action: view String
+  icon: view String
+  fill: view String
+) {
+  addWidgetRowWithAffordance(
+    rows: rows
+    id: id
+    name: name
+    value: value
+    indent: indent
+    rowAction: ""
+    affordanceAction: action
+    affordanceIcon: icon
+    affordanceFill: fill
+  )
+}
+
+func addWidgetRowWithAffordance(
+  rows: mod List(ListViewRow)
+  id: view String
+  name: view String
+  value: view String
+  indent: view Int
+  rowAction: view String
+  affordanceAction: view String
+  affordanceIcon: view String
+  affordanceFill: view String
+) {
+  var keys: List(String) = List.create(String, cap: 9)
+  var values: List(String) = List.create(String, cap: 9)
   keys.add(value: "id")
   values.add(value: "{id}")
   keys.add(value: "name")
@@ -187,8 +237,16 @@ func addWidgetRow(
   values.add(value: "{value}")
   keys.add(value: "indent")
   values.add(value: "{indent}")
+  keys.add(value: "rowAction")
+  values.add(value: "{rowAction}")
   keys.add(value: "action")
-  values.add(value: "{action}")
+  values.add(value: "{affordanceAction}")
+  keys.add(value: "actionActive")
+  values.add(value: "{affordanceAction.length() > 0}")
+  keys.add(value: "actionIcon")
+  values.add(value: "{affordanceIcon}")
+  keys.add(value: "actionFill")
+  values.add(value: "{affordanceFill}")
   rows.add(value: ListViewRow { keys: own keys, values: own values })
 }
 

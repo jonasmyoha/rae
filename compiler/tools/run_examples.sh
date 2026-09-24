@@ -591,6 +591,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              RAE_UI_EDITOR_TEST_TREE_CLICKS="PlayButton cmd:PlayLabel" \
              RAE_UI_EDITOR_TEST_COMPONENT="remove:Shape" \
              perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-comp1.log" 2>&1 \
+             && grep -qaF "confirm removing Shape" "$TMP_OUT/render-comp1.log" \
              && grep -qaF "removed Shape from 1" "$TMP_OUT/render-comp1.log" \
              && (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
                 RAE_UI_HEADLESS=1 RAE_UI_EDITOR_TREE=1 RAE_SDL_HEADLESS_MS=1200 \
@@ -603,12 +604,31 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
                 RAE_UI_EDITOR_TEST_TREE_CLICKS="PlayButton" \
                 RAE_UI_EDITOR_TEST_COMPONENT="filter:tran" \
                 perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-comp3.log" 2>&1 \
-             && grep -qaF "filter: tran:; add component: TransformFx=add" "$TMP_OUT/render-comp3.log"; then
+             && grep -qaF "filter: tran:; add component: TransformFx=" "$TMP_OUT/render-comp3.log"; then
             :
           else
             UI_EDITOR_OK=0
             echo "  component add/remove/filter failed:"
             cat "$TMP_OUT/render-comp1.log" "$TMP_OUT/render-comp2.log" "$TMP_OUT/render-comp3.log" 2>/dev/null | grep -av '^\[present\]' | cut -c1-300 | sed 's/^/    /'
+          fi
+          # The component rows scroll inside a FIXED clip. A deep virtual-list
+          # offset must still paint rows and leave the parent chain in place.
+          SCREENSHOT="$TMP_OUT/ui-editor-component-scroll.bmp"
+          if (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
+             RAE_UI_HEADLESS=1 RAE_UI_EDITOR_TREE=1 RAE_SDL_HEADLESS_MS=1500 \
+             RAE_UI_EDITOR_TEST_SELECT="PlayButton" \
+             RAE_UI_EDITOR_TEST_COMPONENT="scroll:-280" \
+             RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
+             perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-component-scroll.log" 2>&1 \
+             && grep -qaF "component scroll: -280" "$TMP_OUT/render-component-scroll.log" \
+             && python3 tools/assert_bmp_diff.py "$SCREENSHOT" \
+                  "../examples/121_ui_editor/references/ComponentScroll.png" \
+                  --skip-size-mismatch > "$TMP_OUT/screenshot-component-scroll.log" 2>&1; then
+            :
+          else
+            UI_EDITOR_OK=0
+            echo "  component list scroll failed:"
+            cat "$TMP_OUT/render-component-scroll.log" "$TMP_OUT/screenshot-component-scroll.log" 2>/dev/null | grep -av '^\[present\]' | cut -c1-300 | sed 's/^/    /'
           fi
           # What DRIVES a value, inline with it (#21438052). The generated
           # widgets tag each field with where its value came from, read back

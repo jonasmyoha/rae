@@ -239,13 +239,21 @@ func appendRectRows(
   inspectorSystem: view InspectorSystem
   header: view String
 ) {
-  addWidgetRow(
+  var removeIcon: String = "x"
+  var removeFill: String = "editorRemoveAction"
+  if inspectorSystem.pendingRemoveComponent is "Rect" {
+    removeIcon = "✓"
+    removeFill = "editorConfirmAction"
+  }
+  addWidgetAffordanceRow(
     rows: rows
     id: "Rect"
     name: header
-    value: "remove"
+    value: ""
     indent: 0
     action: "compRemove:Rect"
+    icon: removeIcon
+    fill: removeFill
   )
   var lockText: String = "off"
   if inspectorSystem.rectLocked {

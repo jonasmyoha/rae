@@ -47,5 +47,39 @@ grep -qF "[ui-editor] marquee preview:PlayButton -> none" "$TMP/Marquee.log" \
   || { echo "marquee preview did not run:"; grep '\[ui-editor\]' "$TMP/Marquee.log"; exit 1; }
 python3 compiler/tools/assert_bmp_diff.py --convert "$TMP/Marquee.bmp" "$OUT_DIR/Marquee.png"
 
+# The hierarchy's multi-selection plate is another interaction-only frame.
+# Keep its gesture identical to the example gate: two selected rows and the
+# brighter active row, with a populated inspector beside them.
+env RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
+RAE_UI_EDITOR_ROOT="examples/121_ui_editor/assets/samples" \
+RAE_UI_EDITOR_TEST_TREE_CLICKS="Title cmd:Tagline cmd:LogoRing" \
+RAE_UI_HEADLESS=1 RAE_UI_EDITOR_TREE=1 RAE_SDL_HEADLESS_MS=1500 \
+RAE_GPU2D_SCREENSHOT="$TMP/TreeSelection.bmp" \
+perl -e 'alarm shift; exec @ARGV' 120 \
+  compiler/bin/rae run --project examples/121_ui_editor examples/121_ui_editor/Main.rae \
+  > "$TMP/TreeSelection.log" 2>&1 \
+  || { echo "tree-selection render failed:"; grep -v '^\[present\]' "$TMP/TreeSelection.log" | tail -20; exit 1; }
+grep -qF "Title,Tagline,LogoRing active LogoRing" "$TMP/TreeSelection.log" \
+  || { echo "tree-selection gesture did not run:"; grep '\[ui-editor\]' "$TMP/TreeSelection.log"; exit 1; }
+python3 compiler/tools/assert_bmp_diff.py --convert \
+  "$TMP/TreeSelection.bmp" "$OUT_DIR/TreeSelection.png"
+
+# The component list scrolls as a moving virtual list inside a fixed clip.
+# Capture a deep offset so a travelling clip or stale row window goes blank.
+env RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
+RAE_UI_EDITOR_ROOT="examples/121_ui_editor/assets/samples" \
+RAE_UI_EDITOR_TEST_SELECT="PlayButton" \
+RAE_UI_EDITOR_TEST_COMPONENT="scroll:-280" \
+RAE_UI_HEADLESS=1 RAE_UI_EDITOR_TREE=1 RAE_SDL_HEADLESS_MS=1500 \
+RAE_GPU2D_SCREENSHOT="$TMP/ComponentScroll.bmp" \
+perl -e 'alarm shift; exec @ARGV' 120 \
+  compiler/bin/rae run --project examples/121_ui_editor examples/121_ui_editor/Main.rae \
+  > "$TMP/ComponentScroll.log" 2>&1 \
+  || { echo "component-scroll render failed:"; grep -v '^\[present\]' "$TMP/ComponentScroll.log" | tail -20; exit 1; }
+grep -qF "[ui-editor] component scroll: -280" "$TMP/ComponentScroll.log" \
+  || { echo "component scroll did not run:"; grep '\[ui-editor\]' "$TMP/ComponentScroll.log"; exit 1; }
+python3 compiler/tools/assert_bmp_diff.py --convert \
+  "$TMP/ComponentScroll.bmp" "$OUT_DIR/ComponentScroll.png"
+
 rm -rf "$TMP"
 echo "references written to $OUT_DIR"
