@@ -16,8 +16,8 @@ func main() {
   log("a index={a.index} gen={a.generation}")
 
   # give `a` an Active component, then destroy it
-  componentSet(this: world.actives, entity: a, data: Active { value: true })
-  destroyEntity(world: world, entity: a)
+  componentSet(this: world.actives, entityId: a, data: Active { value: true })
+  destroyEntity(world: world, entityId: a)
   # UiWorld defers index reuse until the app releases its dead entities (the
   # dead-entities outbox); with nothing of its own to sweep, release at once.
   releaseDeadEntities(world: world, uiSystems: uiSystems)
@@ -32,9 +32,9 @@ func main() {
 
   # component stale-handle safety: set Active on the new entity `c`, then a
   # stale read through `a` (same index, old generation) must MISS.
-  componentSet(this: world.actives, entity: c, data: Active { value: true })
-  log("live c has Active: {componentHas(this: world.actives, entity: c)}")
-  log("stale a has Active: {componentHas(this: world.actives, entity: a)}")
+  componentSet(this: world.actives, entityId: c, data: Active { value: true })
+  log("live c has Active: {componentHas(this: world.actives, entityId: c)}")
+  log("stale a has Active: {componentHas(this: world.actives, entityId: a)}")
 
   # free list empties, next alloc is a fresh index
   let d: EntityId = createEntity(world: world)

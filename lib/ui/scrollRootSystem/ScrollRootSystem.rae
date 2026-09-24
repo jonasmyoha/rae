@@ -108,22 +108,22 @@ func axisPaddingSum(root: view ScrollRoot, insets: view Insets) ret Float {
 func scrollContentExtent(
   world: view UiWorld
   uiSystems: view UiSystems
-  entity: view EntityId
+  entityId: view EntityId
   root: view ScrollRoot
 ) ret Float {
   let padEnd: Float = axisPaddingEnd(
     root: root
-    insets: entityPadding(world: world, uiSystems: uiSystems, entity: entity)
+    insets: entityPadding(world: world, uiSystems: uiSystems, entityId: entityId)
   )
   var extent: Float = 0.0
   var measured: Bool = false
-  if componentHas(this: world.listViews, entity: entity) and componentHas(
+  if componentHas(this: world.listViews, entityId: entityId) and componentHas(
     this: world.listViewDatas
-    entity: entity
+    entityId: entityId
   ) {
-    let listView: ListView = componentGet(this: world.listViews, entity: entity)
+    let listView: ListView = componentGet(this: world.listViews, entityId: entityId)
     if listView.mode is ListViewMode.virtual {
-      let count: Int = componentGet(this: world.listViewDatas, entity: entity).rows.length
+      let count: Int = componentGet(this: world.listViewDatas, entityId: entityId).rows.length
       if count > 0 {
         let pitch: Float = listView.itemHeight + listView.itemGap
         extent = count.toFloat() * pitch - listView.itemGap + padEnd
@@ -131,12 +131,12 @@ func scrollContentExtent(
       }
     }
   }
-  if componentHas(this: world.childrens, entity: entity) {
-    let children: view Children => componentView(this: world.childrens, entity: entity)
+  if componentHas(this: world.childrens, entityId: entityId) {
+    let children: view Children => componentView(this: world.childrens, entityId: entityId)
     loop var i: Int = 0, i < children.ids.length, ++i {
       let child: EntityId = children.ids.copyAtFallback(index: i, fallback: noEntity())
-      if componentHas(this: uiSystems.layout.computedRects, entity: child) {
-        let rect: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: child)
+      if componentHas(this: uiSystems.layout.computedRects, entityId: child) {
+        let rect: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entityId: child)
         let far: Float = axisFarEdge(root: root, rect: rect) + padEnd
         if far > extent {
           extent = far
@@ -146,7 +146,10 @@ func scrollContentExtent(
     }
   }
   if measured is false {
-    let ownRect: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: entity)
+    let ownRect: ComputedRect = componentGet(
+      this: uiSystems.layout.computedRects
+      entityId: entityId
+    )
     extent = axisLength(root: root, size: ownRect.size)
   }
   ret extent
@@ -158,21 +161,21 @@ func scrollContentExtent(
 func scrollWindowLength(
   world: view UiWorld
   uiSystems: view UiSystems
-  entity: view EntityId
+  entityId: view EntityId
   root: view ScrollRoot
 ) ret Float {
-  let ownRect: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: entity)
+  let ownRect: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entityId: entityId)
   var window: Float = axisLength(root: root, size: ownRect.size)
-  if componentHas(this: uiSystems.hierarchy.parents, entity: entity) {
-    let parent: EntityId = componentGet(this: uiSystems.hierarchy.parents, entity: entity).parent
-    if componentHas(this: uiSystems.layout.computedRects, entity: parent) {
+  if componentHas(this: uiSystems.hierarchy.parents, entityId: entityId) {
+    let parent: EntityId = componentGet(this: uiSystems.hierarchy.parents, entityId: entityId).parent
+    if componentHas(this: uiSystems.layout.computedRects, entityId: parent) {
       let parentRect: ComputedRect = componentGet(
         this: uiSystems.layout.computedRects
-        entity: parent
+        entityId: parent
       )
       let parentBox: Float = axisLength(root: root, size: parentRect.size) - axisPaddingSum(
         root: root
-        insets: entityPadding(world: world, uiSystems: uiSystems, entity: parent)
+        insets: entityPadding(world: world, uiSystems: uiSystems, entityId: parent)
       )
       if parentBox < window {
         window = parentBox
@@ -185,23 +188,23 @@ func scrollWindowLength(
 func scrollRootRange(
   world: view UiWorld
   uiSystems: view UiSystems
-  entity: view EntityId
+  entityId: view EntityId
 ) ret ScrollRange {
   let inert: ScrollRange = { active: false, floor: 0.0, window: 1.0 }
-  if isNone(this: entity) {
+  if isNone(this: entityId) {
     ret inert
   }
-  if componentHas(this: world.scrollRoots, entity: entity) is false {
+  if componentHas(this: world.scrollRoots, entityId: entityId) is false {
     ret inert
   }
-  if componentHas(this: uiSystems.layout.computedRects, entity: entity) is false {
+  if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) is false {
     ret inert
   }
-  let root: ScrollRoot = componentGet(this: world.scrollRoots, entity: entity)
+  let root: ScrollRoot = componentGet(this: world.scrollRoots, entityId: entityId)
   let window: Float = scrollWindowLength(
     world: world
     uiSystems: uiSystems
-    entity: entity
+    entityId: entityId
     root: root
   )
   if root.floor is ScrollFloorMode.fixed {
@@ -210,7 +213,7 @@ func scrollRootRange(
   let extent: Float = scrollContentExtent(
     world: world
     uiSystems: uiSystems
-    entity: entity
+    entityId: entityId
     root: root
   )
   let overflow: Float = extent - (window - root.endInset)
@@ -227,7 +230,7 @@ func scrollRootRange(
 func applyScrollPosition(
   world: mod UiWorld
   uiSystems: mod UiSystems
-  entity: view EntityId
+  entityId: view EntityId
   root: view ScrollRoot
   position: view Float
 ) {
@@ -236,16 +239,16 @@ func applyScrollPosition(
     want = { x: position, y: 0.0 }
   }
   var changed: Bool = true
-  if componentHas(this: uiSystems.transform2d.runtimeOffsets, entity: entity) {
-    let current: Vec2 = componentGet(this: uiSystems.transform2d.runtimeOffsets, entity: entity).delta
+  if componentHas(this: uiSystems.transform2d.runtimeOffsets, entityId: entityId) {
+    let current: Vec2 = componentGet(this: uiSystems.transform2d.runtimeOffsets, entityId: entityId).delta
     changed = current.x is not want.x or current.y is not want.y
   }
   if changed {
     let offset: RuntimeOffset = { delta: want }
-    componentSet(this: uiSystems.transform2d.runtimeOffsets, entity: entity, data: offset)
+    componentSet(this: uiSystems.transform2d.runtimeOffsets, entityId: entityId, data: offset)
   }
-  if componentHas(this: world.scrollStates, entity: entity) {
-    let state: mod ScrollState => componentMod(this: world.scrollStates, entity: entity)
+  if componentHas(this: world.scrollStates, entityId: entityId) {
+    let state: mod ScrollState => componentMod(this: world.scrollStates, entityId: entityId)
     state.y = position
   }
 }
@@ -258,13 +261,13 @@ func resetScrollRootOnPage(world: mod UiWorld, uiSystems: mod UiSystems, pageId:
   let n: Int = componentCount(this: world.scrollRoots)
   var i: Int = 0
   loop i < n {
-    let entity: EntityId = componentEntityAt(this: world.scrollRoots, i: i)
-    if pageOf(world: world, uiSystems: uiSystems, entity: entity) is pageId {
-      let root: ScrollRoot = componentGet(this: world.scrollRoots, entity: entity)
+    let entityId: EntityId = componentEntityAt(this: world.scrollRoots, i: i)
+    if pageOf(world: world, uiSystems: uiSystems, entityId: entityId) is pageId {
+      let root: ScrollRoot = componentGet(this: world.scrollRoots, entityId: entityId)
       applyScrollPosition(
         world: world
         uiSystems: uiSystems
-        entity: entity
+        entityId: entityId
         root: root
         position: 0.0
       )
@@ -280,22 +283,22 @@ func resetScrollRootOnPage(world: mod UiWorld, uiSystems: mod UiSystems, pageId:
 func scrollRootSystem(world: mod UiWorld, uiSystems: mod UiSystems, memory: mod ScrollMemory) {
   let n: Int = componentCount(this: world.scrollRoots)
   loop var i: Int = 0, i < n, ++i {
-    let entity: EntityId = componentEntityAt(this: world.scrollRoots, i: i)
-    let pageId: String = pageOf(world: world, uiSystems: uiSystems, entity: entity)
-    if componentHas(this: world.scrollStates, entity: entity) is false {
+    let entityId: EntityId = componentEntityAt(this: world.scrollRoots, i: i)
+    let pageId: String = pageOf(world: world, uiSystems: uiSystems, entityId: entityId)
+    if componentHas(this: world.scrollStates, entityId: entityId) is false {
       let position: Float = recallScroll(memory: memory, pageId: pageId)
       let seeded: ScrollState = { y: position, velocity: 0.0 }
-      componentSet(this: world.scrollStates, entity: entity, data: seeded)
-      let root: ScrollRoot = componentGet(this: world.scrollRoots, entity: entity)
+      componentSet(this: world.scrollStates, entityId: entityId, data: seeded)
+      let root: ScrollRoot = componentGet(this: world.scrollRoots, entityId: entityId)
       applyScrollPosition(
         world: world
         uiSystems: uiSystems
-        entity: entity
+        entityId: entityId
         root: root
         position: position
       )
     } else {
-      let state: ScrollState = componentGet(this: world.scrollStates, entity: entity)
+      let state: ScrollState = componentGet(this: world.scrollStates, entityId: entityId)
       if state.y is not recallScroll(memory: memory, pageId: pageId) {
         rememberScroll(memory: memory, pageId: pageId, position: state.y)
       }
@@ -343,30 +346,30 @@ func scrollAbs(value: view Float) ret Float {
 func pointerOverScrollRoot(
   world: view UiWorld
   uiSystems: view UiSystems
-  entity: view EntityId
+  entityId: view EntityId
   x: view Float
   y: view Float
 ) ret Bool {
-  var window: EntityId = entity
-  if componentHas(this: uiSystems.hierarchy.parents, entity: entity) {
-    let parent: EntityId = componentGet(this: uiSystems.hierarchy.parents, entity: entity).parent
-    if componentHas(this: uiSystems.layout.computedRects, entity: parent) and componentHas(
+  var window: EntityId = entityId
+  if componentHas(this: uiSystems.hierarchy.parents, entityId: entityId) {
+    let parent: EntityId = componentGet(this: uiSystems.hierarchy.parents, entityId: entityId).parent
+    if componentHas(this: uiSystems.layout.computedRects, entityId: parent) and componentHas(
       this: uiSystems.transform2d.worldTransforms
-      entity: parent
+      entityId: parent
     ) {
       window = parent
     }
   }
-  if componentHas(this: uiSystems.layout.computedRects, entity: window) is false {
+  if componentHas(this: uiSystems.layout.computedRects, entityId: window) is false {
     ret false
   }
-  if componentHas(this: uiSystems.transform2d.worldTransforms, entity: window) is false {
+  if componentHas(this: uiSystems.transform2d.worldTransforms, entityId: window) is false {
     ret false
   }
-  let r: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: window)
+  let r: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entityId: window)
   let wt: WorldTransform2D = componentGet(
     this: uiSystems.transform2d.worldTransforms
-    entity: window
+    entityId: window
   )
   if x < wt.position.x or x > wt.position.x + r.size.x {
     ret false
@@ -384,7 +387,7 @@ func pointerAlongAxis(root: view ScrollRoot, input: view UiInput) ret Float {
   ret input.pointer.y
 }
 
-# One frame of scroll on `entity`. Returns true when the position moved, so a
+# One frame of scroll on `entityId`. Returns true when the position moved, so a
 # caller can repaint only on frames that scrolled (including every momentum /
 # spring frame). Inert (false) when the root is not laid out or its content
 # fits. The whole state is read into locals, stepped, and written back — no
@@ -392,19 +395,19 @@ func pointerAlongAxis(root: view ScrollRoot, input: view UiInput) ret Float {
 func updateScrollRoot(
   world: mod UiWorld
   uiSystems: mod UiSystems
-  entity: view EntityId
+  entityId: view EntityId
   input: view UiInput
 ) ret Bool {
-  if isNone(this: entity) {
+  if isNone(this: entityId) {
     ret false
   }
-  if componentHas(this: world.scrollRoots, entity: entity) is false {
+  if componentHas(this: world.scrollRoots, entityId: entityId) is false {
     ret false
   }
-  let root: ScrollRoot = componentGet(this: world.scrollRoots, entity: entity)
+  let root: ScrollRoot = componentGet(this: world.scrollRoots, entityId: entityId)
   var state: ScrollState = { y: 0.0, velocity: 0.0 }
-  if componentHas(this: world.scrollStates, entity: entity) {
-    state = componentGet(this: world.scrollStates, entity: entity)
+  if componentHas(this: world.scrollStates, entityId: entityId) {
+    state = componentGet(this: world.scrollStates, entityId: entityId)
   }
   var drag: ScrollDrag = {
     dragging: false
@@ -413,26 +416,26 @@ func updateScrollRoot(
     d1: 0.0
     d2: 0.0
   }
-  if componentHas(this: world.scrollDrags, entity: entity) {
-    drag = componentGet(this: world.scrollDrags, entity: entity)
+  if componentHas(this: world.scrollDrags, entityId: entityId) {
+    drag = componentGet(this: world.scrollDrags, entityId: entityId)
   }
   let before: Float = state.y
-  let range: ScrollRange = scrollRootRange(world: world, uiSystems: uiSystems, entity: entity)
+  let range: ScrollRange = scrollRootRange(world: world, uiSystems: uiSystems, entityId: entityId)
 
   if range.active is false {
     # Content fits. Reset rather than leaving a stale position behind: a panel
     # that shrinks while scrolled would otherwise keep a gap at the top.
     drag.dragging = false
-    componentSet(this: world.scrollDrags, entity: entity, data: drag)
+    componentSet(this: world.scrollDrags, entityId: entityId, data: drag)
     if before is not 0.0 {
       applyScrollPosition(
         world: world
         uiSystems: uiSystems
-        entity: entity
+        entityId: entityId
         root: root
         position: 0.0
       )
-      let rest: mod ScrollState => componentMod(this: world.scrollStates, entity: entity)
+      let rest: mod ScrollState => componentMod(this: world.scrollStates, entityId: entityId)
       rest.velocity = 0.0
     }
     ret before is not 0.0
@@ -443,7 +446,7 @@ func updateScrollRoot(
   let inside: Bool = pointerOverScrollRoot(
     world: world
     uiSystems: uiSystems
-    entity: entity
+    entityId: entityId
     x: input.pointer.x
     y: input.pointer.y
   )
@@ -467,7 +470,7 @@ func updateScrollRoot(
   }
 
   # ----- wheel (only when updateUiInput routed it here) -----
-  let wheel: Float = uiWheelFor(input: input, entity: entity)
+  let wheel: Float = uiWheelFor(input: input, entityId: entityId)
   if wheel is not 0.0 {
     let raw: Float = wheel * scrollWheelStep
     state.y = state.y + dampedDelta(
@@ -525,13 +528,13 @@ func updateScrollRoot(
     }
   }
 
-  componentSet(this: world.scrollDrags, entity: entity, data: drag)
-  componentSet(this: world.scrollStates, entity: entity, data: state)
+  componentSet(this: world.scrollDrags, entityId: entityId, data: drag)
+  componentSet(this: world.scrollStates, entityId: entityId, data: state)
   if state.y is not before {
     applyScrollPosition(
       world: world
       uiSystems: uiSystems
-      entity: entity
+      entityId: entityId
       root: root
       position: state.y
     )
@@ -541,12 +544,12 @@ func updateScrollRoot(
 
 # Whether the root is mid-drag, so a caller can suppress its own pointer
 # handling — a drag that started on the panel should not also orbit the camera.
-func scrollRootDragging(world: view UiWorld, entity: view EntityId) ret Bool {
-  if isNone(this: entity) {
+func scrollRootDragging(world: view UiWorld, entityId: view EntityId) ret Bool {
+  if isNone(this: entityId) {
     ret false
   }
-  if componentHas(this: world.scrollDrags, entity: entity) is false {
+  if componentHas(this: world.scrollDrags, entityId: entityId) is false {
     ret false
   }
-  ret componentGet(this: world.scrollDrags, entity: entity).dragging
+  ret componentGet(this: world.scrollDrags, entityId: entityId).dragging
 }

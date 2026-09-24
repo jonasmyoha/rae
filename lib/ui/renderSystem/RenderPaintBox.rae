@@ -32,17 +32,17 @@ func g2dChain(color: view RgbaColor, chain255: view Int) ret RgbaColor {
   ret RgbaColor { r: color.r, g: color.g, b: color.b, a: a }
 }
 
-func g2dRadius(world: view UiWorld, entity: view EntityId, fallback: view Float) ret Float {
-  if componentHas(this: world.cornerRadiuses, entity: entity) {
-    let cr: CornerRadius = componentGet(this: world.cornerRadiuses, entity: entity)
+func g2dRadius(world: view UiWorld, entityId: view EntityId, fallback: view Float) ret Float {
+  if componentHas(this: world.cornerRadiuses, entityId: entityId) {
+    let cr: CornerRadius = componentGet(this: world.cornerRadiuses, entityId: entityId)
     ret cr.radius
   }
   ret fallback
 }
 
-func g2dHoverMul(world: view UiWorld, entity: view EntityId) ret Float {
-  if componentHas(this: world.hoverScales, entity: entity) {
-    let hs: HoverScale = componentGet(this: world.hoverScales, entity: entity)
+func g2dHoverMul(world: view UiWorld, entityId: view EntityId) ret Float {
+  if componentHas(this: world.hoverScales, entityId: entityId) {
+    let hs: HoverScale = componentGet(this: world.hoverScales, entityId: entityId)
     ret hs.current
   }
   ret 1.0
@@ -63,11 +63,11 @@ type PaintBox {
 
 func g2dPaintBox(
   world: view UiWorld
-  entity: view EntityId
+  entityId: view EntityId
   wt: view WorldTransform2D
   cr: view ComputedRect
 ) ret PaintBox {
-  let hoverMul: Float = g2dHoverMul(world: world, entity: entity)
+  let hoverMul: Float = g2dHoverMul(world: world, entityId: entityId)
   let scaleX: Float = wt.scale.x * hoverMul
   let scaleY: Float = wt.scale.y * hoverMul
   var pivotX: Float = 0.5
@@ -79,8 +79,8 @@ func g2dPaintBox(
   # drift by (1 - scale) * pivot of its size.
   var ownX: Float = hoverMul
   var ownY: Float = hoverMul
-  if componentHas(this: world.transforms, entity: entity) {
-    let fx: TransformFx = componentGet(this: world.transforms, entity: entity)
+  if componentHas(this: world.transforms, entityId: entityId) {
+    let fx: TransformFx = componentGet(this: world.transforms, entityId: entityId)
     pivotX = fx.pivot.x
     pivotY = fx.pivot.y
     ownX = fx.scaleX * hoverMul
@@ -115,13 +115,13 @@ func g2dPaintBox(
 func paintShadowG(
   world: view UiWorld
   uiSystems: view UiSystems
-  entity: view EntityId
+  entityId: view EntityId
   box: view PaintBox
   radius: view Float
   chain255: view Int
   canvas: mod Gpu2dCanvas
 ) {
-  let shadow: Shadow = componentGet(this: world.shadows, entity: entity)
+  let shadow: Shadow = componentGet(this: world.shadows, entityId: entityId)
   if shadow.blur <= 0.0 {
     ret
   }
@@ -135,7 +135,7 @@ func paintShadowG(
   }
   var opacity: Float = restOpacity
   if restOpacity is not hoverOpacity {
-    let hover: Float = hoverFadeAmount(world: world, uiSystems: uiSystems, entity: entity)
+    let hover: Float = hoverFadeAmount(world: world, uiSystems: uiSystems, entityId: entityId)
     opacity = restOpacity + (hoverOpacity - restOpacity) * hover
   }
   if opacity <= 0.0 {
@@ -184,27 +184,27 @@ func paintShadowG(
 func pushMaskClipG(
   world: view UiWorld
   uiSystems: view UiSystems
-  entity: view EntityId
+  entityId: view EntityId
   canvas: mod Gpu2dCanvas
 ) ret Bool {
-  let mask: MaskShape = componentGet(this: world.maskShapes, entity: entity)
-  var source: EntityId = entity
+  let mask: MaskShape = componentGet(this: world.maskShapes, entityId: entityId)
+  var source: EntityId = entityId
   if mask.sourceNodeId.length() > 0 {
-    let page: String = pageOf(world: world, uiSystems: uiSystems, entity: entity)
+    let page: String = pageOf(world: world, uiSystems: uiSystems, entityId: entityId)
     if let index: Int = findNodeInPage(world: world, pageId: page, nodeId: mask.sourceNodeId) {
       source = nodeEntity(world: world, index: index)
     }
   }
-  if componentHas(this: uiSystems.layout.computedRects, entity: source) is false or componentHas(
+  if componentHas(this: uiSystems.layout.computedRects, entityId: source) is false or componentHas(
     this: uiSystems.transform2d.worldTransforms
-    entity: source
+    entityId: source
   ) is false {
     ret false
   }
-  let cr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: source)
+  let cr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entityId: source)
   let wt: WorldTransform2D = componentGet(
     this: uiSystems.transform2d.worldTransforms
-    entity: source
+    entityId: source
   )
   var x: Float = wt.position.x
   var y: Float = wt.position.y

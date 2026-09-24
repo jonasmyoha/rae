@@ -56,7 +56,7 @@ func createGuideSystem(
     w: designW
     h: designH
   )
-  setLayerById(world: world, entity: root, id: "guides")
+  setLayerById(world: world, entityId: root, id: "guides")
   ret GuideSystem {
     guideRects: ComponentTable.create(GuideRect)
     pageRoot: root
@@ -72,9 +72,9 @@ func guidesFrameSpace(
 ) ret EntityId {
   let count: Int = componentCount(this: world.cameras)
   loop var i: Int = 0, i < count, ++i {
-    let entity: EntityId = componentEntityAt(this: world.cameras, i: i)
-    if pageOf(world: world, uiSystems: uiSystems, entity: entity) is "guides" {
-      ret entity
+    let entityId: EntityId = componentEntityAt(this: world.cameras, i: i)
+    if pageOf(world: world, uiSystems: uiSystems, entityId: entityId) is "guides" {
+      ret entityId
     }
   }
   ret pageRoot
@@ -93,14 +93,14 @@ func setGuideRects(
 ) {
   let count: Int = componentCount(this: guideSystem.guideRects)
   loop var i: Int = 0, i < count, ++i {
-    let entity: EntityId = componentEntityAt(this: guideSystem.guideRects, i: i)
+    let entityId: EntityId = componentEntityAt(this: guideSystem.guideRects, i: i)
     let guide: GuideRect = componentDataAt(this: guideSystem.guideRects, i: i)
     if guide.kind is not kind {
       continue
     }
-    componentSet(this: world.actives, entity: entity, data: Active { value: active })
-    if componentHas(this: world.rects, entity: entity) {
-      let rect: mod Rect => componentMod(this: world.rects, entity: entity)
+    componentSet(this: world.actives, entityId: entityId, data: Active { value: active })
+    if componentHas(this: world.rects, entityId: entityId) {
+      let rect: mod Rect => componentMod(this: world.rects, entityId: entityId)
       rect.position.x = x
       rect.position.y = y
       rect.size.x = w
@@ -122,8 +122,8 @@ func syncGuides(
   columnW: view Float
   safeInsets: view Insets
 ) {
-  if componentHas(this: world.rects, entity: guideSystem.frameSpace) {
-    let rect: mod Rect => componentMod(this: world.rects, entity: guideSystem.frameSpace)
+  if componentHas(this: world.rects, entityId: guideSystem.frameSpace) {
+    let rect: mod Rect => componentMod(this: world.rects, entityId: guideSystem.frameSpace)
     rect.size.x = designW
     rect.size.y = designH
   }

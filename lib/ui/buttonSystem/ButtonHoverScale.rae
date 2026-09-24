@@ -12,7 +12,7 @@ open ecs/Entity
 open ecs/ComponentTable
 import Math
 
-# True when `entity` is `ancestor` itself or sits anywhere below it in
+# True when `entityId` is `ancestor` itself or sits anywhere below it in
 # the parent chain. Lets a hovered container (e.g. the Library's
 # playlist tile, which carries the OnClick) drive the HoverScale on its
 # child covers so the whole thumbnail scales as one — the hit-test only
@@ -21,19 +21,19 @@ import Math
 func hoverScaleContains(
   world: view UiWorld
   uiSystems: view UiSystems
-  entity: view EntityId
+  entityId: view EntityId
   ancestor: view EntityId
 ) ret Bool {
-  if entity is ancestor {
+  if entityId is ancestor {
     ret true
   }
-  var cur: EntityId = entity
+  var cur: EntityId = entityId
   var guard: Int = 0
   loop guard < 64 {
-    if componentHas(this: uiSystems.hierarchy.parents, entity: cur) is false {
+    if componentHas(this: uiSystems.hierarchy.parents, entityId: cur) is false {
       ret false
     }
-    let p: Parent = componentGet(this: uiSystems.hierarchy.parents, entity: cur)
+    let p: Parent = componentGet(this: uiSystems.hierarchy.parents, entityId: cur)
     if p.parent is ancestor {
       ret true
     }
@@ -69,19 +69,19 @@ func buttonHoverScaleUpdate(
   let n: Int = componentCount(this: world.hoverScales)
   var i: Int = 0
   loop i < n {
-    let entity: EntityId = componentEntityAt(this: world.hoverScales, i: i)
-    let hs: HoverScale = componentGet(this: world.hoverScales, entity: entity)
+    let entityId: EntityId = componentEntityAt(this: world.hoverScales, i: i)
+    let hs: HoverScale = componentGet(this: world.hoverScales, entityId: entityId)
     var target: Float = hs.restScale
     let containsHover: Bool = hoverScaleContains(
       world: world
       uiSystems: uiSystems
-      entity: entity
+      entityId: entityId
       ancestor: hovered
     )
     if containsHover {
       target = hs.hoverScale
     }
-    if containsHover and entityPressed(world: world, uiSystems: uiSystems, entity: hovered) {
+    if containsHover and entityPressed(world: world, uiSystems: uiSystems, entityId: hovered) {
       target = hs.pressedScale
     }
     let next: Float = easeTowards(
@@ -95,7 +95,7 @@ func buttonHoverScaleUpdate(
       # Per-frame animation state is a mutable component update, not a
       # replace/drop cycle. Updating in place avoids allocator churn in the
       # hot hover path that 106 drives while the cursor moves over covers.
-      let slot: mod HoverScale => componentMod(this: world.hoverScales, entity: entity)
+      let slot: mod HoverScale => componentMod(this: world.hoverScales, entityId: entityId)
       slot.current = next
       slot.target = target
       if next is not target {

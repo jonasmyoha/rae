@@ -168,10 +168,10 @@ func bagMember(key: view String, valueJson: view String) ret String {
   ret "      {Json.quote(text: key)}: {prettyJsonText(source: valueJson, depth: 3)}"
 }
 
-# The pending (app) components of `entity`, verbatim from the outbox.
-func pendingJsonFor(world: view UiWorld, entity: view EntityId, name: view String) ret String {
+# The pending (app) components of `entityId`, verbatim from the outbox.
+func pendingJsonFor(world: view UiWorld, entityId: view EntityId, name: view String) ret String {
   loop let pending: view PendingComponent in world.pendingComponents {
-    if pending.entity is entity and pending.name is name {
+    if pending.entityId is entityId and pending.name is name {
       ret "{pending.json}"
     }
   }
@@ -181,19 +181,19 @@ func pendingJsonFor(world: view UiWorld, entity: view EntityId, name: view Strin
 # A runtime row (a ListView's materialised row, a RuntimeOnly-tagged
 # entity): not this file's node. `RuntimeOnly { value: false }` is authored
 # data, not a tag — the value decides.
-func isRowEntity(world: view UiWorld, entity: view EntityId) ret Bool {
-  if componentHas(this: world.listViewRowKeys, entity: entity) {
+func isRowEntity(world: view UiWorld, entityId: view EntityId) ret Bool {
+  if componentHas(this: world.listViewRowKeys, entityId: entityId) {
     ret true
   }
-  if componentHas(this: world.runtimeOnlys, entity: entity) {
-    ret componentGet(this: world.runtimeOnlys, entity: entity).value
+  if componentHas(this: world.runtimeOnlys, entityId: entityId) {
+    ret componentGet(this: world.runtimeOnlys, entityId: entityId).value
   }
   ret false
 }
 
-func nodeIdOfEntity(world: view UiWorld, entity: view EntityId) ret String {
-  if componentHas(this: world.nodeIdComponents, entity: entity) {
-    ret "{componentView(this: world.nodeIdComponents, entity: entity).id}"
+func nodeIdOfEntity(world: view UiWorld, entityId: view EntityId) ret String {
+  if componentHas(this: world.nodeIdComponents, entityId: entityId) {
+    ret "{componentView(this: world.nodeIdComponents, entityId: entityId).id}"
   }
   ret ""
 }
@@ -201,7 +201,7 @@ func nodeIdOfEntity(world: view UiWorld, entity: view EntityId) ret String {
 # Whether the fresh decode has the same component (present, equal).
 func unchangedSinceSource(
   world: view UiWorld
-  entity: view EntityId
+  entityId: view EntityId
   fresh: view UiWorld
   freshEntity: view EntityId
   name: view String
@@ -209,8 +209,8 @@ func unchangedSinceSource(
   if isNone(this: freshEntity) {
     ret false
   }
-  let live: String = machineComponentJson(world: world, entity: entity, name: name)
-  let decoded: String = machineComponentJson(world: fresh, entity: freshEntity, name: name)
+  let live: String = machineComponentJson(world: world, entityId: entityId, name: name)
+  let decoded: String = machineComponentJson(world: fresh, entityId: freshEntity, name: name)
   ret live.length() > 0 and live is decoded
 }
 
@@ -223,11 +223,11 @@ func writeNode(
   uiSystems: view UiSystems
   fresh: view UiWorld
   scene: view Scene
-  entity: view EntityId
+  entityId: view EntityId
   pageId: view String
   visited: mod List(String)
 ) {
-  let nodeId: String = nodeIdOfEntity(world: world, entity: entity)
+  let nodeId: String = nodeIdOfEntity(world: world, entityId: entityId)
   if nodeId.length() is 0 {
     ret
   }
@@ -248,8 +248,8 @@ func writeNode(
   # Where the author wrote Children (-1: they did not; it goes last).
   var childrenSlot: Int = -1
   var inherited: List(String) = List.create(String, cap: 8)
-  if componentHas(this: world.bundleRefs, entity: entity) {
-    let refs: view BundleRefs => componentView(this: world.bundleRefs, entity: entity)
+  if componentHas(this: world.bundleRefs, entityId: entityId) {
+    let refs: view BundleRefs => componentView(this: world.bundleRefs, entityId: entityId)
     loop let name: view String in refs.inherited {
       inherited.add(value: "{name}")
     }
@@ -271,13 +271,13 @@ func writeNode(
         written.add(value: "{key}")
         continue
       }
-      let pendingJson: String = pendingJsonFor(world: world, entity: entity, name: key)
+      let pendingJson: String = pendingJsonFor(world: world, entityId: entityId, name: key)
       if pendingJson.length() > 0 {
         members.add(value: bagMember(key: key, valueJson: pendingJson))
         written.add(value: "{key}")
         continue
       }
-      let live: String = machineComponentJson(world: world, entity: entity, name: key)
+      let live: String = machineComponentJson(world: world, entityId: entityId, name: key)
       if live.length() is 0 {
         # Not a table of this world (an app's component another app drained,
         # or the node's own override over a bundle): the author's text.
@@ -287,7 +287,7 @@ func writeNode(
       }
       if unchangedSinceSource(
         world: world
-        entity: entity
+        entityId: entityId
         fresh: fresh
         freshEntity: freshEntity
         name: key
@@ -297,7 +297,7 @@ func writeNode(
         members.add(
           value: bagMember(
             key: key
-            valueJson: authoredComponentJson(world: world, entity: entity, name: key)
+            valueJson: authoredComponentJson(world: world, entityId: entityId, name: key)
           )
         )
       }
@@ -307,33 +307,33 @@ func writeNode(
   # 2. Components the world has that the author did not write: added at
   # runtime — unless they are what the loader adds itself (Name / NodeId
   # defaults, the Text override, a bundle's inherited ones).
-  let names: List(String) = authoredNamesOf(world: world, entity: entity)
+  let names: List(String) = authoredNamesOf(world: world, entityId: entityId)
   loop let name: view String in names {
     if listHas(items: written, name: name) or listHas(items: inherited, name: name) {
       continue
     }
     if name is "StyleOverride" or name is "NodeId" or name is "Name" or name is "PageRoot" or name is "BundleRefs" {
       if name is "Name" {
-        let label: String = "{componentView(this: world.names, entity: entity).label}"
+        let label: String = "{componentView(this: world.names, entityId: entityId).label}"
         if label is not nodeId {
           members.add(
             value: bagMember(
               key: name
-              valueJson: authoredComponentJson(world: world, entity: entity, name: name)
+              valueJson: authoredComponentJson(world: world, entityId: entityId, name: name)
             )
           )
         }
       }
       continue
     }
-    let text: String = authoredComponentJson(world: world, entity: entity, name: name)
+    let text: String = authoredComponentJson(world: world, entityId: entityId, name: name)
     if text.length() > 0 {
       members.add(value: bagMember(key: name, valueJson: text))
     }
   }
   # 3. Pending (app) components the author did not write either.
   loop let pending: view PendingComponent in world.pendingComponents {
-    if pending.entity is entity and listHas(items: written, name: pending.name) is false {
+    if pending.entityId is entityId and listHas(items: written, name: pending.name) is false {
       members.add(value: bagMember(key: pending.name, valueJson: pending.json))
       written.add(value: "{pending.name}")
     }
@@ -342,14 +342,14 @@ func writeNode(
   # the child scene's, not this file's.
   var childIds: List(String) = List.create(String, cap: 8)
   var childEntities: List(EntityId) = List.create(EntityId, cap: 8)
-  let isInstance: Bool = componentHas(this: world.sceneInstances, entity: entity)
-  if isInstance is false and componentHas(this: world.childrens, entity: entity) {
-    let children: view Children => componentView(this: world.childrens, entity: entity)
+  let isInstance: Bool = componentHas(this: world.sceneInstances, entityId: entityId)
+  if isInstance is false and componentHas(this: world.childrens, entityId: entityId) {
+    let children: view Children => componentView(this: world.childrens, entityId: entityId)
     loop let child: view EntityId in children.ids {
-      if isRowEntity(world: world, entity: child) {
+      if isRowEntity(world: world, entityId: child) {
         continue
       }
-      let childId: String = nodeIdOfEntity(world: world, entity: child)
+      let childId: String = nodeIdOfEntity(world: world, entityId: child)
       if childId.length() > 0 {
         childIds.add(value: childId)
         childEntities.add(value: child)
@@ -390,7 +390,7 @@ func writeNode(
       uiSystems: uiSystems
       fresh: fresh
       scene: scene
-      entity: child
+      entityId: child
       pageId: pageId
       visited: visited
     )
@@ -422,7 +422,7 @@ func writeSceneText(
   let root: JsonValue = Json.root(doc: doc)
   var text: String = "\{\n"
   # Headers first, in the author's order; `root` follows the mounted root.
-  let rootId: String = nodeIdOfEntity(world: world, entity: pageRoot)
+  let rootId: String = nodeIdOfEntity(world: world, entityId: pageRoot)
   let count: Int = Json.objectLen(this: root)
   var wroteRoot: Bool = false
   loop var i: Int = 0, i < count, ++i {
@@ -454,7 +454,7 @@ func writeSceneText(
     uiSystems: uiSystems
     fresh: fresh
     scene: scene
-    entity: pageRoot
+    entityId: pageRoot
     pageId: pageId
     visited: visited
   )

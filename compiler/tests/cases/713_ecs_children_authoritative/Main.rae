@@ -12,10 +12,10 @@ open ecs/hierarchySystem/HierarchySystem
 # the Children table.
 func printKids(
   childrens: view ComponentTable(Children)
-  entity: view EntityId
+  entityId: view EntityId
   label: view String
 ) {
-  let kids: List(EntityId) = getChildren(childrens: childrens, parent: entity)
+  let kids: List(EntityId) = getChildren(childrens: childrens, parent: entityId)
   var line: String = "{label}:"
   loop var i: Int = 0, i < kids.length, ++i {
     if let kid: EntityId = kids.copyAt(index: i) {
@@ -36,8 +36,8 @@ func printOrder(order: view List(EntityId), label: view String) {
 }
 
 func parentIndex(parents: view ComponentTable(Parent), child: view EntityId) ret Int {
-  if componentHas(this: parents, entity: child) {
-    let link: Parent = componentGet(this: parents, entity: child)
+  if componentHas(this: parents, entityId: child) {
+    let link: Parent = componentGet(this: parents, entityId: child)
     ret link.parent.index
   }
   ret -1
@@ -84,18 +84,18 @@ func main() {
     child: s5
     parent: root
   )
-  printKids(childrens: childrens, entity: root, label: "siblings")
+  printKids(childrens: childrens, entityId: root, label: "siblings")
 
-  detachForDestroy(parents: parents, childrens: childrens, entity: s2)
-  printKids(childrens: childrens, entity: root, label: "after destroy s2")
+  detachForDestroy(parents: parents, childrens: childrens, entityId: s2)
+  printKids(childrens: childrens, entityId: root, label: "after destroy s2")
 
   # Wipe the derived index the way a snapshot reload would leave it, rebuild.
   loop componentCount(this: parents) > 0 {
     let stale: EntityId = componentEntityAt(this: parents, i: 0)
-    componentRemove(this: parents, entity: stale)
+    componentRemove(this: parents, entityId: stale)
   }
   rebuildParentsFromChildren(parents: parents, childrens: childrens)
-  printKids(childrens: childrens, entity: root, label: "after rebuild")
+  printKids(childrens: childrens, entityId: root, label: "after rebuild")
   log("s3 parent after rebuild: {parentIndex(parents: parents, child: s3)}")
   log("s2 parent after rebuild: {parentIndex(parents: parents, child: s2)}")
 
@@ -116,7 +116,7 @@ func main() {
     child: s7
     index: 99
   )
-  printKids(childrens: childrens, entity: root, label: "after inserts")
+  printKids(childrens: childrens, entityId: root, label: "after inserts")
   log("s6 parent: {parentIndex(parents: parents, child: s6)}")
 
   # ----- single parent on reparent via insertChild -----
@@ -128,16 +128,16 @@ func main() {
     child: s3
     index: 0
   )
-  printKids(childrens: childrens, entity: root, label: "root after s3 moved")
-  printKids(childrens: childrens, entity: other, label: "other after s3 moved")
+  printKids(childrens: childrens, entityId: root, label: "root after s3 moved")
+  printKids(childrens: childrens, entityId: other, label: "other after s3 moved")
 
   # ----- single parent healed on rebuild: hand-corrupt a second list -----
-  let dup: mod Children => componentMod(this: childrens, entity: other)
+  let dup: mod Children => componentMod(this: childrens, entityId: other)
   dup.ids.add(value: s4)
-  printKids(childrens: childrens, entity: other, label: "other corrupted")
+  printKids(childrens: childrens, entityId: other, label: "other corrupted")
   rebuildParentsFromChildren(parents: parents, childrens: childrens)
-  printKids(childrens: childrens, entity: root, label: "root after heal")
-  printKids(childrens: childrens, entity: other, label: "other after heal")
+  printKids(childrens: childrens, entityId: root, label: "root after heal")
+  printKids(childrens: childrens, entityId: other, label: "other after heal")
   log("s4 parent after heal: {parentIndex(parents: parents, child: s4)}")
 
   # ----- depthOrder dirty-tracks on the Children table -----

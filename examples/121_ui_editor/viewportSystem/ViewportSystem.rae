@@ -140,7 +140,7 @@ func pinDocumentPage(world: mod UiWorld, pageRoot: view EntityId) {
     ret
   }
   let anchor: ExtentAnchor = { h: HExtent.left }
-  componentSet(this: world.extentAnchors, entity: pageRoot, data: anchor)
+  componentSet(this: world.extentAnchors, entityId: pageRoot, data: anchor)
 }
 
 # The document column's x inside its own frame (centered in the frame's
@@ -160,10 +160,10 @@ func sizeChromePage(
   chromeRoot: view EntityId
   viewportSystem: view ViewportSystem
 ) {
-  if isNone(this: chromeRoot) or componentHas(this: world.rects, entity: chromeRoot) is false {
+  if isNone(this: chromeRoot) or componentHas(this: world.rects, entityId: chromeRoot) is false {
     ret
   }
-  let rect: mod Rect => componentMod(this: world.rects, entity: chromeRoot)
+  let rect: mod Rect => componentMod(this: world.rects, entityId: chromeRoot)
   rect.size.x = viewportSystem.designW
   rect.size.y = viewportSystem.designH
 }

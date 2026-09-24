@@ -53,19 +53,19 @@ func writeMarqueeBand(
   var changed: Bool = false
   let count: Int = componentCount(this: inspectorSystem.marqueeBands)
   loop var i: Int = 0, i < count, ++i {
-    let entity: EntityId = componentEntityAt(this: inspectorSystem.marqueeBands, i: i)
+    let entityId: EntityId = componentEntityAt(this: inspectorSystem.marqueeBands, i: i)
     var wasVisible: Bool = true
-    if componentHas(this: world.actives, entity: entity) {
-      wasVisible = componentGet(this: world.actives, entity: entity).value
+    if componentHas(this: world.actives, entityId: entityId) {
+      wasVisible = componentGet(this: world.actives, entityId: entityId).value
     }
     if wasVisible is not visible {
-      componentSet(this: world.actives, entity: entity, data: Active { value: visible })
+      componentSet(this: world.actives, entityId: entityId, data: Active { value: visible })
       changed = true
     }
-    if visible and componentHas(this: world.rects, entity: entity) {
-      let current: Rect = componentGet(this: world.rects, entity: entity)
+    if visible and componentHas(this: world.rects, entityId: entityId) {
+      let current: Rect = componentGet(this: world.rects, entityId: entityId)
       if current.position.x is not rect.x or current.position.y is not rect.y or current.size.x is not rect.w or current.size.y is not rect.h {
-        let band: mod Rect => componentMod(this: world.rects, entity: entity)
+        let band: mod Rect => componentMod(this: world.rects, entityId: entityId)
         band.position.x = rect.x
         band.position.y = rect.y
         band.size.x = rect.w
@@ -136,26 +136,29 @@ func moveMarquee(
 func marqueeEnclosesEntity(
   world: view UiWorld
   uiSystems: view UiSystems
-  entity: view EntityId
+  entityId: view EntityId
   band: view MarqueeRect
 ) ret Bool {
-  if uiEntityActive(world: world, entity: entity) is false {
+  if uiEntityActive(world: world, entityId: entityId) is false {
     ret false
   }
-  if componentHas(this: uiSystems.transform2d.worldTransforms, entity: entity) is false or componentHas(
+  if componentHas(this: uiSystems.transform2d.worldTransforms, entityId: entityId) is false or componentHas(
     this: uiSystems.layout.computedRects
-    entity: entity
+    entityId: entityId
   ) is false {
     ret false
   }
-  if worldVisualOf(world: world, uiSystems: uiSystems, entity: entity).visible is false {
+  if worldVisualOf(world: world, uiSystems: uiSystems, entityId: entityId).visible is false {
     ret false
   }
   let transform: WorldTransform2D = componentGet(
     this: uiSystems.transform2d.worldTransforms
-    entity: entity
+    entityId: entityId
   )
-  let computed: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: entity)
+  let computed: ComputedRect = componentGet(
+    this: uiSystems.layout.computedRects
+    entityId: entityId
+  )
   let node: MarqueeRect = marqueeRectBetween(
     x1: transform.position.x
     y1: transform.position.y
@@ -173,28 +176,28 @@ func marqueeEnclosesEntity(
 func collectMarqueeEntities(
   world: view UiWorld
   uiSystems: view UiSystems
-  entity: view EntityId
+  entityId: view EntityId
   band: view MarqueeRect
   found: mod List(EntityId)
 ) {
-  if isNone(this: entity) or uiEntityActive(world: world, entity: entity) is false {
+  if isNone(this: entityId) or uiEntityActive(world: world, entityId: entityId) is false {
     ret
   }
   if marqueeEnclosesEntity(
     world: world
     uiSystems: uiSystems
-    entity: entity
+    entityId: entityId
     band: band
   ) {
-    found.add(value: entity)
+    found.add(value: entityId)
   }
-  if componentHas(this: world.childrens, entity: entity) {
-    let children: view Children => componentView(this: world.childrens, entity: entity)
+  if componentHas(this: world.childrens, entityId: entityId) {
+    let children: view Children => componentView(this: world.childrens, entityId: entityId)
     loop let child: view EntityId in children.ids {
       collectMarqueeEntities(
         world: world
         uiSystems: uiSystems
-        entity: child
+        entityId: child
         band: band
         found: found
       )
@@ -230,7 +233,7 @@ func finishMarquee(
     collectMarqueeEntities(
       world: world
       uiSystems: uiSystems
-      entity: sceneRoot
+      entityId: sceneRoot
       band: band
       found: found
     )

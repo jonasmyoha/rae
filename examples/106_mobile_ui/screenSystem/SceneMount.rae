@@ -13,12 +13,12 @@ open ui/SceneInstance
 open ecs/ComponentTable
 open ui/UiSystems
 
-# Decorate `entity` as a glaring red error block with a label. Used
+# Decorate `entityId` as a glaring red error block with a label. Used
 # when scene mounting fails. Caller has already set the entity's Rect/Size.
 func paintErrorBlock(
   world: mod UiWorld
   uiSystems: mod UiSystems
-  entity: view EntityId
+  entityId: view EntityId
   label: view String
 ) pub {
   let red: RgbaColor = { r: 220, g: 32, b: 48, a: 255 }
@@ -31,12 +31,12 @@ func paintErrorBlock(
     strokeGap: 0.0
     radius: 17.349397590361445
   }
-  componentSet(this: world.shapes, entity: entity, data: shape)
+  componentSet(this: world.shapes, entityId: entityId, data: shape)
 
   let txt: EntityId = createEntity(world: world)
   setRectFixed(
     world: world
-    entity: txt
+    entityId: txt
     w: 480.0
     h: 32.0
   )
@@ -44,7 +44,7 @@ func paintErrorBlock(
   let msg: String = prefix.concat(other: label)
   setText(
     world: world
-    entity: txt
+    entityId: txt
     text: msg
     styleId: "primary"
   )
@@ -54,7 +54,7 @@ func paintErrorBlock(
   attachChildren(
     world: world
     uiSystems: uiSystems
-    parent: entity
+    parent: entityId
     kids: kids
   )
 }
@@ -85,7 +85,7 @@ func mountOrError(
     paintErrorBlock(
       world: world
       uiSystems: uiSystems
-      entity: mountEntity
+      entityId: mountEntity
       label: label
     )
     ret mountEntity
@@ -128,14 +128,14 @@ func mountSubSceneOrError(
     let sentinel: EntityId = createEntity(world: world)
     setRectFixed(
       world: world
-      entity: sentinel
+      entityId: sentinel
       w: w
       h: h
     )
     paintErrorBlock(
       world: world
       uiSystems: uiSystems
-      entity: sentinel
+      entityId: sentinel
       label: label
     )
     ret sentinel
@@ -161,14 +161,14 @@ func mountRegistrySubSceneOrError(
     let sentinel: EntityId = createEntity(world: world)
     setRectFixed(
       world: world
-      entity: sentinel
+      entityId: sentinel
       w: w
       h: h
     )
     paintErrorBlock(
       world: world
       uiSystems: uiSystems
-      entity: sentinel
+      entityId: sentinel
       label: label
     )
     ret sentinel
@@ -199,7 +199,7 @@ func buildSimpleSceneInstance(
   let mount: EntityId = createEntity(world: world)
   setRectFixed(
     world: world
-    entity: mount
+    entityId: mount
     w: w
     h: h
   )
@@ -258,7 +258,7 @@ func mountPageOrError(
   let husk: EntityId = createEntity(world: world)
   setRectFixed(
     world: world
-    entity: husk
+    entityId: husk
     w: w
     h: h
   )
@@ -270,12 +270,12 @@ func mountPageOrError(
   paintErrorBlock(
     world: world
     uiSystems: uiSystems
-    entity: husk
+    entityId: husk
     label: label
   )
   var copiedId: String = ""
   copiedId = copiedId.concat(other: pageIdForNested)
   let pr: PageRoot = { id: own copiedId }
-  componentSet(this: world.pageRoots, entity: husk, data: own pr)
+  componentSet(this: world.pageRoots, entityId: husk, data: own pr)
   ret husk
 }

@@ -44,29 +44,32 @@ func albumCoverUpdate(
 ) {
   let count: Int = componentCount(this: albumCoverSystem.albumCovers)
   loop var i: Int = 0, i < count, ++i {
-    let entity: EntityId = componentEntityAt(this: albumCoverSystem.albumCovers, i: i)
-    let hasRadius: Bool = componentHas(this: world.cornerRadiuses, entity: entity)
+    let entityId: EntityId = componentEntityAt(this: albumCoverSystem.albumCovers, i: i)
+    let hasRadius: Bool = componentHas(this: world.cornerRadiuses, entityId: entityId)
     if rounded {
-      if hasRadius is false and componentHas(this: albumCoverSystem.authoredRadii, entity: entity) {
+      if hasRadius is false and componentHas(
+        this: albumCoverSystem.authoredRadii
+        entityId: entityId
+      ) {
         let authored: AuthoredRadius = componentGet(
           this: albumCoverSystem.authoredRadii
-          entity: entity
+          entityId: entityId
         )
         componentSet(
           this: world.cornerRadiuses
-          entity: entity
+          entityId: entityId
           data: CornerRadius { radius: authored.radius }
         )
-        componentRemove(this: albumCoverSystem.authoredRadii, entity: entity)
+        componentRemove(this: albumCoverSystem.authoredRadii, entityId: entityId)
       }
     } else if hasRadius {
-      let current: CornerRadius = componentGet(this: world.cornerRadiuses, entity: entity)
+      let current: CornerRadius = componentGet(this: world.cornerRadiuses, entityId: entityId)
       componentSet(
         this: albumCoverSystem.authoredRadii
-        entity: entity
+        entityId: entityId
         data: AuthoredRadius { radius: current.radius }
       )
-      componentRemove(this: world.cornerRadiuses, entity: entity)
+      componentRemove(this: world.cornerRadiuses, entityId: entityId)
     }
   }
 }

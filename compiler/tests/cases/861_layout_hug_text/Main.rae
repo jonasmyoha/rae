@@ -27,12 +27,12 @@ func fixedSize() ret Size {
 
 func setRect(
   world: mod UiWorld
-  entity: view EntityId
+  entityId: view EntityId
   w: view Float
   h: view Float
 ) {
   let r: Rect = { position: { x: 0.0, y: 0.0 }, size: { x: w, y: h } }
-  componentSet(this: world.rects, entity: entity, data: r)
+  componentSet(this: world.rects, entityId: entityId, data: r)
 }
 
 func attach(
@@ -42,10 +42,10 @@ func attach(
   child: view EntityId
 ) {
   let pl: Parent = { parent: parent }
-  componentSet(this: uiSystems.hierarchy.parents, entity: child, data: pl)
+  componentSet(this: uiSystems.hierarchy.parents, entityId: child, data: pl)
   var kids: List(EntityId) = List.create(EntityId, cap: 1)
-  if componentHas(this: world.childrens, entity: parent) {
-    let existing: Children = componentGet(this: world.childrens, entity: parent)
+  if componentHas(this: world.childrens, entityId: parent) {
+    let existing: Children = componentGet(this: world.childrens, entityId: parent)
     loop var i: Int = 0, i < existing.ids.length, ++i {
       if let e: EntityId = existing.ids.copyAt(index: i) {
         kids.add(value: e)
@@ -54,16 +54,16 @@ func attach(
   }
   kids.add(value: child)
   let ch: Children = { ids: own kids }
-  componentSet(this: world.childrens, entity: parent, data: own ch)
+  componentSet(this: world.childrens, entityId: parent, data: own ch)
 }
 
 func dump(
   world: view UiWorld
   uiSystems: view UiSystems
-  entity: view EntityId
+  entityId: view EntityId
   label: view String
 ) {
-  let cr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: entity)
+  let cr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entityId: entityId)
   log("{label} cr=({cr.position.x},{cr.position.y},{cr.size.x},{cr.size.y})")
 }
 
@@ -76,19 +76,19 @@ func main() {
   let chip: EntityId = createEntity(world: world)
   setRect(
     world: world
-    entity: chip
+    entityId: chip
     w: 0.0
     h: 0.0
   )
-  componentSet(this: world.sizes, entity: chip, data: hugSize())
+  componentSet(this: world.sizes, entityId: chip, data: hugSize())
   componentSet(
     this: world.paddings
-    entity: chip
+    entityId: chip
     data: Padding { insets: { l: 12.0, t: 8.0, r: 12.0, b: 8.0 } }
   )
   componentSet(
     this: world.layouts
-    entity: chip
+    entityId: chip
     data: Layout {
       kind: LayoutType.horizontal
       gap: 0.0
@@ -103,20 +103,20 @@ func main() {
   let label: EntityId = createEntity(world: world)
   setRect(
     world: world
-    entity: label
+    entityId: label
     w: 0.0
     h: 0.0
   )
-  componentSet(this: world.sizes, entity: label, data: hugSize())
+  componentSet(this: world.sizes, entityId: label, data: hugSize())
   componentSet(
     this: world.texts
-    entity: label
+    entityId: label
     data: Text { text: "Hello", styleId: "body", wrapWidthMode: WrapWidthMode.none }
   )
   # The font measure the pre-layout pass would write: 140 wide, 24 line box.
   componentSet(
     this: uiSystems.layout.measuredTexts
-    entity: label
+    entityId: label
     data: MeasuredText { w: 140.0, h: 24.0 }
   )
   attach(
@@ -131,19 +131,19 @@ func main() {
   let fixed: EntityId = createEntity(world: world)
   setRect(
     world: world
-    entity: fixed
+    entityId: fixed
     w: 200.0
     h: 30.0
   )
-  componentSet(this: world.sizes, entity: fixed, data: fixedSize())
+  componentSet(this: world.sizes, entityId: fixed, data: fixedSize())
   componentSet(
     this: world.texts
-    entity: fixed
+    entityId: fixed
     data: Text { text: "Wide", styleId: "body", wrapWidthMode: WrapWidthMode.none }
   )
   componentSet(
     this: uiSystems.layout.measuredTexts
-    entity: fixed
+    entityId: fixed
     data: MeasuredText { w: 999.0, h: 24.0 }
   )
 
@@ -152,19 +152,19 @@ func main() {
   dump(
     world: world
     uiSystems: uiSystems
-    entity: chip
+    entityId: chip
     label: "chip"
   )
   dump(
     world: world
     uiSystems: uiSystems
-    entity: label
+    entityId: label
     label: "label"
   )
   dump(
     world: world
     uiSystems: uiSystems
-    entity: fixed
+    entityId: fixed
     label: "fixed"
   )
 }

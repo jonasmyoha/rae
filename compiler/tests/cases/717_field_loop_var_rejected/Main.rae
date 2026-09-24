@@ -6,14 +6,14 @@ open ecs/ComponentTable
 type Rect { x: Int, y: Int }
 type World { rects: ComponentTable(Rect) }
 
-func clearAll(world: mod World, entity: view EntityId) {
+func clearAll(world: mod World, entityId: view EntityId) {
   loop var table: mod ComponentTable(any) in fields(world) {
-    componentRemove(this: table, entity: entity)
+    componentRemove(this: table, entityId: entityId)
   }
 }
 
 func main() {
   var world: World = World { rects: ComponentTable.create(Rect) }
   let e: EntityId = { index: 1, generation: 0 }
-  clearAll(world: world, entity: e)
+  clearAll(world: world, entityId: e)
 }

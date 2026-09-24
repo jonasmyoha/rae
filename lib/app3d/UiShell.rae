@@ -208,13 +208,13 @@ func loadMountedSceneTextures(
   var owners: List(EntityId) = List.create(EntityId, cap: 16)
   loop var i: Int = 0, i < componentCount(this: world.sprites), ++i {
     let owner: EntityId = componentEntityAt(this: world.sprites, i: i)
-    let sprite: view Sprite => componentView(this: world.sprites, entity: owner)
+    let sprite: view Sprite => componentView(this: world.sprites, entityId: owner)
     wanted.add(value: "{sprite.textureKey}")
     owners.add(value: owner)
   }
   loop var i: Int = 0, i < componentCount(this: world.animFrames), ++i {
     let owner: EntityId = componentEntityAt(this: world.animFrames, i: i)
-    let frames: view AnimFrames => componentView(this: world.animFrames, entity: owner)
+    let frames: view AnimFrames => componentView(this: world.animFrames, entityId: owner)
     loop var frame: Int = 0, frame < animFrameCount(frames: frames), ++frame {
       wanted.add(value: animFrameKey(frames: frames, index: frame))
       owners.add(value: owner)
@@ -244,8 +244,8 @@ func loadMountedSceneTextures(
     }
     let owner: EntityId = owners.copyAtFallback(index: i, fallback: noEntity())
     var nodeId: String = ""
-    if componentHas(this: world.nodeIdComponents, entity: owner) {
-      let node: view NodeId => componentView(this: world.nodeIdComponents, entity: owner)
+    if componentHas(this: world.nodeIdComponents, entityId: owner) {
+      let node: view NodeId => componentView(this: world.nodeIdComponents, entityId: owner)
       nodeId = "{node.id}"
     }
     reportSceneDiagnostic(
@@ -478,24 +478,24 @@ func nodeEntityFor(world: view UiWorld, nodeId: view String) ret EntityId {
 }
 
 func setNodeText(world: mod UiWorld, nodeId: view String, value: view String) {
-  let entity: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
-  if isNone(this: entity) {
+  let entityId: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
+  if isNone(this: entityId) {
     ret
   }
-  if componentHas(this: world.texts, entity: entity) is false {
+  if componentHas(this: world.texts, entityId: entityId) is false {
     ret
   }
-  let text: mod Text => componentMod(this: world.texts, entity: entity)
+  let text: mod Text => componentMod(this: world.texts, entityId: entityId)
   text.text = "{value}"
 }
 
 func setNodeActive(world: mod UiWorld, nodeId: view String, value: view Bool) {
-  let entity: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
-  if isNone(this: entity) {
+  let entityId: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
+  if isNone(this: entityId) {
     ret
   }
   let active: Active = { value: value }
-  componentSet(this: world.actives, entity: entity, data: active)
+  componentSet(this: world.actives, entityId: entityId, data: active)
 }
 
 # Switch a node's HEIGHT sizing policy at runtime. Hug measures from the active
@@ -510,21 +510,21 @@ func setNodeActive(world: mod UiWorld, nodeId: view String, value: view Bool) {
 # axis is preserved where a Size already exists, and defaults to Fixed (the
 # authored Rect width) where one is created.
 func setNodeHeightMode(world: mod UiWorld, nodeId: view String, hug: view Bool) {
-  let entity: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
-  if isNone(this: entity) {
+  let entityId: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
+  if isNone(this: entityId) {
     ret
   }
   var next: SizeAxis = { mode: SizeMode.fill, min: -1, max: -1 }
   if hug {
     next = { mode: SizeMode.hug, min: -1, max: -1 }
   }
-  if componentHas(this: world.sizes, entity: entity) {
-    let size: mod Size => componentMod(this: world.sizes, entity: entity)
+  if componentHas(this: world.sizes, entityId: entityId) {
+    let size: mod Size => componentMod(this: world.sizes, entityId: entityId)
     size.h = next
     ret
   }
   let created: Size = { w: defaultSizeAxis(), h: next }
-  componentSet(this: world.sizes, entity: entity, data: created)
+  componentSet(this: world.sizes, entityId: entityId, data: created)
 }
 
 # Repaint a scene node from the palette. The value must be one of the
@@ -532,14 +532,14 @@ func setNodeHeightMode(world: mod UiWorld, nodeId: view String, hug: view Bool) 
 # paints debug magenta rather than failing, which is a long way from the
 # call site that caused it.
 func setNodeFillSlot(world: mod UiWorld, nodeId: view String, slot: view String) {
-  let entity: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
-  if isNone(this: entity) {
+  let entityId: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
+  if isNone(this: entityId) {
     ret
   }
-  if componentHas(this: world.shapes, entity: entity) is false {
+  if componentHas(this: world.shapes, entityId: entityId) is false {
     ret
   }
-  let shape: mod Shape => componentMod(this: world.shapes, entity: entity)
+  let shape: mod Shape => componentMod(this: world.shapes, entityId: entityId)
   shape.fillSlot = "{slot}"
 }
 
@@ -551,14 +551,14 @@ func setNodeRect(
   w: view Float
   h: view Float
 ) {
-  let entity: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
-  if isNone(this: entity) {
+  let entityId: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
+  if isNone(this: entityId) {
     ret
   }
-  if componentHas(this: world.rects, entity: entity) is false {
+  if componentHas(this: world.rects, entityId: entityId) is false {
     ret
   }
-  let r: mod Rect => componentMod(this: world.rects, entity: entity)
+  let r: mod Rect => componentMod(this: world.rects, entityId: entityId)
   r.position.x = x
   r.position.y = y
   r.size.x = w
@@ -566,26 +566,26 @@ func setNodeRect(
 }
 
 func nodeRectW(world: view UiWorld, nodeId: view String) ret Float {
-  let entity: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
-  if isNone(this: entity) {
+  let entityId: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
+  if isNone(this: entityId) {
     ret 0.0
   }
-  if componentHas(this: world.rects, entity: entity) is false {
+  if componentHas(this: world.rects, entityId: entityId) is false {
     ret 0.0
   }
-  let r: Rect = componentGet(this: world.rects, entity: entity)
+  let r: Rect = componentGet(this: world.rects, entityId: entityId)
   ret r.size.x
 }
 
 func nodeRectH(world: view UiWorld, nodeId: view String) ret Float {
-  let entity: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
-  if isNone(this: entity) {
+  let entityId: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
+  if isNone(this: entityId) {
     ret 0.0
   }
-  if componentHas(this: world.rects, entity: entity) is false {
+  if componentHas(this: world.rects, entityId: entityId) is false {
     ret 0.0
   }
-  let r: Rect = componentGet(this: world.rects, entity: entity)
+  let r: Rect = componentGet(this: world.rects, entityId: entityId)
   ret r.size.y
 }
 

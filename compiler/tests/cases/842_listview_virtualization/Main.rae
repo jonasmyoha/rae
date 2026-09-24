@@ -74,26 +74,26 @@ func makeListView() ret ListView {
 # asserting the bindings re-point correctly as the window scrolls.
 func topRowLabel(world: view UiWorld, listEntity: view EntityId) ret String {
   unsafe {
-    if componentHas(this: world.childrens, entity: listEntity) is false {
+    if componentHas(this: world.childrens, entityId: listEntity) is false {
       ret "(none)"
     }
-    let ch: view Children => componentView(this: world.childrens, entity: listEntity)
+    let ch: view Children => componentView(this: world.childrens, entityId: listEntity)
     if ch.ids.length is 0 {
       ret "(none)"
     }
     let rowRoot: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: 0)
-    if componentHas(this: world.childrens, entity: rowRoot) is false {
+    if componentHas(this: world.childrens, entityId: rowRoot) is false {
       ret "(no child)"
     }
-    let rch: view Children => componentView(this: world.childrens, entity: rowRoot)
+    let rch: view Children => componentView(this: world.childrens, entityId: rowRoot)
     if rch.ids.length is 0 {
       ret "(no child)"
     }
     let label: EntityId = rae_ext_rae_buf_get(buf: rch.ids.data, index: 0)
-    if componentHas(this: world.texts, entity: label) is false {
+    if componentHas(this: world.texts, entityId: label) is false {
       ret "(no text)"
     }
-    let t: Text = componentGet(this: world.texts, entity: label)
+    let t: Text = componentGet(this: world.texts, entityId: label)
     ret "{t.text}"
   }
 }
@@ -127,10 +127,10 @@ func main() {
   loadScene(world: sceneWorld, uiSystems: uiSystems, scene: scene)
   if let listRaw: Int = sceneWorld.nodeIds.get(k: "List") {
     let listNode: EntityId = id(v: listRaw)
-    let has: Bool = componentHas(this: sceneWorld.listViews, entity: listNode)
+    let has: Bool = componentHas(this: sceneWorld.listViews, entityId: listNode)
     log("List has ListView: {has}")
     if has {
-      let lv: ListView = componentGet(this: sceneWorld.listViews, entity: listNode)
+      let lv: ListView = componentGet(this: sceneWorld.listViews, entityId: listNode)
       log(
         "itemHeight: {lv.itemHeight.toInt()} visible: {lv.visibleItemCount} overscan: {lv.overscanRows} bindings: {lv.bindings.length}"
       )
@@ -148,10 +148,10 @@ func main() {
   # Part B's own systems (Part A's belong to sceneWorld).
   uiSystems = createUiSystems()
   let listEntity: EntityId = createEntity(world: world)
-  componentSet(this: world.listViews, entity: listEntity, data: makeListView())
-  componentSet(this: world.listViewDatas, entity: listEntity, data: buildData(count: rowCount))
+  componentSet(this: world.listViews, entityId: listEntity, data: makeListView())
+  componentSet(this: world.listViewDatas, entityId: listEntity, data: buildData(count: rowCount))
   let scroll0: ScrollState = { y: 0.0, velocity: 0.0 }
-  componentSet(this: world.scrollStates, entity: listEntity, data: scroll0)
+  componentSet(this: world.scrollStates, entityId: listEntity, data: scroll0)
 
   listViewSystem(world: world, uiSystems: uiSystems, scenes: rowScenes)
   let aliveTop: Int = aliveCount(world: world)
@@ -162,7 +162,7 @@ func main() {
   # Scroll deep into the middle (row ~4998 becomes the first windowed row).
   let midY: Float = 0.0 - 200000.0
   let mid: ScrollState = { y: midY, velocity: 0.0 }
-  componentSet(this: world.scrollStates, entity: listEntity, data: mid)
+  componentSet(this: world.scrollStates, entityId: listEntity, data: mid)
   listViewSystem(world: world, uiSystems: uiSystems, scenes: rowScenes)
   let aliveMid: Int = aliveCount(world: world)
   log("alive at mid: {aliveMid}")
@@ -171,7 +171,7 @@ func main() {
   # Scroll to the very end: the window shrinks (fewer rows remain).
   let endY: Float = 0.0 - (rowCount - 1).toFloat() * rowPitch
   let endS: ScrollState = { y: endY, velocity: 0.0 }
-  componentSet(this: world.scrollStates, entity: listEntity, data: endS)
+  componentSet(this: world.scrollStates, entityId: listEntity, data: endS)
   listViewSystem(world: world, uiSystems: uiSystems, scenes: rowScenes)
   let aliveEnd: Int = aliveCount(world: world)
   log("alive at end: {aliveEnd}")

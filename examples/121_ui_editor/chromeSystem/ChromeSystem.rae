@@ -82,10 +82,10 @@ func createChromeSystem() ret ChromeSystem {
 
 # The chrome root's Active (absent = shown).
 func chromeVisible(world: view UiWorld, chromeSystem: view ChromeSystem) ret Bool {
-  if componentHas(this: world.actives, entity: chromeSystem.pageRoot) is false {
+  if componentHas(this: world.actives, entityId: chromeSystem.pageRoot) is false {
     ret true
   }
-  ret componentGet(this: world.actives, entity: chromeSystem.pageRoot).value
+  ret componentGet(this: world.actives, entityId: chromeSystem.pageRoot).value
 }
 
 func editorTextFor(chromeSystem: view ChromeSystem, key: view String) ret String {
@@ -150,20 +150,20 @@ func editorTextFor(chromeSystem: view ChromeSystem, key: view String) ret String
 func editorTextSystem(world: mod UiWorld, chromeSystem: view ChromeSystem) {
   let count: Int = componentCount(this: world.textBindings)
   loop var i: Int = 0, i < count, ++i {
-    let entity: EntityId = componentEntityAt(this: world.textBindings, i: i)
-    let binding: view TextBinding => componentView(this: world.textBindings, entity: entity)
+    let entityId: EntityId = componentEntityAt(this: world.textBindings, i: i)
+    let binding: view TextBinding => componentView(this: world.textBindings, entityId: entityId)
     if binding.key.startsWith(prefix: "editor.") is false {
       continue
     }
-    if componentHas(this: world.texts, entity: entity) is false {
+    if componentHas(this: world.texts, entityId: entityId) is false {
       continue
     }
     let value: String = editorTextFor(chromeSystem: chromeSystem, key: binding.key)
-    let current: view Text => componentView(this: world.texts, entity: entity)
+    let current: view Text => componentView(this: world.texts, entityId: entityId)
     if current.text is value {
       continue
     }
-    let text: mod Text => componentMod(this: world.texts, entity: entity)
+    let text: mod Text => componentMod(this: world.texts, entityId: entityId)
     text.text = value
   }
 }
@@ -176,23 +176,23 @@ func diagnosticsBadgeSystem(
 ) {
   let count: Int = componentCount(this: chromeSystem.diagnosticsBadges)
   loop var i: Int = 0, i < count, ++i {
-    let entity: EntityId = componentEntityAt(this: chromeSystem.diagnosticsBadges, i: i)
+    let entityId: EntityId = componentEntityAt(this: chromeSystem.diagnosticsBadges, i: i)
     let badge: view DiagnosticsBadge => componentView(
       this: chromeSystem.diagnosticsBadges
-      entity: entity
+      entityId: entityId
     )
     var fill: RgbaColor = badge.clearFill
     if diagnosticsCount > 0 {
       fill = badge.errorFill
     }
-    if componentHas(this: world.shapes, entity: entity) is false {
+    if componentHas(this: world.shapes, entityId: entityId) is false {
       continue
     }
-    let current: Shape = componentGet(this: world.shapes, entity: entity)
+    let current: Shape = componentGet(this: world.shapes, entityId: entityId)
     if current.fill.r is fill.r and current.fill.g is fill.g and current.fill.b is fill.b and current.fill.a is fill.a and current.fillSlot.length() is 0 {
       continue
     }
-    let shape: mod Shape => componentMod(this: world.shapes, entity: entity)
+    let shape: mod Shape => componentMod(this: world.shapes, entityId: entityId)
     shape.fill = fill
     shape.fillSlot = ""
   }
@@ -209,13 +209,13 @@ func editorPanelOpen(
 ) ret Bool {
   let count: Int = componentCount(this: chromeSystem.editorPanels)
   loop var i: Int = 0, i < count, ++i {
-    let entity: EntityId = componentEntityAt(this: chromeSystem.editorPanels, i: i)
+    let entityId: EntityId = componentEntityAt(this: chromeSystem.editorPanels, i: i)
     let panel: EditorPanel = componentDataAt(this: chromeSystem.editorPanels, i: i)
     if panel.panel is kind {
-      if componentHas(this: world.actives, entity: entity) is false {
+      if componentHas(this: world.actives, entityId: entityId) is false {
         ret true
       }
-      ret componentGet(this: world.actives, entity: entity).value
+      ret componentGet(this: world.actives, entityId: entityId).value
     }
   }
   ret false
@@ -229,10 +229,10 @@ func setEditorPanelOpen(
 ) {
   let count: Int = componentCount(this: chromeSystem.editorPanels)
   loop var i: Int = 0, i < count, ++i {
-    let entity: EntityId = componentEntityAt(this: chromeSystem.editorPanels, i: i)
+    let entityId: EntityId = componentEntityAt(this: chromeSystem.editorPanels, i: i)
     let panel: EditorPanel = componentDataAt(this: chromeSystem.editorPanels, i: i)
     if panel.panel is kind {
-      componentSet(this: world.actives, entity: entity, data: Active { value: open })
+      componentSet(this: world.actives, entityId: entityId, data: Active { value: open })
     }
   }
 }
@@ -257,8 +257,11 @@ func panelToggleSystem(chromeSystem: view ChromeSystem, world: mod UiWorld) ret 
   let count: Int = eventCount(this: world.uiActions)
   loop var a: Int = 0, a < count, ++a {
     let action: UiAction = eventAt(this: world.uiActions, i: a)
-    if componentHas(this: chromeSystem.panelToggles, entity: action.entity) {
-      let toggle: PanelToggle = componentGet(this: chromeSystem.panelToggles, entity: action.entity)
+    if componentHas(this: chromeSystem.panelToggles, entityId: action.entityId) {
+      let toggle: PanelToggle = componentGet(
+        this: chromeSystem.panelToggles
+        entityId: action.entityId
+      )
       toggleEditorPanel(chromeSystem: chromeSystem, world: world, kind: toggle.panel)
       changed = true
     }
@@ -295,15 +298,15 @@ func editAreaOf(
   if componentCount(this: chromeSystem.editAreas) is 0 {
     ret area
   }
-  let entity: EntityId = componentEntityAt(this: chromeSystem.editAreas, i: 0)
-  if componentHas(this: uiSystems.layout.computedRects, entity: entity) and componentHas(
+  let entityId: EntityId = componentEntityAt(this: chromeSystem.editAreas, i: 0)
+  if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) and componentHas(
     this: uiSystems.transform2d.worldTransforms
-    entity: entity
+    entityId: entityId
   ) {
-    let rect: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: entity)
+    let rect: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entityId: entityId)
     let transform: WorldTransform2D = componentGet(
       this: uiSystems.transform2d.worldTransforms
-      entity: entity
+      entityId: entityId
     )
     if rect.size.x > 0.0 and rect.size.y > 0.0 {
       area.x = transform.position.x
@@ -363,5 +366,5 @@ func setEditorListRows(world: mod UiWorld, list: view EntityId, rows: own List(L
   if isNone(this: list) {
     ret
   }
-  componentSet(this: world.listViewDatas, entity: list, data: ListViewData { rows: own rows })
+  componentSet(this: world.listViewDatas, entityId: list, data: ListViewData { rows: own rows })
 }

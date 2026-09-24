@@ -2237,7 +2237,7 @@ static AstStmt* parse_if_statement(Parser* parser, const Token* if_token) {
 // ---------------------------------------------------------------------------
 // #807 — the ECS query loop (option A of the iteration-sugar design).
 //
-//   loop let entity: EntityId, p: mod Pos, v: view Vel in query2(tableA: pos, tableB: vel) { … }
+//   loop let entityId: EntityId, p: mod Pos, v: view Vel in query2(tableA: pos, tableB: vel) { … }
 //
 // This is Rae's native way to walk a component join: it reads like the
 // architecture — "for each entity that has a Pos and a Vel, give me the entity,
@@ -2247,7 +2247,7 @@ static AstStmt* parse_if_statement(Parser* parser, const Token* if_token) {
 //
 //   let raeQueryHits0: List(Query2Match) = query2(tableA: pos, tableB: vel)
 //   loop let raeQueryHit0: view Query2Match in raeQueryHits0 {
-//     let entity: EntityId = raeQueryHit0.entity
+//     let entityId: EntityId = raeQueryHit0.entityId
 //     let p: mod Pos  => queryModAt(table: pos, denseIndex: raeQueryHit0.indexA)
 //     let v: view Vel => queryViewAt(table: vel, denseIndex: raeQueryHit0.indexB)
 //     …
@@ -2409,12 +2409,12 @@ static AstStmt* parse_query_loop(Parser* parser, AstStmt* stmt, bool has_let,
   bool ok = true;
   if (arity == 0) {
     parser_error(parser, first_name,
-                 "a query loop (`loop let entity: EntityId, a: mod A, b: view B in ...`) must iterate a "
+                 "a query loop (`loop let entityId: EntityId, a: mod A, b: view B in ...`) must iterate a "
                  "query2, query3, query4, query5, or forEach call");
     ok = false;
   }
 
-  // Optional leading `entity: EntityId` binding; the rest are components.
+  // Optional leading `entityId: EntityId` binding; the rest are components.
   int comp_start = 0;
   AstTypeRef* t0 = bindings[0].type;
   if (t0 && t0->parts && !t0->parts->next && str_eq_cstr(t0->parts->text, "EntityId")
@@ -2525,7 +2525,7 @@ static AstStmt* parse_query_loop(Parser* parser, AstStmt* stmt, bool has_let,
     es->as.let_stmt.name = bindings[0].name;
     es->as.let_stmt.type = bindings[0].type;
     es->as.let_stmt.value = query_loop_member(parser, bindings[0].name_tok,
-                                query_loop_ident(parser, bindings[0].name_tok, hidden), "entity");
+                                query_loop_ident(parser, bindings[0].name_tok, hidden), "entityId");
     es->as.let_stmt.is_bind = false;
     es->as.let_stmt.is_var = false;
     es->as.let_stmt.is_const = false;

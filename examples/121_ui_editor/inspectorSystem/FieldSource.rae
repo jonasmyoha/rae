@@ -141,13 +141,13 @@ type FieldProvenance {
 func decodedFieldIn(
   T: type
   table: view ComponentTable(T)
-  entity: view EntityId
+  entityId: view EntityId
   field: view String
 ) ret AuthoredValue {
-  if componentHas(this: table, entity: entity) is false {
+  if componentHas(this: table, entityId: entityId) is false {
     ret missingAuthoredValue()
   }
-  let value: view T => componentView(this: table, entity: entity)
+  let value: view T => componentView(this: table, entityId: entityId)
   loop let decoded: view any in fields(value) {
     if fieldName(decoded) is field {
       ret AuthoredValue { text: "{decoded}", readable: true }
@@ -165,15 +165,18 @@ func decodedFieldValue(
 ) ret AuthoredValue {
   let count: Int = componentCount(this: sourceWorld.sceneSources)
   loop var i: Int = 0, i < count, ++i {
-    let entity: EntityId = componentEntityAt(this: sourceWorld.sceneSources, i: i)
-    let source: view SceneSource => componentView(this: sourceWorld.sceneSources, entity: entity)
+    let entityId: EntityId = componentEntityAt(this: sourceWorld.sceneSources, i: i)
+    let source: view SceneSource => componentView(
+      this: sourceWorld.sceneSources
+      entityId: entityId
+    )
     if source.sceneId is not sceneId or source.nodeId is not nodeId {
       continue
     }
     var answer: AuthoredValue = missingAuthoredValue()
     loop let table: view ComponentTable(any) in fields(sourceWorld) {
       if typeName(table) is component {
-        answer = decodedFieldIn(table: table, entity: entity, field: field)
+        answer = decodedFieldIn(table: table, entityId: entityId, field: field)
       }
     }
     ret answer
@@ -184,16 +187,16 @@ func decodedFieldValue(
 func fieldProvenance(
   sources: view SceneRegistry
   world: view UiWorld
-  entity: view EntityId
+  entityId: view EntityId
   sourceWorld: view UiWorld
   component: view String
   field: view String
   liveText: view String
 ) ret FieldProvenance {
-  if componentHas(this: world.sceneSources, entity: entity) is false {
+  if componentHas(this: world.sceneSources, entityId: entityId) is false {
     ret FieldProvenance { source: FieldSource.unknown, authoredText: "" }
   }
-  let source: view SceneSource => componentView(this: world.sceneSources, entity: entity)
+  let source: view SceneSource => componentView(this: world.sceneSources, entityId: entityId)
   let sourceIndex: Int = sceneRegistryIndex(reg: sources, key: source.sceneId)
   if sourceIndex < 0 {
     ret FieldProvenance { source: FieldSource.unknown, authoredText: "" }

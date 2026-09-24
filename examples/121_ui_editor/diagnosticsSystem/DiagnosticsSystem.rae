@@ -86,9 +86,9 @@ func placeholderSizeFor(
   var largest: Float = 0.0
   loop var i: Int = 0, i < wanted.length, ++i {
     if wanted.copyAtFallback(index: i, fallback: "") is key {
-      let entity: EntityId = wantedEntities.copyAtFallback(index: i, fallback: noEntity())
-      if componentHas(this: world.rects, entity: entity) {
-        let rect: Rect = componentGet(this: world.rects, entity: entity)
+      let entityId: EntityId = wantedEntities.copyAtFallback(index: i, fallback: noEntity())
+      if componentHas(this: world.rects, entityId: entityId) {
+        let rect: Rect = componentGet(this: world.rects, entityId: entityId)
         if rect.size.x > largest {
           largest = rect.size.x
         }
@@ -163,7 +163,7 @@ func textureUpdate(
   let animCount: Int = componentCount(this: world.animFrames)
   loop var a: Int = 0, a < animCount, ++a {
     let owner: EntityId = componentEntityAt(this: world.animFrames, i: a)
-    let frames: view AnimFrames => componentView(this: world.animFrames, entity: owner)
+    let frames: view AnimFrames => componentView(this: world.animFrames, entityId: owner)
     loop var f: Int = 0, f < animFrameCount(frames: frames), ++f {
       wanted.add(value: animFrameKey(frames: frames, index: f))
       wantedEntities.add(value: owner)
@@ -175,7 +175,7 @@ func textureUpdate(
   }
   loop var i: Int = 0, i < wanted.length, ++i {
     let key: String = wanted.copyAtFallback(index: i, fallback: "")
-    let entity: EntityId = wantedEntities.copyAtFallback(index: i, fallback: noEntity())
+    let entityId: EntityId = wantedEntities.copyAtFallback(index: i, fallback: noEntity())
     # Empty keys are colour-only sprites; `mat:` keys are icon-font glyphs.
     if key.length() is 0 or key.startsWith(prefix: "mat:") or textureKeySettled(
       textureSystem: textureSystem
@@ -206,8 +206,8 @@ func textureUpdate(
       )
     )
     var nodeLabel: String = ""
-    if componentHas(this: world.nodeIdComponents, entity: entity) {
-      nodeLabel = "{componentGet(this: world.nodeIdComponents, entity: entity).id}"
+    if componentHas(this: world.nodeIdComponents, entityId: entityId) {
+      nodeLabel = "{componentGet(this: world.nodeIdComponents, entityId: entityId).id}"
     }
     reportSceneDiagnostic(
       diagnostics: world.sceneDiagnostics

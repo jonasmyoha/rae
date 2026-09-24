@@ -11,7 +11,7 @@ kind for many entities; a **World** is an app-defined struct that embeds one
 `EntityAllocator` plus one `ComponentTable(T)` field per component (`UiWorld`,
 `World3d`, the 116 `GameWorld` are all this shape). Generic functions take the
 element type as a leading `T: type` argument that is inferred from the table at
-the call site — you write `componentGet(this: table, entity: e)`, not the `T`.
+the call site — you write `componentGet(this: table, entityId: e)`, not the `T`.
 
 ## Entities & handles — `lib/ecs/entity.rae`, `lib/ecs/world.rae`
 
@@ -30,8 +30,8 @@ table, and an O(1) dense live-set:
 ```rae
 func createEntityAllocator() ret EntityAllocator
 func allocEntity(this: mod EntityAllocator) ret EntityId    # reuse a freed slot (bumped gen) or a fresh index
-func freeEntity(this: mod EntityAllocator, entity: view EntityId)   # bump generation, recycle index, O(1) drop from alive
-func allocatorIsAlive(this: view EntityAllocator, entity: view EntityId) ret Bool
+func freeEntity(this: mod EntityAllocator, entityId: view EntityId)   # bump generation, recycle index, O(1) drop from alive
+func allocatorIsAlive(this: view EntityAllocator, entityId: view EntityId) ret Bool
 func allocatorAliveCount(this: view EntityAllocator) ret Int
 func allocatorGeneration(this: view EntityAllocator, index: view Int) ret Int
 ```
@@ -49,12 +49,12 @@ iteration, a table-level `generation` counter, and per-entity modify stamps.
 type ComponentTable(T: type) { ... }
 func createComponentTable(T: type) ret ComponentTable(T)
 
-func componentSet(this: mod ComponentTable(T), entity: view EntityId, data: own T)
-func componentHas(this: view ComponentTable(T), entity: view EntityId) ret Bool
-func componentGet(this: view ComponentTable(T), entity: view EntityId) ret T          # owned deep copy
-func componentView(this: view ComponentTable(T), entity: view EntityId) ret view T    # read-only alias
-func componentMod(this: mod ComponentTable(T), entity: view EntityId) ret mod T        # write-through alias
-func componentRemove(this: mod ComponentTable(T), entity: view EntityId)               # ordered? no — swap-remove
+func componentSet(this: mod ComponentTable(T), entityId: view EntityId, data: own T)
+func componentHas(this: view ComponentTable(T), entityId: view EntityId) ret Bool
+func componentGet(this: view ComponentTable(T), entityId: view EntityId) ret T          # owned deep copy
+func componentView(this: view ComponentTable(T), entityId: view EntityId) ret view T    # read-only alias
+func componentMod(this: mod ComponentTable(T), entityId: view EntityId) ret mod T        # write-through alias
+func componentRemove(this: mod ComponentTable(T), entityId: view EntityId)               # ordered? no — swap-remove
 func componentCount(this: view ComponentTable(T)) ret Int
 
 # Dense iteration (index 0..count):
@@ -63,7 +63,7 @@ func componentDataAt(this: view ComponentTable(T), i: view Int) ret T           
 
 # Change tracking:
 func componentTableGeneration(this: view ComponentTable(T)) ret Int    # bumped on any set/mod/remove
-func componentModStamp(this: view ComponentTable(T), entity: view EntityId) ret Int
+func componentModStamp(this: view ComponentTable(T), entityId: view EntityId) ret Int
 ```
 
 `componentMod` returning a live `mod T` is the #1 ECS ergonomic — drive an entity
@@ -210,7 +210,7 @@ The fix is always the same:
 ```rae
 # ALLOWED — two disjoint tables of one world, both written, in one system:
 func movementSystem(world: mod GameWorld, dt: view Float) {
-  loop let entity: EntityId, controller: mod ThirdPersonController, anim: mod AnimationState
+  loop let entityId: EntityId, controller: mod ThirdPersonController, anim: mod AnimationState
        in query2(tableA: world.controllers, tableB: world.animStates) {
     updateWalkerMovement(controller: controller, intent: intent, cameraYaw: yaw, dt: dt)
     groundWalker(controller: controller, groundZ: groundZ)   # same borrowed ref, next call
@@ -219,18 +219,18 @@ func movementSystem(world: mod GameWorld, dt: view Float) {
 }
 
 # ALLOWED — one element ref threaded through several calls (114):
-let controller: mod ThirdPersonController => componentMod(this: world.controllers, entity: hero)
+let controller: mod ThirdPersonController => componentMod(this: world.controllers, entityId: hero)
 updateWalkerMovement(controller: controller, intent: intent, cameraYaw: yaw, dt: dt)
 groundWalker(controller: controller, groundZ: groundZ)
 
 # ALLOWED — a ref into one table plus a ref into another:
-let pos: mod Position => componentMod(this: world.positions, entity: e)
-let vel: view Velocity => componentView(this: world.velocities, entity: e)
+let pos: mod Position => componentMod(this: world.positions, entityId: e)
+let vel: view Velocity => componentView(this: world.velocities, entityId: e)
 pos.x = pos.x + vel.v * dt
 
 # REJECTED (#814) — structural mutation of the table you hold a ref into:
-let pos: mod Position => componentMod(this: world.positions, entity: e)
-componentSet(this: world.positions, entity: other, data: Position { x: 0 })   # may realloc -> pos dangles
+let pos: mod Position => componentMod(this: world.positions, entityId: e)
+componentSet(this: world.positions, entityId: other, data: Position { x: 0 })   # may realloc -> pos dangles
 pos.x = 1
 # -> error: cannot mutate a ComponentTable while a componentMod/queryModAt reference ('pos') aliases one of its rows
 # Fix: do the componentSet first, THEN take the ref; or copy the value out.
@@ -241,9 +241,9 @@ pos.x = 1
 Join tables on the entities they share, probing the smallest table:
 
 ```rae
-type Query2Match { entity: EntityId, indexA: Int, indexB: Int }
+type Query2Match { entityId: EntityId, indexA: Int, indexB: Int }
 func query2(A: type, B: type, tableA: view ComponentTable(A), tableB: view ComponentTable(B)) ret List(Query2Match)
-type Query3Match { entity: EntityId, indexA: Int, indexB: Int, indexC: Int }
+type Query3Match { entityId: EntityId, indexA: Int, indexB: Int, indexC: Int }
 func query3(A: type, B: type, C: type, tableA: ..., tableB: ..., tableC: view ComponentTable(C)) ret List(Query3Match)
 func query4(A, B, C, D: type, tableA: ..., tableD: view ComponentTable(D)) ret List(Query4Match)
 func query5(A, B, C, D, E: type, tableA: ..., tableE: view ComponentTable(E)) ret List(Query5Match)
@@ -293,7 +293,7 @@ A system's core statement is "for every entity that has these components, give
 me those components". Rae spells that directly:
 
 ```rae
-loop let entity: EntityId, p: mod Pos, v: view Vel in query2(tableA: pos, tableB: vel) {
+loop let entityId: EntityId, p: mod Pos, v: view Vel in query2(tableA: pos, tableB: vel) {
   p.x = p.x + v.v
 }
 ```
@@ -315,7 +315,7 @@ idiom exactly:
 ```rae
 let raeQueryHits0: List(Query2Match) = query2(tableA: pos, tableB: vel)
 loop let raeQueryHit0: view Query2Match in raeQueryHits0 {
-  let entity: EntityId = raeQueryHit0.entity
+  let entityId: EntityId = raeQueryHit0.entityId
   let p: mod Pos  => queryModAt(table: pos, denseIndex: raeQueryHit0.indexA)
   let v: view Vel => queryViewAt(table: vel, denseIndex: raeQueryHit0.indexB)
   p.x = p.x + v.v
@@ -331,9 +331,9 @@ A tag is a zero-field marker component (`type FooTag {}`); its table stores
 presence only:
 
 ```rae
-func addTag(table: mod ComponentTable(T), entity: view EntityId)
-func removeTag(table: mod ComponentTable(T), entity: view EntityId)
-func hasTag(table: view ComponentTable(T), entity: view EntityId) ret Bool
+func addTag(table: mod ComponentTable(T), entityId: view EntityId)
+func removeTag(table: mod ComponentTable(T), entityId: view EntityId)
+func hasTag(table: view ComponentTable(T), entityId: view EntityId) ret Bool
 func tagCount(table: view ComponentTable(T)) ret Int
 func taggedEntities(table: view ComponentTable(T)) ret List(EntityId)
 ```
@@ -353,7 +353,7 @@ func setParent(parents: mod ComponentTable(Parent), childrens: mod ComponentTabl
 func insertChild(parents: ..., childrens: ..., parent: view EntityId, child: view EntityId, index: view Int)
 func getChildren(childrens: view ComponentTable(Children), parent: view EntityId) ret List(EntityId)   # a COPY
 func rebuildParentsFromChildren(parents: mod ComponentTable(Parent), childrens: mod ComponentTable(Children))  # after a bulk load / self-heal
-func detachForDestroy(parents: ..., childrens: ..., entity: view EntityId)     # unlink one node, orphan its children
+func detachForDestroy(parents: ..., childrens: ..., entityId: view EntityId)     # unlink one node, orphan its children
 func destroySubtree(allocator: mod EntityAllocator, parents: ..., childrens: ..., root: view EntityId)
 ```
 
@@ -423,9 +423,9 @@ and NOT an `@`-attribute:
 
 ```rae
 # lib/ecs/world.rae — one definition for every World.
-func clearEntityComponents(W: type, world: mod W, entity: view EntityId) {
+func clearEntityComponents(W: type, world: mod W, entityId: view EntityId) {
   loop let table: mod ComponentTable(any) in fields(world) {
-    componentRemove(this: table, entity: entity)
+    componentRemove(this: table, entityId: entityId)
   }
 }
 ```
@@ -485,13 +485,13 @@ type UiSystems { layout: LayoutSystem, safeArea: SafeAreaSystem, hierarchy: Hier
                  transform2d: Transform2dSystem, animation: AnimationSystem,
                  heroTransition: HeroTransitionSystem, button: ButtonSystem }
 func createUiSystems() ret UiSystems
-func clearUiSystemsEntity(uiSystems: mod UiSystems, entity: view EntityId)
+func clearUiSystemsEntity(uiSystems: mod UiSystems, entityId: view EntityId)
 # every lib system / reader: `world: mod UiWorld, uiSystems: view | mod UiSystems`
 func uiShouldRun(schedule: mod Schedule, world: view UiWorld, uiSystems: view UiSystems, index: view Int) ret Bool
 #   = declared world generation + uiSystemsReadGeneration (Pipeline.rae lists per stage)
 
 # lib/ui/Registry.rae — the pending-components outbox
-type PendingComponent { entity: EntityId, name: String, json: String, sceneId: String, nodeId: String }
+type PendingComponent { entityId: EntityId, name: String, json: String, sceneId: String, nodeId: String }
 #   world.pendingComponents: what the loader had no UiWorld table for
 func applyComponentInto(S: type, system: mod S, world: mod UiWorld, pending: view PendingComponent) ret Bool
 func reportUnknownComponent(world: mod UiWorld, pending: view PendingComponent)   # fail / diagnostic
@@ -514,7 +514,7 @@ type BundleSet; type BundleRefs { names, inherited, overridden }   # BundleRefs:
 func parseBundlesInto(out: mod BundleSet, scene: view Scene)
 func sceneImportedBundles(entry: view Scene, assets: view SceneAssets, registry: view SceneRegistry) ret BundleSet
 #   -> world.bundles, seeded by the host before a mount, like the theme
-func applyBundle(world: mod UiWorld, entity: view EntityId, name: view String)   # on a live entity
+func applyBundle(world: mod UiWorld, entityId: view EntityId, name: view String)   # on a live entityId
 ```
 
 The apps' hand-written aggregates: `examples/106_mobile_ui/MusicSystems.rae`

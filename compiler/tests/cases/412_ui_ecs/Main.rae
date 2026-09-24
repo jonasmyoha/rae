@@ -19,45 +19,45 @@ func main() {
   var e3: EntityId = createEntity(world: world)
   log("alive after 3 createEntity: {aliveCount(world: world)}")
   log("e1={e1.index} e2={e2.index} e3={e3.index}")
-  log("e1 alive: {isAlive(world: world, entity: e1)}")
+  log("e1 alive: {isAlive(world: world, entityId: e1)}")
   let probe99: EntityId = id(v: 99)
-  log("99 alive: {isAlive(world: world, entity: probe99)}")
+  log("99 alive: {isAlive(world: world, entityId: probe99)}")
 
   # Add a Rect to e1 and e3, but not e2.
   let r1: Rect = { position: { x: 0.0, y: 0.0 }, size: { x: 100.0, y: 200.0 } }
   let r3: Rect = { position: { x: 50.0, y: 50.0 }, size: { x: 320.0, y: 240.0 } }
-  componentSet(this: world.rects, entity: e1, data: r1)
-  componentSet(this: world.rects, entity: e3, data: r3)
+  componentSet(this: world.rects, entityId: e1, data: r1)
+  componentSet(this: world.rects, entityId: e3, data: r3)
 
   log("rects.count: {componentCount(this: world.rects)}")
-  log("e1 hasRect: {componentHas(this: world.rects, entity: e1)}")
-  log("e2 hasRect: {componentHas(this: world.rects, entity: e2)}")
-  log("e3 hasRect: {componentHas(this: world.rects, entity: e3)}")
+  log("e1 hasRect: {componentHas(this: world.rects, entityId: e1)}")
+  log("e2 hasRect: {componentHas(this: world.rects, entityId: e2)}")
+  log("e3 hasRect: {componentHas(this: world.rects, entityId: e3)}")
 
-  let got1: Rect = componentGet(this: world.rects, entity: e1)
+  let got1: Rect = componentGet(this: world.rects, entityId: e1)
   log("e1 rect: {got1.position.x},{got1.position.y} {got1.size.x}x{got1.size.y}")
-  let got3: Rect = componentGet(this: world.rects, entity: e3)
+  let got3: Rect = componentGet(this: world.rects, entityId: e3)
   log("e3 rect: {got3.position.x},{got3.position.y} {got3.size.x}x{got3.size.y}")
 
   # Replace e1's rect.
   let r1b: Rect = { position: { x: 10.0, y: 20.0 }, size: { x: 30.0, y: 40.0 } }
-  componentSet(this: world.rects, entity: e1, data: r1b)
+  componentSet(this: world.rects, entityId: e1, data: r1b)
   log("rects.count after replace: {componentCount(this: world.rects)}")
-  let got1b: Rect = componentGet(this: world.rects, entity: e1)
+  let got1b: Rect = componentGet(this: world.rects, entityId: e1)
   log("e1 rect after replace: {got1b.position.x},{got1b.position.y} {got1b.size.x}x{got1b.size.y}")
 
   # Add a Text component to e2.
   let t2: Text = { text: "hello", styleId: "h1", wrapWidthMode: WrapWidthMode.nodeWidth }
-  componentSet(this: world.texts, entity: e2, data: t2)
+  componentSet(this: world.texts, entityId: e2, data: t2)
   log("texts.count: {componentCount(this: world.texts)}")
-  let gotT: Text = componentGet(this: world.texts, entity: e2)
+  let gotT: Text = componentGet(this: world.texts, entityId: e2)
   log("e2 text: '{gotT.text}' style={gotT.styleId}")
 
   # Add an Active=false to e3 (default is true at construction time;
   # this overrides).
   let a3: Active = { value: false }
-  componentSet(this: world.actives, entity: e3, data: a3)
-  let gotA: Active = componentGet(this: world.actives, entity: e3)
+  componentSet(this: world.actives, entityId: e3, data: a3)
+  let gotA: Active = componentGet(this: world.actives, entityId: e3)
   log("e3 active: {gotA.value}")
 
   # Iterate the rects table.
@@ -71,24 +71,24 @@ func main() {
   }
 
   # Remove e3's rect, observe count.
-  componentRemove(this: world.rects, entity: e3)
+  componentRemove(this: world.rects, entityId: e3)
   log("rects.count after remove e3: {componentCount(this: world.rects)}")
-  log("e3 hasRect after remove: {componentHas(this: world.rects, entity: e3)}")
-  log("e1 hasRect after remove: {componentHas(this: world.rects, entity: e1)}")
+  log("e3 hasRect after remove: {componentHas(this: world.rects, entityId: e3)}")
+  log("e1 hasRect after remove: {componentHas(this: world.rects, entityId: e1)}")
 
   let wid: WidgetId = { id: "play.icon", kind: "playbackIcon" }
-  componentSet(this: world.widgetIds, entity: e2, data: wid)
+  componentSet(this: world.widgetIds, entityId: e2, data: wid)
   let wstate: WidgetState = { enabled: true, selected: false, loading: false, error: false }
-  componentSet(this: world.widgetStates, entity: e2, data: wstate)
+  componentSet(this: world.widgetStates, entityId: e2, data: wstate)
   let dep: DataDependency = {
     resource: DataResourceId.playback
     field: DataFieldId.isPlaying
     observedRevision: 7
   }
-  componentSet(this: world.dataDependencies, entity: e2, data: dep)
-  let gotWid: WidgetId = componentGet(this: world.widgetIds, entity: e2)
-  let gotState: WidgetState = componentGet(this: world.widgetStates, entity: e2)
-  let gotDep: DataDependency = componentGet(this: world.dataDependencies, entity: e2)
+  componentSet(this: world.dataDependencies, entityId: e2, data: dep)
+  let gotWid: WidgetId = componentGet(this: world.widgetIds, entityId: e2)
+  let gotState: WidgetState = componentGet(this: world.widgetStates, entityId: e2)
+  let gotDep: DataDependency = componentGet(this: world.dataDependencies, entityId: e2)
   log("e2 widget: {gotWid.id} kind={gotWid.kind} enabled={gotState.enabled}")
   log(
     "e2 dependency: playback={gotDep.resource is DataResourceId.playback} isPlaying={gotDep.field is DataFieldId.isPlaying} rev={gotDep.observedRevision}"

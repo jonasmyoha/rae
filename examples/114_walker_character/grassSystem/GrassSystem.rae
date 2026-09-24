@@ -111,7 +111,7 @@ func updateGrassField(
   grassSystem.centreCellX = cellX
   grassSystem.centreCellY = cellY
   loop var i: Int = 0, i < componentCount(this: world.grassBlades), ++i {
-    let entity: EntityId = componentEntityAt(this: world.grassBlades, i: i)
+    let entityId: EntityId = componentEntityAt(this: world.grassBlades, i: i)
     let blade: GrassBlade = componentDataAt(this: world.grassBlades, i: i)
     let cellIndex: Int = blade.slot / grassPerCell
     let slotInCell: Int = blade.slot % grassPerCell
@@ -119,7 +119,7 @@ func updateGrassField(
     let row: Int = cellIndex / terrainGridSide
     componentSet(
       this: world.grassBlades
-      entity: entity
+      entityId: entityId
       data: placeGrassBlade(
         cellX: cellX + column - terrainHalfGrid
         cellY: cellY + row - terrainHalfGrid
@@ -211,10 +211,10 @@ func createGrassSystem(
   # One blade entity per pool slot; the first updateGrassField wrap re-places
   # them onto the cells around the player.
   loop var slot: Int = 0, slot < grassBladeCount, ++slot {
-    let entity: EntityId = gameWorldAddEntity(world: world)
+    let entityId: EntityId = gameWorldAddEntity(world: world)
     componentSet(
       this: world.grassBlades
-      entity: entity
+      entityId: entityId
       data: GrassBlade {
         baseX: 0.0
         baseY: 0.0

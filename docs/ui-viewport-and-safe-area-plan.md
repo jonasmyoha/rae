@@ -104,14 +104,14 @@ func safeAreaSystem(world: mod UiWorld, viewport: view Viewport) {
   # effective-padding accessor.
   let entities: view List(Int) => world.alive
   for entity in entities {
-    if not componentHas(world.safeAreas, entity) { continue }
+    if not componentHas(world.safeAreas, entityId) { continue }
     let insets: SafeInsets = {
       l: viewport.safeLeft
       t: viewport.safeTop
       r: viewport.safeRight
       b: viewport.safeBottom
     }
-    componentSet(world.safeInsets, entity, insets)
+    componentSet(world.safeInsets, entityId, insets)
   }
 }
 ```
@@ -119,12 +119,12 @@ func safeAreaSystem(world: mod UiWorld, viewport: view Viewport) {
 Update `entityPadding()` in `lib/ui/layout.rae`:
 
 ```rae
-func entityPadding(world: view UiWorld, entity: Int) ret Insets {
+func entityPadding(world: view UiWorld, entityId: Int) ret Insets {
   let base: Insets = ...           # as today
-  if not componentHas(world.safeAreas, entity) { ret base }
-  let safe: SafeArea = componentGet(world.safeAreas, entity)
+  if not componentHas(world.safeAreas, entityId) { ret base }
+  let safe: SafeArea = componentGet(world.safeAreas, entityId)
   if not safe.enabled { ret base }
-  let insets: SafeInsets = componentGet(world.safeInsets, entity)
+  let insets: SafeInsets = componentGet(world.safeInsets, entityId)
   ret Insets {
     l: base.l + (if safe.apply.l then insets.l else 0.0) + safe.extra
     t: base.t + (if safe.apply.t then insets.t else 0.0) + safe.extra

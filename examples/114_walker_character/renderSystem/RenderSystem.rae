@@ -122,7 +122,7 @@ func renderShadowPass(
       )
       loop var shadowClone: Int = 0, shadowClone < characterSystem.crowdEntities.length, ++shadowClone {
         if let member: EntityId = characterSystem.crowdEntities.copyAt(index: shadowClone) {
-          let ctrl: ThirdPersonController = componentGet(this: world.controllers, entity: member)
+          let ctrl: ThirdPersonController = componentGet(this: world.controllers, entityId: member)
           let cloneModel: Mat4 = walkerWorldModel(
             baseModel: characterSystem.basePartModel
             controller: ctrl
@@ -179,7 +179,7 @@ func renderGbufferPass(
   grassView.clusterStrength = 0.8
   grassView.tipLighten = 1.25
   grassView.windStrength = 0.45
-  let heroPos: Vec3 = controllerOf(world: world, entity: characterSystem.heroEntity).position
+  let heroPos: Vec3 = controllerOf(world: world, entityId: characterSystem.heroEntity).position
   grassGenerate(
     grass: grassCompute
     resources: resources
@@ -255,7 +255,7 @@ func renderGbufferPass(
         # Each crowd member samples its OWN palette slot (#547) so it holds a
         # distinct pose in this single instanced skinned draw. Its model is
         # derived from the entity's controller (#739) — no stored model.
-        let ctrl: ThirdPersonController = componentGet(this: world.controllers, entity: member)
+        let ctrl: ThirdPersonController = componentGet(this: world.controllers, entityId: member)
         let cloneModel: Mat4 = walkerWorldModel(
           baseModel: characterSystem.basePartModel
           controller: ctrl
@@ -383,7 +383,7 @@ func renderApp(
   loop var crowdSlot: Int = 0, crowdSlot < characterSystem.crowdEntities.length, ++crowdSlot {
     if let member: EntityId = characterSystem.crowdEntities.copyAt(index: crowdSlot) {
       # Advance this member's AnimationState IN PLACE (#739) — no copy/set-back.
-      let anim: mod AnimationState => componentMod(this: world.animStates, entity: member)
+      let anim: mod AnimationState => componentMod(this: world.animStates, entityId: member)
       anim.animTime = anim.animTime + deltaTime * clipPlaybackRate(clipIndex: anim.clipIndex)
       let memberClip: Int = anim.clipIndex
       let memberTime: Float = anim.animTime

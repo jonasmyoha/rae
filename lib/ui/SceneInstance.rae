@@ -401,16 +401,16 @@ func mountSceneInstanceImpl(
       # Explicit struct construction (not `let entity: EntityId =
       # mountEntity`) — the Live VM treats the latter as a view-ref
       # bind and then refuses the reassignment on the next branch.
-      var entity: EntityId = { index: mountEntity.index, generation: mountEntity.generation }
+      var entityId: EntityId = { index: mountEntity.index, generation: mountEntity.generation }
       if i is not rootIdx {
-        entity = createEntity(world: world)
+        entityId = createEntity(world: world)
       }
-      appendEntityListSI(lst: entitiesByNodeIndex, value: entity)
+      appendEntityListSI(lst: entitiesByNodeIndex, value: entityId)
       if pageId.length() is 0 {
-        nodeIdsMap.set(k: node.nodeId, value: entity.index)
+        nodeIdsMap.set(k: node.nodeId, value: entityId.index)
       } else {
         let key: String = pageScopedKey(pageId: pageId, nodeId: node.nodeId)
-        nodeIdsMap.set(k: key, value: entity.index)
+        nodeIdsMap.set(k: key, value: entityId.index)
       }
       i = i + 1
     }
@@ -425,14 +425,14 @@ func mountSceneInstanceImpl(
     var j: Int = 0
     loop j < nodeCount {
       let node: view SceneNode => nodeAt(this: scene, idx: j)
-      let entity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: j)
+      let entityId: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: j)
       let isRoot: Bool = j is rootIdx
       let source: SceneSource = {
         sceneId: "{scene.sceneId}"
         nodeId: "{node.nodeId}"
         root: isRoot and markSourceRoot
       }
-      componentSet(this: world.sceneSources, entity: entity, data: source)
+      componentSet(this: world.sceneSources, entityId: entityId, data: source)
 
       let bag: JsonValue = Json.jsonValueAt(doc: docView, idx: node.componentsValueIdx)
       let keyCount: Int = Json.objectLen(this: bag)
@@ -442,7 +442,7 @@ func mountSceneInstanceImpl(
       if Json.field(doc: docView, this: bag, key: bundlesKey) >= 0 {
         applyExpandedBag(
           world: world
-          entity: entity
+          entityId: entityId
           local: ownBundles
           doc: docView
           bag: bag
@@ -468,7 +468,7 @@ func mountSceneInstanceImpl(
           let valueAtKey: JsonValue = Json.objectValueAt(doc: docView, this: bag, idx: k)
           applyComponentByName(
             world: world
-            entity: entity
+            entityId: entityId
             name: key
             doc: docView
             val: valueAtKey
@@ -522,7 +522,7 @@ func mountSceneInstanceImpl(
           buf: entitiesByNodeIndex.data
           index: nodeIdx
         )
-        applyOverride(world: world, entity: targetEntity, override: o)
+        applyOverride(world: world, entityId: targetEntity, override: o)
       }
       oi = oi + 1
     }
@@ -580,7 +580,7 @@ func parseRgbaString(text: view String) ret RgbaColor {
   }
 }
 
-func applyOverride(world: mod UiWorld, entity: view EntityId, override: view SceneOverride) {
+func applyOverride(world: mod UiWorld, entityId: view EntityId, override: view SceneOverride) {
   let textKey: String = "Text"
   let spriteKey: String = "Sprite"
   let activeKey: String = "Active"
@@ -595,16 +595,16 @@ func applyOverride(world: mod UiWorld, entity: view EntityId, override: view Sce
   if override.componentName is textKey {
     let textField: String = "text"
     if override.fieldName is textField {
-      if componentHas(this: world.texts, entity: entity) {
-        let cur: mod Text => componentMod(this: world.texts, entity: entity)
+      if componentHas(this: world.texts, entityId: entityId) {
+        let cur: mod Text => componentMod(this: world.texts, entityId: entityId)
         cur.text = override.valueString
       }
       ret
     }
     let styleField: String = "styleId"
     if override.fieldName is styleField {
-      if componentHas(this: world.texts, entity: entity) {
-        let cur: mod Text => componentMod(this: world.texts, entity: entity)
+      if componentHas(this: world.texts, entityId: entityId) {
+        let cur: mod Text => componentMod(this: world.texts, entityId: entityId)
         cur.styleId = override.valueString
       }
     }
@@ -614,16 +614,16 @@ func applyOverride(world: mod UiWorld, entity: view EntityId, override: view Sce
   if override.componentName is spriteKey {
     let textureField: String = "textureKey"
     if override.fieldName is textureField {
-      if componentHas(this: world.sprites, entity: entity) {
-        let cur: mod Sprite => componentMod(this: world.sprites, entity: entity)
+      if componentHas(this: world.sprites, entityId: entityId) {
+        let cur: mod Sprite => componentMod(this: world.sprites, entityId: entityId)
         cur.textureKey = override.valueString
       }
       ret
     }
     let tintField: String = "tint"
     if override.fieldName is tintField {
-      if componentHas(this: world.sprites, entity: entity) {
-        let cur: mod Sprite => componentMod(this: world.sprites, entity: entity)
+      if componentHas(this: world.sprites, entityId: entityId) {
+        let cur: mod Sprite => componentMod(this: world.sprites, entityId: entityId)
         cur.tint = parseRgbaString(text: override.valueString)
         # Explicit literal override wins over any scene slot (#235).
         cur.tintSlot = ""
@@ -635,8 +635,8 @@ func applyOverride(world: mod UiWorld, entity: view EntityId, override: view Sce
   if override.componentName is onClickKey {
     let actionField: String = "actionId"
     if override.fieldName is actionField {
-      if componentHas(this: world.onClicks, entity: entity) {
-        let cur: mod OnClick => componentMod(this: world.onClicks, entity: entity)
+      if componentHas(this: world.onClicks, entityId: entityId) {
+        let cur: mod OnClick => componentMod(this: world.onClicks, entityId: entityId)
         cur.actionId = override.valueString
       }
     }
@@ -649,15 +649,15 @@ func applyOverride(world: mod UiWorld, entity: view EntityId, override: view Sce
       let trueStr: String = "true"
       let v: Bool = override.valueString is trueStr
       let active: Active = { value: v }
-      componentSet(this: world.actives, entity: entity, data: active)
+      componentSet(this: world.actives, entityId: entityId, data: active)
     }
     ret
   }
   let rectKey: String = "Rect"
   if override.componentName is rectKey {
     var current: Rect = { position: { x: 0.0, y: 0.0 }, size: { x: 0.0, y: 0.0 } }
-    if componentHas(this: world.rects, entity: entity) {
-      current = componentGet(this: world.rects, entity: entity)
+    if componentHas(this: world.rects, entityId: entityId) {
+      current = componentGet(this: world.rects, entityId: entityId)
     }
     let value: Float = override.valueString.toFloat()
     let wField: String = "w"
@@ -668,7 +668,7 @@ func applyOverride(world: mod UiWorld, entity: view EntityId, override: view Sce
     if override.fieldName is hField {
       current.size.y = value
     }
-    componentSet(this: world.rects, entity: entity, data: current)
+    componentSet(this: world.rects, entityId: entityId, data: current)
     ret
   }
   # Per-row identity and style a data list writes onto its row roots (#996):
@@ -678,14 +678,14 @@ func applyOverride(world: mod UiWorld, entity: view EntityId, override: view Sce
   let heroKey: String = "HeroWidget"
   if override.componentName is heroKey {
     let hero: HeroWidget = { key: "{override.valueString}" }
-    componentSet(this: world.heroWidgets, entity: entity, data: hero)
+    componentSet(this: world.heroWidgets, entityId: entityId, data: hero)
     ret
   }
   let widgetIdKey: String = "WidgetId"
   if override.componentName is widgetIdKey {
     var current: WidgetId = { id: "", kind: "" }
-    if componentHas(this: world.widgetIds, entity: entity) {
-      current = componentGet(this: world.widgetIds, entity: entity)
+    if componentHas(this: world.widgetIds, entityId: entityId) {
+      current = componentGet(this: world.widgetIds, entityId: entityId)
     }
     let idField: String = "id"
     if override.fieldName is idField {
@@ -693,25 +693,25 @@ func applyOverride(world: mod UiWorld, entity: view EntityId, override: view Sce
     } else {
       current.kind = "{override.valueString}"
     }
-    componentSet(this: world.widgetIds, entity: entity, data: current)
+    componentSet(this: world.widgetIds, entityId: entityId, data: current)
     ret
   }
   let cornerKey: String = "CornerRadius"
   if override.componentName is cornerKey {
     let radius: Float = override.valueString.toFloat()
     if radius <= 0.0 {
-      componentRemove(this: world.cornerRadiuses, entity: entity)
+      componentRemove(this: world.cornerRadiuses, entityId: entityId)
     } else {
       let corner: CornerRadius = { radius: radius }
-      componentSet(this: world.cornerRadiuses, entity: entity, data: corner)
+      componentSet(this: world.cornerRadiuses, entityId: entityId, data: corner)
     }
     ret
   }
   let widgetStateKey: String = "WidgetState"
   if override.componentName is widgetStateKey {
     var current: WidgetState = { enabled: true, selected: false, loading: false, error: false }
-    if componentHas(this: world.widgetStates, entity: entity) {
-      current = componentGet(this: world.widgetStates, entity: entity)
+    if componentHas(this: world.widgetStates, entityId: entityId) {
+      current = componentGet(this: world.widgetStates, entityId: entityId)
     }
     let trueStr: String = "true"
     let v: Bool = override.valueString is trueStr
@@ -727,17 +727,17 @@ func applyOverride(world: mod UiWorld, entity: view EntityId, override: view Sce
     if override.fieldName is "error" {
       current.error = v
     }
-    componentSet(this: world.widgetStates, entity: entity, data: current)
+    componentSet(this: world.widgetStates, entityId: entityId, data: current)
     ret
   }
   # Shape kind/fill/radius and GradientFill palette slots let a row carry its
   # themed highlight state as data (the playing track's pill, editor rows).
   let shapeKey: String = "Shape"
   if override.componentName is shapeKey {
-    if componentHas(this: world.shapes, entity: entity) is false {
+    if componentHas(this: world.shapes, entityId: entityId) is false {
       ret
     }
-    let cur: mod Shape => componentMod(this: world.shapes, entity: entity)
+    let cur: mod Shape => componentMod(this: world.shapes, entityId: entityId)
     if override.fieldName is "kind" {
       if let kind: ShapeKind = enumFromName(
         ShapeKind
@@ -756,10 +756,10 @@ func applyOverride(world: mod UiWorld, entity: view EntityId, override: view Sce
   }
   let gradientKey: String = "GradientFill"
   if override.componentName is gradientKey {
-    if componentHas(this: world.gradientFills, entity: entity) is false {
+    if componentHas(this: world.gradientFills, entityId: entityId) is false {
       ret
     }
-    let current: mod GradientFill => componentMod(this: world.gradientFills, entity: entity)
+    let current: mod GradientFill => componentMod(this: world.gradientFills, entityId: entityId)
     if override.fieldName is "fromSlot" {
       current.fromSlot = "{override.valueString}"
     }
@@ -773,7 +773,7 @@ func applyOverride(world: mod UiWorld, entity: view EntityId, override: view Sce
   # author it; a data list binds it onto its rows.
   let stateStyleKey: String = "StateStyle"
   if override.componentName is stateStyleKey {
-    if componentHas(this: world.stateStyles, entity: entity) is false {
+    if componentHas(this: world.stateStyles, entityId: entityId) is false {
       let noColor: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
       let zero: Vec2 = { x: 0.0, y: 0.0 }
       let fresh: StateStyle = {
@@ -798,9 +798,9 @@ func applyOverride(world: mod UiWorld, entity: view EntityId, override: view Sce
         loadingAlpha: 1.0
         errorAlpha: 1.0
       }
-      componentSet(this: world.stateStyles, entity: entity, data: fresh)
+      componentSet(this: world.stateStyles, entityId: entityId, data: fresh)
     }
-    let cur: mod StateStyle => componentMod(this: world.stateStyles, entity: entity)
+    let cur: mod StateStyle => componentMod(this: world.stateStyles, entityId: entityId)
     let alpha: Float = override.valueString.toFloat()
     if override.fieldName is "disabledAlpha" {
       cur.disabledAlpha = alpha
@@ -818,8 +818,8 @@ func applyOverride(world: mod UiWorld, entity: view EntityId, override: view Sce
   let paddingKey: String = "Padding"
   if override.componentName is paddingKey {
     var insets: Padding = { insets: { l: 0.0, t: 0.0, r: 0.0, b: 0.0 } }
-    if componentHas(this: world.paddings, entity: entity) {
-      insets = componentGet(this: world.paddings, entity: entity)
+    if componentHas(this: world.paddings, entityId: entityId) {
+      insets = componentGet(this: world.paddings, entityId: entityId)
     }
     let value: Float = override.valueString.toFloat()
     if override.fieldName is "l" {
@@ -834,7 +834,7 @@ func applyOverride(world: mod UiWorld, entity: view EntityId, override: view Sce
     if override.fieldName is "b" {
       insets.insets.b = value
     }
-    componentSet(this: world.paddings, entity: entity, data: insets)
+    componentSet(this: world.paddings, entityId: entityId, data: insets)
     ret
   }
 }
@@ -865,12 +865,12 @@ func mountPage(
   }
   let root: EntityId = createEntity(world: world)
   let r: Rect = { position: { x: 0.0, y: 0.0 }, size: { x: w, y: h } }
-  componentSet(this: world.rects, entity: root, data: r)
+  componentSet(this: world.rects, entityId: root, data: r)
   let size: Size = {
     w: SizeAxis { mode: SizeMode.fixed, min: -1, max: -1 }
     h: SizeAxis { mode: SizeMode.fixed, min: -1, max: -1 }
   }
-  componentSet(this: world.sizes, entity: root, data: size)
+  componentSet(this: world.sizes, entityId: root, data: size)
   let mounted: EntityId = mountSceneInstanceImpl(
     world: world
     uiSystems: uiSystems
@@ -888,6 +888,6 @@ func mountPage(
   var copiedId: String = ""
   copiedId = copiedId.concat(other: pageId)
   let pr: PageRoot = { id: own copiedId }
-  componentSet(this: world.pageRoots, entity: root, data: own pr)
+  componentSet(this: world.pageRoots, entityId: root, data: own pr)
   ret root
 }

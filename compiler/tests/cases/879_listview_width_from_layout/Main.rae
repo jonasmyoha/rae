@@ -53,14 +53,14 @@ func rowWidths(
   listEntity: view EntityId
 ) ret String {
   var out: String = ""
-  if componentHas(this: world.childrens, entity: listEntity) is false {
+  if componentHas(this: world.childrens, entityId: listEntity) is false {
     ret "none"
   }
-  let children: view Children => componentView(this: world.childrens, entity: listEntity)
+  let children: view Children => componentView(this: world.childrens, entityId: listEntity)
   loop var i: Int = 0, i < children.ids.length, ++i {
     let row: EntityId = children.ids.copyAtFallback(index: i, fallback: noEntity())
-    if componentHas(this: uiSystems.layout.computedRects, entity: row) {
-      let rect: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: row)
+    if componentHas(this: uiSystems.layout.computedRects, entityId: row) {
+      let rect: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entityId: row)
       out = "{out} {rect.size.x.toInt()}"
     }
   }
@@ -72,10 +72,10 @@ func listSize(
   uiSystems: view UiSystems
   listEntity: view EntityId
 ) ret String {
-  if componentHas(this: uiSystems.layout.computedRects, entity: listEntity) is false {
+  if componentHas(this: uiSystems.layout.computedRects, entityId: listEntity) is false {
     ret "none"
   }
-  let rect: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: listEntity)
+  let rect: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entityId: listEntity)
   ret "{rect.size.x.toInt()}x{rect.size.y.toInt()}"
 }
 
@@ -95,7 +95,11 @@ func main() {
   loop var i: Int = 0, i < 5, ++i {
     rows.add(value: dataRow(index: i))
   }
-  componentSet(this: world.listViewDatas, entity: listEntity, data: ListViewData { rows: own rows })
+  componentSet(
+    this: world.listViewDatas
+    entityId: listEntity
+    data: ListViewData { rows: own rows }
+  )
   let registry: SceneRegistry = createSceneRegistry()
   listViewSystem(world: world, uiSystems: uiSystems, scenes: registry)
   layoutSystem(world: world, uiSystems: uiSystems)
@@ -117,7 +121,11 @@ func main() {
   let two: List(ListViewRow) = List.create(ListViewRow, cap: 2)
   two.add(value: dataRow(index: 0))
   two.add(value: dataRow(index: 1))
-  componentSet(this: world.listViewDatas, entity: listEntity, data: ListViewData { rows: own two })
+  componentSet(
+    this: world.listViewDatas
+    entityId: listEntity
+    data: ListViewData { rows: own two }
+  )
   listViewSystem(world: world, uiSystems: uiSystems, scenes: registry)
   layoutSystem(world: world, uiSystems: uiSystems)
   log(

@@ -21,15 +21,15 @@ open ecs/Entity
 func animateScene(world: mod World3d, sceneId: view Int, time: view Float) {
   # Index 0 is the ground plane; the props start at 1.
   loop var j: Int = 1, j < world3dMeshRendererCount(world: world), ++j {
-    let entity: EntityId = world3dMeshRendererEntityAt(world: world, i: j)
-    var transform: Transform3d = world3dGetTransform(world: world, entity: entity)
+    let entityId: EntityId = world3dMeshRendererEntityAt(world: world, i: j)
+    var transform: Transform3d = world3dGetTransform(world: world, entityId: entityId)
     let phase: Float = j.toFloat() * 0.173 + sceneId.toFloat()
     transform.rotation = Vec3.create(
       x: time * (0.08 + sceneId.toFloat() * 0.04)
       y: Math.sin(x: time * 0.18 + phase) * 0.28
       z: time * (0.12 + (j % 5).toFloat() * 0.025)
     )
-    world3dWriteTransform(world: world, entity: entity, transform: transform)
+    world3dWriteTransform(world: world, entityId: entityId, transform: transform)
   }
 }
 
@@ -65,8 +65,8 @@ func animateScene(world: mod World3d, sceneId: view Int, time: view Float) {
 func animateMetaballLab(world: mod World3d, time: view Float) {
   loop var i: Int = 0, i < world3dSdfCount(world: world), ++i {
     let sdf: SdfPrimitive = world3dSdfDataAt(world: world, i: i)
-    let entity: EntityId = world3dSdfEntityAt(world: world, i: i)
-    var transform: Transform3d = world3dGetTransform(world: world, entity: entity)
+    let entityId: EntityId = world3dSdfEntityAt(world: world, i: i)
+    var transform: Transform3d = world3dGetTransform(world: world, entityId: entityId)
     let phase: Float = i.toFloat() * 0.7853981
     let idx: Float = i.toFloat()
 
@@ -92,7 +92,7 @@ func animateMetaballLab(world: mod World3d, time: view Float) {
       )
       let r: Float = (0.30 + Math.sin(x: time * 0.9 + phase) * 0.09) * away
       transform.scale = Vec3.create(x: r, y: r, z: r)
-      world3dWriteTransform(world: world, entity: entity, transform: transform)
+      world3dWriteTransform(world: world, entityId: entityId, transform: transform)
     }
     if sdf.cluster is 1 {
       # Titan: very large, very sticky balls. Big radius plus k=1.35 means
@@ -106,7 +106,7 @@ func animateMetaballLab(world: mod World3d, time: view Float) {
       )
       let r: Float = 1.85 + Math.sin(x: time * 0.37 + phase * 1.9) * 0.42
       transform.scale = Vec3.create(x: r, y: r, z: r)
-      world3dWriteTransform(world: world, entity: entity, transform: transform)
+      world3dWriteTransform(world: world, entityId: entityId, transform: transform)
     }
     if sdf.cluster is 2 {
       # Mist: small radii and k=0.18 — barely fusing, so it stays a cloud of
@@ -119,7 +119,7 @@ func animateMetaballLab(world: mod World3d, time: view Float) {
       )
       let r: Float = (0.27 + Math.sin(x: time * 1.5 + phase * 2.6) * 0.09) * away
       transform.scale = Vec3.create(x: r, y: r, z: r)
-      world3dWriteTransform(world: world, entity: entity, transform: transform)
+      world3dWriteTransform(world: world, entityId: entityId, transform: transform)
     }
     if sdf.cluster is 3 {
       # Ember: fast, hot, medium size, sticky enough to boil internally.
@@ -131,7 +131,7 @@ func animateMetaballLab(world: mod World3d, time: view Float) {
       )
       let r: Float = (0.62 + Math.sin(x: t * 0.7 + phase * 2.1) * 0.26) * away
       transform.scale = Vec3.create(x: r, y: r, z: r)
-      world3dWriteTransform(world: world, entity: entity, transform: transform)
+      world3dWriteTransform(world: world, entityId: entityId, transform: transform)
     }
     if sdf.cluster is 4 {
       # Orchid: slow, large-ish, long escapes — the clearest place to watch a
@@ -144,7 +144,7 @@ func animateMetaballLab(world: mod World3d, time: view Float) {
       )
       let r: Float = (0.78 + Math.sin(x: time * 0.5 + phase) * 0.20) * away
       transform.scale = Vec3.create(x: r, y: r, z: r)
-      world3dWriteTransform(world: world, entity: entity, transform: transform)
+      world3dWriteTransform(world: world, entityId: entityId, transform: transform)
     }
     if sdf.cluster is 5 {
       # Verdigris: the middle case — medium count, medium stickiness, a ring
@@ -158,7 +158,7 @@ func animateMetaballLab(world: mod World3d, time: view Float) {
       )
       let r: Float = (0.44 + Math.sin(x: t + phase * 1.5) * 0.14) * away
       transform.scale = Vec3.create(x: r, y: r, z: r)
-      world3dWriteTransform(world: world, entity: entity, transform: transform)
+      world3dWriteTransform(world: world, entityId: entityId, transform: transform)
     }
     if sdf.cluster is 6 {
       # Pearl: few, big, pale and nearly still — a rest for the eye, and the
@@ -171,7 +171,7 @@ func animateMetaballLab(world: mod World3d, time: view Float) {
       )
       let r: Float = 1.05 + Math.sin(x: time * 0.24 + phase * 1.3) * 0.18
       transform.scale = Vec3.create(x: r, y: r, z: r)
-      world3dWriteTransform(world: world, entity: entity, transform: transform)
+      world3dWriteTransform(world: world, entityId: entityId, transform: transform)
     }
   }
 }
@@ -191,8 +191,8 @@ func animateMetaballLab(world: mod World3d, time: view Float) {
 func animateScene3(world: mod World3d, time: view Float) {
   loop var i: Int = 0, i < world3dSdfCount(world: world), ++i {
     let sdf: SdfPrimitive = world3dSdfDataAt(world: world, i: i)
-    let entity: EntityId = world3dSdfEntityAt(world: world, i: i)
-    var transform: Transform3d = world3dGetTransform(world: world, entity: entity)
+    let entityId: EntityId = world3dSdfEntityAt(world: world, i: i)
+    var transform: Transform3d = world3dGetTransform(world: world, entityId: entityId)
     let phase: Float = i.toFloat() * 0.6283185
     let idx: Float = i.toFloat()
 
@@ -221,7 +221,7 @@ func animateScene3(world: mod World3d, time: view Float) {
     let breathe: Float = 1.0 + Math.sin(x: time * 0.7 + phase * 1.6) * 0.18
     let r: Float = base * breathe * (1.0 - 0.32 * escape)
     transform.scale = Vec3.create(x: r, y: r, z: r)
-    world3dWriteTransform(world: world, entity: entity, transform: transform)
+    world3dWriteTransform(world: world, entityId: entityId, transform: transform)
   }
 }
 
@@ -236,16 +236,16 @@ func animateScene1(
   # the useful shape to watch here: a sphere looks identical under any
   # rotation, so it cannot show a wrong rotation order or a skewed normal
   # transform, and a flat-shaded cube shows both immediately.
-  var cubeATransform: Transform3d = world3dGetTransform(world: world, entity: cubeA)
+  var cubeATransform: Transform3d = world3dGetTransform(world: world, entityId: cubeA)
   cubeATransform.rotation = Vec3.create(x: time * 0.7, y: time * 0.31, z: 0.0)
-  world3dWriteTransform(world: world, entity: cubeA, transform: cubeATransform)
-  var cubeBTransform: Transform3d = world3dGetTransform(world: world, entity: cubeB)
+  world3dWriteTransform(world: world, entityId: cubeA, transform: cubeATransform)
+  var cubeBTransform: Transform3d = world3dGetTransform(world: world, entityId: cubeB)
   cubeBTransform.rotation = Vec3.create(x: 0.0, y: time * 0.55, z: time * 0.9)
-  world3dWriteTransform(world: world, entity: cubeB, transform: cubeBTransform)
+  world3dWriteTransform(world: world, entityId: cubeB, transform: cubeBTransform)
 
-  var torusTransform: Transform3d = world3dGetTransform(world: world, entity: torus)
+  var torusTransform: Transform3d = world3dGetTransform(world: world, entityId: torus)
   torusTransform.rotation = Vec3.create(x: time * 0.35, y: 0.0, z: time * 0.62)
-  world3dWriteTransform(world: world, entity: torus, transform: torusTransform)
+  world3dWriteTransform(world: world, entityId: torus, transform: torusTransform)
   # Heights are chosen against the ground plane at z=-0.75 so every ball
   # stays INSIDE the SSAO contact radius (~1.2 world units) for its whole
   # cycle, not merely at the bottom of its swing.
@@ -270,8 +270,8 @@ func animateScene1(
   # cluster is fast and loose, the blue cluster sits between them.
   loop var i: Int = 0, i < world3dSdfCount(world: world), ++i {
     let sdf: SdfPrimitive = world3dSdfDataAt(world: world, i: i)
-    let entity: EntityId = world3dSdfEntityAt(world: world, i: i)
-    var transform: Transform3d = world3dGetTransform(world: world, entity: entity)
+    let entityId: EntityId = world3dSdfEntityAt(world: world, i: i)
+    var transform: Transform3d = world3dGetTransform(world: world, entityId: entityId)
     let phase: Float = i.toFloat() * 1.2566371
     if sdf.cluster is 1 {
       # Obsidian: slow, small orbits, gentle breathing. Its low stickiness
@@ -284,7 +284,7 @@ func animateScene1(
       )
       let obsidianR: Float = 0.82 + Math.sin(x: time * 0.29 + phase * 1.7) * 0.14
       transform.scale = Vec3.create(x: obsidianR, y: obsidianR, z: obsidianR)
-      world3dWriteTransform(world: world, entity: entity, transform: transform)
+      world3dWriteTransform(world: world, entityId: entityId, transform: transform)
     }
     if sdf.cluster is 2 {
       # Ember: fast and churning, with big size swings. Very sticky
@@ -298,7 +298,7 @@ func animateScene1(
       )
       let emberR: Float = 0.78 + Math.sin(x: fast * 0.62 + phase * 2.3) * 0.42
       transform.scale = Vec3.create(x: emberR, y: emberR, z: emberR)
-      world3dWriteTransform(world: world, entity: entity, transform: transform)
+      world3dWriteTransform(world: world, entityId: entityId, transform: transform)
     }
     if sdf.cluster is 0 {
       # Excursion: every third ball periodically breaks away TOWARD THE
@@ -327,7 +327,7 @@ func animateScene1(
       )
       let radius: Float = 1.45 + Math.sin(x: time * 0.67 + phase * 2.0) * 0.16 - 0.08 * excursion
       transform.scale = Vec3.create(x: radius, y: radius, z: radius)
-      world3dWriteTransform(world: world, entity: entity, transform: transform)
+      world3dWriteTransform(world: world, entityId: entityId, transform: transform)
     }
   }
 }

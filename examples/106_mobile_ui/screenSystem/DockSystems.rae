@@ -30,18 +30,18 @@ func anchorBottomSystem(world: mod UiWorld, bottomInset: view Float) pub {
   let n: Int = componentCount(this: world.anchorBottoms)
   var i: Int = 0
   loop i < n {
-    let entity: EntityId = componentEntityAt(this: world.anchorBottoms, i: i)
+    let entityId: EntityId = componentEntityAt(this: world.anchorBottoms, i: i)
     let anchor: AnchorBottom = componentDataAt(this: world.anchorBottoms, i: i)
-    if anchor.enabled and componentHas(this: world.rects, entity: entity) {
-      let r: Rect = componentGet(this: world.rects, entity: entity)
+    if anchor.enabled and componentHas(this: world.rects, entityId: entityId) {
+      let r: Rect = componentGet(this: world.rects, entityId: entityId)
       let wantedY: Float = world.layoutH - r.size.y - bottomInset
       var currentY: Float = wantedY - 1.0
-      if componentHas(this: world.offsets, entity: entity) {
-        currentY = componentGet(this: world.offsets, entity: entity).delta.y
+      if componentHas(this: world.offsets, entityId: entityId) {
+        currentY = componentGet(this: world.offsets, entityId: entityId).delta.y
       }
       if currentY is not wantedY {
         let off: Offset = { delta: Vec2 { x: 0.0, y: wantedY } }
-        componentSet(this: world.offsets, entity: entity, data: off)
+        componentSet(this: world.offsets, entityId: entityId, data: off)
       }
     }
     i = i + 1
@@ -52,17 +52,17 @@ func layerTagSystem(world: mod UiWorld) pub {
   let n: Int = componentCount(this: world.layerTags)
   var i: Int = 0
   loop i < n {
-    let entity: EntityId = componentEntityAt(this: world.layerTags, i: i)
-    if componentHas(this: world.layerRefs, entity: entity) is false {
+    let entityId: EntityId = componentEntityAt(this: world.layerTags, i: i)
+    if componentHas(this: world.layerRefs, entityId: entityId) is false {
       let tag: LayerTag = componentDataAt(this: world.layerTags, i: i)
-      setLayerById(world: world, entity: entity, id: tag.id)
+      setLayerById(world: world, entityId: entityId, id: tag.id)
     }
     i = i + 1
   }
 }
 
-func setTabSpriteTint(world: mod UiWorld, entity: view EntityId, tint: view RgbaColor) {
-  let sp: Sprite = componentGet(this: world.sprites, entity: entity)
+func setTabSpriteTint(world: mod UiWorld, entityId: view EntityId, tint: view RgbaColor) {
+  let sp: Sprite = componentGet(this: world.sprites, entityId: entityId)
   if sp.tint.r is tint.r and sp.tint.g is tint.g and sp.tint.b is tint.b and sp.tint.a is tint.a {
     ret
   }
@@ -75,16 +75,16 @@ func setTabSpriteTint(world: mod UiWorld, entity: view EntityId, tint: view Rgba
     nineSlice: sp.nineSlice
     hasNineSlice: sp.hasNineSlice
   }
-  componentSet(this: world.sprites, entity: entity, data: updated)
+  componentSet(this: world.sprites, entityId: entityId, data: updated)
 }
 
-func setTabTextStyle(world: mod UiWorld, entity: view EntityId, styleId: view String) {
-  let t: Text = componentGet(this: world.texts, entity: entity)
+func setTabTextStyle(world: mod UiWorld, entityId: view EntityId, styleId: view String) {
+  let t: Text = componentGet(this: world.texts, entityId: entityId)
   if t.styleId is styleId {
     ret
   }
   let updated: Text = { text: "{t.text}", styleId: "{styleId}", wrapWidthMode: t.wrapWidthMode }
-  componentSet(this: world.texts, entity: entity, data: updated)
+  componentSet(this: world.texts, entityId: entityId, data: updated)
 }
 
 func navTabsSystem(dockSystem: view DockSystem, world: mod UiWorld, activeTab: Screen) pub {
@@ -106,25 +106,25 @@ func navTabsSystem(dockSystem: view DockSystem, world: mod UiWorld, activeTab: S
         tint = activeTint
         style = "tabActive"
       }
-      if componentHas(this: world.childrens, entity: tab) {
+      if componentHas(this: world.childrens, entityId: tab) {
         let kids: List(EntityId) = List.create(EntityId, cap: 4)
-        let ch: view Children => componentView(this: world.childrens, entity: tab)
+        let ch: view Children => componentView(this: world.childrens, entityId: tab)
         var k: Int = 0
         loop k < ch.ids.length {
           kids.add(value: rae_ext_rae_buf_get(buf: ch.ids.data, index: k))
           k = k + 1
         }
         loop let child: view EntityId in kids {
-          if componentHas(this: world.sprites, entity: child) {
-            setTabSpriteTint(world: world, entity: child, tint: tint)
+          if componentHas(this: world.sprites, entityId: child) {
+            setTabSpriteTint(world: world, entityId: child, tint: tint)
           }
-          if componentHas(this: world.texts, entity: child) {
-            setTabTextStyle(world: world, entity: child, styleId: style)
+          if componentHas(this: world.texts, entityId: child) {
+            setTabTextStyle(world: world, entityId: child, styleId: style)
           }
         }
       }
-      if componentHas(this: world.widgetStates, entity: tab) {
-        let ws: WidgetState = componentGet(this: world.widgetStates, entity: tab)
+      if componentHas(this: world.widgetStates, entityId: tab) {
+        let ws: WidgetState = componentGet(this: world.widgetStates, entityId: tab)
         if ws.selected is not active {
           let updated: WidgetState = {
             enabled: ws.enabled
@@ -132,7 +132,7 @@ func navTabsSystem(dockSystem: view DockSystem, world: mod UiWorld, activeTab: S
             loading: ws.loading
             error: ws.error
           }
-          componentSet(this: world.widgetStates, entity: tab, data: updated)
+          componentSet(this: world.widgetStates, entityId: tab, data: updated)
         }
       }
       i = i + 1

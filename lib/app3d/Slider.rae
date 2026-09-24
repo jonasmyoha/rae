@@ -87,19 +87,19 @@ func fractionForX(
   trackId: view String
   x: view Float
 ) ret Float {
-  let entity: EntityId = nodeEntityFor(world: world, nodeId: trackId)
-  if isNone(this: entity) {
+  let entityId: EntityId = nodeEntityFor(world: world, nodeId: trackId)
+  if isNone(this: entityId) {
     ret 0.0
   }
-  if componentHas(this: uiSystems.layout.computedRects, entity: entity) is false {
+  if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) is false {
     ret 0.0
   }
-  let r: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: entity)
+  let r: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entityId: entityId)
   if r.size.x <= 0.0 {
     ret 0.0
   }
   # Screen x, for the same reason as pointInNode.
-  let sx: Float = nodeScreenX(world: world, uiSystems: uiSystems, entity: entity)
+  let sx: Float = nodeScreenX(world: world, uiSystems: uiSystems, entityId: entityId)
   ret sliderClamp(value: (x - sx) / r.size.x, lo: 0.0, hi: 1.0)
 }
 
@@ -125,10 +125,10 @@ func updateSlider(
   let before: Float = s.value
 
   if input.pointer.pressed {
-    let entity: EntityId = nodeEntityFor(world: world, nodeId: s.trackId)
-    if isNone(this: entity) is false {
-      if componentHas(this: uiSystems.layout.computedRects, entity: entity) {
-        let r: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: entity)
+    let entityId: EntityId = nodeEntityFor(world: world, nodeId: s.trackId)
+    if isNone(this: entityId) is false {
+      if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) {
+        let r: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entityId: entityId)
         # A press anywhere on the track jumps the handle there and begins a
         # drag, rather than requiring the handle itself to be hit — the handle
         # is a few pixels wide and the track is the affordance.
@@ -169,19 +169,19 @@ func applySliderFill(s: view Slider, world: mod UiWorld, uiSystems: mod UiSystem
   if isNone(this: track) {
     ret
   }
-  if componentHas(this: uiSystems.layout.computedRects, entity: track) is false {
+  if componentHas(this: uiSystems.layout.computedRects, entityId: track) is false {
     ret
   }
-  let tr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: track)
+  let tr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entityId: track)
   let fill: EntityId = nodeEntityFor(world: world, nodeId: s.fillId)
   if isNone(this: fill) {
     ret
   }
-  if componentHas(this: uiSystems.layout.computedRects, entity: fill) is false {
+  if componentHas(this: uiSystems.layout.computedRects, entityId: fill) is false {
     ret
   }
   let want: Float = tr.size.x * fraction(s: s)
-  let fr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: fill)
+  let fr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entityId: fill)
   # Only write on a real change: componentSet bumps the table generation whether
   # or not the value differs, and a per-frame write to an unchanged width keeps
   # the render cache permanently dirty (#407).
@@ -196,7 +196,7 @@ func applySliderFill(s: view Slider, world: mod UiWorld, uiSystems: mod UiSystem
     position: { x: fr.position.x, y: fr.position.y }
     size: { x: want, y: fr.size.y }
   }
-  componentSet(this: uiSystems.layout.computedRects, entity: fill, data: next)
+  componentSet(this: uiSystems.layout.computedRects, entityId: fill, data: next)
 }
 
 # ----- node-based slider ----------------------------------------------
@@ -212,28 +212,28 @@ func nodeComputedRect(
   nodeId: view String
   out: mod ComputedRect
 ) ret Bool {
-  let entity: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
-  if isNone(this: entity) {
+  let entityId: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
+  if isNone(this: entityId) {
     ret false
   }
-  if componentHas(this: uiSystems.layout.computedRects, entity: entity) is false {
+  if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) is false {
     ret false
   }
-  out = componentGet(this: uiSystems.layout.computedRects, entity: entity)
+  out = componentGet(this: uiSystems.layout.computedRects, entityId: entityId)
   ret true
 }
 
 func debugNodeRect(world: view UiWorld, uiSystems: view UiSystems, nodeId: view String) pub {
-  let entity: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
-  if isNone(this: entity) {
+  let entityId: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
+  if isNone(this: entityId) {
     log("[slider] {nodeId}: NO ENTITY")
     ret
   }
-  if componentHas(this: uiSystems.layout.computedRects, entity: entity) is false {
+  if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) is false {
     log("[slider] {nodeId}: no ComputedRect")
     ret
   }
-  let r: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: entity)
+  let r: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entityId: entityId)
   log("[slider] {nodeId}: x={r.position.x} y={r.position.y} w={r.size.x} h={r.size.y}")
 }
 
@@ -244,24 +244,32 @@ func debugNodeRect(world: view UiWorld, uiSystems: view UiSystems, nodeId: view 
 # compares screen coordinates to local ones, so a press is never inside and the
 # control is silently inert. uiHitTest gets this right (wt.position.x + cr.size.x) and is the
 # reference; these helpers now match it.
-func nodeScreenX(world: view UiWorld, uiSystems: view UiSystems, entity: view EntityId) ret Float {
-  if componentHas(this: uiSystems.transform2d.worldTransforms, entity: entity) is false {
+func nodeScreenX(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+) ret Float {
+  if componentHas(this: uiSystems.transform2d.worldTransforms, entityId: entityId) is false {
     ret 0.0
   }
   let wt: WorldTransform2D = componentGet(
     this: uiSystems.transform2d.worldTransforms
-    entity: entity
+    entityId: entityId
   )
   ret wt.position.x
 }
 
-func nodeScreenY(world: view UiWorld, uiSystems: view UiSystems, entity: view EntityId) ret Float {
-  if componentHas(this: uiSystems.transform2d.worldTransforms, entity: entity) is false {
+func nodeScreenY(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+) ret Float {
+  if componentHas(this: uiSystems.transform2d.worldTransforms, entityId: entityId) is false {
     ret 0.0
   }
   let wt: WorldTransform2D = componentGet(
     this: uiSystems.transform2d.worldTransforms
-    entity: entity
+    entityId: entityId
   )
   ret wt.position.y
 }
@@ -273,16 +281,16 @@ func pointInNode(
   x: view Float
   y: view Float
 ) pub ret Bool {
-  let entity: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
-  if isNone(this: entity) {
+  let entityId: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
+  if isNone(this: entityId) {
     ret false
   }
-  if componentHas(this: uiSystems.layout.computedRects, entity: entity) is false {
+  if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) is false {
     ret false
   }
-  let r: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: entity)
-  let sx: Float = nodeScreenX(world: world, uiSystems: uiSystems, entity: entity)
-  let sy: Float = nodeScreenY(world: world, uiSystems: uiSystems, entity: entity)
+  let r: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entityId: entityId)
+  let sx: Float = nodeScreenX(world: world, uiSystems: uiSystems, entityId: entityId)
+  let sy: Float = nodeScreenY(world: world, uiSystems: uiSystems, entityId: entityId)
   if x < sx or x > sx + r.size.x {
     ret false
   }
@@ -299,19 +307,19 @@ func fractionAcrossNode(
   nodeId: view String
   x: view Float
 ) pub ret Float {
-  let entity: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
-  if isNone(this: entity) {
+  let entityId: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
+  if isNone(this: entityId) {
     ret 0.0
   }
-  if componentHas(this: uiSystems.layout.computedRects, entity: entity) is false {
+  if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) is false {
     ret 0.0
   }
-  let r: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: entity)
+  let r: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entityId: entityId)
   if r.size.x <= 0.0 {
     ret 0.0
   }
   # Screen x, for the same reason as pointInNode.
-  let sx: Float = nodeScreenX(world: world, uiSystems: uiSystems, entity: entity)
+  let sx: Float = nodeScreenX(world: world, uiSystems: uiSystems, entityId: entityId)
   ret sliderClamp(value: (x - sx) / r.size.x, lo: 0.0, hi: 1.0)
 }
 
@@ -330,14 +338,14 @@ func setNodeFractionWidth(
   if isNone(this: te) or isNone(this: fe) {
     ret
   }
-  if componentHas(this: uiSystems.layout.computedRects, entity: te) is false {
+  if componentHas(this: uiSystems.layout.computedRects, entityId: te) is false {
     ret
   }
-  if componentHas(this: uiSystems.layout.computedRects, entity: fe) is false {
+  if componentHas(this: uiSystems.layout.computedRects, entityId: fe) is false {
     ret
   }
-  let tr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: te)
-  let fr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: fe)
+  let tr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entityId: te)
+  let fr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entityId: fe)
   let want: Float = tr.size.x * sliderClamp(value: fraction, lo: 0.0, hi: 1.0)
   var delta: Float = want - fr.size.x
   if delta < 0.0 {
@@ -350,14 +358,14 @@ func setNodeFractionWidth(
     position: { x: tr.position.x, y: fr.position.y }
     size: { x: want, y: fr.size.y }
   }
-  componentSet(this: uiSystems.layout.computedRects, entity: fe, data: next)
-  if componentHas(this: world.rects, entity: fe) {
-    let ar: Rect = componentGet(this: world.rects, entity: fe)
+  componentSet(this: uiSystems.layout.computedRects, entityId: fe, data: next)
+  if componentHas(this: world.rects, entityId: fe) {
+    let ar: Rect = componentGet(this: world.rects, entityId: fe)
     let nextAuthored: Rect = {
       position: { x: ar.position.x, y: ar.position.y }
       size: { x: want, y: ar.size.y }
     }
-    componentSet(this: world.rects, entity: fe, data: nextAuthored)
+    componentSet(this: world.rects, entityId: fe, data: nextAuthored)
   }
 }
 
@@ -375,14 +383,14 @@ func centreNodeAtFraction(
   if isNone(this: te) or isNone(this: he) {
     ret
   }
-  if componentHas(this: uiSystems.layout.computedRects, entity: te) is false {
+  if componentHas(this: uiSystems.layout.computedRects, entityId: te) is false {
     ret
   }
-  if componentHas(this: world.rects, entity: he) is false {
+  if componentHas(this: world.rects, entityId: he) is false {
     ret
   }
-  let tr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: te)
-  let hr: Rect = componentGet(this: world.rects, entity: he)
+  let tr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entityId: te)
+  let hr: Rect = componentGet(this: world.rects, entityId: he)
   let f: Float = sliderClamp(value: fraction, lo: 0.0, hi: 1.0)
   # The handle is a CHILD of the track, so its authored x is already relative to
   # the track's origin: the travel is the track's width less the handle's, so it
@@ -406,15 +414,15 @@ func centreNodeAtFraction(
     position: { x: wantX, y: hr.position.y }
     size: { x: hr.size.x, y: hr.size.y }
   }
-  componentSet(this: world.rects, entity: he, data: next)
-  if componentHas(this: uiSystems.layout.computedRects, entity: he) {
-    let cr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: he)
-    let trc: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: te)
+  componentSet(this: world.rects, entityId: he, data: next)
+  if componentHas(this: uiSystems.layout.computedRects, entityId: he) {
+    let cr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entityId: he)
+    let trc: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entityId: te)
     let nextC: ComputedRect = {
       position: { x: trc.position.x + wantX, y: cr.position.y }
       size: { x: cr.size.x, y: cr.size.y }
     }
-    componentSet(this: uiSystems.layout.computedRects, entity: he, data: nextC)
+    componentSet(this: uiSystems.layout.computedRects, entityId: he, data: nextC)
   }
 }
 

@@ -29,10 +29,10 @@ func t2at(
 
 func printWorld3D(
   worlds: view ComponentTable(WorldTransform3D)
-  entity: view EntityId
+  entityId: view EntityId
   label: view String
 ) {
-  let w: WorldTransform3D = componentGet(this: worlds, entity: entity)
+  let w: WorldTransform3D = componentGet(this: worlds, entityId: entityId)
   log(
     "{label}: {w.matrix.m.copyAtFallback(index: 12, fallback: 0.0)} {w.matrix.m.copyAtFallback(
       index: 13
@@ -43,10 +43,10 @@ func printWorld3D(
 
 func printWorld2D(
   worlds: view ComponentTable(WorldTransform2D)
-  entity: view EntityId
+  entityId: view EntityId
   label: view String
 ) {
-  let w: WorldTransform2D = componentGet(this: worlds, entity: entity)
+  let w: WorldTransform2D = componentGet(this: worlds, entityId: entityId)
   log("{label}: pos {w.position.x},{w.position.y} rot {w.rotation} scale {w.scale.x},{w.scale.y}")
 }
 
@@ -61,10 +61,10 @@ func main() {
   let a: EntityId = { index: 2, generation: 0 }
   let a1: EntityId = { index: 3, generation: 0 }
   let lone: EntityId = { index: 9, generation: 0 }
-  componentSet(this: t3, entity: r, data: t3at(x: 10.0, y: 20.0, z: 30.0))
-  componentSet(this: t3, entity: a, data: t3at(x: 1.0, y: 2.0, z: 3.0))
-  componentSet(this: t3, entity: a1, data: t3at(x: 100.0, y: 200.0, z: 300.0))
-  componentSet(this: t3, entity: lone, data: t3at(x: 7.0, y: 8.0, z: 9.0))
+  componentSet(this: t3, entityId: r, data: t3at(x: 10.0, y: 20.0, z: 30.0))
+  componentSet(this: t3, entityId: a, data: t3at(x: 1.0, y: 2.0, z: 3.0))
+  componentSet(this: t3, entityId: a1, data: t3at(x: 100.0, y: 200.0, z: 300.0))
+  componentSet(this: t3, entityId: lone, data: t3at(x: 7.0, y: 8.0, z: 9.0))
   setParent(
     parents: parents3
     childrens: childrens3
@@ -85,10 +85,10 @@ func main() {
     parents: parents3
     childrens: childrens3
   )
-  printWorld3D(worlds: w3, entity: r, label: "3D r")
-  printWorld3D(worlds: w3, entity: a, label: "3D a")
-  printWorld3D(worlds: w3, entity: a1, label: "3D a1")
-  printWorld3D(worlds: w3, entity: lone, label: "3D lone")
+  printWorld3D(worlds: w3, entityId: r, label: "3D r")
+  printWorld3D(worlds: w3, entityId: a, label: "3D a")
+  printWorld3D(worlds: w3, entityId: a1, label: "3D a1")
+  printWorld3D(worlds: w3, entityId: lone, label: "3D lone")
 
   # ----- 2D: r2 -> b -> b1 (translate+scale), and rr -> cc (rotation sum) -----
   var parents2: ComponentTable(Parent) = ComponentTable.create(Parent)
@@ -103,7 +103,7 @@ func main() {
   let cc: EntityId = { index: 5, generation: 0 }
   componentSet(
     this: t2
-    entity: r2
+    entityId: r2
     data: t2at(
       x: 10.0
       y: 20.0
@@ -114,7 +114,7 @@ func main() {
   )
   componentSet(
     this: t2
-    entity: b
+    entityId: b
     data: t2at(
       x: 5.0
       y: 5.0
@@ -125,7 +125,7 @@ func main() {
   )
   componentSet(
     this: t2
-    entity: b1
+    entityId: b1
     data: t2at(
       x: 1.0
       y: 1.0
@@ -136,7 +136,7 @@ func main() {
   )
   componentSet(
     this: t2
-    entity: rr
+    entityId: rr
     data: t2at(
       x: 0.0
       y: 0.0
@@ -147,7 +147,7 @@ func main() {
   )
   componentSet(
     this: t2
-    entity: cc
+    entityId: cc
     data: t2at(
       x: 0.0
       y: 0.0
@@ -182,8 +182,8 @@ func main() {
     parents: parents2
     childrens: childrens2
   )
-  printWorld2D(worlds: w2, entity: r2, label: "2D r2")
-  printWorld2D(worlds: w2, entity: b, label: "2D b")
-  printWorld2D(worlds: w2, entity: b1, label: "2D b1")
-  printWorld2D(worlds: w2, entity: cc, label: "2D cc")
+  printWorld2D(worlds: w2, entityId: r2, label: "2D r2")
+  printWorld2D(worlds: w2, entityId: b, label: "2D b")
+  printWorld2D(worlds: w2, entityId: b1, label: "2D b1")
+  printWorld2D(worlds: w2, entityId: cc, label: "2D cc")
 }

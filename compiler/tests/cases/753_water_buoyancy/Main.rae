@@ -46,11 +46,11 @@ func main() {
   let boat: EntityId = { index: 1, generation: 0 }
   let rock: EntityId = { index: 2, generation: 0 }
   let buoy: EntityId = { index: 3, generation: 0 }
-  componentSet(this: transforms, entity: boat, data: placed(x: 2.0, y: 0.0, z: -9.0))
-  componentSet(this: transforms, entity: rock, data: placed(x: 2.0, y: 0.0, z: -9.0))
-  componentSet(this: transforms, entity: buoy, data: placed(x: 6.0, y: 5.0, z: 40.0))
-  componentSet(this: buoyants, entity: boat, data: Buoyant { offset: 0.3 })
-  componentSet(this: buoyants, entity: buoy, data: Buoyant { offset: 0.0 })
+  componentSet(this: transforms, entityId: boat, data: placed(x: 2.0, y: 0.0, z: -9.0))
+  componentSet(this: transforms, entityId: rock, data: placed(x: 2.0, y: 0.0, z: -9.0))
+  componentSet(this: transforms, entityId: buoy, data: placed(x: 6.0, y: 5.0, z: 40.0))
+  componentSet(this: buoyants, entityId: boat, data: Buoyant { offset: 0.3 })
+  componentSet(this: buoyants, entityId: buoy, data: Buoyant { offset: 0.0 })
 
   buoyancySystem(
     transforms: transforms
@@ -59,9 +59,9 @@ func main() {
     time: 0.0
   )
 
-  let boatNow: Transform3d = componentGet(this: transforms, entity: boat)
-  let rockNow: Transform3d = componentGet(this: transforms, entity: rock)
-  let buoyNow: Transform3d = componentGet(this: transforms, entity: buoy)
+  let boatNow: Transform3d = componentGet(this: transforms, entityId: boat)
+  let rockNow: Transform3d = componentGet(this: transforms, entityId: rock)
+  let buoyNow: Transform3d = componentGet(this: transforms, entityId: buoy)
   # x=2 is the crest of the 8 m wave: surface 2.5, boat rides 0.3 above it.
   check(
     name: "the boat sits on the crest plus its offset"

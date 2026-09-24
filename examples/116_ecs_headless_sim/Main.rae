@@ -79,12 +79,12 @@ func createGameWorld() ret GameWorld {
 # Destroy an entity: clear it from every table then recycle its id. (This is the
 # per-World boilerplate #756/#760 will synthesize; a GameWorld has few tables so
 # it stays short here.)
-func destroyGameEntity(world: mod GameWorld, entity: view EntityId) {
-  componentRemove(this: world.positions, entity: entity)
-  componentRemove(this: world.velocities, entity: entity)
-  componentRemove(this: world.healths, entity: entity)
-  componentRemove(this: world.enemies, entity: entity)
-  freeEntity(this: world.allocator, entity: entity)
+func destroyGameEntity(world: mod GameWorld, entityId: view EntityId) {
+  componentRemove(this: world.positions, entityId: entityId)
+  componentRemove(this: world.velocities, entityId: entityId)
+  componentRemove(this: world.healths, entityId: entityId)
+  componentRemove(this: world.enemies, entityId: entityId)
+  freeEntity(this: world.allocator, entityId: entityId)
 }
 
 # ----- systems -----
@@ -106,8 +106,8 @@ func firstEnemy(world: view GameWorld) ret EntityId {
     let tagged: List(EntityId) = taggedEntities(table: world.enemies)
     loop var i: Int = 0, i < tagged.length, ++i {
       let e: EntityId = rae_ext_rae_buf_get(buf: tagged.data, index: i)
-      if componentHas(this: world.healths, entity: e) {
-        let h: Health = componentGet(this: world.healths, entity: e)
+      if componentHas(this: world.healths, entityId: e) {
+        let h: Health = componentGet(this: world.healths, entityId: e)
         if h.hp > 0 {
           if best.index <= 0 or e.index < best.index {
             best = e
@@ -132,8 +132,8 @@ func combatSystem(world: mod GameWorld) {
 func applyDamageSystem(world: mod GameWorld) {
   loop var i: Int = 0, i < eventCount(this: world.damage), ++i {
     let ev: DamageEvent = eventAt(this: world.damage, i: i)
-    if componentHas(this: world.healths, entity: ev.target) {
-      let h: mod Health => componentMod(this: world.healths, entity: ev.target)
+    if componentHas(this: world.healths, entityId: ev.target) {
+      let h: mod Health => componentMod(this: world.healths, entityId: ev.target)
       h.hp = h.hp - ev.amount
     }
   }
@@ -147,8 +147,8 @@ func cullSystem(world: mod GameWorld) {
     let dead: List(EntityId) = List.create(EntityId, cap: 8)
     loop var i: Int = 0, i < tagged.length, ++i {
       let e: EntityId = rae_ext_rae_buf_get(buf: tagged.data, index: i)
-      if componentHas(this: world.healths, entity: e) {
-        let h: Health = componentGet(this: world.healths, entity: e)
+      if componentHas(this: world.healths, entityId: e) {
+        let h: Health = componentGet(this: world.healths, entityId: e)
         if h.hp <= 0 {
           dead.add(value: e)
         }
@@ -156,7 +156,7 @@ func cullSystem(world: mod GameWorld) {
     }
     loop var i: Int = 0, i < dead.length, ++i {
       let e: EntityId = rae_ext_rae_buf_get(buf: dead.data, index: i)
-      destroyGameEntity(world: world, entity: e)
+      destroyGameEntity(world: world, entityId: e)
     }
   }
 }
@@ -175,8 +175,8 @@ func statsSystem(world: mod GameWorld) {
 }
 
 func heroX(world: view GameWorld, hero: view EntityId) ret Int {
-  if componentHas(this: world.positions, entity: hero) {
-    let p: Position = componentGet(this: world.positions, entity: hero)
+  if componentHas(this: world.positions, entityId: hero) {
+    let p: Position = componentGet(this: world.positions, entityId: hero)
     ret p.x
   }
   ret -1
@@ -307,17 +307,17 @@ func main() {
   let orc: EntityId = allocEntity(this: world.allocator)
   let goblin: EntityId = allocEntity(this: world.allocator)
 
-  componentSet(this: world.positions, entity: hero, data: Position { x: 0 })
-  componentSet(this: world.velocities, entity: hero, data: Velocity { dx: 1 })
-  componentSet(this: world.healths, entity: hero, data: Health { hp: 100 })
+  componentSet(this: world.positions, entityId: hero, data: Position { x: 0 })
+  componentSet(this: world.velocities, entityId: hero, data: Velocity { dx: 1 })
+  componentSet(this: world.healths, entityId: hero, data: Health { hp: 100 })
 
-  componentSet(this: world.positions, entity: orc, data: Position { x: 10 })
-  componentSet(this: world.healths, entity: orc, data: Health { hp: 6 })
-  addTag(table: world.enemies, entity: orc)
+  componentSet(this: world.positions, entityId: orc, data: Position { x: 10 })
+  componentSet(this: world.healths, entityId: orc, data: Health { hp: 6 })
+  addTag(table: world.enemies, entityId: orc)
 
-  componentSet(this: world.positions, entity: goblin, data: Position { x: 20 })
-  componentSet(this: world.healths, entity: goblin, data: Health { hp: 3 })
-  addTag(table: world.enemies, entity: goblin)
+  componentSet(this: world.positions, entityId: goblin, data: Position { x: 20 })
+  componentSet(this: world.healths, entityId: goblin, data: Health { hp: 3 })
+  addTag(table: world.enemies, entityId: goblin)
 
   # Build the schedule ONCE, run it every frame.
   var sched: Schedule = createSchedule()

@@ -32,23 +32,23 @@ type NetPlayer {
 # A player joins: spawn a NetPlayer entity. Generational — a slot freed by an
 # earlier leave is recycled with a bumped generation.
 func netJoin(world: mod GameWorld, remoteId: view Int, role: view Int) ret EntityId {
-  let entity: EntityId = gameWorldAddEntity(world: world)
+  let entityId: EntityId = gameWorldAddEntity(world: world)
   componentSet(
     this: world.netPlayers
-    entity: entity
+    entityId: entityId
     data: NetPlayer { remoteId: remoteId, role: role, controlled: noEntity() }
   )
-  ret entity
+  ret entityId
 }
 
 # A player leaves: drop the NetPlayer component, then free the entity slot so a
 # later join recycles it (and stale handles to the departed player read dead).
-func netLeave(world: mod GameWorld, entity: view EntityId) {
+func netLeave(world: mod GameWorld, entityId: view EntityId) {
   # #760: clear every component row for the leaving entity (generic reflection
   # sweep) so a recycled index can never read stale data from ANY table, then
   # free the slot. Replaces the single hand-listed netPlayers remove.
-  clearEntityComponents(world: world, entity: entity)
-  freeEntity(this: world.allocator, entity: entity)
+  clearEntityComponents(world: world, entityId: entityId)
+  freeEntity(this: world.allocator, entityId: entityId)
 }
 
 # Count of joined remote players (live NetPlayer entities).
@@ -82,11 +82,11 @@ func seamSelfTest(world: mod GameWorld) {
   let a: EntityId = netJoin(world: world, remoteId: 101, role: 2)
   let b: EntityId = netJoin(world: world, remoteId: 102, role: 2)
   let c: EntityId = netJoin(world: world, remoteId: 103, role: 2)
-  netLeave(world: world, entity: b)
+  netLeave(world: world, entityId: b)
   let d: EntityId = netJoin(world: world, remoteId: 104, role: 2)
   let recycledIndex: Bool = d.index is b.index
   let bumpedGeneration: Bool = d.generation is b.generation + 1
-  let departedDead: Bool = allocatorIsAlive(this: world.allocator, entity: b) is false
+  let departedDead: Bool = allocatorIsAlive(this: world.allocator, entityId: b) is false
   let netOk: Bool = recycledIndex and bumpedGeneration and departedDead
 
   let body: EntityId = spawnPhysicsBody(
@@ -95,16 +95,16 @@ func seamSelfTest(world: mod GameWorld) {
     velocity: Vec3.create(x: 1.0, y: 0.0, z: 0.0)
     gravityScale: 1.0
   )
-  let before: Transform3D = componentGet(this: world.transforms, entity: body)
+  let before: Transform3D = componentGet(this: world.transforms, entityId: body)
   physicsStepWorld(world: world, fixedDt: 0.1)
-  let after: Transform3D = componentGet(this: world.transforms, entity: body)
+  let after: Transform3D = componentGet(this: world.transforms, entityId: body)
   # x advances by velocity*dt, z falls under gravity — both must have moved.
   let physicsOk: Bool = after.position.x > before.position.x and after.position.z < before.position.z
 
-  netLeave(world: world, entity: a)
-  netLeave(world: world, entity: c)
-  netLeave(world: world, entity: d)
-  despawnPhysicsBody(world: world, entity: body)
+  netLeave(world: world, entityId: a)
+  netLeave(world: world, entityId: c)
+  netLeave(world: world, entityId: d)
+  despawnPhysicsBody(world: world, entityId: body)
   log(
     "[seamtest] net recycle idx={b.index} gen {b.generation}->{d.generation} netOk={netOk} physicsOk={physicsOk}"
   )

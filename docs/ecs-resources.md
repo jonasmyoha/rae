@@ -11,7 +11,7 @@ A **World** holds two kinds of state:
 ```rae
 type GameWorld {
   allocator: EntityAllocator          # entity core (#706)
-  positions:  ComponentTable(Position) # a COMPONENT (per-entity)
+  positions:  ComponentTable(Position) # a COMPONENT (per-entityId)
   frame:      Frame                    # a RESOURCE (one per world)
   input:      Input                    # a RESOURCE
 }

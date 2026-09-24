@@ -34,13 +34,13 @@ func hasHistorySystem(homeSystem: mod HomeSystem, world: mod UiWorld, state: vie
   let n: Int = componentCount(this: homeSystem.hasHistories)
   var i: Int = 0
   loop i < n {
-    let entity: EntityId = componentEntityAt(this: homeSystem.hasHistories, i: i)
+    let entityId: EntityId = componentEntityAt(this: homeSystem.hasHistories, i: i)
     let binding: HasHistory = componentDataAt(this: homeSystem.hasHistories, i: i)
     if binding.builtRevision is not revision {
       let active: Active = { value: hasEntries }
-      componentSet(this: world.actives, entity: entity, data: active)
+      componentSet(this: world.actives, entityId: entityId, data: active)
       let built: HasHistory = { builtRevision: revision }
-      componentSet(this: homeSystem.hasHistories, entity: entity, data: built)
+      componentSet(this: homeSystem.hasHistories, entityId: entityId, data: built)
     }
     i = i + 1
   }

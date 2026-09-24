@@ -350,11 +350,11 @@ func documentDesignSize(document: mod SceneDocument) {
 func seedListViewRows(world: mod UiWorld) {
   let listCount: Int = componentCount(this: world.listViews)
   loop var i: Int = 0, i < listCount, ++i {
-    let entity: EntityId = componentEntityAt(this: world.listViews, i: i)
-    if componentHas(this: world.listViewDatas, entity: entity) {
+    let entityId: EntityId = componentEntityAt(this: world.listViews, i: i)
+    if componentHas(this: world.listViewDatas, entityId: entityId) {
       continue
     }
-    let list: ListView = componentGet(this: world.listViews, entity: entity)
+    let list: ListView = componentGet(this: world.listViews, entityId: entityId)
     var rows: List(ListViewRow) = List.create(ListViewRow, cap: listViewSampleRows)
     loop var row: Int = 0, row < listViewSampleRows, ++row {
       var keys: List(String) = List.create(String, cap: list.bindings.length + 1)
@@ -369,7 +369,11 @@ func seedListViewRows(world: mod UiWorld) {
       }
       rows.add(value: ListViewRow { keys: own keys, values: own values })
     }
-    componentSet(this: world.listViewDatas, entity: entity, data: ListViewData { rows: own rows })
+    componentSet(
+      this: world.listViewDatas
+      entityId: entityId
+      data: ListViewData { rows: own rows }
+    )
   }
 }
 
@@ -387,10 +391,12 @@ func snapshotDocumentScrolls(world: view UiWorld) ret ScrollSnapshot {
   }
   let count: Int = componentCount(this: world.scrollStates)
   loop var i: Int = 0, i < count, ++i {
-    let entity: EntityId = componentEntityAt(this: world.scrollStates, i: i)
-    if componentHas(this: world.nodeIdComponents, entity: entity) {
+    let entityId: EntityId = componentEntityAt(this: world.scrollStates, i: i)
+    if componentHas(this: world.nodeIdComponents, entityId: entityId) {
       let state: ScrollState = componentDataAt(this: world.scrollStates, i: i)
-      snapshot.nodeIds.add(value: "{componentGet(this: world.nodeIdComponents, entity: entity).id}")
+      snapshot.nodeIds.add(
+        value: "{componentGet(this: world.nodeIdComponents, entityId: entityId).id}"
+      )
       snapshot.offsets.add(value: state.y)
     }
   }
@@ -401,9 +407,9 @@ func restoreDocumentScrolls(world: mod UiWorld, snapshot: view ScrollSnapshot) {
   loop var i: Int = 0, i < snapshot.nodeIds.length, ++i {
     if let nodeId: String = snapshot.nodeIds.copyAt(index: i) {
       if let raw: Int = world.nodeIds.get(k: "document/{nodeId}") {
-        let entity: EntityId = nodeEntity(world: world, index: raw)
-        if componentHas(this: world.scrollStates, entity: entity) {
-          let state: mod ScrollState => componentMod(this: world.scrollStates, entity: entity)
+        let entityId: EntityId = nodeEntity(world: world, index: raw)
+        if componentHas(this: world.scrollStates, entityId: entityId) {
+          let state: mod ScrollState => componentMod(this: world.scrollStates, entityId: entityId)
           state.y = snapshot.offsets.copyAtFallback(index: i, fallback: 0.0)
         }
       }
@@ -467,12 +473,12 @@ func tagMountedNodeIds(world: mod UiWorld, scene: view Scene, pageId: view Strin
   loop var i: Int = 0, i < scene.nodes.length, ++i {
     let node: view SceneNode => nodeAt(this: scene, idx: i)
     if let raw: Int = world.nodeIds.get(k: "{pageId}/{node.nodeId}") {
-      let entity: EntityId = nodeEntity(world: world, index: raw)
-      if componentHas(this: world.nodeIdComponents, entity: entity) is false {
+      let entityId: EntityId = nodeEntity(world: world, index: raw)
+      if componentHas(this: world.nodeIdComponents, entityId: entityId) is false {
         let nodeId: NodeId = { id: "{node.nodeId}" }
-        componentSet(this: world.nodeIdComponents, entity: entity, data: own nodeId)
+        componentSet(this: world.nodeIdComponents, entityId: entityId, data: own nodeId)
         let name: Name = { label: "{node.nodeId}" }
-        componentSet(this: world.names, entity: entity, data: own name)
+        componentSet(this: world.names, entityId: entityId, data: own name)
       }
     }
   }
@@ -576,7 +582,7 @@ func documentMountSystem(
     w: document.columnW
     h: document.designH
   )
-  setLayerById(world: world, entity: document.pageRoot, id: "document")
+  setLayerById(world: world, entityId: document.pageRoot, id: "document")
   # The complete reachable scene graph was registered during preparation, so
   # the resolver can safely mount nested instances in its own depth loop.
   resolveSceneInstances(

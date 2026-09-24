@@ -1,7 +1,7 @@
 # Materialise a parsed `Scene` into ECS state on a `UiWorld`.
 #
 # Three passes:
-# 1. allocate one entity per SceneNode and register `nodeId → entity`
+# 1. allocate one entity per SceneNode and register `nodeId → entityId`
 #    in `world.nodeIds` so children can resolve.
 # 2. apply each node's component bag via `applyComponentByName`. The
 #    "Children" key is special-cased and skipped here.
@@ -43,7 +43,7 @@ func loadScene(world: mod UiWorld, uiSystems: view UiSystems, scene: view Scene)
 # in `world.nodeIds`. Use `pageId: ""` for the unscoped path (the
 # default rebuild-only flow). The scene's root entity is returned and
 # also tagged with `PageRoot { id: pageId }` when `pageId` is non-empty,
-# so `pageOf(uiSystems: uiSystems, world, entity)` can walk back up to find the owning page.
+# so `pageOf(uiSystems: uiSystems, world, entityId)` can walk back up to find the owning page.
 func loadSceneIntoPage(
   world: mod UiWorld
   uiSystems: view UiSystems
@@ -138,13 +138,13 @@ func loadSceneIntoPage(
       }
       if isReachable {
         let node: view SceneNode => nodeAt(this: scene, idx: i)
-        let entity: EntityId = createEntity(world: world)
-        appendEntityListSL(lst: entitiesByNodeIndex, value: entity)
+        let entityId: EntityId = createEntity(world: world)
+        appendEntityListSL(lst: entitiesByNodeIndex, value: entityId)
         if pageId.length() is 0 {
-          nodeIdsMap.set(k: node.nodeId, value: entity.index)
+          nodeIdsMap.set(k: node.nodeId, value: entityId.index)
         } else {
           let key: String = pageScopedKey(pageId: pageId, nodeId: node.nodeId)
-          nodeIdsMap.set(k: key, value: entity.index)
+          nodeIdsMap.set(k: key, value: entityId.index)
         }
       } else {
         let placeholder: EntityId = noEntity()
@@ -165,21 +165,21 @@ func loadSceneIntoPage(
         j = j + 1
       } else {
         let node: view SceneNode => nodeAt(this: scene, idx: j)
-        let entity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: j)
+        let entityId: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: j)
 
         # Always tag the entity with NodeId + Name (label = nodeId by default)
         # so the dump and overrides can identify it without reading the
         # component bag. NodeId from the bag (if present) wins.
         let defaultNodeId: NodeId = { id: node.nodeId }
-        componentSet(this: world.nodeIdComponents, entity: entity, data: defaultNodeId)
+        componentSet(this: world.nodeIdComponents, entityId: entityId, data: defaultNodeId)
         let defaultName: Name = { label: node.nodeId }
-        componentSet(this: world.names, entity: entity, data: defaultName)
+        componentSet(this: world.names, entityId: entityId, data: defaultName)
         let source: SceneSource = {
           sceneId: "{scene.sceneId}"
           nodeId: "{node.nodeId}"
           root: false
         }
-        componentSet(this: world.sceneSources, entity: entity, data: source)
+        componentSet(this: world.sceneSources, entityId: entityId, data: source)
 
         # Walk the node's component bag in declaration order — or, when the
         # node lists `bundles`, its EXPANSION (ui/SceneBundles): the bundles'
@@ -188,7 +188,7 @@ func loadSceneIntoPage(
         if Json.field(doc: docView, this: bag, key: bundlesKey) >= 0 {
           applyExpandedBag(
             world: world
-            entity: entity
+            entityId: entityId
             local: ownBundles
             doc: docView
             bag: bag
@@ -212,7 +212,7 @@ func loadSceneIntoPage(
             let valueAtKey: JsonValue = Json.objectValueAt(doc: docView, this: bag, idx: k)
             applyComponentByName(
               world: world
-              entity: entity
+              entityId: entityId
               name: key
               doc: docView
               val: valueAtKey
@@ -275,7 +275,7 @@ func loadSceneIntoPage(
       var copiedId: String = ""
       copiedId = copiedId.concat(other: pageId)
       let pr: PageRoot = { id: own copiedId }
-      componentSet(this: world.pageRoots, entity: rootEntity, data: own pr)
+      componentSet(this: world.pageRoots, entityId: rootEntity, data: own pr)
     }
     ret rootEntity
   }
@@ -309,8 +309,8 @@ func resolveSceneInstances(
     let n: Int = componentCount(this: world.sceneInstances)
     var i: Int = 0
     loop i < n {
-      let entity: EntityId = componentEntityAt(this: world.sceneInstances, i: i)
-      let inst: SceneInstance = componentGet(this: world.sceneInstances, entity: entity)
+      let entityId: EntityId = componentEntityAt(this: world.sceneInstances, i: i)
+      let inst: SceneInstance = componentGet(this: world.sceneInstances, entityId: entityId)
       if inst.sceneId.length() > 0 {
         let idx: Int = sceneRegistryIndex(reg: registry, key: inst.sceneId)
         if idx >= 0 {
@@ -342,13 +342,13 @@ func resolveSceneInstances(
           mountSceneInstanceIntoPage(
             world: world
             uiSystems: uiSystems
-            mountEntity: entity
+            mountEntity: entityId
             scene: scene
             overrides: overrides
             pageId: pageId
           )
           # Clear the marker so the next loop pass doesn't re-mount this entity.
-          componentRemove(this: world.sceneInstances, entity: entity)
+          componentRemove(this: world.sceneInstances, entityId: entityId)
           progressed = true
         } else {
           if world.scenePolicy.unknownComponents is UnknownComponentPolicy.report {
@@ -356,9 +356,9 @@ func resolveSceneInstances(
             # the instance node becomes a red sentinel block so the gap is
             # visible, and the marker is cleared so this pass does not spin on
             # it. Under `fail` (the default) it is left unmounted, as before.
-            var nodeLabel: String = "{entity.index}"
-            if componentHas(this: world.nodeIdComponents, entity: entity) {
-              nodeLabel = "{componentGet(this: world.nodeIdComponents, entity: entity).id}"
+            var nodeLabel: String = "{entityId.index}"
+            if componentHas(this: world.nodeIdComponents, entityId: entityId) {
+              nodeLabel = "{componentGet(this: world.nodeIdComponents, entityId: entityId).id}"
             }
             reportSceneDiagnostic(
               diagnostics: world.sceneDiagnostics
@@ -368,8 +368,8 @@ func resolveSceneInstances(
               name: inst.sceneId
               message: "no sub-scene registered as {inst.sceneId}"
             )
-            paintMissingSubSceneSentinel(world: world, entity: entity)
-            componentRemove(this: world.sceneInstances, entity: entity)
+            paintMissingSubSceneSentinel(world: world, entityId: entityId)
+            componentRemove(this: world.sceneInstances, entityId: entityId)
             progressed = true
           }
         }
@@ -385,7 +385,7 @@ func resolveSceneInstances(
 
 # The visible failure for an unresolved SceneInstance under `report`: a red
 # block in the node's own Rect (the same signal 106's mountOrError paints).
-func paintMissingSubSceneSentinel(world: mod UiWorld, entity: view EntityId) {
+func paintMissingSubSceneSentinel(world: mod UiWorld, entityId: view EntityId) {
   let sentinel: Shape = {
     kind: ShapeKind.roundedRect
     fill: RgbaColor { r: 220, g: 32, b: 48, a: 255 }
@@ -397,7 +397,7 @@ func paintMissingSubSceneSentinel(world: mod UiWorld, entity: view EntityId) {
     strokeGap: 0.0
     radius: 8.0
   }
-  componentSet(this: world.shapes, entity: entity, data: sentinel)
+  componentSet(this: world.shapes, entityId: entityId, data: sentinel)
 }
 
 # Diagnostic helper used by tests and the eventual editor: dump the
@@ -413,14 +413,14 @@ func dumpScene(world: view UiWorld, uiSystems: view UiSystems, scene: view Scene
     # Resolve via the world's nodeIds map (more authoritative than our
     # local list — covers later runtime additions too).
     if let entityRaw: Int = world.nodeIds.get(k: node.nodeId) {
-      let entity: EntityId = nodeEntity(world: world, index: entityRaw)
+      let entityId: EntityId = nodeEntity(world: world, index: entityRaw)
       var parentStr: String = "(root)"
-      if componentHas(this: uiSystems.hierarchy.parents, entity: entity) {
-        let pl: Parent = componentGet(this: uiSystems.hierarchy.parents, entity: entity)
+      if componentHas(this: uiSystems.hierarchy.parents, entityId: entityId) {
+        let pl: Parent = componentGet(this: uiSystems.hierarchy.parents, entityId: entityId)
         parentStr = "parent=ent{pl.parent.index}"
       }
-      var comps: String = componentNamesFor(world: world, entity: entity)
-      log("  [{node.nodeId}] ent={entity.index} {parentStr} comps=[{comps}]")
+      var comps: String = componentNamesFor(world: world, entityId: entityId)
+      log("  [{node.nodeId}] ent={entityId.index} {parentStr} comps=[{comps}]")
     } else {
       log("  [{node.nodeId}] (not in world.nodeIds — skipped)")
     }
@@ -429,83 +429,83 @@ func dumpScene(world: view UiWorld, uiSystems: view UiSystems, scene: view Scene
 }
 
 # Returns a comma-separated list of authored component names attached
-# to `entity`. Order matches `registeredComponentNames()` for stable
+# to `entityId`. Order matches `registeredComponentNames()` for stable
 # diagnostic output.
-func componentNamesFor(world: view UiWorld, entity: view EntityId) ret String {
+func componentNamesFor(world: view UiWorld, entityId: view EntityId) ret String {
   let parts: List(String) = List.create(String, cap: 8)
-  if componentHas(this: world.rects, entity: entity) {
+  if componentHas(this: world.rects, entityId: entityId) {
     parts.add(value: "Rect")
   }
-  if componentHas(this: world.sizes, entity: entity) {
+  if componentHas(this: world.sizes, entityId: entityId) {
     parts.add(value: "Size")
   }
-  if componentHas(this: world.layouts, entity: entity) {
+  if componentHas(this: world.layouts, entityId: entityId) {
     parts.add(value: "Layout")
   }
-  if componentHas(this: world.paddings, entity: entity) {
+  if componentHas(this: world.paddings, entityId: entityId) {
     parts.add(value: "Padding")
   }
-  if componentHas(this: world.aligns, entity: entity) {
+  if componentHas(this: world.aligns, entityId: entityId) {
     parts.add(value: "Align")
   }
-  if componentHas(this: world.offsets, entity: entity) {
+  if componentHas(this: world.offsets, entityId: entityId) {
     parts.add(value: "Offset")
   }
-  if componentHas(this: world.sprites, entity: entity) {
+  if componentHas(this: world.sprites, entityId: entityId) {
     parts.add(value: "Sprite")
   }
-  if componentHas(this: world.texts, entity: entity) {
+  if componentHas(this: world.texts, entityId: entityId) {
     parts.add(value: "Text")
   }
-  if componentHas(this: world.textShadows, entity: entity) {
+  if componentHas(this: world.textShadows, entityId: entityId) {
     parts.add(value: "TextShadow")
   }
-  if componentHas(this: world.shapes, entity: entity) {
+  if componentHas(this: world.shapes, entityId: entityId) {
     parts.add(value: "Shape")
   }
-  if componentHas(this: world.actives, entity: entity) {
+  if componentHas(this: world.actives, entityId: entityId) {
     parts.add(value: "Active")
   }
-  if componentHas(this: world.opacities, entity: entity) {
+  if componentHas(this: world.opacities, entityId: entityId) {
     parts.add(value: "Opacity")
   }
-  if componentHas(this: world.onClicks, entity: entity) {
+  if componentHas(this: world.onClicks, entityId: entityId) {
     parts.add(value: "OnClick")
   }
-  if componentHas(this: world.buttons, entity: entity) {
+  if componentHas(this: world.buttons, entityId: entityId) {
     parts.add(value: "Button")
   }
-  if componentHas(this: world.widgetIds, entity: entity) {
+  if componentHas(this: world.widgetIds, entityId: entityId) {
     parts.add(value: "WidgetId")
   }
-  if componentHas(this: world.widgetStates, entity: entity) {
+  if componentHas(this: world.widgetStates, entityId: entityId) {
     parts.add(value: "WidgetState")
   }
-  if componentHas(this: world.dataDependencies, entity: entity) {
+  if componentHas(this: world.dataDependencies, entityId: entityId) {
     parts.add(value: "DataDependency")
   }
-  if componentHas(this: world.actionBindings, entity: entity) {
+  if componentHas(this: world.actionBindings, entityId: entityId) {
     parts.add(value: "ActionBinding")
   }
-  if componentHas(this: world.refreshRegions, entity: entity) {
+  if componentHas(this: world.refreshRegions, entityId: entityId) {
     parts.add(value: "RefreshRegion")
   }
-  if componentHas(this: world.names, entity: entity) {
+  if componentHas(this: world.names, entityId: entityId) {
     parts.add(value: "Name")
   }
-  if componentHas(this: world.nodeIdComponents, entity: entity) {
+  if componentHas(this: world.nodeIdComponents, entityId: entityId) {
     parts.add(value: "NodeId")
   }
-  if componentHas(this: world.sceneInstances, entity: entity) {
+  if componentHas(this: world.sceneInstances, entityId: entityId) {
     parts.add(value: "SceneInstance")
   }
-  if componentHas(this: world.textBindings, entity: entity) {
+  if componentHas(this: world.textBindings, entityId: entityId) {
     parts.add(value: "TextBinding")
   }
-  if componentHas(this: world.maskShapes, entity: entity) {
+  if componentHas(this: world.maskShapes, entityId: entityId) {
     parts.add(value: "MaskShape")
   }
-  if componentHas(this: world.childrens, entity: entity) {
+  if componentHas(this: world.childrens, entityId: entityId) {
     parts.add(value: "Children")
   }
   let comma: String = ","

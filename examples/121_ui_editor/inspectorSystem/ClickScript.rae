@@ -35,20 +35,23 @@ type ClickPoint {
   ok: Bool
 }
 
-# The centre of `entity` in screen space, from the transform and computed
+# The centre of `entityId` in screen space, from the transform and computed
 # rect this frame's layout produced — the same numbers the hit test reads.
-func nodeCenterOf(uiSystems: view UiSystems, entity: view EntityId) ret ClickPoint {
-  if componentHas(this: uiSystems.transform2d.worldTransforms, entity: entity) is false {
+func nodeCenterOf(uiSystems: view UiSystems, entityId: view EntityId) ret ClickPoint {
+  if componentHas(this: uiSystems.transform2d.worldTransforms, entityId: entityId) is false {
     ret ClickPoint { x: 0.0, y: 0.0, ok: false }
   }
-  if componentHas(this: uiSystems.layout.computedRects, entity: entity) is false {
+  if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) is false {
     ret ClickPoint { x: 0.0, y: 0.0, ok: false }
   }
   let transform: WorldTransform2D = componentGet(
     this: uiSystems.transform2d.worldTransforms
-    entity: entity
+    entityId: entityId
   )
-  let computed: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: entity)
+  let computed: ComputedRect = componentGet(
+    this: uiSystems.layout.computedRects
+    entityId: entityId
+  )
   ret ClickPoint {
     x: transform.position.x + computed.size.x * transform.scale.x * 0.5
     y: transform.position.y + computed.size.y * transform.scale.y * 0.5
@@ -99,12 +102,12 @@ func runTestClick(
     x = point.sub(start: 0, len: comma).toFloat()
     y = point.sub(start: comma + 1, len: point.length() - comma - 1).toFloat()
   } else {
-    let target: EntityId = findNodeByIdIn(world: world, entity: sceneRoot, nodeId: rest)
+    let target: EntityId = findNodeByIdIn(world: world, entityId: sceneRoot, nodeId: rest)
     if isNone(this: target) {
       log("[ui-editor] click: no node named {rest}")
       ret
     }
-    let center: ClickPoint = nodeCenterOf(uiSystems: uiSystems, entity: target)
+    let center: ClickPoint = nodeCenterOf(uiSystems: uiSystems, entityId: target)
     if center.ok is false {
       log("[ui-editor] click: {rest} has no on-screen rect")
       ret
@@ -171,12 +174,15 @@ func runTestClicks(
 # The exact transformed screen rectangle the marquee compares, with a small
 # exterior pad so floating-point equality at an edge cannot make the fixture
 # platform-sensitive.
-func testMarqueeRectOf(uiSystems: view UiSystems, entity: view EntityId) ret MarqueeRect {
+func testMarqueeRectOf(uiSystems: view UiSystems, entityId: view EntityId) ret MarqueeRect {
   let transform: WorldTransform2D = componentGet(
     this: uiSystems.transform2d.worldTransforms
-    entity: entity
+    entityId: entityId
   )
-  let computed: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: entity)
+  let computed: ComputedRect = componentGet(
+    this: uiSystems.layout.computedRects
+    entityId: entityId
+  )
   let exact: MarqueeRect = marqueeRectBetween(
     x1: transform.position.x
     y1: transform.position.y
@@ -229,12 +235,12 @@ func runTestMarquee(
     )
     ret
   }
-  let target: EntityId = findNodeByIdIn(world: world, entity: sceneRoot, nodeId: rest)
+  let target: EntityId = findNodeByIdIn(world: world, entityId: sceneRoot, nodeId: rest)
   if isNone(this: target) {
     log("[ui-editor] marquee: no node named {rest}")
     ret
   }
-  let band: MarqueeRect = testMarqueeRectOf(uiSystems: uiSystems, entity: target)
+  let band: MarqueeRect = testMarqueeRectOf(uiSystems: uiSystems, entityId: target)
   beginMarquee(
     inspectorSystem: inspectorSystem
     world: world
@@ -331,7 +337,7 @@ func runTestTreeClick(
       mode = SelectMode.range
     }
   }
-  let target: EntityId = findNodeByIdIn(world: world, entity: sceneRoot, nodeId: rest)
+  let target: EntityId = findNodeByIdIn(world: world, entityId: sceneRoot, nodeId: rest)
   if isNone(this: target) {
     log("[ui-editor] tree click: no node named {rest}")
     ret
@@ -339,7 +345,7 @@ func runTestTreeClick(
   applySelect(
     inspectorSystem: inspectorSystem
     world: world
-    entity: target
+    entityId: target
     mode: mode
   )
 }
@@ -375,7 +381,7 @@ func runTestTreeClicks(
       )
       let position: Float = trimmed.sub(start: 11, len: trimmed.length() - 11).toFloat()
       let state: ScrollState = { y: position, velocity: 0 }
-      componentSet(this: world.scrollStates, entity: list, data: state)
+      componentSet(this: world.scrollStates, entityId: list, data: state)
       syncTreePanel(
         chromeSystem: chromeSystem
         world: world
@@ -457,7 +463,7 @@ func runTestTreeClicks(
     "[ui-editor] tree clicks [{script}] -> {selectionNodeIds(
       inspectorSystem: inspectorSystem
       world: world
-    )} active {nodeIdOf(world: world, entity: inspectorSystem.selected)}"
+    )} active {nodeIdOf(world: world, entityId: inspectorSystem.selected)}"
   )
   logInspectorPanel(
     inspectorSystem: inspectorSystem
@@ -502,15 +508,15 @@ func logInspectorPanel(
     world: world
     source: EditorListSource.hierarchy
   )
-  let treeScroll: ScrollState = componentGet(this: world.scrollStates, entity: treeList)
+  let treeScroll: ScrollState = componentGet(this: world.scrollStates, entityId: treeList)
   log("[ui-editor] hierarchy scroll: {treeScroll.y}")
   # Read the rows AFTER the resync above: `treeEntities` is rebuilt there, and
   # logging it earlier reports the previous sync's tree.
   var visible: String = ""
   var labels: String = ""
   loop let row: view EntityId in inspectorSystem.treeEntities {
-    let name: String = nodeIdOf(world: world, entity: row)
-    let label: String = treeRowLabelOf(world: world, entity: row)
+    let name: String = nodeIdOf(world: world, entityId: row)
+    let label: String = treeRowLabelOf(world: world, entityId: row)
     if visible.length() is 0 {
       visible = "{name}"
       labels = "{label}"
@@ -579,13 +585,13 @@ func runTestComponent(
       world: world
       source: EditorListSource.components
     )
-    if componentHas(this: world.scrollRoots, entity: list) {
-      let root: ScrollRoot = componentGet(this: world.scrollRoots, entity: list)
+    if componentHas(this: world.scrollRoots, entityId: list) {
+      let root: ScrollRoot = componentGet(this: world.scrollRoots, entityId: list)
       let position: Float = name.toFloat()
       applyScrollPosition(
         world: world
         uiSystems: uiSystems
-        entity: list
+        entityId: list
         root: root
         position: position
       )

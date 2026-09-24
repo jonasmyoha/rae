@@ -445,16 +445,16 @@ func spotifyBindingSystem(world: mod UiWorld, spotifySystem: mod SpotifySystem) 
   let n: Int = componentCount(this: world.textBindings)
   var i: Int = 0
   loop i < n {
-    let entity: EntityId = componentEntityAt(this: world.textBindings, i: i)
+    let entityId: EntityId = componentEntityAt(this: world.textBindings, i: i)
     let binding: TextBinding = componentDataAt(this: world.textBindings, i: i)
     if binding.key is "spotify.title" {
-      writeTrackText(world: world, entity: entity, value: spotifySystem.title)
+      writeTrackText(world: world, entityId: entityId, value: spotifySystem.title)
     }
     if binding.key is "spotify.artist" {
-      writeTrackText(world: world, entity: entity, value: spotifySystem.artist)
+      writeTrackText(world: world, entityId: entityId, value: spotifySystem.artist)
     }
     if binding.key is "spotify.album" {
-      writeTrackText(world: world, entity: entity, value: spotifySystem.album)
+      writeTrackText(world: world, entityId: entityId, value: spotifySystem.album)
     }
     i = i + 1
   }

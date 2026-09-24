@@ -476,8 +476,8 @@ order, like the click hit test. Two rules keep it honest:
   rows scrolled out of the panel cannot catch the wheel over the panel next
   to them.
 
-Systems read their share with `uiWheelFor(input, entity)`, which is the delta
-if the wheel was routed to `entity` and 0 otherwise. `updateScrollRoot` uses
+Systems read their share with `uiWheelFor(input, entityId)`, which is the delta
+if the wheel was routed to `entityId` and 0 otherwise. `updateScrollRoot` uses
 it for the root it steps. The editor authors `"WheelTarget": {}` on its
 `EditArea`, and `cameraInputSystem` zooms by
 `uiWheelFor(input, editAreaEntity(...))`. So over the hierarchy the list
@@ -681,7 +681,7 @@ and a parent are per-entity facts, and the header already names a
 multi-selection):
 
 ```
-identity: entity=#10 gen 0  node=PlayButton  name=PlayButton  type=(none)
+identity: entityId=#10 gen 0  node=PlayButton  name=PlayButton  type=(none)
           parent=Panel #9   children=PlayIcon #11, PlayLabel #12
 ```
 

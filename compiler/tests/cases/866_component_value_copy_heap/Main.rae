@@ -28,24 +28,24 @@ func discard(value: copy HeapComponent) {
 func main() {
   unsafe {
     var table: ComponentTable(HeapComponent) = createComponentTable(HeapComponent)
-    let entity: EntityId = id(v: 7)
-    componentSet(this: table, entity: entity, data: createHeapComponent(seed: 1))
+    let entityId: EntityId = id(v: 7)
+    componentSet(this: table, entityId: entityId, data: createHeapComponent(seed: 1))
 
     var copies: List(HeapComponent) = List.create(HeapComponent, cap: 2)
-    copies.add(value: componentGet(this: table, entity: entity))
+    copies.add(value: componentGet(this: table, entityId: entityId))
     copies.add(value: componentDataAt(this: table, i: 0))
 
     let first: mod HeapComponent => copies.modAt(index: 0)
     first.items.add(value: "copy-only")
     first.label = "changed-copy"
 
-    let original: view HeapComponent => componentView(this: table, entity: entity)
+    let original: view HeapComponent => componentView(this: table, entityId: entityId)
     log("copies={copies.length} firstItems={first.items.length}")
     log("original={original.label} items={original.items.length}")
 
     # Warm the generated deep-copy/drop paths before taking the allocation
     # baseline, then repeat enough times to expose an unused-copy-param leak.
-    let copySource: HeapComponent = componentGet(this: table, entity: entity)
+    let copySource: HeapComponent = componentGet(this: table, entityId: entityId)
     discard(value: copySource)
     let baseline: Int = rae_ext_rae_mem_stats_outstanding()
     loop var i: Int = 0, i < 1000, ++i {

@@ -151,7 +151,7 @@ sync by index" is always an entity table in disguise.
   `List`s.
 - `Scene3d` (`lib/scene3d.rae:142`) is a hand-rolled SoA: `transforms`,
   `prevTransforms`, `materials`, `meshRenderers`, `sdfPrimitives`, each row keyed
-  by `entity: Int`. It is an ECS with none of the ergonomics — the app must keep
+  by `entityId: Int`. It is an ECS with none of the ergonomics — the app must keep
   `prevTransforms` "in lockstep" and bump `revision` by hand (`:151-155`).
 - 114's "systems" are **modules holding a State struct + update/render over
   Lists** (`terrain.rae:83/307`, `grass.rae:47/89`, `render.rae`, `physics.rae`
@@ -387,7 +387,7 @@ four-place pattern at scale.
 
 ### 112 (metaballs / deferred)
 - **Entities:** each metaball/cube/torus/prop (today `SdfPrimitive`/`MeshRenderer`
-  rows keyed by `entity: Int`, `scene3d.rae:114`).
+  rows keyed by `entityId: Int`, `scene3d.rae:114`).
 - **Components:** `Transform3D`, `PrevTransform3D`, `Material3D`, `SdfPrimitive`,
   `MeshRenderer`; **`cluster: Int` becomes a tag/marker component** queried
   instead of branched on.

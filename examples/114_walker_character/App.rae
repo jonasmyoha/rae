@@ -361,7 +361,7 @@ func createApp() ret App {
             let partEntity: EntityId = gameWorldAddEntity(world: gameWorld)
             gameWorldSetPartRoughness(
               world: gameWorld
-              entity: partEntity
+              entityId: partEntity
               part: PartRoughness { meshId: handle.id, roughness: rough }
             )
             if haveFirstPart is false {
@@ -568,10 +568,10 @@ func createApp() ret App {
     # Its clip/animTime + motion-vector model stay on CharacterSystem (hero-specific
     # transitions); only the controller moves into the world.
     let heroEntity: EntityId = gameWorldAddEntity(world: gameWorld)
-    gameWorldSetController(world: gameWorld, entity: heroEntity, controller: characterController)
+    gameWorldSetController(world: gameWorld, entityId: heroEntity, controller: characterController)
     gameWorldSetTransform(
       world: gameWorld
-      entity: heroEntity
+      entityId: heroEntity
       transform: controllerTransform3D(controller: characterController)
     )
 
@@ -594,10 +594,10 @@ func createApp() ret App {
       # Transform3D synced from the controller. Its render model is derived from
       # the controller (walkerWorldModel) at draw time, so no stored model.
       let cloneEntity: EntityId = gameWorldAddEntity(world: gameWorld)
-      gameWorldSetController(world: gameWorld, entity: cloneEntity, controller: cloneController)
+      gameWorldSetController(world: gameWorld, entityId: cloneEntity, controller: cloneController)
       gameWorldSetAnim(
         world: gameWorld
-        entity: cloneEntity
+        entityId: cloneEntity
         anim: AnimationState {
           clipIndex: crowdClipFor(index: cloneIndex)
           animTime: cloneIndex.toFloat() * 0.4
@@ -605,7 +605,7 @@ func createApp() ret App {
       )
       gameWorldSetTransform(
         world: gameWorld
-        entity: cloneEntity
+        entityId: cloneEntity
         transform: controllerTransform3D(controller: cloneController)
       )
       crowdEntities.add(value: cloneEntity)

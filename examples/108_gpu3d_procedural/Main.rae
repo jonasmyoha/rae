@@ -27,13 +27,13 @@ type Material3d {
 
 # shape: 0 sphere, 1 box, 2 torus. material indexes Scene3d.materials.
 type Renderable3d {
-  entity: Int
+  entityIndex: Int
   shape: Int
   material: Int
 }
 
 # Parallel component arrays are the first extraction-friendly ECS storage.
-# `renderables[i]` points at `transforms[entity]`; materials are shared.
+# `renderables[i]` points at `transforms[entityIndex]`; materials are shared.
 type Scene3d {
   transforms: List(Transform3d)
   renderables: List(Renderable3d)
@@ -77,9 +77,11 @@ func addObject(
   position: view Vec3
   scale: view Vec3
 ) {
-  let entity: Int = scene.transforms.length
+  let entityIndex: Int = scene.transforms.length
   scene.transforms.add(value: Transform3d { position: position, scale: scale })
-  scene.renderables.add(value: Renderable3d { entity: entity, shape: shape, material: material })
+  scene.renderables.add(
+    value: Renderable3d { entityIndex: entityIndex, shape: shape, material: material }
+  )
 }
 
 func buildScene() ret Scene3d {
@@ -202,7 +204,7 @@ func extractScene(
   }
 
   loop let renderable: view Renderable3d in scene.renderables {
-    if let transform: view Transform3d => scene.transforms.viewAt(index: renderable.entity) {
+    if let transform: view Transform3d => scene.transforms.viewAt(index: renderable.entityIndex) {
       packed.add(value: renderable.shape.toFloat())
       pushVec3(buf: packed, value: transform.position)
       pushVec3(buf: packed, value: transform.scale)

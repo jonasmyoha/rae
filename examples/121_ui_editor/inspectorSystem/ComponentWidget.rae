@@ -273,14 +273,14 @@ func tableWidgetRows(
   # node: it is the one whose text is on screen wherever the selection agrees.
   var firstEntity: EntityId = noEntity()
   var commonRaw: List(String) = List.create(String, cap: 8)
-  loop let entity: view EntityId in selection {
-    if componentHas(this: table, entity: entity) is false {
+  loop let entityId: view EntityId in selection {
+    if componentHas(this: table, entityId: entityId) is false {
       continue
     }
-    let value: view T => componentView(this: table, entity: entity)
+    let value: view T => componentView(this: table, entityId: entityId)
     if seen is false {
       seen = true
-      firstEntity = entity
+      firstEntity = entityId
       componentFieldTexts(
         value: value
         spec: spec
@@ -323,7 +323,7 @@ func tableWidgetRows(
       let tag: String = fieldSourceTag(provenance: fieldProvenance(
         sources: sourceScenes
         world: world
-        entity: firstEntity
+        entityId: firstEntity
         sourceWorld: sourceWorld
         component: name
         field: field

@@ -20,7 +20,7 @@ A `World` struct in Rae holds one `ComponentTable(T)` field per component type
 
 1. the struct field — `foos: ComponentTable(Foo)`
 2. the `createUiWorld()` default-construct — `foos: createComponentTable(Foo)`
-3. the `destroyEntity` sweep — `componentRemove(this: world.foos, entity: entity)`
+3. the `destroyEntity` sweep — `componentRemove(this: world.foos, entityId: entityId)`
 4. the registry dispatch arm — `registerComponent(...)` in `registry.rae`
 
 Places 3 and 4 are pure boilerplate mechanically derivable from the field list,
@@ -39,7 +39,7 @@ compiler is the only lever, which is what this task investigates.
 ## Why not auto-generate a `destroyEntity` free function
 
 The most literal reading — the compiler detects "a struct with `ComponentTable`
-fields" and *invents* a `destroyEntity(world, entity)` free function — was
+fields" and *invents* a `destroyEntity(world, entityId)` free function — was
 considered and **rejected**:
 
 - **It collides.** `UiWorld` already defines `destroyEntity` by hand; so would
@@ -54,7 +54,7 @@ considered and **rejected**:
 - **The name is too broad to reserve.** `destroyEntity` as a structural,
   globally-injected builtin has a large collision surface across app code.
 - **Teardown is not purely mechanical.** `destroyEntity` also does
-  `freeEntity(world.allocator, entity)` and carries an *ordering* contract
+  `freeEntity(world.allocator, entityId)` and carries an *ordering* contract
   (Children removed relative to Parent). A fully-synthesized function has to
   encode policy the author currently states explicitly.
 
@@ -66,13 +66,13 @@ policy (allocator free, ordering, the function's public name) in ordinary,
 greppable Rae:
 
 ```rae
-func destroyEntity(world: mod UiWorld, entity: view EntityId) {
-  clearEntityComponents(world: world, entity: entity)   # compiler builtin
-  freeEntity(this: world.allocator, entity: entity)
+func destroyEntity(world: mod UiWorld, entityId: view EntityId) {
+  clearEntityComponents(world: world, entityId: entityId)   # compiler builtin
+  freeEntity(this: world.allocator, entityId: entityId)
 }
 ```
 
-`clearEntityComponents(world: mod W, entity: view EntityId)` is a builtin
+`clearEntityComponents(world: mod W, entityId: view EntityId)` is a builtin
 recognized in sema exactly like `sizeof`/`Array` (`sema.c` AST_EXPR_CALL /
 IDENT site, ~line 2493). It type-checks arg0 to a struct with `ComponentTable`
 fields and arg1 to `EntityId`, then lowers to a synthesized C function

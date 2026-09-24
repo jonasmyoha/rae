@@ -42,20 +42,20 @@ func cursorKindFromName(name: view String) ret Int {
   ret cursorArrow
 }
 
-func cursorKindForEntity(world: view UiWorld, entity: view EntityId) ret Int {
-  if isNone(this: entity) {
+func cursorKindForEntity(world: view UiWorld, entityId: view EntityId) ret Int {
+  if isNone(this: entityId) {
     ret cursorArrow
   }
 
-  if componentHas(this: world.widgetStates, entity: entity) {
-    let state: view WidgetState => componentView(this: world.widgetStates, entity: entity)
+  if componentHas(this: world.widgetStates, entityId: entityId) {
+    let state: view WidgetState => componentView(this: world.widgetStates, entityId: entityId)
     if state.enabled is false {
       ret cursorArrow
     }
   }
 
-  if componentHas(this: world.pointerEvents, entity: entity) {
-    let pe: view PointerEvents => componentView(this: world.pointerEvents, entity: entity)
+  if componentHas(this: world.pointerEvents, entityId: entityId) {
+    let pe: view PointerEvents => componentView(this: world.pointerEvents, entityId: entityId)
     if pe.enabled is false {
       ret cursorArrow
     }
@@ -65,7 +65,7 @@ func cursorKindForEntity(world: view UiWorld, entity: view EntityId) ret Int {
     }
   }
 
-  if componentHas(this: world.onClicks, entity: entity) {
+  if componentHas(this: world.onClicks, entityId: entityId) {
     ret cursorPointer
   }
 
@@ -73,7 +73,7 @@ func cursorKindForEntity(world: view UiWorld, entity: view EntityId) ret Int {
 }
 
 func syncDesktopCursor(world: view UiWorld, hovered: view EntityId, lastKind: mod Int) pub {
-  let kind: Int = cursorKindForEntity(world: world, entity: hovered)
+  let kind: Int = cursorKindForEntity(world: world, entityId: hovered)
   if kind is not lastKind {
     uiSetMouseCursor(kind: kind)
     lastKind = kind
