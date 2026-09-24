@@ -12,7 +12,7 @@
       "Shape": {"kind": "RoundedRect", "fill": "#0A3838", "stroke": "#78E6DC14", "strokeWidth": 1, "radius": 20},
       "Layout": {"type": "Vertical", "gap": 12, "alignCross": "Stretch"},
       "Padding": {"l": 29, "t": 14, "r": 29, "b": 17},
-      "Children": ["InsNodeId", "InsType", "InsComponents", "InsAppComponents", "InsWidgets", "InsParents"]
+      "Children": ["InsNodeId", "InsType", "InsComponents", "InsAppComponents", "InsWidgetsViewport", "InsParents"]
     },
     "InsNodeId": {
       "Rect": {"x": 0, "y": 0, "w": 0, "h": 35},
@@ -88,24 +88,37 @@
       },
       "TextBinding": {"key": "editor.inspector.appComponents", "format": "Plain", "prefix": "", "suffix": ""}
     },
+    "InsWidgetsViewport": {
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 0},
+      "Size": {
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Hug"}
+      },
+      "Overflow": {"mode": "Clip"},
+      "Children": ["InsWidgets"]
+    },
     "InsWidgets": {
       "Rect": {"x": 0, "y": 0, "w": 0, "h": 0},
+      "ScrollRoot": {"axis": "y", "floor": "content", "endInset": 0},
       "ScrollState": {"y": 0},
       "ListView": {
         "itemSceneId": "chrome/ComponentRow",
         "itemKeyField": "id",
         "itemHeight": 26,
         "itemGap": 2,
-        "visibleItemCount": 22,
+        "visibleItemCount": 12,
         "overscanRows": 1,
         "bindings": [
           {"nodeId": "ComponentRow", "component": "Padding", "field": "l", "itemField": "indent"},
-          {"nodeId": "ComponentRow", "component": "OnClick", "field": "actionId", "itemField": "action"},
+          {"nodeId": "ComponentRow", "component": "OnClick", "field": "actionId", "itemField": "rowAction"},
           {"nodeId": "RowName", "component": "Text", "field": "text", "itemField": "name"},
-          {"nodeId": "RowValue", "component": "Text", "field": "text", "itemField": "value"}
+          {"nodeId": "RowValue", "component": "Text", "field": "text", "itemField": "value"},
+          {"nodeId": "RowAction", "component": "Active", "field": "value", "itemField": "actionActive"},
+          {"nodeId": "RowAction", "component": "OnClick", "field": "actionId", "itemField": "action"},
+          {"nodeId": "RowAction", "component": "Text", "field": "text", "itemField": "actionIcon"},
+          {"nodeId": "RowAction", "component": "Shape", "field": "fillSlot", "itemField": "actionFill"}
         ]
       },
-      "Overflow": {"mode": "Clip"},
       "EditorList": {"source": "components"},
       "Size": {
         "w": {"mode": "Fill"},

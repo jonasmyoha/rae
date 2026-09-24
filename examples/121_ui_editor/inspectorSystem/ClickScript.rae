@@ -26,6 +26,7 @@ open ecs/Entity
 open ecs/ComponentTable
 open inspectorSystem/InspectorSystem
 open inspectorSystem/ComponentEdit
+open ui/scrollRootSystem/ScrollRootSystem
 
 # A point to click, and whether one could be resolved at all.
 type ClickPoint {
@@ -72,7 +73,7 @@ func selectModeFromName(name: view String) ret SelectMode {
 func runTestClick(
   inspectorSystem: mod InspectorSystem
   world: mod UiWorld
-  uiSystems: view UiSystems
+  uiSystems: mod UiSystems
   sceneRoot: view EntityId
   step: view String
 ) {
@@ -493,6 +494,7 @@ func logInspectorPanel(
 #   RAE_UI_EDITOR_TEST_COMPONENT="add:Constraints"   add to every selected node
 #   RAE_UI_EDITOR_TEST_COMPONENT="remove:Shape"      strip from those that have it
 #   RAE_UI_EDITOR_TEST_COMPONENT="filter:tran"       narrow the component list
+#   RAE_UI_EDITOR_TEST_COMPONENT="scroll:-280"       scroll the component viewport
 #
 # Add and remove go through the SAME functions the panel's rows call, so what
 # the gate exercises is the real edit, not a shortcut around it. The filter is
@@ -511,7 +513,7 @@ func runTestComponent(
   }
   let colon: Int = script.indexOf(sub: ":")
   if colon <= 0 {
-    log("[ui-editor] component: expected add:/remove:/filter:<name>, got {script}")
+    log("[ui-editor] component: expected add:/remove:/filter:/scroll:<value>, got {script}")
     ret
   }
   let verb: String = script.sub(start: 0, len: colon)
@@ -521,20 +523,38 @@ func runTestComponent(
     log("[ui-editor] component filter: {name}")
   }
   if verb is "add" {
-    let added: Int = addComponentToSelection(
-      world: world
-      selection: inspectorSystem.selection
-      name: name
-    )
-    log("[ui-editor] added {name} to {added}")
+    applyComponentAction(inspectorSystem: inspectorSystem, world: world, actionId: "compAdd:{name}")
   }
   if verb is "remove" {
-    let removed: Int = removeComponentFromSelection(
+    applyComponentAction(
+      inspectorSystem: inspectorSystem
       world: world
-      selection: inspectorSystem.selection
-      name: name
+      actionId: "compRemove:{name}"
     )
-    log("[ui-editor] removed {name} from {removed}")
+    applyComponentAction(
+      inspectorSystem: inspectorSystem
+      world: world
+      actionId: "compRemove:{name}"
+    )
+  }
+  if verb is "scroll" {
+    let list: EntityId = editorListEntity(
+      chromeSystem: chromeSystem
+      world: world
+      source: EditorListSource.components
+    )
+    if componentHas(this: world.scrollRoots, entity: list) {
+      let root: ScrollRoot = componentGet(this: world.scrollRoots, entity: list)
+      let position: Float = name.toFloat()
+      applyScrollPosition(
+        world: world
+        uiSystems: uiSystems
+        entity: list
+        root: root
+        position: position
+      )
+      log("[ui-editor] component scroll: {position}")
+    }
   }
   logInspectorPanel(
     inspectorSystem: inspectorSystem

@@ -365,7 +365,7 @@ it (`Coverage` unless a nicer example exists).
 | CornerRadius | radius | yes | yes | Coverage |
 | MaskShape | kind Circle / RoundedRect, sourceNodeId, radius | yes | yes — own box or `sourceNodeId`; since #1003 the image and text pipelines round a clip like the box pipeline, so the mask is exact for every primitive | Coverage `CircleMask`, `SourceMasked` |
 | BackdropImage | textureKey | yes | image when registered, glass fallback otherwise | Coverage |
-| HoverScale | restScale hoverScale speed current target | yes | yes (interactive) | Coverage `ShadowBox` |
+| HoverScale | restScale hoverScale pressedScale speed current target | yes | yes (interactive) | Coverage `ShadowBox` |
 | HitArea, OnClick, Button, PointerEvents, ActionBinding | kind radius; actionId actionIdDouble actionIdTriple maxDelayMs; role; enabled cursor blockChildren; actionId role | yes | input only (no pixels) | MainMenu, Coverage |
 | Active, EditorVisible, EditorLocked, DebugAnchor, RuntimeOnly | value | yes | Active hides; the rest are flags | Coverage |
 | Name, PrimaryType, NodeId, SceneScope, HeroWidget, WidgetId, WidgetState | strings / flags | yes | metadata (the inspector shows them) | Coverage |
@@ -622,6 +622,15 @@ many entities actually changed (`removed Shape from 1` of a 2-node selection),
 because that count is the only way to tell a real edit from a click on a
 component only some of the selection had.
 
+The actions are authored controls in `chrome/ComponentRow`, not words in the
+value column. A component header ends in a red `x` pill; its first press turns
+amber and asks for confirmation, and its second press removes. Add candidates
+end in teal `+` pills. Their hover glow and scale, plus the smaller authored
+`HoverScale.pressedScale`, come from ordinary UI components, so the pooled
+ListView rows need no code-drawn affordance. Rect input rows retain their
+whole-row actions; component add/remove actions use the dedicated child hit
+target.
+
 **The filter.** The add list is every component the world knows — ~79 rows —
 so it is unusable without narrowing, which is what makes the filter part of
 this feature rather than a nicety. It matches case-insensitively on a
@@ -635,6 +644,13 @@ here — the editor binds BARE letters as panel shortcuts (`H`, `D`, `G`, `N`,
 `B`, `P`), so without a mode, typing a filter would toggle half the chrome.
 `App.rae` gates exactly that block on `filterFocused`; everything below it
 carries a modifier and so cannot be typed text.
+
+The unfiltered add section starts collapsed and its `+` / `-` header toggles
+it. Typing a filter opens matching candidates automatically. The component
+list itself is a virtual ListView and an authored `ScrollRoot`: a Hug inner
+list moves inside a separate clipped viewport, so the clip remains fixed as
+the list scrolls. `inspectorUpdate` advances the shared drag/wheel physics and
+suppresses a component action on the release frame of a drag.
 
 ## What DRIVES a value, inline with it (#21438052)
 
