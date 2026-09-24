@@ -2273,6 +2273,22 @@ static AstStmt* parse_if_statement(Parser* parser, const Token* if_token) {
 // nested query loops each own and alias their own result. The statement
 // therefore expands to a two-statement chain (hoist -> loop); parse_block walks
 // the chain when appending.
+//
+// The SINGLE-table form (`in query(table: t)`) does not build a match list at
+// all (#72253723). Its hoist is the packed row count, and a hidden counter
+// drives an ordinary three-clause loop over it, with the accessors keyed by
+// the counter — one pass, no allocation, which matters for a per-frame system:
+//
+//   let raeQueryCount0: Int = queryCount(table: t)
+//   loop var raeQueryIndex0: Int = 0, raeQueryIndex0 < raeQueryCount0, ++raeQueryIndex0 {
+//     let entityId: EntityId = queryEntityAt(table: t, denseIndex: raeQueryIndex0)
+//     let x: view T => queryViewAt(table: t, denseIndex: raeQueryIndex0)
+//     …
+//   }
+//
+// The `query(...)` call is kept on the loop for the formatter only; it is not
+// evaluated. The same no-structural-mutation rule (#814, sema) keeps the
+// counter's dense indices valid, exactly as it kept the snapshot's.
 // ---------------------------------------------------------------------------
 
 #define RAE_QUERY_LOOP_MAX_BINDINGS 6  /* entity + up to 5 components */
@@ -2335,12 +2351,10 @@ static AstCallArg* query_loop_arg(Parser* parser, const char* name, AstExpr* val
   return a;
 }
 
-// `queryModAt(table: T, denseIndex: I)` / `queryViewAt(...)`, mirroring the
-// spelling of the query call: bare, or `Qualifier.fn(...)`.
-static AstExpr* query_loop_accessor(Parser* parser, const Token* tok, const AstExpr* qualifier,
-                                    const char* fn, AstExpr* table, AstExpr* dense_index) {
-  AstCallArg* args = query_loop_arg(parser, "table", table,
-                     query_loop_arg(parser, "denseIndex", dense_index, NULL));
+// `fn(args)`, mirroring the spelling of the query call: bare, or
+// `Qualifier.fn(...)`.
+static AstExpr* query_loop_call(Parser* parser, const Token* tok, const AstExpr* qualifier,
+                                const char* fn, AstCallArg* args) {
   if (qualifier) {
     AstExpr* mc = new_expr(parser, AST_EXPR_METHOD_CALL, tok);
     mc->as.method_call.object = query_loop_clone_place(parser, qualifier);
@@ -2352,6 +2366,32 @@ static AstExpr* query_loop_accessor(Parser* parser, const Token* tok, const AstE
   call->as.call.callee = query_loop_ident(parser, tok, str_from_cstr(fn));
   call->as.call.args = args;
   return call;
+}
+
+// `queryModAt(table: T, denseIndex: I)` / `queryViewAt(...)` /
+// `queryEntityAt(...)`.
+static AstExpr* query_loop_accessor(Parser* parser, const Token* tok, const AstExpr* qualifier,
+                                    const char* fn, AstExpr* table, AstExpr* dense_index) {
+  return query_loop_call(parser, tok, qualifier, fn,
+                         query_loop_arg(parser, "table", table,
+                         query_loop_arg(parser, "denseIndex", dense_index, NULL)));
+}
+
+static bool is_query_callee(const Token* tok) {
+  if (!tok || tok->kind != TOK_IDENT) return false;
+  return str_eq_cstr(tok->lexeme, "query") || str_eq_cstr(tok->lexeme, "query2")
+      || str_eq_cstr(tok->lexeme, "query3") || str_eq_cstr(tok->lexeme, "query4")
+      || str_eq_cstr(tok->lexeme, "query5");
+}
+
+// At `in`: is the iterable a query call — `query…(` or `Qualifier.query…(`?
+// Token lookahead only; nothing is consumed.
+static bool query_loop_follows(Parser* parser) {
+  if (!parser_check(parser, TOK_KW_IN)) return false;
+  const Token* a = parser_peek_at(parser, 1);
+  if (is_query_callee(a) && parser_peek_at(parser, 2)->kind == TOK_LPAREN) return true;
+  return a && a->kind == TOK_IDENT && parser_peek_at(parser, 2)->kind == TOK_DOT
+      && is_query_callee(parser_peek_at(parser, 3)) && parser_peek_at(parser, 4)->kind == TOK_LPAREN;
 }
 
 static AstStmt* parse_query_loop(Parser* parser, AstStmt* stmt, bool has_let,
@@ -2462,23 +2502,33 @@ static AstStmt* parse_query_loop(Parser* parser, AstStmt* stmt, bool has_let,
     }
   }
 
-  // The query result is hoisted into a hidden owned `let` ahead of the loop
+  // A JOIN's result is hoisted into a hidden owned `let` ahead of the loop
   // (so it is dropped exactly like the hand-written idiom), and a hidden match
-  // binding drives the loop; the visible bindings alias into it.
+  // binding drives the loop; the visible bindings alias into it. A SINGLE
+  // table needs no match list at all: the hoist is its packed row count and a
+  // hidden counter drives a three-clause loop over 0..count (#72253723) — no
+  // allocation, one pass — with the accessors keyed by the counter.
   int loop_id = hit_counter++;
+  bool direct = ok && single_table;
   char hits_buf[32];
-  snprintf(hits_buf, sizeof hits_buf, "raeQueryHits%d", loop_id);
+  snprintf(hits_buf, sizeof hits_buf, direct ? "raeQueryCount%d" : "raeQueryHits%d", loop_id);
   Str hits_name = parser_copy_str(parser, str_from_cstr(hits_buf));
   char hidden_buf[32];
-  snprintf(hidden_buf, sizeof hidden_buf, "raeQueryHit%d", loop_id);
+  snprintf(hidden_buf, sizeof hidden_buf, direct ? "raeQueryIndex%d" : "raeQueryHit%d", loop_id);
   Str hidden = parser_copy_str(parser, str_from_cstr(hidden_buf));
   const char* mt = match_type ? match_type : "QueryMatch";
 
   AstStmt* hoist = new_stmt(parser, AST_STMT_LET, first_name);
   hoist->as.let_stmt.name = hits_name;
-  hoist->as.let_stmt.type = query_loop_type(parser, first_name, "List", false);
-  hoist->as.let_stmt.type->generic_args = query_loop_type(parser, first_name, mt, false);
-  hoist->as.let_stmt.value = iterable;
+  if (direct) {
+    hoist->as.let_stmt.type = query_loop_type(parser, first_name, "Int", false);
+    hoist->as.let_stmt.value = query_loop_call(parser, first_name, qualifier, "queryCount",
+                                 query_loop_arg(parser, "table", query_loop_clone_place(parser, tables[0]), NULL));
+  } else {
+    hoist->as.let_stmt.type = query_loop_type(parser, first_name, "List", false);
+    hoist->as.let_stmt.type->generic_args = query_loop_type(parser, first_name, mt, false);
+    hoist->as.let_stmt.value = iterable;
+  }
   hoist->as.let_stmt.is_bind = false;
   hoist->as.let_stmt.is_var = false;
   hoist->as.let_stmt.is_const = false;
@@ -2504,16 +2554,33 @@ static AstStmt* parse_query_loop(Parser* parser, AstStmt* stmt, bool has_let,
 
   AstStmt* init = new_stmt(parser, AST_STMT_LET, first_name);
   init->as.let_stmt.name = hidden;
-  init->as.let_stmt.type = query_loop_type(parser, first_name, mt, true);
-  init->as.let_stmt.value = NULL;
   init->as.let_stmt.is_bind = false;
-  init->as.let_stmt.is_var = false;
   init->as.let_stmt.is_const = false;
-
-  stmt->as.loop_stmt.is_range = true;
   stmt->as.loop_stmt.init = init;
-  stmt->as.loop_stmt.condition = query_loop_ident(parser, first_name, hits_name);
-  stmt->as.loop_stmt.increment = NULL;
+  if (direct) {
+    // loop var raeQueryIndex<N>: Int = 0, raeQueryIndex<N> < raeQueryCount<N>, ++raeQueryIndex<N>
+    init->as.let_stmt.type = query_loop_type(parser, first_name, "Int", false);
+    init->as.let_stmt.value = new_expr(parser, AST_EXPR_INTEGER, first_name);
+    init->as.let_stmt.value->as.integer = parser_copy_str(parser, str_from_cstr("0"));
+    init->as.let_stmt.is_var = true;
+    AstExpr* cond = new_expr(parser, AST_EXPR_BINARY, first_name);
+    cond->as.binary.op = AST_BIN_LT;
+    cond->as.binary.lhs = query_loop_ident(parser, first_name, hidden);
+    cond->as.binary.rhs = query_loop_ident(parser, first_name, hits_name);
+    AstExpr* inc = new_expr(parser, AST_EXPR_UNARY, first_name);
+    inc->as.unary.op = AST_UNARY_PRE_INC;
+    inc->as.unary.operand = query_loop_ident(parser, first_name, hidden);
+    stmt->as.loop_stmt.is_range = false;
+    stmt->as.loop_stmt.condition = cond;
+    stmt->as.loop_stmt.increment = inc;
+  } else {
+    init->as.let_stmt.type = query_loop_type(parser, first_name, mt, true);
+    init->as.let_stmt.value = NULL;
+    init->as.let_stmt.is_var = false;
+    stmt->as.loop_stmt.is_range = true;
+    stmt->as.loop_stmt.condition = query_loop_ident(parser, first_name, hits_name);
+    stmt->as.loop_stmt.increment = NULL;
+  }
   stmt->as.loop_stmt.body = parse_block(parser);
   if (!ok || !stmt->as.loop_stmt.body) return hoist;
 
@@ -2524,8 +2591,12 @@ static AstStmt* parse_query_loop(Parser* parser, AstStmt* stmt, bool has_let,
     AstStmt* es = new_stmt(parser, AST_STMT_LET, bindings[0].name_tok);
     es->as.let_stmt.name = bindings[0].name;
     es->as.let_stmt.type = bindings[0].type;
-    es->as.let_stmt.value = query_loop_member(parser, bindings[0].name_tok,
-                                query_loop_ident(parser, bindings[0].name_tok, hidden), "entityId");
+    es->as.let_stmt.value = direct
+      ? query_loop_accessor(parser, bindings[0].name_tok, qualifier, "queryEntityAt",
+                            query_loop_clone_place(parser, tables[0]),
+                            query_loop_ident(parser, bindings[0].name_tok, hidden))
+      : query_loop_member(parser, bindings[0].name_tok,
+                          query_loop_ident(parser, bindings[0].name_tok, hidden), "entityId");
     es->as.let_stmt.is_bind = false;
     es->as.let_stmt.is_var = false;
     es->as.let_stmt.is_const = false;
@@ -2537,7 +2608,9 @@ static AstStmt* parse_query_loop(Parser* parser, AstStmt* stmt, bool has_let,
     QueryLoopBinding* cb = &bindings[comp_start + i];
     const char* field = single_table ? "index" : index_fields[i];
     AstExpr* table = query_loop_clone_place(parser, tables[i]);
-    AstExpr* dense = query_loop_member(parser, cb->name_tok, query_loop_ident(parser, cb->name_tok, hidden), field);
+    AstExpr* dense = direct
+      ? query_loop_ident(parser, cb->name_tok, hidden)
+      : query_loop_member(parser, cb->name_tok, query_loop_ident(parser, cb->name_tok, hidden), field);
     AstExpr* accessor = query_loop_accessor(parser, cb->name_tok, qualifier,
                                             cb->type->is_mod ? "queryModAt" : "queryViewAt", table, dense);
     AstStmt* ls = new_stmt(parser, AST_STMT_LET, cb->name_tok);
@@ -2663,8 +2736,11 @@ static AstStmt* parse_loop_statement(Parser* parser, const Token* loop_token) {
     parser_consume(parser, TOK_COLON, "expected ':' after identifier");
     AstTypeRef* type = parse_type_ref(parser);
 
-    // #807: `loop let a: A, b: B, ... in query…(…)` — the ECS query loop.
-    if (parser_check(parser, TOK_COMMA)) {
+    // #807: `loop let a: A, b: B, ... in query…(…)` — the ECS query loop. A
+    // single binding (`loop let fade: view Fade in query(table: fades)`) is the
+    // same loop with no entity binding; it is told apart from a collection loop
+    // by its iterable being a query call (#72253723).
+    if (parser_check(parser, TOK_COMMA) || query_loop_follows(parser)) {
       return parse_query_loop(parser, stmt, has_let, name, type);
     }
 

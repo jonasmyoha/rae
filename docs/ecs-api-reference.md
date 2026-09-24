@@ -260,7 +260,13 @@ loop let hit: view Query2Match in query2(tableA: world.positions, tableB: world.
 }
 func queryModAt(table: mod ComponentTable(T), denseIndex: view Int) ret mod T
 func queryViewAt(table: view ComponentTable(T), denseIndex: view Int) ret view T
+func queryCount(table: view ComponentTable(T)) ret Int                          # packed row count
+func queryEntityAt(table: view ComponentTable(T), denseIndex: view Int) ret EntityId
 ```
+
+`queryCount` / `queryEntityAt` are the two reads the single-table query LOOP is
+lowered onto (below); they are `componentCount` / `componentEntityAt` under the
+query spelling.
 
 `tagged(D, T, dataTable, tagTable)` is `query2` specialised to "data table
 filtered by a zero-field tag" — the **with T** filter. `query` / `queryView`
@@ -307,10 +313,10 @@ loop let entityId: EntityId, p: mod Pos, v: view Vel in query2(tableA: pos, tabl
 - Each table argument must be a table name or field path (`pos`,
   `world.positions`) — the loop aliases each component back into that same table.
 
-It is PURE SUGAR, resolved in the parser: the statement expands to the hoisted
-result list plus the storage-aliasing accessor bindings systems used to write by
-hand, so sema and codegen see ordinary Rae and the compiled C is the hand-written
-idiom exactly:
+It is PURE SUGAR, resolved in the parser: the statement expands to ordinary
+Rae — the storage-aliasing accessor bindings systems used to write by hand — so
+sema and codegen see plain code and the compiled C is the hand-written idiom
+exactly. A JOIN hoists its match list and walks it:
 
 ```rae
 let raeQueryHits0: List(Query2Match) = query2(tableA: pos, tableB: vel)
@@ -322,8 +328,27 @@ loop let raeQueryHit0: view Query2Match in raeQueryHits0 {
 }
 ```
 
-The explicit form stays valid — it is what the loop means. Nested query loops
-each own their own result list and alias their own hit.
+A SINGLE table builds no list at all: the loop walks the table's packed rows
+by index, so a per-frame system over one table allocates nothing (the
+`query(table: t)` call in the source is never made):
+
+```rae
+loop let entityId: EntityId, fade: view HoverFade in query(table: fades) { … }
+# lowers to
+let raeQueryCount0: Int = queryCount(table: fades)
+loop var raeQueryIndex0: Int = 0, raeQueryIndex0 < raeQueryCount0, ++raeQueryIndex0 {
+  let entityId: EntityId = queryEntityAt(table: fades, denseIndex: raeQueryIndex0)
+  let fade: view HoverFade => queryViewAt(table: fades, denseIndex: raeQueryIndex0)
+  …
+}
+```
+
+The count is read once, before the loop, exactly as the list was; the
+no-structural-mutation rule (`componentSet` of a new entity / `componentRemove`
+on a table a live binding aliases is rejected, see the borrow rule above) is
+what keeps the indices valid in both forms. The explicit forms stay valid — they
+are what the loop means. Nested query loops each own their own hidden
+count/counter or result list.
 
 ## Tags — `lib/ecs/tag.rae`
 

@@ -1,0 +1,70 @@
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Query
+
+# The single-table query loop is lowered to a counted walk over the table's
+# packed rows (no match list, no allocation). This drives everything the
+# lowering must keep right: `break` and `continue` inside the body (the hidden
+# counter must still advance on `continue`), nested single-table loops (each
+# gets its own hidden count + counter), a `mod` binding writing through, a loop
+# with no entity binding.# are qualified the same way.
+type Score {
+  value: Int
+}
+
+type Tag {
+  t: Int
+}
+
+func main() {
+  var scores: ComponentTable(Score) = ComponentTable.create(Score)
+  var tags: ComponentTable(Tag) = ComponentTable.create(Tag)
+  loop var i: Int = 1, i <= 6, ++i {
+    let entityId: EntityId = { index: i, generation: 0 }
+    componentSet(this: scores, entityId: entityId, data: Score { value: i * 10 })
+  }
+  componentSet(this: tags, entityId: EntityId { index: 2, generation: 0 }, data: Tag { t: 1 })
+  componentSet(this: tags, entityId: EntityId { index: 5, generation: 0 }, data: Tag { t: 2 })
+
+  # break stops at the fifth entity; continue skips the odd ones before it. The
+  # counter must advance past a `continue`, or the loop would never end.
+  var visited: Int = 0
+  loop let entityId: EntityId, score: view Score in query(table: scores) {
+    if entityId.index is 5 {
+      break
+    }
+    if entityId.index % 2 is 1 {
+      continue
+    }
+    visited = visited + 1
+    log("even e{entityId.index} value={score.value}")
+  }
+  log("visited {visited}")
+
+  # A mod binding writes through to the table.
+  loop let score: mod Score in query(table: scores) {
+    score.value = score.value + 1
+  }
+  let readback: Score = componentGet(this: scores, entityId: EntityId { index: 3, generation: 0 })
+  log("mod readback e3={readback.value}")
+
+  # Nested single-table loops: the inner walk runs to completion for every
+  # outer row, with its own hidden counter.
+  var pairs: Int = 0
+  loop let outer: EntityId, tag: view Tag in query(table: tags) {
+    loop let inner: EntityId, score: view Score in query(table: scores) {
+      if inner.index > outer.index {
+        pairs = pairs + tag.t
+      }
+    }
+  }
+  log("pairs {pairs}")
+
+  # An empty table: the body never runs.
+  var empty: ComponentTable(Score) = ComponentTable.create(Score)
+  var ran: Bool = false
+  loop let score: view Score in query(table: empty) {
+    ran = true
+  }
+  log("empty ran {ran}")
+}

@@ -60,9 +60,10 @@ a feature that is not already listed here.
   `query`; nested query loops each own their own result. Chosen over keeping the
   explicit accessor form because a language that bets on ECS should make its most
   common operation its cleanest line — and it costs nothing at runtime: it is PURE
-  SUGAR resolved in the parser (hoisted result list + the accessor aliases systems
-  used to hand-write), so sema and codegen see ordinary Rae and the compiled C is
-  identical to the hand-written idiom. The explicit form remains valid; it is
+  SUGAR resolved in the parser (for a join, the hoisted result list + the accessor
+  aliases systems used to hand-write; for one table, a counted walk over its
+  packed rows that allocates nothing), so sema and codegen see ordinary Rae and
+  the compiled C is identical to the hand-written idiom. The explicit form remains valid; it is
   exactly what the loop desugars to. Misuse is a parse-time error (wrong binding
   count vs table count; a component binding that is neither `mod` nor `view`; a
   non-query iterable; a computed table argument). Tests 734 (+ rejects 735/736).
