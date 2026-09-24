@@ -4,9 +4,13 @@
 # (#79484806): `local = copied` inside an `if let` dropped `copied` at its scope
 # end and `local` at its own, over the same buffers (and `local` read freed
 # memory in between). The same store through a `mod` reference had the same
-# hole. `own x` stays the move: the source is emptied, nothing is copied.
+# hole, and so did a binding narrowed from an optional accessor (`if let slot: mod T
+# => xs.modAt(index:)`, #70178297). `own x` stays the move: the source is emptied, nothing is
+# copied.
 # Every case is checked twice — the values read back right, and the
 # outstanding allocation count returns to its baseline once the scopes close.
+open collections/StringMap
+
 func rae_ext_rae_mem_stats_outstanding() unsafe extern ret Int
 
 type Holder {
@@ -70,6 +74,48 @@ func assignStringThroughModRef() ret String {
   ret "{target.label} / {source}"
 }
 
+# Through a `mod` binding narrowed from an OPTIONAL accessor (`if let ... =>
+# xs.modAt(index:)`): the binding is a plain reference inside the branch, so
+# the store copies exactly as through `let slot: mod T => place` (#70178297).
+func assignThroughModAt() ret String {
+  var holders: List(Holder) = List.create(Holder, cap: 2)
+  holders.add(value: makeHolder(tag: 4))
+  let source: Holder = makeHolder(tag: 5)
+  if let slot: mod Holder => holders.modAt(index: 0) {
+    slot = source
+  }
+  var label: String = ""
+  if let stored: view Holder => holders.viewAt(index: 0) {
+    label = "{stored.label} {stored.items.length} / {source.label}"
+  }
+  ret label
+}
+
+func assignStringThroughModAt() ret String {
+  var labels: List(String) = List.create(String, cap: 2)
+  labels.add(value: "old")
+  let text: String = "new label"
+  if let cell: mod String => labels.modAt(index: 0) {
+    cell = text
+  }
+  ret "{labels.copyAtDefault(index: 0)} / {text}"
+}
+
+# The same through a map's `modGet` (the generic optional-accessor path).
+func assignThroughModGet() ret String {
+  var byName: StringMap(Holder) = StringMap.create(Holder, cap: 4)
+  byName.set(k: "slot", value: makeHolder(tag: 4))
+  let source: Holder = makeHolder(tag: 5)
+  if let editable: mod Holder => byName.modGet(key: "slot") {
+    editable = source
+  }
+  var label: String = ""
+  if let stored: view Holder => byName.viewGet(key: "slot") {
+    label = "{stored.label} {stored.items.length} / {source.label}"
+  }
+  ret label
+}
+
 func assignWithOwn() ret String {
   var target: Holder = makeHolder(tag: 8)
   var source: Holder = makeHolder(tag: 6)
@@ -85,6 +131,9 @@ func main() {
     assignFromField()
     assignThroughModRef()
     assignStringThroughModRef()
+    assignThroughModAt()
+    assignStringThroughModAt()
+    assignThroughModGet()
     assignWithOwn()
     let baseline: Int = rae_ext_rae_mem_stats_outstanding()
     loop var i: Int = 1, i <= 3, ++i {
@@ -94,6 +143,9 @@ func main() {
     log("field: {assignFromField()}")
     log("mod ref: {assignThroughModRef()}")
     log("mod String ref: {assignStringThroughModRef()}")
+    log("modAt: {assignThroughModAt()}")
+    log("modAt String: {assignStringThroughModAt()}")
+    log("modGet: {assignThroughModGet()}")
     log("own: {assignWithOwn()}")
     loop var i: Int = 0, i < 200, ++i {
       assignFromIfLet(round: i)
@@ -101,6 +153,9 @@ func main() {
       assignFromField()
       assignThroughModRef()
       assignStringThroughModRef()
+      assignThroughModAt()
+      assignStringThroughModAt()
+      assignThroughModGet()
       assignWithOwn()
     }
     log("leaked allocations: {rae_ext_rae_mem_stats_outstanding() - baseline}")

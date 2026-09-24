@@ -95,10 +95,22 @@ static bool emit_list_if_let(CFuncContext* ctx, const AstStmt* stmt, FILE* out) 
   fprintf(out, ";\n");
 
   size_t saved_locals = ctx->local_count;
+  // #70178297: inside the branch the binding is NOT optional — the test above
+  // narrowed it — so register it as the plain reference/value it was declared
+  // as. Registering the declared type with its `opt` still set made a
+  // whole-value store through a `mod` binding (`slot = value`) type its
+  // pointee as the boxed optional (RaeAny) and assign a struct to it.
+  const AstTypeRef* narrowed_type = element_type;
+  if (element_type->is_opt) {
+    AstTypeRef* narrowed = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
+    *narrowed = *element_type;
+    narrowed->is_opt = false;
+    narrowed_type = narrowed;
+  }
   if (ctx->local_count < 256) {
     size_t local_index = ctx->local_count++;
     ctx->locals[local_index] = binding->as.let_stmt.name;
-    ctx->local_type_refs[local_index] = element_type;
+    ctx->local_type_refs[local_index] = narrowed_type;
     ctx->local_is_ptr[local_index] = is_ref;
     ctx->local_is_mod[local_index] = element_type->is_mod;
     ctx->local_moved[local_index] = false;
@@ -2218,10 +2230,16 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 // that reads the target (`r = merge(r, x)`) sees it intact.
                 AstTypeRef pointee = *target_tr;
                 pointee.is_mod = false; pointee.is_view = false; pointee.next = NULL;
-                bool pointee_is_string = !pointee.is_opt
-                    && str_eq_cstr(get_base_type_name(&pointee), "String");
+                // A store THROUGH a `mod` reference is always through a
+                // narrowed one — an optional reference cannot be stored
+                // through without an `if let` first — so the pointee is the
+                // plain T here whatever the binding's declared type still
+                // carries (#70178297: a `mod T` narrowed from `modAt`/`modGet`
+                // kept `opt` set and was stored into as a boxed RaeAny).
+                pointee.is_opt = false;
+                bool pointee_is_string = str_eq_cstr(get_base_type_name(&pointee), "String");
                 bool pointee_owns = pointee_is_string
-                    || (!pointee.is_opt && !pointee.generic_args
+                    || (!pointee.generic_args
                         && str_eq_cstr(get_base_type_name(&pointee), "Task"))
                     || type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, &pointee, 0);
                 if (pointee_owns) {
@@ -2239,9 +2257,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     // `=` COPIES (#79484806): an RHS that reads an existing
                     // location lands as a deep copy, never as an alias of the
                     // source's heap — the same rule as the local/field store.
-                    // (An `opt` pointee — a `mod T` bound from an optional
-                    // accessor — is boxed and keeps its old store as it was.)
-                    bool rhs_reads_location = !pointee.is_opt && rhs && (rhs->kind == AST_EXPR_IDENT
+                    bool rhs_reads_location = rhs && (rhs->kind == AST_EXPR_IDENT
                         || rhs->kind == AST_EXPR_MEMBER || rhs->kind == AST_EXPR_INDEX);
                     fprintf(out, "{ ");
                     emit_type_ref_as_c_type(ctx, &pointee, out, false);
