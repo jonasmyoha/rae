@@ -69,7 +69,7 @@ func buildScene(
     emission: noEmission
     toon: true
   }
-  let bedEntity: EntityId = world3dAddMeshInstance(
+  let bedEntityId: EntityId = world3dAddMeshInstance(
     world: sceneWorld
     mesh: ground
     material: sand
@@ -83,7 +83,7 @@ func buildScene(
     let size: Float = 14.0 + i.toFloat() * 6.0
     # Centre a little under the surface: the top face pokes out by ~1 m, the
     # sides run down to the bed, so depth goes 0 -> bedDepth around each island.
-    let islandEntity: EntityId = world3dAddMeshInstance(
+    let islandEntityId: EntityId = world3dAddMeshInstance(
       world: sceneWorld
       mesh: box
       material: sand
@@ -146,16 +146,16 @@ func main() ret Int {
   let box: MeshHandle = uploadMeshData(renderer: renderer, meshData: boxData)
   var sceneWorld: World3d = buildScene(renderer: renderer, box: box, ground: ground)
   let buoyancyDemo: Bool = Sys.getEnv(name: "RAE_WATER_BUOYANCY") is "1"
-  let buoyEntity: EntityId = world3dAddEntity(world: sceneWorld)
+  let buoyEntityId: EntityId = world3dAddEntity(world: sceneWorld)
   if buoyancyDemo {
     world3dSetMeshRenderer(
       world: sceneWorld
-      entityId: buoyEntity
+      entityId: buoyEntityId
       renderer: MeshRenderer { entityIndex: -1, mesh: box, material: -1, visible: true }
     )
     world3dSetMaterial(
       world: sceneWorld
-      entityId: buoyEntity
+      entityId: buoyEntityId
       material: Material3d {
         baseColor: { x: 1.0, y: 0.3, z: 0.02 }
         metallic: 0.0
@@ -373,7 +373,7 @@ func main() ret Int {
             ) {
               world3dSetTransform(
                 world: sceneWorld
-                entityId: buoyEntity
+                entityId: buoyEntityId
                 transform: Transform3d {
                   position: { x: -5.0, y: -20.0, z: sample.height + 0.8 }
                   rotation: { x: 0.0, y: 0.0, z: 0.0 }

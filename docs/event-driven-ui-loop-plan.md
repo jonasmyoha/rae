@@ -215,7 +215,7 @@ loop running and switching is false {
 
     let active: Bool = forceRender or renderCacheDirty(...) or
                        input.events.length > 0 or
-                       input.pressedEntity is not lastPressed or
+                       input.pressedEntityId is not lastPressed or
                        animating or isMouseButtonDown(...)
 
     if active {

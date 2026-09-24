@@ -429,15 +429,15 @@ func runApp(app: mod App) ret Int {
     updateUiInput(input: input, world: app.world, uiSystems: app.uiSystems)
     if overlayTookPointer or app.debugOverlay.open {
       eventClear(UiAction, this: app.world.uiActions)
-      input.pressedEntity = noEntity()
+      input.pressedEntityId = noEntity()
       input.wheel = 0.0
       input.wheelTarget = noEntity()
       changed = true
     }
     let hadEvents: Bool = uiActionCount(world: app.world) > 0
-    let inputChanged: Bool = input.hoveredEntity is not previousHovered or input.pressedEntity is not previousPressed or input.pointer.down
-    previousHovered = input.hoveredEntity
-    previousPressed = input.pressedEntity
+    let inputChanged: Bool = input.hoveredEntityId is not previousHovered or input.pressedEntityId is not previousPressed or input.pointer.down
+    previousHovered = input.hoveredEntityId
+    previousPressed = input.pressedEntityId
     editArea = editAreaOf(
       chromeSystem: app.chromeSystem
       world: app.world

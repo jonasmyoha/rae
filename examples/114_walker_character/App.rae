@@ -121,7 +121,7 @@ type InputSystem {
 
 # The animated character: the player-controlled hero plus a `crowd` of
 # independently-animated members. #739: the hero's controller and each crowd
-# member are now ENTITIES in the GameWorld — `heroEntity` carries the hero's
+# member are now ENTITIES in the GameWorld — `heroEntityId` carries the hero's
 # ThirdPersonController; `crowdEntities` are the crowd members, each an entity
 # with a ThirdPersonController + AnimationState{clipIndex,animTime} + Transform3D.
 # They're driven in place via componentMod (no copy-out/mutate/set-back), and
@@ -134,7 +134,7 @@ type CharacterSystem {
   bindPose: SkeletonPose
   transitionFrom: SkeletonPose
   transitionElapsed: Float
-  heroEntity: EntityId
+  heroEntityId: EntityId
   clipIndex: Int
   playing: Bool
   speed: Float
@@ -358,10 +358,10 @@ func createApp() ret App {
             indices: part.indices
           )
           if meshHandleIsValid(h: handle) {
-            let partEntity: EntityId = gameWorldAddEntity(world: gameWorld)
+            let partEntityId: EntityId = gameWorldAddEntity(world: gameWorld)
             gameWorldSetPartRoughness(
               world: gameWorld
-              entityId: partEntity
+              entityId: partEntityId
               part: PartRoughness { meshId: handle.id, roughness: rough }
             )
             if haveFirstPart is false {
@@ -567,11 +567,15 @@ func createApp() ret App {
     # #739: the hero is an entity carrying its ThirdPersonController + Transform3D.
     # Its clip/animTime + motion-vector model stay on CharacterSystem (hero-specific
     # transitions); only the controller moves into the world.
-    let heroEntity: EntityId = gameWorldAddEntity(world: gameWorld)
-    gameWorldSetController(world: gameWorld, entityId: heroEntity, controller: characterController)
+    let heroEntityId: EntityId = gameWorldAddEntity(world: gameWorld)
+    gameWorldSetController(
+      world: gameWorld
+      entityId: heroEntityId
+      controller: characterController
+    )
     gameWorldSetTransform(
       world: gameWorld
-      entityId: heroEntity
+      entityId: heroEntityId
       transform: controllerTransform3D(controller: characterController)
     )
 
@@ -593,11 +597,11 @@ func createApp() ret App {
       # #739: each crowd member is an entity — controller + AnimationState + a
       # Transform3D synced from the controller. Its render model is derived from
       # the controller (walkerWorldModel) at draw time, so no stored model.
-      let cloneEntity: EntityId = gameWorldAddEntity(world: gameWorld)
-      gameWorldSetController(world: gameWorld, entityId: cloneEntity, controller: cloneController)
+      let cloneEntityId: EntityId = gameWorldAddEntity(world: gameWorld)
+      gameWorldSetController(world: gameWorld, entityId: cloneEntityId, controller: cloneController)
       gameWorldSetAnim(
         world: gameWorld
-        entityId: cloneEntity
+        entityId: cloneEntityId
         anim: AnimationState {
           clipIndex: crowdClipFor(index: cloneIndex)
           animTime: cloneIndex.toFloat() * 0.4
@@ -605,10 +609,10 @@ func createApp() ret App {
       )
       gameWorldSetTransform(
         world: gameWorld
-        entityId: cloneEntity
+        entityId: cloneEntityId
         transform: controllerTransform3D(controller: cloneController)
       )
-      crowdEntities.add(value: cloneEntity)
+      crowdEntities.add(value: cloneEntityId)
     }
     updateInfiniteTerrain(
       terrainSystem: terrainSystem
@@ -768,8 +772,8 @@ func createApp() ret App {
         rig: own rig
         light: light
         hosek: hosekData
-        rigEntity: rigLink.rigEntity
-        camEntity: rigLink.camEntity
+        rigEntityId: rigLink.rigEntityId
+        cameraEntityId: rigLink.cameraEntityId
       }
       characterSystem: {
         skeleton: own sk
@@ -779,7 +783,7 @@ func createApp() ret App {
         bindPose: bindPose
         transitionFrom: bindPose
         transitionElapsed: clipTransitionDuration
-        heroEntity: heroEntity
+        heroEntityId: heroEntityId
         clipIndex: clipIndex
         playing: playing
         speed: speed

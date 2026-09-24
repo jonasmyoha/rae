@@ -612,30 +612,30 @@ func componentEqualsIn(
   this: view ComponentTable(T)
   otherWorld: view UiWorld
   entityId: view EntityId
-  otherEntity: view EntityId
+  otherEntityId: view EntityId
 ) ret Bool {
   loop let that: view ComponentTable(T) in fields(otherWorld) {
     if componentHas(this: this, entityId: entityId) is false {
-      ret componentHas(this: that, entityId: otherEntity) is false
+      ret componentHas(this: that, entityId: otherEntityId) is false
     }
-    if componentHas(this: that, entityId: otherEntity) is false {
+    if componentHas(this: that, entityId: otherEntityId) is false {
       ret false
     }
     let mine: view T => componentView(this: this, entityId: entityId)
-    let theirs: view T => componentView(this: that, entityId: otherEntity)
+    let theirs: view T => componentView(this: that, entityId: otherEntityId)
     ret equals(a: mine, b: theirs)
   }
   ret false
 }
 
 # The authored component `name` of `entityId` in `a`, compared with the same
-# component of `otherEntity` in `b` — by VALUE (componentEqualsIn), not by
+# component of `otherEntityId` in `b` — by VALUE (componentEqualsIn), not by
 # their encoded text. `none` when no authored table carries that name.
 func componentEqualsByName(
   world: view UiWorld
   other: view UiWorld
   entityId: view EntityId
-  otherEntity: view EntityId
+  otherEntityId: view EntityId
   name: view String
 ) ret opt Bool {
   var answer: opt Bool = none
@@ -647,7 +647,7 @@ func componentEqualsByName(
         this: table
         otherWorld: other
         entityId: entityId
-        otherEntity: otherEntity
+        otherEntityId: otherEntityId
       )
     }
   }

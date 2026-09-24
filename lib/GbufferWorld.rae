@@ -63,12 +63,12 @@ func renderSceneSdfWorld(
     ret
   }
   loop var clusterScan: Int = 0, clusterScan < count, ++clusterScan {
-    let headEntity: EntityId = componentEntityAt(this: world.sdfs, i: clusterScan)
-    let head: SdfPrimitive = componentGet(this: world.sdfs, entityId: headEntity)
+    let headEntityId: EntityId = componentEntityAt(this: world.sdfs, i: clusterScan)
+    let head: SdfPrimitive = componentGet(this: world.sdfs, entityId: headEntityId)
     var alreadyDrawn: Bool = false
     loop var back: Int = 0, back < clusterScan, ++back {
-      let priorEntity: EntityId = componentEntityAt(this: world.sdfs, i: back)
-      let prior: SdfPrimitive = componentGet(this: world.sdfs, entityId: priorEntity)
+      let priorEntityId: EntityId = componentEntityAt(this: world.sdfs, i: back)
+      let prior: SdfPrimitive = componentGet(this: world.sdfs, entityId: priorEntityId)
       if prior.shape is 0 {
         if prior.cluster is head.cluster {
           alreadyDrawn = true
@@ -81,13 +81,13 @@ func renderSceneSdfWorld(
         let colors: List(Float) = List.create(Float, cap: count * 4)
         var ballCount: Int = 0
         loop var i: Int = 0, i < count, ++i {
-          let ballEntity: EntityId = componentEntityAt(this: world.sdfs, i: i)
-          let sdf: SdfPrimitive = componentGet(this: world.sdfs, entityId: ballEntity)
+          let ballEntityId: EntityId = componentEntityAt(this: world.sdfs, i: i)
+          let sdf: SdfPrimitive = componentGet(this: world.sdfs, entityId: ballEntityId)
           if sdf.shape is 0 {
             if sdf.cluster is head.cluster {
               let transform: Transform3d = componentGet(
                 this: world.transforms
-                entityId: ballEntity
+                entityId: ballEntityId
               )
               packed.add(value: transform.position.x)
               packed.add(value: transform.position.y)
@@ -95,7 +95,7 @@ func renderSceneSdfWorld(
               packed.add(value: transform.scale.x)
               let ballMaterial: Material3d = componentGet(
                 this: world.materials
-                entityId: ballEntity
+                entityId: ballEntityId
               )
               colors.add(value: ballMaterial.baseColor.x)
               colors.add(value: ballMaterial.baseColor.y)
@@ -106,7 +106,7 @@ func renderSceneSdfWorld(
           }
         }
         if ballCount > 0 {
-          let material: Material3d = componentGet(this: world.materials, entityId: headEntity)
+          let material: Material3d = componentGet(this: world.materials, entityId: headEntityId)
           drawMetaballs(
             cache: cache
             resources: resources

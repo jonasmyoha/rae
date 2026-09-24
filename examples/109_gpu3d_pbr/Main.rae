@@ -144,7 +144,7 @@ func main() ret Int {
   # The torus is the last-but-one instance; remember its entity so the
   # animation below can spin it in place. Its dense position in the
   # meshRenderers table is count-2 (the ground plane is the last add).
-  let torusEntity: EntityId = world3dMeshRendererEntityAt(
+  let torusEntityId: EntityId = world3dMeshRendererEntityAt(
     world: world
     i: world3dMeshRendererCount(world: world) - 2
   )
@@ -227,9 +227,9 @@ func main() ret Int {
     )
 
     # Spin the torus about +Z and tumble it about +X.
-    var torusT: Transform3d = world3dGetTransform(world: world, entityId: torusEntity)
+    var torusT: Transform3d = world3dGetTransform(world: world, entityId: torusEntityId)
     torusT.rotation = Vec3.create(x: t * 0.4, y: 0.0, z: t * 0.6)
-    world3dWriteTransform(world: world, entityId: torusEntity, transform: torusT)
+    world3dWriteTransform(world: world, entityId: torusEntityId, transform: torusT)
 
     let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
     if Gpu2d.renderGate() {

@@ -333,7 +333,7 @@ func listViewApplySceneBinding(
   } else {
     ret
   }
-  let target: EntityId = nodeEntity(world: world, index: index)
+  let target: EntityId = nodeEntityId(world: world, index: index)
   if listViewSceneBindingCurrent(
     world: world
     entityId: target
@@ -357,7 +357,7 @@ func listViewApplySceneBinding(
 func listViewBuildRow(
   world: mod UiWorld
   uiSystems: view UiSystems
-  listEntity: view EntityId
+  listEntityId: view EntityId
   lv: view ListView
   distinct: view List(String)
   scenes: view SceneRegistry
@@ -369,8 +369,8 @@ func listViewBuildRow(
   # ROOT placement components are skipped on mount, as for any scene
   # instance — the host positions the instance.)
   var rowW: Float = 0.0
-  if componentHas(this: world.rects, entityId: listEntity) {
-    rowW = componentGet(this: world.rects, entityId: listEntity).size.x
+  if componentHas(this: world.rects, entityId: listEntityId) {
+    rowW = componentGet(this: world.rects, entityId: listEntityId).size.x
   }
   let r: Rect = { position: { x: 0.0, y: 0.0 }, size: { x: rowW, y: lv.itemHeight } }
   componentSet(this: world.rects, entityId: rowRoot, data: r)
@@ -386,7 +386,7 @@ func listViewBuildRow(
     mountSceneInstanceIntoPage(
       world: world
       uiSystems: uiSystems
-      mountEntity: rowRoot
+      mountEntityId: rowRoot
       scene: scene
       overrides: overrides
       pageId: listViewRowPage(rowRoot: rowRoot)
@@ -569,7 +569,7 @@ func listViewSyncEntity(
       let rowRoot: EntityId = listViewBuildRow(
         world: world
         uiSystems: uiSystems
-        listEntity: entityId
+        listEntityId: entityId
         lv: lv
         distinct: distinct
         scenes: scenes
@@ -658,24 +658,24 @@ func listViewRowKeyOf(lv: view ListView, row: view ListViewRow, index: view Int)
 func listViewFlowRowSize(
   world: view UiWorld
   uiSystems: view UiSystems
-  listEntity: view EntityId
+  listEntityId: view EntityId
   lv: view ListView
 ) ret Vec2 {
   # The laid-out width is authoritative once layout has run; before the first
   # layout (the mount that fills the list) the authored Rect stands in, so the
   # rows exist for that first layout pass and are resized on the next frame.
   var containerW: Float = 0.0
-  if componentHas(this: uiSystems.layout.computedRects, entityId: listEntity) {
-    containerW = componentGet(this: uiSystems.layout.computedRects, entityId: listEntity).size.x
+  if componentHas(this: uiSystems.layout.computedRects, entityId: listEntityId) {
+    containerW = componentGet(this: uiSystems.layout.computedRects, entityId: listEntityId).size.x
   }
-  if containerW <= 0.0 and componentHas(this: world.rects, entityId: listEntity) {
-    containerW = componentGet(this: world.rects, entityId: listEntity).size.x
+  if containerW <= 0.0 and componentHas(this: world.rects, entityId: listEntityId) {
+    containerW = componentGet(this: world.rects, entityId: listEntityId).size.x
   }
   if containerW <= 0.0 {
     containerW = world.layoutW
   }
-  if componentHas(this: world.paddings, entityId: listEntity) {
-    let pad: Padding = componentGet(this: world.paddings, entityId: listEntity)
+  if componentHas(this: world.paddings, entityId: listEntityId) {
+    let pad: Padding = componentGet(this: world.paddings, entityId: listEntityId)
     containerW = containerW - pad.insets.l - pad.insets.r
   }
   var w: Float = lv.itemWidth
@@ -683,8 +683,8 @@ func listViewFlowRowSize(
   if lv.fitToColumns {
     var cols: Int = 1
     var gap: Float = 0.0
-    if componentHas(this: world.layouts, entityId: listEntity) {
-      let layout: Layout = componentGet(this: world.layouts, entityId: listEntity)
+    if componentHas(this: world.layouts, entityId: listEntityId) {
+      let layout: Layout = componentGet(this: world.layouts, entityId: listEntityId)
       if layout.columns > 1 {
         cols = layout.columns
       }
@@ -727,7 +727,7 @@ func listViewBuildFlowRow(
     mountSceneInstanceImpl(
       world: world
       uiSystems: uiSystems
-      mountEntity: rowRoot
+      mountEntityId: rowRoot
       scene: scene
       overrides: overrides
       pageId: listViewRowPage(rowRoot: rowRoot)
@@ -787,7 +787,7 @@ func listViewSyncFlow(
     let size: Vec2 = listViewFlowRowSize(
       world: world
       uiSystems: uiSystems
-      listEntity: entityId
+      listEntityId: entityId
       lv: lv
     )
     let ordered: List(EntityId) = List.create(EntityId, cap: count)

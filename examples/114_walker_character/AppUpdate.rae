@@ -86,7 +86,7 @@ func controlledPosition(
 ) ret Vec3 {
   ret controllerOf(
     world: world
-    entityId: rosterControlledEntity(players: players, characterSystem: characterSystem)
+    entityId: rosterControlledEntityId(players: players, characterSystem: characterSystem)
   ).position
 }
 
@@ -97,7 +97,7 @@ func controlledHeading(
 ) ret Float {
   ret controllerOf(
     world: world
-    entityId: rosterControlledEntity(players: players, characterSystem: characterSystem)
+    entityId: rosterControlledEntityId(players: players, characterSystem: characterSystem)
   ).heading
 }
 
@@ -156,7 +156,7 @@ func updateApp(app: mod App) {
     inputSystem: app.inputSystem
     persist: app.persist
     world: app.world
-    heroEntity: app.characterSystem.heroEntity
+    heroEntityId: app.characterSystem.heroEntityId
     deltaTime: deltaTime
   )
   let joyActive: Bool = camTick.joyActive
@@ -200,7 +200,7 @@ func updateApp(app: mod App) {
     if rosterControlledIsHero(roster: app.players) {
       # Drive the hero's controller IN PLACE through the world's controllers table
       # (write-through componentMod, #721) — no copy-out/set-back.
-      let heroE: EntityId = app.characterSystem.heroEntity
+      let heroE: EntityId = app.characterSystem.heroEntityId
       let heroCtrl: mod ThirdPersonController => componentMod(
         this: app.world.controllers
         entityId: heroE
@@ -315,7 +315,7 @@ func updateApp(app: mod App) {
           playing: app.characterSystem.playing
           speed: app.characterSystem.speed
           toon: app.characterSystem.toon
-          controller: controllerOf(world: app.world, entityId: app.characterSystem.heroEntity)
+          controller: controllerOf(world: app.world, entityId: app.characterSystem.heroEntityId)
           rig: app.cameraSystem.rig
           camera: app.cameraSystem.camera
         )

@@ -29,8 +29,8 @@ func renderSceneSdfWorld(world: view World3d) pub {
     ret
   }
   loop var clusterScan: Int = 0, clusterScan < count, ++clusterScan {
-    let headEntity: EntityId = componentEntityAt(this: world.sdfs, i: clusterScan)
-    let head: SdfPrimitive = componentGet(this: world.sdfs, entityId: headEntity)
+    let headEntityId: EntityId = componentEntityAt(this: world.sdfs, i: clusterScan)
+    let head: SdfPrimitive = componentGet(this: world.sdfs, entityId: headEntityId)
     # The cluster HEAD (the primitive that supplies the fused surface's
     # material + smoothing) is the member with the LOWEST entity index — a
     # stable key independent of dense order (#810), so a componentRemove
@@ -38,9 +38,9 @@ func renderSceneSdfWorld(world: view World3d) pub {
     # itself is the explicit `cluster` id, never dense adjacency.
     var isHead: Bool = true
     loop var back: Int = 0, back < count, ++back {
-      let otherEntity: EntityId = componentEntityAt(this: world.sdfs, i: back)
-      if otherEntity.index < headEntity.index {
-        let other: SdfPrimitive = componentGet(this: world.sdfs, entityId: otherEntity)
+      let otherEntityId: EntityId = componentEntityAt(this: world.sdfs, i: back)
+      if otherEntityId.index < headEntityId.index {
+        let other: SdfPrimitive = componentGet(this: world.sdfs, entityId: otherEntityId)
         if other.shape is 0 {
           if other.cluster is head.cluster {
             isHead = false
@@ -54,13 +54,13 @@ func renderSceneSdfWorld(world: view World3d) pub {
         let colors: List(Float) = List.create(Float, cap: count * 4)
         var ballCount: Int = 0
         loop var i: Int = 0, i < count, ++i {
-          let ballEntity: EntityId = componentEntityAt(this: world.sdfs, i: i)
-          let sdf: SdfPrimitive = componentGet(this: world.sdfs, entityId: ballEntity)
+          let ballEntityId: EntityId = componentEntityAt(this: world.sdfs, i: i)
+          let sdf: SdfPrimitive = componentGet(this: world.sdfs, entityId: ballEntityId)
           if sdf.shape is 0 {
             if sdf.cluster is head.cluster {
               let transform: Transform3d = componentGet(
                 this: world.transforms
-                entityId: ballEntity
+                entityId: ballEntityId
               )
               packed.add(value: transform.position.x)
               packed.add(value: transform.position.y)
@@ -68,7 +68,7 @@ func renderSceneSdfWorld(world: view World3d) pub {
               packed.add(value: transform.scale.x)
               let ballMaterial: Material3d = componentGet(
                 this: world.materials
-                entityId: ballEntity
+                entityId: ballEntityId
               )
               colors.add(value: ballMaterial.baseColor.x)
               colors.add(value: ballMaterial.baseColor.y)
@@ -79,7 +79,7 @@ func renderSceneSdfWorld(world: view World3d) pub {
           }
         }
         if ballCount > 0 {
-          let material: Material3d = componentGet(this: world.materials, entityId: headEntity)
+          let material: Material3d = componentGet(this: world.materials, entityId: headEntityId)
           drawMetaballs(
             packedBalls: packed.data
             count: ballCount
@@ -110,8 +110,8 @@ func renderSceneShadowSdfWorld(
     ret
   }
   loop var clusterScan: Int = 0, clusterScan < count, ++clusterScan {
-    let headEntity: EntityId = componentEntityAt(this: world.sdfs, i: clusterScan)
-    let head: SdfPrimitive = componentGet(this: world.sdfs, entityId: headEntity)
+    let headEntityId: EntityId = componentEntityAt(this: world.sdfs, i: clusterScan)
+    let head: SdfPrimitive = componentGet(this: world.sdfs, entityId: headEntityId)
     # The cluster HEAD (the primitive that supplies the fused surface's
     # material + smoothing) is the member with the LOWEST entity index — a
     # stable key independent of dense order (#810), so a componentRemove
@@ -119,9 +119,9 @@ func renderSceneShadowSdfWorld(
     # itself is the explicit `cluster` id, never dense adjacency.
     var isHead: Bool = true
     loop var back: Int = 0, back < count, ++back {
-      let otherEntity: EntityId = componentEntityAt(this: world.sdfs, i: back)
-      if otherEntity.index < headEntity.index {
-        let other: SdfPrimitive = componentGet(this: world.sdfs, entityId: otherEntity)
+      let otherEntityId: EntityId = componentEntityAt(this: world.sdfs, i: back)
+      if otherEntityId.index < headEntityId.index {
+        let other: SdfPrimitive = componentGet(this: world.sdfs, entityId: otherEntityId)
         if other.shape is 0 {
           if other.cluster is head.cluster {
             isHead = false
@@ -134,13 +134,13 @@ func renderSceneShadowSdfWorld(
         let packed: List(Float) = List.create(Float, cap: count * 4)
         var ballCount: Int = 0
         loop var i: Int = 0, i < count, ++i {
-          let ballEntity: EntityId = componentEntityAt(this: world.sdfs, i: i)
-          let sdf: SdfPrimitive = componentGet(this: world.sdfs, entityId: ballEntity)
+          let ballEntityId: EntityId = componentEntityAt(this: world.sdfs, i: i)
+          let sdf: SdfPrimitive = componentGet(this: world.sdfs, entityId: ballEntityId)
           if sdf.shape is 0 {
             if sdf.cluster is head.cluster {
               let transform: Transform3d = componentGet(
                 this: world.transforms
-                entityId: ballEntity
+                entityId: ballEntityId
               )
               packed.add(value: transform.position.x)
               packed.add(value: transform.position.y)

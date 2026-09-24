@@ -186,9 +186,9 @@ func main() ret Int {
   # Scene 1's named props, resolved once to their World3d entities so the
   # animator can spin them in place each frame (the World3d analogue of the
   # nodeId->Int lookup the Scene3d asset used).
-  let cubeAEntity: EntityId = world3dAssetEntity(asset: scene1, nodeId: "spinCubeA")
-  let cubeBEntity: EntityId = world3dAssetEntity(asset: scene1, nodeId: "spinCubeB")
-  let torusEntity: EntityId = world3dAssetEntity(asset: scene1, nodeId: "heroTorus")
+  let cubeAEntityId: EntityId = world3dAssetEntityId(asset: scene1, nodeId: "spinCubeA")
+  let cubeBEntityId: EntityId = world3dAssetEntityId(asset: scene1, nodeId: "spinCubeB")
+  let torusEntityId: EntityId = world3dAssetEntityId(asset: scene1, nodeId: "heroTorus")
 
   # Fonts + theme through the shared loader, which also bridges the
   # theme's PALETTE into the active theme — the step that was missing
@@ -710,9 +710,9 @@ func main() ret Int {
       if uiState.activeScene is 1 {
         animateScene1(
           world: scene1.world
-          cubeA: cubeAEntity
-          cubeB: cubeBEntity
-          torus: torusEntity
+          cubeA: cubeAEntityId
+          cubeB: cubeBEntityId
+          torus: torusEntityId
           time: simTime
         )
       }

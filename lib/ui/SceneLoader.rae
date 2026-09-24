@@ -237,14 +237,14 @@ func loadSceneIntoPage(
         p = p + 1
       } else {
         let node: view SceneNode => nodeAt(this: scene, idx: p)
-        let parentEntity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: p)
+        let parentEntityId: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: p)
         let kn: Int = node.childrenIds.length
         var q: Int = 0
         loop q < kn {
           if let childId: String = node.childrenIds.copyAt(index: q) {
             let childIdx: Int = sceneNodeIndex(this: scene, nodeId: childId)
             if childIdx >= 0 {
-              let childEntity: EntityId = rae_ext_rae_buf_get(
+              let childEntityId: EntityId = rae_ext_rae_buf_get(
                 buf: entitiesByNodeIndex.data
                 index: childIdx
               )
@@ -254,8 +254,8 @@ func loadSceneIntoPage(
               setParent(
                 parents: uiSystems.hierarchy.parents
                 childrens: world.childrens
-                child: childEntity
-                parent: parentEntity
+                child: childEntityId
+                parent: parentEntityId
               )
             }
           }
@@ -270,14 +270,14 @@ func loadSceneIntoPage(
     if rootIdx < 0 {
       ret noEntity()
     }
-    let rootEntity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: rootIdx)
+    let rootEntityId: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: rootIdx)
     if pageId.length() > 0 {
       var copiedId: String = ""
       copiedId = copiedId.concat(other: pageId)
       let pr: PageRoot = { id: own copiedId }
-      componentSet(this: world.pageRoots, entityId: rootEntity, data: own pr)
+      componentSet(this: world.pageRoots, entityId: rootEntityId, data: own pr)
     }
-    ret rootEntity
+    ret rootEntityId
   }
 }
 
@@ -342,7 +342,7 @@ func resolveSceneInstances(
           mountSceneInstanceIntoPage(
             world: world
             uiSystems: uiSystems
-            mountEntity: entityId
+            mountEntityId: entityId
             scene: scene
             overrides: overrides
             pageId: pageId
@@ -413,7 +413,7 @@ func dumpScene(world: view UiWorld, uiSystems: view UiSystems, scene: view Scene
     # Resolve via the world's nodeIds map (more authoritative than our
     # local list — covers later runtime additions too).
     if let entityRaw: Int = world.nodeIds.get(k: node.nodeId) {
-      let entityId: EntityId = nodeEntity(world: world, index: entityRaw)
+      let entityId: EntityId = nodeEntityId(world: world, index: entityRaw)
       var parentStr: String = "(root)"
       if componentHas(this: uiSystems.hierarchy.parents, entityId: entityId) {
         let pl: Parent = componentGet(this: uiSystems.hierarchy.parents, entityId: entityId)
