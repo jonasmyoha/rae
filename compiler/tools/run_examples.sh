@@ -303,6 +303,43 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             echo "  inspector select failed:"
             cat "$TMP_OUT/render-select.log" "$TMP_OUT/screenshot-select.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
           fi
+          # The Rect group's text inputs (#44133406), driven through the SAME
+          # functions the keys call (RectEdit.rae), never a back door. Four
+          # runs, each pinning one rule of the editor:
+          #   Tab commits the field it leaves and moves on (x=5, then y=7)
+          #   Esc drops the draft: typed 99, nothing written, h still mixed
+          #   an untyped MIXED field commits nothing — tabbing through it must
+          #     not flatten a selection that disagrees to one value
+          #   the W/H lock keeps EACH entity's own ratio: Card 300x460 locked
+          #     to w=150 gets h=230, CardCost 60x40 to w=120 gets h=80
+          if (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
+             RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=1200 RAE_UI_EDITOR_TEST_SELECT=PlayButton \
+             RAE_UI_EDITOR_TEST_SET_RECT="focus:x type:5 tab type:7 enter" \
+             perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-recttab.log" 2>&1 \
+             && grep -qaF "rect set focus:x type:5 tab type:7 enter -> 2: x 5 layout  y 7 layout" "$TMP_OUT/render-recttab.log" \
+             && (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
+                RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=1200 RAE_UI_EDITOR_TEST_SELECT=PlayButton,ContinueButton \
+                RAE_UI_EDITOR_TEST_SET_RECT="focus:h type:99 esc focus:h enter" \
+                perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-rectesc.log" 2>&1 \
+             && grep -qaF "rect set focus:h type:99 esc focus:h enter -> 0: x 0 layout  y 0 layout  w 0 fill  h —" "$TMP_OUT/render-rectesc.log" \
+             && (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/Card.raescene" \
+                RAE_UI_EDITOR_ROOT="examples/121_ui_editor/assets/samples" \
+                RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=1200 RAE_UI_EDITOR_TEST_SELECT=Card \
+                RAE_UI_EDITOR_TEST_SET_RECT="lock w=150" \
+                perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-rectlock.log" 2>&1 \
+             && grep -qaF "rect set lock w=150 -> 1: x 0  y 0  w 150  h 230" "$TMP_OUT/render-rectlock.log" \
+             && (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/Card.raescene" \
+                RAE_UI_EDITOR_ROOT="examples/121_ui_editor/assets/samples" \
+                RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=1200 RAE_UI_EDITOR_TEST_SELECT=CardCost \
+                RAE_UI_EDITOR_TEST_SET_RECT="lock w=120" \
+                perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-rectlock2.log" 2>&1 \
+             && grep -qaF "rect set lock w=120 -> 1: x 0 layout  y 0 layout  w 120  h 80" "$TMP_OUT/render-rectlock2.log"; then
+            :
+          else
+            UI_EDITOR_OK=0
+            echo "  rect text inputs failed:"
+            cat "$TMP_OUT/render-recttab.log" "$TMP_OUT/render-rectesc.log" "$TMP_OUT/render-rectlock.log" "$TMP_OUT/render-rectlock2.log" 2>/dev/null | grep -a "rect " | cut -c1-200 | sed 's/^/    /'
+          fi
           # Canvas selection gestures (#20778145). One run replays a script of
           # real canvas clicks through the live gesture path, so what is gated
           # is the gesture, not a back door into the selection set:
@@ -374,14 +411,14 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              RAE_UI_HEADLESS=1 RAE_UI_EDITOR_TREE=1 RAE_SDL_HEADLESS_MS=1200 \
              RAE_UI_EDITOR_TEST_TREE_CLICKS="PlayButton" \
              perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-widgets1.log" 2>&1 \
-             && grep -qaF "select parent:; filter: / to search components:; Size: w=SizeAxis { mode: fill, min: -1, max: -1 } h=SizeAxis { mode: fixed, min: -1, max: -1 }; Layout: kind=horizontal [none|horizontal|vertical|grid|stack] gap=16 · was spaceS" "$TMP_OUT/render-widgets1.log" \
+             && grep -qaF "select parent:; filter: / to search components:; Rect: lock w/h=off x=0 layout y=0 layout w=0 fill h=128; Size: w=SizeAxis { mode: fill, min: -1, max: -1 } h=SizeAxis { mode: fixed, min: -1, max: -1 }; Layout: kind=horizontal [none|horizontal|vertical|grid|stack] gap=16 · was spaceS" "$TMP_OUT/render-widgets1.log" \
              && grep -qaF "; OnClick: actionId=menu.play maxDelayMs=250; Name: label=PlayButton · computed; NodeId: id=PlayButton · computed" "$TMP_OUT/render-widgets1.log" \
              && ! grep -qaF "Children:" "$TMP_OUT/render-widgets1.log" \
              && (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
                 RAE_UI_HEADLESS=1 RAE_UI_EDITOR_TREE=1 RAE_SDL_HEADLESS_MS=1200 \
                 RAE_UI_EDITOR_TEST_TREE_CLICKS="PlayButton cmd:PlayLabel" \
                 perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-widgets2.log" 2>&1 \
-             && grep -qaF "widgets select parent:; filter: / to search components:; Size: w=— h=SizeAxis { mode: fixed, min: -1, max: -1 }; Layout (1/2): kind=horizontal" "$TMP_OUT/render-widgets2.log" \
+             && grep -qaF "widgets select parent:; filter: / to search components:; Rect: lock w/h=off x=0 layout y=0 layout w=— — h=—; Size: w=— h=SizeAxis { mode: fixed, min: -1, max: -1 }; Layout (1/2): kind=horizontal" "$TMP_OUT/render-widgets2.log" \
              && (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/Coverage.raescene" \
                 RAE_UI_HEADLESS=1 RAE_UI_EDITOR_TREE=1 RAE_HEADLESS_FRAMES=3 RAE_FIXED_DT=0.05 \
                 RAE_UI_EDITOR_TEST_TREE_CLICKS="FadedBox" \
@@ -798,7 +835,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/render-save.log" "$TMP_OUT/render-saved.log" "$TMP_OUT/screenshot-saved.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
           fi
           if [ "$UI_EDITOR_OK" = "1" ]; then
-            echo "PASS: $EXAMPLE_NAME (7 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select, composite multi-selection inspector, generated component widgets, value provenance, component add/remove/filter, select parent + identity, hierarchy collapse/expand, selected-row plate, row labels + tree filter, canvas selection gestures, click-through cycling, hierarchy multi-selection, Rect widget multi-select read+write, .raepack project open + switch, file picker, camera zoom, outline pools, save path)"
+            echo "PASS: $EXAMPLE_NAME (7 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select, composite multi-selection inspector, generated component widgets, value provenance, component add/remove/filter, select parent + identity, hierarchy collapse/expand, selected-row plate, row labels + tree filter, canvas selection gestures, click-through cycling, hierarchy multi-selection, Rect widget multi-select read+write, Rect text inputs + lock, .raepack project open + switch, file picker, camera zoom, outline pools, save path)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (ui editor sample gate)"

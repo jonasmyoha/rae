@@ -392,6 +392,49 @@ inspector is read-only until the DAW/editor capability design
 (`ui-ecs-refactor-status.md` §2.7) lands; the app is shaped so those are new
 systems, not rewrites.
 
+## Typing into the Rect group (#44133406)
+
+The Rect component is the inspector's one hand-written widget, and it is now
+four real inputs — X, Y, W, H — plus a W/H lock, instead of a summary line
+(`inspectorSystem/RectEdit.rae`, on top of RectWidget's model).
+
+| key / gesture | effect |
+|---|---|
+| click a row | focus it; the whole value is SELECTED, so the first key replaces it (`[128]|`) |
+| digits, `.`, `-` | type into the draft (`-` only first, one `.`) |
+| Backspace | delete the last character |
+| Tab | commit this field, move to the next (x → y → w → h → x) |
+| Enter, or any other click | commit to EVERY selected entity, stop editing |
+| Esc | drop the draft, stop — nothing is written |
+
+Three rules the design turns on:
+
+- **An untyped field commits nothing.** A MIXED field shows the mixed marker
+  until something is typed; tabbing through it, or focusing it and pressing
+  Enter, must not flatten a selection that disagrees into one value.
+- **A blur commits to the selection it was typed for.** A click elsewhere is
+  handled at the very top of the frame, before that click can change the
+  selection — otherwise the draft would land on whatever the click selected.
+- **The lock keeps each entity's OWN ratio.** Locking two differently-shaped
+  nodes and typing a width scales each by its own proportion (Card 300×460 →
+  w 150 gives h 230; CardCost 60×40 → w 120 gives h 80), never forcing them to
+  one shape. An entity with a zero on either axis has no ratio to keep and
+  takes the typed value alone. X and Y ignore the lock.
+
+**One question decides whether keys are text or commands:**
+`keyboardCaptured(inspectorSystem)`, asked ONCE at the start of the frame and
+true while either filter or a Rect field has focus. While it is, the bare
+panel shortcuts in App.rae, `T`, `U`, `/`, `F`, the arrows and the
+deselecting Esc all stand down — and because it is asked at the start, the
+key that ENDS an edit (Enter, Esc) is spent on the edit alone. This replaced
+several single-flag checks and fixed latent bugs from the filter work, where
+typing `t` or `u` into the tree filter toggled the panel or selected a parent,
+and Esc in a filter also threw the selection away.
+
+`RAE_UI_EDITOR_TEST_SET_RECT` takes a keystroke script (`focus:x type:5 tab
+type:7 enter`, `lock w=150`, `esc`) and drives the SAME functions the keys
+call. The original `h=64` form still works as shorthand for focus-type-Enter.
+
 ## The side panels are the same width
 
 `LeftPanel` and `RightPanel` are both **384** wide. They were 328 and 384,
