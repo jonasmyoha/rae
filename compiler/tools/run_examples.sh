@@ -236,9 +236,13 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           SCREENSHOT="$TMP_OUT/ui-editor-NestedPage.bmp"
           if (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/NestedPage.raescene" \
              RAE_UI_EDITOR_ROOT="examples/121_ui_editor/assets/samples" \
-             RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
+             RAE_UI_HEADLESS=1 RAE_UI_EDITOR_TREE=1 RAE_SDL_HEADLESS_MS=1500 \
+             RAE_UI_EDITOR_TEST_TREE_CLICKS="ParentMount" RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
              perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-NestedPage.log" 2>&1 \
              && grep -qE '\[ui-editor\] mounted NestedPage: [1-9][0-9]* nodes, 0 diagnostics' "$TMP_OUT/render-NestedPage.log" \
+             && grep -qF 'ParentMount - Scene  nested/Parent' "$TMP_OUT/render-NestedPage.log" \
+             && grep -qF 'ChildRoot - Scene  nested/Child' "$TMP_OUT/render-NestedPage.log" \
+             && grep -qF 'gap=24 · from spaceM' "$TMP_OUT/render-NestedPage.log" \
              && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=20 \
                 > "$TMP_OUT/screenshot-NestedPage.log" 2>&1; then
             :
