@@ -25,12 +25,12 @@ func uploadTetrisMesh(renderer: mod DeferredRenderer, meshData: view MeshData) r
   )
 }
 
-# The Material3d for a tetromino kind color (colorIdx 0..6 -> kind ids 1..7).
+# The Material3d for a tetromino kind color (colorIndex 0..6 -> kind ids 1..7).
 # World3d stores the material as a per-entity COMPONENT, so recolouring a block
 # is a component write rather than the old shared material-index swap.
-func kindMaterial(colorIdx: view Int) ret Material3d {
+func kindMaterial(colorIndex: view Int) ret Material3d {
   ret Material3d {
-    baseColor: kindColor(id: colorIdx + 1)
+    baseColor: kindColor(id: colorIndex + 1)
     metallic: 0.08
     roughness: 0.3
     emission: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
@@ -57,11 +57,11 @@ func blockTransform(gridX: view Int, gridY: view Int, size: view Float) ret Tran
 # Recolour a block by writing its per-entity Material3d component. `entityIndex` is the
 # block's dense slot index (== its position in the transforms table), mapped to an
 # EntityId via world3dEntityAt.
-func setEntityMaterial(world: mod World3d, entityIndex: view Int, colorIdx: view Int) {
+func setEntityMaterial(world: mod World3d, entityIndex: view Int, colorIndex: view Int) {
   world3dSetMaterial(
     world: world
     entityId: world3dEntityAt(world: world, i: entityIndex)
-    material: kindMaterial(colorIdx: colorIdx)
+    material: kindMaterial(colorIndex: colorIndex)
   )
 }
 
@@ -79,7 +79,7 @@ func createTetrisRenderState(renderer: mod DeferredRenderer) ret TetrisRenderSta
     let entityId: EntityId = world3dAddMeshInstance(
       world: world
       mesh: cube
-      material: kindMaterial(colorIdx: 0)
+      material: kindMaterial(colorIndex: 0)
       position: hidden.position
       rotation: hidden.rotation
       scale: hidden.scale
@@ -91,7 +91,7 @@ func createTetrisRenderState(renderer: mod DeferredRenderer) ret TetrisRenderSta
     let entityId: EntityId = world3dAddMeshInstance(
       world: world
       mesh: cube
-      material: kindMaterial(colorIdx: 0)
+      material: kindMaterial(colorIndex: 0)
       position: hidden.position
       rotation: hidden.rotation
       scale: hidden.scale
@@ -103,7 +103,7 @@ func createTetrisRenderState(renderer: mod DeferredRenderer) ret TetrisRenderSta
     let entityId: EntityId = world3dAddMeshInstance(
       world: world
       mesh: cube
-      material: kindMaterial(colorIdx: slot % 7)
+      material: kindMaterial(colorIndex: slot % 7)
       position: hidden.position
       rotation: hidden.rotation
       scale: hidden.scale
@@ -169,7 +169,7 @@ func extractTetrisScene(renderState: mod TetrisRenderState, world: view World) {
           setEntityMaterial(
             world: renderState.world
             entityIndex: entityIndex
-            colorIdx: colorId - 1
+            colorIndex: colorId - 1
           )
         } else {
           writeSlotTransform(renderState: renderState, entityIndex: entityIndex, transform: hidden)
@@ -206,7 +206,7 @@ func extractTetrisScene(renderState: mod TetrisRenderState, world: view World) {
             setEntityMaterial(
               world: renderState.world
               entityIndex: entityIndex
-              colorIdx: colorId - 1
+              colorIndex: colorId - 1
             )
             activeSlot = activeSlot + 1
           }
