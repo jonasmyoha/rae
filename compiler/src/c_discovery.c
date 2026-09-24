@@ -188,6 +188,36 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
                     discover_specializations_expr_impl(ctx, synth_call);
                     break;
                 }
+                // Module-qualified call: `Query.queryViewAt(table: t, denseIndex: i)`
+                // where `Query` is an imported module (`import ecs/Query`). The
+                // qualifier is not a value and not a type, and c_expr.c lowers the
+                // call to a plain `queryViewAt(table: t, denseIndex: i)` with NO
+                // receiver — so discover exactly that. Without this the generic
+                // specialisation was never registered up front: the emitter then
+                // created it lazily AFTER its first caller, which C rejects as a
+                // call to an undeclared function (#33142260). Same test as the
+                // lowering: no local binding, no inferable type, and a function
+                // of that name exists.
+                bool obj_has_value = obj_has_local || infer_expr_type_ref(ctx, expr->as.method_call.object) != NULL
+                    || is_pointer_type(ctx, obj_name);
+                bool fn_exists = false;
+                if (!obj_has_value) {
+                    for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count && !fn_exists; i++) {
+                        const AstDecl* dd = ctx->compiler_ctx->all_decls[i];
+                        fn_exists = dd->kind == AST_DECL_FUNC && str_eq(dd->as.func_decl.name, expr->as.method_call.method_name);
+                    }
+                }
+                if (fn_exists) {
+                    AstExpr* synth_call = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstExpr));
+                    *synth_call = (AstExpr){.kind = AST_EXPR_CALL, .line = expr->line, .column = expr->column};
+                    synth_call->as.call.callee = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstExpr));
+                    *synth_call->as.call.callee = (AstExpr){.kind = AST_EXPR_IDENT, .line = expr->line, .column = expr->column};
+                    synth_call->as.call.callee->as.ident = expr->as.method_call.method_name;
+                    synth_call->as.call.args = expr->as.method_call.args;
+                    synth_call->as.call.generic_args = expr->as.method_call.generic_args;
+                    discover_specializations_expr_impl(ctx, synth_call);
+                    break;
+                }
             }
             uint16_t param_count = 1; for (const AstCallArg* a = expr->as.method_call.args; a; a = a->next) param_count++;
             Str obj_type = infer_expr_type(ctx, expr->as.method_call.object);
