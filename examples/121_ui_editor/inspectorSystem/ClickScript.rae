@@ -507,15 +507,20 @@ func logInspectorPanel(
   # Read the rows AFTER the resync above: `treeEntities` is rebuilt there, and
   # logging it earlier reports the previous sync's tree.
   var visible: String = ""
+  var labels: String = ""
   loop let row: view EntityId in inspectorSystem.treeEntities {
     let name: String = nodeIdOf(world: world, entity: row)
+    let label: String = treeRowLabelOf(world: world, entity: row)
     if visible.length() is 0 {
       visible = "{name}"
+      labels = "{label}"
     } else {
       visible = "{visible},{name}"
+      labels = "{labels} | {label}"
     }
   }
   log("[ui-editor] tree rows ({inspectorSystem.treeEntities.length}): {visible}")
+  log("[ui-editor] tree labels: {labels}")
   log("[ui-editor] tree header: {chromeSystem.treeHeader}")
   log("[ui-editor] inspector: {inspectorSummaryLine(chromeSystem: chromeSystem)}")
 }

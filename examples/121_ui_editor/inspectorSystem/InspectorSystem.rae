@@ -10,6 +10,7 @@
 # RAE_UI_EDITOR_TEST_SELECT=<nodeId>: the headless gate's hook — select that
 # document node at boot as a click would.
 import Gpu2d
+import Json
 import Keys
 import Sdl3
 import String
@@ -27,6 +28,7 @@ open ecs/Entity
 open ecs/ComponentTable
 open ui/UiSystems
 open ui/Scene
+open ui/SceneInstance
 open ui/SceneWriter
 open ui/scrollRootSystem/ScrollRootSystem
 open inspectorSystem/NodeQuery
@@ -44,6 +46,7 @@ type InspectorSystem {
   # successful load, then reused by every inspector selection to distinguish
   # authored tokens from values a runtime system actually changed.
   sourceWorld: UiWorld
+  sourceScenes: SceneRegistry
   hovered: EntityId
   treeDragStartY: Float
   treeDragMoved: Bool
@@ -126,6 +129,7 @@ func createInspectorSystem(world: mod UiWorld) ret InspectorSystem {
     outlineFors: ComponentTable.create(OutlineFor)
     marqueeBands: ComponentTable.create(MarqueeBand)
     sourceWorld: createUiWorld()
+    sourceScenes: createSceneRegistry()
     hovered: noEntity()
     treeDragStartY: 0
     treeDragMoved: false
@@ -740,6 +744,28 @@ func inspectorUpdate(
 
 # After a (re)load the entities are new: drop the selection, or re-find it by
 # node id, and rebuild the panels.
+func cloneInspectorScene(scene: view Scene) ret Scene {
+  let source: String = Json.stringify(doc: scene.doc, value: Json.root(doc: scene.doc))
+  let cloned: Scene = parseScene(source: source)
+  cloned.sceneId = "{scene.sceneId}"
+  ret cloned
+}
+
+func cloneInspectorScenes(scene: view Scene, registry: view SceneRegistry) ret SceneRegistry {
+  var cloned: SceneRegistry = createSceneRegistry()
+  registerScene(reg: cloned, key: "{scene.sceneId}", scene: cloneInspectorScene(scene: scene))
+  loop var i: Int = 0, i < registry.ids.length, ++i {
+    if let sceneId: String = registry.ids.copyAt(index: i) {
+      if sceneRegistryHas(reg: cloned, key: sceneId) {
+        continue
+      }
+      let registered: view Scene => sceneRegistryGet(reg: registry, idx: i)
+      registerScene(reg: cloned, key: "{sceneId}", scene: cloneInspectorScene(scene: registered))
+    }
+  }
+  ret cloned
+}
+
 func inspectorAfterLoad(
   inspectorSystem: mod InspectorSystem
   world: mod UiWorld
@@ -749,9 +775,16 @@ func inspectorAfterLoad(
   selectNodeId: view String
   setRect: view String
   scene: view Scene
+  registry: view SceneRegistry
 ) {
-  let sourceWorld: UiWorld = freshDecodeOf(world: world, uiSystems: uiSystems, scene: scene)
+  let sourceWorld: UiWorld = freshDecodeGraphOf(
+    world: world
+    uiSystems: uiSystems
+    scene: scene
+    registry: registry
+  )
   inspectorSystem.sourceWorld = own sourceWorld
+  inspectorSystem.sourceScenes = cloneInspectorScenes(scene: scene, registry: registry)
   let sceneRoot: EntityId = documentSceneRoot(world: world, pageRoot: pageRoot)
   inspectorSystem.hovered = noEntity()
   var target: EntityId = noEntity()

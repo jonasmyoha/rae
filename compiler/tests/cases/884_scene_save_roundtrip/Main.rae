@@ -175,6 +175,10 @@ func roundTrip(path: view String, root: view String, savedPath: view String) ret
     pageRoot: pageRoot
     pageId: ""
   )
+  if text.contains(sub: "\"SceneSource\"") {
+    log("  {path}: runtime SceneSource leaked into saved text")
+    ret 1
+  }
   writeFile(path: savedPath, content: text)
   var b: UiWorld = createUiWorld()
   var bSystems: UiSystems = createUiSystems()

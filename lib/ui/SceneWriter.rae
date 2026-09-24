@@ -505,3 +505,28 @@ func freshDecodeOf(world: view UiWorld, uiSystems: view UiSystems, scene: view S
   loadScene(world: fresh, uiSystems: freshSystems, scene: scene)
   ret fresh
 }
+
+# The inspector's reference world includes the complete mounted scene graph,
+# so a sub-scene field can be compared with a fresh decode of its own file.
+func freshDecodeGraphOf(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  scene: view Scene
+  registry: view SceneRegistry
+) ret UiWorld {
+  var fresh: UiWorld = createUiWorld()
+  var freshSystems: UiSystems = createUiSystems()
+  fresh.theme.active = world.theme.active
+  fresh.theme.generation = world.theme.generation
+  applyResolvedTokens(dst: fresh.theme.resolved, src: world.theme.resolved)
+  fresh.bundles = cloneBundleSet(set: world.bundles)
+  fresh.scenePolicy.unknownComponents = UnknownComponentPolicy.report
+  loadScene(world: fresh, uiSystems: freshSystems, scene: scene)
+  resolveSceneInstances(
+    world: fresh
+    uiSystems: freshSystems
+    registry: registry
+    pageId: ""
+  )
+  ret fresh
+}

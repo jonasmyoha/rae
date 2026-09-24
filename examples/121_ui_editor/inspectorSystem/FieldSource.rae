@@ -26,6 +26,7 @@ import Json
 import String
 open ui/Ecs
 open ui/Scene
+open ui/SceneInstance
 open ecs/Entity
 open ecs/ComponentTable
 
@@ -157,12 +158,18 @@ func decodedFieldIn(
 
 func decodedFieldValue(
   sourceWorld: view UiWorld
+  sceneId: view String
   nodeId: view String
   component: view String
   field: view String
 ) ret AuthoredValue {
-  if let raw: Int = findNodeInPage(world: sourceWorld, pageId: "", nodeId: nodeId) {
-    let entity: EntityId = nodeEntity(world: sourceWorld, index: raw)
+  let count: Int = componentCount(this: sourceWorld.sceneSources)
+  loop var i: Int = 0, i < count, ++i {
+    let entity: EntityId = componentEntityAt(this: sourceWorld.sceneSources, i: i)
+    let source: view SceneSource => componentView(this: sourceWorld.sceneSources, entity: entity)
+    if source.sceneId is not sceneId or source.nodeId is not nodeId {
+      continue
+    }
     var answer: AuthoredValue = missingAuthoredValue()
     loop let table: view ComponentTable(any) in fields(sourceWorld) {
       if typeName(table) is component {
@@ -175,19 +182,29 @@ func decodedFieldValue(
 }
 
 func fieldProvenance(
-  scene: view Scene
+  sources: view SceneRegistry
+  world: view UiWorld
+  entity: view EntityId
   sourceWorld: view UiWorld
-  nodeId: view String
   component: view String
   field: view String
   liveText: view String
 ) ret FieldProvenance {
+  if componentHas(this: world.sceneSources, entity: entity) is false {
+    ret FieldProvenance { source: FieldSource.unknown, authoredText: "" }
+  }
+  let source: view SceneSource => componentView(this: world.sceneSources, entity: entity)
+  let sourceIndex: Int = sceneRegistryIndex(reg: sources, key: source.sceneId)
+  if sourceIndex < 0 {
+    ret FieldProvenance { source: FieldSource.unknown, authoredText: "" }
+  }
+  let scene: view Scene => sceneRegistryGet(reg: sources, idx: sourceIndex)
   var found: Bool = false
   var componentAuthored: Bool = false
   var fieldAuthored: Bool = false
   let authored: AuthoredValue = authoredFieldValue(
     scene: scene
-    nodeId: nodeId
+    nodeId: source.nodeId
     component: component
     field: field
     found: found
@@ -208,7 +225,8 @@ func fieldProvenance(
   }
   let decoded: AuthoredValue = decodedFieldValue(
     sourceWorld: sourceWorld
-    nodeId: nodeId
+    sceneId: source.sceneId
+    nodeId: source.nodeId
     component: component
     field: field
   )
