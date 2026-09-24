@@ -251,6 +251,21 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             echo "  nested sub-scene sample failed:"
             cat "$TMP_OUT/render-NestedPage.log" "$TMP_OUT/screenshot-NestedPage.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
           fi
+          # Hover leak (#32786425): 600 canvas hover changes through the live
+          # inspector update + layout must not grow memory. Before the fix
+          # this was ~35 MB (a per-call deep copy of the hierarchy's rows that
+          # was never freed); anything above 4 MB fails.
+          if (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
+             RAE_UI_EDITOR_ROOT="examples/121_ui_editor/assets/samples" \
+             RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=300 RAE_UI_EDITOR_TEST_HOVER_CYCLE="Title,Logo,600" \
+             perl -e 'alarm shift; exec @ARGV' 60 "$TMP_OUT/app") > "$TMP_OUT/render-hover-leak.log" 2>&1 \
+             && grep -aE '\[ui-editor\] hover cycle 600: rss -?[0-4] MB above start' "$TMP_OUT/render-hover-leak.log" > /dev/null; then
+            :
+          else
+            UI_EDITOR_OK=0
+            echo "  hover leak check failed (600 canvas hovers):"
+            grep -a 'hover cycle' "$TMP_OUT/render-hover-leak.log" 2>/dev/null | sed 's/^/    /'
+          fi
           # Hover glow (Shadow.hoverOpacity + the ButtonSystem fade): hovering
           # the Open pill once must brighten its glow — the frame differs from
           # the un-hovered MainMenu shot above, and only by the glow.
@@ -962,7 +977,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/render-save.log" "$TMP_OUT/render-saved.log" "$TMP_OUT/screenshot-saved.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
           fi
           if [ "$UI_EDITOR_OK" = "1" ]; then
-            echo "PASS: $EXAMPLE_NAME (7 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select, composite multi-selection inspector, generated component widgets, value provenance, component add/remove/filter, select parent + identity, hierarchy collapse/expand, selected-row plate, row labels + tree filter, canvas click + marquee selection gestures, click-through cycling, hierarchy multi-selection, Rect widget multi-select read+write, Rect text inputs + lock, wheel routing, hover glow, .raepack project open + switch, file picker, camera zoom, outline pools, save path)"
+            echo "PASS: $EXAMPLE_NAME (7 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select, composite multi-selection inspector, generated component widgets, value provenance, component add/remove/filter, select parent + identity, hierarchy collapse/expand, selected-row plate, row labels + tree filter, canvas click + marquee selection gestures, click-through cycling, hierarchy multi-selection, Rect widget multi-select read+write, Rect text inputs + lock, wheel routing, hover glow, hover leak, .raepack project open + switch, file picker, camera zoom, outline pools, save path)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (ui editor sample gate)"

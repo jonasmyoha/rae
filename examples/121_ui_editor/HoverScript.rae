@@ -11,6 +11,10 @@ open ui/Ecs
 open ui/UiSystems
 open ui/buttonSystem/ButtonSystem
 open ecs/Entity
+import Sys
+open ui/inputSystem/InputSystem
+open app3d/UiShell
+open ui/listViewSystem/ListViewSystem
 
 func runTestHover(world: mod UiWorld, uiSystems: mod UiSystems, nodeId: view String) {
   if nodeId.length() is 0 {
@@ -32,4 +36,78 @@ func runTestHover(world: mod UiWorld, uiSystems: mod UiSystems, nodeId: view Str
     pressed: false
   )
   log("[ui-editor] hover {nodeId}")
+}
+
+# RAE_UI_EDITOR_TEST_HOVER_CYCLE="<nodeA>,<nodeB>,<count>": the leak probe for
+# canvas hovering. Alternates the pointer between the centres of two DOCUMENT
+# nodes `count` times, each step going through the live inspector update (the
+# canvas hover path) and the list + layout passes a real frame runs when
+# something changed, logging the process's resident memory as it goes.
+# Moving over the canvas re-hovers a node on every crossing, so a per-hover
+# leak shows as RSS growing with `count`. The gate (run_examples.sh) runs 600:
+# before #32786425 that was ~35 MB, now 0.
+#
+# The inspector update runs every loop iteration, and every pointer move wakes
+# the loop, so this is the path hovering drives. The leak it caught was not in
+# the hover logic but in the scroll-root update it runs every call: a deep copy
+# of the hierarchy's whole row data, read as `componentGet(...).rows.length`
+# and never freed (a compiler bug, fixed in the C backend's member emission).
+func runTestHoverCycle(app: mod App, script: view String) {
+  if script.length() is 0 {
+    ret
+  }
+  let firstComma: Int = script.indexOf(sub: ",")
+  let rest: String = script.sub(start: firstComma + 1, len: script.length() - firstComma - 1)
+  let secondComma: Int = rest.indexOf(sub: ",")
+  if firstComma <= 0 or secondComma <= 0 {
+    log("[ui-editor] hover cycle: expected <nodeA>,<nodeB>,<count>, got {script}")
+    ret
+  }
+  let nodeA: String = script.sub(start: 0, len: firstComma)
+  let nodeB: String = rest.sub(start: 0, len: secondComma)
+  let count: Int = rest.sub(start: secondComma + 1, len: rest.length() - secondComma - 1).toInt()
+  let sceneRoot: EntityId = documentSceneRoot(world: app.world, pageRoot: app.document.pageRoot)
+  let pointA: ClickPoint = nodeCenterOf(
+    uiSystems: app.uiSystems
+    entityId: findNodeByIdIn(world: app.world, entityId: sceneRoot, nodeId: nodeA)
+  )
+  let pointB: ClickPoint = nodeCenterOf(
+    uiSystems: app.uiSystems
+    entityId: findNodeByIdIn(world: app.world, entityId: sceneRoot, nodeId: nodeB)
+  )
+  if pointA.ok is false or pointB.ok is false {
+    log("[ui-editor] hover cycle: {nodeA} or {nodeB} has no on-screen rect")
+    ret
+  }
+  var input: UiInput = createUiInput()
+  let startKb: Int = Sys.processRssKb()
+  loop var i: Int = 1, i <= count, ++i {
+    if i % 2 is 1 {
+      input.pointer.x = pointA.x
+      input.pointer.y = pointA.y
+    } else {
+      input.pointer.x = pointB.x
+      input.pointer.y = pointB.y
+    }
+    let changed: Bool = inspectorUpdate(
+      inspectorSystem: app.inspectorSystem
+      world: app.world
+      uiSystems: app.uiSystems
+      chromeSystem: app.chromeSystem
+      input: input
+      pageRoot: app.document.pageRoot
+      chromeVisible: chromeVisible(world: app.world, chromeSystem: app.chromeSystem)
+      scene: app.document.scene
+    )
+    if changed {
+      listViewSystem(world: app.world, uiSystems: app.uiSystems, scenes: app.document.registry)
+      runScheduledUiSystems(
+        schedule: app.schedule
+        world: app.world
+        uiSystems: app.uiSystems
+        res: app.gpuUi
+      )
+    }
+  }
+  log("[ui-editor] hover cycle {count}: rss {(Sys.processRssKb() - startKb) / 1024} MB above start")
 }
