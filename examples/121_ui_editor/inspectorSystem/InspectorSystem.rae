@@ -47,6 +47,9 @@ type InspectorSystem {
   # authored tokens from values a runtime system actually changed.
   sourceWorld: UiWorld
   hovered: EntityId
+  treeDragStartY: Float
+  treeDragMoved: Bool
+  lastRevealed: EntityId
   # The ACTIVE node: the one the outline follows, the inspector describes and
   # the arrow keys walk from. Always a member of `selection` (or none).
   selected: EntityId
@@ -126,6 +129,9 @@ func createInspectorSystem(world: mod UiWorld) ret InspectorSystem {
     marqueeBands: ComponentTable.create(MarqueeBand)
     sourceWorld: createUiWorld()
     hovered: noEntity()
+    treeDragStartY: 0
+    treeDragMoved: false
+    lastRevealed: noEntity()
     selected: noEntity()
     selection: List.create(EntityId, cap: 8)
     rangeAnchor: noEntity()
@@ -284,6 +290,34 @@ func inspectorUpdate(
     input: input
   ) {
     changed = true
+  }
+  let treeList: EntityId = editorListEntity(
+    chromeSystem: chromeSystem
+    world: world
+    source: EditorListSource.hierarchy
+  )
+  if input.pointer.pressed {
+    inspectorSystem.treeDragStartY = input.pointer.y
+    inspectorSystem.treeDragMoved = false
+  }
+  let treeWasDragged: Bool = inspectorSystem.treeDragMoved
+  if chromeVisible and editorPanelOpen(
+    chromeSystem: chromeSystem
+    world: world
+    kind: EditorPanelKind.tree
+  ) and updateScrollRoot(
+    world: world
+    uiSystems: uiSystems
+    entity: treeList
+    input: input
+  ) {
+    changed = true
+  }
+  if scrollRootDragging(world: world, entity: treeList) {
+    let distance: Float = input.pointer.y - inspectorSystem.treeDragStartY
+    if distance > 4 or distance < -4 {
+      inspectorSystem.treeDragMoved = true
+    }
   }
   # Asked ONCE, before anything this frame can change it (see keyboardCaptured).
   let captured: Bool = keyboardCaptured(inspectorSystem: inspectorSystem)
@@ -470,7 +504,7 @@ func inspectorUpdate(
   let actionCount: Int = uiActionCount(world: world)
   loop var a: Int = 0, a < actionCount, ++a {
     let actionId: String = uiActionAt(world: world, index: a)
-    if actionId.startsWith(prefix: "inspect:") {
+    if treeWasDragged is false and actionId.startsWith(prefix: "inspect:") {
       let index: Int = actionId.sub(start: 8, len: actionId.length() - 8).toInt()
       loop var t: Int = 0, t < inspectorSystem.treeEntities.length, ++t {
         let candidate: EntityId = inspectorSystem.treeEntities.copyAtFallback(
@@ -508,7 +542,7 @@ func inspectorUpdate(
   # targets inside one row and only one of them should win.
   loop var a: Int = 0, a < actionCount, ++a {
     let actionId: String = uiActionAt(world: world, index: a)
-    if actionId.startsWith(prefix: "treeToggle:") {
+    if treeWasDragged is false and actionId.startsWith(prefix: "treeToggle:") {
       let nodeId: String = actionId.sub(start: 11, len: actionId.length() - 11)
       var found: Int = -1
       loop var i: Int = 0, i < inspectorSystem.collapsedNodeIds.length, ++i {
@@ -726,6 +760,7 @@ func inspectorAfterLoad(
   if selectNodeId.length() > 0 {
     target = findNodeByIdIn(world: world, entity: sceneRoot, nodeId: selectNodeId)
   }
+  inspectorSystem.lastRevealed = noEntity()
   inspectorSystem.selected = noEntity()
   inspectorSystem.selection.clear()
   # `a,b,c` selects several nodes: the headless hook has to be able to produce
