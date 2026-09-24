@@ -1,0 +1,238 @@
+open ui/Ecs
+open ui/Components
+open ui/scrollRootSystem/ScrollRootSystem
+open ui/inputSystem/InputSystem
+open ui/Transform
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/hierarchySystem/HierarchySystem
+open ui/UiSystems
+
+# A world camera is the wheel's FALLBACK consumer: it zooms by
+# uiWheelUnclaimed(input), which is the notch only when no UI consumed it AND
+# the pointer is not over UI that paints or takes clicks. The window is a 3D
+# app in miniature, all in screen space:
+#
+#   screen  0,0 400x400    an invisible full-window layout root (no Shape)
+#   panel   0,0 100x200    a painted side panel (Shape) holding a scroll list
+#   list    0,0 100x100    the panel's scrolling window; its content scrolls
+#   button  0,150 100x40   a button on the panel (OnClick), below the list
+#   (the rest of the window is the 3D view: nothing but the invisible root)
+#
+# Before, the camera was gated only by "a button is hovered or pressed", so a
+# notch over the list scrolled it AND zoomed the camera.
+func node(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  x: view Float
+  y: view Float
+  w: view Float
+  h: view Float
+) ret EntityId {
+  let entityId: EntityId = createEntity(world: world)
+  componentSet(
+    this: uiSystems.layout.computedRects
+    entityId: entityId
+    data: ComputedRect { position: { x: x, y: y }, size: { x: w, y: h } }
+  )
+  componentSet(
+    this: uiSystems.transform2d.worldTransforms
+    entityId: entityId
+    data: WorldTransform2D {
+      position: Vec2 { x: x, y: y }
+      rotation: 0.0
+      scale: Vec2 { x: 1.0, y: 1.0 }
+    }
+  )
+  ret entityId
+}
+
+func probe(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  label: view String
+  x: view Float
+  y: view Float
+  wheel: view Float
+  content: view EntityId
+) {
+  var input: UiInput = createUiInput()
+  input.pointer.x = x
+  input.pointer.y = y
+  routeUiWheel(
+    input: input
+    world: world
+    uiSystems: uiSystems
+    wheel: wheel
+  )
+  let list: Float = uiWheelFor(input: input, entityId: content)
+  let camera: Float = uiWheelUnclaimed(input: input)
+  log("{label}: list {list.toInt()} camera {camera.toInt()} blocked {input.wheelBlocked}")
+}
+
+func main() {
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  let screen: EntityId = node(
+    world: world
+    uiSystems: uiSystems
+    x: 0.0
+    y: 0.0
+    w: 400.0
+    h: 400.0
+  )
+  let panel: EntityId = node(
+    world: world
+    uiSystems: uiSystems
+    x: 0.0
+    y: 0.0
+    w: 100.0
+    h: 200.0
+  )
+  let panelShape: Shape = Shape.default()
+  componentSet(this: world.shapes, entityId: panel, data: panelShape)
+  let viewport: EntityId = node(
+    world: world
+    uiSystems: uiSystems
+    x: 0.0
+    y: 0.0
+    w: 100.0
+    h: 100.0
+  )
+  let content: EntityId = node(
+    world: world
+    uiSystems: uiSystems
+    x: 0.0
+    y: 0.0
+    w: 100.0
+    h: 100.0
+  )
+  let row: EntityId = node(
+    world: world
+    uiSystems: uiSystems
+    x: 0.0
+    y: 280.0
+    w: 100.0
+    h: 20.0
+  )
+  let button: EntityId = node(
+    world: world
+    uiSystems: uiSystems
+    x: 0.0
+    y: 150.0
+    w: 100.0
+    h: 40.0
+  )
+  componentSet(
+    this: world.onClicks
+    entityId: button
+    data: OnClick { actionId: "button", actionIdDouble: "", actionIdTriple: "" }
+  )
+  componentSet(
+    this: world.overflows
+    entityId: viewport
+    data: OverflowPolicy { mode: OverflowMode.clip }
+  )
+  setParent(
+    parents: uiSystems.hierarchy.parents
+    childrens: world.childrens
+    child: panel
+    parent: screen
+  )
+  setParent(
+    parents: uiSystems.hierarchy.parents
+    childrens: world.childrens
+    child: viewport
+    parent: panel
+  )
+  setParent(
+    parents: uiSystems.hierarchy.parents
+    childrens: world.childrens
+    child: content
+    parent: viewport
+  )
+  setParent(
+    parents: uiSystems.hierarchy.parents
+    childrens: world.childrens
+    child: row
+    parent: content
+  )
+  setParent(
+    parents: uiSystems.hierarchy.parents
+    childrens: world.childrens
+    child: button
+    parent: panel
+  )
+  let root: ScrollRoot = {
+    axis: ScrollAxis.y
+    floor: ScrollFloorMode.content
+    fixedFloor: 0.0
+    endInset: 0.0
+  }
+  componentSet(this: world.scrollRoots, entityId: content, data: root)
+
+  # Over the scroll list: the list's notch, not the camera's.
+  probe(
+    world: world
+    uiSystems: uiSystems
+    label: "list"
+    x: 50.0
+    y: 50.0
+    wheel: -1.0
+    content: content
+  )
+  # Over the panel's plain background (below the list, above the button):
+  # nothing consumes it, but the panel paints there, so the camera behind it
+  # does not get it either.
+  probe(
+    world: world
+    uiSystems: uiSystems
+    label: "panel background"
+    x: 50.0
+    y: 125.0
+    wheel: -1.0
+    content: content
+  )
+  # Over the button: the same, a button is UI.
+  probe(
+    world: world
+    uiSystems: uiSystems
+    label: "button"
+    x: 50.0
+    y: 170.0
+    wheel: -1.0
+    content: content
+  )
+  # Over the list's row that overflows the clip into the 3D view: the clip hides
+  # it, so it is the 3D view and the camera zooms.
+  probe(
+    world: world
+    uiSystems: uiSystems
+    label: "clipped row"
+    x: 50.0
+    y: 290.0
+    wheel: -1.0
+    content: content
+  )
+  # Over the 3D view: only the invisible full-window root is there, which
+  # neither paints nor takes clicks, so the camera zooms.
+  probe(
+    world: world
+    uiSystems: uiSystems
+    label: "3d view"
+    x: 300.0
+    y: 300.0
+    wheel: -1.0
+    content: content
+  )
+  # No notch this frame: nobody gets anything.
+  probe(
+    world: world
+    uiSystems: uiSystems
+    label: "idle"
+    x: 300.0
+    y: 300.0
+    wheel: 0.0
+    content: content
+  )
+}

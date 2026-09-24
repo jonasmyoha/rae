@@ -494,11 +494,26 @@ of the rules above was sabotage-checked against it. The editor gate replays
 runs. It fails with exactly the reported bug if the camera goes back to
 reading the raw delta.
 
-Not migrated yet: the 3D orbit cameras (`lib/app3d/CameraRig`, 109/110/115)
-and 106's own scroll code still read `Gpu2d.wheelMove()` directly. Each of
-those apps has a single wheel reader, so nothing double-consumes today. When
-one of them gains a UI panel that scrolls, move its camera onto
-`uiWheelFor`.
+The 3D cameras came next. A world camera behind the UI is the FALLBACK
+consumer. It takes `uiWheelUnclaimed(input)`, which is the notch only when no UI
+consumed it (`wheelTarget` is none) and the pointer is not over UI that paints
+or takes clicks. The router records the second half as `UiInput.wheelBlocked`,
+so a notch over a panel's plain background or a button reaches nobody.
+`updateCameraRig` no longer reads the device: it takes a `wheel:` argument.
+111, 112 and 114 pass `uiWheelUnclaimed(input:)`, which fixes a live double
+consume: each has a scrolling panel, and a notch over the panel's list used to
+scroll it AND zoom the camera, because the camera was gated only by "a button
+is hovered or pressed". 118 and 119 have no UI in the window and pass
+`Gpu2d.wheelMove()`, as the only consumer. Fixture `914_ui_wheel_unclaimed`
+covers a panel over a world view (list, panel background, button, clipped row,
+3D view, idle). Removing the "over UI" half makes the camera zoom over the
+panel background and the button, and the fixture catches it.
+
+Still reading the device, on purpose: 109, 110 and 115, whose hand-rolled
+cameras run in windows with no UI world, and 106's own scroll code, which uses
+its own input system and has no world camera. Each is the only wheel reader in
+its app. Route it through `uiWheelFor`/`uiWheelUnclaimed` the day it gains a
+second one.
 
 ## Hover glows fade, then the editor sleeps
 

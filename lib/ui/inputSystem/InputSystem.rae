@@ -7,9 +7,11 @@
 # The scroll wheel is ROUTED, not broadcast: each frame `updateUiInput` hands
 # the wheel to exactly one consumer — the nearest `ScrollRoot` or `WheelTarget`
 # (ui/InputComponents) on the path to the topmost node under the pointer — and
-# systems take their share with `uiWheelFor(input, entityId)`. Reading
-# `Gpu2d.wheelMove()` directly from two systems made one wheel notch both
-# scroll a list and zoom the canvas beside it.
+# systems take their share with `uiWheelFor(input, entityId)`. A world camera
+# behind the UI is the fallback consumer and takes `uiWheelUnclaimed(input)`:
+# the notch only when no UI consumed it and the pointer is not over UI.
+# Reading `Gpu2d.wheelMove()` directly from two systems made one wheel notch
+# both scroll a list and zoom the canvas beside it.
 open ui/Ecs
 open ui/Components
 open ui/Layer
@@ -37,6 +39,10 @@ type UiInput {
   pressedEntityId: EntityId
   wheel: Float
   wheelTarget: EntityId
+  # The pointer is over UI that paints or takes clicks but consumes no wheel
+  # (a panel background, a button): nothing under it gets the notch, and in
+  # particular not the world behind the UI (uiWheelUnclaimed).
+  wheelBlocked: Bool
 }
 
 func createUiInput() pub ret UiInput {
@@ -52,6 +58,7 @@ func createUiInput() pub ret UiInput {
     pressedEntityId: noEntity()
     wheel: 0.0
     wheelTarget: noEntity()
+    wheelBlocked: false
   }
 }
 
@@ -309,13 +316,14 @@ func uiWheelRouteEntity(
 }
 
 # The wheel consumer under (x, y): walk the roots in reverse paint order and
-# stop at the first subtree that has one or that paints over the point.
+# stop at the first subtree that has one or that paints over the point. A route
+# that is blocked with no target is UI that swallows the notch.
 func uiWheelRoute(
   world: view UiWorld
   uiSystems: view UiSystems
   x: view Float
   y: view Float
-) ret EntityId {
+) ret UiWheelRoute {
   unsafe {
     let roots: List(EntityId) = collectPaintableRoots(world: world, uiSystems: uiSystems)
     var i: Int = roots.length - 1
@@ -330,12 +338,12 @@ func uiWheelRoute(
           y: y
         )
         if route.blocked or isNone(this: route.target) is false {
-          ret route.target
+          ret route
         }
       }
       i = i - 1
     }
-    ret noEntity()
+    ret UiWheelRoute { blocked: false, target: noEntity() }
   }
 }
 
@@ -350,13 +358,16 @@ func routeUiWheel(
 ) {
   input.wheel = wheel
   input.wheelTarget = noEntity()
+  input.wheelBlocked = false
   if wheel is not 0.0 {
-    input.wheelTarget = uiWheelRoute(
+    let route: UiWheelRoute = uiWheelRoute(
       world: world
       uiSystems: uiSystems
       x: input.pointer.x
       y: input.pointer.y
     )
+    input.wheelTarget = route.target
+    input.wheelBlocked = route.blocked and isNone(this: route.target)
   }
 }
 
@@ -434,6 +445,7 @@ func suppressUiPress(input: mod UiInput, world: mod UiWorld) {
   input.pressedEntityId = noEntity()
   input.wheel = 0.0
   input.wheelTarget = noEntity()
+  input.wheelBlocked = false
 }
 
 func uiPointerCaptured(input: view UiInput) pub ret Bool {
@@ -451,6 +463,18 @@ func uiPointerCaptured(input: view UiInput) pub ret Bool {
 # scrolls by `uiWheelFor(input, list)`, and at most one of them is non-zero.
 func uiWheelFor(input: view UiInput, entityId: view EntityId) ret Float {
   if isNone(this: entityId) or input.wheelTarget is not entityId {
+    ret 0.0
+  }
+  ret input.wheel
+}
+
+# This frame's wheel delta if NO UI took it: nothing consumed the notch and the
+# pointer is not over UI that paints or takes clicks. The fallback consumer's
+# share — a world camera behind the UI zooms by `uiWheelUnclaimed(input)`, so a
+# notch over a scrolling panel (or a panel's plain background) never also
+# zooms the scene. At most one of this and every `uiWheelFor` is non-zero.
+func uiWheelUnclaimed(input: view UiInput) ret Float {
+  if isNone(this: input.wheelTarget) is false or input.wheelBlocked {
     ret 0.0
   }
   ret input.wheel

@@ -400,12 +400,20 @@ func toggleCameraRigMode(rig: mod CameraRig, camera: mod Camera3d) pub {
 # `allowInput` is false when the UI has captured the pointer, so pressing
 # a button does not also spin the camera. Note that it gates the KEYBOARD
 # too: a text field would otherwise steer the view while being typed in.
+#
+# `wheel` is this frame's wheel delta ROUTED to the camera — the rig does not
+# read the device, because a UI panel over the view may have taken the notch.
+# An app with a UiInput passes `uiWheelUnclaimed(input: ui)` (the notch only
+# when no UI consumed it and the pointer is not over UI); an app with no UI in
+# the window, where the camera is the only wheel consumer, passes
+# `Gpu2d.wheelMove()`.
 func updateCameraRig(
   rig: mod CameraRig
   camera: mod Camera3d
   allowInput: view Bool
+  wheel: view Float
   deltaTime: view Float
-) pub ret Bool {
+) ret Bool {
   let yaw0: Float = rig.yaw
   let orbitPitch0: Float = rig.orbitPitch
   let freePitch0: Float = rig.freePitch
@@ -457,7 +465,7 @@ func updateCameraRig(
 
   if allowInput {
     # The wheel is a pointer device, so it rides the mouse toggle.
-    mouseDist = 0.0 - Gpu2d.wheelMove() * rig.wheelSpeed
+    mouseDist = 0.0 - wheel * rig.wheelSpeed
     let boost: Float = speedScale()
     if rig.mode is CameraRigMode.orbit {
       if Sdl3.isKeyDown(key: Keys.keyW) {
