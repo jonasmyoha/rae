@@ -13,6 +13,7 @@ open ui/Components
 open ui/buttonSystem/ButtonSystem
 open ecs/Entity
 open ecs/ComponentTable
+open ecs/Query
 
 # Seconds a full fade (rest -> hovered or back) takes.
 const hoverFadeSeconds: Float = 0.15
@@ -37,10 +38,8 @@ func buttonHoverFadeUpdate(
   }
   let step: Float = frameDt / hoverFadeSeconds
   var animating: Bool = false
-  let n: Int = componentCount(this: world.shadows)
-  loop var i: Int = 0, i < n, ++i {
-    let entityId: EntityId = componentEntityAt(this: world.shadows, i: i)
-    if shadowReactsToHover(shadow: componentGet(this: world.shadows, entityId: entityId)) {
+  loop let entityId: EntityId, shadow: view Shadow in forEach(table: world.shadows) {
+    if shadowReactsToHover(shadow: shadow) {
       var target: Float = 0.0
       if entityHovered(world: world, uiSystems: uiSystems, entityId: entityId) {
         target = 1.0
