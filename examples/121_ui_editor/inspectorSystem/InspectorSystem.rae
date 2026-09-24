@@ -28,6 +28,7 @@ open ecs/ComponentTable
 open ui/UiSystems
 open ui/Scene
 open ui/SceneWriter
+open ui/scrollRootSystem/ScrollRootSystem
 open inspectorSystem/NodeQuery
 open inspectorSystem/RectWidget
 open inspectorSystem/RectEdit
@@ -89,6 +90,8 @@ type InspectorSystem {
   # without a mode, typing a filter would toggle half the chrome.
   componentFilter: String
   filterFocused: Bool
+  addComponentsCollapsed: Bool
+  pendingRemoveComponent: String
   # The HIERARCHY filter (#89663819), with its own focus. Two filters, two
   # panels: `/` types into the component list, `F` into the tree. They are
   # mutually exclusive — one keyboard cannot feed both.
@@ -141,6 +144,8 @@ func createInspectorSystem(world: mod UiWorld) ret InspectorSystem {
     collapsedNodeIds: List.create(String, cap: 8)
     componentFilter: ""
     filterFocused: false
+    addComponentsCollapsed: true
+    pendingRemoveComponent: ""
     treeFilter: ""
     treeFilterFocused: false
     rectEditing: false
@@ -257,7 +262,7 @@ func keyboardCaptured(inspectorSystem: view InspectorSystem) ret Bool {
 func inspectorUpdate(
   inspectorSystem: mod InspectorSystem
   world: mod UiWorld
-  uiSystems: view UiSystems
+  uiSystems: mod UiSystems
   chromeSystem: mod ChromeSystem
   input: view UiInput
   pageRoot: view EntityId
@@ -266,6 +271,20 @@ func inspectorUpdate(
 ) ret Bool {
   let sceneRoot: EntityId = documentSceneRoot(world: world, pageRoot: pageRoot)
   var changed: Bool = false
+  let componentList: EntityId = editorListEntity(
+    chromeSystem: chromeSystem
+    world: world
+    source: EditorListSource.components
+  )
+  let componentListWasDragging: Bool = scrollRootDragging(world: world, entity: componentList)
+  if chromeVisible and updateScrollRoot(
+    world: world
+    uiSystems: uiSystems
+    entity: componentList
+    input: input
+  ) {
+    changed = true
+  }
   # Asked ONCE, before anything this frame can change it (see keyboardCaptured).
   let captured: Bool = keyboardCaptured(inspectorSystem: inspectorSystem)
   # --- The Rect group's text input (#44133406) -----------------------------
@@ -475,27 +494,12 @@ func inspectorUpdate(
   # act on the WHOLE selection, and both report how many entities actually
   # changed — "removed Shape from 2" is the only way to tell a real edit from
   # a click on a component only one of the selected nodes had.
-  loop var a: Int = 0, a < actionCount, ++a {
-    let actionId: String = uiActionAt(world: world, index: a)
-    if actionId.startsWith(prefix: "compRemove:") {
-      let name: String = actionId.sub(start: 11, len: actionId.length() - 11)
-      let removed: Int = removeComponentFromSelection(
-        world: world
-        selection: inspectorSystem.selection
-        name: name
-      )
-      log("[ui-editor] removed {name} from {removed}")
-      changed = true
-    }
-    if actionId.startsWith(prefix: "compAdd:") {
-      let name: String = actionId.sub(start: 8, len: actionId.length() - 8)
-      let added: Int = addComponentToSelection(
-        world: world
-        selection: inspectorSystem.selection
-        name: name
-      )
-      log("[ui-editor] added {name} to {added}")
-      changed = true
+  if componentListWasDragging is false {
+    loop var a: Int = 0, a < actionCount, ++a {
+      let actionId: String = uiActionAt(world: world, index: a)
+      if applyComponentAction(inspectorSystem: inspectorSystem, world: world, actionId: actionId) {
+        changed = true
+      }
     }
   }
   # Chevron clicks: collapse / expand, keyed on the node id the row carries
