@@ -1,0 +1,31 @@
+open ecs/ComponentTable
+
+type Component {
+  count: Int
+}
+
+type World {
+  components: ComponentTable(Component)
+}
+
+func fieldNames(T: type, value: view T) {
+  loop let field: view any in fields(value) {
+    continue
+  }
+}
+
+func tableNames(T: type, table: view ComponentTable(T)) {
+  let value: T = T.default()
+  fieldNames(value: value)
+}
+
+func walk(W: type, world: view W) {
+  loop let table: view ComponentTable(any) in fields(world) {
+    tableNames(table: table)
+  }
+}
+
+func main() {
+  let world: World = { components: ComponentTable.create(Component) }
+  walk(world: world)
+}
