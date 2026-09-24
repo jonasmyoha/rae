@@ -1,0 +1,105 @@
+open ecs/Entity
+open ecs/ComponentTable
+import ecs/Query
+
+# The query loop and the query accessors in the MODULE-QUALIFIED spelling: a
+# file that `import`s ecs/Query instead of `open`ing it writes `Query.query2(...)`.
+# This is fixture 734's program with every query call qualified, so its output
+# must match 734's line for line. Until #33142260 it did not compile: the C
+# backend's discovery pass did not recognise `Query.fn(...)` as a call to the
+# generic `fn`, so each specialisation was created lazily AFTER its first caller
+# and the C compiler rejected the call as undeclared. The single-table loop
+# (lowered onto Query.queryCount / Query.queryEntityAt) and a plain qualified
+# accessor call outside any loop are covered at the end.
+type Position {
+  x: Int
+}
+
+type Velocity {
+  v: Int
+}
+
+type Tag {
+  t: Int
+}
+
+func main() {
+  var pos: ComponentTable(Position) = ComponentTable.create(Position)
+  var vel: ComponentTable(Velocity) = ComponentTable.create(Velocity)
+  var tag: ComponentTable(Tag) = ComponentTable.create(Tag)
+  let e1: EntityId = { index: 1, generation: 0 }
+  let e2: EntityId = { index: 2, generation: 0 }
+  let e3: EntityId = { index: 3, generation: 0 }
+  componentSet(this: pos, entityId: e1, data: Position { x: 10 })
+  componentSet(this: pos, entityId: e2, data: Position { x: 20 })
+  componentSet(this: pos, entityId: e3, data: Position { x: 30 })
+  componentSet(this: vel, entityId: e2, data: Velocity { v: 2 })
+  componentSet(this: vel, entityId: e3, data: Velocity { v: 3 })
+  componentSet(this: tag, entityId: e3, data: Tag { t: 9 })
+
+  # query2: entity + mod + view. Integrates v into x for every entity in both.
+  loop let entityId: EntityId, position: mod Position, velocity: view Velocity in Query.query2(
+    tableA: pos
+    tableB: vel
+  ) {
+    position.x = position.x + velocity.v
+    log("q2 e{entityId.index} x={position.x} v={velocity.v}")
+  }
+  let r2: Position = componentGet(this: pos, entityId: e2)
+  let r3: Position = componentGet(this: pos, entityId: e3)
+  log("readback e2={r2.x} e3={r3.x}")
+
+  # view-only loop, no entity binding: reads must not bump the generation.
+  let gen: Int = componentTableGeneration(this: pos)
+  var dot: Int = 0
+  loop let position: view Position, velocity: view Velocity in Query.query2(
+    tableA: pos
+    tableB: vel
+  ) {
+    dot = dot + position.x * velocity.v
+  }
+  log("view dot: {dot}")
+  log("pos gen delta: {componentTableGeneration(this: pos) - gen}")
+
+  # query3: three bindings, two of them mod.
+  loop let entityId: EntityId, position: mod Position, velocity: view Velocity, tg: mod Tag in Query.query3(
+    tableA: pos
+    tableB: vel
+    tableC: tag
+  ) {
+    position.x = position.x + 100
+    tg.t = tg.t + 1
+    log("q3 e{entityId.index}")
+  }
+  let r3b: Position = componentGet(this: pos, entityId: e3)
+  let t3: Tag = componentGet(this: tag, entityId: e3)
+  log("q3 readback x={r3b.x} t={t3.t}")
+
+  # query: the single-table base case, in dense order.
+  loop let entityId: EntityId, position: view Position in Query.query(table: pos) {
+    log("all e{entityId.index} x={position.x}")
+  }
+
+  # nested query loops each alias their own hit.
+  var pairs: Int = 0
+  loop let outer: EntityId, outerVelocity: view Velocity in Query.query(table: vel) {
+    loop let inner: EntityId, ip: view Position, innerVelocity: view Velocity in Query.query2(
+      tableA: pos
+      tableB: vel
+    ) {
+      pairs = pairs + 1
+    }
+  }
+  log("nested pairs: {pairs}")
+
+  # A qualified single-table loop: lowered onto Query.queryCount / queryEntityAt.
+  var total: Int = 0
+  loop let entityId: EntityId, position: view Position in Query.query(table: pos) {
+    total = total + position.x
+  }
+  log("qualified single-table total={total}")
+  # A qualified generic accessor called outside any loop.
+  let rows: Int = Query.queryCount(table: pos)
+  let firstRow: view Position => Query.queryViewAt(table: pos, denseIndex: 0)
+  log("qualified plain calls rows={rows} first x={firstRow.x}")
+}
