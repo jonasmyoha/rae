@@ -192,23 +192,21 @@ func accumulateVisibility(world: mod UiWorld, uiSystems: view UiSystems) {
     parents: uiSystems.hierarchy.parents
     childrens: world.childrens
   )
-  loop var i: Int = 0, i < order.length, ++i {
-    if let entityId: EntityId = order.copyAt(index: i) {
-      if componentHas(this: uiSystems.hierarchy.parents, entityId: entityId) {
-        let link: Parent = componentGet(this: uiSystems.hierarchy.parents, entityId: entityId)
-        let parentWv: WorldVisual = worldVisualOf(
-          world: world
-          uiSystems: uiSystems
-          entityId: link.parent
-        )
-        let wv: WorldVisual = composeVisual(
-          world: world
-          entityId: entityId
-          parentAlpha: parentWv.alpha
-          parentVisible: parentWv.visible
-        )
-        componentSet(this: uiSystems.transform2d.worldVisuals, entityId: entityId, data: wv)
-      }
+  loop let entityId: view EntityId in order {
+    if componentHas(this: uiSystems.hierarchy.parents, entityId: entityId) {
+      let link: Parent = componentGet(this: uiSystems.hierarchy.parents, entityId: entityId)
+      let parentWv: WorldVisual = worldVisualOf(
+        world: world
+        uiSystems: uiSystems
+        entityId: link.parent
+      )
+      let wv: WorldVisual = composeVisual(
+        world: world
+        entityId: entityId
+        parentAlpha: parentWv.alpha
+        parentVisible: parentWv.visible
+      )
+      componentSet(this: uiSystems.transform2d.worldVisuals, entityId: entityId, data: wv)
     }
   }
 }

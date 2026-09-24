@@ -633,21 +633,19 @@ func computeLinear(world: mod UiWorld, uiSystems: mod UiSystems) {
       childrens: world.childrens
     )
     var scratch: List(EntityId) = List.create(EntityId, cap: 8)
-    loop var i: Int = 0, i < order.length, ++i {
-      if let entityId: EntityId = order.copyAt(index: i) {
-        if layoutActive(world: world, entityId: entityId) {
-          if componentHas(this: uiSystems.hierarchy.parents, entityId: entityId) is false {
-            if componentHas(this: world.rects, entityId: entityId) {
-              seedRoot(world: world, uiSystems: uiSystems, entityId: entityId)
-            }
+    loop let entityId: view EntityId in order {
+      if layoutActive(world: world, entityId: entityId) {
+        if componentHas(this: uiSystems.hierarchy.parents, entityId: entityId) is false {
+          if componentHas(this: world.rects, entityId: entityId) {
+            seedRoot(world: world, uiSystems: uiSystems, entityId: entityId)
           }
-          placeChildren(
-            world: world
-            uiSystems: uiSystems
-            entityId: entityId
-            scratch: scratch
-          )
         }
+        placeChildren(
+          world: world
+          uiSystems: uiSystems
+          entityId: entityId
+          scratch: scratch
+        )
       }
     }
     # Standalone roots (no Parent, no Children) are absent from the order.
