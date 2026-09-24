@@ -366,6 +366,24 @@ func runTestTreeClicks(
     if trimmed.length() is 0 {
       continue
     }
+    # A manual scroll followed by a normal panel refresh must stay where put.
+    if trimmed.startsWith(prefix: "treeScroll:") {
+      let list: EntityId = editorListEntity(
+        chromeSystem: chromeSystem
+        world: world
+        source: EditorListSource.hierarchy
+      )
+      let position: Float = trimmed.sub(start: 11, len: trimmed.length() - 11).toFloat()
+      let state: ScrollState = { y: position, velocity: 0 }
+      componentSet(this: world.scrollStates, entity: list, data: state)
+      syncTreePanel(
+        chromeSystem: chromeSystem
+        world: world
+        inspectorSystem: inspectorSystem
+        sceneRoot: sceneRoot
+      )
+      continue
+    }
     # `parent` is not a click: it walks the whole selection up a level, the
     # affordance the click-through gesture cannot express.
     # `treeFilter:<text>`: what typing into the hierarchy filter produces.
@@ -428,6 +446,12 @@ func runTestTreeClicks(
       sceneRoot: sceneRoot
       step: trimmed
     )
+    syncTreePanel(
+      chromeSystem: chromeSystem
+      world: world
+      inspectorSystem: inspectorSystem
+      sceneRoot: sceneRoot
+    )
   }
   log(
     "[ui-editor] tree clicks [{script}] -> {selectionNodeIds(
@@ -473,6 +497,13 @@ func logInspectorPanel(
     inspectorSystem: inspectorSystem
     sceneRoot: sceneRoot
   )
+  let treeList: EntityId = editorListEntity(
+    chromeSystem: chromeSystem
+    world: world
+    source: EditorListSource.hierarchy
+  )
+  let treeScroll: ScrollState = componentGet(this: world.scrollStates, entity: treeList)
+  log("[ui-editor] hierarchy scroll: {treeScroll.y}")
   # Read the rows AFTER the resync above: `treeEntities` is rebuilt there, and
   # logging it earlier reports the previous sync's tree.
   var visible: String = ""

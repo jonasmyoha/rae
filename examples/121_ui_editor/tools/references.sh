@@ -81,5 +81,17 @@ grep -qF "[ui-editor] component scroll: -280" "$TMP/ComponentScroll.log" \
 python3 compiler/tools/assert_bmp_diff.py --convert \
   "$TMP/ComponentScroll.bmp" "$OUT_DIR/ComponentScroll.png"
 
+# Revealing the last row must render beyond several complete viewports.
+env RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
+RAE_UI_EDITOR_TEST_TREE_CLICKS="Footer" \
+RAE_UI_HEADLESS=1 RAE_UI_EDITOR_TREE=1 RAE_SDL_HEADLESS_MS=1500 \
+RAE_GPU2D_SCREENSHOT="$TMP/TreeReveal.bmp" \
+perl -e 'alarm shift; exec @ARGV' 120 \
+  compiler/bin/rae run --project examples/121_ui_editor examples/121_ui_editor/Main.rae \
+  > "$TMP/TreeReveal.log" 2>&1
+grep -qF "[ui-editor] hierarchy scroll: -1353" "$TMP/TreeReveal.log"
+python3 compiler/tools/assert_bmp_diff.py --convert \
+  "$TMP/TreeReveal.bmp" "$OUT_DIR/TreeReveal.png"
+
 rm -rf "$TMP"
 echo "references written to $OUT_DIR"
