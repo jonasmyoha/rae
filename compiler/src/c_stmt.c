@@ -2236,17 +2236,37 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                         rhs->kind == AST_EXPR_CALL || rhs->kind == AST_EXPR_METHOD_CALL ||
                         rhs->kind == AST_EXPR_INTERP || rhs->kind == AST_EXPR_BINARY ||
                         rhs->kind == AST_EXPR_OWN);
+                    // `=` COPIES (#79484806): an RHS that reads an existing
+                    // location lands as a deep copy, never as an alias of the
+                    // source's heap — the same rule as the local/field store.
+                    // (An `opt` pointee — a `mod T` bound from an optional
+                    // accessor — is boxed and keeps its old store as it was.)
+                    bool rhs_reads_location = !pointee.is_opt && rhs && (rhs->kind == AST_EXPR_IDENT
+                        || rhs->kind == AST_EXPR_MEMBER || rhs->kind == AST_EXPR_INDEX);
                     fprintf(out, "{ ");
                     emit_type_ref_as_c_type(ctx, &pointee, out, false);
                     fprintf(out, " __asg%d = ", tmpn);
-                    if (rhs->kind == AST_EXPR_OBJECT && !rhs->as.object_literal.type) {
-                        fprintf(out, "(");
-                        emit_type_ref_as_c_type(ctx, &pointee, out, true);
+                    if (rhs_reads_location && pointee_is_string) {
+                        fprintf(out, "rae_string_copy(");
+                        emit_expr(ctx, rhs, out, PREC_LOWEST, false, false);
                         fprintf(out, ")");
+                    } else if (rhs_reads_location) {
+                        const char* tn_dc = rae_mangle_type_specialized(
+                            ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, &pointee);
+                        fprintf(out, "(__extension__ ({ %s __dc%d; rae_deep_copy_%s(&__dc%d, &(",
+                                tn_dc, tmpn, tn_dc, tmpn);
+                        emit_expr(ctx, rhs, out, PREC_LOWEST, false, false);
+                        fprintf(out, ")); __dc%d; }))", tmpn);
+                    } else {
+                        if (rhs->kind == AST_EXPR_OBJECT && !rhs->as.object_literal.type) {
+                            fprintf(out, "(");
+                            emit_type_ref_as_c_type(ctx, &pointee, out, true);
+                            fprintf(out, ")");
+                        }
+                        if (rhs_fresh_string) fprintf(out, "rae_string_pool_take(");
+                        emit_expr(ctx, rhs, out, PREC_LOWEST, false, false);
+                        if (rhs_fresh_string) fprintf(out, ")");
                     }
-                    if (rhs_fresh_string) fprintf(out, "rae_string_pool_take(");
-                    emit_expr(ctx, rhs, out, PREC_LOWEST, false, false);
-                    if (rhs_fresh_string) fprintf(out, ")");
                     fprintf(out, "; ");
                     emit_type_ref_as_c_type(ctx, &pointee, out, false);
                     fprintf(out, "* __asgp%d = ", tmpn);
@@ -2549,13 +2569,33 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     fprintf(out, "{ ");
                     emit_type_ref_as_c_type(ctx, target_tr, out, false);
                     fprintf(out, " __asg%d = ", tmpn);
-                    if (stmt->as.assign_stmt.value->kind == AST_EXPR_OBJECT &&
-                        !stmt->as.assign_stmt.value->as.object_literal.type) {
-                        fprintf(out, "(");
-                        emit_type_ref_as_c_type(ctx, target_tr, out, true);
-                        fprintf(out, ")");
+                    // `=` COPIES, the same rule the `let` path applies (#79484806):
+                    // an RHS that READS AN EXISTING LOCATION — a bare ident, a
+                    // field, an element — lands as a fresh deep copy, never as
+                    // a bit-for-bit alias of the source's heap. The alias was a
+                    // double free: `local = copied` inside an `if let` dropped
+                    // `copied` at its scope end and `local` at its own, over the
+                    // same String/List buffers. A fresh value (a call, a
+                    // literal, an interpolation) is taken as it was; `own x` is
+                    // the move, handled below.
+                    const AstExpr* arhs = stmt->as.assign_stmt.value;
+                    bool arhs_reads_location = arhs->kind == AST_EXPR_IDENT
+                        || arhs->kind == AST_EXPR_MEMBER || arhs->kind == AST_EXPR_INDEX;
+                    if (arhs_reads_location) {
+                        const char* tn_dc = rae_mangle_type_specialized(
+                            ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, target_tr);
+                        fprintf(out, "(__extension__ ({ %s __dc%d; rae_deep_copy_%s(&__dc%d, &(",
+                                tn_dc, tmpn, tn_dc, tmpn);
+                        emit_expr(ctx, arhs, out, PREC_LOWEST, false, false);
+                        fprintf(out, ")); __dc%d; }))", tmpn);
+                    } else {
+                        if (arhs->kind == AST_EXPR_OBJECT && !arhs->as.object_literal.type) {
+                            fprintf(out, "(");
+                            emit_type_ref_as_c_type(ctx, target_tr, out, true);
+                            fprintf(out, ")");
+                        }
+                        emit_expr(ctx, arhs, out, PREC_LOWEST, false, false);
                     }
-                    emit_expr(ctx, stmt->as.assign_stmt.value, out, PREC_LOWEST, false, false);
                     fprintf(out, "; ");
                     emit_type_ref_as_c_type(ctx, target_tr, out, false);
                     fprintf(out, "* __asgp%d = &(", tmpn);
