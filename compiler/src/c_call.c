@@ -1449,7 +1449,10 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 }
                 fprintf(out, "(__extension__ ({ %s __cpy%d; rae_deep_copy_%s(&__cpy%d, %s",
                         tn_dc, tmp_id, tn_dc, tmp_id, src_is_ptr ? "(" : "&(");
-                emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
+                // A pointer source is passed AS the pointer: without
+                // suppress_deref a struct view local emitted as `(*v)`, a value
+                // where rae_deep_copy takes a pointer.
+                emit_expr(ctx, a->value, out, PREC_LOWEST, false, src_is_ptr);
                 fprintf(out, ")); __cpy%d; }))", tmp_id);
             } else if (wrap_move_arg) {
                 // See the wrap_move_arg comment above: move the String
