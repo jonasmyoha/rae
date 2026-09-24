@@ -1,0 +1,35 @@
+# HoverScript — the headless driver for hover paint (the button glows).
+#
+#   RAE_UI_EDITOR_TEST_HOVER=OpenPill
+#
+# Marks that chrome node hovered once after layout, with the same
+# buttonInteractionMark the input system calls on the node under the pointer.
+# The headless pointer never moves, so nothing clears the mark: the glow fades
+# in over the next frames (buttonHoverFadeUpdate) and the screenshot shows it
+# at rest in its hovered state.
+open ui/Ecs
+open ui/UiSystems
+open ui/buttonSystem/ButtonSystem
+open ecs/Entity
+
+func runTestHover(world: mod UiWorld, uiSystems: mod UiSystems, nodeId: view String) {
+  if nodeId.length() is 0 {
+    ret
+  }
+  var node: EntityId = noEntity()
+  if let index: Int = findNodeInPage(world: world, pageId: "chrome", nodeId: nodeId) {
+    node = nodeEntity(world: world, index: index)
+  }
+  if isNone(this: node) {
+    log("[ui-editor] hover: no chrome node named {nodeId}")
+    ret
+  }
+  buttonInteractionMark(
+    world: world
+    uiSystems: uiSystems
+    entity: node
+    hovered: true
+    pressed: false
+  )
+  log("[ui-editor] hover {nodeId}")
+}

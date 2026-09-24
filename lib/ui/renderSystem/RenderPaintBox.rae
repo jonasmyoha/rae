@@ -9,6 +9,7 @@ open ecs/ComponentTable
 open ecs/Entity
 open Gpu2dCanvas
 open ui/UiSystems
+open ui/buttonSystem/ButtonHoverFade
 
 func g2dColor(color: view RgbaColor) ret Int {
   ret (color.a shl 24) bitor (color.r shl 16) bitor (color.g shl 8) bitor color.b
@@ -121,15 +122,23 @@ func paintShadowG(
   canvas: mod Gpu2dCanvas
 ) {
   let shadow: Shadow = componentGet(this: world.shadows, entity: entity)
-  if shadow.hoverOnly {
-    if componentHas(this: uiSystems.button.interactions, entity: entity) is false {
-      ret
-    }
-    if componentGet(this: uiSystems.button.interactions, entity: entity).hovered is false {
-      ret
-    }
-  }
   if shadow.blur <= 0.0 {
+    ret
+  }
+  # Rest and hovered opacity, mixed by the hover fade (ui/buttonSystem).
+  var restOpacity: Float = shadow.opacity
+  var hoverOpacity: Float = shadow.opacity
+  if shadow.hoverOnly {
+    restOpacity = 0.0
+  } else if shadow.hoverOpacity > 0.0 {
+    hoverOpacity = shadow.hoverOpacity
+  }
+  var opacity: Float = restOpacity
+  if restOpacity is not hoverOpacity {
+    let hover: Float = hoverFadeAmount(world: world, uiSystems: uiSystems, entity: entity)
+    opacity = restOpacity + (hoverOpacity - restOpacity) * hover
+  }
+  if opacity <= 0.0 {
     ret
   }
   var layers: Int = shadow.layers
@@ -139,7 +148,6 @@ func paintShadowG(
   if layers > 16 {
     layers = 16
   }
-  var opacity: Float = shadow.opacity
   if opacity < 0.0 {
     opacity = 0.0
   }
