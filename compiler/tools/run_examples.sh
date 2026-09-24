@@ -251,6 +251,24 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             echo "  nested sub-scene sample failed:"
             cat "$TMP_OUT/render-NestedPage.log" "$TMP_OUT/screenshot-NestedPage.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
           fi
+          # Wheel routing: one notch reaches ONE consumer (lib routeUiWheel +
+          # WheelTarget on the EditArea). Over the hierarchy it scrolls the tree
+          # and must NOT zoom the canvas; over the canvas it zooms and scrolls
+          # nothing; over the component list it scrolls only that list.
+          if (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
+             RAE_UI_EDITOR_ROOT="examples/121_ui_editor/assets/samples" \
+             RAE_UI_HEADLESS=1 RAE_UI_EDITOR_TREE=1 RAE_SDL_HEADLESS_MS=800 RAE_UI_EDITOR_TEST_SELECT=Title \
+             RAE_UI_EDITOR_TEST_WHEEL="TreePanel:-3 EditArea:2 InsWidgets:-1" \
+             perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-Wheel.log" 2>&1 \
+             && grep -qF 'wheel TreePanel -3: routed TreeList zoom 38->38 tree 0->-144 components 0->0' "$TMP_OUT/render-Wheel.log" \
+             && grep -qF 'wheel EditArea 2: routed EditArea zoom 38->46 tree -144->-144 components 0->0' "$TMP_OUT/render-Wheel.log" \
+             && grep -qF 'wheel InsWidgets -1: routed ComponentList zoom 46->46 tree -144->-144 components 0->-48' "$TMP_OUT/render-Wheel.log"; then
+            :
+          else
+            UI_EDITOR_OK=0
+            echo "  wheel routing failed:"
+            grep -a '\] wheel' "$TMP_OUT/render-Wheel.log" 2>/dev/null | sed 's/^/    /'
+          fi
           # The effect systems (#1005): Coverage's AnimFrames / WobbleFx /
           # BackgroundPan+SmokeFx / Carousel nodes must have MOVED between frame
           # 2 and frame 12 at the same fixed step (assert_bmp_diff MISMATCH is
@@ -924,7 +942,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/render-save.log" "$TMP_OUT/render-saved.log" "$TMP_OUT/screenshot-saved.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
           fi
           if [ "$UI_EDITOR_OK" = "1" ]; then
-            echo "PASS: $EXAMPLE_NAME (7 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select, composite multi-selection inspector, generated component widgets, value provenance, component add/remove/filter, select parent + identity, hierarchy collapse/expand, selected-row plate, row labels + tree filter, canvas click + marquee selection gestures, click-through cycling, hierarchy multi-selection, Rect widget multi-select read+write, Rect text inputs + lock, .raepack project open + switch, file picker, camera zoom, outline pools, save path)"
+            echo "PASS: $EXAMPLE_NAME (7 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select, composite multi-selection inspector, generated component widgets, value provenance, component add/remove/filter, select parent + identity, hierarchy collapse/expand, selected-row plate, row labels + tree filter, canvas click + marquee selection gestures, click-through cycling, hierarchy multi-selection, Rect widget multi-select read+write, Rect text inputs + lock, wheel routing, .raepack project open + switch, file picker, camera zoom, outline pools, save path)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (ui editor sample gate)"

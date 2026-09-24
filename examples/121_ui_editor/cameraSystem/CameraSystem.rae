@@ -19,6 +19,7 @@ open ui/Ecs
 open ui/Components
 open ecs/Entity
 open ecs/ComponentTable
+open ui/inputSystem/InputSystem
 
 const zoomMin: Float = 0.25
 
@@ -234,16 +235,24 @@ func bootCameraZoom(
 
 # Per-frame input: wheel = zoom about the cursor, middle drag = pan, the
 # chrome pill's actions, `F` = fit. Returns whether the cameraSystem moved.
+# The wheel is only the camera's when updateUiInput routed it to the EditArea
+# (its `WheelTarget`): over the hierarchy it scrolls the list, over the
+# inspector it does nothing. With the chrome hidden the canvas is the whole
+# window, so every wheel notch zooms.
 func cameraInputSystem(
   cameraSystem: mod CameraSystem
   world: mod UiWorld
   chromeSystem: mod ChromeSystem
   area: view EditAreaRect
+  input: view UiInput
 ) ret Bool {
   var moved: Bool = false
   let pointerX: Float = Gpu2d.pointerX()
   let pointerY: Float = Gpu2d.pointerY()
-  let wheel: Float = Gpu2d.wheelMove()
+  var wheel: Float = uiWheelFor(input: input, entity: editAreaEntity(chromeSystem: chromeSystem))
+  if chromeVisible(world: world, chromeSystem: chromeSystem) is false {
+    wheel = input.wheel
+  }
   if wheel is not 0.0 {
     let current: Camera2D = cameraOf(cameraSystem: cameraSystem, world: world)
     zoomCameraAbout(

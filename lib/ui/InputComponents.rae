@@ -1,0 +1,14 @@
+# InputComponents — authored components that say which node CONSUMES an input
+# channel. Input is routed once per frame by `updateUiInput`
+# (ui/inputSystem): the channel goes to exactly one consumer, and systems ask
+# for their share by identity (`uiWheelFor`) instead of reading the device.
+
+# Marks a node that takes the scroll wheel while the pointer is over it: a
+# canvas that zooms, a viewport that pans. A `ScrollRoot` is a wheel consumer
+# without this tag. The wheel goes to the nearest consumer on the path to the
+# topmost node under the pointer, so a list scrolling inside a panel does not
+# also zoom the canvas beside or behind it.
+#
+#     "Canvas": { "WheelTarget": {} }
+type WheelTarget {
+}
