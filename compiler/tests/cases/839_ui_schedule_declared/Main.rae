@@ -98,12 +98,12 @@ func main() {
   # (b) equivalence over a mutation sequence
   let root: EntityId = createEntity(world: world)
   let r: Rect = { position: { x: 0.0, y: 0.0 }, size: { x: 200.0, y: 100.0 } }
-  componentSet(this: world.rects, entity: root, data: r)
+  componentSet(this: world.rects, entityId: root, data: r)
   let sz: Size = {
     w: SizeAxis { mode: SizeMode.fixed, min: -1, max: -1 }
     h: SizeAxis { mode: SizeMode.fixed, min: -1, max: -1 }
   }
-  componentSet(this: world.sizes, entity: root, data: sz)
+  componentSet(this: world.sizes, entityId: root, data: sz)
 
   let layoutCache: LayoutCache = createLayoutCache()
   let transformCache: TransformCache = createTransformCache()
@@ -132,7 +132,7 @@ func main() {
   # a layout read table: layout runs; it rewrites computedRects, which
   # transform reads, so transform runs too
   let inactive: Active = { value: false }
-  componentSet(this: world.actives, entity: root, data: inactive)
+  componentSet(this: world.actives, entityId: root, data: inactive)
   let f3: Compare = frame(
     label: "actives"
     world: world
@@ -145,7 +145,7 @@ func main() {
 
   # a table neither tracks
   let text: Text = { text: "hi", styleId: "", wrapWidthMode: WrapWidthMode.none }
-  componentSet(this: world.texts, entity: root, data: text)
+  componentSet(this: world.texts, entityId: root, data: text)
   let f4: Compare = frame(
     label: "texts"
     world: world
@@ -170,7 +170,7 @@ func main() {
 
   # a transform-only read: layout skips, transform runs
   let opacity: Opacity = { value: 0.5 }
-  componentSet(this: world.opacities, entity: root, data: opacity)
+  componentSet(this: world.opacities, entityId: root, data: opacity)
   let f6: Compare = frame(
     label: "opacities"
     world: world
@@ -184,7 +184,7 @@ func main() {
   # extentAnchors: layout READS it but deliberately does not track it — the
   # schedule must reproduce that exclusion, not "fix" it
   let anchor: ExtentAnchor = { h: HExtent.left }
-  componentSet(this: world.extentAnchors, entity: root, data: anchor)
+  componentSet(this: world.extentAnchors, entityId: root, data: anchor)
   let f7: Compare = frame(
     label: "extentAnchors"
     world: world

@@ -222,7 +222,7 @@ the app drains.
 
 **Loading — the pending-components outbox.** `applyComponentByName` applies
 the keys that name a `UiWorld` table, as today, and instead of erroring on
-the rest it appends `PendingComponent { entity, name, json }` (json = the
+the rest it appends `PendingComponent { entityId, name, json }` (json = the
 object's source text) to `world.pendingComponents`. After `loadSceneFile`
 returns, the app applies its own:
 
@@ -255,8 +255,8 @@ until the app has confirmed the sweep:
 
 ```rae
 func sweepMusicEntities(app: mod MusicApp) {
-  loop let entity: view EntityId in app.world.deadEntities {
-    clearEntityComponents(PlaybackSystem, world: app.playbackSystem, entity: entity)   # exists today (#760)
+  loop let entityId: view EntityId in app.world.deadEntities {
+    clearEntityComponents(PlaybackSystem, world: app.playbackSystem, entityId: entityId)   # exists today (#760)
     ...  # one line per system with tables
   }
   releaseDeadEntities(world: app.world)   # ids become reusable
@@ -366,7 +366,7 @@ Rules:
   not know (`PanelToggle`); the expansion routes it to the pending outbox
   like any unknown key, with the node's field-wise override already merged.
 - **Code-side application** is the same expansion on a live world:
-  `applyBundle(world, entity, name)` — so `DebugGpu2dMenu` and any code-built
+  `applyBundle(world, entityId, name)` — so `DebugGpu2dMenu` and any code-built
   UI can use the authored bundles instead of listing components by hand.
 - **`ContainerStyle` is a bundle** whose values are theme tokens; it stays
   as-is (working, tested) and becomes an entry in the theme's `bundles`

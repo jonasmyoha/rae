@@ -39,17 +39,17 @@ func buttonHoverFadeUpdate(
   var animating: Bool = false
   let n: Int = componentCount(this: world.shadows)
   loop var i: Int = 0, i < n, ++i {
-    let entity: EntityId = componentEntityAt(this: world.shadows, i: i)
-    if shadowReactsToHover(shadow: componentGet(this: world.shadows, entity: entity)) {
+    let entityId: EntityId = componentEntityAt(this: world.shadows, i: i)
+    if shadowReactsToHover(shadow: componentGet(this: world.shadows, entityId: entityId)) {
       var target: Float = 0.0
-      if entityHovered(world: world, uiSystems: uiSystems, entity: entity) {
+      if entityHovered(world: world, uiSystems: uiSystems, entityId: entityId) {
         target = 1.0
       }
-      if componentHas(this: uiSystems.button.hoverFades, entity: entity) is false {
+      if componentHas(this: uiSystems.button.hoverFades, entityId: entityId) is false {
         let rest: HoverFade = { amount: 0.0 }
-        componentSet(this: uiSystems.button.hoverFades, entity: entity, data: rest)
+        componentSet(this: uiSystems.button.hoverFades, entityId: entityId, data: rest)
       }
-      let current: Float = componentGet(this: uiSystems.button.hoverFades, entity: entity).amount
+      let current: Float = componentGet(this: uiSystems.button.hoverFades, entityId: entityId).amount
       if current is not target {
         var next: Float = current + step
         if target < current {
@@ -65,7 +65,10 @@ func buttonHoverFadeUpdate(
         if next - target < 0.001 and target - next < 0.001 {
           next = target
         }
-        let fade: mod HoverFade => componentMod(this: uiSystems.button.hoverFades, entity: entity)
+        let fade: mod HoverFade => componentMod(
+          this: uiSystems.button.hoverFades
+          entityId: entityId
+        )
         fade.amount = next
         # Every step changed what is drawn, the last one included.
         animating = true
@@ -76,16 +79,16 @@ func buttonHoverFadeUpdate(
 }
 
 # The hover mix a Shadow paints with: the eased fade when the ButtonSystem runs
-# one for `entity`, else the instant hovered / not-hovered switch.
+# one for `entityId`, else the instant hovered / not-hovered switch.
 func hoverFadeAmount(
   world: view UiWorld
   uiSystems: view UiSystems
-  entity: view EntityId
+  entityId: view EntityId
 ) ret Float {
-  if componentHas(this: uiSystems.button.hoverFades, entity: entity) {
-    ret componentGet(this: uiSystems.button.hoverFades, entity: entity).amount
+  if componentHas(this: uiSystems.button.hoverFades, entityId: entityId) {
+    ret componentGet(this: uiSystems.button.hoverFades, entityId: entityId).amount
   }
-  if entityHovered(world: world, uiSystems: uiSystems, entity: entity) {
+  if entityHovered(world: world, uiSystems: uiSystems, entityId: entityId) {
     ret 1.0
   }
   ret 0.0

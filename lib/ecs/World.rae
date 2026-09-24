@@ -72,39 +72,39 @@ func allocEntity(this: mod EntityAllocator) ret EntityId {
     setIntListAt(lst: this.generations, index: idx, value: 0)
     gen = 0
   }
-  let entity: EntityId = { index: idx, generation: gen }
+  let entityId: EntityId = { index: idx, generation: gen }
   let pos: Int = this.alive.length
-  appendEntityList(lst: this.alive, value: entity)
+  appendEntityList(lst: this.alive, value: entityId)
   ensureIntSlots(lst: this.aliveSlot, index: idx)
   setIntListAt(lst: this.aliveSlot, index: idx, value: pos)
-  ret entity
+  ret entityId
 }
 
 # Free an entity: bump its slot's generation (so stale handles compare unequal),
 # return the index to the free list, and drop it from the live set in O(1) via
 # the sparse slot map (swap the last entry into the hole, fix the moved entity's
 # recorded slot, pop, clear this slot).
-func freeEntity(this: mod EntityAllocator, entity: view EntityId) {
-  retireEntity(this: this, entity: entity)
-  recycleEntityIndex(this: this, entity: entity)
+func freeEntity(this: mod EntityAllocator, entityId: view EntityId) {
+  retireEntity(this: this, entityId: entityId)
+  recycleEntityIndex(this: this, entityId: entityId)
 }
 
 # The free-list half of freeEntity: make the index allocatable again. Only
 # valid for an entity that was retired; a world that defers reuse (UiWorld's
 # dead-entities outbox) calls this once the app has swept its own tables.
-func recycleEntityIndex(this: mod EntityAllocator, entity: view EntityId) {
-  if entity.index < 0 {
+func recycleEntityIndex(this: mod EntityAllocator, entityId: view EntityId) {
+  if entityId.index < 0 {
     ret
   }
-  appendIntList(lst: this.freeList, value: entity.index)
+  appendIntList(lst: this.freeList, value: entityId.index)
 }
 
 # The liveness half of freeEntity: bump the slot's generation (stale handles
 # compare unequal, isAlive is false) and drop the entity from the live set —
 # WITHOUT returning the index to the free list, so nothing can be allocated
 # into it yet.
-func retireEntity(this: mod EntityAllocator, entity: view EntityId) {
-  let idx: Int = entity.index
+func retireEntity(this: mod EntityAllocator, entityId: view EntityId) {
+  let idx: Int = entityId.index
   if idx < 0 {
     ret
   }
@@ -141,8 +141,8 @@ func allocatorGeneration(this: view EntityAllocator, index: view Int) ret Int {
 # matches the handle's. A freed slot has a bumped generation and a never-
 # allocated/out-of-range index reads -1, so both compare unequal — noEntity()
 # (index -1) and stale handles read false without touching the alive list.
-func allocatorIsAlive(this: view EntityAllocator, entity: view EntityId) ret Bool {
-  ret allocatorGeneration(this: this, index: entity.index) is entity.generation
+func allocatorIsAlive(this: view EntityAllocator, entityId: view EntityId) ret Bool {
+  ret allocatorGeneration(this: this, index: entityId.index) is entityId.generation
 }
 
 # How many entities are currently alive (the dense set's length).
@@ -150,7 +150,7 @@ func allocatorAliveCount(this: view EntityAllocator) ret Int {
   ret this.alive.length
 }
 
-# Remove `entity` from EVERY component table of `world` in one call — the
+# Remove `entityId` from EVERY component table of `world` in one call — the
 # generic, reflection-driven replacement for a hand-listed per-table
 # `componentRemove` sweep (#760). `fields(world)` unrolls at compile time to one
 # `componentRemove` per `ComponentTable` field (docs/compile-time-reflection.md);
@@ -160,8 +160,8 @@ func allocatorAliveCount(this: view EntityAllocator) ret Int {
 # the entity or detach hierarchy links — the caller keeps that explicit
 # (destroyEntity, per-system despawn helpers), because those are lifecycle /
 # referential-integrity concerns, not "drop this entity's rows".
-func clearEntityComponents(W: type, world: mod W, entity: view EntityId) {
+func clearEntityComponents(W: type, world: mod W, entityId: view EntityId) {
   loop let table: mod ComponentTable(any) in fields(world) {
-    componentRemove(this: table, entity: entity)
+    componentRemove(this: table, entityId: entityId)
   }
 }

@@ -47,16 +47,16 @@ func fitDiffers(a: view Float, b: view Float) ret Bool {
 func fitWriteRect(
   world: mod UiWorld
   uiSystems: mod UiSystems
-  entity: view EntityId
+  entityId: view EntityId
   x: view Float
   y: view Float
   w: view Float
   h: view Float
 ) {
-  if componentHas(this: uiSystems.layout.computedRects, entity: entity) is false {
+  if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) is false {
     ret
   }
-  let cur: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: entity)
+  let cur: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entityId: entityId)
   var dirty: Bool = false
   if fitDiffers(a: cur.position.x, b: x) {
     dirty = true
@@ -73,7 +73,7 @@ func fitWriteRect(
   if dirty is false {
     ret
   }
-  let cr: mod ComputedRect => componentMod(this: uiSystems.layout.computedRects, entity: entity)
+  let cr: mod ComputedRect => componentMod(this: uiSystems.layout.computedRects, entityId: entityId)
   cr.position.x = x
   cr.position.y = y
   cr.size.x = w
@@ -86,24 +86,24 @@ func fitWriteRect(
 func fitScaleSubtree(
   world: mod UiWorld
   uiSystems: mod UiSystems
-  entity: view EntityId
+  entityId: view EntityId
   s: view Float
 ) {
   unsafe {
-    if componentHas(this: world.childrens, entity: entity) is false {
+    if componentHas(this: world.childrens, entityId: entityId) is false {
       ret
     }
-    let ch: view Children => componentView(this: world.childrens, entity: entity)
+    let ch: view Children => componentView(this: world.childrens, entityId: entityId)
     let n: Int = ch.ids.length
     var i: Int = 0
     loop i < n {
       let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
-      if componentHas(this: world.rects, entity: cid) {
-        let r: Rect = componentGet(this: world.rects, entity: cid)
+      if componentHas(this: world.rects, entityId: cid) {
+        let r: Rect = componentGet(this: world.rects, entityId: cid)
         fitWriteRect(
           world: world
           uiSystems: uiSystems
-          entity: cid
+          entityId: cid
           x: r.position.x * s
           y: r.position.y * s
           w: r.size.x * s
@@ -113,7 +113,7 @@ func fitScaleSubtree(
       fitScaleSubtree(
         world: world
         uiSystems: uiSystems
-        entity: cid
+        entityId: cid
         s: s
       )
       i = i + 1
@@ -126,21 +126,21 @@ func fitScaleSubtree(
 func fitApplyOne(
   world: mod UiWorld
   uiSystems: mod UiSystems
-  entity: view EntityId
+  entityId: view EntityId
   mode: view FitMode
 ) {
-  if componentHas(this: uiSystems.hierarchy.parents, entity: entity) is false {
+  if componentHas(this: uiSystems.hierarchy.parents, entityId: entityId) is false {
     ret
   }
-  let pl: Parent = componentGet(this: uiSystems.hierarchy.parents, entity: entity)
-  if componentHas(this: uiSystems.layout.computedRects, entity: pl.parent) is false {
+  let pl: Parent = componentGet(this: uiSystems.hierarchy.parents, entityId: entityId)
+  if componentHas(this: uiSystems.layout.computedRects, entityId: pl.parent) is false {
     ret
   }
-  if componentHas(this: world.rects, entity: entity) is false {
+  if componentHas(this: world.rects, entityId: entityId) is false {
     ret
   }
-  let pcr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: pl.parent)
-  let design: Rect = componentGet(this: world.rects, entity: entity)
+  let pcr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entityId: pl.parent)
+  let design: Rect = componentGet(this: world.rects, entityId: entityId)
   if design.size.x <= 0.0 {
     ret
   }
@@ -151,8 +151,8 @@ func fitApplyOne(
   var padT: Float = 0.0
   var availW: Float = pcr.size.x
   var availH: Float = pcr.size.y
-  if componentHas(this: world.paddings, entity: pl.parent) {
-    let pad: Padding = componentGet(this: world.paddings, entity: pl.parent)
+  if componentHas(this: world.paddings, entityId: pl.parent) {
+    let pad: Padding = componentGet(this: world.paddings, entityId: pl.parent)
     padL = pad.insets.l
     padT = pad.insets.t
     availW = availW - pad.insets.l - pad.insets.r
@@ -184,7 +184,7 @@ func fitApplyOne(
   fitWriteRect(
     world: world
     uiSystems: uiSystems
-    entity: entity
+    entityId: entityId
     x: x
     y: y
     w: w
@@ -193,7 +193,7 @@ func fitApplyOne(
   fitScaleSubtree(
     world: world
     uiSystems: uiSystems
-    entity: entity
+    entityId: entityId
     s: s
   )
 }
@@ -234,7 +234,7 @@ func fitSystem(world: mod UiWorld, uiSystems: mod UiSystems) pub {
     fitApplyOne(
       world: world
       uiSystems: uiSystems
-      entity: e
+      entityId: e
       mode: stf.mode
     )
     i = i + 1

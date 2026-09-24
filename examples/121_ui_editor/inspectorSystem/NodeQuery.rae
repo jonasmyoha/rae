@@ -22,24 +22,24 @@ func documentSceneRoot(world: view UiWorld, pageRoot: view EntityId) ret EntityI
   ret pageRoot
 }
 
-# Deepest active node under (x, y) in `entity`'s subtree, or none.
+# Deepest active node under (x, y) in `entityId`'s subtree, or none.
 func deepestNodeAt(
   world: view UiWorld
   uiSystems: view UiSystems
-  entity: view EntityId
+  entityId: view EntityId
   x: view Float
   y: view Float
 ) ret EntityId {
-  if uiEntityActive(world: world, entity: entity) is false {
+  if uiEntityActive(world: world, entityId: entityId) is false {
     ret noEntity()
   }
-  if componentHas(this: world.childrens, entity: entity) {
-    let children: view Children => componentView(this: world.childrens, entity: entity)
+  if componentHas(this: world.childrens, entityId: entityId) {
+    let children: view Children => componentView(this: world.childrens, entityId: entityId)
     loop var i: Int = children.ids.length - 1, i >= 0, --i {
       let hit: EntityId = deepestNodeAt(
         world: world
         uiSystems: uiSystems
-        entity: children.ids.copyAtFallback(index: i, fallback: noEntity())
+        entityId: children.ids.copyAtFallback(index: i, fallback: noEntity())
         x: x
         y: y
       )
@@ -51,41 +51,45 @@ func deepestNodeAt(
   if uiPointInEntity(
     world: world
     uiSystems: uiSystems
-    entity: entity
+    entityId: entityId
     x: x
     y: y
   ) {
-    ret entity
+    ret entityId
   }
   ret noEntity()
 }
 
-func nodeIdOf(world: view UiWorld, entity: view EntityId) ret String {
-  if isNone(this: entity) {
+func nodeIdOf(world: view UiWorld, entityId: view EntityId) ret String {
+  if isNone(this: entityId) {
     ret ""
   }
-  if componentHas(this: world.nodeIdComponents, entity: entity) {
-    ret "{componentGet(this: world.nodeIdComponents, entity: entity).id}"
+  if componentHas(this: world.nodeIdComponents, entityId: entityId) {
+    ret "{componentGet(this: world.nodeIdComponents, entityId: entityId).id}"
   }
-  ret "entity {entity.index}"
+  ret "entity {entityId.index}"
 }
 
-# First node in `entity`'s subtree whose NodeId is `nodeId`.
-func findNodeByIdIn(world: view UiWorld, entity: view EntityId, nodeId: view String) ret EntityId {
-  if isNone(this: entity) {
+# First node in `entityId`'s subtree whose NodeId is `nodeId`.
+func findNodeByIdIn(
+  world: view UiWorld
+  entityId: view EntityId
+  nodeId: view String
+) ret EntityId {
+  if isNone(this: entityId) {
     ret noEntity()
   }
-  if componentHas(this: world.nodeIdComponents, entity: entity) {
-    if componentGet(this: world.nodeIdComponents, entity: entity).id is nodeId {
-      ret entity
+  if componentHas(this: world.nodeIdComponents, entityId: entityId) {
+    if componentGet(this: world.nodeIdComponents, entityId: entityId).id is nodeId {
+      ret entityId
     }
   }
-  if componentHas(this: world.childrens, entity: entity) {
-    let children: view Children => componentView(this: world.childrens, entity: entity)
+  if componentHas(this: world.childrens, entityId: entityId) {
+    let children: view Children => componentView(this: world.childrens, entityId: entityId)
     loop var i: Int = 0, i < children.ids.length, ++i {
       let found: EntityId = findNodeByIdIn(
         world: world
-        entity: children.ids.copyAtFallback(index: i, fallback: noEntity())
+        entityId: children.ids.copyAtFallback(index: i, fallback: noEntity())
         nodeId: nodeId
       )
       if isNone(this: found) is false {
@@ -96,27 +100,31 @@ func findNodeByIdIn(world: view UiWorld, entity: view EntityId, nodeId: view Str
   ret noEntity()
 }
 
-func parentOf(world: view UiWorld, uiSystems: view UiSystems, entity: view EntityId) ret EntityId {
-  if isNone(this: entity) or componentHas(this: uiSystems.hierarchy.parents, entity: entity) is false {
+func parentOf(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+) ret EntityId {
+  if isNone(this: entityId) or componentHas(this: uiSystems.hierarchy.parents, entityId: entityId) is false {
     ret noEntity()
   }
-  ret componentGet(this: uiSystems.hierarchy.parents, entity: entity).parent
+  ret componentGet(this: uiSystems.hierarchy.parents, entityId: entityId).parent
 }
 
 # The sibling `step` places away in the parent's Children (clamped).
 func siblingOf(
   world: view UiWorld
   uiSystems: view UiSystems
-  entity: view EntityId
+  entityId: view EntityId
   step: view Int
 ) ret EntityId {
-  let parent: EntityId = parentOf(world: world, uiSystems: uiSystems, entity: entity)
-  if isNone(this: parent) or componentHas(this: world.childrens, entity: parent) is false {
-    ret entity
+  let parent: EntityId = parentOf(world: world, uiSystems: uiSystems, entityId: entityId)
+  if isNone(this: parent) or componentHas(this: world.childrens, entityId: parent) is false {
+    ret entityId
   }
-  let children: view Children => componentView(this: world.childrens, entity: parent)
+  let children: view Children => componentView(this: world.childrens, entityId: parent)
   loop var i: Int = 0, i < children.ids.length, ++i {
-    if children.ids.copyAtFallback(index: i, fallback: noEntity()) is entity {
+    if children.ids.copyAtFallback(index: i, fallback: noEntity()) is entityId {
       var next: Int = i + step
       if next < 0 {
         next = 0
@@ -124,43 +132,43 @@ func siblingOf(
       if next > children.ids.length - 1 {
         next = children.ids.length - 1
       }
-      ret children.ids.copyAtFallback(index: next, fallback: entity)
+      ret children.ids.copyAtFallback(index: next, fallback: entityId)
     }
   }
-  ret entity
+  ret entityId
 }
 
-func firstChildOf(world: view UiWorld, entity: view EntityId) ret EntityId {
-  if isNone(this: entity) or componentHas(this: world.childrens, entity: entity) is false {
-    ret entity
+func firstChildOf(world: view UiWorld, entityId: view EntityId) ret EntityId {
+  if isNone(this: entityId) or componentHas(this: world.childrens, entityId: entityId) is false {
+    ret entityId
   }
-  let children: view Children => componentView(this: world.childrens, entity: entity)
+  let children: view Children => componentView(this: world.childrens, entityId: entityId)
   if children.ids.length is 0 {
-    ret entity
+    ret entityId
   }
-  ret children.ids.copyAtFallback(index: 0, fallback: entity)
+  ret children.ids.copyAtFallback(index: 0, fallback: entityId)
 }
 
 # The parent chain as `a > b > c`, stopping at the document scene root.
 func parentChainOf(
   world: view UiWorld
   uiSystems: view UiSystems
-  entity: view EntityId
+  entityId: view EntityId
   sceneRoot: view EntityId
 ) ret String {
   var chain: String = ""
-  var current: EntityId = parentOf(world: world, uiSystems: uiSystems, entity: entity)
+  var current: EntityId = parentOf(world: world, uiSystems: uiSystems, entityId: entityId)
   var guard: Int = 0
   loop isNone(this: current) is false and guard < 32 {
     if chain.length() > 0 {
-      chain = "{nodeIdOf(world: world, entity: current)} > {chain}"
+      chain = "{nodeIdOf(world: world, entityId: current)} > {chain}"
     } else {
-      chain = nodeIdOf(world: world, entity: current)
+      chain = nodeIdOf(world: world, entityId: current)
     }
     if current is sceneRoot {
       current = noEntity()
     } else {
-      current = parentOf(world: world, uiSystems: uiSystems, entity: current)
+      current = parentOf(world: world, uiSystems: uiSystems, entityId: current)
     }
     guard = guard + 1
   }
@@ -178,10 +186,10 @@ func parentChainOf(
 # joined, bare. The inspector tallies these across a selection exactly like
 # the lib components, so this returns the NAMES and leaves the wording to the
 # caller.
-func pendingComponentNames(world: view UiWorld, entity: view EntityId) ret String {
+func pendingComponentNames(world: view UiWorld, entityId: view EntityId) ret String {
   var names: String = ""
   loop let pending: view PendingComponent in world.pendingComponents {
-    if pending.entity is entity {
+    if pending.entityId is entityId {
       if names.length() > 0 {
         names = "{names}, {pending.name}"
       } else {
@@ -193,9 +201,9 @@ func pendingComponentNames(world: view UiWorld, entity: view EntityId) ret Strin
 }
 
 # The node's authored type, or "" when it has none.
-func nodePrimaryType(world: view UiWorld, entity: view EntityId) ret String {
-  if componentHas(this: world.primaryTypes, entity: entity) {
-    let primary: view PrimaryType => componentView(this: world.primaryTypes, entity: entity)
+func nodePrimaryType(world: view UiWorld, entityId: view EntityId) ret String {
+  if componentHas(this: world.primaryTypes, entityId: entityId) {
+    let primary: view PrimaryType => componentView(this: world.primaryTypes, entityId: entityId)
     ret "{primary.typeName}"
   }
   ret ""
@@ -204,15 +212,15 @@ func nodePrimaryType(world: view UiWorld, entity: view EntityId) ret String {
 # `<PrimaryType> / <Name>`, dropping either half when it is absent. This is
 # the node's own identity, so a selection that AGREES on it can still show it
 # — and at n=1 it always agrees.
-func nodeTypeLine(world: view UiWorld, entity: view EntityId) ret String {
+func nodeTypeLine(world: view UiWorld, entityId: view EntityId) ret String {
   var primaryType: String = ""
-  if componentHas(this: world.primaryTypes, entity: entity) {
-    let primary: view PrimaryType => componentView(this: world.primaryTypes, entity: entity)
+  if componentHas(this: world.primaryTypes, entityId: entityId) {
+    let primary: view PrimaryType => componentView(this: world.primaryTypes, entityId: entityId)
     primaryType = "{primary.typeName}"
   }
   var label: String = ""
-  if componentHas(this: world.names, entity: entity) {
-    let name: view Name => componentView(this: world.names, entity: entity)
+  if componentHas(this: world.names, entityId: entityId) {
+    let name: view Name => componentView(this: world.names, entityId: entityId)
     label = "{name.label}"
   }
   if primaryType.length() is 0 {
@@ -228,11 +236,11 @@ func nodeTypeLine(world: view UiWorld, entity: view EntityId) ret String {
 # was expanded from, which components it inherited whole (shown dimmed, in
 # brackets) and which it authored a field over — "" for a node without
 # bundles. The per-field diff waits for the save path.
-func bundleProvenanceLine(world: view UiWorld, entity: view EntityId) ret String {
-  if componentHas(this: world.bundleRefs, entity: entity) is false {
+func bundleProvenanceLine(world: view UiWorld, entityId: view EntityId) ret String {
+  if componentHas(this: world.bundleRefs, entityId: entityId) is false {
     ret ""
   }
-  let refs: view BundleRefs => componentView(this: world.bundleRefs, entity: entity)
+  let refs: view BundleRefs => componentView(this: world.bundleRefs, entityId: entityId)
   if refs.names.length is 0 {
     ret ""
   }
@@ -267,7 +275,7 @@ func hitStackAt(
   let deepest: EntityId = deepestNodeAt(
     world: world
     uiSystems: uiSystems
-    entity: sceneRoot
+    entityId: sceneRoot
     x: x
     y: y
   )
@@ -275,7 +283,7 @@ func hitStackAt(
     ret
   }
   out.add(value: deepest)
-  var walk: EntityId = parentOf(world: world, uiSystems: uiSystems, entity: deepest)
+  var walk: EntityId = parentOf(world: world, uiSystems: uiSystems, entityId: deepest)
   # Bounded by the tree's depth; the guard is against a malformed parent cycle,
   # not against normal nesting.
   loop var steps: Int = 0, steps < 64, ++steps {
@@ -285,7 +293,7 @@ func hitStackAt(
     if uiPointInEntity(
       world: world
       uiSystems: uiSystems
-      entity: walk
+      entityId: walk
       x: x
       y: y
     ) {
@@ -294,18 +302,18 @@ func hitStackAt(
     if walk is sceneRoot {
       ret
     }
-    walk = parentOf(world: world, uiSystems: uiSystems, entity: walk)
+    walk = parentOf(world: world, uiSystems: uiSystems, entityId: walk)
   }
 }
 
-# The node ids of `entity`'s children, comma separated, with their entity
+# The node ids of `entityId`'s children, comma separated, with their entity
 # indices — the hierarchy half of the identity block. Truncated at eight, so a
 # container with fifty children does not push the whole panel off screen.
-func childIdsOf(world: view UiWorld, entity: view EntityId) ret String {
-  if isNone(this: entity) or componentHas(this: world.childrens, entity: entity) is false {
+func childIdsOf(world: view UiWorld, entityId: view EntityId) ret String {
+  if isNone(this: entityId) or componentHas(this: world.childrens, entityId: entityId) is false {
     ret ""
   }
-  let children: view Children => componentView(this: world.childrens, entity: entity)
+  let children: view Children => componentView(this: world.childrens, entityId: entityId)
   var line: String = ""
   var shown: Int = 0
   loop var i: Int = 0, i < children.ids.length, ++i {
@@ -316,7 +324,7 @@ func childIdsOf(world: view UiWorld, entity: view EntityId) ret String {
     if isNone(this: child) {
       continue
     }
-    let text: String = "{nodeIdOf(world: world, entity: child)} #{child.index}"
+    let text: String = "{nodeIdOf(world: world, entityId: child)} #{child.index}"
     if line.length() is 0 {
       line = "{text}"
     } else {
@@ -329,11 +337,11 @@ func childIdsOf(world: view UiWorld, entity: view EntityId) ret String {
 
 # `<nodeId> #<index>` for a node, or "" for none — how one entity is named in
 # the identity block and beside a diagnostic.
-func entityLabelOf(world: view UiWorld, entity: view EntityId) ret String {
-  if isNone(this: entity) {
+func entityLabelOf(world: view UiWorld, entityId: view EntityId) ret String {
+  if isNone(this: entityId) {
     ret ""
   }
-  ret "{nodeIdOf(world: world, entity: entity)} #{entity.index}"
+  ret "{nodeIdOf(world: world, entityId: entityId)} #{entityId.index}"
 }
 
 # `...` at `limit` characters. A tree row is one line in a narrow panel, so a
@@ -351,33 +359,33 @@ func truncated(text: view String, limit: view Int) ret String {
 # `PrimaryType` wins when there is one; otherwise the kind is derived from the
 # components the node actually carries, most specific first — a node with a
 # ListView is a List whatever else it has, and a bare container is a Node.
-func nodeKindOf(world: view UiWorld, entity: view EntityId) ret String {
-  let authored: String = nodePrimaryType(world: world, entity: entity)
+func nodeKindOf(world: view UiWorld, entityId: view EntityId) ret String {
+  let authored: String = nodePrimaryType(world: world, entityId: entityId)
   if authored.length() > 0 {
     ret authored
   }
-  if componentHas(this: world.sceneInstances, entity: entity) {
+  if componentHas(this: world.sceneInstances, entityId: entityId) {
     ret "Scene"
   }
-  if componentHas(this: world.sceneSources, entity: entity) {
-    let source: view SceneSource => componentView(this: world.sceneSources, entity: entity)
+  if componentHas(this: world.sceneSources, entityId: entityId) {
+    let source: view SceneSource => componentView(this: world.sceneSources, entityId: entityId)
     if source.root {
       ret "Scene"
     }
   }
-  if componentHas(this: world.listViews, entity: entity) {
+  if componentHas(this: world.listViews, entityId: entityId) {
     ret "List"
   }
-  if componentHas(this: world.texts, entity: entity) {
+  if componentHas(this: world.texts, entityId: entityId) {
     ret "Text"
   }
-  if componentHas(this: world.sprites, entity: entity) {
+  if componentHas(this: world.sprites, entityId: entityId) {
     ret "Sprite"
   }
-  if componentHas(this: world.shapes, entity: entity) {
+  if componentHas(this: world.shapes, entityId: entityId) {
     ret "Shape"
   }
-  if componentHas(this: world.layouts, entity: entity) {
+  if componentHas(this: world.layouts, entityId: entityId) {
     ret "Layout"
   }
   ret "Node"
@@ -388,21 +396,24 @@ func nodeKindOf(world: view UiWorld, entity: view EntityId) ret String {
 # file it came from — those are the two cases where a node's identity is in
 # its data rather than its name. "" for everything else; a preview of nothing
 # is just noise in a narrow panel.
-func nodePreviewOf(world: view UiWorld, entity: view EntityId) ret String {
-  if componentHas(this: world.sceneSources, entity: entity) {
-    let source: view SceneSource => componentView(this: world.sceneSources, entity: entity)
+func nodePreviewOf(world: view UiWorld, entityId: view EntityId) ret String {
+  if componentHas(this: world.sceneSources, entityId: entityId) {
+    let source: view SceneSource => componentView(this: world.sceneSources, entityId: entityId)
     if source.root and source.sceneId.length() > 0 {
       ret "{source.sceneId}"
     }
   }
-  if componentHas(this: world.sceneInstances, entity: entity) {
-    let instance: view SceneInstance => componentView(this: world.sceneInstances, entity: entity)
+  if componentHas(this: world.sceneInstances, entityId: entityId) {
+    let instance: view SceneInstance => componentView(
+      this: world.sceneInstances
+      entityId: entityId
+    )
     if instance.sceneId.length() > 0 {
       ret "{instance.sceneId}"
     }
   }
-  if componentHas(this: world.texts, entity: entity) {
-    let text: view Text => componentView(this: world.texts, entity: entity)
+  if componentHas(this: world.texts, entityId: entityId) {
+    let text: view Text => componentView(this: world.texts, entityId: entityId)
     # Short on purpose: the row already spends its width on `Name - Kind`,
     # and the panel's inner width is ~346px. A longer preview is clipped by
     # the panel edge mid-word, which reads as broken rather than truncated.
@@ -417,17 +428,17 @@ func nodePreviewOf(world: view UiWorld, entity: view EntityId) ret String {
 # The whole row label: `Name - Kind` plus the preview, plus a `+` when the node
 # carries bundle provenance (it came from a template rather than being written
 # here). Assembled in one place so the tree and any future list agree.
-func treeRowLabelOf(world: view UiWorld, entity: view EntityId) ret String {
-  var line: String = "{nodeIdOf(world: world, entity: entity)} - {nodeKindOf(
+func treeRowLabelOf(world: view UiWorld, entityId: view EntityId) ret String {
+  var line: String = "{nodeIdOf(world: world, entityId: entityId)} - {nodeKindOf(
     world: world
-    entity: entity
+    entityId: entityId
   )}"
-  let preview: String = nodePreviewOf(world: world, entity: entity)
+  let preview: String = nodePreviewOf(world: world, entityId: entityId)
   if preview.length() > 0 {
     line = "{line}  {preview}"
   }
-  if componentHas(this: world.bundleRefs, entity: entity) {
-    let refs: view BundleRefs => componentView(this: world.bundleRefs, entity: entity)
+  if componentHas(this: world.bundleRefs, entityId: entityId) {
+    let refs: view BundleRefs => componentView(this: world.bundleRefs, entityId: entityId)
     if refs.names.length > 0 {
       line = "{line}  +{refs.names.join(sep: "+")}"
     }
@@ -438,20 +449,24 @@ func treeRowLabelOf(world: view UiWorld, entity: view EntityId) ret String {
 # Does this node, or anything under it, match `filter`? A tree filter that hid
 # non-matching ANCESTORS would cut matches out of the tree entirely, so a
 # parent survives when a descendant matches — the row stays as context.
-func treeRowMatches(world: view UiWorld, entity: view EntityId, filter: view String) ret Bool {
+func treeRowMatches(world: view UiWorld, entityId: view EntityId, filter: view String) ret Bool {
   if filter.length() is 0 {
     ret true
   }
-  if treeRowLabelOf(world: world, entity: entity).toLower().indexOf(sub: filter.toLower()) >= 0 {
+  if treeRowLabelOf(world: world, entityId: entityId).toLower().indexOf(sub: filter.toLower()) >= 0 {
     ret true
   }
-  if componentHas(this: world.childrens, entity: entity) is false {
+  if componentHas(this: world.childrens, entityId: entityId) is false {
     ret false
   }
-  let children: view Children => componentView(this: world.childrens, entity: entity)
+  let children: view Children => componentView(this: world.childrens, entityId: entityId)
   loop var i: Int = 0, i < children.ids.length, ++i {
     let child: EntityId = children.ids.copyAtFallback(index: i, fallback: noEntity())
-    if isNone(this: child) is false and treeRowMatches(world: world, entity: child, filter: filter) {
+    if isNone(this: child) is false and treeRowMatches(
+      world: world
+      entityId: child
+      filter: filter
+    ) {
       ret true
     }
   }

@@ -78,16 +78,16 @@ func main() {
   log("--- component spot-checks ---")
   if let albumRootRaw: Int = world.nodeIds.get(k: "AlbumRoot") {
     let albumRootId: EntityId = id(v: albumRootRaw)
-    if componentHas(this: world.rects, entity: albumRootId) {
-      let r: Rect = componentGet(this: world.rects, entity: albumRootId)
+    if componentHas(this: world.rects, entityId: albumRootId) {
+      let r: Rect = componentGet(this: world.rects, entityId: albumRootId)
       log("AlbumRoot Rect: {r.position.x},{r.position.y} {r.size.x}x{r.size.y}")
     }
-    if componentHas(this: world.layouts, entity: albumRootId) {
-      let lay: Layout = componentGet(this: world.layouts, entity: albumRootId)
+    if componentHas(this: world.layouts, entityId: albumRootId) {
+      let lay: Layout = componentGet(this: world.layouts, entityId: albumRootId)
       log("AlbumRoot Layout: kind={lay.kind} gap={lay.gap} alignCross={lay.alignCross}")
     }
-    if componentHas(this: world.childrens, entity: albumRootId) {
-      let ch: view Children => componentView(this: world.childrens, entity: albumRootId)
+    if componentHas(this: world.childrens, entityId: albumRootId) {
+      let ch: view Children => componentView(this: world.childrens, entityId: albumRootId)
       log("AlbumRoot has {ch.ids.length} children")
     }
   } else {
@@ -96,9 +96,9 @@ func main() {
 
   if let backButtonRaw: Int = world.nodeIds.get(k: "BackButton") {
     let backButtonId: EntityId = id(v: backButtonRaw)
-    let oc: view OnClick => componentView(this: world.onClicks, entity: backButtonId)
+    let oc: view OnClick => componentView(this: world.onClicks, entityId: backButtonId)
     log("BackButton OnClick.actionId = {oc.actionId}")
-    let sp: view Sprite => componentView(this: world.sprites, entity: backButtonId)
+    let sp: view Sprite => componentView(this: world.sprites, entityId: backButtonId)
     log("BackButton Sprite.textureKey = {sp.textureKey}")
   } else {
     log("BackButton missing")
@@ -106,7 +106,7 @@ func main() {
 
   if let playButtonRaw: Int = world.nodeIds.get(k: "PlayButton") {
     let playButtonId: EntityId = id(v: playButtonRaw)
-    let sh: Shape = componentGet(this: world.shapes, entity: playButtonId)
+    let sh: Shape = componentGet(this: world.shapes, entityId: playButtonId)
     log("PlayButton Shape.kind={sh.kind} radius={sh.radius}")
     log("PlayButton Shape.fill.r={sh.fill.r} a={sh.fill.a}")
   } else {

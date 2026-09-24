@@ -22,11 +22,11 @@ open ui/scrollRootSystem/ScrollRootSystem
 open ecs/Entity
 open ecs/ComponentTable
 
-func scrollPositionOf(world: view UiWorld, entity: view EntityId) ret Int {
-  if isNone(this: entity) or componentHas(this: world.scrollStates, entity: entity) is false {
+func scrollPositionOf(world: view UiWorld, entityId: view EntityId) ret Int {
+  if isNone(this: entityId) or componentHas(this: world.scrollStates, entityId: entityId) is false {
     ret 0
   }
-  ret componentGet(this: world.scrollStates, entity: entity).y.toInt()
+  ret componentGet(this: world.scrollStates, entityId: entityId).y.toInt()
 }
 
 func runTestWheelStep(
@@ -48,7 +48,7 @@ func runTestWheelStep(
   if let index: Int = findNodeInPage(world: world, pageId: "chrome", nodeId: nodeId) {
     node = nodeEntity(world: world, index: index)
   }
-  let center: ClickPoint = nodeCenterOf(uiSystems: uiSystems, entity: node)
+  let center: ClickPoint = nodeCenterOf(uiSystems: uiSystems, entityId: node)
   if isNone(this: node) or center.ok is false {
     log("[ui-editor] wheel: no on-screen chrome node named {nodeId}")
     ret
@@ -73,19 +73,19 @@ func runTestWheelStep(
     source: EditorListSource.components
   )
   let zoomBefore: Int = (cameraOf(cameraSystem: cameraSystem, world: world).zoom * 100.0 + 0.5).toInt()
-  let treeBefore: Int = scrollPositionOf(world: world, entity: treeList)
-  let componentsBefore: Int = scrollPositionOf(world: world, entity: componentList)
+  let treeBefore: Int = scrollPositionOf(world: world, entityId: treeList)
+  let componentsBefore: Int = scrollPositionOf(world: world, entityId: componentList)
   # Every wheel reader a live frame runs, in the frame's order.
   updateScrollRoot(
     world: world
     uiSystems: uiSystems
-    entity: componentList
+    entityId: componentList
     input: input
   )
   updateScrollRoot(
     world: world
     uiSystems: uiSystems
-    entity: treeList
+    entityId: treeList
     input: input
   )
   cameraInputSystem(
@@ -96,11 +96,11 @@ func runTestWheelStep(
     input: input
   )
   let zoomAfter: Int = (cameraOf(cameraSystem: cameraSystem, world: world).zoom * 100.0 + 0.5).toInt()
-  let treeAfter: Int = scrollPositionOf(world: world, entity: treeList)
-  let componentsAfter: Int = scrollPositionOf(world: world, entity: componentList)
+  let treeAfter: Int = scrollPositionOf(world: world, entityId: treeList)
+  let componentsAfter: Int = scrollPositionOf(world: world, entityId: componentList)
   # The chrome's nodes carry no NodeId component (the page map holds them), so
   # name the three consumers the editor has rather than print an entity index.
-  var routed: String = nodeIdOf(world: world, entity: input.wheelTarget)
+  var routed: String = nodeIdOf(world: world, entityId: input.wheelTarget)
   if isNone(this: input.wheelTarget) {
     routed = "none"
   } else if input.wheelTarget is treeList {

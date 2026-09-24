@@ -399,12 +399,12 @@ func updateInfiniteTerrain(
   terrainSystem.centreCellY = cellY
 
   loop var i: Int = 0, i < componentCount(this: world.propKinds), ++i {
-    let entity: EntityId = componentEntityAt(this: world.propKinds, i: i)
+    let entityId: EntityId = componentEntityAt(this: world.propKinds, i: i)
     var pk: PropKind = componentDataAt(this: world.propKinds, i: i)
     let ccx: Int = slotCellX(centreCellX: cellX, slot: pk.slot)
     let ccy: Int = slotCellY(centreCellY: cellY, slot: pk.slot)
     if pk.kind is kindTile {
-      let tile: TileMesh = componentGet(this: world.tileMeshes, entity: entity)
+      let tile: TileMesh = componentGet(this: world.tileMeshes, entityId: entityId)
       reshapeTerrainTile(
         terrainSystem: terrainSystem
         renderer: renderer
@@ -414,7 +414,7 @@ func updateInfiniteTerrain(
       )
       componentSet(
         this: world.transforms
-        entity: entity
+        entityId: entityId
         data: Transform3D {
           position: Vec3.create(
             x: ccx.toFloat() * terrainCellSize
@@ -429,7 +429,11 @@ func updateInfiniteTerrain(
       var broad: Bool = false
       if pk.kind is kindTree {
         broad = terrainHash(cellX: ccx, cellY: ccy, seed: 131) < 0.54
-        componentSet(this: world.treeVariants, entity: entity, data: TreeVariant { broad: broad })
+        componentSet(
+          this: world.treeVariants
+          entityId: entityId
+          data: TreeVariant { broad: broad }
+        )
       }
       let t: Transform3D = kindTransform(
         kind: pk.kind
@@ -438,13 +442,13 @@ func updateInfiniteTerrain(
         cellY: ccy
         groundZ: terrainSystem.groundZ
       )
-      componentSet(this: world.transforms, entity: entity, data: t)
+      componentSet(this: world.transforms, entityId: entityId, data: t)
       pk.active = terrainPropAllowed(
         x: t.position.x
         y: t.position.y
         minGrass: kindMinGrass(kind: pk.kind)
       )
-      componentSet(this: world.propKinds, entity: entity, data: pk)
+      componentSet(this: world.propKinds, entityId: entityId, data: pk)
     }
   }
   ret true
@@ -475,10 +479,12 @@ func drawTerrainProps(
   resetInstanceBatch(batch: terrainSystem.tallTrunkProp.batch)
   resetInstanceBatch(batch: terrainSystem.tallCrownProp.batch)
   loop var i: Int = 0, i < componentCount(this: world.propKinds), ++i {
-    let entity: EntityId = componentEntityAt(this: world.propKinds, i: i)
+    let entityId: EntityId = componentEntityAt(this: world.propKinds, i: i)
     let pk: PropKind = componentDataAt(this: world.propKinds, i: i)
     if pk.active and pk.kind is not kindTile {
-      let model: Mat4 = transform3dToMatrix(t: componentGet(this: world.transforms, entity: entity))
+      let model: Mat4 = transform3dToMatrix(
+        t: componentGet(this: world.transforms, entityId: entityId)
+      )
       if pk.kind is kindRock {
         gatherKind(prop: terrainSystem.rockProp, model: model)
       }
@@ -495,7 +501,7 @@ func drawTerrainProps(
         gatherKind(prop: terrainSystem.grassProp, model: model)
       }
       if pk.kind is kindTree {
-        if componentGet(this: world.treeVariants, entity: entity).broad {
+        if componentGet(this: world.treeVariants, entityId: entityId).broad {
           gatherKind(prop: terrainSystem.broadTrunkProp, model: model)
           gatherKind(prop: terrainSystem.broadCrownProp, model: model)
         } else {
@@ -523,12 +529,12 @@ func drawTerrainGround(
   time: copy Float
 ) {
   loop var i: Int = 0, i < componentCount(this: world.tileMeshes), ++i {
-    let entity: EntityId = componentEntityAt(this: world.tileMeshes, i: i)
+    let entityId: EntityId = componentEntityAt(this: world.tileMeshes, i: i)
     let tile: TileMesh = componentDataAt(this: world.tileMeshes, i: i)
     if tile.meshId >= 1 {
       # #745: Quat all the way — the tile's authoritative transform is already a
       # Quat Transform3D; compose it straight to a Mat4 (no Euler Vec3 detour).
-      let q: Transform3D = componentGet(this: world.transforms, entity: entity)
+      let q: Transform3D = componentGet(this: world.transforms, entityId: entityId)
       let model: Mat4 = transform3dToMatrix(t: q)
       drawTerrainMesh(
         cache: cache
@@ -553,10 +559,12 @@ func drawTerrainPropsShadow(
   world: view GameWorld
 ) {
   loop var i: Int = 0, i < componentCount(this: world.propKinds), ++i {
-    let entity: EntityId = componentEntityAt(this: world.propKinds, i: i)
+    let entityId: EntityId = componentEntityAt(this: world.propKinds, i: i)
     let pk: PropKind = componentDataAt(this: world.propKinds, i: i)
     if pk.active and pk.kind is not kindTile {
-      let model: Mat4 = transform3dToMatrix(t: componentGet(this: world.transforms, entity: entity))
+      let model: Mat4 = transform3dToMatrix(
+        t: componentGet(this: world.transforms, entityId: entityId)
+      )
       if pk.kind is kindRock {
         castKind(renderer: renderer, mesh: terrainSystem.rockProp.mesh, model: model)
       }
@@ -573,7 +581,7 @@ func drawTerrainPropsShadow(
         castKind(renderer: renderer, mesh: terrainSystem.grassProp.mesh, model: model)
       }
       if pk.kind is kindTree {
-        if componentGet(this: world.treeVariants, entity: entity).broad {
+        if componentGet(this: world.treeVariants, entityId: entityId).broad {
           castKind(renderer: renderer, mesh: terrainSystem.broadTrunkProp.mesh, model: model)
           castKind(renderer: renderer, mesh: terrainSystem.broadCrownProp.mesh, model: model)
         } else {
@@ -616,14 +624,14 @@ func terrainMaterial(color: view Vec3, roughness: view Float) ret Material3d {
 
 # Spawn one prop entity of `kind` for pool slot `slot`.
 func spawnProp(world: mod GameWorld, kind: view Int, slot: view Int) ret EntityId {
-  let entity: EntityId = gameWorldAddEntity(world: world)
-  componentSet(this: world.transforms, entity: entity, data: createTransform3D())
+  let entityId: EntityId = gameWorldAddEntity(world: world)
+  componentSet(this: world.transforms, entityId: entityId, data: createTransform3D())
   componentSet(
     this: world.propKinds
-    entity: entity
+    entityId: entityId
     data: PropKind { kind: kind, slot: slot, active: false }
   )
-  ret entity
+  ret entityId
 }
 
 func createTerrainSystem(
@@ -692,16 +700,20 @@ func createTerrainSystem(
   loop var slot: Int = 0, slot < terrainCellCount, ++slot {
     let tileMesh: MeshHandle = uploadMeshDataForTerrain(renderer: renderer, mesh: tilePlane)
     let tileEntity: EntityId = gameWorldAddEntity(world: world)
-    componentSet(this: world.transforms, entity: tileEntity, data: createTransform3D())
+    componentSet(this: world.transforms, entityId: tileEntity, data: createTransform3D())
     componentSet(
       this: world.propKinds
-      entity: tileEntity
+      entityId: tileEntity
       data: PropKind { kind: kindTile, slot: slot, active: true }
     )
-    componentSet(this: world.tileMeshes, entity: tileEntity, data: TileMesh { meshId: tileMesh.id })
+    componentSet(
+      this: world.tileMeshes
+      entityId: tileEntity
+      data: TileMesh { meshId: tileMesh.id }
+    )
 
     let treeEntity: EntityId = spawnProp(world: world, kind: kindTree, slot: slot)
-    componentSet(this: world.treeVariants, entity: treeEntity, data: TreeVariant { broad: false })
+    componentSet(this: world.treeVariants, entityId: treeEntity, data: TreeVariant { broad: false })
     let unusedRock: EntityId = spawnProp(world: world, kind: kindRock, slot: slot)
     let unusedBush: EntityId = spawnProp(world: world, kind: kindBush, slot: slot)
     let unusedFlower: EntityId = spawnProp(world: world, kind: kindFlower, slot: slot)

@@ -51,19 +51,19 @@ func main() {
   )
 
   let e1: EntityId = { index: 1, generation: 0 }
-  componentSet(this: positions, entity: e1, data: Position { x: 10 })
-  componentSet(this: velocities, entity: e1, data: Velocity { v: 2 })
+  componentSet(this: positions, entityId: e1, data: Position { x: 10 })
+  componentSet(this: velocities, entityId: e1, data: Velocity { v: 2 })
 
   # Frame 1: first run — both systems run, in order.
   log("frame1: {runFrame(sched: sched, positions: positions, velocities: velocities)}")
   # Frame 2: nothing mutated — both skip.
   log("frame2: {runFrame(sched: sched, positions: positions, velocities: velocities)}")
   # Frame 3: mutate velocities — only move (reads velocities) runs.
-  let velocity: mod Velocity => componentMod(this: velocities, entity: e1)
+  let velocity: mod Velocity => componentMod(this: velocities, entityId: e1)
   velocity.v = 9
   log("frame3: {runFrame(sched: sched, positions: positions, velocities: velocities)}")
   # Frame 4: mutate positions — only render (reads positions) runs.
-  let pm: mod Position => componentMod(this: positions, entity: e1)
+  let pm: mod Position => componentMod(this: positions, entityId: e1)
   pm.x = 99
   log("frame4: {runFrame(sched: sched, positions: positions, velocities: velocities)}")
 }

@@ -113,7 +113,7 @@ type Light3d {
 
 # ----- geometry components (the backend divergence point) -------------
 type MeshRenderer {
-  entity: Int
+  entityIndex: Int
   mesh: MeshHandle
   material: Int
   visible: Bool
@@ -133,7 +133,7 @@ type MeshRenderer {
 # distances. Metallic/roughness/emission come from the first primitive,
 # because those shade the fused surface as a whole.
 type SdfPrimitive {
-  entity: Int
+  entityIndex: Int
   shape: Int
   material: Int
   noise: Float
@@ -169,7 +169,7 @@ func defaultLight3d() pub ret Light3d {
 # The 3D counterpart to lib/ui's UiWorld: the reusable entity core
 # (EntityAllocator, lib/ecs/world.rae) plus one ComponentTable per 3D
 # component, keyed by EntityId. This is the 3D scene model — the parallel-List
-# `Scene3d` SoA it replaced (a bare-index `entity` shared across every List) was
+# `Scene3d` SoA it replaced (a bare `entity` index shared across every List) was
 # retired in #797; authoring is world3dAddEntity + the component setters below,
 # and the renderers read its ECS queries.
 #
@@ -223,30 +223,30 @@ func world3dAddEntity(world: mod World3d) ret EntityId {
 # than ComponentTable plumbing (mirrors lib/ui's world_helpers). Setting a
 # Transform3d seeds the previous transform to match, so the first frame's
 # motion vectors are zero rather than a jump from an unset previous.
-func world3dSetTransform(world: mod World3d, entity: view EntityId, transform: view Transform3d) {
-  componentSet(this: world.transforms, entity: entity, data: transform)
-  componentSet(this: world.prevTransforms, entity: entity, data: transform)
+func world3dSetTransform(world: mod World3d, entityId: view EntityId, transform: view Transform3d) {
+  componentSet(this: world.transforms, entityId: entityId, data: transform)
+  componentSet(this: world.prevTransforms, entityId: entityId, data: transform)
 }
 
-func world3dSetMaterial(world: mod World3d, entity: view EntityId, material: view Material3d) {
-  componentSet(this: world.materials, entity: entity, data: material)
+func world3dSetMaterial(world: mod World3d, entityId: view EntityId, material: view Material3d) {
+  componentSet(this: world.materials, entityId: entityId, data: material)
 }
 
 func world3dSetMeshRenderer(
   world: mod World3d
-  entity: view EntityId
+  entityId: view EntityId
   renderer: view MeshRenderer
 ) {
-  componentSet(this: world.meshRenderers, entity: entity, data: renderer)
+  componentSet(this: world.meshRenderers, entityId: entityId, data: renderer)
 }
 
-func world3dSetSdf(world: mod World3d, entity: view EntityId, sdf: view SdfPrimitive) {
-  componentSet(this: world.sdfs, entity: entity, data: sdf)
+func world3dSetSdf(world: mod World3d, entityId: view EntityId, sdf: view SdfPrimitive) {
+  componentSet(this: world.sdfs, entityId: entityId, data: sdf)
 }
 
 # Allocate an entity and attach its Transform3d + a per-entity Material3d
 # component + MeshRenderer in one call — the authoring primitive for building a
-# World3d in code (#794). The MeshRenderer's legacy `entity`/`material` Int fields
+# World3d in code (#794). The MeshRenderer's legacy `entityIndex`/`material` Int fields
 # are ignored by the World3d renderer (renderSceneWorld reads the ECS entity + the
 # Material3d component), so they carry placeholders.
 func world3dAddMeshInstance(
@@ -257,19 +257,19 @@ func world3dAddMeshInstance(
   rotation: view Vec3
   scale: view Vec3
 ) ret EntityId {
-  let entity: EntityId = world3dAddEntity(world: world)
+  let entityId: EntityId = world3dAddEntity(world: world)
   world3dSetTransform(
     world: world
-    entity: entity
+    entityId: entityId
     transform: Transform3d { position: position, rotation: rotation, scale: scale }
   )
-  world3dSetMaterial(world: world, entity: entity, material: material)
+  world3dSetMaterial(world: world, entityId: entityId, material: material)
   world3dSetMeshRenderer(
     world: world
-    entity: entity
-    renderer: MeshRenderer { entity: -1, mesh: mesh, material: -1, visible: true }
+    entityId: entityId
+    renderer: MeshRenderer { entityIndex: -1, mesh: mesh, material: -1, visible: true }
   )
-  ret entity
+  ret entityId
 }
 
 # Live entity count — the ECS analogue of `scene.transforms.length`.
@@ -279,16 +279,20 @@ func world3dEntityCount(world: view World3d) ret Int {
 
 # ----- World3d runtime access (animation + frame history) ------------
 # Read an entity's current Transform3d.
-func world3dGetTransform(world: view World3d, entity: view EntityId) ret Transform3d {
-  ret componentGet(this: world.transforms, entity: entity)
+func world3dGetTransform(world: view World3d, entityId: view EntityId) ret Transform3d {
+  ret componentGet(this: world.transforms, entityId: entityId)
 }
 
 # Write an entity's Transform3d WITHOUT touching its previous transform — the
 # per-frame animation write. Previous transforms advance once per frame via
 # world3dPrevTransformSystem (the setTransform / snapshot split, so multiple
 # writes in one frame still yield one clean motion-vector delta).
-func world3dWriteTransform(world: mod World3d, entity: view EntityId, transform: view Transform3d) {
-  componentSet(this: world.transforms, entity: entity, data: transform)
+func world3dWriteTransform(
+  world: mod World3d
+  entityId: view EntityId
+  transform: view Transform3d
+) {
+  componentSet(this: world.transforms, entityId: entityId, data: transform)
 }
 
 # The entity at loader transform-index `i` (its dense position in the transforms

@@ -31,20 +31,20 @@ open inspectorSystem/NodeQuery
 # later still continues the cycle.
 const clickCycleSlop: Float = 4.0
 
-# Add `entity` to the selection and make it the anchor, or drop it when it is
+# Add `entityId` to the selection and make it the anchor, or drop it when it is
 # already selected (a modifier-click). Kept beside `selectNode` so both halves
 # of the selection contract live in one place.
 func selectAddNode(
   inspectorSystem: mod InspectorSystem
   world: mod UiWorld
-  entity: view EntityId
+  entityId: view EntityId
 ) {
-  if isNone(this: entity) {
+  if isNone(this: entityId) {
     ret
   }
   loop var i: Int = 0, i < inspectorSystem.selection.length, ++i {
     if let member: EntityId = inspectorSystem.selection.copyAt(index: i) {
-      if member is entity {
+      if member is entityId {
         inspectorSystem.selection.removeAt(index: i)
         var anchor: EntityId = noEntity()
         if inspectorSystem.selection.length > 0 {
@@ -59,24 +59,24 @@ func selectAddNode(
       }
     }
   }
-  inspectorSystem.selection.add(value: entity)
-  inspectorSystem.selected = entity
+  inspectorSystem.selection.add(value: entityId)
+  inspectorSystem.selected = entityId
 }
 
-# Replace the selection with exactly `entity` (a plain click). Every path that
+# Replace the selection with exactly `entityId` (a plain click). Every path that
 # changes the selection goes through here or `selectAddNode`, so the anchor and
 # the set can never disagree.
-func selectNode(inspectorSystem: mod InspectorSystem, world: mod UiWorld, entity: view EntityId) {
-  inspectorSystem.selected = entity
+func selectNode(inspectorSystem: mod InspectorSystem, world: mod UiWorld, entityId: view EntityId) {
+  inspectorSystem.selected = entityId
   inspectorSystem.selection.clear()
-  if isNone(this: entity) {
+  if isNone(this: entityId) {
     ret
   }
-  inspectorSystem.selection.add(value: entity)
+  inspectorSystem.selection.add(value: entityId)
   log(
-    "[ui-editor] selected {nodeIdOf(world: world, entity: entity)}: {componentNamesFor(
+    "[ui-editor] selected {nodeIdOf(world: world, entityId: entityId)}: {componentNamesFor(
       world: world
-      entity: entity
+      entityId: entityId
     )}"
   )
 }
@@ -148,10 +148,10 @@ func pointerSelectMode() ret SelectMode {
   ret SelectMode.replace
 }
 
-func isSelected(inspectorSystem: view InspectorSystem, entity: view EntityId) ret Bool {
+func isSelected(inspectorSystem: view InspectorSystem, entityId: view EntityId) ret Bool {
   loop var i: Int = 0, i < inspectorSystem.selection.length, ++i {
     if let member: EntityId = inspectorSystem.selection.copyAt(index: i) {
-      if member is entity {
+      if member is entityId {
         ret true
       }
     }
@@ -167,11 +167,11 @@ func isSelected(inspectorSystem: view InspectorSystem, entity: view EntityId) re
 # add nothing, not to throw the selection away — and losing a carefully built
 # set to a near-miss is exactly the kind of thing that makes an editor feel
 # hostile.
-# The row index of `entity` in the tree's visible order, or -1.
-func treeRowOf(inspectorSystem: view InspectorSystem, entity: view EntityId) ret Int {
+# The row index of `entityId` in the tree's visible order, or -1.
+func treeRowOf(inspectorSystem: view InspectorSystem, entityId: view EntityId) ret Int {
   loop var i: Int = 0, i < inspectorSystem.treeEntities.length, ++i {
     if let row: EntityId = inspectorSystem.treeEntities.copyAt(index: i) {
-      if row is entity {
+      if row is entityId {
         ret i
       }
     }
@@ -180,7 +180,7 @@ func treeRowOf(inspectorSystem: view InspectorSystem, entity: view EntityId) ret
 }
 
 # Select the contiguous run of visible rows between the range anchor and
-# `entity`. The set is REPLACED by the run rather than unioned with it, which
+# `entityId`. The set is REPLACED by the run rather than unioned with it, which
 # is what lets a second Shift+click shrink a range that overshot — the
 # behaviour every file browser has and the reason the anchor must not move.
 #
@@ -190,19 +190,19 @@ func treeRowOf(inspectorSystem: view InspectorSystem, entity: view EntityId) ret
 func applyRange(
   inspectorSystem: mod InspectorSystem
   world: mod UiWorld
-  entity: view EntityId
+  entityId: view EntityId
 ) ret Bool {
-  let toRow: Int = treeRowOf(inspectorSystem: inspectorSystem, entity: entity)
+  let toRow: Int = treeRowOf(inspectorSystem: inspectorSystem, entityId: entityId)
   var fromRow: Int = treeRowOf(
     inspectorSystem: inspectorSystem
-    entity: inspectorSystem.rangeAnchor
+    entityId: inspectorSystem.rangeAnchor
   )
   if toRow < 0 {
     # The clicked node is not a visible row at all — the tree panel is closed,
     # or it has not been built yet. A range over rows that are not on screen
     # is meaningless, so degrade to a plain click rather than doing nothing:
     # Shift+arrow must still move the active node with the tree hidden.
-    selectNode(inspectorSystem: inspectorSystem, world: world, entity: entity)
+    selectNode(inspectorSystem: inspectorSystem, world: world, entityId: entityId)
     ret true
   }
   if fromRow < 0 {
@@ -221,7 +221,7 @@ func applyRange(
       inspectorSystem.selection.add(value: row)
     }
   }
-  inspectorSystem.selected = entity
+  inspectorSystem.selected = entityId
   # The anchor deliberately survives the range: `selectNode` / `selectAddNode`
   # would have moved it, which is why a range does not go through them.
   inspectorSystem.rangeAnchor = anchor
@@ -237,7 +237,7 @@ func applyRange(
 func applySelect(
   inspectorSystem: mod InspectorSystem
   world: mod UiWorld
-  entity: view EntityId
+  entityId: view EntityId
   mode: view SelectMode
 ) ret Bool {
   inspectorSystem.pendingRemoveComponent = ""
@@ -248,36 +248,36 @@ func applySelect(
   # modifier click all leave no stale depth behind.
   inspectorSystem.cycleActive = false
   if mode is SelectMode.range {
-    if isNone(this: entity) {
+    if isNone(this: entityId) {
       ret false
     }
-    ret applyRange(inspectorSystem: inspectorSystem, world: world, entity: entity)
+    ret applyRange(inspectorSystem: inspectorSystem, world: world, entityId: entityId)
   }
   # Every non-range gesture re-origins the range: after a plain, toggling or
   # subtracting click, the next Shift+click spans from THAT row.
-  if isNone(this: entity) is false {
-    inspectorSystem.rangeAnchor = entity
+  if isNone(this: entityId) is false {
+    inspectorSystem.rangeAnchor = entityId
   }
   if mode is SelectMode.replace {
-    if isNone(this: entity) {
+    if isNone(this: entityId) {
       if inspectorSystem.selection.length is 0 {
         ret false
       }
-      selectNode(inspectorSystem: inspectorSystem, world: world, entity: noEntity())
+      selectNode(inspectorSystem: inspectorSystem, world: world, entityId: noEntity())
       inspectorSystem.rangeAnchor = noEntity()
       log("[ui-editor] deselected")
       ret true
     }
-    if inspectorSystem.selection.length is 1 and inspectorSystem.selected is entity {
+    if inspectorSystem.selection.length is 1 and inspectorSystem.selected is entityId {
       ret false
     }
-    selectNode(inspectorSystem: inspectorSystem, world: world, entity: entity)
+    selectNode(inspectorSystem: inspectorSystem, world: world, entityId: entityId)
     ret true
   }
-  if isNone(this: entity) {
+  if isNone(this: entityId) {
     ret false
   }
-  let already: Bool = isSelected(inspectorSystem: inspectorSystem, entity: entity)
+  let already: Bool = isSelected(inspectorSystem: inspectorSystem, entityId: entityId)
   if mode is SelectMode.add and already {
     ret false
   }
@@ -288,7 +288,7 @@ func applySelect(
   # out, `subtract` only when it was in, and `toggle` means flip by
   # definition. So the three modes differ purely in the guards above, and
   # `selectAddNode` — which toggles — is the single mutation.
-  selectAddNode(inspectorSystem: inspectorSystem, world: world, entity: entity)
+  selectAddNode(inspectorSystem: inspectorSystem, world: world, entityId: entityId)
   log(
     "[ui-editor] selection ({inspectorSystem.selection.length}): {selectionNodeIds(
       inspectorSystem: inspectorSystem
@@ -313,7 +313,7 @@ func applySelectMany(
       ret applySelect(
         inspectorSystem: inspectorSystem
         world: world
-        entity: noEntity()
+        entityId: noEntity()
         mode: SelectMode.replace
       )
     }
@@ -321,7 +321,7 @@ func applySelectMany(
   }
   var changed: Bool = false
   var first: Bool = true
-  loop let entity: view EntityId in entities {
+  loop let entityId: view EntityId in entities {
     var entityMode: SelectMode = mode
     if mode is SelectMode.replace and first is false {
       entityMode = SelectMode.add
@@ -329,7 +329,7 @@ func applySelectMany(
     if applySelect(
       inspectorSystem: inspectorSystem
       world: world
-      entity: entity
+      entityId: entityId
       mode: entityMode
     ) {
       changed = true
@@ -348,7 +348,7 @@ func selectionNodeIds(inspectorSystem: view InspectorSystem, world: view UiWorld
   var line: String = ""
   loop var i: Int = 0, i < inspectorSystem.selection.length, ++i {
     if let member: EntityId = inspectorSystem.selection.copyAt(index: i) {
-      let name: String = nodeIdOf(world: world, entity: member)
+      let name: String = nodeIdOf(world: world, entityId: member)
       if line.length() is 0 {
         line = "{name}"
       } else {
@@ -384,13 +384,13 @@ func selectParentOfSelection(
   }
   var parents: List(EntityId) = List.create(EntityId, cap: 8)
   var moved: Bool = false
-  loop let entity: view EntityId in inspectorSystem.selection {
-    if isNone(this: entity) {
+  loop let entityId: view EntityId in inspectorSystem.selection {
+    if isNone(this: entityId) {
       continue
     }
-    var target: EntityId = entity
-    if entity is not sceneRoot {
-      let parent: EntityId = parentOf(world: world, uiSystems: uiSystems, entity: entity)
+    var target: EntityId = entityId
+    if entityId is not sceneRoot {
+      let parent: EntityId = parentOf(world: world, uiSystems: uiSystems, entityId: entityId)
       if isNone(this: parent) is false {
         target = parent
         moved = true
@@ -453,10 +453,10 @@ func canvasSelectAt(
     ret applySelect(
       inspectorSystem: inspectorSystem
       world: world
-      entity: deepestNodeAt(
+      entityId: deepestNodeAt(
         world: world
         uiSystems: uiSystems
-        entity: sceneRoot
+        entityId: sceneRoot
         x: x
         y: y
       )
@@ -479,7 +479,7 @@ func canvasSelectAt(
     ret applySelect(
       inspectorSystem: inspectorSystem
       world: world
-      entity: noEntity()
+      entityId: noEntity()
       mode: SelectMode.replace
     )
   }
@@ -503,7 +503,7 @@ func canvasSelectAt(
   let changed: Bool = applySelect(
     inspectorSystem: inspectorSystem
     world: world
-    entity: picked
+    entityId: picked
     mode: SelectMode.replace
   )
   # Re-arm AFTER applySelect, which cleared the cycle. The point is the one
@@ -520,7 +520,7 @@ func canvasSelectAt(
     # Only the STEPS are logged, not every canvas click: `applySelect` already
     # names what got selected, and the one thing that line cannot show is how
     # deep into the stack under the cursor you now are.
-    var pickedName: String = nodeIdOf(world: world, entity: picked)
+    var pickedName: String = nodeIdOf(world: world, entityId: picked)
     if isNone(this: picked) {
       pickedName = "nothing"
     }

@@ -314,12 +314,12 @@ func encodeGradientFill(gradient: view GradientFill) ret String {
 }
 
 # Text with its namespaced style override (a sparse component of its own).
-func encodeText(world: view UiWorld, entity: view EntityId, text: view Text) ret String {
+func encodeText(world: view UiWorld, entityId: view EntityId, text: view Text) ret String {
   let base: String = encodeComponent(value: text, skip: "")
-  if componentHas(this: world.styleOverrides, entity: entity) is false {
+  if componentHas(this: world.styleOverrides, entityId: entityId) is false {
     ret base
   }
-  let override: view StyleOverride => componentView(this: world.styleOverrides, entity: entity)
+  let override: view StyleOverride => componentView(this: world.styleOverrides, entityId: entityId)
   var builder: JsonBuilder = Json.jbObject()
   if override.hasSize {
     Json.jbField(builder: builder, key: "size", valueJson: jsonNumber(value: override.size))
@@ -446,121 +446,121 @@ func encodeListView(listView: view ListView) ret String {
   ret Json.jbEndObject(builder: builder)
 }
 
-# A component of `entity` in the authored grammar, "" when the name is no
+# A component of `entityId` in the authored grammar, "" when the name is no
 # authored table of the world (or the entity has none).
 func authoredComponentJson(
   world: view UiWorld
-  entity: view EntityId
+  entityId: view EntityId
   name: view String
 ) ret String {
   if name is "Rect" {
-    if componentHas(this: world.rects, entity: entity) {
-      let value: Rect = componentGet(this: world.rects, entity: entity)
+    if componentHas(this: world.rects, entityId: entityId) {
+      let value: Rect = componentGet(this: world.rects, entityId: entityId)
       ret encodeRect(rect: value)
     }
     ret ""
   }
   if name is "Layout" {
-    if componentHas(this: world.layouts, entity: entity) {
-      let value: Layout = componentGet(this: world.layouts, entity: entity)
+    if componentHas(this: world.layouts, entityId: entityId) {
+      let value: Layout = componentGet(this: world.layouts, entityId: entityId)
       ret encodeLayout(layout: value)
     }
     ret ""
   }
   if name is "Padding" {
-    if componentHas(this: world.paddings, entity: entity) {
-      let value: Padding = componentGet(this: world.paddings, entity: entity)
+    if componentHas(this: world.paddings, entityId: entityId) {
+      let value: Padding = componentGet(this: world.paddings, entityId: entityId)
       ret encodeInsets(insets: value.insets)
     }
     ret ""
   }
   if name is "Margin" {
-    if componentHas(this: world.margins, entity: entity) {
-      let value: Margin = componentGet(this: world.margins, entity: entity)
+    if componentHas(this: world.margins, entityId: entityId) {
+      let value: Margin = componentGet(this: world.margins, entityId: entityId)
       ret encodeInsets(insets: value.insets)
     }
     ret ""
   }
   if name is "Offset" {
-    if componentHas(this: world.offsets, entity: entity) {
-      let value: Offset = componentGet(this: world.offsets, entity: entity)
+    if componentHas(this: world.offsets, entityId: entityId) {
+      let value: Offset = componentGet(this: world.offsets, entityId: entityId)
       ret encodeVec2(v: value.delta)
     }
     ret ""
   }
   if name is "Align" {
-    if componentHas(this: world.aligns, entity: entity) {
-      let value: Align = componentGet(this: world.aligns, entity: entity)
+    if componentHas(this: world.aligns, entityId: entityId) {
+      let value: Align = componentGet(this: world.aligns, entityId: entityId)
       ret encodeAlign(align: value)
     }
     ret ""
   }
   if name is "TextShadow" {
-    if componentHas(this: world.textShadows, entity: entity) {
-      let value: TextShadow = componentGet(this: world.textShadows, entity: entity)
+    if componentHas(this: world.textShadows, entityId: entityId) {
+      let value: TextShadow = componentGet(this: world.textShadows, entityId: entityId)
       ret encodeTextShadow(shadow: value)
     }
     ret ""
   }
   if name is "OpticalAlign" {
-    if componentHas(this: world.opticalAligns, entity: entity) {
-      let value: OpticalAlign = componentGet(this: world.opticalAligns, entity: entity)
+    if componentHas(this: world.opticalAligns, entityId: entityId) {
+      let value: OpticalAlign = componentGet(this: world.opticalAligns, entityId: entityId)
       ret encodeOpticalAlign(optical: value)
     }
     ret ""
   }
   if name is "Sprite" {
-    if componentHas(this: world.sprites, entity: entity) {
-      let value: Sprite = componentGet(this: world.sprites, entity: entity)
+    if componentHas(this: world.sprites, entityId: entityId) {
+      let value: Sprite = componentGet(this: world.sprites, entityId: entityId)
       ret encodeSprite(sprite: value)
     }
     ret ""
   }
   if name is "Shape" {
-    if componentHas(this: world.shapes, entity: entity) {
-      let value: Shape = componentGet(this: world.shapes, entity: entity)
+    if componentHas(this: world.shapes, entityId: entityId) {
+      let value: Shape = componentGet(this: world.shapes, entityId: entityId)
       ret encodeShape(shape: value)
     }
     ret ""
   }
   if name is "GradientFill" {
-    if componentHas(this: world.gradientFills, entity: entity) {
-      let value: GradientFill = componentGet(this: world.gradientFills, entity: entity)
+    if componentHas(this: world.gradientFills, entityId: entityId) {
+      let value: GradientFill = componentGet(this: world.gradientFills, entityId: entityId)
       ret encodeGradientFill(gradient: value)
     }
     ret ""
   }
   if name is "Text" {
-    if componentHas(this: world.texts, entity: entity) {
-      let value: Text = componentGet(this: world.texts, entity: entity)
-      ret encodeText(world: world, entity: entity, text: value)
+    if componentHas(this: world.texts, entityId: entityId) {
+      let value: Text = componentGet(this: world.texts, entityId: entityId)
+      ret encodeText(world: world, entityId: entityId, text: value)
     }
     ret ""
   }
   if name is "DataDependency" {
-    if componentHas(this: world.dataDependencies, entity: entity) {
-      let value: DataDependency = componentGet(this: world.dataDependencies, entity: entity)
+    if componentHas(this: world.dataDependencies, entityId: entityId) {
+      let value: DataDependency = componentGet(this: world.dataDependencies, entityId: entityId)
       ret encodeDataDependency(dep: value)
     }
     ret ""
   }
   if name is "RefreshRegion" {
-    if componentHas(this: world.refreshRegions, entity: entity) {
-      let value: RefreshRegion = componentGet(this: world.refreshRegions, entity: entity)
+    if componentHas(this: world.refreshRegions, entityId: entityId) {
+      let value: RefreshRegion = componentGet(this: world.refreshRegions, entityId: entityId)
       ret encodeRefreshRegion(region: value)
     }
     ret ""
   }
   if name is "SceneInstance" {
-    if componentHas(this: world.sceneInstances, entity: entity) {
-      let value: SceneInstance = componentGet(this: world.sceneInstances, entity: entity)
+    if componentHas(this: world.sceneInstances, entityId: entityId) {
+      let value: SceneInstance = componentGet(this: world.sceneInstances, entityId: entityId)
       ret encodeSceneInstance(instance: value)
     }
     ret ""
   }
   if name is "ListView" {
-    if componentHas(this: world.listViews, entity: entity) {
-      let value: ListView = componentGet(this: world.listViews, entity: entity)
+    if componentHas(this: world.listViews, entityId: entityId) {
+      let value: ListView = componentGet(this: world.listViews, entityId: entityId)
       ret encodeListView(listView: value)
     }
     ret ""
@@ -571,7 +571,7 @@ func authoredComponentJson(
     if isRuntimeTable(name: typeName(table)) is false and name is authoredNameOf(
       typeName: typeName(table)
     ) {
-      text = tableAuthoredJson(table: table, entity: entity)
+      text = tableAuthoredJson(table: table, entityId: entityId)
     }
   }
   ret text
@@ -579,25 +579,25 @@ func authoredComponentJson(
 
 # The generic encoders instantiated per table type (a `T` the fields loop
 # cannot name itself).
-func tableAuthoredJson(T: type, table: view ComponentTable(T), entity: view EntityId) ret String {
-  if componentHas(this: table, entity: entity) is false {
+func tableAuthoredJson(T: type, table: view ComponentTable(T), entityId: view EntityId) ret String {
+  if componentHas(this: table, entityId: entityId) is false {
     ret ""
   }
-  let value: T = componentGet(this: table, entity: entity)
+  let value: T = componentGet(this: table, entityId: entityId)
   ret encodeComponent(value: value, skip: "")
 }
 
-func tableMachineJson(T: type, table: view ComponentTable(T), entity: view EntityId) ret String {
-  if componentHas(this: table, entity: entity) is false {
+func tableMachineJson(T: type, table: view ComponentTable(T), entityId: view EntityId) ret String {
+  if componentHas(this: table, entityId: entityId) is false {
     ret ""
   }
-  let value: T = componentGet(this: table, entity: entity)
+  let value: T = componentGet(this: table, entityId: entityId)
   ret value.toJson()
 }
 
 # The machine form of a component (its compiler toJson), for the "did it
 # change since the fresh decode" test; "" when absent.
-# Compare ONE component of `entity` in the table `this` with the same
+# Compare ONE component of `entityId` in the table `this` with the same
 # component of `other` in the world `otherWorld` (#884's round-trip check).
 #
 # Two worlds cannot be walked in lockstep — a `fields()` loop walks the fields
@@ -611,30 +611,30 @@ func componentEqualsIn(
   T: type
   this: view ComponentTable(T)
   otherWorld: view UiWorld
-  entity: view EntityId
+  entityId: view EntityId
   otherEntity: view EntityId
 ) ret Bool {
   loop let that: view ComponentTable(T) in fields(otherWorld) {
-    if componentHas(this: this, entity: entity) is false {
-      ret componentHas(this: that, entity: otherEntity) is false
+    if componentHas(this: this, entityId: entityId) is false {
+      ret componentHas(this: that, entityId: otherEntity) is false
     }
-    if componentHas(this: that, entity: otherEntity) is false {
+    if componentHas(this: that, entityId: otherEntity) is false {
       ret false
     }
-    let mine: view T => componentView(this: this, entity: entity)
-    let theirs: view T => componentView(this: that, entity: otherEntity)
+    let mine: view T => componentView(this: this, entityId: entityId)
+    let theirs: view T => componentView(this: that, entityId: otherEntity)
     ret equals(a: mine, b: theirs)
   }
   ret false
 }
 
-# The authored component `name` of `entity` in `a`, compared with the same
+# The authored component `name` of `entityId` in `a`, compared with the same
 # component of `otherEntity` in `b` — by VALUE (componentEqualsIn), not by
 # their encoded text. `none` when no authored table carries that name.
 func componentEqualsByName(
   world: view UiWorld
   other: view UiWorld
-  entity: view EntityId
+  entityId: view EntityId
   otherEntity: view EntityId
   name: view String
 ) ret opt Bool {
@@ -646,7 +646,7 @@ func componentEqualsByName(
       answer = componentEqualsIn(
         this: table
         otherWorld: other
-        entity: entity
+        entityId: entityId
         otherEntity: otherEntity
       )
     }
@@ -656,7 +656,7 @@ func componentEqualsByName(
 
 func machineComponentJson(
   world: view UiWorld
-  entity: view EntityId
+  entityId: view EntityId
   name: view String
 ) ret String {
   var text: String = ""
@@ -664,12 +664,12 @@ func machineComponentJson(
     if isRuntimeTable(name: typeName(table)) is false and name is authoredNameOf(
       typeName: typeName(table)
     ) {
-      text = tableMachineJson(table: table, entity: entity)
+      text = tableMachineJson(table: table, entityId: entityId)
     }
   }
   # Text's override rides along.
-  if name is "Text" and componentHas(this: world.styleOverrides, entity: entity) {
-    let override: StyleOverride = componentGet(this: world.styleOverrides, entity: entity)
+  if name is "Text" and componentHas(this: world.styleOverrides, entityId: entityId) {
+    let override: StyleOverride = componentGet(this: world.styleOverrides, entityId: entityId)
     text = "{text}|{override.toJson()}"
   }
   ret text
@@ -677,10 +677,13 @@ func machineComponentJson(
 
 # Every authored table the entity carries, by authored name — the "added
 # since the source" scan.
-func authoredNamesOf(world: view UiWorld, entity: view EntityId) ret List(String) {
+func authoredNamesOf(world: view UiWorld, entityId: view EntityId) ret List(String) {
   var names: List(String) = List.create(String, cap: 16)
   loop let table: view ComponentTable(any) in fields(world) {
-    if isRuntimeTable(name: typeName(table)) is false and componentHas(this: table, entity: entity) {
+    if isRuntimeTable(name: typeName(table)) is false and componentHas(
+      this: table
+      entityId: entityId
+    ) {
       names.add(value: authoredNameOf(typeName: typeName(table)))
     }
   }

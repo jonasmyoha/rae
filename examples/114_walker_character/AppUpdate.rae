@@ -86,7 +86,7 @@ func controlledPosition(
 ) ret Vec3 {
   ret controllerOf(
     world: world
-    entity: rosterControlledEntity(players: players, characterSystem: characterSystem)
+    entityId: rosterControlledEntity(players: players, characterSystem: characterSystem)
   ).position
 }
 
@@ -97,7 +97,7 @@ func controlledHeading(
 ) ret Float {
   ret controllerOf(
     world: world
-    entity: rosterControlledEntity(players: players, characterSystem: characterSystem)
+    entityId: rosterControlledEntity(players: players, characterSystem: characterSystem)
   ).heading
 }
 
@@ -203,7 +203,7 @@ func updateApp(app: mod App) {
       let heroE: EntityId = app.characterSystem.heroEntity
       let heroCtrl: mod ThirdPersonController => componentMod(
         this: app.world.controllers
-        entity: heroE
+        entityId: heroE
       )
       characterMoved = updateWalkerMovement(
         controller: heroCtrl
@@ -239,7 +239,7 @@ func updateApp(app: mod App) {
       if let crowdE: EntityId = app.characterSystem.crowdEntities.copyAt(index: idx) {
         let drivenCtrl: mod ThirdPersonController => componentMod(
           this: app.world.controllers
-          entity: crowdE
+          entityId: crowdE
         )
         characterMoved = updateWalkerMovement(
           controller: drivenCtrl
@@ -251,7 +251,7 @@ func updateApp(app: mod App) {
         let drivenClip: Int = locomotionClipFor(controller: drivenCtrl)
         let drivenAnim: mod AnimationState => componentMod(
           this: app.world.animStates
-          entity: crowdE
+          entityId: crowdE
         )
         drivenAnim.clipIndex = drivenClip
         if characterMoved {
@@ -315,7 +315,7 @@ func updateApp(app: mod App) {
           playing: app.characterSystem.playing
           speed: app.characterSystem.speed
           toon: app.characterSystem.toon
-          controller: controllerOf(world: app.world, entity: app.characterSystem.heroEntity)
+          controller: controllerOf(world: app.world, entityId: app.characterSystem.heroEntity)
           rig: app.cameraSystem.rig
           camera: app.cameraSystem.camera
         )

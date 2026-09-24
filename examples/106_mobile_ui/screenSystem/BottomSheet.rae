@@ -134,12 +134,12 @@ func bottomSheetSystem(
   loop r < nr {
     let root: EntityId = componentEntityAt(this: world.bottomSheets, i: r)
     var currentActive: Bool = true
-    if componentHas(this: world.actives, entity: root) {
-      currentActive = componentGet(this: world.actives, entity: root).value
+    if componentHas(this: world.actives, entityId: root) {
+      currentActive = componentGet(this: world.actives, entityId: root).value
     }
     if currentActive is not sheet.visible {
       let active: Active = { value: sheet.visible }
-      componentSet(this: world.actives, entity: root, data: active)
+      componentSet(this: world.actives, entityId: root, data: active)
     }
     r = r + 1
   }
@@ -151,18 +151,18 @@ func bottomSheetSystem(
   loop p < np {
     let panel: EntityId = componentEntityAt(this: world.sheetPanels, i: p)
     let binding: SheetPanel = componentDataAt(this: world.sheetPanels, i: p)
-    let pad: Insets = entityPadding(world: world, uiSystems: uiSystems, entity: panel)
-    let layout: Layout = entityLayout(world: world, entity: panel)
+    let pad: Insets = entityPadding(world: world, uiSystems: uiSystems, entityId: panel)
+    let layout: Layout = entityLayout(world: world, entityId: panel)
     let rowCount: Int = sheet.actions.length
     var gaps: Float = 0.0
     if rowCount > 1 {
       gaps = layout.gap * (rowCount - 1).toFloat()
     }
     let panelH: Float = pad.t + binding.rowHeight * rowCount.toFloat() + gaps + pad.b
-    let current: Rect = entityRect(world: world, entity: panel)
+    let current: Rect = entityRect(world: world, entityId: panel)
     if current.size.y is not panelH {
       let sized: Rect = { position: current.position, size: Vec2 { x: current.size.x, y: panelH } }
-      componentSet(this: world.rects, entity: panel, data: sized)
+      componentSet(this: world.rects, entityId: panel, data: sized)
     }
     p = p + 1
   }

@@ -10,11 +10,11 @@ open ecs/hierarchySystem/HierarchySystem
 func printOrder(order: view List(EntityId), label: view String) {
   var line: String = ""
   loop var i: Int = 0, i < order.length, ++i {
-    if let entity: EntityId = order.copyAt(index: i) {
+    if let entityId: EntityId = order.copyAt(index: i) {
       if i > 0 {
         line = "{line} "
       }
-      line = "{line}{entity.index}"
+      line = "{line}{entityId.index}"
     }
   }
   log("{label}: {line}")
@@ -27,8 +27,8 @@ func parentsBeforeChildren(
 ) ret Bool {
   loop var i: Int = 0, i < order.length, ++i {
     if let child: EntityId = order.copyAt(index: i) {
-      if componentHas(this: parents, entity: child) {
-        let link: Parent = componentGet(this: parents, entity: child)
+      if componentHas(this: parents, entityId: child) {
+        let link: Parent = componentGet(this: parents, entityId: child)
         var parentPos: Int = -1
         loop var j: Int = 0, j < order.length, ++j {
           if let other: EntityId = order.copyAt(index: j) {

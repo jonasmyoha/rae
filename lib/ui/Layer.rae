@@ -14,11 +14,11 @@ open ui/UiSystems
 # just the label that `setLayerById` / `renderSystem` look up. Apps
 # call this once per named layer at boot, stash the returned ids in
 # whatever structure they like, and from then on tag overlay roots
-# with `setLayerById(world, entity, id)`.
+# with `setLayerById(world, entityId, id)`.
 func createLayerEntity(world: mod UiWorld, id: own String, order: view Int) pub ret EntityId {
   let e: EntityId = createEntity(world: world)
   let lr: LayerRoot = { id: own id, order: order }
-  componentSet(this: world.layerRoots, entity: e, data: own lr)
+  componentSet(this: world.layerRoots, entityId: e, data: own lr)
   ret e
 }
 
@@ -61,32 +61,32 @@ func findLayerEntity(world: view UiWorld, id: view String) pub ret EntityId {
   ret noEntity()
 }
 
-# Stamp a `LayerRef` linking `entity` to the layer-root with `id`.
+# Stamp a `LayerRef` linking `entityId` to the layer-root with `id`.
 # No-op when the layer doesn't exist — the entity stays on the
 # default content plane.
-func setLayerById(world: mod UiWorld, entity: view EntityId, id: view String) pub {
+func setLayerById(world: mod UiWorld, entityId: view EntityId, id: view String) pub {
   let layer: EntityId = findLayerEntity(world: world, id: id)
   if isNone(this: layer) {
     ret
   }
   let ref: LayerRef = { layer: layer }
-  componentSet(this: world.layerRefs, entity: entity, data: ref)
+  componentSet(this: world.layerRefs, entityId: entityId, data: ref)
 }
 
 # Read the paint-order of the layer an entity belongs to. Falls back
 # to the content layer's order (or 0 when no content layer exists).
-func entityLayerOrder(world: view UiWorld, entity: view EntityId) pub ret Int {
-  if componentHas(this: world.layerRefs, entity: entity) {
-    let ref: LayerRef = componentGet(this: world.layerRefs, entity: entity)
-    if componentHas(this: world.layerRoots, entity: ref.layer) {
-      let lr: LayerRoot = componentGet(this: world.layerRoots, entity: ref.layer)
+func entityLayerOrder(world: view UiWorld, entityId: view EntityId) pub ret Int {
+  if componentHas(this: world.layerRefs, entityId: entityId) {
+    let ref: LayerRef = componentGet(this: world.layerRefs, entityId: entityId)
+    if componentHas(this: world.layerRoots, entityId: ref.layer) {
+      let lr: LayerRoot = componentGet(this: world.layerRoots, entityId: ref.layer)
       ret lr.order
     }
   }
   let contentId: String = "content"
   let content: EntityId = findLayerEntity(world: world, id: contentId)
   if isNone(this: content) is false {
-    let lr: LayerRoot = componentGet(this: world.layerRoots, entity: content)
+    let lr: LayerRoot = componentGet(this: world.layerRoots, entityId: content)
     ret lr.order
   }
   ret 0
@@ -103,8 +103,8 @@ func collectPaintableRoots(world: view UiWorld, uiSystems: view UiSystems) pub r
     var i: Int = 0
     loop i < n {
       let e: EntityId = rae_ext_rae_buf_get(buf: alive.data, index: i)
-      if componentHas(this: uiSystems.hierarchy.parents, entity: e) is false {
-        if componentHas(this: uiSystems.transform2d.worldTransforms, entity: e) {
+      if componentHas(this: uiSystems.hierarchy.parents, entityId: e) is false {
+        if componentHas(this: uiSystems.transform2d.worldTransforms, entityId: e) {
           roots.add(value: e)
         }
       }
@@ -115,11 +115,11 @@ func collectPaintableRoots(world: view UiWorld, uiSystems: view UiSystems) pub r
     loop outer < m {
       var minIdx: Int = outer
       let outerE: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: outer)
-      var minOrd: Int = entityLayerOrder(world: world, entity: outerE)
+      var minOrd: Int = entityLayerOrder(world: world, entityId: outerE)
       var inner: Int = outer + 1
       loop inner < m {
         let innerE: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: inner)
-        let ord: Int = entityLayerOrder(world: world, entity: innerE)
+        let ord: Int = entityLayerOrder(world: world, entityId: innerE)
         if ord < minOrd {
           minIdx = inner
           minOrd = ord

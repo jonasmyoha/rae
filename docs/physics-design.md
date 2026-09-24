@@ -234,7 +234,7 @@ between fixed steps uses the existing `lib/ecs/prevTransformSystem`.
    `b3SolvePlanes` → apply delta → `b3ClipVector` on the velocity; writes
    `Transform3D`, `grounded`, `groundNormal`. Runs *before* the step so
    kinematic pushes see the new pose.
-6. Spawn/despawn helpers: `spawnRigidBody(world, entity, def…)` creates the
+6. Spawn/despawn helpers: `spawnRigidBody(world, entityId, def…)` creates the
    body and shapes and sets `userData`; `despawnRigidBody` destroys the body
    **before** `clearEntityComponents`, so a recycled index never owns a live
    Box3D body. Static venue shapes are created once on a single static body.

@@ -178,19 +178,19 @@ func placeOutline(
   visible: view Bool
 ) ret Bool {
   var show: Bool = visible and isNone(this: target) is false
-  if show and (componentHas(this: uiSystems.transform2d.worldTransforms, entity: target) is false or componentHas(
+  if show and (componentHas(this: uiSystems.transform2d.worldTransforms, entityId: target) is false or componentHas(
     this: uiSystems.layout.computedRects
-    entity: target
+    entityId: target
   ) is false) {
     show = false
   }
   var changed: Bool = false
   var wasShown: Bool = true
-  if componentHas(this: world.actives, entity: outline) {
-    wasShown = componentGet(this: world.actives, entity: outline).value
+  if componentHas(this: world.actives, entityId: outline) {
+    wasShown = componentGet(this: world.actives, entityId: outline).value
   }
   if wasShown is not show {
-    componentSet(this: world.actives, entity: outline, data: Active { value: show })
+    componentSet(this: world.actives, entityId: outline, data: Active { value: show })
     changed = true
   }
   if show is false {
@@ -198,30 +198,30 @@ func placeOutline(
   }
   let transform: WorldTransform2D = componentGet(
     this: uiSystems.transform2d.worldTransforms
-    entity: target
+    entityId: target
   )
-  let computed: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: target)
+  let computed: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entityId: target)
   let w: Float = computed.size.x * transform.scale.x
   let h: Float = computed.size.y * transform.scale.y
-  if componentHas(this: world.rects, entity: outline) {
-    let current: Rect = componentGet(this: world.rects, entity: outline)
+  if componentHas(this: world.rects, entityId: outline) {
+    let current: Rect = componentGet(this: world.rects, entityId: outline)
     if current.size.x is not w or current.size.y is not h {
-      let rect: mod Rect => componentMod(this: world.rects, entity: outline)
+      let rect: mod Rect => componentMod(this: world.rects, entityId: outline)
       rect.size.x = w
       rect.size.y = h
       changed = true
     }
   }
   var writeOffset: Bool = true
-  if componentHas(this: uiSystems.transform2d.runtimeOffsets, entity: outline) {
-    let current: Vec2 = componentGet(this: uiSystems.transform2d.runtimeOffsets, entity: outline).delta
+  if componentHas(this: uiSystems.transform2d.runtimeOffsets, entityId: outline) {
+    let current: Vec2 = componentGet(this: uiSystems.transform2d.runtimeOffsets, entityId: outline).delta
     if current.x is transform.position.x and current.y is transform.position.y {
       writeOffset = false
     }
   }
   if writeOffset {
     let offset: RuntimeOffset = { delta: Vec2 { x: transform.position.x, y: transform.position.y } }
-    componentSet(this: uiSystems.transform2d.runtimeOffsets, entity: outline, data: own offset)
+    componentSet(this: uiSystems.transform2d.runtimeOffsets, entityId: outline, data: own offset)
     changed = true
   }
   ret changed
@@ -284,11 +284,11 @@ func inspectorUpdate(
     world: world
     source: EditorListSource.components
   )
-  let componentListWasDragging: Bool = scrollRootDragging(world: world, entity: componentList)
+  let componentListWasDragging: Bool = scrollRootDragging(world: world, entityId: componentList)
   if chromeVisible and updateScrollRoot(
     world: world
     uiSystems: uiSystems
-    entity: componentList
+    entityId: componentList
     input: input
   ) {
     changed = true
@@ -310,12 +310,12 @@ func inspectorUpdate(
   ) and updateScrollRoot(
     world: world
     uiSystems: uiSystems
-    entity: treeList
+    entityId: treeList
     input: input
   ) {
     changed = true
   }
-  if scrollRootDragging(world: world, entity: treeList) {
+  if scrollRootDragging(world: world, entityId: treeList) {
     let distance: Float = input.pointer.y - inspectorSystem.treeDragStartY
     if distance > 4 or distance < -4 {
       inspectorSystem.treeDragMoved = true
@@ -415,7 +415,7 @@ func inspectorUpdate(
     hovered = deepestNodeAt(
       world: world
       uiSystems: uiSystems
-      entity: sceneRoot
+      entityId: sceneRoot
       x: input.pointer.x
       y: input.pointer.y
     )
@@ -495,7 +495,7 @@ func inspectorUpdate(
       }
     }
   }
-  # A tree row click carries `inspect:<entity index>` — an ENTITY index, not a
+  # A tree row click carries `inspect:<entityId index>` — an ENTITY index, not a
   # row index, so the live tree can rebuild under the user (it refreshes
   # constantly) without a click landing on whatever slid into that row.
   #
@@ -517,7 +517,7 @@ func inspectorUpdate(
           if applySelect(
             inspectorSystem: inspectorSystem
             world: world
-            entity: candidate
+            entityId: candidate
             mode: treeSelectMode()
           ) {
             changed = true
@@ -666,7 +666,7 @@ func inspectorUpdate(
       selection = siblingOf(
         world: world
         uiSystems: uiSystems
-        entity: selection
+        entityId: selection
         step: -1
       )
     }
@@ -674,18 +674,18 @@ func inspectorUpdate(
       selection = siblingOf(
         world: world
         uiSystems: uiSystems
-        entity: selection
+        entityId: selection
         step: 1
       )
     }
     if Sdl3.isKeyPressed(key: Keys.keyLeft) {
-      let parent: EntityId = parentOf(world: world, uiSystems: uiSystems, entity: selection)
+      let parent: EntityId = parentOf(world: world, uiSystems: uiSystems, entityId: selection)
       if isNone(this: parent) is false and selection is not sceneRoot {
         selection = parent
       }
     }
     if Sdl3.isKeyPressed(key: Keys.keyRight) {
-      selection = firstChildOf(world: world, entity: selection)
+      selection = firstChildOf(world: world, entityId: selection)
     }
   }
   if Sdl3.isKeyPressed(key: Keys.keyT) and captured is false {
@@ -696,7 +696,7 @@ func inspectorUpdate(
     if applySelect(
       inspectorSystem: inspectorSystem
       world: world
-      entity: selection
+      entityId: selection
       mode: keyboardMode
     ) {
       changed = true
@@ -789,7 +789,7 @@ func inspectorAfterLoad(
   inspectorSystem.hovered = noEntity()
   var target: EntityId = noEntity()
   if selectNodeId.length() > 0 {
-    target = findNodeByIdIn(world: world, entity: sceneRoot, nodeId: selectNodeId)
+    target = findNodeByIdIn(world: world, entityId: sceneRoot, nodeId: selectNodeId)
   }
   inspectorSystem.lastRevealed = noEntity()
   inspectorSystem.selected = noEntity()
@@ -803,16 +803,16 @@ func inspectorAfterLoad(
       if trimmed.length() is 0 {
         continue
       }
-      let found: EntityId = findNodeByIdIn(world: world, entity: sceneRoot, nodeId: trimmed)
+      let found: EntityId = findNodeByIdIn(world: world, entityId: sceneRoot, nodeId: trimmed)
       if isNone(this: found) is false {
-        selectAddNode(inspectorSystem: inspectorSystem, world: world, entity: found)
+        selectAddNode(inspectorSystem: inspectorSystem, world: world, entityId: found)
       } else {
         log("[ui-editor] select: no node named {trimmed}")
       }
     }
   } else {
     if isNone(this: target) is false {
-      selectNode(inspectorSystem: inspectorSystem, world: world, entity: target)
+      selectNode(inspectorSystem: inspectorSystem, world: world, entityId: target)
     } else {
       if selectNodeId.length() > 0 {
         log("[ui-editor] select: no node named {selectNodeId}")

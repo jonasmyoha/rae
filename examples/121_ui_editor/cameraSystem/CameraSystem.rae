@@ -93,11 +93,11 @@ func setCameraFrame(
 func cameraOf(cameraSystem: view CameraSystem, world: view UiWorld) ret Camera2D {
   if isNone(this: cameraSystem.guidesRoot) or componentHas(
     this: world.cameras
-    entity: cameraSystem.guidesRoot
+    entityId: cameraSystem.guidesRoot
   ) is false {
     ret Camera2D { zoom: 1.0, offsetX: 0.0, offsetY: 0.0 }
   }
-  ret componentGet(this: world.cameras, entity: cameraSystem.guidesRoot)
+  ret componentGet(this: world.cameras, entityId: cameraSystem.guidesRoot)
 }
 
 # Write the cameraSystem: the guides root gets it as is; the document root gets it
@@ -112,14 +112,14 @@ func writeCamera(
   if isNone(this: cameraSystem.guidesRoot) is false {
     componentSet(
       this: world.cameras
-      entity: cameraSystem.guidesRoot
+      entityId: cameraSystem.guidesRoot
       data: Camera2D { zoom: next.zoom, offsetX: next.offsetX, offsetY: next.offsetY }
     )
   }
   if isNone(this: cameraSystem.documentRoot) is false {
     componentSet(
       this: world.cameras
-      entity: cameraSystem.documentRoot
+      entityId: cameraSystem.documentRoot
       data: Camera2D {
         zoom: next.zoom
         offsetX: next.offsetX + cameraSystem.homeX * next.zoom
@@ -249,7 +249,7 @@ func cameraInputSystem(
   var moved: Bool = false
   let pointerX: Float = Gpu2d.pointerX()
   let pointerY: Float = Gpu2d.pointerY()
-  var wheel: Float = uiWheelFor(input: input, entity: editAreaEntity(chromeSystem: chromeSystem))
+  var wheel: Float = uiWheelFor(input: input, entityId: editAreaEntity(chromeSystem: chromeSystem))
   if chromeVisible(world: world, chromeSystem: chromeSystem) is false {
     wheel = input.wheel
   }

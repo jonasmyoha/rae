@@ -10,20 +10,20 @@
 open ecs/Entity
 open ecs/ComponentTable
 
-# Mark `entity` with tag T. Idempotent: re-adding overwrites the (empty) value.
-func addTag(T: type, table: mod ComponentTable(T), entity: view EntityId) {
+# Mark `entityId` with tag T. Idempotent: re-adding overwrites the (empty) value.
+func addTag(T: type, table: mod ComponentTable(T), entityId: view EntityId) {
   var value: T
-  componentSet(this: table, entity: entity, data: value)
+  componentSet(this: table, entityId: entityId, data: value)
 }
 
-# Remove tag T from `entity` (no-op if absent).
-func removeTag(T: type, table: mod ComponentTable(T), entity: view EntityId) {
-  componentRemove(this: table, entity: entity)
+# Remove tag T from `entityId` (no-op if absent).
+func removeTag(T: type, table: mod ComponentTable(T), entityId: view EntityId) {
+  componentRemove(this: table, entityId: entityId)
 }
 
-# Whether `entity` carries tag T.
-func hasTag(T: type, table: view ComponentTable(T), entity: view EntityId) ret Bool {
-  ret componentHas(this: table, entity: entity)
+# Whether `entityId` carries tag T.
+func hasTag(T: type, table: view ComponentTable(T), entityId: view EntityId) ret Bool {
+  ret componentHas(this: table, entityId: entityId)
 }
 
 # How many entities carry tag T.

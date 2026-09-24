@@ -67,16 +67,16 @@ func pageRootOf(world: view UiWorld, scene: view Scene) ret EntityId {
   ret noEntity()
 }
 
-# Compare node `entity` of `a` with its namesake in `b`: every authored table
+# Compare node `entityId` of `a` with its namesake in `b`: every authored table
 # by VALUE (`equals` through componentEqualsByName — the encoded text is only
 # used to REPORT a difference), and the pending components' names + json.
 func compareNode(
   a: view UiWorld
   b: view UiWorld
-  entity: view EntityId
+  entityId: view EntityId
   problems: mod List(String)
 ) {
-  let nodeId: String = "{componentGet(this: a.nodeIdComponents, entity: entity).id}"
+  let nodeId: String = "{componentGet(this: a.nodeIdComponents, entityId: entityId).id}"
   var other: EntityId = noEntity()
   if let index: Int = findNodeInPage(world: b, pageId: "", nodeId: nodeId) {
     other = nodeEntity(world: b, index: index)
@@ -85,7 +85,7 @@ func compareNode(
     problems.add(value: "{nodeId}: missing after save")
     ret
   }
-  let names: List(String) = authoredNamesOf(world: a, entity: entity)
+  let names: List(String) = authoredNamesOf(world: a, entityId: entityId)
   loop let name: view String in names {
     if name is "BundleRefs" {
       continue
@@ -97,31 +97,31 @@ func compareNode(
     if let byValue: Bool = componentEqualsByName(
       world: a
       other: b
-      entity: entity
+      entityId: entityId
       otherEntity: other
       name: name
     ) {
       if byValue is false {
-        let left: String = machineComponentJson(world: a, entity: entity, name: name)
-        let right: String = machineComponentJson(world: b, entity: other, name: name)
+        let left: String = machineComponentJson(world: a, entityId: entityId, name: name)
+        let right: String = machineComponentJson(world: b, entityId: other, name: name)
         problems.add(value: "{nodeId}.{name}: {left} != {right}")
       }
     }
   }
-  let namesB: List(String) = authoredNamesOf(world: b, entity: other)
+  let namesB: List(String) = authoredNamesOf(world: b, entityId: other)
   loop let name: view String in namesB {
     if name is "BundleRefs" {
       continue
     }
-    if machineComponentJson(world: a, entity: entity, name: name).length() is 0 {
+    if machineComponentJson(world: a, entityId: entityId, name: name).length() is 0 {
       problems.add(value: "{nodeId}.{name}: appeared after save")
     }
   }
   loop let pending: view PendingComponent in a.pendingComponents {
-    if pending.entity is entity {
+    if pending.entityId is entityId {
       var found: Bool = false
       loop let candidate: view PendingComponent in b.pendingComponents {
-        if candidate.entity is other and candidate.name is pending.name {
+        if candidate.entityId is other and candidate.name is pending.name {
           found = true
           if candidate.json is not pending.json {
             problems.add(
@@ -135,14 +135,14 @@ func compareNode(
       }
     }
   }
-  if componentHas(this: a.childrens, entity: entity) {
-    let children: view Children => componentView(this: a.childrens, entity: entity)
+  if componentHas(this: a.childrens, entityId: entityId) {
+    let children: view Children => componentView(this: a.childrens, entityId: entityId)
     loop let child: view EntityId in children.ids {
-      if componentHas(this: a.nodeIdComponents, entity: child) {
+      if componentHas(this: a.nodeIdComponents, entityId: child) {
         compareNode(
           a: a
           b: b
-          entity: child
+          entityId: child
           problems: problems
         )
       }
@@ -196,7 +196,7 @@ func roundTrip(path: view String, root: view String, savedPath: view String) ret
   compareNode(
     a: a
     b: b
-    entity: pageRoot
+    entityId: pageRoot
     problems: problems
   )
   if aliveCount(world: a) is not aliveCount(world: b) {
@@ -266,18 +266,18 @@ func main() {
     root: "{getEnv(name: "TMPDIR")}/"
   )
   let rootEntity: EntityId = pageRootOf(world: edited, scene: scene)
-  let rect: mod Rect => componentMod(this: edited.rects, entity: rootEntity)
+  let rect: mod Rect => componentMod(this: edited.rects, entityId: rootEntity)
   rect.size.x = 640.0
   # Components ADDED at runtime, with enum fields: the generic encoder names
   # the members (enumName), the Layout arm spells `kind` as `type`.
   componentSet(
     this: edited.shapes
-    entity: rootEntity
+    entityId: rootEntity
     data: Shape { kind: ShapeKind.circle, radius: 12.0 }
   )
   componentSet(
     this: edited.layouts
-    entity: rootEntity
+    entityId: rootEntity
     data: Layout {
       kind: LayoutType.horizontal
       alignMain: AlignKind.center
@@ -286,7 +286,7 @@ func main() {
   )
   componentSet(
     this: edited.scrollRoots
-    entity: rootEntity
+    entityId: rootEntity
     data: ScrollRoot { axis: ScrollAxis.x }
   )
   let fresh: UiWorld = freshDecodeOf(world: edited, uiSystems: editedSystems, scene: scene)
@@ -325,7 +325,7 @@ func main() {
   compareNode(
     a: edited
     b: reloaded
-    entity: rootEntity
+    entityId: rootEntity
     problems: editProblems
   )
   loop let problem: view String in editProblems {

@@ -62,9 +62,9 @@ func createRegistry() ret Registry {
 # Eager-chain data mutation on a playback track (#261): componentMod
 # bumps the table generation, bumpRevision bumps the instance revision,
 # markChanged bumps the system revision.
-func setTrackId(reg: mod Registry, entity: view EntityId, newId: view Int) {
-  if componentHas(this: reg.playback.nowPlaying, entity: entity) {
-    let t: mod Track => componentMod(this: reg.playback.nowPlaying, entity: entity)
+func setTrackId(reg: mod Registry, entityId: view EntityId, newId: view Int) {
+  if componentHas(this: reg.playback.nowPlaying, entityId: entityId) {
+    let t: mod Track => componentMod(this: reg.playback.nowPlaying, entityId: entityId)
     t.id = newId
     bumpRevision(this: t)
   }
@@ -78,7 +78,7 @@ type Observe {
   system: SystemId
   kind: ObserveKind
   tableId: Int  # which table within the system (multi-table systems); 0 here
-  entity: EntityId  # which component instance (component kind)
+  entityId: EntityId  # which component instance (component kind)
   observedRevision: Int
   dirty: Bool
 }
@@ -95,8 +95,8 @@ func revisionOf(reg: view Registry, obs: view Observe) ret Int {
       ret componentTableGeneration(this: reg.playback.nowPlaying)
     }
     # component-instance kind
-    if componentHas(this: reg.playback.nowPlaying, entity: obs.entity) {
-      let t: Track = componentGet(this: reg.playback.nowPlaying, entity: obs.entity)
+    if componentHas(this: reg.playback.nowPlaying, entityId: obs.entityId) {
+      let t: Track = componentGet(this: reg.playback.nowPlaying, entityId: obs.entityId)
       ret t.revision
     }
     ret 0
@@ -112,13 +112,13 @@ func makeObserve(
   reg: view Registry
   system: SystemId
   kind: ObserveKind
-  entity: view EntityId
+  entityId: view EntityId
 ) ret Observe {
   var o: Observe = {
     system: system
     kind: kind
     tableId: 0
-    entity: entity
+    entityId: entityId
     observedRevision: 0
     dirty: false
   }
@@ -136,11 +136,11 @@ func refreshObservers(reg: view Registry, observers: mod ComponentTable(Observe)
     let e: EntityId = componentEntityAt(this: observers, i: i)
     var cur: Int = 0
     var seen: Int = 0
-    let obs: view Observe => componentView(this: observers, entity: e)
+    let obs: view Observe => componentView(this: observers, entityId: e)
     cur = revisionOf(reg: reg, obs: obs)
     seen = obs.observedRevision
     if cur is not seen {
-      let obm: mod Observe => componentMod(this: observers, entity: e)
+      let obm: mod Observe => componentMod(this: observers, entityId: e)
       obm.observedRevision = cur
       obm.dirty = true
       changed = changed + 1
@@ -150,8 +150,8 @@ func refreshObservers(reg: view Registry, observers: mod ComponentTable(Observe)
   ret changed
 }
 
-func observerDirty(observers: view ComponentTable(Observe), entity: view EntityId) ret Bool {
-  let o: view Observe => componentView(this: observers, entity: entity)
+func observerDirty(observers: view ComponentTable(Observe), entityId: view EntityId) ret Bool {
+  let o: view Observe => componentView(this: observers, entityId: entityId)
   ret o.dirty
 }
 
@@ -160,7 +160,7 @@ func main() {
 
   # Setup: one track already playing.
   let tEnt: EntityId = id(v: 1)
-  componentSet(this: reg.playback.nowPlaying, entity: tEnt, data: Track { id: 100, revision: 0 })
+  componentSet(this: reg.playback.nowPlaying, entityId: tEnt, data: Track { id: 100, revision: 0 })
   markChanged(this: reg.playback)
 
   # Three playback observers (system / table / component) + a library
@@ -172,42 +172,42 @@ func main() {
   let oLib: EntityId = id(v: 13)
   componentSet(
     this: observers
-    entity: oSys
+    entityId: oSys
     data: makeObserve(
       reg: reg
       system: SystemId.playback
       kind: ObserveKind.system
-      entity: noEntity()
+      entityId: noEntity()
     )
   )
   componentSet(
     this: observers
-    entity: oTbl
+    entityId: oTbl
     data: makeObserve(
       reg: reg
       system: SystemId.playback
       kind: ObserveKind.table
-      entity: noEntity()
+      entityId: noEntity()
     )
   )
   componentSet(
     this: observers
-    entity: oCmp
+    entityId: oCmp
     data: makeObserve(
       reg: reg
       system: SystemId.playback
       kind: ObserveKind.component
-      entity: tEnt
+      entityId: tEnt
     )
   )
   componentSet(
     this: observers
-    entity: oLib
+    entityId: oLib
     data: makeObserve(
       reg: reg
       system: SystemId.library
       kind: ObserveKind.system
-      entity: noEntity()
+      entityId: noEntity()
     )
   )
 
@@ -217,14 +217,14 @@ func main() {
   # Mutate one playback track: bumps table generation + instance
   # revision + system revision (all three playback observers should fire;
   # the library observer must not).
-  setTrackId(reg: reg, entity: tEnt, newId: 200)
+  setTrackId(reg: reg, entityId: tEnt, newId: 200)
 
   # Pass 2.
   log("pass2_changed: {refreshObservers(reg: reg, observers: observers)}")
-  log("sys_dirty: {observerDirty(observers: observers, entity: oSys)}")
-  log("tbl_dirty: {observerDirty(observers: observers, entity: oTbl)}")
-  log("cmp_dirty: {observerDirty(observers: observers, entity: oCmp)}")
-  log("lib_dirty: {observerDirty(observers: observers, entity: oLib)}")
+  log("sys_dirty: {observerDirty(observers: observers, entityId: oSys)}")
+  log("tbl_dirty: {observerDirty(observers: observers, entityId: oTbl)}")
+  log("cmp_dirty: {observerDirty(observers: observers, entityId: oCmp)}")
+  log("lib_dirty: {observerDirty(observers: observers, entityId: oLib)}")
 
   # Pass 3: nothing new -> 0 dirty (idempotent; observedRevisions caught up).
   log("pass3_changed: {refreshObservers(reg: reg, observers: observers)}")

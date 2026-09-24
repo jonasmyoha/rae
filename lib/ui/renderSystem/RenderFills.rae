@@ -16,17 +16,17 @@ open Gpu2dCanvas
 func paintGradientG(
   world: view UiWorld
   uiSystems: view UiSystems
-  entity: view EntityId
+  entityId: view EntityId
   wt: view WorldTransform2D
   cr: view ComputedRect
   chain255: view Int
   canvas: mod Gpu2dCanvas
 ) {
-  let gf: GradientFill = componentGet(this: world.gradientFills, entity: entity)
-  let radius: Float = g2dRadius(world: world, entity: entity, fallback: 0.0)
+  let gf: GradientFill = componentGet(this: world.gradientFills, entityId: entityId)
+  let radius: Float = g2dRadius(world: world, entityId: entityId, fallback: 0.0)
   let box: PaintBox = g2dPaintBox(
     world: world
-    entity: entity
+    entityId: entityId
     wt: wt
     cr: cr
   )
@@ -45,11 +45,11 @@ func paintGradientG(
   }
   let from: RgbaColor = g2dChain(color: fromBase, chain255: chain255)
   let to: RgbaColor = g2dChain(color: toBase, chain255: chain255)
-  if componentHas(this: world.shadows, entity: entity) {
+  if componentHas(this: world.shadows, entityId: entityId) {
     paintShadowG(
       world: world
       uiSystems: uiSystems
-      entity: entity
+      entityId: entityId
       box: box
       radius: radius * hoverMul
       chain255: chain255
@@ -71,17 +71,17 @@ func paintGradientG(
 
 func paintBackdropG(
   world: view UiWorld
-  entity: view EntityId
+  entityId: view EntityId
   wt: view WorldTransform2D
   cr: view ComputedRect
   chain255: view Int
   canvas: mod Gpu2dCanvas
 ) {
-  let bi: BackdropImage = componentGet(this: world.backdropImages, entity: entity)
-  let radius: Float = g2dRadius(world: world, entity: entity, fallback: 0.0)
+  let bi: BackdropImage = componentGet(this: world.backdropImages, entityId: entityId)
+  let radius: Float = g2dRadius(world: world, entityId: entityId, fallback: 0.0)
   let box: PaintBox = g2dPaintBox(
     world: world
-    entity: entity
+    entityId: entityId
     wt: wt
     cr: cr
   )

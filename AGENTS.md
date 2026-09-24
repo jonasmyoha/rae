@@ -95,6 +95,18 @@ These instructions define **how Codex should work**, communicate progress, and i
   `settings: Settings`. This is the default; reach for a different name only when
   it says something the type does not (a ROLE: `previous`/`current`, `source`/
   `destination`, `hero`/`crowd`).
+- **An id/handle is named for the ID, not for the thing it points at.** The
+  whole type name is lowercased, including `Id`: `entityId: EntityId`, never
+  `entity: EntityId`. `entity` suggests you are holding the entity (its
+  components, its data), but you only have its id, so the reader draws the
+  wrong conclusion at every call site (`componentGet(this: table, entityId:
+  entityId)`). The same goes for any `…Id` / handle type (`nodeId: NodeId`,
+  `meshHandle: MeshHandle`). When a role is added, the `Id` suffix stays:
+  `rootEntityId`, `hoveredEntityId`, `targetEntityId`, not `rootEntity`. A
+  plain `Int` index into an entity array is not an id either, so name it
+  `entityIndex`. (The ECS API and every bare `entity` binding were renamed to
+  `entityId` in one sweep. Role-prefixed `…Entity: EntityId` names such as
+  `rootEntity` are still being migrated, so fix them in files you touch.)
 - **Resolve a name conflict by making the name MORE specific, never by
   abbreviating.** Two cameras are `playerCamera` and `debugCamera`, not `cam1`/
   `cam2` or `cam`/`c`. Add words; do not remove them. `io` is doubly wrong — it

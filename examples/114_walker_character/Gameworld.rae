@@ -118,42 +118,46 @@ func gameWorldAddEntity(world: mod GameWorld) ret EntityId {
 # ComponentTable plumbing (mirrors 112's World3d helpers).
 func gameWorldSetTransform(
   world: mod GameWorld
-  entity: view EntityId
+  entityId: view EntityId
   transform: view Transform3D
 ) {
-  componentSet(this: world.transforms, entity: entity, data: transform)
+  componentSet(this: world.transforms, entityId: entityId, data: transform)
 }
 
 func gameWorldSetWorldTransform(
   world: mod GameWorld
-  entity: view EntityId
+  entityId: view EntityId
   worldTransform: view WorldTransform3D
 ) {
-  componentSet(this: world.worldTransforms, entity: entity, data: worldTransform)
+  componentSet(this: world.worldTransforms, entityId: entityId, data: worldTransform)
 }
 
-func gameWorldSetMaterial(world: mod GameWorld, entity: view EntityId, material: view Material3D) {
-  componentSet(this: world.materials, entity: entity, data: material)
+func gameWorldSetMaterial(
+  world: mod GameWorld
+  entityId: view EntityId
+  material: view Material3D
+) {
+  componentSet(this: world.materials, entityId: entityId, data: material)
 }
 
 func gameWorldSetController(
   world: mod GameWorld
-  entity: view EntityId
+  entityId: view EntityId
   controller: view ThirdPersonController
 ) {
-  componentSet(this: world.controllers, entity: entity, data: controller)
+  componentSet(this: world.controllers, entityId: entityId, data: controller)
 }
 
-func gameWorldSetAnim(world: mod GameWorld, entity: view EntityId, anim: view AnimationState) {
-  componentSet(this: world.animStates, entity: entity, data: anim)
+func gameWorldSetAnim(world: mod GameWorld, entityId: view EntityId, anim: view AnimationState) {
+  componentSet(this: world.animStates, entityId: entityId, data: anim)
 }
 
 func gameWorldSetPartRoughness(
   world: mod GameWorld
-  entity: view EntityId
+  entityId: view EntityId
   part: view PartRoughness
 ) {
-  componentSet(this: world.partRoughness, entity: entity, data: part)
+  componentSet(this: world.partRoughness, entityId: entityId, data: part)
 }
 
 # The skinned parts, in creation (= upload) order — a query over the part table.
@@ -172,8 +176,8 @@ func gameWorldPartAt(world: view GameWorld, i: view Int) ret PartRoughness {
 # The ThirdPersonController of an entity (hero or crowd member). A narrow
 # GameWorld accessor so systems read a controlled character straight from the
 # world without depending on the App aggregate (#743).
-func controllerOf(world: view GameWorld, entity: view EntityId) ret ThirdPersonController {
-  ret componentGet(this: world.controllers, entity: entity)
+func controllerOf(world: view GameWorld, entityId: view EntityId) ret ThirdPersonController {
+  ret componentGet(this: world.controllers, entityId: entityId)
 }
 
 func controllerTransform3D(controller: view ThirdPersonController) ret Transform3D {

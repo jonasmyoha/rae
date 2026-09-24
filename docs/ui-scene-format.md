@@ -222,7 +222,7 @@ storage term Rae's sparse tables would falsely promise.)
   Rect, Size …] overrides: Shape`). On save (`lib/ui/SceneWriter`) a bundled
   node is written as its `bundles` list plus its own component objects —
   the inherited ones are not expanded into the file.
-- **Code-side.** `applyBundle(world, entity, name)` runs the same expansion
+- **Code-side.** `applyBundle(world, entityId, name)` runs the same expansion
   on a live entity (a debug menu can use the authored bundles instead of
   listing components), appending to its `BundleRefs`.
 - **Diagnostics, never a hang.** An unknown name is `unknownBundle` (ignored);

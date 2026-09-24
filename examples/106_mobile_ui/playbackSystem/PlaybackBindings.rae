@@ -54,17 +54,17 @@ func playbackIconSystem(world: mod UiWorld, playbackSystem: view PlaybackSystem)
   let n: Int = componentCount(this: playbackSystem.playbackIcons)
   var i: Int = 0
   loop i < n {
-    let entity: EntityId = componentEntityAt(this: playbackSystem.playbackIcons, i: i)
+    let entityId: EntityId = componentEntityAt(this: playbackSystem.playbackIcons, i: i)
     let icon: PlaybackIcon = componentDataAt(this: playbackSystem.playbackIcons, i: i)
     if icon.builtRevision is not playbackSystem.revision {
       setSpriteKey(
         world: world
-        entity: entity
+        entityId: entityId
         key: playbackIconKey(playbackSystem: playbackSystem)
       )
-      setWidgetSelected(world: world, entity: entity, selected: playbackSystem.isPlaying)
+      setWidgetSelected(world: world, entityId: entityId, selected: playbackSystem.isPlaying)
       let built: PlaybackIcon = { builtRevision: playbackSystem.revision }
-      componentSet(this: playbackSystem.playbackIcons, entity: entity, data: built)
+      componentSet(this: playbackSystem.playbackIcons, entityId: entityId, data: built)
       changed = true
     }
     i = i + 1
@@ -87,7 +87,7 @@ func playbackCoverSystem(
   let n: Int = componentCount(this: playbackSystem.playbackCovers)
   var i: Int = 0
   loop i < n {
-    let entity: EntityId = componentEntityAt(this: playbackSystem.playbackCovers, i: i)
+    let entityId: EntityId = componentEntityAt(this: playbackSystem.playbackCovers, i: i)
     let cover: PlaybackCover = componentDataAt(this: playbackSystem.playbackCovers, i: i)
     if cover.builtRevision is not playbackSystem.nowPlayingRevision {
       if cover.builtRevision < 0 {
@@ -96,27 +96,27 @@ func playbackCoverSystem(
           playbackSystem: playbackSystem
           browsedStem: state.currentAlbumStem
         )
-        setSpriteKey(world: world, entity: entity, key: seed)
+        setSpriteKey(world: world, entityId: entityId, key: seed)
       } else if playbackSystem.nowPlayingArtKey.length() > 0 {
         let key: String = coverKeyResolved(
           reg: reg
           playbackSystem: playbackSystem
           browsedStem: playbackSystem.playingAlbumStem
         )
-        setSpriteKey(world: world, entity: entity, key: key)
+        setSpriteKey(world: world, entityId: entityId, key: key)
       }
       let built: PlaybackCover = { builtRevision: playbackSystem.nowPlayingRevision }
-      componentSet(this: playbackSystem.playbackCovers, entity: entity, data: built)
+      componentSet(this: playbackSystem.playbackCovers, entityId: entityId, data: built)
       changed = true
     }
     # The cover's `HeroWidget` key is the browsed album's stem (a scene
     # authors the `"albumCover"` placeholder), so a page-to-page hero
     # transition finds it by the same key as the tile it flies from.
-    if componentHas(this: world.heroWidgets, entity: entity) {
-      let hero: HeroWidget = componentGet(this: world.heroWidgets, entity: entity)
+    if componentHas(this: world.heroWidgets, entityId: entityId) {
+      let hero: HeroWidget = componentGet(this: world.heroWidgets, entityId: entityId)
       if hero.key is not state.currentAlbumStem {
         let bound: HeroWidget = { key: "{state.currentAlbumStem}" }
-        componentSet(this: world.heroWidgets, entity: entity, data: bound)
+        componentSet(this: world.heroWidgets, entityId: entityId, data: bound)
       }
     }
     i = i + 1
@@ -127,7 +127,7 @@ func playbackCoverSystem(
 # The heart's declarative visuals: outline/filled glyph and white / warm
 # coral tint by `selected`. StateStyle is a runtime table the scene loader
 # refuses to author, so the system installs it on first sight.
-func installHeartStyle(world: mod UiWorld, entity: view EntityId) {
+func installHeartStyle(world: mod UiWorld, entityId: view EntityId) {
   let baseKey: String = "mat:favorite_border"
   let selKey: String = "mat:favorite"
   let noTextStyle: String = ""
@@ -154,7 +154,7 @@ func installHeartStyle(world: mod UiWorld, entity: view EntityId) {
     loadingAlpha: 1.0
     errorAlpha: 1.0
   }
-  componentSet(this: world.stateStyles, entity: entity, data: own style)
+  componentSet(this: world.stateStyles, entityId: entityId, data: own style)
 }
 
 # Every `LikedHeart`: WidgetState.selected mirrors whether the browsed
@@ -178,21 +178,21 @@ func likedHeartSystem(
   let n: Int = componentCount(this: playbackSystem.likedHearts)
   var i: Int = 0
   loop i < n {
-    let entity: EntityId = componentEntityAt(this: playbackSystem.likedHearts, i: i)
+    let entityId: EntityId = componentEntityAt(this: playbackSystem.likedHearts, i: i)
     let heart: LikedHeart = componentDataAt(this: playbackSystem.likedHearts, i: i)
     if heart.styled is false {
-      installHeartStyle(world: world, entity: entity)
+      installHeartStyle(world: world, entityId: entityId)
       let styled: LikedHeart = { styled: true }
-      componentSet(this: playbackSystem.likedHearts, entity: entity, data: styled)
+      componentSet(this: playbackSystem.likedHearts, entityId: entityId, data: styled)
       changed = true
     }
     if stem.length() > 0 {
       var current: Bool = false
-      if componentHas(this: world.widgetStates, entity: entity) {
-        current = componentGet(this: world.widgetStates, entity: entity).selected
+      if componentHas(this: world.widgetStates, entityId: entityId) {
+        current = componentGet(this: world.widgetStates, entityId: entityId).selected
       }
       if current is not isLiked {
-        setWidgetSelected(world: world, entity: entity, selected: isLiked)
+        setWidgetSelected(world: world, entityId: entityId, selected: isLiked)
         changed = true
       }
     }
@@ -204,15 +204,15 @@ func likedHeartSystem(
 # Write one Text's string in place, keeping its style. Compared BEFORE
 # taking the mod ref: componentMod bumps the table generation eagerly, so
 # an unchanged string would mark the render cache dirty every frame.
-func writeTrackText(world: mod UiWorld, entity: view EntityId, value: view String) {
-  if componentHas(this: world.texts, entity: entity) is false {
+func writeTrackText(world: mod UiWorld, entityId: view EntityId, value: view String) {
+  if componentHas(this: world.texts, entityId: entityId) is false {
     ret
   }
-  let cur: view Text => componentView(this: world.texts, entity: entity)
+  let cur: view Text => componentView(this: world.texts, entityId: entityId)
   if cur.text is value {
     ret
   }
-  let slot: mod Text => componentMod(this: world.texts, entity: entity)
+  let slot: mod Text => componentMod(this: world.texts, entityId: entityId)
   slot.text = "{value}"
 }
 
@@ -231,7 +231,7 @@ func trackTextSystem(
   loop i < n {
     let binding: view TrackText => componentView(
       this: playbackSystem.trackTexts
-      entity: componentEntityAt(this: playbackSystem.trackTexts, i: i)
+      entityId: componentEntityAt(this: playbackSystem.trackTexts, i: i)
     )
     if binding.builtKey is not key {
       stale = true
@@ -245,16 +245,16 @@ func trackTextSystem(
   let track: Track = trackAt(album: album, idx: state.currentTrackIndex)
   i = 0
   loop i < n {
-    let entity: EntityId = componentEntityAt(this: playbackSystem.trackTexts, i: i)
+    let entityId: EntityId = componentEntityAt(this: playbackSystem.trackTexts, i: i)
     let binding: TrackText = componentDataAt(this: playbackSystem.trackTexts, i: i)
     if binding.builtKey is not key {
       if binding.field is "artist" {
-        writeTrackText(world: world, entity: entity, value: album.artist)
+        writeTrackText(world: world, entityId: entityId, value: album.artist)
       } else {
-        writeTrackText(world: world, entity: entity, value: track.title)
+        writeTrackText(world: world, entityId: entityId, value: track.title)
       }
       let built: TrackText = { field: "{binding.field}", builtKey: "{key}" }
-      componentSet(this: playbackSystem.trackTexts, entity: entity, data: own built)
+      componentSet(this: playbackSystem.trackTexts, entityId: entityId, data: own built)
     }
     i = i + 1
   }
@@ -276,7 +276,7 @@ func playbackTimeSystem(world: mod UiWorld, playbackSystem: view PlaybackSystem)
   let n: Int = componentCount(this: playbackSystem.playbackTimes)
   var i: Int = 0
   loop i < n {
-    let entity: EntityId = componentEntityAt(this: playbackSystem.playbackTimes, i: i)
+    let entityId: EntityId = componentEntityAt(this: playbackSystem.playbackTimes, i: i)
     let binding: PlaybackTime = componentDataAt(this: playbackSystem.playbackTimes, i: i)
     let second: Int = playbackTimeSecond(kind: binding.kind, playbackSystem: playbackSystem)
     if binding.builtSecond is not second {
@@ -285,9 +285,9 @@ func playbackTimeSystem(world: mod UiWorld, playbackSystem: view PlaybackSystem)
         seconds = playbackSystem.elapsedSec
       }
       let label: String = formatDurationMs(ms: (seconds * 1000.0).toInt())
-      writeTrackText(world: world, entity: entity, value: label)
+      writeTrackText(world: world, entityId: entityId, value: label)
       let built: PlaybackTime = { kind: binding.kind, builtSecond: second }
-      componentSet(this: playbackSystem.playbackTimes, entity: entity, data: built)
+      componentSet(this: playbackSystem.playbackTimes, entityId: entityId, data: built)
     }
     i = i + 1
   }

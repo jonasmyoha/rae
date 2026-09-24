@@ -26,7 +26,7 @@ func setupNode(
   let e: EntityId = createEntity(world: world)
   componentSet(
     this: uiSystems.layout.computedRects
-    entity: e
+    entityId: e
     data: ComputedRect { position: { x: 0.0, y: 0.0 }, size: { x: w, y: h } }
   )
   world.nodeIds.set(k: nodeId, value: e.index)
@@ -54,13 +54,13 @@ func step(
   ret updateScrollRoot(
     world: world
     uiSystems: uiSystems
-    entity: panel
+    entityId: panel
     input: input
   )
 }
 
 func offsetOf(world: view UiWorld, panel: view EntityId) ret Float {
-  ret componentGet(this: world.scrollStates, entity: panel).y
+  ret componentGet(this: world.scrollStates, entityId: panel).y
 }
 
 # Round a Float to the nearest Int so momentum trace lines are stable/readable.
@@ -85,7 +85,7 @@ func main() {
   )
   componentSet(
     this: uiSystems.transform2d.worldTransforms
-    entity: vp
+    entityId: vp
     data: WorldTransform2D {
       position: Vec2 { x: 0.0, y: 0.0 }
       rotation: 0.0
@@ -112,12 +112,12 @@ func main() {
     fixedFloor: 0.0
     endInset: 0.0
   }
-  componentSet(this: world.scrollRoots, entity: content, data: root)
+  componentSet(this: world.scrollRoots, entityId: content, data: root)
   let memory: ScrollMemory = createScrollMemory()
   scrollRootSystem(world: world, uiSystems: uiSystems, memory: memory)
   let panel: EntityId = findScrollRoot(world: world, uiSystems: uiSystems)
   log("root is content: {panel.index is content.index}")
-  let range: ScrollRange = scrollRootRange(world: world, uiSystems: uiSystems, entity: panel)
+  let range: ScrollRange = scrollRootRange(world: world, uiSystems: uiSystems, entityId: panel)
   log("floor: {roundI(value: range.floor)} window: {roundI(value: range.window)}")
 
   var input: UiInput = createUiInput()

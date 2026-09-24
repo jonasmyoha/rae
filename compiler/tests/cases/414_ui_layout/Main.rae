@@ -26,18 +26,18 @@ func makeFixedSize() ret Size {
 
 func setRectFixed(
   world: mod UiWorld
-  entity: view EntityId
+  entityId: view EntityId
   w: view Float
   h: view Float
 ) {
   let r: Rect = { position: { x: 0.0, y: 0.0 }, size: { x: w, y: h } }
-  componentSet(this: world.rects, entity: entity, data: r)
-  componentSet(this: world.sizes, entity: entity, data: makeFixedSize())
+  componentSet(this: world.rects, entityId: entityId, data: r)
+  componentSet(this: world.sizes, entityId: entityId, data: makeFixedSize())
 }
 
 func setShapeRect(
   world: mod UiWorld
-  entity: view EntityId
+  entityId: view EntityId
   r: view Int
   g: view Int
   b: view Int
@@ -49,7 +49,7 @@ func setShapeRect(
     strokeWidth: 0.0
     radius: 0.0
   }
-  componentSet(this: world.shapes, entity: entity, data: shape)
+  componentSet(this: world.shapes, entityId: entityId, data: shape)
 }
 
 func attachChildren(
@@ -65,7 +65,7 @@ func attachChildren(
       let kid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: i)
       kidsCopy.add(value: kid)
       let pl: Parent = { parent: parent }
-      componentSet(this: uiSystems.hierarchy.parents, entity: kid, data: pl)
+      componentSet(this: uiSystems.hierarchy.parents, entityId: kid, data: pl)
       i = i + 1
     }
     # `own kidsCopy` transfers ownership of the freshly-built list into
@@ -74,22 +74,22 @@ func attachChildren(
     # `own ch` to componentSet, which stores the struct into the
     # world's component table. See docs/ownership-model.md.
     let ch: Children = { ids: own kidsCopy }
-    componentSet(this: world.childrens, entity: parent, data: own ch)
+    componentSet(this: world.childrens, entityId: parent, data: own ch)
   }
 }
 
 func dumpEntity(
   world: view UiWorld
   uiSystems: view UiSystems
-  entity: view EntityId
+  entityId: view EntityId
   label: view String
 ) {
-  var cr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: entity)
+  var cr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entityId: entityId)
   var wt: WorldTransform2D = componentGet(
     this: uiSystems.transform2d.worldTransforms
-    entity: entity
+    entityId: entityId
   )
-  let wv: WorldVisual = worldVisualOf(world: world, uiSystems: uiSystems, entity: entity)
+  let wv: WorldVisual = worldVisualOf(world: world, uiSystems: uiSystems, entityId: entityId)
   log(
     "{label} cr=({cr.position.x},{cr.position.y},{cr.size.x},{cr.size.y}) wt=({wt.position.x},{wt.position.y}) alpha={wv.alpha} visible={wv.visible}"
   )
@@ -102,7 +102,7 @@ func main() {
   let root: EntityId = createEntity(world: world)
   setRectFixed(
     world: world
-    entity: root
+    entityId: root
     w: 400.0
     h: 600.0
   )
@@ -115,14 +115,14 @@ func main() {
     rowGap: 0.0
     columnGap: 0.0
   }
-  componentSet(this: world.layouts, entity: root, data: rootLayout)
+  componentSet(this: world.layouts, entityId: root, data: rootLayout)
   let rootPad: Padding = { insets: Insets { l: 20.0, t: 20.0, r: 20.0, b: 20.0 } }
-  componentSet(this: world.paddings, entity: root, data: rootPad)
+  componentSet(this: world.paddings, entityId: root, data: rootPad)
 
   let header: EntityId = createEntity(world: world)
   setRectFixed(
     world: world
-    entity: header
+    entityId: header
     w: 360.0
     h: 80.0
   )
@@ -135,18 +135,18 @@ func main() {
     rowGap: 0.0
     columnGap: 0.0
   }
-  componentSet(this: world.layouts, entity: header, data: headerLayout)
+  componentSet(this: world.layouts, entityId: header, data: headerLayout)
 
   let iconA: EntityId = createEntity(world: world)
   setRectFixed(
     world: world
-    entity: iconA
+    entityId: iconA
     w: 40.0
     h: 40.0
   )
   setShapeRect(
     world: world
-    entity: iconA
+    entityId: iconA
     r: 255
     g: 0
     b: 0
@@ -154,13 +154,13 @@ func main() {
   let iconB: EntityId = createEntity(world: world)
   setRectFixed(
     world: world
-    entity: iconB
+    entityId: iconB
     w: 40.0
     h: 40.0
   )
   setShapeRect(
     world: world
-    entity: iconB
+    entityId: iconB
     r: 0
     g: 255
     b: 0
@@ -178,13 +178,13 @@ func main() {
   let body: EntityId = createEntity(world: world)
   setRectFixed(
     world: world
-    entity: body
+    entityId: body
     w: 360.0
     h: 100.0
   )
   setShapeRect(
     world: world
-    entity: body
+    entityId: body
     r: 200
     g: 200
     b: 200
@@ -193,13 +193,13 @@ func main() {
   let footer: EntityId = createEntity(world: world)
   setRectFixed(
     world: world
-    entity: footer
+    entityId: footer
     w: 360.0
     h: 100.0
   )
   setShapeRect(
     world: world
-    entity: footer
+    entityId: footer
     r: 100
     g: 100
     b: 100
@@ -225,67 +225,67 @@ func main() {
   dumpEntity(
     world: world
     uiSystems: uiSystems
-    entity: root
+    entityId: root
     label: "Root"
   )
   dumpEntity(
     world: world
     uiSystems: uiSystems
-    entity: header
+    entityId: header
     label: "  Header"
   )
   dumpEntity(
     world: world
     uiSystems: uiSystems
-    entity: iconA
+    entityId: iconA
     label: "    IconA"
   )
   dumpEntity(
     world: world
     uiSystems: uiSystems
-    entity: iconB
+    entityId: iconB
     label: "    IconB"
   )
   dumpEntity(
     world: world
     uiSystems: uiSystems
-    entity: body
+    entityId: body
     label: "  Body"
   )
   dumpEntity(
     world: world
     uiSystems: uiSystems
-    entity: footer
+    entityId: footer
     label: "  Footer"
   )
 
   # Inactive subtree: set Header inactive and re-run transform.
   log("--- toggle Header.Active=false ---")
   let inactive: Active = { value: false }
-  componentSet(this: world.actives, entity: header, data: inactive)
+  componentSet(this: world.actives, entityId: header, data: inactive)
   transformSystem(world: world, uiSystems: uiSystems)
   dumpEntity(
     world: world
     uiSystems: uiSystems
-    entity: header
+    entityId: header
     label: "  Header"
   )
   dumpEntity(
     world: world
     uiSystems: uiSystems
-    entity: iconA
+    entityId: iconA
     label: "    IconA"
   )
   dumpEntity(
     world: world
     uiSystems: uiSystems
-    entity: iconB
+    entityId: iconB
     label: "    IconB"
   )
   dumpEntity(
     world: world
     uiSystems: uiSystems
-    entity: body
+    entityId: body
     label: "  Body"
   )
 }

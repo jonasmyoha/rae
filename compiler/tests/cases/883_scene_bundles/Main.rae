@@ -73,26 +73,26 @@ func scene() ret String {
   ret s
 }
 
-func rectOf(world: view UiWorld, entity: view EntityId) ret String {
-  if componentHas(this: world.rects, entity: entity) is false {
+func rectOf(world: view UiWorld, entityId: view EntityId) ret String {
+  if componentHas(this: world.rects, entityId: entityId) is false {
     ret "no Rect"
   }
-  let r: Rect = componentGet(this: world.rects, entity: entity)
+  let r: Rect = componentGet(this: world.rects, entityId: entityId)
   ret "{r.position.x.toInt()},{r.position.y.toInt()} {r.size.x.toInt()}x{r.size.y.toInt()}"
 }
 
-func opacityOf(world: view UiWorld, entity: view EntityId) ret String {
-  if componentHas(this: world.opacities, entity: entity) is false {
+func opacityOf(world: view UiWorld, entityId: view EntityId) ret String {
+  if componentHas(this: world.opacities, entityId: entityId) is false {
     ret "no Opacity"
   }
-  ret "{componentGet(this: world.opacities, entity: entity).value}"
+  ret "{componentGet(this: world.opacities, entityId: entityId).value}"
 }
 
-func refsOf(world: view UiWorld, entity: view EntityId) ret String {
-  if componentHas(this: world.bundleRefs, entity: entity) is false {
+func refsOf(world: view UiWorld, entityId: view EntityId) ret String {
+  if componentHas(this: world.bundleRefs, entityId: entityId) is false {
     ret "no BundleRefs"
   }
-  let refs: view BundleRefs => componentView(this: world.bundleRefs, entity: entity)
+  let refs: view BundleRefs => componentView(this: world.bundleRefs, entityId: entityId)
   ret "names={refs.names.join(sep: ",")} inherited={refs.inherited.join(sep: ",")} overridden={refs.overridden.join(
     sep: ","
   )}"
@@ -132,12 +132,12 @@ func main() {
   loop let nodeId: view String in nodeIds {
     let e: EntityId = entityNamed(world: world, scene: entry, nodeId: nodeId)
     log(
-      "{nodeId}: rect {rectOf(world: world, entity: e)} opacity {opacityOf(world: world, entity: e)} hitArea {componentHas(
-        this: world.hitAreas
-        entity: e
-      )}"
+      "{nodeId}: rect {rectOf(world: world, entityId: e)} opacity {opacityOf(
+        world: world
+        entityId: e
+      )} hitArea {componentHas(this: world.hitAreas, entityId: e)}"
     )
-    log("  {refsOf(world: world, entity: e)}")
+    log("  {refsOf(world: world, entityId: e)}")
   }
   log("pending (app components through bundles): {world.pendingComponents.length}")
   loop let pending: view PendingComponent in world.pendingComponents {
@@ -150,6 +150,6 @@ func main() {
 
   # applyBundle on a live entity: the same expansion, appended to BundleRefs.
   let live: EntityId = createEntity(world: world)
-  applyBundle(world: world, entity: live, name: "pill")
-  log("live: rect {rectOf(world: world, entity: live)} {refsOf(world: world, entity: live)}")
+  applyBundle(world: world, entityId: live, name: "pill")
+  log("live: rect {rectOf(world: world, entityId: live)} {refsOf(world: world, entityId: live)}")
 }

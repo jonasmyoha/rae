@@ -42,11 +42,11 @@ func animFrameCount(frames: view AnimFrames) ret Int {
   ret frames.frameCount
 }
 
-func setSpriteKey(world: mod UiWorld, entity: view EntityId, key: view String) {
-  if key.length() is 0 or componentHas(this: world.sprites, entity: entity) is false {
+func setSpriteKey(world: mod UiWorld, entityId: view EntityId, key: view String) {
+  if key.length() is 0 or componentHas(this: world.sprites, entityId: entityId) is false {
     ret
   }
-  let sprite: mod Sprite => componentMod(this: world.sprites, entity: entity)
+  let sprite: mod Sprite => componentMod(this: world.sprites, entityId: entityId)
   if sprite.textureKey is not key {
     sprite.textureKey = "{key}"
   }
@@ -63,21 +63,24 @@ func animFramesSystem(
   var live: Bool = false
   let count: Int = componentCount(this: world.animFrames)
   loop var i: Int = 0, i < count, ++i {
-    let entity: EntityId = componentEntityAt(this: world.animFrames, i: i)
-    let frames: view AnimFrames => componentView(this: world.animFrames, entity: entity)
+    let entityId: EntityId = componentEntityAt(this: world.animFrames, i: i)
+    let frames: view AnimFrames => componentView(this: world.animFrames, entityId: entityId)
     let total: Int = animFrameCount(frames: frames)
     if total <= 0 or frames.fps <= 0.0 {
       continue
     }
-    if componentHas(this: uiSystems.animation.animStates, entity: entity) is false {
+    if componentHas(this: uiSystems.animation.animStates, entityId: entityId) is false {
       componentSet(
         this: uiSystems.animation.animStates
-        entity: entity
+        entityId: entityId
         data: AnimState { playing: true, elapsedMs: 0.0, frameIndex: 0 }
       )
-      setSpriteKey(world: world, entity: entity, key: animFrameKey(frames: frames, index: 0))
+      setSpriteKey(world: world, entityId: entityId, key: animFrameKey(frames: frames, index: 0))
     }
-    let state: mod AnimState => componentMod(this: uiSystems.animation.animStates, entity: entity)
+    let state: mod AnimState => componentMod(
+      this: uiSystems.animation.animStates
+      entityId: entityId
+    )
     if state.playing is false {
       continue
     }
@@ -100,11 +103,11 @@ func animFramesSystem(
     }
     if advanced {
       if state.playing is false and frames.onEndTextureKey.length() > 0 {
-        setSpriteKey(world: world, entity: entity, key: frames.onEndTextureKey)
+        setSpriteKey(world: world, entityId: entityId, key: frames.onEndTextureKey)
       } else {
         setSpriteKey(
           world: world
-          entity: entity
+          entityId: entityId
           key: animFrameKey(frames: frames, index: state.frameIndex)
         )
       }
@@ -120,7 +123,7 @@ func animFramesSystem(
 func animTriggerSystem(world: mod UiWorld, uiSystems: mod UiSystems) {
   let count: Int = componentCount(this: world.animTriggers)
   loop var i: Int = 0, i < count, ++i {
-    let entity: EntityId = componentEntityAt(this: world.animTriggers, i: i)
+    let entityId: EntityId = componentEntityAt(this: world.animTriggers, i: i)
     let trigger: AnimTrigger = componentDataAt(this: world.animTriggers, i: i)
     var fired: Bool = false
     if trigger.actionId.length() > 0 {
@@ -131,10 +134,10 @@ func animTriggerSystem(world: mod UiWorld, uiSystems: mod UiSystems) {
         }
       }
     }
-    if componentHas(this: uiSystems.button.interactions, entity: entity) {
+    if componentHas(this: uiSystems.button.interactions, entityId: entityId) {
       let interaction: Interaction = componentGet(
         this: uiSystems.button.interactions
-        entity: entity
+        entityId: entityId
       )
       if trigger.event is "click" and interaction.pressed {
         fired = true
@@ -143,36 +146,36 @@ func animTriggerSystem(world: mod UiWorld, uiSystems: mod UiSystems) {
         fired = true
       }
     }
-    if fired is false or componentHas(this: world.animFrames, entity: entity) is false {
+    if fired is false or componentHas(this: world.animFrames, entityId: entityId) is false {
       continue
     }
     var playing: Bool = false
-    if componentHas(this: uiSystems.animation.animStates, entity: entity) {
-      playing = componentGet(this: uiSystems.animation.animStates, entity: entity).playing
+    if componentHas(this: uiSystems.animation.animStates, entityId: entityId) {
+      playing = componentGet(this: uiSystems.animation.animStates, entityId: entityId).playing
     }
     if playing and trigger.restartOnTrigger is false {
       continue
     }
     componentSet(
       this: uiSystems.animation.animStates
-      entity: entity
+      entityId: entityId
       data: AnimState { playing: true, elapsedMs: 0.0, frameIndex: 0 }
     )
-    let frames: view AnimFrames => componentView(this: world.animFrames, entity: entity)
-    setSpriteKey(world: world, entity: entity, key: animFrameKey(frames: frames, index: 0))
+    let frames: view AnimFrames => componentView(this: world.animFrames, entityId: entityId)
+    setSpriteKey(world: world, entityId: entityId, key: animFrameKey(frames: frames, index: 0))
   }
 }
 
 func setRuntimeOffset(
   world: mod UiWorld
   uiSystems: mod UiSystems
-  entity: view EntityId
+  entityId: view EntityId
   x: view Float
   y: view Float
 ) {
   componentSet(
     this: uiSystems.transform2d.runtimeOffsets
-    entity: entity
+    entityId: entityId
     data: RuntimeOffset { delta: Vec2 { x: x, y: y } }
   )
 }
@@ -182,7 +185,7 @@ func setRuntimeOffset(
 func wobbleFxSystem(world: mod UiWorld, uiSystems: mod UiSystems, time: view Float) ret Bool {
   let count: Int = componentCount(this: world.wobbleFxs)
   loop var i: Int = 0, i < count, ++i {
-    let entity: EntityId = componentEntityAt(this: world.wobbleFxs, i: i)
+    let entityId: EntityId = componentEntityAt(this: world.wobbleFxs, i: i)
     let fx: WobbleFx = componentDataAt(this: world.wobbleFxs, i: i)
     let y: Float = fx.amp * Math.sin(x: time * fx.freq * twoPi) + fx.secondAmp * Math.sin(
       x: time * fx.secondFreq * twoPi
@@ -190,7 +193,7 @@ func wobbleFxSystem(world: mod UiWorld, uiSystems: mod UiSystems, time: view Flo
     setRuntimeOffset(
       world: world
       uiSystems: uiSystems
-      entity: entity
+      entityId: entityId
       x: 0.0
       y: y
     )
@@ -203,12 +206,12 @@ func wobbleFxSystem(world: mod UiWorld, uiSystems: mod UiSystems, time: view Flo
 func backgroundPanSystem(world: mod UiWorld, uiSystems: mod UiSystems, time: view Float) ret Bool {
   let count: Int = componentCount(this: world.backgroundPans)
   loop var i: Int = 0, i < count, ++i {
-    let entity: EntityId = componentEntityAt(this: world.backgroundPans, i: i)
+    let entityId: EntityId = componentEntityAt(this: world.backgroundPans, i: i)
     let pan: BackgroundPan = componentDataAt(this: world.backgroundPans, i: i)
     setRuntimeOffset(
       world: world
       uiSystems: uiSystems
-      entity: entity
+      entityId: entityId
       x: pan.amplitudeX * Math.sin(x: time * pan.speedX)
       y: pan.amplitudeY * Math.sin(x: time * pan.speedY)
     )
@@ -216,10 +219,10 @@ func backgroundPanSystem(world: mod UiWorld, uiSystems: mod UiSystems, time: vie
   ret count > 0
 }
 
-func childrenOf(world: view UiWorld, entity: view EntityId) ret List(EntityId) {
+func childrenOf(world: view UiWorld, entityId: view EntityId) ret List(EntityId) {
   var kids: List(EntityId) = List.create(EntityId, cap: 8)
-  if componentHas(this: world.childrens, entity: entity) {
-    let children: view Children => componentView(this: world.childrens, entity: entity)
+  if componentHas(this: world.childrens, entityId: entityId) {
+    let children: view Children => componentView(this: world.childrens, entityId: entityId)
     loop var i: Int = 0, i < children.ids.length, ++i {
       kids.add(value: children.ids.copyAtFallback(index: i, fallback: noEntity()))
     }
@@ -241,24 +244,27 @@ func smokeFxSystem(world: mod UiWorld, uiSystems: mod UiSystems, deltaTime: view
   var live: Bool = false
   let count: Int = componentCount(this: world.smokeFxs)
   loop var i: Int = 0, i < count, ++i {
-    let entity: EntityId = componentEntityAt(this: world.smokeFxs, i: i)
+    let entityId: EntityId = componentEntityAt(this: world.smokeFxs, i: i)
     let fx: SmokeFx = componentDataAt(this: world.smokeFxs, i: i)
-    let pool: List(EntityId) = childrenOf(world: world, entity: entity)
+    let pool: List(EntityId) = childrenOf(world: world, entityId: entityId)
     if pool.length is 0 or fx.lifetimeMs <= 0.0 {
       continue
     }
-    if componentHas(this: uiSystems.animation.smokeStates, entity: entity) is false {
+    if componentHas(this: uiSystems.animation.smokeStates, entityId: entityId) is false {
       var ages: List(Float) = List.create(Float, cap: pool.length)
       loop var p: Int = 0, p < pool.length, ++p {
         ages.add(value: 0.0 - 1.0)
       }
       componentSet(
         this: uiSystems.animation.smokeStates
-        entity: entity
+        entityId: entityId
         data: SmokeState { ages: own ages, spawnTimerMs: fx.spawnIntervalMs }
       )
     }
-    let state: mod SmokeState => componentMod(this: uiSystems.animation.smokeStates, entity: entity)
+    let state: mod SmokeState => componentMod(
+      this: uiSystems.animation.smokeStates
+      entityId: entityId
+    )
     loop state.ages.length < pool.length {
       state.ages.add(value: 0.0 - 1.0)
     }
@@ -306,18 +312,18 @@ func smokeFxSystem(world: mod UiWorld, uiSystems: mod UiSystems, deltaTime: view
       setRuntimeOffset(
         world: world
         uiSystems: uiSystems
-        entity: puff
+        entityId: puff
         x: offsetX
         y: offsetY
       )
-      componentSet(this: world.opacities, entity: puff, data: Opacity { value: opacity })
+      componentSet(this: world.opacities, entityId: puff, data: Opacity { value: opacity })
       var fx2: TransformFx = defaultTransformFx()
-      if componentHas(this: world.transforms, entity: puff) {
-        fx2 = componentGet(this: world.transforms, entity: puff)
+      if componentHas(this: world.transforms, entityId: puff) {
+        fx2 = componentGet(this: world.transforms, entityId: puff)
       }
       fx2.scaleX = scale
       fx2.scaleY = scale
-      componentSet(this: world.transforms, entity: puff, data: fx2)
+      componentSet(this: world.transforms, entityId: puff, data: fx2)
     }
   }
   ret live
@@ -327,21 +333,21 @@ func smokeFxSystem(world: mod UiWorld, uiSystems: mod UiSystems, deltaTime: view
 func pointOverEntity(
   world: view UiWorld
   uiSystems: view UiSystems
-  entity: view EntityId
+  entityId: view EntityId
   x: view Float
   y: view Float
 ) ret Bool {
-  if componentHas(this: uiSystems.transform2d.worldTransforms, entity: entity) is false or componentHas(
+  if componentHas(this: uiSystems.transform2d.worldTransforms, entityId: entityId) is false or componentHas(
     this: uiSystems.layout.computedRects
-    entity: entity
+    entityId: entityId
   ) is false {
     ret false
   }
   let transform: WorldTransform2D = componentGet(
     this: uiSystems.transform2d.worldTransforms
-    entity: entity
+    entityId: entityId
   )
-  let rect: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: entity)
+  let rect: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entityId: entityId)
   ret x >= transform.position.x and y >= transform.position.y and x <= transform.position.x + rect.size.x and y <= transform.position.y + rect.size.y
 }
 
@@ -356,18 +362,18 @@ func childStrideX(
   let first: EntityId = kids.copyAtFallback(index: 0, fallback: noEntity())
   if kids.length >= 2 {
     let second: EntityId = kids.copyAtFallback(index: 1, fallback: noEntity())
-    if componentHas(this: uiSystems.layout.computedRects, entity: first) and componentHas(
+    if componentHas(this: uiSystems.layout.computedRects, entityId: first) and componentHas(
       this: uiSystems.layout.computedRects
-      entity: second
+      entityId: second
     ) {
-      ret componentGet(this: uiSystems.layout.computedRects, entity: second).position.x - componentGet(
+      ret componentGet(this: uiSystems.layout.computedRects, entityId: second).position.x - componentGet(
         this: uiSystems.layout.computedRects
-        entity: first
+        entityId: first
       ).position.x
     }
   }
-  if componentHas(this: uiSystems.layout.computedRects, entity: first) {
-    ret componentGet(this: uiSystems.layout.computedRects, entity: first).size.x
+  if componentHas(this: uiSystems.layout.computedRects, entityId: first) {
+    ret componentGet(this: uiSystems.layout.computedRects, entityId: first).size.x
   }
   ret 0.0
 }
@@ -390,16 +396,16 @@ func carouselSystem(
   var live: Bool = false
   let count: Int = componentCount(this: world.carousels)
   loop var i: Int = 0, i < count, ++i {
-    let entity: EntityId = componentEntityAt(this: world.carousels, i: i)
+    let entityId: EntityId = componentEntityAt(this: world.carousels, i: i)
     let carousel: Carousel = componentDataAt(this: world.carousels, i: i)
-    let kids: List(EntityId) = childrenOf(world: world, entity: entity)
+    let kids: List(EntityId) = childrenOf(world: world, entityId: entityId)
     if kids.length is 0 {
       continue
     }
-    if componentHas(this: uiSystems.animation.carouselStates, entity: entity) is false {
+    if componentHas(this: uiSystems.animation.carouselStates, entityId: entityId) is false {
       componentSet(
         this: uiSystems.animation.carouselStates
-        entity: entity
+        entityId: entityId
         data: CarouselState {
           page: 0
           offset: 0.0
@@ -412,13 +418,13 @@ func carouselSystem(
     }
     let state: mod CarouselState => componentMod(
       this: uiSystems.animation.carouselStates
-      entity: entity
+      entityId: entityId
     )
     let stride: Float = childStrideX(world: world, uiSystems: uiSystems, kids: kids)
     let over: Bool = pointOverEntity(
       world: world
       uiSystems: uiSystems
-      entity: entity
+      entityId: entityId
       x: pointerX
       y: pointerY
     )
@@ -468,7 +474,7 @@ func carouselSystem(
     setRuntimeOffset(
       world: world
       uiSystems: uiSystems
-      entity: entity
+      entityId: entityId
       x: state.offset * carousel.travelFactor
       y: 0.0
     )
@@ -476,8 +482,8 @@ func carouselSystem(
       loop var k: Int = 0, k < kids.length, ++k {
         let page: EntityId = kids.copyAtFallback(index: k, fallback: noEntity())
         var fx: TransformFx = defaultTransformFx()
-        if componentHas(this: world.transforms, entity: page) {
-          fx = componentGet(this: world.transforms, entity: page)
+        if componentHas(this: world.transforms, entityId: page) {
+          fx = componentGet(this: world.transforms, entityId: page)
         }
         var scale: Float = carousel.previewScale
         if k is state.page {
@@ -486,7 +492,7 @@ func carouselSystem(
         if fx.scaleX is not scale or fx.scaleY is not scale {
           fx.scaleX = scale
           fx.scaleY = scale
-          componentSet(this: world.transforms, entity: page, data: fx)
+          componentSet(this: world.transforms, entityId: page, data: fx)
         }
       }
     }

@@ -27,10 +27,10 @@ func main() {
     # Build Children in place so the heap is genuinely owned by the
     # struct literal, then transfer ownership of `kids` into the field.
     let ch: Children = { ids: own kids }
-    componentSet(this: world.childrens, entity: parent, data: own ch)
+    componentSet(this: world.childrens, entityId: parent, data: own ch)
 
     # Read back via componentView — borrow, no copy, no auto-drop.
-    let chv: view Children => componentView(this: world.childrens, entity: parent)
+    let chv: view Children => componentView(this: world.childrens, entityId: parent)
     log("via componentView:")
     let chv0: EntityId = rae_ext_rae_buf_get(buf: chv.ids.data, index: 0)
     let chv1: EntityId = rae_ext_rae_buf_get(buf: chv.ids.data, index: 1)
@@ -41,7 +41,7 @@ func main() {
 
     # Second read pretending we lost the first ref — value should still
     # be intact (no corruption from the first borrow going out of scope).
-    let chv2v: view Children => componentView(this: world.childrens, entity: parent)
+    let chv2v: view Children => componentView(this: world.childrens, entityId: parent)
     log("second read:")
     let r0: EntityId = rae_ext_rae_buf_get(buf: chv2v.ids.data, index: 0)
     let r1: EntityId = rae_ext_rae_buf_get(buf: chv2v.ids.data, index: 1)

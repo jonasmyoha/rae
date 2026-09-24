@@ -25,23 +25,23 @@ func emptyStateSystem(world: mod UiWorld, uiSystems: view UiSystems, state: view
   let n: Int = componentCount(this: world.emptyStates)
   var i: Int = 0
   loop i < n {
-    let entity: EntityId = componentEntityAt(this: world.emptyStates, i: i)
+    let entityId: EntityId = componentEntityAt(this: world.emptyStates, i: i)
     let binding: EmptyState = componentDataAt(this: world.emptyStates, i: i)
     var empty: Bool = historyEmpty
     if binding.kind is EmptyStateKind.search {
       empty = searchQueryBlankOnPage(
         world: world
         uiSystems: uiSystems
-        page: pageOf(world: world, uiSystems: uiSystems, entity: entity)
+        page: pageOf(world: world, uiSystems: uiSystems, entityId: entityId)
       )
     }
     var current: Bool = true
-    if componentHas(this: world.actives, entity: entity) {
-      current = componentGet(this: world.actives, entity: entity).value
+    if componentHas(this: world.actives, entityId: entityId) {
+      current = componentGet(this: world.actives, entityId: entityId).value
     }
     if current is not empty {
       let flag: Active = { value: empty }
-      componentSet(this: world.actives, entity: entity, data: flag)
+      componentSet(this: world.actives, entityId: entityId, data: flag)
     }
     i = i + 1
   }

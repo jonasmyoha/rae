@@ -53,7 +53,7 @@ func syncInspectorPanel(
     ret
   }
   if members is 1 {
-    chromeSystem.inspectorNodeId = nodeIdOf(world: world, entity: inspectorSystem.selected)
+    chromeSystem.inspectorNodeId = nodeIdOf(world: world, entityId: inspectorSystem.selected)
   } else {
     chromeSystem.inspectorNodeId = "Selection ({members}): {selectionNodeIds(
       inspectorSystem: inspectorSystem
@@ -67,30 +67,30 @@ func syncInspectorPanel(
   var typeAgrees: Bool = true
   var parentAgrees: Bool = true
   var seen: Bool = false
-  loop let entity: view EntityId in inspectorSystem.selection {
-    if isNone(this: entity) {
+  loop let entityId: view EntityId in inspectorSystem.selection {
+    if isNone(this: entityId) {
       continue
     }
     tallyComponentNames(
       tallies: componentTallies
-      names: componentNamesFor(world: world, entity: entity)
+      names: componentNamesFor(world: world, entityId: entityId)
     )
     tallyComponentNames(
       tallies: appTallies
-      names: pendingComponentNames(world: world, entity: entity)
+      names: pendingComponentNames(world: world, entityId: entityId)
     )
     # At n=1 the identity line is `Type / Name`; above that it folds the TYPE
     # only. A name is per-entity meta — two Text nodes are always named
     # differently — so folding it would report every multi-selection as mixed
     # and hide the one thing they genuinely share.
-    var entityType: String = nodePrimaryType(world: world, entity: entity)
+    var entityType: String = nodePrimaryType(world: world, entityId: entityId)
     if members is 1 {
-      entityType = nodeTypeLine(world: world, entity: entity)
+      entityType = nodeTypeLine(world: world, entityId: entityId)
     }
     let entityParents: String = parentChainOf(
       world: world
       uiSystems: uiSystems
-      entity: entity
+      entityId: entityId
       sceneRoot: sceneRoot
     )
     if seen is false {
@@ -120,7 +120,10 @@ func syncInspectorPanel(
   chromeSystem.inspectorParents = parentLine
   var components: String = compositeLine(tallies: componentTallies, members: members)
   if members is 1 {
-    components = "{components}{bundleProvenanceLine(world: world, entity: inspectorSystem.selected)}"
+    components = "{components}{bundleProvenanceLine(
+      world: world
+      entityId: inspectorSystem.selected
+    )}"
   }
   chromeSystem.inspectorComponents = components
   let appComponents: String = compositeLine(tallies: appTallies, members: members)
@@ -161,13 +164,13 @@ func syncInspectorPanel(
       rows: widgetRows
       id: "identity.node"
       name: "node"
-      value: nodeIdOf(world: world, entity: anchor)
+      value: nodeIdOf(world: world, entityId: anchor)
       indent: 1
       action: ""
     )
     var identityName: String = ""
-    if componentHas(this: world.names, entity: anchor) {
-      identityName = "{componentView(this: world.names, entity: anchor).label}"
+    if componentHas(this: world.names, entityId: anchor) {
+      identityName = "{componentView(this: world.names, entityId: anchor).label}"
     }
     addWidgetRow(
       rows: widgetRows
@@ -177,7 +180,7 @@ func syncInspectorPanel(
       indent: 1
       action: ""
     )
-    var identityType: String = nodePrimaryType(world: world, entity: anchor)
+    var identityType: String = nodePrimaryType(world: world, entityId: anchor)
     if identityType.length() is 0 {
       identityType = "(none)"
     }
@@ -191,7 +194,7 @@ func syncInspectorPanel(
     )
     var parentLabel: String = entityLabelOf(
       world: world
-      entity: parentOf(world: world, uiSystems: uiSystems, entity: anchor)
+      entityId: parentOf(world: world, uiSystems: uiSystems, entityId: anchor)
     )
     if parentLabel.length() is 0 {
       parentLabel = "(none)"
@@ -204,7 +207,7 @@ func syncInspectorPanel(
       indent: 1
       action: ""
     )
-    var childLabels: String = childIdsOf(world: world, entity: anchor)
+    var childLabels: String = childIdsOf(world: world, entityId: anchor)
     if childLabels.length() is 0 {
       childLabels = "(none)"
     }
@@ -385,7 +388,7 @@ func setWidgetRows(
     ret
   }
   let active: Active = { value: rows.length > 0 }
-  componentSet(this: world.actives, entity: list, data: active)
+  componentSet(this: world.actives, entityId: list, data: active)
   setEditorListRows(world: world, list: list, rows: own rows)
 }
 
@@ -403,12 +406,12 @@ func revealTreeSelection(
     inspectorSystem.lastRevealed = noEntity()
     ret
   }
-  let listView: ListView = componentGet(this: world.listViews, entity: list)
+  let listView: ListView = componentGet(this: world.listViews, entityId: list)
   let pitch: Float = listView.itemHeight + listView.itemGap
   let window: Float = listView.visibleItemCount.toFloat() * pitch - listView.itemGap
   loop var i: Int = 0, i < inspectorSystem.treeEntities.length, ++i {
     if inspectorSystem.treeEntities.copyAtFallback(index: i, fallback: noEntity()) is inspectorSystem.selected {
-      let state: ScrollState = componentGet(this: world.scrollStates, entity: list)
+      let state: ScrollState = componentGet(this: world.scrollStates, entityId: list)
       var top: Float = -state.y
       let rowTop: Float = i.toFloat() * pitch
       let rowBottom: Float = rowTop + listView.itemHeight
@@ -429,7 +432,7 @@ func revealTreeSelection(
         top = 0
       }
       let revealed: ScrollState = { y: -top, velocity: 0 }
-      componentSet(this: world.scrollStates, entity: list, data: revealed)
+      componentSet(this: world.scrollStates, entityId: list, data: revealed)
       inspectorSystem.lastRevealed = inspectorSystem.selected
       ret
     }
@@ -446,19 +449,19 @@ func treeCollapsed(collapsed: view List(String), nodeId: view String) ret Bool {
   ret false
 }
 
-# Does the subtree under `entity` (excluding it) contain a selected node? Used
+# Does the subtree under `entityId` (excluding it) contain a selected node? Used
 # to mark a COLLAPSED row that is hiding part of the selection — collapsing
 # keeps descendants selected (dropping them would silently shrink a set the
 # user built), so the row has to say that something is in there.
 func subtreeHasSelection(
   world: view UiWorld
-  entity: view EntityId
+  entityId: view EntityId
   selection: view List(EntityId)
 ) ret Bool {
-  if componentHas(this: world.childrens, entity: entity) is false {
+  if componentHas(this: world.childrens, entityId: entityId) is false {
     ret false
   }
-  let children: view Children => componentView(this: world.childrens, entity: entity)
+  let children: view Children => componentView(this: world.childrens, entityId: entityId)
   loop var i: Int = 0, i < children.ids.length, ++i {
     let child: EntityId = children.ids.copyAtFallback(index: i, fallback: noEntity())
     if isNone(this: child) {
@@ -471,7 +474,7 @@ func subtreeHasSelection(
         }
       }
     }
-    if subtreeHasSelection(world: world, entity: child, selection: selection) {
+    if subtreeHasSelection(world: world, entityId: child, selection: selection) {
       ret true
     }
   }
@@ -487,11 +490,11 @@ func subtreeHasSelection(
 # palette, so a theme change carries them.
 func treeRowGradientSlot(
   selection: view List(EntityId)
-  entity: view EntityId
+  entityId: view EntityId
   selected: view EntityId
   from: view Bool
 ) ret String {
-  if entity is selected {
+  if entityId is selected {
     if from {
       ret "editorRowActiveFrom"
     }
@@ -499,7 +502,7 @@ func treeRowGradientSlot(
   }
   loop var i: Int = 0, i < selection.length, ++i {
     if let member: EntityId = selection.copyAt(index: i) {
-      if member is entity {
+      if member is entityId {
         if from {
           ret "editorRowSelectedFrom"
         }
@@ -518,11 +521,11 @@ func treeRowGradientSlot(
 func treeRowMarker(
   world: view UiWorld
   selection: view List(EntityId)
-  entity: view EntityId
+  entityId: view EntityId
   selected: view EntityId
   hidden: view Bool
 ) ret String {
-  if hidden and subtreeHasSelection(world: world, entity: entity, selection: selection) {
+  if hidden and subtreeHasSelection(world: world, entityId: entityId, selection: selection) {
     ret "*"
   }
   ret ""
@@ -530,7 +533,7 @@ func treeRowMarker(
 
 func collectTreeRows(
   world: view UiWorld
-  entity: view EntityId
+  entityId: view EntityId
   depth: view Int
   selected: view EntityId
   selection: view List(EntityId)
@@ -539,17 +542,17 @@ func collectTreeRows(
   entities: mod List(EntityId)
   rows: mod List(ListViewRow)
 ) {
-  if isNone(this: entity) or rows.length >= 256 {
+  if isNone(this: entityId) or rows.length >= 256 {
     ret
   }
   # Filtered out, and nothing beneath matches either: the whole branch goes.
-  if treeRowMatches(world: world, entity: entity, filter: filter) is false {
+  if treeRowMatches(world: world, entityId: entityId, filter: filter) is false {
     ret
   }
-  let nodeId: String = nodeIdOf(world: world, entity: entity)
+  let nodeId: String = nodeIdOf(world: world, entityId: entityId)
   var hasChildren: Bool = false
-  if componentHas(this: world.childrens, entity: entity) {
-    hasChildren = componentView(this: world.childrens, entity: entity).ids.length > 0
+  if componentHas(this: world.childrens, entityId: entityId) {
+    hasChildren = componentView(this: world.childrens, entityId: entityId).ids.length > 0
   }
   let isCollapsed: Bool = treeCollapsed(collapsed: collapsed, nodeId: nodeId)
   # A leaf has no chevron at all: a disclosure control that discloses nothing
@@ -576,28 +579,28 @@ func collectTreeRows(
     "guide6"
   }
   var values: List(String) = List.create(String, cap: 15)
-  values.add(value: "{entity.index}")
-  values.add(value: treeRowLabelOf(world: world, entity: entity))
+  values.add(value: "{entityId.index}")
+  values.add(value: treeRowLabelOf(world: world, entityId: entityId))
   values.add(value: treeRowMarker(
     world: world
     selection: selection
-    entity: entity
+    entityId: entityId
     selected: selected
     hidden: isCollapsed
   ))
-  values.add(value: "inspect:{entity.index}")
+  values.add(value: "inspect:{entityId.index}")
   values.add(value: "{hasChildren and isCollapsed is false}")
   values.add(value: "{hasChildren and isCollapsed}")
   values.add(value: chevronAction)
   values.add(value: treeRowGradientSlot(
     selection: selection
-    entity: entity
+    entityId: entityId
     selected: selected
     from: true
   ))
   values.add(value: treeRowGradientSlot(
     selection: selection
-    entity: entity
+    entityId: entityId
     selected: selected
     from: false
   ))
@@ -608,19 +611,19 @@ func collectTreeRows(
   values.add(value: "{depth >= 5}")
   values.add(value: "{depth >= 6}")
   rows.add(value: ListViewRow { keys: own keys, values: own values })
-  entities.add(value: entity)
+  entities.add(value: entityId)
   # A collapsed node contributes its own row and stops. `entities` therefore
   # holds exactly the VISIBLE rows, which is what makes a Shift-range span
   # what the user can see rather than the whole DFS (#72481430).
   if isCollapsed {
     ret
   }
-  if componentHas(this: world.childrens, entity: entity) {
-    let children: view Children => componentView(this: world.childrens, entity: entity)
+  if componentHas(this: world.childrens, entityId: entityId) {
+    let children: view Children => componentView(this: world.childrens, entityId: entityId)
     loop var i: Int = 0, i < children.ids.length, ++i {
       collectTreeRows(
         world: world
-        entity: children.ids.copyAtFallback(index: i, fallback: noEntity())
+        entityId: children.ids.copyAtFallback(index: i, fallback: noEntity())
         depth: depth + 1
         selected: selected
         selection: selection
@@ -654,7 +657,7 @@ func syncTreePanel(
   var rows: List(ListViewRow) = List.create(ListViewRow, cap: 32)
   collectTreeRows(
     world: world
-    entity: sceneRoot
+    entityId: sceneRoot
     depth: 0
     selected: inspectorSystem.selected
     selection: inspectorSystem.selection

@@ -73,7 +73,7 @@ func drop(T: type, this: mod ComponentTable(T)) {
   dropIntList(lst: this.denseStamps)
 }
 
-# Returns the dense index of `entity` in this table, or -1 if absent.
+# Returns the dense index of `entityId` in this table, or -1 if absent.
 #
 # `denseEntities` is `List(EntityId)`, but inside this generic
 # function the C backend currently mis-mangles `denseEntities.get(...)`
@@ -81,12 +81,12 @@ func drop(T: type, this: mod ComponentTable(T)) {
 # (so `List(EntityId).get` becomes `List(Rect).get` when T=Rect).
 # Bypass via `rae_ext_rae_buf_get` which doesn't go through the
 # generic dispatch.
-func componentIndexOf(T: type, this: view ComponentTable(T), entity: view EntityId) ret Int {
+func componentIndexOf(T: type, this: view ComponentTable(T), entityId: view EntityId) ret Int {
   unsafe {
-    # O(1) sparse lookup. `sparse[entity.index]` is the candidate dense
+    # O(1) sparse lookup. `sparse[entityId.index]` is the candidate dense
     # index; we still validate the dense back-reference so a stale slot
     # (left by a swap-remove of a *different* entity) can't false-hit.
-    let key: Int = entity.index
+    let key: Int = entityId.index
     if key < 0 {
       ret -1
     }
@@ -101,15 +101,15 @@ func componentIndexOf(T: type, this: view ComponentTable(T), entity: view Entity
       ret -1
     }
     let e: EntityId = rae_ext_rae_buf_get(buf: this.denseEntities.data, index: idx)
-    if e is entity {
+    if e is entityId {
       ret idx
     }
     ret -1
   }
 }
 
-func componentHas(T: type, this: view ComponentTable(T), entity: view EntityId) ret Bool {
-  ret componentIndexOf(this, entity: entity) >= 0
+func componentHas(T: type, this: view ComponentTable(T), entityId: view EntityId) ret Bool {
+  ret componentIndexOf(this, entityId: entityId) >= 0
 }
 
 # Copy one dense component into an optional payload. Returning the raw slot
@@ -124,7 +124,7 @@ func componentCopyAt(T: type, this: view ComponentTable(T), i: view Int) ret opt
   }
 }
 
-# Read the component for `entity`. Caller must check `componentHas` first — if
+# Read the component for `entityId`. Caller must check `componentHas` first — if
 # the component is missing, this returns the value at dense index 0, or T's
 # default when the table is empty. The check-then-read pattern is:
 #
@@ -136,8 +136,8 @@ func componentCopyAt(T: type, this: view ComponentTable(T), i: view Int) ret opt
 # The value is an owned deep copy. Heap-carrying fields such as String and List
 # are independent of the table's stored component; use `componentView` when a
 # read-only borrow is enough and no copy is wanted.
-func componentGet(T: type, this: view ComponentTable(T), entity: view EntityId) ret T {
-  let idx: Int = componentIndexOf(this, entity: entity)
+func componentGet(T: type, this: view ComponentTable(T), entityId: view EntityId) ret T {
+  let idx: Int = componentIndexOf(this, entityId: entityId)
   var safeIdx: Int = idx
   if safeIdx < 0 {
     safeIdx = 0
@@ -152,9 +152,9 @@ func componentGet(T: type, this: view ComponentTable(T), entity: view EntityId) 
 # `componentGet` in hot paths or whenever an independent owned value is not
 # needed. The `view T` return makes Rae treat the binding as a borrow: no
 # auto-drop, no ownership claim, just a window into the world's memory.
-func componentView(T: type, this: view ComponentTable(T), entity: view EntityId) ret view T {
+func componentView(T: type, this: view ComponentTable(T), entityId: view EntityId) ret view T {
   unsafe {
-    let idx: Int = componentIndexOf(this, entity: entity)
+    let idx: Int = componentIndexOf(this, entityId: entityId)
     var safeIdx: Int = idx
     if safeIdx < 0 {
       safeIdx = 0
@@ -176,9 +176,9 @@ func componentView(T: type, this: view ComponentTable(T), entity: view EntityId)
 # `let x: mod T => call()` alias the callee's returned storage rather than a
 # temporary. Returns a ref to dense slot 0 for a MISSING entity (check
 # componentHas first), matching componentGet's documented compromise.
-func componentMod(T: type, this: mod ComponentTable(T), entity: view EntityId) ret mod T {
+func componentMod(T: type, this: mod ComponentTable(T), entityId: view EntityId) ret mod T {
   unsafe {
-    let idx: Int = componentIndexOf(this, entity: entity)
+    let idx: Int = componentIndexOf(this, entityId: entityId)
     var safeIdx: Int = idx
     if safeIdx < 0 {
       safeIdx = 0
@@ -197,16 +197,16 @@ func componentMod(T: type, this: mod ComponentTable(T), entity: view EntityId) r
   }
 }
 
-# Add or replace the component for `entity`. Internally aliases the
+# Add or replace the component for `entityId`. Internally aliases the
 # two inner lists so the mutation propagates on both targets.
 func componentSet(
   T: type
   this: mod ComponentTable(T)
-  entity: view EntityId
+  entityId: view EntityId
   data: own T
 ) {
   unsafe {
-    let existing: Int = componentIndexOf(T, this: this, entity: entity)
+    let existing: Int = componentIndexOf(T, this: this, entityId: entityId)
     if existing >= 0 {
       # Drop the existing slot before overwriting. Without this the
       # old component's heap-owning fields (Strings, Lists) leak
@@ -224,10 +224,10 @@ func componentSet(
     # New entity: append to all dense lists (denseStamps in lockstep) and
     # point its sparse slot at the new tail index.
     let newIdx: Int = this.denseEntities.length
-    appendEntityList(lst: this.denseEntities, value: entity)
+    appendEntityList(lst: this.denseEntities, value: entityId)
     this.denseData.add(value: data)
     appendIntList(lst: this.denseStamps, value: 0)
-    let key: Int = entity.index
+    let key: Int = entityId.index
     ensureIntSlots(lst: this.sparse, index: key)
     rae_ext_rae_buf_set(buf: this.sparse.data, index: key, value: newIdx)
     this.generation = this.generation + 1
@@ -235,16 +235,16 @@ func componentSet(
   }
 }
 
-# Swap-remove the component for `entity`. Order in the table is not
+# Swap-remove the component for `entityId`. Order in the table is not
 # preserved (no callers depend on it).
-func componentRemove(T: type, this: mod ComponentTable(T), entity: view EntityId) {
-  let idx: Int = componentIndexOf(T, this: this, entity: entity)
+func componentRemove(T: type, this: mod ComponentTable(T), entityId: view EntityId) {
+  let idx: Int = componentIndexOf(T, this: this, entityId: entityId)
   if idx < 0 {
     # Missing entity is a no-op; don't bump generation so consumers
     # aren't woken by spurious removes.
     ret
   }
-  let removedKey: Int = entity.index
+  let removedKey: Int = entityId.index
   let last: Int = this.denseEntities.length - 1
   let lastEntity: EntityId = entityListAt(lst: this.denseEntities, index: last)
   if idx is not last {
@@ -276,12 +276,12 @@ func componentTableGeneration(T: type, this: view ComponentTable(T)) pub ret Int
 }
 
 # Per-entity last-modified stamp (#270a): the `generation` at the last
-# set/mod of `entity`, or 0 if absent. Compare against the stamp a cache
-# last processed for `entity`; a higher value means it changed. New
+# set/mod of `entityId`, or 0 if absent. Compare against the stamp a cache
+# last processed for `entityId`; a higher value means it changed. New
 # entities always stamp >= 1, so a cache seeded at 0 treats them as dirty.
-func componentModStamp(T: type, this: view ComponentTable(T), entity: view EntityId) pub ret Int {
+func componentModStamp(T: type, this: view ComponentTable(T), entityId: view EntityId) pub ret Int {
   unsafe {
-    let idx: Int = componentIndexOf(this, entity: entity)
+    let idx: Int = componentIndexOf(this, entityId: entityId)
     if idx < 0 {
       ret 0
     }

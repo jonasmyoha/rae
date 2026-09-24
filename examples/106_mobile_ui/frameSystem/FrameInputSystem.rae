@@ -66,7 +66,7 @@ func frameInputSystem(
     let range: ScrollRange = scrollRootRange(
       world: world
       uiSystems: app.uiSystems
-      entity: frame.scrollTarget
+      entityId: frame.scrollTarget
     )
     tick.scrollOnThisScreen = range.active
     tick.scrollFloor = range.floor
@@ -74,10 +74,10 @@ func frameInputSystem(
     if isNone(this: frame.scrollTarget) {
       scrollFsm.scrollY = 0.0
     } else {
-      if componentHas(this: world.scrollStates, entity: frame.scrollTarget) {
+      if componentHas(this: world.scrollStates, entityId: frame.scrollTarget) {
         let activeScroll: ScrollState = componentGet(
           this: world.scrollStates
-          entity: frame.scrollTarget
+          entityId: frame.scrollTarget
         )
         scrollFsm.scrollY = activeScroll.y
       } else {

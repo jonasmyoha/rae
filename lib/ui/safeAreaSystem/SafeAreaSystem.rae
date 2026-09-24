@@ -23,7 +23,7 @@ func safeAreaSystem(world: mod UiWorld, uiSystems: mod UiSystems, insets: view I
     var i: Int = 0
     loop i < n {
       let e: EntityId = rae_ext_rae_buf_get(buf: alive.data, index: i)
-      if componentHas(this: world.safeAreas, entity: e) {
+      if componentHas(this: world.safeAreas, entityId: e) {
         # Idempotent: only write when the entity has no SafeInsets yet or
         # its stored value differs. `SafeInsets` is not a layout dirty
         # input (see layout.rae ifDirty), so an unconditional
@@ -31,8 +31,8 @@ func safeAreaSystem(world: mod UiWorld, uiSystems: mod UiSystems, insets: view I
         # keeps the component generation stable so any future tracking,
         # and the render caches, stay clean at idle.
         var changed: Bool = true
-        if componentHas(this: uiSystems.safeArea.safeInsets, entity: e) {
-          let cur: SafeInsets = componentGet(this: uiSystems.safeArea.safeInsets, entity: e)
+        if componentHas(this: uiSystems.safeArea.safeInsets, entityId: e) {
+          let cur: SafeInsets = componentGet(this: uiSystems.safeArea.safeInsets, entityId: e)
           if equals(a: cur.insets, b: insets) {
             changed = false
           }
@@ -41,7 +41,7 @@ func safeAreaSystem(world: mod UiWorld, uiSystems: mod UiSystems, insets: view I
           let payload: SafeInsets = {
             insets: Insets { l: insets.l, t: insets.t, r: insets.r, b: insets.b }
           }
-          componentSet(this: uiSystems.safeArea.safeInsets, entity: e, data: payload)
+          componentSet(this: uiSystems.safeArea.safeInsets, entityId: e, data: payload)
         }
       }
       i = i + 1

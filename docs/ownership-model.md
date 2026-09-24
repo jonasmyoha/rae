@@ -26,7 +26,7 @@ func attachChildren(world: mod UiWorld, parent: Int, kids: view List(Int)) {
   let copy: List(Int) = createList(Int)(initialCap: kids.length)
   ...
   let ch: Children = { ids: copy }
-  componentSet(this: world.childrens, entity: parent, data: ch)
+  componentSet(this: world.childrens, entityId: parent, data: ch)
 }
 ```
 
@@ -83,7 +83,7 @@ Meaning:
 Recognise `own T` as a parameter mode:
 
 ```rae
-func componentSet(T)(this: mod ComponentTable(T), entity: Int, data: own T)
+func componentSet(T)(this: mod ComponentTable(T), entityId: Int, data: own T)
 ```
 
 Meaning:
@@ -221,13 +221,13 @@ Only mark moved in **ownership-consuming contexts**:
 Change this:
 
 ```rae
-func componentSet(T)(this: mod ComponentTable(T), entity: Int, data: T)
+func componentSet(T)(this: mod ComponentTable(T), entityId: Int, data: T)
 ```
 
 to:
 
 ```rae
-func componentSet(T)(this: mod ComponentTable(T), entity: Int, data: own T)
+func componentSet(T)(this: mod ComponentTable(T), entityId: Int, data: own T)
 ```
 
 Because `componentSet` stores the component into the table and
@@ -250,7 +250,7 @@ later. For now, focus on preventing caller-scope double-free.
 
 ```rae
 let ch: Children = { ids: own copy }
-componentSet(this: world.childrens, entity: parent, data: ch)
+componentSet(this: world.childrens, entityId: parent, data: ch)
 ```
 
 Because `componentSet` has `data: own T`, the second line should

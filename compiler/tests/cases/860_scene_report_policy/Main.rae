@@ -57,7 +57,7 @@ func foreignScene() ret String {
 
 func shapeOf(world: view UiWorld, nodeId: view String) ret Shape {
   if let raw: Int = world.nodeIds.get(k: nodeId) {
-    ret componentGet(this: world.shapes, entity: id(v: raw))
+    ret componentGet(this: world.shapes, entityId: id(v: raw))
   }
   ret Shape.default()
 }
@@ -91,10 +91,10 @@ func main() {
   # The node with the unknown components still mounted with the ones it has.
   if let rootRaw: Int = world.nodeIds.get(k: "Root") {
     let root: EntityId = id(v: rootRaw)
-    let layout: Layout = componentGet(this: world.layouts, entity: root)
+    let layout: Layout = componentGet(this: world.layouts, entityId: root)
     log("Root Layout kind={layout.kind} gap={layout.gap} (unknown token kept the default)")
     log(
-      "Root has ComputedRect = {componentHas(this: uiSystems.layout.computedRects, entity: root)}"
+      "Root has ComputedRect = {componentHas(this: uiSystems.layout.computedRects, entityId: root)}"
     )
   }
 

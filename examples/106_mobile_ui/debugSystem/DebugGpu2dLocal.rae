@@ -256,10 +256,10 @@ func currentDebugFPS(debug: view DebugSystem) pub ret Float {
 func addDebugLayer(world: mod UiWorld, uiSystems: view UiSystems, debug: mod DebugSystem) pub {
   let hasAnchor: Bool = applyDebugAnchor(world: world, debug: debug)
   let button: EntityId = buildDebugButton(world: world, uiSystems: uiSystems, debug: debug)
-  setLayerById(world: world, entity: button, id: "debug")
+  setLayerById(world: world, entityId: button, id: "debug")
   if debug.menuOpen {
     let menu: EntityId = buildDebugMenuOverlay(world: world, uiSystems: uiSystems, debug: debug)
-    setLayerById(world: world, entity: menu, id: "debug")
+    setLayerById(world: world, entityId: menu, id: "debug")
   }
 }
 
@@ -332,9 +332,9 @@ func syncDebugWidgetStates(world: mod UiWorld, debug: view DebugSystem) pub {
   let n: Int = componentCount(this: world.actionBindings)
   var i: Int = 0
   loop i < n {
-    let entity: EntityId = componentEntityAt(this: world.actionBindings, i: i)
-    if componentHas(this: world.widgetIds, entity: entity) {
-      let wid: view WidgetId => componentView(this: world.widgetIds, entity: entity)
+    let entityId: EntityId = componentEntityAt(this: world.actionBindings, i: i)
+    if componentHas(this: world.widgetIds, entityId: entityId) {
+      let wid: view WidgetId => componentView(this: world.widgetIds, entityId: entityId)
       let debugKind: String = "debugToggle"
       let pillKind: String = "debugSwitchPill"
       let knobKind: String = "debugSwitchKnob"
@@ -350,13 +350,16 @@ func syncDebugWidgetStates(world: mod UiWorld, debug: view DebugSystem) pub {
         }
       }
       if isDebugToggle {
-        let bind: view ActionBinding => componentView(this: world.actionBindings, entity: entity)
+        let bind: view ActionBinding => componentView(
+          this: world.actionBindings
+          entityId: entityId
+        )
         let selected: Bool = selectedForDebugAction(
           world: world
           actionId: bind.actionId
           debug: debug
         )
-        setWidgetSelected(world: world, entity: entity, selected: selected)
+        setWidgetSelected(world: world, entityId: entityId, selected: selected)
       }
     }
     i = i + 1

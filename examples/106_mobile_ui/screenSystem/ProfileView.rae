@@ -69,20 +69,20 @@ func profileStatsSystem(
   let n: Int = componentCount(this: profileSystem.profileStats)
   var i: Int = 0
   loop i < n {
-    let entity: EntityId = componentEntityAt(this: profileSystem.profileStats, i: i)
+    let entityId: EntityId = componentEntityAt(this: profileSystem.profileStats, i: i)
     let binding: ProfileStat = componentDataAt(this: profileSystem.profileStats, i: i)
-    if componentHas(this: world.texts, entity: entity) {
+    if componentHas(this: world.texts, entityId: entityId) {
       let wanted: String = profileStatText(state: state, stat: binding.stat)
       # A by-value read (three tiny Texts): the table must not be written
       # while a view into one of its rows is live.
-      let current: Text = componentGet(this: world.texts, entity: entity)
+      let current: Text = componentGet(this: world.texts, entityId: entityId)
       if current.text is not wanted {
         let updated: Text = {
           text: wanted
           styleId: "{current.styleId}"
           wrapWidthMode: current.wrapWidthMode
         }
-        componentSet(this: world.texts, entity: entity, data: updated)
+        componentSet(this: world.texts, entityId: entityId, data: updated)
       }
     }
     i = i + 1
@@ -90,15 +90,15 @@ func profileStatsSystem(
 }
 
 # ----- AvatarSource system -------------------------------------------------
-func setActiveIfChanged(world: mod UiWorld, entity: view EntityId, active: view Bool) {
+func setActiveIfChanged(world: mod UiWorld, entityId: view EntityId, active: view Bool) {
   var current: Bool = true
-  if componentHas(this: world.actives, entity: entity) {
-    let a: Active = componentGet(this: world.actives, entity: entity)
+  if componentHas(this: world.actives, entityId: entityId) {
+    let a: Active = componentGet(this: world.actives, entityId: entityId)
     current = a.value
   }
   if current is not active {
     let flag: Active = { value: active }
-    componentSet(this: world.actives, entity: entity, data: flag)
+    componentSet(this: world.actives, entityId: entityId, data: flag)
   }
 }
 
@@ -117,21 +117,21 @@ func avatarSystem(
       let container: EntityId = componentEntityAt(this: profileSystem.avatarSources, i: i)
       let source: AvatarSource = componentDataAt(this: profileSystem.avatarSources, i: i)
       let loaded: Bool = textureHas(reg: reg, key: source.textureKey)
-      if componentHas(this: world.childrens, entity: container) {
-        let kids: view Children => componentView(this: world.childrens, entity: container)
+      if componentHas(this: world.childrens, entityId: container) {
+        let kids: view Children => componentView(this: world.childrens, entityId: container)
         var k: Int = 0
         loop k < kids.ids.length {
           let child: EntityId = rae_ext_rae_buf_get(buf: kids.ids.data, index: k)
           var isPhoto: Bool = false
-          if componentHas(this: world.sprites, entity: child) {
-            let sp: view Sprite => componentView(this: world.sprites, entity: child)
+          if componentHas(this: world.sprites, entityId: child) {
+            let sp: view Sprite => componentView(this: world.sprites, entityId: child)
             isPhoto = sp.textureKey is source.textureKey
           }
           var active: Bool = loaded
           if isPhoto is false {
             active = loaded is false
           }
-          setActiveIfChanged(world: world, entity: child, active: active)
+          setActiveIfChanged(world: world, entityId: child, active: active)
           k = k + 1
         }
       }

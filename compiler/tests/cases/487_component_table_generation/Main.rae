@@ -12,8 +12,8 @@ open ecs/Entity
 open ecs/ComponentTable
 
 # #814: a mod borrow must end before the table is mutated again — scope it here.
-func modBorrowOnly(tab: mod ComponentTable(Rect), entity: view EntityId) {
-  let m: mod Rect => componentMod(Rect, this: tab, entity: entity)
+func modBorrowOnly(tab: mod ComponentTable(Rect), entityId: view EntityId) {
+  let m: mod Rect => componentMod(Rect, this: tab, entityId: entityId)
 }
 
 func main() {
@@ -30,33 +30,33 @@ func main() {
   componentSet(
     Rect
     this: tab
-    entity: e1
+    entityId: e1
     data: r1
   )
   componentSet(
     Rect
     this: tab
-    entity: e2
+    entityId: e2
     data: r2
   )
   componentSet(
     Rect
     this: tab
-    entity: e3
+    entityId: e3
     data: r3
   )
   log("after-3-sets={componentTableGeneration(Rect, this: tab)}")
 
-  let got: Rect = componentGet(Rect, this: tab, entity: e1)
+  let got: Rect = componentGet(Rect, this: tab, entityId: e1)
   log("get-no-bump={componentTableGeneration(Rect, this: tab)}")
 
   # mod-borrow bumps eagerly even if caller only reads (borrow scoped in a helper, #814)
-  modBorrowOnly(tab: tab, entity: e2)
+  modBorrowOnly(tab: tab, entityId: e2)
   log("mod-bumps={componentTableGeneration(Rect, this: tab)}")
 
-  componentRemove(Rect, this: tab, entity: e1)
+  componentRemove(Rect, this: tab, entityId: e1)
   log("remove-bumps={componentTableGeneration(Rect, this: tab)}")
 
-  componentRemove(Rect, this: tab, entity: e99)
+  componentRemove(Rect, this: tab, entityId: e99)
   log("remove-missing-no-bump={componentTableGeneration(Rect, this: tab)}")
 }

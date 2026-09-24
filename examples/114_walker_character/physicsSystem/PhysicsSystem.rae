@@ -46,10 +46,10 @@ func spawnPhysicsBody(
   velocity: view Vec3
   gravityScale: view Float
 ) ret EntityId {
-  let entity: EntityId = gameWorldAddEntity(world: world)
+  let entityId: EntityId = gameWorldAddEntity(world: world)
   componentSet(
     this: world.transforms
-    entity: entity
+    entityId: entityId
     data: Transform3D {
       position: position
       rotation: Quat.identity()
@@ -58,30 +58,30 @@ func spawnPhysicsBody(
   )
   componentSet(
     this: world.physicsBodies
-    entity: entity
+    entityId: entityId
     data: PhysicsBody { velocity: velocity, gravityScale: gravityScale }
   )
-  ret entity
+  ret entityId
 }
 
 # Despawn a physics body: drop its components first (so a recycled index can
 # never read stale body/transform data), then free the entity slot.
-func despawnPhysicsBody(world: mod GameWorld, entity: view EntityId) {
+func despawnPhysicsBody(world: mod GameWorld, entityId: view EntityId) {
   # #760: one generic reflection sweep clears the body's row from every table
   # (physicsBodies, transforms, and any future one) so a recycled index reads no
   # stale data; then free the slot. Replaces the hand-listed per-table removes.
-  clearEntityComponents(world: world, entity: entity)
-  freeEntity(this: world.allocator, entity: entity)
+  clearEntityComponents(world: world, entityId: entityId)
+  freeEntity(this: world.allocator, entityId: entityId)
 }
 
 # One fixed step over every physics body: semi-implicit Euler (gravity into
 # velocity, velocity into position). Iterates the ECS table — a real system.
 func physicsStepWorld(world: mod GameWorld, fixedDt: view Float) {
   loop var i: Int = 0, i < componentCount(this: world.physicsBodies), ++i {
-    let entity: EntityId = componentEntityAt(this: world.physicsBodies, i: i)
-    let body: mod PhysicsBody => componentMod(this: world.physicsBodies, entity: entity)
+    let entityId: EntityId = componentEntityAt(this: world.physicsBodies, i: i)
+    let body: mod PhysicsBody => componentMod(this: world.physicsBodies, entityId: entityId)
     body.velocity.z = body.velocity.z + physicsGravity * body.gravityScale * fixedDt
-    let tf: mod Transform3D => componentMod(this: world.transforms, entity: entity)
+    let tf: mod Transform3D => componentMod(this: world.transforms, entityId: entityId)
     tf.position.x = tf.position.x + body.velocity.x * fixedDt
     tf.position.y = tf.position.y + body.velocity.y * fixedDt
     tf.position.z = tf.position.z + body.velocity.z * fixedDt

@@ -16,7 +16,7 @@ import Json
 # with the merge applied), then the BundleRefs record for the round-trip.
 func applyExpandedBag(
   world: mod UiWorld
-  entity: view EntityId
+  entityId: view EntityId
   local: view BundleSet
   doc: view JsonDoc
   bag: view JsonValue
@@ -43,7 +43,7 @@ func applyExpandedBag(
     )
     applyComponentByName(
       world: world
-      entity: entity
+      entityId: entityId
       name: name
       doc: merged
       val: Json.root(doc: merged)
@@ -68,36 +68,36 @@ func applyExpandedBag(
       refs.overridden.add(value: expanded.names.copyAtFallback(index: i, fallback: ""))
     }
   }
-  componentSet(this: world.bundleRefs, entity: entity, data: refs)
+  componentSet(this: world.bundleRefs, entityId: entityId, data: refs)
 }
 
 # Apply a bundle to a LIVE entity: the same expansion with no node bag, so
 # code-built UI (a debug menu) uses the authored bundles instead of listing
 # components by hand. Appends the name to the entity's BundleRefs.
-func applyBundle(world: mod UiWorld, entity: view EntityId, name: view String) pub {
+func applyBundle(world: mod UiWorld, entityId: view EntityId, name: view String) pub {
   let source: String = "\{\"bundles\":[{Json.quote(text: name)}]\}"
   let doc: JsonDoc = Json.parseJson(source: source)
   let bag: JsonValue = Json.root(doc: doc)
   let empty: BundleSet = createBundleSet()
   var previous: List(String) = List.create(String, cap: 4)
-  if componentHas(this: world.bundleRefs, entity: entity) {
-    let existing: view BundleRefs => componentView(this: world.bundleRefs, entity: entity)
+  if componentHas(this: world.bundleRefs, entityId: entityId) {
+    let existing: view BundleRefs => componentView(this: world.bundleRefs, entityId: entityId)
     loop let n: view String in existing.names {
       previous.add(value: "{n}")
     }
   }
   applyExpandedBag(
     world: world
-    entity: entity
+    entityId: entityId
     local: empty
     doc: doc
     bag: bag
     sceneId: "live"
-    nodeId: "{entity.index}"
+    nodeId: "{entityId.index}"
     skipPlacement: false
   )
   if previous.length > 0 {
-    let refs: mod BundleRefs => componentMod(this: world.bundleRefs, entity: entity)
+    let refs: mod BundleRefs => componentMod(this: world.bundleRefs, entityId: entityId)
     loop let n: view String in previous {
       refs.names.add(value: "{n}")
     }

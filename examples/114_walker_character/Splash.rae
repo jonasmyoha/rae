@@ -100,7 +100,7 @@ func splashStep(
   # The hero (always evaluated — the character the player is watching).
   let heroCtrl: ThirdPersonController = controllerOf(
     world: world
-    entity: characterSystem.heroEntity
+    entityId: characterSystem.heroEntity
   )
   if heroCtrl.moving {
     let heroDepth: Float = terrainWaterDepth(x: heroCtrl.position.x, y: heroCtrl.position.y)
@@ -116,7 +116,7 @@ func splashStep(
   # Every moving crowd member in water, strided so the pool is not swamped.
   loop var i: Int = 0, i < characterSystem.crowdEntities.length, ++i {
     if let member: EntityId = characterSystem.crowdEntities.copyAt(index: i) {
-      let ctrl: ThirdPersonController = componentGet(this: world.controllers, entity: member)
+      let ctrl: ThirdPersonController = componentGet(this: world.controllers, entityId: member)
       if ctrl.moving and (world.splashTick + i) % splashCrowdStride is 0 {
         let depth: Float = terrainWaterDepth(x: ctrl.position.x, y: ctrl.position.y)
         if depth > splashMinDepth {

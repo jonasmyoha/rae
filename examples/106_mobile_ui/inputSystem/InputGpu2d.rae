@@ -96,30 +96,30 @@ func sendScriptedTap(input: mod InputSystem) {
     actionId = "{name}"
   }
   log("[screen-seq] tap {actionId}")
-  eventSend(this: input.uiActions, value: UiAction { entity: noEntity(), actionId: actionId })
+  eventSend(this: input.uiActions, value: UiAction { entityId: noEntity(), actionId: actionId })
 }
 
 func pointInEntity(
   world: view UiWorld
   uiSystems: view UiSystems
-  entity: view EntityId
+  entityId: view EntityId
   x: view Float
   y: view Float
 ) ret Bool {
-  if componentHas(this: uiSystems.transform2d.worldTransforms, entity: entity) is false {
+  if componentHas(this: uiSystems.transform2d.worldTransforms, entityId: entityId) is false {
     ret false
   }
-  if componentHas(this: uiSystems.layout.computedRects, entity: entity) is false {
+  if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) is false {
     ret false
   }
   let wt: WorldTransform2D = componentGet(
     this: uiSystems.transform2d.worldTransforms
-    entity: entity
+    entityId: entityId
   )
-  if worldVisualOf(world: world, uiSystems: uiSystems, entity: entity).visible is false {
+  if worldVisualOf(world: world, uiSystems: uiSystems, entityId: entityId).visible is false {
     ret false
   }
-  let cr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: entity)
+  let cr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entityId: entityId)
   if x < wt.position.x {
     ret false
   }
@@ -138,13 +138,13 @@ func pointInEntity(
 func hitTestEntity(
   world: view UiWorld
   uiSystems: view UiSystems
-  entity: view EntityId
+  entityId: view EntityId
   x: view Float
   y: view Float
 ) ret EntityId {
   unsafe {
-    if componentHas(this: world.childrens, entity: entity) {
-      let ch: view Children => componentView(this: world.childrens, entity: entity)
+    if componentHas(this: world.childrens, entityId: entityId) {
+      let ch: view Children => componentView(this: world.childrens, entityId: entityId)
       let n: Int = ch.ids.length
       var i: Int = n - 1
       loop i >= 0 {
@@ -152,7 +152,7 @@ func hitTestEntity(
         let hit: EntityId = hitTestEntity(
           world: world
           uiSystems: uiSystems
-          entity: cid
+          entityId: cid
           x: x
           y: y
         )
@@ -163,15 +163,15 @@ func hitTestEntity(
       }
     }
 
-    if componentHas(this: world.onClicks, entity: entity) {
+    if componentHas(this: world.onClicks, entityId: entityId) {
       if pointInEntity(
         world: world
         uiSystems: uiSystems
-        entity: entity
+        entityId: entityId
         x: x
         y: y
       ) {
-        ret entity
+        ret entityId
       }
     }
     ret inputNoEntity
@@ -190,11 +190,11 @@ func hitTest(
     var i: Int = n - 1
     loop i >= 0 {
       let e: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: i)
-      if componentHas(this: world.layerRoots, entity: e) is false {
+      if componentHas(this: world.layerRoots, entityId: e) is false {
         let hit: EntityId = hitTestEntity(
           world: world
           uiSystems: uiSystems
-          entity: e
+          entityId: e
           x: x
           y: y
         )
@@ -276,10 +276,10 @@ func updateInputSystem(
     log("[input] release at ({mx},{my}) -> hit={hit.index} pressed={input.pressedEntity.index}")
     if isNone(this: hit) is false {
       if hit is input.pressedEntity {
-        if componentHas(this: world.onClicks, entity: hit) {
-          let oc: view OnClick => componentView(this: world.onClicks, entity: hit)
+        if componentHas(this: world.onClicks, entityId: hit) {
+          let oc: view OnClick => componentView(this: world.onClicks, entityId: hit)
           log("[input] fire {oc.actionId} on entity {hit.index}")
-          eventSend(this: input.uiActions, value: UiAction { entity: hit, actionId: oc.actionId })
+          eventSend(this: input.uiActions, value: UiAction { entityId: hit, actionId: oc.actionId })
         } else {
           log("[input] release matched press but entity has no OnClick")
         }

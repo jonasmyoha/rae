@@ -60,11 +60,11 @@ func emptyFieldView() ret FieldView {
 func rectFieldValue(
   world: view UiWorld
   uiSystems: view UiSystems
-  entity: view EntityId
+  entityId: view EntityId
   field: view RectField
 ) ret Float {
-  if componentHas(this: world.rects, entity: entity) {
-    let rect: view Rect => componentView(this: world.rects, entity: entity)
+  if componentHas(this: world.rects, entityId: entityId) {
+    let rect: view Rect => componentView(this: world.rects, entityId: entityId)
     match field {
       case RectField.x {
         ret rect.position.x
@@ -81,10 +81,10 @@ func rectFieldValue(
     }
   }
   if field is RectField.w or field is RectField.h {
-    if componentHas(this: uiSystems.layout.computedRects, entity: entity) {
+    if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) {
       let computed: ComputedRect = componentGet(
         this: uiSystems.layout.computedRects
-        entity: entity
+        entityId: entityId
       )
       if field is RectField.w {
         ret computed.size.x
@@ -93,10 +93,10 @@ func rectFieldValue(
     }
     ret 0.0
   }
-  if componentHas(this: uiSystems.transform2d.worldTransforms, entity: entity) {
+  if componentHas(this: uiSystems.transform2d.worldTransforms, entityId: entityId) {
     let transform: WorldTransform2D = componentGet(
       this: uiSystems.transform2d.worldTransforms
-      entity: entity
+      entityId: entityId
     )
     if field is RectField.x {
       ret transform.position.x
@@ -117,12 +117,12 @@ func rectFieldValue(
 func rectFieldDriver(
   world: view UiWorld
   uiSystems: view UiSystems
-  entity: view EntityId
+  entityId: view EntityId
   field: view RectField
 ) ret String {
   if field is RectField.w or field is RectField.h {
-    if componentHas(this: world.sizes, entity: entity) {
-      let size: view Size => componentView(this: world.sizes, entity: entity)
+    if componentHas(this: world.sizes, entityId: entityId) {
+      let size: view Size => componentView(this: world.sizes, entityId: entityId)
       var mode: SizeMode = size.w.mode
       if field is RectField.h {
         mode = size.h.mode
@@ -138,19 +138,19 @@ func rectFieldDriver(
   }
   var driver: String = ""
   var parent: EntityId = noEntity()
-  if componentHas(this: uiSystems.hierarchy.parents, entity: entity) {
-    parent = componentGet(this: uiSystems.hierarchy.parents, entity: entity).parent
+  if componentHas(this: uiSystems.hierarchy.parents, entityId: entityId) {
+    parent = componentGet(this: uiSystems.hierarchy.parents, entityId: entityId).parent
   }
-  if isNone(this: parent) is false and componentHas(this: world.layouts, entity: parent) {
-    let layout: view Layout => componentView(this: world.layouts, entity: parent)
+  if isNone(this: parent) is false and componentHas(this: world.layouts, entityId: parent) {
+    let layout: view Layout => componentView(this: world.layouts, entityId: parent)
     if layout.kind is not LayoutType.none {
       # An OWNED copy, not the literal: the layout+align case reassigns
       # `driver` below, and reassigning over a static literal frees it.
       driver = stringCopy(string: "layout")
     }
   }
-  if componentHas(this: world.aligns, entity: entity) {
-    let align: view Align => componentView(this: world.aligns, entity: entity)
+  if componentHas(this: world.aligns, entityId: entityId) {
+    let align: view Align => componentView(this: world.aligns, entityId: entityId)
     var aligned: Bool = align.hasX
     if field is RectField.y {
       aligned = align.hasY
@@ -191,20 +191,20 @@ func selectionRectField(
   var common: Int = 0
   var driver: String = ""
   var driverAgrees: Bool = true
-  loop let entity: view EntityId in selection {
-    if isNone(this: entity) {
+  loop let entityId: view EntityId in selection {
+    if isNone(this: entityId) {
       continue
     }
     let value: Int = rectFieldValue(
       world: world
       uiSystems: uiSystems
-      entity: entity
+      entityId: entityId
       field: field
     ).toInt()
     let entityDriver: String = rectFieldDriver(
       world: world
       uiSystems: uiSystems
-      entity: entity
+      entityId: entityId
       field: field
     )
     if seen is false {
@@ -255,8 +255,8 @@ func applyRectField(
   value: view Float
 ) ret Int {
   var written: Int = 0
-  loop let entity: view EntityId in selection {
-    if isNone(this: entity) {
+  loop let entityId: view EntityId in selection {
+    if isNone(this: entityId) {
       continue
     }
     var next: Rect = {
@@ -264,13 +264,13 @@ func applyRectField(
         x: rectFieldValue(
           world: world
           uiSystems: uiSystems
-          entity: entity
+          entityId: entityId
           field: RectField.x
         )
         y: rectFieldValue(
           world: world
           uiSystems: uiSystems
-          entity: entity
+          entityId: entityId
           field: RectField.y
         )
       }
@@ -278,13 +278,13 @@ func applyRectField(
         x: rectFieldValue(
           world: world
           uiSystems: uiSystems
-          entity: entity
+          entityId: entityId
           field: RectField.w
         )
         y: rectFieldValue(
           world: world
           uiSystems: uiSystems
-          entity: entity
+          entityId: entityId
           field: RectField.h
         )
       }
@@ -303,7 +303,7 @@ func applyRectField(
         next.size.y = value
       }
     }
-    componentSet(this: world.rects, entity: entity, data: next)
+    componentSet(this: world.rects, entityId: entityId, data: next)
     written = written + 1
   }
   ret written
