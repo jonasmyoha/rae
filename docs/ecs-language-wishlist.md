@@ -57,7 +57,7 @@ a feature that is not already listed here.
   An optional leading `EntityId` binding receives the entity; the rest map
   positionally to the joined tables and must be `mod` (writes through, bumps the
   change stamp) or `view` (never dirties). Works over `query2`..`query5` and
-  `forEach`; nested query loops each own their own result. Chosen over keeping the
+  `query`; nested query loops each own their own result. Chosen over keeping the
   explicit accessor form because a language that bets on ECS should make its most
   common operation its cleanest line — and it costs nothing at runtime: it is PURE
   SUGAR resolved in the parser (hoisted result list + the accessor aliases systems

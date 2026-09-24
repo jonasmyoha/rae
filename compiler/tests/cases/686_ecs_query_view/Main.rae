@@ -2,8 +2,8 @@ open ecs/Entity
 open ecs/ComponentTable
 open ecs/Query
 
-# #709: single-table dense forEach + read-only view query variants.
-# forEach walks one table's whole dense set; the View accessors read a matched
+# #709: single-table dense query + read-only view query variants.
+# query walks one table's whole dense set; the View accessors read a matched
 # component through a `view` ref WITHOUT bumping the table generation (unlike the
 # mutating queryModAt), so a read-only pass leaves change-detection untouched.
 type Position {
@@ -32,12 +32,12 @@ func main() {
   componentSet(this: vel, entityId: e3, data: Velocity { v: 7 })
   componentSet(this: tag, entityId: e2, data: Tag { t: 9 })
 
-  # Dense single-table forEach over pos: sum every x through a view ref.
-  let all: List(QueryMatch) = forEach(table: pos)
-  log("forEach count: {all.length}")
+  # Dense single-table query over pos: sum every x through a view ref.
+  let all: List(QueryMatch) = query(table: pos)
+  log("query count: {all.length}")
   var sum: Int = 0
   loop let row: view QueryMatch in all {
-    let position: view Position => forEachView(table: pos, hit: row)
+    let position: view Position => queryView(table: pos, hit: row)
     sum = sum + position.x
   }
   log("pos sum: {sum}")
