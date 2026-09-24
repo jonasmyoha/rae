@@ -646,13 +646,21 @@ generated field row now carries where its value came from
 | tag | meaning |
 |---|---|
 | *(none)* | authored, and the live value still equals what the author wrote |
-| `· was <x>` | the author wrote `<x>` here and the live value DIFFERS |
+| `· from <x>` | the authored spelling decodes to this typed value (for example, a theme token or hex colour) |
+| `· changed from <x>` | the live value differs from a fresh decode of what the author wrote |
 | `· computed` | the component is absent from this node's authored bag — nothing in the file put it here |
 
-`Name: label=PlayButton · computed` is the loader's own doing; `gap=16 · was
-spaceS` is a theme token resolved to a number. The two states the task cared
-about — authored-but-overridden versus purely computed — are different tags,
-and the overridden one names the authored value rather than merely flagging it.
+`Name: label=PlayButton · computed` is the loader's own doing; `gap=16 · from
+spaceS` is a theme token resolved to a number, and a changed gap would read
+`gap=24 · changed from spaceS`. Hex colours use the same rule: an authored
+`accent` or `#00000000` string is a resolution when it produces the current
+`RgbaColor`, not an overwrite.
+
+The inspector owns one reference `UiWorld` freshly decoded with the active
+theme on each successful document load. Generated component rows compare
+their typed live field against that reference, so changing the selection does
+not mount another world or repeat token resolution. The save path uses the
+same fresh-decode contract for preserving authored spellings.
 
 **What Rae can and cannot answer.** WHICH SYSTEM wrote a value is *not*
 available: `ComponentTable` carries a table-level `generation` and per-entity
@@ -675,8 +683,8 @@ Three limits, deliberate:
 - **A node not in the document's scene gets no tag at all.** Sub-scene nodes
   live in another file and `SceneScope` is never populated, so the module stays
   silent rather than claiming `computed` about a node it simply cannot see.
-  Nested authored values (an `Insets`) are likewise reported as authored but
-  not compared — comparing those needs a decode, which is the save path's job.
+  Nested authored values are compared through their freshly decoded typed Rae
+  value; when unchanged they stay quiet.
 
 ## Component widgets are generated from reflection (#24323144)
 
