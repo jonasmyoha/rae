@@ -31,5 +31,21 @@ for SAMPLE in MainMenu Settings CardStrip Coverage SelfContained split/Page; do
     || { echo "$SAMPLE mounted with diagnostics:"; grep '\[ui-editor\]' "$TMP/$NAME.log"; exit 1; }
   python3 compiler/tools/assert_bmp_diff.py --convert "$TMP/$NAME.bmp" "$OUT_DIR/$NAME.png"
 done
+
+# The marquee is transient chrome, so a dedicated headless hook holds it over
+# the Start button for one reference frame. The ordinary MainMenu reference
+# remains the idle editor.
+env RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
+RAE_UI_EDITOR_ROOT="examples/121_ui_editor/assets/samples" \
+RAE_UI_EDITOR_TEST_MARQUEES="preview:PlayButton" \
+RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$TMP/Marquee.bmp" \
+perl -e 'alarm shift; exec @ARGV' 120 \
+  compiler/bin/rae run --project examples/121_ui_editor examples/121_ui_editor/Main.rae \
+  > "$TMP/Marquee.log" 2>&1 \
+  || { echo "marquee render failed:"; grep -v '^\[present\]' "$TMP/Marquee.log" | tail -20; exit 1; }
+grep -qF "[ui-editor] marquee preview:PlayButton -> none" "$TMP/Marquee.log" \
+  || { echo "marquee preview did not run:"; grep '\[ui-editor\]' "$TMP/Marquee.log"; exit 1; }
+python3 compiler/tools/assert_bmp_diff.py --convert "$TMP/Marquee.bmp" "$OUT_DIR/Marquee.png"
+
 rm -rf "$TMP"
 echo "references written to $OUT_DIR"

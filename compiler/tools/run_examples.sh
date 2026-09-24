@@ -366,6 +366,41 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             echo "  canvas selection failed:"
             cat "$TMP_OUT/render-clicks.log" "$TMP_OUT/render-deselect.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
           fi
+          # Empty-canvas drag marquee (#82302705). The scripted band uses the
+          # same begin/move/finish functions as live input and every result
+          # still passes through applySelect. It pins all four modifier modes
+          # plus the four-pixel slop: `small` must preserve the Play group.
+          if (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
+             RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=1200 \
+             RAE_UI_EDITOR_TEST_MARQUEES="PlayButton small shift:ContinueButton cmd:PlayButton alt:ContinueButton" \
+             perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-marquee.log" 2>&1 \
+             && grep -qF "marquee PlayButton -> PlayButton,PlayIcon,PlayLabel" "$TMP_OUT/render-marquee.log" \
+             && grep -qF "marquee small -> PlayButton,PlayIcon,PlayLabel" "$TMP_OUT/render-marquee.log" \
+             && grep -qF "marquee shift:ContinueButton -> PlayButton,PlayIcon,PlayLabel,ContinueButton,ContinueLabel" "$TMP_OUT/render-marquee.log" \
+             && grep -qF "marquee cmd:PlayButton -> ContinueButton,ContinueLabel" "$TMP_OUT/render-marquee.log" \
+             && grep -qF "marquee alt:ContinueButton -> none" "$TMP_OUT/render-marquee.log"; then
+            :
+          else
+            UI_EDITOR_OK=0
+            echo "  canvas marquee selection failed:"
+            cat "$TMP_OUT/render-marquee.log" 2>/dev/null | grep -av '^\[present\]' | sed 's/^/    /'
+          fi
+          # The rubber band itself is authored chrome, pinned as pixels while
+          # the preview hook holds it over PlayButton for one frame.
+          SCREENSHOT="$TMP_OUT/ui-editor-marquee.bmp"
+          if (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
+             RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=1200 \
+             RAE_UI_EDITOR_TEST_MARQUEES="preview:PlayButton" RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
+             perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-marquee-preview.log" 2>&1 \
+             && python3 tools/assert_bmp_diff.py "$SCREENSHOT" \
+                  "../examples/121_ui_editor/references/Marquee.png" \
+                  --skip-size-mismatch > "$TMP_OUT/screenshot-marquee.log" 2>&1; then
+            :
+          else
+            UI_EDITOR_OK=0
+            echo "  canvas marquee chrome failed:"
+            cat "$TMP_OUT/render-marquee-preview.log" "$TMP_OUT/screenshot-marquee.log" 2>/dev/null | grep -av '^\[present\]' | sed 's/^/    /'
+          fi
           # The inspector is MULTI-SELECTION only (#82314313): it renders the
           # COMPOSITE of the whole selection, and n=1 is that same code path
           # with one member rather than a separate single-selection mode.
@@ -835,7 +870,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/render-save.log" "$TMP_OUT/render-saved.log" "$TMP_OUT/screenshot-saved.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
           fi
           if [ "$UI_EDITOR_OK" = "1" ]; then
-            echo "PASS: $EXAMPLE_NAME (7 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select, composite multi-selection inspector, generated component widgets, value provenance, component add/remove/filter, select parent + identity, hierarchy collapse/expand, selected-row plate, row labels + tree filter, canvas selection gestures, click-through cycling, hierarchy multi-selection, Rect widget multi-select read+write, Rect text inputs + lock, .raepack project open + switch, file picker, camera zoom, outline pools, save path)"
+            echo "PASS: $EXAMPLE_NAME (7 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select, composite multi-selection inspector, generated component widgets, value provenance, component add/remove/filter, select parent + identity, hierarchy collapse/expand, selected-row plate, row labels + tree filter, canvas click + marquee selection gestures, click-through cycling, hierarchy multi-selection, Rect widget multi-select read+write, Rect text inputs + lock, .raepack project open + switch, file picker, camera zoom, outline pools, save path)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (ui editor sample gate)"
