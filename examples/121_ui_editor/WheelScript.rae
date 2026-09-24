@@ -1,0 +1,150 @@
+# WheelScript — the headless driver for the scroll wheel.
+#
+# One wheel notch must reach exactly ONE consumer: over the hierarchy it
+# scrolls the list, over the canvas it zooms, over the inspector's fields it
+# does nothing. This replays scripted notches through the lib router
+# (`routeUiWheel`, the same call `updateUiInput` makes with the device delta)
+# and then lets every wheel reader of a live frame see the result, so a reader
+# that still took the wheel without being routed to would show up in the log.
+#
+#   RAE_UI_EDITOR_TEST_WHEEL="TreePanel:-3 EditArea:2 InspectorPanel:1"
+#
+# A step is `<chrome nodeId>:<delta>`; the notch lands in the middle of that
+# chrome node (looked up in the "chrome" page). Each logs one line:
+#
+#   [ui-editor] wheel TreePanel -3: routed TreeList zoom 100->100 tree 0->-144
+import String
+open ui/Ecs
+open ui/Components
+open ui/UiSystems
+open ui/inputSystem/InputSystem
+open ui/scrollRootSystem/ScrollRootSystem
+open ecs/Entity
+open ecs/ComponentTable
+
+func scrollPositionOf(world: view UiWorld, entity: view EntityId) ret Int {
+  if isNone(this: entity) or componentHas(this: world.scrollStates, entity: entity) is false {
+    ret 0
+  }
+  ret componentGet(this: world.scrollStates, entity: entity).y.toInt()
+}
+
+func runTestWheelStep(
+  cameraSystem: mod CameraSystem
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  chromeSystem: mod ChromeSystem
+  area: view EditAreaRect
+  step: view String
+) {
+  let colon: Int = step.indexOf(sub: ":")
+  if colon <= 0 {
+    log("[ui-editor] wheel: expected <nodeId>:<delta>, got {step}")
+    ret
+  }
+  let nodeId: String = step.sub(start: 0, len: colon)
+  let delta: Float = step.sub(start: colon + 1, len: step.length() - colon - 1).toFloat()
+  var node: EntityId = noEntity()
+  if let index: Int = findNodeInPage(world: world, pageId: "chrome", nodeId: nodeId) {
+    node = nodeEntity(world: world, index: index)
+  }
+  let center: ClickPoint = nodeCenterOf(uiSystems: uiSystems, entity: node)
+  if isNone(this: node) or center.ok is false {
+    log("[ui-editor] wheel: no on-screen chrome node named {nodeId}")
+    ret
+  }
+  var input: UiInput = createUiInput()
+  input.pointer.x = center.x
+  input.pointer.y = center.y
+  routeUiWheel(
+    input: input
+    world: world
+    uiSystems: uiSystems
+    wheel: delta
+  )
+  let treeList: EntityId = editorListEntity(
+    chromeSystem: chromeSystem
+    world: world
+    source: EditorListSource.hierarchy
+  )
+  let componentList: EntityId = editorListEntity(
+    chromeSystem: chromeSystem
+    world: world
+    source: EditorListSource.components
+  )
+  let zoomBefore: Int = (cameraOf(cameraSystem: cameraSystem, world: world).zoom * 100.0 + 0.5).toInt()
+  let treeBefore: Int = scrollPositionOf(world: world, entity: treeList)
+  let componentsBefore: Int = scrollPositionOf(world: world, entity: componentList)
+  # Every wheel reader a live frame runs, in the frame's order.
+  updateScrollRoot(
+    world: world
+    uiSystems: uiSystems
+    entity: componentList
+    input: input
+  )
+  updateScrollRoot(
+    world: world
+    uiSystems: uiSystems
+    entity: treeList
+    input: input
+  )
+  cameraInputSystem(
+    cameraSystem: cameraSystem
+    world: world
+    chromeSystem: chromeSystem
+    area: area
+    input: input
+  )
+  let zoomAfter: Int = (cameraOf(cameraSystem: cameraSystem, world: world).zoom * 100.0 + 0.5).toInt()
+  let treeAfter: Int = scrollPositionOf(world: world, entity: treeList)
+  let componentsAfter: Int = scrollPositionOf(world: world, entity: componentList)
+  # The chrome's nodes carry no NodeId component (the page map holds them), so
+  # name the three consumers the editor has rather than print an entity index.
+  var routed: String = nodeIdOf(world: world, entity: input.wheelTarget)
+  if isNone(this: input.wheelTarget) {
+    routed = "none"
+  } else if input.wheelTarget is treeList {
+    routed = "TreeList"
+  } else if input.wheelTarget is componentList {
+    routed = "ComponentList"
+  } else if input.wheelTarget is editAreaEntity(chromeSystem: chromeSystem) {
+    routed = "EditArea"
+  }
+  log(
+    "[ui-editor] wheel {nodeId} {delta.toInt()}: routed {routed} zoom {zoomBefore}->{zoomAfter} tree {treeBefore}->{treeAfter} components {componentsBefore}->{componentsAfter}"
+  )
+}
+
+func runTestWheel(
+  cameraSystem: mod CameraSystem
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  chromeSystem: mod ChromeSystem
+  area: view EditAreaRect
+  script: view String
+) {
+  if script.length() is 0 {
+    ret
+  }
+  var rest: String = "{script}"
+  loop rest.length() > 0 {
+    let space: Int = rest.indexOf(sub: " ")
+    var step: String = "{rest}"
+    if space >= 0 {
+      step = rest.sub(start: 0, len: space)
+      rest = rest.sub(start: space + 1, len: rest.length() - space - 1)
+    } else {
+      rest = ""
+    }
+    if step.length() > 0 {
+      runTestWheelStep(
+        cameraSystem: cameraSystem
+        world: world
+        uiSystems: uiSystems
+        chromeSystem: chromeSystem
+        area: area
+        step: step
+      )
+    }
+  }
+}

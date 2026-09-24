@@ -452,6 +452,54 @@ changing one without the other silently re-introduces the offset — and the
 reference screenshots, which frame the whole window, will shift by exactly
 half the difference.
 
+## One wheel notch, one consumer
+
+Scrolling the hierarchy used to zoom the canvas at the same time. Two
+systems read the device's per-frame wheel delta (`Gpu2d.wheelMove()`) on
+their own: the lib `updateScrollRoot` scrolled any `ScrollRoot` the pointer
+was inside, and the editor camera zoomed on any wheel at all. Each was fine on
+its own; together they broadcast one notch to both.
+
+The fix is in the lib, not in the editor: the wheel is **routed**.
+`updateUiInput` (lib/ui/inputSystem) calls `routeUiWheel` once per frame,
+which stores the delta on `UiInput.wheel` and the ONE entity that takes it on
+`UiInput.wheelTarget`. The target is the nearest wheel consumer on the path to
+the topmost node under the pointer. A consumer is a `ScrollRoot` (its window
+is its parent's box) or a node tagged with the new lib component
+`WheelTarget {}` (lib/ui/InputComponents.rae). The walk follows reverse paint
+order, like the click hit test. Two rules keep it honest:
+
+- a subtree that paints or takes clicks under the pointer **blocks** what
+  is painted below it, so a popup that consumes nothing swallows the notch
+  instead of letting it fall through;
+- a clipping node (`Overflow: Clip`) hides its subtree outside its box. Tree
+  rows scrolled out of the panel cannot catch the wheel over the panel next
+  to them.
+
+Systems read their share with `uiWheelFor(input, entity)`, which is the delta
+if the wheel was routed to `entity` and 0 otherwise. `updateScrollRoot` uses
+it for the root it steps. The editor authors `"WheelTarget": {}` on its
+`EditArea`, and `cameraInputSystem` zooms by
+`uiWheelFor(input, editAreaEntity(...))`. So over the hierarchy the list
+scrolls, over the canvas it zooms, and over the inspector's fields nothing
+happens. With the chrome hidden, the canvas is the whole window and every
+notch zooms. An overlay drawn outside the world (the debug overlay) drops the
+notch, just as it drops the press.
+
+Tests: `compiler/tests/cases/910_ui_wheel_routing` runs the router on a
+hand-built world (list / overlay / clipped row / canvas / popup / idle). Each
+of the rules above was sabotage-checked against it. The editor gate replays
+`RAE_UI_EDITOR_TEST_WHEEL="TreePanel:-3 EditArea:2 InsWidgets:-1"`
+(WheelScript.rae) through `routeUiWheel` and then every wheel reader a frame
+runs. It fails with exactly the reported bug if the camera goes back to
+reading the raw delta.
+
+Not migrated yet: the 3D orbit cameras (`lib/app3d/CameraRig`, 109/110/115)
+and 106's own scroll code still read `Gpu2d.wheelMove()` directly. Each of
+those apps has a single wheel reader, so nothing double-consumes today. When
+one of them gains a UI panel that scrolls, move its camera onto
+`uiWheelFor`.
+
 ## What a hierarchy row says (#89663819)
 
 A row reads `Name - Kind`, plus a value preview where one exists, so a node

@@ -353,6 +353,14 @@ func runApp(app: mod App) ret Int {
     scene: app.document.scene
     script: app.testComponent
   )
+  runTestWheel(
+    cameraSystem: app.cameraSystem
+    world: app.world
+    uiSystems: app.uiSystems
+    chromeSystem: app.chromeSystem
+    area: editArea
+    script: app.testWheel
+  )
   # The scripted hooks above may have changed the selection AFTER the boot
   # layout, and the loop's own list/layout pass is gated on `changed`, which
   # a scripted hook does not set. Run them once more here so the re-bound
@@ -416,6 +424,8 @@ func runApp(app: mod App) ret Int {
     if overlayTookPointer or app.debugOverlay.open {
       eventClear(UiAction, this: app.world.uiActions)
       input.pressedEntity = noEntity()
+      input.wheel = 0.0
+      input.wheelTarget = noEntity()
       changed = true
     }
     let hadEvents: Bool = uiActionCount(world: app.world) > 0
@@ -438,6 +448,7 @@ func runApp(app: mod App) ret Int {
       world: app.world
       chromeSystem: app.chromeSystem
       area: editArea
+      input: input
     ) {
       changed = true
     }

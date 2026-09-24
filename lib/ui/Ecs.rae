@@ -15,6 +15,7 @@ open ecs/hierarchySystem/HierarchySystem
 # Only raylib-free MSDF data types; paint code stays out of UiWorld.
 import ui/MsdfState
 open ui/BindingComponents
+open ui/InputComponents
 open collections/StringMap
 
 # One semantic UI action produced by the input system when a click resolves to
@@ -93,6 +94,7 @@ type UiWorld {
   scrollRoots: ComponentTable(ScrollRoot)
   scrollStates: ComponentTable(ScrollState)
   scrollDrags: ComponentTable(ScrollDrag)
+  wheelTargets: ComponentTable(WheelTarget)
   widgetIds: ComponentTable(WidgetId)
   widgetStates: ComponentTable(WidgetState)
   dataDependencies: ComponentTable(DataDependency)
@@ -264,6 +266,7 @@ func createUiWorld() ret UiWorld {
     scrollRoots: ComponentTable.create(ScrollRoot)
     scrollStates: ComponentTable.create(ScrollState)
     scrollDrags: ComponentTable.create(ScrollDrag)
+    wheelTargets: ComponentTable.create(WheelTarget)
     widgetIds: ComponentTable.create(WidgetId)
     widgetStates: ComponentTable.create(WidgetState)
     dataDependencies: ComponentTable.create(DataDependency)
