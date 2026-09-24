@@ -251,6 +251,26 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             echo "  nested sub-scene sample failed:"
             cat "$TMP_OUT/render-NestedPage.log" "$TMP_OUT/screenshot-NestedPage.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
           fi
+          # Hover glow (Shadow.hoverOpacity + the ButtonSystem fade): hovering
+          # the Open pill once must brighten its glow — the frame differs from
+          # the un-hovered MainMenu shot above, and only by the glow.
+          HOVERED="$TMP_OUT/ui-editor-MainMenu-hover.bmp"
+          if (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
+             RAE_UI_EDITOR_ROOT="examples/121_ui_editor/assets/samples" \
+             RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=1500 RAE_UI_EDITOR_TEST_HOVER=OpenPill \
+             RAE_GPU2D_SCREENSHOT="$HOVERED" \
+             perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-hover.log" 2>&1 \
+             && grep -qF '[ui-editor] hover OpenPill' "$TMP_OUT/render-hover.log" \
+             && ! python3 tools/assert_bmp_diff.py "$TMP_OUT/ui-editor-MainMenu.bmp" "$HOVERED" --max-diff-pct 0.02 \
+                > "$TMP_OUT/hover-diff.log" 2>&1 \
+             && python3 tools/assert_bmp_diff.py "$TMP_OUT/ui-editor-MainMenu.bmp" "$HOVERED" --max-diff-pct 1.0 \
+                >> "$TMP_OUT/hover-diff.log" 2>&1; then
+            :
+          else
+            UI_EDITOR_OK=0
+            echo "  hover glow check failed (Open pill hovered vs rest):"
+            cat "$TMP_OUT/render-hover.log" "$TMP_OUT/hover-diff.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
+          fi
           # Wheel routing: one notch reaches ONE consumer (lib routeUiWheel +
           # WheelTarget on the EditArea). Over the hierarchy it scrolls the tree
           # and must NOT zoom the canvas; over the canvas it zooms and scrolls
@@ -942,7 +962,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/render-save.log" "$TMP_OUT/render-saved.log" "$TMP_OUT/screenshot-saved.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
           fi
           if [ "$UI_EDITOR_OK" = "1" ]; then
-            echo "PASS: $EXAMPLE_NAME (7 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select, composite multi-selection inspector, generated component widgets, value provenance, component add/remove/filter, select parent + identity, hierarchy collapse/expand, selected-row plate, row labels + tree filter, canvas click + marquee selection gestures, click-through cycling, hierarchy multi-selection, Rect widget multi-select read+write, Rect text inputs + lock, wheel routing, .raepack project open + switch, file picker, camera zoom, outline pools, save path)"
+            echo "PASS: $EXAMPLE_NAME (7 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select, composite multi-selection inspector, generated component widgets, value provenance, component add/remove/filter, select parent + identity, hierarchy collapse/expand, selected-row plate, row labels + tree filter, canvas click + marquee selection gestures, click-through cycling, hierarchy multi-selection, Rect widget multi-select read+write, Rect text inputs + lock, wheel routing, hover glow, .raepack project open + switch, file picker, camera zoom, outline pools, save path)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (ui editor sample gate)"

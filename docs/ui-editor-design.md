@@ -500,6 +500,39 @@ those apps has a single wheel reader, so nothing double-consumes today. When
 one of them gains a UI panel that scrolls, move its camera onto
 `uiWheelFor`.
 
+## Hover glows fade, then the editor sleeps
+
+Every top-bar button glows under the pointer. The icon buttons and the quiet
+pills use a `Shadow` with `hoverOnly: true`, which is invisible at rest.
+`Open...` is the primary button, so its glow is always on (opacity 0.22), and
+it used to look the same whether hovered or not. `Shadow` now has a second
+opacity, `hoverOpacity`. A value above 0 keeps the shadow at `opacity` at rest
+and brightens it to `hoverOpacity` under the pointer. `Open...` authors
+`"hoverOpacity": 0.6`. This is a scene parameter, so no button code knows
+about it.
+
+The change between rest and hover is animated. `buttonHoverFadeUpdate`
+(lib/ui/buttonSystem/ButtonHoverFade.rae) keeps a runtime `HoverFade { amount }`
+on every hover-reactive Shadow, in the ButtonSystem's own table next to
+`Interaction`. It moves `amount` linearly toward 1 while the node is hovered
+and toward 0 when it is not, taking 0.15 s for a full fade. The painter mixes
+the rest and hover opacity by `amount`. An app that never runs the system
+gets the old instant switch.
+
+The system returns true only while a fade is still moving, and it snaps the
+last float step so it cannot ask for a frame it would not show. The editor
+feeds that into the same `animating` flag as the effect systems. It renders
+every frame for about 0.15 s after the pointer enters or leaves, then drops
+back to its blocking event wait and renders nothing until the next event.
+
+Tests: `compiler/tests/cases/911_ui_hover_fade` checks the fade: 3 frames in,
+3 frames out, `animating` false on the settled frame, plain shadows
+untouched, and the instant fallback. The 121 gate hovers `OpenPill` through
+`RAE_UI_EDITOR_TEST_HOVER` (HoverScript.rae), which calls the same
+`buttonInteractionMark` the input system uses, and requires the frame to
+differ from the un-hovered MainMenu shot. Removing `hoverOpacity` makes the two
+frames identical.
+
 ## What a hierarchy row says (#89663819)
 
 A row reads `Name - Kind`, plus a value preview where one exists, so a node

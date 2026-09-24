@@ -1,0 +1,84 @@
+open ui/Ecs
+open ui/Components
+open ui/UiSystems
+open ui/buttonSystem/ButtonSystem
+open ui/buttonSystem/ButtonHoverFade
+open ecs/Entity
+open ecs/ComponentTable
+
+# A hover glow fades in over hoverFadeSeconds (0.15 s) while the pointer is
+# over its node and out when it leaves, and the system reports "animating" only
+# while a fade still moves — the frame it settles is the last one it asks for,
+# so an app's loop goes back to its idle wait. A plain shadow (no hover
+# behaviour) is never touched, and a node without a fade falls back to the
+# instant hovered switch.
+func stepLog(
+  world: view UiWorld
+  uiSystems: mod UiSystems
+  label: view String
+  glow: view EntityId
+) {
+  let animating: Bool = buttonHoverFadeUpdate(world: world, uiSystems: uiSystems, deltaTime: 0.05)
+  let amount: Float = hoverFadeAmount(world: world, uiSystems: uiSystems, entity: glow)
+  log("{label}: amount {(amount * 100.0 + 0.5).toInt()}% animating {animating}")
+}
+
+func main() {
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  let glow: EntityId = createEntity(world: world)
+  let glowShadow: Shadow = {
+    blur: 12.0
+    opacity: 0.22
+    color: RgbaColor { r: 0, g: 255, b: 200, a: 255 }
+    hoverOpacity: 0.6
+  }
+  componentSet(this: world.shadows, entity: glow, data: glowShadow)
+  let plain: EntityId = createEntity(world: world)
+  let plainShadow: Shadow = { blur: 4.0, color: RgbaColor { r: 0, g: 0, b: 0, a: 255 } }
+  componentSet(this: world.shadows, entity: plain, data: plainShadow)
+
+  stepLog(
+    world: world
+    uiSystems: uiSystems
+    label: "rest"
+    glow: glow
+  )
+  buttonInteractionMark(
+    world: world
+    uiSystems: uiSystems
+    entity: glow
+    hovered: true
+    pressed: false
+  )
+  loop var i: Int = 1, i <= 4, ++i {
+    stepLog(
+      world: world
+      uiSystems: uiSystems
+      label: "in {i}"
+      glow: glow
+    )
+  }
+  buttonInteractionClear(world: world, uiSystems: uiSystems, entity: glow)
+  loop var i: Int = 1, i <= 4, ++i {
+    stepLog(
+      world: world
+      uiSystems: uiSystems
+      label: "out {i}"
+      glow: glow
+    )
+  }
+  log("plain shadow faded: {componentHas(this: uiSystems.button.hoverFades, entity: plain)}")
+  # Without the system, the painter's mix is the instant switch.
+  let unfaded: EntityId = createEntity(world: world)
+  buttonInteractionMark(
+    world: world
+    uiSystems: uiSystems
+    entity: unfaded
+    hovered: true
+    pressed: false
+  )
+  log(
+    "no fade, hovered: {(hoverFadeAmount(world: world, uiSystems: uiSystems, entity: unfaded) * 100.0).toInt()}%"
+  )
+}
