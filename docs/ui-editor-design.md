@@ -485,12 +485,12 @@ filtering `orbit` finds `Title` by its TEXT, not just nodes named Orbit\*.
 It has its own focus key, `F`, mutually exclusive with the component list's
 `/` — two filters, two panels, one keyboard.
 
-**Not done: which scene FILE a mounted subtree came from.** The loader removes
-the `SceneInstance` marker once it mounts (`lib/ui/SceneLoader.rae`, "clear the
-marker so the next loop pass doesn't re-mount"), and `SceneScope` is declared
-but never written, so after load nothing on a mounted entity records its source
-file. `BundleRefs` tracks BUNDLE provenance, which is why `+<bundle>` works and
-the file does not. See the split-out task.
+**Mounted scene roots name their source file.** Every mounted node carries the
+runtime-only `SceneSource { sceneId, nodeId, root }`. The root flag makes the
+hierarchy preview the file only on the row where that scene is mounted, while
+the source node id lets every descendant resolve its authored fields. This is
+separate from authored `SceneScope` and never appears in saved `.raescene` text.
+`BundleRefs` remains the independent `+<bundle>` provenance.
 
 ## The selected-row plate (#38090472)
 
@@ -684,10 +684,11 @@ spaceS` is a theme token resolved to a number, and a changed gap would read
 `RgbaColor`, not an overwrite.
 
 The inspector owns one reference `UiWorld` freshly decoded with the active
-theme on each successful document load. Generated component rows compare
-their typed live field against that reference, so changing the selection does
-not mount another world or repeat token resolution. The save path uses the
-same fresh-decode contract for preserving authored spellings.
+theme on each successful document load. It resolves the complete registered
+sub-scene graph once, then uses each node's runtime `SceneSource` to compare
+against the correct file and source node. Changing the selection therefore
+does not mount another world or repeat token resolution. The save path uses
+the same fresh-decode contract for preserving authored spellings.
 
 **What Rae can and cannot answer.** WHICH SYSTEM wrote a value is *not*
 available: `ComponentTable` carries a table-level `generation` and per-entity
@@ -707,11 +708,11 @@ Three limits, deliberate:
   `"RoundedRect"` would call every enum overridden, so the comparison uses the
   undecorated value and is case-insensitive (the scene spells enums
   PascalCase).
-- **A node not in the document's scene gets no tag at all.** Sub-scene nodes
-  live in another file and `SceneScope` is never populated, so the module stays
-  silent rather than claiming `computed` about a node it simply cannot see.
-  Nested authored values are compared through their freshly decoded typed Rae
-  value; when unchanged they stay quiet.
+- **A node without `SceneSource` gets no tag at all.** Loaded document and
+  sub-scene nodes carry it; runtime-created nodes do not. The module stays
+  silent rather than claiming `computed` about a node with no authored source.
+  Nested authored values compare through their freshly decoded typed Rae value;
+  when unchanged they stay quiet.
 
 ## Component widgets are generated from reflection (#24323144)
 

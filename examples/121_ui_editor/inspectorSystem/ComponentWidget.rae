@@ -257,6 +257,7 @@ func tableWidgetRows(
   T: type
   world: view UiWorld
   sourceWorld: view UiWorld
+  sourceScenes: view SceneRegistry
   table: view ComponentTable(T)
   selection: view List(EntityId)
   name: view String
@@ -270,7 +271,7 @@ func tableWidgetRows(
   var seen: Bool = false
   # The node whose values filled `common`. Provenance is read against THIS
   # node: it is the one whose text is on screen wherever the selection agrees.
-  var firstNodeId: String = ""
+  var firstEntity: EntityId = noEntity()
   var commonRaw: List(String) = List.create(String, cap: 8)
   loop let entity: view EntityId in selection {
     if componentHas(this: table, entity: entity) is false {
@@ -279,7 +280,7 @@ func tableWidgetRows(
     let value: view T => componentView(this: table, entity: entity)
     if seen is false {
       seen = true
-      firstNodeId = nodeIdOf(world: world, entity: entity)
+      firstEntity = entity
       componentFieldTexts(
         value: value
         spec: spec
@@ -320,9 +321,10 @@ func tableWidgetRows(
       # Strings, rather than inside the reflection loop — the generic stays
       # pure field-walking and provenance layers on top.
       let tag: String = fieldSourceTag(provenance: fieldProvenance(
-        scene: scene
+        sources: sourceScenes
+        world: world
+        entity: firstEntity
         sourceWorld: sourceWorld
-        nodeId: firstNodeId
         component: name
         field: field
         liveText: commonRaw.copyAtDefault(index: i)
@@ -347,6 +349,7 @@ func tableWidgetRows(
 func componentWidgetRows(
   world: view UiWorld
   sourceWorld: view UiWorld
+  sourceScenes: view SceneRegistry
   selection: view List(EntityId)
   name: view String
   scene: view Scene
@@ -361,6 +364,7 @@ func componentWidgetRows(
       tableWidgetRows(
         world: world
         sourceWorld: sourceWorld
+        sourceScenes: sourceScenes
         table: table
         selection: selection
         name: name

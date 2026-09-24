@@ -334,6 +334,7 @@ func mountSceneInstanceIntoPage(
     overrides: overrides
     pageId: pageId
     keepRootPlacement: false
+    markSourceRoot: true
   )
 }
 
@@ -362,6 +363,7 @@ func mountSubScene(
     overrides: overrides
     pageId: ""
     keepRootPlacement: true
+    markSourceRoot: true
   )
   ret mounted
 }
@@ -374,6 +376,7 @@ func mountSceneInstanceImpl(
   overrides: view List(SceneOverride)
   pageId: view String
   keepRootPlacement: view Bool
+  markSourceRoot: view Bool
 ) ret EntityId {
   unsafe {
     if scene.ok is false {
@@ -424,6 +427,12 @@ func mountSceneInstanceImpl(
       let node: view SceneNode => nodeAt(this: scene, idx: j)
       let entity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: j)
       let isRoot: Bool = j is rootIdx
+      let source: SceneSource = {
+        sceneId: "{scene.sceneId}"
+        nodeId: "{node.nodeId}"
+        root: isRoot and markSourceRoot
+      }
+      componentSet(this: world.sceneSources, entity: entity, data: source)
 
       let bag: JsonValue = Json.jsonValueAt(doc: docView, idx: node.componentsValueIdx)
       let keyCount: Int = Json.objectLen(this: bag)
@@ -862,13 +871,15 @@ func mountPage(
     h: SizeAxis { mode: SizeMode.fixed, min: -1, max: -1 }
   }
   componentSet(this: world.sizes, entity: root, data: size)
-  let mounted: EntityId = mountSceneInstanceIntoPage(
+  let mounted: EntityId = mountSceneInstanceImpl(
     world: world
     uiSystems: uiSystems
     mountEntity: root
     scene: scene
     overrides: overrides
     pageId: pageId
+    keepRootPlacement: false
+    markSourceRoot: false
   )
   # Tag the page root explicitly — `mountSceneInstanceIntoPage` only
   # scopes nodeIds, leaving the page-root tagging to callers like us.

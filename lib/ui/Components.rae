@@ -628,6 +628,12 @@ type SceneScope {
   scope: String
 }
 
+type SceneSource {
+  sceneId: String
+  nodeId: String
+  root: Bool
+}
+
 type RuntimeOnly {
   value: Bool
 }
@@ -635,10 +641,6 @@ type RuntimeOnly {
 # Dynamic scene + data binding
 type SceneInstance {
   sceneId: String
-  # Per-field overrides captured at deserialization. Same shape as
-  # `lib/ui/sceneInstance.rae`'s SceneOverride (nodeId + componentName
-  # + fieldName + valueString quadruple). The scene-loader's resolve
-  # pass reads these when mounting the referenced child scene.
   overrideNodeIds: List(String)
   overrideComponents: List(String)
   overrideFields: List(String)

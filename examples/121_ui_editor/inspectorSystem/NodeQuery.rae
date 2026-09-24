@@ -359,6 +359,12 @@ func nodeKindOf(world: view UiWorld, entity: view EntityId) ret String {
   if componentHas(this: world.sceneInstances, entity: entity) {
     ret "Scene"
   }
+  if componentHas(this: world.sceneSources, entity: entity) {
+    let source: view SceneSource => componentView(this: world.sceneSources, entity: entity)
+    if source.root {
+      ret "Scene"
+    }
+  }
   if componentHas(this: world.listViews, entity: entity) {
     ret "List"
   }
@@ -383,6 +389,12 @@ func nodeKindOf(world: view UiWorld, entity: view EntityId) ret String {
 # its data rather than its name. "" for everything else; a preview of nothing
 # is just noise in a narrow panel.
 func nodePreviewOf(world: view UiWorld, entity: view EntityId) ret String {
+  if componentHas(this: world.sceneSources, entity: entity) {
+    let source: view SceneSource => componentView(this: world.sceneSources, entity: entity)
+    if source.root and source.sceneId.length() > 0 {
+      ret "{source.sceneId}"
+    }
+  }
   if componentHas(this: world.sceneInstances, entity: entity) {
     let instance: view SceneInstance => componentView(this: world.sceneInstances, entity: entity)
     if instance.sceneId.length() > 0 {

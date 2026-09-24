@@ -69,6 +69,7 @@ func isRuntimeTable(name: view String) ret Bool {
     "HeroTransition"
     "StyleOverride"
     "BundleRefs"
+    "SceneSource"
   ]
   var i: Int = 0
   loop i < runtime.length() {
@@ -197,7 +198,9 @@ func applyComponentByName(
       table
     ) is not "ScrollDrag" and typeName(table) is not "StateStyle" and typeName(table) is not "ListViewData" and typeName(
       table
-    ) is not "ListViewRowKey" and typeName(table) is not "StyleOverride" and typeName(table) is not "BundleRefs" {
+    ) is not "ListViewRowKey" and typeName(table) is not "StyleOverride" and typeName(table) is not "BundleRefs" and typeName(
+      table
+    ) is not "SceneSource" {
       if name is authoredNameOf(typeName: typeName(table)) {
         decodeComponent(
           table: table
