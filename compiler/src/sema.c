@@ -3288,6 +3288,48 @@ static bool reflect_loop_is_fields(const AstStmt* stmt) {
         && str_eq_cstr(it->as.call.callee->as.ident, "fields");
 }
 
+/* Loop control is lexical, independent of generic type substitution. Some
+ * field-reflection specializations are discovered only by the C backend, so
+ * validate templates before specialization can bypass ordinary statement sema.
+ * fields() expands to straight-line blocks: it preserves, but never adds, an
+ * enclosing runtime loop. A nested function call cannot inherit that loop. */
+static void sema_check_template_loop_context(AstModule* module,
+        const AstBlock* block, int depth) {
+    for (const AstStmt* stmt = block ? block->first : NULL; stmt; stmt = stmt->next) {
+        switch (stmt->kind) {
+            case AST_STMT_BREAK:
+            case AST_STMT_CONTINUE:
+                if (depth == 0) {
+                    diag_error(sema_diag_file(module), (int)stmt->line, (int)stmt->column,
+                        stmt->kind == AST_STMT_BREAK
+                            ? "'break' is only valid inside a loop"
+                            : "'continue' is only valid inside a loop");
+                    module->had_error = true;
+                }
+                break;
+            case AST_STMT_LOOP:
+                sema_check_template_loop_context(module, stmt->as.loop_stmt.body,
+                    depth + !(stmt->as.loop_stmt.is_range && reflect_loop_is_fields(stmt)));
+                break;
+            case AST_STMT_IF:
+                sema_check_template_loop_context(module, stmt->as.if_stmt.then_block, depth);
+                sema_check_template_loop_context(module, stmt->as.if_stmt.else_block, depth);
+                break;
+            case AST_STMT_MATCH:
+                for (const AstMatchCase* arm = stmt->as.match_stmt.cases; arm; arm = arm->next)
+                    sema_check_template_loop_context(module, arm->block, depth);
+                break;
+            case AST_STMT_DEFER:
+                sema_check_template_loop_context(module, stmt->as.defer_stmt.block, depth);
+                break;
+            case AST_STMT_UNSAFE:
+                sema_check_template_loop_context(module, stmt->as.unsafe_stmt.block, depth);
+                break;
+            default: break;
+        }
+    }
+}
+
 // Fill `out` with one scoped `if true { let x => value.field; body }` per struct
 // field matching `pattern`. This is the shared unrolling core used by BOTH the
 // non-generic sema path (#772) and the generic-instantiation C-backend path
@@ -7676,6 +7718,18 @@ bool sema_analyze_module(CompilerContext* ctx, AstModule* module) {
         }
         d = d->next;
     }
+    /* Check each original generic body once, including bodies reached only
+     * through ComponentTable(any) field bindings. Stop before specialization
+     * so the same lexical error is not repeated for every concrete type. */
+    for (AstDecl* template = module->decls; template; template = template->next) {
+        if (template->kind != AST_DECL_FUNC || !template->as.func_decl.generic_params
+            || template->as.func_decl.specialization_args) continue;
+        const char* saved_origin = s_current_decl_origin;
+        if (template->origin_file) s_current_decl_origin = template->origin_file;
+        sema_check_template_loop_context(module, template->as.func_decl.body, 0);
+        s_current_decl_origin = saved_origin;
+    }
+    if (module->had_error) return false;
     bool found_new = true;
     while (found_new) {
         found_new = false; d = module->decls;
