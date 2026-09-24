@@ -17,6 +17,7 @@
 import Math
 import String
 open app3d/SettingsDialog
+open app3d/TimeOfDay
 open Calendar
 
 func check(label: view String, ok: view Bool) {
@@ -129,7 +130,7 @@ func main() {
   # The hour is held flat, not inside a nested Slider: a nested struct passed as
   # `mod` does not reliably write back here, and the slider silently never moved
   # when it was stored that way.
-  check(label: "hour is carried", ok: one.hour is 8.0)
+  check(label: "hour is carried", ok: one.timeOfDay.hour is 8.0)
   check(label: "starts not dragging", ok: one.timeDragging is false)
   check(label: "a day spans 0..24", ok: settingsHourMin is 0.0 and settingsHourMax is 24.0)
 
@@ -153,7 +154,7 @@ func main() {
   )
   check(
     label: "2.5s advances one hour"
-    ok: settingsAdvanceTime(settingsState: clock, deltaTime: 2.5) and clock.hour > 12.99 and clock.hour < 13.01
+    ok: settingsAdvanceTime(settingsState: clock, deltaTime: 2.5) and clock.timeOfDay.hour > 12.99 and clock.timeOfDay.hour < 13.01
   )
   # Half a real minute is half a day, and 13:00 plus twelve hours is 01:00 the
   # next day — so this covers the rate and the MIDNIGHT WRAP at once. Clamping
@@ -161,7 +162,7 @@ func main() {
   # ever run once.
   check(
     label: "half a minute is half a day, past midnight"
-    ok: settingsAdvanceTime(settingsState: clock, deltaTime: 30.0) and clock.hour > 0.99 and clock.hour < 1.01
+    ok: settingsAdvanceTime(settingsState: clock, deltaTime: 30.0) and clock.timeOfDay.hour > 0.99 and clock.timeOfDay.hour < 1.01
   )
   # A whole day later it reads the same hour, so nothing CHANGED and the caller
   # is told so rather than being made to rebuild the sky for an identical value.
@@ -172,10 +173,10 @@ func main() {
   # A drag WINS: otherwise the clock and the pointer fight over one value and
   # the handle crawls away from where it was put.
   clock.timeDragging = true
-  let heldAt: Float = clock.hour
+  let heldAt: Float = clock.timeOfDay.hour
   check(
     label: "a drag pauses the clock"
-    ok: settingsAdvanceTime(settingsState: clock, deltaTime: 2.5) is false and clock.hour is heldAt
+    ok: settingsAdvanceTime(settingsState: clock, deltaTime: 2.5) is false and clock.timeOfDay.hour is heldAt
   )
   clock.timeDragging = false
   # PLAY/PAUSE IS THE MASTER. Pausing stops the clock whatever the Animate time
@@ -183,10 +184,10 @@ func main() {
   # paused in any sense a user would recognise.
   check(label: "animate time is on for the master test", ok: clock.animateTime)
   clock.playing = false
-  let pausedAt: Float = clock.hour
+  let pausedAt: Float = clock.timeOfDay.hour
   check(
     label: "pause stops the clock"
-    ok: settingsAdvanceTime(settingsState: clock, deltaTime: 2.5) is false and clock.hour is pausedAt
+    ok: settingsAdvanceTime(settingsState: clock, deltaTime: 2.5) is false and clock.timeOfDay.hour is pausedAt
   )
   # The toggle KEEPS its value rather than being written to false, so resuming
   # restores exactly what was set instead of silently turning the feature off.
@@ -194,7 +195,7 @@ func main() {
   clock.playing = true
   check(
     label: "resume starts the clock again"
-    ok: settingsAdvanceTime(settingsState: clock, deltaTime: 2.5) and clock.hour is not pausedAt
+    ok: settingsAdvanceTime(settingsState: clock, deltaTime: 2.5) and clock.timeOfDay.hour is not pausedAt
   )
 
   # And the toggle turns it off entirely.
@@ -202,10 +203,10 @@ func main() {
     label: "toggle turns animation off"
     ok: settingsHandleAction(settingsState: clock, actionId: "settings.time.animate") and clock.animateTime is false
   )
-  let stoppedAt: Float = clock.hour
+  let stoppedAt: Float = clock.timeOfDay.hour
   check(
     label: "a stopped clock does not move"
-    ok: settingsAdvanceTime(settingsState: clock, deltaTime: 2.5) is false and clock.hour is stoppedAt
+    ok: settingsAdvanceTime(settingsState: clock, deltaTime: 2.5) is false and clock.timeOfDay.hour is stoppedAt
   )
 
   # ----- the calendar rides the clock ---------------------------------
@@ -225,34 +226,37 @@ func main() {
   # — which is exactly what happened when the default moved from 2026 to 1995.
   check(
     label: "date defaults to the June solstice"
-    ok: cal.dayOfYear is settingsDefaultDayOfYear and cal.year is settingsDefaultYear
+    ok: cal.timeOfDay.dayOfYear is timeOfDayDefaultDayOfYear and cal.timeOfDay.year is timeOfDayDefaultYear
   )
   settingsAdvanceTime(settingsState: cal, deltaTime: 60.0)
   check(
     label: "a day of clock advances the date"
-    ok: cal.dayOfYear is settingsDefaultDayOfYear + 1 and cal.year is settingsDefaultYear
+    ok: cal.timeOfDay.dayOfYear is timeOfDayDefaultDayOfYear + 1 and cal.timeOfDay.year is timeOfDayDefaultYear
   )
   # The year rolls at the year's REAL length, so 29 February exists in 2028 and
   # does not in 2029.
-  cal.year = 2028
-  cal.dayOfYear = 59
+  cal.timeOfDay.year = 2028
+  cal.timeOfDay.dayOfYear = 59
   settingsAdvanceTime(settingsState: cal, deltaTime: 60.0)
   let feb29: CalendarDate = settingsDate(settingsState: cal)
   check(label: "29 Feb exists in a leap year", ok: feb29.month is 2 and feb29.day is 29)
-  cal.year = 2029
-  cal.dayOfYear = 59
+  cal.timeOfDay.year = 2029
+  cal.timeOfDay.dayOfYear = 59
   settingsAdvanceTime(settingsState: cal, deltaTime: 60.0)
   let mar1: CalendarDate = settingsDate(settingsState: cal)
   check(label: "and is skipped in a plain year", ok: mar1.month is 3 and mar1.day is 1)
-  cal.year = 2026
-  cal.dayOfYear = 365
+  cal.timeOfDay.year = 2026
+  cal.timeOfDay.dayOfYear = 365
   settingsAdvanceTime(settingsState: cal, deltaTime: 60.0)
-  check(label: "new year rolls the year over", ok: cal.year is 2027 and cal.dayOfYear is 1)
+  check(
+    label: "new year rolls the year over"
+    ok: cal.timeOfDay.year is 2027 and cal.timeOfDay.dayOfYear is 1
+  )
   # Pause is the master over the calendar too, not just the hour.
   cal.playing = false
-  let heldDay: Int = cal.dayOfYear
+  let heldDay: Int = cal.timeOfDay.dayOfYear
   settingsAdvanceTime(settingsState: cal, deltaTime: 600.0)
-  check(label: "pause holds the date as well", ok: cal.dayOfYear is heldDay)
+  check(label: "pause holds the date as well", ok: cal.timeOfDay.dayOfYear is heldDay)
 
   # Play/pause is shared, so both examples show the same word for it.
   check(label: "starts playing", ok: one.playing)
