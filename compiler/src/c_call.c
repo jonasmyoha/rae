@@ -1559,6 +1559,29 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
 
     if (expr->as.call.callee->kind == AST_EXPR_IDENT) {
         Str callee_name = expr->as.call.callee->as.ident;
+        // Reflection can discover nested generic calls only during lowering,
+        // after ordinary sema. An unresolved user call is an error, never an
+        // implicit C declaration: in particular, a stale argument list must
+        // not silently become an unspecialized rae_<name>(...) call.
+        // Internal __ intrinsics retain their existing runtime fallback.
+        if (!str_starts_with_cstr(callee_name, "__")) {
+            size_t argument_count = 0;
+            for (const AstCallArg* arg = expr->as.call.args; arg; arg = arg->next)
+                ++argument_count;
+            char message[384];
+            snprintf(message, sizeof message,
+                "cannot resolve call to '%.*s' with %zu value arguments during C lowering; "
+                "check the function's parameter count and generic arguments",
+                (int)callee_name.len, callee_name.data, argument_count);
+            const char* origin = ctx->func_decl ? ctx->func_decl->origin_file : NULL;
+            diag_error(origin ? origin : ctx->module->file_path,
+                       (int)expr->line, (int)expr->column, message);
+            // Discovery also emits into a scratch stream. Keep walking so
+            // other diagnostics remain available; the pipeline rejects the
+            // output on diag_error_count(), before invoking the C compiler.
+            fprintf(out, "0 /* unresolved Rae call */");
+            return true;
+        }
         if (str_starts_with_cstr(callee_name, "__buf_")) fprintf(out, "rae_ext_%.*s(", (int)callee_name.len, callee_name.data);
         else fprintf(out, "rae_%.*s(", (int)callee_name.len, callee_name.data);
         const AstCallArg* a = expr->as.call.args;
