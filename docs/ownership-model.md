@@ -47,6 +47,15 @@ let ch: Children = { ids: a }
 That means `let ch: Children = { ids: copy }` must NOT move
 `copy`.
 
+### String reassignment
+
+`destination = source` copies a stored String value into an ordinary String
+local. It does not transfer the source's allocation or borrow it. The copy is
+made before the old destination is dropped, so `value = value` is safe, and a
+source declared inside a loop can leave scope without invalidating an outer
+destination. Fresh String results and explicit `own` retain their existing
+transfer behavior. See `stress/10_stringAssignAlias` and compiler regression 906.
+
 ## Explicit ownership transfer with `own`
 
 Recognise the `own` keyword in expression positions:

@@ -1,0 +1,30 @@
+pack StringAssignAlias {
+  format: "raepack"
+  version: 1
+  defaultTarget: compiled
+  name: "String assignment lifetime"
+  description: "An outer String assignment must survive the source local leaving scope."
+  category: "Stress"
+  targets: {
+    target compiled: {
+      label: "Compiled"
+      entry: "Main.rae"
+      sources: {
+        source: {
+          path: "."
+          emit: compiled
+        }
+      }
+    }
+  }
+  stress: {
+    verdict: "handles"
+    expect: {
+      outcome: "run"
+      exitCode: 0
+      stdout: "value2"
+      stderr: ""
+    }
+    fixedBy: "#55344481"
+  }
+}
