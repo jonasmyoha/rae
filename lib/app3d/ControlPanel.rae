@@ -171,8 +171,8 @@ func buildControlPanel(
   # children — a title, a readout — and a panel that overwrote them would
   # silently delete part of the scene it was asked to extend.
   let kids: List(EntityId) = List.create(EntityId, cap: panel.ids.length + 4)
-  if componentHas(this: world.childrens, entity: host) {
-    let existing: view Children => componentView(this: world.childrens, entity: host)
+  if componentHas(this: world.childrens, entityId: host) {
+    let existing: view Children => componentView(this: world.childrens, entityId: host)
     var e: Int = 0
     loop e < existing.ids.length {
       kids.add(value: panelEntityAt(values: existing.ids, index: e))
@@ -185,7 +185,7 @@ func buildControlPanel(
     let labelE: EntityId = createEntity(world: world)
 
     let rect: Rect = { position: { x: 0.0, y: 0.0 }, size: { x: panel.buttonW, y: panel.buttonH } }
-    componentSet(this: world.rects, entity: buttonE, data: rect)
+    componentSet(this: world.rects, entityId: buttonE, data: rect)
     let shape: Shape = {
       kind: ShapeKind.roundedRect
       fill: RgbaColor { r: 35, g: 42, b: 56, a: 255 }
@@ -197,38 +197,38 @@ func buildControlPanel(
       strokeGap: 0.0
       radius: 8.0
     }
-    componentSet(this: world.shapes, entity: buttonE, data: shape)
+    componentSet(this: world.shapes, entityId: buttonE, data: shape)
     let click: OnClick = {
       actionId: "{panelStringAt(values: panel.actionIds, index: i)}"
       actionIdDouble: ""
       actionIdTriple: ""
       maxDelayMs: 0
     }
-    componentSet(this: world.onClicks, entity: buttonE, data: click)
+    componentSet(this: world.onClicks, entityId: buttonE, data: click)
 
     let labelRect: Rect = {
       position: { x: 0.0, y: 0.0 }
       size: { x: panel.buttonW, y: panel.buttonH }
     }
-    componentSet(this: world.rects, entity: labelE, data: labelRect)
+    componentSet(this: world.rects, entityId: labelE, data: labelRect)
     let text: Text = {
       text: "{panelStringAt(values: panel.selectedIds, index: i)}"
       styleId: "{panel.textStyleId}"
       wrapWidthMode: WrapWidthMode.none
     }
-    componentSet(this: world.texts, entity: labelE, data: text)
+    componentSet(this: world.texts, entityId: labelE, data: text)
     let optical: OpticalAlign = {
       enabled: true
       centerX: true
       centerY: true
       bias: Vec2 { x: 0.0, y: 0.0 }
     }
-    componentSet(this: world.opticalAligns, entity: labelE, data: optical)
+    componentSet(this: world.opticalAligns, entityId: labelE, data: optical)
 
     let labelKids: List(EntityId) = List.create(EntityId, cap: 1)
     labelKids.add(value: labelE)
     let buttonChildren: Children = { ids: own labelKids }
-    componentSet(this: world.childrens, entity: buttonE, data: buttonChildren)
+    componentSet(this: world.childrens, entityId: buttonE, data: buttonChildren)
 
     # PARENT IS NOT OPTIONAL. `layoutSystem` treats every entity with no
     # Parent as a layout root and places it at the origin, so a button
@@ -237,9 +237,9 @@ func buildControlPanel(
     # than flowing through the host's Layout. Children and Parent are two
     # halves of one edge; the scene loader sets both, and so must this.
     let buttonParent: Parent = { parent: host }
-    componentSet(this: uiSystems.hierarchy.parents, entity: buttonE, data: buttonParent)
+    componentSet(this: uiSystems.hierarchy.parents, entityId: buttonE, data: buttonParent)
     let labelParent: Parent = { parent: buttonE }
-    componentSet(this: uiSystems.hierarchy.parents, entity: labelE, data: labelParent)
+    componentSet(this: uiSystems.hierarchy.parents, entityId: labelE, data: labelParent)
 
     buttons.add(value: buttonE)
     labels.add(value: labelE)
@@ -247,7 +247,7 @@ func buildControlPanel(
     i = i + 1
   }
   let hostChildren: Children = { ids: own kids }
-  componentSet(this: world.childrens, entity: host, data: hostChildren)
+  componentSet(this: world.childrens, entityId: host, data: hostChildren)
 
   # `selectedIds` held the pending labels until now; from here it holds
   # one selected id per group, indexed by group number.
@@ -272,11 +272,11 @@ func setPanelButtonLabel(
   if idx < 0 {
     ret
   }
-  let entity: EntityId = panelEntityAt(values: panel.labelEntities, index: idx)
-  if componentHas(this: world.texts, entity: entity) is false {
+  let entityId: EntityId = panelEntityAt(values: panel.labelEntities, index: idx)
+  if componentHas(this: world.texts, entityId: entityId) is false {
     ret
   }
-  let text: mod Text => componentMod(this: world.texts, entity: entity)
+  let text: mod Text => componentMod(this: world.texts, entityId: entityId)
   text.text = "{label}"
 }
 
@@ -303,9 +303,9 @@ func setPanelSelection(
   var i: Int = 0
   loop i < panel.ids.length {
     if panelIntAt(values: panel.groups, index: i) is group {
-      let entity: EntityId = panelEntityAt(values: panel.buttonEntities, index: i)
-      if componentHas(this: world.shapes, entity: entity) {
-        let shape: mod Shape => componentMod(this: world.shapes, entity: entity)
+      let entityId: EntityId = panelEntityAt(values: panel.buttonEntities, index: i)
+      if componentHas(this: world.shapes, entityId: entityId) {
+        let shape: mod Shape => componentMod(this: world.shapes, entityId: entityId)
         if panelStringAt(values: panel.ids, index: i) is id {
           shape.fillSlot = panelSlotSelected
         } else {
@@ -328,11 +328,11 @@ func setPanelButtonOn(
   if idx < 0 {
     ret
   }
-  let entity: EntityId = panelEntityAt(values: panel.buttonEntities, index: idx)
-  if componentHas(this: world.shapes, entity: entity) is false {
+  let entityId: EntityId = panelEntityAt(values: panel.buttonEntities, index: idx)
+  if componentHas(this: world.shapes, entityId: entityId) is false {
     ret
   }
-  let shape: mod Shape => componentMod(this: world.shapes, entity: entity)
+  let shape: mod Shape => componentMod(this: world.shapes, entityId: entityId)
   if on {
     shape.fillSlot = panelSlotSelected
   } else {

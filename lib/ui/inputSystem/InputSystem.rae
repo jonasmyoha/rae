@@ -7,7 +7,7 @@
 # The scroll wheel is ROUTED, not broadcast: each frame `updateUiInput` hands
 # the wheel to exactly one consumer — the nearest `ScrollRoot` or `WheelTarget`
 # (ui/InputComponents) on the path to the topmost node under the pointer — and
-# systems take their share with `uiWheelFor(input, entity)`. Reading
+# systems take their share with `uiWheelFor(input, entityId)`. Reading
 # `Gpu2d.wheelMove()` directly from two systems made one wheel notch both
 # scroll a list and zoom the canvas beside it.
 open ui/Ecs
@@ -55,9 +55,9 @@ func createUiInput() pub ret UiInput {
   }
 }
 
-func uiEntityActive(world: view UiWorld, entity: view EntityId) ret Bool {
-  if componentHas(this: world.actives, entity: entity) {
-    let active: Active = componentGet(this: world.actives, entity: entity)
+func uiEntityActive(world: view UiWorld, entityId: view EntityId) ret Bool {
+  if componentHas(this: world.actives, entityId: entityId) {
+    let active: Active = componentGet(this: world.actives, entityId: entityId)
     ret active.value
   }
   ret true
@@ -66,27 +66,27 @@ func uiEntityActive(world: view UiWorld, entity: view EntityId) ret Bool {
 func uiPointInEntity(
   world: view UiWorld
   uiSystems: view UiSystems
-  entity: view EntityId
+  entityId: view EntityId
   x: view Float
   y: view Float
 ) ret Bool {
-  if uiEntityActive(world: world, entity: entity) is false {
+  if uiEntityActive(world: world, entityId: entityId) is false {
     ret false
   }
-  if componentHas(this: uiSystems.transform2d.worldTransforms, entity: entity) is false {
+  if componentHas(this: uiSystems.transform2d.worldTransforms, entityId: entityId) is false {
     ret false
   }
-  if componentHas(this: uiSystems.layout.computedRects, entity: entity) is false {
+  if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) is false {
     ret false
   }
   let wt: WorldTransform2D = componentGet(
     this: uiSystems.transform2d.worldTransforms
-    entity: entity
+    entityId: entityId
   )
-  if worldVisualOf(world: world, uiSystems: uiSystems, entity: entity).visible is false {
+  if worldVisualOf(world: world, uiSystems: uiSystems, entityId: entityId).visible is false {
     ret false
   }
-  let cr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: entity)
+  let cr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entityId: entityId)
   if x < wt.position.x {
     ret false
   }
@@ -105,23 +105,23 @@ func uiPointInEntity(
 func uiHitTestEntity(
   world: view UiWorld
   uiSystems: view UiSystems
-  entity: view EntityId
+  entityId: view EntityId
   x: view Float
   y: view Float
 ) ret EntityId {
   unsafe {
-    if uiEntityActive(world: world, entity: entity) is false {
+    if uiEntityActive(world: world, entityId: entityId) is false {
       ret noEntity()
     }
-    if componentHas(this: world.childrens, entity: entity) {
-      let children: view Children => componentView(this: world.childrens, entity: entity)
+    if componentHas(this: world.childrens, entityId: entityId) {
+      let children: view Children => componentView(this: world.childrens, entityId: entityId)
       var i: Int = children.ids.length - 1
       loop i >= 0 {
         let child: EntityId = rae_ext_rae_buf_get(buf: children.ids.data, index: i)
         let hit: EntityId = uiHitTestEntity(
           world: world
           uiSystems: uiSystems
-          entity: child
+          entityId: child
           x: x
           y: y
         )
@@ -131,15 +131,15 @@ func uiHitTestEntity(
         i = i - 1
       }
     }
-    if componentHas(this: world.onClicks, entity: entity) {
+    if componentHas(this: world.onClicks, entityId: entityId) {
       if uiPointInEntity(
         world: world
         uiSystems: uiSystems
-        entity: entity
+        entityId: entityId
         x: x
         y: y
       ) {
-        ret entity
+        ret entityId
       }
     }
     ret noEntity()
@@ -157,11 +157,11 @@ func uiHitTest(
     var i: Int = roots.length - 1
     loop i >= 0 {
       let root: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: i)
-      if componentHas(this: world.layerRoots, entity: root) is false {
+      if componentHas(this: world.layerRoots, entityId: root) is false {
         let hit: EntityId = uiHitTestEntity(
           world: world
           uiSystems: uiSystems
-          entity: root
+          entityId: root
           x: x
           y: y
         )
@@ -187,24 +187,24 @@ type UiWheelRoute {
 func uiWheelConsumerAt(
   world: view UiWorld
   uiSystems: view UiSystems
-  entity: view EntityId
+  entityId: view EntityId
   x: view Float
   y: view Float
 ) ret Bool {
-  if componentHas(this: world.wheelTargets, entity: entity) {
+  if componentHas(this: world.wheelTargets, entityId: entityId) {
     ret uiPointInEntity(
       world: world
       uiSystems: uiSystems
-      entity: entity
+      entityId: entityId
       x: x
       y: y
     )
   }
-  if componentHas(this: world.scrollRoots, entity: entity) {
+  if componentHas(this: world.scrollRoots, entityId: entityId) {
     ret uiPointInScrollWindow(
       world: world
       uiSystems: uiSystems
-      entity: entity
+      entityId: entityId
       x: x
       y: y
     )
@@ -219,17 +219,17 @@ func uiWheelConsumerAt(
 func uiPointInScrollWindow(
   world: view UiWorld
   uiSystems: view UiSystems
-  entity: view EntityId
+  entityId: view EntityId
   x: view Float
   y: view Float
 ) ret Bool {
-  if componentHas(this: uiSystems.hierarchy.parents, entity: entity) {
-    let parent: EntityId = componentGet(this: uiSystems.hierarchy.parents, entity: entity).parent
-    if componentHas(this: uiSystems.layout.computedRects, entity: parent) {
+  if componentHas(this: uiSystems.hierarchy.parents, entityId: entityId) {
+    let parent: EntityId = componentGet(this: uiSystems.hierarchy.parents, entityId: entityId).parent
+    if componentHas(this: uiSystems.layout.computedRects, entityId: parent) {
       ret uiPointInEntity(
         world: world
         uiSystems: uiSystems
-        entity: parent
+        entityId: parent
         x: x
         y: y
       )
@@ -238,7 +238,7 @@ func uiPointInScrollWindow(
   ret uiPointInEntity(
     world: world
     uiSystems: uiSystems
-    entity: entity
+    entityId: entityId
     x: x
     y: y
   )
@@ -247,38 +247,38 @@ func uiPointInScrollWindow(
 func uiWheelRouteEntity(
   world: view UiWorld
   uiSystems: view UiSystems
-  entity: view EntityId
+  entityId: view EntityId
   x: view Float
   y: view Float
 ) ret UiWheelRoute {
   unsafe {
-    if uiEntityActive(world: world, entity: entity) is false {
+    if uiEntityActive(world: world, entityId: entityId) is false {
       ret UiWheelRoute { blocked: false, target: noEntity() }
     }
     let inside: Bool = uiPointInEntity(
       world: world
       uiSystems: uiSystems
-      entity: entity
+      entityId: entityId
       x: x
       y: y
     )
     # A clipping node hides whatever of its subtree lies outside it: rows
     # scrolled out of a panel must not catch the wheel over the panel above.
-    if inside is false and componentHas(this: world.overflows, entity: entity) {
-      if componentGet(this: world.overflows, entity: entity).mode is OverflowMode.clip {
+    if inside is false and componentHas(this: world.overflows, entityId: entityId) {
+      if componentGet(this: world.overflows, entityId: entityId).mode is OverflowMode.clip {
         ret UiWheelRoute { blocked: false, target: noEntity() }
       }
     }
     var route: UiWheelRoute = { blocked: false, target: noEntity() }
-    if componentHas(this: world.childrens, entity: entity) {
-      let children: view Children => componentView(this: world.childrens, entity: entity)
+    if componentHas(this: world.childrens, entityId: entityId) {
+      let children: view Children => componentView(this: world.childrens, entityId: entityId)
       var i: Int = children.ids.length - 1
       loop i >= 0 and route.blocked is false and isNone(this: route.target) {
         let child: EntityId = rae_ext_rae_buf_get(buf: children.ids.data, index: i)
         route = uiWheelRouteEntity(
           world: world
           uiSystems: uiSystems
-          entity: child
+          entityId: child
           x: x
           y: y
         )
@@ -289,17 +289,17 @@ func uiWheelRouteEntity(
       if uiWheelConsumerAt(
         world: world
         uiSystems: uiSystems
-        entity: entity
+        entityId: entityId
         x: x
         y: y
       ) {
-        ret UiWheelRoute { blocked: true, target: entity }
+        ret UiWheelRoute { blocked: true, target: entityId }
       }
     }
     if route.blocked is false and inside {
-      if componentHas(this: world.shapes, entity: entity) or componentHas(
+      if componentHas(this: world.shapes, entityId: entityId) or componentHas(
         this: world.onClicks
-        entity: entity
+        entityId: entityId
       ) {
         route.blocked = true
       }
@@ -321,11 +321,11 @@ func uiWheelRoute(
     var i: Int = roots.length - 1
     loop i >= 0 {
       let root: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: i)
-      if componentHas(this: world.layerRoots, entity: root) is false {
+      if componentHas(this: world.layerRoots, entityId: root) is false {
         let route: UiWheelRoute = uiWheelRouteEntity(
           world: world
           uiSystems: uiSystems
-          entity: root
+          entityId: root
           x: x
           y: y
         )
@@ -366,8 +366,8 @@ func updateUiInput(input: mod UiInput, world: mod UiWorld, uiSystems: mod UiSyst
   frameAdvance(this: world.uiActions)
   # Clear last frame's per-entity marks before recomputing (previous hovered +
   # pressed are the only two that can carry an Interaction).
-  buttonInteractionClear(world: world, uiSystems: uiSystems, entity: input.hoveredEntity)
-  buttonInteractionClear(world: world, uiSystems: uiSystems, entity: input.pressedEntity)
+  buttonInteractionClear(world: world, uiSystems: uiSystems, entityId: input.hoveredEntity)
+  buttonInteractionClear(world: world, uiSystems: uiSystems, entityId: input.pressedEntity)
 
   let x: Float = Gpu2d.pointerX()
   let y: Float = Gpu2d.pointerY()
@@ -398,10 +398,10 @@ func updateUiInput(input: mod UiInput, world: mod UiWorld, uiSystems: mod UiSyst
   if released {
     if isNone(this: input.hoveredEntity) is false {
       if input.hoveredEntity is input.pressedEntity {
-        let click: OnClick = componentGet(this: world.onClicks, entity: input.hoveredEntity)
+        let click: OnClick = componentGet(this: world.onClicks, entityId: input.hoveredEntity)
         eventSend(
           this: world.uiActions
-          value: UiAction { entity: input.hoveredEntity, actionId: click.actionId }
+          value: UiAction { entityId: input.hoveredEntity, actionId: click.actionId }
         )
       }
     }
@@ -412,14 +412,14 @@ func updateUiInput(input: mod UiInput, world: mod UiWorld, uiSystems: mod UiSyst
   buttonInteractionMark(
     world: world
     uiSystems: uiSystems
-    entity: input.hoveredEntity
+    entityId: input.hoveredEntity
     hovered: true
     pressed: false
   )
   buttonInteractionMark(
     world: world
     uiSystems: uiSystems
-    entity: input.pressedEntity
+    entityId: input.pressedEntity
     hovered: false
     pressed: true
   )
@@ -446,11 +446,11 @@ func uiPointerCaptured(input: view UiInput) pub ret Bool {
   ret false
 }
 
-# This frame's wheel delta if it was routed to `entity`, else 0. The one way a
+# This frame's wheel delta if it was routed to `entityId`, else 0. The one way a
 # system reads the wheel: a canvas zooms by `uiWheelFor(input, canvas)`, a list
 # scrolls by `uiWheelFor(input, list)`, and at most one of them is non-zero.
-func uiWheelFor(input: view UiInput, entity: view EntityId) ret Float {
-  if isNone(this: entity) or input.wheelTarget is not entity {
+func uiWheelFor(input: view UiInput, entityId: view EntityId) ret Float {
+  if isNone(this: entityId) or input.wheelTarget is not entityId {
     ret 0.0
   }
   ret input.wheel

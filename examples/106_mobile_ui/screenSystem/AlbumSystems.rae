@@ -35,11 +35,11 @@ func albumCollectionKey(state: view AppState) ret String {
 # Write a `Text.text` in place, keeping its style — the same compare-before-
 # write discipline the old node-poke used, now keyed off the node's
 # `TextBinding`, not a page + node-id lookup.
-func writeAlbumText(world: mod UiWorld, entity: view EntityId, text: view String) {
-  if componentHas(this: world.texts, entity: entity) is false {
+func writeAlbumText(world: mod UiWorld, entityId: view EntityId, text: view String) {
+  if componentHas(this: world.texts, entityId: entityId) is false {
     ret
   }
-  let current: Text = componentGet(this: world.texts, entity: entity)
+  let current: Text = componentGet(this: world.texts, entityId: entityId)
   if current.text is text {
     ret
   }
@@ -48,7 +48,7 @@ func writeAlbumText(world: mod UiWorld, entity: view EntityId, text: view String
     styleId: "{current.styleId}"
     wrapWidthMode: current.wrapWidthMode
   }
-  componentSet(this: world.texts, entity: entity, data: updated)
+  componentSet(this: world.texts, entityId: entityId, data: updated)
 }
 
 # The album page's header, entirely from data (#979): the caption / title /
@@ -67,16 +67,16 @@ func albumHeaderSystem(
   let nb: Int = componentCount(this: world.textBindings)
   var i: Int = 0
   loop i < nb {
-    let entity: EntityId = componentEntityAt(this: world.textBindings, i: i)
+    let entityId: EntityId = componentEntityAt(this: world.textBindings, i: i)
     let binding: TextBinding = componentDataAt(this: world.textBindings, i: i)
     if binding.key is "album.caption" {
-      writeAlbumText(world: world, entity: entity, text: cv.caption)
+      writeAlbumText(world: world, entityId: entityId, text: cv.caption)
     }
     if binding.key is "album.title" {
-      writeAlbumText(world: world, entity: entity, text: cv.title)
+      writeAlbumText(world: world, entityId: entityId, text: cv.title)
     }
     if binding.key is "album.artist" {
-      writeAlbumText(world: world, entity: entity, text: cv.artist)
+      writeAlbumText(world: world, entityId: entityId, text: cv.artist)
     }
     i = i + 1
   }
@@ -87,8 +87,8 @@ func albumHeaderSystem(
   var c: Int = 0
   loop c < nc {
     let cover: EntityId = componentEntityAt(this: albumSystem.albumHeaders, i: c)
-    if componentHas(this: world.sprites, entity: cover) {
-      let sp: Sprite = componentGet(this: world.sprites, entity: cover)
+    if componentHas(this: world.sprites, entityId: cover) {
+      let sp: Sprite = componentGet(this: world.sprites, entityId: cover)
       if sp.textureKey is not cv.coverStem {
         let updated: Sprite = {
           textureKey: "{cv.coverStem}"
@@ -99,10 +99,10 @@ func albumHeaderSystem(
           nineSlice: sp.nineSlice
           hasNineSlice: sp.hasNineSlice
         }
-        componentSet(this: world.sprites, entity: cover, data: updated)
+        componentSet(this: world.sprites, entityId: cover, data: updated)
       }
     }
-    setHeroWidget(world: world, entity: cover, key: "{cv.coverStem}")
+    setHeroWidget(world: world, entityId: cover, key: "{cv.coverStem}")
     c = c + 1
   }
 }

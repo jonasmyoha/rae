@@ -181,9 +181,9 @@ Two small, general primitives — which is exactly what separates this from the 
 
 ```rae
 # Clear every component of an entity — replaces the hand-listed destroyEntity loop.
-func clearEntityComponents(W: type, world: mod W, entity: view EntityId) {
+func clearEntityComponents(W: type, world: mod W, entityId: view EntityId) {
   loop let table: mod ComponentTable(any) in fields(world) {
-    componentRemove(this: table, entity: entity)
+    componentRemove(this: table, entityId: entityId)
   }
 }
 
@@ -208,9 +208,9 @@ What `clearEntityComponents(world: uiWorld, ...)` unrolls to for `UiWorld` — e
 the hand-written loop, nothing more:
 
 ```rae
-componentRemove(this: world.rects,   entity: entity)
-componentRemove(this: world.sizes,   entity: entity)
-componentRemove(this: world.layouts, entity: entity)
+componentRemove(this: world.rects,   entityId: entityId)
+componentRemove(this: world.sizes,   entityId: entityId)
+componentRemove(this: world.layouts, entityId: entityId)
 # ... one per ComponentTable field; allocator / hierarchyOrder skipped
 ```
 
@@ -325,7 +325,7 @@ loop let f: mod any in fields(comp) {
   # decide per field what to write; fieldName(f) / typeName(f) fold as before
   f.set(value: decodeField(f, doc: doc))     # #960 supplies decodeField
 }
-componentSet(table, entity, comp)
+componentSet(table, entityId, comp)
 ```
 
 **Optional fields.** A pattern's optionality is part of the match: an
@@ -592,4 +592,4 @@ two additional String parameters supplied correctly.
 - Nested structs: does `fields()` recurse, or only one level? (One level; recurse
   explicitly with a nested loop.)
 - Inferring the world type `W` from the value argument, so callers write
-  `clearEntityComponents(world: uiWorld, entity: e)` without an explicit `W:`.
+  `clearEntityComponents(world: uiWorld, entityId: e)` without an explicit `W:`.

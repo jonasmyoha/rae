@@ -38,7 +38,7 @@ const idleHeartbeatSec: Float = 0.5
 
 func toggleChrome(chromeSystem: view ChromeSystem, world: mod UiWorld) {
   let active: Active = { value: not chromeVisible(world: world, chromeSystem: chromeSystem) }
-  componentSet(this: world.actives, entity: chromeSystem.pageRoot, data: active)
+  componentSet(this: world.actives, entityId: chromeSystem.pageRoot, data: active)
 }
 
 # A watched file changed: reload the document (its theme + fonts follow its imports) (a broken
@@ -48,7 +48,7 @@ func reloadDocument(app: mod App) {
   # The selection survives by node id (the entities are new after the mount).
   var keepSelected: String = "{app.testSelectNodeId}"
   if keepSelected.length() is 0 and isNone(this: app.inspectorSystem.selected) is false {
-    keepSelected = nodeIdOf(world: app.world, entity: app.inspectorSystem.selected)
+    keepSelected = nodeIdOf(world: app.world, entityId: app.inspectorSystem.selected)
   }
   let mounted: Bool = documentPrepareSystem(document: app.document, world: app.world)
   if mounted {

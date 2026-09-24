@@ -44,16 +44,16 @@ func markChanged(this: mod ToySystem) {
 
 # STRUCTURAL change (add): componentSet bumps the table generation;
 # markChanged bumps the system revision. New instance starts at 0.
-func toyAddCell(sys: mod ToySystem, entity: view EntityId, v: view Int) {
-  componentSet(this: sys.cells, entity: entity, data: Cell { v: v, revision: 0 })
+func toyAddCell(sys: mod ToySystem, entityId: view EntityId, v: view Int) {
+  componentSet(this: sys.cells, entityId: entityId, data: Cell { v: v, revision: 0 })
   markChanged(this: sys)
 }
 
 # DATA change: componentMod bumps the table generation; bumpRevision
 # bumps the instance revision; markChanged bumps the system revision.
-func toySetValue(sys: mod ToySystem, entity: view EntityId, v: view Int) {
-  if componentHas(this: sys.cells, entity: entity) {
-    let c: mod Cell => componentMod(this: sys.cells, entity: entity)
+func toySetValue(sys: mod ToySystem, entityId: view EntityId, v: view Int) {
+  if componentHas(this: sys.cells, entityId: entityId) {
+    let c: mod Cell => componentMod(this: sys.cells, entityId: entityId)
     c.v = v
     bumpRevision(this: c)
   }
@@ -61,8 +61,8 @@ func toySetValue(sys: mod ToySystem, entity: view EntityId, v: view Int) {
 }
 
 # Pure read — bumps NOTHING (componentView does not bump).
-func toyReadValue(sys: view ToySystem, entity: view EntityId) ret Int {
-  let c: view Cell => componentView(this: sys.cells, entity: entity)
+func toyReadValue(sys: view ToySystem, entityId: view EntityId) ret Int {
+  let c: view Cell => componentView(this: sys.cells, entityId: entityId)
   ret c.v
 }
 
@@ -72,24 +72,24 @@ func main() {
   log("tbl_gen0: {componentTableGeneration(this: sys.cells)}")
 
   let e1: EntityId = id(v: 1)
-  toyAddCell(sys: sys, entity: e1, v: 10)
+  toyAddCell(sys: sys, entityId: e1, v: 10)
   log("sys_rev1: {sys.revision}")
   log("tbl_gen1: {componentTableGeneration(this: sys.cells)}")
-  let c1: Cell = componentGet(this: sys.cells, entity: e1)
+  let c1: Cell = componentGet(this: sys.cells, entityId: e1)
   log("cell_rev0: {c1.revision}")
 
-  toySetValue(sys: sys, entity: e1, v: 11)
+  toySetValue(sys: sys, entityId: e1, v: 11)
   log("sys_rev2: {sys.revision}")
   log("tbl_gen2: {componentTableGeneration(this: sys.cells)}")
-  let c1b: Cell = componentGet(this: sys.cells, entity: e1)
+  let c1b: Cell = componentGet(this: sys.cells, entityId: e1)
   log("cell_rev1: {c1b.revision}")
   log("val: {c1b.v}")
 
   # pure read bumps nothing (instance / table / system all unchanged)
-  let rv: Int = toyReadValue(sys: sys, entity: e1)
+  let rv: Int = toyReadValue(sys: sys, entityId: e1)
   log("read_val: {rv}")
   log("sys_rev_after_read: {sys.revision}")
   log("tbl_gen_after_read: {componentTableGeneration(this: sys.cells)}")
-  let c1c: Cell = componentGet(this: sys.cells, entity: e1)
+  let c1c: Cell = componentGet(this: sys.cells, entityId: e1)
   log("cell_rev_after_read: {c1c.revision}")
 }

@@ -25,28 +25,28 @@ open ecs/ComponentTable
 # table is kept in step by clearing the two from LAST frame and marking the two for
 # THIS frame — no per-entity scan. Merge the flags so an entity that is both
 # hovered and pressed gets a single {hovered:true, pressed:true}.
-func buttonInteractionClear(world: mod UiWorld, uiSystems: mod UiSystems, entity: view EntityId) {
-  if isNone(this: entity) {
+func buttonInteractionClear(world: mod UiWorld, uiSystems: mod UiSystems, entityId: view EntityId) {
+  if isNone(this: entityId) {
     ret
   }
-  if componentHas(this: uiSystems.button.interactions, entity: entity) {
-    componentRemove(this: uiSystems.button.interactions, entity: entity)
+  if componentHas(this: uiSystems.button.interactions, entityId: entityId) {
+    componentRemove(this: uiSystems.button.interactions, entityId: entityId)
   }
 }
 
 func buttonInteractionMark(
   world: mod UiWorld
   uiSystems: mod UiSystems
-  entity: view EntityId
+  entityId: view EntityId
   hovered: view Bool
   pressed: view Bool
 ) {
-  if isNone(this: entity) {
+  if isNone(this: entityId) {
     ret
   }
   var state: Interaction = { hovered: false, pressed: false }
-  if componentHas(this: uiSystems.button.interactions, entity: entity) {
-    state = componentGet(this: uiSystems.button.interactions, entity: entity)
+  if componentHas(this: uiSystems.button.interactions, entityId: entityId) {
+    state = componentGet(this: uiSystems.button.interactions, entityId: entityId)
   }
   if hovered {
     state.hovered = true
@@ -54,7 +54,7 @@ func buttonInteractionMark(
   if pressed {
     state.pressed = true
   }
-  componentSet(this: uiSystems.button.interactions, entity: entity, data: state)
+  componentSet(this: uiSystems.button.interactions, entityId: entityId, data: state)
 }
 
 # Read a per-entity interaction flag (default false when the entity carries no
@@ -62,21 +62,21 @@ func buttonInteractionMark(
 func entityHovered(
   world: view UiWorld
   uiSystems: view UiSystems
-  entity: view EntityId
+  entityId: view EntityId
 ) pub ret Bool {
-  if componentHas(this: uiSystems.button.interactions, entity: entity) is false {
+  if componentHas(this: uiSystems.button.interactions, entityId: entityId) is false {
     ret false
   }
-  ret componentGet(this: uiSystems.button.interactions, entity: entity).hovered
+  ret componentGet(this: uiSystems.button.interactions, entityId: entityId).hovered
 }
 
 func entityPressed(
   world: view UiWorld
   uiSystems: view UiSystems
-  entity: view EntityId
+  entityId: view EntityId
 ) pub ret Bool {
-  if componentHas(this: uiSystems.button.interactions, entity: entity) is false {
+  if componentHas(this: uiSystems.button.interactions, entityId: entityId) is false {
     ret false
   }
-  ret componentGet(this: uiSystems.button.interactions, entity: entity).pressed
+  ret componentGet(this: uiSystems.button.interactions, entityId: entityId).pressed
 }

@@ -353,7 +353,7 @@ func resetNodeToBase(
   frames: view FrameSet
   states: view StateSet
   nodeId: view String
-  entity: view EntityId
+  entityId: view EntityId
 ) {
   let doc: view JsonDoc => scene.doc
   let baseIdx: Int = sceneNodeIndex(this: scene, nodeId: nodeId)
@@ -376,7 +376,7 @@ func resetNodeToBase(
       scene: scene
       bagIdx: bagIdx
       baseBag: baseBag
-      entity: entity
+      entityId: entityId
     )
     f = f + 1
   }
@@ -393,7 +393,7 @@ func resetNodeToBase(
       scene: scene
       bagIdx: bagIdx
       baseBag: baseBag
-      entity: entity
+      entityId: entityId
     )
     st = st + 1
   }
@@ -416,7 +416,7 @@ func resetNodeToBase(
       let val: JsonValue = Json.objectValueAt(doc: doc, this: baseBag, idx: k)
       applyComponentByName(
         world: world
-        entity: entity
+        entityId: entityId
         name: key
         doc: doc
         val: val
@@ -435,7 +435,7 @@ func stripBagAddedComponents(
   scene: view Scene
   bagIdx: view Int
   baseBag: view JsonValue
-  entity: view EntityId
+  entityId: view EntityId
 ) {
   if bagIdx < 0 {
     ret
@@ -455,7 +455,7 @@ func stripBagAddedComponents(
     }
     if skip is false {
       if bagHasKey(doc: doc, bag: baseBag, key: key) is false {
-        removeComponentByName(world: world, entity: entity, name: key)
+        removeComponentByName(world: world, entityId: entityId, name: key)
       }
     }
     k = k + 1
@@ -470,7 +470,7 @@ func overlayNodeFromFrame(
   frames: view FrameSet
   frameIdx: view Int
   nodeId: view String
-  entity: view EntityId
+  entityId: view EntityId
 ) {
   let bagIdx: Int = frameNodeBagIdx(
     scene: scene
@@ -482,7 +482,7 @@ func overlayNodeFromFrame(
     world: world
     scene: scene
     bagIdx: bagIdx
-    entity: entity
+    entityId: entityId
     nodeId: nodeId
   )
 }
@@ -494,7 +494,7 @@ func overlayNodeFromState(
   states: view StateSet
   stateIdx: view Int
   nodeId: view String
-  entity: view EntityId
+  entityId: view EntityId
 ) {
   let bagIdx: Int = stateNodeBagIdx(
     scene: scene
@@ -506,7 +506,7 @@ func overlayNodeFromState(
     world: world
     scene: scene
     bagIdx: bagIdx
-    entity: entity
+    entityId: entityId
     nodeId: nodeId
   )
 }
@@ -516,7 +516,7 @@ func overlayNodeFromBag(
   world: mod UiWorld
   scene: view Scene
   bagIdx: view Int
-  entity: view EntityId
+  entityId: view EntityId
   nodeId: view String
 ) {
   if bagIdx < 0 {
@@ -541,7 +541,7 @@ func overlayNodeFromBag(
           let noName: String = ""
           let name: String = Json.jsonString(this: elem, fallback: noName)
           if name.length() > 0 {
-            removeComponentByName(world: world, entity: entity, name: name)
+            removeComponentByName(world: world, entityId: entityId, name: name)
           }
           r = r + 1
         }
@@ -549,7 +549,7 @@ func overlayNodeFromBag(
         let val: JsonValue = Json.objectValueAt(doc: doc, this: bag, idx: k)
         applyComponentByName(
           world: world
-          entity: entity
+          entityId: entityId
           name: key
           doc: doc
           val: val
@@ -645,14 +645,14 @@ func applyFrameToPage(
   let overridden: List(String) = overriddenNodeIds(scene: scene, frames: frames, states: states)
   loop let nodeId: view String in overridden {
     if let raw: Int = findNodeInPage(world: world, pageId: pageId, nodeId: nodeId) {
-      let entity: EntityId = nodeEntity(world: world, index: raw)
+      let entityId: EntityId = nodeEntity(world: world, index: raw)
       resetNodeToBase(
         world: world
         scene: scene
         frames: frames
         states: states
         nodeId: nodeId
-        entity: entity
+        entityId: entityId
       )
       if frameIdx >= 0 {
         overlayNodeFromFrame(
@@ -661,7 +661,7 @@ func applyFrameToPage(
           frames: frames
           frameIdx: frameIdx
           nodeId: nodeId
-          entity: entity
+          entityId: entityId
         )
       }
       var st: Int = 0
@@ -674,7 +674,7 @@ func applyFrameToPage(
               states: states
               stateIdx: st
               nodeId: nodeId
-              entity: entity
+              entityId: entityId
             )
           }
         }

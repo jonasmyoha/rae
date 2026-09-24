@@ -37,18 +37,18 @@ func main() {
   let e2: EntityId = { index: 2, generation: 0 }
   let e3: EntityId = { index: 3, generation: 0 }
   let e4: EntityId = { index: 4, generation: 0 }
-  componentSet(this: pos, entity: e1, data: Position { x: 10 })
-  componentSet(this: pos, entity: e2, data: Position { x: 20 })
-  componentSet(this: pos, entity: e3, data: Position { x: 30 })
-  componentSet(this: pos, entity: e4, data: Position { x: 40 })
-  componentSet(this: vel, entity: e2, data: Velocity { v: 2 })
-  componentSet(this: vel, entity: e3, data: Velocity { v: 3 })
-  componentSet(this: vel, entity: e4, data: Velocity { v: 4 })
-  componentSet(this: hp, entity: e3, data: Hp { hp: 33 })
-  componentSet(this: hp, entity: e4, data: Hp { hp: 44 })
-  componentSet(this: tag, entity: e4, data: Tag { t: 1 })
-  componentSet(this: nm, entity: e1, data: Nm { n: 100 })
-  componentSet(this: nm, entity: e4, data: Nm { n: 400 })
+  componentSet(this: pos, entityId: e1, data: Position { x: 10 })
+  componentSet(this: pos, entityId: e2, data: Position { x: 20 })
+  componentSet(this: pos, entityId: e3, data: Position { x: 30 })
+  componentSet(this: pos, entityId: e4, data: Position { x: 40 })
+  componentSet(this: vel, entityId: e2, data: Velocity { v: 2 })
+  componentSet(this: vel, entityId: e3, data: Velocity { v: 3 })
+  componentSet(this: vel, entityId: e4, data: Velocity { v: 4 })
+  componentSet(this: hp, entityId: e3, data: Hp { hp: 33 })
+  componentSet(this: hp, entityId: e4, data: Hp { hp: 44 })
+  componentSet(this: tag, entityId: e4, data: Tag { t: 1 })
+  componentSet(this: nm, entityId: e1, data: Nm { n: 100 })
+  componentSet(this: nm, entityId: e4, data: Nm { n: 400 })
 
   # query4, smallest table (tag, 1 entity) in slot D.
   let h4: List(Query4Match) = query4(
@@ -63,7 +63,7 @@ func main() {
     let velocity: view Velocity => query4ViewB(tableB: vel, hit: row)
     let h: view Hp => query4ViewC(tableC: hp, hit: row)
     let tg: view Tag => query4ViewD(tableD: tag, hit: row)
-    log("q4 e{row.entity.index}: {position.x} {velocity.v} {h.hp} {tg.t}")
+    log("q4 e{row.entityId.index}: {position.x} {velocity.v} {h.hp} {tg.t}")
   }
 
   # query4 again with the smallest table in slot B (a different driver branch).
@@ -78,7 +78,7 @@ func main() {
     let px: mod Position => queryModAt(table: pos, denseIndex: row.indexA)
     px.x = px.x + 1000
   }
-  let got: Position = componentGet(this: pos, entity: e4)
+  let got: Position = componentGet(this: pos, entityId: e4)
   log("e4.x after q4 mod: {got.x}")
 
   # query5, smallest table (tag) in slot E.
@@ -96,7 +96,7 @@ func main() {
     let h: view Hp => query5ViewC(tableC: hp, hit: row)
     let nn: view Nm => query5ViewD(tableD: nm, hit: row)
     let tg: view Tag => query5ViewE(tableE: tag, hit: row)
-    log("q5 e{row.entity.index}: {position.x} {velocity.v} {h.hp} {nn.n} {tg.t}")
+    log("q5 e{row.entityId.index}: {position.x} {velocity.v} {h.hp} {nn.n} {tg.t}")
   }
 
   # query5 with the smallest table in slot A.
@@ -112,6 +112,6 @@ func main() {
     let nn: mod Nm => queryModAt(table: nm, denseIndex: row.indexE)
     nn.n = nn.n + 1
   }
-  let gotNm: Nm = componentGet(this: nm, entity: e4)
+  let gotNm: Nm = componentGet(this: nm, entityId: e4)
   log("e4.n after q5 mod: {gotNm.n}")
 }

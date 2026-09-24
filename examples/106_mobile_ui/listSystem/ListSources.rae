@@ -272,7 +272,7 @@ func listSourceKey(
     ret searchQueryOnPage(
       world: world
       uiSystems: uiSystems
-      page: pageOf(world: world, uiSystems: uiSystems, entity: host)
+      page: pageOf(world: world, uiSystems: uiSystems, entityId: host)
     )
   }
   if source is ListSourceKind.albumTracks {
@@ -300,8 +300,8 @@ func listViewDataFor(
   }
   if source is ListSourceKind.searchTracks or source is ListSourceKind.searchAlbums {
     var maxRows: Int = 12
-    if componentHas(this: world.listViews, entity: host) {
-      let lv: ListView = componentGet(this: world.listViews, entity: host)
+    if componentHas(this: world.listViews, entityId: host) {
+      let lv: ListView = componentGet(this: world.listViews, entityId: host)
       if lv.visibleItemCount > 0 {
         maxRows = lv.visibleItemCount
       }
@@ -311,7 +311,7 @@ func listViewDataFor(
       query: searchQueryOnPage(
         world: world
         uiSystems: uiSystems
-        page: pageOf(world: world, uiSystems: uiSystems, entity: host)
+        page: pageOf(world: world, uiSystems: uiSystems, entityId: host)
       )
       albumsOnly: source is ListSourceKind.searchAlbums
       maxRows: maxRows
@@ -359,9 +359,9 @@ func listSourceSystem(
         state: state
         playbackSystem: playbackSystem
       )
-      componentSet(this: world.listViewDatas, entity: host, data: own data)
+      componentSet(this: world.listViewDatas, entityId: host, data: own data)
       let built: ListSource = { source: binding.source, builtKey: "{key}" }
-      componentSet(this: world.listSources, entity: host, data: own built)
+      componentSet(this: world.listSources, entityId: host, data: own built)
       changed = true
     }
     i = i + 1

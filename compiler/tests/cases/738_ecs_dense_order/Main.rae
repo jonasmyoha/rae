@@ -29,26 +29,26 @@ func main() {
   let e2: EntityId = { index: 2, generation: 0 }
   let e3: EntityId = { index: 3, generation: 0 }
   let e4: EntityId = { index: 4, generation: 0 }
-  componentSet(this: pos, entity: e1, data: Position { x: 10 })
-  componentSet(this: pos, entity: e2, data: Position { x: 20 })
-  componentSet(this: pos, entity: e3, data: Position { x: 30 })
-  componentSet(this: pos, entity: e4, data: Position { x: 40 })
+  componentSet(this: pos, entityId: e1, data: Position { x: 10 })
+  componentSet(this: pos, entityId: e2, data: Position { x: 20 })
+  componentSet(this: pos, entityId: e3, data: Position { x: 30 })
+  componentSet(this: pos, entityId: e4, data: Position { x: 40 })
   log("insertion: {order(pos: pos)}")
 
   # Non-tail remove: e2's slot (dense 1) receives the TAIL row (e4).
-  let stamp4: Int = componentModStamp(this: pos, entity: e4)
-  componentRemove(this: pos, entity: e2)
+  let stamp4: Int = componentModStamp(this: pos, entityId: e4)
+  componentRemove(this: pos, entityId: e2)
   log("after removing e2 (non-tail): {order(pos: pos)}")
   log(
-    "e4 still findable at dense {componentIndexOf(this: pos, entity: e4)} with x={componentGet(
+    "e4 still findable at dense {componentIndexOf(this: pos, entityId: e4)} with x={componentGet(
       this: pos
-      entity: e4
+      entityId: e4
     ).x}"
   )
-  log("e4 stamp moved intact: {componentModStamp(this: pos, entity: e4) - stamp4}")
-  log("e2 gone: {componentHas(this: pos, entity: e2)}")
+  log("e4 stamp moved intact: {componentModStamp(this: pos, entityId: e4) - stamp4}")
+  log("e2 gone: {componentHas(this: pos, entityId: e2)}")
 
   # Tail remove: order of the rest is untouched.
-  componentRemove(this: pos, entity: e3)
+  componentRemove(this: pos, entityId: e3)
   log("after removing e3 (tail): {order(pos: pos)}")
 }

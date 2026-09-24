@@ -23,7 +23,7 @@ open ecs/ComponentTable
 # A minimal stand-in for the removed backend's input system: an event carries
 # its own owned actionId, so appending one must DEEP-COPY the source String.
 type ActionEvent {
-  entity: EntityId
+  entityId: EntityId
   actionId: String
 }
 
@@ -35,27 +35,27 @@ func createInputSystem() ret InputSystem {
   ret InputSystem { events: List.create(ActionEvent, cap: 4) }
 }
 
-func appendActionEvent(input: mod InputSystem, entity: view EntityId, actionId: view String) {
+func appendActionEvent(input: mod InputSystem, entityId: view EntityId, actionId: view String) {
   var copied: String = ""
   copied = copied.concat(other: actionId)
-  input.events.add(value: ActionEvent { entity: entity, actionId: own copied })
+  input.events.add(value: ActionEvent { entityId: entityId, actionId: own copied })
 }
 
 func main() {
   let world: UiWorld = createUiWorld()
-  let entity: EntityId = createEntity(world: world)
+  let entityId: EntityId = createEntity(world: world)
   let oc: OnClick = {
     actionId: "playback.toggle.long.string"
     actionIdDouble: ""
     actionIdTriple: ""
     maxDelayMs: 0
   }
-  componentSet(this: world.onClicks, entity: entity, data: oc)
+  componentSet(this: world.onClicks, entityId: entityId, data: oc)
 
   if true {
     let input: InputSystem = createInputSystem()
-    let ocView: view OnClick => componentView(this: world.onClicks, entity: entity)
-    appendActionEvent(input: input, entity: entity, actionId: ocView.actionId)
+    let ocView: view OnClick => componentView(this: world.onClicks, entityId: entityId)
+    appendActionEvent(input: input, entityId: entityId, actionId: ocView.actionId)
     log("appended action event; input has {input.events.length} events")
   }
   # `input` dropped here. Now we drop `world` at end of main —

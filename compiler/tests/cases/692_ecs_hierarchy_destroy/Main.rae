@@ -52,8 +52,8 @@ func main() {
     root: r
   )
   log("A alive after: {allocatorAliveCount(this: alloc)}")
-  log("A r alive: {allocatorIsAlive(this: alloc, entity: r)}")
-  log("A a1 alive: {allocatorIsAlive(this: alloc, entity: a1)}")
+  log("A r alive: {allocatorIsAlive(this: alloc, entityId: r)}")
+  log("A a1 alive: {allocatorIsAlive(this: alloc, entityId: a1)}")
   log("A parents table count: {componentCount(this: parents)}")
   log("A childrens table count: {componentCount(this: childrens)}")
 
@@ -81,12 +81,12 @@ func main() {
     parent: m
   )
 
-  detachForDestroy(parents: parents, childrens: childrens, entity: m)
+  detachForDestroy(parents: parents, childrens: childrens, entityId: m)
   # m is gone from the hierarchy; p no longer lists it; c1/c2 are orphaned roots.
   log("B p children count: {getChildren(childrens: childrens, parent: p).length}")
-  log("B m has parent: {componentHas(this: parents, entity: m)}")
-  log("B m has children: {componentHas(this: childrens, entity: m)}")
-  log("B c1 has parent: {componentHas(this: parents, entity: c1)}")
-  log("B c2 has parent: {componentHas(this: parents, entity: c2)}")
-  log("B p has parent: {componentHas(this: parents, entity: p)}")
+  log("B m has parent: {componentHas(this: parents, entityId: m)}")
+  log("B m has children: {componentHas(this: childrens, entityId: m)}")
+  log("B c1 has parent: {componentHas(this: parents, entityId: c1)}")
+  log("B c2 has parent: {componentHas(this: parents, entityId: c2)}")
+  log("B p has parent: {componentHas(this: parents, entityId: p)}")
 }

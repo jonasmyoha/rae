@@ -134,13 +134,13 @@ func failWorld3dAsset(asset: mod World3dAsset, message: view String) {
 # in renderable order and each is given a transform immediately, that index is the
 # entity's dense position, which world3dAssetEntity resolves back with
 # world3dEntityAt — the same mapping the Scene3d asset used.
-func addWorldAssetEntity(asset: mod World3dAsset, nodeId: view String, entity: view Int) {
+func addWorldAssetEntity(asset: mod World3dAsset, nodeId: view String, entityIndex: view Int) {
   var nodeIdCopy: String = ""
   unsafe {
     nodeIdCopy = rae_ext_rae_string_copy(string: nodeId)
   }
   asset.nodeIds.add(value: nodeIdCopy)
-  asset.entityIds.add(value: entity)
+  asset.entityIds.add(value: entityIndex)
 }
 
 # Parse a .raescene straight into a World3d (#796). One node walk with the shared
@@ -280,25 +280,25 @@ func parseWorld3dAsset(source: view String, meshes: view MeshRegistry3d) pub ret
         if visibleValue.kind is JsonKind.bool and visibleValue.asBool is false {
           visible = false
         }
-        let entity: EntityId = world3dAddEntity(world: asset.world)
-        world3dSetTransform(world: asset.world, entity: entity, transform: transform)
+        let entityId: EntityId = world3dAddEntity(world: asset.world)
+        world3dSetTransform(world: asset.world, entityId: entityId, transform: transform)
         # The MeshRenderer's legacy entity/material Int fields are ignored by the
         # World3d renderer (it reads the entity + the Material3d component); they
         # carry the dense index / material index for parity with the old bridge.
         world3dSetMeshRenderer(
           world: asset.world
-          entity: entity
+          entityId: entityId
           renderer: MeshRenderer {
-            entity: entityIndex
+            entityIndex: entityIndex
             mesh: mesh
             material: materialIdx
             visible: visible
           }
         )
         if let material: Material3d = materialValues.copyAt(index: materialIdx) {
-          world3dSetMaterial(world: asset.world, entity: entity, material: material)
+          world3dSetMaterial(world: asset.world, entityId: entityId, material: material)
         }
-        addWorldAssetEntity(asset: asset, nodeId: node.nodeId, entity: entityIndex)
+        addWorldAssetEntity(asset: asset, nodeId: node.nodeId, entityIndex: entityIndex)
         entityIndex = entityIndex + 1
       } else {
         let sdf: JsonValue = nodeComponent(doc: doc, node: node, name: "SdfPrimitive")
@@ -364,13 +364,13 @@ func parseWorld3dAsset(source: view String, meshes: view MeshRegistry3d) pub ret
         if smoothingValue.kind is JsonKind.number {
           smoothing = smoothingValue.asNumber
         }
-        let entity: EntityId = world3dAddEntity(world: asset.world)
-        world3dSetTransform(world: asset.world, entity: entity, transform: transform)
+        let entityId: EntityId = world3dAddEntity(world: asset.world)
+        world3dSetTransform(world: asset.world, entityId: entityId, transform: transform)
         world3dSetSdf(
           world: asset.world
-          entity: entity
+          entityId: entityId
           sdf: SdfPrimitive {
-            entity: entityIndex
+            entityIndex: entityIndex
             shape: shape
             material: materialIdx
             noise: noise
@@ -379,9 +379,9 @@ func parseWorld3dAsset(source: view String, meshes: view MeshRegistry3d) pub ret
           }
         )
         if let material: Material3d = materialValues.copyAt(index: materialIdx) {
-          world3dSetMaterial(world: asset.world, entity: entity, material: material)
+          world3dSetMaterial(world: asset.world, entityId: entityId, material: material)
         }
-        addWorldAssetEntity(asset: asset, nodeId: node.nodeId, entity: entityIndex)
+        addWorldAssetEntity(asset: asset, nodeId: node.nodeId, entityIndex: entityIndex)
         entityIndex = entityIndex + 1
       }
     }

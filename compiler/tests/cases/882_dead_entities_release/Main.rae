@@ -15,12 +15,12 @@ func main() {
   var uiSystems: UiSystems = createUiSystems()
   let a: EntityId = createEntity(world: world)
   let b: EntityId = createEntity(world: world)
-  componentSet(this: world.actives, entity: a, data: Active { value: true })
+  componentSet(this: world.actives, entityId: a, data: Active { value: true })
   log("a index={a.index} b index={b.index} alive={aliveCount(world: world)}")
 
-  destroyEntity(world: world, entity: a)
+  destroyEntity(world: world, entityId: a)
   log(
-    "after destroy: alive={aliveCount(world: world)} a isAlive={isAlive(world: world, entity: a)} dead={world.deadEntities.length}"
+    "after destroy: alive={aliveCount(world: world)} a isAlive={isAlive(world: world, entityId: a)} dead={world.deadEntities.length}"
   )
 
   # Not released yet: a fresh index, not a's.
@@ -34,14 +34,14 @@ func main() {
   log(
     "d index={d.index} reused a: {d.index is a.index} newer generation: {d.generation > a.generation}"
   )
-  log("stale a has Active: {componentHas(this: world.actives, entity: a)}")
+  log("stale a has Active: {componentHas(this: world.actives, entityId: a)}")
 
   # A subtree destroy queues every entity of it; one release recycles all.
   let root: EntityId = createEntity(world: world)
   let child: EntityId = createEntity(world: world)
   var kids: Children = { ids: List.create(EntityId, cap: 1) }
   kids.ids.add(value: child)
-  componentSet(this: world.childrens, entity: root, data: kids)
+  componentSet(this: world.childrens, entityId: root, data: kids)
   destroyEntitySubtree(world: world, uiSystems: uiSystems, root: root)
   log("subtree dead={world.deadEntities.length} alive={aliveCount(world: world)}")
   releaseDeadEntities(world: world, uiSystems: uiSystems)

@@ -79,7 +79,7 @@ func applyMusicComponents(world: mod UiWorld, musicSystems: mod MusicSystems) {
       continue
     }
     kept.add(value: PendingComponent {
-      entity: pending.entity
+      entityId: pending.entityId
       name: "{pending.name}"
       json: "{pending.json}"
       sceneId: "{pending.sceneId}"
@@ -97,14 +97,14 @@ func sweepMusicEntities(
   uiSystems: mod UiSystems
   musicSystems: mod MusicSystems
 ) {
-  loop let entity: view EntityId in world.deadEntities {
-    clearEntityComponents(world: musicSystems.playbackSystem, entity: entity)
-    clearEntityComponents(world: musicSystems.dockSystem, entity: entity)
-    clearEntityComponents(world: musicSystems.albumSystem, entity: entity)
-    clearEntityComponents(world: musicSystems.profileSystem, entity: entity)
-    clearEntityComponents(world: musicSystems.historySystem, entity: entity)
-    clearEntityComponents(world: musicSystems.homeSystem, entity: entity)
-    clearEntityComponents(world: musicSystems.albumCoverSystem, entity: entity)
+  loop let entityId: view EntityId in world.deadEntities {
+    clearEntityComponents(world: musicSystems.playbackSystem, entityId: entityId)
+    clearEntityComponents(world: musicSystems.dockSystem, entityId: entityId)
+    clearEntityComponents(world: musicSystems.albumSystem, entityId: entityId)
+    clearEntityComponents(world: musicSystems.profileSystem, entityId: entityId)
+    clearEntityComponents(world: musicSystems.historySystem, entityId: entityId)
+    clearEntityComponents(world: musicSystems.homeSystem, entityId: entityId)
+    clearEntityComponents(world: musicSystems.albumCoverSystem, entityId: entityId)
   }
   releaseDeadEntities(world: world, uiSystems: uiSystems)
 }

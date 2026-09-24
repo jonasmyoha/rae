@@ -90,15 +90,15 @@ func listScene() ret String {
 func describe(world: view UiWorld, rowEntity: view EntityId, nodeId: view String) ret String {
   let page: String = "listRow{rowEntity.index}"
   if let raw: Int = findNodeInPage(world: world, pageId: page, nodeId: nodeId) {
-    let entity: EntityId = nodeEntity(world: world, index: raw)
-    var out: String = "{nodeId}#{entity.index}"
-    if componentHas(this: world.shapes, entity: entity) {
-      out = "{out} fillSlot='{componentView(this: world.shapes, entity: entity).fillSlot}'"
+    let entityId: EntityId = nodeEntity(world: world, index: raw)
+    var out: String = "{nodeId}#{entityId.index}"
+    if componentHas(this: world.shapes, entityId: entityId) {
+      out = "{out} fillSlot='{componentView(this: world.shapes, entityId: entityId).fillSlot}'"
     } else {
       out = "{out} NO-SHAPE"
     }
-    if componentHas(this: world.texts, entity: entity) {
-      out = "{out} text='{componentView(this: world.texts, entity: entity).text}'"
+    if componentHas(this: world.texts, entityId: entityId) {
+      out = "{out} text='{componentView(this: world.texts, entityId: entityId).text}'"
     }
     ret out
   }
@@ -119,20 +119,24 @@ func main() {
   if let raw: Int = world.nodeIds.get(k: "List") {
     listEntity = id(v: raw)
   }
-  let lv: ListView = componentGet(this: world.listViews, entity: listEntity)
+  let lv: ListView = componentGet(this: world.listViews, entityId: listEntity)
   log("mode virtual: {lv.mode is ListViewMode.virtual} bindings: {lv.bindings.length}")
   let rows: List(ListViewRow) = List.create(ListViewRow, cap: 3)
   rows.add(value: row(label: "one", slot: "accent"))
   rows.add(value: row(label: "two", slot: ""))
-  componentSet(this: world.listViewDatas, entity: listEntity, data: ListViewData { rows: own rows })
+  componentSet(
+    this: world.listViewDatas
+    entityId: listEntity
+    data: ListViewData { rows: own rows }
+  )
   listViewSystem(world: world, uiSystems: uiSystems, scenes: registry)
   unsafe {
-    let ch: view Children => componentView(this: world.childrens, entity: listEntity)
+    let ch: view Children => componentView(this: world.childrens, entityId: listEntity)
     log("row entities: {ch.ids.length}")
     var i: Int = 0
     loop i < ch.ids.length {
       let r: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
-      log("row {i}: root#{r.index} rootHasShape={componentHas(this: world.shapes, entity: r)}")
+      log("row {i}: root#{r.index} rootHasShape={componentHas(this: world.shapes, entityId: r)}")
       log("  {describe(world: world, rowEntity: r, nodeId: "Row")}")
       log("  {describe(world: world, rowEntity: r, nodeId: "Label")}")
       i = i + 1
@@ -146,13 +150,13 @@ func main() {
   rows2.add(value: row(label: "two", slot: "accent"))
   componentSet(
     this: world.listViewDatas
-    entity: listEntity
+    entityId: listEntity
     data: ListViewData { rows: own rows2 }
   )
   listViewSystem(world: world, uiSystems: uiSystems, scenes: registry)
   log("--- after same-key rebind (expect one='' two='accent') ---")
   unsafe {
-    let ch: view Children => componentView(this: world.childrens, entity: listEntity)
+    let ch: view Children => componentView(this: world.childrens, entityId: listEntity)
     var i: Int = 0
     loop i < ch.ids.length {
       let r: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)

@@ -37,7 +37,7 @@ func applyEditorComponents(
       continue
     }
     kept.add(value: PendingComponent {
-      entity: pending.entity
+      entityId: pending.entityId
       name: "{pending.name}"
       json: "{pending.json}"
       sceneId: "{pending.sceneId}"
@@ -58,11 +58,11 @@ func sweepEditorEntities(
   inspectorSystem: mod InspectorSystem
   outlinePoolSystem: mod OutlinePoolSystem
 ) {
-  loop let entity: view EntityId in world.deadEntities {
-    clearEntityComponents(world: chromeSystem, entity: entity)
-    clearEntityComponents(world: guideSystem, entity: entity)
-    clearEntityComponents(world: inspectorSystem, entity: entity)
-    clearEntityComponents(world: outlinePoolSystem, entity: entity)
+  loop let entityId: view EntityId in world.deadEntities {
+    clearEntityComponents(world: chromeSystem, entityId: entityId)
+    clearEntityComponents(world: guideSystem, entityId: entityId)
+    clearEntityComponents(world: inspectorSystem, entityId: entityId)
+    clearEntityComponents(world: outlinePoolSystem, entityId: entityId)
   }
   releaseDeadEntities(world: world, uiSystems: uiSystems)
 }

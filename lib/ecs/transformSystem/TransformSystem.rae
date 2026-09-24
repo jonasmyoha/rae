@@ -44,10 +44,10 @@ func transformSystem3D(
 ) {
   # Pass 1: every root (local transform, no Parent) -> world = local.
   loop var i: Int = 0, i < componentCount(this: transforms), ++i {
-    let entity: EntityId = componentEntityAt(this: transforms, i: i)
-    if componentHas(this: parents, entity: entity) is false {
-      let local: Transform3D = componentGet(this: transforms, entity: entity)
-      componentSet(this: worldTransforms, entity: entity, data: rootWorld3D(local: local))
+    let entityId: EntityId = componentEntityAt(this: transforms, i: i)
+    if componentHas(this: parents, entityId: entityId) is false {
+      let local: Transform3D = componentGet(this: transforms, entityId: entityId)
+      componentSet(this: worldTransforms, entityId: entityId, data: rootWorld3D(local: local))
     }
   }
   # Pass 2: every parented entity in depth order -> world = parentWorld o local.
@@ -57,25 +57,25 @@ func transformSystem3D(
     childrens: childrens
   )
   loop var i: Int = 0, i < order.length, ++i {
-    if let entity: EntityId = order.copyAt(index: i) {
-      if componentHas(this: transforms, entity: entity) and componentHas(
+    if let entityId: EntityId = order.copyAt(index: i) {
+      if componentHas(this: transforms, entityId: entityId) and componentHas(
         this: parents
-        entity: entity
+        entityId: entityId
       ) {
-        let local: Transform3D = componentGet(this: transforms, entity: entity)
-        let link: Parent = componentGet(this: parents, entity: entity)
-        if componentHas(this: worldTransforms, entity: link.parent) {
+        let local: Transform3D = componentGet(this: transforms, entityId: entityId)
+        let link: Parent = componentGet(this: parents, entityId: entityId)
+        if componentHas(this: worldTransforms, entityId: link.parent) {
           let parentWorld: WorldTransform3D = componentGet(
             this: worldTransforms
-            entity: link.parent
+            entityId: link.parent
           )
           componentSet(
             this: worldTransforms
-            entity: entity
+            entityId: entityId
             data: composeWorld3D(parentWorld: parentWorld, local: local)
           )
         } else {
-          componentSet(this: worldTransforms, entity: entity, data: rootWorld3D(local: local))
+          componentSet(this: worldTransforms, entityId: entityId, data: rootWorld3D(local: local))
         }
       }
     }
@@ -116,10 +116,10 @@ func transformSystem2D(
   childrens: view ComponentTable(Children)
 ) {
   loop var i: Int = 0, i < componentCount(this: transforms), ++i {
-    let entity: EntityId = componentEntityAt(this: transforms, i: i)
-    if componentHas(this: parents, entity: entity) is false {
-      let local: Transform2D = componentGet(this: transforms, entity: entity)
-      componentSet(this: worldTransforms, entity: entity, data: rootWorld2D(local: local))
+    let entityId: EntityId = componentEntityAt(this: transforms, i: i)
+    if componentHas(this: parents, entityId: entityId) is false {
+      let local: Transform2D = componentGet(this: transforms, entityId: entityId)
+      componentSet(this: worldTransforms, entityId: entityId, data: rootWorld2D(local: local))
     }
   }
   let order: view List(EntityId) => depthOrder(
@@ -128,25 +128,25 @@ func transformSystem2D(
     childrens: childrens
   )
   loop var i: Int = 0, i < order.length, ++i {
-    if let entity: EntityId = order.copyAt(index: i) {
-      if componentHas(this: transforms, entity: entity) and componentHas(
+    if let entityId: EntityId = order.copyAt(index: i) {
+      if componentHas(this: transforms, entityId: entityId) and componentHas(
         this: parents
-        entity: entity
+        entityId: entityId
       ) {
-        let local: Transform2D = componentGet(this: transforms, entity: entity)
-        let link: Parent = componentGet(this: parents, entity: entity)
-        if componentHas(this: worldTransforms, entity: link.parent) {
+        let local: Transform2D = componentGet(this: transforms, entityId: entityId)
+        let link: Parent = componentGet(this: parents, entityId: entityId)
+        if componentHas(this: worldTransforms, entityId: link.parent) {
           let parentWorld: WorldTransform2D = componentGet(
             this: worldTransforms
-            entity: link.parent
+            entityId: link.parent
           )
           componentSet(
             this: worldTransforms
-            entity: entity
+            entityId: entityId
             data: composeWorld2D(parentWorld: parentWorld, local: local)
           )
         } else {
-          componentSet(this: worldTransforms, entity: entity, data: rootWorld2D(local: local))
+          componentSet(this: worldTransforms, entityId: entityId, data: rootWorld2D(local: local))
         }
       }
     }

@@ -19,8 +19,8 @@ open ecs/ComponentTable
 # `T` is inferred from the `ComponentTable(any)` binding at the call site, so
 # `T.default()` names a real type here. This is the decoder's own trick
 # (`var comp: T = T.default()` in lib/ui/RegistryGeneric.rae).
-func addDefaultComponent(T: type, table: mod ComponentTable(T), entity: view EntityId) {
-  componentSet(this: table, entity: entity, data: T.default())
+func addDefaultComponent(T: type, table: mod ComponentTable(T), entityId: view EntityId) {
+  componentSet(this: table, entityId: entityId, data: T.default())
 }
 
 # Add `name` to every selected entity that does NOT already have it, at the
@@ -37,9 +37,9 @@ func addComponentToSelection(
   var added: Int = 0
   loop let table: mod ComponentTable(any) in fields(world) {
     if typeName(table) is name {
-      loop let entity: view EntityId in selection {
-        if isNone(this: entity) is false and componentHas(this: table, entity: entity) is false {
-          addDefaultComponent(table: table, entity: entity)
+      loop let entityId: view EntityId in selection {
+        if isNone(this: entityId) is false and componentHas(this: table, entityId: entityId) is false {
+          addDefaultComponent(table: table, entityId: entityId)
           added = added + 1
         }
       }
@@ -58,9 +58,9 @@ func removeComponentFromSelection(
   var removed: Int = 0
   loop let table: mod ComponentTable(any) in fields(world) {
     if typeName(table) is name {
-      loop let entity: view EntityId in selection {
-        if isNone(this: entity) is false and componentHas(this: table, entity: entity) {
-          componentRemove(this: table, entity: entity)
+      loop let entityId: view EntityId in selection {
+        if isNone(this: entityId) is false and componentHas(this: table, entityId: entityId) {
+          componentRemove(this: table, entityId: entityId)
           removed = removed + 1
         }
       }
@@ -102,8 +102,8 @@ func selectionHasAll(
   var missing: Int = 0
   loop let table: view ComponentTable(any) in fields(world) {
     if typeName(table) is name {
-      loop let entity: view EntityId in selection {
-        if isNone(this: entity) is false and componentHas(this: table, entity: entity) is false {
+      loop let entityId: view EntityId in selection {
+        if isNone(this: entityId) is false and componentHas(this: table, entityId: entityId) is false {
           missing = missing + 1
         }
       }

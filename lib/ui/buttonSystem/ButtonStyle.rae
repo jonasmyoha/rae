@@ -24,18 +24,22 @@ open ecs/ComponentTable
 # ----- variant readers (fresh scalar/String copies, no struct copy) --
 func styleWantSpriteKey(
   world: view UiWorld
-  entity: view EntityId
+  entityId: view EntityId
   selected: view Bool
 ) ret String {
-  let style: view StateStyle => componentView(this: world.stateStyles, entity: entity)
+  let style: view StateStyle => componentView(this: world.stateStyles, entityId: entityId)
   if selected {
     ret "{style.spriteKeySelected}"
   }
   ret "{style.spriteKey}"
 }
 
-func styleWantTint(world: view UiWorld, entity: view EntityId, selected: view Bool) ret RgbaColor {
-  let style: view StateStyle => componentView(this: world.stateStyles, entity: entity)
+func styleWantTint(
+  world: view UiWorld
+  entityId: view EntityId
+  selected: view Bool
+) ret RgbaColor {
+  let style: view StateStyle => componentView(this: world.stateStyles, entityId: entityId)
   # A non-empty slot references the active theme (#237); else the literal.
   if selected {
     if style.tintSelectedSlot.length() > 0 {
@@ -49,44 +53,44 @@ func styleWantTint(world: view UiWorld, entity: view EntityId, selected: view Bo
   ret style.tint
 }
 
-func styleHasTint(world: view UiWorld, entity: view EntityId) ret Bool {
-  let style: view StateStyle => componentView(this: world.stateStyles, entity: entity)
+func styleHasTint(world: view UiWorld, entityId: view EntityId) ret Bool {
+  let style: view StateStyle => componentView(this: world.stateStyles, entityId: entityId)
   ret style.hasTint
 }
 
 func styleWantTextStyle(
   world: view UiWorld
-  entity: view EntityId
+  entityId: view EntityId
   selected: view Bool
 ) ret String {
-  let style: view StateStyle => componentView(this: world.stateStyles, entity: entity)
+  let style: view StateStyle => componentView(this: world.stateStyles, entityId: entityId)
   if selected {
     ret "{style.textStyleSelected}"
   }
   ret "{style.textStyle}"
 }
 
-func styleDisabledAlpha(world: view UiWorld, entity: view EntityId) ret Float {
-  let style: view StateStyle => componentView(this: world.stateStyles, entity: entity)
+func styleDisabledAlpha(world: view UiWorld, entityId: view EntityId) ret Float {
+  let style: view StateStyle => componentView(this: world.stateStyles, entityId: entityId)
   ret style.disabledAlpha
 }
 
-func styleLoadingAlpha(world: view UiWorld, entity: view EntityId) ret Float {
-  let style: view StateStyle => componentView(this: world.stateStyles, entity: entity)
+func styleLoadingAlpha(world: view UiWorld, entityId: view EntityId) ret Float {
+  let style: view StateStyle => componentView(this: world.stateStyles, entityId: entityId)
   ret style.loadingAlpha
 }
 
-func styleErrorAlpha(world: view UiWorld, entity: view EntityId) ret Float {
-  let style: view StateStyle => componentView(this: world.stateStyles, entity: entity)
+func styleErrorAlpha(world: view UiWorld, entityId: view EntityId) ret Float {
+  let style: view StateStyle => componentView(this: world.stateStyles, entityId: entityId)
   ret style.errorAlpha
 }
 
 func styleWantShapeFill(
   world: view UiWorld
-  entity: view EntityId
+  entityId: view EntityId
   selected: view Bool
 ) ret RgbaColor {
-  let style: view StateStyle => componentView(this: world.stateStyles, entity: entity)
+  let style: view StateStyle => componentView(this: world.stateStyles, entityId: entityId)
   # A non-empty slot references the active theme (#237); else the literal.
   if selected {
     if style.shapeFillSelectedSlot.length() > 0 {
@@ -100,76 +104,80 @@ func styleWantShapeFill(
   ret style.shapeFill
 }
 
-func styleHasShapeFill(world: view UiWorld, entity: view EntityId) ret Bool {
-  let style: view StateStyle => componentView(this: world.stateStyles, entity: entity)
+func styleHasShapeFill(world: view UiWorld, entityId: view EntityId) ret Bool {
+  let style: view StateStyle => componentView(this: world.stateStyles, entityId: entityId)
   ret style.hasShapeFill
 }
 
-func styleWantOffset(world: view UiWorld, entity: view EntityId, selected: view Bool) ret Vec2 {
-  let style: view StateStyle => componentView(this: world.stateStyles, entity: entity)
+func styleWantOffset(world: view UiWorld, entityId: view EntityId, selected: view Bool) ret Vec2 {
+  let style: view StateStyle => componentView(this: world.stateStyles, entityId: entityId)
   if selected {
     ret style.offsetSelected
   }
   ret style.offset
 }
 
-func styleHasOffset(world: view UiWorld, entity: view EntityId) ret Bool {
-  let style: view StateStyle => componentView(this: world.stateStyles, entity: entity)
+func styleHasOffset(world: view UiWorld, entityId: view EntityId) ret Bool {
+  let style: view StateStyle => componentView(this: world.stateStyles, entityId: entityId)
   ret style.hasOffset
 }
 
 # ----- read-side checks (view borrows only) --------------------------
-func spriteKeyDiffers(world: view UiWorld, entity: view EntityId, wantKey: view String) ret Bool {
+func spriteKeyDiffers(world: view UiWorld, entityId: view EntityId, wantKey: view String) ret Bool {
   if wantKey.length() is 0 {
     ret false
   }
-  if componentHas(this: world.sprites, entity: entity) is false {
+  if componentHas(this: world.sprites, entityId: entityId) is false {
     ret false
   }
-  let cur: view Sprite => componentView(this: world.sprites, entity: entity)
+  let cur: view Sprite => componentView(this: world.sprites, entityId: entityId)
   ret cur.textureKey is wantKey is false
 }
 
 func spriteTintDiffers(
   world: view UiWorld
-  entity: view EntityId
+  entityId: view EntityId
   wantTint: view RgbaColor
 ) ret Bool {
-  if componentHas(this: world.sprites, entity: entity) is false {
+  if componentHas(this: world.sprites, entityId: entityId) is false {
     ret false
   }
-  let cur: view Sprite => componentView(this: world.sprites, entity: entity)
+  let cur: view Sprite => componentView(this: world.sprites, entityId: entityId)
   ret equals(a: cur.tint, b: wantTint) is false
 }
 
-func textStyleDiffers(world: view UiWorld, entity: view EntityId, wantStyle: view String) ret Bool {
+func textStyleDiffers(
+  world: view UiWorld
+  entityId: view EntityId
+  wantStyle: view String
+) ret Bool {
   if wantStyle.length() is 0 {
     ret false
   }
-  if componentHas(this: world.texts, entity: entity) is false {
+  if componentHas(this: world.texts, entityId: entityId) is false {
     ret false
   }
-  let cur: view Text => componentView(this: world.texts, entity: entity)
+  let cur: view Text => componentView(this: world.texts, entityId: entityId)
   ret cur.styleId is wantStyle is false
 }
 
 func shapeFillDiffers(
   world: view UiWorld
-  entity: view EntityId
+  entityId: view EntityId
   wantFill: view RgbaColor
 ) ret Bool {
-  if componentHas(this: world.shapes, entity: entity) is false {
+  if componentHas(this: world.shapes, entityId: entityId) is false {
     ret false
   }
-  let cur: view Shape => componentView(this: world.shapes, entity: entity)
+  let cur: view Shape => componentView(this: world.shapes, entityId: entityId)
   ret equals(a: cur.fill, b: wantFill) is false
 }
 
-func offsetDiffers(world: view UiWorld, entity: view EntityId, wantOffset: view Vec2) ret Bool {
-  if componentHas(this: world.offsets, entity: entity) is false {
+func offsetDiffers(world: view UiWorld, entityId: view EntityId, wantOffset: view Vec2) ret Bool {
+  if componentHas(this: world.offsets, entityId: entityId) is false {
     ret true
   }
-  let cur: view Offset => componentView(this: world.offsets, entity: entity)
+  let cur: view Offset => componentView(this: world.offsets, entityId: entityId)
   if cur.delta.x is not wantOffset.x {
     ret true
   }
@@ -177,18 +185,18 @@ func offsetDiffers(world: view UiWorld, entity: view EntityId, wantOffset: view 
 }
 
 # ----- per-visual apply (mod borrow only when a check said "differs")
-func applySpriteStyle(world: mod UiWorld, entity: view EntityId, selected: view Bool) {
-  var wantKey: String = styleWantSpriteKey(world: world, entity: entity, selected: selected)
-  let wantTint: RgbaColor = styleWantTint(world: world, entity: entity, selected: selected)
-  let keyChange: Bool = spriteKeyDiffers(world: world, entity: entity, wantKey: wantKey)
+func applySpriteStyle(world: mod UiWorld, entityId: view EntityId, selected: view Bool) {
+  var wantKey: String = styleWantSpriteKey(world: world, entityId: entityId, selected: selected)
+  let wantTint: RgbaColor = styleWantTint(world: world, entityId: entityId, selected: selected)
+  let keyChange: Bool = spriteKeyDiffers(world: world, entityId: entityId, wantKey: wantKey)
   var tintChange: Bool = false
-  if styleHasTint(world: world, entity: entity) {
-    tintChange = spriteTintDiffers(world: world, entity: entity, wantTint: wantTint)
+  if styleHasTint(world: world, entityId: entityId) {
+    tintChange = spriteTintDiffers(world: world, entityId: entityId, wantTint: wantTint)
   }
   if keyChange is false and tintChange is false {
     ret
   }
-  let sp: mod Sprite => componentMod(this: world.sprites, entity: entity)
+  let sp: mod Sprite => componentMod(this: world.sprites, entityId: entityId)
   if keyChange {
     sp.textureKey = own wantKey
   }
@@ -201,39 +209,39 @@ func applySpriteStyle(world: mod UiWorld, entity: view EntityId, selected: view 
   }
 }
 
-func applyTextStyle(world: mod UiWorld, entity: view EntityId, selected: view Bool) {
-  var wantStyle: String = styleWantTextStyle(world: world, entity: entity, selected: selected)
-  if textStyleDiffers(world: world, entity: entity, wantStyle: wantStyle) is false {
+func applyTextStyle(world: mod UiWorld, entityId: view EntityId, selected: view Bool) {
+  var wantStyle: String = styleWantTextStyle(world: world, entityId: entityId, selected: selected)
+  if textStyleDiffers(world: world, entityId: entityId, wantStyle: wantStyle) is false {
     ret
   }
-  let t: mod Text => componentMod(this: world.texts, entity: entity)
+  let t: mod Text => componentMod(this: world.texts, entityId: entityId)
   t.styleId = own wantStyle
 }
 
-func applyShapeStyle(world: mod UiWorld, entity: view EntityId, selected: view Bool) {
-  if styleHasShapeFill(world: world, entity: entity) is false {
+func applyShapeStyle(world: mod UiWorld, entityId: view EntityId, selected: view Bool) {
+  if styleHasShapeFill(world: world, entityId: entityId) is false {
     ret
   }
-  let wantFill: RgbaColor = styleWantShapeFill(world: world, entity: entity, selected: selected)
-  if shapeFillDiffers(world: world, entity: entity, wantFill: wantFill) is false {
+  let wantFill: RgbaColor = styleWantShapeFill(world: world, entityId: entityId, selected: selected)
+  if shapeFillDiffers(world: world, entityId: entityId, wantFill: wantFill) is false {
     ret
   }
-  let sh: mod Shape => componentMod(this: world.shapes, entity: entity)
+  let sh: mod Shape => componentMod(this: world.shapes, entityId: entityId)
   sh.fill = wantFill
   # State fill overrides the scene slot — clear it (see applySpriteStyle, #235).
   sh.fillSlot = ""
 }
 
-func applyOffsetStyle(world: mod UiWorld, entity: view EntityId, selected: view Bool) {
-  if styleHasOffset(world: world, entity: entity) is false {
+func applyOffsetStyle(world: mod UiWorld, entityId: view EntityId, selected: view Bool) {
+  if styleHasOffset(world: world, entityId: entityId) is false {
     ret
   }
-  let wantOffset: Vec2 = styleWantOffset(world: world, entity: entity, selected: selected)
-  if offsetDiffers(world: world, entity: entity, wantOffset: wantOffset) is false {
+  let wantOffset: Vec2 = styleWantOffset(world: world, entityId: entityId, selected: selected)
+  if offsetDiffers(world: world, entityId: entityId, wantOffset: wantOffset) is false {
     ret
   }
   let off: Offset = { delta: wantOffset }
-  componentSet(this: world.offsets, entity: entity, data: off)
+  componentSet(this: world.offsets, entityId: entityId, data: off)
 }
 
 # Widget state dims through the Opacity component. Only engages when
@@ -241,14 +249,14 @@ func applyOffsetStyle(world: mod UiWorld, entity: view EntityId, selected: view 
 # elsewhere are untouched by default.
 func applyStateOpacity(
   world: mod UiWorld
-  entity: view EntityId
+  entityId: view EntityId
   enabled: view Bool
   loading: view Bool
   error: view Bool
 ) {
-  let disabledAlpha: Float = styleDisabledAlpha(world: world, entity: entity)
-  let loadingAlpha: Float = styleLoadingAlpha(world: world, entity: entity)
-  let errorAlpha: Float = styleErrorAlpha(world: world, entity: entity)
+  let disabledAlpha: Float = styleDisabledAlpha(world: world, entityId: entityId)
+  let loadingAlpha: Float = styleLoadingAlpha(world: world, entityId: entityId)
+  let errorAlpha: Float = styleErrorAlpha(world: world, entityId: entityId)
   if disabledAlpha >= 1.0 and loadingAlpha >= 1.0 and errorAlpha >= 1.0 {
     ret
   }
@@ -260,19 +268,19 @@ func applyStateOpacity(
   } else if enabled is false {
     want = disabledAlpha
   }
-  if componentHas(this: world.opacities, entity: entity) is false {
+  if componentHas(this: world.opacities, entityId: entityId) is false {
     if want is 1.0 {
       ret
     }
     let o: Opacity = { value: want }
-    componentSet(this: world.opacities, entity: entity, data: o)
+    componentSet(this: world.opacities, entityId: entityId, data: o)
     ret
   }
-  let cur: Opacity = componentGet(this: world.opacities, entity: entity)
+  let cur: Opacity = componentGet(this: world.opacities, entityId: entityId)
   if cur.value is want {
     ret
   }
-  let o: mod Opacity => componentMod(this: world.opacities, entity: entity)
+  let o: mod Opacity => componentMod(this: world.opacities, entityId: entityId)
   o.value = want
 }
 
@@ -281,25 +289,25 @@ func buttonStyleUpdate(world: mod UiWorld) {
   let n: Int = componentCount(this: world.stateStyles)
   var i: Int = 0
   loop i < n {
-    let entity: EntityId = componentEntityAt(this: world.stateStyles, i: i)
+    let entityId: EntityId = componentEntityAt(this: world.stateStyles, i: i)
     var selected: Bool = false
     var enabled: Bool = true
     var loading: Bool = false
     var error: Bool = false
-    if componentHas(this: world.widgetStates, entity: entity) {
-      let ws: WidgetState = componentGet(this: world.widgetStates, entity: entity)
+    if componentHas(this: world.widgetStates, entityId: entityId) {
+      let ws: WidgetState = componentGet(this: world.widgetStates, entityId: entityId)
       selected = ws.selected
       enabled = ws.enabled
       loading = ws.loading
       error = ws.error
     }
-    applySpriteStyle(world: world, entity: entity, selected: selected)
-    applyTextStyle(world: world, entity: entity, selected: selected)
-    applyShapeStyle(world: world, entity: entity, selected: selected)
-    applyOffsetStyle(world: world, entity: entity, selected: selected)
+    applySpriteStyle(world: world, entityId: entityId, selected: selected)
+    applyTextStyle(world: world, entityId: entityId, selected: selected)
+    applyShapeStyle(world: world, entityId: entityId, selected: selected)
+    applyOffsetStyle(world: world, entityId: entityId, selected: selected)
     applyStateOpacity(
       world: world
-      entity: entity
+      entityId: entityId
       enabled: enabled
       loading: loading
       error: error

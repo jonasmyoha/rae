@@ -28,23 +28,23 @@ func main() {
   let e1: EntityId = { index: 1, generation: 0 }
   let e2: EntityId = { index: 2, generation: 0 }
   let e3: EntityId = { index: 3, generation: 0 }
-  componentSet(this: pos, entity: e1, data: Position { x: 10 })
-  componentSet(this: pos, entity: e2, data: Position { x: 20 })
-  componentSet(this: pos, entity: e3, data: Position { x: 30 })
-  componentSet(this: vel, entity: e2, data: Velocity { v: 2 })
-  componentSet(this: vel, entity: e3, data: Velocity { v: 3 })
-  componentSet(this: tag, entity: e3, data: Tag { t: 9 })
+  componentSet(this: pos, entityId: e1, data: Position { x: 10 })
+  componentSet(this: pos, entityId: e2, data: Position { x: 20 })
+  componentSet(this: pos, entityId: e3, data: Position { x: 30 })
+  componentSet(this: vel, entityId: e2, data: Velocity { v: 2 })
+  componentSet(this: vel, entityId: e3, data: Velocity { v: 3 })
+  componentSet(this: tag, entityId: e3, data: Tag { t: 9 })
 
   # query2: entity + mod + view. Integrates v into x for every entity in both.
-  loop let entity: EntityId, position: mod Position, velocity: view Velocity in query2(
+  loop let entityId: EntityId, position: mod Position, velocity: view Velocity in query2(
     tableA: pos
     tableB: vel
   ) {
     position.x = position.x + velocity.v
-    log("q2 e{entity.index} x={position.x} v={velocity.v}")
+    log("q2 e{entityId.index} x={position.x} v={velocity.v}")
   }
-  let r2: Position = componentGet(this: pos, entity: e2)
-  let r3: Position = componentGet(this: pos, entity: e3)
+  let r2: Position = componentGet(this: pos, entityId: e2)
+  let r3: Position = componentGet(this: pos, entityId: e3)
   log("readback e2={r2.x} e3={r3.x}")
 
   # view-only loop, no entity binding: reads must not bump the generation.
@@ -57,22 +57,22 @@ func main() {
   log("pos gen delta: {componentTableGeneration(this: pos) - gen}")
 
   # query3: three bindings, two of them mod.
-  loop let entity: EntityId, position: mod Position, velocity: view Velocity, tg: mod Tag in query3(
+  loop let entityId: EntityId, position: mod Position, velocity: view Velocity, tg: mod Tag in query3(
     tableA: pos
     tableB: vel
     tableC: tag
   ) {
     position.x = position.x + 100
     tg.t = tg.t + 1
-    log("q3 e{entity.index}")
+    log("q3 e{entityId.index}")
   }
-  let r3b: Position = componentGet(this: pos, entity: e3)
-  let t3: Tag = componentGet(this: tag, entity: e3)
+  let r3b: Position = componentGet(this: pos, entityId: e3)
+  let t3: Tag = componentGet(this: tag, entityId: e3)
   log("q3 readback x={r3b.x} t={t3.t}")
 
   # forEach: the single-table base case, in dense order.
-  loop let entity: EntityId, position: view Position in forEach(table: pos) {
-    log("all e{entity.index} x={position.x}")
+  loop let entityId: EntityId, position: view Position in forEach(table: pos) {
+    log("all e{entityId.index} x={position.x}")
   }
 
   # nested query loops each alias their own hit.

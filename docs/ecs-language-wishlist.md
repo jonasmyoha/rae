@@ -50,7 +50,7 @@ a feature that is not already listed here.
   like the architecture instead of like plumbing. That is the sentence the language
   now says directly:
   ```rae
-  loop let entity: EntityId, p: mod Pos, v: view Vel in query2(tableA: pos, tableB: vel) {
+  loop let entityId: EntityId, p: mod Pos, v: view Vel in query2(tableA: pos, tableB: vel) {
     p.x = p.x + v.v
   }
   ```
@@ -240,7 +240,7 @@ a feature that is not already listed here.
 - **Generational entity recycling `(landed #703/#704)`.** `EntityAllocator` recycling
   freed index slots + bumping generation is what lets pools recycle entities instead of
   scale-to-0 culling (terrain #741). Keep; it is the backbone of entity pooling.
-- **Generic `world.despawn(entity)` that clears every component table.** Despawn today
+- **Generic `world.despawn(entityId)` that clears every component table.** Despawn today
   is manual: `componentRemove` from each specific table (physicsBody, transform, …) then
   `freeEntity`, per site (net/physics seams #746). Forget one table and a recycled index
   reads stale data. A structural op that, given the world's registered component set,

@@ -53,11 +53,11 @@ func easeTowards(
 # Higher rank paints later (= on top). Rank-2 paints over rank-1 so a
 # newly-hovered tile beats a still-unhovering sibling regardless of
 # their order in the Children list.
-func hoverPaintRank(world: view UiWorld, entity: view EntityId) pub ret Int {
-  if componentHas(this: world.hoverScales, entity: entity) is false {
+func hoverPaintRank(world: view UiWorld, entityId: view EntityId) pub ret Int {
+  if componentHas(this: world.hoverScales, entityId: entityId) is false {
     ret 0
   }
-  let hs: HoverScale = componentGet(this: world.hoverScales, entity: entity)
+  let hs: HoverScale = componentGet(this: world.hoverScales, entityId: entityId)
   if hs.current <= hs.restScale {
     ret 0
   }
@@ -67,26 +67,26 @@ func hoverPaintRank(world: view UiWorld, entity: view EntityId) pub ret Int {
   ret 1
 }
 
-# Max `hoverPaintRank` over `entity` and its whole descendant subtree.
+# Max `hoverPaintRank` over `entityId` and its whole descendant subtree.
 # Painter uses this (not the entity's own rank) when sorting siblings
 # so a row containing the hovered tile is dispatched into the higher
 # pass and lands above sibling rows whose tiles would otherwise
 # overdraw the popped tile's vertical overflow.
-func subtreeHoverPaintRank(world: view UiWorld, entity: view EntityId) pub ret Int {
+func subtreeHoverPaintRank(world: view UiWorld, entityId: view EntityId) pub ret Int {
   unsafe {
-    var best: Int = hoverPaintRank(world: world, entity: entity)
+    var best: Int = hoverPaintRank(world: world, entityId: entityId)
     if best is 2 {
       ret 2
     }
-    if componentHas(this: world.childrens, entity: entity) is false {
+    if componentHas(this: world.childrens, entityId: entityId) is false {
       ret best
     }
-    let ch: view Children => componentView(this: world.childrens, entity: entity)
+    let ch: view Children => componentView(this: world.childrens, entityId: entityId)
     let n: Int = ch.ids.length
     var i: Int = 0
     loop i < n {
       let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
-      let r: Int = subtreeHoverPaintRank(world: world, entity: cid)
+      let r: Int = subtreeHoverPaintRank(world: world, entityId: cid)
       if r > best {
         best = r
       }

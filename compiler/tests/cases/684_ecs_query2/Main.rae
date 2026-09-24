@@ -15,9 +15,9 @@ type Velocity {
   v: Int
 }
 
-func posOf(table: view ComponentTable(Position), entity: view EntityId) ret Int {
-  if componentHas(this: table, entity: entity) {
-    let p: Position = componentGet(this: table, entity: entity)
+func posOf(table: view ComponentTable(Position), entityId: view EntityId) ret Int {
+  if componentHas(this: table, entityId: entityId) {
+    let p: Position = componentGet(this: table, entityId: entityId)
     ret p.x
   }
   ret -1
@@ -29,11 +29,11 @@ func main() {
   let e1: EntityId = { index: 1, generation: 0 }
   let e2: EntityId = { index: 2, generation: 0 }
   let e3: EntityId = { index: 3, generation: 0 }
-  componentSet(this: pos, entity: e1, data: Position { x: 10 })
-  componentSet(this: pos, entity: e2, data: Position { x: 20 })
-  componentSet(this: pos, entity: e3, data: Position { x: 30 })
-  componentSet(this: vel, entity: e2, data: Velocity { v: 2 })
-  componentSet(this: vel, entity: e3, data: Velocity { v: 3 })
+  componentSet(this: pos, entityId: e1, data: Position { x: 10 })
+  componentSet(this: pos, entityId: e2, data: Position { x: 20 })
+  componentSet(this: pos, entityId: e3, data: Position { x: 30 })
+  componentSet(this: vel, entityId: e2, data: Velocity { v: 2 })
+  componentSet(this: vel, entityId: e3, data: Velocity { v: 3 })
 
   let hits: List(Query2Match) = query2(tableA: pos, tableB: vel)
   log("q2 count: {hits.length}")
@@ -43,7 +43,7 @@ func main() {
     posx.x = posx.x + velocity.v
   }
   # e1 has no Velocity so it is not in the join and stays 10; e2 -> 22, e3 -> 33.
-  log("e1.x: {posOf(table: pos, entity: e1)}")
-  log("e2.x: {posOf(table: pos, entity: e2)}")
-  log("e3.x: {posOf(table: pos, entity: e3)}")
+  log("e1.x: {posOf(table: pos, entityId: e1)}")
+  log("e2.x: {posOf(table: pos, entityId: e2)}")
+  log("e3.x: {posOf(table: pos, entityId: e3)}")
 }

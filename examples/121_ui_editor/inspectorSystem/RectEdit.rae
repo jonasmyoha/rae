@@ -112,32 +112,32 @@ func applyRectFieldLocked(
     )
   }
   var written: Int = 0
-  loop let entity: view EntityId in selection {
-    if isNone(this: entity) {
+  loop let entityId: view EntityId in selection {
+    if isNone(this: entityId) {
       continue
     }
     let x: Float = rectFieldValue(
       world: world
       uiSystems: uiSystems
-      entity: entity
+      entityId: entityId
       field: RectField.x
     )
     let y: Float = rectFieldValue(
       world: world
       uiSystems: uiSystems
-      entity: entity
+      entityId: entityId
       field: RectField.y
     )
     let w0: Float = rectFieldValue(
       world: world
       uiSystems: uiSystems
-      entity: entity
+      entityId: entityId
       field: RectField.w
     )
     let h0: Float = rectFieldValue(
       world: world
       uiSystems: uiSystems
-      entity: entity
+      entityId: entityId
       field: RectField.h
     )
     var w: Float = w0
@@ -154,7 +154,7 @@ func applyRectFieldLocked(
       }
     }
     let next: Rect = { position: { x: x, y: y }, size: { x: w, y: h } }
-    componentSet(this: world.rects, entity: entity, data: next)
+    componentSet(this: world.rects, entityId: entityId, data: next)
     written = written + 1
   }
   ret written

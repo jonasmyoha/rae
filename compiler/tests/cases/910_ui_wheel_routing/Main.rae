@@ -33,22 +33,22 @@ func node(
   w: view Float
   h: view Float
 ) ret EntityId {
-  let entity: EntityId = createEntity(world: world)
+  let entityId: EntityId = createEntity(world: world)
   componentSet(
     this: uiSystems.layout.computedRects
-    entity: entity
+    entityId: entityId
     data: ComputedRect { position: { x: x, y: y }, size: { x: w, y: h } }
   )
   componentSet(
     this: uiSystems.transform2d.worldTransforms
-    entity: entity
+    entityId: entityId
     data: WorldTransform2D {
       position: Vec2 { x: x, y: y }
       rotation: 0.0
       scale: Vec2 { x: 1.0, y: 1.0 }
     }
   )
-  ret entity
+  ret entityId
 }
 
 # The three consumers, in the order they are declared in main.
@@ -58,17 +58,17 @@ type Consumers {
   content: EntityId
 }
 
-func nameOf(entity: view EntityId, consumers: view Consumers) ret String {
-  if isNone(this: entity) {
+func nameOf(entityId: view EntityId, consumers: view Consumers) ret String {
+  if isNone(this: entityId) {
     ret "none"
   }
-  if entity is consumers.pane {
+  if entityId is consumers.pane {
     ret "pane"
   }
-  if entity is consumers.canvas {
+  if entityId is consumers.canvas {
     ret "canvas"
   }
-  if entity is consumers.content {
+  if entityId is consumers.content {
     ret "content"
   }
   ret "other"
@@ -91,17 +91,17 @@ func probe(
     uiSystems: uiSystems
     wheel: -1.0
   )
-  let before: Float = componentGet(this: world.scrollStates, entity: consumers.content).y
+  let before: Float = componentGet(this: world.scrollStates, entityId: consumers.content).y
   updateScrollRoot(
     world: world
     uiSystems: uiSystems
-    entity: consumers.content
+    entityId: consumers.content
     input: input
   )
-  let after: Float = componentGet(this: world.scrollStates, entity: consumers.content).y
-  let zoom: Float = uiWheelFor(input: input, entity: consumers.canvas)
+  let after: Float = componentGet(this: world.scrollStates, entityId: consumers.content).y
+  let zoom: Float = uiWheelFor(input: input, entityId: consumers.canvas)
   log(
-    "{label}: routed {nameOf(entity: input.wheelTarget, consumers: consumers)} zoom {zoom.toInt()} scroll {before.toInt()}->{after.toInt()}"
+    "{label}: routed {nameOf(entityId: input.wheelTarget, consumers: consumers)} zoom {zoom.toInt()} scroll {before.toInt()}->{after.toInt()}"
   )
 }
 
@@ -116,7 +116,7 @@ func main() {
     w: 400.0
     h: 400.0
   )
-  componentSet(this: world.wheelTargets, entity: canvas, data: WheelTarget {})
+  componentSet(this: world.wheelTargets, entityId: canvas, data: WheelTarget {})
   let pane: EntityId = node(
     world: world
     uiSystems: uiSystems
@@ -125,7 +125,7 @@ func main() {
     w: 100.0
     h: 100.0
   )
-  componentSet(this: world.wheelTargets, entity: pane, data: WheelTarget {})
+  componentSet(this: world.wheelTargets, entityId: pane, data: WheelTarget {})
   let viewport: EntityId = node(
     world: world
     uiSystems: uiSystems
@@ -136,7 +136,7 @@ func main() {
   )
   componentSet(
     this: world.overflows
-    entity: viewport
+    entityId: viewport
     data: OverflowPolicy { mode: OverflowMode.clip }
   )
   let content: EntityId = node(
@@ -157,7 +157,7 @@ func main() {
   )
   componentSet(
     this: world.onClicks
-    entity: row
+    entityId: row
     data: OnClick { actionId: "row", actionIdDouble: "", actionIdTriple: "" }
   )
   let overlay: EntityId = node(
@@ -170,7 +170,7 @@ func main() {
   )
   componentSet(
     this: world.onClicks
-    entity: overlay
+    entityId: overlay
     data: OnClick { actionId: "overlay", actionIdDouble: "", actionIdTriple: "" }
   )
   # The pane first, so painted first: below the viewport's overflowing row.
@@ -218,7 +218,7 @@ func main() {
   )
   componentSet(
     this: world.onClicks
-    entity: popup
+    entityId: popup
     data: OnClick { actionId: "popup", actionIdDouble: "", actionIdTriple: "" }
   )
   let root: ScrollRoot = {
@@ -227,7 +227,7 @@ func main() {
     fixedFloor: 0.0
     endInset: 0.0
   }
-  componentSet(this: world.scrollRoots, entity: content, data: root)
+  componentSet(this: world.scrollRoots, entityId: content, data: root)
   let consumers: Consumers = { canvas: canvas, pane: pane, content: content }
   let memory: ScrollMemory = createScrollMemory()
   scrollRootSystem(world: world, uiSystems: uiSystems, memory: memory)
@@ -289,5 +289,5 @@ func main() {
     uiSystems: uiSystems
     wheel: 0.0
   )
-  log("idle: routed {nameOf(entity: idle.wheelTarget, consumers: consumers)}")
+  log("idle: routed {nameOf(entityId: idle.wheelTarget, consumers: consumers)}")
 }

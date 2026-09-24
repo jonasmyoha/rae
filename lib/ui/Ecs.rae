@@ -23,7 +23,7 @@ open collections/StringMap
 # `uiActions` EventQueue resource on UiWorld — replaces the old hand-rolled
 # `UiInput.events` list.
 type UiAction {
-  entity: EntityId
+  entityId: EntityId
   actionId: String
 }
 
@@ -339,8 +339,8 @@ func createEntity(world: mod UiWorld) ret EntityId {
 # O(1) liveness, delegated to the shared entity core (#705/#706): a handle is
 # alive iff its slot's current generation still matches. noEntity() and stale
 # handles compare unequal without touching the alive list.
-func isAlive(world: view UiWorld, entity: view EntityId) ret Bool {
-  ret allocatorIsAlive(this: world.allocator, entity: entity)
+func isAlive(world: view UiWorld, entityId: view EntityId) ret Bool {
+  ret allocatorIsAlive(this: world.allocator, entityId: entityId)
 }
 
 func aliveCount(world: view UiWorld) ret Int {
@@ -396,23 +396,27 @@ func nodeEntity(world: view UiWorld, index: view Int) pub ret EntityId {
   }
 }
 
-# Walk Parent up from `entity` until we hit a `PageRoot`, then return
+# Walk Parent up from `entityId` until we hit a `PageRoot`, then return
 # its id. Returns an empty string when no ancestor is a page root —
 # callers should treat that as "no page" / unscoped.
-func pageOf(world: view UiWorld, uiSystems: view UiSystems, entity: view EntityId) pub ret String {
-  # Explicit construction (not `let cur: EntityId = entity`) — the
+func pageOf(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+) pub ret String {
+  # Explicit construction (not `let cur: EntityId = entityId`) — the
   # Live VM treats the latter as a view-ref bind and then refuses
   # the reassignment inside the loop.
-  var cur: EntityId = { index: entity.index, generation: entity.generation }
+  var cur: EntityId = { index: entityId.index, generation: entityId.generation }
   loop true {
-    if componentHas(this: world.pageRoots, entity: cur) {
-      let r: PageRoot = componentGet(this: world.pageRoots, entity: cur)
+    if componentHas(this: world.pageRoots, entityId: cur) {
+      let r: PageRoot = componentGet(this: world.pageRoots, entityId: cur)
       ret r.id
     }
-    if componentHas(this: uiSystems.hierarchy.parents, entity: cur) is false {
+    if componentHas(this: uiSystems.hierarchy.parents, entityId: cur) is false {
       ret ""
     }
-    let pl: Parent = componentGet(this: uiSystems.hierarchy.parents, entity: cur)
+    let pl: Parent = componentGet(this: uiSystems.hierarchy.parents, entityId: cur)
     cur = { index: pl.parent.index, generation: pl.parent.generation }
   }
   ret ""
@@ -448,7 +452,7 @@ func setPageActive(world: mod UiWorld, pageId: view String, active: view Bool) p
     ret
   }
   let a: Active = { value: active }
-  componentSet(this: world.actives, entity: root, data: a)
+  componentSet(this: world.actives, entityId: root, data: a)
 }
 
 # Returns whether `pageId` is currently active (or `false` if no
@@ -461,10 +465,10 @@ func isPageActive(world: view UiWorld, pageId: view String) pub ret Bool {
   if isNone(this: root) {
     ret false
   }
-  if componentHas(this: world.actives, entity: root) is false {
+  if componentHas(this: world.actives, entityId: root) is false {
     ret false
   }
-  let a: Active = componentGet(this: world.actives, entity: root)
+  let a: Active = componentGet(this: world.actives, entityId: root)
   ret a.value
 }
 
@@ -482,7 +486,7 @@ func findScrollRoot(world: view UiWorld, uiSystems: view UiSystems) pub ret Enti
   let fallback: EntityId = componentEntityAt(this: world.scrollRoots, i: 0)
   loop i < n {
     let e: EntityId = componentEntityAt(this: world.scrollRoots, i: i)
-    let pid: String = pageOf(world: world, uiSystems: uiSystems, entity: e)
+    let pid: String = pageOf(world: world, uiSystems: uiSystems, entityId: e)
     if pid.length() > 0 {
       if isPageActive(world: world, pageId: pid) {
         ret e
@@ -502,11 +506,11 @@ func findScrollRoot(world: view UiWorld, uiSystems: view UiSystems) pub ret Enti
 # whether it wrote — an equal key is left alone, since componentSet bumps the
 # table generation regardless. The one place binding systems (playback icon /
 # cover, the Spotify view) re-point a sprite by data.
-func setSpriteKey(world: mod UiWorld, entity: view EntityId, key: view String) pub ret Bool {
-  if componentHas(this: world.sprites, entity: entity) is false {
+func setSpriteKey(world: mod UiWorld, entityId: view EntityId, key: view String) pub ret Bool {
+  if componentHas(this: world.sprites, entityId: entityId) is false {
     ret false
   }
-  let current: Sprite = componentGet(this: world.sprites, entity: entity)
+  let current: Sprite = componentGet(this: world.sprites, entityId: entityId)
   if current.textureKey is key {
     ret false
   }
@@ -518,7 +522,7 @@ func setSpriteKey(world: mod UiWorld, entity: view EntityId, key: view String) p
     nineSlice: current.nineSlice
     hasNineSlice: current.hasNineSlice
   }
-  componentSet(this: world.sprites, entity: entity, data: next)
+  componentSet(this: world.sprites, entityId: entityId, data: next)
   ret true
 }
 
@@ -537,14 +541,14 @@ func updateScrollOffset(
   # transform pass — not the full layout — so scrolling stays smooth on
   # large pages. The target's authored `Offset` base is left untouched.
   let ro: RuntimeOffset = { delta: Vec2 { x: 0.0, y: scrollY } }
-  componentSet(this: uiSystems.transform2d.runtimeOffsets, entity: target, data: own ro)
-  if componentHas(this: world.scrollStates, entity: target) {
-    let s: mod ScrollState => componentMod(this: world.scrollStates, entity: target)
+  componentSet(this: uiSystems.transform2d.runtimeOffsets, entityId: target, data: own ro)
+  if componentHas(this: world.scrollStates, entityId: target) {
+    let s: mod ScrollState => componentMod(this: world.scrollStates, entityId: target)
     s.y = scrollY
   }
 }
 
-# Drop `entity` from every ComponentTable in `world` AND from the entity core's
+# Drop `entityId` from every ComponentTable in `world` AND from the entity core's
 # live set (via freeEntity, below). Each `componentRemove` is a no-op when the
 # entity isn't in that table, so the per-call cost is just a hash
 # probe. Cascade-drop on each removed value frees heap fields owned
@@ -553,22 +557,22 @@ func updateScrollOffset(
 # pointing here) are NOT cleared — the standard subtree-walking
 # unmount path destroys children before parents so this isn't an
 # issue in the supported usage pattern.
-func destroyEntity(world: mod UiWorld, entity: view EntityId) pub {
+func destroyEntity(world: mod UiWorld, entityId: view EntityId) pub {
   # Drop the entity's row from every component table (#760): one generic,
   # reflection-driven sweep instead of ~75 hand-listed componentRemove calls that
   # silently rotted whenever a table was added (see #756). clearEntityComponents
   # unrolls `fields(world)` to one componentRemove per ComponentTable field.
-  clearEntityComponents(world: world, entity: entity)
+  clearEntityComponents(world: world, entityId: entityId)
   # A pending authored component of this entity has nowhere to go any more.
-  dropPendingComponentsOf(world: world, entity: entity)
+  dropPendingComponentsOf(world: world, entityId: entityId)
   # Retire, do not free: bump the generation (a stale handle compares unequal)
   # and drop the entity from the live set NOW — isAlive/aliveCount are exact
   # immediately — but keep the index OUT of the free list until the app has
   # cleared the entity from its own systems' tables and called
   # releaseDeadEntities (the dead-entities outbox, §3.2). Recycling the index
   # first would let a new entity inherit the old one's rows in an app table.
-  retireEntity(this: world.allocator, entity: entity)
-  world.deadEntities.add(value: entity)
+  retireEntity(this: world.allocator, entityId: entityId)
+  world.deadEntities.add(value: entityId)
 }
 
 # Hand every retired index back to the allocator for reuse. The app calls this
@@ -576,23 +580,23 @@ func destroyEntity(world: mod UiWorld, entity: view EntityId) pub {
 # their tables (and after any unmount); an app with no tables of its own calls
 # it right after the lib pipeline.
 func releaseDeadEntities(world: mod UiWorld, uiSystems: mod UiSystems) pub {
-  loop let entity: view EntityId in world.deadEntities {
+  loop let entityId: view EntityId in world.deadEntities {
     # The lib systems' own rows (docs/ecs-systems-own-their-tables.md §3.1)
     # go with the entity, like the world's did in destroyEntity.
-    clearUiSystemsEntity(uiSystems: uiSystems, entity: entity)
-    recycleEntityIndex(this: world.allocator, entity: entity)
+    clearUiSystemsEntity(uiSystems: uiSystems, entityId: entityId)
+    recycleEntityIndex(this: world.allocator, entityId: entityId)
   }
   world.deadEntities.clear()
 }
 
-# Remove the pending rows that name `entity` (swap-remove; order is not part
+# Remove the pending rows that name `entityId` (swap-remove; order is not part
 # of the outbox's contract).
-func dropPendingComponentsOf(world: mod UiWorld, entity: view EntityId) {
+func dropPendingComponentsOf(world: mod UiWorld, entityId: view EntityId) {
   var i: Int = 0
   loop i < world.pendingComponents.length {
     var hit: Bool = false
     if let pending: view PendingComponent => world.pendingComponents.viewAt(index: i) {
-      hit = pending.entity is entity
+      hit = pending.entityId is entityId
     }
     if hit {
       world.pendingComponents.swapRemove(index: i)
@@ -627,7 +631,7 @@ func destroyEntitySubtree(world: mod UiWorld, uiSystems: view UiSystems, root: v
     var i: Int = n - 1
     loop i >= 0 {
       let e: EntityId = rae_ext_rae_buf_get(buf: collected.data, index: i)
-      destroyEntity(world: world, entity: e)
+      destroyEntity(world: world, entityId: e)
       i = i - 1
     }
   }

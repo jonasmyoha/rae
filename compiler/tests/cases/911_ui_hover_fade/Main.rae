@@ -19,7 +19,7 @@ func stepLog(
   glow: view EntityId
 ) {
   let animating: Bool = buttonHoverFadeUpdate(world: world, uiSystems: uiSystems, deltaTime: 0.05)
-  let amount: Float = hoverFadeAmount(world: world, uiSystems: uiSystems, entity: glow)
+  let amount: Float = hoverFadeAmount(world: world, uiSystems: uiSystems, entityId: glow)
   log("{label}: amount {(amount * 100.0 + 0.5).toInt()}% animating {animating}")
 }
 
@@ -33,10 +33,10 @@ func main() {
     color: RgbaColor { r: 0, g: 255, b: 200, a: 255 }
     hoverOpacity: 0.6
   }
-  componentSet(this: world.shadows, entity: glow, data: glowShadow)
+  componentSet(this: world.shadows, entityId: glow, data: glowShadow)
   let plain: EntityId = createEntity(world: world)
   let plainShadow: Shadow = { blur: 4.0, color: RgbaColor { r: 0, g: 0, b: 0, a: 255 } }
-  componentSet(this: world.shadows, entity: plain, data: plainShadow)
+  componentSet(this: world.shadows, entityId: plain, data: plainShadow)
 
   stepLog(
     world: world
@@ -47,7 +47,7 @@ func main() {
   buttonInteractionMark(
     world: world
     uiSystems: uiSystems
-    entity: glow
+    entityId: glow
     hovered: true
     pressed: false
   )
@@ -59,7 +59,7 @@ func main() {
       glow: glow
     )
   }
-  buttonInteractionClear(world: world, uiSystems: uiSystems, entity: glow)
+  buttonInteractionClear(world: world, uiSystems: uiSystems, entityId: glow)
   loop var i: Int = 1, i <= 4, ++i {
     stepLog(
       world: world
@@ -68,17 +68,17 @@ func main() {
       glow: glow
     )
   }
-  log("plain shadow faded: {componentHas(this: uiSystems.button.hoverFades, entity: plain)}")
+  log("plain shadow faded: {componentHas(this: uiSystems.button.hoverFades, entityId: plain)}")
   # Without the system, the painter's mix is the instant switch.
   let unfaded: EntityId = createEntity(world: world)
   buttonInteractionMark(
     world: world
     uiSystems: uiSystems
-    entity: unfaded
+    entityId: unfaded
     hovered: true
     pressed: false
   )
   log(
-    "no fade, hovered: {(hoverFadeAmount(world: world, uiSystems: uiSystems, entity: unfaded) * 100.0).toInt()}%"
+    "no fade, hovered: {(hoverFadeAmount(world: world, uiSystems: uiSystems, entityId: unfaded) * 100.0).toInt()}%"
   )
 }

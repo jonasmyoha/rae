@@ -115,18 +115,18 @@ func historyListData(history: view PlayHistory) ret ListViewData {
   }
 }
 
-func setHistoryActive(world: mod UiWorld, entity: view EntityId, active: view Bool) {
-  if isNone(this: entity) {
+func setHistoryActive(world: mod UiWorld, entityId: view EntityId, active: view Bool) {
+  if isNone(this: entityId) {
     ret
   }
   var current: Bool = true
-  if componentHas(this: world.actives, entity: entity) {
-    let a: Active = componentGet(this: world.actives, entity: entity)
+  if componentHas(this: world.actives, entityId: entityId) {
+    let a: Active = componentGet(this: world.actives, entityId: entityId)
     current = a.value
   }
   if current is not active {
     let flag: Active = { value: active }
-    componentSet(this: world.actives, entity: entity, data: flag)
+    componentSet(this: world.actives, entityId: entityId, data: flag)
   }
 }
 
@@ -148,16 +148,16 @@ func historyListSystem(
     if binding.builtRevision is not state.playHistory.revision {
       componentSet(
         this: world.listViewDatas
-        entity: host
+        entityId: host
         data: historyListData(history: state.playHistory)
       )
       let hasEntries: Bool = state.playHistory.entries.length > 0
       # The host shows while there are entries; the page's `EmptyState`
       # node (an authored `EmptyState { kind: history }`) is toggled by
       # `emptyStateSystem`, no page + node-id lookup here.
-      setHistoryActive(world: world, entity: host, active: hasEntries)
+      setHistoryActive(world: world, entityId: host, active: hasEntries)
       let built: HistoryList = { builtRevision: state.playHistory.revision }
-      componentSet(this: historySystem.historyLists, entity: host, data: built)
+      componentSet(this: historySystem.historyLists, entityId: host, data: built)
     }
     i = i + 1
   }

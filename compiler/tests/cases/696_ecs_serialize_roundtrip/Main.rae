@@ -91,10 +91,10 @@ func main() {
   let e2: EntityId = { index: 2, generation: 0 }
 
   var src: MiniWorld = emptyWorld()
-  componentSet(this: src.positions, entity: e1, data: Position { x: 10, y: 20 })
-  componentSet(this: src.positions, entity: e2, data: Position { x: 30, y: 40 })
-  componentSet(this: src.velocities, entity: e2, data: Velocity { dx: 1, dy: 2 })
-  componentSet(this: src.caches, entity: e2, data: WorldCache { w: 999 })
+  componentSet(this: src.positions, entityId: e1, data: Position { x: 10, y: 20 })
+  componentSet(this: src.positions, entityId: e2, data: Position { x: 30, y: 40 })
+  componentSet(this: src.velocities, entityId: e2, data: Velocity { dx: 1, dy: 2 })
+  componentSet(this: src.caches, entityId: e2, data: WorldCache { w: 999 })
 
   let jsonStr: String = worldToJson(world: src, registry: reg)
   log("json: {jsonStr}")
@@ -108,9 +108,9 @@ func main() {
   log("vel count: {componentCount(this: dst.velocities)}")
   log("cache count: {componentCount(this: dst.caches)}")
 
-  let p1: Position = componentGet(this: dst.positions, entity: e1)
-  let p2: Position = componentGet(this: dst.positions, entity: e2)
-  let v2: Velocity = componentGet(this: dst.velocities, entity: e2)
+  let p1: Position = componentGet(this: dst.positions, entityId: e1)
+  let p2: Position = componentGet(this: dst.positions, entityId: e2)
+  let v2: Velocity = componentGet(this: dst.velocities, entityId: e2)
   log("e1 pos: {p1.x},{p1.y}")
   log("e2 pos: {p2.x},{p2.y}")
   log("e2 vel: {v2.dx},{v2.dy}")

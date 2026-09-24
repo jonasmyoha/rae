@@ -318,9 +318,9 @@ type ToySystem { cells: ComponentTable(Cell), revision: Int }
 func markChanged(this: mod ToySystem) { this.revision = this.revision + 1 }
 
 # a DATA-change mutation site bumps the whole chain, eagerly:
-func toySetValue(sys: mod ToySystem, entity: view EntityId, v: view Int) {
-  if componentHas(this: sys.cells, entity: entity) {
-    let c: mod Cell => componentMod(this: sys.cells, entity: entity) # table generation++
+func toySetValue(sys: mod ToySystem, entityId: view EntityId, v: view Int) {
+  if componentHas(this: sys.cells, entityId: entityId) {
+    let c: mod Cell => componentMod(this: sys.cells, entityId: entityId) # table generation++
     c.v = v
     bumpRevision(this: c)                                            # instance revision++ (explicit)
   }
@@ -373,7 +373,7 @@ if current != observe.observedRevision {
 }
 ```
 
-Targets are `(system, table, entity)` ids, so the mechanism is fully
+Targets are `(system, table, entityId)` ids, so the mechanism is fully
 generic — playback, media library, filesystem, compiler, undo, AI are
 all observed identically, with **no** per-feature `Resource`/`Field`
 enum. Retiring `DataResourceId`/`DataFieldId` in favour of real
@@ -455,11 +455,11 @@ across all three levels by `compiler/tests/cases/537_observe_refresh`.
 
 ```
 // UiPlaybackSystem: cover observes PlaybackSystem's nowPlaying instance
-observe(cover, system: PlaybackId, component: (nowPlayingTable, entity))
+observe(cover, system: PlaybackId, component: (nowPlayingTable, entityId))
 
 // phase 4:
 if rev(registry, cover.observe) != cover.observed {
-    cover.artKey = playback.view.nowPlaying(entity).artKey
+    cover.artKey = playback.view.nowPlaying(entityId).artKey
     cover.observed = current
 }
 ```

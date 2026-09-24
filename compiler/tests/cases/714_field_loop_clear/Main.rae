@@ -20,9 +20,9 @@ type Mini {
   count: Int
 }
 
-func clearAll(world: mod Mini, entity: view EntityId) {
+func clearAll(world: mod Mini, entityId: view EntityId) {
   loop let table: mod ComponentTable(any) in fields(world) {
-    componentRemove(this: table, entity: entity)
+    componentRemove(this: table, entityId: entityId)
   }
 }
 
@@ -33,10 +33,10 @@ func main() {
     count: 7
   }
   let e: EntityId = { index: 1, generation: 0 }
-  componentSet(this: world.rects, entity: e, data: Rect { x: 3, y: 4 })
-  componentSet(this: world.sizes, entity: e, data: Size { w: 5, h: 6 })
+  componentSet(this: world.rects, entityId: e, data: Rect { x: 3, y: 4 })
+  componentSet(this: world.sizes, entityId: e, data: Size { w: 5, h: 6 })
   log("before: rects={componentCount(this: world.rects)} sizes={componentCount(this: world.sizes)}")
-  clearAll(world: world, entity: e)
+  clearAll(world: world, entityId: e)
   log(
     "after: rects={componentCount(this: world.rects)} sizes={componentCount(this: world.sizes)} count={world.count}"
   )

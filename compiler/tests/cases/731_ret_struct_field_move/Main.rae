@@ -22,7 +22,7 @@ type Holder {
 func makeWorld() ret World {
   var t: ComponentTable(Comp) = ComponentTable.create(Comp)
   let e: EntityId = { index: 1, generation: 0 }
-  componentSet(this: t, entity: e, data: Comp { x: 42 })
+  componentSet(this: t, entityId: e, data: Comp { x: 42 })
   ret World { table: own t }
 }
 
@@ -36,6 +36,6 @@ func makeHolder() ret Holder {
 func main() {
   let h: Holder = makeHolder()
   let e: EntityId = { index: 1, generation: 0 }
-  let c: Comp = componentGet(this: h.world.table, entity: e)
+  let c: Comp = componentGet(this: h.world.table, entityId: e)
   log("count={componentCount(this: h.world.table)} x={c.x}")
 }
