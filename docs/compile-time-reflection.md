@@ -573,6 +573,16 @@ If a world ever grows dozens of same-kind fields *and* a genuine constructor bug
 appears, revisit — but the mechanism to reach for then is incremental struct
 assembly, a general language feature, not a reflection helper.
 
+## Nested generic call validation
+
+Calls reached through `ComponentTable(any)` field bindings must still match a
+declared function. Some nested generic calls are resolved during C lowering;
+an unresolved call now reports a Rae diagnostic at the call site, including
+its value-argument count, and fails `build --emit-c` before native compilation.
+There is no implicit fallback to an unspecialized C function. Regression 908
+checks a stale inner call; 909 checks the same chain with a real `Scene` and
+two additional String parameters supplied correctly.
+
 ## Open questions
 
 - Does a field binding need `match` over its type, or is the binding-type filter
