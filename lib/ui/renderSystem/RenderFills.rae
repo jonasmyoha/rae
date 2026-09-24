@@ -35,8 +35,16 @@ func paintGradientG(
   let drawH: Float = box.h
   let drawX: Float = box.x
   let drawY: Float = box.y
-  let from: RgbaColor = g2dChain(color: gf.from, chain255: chain255)
-  let to: RgbaColor = g2dChain(color: gf.to, chain255: chain255)
+  var fromBase: RgbaColor = gf.from
+  if gf.fromSlot.length() > 0 {
+    fromBase = uiThemeColor(theme: world.theme, name: gf.fromSlot)
+  }
+  var toBase: RgbaColor = gf.to
+  if gf.toSlot.length() > 0 {
+    toBase = uiThemeColor(theme: world.theme, name: gf.toSlot)
+  }
+  let from: RgbaColor = g2dChain(color: fromBase, chain255: chain255)
+  let to: RgbaColor = g2dChain(color: toBase, chain255: chain255)
   if componentHas(this: world.shadows, entity: entity) {
     paintShadowG(
       world: world
