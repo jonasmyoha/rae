@@ -2,16 +2,19 @@ open ecs/Entity
 open ecs/ComponentTable
 import Sys
 
-# A field read straight off a call's OWNED result — `componentCopyAtDefault(...).rows.length`
-# — must release that result. It returns a deep copy (componentGet did too, before
-# the componentCopy rename), and nothing ever
-# dropped it, so a per-frame read leaked the whole copy every frame: the UI
+# A field read straight off a call's OWNED result — `componentCopyAtDefault(...).rows.length`,
+# `makeWrapper(...).inner.label` — must release that result. The call returns a
+# deep copy (componentGet did too, before the componentCopy rename), and nothing
+# ever dropped it, so a per-frame read leaked the whole copy every frame: the UI
 # editor grew ~20 MB per canvas hover sweep through exactly this read in the
-# scroll-root update (#32786425). The C backend now captures the call in a
-# statement temporary and drops it after the statement when the chain ends in
-# a plain value. A chain ending in a heap value (a String field) keeps the old
-# code path — dropping the owner there would leave the read value dangling —
-# so its reads are checked for correctness, not for freeing.
+# scroll-root update (#32786425). The C backend captures the call in a statement
+# temporary, reads the chain off it as a PLACE, and drops the temporary after
+# the statement — whatever the chain ends in (#45158908). A heap-valued field
+# (a String, a List, a struct carrying them) is safe because every consumer
+# treats a member read as a location: a `let` or `=` copies it out, an argument
+# borrows it for the call, `own` moves it out. Each such shape below is checked
+# for BOTH halves: the value survives (no dangling), and the loop does not grow
+# memory (no leak). 20000 leaked owners were ~340 MB before; freed, noise.
 type Rows {
   label: String
   rows: List(String)
@@ -56,8 +59,75 @@ func main() {
   }
   log("nested read total {nested}, freed: {(Sys.processRssKb() - nestedStart) / 1024 < 40}")
 
-  # A chain ending in a String keeps its value: read it, keep it, use it later.
+  # A chain ending in a String, kept in a `let` and used AFTER heavy allocation
+  # churn (if it aliased the dropped owner, the churn would overwrite it).
   let label: String = componentCopyAtDefault(this: table, i: 0).label
-  let interpolated: String = "{componentCopyAtDefault(this: table, i: 0).label}!"
-  log("string reads: {label} {interpolated} {makeWrapper(count: 2).inner.label}")
+  let heapStart: Int = Sys.processRssKb()
+  var keptLength: Int = 0
+  loop var i: Int = 0, i < 20000, ++i {
+    let kept: String = makeWrapper(count: 50).inner.label
+    keptLength = keptLength + kept.length()
+  }
+  log(
+    "kept string: {label} x{keptLength / 20000}, freed: {(Sys.processRssKb() - heapStart) / 1024 < 40}"
+  )
+
+  # A chain ending in a STRUCT, kept: a deep copy of the field, the owner freed.
+  let structStart: Int = Sys.processRssKb()
+  var keptRows: Int = 0
+  loop var i: Int = 0, i < 20000, ++i {
+    let inner: Rows = makeWrapper(count: 50).inner
+    keptRows = keptRows + inner.rows.length
+  }
+  log(
+    "kept struct rows: {keptRows / 20000}, freed: {(Sys.processRssKb() - structStart) / 1024 < 40}"
+  )
+
+  # Borrowed for one call (`view` parameters), a String field and a struct field.
+  let viewStart: Int = Sys.processRssKb()
+  var viewed: Int = 0
+  loop var i: Int = 0, i < 20000, ++i {
+    viewed = viewed + labelLength(text: makeWrapper(count: 50).inner.label)
+    viewed = viewed + rowCount(rows: makeWrapper(count: 50).inner)
+  }
+  log("viewed: {viewed / 20000}, freed: {(Sys.processRssKb() - viewStart) / 1024 < 40}")
+
+  # Moved out with `own`: the field leaves the temporary, the rest is freed.
+  let ownStart: Int = Sys.processRssKb()
+  var owned: Int = 0
+  loop var i: Int = 0, i < 20000, ++i {
+    owned = owned + takeLabel(text: own makeWrapper(count: 50).inner.label)
+  }
+  log("owned: {owned / 20000}, freed: {(Sys.processRssKb() - ownStart) / 1024 < 40}")
+
+  # Interpolated, compared, assigned, and returned through a helper.
+  let useStart: Int = Sys.processRssKb()
+  var matches: Int = 0
+  var assigned: String = ""
+  loop var i: Int = 0, i < 20000, ++i {
+    let text: String = "{makeWrapper(count: 50).inner.label}!"
+    if makeWrapper(count: 50).inner.label is "table" {
+      matches = matches + 1
+    }
+    assigned = makeWrapper(count: 50).inner.label
+    matches = matches + labelOf(count: 50).length()
+    matches = matches + text.length()
+  }
+  log("used: {matches / 20000} {assigned}, freed: {(Sys.processRssKb() - useStart) / 1024 < 40}")
+}
+
+func labelLength(text: view String) ret Int {
+  ret text.length()
+}
+
+func rowCount(rows: view Rows) ret Int {
+  ret rows.rows.length
+}
+
+func takeLabel(text: own String) ret Int {
+  ret text.length()
+}
+
+func labelOf(count: view Int) ret String {
+  ret makeWrapper(count: count).inner.label
 }

@@ -1,0 +1,26 @@
+# A `view`/`mod` BINDING (`=>`) to a field of a call's owned result is rejected.
+# `makeWrapper(...)` returns ownership; the C backend evaluates it into a
+# statement temporary that is dropped at the end of the statement (#45158908),
+# so an alias into it would dangle for the rest of the scope. Binding the value
+# (`let label: String = makeWrapper(...).inner.label`, a copy) or a reference
+# to a place that outlives the statement is the way; the direct
+# `let v: view T => call()` was already refused for the same reason.
+type Rows {
+  label: String
+  rows: List(String)
+}
+
+type Wrapper {
+  inner: Rows
+}
+
+func makeWrapper() ret Wrapper {
+  ret Wrapper { inner: Rows { label: "table", rows: List.create(String, cap: 1) } }
+}
+
+func main() {
+  let label: view String => makeWrapper().inner.label
+  log("{label}")
+  let rows: mod Rows => makeWrapper().inner
+  log("{rows.rows.length}")
+}
