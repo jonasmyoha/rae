@@ -18,7 +18,6 @@
 #
 # The position is a `RuntimeOffset` on the root (`applyScrollPosition`): a
 # transform-time translation of the subtree, never a relayout.
-import Gpu2d
 open ui/Ecs
 open ui/Components
 open ui/inputSystem/InputSystem
@@ -467,9 +466,9 @@ func updateScrollRoot(
     drag.dragging = false
   }
 
-  # ----- wheel (only while hovering the window) -----
-  let wheel: Float = Gpu2d.wheelMove()
-  if inside and wheel is not 0.0 {
+  # ----- wheel (only when updateUiInput routed it here) -----
+  let wheel: Float = uiWheelFor(input: input, entity: entity)
+  if wheel is not 0.0 {
     let raw: Float = wheel * scrollWheelStep
     state.y = state.y + dampedDelta(
       current: state.y

@@ -274,6 +274,14 @@ type EditAreaRect {
   h: Float
 }
 
+# The node tagged EditArea, or none before the chrome is mounted.
+func editAreaEntity(chromeSystem: view ChromeSystem) ret EntityId {
+  if componentCount(this: chromeSystem.editAreas) is 0 {
+    ret noEntity()
+  }
+  ret componentEntityAt(this: chromeSystem.editAreas, i: 0)
+}
+
 # The rect of the node tagged EditArea (the space between the panels), or the
 # whole canvas until the chrome has laid out.
 func editAreaOf(

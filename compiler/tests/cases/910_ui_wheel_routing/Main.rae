@@ -1,0 +1,293 @@
+open ui/Ecs
+open ui/Components
+open ui/InputComponents
+open ui/scrollRootSystem/ScrollRootSystem
+open ui/inputSystem/InputSystem
+open ui/Transform
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/hierarchySystem/HierarchySystem
+open ui/UiSystems
+
+# The scroll wheel is ROUTED to exactly one consumer (routeUiWheel), never
+# broadcast. The world is an editor in miniature, all in screen space:
+#
+#   canvas   0,0 400x400   WheelTarget (the thing that zooms)
+#   viewport 0,0 100x100   clips; its content is a ScrollRoot
+#   row      0,200 100x20  the content's last row, below the clip (floor -120)
+#   pane     0,150 100x100 WheelTarget, painted below the viewport, under the row
+#   overlay  0,0 50x50     the canvas's child, painted over the viewport corner
+#   popup    340,340 60x60 a separate root painted over the canvas
+#
+# Each probe prints who took the notch and what each reader got. The overlay
+# probe is the one a position-only check gets wrong: the pointer IS inside the
+# list's scroll window, but the node on top is the overlay, whose path to the
+# root runs through the canvas and not the list — so the canvas takes it (as a
+# scrollable panel takes the wheel over a button inside it) and the list, which
+# the pointer is merely "inside", must not move.
+func node(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  x: view Float
+  y: view Float
+  w: view Float
+  h: view Float
+) ret EntityId {
+  let entity: EntityId = createEntity(world: world)
+  componentSet(
+    this: uiSystems.layout.computedRects
+    entity: entity
+    data: ComputedRect { position: { x: x, y: y }, size: { x: w, y: h } }
+  )
+  componentSet(
+    this: uiSystems.transform2d.worldTransforms
+    entity: entity
+    data: WorldTransform2D {
+      position: Vec2 { x: x, y: y }
+      rotation: 0.0
+      scale: Vec2 { x: 1.0, y: 1.0 }
+    }
+  )
+  ret entity
+}
+
+# The three consumers, in the order they are declared in main.
+type Consumers {
+  canvas: EntityId
+  pane: EntityId
+  content: EntityId
+}
+
+func nameOf(entity: view EntityId, consumers: view Consumers) ret String {
+  if isNone(this: entity) {
+    ret "none"
+  }
+  if entity is consumers.pane {
+    ret "pane"
+  }
+  if entity is consumers.canvas {
+    ret "canvas"
+  }
+  if entity is consumers.content {
+    ret "content"
+  }
+  ret "other"
+}
+
+func probe(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  label: view String
+  x: view Float
+  y: view Float
+  consumers: view Consumers
+) {
+  var input: UiInput = createUiInput()
+  input.pointer.x = x
+  input.pointer.y = y
+  routeUiWheel(
+    input: input
+    world: world
+    uiSystems: uiSystems
+    wheel: -1.0
+  )
+  let before: Float = componentGet(this: world.scrollStates, entity: consumers.content).y
+  updateScrollRoot(
+    world: world
+    uiSystems: uiSystems
+    entity: consumers.content
+    input: input
+  )
+  let after: Float = componentGet(this: world.scrollStates, entity: consumers.content).y
+  let zoom: Float = uiWheelFor(input: input, entity: consumers.canvas)
+  log(
+    "{label}: routed {nameOf(entity: input.wheelTarget, consumers: consumers)} zoom {zoom.toInt()} scroll {before.toInt()}->{after.toInt()}"
+  )
+}
+
+func main() {
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  let canvas: EntityId = node(
+    world: world
+    uiSystems: uiSystems
+    x: 0.0
+    y: 0.0
+    w: 400.0
+    h: 400.0
+  )
+  componentSet(this: world.wheelTargets, entity: canvas, data: WheelTarget {})
+  let pane: EntityId = node(
+    world: world
+    uiSystems: uiSystems
+    x: 0.0
+    y: 150.0
+    w: 100.0
+    h: 100.0
+  )
+  componentSet(this: world.wheelTargets, entity: pane, data: WheelTarget {})
+  let viewport: EntityId = node(
+    world: world
+    uiSystems: uiSystems
+    x: 0.0
+    y: 0.0
+    w: 100.0
+    h: 100.0
+  )
+  componentSet(
+    this: world.overflows
+    entity: viewport
+    data: OverflowPolicy { mode: OverflowMode.clip }
+  )
+  let content: EntityId = node(
+    world: world
+    uiSystems: uiSystems
+    x: 0.0
+    y: 0.0
+    w: 100.0
+    h: 100.0
+  )
+  let row: EntityId = node(
+    world: world
+    uiSystems: uiSystems
+    x: 0.0
+    y: 200.0
+    w: 100.0
+    h: 20.0
+  )
+  componentSet(
+    this: world.onClicks
+    entity: row
+    data: OnClick { actionId: "row", actionIdDouble: "", actionIdTriple: "" }
+  )
+  let overlay: EntityId = node(
+    world: world
+    uiSystems: uiSystems
+    x: 0.0
+    y: 0.0
+    w: 50.0
+    h: 50.0
+  )
+  componentSet(
+    this: world.onClicks
+    entity: overlay
+    data: OnClick { actionId: "overlay", actionIdDouble: "", actionIdTriple: "" }
+  )
+  # The pane first, so painted first: below the viewport's overflowing row.
+  setParent(
+    parents: uiSystems.hierarchy.parents
+    childrens: world.childrens
+    child: pane
+    parent: canvas
+  )
+  setParent(
+    parents: uiSystems.hierarchy.parents
+    childrens: world.childrens
+    child: viewport
+    parent: canvas
+  )
+  setParent(
+    parents: uiSystems.hierarchy.parents
+    childrens: world.childrens
+    child: content
+    parent: viewport
+  )
+  setParent(
+    parents: uiSystems.hierarchy.parents
+    childrens: world.childrens
+    child: row
+    parent: content
+  )
+  # Added last, so painted last: on top of the viewport.
+  setParent(
+    parents: uiSystems.hierarchy.parents
+    childrens: world.childrens
+    child: overlay
+    parent: canvas
+  )
+  # A second root, created later so painted later: a popup over the canvas's
+  # bottom-right corner. It is not the canvas's child, so the canvas is not on
+  # its path; it consumes nothing, and what it covers must not get the notch.
+  let popup: EntityId = node(
+    world: world
+    uiSystems: uiSystems
+    x: 340.0
+    y: 340.0
+    w: 60.0
+    h: 60.0
+  )
+  componentSet(
+    this: world.onClicks
+    entity: popup
+    data: OnClick { actionId: "popup", actionIdDouble: "", actionIdTriple: "" }
+  )
+  let root: ScrollRoot = {
+    axis: ScrollAxis.y
+    floor: ScrollFloorMode.content
+    fixedFloor: 0.0
+    endInset: 0.0
+  }
+  componentSet(this: world.scrollRoots, entity: content, data: root)
+  let consumers: Consumers = { canvas: canvas, pane: pane, content: content }
+  let memory: ScrollMemory = createScrollMemory()
+  scrollRootSystem(world: world, uiSystems: uiSystems, memory: memory)
+
+  # In the viewport, clear of the overlay: the list scrolls, the canvas does not zoom.
+  probe(
+    world: world
+    uiSystems: uiSystems
+    label: "list"
+    x: 75.0
+    y: 75.0
+    consumers: consumers
+  )
+  # Over the overlay covering the viewport: the canvas's notch, not the list's.
+  probe(
+    world: world
+    uiSystems: uiSystems
+    label: "overlay"
+    x: 25.0
+    y: 25.0
+    consumers: consumers
+  )
+  # Over the row that overflows the clip onto the pane: the clip hides it, so
+  # the notch is the pane's, not the invisible row's (whose path would give it
+  # to the canvas).
+  probe(
+    world: world
+    uiSystems: uiSystems
+    label: "clipped row"
+    x: 50.0
+    y: 210.0
+    consumers: consumers
+  )
+  # Bare canvas: zooms, the list stays put.
+  probe(
+    world: world
+    uiSystems: uiSystems
+    label: "canvas"
+    x: 300.0
+    y: 300.0
+    consumers: consumers
+  )
+  # Under the popup: blocked, so neither the canvas below nor anything else.
+  probe(
+    world: world
+    uiSystems: uiSystems
+    label: "popup"
+    x: 370.0
+    y: 370.0
+    consumers: consumers
+  )
+  # No notch this frame: nobody is routed to.
+  var idle: UiInput = createUiInput()
+  idle.pointer.x = 75.0
+  idle.pointer.y = 75.0
+  routeUiWheel(
+    input: idle
+    world: world
+    uiSystems: uiSystems
+    wheel: 0.0
+  )
+  log("idle: routed {nameOf(entity: idle.wheelTarget, consumers: consumers)}")
+}
