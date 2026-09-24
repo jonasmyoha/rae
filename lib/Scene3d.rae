@@ -28,6 +28,7 @@ open Vec3
 open ecs/Entity
 open ecs/World
 open ecs/ComponentTable
+open ecs/Query
 open ecs/prevTransformSystem/PrevTransformSystem
 
 # ----- typed resource handles ----------------------------------------
@@ -276,9 +277,13 @@ func world3dEntityCount(world: view World3d) ret Int {
 }
 
 # ----- World3d runtime access (animation + frame history) ------------
-# Read an entity's current Transform3d.
-func world3dGetTransform(world: view World3d, entityId: view EntityId) ret Transform3d {
-  ret componentGet(this: world.transforms, entityId: entityId)
+# A mutable reference to an entity's current Transform3d: the per-frame
+# animation write. Like world3dWriteTransform it touches only the CURRENT
+# transform — the previous one advances once per frame via
+# world3dPrevTransformSystem — so it is the in-place form of "read, change,
+# write back", without copying the transform out and in.
+func world3dTransformMod(world: mod World3d, entityId: view EntityId) ret mod Transform3d {
+  ret componentMod(this: world.transforms, entityId: entityId)
 }
 
 # Write an entity's Transform3d WITHOUT touching its previous transform — the
@@ -317,8 +322,8 @@ func world3dSdfEntityAt(world: view World3d, i: view Int) ret EntityId {
   ret componentEntityAt(this: world.sdfs, i: i)
 }
 
-func world3dSdfDataAt(world: view World3d, i: view Int) ret SdfPrimitive {
-  ret componentDataAt(this: world.sdfs, i: i)
+func world3dSdfDataAt(world: view World3d, i: view Int) ret view SdfPrimitive {
+  ret queryViewAt(table: world.sdfs, denseIndex: i)
 }
 
 # Advance motion-vector history by running the general PrevTransformSystem

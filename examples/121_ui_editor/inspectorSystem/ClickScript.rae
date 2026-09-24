@@ -44,11 +44,11 @@ func nodeCenterOf(uiSystems: view UiSystems, entityId: view EntityId) ret ClickP
   if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) is false {
     ret ClickPoint { x: 0.0, y: 0.0, ok: false }
   }
-  let transform: WorldTransform2D = componentGet(
+  let transform: view WorldTransform2D => componentView(
     this: uiSystems.transform2d.worldTransforms
     entityId: entityId
   )
-  let computed: ComputedRect = componentGet(
+  let computed: view ComputedRect => componentView(
     this: uiSystems.layout.computedRects
     entityId: entityId
   )
@@ -175,11 +175,11 @@ func runTestClicks(
 # exterior pad so floating-point equality at an edge cannot make the fixture
 # platform-sensitive.
 func testMarqueeRectOf(uiSystems: view UiSystems, entityId: view EntityId) ret MarqueeRect {
-  let transform: WorldTransform2D = componentGet(
+  let transform: view WorldTransform2D => componentView(
     this: uiSystems.transform2d.worldTransforms
     entityId: entityId
   )
-  let computed: ComputedRect = componentGet(
+  let computed: view ComputedRect => componentView(
     this: uiSystems.layout.computedRects
     entityId: entityId
   )
@@ -508,7 +508,7 @@ func logInspectorPanel(
     world: world
     source: EditorListSource.hierarchy
   )
-  let treeScroll: ScrollState = componentGet(this: world.scrollStates, entityId: treeList)
+  let treeScroll: view ScrollState => componentView(this: world.scrollStates, entityId: treeList)
   log("[ui-editor] hierarchy scroll: {treeScroll.y}")
   # Read the rows AFTER the resync above: `treeEntities` is rebuilt there, and
   # logging it earlier reports the previous sync's tree.
@@ -586,7 +586,7 @@ func runTestComponent(
       source: EditorListSource.components
     )
     if componentHas(this: world.scrollRoots, entityId: list) {
-      let root: ScrollRoot = componentGet(this: world.scrollRoots, entityId: list)
+      let root: view ScrollRoot => componentView(this: world.scrollRoots, entityId: list)
       let position: Float = name.toFloat()
       applyScrollPosition(
         world: world

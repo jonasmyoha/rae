@@ -655,20 +655,22 @@ func applyOverride(world: mod UiWorld, entityId: view EntityId, override: view S
   }
   let rectKey: String = "Rect"
   if override.componentName is rectKey {
-    var current: Rect = { position: { x: 0.0, y: 0.0 }, size: { x: 0.0, y: 0.0 } }
-    if componentHas(this: world.rects, entityId: entityId) {
-      current = componentGet(this: world.rects, entityId: entityId)
+    # Upsert one field in place: create the default only when missing, then
+    # write the field through componentMod (no copy, no whole-value set).
+    if componentHas(this: world.rects, entityId: entityId) is false {
+      let empty: Rect = { position: { x: 0.0, y: 0.0 }, size: { x: 0.0, y: 0.0 } }
+      componentSet(this: world.rects, entityId: entityId, data: empty)
     }
+    let rect: mod Rect => componentMod(this: world.rects, entityId: entityId)
     let value: Float = override.valueString.toFloat()
     let wField: String = "w"
     let hField: String = "h"
     if override.fieldName is wField {
-      current.size.x = value
+      rect.size.x = value
     }
     if override.fieldName is hField {
-      current.size.y = value
+      rect.size.y = value
     }
-    componentSet(this: world.rects, entityId: entityId, data: current)
     ret
   }
   # Per-row identity and style a data list writes onto its row roots (#996):
@@ -683,17 +685,17 @@ func applyOverride(world: mod UiWorld, entityId: view EntityId, override: view S
   }
   let widgetIdKey: String = "WidgetId"
   if override.componentName is widgetIdKey {
-    var current: WidgetId = { id: "", kind: "" }
-    if componentHas(this: world.widgetIds, entityId: entityId) {
-      current = componentGet(this: world.widgetIds, entityId: entityId)
+    if componentHas(this: world.widgetIds, entityId: entityId) is false {
+      let empty: WidgetId = { id: "", kind: "" }
+      componentSet(this: world.widgetIds, entityId: entityId, data: empty)
     }
+    let widgetId: mod WidgetId => componentMod(this: world.widgetIds, entityId: entityId)
     let idField: String = "id"
     if override.fieldName is idField {
-      current.id = "{override.valueString}"
+      widgetId.id = "{override.valueString}"
     } else {
-      current.kind = "{override.valueString}"
+      widgetId.kind = "{override.valueString}"
     }
-    componentSet(this: world.widgetIds, entityId: entityId, data: current)
     ret
   }
   let cornerKey: String = "CornerRadius"
@@ -709,25 +711,25 @@ func applyOverride(world: mod UiWorld, entityId: view EntityId, override: view S
   }
   let widgetStateKey: String = "WidgetState"
   if override.componentName is widgetStateKey {
-    var current: WidgetState = { enabled: true, selected: false, loading: false, error: false }
-    if componentHas(this: world.widgetStates, entityId: entityId) {
-      current = componentGet(this: world.widgetStates, entityId: entityId)
+    if componentHas(this: world.widgetStates, entityId: entityId) is false {
+      let initial: WidgetState = { enabled: true, selected: false, loading: false, error: false }
+      componentSet(this: world.widgetStates, entityId: entityId, data: initial)
     }
+    let widgetState: mod WidgetState => componentMod(this: world.widgetStates, entityId: entityId)
     let trueStr: String = "true"
     let v: Bool = override.valueString is trueStr
     if override.fieldName is "enabled" {
-      current.enabled = v
+      widgetState.enabled = v
     }
     if override.fieldName is "selected" {
-      current.selected = v
+      widgetState.selected = v
     }
     if override.fieldName is "loading" {
-      current.loading = v
+      widgetState.loading = v
     }
     if override.fieldName is "error" {
-      current.error = v
+      widgetState.error = v
     }
-    componentSet(this: world.widgetStates, entityId: entityId, data: current)
     ret
   }
   # Shape kind/fill/radius and GradientFill palette slots let a row carry its
@@ -817,24 +819,24 @@ func applyOverride(world: mod UiWorld, entityId: view EntityId, override: view S
   # by its depth through a ListView binding.
   let paddingKey: String = "Padding"
   if override.componentName is paddingKey {
-    var insets: Padding = { insets: { l: 0.0, t: 0.0, r: 0.0, b: 0.0 } }
-    if componentHas(this: world.paddings, entityId: entityId) {
-      insets = componentGet(this: world.paddings, entityId: entityId)
+    if componentHas(this: world.paddings, entityId: entityId) is false {
+      let empty: Padding = { insets: { l: 0.0, t: 0.0, r: 0.0, b: 0.0 } }
+      componentSet(this: world.paddings, entityId: entityId, data: empty)
     }
+    let padding: mod Padding => componentMod(this: world.paddings, entityId: entityId)
     let value: Float = override.valueString.toFloat()
     if override.fieldName is "l" {
-      insets.insets.l = value
+      padding.insets.l = value
     }
     if override.fieldName is "t" {
-      insets.insets.t = value
+      padding.insets.t = value
     }
     if override.fieldName is "r" {
-      insets.insets.r = value
+      padding.insets.r = value
     }
     if override.fieldName is "b" {
-      insets.insets.b = value
+      padding.insets.b = value
     }
-    componentSet(this: world.paddings, entityId: entityId, data: insets)
     ret
   }
 }

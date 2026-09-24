@@ -14,6 +14,7 @@ open ui/Ecs
 import ui/Components
 open ecs/Entity
 open ecs/ComponentTable
+open ecs/Query
 open ui/Layer
 
 # DockSystem (docs/ecs-systems-own-their-tables.md §3): owns the dock's `NavTab` tabs — its
@@ -31,13 +32,13 @@ func anchorBottomSystem(world: mod UiWorld, bottomInset: view Float) pub {
   var i: Int = 0
   loop i < n {
     let entityId: EntityId = componentEntityAt(this: world.anchorBottoms, i: i)
-    let anchor: AnchorBottom = componentDataAt(this: world.anchorBottoms, i: i)
+    let anchor: view AnchorBottom => queryViewAt(table: world.anchorBottoms, denseIndex: i)
     if anchor.enabled and componentHas(this: world.rects, entityId: entityId) {
-      let r: Rect = componentGet(this: world.rects, entityId: entityId)
+      let r: view Rect => componentView(this: world.rects, entityId: entityId)
       let wantedY: Float = world.layoutH - r.size.y - bottomInset
       var currentY: Float = wantedY - 1.0
       if componentHas(this: world.offsets, entityId: entityId) {
-        currentY = componentGet(this: world.offsets, entityId: entityId).delta.y
+        currentY = componentView(this: world.offsets, entityId: entityId).delta.y
       }
       if currentY is not wantedY {
         let off: Offset = { delta: Vec2 { x: 0.0, y: wantedY } }
@@ -54,7 +55,7 @@ func layerTagSystem(world: mod UiWorld) pub {
   loop i < n {
     let entityId: EntityId = componentEntityAt(this: world.layerTags, i: i)
     if componentHas(this: world.layerRefs, entityId: entityId) is false {
-      let tag: LayerTag = componentDataAt(this: world.layerTags, i: i)
+      let tag: view LayerTag => queryViewAt(table: world.layerTags, denseIndex: i)
       setLayerById(world: world, entityId: entityId, id: tag.id)
     }
     i = i + 1
@@ -62,29 +63,21 @@ func layerTagSystem(world: mod UiWorld) pub {
 }
 
 func setTabSpriteTint(world: mod UiWorld, entityId: view EntityId, tint: view RgbaColor) {
-  let sp: Sprite = componentGet(this: world.sprites, entityId: entityId)
-  if sp.tint.r is tint.r and sp.tint.g is tint.g and sp.tint.b is tint.b and sp.tint.a is tint.a {
+  let current: RgbaColor = componentView(this: world.sprites, entityId: entityId).tint
+  if current.r is tint.r and current.g is tint.g and current.b is tint.b and current.a is tint.a {
     ret
   }
-  let updated: Sprite = {
-    textureKey: "{sp.textureKey}"
-    tint: tint
-    tintSlot: ""
-    scaleMode: sp.scaleMode
-    tileScale: sp.tileScale
-    nineSlice: sp.nineSlice
-    hasNineSlice: sp.hasNineSlice
-  }
-  componentSet(this: world.sprites, entityId: entityId, data: updated)
+  let sprite: mod Sprite => componentMod(this: world.sprites, entityId: entityId)
+  sprite.tint = tint
+  sprite.tintSlot = ""
 }
 
 func setTabTextStyle(world: mod UiWorld, entityId: view EntityId, styleId: view String) {
-  let t: Text = componentGet(this: world.texts, entityId: entityId)
-  if t.styleId is styleId {
+  if componentView(this: world.texts, entityId: entityId).styleId is styleId {
     ret
   }
-  let updated: Text = { text: "{t.text}", styleId: "{styleId}", wrapWidthMode: t.wrapWidthMode }
-  componentSet(this: world.texts, entityId: entityId, data: updated)
+  let text: mod Text => componentMod(this: world.texts, entityId: entityId)
+  text.styleId = "{styleId}"
 }
 
 func navTabsSystem(dockSystem: view DockSystem, world: mod UiWorld, activeTab: Screen) pub {
@@ -98,7 +91,7 @@ func navTabsSystem(dockSystem: view DockSystem, world: mod UiWorld, activeTab: S
     var i: Int = 0
     loop i < n {
       let tab: EntityId = componentEntityAt(this: dockSystem.navTabs, i: i)
-      let binding: NavTab = componentDataAt(this: dockSystem.navTabs, i: i)
+      let binding: view NavTab => queryViewAt(table: dockSystem.navTabs, denseIndex: i)
       let active: Bool = binding.screen is activeName
       var tint: RgbaColor = inactiveTint
       var style: String = "tabInactive"
@@ -124,15 +117,9 @@ func navTabsSystem(dockSystem: view DockSystem, world: mod UiWorld, activeTab: S
         }
       }
       if componentHas(this: world.widgetStates, entityId: tab) {
-        let ws: WidgetState = componentGet(this: world.widgetStates, entityId: tab)
-        if ws.selected is not active {
-          let updated: WidgetState = {
-            enabled: ws.enabled
-            selected: active
-            loading: ws.loading
-            error: ws.error
-          }
-          componentSet(this: world.widgetStates, entityId: tab, data: updated)
+        if componentView(this: world.widgetStates, entityId: tab).selected is not active {
+          let widgetState: mod WidgetState => componentMod(this: world.widgetStates, entityId: tab)
+          widgetState.selected = active
         }
       }
       i = i + 1

@@ -97,8 +97,8 @@ func main() {
   log("albumCovers: {componentCount(this: albumCoverSystem.albumCovers)}")
   log("favourites: {componentCount(this: albumCoverSystem.favourites)}")
   let hero: EntityId = componentEntityAt(this: albumCoverSystem.favourites, i: 0)
-  let cover: AlbumCover = componentGet(this: albumCoverSystem.albumCovers, entityId: hero)
-  let favourite: Favourite = componentGet(this: albumCoverSystem.favourites, entityId: hero)
+  let cover: view AlbumCover => componentView(this: albumCoverSystem.albumCovers, entityId: hero)
+  let favourite: view Favourite => componentView(this: albumCoverSystem.favourites, entityId: hero)
   log("hero cover radius={cover.radius} label={cover.label} favourite count={favourite.count}")
   log("unclaimed: {kept.length}")
 

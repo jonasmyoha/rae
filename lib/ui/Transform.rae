@@ -34,7 +34,7 @@ func active(world: view UiWorld, entityId: view EntityId) ret Bool {
   if componentHas(this: world.actives, entityId: entityId) is false {
     ret true
   }
-  let a: Active = componentGet(this: world.actives, entityId: entityId)
+  let a: view Active => componentView(this: world.actives, entityId: entityId)
   ret a.value
 }
 
@@ -42,7 +42,7 @@ func opacity(world: view UiWorld, entityId: view EntityId) ret Float {
   if componentHas(this: world.opacities, entityId: entityId) is false {
     ret 1.0
   }
-  let o: Opacity = componentGet(this: world.opacities, entityId: entityId)
+  let o: view Opacity => componentView(this: world.opacities, entityId: entityId)
   ret o.value
 }
 
@@ -58,7 +58,10 @@ func worldVisualOf(
   if componentHas(this: uiSystems.transform2d.worldVisuals, entityId: entityId) is false {
     ret WorldVisual { alpha: 1.0, visible: true }
   }
-  let wv: WorldVisual = componentGet(this: uiSystems.transform2d.worldVisuals, entityId: entityId)
+  let wv: view WorldVisual => componentView(
+    this: uiSystems.transform2d.worldVisuals
+    entityId: entityId
+  )
   ret wv
 }
 
@@ -66,7 +69,7 @@ func fxOf(world: view UiWorld, entityId: view EntityId) ret TransformFx {
   if componentHas(this: world.transforms, entityId: entityId) is false {
     ret defaultTransformFx()
   }
-  let t: TransformFx = componentGet(this: world.transforms, entityId: entityId)
+  let t: view TransformFx => componentView(this: world.transforms, entityId: entityId)
   ret t
 }
 
@@ -78,7 +81,10 @@ func computedRectOf(
   if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) is false {
     ret ComputedRect { position: { x: 0.0, y: 0.0 }, size: { x: 0.0, y: 0.0 } }
   }
-  let r: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entityId: entityId)
+  let r: view ComputedRect => componentView(
+    this: uiSystems.layout.computedRects
+    entityId: entityId
+  )
   ret r
 }
 
@@ -94,7 +100,7 @@ func runtimeOffsetOf(
   if componentHas(this: uiSystems.transform2d.runtimeOffsets, entityId: entityId) is false {
     ret Vec2 { x: 0.0, y: 0.0 }
   }
-  let ro: RuntimeOffset = componentGet(
+  let ro: view RuntimeOffset => componentView(
     this: uiSystems.transform2d.runtimeOffsets
     entityId: entityId
   )
@@ -137,7 +143,7 @@ func composeVisual(
 func buildLocalTransforms(world: mod UiWorld, uiSystems: view UiSystems) {
   loop var i: Int = 0, i < componentCount(this: uiSystems.layout.computedRects), ++i {
     let entityId: EntityId = componentEntityAt(this: uiSystems.layout.computedRects, i: i)
-    let cr: ComputedRect = componentDataAt(this: uiSystems.layout.computedRects, i: i)
+    let cr: view ComputedRect => queryViewAt(table: uiSystems.layout.computedRects, denseIndex: i)
     let ro: Vec2 = runtimeOffsetOf(world: world, uiSystems: uiSystems, entityId: entityId)
     let fx: TransformFx = fxOf(world: world, entityId: entityId)
     # The ECS transform rotates about the entity's ORIGIN (its top-left);
@@ -194,7 +200,7 @@ func accumulateVisibility(world: mod UiWorld, uiSystems: view UiSystems) {
   )
   loop let entityId: view EntityId in order {
     if componentHas(this: uiSystems.hierarchy.parents, entityId: entityId) {
-      let link: Parent = componentGet(this: uiSystems.hierarchy.parents, entityId: entityId)
+      let link: view Parent => componentView(this: uiSystems.hierarchy.parents, entityId: entityId)
       let parentWv: WorldVisual = worldVisualOf(
         world: world
         uiSystems: uiSystems

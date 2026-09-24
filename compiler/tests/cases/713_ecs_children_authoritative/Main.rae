@@ -37,7 +37,7 @@ func printOrder(order: view List(EntityId), label: view String) {
 
 func parentIndex(parents: view ComponentTable(Parent), child: view EntityId) ret Int {
   if componentHas(this: parents, entityId: child) {
-    let link: Parent = componentGet(this: parents, entityId: child)
+    let link: view Parent => componentView(this: parents, entityId: child)
     ret link.parent.index
   }
   ret -1

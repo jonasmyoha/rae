@@ -56,14 +56,14 @@ func writeMarqueeBand(
     let entityId: EntityId = componentEntityAt(this: inspectorSystem.marqueeBands, i: i)
     var wasVisible: Bool = true
     if componentHas(this: world.actives, entityId: entityId) {
-      wasVisible = componentGet(this: world.actives, entityId: entityId).value
+      wasVisible = componentView(this: world.actives, entityId: entityId).value
     }
     if wasVisible is not visible {
       componentSet(this: world.actives, entityId: entityId, data: Active { value: visible })
       changed = true
     }
     if visible and componentHas(this: world.rects, entityId: entityId) {
-      let current: Rect = componentGet(this: world.rects, entityId: entityId)
+      let current: view Rect => componentView(this: world.rects, entityId: entityId)
       if current.position.x is not rect.x or current.position.y is not rect.y or current.size.x is not rect.w or current.size.y is not rect.h {
         let band: mod Rect => componentMod(this: world.rects, entityId: entityId)
         band.position.x = rect.x
@@ -151,11 +151,11 @@ func marqueeEnclosesEntity(
   if worldVisualOf(world: world, uiSystems: uiSystems, entityId: entityId).visible is false {
     ret false
   }
-  let transform: WorldTransform2D = componentGet(
+  let transform: view WorldTransform2D => componentView(
     this: uiSystems.transform2d.worldTransforms
     entityId: entityId
   )
-  let computed: ComputedRect = componentGet(
+  let computed: view ComputedRect => componentView(
     this: uiSystems.layout.computedRects
     entityId: entityId
   )

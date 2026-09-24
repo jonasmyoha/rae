@@ -24,6 +24,7 @@ import ui/Scene
 open ui/SceneInstance
 open ecs/Entity
 open ecs/ComponentTable
+open ecs/Query
 open ecs/hierarchySystem/HierarchySystem
 open ui/Theme
 open ui/renderSystem/RenderSystem
@@ -121,7 +122,7 @@ func setHistoryActive(world: mod UiWorld, entityId: view EntityId, active: view 
   }
   var current: Bool = true
   if componentHas(this: world.actives, entityId: entityId) {
-    let a: Active = componentGet(this: world.actives, entityId: entityId)
+    let a: view Active => componentView(this: world.actives, entityId: entityId)
     current = a.value
   }
   if current is not active {
@@ -144,8 +145,8 @@ func historyListSystem(
   var i: Int = 0
   loop i < n {
     let host: EntityId = componentEntityAt(this: historySystem.historyLists, i: i)
-    let binding: HistoryList = componentDataAt(this: historySystem.historyLists, i: i)
-    if binding.builtRevision is not state.playHistory.revision {
+    let builtRevision: Int = queryViewAt(table: historySystem.historyLists, denseIndex: i).builtRevision
+    if builtRevision is not state.playHistory.revision {
       componentSet(
         this: world.listViewDatas
         entityId: host
@@ -156,8 +157,8 @@ func historyListSystem(
       # node (an authored `EmptyState { kind: history }`) is toggled by
       # `emptyStateSystem`, no page + node-id lookup here.
       setHistoryActive(world: world, entityId: host, active: hasEntries)
-      let built: HistoryList = { builtRevision: state.playHistory.revision }
-      componentSet(this: historySystem.historyLists, entityId: host, data: built)
+      let binding: mod HistoryList => queryModAt(table: historySystem.historyLists, denseIndex: i)
+      binding.builtRevision = state.playHistory.revision
     }
     i = i + 1
   }

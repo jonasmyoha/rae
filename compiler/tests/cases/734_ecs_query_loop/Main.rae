@@ -43,8 +43,8 @@ func main() {
     position.x = position.x + velocity.v
     log("q2 e{entityId.index} x={position.x} v={velocity.v}")
   }
-  let r2: Position = componentGet(this: pos, entityId: e2)
-  let r3: Position = componentGet(this: pos, entityId: e3)
+  let r2: view Position => componentView(this: pos, entityId: e2)
+  let r3: view Position => componentView(this: pos, entityId: e3)
   log("readback e2={r2.x} e3={r3.x}")
 
   # view-only loop, no entity binding: reads must not bump the generation.
@@ -66,8 +66,8 @@ func main() {
     tg.t = tg.t + 1
     log("q3 e{entityId.index}")
   }
-  let r3b: Position = componentGet(this: pos, entityId: e3)
-  let t3: Tag = componentGet(this: tag, entityId: e3)
+  let r3b: view Position => componentView(this: pos, entityId: e3)
+  let t3: view Tag => componentView(this: tag, entityId: e3)
   log("q3 readback x={r3b.x} t={t3.t}")
 
   # query: the single-table base case, in dense order.

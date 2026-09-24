@@ -12,12 +12,12 @@ func main() {
   componentSet(this: wt2, entityId: e1, data: createWorldTransform2D())
   componentSet(this: wt3, entityId: e1, data: createWorldTransform3D())
 
-  let w2: WorldTransform2D = componentGet(this: wt2, entityId: e1)
+  let w2: view WorldTransform2D => componentView(this: wt2, entityId: e1)
   log(
     "wt2 pos: {w2.position.x},{w2.position.y} rot: {w2.rotation} scale: {w2.scale.x},{w2.scale.y}"
   )
 
-  let w3: WorldTransform3D = componentGet(this: wt3, entityId: e1)
+  let w3: view WorldTransform3D => componentView(this: wt3, entityId: e1)
   let m0: Float = w3.matrix.m.copyAtFallback(index: 0, fallback: 0.0)
   let m5: Float = w3.matrix.m.copyAtFallback(index: 5, fallback: 0.0)
   let m1: Float = w3.matrix.m.copyAtFallback(index: 1, fallback: 0.0)

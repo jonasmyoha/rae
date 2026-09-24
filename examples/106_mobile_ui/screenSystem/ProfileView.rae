@@ -17,6 +17,7 @@ import ui/Scene
 open ui/SceneInstance
 open ecs/Entity
 open ecs/ComponentTable
+open ecs/Query
 open ui/renderSystem/RenderSystem
 
 # ----- ProfileStat system --------------------------------------------------
@@ -70,19 +71,14 @@ func profileStatsSystem(
   var i: Int = 0
   loop i < n {
     let entityId: EntityId = componentEntityAt(this: profileSystem.profileStats, i: i)
-    let binding: ProfileStat = componentDataAt(this: profileSystem.profileStats, i: i)
+    let binding: view ProfileStat => queryViewAt(table: profileSystem.profileStats, denseIndex: i)
     if componentHas(this: world.texts, entityId: entityId) {
       let wanted: String = profileStatText(state: state, stat: binding.stat)
-      # A by-value read (three tiny Texts): the table must not be written
-      # while a view into one of its rows is live.
-      let current: Text = componentGet(this: world.texts, entityId: entityId)
-      if current.text is not wanted {
-        let updated: Text = {
-          text: wanted
-          styleId: "{current.styleId}"
-          wrapWidthMode: current.wrapWidthMode
-        }
-        componentSet(this: world.texts, entityId: entityId, data: updated)
+      # Compared through a view, written in place through componentMod: no
+      # copy, and no whole-component write while a view is live.
+      if componentView(this: world.texts, entityId: entityId).text is not wanted {
+        let current: mod Text => componentMod(this: world.texts, entityId: entityId)
+        current.text = "{wanted}"
       }
     }
     i = i + 1
@@ -93,7 +89,7 @@ func profileStatsSystem(
 func setActiveIfChanged(world: mod UiWorld, entityId: view EntityId, active: view Bool) {
   var current: Bool = true
   if componentHas(this: world.actives, entityId: entityId) {
-    let a: Active = componentGet(this: world.actives, entityId: entityId)
+    let a: view Active => componentView(this: world.actives, entityId: entityId)
     current = a.value
   }
   if current is not active {
@@ -115,7 +111,10 @@ func avatarSystem(
     var i: Int = 0
     loop i < n {
       let container: EntityId = componentEntityAt(this: profileSystem.avatarSources, i: i)
-      let source: AvatarSource = componentDataAt(this: profileSystem.avatarSources, i: i)
+      let source: view AvatarSource => queryViewAt(
+        table: profileSystem.avatarSources
+        denseIndex: i
+      )
       let loaded: Bool = textureHas(reg: reg, key: source.textureKey)
       if componentHas(this: world.childrens, entityId: container) {
         let kids: view Children => componentView(this: world.childrens, entityId: container)

@@ -7,6 +7,7 @@ open ui/UiSystems
 import ui/Theme
 open ecs/Entity
 open ecs/ComponentTable
+open ecs/Query
 open ecs/Queue
 open ecs/Event
 open ecs/World
@@ -410,13 +411,13 @@ func pageOf(
   var cur: EntityId = { index: entityId.index, generation: entityId.generation }
   loop true {
     if componentHas(this: world.pageRoots, entityId: cur) {
-      let r: PageRoot = componentGet(this: world.pageRoots, entityId: cur)
+      let r: view PageRoot => componentView(this: world.pageRoots, entityId: cur)
       ret r.id
     }
     if componentHas(this: uiSystems.hierarchy.parents, entityId: cur) is false {
       ret ""
     }
-    let pl: Parent = componentGet(this: uiSystems.hierarchy.parents, entityId: cur)
+    let pl: view Parent => componentView(this: uiSystems.hierarchy.parents, entityId: cur)
     cur = { index: pl.parent.index, generation: pl.parent.generation }
   }
   ret ""
@@ -431,7 +432,7 @@ func findPageRootEntity(world: view UiWorld, pageId: view String) pub ret Entity
   var i: Int = 0
   loop i < n {
     let e: EntityId = componentEntityAt(this: world.pageRoots, i: i)
-    let r: PageRoot = componentDataAt(this: world.pageRoots, i: i)
+    let r: view PageRoot => queryViewAt(table: world.pageRoots, denseIndex: i)
     if r.id is pageId {
       ret e
     }
@@ -468,7 +469,7 @@ func isPageActive(world: view UiWorld, pageId: view String) pub ret Bool {
   if componentHas(this: world.actives, entityId: root) is false {
     ret false
   }
-  let a: Active = componentGet(this: world.actives, entityId: root)
+  let a: view Active => componentView(this: world.actives, entityId: root)
   ret a.value
 }
 
@@ -510,19 +511,13 @@ func setSpriteKey(world: mod UiWorld, entityId: view EntityId, key: view String)
   if componentHas(this: world.sprites, entityId: entityId) is false {
     ret false
   }
-  let current: Sprite = componentGet(this: world.sprites, entityId: entityId)
-  if current.textureKey is key {
+  # Checked through a view first: componentMod marks the table changed, and an
+  # unchanged key must not.
+  if componentView(this: world.sprites, entityId: entityId).textureKey is key {
     ret false
   }
-  let next: Sprite = {
-    textureKey: "{key}"
-    tint: current.tint
-    scaleMode: current.scaleMode
-    tileScale: current.tileScale
-    nineSlice: current.nineSlice
-    hasNineSlice: current.hasNineSlice
-  }
-  componentSet(this: world.sprites, entityId: entityId, data: next)
+  let sprite: mod Sprite => componentMod(this: world.sprites, entityId: entityId)
+  sprite.textureKey = "{key}"
   ret true
 }
 

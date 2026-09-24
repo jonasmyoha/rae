@@ -107,7 +107,7 @@ func firstEnemy(world: view GameWorld) ret EntityId {
     loop var i: Int = 0, i < tagged.length, ++i {
       let e: EntityId = rae_ext_rae_buf_get(buf: tagged.data, index: i)
       if componentHas(this: world.healths, entityId: e) {
-        let h: Health = componentGet(this: world.healths, entityId: e)
+        let h: view Health => componentView(this: world.healths, entityId: e)
         if h.hp > 0 {
           if best.index <= 0 or e.index < best.index {
             best = e
@@ -148,7 +148,7 @@ func cullSystem(world: mod GameWorld) {
     loop var i: Int = 0, i < tagged.length, ++i {
       let e: EntityId = rae_ext_rae_buf_get(buf: tagged.data, index: i)
       if componentHas(this: world.healths, entityId: e) {
-        let h: Health = componentGet(this: world.healths, entityId: e)
+        let h: view Health => componentView(this: world.healths, entityId: e)
         if h.hp <= 0 {
           dead.add(value: e)
         }
@@ -176,7 +176,7 @@ func statsSystem(world: mod GameWorld) {
 
 func heroX(world: view GameWorld, hero: view EntityId) ret Int {
   if componentHas(this: world.positions, entityId: hero) {
-    let p: Position = componentGet(this: world.positions, entityId: hero)
+    let p: view Position => componentView(this: world.positions, entityId: hero)
     ret p.x
   }
   ret -1

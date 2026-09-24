@@ -124,32 +124,25 @@ func componentCopyAt(T: type, this: view ComponentTable(T), i: view Int) ret opt
   }
 }
 
-# Read the component for `entityId`. Caller must check `componentHas` first — if
-# the component is missing, this returns the value at dense index 0, or T's
-# default when the table is empty. The check-then-read pattern is:
+# An owned deep COPY of the component for `entityId`, or `none` when the entity
+# has no such component. Heap-carrying fields (String, List) are copied
+# recursively, so this is the expensive read: use `componentView` to read and
+# `componentMod` to change a component in place. A copy is only right when the
+# value must outlive or be independent of the table (kept after the component
+# is removed, handed on as `own`). Mirrors List's `copyAt`: the `opt` means a
+# missing component can never pass for another entity's.
 #
-#   if componentHas(table, entity: e) {
-#     let r: Rect = componentGet(table, entity: e)
-#     ...
-#   }
-#
-# The value is an owned deep copy. Heap-carrying fields such as String and List
-# are independent of the table's stored component; use `componentView` when a
-# read-only borrow is enough and no copy is wanted.
-func componentGet(T: type, this: view ComponentTable(T), entityId: view EntityId) ret T {
+#   if let rect: Rect = componentCopy(this: world.rects, entityId: entityId) { ... }
+func componentCopy(T: type, this: view ComponentTable(T), entityId: view EntityId) ret opt T {
   let idx: Int = componentIndexOf(this, entityId: entityId)
-  var safeIdx: Int = idx
-  if safeIdx < 0 {
-    safeIdx = 0
+  if idx < 0 {
+    ret none
   }
-  if let value: T = componentCopyAt(this: this, i: safeIdx) {
-    ret value
-  }
-  ret T.default()
+  ret componentCopyAt(this: this, i: idx)
 }
 
 # Borrow a read-only reference into the table's storage. Use this instead of
-# `componentGet` in hot paths or whenever an independent owned value is not
+# `componentCopy` in hot paths or whenever an independent owned value is not
 # needed. The `view T` return makes Rae treat the binding as a borrow: no
 # auto-drop, no ownership claim, just a window into the world's memory.
 func componentView(T: type, this: view ComponentTable(T), entityId: view EntityId) ret view T {
@@ -170,12 +163,12 @@ func componentView(T: type, this: view ComponentTable(T), entityId: view EntityI
 #   let velocity: mod Velocity => componentMod(this: world.velocities, entity: e)
 #   velocity.dx = velocity.dx + gravity * dt   # persists; NO componentSet needed
 #
-# Contrast componentGet, which hands back a COPY: mutating that copy does NOT
+# Contrast componentCopy, which hands back a COPY: mutating that copy does NOT
 # touch the table. The `mod T` return is a real write-through reference thanks to
 # the primitive/struct ref-binding fixes (#654/#656/#662/#663) that make
 # `let x: mod T => call()` alias the callee's returned storage rather than a
 # temporary. Returns a ref to dense slot 0 for a MISSING entity (check
-# componentHas first), matching componentGet's documented compromise.
+# componentHas first), the same compromise as componentView.
 func componentMod(T: type, this: mod ComponentTable(T), entityId: view EntityId) ret mod T {
   unsafe {
     let idx: Int = componentIndexOf(this, entityId: entityId)
@@ -297,10 +290,10 @@ func componentEntityAt(T: type, this: view ComponentTable(T), i: view Int) ret E
   }
 }
 
-# Iteration helper: returns an owned deep copy of the component at dense index
-# `i`. Use `queryViewAt` or pair `componentEntityAt` with `componentView` when a
-# borrowed hot-path read is enough.
-func componentDataAt(T: type, this: view ComponentTable(T), i: view Int) ret T {
+# An owned deep COPY of the component at dense index `i`, or T's default when
+# `i` is out of range. The by-index twin of `componentCopy`; `queryViewAt` /
+# `queryModAt` (ecs/Query) are the by-index view and mod.
+func componentCopyAtDefault(T: type, this: view ComponentTable(T), i: view Int) ret T {
   if let value: T = componentCopyAt(this: this, i: i) {
     ret value
   }

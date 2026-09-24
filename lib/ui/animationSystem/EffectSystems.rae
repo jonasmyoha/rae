@@ -14,6 +14,7 @@ import ui/Ecs
 import ui/Components
 open ecs/Entity
 open ecs/ComponentTable
+open ecs/Query
 open ecs/Event
 open ui/UiSystems
 
@@ -124,7 +125,7 @@ func animTriggerSystem(world: mod UiWorld, uiSystems: mod UiSystems) {
   let count: Int = componentCount(this: world.animTriggers)
   loop var i: Int = 0, i < count, ++i {
     let entityId: EntityId = componentEntityAt(this: world.animTriggers, i: i)
-    let trigger: AnimTrigger = componentDataAt(this: world.animTriggers, i: i)
+    let trigger: view AnimTrigger => queryViewAt(table: world.animTriggers, denseIndex: i)
     var fired: Bool = false
     if trigger.actionId.length() > 0 {
       loop var a: Int = 0, a < eventCount(this: world.uiActions), ++a {
@@ -135,7 +136,7 @@ func animTriggerSystem(world: mod UiWorld, uiSystems: mod UiSystems) {
       }
     }
     if componentHas(this: uiSystems.button.interactions, entityId: entityId) {
-      let interaction: Interaction = componentGet(
+      let interaction: view Interaction => componentView(
         this: uiSystems.button.interactions
         entityId: entityId
       )
@@ -151,7 +152,7 @@ func animTriggerSystem(world: mod UiWorld, uiSystems: mod UiSystems) {
     }
     var playing: Bool = false
     if componentHas(this: uiSystems.animation.animStates, entityId: entityId) {
-      playing = componentGet(this: uiSystems.animation.animStates, entityId: entityId).playing
+      playing = componentView(this: uiSystems.animation.animStates, entityId: entityId).playing
     }
     if playing and trigger.restartOnTrigger is false {
       continue
@@ -186,7 +187,7 @@ func wobbleFxSystem(world: mod UiWorld, uiSystems: mod UiSystems, time: view Flo
   let count: Int = componentCount(this: world.wobbleFxs)
   loop var i: Int = 0, i < count, ++i {
     let entityId: EntityId = componentEntityAt(this: world.wobbleFxs, i: i)
-    let fx: WobbleFx = componentDataAt(this: world.wobbleFxs, i: i)
+    let fx: view WobbleFx => queryViewAt(table: world.wobbleFxs, denseIndex: i)
     let y: Float = fx.amp * Math.sin(x: time * fx.freq * twoPi) + fx.secondAmp * Math.sin(
       x: time * fx.secondFreq * twoPi
     )
@@ -207,7 +208,7 @@ func backgroundPanSystem(world: mod UiWorld, uiSystems: mod UiSystems, time: vie
   let count: Int = componentCount(this: world.backgroundPans)
   loop var i: Int = 0, i < count, ++i {
     let entityId: EntityId = componentEntityAt(this: world.backgroundPans, i: i)
-    let pan: BackgroundPan = componentDataAt(this: world.backgroundPans, i: i)
+    let pan: view BackgroundPan => queryViewAt(table: world.backgroundPans, denseIndex: i)
     setRuntimeOffset(
       world: world
       uiSystems: uiSystems
@@ -245,7 +246,7 @@ func smokeFxSystem(world: mod UiWorld, uiSystems: mod UiSystems, deltaTime: view
   let count: Int = componentCount(this: world.smokeFxs)
   loop var i: Int = 0, i < count, ++i {
     let entityId: EntityId = componentEntityAt(this: world.smokeFxs, i: i)
-    let fx: SmokeFx = componentDataAt(this: world.smokeFxs, i: i)
+    let fx: view SmokeFx => queryViewAt(table: world.smokeFxs, denseIndex: i)
     let pool: List(EntityId) = childrenOf(world: world, entityId: entityId)
     if pool.length is 0 or fx.lifetimeMs <= 0.0 {
       continue
@@ -317,13 +318,12 @@ func smokeFxSystem(world: mod UiWorld, uiSystems: mod UiSystems, deltaTime: view
         y: offsetY
       )
       componentSet(this: world.opacities, entityId: puff, data: Opacity { value: opacity })
-      var fx2: TransformFx = defaultTransformFx()
-      if componentHas(this: world.transforms, entityId: puff) {
-        fx2 = componentGet(this: world.transforms, entityId: puff)
+      if componentHas(this: world.transforms, entityId: puff) is false {
+        componentSet(this: world.transforms, entityId: puff, data: defaultTransformFx())
       }
-      fx2.scaleX = scale
-      fx2.scaleY = scale
-      componentSet(this: world.transforms, entityId: puff, data: fx2)
+      let puffFx: mod TransformFx => componentMod(this: world.transforms, entityId: puff)
+      puffFx.scaleX = scale
+      puffFx.scaleY = scale
     }
   }
   ret live
@@ -343,11 +343,14 @@ func pointOverEntity(
   ) is false {
     ret false
   }
-  let transform: WorldTransform2D = componentGet(
+  let transform: view WorldTransform2D => componentView(
     this: uiSystems.transform2d.worldTransforms
     entityId: entityId
   )
-  let rect: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entityId: entityId)
+  let rect: view ComputedRect => componentView(
+    this: uiSystems.layout.computedRects
+    entityId: entityId
+  )
   ret x >= transform.position.x and y >= transform.position.y and x <= transform.position.x + rect.size.x and y <= transform.position.y + rect.size.y
 }
 
@@ -366,14 +369,14 @@ func childStrideX(
       this: uiSystems.layout.computedRects
       entityId: second
     ) {
-      ret componentGet(this: uiSystems.layout.computedRects, entityId: second).position.x - componentGet(
+      ret componentView(this: uiSystems.layout.computedRects, entityId: second).position.x - componentView(
         this: uiSystems.layout.computedRects
         entityId: first
       ).position.x
     }
   }
   if componentHas(this: uiSystems.layout.computedRects, entityId: first) {
-    ret componentGet(this: uiSystems.layout.computedRects, entityId: first).size.x
+    ret componentView(this: uiSystems.layout.computedRects, entityId: first).size.x
   }
   ret 0.0
 }
@@ -397,7 +400,7 @@ func carouselSystem(
   let count: Int = componentCount(this: world.carousels)
   loop var i: Int = 0, i < count, ++i {
     let entityId: EntityId = componentEntityAt(this: world.carousels, i: i)
-    let carousel: Carousel = componentDataAt(this: world.carousels, i: i)
+    let carousel: view Carousel => queryViewAt(table: world.carousels, denseIndex: i)
     let kids: List(EntityId) = childrenOf(world: world, entityId: entityId)
     if kids.length is 0 {
       continue
@@ -481,18 +484,21 @@ func carouselSystem(
     if carousel.previewScale > 0.0 and carousel.previewScale is not 1.0 {
       loop var k: Int = 0, k < kids.length, ++k {
         let page: EntityId = kids.copyAtFallback(index: k, fallback: noEntity())
-        var fx: TransformFx = defaultTransformFx()
-        if componentHas(this: world.transforms, entityId: page) {
-          fx = componentGet(this: world.transforms, entityId: page)
+        if componentHas(this: world.transforms, entityId: page) is false {
+          componentSet(this: world.transforms, entityId: page, data: defaultTransformFx())
         }
         var scale: Float = carousel.previewScale
         if k is state.page {
           scale = 1.0
         }
-        if fx.scaleX is not scale or fx.scaleY is not scale {
-          fx.scaleX = scale
-          fx.scaleY = scale
-          componentSet(this: world.transforms, entityId: page, data: fx)
+        # Compared through a view, written only on a change (componentMod marks
+        # the table changed).
+        let currentScaleX: Float = componentView(this: world.transforms, entityId: page).scaleX
+        let currentScaleY: Float = componentView(this: world.transforms, entityId: page).scaleY
+        if currentScaleX is not scale or currentScaleY is not scale {
+          let pageFx: mod TransformFx => componentMod(this: world.transforms, entityId: page)
+          pageFx.scaleX = scale
+          pageFx.scaleY = scale
         }
       }
     }

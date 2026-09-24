@@ -48,7 +48,7 @@ func buttonHoverFadeUpdate(
         let rest: HoverFade = { amount: 0.0 }
         componentSet(this: uiSystems.button.hoverFades, entityId: entityId, data: rest)
       }
-      let current: Float = componentGet(this: uiSystems.button.hoverFades, entityId: entityId).amount
+      let current: Float = componentView(this: uiSystems.button.hoverFades, entityId: entityId).amount
       if current is not target {
         var next: Float = current + step
         if target < current {
@@ -85,7 +85,7 @@ func hoverFadeAmount(
   entityId: view EntityId
 ) ret Float {
   if componentHas(this: uiSystems.button.hoverFades, entityId: entityId) {
-    ret componentGet(this: uiSystems.button.hoverFades, entityId: entityId).amount
+    ret componentView(this: uiSystems.button.hoverFades, entityId: entityId).amount
   }
   if entityHovered(world: world, uiSystems: uiSystems, entityId: entityId) {
     ret 1.0

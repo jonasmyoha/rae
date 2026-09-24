@@ -11,7 +11,7 @@ kind for many entities; a **World** is an app-defined struct that embeds one
 `EntityAllocator` plus one `ComponentTable(T)` field per component (`UiWorld`,
 `World3d`, the 116 `GameWorld` are all this shape). Generic functions take the
 element type as a leading `T: type` argument that is inferred from the table at
-the call site — you write `componentGet(this: table, entityId: e)`, not the `T`.
+the call site — you write `componentView(this: table, entityId: e)`, not the `T`.
 
 ## Entities & handles — `lib/ecs/entity.rae`, `lib/ecs/world.rae`
 
@@ -51,7 +51,7 @@ func createComponentTable(T: type) ret ComponentTable(T)
 
 func componentSet(this: mod ComponentTable(T), entityId: view EntityId, data: own T)
 func componentHas(this: view ComponentTable(T), entityId: view EntityId) ret Bool
-func componentGet(this: view ComponentTable(T), entityId: view EntityId) ret T          # owned deep copy
+func componentCopy(this: view ComponentTable(T), entityId: view EntityId) ret opt T    # owned deep copy; none if missing
 func componentView(this: view ComponentTable(T), entityId: view EntityId) ret view T    # read-only alias
 func componentMod(this: mod ComponentTable(T), entityId: view EntityId) ret mod T        # write-through alias
 func componentRemove(this: mod ComponentTable(T), entityId: view EntityId)               # ordered? no — swap-remove
@@ -59,7 +59,7 @@ func componentCount(this: view ComponentTable(T)) ret Int
 
 # Dense iteration (index 0..count):
 func componentEntityAt(this: view ComponentTable(T), i: view Int) ret EntityId
-func componentDataAt(this: view ComponentTable(T), i: view Int) ret T                  # owned deep copy
+func componentCopyAtDefault(this: view ComponentTable(T), i: view Int) ret T          # owned deep copy by dense index
 
 # Change tracking:
 func componentTableGeneration(this: view ComponentTable(T)) ret Int    # bumped on any set/mod/remove
@@ -70,10 +70,24 @@ func componentModStamp(this: view ComponentTable(T), entityId: view EntityId) re
 in place, no copy-out/mutate/set-back. Dense order is insertion order UNTIL the
 first non-tail `componentRemove` — see the iteration-order contract below.
 
-`componentGet` and `componentDataAt` return independent owned values, including
-recursive copies of String/List/Map fields. Prefer `componentView` / `queryViewAt`
-for read-only per-frame walks where that copy is unnecessary; use the value
-accessors when the result must outlive or be mutated independently of the table.
+**Read with `componentView`, change with `componentMod`; copy only when a value
+must be independent of the table.** `componentView` is a read-only reference into
+the table's storage (no copy), `componentMod` a writable one (writes land in the
+row; no `componentSet` write-back). By dense index the same pair is
+`queryViewAt` / `queryModAt` (ecs/Query). To change one field of a component,
+write it through `componentMod` — never copy it out, edit, and `componentSet` it
+back.
+
+`componentCopy` and `componentCopyAtDefault` return independent owned values,
+including recursive copies of String/List/Map fields; mutating that copy never
+writes back to the table. They are the exception, named for what they do (the
+read that looked cheap used to be called `componentGet`). `componentCopy`
+returns `opt T`, so a missing component is `none` and can never pass for another
+entity's row. A copy is right only when the value must outlive or be
+independent of its row: duplicating a component onto another entity in the same
+table (adding a row may move storage a view points into), a snapshot into
+another table (previous-frame transforms), a value an API returns with a default
+fallback, or locals that are stepped and written back whole.
 
 ### Iteration-order contract (#810)
 

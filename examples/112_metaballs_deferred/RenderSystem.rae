@@ -59,14 +59,14 @@ func renderSdfClusterGbuffer(
     toon: false
   }
   loop let hit: view Query2Match in matches {
-    let sdf: SdfPrimitive = componentGet(this: world.sdfs, entityId: hit.entityId)
+    let sdf: view SdfPrimitive => componentView(this: world.sdfs, entityId: hit.entityId)
     if sdf.shape is 0 {
-      let t: Transform3d = componentGet(this: world.transforms, entityId: hit.entityId)
+      let t: view Transform3d => componentView(this: world.transforms, entityId: hit.entityId)
       packed.add(value: t.position.x)
       packed.add(value: t.position.y)
       packed.add(value: t.position.z)
       packed.add(value: t.scale.x)
-      let mat: Material3d = componentGet(this: world.materials, entityId: hit.entityId)
+      let mat: view Material3d => componentView(this: world.materials, entityId: hit.entityId)
       colors.add(value: mat.baseColor.x)
       colors.add(value: mat.baseColor.y)
       colors.add(value: mat.baseColor.z)
@@ -114,9 +114,9 @@ func renderSdfClusterShadow(
   var haveHead: Bool = false
   var headSmoothing: Float = 0.0
   loop let hit: view Query2Match in matches {
-    let sdf: SdfPrimitive = componentGet(this: world.sdfs, entityId: hit.entityId)
+    let sdf: view SdfPrimitive => componentView(this: world.sdfs, entityId: hit.entityId)
     if sdf.shape is 0 {
-      let t: Transform3d = componentGet(this: world.transforms, entityId: hit.entityId)
+      let t: view Transform3d => componentView(this: world.transforms, entityId: hit.entityId)
       packed.add(value: t.position.x)
       packed.add(value: t.position.y)
       packed.add(value: t.position.z)

@@ -22,7 +22,7 @@ func paintGradientG(
   chain255: view Int
   canvas: mod Gpu2dCanvas
 ) {
-  let gf: GradientFill = componentGet(this: world.gradientFills, entityId: entityId)
+  let gf: view GradientFill => componentView(this: world.gradientFills, entityId: entityId)
   let radius: Float = g2dRadius(world: world, entityId: entityId, fallback: 0.0)
   let box: PaintBox = g2dPaintBox(
     world: world
@@ -77,7 +77,7 @@ func paintBackdropG(
   chain255: view Int
   canvas: mod Gpu2dCanvas
 ) {
-  let bi: BackdropImage = componentGet(this: world.backdropImages, entityId: entityId)
+  let bi: view BackdropImage => componentView(this: world.backdropImages, entityId: entityId)
   let radius: Float = g2dRadius(world: world, entityId: entityId, fallback: 0.0)
   let box: PaintBox = g2dPaintBox(
     world: world

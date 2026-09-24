@@ -5,6 +5,7 @@ open ui/SceneInstance
 open ui/listViewSystem/ListViewSystem
 open ecs/Entity
 open ecs/ComponentTable
+open ecs/Query
 open ui/UiSystems
 
 # The app's data lists as DATA (#996). Every list a screen shows — the Home
@@ -301,7 +302,7 @@ func listViewDataFor(
   if source is ListSourceKind.searchTracks or source is ListSourceKind.searchAlbums {
     var maxRows: Int = 12
     if componentHas(this: world.listViews, entityId: host) {
-      let lv: ListView = componentGet(this: world.listViews, entityId: host)
+      let lv: view ListView => componentView(this: world.listViews, entityId: host)
       if lv.visibleItemCount > 0 {
         maxRows = lv.visibleItemCount
       }
@@ -341,27 +342,27 @@ func listSourceSystem(
   var i: Int = 0
   loop i < n {
     let host: EntityId = componentEntityAt(this: world.listSources, i: i)
-    let binding: ListSource = componentDataAt(this: world.listSources, i: i)
+    let source: ListSourceKind = queryViewAt(table: world.listSources, denseIndex: i).source
     let key: String = listSourceKey(
       world: world
       uiSystems: uiSystems
       host: host
-      source: binding.source
+      source: source
       state: state
       playbackSystem: playbackSystem
     )
-    if key is not binding.builtKey {
+    if key is not queryViewAt(table: world.listSources, denseIndex: i).builtKey {
       let data: ListViewData = listViewDataFor(
         world: world
         uiSystems: uiSystems
         host: host
-        source: binding.source
+        source: source
         state: state
         playbackSystem: playbackSystem
       )
       componentSet(this: world.listViewDatas, entityId: host, data: own data)
-      let built: ListSource = { source: binding.source, builtKey: "{key}" }
-      componentSet(this: world.listSources, entityId: host, data: own built)
+      let binding: mod ListSource => queryModAt(table: world.listSources, denseIndex: i)
+      binding.builtKey = "{key}"
       changed = true
     }
     i = i + 1

@@ -45,7 +45,10 @@ func main() {
   loop let score: mod Score in query(table: scores) {
     score.value = score.value + 1
   }
-  let readback: Score = componentGet(this: scores, entityId: EntityId { index: 3, generation: 0 })
+  let readback: view Score => componentView(
+    this: scores
+    entityId: EntityId { index: 3, generation: 0 }
+  )
   log("mod readback e3={readback.value}")
 
   # Nested single-table loops: the inner walk runs to completion for every

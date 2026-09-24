@@ -75,13 +75,13 @@ func main() {
   toyAddCell(sys: sys, entityId: e1, v: 10)
   log("sys_rev1: {sys.revision}")
   log("tbl_gen1: {componentTableGeneration(this: sys.cells)}")
-  let c1: Cell = componentGet(this: sys.cells, entityId: e1)
+  let c1: view Cell => componentView(this: sys.cells, entityId: e1)
   log("cell_rev0: {c1.revision}")
 
   toySetValue(sys: sys, entityId: e1, v: 11)
   log("sys_rev2: {sys.revision}")
   log("tbl_gen2: {componentTableGeneration(this: sys.cells)}")
-  let c1b: Cell = componentGet(this: sys.cells, entityId: e1)
+  let c1b: view Cell => componentView(this: sys.cells, entityId: e1)
   log("cell_rev1: {c1b.revision}")
   log("val: {c1b.v}")
 
@@ -90,6 +90,6 @@ func main() {
   log("read_val: {rv}")
   log("sys_rev_after_read: {sys.revision}")
   log("tbl_gen_after_read: {componentTableGeneration(this: sys.cells)}")
-  let c1c: Cell = componentGet(this: sys.cells, entityId: e1)
+  let c1c: view Cell => componentView(this: sys.cells, entityId: e1)
   log("cell_rev_after_read: {c1c.revision}")
 }

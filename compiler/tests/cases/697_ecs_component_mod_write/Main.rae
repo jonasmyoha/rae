@@ -3,7 +3,7 @@ open ecs/ComponentTable
 
 # #721: componentMod returns a write-through `mod T` that ALIASES the table's
 # storage — gameplay code mutates a component in place, no copy-mutate-set. This
-# proves the write persists without componentSet, that a componentGet COPY does
+# proves the write persists without componentSet, that a componentCopy COPY does
 # NOT, and that in-place integration over a loop accumulates.
 type Velocity {
   dx: Int
@@ -19,13 +19,16 @@ func main() {
   let v: mod Velocity => componentMod(this: vels, entityId: e1)
   v.dx = v.dx + 10
   v.dy = 100
-  let got: Velocity = componentGet(this: vels, entityId: e1)
+  let got: view Velocity => componentView(this: vels, entityId: e1)
   log("write-through: {got.dx},{got.dy}")
 
-  # Mutating a componentGet COPY must NOT touch storage.
-  var snapshot: Velocity = componentGet(this: vels, entityId: e1)
+  # Mutating a componentCopy COPY must NOT touch storage.
+  var snapshot: Velocity = { dx: 0, dy: 0 }
+  if let copied: Velocity = componentCopy(this: vels, entityId: e1) {
+    snapshot = copied
+  }
   snapshot.dx = 999
-  let after: Velocity = componentGet(this: vels, entityId: e1)
+  let after: view Velocity => componentView(this: vels, entityId: e1)
   log("copy leaked: {after.dx is 999}")
 
   # Gameplay loop: integrate in place over 3 frames.
@@ -33,7 +36,7 @@ func main() {
     let velocity: mod Velocity => componentMod(this: vels, entityId: e1)
     velocity.dx = velocity.dx + 1
   }
-  let done: Velocity = componentGet(this: vels, entityId: e1)
+  let done: view Velocity => componentView(this: vels, entityId: e1)
   log("after loop: {done.dx}")
 
   # componentMod eagerly bumps the table generation (change-detection).

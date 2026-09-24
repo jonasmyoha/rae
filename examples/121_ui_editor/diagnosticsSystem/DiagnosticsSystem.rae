@@ -20,6 +20,7 @@ open ui/BindingComponents
 open ui/animationSystem/EffectSystems
 open ecs/Entity
 open ecs/ComponentTable
+open ecs/Query
 open Gpu2dCanvas
 
 # The placeholder bitmap's size bounds. It is generated at the size its largest
@@ -88,7 +89,7 @@ func placeholderSizeFor(
     if wanted.copyAtFallback(index: i, fallback: "") is key {
       let entityId: EntityId = wantedEntities.copyAtFallback(index: i, fallback: noEntity())
       if componentHas(this: world.rects, entityId: entityId) {
-        let rect: Rect = componentGet(this: world.rects, entityId: entityId)
+        let rect: view Rect => componentView(this: world.rects, entityId: entityId)
         if rect.size.x > largest {
           largest = rect.size.x
         }
@@ -156,7 +157,7 @@ func textureUpdate(
   var wantedEntities: List(EntityId) = List.create(EntityId, cap: 16)
   let spriteCount: Int = componentCount(this: world.sprites)
   loop var i: Int = 0, i < spriteCount, ++i {
-    let sprite: Sprite = componentDataAt(this: world.sprites, i: i)
+    let sprite: view Sprite => queryViewAt(table: world.sprites, denseIndex: i)
     wanted.add(value: "{sprite.textureKey}")
     wantedEntities.add(value: componentEntityAt(this: world.sprites, i: i))
   }

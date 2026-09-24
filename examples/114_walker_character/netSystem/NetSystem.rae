@@ -95,11 +95,14 @@ func seamSelfTest(world: mod GameWorld) {
     velocity: Vec3.create(x: 1.0, y: 0.0, z: 0.0)
     gravityScale: 1.0
   )
-  let before: Transform3D = componentGet(this: world.transforms, entityId: body)
+  # The position BEFORE the step, as plain values: a view would read the row
+  # after the step moved it.
+  let beforeX: Float = componentView(this: world.transforms, entityId: body).position.x
+  let beforeZ: Float = componentView(this: world.transforms, entityId: body).position.z
   physicsStepWorld(world: world, fixedDt: 0.1)
-  let after: Transform3D = componentGet(this: world.transforms, entityId: body)
+  let after: view Transform3D => componentView(this: world.transforms, entityId: body)
   # x advances by velocity*dt, z falls under gravity — both must have moved.
-  let physicsOk: Bool = after.position.x > before.position.x and after.position.z < before.position.z
+  let physicsOk: Bool = after.position.x > beforeX and after.position.z < beforeZ
 
   netLeave(world: world, entityId: a)
   netLeave(world: world, entityId: c)

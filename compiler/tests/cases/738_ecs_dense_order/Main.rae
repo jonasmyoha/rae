@@ -1,6 +1,8 @@
 open ecs/Entity
 open ecs/ComponentTable
 
+open ecs/Query
+
 # #810: pins the dense-iteration-order CONTRACT of ComponentTable.
 #   - dense order is INSERTION order until the first non-tail componentRemove;
 #   - a non-tail remove is a SWAP-REMOVE: the LAST row moves into the removed
@@ -17,7 +19,7 @@ func order(pos: view ComponentTable(Position)) ret String {
   var line: String = ""
   loop var i: Int = 0, i < componentCount(this: pos), ++i {
     let e: EntityId = componentEntityAt(this: pos, i: i)
-    let p: Position = componentDataAt(this: pos, i: i)
+    let p: view Position => queryViewAt(table: pos, denseIndex: i)
     line = "{line}e{e.index}:{p.x} "
   }
   ret line
@@ -40,7 +42,7 @@ func main() {
   componentRemove(this: pos, entityId: e2)
   log("after removing e2 (non-tail): {order(pos: pos)}")
   log(
-    "e4 still findable at dense {componentIndexOf(this: pos, entityId: e4)} with x={componentGet(
+    "e4 still findable at dense {componentIndexOf(this: pos, entityId: e4)} with x={componentView(
       this: pos
       entityId: e4
     ).x}"

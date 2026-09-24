@@ -33,7 +33,7 @@ func hoverScaleContains(
     if componentHas(this: uiSystems.hierarchy.parents, entityId: cur) is false {
       ret false
     }
-    let p: Parent = componentGet(this: uiSystems.hierarchy.parents, entityId: cur)
+    let p: view Parent => componentView(this: uiSystems.hierarchy.parents, entityId: cur)
     if p.parent is ancestor {
       ret true
     }
@@ -70,7 +70,7 @@ func buttonHoverScaleUpdate(
   var i: Int = 0
   loop i < n {
     let entityId: EntityId = componentEntityAt(this: world.hoverScales, i: i)
-    let hs: HoverScale = componentGet(this: world.hoverScales, entityId: entityId)
+    let hs: view HoverScale => componentView(this: world.hoverScales, entityId: entityId)
     var target: Float = hs.restScale
     let containsHover: Bool = hoverScaleContains(
       world: world

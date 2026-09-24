@@ -29,11 +29,11 @@ func renderSceneWorld(
 ) pub {
   loop var j: Int = 0, j < componentCount(this: world.meshRenderers), ++j {
     let entityId: EntityId = componentEntityAt(this: world.meshRenderers, i: j)
-    let renderer: MeshRenderer = componentGet(this: world.meshRenderers, entityId: entityId)
+    let renderer: view MeshRenderer => componentView(this: world.meshRenderers, entityId: entityId)
     if renderer.visible {
-      let t: Transform3d = componentGet(this: world.transforms, entityId: entityId)
-      let pt: Transform3d = componentGet(this: world.prevTransforms, entityId: entityId)
-      let m: Material3d = componentGet(this: world.materials, entityId: entityId)
+      let t: view Transform3d => componentView(this: world.transforms, entityId: entityId)
+      let pt: view Transform3d => componentView(this: world.prevTransforms, entityId: entityId)
+      let m: view Material3d => componentView(this: world.materials, entityId: entityId)
       drawInstance(
         cache: cache
         resources: resources
@@ -64,11 +64,11 @@ func renderSceneSdfWorld(
   }
   loop var clusterScan: Int = 0, clusterScan < count, ++clusterScan {
     let headEntityId: EntityId = componentEntityAt(this: world.sdfs, i: clusterScan)
-    let head: SdfPrimitive = componentGet(this: world.sdfs, entityId: headEntityId)
+    let head: view SdfPrimitive => componentView(this: world.sdfs, entityId: headEntityId)
     var alreadyDrawn: Bool = false
     loop var back: Int = 0, back < clusterScan, ++back {
       let priorEntityId: EntityId = componentEntityAt(this: world.sdfs, i: back)
-      let prior: SdfPrimitive = componentGet(this: world.sdfs, entityId: priorEntityId)
+      let prior: view SdfPrimitive => componentView(this: world.sdfs, entityId: priorEntityId)
       if prior.shape is 0 {
         if prior.cluster is head.cluster {
           alreadyDrawn = true
@@ -82,10 +82,10 @@ func renderSceneSdfWorld(
         var ballCount: Int = 0
         loop var i: Int = 0, i < count, ++i {
           let ballEntityId: EntityId = componentEntityAt(this: world.sdfs, i: i)
-          let sdf: SdfPrimitive = componentGet(this: world.sdfs, entityId: ballEntityId)
+          let sdf: view SdfPrimitive => componentView(this: world.sdfs, entityId: ballEntityId)
           if sdf.shape is 0 {
             if sdf.cluster is head.cluster {
-              let transform: Transform3d = componentGet(
+              let transform: view Transform3d => componentView(
                 this: world.transforms
                 entityId: ballEntityId
               )
@@ -93,7 +93,7 @@ func renderSceneSdfWorld(
               packed.add(value: transform.position.y)
               packed.add(value: transform.position.z)
               packed.add(value: transform.scale.x)
-              let ballMaterial: Material3d = componentGet(
+              let ballMaterial: view Material3d => componentView(
                 this: world.materials
                 entityId: ballEntityId
               )
@@ -106,7 +106,10 @@ func renderSceneSdfWorld(
           }
         }
         if ballCount > 0 {
-          let material: Material3d = componentGet(this: world.materials, entityId: headEntityId)
+          let material: view Material3d => componentView(
+            this: world.materials
+            entityId: headEntityId
+          )
           drawMetaballs(
             cache: cache
             resources: resources
