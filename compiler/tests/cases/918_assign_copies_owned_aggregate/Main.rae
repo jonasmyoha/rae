@@ -1,0 +1,108 @@
+# `=` COPIES. Storing a value that reads an existing location — a local, a
+# field, an element — into an owned aggregate must land a fresh deep copy of
+# its String/List heap, never a bit-for-bit alias. The alias was a double free
+# (#79484806): `local = copied` inside an `if let` dropped `copied` at its scope
+# end and `local` at its own, over the same buffers (and `local` read freed
+# memory in between). The same store through a `mod` reference had the same
+# hole. `own x` stays the move: the source is emptied, nothing is copied.
+# Every case is checked twice — the values read back right, and the
+# outstanding allocation count returns to its baseline once the scopes close.
+func rae_ext_rae_mem_stats_outstanding() unsafe extern ret Int
+
+type Holder {
+  label: String
+  items: List(String)
+}
+
+type Pair {
+  first: Holder
+  second: Holder
+}
+
+func makeHolder(tag: view Int) ret Holder {
+  var items: List(String) = List.create(String, cap: 2)
+  items.add(value: "item {tag}")
+  items.add(value: "item {tag} again")
+  ret Holder { label: "holder {tag}", items: own items }
+}
+
+func maybeHolder(tag: view Int) ret opt Holder {
+  ret makeHolder(tag: tag)
+}
+
+# Each shape in its own function, so every local is dropped when it returns
+# and the caller can compare outstanding allocations before and after.
+func assignFromIfLet(round: view Int) ret String {
+  var local: Holder = Holder.default()
+  if let copied: Holder = maybeHolder(tag: round) {
+    local = copied
+  }
+  ret "{local.label} {local.items.length}"
+}
+
+func assignFromIdent() ret String {
+  var target: Holder = makeHolder(tag: 9)
+  let source: Holder = makeHolder(tag: 7)
+  target = source
+  ret "{target.label} / {source.label} {source.items.length}"
+}
+
+func assignFromField() ret String {
+  let pair: Pair = { first: makeHolder(tag: 1), second: makeHolder(tag: 2) }
+  var target: Holder = makeHolder(tag: 3)
+  target = pair.second
+  ret "{target.label} / {pair.second.label}"
+}
+
+func assignThroughModRef() ret String {
+  var pair: Pair = { first: makeHolder(tag: 4), second: makeHolder(tag: 5) }
+  let source: Holder = makeHolder(tag: 6)
+  let slot: mod Holder => pair.first
+  slot = source
+  ret "{pair.first.label} {pair.first.items.length} / {source.label}"
+}
+
+func assignStringThroughModRef() ret String {
+  var target: Holder = makeHolder(tag: 4)
+  let source: String = "new label"
+  let slot: mod String => target.label
+  slot = source
+  ret "{target.label} / {source}"
+}
+
+func assignWithOwn() ret String {
+  var target: Holder = makeHolder(tag: 8)
+  var source: Holder = makeHolder(tag: 6)
+  target = own source
+  ret "{target.label} {target.items.length}"
+}
+
+func main() {
+  unsafe {
+    # Warm every generated copy/drop path once, then take the baseline.
+    assignFromIfLet(round: 0)
+    assignFromIdent()
+    assignFromField()
+    assignThroughModRef()
+    assignStringThroughModRef()
+    assignWithOwn()
+    let baseline: Int = rae_ext_rae_mem_stats_outstanding()
+    loop var i: Int = 1, i <= 3, ++i {
+      log("if-let round {i}: {assignFromIfLet(round: i)}")
+    }
+    log("ident: {assignFromIdent()}")
+    log("field: {assignFromField()}")
+    log("mod ref: {assignThroughModRef()}")
+    log("mod String ref: {assignStringThroughModRef()}")
+    log("own: {assignWithOwn()}")
+    loop var i: Int = 0, i < 200, ++i {
+      assignFromIfLet(round: i)
+      assignFromIdent()
+      assignFromField()
+      assignThroughModRef()
+      assignStringThroughModRef()
+      assignWithOwn()
+    }
+    log("leaked allocations: {rae_ext_rae_mem_stats_outstanding() - baseline}")
+  }
+}
