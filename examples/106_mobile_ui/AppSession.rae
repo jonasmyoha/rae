@@ -52,9 +52,9 @@ type AppSession {
   lastHoverAnimDirty: Bool
   lastFrameTime: Float64
   # InputSystem outlives world rebuilds so a held press carries
-  # `pressedEntity` across them.
+  # `pressedEntityId` across them.
   input: InputSystem
-  lastHoveredEntity: EntityId
+  lastHoveredEntityId: EntityId
   lastCursorKind: Int
   lastMouseButtons: Int
   # True while album covers / history art are still streaming in.
@@ -127,7 +127,7 @@ func createAppSession(app: mod App) ret AppSession {
     lastHoverAnimDirty: false
     lastFrameTime: 0.0
     input: createInputSystem()
-    lastHoveredEntity: noEntity()
+    lastHoveredEntityId: noEntity()
     lastCursorKind: cursorArrow
     lastMouseButtons: 0
     assetsLoading: true

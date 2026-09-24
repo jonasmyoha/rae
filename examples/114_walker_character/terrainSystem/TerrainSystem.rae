@@ -699,21 +699,25 @@ func createTerrainSystem(
   # tree/rock/bush/flower/grassA/grassB. Recycled every stream, placed by query.
   loop var slot: Int = 0, slot < terrainCellCount, ++slot {
     let tileMesh: MeshHandle = uploadMeshDataForTerrain(renderer: renderer, mesh: tilePlane)
-    let tileEntity: EntityId = gameWorldAddEntity(world: world)
-    componentSet(this: world.transforms, entityId: tileEntity, data: createTransform3D())
+    let tileEntityId: EntityId = gameWorldAddEntity(world: world)
+    componentSet(this: world.transforms, entityId: tileEntityId, data: createTransform3D())
     componentSet(
       this: world.propKinds
-      entityId: tileEntity
+      entityId: tileEntityId
       data: PropKind { kind: kindTile, slot: slot, active: true }
     )
     componentSet(
       this: world.tileMeshes
-      entityId: tileEntity
+      entityId: tileEntityId
       data: TileMesh { meshId: tileMesh.id }
     )
 
-    let treeEntity: EntityId = spawnProp(world: world, kind: kindTree, slot: slot)
-    componentSet(this: world.treeVariants, entityId: treeEntity, data: TreeVariant { broad: false })
+    let treeEntityId: EntityId = spawnProp(world: world, kind: kindTree, slot: slot)
+    componentSet(
+      this: world.treeVariants
+      entityId: treeEntityId
+      data: TreeVariant { broad: false }
+    )
     let unusedRock: EntityId = spawnProp(world: world, kind: kindRock, slot: slot)
     let unusedBush: EntityId = spawnProp(world: world, kind: kindBush, slot: slot)
     let unusedFlower: EntityId = spawnProp(world: world, kind: kindFlower, slot: slot)

@@ -46,7 +46,7 @@ func buildScene(sphere: view MeshHandle, ground: view MeshHandle) ret World3d {
     emission: noEmission
     toon: false
   }
-  let ballEntity: EntityId = world3dAddMeshInstance(
+  let ballEntityId: EntityId = world3dAddMeshInstance(
     world: sceneWorld
     mesh: sphere
     material: ballMaterial
@@ -54,7 +54,7 @@ func buildScene(sphere: view MeshHandle, ground: view MeshHandle) ret World3d {
     rotation: noRotation
     scale: unitScale
   )
-  let groundEntity: EntityId = world3dAddMeshInstance(
+  let groundEntityId: EntityId = world3dAddMeshInstance(
     world: sceneWorld
     mesh: ground
     material: groundMaterial
@@ -78,7 +78,7 @@ func main() ret Int {
   var sceneWorld: World3d = buildScene(sphere: sphere, ground: ground)
   # The ball is the first mesh added (dense position 0); the easing below
   # animates its transform in place.
-  let ballEntity: EntityId = world3dMeshRendererEntityAt(world: sceneWorld, i: 0)
+  let ballEntityId: EntityId = world3dMeshRendererEntityAt(world: sceneWorld, i: 0)
   var camera: Camera3d = defaultCamera3d()
   camera.position = Vec3.create(x: 10.0, y: 0.0 - 12.0, z: 8.0)
   camera.target = Vec3.create(x: 0.0, y: 0.0, z: 2.0)
@@ -124,7 +124,7 @@ func main() ret Int {
     let currentZ: Float = 5.0 - 4.0 * bounce
     world3dWriteTransform(
       world: sceneWorld
-      entityId: ballEntity
+      entityId: ballEntityId
       transform: Transform3d {
         position: Vec3.create(x: 0.0, y: 0.0, z: currentZ)
         rotation: Vec3.create(x: 0.0, y: phase * 3.14159, z: 0.0)

@@ -35,11 +35,11 @@ func main() {
   let world: UiWorld = createUiWorld()
   var uiSystems: UiSystems = createUiSystems()
   log("loading scene with an unregistered component...")
-  let rootEntity: EntityId = loadScene(world: world, uiSystems: uiSystems, scene: scene)
+  let rootEntityId: EntityId = loadScene(world: world, uiSystems: uiSystems, scene: scene)
   # An unregistered name is no longer the loader's verdict: it waits in the
   # pending outbox for an app system to claim it. With no app tables, every
   # pending component is unknown — reporting it is the #941 exit.
   reportPendingComponents(world: world)
   # Unreachable: loadScene aborts on the unregistered component (#941).
-  log("unreachable rootEntity = {rootEntity.index}")
+  log("unreachable rootEntity = {rootEntityId.index}")
 }

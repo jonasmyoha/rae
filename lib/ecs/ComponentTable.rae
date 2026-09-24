@@ -246,11 +246,11 @@ func componentRemove(T: type, this: mod ComponentTable(T), entityId: view Entity
   }
   let removedKey: Int = entityId.index
   let last: Int = this.denseEntities.length - 1
-  let lastEntity: EntityId = entityListAt(lst: this.denseEntities, index: last)
+  let lastEntityId: EntityId = entityListAt(lst: this.denseEntities, index: last)
   if idx is not last {
     # The entity that was at `last` now lives at `idx`: repoint its
     # sparse slot so future lookups find it.
-    setIntListAt(lst: this.sparse, index: lastEntity.index, value: idx)
+    setIntListAt(lst: this.sparse, index: lastEntityId.index, value: idx)
   }
   swapRemoveEntityList(lst: this.denseEntities, index: idx)
   this.denseData.swapRemove(index: idx)

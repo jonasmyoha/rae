@@ -33,8 +33,8 @@ type UiPointerState {
 # app's UI dispatch. UiInput now carries only pointer + hover/press tracking.
 type UiInput {
   pointer: UiPointerState
-  hoveredEntity: EntityId
-  pressedEntity: EntityId
+  hoveredEntityId: EntityId
+  pressedEntityId: EntityId
   wheel: Float
   wheelTarget: EntityId
 }
@@ -48,8 +48,8 @@ func createUiInput() pub ret UiInput {
       pressed: false
       released: false
     }
-    hoveredEntity: noEntity()
-    pressedEntity: noEntity()
+    hoveredEntityId: noEntity()
+    pressedEntityId: noEntity()
     wheel: 0.0
     wheelTarget: noEntity()
   }
@@ -366,8 +366,8 @@ func updateUiInput(input: mod UiInput, world: mod UiWorld, uiSystems: mod UiSyst
   frameAdvance(this: world.uiActions)
   # Clear last frame's per-entity marks before recomputing (previous hovered +
   # pressed are the only two that can carry an Interaction).
-  buttonInteractionClear(world: world, uiSystems: uiSystems, entityId: input.hoveredEntity)
-  buttonInteractionClear(world: world, uiSystems: uiSystems, entityId: input.pressedEntity)
+  buttonInteractionClear(world: world, uiSystems: uiSystems, entityId: input.hoveredEntityId)
+  buttonInteractionClear(world: world, uiSystems: uiSystems, entityId: input.pressedEntityId)
 
   let x: Float = Gpu2d.pointerX()
   let y: Float = Gpu2d.pointerY()
@@ -380,7 +380,7 @@ func updateUiInput(input: mod UiInput, world: mod UiWorld, uiSystems: mod UiSyst
     pressed: pressed
     released: released
   }
-  input.hoveredEntity = uiHitTest(
+  input.hoveredEntityId = uiHitTest(
     world: world
     uiSystems: uiSystems
     x: x
@@ -393,33 +393,33 @@ func updateUiInput(input: mod UiInput, world: mod UiWorld, uiSystems: mod UiSyst
     wheel: Gpu2d.wheelMove()
   )
   if pressed {
-    input.pressedEntity = input.hoveredEntity
+    input.pressedEntityId = input.hoveredEntityId
   }
   if released {
-    if isNone(this: input.hoveredEntity) is false {
-      if input.hoveredEntity is input.pressedEntity {
-        let click: OnClick = componentGet(this: world.onClicks, entityId: input.hoveredEntity)
+    if isNone(this: input.hoveredEntityId) is false {
+      if input.hoveredEntityId is input.pressedEntityId {
+        let click: OnClick = componentGet(this: world.onClicks, entityId: input.hoveredEntityId)
         eventSend(
           this: world.uiActions
-          value: UiAction { entityId: input.hoveredEntity, actionId: click.actionId }
+          value: UiAction { entityId: input.hoveredEntityId, actionId: click.actionId }
         )
       }
     }
-    input.pressedEntity = noEntity()
+    input.pressedEntityId = noEntity()
   }
 
   # Project this frame's hovered/pressed refs onto the entities as components.
   buttonInteractionMark(
     world: world
     uiSystems: uiSystems
-    entityId: input.hoveredEntity
+    entityId: input.hoveredEntityId
     hovered: true
     pressed: false
   )
   buttonInteractionMark(
     world: world
     uiSystems: uiSystems
-    entityId: input.pressedEntity
+    entityId: input.pressedEntityId
     hovered: false
     pressed: true
   )
@@ -431,16 +431,16 @@ func updateUiInput(input: mod UiInput, world: mod UiWorld, uiSystems: mod UiSyst
 # this the same click would work the button underneath it too.
 func suppressUiPress(input: mod UiInput, world: mod UiWorld) {
   eventClear(this: world.uiActions)
-  input.pressedEntity = noEntity()
+  input.pressedEntityId = noEntity()
   input.wheel = 0.0
   input.wheelTarget = noEntity()
 }
 
 func uiPointerCaptured(input: view UiInput) pub ret Bool {
-  if isNone(this: input.hoveredEntity) is false {
+  if isNone(this: input.hoveredEntityId) is false {
     ret true
   }
-  if isNone(this: input.pressedEntity) is false {
+  if isNone(this: input.pressedEntityId) is false {
     ret true
   }
   ret false

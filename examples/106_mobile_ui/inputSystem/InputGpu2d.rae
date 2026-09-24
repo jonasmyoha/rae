@@ -11,7 +11,7 @@ open ecs/Event
 open ui/Transform
 open ui/UiSystems
 
-let inputNoEntity: EntityId = { index: -1, generation: 0 }
+let inputNoEntityId: EntityId = { index: -1, generation: 0 }
 
 type PointerState {
   x: Float
@@ -25,7 +25,7 @@ type PointerState {
 # lib/ecs `EventQueue` primitive — 106 no longer defines its own ActionEvent.
 type InputSystem {
   pointer: PointerState
-  pressedEntity: EntityId
+  pressedEntityId: EntityId
   uiActions: EventQueue(UiAction)
   # `RAE_UI_SCREEN_SEQ` scripted taps (#972): the remaining screen names,
   # the frame counter, and the frames between two scripted taps.
@@ -51,7 +51,7 @@ func createInputSystem() ret InputSystem {
       pressed: false
       released: false
     }
-    pressedEntity: noEntity()
+    pressedEntityId: noEntity()
     uiActions: createEventQueue(UiAction)
     scriptedScreens: scriptedScreenSequence()
     scriptedFrame: 0
@@ -174,7 +174,7 @@ func hitTestEntity(
         ret entityId
       }
     }
-    ret inputNoEntity
+    ret inputNoEntityId
   }
 }
 
@@ -204,7 +204,7 @@ func hitTest(
       }
       i = i - 1
     }
-    ret inputNoEntity
+    ret inputNoEntityId
   }
 }
 
@@ -257,13 +257,13 @@ func updateInputSystem(
   input.pointer = nextPointer
 
   if pressed {
-    input.pressedEntity = hitTest(
+    input.pressedEntityId = hitTest(
       world: world
       uiSystems: uiSystems
       x: mx
       y: my
     )
-    log("[input] press at ({mx},{my}) -> pressedEntity={input.pressedEntity.index}")
+    log("[input] press at ({mx},{my}) -> pressedEntity={input.pressedEntityId.index}")
   }
 
   if released {
@@ -273,9 +273,9 @@ func updateInputSystem(
       x: mx
       y: my
     )
-    log("[input] release at ({mx},{my}) -> hit={hit.index} pressed={input.pressedEntity.index}")
+    log("[input] release at ({mx},{my}) -> hit={hit.index} pressed={input.pressedEntityId.index}")
     if isNone(this: hit) is false {
-      if hit is input.pressedEntity {
+      if hit is input.pressedEntityId {
         if componentHas(this: world.onClicks, entityId: hit) {
           let oc: view OnClick => componentView(this: world.onClicks, entityId: hit)
           log("[input] fire {oc.actionId} on entity {hit.index}")
@@ -284,11 +284,11 @@ func updateInputSystem(
           log("[input] release matched press but entity has no OnClick")
         }
       } else {
-        log("[input] release hit {hit.index} != pressed {input.pressedEntity.index} - drop")
+        log("[input] release hit {hit.index} != pressed {input.pressedEntityId.index} - drop")
       }
     } else {
       log("[input] release hit nothing - drop")
     }
-    input.pressedEntity = inputNoEntity
+    input.pressedEntityId = inputNoEntityId
   }
 }

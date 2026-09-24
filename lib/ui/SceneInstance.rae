@@ -282,30 +282,30 @@ func appendEntityListSI(lst: mod List(EntityId), value: view EntityId) {
   }
 }
 
-# Mount `scene` under `mountEntity`. Returns `mountEntity` on success,
+# Mount `scene` under `mountEntityId`. Returns `mountEntityId` on success,
 # or noEntity() if the scene wasn't ok.
 #
 # Behaviour:
 # - The scene's root node's components (excluding placement) are
-#   applied directly onto `mountEntity`. Existing components on the
+#   applied directly onto `mountEntityId`. Existing components on the
 #   mount entity are replaced — caller is expected to set placement
 #   *before* calling this.
 # - All non-root nodes are allocated as new entities under
-#   `mountEntity`'s subtree.
+#   `mountEntityId`'s subtree.
 # - `world.nodeIds` is populated for every node in the mounted scene
 #   so overrides and later code can resolve by id.
 # - `overrides` is applied last, after the whole subtree is built.
 func mountSceneInstance(
   world: mod UiWorld
   uiSystems: view UiSystems
-  mountEntity: view EntityId
+  mountEntityId: view EntityId
   scene: view Scene
   overrides: view List(SceneOverride)
 ) ret EntityId {
   ret mountSceneInstanceIntoPage(
     world: world
     uiSystems: uiSystems
-    mountEntity: mountEntity
+    mountEntityId: mountEntityId
     scene: scene
     overrides: overrides
     pageId: ""
@@ -315,13 +315,13 @@ func mountSceneInstance(
 # Same as `mountSceneInstance` but writes nodeIds under a `pageId/`
 # prefix so the scene's nodeIds don't collide with other resident
 # pages. Empty `pageId` is the unscoped path that matches the
-# legacy rebuild flow. Does NOT tag `mountEntity` as a PageRoot —
+# legacy rebuild flow. Does NOT tag `mountEntityId` as a PageRoot —
 # scoping and page-root tagging are separate concerns; the caller
 # typically tags an enclosing entity. `mountPage` does both at once.
 func mountSceneInstanceIntoPage(
   world: mod UiWorld
   uiSystems: view UiSystems
-  mountEntity: view EntityId
+  mountEntityId: view EntityId
   scene: view Scene
   overrides: view List(SceneOverride)
   pageId: view String
@@ -329,7 +329,7 @@ func mountSceneInstanceIntoPage(
   ret mountSceneInstanceImpl(
     world: world
     uiSystems: uiSystems
-    mountEntity: mountEntity
+    mountEntityId: mountEntityId
     scene: scene
     overrides: overrides
     pageId: pageId
@@ -358,7 +358,7 @@ func mountSubScene(
   let mounted: EntityId = mountSceneInstanceImpl(
     world: world
     uiSystems: uiSystems
-    mountEntity: root
+    mountEntityId: root
     scene: scene
     overrides: overrides
     pageId: ""
@@ -371,7 +371,7 @@ func mountSubScene(
 func mountSceneInstanceImpl(
   world: mod UiWorld
   uiSystems: view UiSystems
-  mountEntity: view EntityId
+  mountEntityId: view EntityId
   scene: view Scene
   overrides: view List(SceneOverride)
   pageId: view String
@@ -391,7 +391,7 @@ func mountSceneInstanceImpl(
       ret noEntity()
     }
 
-    # Pass 1: allocate entities. The scene's root maps to `mountEntity`;
+    # Pass 1: allocate entities. The scene's root maps to `mountEntityId`;
     # every other node gets a fresh entity.
     let entitiesByNodeIndex: List(EntityId) = List.create(EntityId, cap: nodeCount)
     let nodeIdsMap: mod StringMap(Int) => world.nodeIds
@@ -401,7 +401,7 @@ func mountSceneInstanceImpl(
       # Explicit struct construction (not `let entity: EntityId =
       # mountEntity`) — the Live VM treats the latter as a view-ref
       # bind and then refuses the reassignment on the next branch.
-      var entityId: EntityId = { index: mountEntity.index, generation: mountEntity.generation }
+      var entityId: EntityId = { index: mountEntityId.index, generation: mountEntityId.generation }
       if i is not rootIdx {
         entityId = createEntity(world: world)
       }
@@ -485,14 +485,14 @@ func mountSceneInstanceImpl(
     var p: Int = 0
     loop p < nodeCount {
       let node: view SceneNode => nodeAt(this: scene, idx: p)
-      let parentEntity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: p)
+      let parentEntityId: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: p)
       let kn: Int = node.childrenIds.length
       var q: Int = 0
       loop q < kn {
         if let childId: String = node.childrenIds.copyAt(index: q) {
           let childIdx: Int = sceneNodeIndex(this: scene, nodeId: childId)
           if childIdx >= 0 {
-            let childEntity: EntityId = rae_ext_rae_buf_get(
+            let childEntityId: EntityId = rae_ext_rae_buf_get(
               buf: entitiesByNodeIndex.data
               index: childIdx
             )
@@ -501,8 +501,8 @@ func mountSceneInstanceImpl(
             setParent(
               parents: uiSystems.hierarchy.parents
               childrens: world.childrens
-              child: childEntity
-              parent: parentEntity
+              child: childEntityId
+              parent: parentEntityId
             )
           }
         }
@@ -518,16 +518,16 @@ func mountSceneInstanceImpl(
       let o: SceneOverride = rae_ext_rae_buf_get(buf: overrides.data, index: oi)
       let nodeIdx: Int = sceneNodeIndex(this: scene, nodeId: o.nodeId)
       if nodeIdx >= 0 {
-        let targetEntity: EntityId = rae_ext_rae_buf_get(
+        let targetEntityId: EntityId = rae_ext_rae_buf_get(
           buf: entitiesByNodeIndex.data
           index: nodeIdx
         )
-        applyOverride(world: world, entityId: targetEntity, override: o)
+        applyOverride(world: world, entityId: targetEntityId, override: o)
       }
       oi = oi + 1
     }
 
-    ret mountEntity
+    ret mountEntityId
   }
 }
 
@@ -874,7 +874,7 @@ func mountPage(
   let mounted: EntityId = mountSceneInstanceImpl(
     world: world
     uiSystems: uiSystems
-    mountEntity: root
+    mountEntityId: root
     scene: scene
     overrides: overrides
     pageId: pageId

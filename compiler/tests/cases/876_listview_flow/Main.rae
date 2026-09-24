@@ -113,13 +113,13 @@ func stripScene() ret String {
   ret s
 }
 
-func rowIds(world: view UiWorld, listEntity: view EntityId) ret List(String) {
+func rowIds(world: view UiWorld, listEntityId: view EntityId) ret List(String) {
   let out: List(String) = List.create(String, cap: 8)
   unsafe {
-    if componentHas(this: world.childrens, entityId: listEntity) is false {
+    if componentHas(this: world.childrens, entityId: listEntityId) is false {
       ret out
     }
-    let ch: view Children => componentView(this: world.childrens, entityId: listEntity)
+    let ch: view Children => componentView(this: world.childrens, entityId: listEntityId)
     var i: Int = 0
     loop i < ch.ids.length {
       let row: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
@@ -131,9 +131,9 @@ func rowIds(world: view UiWorld, listEntity: view EntityId) ret List(String) {
   ret out
 }
 
-func describeRows(world: view UiWorld, listEntity: view EntityId) ret String {
+func describeRows(world: view UiWorld, listEntityId: view EntityId) ret String {
   var s: String = ""
-  loop let id: view String in rowIds(world: world, listEntity: listEntity) {
+  loop let id: view String in rowIds(world: world, listEntityId: listEntityId) {
     s = s.concat(other: "{id} ")
   }
   ret s.trim()
@@ -142,7 +142,7 @@ func describeRows(world: view UiWorld, listEntity: view EntityId) ret String {
 func rowNodeText(world: view UiWorld, row: view EntityId, nodeId: view String) ret String {
   let page: String = "listRow{row.index}"
   if let raw: Int = findNodeInPage(world: world, pageId: page, nodeId: nodeId) {
-    let entityId: EntityId = nodeEntity(world: world, index: raw)
+    let entityId: EntityId = nodeEntityId(world: world, index: raw)
     if componentHas(this: world.sprites, entityId: entityId) {
       ret componentGet(this: world.sprites, entityId: entityId).textureKey
     }
@@ -168,11 +168,11 @@ func main() {
   let grid: Scene = parseScene(source: gridScene())
   grid.sceneId = "grid"
   loadScene(world: world, uiSystems: uiSystems, scene: grid)
-  var listEntity: EntityId = noEntity()
+  var listEntityId: EntityId = noEntity()
   if let raw: Int = world.nodeIds.get(k: "Grid") {
-    listEntity = id(v: raw)
+    listEntityId = id(v: raw)
   }
-  let lv: ListView = componentGet(this: world.listViews, entityId: listEntity)
+  let lv: ListView = componentGet(this: world.listViews, entityId: listEntityId)
   log(
     "mode flow: {lv.mode is ListViewMode.flow} rowScenes: {lv.rowScenes.length} fit: {lv.fitToColumns}"
   )
@@ -182,13 +182,13 @@ func main() {
   rows.add(value: tileRow(key: "kind", kind: "album"))
   componentSet(
     this: world.listViewDatas
-    entityId: listEntity
+    entityId: listEntityId
     data: ListViewData { rows: own rows }
   )
   listViewSystem(world: world, uiSystems: uiSystems, scenes: registry)
-  log("rows: {describeRows(world: world, listEntity: listEntity)}")
+  log("rows: {describeRows(world: world, listEntityId: listEntityId)}")
   unsafe {
-    let ch: view Children => componentView(this: world.childrens, entityId: listEntity)
+    let ch: view Children => componentView(this: world.childrens, entityId: listEntityId)
     let first: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: 0)
     let second: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: 1)
     let firstKey: ListViewRowKey = componentGet(this: world.listViewRowKeys, entityId: first)
@@ -205,19 +205,19 @@ func main() {
   let aliveA: Int = aliveCount(world: world)
 
   # ----- B: keyed rebind — drop "abbey", add "help", reorder -----
-  let before: List(String) = rowIds(world: world, listEntity: listEntity)
+  let before: List(String) = rowIds(world: world, listEntityId: listEntityId)
   let rows2: List(ListViewRow) = List.create(ListViewRow, cap: 4)
   rows2.add(value: tileRow(key: "kind", kind: "album"))
   rows2.add(value: tileRow(key: "liked", kind: "playlist"))
   rows2.add(value: tileRow(key: "help", kind: "album"))
   componentSet(
     this: world.listViewDatas
-    entityId: listEntity
+    entityId: listEntityId
     data: ListViewData { rows: own rows2 }
   )
   listViewSystem(world: world, uiSystems: uiSystems, scenes: registry)
-  log("rows: {describeRows(world: world, listEntity: listEntity)}")
-  let after: List(String) = rowIds(world: world, listEntity: listEntity)
+  log("rows: {describeRows(world: world, listEntityId: listEntityId)}")
+  let after: List(String) = rowIds(world: world, listEntityId: listEntityId)
   let likedBefore: String = before.copyAtFallback(index: 0, fallback: "")
   let likedAfter: String = after.copyAtFallback(index: 1, fallback: "")
   let kindBefore: String = before.copyAtFallback(index: 2, fallback: "")
@@ -226,28 +226,28 @@ func main() {
   log("alive unchanged (one out, one in): {aliveCount(world: world) is aliveA}")
   # An unchanged rebind touches nothing: same ids, same order.
   listViewSystem(world: world, uiSystems: uiSystems, scenes: registry)
-  log("stable: {describeRows(world: world, listEntity: listEntity)}")
+  log("stable: {describeRows(world: world, listEntityId: listEntityId)}")
 
   # ----- C: a horizontal strip with fixed-width rows -----
   let stripWorld: UiWorld = createUiWorld()
   let strip: Scene = parseScene(source: stripScene())
   strip.sceneId = "strip"
   loadScene(world: stripWorld, uiSystems: uiSystems, scene: strip)
-  var stripEntity: EntityId = noEntity()
+  var stripEntityId: EntityId = noEntity()
   if let raw: Int = stripWorld.nodeIds.get(k: "Strip") {
-    stripEntity = id(v: raw)
+    stripEntityId = id(v: raw)
   }
   let thumbs: List(ListViewRow) = List.create(ListViewRow, cap: 3)
   thumbs.add(value: tileRow(key: "a", kind: "album"))
   thumbs.add(value: tileRow(key: "b", kind: "album"))
   componentSet(
     this: stripWorld.listViewDatas
-    entityId: stripEntity
+    entityId: stripEntityId
     data: ListViewData { rows: own thumbs }
   )
   listViewSystem(world: stripWorld, uiSystems: uiSystems, scenes: registry)
   unsafe {
-    let ch: view Children => componentView(this: stripWorld.childrens, entityId: stripEntity)
+    let ch: view Children => componentView(this: stripWorld.childrens, entityId: stripEntityId)
     let thumb: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: 1)
     let rect: Rect = componentGet(this: stripWorld.rects, entityId: thumb)
     log("strip rows: {ch.ids.length} thumb: {rect.size.x.toInt()}x{rect.size.y.toInt()}")

@@ -46,7 +46,7 @@ func runTestWheelStep(
   let delta: Float = step.sub(start: colon + 1, len: step.length() - colon - 1).toFloat()
   var node: EntityId = noEntity()
   if let index: Int = findNodeInPage(world: world, pageId: "chrome", nodeId: nodeId) {
-    node = nodeEntity(world: world, index: index)
+    node = nodeEntityId(world: world, index: index)
   }
   let center: ClickPoint = nodeCenterOf(uiSystems: uiSystems, entityId: node)
   if isNone(this: node) or center.ok is false {
@@ -62,12 +62,12 @@ func runTestWheelStep(
     uiSystems: uiSystems
     wheel: delta
   )
-  let treeList: EntityId = editorListEntity(
+  let treeList: EntityId = editorListEntityId(
     chromeSystem: chromeSystem
     world: world
     source: EditorListSource.hierarchy
   )
-  let componentList: EntityId = editorListEntity(
+  let componentList: EntityId = editorListEntityId(
     chromeSystem: chromeSystem
     world: world
     source: EditorListSource.components
@@ -107,7 +107,7 @@ func runTestWheelStep(
     routed = "TreeList"
   } else if input.wheelTarget is componentList {
     routed = "ComponentList"
-  } else if input.wheelTarget is editAreaEntity(chromeSystem: chromeSystem) {
+  } else if input.wheelTarget is editAreaEntityId(chromeSystem: chromeSystem) {
     routed = "EditArea"
   }
   log(

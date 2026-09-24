@@ -59,13 +59,13 @@ func paintErrorBlock(
   )
 }
 
-# Mount a scene under `mountEntity`. On failure log + paint the entity
+# Mount a scene under `mountEntityId`. On failure log + paint the entity
 # as a sentinel error block and return the mount entity (callers expect
 # a non-negative id).
 func mountOrError(
   world: mod UiWorld
   uiSystems: mod UiSystems
-  mountEntity: view EntityId
+  mountEntityId: view EntityId
   scene: view Scene
   sceneLabel: view String
   overrides: view List(SceneOverride)
@@ -73,22 +73,22 @@ func mountOrError(
   let result: EntityId = mountSceneInstance(
     world: world
     uiSystems: uiSystems
-    mountEntity: mountEntity
+    mountEntityId: mountEntityId
     scene: scene
     overrides: overrides
   )
   if isNone(this: result) {
     let label: String = sceneLabel
     log(
-      "[scene-error] mount failed for {label} (entity {mountEntity.index}, scene.ok={scene.ok}, scene.errorMsg={scene.errorMsg})"
+      "[scene-error] mount failed for {label} (entity {mountEntityId.index}, scene.ok={scene.ok}, scene.errorMsg={scene.errorMsg})"
     )
     paintErrorBlock(
       world: world
       uiSystems: uiSystems
-      entityId: mountEntity
+      entityId: mountEntityId
       label: label
     )
-    ret mountEntity
+    ret mountEntityId
   }
   ret result
 }
@@ -207,7 +207,7 @@ func buildSimpleSceneInstance(
   let mounted: EntityId = mountOrError(
     world: world
     uiSystems: uiSystems
-    mountEntity: mount
+    mountEntityId: mount
     scene: scene
     sceneLabel: label
     overrides: noOverrides

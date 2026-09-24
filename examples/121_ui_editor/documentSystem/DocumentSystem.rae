@@ -407,7 +407,7 @@ func restoreDocumentScrolls(world: mod UiWorld, snapshot: view ScrollSnapshot) {
   loop var i: Int = 0, i < snapshot.nodeIds.length, ++i {
     if let nodeId: String = snapshot.nodeIds.copyAt(index: i) {
       if let raw: Int = world.nodeIds.get(k: "document/{nodeId}") {
-        let entityId: EntityId = nodeEntity(world: world, index: raw)
+        let entityId: EntityId = nodeEntityId(world: world, index: raw)
         if componentHas(this: world.scrollStates, entityId: entityId) {
           let state: mod ScrollState => componentMod(this: world.scrollStates, entityId: entityId)
           state.y = snapshot.offsets.copyAtFallback(index: i, fallback: 0.0)
@@ -473,7 +473,7 @@ func tagMountedNodeIds(world: mod UiWorld, scene: view Scene, pageId: view Strin
   loop var i: Int = 0, i < scene.nodes.length, ++i {
     let node: view SceneNode => nodeAt(this: scene, idx: i)
     if let raw: Int = world.nodeIds.get(k: "{pageId}/{node.nodeId}") {
-      let entityId: EntityId = nodeEntity(world: world, index: raw)
+      let entityId: EntityId = nodeEntityId(world: world, index: raw)
       if componentHas(this: world.nodeIdComponents, entityId: entityId) is false {
         let nodeId: NodeId = { id: "{node.nodeId}" }
         componentSet(this: world.nodeIdComponents, entityId: entityId, data: own nodeId)
