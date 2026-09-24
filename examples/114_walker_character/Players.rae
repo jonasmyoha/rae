@@ -51,18 +51,18 @@ func rosterControlledCrowdIndex(roster: view PlayerRoster) ret Int {
 # entity, or the crowd member entity for the controlled index. This is the
 # roster's ECS view — the same kind of character-entity handle a NetPlayer
 # points at via `controlled`, so local and remote control resolve identically.
-func rosterControlledEntity(
+func rosterControlledEntityId(
   players: view PlayerRoster
   characterSystem: view CharacterSystem
 ) ret EntityId {
   if rosterControlledIsHero(roster: players) {
-    ret characterSystem.heroEntity
+    ret characterSystem.heroEntityId
   }
   let idx: Int = rosterControlledCrowdIndex(roster: players)
   if let entityId: EntityId = characterSystem.crowdEntities.copyAt(index: idx) {
     ret entityId
   }
-  ret characterSystem.heroEntity
+  ret characterSystem.heroEntityId
 }
 
 # Cycle to the next / previous controllable character (wraps). No-op with one

@@ -230,8 +230,8 @@ func emitSubtree(
   if componentHas(this: childrens, entityId: node) {
     let cache: view Children => componentView(this: childrens, entityId: node)
     loop var i: Int = 0, i < cache.ids.length, ++i {
-      if let childEntity: EntityId = cache.ids.copyAt(index: i) {
-        emitSubtree(state: state, childrens: childrens, node: childEntity)
+      if let childEntityId: EntityId = cache.ids.copyAt(index: i) {
+        emitSubtree(state: state, childrens: childrens, node: childEntityId)
       }
     }
   }
@@ -293,8 +293,8 @@ func collectSubtree(
   if componentHas(this: childrens, entityId: node) {
     let cache: view Children => componentView(this: childrens, entityId: node)
     loop var i: Int = 0, i < cache.ids.length, ++i {
-      if let childEntity: EntityId = cache.ids.copyAt(index: i) {
-        collectSubtree(childrens: childrens, node: childEntity, out: out)
+      if let childEntityId: EntityId = cache.ids.copyAt(index: i) {
+        collectSubtree(childrens: childrens, node: childEntityId, out: out)
       }
     }
   }

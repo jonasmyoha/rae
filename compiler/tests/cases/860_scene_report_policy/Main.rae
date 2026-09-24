@@ -73,12 +73,12 @@ func main() {
   let world: UiWorld = createUiWorld()
   var uiSystems: UiSystems = createUiSystems()
   world.scenePolicy.unknownComponents = UnknownComponentPolicy.report
-  let rootEntity: EntityId = loadScene(world: world, uiSystems: uiSystems, scene: scene)
+  let rootEntityId: EntityId = loadScene(world: world, uiSystems: uiSystems, scene: scene)
   # `Foo` waited in the pending outbox (no lib table, maybe an app's); no
   # system here claims it, so reporting it is what turns it into the
   # unknownComponent diagnostic — at the end of the list, after the load.
   reportPendingComponents(world: world)
-  log("mounted root = {rootEntity.index >= 0}, alive = {aliveCount(world: world)}")
+  log("mounted root = {rootEntityId.index >= 0}, alive = {aliveCount(world: world)}")
   # The empty registry: `CardView` is nobody's sub-scene.
   let registry: SceneRegistry = createSceneRegistry()
   resolveSceneInstances(

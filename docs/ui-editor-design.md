@@ -480,7 +480,7 @@ Systems read their share with `uiWheelFor(input, entityId)`, which is the delta
 if the wheel was routed to `entityId` and 0 otherwise. `updateScrollRoot` uses
 it for the root it steps. The editor authors `"WheelTarget": {}` on its
 `EditArea`, and `cameraInputSystem` zooms by
-`uiWheelFor(input, editAreaEntity(...))`. So over the hierarchy the list
+`uiWheelFor(input, editAreaEntityId(...))`. So over the hierarchy the list
 scrolls, over the canvas it zooms, and over the inspector's fields nothing
 happens. With the chrome hidden, the canvas is the whole window and every
 notch zooms. An overlay drawn outside the world (the debug overlay) drops the

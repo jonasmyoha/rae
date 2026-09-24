@@ -62,7 +62,7 @@ func loadInto(
 
 func pageRootOf(world: view UiWorld, scene: view Scene) ret EntityId {
   if let index: Int = findNodeInPage(world: world, pageId: "", nodeId: scene.rootNodeId) {
-    ret nodeEntity(world: world, index: index)
+    ret nodeEntityId(world: world, index: index)
   }
   ret noEntity()
 }
@@ -79,7 +79,7 @@ func compareNode(
   let nodeId: String = "{componentGet(this: a.nodeIdComponents, entityId: entityId).id}"
   var other: EntityId = noEntity()
   if let index: Int = findNodeInPage(world: b, pageId: "", nodeId: nodeId) {
-    other = nodeEntity(world: b, index: index)
+    other = nodeEntityId(world: b, index: index)
   }
   if isNone(this: other) {
     problems.add(value: "{nodeId}: missing after save")
@@ -98,7 +98,7 @@ func compareNode(
       world: a
       other: b
       entityId: entityId
-      otherEntity: other
+      otherEntityId: other
       name: name
     ) {
       if byValue is false {
@@ -265,19 +265,19 @@ func main() {
     path: fixture
     root: "{getEnv(name: "TMPDIR")}/"
   )
-  let rootEntity: EntityId = pageRootOf(world: edited, scene: scene)
-  let rect: mod Rect => componentMod(this: edited.rects, entityId: rootEntity)
+  let rootEntityId: EntityId = pageRootOf(world: edited, scene: scene)
+  let rect: mod Rect => componentMod(this: edited.rects, entityId: rootEntityId)
   rect.size.x = 640.0
   # Components ADDED at runtime, with enum fields: the generic encoder names
   # the members (enumName), the Layout arm spells `kind` as `type`.
   componentSet(
     this: edited.shapes
-    entityId: rootEntity
+    entityId: rootEntityId
     data: Shape { kind: ShapeKind.circle, radius: 12.0 }
   )
   componentSet(
     this: edited.layouts
-    entityId: rootEntity
+    entityId: rootEntityId
     data: Layout {
       kind: LayoutType.horizontal
       alignMain: AlignKind.center
@@ -286,7 +286,7 @@ func main() {
   )
   componentSet(
     this: edited.scrollRoots
-    entityId: rootEntity
+    entityId: rootEntityId
     data: ScrollRoot { axis: ScrollAxis.x }
   )
   let fresh: UiWorld = freshDecodeOf(world: edited, uiSystems: editedSystems, scene: scene)
@@ -295,7 +295,7 @@ func main() {
     uiSystems: editedSystems
     fresh: fresh
     scene: scene
-    pageRoot: rootEntity
+    pageRoot: rootEntityId
     pageId: ""
   )
   log(
@@ -325,7 +325,7 @@ func main() {
   compareNode(
     a: edited
     b: reloaded
-    entityId: rootEntity
+    entityId: rootEntityId
     problems: editProblems
   )
   loop let problem: view String in editProblems {

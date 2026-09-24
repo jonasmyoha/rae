@@ -72,7 +72,7 @@ func frameUpdateSystem(
     forceRender: frame.forceRender
     animating: tick.animating
     prevPressed: frame.lastPressed
-    prevHovered: session.lastHoveredEntity
+    prevHovered: session.lastHoveredEntityId
     prevMouseButtons: session.lastMouseButtons
     viewport: app.viewport
   )
@@ -102,9 +102,9 @@ func frameUpdateSystem(
   if tick.active {
     session.renderUntil = tick.now + 0.5
   }
-  session.lastHoveredEntity = currentHovered
+  session.lastHoveredEntityId = currentHovered
   session.lastMouseButtons = activeDecision.currentMouseButtons
-  frame.lastPressed = input.pressedEntity
+  frame.lastPressed = input.pressedEntityId
 
   # Render decision trace: whether we'll paint this frame and why. If
   # `active=false` repeatedly while the UI is visibly frozen, the bug is in
@@ -112,7 +112,7 @@ func frameUpdateSystem(
   # downstream in renderSystem / endDrawing.
   if app.loopDebugEnabled {
     log(
-      "[loop {app.loopDebugFrame}] uiActions={eventCount(this: input.uiActions)} pressed={input.pressedEntity.index} animating={tick.animating} active={tick.active} decide={activeDecision.active} assets={session.assetsLoading} hover={session.lastHoverAnimDirty} appSystems={frame.observation.ranCount}{frame.observation.ranNames}"
+      "[loop {app.loopDebugFrame}] uiActions={eventCount(this: input.uiActions)} pressed={input.pressedEntityId.index} animating={tick.animating} active={tick.active} decide={activeDecision.active} assets={session.assetsLoading} hover={session.lastHoverAnimDirty} appSystems={frame.observation.ranCount}{frame.observation.ranNames}"
     )
   }
 }

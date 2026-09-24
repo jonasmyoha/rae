@@ -203,14 +203,14 @@ func unchangedSinceSource(
   world: view UiWorld
   entityId: view EntityId
   fresh: view UiWorld
-  freshEntity: view EntityId
+  freshEntityId: view EntityId
   name: view String
 ) ret Bool {
-  if isNone(this: freshEntity) {
+  if isNone(this: freshEntityId) {
     ret false
   }
   let live: String = machineComponentJson(world: world, entityId: entityId, name: name)
-  let decoded: String = machineComponentJson(world: fresh, entityId: freshEntity, name: name)
+  let decoded: String = machineComponentJson(world: fresh, entityId: freshEntityId, name: name)
   ret live.length() > 0 and live is decoded
 }
 
@@ -237,9 +237,9 @@ func writeNode(
     }
   }
   visited.add(value: "{nodeId}")
-  var freshEntity: EntityId = noEntity()
+  var freshEntityId: EntityId = noEntity()
   if let index: Int = findNodeInPage(world: fresh, pageId: "", nodeId: nodeId) {
-    freshEntity = nodeEntity(world: fresh, index: index)
+    freshEntityId = nodeEntityId(world: fresh, index: index)
   }
   let doc: view JsonDoc => scene.doc
   let sourceIndex: Int = sceneNodeIndex(this: scene, nodeId: nodeId)
@@ -289,7 +289,7 @@ func writeNode(
         world: world
         entityId: entityId
         fresh: fresh
-        freshEntity: freshEntity
+        freshEntityId: freshEntityId
         name: key
       ) or listHas(items: inherited, name: key) {
         members.add(value: bagMember(key: key, valueJson: Json.stringify(doc: doc, value: value)))

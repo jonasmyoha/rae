@@ -70,8 +70,8 @@ func main() {
   var uiSystems: UiSystems = createUiSystems()
   world.scenePolicy.unknownComponents = UnknownComponentPolicy.report
   let scene: Scene = parseScene(source: appScene())
-  let rootEntity: EntityId = loadScene(world: world, uiSystems: uiSystems, scene: scene)
-  log("mounted = {rootEntity.index >= 0}, alive = {aliveCount(world: world)}")
+  let rootEntityId: EntityId = loadScene(world: world, uiSystems: uiSystems, scene: scene)
+  log("mounted = {rootEntityId.index >= 0}, alive = {aliveCount(world: world)}")
   # The loader applied the lib components and parked the rest, in order.
   log("pending after load: {world.pendingComponents.length}")
   loop let pending: view PendingComponent in world.pendingComponents {

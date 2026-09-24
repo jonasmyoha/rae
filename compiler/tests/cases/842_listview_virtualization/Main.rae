@@ -72,12 +72,12 @@ func makeListView() ret ListView {
 
 # The label text of the topmost windowed row (slot 0 = first child), for
 # asserting the bindings re-point correctly as the window scrolls.
-func topRowLabel(world: view UiWorld, listEntity: view EntityId) ret String {
+func topRowLabel(world: view UiWorld, listEntityId: view EntityId) ret String {
   unsafe {
-    if componentHas(this: world.childrens, entityId: listEntity) is false {
+    if componentHas(this: world.childrens, entityId: listEntityId) is false {
       ret "(none)"
     }
-    let ch: view Children => componentView(this: world.childrens, entityId: listEntity)
+    let ch: view Children => componentView(this: world.childrens, entityId: listEntityId)
     if ch.ids.length is 0 {
       ret "(none)"
     }
@@ -147,31 +147,31 @@ func main() {
   let world: UiWorld = createUiWorld()
   # Part B's own systems (Part A's belong to sceneWorld).
   uiSystems = createUiSystems()
-  let listEntity: EntityId = createEntity(world: world)
-  componentSet(this: world.listViews, entityId: listEntity, data: makeListView())
-  componentSet(this: world.listViewDatas, entityId: listEntity, data: buildData(count: rowCount))
+  let listEntityId: EntityId = createEntity(world: world)
+  componentSet(this: world.listViews, entityId: listEntityId, data: makeListView())
+  componentSet(this: world.listViewDatas, entityId: listEntityId, data: buildData(count: rowCount))
   let scroll0: ScrollState = { y: 0.0, velocity: 0.0 }
-  componentSet(this: world.scrollStates, entityId: listEntity, data: scroll0)
+  componentSet(this: world.scrollStates, entityId: listEntityId, data: scroll0)
 
   listViewSystem(world: world, uiSystems: uiSystems, scenes: rowScenes)
   let aliveTop: Int = aliveCount(world: world)
   log("rows: {rowCount}")
   log("alive at top: {aliveTop}")
-  log("top row: {topRowLabel(world: world, listEntity: listEntity)}")
+  log("top row: {topRowLabel(world: world, listEntityId: listEntityId)}")
 
   # Scroll deep into the middle (row ~4998 becomes the first windowed row).
   let midY: Float = 0.0 - 200000.0
   let mid: ScrollState = { y: midY, velocity: 0.0 }
-  componentSet(this: world.scrollStates, entityId: listEntity, data: mid)
+  componentSet(this: world.scrollStates, entityId: listEntityId, data: mid)
   listViewSystem(world: world, uiSystems: uiSystems, scenes: rowScenes)
   let aliveMid: Int = aliveCount(world: world)
   log("alive at mid: {aliveMid}")
-  log("mid top row: {topRowLabel(world: world, listEntity: listEntity)}")
+  log("mid top row: {topRowLabel(world: world, listEntityId: listEntityId)}")
 
   # Scroll to the very end: the window shrinks (fewer rows remain).
   let endY: Float = 0.0 - (rowCount - 1).toFloat() * rowPitch
   let endS: ScrollState = { y: endY, velocity: 0.0 }
-  componentSet(this: world.scrollStates, entityId: listEntity, data: endS)
+  componentSet(this: world.scrollStates, entityId: listEntityId, data: endS)
   listViewSystem(world: world, uiSystems: uiSystems, scenes: rowScenes)
   let aliveEnd: Int = aliveCount(world: world)
   log("alive at end: {aliveEnd}")

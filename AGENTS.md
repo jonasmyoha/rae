@@ -104,9 +104,12 @@ These instructions define **how Codex should work**, communicate progress, and i
   `meshHandle: MeshHandle`). When a role is added, the `Id` suffix stays:
   `rootEntityId`, `hoveredEntityId`, `targetEntityId`, not `rootEntity`. A
   plain `Int` index into an entity array is not an id either, so name it
-  `entityIndex`. (The ECS API and every bare `entity` binding were renamed to
-  `entityId` in one sweep. Role-prefixed `…Entity: EntityId` names such as
-  `rootEntity` are still being migrated, so fix them in files you touch.)
+  `entityIndex`. A function that RETURNS an id and is named by a noun follows
+  the same rule (`editAreaEntityId()`, `nodeEntityId(...)`). A function named by
+  a VERB keeps `Entity`, because it names the action on the entity rather than a
+  held id: `createEntity`, `noEntity`, `allocEntity`, `findPageRootEntity`,
+  `hitTestEntity`, `destroyEntity`. (The whole tree was migrated in two sweeps:
+  the bare `entity` bindings, then the role-prefixed `…Entity` names.)
 - **Resolve a name conflict by making the name MORE specific, never by
   abbreviating.** Two cameras are `playerCamera` and `debugCamera`, not `cam1`/
   `cam2` or `cam`/`c`. Add words; do not remove them. `io` is doubly wrong — it
