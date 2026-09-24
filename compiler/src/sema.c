@@ -3862,6 +3862,27 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                                    "accessor (viewAt, modAt, viewGet, modGet)");
                         module->had_error = true;
                     }
+                } else if (bv->kind == AST_EXPR_MEMBER) {
+                    // #45158908: the same through a field chain. `f().inner.label`
+                    // is a place inside the call's result, which the backend holds
+                    // in a temporary dropped at the end of the statement — a
+                    // reference to it would dangle for the rest of the scope.
+                    const AstExpr* root = bv;
+                    while (root->kind == AST_EXPR_MEMBER) root = root->as.member.object;
+                    if (root->kind == AST_EXPR_CALL && root->decl_link
+                        && root->decl_link->kind == AST_DECL_FUNC) {
+                        const AstFuncDecl* rfd = &root->decl_link->as.func_decl;
+                        bool root_returns_ref = rfd->returns && rfd->returns->type
+                            && (rfd->returns->type->is_view || rfd->returns->type->is_mod);
+                        if (rfd->returns && !root_returns_ref) {
+                            diag_error(sema_diag_file(module), (int)stmt->line, (int)stmt->column,
+                                       "cannot bind a reference to a field of a call that returns ownership: "
+                                       "the result is dropped at the end of this statement; "
+                                       "write 'let name: T = ...' to copy the field out, or make the call "
+                                       "return a reference (view/mod) to storage that outlives it");
+                            module->had_error = true;
+                        }
+                    }
                 }
             }
             // #814: an element-reference binding through a ComponentTable

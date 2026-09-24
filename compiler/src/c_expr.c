@@ -245,9 +245,16 @@ static bool expr_is_string_typed(CFuncContext* ctx, const AstExpr* e) {
 static void emit_member_chain_on_temp(CFuncContext* ctx, const AstExpr* expr, const AstExpr* base,
                                       int tmp_id, FILE* out) {
     if (expr == base) {
-        fprintf(out, "((__rae_stmt_tmp%d = (", tmp_id);
+        // `(*(..., &tmp))`, not `(..., tmp)`: a comma expression is not an
+        // lvalue in C, a dereferenced pointer is. The chain read off it is
+        // therefore a PLACE inside the temporary, which is what lets every
+        // consumer keep its own rule: a `let`/assignment deep-copies the field
+        // out, a `view` argument borrows it for the call, `own` moves it out
+        // and zeroes the slot — and the temporary's drop after the statement
+        // releases whatever is left (#45158908).
+        fprintf(out, "(*((__rae_stmt_tmp%d = (", tmp_id);
         emit_expr(ctx, base, out, PREC_LOWEST, false, false);
-        fprintf(out, ")), (__rae_stmt_tmp%d_set = 1), __rae_stmt_tmp%d)", tmp_id, tmp_id);
+        fprintf(out, ")), (__rae_stmt_tmp%d_set = 1), &__rae_stmt_tmp%d))", tmp_id, tmp_id);
         return;
     }
     const AstTypeRef* obj_tr = infer_expr_type_ref(ctx, expr->as.member.object);
@@ -915,27 +922,37 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                 break;
             }
         }
-        // #32786425: a field chain read off a call's OWNED result —
-        // `componentCopyAtDefault(this: t, i: i).rows.length` — used to leak that
-        // whole result (a deep copy) every time: nothing ever dropped it. When
-        // the chain ends in a plain value (no heap: Int, Float, Bool, enum...),
-        // capture the call in a statement temporary, read the field off it,
-        // and let the statement's drop list release it afterwards. A chain
-        // that ends in a heap value (a String / List field) is left as it
-        // was: dropping the owner after the statement would leave the read
-        // value dangling, which is worse than the leak.
-        if (!is_lvalue && ctx->stmt_temps) {
+        // #32786425 / #45158908: a field chain read off a call's OWNED result —
+        // `componentCopyAtDefault(this: t, i: i).rows.length`,
+        // `makeWrapper().inner.label` — used to leak that whole result (a deep
+        // copy) every time: nothing ever dropped it. The call is captured in a
+        // statement temporary and the chain is read off it as a place (see
+        // emit_member_chain_on_temp), so the statement's drop list releases
+        // the result afterwards, whatever the chain ends in. A heap-valued
+        // field is safe because every consumer already treats a member read
+        // as a LOCATION: `let`/`=` copy it out, an argument borrows it only
+        // for the call, `own` moves it out and zeroes the slot. (A `view`/`mod`
+        // BINDING to it would outlive the temporary; sema rejects that.)
+        if (ctx->stmt_temps) {
             const AstExpr* base = expr->as.member.object;
             while (base->kind == AST_EXPR_MEMBER) base = base->as.member.object;
-            const AstTypeRef* result_tr = infer_expr_type_ref(ctx, expr);
-            const AstTypeRef* base_tr = (base->kind == AST_EXPR_CALL || base->kind == AST_EXPR_METHOD_CALL)
+            // The buffer-get intrinsics are typed as returning the element by
+            // value but are LOWERED to a dereference of the buffer's storage (a
+            // place, c_call.c is_buf_get): `ret view rae_ext_rae_buf_get(buf:
+            // this.data, index: idx).value` in the hash maps aliases the map's
+            // own slot. Capturing that in a temporary would hand back a pointer
+            // into a copy that is dropped at the end of the statement.
+            bool base_is_storage_place = base->kind == AST_EXPR_CALL && base->as.call.callee
+                && base->as.call.callee->kind == AST_EXPR_IDENT
+                && (str_eq_cstr(base->as.call.callee->as.ident, "rae_ext_rae_buf_get")
+                    || str_eq_cstr(base->as.call.callee->as.ident, "rae_ext___buf_get")
+                    || str_eq_cstr(base->as.call.callee->as.ident, "__buf_get"));
+            const AstTypeRef* base_tr = !base_is_storage_place
+                && (base->kind == AST_EXPR_CALL || base->kind == AST_EXPR_METHOD_CALL)
                 ? infer_expr_type_ref(ctx, base) : NULL;
-            bool result_is_plain = result_tr && !result_tr->is_view && !result_tr->is_mod && !result_tr->is_opt
-                && !str_eq_cstr(get_base_type_name(result_tr), "String")
-                && !type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, result_tr, 0);
             bool base_is_owned = base_tr && !base_tr->is_view && !base_tr->is_mod && !base_tr->is_opt
                 && type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, base_tr, 0);
-            if (result_is_plain && base_is_owned) {
+            if (base_is_owned) {
                 const AstTypeRef* base_concrete = base_tr;
                 if (ctx->generic_params && ctx->generic_args)
                     base_concrete = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, base_tr);
