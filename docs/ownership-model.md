@@ -56,6 +56,13 @@ source declared inside a loop can leave scope without invalidating an outer
 destination. Fresh String results and explicit `own` retain their existing
 transfer behavior. See `stress/10_stringAssignAlias` and compiler regression 906.
 
+A `mod String` argument addresses the caller's actual String slot, including
+struct members and a reference forwarded through another function. Assigning
+through it copies a stored source before dropping the old pointee, so a source
+that aliases the destination remains safe. A local initially holding a static
+literal is still cleaned up if the callee replaces it with allocated text.
+Compiler regression 907 covers these paths, including generic and method calls.
+
 ## Explicit ownership transfer with `own`
 
 Recognise the `own` keyword in expression positions:
