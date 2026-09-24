@@ -106,7 +106,7 @@ type World3dAsset {
   camera: Camera3d
   light: Light3d
   nodeIds: List(String)
-  entityIds: List(Int)
+  entityIds: List(EntityId)
   ok: Bool
   errorMsg: String
 }
@@ -117,7 +117,7 @@ func emptyWorld3dAsset() ret World3dAsset {
     camera: defaultCamera3d()
     light: defaultLight3d()
     nodeIds: List.create(String, cap: 16)
-    entityIds: List.create(Int, cap: 16)
+    entityIds: List.create(EntityId, cap: 16)
     ok: false
     errorMsg: ""
   }
@@ -130,17 +130,15 @@ func failWorld3dAsset(asset: mod World3dAsset, message: view String) {
   }
 }
 
-# nodeId -> the renderable's DENSE transform index. Because entities are created
-# in renderable order and each is given a transform immediately, that index is the
-# entity's dense position, which world3dAssetEntity resolves back with
-# world3dEntityAt — the same mapping the Scene3d asset used.
-func addWorldAssetEntity(asset: mod World3dAsset, nodeId: view String, entityIndex: view Int) {
+# nodeId -> the renderable's entity. The EntityId itself, not its dense position:
+# a position is only an id while nothing is ever removed from the table.
+func addWorldAssetEntity(asset: mod World3dAsset, nodeId: view String, entityId: view EntityId) {
   var nodeIdCopy: String = ""
   unsafe {
     nodeIdCopy = rae_ext_rae_string_copy(string: nodeId)
   }
   asset.nodeIds.add(value: nodeIdCopy)
-  asset.entityIds.add(value: entityIndex)
+  asset.entityIds.add(value: entityId)
 }
 
 # Parse a .raescene straight into a World3d (#796). One node walk with the shared
@@ -207,7 +205,8 @@ func parseWorld3dAsset(source: view String, meshes: view MeshRegistry3d) pub ret
   }
 
   # Pass 2: renderables (each becomes an entity), then camera/light. `entityIndex`
-  # is the running renderable count == each new entity's dense transform position.
+  # is the running renderable count, written only into the legacy MeshRenderer /
+  # SdfPrimitive `entityIndex` field (nothing reads it; the entity is the key).
   var entityIndex: Int = 0
   var cameraCount: Int = 0
   var lightCount: Int = 0
@@ -298,7 +297,7 @@ func parseWorld3dAsset(source: view String, meshes: view MeshRegistry3d) pub ret
         if let material: Material3d = materialValues.copyAt(index: materialIdx) {
           world3dSetMaterial(world: asset.world, entityId: entityId, material: material)
         }
-        addWorldAssetEntity(asset: asset, nodeId: node.nodeId, entityIndex: entityIndex)
+        addWorldAssetEntity(asset: asset, nodeId: node.nodeId, entityId: entityId)
         entityIndex = entityIndex + 1
       } else {
         let sdf: JsonValue = nodeComponent(doc: doc, node: node, name: "SdfPrimitive")
@@ -381,7 +380,7 @@ func parseWorld3dAsset(source: view String, meshes: view MeshRegistry3d) pub ret
         if let material: Material3d = materialValues.copyAt(index: materialIdx) {
           world3dSetMaterial(world: asset.world, entityId: entityId, material: material)
         }
-        addWorldAssetEntity(asset: asset, nodeId: node.nodeId, entityIndex: entityIndex)
+        addWorldAssetEntity(asset: asset, nodeId: node.nodeId, entityId: entityId)
         entityIndex = entityIndex + 1
       }
     }
@@ -475,15 +474,14 @@ func loadWorld3dFile(path: view String, meshes: view MeshRegistry3d) pub ret Wor
   ret parseWorld3dAsset(source: source, meshes: meshes)
 }
 
-# The entity for a node id (its dense transform position mapped to an EntityId),
-# or noEntity() if the id is absent.
+# The entity for a node id, or noEntity() if the id is absent.
 func world3dAssetEntity(asset: view World3dAsset, nodeId: view String) pub ret EntityId {
   var i: Int = 0
   loop i < asset.nodeIds.length {
     if let candidate: String = asset.nodeIds.copyAt(index: i) {
       if candidate is nodeId {
-        if let idx: Int = asset.entityIds.copyAt(index: i) {
-          ret world3dEntityAt(world: asset.world, i: idx)
+        if let entityId: EntityId = asset.entityIds.copyAt(index: i) {
+          ret entityId
         }
       }
     }
