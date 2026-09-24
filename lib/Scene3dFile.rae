@@ -204,10 +204,7 @@ func parseWorld3dAsset(source: view String, meshes: view MeshRegistry3d) pub ret
     i = i + 1
   }
 
-  # Pass 2: renderables (each becomes an entity), then camera/light. `entityIndex`
-  # is the running renderable count, written only into the legacy MeshRenderer /
-  # SdfPrimitive `entityIndex` field (nothing reads it; the entity is the key).
-  var entityIndex: Int = 0
+  # Pass 2: renderables (each becomes an entity), then camera/light.
   var cameraCount: Int = 0
   var lightCount: Int = 0
   i = 0
@@ -281,24 +278,18 @@ func parseWorld3dAsset(source: view String, meshes: view MeshRegistry3d) pub ret
         }
         let entityId: EntityId = world3dAddEntity(world: asset.world)
         world3dSetTransform(world: asset.world, entityId: entityId, transform: transform)
-        # The MeshRenderer's legacy entity/material Int fields are ignored by the
-        # World3d renderer (it reads the entity + the Material3d component); they
-        # carry the dense index / material index for parity with the old bridge.
+        # The MeshRenderer's legacy `material` Int field is ignored by the World3d
+        # renderer (it reads the Material3d component); it carries the material
+        # index for parity with the old bridge.
         world3dSetMeshRenderer(
           world: asset.world
           entityId: entityId
-          renderer: MeshRenderer {
-            entityIndex: entityIndex
-            mesh: mesh
-            material: materialIdx
-            visible: visible
-          }
+          renderer: MeshRenderer { mesh: mesh, material: materialIdx, visible: visible }
         )
         if let material: Material3d = materialValues.copyAt(index: materialIdx) {
           world3dSetMaterial(world: asset.world, entityId: entityId, material: material)
         }
         addWorldAssetEntity(asset: asset, nodeId: node.nodeId, entityId: entityId)
-        entityIndex = entityIndex + 1
       } else {
         let sdf: JsonValue = nodeComponent(doc: doc, node: node, name: "SdfPrimitive")
         if sdf.kind is not JsonKind.object {
@@ -369,7 +360,6 @@ func parseWorld3dAsset(source: view String, meshes: view MeshRegistry3d) pub ret
           world: asset.world
           entityId: entityId
           sdf: SdfPrimitive {
-            entityIndex: entityIndex
             shape: shape
             material: materialIdx
             noise: noise
@@ -381,7 +371,6 @@ func parseWorld3dAsset(source: view String, meshes: view MeshRegistry3d) pub ret
           world3dSetMaterial(world: asset.world, entityId: entityId, material: material)
         }
         addWorldAssetEntity(asset: asset, nodeId: node.nodeId, entityId: entityId)
-        entityIndex = entityIndex + 1
       }
     }
 

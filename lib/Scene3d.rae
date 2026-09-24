@@ -113,7 +113,6 @@ type Light3d {
 
 # ----- geometry components (the backend divergence point) -------------
 type MeshRenderer {
-  entityIndex: Int
   mesh: MeshHandle
   material: Int
   visible: Bool
@@ -133,7 +132,6 @@ type MeshRenderer {
 # distances. Metallic/roughness/emission come from the first primitive,
 # because those shade the fused surface as a whole.
 type SdfPrimitive {
-  entityIndex: Int
   shape: Int
   material: Int
   noise: Float
@@ -246,9 +244,9 @@ func world3dSetSdf(world: mod World3d, entityId: view EntityId, sdf: view SdfPri
 
 # Allocate an entity and attach its Transform3d + a per-entity Material3d
 # component + MeshRenderer in one call — the authoring primitive for building a
-# World3d in code (#794). The MeshRenderer's legacy `entityIndex`/`material` Int fields
-# are ignored by the World3d renderer (renderSceneWorld reads the ECS entity + the
-# Material3d component), so they carry placeholders.
+# World3d in code (#794). The MeshRenderer's legacy `material` Int field is
+# ignored by the World3d renderer (renderSceneWorld reads the Material3d
+# component), so it carries a placeholder.
 func world3dAddMeshInstance(
   world: mod World3d
   mesh: view MeshHandle
@@ -267,7 +265,7 @@ func world3dAddMeshInstance(
   world3dSetMeshRenderer(
     world: world
     entityId: entityId
-    renderer: MeshRenderer { entityIndex: -1, mesh: mesh, material: -1, visible: true }
+    renderer: MeshRenderer { mesh: mesh, material: -1, visible: true }
   )
   ret entityId
 }
