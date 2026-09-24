@@ -773,6 +773,16 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
         if (str_eq_cstr(expr->as.method_call.method_name, "toJson") && !expr->as.method_call.args) {
             const AstTypeRef* obj_tr = infer_expr_type_ref(ctx, expr->as.method_call.object);
             const char* mangled = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, obj_tr);
+            if (obj_tr && (obj_tr->is_view || obj_tr->is_mod)) {
+                // A view/mod receiver already IS a pointer to the value: pass it
+                // as is. Taking its address passed a pointer-to-pointer, and the
+                // serializer printed the address as the field values (a view of
+                // a generic T in lib/ecs/Serialize, #32786425 follow-up).
+                fprintf(out, "rae_toJson_%s_((%s*)(", mangled, mangled);
+                emit_expr(ctx, expr->as.method_call.object, out, PREC_LOWEST, false, true);
+                fprintf(out, "))");
+                break;
+            }
             fprintf(out, "rae_toJson_%s_(&", mangled);
             emit_expr(ctx, expr->as.method_call.object, out, PREC_LOWEST, true, false);
             fprintf(out, ")");
@@ -906,7 +916,7 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
             }
         }
         // #32786425: a field chain read off a call's OWNED result —
-        // `componentGet(this: t, entityId: e).rows.length` — used to leak that
+        // `componentCopyAtDefault(this: t, i: i).rows.length` — used to leak that
         // whole result (a deep copy) every time: nothing ever dropped it. When
         // the chain ends in a plain value (no heap: Int, Float, Bool, enum...),
         // capture the call in a statement temporary, read the field off it,
@@ -938,6 +948,35 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
         }
         const AstTypeRef* obj_tr = infer_expr_type_ref(ctx, expr->as.member.object);
         bool use_arrow = (obj_tr && (obj_tr->is_view || obj_tr->is_mod));
+        // A call that RETURNS a reference (`ret view T` / `ret mod T`) yields a
+        // pointer even when inference lost that — e.g. the explicit-type
+        // spelling `componentView(Rect, this: t, entityId: e).position`.
+        if (!use_arrow && expr->as.member.object->kind == AST_EXPR_CALL
+            && expr->as.member.object->decl_link
+            && expr->as.member.object->decl_link->kind == AST_DECL_FUNC) {
+            const AstFuncDecl* cfd = &expr->as.member.object->decl_link->as.func_decl;
+            if (cfd->returns && cfd->returns->type
+                && (cfd->returns->type->is_view || cfd->returns->type->is_mod)) use_arrow = true;
+        }
+        // The explicit-type spelling is rewritten before emission and can reach
+        // here unresolved: fall back to the callee NAME when every function of
+        // that name returns a reference.
+        if (!use_arrow && expr->as.member.object->kind == AST_EXPR_CALL
+            && !expr->as.member.object->decl_link
+            && expr->as.member.object->as.call.callee
+            && expr->as.member.object->as.call.callee->kind == AST_EXPR_IDENT) {
+            Str cname = expr->as.member.object->as.call.callee->as.ident;
+            bool any = false, all_ref = true;
+            for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count; i++) {
+                const AstDecl* d = ctx->compiler_ctx->all_decls[i];
+                if (d->kind != AST_DECL_FUNC || !str_eq(d->as.func_decl.name, cname)) continue;
+                any = true;
+                const AstFuncDecl* cfd = &d->as.func_decl;
+                if (!(cfd->returns && cfd->returns->type
+                      && (cfd->returns->type->is_view || cfd->returns->type->is_mod))) all_ref = false;
+            }
+            if (any && all_ref) use_arrow = true;
+        }
         emit_expr(ctx, expr->as.member.object, out, PREC_CALL, true, false);
         Str fld = c_struct_field_c_name(expr->as.member.member, type_ref_is_c_struct(ctx, obj_tr));
         fprintf(out, "%s%.*s", use_arrow ? "->" : ".", (int)fld.len, fld.data);
