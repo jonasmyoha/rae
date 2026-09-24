@@ -2421,9 +2421,19 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     ctx->expected_type = saved_exp;
                 } else if (is_string_local_reassign) {
                     Str tname = stmt->as.assign_stmt.target->as.ident;
+                    const AstExpr* rhs = stmt->as.assign_stmt.value;
+                    // A stored String belongs to its source. Copy BEFORE
+                    // dropping the destination (also makes self-assignment
+                    // safe); only produced temporaries / explicit own transfer.
+                    bool rhs_owning_temp = rhs && (
+                        rhs->kind == AST_EXPR_CALL || rhs->kind == AST_EXPR_METHOD_CALL ||
+                        rhs->kind == AST_EXPR_INTERP || rhs->kind == AST_EXPR_BINARY ||
+                        rhs->kind == AST_EXPR_OWN);
                     int tmpn = ctx->temp_counter++;
                     fprintf(out, "{ rae_String __asg%d = ", tmpn);
-                    emit_expr(ctx, stmt->as.assign_stmt.value, out, PREC_LOWEST, false, false);
+                    if (!rhs_owning_temp) fprintf(out, "rae_string_copy(");
+                    emit_expr(ctx, rhs, out, PREC_LOWEST, false, false);
+                    if (!rhs_owning_temp) fprintf(out, ")");
                     fprintf(out, "; rae_string_drop(&%.*s); %.*s = rae_string_pool_take(__asg%d); }",
                             (int)tname.len, tname.data,
                             (int)tname.len, tname.data,

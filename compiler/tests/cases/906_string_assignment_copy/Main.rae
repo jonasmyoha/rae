@@ -1,0 +1,35 @@
+type Label {
+  text: String
+}
+
+func assignString(source: view String) ret String {
+  var destination: String = ""
+  destination = source
+  ret destination
+}
+
+func main() {
+  var keep: String = ""
+  loop var i: Int = 0, i < 20, ++i {
+    let local: String = "value{i}"
+    keep = local
+    log(local)
+  }
+  log(keep)
+  keep = keep
+  log(keep)
+  var source: String = "source{7}"
+  keep = source
+  source = "changed{8}"
+  log(keep)
+  keep = assignString(source: source)
+  source = "last{9}"
+  log(keep)
+  let label: Label = { text: "member{4}" }
+  keep = label.text
+  log(keep)
+  keep = "{keep}+suffix"
+  log(keep)
+  keep = "literal"
+  log(keep)
+}

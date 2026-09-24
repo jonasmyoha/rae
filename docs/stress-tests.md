@@ -194,3 +194,12 @@ Implementation outline (small; everything reuses the examples plumbing):
    (05); make `own` a real move with a use-after-move diagnostic (06); a
    documented character-vs-byte string API (07); an error (or a diagnostic)
    for `set` past the end (08); a stack-overflow message (09).
+
+## String assignment lifetime (case 10)
+
+`10_stringAssignAlias` is on the **handles** shelf: an outer String assigned
+from a loop-local String keeps an independent value after the source drops.
+The pre-fix case reproduced an allocator abort (exit 1, empty stdout) and its
+footgun expectation was verified before being flipped in the fix. The fixed
+expectation is exit 0, `value2`, and empty stderr. See the case README for the
+observed failure and cross-language lifetime comparison.
