@@ -38,7 +38,7 @@ func buttonHoverFadeUpdate(
   }
   let step: Float = frameDt / hoverFadeSeconds
   var animating: Bool = false
-  loop let entityId: EntityId, shadow: view Shadow in forEach(table: world.shadows) {
+  loop let entityId: EntityId, shadow: view Shadow in query(table: world.shadows) {
     if shadowReactsToHover(shadow: shadow) {
       var target: Float = 0.0
       if entityHovered(world: world, uiSystems: uiSystems, entityId: entityId) {

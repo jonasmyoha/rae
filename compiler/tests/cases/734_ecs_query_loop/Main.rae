@@ -70,14 +70,14 @@ func main() {
   let t3: Tag = componentGet(this: tag, entityId: e3)
   log("q3 readback x={r3b.x} t={t3.t}")
 
-  # forEach: the single-table base case, in dense order.
-  loop let entityId: EntityId, position: view Position in forEach(table: pos) {
+  # query: the single-table base case, in dense order.
+  loop let entityId: EntityId, position: view Position in query(table: pos) {
     log("all e{entityId.index} x={position.x}")
   }
 
   # nested query loops each alias their own hit.
   var pairs: Int = 0
-  loop let outer: EntityId, outerVelocity: view Velocity in forEach(table: vel) {
+  loop let outer: EntityId, outerVelocity: view Velocity in query(table: vel) {
     loop let inner: EntityId, ip: view Position, innerVelocity: view Velocity in query2(
       tableA: pos
       tableB: vel

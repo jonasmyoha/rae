@@ -37,7 +37,7 @@ func main() {
   let withoutHits: List(QueryMatch) = without(dataTable: pos, tagTable: tag)
   log("without count: {withoutHits.length}")
   loop let row: view QueryMatch in withoutHits {
-    let position: view Position => forEachView(table: pos, hit: row)
+    let position: view Position => queryView(table: pos, hit: row)
     log("without e{row.entityId.index} x={position.x}")
   }
 
@@ -52,7 +52,7 @@ func main() {
   let ch1: List(QueryMatch) = changedSince(table: pos, sinceGeneration: gen0)
   log("changed since gen0: {ch1.length}")
   loop let row: view QueryMatch in ch1 {
-    let position: view Position => forEachView(table: pos, hit: row)
+    let position: view Position => queryView(table: pos, hit: row)
     log("changed e{row.entityId.index} x={position.x}")
   }
 
