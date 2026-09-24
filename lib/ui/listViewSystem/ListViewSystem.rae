@@ -265,6 +265,20 @@ func listViewSceneBindingCurrent(
     }
     ret true
   }
+  let gradientName: String = "GradientFill"
+  if binding.componentName is gradientName {
+    if componentHas(this: world.gradientFills, entity: entity) is false {
+      ret true
+    }
+    let current: view GradientFill => componentView(this: world.gradientFills, entity: entity)
+    if binding.fieldName is "fromSlot" {
+      ret current.fromSlot is value
+    }
+    if binding.fieldName is "toSlot" {
+      ret current.toSlot is value
+    }
+    ret true
+  }
   let stateStyleName: String = "StateStyle"
   if binding.componentName is stateStyleName {
     if componentHas(this: world.stateStyles, entity: entity) is false {

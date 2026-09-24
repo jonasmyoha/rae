@@ -501,6 +501,12 @@ func applyAuthoredFixups(
     shape.strokeSlot = slotNameOf(doc: doc, val: val, key: "stroke")
     ret
   }
+  if name is "GradientFill" {
+    let gradient: mod GradientFill => componentMod(this: world.gradientFills, entity: entity)
+    gradient.fromSlot = slotNameOf(doc: doc, val: val, key: "from")
+    gradient.toSlot = slotNameOf(doc: doc, val: val, key: "to")
+    ret
+  }
   if name is "Text" {
     # Tier-2 partial style override (#236): namespaced inside the Text bag,
     # stored as a sparse component only when authored. The base styleId is

@@ -721,9 +721,8 @@ func applyOverride(world: mod UiWorld, entity: view EntityId, override: view Sce
     componentSet(this: world.widgetStates, entity: entity, data: current)
     ret
   }
-  # `Shape.kind` ("Rect" / "RoundedRect" / "Circle"), `Shape.fillSlot` (a
-  # palette slot; "" keeps the literal fill) and `Shape.radius`: a row's
-  # highlight state as data (the playing track's pill).
+  # Shape kind/fill/radius and GradientFill palette slots let a row carry its
+  # themed highlight state as data (the playing track's pill, editor rows).
   let shapeKey: String = "Shape"
   if override.componentName is shapeKey {
     if componentHas(this: world.shapes, entity: entity) is false {
@@ -743,6 +742,20 @@ func applyOverride(world: mod UiWorld, entity: view EntityId, override: view Sce
     }
     if override.fieldName is "radius" {
       cur.radius = override.valueString.toFloat()
+    }
+    ret
+  }
+  let gradientKey: String = "GradientFill"
+  if override.componentName is gradientKey {
+    if componentHas(this: world.gradientFills, entity: entity) is false {
+      ret
+    }
+    let current: mod GradientFill => componentMod(this: world.gradientFills, entity: entity)
+    if override.fieldName is "fromSlot" {
+      current.fromSlot = "{override.valueString}"
+    }
+    if override.fieldName is "toSlot" {
+      current.toSlot = "{override.valueString}"
     }
     ret
   }

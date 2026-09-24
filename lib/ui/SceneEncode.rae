@@ -303,6 +303,15 @@ func encodeShape(shape: view Shape) ret String {
   ret withMembers(base: base, extra: extra)
 }
 
+func encodeGradientFill(gradient: view GradientFill) ret String {
+  let base: String = encodeComponent(value: gradient, skip: "from,fromSlot,to,toSlot")
+  let extra: List(String) = [
+    "\"from\": {encodeColorOrSlot(color: gradient.from, slot: gradient.fromSlot)}"
+    "\"to\": {encodeColorOrSlot(color: gradient.to, slot: gradient.toSlot)}"
+  ]
+  ret withMembers(base: base, extra: extra)
+}
+
 # Text with its namespaced style override (a sparse component of its own).
 func encodeText(world: view UiWorld, entity: view EntityId, text: view Text) ret String {
   let base: String = encodeComponent(value: text, skip: "")
@@ -510,6 +519,13 @@ func authoredComponentJson(
     if componentHas(this: world.shapes, entity: entity) {
       let value: Shape = componentGet(this: world.shapes, entity: entity)
       ret encodeShape(shape: value)
+    }
+    ret ""
+  }
+  if name is "GradientFill" {
+    if componentHas(this: world.gradientFills, entity: entity) {
+      let value: GradientFill = componentGet(this: world.gradientFills, entity: entity)
+      ret encodeGradientFill(gradient: value)
     }
     ret ""
   }
