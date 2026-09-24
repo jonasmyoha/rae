@@ -26,6 +26,8 @@ import Json
 import String
 open ui/Ecs
 open ui/Scene
+open ecs/Entity
+open ecs/ComponentTable
 
 # Where a field's live value came from.
 #
@@ -36,13 +38,16 @@ open ui/Scene
 #   defaulted  — the component was authored, this field was not: it holds the
 #                type's default.
 #   authored   — the field was authored and the live value still matches it.
-#   overridden — the field was authored and the live value DIFFERS. Something
-#                wrote over the author, which is the case worth seeing.
+#   resolved   — the authored spelling decodes to the current typed value (a
+#                theme token or colour string, for example).
+#   overridden — the field differs from a fresh decode. Something wrote over
+#                the decoded value, which is the case worth seeing.
 enum FieldSource {
   unknown
   computed
   defaulted
   authored
+  resolved
   overridden
 }
 
@@ -129,8 +134,49 @@ type FieldProvenance {
   authoredText: String
 }
 
+# Read one field from a freshly decoded component using its typed Rae text.
+# This is the same representation used for the live field, so structs such as
+# RgbaColor compare by value without teaching the inspector their shape.
+func decodedFieldIn(
+  T: type
+  table: view ComponentTable(T)
+  entity: view EntityId
+  field: view String
+) ret AuthoredValue {
+  if componentHas(this: table, entity: entity) is false {
+    ret missingAuthoredValue()
+  }
+  let value: view T => componentView(this: table, entity: entity)
+  loop let decoded: view any in fields(value) {
+    if fieldName(decoded) is field {
+      ret AuthoredValue { text: "{decoded}", readable: true }
+    }
+  }
+  ret missingAuthoredValue()
+}
+
+func decodedFieldValue(
+  sourceWorld: view UiWorld
+  nodeId: view String
+  component: view String
+  field: view String
+) ret AuthoredValue {
+  if let raw: Int = findNodeInPage(world: sourceWorld, pageId: "", nodeId: nodeId) {
+    let entity: EntityId = nodeEntity(world: sourceWorld, index: raw)
+    var answer: AuthoredValue = missingAuthoredValue()
+    loop let table: view ComponentTable(any) in fields(sourceWorld) {
+      if typeName(table) is component {
+        answer = decodedFieldIn(table: table, entity: entity, field: field)
+      }
+    }
+    ret answer
+  }
+  ret missingAuthoredValue()
+}
+
 func fieldProvenance(
   scene: view Scene
+  sourceWorld: view UiWorld
   nodeId: view String
   component: view String
   field: view String
@@ -157,24 +203,38 @@ func fieldProvenance(
   if fieldAuthored is false {
     ret FieldProvenance { source: FieldSource.defaulted, authoredText: "" }
   }
-  if authored.readable is false {
-    # Authored, but a nested value this module does not compare.
+  if authored.readable and sameValueText(live: liveText, authored: authored.text) {
     ret FieldProvenance { source: FieldSource.authored, authoredText: "" }
   }
-  if sameValueText(live: liveText, authored: authored.text) {
+  let decoded: AuthoredValue = decodedFieldValue(
+    sourceWorld: sourceWorld
+    nodeId: nodeId
+    component: component
+    field: field
+  )
+  if decoded.readable and sameValueText(live: liveText, authored: decoded.text) {
+    if authored.readable {
+      ret FieldProvenance { source: FieldSource.resolved, authoredText: "{authored.text}" }
+    }
     ret FieldProvenance { source: FieldSource.authored, authoredText: "" }
   }
-  ret FieldProvenance { source: FieldSource.overridden, authoredText: "{authored.text}" }
+  var sourceText: String = "authored value"
+  if authored.readable {
+    sourceText = "{authored.text}"
+  }
+  ret FieldProvenance { source: FieldSource.overridden, authoredText: own sourceText }
 }
 
 # The tag shown after the value. An OVERRIDDEN field names what the author
-# wrote, so the two states the task cares about cannot be confused: a value
-# that replaced an authored one reads `was 0`, a value nothing authored reads
-# `computed`. An untouched authored value says nothing — the common case
-# should be the quiet one.
+# wrote. A decoded token reads `from spaceS`; a later mutation reads `changed
+# from spaceS`. An untouched authored value says nothing — the common case is
+# the quiet one.
 func fieldSourceTag(provenance: view FieldProvenance) ret String {
+  if provenance.source is FieldSource.resolved {
+    ret "from {provenance.authoredText}"
+  }
   if provenance.source is FieldSource.overridden {
-    ret "was {provenance.authoredText}"
+    ret "changed from {provenance.authoredText}"
   }
   if provenance.source is FieldSource.computed {
     ret "computed"

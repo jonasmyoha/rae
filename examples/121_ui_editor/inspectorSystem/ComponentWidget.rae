@@ -198,6 +198,7 @@ func addWidgetRow(
 func tableWidgetRows(
   T: type
   world: view UiWorld
+  sourceWorld: view UiWorld
   table: view ComponentTable(T)
   selection: view List(EntityId)
   name: view String
@@ -262,6 +263,7 @@ func tableWidgetRows(
       # pure field-walking and provenance layers on top.
       let tag: String = fieldSourceTag(provenance: fieldProvenance(
         scene: scene
+        sourceWorld: sourceWorld
         nodeId: firstNodeId
         component: name
         field: field
@@ -286,6 +288,7 @@ func tableWidgetRows(
 # table of the world — no dispatch, no list of components anywhere.
 func componentWidgetRows(
   world: view UiWorld
+  sourceWorld: view UiWorld
   selection: view List(EntityId)
   name: view String
   scene: view Scene
@@ -299,6 +302,7 @@ func componentWidgetRows(
     if typeName(table) is name {
       tableWidgetRows(
         world: world
+        sourceWorld: sourceWorld
         table: table
         selection: selection
         name: name

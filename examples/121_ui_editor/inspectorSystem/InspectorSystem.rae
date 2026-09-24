@@ -27,6 +27,7 @@ open ecs/Entity
 open ecs/ComponentTable
 open ui/UiSystems
 open ui/Scene
+open ui/SceneWriter
 open inspectorSystem/NodeQuery
 open inspectorSystem/RectWidget
 open inspectorSystem/RectEdit
@@ -40,6 +41,10 @@ const treeIndentPerLevel: Float = 12.0
 type InspectorSystem {
   outlineFors: ComponentTable(OutlineFor)
   marqueeBands: ComponentTable(MarqueeBand)
+  # The document freshly decoded with the active theme. Rebuilt once per
+  # successful load, then reused by every inspector selection to distinguish
+  # authored tokens from values a runtime system actually changed.
+  sourceWorld: UiWorld
   hovered: EntityId
   # The ACTIVE node: the one the outline follows, the inspector describes and
   # the arrow keys walk from. Always a member of `selection` (or none).
@@ -116,6 +121,7 @@ func createInspectorSystem(world: mod UiWorld) ret InspectorSystem {
   ret InspectorSystem {
     outlineFors: ComponentTable.create(OutlineFor)
     marqueeBands: ComponentTable.create(MarqueeBand)
+    sourceWorld: createUiWorld()
     hovered: noEntity()
     selected: noEntity()
     selection: List.create(EntityId, cap: 8)
@@ -708,6 +714,8 @@ func inspectorAfterLoad(
   setRect: view String
   scene: view Scene
 ) {
+  let sourceWorld: UiWorld = freshDecodeOf(world: world, uiSystems: uiSystems, scene: scene)
+  inspectorSystem.sourceWorld = own sourceWorld
   let sceneRoot: EntityId = documentSceneRoot(world: world, pageRoot: pageRoot)
   inspectorSystem.hovered = noEntity()
   var target: EntityId = noEntity()
