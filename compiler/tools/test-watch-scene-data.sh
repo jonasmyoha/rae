@@ -42,7 +42,11 @@ func main() {
 RAE
 
 LOG="$WORK/watch.log"
-( cd "$WORK" && RAE_FORMAT=off "$BIN" watch Main.rae > "$LOG" 2>&1 ) &
+# `exec`: the subshell BECOMES the watcher, so $! is the watcher's own pid and
+# the cleanup trap stops it. Without it $! was the subshell's pid, the trap
+# killed only that, and every run left a `rae watch` spinning in a temp dir
+# forever (41 had piled up, each at 1-2% CPU).
+( cd "$WORK" && RAE_FORMAT=off exec "$BIN" watch Main.rae > "$LOG" 2>&1 ) &
 WATCH_PID=$!
 
 wait_for() {  # wait_for <pattern> <seconds>
