@@ -20,6 +20,7 @@ open ui/EventLoop
 open ui/SceneLoader
 open ui/Pipeline
 open ui/inputSystem/InputSystem
+open ui/buttonSystem/ButtonHoverFade
 open ui/listViewSystem/ListViewSystem
 open ui/animationSystem/EffectSystems
 open ui/renderSystem/RenderSystem
@@ -213,7 +214,7 @@ func openProjectScene(app: mod App, index: view Int) {
   }
 }
 
-# The six effect systems in schedule order; true while any is live.
+# The hover fade and the six effect systems in schedule order; true while any is live.
 func effectSystems(
   app: mod App
   deltaTime: view Float
@@ -221,6 +222,10 @@ func effectSystems(
   input: view UiInput
 ) ret Bool {
   var live: Bool = false
+  # Hover glows fade in and out; live only while one is still moving.
+  if buttonHoverFadeUpdate(world: app.world, uiSystems: app.uiSystems, deltaTime: deltaTime) {
+    live = true
+  }
   if animFramesSystem(world: app.world, uiSystems: app.uiSystems, deltaTime: deltaTime) {
     live = true
   }
@@ -361,6 +366,7 @@ func runApp(app: mod App) ret Int {
     area: editArea
     script: app.testWheel
   )
+  runTestHover(world: app.world, uiSystems: app.uiSystems, nodeId: app.testHover)
   # The scripted hooks above may have changed the selection AFTER the boot
   # layout, and the loop's own list/layout pass is gated on `changed`, which
   # a scripted hook does not set. Run them once more here so the re-bound

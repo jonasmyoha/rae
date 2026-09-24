@@ -60,8 +60,29 @@ type HeroTransitionSystem {
 
 # The button system (buttonSystem/): the per-entity pointer state it derives
 # (hovered / pressed) — its style swap and hover scale read it from here.
+# #729: per-entity pointer interaction state, maintained by the input system
+# (InputSystem/updateUiInput). `hovered` = the pointer is over this entity;
+# `pressed` = the press that is currently down started on this entity. The pointer
+# POSITION and the action-event queue stay singleton on `UiInput` (a pointer is one
+# device — that is not per-entity state), but WHICH entity is hovered/pressed is,
+# so it lives here as a component render/style systems can read directly instead of
+# threading a single hovered/pressed EntityId through every call.
+type Interaction {
+  hovered: Bool
+  pressed: Bool
+}
+
+# How far a node's hover paint (a hover `Shadow`) has faded in: 0 at rest, 1
+# fully hovered. Runtime state the ButtonSystem seeds and eases
+# (buttonHoverFadeUpdate) so a glow fades in and out instead of switching on the
+# frame the pointer arrives; never authored.
+type HoverFade {
+  amount: Float
+}
+
 type ButtonSystem {
   interactions: ComponentTable(Interaction)
+  hoverFades: ComponentTable(HoverFade)
 }
 
 type UiSystems {
@@ -96,7 +117,10 @@ func createUiSystems() ret UiSystems {
       carouselStates: ComponentTable.create(CarouselState)
     }
     heroTransition: HeroTransitionSystem { heroTransitions: ComponentTable.create(HeroTransition) }
-    button: ButtonSystem { interactions: ComponentTable.create(Interaction) }
+    button: ButtonSystem {
+      interactions: ComponentTable.create(Interaction)
+      hoverFades: ComponentTable.create(HoverFade)
+    }
   }
 }
 
@@ -118,4 +142,5 @@ func clearUiSystemsEntity(uiSystems: mod UiSystems, entity: view EntityId) {
   componentRemove(this: uiSystems.animation.carouselStates, entity: entity)
   componentRemove(this: uiSystems.heroTransition.heroTransitions, entity: entity)
   componentRemove(this: uiSystems.button.interactions, entity: entity)
+  componentRemove(this: uiSystems.button.hoverFades, entity: entity)
 }

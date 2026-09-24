@@ -277,7 +277,11 @@ type Shadow {
   color: RgbaColor
   hasColor: Bool = false
   centered: Bool = false
+  # Hover: `hoverOnly` shows the shadow only under the pointer (at `opacity`);
+  # a `hoverOpacity` above 0 keeps it at `opacity` at rest and brightens it to
+  # `hoverOpacity` under the pointer. The ButtonSystem fades between the two.
   hoverOnly: Bool = false
+  hoverOpacity: Float = 0.0
 }
 
 type Opacity {
@@ -496,18 +500,6 @@ type ScrollDrag {
   d0: Float
   d1: Float
   d2: Float
-}
-
-# #729: per-entity pointer interaction state, maintained by the input system
-# (InputSystem/updateUiInput). `hovered` = the pointer is over this entity;
-# `pressed` = the press that is currently down started on this entity. The pointer
-# POSITION and the action-event queue stay singleton on `UiInput` (a pointer is one
-# device — that is not per-entity state), but WHICH entity is hovered/pressed is,
-# so it lives here as a component render/style systems can read directly instead of
-# threading a single hovered/pressed EntityId through every call.
-type Interaction {
-  hovered: Bool
-  pressed: Bool
 }
 
 # Stable widget metadata for data-oriented UI updates. These components

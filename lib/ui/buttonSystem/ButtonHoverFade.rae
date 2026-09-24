@@ -1,0 +1,92 @@
+# ButtonHoverFade — the button system's hover FADE (buttonSystem/): a hover
+# `Shadow` (hoverOnly, or a hoverOpacity above its resting opacity) fades in
+# while the pointer is over its node and out when it leaves, instead of
+# switching on and off in one frame. The painter reads the `HoverFade` amount
+# this eases; an app that never runs this system keeps the old instant switch.
+#
+# Returns true while any fade is still moving, so the app's loop keeps
+# rendering for the ~0.15 s it takes and then goes back to its idle wait: a
+# settled fade costs no frames.
+open ui/Ecs
+open ui/UiSystems
+open ui/Components
+open ui/buttonSystem/ButtonSystem
+open ecs/Entity
+open ecs/ComponentTable
+
+# Seconds a full fade (rest -> hovered or back) takes.
+const hoverFadeSeconds: Float = 0.15
+
+func shadowReactsToHover(shadow: view Shadow) ret Bool {
+  ret shadow.hoverOnly or shadow.hoverOpacity > 0.0
+}
+
+func buttonHoverFadeUpdate(
+  world: view UiWorld
+  uiSystems: mod UiSystems
+  deltaTime: view Float
+) ret Bool {
+  # An idle loop's first tick can carry a long delta; cap it so a fade that
+  # starts after a wait still shows its first frames instead of snapping.
+  var frameDt: Float = deltaTime
+  if frameDt > 0.05 {
+    frameDt = 0.05
+  }
+  if frameDt < 0.0 {
+    frameDt = 0.0
+  }
+  let step: Float = frameDt / hoverFadeSeconds
+  var animating: Bool = false
+  let n: Int = componentCount(this: world.shadows)
+  loop var i: Int = 0, i < n, ++i {
+    let entity: EntityId = componentEntityAt(this: world.shadows, i: i)
+    if shadowReactsToHover(shadow: componentGet(this: world.shadows, entity: entity)) {
+      var target: Float = 0.0
+      if entityHovered(world: world, uiSystems: uiSystems, entity: entity) {
+        target = 1.0
+      }
+      if componentHas(this: uiSystems.button.hoverFades, entity: entity) is false {
+        let rest: HoverFade = { amount: 0.0 }
+        componentSet(this: uiSystems.button.hoverFades, entity: entity, data: rest)
+      }
+      let current: Float = componentGet(this: uiSystems.button.hoverFades, entity: entity).amount
+      if current is not target {
+        var next: Float = current + step
+        if target < current {
+          next = current - step
+          if next < target {
+            next = target
+          }
+        } else if next > target {
+          next = target
+        }
+        # Three 1/3 steps sum to 0.99999994: snap, or the fade asks for a frame
+        # it cannot show.
+        if next - target < 0.001 and target - next < 0.001 {
+          next = target
+        }
+        let fade: mod HoverFade => componentMod(this: uiSystems.button.hoverFades, entity: entity)
+        fade.amount = next
+        # Every step changed what is drawn, the last one included.
+        animating = true
+      }
+    }
+  }
+  ret animating
+}
+
+# The hover mix a Shadow paints with: the eased fade when the ButtonSystem runs
+# one for `entity`, else the instant hovered / not-hovered switch.
+func hoverFadeAmount(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entity: view EntityId
+) ret Float {
+  if componentHas(this: uiSystems.button.hoverFades, entity: entity) {
+    ret componentGet(this: uiSystems.button.hoverFades, entity: entity).amount
+  }
+  if entityHovered(world: world, uiSystems: uiSystems, entity: entity) {
+    ret 1.0
+  }
+  ret 0.0
+}
