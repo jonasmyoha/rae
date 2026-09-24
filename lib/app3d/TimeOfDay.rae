@@ -1,0 +1,69 @@
+# TimeOfDay — the simulated clock the 3D examples' sky runs on: an hour and a
+# date that advance with wall time, roll the date at midnight and the year at
+# New Year. Pure arithmetic over lib/Calendar, deliberately free of any UI:
+# the settings dialog (app3d/SettingsDialog) OWNS one and decides WHEN it runs
+# (paused, animation off, the slider being dragged), and a test of the clock
+# itself compiles this module and Calendar, not the whole UI and renderer.
+
+open Calendar
+
+# A whole day in one minute. Fast enough to see dawn and dusk without waiting,
+# slow enough that the sun does not strobe.
+const timeOfDayDaySeconds: Float = 60.0
+
+# The June solstice, so a scene at the Helsinki default opens with the sun
+# actually up: at this latitude the December sun reaches 6 degrees, which is a
+# legitimate but very dark first impression for an example.
+const timeOfDayDefaultDayOfYear: Int = 172
+
+const timeOfDayDefaultYear: Int = 1995
+
+type TimeOfDay {
+  # 0 <= hour < 24, local solar time.
+  hour: Float
+  # The date, which is what makes seasons: declination swings noon elevation at
+  # Helsinki between 6.4 and 53.3 degrees over the year.
+  dayOfYear: Int
+  # The year has NO effect on the sun — the declination fit repeats annually. It
+  # is here because a clock that runs for long enough should roll a year over
+  # rather than silently restart, and because watching it tick is a small
+  # pleasure. lib/Calendar gets the leap years right, so 29 February arrives.
+  year: Int
+}
+
+func createTimeOfDay(hour: view Float) ret TimeOfDay {
+  ret TimeOfDay { hour: hour, dayOfYear: timeOfDayDefaultDayOfYear, year: timeOfDayDefaultYear }
+}
+
+# Advance the clock by `deltaTime` seconds of wall time. Returns true when the
+# hour actually moved. A non-positive delta is refused: time never runs
+# backwards on a bad clock reading.
+#
+# The whole delta is integrated, however large: a caller must not cap it, or
+# every slow frame loses simulated time (111 and 112 drifted apart that way,
+# test 599). Midnight rolls the DATE, and the date rolls the YEAR — a loop, not
+# one subtraction, so a stall longer than a day still lands on the right date.
+func timeOfDayAdvance(timeOfDay: mod TimeOfDay, deltaTime: view Float) ret Bool {
+  if deltaTime <= 0.0 {
+    ret false
+  }
+  var h: Float = timeOfDay.hour + deltaTime * 24.0 / timeOfDayDaySeconds
+  var rollYear: Int = timeOfDay.year
+  var rollDay: Int = timeOfDay.dayOfYear
+  loop h >= 24.0 {
+    h = h - 24.0
+    advanceOneDay(year: rollYear, dayOfYear: rollDay)
+  }
+  timeOfDay.year = rollYear
+  timeOfDay.dayOfYear = rollDay
+  if h is timeOfDay.hour {
+    ret false
+  }
+  timeOfDay.hour = h
+  ret true
+}
+
+# The date the clock is on.
+func timeOfDayDate(timeOfDay: view TimeOfDay) ret CalendarDate {
+  ret dateFromDayOfYear(year: timeOfDay.year, dayOfYear: timeOfDay.dayOfYear)
+}
