@@ -1,0 +1,22 @@
+# Even unused templates must obey lexical loop context.
+func invalid(T: type, value: view T) {
+  loop let field: view any in fields(value) {
+    if true {
+      continue
+    }
+    match 1 {
+      case 1 {
+        break
+      }
+    }
+    unsafe {
+      continue
+    }
+    defer {
+      break
+    }
+  }
+}
+
+func main() {
+}

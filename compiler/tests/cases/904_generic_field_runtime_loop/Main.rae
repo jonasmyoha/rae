@@ -1,0 +1,29 @@
+type Pair {
+  first: Int
+  second: Int
+}
+
+func visit(T: type, value: view T) ret Int {
+  var count: Int = 0
+  loop let field: view any in fields(value) {
+    loop var i: Int = 0, i < 3, ++i {
+      if i is 0 {
+        continue
+      }
+      count = count + 1
+      break
+    }
+  }
+  loop var i: Int = 0, i < 2, ++i {
+    loop let field: view any in fields(value) {
+      count = count + 1
+      continue
+    }
+  }
+  ret count
+}
+
+func main() {
+  let pair: Pair = { first: 1, second: 2 }
+  log(visit(value: pair))
+}
