@@ -337,10 +337,10 @@ func deserStyleOverride(
       fallback: 0.0
     )
   }
-  let colorIdx: Int = Json.field(doc: doc, this: val, key: "color")
-  if colorIdx >= 0 {
+  let colorValueIndex: Int = Json.field(doc: doc, this: val, key: "color")
+  if colorValueIndex >= 0 {
     so.hasColor = true
-    let cv: JsonValue = Json.jsonValueAt(doc: doc, idx: colorIdx)
+    let cv: JsonValue = Json.jsonValueAt(doc: doc, idx: colorValueIndex)
     so.color = deserRgba(
       doc: doc
       theme: theme
