@@ -237,6 +237,26 @@ static bool expr_is_string_typed(CFuncContext* ctx, const AstExpr* e) {
     return false;
 }
 
+
+// #32786425: emit `expr` — a member chain whose innermost object is `base`, a
+// call — with `base` evaluated once into statement temporary `tmp_id` (raised
+// `_set` so the statement's drop list releases it) and the fields read off
+// that temporary.
+static void emit_member_chain_on_temp(CFuncContext* ctx, const AstExpr* expr, const AstExpr* base,
+                                      int tmp_id, FILE* out) {
+    if (expr == base) {
+        fprintf(out, "((__rae_stmt_tmp%d = (", tmp_id);
+        emit_expr(ctx, base, out, PREC_LOWEST, false, false);
+        fprintf(out, ")), (__rae_stmt_tmp%d_set = 1), __rae_stmt_tmp%d)", tmp_id, tmp_id);
+        return;
+    }
+    const AstTypeRef* obj_tr = infer_expr_type_ref(ctx, expr->as.member.object);
+    bool use_arrow = expr->as.member.object != base && obj_tr && (obj_tr->is_view || obj_tr->is_mod);
+    emit_member_chain_on_temp(ctx, expr->as.member.object, base, tmp_id, out);
+    Str fld = c_struct_field_c_name(expr->as.member.member, type_ref_is_c_struct(ctx, obj_tr));
+    fprintf(out, "%s%.*s", use_arrow ? "->" : ".", (int)fld.len, fld.data);
+}
+
 bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_prec, bool is_lvalue, bool suppress_deref) {
   if (!expr) return true;
   switch (expr->kind) {
@@ -883,6 +903,37 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                 fprintf(out, "%.*s_%.*s", (int)expr->as.member.object->as.ident.len, expr->as.member.object->as.ident.data,
                     (int)expr->as.member.member.len, expr->as.member.member.data);
                 break;
+            }
+        }
+        // #32786425: a field chain read off a call's OWNED result —
+        // `componentGet(this: t, entityId: e).rows.length` — used to leak that
+        // whole result (a deep copy) every time: nothing ever dropped it. When
+        // the chain ends in a plain value (no heap: Int, Float, Bool, enum...),
+        // capture the call in a statement temporary, read the field off it,
+        // and let the statement's drop list release it afterwards. A chain
+        // that ends in a heap value (a String / List field) is left as it
+        // was: dropping the owner after the statement would leave the read
+        // value dangling, which is worse than the leak.
+        if (!is_lvalue && ctx->stmt_temps) {
+            const AstExpr* base = expr->as.member.object;
+            while (base->kind == AST_EXPR_MEMBER) base = base->as.member.object;
+            const AstTypeRef* result_tr = infer_expr_type_ref(ctx, expr);
+            const AstTypeRef* base_tr = (base->kind == AST_EXPR_CALL || base->kind == AST_EXPR_METHOD_CALL)
+                ? infer_expr_type_ref(ctx, base) : NULL;
+            bool result_is_plain = result_tr && !result_tr->is_view && !result_tr->is_mod && !result_tr->is_opt
+                && !str_eq_cstr(get_base_type_name(result_tr), "String")
+                && !type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, result_tr, 0);
+            bool base_is_owned = base_tr && !base_tr->is_view && !base_tr->is_mod && !base_tr->is_opt
+                && type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, base_tr, 0);
+            if (result_is_plain && base_is_owned) {
+                const AstTypeRef* base_concrete = base_tr;
+                if (ctx->generic_params && ctx->generic_args)
+                    base_concrete = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, base_tr);
+                int tmp_id = register_stmt_temp(ctx, base_concrete, true);
+                if (tmp_id >= 0) {
+                    emit_member_chain_on_temp(ctx, expr, base, tmp_id, out);
+                    break;
+                }
             }
         }
         const AstTypeRef* obj_tr = infer_expr_type_ref(ctx, expr->as.member.object);

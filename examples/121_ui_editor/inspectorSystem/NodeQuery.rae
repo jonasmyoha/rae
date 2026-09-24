@@ -65,7 +65,7 @@ func nodeIdOf(world: view UiWorld, entityId: view EntityId) ret String {
     ret ""
   }
   if componentHas(this: world.nodeIdComponents, entityId: entityId) {
-    ret "{componentGet(this: world.nodeIdComponents, entityId: entityId).id}"
+    ret "{componentView(this: world.nodeIdComponents, entityId: entityId).id}"
   }
   ret "entity {entityId.index}"
 }
@@ -80,7 +80,7 @@ func findNodeByIdIn(
     ret noEntity()
   }
   if componentHas(this: world.nodeIdComponents, entityId: entityId) {
-    if componentGet(this: world.nodeIdComponents, entityId: entityId).id is nodeId {
+    if componentView(this: world.nodeIdComponents, entityId: entityId).id is nodeId {
       ret entityId
     }
   }
