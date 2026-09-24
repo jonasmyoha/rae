@@ -167,6 +167,146 @@ func runTestClicks(
   )
 }
 
+# The exact transformed screen rectangle the marquee compares, with a small
+# exterior pad so floating-point equality at an edge cannot make the fixture
+# platform-sensitive.
+func testMarqueeRectOf(uiSystems: view UiSystems, entity: view EntityId) ret MarqueeRect {
+  let transform: WorldTransform2D = componentGet(
+    this: uiSystems.transform2d.worldTransforms
+    entity: entity
+  )
+  let computed: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: entity)
+  let exact: MarqueeRect = marqueeRectBetween(
+    x1: transform.position.x
+    y1: transform.position.y
+    x2: transform.position.x + computed.size.x * transform.scale.x
+    y2: transform.position.y + computed.size.y * transform.scale.y
+  )
+  ret MarqueeRect { x: exact.x - 2.0, y: exact.y - 2.0, w: exact.w + 4.0, h: exact.h + 4.0 }
+}
+
+# One headless marquee step: `[modifier:]nodeId`, `small`, or
+# `preview:nodeId`. Node steps exercise begin/move/finish and the shared
+# selection funnel; preview leaves the authored band visible for its reference
+# image. Empty-press gating itself stays in inspectorUpdate, while the existing
+# raw empty-canvas click fixture pins the below-threshold deselect behaviour.
+func runTestMarquee(
+  inspectorSystem: mod InspectorSystem
+  world: mod UiWorld
+  uiSystems: view UiSystems
+  sceneRoot: view EntityId
+  step: view String
+) {
+  var mode: SelectMode = SelectMode.replace
+  var rest: String = "{step}"
+  var preview: Bool = false
+  let colon: Int = step.indexOf(sub: ":")
+  if colon > 0 {
+    let head: String = step.sub(start: 0, len: colon)
+    if head is "preview" {
+      preview = true
+    } else {
+      mode = selectModeFromName(name: head)
+    }
+    rest = step.sub(start: colon + 1, len: step.length() - colon - 1)
+  }
+  if rest is "small" or step is "small" {
+    beginMarquee(
+      inspectorSystem: inspectorSystem
+      world: world
+      x: 1.0
+      y: 1.0
+      mode: mode
+    )
+    finishMarquee(
+      inspectorSystem: inspectorSystem
+      world: world
+      uiSystems: uiSystems
+      sceneRoot: sceneRoot
+      x: 3.0
+      y: 3.0
+    )
+    ret
+  }
+  let target: EntityId = findNodeByIdIn(world: world, entity: sceneRoot, nodeId: rest)
+  if isNone(this: target) {
+    log("[ui-editor] marquee: no node named {rest}")
+    ret
+  }
+  let band: MarqueeRect = testMarqueeRectOf(uiSystems: uiSystems, entity: target)
+  beginMarquee(
+    inspectorSystem: inspectorSystem
+    world: world
+    x: band.x
+    y: band.y
+    mode: mode
+  )
+  moveMarquee(
+    inspectorSystem: inspectorSystem
+    world: world
+    x: band.x + band.w
+    y: band.y + band.h
+  )
+  if preview {
+    # Hold only the authored pixels for the screenshot fixture. A live
+    # half-gesture with the button up is cancelled by inspectorUpdate.
+    inspectorSystem.marqueeTracking = false
+    inspectorSystem.marqueeDragging = false
+  } else {
+    finishMarquee(
+      inspectorSystem: inspectorSystem
+      world: world
+      uiSystems: uiSystems
+      sceneRoot: sceneRoot
+      x: band.x + band.w
+      y: band.y + band.h
+    )
+  }
+}
+
+func runTestMarquees(
+  inspectorSystem: mod InspectorSystem
+  world: mod UiWorld
+  uiSystems: view UiSystems
+  chromeSystem: mod ChromeSystem
+  pageRoot: view EntityId
+  script: view String
+  scene: view Scene
+) {
+  if script.length() is 0 {
+    ret
+  }
+  let sceneRoot: EntityId = documentSceneRoot(world: world, pageRoot: pageRoot)
+  let steps: List(String) = script.split(sep: " ")
+  loop let step: view String in steps {
+    let trimmed: String = step.trim()
+    if trimmed.length() is 0 {
+      continue
+    }
+    runTestMarquee(
+      inspectorSystem: inspectorSystem
+      world: world
+      uiSystems: uiSystems
+      sceneRoot: sceneRoot
+      step: trimmed
+    )
+    log(
+      "[ui-editor] marquee {trimmed} -> {selectionNodeIds(
+        inspectorSystem: inspectorSystem
+        world: world
+      )}"
+    )
+  }
+  logInspectorPanel(
+    inspectorSystem: inspectorSystem
+    world: world
+    uiSystems: uiSystems
+    chromeSystem: chromeSystem
+    sceneRoot: sceneRoot
+    scene: scene
+  )
+}
+
 # Replay one tree-row click. Everything from the entity onward is the live
 # path — the same `applySelect` with the same `treeSelectMode` mapping, so
 # the range, the anchor and the markers are the real ones. Only the row's
@@ -247,7 +387,7 @@ func runTestTreeClicks(
       if wantCollapsed {
         nodeId = trimmed.sub(start: 9, len: trimmed.length() - 9)
       }
-      var at: Int = 0 - 1
+      var at: Int = -1
       loop var i: Int = 0, i < inspectorSystem.collapsedNodeIds.length, ++i {
         if let name: String = inspectorSystem.collapsedNodeIds.copyAt(index: i) {
           if name is nodeId {
