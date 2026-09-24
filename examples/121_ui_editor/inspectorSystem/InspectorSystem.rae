@@ -29,6 +29,7 @@ open ui/UiSystems
 open ui/Scene
 open inspectorSystem/NodeQuery
 open inspectorSystem/RectWidget
+open inspectorSystem/RectEdit
 open inspectorSystem/ComponentEdit
 
 # Tree rows: one design unit of indent per depth level.
@@ -77,6 +78,12 @@ type InspectorSystem {
   # mutually exclusive — one keyboard cannot feed both.
   treeFilter: String
   treeFilterFocused: Bool
+  # The Rect group's text input (#44133406): whether a field has focus, which
+  # one, what has been typed so far, and the W/H aspect lock.
+  rectEditing: Bool
+  rectField: RectField
+  rectDraft: String
+  rectLocked: Bool
   # Collapsed rows, by NODE ID rather than entity or row index (#72481430).
   # The tree rebuilds constantly and a reload recreates every entity, so an
   # entity handle or an index would lose the state on the next keystroke;
@@ -111,6 +118,10 @@ func createInspectorSystem(world: mod UiWorld) ret InspectorSystem {
     filterFocused: false
     treeFilter: ""
     treeFilterFocused: false
+    rectEditing: false
+    rectField: RectField.x
+    rectDraft: ""
+    rectLocked: false
     treeEntities: List.create(EntityId, cap: 64)
   }
 }
@@ -209,6 +220,15 @@ func placeOutlines(
 # Per frame: hover from the pointer, click / arrows / Esc on the selection,
 # tree-row actions, then the outlines and panels. Returns whether anything
 # the frame shows changed.
+# Is the keyboard feeding a text input right now? While it is, keys are TEXT,
+# not commands: the bare-letter panel shortcuts in App.rae, the arrows, `T`,
+# `U`, `/`, `F` and the deselecting Esc must all stand down. One question with
+# one answer, asked at the START of the frame, so the keystroke that ENDS an
+# edit (Enter, Esc) is still spent on the edit and not also on a command.
+func keyboardCaptured(inspectorSystem: view InspectorSystem) ret Bool {
+  ret inspectorSystem.filterFocused or inspectorSystem.treeFilterFocused or inspectorSystem.rectEditing
+}
+
 func inspectorUpdate(
   inspectorSystem: mod InspectorSystem
   world: mod UiWorld
@@ -221,6 +241,81 @@ func inspectorUpdate(
 ) ret Bool {
   let sceneRoot: EntityId = documentSceneRoot(world: world, pageRoot: pageRoot)
   var changed: Bool = false
+  # Asked ONCE, before anything this frame can change it (see keyboardCaptured).
+  let captured: Bool = keyboardCaptured(inspectorSystem: inspectorSystem)
+  # --- The Rect group's text input (#44133406) -----------------------------
+  # Rect-row clicks first: focusing a field and toggling the lock.
+  var rectAction: Bool = false
+  let rectActionCount: Int = uiActionCount(world: world)
+  loop var a: Int = 0, a < rectActionCount, ++a {
+    let actionId: String = uiActionAt(world: world, index: a)
+    if actionId is "rectLock" {
+      rectAction = true
+      rectToggleLock(inspectorSystem: inspectorSystem)
+      changed = true
+    }
+    if actionId.startsWith(prefix: "rectFocus:") {
+      rectAction = true
+      if let field: RectField = rectFieldFromName(
+        name: actionId.sub(start: 10, len: actionId.length() - 10)
+      ) {
+        # Clicking a DIFFERENT field blurs the current one, and a blur commits
+        # — the same as Tab, just not in tab order.
+        if inspectorSystem.rectEditing and inspectorSystem.rectField is not field {
+          rectCommit(inspectorSystem: inspectorSystem, world: world, uiSystems: uiSystems)
+        }
+        if inspectorSystem.rectEditing is false or inspectorSystem.rectField is not field {
+          rectFocus(inspectorSystem: inspectorSystem, field: field)
+        }
+        changed = true
+      }
+    }
+  }
+  # A press ANYWHERE else is a blur, and a blur commits. It runs before the
+  # canvas and tree clicks below, so the draft lands on the selection it was
+  # typed for — not on whatever that click is about to select.
+  if input.pointer.pressed and inspectorSystem.rectEditing and rectAction is false {
+    rectEnter(inspectorSystem: inspectorSystem, world: world, uiSystems: uiSystems)
+    changed = true
+  }
+  # Keys, only while a field has focus. Digits live on key1..key9 then key0.
+  if inspectorSystem.rectEditing and rectAction is false {
+    let digits: String = "123456789"
+    loop var d: Int = 0, d < 9, ++d {
+      if Sdl3.isKeyPressed(key: Keys.key1 + d) {
+        rectTypeChar(inspectorSystem: inspectorSystem, character: digits.sub(start: d, len: 1))
+        changed = true
+      }
+    }
+    if Sdl3.isKeyPressed(key: Keys.key0) {
+      rectTypeChar(inspectorSystem: inspectorSystem, character: "0")
+      changed = true
+    }
+    if Sdl3.isKeyPressed(key: Keys.keyMinus) {
+      rectTypeChar(inspectorSystem: inspectorSystem, character: "-")
+      changed = true
+    }
+    if Sdl3.isKeyPressed(key: Keys.keyPeriod) {
+      rectTypeChar(inspectorSystem: inspectorSystem, character: ".")
+      changed = true
+    }
+    if Sdl3.isKeyPressed(key: Keys.keyBackspace) {
+      rectBackspace(inspectorSystem: inspectorSystem)
+      changed = true
+    }
+    if Sdl3.isKeyPressed(key: Keys.keyTab) {
+      rectTab(inspectorSystem: inspectorSystem, world: world, uiSystems: uiSystems)
+      changed = true
+    }
+    if Sdl3.isKeyPressed(key: Keys.keyEnter) {
+      rectEnter(inspectorSystem: inspectorSystem, world: world, uiSystems: uiSystems)
+      changed = true
+    }
+    if Sdl3.isKeyPressed(key: Keys.keyEscape) {
+      rectEscape(inspectorSystem: inspectorSystem)
+      changed = true
+    }
+  }
   # Only the edit area reaches the document: a pointer over a chrome panel
   # (which may cover part of the document) hovers and selects nothing.
   # Whether the pointer is over the CANVAS this frame. It gates both halves of
@@ -350,7 +445,7 @@ func inspectorUpdate(
     }
   }
   # Select parent, from the inspector's own row or the `U` key (#23728694).
-  if Sdl3.isKeyPressed(key: Keys.keyU) and inspectorSystem.filterFocused is false {
+  if Sdl3.isKeyPressed(key: Keys.keyU) and captured is false {
     if selectParentOfSelection(
       inspectorSystem: inspectorSystem
       world: world
@@ -375,12 +470,12 @@ func inspectorUpdate(
   # The component filter (#57156455). `/` focuses it; while focused the letter
   # keys type into it instead of firing the editor's panel shortcuts, which is
   # why App.rae gates those on `filterFocused`.
-  if Sdl3.isKeyPressed(key: Keys.keySlash) {
+  if Sdl3.isKeyPressed(key: Keys.keySlash) and captured is false {
     inspectorSystem.filterFocused = true
     inspectorSystem.treeFilterFocused = false
     changed = true
   }
-  if Sdl3.isKeyPressed(key: Keys.keyF) and inspectorSystem.filterFocused is false {
+  if Sdl3.isKeyPressed(key: Keys.keyF) and captured is false {
     inspectorSystem.treeFilterFocused = true
     changed = true
   }
@@ -439,11 +534,14 @@ func inspectorUpdate(
   if Sdl3.isKeyDown(key: Keys.keyLShift) or Sdl3.isKeyDown(key: Keys.keyRShift) {
     keyboardMode = SelectMode.range
   }
-  if Sdl3.isKeyPressed(key: Keys.keyEscape) {
+  # Esc deselects and the arrows walk the tree ONLY when no text input owns
+  # the keyboard: Esc inside a filter or a Rect field ends that edit, and must
+  # not also throw the selection away.
+  if Sdl3.isKeyPressed(key: Keys.keyEscape) and captured is false {
     selection = noEntity()
     keyboardMode = SelectMode.replace
   }
-  if isNone(this: selection) is false {
+  if isNone(this: selection) is false and captured is false {
     if Sdl3.isKeyPressed(key: Keys.keyUp) {
       selection = siblingOf(
         world: world
@@ -470,7 +568,7 @@ func inspectorUpdate(
       selection = firstChildOf(world: world, entity: selection)
     }
   }
-  if Sdl3.isKeyPressed(key: Keys.keyT) {
+  if Sdl3.isKeyPressed(key: Keys.keyT) and captured is false {
     toggleEditorPanel(chromeSystem: chromeSystem, world: world, kind: EditorPanelKind.tree)
     changed = true
   }
@@ -584,11 +682,13 @@ func inspectorAfterLoad(
   # edit goes to every selected entity, which is the part a single-selection
   # inspector would have let us skip.
   if setRect.length() > 0 {
-    let written: Int = applyRectEdit(
+    # Through the SAME functions the keys call (RectEdit.rae), not straight
+    # into applyRectField — so the gate proves the keyboard's commit path.
+    let written: Int = runRectScript(
+      inspectorSystem: inspectorSystem
       world: world
       uiSystems: uiSystems
-      selection: inspectorSystem.selection
-      edit: setRect
+      script: setRect
     )
     let afterLine: String = rectWidgetLine(
       world: world
