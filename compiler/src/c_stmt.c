@@ -2183,10 +2183,27 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             fprintf(out, "  ");
             // Check if assigning to a mod ref variable (e.g. rx = 10 where rx is rae_Mod_Int64)
             const AstTypeRef* target_tr = infer_expr_type_ref(ctx, stmt->as.assign_stmt.target);
+            if (target_tr && ctx->generic_params && ctx->generic_args)
+                target_tr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
+                                                 ctx->generic_args, target_tr);
             bool is_mod_ref = target_tr && target_tr->is_mod;
             bool is_prim_mod_ref = is_mod_ref && is_primitive_type(get_base_type_name(target_tr));
 
-            if (is_prim_mod_ref) {
+            if (is_prim_mod_ref && str_eq_cstr(get_base_type_name(target_tr), "String")) {
+                const AstExpr* rhs = stmt->as.assign_stmt.value;
+                bool fresh = rhs && (rhs->kind == AST_EXPR_CALL
+                    || rhs->kind == AST_EXPR_METHOD_CALL || rhs->kind == AST_EXPR_INTERP
+                    || rhs->kind == AST_EXPR_BINARY || rhs->kind == AST_EXPR_OWN);
+                int temporary = ctx->temp_counter++;
+                // Copy/take before dropping: source may alias destination.
+                fprintf(out, "{ rae_String __asg%d = %s(", temporary,
+                        fresh ? "rae_string_pool_take" : "rae_string_copy");
+                emit_expr(ctx, rhs, out, PREC_LOWEST, false, false);
+                fprintf(out, "); rae_String* __asgp%d = ", temporary);
+                emit_expr(ctx, stmt->as.assign_stmt.target, out, PREC_LOWEST, true, true);
+                fprintf(out, ".ptr; rae_string_drop(__asgp%d); *__asgp%d = __asg%d; }",
+                        temporary, temporary, temporary);
+            } else if (is_prim_mod_ref) {
                 // *rx.ptr = value
                 fprintf(out, "*");
                 emit_expr(ctx, stmt->as.assign_stmt.target, out, PREC_LOWEST, true, true);

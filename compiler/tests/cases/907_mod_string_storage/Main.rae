@@ -1,0 +1,41 @@
+type Label {
+  text: String
+}
+
+func assignString(destination: mod String, source: view String) {
+  destination = source
+}
+
+func forward(destination: mod String, source: view String) {
+  assignString(destination: destination, source: source)
+}
+
+func appendSuffix(destination: mod String) {
+  destination = "{destination}+suffix"
+}
+
+func assignGeneric(T: type, destination: mod T, source: view T) {
+  destination = source
+}
+
+func main() {
+  var keep: String = "old"
+  var label: Label = { text: "initial" }
+  loop var i: Int = 0, i < 3, ++i {
+    let source: String = "value{i}"
+    assignString(destination: keep, source: source)
+    forward(destination: label.text, source: source)
+    log(source)
+  }
+  log(keep)
+  log(label.text)
+  assignString(destination: keep, source: keep)
+  assignString(destination: label.text, source: label.text)
+  appendSuffix(destination: keep)
+  log(keep)
+  log(label.text)
+  keep.assignString(source: "method")
+  log(keep)
+  assignGeneric(destination: keep, source: label.text)
+  log(keep)
+}
