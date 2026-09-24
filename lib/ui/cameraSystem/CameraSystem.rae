@@ -10,28 +10,37 @@ open ui/Ecs
 open ui/Components
 open ecs/Entity
 open ecs/ComponentTable
+open ecs/Query
 open ui/UiSystems
+
+func cameraFxMatches(fx: view TransformFx, zoom: view Float) ret Bool {
+  ret fx.scaleX is zoom and fx.scaleY is zoom and fx.pivot.x is 0.0 and fx.pivot.y is 0.0
+}
 
 func cameraSystem(world: mod UiWorld, uiSystems: mod UiSystems) {
   let count: Int = componentCount(this: world.cameras)
   loop var i: Int = 0, i < count, ++i {
     let entityId: EntityId = componentEntityAt(this: world.cameras, i: i)
-    let camera: Camera2D = componentDataAt(this: world.cameras, i: i)
-    var fx: TransformFx = defaultTransformFx()
-    if componentHas(this: world.transforms, entityId: entityId) {
-      fx = componentGet(this: world.transforms, entityId: entityId)
+    let camera: view Camera2D => queryViewAt(table: world.cameras, denseIndex: i)
+    if componentHas(this: world.transforms, entityId: entityId) is false {
+      componentSet(this: world.transforms, entityId: entityId, data: defaultTransformFx())
     }
-    if fx.scaleX is not camera.zoom or fx.scaleY is not camera.zoom or fx.pivot.x is not 0.0 or fx.pivot.y is not 0.0 {
+    # Compared through a view; written through componentMod only on a change,
+    # because componentMod marks the table changed and this runs every frame.
+    if cameraFxMatches(
+      fx: componentView(this: world.transforms, entityId: entityId)
+      zoom: camera.zoom
+    ) is false {
+      let fx: mod TransformFx => componentMod(this: world.transforms, entityId: entityId)
       fx.scaleX = camera.zoom
       fx.scaleY = camera.zoom
       fx.pivot = Vec2 { x: 0.0, y: 0.0 }
       fx.anchor = Vec2 { x: 0.0, y: 0.0 }
-      componentSet(this: world.transforms, entityId: entityId, data: fx)
     }
     var current: Vec2 = { x: 0.0, y: 0.0 }
     var hasOffset: Bool = false
     if componentHas(this: uiSystems.transform2d.runtimeOffsets, entityId: entityId) {
-      current = componentGet(this: uiSystems.transform2d.runtimeOffsets, entityId: entityId).delta
+      current = componentView(this: uiSystems.transform2d.runtimeOffsets, entityId: entityId).delta
       hasOffset = true
     }
     if hasOffset is false or current.x is not camera.offsetX or current.y is not camera.offsetY {

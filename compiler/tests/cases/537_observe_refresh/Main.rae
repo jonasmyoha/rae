@@ -96,7 +96,7 @@ func revisionOf(reg: view Registry, obs: view Observe) ret Int {
     }
     # component-instance kind
     if componentHas(this: reg.playback.nowPlaying, entityId: obs.entityId) {
-      let t: Track = componentGet(this: reg.playback.nowPlaying, entityId: obs.entityId)
+      let t: view Track => componentView(this: reg.playback.nowPlaying, entityId: obs.entityId)
       ret t.revision
     }
     ret 0

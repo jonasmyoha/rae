@@ -6,6 +6,7 @@ open ui/Ecs
 import ui/Components
 open ecs/Entity
 open ecs/ComponentTable
+open ecs/Query
 open ui/UiSystems
 
 # Is the SearchField on `page` blank? "" (no field on the page) counts as
@@ -26,7 +27,7 @@ func emptyStateSystem(world: mod UiWorld, uiSystems: view UiSystems, state: view
   var i: Int = 0
   loop i < n {
     let entityId: EntityId = componentEntityAt(this: world.emptyStates, i: i)
-    let binding: EmptyState = componentDataAt(this: world.emptyStates, i: i)
+    let binding: view EmptyState => queryViewAt(table: world.emptyStates, denseIndex: i)
     var empty: Bool = historyEmpty
     if binding.kind is EmptyStateKind.search {
       empty = searchQueryBlankOnPage(
@@ -37,7 +38,7 @@ func emptyStateSystem(world: mod UiWorld, uiSystems: view UiSystems, state: view
     }
     var current: Bool = true
     if componentHas(this: world.actives, entityId: entityId) {
-      current = componentGet(this: world.actives, entityId: entityId).value
+      current = componentView(this: world.actives, entityId: entityId).value
     }
     if current is not empty {
       let flag: Active = { value: empty }

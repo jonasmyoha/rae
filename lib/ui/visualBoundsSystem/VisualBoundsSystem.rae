@@ -13,6 +13,7 @@ import ui/IconCodepoints
 import ui/ThemeResolved
 open ui/Ecs
 open ecs/ComponentTable
+open ecs/Query
 open ui/UiSystems
 
 # Recompute + cache `e`'s bounds when the (text, size, icon-font) key
@@ -26,7 +27,7 @@ func refreshVisualBounds(
   res: view Gpu2dUi
 ) {
   if componentHas(this: world.visualBounds, entityId: entityId) {
-    let cur: VisualBounds = componentGet(this: world.visualBounds, entityId: entityId)
+    let cur: view VisualBounds => componentView(this: world.visualBounds, entityId: entityId)
     if cur.measuredIcon is isIcon {
       if cur.measuredSize is sizePx {
         if cur.measuredText is text {
@@ -74,7 +75,7 @@ func visualBoundsSystem(world: mod UiWorld, uiSystems: view UiSystems, res: view
   var i: Int = 0
   loop i < n {
     let entityId: EntityId = componentEntityAt(this: world.texts, i: i)
-    let t: Text = componentDataAt(this: world.texts, i: i)
+    let t: view Text => queryViewAt(table: world.texts, denseIndex: i)
     if t.text.length() > 0 {
       var size: Float = resolveTextSize(theme: res.theme, styleId: t.styleId)
       # Measure at the OVERRIDDEN size (#236) so centering bounds match paint.
@@ -97,7 +98,7 @@ func visualBoundsSystem(world: mod UiWorld, uiSystems: view UiSystems, res: view
   i = 0
   loop i < n {
     let entityId: EntityId = componentEntityAt(this: world.sprites, i: i)
-    let sp: Sprite = componentDataAt(this: world.sprites, i: i)
+    let sp: view Sprite => queryViewAt(table: world.sprites, denseIndex: i)
     if sp.textureKey.startsWith(prefix: matPrefix) {
       let nameLen: Int = sp.textureKey.length() - matPrefix.length()
       let name: String = sp.textureKey.sub(start: matPrefix.length(), len: nameLen)
@@ -129,7 +130,10 @@ func iconGlyphSize(
   if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) is false {
     ret 0.0
   }
-  let cr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entityId: entityId)
+  let cr: view ComputedRect => componentView(
+    this: uiSystems.layout.computedRects
+    entityId: entityId
+  )
   let hoverMul: Float = g2dHoverMul(world: world, entityId: entityId)
   let drawW: Float = cr.size.x * hoverMul
   let drawH: Float = cr.size.y * hoverMul
@@ -152,7 +156,7 @@ func measureTextForLayout(world: mod UiWorld, uiSystems: mod UiSystems, res: vie
   var i: Int = 0
   loop i < n {
     let entityId: EntityId = componentEntityAt(this: world.texts, i: i)
-    let t: Text = componentDataAt(this: world.texts, i: i)
+    let t: view Text => queryViewAt(table: world.texts, denseIndex: i)
     if t.text.length() > 0 {
       var size: Float = resolveTextSize(theme: res.theme, styleId: t.styleId)
       if componentHas(this: world.styleOverrides, entityId: entityId) {
@@ -171,7 +175,7 @@ func measureTextForLayout(world: mod UiWorld, uiSystems: mod UiSystems, res: vie
       let measuredH: Float = size
       var write: Bool = true
       if componentHas(this: uiSystems.layout.measuredTexts, entityId: entityId) {
-        let cur: MeasuredText = componentGet(
+        let cur: view MeasuredText => componentView(
           this: uiSystems.layout.measuredTexts
           entityId: entityId
         )

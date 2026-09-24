@@ -45,7 +45,7 @@ func attach(
   componentSet(this: uiSystems.hierarchy.parents, entityId: child, data: pl)
   var kids: List(EntityId) = List.create(EntityId, cap: 1)
   if componentHas(this: world.childrens, entityId: parent) {
-    let existing: Children = componentGet(this: world.childrens, entityId: parent)
+    let existing: view Children => componentView(this: world.childrens, entityId: parent)
     loop var i: Int = 0, i < existing.ids.length, ++i {
       if let e: EntityId = existing.ids.copyAt(index: i) {
         kids.add(value: e)
@@ -63,7 +63,10 @@ func dump(
   entityId: view EntityId
   label: view String
 ) {
-  let cr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entityId: entityId)
+  let cr: view ComputedRect => componentView(
+    this: uiSystems.layout.computedRects
+    entityId: entityId
+  )
   log("{label} cr=({cr.position.x},{cr.position.y},{cr.size.x},{cr.size.y})")
 }
 

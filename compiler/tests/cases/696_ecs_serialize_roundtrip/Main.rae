@@ -108,9 +108,9 @@ func main() {
   log("vel count: {componentCount(this: dst.velocities)}")
   log("cache count: {componentCount(this: dst.caches)}")
 
-  let p1: Position = componentGet(this: dst.positions, entityId: e1)
-  let p2: Position = componentGet(this: dst.positions, entityId: e2)
-  let v2: Velocity = componentGet(this: dst.velocities, entityId: e2)
+  let p1: view Position => componentView(this: dst.positions, entityId: e1)
+  let p2: view Position => componentView(this: dst.positions, entityId: e2)
+  let v2: view Velocity => componentView(this: dst.velocities, entityId: e2)
   log("e1 pos: {p1.x},{p1.y}")
   log("e2 pos: {p2.x},{p2.y}")
   log("e2 vel: {v2.dx},{v2.dy}")

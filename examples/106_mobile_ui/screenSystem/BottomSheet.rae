@@ -30,6 +30,7 @@ import ui/Scene
 open ui/SceneInstance
 open ecs/Entity
 open ecs/ComponentTable
+open ecs/Query
 open ecs/hierarchySystem/HierarchySystem
 open ui/layoutSystem/LayoutSystem
 open ui/Theme
@@ -135,7 +136,7 @@ func bottomSheetSystem(
     let root: EntityId = componentEntityAt(this: world.bottomSheets, i: r)
     var currentActive: Bool = true
     if componentHas(this: world.actives, entityId: root) {
-      currentActive = componentGet(this: world.actives, entityId: root).value
+      currentActive = componentView(this: world.actives, entityId: root).value
     }
     if currentActive is not sheet.visible {
       let active: Active = { value: sheet.visible }
@@ -150,7 +151,7 @@ func bottomSheetSystem(
   var p: Int = 0
   loop p < np {
     let panel: EntityId = componentEntityAt(this: world.sheetPanels, i: p)
-    let binding: SheetPanel = componentDataAt(this: world.sheetPanels, i: p)
+    let binding: view SheetPanel => queryViewAt(table: world.sheetPanels, denseIndex: p)
     let pad: Insets = entityPadding(world: world, uiSystems: uiSystems, entityId: panel)
     let layout: Layout = entityLayout(world: world, entityId: panel)
     let rowCount: Int = sheet.actions.length

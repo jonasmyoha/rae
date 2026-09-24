@@ -197,7 +197,7 @@ func listViewSceneBindingCurrent(
     if componentHas(this: world.actives, entityId: entityId) is false {
       ret false
     }
-    let cur: Active = componentGet(this: world.actives, entityId: entityId)
+    let cur: view Active => componentView(this: world.actives, entityId: entityId)
     let trueStr: String = "true"
     ret cur.value is (value is trueStr)
   }
@@ -206,7 +206,7 @@ func listViewSceneBindingCurrent(
     if componentHas(this: world.heroWidgets, entityId: entityId) is false {
       ret false
     }
-    let cur: HeroWidget = componentGet(this: world.heroWidgets, entityId: entityId)
+    let cur: view HeroWidget => componentView(this: world.heroWidgets, entityId: entityId)
     ret cur.key is value
   }
   let widgetIdName: String = "WidgetId"
@@ -214,7 +214,7 @@ func listViewSceneBindingCurrent(
     if componentHas(this: world.widgetIds, entityId: entityId) is false {
       ret false
     }
-    let cur: WidgetId = componentGet(this: world.widgetIds, entityId: entityId)
+    let cur: view WidgetId => componentView(this: world.widgetIds, entityId: entityId)
     if binding.fieldName is "id" {
       ret cur.id is value
     }
@@ -226,7 +226,7 @@ func listViewSceneBindingCurrent(
     if componentHas(this: world.cornerRadiuses, entityId: entityId) is false {
       ret wanted <= 0.0
     }
-    let cur: CornerRadius = componentGet(this: world.cornerRadiuses, entityId: entityId)
+    let cur: view CornerRadius => componentView(this: world.cornerRadiuses, entityId: entityId)
     ret cur.radius is wanted
   }
   let widgetStateName: String = "WidgetState"
@@ -234,7 +234,7 @@ func listViewSceneBindingCurrent(
     if componentHas(this: world.widgetStates, entityId: entityId) is false {
       ret false
     }
-    let cur: WidgetState = componentGet(this: world.widgetStates, entityId: entityId)
+    let cur: view WidgetState => componentView(this: world.widgetStates, entityId: entityId)
     let trueStr: String = "true"
     let wanted: Bool = value is trueStr
     if binding.fieldName is "enabled" {
@@ -299,7 +299,7 @@ func listViewSceneBindingCurrent(
     if componentHas(this: world.paddings, entityId: entityId) is false {
       ret false
     }
-    let cur: Padding = componentGet(this: world.paddings, entityId: entityId)
+    let cur: view Padding => componentView(this: world.paddings, entityId: entityId)
     let wanted: Float = value.toFloat()
     if binding.fieldName is "l" {
       ret cur.insets.l is wanted
@@ -370,7 +370,7 @@ func listViewBuildRow(
   # instance — the host positions the instance.)
   var rowW: Float = 0.0
   if componentHas(this: world.rects, entityId: listEntityId) {
-    rowW = componentGet(this: world.rects, entityId: listEntityId).size.x
+    rowW = componentView(this: world.rects, entityId: listEntityId).size.x
   }
   let r: Rect = { position: { x: 0.0, y: 0.0 }, size: { x: rowW, y: lv.itemHeight } }
   componentSet(this: world.rects, entityId: rowRoot, data: r)
@@ -420,7 +420,7 @@ func listViewApplyRow(
   unsafe {
     var moved: Bool = true
     if componentHas(this: world.offsets, entityId: rowRoot) {
-      let cur: Offset = componentGet(this: world.offsets, entityId: rowRoot)
+      let cur: view Offset => componentView(this: world.offsets, entityId: rowRoot)
       moved = cur.delta.y is not topY
     }
     if moved {
@@ -507,17 +507,24 @@ func listViewSyncEntity(
   scenes: view SceneRegistry
 ) {
   unsafe {
-    let lv: ListView = componentGet(this: world.listViews, entityId: entityId)
+    # A real COPY: this pass destroys surplus rows and builds new ones, which
+    # adds and removes rows across the world's tables and can move the ListView
+    # table's storage, while the list's definition is used all the way through.
+    # A view of the row would not survive that.
+    var lv: ListView = ListView.default()
+    if let listView: ListView = componentCopy(this: world.listViews, entityId: entityId) {
+      lv = own listView
+    }
     let sceneRow: Bool = listViewUsesScene(lv: lv, scenes: scenes)
     var scrollY: Float = 0.0
     if componentHas(this: world.scrollStates, entityId: entityId) {
-      scrollY = componentGet(this: world.scrollStates, entityId: entityId).y
+      scrollY = componentView(this: world.scrollStates, entityId: entityId).y
     }
     # The scroll is a runtime translation of the whole list (transform-time,
     # never a relayout); the rows sit at their content offsets below.
     var scrolled: Bool = true
     if componentHas(this: uiSystems.transform2d.runtimeOffsets, entityId: entityId) {
-      let cur: RuntimeOffset = componentGet(
+      let cur: view RuntimeOffset => componentView(
         this: uiSystems.transform2d.runtimeOffsets
         entityId: entityId
       )
@@ -529,7 +536,7 @@ func listViewSyncEntity(
     }
     var count: Int = 0
     if componentHas(this: world.listViewDatas, entityId: entityId) {
-      let data: ListViewData = componentGet(this: world.listViewDatas, entityId: entityId)
+      let data: view ListViewData => componentView(this: world.listViewDatas, entityId: entityId)
       count = data.rows.length
     }
 
@@ -597,7 +604,7 @@ func listViewSyncEntity(
     if count is 0 {
       ret
     }
-    let data: ListViewData = componentGet(this: world.listViewDatas, entityId: entityId)
+    let data: view ListViewData => componentView(this: world.listViewDatas, entityId: entityId)
     let pitch: Float = lv.itemHeight + lv.itemGap
     var s: Int = 0
     loop s < target and s < rows2.length {
@@ -666,16 +673,16 @@ func listViewFlowRowSize(
   # rows exist for that first layout pass and are resized on the next frame.
   var containerW: Float = 0.0
   if componentHas(this: uiSystems.layout.computedRects, entityId: listEntityId) {
-    containerW = componentGet(this: uiSystems.layout.computedRects, entityId: listEntityId).size.x
+    containerW = componentView(this: uiSystems.layout.computedRects, entityId: listEntityId).size.x
   }
   if containerW <= 0.0 and componentHas(this: world.rects, entityId: listEntityId) {
-    containerW = componentGet(this: world.rects, entityId: listEntityId).size.x
+    containerW = componentView(this: world.rects, entityId: listEntityId).size.x
   }
   if containerW <= 0.0 {
     containerW = world.layoutW
   }
   if componentHas(this: world.paddings, entityId: listEntityId) {
-    let pad: Padding = componentGet(this: world.paddings, entityId: listEntityId)
+    let pad: view Padding => componentView(this: world.paddings, entityId: listEntityId)
     containerW = containerW - pad.insets.l - pad.insets.r
   }
   var w: Float = lv.itemWidth
@@ -684,7 +691,7 @@ func listViewFlowRowSize(
     var cols: Int = 1
     var gap: Float = 0.0
     if componentHas(this: world.layouts, entityId: listEntityId) {
-      let layout: Layout = componentGet(this: world.layouts, entityId: listEntityId)
+      let layout: view Layout => componentView(this: world.layouts, entityId: listEntityId)
       if layout.columns > 1 {
         cols = layout.columns
       }
@@ -762,7 +769,7 @@ func listViewSyncFlow(
   scenes: view SceneRegistry
 ) {
   unsafe {
-    let lv: ListView = componentGet(this: world.listViews, entityId: entityId)
+    let lv: view ListView => componentView(this: world.listViews, entityId: entityId)
     var count: Int = 0
     if componentHas(this: world.listViewDatas, entityId: entityId) {
       count = componentView(this: world.listViewDatas, entityId: entityId).rows.length
@@ -794,7 +801,7 @@ func listViewSyncFlow(
     let distinct: List(String) = listViewDistinctNodeIds(lv: lv)
     var d: Int = 0
     loop d < count {
-      let data: ListViewData = componentGet(this: world.listViewDatas, entityId: entityId)
+      let data: view ListViewData => componentView(this: world.listViewDatas, entityId: entityId)
       let row: ListViewRow = rae_ext_rae_buf_get(buf: data.rows.data, index: d)
       let key: String = listViewRowKeyOf(lv: lv, row: row, index: d)
       let sceneId: String = listViewRowSceneId(lv: lv, row: row)
@@ -804,7 +811,7 @@ func listViewSyncFlow(
       loop e < existing.length and isNone(this: rowRoot) {
         if reused.copyAtFallback(index: e, fallback: true) is false {
           let candidate: EntityId = rae_ext_rae_buf_get(buf: existing.data, index: e)
-          let identity: ListViewRowKey = componentGet(
+          let identity: view ListViewRowKey => componentView(
             this: world.listViewRowKeys
             entityId: candidate
           )
@@ -833,10 +840,10 @@ func listViewSyncFlow(
         )
       } else if componentHas(this: world.rects, entityId: rowRoot) {
         # The container may have been resized since the row was built.
-        let cur: Rect = componentGet(this: world.rects, entityId: rowRoot)
-        if cur.size.x is not size.x or cur.size.y is not size.y {
-          let r: Rect = { position: cur.position, size: { x: size.x, y: size.y } }
-          componentSet(this: world.rects, entityId: rowRoot, data: r)
+        let currentSize: Vec2 = componentView(this: world.rects, entityId: rowRoot).size
+        if currentSize.x is not size.x or currentSize.y is not size.y {
+          let rect: mod Rect => componentMod(this: world.rects, entityId: rowRoot)
+          rect.size = Vec2 { x: size.x, y: size.y }
         }
       }
       ordered.add(value: rowRoot)
@@ -971,7 +978,7 @@ func listViewSystem(world: mod UiWorld, uiSystems: view UiSystems, scenes: view 
     var e: Int = 0
     loop e < entities.length {
       let entityId: EntityId = rae_ext_rae_buf_get(buf: entities.data, index: e)
-      let lv: ListView = componentGet(this: world.listViews, entityId: entityId)
+      let lv: view ListView => componentView(this: world.listViews, entityId: entityId)
       if lv.mode is ListViewMode.flow {
         listViewSyncFlow(
           world: world

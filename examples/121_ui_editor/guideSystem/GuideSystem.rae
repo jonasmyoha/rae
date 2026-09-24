@@ -17,6 +17,7 @@ open ui/SceneInstance
 open ui/BindingComponents
 open ecs/Entity
 open ecs/ComponentTable
+open ecs/Query
 open ui/UiSystems
 
 const guidesScenePath: String = "examples/121_ui_editor/assets/scenes/chrome/Guides.raescene"
@@ -94,7 +95,7 @@ func setGuideRects(
   let count: Int = componentCount(this: guideSystem.guideRects)
   loop var i: Int = 0, i < count, ++i {
     let entityId: EntityId = componentEntityAt(this: guideSystem.guideRects, i: i)
-    let guide: GuideRect = componentDataAt(this: guideSystem.guideRects, i: i)
+    let guide: view GuideRect => queryViewAt(table: guideSystem.guideRects, denseIndex: i)
     if guide.kind is not kind {
       continue
     }

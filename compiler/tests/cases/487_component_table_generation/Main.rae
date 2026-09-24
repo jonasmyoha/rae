@@ -47,7 +47,8 @@ func main() {
   )
   log("after-3-sets={componentTableGeneration(Rect, this: tab)}")
 
-  let got: Rect = componentGet(Rect, this: tab, entityId: e1)
+  # A read (componentView) must not bump the generation.
+  let gotX: Float = componentView(Rect, this: tab, entityId: e1).position.x
   log("get-no-bump={componentTableGeneration(Rect, this: tab)}")
 
   # mod-borrow bumps eagerly even if caller only reads (borrow scoped in a helper, #814)

@@ -97,7 +97,13 @@ func cameraOf(cameraSystem: view CameraSystem, world: view UiWorld) ret Camera2D
   ) is false {
     ret Camera2D { zoom: 1.0, offsetX: 0.0, offsetY: 0.0 }
   }
-  ret componentGet(this: world.cameras, entityId: cameraSystem.guidesRoot)
+  # A real COPY: callers treat the camera as a value (they compute the next
+  # camera from it and write it back through writeCamera), and the fallback
+  # above has no row a view could point at.
+  if let camera: Camera2D = componentCopy(this: world.cameras, entityId: cameraSystem.guidesRoot) {
+    ret camera
+  }
+  ret Camera2D { zoom: 1.0, offsetX: 0.0, offsetY: 0.0 }
 }
 
 # Write the cameraSystem: the guides root gets it as is; the document root gets it

@@ -64,7 +64,7 @@ func createUiInput() pub ret UiInput {
 
 func uiEntityActive(world: view UiWorld, entityId: view EntityId) ret Bool {
   if componentHas(this: world.actives, entityId: entityId) {
-    let active: Active = componentGet(this: world.actives, entityId: entityId)
+    let active: view Active => componentView(this: world.actives, entityId: entityId)
     ret active.value
   }
   ret true
@@ -86,14 +86,17 @@ func uiPointInEntity(
   if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) is false {
     ret false
   }
-  let wt: WorldTransform2D = componentGet(
+  let wt: view WorldTransform2D => componentView(
     this: uiSystems.transform2d.worldTransforms
     entityId: entityId
   )
   if worldVisualOf(world: world, uiSystems: uiSystems, entityId: entityId).visible is false {
     ret false
   }
-  let cr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entityId: entityId)
+  let cr: view ComputedRect => componentView(
+    this: uiSystems.layout.computedRects
+    entityId: entityId
+  )
   if x < wt.position.x {
     ret false
   }
@@ -231,7 +234,7 @@ func uiPointInScrollWindow(
   y: view Float
 ) ret Bool {
   if componentHas(this: uiSystems.hierarchy.parents, entityId: entityId) {
-    let parent: EntityId = componentGet(this: uiSystems.hierarchy.parents, entityId: entityId).parent
+    let parent: EntityId = componentView(this: uiSystems.hierarchy.parents, entityId: entityId).parent
     if componentHas(this: uiSystems.layout.computedRects, entityId: parent) {
       ret uiPointInEntity(
         world: world
@@ -272,7 +275,7 @@ func uiWheelRouteEntity(
     # A clipping node hides whatever of its subtree lies outside it: rows
     # scrolled out of a panel must not catch the wheel over the panel above.
     if inside is false and componentHas(this: world.overflows, entityId: entityId) {
-      if componentGet(this: world.overflows, entityId: entityId).mode is OverflowMode.clip {
+      if componentView(this: world.overflows, entityId: entityId).mode is OverflowMode.clip {
         ret UiWheelRoute { blocked: false, target: noEntity() }
       }
     }
@@ -409,7 +412,10 @@ func updateUiInput(input: mod UiInput, world: mod UiWorld, uiSystems: mod UiSyst
   if released {
     if isNone(this: input.hoveredEntityId) is false {
       if input.hoveredEntityId is input.pressedEntityId {
-        let click: OnClick = componentGet(this: world.onClicks, entityId: input.hoveredEntityId)
+        let click: view OnClick => componentView(
+          this: world.onClicks
+          entityId: input.hoveredEntityId
+        )
         eventSend(
           this: world.uiActions
           value: UiAction { entityId: input.hoveredEntityId, actionId: click.actionId }

@@ -830,7 +830,7 @@ func applyDebugAnchor(world: view UiWorld, debug: mod DebugSystem) ret Bool {
   loop i < n {
     let e: EntityId = componentEntityAt(this: anchors, i: i)
     if componentHas(this: world.rects, entityId: e) {
-      let r: Rect = componentGet(this: world.rects, entityId: e)
+      let r: view Rect => componentView(this: world.rects, entityId: e)
       debug.buttonX = r.position.x
       debug.buttonY = r.position.y
       if r.size.x > 0.0 {

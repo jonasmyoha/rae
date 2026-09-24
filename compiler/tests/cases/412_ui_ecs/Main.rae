@@ -4,6 +4,12 @@ open ui/Registry
 open ecs/Entity
 open ecs/ComponentTable
 
+open ecs/Query
+
+func rectText(rect: view Rect) ret String {
+  ret "{rect.position.x},{rect.position.y} {rect.size.x}x{rect.size.y}"
+}
+
 func main() {
   let world: UiWorld = createUiWorld()
   log("alive at boot: {aliveCount(world: world)}")
@@ -34,30 +40,29 @@ func main() {
   log("e2 hasRect: {componentHas(this: world.rects, entityId: e2)}")
   log("e3 hasRect: {componentHas(this: world.rects, entityId: e3)}")
 
-  let got1: Rect = componentGet(this: world.rects, entityId: e1)
-  log("e1 rect: {got1.position.x},{got1.position.y} {got1.size.x}x{got1.size.y}")
-  let got3: Rect = componentGet(this: world.rects, entityId: e3)
-  log("e3 rect: {got3.position.x},{got3.position.y} {got3.size.x}x{got3.size.y}")
+  # Read through views passed as arguments: a view BINDING would still be live
+  # at the replace and remove below, which the borrow rule rejects.
+  log("e1 rect: {rectText(rect: componentView(this: world.rects, entityId: e1))}")
+  log("e3 rect: {rectText(rect: componentView(this: world.rects, entityId: e3))}")
 
   # Replace e1's rect.
   let r1b: Rect = { position: { x: 10.0, y: 20.0 }, size: { x: 30.0, y: 40.0 } }
   componentSet(this: world.rects, entityId: e1, data: r1b)
   log("rects.count after replace: {componentCount(this: world.rects)}")
-  let got1b: Rect = componentGet(this: world.rects, entityId: e1)
-  log("e1 rect after replace: {got1b.position.x},{got1b.position.y} {got1b.size.x}x{got1b.size.y}")
+  log("e1 rect after replace: {rectText(rect: componentView(this: world.rects, entityId: e1))}")
 
   # Add a Text component to e2.
   let t2: Text = { text: "hello", styleId: "h1", wrapWidthMode: WrapWidthMode.nodeWidth }
   componentSet(this: world.texts, entityId: e2, data: t2)
   log("texts.count: {componentCount(this: world.texts)}")
-  let gotT: Text = componentGet(this: world.texts, entityId: e2)
+  let gotT: view Text => componentView(this: world.texts, entityId: e2)
   log("e2 text: '{gotT.text}' style={gotT.styleId}")
 
   # Add an Active=false to e3 (default is true at construction time;
   # this overrides).
   let a3: Active = { value: false }
   componentSet(this: world.actives, entityId: e3, data: a3)
-  let gotA: Active = componentGet(this: world.actives, entityId: e3)
+  let gotA: view Active => componentView(this: world.actives, entityId: e3)
   log("e3 active: {gotA.value}")
 
   # Iterate the rects table.
@@ -65,7 +70,7 @@ func main() {
   var i: Int = 0
   loop i < rectN {
     let ent: EntityId = componentEntityAt(this: world.rects, i: i)
-    let r: Rect = componentDataAt(this: world.rects, i: i)
+    let r: view Rect => queryViewAt(table: world.rects, denseIndex: i)
     log("  rect[{i}] entity={ent.index} {r.size.x}x{r.size.y}")
     i = i + 1
   }
@@ -86,9 +91,9 @@ func main() {
     observedRevision: 7
   }
   componentSet(this: world.dataDependencies, entityId: e2, data: dep)
-  let gotWid: WidgetId = componentGet(this: world.widgetIds, entityId: e2)
-  let gotState: WidgetState = componentGet(this: world.widgetStates, entityId: e2)
-  let gotDep: DataDependency = componentGet(this: world.dataDependencies, entityId: e2)
+  let gotWid: view WidgetId => componentView(this: world.widgetIds, entityId: e2)
+  let gotState: view WidgetState => componentView(this: world.widgetStates, entityId: e2)
+  let gotDep: view DataDependency => componentView(this: world.dataDependencies, entityId: e2)
   log("e2 widget: {gotWid.id} kind={gotWid.kind} enabled={gotState.enabled}")
   log(
     "e2 dependency: playback={gotDep.resource is DataResourceId.playback} isPlaying={gotDep.field is DataFieldId.isPlaying} rev={gotDep.observedRevision}"

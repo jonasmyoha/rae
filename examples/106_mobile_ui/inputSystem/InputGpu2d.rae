@@ -112,14 +112,17 @@ func pointInEntity(
   if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) is false {
     ret false
   }
-  let wt: WorldTransform2D = componentGet(
+  let wt: view WorldTransform2D => componentView(
     this: uiSystems.transform2d.worldTransforms
     entityId: entityId
   )
   if worldVisualOf(world: world, uiSystems: uiSystems, entityId: entityId).visible is false {
     ret false
   }
-  let cr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entityId: entityId)
+  let cr: view ComputedRect => componentView(
+    this: uiSystems.layout.computedRects
+    entityId: entityId
+  )
   if x < wt.position.x {
     ret false
   }

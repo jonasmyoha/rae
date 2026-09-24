@@ -84,8 +84,11 @@ func dumpEntity(
   entityId: view EntityId
   label: view String
 ) {
-  var cr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entityId: entityId)
-  var wt: WorldTransform2D = componentGet(
+  let cr: view ComputedRect => componentView(
+    this: uiSystems.layout.computedRects
+    entityId: entityId
+  )
+  let wt: view WorldTransform2D => componentView(
     this: uiSystems.transform2d.worldTransforms
     entityId: entityId
   )

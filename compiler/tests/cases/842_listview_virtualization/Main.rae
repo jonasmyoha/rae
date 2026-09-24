@@ -93,7 +93,7 @@ func topRowLabel(world: view UiWorld, listEntityId: view EntityId) ret String {
     if componentHas(this: world.texts, entityId: label) is false {
       ret "(no text)"
     }
-    let t: Text = componentGet(this: world.texts, entityId: label)
+    let t: view Text => componentView(this: world.texts, entityId: label)
     ret "{t.text}"
   }
 }
@@ -130,7 +130,7 @@ func main() {
     let has: Bool = componentHas(this: sceneWorld.listViews, entityId: listNode)
     log("List has ListView: {has}")
     if has {
-      let lv: ListView = componentGet(this: sceneWorld.listViews, entityId: listNode)
+      let lv: view ListView => componentView(this: sceneWorld.listViews, entityId: listNode)
       log(
         "itemHeight: {lv.itemHeight.toInt()} visible: {lv.visibleItemCount} overscan: {lv.overscanRows} bindings: {lv.bindings.length}"
       )

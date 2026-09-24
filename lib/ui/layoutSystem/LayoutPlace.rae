@@ -92,7 +92,10 @@ func placeChildren(
     var ownW: Float = 0.0
     var ownH: Float = 0.0
     if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) {
-      let cr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entityId: entityId)
+      let cr: view ComputedRect => componentView(
+        this: uiSystems.layout.computedRects
+        entityId: entityId
+      )
       ownW = cr.size.x
       ownH = cr.size.y
     }
@@ -578,7 +581,7 @@ func placeStack(
       var alignX: AlignKind = AlignKind.center
       var alignY: AlignKind = AlignKind.center
       if componentHas(this: world.aligns, entityId: cid) {
-        let a: Align = componentGet(this: world.aligns, entityId: cid)
+        let a: view Align => componentView(this: world.aligns, entityId: cid)
         if a.hasX {
           alignX = a.x
         }

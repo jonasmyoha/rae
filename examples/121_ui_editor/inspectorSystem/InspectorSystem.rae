@@ -26,6 +26,7 @@ open ui/SceneBundles
 open app3d/UiShell
 open ecs/Entity
 open ecs/ComponentTable
+open ecs/Query
 open ui/UiSystems
 open ui/Scene
 open ui/SceneInstance
@@ -187,7 +188,7 @@ func placeOutline(
   var changed: Bool = false
   var wasShown: Bool = true
   if componentHas(this: world.actives, entityId: outline) {
-    wasShown = componentGet(this: world.actives, entityId: outline).value
+    wasShown = componentView(this: world.actives, entityId: outline).value
   }
   if wasShown is not show {
     componentSet(this: world.actives, entityId: outline, data: Active { value: show })
@@ -196,15 +197,18 @@ func placeOutline(
   if show is false {
     ret changed
   }
-  let transform: WorldTransform2D = componentGet(
+  let transform: view WorldTransform2D => componentView(
     this: uiSystems.transform2d.worldTransforms
     entityId: target
   )
-  let computed: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entityId: target)
+  let computed: view ComputedRect => componentView(
+    this: uiSystems.layout.computedRects
+    entityId: target
+  )
   let w: Float = computed.size.x * transform.scale.x
   let h: Float = computed.size.y * transform.scale.y
   if componentHas(this: world.rects, entityId: outline) {
-    let current: Rect = componentGet(this: world.rects, entityId: outline)
+    let current: view Rect => componentView(this: world.rects, entityId: outline)
     if current.size.x is not w or current.size.y is not h {
       let rect: mod Rect => componentMod(this: world.rects, entityId: outline)
       rect.size.x = w
@@ -214,7 +218,7 @@ func placeOutline(
   }
   var writeOffset: Bool = true
   if componentHas(this: uiSystems.transform2d.runtimeOffsets, entityId: outline) {
-    let current: Vec2 = componentGet(this: uiSystems.transform2d.runtimeOffsets, entityId: outline).delta
+    let current: Vec2 = componentView(this: uiSystems.transform2d.runtimeOffsets, entityId: outline).delta
     if current.x is transform.position.x and current.y is transform.position.y {
       writeOffset = false
     }
@@ -239,7 +243,7 @@ func placeOutlines(
   var changed: Bool = false
   let count: Int = componentCount(this: inspectorSystem.outlineFors)
   loop var i: Int = 0, i < count, ++i {
-    let tag: OutlineFor = componentDataAt(this: inspectorSystem.outlineFors, i: i)
+    let tag: view OutlineFor => queryViewAt(table: inspectorSystem.outlineFors, denseIndex: i)
     if tag.role is role {
       if placeOutline(
         world: world

@@ -91,14 +91,14 @@ func probe(
     uiSystems: uiSystems
     wheel: -1.0
   )
-  let before: Float = componentGet(this: world.scrollStates, entityId: consumers.content).y
+  let before: Float = componentView(this: world.scrollStates, entityId: consumers.content).y
   updateScrollRoot(
     world: world
     uiSystems: uiSystems
     entityId: consumers.content
     input: input
   )
-  let after: Float = componentGet(this: world.scrollStates, entityId: consumers.content).y
+  let after: Float = componentView(this: world.scrollStates, entityId: consumers.content).y
   let zoom: Float = uiWheelFor(input: input, entityId: consumers.canvas)
   log(
     "{label}: routed {nameOf(entityId: input.wheelTarget, consumers: consumers)} zoom {zoom.toInt()} scroll {before.toInt()}->{after.toInt()}"

@@ -51,23 +51,23 @@ func albumCoverUpdate(
         this: albumCoverSystem.authoredRadii
         entityId: entityId
       ) {
-        let authored: AuthoredRadius = componentGet(
+        let authoredRadius: Float = componentView(
           this: albumCoverSystem.authoredRadii
           entityId: entityId
-        )
+        ).radius
         componentSet(
           this: world.cornerRadiuses
           entityId: entityId
-          data: CornerRadius { radius: authored.radius }
+          data: CornerRadius { radius: authoredRadius }
         )
         componentRemove(this: albumCoverSystem.authoredRadii, entityId: entityId)
       }
     } else if hasRadius {
-      let current: CornerRadius = componentGet(this: world.cornerRadiuses, entityId: entityId)
+      let currentRadius: Float = componentView(this: world.cornerRadiuses, entityId: entityId).radius
       componentSet(
         this: albumCoverSystem.authoredRadii
         entityId: entityId
-        data: AuthoredRadius { radius: current.radius }
+        data: AuthoredRadius { radius: currentRadius }
       )
       componentRemove(this: world.cornerRadiuses, entityId: entityId)
     }

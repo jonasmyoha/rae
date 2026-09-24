@@ -44,17 +44,20 @@ func buttonInteractionMark(
   if isNone(this: entityId) {
     ret
   }
-  var state: Interaction = { hovered: false, pressed: false }
-  if componentHas(this: uiSystems.button.interactions, entityId: entityId) {
-    state = componentGet(this: uiSystems.button.interactions, entityId: entityId)
+  if componentHas(this: uiSystems.button.interactions, entityId: entityId) is false {
+    let cleared: Interaction = { hovered: false, pressed: false }
+    componentSet(this: uiSystems.button.interactions, entityId: entityId, data: cleared)
   }
+  let state: mod Interaction => componentMod(
+    this: uiSystems.button.interactions
+    entityId: entityId
+  )
   if hovered {
     state.hovered = true
   }
   if pressed {
     state.pressed = true
   }
-  componentSet(this: uiSystems.button.interactions, entityId: entityId, data: state)
 }
 
 # Read a per-entity interaction flag (default false when the entity carries no
@@ -67,7 +70,7 @@ func entityHovered(
   if componentHas(this: uiSystems.button.interactions, entityId: entityId) is false {
     ret false
   }
-  ret componentGet(this: uiSystems.button.interactions, entityId: entityId).hovered
+  ret componentView(this: uiSystems.button.interactions, entityId: entityId).hovered
 }
 
 func entityPressed(
@@ -78,5 +81,5 @@ func entityPressed(
   if componentHas(this: uiSystems.button.interactions, entityId: entityId) is false {
     ret false
   }
-  ret componentGet(this: uiSystems.button.interactions, entityId: entityId).pressed
+  ret componentView(this: uiSystems.button.interactions, entityId: entityId).pressed
 }

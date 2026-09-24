@@ -35,28 +35,24 @@ func main() {
   let miss: EntityId = id(v: 99)
   log("has_miss: {componentHas(this: t, entityId: miss)}")
 
-  let g1: Cell = componentGet(this: t, entityId: e1)
-  log("get_e1: {g1.v}")
+  log("get_e1: {componentView(this: t, entityId: e1).v}")
 
   # replace bumps
   componentSet(this: t, entityId: e1, data: Cell { v: 11 })
   log("gen3: {componentTableGeneration(this: t)}")
-  let g1b: Cell = componentGet(this: t, entityId: e1)
-  log("get_e1b: {g1b.v}")
+  log("get_e1b: {componentView(this: t, entityId: e1).v}")
 
   # mod bumps (borrow scoped in a helper, #814)
   setViaMod(t: t, entityId: e2, v: 21)
   log("gen4: {componentTableGeneration(this: t)}")
-  let g2: Cell = componentGet(this: t, entityId: e2)
-  log("get_e2: {g2.v}")
+  log("get_e2: {componentView(this: t, entityId: e2).v}")
 
   # remove bumps; e2 survives the swap-remove of e1
   componentRemove(this: t, entityId: e1)
   log("gen5: {componentTableGeneration(this: t)}")
   log("count_after_remove: {componentCount(this: t)}")
   log("has_e2: {componentHas(this: t, entityId: e2)}")
-  let g2b: Cell = componentGet(this: t, entityId: e2)
-  log("get_e2b: {g2b.v}")
+  log("get_e2b: {componentView(this: t, entityId: e2).v}")
 
   # no-op remove of an absent entity must NOT bump the generation
   componentRemove(this: t, entityId: miss)

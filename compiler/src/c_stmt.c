@@ -2058,7 +2058,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 //       copies the C struct, aliasing y's heap.
                 //     - call to a known extractor: rae_ext_rae_buf_get
                 //       (List/Map slot extraction), valueAt (JsonDoc
-                //       list element), componentGet (ECS component
+                //       list element), componentCopy (ECS component
                 //       table). These return into a value-typed slot
                 //       owned by the first arg's storage.
                 const AstExpr* init = stmt->as.let_stmt.value;

@@ -2,8 +2,9 @@ open ecs/Entity
 open ecs/ComponentTable
 import Sys
 
-# A field read straight off a call's OWNED result — `componentGet(...).rows.length`
-# — must release that result. componentGet returns a deep copy, and nothing ever
+# A field read straight off a call's OWNED result — `componentCopyAtDefault(...).rows.length`
+# — must release that result. It returns a deep copy (componentGet did too, before
+# the componentCopy rename), and nothing ever
 # dropped it, so a per-frame read leaked the whole copy every frame: the UI
 # editor grew ~20 MB per canvas hover sweep through exactly this read in the
 # scroll-root update (#32786425). The C backend now captures the call in a
@@ -42,7 +43,7 @@ func main() {
   let startKb: Int = Sys.processRssKb()
   var total: Int = 0
   loop var i: Int = 0, i < 20000, ++i {
-    total = total + componentGet(this: table, entityId: entityId).rows.length
+    total = total + componentCopyAtDefault(this: table, i: 0).rows.length
   }
   let grewMb: Int = (Sys.processRssKb() - startKb) / 1024
   log("component read total {total}, freed: {grewMb < 40}")
@@ -56,7 +57,7 @@ func main() {
   log("nested read total {nested}, freed: {(Sys.processRssKb() - nestedStart) / 1024 < 40}")
 
   # A chain ending in a String keeps its value: read it, keep it, use it later.
-  let label: String = componentGet(this: table, entityId: entityId).label
-  let interpolated: String = "{componentGet(this: table, entityId: entityId).label}!"
+  let label: String = componentCopyAtDefault(this: table, i: 0).label
+  let interpolated: String = "{componentCopyAtDefault(this: table, i: 0).label}!"
   log("string reads: {label} {interpolated} {makeWrapper(count: 2).inner.label}")
 }

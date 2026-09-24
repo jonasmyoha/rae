@@ -50,7 +50,7 @@ func runTestHover(world: mod UiWorld, uiSystems: mod UiSystems, nodeId: view Str
 # The inspector update runs every loop iteration, and every pointer move wakes
 # the loop, so this is the path hovering drives. The leak it caught was not in
 # the hover logic but in the scroll-root update it runs every call: a deep copy
-# of the hierarchy's whole row data, read as `componentGet(...).rows.length`
+# of the hierarchy's whole row data, read as `componentView(...).rows.length`
 # and never freed (a compiler bug, fixed in the C backend's member emission).
 func runTestHoverCycle(app: mod App, script: view String) {
   if script.length() is 0 {

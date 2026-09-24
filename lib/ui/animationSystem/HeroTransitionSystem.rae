@@ -18,6 +18,7 @@ open ui/Components
 open ui/Layer
 open ecs/Entity
 open ecs/ComponentTable
+open ecs/Query
 open ui/UiSystems
 
 # The `HeroWidget` with `key` under the page `pageId`, or noEntity().
@@ -31,7 +32,7 @@ func findHeroOnPage(
   var i: Int = 0
   loop i < n {
     let entityId: EntityId = componentEntityAt(this: world.heroWidgets, i: i)
-    let hero: HeroWidget = componentDataAt(this: world.heroWidgets, i: i)
+    let hero: view HeroWidget => queryViewAt(table: world.heroWidgets, denseIndex: i)
     if hero.key is key {
       let page: String = pageOf(world: world, uiSystems: uiSystems, entityId: entityId)
       if page is pageId {
@@ -61,11 +62,14 @@ func heroOnScreen(
   uiSystems: view UiSystems
   entityId: view EntityId
 ) ret Bool {
-  let at: WorldTransform2D = componentGet(
+  let at: view WorldTransform2D => componentView(
     this: uiSystems.transform2d.worldTransforms
     entityId: entityId
   )
-  let box: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entityId: entityId)
+  let box: view ComputedRect => componentView(
+    this: uiSystems.layout.computedRects
+    entityId: entityId
+  )
   if at.position.x + box.size.x <= 0.0 or at.position.x >= world.layoutW {
     ret false
   }
@@ -77,7 +81,7 @@ func heroOnScreen(
 
 func heroRadius(world: view UiWorld, entityId: view EntityId) ret Float {
   if componentHas(this: world.cornerRadiuses, entityId: entityId) {
-    ret componentGet(this: world.cornerRadiuses, entityId: entityId).radius
+    ret componentView(this: world.cornerRadiuses, entityId: entityId).radius
   }
   ret 0.0
 }
@@ -146,16 +150,22 @@ func spawnHeroTransition(
   if heroOnScreen(world: world, uiSystems: uiSystems, entityId: source) is false {
     ret false
   }
-  let sourceAt: WorldTransform2D = componentGet(
+  let sourceAt: view WorldTransform2D => componentView(
     this: uiSystems.transform2d.worldTransforms
     entityId: source
   )
-  let sourceBox: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entityId: source)
-  let targetAt: WorldTransform2D = componentGet(
+  let sourceBox: view ComputedRect => componentView(
+    this: uiSystems.layout.computedRects
+    entityId: source
+  )
+  let targetAt: view WorldTransform2D => componentView(
     this: uiSystems.transform2d.worldTransforms
     entityId: target
   )
-  let targetBox: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entityId: target)
+  let targetBox: view ComputedRect => componentView(
+    this: uiSystems.layout.computedRects
+    entityId: target
+  )
   let flight: EntityId = createEntity(world: world)
   let transition: HeroTransition = {
     key: "{key}"
@@ -187,18 +197,11 @@ func spawnHeroTransition(
     h: transition.fromH
     radius: transition.fromRadius
   )
-  if componentHas(this: world.sprites, entityId: source) {
-    let sourceSprite: Sprite = componentGet(this: world.sprites, entityId: source)
-    let sprite: Sprite = {
-      textureKey: "{sourceSprite.textureKey}"
-      tint: sourceSprite.tint
-      tintSlot: "{sourceSprite.tintSlot}"
-      scaleMode: sourceSprite.scaleMode
-      tileScale: sourceSprite.tileScale
-      nineSlice: sourceSprite.nineSlice
-      hasNineSlice: sourceSprite.hasNineSlice
-    }
-    componentSet(this: world.sprites, entityId: flight, data: sprite)
+  # A real COPY: the flight gets its own Sprite in the SAME table, and adding a
+  # row for a new entity may move the table's storage, so a view of the
+  # source's row cannot be held across it.
+  if let sprite: Sprite = componentCopy(this: world.sprites, entityId: source) {
+    componentSet(this: world.sprites, entityId: flight, data: own sprite)
   }
   setLayerById(world: world, entityId: flight, id: layerId)
   log(
@@ -237,7 +240,7 @@ func heroTransitionSystem(
   }
   var moving: Bool = false
   loop let flight: view EntityId in flights {
-    let transition: HeroTransition = componentGet(
+    let transition: view HeroTransition => componentView(
       this: uiSystems.heroTransition.heroTransitions
       entityId: flight
     )

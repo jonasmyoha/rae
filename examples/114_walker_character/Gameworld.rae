@@ -15,6 +15,7 @@ import Quat
 open ecs/Entity
 open ecs/World
 open ecs/ComponentTable
+open ecs/Query
 open ecs/Transform
 open ecs/Hierarchy
 open ecs/hierarchySystem/HierarchySystem
@@ -165,8 +166,8 @@ func gameWorldPartCount(world: view GameWorld) ret Int {
   ret componentCount(this: world.partRoughness)
 }
 
-func gameWorldPartAt(world: view GameWorld, i: view Int) ret PartRoughness {
-  ret componentDataAt(this: world.partRoughness, i: i)
+func gameWorldPartAt(world: view GameWorld, i: view Int) ret view PartRoughness {
+  ret queryViewAt(table: world.partRoughness, denseIndex: i)
 }
 
 # Derive a Transform3D from a controller (its position + heading about +Z). Kept
@@ -176,8 +177,8 @@ func gameWorldPartAt(world: view GameWorld, i: view Int) ret PartRoughness {
 # The ThirdPersonController of an entity (hero or crowd member). A narrow
 # GameWorld accessor so systems read a controlled character straight from the
 # world without depending on the App aggregate (#743).
-func controllerOf(world: view GameWorld, entityId: view EntityId) ret ThirdPersonController {
-  ret componentGet(this: world.controllers, entityId: entityId)
+func controllerOf(world: view GameWorld, entityId: view EntityId) ret view ThirdPersonController {
+  ret componentView(this: world.controllers, entityId: entityId)
 }
 
 func controllerTransform3D(controller: view ThirdPersonController) ret Transform3D {

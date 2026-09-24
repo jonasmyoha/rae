@@ -56,7 +56,10 @@ func fitWriteRect(
   if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) is false {
     ret
   }
-  let cur: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entityId: entityId)
+  let cur: view ComputedRect => componentView(
+    this: uiSystems.layout.computedRects
+    entityId: entityId
+  )
   var dirty: Bool = false
   if fitDiffers(a: cur.position.x, b: x) {
     dirty = true
@@ -99,7 +102,7 @@ func fitScaleSubtree(
     loop i < n {
       let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
       if componentHas(this: world.rects, entityId: cid) {
-        let r: Rect = componentGet(this: world.rects, entityId: cid)
+        let r: view Rect => componentView(this: world.rects, entityId: cid)
         fitWriteRect(
           world: world
           uiSystems: uiSystems
@@ -132,15 +135,18 @@ func fitApplyOne(
   if componentHas(this: uiSystems.hierarchy.parents, entityId: entityId) is false {
     ret
   }
-  let pl: Parent = componentGet(this: uiSystems.hierarchy.parents, entityId: entityId)
+  let pl: view Parent => componentView(this: uiSystems.hierarchy.parents, entityId: entityId)
   if componentHas(this: uiSystems.layout.computedRects, entityId: pl.parent) is false {
     ret
   }
   if componentHas(this: world.rects, entityId: entityId) is false {
     ret
   }
-  let pcr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entityId: pl.parent)
-  let design: Rect = componentGet(this: world.rects, entityId: entityId)
+  let pcr: view ComputedRect => componentView(
+    this: uiSystems.layout.computedRects
+    entityId: pl.parent
+  )
+  let design: view Rect => componentView(this: world.rects, entityId: entityId)
   if design.size.x <= 0.0 {
     ret
   }
@@ -152,7 +158,7 @@ func fitApplyOne(
   var availW: Float = pcr.size.x
   var availH: Float = pcr.size.y
   if componentHas(this: world.paddings, entityId: pl.parent) {
-    let pad: Padding = componentGet(this: world.paddings, entityId: pl.parent)
+    let pad: view Padding => componentView(this: world.paddings, entityId: pl.parent)
     padL = pad.insets.l
     padT = pad.insets.t
     availW = availW - pad.insets.l - pad.insets.r
@@ -205,7 +211,7 @@ func fitSystem(world: mod UiWorld, uiSystems: mod UiSystems) pub {
   # Aspect ∧ ComputedRect join (#807/#940): only entities that carry BOTH an
   # Aspect and a ComputedRect can be corrected, so query2 walks the smaller of
   # the two tables and probes the other by index instead of scanning every
-  # Aspect and re-looking-up its ComputedRect. componentDataAt reads each side
+  # Aspect and re-looking-up its ComputedRect. queryViewAt reads each side
   # by its dense index (no sparse probe, no generation bump); queryModAt writes
   # ONLY on a real change, keeping the same change-gated bump as componentMod.
   let hits: List(Query2Match) = query2(
@@ -213,9 +219,12 @@ func fitSystem(world: mod UiWorld, uiSystems: mod UiSystems) pub {
     tableB: uiSystems.layout.computedRects
   )
   loop let row: view Query2Match in hits {
-    let a: Aspect = componentDataAt(this: world.aspects, i: row.indexA)
+    let a: view Aspect => queryViewAt(table: world.aspects, denseIndex: row.indexA)
     if a.ratio > 0.0 {
-      let cur: ComputedRect = componentDataAt(this: uiSystems.layout.computedRects, i: row.indexB)
+      let cur: view ComputedRect => queryViewAt(
+        table: uiSystems.layout.computedRects
+        denseIndex: row.indexB
+      )
       let targetH: Float = cur.size.x / a.ratio
       if fitDiffers(a: cur.size.y, b: targetH) {
         let cr: mod ComputedRect => queryModAt(
@@ -230,7 +239,7 @@ func fitSystem(world: mod UiWorld, uiSystems: mod UiSystems) pub {
   var i: Int = 0
   loop i < n {
     let e: EntityId = componentEntityAt(this: world.scaleToFits, i: i)
-    let stf: ScaleToFit = componentDataAt(this: world.scaleToFits, i: i)
+    let stf: view ScaleToFit => queryViewAt(table: world.scaleToFits, denseIndex: i)
     fitApplyOne(
       world: world
       uiSystems: uiSystems

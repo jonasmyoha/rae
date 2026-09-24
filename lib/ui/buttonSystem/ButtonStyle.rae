@@ -276,7 +276,7 @@ func applyStateOpacity(
     componentSet(this: world.opacities, entityId: entityId, data: o)
     ret
   }
-  let cur: Opacity = componentGet(this: world.opacities, entityId: entityId)
+  let cur: view Opacity => componentView(this: world.opacities, entityId: entityId)
   if cur.value is want {
     ret
   }
@@ -295,7 +295,7 @@ func buttonStyleUpdate(world: mod UiWorld) {
     var loading: Bool = false
     var error: Bool = false
     if componentHas(this: world.widgetStates, entityId: entityId) {
-      let ws: WidgetState = componentGet(this: world.widgetStates, entityId: entityId)
+      let ws: view WidgetState => componentView(this: world.widgetStates, entityId: entityId)
       selected = ws.selected
       enabled = ws.enabled
       loading = ws.loading
