@@ -385,7 +385,7 @@
       },
       "Active": {"value": true},
       "Layout": {"type": "Vertical", "gap": 12, "alignCross": "Stretch"},
-      "Children": ["TreeTitle", "TreeList"],
+      "Children": ["TreeTitle", "TreeViewport"],
       "EditorPanel": {"panel": "tree"}
     },
     "TreeTitle": {
@@ -407,6 +407,12 @@
         "bias": {"x": 0, "y": 0}
       }
     },
+    "TreeViewport": {
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 284},
+      "Size": {"w": {"mode": "Fill"}, "h": {"mode": "Fixed"}},
+      "Overflow": {"mode": "Clip"},
+      "Children": ["TreeList"]
+    },
     "TreeList": {
       "Rect": {"x": 0, "y": 0, "w": 0, "h": 0},
       "ScrollState": {"y": 0},
@@ -427,8 +433,8 @@
           {"nodeId": "TreeLabel", "component": "Text", "field": "text", "itemField": "label"}
         ]
       },
-      "Overflow": {"mode": "Clip"},
       "EditorList": {"source": "hierarchy"},
+      "ScrollRoot": {"axis": "y", "floor": "content", "endInset": 0},
       "Size": {
         "w": {"mode": "Fill"},
         "h": {"mode": "Hug"}

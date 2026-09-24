@@ -540,10 +540,19 @@ filtering afterwards:
   to say it is hiding part of the selection — a third marker beside `>` for
   the active node and `-` for the other selected rows.
 
-Scroll-into-view is NOT here; see the split-out task. The arithmetic works
-(`index=39 → scrollY=-1350` for a 40-row tree), but writing that to the
-list's `ScrollState` blanks the panel once the scroll passes one viewport
-height, so shipping it would regress the tree.
+The hierarchy now reveals its active row when the active entity changes.
+`lastRevealed` records that entity; refreshing the panel or clicking the same
+active row preserves manual scrolling. A filtered or collapsed-away target is
+retried when it becomes visible, and document reload resets the remembered
+entity. Reveal cancels momentum and clamps to the full data extent.
+
+The authored `TreeViewport` is the fixed 284-du clip (seven 38-du rows with
+3-du gaps). Its child `TreeList` owns `ScrollRoot` / `ScrollState` and moves
+through the existing virtual-list runtime offset. The clip must belong to the
+stationary parent: clipping the moving list itself moved its window offscreen.
+Wheel and drag use the shared scroll physics. The Footer regression reveals
+row 39 at -1353 du, keeps the selected row visible, and captures the rendered
+strip; a separate refresh check preserves a manually chosen -82-du offset.
 
 ## The headless hooks resync the tree (#85867026)
 

@@ -517,6 +517,33 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             echo "  hierarchy selected-row plate failed:"
             cat "$TMP_OUT/render-treeplate.log" "$TMP_OUT/screenshot-treeplate.log" 2>/dev/null | grep -av '^\[present\]' | cut -c1-260 | sed 's/^/    /'
           fi
+          # Deep reveal has a fixed clip, and refreshes preserve manual scrolling.
+          SCREENSHOT="$TMP_OUT/ui-editor-treereveal.bmp"
+          if (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
+             RAE_UI_HEADLESS=1 RAE_UI_EDITOR_TREE=1 RAE_SDL_HEADLESS_MS=1500 \
+             RAE_UI_EDITOR_TEST_TREE_CLICKS="Footer" RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
+             perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-treereveal.log" 2>&1 \
+             && grep -qaF "[ui-editor] hierarchy scroll: -1353" "$TMP_OUT/render-treereveal.log" \
+             && python3 tools/assert_bmp_diff.py "$SCREENSHOT" \
+                  "../examples/121_ui_editor/references/TreeReveal.png" \
+                  > "$TMP_OUT/screenshot-treereveal.log" 2>&1 \
+             && (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
+                RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=1200 \
+                RAE_UI_EDITOR_TEST_TREE_CLICKS="Footer treeScroll:-82 Footer" \
+                perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-treemanual.log" 2>&1 \
+             && grep -qaF "[ui-editor] hierarchy scroll: -82" "$TMP_OUT/render-treemanual.log" \
+             && (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
+                RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=1200 \
+                RAE_UI_EDITOR_TEST_TREE_CLICKS="Footer Screen" \
+                perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-treeup.log" 2>&1 \
+             && grep -qaE "hierarchy scroll: -?0$" "$TMP_OUT/render-treeup.log"; then
+            :
+          else
+            UI_EDITOR_OK=0
+            echo "  hierarchy deep reveal / manual scroll preservation failed:"
+            cat "$TMP_OUT/render-treereveal.log" "$TMP_OUT/screenshot-treereveal.log" \
+                "$TMP_OUT/render-treemanual.log" "$TMP_OUT/render-treeup.log" 2>/dev/null | tail -25
+          fi
           # Collapse / expand the hierarchy (#72481430). Three runs:
           #   collapse hides a subtree — LogoRing's four descendants leave the
           #     visible rows, 40 -> 32, and expanding restores them

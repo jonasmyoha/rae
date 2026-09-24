@@ -2,9 +2,8 @@
 #
 # The rendering half of the inspector: the property panel's lines and the
 # hierarchy list's rows. Split from InspectorSystem.rae, which owns the state
-# and the selection funnel, purely to keep both under the 1,000-line cap —
-# these read `InspectorSystem` but never change it, which is why the panels
-# can move out and the state cannot.
+# and the selection funnel, to keep both under the 1,000-line cap. Tree sync
+# updates the visible entity order and reveals a newly active selection.
 import String
 open Sys
 open ui/Ecs
@@ -389,6 +388,53 @@ func setWidgetRows(
   setEditorListRows(world: world, list: list, rows: own rows)
 }
 
+# Reveal only when the active entity changes. Panel refreshes must preserve a
+# user's manual scroll. A hidden/filtered entity is retried when it becomes a row.
+func revealTreeSelection(
+  world: mod UiWorld
+  inspectorSystem: mod InspectorSystem
+  list: view EntityId
+) {
+  if inspectorSystem.lastRevealed is inspectorSystem.selected {
+    ret
+  }
+  if isNone(this: inspectorSystem.selected) {
+    inspectorSystem.lastRevealed = noEntity()
+    ret
+  }
+  let listView: ListView = componentGet(this: world.listViews, entity: list)
+  let pitch: Float = listView.itemHeight + listView.itemGap
+  let window: Float = listView.visibleItemCount.toFloat() * pitch - listView.itemGap
+  loop var i: Int = 0, i < inspectorSystem.treeEntities.length, ++i {
+    if inspectorSystem.treeEntities.copyAtFallback(index: i, fallback: noEntity()) is inspectorSystem.selected {
+      let state: ScrollState = componentGet(this: world.scrollStates, entity: list)
+      var top: Float = -state.y
+      let rowTop: Float = i.toFloat() * pitch
+      let rowBottom: Float = rowTop + listView.itemHeight
+      if rowTop < top {
+        top = rowTop
+      }
+      if rowBottom > top + window {
+        top = rowBottom - window
+      }
+      var maximum: Float = inspectorSystem.treeEntities.length.toFloat() * pitch - listView.itemGap - window
+      if maximum < 0 {
+        maximum = 0
+      }
+      if top > maximum {
+        top = maximum
+      }
+      if top < 0 {
+        top = 0
+      }
+      let revealed: ScrollState = { y: -top, velocity: 0 }
+      componentSet(this: world.scrollStates, entity: list, data: revealed)
+      inspectorSystem.lastRevealed = inspectorSystem.selected
+      ret
+    }
+  }
+}
+
 # Is `nodeId` collapsed?
 func treeCollapsed(collapsed: view List(String), nodeId: view String) ret Bool {
   loop let name: view String in collapsed {
@@ -604,6 +650,7 @@ func syncTreePanel(
   }
   chromeSystem.treeHeader = header
   setEditorListRows(world: world, list: list, rows: own rows)
+  revealTreeSelection(world: world, inspectorSystem: inspectorSystem, list: list)
 }
 
 # One component of the composite: its name, and how many of the selected
