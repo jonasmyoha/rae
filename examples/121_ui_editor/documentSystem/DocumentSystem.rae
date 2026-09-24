@@ -33,6 +33,7 @@ open ui/ScenePolicy
 open ui/RegistryOpt
 open ecs/Entity
 open ecs/ComponentTable
+open ecs/Query
 open ui/UiSystems
 
 const defaultDesignW: Float = 1080.0
@@ -354,7 +355,7 @@ func seedListViewRows(world: mod UiWorld) {
     if componentHas(this: world.listViewDatas, entityId: entityId) {
       continue
     }
-    let list: ListView = componentGet(this: world.listViews, entityId: entityId)
+    let list: view ListView => componentView(this: world.listViews, entityId: entityId)
     var rows: List(ListViewRow) = List.create(ListViewRow, cap: listViewSampleRows)
     loop var row: Int = 0, row < listViewSampleRows, ++row {
       var keys: List(String) = List.create(String, cap: list.bindings.length + 1)
@@ -393,7 +394,7 @@ func snapshotDocumentScrolls(world: view UiWorld) ret ScrollSnapshot {
   loop var i: Int = 0, i < count, ++i {
     let entityId: EntityId = componentEntityAt(this: world.scrollStates, i: i)
     if componentHas(this: world.nodeIdComponents, entityId: entityId) {
-      let state: ScrollState = componentDataAt(this: world.scrollStates, i: i)
+      let state: view ScrollState => queryViewAt(table: world.scrollStates, denseIndex: i)
       snapshot.nodeIds.add(
         value: "{componentView(this: world.nodeIdComponents, entityId: entityId).id}"
       )

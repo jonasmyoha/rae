@@ -281,6 +281,30 @@ func loadSceneIntoPage(
   }
 }
 
+# The overrides a SceneInstance authors, as the list mountSceneInstanceIntoPage
+# takes.
+func sceneInstanceOverrides(inst: view SceneInstance) ret List(SceneOverride) {
+  let overrides: List(SceneOverride) = List.create(SceneOverride, cap: inst.overrideNodeIds.length)
+  loop var j: Int = 0, j < inst.overrideNodeIds.length, ++j {
+    if let nodeId: String = inst.overrideNodeIds.copyAt(index: j) {
+      if let componentName: String = inst.overrideComponents.copyAt(index: j) {
+        if let fieldName: String = inst.overrideFields.copyAt(index: j) {
+          if let valueString: String = inst.overrideValues.copyAt(index: j) {
+            let ov: SceneOverride = {
+              nodeId: nodeId
+              componentName: componentName
+              fieldName: fieldName
+              valueString: valueString
+            }
+            overrides.add(value: ov)
+          }
+        }
+      }
+    }
+  }
+  ret overrides
+}
+
 # Phase 1f scene-instance resolver.
 #
 # After `loadScene` materialises the top-level scene, any node that
@@ -310,35 +334,20 @@ func resolveSceneInstances(
     var i: Int = 0
     loop i < n {
       let entityId: EntityId = componentEntityAt(this: world.sceneInstances, i: i)
-      let inst: SceneInstance = componentGet(this: world.sceneInstances, entityId: entityId)
-      if inst.sceneId.length() > 0 {
-        let idx: Int = sceneRegistryIndex(reg: registry, key: inst.sceneId)
+      # Read through expression-level views: this loop body mounts (which can
+      # add scene instances) and removes the marker, so no view binding may
+      # span it.
+      let sceneIdLength: Int = componentView(this: world.sceneInstances, entityId: entityId).sceneId.length()
+      if sceneIdLength > 0 {
+        let idx: Int = sceneRegistryIndex(
+          reg: registry
+          key: componentView(this: world.sceneInstances, entityId: entityId).sceneId
+        )
         if idx >= 0 {
           let scene: view Scene => sceneRegistryGet(reg: registry, idx: idx)
-          let overrides: List(SceneOverride) = List.create(
-            SceneOverride
-            cap: inst.overrideNodeIds.length
+          let overrides: List(SceneOverride) = sceneInstanceOverrides(
+            inst: componentView(this: world.sceneInstances, entityId: entityId)
           )
-          let m: Int = inst.overrideNodeIds.length
-          var j: Int = 0
-          loop j < m {
-            if let nodeId: String = inst.overrideNodeIds.copyAt(index: j) {
-              if let componentName: String = inst.overrideComponents.copyAt(index: j) {
-                if let fieldName: String = inst.overrideFields.copyAt(index: j) {
-                  if let valueString: String = inst.overrideValues.copyAt(index: j) {
-                    let ov: SceneOverride = {
-                      nodeId: nodeId
-                      componentName: componentName
-                      fieldName: fieldName
-                      valueString: valueString
-                    }
-                    overrides.add(value: ov)
-                  }
-                }
-              }
-            }
-            j = j + 1
-          }
           mountSceneInstanceIntoPage(
             world: world
             uiSystems: uiSystems
@@ -365,8 +374,11 @@ func resolveSceneInstances(
               sceneId: pageId
               nodeId: nodeLabel
               kind: SceneDiagnosticKind.missingSubScene
-              name: inst.sceneId
-              message: "no sub-scene registered as {inst.sceneId}"
+              name: componentView(this: world.sceneInstances, entityId: entityId).sceneId
+              message: "no sub-scene registered as {componentView(
+                this: world.sceneInstances
+                entityId: entityId
+              ).sceneId}"
             )
             paintMissingSubSceneSentinel(world: world, entityId: entityId)
             componentRemove(this: world.sceneInstances, entityId: entityId)
@@ -416,7 +428,7 @@ func dumpScene(world: view UiWorld, uiSystems: view UiSystems, scene: view Scene
       let entityId: EntityId = nodeEntityId(world: world, index: entityRaw)
       var parentStr: String = "(root)"
       if componentHas(this: uiSystems.hierarchy.parents, entityId: entityId) {
-        let pl: Parent = componentGet(this: uiSystems.hierarchy.parents, entityId: entityId)
+        let pl: view Parent => componentView(this: uiSystems.hierarchy.parents, entityId: entityId)
         parentStr = "parent=ent{pl.parent.index}"
       }
       var comps: String = componentNamesFor(world: world, entityId: entityId)

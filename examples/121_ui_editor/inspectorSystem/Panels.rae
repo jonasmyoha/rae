@@ -406,13 +406,12 @@ func revealTreeSelection(
     inspectorSystem.lastRevealed = noEntity()
     ret
   }
-  let listView: ListView = componentGet(this: world.listViews, entityId: list)
+  let listView: view ListView => componentView(this: world.listViews, entityId: list)
   let pitch: Float = listView.itemHeight + listView.itemGap
   let window: Float = listView.visibleItemCount.toFloat() * pitch - listView.itemGap
   loop var i: Int = 0, i < inspectorSystem.treeEntities.length, ++i {
     if inspectorSystem.treeEntities.copyAtFallback(index: i, fallback: noEntity()) is inspectorSystem.selected {
-      let state: ScrollState = componentGet(this: world.scrollStates, entityId: list)
-      var top: Float = -state.y
+      var top: Float = -componentView(this: world.scrollStates, entityId: list).y
       let rowTop: Float = i.toFloat() * pitch
       let rowBottom: Float = rowTop + listView.itemHeight
       if rowTop < top {

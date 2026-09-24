@@ -122,7 +122,10 @@ func renderShadowPass(
       )
       loop var shadowClone: Int = 0, shadowClone < characterSystem.crowdEntities.length, ++shadowClone {
         if let member: EntityId = characterSystem.crowdEntities.copyAt(index: shadowClone) {
-          let ctrl: ThirdPersonController = componentGet(this: world.controllers, entityId: member)
+          let ctrl: view ThirdPersonController => componentView(
+            this: world.controllers
+            entityId: member
+          )
           let cloneModel: Mat4 = walkerWorldModel(
             baseModel: characterSystem.basePartModel
             controller: ctrl
@@ -231,7 +234,7 @@ func renderGbufferPass(
     baseRow: 0
   )
   loop var p: Int = 0, p < gameWorldPartCount(world: world), ++p {
-    let part: PartRoughness = gameWorldPartAt(world: world, i: p)
+    let part: view PartRoughness => gameWorldPartAt(world: world, i: p)
     let handle: MeshHandle = meshHandle(id: part.meshId, generation: 1)
     let mat: Material3d = {
       baseColor: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
@@ -255,7 +258,10 @@ func renderGbufferPass(
         # Each crowd member samples its OWN palette slot (#547) so it holds a
         # distinct pose in this single instanced skinned draw. Its model is
         # derived from the entity's controller (#739) — no stored model.
-        let ctrl: ThirdPersonController = componentGet(this: world.controllers, entityId: member)
+        let ctrl: view ThirdPersonController => componentView(
+          this: world.controllers
+          entityId: member
+        )
         let cloneModel: Mat4 = walkerWorldModel(
           baseModel: characterSystem.basePartModel
           controller: ctrl

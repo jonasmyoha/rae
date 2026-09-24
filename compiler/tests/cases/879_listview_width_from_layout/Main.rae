@@ -60,7 +60,10 @@ func rowWidths(
   loop var i: Int = 0, i < children.ids.length, ++i {
     let row: EntityId = children.ids.copyAtFallback(index: i, fallback: noEntity())
     if componentHas(this: uiSystems.layout.computedRects, entityId: row) {
-      let rect: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entityId: row)
+      let rect: view ComputedRect => componentView(
+        this: uiSystems.layout.computedRects
+        entityId: row
+      )
       out = "{out} {rect.size.x.toInt()}"
     }
   }
@@ -75,7 +78,7 @@ func listSize(
   if componentHas(this: uiSystems.layout.computedRects, entityId: listEntityId) is false {
     ret "none"
   }
-  let rect: ComputedRect = componentGet(
+  let rect: view ComputedRect => componentView(
     this: uiSystems.layout.computedRects
     entityId: listEntityId
   )

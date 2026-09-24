@@ -7,6 +7,7 @@ import ui/Ecs
 import ui/Components
 open ecs/Entity
 open ecs/ComponentTable
+open ecs/Query
 open ui/UiSystems
 
 # Layer-root entity factory. Creates a parentless entity with a
@@ -52,7 +53,7 @@ func findLayerEntity(world: view UiWorld, id: view String) pub ret EntityId {
   var i: Int = 0
   loop i < n {
     let e: EntityId = componentEntityAt(this: world.layerRoots, i: i)
-    let lr: LayerRoot = componentDataAt(this: world.layerRoots, i: i)
+    let lr: view LayerRoot => queryViewAt(table: world.layerRoots, denseIndex: i)
     if lr.id is id {
       ret e
     }
@@ -77,16 +78,16 @@ func setLayerById(world: mod UiWorld, entityId: view EntityId, id: view String) 
 # to the content layer's order (or 0 when no content layer exists).
 func entityLayerOrder(world: view UiWorld, entityId: view EntityId) pub ret Int {
   if componentHas(this: world.layerRefs, entityId: entityId) {
-    let ref: LayerRef = componentGet(this: world.layerRefs, entityId: entityId)
+    let ref: view LayerRef => componentView(this: world.layerRefs, entityId: entityId)
     if componentHas(this: world.layerRoots, entityId: ref.layer) {
-      let lr: LayerRoot = componentGet(this: world.layerRoots, entityId: ref.layer)
+      let lr: view LayerRoot => componentView(this: world.layerRoots, entityId: ref.layer)
       ret lr.order
     }
   }
   let contentId: String = "content"
   let content: EntityId = findLayerEntity(world: world, id: contentId)
   if isNone(this: content) is false {
-    let lr: LayerRoot = componentGet(this: world.layerRoots, entityId: content)
+    let lr: view LayerRoot => componentView(this: world.layerRoots, entityId: content)
     ret lr.order
   }
   ret 0

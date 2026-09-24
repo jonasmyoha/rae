@@ -34,7 +34,7 @@ func g2dChain(color: view RgbaColor, chain255: view Int) ret RgbaColor {
 
 func g2dRadius(world: view UiWorld, entityId: view EntityId, fallback: view Float) ret Float {
   if componentHas(this: world.cornerRadiuses, entityId: entityId) {
-    let cr: CornerRadius = componentGet(this: world.cornerRadiuses, entityId: entityId)
+    let cr: view CornerRadius => componentView(this: world.cornerRadiuses, entityId: entityId)
     ret cr.radius
   }
   ret fallback
@@ -42,7 +42,7 @@ func g2dRadius(world: view UiWorld, entityId: view EntityId, fallback: view Floa
 
 func g2dHoverMul(world: view UiWorld, entityId: view EntityId) ret Float {
   if componentHas(this: world.hoverScales, entityId: entityId) {
-    let hs: HoverScale = componentGet(this: world.hoverScales, entityId: entityId)
+    let hs: view HoverScale => componentView(this: world.hoverScales, entityId: entityId)
     ret hs.current
   }
   ret 1.0
@@ -80,7 +80,7 @@ func g2dPaintBox(
   var ownX: Float = hoverMul
   var ownY: Float = hoverMul
   if componentHas(this: world.transforms, entityId: entityId) {
-    let fx: TransformFx = componentGet(this: world.transforms, entityId: entityId)
+    let fx: view TransformFx => componentView(this: world.transforms, entityId: entityId)
     pivotX = fx.pivot.x
     pivotY = fx.pivot.y
     ownX = fx.scaleX * hoverMul
@@ -121,7 +121,7 @@ func paintShadowG(
   chain255: view Int
   canvas: mod Gpu2dCanvas
 ) {
-  let shadow: Shadow = componentGet(this: world.shadows, entityId: entityId)
+  let shadow: view Shadow => componentView(this: world.shadows, entityId: entityId)
   if shadow.blur <= 0.0 {
     ret
   }
@@ -187,7 +187,7 @@ func pushMaskClipG(
   entityId: view EntityId
   canvas: mod Gpu2dCanvas
 ) ret Bool {
-  let mask: MaskShape = componentGet(this: world.maskShapes, entityId: entityId)
+  let mask: view MaskShape => componentView(this: world.maskShapes, entityId: entityId)
   var source: EntityId = entityId
   if mask.sourceNodeId.length() > 0 {
     let page: String = pageOf(world: world, uiSystems: uiSystems, entityId: entityId)
@@ -201,8 +201,8 @@ func pushMaskClipG(
   ) is false {
     ret false
   }
-  let cr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entityId: source)
-  let wt: WorldTransform2D = componentGet(
+  let cr: view ComputedRect => componentView(this: uiSystems.layout.computedRects, entityId: source)
+  let wt: view WorldTransform2D => componentView(
     this: uiSystems.transform2d.worldTransforms
     entityId: source
   )

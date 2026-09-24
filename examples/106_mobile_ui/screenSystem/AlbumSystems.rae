@@ -16,6 +16,8 @@ open ui/SceneInstance
 open ecs/Entity
 open ecs/ComponentTable
 
+open ecs/Query
+
 # What the header and the rows depend on, as one comparable string.
 # AlbumSystem (docs/ecs-systems-own-their-tables.md §3): owns the album page's `AlbumHeader` texts
 # — its
@@ -39,16 +41,11 @@ func writeAlbumText(world: mod UiWorld, entityId: view EntityId, text: view Stri
   if componentHas(this: world.texts, entityId: entityId) is false {
     ret
   }
-  let current: Text = componentGet(this: world.texts, entityId: entityId)
-  if current.text is text {
+  if componentView(this: world.texts, entityId: entityId).text is text {
     ret
   }
-  let updated: Text = {
-    text: "{text}"
-    styleId: "{current.styleId}"
-    wrapWidthMode: current.wrapWidthMode
-  }
-  componentSet(this: world.texts, entityId: entityId, data: updated)
+  let current: mod Text => componentMod(this: world.texts, entityId: entityId)
+  current.text = "{text}"
 }
 
 # The album page's header, entirely from data (#979): the caption / title /
@@ -68,7 +65,7 @@ func albumHeaderSystem(
   var i: Int = 0
   loop i < nb {
     let entityId: EntityId = componentEntityAt(this: world.textBindings, i: i)
-    let binding: TextBinding = componentDataAt(this: world.textBindings, i: i)
+    let binding: view TextBinding => queryViewAt(table: world.textBindings, denseIndex: i)
     if binding.key is "album.caption" {
       writeAlbumText(world: world, entityId: entityId, text: cv.caption)
     }
@@ -88,19 +85,7 @@ func albumHeaderSystem(
   loop c < nc {
     let cover: EntityId = componentEntityAt(this: albumSystem.albumHeaders, i: c)
     if componentHas(this: world.sprites, entityId: cover) {
-      let sp: Sprite = componentGet(this: world.sprites, entityId: cover)
-      if sp.textureKey is not cv.coverStem {
-        let updated: Sprite = {
-          textureKey: "{cv.coverStem}"
-          tint: sp.tint
-          tintSlot: "{sp.tintSlot}"
-          scaleMode: sp.scaleMode
-          tileScale: sp.tileScale
-          nineSlice: sp.nineSlice
-          hasNineSlice: sp.hasNineSlice
-        }
-        componentSet(this: world.sprites, entityId: cover, data: updated)
-      }
+      setSpriteKey(world: world, entityId: cover, key: cv.coverStem)
     }
     setHeroWidget(world: world, entityId: cover, key: "{cv.coverStem}")
     c = c + 1

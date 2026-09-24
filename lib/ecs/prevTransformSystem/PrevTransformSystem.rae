@@ -17,9 +17,13 @@
 open ecs/Entity
 open ecs/ComponentTable
 
+open ecs/Query
+
 func prevTransformSystem(T: type, current: view ComponentTable(T), prev: mod ComponentTable(T)) {
   loop var i: Int = 0, i < componentCount(this: current), ++i {
     let entityId: EntityId = componentEntityAt(this: current, i: i)
-    componentSet(this: prev, entityId: entityId, data: componentDataAt(this: current, i: i))
+    # A real COPY: the previous-frame table keeps its own snapshot of the
+    # transform, and componentSet takes ownership of it.
+    componentSet(this: prev, entityId: entityId, data: componentCopyAtDefault(this: current, i: i))
   }
 }

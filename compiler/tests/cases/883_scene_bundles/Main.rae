@@ -77,7 +77,7 @@ func rectOf(world: view UiWorld, entityId: view EntityId) ret String {
   if componentHas(this: world.rects, entityId: entityId) is false {
     ret "no Rect"
   }
-  let r: Rect = componentGet(this: world.rects, entityId: entityId)
+  let r: view Rect => componentView(this: world.rects, entityId: entityId)
   ret "{r.position.x.toInt()},{r.position.y.toInt()} {r.size.x.toInt()}x{r.size.y.toInt()}"
 }
 
@@ -85,7 +85,7 @@ func opacityOf(world: view UiWorld, entityId: view EntityId) ret String {
   if componentHas(this: world.opacities, entityId: entityId) is false {
     ret "no Opacity"
   }
-  ret "{componentGet(this: world.opacities, entityId: entityId).value}"
+  ret "{componentView(this: world.opacities, entityId: entityId).value}"
 }
 
 func refsOf(world: view UiWorld, entityId: view EntityId) ret String {

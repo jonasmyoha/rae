@@ -32,7 +32,7 @@ func printWorld3D(
   entityId: view EntityId
   label: view String
 ) {
-  let w: WorldTransform3D = componentGet(this: worlds, entityId: entityId)
+  let w: view WorldTransform3D => componentView(this: worlds, entityId: entityId)
   log(
     "{label}: {w.matrix.m.copyAtFallback(index: 12, fallback: 0.0)} {w.matrix.m.copyAtFallback(
       index: 13
@@ -46,7 +46,7 @@ func printWorld2D(
   entityId: view EntityId
   label: view String
 ) {
-  let w: WorldTransform2D = componentGet(this: worlds, entityId: entityId)
+  let w: view WorldTransform2D => componentView(this: worlds, entityId: entityId)
   log("{label}: pos {w.position.x},{w.position.y} rot {w.rotation} scale {w.scale.x},{w.scale.y}")
 }
 

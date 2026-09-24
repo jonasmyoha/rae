@@ -508,9 +508,9 @@ func renderSceneShadowWorld(
 ) pub {
   loop var j: Int = 0, j < componentCount(this: world.meshRenderers), ++j {
     let entityId: EntityId = componentEntityAt(this: world.meshRenderers, i: j)
-    let renderer: MeshRenderer = componentGet(this: world.meshRenderers, entityId: entityId)
+    let renderer: view MeshRenderer => componentView(this: world.meshRenderers, entityId: entityId)
     if renderer.visible {
-      let t: Transform3d = componentGet(this: world.transforms, entityId: entityId)
+      let t: view Transform3d => componentView(this: world.transforms, entityId: entityId)
       drawShadowCaster(
         shadow: shadow
         meshes: meshes
@@ -534,11 +534,11 @@ func renderSceneWorld(
 ) pub {
   loop var j: Int = 0, j < componentCount(this: world.meshRenderers), ++j {
     let entityId: EntityId = componentEntityAt(this: world.meshRenderers, i: j)
-    let renderer: MeshRenderer = componentGet(this: world.meshRenderers, entityId: entityId)
+    let renderer: view MeshRenderer => componentView(this: world.meshRenderers, entityId: entityId)
     if renderer.visible {
-      let t: Transform3d = componentGet(this: world.transforms, entityId: entityId)
-      let pt: Transform3d = componentGet(this: world.prevTransforms, entityId: entityId)
-      let m: Material3d = componentGet(this: world.materials, entityId: entityId)
+      let t: view Transform3d => componentView(this: world.transforms, entityId: entityId)
+      let pt: view Transform3d => componentView(this: world.prevTransforms, entityId: entityId)
+      let m: view Material3d => componentView(this: world.materials, entityId: entityId)
       drawInstance(
         meshes: meshes
         resources: resources

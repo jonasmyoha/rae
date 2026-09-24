@@ -99,7 +99,7 @@ These instructions define **how Codex should work**, communicate progress, and i
   whole type name is lowercased, including `Id`: `entityId: EntityId`, never
   `entity: EntityId`. `entity` suggests you are holding the entity (its
   components, its data), but you only have its id, so the reader draws the
-  wrong conclusion at every call site (`componentGet(this: table, entityId:
+  wrong conclusion at every call site (`componentView(this: table, entityId:
   entityId)`). The same goes for any `…Id` / handle type (`nodeId: NodeId`,
   `meshHandle: MeshHandle`). When a role is added, the `Id` suffix stays:
   `rootEntityId`, `hoveredEntityId`, `targetEntityId`, not `rootEntity`. A

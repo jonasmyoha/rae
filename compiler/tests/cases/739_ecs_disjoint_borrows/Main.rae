@@ -55,10 +55,10 @@ func main() {
     velocity.v = velocity.v * 10
   }
   log(
-    "after system: e1={componentGet(this: world.positions, entityId: e1).x}/{componentGet(
+    "after system: e1={componentView(this: world.positions, entityId: e1).x}/{componentView(
       this: world.velocities
       entityId: e1
-    ).v} e2={componentGet(this: world.positions, entityId: e2).x}/{componentGet(
+    ).v} e2={componentView(this: world.positions, entityId: e2).x}/{componentView(
       this: world.velocities
       entityId: e2
     ).v}"
@@ -69,13 +69,13 @@ func main() {
   bump(position: c)
   bump(position: c)
   ground(position: c, floor: 100)
-  log("threaded ref: e1.x={componentGet(this: world.positions, entityId: e1).x}")
+  log("threaded ref: e1.x={componentView(this: world.positions, entityId: e1).x}")
 
   # 3. a ref into one table plus a ref into another, at once
   let p2: mod Position => componentMod(this: world.positions, entityId: e2)
   let velocity: view Velocity => componentView(this: world.velocities, entityId: e2)
   p2.x = p2.x + velocity.v
-  log("two-table refs: e2.x={componentGet(this: world.positions, entityId: e2).x}")
+  log("two-table refs: e2.x={componentView(this: world.positions, entityId: e2).x}")
 
   # 4. modAt binding live while a DIFFERENT List is mutated
   var xs: List(Int) = List.create(Int, cap: 1)

@@ -15,6 +15,8 @@ import ui/Components
 open ecs/Entity
 open ecs/ComponentTable
 
+open ecs/Query
+
 # Every `HasHistory`: Active follows "the play history has entries", keyed on
 # the history revision so an idle frame writes nothing.
 # HomeSystem (docs/ecs-systems-own-their-tables.md §3): owns the home page's `HasHistory` sections
@@ -35,12 +37,12 @@ func hasHistorySystem(homeSystem: mod HomeSystem, world: mod UiWorld, state: vie
   var i: Int = 0
   loop i < n {
     let entityId: EntityId = componentEntityAt(this: homeSystem.hasHistories, i: i)
-    let binding: HasHistory = componentDataAt(this: homeSystem.hasHistories, i: i)
-    if binding.builtRevision is not revision {
+    let builtRevision: Int = queryViewAt(table: homeSystem.hasHistories, denseIndex: i).builtRevision
+    if builtRevision is not revision {
       let active: Active = { value: hasEntries }
       componentSet(this: world.actives, entityId: entityId, data: active)
-      let built: HasHistory = { builtRevision: revision }
-      componentSet(this: homeSystem.hasHistories, entityId: entityId, data: built)
+      let binding: mod HasHistory => queryModAt(table: homeSystem.hasHistories, denseIndex: i)
+      binding.builtRevision = revision
     }
     i = i + 1
   }

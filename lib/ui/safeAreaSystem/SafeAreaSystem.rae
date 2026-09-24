@@ -32,7 +32,10 @@ func safeAreaSystem(world: mod UiWorld, uiSystems: mod UiSystems, insets: view I
         # and the render caches, stay clean at idle.
         var changed: Bool = true
         if componentHas(this: uiSystems.safeArea.safeInsets, entityId: e) {
-          let cur: SafeInsets = componentGet(this: uiSystems.safeArea.safeInsets, entityId: e)
+          let cur: view SafeInsets => componentView(
+            this: uiSystems.safeArea.safeInsets
+            entityId: e
+          )
           if equals(a: cur.insets, b: insets) {
             changed = false
           }

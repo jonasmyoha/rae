@@ -80,7 +80,7 @@ typedef struct {
   // Per the language design (docs/ownership-model.md) plain `T`
   // returns SHOULD own — this gate is a transitional measure until
   // stdlib APIs that currently return shallow aliases (sceneNodeAt,
-  // componentGet on heap-owning T, JsonDoc helpers, ...) get
+  // componentCopy on heap-owning T, JsonDoc helpers, ...) get
   // migrated to `view T` returns. Once they're migrated, this gate
   // becomes unnecessary and Layer 5 can fire on all owning struct
   // lets unconditionally.

@@ -1,10 +1,11 @@
-# componentGet / componentDataAt return owned component values. A component
+# componentCopy / componentCopyAtDefault return owned component values. A component
 # with String and List(String) fields must be copied recursively: storing the
 # returned values elsewhere and dropping both copies must leave the table's
 # original intact. The unused `copy T` parameter loop also proves that the
 # callee releases the independent copies it receives.
 import Sys
 open ecs/ComponentTable
+open ecs/Query
 open ecs/Entity
 
 func rae_ext_rae_mem_stats_outstanding() unsafe extern ret Int
@@ -32,8 +33,10 @@ func main() {
     componentSet(this: table, entityId: entityId, data: createHeapComponent(seed: 1))
 
     var copies: List(HeapComponent) = List.create(HeapComponent, cap: 2)
-    copies.add(value: componentGet(this: table, entityId: entityId))
-    copies.add(value: componentDataAt(this: table, i: 0))
+    if let copied: HeapComponent = componentCopy(this: table, entityId: entityId) {
+      copies.add(value: own copied)
+    }
+    copies.add(value: componentCopyAtDefault(this: table, i: 0))
 
     let first: mod HeapComponent => copies.modAt(index: 0)
     first.items.add(value: "copy-only")
@@ -45,7 +48,7 @@ func main() {
 
     # Warm the generated deep-copy/drop paths before taking the allocation
     # baseline, then repeat enough times to expose an unused-copy-param leak.
-    let copySource: HeapComponent = componentGet(this: table, entityId: entityId)
+    let copySource: view HeapComponent => componentView(this: table, entityId: entityId)
     discard(value: copySource)
     let baseline: Int = rae_ext_rae_mem_stats_outstanding()
     loop var i: Int = 0, i < 1000, ++i {

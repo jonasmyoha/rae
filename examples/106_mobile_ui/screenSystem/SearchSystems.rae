@@ -23,6 +23,7 @@ import ui/Scene
 open ui/SceneInstance
 open ecs/Entity
 open ecs/ComponentTable
+open ecs/Query
 open ui/UiSystems
 
 # ----- SearchField ----------------------------------------------------------
@@ -45,7 +46,7 @@ func entityPageActive(
   if componentHas(this: world.actives, entityId: root) is false {
     ret true
   }
-  let a: Active = componentGet(this: world.actives, entityId: root)
+  let a: view Active => componentView(this: world.actives, entityId: root)
   ret a.value
 }
 
@@ -89,7 +90,7 @@ func setActiveIfDifferent(world: mod UiWorld, entityId: view EntityId, active: v
   }
   var current: Bool = true
   if componentHas(this: world.actives, entityId: entityId) {
-    let a: Active = componentGet(this: world.actives, entityId: entityId)
+    let a: view Active => componentView(this: world.actives, entityId: entityId)
     current = a.value
   }
   if current is not active {
@@ -107,12 +108,21 @@ func setTextIfDifferent(
   if isNone(this: entityId) or componentHas(this: world.texts, entityId: entityId) is false {
     ret
   }
-  let current: Text = componentGet(this: world.texts, entityId: entityId)
-  if current.text is text and current.styleId is styleId {
+  let unchanged: Bool = textMatches(
+    current: componentView(this: world.texts, entityId: entityId)
+    text: text
+    styleId: styleId
+  )
+  if unchanged {
     ret
   }
-  let updated: Text = { text: "{text}", styleId: "{styleId}", wrapWidthMode: current.wrapWidthMode }
-  componentSet(this: world.texts, entityId: entityId, data: updated)
+  let current: mod Text => componentMod(this: world.texts, entityId: entityId)
+  current.text = "{text}"
+  current.styleId = "{styleId}"
+}
+
+func textMatches(current: view Text, text: view String, styleId: view String) ret Bool {
+  ret current.text is text and current.styleId is styleId
 }
 
 # The search-results list host (`ListSource { searchTracks | searchAlbums }`)
@@ -126,7 +136,7 @@ func searchResultsOnPage(
   var i: Int = 0
   loop i < n {
     let entityId: EntityId = componentEntityAt(this: world.listSources, i: i)
-    let binding: ListSource = componentDataAt(this: world.listSources, i: i)
+    let binding: view ListSource => queryViewAt(table: world.listSources, denseIndex: i)
     let isSearch: Bool = binding.source is ListSourceKind.searchTracks or binding.source is ListSourceKind.searchAlbums
     if isSearch and pageOf(world: world, uiSystems: uiSystems, entityId: entityId) is page {
       ret entityId
@@ -156,8 +166,7 @@ func searchFieldSystem(world: mod UiWorld, uiSystems: view UiSystems, input: vie
   var i: Int = 0
   loop i < n {
     let field: EntityId = componentEntityAt(this: world.searchFields, i: i)
-    let data: SearchField = componentDataAt(this: world.searchFields, i: i)
-    var query: String = "{data.query}"
+    var query: String = "{queryViewAt(table: world.searchFields, denseIndex: i).query}"
     # Typing goes to the field whose page is on screen.
     if entityPageActive(world: world, uiSystems: uiSystems, entityId: field) {
       var b: Int = 0
@@ -169,14 +178,9 @@ func searchFieldSystem(world: mod UiWorld, uiSystems: view UiSystems, input: vie
         query = "{query}{input.typedText}"
       }
     }
-    if query is not data.query {
-      let updated: SearchField = {
-        query: "{query}"
-        placeholder: "{data.placeholder}"
-        textStyleId: "{data.textStyleId}"
-        placeholderStyleId: "{data.placeholderStyleId}"
-      }
-      componentSet(this: world.searchFields, entityId: field, data: updated)
+    if query is not queryViewAt(table: world.searchFields, denseIndex: i).query {
+      let data: mod SearchField => queryModAt(table: world.searchFields, denseIndex: i)
+      data.query = "{query}"
     }
     # Mirror into the visible line.
     let line: EntityId = searchFieldTextChild(world: world, field: field)
@@ -185,14 +189,14 @@ func searchFieldSystem(world: mod UiWorld, uiSystems: view UiSystems, input: vie
         world: world
         entityId: line
         text: query
-        styleId: data.textStyleId
+        styleId: queryViewAt(table: world.searchFields, denseIndex: i).textStyleId
       )
     } else {
       setTextIfDifferent(
         world: world
         entityId: line
-        text: data.placeholder
-        styleId: data.placeholderStyleId
+        text: queryViewAt(table: world.searchFields, denseIndex: i).placeholder
+        styleId: queryViewAt(table: world.searchFields, denseIndex: i).placeholderStyleId
       )
     }
     # Results vs empty state. The results container follows the query here;
@@ -221,7 +225,7 @@ func searchQueryOnPage(
   loop i < n {
     let field: EntityId = componentEntityAt(this: world.searchFields, i: i)
     if pageOf(world: world, uiSystems: uiSystems, entityId: field) is page {
-      let data: SearchField = componentDataAt(this: world.searchFields, i: i)
+      let data: view SearchField => queryViewAt(table: world.searchFields, denseIndex: i)
       ret "{data.query}"
     }
     i = i + 1

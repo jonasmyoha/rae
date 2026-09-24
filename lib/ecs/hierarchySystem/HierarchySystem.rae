@@ -95,7 +95,7 @@ func unlinkFromCurrent(
   child: view EntityId
 ) {
   if componentHas(this: parents, entityId: child) {
-    let current: Parent = componentGet(this: parents, entityId: child)
+    let current: view Parent => componentView(this: parents, entityId: child)
     removeChildFrom(childrens: childrens, parent: current.parent, child: child)
   }
 }
@@ -314,8 +314,8 @@ func detachForDestroy(
   entityId: view EntityId
 ) {
   if componentHas(this: parents, entityId: entityId) {
-    let link: Parent = componentGet(this: parents, entityId: entityId)
-    removeChildFrom(childrens: childrens, parent: link.parent, child: entityId)
+    let parentEntityId: EntityId = componentView(this: parents, entityId: entityId).parent
+    removeChildFrom(childrens: childrens, parent: parentEntityId, child: entityId)
     componentRemove(this: parents, entityId: entityId)
   }
   if componentHas(this: childrens, entityId: entityId) {
@@ -345,7 +345,7 @@ func destroySubtree(
   # Unlink the root from its parent's Children so the (surviving) parent doesn't
   # dangle to the destroyed root.
   if componentHas(this: parents, entityId: root) {
-    let link: Parent = componentGet(this: parents, entityId: root)
+    let link: view Parent => componentView(this: parents, entityId: root)
     removeChildFrom(childrens: childrens, parent: link.parent, child: root)
   }
   loop var i: Int = 0, i < subtree.length, ++i {

@@ -46,7 +46,7 @@ func transformSystem3D(
   loop var i: Int = 0, i < componentCount(this: transforms), ++i {
     let entityId: EntityId = componentEntityAt(this: transforms, i: i)
     if componentHas(this: parents, entityId: entityId) is false {
-      let local: Transform3D = componentGet(this: transforms, entityId: entityId)
+      let local: view Transform3D => componentView(this: transforms, entityId: entityId)
       componentSet(this: worldTransforms, entityId: entityId, data: rootWorld3D(local: local))
     }
   }
@@ -61,18 +61,16 @@ func transformSystem3D(
       this: parents
       entityId: entityId
     ) {
-      let local: Transform3D = componentGet(this: transforms, entityId: entityId)
-      let link: Parent = componentGet(this: parents, entityId: entityId)
+      let local: view Transform3D => componentView(this: transforms, entityId: entityId)
+      let link: view Parent => componentView(this: parents, entityId: entityId)
       if componentHas(this: worldTransforms, entityId: link.parent) {
-        let parentWorld: WorldTransform3D = componentGet(
-          this: worldTransforms
-          entityId: link.parent
+        # The parent's row is read as an ARGUMENT, not a binding: the child's
+        # componentSet below may append to this same table.
+        let composed: WorldTransform3D = composeWorld3D(
+          parentWorld: componentView(this: worldTransforms, entityId: link.parent)
+          local: local
         )
-        componentSet(
-          this: worldTransforms
-          entityId: entityId
-          data: composeWorld3D(parentWorld: parentWorld, local: local)
-        )
+        componentSet(this: worldTransforms, entityId: entityId, data: composed)
       } else {
         componentSet(this: worldTransforms, entityId: entityId, data: rootWorld3D(local: local))
       }
@@ -116,7 +114,7 @@ func transformSystem2D(
   loop var i: Int = 0, i < componentCount(this: transforms), ++i {
     let entityId: EntityId = componentEntityAt(this: transforms, i: i)
     if componentHas(this: parents, entityId: entityId) is false {
-      let local: Transform2D = componentGet(this: transforms, entityId: entityId)
+      let local: view Transform2D => componentView(this: transforms, entityId: entityId)
       componentSet(this: worldTransforms, entityId: entityId, data: rootWorld2D(local: local))
     }
   }
@@ -130,18 +128,16 @@ func transformSystem2D(
       this: parents
       entityId: entityId
     ) {
-      let local: Transform2D = componentGet(this: transforms, entityId: entityId)
-      let link: Parent = componentGet(this: parents, entityId: entityId)
+      let local: view Transform2D => componentView(this: transforms, entityId: entityId)
+      let link: view Parent => componentView(this: parents, entityId: entityId)
       if componentHas(this: worldTransforms, entityId: link.parent) {
-        let parentWorld: WorldTransform2D = componentGet(
-          this: worldTransforms
-          entityId: link.parent
+        # The parent's row is read as an ARGUMENT, not a binding: the child's
+        # componentSet below may append to this same table.
+        let composed: WorldTransform2D = composeWorld2D(
+          parentWorld: componentView(this: worldTransforms, entityId: link.parent)
+          local: local
         )
-        componentSet(
-          this: worldTransforms
-          entityId: entityId
-          data: composeWorld2D(parentWorld: parentWorld, local: local)
-        )
+        componentSet(this: worldTransforms, entityId: entityId, data: composed)
       } else {
         componentSet(this: worldTransforms, entityId: entityId, data: rootWorld2D(local: local))
       }

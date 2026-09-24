@@ -217,7 +217,10 @@ func handleScreenSwitch(
     scrollFsm.scrollY = 0.0
   } else {
     if componentHas(this: world.scrollStates, entityId: result.newScrollTarget) {
-      let s: ScrollState = componentGet(this: world.scrollStates, entityId: result.newScrollTarget)
+      let s: view ScrollState => componentView(
+        this: world.scrollStates
+        entityId: result.newScrollTarget
+      )
       scrollFsm.scrollY = s.y
     } else {
       scrollFsm.scrollY = 0.0

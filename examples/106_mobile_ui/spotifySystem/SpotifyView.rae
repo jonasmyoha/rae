@@ -24,6 +24,8 @@ import Time
 open ecs/Entity
 open ecs/ComponentTable
 
+open ecs/Query
+
 # PlaybackSystem lives in this example's playback.rae — auto-imported
 # from the same project directory. We mutate it here to sync the local
 # mock's `isPlaying` from Spotify's reported state so the play-button
@@ -446,7 +448,7 @@ func spotifyBindingSystem(world: mod UiWorld, spotifySystem: mod SpotifySystem) 
   var i: Int = 0
   loop i < n {
     let entityId: EntityId = componentEntityAt(this: world.textBindings, i: i)
-    let binding: TextBinding = componentDataAt(this: world.textBindings, i: i)
+    let binding: view TextBinding => queryViewAt(table: world.textBindings, denseIndex: i)
     if binding.key is "spotify.title" {
       writeTrackText(world: world, entityId: entityId, value: spotifySystem.title)
     }

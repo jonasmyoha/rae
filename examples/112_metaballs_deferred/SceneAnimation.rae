@@ -68,7 +68,7 @@ func buildClusterTags(world: view World3d) ret ClusterTags {
   }
   loop var i: Int = 0, i < world3dSdfCount(world: world), ++i {
     let entityId: EntityId = world3dSdfEntityAt(world: world, i: i)
-    let sdf: SdfPrimitive = world3dSdfDataAt(world: world, i: i)
+    let sdf: view SdfPrimitive => world3dSdfDataAt(world: world, i: i)
     if sdf.cluster is 0 {
       addTag(table: tags.c0, entityId: entityId)
     }
@@ -119,14 +119,13 @@ func animateScene(world: mod World3d, sceneId: view Int, time: view Float) {
   var i: Int = 1
   loop i < world3dMeshRendererCount(world: world) {
     let entityId: EntityId = world3dMeshRendererEntityAt(world: world, i: i)
-    var transform: Transform3d = world3dGetTransform(world: world, entityId: entityId)
+    let transform: mod Transform3d => world3dTransformMod(world: world, entityId: entityId)
     let phase: Float = i.toFloat() * 0.173 + sceneId.toFloat()
     transform.rotation = Vec3.create(
       x: time * (0.08 + sceneId.toFloat() * 0.04)
       y: Math.sin(x: time * 0.18 + phase) * 0.28
       z: time * (0.12 + (i % 5).toFloat() * 0.025)
     )
-    world3dWriteTransform(world: world, entityId: entityId, transform: transform)
     i = i + 1
   }
 }
@@ -166,7 +165,7 @@ func animateMetaballLab(world: mod World3d, tags: view ClusterTags, time: view F
   let m0: List(Query2Match) = tagged(dataTable: world.sdfs, tagTable: tags.c0)
   loop let hit: view Query2Match in m0 {
     let p: LabPulse = labPulse(time: time, i: hit.indexA)
-    var transform: Transform3d = world3dGetTransform(world: world, entityId: hit.entityId)
+    let transform: mod Transform3d => world3dTransformMod(world: world, entityId: hit.entityId)
     let t: Float = time * 0.46
     transform.position = Vec3.create(
       x: 0.0 - 6.0 + Math.cos(x: t + p.phase) * (1.9 + p.escape * 4.4)
@@ -175,14 +174,13 @@ func animateMetaballLab(world: mod World3d, tags: view ClusterTags, time: view F
     )
     let r: Float = (0.30 + Math.sin(x: time * 0.9 + p.phase) * 0.09) * p.away
     transform.scale = Vec3.create(x: r, y: r, z: r)
-    world3dWriteTransform(world: world, entityId: hit.entityId, transform: transform)
   }
   # Titan (cluster 1): very large, very sticky (k=1.35) — never separates, it
   # wallows, the opposite end of the range from the swarm.
   let m1: List(Query2Match) = tagged(dataTable: world.sdfs, tagTable: tags.c1)
   loop let hit: view Query2Match in m1 {
     let p: LabPulse = labPulse(time: time, i: hit.indexA)
-    var transform: Transform3d = world3dGetTransform(world: world, entityId: hit.entityId)
+    let transform: mod Transform3d => world3dTransformMod(world: world, entityId: hit.entityId)
     let t: Float = time * 0.21
     transform.position = Vec3.create(
       x: Math.cos(x: t + p.phase) * 1.35
@@ -191,14 +189,13 @@ func animateMetaballLab(world: mod World3d, tags: view ClusterTags, time: view F
     )
     let r: Float = 1.85 + Math.sin(x: time * 0.37 + p.phase * 1.9) * 0.42
     transform.scale = Vec3.create(x: r, y: r, z: r)
-    world3dWriteTransform(world: world, entityId: hit.entityId, transform: transform)
   }
   # Mist (cluster 2): small radii and k=0.18 — barely fusing, a cloud of
   # separate droplets, almost no smooth-union.
   let m2: List(Query2Match) = tagged(dataTable: world.sdfs, tagTable: tags.c2)
   loop let hit: view Query2Match in m2 {
     let p: LabPulse = labPulse(time: time, i: hit.indexA)
-    var transform: Transform3d = world3dGetTransform(world: world, entityId: hit.entityId)
+    let transform: mod Transform3d => world3dTransformMod(world: world, entityId: hit.entityId)
     let t: Float = time * 0.63
     transform.position = Vec3.create(
       x: 6.4 + Math.cos(x: t * 0.9 + p.phase * 1.7) * (2.6 + p.escape * 3.2)
@@ -207,13 +204,12 @@ func animateMetaballLab(world: mod World3d, tags: view ClusterTags, time: view F
     )
     let r: Float = (0.27 + Math.sin(x: time * 1.5 + p.phase * 2.6) * 0.09) * p.away
     transform.scale = Vec3.create(x: r, y: r, z: r)
-    world3dWriteTransform(world: world, entityId: hit.entityId, transform: transform)
   }
   # Ember (cluster 3): fast, hot, medium size, sticky enough to boil internally.
   let m3: List(Query2Match) = tagged(dataTable: world.sdfs, tagTable: tags.c3)
   loop let hit: view Query2Match in m3 {
     let p: LabPulse = labPulse(time: time, i: hit.indexA)
-    var transform: Transform3d = world3dGetTransform(world: world, entityId: hit.entityId)
+    let transform: mod Transform3d => world3dTransformMod(world: world, entityId: hit.entityId)
     let t: Float = time * 1.45
     transform.position = Vec3.create(
       x: 0.0 - 2.6 + Math.cos(x: t + p.phase * 1.3) * (1.3 + p.escape * 3.0)
@@ -222,14 +218,13 @@ func animateMetaballLab(world: mod World3d, tags: view ClusterTags, time: view F
     )
     let r: Float = (0.62 + Math.sin(x: t * 0.7 + p.phase * 2.1) * 0.26) * p.away
     transform.scale = Vec3.create(x: r, y: r, z: r)
-    world3dWriteTransform(world: world, entityId: hit.entityId, transform: transform)
   }
   # Orchid (cluster 4): slow, large-ish, long escapes — the clearest place to
   # watch a droplet pinch off and rejoin.
   let m4: List(Query2Match) = tagged(dataTable: world.sdfs, tagTable: tags.c4)
   loop let hit: view Query2Match in m4 {
     let p: LabPulse = labPulse(time: time, i: hit.indexA)
-    var transform: Transform3d = world3dGetTransform(world: world, entityId: hit.entityId)
+    let transform: mod Transform3d => world3dTransformMod(world: world, entityId: hit.entityId)
     let t: Float = time * 0.38
     transform.position = Vec3.create(
       x: 3.2 + Math.cos(x: t + p.phase) * (1.2 + p.escape * 4.8)
@@ -238,14 +233,13 @@ func animateMetaballLab(world: mod World3d, tags: view ClusterTags, time: view F
     )
     let r: Float = (0.78 + Math.sin(x: time * 0.5 + p.phase) * 0.20) * p.away
     transform.scale = Vec3.create(x: r, y: r, z: r)
-    world3dWriteTransform(world: world, entityId: hit.entityId, transform: transform)
   }
   # Verdigris (cluster 5): the middle case — medium count, medium stickiness, a
   # ring that breathes in and out through the centre of the frame.
   let m5: List(Query2Match) = tagged(dataTable: world.sdfs, tagTable: tags.c5)
   loop let hit: view Query2Match in m5 {
     let p: LabPulse = labPulse(time: time, i: hit.indexA)
-    var transform: Transform3d = world3dGetTransform(world: world, entityId: hit.entityId)
+    let transform: mod Transform3d => world3dTransformMod(world: world, entityId: hit.entityId)
     let t: Float = time * 0.55
     let ring: Float = 2.2 + Math.sin(x: time * 0.33) * 0.9
     transform.position = Vec3.create(
@@ -255,14 +249,13 @@ func animateMetaballLab(world: mod World3d, tags: view ClusterTags, time: view F
     )
     let r: Float = (0.44 + Math.sin(x: t + p.phase * 1.5) * 0.14) * p.away
     transform.scale = Vec3.create(x: r, y: r, z: r)
-    world3dWriteTransform(world: world, entityId: hit.entityId, transform: transform)
   }
   # Pearl (cluster 6): few, big, pale and nearly still — a rest for the eye, the
   # control case showing the same smoothing without motion.
   let m6: List(Query2Match) = tagged(dataTable: world.sdfs, tagTable: tags.c6)
   loop let hit: view Query2Match in m6 {
     let p: LabPulse = labPulse(time: time, i: hit.indexA)
-    var transform: Transform3d = world3dGetTransform(world: world, entityId: hit.entityId)
+    let transform: mod Transform3d => world3dTransformMod(world: world, entityId: hit.entityId)
     let t: Float = time * 0.16
     transform.position = Vec3.create(
       x: 0.0 - 4.4 + Math.cos(x: t + p.phase) * 0.85
@@ -271,7 +264,6 @@ func animateMetaballLab(world: mod World3d, tags: view ClusterTags, time: view F
     )
     let r: Float = 1.05 + Math.sin(x: time * 0.24 + p.phase * 1.3) * 0.18
     transform.scale = Vec3.create(x: r, y: r, z: r)
-    world3dWriteTransform(world: world, entityId: hit.entityId, transform: transform)
   }
 }
 
@@ -291,8 +283,8 @@ func animateScene3(world: mod World3d, time: view Float) {
   var i: Int = 0
   loop i < world3dSdfCount(world: world) {
     let entityId: EntityId = world3dSdfEntityAt(world: world, i: i)
-    let sdf: SdfPrimitive = world3dSdfDataAt(world: world, i: i)
-    var transform: Transform3d = world3dGetTransform(world: world, entityId: entityId)
+    let sdf: view SdfPrimitive => world3dSdfDataAt(world: world, i: i)
+    let transform: mod Transform3d => world3dTransformMod(world: world, entityId: entityId)
     let phase: Float = i.toFloat() * 0.6283185
     let idx: Float = i.toFloat()
 
@@ -321,7 +313,6 @@ func animateScene3(world: mod World3d, time: view Float) {
     let breathe: Float = 1.0 + Math.sin(x: time * 0.7 + phase * 1.6) * 0.18
     let r: Float = base * breathe * (1.0 - 0.32 * escape)
     transform.scale = Vec3.create(x: r, y: r, z: r)
-    world3dWriteTransform(world: world, entityId: entityId, transform: transform)
     i = i + 1
   }
 }
@@ -340,16 +331,13 @@ func animateScene1(
   # the useful shape to watch here: a sphere looks identical under any
   # rotation, so it cannot show a wrong rotation order or a skewed normal
   # transform, and a flat-shaded cube shows both immediately.
-  var cubeATransform: Transform3d = world3dGetTransform(world: world, entityId: cubeA)
+  let cubeATransform: mod Transform3d => world3dTransformMod(world: world, entityId: cubeA)
   cubeATransform.rotation = Vec3.create(x: time * 0.7, y: time * 0.31, z: 0.0)
-  world3dWriteTransform(world: world, entityId: cubeA, transform: cubeATransform)
-  var cubeBTransform: Transform3d = world3dGetTransform(world: world, entityId: cubeB)
+  let cubeBTransform: mod Transform3d => world3dTransformMod(world: world, entityId: cubeB)
   cubeBTransform.rotation = Vec3.create(x: 0.0, y: time * 0.55, z: time * 0.9)
-  world3dWriteTransform(world: world, entityId: cubeB, transform: cubeBTransform)
 
-  var torusTransform: Transform3d = world3dGetTransform(world: world, entityId: torus)
+  let torusTransform: mod Transform3d => world3dTransformMod(world: world, entityId: torus)
   torusTransform.rotation = Vec3.create(x: time * 0.35, y: 0.0, z: time * 0.62)
-  world3dWriteTransform(world: world, entityId: torus, transform: torusTransform)
   # Heights are chosen against the ground plane at z=-0.75 so every ball
   # stays INSIDE the SSAO contact radius (~1.2 world units) for its whole
   # cycle, not merely at the bottom of its swing.
@@ -376,7 +364,7 @@ func animateScene1(
   let m1: List(Query2Match) = tagged(dataTable: world.sdfs, tagTable: tags.c1)
   loop let hit: view Query2Match in m1 {
     let phase: Float = hit.indexA.toFloat() * 1.2566371
-    var transform: Transform3d = world3dGetTransform(world: world, entityId: hit.entityId)
+    let transform: mod Transform3d => world3dTransformMod(world: world, entityId: hit.entityId)
     let slow: Float = time * 0.34
     transform.position = Vec3.create(
       x: 0.0 - 5.25 + Math.cos(x: slow + phase) * 0.62
@@ -385,14 +373,13 @@ func animateScene1(
     )
     let obsidianR: Float = 0.82 + Math.sin(x: time * 0.29 + phase * 1.7) * 0.14
     transform.scale = Vec3.create(x: obsidianR, y: obsidianR, z: obsidianR)
-    world3dWriteTransform(world: world, entityId: hit.entityId, transform: transform)
   }
   # Ember (cluster 2): fast and churning, big size swings; very sticky (k 1.15)
   # so it stays one mass and boils internally, making the colour gradient visible.
   let m2: List(Query2Match) = tagged(dataTable: world.sdfs, tagTable: tags.c2)
   loop let hit: view Query2Match in m2 {
     let phase: Float = hit.indexA.toFloat() * 1.2566371
-    var transform: Transform3d = world3dGetTransform(world: world, entityId: hit.entityId)
+    let transform: mod Transform3d => world3dTransformMod(world: world, entityId: hit.entityId)
     let fast: Float = time * 1.35
     transform.position = Vec3.create(
       x: 0.0 - 0.35 + Math.cos(x: fast + phase * 1.4) * 1.18
@@ -401,7 +388,6 @@ func animateScene1(
     )
     let emberR: Float = 0.78 + Math.sin(x: fast * 0.62 + phase * 2.3) * 0.42
     transform.scale = Vec3.create(x: emberR, y: emberR, z: emberR)
-    world3dWriteTransform(world: world, entityId: hit.entityId, transform: transform)
   }
   # Excursion (cluster 0): every third ball periodically breaks away toward the
   # camera far enough that the smooth-union (k 0.62) pinches off into a droplet,
@@ -411,7 +397,7 @@ func animateScene1(
   loop let hit: view Query2Match in m0 {
     let i: Int = hit.indexA
     let phase: Float = i.toFloat() * 1.2566371
-    var transform: Transform3d = world3dGetTransform(world: world, entityId: hit.entityId)
+    let transform: mod Transform3d => world3dTransformMod(world: world, entityId: hit.entityId)
     var excursion: Float = 0.0
     if i % 3 is 0 {
       var pulse: Float = Math.sin(x: time * 0.26 + phase * 3.1)
@@ -429,6 +415,5 @@ func animateScene1(
     )
     let radius: Float = 1.45 + Math.sin(x: time * 0.67 + phase * 2.0) * 0.16 - 0.08 * excursion
     transform.scale = Vec3.create(x: radius, y: radius, z: radius)
-    world3dWriteTransform(world: world, entityId: hit.entityId, transform: transform)
   }
 }

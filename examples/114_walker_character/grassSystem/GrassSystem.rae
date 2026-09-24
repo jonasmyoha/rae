@@ -23,6 +23,7 @@ import Noise
 import Vec3
 import ecs/Entity
 open ecs/ComponentTable
+open ecs/Query
 open Math3d
 open Gltf
 open Gpu3d
@@ -112,9 +113,9 @@ func updateGrassField(
   grassSystem.centreCellY = cellY
   loop var i: Int = 0, i < componentCount(this: world.grassBlades), ++i {
     let entityId: EntityId = componentEntityAt(this: world.grassBlades, i: i)
-    let blade: GrassBlade = componentDataAt(this: world.grassBlades, i: i)
-    let cellIndex: Int = blade.slot / grassPerCell
-    let slotInCell: Int = blade.slot % grassPerCell
+    let slot: Int = queryViewAt(table: world.grassBlades, denseIndex: i).slot
+    let cellIndex: Int = slot / grassPerCell
+    let slotInCell: Int = slot % grassPerCell
     let column: Int = cellIndex % terrainGridSide
     let row: Int = cellIndex / terrainGridSide
     componentSet(
@@ -125,7 +126,7 @@ func updateGrassField(
         cellY: cellY + row - terrainHalfGrid
         slotInCell: slotInCell
         groundZ: grassSystem.groundZ
-        slot: blade.slot
+        slot: slot
       )
     )
   }
@@ -154,7 +155,7 @@ func drawGrassField(
   toon: view Int
 ) {
   loop var index: Int = 0, index < componentCount(this: world.grassBlades), ++index {
-    let blade: GrassBlade = componentDataAt(this: world.grassBlades, i: index)
+    let blade: view GrassBlade => queryViewAt(table: world.grassBlades, denseIndex: index)
     let gust: Float = grassGust(phase: blade.phase, baseX: blade.baseX, time: time)
     let prevGust: Float = grassGust(phase: blade.phase, baseX: blade.baseX, time: time - deltaTime)
     let model: Mat4 = GbufferRecord.swayModel(

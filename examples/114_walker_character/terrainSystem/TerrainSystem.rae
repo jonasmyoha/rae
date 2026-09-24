@@ -26,6 +26,7 @@ open Mesh3d
 open GbufferInstanced
 open ecs/Entity
 open ecs/ComponentTable
+open ecs/Query
 open ecs/Transform
 
 # Single source of truth for the ground colour: the terrain ground material AND
@@ -400,11 +401,11 @@ func updateInfiniteTerrain(
 
   loop var i: Int = 0, i < componentCount(this: world.propKinds), ++i {
     let entityId: EntityId = componentEntityAt(this: world.propKinds, i: i)
-    var pk: PropKind = componentDataAt(this: world.propKinds, i: i)
+    let pk: mod PropKind => queryModAt(table: world.propKinds, denseIndex: i)
     let ccx: Int = slotCellX(centreCellX: cellX, slot: pk.slot)
     let ccy: Int = slotCellY(centreCellY: cellY, slot: pk.slot)
     if pk.kind is kindTile {
-      let tile: TileMesh = componentGet(this: world.tileMeshes, entityId: entityId)
+      let tile: view TileMesh => componentView(this: world.tileMeshes, entityId: entityId)
       reshapeTerrainTile(
         terrainSystem: terrainSystem
         renderer: renderer
@@ -448,7 +449,6 @@ func updateInfiniteTerrain(
         y: t.position.y
         minGrass: kindMinGrass(kind: pk.kind)
       )
-      componentSet(this: world.propKinds, entityId: entityId, data: pk)
     }
   }
   ret true
@@ -480,10 +480,10 @@ func drawTerrainProps(
   resetInstanceBatch(batch: terrainSystem.tallCrownProp.batch)
   loop var i: Int = 0, i < componentCount(this: world.propKinds), ++i {
     let entityId: EntityId = componentEntityAt(this: world.propKinds, i: i)
-    let pk: PropKind = componentDataAt(this: world.propKinds, i: i)
+    let pk: view PropKind => queryViewAt(table: world.propKinds, denseIndex: i)
     if pk.active and pk.kind is not kindTile {
       let model: Mat4 = transform3dToMatrix(
-        t: componentGet(this: world.transforms, entityId: entityId)
+        t: componentView(this: world.transforms, entityId: entityId)
       )
       if pk.kind is kindRock {
         gatherKind(prop: terrainSystem.rockProp, model: model)
@@ -501,7 +501,7 @@ func drawTerrainProps(
         gatherKind(prop: terrainSystem.grassProp, model: model)
       }
       if pk.kind is kindTree {
-        if componentGet(this: world.treeVariants, entityId: entityId).broad {
+        if componentView(this: world.treeVariants, entityId: entityId).broad {
           gatherKind(prop: terrainSystem.broadTrunkProp, model: model)
           gatherKind(prop: terrainSystem.broadCrownProp, model: model)
         } else {
@@ -530,11 +530,11 @@ func drawTerrainGround(
 ) {
   loop var i: Int = 0, i < componentCount(this: world.tileMeshes), ++i {
     let entityId: EntityId = componentEntityAt(this: world.tileMeshes, i: i)
-    let tile: TileMesh = componentDataAt(this: world.tileMeshes, i: i)
+    let tile: view TileMesh => queryViewAt(table: world.tileMeshes, denseIndex: i)
     if tile.meshId >= 1 {
       # #745: Quat all the way — the tile's authoritative transform is already a
       # Quat Transform3D; compose it straight to a Mat4 (no Euler Vec3 detour).
-      let q: Transform3D = componentGet(this: world.transforms, entityId: entityId)
+      let q: view Transform3D => componentView(this: world.transforms, entityId: entityId)
       let model: Mat4 = transform3dToMatrix(t: q)
       drawTerrainMesh(
         cache: cache
@@ -560,10 +560,10 @@ func drawTerrainPropsShadow(
 ) {
   loop var i: Int = 0, i < componentCount(this: world.propKinds), ++i {
     let entityId: EntityId = componentEntityAt(this: world.propKinds, i: i)
-    let pk: PropKind = componentDataAt(this: world.propKinds, i: i)
+    let pk: view PropKind => queryViewAt(table: world.propKinds, denseIndex: i)
     if pk.active and pk.kind is not kindTile {
       let model: Mat4 = transform3dToMatrix(
-        t: componentGet(this: world.transforms, entityId: entityId)
+        t: componentView(this: world.transforms, entityId: entityId)
       )
       if pk.kind is kindRock {
         castKind(renderer: renderer, mesh: terrainSystem.rockProp.mesh, model: model)
@@ -581,7 +581,7 @@ func drawTerrainPropsShadow(
         castKind(renderer: renderer, mesh: terrainSystem.grassProp.mesh, model: model)
       }
       if pk.kind is kindTree {
-        if componentGet(this: world.treeVariants, entityId: entityId).broad {
+        if componentView(this: world.treeVariants, entityId: entityId).broad {
           castKind(renderer: renderer, mesh: terrainSystem.broadTrunkProp.mesh, model: model)
           castKind(renderer: renderer, mesh: terrainSystem.broadCrownProp.mesh, model: model)
         } else {

@@ -93,7 +93,7 @@ func paintShapeG(
   chain255: view Int
   canvas: mod Gpu2dCanvas
 ) {
-  let sh: Shape = componentGet(this: world.shapes, entityId: entityId)
+  let sh: view Shape => componentView(this: world.shapes, entityId: entityId)
   # Resolve a palette slot from the ACTIVE theme at paint (#235) so a
   # dark/light toggle re-colours without a scene re-parse; empty slot
   # keeps the literal fill.
@@ -241,7 +241,7 @@ func visualBoundsAt(
   res: view Gpu2dUi
 ) ret SdfTextBounds {
   if componentHas(this: world.visualBounds, entityId: entityId) {
-    let vb: VisualBounds = componentGet(this: world.visualBounds, entityId: entityId)
+    let vb: view VisualBounds => componentView(this: world.visualBounds, entityId: entityId)
     var isFresh: Bool = false
     if vb.measuredIcon is isIcon {
       if vb.measuredSize is sizePx {
@@ -312,7 +312,7 @@ func paintSpriteG(
     var gx: Float = drawX + (drawW - sz) / 2.0
     var gy: Float = drawY + (drawH - sz) / 2.0 + sz
     if componentHas(this: world.opticalAligns, entityId: entityId) {
-      let oa: OpticalAlign = componentGet(this: world.opticalAligns, entityId: entityId)
+      let oa: view OpticalAlign => componentView(this: world.opticalAligns, entityId: entityId)
       if oa.enabled {
         let bounds: SdfTextBounds = visualBoundsAt(
           world: world
@@ -351,7 +351,7 @@ func paintSpriteG(
   # image quad's own corner radius — a circle is the centred square at half
   # its side. (A mask sourced from another node stays a rect scissor.)
   if componentHas(this: world.maskShapes, entityId: entityId) {
-    let mask: MaskShape = componentGet(this: world.maskShapes, entityId: entityId)
+    let mask: view MaskShape => componentView(this: world.maskShapes, entityId: entityId)
     if mask.sourceNodeId.length() is 0 {
       if mask.kind is MaskKind.circle {
         var side: Float = drawW
@@ -477,14 +477,14 @@ func paintTextG(
   }
   var centerX: Bool = resolveTextIsCentered(theme: res.theme, styleId: t.styleId)
   var rightX: Bool = resolveTextIsRightAligned(theme: res.theme, styleId: t.styleId)
-  var optical: OpticalAlign = {
-    enabled: false
-    centerX: false
-    centerY: false
-    bias: Vec2 { x: 0.0, y: 0.0 }
-  }
+  # The optical-align fields this draw uses, read off the component through a
+  # view when the node has one (plain values, no component copy).
+  var opticalEnabled: Bool = false
+  var opticalCenterX: Bool = false
+  var opticalCenterY: Bool = false
+  var opticalBias: Vec2 = { x: 0.0, y: 0.0 }
   if componentHas(this: world.aligns, entityId: entityId) {
-    let al: Align = componentGet(this: world.aligns, entityId: entityId)
+    let al: view Align => componentView(this: world.aligns, entityId: entityId)
     if al.hasX {
       if al.x is AlignKind.center {
         centerX = true
@@ -495,7 +495,11 @@ func paintTextG(
     }
   }
   if componentHas(this: world.opticalAligns, entityId: entityId) {
-    optical = componentGet(this: world.opticalAligns, entityId: entityId)
+    let optical: view OpticalAlign => componentView(this: world.opticalAligns, entityId: entityId)
+    opticalEnabled = optical.enabled
+    opticalCenterX = optical.centerX
+    opticalCenterY = optical.centerY
+    opticalBias = optical.bias
     if optical.enabled {
       centerX = optical.centerX
       if optical.centerX {
@@ -525,7 +529,7 @@ func paintTextG(
       drawX = wt.position.x + boxW - bounds.right
     }
   }
-  if optical.enabled {
+  if opticalEnabled {
     let bounds: SdfTextBounds = visualBoundsAt(
       world: world
       entityId: entityId
@@ -534,11 +538,11 @@ func paintTextG(
       sizePx: size
       res: res
     )
-    if optical.centerX {
-      drawX = wt.position.x + boxW / 2.0 - (bounds.left + bounds.right) / 2.0 + optical.bias.x
+    if opticalCenterX {
+      drawX = wt.position.x + boxW / 2.0 - (bounds.left + bounds.right) / 2.0 + opticalBias.x
     }
-    if optical.centerY {
-      drawY = wt.position.y + boxH / 2.0 - (bounds.top + bounds.bottom) / 2.0 + optical.bias.y
+    if opticalCenterY {
+      drawY = wt.position.y + boxH / 2.0 - (bounds.top + bounds.bottom) / 2.0 + opticalBias.y
     }
   }
   if t.wrapWidthMode is WrapWidthMode.nodeWidth {
@@ -571,7 +575,7 @@ func paintTextG(
   var shOffY: Float = 0.0
   var shSoft: Float = 1.0
   if componentHas(this: world.textShadows, entityId: entityId) {
-    let sh: TextShadow = componentGet(this: world.textShadows, entityId: entityId)
+    let sh: view TextShadow => componentView(this: world.textShadows, entityId: entityId)
     hasShadow = true
     shCol = sh.color
     shOffX = sh.offset.x
@@ -673,8 +677,11 @@ func paintEntityG(
   if componentHas(this: uiSystems.transform2d.worldTransforms, entityId: entityId) is false {
     ret
   }
-  let cr: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entityId: entityId)
-  let wt: WorldTransform2D = componentGet(
+  let cr: view ComputedRect => componentView(
+    this: uiSystems.layout.computedRects
+    entityId: entityId
+  )
+  let wt: view WorldTransform2D => componentView(
     this: uiSystems.transform2d.worldTransforms
     entityId: entityId
   )
@@ -768,7 +775,7 @@ func entityClipsChildrenG(world: view UiWorld, entityId: view EntityId) ret Bool
   if componentHas(this: world.overflows, entityId: entityId) is false {
     ret false
   }
-  let op: OverflowPolicy = componentGet(this: world.overflows, entityId: entityId)
+  let op: view OverflowPolicy => componentView(this: world.overflows, entityId: entityId)
   ret op.mode is OverflowMode.clip
 }
 
@@ -816,11 +823,11 @@ func paintSubtreeG(
     if entityClipsChildrenG(world: world, entityId: entityId) {
       if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) {
         if componentHas(this: uiSystems.transform2d.worldTransforms, entityId: entityId) {
-          let ccr: ComputedRect = componentGet(
+          let ccr: view ComputedRect => componentView(
             this: uiSystems.layout.computedRects
             entityId: entityId
           )
-          let cwt: WorldTransform2D = componentGet(
+          let cwt: view WorldTransform2D => componentView(
             this: uiSystems.transform2d.worldTransforms
             entityId: entityId
           )

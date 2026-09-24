@@ -82,7 +82,7 @@ func rectFieldValue(
   }
   if field is RectField.w or field is RectField.h {
     if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) {
-      let computed: ComputedRect = componentGet(
+      let computed: view ComputedRect => componentView(
         this: uiSystems.layout.computedRects
         entityId: entityId
       )
@@ -94,7 +94,7 @@ func rectFieldValue(
     ret 0.0
   }
   if componentHas(this: uiSystems.transform2d.worldTransforms, entityId: entityId) {
-    let transform: WorldTransform2D = componentGet(
+    let transform: view WorldTransform2D => componentView(
       this: uiSystems.transform2d.worldTransforms
       entityId: entityId
     )
@@ -139,7 +139,7 @@ func rectFieldDriver(
   var driver: String = ""
   var parent: EntityId = noEntity()
   if componentHas(this: uiSystems.hierarchy.parents, entityId: entityId) {
-    parent = componentGet(this: uiSystems.hierarchy.parents, entityId: entityId).parent
+    parent = componentView(this: uiSystems.hierarchy.parents, entityId: entityId).parent
   }
   if isNone(this: parent) is false and componentHas(this: world.layouts, entityId: parent) {
     let layout: view Layout => componentView(this: world.layouts, entityId: parent)
