@@ -20,6 +20,7 @@ open inspectorSystem/NodeQuery
 open inspectorSystem/RectWidget
 open ui/Scene
 open inspectorSystem/ComponentWidget
+open inspectorSystem/RectEdit
 open inspectorSystem/ComponentEdit
 
 # The inspector renders the COMPOSITE of the whole selection. There is no
@@ -47,7 +48,6 @@ func syncInspectorPanel(
     chromeSystem.inspectorType = "click a node, or use the arrows"
     chromeSystem.inspectorComponents = ""
     chromeSystem.inspectorAppComponents = ""
-    chromeSystem.inspectorRect = ""
     chromeSystem.inspectorParents = ""
     chromeSystem.inspectorWidgets = ""
     setWidgetRows(world: world, chromeSystem: chromeSystem, rows: List.create(ListViewRow, cap: 1))
@@ -130,14 +130,6 @@ func syncInspectorPanel(
   } else {
     chromeSystem.inspectorAppComponents = "not a lib component: {appComponents}"
   }
-  # The Rect widget, over the WHOLE selection: a field the selected entities
-  # agree on shows its value, one they differ on shows the mixed marker, and
-  # each carries what drives it (#54986153).
-  chromeSystem.inspectorRect = rectWidgetLine(
-    world: world
-    uiSystems: uiSystems
-    selection: inspectorSystem.selection
-  )
   # Every other component gets its GENERATED widget (#24323144): a header row
   # per component in the union — carrying the partial count — then one row
   # per reflected field, folded over the selection. Rect is bespoke and
@@ -260,7 +252,20 @@ func syncInspectorPanel(
     if matchesComponentFilter(name: tally.name, filter: inspectorSystem.componentFilter) is false {
       continue
     }
+    # Rect is the bespoke widget: four real input rows and the W/H lock
+    # (#44133406) instead of generated field rows.
     if widgetOverride(name: tally.name).bespoke {
+      var rectHeader: String = "{tally.name}"
+      if tally.count < members {
+        rectHeader = "{tally.name} ({tally.count}/{members})"
+      }
+      appendRectRows(
+        rows: widgetRows
+        world: world
+        uiSystems: uiSystems
+        inspectorSystem: inspectorSystem
+        header: rectHeader
+      )
       continue
     }
     # Render the fields first: a component whose every field is hidden

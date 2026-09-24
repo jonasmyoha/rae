@@ -1,0 +1,377 @@
+# inspectorSystem/RectEdit — typing into the Rect group's X / Y / W / H.
+#
+# The Rect widget's MODEL (RectWidget.rae: the selection-set fold, the mixed
+# marker, the driver annotation, write-to-all) already existed; this is the
+# input on top of it. One field has focus at a time and collects a DRAFT:
+#
+#   click a row / Tab     focus that field (Tab: commit this one, move on)
+#   digits . -            type into the draft
+#   Backspace             delete the last character
+#   Enter, or a click     commit the draft to EVERY selected entity, stop
+#     anywhere else
+#   Esc                   drop the draft, stop — nothing is written
+#
+# Focusing a field SELECTS its whole value, so the first keystroke replaces it
+# rather than appending to "128". A mixed field keeps showing the mixed marker
+# until something is typed, and an empty draft commits NOTHING — tabbing
+# through a mixed field must not flatten the selection to one value.
+#
+# Every key and every scripted step below calls these same functions, which is
+# what keeps RAE_UI_EDITOR_TEST_SET_RECT honest: the headless gate exercises
+# the commit path the keyboard uses, not a back door into `applyRectField`.
+open ui/Ecs
+open ui/Components
+open ui/UiSystems
+open ecs/Entity
+open ecs/ComponentTable
+open inspectorSystem/RectWidget
+
+func rectFieldName(field: view RectField) ret String {
+  if field is RectField.x {
+    ret "x"
+  }
+  if field is RectField.y {
+    ret "y"
+  }
+  if field is RectField.w {
+    ret "w"
+  }
+  ret "h"
+}
+
+# Tab order: X, Y, W, H, and round again.
+func nextRectField(field: view RectField) ret RectField {
+  if field is RectField.x {
+    ret RectField.y
+  }
+  if field is RectField.y {
+    ret RectField.w
+  }
+  if field is RectField.w {
+    ret RectField.h
+  }
+  ret RectField.x
+}
+
+func rectFocus(inspectorSystem: mod InspectorSystem, field: view RectField) {
+  inspectorSystem.rectEditing = true
+  inspectorSystem.rectField = field
+  inspectorSystem.rectDraft = ""
+}
+
+# Append one typed character, keeping the draft a number in progress: digits
+# always, one `.`, and `-` only as the first character.
+func rectTypeChar(inspectorSystem: mod InspectorSystem, character: view String) {
+  let draft: String = "{inspectorSystem.rectDraft}"
+  if character is "-" and draft.length() > 0 {
+    ret
+  }
+  if character is "." and draft.indexOf(sub: ".") >= 0 {
+    ret
+  }
+  inspectorSystem.rectDraft = "{draft}{character}"
+}
+
+func rectBackspace(inspectorSystem: mod InspectorSystem) {
+  let length: Int = inspectorSystem.rectDraft.length()
+  if length > 0 {
+    inspectorSystem.rectDraft = inspectorSystem.rectDraft.sub(start: 0, len: length - 1)
+  }
+}
+
+# Is the draft a number worth writing? Empty, a lone `-`, a lone `.` or `-.`
+# is a field that was focused but not typed into, which commits nothing.
+func rectDraftHasValue(draft: view String) ret Bool {
+  if draft.length() is 0 {
+    ret false
+  }
+  ret draft is not "-" and draft is not "." and draft is not "-."
+}
+
+# The one place a W or H edit keeps the aspect ratio (the group lock). Each
+# selected entity keeps its OWN ratio: locking two differently-shaped nodes and
+# typing a width scales each by its own proportion, never forces them to one
+# shape. An entity with a zero on either axis has no ratio to keep, so it takes
+# the typed value alone — the lock cannot invent a shape.
+func applyRectFieldLocked(
+  world: mod UiWorld
+  uiSystems: view UiSystems
+  selection: view List(EntityId)
+  field: view RectField
+  value: view Float
+  locked: view Bool
+) ret Int {
+  let sizing: Bool = field is RectField.w or field is RectField.h
+  if locked is false or sizing is false {
+    ret applyRectField(
+      world: world
+      uiSystems: uiSystems
+      selection: selection
+      field: field
+      value: value
+    )
+  }
+  var written: Int = 0
+  loop let entity: view EntityId in selection {
+    if isNone(this: entity) {
+      continue
+    }
+    let x: Float = rectFieldValue(
+      world: world
+      uiSystems: uiSystems
+      entity: entity
+      field: RectField.x
+    )
+    let y: Float = rectFieldValue(
+      world: world
+      uiSystems: uiSystems
+      entity: entity
+      field: RectField.y
+    )
+    let w0: Float = rectFieldValue(
+      world: world
+      uiSystems: uiSystems
+      entity: entity
+      field: RectField.w
+    )
+    let h0: Float = rectFieldValue(
+      world: world
+      uiSystems: uiSystems
+      entity: entity
+      field: RectField.h
+    )
+    var w: Float = w0
+    var h: Float = h0
+    if field is RectField.w {
+      w = value
+      if w0 is not 0.0 {
+        h = h0 * value / w0
+      }
+    } else {
+      h = value
+      if h0 is not 0.0 {
+        w = w0 * value / h0
+      }
+    }
+    let next: Rect = { position: { x: x, y: y }, size: { x: w, y: h } }
+    componentSet(this: world.rects, entity: entity, data: next)
+    written = written + 1
+  }
+  ret written
+}
+
+# Commit the draft to the WHOLE selection and clear it. Returns how many
+# entities were written — 0 for a field that was focused but never typed into.
+func rectCommit(
+  inspectorSystem: mod InspectorSystem
+  world: mod UiWorld
+  uiSystems: view UiSystems
+) ret Int {
+  let draft: String = "{inspectorSystem.rectDraft}"
+  inspectorSystem.rectDraft = ""
+  if inspectorSystem.rectEditing is false or rectDraftHasValue(draft: draft) is false {
+    ret 0
+  }
+  let written: Int = applyRectFieldLocked(
+    world: world
+    uiSystems: uiSystems
+    selection: inspectorSystem.selection
+    field: inspectorSystem.rectField
+    value: draft.toFloat()
+    locked: inspectorSystem.rectLocked
+  )
+  log(
+    "[ui-editor] rect commit {rectFieldName(field: inspectorSystem.rectField)}={draft} -> {written}"
+  )
+  ret written
+}
+
+# Enter, or a click anywhere else: commit and stop editing.
+func rectEnter(
+  inspectorSystem: mod InspectorSystem
+  world: mod UiWorld
+  uiSystems: view UiSystems
+) ret Int {
+  let written: Int = rectCommit(
+    inspectorSystem: inspectorSystem
+    world: world
+    uiSystems: uiSystems
+  )
+  inspectorSystem.rectEditing = false
+  ret written
+}
+
+# Tab: commit this field and move to the next, still editing.
+func rectTab(
+  inspectorSystem: mod InspectorSystem
+  world: mod UiWorld
+  uiSystems: view UiSystems
+) ret Int {
+  let written: Int = rectCommit(
+    inspectorSystem: inspectorSystem
+    world: world
+    uiSystems: uiSystems
+  )
+  inspectorSystem.rectField = nextRectField(field: inspectorSystem.rectField)
+  ret written
+}
+
+# Esc: drop the draft and stop. Nothing is written, so the value on every
+# selected entity is exactly what it was before the field was focused.
+func rectEscape(inspectorSystem: mod InspectorSystem) {
+  inspectorSystem.rectDraft = ""
+  inspectorSystem.rectEditing = false
+}
+
+func rectToggleLock(inspectorSystem: mod InspectorSystem) {
+  inspectorSystem.rectLocked = inspectorSystem.rectLocked is false
+  log("[ui-editor] rect lock {inspectorSystem.rectLocked}")
+}
+
+# The Rect group's rows for the inspector's component list: a header with the
+# component's remove affordance, the lock toggle, then one input row per field.
+# The FOCUSED row shows what the keyboard is doing — `[128]|` while the whole
+# value is selected (the next key replaces it), `20|` once something is typed.
+func appendRectRows(
+  rows: mod List(ListViewRow)
+  world: view UiWorld
+  uiSystems: view UiSystems
+  inspectorSystem: view InspectorSystem
+  header: view String
+) {
+  addWidgetRow(
+    rows: rows
+    id: "Rect"
+    name: header
+    value: "remove"
+    indent: 0
+    action: "compRemove:Rect"
+  )
+  var lockText: String = "off"
+  if inspectorSystem.rectLocked {
+    lockText = "on"
+  }
+  addWidgetRow(
+    rows: rows
+    id: "Rect.lock"
+    name: "lock w/h"
+    value: lockText
+    indent: 1
+    action: "rectLock"
+  )
+  var field: RectField = RectField.x
+  loop var i: Int = 0, i < 4, ++i {
+    let resolved: FieldView = selectionRectField(
+      world: world
+      uiSystems: uiSystems
+      selection: inspectorSystem.selection
+      field: field
+    )
+    var text: String = "{resolved.text}"
+    if resolved.driver.length() > 0 {
+      text = "{text} {resolved.driver}"
+    }
+    if inspectorSystem.rectEditing and inspectorSystem.rectField is field {
+      if inspectorSystem.rectDraft.length() is 0 {
+        text = "[{resolved.text}]|"
+      } else {
+        text = "{inspectorSystem.rectDraft}|"
+      }
+    }
+    let name: String = rectFieldName(field: field)
+    addWidgetRow(
+      rows: rows
+      id: "Rect.{name}"
+      name: "{name}"
+      value: text
+      indent: 1
+      action: "rectFocus:{name}"
+    )
+    field = nextRectField(field: field)
+  }
+}
+
+# Run a scripted sequence through the SAME functions the keys call. Tokens,
+# space separated:
+#   lock             toggle the W/H lock
+#   focus:<f>        focus x / y / w / h
+#   type:<text>      type each character
+#   tab | enter | esc | backspace
+#   <f>=<value>      shorthand: focus, type, enter (the original hook syntax)
+# Returns how many entity writes the script committed in total.
+func runRectScript(
+  inspectorSystem: mod InspectorSystem
+  world: mod UiWorld
+  uiSystems: view UiSystems
+  script: view String
+) ret Int {
+  var written: Int = 0
+  let steps: List(String) = script.split(sep: " ")
+  loop let step: view String in steps {
+    let token: String = step.trim()
+    if token.length() is 0 {
+      continue
+    }
+    if token is "lock" {
+      rectToggleLock(inspectorSystem: inspectorSystem)
+      continue
+    }
+    if token is "tab" {
+      written = written + rectTab(
+        inspectorSystem: inspectorSystem
+        world: world
+        uiSystems: uiSystems
+      )
+      continue
+    }
+    if token is "enter" {
+      written = written + rectEnter(
+        inspectorSystem: inspectorSystem
+        world: world
+        uiSystems: uiSystems
+      )
+      continue
+    }
+    if token is "esc" {
+      rectEscape(inspectorSystem: inspectorSystem)
+      continue
+    }
+    if token is "backspace" {
+      rectBackspace(inspectorSystem: inspectorSystem)
+      continue
+    }
+    if token.startsWith(prefix: "focus:") {
+      if let field: RectField = rectFieldFromName(
+        name: token.sub(start: 6, len: token.length() - 6)
+      ) {
+        rectFocus(inspectorSystem: inspectorSystem, field: field)
+      }
+      continue
+    }
+    if token.startsWith(prefix: "type:") {
+      let text: String = token.sub(start: 5, len: token.length() - 5)
+      loop var i: Int = 0, i < text.length(), ++i {
+        rectTypeChar(inspectorSystem: inspectorSystem, character: text.sub(start: i, len: 1))
+      }
+      continue
+    }
+    let equals: Int = token.indexOf(sub: "=")
+    if equals > 0 {
+      if let field: RectField = rectFieldFromName(name: token.sub(start: 0, len: equals)) {
+        rectFocus(inspectorSystem: inspectorSystem, field: field)
+        let text: String = token.sub(start: equals + 1, len: token.length() - equals - 1)
+        loop var i: Int = 0, i < text.length(), ++i {
+          rectTypeChar(inspectorSystem: inspectorSystem, character: text.sub(start: i, len: 1))
+        }
+        written = written + rectEnter(
+          inspectorSystem: inspectorSystem
+          world: world
+          uiSystems: uiSystems
+        )
+        continue
+      }
+    }
+    log("[ui-editor] rect script: unknown step {token}")
+  }
+  ret written
+}
