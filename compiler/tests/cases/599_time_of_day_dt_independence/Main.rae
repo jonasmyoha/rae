@@ -16,10 +16,11 @@
 #
 # 5 fps is in the list deliberately: at 0.2 s per frame it is exactly the case
 # the old cap halved, turning a simulated day into twelve hours.
-import Math
-import Vec3
-import Scene3d
-open app3d/SettingsDialog
+#
+# It tests the clock module directly, not through the settings dialog that owns
+# it: the dialog pulls in the whole UI and renderer (105 modules, ~18 s to
+# build), the clock needs only lib/Calendar.
+open app3d/TimeOfDay
 
 func approxEq(a: view Float, b: view Float, tol: view Float) ret Bool {
   var d: Float = a - b
@@ -36,23 +37,16 @@ func approxEq(a: view Float, b: view Float, tol: view Float) ret Bool {
 # step that crosses two midnights -- it read a correct two-day jump as twelve
 # hours and failed a passing implementation.
 func hoursAfter(deltaTime: view Float, frames: view Int) ret Float {
-  var settingsState: SettingsState = createSettingsState(
-    scene: 1
-    sceneCount: 3
-    speed: 1.0
-    toon: false
-    hour: 0.0
-    skyModel: SettingsSkyModel.preetham
-  )
-  let startDay: Int = settingsState.dayOfYear
+  var timeOfDay: TimeOfDay = createTimeOfDay(hour: 0.0)
+  let startDay: Int = timeOfDay.dayOfYear
   var i: Int = 0
   loop i < frames {
-    settingsAdvanceTime(settingsState: settingsState, deltaTime: deltaTime)
+    timeOfDayAdvance(timeOfDay: timeOfDay, deltaTime: deltaTime)
     i = i + 1
   }
   # No year wrap in these runs: the default day is midsummer and the longest
   # case here advances two days.
-  ret (settingsState.dayOfYear - startDay).toFloat() * 24.0 + settingsState.hour
+  ret (timeOfDay.dayOfYear - startDay).toFloat() * 24.0 + timeOfDay.hour
 }
 
 func main() {

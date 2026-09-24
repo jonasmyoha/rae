@@ -32,6 +32,7 @@ open Vec3
 open SkyHosek
 open Sky
 open Calendar
+open app3d/TimeOfDay
 open app3d/CameraBar
 open ecs/Entity
 open ui/SceneFile
@@ -63,13 +64,6 @@ const settingsHourMin: Float = 0.0
 
 const settingsHourMax: Float = 24.0
 
-# The June solstice, so a scene at the Helsinki default opens with the sun
-# actually up: at this latitude the December sun reaches 6 degrees, which is a
-# legitimate but very dark first impression for an example.
-const settingsDefaultDayOfYear: Int = 172
-
-const settingsDefaultYear: Int = 1995
-
 type SettingsState {
   # Play/pause. Shared because both examples had one and they had drifted to
   # different words for the same control — 110 said Resume, 113 said Play.
@@ -85,7 +79,9 @@ type SettingsState {
   toon: Bool
   taa: Bool  # anti-aliasing: TAA on, or (default) FXAA
   skyModel: SettingsSkyModel
-  hour: Float
+  # The simulated clock (hour + date), app3d/TimeOfDay. The dialog owns it and
+  # decides when it runs; the arithmetic lives there.
+  timeOfDay: TimeOfDay
   # Drag state kept FLAT here (a Bool, not a nested Slider). Nested-field `mod`
   # write-back is reliable now (#762, test 707_nested_mod_writeback) so a nested
   # Slider would work too; the flat form is just what this dialog already uses.
@@ -110,20 +106,8 @@ type SettingsState {
   shadows: Bool
   # No longitude: with local solar time it does not move the sun. Add it with its first reader
   # (clock-time conversion, or weather).
-  # The date, which is what makes seasons: declination swings noon elevation at
-  # Helsinki between 6.4 and 53.3 degrees over the year.
-  dayOfYear: Int
   dateDragging: Bool
-  # The year has NO effect on the sun — the declination fit repeats annually. It
-  # is here because a clock that runs for long enough should roll a year over
-  # rather than silently restart, and because watching it tick is a small
-  # pleasure. lib/calendar gets the leap years right, so 29 February arrives.
-  year: Int
 }
-
-# A whole day in one minute. Fast enough to see dawn and dusk without waiting,
-# slow enough that the sun does not strobe.
-const settingsDaySeconds: Float = 60.0
 
 # `skyModel` is the app's default, not a shared one: 110 is the realistic scene
 # and starts on Preetham, 113 is the stylised one and starts on Hosek. The panel
@@ -145,15 +129,13 @@ func createSettingsState(
     toon: toon
     taa: false
     skyModel: skyModel
-    hour: hour
+    timeOfDay: createTimeOfDay(hour: hour)
     timeDragging: false
     animateTime: true
     latitude: skyDefaultLatitudeDeg
     latDragging: false
     shadows: true
-    dayOfYear: settingsDefaultDayOfYear
     dateDragging: false
-    year: settingsDefaultYear
   }
 }
 
@@ -180,29 +162,9 @@ func settingsAdvanceTime(settingsState: mod SettingsState, deltaTime: view Float
   if settingsState.timeDragging {
     ret false
   }
-  if deltaTime <= 0.0 {
-    ret false
-  }
-  var h: Float = settingsState.hour + deltaTime * 24.0 / settingsDaySeconds
-  # Midnight rolls the DATE, and the date rolls the YEAR. The point of the
-  # control is that it keeps going round, and a clock that wrapped the hour while
-  # leaving the calendar behind would be a clock that never reaches tomorrow.
-  # lib/calendar owns the year length, so a leap year gets its 29 February.
-  # LOCALS, then assigned back — a readability choice. Passing settingsState.year /
-  # settingsState.dayOfYear straight into a `mod` parameter also works (#762, test 707).
-  var rollYear: Int = settingsState.year
-  var rollDay: Int = settingsState.dayOfYear
-  loop h >= 24.0 {
-    h = h - 24.0
-    advanceOneDay(year: rollYear, dayOfYear: rollDay)
-  }
-  settingsState.year = rollYear
-  settingsState.dayOfYear = rollDay
-  if h is settingsState.hour {
-    ret false
-  }
-  settingsState.hour = h
-  ret true
+  # The arithmetic — date and year roll, the refused negative delta — is the
+  # clock's own (app3d/TimeOfDay).
+  ret timeOfDayAdvance(timeOfDay: settingsState.timeOfDay, deltaTime: deltaTime)
 }
 
 # The date slider, over the real length of the current year.
@@ -243,19 +205,19 @@ func settingsUpdateDatePointer(
     nodeId: "SettingsDateTrack"
     x: input.pointer.x
   )
-  let span: Int = daysInYear(year: settingsState.year)
+  let span: Int = daysInYear(year: settingsState.timeOfDay.year)
   var next: Int = 1 + (f * (span - 1).toFloat() + 0.5).toInt()
-  next = clampDayOfYear(year: settingsState.year, dayOfYear: next)
-  if next is settingsState.dayOfYear {
+  next = clampDayOfYear(year: settingsState.timeOfDay.year, dayOfYear: next)
+  if next is settingsState.timeOfDay.dayOfYear {
     ret false
   }
-  settingsState.dayOfYear = next
+  settingsState.timeOfDay.dayOfYear = next
   ret true
 }
 
 # The date this state is on.
 func settingsDate(settingsState: view SettingsState) ret CalendarDate {
-  ret dateFromDayOfYear(year: settingsState.year, dayOfYear: settingsState.dayOfYear)
+  ret timeOfDayDate(timeOfDay: settingsState.timeOfDay)
 }
 
 # Mounted the way camera_bar is: the app authors a host node and owns where the
@@ -430,10 +392,10 @@ func settingsUpdatePointer(
     x: input.pointer.x
   )
   let next: Float = settingsHourMin + f * (settingsHourMax - settingsHourMin)
-  if next is settingsState.hour {
+  if next is settingsState.timeOfDay.hour {
     ret false
   }
-  settingsState.hour = next
+  settingsState.timeOfDay.hour = next
   ret true
 }
 
@@ -538,7 +500,7 @@ func settingsApplyToWorld(
   setNodeText(
     world: world
     nodeId: "SettingsTimeLabel"
-    value: "Time of day {formatHour(hour: settingsState.hour)} {formatCalendarDate(
+    value: "Time of day {formatHour(hour: settingsState.timeOfDay.hour)} {formatCalendarDate(
       date: settingsDate(settingsState: settingsState)
     )}"
   )
@@ -606,7 +568,7 @@ func settingsApplyToWorld(
 
   # Two drawn parts: the track, and the knob that travels along it. A filled
   # portion made it read as a progress bar, which is a different control.
-  let f: Float = (settingsState.hour - settingsHourMin) / (settingsHourMax - settingsHourMin)
+  let f: Float = (settingsState.timeOfDay.hour - settingsHourMin) / (settingsHourMax - settingsHourMin)
   centreNodeAtFraction(
     world: world
     uiSystems: uiSystems
@@ -614,10 +576,10 @@ func settingsApplyToWorld(
     handleId: "SettingsTimeHandle"
     fraction: f
   )
-  let dateSpan: Int = daysInYear(year: settingsState.year) - 1
+  let dateSpan: Int = daysInYear(year: settingsState.timeOfDay.year) - 1
   var dateF: Float = 0.0
   if dateSpan > 0 {
-    dateF = (settingsState.dayOfYear - 1).toFloat() / dateSpan.toFloat()
+    dateF = (settingsState.timeOfDay.dayOfYear - 1).toFloat() / dateSpan.toFloat()
   }
   centreNodeAtFraction(
     world: world
@@ -655,8 +617,8 @@ func settingsSlotFor(on: view Bool) ret String {
 # the visible sun and the cast shadows cannot drift apart.
 func settingsSunDir(settingsState: view SettingsState) ret Vec3 {
   ret sunDirForDate(
-    hour: settingsState.hour
-    dayOfYear: settingsState.dayOfYear
+    hour: settingsState.timeOfDay.hour
+    dayOfYear: settingsState.timeOfDay.dayOfYear
     latitudeDeg: settingsState.latitude
   )
 }
@@ -666,13 +628,13 @@ func settingsSunDir(settingsState: view SettingsState) ret Vec3 {
 # full-strength through a sunset.
 func settingsSunColor(settingsState: view SettingsState) ret Vec3 {
   let base: Vec3 = sunColorForDate(
-    hour: settingsState.hour
-    dayOfYear: settingsState.dayOfYear
+    hour: settingsState.timeOfDay.hour
+    dayOfYear: settingsState.timeOfDay.dayOfYear
     latitudeDeg: settingsState.latitude
   )
   var lift: Float = sunHeightForDate(
-    hour: settingsState.hour
-    dayOfYear: settingsState.dayOfYear
+    hour: settingsState.timeOfDay.hour
+    dayOfYear: settingsState.timeOfDay.dayOfYear
     latitudeDeg: settingsState.latitude
   )
   # Never fully black: a scene lit by nothing reads as broken rather than as
@@ -695,8 +657,8 @@ func settingsBuildSky(
   # side is a fade rather than a different sky. Applied here, once, so the two
   # models darken together.
   let day: Float = daylightFactorForDate(
-    hour: settingsState.hour
-    dayOfYear: settingsState.dayOfYear
+    hour: settingsState.timeOfDay.hour
+    dayOfYear: settingsState.timeOfDay.dayOfYear
     latitudeDeg: settingsState.latitude
   )
   # SOLID is the control case: a flat colour, no gradient and no sun disc, so
