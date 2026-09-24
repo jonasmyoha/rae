@@ -446,7 +446,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              RAE_UI_HEADLESS=1 RAE_UI_EDITOR_TREE=1 RAE_SDL_HEADLESS_MS=1200 \
              RAE_UI_EDITOR_TEST_TREE_CLICKS="PlayButton" \
              perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-widgets1.log" 2>&1 \
-             && grep -qaF "select parent:; filter: / to search components:; Rect: lock w/h=off x=0 layout y=0 layout w=0 fill h=128; Size: w=SizeAxis { mode: fill, min: -1, max: -1 } h=SizeAxis { mode: fixed, min: -1, max: -1 }; Layout: kind=horizontal [none|horizontal|vertical|grid|stack] gap=16 · was spaceS" "$TMP_OUT/render-widgets1.log" \
+             && grep -qaF "select parent:; filter: / to search components:; Rect: lock w/h=off x=0 layout y=0 layout w=0 fill h=128; Size: w=SizeAxis { mode: fill, min: -1, max: -1 } h=SizeAxis { mode: fixed, min: -1, max: -1 }; Layout: kind=horizontal [none|horizontal|vertical|grid|stack] gap=16 · from spaceS" "$TMP_OUT/render-widgets1.log" \
              && grep -qaF "; OnClick: actionId=menu.play maxDelayMs=250; Name: label=PlayButton · computed; NodeId: id=PlayButton · computed" "$TMP_OUT/render-widgets1.log" \
              && ! grep -qaF "Children:" "$TMP_OUT/render-widgets1.log" \
              && (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
@@ -616,9 +616,10 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           #   `· computed`  — nothing in the .raescene authored this component
           #     on this node (Name and NodeId are made by the loader), so the
           #     value cannot be traced to the author at all
-          #   `· was <x>`   — the author DID write this field and the live
-          #     value differs; here a `gap` authored as the theme token
-          #     `spaceS`, resolved to 16
+          #   `· from <x>`  — the author wrote a spelling such as a theme
+          #     token and a fresh decode produces the live typed value
+          #   `· changed from <x>` — the live value differs from that fresh
+          #     decode, so a runtime system or edit replaced it
           # An authored value still equal to what the author wrote stays quiet,
           # and an enum's picker must NOT be compared (that would call every
           # enum overridden), which `kind=roundedRect` with no tag pins.
@@ -627,7 +628,9 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              RAE_UI_EDITOR_TEST_TREE_CLICKS="PlayButton" \
              perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-driver.log" 2>&1 \
              && grep -qaF "Name: label=PlayButton · computed" "$TMP_OUT/render-driver.log" \
-             && grep -qaF "gap=16 · was spaceS" "$TMP_OUT/render-driver.log" \
+             && grep -qaF "gap=16 · from spaceS" "$TMP_OUT/render-driver.log" \
+             && grep -qaF "fill=RgbaColor { r: 72, g: 180, b: 152, a: 255 } · from accent" "$TMP_OUT/render-driver.log" \
+             && grep -qaF "stroke=RgbaColor { r: 0, g: 0, b: 0, a: 0 } · from #00000000" "$TMP_OUT/render-driver.log" \
              && grep -qaF "kind=roundedRect [rect|roundedRect|circle] fill=" "$TMP_OUT/render-driver.log"; then
             :
           else
