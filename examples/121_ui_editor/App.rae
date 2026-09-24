@@ -367,6 +367,7 @@ func runApp(app: mod App) ret Int {
     script: app.testWheel
   )
   runTestHover(world: app.world, uiSystems: app.uiSystems, nodeId: app.testHover)
+  runTestHoverCycle(app: app, script: app.testHoverCycle)
   # The scripted hooks above may have changed the selection AFTER the boot
   # layout, and the loop's own list/layout pass is gated on `changed`, which
   # a scripted hook does not set. Run them once more here so the re-bound

@@ -121,9 +121,12 @@ func scrollContentExtent(
     this: world.listViewDatas
     entityId: entityId
   ) {
-    let listView: ListView = componentGet(this: world.listViews, entityId: entityId)
+    # Views, not componentGet: this runs every frame for every scrolling list,
+    # and componentGet is a deep copy of the list's whole row data just to read
+    # its length (#32786425 — it also leaked that copy until the compiler fix).
+    let listView: view ListView => componentView(this: world.listViews, entityId: entityId)
     if listView.mode is ListViewMode.virtual {
-      let count: Int = componentGet(this: world.listViewDatas, entityId: entityId).rows.length
+      let count: Int = componentView(this: world.listViewDatas, entityId: entityId).rows.length
       if count > 0 {
         let pitch: Float = listView.itemHeight + listView.itemGap
         extent = count.toFloat() * pitch - listView.itemGap + padEnd

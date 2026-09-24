@@ -1,0 +1,62 @@
+open ecs/Entity
+open ecs/ComponentTable
+import Sys
+
+# A field read straight off a call's OWNED result — `componentGet(...).rows.length`
+# — must release that result. componentGet returns a deep copy, and nothing ever
+# dropped it, so a per-frame read leaked the whole copy every frame: the UI
+# editor grew ~20 MB per canvas hover sweep through exactly this read in the
+# scroll-root update (#32786425). The C backend now captures the call in a
+# statement temporary and drops it after the statement when the chain ends in
+# a plain value. A chain ending in a heap value (a String field) keeps the old
+# code path — dropping the owner there would leave the read value dangling —
+# so its reads are checked for correctness, not for freeing.
+type Rows {
+  label: String
+  rows: List(String)
+}
+
+type Wrapper {
+  inner: Rows
+}
+
+func makeWrapper(count: view Int) ret Wrapper {
+  var rows: List(String) = List.create(String, cap: count)
+  loop var i: Int = 0, i < count, ++i {
+    rows.add(value: "row number {i} with enough text to make the copy heavy")
+  }
+  ret Wrapper { inner: Rows { label: "table", rows: own rows } }
+}
+
+func main() {
+  var table: ComponentTable(Rows) = ComponentTable.create(Rows)
+  var data: Rows = { label: "table", rows: List.create(String, cap: 200) }
+  loop var i: Int = 0, i < 200, ++i {
+    data.rows.add(value: "row number {i} with enough text to make the copy heavy")
+  }
+  let entityId: EntityId = { index: 1, generation: 0 }
+  componentSet(this: table, entityId: entityId, data: data)
+
+  # 20000 reads of one field off a fresh deep copy. Leaking each copy was
+  # ~340 MB; freed, it is noise. The bound is far above noise, far below that.
+  let startKb: Int = Sys.processRssKb()
+  var total: Int = 0
+  loop var i: Int = 0, i < 20000, ++i {
+    total = total + componentGet(this: table, entityId: entityId).rows.length
+  }
+  let grewMb: Int = (Sys.processRssKb() - startKb) / 1024
+  log("component read total {total}, freed: {grewMb < 40}")
+
+  # Through a nested field and a user function returning an owned struct.
+  let nestedStart: Int = Sys.processRssKb()
+  var nested: Int = 0
+  loop var i: Int = 0, i < 5000, ++i {
+    nested = nested + makeWrapper(count: 200).inner.rows.length
+  }
+  log("nested read total {nested}, freed: {(Sys.processRssKb() - nestedStart) / 1024 < 40}")
+
+  # A chain ending in a String keeps its value: read it, keep it, use it later.
+  let label: String = componentGet(this: table, entityId: entityId).label
+  let interpolated: String = "{componentGet(this: table, entityId: entityId).label}!"
+  log("string reads: {label} {interpolated} {makeWrapper(count: 2).inner.label}")
+}
