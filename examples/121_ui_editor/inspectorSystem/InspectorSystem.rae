@@ -39,6 +39,7 @@ const treeIndentPerLevel: Float = 12.0
 # selection outline nodes in chrome/Guides.raescene) and its own state.
 type InspectorSystem {
   outlineFors: ComponentTable(OutlineFor)
+  marqueeBands: ComponentTable(MarqueeBand)
   hovered: EntityId
   # The ACTIVE node: the one the outline follows, the inspector describes and
   # the arrow keys walk from. Always a member of `selection` (or none).
@@ -67,6 +68,16 @@ type InspectorSystem {
   # system rather than rebuilt per step so the cycle walks ONE stack: a
   # relayout between clicks cannot renumber the steps under the user.
   cycleStack: List(EntityId)
+  # A left press on empty canvas becomes a marquee only after it crosses the
+  # drag threshold. Until then it remains the ordinary empty-canvas click
+  # that clears a plain selection. The modifier mode is captured on press.
+  marqueeTracking: Bool
+  marqueeDragging: Bool
+  marqueeStartX: Float
+  marqueeStartY: Float
+  marqueeCurrentX: Float
+  marqueeCurrentY: Float
+  marqueeMode: SelectMode
   # The component-list filter (#57156455): the typed text, and whether the
   # keyboard is currently feeding it. `/` focuses, Esc clears and unfocuses.
   # Focus matters because the editor binds BARE letters as panel shortcuts —
@@ -104,6 +115,7 @@ type InspectorSystem {
 func createInspectorSystem(world: mod UiWorld) ret InspectorSystem {
   ret InspectorSystem {
     outlineFors: ComponentTable.create(OutlineFor)
+    marqueeBands: ComponentTable.create(MarqueeBand)
     hovered: noEntity()
     selected: noEntity()
     selection: List.create(EntityId, cap: 8)
@@ -113,6 +125,13 @@ func createInspectorSystem(world: mod UiWorld) ret InspectorSystem {
     cycleDepth: 0
     cycleActive: false
     cycleStack: List.create(EntityId, cap: 8)
+    marqueeTracking: false
+    marqueeDragging: false
+    marqueeStartX: 0.0
+    marqueeStartY: 0.0
+    marqueeCurrentX: 0.0
+    marqueeCurrentY: 0.0
+    marqueeMode: SelectMode.replace
     collapsedNodeIds: List.create(String, cap: 8)
     componentFilter: ""
     filterFocused: false
@@ -344,10 +363,12 @@ func inspectorUpdate(
     inspectorSystem.hovered = hovered
     changed = true
   }
-  # The canvas click goes straight through the selection funnel with whatever
-  # modifiers are held — including the empty-space case, which is the whole
-  # point: a plain click that hits nothing clears the set.
+  # The canvas press goes straight through the selection funnel with whatever
+  # modifiers are held. An empty press also arms the marquee, but its ordinary
+  # click meaning happens NOW: without enough movement, plain still clears and
+  # a modified miss still does nothing.
   if input.pointer.pressed and onCanvas {
+    let mode: SelectMode = pointerSelectMode()
     if canvasSelectAt(
       inspectorSystem: inspectorSystem
       world: world
@@ -355,9 +376,62 @@ func inspectorUpdate(
       sceneRoot: sceneRoot
       x: input.pointer.x
       y: input.pointer.y
-      mode: pointerSelectMode()
+      mode: mode
     ) {
       changed = true
+    }
+    if isNone(this: hovered) {
+      if beginMarquee(
+        inspectorSystem: inspectorSystem
+        world: world
+        x: input.pointer.x
+        y: input.pointer.y
+        mode: mode
+      ) {
+        changed = true
+      }
+    } else {
+      if cancelMarquee(inspectorSystem: inspectorSystem, world: world) {
+        changed = true
+      }
+    }
+  } else if input.pointer.pressed {
+    if cancelMarquee(inspectorSystem: inspectorSystem, world: world) {
+      changed = true
+    }
+  }
+  if inspectorSystem.marqueeTracking {
+    if input.pointer.down {
+      if moveMarquee(
+        inspectorSystem: inspectorSystem
+        world: world
+        x: input.pointer.x
+        y: input.pointer.y
+      ) {
+        changed = true
+      }
+      if inspectorSystem.marqueeDragging and isNone(this: inspectorSystem.hovered) is false {
+        inspectorSystem.hovered = noEntity()
+        changed = true
+      }
+    }
+    if input.pointer.released {
+      if finishMarquee(
+        inspectorSystem: inspectorSystem
+        world: world
+        uiSystems: uiSystems
+        sceneRoot: sceneRoot
+        x: input.pointer.x
+        y: input.pointer.y
+      ) {
+        changed = true
+      }
+    } else if input.pointer.down is false {
+      # Focus loss can end a press without a release event. Never leave the
+      # band or a half-gesture stuck on screen.
+      if cancelMarquee(inspectorSystem: inspectorSystem, world: world) {
+        changed = true
+      }
     }
   }
   # A tree row click carries `inspect:<entity index>` — an ENTITY index, not a
@@ -426,7 +500,7 @@ func inspectorUpdate(
     let actionId: String = uiActionAt(world: world, index: a)
     if actionId.startsWith(prefix: "treeToggle:") {
       let nodeId: String = actionId.sub(start: 11, len: actionId.length() - 11)
-      var found: Int = 0 - 1
+      var found: Int = -1
       loop var i: Int = 0, i < inspectorSystem.collapsedNodeIds.length, ++i {
         if let name: String = inspectorSystem.collapsedNodeIds.copyAt(index: i) {
           if name is nodeId {

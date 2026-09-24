@@ -1,0 +1,268 @@
+# inspectorSystem/Marquee — empty-canvas drag selection and its authored band.
+#
+# The band and every node comparison use SCREEN coordinates, after camera and
+# ancestor transforms. A node is selected only when its complete transformed
+# rectangle is enclosed; merely intersecting the band is deliberately not
+# enough. Selection mutations still go through applySelectMany -> applySelect.
+open ui/Ecs
+open ui/Components
+open ui/Transform
+open ui/inputSystem/InputSystem
+open ecs/Entity
+open ecs/ComponentTable
+open ui/UiSystems
+
+const marqueeDragSlop: Float = 4.0
+
+type MarqueeRect {
+  x: Float
+  y: Float
+  w: Float
+  h: Float
+}
+
+func marqueeRectBetween(
+  x1: view Float
+  y1: view Float
+  x2: view Float
+  y2: view Float
+) ret MarqueeRect {
+  var left: Float = x1
+  var top: Float = y1
+  var right: Float = x2
+  var bottom: Float = y2
+  if right < left {
+    left = x2
+    right = x1
+  }
+  if bottom < top {
+    top = y2
+    bottom = y1
+  }
+  ret MarqueeRect { x: left, y: top, w: right - left, h: bottom - top }
+}
+
+# Show or hide every authored MarqueeBand node. Returns whether chrome data
+# changed, so the caller knows the layout/transform pass must run again.
+func writeMarqueeBand(
+  inspectorSystem: view InspectorSystem
+  world: mod UiWorld
+  visible: view Bool
+  rect: view MarqueeRect
+) ret Bool {
+  var changed: Bool = false
+  let count: Int = componentCount(this: inspectorSystem.marqueeBands)
+  loop var i: Int = 0, i < count, ++i {
+    let entity: EntityId = componentEntityAt(this: inspectorSystem.marqueeBands, i: i)
+    var wasVisible: Bool = true
+    if componentHas(this: world.actives, entity: entity) {
+      wasVisible = componentGet(this: world.actives, entity: entity).value
+    }
+    if wasVisible is not visible {
+      componentSet(this: world.actives, entity: entity, data: Active { value: visible })
+      changed = true
+    }
+    if visible and componentHas(this: world.rects, entity: entity) {
+      let current: Rect = componentGet(this: world.rects, entity: entity)
+      if current.position.x is not rect.x or current.position.y is not rect.y or current.size.x is not rect.w or current.size.y is not rect.h {
+        let band: mod Rect => componentMod(this: world.rects, entity: entity)
+        band.position.x = rect.x
+        band.position.y = rect.y
+        band.size.x = rect.w
+        band.size.y = rect.h
+        changed = true
+      }
+    }
+  }
+  ret changed
+}
+
+func beginMarquee(
+  inspectorSystem: mod InspectorSystem
+  world: mod UiWorld
+  x: view Float
+  y: view Float
+  mode: view SelectMode
+) ret Bool {
+  inspectorSystem.marqueeTracking = true
+  inspectorSystem.marqueeDragging = false
+  inspectorSystem.marqueeStartX = x
+  inspectorSystem.marqueeStartY = y
+  inspectorSystem.marqueeCurrentX = x
+  inspectorSystem.marqueeCurrentY = y
+  inspectorSystem.marqueeMode = mode
+  ret writeMarqueeBand(
+    inspectorSystem: inspectorSystem
+    world: world
+    visible: false
+    rect: MarqueeRect { x: x, y: y, w: 0.0, h: 0.0 }
+  )
+}
+
+# Move the pending gesture. Crossing four screen pixels promotes it to a real
+# marquee; before that it remains a click and no band is drawn.
+func moveMarquee(
+  inspectorSystem: mod InspectorSystem
+  world: mod UiWorld
+  x: view Float
+  y: view Float
+) ret Bool {
+  if inspectorSystem.marqueeTracking is false {
+    ret false
+  }
+  inspectorSystem.marqueeCurrentX = x
+  inspectorSystem.marqueeCurrentY = y
+  if inspectorSystem.marqueeDragging is false {
+    let deltaX: Float = x - inspectorSystem.marqueeStartX
+    let deltaY: Float = y - inspectorSystem.marqueeStartY
+    if deltaX * deltaX + deltaY * deltaY > marqueeDragSlop * marqueeDragSlop {
+      inspectorSystem.marqueeDragging = true
+    }
+  }
+  let rect: MarqueeRect = marqueeRectBetween(
+    x1: inspectorSystem.marqueeStartX
+    y1: inspectorSystem.marqueeStartY
+    x2: x
+    y2: y
+  )
+  ret writeMarqueeBand(
+    inspectorSystem: inspectorSystem
+    world: world
+    visible: inspectorSystem.marqueeDragging
+    rect: rect
+  )
+}
+
+func marqueeEnclosesEntity(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entity: view EntityId
+  band: view MarqueeRect
+) ret Bool {
+  if uiEntityActive(world: world, entity: entity) is false {
+    ret false
+  }
+  if componentHas(this: uiSystems.transform2d.worldTransforms, entity: entity) is false or componentHas(
+    this: uiSystems.layout.computedRects
+    entity: entity
+  ) is false {
+    ret false
+  }
+  if worldVisualOf(world: world, uiSystems: uiSystems, entity: entity).visible is false {
+    ret false
+  }
+  let transform: WorldTransform2D = componentGet(
+    this: uiSystems.transform2d.worldTransforms
+    entity: entity
+  )
+  let computed: ComputedRect = componentGet(this: uiSystems.layout.computedRects, entity: entity)
+  let node: MarqueeRect = marqueeRectBetween(
+    x1: transform.position.x
+    y1: transform.position.y
+    x2: transform.position.x + computed.size.x * transform.scale.x
+    y2: transform.position.y + computed.size.y * transform.scale.y
+  )
+  if node.w <= 0.0 or node.h <= 0.0 {
+    ret false
+  }
+  ret node.x >= band.x and node.y >= band.y and node.x + node.w <= band.x + band.w and node.y + node.h <= band.y + band.h
+}
+
+# Pre-order keeps a containing parent before its enclosed descendants, leaving
+# the deepest/latest enclosed node as the active member of the resulting set.
+func collectMarqueeEntities(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entity: view EntityId
+  band: view MarqueeRect
+  found: mod List(EntityId)
+) {
+  if isNone(this: entity) or uiEntityActive(world: world, entity: entity) is false {
+    ret
+  }
+  if marqueeEnclosesEntity(
+    world: world
+    uiSystems: uiSystems
+    entity: entity
+    band: band
+  ) {
+    found.add(value: entity)
+  }
+  if componentHas(this: world.childrens, entity: entity) {
+    let children: view Children => componentView(this: world.childrens, entity: entity)
+    loop let child: view EntityId in children.ids {
+      collectMarqueeEntities(
+        world: world
+        uiSystems: uiSystems
+        entity: child
+        band: band
+        found: found
+      )
+    }
+  }
+}
+
+func finishMarquee(
+  inspectorSystem: mod InspectorSystem
+  world: mod UiWorld
+  uiSystems: view UiSystems
+  sceneRoot: view EntityId
+  x: view Float
+  y: view Float
+) ret Bool {
+  if inspectorSystem.marqueeTracking is false {
+    ret false
+  }
+  var changed: Bool = moveMarquee(
+    inspectorSystem: inspectorSystem
+    world: world
+    x: x
+    y: y
+  )
+  if inspectorSystem.marqueeDragging {
+    let band: MarqueeRect = marqueeRectBetween(
+      x1: inspectorSystem.marqueeStartX
+      y1: inspectorSystem.marqueeStartY
+      x2: x
+      y2: y
+    )
+    var found: List(EntityId) = List.create(EntityId, cap: 16)
+    collectMarqueeEntities(
+      world: world
+      uiSystems: uiSystems
+      entity: sceneRoot
+      band: band
+      found: found
+    )
+    if applySelectMany(
+      inspectorSystem: inspectorSystem
+      world: world
+      entities: found
+      mode: inspectorSystem.marqueeMode
+    ) {
+      changed = true
+    }
+  }
+  inspectorSystem.marqueeTracking = false
+  inspectorSystem.marqueeDragging = false
+  if writeMarqueeBand(
+    inspectorSystem: inspectorSystem
+    world: world
+    visible: false
+    rect: MarqueeRect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 }
+  ) {
+    changed = true
+  }
+  ret changed
+}
+
+func cancelMarquee(inspectorSystem: mod InspectorSystem, world: mod UiWorld) ret Bool {
+  inspectorSystem.marqueeTracking = false
+  inspectorSystem.marqueeDragging = false
+  ret writeMarqueeBand(
+    inspectorSystem: inspectorSystem
+    world: world
+    visible: false
+    rect: MarqueeRect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 }
+  )
+}

@@ -297,6 +297,47 @@ func applySelect(
   ret true
 }
 
+# Apply one marquee result through the same single-node funnel as clicks and
+# tree gestures. Plain replaces with the first enclosed node and adds the
+# rest; an empty plain band clears. Modified bands apply their mode to every
+# enclosed node and leave the set alone when they enclose nothing.
+func applySelectMany(
+  inspectorSystem: mod InspectorSystem
+  world: mod UiWorld
+  entities: view List(EntityId)
+  mode: view SelectMode
+) ret Bool {
+  if entities.length is 0 {
+    if mode is SelectMode.replace {
+      ret applySelect(
+        inspectorSystem: inspectorSystem
+        world: world
+        entity: noEntity()
+        mode: SelectMode.replace
+      )
+    }
+    ret false
+  }
+  var changed: Bool = false
+  var first: Bool = true
+  loop let entity: view EntityId in entities {
+    var entityMode: SelectMode = mode
+    if mode is SelectMode.replace and first is false {
+      entityMode = SelectMode.add
+    }
+    if applySelect(
+      inspectorSystem: inspectorSystem
+      world: world
+      entity: entity
+      mode: entityMode
+    ) {
+      changed = true
+    }
+    first = false
+  }
+  ret changed
+}
+
 # The selected node ids, in selection order — the headless gate's assertion
 # surface, and what a future "Selection (n)" label in the panel will read.
 func selectionNodeIds(inspectorSystem: view InspectorSystem, world: view UiWorld) ret String {

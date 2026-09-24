@@ -109,7 +109,8 @@ texture manifest, and a design-resolution + fit rule (now native:
   `guides` layer between the document and the chrome: plain `Shape` nodes with the
   dashed stroke (`Shape.strokeDash` / `strokeGap`, painted by the stock render system),
   positioned from the document's frame by `guideSystem/` after every load. `G`
-  toggles them; `RAE_UI_EDITOR_GUIDES=0` starts hidden. The safe-area guide shows
+  toggles the camera-bearing frame subtree; `RAE_UI_EDITOR_GUIDES=0` starts it
+  hidden without hiding the screen-space selection chrome. The safe-area guide shows
   only when the frame has insets.
 - **Camera** (#99444501, `cameraSystem/`): the wheel zooms the DOCUMENT about the
   cursor (0.25x–5x, 10% per notch), a middle-button drag pans it, and the chrome's
@@ -806,6 +807,22 @@ Three decisions are worth keeping:
 - **A press on chrome is not a click on empty canvas.** `onCanvas` gates both
   the hover and the click; without it every press on a panel toggle would
   clear the selection.
+
+**An empty-canvas left drag is a marquee.** It becomes a drag only after four
+screen pixels; below that threshold it remains the ordinary empty click above,
+so a plain click still clears and a modified miss still does nothing. Once it
+crosses the threshold, the authored `Marquee` node in `chrome/Guides.raescene`
+shows the rubber band in chrome space. On release it selects every active,
+visible document node whose complete transformed screen rectangle is ENCLOSED
+by the band. Intersection is deliberately insufficient: a casual sweep across
+part of a large container must not unexpectedly select that container.
+
+The modifier is captured when the press begins. Plain replaces the set, Shift
+adds every enclosed node, Cmd/Ctrl toggles each, and Alt/Opt subtracts each. A
+plain band enclosing nothing clears; an empty modified band does nothing. The
+multi-node operation is only a small adapter: its first plain node uses
+`replace`, later nodes use `add`, and every mutation still calls `applySelect`.
+Middle drag remains camera pan and never enters the left-button gesture.
 
 ### Click the same spot again to go up (#73816378)
 
