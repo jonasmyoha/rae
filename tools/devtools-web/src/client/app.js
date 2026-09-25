@@ -862,6 +862,10 @@ function handleExampleRunOutput(event) {
     return;
   }
   appendExampleOutput(event.line, event.stream);
+  // Under `rae watch` a failed rebuild keeps the previous app running and
+  // never reaches the app-started event that takes the bar down, so the
+  // supervisor's own failure line is the signal here.
+  if (event.line.startsWith("rae watch: build failed")) clearBuildProgressBar();
 }
 
 function formatBuildTiming(t) {
