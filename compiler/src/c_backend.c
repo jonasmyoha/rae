@@ -11,6 +11,7 @@
 
 #include "lexer.h"
 #include "diag.h"
+#include "progress.h"
 
 // Grow a heap dynamic array so it can hold at least one more element, doubling
 // its capacity. Replaces the old fixed-size collectors that SILENTLY DROPPED the
@@ -2273,7 +2274,21 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   g_emitted_spec_func_count = 0; // Reset dedup for this compilation
   ctx->all_decl_count = 0; collect_decls_from_module(ctx, module); ctx->current_module = (AstModule*)module;
 
+  // Build progress (progress.h): the emit phase reports its own position, by
+  // stage. The stage shares are from the UI editor build (17 s of emission):
+  // the first discovery ~18%, the cascade-drop re-discovery ~18%, the helper
+  // passes between and after them ~11%, then the function bodies — plain
+  // ~23%, specialized ~29%.
+  #define EMIT_STAGE_DISCOVER_LO 0.00
+  #define EMIT_STAGE_DISCOVER_HI 0.18
+  #define EMIT_STAGE_REDISCOVER_LO 0.21
+  #define EMIT_STAGE_REDISCOVER_HI 0.39
+  #define EMIT_STAGE_PLAIN_BODIES_LO 0.47
+  #define EMIT_STAGE_PLAIN_BODIES_HI 0.70
+  #define EMIT_STAGE_SPEC_BODIES_LO 0.70
+  #define EMIT_STAGE_SPEC_BODIES_HI 0.99
   // Discover generic specializations by walking all function bodies
+  discovery_progress_window(EMIT_STAGE_DISCOVER_LO, EMIT_STAGE_DISCOVER_HI);
   collect_type_refs_module(ctx);
 
   FILE* out = fopen(out_path, "w"); if (!out) return false;
@@ -2541,6 +2556,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   }
   if (opt_entry_count > 0) fprintf(out, "\n");
 
+  progress_work(EMIT_STAGE_DISCOVER_HI, EMIT_STAGE_REDISCOVER_LO, 1, 3);
   // #703: value-equality (`is`) for value-comparable structs. Forward-declare
   // all of them first (a nested field may reference a struct defined later),
   // then define. `a is b` / `a is not b` lower to rae_eq_<T> in c_expr.c.
@@ -2859,6 +2875,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       fprintf(out, "  return __r;\n}\n\n");
   }
 
+  progress_work(EMIT_STAGE_DISCOVER_HI, EMIT_STAGE_REDISCOVER_LO, 2, 3);
   // Generate rae_to_str_TYPE_ for non-c_struct user types so interpolation
   // (`"{p}"`) and `.toString()` print the value in Rae's own literal
   // spelling: `Point { x: 10, y: 20 }`. The _Generic-based rae_ext_rae_str
@@ -3264,6 +3281,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   // BEFORE the spec-emission pipeline writes call sites. Without
   // this re-discovery, those nested calls go out as undeclared
   // C functions because the prototype comes later in the output.
+  discovery_progress_window(EMIT_STAGE_REDISCOVER_LO, EMIT_STAGE_REDISCOVER_HI);
   collect_type_refs_module(ctx);
   // Bodies — reverse field order so LIFO drop matches construction.
   // Emits both `rae_drop_struct_<T>` (full) and
@@ -3365,6 +3383,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
     }
   }
 
+  progress_work(EMIT_STAGE_REDISCOVER_HI, EMIT_STAGE_PLAIN_BODIES_LO, 1, 4);
   // Phase 1+2: synthesise deep-copy helpers.
   //
   // Two function families, both named with `rae_deep_copy_<MangledType>`
@@ -3673,6 +3692,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   }
   #undef EMIT_FIELD_COPY
 
+  progress_work(EMIT_STAGE_REDISCOVER_HI, EMIT_STAGE_PLAIN_BODIES_LO, 2, 4);
   // Value-optional helper BODIES. Payload drop/copy helpers are all declared
   // by now, so `rae_drop_<optT>` / `rae_deep_copy_<optT>` can call into them.
   for (size_t i = 0; i < opt_entry_count; i++) {
@@ -3719,6 +3739,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
     }
   }
 
+  progress_work(EMIT_STAGE_REDISCOVER_HI, EMIT_STAGE_PLAIN_BODIES_LO, 3, 4);
   // Emit top-level `let` globals as static C variables. We bundle every
   // imported module into one translation unit, so plain `static` works
   // (no need for extern/header). Initialised lets get their initialiser
@@ -3856,6 +3877,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   // Bodies for non-generic functions
   for (size_t i = 0; i < ctx->all_decl_count; i++) {
       const AstDecl* d = ctx->all_decls[i];
+      progress_work(EMIT_STAGE_PLAIN_BODIES_LO, EMIT_STAGE_PLAIN_BODIES_HI, i, ctx->all_decl_count);
       if (d->kind == AST_DECL_FUNC && !d->as.func_decl.generic_params && !d->as.func_decl.specialization_args && !d->as.func_decl.is_extern && !str_eq_cstr(d->as.func_decl.name, "main")) {
           emit_function(ctx, module, &d->as.func_decl, out);
       }
@@ -3902,10 +3924,12 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
               emit_param_list(&tctx, f->params, out, false);
               fprintf(out, ");\n");
           }
+          progress_work(EMIT_STAGE_SPEC_BODIES_LO, EMIT_STAGE_SPEC_BODIES_HI, emitted_idx, ctx->specialized_func_count);
           emit_specialized_function(ctx, module, ctx->specialized_funcs[emitted_idx].decl, ctx->specialized_funcs[emitted_idx].concrete_args, out);
           emitted_idx++;
       }
   }
+  progress_work(EMIT_STAGE_SPEC_BODIES_HI, 1.0, 0, 1);
   
   // Finally emit main
   size_t pre_main_spec_count = ctx->specialized_func_count;

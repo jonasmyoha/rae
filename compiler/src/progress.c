@@ -1,6 +1,7 @@
 #include "progress.h"
 #include "sys_thread.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,10 +23,17 @@ static const char* const phase_names[PROGRESS_PHASES] = {
 /* The same phases as one word each, for the machine-readable line. */
 static const char* const phase_keys[PROGRESS_PHASES] = { "load", "sema", "emit", "cc" };
 
-/* Before the first recorded build: the rough shape of a mid-sized example
- * at -O2 (the C compiler dominates). */
-static const long long default_phase_ms[PROGRESS_PHASES] = { 1500, 2500, 2500, 6000 };
+/* Before the first recorded build: the rough shape of a large example at
+ * -O2, measured on the UI editor (137 modules, 47K lines of C): load 0.6 s,
+ * sema 3.2 s, emit 17 s, cc 17 s. Emission and the C compiler split the build
+ * about evenly; the front end is a sliver. Only the RATIOS matter here — the
+ * record replaces them after the first build of each app. */
+static const long long default_phase_ms[PROGRESS_PHASES] = { 600, 3200, 17000, 17000 };
 static const int default_modules = 60;
+/* A time-estimated phase past this share of its budget creeps toward the cap
+ * instead of running linearly into it (see estimate). */
+#define PROGRESS_CREEP_FROM 0.9
+#define PROGRESS_CAP 0.97
 
 static struct {
   bool active;
@@ -44,6 +52,8 @@ static struct {
   long long last_phase_ms[PROGRESS_PHASES];  /* the estimate (last build) */
   int last_modules;
   int modules_loaded;
+  bool has_work;              /* the current phase reports its own progress */
+  double work;                /* ... and is this far through (0..1, only rises) */
   char record_path[4096];
 } g;
 
@@ -82,23 +92,41 @@ static void write_record(void) {
   fclose(f);
 }
 
-/* Estimated completion, 0..1. Finished phases count in full; the current one
- * by elapsed time against last build's duration (and by modules loaded while
- * loading), never past 97% so the bar cannot show done before it is. */
+/* How far through the current phase, 0..1. A phase that counts its work says
+ * so exactly (progress_work); otherwise elapsed time against last build's
+ * duration, linear up to PROGRESS_CREEP_FROM of it and then approaching the
+ * cap asymptotically — a phase that is slower than last time keeps the bar
+ * moving a little instead of freezing it. The loader additionally counts
+ * modules. Never past PROGRESS_CAP so the bar cannot show done before it is. */
+static double phase_fraction(long long now) {
+  double frac;
+  if (g.has_work) {
+    frac = g.work;
+  } else {
+    frac = (double)(now - g.phase_started_ms) / (double)g.last_phase_ms[g.phase];
+    if (g.phase == PROGRESS_LOAD && g.last_modules > 0) {
+      double by_modules = (double)g.modules_loaded / (double)g.last_modules;
+      if (by_modules > frac) frac = by_modules;
+    }
+    if (frac > PROGRESS_CREEP_FROM) {
+      double over = frac - PROGRESS_CREEP_FROM;
+      frac = PROGRESS_CREEP_FROM + (PROGRESS_CAP - PROGRESS_CREEP_FROM) * (1.0 - exp(-over * 2.0));
+    }
+  }
+  if (frac > PROGRESS_CAP) frac = PROGRESS_CAP;
+  if (frac < 0.0) frac = 0.0;
+  return frac;
+}
+
+/* Estimated completion, 0..1. Finished phases count in full, weighted by last
+ * build's durations; the current one by phase_fraction. */
 static double estimate(long long now) {
   long long total = 0;
   for (int i = 0; i <= (int)g.last_phase; i++) total += g.last_phase_ms[i];
   if (total <= 0) return 0.0;
   double done = 0.0;
   for (int i = 0; i < (int)g.phase; i++) done += (double)g.last_phase_ms[i];
-  double frac = (double)(now - g.phase_started_ms) / (double)g.last_phase_ms[g.phase];
-  if (g.phase == PROGRESS_LOAD && g.last_modules > 0) {
-    double by_modules = (double)g.modules_loaded / (double)g.last_modules;
-    if (by_modules > frac) frac = by_modules;
-  }
-  if (frac > 0.97) frac = 0.97;
-  if (frac < 0.0) frac = 0.0;
-  done += frac * (double)g.last_phase_ms[g.phase];
+  done += phase_fraction(now) * (double)g.last_phase_ms[g.phase];
   return done / (double)total;
 }
 
@@ -180,7 +208,20 @@ void progress_phase(ProgressPhase phase) {
   g.phase_ms[g.phase] = now - g.phase_started_ms;
   g.phase = phase;
   g.phase_started_ms = now;
+  g.has_work = false;
+  g.work = 0.0;
   if (g.lines) emit_line(now);
+  sys_mutex_unlock(&g.lock);
+}
+
+void progress_work(double lo, double hi, size_t done, size_t total) {
+  if (!g.active) return;
+  double within = total > 0 ? (double)done / (double)total : 1.0;
+  if (within > 1.0) within = 1.0;
+  double work = lo + (hi - lo) * within;
+  sys_mutex_lock(&g.lock);
+  g.has_work = true;
+  if (work > g.work) g.work = work;
   sys_mutex_unlock(&g.lock);
 }
 
