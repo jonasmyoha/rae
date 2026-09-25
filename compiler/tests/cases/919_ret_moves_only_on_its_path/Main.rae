@@ -1,0 +1,75 @@
+# `ret x` moves x out of the function, but only on THAT path. A local
+# returned by one `ret` still owns its heap on every path that does not take
+# it, and must be released there. The move mark used to stay set for the rest
+# of the function, so the other paths never dropped the local: the UI
+# editor's `truncated` (below, verbatim) leaked one String per call whenever
+# it took the "..." path — ~13 per hierarchy refresh, i.e. per canvas hover.
+# Each shape is checked twice: the value reads back right, and outstanding
+# String allocations return to the baseline once the calls are done.
+func rae_ext_rae_mem_stats_outstanding() unsafe extern ret Int
+
+func truncated(text: view String, limit: view Int) ret String {
+  let flat: String = text.replace(old: "\n", new: " ").trim()
+  if flat.length() <= limit {
+    ret flat
+  }
+  ret "{flat.sub(start: 0, len: limit)}..."
+}
+
+# The same, moving with an explicit `own`.
+func truncatedOwn(text: view String, limit: view Int) ret String {
+  let flat: String = text.trim()
+  if flat.length() <= limit {
+    ret own flat
+  }
+  ret "{flat.sub(start: 0, len: limit)}..."
+}
+
+# The local belongs to an OUTER block and is returned from an INNER one;
+# when the inner branch is not taken, the outer block's end releases it.
+func nestedReturn(seed: view Int, take: view Bool) ret String {
+  if seed >= 0 {
+    let label: String = "label {seed}"
+    if take {
+      ret label
+    }
+  }
+  ret "fallback"
+}
+
+# Returned from inside a loop: every iteration that does not return must
+# release that iteration's local.
+func findInLoop(target: view Int) ret String {
+  loop var i: Int = 0, i < 5, ++i {
+    let candidate: String = "candidate {i}"
+    if i is target {
+      ret candidate
+    }
+  }
+  ret "not found"
+}
+
+func main() {
+  unsafe {
+    log(truncated(text: "short", limit: 10))
+    log(truncated(text: "a long\nline of text", limit: 6))
+    log(truncatedOwn(text: "  tiny  ", limit: 10))
+    log(truncatedOwn(text: "  much longer text  ", limit: 4))
+    log(nestedReturn(seed: 3, take: true))
+    log(nestedReturn(seed: 3, take: false))
+    log(findInLoop(target: 2))
+    log(findInLoop(target: 9))
+    let baseline: Int = rae_ext_rae_mem_stats_outstanding()
+    loop var i: Int = 0, i < 200, ++i {
+      let kept: String = truncated(text: "short", limit: 10)
+      let cut: String = truncated(text: "a long line of text {i}", limit: 6)
+      let keptOwn: String = truncatedOwn(text: " tiny ", limit: 10)
+      let cutOwn: String = truncatedOwn(text: " much longer text {i} ", limit: 4)
+      let taken: String = nestedReturn(seed: i, take: true)
+      let skipped: String = nestedReturn(seed: i, take: false)
+      let found: String = findInLoop(target: i % 5)
+      let missing: String = findInLoop(target: 9)
+    }
+    log("leaked allocations: {rae_ext_rae_mem_stats_outstanding() - baseline}")
+  }
+}
