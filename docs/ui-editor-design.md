@@ -161,9 +161,11 @@ chrome can be hidden for a pure passive view (`H` key).
   (`assets/scenes/Editor.raescene`, `chrome/*.raescene` sub-scenes), the desktop
   editor layout the reference editor uses (docs/ui-editor-reference-features.md §3):
   a 76pt **top bar** (`Panels` toggle, file name, zoom pill, `Open...`, node count,
-  diagnostics pill, `Inspector` toggle), a **Body** row of `LeftPanel` (328pt:
-  Project / Hierarchy / Diagnostics sections as clipped ListViews, `chrome/*Row`
-  rows) · `EditArea` (Fill — the space the camera fits the document into) ·
+  diagnostics pill, `Inspector` toggle), a **Body** row of `LeftPanel` (384pt:
+  the Project section and the Hierarchy, which FILLS the rest of the column —
+  its clipped viewport is `Size { h: Fill }` and `syncTreeViewport` sets the
+  list's row window from the laid-out height; the diagnostics list is no longer
+  a panel, a dialog will show it) · `EditArea` (Fill — the space the camera fits the document into) ·
   `RightPanel` (384pt: the `chrome/Inspector` instance, always shown, "nothing
   selected" is a state), and a 42pt **status bar** (frame size, status line). The
   top-bar toggles fire `panel.left` / `panel.right` and flip the panels' `Active`;
@@ -180,7 +182,7 @@ chrome can be hidden for a pure passive view (`H` key).
   `PanelToggle { panel }` (`panelToggleSystem` flips every panel of the kind a
   fired pill names; the key handlers call `setEditorPanelOpen` by kind); the
   space the document is fitted into is tagged `EditArea`; the three lists carry
-  `EditorList { source: hierarchy|project|diagnostics }` and one list system
+  `EditorList { source: hierarchy|project|components }` and one list system
   each fills their `ListViewData`; the guide shapes and labels carry `GuideRect
   { kind }`; the count pill `DiagnosticsBadge`. The components are lib tables
   (`lib/ui/BindingComponents.rae`, the "registry is the world" rule), so the
@@ -216,9 +218,9 @@ the library systems, like 106's `FramePipeline.rae`):
 | `documentSystem/DocumentSave.rae` | `saveDocument`, `saveDocumentTo` | Cmd/Ctrl+S writes the document page back to its file through `lib/ui/SceneWriter` (+ `SceneEncode`): a component that still equals a fresh decode of its authored text is written VERBATIM (theme tokens, hex colours, the author's field and node order survive), a changed or added one is encoded in the grammar (the inverse fixups: Rect {x,y,w,h}, Layout `type`, flattened insets, palette slots, Text styleOverride, DataDependency keys, SceneInstance overrides, ListView bindings), the node's pending app components as they were read, the headers from the parsed file; canonical 2-space layout, one node per block. `RAE_UI_EDITOR_TEST_SAVE=<path>` is the headless hook. Fixture 884 round-trips every 121 sample and every 106 scene (load → save → load, every authored table equal in machine form, pending components verbatim) and an edited Rect |
 | (bundles) | `BundleRefs` on a node | a node expanded from `bundles` (docs/ui-scene-format.md §9) carries the loader-written `BundleRefs { names, inherited, overridden }`; the inspector's components line appends `bundles: … [inherited: …] overrides: …` — the components the node took whole from a bundle versus the ones it authored a field over. The per-field diff on save waits for the save path |
 | `EditorSystems.rae` | `applyEditorComponents`, `sweepEditorEntities` | the editor's aggregate glue (docs/ecs-systems-own-their-tables.md §3.2): the chrome / guides / inspector / outline-pool systems OWN their authored components (`chromeSystem/EditorComponents.rae`, no longer lib tables); after every mount the pending outbox is drained into them, and each frame the dead entities are cleared from them before the world recycles the indices |
-| (lib outbox) | `world.pendingComponents` | an authored component no lib table matches is an APP's own (docs/ecs-systems-own-their-tables.md §4): the editor never reports it — it stays on the node as authored, the inspector lists it under "not a lib component", the diagnostics list shows it as an `appComponent` INFO row (the red pill counts only real diagnostics), and the mount/reload log says `N app components kept` |
+| (lib outbox) | `world.pendingComponents` | an authored component no lib table matches is an APP's own (docs/ecs-systems-own-their-tables.md §4): the editor never reports it — it stays on the node as authored, the inspector lists it under "not a lib component" (the red pill counts only real diagnostics), and the mount/reload log says `N app components kept` |
 | `watchSystem/` | `fileWatchSystem` | poll `Sys.fileMtime` of the OPENED document, its sub-scenes and imports every 250 ms (only while the window is visible); changed → `documentLoadSystem` remount, scroll preserved. This is for the document, which may live in another project; the editor's own chrome scenes are NOT watched here — under `rae watch` a chrome edit restarts the editor like any `.rae`/`.raescene` edit (docs/hot-reload-plan.md) |
-| `diagnosticsSystem/` | `diagnosticsSystem` | owns `List(SceneDiagnostic)` (unknown component, runtime-only component, unknown token, missing sub-scene, missing texture, parse error); writes the chrome's counter + list (a `ListView` — the `lib/ui` list system, dogfooded) |
+| `diagnosticsSystem/` | `diagnosticsSystem` | owns `List(SceneDiagnostic)` (unknown component, runtime-only component, unknown token, missing sub-scene, missing texture, parse error); writes the chrome's counter pill + status line (the list panel was removed from the left column; a dialog will show the rows) |
 | `inspectorSystem/` | `inspectorSystem` | hover → highlight rect; click → select (see *Canvas selection* below); overlay with node id, component names (`componentNamesFor`), computed rect; arrow keys walk the tree; `Esc` clears |
 | `viewportSystem/` | `viewportSystem` | design resolution + letterbox from the document; window resize → re-fit |
 

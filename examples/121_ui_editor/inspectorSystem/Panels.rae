@@ -635,6 +635,55 @@ func collectTreeRows(
   }
 }
 
+# The hierarchy fills the left column: its clipped viewport is `Size { h: Fill
+# }`, so how many rows are visible is layout's answer, not an authored count.
+# Each frame the ListView's `visibleItemCount` (the row-pool window, and the
+# reveal maths above) is set from the viewport's computed height — the
+# viewport is the list's parent node. Returns whether the count changed (a
+# resize: the pool grows or shrinks on the next list sync).
+func syncTreeViewport(
+  chromeSystem: view ChromeSystem
+  world: mod UiWorld
+  uiSystems: view UiSystems
+) ret Bool {
+  let list: EntityId = editorListEntityId(
+    chromeSystem: chromeSystem
+    world: world
+    source: EditorListSource.hierarchy
+  )
+  if isNone(this: list) {
+    ret false
+  }
+  if componentHas(this: uiSystems.hierarchy.parents, entityId: list) is false {
+    ret false
+  }
+  let parentLink: view Parent => componentView(this: uiSystems.hierarchy.parents, entityId: list)
+  let viewport: EntityId = {
+    index: parentLink.parent.index
+    generation: parentLink.parent.generation
+  }
+  if componentHas(this: uiSystems.layout.computedRects, entityId: viewport) is false {
+    ret false
+  }
+  let height: Float = componentView(this: uiSystems.layout.computedRects, entityId: viewport).size.y
+  let listView: mod ListView => componentMod(this: world.listViews, entityId: list)
+  let pitch: Float = listView.itemHeight + listView.itemGap
+  if height <= 0.0 or pitch <= 0.0 {
+    ret false
+  }
+  # Whole rows that fit (the clip shows the partial one below them; the pool
+  # keeps an overscan row for it).
+  var count: Int = ((height + listView.itemGap) / pitch).toInt()
+  if count < 1 {
+    count = 1
+  }
+  if count is listView.visibleItemCount {
+    ret false
+  }
+  listView.visibleItemCount = count
+  ret true
+}
+
 # Rebuild the hierarchy list's rows (DFS of the document, depth as indent,
 # the selection marked) on the ListView tagged `EditorList { source:
 # hierarchy }`.

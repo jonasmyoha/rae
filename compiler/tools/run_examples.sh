@@ -325,13 +325,12 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # files stay untouched), rewrites it itself after 600 ms with the
           # .rewrite twin (one changed Text, one component no lib table has —
           # an app's own, KEPT as authored, not an error), and must log
-          # the reload with 0 diagnostics + 1 kept and still render a frame with
-          # the diagnostics panel open.
+          # the reload with 0 diagnostics + 1 kept and still render a frame.
           WATCH_DIR="$TMP_OUT/watch-samples"
           cp -r ../examples/121_ui_editor/assets/samples "$WATCH_DIR"
           SCREENSHOT="$TMP_OUT/ui-editor-reload.bmp"
           if (cd .. && RAE_UI_EDITOR_SCENE="$WATCH_DIR/MainMenu.raescene" RAE_UI_EDITOR_TEST_REWRITE=600 \
-             RAE_UI_EDITOR_PANEL=1 RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=2200 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
+             RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=2200 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
              perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-reload.log" 2>&1 \
              && grep -qE "\[ui-editor\] mounted MainMenu: [1-9][0-9]* nodes, 0 diagnostics" "$TMP_OUT/render-reload.log" \
              && grep -qE "\[ui-editor\] reloaded .*MainMenu.raescene \(\+[1-9][0-9]* -[1-9][0-9]* nodes, 0 diagnostics, 1 app components kept\)" "$TMP_OUT/render-reload.log" \
@@ -580,7 +579,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              RAE_UI_HEADLESS=1 RAE_UI_EDITOR_TREE=1 RAE_SDL_HEADLESS_MS=1500 \
              RAE_UI_EDITOR_TEST_TREE_CLICKS="Footer" RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
              perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-treereveal.log" 2>&1 \
-             && grep -qaF "[ui-editor] hierarchy scroll: -1353" "$TMP_OUT/render-treereveal.log" \
+             && grep -qaF "[ui-editor] hierarchy scroll: -943" "$TMP_OUT/render-treereveal.log" \
              && python3 tools/assert_bmp_diff.py "$SCREENSHOT" \
                   "../examples/121_ui_editor/references/TreeReveal.png" \
                   > "$TMP_OUT/screenshot-treereveal.log" 2>&1 \

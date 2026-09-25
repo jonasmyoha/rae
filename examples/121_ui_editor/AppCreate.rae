@@ -38,8 +38,6 @@ const chromeScenePath: String = "examples/121_ui_editor/assets/scenes/Editor.rae
 
 # The chrome's own sub-scenes, registered into the document's registry on
 # every load (one registry serves every ListView, chrome or document).
-const diagnosticRowScenePath: String = "examples/121_ui_editor/assets/scenes/chrome/DiagnosticRow.raescene"
-
 const inspectorScenePath: String = "examples/121_ui_editor/assets/scenes/chrome/Inspector.raescene"
 
 const treeRowScenePath: String = "examples/121_ui_editor/assets/scenes/chrome/TreeRow.raescene"
@@ -192,11 +190,6 @@ func createApp() ret App {
   # One add per scene: the path and the id it registers under are written
   # together, so there is no order to keep two lists in.
   var builtinScenes: List(BuiltinScene) = List.create(BuiltinScene, cap: 8)
-  addBuiltinScene(
-    builtinScenes: builtinScenes
-    path: diagnosticRowScenePath
-    sceneId: "chrome/DiagnosticRow"
-  )
   addBuiltinScene(
     builtinScenes: builtinScenes
     path: inspectorScenePath
@@ -362,16 +355,6 @@ func createApp() ret App {
       chromeSystem: chromeSystem
       world: world
       kind: EditorPanelKind.project
-      open: true
-    )
-  }
-  # RAE_UI_EDITOR_PANEL=1 opens the diagnostics panel at boot (the headless
-  # gate's screenshot shows it; interactively D toggles it).
-  if getEnv(name: "RAE_UI_EDITOR_PANEL") is "1" {
-    setEditorPanelOpen(
-      chromeSystem: chromeSystem
-      world: world
-      kind: EditorPanelKind.diagnostics
       open: true
     )
   }
