@@ -7,6 +7,7 @@
 #include "mangler.h"
 #include "ownership.h"
 #include "c_backend.h"
+#include "progress.h"
 #include <string.h>
 #include <errno.h>
 #include <limits.h>
@@ -7751,6 +7752,10 @@ bool sema_analyze_module(CompilerContext* ctx, AstModule* module) {
         s_current_decl_origin = saved_origin;
     }
     if (module->had_error) return false;
+    /* Build progress (progress.h): the sema phase is one declaration at a
+     * time, so the bar counts them. */
+    size_t decl_total = 0;
+    for (const AstDecl* c = module->decls; c; c = c->next) decl_total++;
     bool found_new = true;
     while (found_new) {
         found_new = false; d = module->decls;
@@ -7764,6 +7769,7 @@ bool sema_analyze_module(CompilerContext* ctx, AstModule* module) {
             if (!is_template) {
                 if (processed_count < 8192) processed[processed_count++] = d;
                 found_new = true;
+                progress_work(0.0, 1.0, processed_count, decl_total);
                 
                 // If it's a specialization, we might need to define it in symbol table if it's not there
                 if (d->kind == AST_DECL_TYPE && d->as.type_decl.specialization_args && !d->resolved_type) {

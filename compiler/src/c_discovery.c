@@ -9,6 +9,7 @@
 #include "mangler.h"
 #include "sema.h"
 #include "str.h"
+#include "progress.h"
 
 #include <stddef.h>
 #include <stdlib.h>
@@ -419,9 +420,24 @@ void discover_specializations_stmt(CFuncContext* ctx, const AstStmt* stmt) {
     discover_specializations_stmt_impl(ctx, stmt);
 }
 
+/* Build progress (progress.h): the window of the emit phase the current
+ * discovery run reports into, set by the backend before each run. */
+static double g_discovery_lo = 0.0, g_discovery_hi = 0.0;
+
+void discovery_progress_window(double lo, double hi) {
+    g_discovery_lo = lo; g_discovery_hi = hi;
+}
+
+/* One walk = the declarations, then every specialization known so far. */
+static void discovery_progress(const CompilerContext* ctx, double lo, double hi, size_t walked) {
+    progress_work(lo, hi, walked, ctx->all_decl_count + ctx->specialized_func_count);
+}
+
 void discover_specializations_module(CompilerContext* ctx, const AstModule* module) {
+    double lo = g_discovery_lo, hi = g_discovery_hi;
     for (size_t i = 0; i < ctx->all_decl_count; i++) {
         const AstDecl* d = ctx->all_decls[i];
+        discovery_progress(ctx, lo, hi, i);
         if (d->kind == AST_DECL_FUNC && !d->as.func_decl.generic_params && !d->as.func_decl.specialization_args) {
             CFuncContext fctx = {.compiler_ctx = ctx, .module = module, .func_decl = &d->as.func_decl};
             // Pre-populate params as locals so infer_expr_type_ref can resolve `this`
@@ -455,6 +471,7 @@ void discover_specializations_module(CompilerContext* ctx, const AstModule* modu
         size_t limit = ctx->specialized_func_count;
         for (size_t i = discovered; i < limit; i++) {
             const AstFuncDecl* f = ctx->specialized_funcs[i].decl; const AstTypeRef* args = ctx->specialized_funcs[i].concrete_args;
+            discovery_progress(ctx, lo, hi, ctx->all_decl_count + i);
             if (!f) continue;
             const AstIdentifierPart* disc_gp = f->generic_params;
             if (!disc_gp && f->generic_template && f->generic_template->kind == AST_DECL_FUNC) disc_gp = f->generic_template->as.func_decl.generic_params;
@@ -488,8 +505,17 @@ void discover_specializations_module(CompilerContext* ctx, const AstModule* modu
 
 void collect_type_refs_module(CompilerContext* ctx) {
     size_t last_generic_count = 0; size_t last_func_count = 0;
+    /* Progress: the run's window is split by halving — the first walk gets
+     * half of it, the next a quarter, and so on — since how many walks it
+     * takes to reach the fixpoint is not known up front. */
+    double lo = g_discovery_lo, hi = g_discovery_hi;
+    double walk_lo = lo, walk_hi = lo + (hi - lo) * 0.5;
     do {
         last_generic_count = ctx->generic_type_count; last_func_count = ctx->specialized_func_count;
+        g_discovery_lo = walk_lo; g_discovery_hi = walk_hi;
         discover_specializations_module(ctx, ctx->current_module);
+        walk_lo = walk_hi; walk_hi = walk_hi + (hi - walk_hi) * 0.5;
     } while (ctx->generic_type_count > last_generic_count || ctx->specialized_func_count > last_func_count);
+    g_discovery_lo = lo; g_discovery_hi = hi;
+    progress_work(lo, hi, 1, 1);
 }
