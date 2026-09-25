@@ -221,66 +221,9 @@ func textureUpdate(
   }
 }
 
-# The diagnostics list's rows: one per diagnostic, `kind · sceneId/nodeId ·
-# name · message` as four bound cells, on the ListView tagged
-# `EditorList { source: diagnostics }`.
-func diagnosticsListSystem(chromeSystem: view ChromeSystem, world: mod UiWorld) {
-  let list: EntityId = editorListEntityId(
-    chromeSystem: chromeSystem
-    world: world
-    source: EditorListSource.diagnostics
-  )
-  if isNone(this: list) {
-    ret
-  }
-  let count: Int = world.sceneDiagnostics.length
-  var rows: List(ListViewRow) = List.create(ListViewRow, cap: count + 1)
-  loop var i: Int = 0, i < count, ++i {
-    if let entry: view SceneDiagnostic => world.sceneDiagnostics.viewAt(index: i) {
-      var keys: List(String) = {
-        "id"
-        "kind"
-        "where"
-        "name"
-        "message"
-      }
-      var values: List(String) = List.create(String, cap: 5)
-      values.add(value: "{i}")
-      values.add(value: "{entry.kind.toString()}")
-      values.add(value: "{entry.sceneId}/{entry.nodeId}")
-      values.add(value: "{entry.name}")
-      values.add(value: "{entry.message}")
-      rows.add(value: ListViewRow { keys: own keys, values: own values })
-    }
-  }
-  # INFO rows, after the real diagnostics: the authored components no lib
-  # table matched. They are an app's own (docs/ecs-systems-own-their-tables.md
-  # §4) — the editor keeps them on the node as authored and never counts them
-  # as an error; the pill above stays the diagnostics count.
-  let pendingCount: Int = world.pendingComponents.length
-  loop var i: Int = 0, i < pendingCount, ++i {
-    if let pending: view PendingComponent => world.pendingComponents.viewAt(index: i) {
-      var keys: List(String) = {
-        "id"
-        "kind"
-        "where"
-        "name"
-        "message"
-      }
-      var values: List(String) = List.create(String, cap: 5)
-      values.add(value: "{count + i}")
-      values.add(value: "appComponent")
-      values.add(value: "{pending.sceneId}/{pending.nodeId}")
-      values.add(value: "{pending.name}")
-      values.add(value: "not a lib component; kept as authored")
-      rows.add(value: ListViewRow { keys: own keys, values: own values })
-    }
-  }
-  setEditorListRows(world: world, list: list, rows: own rows)
-}
-
 # Fill the status from the document + diagnostics and drive the chrome: the
-# bound labels, the count pill, the diagnostics list.
+# bound labels and the count pill. (The diagnostics LIST left the chrome —
+# the left column is the hierarchy alone; a dialog will show the rows.)
 func chromeSyncSystem(
   world: mod UiWorld
   chromeSystem: mod ChromeSystem
@@ -313,7 +256,6 @@ func chromeSyncSystem(
   chromeSystem.statusLine = line
   editorTextSystem(world: world, chromeSystem: chromeSystem)
   diagnosticsBadgeSystem(chromeSystem: chromeSystem, world: world, diagnosticsCount: count)
-  diagnosticsListSystem(chromeSystem: chromeSystem, world: world)
 }
 
 # Log every diagnostic once, in the gate's one-line form, after a load.
