@@ -89,7 +89,7 @@ RAE_GPU2D_SCREENSHOT="$TMP/TreeReveal.bmp" \
 perl -e 'alarm shift; exec @ARGV' 120 \
   compiler/bin/rae run --project examples/121_ui_editor examples/121_ui_editor/Main.rae \
   > "$TMP/TreeReveal.log" 2>&1
-grep -qF "[ui-editor] hierarchy scroll: -1353" "$TMP/TreeReveal.log"
+grep -qF "[ui-editor] hierarchy scroll: -943" "$TMP/TreeReveal.log"
 python3 compiler/tools/assert_bmp_diff.py --convert \
   "$TMP/TreeReveal.bmp" "$OUT_DIR/TreeReveal.png"
 

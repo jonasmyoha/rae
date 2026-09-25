@@ -283,6 +283,10 @@ func inspectorUpdate(
 ) ret Bool {
   let sceneRoot: EntityId = documentSceneRoot(world: world, pageRoot: pageRoot)
   var changed: Bool = false
+  # The hierarchy's row window follows its viewport's laid-out height.
+  if syncTreeViewport(chromeSystem: chromeSystem, world: world, uiSystems: uiSystems) {
+    changed = true
+  }
   let componentList: EntityId = editorListEntityId(
     chromeSystem: chromeSystem
     world: world
