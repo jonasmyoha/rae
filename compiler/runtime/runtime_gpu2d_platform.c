@@ -294,7 +294,42 @@ EMSCRIPTEN_KEEPALIVE void rae_browser_request_stop(void) {
  * surface yet? Used only to explain a headless run that drew nothing. */
 extern rae_Bool rae_frame_presented_any(void);
 
+/* RAE_GPU2D_TEST_POINTER="x1,y1,x2,y2,frames" (test-only; inert unless set):
+ * the reported pointer alternates between two DESIGN-space points, moving
+ * every `frames` event polls, so a headless run drives the app's real frame
+ * loop — hit-test, hover, outlines, paint — as a mouse sweeping between two
+ * spots would. A soak/leak probe; logs its move count every 250 moves. */
+static int g_g2d_test_pointer_state = 0;   /* 0 unread, 1 off, 2 on */
+static double g_g2d_test_pointer[4];
+static long long g_g2d_test_pointer_frames = 1, g_g2d_test_pointer_polls = 0, g_g2d_test_pointer_moves = 0;
+/* Painted frames (endFrame calls, counted in rae_g2d_tick) while it is on. */
+static long long g_g2d_test_pointer_paints = 0;
+static int rae_g2d_test_pointer_on(void) {
+    if (g_g2d_test_pointer_state == 0) {
+        const char* e = getenv("RAE_GPU2D_TEST_POINTER");
+        g_g2d_test_pointer_state = 1;
+        if (e && sscanf(e, "%lf,%lf,%lf,%lf,%lld", &g_g2d_test_pointer[0], &g_g2d_test_pointer[1],
+                        &g_g2d_test_pointer[2], &g_g2d_test_pointer[3],
+                        &g_g2d_test_pointer_frames) == 5 && g_g2d_test_pointer_frames > 0) {
+            g_g2d_test_pointer_state = 2;
+        }
+    }
+    return g_g2d_test_pointer_state == 2;
+}
+static void rae_g2d_test_pointer_advance(void) {
+    if (!rae_g2d_test_pointer_on()) return;
+    g_g2d_test_pointer_polls++;
+    if (g_g2d_test_pointer_polls % g_g2d_test_pointer_frames == 0) {
+        g_g2d_test_pointer_moves++;
+        if (g_g2d_test_pointer_moves % 250 == 0) {
+            fprintf(stderr, "[gpu2d-test-pointer] %lld moves, %lld painted frames\n",
+                    g_g2d_test_pointer_moves, g_g2d_test_pointer_paints);
+        }
+    }
+}
+
 rae_Bool rae_ext_Gpu2d_pollClose(void) {
+    rae_g2d_test_pointer_advance();
 #ifdef __EMSCRIPTEN__
     /* Browser WebGPU presents at requestAnimationFrame boundaries. Asyncify
      * lets the current Rae loop await that boundary without source changes. */
@@ -490,6 +525,12 @@ void rae_ext_EventLoop_wake(void){
  * points; we scale to physical px (× dpr) then invert the design fit transform
  * (subtract the letterbox offset, divide by scale). */
 static void rae_g2d_pointer_design(double* dx, double* dy) {
+    if (rae_g2d_test_pointer_on()) {
+        int second = (int)(g_g2d_test_pointer_moves % 2);
+        *dx = g_g2d_test_pointer[second ? 2 : 0];
+        *dy = g_g2d_test_pointer[second ? 3 : 1];
+        return;
+    }
     float mx = 0, my = 0; SDL_GetMouseState(&mx, &my);
     int lw = 0, lh = 0; if (g_sdl_win) SDL_GetWindowSize(g_sdl_win, &lw, &lh);
     double sclx = (lw > 0) ? (double)g_sdl_w / (double)lw : 1.0;
