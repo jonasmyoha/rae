@@ -1,0 +1,91 @@
+# `=` COPIES into a field too. Storing a local into an owned String field or
+# an owned heap-struct field lands a fresh copy (#79484806), so the local
+# still owns its own heap and its scope exit must release it. The store used
+# to ALSO mark the local moved — a leftover of the time `field = local` moved
+# — so the local was copied and never freed: the UI editor's
+# `chromeSystem.treeHeader = header` leaked one String per hierarchy refresh.
+# Storing into an OPTIONAL field boxes the value itself; that one is still a
+# move and must not be freed twice. Each shape: the values read back right
+# (the local stays valid after a copying store), and outstanding String
+# allocations return to the baseline.
+func rae_ext_rae_mem_stats_outstanding() unsafe extern ret Int
+
+type Inner {
+  label: String
+  items: List(String)
+}
+
+type Outer {
+  header: String
+  inner: Inner
+  maybe: opt Inner
+}
+
+func makeInner(tag: view Int) ret Inner {
+  var items: List(String) = List.create(String, cap: 2)
+  items.add(value: "item {tag}")
+  ret Inner { label: "inner {tag}", items: own items }
+}
+
+func emptyOuter() ret Outer {
+  ret Outer { header: "", inner: makeInner(tag: 0), maybe: none }
+}
+
+# The editor's shape, verbatim in spirit: a `var` String, conditionally
+# reassigned, then stored into a field through a `mod` parameter.
+func setHeader(outer: mod Outer, count: view Int, filter: view String) {
+  var header: String = "Hierarchy ({count})"
+  if filter.length() > 0 {
+    header = "Hierarchy ({count})  filter: {filter}"
+  }
+  outer.header = header
+}
+
+# The local is still readable after the copying store.
+func headerAndLocal(outer: mod Outer, count: view Int) ret String {
+  let header: String = "copy {count}"
+  outer.header = header
+  ret "{outer.header} / {header}"
+}
+
+func setInner(outer: mod Outer, tag: view Int) ret String {
+  let local: Inner = makeInner(tag: tag)
+  outer.inner = local
+  ret "{outer.inner.label} / {local.label} {local.items.length}"
+}
+
+func setMaybe(outer: mod Outer, tag: view Int) {
+  let local: Inner = makeInner(tag: tag)
+  outer.maybe = local
+}
+
+func maybeLabel(outer: view Outer) ret String {
+  if let inner: view Inner => outer.maybe {
+    ret "{inner.label}"
+  }
+  ret "none"
+}
+
+func main() {
+  unsafe {
+    var outer: Outer = emptyOuter()
+    setHeader(outer: outer, count: 1, filter: "")
+    log(outer.header)
+    setHeader(outer: outer, count: 2, filter: "btn")
+    log(outer.header)
+    log(headerAndLocal(outer: outer, count: 3))
+    log(setInner(outer: outer, tag: 4))
+    setMaybe(outer: outer, tag: 5)
+    log(maybeLabel(outer: outer))
+    let baseline: Int = rae_ext_rae_mem_stats_outstanding()
+    loop var i: Int = 0, i < 200, ++i {
+      setHeader(outer: outer, count: i, filter: "")
+      setHeader(outer: outer, count: i, filter: "x")
+      let both: String = headerAndLocal(outer: outer, count: i)
+      let inner: String = setInner(outer: outer, tag: i)
+      setMaybe(outer: outer, tag: i)
+    }
+    log("leaked allocations: {rae_ext_rae_mem_stats_outstanding() - baseline}")
+    log("{outer.header} | {outer.inner.label} | {maybeLabel(outer: outer)}")
+  }
+}

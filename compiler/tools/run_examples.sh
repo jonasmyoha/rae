@@ -251,20 +251,35 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             echo "  nested sub-scene sample failed:"
             cat "$TMP_OUT/render-NestedPage.log" "$TMP_OUT/screenshot-NestedPage.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
           fi
-          # Hover leak (#32786425): 600 canvas hover changes through the live
-          # inspector update + layout must not grow memory. Before the fix
-          # this was ~35 MB (a per-call deep copy of the hierarchy's rows that
-          # was never freed); anything above 4 MB fails.
+          # Hover leak (#32786425, #13186639): 1500 painted frames, each a
+          # canvas hover change — RAE_GPU2D_TEST_POINTER moves the pointer
+          # between Title and OrbitPlanet every poll, so the REAL frame loop
+          # runs hit-test, hover outline, hierarchy refresh and paint. At exit
+          # (RAE_MEM_STATS=1) the outstanding allocations must be the boot
+          # baseline (972 Strings, 1 buffer today), not a per-hover count:
+          # any leak of even one String per hover adds 1500. A MB threshold
+          # was too coarse — the hierarchy-refresh String leak (~0.7 KB per
+          # hover) passed the old 4 MB check. The move line proves the
+          # pointer really moved 1500 times.
           if (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
              RAE_UI_EDITOR_ROOT="examples/121_ui_editor/assets/samples" \
-             RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=300 RAE_UI_EDITOR_TEST_HOVER_CYCLE="Title,Logo,600" \
-             perl -e 'alarm shift; exec @ARGV' 60 "$TMP_OUT/app") > "$TMP_OUT/render-hover-leak.log" 2>&1 \
-             && grep -aE '\[ui-editor\] hover cycle 600: rss -?[0-4] MB above start' "$TMP_OUT/render-hover-leak.log" > /dev/null; then
+             RAE_UI_HEADLESS=1 RAE_HEADLESS_FRAMES=1500 RAE_FIXED_DT=0.05 RAE_MEM_STATS=1 \
+             RAE_GPU2D_TEST_POINTER="623,196,787,297,1" \
+             perl -e 'alarm shift; exec @ARGV' 90 "$TMP_OUT/app") > "$TMP_OUT/render-hover-leak.log" 2>&1 \
+             && grep -aqF '[gpu2d-test-pointer] 1500 moves' "$TMP_OUT/render-hover-leak.log" \
+             && awk '
+                  function out(line) { sub(/.*outstanding=/, "", line); sub(/ .*/, "", line); return line + 0 }
+                  /\[mem:string:TOTAL/ { total = out($0); seen++ }
+                  /\[mem:string:sub /  { substrings = out($0) }
+                  /\[mem:string:interp/ { interps = out($0) }
+                  /\[mem:buf /         { buffers = out($0); seen++ }
+                  END { exit !(seen == 2 && total < 1972 && substrings < 100 && interps < 100 && buffers < 50) }
+                ' "$TMP_OUT/render-hover-leak.log"; then
             :
           else
             UI_EDITOR_OK=0
-            echo "  hover leak check failed (600 canvas hovers):"
-            grep -a 'hover cycle' "$TMP_OUT/render-hover-leak.log" 2>/dev/null | sed 's/^/    /'
+            echo "  hover leak check failed (1500 painted canvas hovers; outstanding must stay at the boot baseline):"
+            grep -a 'test-pointer\|mem:string:TOTAL\|mem:string:sub \|mem:string:interp\|mem:buf ' "$TMP_OUT/render-hover-leak.log" 2>/dev/null | tail -5 | sed 's/^/    /'
           fi
           # Hover glow (Shadow.hoverOpacity + the ButtonSystem fade): hovering
           # the Open pill once must brighten its glow — the frame differs from
