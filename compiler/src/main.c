@@ -3136,6 +3136,16 @@ static void watch_channel_id(const char* project_root,
   if (o == 0) snprintf(out, out_size, "app");
 }
 
+// The same sentinel `rae run` prints when it execs the app (main.c "Build
+// timing"): a driver holding our stderr in a pipe (the devtools) takes its
+// build-progress bar down on it. The watch loop rebuilds in a child `rae
+// build` whose progress lines end at emission, so without this line the bar
+// would sit at "emitting C" for as long as the app runs.
+static void watch_announce_app_start(const char* entry) {
+  fprintf(stderr, "@@RAE_APP_START@@ entry=%s\n", entry);
+  fflush(stderr);
+}
+
 static pid_t watch_spawn_child(const char* bin_path,
                                const char* run_cwd,
                                const char* channel_dir,
@@ -3329,6 +3339,7 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
     watch_state_free(&ws);
     return 1;
   }
+  watch_announce_app_start(entry);
   long long spawn_t = watch_now_ms();
   // Health window: if the child dies non-zero within this many ms of
   // spawn, treat the build as bad and (compiled only) fall back to
@@ -3382,6 +3393,7 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
           previous_bin[0] = '\0';
           child = watch_spawn_child(current_bin, lib_root, dotrae, run_opts->app_argc, run_opts->app_argv);
           if (child < 0) break;
+          watch_announce_app_start(entry);
           spawn_t = watch_now_ms();
           health_until = spawn_t + HEALTH_MS;
           current_promoted = true;   // previous was already good
@@ -3516,6 +3528,7 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
     // Spawn the new child.
     child = watch_spawn_child(current_bin, lib_root, dotrae, run_opts->app_argc, run_opts->app_argv);
     if (child < 0) break;
+    watch_announce_app_start(entry);
     spawn_t = watch_now_ms();
     health_until = spawn_t + HEALTH_MS;
     current_promoted = false;
