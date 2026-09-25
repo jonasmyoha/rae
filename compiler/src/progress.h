@@ -2,6 +2,7 @@
 #define PROGRESS_H
 
 #include <stdbool.h>
+#include <stddef.h>
 
 /* A minimal build progress display for `rae run` / `rae build` on a terminal:
  *
@@ -37,7 +38,14 @@ typedef enum {
  * file the last build's phase durations are read from and this build's are
  * written to (NULL: defaults only, nothing written); `last_phase` is the
  * phase this pipeline ends with, so an emit-only build fills the bar without
- * a C compile it will never run. */
+ * a C compile it will never run.
+ *
+ * How far into the CURRENT phase the bar is comes from the phase itself when
+ * it can count its work (progress_work: sema per declaration, emission per
+ * discovery walk and per function body) and from elapsed time against the
+ * last build only for a phase that cannot (the C compiler). A time estimate
+ * that overruns its budget creeps on asymptotically instead of freezing, so
+ * the bar keeps moving through a phase that got slower since last time. */
 void progress_begin(const char* record_path, ProgressPhase last_phase);
 
 /* Enter a phase; the previous phase is recorded as complete. */
@@ -45,6 +53,14 @@ void progress_phase(ProgressPhase phase);
 
 /* The loader reports each module as it finishes loading. */
 void progress_module_loaded(int loaded);
+
+/* The current phase reports how far along it is by WORK: it is in a stage
+ * spanning [lo, hi] of the phase (each 0..1) and has finished `done` of that
+ * stage's `total` items. The bar only moves forward within a phase, so a
+ * stage whose item count is still growing (specializations discovered while
+ * emitting) never pulls it back; a phase that never reports is estimated by
+ * elapsed time instead. Cheap enough to call per item. */
+void progress_work(double lo, double hi, size_t done, size_t total);
 
 /* Take the bar off the screen before printing something else to stderr. The
  * ticker draws it again shortly after. Safe to call when not showing. */

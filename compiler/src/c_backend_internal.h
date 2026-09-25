@@ -286,6 +286,9 @@ void mark_expr_moved_if_local(CFuncContext* ctx, const AstExpr* expr);
 
 // -- Discovery pass --
 void collect_type_refs_module(CompilerContext* ctx);
+/* Build progress: the window of the emit phase the next discovery run reports
+ * into (progress.h). */
+void discovery_progress_window(double lo, double hi);
 void discover_specializations_expr(CFuncContext* ctx, const AstExpr* expr);
 void discover_specializations_stmt(CFuncContext* ctx, const AstStmt* stmt);
 void discover_specializations_module(CompilerContext* ctx, const AstModule* module);
