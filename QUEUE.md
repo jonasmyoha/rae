@@ -11,87 +11,19 @@ tasks as the record of how they were verified.
 
 ## How SUMU reads this file
 
-SUMU owns the task list between the `SUMU_QUEUE_START` and `SUMU_QUEUE_END`
-markers below. **That block is rebuilt from scratch on every save** — notes,
-docs and anything else worth keeping go ABOVE the start marker, like this
-section.
+SUMU owns the list between the markers below and rebuilds it on every save.
+Anything worth keeping goes above the start marker.
 
-### Who writes what
+SUMU writes `[queued]` and `[>claude]` / `[>codex]`. The agent writes the
+outcome, in the same commit as the work: `[x]` done, `[postponed]`, or
+`[failed]` / `[question]` — both stop the queue, with the question after
+`QUESTION:` in the line body. Never put a started task back to `[ ]`.
 
-SUMU writes the RUNNING marker when it dispatches a task. The AGENT writes the
-outcome. SUMU never writes an outcome on an agent's behalf.
+File a new task as `- [ ] the task text`; SUMU mints the `#id`, so never
+guess one. Line order is the queue order.
 
-| Marker | Meaning | Written by |
-| --- | --- | --- |
-| `[ ]` | Not started | you, or an agent filing a new task |
-| `[queued]` | Picked to run next | SUMU |
-| `[>claude]` `[>codex]` | Running now, naming the agent | SUMU |
-| `[x]` | Done | the agent |
-| `[failed]` | Tried, did not work. STOPS the queue | the agent |
-| `[question]` | Needs an answer. STOPS the queue | the agent |
-| `[postponed]` | Not done, not now. The queue moves on | the agent, or you |
-
-A `[question]` puts the question in the line body after `QUESTION:`, never
-inside the brackets — a `]` in there corrupts the marker.
-
-Putting a task that has ALREADY been started back to `[ ]` is forbidden.
-`[ ]` means "never started", so it erases the fact that a turn happened, its
-findings with it. Use `[postponed]`, `[failed]` or `[question]`.
-
-Write the outcome marker as the LAST thing in a turn, in the same commit as
-the work.
-
-### Task ids and order
-
-A task's `#id` is an 8-digit number SUMU mints, e.g. `#48213907`. You do not
-write one: a new task is just `- [ ] the task text`, and SUMU gives it an id
-the next time it loads the file and writes the number back on the next save.
-That goes for agents filing follow-up tasks too — never guess a `#<next id>`;
-a guessed number collides with one somebody else guessed on another machine
-or in another agent's lane, and a collision deletes a task.
-
-Older tasks keep their short numbers (`#173`); a short id just means it was
-minted before 2026-09-15. Nothing is renumbered.
-
-The id is identity, not order. **The line order is the queue order**: the
-runner takes open tasks top to bottom, "Move as next" moves the line, and
-nothing sorts by number.
-
-### Task metadata
-
-Directly after the `#id`, before the sentence, a task may carry one brace
-group of `key:value` fields:
-
-| Example | Meaning |
-| --- | --- |
-| `{difficulty:3}` | Difficulty 3 of 5 |
-| `{difficulty:5 model:gpt-6-astra}` | Difficulty 5, pinned to one model |
-
-It sits at the HEAD of the line on purpose: agents append their findings to
-the END, so anything kept there gets buried between notes and eventually
-dropped. Fields SUMU does not know are left alone, so this is where other
-per-task data can go later.
-
-`{d3}` and a bare `{3}` are also read, and normalise to `{difficulty:3}` the
-next time SUMU rewrites the line. SUMU hides the group in its task editor —
-it is metadata, not part of the sentence — and puts it back when you save.
-
-### Difficulty selects the model
-
-Level 5 means "this agent's strongest model", so one task picks the right
-model whichever agent runs it. SUMU applies this on autoplay and on Start
-task alike.
-
-| Level | Codex | Claude |
-| --- | --- | --- |
-| 5 · Hardest | 6 Astra | Fable 5.1 |
-| 4 · Hard | 5.6 Sol | Opus 5.0 |
-| 3 · Moderate | 5.6 Terra | Opus 4.8 |
-| 2 · Easy | 5.6 Luna | Sonnet |
-| 1 · Trivial | 5.4 Mini | Haiku |
-
-A `model:` field overrides the ladder for that one task. A task with no
-difficulty runs on whatever model the agent is already set to.
+`{difficulty:4}` for a normal task, `{difficulty:5}` for a hard one. 1-3 are
+not in use.
 
 <!-- SUMU_QUEUE_START -->
 - [x] #59229208 {difficulty:4} after a hot reload, the Rae UI Editor should remember it’s window size and position. I believe example 106 already does? As do many other examples. DONE: the editor opts into lib/ui/WindowGeometry exactly as 106 does (createWindowGeometry(dir: dir(), name: "window.121_ui_editor.geometry") + restore after initWindow + updateWindowGeometry each frame + flush on quit); the one-shot windowResized is read once and shared with viewportSystem; skipped under any headless budget (Gpu2d.headlessRequested) so the gate window stays 1400x900. Verified windowed: a preset channel file restores to 1000x700 at (120, 90); the live `rae watch` editor wrote its own file on restart. 121 gate green.
@@ -464,4 +396,5 @@ difficulty runs on whatever model the agent is already set to.
 - [x] #70178297 {difficulty:5} [compiler/c_backend — a whole-value store through an `if let … mod T => xs.modAt(index:)` binding does not compile] `if let slot: mod Holder => holders.modAt(index: 0) { slot = source }` emits `RaeAny __asg = source; RaeAny* __asgp = slot; rae_any_drop(...)`: the binding from an OPTIONAL reference accessor keeps its pointee typed as the boxed `opt` (RaeAny) in the backend, so a whole-value assignment through it assigns a struct to a RaeAny (C error for a struct; for a `mod String` it was `RaeAny __asg = <rae_String>`, an aliasing store). Field writes through such a binding (`slot.label = ...`) work; only the whole-value `slot = value` store is broken. Found while writing fixture 918 (the `=` copies rule), which tests the plain `let slot: mod T => place` form instead. Fix: in the if-let narrowing, give the bound `mod T`/`view T` its NON-opt pointee type for the store path (c_stmt.c AST_STMT_ASSIGN `is_mod_ref` branch, `pointee.is_opt`), then apply the same `=` copies / `own` moves rule there; add the modAt form to 918. — DONE: two fixes. (1) The store path (c_stmt.c AST_STMT_ASSIGN `is_mod_ref`): a whole-value store THROUGH a `mod` reference is always through a narrowed one — an optional reference cannot be stored through without an `if let` first — so the pointee is now the plain T whatever `opt` the binding's declared type still carries; that covers every narrowing path at once (`modAt`, the map's `modGet`, any future accessor) and the previous task's `!pointee.is_opt` guard is gone, so the `=` copies / `own` moves rule applies there too. (2) The `if let … => xs.modAt(index:)` fast path (emit_list_if_let) now registers the binding's local under its narrowed (non-opt) type, the truthful one inside the branch. Fixture 918 grew `assignThroughModAt`, `assignStringThroughModAt` and `assignThroughModGet` (StringMap): values read back right, outstanding allocations back to baseline; the pre-task compiler fails the fixture with `initializing 'RaeAny' with … 'rae_Holder'`. (The `mod String` modAt store already worked after #79484806 via the primitive-mod-ref path; verified.) Full suite 569/569, every example compiles, 121/106/114 windowed gates pass. Version 0.1.79.
 - [postponed] #74008090 just got rae ui editor rendering so it only renders the canvas, not the panels and inspector at all. Try to repro and fix.
 - [x] #34756644 make the hierarchy selection thing have rounded corners. — DONE: the selected-row plate is the row's GradientFill, and the gradient painter takes its corner radius from the CornerRadius component (g2dRadius), not from the Shape's `radius` — the TreeRow only had the Shape's, so the plate painted square. chrome/TreeRow.raescene now carries `CornerRadius { radius: 10 }` matching the Shape. TreeSelection / TreeReveal / ComponentScroll references regenerated (the only frames with a plate; the other seven unchanged), 121 example gate PASS.
+- [ ] #13186639 {difficulty:5} [compiler ownership + examples/121_ui_editor — canvas hover leaks Strings on every hierarchy refresh] FOUND (2026-09-25, measured, NOT fixed): hovering document nodes in the editor canvas leaks memory without bound. It is NOT the outline drawing: each hover change makes inspectorUpdate call syncTreePanel (inspectorSystem/Panels.rae), which rebuilds every hierarchy row, and that rebuild leaks Strings every time. MEASUREMENT (10-minute headless soak, MainMenu, pointer alternating Title <-> OrbitPlanet every frame, idle editor alongside as control): 103,500 hovers, each a painted frame; Strings never freed at exit 1,457,854 (control: 8,630); List/buffer allocations never freed 114 in BOTH (no List leak); physical footprint at 9.5 min 153.5 MB vs 96.9 MB idle; RSS rose ~4 MB/min for the first 7 min, then flattened only because macOS began compressing pages (the idle control dropped 126 -> 85 MB at the same moment), so RSS alone under-reports it. By RAE_MEM_STATS category: string:sub outstanding 1,345,735, string:interp 103,535 (about ONE per hover), string:copy 7,046 (identical in the idle run, i.e. startup, NOT hover). A separate 25 s run with MallocStackLogging=1 + `leaks <pid>`: 33,143 leaked blocks after 1,500 hovers, grouped by stack: (1) ~24,000 x 48-byte blocks, `rae_ext_rae_str_sub` <- String.trim <- treeRowLabelOf (inspectorSystem/NodeQuery.rae) <- collectTreeRows (recursive) <- syncTreePanel <- inspectorUpdate. The only trim on that path is `truncated(text:, limit:)` in NodeQuery.rae: `let flat: String = text.replace(old: "\n", new: " ").trim()` then `ret flat` or `ret "{flat.sub(start: 0, len: limit)}..."`. About 13 per refresh = the MainMenu Text nodes whose preview is cut with "...", so the evidence points at the TRUNCATING return path not dropping the owned local `flat` (verify: a Text short enough for `ret flat` should not leak). (2) ~1,900 x 16-byte blocks, `rae_ext_rae_str_interp` directly in syncTreePanel: `var header: String = "Hierarchy ({rows.length})"` (conditionally reassigned for the filter), then `chromeSystem.treeHeader = header`. Suspect this was INTRODUCED by 142db319 (#79484806, "`=` copies"): assigning a local into a field now deep-copies it, so the local must be dropped at scope end, and apparently is not for this `var` String; before that commit the store was a shallow alias and nothing leaked. Check by building the soak with the compiler from 142db319^ vs 142db319. (3) ~800 x 32-byte `rae_string_copy` from listViewSystem -> mountSceneInstanceImpl -> StringMap.set: startup only (same count idle), ignore. Both real leaks look like COMPILER ownership bugs (an owned String local not dropped on some return path / after being copied into a field), not editor logic — fix them in the C backend, not by rewriting the editor code around them, and add a minimal fixture for each shape (String local returned through an interpolation on one path; `var s: String = interp`, conditional reassign, `field = s`) that asserts outstanding String allocations return to baseline, like fixture 918 does. WHY THE EXISTING GATE MISSED IT: run_examples.sh's hover-leak check (RAE_UI_EDITOR_TEST_HOVER_CYCLE=Title,Logo,600) calls the hover logic directly without painting and accepts up to 4 MB over 600 hovers; this leak is ~13 x 48 B + 16 B (~0.7 KB malloc) per refresh, ~0.4 MB per 600, under that threshold. HOW TO MEASURE: (a) `bash examples/121_ui_editor/tools/hover-soak.sh 20` (committed in 71647680) builds the editor, runs it headless with the test-only runtime hook RAE_GPU2D_TEST_POINTER="x1,y1,x2,y2,frames" (runtime_gpu2d_platform.c: the reported pointer alternates between two design-space points every N polls, driving the REAL frame loop; logs `[gpu2d-test-pointer] N moves, M painted frames` every 250 moves) plus RAE_MEM_STATS=1, samples RSS every 10 s and prints the mem:string:sub / interp / TOTAL / buf lines at exit. 20 s is enough: currently ~3,250 hovers leave ~45,000 sub and ~3,500 interp outstanding. Pass 600 for the full 10-minute run. (b) For call sites use a SEPARATE run WITHOUT RAE_MEM_STATS (its table of live-allocation pointers makes leaked blocks look referenced, so `leaks` reports nothing): build as the script does, run the app with RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=40000 RAE_GPU2D_TEST_POINTER="623,196,787,297,1" MallocStackLogging=1 in the background, after ~20 s run `leaks <pid>` and read the `STACK OF N INSTANCES OF` groups. Idle baseline for `leaks` is ~116 blocks / ~0.8 MB (startup). DONE WHEN: the 20 s soak shows string:sub and string:interp outstanding at the idle baseline (tens, not thousands) and flat with run length; `leaks` on the hover run matches the idle baseline; the two compiler fixtures pass and fail on the pre-fix compiler; and the run_examples.sh hover-leak gate is tightened to drive painted frames through RAE_GPU2D_TEST_POINTER and assert outstanding String counts (not a MB threshold), sabotage-checked. Full suite + 121 example gate green.
 <!-- SUMU_QUEUE_END -->
