@@ -1491,6 +1491,7 @@ static void emit_match_case_test(CFuncContext* ctx, const AstExpr* subject,
 }
 
 static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
+static bool emit_stmt_body(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 
 // #884: every statement is emitted into a buffer first. A heap-owning
 // temporary produced inside it (a call result borrowed by a `view`
@@ -1498,8 +1499,36 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 // goes BEFORE the statement, its drop AFTER, so the value is released at the
 // end of the statement that made it. A `ret` writes the drops itself before
 // returning. Statements without temporaries come out byte-identical.
+// The local a `ret x` / `ret own x` hands back, or -1. Same LIFO name lookup
+// as mark_local_moved_by_name.
+static int returned_local_index(const CFuncContext* ctx, const AstStmt* stmt) {
+    if (stmt->kind != AST_STMT_RET || !stmt->as.ret_stmt.values) return -1;
+    const AstExpr* e = stmt->as.ret_stmt.values->value;
+    while (e && e->kind == AST_EXPR_OWN) e = e->as.unary.operand;
+    if (!e || e->kind != AST_EXPR_IDENT) return -1;
+    for (int i = (int)ctx->local_count - 1; i >= 0; i--)
+        if (str_eq(ctx->locals[i], e->as.ident)) return i;
+    return -1;
+}
+
 bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     if (!stmt) return true;
+    // `ret x` moves x out, but only on THAT path: the ret marks x moved so its
+    // own drop epilogue skips it, and the mark is undone once the statement
+    // is emitted. Anything emitted after it (the rest of an enclosing block,
+    // a later `ret`, the scope-exit drops) is only reached when this ret was
+    // NOT taken, where x still owns its heap. Left set, `if short { ret flat
+    // } ret "{flat.sub(...)}..."` never released `flat` on the second path
+    // (the editor's `truncated`, ~13 leaked Strings per hierarchy refresh).
+    int ret_local = returned_local_index(ctx, stmt);
+    bool ret_local_was_moved = ret_local >= 0 && ctx->local_moved[ret_local];
+    bool ok_ret = emit_stmt_body(ctx, stmt, out);
+    if (ret_local >= 0 && ret_local < (int)ctx->local_count)
+        ctx->local_moved[ret_local] = ret_local_was_moved;
+    return ok_ret;
+}
+
+static bool emit_stmt_body(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     CStmtTemps temps = {0};
     CStmtTemps* saved = ctx->stmt_temps;
     temps.parent = saved;
@@ -2175,23 +2204,17 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             break;
         }
         case AST_STMT_ASSIGN: {
-            // Stage 3 move tracking (continued): a field assignment
-            // `target.field = src` where src is a bare local of a
-            // heap-owning type moves src's heap into the target. The
-            // local must be skipped by end-of-scope auto-drop so we
-            // don't double-free the heap (now reachable via both
-            // src and target.field). Mirrors the move detection on
-            // `own x`, `ret x`, and bare-ident arg passing.
-            if (stmt->as.assign_stmt.target &&
-                stmt->as.assign_stmt.target->kind == AST_EXPR_MEMBER &&
-                stmt->as.assign_stmt.value &&
-                stmt->as.assign_stmt.value->kind == AST_EXPR_IDENT) {
-                const AstTypeRef* vtr = infer_expr_type_ref(ctx, stmt->as.assign_stmt.value);
-                if (vtr && !(vtr->is_view || vtr->is_mod) &&
-                    type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, vtr, 0)) {
-                    mark_expr_moved_if_local(ctx, stmt->as.assign_stmt.value);
-                }
-            }
+            // No move mark for `target.field = local`: a field store COPIES
+            // an identifier source on every path (`=` copies, #79484806) — a
+            // String field (is_string_field_reassign), an owned heap
+            // aggregate (the #965 store), and boxing into an optional field
+            // (rae_string_copy / rae_deep_copy_<T> into the box). The local
+            // keeps its own heap and its scope exit releases it. This block
+            // used to mark the local moved, a leftover of the time the store
+            // moved: every such store leaked the local (the editor's
+            // `chromeSystem.treeHeader = header`, once per hierarchy refresh;
+            // fixture 920). `own local` is still the move, marked where the
+            // OWN expression is emitted.
             fprintf(out, "  ");
             // Check if assigning to a mod ref variable (e.g. rx = 10 where rx is rae_Mod_Int64)
             const AstTypeRef* target_tr = infer_expr_type_ref(ctx, stmt->as.assign_stmt.target);
