@@ -445,19 +445,26 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             fprintf(out, "(void)0");
             return true;
         }
-        // Pass A only synthesises rae_drop_struct_<T> for NON-GENERIC
-        // user structs. If V is a generic-instance struct
-        // (StringMapEntry(V), JsonField, …), no helper exists — fall
-        // back to no-op rather than emit an undeclared call. This
-        // preserves the existing leak for generic-instance slots but
-        // keeps the build healthy. Closing the rest requires Pass A
-        // to also synthesise specialised drop helpers.
+        // A rae_drop_struct_<T> exists for a non-generic user struct (Pass
+        // A) and for a concrete generic instance registered in
+        // ctx->generic_types (Pass A', e.g. StringMapEntry(Int)). For
+        // anything else there is no helper to call, so this stays a no-op
+        // rather than an undeclared call.
         if (!elem_is_string && !elem_is_opt) {
             const AstDecl* elem_decl = find_type_decl(NULL, ctx->module, ebase);
-            bool has_synth_drop = elem_decl
+            bool is_user_struct = elem_decl
                 && elem_decl->kind == AST_DECL_TYPE
-                && !elem_decl->as.type_decl.generic_params
                 && !has_property(elem_decl->as.type_decl.properties, "c_struct");
+            bool has_synth_drop = is_user_struct && !elem_decl->as.type_decl.generic_params;
+            if (is_user_struct && elem_decl->as.type_decl.generic_params && elem_tr->generic_args) {
+                const char* want = rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, elem_tr);
+                for (size_t gi = 0; want && gi < ctx->compiler_ctx->generic_type_count; gi++) {
+                    const AstTypeRef* gt = ctx->compiler_ctx->generic_types[gi];
+                    if (!gt || gt->is_view || gt->is_mod || gt->is_opt || !gt->generic_args) continue;
+                    const char* have = rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, (AstTypeRef*)gt);
+                    if (have && strcmp(have, want) == 0) { has_synth_drop = true; break; }
+                }
+            }
             if (!has_synth_drop) {
                 fprintf(out, "(void)0");
                 return true;

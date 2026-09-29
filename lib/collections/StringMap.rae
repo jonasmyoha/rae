@@ -68,15 +68,18 @@ func set(
         ret
       }
       if rae_str_eq(a: entry.k, b: k) {
-        entry.value = value
-        # Drop the existing entry's owned-heap fields before overwriting
-        # the slot. Without this, replacing an existing map entry leaks
-        # whichever cascade-droppable fields V's struct (and the entry
-        # key) owns. `entry.value = value` already handled the value
-        # field via the field-assign drop, but the entry struct copy
-        # still aliases the key — drop the slot, then overwrite.
+        # Replace the whole entry: release the old key and value, then
+        # store a fresh one exactly as the insert path above does.
+        # (`entry` is a bitwise copy of the slot; assigning its `value`
+        # never released the old one, so every overwrite of a heap value
+        # leaked it.)
         rae_ext_rae_buf_drop_at(buf: this.data, index: idx)
-        rae_ext_rae_buf_set(buf: this.data, index: idx, value: entry)
+        let keyCopy: String = rae_ext_rae_string_copy(string: k)
+        rae_ext_rae_buf_set(
+          buf: this.data
+          index: idx
+          value: { k: keyCopy, value: value, occupied: true }
+        )
         ret
       }
       idx = (idx + 1) % this.cap
@@ -172,8 +175,11 @@ func get(V: type, this: view StringMap(V), k: view String) ret opt V {
   }
 }
 
+# Through viewGet, not get: get returns an owned COPY of the value, and a
+# temporary optional that is only compared to none is never released — one
+# leaked copy of a heap value per call.
 func has(V: type, this: view StringMap(V), k: view String) ret Bool {
-  ret get(this, k: k) is not none
+  ret viewGet(this, key: k) is not none
 }
 
 func remove(V: type, this: mod StringMap(V), k: view String) {
@@ -232,6 +238,11 @@ func remove(V: type, this: mod StringMap(V), k: view String) {
           }
         }
         rae_ext_rae_buf_set(buf: this.data, index: hole, value: dead)
+        # The removed entry ends here: release its key and value. It sits
+        # unoccupied, so nothing reads it again, but its heap was never
+        # freed (#85206966: every removed key leaked, e.g. unmountPage's
+        # node ids on every remount).
+        rae_ext_rae_buf_drop_at(buf: this.data, index: hole)
         this.length = this.length - 1
         ret
       }
@@ -285,11 +296,24 @@ func growStringMap(V: type, this: mod StringMap(V)) {
     this.data = rae_ext_rae_buf_alloc(size: this.cap, elemSize: sizeof(StringMapEntry(V)))
     this.length = 0
 
+    # MOVE each entry into the new buffer as it is: its key and value keep
+    # their heap, and the old buffer is released without dropping anything.
+    # Re-inserting through `set` copied every key and then freed the old
+    # buffer with the old keys still in it — one leaked String per entry
+    # per doubling (#85206966: ~800 per UI editor boot, all node ids).
     var i: Int = 0
     loop i < oldCap {
       let entry: StringMapEntry(V) = rae_ext_rae_buf_get(buf: oldData, index: i)
       if entry.occupied {
-        set(this, k: entry.k, value: entry.value)
+        var slot: Int = rae_str_hash(s: entry.k) % this.cap
+        if slot < 0 {
+          slot = -slot
+        }
+        loop rae_ext_rae_buf_get(buf: this.data, index: slot).occupied {
+          slot = (slot + 1) % this.cap
+        }
+        rae_ext_rae_buf_set(buf: this.data, index: slot, value: entry)
+        this.length = this.length + 1
       }
       i = i + 1
     }
