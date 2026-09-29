@@ -1,0 +1,100 @@
+# StringMap and IntMap release every entry they stop holding. Three paths
+# leaked (#85206966): growing a StringMap re-inserted each entry through
+# `set`, which copied the key, then freed the old buffer with the old keys
+# still in it (one String per entry per doubling: the UI editor's ~800
+# node-id keys per boot); `remove` left the removed key and value in the
+# unoccupied slot; overwriting a key with a heap value never released the
+# old value; and `has` went through `get`, whose owned copy of the value
+# was never released (one leaked copy per call on a heap-valued map). Each
+# shape is checked twice: the map still answers correctly, and outstanding
+# allocations return to the baseline once it is dropped.
+open collections/StringMap
+open collections/IntMap
+
+func rae_ext_rae_mem_stats_outstanding() unsafe extern ret Int
+
+type Holder {
+  label: String
+}
+
+# Starts at cap 8, so 60 keys force four doublings; every key must still
+# be found afterwards.
+func growAndLookUp(count: view Int) ret Int {
+  var map: StringMap(Holder) = StringMap.create(Holder, cap: 8)
+  loop var i: Int = 0, i < count, ++i {
+    map.set(k: "key {i}", value: Holder { label: "label {i}" })
+  }
+  var found: Int = 0
+  loop var i: Int = 0, i < count, ++i {
+    if let holder: view Holder => map.viewGet(key: "key {i}") {
+      if holder.label is "label {i}" {
+        found = found + 1
+      }
+    }
+  }
+  ret found
+}
+
+# Removing every other key must keep the rest reachable (the backward
+# shift) and release what was removed.
+func removeHalf(count: view Int) ret Int {
+  var map: StringMap(Holder) = StringMap.create(Holder, cap: 8)
+  loop var i: Int = 0, i < count, ++i {
+    map.set(k: "key {i}", value: Holder { label: "label {i}" })
+  }
+  loop var i: Int = 0, i < count, ++i {
+    if i % 2 is 0 {
+      map.remove(k: "key {i}")
+    }
+  }
+  var found: Int = 0
+  loop var i: Int = 0, i < count, ++i {
+    if i % 2 is 1 and map.has(k: "key {i}") {
+      found = found + 1
+    }
+  }
+  ret found * 1000 + map.length
+}
+
+func overwrite(count: view Int) ret String {
+  var map: StringMap(Holder) = StringMap.create(Holder, cap: 8)
+  loop var i: Int = 0, i < count, ++i {
+    map.set(k: "same key", value: Holder { label: "label {i}" })
+  }
+  if let holder: view Holder => map.viewGet(key: "same key") {
+    ret "{holder.label} ({map.length} entry)"
+  }
+  ret "missing"
+}
+
+func intMapRemoveAndOverwrite(count: view Int) ret Int {
+  var map: IntMap(Holder) = IntMap.create(Holder, cap: 8)
+  loop var i: Int = 0, i < count, ++i {
+    map.set(k: i, value: Holder { label: "label {i}" })
+    map.set(k: i, value: Holder { label: "again {i}" })
+  }
+  loop var i: Int = 0, i < count, ++i {
+    if i % 2 is 0 {
+      map.remove(k: i)
+    }
+  }
+  ret map.length
+}
+
+func main() {
+  unsafe {
+    log("grow: found {growAndLookUp(count: 60)} of 60")
+    log("remove half: {removeHalf(count: 60)} (found 30, length 30)")
+    log("overwrite: {overwrite(count: 60)}")
+    log("IntMap: length {intMapRemoveAndOverwrite(count: 60)}")
+    let baseline: Int = rae_ext_rae_mem_stats_outstanding()
+    loop var round: Int = 0, round < 20, ++round {
+      let grown: Int = growAndLookUp(count: 60)
+      let removed: Int = removeHalf(count: 60)
+      let overwritten: String = overwrite(count: 60)
+      let intMapLength: Int = intMapRemoveAndOverwrite(count: 60)
+    }
+    let leaked: Int = rae_ext_rae_mem_stats_outstanding() - baseline
+    log("leaked allocations: {leaked}")
+  }
+}
