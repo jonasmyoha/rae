@@ -256,7 +256,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # between Title and OrbitPlanet every poll, so the REAL frame loop
           # runs hit-test, hover outline, hierarchy refresh and paint. At exit
           # (RAE_MEM_STATS=1) the outstanding allocations must be the boot
-          # baseline (972 Strings, 1 buffer today), not a per-hover count:
+          # baseline (8 Strings, 1 buffer today), not a per-hover count:
           # any leak of even one String per hover adds 1500. A MB threshold
           # was too coarse — the hierarchy-refresh String leak (~0.7 KB per
           # hover) passed the old 4 MB check. The move line proves the
@@ -273,7 +273,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
                   /\[mem:string:sub /  { substrings = out($0) }
                   /\[mem:string:interp/ { interps = out($0) }
                   /\[mem:buf /         { buffers = out($0); seen++ }
-                  END { exit !(seen == 2 && total < 1972 && substrings < 100 && interps < 100 && buffers < 50) }
+                  END { exit !(seen == 2 && total < 100 && substrings < 100 && interps < 100 && buffers < 50) }
                 ' "$TMP_OUT/render-hover-leak.log"; then
             :
           else
