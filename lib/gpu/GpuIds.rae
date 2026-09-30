@@ -6,6 +6,7 @@
 open gpu/GpuResources
 open gpu/GpuLifetime
 open gpu/GpuRender
+open gpu/GpuDependencies
 
 func noBufferId() ret BufferId {
   ret BufferId { managerTag: 0, slot: -1, generation: 0 }
@@ -155,6 +156,16 @@ func pollSubmissions(inFlight: mod List(SubmissionId), resources: mod GpuResourc
     } else {
       i = i + 1
     }
+  }
+  # Every submission appends its dependency slice to the manager's arena, and
+  # the arena only shrinks when compacted. The 2D canvas and water compact at
+  # their frame end, but nothing compacted the renderer's own manager (the
+  # shadow and G-buffer passes submit to it every frame), so its three Lists
+  # grew for the whole run (~3 MB/min in the 3D examples). Compacting here,
+  # once the arena has more than doubled since the last compaction, bounds
+  # every manager that polls its submissions at amortised O(1) per append.
+  if resources.depKinds.length > resources.depCompactedLength * 2 + 1024 {
+    compactDependencies(resources: resources)
   }
 }
 
