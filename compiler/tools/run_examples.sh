@@ -1187,12 +1187,28 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              && [ "$(grep -c "panel buttons: 4 clip, 0 transport" "$TMP_OUT/render.log")" -eq 1 ] \
              && [ "$(grep -c "\[water\] toon lake: 2 bodies" "$TMP_OUT/render.log")" -eq 1 ] \
              && [ "$(grep -c "\[shadow\] casters 130, 3 cascades" "$TMP_OUT/render.log")" -eq 1 ] \
-             && [ "$(grep -c "\[seamtest\] .* netOk=true physicsOk=true" "$TMP_OUT/render.log")" -eq 1 ]; then
-            echo "PASS: $EXAMPLE_NAME (12 skinned parts + ground casting shadows, clip retargeted, atlas decoded)"
+             && [ "$(grep -c "\[seamtest\] .* netOk=true physicsOk=true" "$TMP_OUT/render.log")" -eq 1 ] \
+             && (cd .. && RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=90000 RAE_MEM_STATS=1 RAE_MEM_STATS_EVERY_MS=10000 \
+                perl -e 'alarm shift; exec @ARGV' 150 "$TMP_OUT/app") > "$TMP_OUT/live-growth.log" 2>&1 \
+             && awk '
+                  # Memory held while running must stay flat after warm-up. The
+                  # renderer GPU dependency arena grew for the whole run until
+                  # pollSubmissions compacted it (buf_bytes 8.97 -> 13.68 MB by
+                  # 120 s with a flat buffer COUNT, ~3 MB/min of RSS).
+                  function field(line, key) { sub(".*" key "=", "", line); sub(/ .*/, "", line); return line + 0 }
+                  /^\[mem:live\]/ {
+                    t = field($0, "t"); bufs = field($0, "bufs"); bytes = field($0, "buf_bytes")
+                    if (!based && t >= 20000) { based = 1; baseBufs = bufs; baseBytes = bytes }
+                    lastT = t; lastBufs = bufs; lastBytes = bytes
+                  }
+                  END { exit !(based && lastT >= 80000 && lastBufs - baseBufs <= 4 && lastBytes - baseBytes <= 262144) }
+                ' "$TMP_OUT/live-growth.log"; then
+            echo "PASS: $EXAMPLE_NAME (12 skinned parts + ground casting shadows, clip retargeted, atlas decoded, memory flat while running)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (walker character)"
             cat "$TMP_OUT/render.log" "$TMP_OUT/shot.log" 2>/dev/null | sed 's/^/  /'
+            grep -a '^\[mem:live\]' "$TMP_OUT/live-growth.log" 2>/dev/null | sed 's/^/  /'
             ((FAILED++))
           fi
         elif [ "$EXAMPLE_NAME" = "110_deferred_gbuffer" ]; then
