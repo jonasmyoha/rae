@@ -1121,11 +1121,15 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # skeleton, clip and atlas lines each cover a stage that fails
           # silently on its own: 65 joints (skin parsed), 195 channels
           # retargeted onto it (animation), 512x512 (the pure-Rae PNG
-          # decode that feeds per-vertex colour).
+          # decode that feeds per-vertex colour). The region check proves the
+          # UI is DRAWN, not only created: the corner menu button is a dark
+          # square in the top-left. The "panel buttons" log line kept passing
+          # while the frame loop rendered an empty UiSystems and no UI showed.
           SHOT="$TMP_OUT/walker.bmp"
           if (cd .. && RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SHOT" \
                 perl -e 'alarm shift; exec @ARGV' 45 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
              && python3 tools/assert_nonblank_bmp.py "$SHOT" --min-colors=20 > "$TMP_OUT/shot.log" 2>&1 \
+             && python3 tools/assert_bmp_region_dark.py "$SHOT" 70 70 150 150 0.5 >> "$TMP_OUT/shot.log" 2>&1 \
              && [ "$(grep -c "walker: 6717 verts, 3465 triangles" "$TMP_OUT/render.log")" -eq 1 ] \
              && [ "$(grep -c "skeleton: 65 joints, 76 nodes" "$TMP_OUT/render.log")" -eq 1 ] \
              && [ "$(grep -c "walk 195 ch" "$TMP_OUT/render.log")" -eq 1 ] \
