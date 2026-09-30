@@ -1141,6 +1141,21 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                     wrap_pool_take_arg = true;
                 }
             }
+            // An `extern` BORROWS a plain String argument — the C side reads
+            // it (a path, a key, text to draw) and never frees it. Taking the
+            // fresh temporary out of the pool without an owner leaked it on
+            // every call: `rae_ext_rae_sys_read_file(path: statePathFor(...))`,
+            // one String per HotReload lookup (fixture 934). Park it in a
+            // statement temporary instead, released after the statement like
+            // the view-parameter temporaries above. An `own` parameter is the
+            // callee's to keep and stays a plain pool_take.
+            int extern_string_tmp = -1;
+            if (wrap_pool_take_arg && fd->is_extern && !p->type->is_own && !p->type->is_copy
+                && ctx->stmt_temps) {
+                static AstIdentifierPart kExternStrPart = { .text = { .data = "String", .len = 6 } };
+                static AstTypeRef kExternStrTr = { .parts = &kExternStrPart };
+                extern_string_tmp = register_stmt_temp(ctx, &kExternStrTr, true);
+            }
             // Deep-copy member-access String args going into an `own
             // String` parameter. AST_EXPR_MEMBER reads through to
             // potentially-shared storage (e.g. `ocView->actionId` —
@@ -1499,6 +1514,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             } else {
                 if (needs_addr) fprintf(out, "&");
                 if (needs_deref) fprintf(out, "(*");
+                if (extern_string_tmp >= 0) fprintf(out, "(__rae_stmt_tmp%d = ", extern_string_tmp);
                 if (wrap_pool_take_arg) fprintf(out, "rae_string_pool_take(");
                 if (wrap_deep_copy_arg) fprintf(out, "rae_string_copy(");
                 if (copy_arg_kind == 1) fprintf(out, "rae_string_copy(");
@@ -1515,6 +1531,9 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 if (copy_arg_kind == 3) fprintf(out, ")");
                 if (wrap_deep_copy_arg) fprintf(out, ")");
                 if (wrap_pool_take_arg) fprintf(out, ")");
+                if (extern_string_tmp >= 0)
+                    fprintf(out, ", __rae_stmt_tmp%d_set = 1, __rae_stmt_tmp%d)",
+                            extern_string_tmp, extern_string_tmp);
                 if (needs_deref) fprintf(out, ")");
                 if (needs_prim_wrap) fprintf(out, "} }");
             }
