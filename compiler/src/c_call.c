@@ -1009,6 +1009,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             // loadImageKey(k) leaked one string per call). An extern that
             // genuinely consumes its arg must opt in with `own`.
             bool param_consumes = !(fd->is_extern) || p->type->is_own;
+            bool close_live_flag = false;
             if (param_consumes
                 && p && p->type && !(p->type->is_view || p->type->is_mod)
                 && !p->type->is_copy && a->value
@@ -1023,7 +1024,17 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                                                  ctx->generic_args, (AstTypeRef*)arg_tr);
                 if (arg_tr && !(arg_tr->is_view || arg_tr->is_mod)
                     && type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, arg_tr, 0)) {
-                    mark_expr_moved_if_local(ctx, a->value);
+                    int li = local_index_by_name(ctx, a->value->as.ident);
+                    if (li >= 0 && ctx->local_drop_flag[li]) {
+                        // Moved on this path only: clear the live flag as the
+                        // argument is evaluated, so the scope-exit drop runs on
+                        // the paths that did not move it (#55453128).
+                        Str mn = a->value->as.ident;
+                        fprintf(out, "(__rae_live_%.*s = 0, ", (int)mn.len, mn.data);
+                        close_live_flag = true;
+                    } else {
+                        mark_expr_moved_if_local(ctx, a->value);
+                    }
                 }
             }
             bool needs_addr = false; bool needs_deref = false; bool needs_prim_wrap = false; bool needs_box = false;
@@ -1543,6 +1554,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 if (needs_prim_wrap) fprintf(out, "} }");
             }
             ctx->has_expected_type = had_exp; ctx->expected_type = saved_exp;
+            if (close_live_flag) fprintf(out, ")");
             if (a->next) fprintf(out, ", ");
             a = a->next; if (p) p = p->next;
             arg_index++;

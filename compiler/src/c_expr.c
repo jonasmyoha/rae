@@ -1077,6 +1077,19 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                 }
             }
         }
+        {
+            // A local moved on some paths only clears its live flag as the
+            // move is evaluated (#55453128); every other local is marked moved.
+            const AstExpr* moved = expr->as.unary.operand;
+            int li = (moved && moved->kind == AST_EXPR_IDENT)
+                ? local_index_by_name(ctx, moved->as.ident) : -1;
+            if (li >= 0 && ctx->local_drop_flag[li] && !is_lvalue) {
+                fprintf(out, "(__rae_live_%.*s = 0, ", (int)moved->as.ident.len, moved->as.ident.data);
+                emit_expr(ctx, moved, out, PREC_LOWEST, is_lvalue, suppress_deref);
+                fprintf(out, ")");
+                break;
+            }
+        }
         mark_expr_moved_if_local(ctx, expr->as.unary.operand);
         emit_expr(ctx, expr->as.unary.operand, out, parent_prec, is_lvalue, suppress_deref);
         break;

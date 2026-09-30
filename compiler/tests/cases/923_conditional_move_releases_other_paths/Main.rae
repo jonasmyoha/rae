@@ -1,0 +1,140 @@
+# A local moved into a call on SOME paths only is still released on the others.
+# The move used to be a compile-time mark that skipped the local's scope-exit
+# drop on EVERY path (#55453128): `if exists(path: path) { list.add(value:
+# path) }` leaked `path` whenever the file did not exist, 7 Strings per UI
+# editor reload. Now such a local carries a runtime live flag, cleared where
+# the move is evaluated. Each shape runs both ways: the value arrives where it
+# was moved to, and outstanding allocations return to the baseline.
+func rae_ext_rae_mem_stats_outstanding() unsafe extern ret Int
+
+type Holder {
+  label: String
+  items: List(String)
+}
+
+func makeHolder(seed: view Int) ret Holder {
+  var items: List(String) = List.create(String, cap: 2)
+  items.add(value: "item {seed}")
+  ret Holder { label: "holder {seed}", items: own items }
+}
+
+func keepHolder(holder: own Holder, into: mod List(String)) {
+  into.add(value: "{holder.label}/{holder.items.length}")
+}
+
+# The UI editor's shape: a String moved into a list inside an if.
+func inIf(seed: view Int, take: view Bool, into: mod List(String)) {
+  let path: String = "path {seed}"
+  if take {
+    into.add(value: path)
+  }
+}
+
+func inElse(seed: view Int, take: view Bool, into: mod List(String)) {
+  let path: String = "else {seed}"
+  if take is false {
+    let unused: Int = path.length()
+  } else {
+    into.add(value: path)
+  }
+}
+
+# A struct declared in a loop body and moved on one iteration only.
+func inLoop(seed: view Int, at: view Int, into: mod List(String)) {
+  loop var i: Int = 0, i < 3, ++i {
+    let holder: Holder = makeHolder(seed: seed + i)
+    if i is at {
+      keepHolder(holder: holder, into: into)
+    }
+  }
+}
+
+func inMatch(seed: view Int, choice: view Int, into: mod List(String)) {
+  let path: String = "match {seed}"
+  match choice {
+    case 1 {
+      into.add(value: path)
+    }
+    default {
+      let unused: Int = path.length()
+    }
+  }
+}
+
+func inAnd(seed: view Int, take: view Bool, into: mod List(String)) ret Bool {
+  let path: String = "and {seed}"
+  ret take and appendAndSay(value: path, into: into)
+}
+
+func appendAndSay(value: own String, into: mod List(String)) ret Bool {
+  into.add(value: own value)
+  ret true
+}
+
+# Explicit `own` inside a branch, for a List.
+func ownInIf(seed: view Int, take: view Bool, into: mod List(List(String))) {
+  var items: List(String) = List.create(String, cap: 2)
+  items.add(value: "own {seed}")
+  if take {
+    into.add(value: own items)
+  }
+}
+
+# A moved String reassigned afterwards: the old value is not freed twice,
+# the new one is released at scope exit.
+func reassignAfter(seed: view Int, take: view Bool, into: mod List(String)) ret String {
+  var path: String = "first {seed}"
+  if take {
+    into.add(value: path)
+  }
+  path = "second {seed}"
+  ret "{path}"
+}
+
+func reassignAfterUnconditional(seed: view Int, into: mod List(String)) ret String {
+  var path: String = "plain {seed}"
+  into.add(value: path)
+  path = "again {seed}"
+  ret "{path}"
+}
+
+func run(take: view Bool, rounds: view Int) ret String {
+  var strings: List(String) = List.create(String, cap: 8)
+  var lists: List(List(String)) = List.create(List(String), cap: 4)
+  var said: Int = 0
+  loop var i: Int = 0, i < rounds, ++i {
+    inIf(seed: i, take: take, into: strings)
+    inElse(seed: i, take: take, into: strings)
+    var at: Int = 1
+    if take is false {
+      at = 9
+    }
+    inLoop(seed: i, at: at, into: strings)
+    var choice: Int = 1
+    if take is false {
+      choice = 2
+    }
+    inMatch(seed: i, choice: choice, into: strings)
+    if inAnd(seed: i, take: take, into: strings) {
+      said = said + 1
+    }
+    ownInIf(seed: i, take: take, into: lists)
+    let again: String = reassignAfter(seed: i, take: take, into: strings)
+    let plain: String = reassignAfterUnconditional(seed: i, into: strings)
+  }
+  ret "{strings.length} strings, {lists.length} lists, {said} said"
+}
+
+func main() {
+  unsafe {
+    log("moved: {run(take: true, rounds: 1)}")
+    log("kept: {run(take: false, rounds: 1)}")
+    let baseline: Int = rae_ext_rae_mem_stats_outstanding()
+    loop var round: Int = 0, round < 20, ++round {
+      let moved: String = run(take: true, rounds: 3)
+      let kept: String = run(take: false, rounds: 3)
+    }
+    let leaked: Int = rae_ext_rae_mem_stats_outstanding() - baseline
+    log("leaked allocations: {leaked}")
+  }
+}

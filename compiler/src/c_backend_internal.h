@@ -282,6 +282,8 @@ void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
 const AstFuncDecl* find_drop_overload_for(CFuncContext* ctx, Str container_base);
 // Move tracking helpers (Stage 3 of docs/ownership-model.md).
 void mark_local_moved_by_name(CFuncContext* ctx, Str name);
+bool rest_moves_name_conditionally(const AstStmt* rest, Str name);
+int local_index_by_name(const CFuncContext* ctx, Str name);
 
 // c_names.c: Rae identifiers spelled like a C keyword / macro / libc function.
 bool c_reserved_name(Str name);
