@@ -742,8 +742,18 @@ void mark_expr_moved_if_local(CFuncContext* ctx, const AstExpr* expr) {
   if (expr->kind == AST_EXPR_IDENT) {
     mark_local_moved_by_name(ctx, expr->as.ident);
   } else if (expr->kind == AST_EXPR_OWN) {
-    // Explicit `own x` always tries to move whatever's inside.
-    mark_expr_moved_if_local(ctx, expr->as.unary.operand);
+    // Explicit `own x` always tries to move whatever's inside — except a
+    // local moved on SOME paths only: emitting `own x` cleared its live flag
+    // at run time (c_expr.c), and that flag is the whole record of the move.
+    // Marking it moved as well made the scope exit skip the guarded
+    // `if (__rae_live_x) drop(x)`, so every path that did NOT move leaked
+    // (`if first { kept = own rows }` in a loop: one List per other pass).
+    const AstExpr* operand = expr->as.unary.operand;
+    if (operand && operand->kind == AST_EXPR_IDENT) {
+      int li = local_index_by_name(ctx, operand->as.ident);
+      if (li >= 0 && ctx->local_drop_flag[li]) return;
+    }
+    mark_expr_moved_if_local(ctx, operand);
   }
 }
 
@@ -1889,6 +1899,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                         ctx->local_is_ptr[li] = false;
                         ctx->local_is_mod[li] = false;
                         ctx->local_drop_flag[li] = false;  // #902: never inherit a reused slot's stale flag
+                        ctx->local_moved[li] = false;
                         ctx->local_count++;
                     }
                     break;
@@ -1914,6 +1925,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     ctx->local_is_ptr[local_index] = false;
                     ctx->local_is_mod[local_index] = false;
                     ctx->local_drop_flag[local_index] = false;  // #902: never inherit a reused slot's stale flag
+                    ctx->local_moved[local_index] = false;
                     ctx->local_count++;
                 }
                 break;
@@ -2147,6 +2159,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     ctx->local_is_ptr[local_index] = false;
                     ctx->local_is_mod[local_index] = false;
                     ctx->local_drop_flag[local_index] = false;  // #902: never inherit a reused slot's stale flag
+                    ctx->local_moved[local_index] = false;
                     ctx->local_count++;
                 }
                 break;
@@ -2311,6 +2324,12 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 // scoped to the exact local it is declared for, never
                 // leaked from whatever local last occupied this slot.
                 ctx->local_drop_flag[ctx->local_count] = false;
+                // The same holds for the MOVED mark: a block-local moved out
+                // with `own` (`holder.textFont = own font` inside an `if`)
+                // left its slot marked, and the next local to claim the slot
+                // (`let icons: String = ...` after the block) was born
+                // "moved" — its scope-exit drop was skipped on every path.
+                ctx->local_moved[ctx->local_count] = false;
                 // Phase 3 ownership classification — does this binding
                 // uniquely own its heap, or does it shallow-alias
                 // someone else's storage? Used by emit_implicit_drops
