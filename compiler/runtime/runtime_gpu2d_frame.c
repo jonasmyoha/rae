@@ -241,10 +241,20 @@ void rae_g2d_present(void* texture, int64_t width, int64_t height) {
      * On a presented frame, poll with wait=true so that submission is
      * retired here. This does NOT cost frame rate: Fifo already paces the
      * loop to vsync, and blocking here simply moves the wait that would
-     * otherwise happen inside the next wgpuSurfaceGetCurrentTexture. When
-     * nothing presented (occluded / headless), the cheap non-blocking poll
-     * is enough and must stay non-blocking so those paths never stall. */
-    rae_wgpu_poll(presented ? 1 : 0);
+     * otherwise happen inside the next wgpuSurfaceGetCurrentTexture.
+     *
+     * When nothing presented (hidden / minimised / occluded / headless) the
+     * wait matters MORE, not less: without a drawable there is no vsync, so
+     * nothing paces the frame loop at all. A game whose CPU frame is cheaper
+     * than its GPU frame then submits faster than the GPU retires, and the
+     * backlog of in-flight command buffers grows without bound — measured on
+     * a hidden window: ~23 Metal command buffers/s kept alive, 2.1 GB of
+     * IOAccelerator memory after 90 s, while every Rae-side counter stayed
+     * flat. A non-blocking poll only retires what already finished, so it
+     * cannot stop that. Waiting here is bounded by one frame's GPU work (no
+     * vsync is involved), and it is the backpressure a presenting frame gets
+     * from Fifo: the loop runs no faster than the GPU finishes frames. */
+    rae_wgpu_poll(1);
 }
 
 rae_Bool rae_ext_Gpu2d_lastPresentOk(void) {
