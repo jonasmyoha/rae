@@ -1122,6 +1122,14 @@ static void emit_local_drop(CFuncContext* ctx, FILE* out, size_t idx,
       type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
                                  ctx->generic_args, (AstTypeRef*)type);
   }
+  // The same for a user generic STRUCT of the function's type parameters
+  // (`let box: Box(V)`): as Box(V) it looked heap-free, so the local was
+  // never dropped and whatever it held leaked. Containers with their own drop
+  // overload (List/StringMap/IntMap) substitute their element further down.
+  if (ctx->generic_params && ctx->generic_args && !type->is_opt
+      && type->generic_args && !is_drop_target_type(type) && ctx->local_struct_owns_heap[idx])
+    type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
+                               ctx->generic_args, (AstTypeRef*)type);
   // Task(T): join-on-drop. A Task is a RaeTask* (not a cascade-drop
   // struct), so it'd be skipped below — handle it here. rae_task_drop
   // joins (no-op if already get()'d) then frees, so a worker thread
