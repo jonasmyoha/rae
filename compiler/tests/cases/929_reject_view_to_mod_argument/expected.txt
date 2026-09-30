@@ -1,0 +1,15 @@
+tests/cases/929_reject_view_to_mod_argument/Main.rae:28:17: 'counter' is a read-only view, but parameter 'counter' is 'mod': the callee could write through it. Declare 'counter' as 'mod' where it is bound, or take the parameter as 'view'
+    28 |   bump(counter: counter)
+       |                 ^~~~
+tests/cases/929_reject_view_to_mod_argument/Main.rae:32:21: 'box' is a read-only view, but parameter 'counter' is 'mod': the callee could write through it. Declare 'box' as 'mod' where it is bound, or take the parameter as 'view'
+    32 |   bump(counter: box.counter)
+       |                     ^~~~
+tests/cases/929_reject_view_to_mod_argument/Main.rae:37:17: 'readOnly' is a read-only view, but parameter 'counter' is 'mod': the callee could write through it. Declare 'readOnly' as 'mod' where it is bound, or take the parameter as 'view'
+    37 |   bump(counter: readOnly)
+       |                 ^~~~
+tests/cases/929_reject_view_to_mod_argument/Main.rae:41:3: 'counter' is a read-only view, but parameter 'this' is 'mod': the callee could write through it. Declare 'counter' as 'mod' where it is bound, or take the parameter as 'view'
+    41 |   counter.increment()
+       |   ^~~~
+tests/cases/929_reject_view_to_mod_argument/Main.rae:45:21: a call returning a read-only view cannot be passed to parameter 'counter', which is 'mod'
+    45 |   bump(counter: peek(box: box))
+       |                     ^~~~

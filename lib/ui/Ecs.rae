@@ -610,7 +610,7 @@ func dropPendingComponentsOf(world: mod UiWorld, entityId: view EntityId) {
 # the shared lib/ecs HierarchySystem `collectSubtree` (#722) — UiWorld
 # stores the standard ecs `Children` cache, so there is no UI-local
 # tree walk to duplicate it.
-func destroyEntitySubtree(world: mod UiWorld, uiSystems: view UiSystems, root: view EntityId) pub {
+func destroyEntitySubtree(world: mod UiWorld, uiSystems: mod UiSystems, root: view EntityId) {
   unsafe {
     # #972: detach the root from its parent's `Children` cache FIRST. Without
     # this a destroyed subtree root (the nav-tabs bar, unmounted on every tab
@@ -636,7 +636,7 @@ func destroyEntitySubtree(world: mod UiWorld, uiSystems: view UiSystems, root: v
 # subtree, and sweep `world.nodeIds` for keys with the `"<pageId>/"`
 # prefix so a future page with the same id starts clean. No-op when
 # no page with that id is mounted.
-func unmountPage(world: mod UiWorld, uiSystems: view UiSystems, pageId: view String) pub {
+func unmountPage(world: mod UiWorld, uiSystems: mod UiSystems, pageId: view String) pub {
   unsafe {
     let root: EntityId = findPageRootEntity(world: world, pageId: pageId)
     if isNone(this: root) {

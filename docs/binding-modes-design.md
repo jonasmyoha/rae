@@ -141,6 +141,13 @@ Only what option N makes an error but today's compiler accepts:
    Both now take `mod` (fixed in the source; it compiles on today's
    compiler), so turning the check on breaks nothing known. A fixture joins
    613 for the argument case.
+   **Done (compiler 0.1.90):** `sema_reject_view_to_mod` checks every
+   argument whose parameter is `mod`, and a method receiver whose `this` is
+   `mod`; fixture 929. Turning it on found 46 more bindings in `lib/ui` and
+   the UI examples that were declared `uiSystems: view UiSystems` (and one
+   `view DebugOverlay`) while their callees wrote through them — the
+   hierarchy's parent table, list-view pools, hero transitions. They now
+   take `mod`.
 2. **Confirm the edge cells of §2 against today's compiler** before relying
    on them: an alias or field passed to an `own` parameter copies (it
    compiles today, e.g. `entities.add(value: entityId)` with a `view
