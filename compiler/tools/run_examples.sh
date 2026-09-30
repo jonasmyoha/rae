@@ -281,6 +281,27 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             echo "  hover leak check failed (1500 painted canvas hovers; outstanding must stay at the boot baseline):"
             grep -a 'test-pointer\|mem:string:TOTAL\|mem:string:sub \|mem:string:interp\|mem:buf ' "$TMP_OUT/render-hover-leak.log" 2>/dev/null | tail -5 | sed 's/^/    /'
           fi
+          # Unreachable memory at exit (macOS `leaks --atExit`): the check
+          # above only sees allocations Rae counts; this one sees every malloc,
+          # so it covers the C runtime and wgpu too (the surface capabilities
+          # struct was never freed, #91078530). 300 frames with the pointer
+          # sweeping the window, MallocStackLogging for the stacks, and NO
+          # RAE_MEM_STATS — its allocation table keeps leaked blocks reachable.
+          # Any 'ROOT LEAK' fails; the NSXPCConnection 'ROOT CYCLE's are
+          # AppKit's own.
+          if command -v leaks >/dev/null 2>&1; then
+            (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
+               RAE_UI_EDITOR_ROOT="examples/121_ui_editor/assets/samples" \
+               RAE_UI_HEADLESS=1 RAE_HEADLESS_FRAMES=300 RAE_FIXED_DT=0.05 MallocStackLogging=1 \
+               RAE_GPU2D_TEST_POINTER="sweep:700,5,895,60" \
+               perl -e 'alarm shift; exec @ARGV' 120 leaks --atExit -- "$TMP_OUT/app") > "$TMP_OUT/leaks-at-exit.log" 2>&1 || true
+            if ! grep -q 'leaks for' "$TMP_OUT/leaks-at-exit.log" \
+               || grep -q "^STACK OF .*'ROOT LEAK:" "$TMP_OUT/leaks-at-exit.log"; then
+              UI_EDITOR_OK=0
+              echo "  leaks --atExit found unreachable memory (or did not report):"
+              grep -a "leaks for\|^STACK OF .*'ROOT LEAK:" "$TMP_OUT/leaks-at-exit.log" | sort -u | head -8 | sed 's/^/    /'
+            fi
+          fi
           # Hover glow (Shadow.hoverOpacity + the ButtonSystem fade): hovering
           # the Open pill once must brighten its glow — the frame differs from
           # the un-hovered MainMenu shot above, and only by the glow.

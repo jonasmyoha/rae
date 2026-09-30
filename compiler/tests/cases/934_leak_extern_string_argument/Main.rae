@@ -1,0 +1,113 @@
+# Leak regression for #93590058: an owned String temporary (a call result or
+# an interpolation) passed straight to an `extern` must be freed. In a `ret`
+# the C backend TOOK the temporary out of the string pool (so the pool would
+# not free it) and nothing else dropped it: lib/HotReload.rae's
+# `ret rae_ext_rae_sys_read_file(path: statePathFor(appId: appId))` leaked the
+# path at every call. The other shapes guard the non-`ret` spellings of the
+# same call. Each shape runs in its own function; the caller compares the
+# String outstanding count before and after (RAE_MEM_STATS=1, run_tests.sh).
+func rae_ext_rae_mem_stats_outstanding() unsafe extern ret Int
+
+func rae_ext_rae_sys_read_file(path: String) unsafe extern ret String
+
+func missingPath(n: view Int) ret String {
+  ret "/nonexistent-rae-test-dir/file-{n}.txt"
+}
+
+# 1. `ret extern(path: call())` — the HotReload shape.
+func readInRet(n: view Int) ret String {
+  unsafe {
+    ret rae_ext_rae_sys_read_file(path: missingPath(n: n))
+  }
+}
+
+# 2. `ret extern(path: "interpolated")`.
+func readInterpolatedInRet(n: view Int) ret String {
+  unsafe {
+    ret rae_ext_rae_sys_read_file(path: "/nonexistent-rae-test-dir/interp-{n}.txt")
+  }
+}
+
+# 3. An assignment, as in HotReload's `raw = rae_ext_rae_sys_read_file(...)`.
+func readInAssignment(n: view Int) ret Int {
+  var raw: String = ""
+  unsafe {
+    raw = rae_ext_rae_sys_read_file(path: missingPath(n: n))
+  }
+  ret raw.length()
+}
+
+# 4. A `let` binding.
+func readInLet(n: view Int) ret Int {
+  unsafe {
+    let raw: String = rae_ext_rae_sys_read_file(path: missingPath(n: n))
+    ret raw.length()
+  }
+}
+
+# 5. Control: the path is a named local, not a temporary.
+func readFromLocal(n: view Int) ret String {
+  let path: String = missingPath(n: n)
+  unsafe {
+    ret rae_ext_rae_sys_read_file(path: path)
+  }
+}
+
+func report(shape: view String, strings: view Int) {
+  if strings is 0 {
+    log("{shape}: OK")
+  } else {
+    log("{shape}: LEAK ({strings} strings outstanding)")
+  }
+}
+
+func main() {
+  const rounds: Int = 100
+  var before: Int = 0
+  var total: Int = 0
+
+  unsafe {
+    before = rae_ext_rae_mem_stats_outstanding()
+  }
+  loop var i: Int = 0, i < rounds, ++i {
+    let text: String = readInRet(n: i)
+    total = total + text.length()
+  }
+  unsafe {
+    report(shape: "ret extern(call result)", strings: rae_ext_rae_mem_stats_outstanding() - before)
+    before = rae_ext_rae_mem_stats_outstanding()
+  }
+  loop var i: Int = 0, i < rounds, ++i {
+    let text: String = readInterpolatedInRet(n: i)
+    total = total + text.length()
+  }
+  unsafe {
+    report(
+      shape: "ret extern(interpolation)"
+      strings: rae_ext_rae_mem_stats_outstanding() - before
+    )
+    before = rae_ext_rae_mem_stats_outstanding()
+  }
+  loop var i: Int = 0, i < rounds, ++i {
+    total = total + readInAssignment(n: i)
+  }
+  unsafe {
+    report(shape: "assignment from extern", strings: rae_ext_rae_mem_stats_outstanding() - before)
+    before = rae_ext_rae_mem_stats_outstanding()
+  }
+  loop var i: Int = 0, i < rounds, ++i {
+    total = total + readInLet(n: i)
+  }
+  unsafe {
+    report(shape: "let from extern", strings: rae_ext_rae_mem_stats_outstanding() - before)
+    before = rae_ext_rae_mem_stats_outstanding()
+  }
+  loop var i: Int = 0, i < rounds, ++i {
+    let text: String = readFromLocal(n: i)
+    total = total + text.length()
+  }
+  unsafe {
+    report(shape: "control: named local", strings: rae_ext_rae_mem_stats_outstanding() - before)
+  }
+  log("total: {total}")
+}
