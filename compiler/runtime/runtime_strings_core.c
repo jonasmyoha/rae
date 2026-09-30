@@ -95,12 +95,35 @@ rae_String rae_string_copy(rae_String src) {
 // string interpolation/concat race on a shared pool and corrupt each other's
 // temporaries. A returned String is pool_remove'd (detached) before return,
 // so it survives the worker's pool flush and is safe to hand to the parent.
-static __thread void* g_rae_string_pool[RAE_STRING_POOL_MAX];
+// The first RAE_STRING_POOL_MAX entries live in the fixed array; past that
+// the pool grows on the heap instead of dropping the registration. A dropped
+// registration was a String nobody would ever free: a loop of `let s: String
+// = a + b + c` bindings filled the 4096 slots within ~500 passes and leaked
+// every temporary after that.
+static __thread void* g_rae_string_pool_fixed[RAE_STRING_POOL_MAX];
+static __thread void** g_rae_string_pool_heap = NULL;
+static __thread int g_rae_string_pool_cap = RAE_STRING_POOL_MAX;
+#define g_rae_string_pool (g_rae_string_pool_heap ? g_rae_string_pool_heap : g_rae_string_pool_fixed)
 static __thread int g_rae_string_pool_count = 0;
+
+static int rae_string_pool_grow(void) {
+  int cap = g_rae_string_pool_cap * 2;
+  void** grown = NULL;
+  if (!g_rae_string_pool_heap) {
+    grown = (void**)malloc(sizeof(void*) * (size_t)cap);
+    if (grown) memcpy(grown, g_rae_string_pool_fixed, sizeof(g_rae_string_pool_fixed));
+  } else {
+    grown = (void**)realloc(g_rae_string_pool_heap, sizeof(void*) * (size_t)cap);
+  }
+  if (!grown) return 0;
+  g_rae_string_pool_heap = grown;
+  g_rae_string_pool_cap = cap;
+  return 1;
+}
 
 void rae_string_pool_register(void* ptr) {
   if (!ptr) return;
-  if (g_rae_string_pool_count >= RAE_STRING_POOL_MAX) return;
+  if (g_rae_string_pool_count >= g_rae_string_pool_cap && !rae_string_pool_grow()) return;
   g_mem_pool_register_n++;
   g_rae_string_pool[g_rae_string_pool_count++] = ptr;
 }
