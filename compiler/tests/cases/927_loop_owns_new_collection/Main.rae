@@ -1,0 +1,126 @@
+# A collection loop over a NEW collection (`in makeList()`,
+# `in text.split(...)`) owns it: the collection is released when the loop
+# ends, on break, and on a `ret` out of the body — but not on continue, which
+# still iterates it. It used to be released on no path at all (#57294594).
+# An iterable that names a place (`in items`, `in holder.items`) or a view is
+# only borrowed: it is never released and stays readable after the loop.
+# Each shape checks what the loop saw, and outstanding allocations return to
+# the baseline.
+func rae_ext_rae_mem_stats_outstanding() unsafe extern ret Int
+
+type Holder {
+  items: List(String)
+}
+
+func makeList(count: view Int) ret List(String) {
+  var out: List(String) = List.create(String, cap: 4)
+  loop var i: Int = 0, i < count, ++i {
+    out.add(value: "item number {i} long enough for the heap")
+  }
+  ret out
+}
+
+func toTheEnd(count: view Int) ret Int {
+  var total: Int = 0
+  loop let item: view String in makeList(count: count) {
+    total = total + item.length()
+  }
+  ret total
+}
+
+func withBreak(count: view Int) ret Int {
+  var seen: Int = 0
+  loop let item: view String in makeList(count: count) {
+    if seen is 2 {
+      break
+    }
+    seen = seen + 1
+  }
+  ret seen
+}
+
+# continue must not release the collection it is still iterating.
+func withContinue(count: view Int) ret String {
+  var line: String = ""
+  var skipped: Bool = false
+  loop let item: view String in makeList(count: count) {
+    if skipped is false {
+      skipped = true
+      continue
+    }
+    line = "{line}{item} / "
+  }
+  ret line
+}
+
+func retOut(count: view Int) ret String {
+  loop let item: view String in makeList(count: count) {
+    if item.length() > 3 {
+      ret item
+    }
+  }
+  ret "none"
+}
+
+func nested(count: view Int) ret Int {
+  var pairs: Int = 0
+  loop let outer: view String in makeList(count: count) {
+    loop let inner: view String in makeList(count: count) {
+      if outer.length() is inner.length() {
+        pairs = pairs + 1
+      }
+    }
+  }
+  ret pairs
+}
+
+func methodResults() ret Int {
+  var total: Int = 0
+  loop let word: view String in "alpha beta".split(sep: " ") {
+    total = total + word.length()
+  }
+  loop let part: view String in "one,two,three".split(sep: ",") {
+    total = total + part.length()
+  }
+  ret total
+}
+
+# Borrowed: a named local, a field, and a view parameter stay intact.
+func borrowed(items: view List(String)) ret String {
+  let local: List(String) = makeList(count: 2)
+  let holder: Holder = { items: makeList(count: 3) }
+  var count: Int = 0
+  loop let a: view String in local {
+    count = count + 1
+  }
+  loop let b: view String in holder.items {
+    count = count + 1
+  }
+  loop let c: view String in items {
+    count = count + 1
+  }
+  ret "{count} {local.length} {holder.items.length} {items.length} {local.copyAtFallback(
+    index: 1
+    fallback: ""
+  )}"
+}
+
+func main() {
+  unsafe {
+    let items: List(String) = makeList(count: 4)
+    log("to the end: {toTheEnd(count: 3)}")
+    log("break: {withBreak(count: 5)} continue: {withContinue(count: 3)}")
+    log("ret: {retOut(count: 2)}")
+    log("nested: {nested(count: 3)} method results: {methodResults()}")
+    log("borrowed: {borrowed(items: items)} still {items.length}")
+    let baseline: Int = rae_ext_rae_mem_stats_outstanding()
+    loop var round: Int = 0, round < 30, ++round {
+      let a: Int = toTheEnd(count: 3) + withBreak(count: 5) + nested(count: 3) + methodResults()
+      let b: String = withContinue(count: 3)
+      let c: String = retOut(count: 2)
+      let d: String = borrowed(items: items)
+    }
+    let leaked: Int = rae_ext_rae_mem_stats_outstanding() - baseline
+    log("leaked allocations: {leaked}")
+  }
+}
