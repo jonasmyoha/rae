@@ -2273,6 +2273,9 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   if (!module) return false;
   g_emitted_spec_func_count = 0; // Reset dedup for this compilation
   ctx->all_decl_count = 0; collect_decls_from_module(ctx, module); ctx->current_module = (AstModule*)module;
+  // Before anything reads a name: identifiers spelled like C keywords get a
+  // C-safe spelling, declaration and uses together (c_names.c).
+  c_rename_reserved_names(ctx);
 
   // Build progress (progress.h): the emit phase reports its own position, by
   // stage. The stage shares are from the UI editor build (17 s of emission):
@@ -2662,7 +2665,15 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   }
   fprintf(out, "\n");
 
-  // Generate toJson/fromJson for non-generic user struct types
+  // Generate toJson/fromJson for non-generic user struct types. Emitted into a
+  // buffer first: a field renamed for C (c_names.c, `short` -> `short__kw`)
+  // is the C member in `this->short__kw` but must stay `"short"` as a JSON
+  // key, and c_restore_names_in_literals puts the Rae spelling back inside
+  // the string literals only.
+  FILE* json_block_out = out;
+  char* json_block_buf = NULL; size_t json_block_len = 0;
+  out = open_memstream(&json_block_buf, &json_block_len);
+  if (!out) out = json_block_out;
   for (size_t i = 0; i < ctx->all_decl_count; i++) {
       const AstDecl* d = ctx->all_decls[i];
       if (d->kind != AST_DECL_TYPE || d->as.type_decl.generic_params) continue;
@@ -2874,6 +2885,12 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       }
       fprintf(out, "  return __r;\n}\n\n");
   }
+  if (out != json_block_out) {
+    fclose(out);
+    out = json_block_out;
+    c_restore_names_in_literals(json_block_buf, json_block_len, out);
+    free(json_block_buf);
+  }
 
   progress_work(EMIT_STAGE_DISCOVER_HI, EMIT_STAGE_REDISCOVER_LO, 2, 3);
   // Generate rae_to_str_TYPE_ for non-c_struct user types so interpolation
@@ -2927,8 +2944,9 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       bool first = true;
       for (const AstTypeField* f = td->fields; f; f = f->next) {
           int nl = (int)f->name.len; const char* nd = f->name.data;
+          Str shown = rae_source_name(f->name);  // `short`, not its C name `short__kw`
           fprintf(out, "  __out = rae_ext_rae_str_concat(__out, (rae_String){(uint8_t*)\"%s%.*s: \", %d});\n",
-              first ? " " : ", ", nl, nd, nl + (first ? 3 : 4));
+              first ? " " : ", ", (int)shown.len, shown.data, (int)shown.len + (first ? 3 : 4));
           first = false;
           char fexpr[512]; snprintf(fexpr, sizeof fexpr, "this->%.*s", nl, nd);
           fprintf(out, "  __out = rae_ext_rae_str_concat(__out, ");
