@@ -1083,6 +1083,15 @@ static AstExpr* parse_list_literal(Parser* parser, const Token* start_token) {
   return expr;
 }
 
+/* After an error inside a brace literal: resume after its closing brace, so
+ * the statement around it ends where the literal does and the error is not
+ * followed by a cascade of unrelated ones. */
+static void skip_past_literal_end(Parser* parser, const Token* end) {
+  if (!end) return;
+  while (parser_peek(parser) != end && parser_peek(parser)->kind != TOK_EOF) parser_advance(parser);
+  if (parser_peek(parser) == end) parser_advance(parser);
+}
+
 static AstExpr* parse_collection_literal(Parser* parser, const Token* start_token) {
   AstCollectionElement* head = NULL;
   AstCollectionElement* tail = NULL;
@@ -1115,10 +1124,24 @@ static AstExpr* parse_collection_literal(Parser* parser, const Token* start_toke
     AstCollectionElement* element = parser_alloc(parser, sizeof(AstCollectionElement));
     element->key = NULL;
     
+    // A reserved keyword used as a key (`{ size: 1, if: 2 }`): say so, then
+    // read it as the key it was meant to be, so the rest of the literal still
+    // parses. Taken as an unkeyed element it reported a misleading "mixing
+    // keyed and unkeyed" (or "unexpected token" as the first key) and returned
+    // NULL, which crashed the binding that received it.
+    bool keyword_key = is_keyword(parser_peek(parser)->kind)
+        && !looks_like_ident(parser)  // `val` / `copy` are keywords that also name things
+        && parser_peek_at(parser, 1)->kind == TOK_COLON;
+    if (keyword_key) {
+      const Token* kw = parser_peek(parser);
+      parser_error(parser, kw, "'%.*s' is a reserved keyword", (int)kw->lexeme.len, kw->lexeme.data);
+    }
     // Check for key: value pair (implies map/object literal)
-    if ((looks_like_ident(parser) || parser_check(parser, TOK_STRING)) && parser_peek_at(parser, 1)->kind == TOK_COLON) {
+    if ((looks_like_ident(parser) || parser_check(parser, TOK_STRING) || keyword_key)
+        && parser_peek_at(parser, 1)->kind == TOK_COLON) {
       if (head && !is_keyed) { // First element defines type
         parser_error(parser, parser_peek(parser), "mixing keyed and unkeyed elements in collection literal is not allowed");
+        skip_past_literal_end(parser, end);
         return NULL;
       }
       is_keyed = true; // Mark as map/object
@@ -1127,7 +1150,7 @@ static AstExpr* parse_collection_literal(Parser* parser, const Token* start_toke
       Str key_str;
       if (key_token->kind == TOK_STRING) {
         key_str = unescape_string(parser, key_token->lexeme, true, true);
-      } else { // TOK_IDENT
+      } else { // TOK_IDENT, or a keyword already reported above
         key_str = parser_copy_str(parser, key_token->lexeme);
       }
 
@@ -1139,6 +1162,7 @@ static AstExpr* parse_collection_literal(Parser* parser, const Token* start_toke
     } else { // Unkeyed element (implies list literal)
       if (head && is_keyed) { // First element defines type
         parser_error(parser, parser_peek(parser), "mixing keyed and unkeyed elements in collection literal is not allowed");
+        skip_past_literal_end(parser, end);
         return NULL;
       }
       element->value = parse_expression(parser);
@@ -2100,6 +2124,7 @@ static AstStmt* parse_binding_statement(Parser* parser, const Token* kw_token, b
     // LHS (writing it twice). With the LHS type now mandatory, this is the guard
     // that steers construction to `let p: Point = { ... }` (bare braces).
     if (type != NULL
+        && stmt->as.let_stmt.value  // NULL after a parse error in the value
         && stmt->as.let_stmt.value->kind == AST_EXPR_OBJECT
         && stmt->as.let_stmt.value->as.object_literal.type != NULL
         && stmt->as.let_stmt.value->as.object_literal.fields != NULL) {
