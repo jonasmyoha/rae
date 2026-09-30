@@ -724,6 +724,9 @@ void mark_local_moved_by_name(CFuncContext* ctx, Str name) {
   if (!ctx) return;
   for (int i = (int)ctx->local_count - 1; i >= 0; i--) {
     if (str_eq(ctx->locals[i], name)) {
+      // Every move site that does not clear a live flag itself marks the
+      // local moved. The two that do (a call argument into a consuming
+      // parameter, and an `own x` expression — #55453128) skip this call.
       ctx->local_moved[i] = true;
       return;
     }
@@ -937,6 +940,229 @@ static bool block_has_explicit_drop(const AstBlock* b, Str name) {
   return false;
 }
 
+/* Whether `name` is passed as a call argument (bare, or `own name`) at a point
+ * that runs on SOME paths only: inside an if / loop / match / defer body, a
+ * loop condition or step, a match arm, or the right of `and` / `or`. Such a
+ * local is moved on some paths and still owned on the others, so it gets a
+ * runtime live flag (see the AST_STMT_LET arm) instead of a compile-time move
+ * mark, which would skip its drop on every path. A plain unconditional move
+ * keeps the move mark. Over-reporting is safe: the flag only guards the drop. */
+static bool expr_moves_name(const AstExpr* e, Str name, bool conditional);
+static bool stmt_moves_name(const AstStmt* s, Str name, bool conditional);
+static bool block_moves_name(const AstBlock* b, Str name, bool conditional) {
+  for (const AstStmt* s = b ? b->first : NULL; s; s = s->next)
+    if (stmt_moves_name(s, name, conditional)) return true;
+  return false;
+}
+static bool arg_names(const AstExpr* v, Str name) {
+  while (v && v->kind == AST_EXPR_OWN) v = v->as.unary.operand;
+  return v && v->kind == AST_EXPR_IDENT && str_eq(v->as.ident, name);
+}
+static bool args_move_name(const AstCallArg* a, Str name, bool conditional) {
+  for (; a; a = a->next) {
+    if (conditional && arg_names(a->value, name)) return true;
+    if (expr_moves_name(a->value, name, conditional)) return true;
+  }
+  return false;
+}
+static bool expr_moves_name(const AstExpr* e, Str name, bool conditional) {
+  if (!e) return false;
+  switch (e->kind) {
+    case AST_EXPR_CALL:
+      return expr_moves_name(e->as.call.callee, name, conditional)
+          || args_move_name(e->as.call.args, name, conditional);
+    case AST_EXPR_METHOD_CALL:
+      return expr_moves_name(e->as.method_call.object, name, conditional)
+          || args_move_name(e->as.method_call.args, name, conditional);
+    case AST_EXPR_BINARY: {
+      bool short_circuit = e->as.binary.op == AST_BIN_AND || e->as.binary.op == AST_BIN_OR;
+      return expr_moves_name(e->as.binary.lhs, name, conditional)
+          || expr_moves_name(e->as.binary.rhs, name, conditional || short_circuit);
+    }
+    case AST_EXPR_OWN:
+      if (conditional && arg_names(e, name)) return true;
+      return expr_moves_name(e->as.unary.operand, name, conditional);
+    case AST_EXPR_UNARY: case AST_EXPR_BOX: case AST_EXPR_UNBOX:
+      return expr_moves_name(e->as.unary.operand, name, conditional);
+    case AST_EXPR_CAST: return expr_moves_name(e->as.cast.operand, name, conditional);
+    case AST_EXPR_MEMBER: return expr_moves_name(e->as.member.object, name, conditional);
+    case AST_EXPR_INDEX:
+      return expr_moves_name(e->as.index.target, name, conditional)
+          || expr_moves_name(e->as.index.index, name, conditional);
+    case AST_EXPR_OBJECT:
+      for (const AstObjectField* f = e->as.object_literal.fields; f; f = f->next)
+        if (expr_moves_name(f->value, name, conditional)) return true;
+      return false;
+    case AST_EXPR_LIST:
+      for (const AstExprList* it = e->as.list; it; it = it->next)
+        if (expr_moves_name(it->value, name, conditional)) return true;
+      return false;
+    case AST_EXPR_COLLECTION_LITERAL:
+      for (const AstCollectionElement* el = e->as.collection.elements; el; el = el->next)
+        if (expr_moves_name(el->value, name, conditional)) return true;
+      return false;
+    case AST_EXPR_INTERP:
+      for (const AstInterpPart* p = e->as.interp.parts; p; p = p->next)
+        if (expr_moves_name(p->value, name, conditional)) return true;
+      return false;
+    case AST_EXPR_MATCH:
+      if (expr_moves_name(e->as.match_expr.subject, name, conditional)) return true;
+      for (const AstMatchArm* arm = e->as.match_expr.arms; arm; arm = arm->next)
+        if (expr_moves_name(arm->value, name, true)) return true;
+      return false;
+    default: return false;
+  }
+}
+static bool stmt_moves_name(const AstStmt* s, Str name, bool conditional) {
+  if (!s) return false;
+  switch (s->kind) {
+    case AST_STMT_LET: return expr_moves_name(s->as.let_stmt.value, name, conditional);
+    case AST_STMT_EXPR: return expr_moves_name(s->as.expr_stmt, name, conditional);
+    case AST_STMT_ASSIGN:
+      return expr_moves_name(s->as.assign_stmt.target, name, conditional)
+          || expr_moves_name(s->as.assign_stmt.value, name, conditional);
+    case AST_STMT_RET:
+      for (const AstReturnArg* a = s->as.ret_stmt.values; a; a = a->next)
+        if (expr_moves_name(a->value, name, conditional)) return true;
+      return false;
+    case AST_STMT_DESTRUCT: return expr_moves_name(s->as.destruct_stmt.call, name, conditional);
+    case AST_STMT_IF:
+      return stmt_moves_name(s->as.if_stmt.binding, name, conditional)
+          || expr_moves_name(s->as.if_stmt.condition, name, conditional)
+          || block_moves_name(s->as.if_stmt.then_block, name, true)
+          || block_moves_name(s->as.if_stmt.else_block, name, true);
+    case AST_STMT_LOOP:
+      return stmt_moves_name(s->as.loop_stmt.init, name, conditional)
+          || expr_moves_name(s->as.loop_stmt.condition, name, true)
+          || expr_moves_name(s->as.loop_stmt.increment, name, true)
+          || block_moves_name(s->as.loop_stmt.body, name, true);
+    case AST_STMT_MATCH: {
+      if (stmt_moves_name(s->as.match_stmt.binding, name, conditional)) return true;
+      if (expr_moves_name(s->as.match_stmt.subject, name, conditional)) return true;
+      for (const AstMatchCase* c = s->as.match_stmt.cases; c; c = c->next)
+        if (block_moves_name(c->block, name, true)) return true;
+      return false;
+    }
+    case AST_STMT_DEFER: return block_moves_name(s->as.defer_stmt.block, name, true);
+    case AST_STMT_UNSAFE: return block_moves_name(s->as.unsafe_stmt.block, name, conditional);
+    default: return false;
+  }
+}
+bool rest_moves_name_conditionally(const AstStmt* rest, Str name) {
+  for (const AstStmt* s = rest; s; s = s->next)
+    if (stmt_moves_name(s, name, false)) return true;
+  return false;
+}
+
+int local_index_by_name(const CFuncContext* ctx, Str name) {
+  for (int i = (int)ctx->local_count - 1; i >= 0; i--)
+    if (str_eq(ctx->locals[i], name)) return i;
+  return -1;
+}
+
+/* The scope-exit release of one local: nothing for a borrow or a cheap value,
+ * otherwise the drop its type needs. The caller guards it with the local's
+ * live flag when it has one. */
+static void emit_local_drop(CFuncContext* ctx, FILE* out, size_t idx,
+                            const AstTypeRef* type) {
+  // #969: inside a monomorphized generic body an OWNING local declared as
+  // the bare parameter `T` (`let leftover: T = receive(this)`) is the
+  // concrete type of this instantiation — substitute it so the drop below
+  // sees String / a struct / a List, not the abstract `T` (which reads as
+  // "no heap" and silently leaked the value). Alias-classified locals
+  // (`let val: T = rae_ext_rae_buf_get(...)`) keep skipping as before:
+  // they borrow a container slot the container drops.
+  if (ctx->generic_params && ctx->generic_args && !type->is_opt
+      && !type->generic_args && ctx->local_struct_owns_heap[idx]) {
+    Str tb = get_base_type_name(type);
+    bool is_param = false;
+    for (const AstIdentifierPart* gp = ctx->generic_params; gp; gp = gp->next)
+      if (str_eq(gp->text, tb)) { is_param = true; break; }
+    if (is_param)
+      type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
+                                 ctx->generic_args, (AstTypeRef*)type);
+  }
+  // Task(T): join-on-drop. A Task is a RaeTask* (not a cascade-drop
+  // struct), so it'd be skipped below — handle it here. rae_task_drop
+  // joins (no-op if already get()'d) then frees, so a worker thread
+  // can't outlive its scope / be killed at process teardown.
+  if (str_eq_cstr(get_base_type_name(type), "Task")) {
+    fprintf(out, "  rae_task_drop(%.*s);\n",
+            (int)ctx->locals[idx].len, ctx->locals[idx].data);
+    return;
+  }
+  // Skip cheap value types — they own no heap and don't need a
+  // drop call. Permissive predicate so String-only owning structs
+  // are eligible too — alias safety is gated by local_struct_owns_heap
+  // below.
+  if (!type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, type, 0)) {
+    return;
+  }
+  Str name = ctx->locals[idx];
+  if (type->is_opt) {
+    if (!(type->is_view || type->is_mod) && rae_opt_is_struct_rep(ctx, type))
+      fprintf(out, "  rae_drop_%s(&%.*s);\n",
+              rae_opt_type_name(ctx, type), (int)name.len, name.data);
+    else
+      fprintf(out, "  rae_any_drop(&%.*s);\n",
+              (int)name.len, name.data);
+    return;
+  }
+  Str tbase = get_base_type_name(type);
+  if (str_eq_cstr(tbase, "String")) {
+    // String locals don't have a synthesised rae_drop_struct_ —
+    // call the runtime helper directly. Only drop when the local
+    // uniquely owns its heap (auto-init or struct-literal copy);
+    // String-typed call results may alias the callee's storage.
+    if (ctx->local_struct_owns_heap[idx]) {
+      fprintf(out, "  rae_string_drop(&%.*s);\n",
+              (int)name.len, name.data);
+    }
+    return;
+  }
+  if (is_drop_target_type(type)) {
+    // Stdlib container (List / StringMap / IntMap) — call the
+    // user-defined generic `drop(T)` from lib/core.rae.
+    const AstTypeRef* elem_type = type->generic_args;
+    if (!elem_type) return;
+    // #889: inside a monomorphized generic function a `List(T)` local's
+    // element is the abstract `T`; substitute the enclosing type arguments so
+    // the drop is emitted for the concrete element (e.g. List(Int)), not the
+    // undeclared `rae_T`.
+    if (ctx->generic_params && ctx->generic_args)
+      elem_type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)elem_type);
+    Str loc_base = get_base_type_name(type);
+    const AstFuncDecl* drop_fd = find_drop_overload_for(ctx, loc_base);
+    if (!drop_fd) return;
+    register_function_specialization(ctx->compiler_ctx, drop_fd, elem_type);
+    const char* drop_name =
+        rae_mangle_specialized_function(ctx->compiler_ctx, drop_fd, elem_type);
+    fprintf(out, "  %s(&%.*s);\n", drop_name,
+            (int)name.len, name.data);
+  } else {
+    // Layer 5 + Phase 3 — user struct that transitively needs
+    // cascade drop. Two variants are synthesised in c_backend.c:
+    //   rae_drop_struct_<T>       — full cascade (drops String fields).
+    //   rae_drop_struct_<T>_alias — strict cascade (skips Strings).
+    // Pick by local ownership: struct-literal/auto-init locals
+    // uniquely own (full); call-result and bare-ident-copy locals
+    // may alias the source (alias variant).
+    //
+    // Stage 1 closure: spec-typed locals (Wrapper(String) etc.)
+    // also reach this branch. Pass A' in c_backend.c collects
+    // their `ctx->generic_types[]` entries into `drop_entries[]`
+    // and emits the synthesised helpers under the spec-mangled
+    // name. Generic user-defined containers (List/StringMap/
+    // IntMap) still go through the `is_drop_target_type` branch
+    // above because they have their own `drop(T)` overload.
+    const char* struct_mangled = rae_mangle_type_specialized(
+        ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, type);
+    const char* suffix = ctx->local_struct_owns_heap[idx] ? "" : "_alias";
+    fprintf(out, "  rae_drop_struct_%s%s(&%.*s);\n", struct_mangled, suffix,
+            (int)name.len, name.data);
+  }
+}
+
 bool emit_implicit_drops_for_body(CFuncContext* ctx, FILE* out,
                                   size_t first_let_index) {
   if (!ctx || !out) return false;
@@ -946,109 +1172,17 @@ bool emit_implicit_drops_for_body(CFuncContext* ctx, FILE* out,
     if (!type) continue;
     if (type->is_view || type->is_mod) continue;
     if (ctx->local_moved[idx]) continue;
-    // #969: inside a monomorphized generic body an OWNING local declared as
-    // the bare parameter `T` (`let leftover: T = receive(this)`) is the
-    // concrete type of this instantiation — substitute it so the drop below
-    // sees String / a struct / a List, not the abstract `T` (which reads as
-    // "no heap" and silently leaked the value). Alias-classified locals
-    // (`let val: T = rae_ext_rae_buf_get(...)`) keep skipping as before:
-    // they borrow a container slot the container drops.
-    if (ctx->generic_params && ctx->generic_args && !type->is_opt
-        && !type->generic_args && ctx->local_struct_owns_heap[idx]) {
-      Str tb = get_base_type_name(type);
-      bool is_param = false;
-      for (const AstIdentifierPart* gp = ctx->generic_params; gp; gp = gp->next)
-        if (str_eq(gp->text, tb)) { is_param = true; break; }
-      if (is_param)
-        type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
-                                   ctx->generic_args, (AstTypeRef*)type);
-    }
-    // Task(T): join-on-drop. A Task is a RaeTask* (not a cascade-drop
-    // struct), so it'd be skipped below — handle it here. rae_task_drop
-    // joins (no-op if already get()'d) then frees, so a worker thread
-    // can't outlive its scope / be killed at process teardown.
-    if (str_eq_cstr(get_base_type_name(type), "Task")) {
-      fprintf(out, "  rae_task_drop(%.*s);\n",
-              (int)ctx->locals[idx].len, ctx->locals[idx].data);
+    if (ctx->local_drop_flag[idx]) {
+      // Moved on some paths only (#885, #55453128): released while the flag
+      // says the local still owns its value.
+      Str name = ctx->locals[idx];
+      fprintf(out, "  if (__rae_live_%.*s) { __rae_live_%.*s = 0;\n",
+              (int)name.len, name.data, (int)name.len, name.data);
+      emit_local_drop(ctx, out, idx, type);
+      fprintf(out, "  }\n");
       continue;
     }
-    // Skip cheap value types — they own no heap and don't need a
-    // drop call. Permissive predicate so String-only owning structs
-    // are eligible too — alias safety is gated by local_struct_owns_heap
-    // below.
-    if (!type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, type, 0)) {
-      continue;
-    }
-    Str name = ctx->locals[idx];
-    if (type->is_opt) {
-      if (!(type->is_view || type->is_mod) && rae_opt_is_struct_rep(ctx, type))
-        fprintf(out, "  rae_drop_%s(&%.*s);\n",
-                rae_opt_type_name(ctx, type), (int)name.len, name.data);
-      else
-        fprintf(out, "  rae_any_drop(&%.*s);\n",
-                (int)name.len, name.data);
-      continue;
-    }
-    Str tbase = get_base_type_name(type);
-    if (str_eq_cstr(tbase, "String")) {
-      // String locals don't have a synthesised rae_drop_struct_ —
-      // call the runtime helper directly. Only drop when the local
-      // uniquely owns its heap (auto-init or struct-literal copy);
-      // String-typed call results may alias the callee's storage.
-      if (ctx->local_struct_owns_heap[idx]) {
-        fprintf(out, "  rae_string_drop(&%.*s);\n",
-                (int)name.len, name.data);
-      }
-      continue;
-    }
-    if (is_drop_target_type(type)) {
-      // Stdlib container (List / StringMap / IntMap) — call the
-      // user-defined generic `drop(T)` from lib/core.rae.
-      const AstTypeRef* elem_type = type->generic_args;
-      if (!elem_type) continue;
-      // #889: inside a monomorphized generic function a `List(T)` local's
-      // element is the abstract `T`; substitute the enclosing type arguments so
-      // the drop is emitted for the concrete element (e.g. List(Int)), not the
-      // undeclared `rae_T`.
-      if (ctx->generic_params && ctx->generic_args)
-        elem_type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)elem_type);
-      Str loc_base = get_base_type_name(type);
-      const AstFuncDecl* drop_fd = find_drop_overload_for(ctx, loc_base);
-      if (!drop_fd) continue;
-      register_function_specialization(ctx->compiler_ctx, drop_fd, elem_type);
-      const char* drop_name =
-          rae_mangle_specialized_function(ctx->compiler_ctx, drop_fd, elem_type);
-      fprintf(out, "  %s(&%.*s);\n", drop_name,
-              (int)name.len, name.data);
-    } else {
-      // Layer 5 + Phase 3 — user struct that transitively needs
-      // cascade drop. Two variants are synthesised in c_backend.c:
-      //   rae_drop_struct_<T>       — full cascade (drops String fields).
-      //   rae_drop_struct_<T>_alias — strict cascade (skips Strings).
-      // Pick by local ownership: struct-literal/auto-init locals
-      // uniquely own (full); call-result and bare-ident-copy locals
-      // may alias the source (alias variant).
-      //
-      // Stage 1 closure: spec-typed locals (Wrapper(String) etc.)
-      // also reach this branch. Pass A' in c_backend.c collects
-      // their `ctx->generic_types[]` entries into `drop_entries[]`
-      // and emits the synthesised helpers under the spec-mangled
-      // name. Generic user-defined containers (List/StringMap/
-      // IntMap) still go through the `is_drop_target_type` branch
-      // above because they have their own `drop(T)` overload.
-      const char* struct_mangled = rae_mangle_type_specialized(
-          ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, type);
-      const char* suffix = ctx->local_struct_owns_heap[idx] ? "" : "_alias";
-      if (ctx->local_drop_flag[idx]) {
-        // #885: released only while the local still owns a value.
-        fprintf(out, "  if (__rae_live_%.*s) { __rae_live_%.*s = 0; rae_drop_struct_%s%s(&%.*s); }\n",
-                (int)name.len, name.data, (int)name.len, name.data,
-                struct_mangled, suffix, (int)name.len, name.data);
-        continue;
-      }
-      fprintf(out, "  rae_drop_struct_%s%s(&%.*s);\n", struct_mangled, suffix,
-              (int)name.len, name.data);
-    }
+    emit_local_drop(ctx, out, idx, type);
   }
   return true;
 }
@@ -2194,9 +2328,24 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             if (!is_ref_bind && ctx->func_decl && ctx->func_decl->body && ctx->local_count > 0) {
                 size_t li = ctx->local_count - 1;
                 Str ln = stmt->as.let_stmt.name;
+                bool explicit_drop = type_has_user_drop(ctx->compiler_ctx, ctx->local_type_refs[li])
+                    && block_has_explicit_drop(ctx->func_decl->body, ln);
+                // #55453128: a local moved into a call on SOME paths only (inside
+                // a branch, a loop, a match arm, the right of and/or) must still
+                // be released on the others. The move clears the flag where it
+                // happens (c_call.c); the scope-exit drop is guarded by it.
+                bool conditional_move = false;
+                if (!explicit_drop && ctx->local_type_refs[li]) {
+                    const AstTypeRef* lt = ctx->local_type_refs[li];
+                    if (lt && ctx->generic_params && ctx->generic_args)
+                        lt = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
+                                                 ctx->generic_args, (AstTypeRef*)lt);
+                    conditional_move = lt && !lt->is_view && !lt->is_mod
+                        && type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, lt, 0)
+                        && rest_moves_name_conditionally(stmt->next, ln);
+                }
                 if (str_eq(ctx->locals[li], ln) && !ctx->local_drop_flag[li]
-                    && type_has_user_drop(ctx->compiler_ctx, ctx->local_type_refs[li])
-                    && block_has_explicit_drop(ctx->func_decl->body, ln)) {
+                    && (explicit_drop || conditional_move)) {
                     ctx->local_drop_flag[li] = true;
                     fprintf(out, "  int __rae_live_%.*s = 1;\n", (int)ln.len, ln.data);
                 }
@@ -2506,14 +2655,26 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                         rhs->kind == AST_EXPR_INTERP || rhs->kind == AST_EXPR_BINARY ||
                         rhs->kind == AST_EXPR_OWN);
                     int tmpn = ctx->temp_counter++;
+                    // The old value is released only while the local owns it:
+                    // not after a move (its bytes still point at the heap the
+                    // callee now owns), and behind the live flag when it is
+                    // moved on some paths only (#55453128).
+                    int tli = local_index_by_name(ctx, tname);
+                    bool tflag = tli >= 0 && ctx->local_drop_flag[tli];
+                    bool tmoved = tli >= 0 && ctx->local_moved[tli];
                     fprintf(out, "{ rae_String __asg%d = ", tmpn);
                     if (!rhs_owning_temp) fprintf(out, "rae_string_copy(");
                     emit_expr(ctx, rhs, out, PREC_LOWEST, false, false);
                     if (!rhs_owning_temp) fprintf(out, ")");
-                    fprintf(out, "; rae_string_drop(&%.*s); %.*s = rae_string_pool_take(__asg%d); }",
-                            (int)tname.len, tname.data,
-                            (int)tname.len, tname.data,
-                            tmpn);
+                    fprintf(out, "; ");
+                    if (tflag)
+                        fprintf(out, "if (__rae_live_%.*s) rae_string_drop(&%.*s); __rae_live_%.*s = 1; ",
+                                (int)tname.len, tname.data, (int)tname.len, tname.data,
+                                (int)tname.len, tname.data);
+                    else if (!tmoved)
+                        fprintf(out, "rae_string_drop(&%.*s); ", (int)tname.len, tname.data);
+                    fprintf(out, "%.*s = rae_string_pool_take(__asg%d); }",
+                            (int)tname.len, tname.data, tmpn);
                     // #965: the local now holds a heap it OWNS, whatever it
                     // was initialised from (`var s: String = ""` is a static
                     // literal the scope-exit pass classified as non-owning),
@@ -2646,11 +2807,19 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                         if (ctx->local_moved[tgt_local]) release_old = false;
                         old_owns_heap = ctx->local_struct_owns_heap[tgt_local];
                     }
+                    bool target_flag = tgt_local >= 0 && ctx->local_drop_flag[tgt_local];
                     if (release_old) {
                         char pname[48];
                         snprintf(pname, sizeof pname, "(*__asgp%d)", tmpn);
+                        // Moved on some paths only: release only while live (#55453128).
+                        if (target_flag)
+                            fprintf(out, " if (__rae_live_%.*s) {",
+                                    (int)tgt->as.ident.len, tgt->as.ident.data);
                         emit_drop_for_value(ctx, out, target_tr, pname, old_owns_heap);
+                        if (target_flag) fprintf(out, " }");
                     }
+                    if (target_flag)
+                        fprintf(out, " __rae_live_%.*s = 1;", (int)tgt->as.ident.len, tgt->as.ident.data);
                     fprintf(out, "  *__asgp%d = __asg%d; }", tmpn, tmpn);
                     if (tgt_local >= 0) {
                         ctx->local_moved[tgt_local] = false;
