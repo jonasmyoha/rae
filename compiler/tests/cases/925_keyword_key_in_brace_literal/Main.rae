@@ -1,0 +1,17 @@
+# A reserved keyword used as a key in a bare-brace struct literal is reported
+# as one, at the key, and the rest of the literal still parses. As the second
+# key it used to crash the parser (SIGSEGV in parse_binding_statement); as the
+# first key it was a vague "unexpected token in expression". Mixing keyed and
+# unkeyed elements returned no value into the binding the same way (another
+# crash); it is now one error, and parsing resumes after the literal.
+type Range {
+  size: Int
+}
+
+func main() {
+  let second: Range = { size: 1, if: 2 }
+  let first: Range = { if: 2 }
+  let other: Range = { size: 1, default: 2 }
+  let mixed: Range = { size: 1, 5 }
+  log("unreachable")
+}
