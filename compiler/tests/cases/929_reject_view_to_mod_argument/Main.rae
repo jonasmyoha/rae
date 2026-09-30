@@ -1,0 +1,57 @@
+# The argument half of 613: a view is read-only in every direction, so it
+# cannot be handed to a `mod` parameter either — the callee would write
+# through a read-only promise (docs/binding-modes-design.md §4.1). Each case
+# names the view and the parameter: a view parameter, a field of a view, a
+# view alias local, a view receiver of a method whose `this` is mod, and a
+# call that returns a view. A `mod` source and a plain value still pass.
+type Counter {
+  value: Int
+}
+
+type Box {
+  counter: Counter
+}
+
+func bump(counter: mod Counter) {
+  counter.value = counter.value + 1
+}
+
+func increment(this: mod Counter) {
+  this.value = this.value + 1
+}
+
+func peek(box: view Box) ret view Counter {
+  ret box.counter
+}
+
+func fromViewParam(counter: view Counter) {
+  bump(counter: counter)
+}
+
+func fromViewField(box: view Box) {
+  bump(counter: box.counter)
+}
+
+func fromViewAlias(box: mod Box) {
+  let readOnly: view Counter => box.counter
+  bump(counter: readOnly)
+}
+
+func fromViewReceiver(counter: view Counter) {
+  counter.increment()
+}
+
+func fromViewCall(box: view Box) {
+  bump(counter: peek(box: box))
+}
+
+func allowed(box: mod Box) {
+  bump(counter: box.counter)
+  var local: Counter = { value: 1 }
+  bump(counter: local)
+  local.increment()
+}
+
+func main() {
+  log("should not run")
+}

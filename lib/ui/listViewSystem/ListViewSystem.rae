@@ -356,7 +356,7 @@ func listViewApplySceneBinding(
 # per distinct binding nodeId, in distinct order so slot k == distinctNodeIds[k].
 func listViewBuildRow(
   world: mod UiWorld
-  uiSystems: view UiSystems
+  uiSystems: mod UiSystems
   listEntityId: view EntityId
   lv: view ListView
   distinct: view List(String)
@@ -502,7 +502,7 @@ func listViewWindowCount(lv: view ListView) ret Int {
 # One ListView entity: reconcile its pooled row window to the current scroll.
 func listViewSyncEntity(
   world: mod UiWorld
-  uiSystems: view UiSystems
+  uiSystems: mod UiSystems
   entityId: view EntityId
   scenes: view SceneRegistry
 ) {
@@ -714,7 +714,7 @@ func listViewFlowRowSize(
 # the row's own nodeId page and its identity recorded for the next rebind.
 func listViewBuildFlowRow(
   world: mod UiWorld
-  uiSystems: view UiSystems
+  uiSystems: mod UiSystems
   lv: view ListView
   sceneId: view String
   key: view String
@@ -764,7 +764,7 @@ func listViewBuildFlowRow(
 # One flow-mode ListView: reconcile its child rows to the data rows by key.
 func listViewSyncFlow(
   world: mod UiWorld
-  uiSystems: view UiSystems
+  uiSystems: mod UiSystems
   entityId: view EntityId
   scenes: view SceneRegistry
 ) {
@@ -964,7 +964,7 @@ func listViewApplyFlowRow(
 # before layout, so the current window's rows are laid out this frame.
 # `scenes` supplies the item sub-scenes (`ListView.itemSceneId`); pass an empty
 # registry for bindings-only rows.
-func listViewSystem(world: mod UiWorld, uiSystems: view UiSystems, scenes: view SceneRegistry) pub {
+func listViewSystem(world: mod UiWorld, uiSystems: mod UiSystems, scenes: view SceneRegistry) pub {
   unsafe {
     let n: Int = componentCount(this: world.listViews)
     # Collect entity ids first: syncing mutates childrens/entities, which must
