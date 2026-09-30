@@ -126,7 +126,21 @@ func moveThenContinueAndBreak(passes: view Int) ret Int {
   ret total + kept.length()
 }
 
-# 8. Control: the move is unconditional.
+# 8. A block's own local is moved out with `own`; the next local declared
+#    after the block reuses its slot in the compiler's table and must not
+#    inherit the "moved" mark (the UI editor's `icons` after the text-font
+#    block, one leaked String per document load).
+func localAfterMovedBlockLocal(flag: view Bool) ret Int {
+  var kept: List(Int) = List.create(Int, cap: 0)
+  if flag {
+    let inner: List(Int) = makeRows(count: 8)
+    kept = own inner
+  }
+  let after: List(Int) = makeRows(count: 8)
+  ret kept.length() + after.length()
+}
+
+# 9. Control: the move is unconditional.
 func moveUnconditionally() ret Int {
   var kept: List(Int) = List.create(Int, cap: 0)
   let rows: List(Int) = makeRows(count: 8)
@@ -230,6 +244,18 @@ func main() {
   unsafe {
     report(
       shape: "continue and break after a partial move"
+      strings: rae_ext_rae_mem_stats_outstanding() - strings
+      buffers: rae_ext_rae_mem_stats_buf_outstanding() - buffers
+    )
+    strings = rae_ext_rae_mem_stats_outstanding()
+    buffers = rae_ext_rae_mem_stats_buf_outstanding()
+  }
+  loop var i: Int = 0, i < rounds, ++i {
+    result = result + localAfterMovedBlockLocal(flag: true)
+  }
+  unsafe {
+    report(
+      shape: "local after a block that moved its own local"
       strings: rae_ext_rae_mem_stats_outstanding() - strings
       buffers: rae_ext_rae_mem_stats_buf_outstanding() - buffers
     )
