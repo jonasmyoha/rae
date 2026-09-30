@@ -248,6 +248,9 @@ void rae_ext_Gpu2d_initWindow(int64_t width, int64_t height, rae_String title) {
             if (caps.formats[i] == WGPUTextureFormat_BGRA8Unorm) { g_g2d_fmt = WGPUTextureFormat_BGRA8Unorm; break; }
         }
     }
+    /* The format/present-mode/alpha-mode arrays are wgpu-allocated and ours
+     * to release; only the chosen format (a plain enum) is kept. */
+    wgpuSurfaceCapabilitiesFreeMembers(caps);
     int pw = (int)width, ph = (int)height;
     SDL_GetWindowSizeInPixels(g_sdl_win, &pw, &ph);
     rae_g2d_configure(pw, ph);
