@@ -1377,6 +1377,41 @@ static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             fprintf(out, ";\n    int64_t __rae_collection_length%d = __rae_collection%d.length;\n",
                     loop_id, loop_id);
         }
+        // A NEW collection (`in makeList()`, `in [a, b]`) belongs to the loop
+        // and dies with it; a named place (`in items`, `in world.rows`,
+        // `in xs[i]`) or a view/mod is only borrowed. The owned one lives in
+        // its own temporary layer ABOVE the loop statement's: a `ret` in the
+        // body walks the whole chain and releases it, break / continue stop at
+        // the loop's own temporaries and leave it alone (continue still needs
+        // it; after a break the drop below runs), and the end of the loop
+        // releases it. Guarded by a set flag like every statement temporary.
+        const AstExpr* iterable = stmt->as.loop_stmt.condition;
+        bool iterable_is_place = iterable && (iterable->kind == AST_EXPR_IDENT
+            || iterable->kind == AST_EXPR_MEMBER || iterable->kind == AST_EXPR_INDEX);
+        bool owns_collection = !collection_is_array && !collection_is_ref && !iterable_is_place
+            && ctx->stmt_temps
+            && type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, collection_sub, 0);
+        CStmtTemps collection_temps = {0};
+        CStmtTemps* loop_stmt_temps = ctx->stmt_temps;
+        if (owns_collection) {
+            AstTypeRef owned_type = *collection_sub;
+            owned_type.is_view = false; owned_type.is_mod = false; owned_type.is_opt = false;
+            fprintf(out, "    int __rae_collection%d_set = 1;\n", loop_id);
+            collection_temps.drops = open_memstream(&collection_temps.drops_buf, &collection_temps.drops_len);
+            if (collection_temps.drops) {
+                char cname[48];
+                snprintf(cname, sizeof cname, "__rae_collection%d", loop_id);
+                fprintf(collection_temps.drops, "  if (__rae_collection%d_set) { __rae_collection%d_set = 0;",
+                        loop_id, loop_id);
+                emit_drop_for_value(ctx, collection_temps.drops, &owned_type, cname, true);
+                fprintf(collection_temps.drops, "  }\n");
+                collection_temps.count = 1;
+                collection_temps.parent = loop_stmt_temps->parent;
+                loop_stmt_temps->parent = &collection_temps;
+            } else {
+                owns_collection = false;
+            }
+        }
         fprintf(out, "    for (int64_t __rae_collection_index%d = 0; "
                      "__rae_collection_index%d < __rae_collection_length%d; "
                      "__rae_collection_index%d++) {\n",
@@ -1445,7 +1480,15 @@ static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
         emit_stmt_temp_drops_keep(ctx, out);
         emit_implicit_drops_for_body(ctx, out, saved_locals);
         ctx->local_count = saved_locals;
-        fprintf(out, "    }\n  }\n");
+        fprintf(out, "    }\n");
+        if (owns_collection) {
+            loop_stmt_temps->parent = collection_temps.parent;
+            fflush(collection_temps.drops);
+            if (collection_temps.drops_buf) fputs(collection_temps.drops_buf, out);
+            fclose(collection_temps.drops);
+            free(collection_temps.drops_buf);
+        }
+        fprintf(out, "  }\n");
         return true;
     }
 
