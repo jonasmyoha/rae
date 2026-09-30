@@ -1,4 +1,4 @@
-/* Real-mouse sweep for the windowed hover soak (hover-soak-window.sh).
+/* Real-mouse sweep for the windowed hover memory test (hover-memory-test-window.sh).
  *
  * Moves the REAL cursor down the centre column of the largest on-screen window
  * owned by <pid>, top to bottom in <sweepSeconds>, then jumps back to the top
