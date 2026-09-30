@@ -849,7 +849,29 @@ void emit_drop_for_value(CFuncContext* ctx, FILE* out, const AstTypeRef* type,
     fprintf(out, "  %s(&%s);\n", drop_name, cname);
     return;
   }
-  if (type->generic_args) return;
+  if (type->generic_args) {
+    // A generic struct instance (Pair(String)): released through the
+    // specialised rae_drop_struct_<instance> Pass A' synthesises for every
+    // registered instance. Anything else generic has no helper to call.
+    AstTypeRef concrete = *type;
+    if (ctx->generic_params && ctx->generic_args) {
+      const AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, type);
+      if (sub) concrete = *sub;
+    }
+    concrete.next = NULL;
+    if (!generic_struct_template(ctx->compiler_ctx, &concrete)) return;
+    const char* want = rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, &concrete);
+    bool registered = false;
+    for (size_t gi = 0; want && gi < ctx->compiler_ctx->generic_type_count && !registered; gi++) {
+      const AstTypeRef* gt = ctx->compiler_ctx->generic_types[gi];
+      if (!gt || gt->is_view || gt->is_mod || gt->is_opt || !gt->generic_args) continue;
+      const char* have = rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, (AstTypeRef*)gt);
+      registered = have && strcmp(have, want) == 0;
+    }
+    if (!registered) return;
+    fprintf(out, "  rae_drop_struct_%s%s(&%s);\n", want, owns_heap ? "" : "_alias", cname);
+    return;
+  }
   const char* struct_mangled = rae_mangle_type_specialized(
       ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, type);
   fprintf(out, "  rae_drop_struct_%s%s(&%s);\n", struct_mangled,
