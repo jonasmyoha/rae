@@ -1,0 +1,88 @@
+# The cells of docs/binding-modes-design.md §2 that today's compiler already
+# gets right (§4.2): each checked for the value that arrives, that the source
+# is intact where it must be, and that outstanding allocations return to the
+# baseline.
+#   - a String FIELD passed to an `own` parameter is copied: the callee owns
+#     a copy, the caller's field survives
+#   - `ret` of a field copies: the caller gets an independent value, the
+#     source keeps its own (a String field and a heap struct field)
+#   - a `var` moved from (`own x` into an `own` parameter) is live again once
+#     it is assigned
+# Three other cells of §4.2 disagree with the table today (a List / struct
+# field into `own`, an alias into `own`, `own x` into a `copy` parameter);
+# they are reported on the queue task, not asserted here.
+func rae_ext_rae_mem_stats_outstanding() unsafe extern ret Int
+
+type Holder {
+  label: String
+  items: List(String)
+}
+
+type Outer {
+  inner: Holder
+  text: String
+}
+
+func takeString(text: own String) ret Int {
+  ret text.length()
+}
+
+func consume(list: own List(String)) ret Int {
+  ret list.length
+}
+
+func innerOf(outer: view Outer) ret Holder {
+  ret outer.inner
+}
+
+func labelOf(outer: view Outer) ret String {
+  ret outer.inner.label
+}
+
+func makeOuter(seed: view Int) ret Outer {
+  var items: List(String) = List.create(String, cap: 2)
+  items.add(value: "item {seed} long enough for the heap")
+  ret Outer {
+    inner: Holder { label: "label {seed} long enough for the heap", items: own items }
+    text: "text {seed} long enough for the heap"
+  }
+}
+
+func stringFieldIntoOwn(seed: view Int) ret String {
+  let outer: Outer = makeOuter(seed: seed)
+  let length: Int = takeString(text: outer.text)
+  ret "{length} / caller still has: {outer.text}"
+}
+
+func retOfField(seed: view Int) ret String {
+  let outer: Outer = makeOuter(seed: seed)
+  let copied: Holder = innerOf(outer: outer)
+  let label: String = labelOf(outer: outer)
+  ret "{copied.label} {copied.items.length} {label} / source: {outer.inner.label} {outer.inner.items.length}"
+}
+
+func varLiveAfterMove(seed: view Int) ret String {
+  var list: List(String) = List.create(String, cap: 2)
+  list.add(value: "first {seed} long enough for the heap")
+  let taken: Int = consume(list: own list)
+  list = List.create(String, cap: 2)
+  list.add(value: "second {seed} long enough for the heap")
+  list.add(value: "third {seed} long enough for the heap")
+  ret "{taken} {list.length} {list.copyAtFallback(index: 1, fallback: "")}"
+}
+
+func main() {
+  unsafe {
+    log("String field into own: {stringFieldIntoOwn(seed: 1)}")
+    log("ret of a field: {retOfField(seed: 1)}")
+    log("var after a move: {varLiveAfterMove(seed: 1)}")
+    let baseline: Int = rae_ext_rae_mem_stats_outstanding()
+    loop var i: Int = 0, i < 50, ++i {
+      let a: String = stringFieldIntoOwn(seed: i)
+      let b: String = retOfField(seed: i)
+      let c: String = varLiveAfterMove(seed: i)
+    }
+    let leaked: Int = rae_ext_rae_mem_stats_outstanding() - baseline
+    log("leaked allocations: {leaked}")
+  }
+}
