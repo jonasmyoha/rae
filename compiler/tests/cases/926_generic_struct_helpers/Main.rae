@@ -1,0 +1,79 @@
+# A generic struct instance gets the helpers a plain struct gets: string
+# interpolation and toString(), equals(a:, b:) by content, and toJson /
+# fromJson — for the instance itself, as a field of another struct, and as a
+# List element. They used to exist only for non-generic structs: `"{pair}"`
+# did not compile, equals compared the bytes (so two equal Pair(String) could
+# differ), toJson had no definition, and a generic field serialized as `...`.
+# A nested Pair(Pair(Int)) next to a List(Pair(Int)) also sent the compiler
+# into endless recursion (register_generic_type substituted into a specialised
+# copy instead of the template). Outstanding allocations return to baseline.
+func rae_ext_rae_mem_stats_outstanding() unsafe extern ret Int
+
+type Pair(T: type) {
+  first: T
+  second: T
+}
+
+type Holder {
+  label: String
+  pair: Pair(Int)
+  pairs: List(Pair(Int))
+}
+
+func describe(T: type, value: view Pair(T)) ret String {
+  ret "{value}"
+}
+
+func makeHolder(seed: view Int) ret Holder {
+  var pairs: List(Pair(Int)) = List.create(Pair(Int), cap: 2)
+  pairs.add(value: Pair(Int) { first: seed, second: seed + 1 })
+  pairs.add(value: Pair(Int) { first: seed + 2, second: seed + 3 })
+  ret Holder {
+    label: "holder {seed}"
+    pair: Pair(Int) { first: seed, second: seed }
+    pairs: own pairs
+  }
+}
+
+func roundTrip(seed: view Int) ret String {
+  let words: Pair(String) = { first: "word {seed}", second: "b" }
+  let holder: Holder = makeHolder(seed: seed)
+  let back: Holder = Holder.fromJson(json: holder.toJson())
+  ret "{words.toString()} {equals(a: holder, b: back)} {back.pairs.length}"
+}
+
+func main() {
+  unsafe {
+    let ints: Pair(Int) = { first: 1, second: 2 }
+    let words: Pair(String) = { first: "a", second: "b" }
+    let other: Pair(String) = { first: "a", second: "c" }
+    let nested: Pair(Pair(Int)) = { first: ints, second: ints }
+    var list: List(Pair(Int)) = List.create(Pair(Int), cap: 2)
+    list.add(value: ints)
+    log("{ints} | {words} | {nested}")
+    log("toString: {words.toString()}")
+    log("list: {list}")
+    log("generic body: {describe(value: words)} {describe(value: ints)}")
+    log(
+      "equals: {equals(a: words, b: words)} {equals(a: words, b: other)} {equals(
+        a: nested
+        b: nested
+      )}"
+    )
+    let holder: Holder = makeHolder(seed: 5)
+    log("{holder}")
+    let json: String = holder.toJson()
+    log(json)
+    let back: Holder = Holder.fromJson(json: json)
+    log("back: {back} same: {equals(a: holder, b: back)}")
+    let pairBack: Pair(Int) = Pair(Int).fromJson(json: ints.toJson())
+    log("pair back: {pairBack}")
+    log(roundTrip(seed: 1))
+    let baseline: Int = rae_ext_rae_mem_stats_outstanding()
+    loop var i: Int = 0, i < 50, ++i {
+      let text: String = roundTrip(seed: i)
+    }
+    let leaked: Int = rae_ext_rae_mem_stats_outstanding() - baseline
+    log("leaked allocations: {leaked}")
+  }
+}
