@@ -1,0 +1,22 @@
+tests/cases/925_keyword_key_in_brace_literal/Main.rae:12:34: 'if' is a reserved keyword
+    12 |   let second: Range = { size: 1, if: 2 }
+       |                                  ^~~~
+tests/cases/925_keyword_key_in_brace_literal/Main.rae:13:24: 'if' is a reserved keyword
+    13 |   let first: Range = { if: 2 }
+       |                        ^~~~
+tests/cases/925_keyword_key_in_brace_literal/Main.rae:14:33: 'default' is a reserved keyword
+    14 |   let other: Range = { size: 1, default: 2 }
+       |                                 ^~~~
+tests/cases/925_keyword_key_in_brace_literal/Main.rae:15:33: mixing keyed and unkeyed elements in collection literal is not allowed
+    15 |   let mixed: Range = { size: 1, 5 }
+       |                                 ^~~~
+MODULE
+  type Range
+    field size: Int
+  func main
+    body
+      let second: Range = {size: 1, if: 2}
+      let first: Range = {if: 2}
+      let other: Range = {size: 1, default: 2}
+      let mixed: Range = <expr?>
+      expr log("unreachable")
