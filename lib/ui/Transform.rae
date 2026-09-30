@@ -140,7 +140,7 @@ func composeVisual(
 # (applied here so it never dirties layout), plus authored TransformFx
 # rotation/scale. This is the input the general TransformSystem folds into
 # worldTransforms. Iterates the ComputedRect table — one local per laid-out node.
-func buildLocalTransforms(world: mod UiWorld, uiSystems: view UiSystems) {
+func buildLocalTransforms(world: mod UiWorld, uiSystems: mod UiSystems) {
   loop var i: Int = 0, i < componentCount(this: uiSystems.layout.computedRects), ++i {
     let entityId: EntityId = componentEntityAt(this: uiSystems.layout.computedRects, i: i)
     let cr: view ComputedRect => queryViewAt(table: uiSystems.layout.computedRects, denseIndex: i)
@@ -173,7 +173,7 @@ func buildLocalTransforms(world: mod UiWorld, uiSystems: view UiSystems) {
 # parent-before-child depth order the geometry pass uses. Roots (no Parent) fold
 # onto a fully-visible parent; every other entity folds onto its parent's
 # already-written WorldVisual (depthOrder guarantees the parent came first).
-func accumulateVisibility(world: mod UiWorld, uiSystems: view UiSystems) {
+func accumulateVisibility(world: mod UiWorld, uiSystems: mod UiSystems) {
   # Roots: a local transform but no Parent — the `without` filter (#807/#940)
   # names exactly this "in table A, NOT in table B" set, replacing the manual
   # scan-and-skip. Each root's WorldVisual is computed independently, so the
@@ -224,7 +224,7 @@ func accumulateVisibility(world: mod UiWorld, uiSystems: view UiSystems) {
 # accumulate the alpha/visible WorldVisual cache the geometry system doesn't
 # carry. Because every UI TransformFx is identity scale/rotation, the general
 # per-axis compose reduces to the old translation-only composition — same output.
-func transformSystem(world: mod UiWorld, uiSystems: view UiSystems) {
+func transformSystem(world: mod UiWorld, uiSystems: mod UiSystems) {
   buildLocalTransforms(world: world, uiSystems: uiSystems)
   transformSystem2D(
     orderState: world.hierarchyOrder
@@ -287,7 +287,7 @@ func createTransformCache() pub ret TransformCache {
 # the other tables (e.g. setHeroVisible reads computedRects first).
 func systemIfDirty(
   world: mod UiWorld
-  uiSystems: view UiSystems
+  uiSystems: mod UiSystems
   cache: mod TransformCache
 ) pub ret Bool {
   let crGen: Int = componentTableGeneration(ComputedRect, this: uiSystems.layout.computedRects)

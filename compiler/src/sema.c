@@ -925,6 +925,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
 static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstTypeRef* type_ref);
 static bool sema_rewrite_match_let(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstStmt* stmt);
 static void sema_check_own_args(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, const AstFuncDecl* fd, AstCallArg* args, bool skip_receiver);
+static void sema_reject_view_to_mod(AstModule* module, SymbolTable* symbols, const AstParam* p, const AstExpr* value);
 static bool expr_is_owning(SymbolTable* symbols, const AstExpr* e);
 static TypeInfo* sema_array_type_from_call(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr);
 static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr** expr_ptr);
@@ -6572,6 +6573,10 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
             if (expr->decl_link && expr->decl_link->kind == AST_DECL_FUNC) {
                 sema_check_own_args(ctx, module, symbols, &expr->decl_link->as.func_decl,
                                     expr->as.method_call.args, true);
+                // The receiver is the first parameter: `view.method()` with
+                // `this: mod T` writes through the view the same way.
+                sema_reject_view_to_mod(module, symbols, expr->decl_link->as.func_decl.params,
+                                        expr->as.method_call.object);
             }
             // #927: an unknown MODULE-QUALIFIED call (`Math.noSuchFunction(...)`)
             // or an unknown method on a TYPE NAME used as a namespace
@@ -7288,6 +7293,59 @@ static bool expr_is_owning(SymbolTable* symbols, const AstExpr* e) {
 /* Would handing this expression to `own T` free storage someone else owns?
  * Only fires when T actually owns heap storage — the rule stays invisible
  * in numeric code (open question 3, answered as the narrow reading). */
+/* The base name of a place (`a.b[i].c` -> `a`), when it is a read-only view:
+ * a `view` parameter or local, an optional view, or a call returning `view T`
+ * — the same rule the `=>` promotion check applies. Returns the name in *base
+ * (empty for a call). */
+static bool expr_roots_in_view(SymbolTable* symbols, const AstExpr* e, Str* base) {
+    while (e && (e->kind == AST_EXPR_MEMBER || e->kind == AST_EXPR_INDEX))
+        e = (e->kind == AST_EXPR_MEMBER) ? e->as.member.object : e->as.index.target;
+    if (base) *base = (Str){0};
+    if (!e) return false;
+    if (e->kind == AST_EXPR_IDENT) {
+        Symbol* sym = symbol_table_lookup(symbols, e->as.ident);
+        if (!sym) return false;
+        bool view_type = sym->type
+            && ((sym->type->kind == TYPE_REF && !sym->type->as.ref.is_mod)
+                || (sym->type->kind == TYPE_OPT && sym->type->as.opt.base
+                    && sym->type->as.opt.base->kind == TYPE_REF
+                    && !sym->type->as.opt.base->as.ref.is_mod));
+        if (view_type || (sym->is_immutable && sym->bind_kind == BIND_READONLY_REF)) {
+            if (base) *base = e->as.ident;
+            return true;
+        }
+        return false;
+    }
+    if (e->kind == AST_EXPR_CALL && e->decl_link && e->decl_link->kind == AST_DECL_FUNC) {
+        const AstFuncDecl* fd = &e->decl_link->as.func_decl;
+        return fd->returns && fd->returns->type
+            && fd->returns->type->is_view && !fd->returns->type->is_mod;
+    }
+    return false;
+}
+
+/* docs/binding-modes-design.md §4.1: a view passed to a `mod` parameter
+ * would let the callee write through a read-only promise — the argument
+ * form of the `=>` rule (fixture 613). */
+static void sema_reject_view_to_mod(AstModule* module, SymbolTable* symbols,
+                                    const AstParam* p, const AstExpr* value) {
+    if (!p || !p->type || !p->type->is_mod || !value) return;
+    Str root = {0};
+    if (!expr_roots_in_view(symbols, value, &root)) return;
+    char buffer[320];
+    if (root.len > 0)
+        snprintf(buffer, sizeof buffer,
+                 "'%.*s' is a read-only view, but parameter '%.*s' is 'mod': the callee could write "
+                 "through it. Declare '%.*s' as 'mod' where it is bound, or take the parameter as 'view'",
+                 (int)root.len, root.data, (int)p->name.len, p->name.data, (int)root.len, root.data);
+    else
+        snprintf(buffer, sizeof buffer,
+                 "a call returning a read-only view cannot be passed to parameter '%.*s', which is 'mod'",
+                 (int)p->name.len, p->name.data);
+    diag_error(sema_diag_file(module), (int)value->line, (int)value->column, buffer);
+    module->had_error = true;
+}
+
 static void sema_check_own_args(CompilerContext* ctx, AstModule* module, SymbolTable* symbols,
                                 const AstFuncDecl* fd, AstCallArg* args, bool skip_receiver) {
     if (!fd || !module) return;
@@ -7295,6 +7353,7 @@ static void sema_check_own_args(CompilerContext* ctx, AstModule* module, SymbolT
     AstCallArg* a = args;
     if (skip_receiver && p) p = p->next;
     while (p && a) {
+        sema_reject_view_to_mod(module, symbols, p, a->value);
         /* `type_needs_cascade_drop`, not `type_owns_heap_storage`: the
          * latter does not count a bare String (it only reports types whose
          * FIELDS own heap), and String is the single most common `own`

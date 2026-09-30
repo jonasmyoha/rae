@@ -30,7 +30,7 @@ func appendEntityListSL(lst: mod List(EntityId), value: view EntityId) {
   lst.add(value: value)
 }
 
-func loadScene(world: mod UiWorld, uiSystems: view UiSystems, scene: view Scene) ret EntityId {
+func loadScene(world: mod UiWorld, uiSystems: mod UiSystems, scene: view Scene) ret EntityId {
   ret loadSceneIntoPage(
     world: world
     uiSystems: uiSystems
@@ -46,7 +46,7 @@ func loadScene(world: mod UiWorld, uiSystems: view UiSystems, scene: view Scene)
 # so `pageOf(uiSystems: uiSystems, world, entityId)` can walk back up to find the owning page.
 func loadSceneIntoPage(
   world: mod UiWorld
-  uiSystems: view UiSystems
+  uiSystems: mod UiSystems
   scene: view Scene
   pageId: view String
 ) pub ret EntityId {
@@ -323,7 +323,7 @@ func sceneInstanceOverrides(inst: view SceneInstance) ret List(SceneOverride) {
 # stays consistent end-to-end.
 func resolveSceneInstances(
   world: mod UiWorld
-  uiSystems: view UiSystems
+  uiSystems: mod UiSystems
   registry: view SceneRegistry
   pageId: view String
 ) pub {
