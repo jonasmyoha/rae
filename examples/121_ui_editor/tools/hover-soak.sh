@@ -3,8 +3,11 @@
 # SECONDS (default 600) with the pointer alternating between two canvas nodes
 # every frame (RAE_GPU2D_TEST_POINTER, runtime_gpu2d_platform.c), so each frame
 # re-hovers a node through the real loop — hit-test, hover outline, the
-# hierarchy refresh, paint. Samples resident memory every 10 s and prints the
-# runtime's outstanding String/buffer counts at exit (RAE_MEM_STATS=1).
+# hierarchy refresh, paint. Samples resident memory every 10 s, prints the
+# runtime's outstanding String/buffer counts every 10 s WHILE it runs
+# (RAE_MEM_STATS_EVERY_MS, the `[mem:live]` series) and again at exit
+# (RAE_MEM_STATS=1). The live series is the one that shows memory piling up in
+# a container that is still in use: the exit counts are taken after teardown.
 #
 #   bash examples/121_ui_editor/tools/hover-soak.sh [SECONDS] [sweep]
 #
@@ -40,6 +43,7 @@ gcc -O2 -w -o "$TMP/app" "$TMP/out.c" "$TMP/rae_runtime.c" -I"$TMP" \
 env RAE_UI_EDITOR_SCENE=examples/121_ui_editor/assets/samples/MainMenu.raescene \
   RAE_UI_EDITOR_ROOT=examples/121_ui_editor/assets/samples \
   RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=$((SECONDS_TO_RUN * 1000)) RAE_MEM_STATS=1 \
+  RAE_MEM_STATS_EVERY_MS=10000 \
   RAE_GPU2D_TEST_POINTER="$POINTER" \
   perl -e 'alarm shift; exec @ARGV' $((SECONDS_TO_RUN + 60)) "$TMP/app" > "$TMP/run.log" 2>&1 &
 PID=$!
@@ -52,4 +56,7 @@ for t in $(seq 0 10 "$SECONDS_TO_RUN"); do
 done
 wait "$PID" || true
 grep -a "test-pointer" "$TMP/run.log" | tail -1
+echo "live outstanding (while running):"
+grep -a "^\[mem:live\]" "$TMP/run.log"
+echo "at exit (after teardown):"
 grep -a "mem:string:sub \|mem:string:interp\|mem:string:TOTAL\|mem:buf" "$TMP/run.log"

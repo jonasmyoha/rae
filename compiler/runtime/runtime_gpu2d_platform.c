@@ -345,6 +345,7 @@ static void rae_g2d_test_pointer_advance(void) {
 
 rae_Bool rae_ext_Gpu2d_pollClose(void) {
     rae_g2d_test_pointer_advance();
+    rae_mem_stats_live_tick();
 #ifdef __EMSCRIPTEN__
     /* Browser WebGPU presents at requestAnimationFrame boundaries. Asyncify
      * lets the current Rae loop await that boundary without source changes. */
