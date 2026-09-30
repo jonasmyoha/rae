@@ -1494,6 +1494,17 @@ void rae_value_equals_expr(CompilerContext* ctx, const AstModule* module, const 
     fprintf(out, "((%s) == (%s))", aexpr, bexpr);
 }
 
+// True when `tr` (or any of its type arguments) is one of `params`.
+static bool type_ref_mentions_params(const AstTypeRef* tr, const AstIdentifierPart* params) {
+  if (!tr || !params) return false;
+  Str base = get_base_type_name(tr);
+  for (const AstIdentifierPart* gp = params; gp; gp = gp->next)
+    if (str_eq(gp->text, base)) return true;
+  for (const AstTypeRef* arg = tr->generic_args; arg; arg = arg->next)
+    if (type_ref_mentions_params(arg, params)) return true;
+  return false;
+}
+
 const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
     if (!expr) return NULL;
     // Cache primitive literal type-refs in static storage so callers can hold a
@@ -1646,12 +1657,50 @@ const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
                 if (crt && crt->is_opt && expr->resolved_type
                     && expr->resolved_type->kind == TYPE_OPT)
                     return infer_tr_from_resolved(ctx, expr->resolved_type);
+                // The same for any template return that names the callee's
+                // type parameters (`ret Box(V)`): the unsubstituted `Box(V)`
+                // made a field read off the call (`keepGeneric(...).value`)
+                // the abstract `V`, so `.value.items.length()` compiled as a
+                // String length. Sema pinned the concrete `Box(Holder)`.
+                if (crt && expr->resolved_type
+                    && type_ref_mentions_params(crt, expr->decl_link->as.func_decl.generic_params)) {
+                    const AstTypeRef* concrete = infer_tr_from_resolved(ctx, expr->resolved_type);
+                    if (concrete) return concrete;
+                }
                 if (crt) return crt;
             }
             // Unresolved generic free-function call (no decl_link): fall back to
             // the sema-resolved type so opt-returning calls keep their `opt`.
             if (expr->resolved_type)
                 return infer_tr_from_resolved(ctx, expr->resolved_type);
+            // A generic call with its type argument spelled at the call site
+            // (`keepGeneric(V: Holder, value: ...)`) has no decl_link and no
+            // sema type here. Its result is the callee's return type with that
+            // argument substituted — `Box(V)` -> `Box(Holder)` — so a field
+            // read straight off the call (`keepGeneric(...).value.items`) gets
+            // the concrete field type instead of the abstract `V`.
+            if (expr->as.call.callee && expr->as.call.callee->kind == AST_EXPR_IDENT) {
+                AstExpr* hoisted = hoist_type_arg_if_present(ctx, expr);
+                const AstTypeRef* type_args = hoisted ? hoisted->as.call.generic_args
+                                                      : expr->as.call.generic_args;
+                if (type_args) {
+                    Str fname = expr->as.call.callee->as.ident;
+                    for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count; i++) {
+                        const AstDecl* d = ctx->compiler_ctx->all_decls[i];
+                        if (d->kind != AST_DECL_FUNC) continue;
+                        const AstFuncDecl* cfd = &d->as.func_decl;
+                        if (!str_eq(cfd->name, fname) || !cfd->generic_params
+                            || !cfd->returns || !cfd->returns->type) continue;
+                        if (!type_ref_mentions_params(cfd->returns->type, cfd->generic_params)) break;
+                        const AstTypeRef* concrete = substitute_type_ref(ctx->compiler_ctx,
+                            cfd->generic_params, type_args, cfd->returns->type);
+                        if (concrete && ctx->generic_params && ctx->generic_args)
+                            concrete = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
+                                ctx->generic_args, concrete);
+                        if (concrete) return concrete;
+                    }
+                }
+            }
             // Still nothing (a generic free function called inside another
             // template, e.g. `get(this, k) is not none` in `has`): recover the
             // callee by name + first-argument base type, exactly as the
