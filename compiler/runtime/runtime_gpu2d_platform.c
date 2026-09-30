@@ -301,7 +301,7 @@ extern rae_Bool rae_frame_presented_any(void);
  * the reported pointer alternates between two DESIGN-space points, moving
  * every `frames` event polls, so a headless run drives the app's real frame
  * loop — hit-test, hover, outlines, paint — as a mouse sweeping between two
- * spots would. A soak/leak probe; logs its move count every 250 moves.
+ * spots would. A memory-test/leak probe; logs its move count every 250 moves.
  *
  * RAE_GPU2D_TEST_POINTER="sweep:x,y0,y1,steps": instead of two points, the
  * pointer walks the column `x` from y0 to y1 in `steps` equal steps (one step

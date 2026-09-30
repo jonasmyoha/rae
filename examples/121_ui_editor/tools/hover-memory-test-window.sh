@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Windowed hover soak for the UI editor: the same question as hover-soak.sh
+# Windowed hover memory test for the UI editor: the same question as hover-memory-test.sh
 # (does hovering leak?), but in a VISIBLE window driven by the REAL mouse, so
 # the run goes through real SDL motion events and you can watch it. Builds the
 # editor and mouse-sweep.c, opens MainMenu, and sweeps the cursor down the
 # window's centre column every SWEEP seconds (default 4) for SECONDS (default
 # 300), then quits the app with Cmd+Q.
 #
-#   bash examples/121_ui_editor/tools/hover-soak-window.sh [SECONDS] [SWEEP]
+#   bash examples/121_ui_editor/tools/hover-memory-test-window.sh [SECONDS] [SWEEP]
 #
 # It reports three independent signals:
 #   - resident memory every 10 s;
