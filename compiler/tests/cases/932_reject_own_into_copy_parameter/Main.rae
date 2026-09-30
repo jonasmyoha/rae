@@ -1,0 +1,12 @@
+# `own x` asserts a move. Into a `copy` parameter nothing moves — the callee
+# takes a copy and `x` stays — so writing `own` there is an error
+# (docs/binding-modes-design.md §2). Without `own` the same call is fine.
+func keep(text: copy String) ret Int {
+  ret text.length()
+}
+
+func main() {
+  let name: String = "a name"
+  log("{keep(text: own name)}")
+  log("{keep(text: name)} {name}")
+}

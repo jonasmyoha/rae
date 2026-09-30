@@ -8,9 +8,9 @@
 #     source keeps its own (a String field and a heap struct field)
 #   - a `var` moved from (`own x` into an `own` parameter) is live again once
 #     it is assigned
-# Three other cells of §4.2 disagree with the table today (a List / struct
-# field into `own`, an alias into `own`, `own x` into a `copy` parameter);
-# they are reported on the queue task, not asserted here.
+# The other cells of §4.2 are 931 (a List / struct field, an alias, a view
+# parameter or a constant handed to `own` is copied) and 932 (`own x` into a
+# `copy` parameter is an error).
 func rae_ext_rae_mem_stats_outstanding() unsafe extern ret Int
 
 type Holder {

@@ -7386,33 +7386,38 @@ static void sema_check_own_args(CompilerContext* ctx, AstModule* module, SymbolT
             const AstExpr* moved = a->value->kind == AST_EXPR_OWN ? a->value->as.unary.operand : a->value;
             if (moved && moved->kind == AST_EXPR_IDENT) {
                 Symbol* sym = symbol_table_lookup(symbols, moved->as.ident);
-                if (sym && !sym->is_non_owning && sym->scope_depth > 0) a->moves_local = true;
+                bool is_alias = sym && ((sym->type && (sym->type->kind == TYPE_REF
+                        || (sym->type->kind == TYPE_OPT && sym->type->as.opt.base
+                            && sym->type->as.opt.base->kind == TYPE_REF)))
+                    || sym->bind_kind == BIND_READONLY_REF);
+                /* An alias handed to `own` is COPIED (the codegen's
+                 * own_takes_copy), so it is not consumed. */
+                if (sym && !sym->is_non_owning && !is_alias && sym->scope_depth > 0) a->moves_local = true;
             }
         }
-        if (p->type && p->type->is_own && owns_heap
-            && !expr_is_owning(symbols, a->value)) {
-            Str pbase = get_base_type_name(p->type);
-            if (a->value && a->value->resolved_type) {
-                TypeInfo* at = a->value->resolved_type;
-                if (at->kind == TYPE_REF) at = at->as.ref.base;
-                /* Report the concrete type; "own T" would not help a reader. */
-                if (pbase.len <= 1 && at->name.len > 0) pbase = at->name;
-            }
+        /* A non-owning place handed to `own` (a view parameter, a global,
+         * a field of a borrow) is no longer an error: the callee receives a
+         * deep COPY (docs/binding-modes-design.md §2, "alias or field" row),
+         * so nothing the caller still owns is freed. */
+        (void)expr_is_owning;
+        /* `own x` asserts a move; into a `copy` parameter nothing moves — the
+         * callee takes a copy and `x` stays — so the word is wrong there. */
+        if (p->type && p->type->is_copy && a->value && a->value->kind == AST_EXPR_OWN) {
+            const AstExpr* moved = a->value->as.unary.operand;
             char buf[320];
-            snprintf(buf, sizeof buf,
-                     "argument for '%.*s' does not own its value, but the parameter is 'own %.*s'. "
-                     "Write '\"{%.*s}\"' (or another expression that produces a fresh value) to give "
-                     "the callee its own copy, or 'own <expr>' to transfer ownership deliberately",
-                     (int)p->name.len, p->name.data,
-                     (int)pbase.len, pbase.data,
-                     (int)(a->value && a->value->kind == AST_EXPR_IDENT ? a->value->as.ident.len : 0),
-                     (a->value && a->value->kind == AST_EXPR_IDENT ? a->value->as.ident.data : ""));
-            /* The merged AstModule remembers one file path, but decls come
-             * from many — use the enclosing decl's origin so the location
-             * points at the file the reader actually has open. Same reason
-             * the rae_ext_rae_buf_set check uses it. */
-            const char* own_file = sema_diag_file(module);
-            diag_error(own_file, (int)a->value->line, (int)a->value->column, buf);
+            if (moved && moved->kind == AST_EXPR_IDENT)
+                snprintf(buf, sizeof buf,
+                         "'own %.*s' moves, but parameter '%.*s' is 'copy': the callee takes a copy and '%.*s' "
+                         "stays. Remove 'own', or declare the parameter 'own' to take it",
+                         (int)moved->as.ident.len, moved->as.ident.data,
+                         (int)p->name.len, p->name.data,
+                         (int)moved->as.ident.len, moved->as.ident.data);
+            else
+                snprintf(buf, sizeof buf,
+                         "'own' moves, but parameter '%.*s' is 'copy': the callee takes a copy. Remove 'own', "
+                         "or declare the parameter 'own'",
+                         (int)p->name.len, p->name.data);
+            diag_error(sema_diag_file(module), (int)a->value->line, (int)a->value->column, buf);
             module->had_error = true;
         }
         p = p->next; a = a->next;

@@ -1,0 +1,95 @@
+# An `own` parameter takes a COPY of a place it is handed — the "alias or
+# field" row of docs/binding-modes-design.md §2. Only a bare owned local
+# (moved) and a fresh value are taken as they are; `own x` is the explicit
+# move. A List or struct FIELD used to be handed over bit-for-bit, so the
+# callee and the owner freed the same buffers and the program aborted; an
+# ALIAS or a view parameter was a compile error. Each case checks what the
+# callee received, that the owner still has its own value, and that
+# outstanding allocations return to the baseline.
+func rae_ext_rae_mem_stats_outstanding() unsafe extern ret Int
+
+const greeting: String = "a module-level constant long enough for the heap"
+
+type Holder {
+  label: String
+  items: List(String)
+}
+
+type Outer {
+  inner: Holder
+  text: String
+  list: List(String)
+}
+
+func takeString(text: own String) ret Int {
+  ret text.length()
+}
+
+func takeList(list: own List(String)) ret Int {
+  ret list.length
+}
+
+func takeHolder(holder: own Holder) ret Int {
+  ret holder.items.length
+}
+
+func makeOuter(seed: view Int) ret Outer {
+  var items: List(String) = List.create(String, cap: 2)
+  items.add(value: "item {seed} long enough for the heap")
+  var list: List(String) = List.create(String, cap: 2)
+  list.add(value: "list {seed} long enough for the heap")
+  ret Outer {
+    inner: Holder { label: "label {seed} long enough for the heap", items: own items }
+    text: "text {seed} long enough for the heap"
+    list: own list
+  }
+}
+
+func fieldsIntoOwn(seed: view Int) ret String {
+  let outer: Outer = makeOuter(seed: seed)
+  let a: Int = takeString(text: outer.text)
+  let b: Int = takeList(list: outer.list)
+  let c: Int = takeHolder(holder: outer.inner)
+  ret "{a} {b} {c} | owner: {outer.text} {outer.list.length} {outer.inner.label} {outer.inner.items.length}"
+}
+
+func aliasesIntoOwn(seed: view Int) ret String {
+  let outer: Outer = makeOuter(seed: seed)
+  let textAlias: view String => outer.text
+  let listAlias: view List(String) => outer.list
+  let holderAlias: view Holder => outer.inner
+  let a: Int = takeString(text: textAlias)
+  let b: Int = takeList(list: listAlias)
+  let c: Int = takeHolder(holder: holderAlias)
+  ret "{a} {b} {c} | aliases still read: {textAlias} {listAlias.length} {holderAlias.label}"
+}
+
+func viewParameterIntoOwn(outer: view Outer) ret String {
+  let a: Int = takeList(list: outer.list)
+  let b: Int = takeHolder(holder: outer.inner)
+  ret "{a} {b} | {outer.list.length} {outer.inner.items.length}"
+}
+
+func constantIntoOwn() ret String {
+  let a: Int = takeString(text: greeting)
+  ret "{a} {greeting}"
+}
+
+func main() {
+  unsafe {
+    log("fields: {fieldsIntoOwn(seed: 1)}")
+    log("aliases: {aliasesIntoOwn(seed: 1)}")
+    let outer: Outer = makeOuter(seed: 9)
+    log("view parameter: {viewParameterIntoOwn(outer: outer)} | caller: {outer.list.length}")
+    log("constant: {constantIntoOwn()}")
+    let baseline: Int = rae_ext_rae_mem_stats_outstanding()
+    loop var i: Int = 0, i < 50, ++i {
+      let a: String = fieldsIntoOwn(seed: i)
+      let b: String = aliasesIntoOwn(seed: i)
+      let c: String = viewParameterIntoOwn(outer: outer)
+      let d: String = constantIntoOwn()
+    }
+    let leaked: Int = rae_ext_rae_mem_stats_outstanding() - baseline
+    log("leaked allocations: {leaked}")
+  }
+}
