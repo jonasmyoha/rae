@@ -298,8 +298,14 @@ extern rae_Bool rae_frame_presented_any(void);
  * the reported pointer alternates between two DESIGN-space points, moving
  * every `frames` event polls, so a headless run drives the app's real frame
  * loop — hit-test, hover, outlines, paint — as a mouse sweeping between two
- * spots would. A soak/leak probe; logs its move count every 250 moves. */
-static int g_g2d_test_pointer_state = 0;   /* 0 unread, 1 off, 2 on */
+ * spots would. A soak/leak probe; logs its move count every 250 moves.
+ *
+ * RAE_GPU2D_TEST_POINTER="sweep:x,y0,y1,steps": instead of two points, the
+ * pointer walks the column `x` from y0 to y1 in `steps` equal steps (one step
+ * per event poll), then starts again at y0 — every node the column crosses is
+ * hovered and left on every pass. */
+static int g_g2d_test_pointer_state = 0;   /* 0 unread, 1 off, 2 two points, 3 sweep */
+static long long g_g2d_test_pointer_steps = 2;
 static double g_g2d_test_pointer[4];
 static long long g_g2d_test_pointer_frames = 1, g_g2d_test_pointer_polls = 0, g_g2d_test_pointer_moves = 0;
 /* Painted frames (endFrame calls, counted in rae_g2d_tick) while it is on. */
@@ -308,13 +314,19 @@ static int rae_g2d_test_pointer_on(void) {
     if (g_g2d_test_pointer_state == 0) {
         const char* e = getenv("RAE_GPU2D_TEST_POINTER");
         g_g2d_test_pointer_state = 1;
-        if (e && sscanf(e, "%lf,%lf,%lf,%lf,%lld", &g_g2d_test_pointer[0], &g_g2d_test_pointer[1],
+        if (e && strncmp(e, "sweep:", 6) == 0) {
+            if (sscanf(e + 6, "%lf,%lf,%lf,%lld", &g_g2d_test_pointer[0], &g_g2d_test_pointer[1],
+                       &g_g2d_test_pointer[2], &g_g2d_test_pointer_steps) == 4
+                && g_g2d_test_pointer_steps > 1) {
+                g_g2d_test_pointer_state = 3;
+            }
+        } else if (e && sscanf(e, "%lf,%lf,%lf,%lf,%lld", &g_g2d_test_pointer[0], &g_g2d_test_pointer[1],
                         &g_g2d_test_pointer[2], &g_g2d_test_pointer[3],
                         &g_g2d_test_pointer_frames) == 5 && g_g2d_test_pointer_frames > 0) {
             g_g2d_test_pointer_state = 2;
         }
     }
-    return g_g2d_test_pointer_state == 2;
+    return g_g2d_test_pointer_state >= 2;
 }
 static void rae_g2d_test_pointer_advance(void) {
     if (!rae_g2d_test_pointer_on()) return;
@@ -525,6 +537,14 @@ void rae_ext_EventLoop_wake(void){
  * points; we scale to physical px (× dpr) then invert the design fit transform
  * (subtract the letterbox offset, divide by scale). */
 static void rae_g2d_pointer_design(double* dx, double* dy) {
+    if (rae_g2d_test_pointer_on() && g_g2d_test_pointer_state == 3) {
+        long long step = g_g2d_test_pointer_moves % g_g2d_test_pointer_steps;
+        *dx = g_g2d_test_pointer[0];
+        *dy = g_g2d_test_pointer[1]
+            + (g_g2d_test_pointer[2] - g_g2d_test_pointer[1]) * (double)step
+              / (double)(g_g2d_test_pointer_steps - 1);
+        return;
+    }
     if (rae_g2d_test_pointer_on()) {
         int second = (int)(g_g2d_test_pointer_moves % 2);
         *dx = g_g2d_test_pointer[second ? 2 : 0];

@@ -157,7 +157,7 @@ static void rae_g2d_save_screenshot(const char* path, WGPUTexture tex, int w, in
  * tail: the optional headless screenshot, the best-effort copy into the
  * surface drawable + present, and the device poll. */
 void rae_g2d_tick(void) {
-    if (g_g2d_test_pointer_state == 2) g_g2d_test_pointer_paints++;
+    if (g_g2d_test_pointer_state >= 2) g_g2d_test_pointer_paints++;
     rae_g2d_tick_virtual_clock();
 }
 void rae_g2d_present(void* texture, int64_t width, int64_t height) {

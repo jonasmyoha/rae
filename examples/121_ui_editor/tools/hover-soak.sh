@@ -6,13 +6,19 @@
 # hierarchy refresh, paint. Samples resident memory every 10 s and prints the
 # runtime's outstanding String/buffer counts at exit (RAE_MEM_STATS=1).
 #
-#   bash examples/121_ui_editor/tools/hover-soak.sh [SECONDS]
+#   bash examples/121_ui_editor/tools/hover-soak.sh [SECONDS] [sweep]
+#
+# With `sweep`, the pointer instead walks the canvas column x=700 from the top to
+# the bottom of the window in 180 steps and starts again, so it hovers most of
+# the UI in turn (the `sweep:` form of RAE_GPU2D_TEST_POINTER).
 #
 # Report only: it does not fail on growth. Note that `leaks` cannot be used on
 # this run — RAE_MEM_STATS keeps a table of every live allocation, which makes
 # leaked blocks look referenced; run `leaks` on a separate run without it.
 set -euo pipefail
 SECONDS_TO_RUN="${1:-600}"
+POINTER="623,196,787,297,1"
+[ "${2:-}" = "sweep" ] && POINTER="sweep:700,5,895,180"
 REPO_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 cd "$REPO_ROOT"
 TMP="$(mktemp -d)"
@@ -31,7 +37,7 @@ gcc -O2 -w -o "$TMP/app" "$TMP/out.c" "$TMP/rae_runtime.c" -I"$TMP" \
 env RAE_UI_EDITOR_SCENE=examples/121_ui_editor/assets/samples/MainMenu.raescene \
   RAE_UI_EDITOR_ROOT=examples/121_ui_editor/assets/samples \
   RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=$((SECONDS_TO_RUN * 1000)) RAE_MEM_STATS=1 \
-  RAE_GPU2D_TEST_POINTER="623,196,787,297,1" \
+  RAE_GPU2D_TEST_POINTER="$POINTER" \
   perl -e 'alarm shift; exec @ARGV' $((SECONDS_TO_RUN + 60)) "$TMP/app" > "$TMP/run.log" 2>&1 &
 PID=$!
 echo "seconds rss_kb"
