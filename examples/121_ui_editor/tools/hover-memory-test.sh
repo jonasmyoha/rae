@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Canvas-hover soak for the UI editor: builds the editor, runs it headless for
+# Canvas-hover memory test for the UI editor: builds the editor, runs it headless for
 # SECONDS (default 600) with the pointer alternating between two canvas nodes
 # every frame (RAE_GPU2D_TEST_POINTER, runtime_gpu2d_platform.c), so each frame
 # re-hovers a node through the real loop — hit-test, hover outline, the
@@ -9,13 +9,13 @@
 # (RAE_MEM_STATS=1). The live series is the one that shows memory piling up in
 # a container that is still in use: the exit counts are taken after teardown.
 #
-#   bash examples/121_ui_editor/tools/hover-soak.sh [SECONDS] [sweep]
+#   bash examples/121_ui_editor/tools/hover-memory-test.sh [SECONDS] [sweep]
 #
 # With `sweep`, the pointer instead walks the canvas column x=700 from the top to
 # the bottom of the window in 180 steps and starts again, so it hovers most of
 # the UI in turn (the `sweep:` form of RAE_GPU2D_TEST_POINTER).
 #
-# hover-soak-window.sh is the same soak in a visible window, driven by the real
+# hover-memory-test-window.sh is the same memory test in a visible window, driven by the real
 # mouse (mouse-sweep.c), with `heap` snapshots added.
 #
 # Report only: it does not fail on growth. Note that `leaks` cannot be used on

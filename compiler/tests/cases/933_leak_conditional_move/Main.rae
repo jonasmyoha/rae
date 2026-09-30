@@ -1,7 +1,7 @@
 # Leak regression for #43947654: a local moved with `own` on only SOME paths
 # must still be dropped on every path that did not move it. The compiler gives
 # such a local a live flag (cleared by the move) but emitted no guarded drop at
-# scope exit, so every path that did not move leaked. Found by a 3D game soak
+# scope exit, so every path that did not move leaked. Found by a 3D game memory test
 # that leaked a skinning palette List per character per frame (~31 MB/min).
 #
 # Each shape runs in its own function, so everything it owns is dropped by the
