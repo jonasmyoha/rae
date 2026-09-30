@@ -1,0 +1,48 @@
+# The RAE_MEM_STATS byte counters must balance (#86807581): after every buffer
+# is freed, outstanding BYTES are back where they started, exactly like the
+# outstanding COUNT. A 5-minute soak ended with the counts balanced but
+# `mem:buf ... outstanding=0 (-17997912 B)` — more bytes freed than allocated —
+# so a byte-level leak could never show up. Lists that grow past their capacity
+# reallocate, which is the likely path where the two sides disagree.
+func rae_ext_rae_mem_stats_buf_outstanding() unsafe extern ret Int
+
+func rae_ext_rae_mem_stats_buf_outstanding_bytes() unsafe extern ret Int
+
+func fillList(count: view Int) ret Int {
+  var values: List(Int) = List.create(Int, cap: 1)
+  loop var i: Int = 0, i < count, ++i {
+    values.add(value: i)
+  }
+  ret values.length()
+}
+
+func fillOddSizes(count: view Int) ret Int {
+  var total: Int = 0
+  loop var size: Int = 1, size < count, ++size {
+    var values: List(Int) = List.create(Int, cap: size * 3)
+    values.add(value: size)
+    total = total + values.length()
+  }
+  ret total
+}
+
+func main() {
+  var buffers: Int = 0
+  var bytes: Int = 0
+  unsafe {
+    buffers = rae_ext_rae_mem_stats_buf_outstanding()
+    bytes = rae_ext_rae_mem_stats_buf_outstanding_bytes()
+  }
+  var total: Int = 0
+  loop var round: Int = 0, round < 50, ++round {
+    total = total + fillList(count: 1000)
+    total = total + fillOddSizes(count: 40)
+  }
+  unsafe {
+    let bufferDelta: Int = rae_ext_rae_mem_stats_buf_outstanding() - buffers
+    let byteDelta: Int = rae_ext_rae_mem_stats_buf_outstanding_bytes() - bytes
+    log("total: {total}")
+    log("buffers outstanding: {bufferDelta}")
+    log("bytes outstanding: {byteDelta}")
+  }
+}
