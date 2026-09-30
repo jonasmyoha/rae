@@ -1,0 +1,54 @@
+# A field read straight off a call that returns a generic struct has the
+# field's CONCRETE type. `keepGeneric(V: Holder, ...)` returns Box(Holder), so
+# `.value` is a Holder, `.value.items` a List(String) and `.value.label` a
+# String; inference used to leave the field as the abstract `V`, and the chain
+# compiled `.value.items.length()` as a String length (the C did not compile).
+# The returned Box is a temporary of the statement and must still be freed.
+func rae_ext_rae_mem_stats_outstanding() unsafe extern ret Int
+
+type Holder {
+  label: String
+  items: List(String)
+}
+
+type Box(V: type) {
+  value: V
+}
+
+func makeHolder(tag: view Int) ret Holder {
+  var items: List(String) = List.create(String, cap: 2)
+  items.add(value: "item {tag}")
+  items.add(value: "second {tag}")
+  ret Holder { label: "holder {tag}", items: own items }
+}
+
+func keepGeneric(V: type, value: own V) ret Box(V) {
+  ret Box(V) { value: own value }
+}
+
+func main() {
+  var before: Int = 0
+  unsafe {
+    before = rae_ext_rae_mem_stats_outstanding()
+  }
+  var itemCount: Int = 0
+  var labelLength: Int = 0
+  var labels: String = ""
+  loop var i: Int = 0, i < 100, ++i {
+    # A method on a nested field.
+    itemCount = itemCount + keepGeneric(V: Holder, value: makeHolder(tag: i)).value.items.length()
+    # A method on a nested String field.
+    labelLength = labelLength + keepGeneric(V: Holder, value: makeHolder(tag: i)).value.label.length()
+  }
+  # A field read, bound with its concrete type.
+  let holder: Holder = keepGeneric(V: Holder, value: makeHolder(tag: 7)).value
+  # A nested field read, used in an interpolation.
+  labels = "{keepGeneric(V: Holder, value: makeHolder(tag: 8)).value.label}"
+  log("items: {itemCount}")
+  log("label lengths: {labelLength}")
+  log("holder: {holder.label} with {holder.items.length()} items")
+  log("labels: {labels}")
+  unsafe {
+    log("leaked while chaining: {rae_ext_rae_mem_stats_outstanding() - before - 4}")
+  }
+}
