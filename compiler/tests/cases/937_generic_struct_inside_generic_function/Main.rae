@@ -1,0 +1,77 @@
+# A generic struct named ONLY inside a generic function body is instantiated
+# for the concrete type argument. `Box(V)` below appears nowhere but inside
+# storeGeneric / keepGeneric, so the C type `rae_Box_rae_Holder` was never
+# emitted and the C did not compile (found while bisecting a map leak). Each
+# shape also checks ownership under the counters: `{ value: value }` copies
+# the own parameter (so both the copy and the parameter must be released),
+# `{ value: own value }` moves it (released once, by the Box).
+func rae_ext_rae_mem_stats_outstanding() unsafe extern ret Int
+
+type Holder {
+  label: String
+  items: List(String)
+}
+
+type Box(V: type) {
+  value: V
+}
+
+func makeHolder(tag: view Int) ret Holder {
+  var items: List(String) = List.create(String, cap: 2)
+  items.add(value: "item {tag}")
+  ret Holder { label: "holder {tag}", items: own items }
+}
+
+# The program from the report: a Box(V) local built from a copy.
+func storeGeneric(V: type, value: own V) ret Int {
+  let box: Box(V) = { value: value }
+  ret 1
+}
+
+# The same local, built by moving the parameter in.
+func storeGenericMoved(V: type, value: own V) ret Int {
+  let box: Box(V) = { value: own value }
+  ret 1
+}
+
+# `ret Box(V) { ... }`: the struct escapes to the caller.
+func keepGeneric(V: type, value: own V) ret Box(V) {
+  ret Box(V) { value: own value }
+}
+
+# Takes the Box back apart, so main never has to name `Box(Holder)`.
+func unbox(V: type, box: own Box(V)) ret V {
+  ret own box.value
+}
+
+func main() {
+  var before: Int = 0
+  var total: Int = 0
+  unsafe {
+    before = rae_ext_rae_mem_stats_outstanding()
+  }
+  loop var i: Int = 0, i < 100, ++i {
+    total = total + storeGeneric(V: Holder, value: makeHolder(tag: i))
+  }
+  unsafe {
+    log("copied into a local Box: {rae_ext_rae_mem_stats_outstanding() - before} leaked")
+    before = rae_ext_rae_mem_stats_outstanding()
+  }
+  loop var i: Int = 0, i < 100, ++i {
+    total = total + storeGenericMoved(V: Holder, value: makeHolder(tag: i))
+  }
+  unsafe {
+    log("moved into a local Box: {rae_ext_rae_mem_stats_outstanding() - before} leaked")
+    before = rae_ext_rae_mem_stats_outstanding()
+  }
+  loop var i: Int = 0, i < 100, ++i {
+    # Through unbox: naming `Box(Holder)` here would register the type from
+    # main and hide the bug.
+    let holder: Holder = unbox(V: Holder, box: keepGeneric(V: Holder, value: makeHolder(tag: i)))
+    total = total + holder.items.length()
+  }
+  unsafe {
+    log("returned Box: {rae_ext_rae_mem_stats_outstanding() - before} leaked")
+  }
+  log("total: {total}")
+}

@@ -1278,6 +1278,13 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                     struct_decl->as.type_decl.generic_params,
                     obj_tr ? obj_tr->generic_args : NULL, field_tr);
             }
+            // Inside a specialization the literal's own arguments may still be
+            // the function's type parameters (`let box: Box(V) = { value:
+            // value }`): resolve those too, so `value` is the concrete Holder
+            // and gets the deep copy `=` promises instead of a shallow alias.
+            if (eff_field_tr && ctx->generic_params && ctx->generic_args)
+                eff_field_tr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
+                    ctx->generic_args, eff_field_tr);
             if (eff_field_tr) {
                 // An `opt T` FIELD is a RaeAny and needs the same boxing an
                 // `opt T` return gets. Without this the raw payload was

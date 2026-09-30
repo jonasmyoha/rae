@@ -358,6 +358,13 @@ static void discover_specializations_stmt_impl(CFuncContext* ctx, const AstStmt*
                 if (s->as.let_stmt.value) {
                     const AstTypeRef* type = s->as.let_stmt.type ? s->as.let_stmt.type : infer_expr_type_ref(ctx, s->as.let_stmt.value);
                     if (type) { ctx->expected_type = *type; ctx->has_expected_type = true; }
+                    // Inside a specialization a generic struct local (`let box:
+                    // Box(V)`) is the struct for the CONCRETE argument. When
+                    // Box is named nowhere else, only this registration emits
+                    // `rae_Box_rae_Holder` — without it the C did not compile.
+                    if (type && type->generic_args && ctx->generic_params && ctx->generic_args)
+                        register_generic_type(ctx->compiler_ctx,
+                            substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, type));
                     discover_specializations_expr_impl(ctx, s->as.let_stmt.value); ctx->has_expected_type = false;
                     if (ctx->local_count < 256) {
                         ctx->locals[ctx->local_count] = s->as.let_stmt.name; ctx->local_type_refs[ctx->local_count] = type;
@@ -476,6 +483,16 @@ void discover_specializations_module(CompilerContext* ctx, const AstModule* modu
             const AstIdentifierPart* disc_gp = f->generic_params;
             if (!disc_gp && f->generic_template && f->generic_template->kind == AST_DECL_FUNC) disc_gp = f->generic_template->as.func_decl.generic_params;
             CFuncContext fctx = {.compiler_ctx = ctx, .module = module, .func_decl = f, .generic_params = disc_gp, .generic_args = args};
+            // The specialization's own signature can name a generic struct of
+            // its type parameters (`ret Box(V)`, `value: Box(V)`); register the
+            // concrete struct, as for a generic local above.
+            if (disc_gp && args) {
+                if (f->returns && f->returns->type && f->returns->type->generic_args)
+                    register_generic_type(ctx, substitute_type_ref(ctx, disc_gp, args, f->returns->type));
+                for (const AstParam* p = f->params; p; p = p->next)
+                    if (p->type && p->type->generic_args)
+                        register_generic_type(ctx, substitute_type_ref(ctx, disc_gp, args, p->type));
+            }
             // Populate locals from params so infer_expr_type_ref works for 'this' etc.
             for (const AstParam* p = f->params; p; p = p->next) {
                 if (fctx.local_count < 256) {
