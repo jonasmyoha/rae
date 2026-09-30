@@ -816,8 +816,6 @@ func createApp() ret App {
 
 # ----- the loop ------------------------------------------------------------
 func runWalkerApp() ret Int {
-  var uiSystems: UiSystems = createUiSystems()
-
   var app: App = createApp()
   # A stream through the meadow (#833), baked once against the terrain.
   addMeadowRiver(
@@ -849,7 +847,7 @@ func runWalkerApp() ret Int {
     } else {
       if let resources: mod GpuResources => app.gpuResources {
         renderApp(
-          uiSystems: uiSystems
+          uiSystems: app.inputSystem.uiSystems
           cameraSystem: app.cameraSystem
           characterSystem: app.characterSystem
           frame: app.frame
@@ -867,7 +865,7 @@ func runWalkerApp() ret Int {
     }
     # Frame end: report the authored components no lib table matched (this app
     # has no tables of its own) and recycle the indices of destroyed entities.
-    uiFrameEnd(world: app.inputSystem.world, uiSystems: uiSystems)
+    uiFrameEnd(world: app.inputSystem.world, uiSystems: app.inputSystem.uiSystems)
   }
   if let resources: mod GpuResources => app.gpuResources {
     grassShutdown(grass: app.grassCompute, resources: resources)
