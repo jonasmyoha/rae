@@ -173,12 +173,26 @@ static void emit_to_string_expr(CFuncContext* ctx, const AstExpr* operand, FILE*
     }
     // A List(T): its generated toString (elements recursively). The operand
     // is captured into a temp so the formatter can take its address.
-    if (tr && !tr->is_opt && str_eq_cstr(base, "List") && tr->generic_args) {
+    // A generic struct instance (Pair(String)) the same way: its generated
+    // rae_to_str_<instance>_ (c_struct_shapes.c).
+    const AstTypeRef* generic_sub = NULL;
+    if (tr && !tr->is_opt && tr->generic_args && !str_eq_cstr(base, "List")) {
+        generic_sub = tr;
+        if (ctx->generic_params && ctx->generic_args) {
+            const AstTypeRef* s2 = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr);
+            if (s2) generic_sub = s2;
+        }
+        AstTypeRef plain = *generic_sub; plain.is_view = false; plain.is_mod = false;
+        if (!generic_struct_template(ctx->compiler_ctx, &plain)) generic_sub = NULL;
+    }
+    if (tr && !tr->is_opt && ((str_eq_cstr(base, "List") && tr->generic_args) || generic_sub)) {
         const AstTypeRef* sub = tr;
         if (ctx->generic_params && ctx->generic_args) {
             const AstTypeRef* s2 = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr);
             if (s2) sub = s2;
         }
+        AstTypeRef sub_plain = *sub; sub_plain.is_view = false; sub_plain.is_mod = false;
+        sub = &sub_plain;
         const char* mangled = rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, (AstTypeRef*)sub);
         if (mangled) {
             // The operand may be the list itself or a pointer to it (a `view`
@@ -850,6 +864,34 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                 if (expr->as.method_call.args) emit_expr(ctx, expr->as.method_call.args->value, out, PREC_LOWEST, false, false);
                 fprintf(out, ")");
                 break;
+            }
+            // A generic instance spelled as sema reads the qualifier
+            // (sema_type_qualifier_type): `Pair(Int).fromJson(json:)`, a call
+            // whose callee and arguments are type names.
+            const AstExpr* q = expr->as.method_call.object;
+            if (q->kind == AST_EXPR_CALL && q->as.call.callee && q->as.call.callee->kind == AST_EXPR_IDENT
+                && q->as.call.args) {
+                AstTypeRef tmp = {0}; AstIdentifierPart part = {0};
+                part.text = q->as.call.callee->as.ident; tmp.parts = &part;
+                AstTypeRef* tail = NULL;
+                bool all_types = true;
+                for (const AstCallArg* ta = q->as.call.args; ta; ta = ta->next) {
+                    if (!ta->value || ta->value->kind != AST_EXPR_IDENT || ta->name.len > 0) { all_types = false; break; }
+                    AstTypeRef* ga = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
+                    memset(ga, 0, sizeof(*ga));
+                    ga->parts = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstIdentifierPart));
+                    memset(ga->parts, 0, sizeof(*ga->parts));
+                    ga->parts->text = ta->value->as.ident;
+                    if (!tmp.generic_args) tmp.generic_args = ga; else tail->next = ga;
+                    tail = ga;
+                }
+                if (all_types && generic_struct_template(ctx->compiler_ctx, &tmp)) {
+                    const char* mangled = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, &tmp);
+                    fprintf(out, "rae_fromJson_%s_(", mangled);
+                    if (expr->as.method_call.args) emit_expr(ctx, expr->as.method_call.args->value, out, PREC_LOWEST, false, false);
+                    fprintf(out, ")");
+                    break;
+                }
             }
         }
         // Module-qualified call: `sys.fn(args)` where `sys` is an imported module

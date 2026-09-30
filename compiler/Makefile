@@ -65,6 +65,7 @@ SRCS = $(SRC_DIR)/main.c \
        $(SRC_DIR)/c_expr.c \
        $(SRC_DIR)/c_stmt.c \
        $(SRC_DIR)/c_names.c \
+       $(SRC_DIR)/c_struct_shapes.c \
        $(SRC_DIR)/ownership.c \
        $(SRC_DIR)/raepack.c \
        $(SRC_DIR)/mangler.c \
