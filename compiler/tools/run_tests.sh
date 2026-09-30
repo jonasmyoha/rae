@@ -354,11 +354,39 @@ for TARGET in "${TARGETS[@]}"; do
         case "$TEST_NAME" in
             43[4-9]_*|449_*|542_*|543_*|545_*|666_*|712_*|757_*|847_*|848_*|866_*) ENABLE_MEM_STATS=1 ;;
         esac
+        # A case that READS the counters gets them, found from its source: the
+        # name list above missed 918-931 (and 429), whose outstanding count
+        # was therefore always 0 — they passed while leaking.
+        if grep -q 'rae_ext_rae_mem_stats_' "$TEST_FILE" 2>/dev/null; then
+            ENABLE_MEM_STATS=1
+        fi
+        # Leak check at exit, ON by default (RAE_TEST_MEMCHECK=0 turns it
+        # off): every compiled `run` case runs under RAE_MEM_STATS=1, and one
+        # that exits with Strings or buffers still allocated FAILS even when
+        # its output matches. The exit dump is read before the mem-stats
+        # filter drops it. The RSS cases (431-433) keep running without the
+        # tracker (see #775 above).
+        MEMCHECK=0
+        if [ "${RAE_TEST_MEMCHECK:-1}" != "0" ] && [ "${CMD_RUN_ARGS[0]}" = "run" ]; then
+            case "$TEST_NAME" in
+                43[1-3]_*) ;;
+                *) MEMCHECK=1; ENABLE_MEM_STATS=1 ;;
+            esac
+        fi
+        LEAK_MSG=""
         # For parse/lex/format, we want to capture both stdout and stderr to see errors + any partial results
         if [[ "${CMD_ARGS[0]}" =~ ^(parse|lex|format)$ ]]; then
             CMD_STDOUT=$("$BIN" "${CMD_RUN_ARGS[@]}" 2>&1 || true)
         elif [ $ENABLE_MEM_STATS -eq 1 ]; then
-            CMD_STDOUT=$(RAE_MEM_STATS=1 "$BIN" "${CMD_RUN_ARGS[@]}" 2>&1 | grep -Ev '^\[rae (vm )?mem-stats\]|^  \[(mem|vm):' || true)
+            CMD_RAW=$(RAE_MEM_STATS=1 "$BIN" "${CMD_RUN_ARGS[@]}" 2>&1 || true)
+            if [ $MEMCHECK -eq 1 ]; then
+                LEAK_STRINGS=$(printf '%s\n' "$CMD_RAW" | sed -n 's/^  \[mem:string:TOTAL *\].* outstanding=\([0-9-]*\).*/\1/p' | tail -1)
+                LEAK_BUFFERS=$(printf '%s\n' "$CMD_RAW" | sed -n 's/^  \[mem:buf *\].* outstanding=\([0-9-]*\).*/\1/p' | tail -1)
+                if [ "${LEAK_STRINGS:-0}" != "0" ] || [ "${LEAK_BUFFERS:-0}" != "0" ]; then
+                    LEAK_MSG="leak at exit: ${LEAK_STRINGS:-0} strings, ${LEAK_BUFFERS:-0} buffers outstanding"
+                fi
+            fi
+            CMD_STDOUT=$(printf '%s\n' "$CMD_RAW" | grep -Ev '^\[rae (vm )?mem-stats\]|^  \[(mem|vm):' || true)
         else
             CMD_STDOUT=$("$BIN" "${CMD_RUN_ARGS[@]}" 2>&1 || true)
         fi
@@ -432,6 +460,7 @@ for TARGET in "${TARGETS[@]}"; do
     fi
 
     IS_MATCH=0
+    [ "${SKIP_EXEC:-0}" -eq 0 ] || LEAK_MSG=""
     if [ "${EXPECTED_OUTPUT:0:6}" = "REGEX:" ]; then
         PATTERN="${EXPECTED_OUTPUT:6}"
         # Use python for robust regex matching including multiline/newlines
@@ -448,6 +477,10 @@ for TARGET in "${TARGETS[@]}"; do
     if [ $IS_MATCH -eq 1 ] && [ -n "$FORMAT_CHECK_MSG" ]; then
       IS_MATCH=0
       echo "FAIL: $DISPLAY_NAME ($FORMAT_CHECK_MSG)"
+      ((FAILED++))
+    elif [ $IS_MATCH -eq 1 ] && [ -n "${LEAK_MSG:-}" ]; then
+      IS_MATCH=0
+      echo "FAIL: $DISPLAY_NAME ($LEAK_MSG)"
       ((FAILED++))
     elif [ $IS_MATCH -eq 1 ]; then
       echo "PASS: $DISPLAY_NAME"

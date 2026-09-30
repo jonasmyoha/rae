@@ -678,6 +678,16 @@ You do not need any flag. The old sequential runner is a debugging-only
 fallback: `RAE_TEST_SEQUENTIAL=1 … watch-tests.sh` forces it. See
 `docs/parallel-tests.md`.
 
+**Every `run` case is leak-checked at exit (2026-09-30).** The runner runs
+compiled `run` cases under `RAE_MEM_STATS=1` and FAILS one that exits with
+Strings or buffers still allocated, even when its output matches
+(`FAIL: name (leak at exit: …)`). A case that calls a `rae_ext_rae_mem_stats_*`
+native gets the counters automatically — never rely on a name list, which is
+how 429/918/921 passed while leaking. `RAE_TEST_MEMCHECK=0` turns the
+exit check off for a quick local run; the full suite keeps it on. The
+121_ui_editor example gate also runs `leaks --atExit`, which sees C/wgpu mallocs
+that the Rae counters do not.
+
 **The VISUAL example smoke tests are NOT part of the unit suite, but you MAY
 run them when a change warrants a visual check.** `run_examples.sh` builds and
 renders every example in a real SDL/GPU window and takes screenshots — minutes

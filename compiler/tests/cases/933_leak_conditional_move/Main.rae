@@ -1,0 +1,250 @@
+# Leak regression for #43947654: a local moved with `own` on only SOME paths
+# must still be dropped on every path that did not move it. The compiler gives
+# such a local a live flag (cleared by the move) but emitted no guarded drop at
+# scope exit, so every path that did not move leaked. Found by a 3D game soak
+# that leaked a skinning palette List per character per frame (~31 MB/min).
+#
+# Each shape runs in its own function, so everything it owns is dropped by the
+# time it returns; the caller compares the String and Buffer outstanding
+# counts before and after (RAE_MEM_STATS=1, see run_tests.sh). The last shape
+# moves unconditionally and is the control: it passes with or without the bug.
+func rae_ext_rae_mem_stats_outstanding() unsafe extern ret Int
+
+func rae_ext_rae_mem_stats_buf_outstanding() unsafe extern ret Int
+
+type Bundle {
+  rows: List(Int)
+  label: String
+}
+
+func makeRows(count: view Int) ret List(Int) {
+  var rows: List(Int) = List.create(Int, cap: count)
+  loop var i: Int = 0, i < count, ++i {
+    rows.add(value: i)
+  }
+  ret rows
+}
+
+func makeBundle(count: view Int) ret Bundle {
+  ret Bundle { rows: makeRows(count: count), label: "bundle {count}" }
+}
+
+func sum(rows: view List(Int)) ret Int {
+  var total: Int = 0
+  loop let value: Int in rows {
+    total = total + value
+  }
+  ret total
+}
+
+# 1. The move sits in an `if` that is not taken.
+func moveInUntakenIf(flag: view Bool) ret Int {
+  var kept: List(Int) = List.create(Int, cap: 0)
+  let rows: List(Int) = makeRows(count: 8)
+  if flag {
+    kept = own rows
+  }
+  ret kept.length()
+}
+
+# 2. The game's shape: a fresh List per loop pass, moved out on the first pass
+#    only and merely borrowed on the others.
+func moveOnFirstPassOnly(passes: view Int) ret Int {
+  var first: List(Int) = List.create(Int, cap: 0)
+  var total: Int = 0
+  loop var pass: Int = 0, pass < passes, ++pass {
+    let rows: List(Int) = makeRows(count: 8)
+    if pass is 0 {
+      first = own rows
+    } else {
+      total = total + sum(rows: rows)
+    }
+  }
+  ret total + first.length()
+}
+
+# 3. The move is in the `else`, and the `if` side runs.
+func moveInUntakenElse(flag: view Bool) ret Int {
+  var kept: List(Int) = List.create(Int, cap: 0)
+  let rows: List(Int) = makeRows(count: 8)
+  if flag {
+    kept.add(value: sum(rows: rows))
+  } else {
+    kept = own rows
+  }
+  ret kept.length()
+}
+
+# 4. A String local, moved on one path only.
+func moveStringConditionally(flag: view Bool) ret Int {
+  var kept: String = ""
+  let text: String = "text {flag} that is long enough to live on the heap"
+  if flag {
+    kept = own text
+  }
+  ret kept.length()
+}
+
+# 5. A struct owning a List and a String, moved on one path only.
+func moveStructConditionally(flag: view Bool) ret Int {
+  var kept: Bundle = makeBundle(count: 0)
+  let bundle: Bundle = makeBundle(count: 8)
+  if flag {
+    kept = own bundle
+  }
+  ret kept.rows.length()
+}
+
+# 6. A partial move, then an early `ret` on the path that did not move.
+func earlyRetAfterPartialMove(flag: view Bool) ret Int {
+  var kept: List(Int) = List.create(Int, cap: 0)
+  let rows: List(Int) = makeRows(count: 8)
+  if flag {
+    kept = own rows
+  }
+  if flag is false {
+    ret 1
+  }
+  ret kept.length()
+}
+
+# 7. A partial move inside a loop that leaves by `continue` and `break`.
+func moveThenContinueAndBreak(passes: view Int) ret Int {
+  var kept: List(Int) = List.create(Int, cap: 0)
+  var total: Int = 0
+  loop var pass: Int = 0, pass < passes, ++pass {
+    let rows: List(Int) = makeRows(count: 8)
+    if pass is 0 {
+      kept = own rows
+      continue
+    }
+    if pass is passes - 1 {
+      break
+    }
+    total = total + rows.length()
+  }
+  ret total + kept.length()
+}
+
+# 8. Control: the move is unconditional.
+func moveUnconditionally() ret Int {
+  var kept: List(Int) = List.create(Int, cap: 0)
+  let rows: List(Int) = makeRows(count: 8)
+  kept = own rows
+  ret kept.length()
+}
+
+func report(shape: view String, strings: view Int, buffers: view Int) {
+  if strings is 0 and buffers is 0 {
+    log("{shape}: OK")
+  } else {
+    log("{shape}: LEAK ({strings} strings, {buffers} buffers outstanding)")
+  }
+}
+
+func main() {
+  const rounds: Int = 100
+  var strings: Int = 0
+  var buffers: Int = 0
+  var result: Int = 0
+
+  unsafe {
+    strings = rae_ext_rae_mem_stats_outstanding()
+    buffers = rae_ext_rae_mem_stats_buf_outstanding()
+  }
+  loop var i: Int = 0, i < rounds, ++i {
+    result = result + moveInUntakenIf(flag: false)
+  }
+  unsafe {
+    report(
+      shape: "move in an untaken if"
+      strings: rae_ext_rae_mem_stats_outstanding() - strings
+      buffers: rae_ext_rae_mem_stats_buf_outstanding() - buffers
+    )
+    strings = rae_ext_rae_mem_stats_outstanding()
+    buffers = rae_ext_rae_mem_stats_buf_outstanding()
+  }
+  loop var i: Int = 0, i < rounds, ++i {
+    result = result + moveOnFirstPassOnly(passes: 5)
+  }
+  unsafe {
+    report(
+      shape: "move on the first loop pass only"
+      strings: rae_ext_rae_mem_stats_outstanding() - strings
+      buffers: rae_ext_rae_mem_stats_buf_outstanding() - buffers
+    )
+    strings = rae_ext_rae_mem_stats_outstanding()
+    buffers = rae_ext_rae_mem_stats_buf_outstanding()
+  }
+  loop var i: Int = 0, i < rounds, ++i {
+    result = result + moveInUntakenElse(flag: true)
+  }
+  unsafe {
+    report(
+      shape: "move in an untaken else"
+      strings: rae_ext_rae_mem_stats_outstanding() - strings
+      buffers: rae_ext_rae_mem_stats_buf_outstanding() - buffers
+    )
+    strings = rae_ext_rae_mem_stats_outstanding()
+    buffers = rae_ext_rae_mem_stats_buf_outstanding()
+  }
+  loop var i: Int = 0, i < rounds, ++i {
+    result = result + moveStringConditionally(flag: false)
+  }
+  unsafe {
+    report(
+      shape: "String moved conditionally"
+      strings: rae_ext_rae_mem_stats_outstanding() - strings
+      buffers: rae_ext_rae_mem_stats_buf_outstanding() - buffers
+    )
+    strings = rae_ext_rae_mem_stats_outstanding()
+    buffers = rae_ext_rae_mem_stats_buf_outstanding()
+  }
+  loop var i: Int = 0, i < rounds, ++i {
+    result = result + moveStructConditionally(flag: false)
+  }
+  unsafe {
+    report(
+      shape: "struct moved conditionally"
+      strings: rae_ext_rae_mem_stats_outstanding() - strings
+      buffers: rae_ext_rae_mem_stats_buf_outstanding() - buffers
+    )
+    strings = rae_ext_rae_mem_stats_outstanding()
+    buffers = rae_ext_rae_mem_stats_buf_outstanding()
+  }
+  loop var i: Int = 0, i < rounds, ++i {
+    result = result + earlyRetAfterPartialMove(flag: false)
+  }
+  unsafe {
+    report(
+      shape: "early ret after a partial move"
+      strings: rae_ext_rae_mem_stats_outstanding() - strings
+      buffers: rae_ext_rae_mem_stats_buf_outstanding() - buffers
+    )
+    strings = rae_ext_rae_mem_stats_outstanding()
+    buffers = rae_ext_rae_mem_stats_buf_outstanding()
+  }
+  loop var i: Int = 0, i < rounds, ++i {
+    result = result + moveThenContinueAndBreak(passes: 5)
+  }
+  unsafe {
+    report(
+      shape: "continue and break after a partial move"
+      strings: rae_ext_rae_mem_stats_outstanding() - strings
+      buffers: rae_ext_rae_mem_stats_buf_outstanding() - buffers
+    )
+    strings = rae_ext_rae_mem_stats_outstanding()
+    buffers = rae_ext_rae_mem_stats_buf_outstanding()
+  }
+  loop var i: Int = 0, i < rounds, ++i {
+    result = result + moveUnconditionally()
+  }
+  unsafe {
+    report(
+      shape: "control: unconditional move"
+      strings: rae_ext_rae_mem_stats_outstanding() - strings
+      buffers: rae_ext_rae_mem_stats_buf_outstanding() - buffers
+    )
+  }
+  log("result: {result}")
+}
