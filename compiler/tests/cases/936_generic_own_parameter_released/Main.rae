@@ -1,0 +1,62 @@
+# An `own V` parameter of a generic function is released at function exit
+# when the body did not move it, exactly like an `own Holder` parameter. The
+# scope-exit pass looked at the abstract `V` — which needs no drop — instead
+# of the concrete type, so every heap-owning value handed to such a function
+# leaked (StringMap(Holder).set copies its value into the entry: three Strings
+# per call, fixture 918).
+func rae_ext_rae_mem_stats_outstanding() unsafe extern ret Int
+
+type Holder {
+  label: String
+  items: List(String)
+}
+
+func makeHolder(tag: view Int) ret Holder {
+  var items: List(String) = List.create(String, cap: 2)
+  items.add(value: "item {tag}")
+  ret Holder { label: "holder {tag}", items: own items }
+}
+
+func consumePlain(value: own Holder) ret Int {
+  ret value.label.length()
+}
+
+func consumeGeneric(V: type, value: own V) ret Int {
+  ret 1
+}
+
+func keepGeneric(V: type, value: own V) ret List(V) {
+  var kept: List(V) = List.create(V, cap: 1)
+  kept.add(value: own value)
+  ret kept
+}
+
+func main() {
+  var before: Int = 0
+  var total: Int = 0
+  unsafe {
+    before = rae_ext_rae_mem_stats_outstanding()
+  }
+  loop var i: Int = 0, i < 100, ++i {
+    total = total + consumePlain(value: makeHolder(tag: i))
+  }
+  unsafe {
+    log("own Holder parameter: {rae_ext_rae_mem_stats_outstanding() - before} leaked")
+    before = rae_ext_rae_mem_stats_outstanding()
+  }
+  loop var i: Int = 0, i < 100, ++i {
+    total = total + consumeGeneric(V: Holder, value: makeHolder(tag: i))
+  }
+  unsafe {
+    log("own V parameter: {rae_ext_rae_mem_stats_outstanding() - before} leaked")
+    before = rae_ext_rae_mem_stats_outstanding()
+  }
+  loop var i: Int = 0, i < 100, ++i {
+    let kept: List(Holder) = keepGeneric(V: Holder, value: makeHolder(tag: i))
+    total = total + kept.length()
+  }
+  unsafe {
+    log("own V parameter moved on: {rae_ext_rae_mem_stats_outstanding() - before} leaked")
+  }
+  log("total: {total}")
+}

@@ -764,6 +764,14 @@ bool emit_implicit_drops_for_own_params(CFuncContext* ctx, FILE* out,
     // params — the callee owns the deep copy the caller paid for.
     if (!(type->is_own || type->is_copy)) continue;
     if (ctx->local_moved[idx]) continue;
+    // Inside a monomorphized generic function an `own V` parameter is the
+    // abstract `V` until substituted — which never needs a drop, so the
+    // concrete value leaked: StringMap(Holder).set deep-copies its `value:
+    // own V` into the entry, and the parameter itself was never released
+    // (three Strings per `set` of a Holder, fixture 918).
+    if (ctx->generic_params && ctx->generic_args)
+        type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args,
+                                   (AstTypeRef*)type);
     if (!type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, type, 0)) {
       continue;
     }
@@ -1742,7 +1750,24 @@ static bool emit_stmt_body(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
         fclose(temps.decls);
         if (temps.decls_buf) fputs(temps.decls_buf, out);
     }
+    // A `let` or assignment that calls a Rae function (mangled names end in
+    // `_(`) or a runtime String builder can leave String temporaries in the
+    // pool — the partial results of `a + b + c`, a `toString()` argument.
+    // Expression statements flush theirs; these were held until the
+    // function returned, so a loop in a long-running function piled them up
+    // (10000 passes of an `r.toString() + "," + ...` binding: ~86000
+    // Strings). Flush right after the statement; the bound value itself was
+    // detached with rae_string_pool_take and survives.
+    bool flush_after = body
+        && (stmt->kind == AST_STMT_LET || stmt->kind == AST_STMT_ASSIGN)
+        && (strstr(body, "_(") || strstr(body, "rae_ext_rae_str"));
+    size_t spm_id = 0;
+    if (flush_after) {
+        spm_id = ctx->temp_counter++;
+        fprintf(out, "  int __rae_spm_stmt%zu = rae_string_pool_mark();\n", spm_id);
+    }
     if (body) fputs(body, out);
+    if (flush_after) fprintf(out, "  rae_string_pool_flush(__rae_spm_stmt%zu);\n", spm_id);
     if (temps.count > 0 && temps.drops) {
         fclose(temps.drops);
         if (!temps.flushed && temps.drops_buf) fputs(temps.drops_buf, out);
@@ -2069,11 +2094,19 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     Str var_name = stmt->as.let_stmt.name;
                     Str et_base = get_base_type_name(elem_type);
                     bool elem_is_any = str_eq_cstr(et_base, "Any") || str_eq_cstr(et_base, "RaeAny");
+                    // A String element moves into the list, so it is DETACHED
+                    // from the string pool first, as the `.add(value:)` call
+                    // path does: `["a {x}", "b {y}"]` otherwise left the
+                    // interpolations registered, and the flush after the
+                    // `let` freed Strings the list still held.
+                    bool elem_is_string = !elem_is_any && str_eq_cstr(et_base, "String")
+                        && !elem_type->is_view && !elem_type->is_mod && !elem_type->is_opt;
                     bool saved_has_exp_le = ctx->has_expected_type;
                     AstTypeRef saved_exp_le = ctx->expected_type;
                     for (const AstCollectionElement* e = stmt->as.let_stmt.value->as.collection.elements; e; e = e->next) {
                         fprintf(out, "  %s(&%.*s, ", add_name, (int)var_name.len, var_name.data);
                         if (elem_is_any) fprintf(out, "rae_any((");
+                        if (elem_is_string) fprintf(out, "rae_string_pool_take(");
                         // The element's expected type is the list's element type,
                         // so a nested collection literal (`[[1, 2], [3]]` — each
                         // `[1, 2]` is itself a List(Int) literal) knows what to
@@ -2083,6 +2116,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                         emit_expr(ctx, e->value, out, PREC_LOWEST, false, false);
                         ctx->has_expected_type = saved_has_exp_le;
                         ctx->expected_type = saved_exp_le;
+                        if (elem_is_string) fprintf(out, ")");
                         if (elem_is_any) fprintf(out, "))");
                         fprintf(out, ");\n");
                         // `add(value: own T)` MOVES the element into the list, so
