@@ -281,6 +281,34 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             echo "  hover leak check failed (1500 painted canvas hovers; outstanding must stay at the boot baseline):"
             grep -a 'test-pointer\|mem:string:TOTAL\|mem:string:sub \|mem:string:interp\|mem:buf ' "$TMP_OUT/render-hover-leak.log" 2>/dev/null | tail -5 | sed 's/^/    /'
           fi
+          # Growth WHILE running (RAE_MEM_STATS_EVERY_MS): the check above
+          # reads the counts at exit, after the world is torn down, so memory
+          # piling up in a List/Map still in use (a hover history that only
+          # grows) is freed at teardown and passes it. Here the pointer sweeps
+          # the whole window for 25 s and the runtime prints `[mem:live]`
+          # outstanding counts every 4 s; the last snapshot must stay within a
+          # small bound of the first one taken after a full sweep (t >= 8 s,
+          # one sweep is ~5.5 s), so every hover target was warmed up.
+          if (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
+             RAE_UI_EDITOR_ROOT="examples/121_ui_editor/assets/samples" \
+             RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=25000 RAE_MEM_STATS=1 RAE_MEM_STATS_EVERY_MS=4000 \
+             RAE_GPU2D_TEST_POINTER="sweep:700,5,895,180" \
+             perl -e 'alarm shift; exec @ARGV' 90 "$TMP_OUT/app") > "$TMP_OUT/render-live-growth.log" 2>&1 \
+             && awk '
+                  function field(line, key) { sub(".*" key "=", "", line); sub(/ .*/, "", line); return line + 0 }
+                  /^\[mem:live\]/ {
+                    t = field($0, "t"); strings = field($0, "strings"); bufs = field($0, "bufs")
+                    if (!based && t >= 8000) { based = 1; baseStrings = strings; baseBufs = bufs }
+                    lastT = t; lastStrings = strings; lastBufs = bufs
+                  }
+                  END { exit !(based && lastT >= 16000 && lastStrings - baseStrings <= 4 && lastBufs - baseBufs <= 4) }
+                ' "$TMP_OUT/render-live-growth.log"; then
+            :
+          else
+            UI_EDITOR_OK=0
+            echo "  live growth check failed (25 s pointer sweep; outstanding while running must stay flat after warm-up):"
+            grep -a '^\[mem:live\]' "$TMP_OUT/render-live-growth.log" 2>/dev/null | sed 's/^/    /'
+          fi
           # Unreachable memory at exit (macOS `leaks --atExit`): the check
           # above only sees allocations Rae counts; this one sees every malloc,
           # so it covers the C runtime and wgpu too (the surface capabilities
