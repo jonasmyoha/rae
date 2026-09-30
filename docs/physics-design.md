@@ -1,5 +1,11 @@
 # Physics for Rae — design (Box3D)
 
+> **Engine strategy superseded (2026-09-30):** Box3D is now **ported to Rae**
+> instead of bound as C — see `docs/physics-rae-port-design.md`. §3 (generated
+> bindings), §4 (vendoring the C build) and §5.6 (C runtime hooks) no longer
+> apply. §0 (needs), §5.1–5.5 (the ECS surface), §5.7 (vehicles), §6
+> (determinism rules) and §7 (test scenes) still do.
+
 **Status:** proposal, revised. Supersedes the first draft, which wrongly
 claimed no "Box3D" exists. It does: **`github.com/erincatto/box3d`** — Erin
 Catto's 3D engine, **portable C17, MIT**, and it is the engine this design
