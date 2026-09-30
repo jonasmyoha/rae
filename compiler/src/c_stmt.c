@@ -3124,6 +3124,18 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             // #884: temporaries made while computing the return value die here,
             // before the locals, and before `return` makes anything unreachable.
             emit_stmt_temp_drops_now(ctx, out);
+            // And so do the temporaries of every statement this `ret` sits in:
+            // `if makeList().length > 0 { ret }` holds the list in the if's
+            // statement temporary, which is otherwise dropped only after the
+            // whole if — a point this path never reaches (#34355043). Each
+            // drop is guarded by its `_set` flag and clears it, as for
+            // break / continue (#886).
+            if (ctx->stmt_temps && ctx->stmt_temps->parent) {
+                CStmtTemps* own_temps = ctx->stmt_temps;
+                ctx->stmt_temps = own_temps->parent;
+                emit_stmt_temp_drops_chain(ctx, out, NULL);
+                ctx->stmt_temps = own_temps;
+            }
             if (ctx->defer_stack.count > 0) emit_defers(ctx, 0, out);
             if (ctx->func_first_let_idx != (size_t)-1) {
                 emit_implicit_drops_for_body(ctx, out, ctx->func_first_let_idx);
