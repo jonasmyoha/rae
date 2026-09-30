@@ -12,6 +12,9 @@
 # the bottom of the window in 180 steps and starts again, so it hovers most of
 # the UI in turn (the `sweep:` form of RAE_GPU2D_TEST_POINTER).
 #
+# hover-soak-window.sh is the same soak in a visible window, driven by the real
+# mouse (mouse-sweep.c), with `heap` snapshots added.
+#
 # Report only: it does not fail on growth. Note that `leaks` cannot be used on
 # this run — RAE_MEM_STATS keeps a table of every live allocation, which makes
 # leaked blocks look referenced; run `leaks` on a separate run without it.
