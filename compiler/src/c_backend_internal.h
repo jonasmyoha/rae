@@ -126,6 +126,12 @@ typedef struct {
   // after it, so `inspect(slot: create(id: 1))` releases its slot. NULL
   // outside emit_stmt.
   struct CStmtTemps* stmt_temps;
+  // String-pool mark/flush pairs are emitted only where a pool temporary can
+  // appear (c_stmt.c expr_may_pool). The function's own pair is kept when any
+  // statement of the body may create one; the statement's decision is handed
+  // to the expression-statement wrapper through stmt_may_pool.
+  bool func_may_pool;
+  bool stmt_may_pool;
   // #886: per open loop, that loop statement's own temporaries (its condition's),
   // dropped at the end of every iteration and on break/continue.
   struct CStmtTemps* loop_temps[32];
@@ -284,6 +290,7 @@ const AstFuncDecl* find_drop_overload_for(CFuncContext* ctx, Str container_base)
 void mark_local_moved_by_name(CFuncContext* ctx, Str name);
 bool rest_moves_name_conditionally(const AstStmt* rest, Str name);
 int local_index_by_name(const CFuncContext* ctx, Str name);
+bool expr_may_pool(CFuncContext* ctx, const AstExpr* e);
 
 // c_names.c: Rae identifiers spelled like a C keyword / macro / libc function.
 // c_struct_shapes.c: the user structs that get generated helpers — every

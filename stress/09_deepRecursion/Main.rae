@@ -5,11 +5,17 @@
 # recursion?) in <program>` — and exits non-zero. A genuine bad-address
 # fault is reported as `segmentation fault` instead, with a C backtrace, so
 # the two are never confused.
+#
+# The work after the recursive call is NOT a running sum: `1 + down(n - 1)`
+# is folded by the C compiler into a loop once the frame holds nothing else
+# (it did, when every function still carried a string-pool mark/flush pair),
+# and then no stack runs out at all. Multiply, add and reduce modulo a prime
+# cannot be reassociated, so every level keeps its frame.
 func down(n: view Int) ret Int {
   if n is 0 {
     ret 0
   }
-  ret 1 + down(n: n - 1)
+  ret (down(n: n - 1) * 31 + n) % 1000003
 }
 
 func main() {

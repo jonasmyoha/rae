@@ -1917,6 +1917,26 @@ static bool global_init_is_deferred(const AstExpr* v) {
 }
 
 
+// The function-level string-pool pair (Stage 4) is kept only when a
+// statement of the body may register a pool temporary (expr_may_pool): the
+// body is emitted into a buffer first, then written after the mark line, or
+// with its function-level flushes removed. `main` always keeps the pair.
+static void write_function_body_with_pool(FILE* out, const char* body, bool keep_pool) {
+  static const char* flush_text = "rae_string_pool_flush(__rae_spm_func);";
+  if (keep_pool) {
+    fprintf(out, "  int __rae_spm_func = rae_string_pool_mark();\n");
+    fputs(body, out);
+    return;
+  }
+  size_t flush_len = strlen(flush_text);
+  for (const char* at = body; *at; ) {
+    const char* hit = strstr(at, flush_text);
+    if (!hit) { fputs(at, out); break; }
+    fwrite(at, 1, (size_t)(hit - at), out);
+    at = hit + flush_len;
+  }
+}
+
 bool emit_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* f, FILE* out) {
   if (f->is_extern || str_starts_with_cstr(f->name, "rae_ext_")) return true;
   CFuncContext tctx = {.compiler_ctx = ctx, .module = m, .func_decl = f, .func_first_let_idx = (size_t)-1};
@@ -1974,7 +1994,12 @@ bool emit_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* 
   // String-let wrappers handle the common cases inline; this is
   // the safety net so the global pool doesn't grow unbounded
   // across long-running call chains.
-  fprintf(out, "  int __rae_spm_func = rae_string_pool_mark();\n");
+  FILE* function_out = out;
+  char* body_buf = NULL; size_t body_len = 0;
+  FILE* body_stream = open_memstream(&body_buf, &body_len);
+  if (body_stream) out = body_stream;
+  else fprintf(out, "  int __rae_spm_func = rae_string_pool_mark();\n");
+  tctx.func_may_pool = is_main;
 
   // Assign module-level globals whose initializers are function/method calls
   // (not valid as C static initializers) — run once here, before main's body,
@@ -2004,6 +2029,12 @@ bool emit_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* 
   emit_implicit_drops_for_own_params(&tctx, out, first_let_idx);
 
   fprintf(out, "  rae_string_pool_flush(__rae_spm_func);\n");
+  if (body_stream) {
+    fclose(body_stream);
+    out = function_out;
+    write_function_body_with_pool(out, body_buf ? body_buf : "", tctx.func_may_pool);
+    free(body_buf);
+  }
 
   if (is_main) fprintf(out, "  return 0;\n}\n\n");
   else fprintf(out, "}\n\n");
@@ -2184,7 +2215,12 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
   size_t first_let_idx = tctx.local_count;
   tctx.func_first_let_idx = first_let_idx;
   // Stage 4: per-function string-temp-pool guard. See emit_function.
-  fprintf(out, "  int __rae_spm_func = rae_string_pool_mark();\n");
+  FILE* function_out = out;
+  char* body_buf = NULL; size_t body_len = 0;
+  FILE* body_stream = open_memstream(&body_buf, &body_len);
+  if (body_stream) out = body_stream;
+  else fprintf(out, "  int __rae_spm_func = rae_string_pool_mark();\n");
+  tctx.func_may_pool = false;
   // #773: compile-time field reflection through a generic world parameter. If
   // this specialization's body contains a `loop ... in fields(world)`, the field
   // set depends on the concrete generic args, so expand it AFTER substitution —
@@ -2200,6 +2236,12 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
   emit_implicit_drops_for_body(&tctx, out, first_let_idx);
   emit_implicit_drops_for_own_params(&tctx, out, first_let_idx);
   fprintf(out, "  rae_string_pool_flush(__rae_spm_func);\n");
+  if (body_stream) {
+    fclose(body_stream);
+    out = function_out;
+    write_function_body_with_pool(out, body_buf ? body_buf : "", tctx.func_may_pool);
+    free(body_buf);
+  }
   fprintf(out, "}\n\n"); return true;
 }
 

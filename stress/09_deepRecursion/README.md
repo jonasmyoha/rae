@@ -13,11 +13,16 @@ func down(n: view Int) ret Int {
   if n is 0 {
     ret 0
   }
-  ret 1 + down(n: n - 1)
+  ret (down(n: n - 1) * 31 + n) % 1000003
 }
 
 log("depth 10000000: {down(n: 10000000)}")
 ```
+
+The combine step after the call is deliberately not a running sum: the C
+compiler turns `1 + down(n: n - 1)` into a loop once the frame holds nothing
+else, and then the stack never runs out (that happened when the string-pool
+mark/flush pairs stopped being emitted into every function).
 
 ## What Rae does
 
