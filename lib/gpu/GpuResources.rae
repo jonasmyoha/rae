@@ -414,6 +414,9 @@ type GpuResources {
   depKinds: List(Int)
   depSlots: List(Int)
   depGenerations: List(Int)
+  # Arena length right after the last compaction; pollSubmissions compacts
+  # again once the arena has more than doubled (GpuIds).
+  depCompactedLength: Int
 }
 
 # Fails (none) for a nonsensical capacity or when no device is available (the
@@ -454,6 +457,7 @@ func create(issuer: mod IdIssuer, capacity: view Int) ret opt GpuResources {
       depKinds: List.create(Int, cap: 16)
       depSlots: List.create(Int, cap: 16)
       depGenerations: List.create(Int, cap: 16)
+      depCompactedLength: 0
     }
   }
 }
