@@ -286,6 +286,16 @@ bool rest_moves_name_conditionally(const AstStmt* rest, Str name);
 int local_index_by_name(const CFuncContext* ctx, Str name);
 
 // c_names.c: Rae identifiers spelled like a C keyword / macro / libc function.
+// c_struct_shapes.c: the user structs that get generated helpers — every
+// non-generic one and every concrete generic instantiation, fields substituted.
+typedef struct {
+  const char* mangled;   // the C type name, e.g. rae_Pair_rae_String
+  AstTypeDecl decl;      // name + concrete fields (only these two are set)
+} StructShape;
+size_t collect_struct_shapes(CompilerContext* ctx, StructShape** out_shapes);
+const AstDecl* generic_struct_template(CompilerContext* ctx, const AstTypeRef* type);
+bool earlier_same_named_type(CompilerContext* ctx, size_t idx, Str name);
+
 bool c_reserved_name(Str name);
 Str rae_source_name(Str name);  // the Rae spelling of a renamed identifier
 void c_rename_reserved_names(CompilerContext* ctx);

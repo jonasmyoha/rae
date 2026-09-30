@@ -571,10 +571,19 @@ scan_args:
     bool is_list = str_eq_cstr(base, "List");
     bool is_buffer = (type->resolved_type && type->resolved_type->kind == TYPE_BUFFER) || str_eq_cstr(base, "Buffer");
     if (is_buffer || is_list || str_eq_cstr(base, "Box")) return;
+    // The declaration whose fields are substituted: the TEMPLATE, never an
+    // already specialised copy. A copy's fields are concrete (Pair(Pair(Int))
+    // has `first: Pair(Int)`), so substituting into it for Pair(Int) gave
+    // Pair(Int) back, and — an already registered type rescans its fields —
+    // recursed until the stack ran out (a nested generic next to a
+    // List(Pair(Int)) crashed the compiler).
     const AstDecl* d = NULL;
     for (size_t i = 0; i < ctx->all_decl_count; i++) {
         const AstDecl* ad = ctx->all_decls[i];
-        if (ad->kind == AST_DECL_TYPE && types_match(ad->as.type_decl.name, base)) { d = ad; break; }
+        if (ad->kind != AST_DECL_TYPE || !types_match(ad->as.type_decl.name, base)) continue;
+        if (ad->as.type_decl.specialization_args) { if (!d) d = ad; continue; }
+        d = ad;
+        break;
     }
     if (!d && ctx->current_module) d = find_type_decl(NULL, ctx->current_module, base);
     if (d && d->kind == AST_DECL_TYPE) {
@@ -1399,7 +1408,7 @@ void rae_value_to_str_expr(CompilerContext* ctx, const AstModule* module, const 
         fprintf(out, "rae_enum_toString_%.*s((int64_t)(%s))", (int)base.len, base.data, cexpr);
         return;
     }
-    if (str_eq_cstr(base, "List") && type->generic_args) {
+    if ((str_eq_cstr(base, "List") && type->generic_args) || generic_struct_template(ctx, type)) {
         const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, (AstTypeRef*)type);
         if (mangled) { fprintf(out, "rae_to_str_%s_(&(%s))", mangled, cexpr); return; }
     }
@@ -1453,7 +1462,7 @@ void rae_value_equals_expr(CompilerContext* ctx, const AstModule* module, const 
         fprintf(out, "((%s) == (%s))", aexpr, bexpr);
         return;
     }
-    if (str_eq_cstr(base, "List") && type->generic_args) {
+    if ((str_eq_cstr(base, "List") && type->generic_args) || generic_struct_template(ctx, type)) {
         const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, (AstTypeRef*)type);
         if (mangled) { fprintf(out, "rae_eq_%s_(&(%s), &(%s))", mangled, aexpr, bexpr); return; }
     }
@@ -2200,7 +2209,7 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
 // to_str would emit twice -> C "redefinition". Emitting the derived methods
 // only for the first occurrence keeps the generated C valid instead of a hard
 // compile failure with a .c line. (#136)
-static bool earlier_same_named_type(CompilerContext* ctx, size_t idx, Str name) {
+bool earlier_same_named_type(CompilerContext* ctx, size_t idx, Str name) {
     for (size_t j = 0; j < idx; j++) {
         const AstDecl* e = ctx->all_decls[j];
         if (e->kind == AST_DECL_TYPE && !e->as.type_decl.generic_params
@@ -2267,6 +2276,15 @@ static const char* rae_json_struct_mangled(CompilerContext* ctx, const AstModule
   if (has_property(d->as.type_decl.properties, "c_struct")) return NULL;
   return rae_mangle_type_specialized(ctx, NULL, NULL,
       &(AstTypeRef){.parts = &(AstIdentifierPart){.text = base}});
+}
+
+// The same, for a field / element TYPE: a generic struct instance
+// (`pair: Pair(Int)`, a List(Pair(Int)) element) serializes through its own
+// generated helpers (c_struct_shapes.c) too.
+static const char* rae_json_struct_mangled_type(CompilerContext* ctx, const AstModule* module, const AstTypeRef* type) {
+  if (!type) return NULL;
+  if (generic_struct_template(ctx, type)) return rae_mangle_type_specialized(ctx, NULL, NULL, (AstTypeRef*)type);
+  return rae_json_struct_mangled(ctx, module, get_base_type_name(type));
 }
 
 bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const char* out_path) {
@@ -2650,16 +2668,18 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       fprintf(out, "  return __r;\n}\n\n");
   }
 
+  // Every struct that gets generated helpers: each non-generic user struct and
+  // each concrete generic instantiation (Pair(String), ...), fields substituted
+  // (c_struct_shapes.c). The toJson / fromJson, toString and equals loops below
+  // all walk this one list.
+  StructShape* shapes = NULL;
+  size_t shape_count = collect_struct_shapes(ctx, &shapes);
+
   // #768: forward-declare every toJson/fromJson first, so a nested-struct or
   // List(struct) field can call a child serializer defined later in the file
   // (e.g. Rect.toJson -> Vec2.toJson, Children.toJson -> EntityId.toJson).
-  for (size_t i = 0; i < ctx->all_decl_count; i++) {
-      const AstDecl* d = ctx->all_decls[i];
-      if (d->kind != AST_DECL_TYPE || d->as.type_decl.generic_params) continue;
-      if (has_property(d->as.type_decl.properties, "c_struct")) continue;
-      const AstTypeDecl* td = &d->as.type_decl;
-      if (earlier_same_named_type(ctx, i, td->name)) continue;
-      const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, &(AstTypeRef){.parts = &(AstIdentifierPart){.text = td->name}});
+  for (size_t si = 0; si < shape_count; si++) {
+      const char* mangled = shapes[si].mangled;
       fprintf(out, "RAE_UNUSED static rae_String rae_toJson_%s_(%s* this);\n", mangled, mangled);
       fprintf(out, "RAE_UNUSED static %s rae_fromJson_%s_(rae_String json);\n", mangled, mangled);
   }
@@ -2674,13 +2694,9 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   char* json_block_buf = NULL; size_t json_block_len = 0;
   out = open_memstream(&json_block_buf, &json_block_len);
   if (!out) out = json_block_out;
-  for (size_t i = 0; i < ctx->all_decl_count; i++) {
-      const AstDecl* d = ctx->all_decls[i];
-      if (d->kind != AST_DECL_TYPE || d->as.type_decl.generic_params) continue;
-      if (has_property(d->as.type_decl.properties, "c_struct")) continue;
-      const AstTypeDecl* td = &d->as.type_decl;
-      if (earlier_same_named_type(ctx, i, td->name)) continue;
-      const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, &(AstTypeRef){.parts = &(AstIdentifierPart){.text = td->name}});
+  for (size_t si = 0; si < shape_count; si++) {
+      const AstTypeDecl* td = &shapes[si].decl;
+      const char* mangled = shapes[si].mangled;
 
       // toJson: rae_String rae_toJson_TYPE_(TYPE* this). A generous fixed buffer:
       // #768 nested-struct recursion embeds child JSON, so flat 4K was too small
@@ -2736,12 +2752,12 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
               // fromJson can round-trip it (was the "...": placeholder below).
               fprintf(out, "  { rae_String __e = rae_enum_toString_%.*s((int64_t)this->%.*s); __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": \\\"%%.*s\\\"\", (int)__e.len, (char*)__e.data); }\n",
                   (int)base.len, base.data, (int)f->name.len, f->name.data, (int)f->name.len, f->name.data);
-          } else if (rae_json_struct_mangled(ctx, module, base)) {
+          } else if (rae_json_struct_mangled_type(ctx, module, f->type)) {
               // #768: a NESTED user-struct field recurses through its own
               // generated toJson, embedding the child object. Makes aggregate
               // components (Rect{Vec2}, Shape{Color}, ...) valid, round-trippable
               // JSON instead of the old `...` placeholder.
-              const char* fm = rae_json_struct_mangled(ctx, module, base);
+              const char* fm = rae_json_struct_mangled_type(ctx, module, f->type);
               fprintf(out, "  { rae_String __j = rae_toJson_%s_(&this->%.*s); __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": %%.*s\", (int)__j.len, (char*)__j.data); }\n",
                   fm, (int)f->name.len, f->name.data, (int)f->name.len, f->name.data);
           } else if (str_eq_cstr(base, "List") && f->type->generic_args) {
@@ -2752,7 +2768,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
               const AstTypeRef* elem = f->type->generic_args;
               Str eb = get_base_type_name(elem);
               int nl = (int)f->name.len; const char* nd = f->name.data;
-              const char* esm = rae_json_struct_mangled(ctx, module, eb);
+              const char* esm = rae_json_struct_mangled_type(ctx, module, elem);
               bool eInt = str_eq_cstr(eb, "Int") || str_eq_cstr(eb, "Int64") || str_eq_cstr(eb, "Int32")
                   || find_enum_decl(NULL, module, eb);
               bool eFloat = str_eq_cstr(eb, "Float64") || str_eq_cstr(eb, "Float") || str_eq_cstr(eb, "Float32");
@@ -2836,11 +2852,11 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
               // the leak-gated tests stay at outstanding=0.
               fprintf(out, "  { rae_String __s = rae_json_extract_string(json, \"%.*s\"); __r.%.*s = rae_enum_fromString_%.*s(__s); rae_ext_rae_str_free(__s); }\n",
                   (int)f->name.len, f->name.data, (int)f->name.len, f->name.data, (int)base.len, base.data);
-          } else if (rae_json_struct_mangled(ctx, module, base)) {
+          } else if (rae_json_struct_mangled_type(ctx, module, f->type)) {
               // #768: recurse into a nested user-struct field — extract its
               // `{...}` sub-object and parse it through the child fromJson. Frees
               // the extracted temp (mem-tagged) so leak-gated tests stay at 0.
-              const char* fm = rae_json_struct_mangled(ctx, module, base);
+              const char* fm = rae_json_struct_mangled_type(ctx, module, f->type);
               fprintf(out, "  { rae_String __sub = rae_json_extract_object(json, \"%.*s\"); if (__sub.len > 0) __r.%.*s = rae_fromJson_%s_(__sub); rae_ext_rae_str_free(__sub); }\n",
                   (int)f->name.len, f->name.data, (int)f->name.len, f->name.data, fm);
           } else if (str_eq_cstr(base, "List") && f->type->generic_args) {
@@ -2851,7 +2867,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
               const AstTypeRef* elem = f->type->generic_args;
               Str eb = get_base_type_name(elem);
               int nl = (int)f->name.len; const char* nd = f->name.data;
-              const char* esm = rae_json_struct_mangled(ctx, module, eb);
+              const char* esm = rae_json_struct_mangled_type(ctx, module, elem);
               bool eInt = str_eq_cstr(eb, "Int") || str_eq_cstr(eb, "Int64") || str_eq_cstr(eb, "Int32")
                   || find_enum_decl(NULL, module, eb);
               bool eFloat = str_eq_cstr(eb, "Float64") || str_eq_cstr(eb, "Float") || str_eq_cstr(eb, "Float32");
@@ -2903,13 +2919,8 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   // uses for a value of a given type.)
   // Emit forward declarations first so structs can reference each other
   // regardless of source order.
-  for (size_t i = 0; i < ctx->all_decl_count; i++) {
-      const AstDecl* d = ctx->all_decls[i];
-      if (d->kind != AST_DECL_TYPE || d->as.type_decl.generic_params) continue;
-      if (has_property(d->as.type_decl.properties, "c_struct")) continue;
-      const AstTypeDecl* td = &d->as.type_decl;
-      if (earlier_same_named_type(ctx, i, td->name)) continue;
-      const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, &(AstTypeRef){.parts = &(AstIdentifierPart){.text = td->name}});
+  for (size_t si = 0; si < shape_count; si++) {
+      const char* mangled = shapes[si].mangled;
       fprintf(out, "RAE_UNUSED static rae_String rae_to_str_%s_(const %s* this);\n", mangled, mangled);
   }
   // toString for every List(T) instantiation: `[a, b, c]`, each element
@@ -2926,13 +2937,9 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       fprintf(out, "RAE_UNUSED static rae_String rae_to_str_%s_(const %s* this);\n", mangled, mangled);
   }
   fprintf(out, "\n");
-  for (size_t i = 0; i < ctx->all_decl_count; i++) {
-      const AstDecl* d = ctx->all_decls[i];
-      if (d->kind != AST_DECL_TYPE || d->as.type_decl.generic_params) continue;
-      if (has_property(d->as.type_decl.properties, "c_struct")) continue;
-      const AstTypeDecl* td = &d->as.type_decl;
-      if (earlier_same_named_type(ctx, i, td->name)) continue;
-      const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, &(AstTypeRef){.parts = &(AstIdentifierPart){.text = td->name}});
+  for (size_t si = 0; si < shape_count; si++) {
+      const AstTypeDecl* td = &shapes[si].decl;
+      const char* mangled = shapes[si].mangled;
 
       // The literal spelling: `Pair { x: 1, y: 2, kind: large }` — the declared
       // type name, every field `name: value` in declaration order, each value
@@ -2990,13 +2997,8 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   // instantiation, each field / element compared through the ONE rule
   // (rae_value_equals_expr), recursively. Forward declarations first, since
   // a struct's comparison may call a list's and vice versa.
-  for (size_t i = 0; i < ctx->all_decl_count; i++) {
-      const AstDecl* d = ctx->all_decls[i];
-      if (d->kind != AST_DECL_TYPE || d->as.type_decl.generic_params) continue;
-      if (has_property(d->as.type_decl.properties, "c_struct")) continue;
-      const AstTypeDecl* td = &d->as.type_decl;
-      if (earlier_same_named_type(ctx, i, td->name)) continue;
-      const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, &(AstTypeRef){.parts = &(AstIdentifierPart){.text = td->name}});
+  for (size_t si = 0; si < shape_count; si++) {
+      const char* mangled = shapes[si].mangled;
       fprintf(out, "RAE_UNUSED static rae_Bool rae_eq_%s_(const %s* a, const %s* b);\n", mangled, mangled, mangled);
   }
   for (size_t i = 0; i < ctx->generic_type_count; i++) {
@@ -3008,13 +3010,9 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       fprintf(out, "RAE_UNUSED static rae_Bool rae_eq_%s_(const %s* a, const %s* b);\n", mangled, mangled, mangled);
   }
   fprintf(out, "\n");
-  for (size_t i = 0; i < ctx->all_decl_count; i++) {
-      const AstDecl* d = ctx->all_decls[i];
-      if (d->kind != AST_DECL_TYPE || d->as.type_decl.generic_params) continue;
-      if (has_property(d->as.type_decl.properties, "c_struct")) continue;
-      const AstTypeDecl* td = &d->as.type_decl;
-      if (earlier_same_named_type(ctx, i, td->name)) continue;
-      const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, &(AstTypeRef){.parts = &(AstIdentifierPart){.text = td->name}});
+  for (size_t si = 0; si < shape_count; si++) {
+      const AstTypeDecl* td = &shapes[si].decl;
+      const char* mangled = shapes[si].mangled;
       fprintf(out, "RAE_UNUSED static rae_Bool rae_eq_%s_(const %s* a, const %s* b) {\n", mangled, mangled, mangled);
       for (const AstTypeField* f = td->fields; f; f = f->next) {
           if (!f->type) continue;
