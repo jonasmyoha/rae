@@ -1,0 +1,78 @@
+# A value produced in a statement's condition lives in a statement temporary,
+# dropped after the whole statement. A `ret` inside the statement's body
+# never reaches that point, so it used to leak the temporary (#34355043): the
+# UI editor's `if sceneImports(...).length > 0 or ... { ret }` leaked one List
+# and its items per scene reload. A `ret` now releases the temporaries of
+# every statement it sits in, as break / continue already did (#886). Each
+# shape runs both ways, and outstanding allocations return to the baseline.
+func rae_ext_rae_mem_stats_outstanding() unsafe extern ret Int
+
+func makeList(count: view Int) ret List(String) {
+  var out: List(String) = List.create(String, cap: 4)
+  loop var i: Int = 0, i < count, ++i {
+    out.add(value: "item {i}")
+  }
+  ret out
+}
+
+func never() ret Bool {
+  ret false
+}
+
+# The editor's shape: the temporary in an `or` condition, `ret` in the body.
+func retInIf(count: view Int) ret Int {
+  if makeList(count: count).length > 0 or never() {
+    ret 1
+  }
+  ret 0
+}
+
+# Two statements deep: the if's temporary AND the loop condition's.
+func retInLoop(count: view Int) ret Int {
+  loop var i: Int = 0, i < makeList(count: 3).length, ++i {
+    if makeList(count: count).length > i {
+      ret i
+    }
+  }
+  ret -1
+}
+
+# The returned value itself built from another temporary.
+func retValueFromTemporary(count: view Int) ret Int {
+  if makeList(count: count).length > 1 {
+    ret makeList(count: count + 1).length
+  }
+  ret 0
+}
+
+func breakAndContinue(count: view Int) ret Int {
+  var seen: Int = 0
+  loop var i: Int = 0, i < 4, ++i {
+    if makeList(count: count).length is i {
+      break
+    }
+    if makeList(count: i).length is 1 {
+      continue
+    }
+    seen = seen + 1
+  }
+  ret seen
+}
+
+func main() {
+  unsafe {
+    log("ret in if: {retInIf(count: 2)} {retInIf(count: 0)}")
+    log("ret in loop: {retInLoop(count: 2)} {retInLoop(count: 0)}")
+    log("ret value: {retValueFromTemporary(count: 2)} {retValueFromTemporary(count: 0)}")
+    log("break/continue: {breakAndContinue(count: 2)} {breakAndContinue(count: 9)}")
+    let baseline: Int = rae_ext_rae_mem_stats_outstanding()
+    loop var round: Int = 0, round < 50, ++round {
+      let a: Int = retInIf(count: 2) + retInIf(count: 0)
+      let b: Int = retInLoop(count: 2) + retInLoop(count: 0)
+      let c: Int = retValueFromTemporary(count: 2) + retValueFromTemporary(count: 0)
+      let d: Int = breakAndContinue(count: 2) + breakAndContinue(count: 9)
+    }
+    let leaked: Int = rae_ext_rae_mem_stats_outstanding() - baseline
+    log("leaked allocations: {leaked}")
+  }
+}
