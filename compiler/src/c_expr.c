@@ -171,6 +171,36 @@ static void emit_to_string_expr(CFuncContext* ctx, const AstExpr* operand, FILE*
         fprintf(out, " : (rae_String){(uint8_t*)\"none\", 4}; }))");
         return;
     }
+    // A struct or List VALUE made by a call (`"{makeWords()}"`) is a temporary
+    // this expression owns: hold it in a named temp, format it, release it.
+    // Taking `&(call())` did not compile for a plain struct, and the
+    // List / generic path below captured the value but never released it.
+    if (tr && !tr->is_opt && !tr->is_view && !tr->is_mod
+        && (operand->kind == AST_EXPR_CALL || operand->kind == AST_EXPR_METHOD_CALL)) {
+        AstTypeRef value_type = *tr;
+        value_type.next = NULL;
+        const AstDecl* vd = (base.len > 0) ? find_type_decl(ctx, ctx->module, base) : NULL;
+        bool plain_struct = vd && vd->kind == AST_DECL_TYPE
+            && !has_property(vd->as.type_decl.properties, "c_struct")
+            && !vd->as.type_decl.generic_params && !tr->generic_args;
+        bool formatted = (str_eq_cstr(base, "List") && tr->generic_args)
+            || generic_struct_template(ctx->compiler_ctx, &value_type) || plain_struct;
+        const char* mangled = formatted
+            ? rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, &value_type) : NULL;
+        if (mangled) {
+            int vid = ctx->temp_counter++;
+            char tname[48];
+            snprintf(tname, sizeof tname, "__vstr%d", vid);
+            fprintf(out, "(__extension__ ({ ");
+            emit_type_ref_as_c_type(ctx, &value_type, out, false);
+            fprintf(out, " %s = ", tname);
+            emit_expr(ctx, operand, out, PREC_LOWEST, false, false);
+            fprintf(out, "; rae_String __vs%d = rae_to_str_%s_(&%s);", vid, mangled, tname);
+            emit_drop_for_value(ctx, out, &value_type, tname, true);
+            fprintf(out, " __vs%d; }))", vid);
+            return;
+        }
+    }
     // A List(T): its generated toString (elements recursively). The operand
     // is captured into a temp so the formatter can take its address.
     // A generic struct instance (Pair(String)) the same way: its generated
@@ -1189,7 +1219,16 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
         // surrounding field type (e.g. `grid: createList(initialCap: 200)`
         // where the field's declared type is `List(Int)`).
         const AstTypeRef* obj_tr = expr->as.object_literal.type;
-        if (!obj_tr && ctx->has_expected_type) obj_tr = &ctx->expected_type;
+        // A COPY of the expected type, not a pointer to it: the field loop
+        // below overwrites ctx->expected_type with each field's type, so a
+        // pointer made every field after the first substitute its generic
+        // arguments from the previous FIELD's type — in `Pair(Pair(Int))`,
+        // `second: { ... }` was typed with Pair(Int)'s argument, Int.
+        AstTypeRef obj_expected;
+        if (!obj_tr && ctx->has_expected_type) {
+            obj_expected = ctx->expected_type;
+            obj_tr = &obj_expected;
+        }
         const AstDecl* struct_decl = NULL;
         if (obj_tr) {
             Str obj_base = get_base_type_name(obj_tr);
