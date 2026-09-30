@@ -1728,6 +1728,183 @@ static int returned_local_index(const CFuncContext* ctx, const AstStmt* stmt) {
     return -1;
 }
 
+// String-pool temporaries (runtime_strings_core.c) are registered by exactly
+// two things: the runtime's String builders (interpolation, concat, str(),
+// JSON text, file reads) and a Rae function returning an owned String, which
+// re-registers its result for the caller. Both are expressions whose value is
+// a String, so a statement needs the pool's mark/flush only when it contains a
+// call, interpolation or operator yielding one. Everything the checker does
+// not recognise, and every type it cannot infer, counts as "may", so the
+// answer errs toward the old unconditional pair. Emitting the pair everywhere
+// cost ~2 billion mark/flush calls per 20 s in the 3D examples (~40-80% of
+// the main thread, most of it the TLS lookup of the thread-local pool).
+static bool type_may_carry_pool_string(const CFuncContext* ctx, const AstTypeRef* tr) {
+  if (!tr) return true;
+  if (tr->is_view || tr->is_mod) return false;
+  // Inside a specialization the abstract `T` is the concrete argument (Float
+  // in Array(Float).copyAt), so judge that one.
+  if (ctx->generic_params && ctx->generic_args)
+    tr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr);
+  Str base = get_base_type_name(tr);
+  if (str_eq_cstr(base, "String") || str_eq_cstr(base, "Any") || str_eq_cstr(base, "RaeAny"))
+    return true;
+  for (const AstIdentifierPart* gp = ctx->generic_params; gp; gp = gp->next)
+    if (str_eq(gp->text, base)) return true;
+  return false;
+}
+
+// Calls whose type cannot be inferred are usually calls that return nothing
+// (`list.add(...)`, `array.set(...)`), which can never register a String. A
+// name counts as "returns nothing" only when EVERY function declared under it
+// has no return value; one value-returning overload keeps the conservative
+// answer. The name table is built once per compilation.
+typedef struct {
+  const void* owner;
+  Str* names;
+  uint8_t* state;  /* 0 empty, 1 all declarations void, 2 some returns a value */
+  size_t cap;
+} VoidNameTable;
+static VoidNameTable g_void_names;
+
+static size_t void_name_slot(Str name, size_t cap) {
+  uint64_t h = 1469598103934665603ULL;
+  for (size_t i = 0; i < name.len; i++) h = (h ^ (uint8_t)name.data[i]) * 1099511628211ULL;
+  return (size_t)(h & (cap - 1));
+}
+
+static void build_void_names(const CompilerContext* cctx) {
+  free(g_void_names.names); free(g_void_names.state);
+  size_t cap = 64;
+  while (cap < cctx->all_decl_count * 2 + 64) cap <<= 1;
+  g_void_names.names = calloc(cap, sizeof(Str));
+  g_void_names.state = calloc(cap, 1);
+  g_void_names.cap = cap;
+  g_void_names.owner = cctx;
+  if (!g_void_names.names || !g_void_names.state) { g_void_names.cap = 0; return; }
+  for (size_t i = 0; i < cctx->all_decl_count; i++) {
+    const AstDecl* d = cctx->all_decls[i];
+    if (d->kind != AST_DECL_FUNC) continue;
+    const AstFuncDecl* fd = &d->as.func_decl;
+    bool returns_value = fd->returns && fd->returns->type;
+    size_t slot = void_name_slot(fd->name, cap);
+    while (g_void_names.state[slot] && !str_eq(g_void_names.names[slot], fd->name))
+      slot = (slot + 1) & (cap - 1);
+    if (!g_void_names.state[slot]) {
+      g_void_names.names[slot] = fd->name;
+      g_void_names.state[slot] = returns_value ? 2 : 1;
+    } else if (returns_value) {
+      g_void_names.state[slot] = 2;
+    }
+  }
+}
+
+static bool name_only_returns_nothing(const CFuncContext* ctx, Str name) {
+  if (g_void_names.owner != ctx->compiler_ctx) build_void_names(ctx->compiler_ctx);
+  if (g_void_names.cap == 0 || name.len == 0) return false;
+  size_t slot = void_name_slot(name, g_void_names.cap);
+  while (g_void_names.state[slot]) {
+    if (str_eq(g_void_names.names[slot], name)) return g_void_names.state[slot] == 1;
+    slot = (slot + 1) & (g_void_names.cap - 1);
+  }
+  return false;
+}
+
+static bool call_result_may_pool(CFuncContext* ctx, const AstExpr* e, Str name) {
+  const AstTypeRef* tr = infer_expr_type_ref(ctx, e);
+  if (!tr && name_only_returns_nothing(ctx, name)) return false;
+  return type_may_carry_pool_string(ctx, tr);
+}
+
+bool expr_may_pool(CFuncContext* ctx, const AstExpr* e) {
+  if (!e) return false;
+  switch (e->kind) {
+    case AST_EXPR_IDENT: case AST_EXPR_INTEGER: case AST_EXPR_FLOAT: case AST_EXPR_STRING:
+    case AST_EXPR_CHAR: case AST_EXPR_BOOL: case AST_EXPR_NONE:
+      return false;
+    case AST_EXPR_INTERP:
+      return true;
+    case AST_EXPR_CALL: {
+      const AstExpr* callee = e->as.call.callee;
+      Str callee_name = {0};
+      if (callee && callee->kind == AST_EXPR_IDENT) callee_name = callee->as.ident;
+      else if (callee && callee->kind == AST_EXPR_MEMBER) callee_name = callee->as.member.member;
+      if (call_result_may_pool(ctx, e, callee_name)) return true;
+      for (const AstCallArg* a = e->as.call.args; a; a = a->next)
+        if (expr_may_pool(ctx, a->value)) return true;
+      return expr_may_pool(ctx, callee);
+    }
+    case AST_EXPR_METHOD_CALL:
+      if (call_result_may_pool(ctx, e, e->as.method_call.method_name)) return true;
+      for (const AstCallArg* a = e->as.method_call.args; a; a = a->next)
+        if (expr_may_pool(ctx, a->value)) return true;
+      return expr_may_pool(ctx, e->as.method_call.object);
+    case AST_EXPR_BINARY:
+      // Only `+` can build a String (concatenation); comparisons, `and`/`or`,
+      // arithmetic and bit operators never do, so only their operands count.
+      if (e->as.binary.op == AST_BIN_ADD
+          && type_may_carry_pool_string(ctx, infer_expr_type_ref(ctx, e))) return true;
+      return expr_may_pool(ctx, e->as.binary.lhs) || expr_may_pool(ctx, e->as.binary.rhs);
+    case AST_EXPR_UNARY: case AST_EXPR_BOX: case AST_EXPR_UNBOX: case AST_EXPR_OWN:
+      return expr_may_pool(ctx, e->as.unary.operand);
+    case AST_EXPR_CAST: return expr_may_pool(ctx, e->as.cast.operand);
+    case AST_EXPR_MEMBER: return expr_may_pool(ctx, e->as.member.object);
+    case AST_EXPR_INDEX:
+      return expr_may_pool(ctx, e->as.index.target) || expr_may_pool(ctx, e->as.index.index);
+    case AST_EXPR_OBJECT:
+      for (const AstObjectField* f = e->as.object_literal.fields; f; f = f->next)
+        if (expr_may_pool(ctx, f->value)) return true;
+      return false;
+    case AST_EXPR_LIST:
+      for (const AstExprList* it = e->as.list; it; it = it->next)
+        if (expr_may_pool(ctx, it->value)) return true;
+      return false;
+    case AST_EXPR_COLLECTION_LITERAL:
+      for (const AstCollectionElement* el = e->as.collection.elements; el; el = el->next)
+        if (expr_may_pool(ctx, el->value)) return true;
+      return false;
+    case AST_EXPR_MATCH:
+      if (expr_may_pool(ctx, e->as.match_expr.subject)) return true;
+      for (const AstMatchArm* arm = e->as.match_expr.arms; arm; arm = arm->next)
+        if (expr_may_pool(ctx, arm->value)) return true;
+      return false;
+    default:
+      return true;
+  }
+}
+
+// The expressions a statement evaluates ITSELF — nested blocks are separate
+// statements with their own decision.
+static bool stmt_direct_exprs_may_pool(CFuncContext* ctx, const AstStmt* s) {
+  if (!s) return false;
+  switch (s->kind) {
+    case AST_STMT_LET: return expr_may_pool(ctx, s->as.let_stmt.value);
+    case AST_STMT_EXPR: return expr_may_pool(ctx, s->as.expr_stmt);
+    case AST_STMT_ASSIGN:
+      return expr_may_pool(ctx, s->as.assign_stmt.target)
+          || expr_may_pool(ctx, s->as.assign_stmt.value);
+    case AST_STMT_RET:
+      for (const AstReturnArg* a = s->as.ret_stmt.values; a; a = a->next)
+        if (expr_may_pool(ctx, a->value)) return true;
+      return false;
+    case AST_STMT_DESTRUCT: return expr_may_pool(ctx, s->as.destruct_stmt.call);
+    case AST_STMT_IF:
+      return stmt_direct_exprs_may_pool(ctx, s->as.if_stmt.binding)
+          || expr_may_pool(ctx, s->as.if_stmt.condition);
+    case AST_STMT_LOOP:
+      return stmt_direct_exprs_may_pool(ctx, s->as.loop_stmt.init)
+          || expr_may_pool(ctx, s->as.loop_stmt.condition)
+          || expr_may_pool(ctx, s->as.loop_stmt.increment)
+          || expr_may_pool(ctx, s->as.loop_stmt.query_iterable);
+    case AST_STMT_MATCH:
+      return stmt_direct_exprs_may_pool(ctx, s->as.match_stmt.binding)
+          || expr_may_pool(ctx, s->as.match_stmt.subject);
+    case AST_STMT_DEFER: case AST_STMT_UNSAFE: case AST_STMT_BREAK: case AST_STMT_CONTINUE:
+      return false;
+    default:
+      return true;
+  }
+}
+
 bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     if (!stmt) return true;
     // `ret x` moves x out, but only on THAT path: the ret marks x moved so its
@@ -1746,13 +1923,22 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
 }
 
 static bool emit_stmt_body(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
+    bool may_pool = stmt_direct_exprs_may_pool(ctx, stmt);
+    // An expression statement, `let` or assignment flushes its own
+    // temporaries right after itself; only the others (a `ret` value, an
+    // `if`/`loop`/`match` condition or subject, a destructure) leave theirs to
+    // the function-level flush, so only they make the function keep its pair.
+    bool self_flushing = stmt->kind == AST_STMT_EXPR || stmt->kind == AST_STMT_LET
+        || stmt->kind == AST_STMT_ASSIGN;
+    if (may_pool && !self_flushing) ctx->func_may_pool = true;
     CStmtTemps temps = {0};
     CStmtTemps* saved = ctx->stmt_temps;
     temps.parent = saved;
     ctx->stmt_temps = &temps;
     char* body = NULL; size_t body_len = 0;
     FILE* buf = open_memstream(&body, &body_len);
-    if (!buf) { ctx->stmt_temps = saved; return emit_stmt_inner(ctx, stmt, out); }
+    if (!buf) { ctx->stmt_temps = saved; ctx->stmt_may_pool = may_pool; return emit_stmt_inner(ctx, stmt, out); }
+    ctx->stmt_may_pool = may_pool;
     bool ok = emit_stmt_inner(ctx, stmt, buf);
     fclose(buf);
     ctx->stmt_temps = saved;
@@ -1768,9 +1954,8 @@ static bool emit_stmt_body(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     // (10000 passes of an `r.toString() + "," + ...` binding: ~86000
     // Strings). Flush right after the statement; the bound value itself was
     // detached with rae_string_pool_take and survives.
-    bool flush_after = body
-        && (stmt->kind == AST_STMT_LET || stmt->kind == AST_STMT_ASSIGN)
-        && (strstr(body, "_(") || strstr(body, "rae_ext_rae_str"));
+    bool flush_after = body && may_pool
+        && (stmt->kind == AST_STMT_LET || stmt->kind == AST_STMT_ASSIGN);
     size_t spm_id = 0;
     if (flush_after) {
         spm_id = ctx->temp_counter++;
@@ -1796,9 +1981,16 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             // case: `log("iter {i}")` where the interp result is consumed by log
             // and never bound). Bindings (let/assign/ret) detach captured
             // results via `rae_string_pool_take` so this flush doesn't free them.
-            fprintf(out, "  { int __rae_spm = rae_string_pool_mark(); ");
-            emit_expr(ctx, stmt->as.expr_stmt, out, PREC_LOWEST, false, false);
-            fprintf(out, "; rae_string_pool_flush(__rae_spm); }\n");
+            if (ctx->stmt_may_pool) {
+                fprintf(out, "  { int __rae_spm = rae_string_pool_mark(); ");
+                emit_expr(ctx, stmt->as.expr_stmt, out, PREC_LOWEST, false, false);
+                fprintf(out, "; rae_string_pool_flush(__rae_spm); }\n");
+            } else {
+                // Nothing in it can register a pool temporary (expr_may_pool).
+                fprintf(out, "  ");
+                emit_expr(ctx, stmt->as.expr_stmt, out, PREC_LOWEST, false, false);
+                fprintf(out, ";\n");
+            }
             // #881: `value.drop()` on a local whose type has a destructor
             // consumes the local — scope exit must not release it again.
             // Sema rejects any later use in the same block.
