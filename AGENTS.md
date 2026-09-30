@@ -686,7 +686,10 @@ native gets the counters automatically — never rely on a name list, which is
 how 429/918/921 passed while leaking. `RAE_TEST_MEMCHECK=0` turns the
 exit check off for a quick local run; the full suite keeps it on. The
 121_ui_editor example gate also runs `leaks --atExit`, which sees C/wgpu mallocs
-that the Rae counters do not.
+that the Rae counters do not. Neither sees memory piling up in a container the
+app still holds (it is freed at teardown): `RAE_MEM_STATS_EVERY_MS=N` prints
+`[mem:live]` outstanding counts every N ms from the frame loop, and the 121 gate
+fails when they grow during a 25 s pointer sweep.
 
 **The VISUAL example smoke tests are NOT part of the unit suite, but you MAY
 run them when a change warrants a visual check.** `run_examples.sh` builds and

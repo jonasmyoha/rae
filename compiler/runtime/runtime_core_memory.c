@@ -474,6 +474,39 @@ void rae_ext_rae_mem_stats_dump(void) {
   rae_mem_stats_print();
 }
 
+/* Live snapshots (RAE_MEM_STATS_EVERY_MS=N, with RAE_MEM_STATS=1). The exit
+ * dump runs AFTER the app has torn its world down, so memory piling up in a
+ * List/Map that is still in use — a history that only grows, a pool that
+ * never recycles — is freed at teardown and reads outstanding=0 there, and
+ * `leaks` calls it reachable. A series taken WHILE the app runs shows it:
+ *   [mem:live] t=<ms since first tick> strings=<n> bufs=<n> buf_bytes=<n>
+ * every N ms. Ticked from the frame loop (Gpu2d.pollClose), i.e. between
+ * frames, when no frame's temporaries are alive. */
+int64_t rae_ext_nowNs(void);
+int64_t rae_ext_rae_mem_stats_outstanding(void);
+static int64_t g_mem_live_every_ms = -1;  /* -1 env not read yet, 0 off */
+static int64_t g_mem_live_start_ms;
+static int64_t g_mem_live_next_ms;
+
+void rae_mem_stats_live_tick(void) {
+  if (!g_mem_stats_enabled || g_mem_live_every_ms == 0) return;
+  int64_t now_ms = rae_ext_nowNs() / 1000000;
+  if (g_mem_live_every_ms < 0) {
+    const char* v = getenv("RAE_MEM_STATS_EVERY_MS");
+    g_mem_live_every_ms = (v && v[0]) ? atoll(v) : 0;
+    if (g_mem_live_every_ms <= 0) { g_mem_live_every_ms = 0; return; }
+    g_mem_live_start_ms = now_ms;
+    g_mem_live_next_ms = now_ms;
+  }
+  if (now_ms < g_mem_live_next_ms) return;
+  g_mem_live_next_ms = now_ms + g_mem_live_every_ms;
+  fprintf(stderr, "[mem:live] t=%lld strings=%lld bufs=%lld buf_bytes=%lld\n",
+    (long long)(now_ms - g_mem_live_start_ms),
+    (long long)rae_ext_rae_mem_stats_outstanding(),
+    (long long)(g_mem_buf_alloc_n - g_mem_buf_free_n),
+    (long long)(g_mem_buf_alloc_b - g_mem_buf_free_b));
+}
+
 /* Returns the total outstanding String allocation count (alloc -
  * free) across all sites. Lets leak-regression tests measure exact
  * heap state instead of indirect RSS, which is noisy when the
