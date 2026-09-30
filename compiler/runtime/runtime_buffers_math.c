@@ -157,17 +157,25 @@ static void rae_buf_check(const char* fn, void* buf, int64_t index, int64_t elem
 
 #endif
 
+/* Buffer bytes are measured like String bytes (rae_mem_block_bytes), and
+ * only while RAE_MEM_STATS is on: the COUNTS stay always-live (they back
+ * rae_ext_rae_mem_alloc_total), but asking the allocator for a block's size
+ * costs a call per alloc and free, which only the stats need. */
+static inline int64_t rae_mem_buf_bytes(void* ptr, int64_t hint) {
+  return g_mem_stats_enabled ? rae_mem_block_bytes(ptr, hint) : 0;
+}
+
 void* rae_ext_rae_buf_alloc(int64_t count, int64_t elem_size) {
   if (count <= 0) return NULL;
   void* p = calloc((size_t)count, (size_t)elem_size);
-  if (p) { g_mem_buf_alloc_n++; g_mem_buf_alloc_b += count * elem_size; }
+  if (p) { g_mem_buf_alloc_n++; g_mem_buf_alloc_b += rae_mem_buf_bytes(p, count * elem_size); }
   RAE_BR_REGISTER(p, count, elem_size);
   return p;
 }
 
 void rae_ext_rae_buf_free(void* buf) {
   if (buf) {
-    g_mem_buf_free_n++; g_mem_buf_free_b += rae_malloc_size_safe(buf);
+    g_mem_buf_free_n++; g_mem_buf_free_b += rae_mem_buf_bytes(buf, 0);
     RAE_BR_UNREGISTER(buf);
     free(buf);
   }
@@ -176,7 +184,7 @@ void rae_ext_rae_buf_free(void* buf) {
 void* rae_ext_rae_buf_resize(void* buf, int64_t new_count, int64_t elem_size) {
   if (new_count <= 0) {
     if (buf) {
-      g_mem_buf_free_n++; g_mem_buf_free_b += rae_malloc_size_safe(buf);
+      g_mem_buf_free_n++; g_mem_buf_free_b += rae_mem_buf_bytes(buf, 0);
       RAE_BR_UNREGISTER(buf);
       free(buf);
     }
@@ -186,11 +194,11 @@ void* rae_ext_rae_buf_resize(void* buf, int64_t new_count, int64_t elem_size) {
    * outstanding count stays balanced (one free, one alloc per call),
    * which lets a leak-class hunt distinguish "buffers we forgot to
    * free" from "buffers we keep resizing". */
-  int64_t old_bytes = buf ? rae_malloc_size_safe(buf) : 0;
+  int64_t old_bytes = buf ? rae_mem_buf_bytes(buf, 0) : 0;
   RAE_BR_UNREGISTER(buf);
   void* p = realloc(buf, (size_t)new_count * (size_t)elem_size);
   if (buf) { g_mem_buf_free_n++; g_mem_buf_free_b += old_bytes; }
-  if (p)   { g_mem_buf_alloc_n++; g_mem_buf_alloc_b += new_count * elem_size; }
+  if (p)   { g_mem_buf_alloc_n++; g_mem_buf_alloc_b += rae_mem_buf_bytes(p, new_count * elem_size); }
   g_mem_buf_resize_n++;
   RAE_BR_REGISTER(p, new_count, elem_size);
   return p;

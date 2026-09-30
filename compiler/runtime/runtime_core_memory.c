@@ -378,6 +378,17 @@ static uint8_t rae_mem_hash_remove(void* ptr) {
   return RAE_SITE_UNKNOWN;
 }
 
+/* The byte size of one tracked block, the SAME on the alloc and the free
+ * side: the allocator's own block size where it can report it. Allocation
+ * used to count the requested size and release the rounded-up block (or a
+ * String's capacity), so every alloc/free pair drifted negative — a balanced
+ * run ended at -18 MB of buffers — and a byte-level leak could never show.
+ * The hint is only the fallback for a platform without malloc_size. */
+static inline int64_t rae_mem_block_bytes(void* ptr, int64_t hint) {
+  int64_t measured = rae_malloc_size_safe(ptr);
+  return measured > 0 ? measured : hint;
+}
+
 static inline void rae_mem_str_tag(void* ptr, int64_t bytes, uint8_t site) {
   /* Counted BEFORE the opt-in gate: see g_mem_alloc_total_n. Every String
    * body allocation in the runtime funnels through here, so this is a
@@ -385,7 +396,7 @@ static inline void rae_mem_str_tag(void* ptr, int64_t bytes, uint8_t site) {
   g_mem_alloc_total_n++;
   if (!g_mem_stats_enabled) return;
   g_mem_site_alloc_n[site]++;
-  g_mem_site_alloc_b[site] += bytes;
+  g_mem_site_alloc_b[site] += rae_mem_block_bytes(ptr, bytes);
   rae_mem_hash_insert(ptr, site);
 }
 
@@ -393,11 +404,8 @@ static inline void rae_mem_str_untag(void* ptr, int64_t bytes_hint) {
   if (!g_mem_stats_enabled) return;
   uint8_t site = rae_mem_hash_remove(ptr);
   g_mem_site_free_n[site]++;
-  /* Prefer the explicit byte count (capacity from the rae_String);
-   * fall back to malloc_size for the pool_flush path that only has
-   * a ptr. */
-  int64_t bytes = bytes_hint > 0 ? bytes_hint : rae_malloc_size_safe(ptr);
-  g_mem_site_free_b[site] += bytes;
+  /* Measured exactly as rae_mem_str_tag measured it (rae_mem_block_bytes). */
+  g_mem_site_free_b[site] += rae_mem_block_bytes(ptr, bytes_hint);
 }
 
 static void rae_mem_stats_print(void) {
