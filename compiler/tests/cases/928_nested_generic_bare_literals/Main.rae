@@ -1,0 +1,79 @@
+# Bare-brace literals nested inside a generic struct literal take each field's
+# type from the struct's OWN type arguments. The literal read its type through
+# a pointer to the shared expected type, which the field loop overwrites, so
+# every field after the first was typed from the previous field:
+# `second: { ... }` in a Pair(Pair(Int)) became an Int and the C did not
+# compile (#51427354). Two and three levels, String payloads, two different
+# generics, a plain struct around them, and the expected type coming from a
+# `let`, a call argument and a `ret`. Formatting a struct a CALL returns
+# (`"{makeWords(...)}"`) holds it in a temporary, formats it and releases it:
+# for a plain struct that did not compile (`&(call())`), and a generic one was
+# never released.
+func rae_ext_rae_mem_stats_outstanding() unsafe extern ret Int
+
+type Pair(T: type) {
+  first: T
+  second: T
+}
+
+type Box(T: type) {
+  label: String
+  inner: T
+}
+
+type Scene {
+  name: String
+  corners: Pair(Pair(Int))
+  tags: Pair(String)
+}
+
+func makeScene(seed: view Int) ret Scene {
+  ret Scene {
+    name: "made {seed}"
+    corners: { first: { first: seed, second: seed }, second: { first: 0, second: 0 } }
+    tags: { first: "up", second: "down" }
+  }
+}
+
+func sumOf(pair: view Pair(Pair(Int))) ret Int {
+  ret pair.first.first + pair.first.second + pair.second.first + pair.second.second
+}
+
+func makeWords(seed: view Int) ret Pair(Pair(String)) {
+  ret Pair(Pair(String)) {
+    first: { first: "a{seed}", second: "b{seed}" }
+    second: { first: "c{seed}", second: "d{seed}" }
+  }
+}
+
+func build(seed: view Int) ret String {
+  let two: Pair(Pair(Int)) = { first: { first: seed, second: 2 }, second: { first: 3, second: 4 } }
+  let three: Pair(Pair(Pair(Int))) = {
+    first: { first: { first: 1, second: 2 }, second: { first: 3, second: 4 } }
+    second: { first: { first: 5, second: 6 }, second: { first: 7, second: 8 } }
+  }
+  let boxed: Box(Pair(String)) = { label: "box {seed}", inner: { first: "x", second: "y" } }
+  let scene: Scene = {
+    name: "scene"
+    corners: { first: { first: 1, second: 1 }, second: { first: 2, second: 2 } }
+    tags: { first: "left", second: "right" }
+  }
+  let summed: Int = sumOf(
+    pair: { first: { first: 10, second: 20 }, second: { first: 30, second: 40 } }
+  )
+  ret "{two} | {three.second.second.second} | {boxed} | {scene} | {summed} | {makeWords(seed: seed)} | {makeScene(
+    seed: seed
+  )}"
+}
+
+func main() {
+  unsafe {
+    log(build(seed: 1))
+    let baseline: Int = rae_ext_rae_mem_stats_outstanding()
+    loop var i: Int = 0, i < 50, ++i {
+      let text: String = build(seed: i)
+    }
+    let leaked: Int = rae_ext_rae_mem_stats_outstanding() - baseline
+    log("leaked allocations: {leaked}")
+  }
+}
