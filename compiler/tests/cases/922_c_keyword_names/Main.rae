@@ -1,0 +1,109 @@
+# A Rae name may be spelled like a C keyword (`short`, `long`, `signed`,
+# `char`, `static`, `union`, `volatile`, `int`, `float`, `struct`, `typedef`,
+# `goto`, `for`, `while`, `switch`, ...), a macro the generated C sees
+# (`errno`) or a C library function it calls (`free`, `malloc`). Emitted
+# verbatim, `rae_String short = ...` is not C (#39240138). The compiler gives
+# every such local, parameter, field, label and member a C-safe name
+# (c_names.c) — while struct printing, toJson / fromJson keys and
+# fieldName() keep the Rae spelling, and an enum case like JsonKind.bool
+# keeps its own.
+open collections/StringMap
+import Json
+
+type Range {
+  short: Int
+  long: Int
+  signed: Bool
+  char: String
+  static: List(String)
+  union: opt String
+  volatile: opt Int
+}
+
+type Pair(T: type) {
+  int: T
+  float: T
+}
+
+type Tables {
+  struct: List(Int)
+  typedef: List(String)
+}
+
+const register: Int = 7
+
+func span(short: view Int, long: view Int) ret Int {
+  ret long - short
+}
+
+func describe(range: view Range) ret String {
+  ret "{range.short}..{range.long} signed={range.signed} char={range.char}"
+}
+
+func makeRange(short: view Int, double: view Int) ret Range {
+  var static: List(String) = List.create(String, cap: 2)
+  static.add(value: "s{short}")
+  ret Range {
+    short: short
+    long: double
+    signed: true
+    char: "c{double}"
+    static: own static
+    union: "u"
+    volatile: none
+  }
+}
+
+func maybe(auto: view Int) ret opt String {
+  if auto > 0 {
+    ret "positive"
+  }
+  ret none
+}
+
+func tableNames(tables: view Tables) ret String {
+  var line: String = ""
+  loop let table: view List(Int) in fields(tables) {
+    line = "{line}{fieldName(table)} "
+  }
+  ret line
+}
+
+func main() {
+  let short: Int = 2
+  var long: Int = 9
+  let signed: Bool = true
+  let unsigned: String = "u"
+  var goto: String = "go"
+  goto = "{goto}to"
+  long = long + 1
+  let range: Range = makeRange(short: short, double: long)
+  log("span {span(short: short, long: long)} {describe(range: range)} {signed} {unsigned} {goto}")
+  log(
+    "static[0] {range.static.copyAtFallback(index: 0, fallback: "")} union {range.union} volatile {range.volatile}"
+  )
+  log("{range}")
+  let json: String = range.toJson()
+  log(json)
+  let back: Range = Range.fromJson(json: json)
+  log("back: {back.short} {back.long} {back.signed} {back.char} {back.static.length} {back.union}")
+  let pair: Pair(String) = { int: "i", float: "f" }
+  log("pair {pair.int} {pair.float}")
+  let tables: Tables = { struct: [1, 2], typedef: ["t"] }
+  log("fields: {tableNames(tables: tables)}")
+  if let while: String = maybe(auto: 3) {
+    log("if let {while}")
+  }
+  loop var for: Int = 0, for < 2, ++for {
+    log("loop {for}")
+  }
+  var switch: StringMap(Int) = StringMap.create(Int, cap: 8)
+  switch.set(k: "case", value: register)
+  log("map {switch.length} const {register}")
+  let kind: JsonKind = JsonKind.bool
+  log("enum {kind}")
+  var free: Int = 1
+  var malloc: Int = 2
+  var errno: Int = free + malloc
+  log("libc names {free} {malloc} {errno}")
+}
