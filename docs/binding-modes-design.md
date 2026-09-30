@@ -155,6 +155,14 @@ Only what option N makes an error but today's compiler accepts:
    into a `copy` parameter is an error; `ret` of a field copies. Each gets a
    fixture; any cell that disagrees is either a bug fix or a correction to
    this table, decided per cell.
+   **Done (compiler 0.1.91), the table unchanged:** every edge cell now
+   matches it. Fixture 930 covers the cells that already agreed (a String
+   field into `own` copies, `ret` of a field copies, a moved `var` is live
+   again once assigned); 931 the ones fixed to match — a List or struct
+   FIELD, an alias, a view parameter and a constant handed to `own` are now
+   deep-COPIED (a field used to be handed over bit-for-bit and freed twice;
+   an alias was a compile error); 932 `own x` into a `copy` parameter, now
+   an error.
 
 No parser, formatter or migration work is needed. The spelling does not
 change.
