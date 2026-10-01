@@ -1,0 +1,79 @@
+# copyAtDefault / copyAtFallback / set on a List of plain data (no heap) are
+# lowered inline to a length check plus one load or store (c_expr.c
+# emit_list_fast_access). The semantics must stay the library's: an index out
+# of range reads the zero value or the fallback, a store out of range is
+# ignored with the same one-line warning, arguments are evaluated once and in
+# order. A String list keeps the library call (it deep-copies) as the control.
+type Point {
+  x: Int
+  y: Float
+}
+
+enum Shade { dark, light }
+
+func counted(counter: mod Int, value: view Int) ret Int {
+  counter = counter + 1
+  ret value
+}
+
+func main() {
+  var ints: List(Int) = List.create(Int, cap: 4)
+  ints.add(value: 10)
+  ints.add(value: 20)
+  ints.add(value: 30)
+  log("Int in range: {ints.copyAtDefault(index: 1)}")
+  log("Int past the end: {ints.copyAtDefault(index: 3)}")
+  log("Int negative: {ints.copyAtDefault(index: -1)}")
+  log("Int fallback in range: {ints.copyAtFallback(index: 2, fallback: -7)}")
+  log("Int fallback out of range: {ints.copyAtFallback(index: 9, fallback: -7)}")
+  ints.set(index: 0, value: 11)
+  ints.set(index: 3, value: 99)
+  ints.set(index: -2, value: 99)
+  log(
+    "Int after sets: {ints.copyAtDefault(index: 0)} {ints.copyAtDefault(index: 1)} {ints.copyAtDefault(
+      index: 2
+    )} length {ints.length()}"
+  )
+
+  # The fallback and the index are each evaluated exactly once.
+  var calls: Int = 0
+  let picked: Int = ints.copyAtFallback(
+    index: counted(counter: calls, value: 5)
+    fallback: counted(counter: calls, value: 42)
+  )
+  log("fallback picked {picked} after {calls} evaluations")
+  ints.set(index: counted(counter: calls, value: 1), value: counted(counter: calls, value: 21))
+  log("set wrote {ints.copyAtDefault(index: 1)} after {calls} evaluations")
+
+  var floats: List(Float) = List.create(Float, cap: 2)
+  floats.add(value: 1.5)
+  floats.set(index: 0, value: floats.copyAtDefault(index: 0) + 0.25)
+  log("Float: {floats.copyAtDefault(index: 0)} past the end {floats.copyAtDefault(index: 5)}")
+
+  var flags: List(Bool) = List.create(Bool, cap: 2)
+  flags.add(value: true)
+  log("Bool: {flags.copyAtDefault(index: 0)} past the end {flags.copyAtDefault(index: 1)}")
+
+  var points: List(Point) = List.create(Point, cap: 2)
+  points.add(value: Point { x: 3, y: 0.5 })
+  points.set(index: 0, value: Point { x: 4, y: 1.5 })
+  let point: Point = points.copyAtDefault(index: 0)
+  let missing: Point = points.copyAtDefault(index: 1)
+  let fallbackPoint: Point = points.copyAtFallback(index: 2, fallback: Point { x: -1, y: -1.0 })
+  log("Point: {point.x} {point.y} past the end {missing.x} {missing.y} fallback {fallbackPoint.x}")
+
+  var shades: List(Shade) = List.create(Shade, cap: 2)
+  shades.add(value: Shade.light)
+  log("Shade: {shades.copyAtDefault(index: 0)} past the end {shades.copyAtDefault(index: 4)}")
+
+  var names: List(String) = List.create(String, cap: 2)
+  names.add(value: "first")
+  names.set(index: 0, value: "replaced")
+  names.set(index: 2, value: "ignored")
+  log(
+    "String: {names.copyAtDefault(index: 0)} past the end '{names.copyAtDefault(index: 1)}' fallback {names.copyAtFallback(
+      index: 3
+      fallback: "none"
+    )}"
+  )
+}
