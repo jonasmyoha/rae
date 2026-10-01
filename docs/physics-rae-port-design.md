@@ -1,5 +1,7 @@
 # Physics in Rae — porting Box3D to Rae
 
+> **Questioned 2026-10-01:** `docs/physics-box3d-port-research.md` measures what Box3D's SIMD and threads are worth, how fast a direct Rae port would be, and the upstream churn, and recommends integrating the C library behind a Rae ECS layer instead of porting now.
+
 **Status:** design, 2026-09-30. Nothing implemented. Replaces the *engine
 strategy* of `docs/physics-design.md` (bind Box3D's C through generated
 bindings) with **a port of Box3D to Rae**: as much Rae as possible, as little C
