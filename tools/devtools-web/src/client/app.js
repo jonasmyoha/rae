@@ -4309,9 +4309,22 @@ function setActiveView(targetView) {
 // The benchmark suite's own generated page (benchmarks/list_access/site), served
 // by the devtools server under /benchmarks/list_access/. Loaded on first open
 // only, so the iframe does not fetch the page while the tab is never visited.
+// The frame is sized to the page's full height, so the dashboard scrolls the
+// report like any other tab instead of nesting a second scrollbar; a
+// ResizeObserver keeps the height right when the report reflows (window width).
 function loadBenchmarksPage() {
   const frame = document.getElementById("benchmarks-frame");
-  if (frame && !frame.getAttribute("src")) frame.setAttribute("src", "/benchmarks/list_access/");
+  if (!frame || frame.getAttribute("src")) return;
+  frame.addEventListener("load", () => {
+    const doc = frame.contentDocument;
+    if (!doc || !doc.documentElement) return;
+    const fit = () => {
+      frame.style.height = `${doc.documentElement.scrollHeight}px`;
+    };
+    fit();
+    if (typeof ResizeObserver === "function") new ResizeObserver(fit).observe(doc.body);
+  });
+  frame.setAttribute("src", "/benchmarks/list_access/");
 }
 
 // ---- Stress tab (docs/stress-tests.md) --------------------------------------
