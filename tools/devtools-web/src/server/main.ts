@@ -75,6 +75,7 @@ const compilerMetricsPath = path.resolve(
 // The repo-root README.md — the "Why?" view renders it (markdown + Rae
 // highlighting + the XKCD comic) instead of hand-maintained marketing copy.
 const readmePath = path.resolve(process.cwd(), CONFIG.compilerPath, "README.md");
+const benchmarksRoot = path.resolve(process.cwd(), CONFIG.compilerPath, "benchmarks");
 let activeWebApp: {
   id: string;
   dir: string;
@@ -150,6 +151,28 @@ const server = Bun.serve<SocketData>({
       return new Response(Bun.file(syntaxSummaryPath), {
         headers: { "Content-Type": "application/json" }
       });
+    }
+
+    // Benchmark result pages: /benchmarks/<suite>/[file] serves
+    // <repo>/benchmarks/<suite>/site/[file] (index.html by default) for the
+    // Benchmarks tab. The suite name and file are restricted to plain names so
+    // the route cannot leave a suite's site/ folder.
+    if (url.pathname.startsWith("/benchmarks/") && req.method === "GET") {
+      const parts = url.pathname.slice("/benchmarks/".length).split("/").filter((part) => part.length > 0);
+      const suite = parts[0] ?? "";
+      const fileName = parts.slice(1).join("/") || "index.html";
+      const plain = /^[A-Za-z0-9_.-]+$/;
+      if (!plain.test(suite) || !fileName.split("/").every((part) => plain.test(part) && part !== "..")) {
+        return new Response("Not found", { status: 404 });
+      }
+      if (parts.length === 1 && !url.pathname.endsWith("/")) {
+        return Response.redirect(`/benchmarks/${suite}/`, 302);
+      }
+      const file = Bun.file(path.join(benchmarksRoot, suite, "site", fileName));
+      if (!(await file.exists())) {
+        return new Response(`No result page for benchmark '${suite}' — run benchmarks/${suite}/run.sh`, { status: 404 });
+      }
+      return new Response(file, { headers: { "Cache-Control": "no-store" } });
     }
 
     if (url.pathname === "/api/readme" && req.method === "GET") {
