@@ -4300,7 +4300,18 @@ function setActiveView(targetView) {
     }
   } else if (resolvedView === "why") {
     renderReadme();
+  } else if (resolvedView === "benchmarks") {
+    loadBenchmarksPage();
   }
+}
+
+// ---- Benchmarks tab ---------------------------------------------------------
+// The benchmark suite's own generated page (benchmarks/list_access/site), served
+// by the devtools server under /benchmarks/list_access/. Loaded on first open
+// only, so the iframe does not fetch the page while the tab is never visited.
+function loadBenchmarksPage() {
+  const frame = document.getElementById("benchmarks-frame");
+  if (frame && !frame.getAttribute("src")) frame.setAttribute("src", "/benchmarks/list_access/");
 }
 
 // ---- Stress tab (docs/stress-tests.md) --------------------------------------
