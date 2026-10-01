@@ -20,11 +20,12 @@ The reasons, each worked out below:
    faster, and 8 threads add another 5.7–7.3×. Together that is 21–43× on
    stacks and piles. Rae has no SIMD type, no atomics, and `parallelLoop` still
    runs sequentially.
-2. **Idiomatic Rae is 6× slower than Box3D's scalar C today**, measured on a
-   contact-solver kernel. This is not inherent: the same kernel written against
-   raw buffers runs at C speed. The cost is the safe list accessors (`copyAt` /
-   `copyAtDefault` / `set`), which a compiler or library change can remove.
-   Until then, a direct port would run 6× behind even the slowest Box3D build.
+2. **Rae itself is not the obstacle: safe Rae runs a contact-solver kernel at
+   C speed.** That holds when the list accessors are the narrowed forms
+   (`if let … = copyAt` to read, `if let slot: mod T => modAt` to write). The
+   shorter `copyAtDefault` / `set` spellings are 3.5–6× slower today. That is a
+   compiler or library fix, not a language limit (§4). The obstacle is
+   item 1: SIMD and threads.
 3. **Box3D is changing fast.** All 49 commits are from the last 4.5 months. In
    the last 3 months, 73 of its source files changed by +9 527 / −5 284 lines;
    in the last month alone, 49 files by +5 124 / −3 599. A hand port pins one
@@ -136,22 +137,35 @@ the same checksum.
 | version | time |
 |---|---|
 | C, plain arrays | 3–4 ms |
-| Rae, idiomatic (`List(Float)`, `copyAtDefault(index:)`, `set(index:value:)`) | 21–22 ms |
+| Rae, `copyAtDefault(index:)` to read, `set(index:value:)` to write | 21–22 ms |
+| Rae, `if let … = copyAt(index:)` to read, `set(index:value:)` to write | 9–10 ms |
+| Rae, `if let … = copyAt(index:)` to read, `if let slot: mod Float => modAt(index:)` to write | 3–4 ms |
 | Rae, raw buffer access in `unsafe` (`rae_ext_rae_buf_get` / `rae_ext_rae_buf_set` on `.data`) | 3 ms |
 
-So **Rae's generated code itself is as fast as C**. The 6× comes from the safe
-accessors: every read builds an `opt T` and bounds-checks inside `copyAt`, and
-every write goes through `set`, which bounds-checks and carries a warning path.
-A direct port written in today's idiomatic Rae would therefore run about 6×
-behind Box3D's scalar path. That is 90–260× behind shipping Box3D on the heavy
-benchmarks, and still 6× behind on the light ones.
+(The release profile, `--profile release`, gives the same numbers.)
+
+So **safe, bounds-checked Rae is as fast as C** when the list accessors are
+the narrowed forms, which the C backend lowers to a bare length check and a
+load or store. This matches the earlier `benchmarks/list_access` suite, whose
+read-only cases all use those forms. The slow spellings are `copyAtDefault`
+(about 13 ms of the 19 ms gap) and `set` (about 6 ms). Both are still ordinary
+function calls: `copyAtDefault` builds an optional through `copyAt`, and `set`
+carries a warning path. The suite now has this kernel as its "Scatter update"
+card (C, Rust, JavaScript, Python and the three Rae spellings).
+
+A direct port written with the narrowed forms would therefore match Box3D's
+scalar path. Written with `copyAtDefault` / `set`, it would run 3.5–6×
+behind it. Either way, it starts 15–43× behind shipping Box3D on the heavy
+benchmarks until SIMD and threads exist (§3).
 
 ## 5. What Rae would need before a port could be fast
 
-1. **Fast safe indexing.** An index read that traps on a bad index instead of
-   returning `opt T` (`list[i]` or `list.at(index:)`), plus hoisting or removing
-   bounds checks in counted loops. This alone closes the 6× gap measured above.
-   It helps every hot loop in the engine, not only physics.
+1. **Make every safe accessor as fast as the narrowed forms.** Lower
+   `copyAtDefault` / `copyAtFallback` and `set` the way `if let … = copyAt` and
+   `modAt` already are: a length check plus a load or store, with no optional
+   value and no out-of-line call. Then the obvious spelling is also the fast
+   one. Today it costs 3.5–6× (§4). This helps every hot loop in the engine,
+   not only physics.
 2. **A 4-wide float type** (`Float4`) that lowers to SSE2 / NEON / wasm SIMD,
    with the scalar struct as fallback. This is exactly Box3D's own design.
    Without it, the contact-heavy scenes stay 2.4–7× behind.
@@ -211,7 +225,7 @@ library gets through a binding layer.
 | | A. Full Rae port (current plan) | B. Box3D in C, Rae ECS layer | C. B now, port selected parts later |
 |---|---|---|---|
 | time to working physics in the game | months | days to weeks | days to weeks |
-| speed | 6× behind scalar C today; reaches C speed only after §5 | full SIMD + threads | full, unchanged |
+| speed | scalar C speed at best (with the narrowed accessors); SIMD and threads only after §5 | full SIMD + threads | full, unchanged |
 | upstream fixes and features | manual re-port | update the vendored copy | same as B; ported parts are forks |
 | C written and maintained by us | none | none (Box3D is upstream code; we write the binding) | none |
 | ECS integration | systems around a Rae engine | the same systems around a C engine | the same |
@@ -248,7 +262,7 @@ re-plan the port as language work first.**
    - (c) the same memory and determinism checks the other examples have.
 2. Queue the three language features from §5 as engine tasks in their own
    right, each measured with the kernel from §4:
-   - fast safe indexing first, since it closes a 6× gap everywhere;
+   - fast safe accessors first, so `copyAtDefault` / `set` cost what the narrowed forms cost;
    - then `Float4`;
    - then real `parallelLoop` threads with atomics.
 3. Revisit porting when the game needs something the C library makes hard —
@@ -270,7 +284,8 @@ permanent fork. None of them hold today.
   - Parallel work: the `b3ParallelFor` call sites and the solver stage enum.
   - Benchmarks: the CSVs under `benchmark/`, with step counts from
     `benchmark/main.c`.
-- Rae vs C kernel: one program in three versions (C; Rae with `List`
-  accessors; Rae with raw buffer access), each run three times. C built with
+- Rae vs C kernel: one program in five versions (C; Rae with
+  `copyAtDefault` + `set`; Rae with `if let` + `set`; Rae with `if let` +
+  `modAt`; Rae with raw buffer access), each run three times. C built with
   `gcc -O2`; Rae emitted with `rae build --emit-c` (compiler 0.1.98) and built
   with `gcc -O2`. Same machine (Apple Silicon), same checksum.
