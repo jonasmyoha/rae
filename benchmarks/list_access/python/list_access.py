@@ -139,6 +139,64 @@ SCENARIOS = [
     ("struct_random_ref", struct_random_ref),
 ]
 
+# Scatter update: the contact-solver-shaped read-modify-write kernel
+# (docs/physics-box3d-port-research.md) over plain lists, with an explicit
+# bounds check per contact. The world is built before the timer starts.
+SCATTER_BODIES = 4096
+SCATTER_CONTACTS = 16384
+SCATTER_ITERATIONS = 50
+
+
+def run_scatter():
+    vx = [(i % 17) * 0.1 - 0.8 for i in range(SCATTER_BODIES)]
+    vy = [(i % 13) * 0.1 - 0.6 for i in range(SCATTER_BODIES)]
+    vz = [(i % 11) * 0.1 - 0.5 for i in range(SCATTER_BODIES)]
+    inv_mass = [1.0] * SCATTER_BODIES
+    body_a, body_b = [], []
+    for c in range(SCATTER_CONTACTS):
+        a = (c * 7919) % SCATTER_BODIES
+        b = (c * 104729 + 13) % SCATTER_BODIES
+        if b == a:
+            b = (a + 1) % SCATTER_BODIES
+        body_a.append(a)
+        body_b.append(b)
+    nx = [(c % 5) * 0.1 for c in range(SCATTER_CONTACTS)]
+    ny = [1.0] * SCATTER_CONTACTS
+    nz = [0.0] * SCATTER_CONTACTS
+    accumulated = [0.0] * SCATTER_CONTACTS
+
+    def kernel():
+        for _iteration in range(SCATTER_ITERATIONS):
+            for c in range(SCATTER_CONTACTS):
+                a = body_a[c]
+                b = body_b[c]
+                if not (0 <= a < SCATTER_BODIES and 0 <= b < SCATTER_BODIES):
+                    continue
+                normal_x, normal_y, normal_z = nx[c], ny[c], nz[c]
+                inv_a, inv_b = inv_mass[a], inv_mass[b]
+                normal_velocity = ((vx[b] - vx[a]) * normal_x + (vy[b] - vy[a]) * normal_y
+                                   + (vz[b] - vz[a]) * normal_z)
+                previous = accumulated[c]
+                total = previous - normal_velocity / (inv_a + inv_b)
+                if total < 0.0:
+                    total = 0.0
+                impulse = total - previous
+                accumulated[c] = total
+                vx[a] -= inv_a * impulse * normal_x
+                vy[a] -= inv_a * impulse * normal_y
+                vz[a] -= inv_a * impulse * normal_z
+                vx[b] += inv_b * impulse * normal_x
+                vy[b] += inv_b * impulse * normal_y
+                vz[b] += inv_b * impulse * normal_z
+        total_sum = 0.0
+        for i in range(SCATTER_BODIES):
+            total_sum = total_sum + vx[i] + vy[i] + vz[i]
+        return int(total_sum * 100 - 0.5) if total_sum < 0 else int(total_sum * 100 + 0.5)
+
+    benchmark("scatter_list", kernel)
+
+
 for _repetition in range(9):
     for scenario_name, scenario in SCENARIOS:
         benchmark(scenario_name, scenario)
+    run_scatter()

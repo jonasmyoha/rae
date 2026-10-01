@@ -111,6 +111,9 @@ func intConstant(values: view List(Int), operations: view Int) {
 }
 
 func intStrided(values: view List(Int), operations: view Int) {
+  # The divisor goes through opaqueIndex so `% length` is a real division in
+  # every language, not a mask the C optimiser derives from the constant 65 536.
+  let divisor: Int = opaqueIndex(index: values.length)
   let startNs: Int = nowNs()
   var checksum: Int = 0
   var index: Int = 0
@@ -119,18 +122,21 @@ func intStrided(values: view List(Int), operations: view Int) {
     if let value: Int = values.copyAt(index: index) {
       checksum = checksum + value
     }
-    index = (index + 4) % values.length
+    index = (index + 4) % divisor
     iteration = iteration + 1
   }
   report(name: "int_strided_optional", startNs: startNs, checksum: checksum)
 }
 
 func intRandom(values: view List(Int), operations: view Int) {
+  # The divisor goes through opaqueIndex so `% length` is a real division in
+  # every language, not a mask the C optimiser derives from the constant 65 536.
+  let divisor: Int = opaqueIndex(index: values.length)
   let startNs: Int = nowNs()
   var checksum: Int = 0
   var iteration: Int = 0
   loop iteration < operations {
-    let index: Int = (iteration * 48271 + 17) % values.length
+    let index: Int = (iteration * 48271 + 17) % divisor
     if let value: Int = values.copyAt(index: index) {
       checksum = checksum + value
     }
@@ -140,11 +146,14 @@ func intRandom(values: view List(Int), operations: view Int) {
 }
 
 func intMostlyValid(values: view List(Int), operations: view Int) {
+  # The divisor goes through opaqueIndex so `% length` is a real division in
+  # every language, not a mask the C optimiser derives from the constant 65 536.
+  let divisor: Int = opaqueIndex(index: values.length)
   let startNs: Int = nowNs()
   var checksum: Int = 0
   var iteration: Int = 0
   loop iteration < operations {
-    var index: Int = (iteration * 48271 + 17) % values.length
+    var index: Int = (iteration * 48271 + 17) % divisor
     if iteration % 1000 is 0 {
       index = values.length
     }
@@ -157,11 +166,14 @@ func intMostlyValid(values: view List(Int), operations: view Int) {
 }
 
 func intMixedInvalid(values: view List(Int), operations: view Int) {
+  # The divisor goes through opaqueIndex so `% length` is a real division in
+  # every language, not a mask the C optimiser derives from the constant 65 536.
+  let divisor: Int = opaqueIndex(index: values.length)
   let startNs: Int = nowNs()
   var checksum: Int = 0
   var iteration: Int = 0
   loop iteration < operations {
-    var index: Int = (iteration * 48271 + 17) % values.length
+    var index: Int = (iteration * 48271 + 17) % divisor
     if iteration % 4 is 0 {
       index = -1
     }
@@ -234,17 +246,321 @@ func structCollectionView(particles: view List(Particle), passes: view Int) {
 }
 
 func structRandomView(particles: view List(Particle), operations: view Int) {
+  # The divisor goes through opaqueIndex so `% length` is a real division in
+  # every language, not a mask the C optimiser derives from the constant 65 536.
+  let divisor: Int = opaqueIndex(index: particles.length)
   let startNs: Int = nowNs()
   var checksum: Int = 0
   var iteration: Int = 0
   loop iteration < operations {
-    let index: Int = (iteration * 48271 + 17) % particles.length
+    let index: Int = (iteration * 48271 + 17) % divisor
     if let particle: view Particle => particles.viewAt(index: index) {
       checksum = checksum + particle.px + particle.vz + particle.mass
     }
     iteration = iteration + 1
   }
   report(name: "struct_random_optional_view", startNs: startNs, checksum: checksum)
+}
+
+# Scatter update: a contact-solver-shaped kernel (docs/physics-box3d-port-research.md).
+# Each contact reads two bodies' velocities through indices it holds, computes
+# an impulse, clamps it, and WRITES both bodies back — the read-modify-write by
+# index that physics, particles and skinning do, and that the read-only
+# scenarios above never exercise. Three spellings of the same safe access.
+const scatterBodyCount: Int = 4096
+
+const scatterContactCount: Int = 16384
+
+const scatterIterations: Int = 50
+
+type ScatterWorld {
+  vx: List(Float)
+  vy: List(Float)
+  vz: List(Float)
+  invMass: List(Float)
+  bodyA: List(Int)
+  bodyB: List(Int)
+  nx: List(Float)
+  ny: List(Float)
+  nz: List(Float)
+  accumulated: List(Float)
+}
+
+func filledFloats(count: view Int, value: view Float) ret List(Float) {
+  var values: List(Float) = createList(Float, cap: count)
+  var index: Int = 0
+  loop index < count {
+    values.add(value: value)
+    index = index + 1
+  }
+  ret values
+}
+
+func makeScatterWorld() ret ScatterWorld {
+  var vx: List(Float) = createList(Float, cap: scatterBodyCount)
+  var vy: List(Float) = createList(Float, cap: scatterBodyCount)
+  var vz: List(Float) = createList(Float, cap: scatterBodyCount)
+  var index: Int = 0
+  loop index < scatterBodyCount {
+    vx.add(value: ((index % 17) as Float) * 0.1 - 0.8)
+    vy.add(value: ((index % 13) as Float) * 0.1 - 0.6)
+    vz.add(value: ((index % 11) as Float) * 0.1 - 0.5)
+    index = index + 1
+  }
+  var bodyA: List(Int) = createList(Int, cap: scatterContactCount)
+  var bodyB: List(Int) = createList(Int, cap: scatterContactCount)
+  var nx: List(Float) = createList(Float, cap: scatterContactCount)
+  var contact: Int = 0
+  loop contact < scatterContactCount {
+    let a: Int = (contact * 7919) % scatterBodyCount
+    var b: Int = (contact * 104729 + 13) % scatterBodyCount
+    if b is a {
+      b = (a + 1) % scatterBodyCount
+    }
+    bodyA.add(value: a)
+    bodyB.add(value: b)
+    nx.add(value: ((contact % 5) as Float) * 0.1)
+    contact = contact + 1
+  }
+  ret ScatterWorld {
+    vx: own vx
+    vy: own vy
+    vz: own vz
+    invMass: filledFloats(count: scatterBodyCount, value: 1.0)
+    bodyA: own bodyA
+    bodyB: own bodyB
+    nx: own nx
+    ny: filledFloats(count: scatterContactCount, value: 1.0)
+    nz: filledFloats(count: scatterContactCount, value: 0.0)
+    accumulated: filledFloats(count: scatterContactCount, value: 0.0)
+  }
+}
+
+# The velocity sum, times 100 and rounded: the same integer in every language
+# although JavaScript and Python compute in 64-bit floats.
+func scatterChecksum(world: view ScatterWorld) ret Int {
+  var sum: Float = 0.0
+  loop var index: Int = 0, index < scatterBodyCount, ++index {
+    sum = sum + world.vx.copyAtDefault(index: index) + world.vy.copyAtDefault(index: index) + world.vz.copyAtDefault(
+      index: index
+    )
+  }
+  if sum < 0.0 {
+    ret (sum * 100.0 - 0.5) as Int
+  }
+  ret (sum * 100.0 + 0.5) as Int
+}
+
+# copyAtDefault to read, set to write: the shortest spelling, and the slow one.
+func scatterDefaultSet() {
+  var world: ScatterWorld = makeScatterWorld()
+  let startNs: Int = nowNs()
+  loop var iteration: Int = 0, iteration < scatterIterations, ++iteration {
+    loop var c: Int = 0, c < scatterContactCount, ++c {
+      let a: Int = world.bodyA.copyAtDefault(index: c)
+      let b: Int = world.bodyB.copyAtDefault(index: c)
+      let normalX: Float = world.nx.copyAtDefault(index: c)
+      let normalY: Float = world.ny.copyAtDefault(index: c)
+      let normalZ: Float = world.nz.copyAtDefault(index: c)
+      let invA: Float = world.invMass.copyAtDefault(index: a)
+      let invB: Float = world.invMass.copyAtDefault(index: b)
+      let vxA: Float = world.vx.copyAtDefault(index: a)
+      let vyA: Float = world.vy.copyAtDefault(index: a)
+      let vzA: Float = world.vz.copyAtDefault(index: a)
+      let vxB: Float = world.vx.copyAtDefault(index: b)
+      let vyB: Float = world.vy.copyAtDefault(index: b)
+      let vzB: Float = world.vz.copyAtDefault(index: b)
+      let previous: Float = world.accumulated.copyAtDefault(index: c)
+      let normalVelocity: Float = (vxB - vxA) * normalX + (vyB - vyA) * normalY + (vzB - vzA) * normalZ
+      var total: Float = previous - normalVelocity / (invA + invB)
+      if total < 0.0 {
+        total = 0.0
+      }
+      let lambda: Float = total - previous
+      world.accumulated.set(index: c, value: total)
+      world.vx.set(index: a, value: vxA - invA * lambda * normalX)
+      world.vy.set(index: a, value: vyA - invA * lambda * normalY)
+      world.vz.set(index: a, value: vzA - invA * lambda * normalZ)
+      world.vx.set(index: b, value: vxB + invB * lambda * normalX)
+      world.vy.set(index: b, value: vyB + invB * lambda * normalY)
+      world.vz.set(index: b, value: vzB + invB * lambda * normalZ)
+    }
+  }
+  report(name: "scatter_default_set", startNs: startNs, checksum: scatterChecksum(world: world))
+}
+
+# `if let ... = copyAt` to read (lowered to a length check and a load), set to write.
+func scatterIfLetSet() {
+  var world: ScatterWorld = makeScatterWorld()
+  let startNs: Int = nowNs()
+  loop var iteration: Int = 0, iteration < scatterIterations, ++iteration {
+    loop var c: Int = 0, c < scatterContactCount, ++c {
+      var a: Int = 0
+      if let value: Int = world.bodyA.copyAt(index: c) {
+        a = value
+      }
+      var b: Int = 0
+      if let value: Int = world.bodyB.copyAt(index: c) {
+        b = value
+      }
+      var normalX: Float = 0.0
+      if let value: Float = world.nx.copyAt(index: c) {
+        normalX = value
+      }
+      var normalY: Float = 0.0
+      if let value: Float = world.ny.copyAt(index: c) {
+        normalY = value
+      }
+      var normalZ: Float = 0.0
+      if let value: Float = world.nz.copyAt(index: c) {
+        normalZ = value
+      }
+      var invA: Float = 0.0
+      if let value: Float = world.invMass.copyAt(index: a) {
+        invA = value
+      }
+      var invB: Float = 0.0
+      if let value: Float = world.invMass.copyAt(index: b) {
+        invB = value
+      }
+      var vxA: Float = 0.0
+      if let value: Float = world.vx.copyAt(index: a) {
+        vxA = value
+      }
+      var vyA: Float = 0.0
+      if let value: Float = world.vy.copyAt(index: a) {
+        vyA = value
+      }
+      var vzA: Float = 0.0
+      if let value: Float = world.vz.copyAt(index: a) {
+        vzA = value
+      }
+      var vxB: Float = 0.0
+      if let value: Float = world.vx.copyAt(index: b) {
+        vxB = value
+      }
+      var vyB: Float = 0.0
+      if let value: Float = world.vy.copyAt(index: b) {
+        vyB = value
+      }
+      var vzB: Float = 0.0
+      if let value: Float = world.vz.copyAt(index: b) {
+        vzB = value
+      }
+      var previous: Float = 0.0
+      if let value: Float = world.accumulated.copyAt(index: c) {
+        previous = value
+      }
+      let normalVelocity: Float = (vxB - vxA) * normalX + (vyB - vyA) * normalY + (vzB - vzA) * normalZ
+      var total: Float = previous - normalVelocity / (invA + invB)
+      if total < 0.0 {
+        total = 0.0
+      }
+      let lambda: Float = total - previous
+      world.accumulated.set(index: c, value: total)
+      world.vx.set(index: a, value: vxA - invA * lambda * normalX)
+      world.vy.set(index: a, value: vyA - invA * lambda * normalY)
+      world.vz.set(index: a, value: vzA - invA * lambda * normalZ)
+      world.vx.set(index: b, value: vxB + invB * lambda * normalX)
+      world.vy.set(index: b, value: vyB + invB * lambda * normalY)
+      world.vz.set(index: b, value: vzB + invB * lambda * normalZ)
+    }
+  }
+  report(name: "scatter_iflet_set", startNs: startNs, checksum: scatterChecksum(world: world))
+}
+
+# `if let` to read and `if let slot: mod Float => modAt` to write: both narrowed.
+func scatterIfLetModAt() {
+  var world: ScatterWorld = makeScatterWorld()
+  let startNs: Int = nowNs()
+  loop var iteration: Int = 0, iteration < scatterIterations, ++iteration {
+    loop var c: Int = 0, c < scatterContactCount, ++c {
+      var a: Int = 0
+      if let value: Int = world.bodyA.copyAt(index: c) {
+        a = value
+      }
+      var b: Int = 0
+      if let value: Int = world.bodyB.copyAt(index: c) {
+        b = value
+      }
+      var normalX: Float = 0.0
+      if let value: Float = world.nx.copyAt(index: c) {
+        normalX = value
+      }
+      var normalY: Float = 0.0
+      if let value: Float = world.ny.copyAt(index: c) {
+        normalY = value
+      }
+      var normalZ: Float = 0.0
+      if let value: Float = world.nz.copyAt(index: c) {
+        normalZ = value
+      }
+      var invA: Float = 0.0
+      if let value: Float = world.invMass.copyAt(index: a) {
+        invA = value
+      }
+      var invB: Float = 0.0
+      if let value: Float = world.invMass.copyAt(index: b) {
+        invB = value
+      }
+      var vxA: Float = 0.0
+      if let value: Float = world.vx.copyAt(index: a) {
+        vxA = value
+      }
+      var vyA: Float = 0.0
+      if let value: Float = world.vy.copyAt(index: a) {
+        vyA = value
+      }
+      var vzA: Float = 0.0
+      if let value: Float = world.vz.copyAt(index: a) {
+        vzA = value
+      }
+      var vxB: Float = 0.0
+      if let value: Float = world.vx.copyAt(index: b) {
+        vxB = value
+      }
+      var vyB: Float = 0.0
+      if let value: Float = world.vy.copyAt(index: b) {
+        vyB = value
+      }
+      var vzB: Float = 0.0
+      if let value: Float = world.vz.copyAt(index: b) {
+        vzB = value
+      }
+      var previous: Float = 0.0
+      if let value: Float = world.accumulated.copyAt(index: c) {
+        previous = value
+      }
+      let normalVelocity: Float = (vxB - vxA) * normalX + (vyB - vyA) * normalY + (vzB - vzA) * normalZ
+      var total: Float = previous - normalVelocity / (invA + invB)
+      if total < 0.0 {
+        total = 0.0
+      }
+      let lambda: Float = total - previous
+      if let slot: mod Float => world.accumulated.modAt(index: c) {
+        slot = total
+      }
+      if let slot: mod Float => world.vx.modAt(index: a) {
+        slot = vxA - invA * lambda * normalX
+      }
+      if let slot: mod Float => world.vy.modAt(index: a) {
+        slot = vyA - invA * lambda * normalY
+      }
+      if let slot: mod Float => world.vz.modAt(index: a) {
+        slot = vzA - invA * lambda * normalZ
+      }
+      if let slot: mod Float => world.vx.modAt(index: b) {
+        slot = vxB + invB * lambda * normalX
+      }
+      if let slot: mod Float => world.vy.modAt(index: b) {
+        slot = vyB + invB * lambda * normalY
+      }
+      if let slot: mod Float => world.vz.modAt(index: b) {
+        slot = vzB + invB * lambda * normalZ
+      }
+    }
+  }
+  report(name: "scatter_iflet_modat", startNs: startNs, checksum: scatterChecksum(world: world))
 }
 
 func runSuite() {
@@ -266,6 +582,9 @@ func runSuite() {
   structCollectionValue(particles: particles, passes: passes)
   structCollectionView(particles: particles, passes: passes)
   structRandomView(particles: particles, operations: operations)
+  scatterDefaultSet()
+  scatterIfLetSet()
+  scatterIfLetModAt()
 }
 
 func main() {
