@@ -84,6 +84,10 @@ comparisons = [
      [("c", "struct_random_pointer"), ("rust", "struct_random_get"),
       ("rae", "struct_random_optional_view"), ("javascript", "struct_random_ref"),
       ("python", "struct_random_ref")]),
+    ("Scatter update: contact-solver kernel", "4,096 bodies, 16,384 contacts, 50 iterations: read two bodies by index, compute and clamp an impulse, write both back. The only card that writes by index; Rae is shown in three safe spellings.",
+     [("c", "scatter_checked"), ("rust", "scatter_safe_index"),
+      ("rae", "scatter_iflet_modat"), ("rae", "scatter_iflet_set"), ("rae", "scatter_default_set"),
+      ("javascript", "scatter_typed_array"), ("python", "scatter_list")]),
 ]
 
 labels = {
@@ -97,6 +101,13 @@ labels = {
     ("javascript", "int_sequential_checked"): "JavaScript explicit optional check",
     ("python", "int_sequential_native"): "Python native []",
     ("python", "int_sequential_checked"): "Python explicit optional check",
+    ("c", "scatter_checked"): "C explicit bounds checks",
+    ("rust", "scatter_safe_index"): "Rust safe [] (bounds-checked)",
+    ("rae", "scatter_iflet_modat"): "Rae if let copyAt to read, if let modAt to write",
+    ("rae", "scatter_iflet_set"): "Rae if let copyAt to read, set to write",
+    ("rae", "scatter_default_set"): "Rae copyAtDefault to read, set to write",
+    ("javascript", "scatter_typed_array"): "JavaScript Float32Array, explicit check",
+    ("python", "scatter_list"): "Python list, explicit check",
 }
 language_names = {
     "c": "C", "rae": "Rae", "rust": "Rust",
@@ -191,6 +202,9 @@ rae_random_vs_c = ratio(("rae", "int_random_optional"), ("c", "int_random_checke
 rae_constant_vs_c = ratio(("rae", "int_constant_optional"), ("c", "int_constant_checked"))
 rae_loop_vs_c = ratio(("rae", "int_collection_view"), ("c", "int_collection"))
 struct_view_vs_c = ratio(("rae", "struct_sequential_optional_view"), ("c", "struct_sequential_pointer"))
+scatter_narrowed_vs_c = ratio(("rae", "scatter_iflet_modat"), ("c", "scatter_checked"))
+scatter_set_vs_c = ratio(("rae", "scatter_iflet_set"), ("c", "scatter_checked"))
+scatter_default_vs_c = ratio(("rae", "scatter_default_set"), ("c", "scatter_checked"))
 
 indexed_snippets = {
     "Rae": '''if let particle: view Particle => particles.viewAt(index: index) {
@@ -261,11 +275,12 @@ pre{{overflow:auto;max-height:680px;background:#17201b;color:#e9f1e9;padding:18p
 @media(max-width:560px){{main{{padding:36px 14px}}.grid{{grid-template-columns:1fr}}dl{{grid-template-columns:1fr}}}}
 </style></head><body><main>
 <h1>Safe indexing, measured.</h1><p class="lead">Rae uses optional, logical-length-checked List indexed access. Collection loops lower to direct iteration without optional construction or per-element bounds checks.</p>
-<div class="stamp">65,536 elements · 8,388,608 accesses · median of 7 runs after 2 warmups</div>
+<div class="stamp">65,536 elements · 8,388,608 accesses · scatter: 16,384 contacts × 50 iterations · median of 7 runs after 2 warmups</div>
 <div class="recommendation"><strong>Final recommendations</strong><ol>
 <li>Keep all public List indexed access optional and bounds-checked; these measurements do not justify an unsafe accessor.</li>
 <li>Use <code>loop let item: view Item in items</code> for sequential hot paths and <code>viewAt + if let</code> for random access to large structs.</li>
 <li>Optimize Rae's general owned <code>opt T</code> representation separately; do not make List indexing unsafe to avoid RaeAny.</li>
+<li>In hot loops that write by index, read with <code>if let … = copyAt</code> and write with <code>if let slot: mod T =&gt; modAt</code>. <code>copyAtDefault</code> and <code>set</code> are safe too but several times slower today, until the compiler lowers them the same way (see the scatter card).</li>
 </ol></div>
 <h2>How to read this</h2><p>Each card performs the same useful work and checksum in every listed language. The ratio is relative to the fastest result in that card, so <strong>1.00× means tied at this measurement precision</strong>, not missing data. JavaScript and Python are included for scale and API comparison; their JIT/interpreter and heap-object data models are not direct C-backend code-generation competitors.</p>
 <h2>Results</h2><div class="grid">{"".join(cards)}</div>
@@ -273,10 +288,14 @@ pre{{overflow:auto;max-height:680px;background:#17201b;color:#e9f1e9;padding:18p
 <div class="metric"><strong>{rae_seq_vs_c:.2f}×</strong>Rae optional Int sequential vs C checked</div>
 <div class="metric"><strong>{rae_random_vs_c:.2f}×</strong>Rae optional Int random vs C checked</div>
 <div class="metric"><strong>{rae_loop_vs_c:.2f}×</strong>Rae collection view vs C pointer loop</div>
-<div class="metric"><strong>{struct_view_vs_c:.2f}×</strong>Rae optional struct view vs C pointer</div></div>
+<div class="metric"><strong>{struct_view_vs_c:.2f}×</strong>Rae optional struct view vs C pointer</div>
+<div class="metric"><strong>{scatter_narrowed_vs_c:.2f}×</strong>Rae scatter, if let + modAt, vs C checked</div>
+<div class="metric"><strong>{scatter_default_vs_c:.2f}×</strong>Rae scatter, copyAtDefault + set, vs C checked</div></div>
+<h2>Writing by index: the accessor matters</h2><p>The read-only cards above all use the two Rae shapes the C backend lowers to a bare length check and load: the collection loop and an immediate <code>if let … = copyAt(index:)</code>. The scatter card is the first to also <strong>write</strong> by index, the way a physics solver, particles or skinning do. Written with the narrowed forms, <code>if let</code> to read and <code>if let slot: mod Float =&gt; modAt(index:)</code> to write, Rae runs at {scatter_narrowed_vs_c:.2f}× checked C. Writing with <code>set(index:value:)</code> instead costs {scatter_set_vs_c:.2f}×, and reading with <code>copyAtDefault(index:)</code> as well costs {scatter_default_vs_c:.2f}×: those two accessors are still ordinary function calls that build an optional (<code>copyAtDefault</code> goes through <code>copyAt</code>) or carry a warning path (<code>set</code>). Every spelling is bounds-checked; the difference is only how much of that the compiler can see through. This is why a first contact-solver test (docs/physics-box3d-port-research.md) looked 6× slower than C while this page showed parity: it used the two slow accessors.</p>
 <h2>What RaeAny means here</h2><p><code>opt view T</code> and <code>opt mod T</code> are nullable references: one null check, no allocation, and no element copy. A general owned <code>opt T</code> has to carry either <code>none</code> or an owned value of arbitrary size, so the current C ABI uses a 48-byte <code>RaeAny</code> tag/union/drop record. Values wider than its inline union, including the benchmark's 64-byte <code>Particle</code>, are heap-allocated; heap-owning structs are also deep-copied and later dropped.</p>
 <p><strong>This page does not measure that general RaeAny path.</strong> Its owned-value spelling is <code>if let particle: Particle = particles.at(...)</code>. The C backend recognizes this immediate narrowing and emits one logical-length check followed by a direct local copy, without constructing RaeAny. A stored, passed, or returned owned <code>opt Particle</code> may use RaeAny and therefore deserves separate correctness and performance work before it can be benchmarked honestly. Do not infer RaeAny overhead from the Particle numbers below.</p>
 <h2>Methodology</h2><p>All implementations use equivalent deterministic data, access counts, and validated checksums. Timings exclude allocation/setup, use each runtime's monotonic high-resolution clock, and include nine in-process repetitions; the first two are discarded. C and Rust include explicitly unchecked controls. Rae exposes no unchecked List API.</p>
+<p>The strided, random and invalid-index cases wrap with <code>% length</code>, and that divisor goes through an opacity barrier in Rae, C and Rust (<code>opaqueIndex</code>, a <code>volatile</code> read, <code>black_box</code>), so each performs a real division. Until 2026-10-01 the divisor was the constant 65,536: C and Rust always turned <code>% 65536</code> into a bit mask, Rae only when the C compiler inlined far enough, so those cards measured constant folding and Rae's numbers swung 2.5× with unrelated code changes.</p>
 <p>Rae/C/Rust use contiguous 64-byte inline <code>Particle</code> structs. JavaScript uses ordinary heap objects and Python uses tuples; those struct results answer “what does idiomatic access cost in this runtime?” rather than “how does identical memory layout compile?”</p>
 <dl>{meta_rows}</dl>
 <h2>All measurements</h2><div class="scroll"><table><thead><tr><th>Language</th><th>Scenario</th><th>Median ms</th><th>Minimum ms</th><th>Stddev ms</th><th>Checksum</th></tr></thead><tbody>{table_rows}</tbody></table></div>
@@ -285,6 +304,7 @@ pre{{overflow:auto;max-height:680px;background:#17201b;color:#e9f1e9;padding:18p
 <h2>Representative generated C: immediate if let</h2><p>This hot path checks logical <code>length</code> and binds directly. It does not create RaeAny.</p><pre>{html.escape(excerpt)}</pre>
 <h2>Complete compared source</h2><p>The exact Rae, handwritten C, Rust, JavaScript, and Python programs used for every number are embedded below.</p>{source_sections}
 <h2>Conclusions</h2><p><strong>Compiled result:</strong> Rae/C median ratios are {rae_seq_vs_c:.2f}× sequential, {rae_random_vs_c:.2f}× random, {rae_constant_vs_c:.2f}× repeated-index, {rae_loop_vs_c:.2f}× collection-view, and {struct_view_vs_c:.2f}× struct-view; lower is faster. Similar values are a real finding: optimized Rae optional access is usually the same branch-and-load shape as checked C.</p>
+<p><strong>Writes:</strong> the narrowed spellings keep Rae at {scatter_narrowed_vs_c:.2f}× C on a read-modify-write kernel; <code>copyAtDefault</code> + <code>set</code> cost {scatter_default_vs_c:.2f}×. That gap is a compiler/library task (lower them like the narrowed forms), not a reason for unchecked access.</p>
 <p><strong>Language-design result:</strong> keep optional public indexing. Prefer collection loops for sequential work and element views for large structs. JavaScript and Python provide useful runtime scale, but their JIT/interpreter and heap-managed data layouts do not alter the C-backend decision. General owned <code>opt T</code>/RaeAny remains a separate optimization target and was not measured here.</p>
 <p>Raw data: <code>../results/raw.csv</code>. Aggregates: <code>../results/summary.json</code>. Reproduce with <code>./run.sh</code>.</p>
 </main></body></html>'''
