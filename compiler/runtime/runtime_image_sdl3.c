@@ -404,6 +404,7 @@ static SDL_Mutex* g_sdl_dialog_lock = NULL;   /* guards the fields below */
 static char* g_sdl_dialog_path = NULL;        /* chosen path (malloc'd), NULL = cancel/none */
 static bool g_sdl_dialog_ready = false;       /* a result (path or cancel) is waiting for poll */
 static bool g_sdl_dialog_open = false;        /* a request is in flight */
+static bool g_sdl_dialog_shown = false;       /* that request showed a real panel */
 
 static SDL_Mutex* rae_sdl_dialog_mutex(void) {
     if (!g_sdl_dialog_lock) g_sdl_dialog_lock = SDL_CreateMutex();
@@ -470,6 +471,7 @@ void rae_ext_Sdl3_openFileDialog(rae_String patterns, rae_String defaultLocation
     if (defaultLocation.data && defaultLocation.len > 0) {
         locbuf = SDL_strndup((const char*)defaultLocation.data, (size_t)defaultLocation.len);
     }
+    g_sdl_dialog_shown = true;
     SDL_ShowOpenFileDialog(rae_sdl_dialog_cb, NULL, g_sdl_win,
                            nfilters ? filters : NULL, nfilters, locbuf, false);
     SDL_free(patbuf);
@@ -484,6 +486,7 @@ rae_String rae_ext_Sdl3_pollFileDialogResult(void) {
     if (g_sdl_win) SDL_PumpEvents();
     if (!g_sdl_dialog_lock) return out;   /* never requested */
     SDL_LockMutex(g_sdl_dialog_lock);
+    bool delivered = g_sdl_dialog_ready;
     if (g_sdl_dialog_ready) {
         if (g_sdl_dialog_path) {
             out = rae_ext_rae_str_from_cstr((void*)g_sdl_dialog_path);
@@ -493,6 +496,19 @@ rae_String rae_ext_Sdl3_pollFileDialogResult(void) {
         g_sdl_dialog_ready = false;   /* delivered exactly once */
     }
     SDL_UnlockMutex(g_sdl_dialog_lock);
+    /* Hand the keyboard/mouse focus back to the window the panel was a sheet
+     * of. When a key window closes, SDL's Cocoa backend makes the next window
+     * key itself (its own event loop defeats AppKit's normal hand-off) — but
+     * only when the closing window is an SDL window, and the open panel is
+     * not. So after Open or Cancel the editor looked active, SDL never got
+     * FOCUS_GAINED, and the next click was spent activating the window: the
+     * first click after the dialog did nothing. Raising the parent makes it
+     * key, which SDL hears. Main thread only (the callback may not be), and
+     * only after a real panel — a forced test result shows nothing. */
+    if (delivered && g_sdl_dialog_shown && g_sdl_win) {
+        g_sdl_dialog_shown = false;
+        SDL_RaiseWindow(g_sdl_win);
+    }
     return out;
 }
 
