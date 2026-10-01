@@ -172,7 +172,10 @@ const server = Bun.serve<SocketData>({
       if (!(await file.exists())) {
         return new Response(`No result page for benchmark '${suite}' — run benchmarks/${suite}/run.sh`, { status: 404 });
       }
-      return new Response(file, { headers: { "Cache-Control": "no-store" } });
+      // The dashboard is cross-origin isolated (COI_HEADERS), so a document
+      // framed in it must carry the same headers or the browser blocks the
+      // frame (CoepFrameResourceNeedsCoepHeader) and the tab stays empty.
+      return new Response(file, { headers: { ...COI_HEADERS, "Cache-Control": "no-store" } });
     }
 
     if (url.pathname === "/api/readme" && req.method === "GET") {
