@@ -55,6 +55,17 @@ void rae_ext_rae_runtime_warning(rae_String message) {
   fflush(stderr);
 }
 
+/* The warning of `List.set` for an index past the end, for the inline form
+ * the C backend emits for a plain-data element (c_expr.c
+ * emit_list_fast_access). Same line as lib/core/List.rae's
+ * runtimeWarning("List.set: ..."), kept out of line and cold so the hot
+ * store stays a length check plus one store. */
+__attribute__((cold, noinline)) void rae_list_set_out_of_range(int64_t index, int64_t length) {
+  fprintf(stderr, "warning: List.set: index %lld is out of range for length %lld\n",
+          (long long)index, (long long)length);
+  fflush(stderr);
+}
+
 rae_String rae_ext_rae_sys_get_env(rae_String name) {
   if (!name.data) return (rae_String){NULL, 0, 0, 0};
   const char* val = getenv((const char*)name.data);

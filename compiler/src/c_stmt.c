@@ -1849,8 +1849,19 @@ bool expr_may_pool(CFuncContext* ctx, const AstExpr* e) {
     case AST_EXPR_BINARY:
       // Only `+` can build a String (concatenation); comparisons, `and`/`or`,
       // arithmetic and bit operators never do, so only their operands count.
+      // A `+` is a concatenation only when its operands are Strings: one
+      // operand of a known non-String type (a Float in `list.copyAtDefault(
+      // index: b) + impulse`, whose own type may not be inferable) makes it
+      // arithmetic. Unflagged, such a `+` kept a pool mark/flush pair in a hot
+      // loop for nothing.
       if (e->as.binary.op == AST_BIN_ADD
-          && type_may_carry_pool_string(ctx, infer_expr_type_ref(ctx, e))) return true;
+          && type_may_carry_pool_string(ctx, infer_expr_type_ref(ctx, e))) {
+        const AstTypeRef* lhs = infer_expr_type_ref(ctx, e->as.binary.lhs);
+        const AstTypeRef* rhs = infer_expr_type_ref(ctx, e->as.binary.rhs);
+        bool arithmetic = (lhs && !type_may_carry_pool_string(ctx, lhs))
+                       || (rhs && !type_may_carry_pool_string(ctx, rhs));
+        if (!arithmetic) return true;
+      }
       return expr_may_pool(ctx, e->as.binary.lhs) || expr_may_pool(ctx, e->as.binary.rhs);
     case AST_EXPR_UNARY: case AST_EXPR_BOX: case AST_EXPR_UNBOX: case AST_EXPR_OWN:
       return expr_may_pool(ctx, e->as.unary.operand);

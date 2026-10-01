@@ -23,8 +23,8 @@ The reasons, each worked out below:
 2. **Rae itself is not the obstacle: safe Rae runs a contact-solver kernel at
    C speed.** That holds when the list accessors are the narrowed forms
    (`if let … = copyAt` to read, `if let slot: mod T => modAt` to write). The
-   shorter `copyAtDefault` / `set` spellings are 3.5–6× slower today. That is a
-   compiler or library fix, not a language limit (§4). The obstacle is
+   shorter `copyAtDefault` / `set` spellings were 3.5–6× slower; compiler 0.1.99
+   lowers them the same way for plain-data elements (§4). The obstacle is
    item 1: SIMD and threads.
 3. **Box3D is changing fast.** All 49 commits are from the last 4.5 months. In
    the last 3 months, 73 of its source files changed by +9 527 / −5 284 lines;
@@ -154,18 +154,16 @@ carries a warning path. The suite now has this kernel as its "Scatter update"
 card (C, Rust, JavaScript, Python and the three Rae spellings).
 
 A direct port written with the narrowed forms would therefore match Box3D's
-scalar path. Written with `copyAtDefault` / `set`, it would run 3.5–6×
-behind it. Either way, it starts 15–43× behind shipping Box3D on the heavy
+scalar path. Since compiler 0.1.99 the same holds for `copyAtDefault` / `set` on
+plain-data elements (they were 3.5–6× slower before). Either way, it starts 15–43× behind shipping Box3D on the heavy
 benchmarks until SIMD and threads exist (§3).
 
 ## 5. What Rae would need before a port could be fast
 
-1. **Make every safe accessor as fast as the narrowed forms.** Lower
-   `copyAtDefault` / `copyAtFallback` and `set` the way `if let … = copyAt` and
-   `modAt` already are: a length check plus a load or store, with no optional
-   value and no out-of-line call. Then the obvious spelling is also the fast
-   one. Today it costs 3.5–6× (§4). This helps every hot loop in the engine,
-   not only physics.
+1. **Make every safe accessor as fast as the narrowed forms.** Done in
+   compiler 0.1.99 for plain-data elements: `copyAtDefault` / `copyAtFallback`
+   and `set` now lower to a length check plus a load or store, like
+   `if let … = copyAt` and `modAt` (scatter benchmark: 3.9× → 1.16× C).
 2. **A 4-wide float type** (`Float4`) that lowers to SSE2 / NEON / wasm SIMD,
    with the scalar struct as fallback. This is exactly Box3D's own design.
    Without it, the contact-heavy scenes stay 2.4–7× behind.
