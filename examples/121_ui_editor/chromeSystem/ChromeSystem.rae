@@ -147,8 +147,10 @@ func editorTextFor(chromeSystem: view ChromeSystem, key: view String) ret String
 # Every `TextBinding` whose key is an `editor.*` key gets its Text from the
 # status. Other keys (a document's own bindings, 106's `album.title`) are
 # another app's and are left alone. Writes only on change, so an idle frame
-# bumps no table generation.
-func editorTextSystem(world: mod UiWorld, chromeSystem: view ChromeSystem) {
+# bumps no table generation, and returns whether it wrote: a new label is a
+# change the frame must lay out and draw, like any other system's.
+func editorTextSystem(world: mod UiWorld, chromeSystem: view ChromeSystem) ret Bool {
+  var changed: Bool = false
   let count: Int = componentCount(this: world.textBindings)
   loop var i: Int = 0, i < count, ++i {
     let entityId: EntityId = componentEntityAt(this: world.textBindings, i: i)
@@ -166,7 +168,9 @@ func editorTextSystem(world: mod UiWorld, chromeSystem: view ChromeSystem) {
     }
     let text: mod Text => componentMod(this: world.texts, entityId: entityId)
     text.text = value
+    changed = true
   }
+  ret changed
 }
 
 # The diagnostics pill chooses its authored colour for the current state.

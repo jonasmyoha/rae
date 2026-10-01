@@ -449,7 +449,6 @@ func runApp(app: mod App) ret Int {
     if panelToggleSystem(chromeSystem: app.chromeSystem, world: app.world) {
       changed = true
     }
-    editorTextSystem(world: app.world, chromeSystem: app.chromeSystem)
     if cameraInputSystem(
       cameraSystem: app.cameraSystem
       world: app.world
@@ -601,6 +600,13 @@ func runApp(app: mod App) ret Int {
     if animating {
       changed = true
     }
+    # The chrome labels follow the ChromeSystem fields, so their sync runs
+    # AFTER every system above that writes them (camera zoom, selection,
+    # load, save): a label then changes in the same frame as its cause, and a
+    # changed label is itself a change to lay out and draw.
+    if editorTextSystem(world: app.world, chromeSystem: app.chromeSystem) {
+      changed = true
+    }
     if hadEvents or changed {
       listViewSystem(world: app.world, uiSystems: app.uiSystems, scenes: app.document.registry)
       runScheduledUiSystems(
@@ -624,6 +630,8 @@ func runApp(app: mod App) ret Int {
             canvasH: app.viewportSystem.designH
           )
         )
+        # The refit changed the zoom, so the zoom label follows it.
+        editorTextSystem(world: app.world, chromeSystem: app.chromeSystem)
         runScheduledUiSystems(
           schedule: app.schedule
           world: app.world
