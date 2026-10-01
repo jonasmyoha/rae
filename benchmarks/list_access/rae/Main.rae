@@ -153,9 +153,11 @@ func intMostlyValid(values: view List(Int), operations: view Int) {
   var checksum: Int = 0
   var iteration: Int = 0
   loop iteration < operations {
-    var index: Int = (iteration * 48271 + 17) % divisor
-    if iteration % 1000 is 0 {
-      index = values.length
+    # Divide only for a valid index, as the C and Rust versions do: computing
+    # `% divisor` on every iteration and then overwriting it did extra work.
+    var index: Int = values.length
+    if iteration % 1000 is not 0 {
+      index = (iteration * 48271 + 17) % divisor
     }
     if let value: Int = values.copyAt(index: index) {
       checksum = checksum + value
@@ -173,9 +175,10 @@ func intMixedInvalid(values: view List(Int), operations: view Int) {
   var checksum: Int = 0
   var iteration: Int = 0
   loop iteration < operations {
-    var index: Int = (iteration * 48271 + 17) % divisor
-    if iteration % 4 is 0 {
-      index = -1
+    # Divide only for a valid index, as the C and Rust versions do.
+    var index: Int = -1
+    if iteration % 4 is not 0 {
+      index = (iteration * 48271 + 17) % divisor
     }
     if let value: Int = values.copyAt(index: index) {
       checksum = checksum + value

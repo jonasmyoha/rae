@@ -538,6 +538,7 @@ rae_String rae_ext_rae_str_sub(rae_String s, int64_t start, int64_t len);
  * stderr, exit RAE_TRAP_EXIT_CODE. runtime_filesystem.c. */
 void rae_ext_rae_runtime_error(rae_String message);
 void rae_ext_rae_runtime_warning(rae_String message);
+__attribute__((cold, noinline)) void rae_list_set_out_of_range(int64_t index, int64_t length);
 /* runtime_core_memory.c: per-thread alternate signal stack for the crash
  * handler; the emitted spawn thunk calls it first. No-op on WASM. */
 void rae_thread_install_altstack(void);

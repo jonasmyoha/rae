@@ -308,6 +308,94 @@ static void emit_member_chain_on_temp(CFuncContext* ctx, const AstExpr* expr, co
     fprintf(out, "%s%.*s", use_arrow ? "->" : ".", (int)fld.len, fld.data);
 }
 
+
+// `list.copyAtDefault(index:)`, `list.copyAtFallback(index:fallback:)` and
+// `list.set(index:value:)` on a List whose element owns no heap (Int, Float,
+// Bool, a struct of those) lower to a length check plus one load or store,
+// exactly like the narrowed `if let ... = copyAt` / `modAt` forms
+// (emit_list_if_let). As library calls they cost 3-4x those forms in a hot
+// loop: copyAtDefault built an `opt T` through copyAt and unwrapped it, and set
+// carried its interpolated warning in the hot path (benchmarks/list_access,
+// "Scatter update"). The semantics are the library's: an index out of range
+// reads the type's zero value / the fallback, and a store is ignored with the
+// same one-line warning. Arguments are evaluated once, in source order. An
+// element that owns heap (String, List, a struct with them) keeps the library
+// call, which deep-copies a read and drops the overwritten value.
+static bool emit_list_fast_access(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
+  Str method = expr->as.method_call.method_name;
+  bool read_default = str_eq_cstr(method, "copyAtDefault");
+  bool read_fallback = str_eq_cstr(method, "copyAtFallback");
+  bool write = str_eq_cstr(method, "set");
+  if (!read_default && !read_fallback && !write) return false;
+  const AstTypeRef* list_type = infer_expr_type_ref(ctx, expr->as.method_call.object);
+  if (!list_type || list_type->is_opt || !str_eq_cstr(get_base_type_name(list_type), "List")
+      || !list_type->generic_args || list_type->generic_args->next) return false;
+  const AstTypeRef* element = list_type->generic_args;
+  if (ctx->generic_params && ctx->generic_args)
+    element = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args,
+                                  (AstTypeRef*)element);
+  if (!element || element->is_opt || element->is_view || element->is_mod) return false;
+  Str element_base = get_base_type_name(element);
+  if (element_base.len == 0 || str_eq_cstr(element_base, "Any") || str_eq_cstr(element_base, "RaeAny")
+      || str_eq_cstr(element_base, "String")) return false;
+  for (const AstIdentifierPart* gp = ctx->generic_params; gp; gp = gp->next)
+    if (str_eq(gp->text, element_base)) return false;  // still abstract
+  if (type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, element, 0)) return false;
+
+  const AstExpr* index_value = NULL;
+  const AstExpr* extra_value = NULL;  // the fallback, or the value stored
+  for (const AstCallArg* a = expr->as.method_call.args; a; a = a->next) {
+    if (str_eq_cstr(a->name, "index")) index_value = a->value;
+    else if (read_fallback && str_eq_cstr(a->name, "fallback")) extra_value = a->value;
+    else if (write && str_eq_cstr(a->name, "value")) extra_value = a->value;
+    else return false;
+  }
+  if (!index_value || ((read_fallback || write) && !extra_value)) return false;
+
+  int id = ctx->temp_counter++;
+  bool list_is_ref = list_type->is_view || list_type->is_mod;
+  fprintf(out, "(__extension__ ({ __auto_type __rae_flist%d = ", id);
+  if (!list_is_ref) fprintf(out, "&(");
+  emit_expr(ctx, expr->as.method_call.object, out, PREC_LOWEST, false, true);
+  if (!list_is_ref) fprintf(out, ")");
+  fprintf(out, "; int64_t __rae_findex%d = ", id);
+  emit_expr(ctx, index_value, out, PREC_LOWEST, false, false);
+  fprintf(out, "; ");
+  if (extra_value) {
+    bool had_exp = ctx->has_expected_type;
+    AstTypeRef saved_exp = ctx->expected_type;
+    ctx->expected_type = *element;
+    ctx->has_expected_type = true;
+    emit_type_ref_as_c_type(ctx, element, out, false);
+    fprintf(out, " __rae_fvalue%d = ", id);
+    emit_expr(ctx, extra_value, out, PREC_LOWEST, false, false);
+    fprintf(out, "; ");
+    ctx->has_expected_type = had_exp;
+    ctx->expected_type = saved_exp;
+  }
+  if (write) {
+    fprintf(out, "if ((uint64_t)__rae_findex%d < (uint64_t)__rae_flist%d->length) "
+                 "__rae_flist%d->data[__rae_findex%d] = __rae_fvalue%d; "
+                 "else rae_list_set_out_of_range(__rae_findex%d, __rae_flist%d->length); (void)0; }))",
+            id, id, id, id, id, id, id);
+  } else {
+    // A typed result, not `?:`: the conditional operator promotes a Bool to
+    // int, and interpolation would then print 1 instead of true.
+    emit_type_ref_as_c_type(ctx, element, out, false);
+    if (read_fallback) {
+      fprintf(out, " __rae_fresult%d = __rae_fvalue%d; ", id, id);
+    } else {
+      fprintf(out, " __rae_fresult%d = (", id);
+      emit_type_ref_as_c_type(ctx, element, out, false);
+      fprintf(out, "){0}; ");
+    }
+    fprintf(out, "if ((uint64_t)__rae_findex%d < (uint64_t)__rae_flist%d->length) "
+                 "__rae_fresult%d = __rae_flist%d->data[__rae_findex%d]; __rae_fresult%d; }))",
+            id, id, id, id, id, id);
+  }
+  return true;
+}
+
 bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_prec, bool is_lvalue, bool suppress_deref) {
   if (!expr) return true;
   switch (expr->kind) {
@@ -820,6 +908,7 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
             emit_to_string_expr(ctx, expr->as.method_call.object, out);
             break;
         }
+        if (emit_list_fast_access(ctx, expr, out)) break;
         // Built-in method: toJson() → rae_toJson_TYPE_(&object)
         if (str_eq_cstr(expr->as.method_call.method_name, "toJson") && !expr->as.method_call.args) {
             const AstTypeRef* obj_tr = infer_expr_type_ref(ctx, expr->as.method_call.object);
