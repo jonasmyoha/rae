@@ -254,7 +254,7 @@ How option B would look:
 **Choose C: integrate Box3D's C library now behind a Rae ECS layer, and
 re-plan the port as language work first.**
 
-1. Replace the port phases P0–P10 in `QUEUE_PHYSICS.md` with:
+1. Replace the port phases P0–P10 (the `[physics port P…]` tasks in `QUEUE.md`) with:
    - (a) vendor Box3D and extend the binding generator to it;
    - (b) the `lib/physics` ECS layer and a 114 demo;
    - (c) the same memory and determinism checks the other examples have.
