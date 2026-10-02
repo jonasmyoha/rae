@@ -1,0 +1,132 @@
+# The shared event-loop wait policy (lib/ui/EventLoop.rae nextWaitTimeoutSec),
+# case by case. An idle UI app should block, not tick: a visible idle window
+# sleeps until an event (or its deadline), a watcher only adds a timer where
+# the OS cannot notify about file changes, and a HIDDEN window ignores
+# animation, a held button and the watcher — it sleeps until it is shown or
+# its heartbeat is due, at most once a second. This is the 121 editor's
+# idle-wakeup check (headless runs cannot be hidden; measure a real window
+# with compiler/tools/idle-wakeups.sh).
+open ui/EventLoop
+
+func show(
+  label: view String
+  visible: view Bool
+  animating: view Bool
+  mouseDown: view Bool
+  pollWatcher: view Bool
+  frameSec: view Float
+  heartbeatSec: view Float
+) {
+  let timeout: Float = nextWaitTimeoutSec(
+    visible: visible
+    animating: animating
+    mouseDown: mouseDown
+    pollWatcher: pollWatcher
+    frameSec: frameSec
+    heartbeatSec: heartbeatSec
+  )
+  # Milliseconds, rounded: the wakeups per second follow from it.
+  log("{label}: {(timeout * 1000.0 + 0.5).toInt()} ms")
+}
+
+func main() {
+  show(
+    label: "visible idle"
+    visible: true
+    animating: false
+    mouseDown: false
+    pollWatcher: false
+    frameSec: 0.016667
+    heartbeatSec: 0.0
+  )
+  show(
+    label: "visible idle, watcher without notifications"
+    visible: true
+    animating: false
+    mouseDown: false
+    pollWatcher: true
+    frameSec: 0.016667
+    heartbeatSec: 0.0
+  )
+  show(
+    label: "visible idle, deadline in 0.25 s"
+    visible: true
+    animating: false
+    mouseDown: false
+    pollWatcher: true
+    frameSec: 0.016667
+    heartbeatSec: 0.25
+  )
+  show(
+    label: "visible idle, deadline after the watcher poll"
+    visible: true
+    animating: false
+    mouseDown: false
+    pollWatcher: true
+    frameSec: 0.016667
+    heartbeatSec: 5.0
+  )
+  show(
+    label: "visible animating"
+    visible: true
+    animating: true
+    mouseDown: false
+    pollWatcher: true
+    frameSec: 0.016667
+    heartbeatSec: 0.5
+  )
+  show(
+    label: "visible busy render"
+    visible: true
+    animating: true
+    mouseDown: false
+    pollWatcher: false
+    frameSec: 0.0
+    heartbeatSec: 0.0
+  )
+  show(
+    label: "visible mouse down"
+    visible: true
+    animating: false
+    mouseDown: true
+    pollWatcher: false
+    frameSec: 0.016667
+    heartbeatSec: 0.0
+  )
+  show(
+    label: "hidden animating"
+    visible: false
+    animating: true
+    mouseDown: false
+    pollWatcher: true
+    frameSec: 0.016667
+    heartbeatSec: 0.0
+  )
+  show(
+    label: "hidden busy render"
+    visible: false
+    animating: true
+    mouseDown: true
+    pollWatcher: true
+    frameSec: 0.0
+    heartbeatSec: 0.0
+  )
+  show(
+    label: "hidden, deadline in 0.25 s"
+    visible: false
+    animating: true
+    mouseDown: false
+    pollWatcher: false
+    frameSec: 0.016667
+    heartbeatSec: 0.25
+  )
+  show(
+    label: "hidden, heartbeat 2 s"
+    visible: false
+    animating: false
+    mouseDown: false
+    pollWatcher: false
+    frameSec: 0.016667
+    heartbeatSec: 2.0
+  )
+}

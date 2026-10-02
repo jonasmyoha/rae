@@ -170,6 +170,21 @@ func updateWindowGeometry(
   writeWindowGeometry(windowGeometry: windowGeometry)
 }
 
+# Seconds until a pending write is due, for the loop's wait deadline
+# (EventLoop.nextWaitTimeoutSec `heartbeatSec`): a drag that ends while the
+# app sits idle is still written, without a periodic wake to notice the
+# settle. 0 when nothing is pending.
+func windowGeometryDeadlineSec(windowGeometry: view WindowGeometry, now: view Float64) ret Float {
+  if windowGeometry.dirty is false {
+    ret 0.0
+  }
+  let remaining: Float = windowGeometrySettleSec - (now - windowGeometry.dirtyAt) as Float
+  if remaining < 0.001 {
+    ret 0.001
+  }
+  ret remaining
+}
+
 # For an app that would rather write on its own schedule — on quit, say — than
 # let the settle timer do it.
 func flushWindowGeometry(windowGeometry: mod WindowGeometry) {

@@ -29,6 +29,7 @@
 # where `<verb>` is `data`, `reload`, or `restart`. The build-id and
 # timestamp are recorded but not consumed by the runtime — they're
 # for log forensics and supervisor-side dedup.
+open FileNotify
 
 # ----- paths ----------------------------------------------------------
 #
@@ -177,6 +178,9 @@ type ReloadSignalWatcher {
   # Epoch seconds — Float64 so a ~1.7e9 timestamp keeps sub-second
   # resolution (f32 would quantise it to ~128s and never detect a change).
   lastMtime: Float64
+  # Wakes a blocked event loop when the supervisor writes the signal, so an
+  # idle app needs no timer to notice a rebuild (lib/FileNotify.rae).
+  notify: FileNotify
 }
 
 func emptySignal() ret ReloadSignal {
@@ -187,10 +191,21 @@ func emptySignal() ret ReloadSignal {
 # `pollReloadSignal` after construction reports `None` even if the
 # file already exists. Supervisors can pre-create the file at any
 # version; we only react to *new* writes after the app started.
-func createReloadSignalWatcher() pub ret ReloadSignalWatcher {
-  let p: String = signalPath()
-  let mt: Float64 = fileModTime(path: p)
-  ret ReloadSignalWatcher { path: p, lastMtime: mt }
+func createReloadSignalWatcher() ret ReloadSignalWatcher {
+  ret createReloadSignalWatcherAt(path: signalPath())
+}
+
+# The same for a signal file somewhere else (tests).
+func createReloadSignalWatcherAt(path: view String) ret ReloadSignalWatcher {
+  let notify: FileNotify = createFileNotify()
+  fileNotifyWatch(fileNotify: notify, path: path)
+  ret ReloadSignalWatcher { path: "{path}", lastMtime: fileModTime(path: path), notify: notify }
+}
+
+# Whether an event loop must wake on a timer to see a new signal: only when
+# the OS gives no file notifications (lib/ui/EventLoop.rae's `pollWatcher`).
+func reloadSignalNeedsPolling(w: view ReloadSignalWatcher) ret Bool {
+  ret fileNotifyActive(fileNotify: w.notify) is false
 }
 
 # ----- build status ---------------------------------------------------
@@ -289,11 +304,17 @@ func parseReloadVerb(token: view String) ret ReloadVerb {
 # watcher forever, and the supervisor will write a fresh signal
 # next time around.
 func pollReloadSignal(w: mod ReloadSignalWatcher) pub ret ReloadSignal {
+  # The notification only woke the loop; the mtime below decides.
+  fileNotifyTakeChanged(fileNotify: w.notify)
   let mt: Float64 = fileModTime(path: w.path)
   if mt is w.lastMtime {
     ret emptySignal()
   }
   w.lastMtime = mt
+  # The supervisor may have renamed a new file over the old one: watch the
+  # file that is there now.
+  fileNotifyClear(fileNotify: w.notify)
+  fileNotifyWatch(fileNotify: w.notify, path: w.path)
   var raw: String = ""
   unsafe {
     raw = rae_ext_rae_sys_read_file(path: w.path)

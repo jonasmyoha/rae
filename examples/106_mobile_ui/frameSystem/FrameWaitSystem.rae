@@ -4,11 +4,15 @@ open ui/WindowGeometry
 open ui/scrollRootSystem/ScrollRootSystem
 open ecs/ComponentTable
 open ui/UiSystems
+open FileWatch
+open HotReload
+import Gpu2d
 
 # Frame phase 0 — the wait policy. Decides how long to block for OS events
 # (busy-render while interacting / animating / loading, one frame while
-# playback ticks, the watcher cadence otherwise, the idle cap when nothing
-# moves), writes the scroll bounds + animation flags the later phases read
+# playback ticks, until the next event or deadline when nothing moves, and
+# never a frame-length wait while the window is hidden), writes the scroll bounds + animation flags
+# the later phases read
 # into the tick, waits, and turns the close / auto-exit conditions into
 # `session.running = false`. The world is only read, for the scroll bounds.
 func frameWaitSystem(
@@ -32,17 +36,17 @@ func frameWaitSystem(
   tick.scrollOnThisScreen = range.active
   tick.scrollFloor = range.floor
   # Treat in-flight scroll momentum / spring as an animation so the event
-  # loop wakes at frame cadence (~16 ms) instead of the file-watcher's idle
-  # poll (50 ms / ~20 fps). Otherwise the spring-back after release renders
-  # chunky because the physics step only runs once per OS event wake.
+  # loop wakes at frame cadence (~16 ms) instead of blocking until the next
+  # OS event. Otherwise the spring-back after release renders chunky because
+  # the physics step only runs once per OS event wake.
   let scrollOOB: Bool = scrollFsm.scrollY > 0.0 or scrollFsm.scrollY < tick.scrollFloor
   var velAbs: Float = scrollFsm.velocity
   if velAbs < 0.0 {
-    velAbs = 0.0 - velAbs
+    velAbs = -velAbs
   }
   # Recent-wheel (0.25s) counts as animating: wheel scroll drives scrollY
-  # per-event with velocity==0, so without it the loop idles at the ~20Hz
-  # watcher poll between wheel events.
+  # per-event with velocity==0, so without it the loop blocks between wheel
+  # events.
   tick.scrollAnimating = false
   if velAbs > 0.05 or scrollOOB or ((uiNowSeconds() - scrollFsm.lastWheelTime) < 0.25) {
     tick.scrollAnimating = true
@@ -66,16 +70,25 @@ func frameWaitSystem(
   tick.busyAnimating = heroInFlight or tick.scrollAnimating or session.lastHoverAnimDirty or session.assetsLoading or uiPointerButtonDown(
     button: mouseButtonLeft
   )
-  tick.timeout = 0.0
-  if tick.busyAnimating is false {
-    tick.timeout = nextWaitTimeoutSec(
-      animating: tick.playbackAnimating or uiNowSeconds() < session.renderUntil
-      mouseDown: false
-      pollWatcher: true
-      frameSec: session.targetFrameSec
-      heartbeatSec: 0.0
-    )
+  # Busy-render is `animating` with a zero-length frame, so the shared policy
+  # (lib/ui/EventLoop.rae) decides it too: a hidden window never spins, it
+  # sleeps until it is shown again. The watchers wake the loop themselves
+  # (OS file notifications) and are polled only where the OS has none; a
+  # window move that is still settling asks to be woken when it is due.
+  var frameSec: Float = session.targetFrameSec
+  if tick.busyAnimating {
+    frameSec = 0.0
   }
+  tick.timeout = nextWaitTimeoutSec(
+    visible: Gpu2d.renderableNow()
+    animating: tick.busyAnimating or tick.playbackAnimating or uiNowSeconds() < session.renderUntil
+    mouseDown: false
+    pollWatcher: fileWatcherNeedsPolling(watcher: session.watcher) or reloadSignalNeedsPolling(
+      w: session.reloadWatcher
+    )
+    frameSec: frameSec
+    heartbeatSec: windowGeometryDeadlineSec(windowGeometry: app.windowGeometry, now: uiNowSeconds())
+  )
   # Heartbeat: prints once per frame BEFORE the wait. If this line stops
   # appearing in the log, the loop has stalled inside the frame body (not in
   # waitEventsTimeout). If it keeps printing but UI doesn't update, the input

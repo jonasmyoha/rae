@@ -163,10 +163,54 @@ Two layers enforce it so it is not a per-app footgun:
   free. Pattern:
 
       if gpu2d.shouldRenderFrame(appNeedsRender: needsRender) is false {
-        gpu2d.waitEvents(timeoutSec: nextWaitTimeoutSec(animating: false, ...))
+        gpu2d.waitEvents(timeoutSec: nextWaitTimeoutSec(
+          visible: Gpu2d.renderableNow(), animating: animating, ...))
       } else {
         ... render + present ...
       }
 
 New windowed apps (2D or 3D) should use `shouldRenderFrame` rather than
 re-deriving the visibility check.
+
+## An idle app sleeps; it does not tick (2026-10-02)
+
+Not rendering is half of it; the other half is not WAKING. Measured with
+`compiler/tools/idle-wakeups.sh` (main-loop iterations per second from the
+runtime's `RAE_LOOP_TRACE=1` lines; the process's context switches have a floor
+of tens per second from Metal/wgpu/display-link threads, so they cannot tell):
+
+| app | visible idle (before -> after) | hidden (before -> after) |
+|---|---|---|
+| 121 editor, static scene | 19 -> 0 | 2 -> 0 |
+| 121 editor, live effects (Coverage) | renders | 56 -> 0 |
+| 106 mobile UI | 19 -> 0 | 19 -> ~0.8 (its Spotify poller wakes it each 1 s tick, on purpose) |
+| 104 ui_hello | 4 -> 1 | 51 -> 1 |
+| 114 game | renders | 1 -> 1 |
+
+Where the wakeups came from, and the shared rule that removed each:
+
+- **A file watcher polled on a timer** (50 ms in the policy, 250 ms in the
+  watchers): an idle visible window woke ~20x/s to stat files that had not
+  changed. Now the OS notifies (`lib/FileNotify.rae`: kqueue on macOS, inotify
+  on Linux), and its runtime thread calls the same `EventLoop.wake` a spawn'd
+  worker uses. `pollWatcher` is passed only where the OS has no notifications
+  (`fileWatcherNeedsPolling`, `reloadSignalNeedsPolling`), and then it is a 1 s
+  poll.
+- **An effect kept a one-frame wait while hidden**: `animating` made the wait
+  16.7 ms although nothing was drawn. `nextWaitTimeoutSec` now takes `visible`
+  (`Gpu2d.renderableNow()`) and, hidden, ignores animating / mouseDown /
+  pollWatcher: it sleeps until the window is shown (an OS event) or its
+  heartbeat is due, at most once a second. A busy render loop is `animating`
+  with `frameSec: 0.0`, so a hidden one cannot spin either.
+- **A fixed heartbeat for something slow**: `heartbeatSec` is a DEADLINE — pass
+  the time until the next change of a slow periodic thing (a caret blink, a
+  clock label, `windowGeometryDeadlineSec` for a settling window move), never
+  `animating`. Wait for the next blink, not the next frame.
+- **An app that rendered while hidden** (104 drew on every wake): use
+  `Gpu2d.shouldRenderFrame`.
+
+Anything that finishes OFF the event queue must wake the loop, or an idle app
+only notices it on the next mouse move: a spawn'd worker calls `wake()` after
+posting its result, and the runtime does the same for a file dialog's result
+and a file notification. `compiler/tests/cases/940_wait_policy` pins the policy
+case by case.

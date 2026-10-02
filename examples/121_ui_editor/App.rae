@@ -34,8 +34,6 @@ open ui/WindowGeometry
 open ecs/Event
 open ui/UiSystems
 
-const idleHeartbeatSec: Float = 0.5
-
 func toggleChrome(chromeSystem: view ChromeSystem, world: mod UiWorld) {
   let active: Active = { value: not chromeVisible(world: world, chromeSystem: chromeSystem) }
   componentSet(this: world.actives, entityId: chromeSystem.pageRoot, data: active)
@@ -685,14 +683,17 @@ func runApp(app: mod App) ret Int {
       }
       renderedThisFrame = true
     } else {
-      # The watcher is a poll, so the wait is bounded by its interval while
-      # the window can show a reload; a hidden window sleeps on the heartbeat.
+      # The shared policy (lib/ui/EventLoop.rae): a hidden window sleeps
+      # whatever animates; a visible idle one blocks until an event — a file
+      # change is one (watchSystem) — or until a settling window move is due
+      # to be written.
       Gpu2d.waitEvents(timeoutSec: nextWaitTimeoutSec(
+        visible: Gpu2d.renderableNow()
         animating: animating
         mouseDown: false
-        pollWatcher: Gpu2d.renderableNow()
+        pollWatcher: fileWatchNeedsPolling(watch: app.watch)
         frameSec: 0.016667
-        heartbeatSec: idleHeartbeatSec
+        heartbeatSec: windowGeometryDeadlineSec(windowGeometry: app.windowGeometry, now: now)
       ))
     }
   }
