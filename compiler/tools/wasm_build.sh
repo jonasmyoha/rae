@@ -46,7 +46,7 @@ mkdir -p "$(dirname "$OUT")"
 # runtime (it's a no-op stub on the single-threaded wasip1 target).
 if [ "${WASM_THREADS:-0}" = "1" ]; then
   # Shared memory must be bounded: --max-memory=1 GiB (16384 * 64KiB pages).
-  "$CC" --target=wasm32-wasip1-threads --sysroot="$SYS" -O2 -msimd128 -pthread \
+  "$CC" --target=wasm32-wasip1-threads --sysroot="$SYS" -O2 -ffp-contract=off -msimd128 -pthread \
     -DRAE_WASM_THREADS \
     -Wl,--allow-undefined \
     -Wl,--import-memory,--export-memory,--shared-memory,--max-memory=1073741824 \
@@ -55,7 +55,7 @@ else
   # -msimd128: enable WASM SIMD (clang auto-vectorizes hot float loops); supported
   # by Node and all modern browsers. -Wl,--allow-undefined lets examples import
   # functions the host supplies from JS (e.g. fbPixel) as env imports.
-  "$CC" --target=wasm32-wasip1 --sysroot="$SYS" -O2 -msimd128 \
+  "$CC" --target=wasm32-wasip1 --sysroot="$SYS" -O2 -ffp-contract=off -msimd128 \
     -Wl,--allow-undefined \
     -o "$OUT" "$TMP/out.c" "$TMP/rae_runtime.c" $EXTRA_C -I"$TMP"
 fi

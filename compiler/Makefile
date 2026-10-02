@@ -4,7 +4,7 @@
 MODE ?= DEV_FAST
 
 CC = gcc
-COMMON_CFLAGS = -std=c11 -Wall -Wextra -Wpedantic -O0 -g
+COMMON_CFLAGS = -std=c11 -Wall -Wextra -Wpedantic -O0 -g -ffp-contract=off
 LDFLAGS = -framework Foundation -framework ImageIO -framework CoreGraphics -L/opt/homebrew/lib
 COMMON_CFLAGS += -I/opt/homebrew/include -I../third_party/tinyexpr
 

@@ -1,0 +1,52 @@
+# `a * b + c` must round twice — the product, then the sum — and never be
+# fused into one FMA, which rounds once. Clang fuses by default on arm64, so
+# without -ffp-contract=off (and rae_runtime.h's FP_CONTRACT pragma) the same
+# program computes different floats on different machines, and the physics
+# port could not match Box3D's reference build bit for bit
+# (docs/physics-rae-port-design.md §4).
+#
+# The values make the two answers differ: a = b = 1 + e, so a * b is
+# 1 + 2e + e*e, and e*e is too small to survive rounding the product. With
+# c = -(1 + 2e) the unfused result is exactly 0; a fused one is e*e. The
+# exponent comes from a parsed string so the C compiler cannot fold anything.
+
+# 0.5 to the power `steps`, built by a loop the C compiler cannot fold away.
+func halfPower(steps: view Int) ret Float {
+  var value: Float = 1.0
+  loop var i: Int = 0, i < steps, ++i {
+    value = value * 0.5
+  }
+  ret value
+}
+
+func halfPower64(steps: view Int) ret Float64 {
+  var value: Float64 = 1.0
+  loop var i: Int = 0, i < steps, ++i {
+    value = value * 0.5
+  }
+  ret value
+}
+
+func multiplyAdd(a: view Float, b: view Float, c: view Float) ret Float {
+  ret a * b + c
+}
+
+func multiplyAdd64(a: view Float64, b: view Float64, c: view Float64) ret Float64 {
+  ret a * b + c
+}
+
+func main() {
+  # Float is 32-bit: e = 2^-12, e*e = 2^-24 is half an ulp of 1 and rounds away.
+  let e: Float = halfPower(steps: "12".toInt())
+  let a: Float = 1.0 + e
+  let result: Float = multiplyAdd(a: a, b: a, c: -(1.0 + 2.0 * e))
+  log("Float   a * b + c is zero (not fused): {result is 0.0}")
+
+  # Float64: e = 2^-30, e*e = 2^-60 is far below an ulp of 1.
+  let e64: Float64 = halfPower64(steps: "30".toInt())
+  let one: Float64 = 1.0
+  let two: Float64 = 2.0
+  let a64: Float64 = one + e64
+  let result64: Float64 = multiplyAdd64(a: a64, b: a64, c: -(one + two * e64))
+  log("Float64 a * b + c is zero (not fused): {result64 is 0.0}")
+}

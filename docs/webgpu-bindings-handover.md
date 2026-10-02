@@ -65,7 +65,7 @@ against wgpu-native, runs. `WGPUExtent3D` round-trips through Rae.
 
 ```sh
 rae build --target compiled --emit-c --out /tmp/w/out.c prog.rae
-gcc -O0 -o /tmp/w/app /tmp/w/out.c /tmp/w/rae_runtime.c \
+gcc -O0 -ffp-contract=off -o /tmp/w/app /tmp/w/out.c /tmp/w/rae_runtime.c \
   third_party/raylib/rae_raylib.c third_party/tinyexpr/rae_tinyexpr.c \
   -I/tmp/w -Ithird_party/raylib -Ithird_party/tinyexpr -I/opt/homebrew/include \
   -DRAE_HAS_RAYLIB -DRAE_HAS_SDL3 -DRAE_HAS_WEBGPU \

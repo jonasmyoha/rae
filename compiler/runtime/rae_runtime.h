@@ -1,6 +1,18 @@
 #ifndef RAE_RUNTIME_H
 #define RAE_RUNTIME_H
 
+/* Never fuse `a * b + c` into one FMA instruction. Clang does by default on
+ * arm64 (and wherever FMA exists), which rounds once instead of twice: the
+ * same Rae program then computes different floats on different machines, and
+ * the physics port (docs/physics-rae-port-design.md §4) must match Box3D's
+ * reference build bit for bit. Every Rae compile line also passes
+ * -ffp-contract=off; this pragma is the backstop for builds that do not (an
+ * IDE project, a hand-written recipe), since every Rae translation unit
+ * includes this header first. GCC ignores the pragma and relies on the flag. */
+#if defined(__clang__)
+#pragma STDC FP_CONTRACT OFF
+#endif
+
 #include <stdint.h>
 #include <stdbool.h>
 #include <math.h>
@@ -573,9 +585,29 @@ int64_t rae_ext_rae_mem_alloc_total(void);
 void rae_ext_rae_seed(int64_t seed);
 float rae_ext_rae_random(void);
 int64_t rae_ext_rae_random_int(int64_t min, int64_t max);
-int64_t rae_ext_rae_popcount(int64_t x);
-int64_t rae_ext_rae_leading_zeros(int64_t x);
-int64_t rae_ext_rae_trailing_zeros(int64_t x);
+/* Bit intrinsics (lib/Math.rae popcount / leadingZeros / trailingZeros).
+ * Defined here, static inline, so each call compiles to the one CPU
+ * instruction instead of a call into the runtime: the physics bitsets and
+ * id pools walk set bits with trailingZeros in their inner loops. An input of
+ * 0 has a defined answer, the bit width (the builtins are undefined on 0). */
+static inline int64_t rae_ext_rae_popcount(int64_t x) {
+  return (int64_t)__builtin_popcountll((unsigned long long)x);
+}
+static inline int64_t rae_ext_rae_leading_zeros(int64_t x) {
+  return x == 0 ? 64 : (int64_t)__builtin_clzll((unsigned long long)x);
+}
+static inline int64_t rae_ext_rae_trailing_zeros(int64_t x) {
+  return x == 0 ? 64 : (int64_t)__builtin_ctzll((unsigned long long)x);
+}
+static inline int64_t rae_ext_Math_trailingZerosUInt64(uint64_t x) {
+  return x == 0 ? 64 : (int64_t)__builtin_ctzll((unsigned long long)x);
+}
+static inline int64_t rae_ext_Math_trailingZerosUInt32(uint32_t x) {
+  return x == 0 ? 32 : (int64_t)__builtin_ctz((unsigned int)x);
+}
+static inline int64_t rae_ext_Math_trailingZerosInt32(int32_t x) {
+  return x == 0 ? 32 : (int64_t)__builtin_ctz((unsigned int)x);
+}
 
 /* Channel(T) MPSC cross-thread channel (#271) — see lib/channel.rae. */
 int64_t rae_ext_rae_chan_new(int64_t elem_size);

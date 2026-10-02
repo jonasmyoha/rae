@@ -119,7 +119,7 @@ $(printf "%b" "$asset_lines"))
 $(printf "%b" "${pkg_lines:-}")
 
 target_compile_definitions(\${APP} PRIVATE RAE_HAS_SDL3 RAE_HAS_WEBGPU)
-target_compile_options(\${APP} PRIVATE -w)
+target_compile_options(\${APP} PRIVATE -w -ffp-contract=off)
 target_include_directories(\${APP} PRIVATE
   "$runtime_dir"
   "$frameworks/SDL3.xcframework/ios-arm64/Headers"

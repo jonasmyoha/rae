@@ -1,0 +1,156 @@
+# A contact-solver-shaped kernel over solver-sized structs (P0 of the physics
+# port, docs/physics-rae-port-design.md §6): 100 000 contact constraints of
+# 80 bytes walked in order, each reading two 32-byte body states at scattered
+# indices, computing a normal impulse, and writing the bodies and the
+# constraint back. The same program is in c/solver_struct.c, operation for
+# operation, so the checksums match and the times compare.
+type BodyState {
+  vx: Float
+  vy: Float
+  vz: Float
+  wx: Float
+  wy: Float
+  wz: Float
+  invMass: Float
+  invInertia: Float
+}
+
+type ContactConstraint {
+  normalX: Float
+  normalY: Float
+  normalZ: Float
+  anchorAX: Float
+  anchorAY: Float
+  anchorAZ: Float
+  anchorBX: Float
+  anchorBY: Float
+  anchorBZ: Float
+  normalMass: Float
+  impulse: Float
+  bias: Float
+  friction: Float
+  restitution: Float
+  relax: Float
+  spare: Float
+  bodyA: Int
+  bodyB: Int
+}
+
+const constraintCount: Int = 100000
+
+const bodyCount: Int = 25000
+
+const passes: Int = 20
+
+func nextState(state: view Int) ret Int {
+  ret (state * 1103515245 + 12345) % 2147483648
+}
+
+func unitFloat(state: view Int) ret Float {
+  ret ((state % 2001) - 1000) as Float / 1000.0
+}
+
+func main() {
+  var state: Int = 12345
+  let bodies: List(BodyState) = List.create(BodyState, cap: bodyCount)
+  loop var i: Int = 0, i < bodyCount, ++i {
+    state = nextState(state: state)
+    let velocity: Float = unitFloat(state: state)
+    bodies.add(value: BodyState {
+      vx: velocity
+      vy: -velocity
+      vz: 0.5 * velocity
+      wx: 0.0
+      wy: 0.25 * velocity
+      wz: 0.0
+      invMass: 1.0
+      invInertia: 0.5
+    })
+  }
+  let constraints: List(ContactConstraint) = List.create(ContactConstraint, cap: constraintCount)
+  loop var i: Int = 0, i < constraintCount, ++i {
+    state = nextState(state: state)
+    let bodyA: Int = state % bodyCount
+    state = nextState(state: state)
+    let bodyB: Int = state % bodyCount
+    state = nextState(state: state)
+    let lever: Float = unitFloat(state: state)
+    constraints.add(value: ContactConstraint {
+      normalX: 0.0
+      normalY: 1.0
+      normalZ: 0.0
+      anchorAX: lever
+      anchorAY: 0.5
+      anchorAZ: -lever
+      anchorBX: -lever
+      anchorBY: -0.5
+      anchorBZ: lever
+      normalMass: 0.4
+      impulse: 0.0
+      bias: 0.01
+      friction: 0.6
+      restitution: 0.0
+      relax: 1.0
+      spare: 0.0
+      bodyA: bodyA
+      bodyB: bodyB
+    })
+  }
+
+  let startNs: Int = nowNs()
+  loop var pass: Int = 0, pass < passes, ++pass {
+    loop var i: Int = 0, i < constraintCount, ++i {
+      if let constraint: mod ContactConstraint => constraints.modAt(index: i) {
+        let a: BodyState = bodies.copyAtDefault(index: constraint.bodyA)
+        let b: BodyState = bodies.copyAtDefault(index: constraint.bodyB)
+        # Relative normal velocity at the contact: (vB + wB x rB) - (vA + wA x rA).
+        let dvx: Float = b.vx + (b.wy * constraint.anchorBZ - b.wz * constraint.anchorBY) - (a.vx + (a.wy * constraint.anchorAZ - a.wz * constraint.anchorAY))
+        let dvy: Float = b.vy + (b.wz * constraint.anchorBX - b.wx * constraint.anchorBZ) - (a.vy + (a.wz * constraint.anchorAX - a.wx * constraint.anchorAZ))
+        let dvz: Float = b.vz + (b.wx * constraint.anchorBY - b.wy * constraint.anchorBX) - (a.vz + (a.wx * constraint.anchorAY - a.wy * constraint.anchorAX))
+        let normalVelocity: Float = dvx * constraint.normalX + dvy * constraint.normalY + dvz * constraint.normalZ
+        var newImpulse: Float = constraint.impulse - constraint.normalMass * (normalVelocity + constraint.bias)
+        if newImpulse < 0.0 {
+          newImpulse = 0.0
+        }
+        let delta: Float = newImpulse - constraint.impulse
+        constraint.impulse = newImpulse
+        let px: Float = delta * constraint.normalX
+        let py: Float = delta * constraint.normalY
+        let pz: Float = delta * constraint.normalZ
+        bodies.set(
+          index: constraint.bodyA
+          value: BodyState {
+            vx: a.vx - a.invMass * px
+            vy: a.vy - a.invMass * py
+            vz: a.vz - a.invMass * pz
+            wx: a.wx - a.invInertia * (constraint.anchorAY * pz - constraint.anchorAZ * py)
+            wy: a.wy - a.invInertia * (constraint.anchorAZ * px - constraint.anchorAX * pz)
+            wz: a.wz - a.invInertia * (constraint.anchorAX * py - constraint.anchorAY * px)
+            invMass: a.invMass
+            invInertia: a.invInertia
+          }
+        )
+        let b2: BodyState = bodies.copyAtDefault(index: constraint.bodyB)
+        bodies.set(
+          index: constraint.bodyB
+          value: BodyState {
+            vx: b2.vx + b2.invMass * px
+            vy: b2.vy + b2.invMass * py
+            vz: b2.vz + b2.invMass * pz
+            wx: b2.wx + b2.invInertia * (constraint.anchorBY * pz - constraint.anchorBZ * py)
+            wy: b2.wy + b2.invInertia * (constraint.anchorBZ * px - constraint.anchorBX * pz)
+            wz: b2.wz + b2.invInertia * (constraint.anchorBX * py - constraint.anchorBY * px)
+            invMass: b2.invMass
+            invInertia: b2.invInertia
+          }
+        )
+      }
+    }
+  }
+  let elapsed: Int = nowNs() - startNs
+  var checksum: Float = 0.0
+  loop var i: Int = 0, i < constraintCount, ++i {
+    checksum = checksum + constraints.copyAtDefault(index: i).impulse
+  }
+  log("RESULT,rae,{elapsed},{(checksum * 1000.0).toInt()}")
+}
