@@ -1,0 +1,38 @@
+# trailingZeros for every integer width the physics port needs (Box3D's
+# b3CTZ64 walks the set bits of a UInt64 bitset word): UInt64, UInt32 and
+# Int32 beside the Int form of 650. Each is one CPU instruction (inline in
+# rae_runtime.h); 0 answers the bit width, and the sign bit of a 32-bit value
+# counts like any other bit.
+open Math
+
+# The set bits of a bitset word, lowest first, the way Box3D iterates them:
+# take the lowest set bit's index, then clear that bit.
+func setBits(word: view UInt64) ret String {
+  var bits: UInt64 = word
+  var out: String = ""
+  loop bits is not 0 {
+    let index: Int = trailingZeros(x: bits)
+    out = "{out} {index}"
+    bits = bits bitand (bits - 1)
+  }
+  ret out
+}
+
+func main() {
+  let zero64: UInt64 = 0
+  let eight64: UInt64 = 8
+  let top64: UInt64 = 9223372036854775808
+  log("UInt64: {trailingZeros(x: eight64)} {trailingZeros(x: top64)} {trailingZeros(x: zero64)}")
+  let zero32: UInt32 = 0
+  let one32: UInt32 = 1
+  let top32: UInt32 = 2147483648
+  log("UInt32: {trailingZeros(x: one32)} {trailingZeros(x: top32)} {trailingZeros(x: zero32)}")
+  let zeroSigned: Int32 = 0
+  let twelve: Int32 = 12
+  let minSigned: Int32 = -2147483648
+  log(
+    "Int32: {trailingZeros(x: twelve)} {trailingZeros(x: minSigned)} {trailingZeros(x: zeroSigned)}"
+  )
+  let word: UInt64 = 9223372036854775849
+  log("set bits of a word:{setBits(word: word)}")
+}

@@ -71,7 +71,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
       WGPU="${WGPU_NATIVE:-$HOME/.local/wgpu-native}"
       WGPU_FLAGS=""
       [ -f "$WGPU/lib/libwgpu_native.dylib" ] && WGPU_FLAGS="-DRAE_HAS_WEBGPU -I$WGPU/include -L$WGPU/lib -lwgpu_native -Wl,-rpath,$WGPU/lib -framework Metal -framework QuartzCore -framework Foundation -framework ImageIO -framework CoreGraphics"
-      if gcc -O2 -o "$TMP_OUT/app" "$TMP_OUT/out.c" "$TMP_OUT/rae_runtime.c" \
+      if gcc -O2 -ffp-contract=off -o "$TMP_OUT/app" "$TMP_OUT/out.c" "$TMP_OUT/rae_runtime.c" \
          $([ -f "$TMP_OUT/monocypher.c" ] && echo "$TMP_OUT/monocypher.c") \
          $(ls "$PROJECT_DIR"/*.c 2>/dev/null | grep -v "rae_runtime.c" | grep -v "main_compiled.c" || true) \
          -I"$TMP_OUT" -I/opt/homebrew/include -L/opt/homebrew/lib -DRAE_HAS_SDL3 $WGPU_FLAGS \

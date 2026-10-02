@@ -2537,9 +2537,11 @@ static bool gcc_link_c_to_binary(const char* entry_rae_file,
   }
   // release: optimize and strip asserts; dev/debug: no opt + symbols so
   // a profiler/debugger reads the generated C and runtime cleanly.
+  // -ffp-contract=off: never fuse a * b + c into an FMA, so a float result
+  // is the same on every machine (rae_runtime.h has the matching pragma).
   const char* opt_flags = (profile == BUILD_PROFILE_DEV)
-                              ? "-O0 -g"
-                              : "-O2 -DNDEBUG";
+                              ? "-O0 -g -ffp-contract=off"
+                              : "-O2 -DNDEBUG -ffp-contract=off";
 
   char extra_c_files[PATH_MAX * 4] = {0};
   {
@@ -2675,6 +2677,7 @@ static bool emcc_link_c_to_web(const char* entry_rae_file,
    * strict C11 mode hides those declarations, while its GNU C11 mode exposes
    * the same portable libc surface used by native Compiled builds. */
   args[n++] = "-std=gnu11";
+  args[n++] = "-ffp-contract=off";  /* same floats on every machine (rae_runtime.h) */
   if (profile == BUILD_PROFILE_DEV) {
     args[n++] = "-O0";
     args[n++] = "-gsource-map";
@@ -4016,7 +4019,7 @@ static const char* RAE_INIT_TEMPLATE_MAKEFILE =
   "RUNTIME_C:= $(BUILD)/rae_runtime.c\n"
   "BIN      := $(BUILD)/app\n"
   "\n"
-  "CFLAGS   := -O2 -I/opt/homebrew/include\n"
+  "CFLAGS   := -O2 -ffp-contract=off -I/opt/homebrew/include\n"
   "LDFLAGS  := -L/opt/homebrew/lib -framework Foundation \\\n"
   "            -framework ImageIO -framework CoreGraphics\n"
   "\n"

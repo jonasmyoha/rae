@@ -1730,6 +1730,12 @@ static AstDecl* resolve_function_overload(CompilerContext* ctx, AstModule* modul
     // such a call is bound by name in the backend).
     const AstDecl* arity_cands[8]; size_t arity_cand_count = 0;
     bool open_generic_candidate = false;
+    // The first non-generic candidate whose argument KINDS match. Integer
+    // widths share one kind, so `trailingZeros(x: UInt64)` and `(x: Int32)`
+    // both "match" a UInt64 argument; a candidate whose integer parameters are
+    // the arguments' exact types is preferred, and this one is the fallback
+    // (the previous rule: first kind match wins).
+    AstDecl* first_kind_match = NULL;
 
     for (Symbol* curr = symbols->head; curr; curr = curr->next) {
         if (!str_eq(curr->name, name)) continue;
@@ -1824,6 +1830,7 @@ static AstDecl* resolve_function_overload(CompilerContext* ctx, AstModule* modul
             // Non-generic: check parameter types if possible
             bool mismatch = false;
             bool numeric_mismatch = false; // the mismatch is only a numeric-kind difference
+            bool int_inexact = false;      // kinds match, but an integer width/sign differs
             AstParam* p = fd->params;
             AstCallArg* a = args;
             while (p && a) {
@@ -1843,17 +1850,27 @@ static AstDecl* resolve_function_overload(CompilerContext* ctx, AstModule* modul
                             break;
                         }
                         if (pt_base->kind == TYPE_STRUCT && !str_eq(pt_base->name, at_base->name)) { mismatch = true; break; }
+                        // Sized integers are interned, so the same width and
+                        // signedness is the same TypeInfo.
+                        if (pt_base->kind == TYPE_INT && pt_base != at_base) int_inexact = true;
                     }
                 }
                 p = p->next; a = a->next;
             }
-            if (!mismatch) return curr->decl;
+            if (!mismatch && !int_inexact) return curr->decl;
+            if (!mismatch) {
+                if (!first_kind_match) first_kind_match = curr->decl;
+                continue;
+            }
             nongeneric_arity_matches++;
             if (numeric_mismatch && !numeric_mismatch_only) numeric_mismatch_only = curr->decl;
             if (!mismatch_only) mismatch_only = curr->decl;
             if (type_cand_count < 8) type_cands[type_cand_count++] = curr->decl;
         }
     }
+    // No candidate matched every integer exactly: the first that matched by
+    // kind, as before (ensure_type_match then checks the argument).
+    if (first_kind_match) return first_kind_match;
 
     // Only a numeric type stands between the call and its sole candidate: bind
     // to it so the argument-conversion check (ensure_type_match) fires with the
