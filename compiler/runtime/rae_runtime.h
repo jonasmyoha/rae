@@ -622,6 +622,12 @@ rae_Bool rae_ext_rae_sys_exists(rae_String path);
 rae_Bool rae_ext_rae_sys_lock_file(rae_String path);
 rae_Bool rae_ext_rae_sys_unlock_file(rae_String path);
 double rae_ext_rae_sys_file_mtime(rae_String path);
+/* OS file-change notifications (runtime_file_notify.c, lib/FileNotify.rae). */
+int64_t rae_ext_FileNotify_open(void);
+rae_Bool rae_ext_FileNotify_watch(int64_t id, rae_String path);
+void rae_ext_FileNotify_clear(int64_t id);
+rae_Bool rae_ext_FileNotify_takeChanged(int64_t id);
+void rae_ext_FileNotify_close(int64_t id);
 int64_t rae_ext_rae_sys_rss_kb(void);
 
 /* Audio — SFX + looping ambient over the SDL3 backend (runtime_audio_sdl3.c, #46). */

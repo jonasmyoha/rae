@@ -1,0 +1,89 @@
+# OS file-change notifications: the OS tells the app that a file changed,
+# instead of the app stat-ing it on a timer.
+#
+# A file watcher that polls makes an idle app wake 4-20 times a second only to
+# find nothing changed. With a FileNotify, the runtime's notification thread
+# (kqueue on macOS, inotify on Linux) wakes the event loop — the same
+# `EventLoop.wake` a spawn'd worker uses — the moment a watched file changes,
+# so the loop can block until then.
+#
+# A notification is a HINT, not a diff: `fileNotifyTakeChanged` says "look
+# now", and the caller still compares mtimes to decide whether anything
+# changed. Each path is watched together with its directory (an editor saves
+# by renaming a temp file over the original, which only the directory sees),
+# so an unrelated file beside a watched one also says "look now". After a
+# real change, re-arm with `fileNotifyClear` + `fileNotifyWatch`: the file
+# that is there now may be a new inode.
+#
+# Where the OS offers nothing (Windows, WASM) `fileNotifyActive` is false and
+# the caller keeps polling, slowly. `RAE_FILE_NOTIFY=off` forces that path.
+# lib/FileWatch.rae and lib/HotReload.rae are the users in the stdlib.
+func nativeOpen() unsafe extern("rae_ext_FileNotify_open") ret Int
+
+func nativeWatch(id: Int, path: String) unsafe extern("rae_ext_FileNotify_watch") ret Bool
+
+func nativeClear(id: Int) unsafe extern("rae_ext_FileNotify_clear")
+
+func nativeTakeChanged(id: Int) unsafe extern("rae_ext_FileNotify_takeChanged") ret Bool
+
+func nativeClose(id: Int) unsafe extern("rae_ext_FileNotify_close")
+
+type FileNotify {
+  # The runtime's handle; < 0 when notifications are unavailable.
+  id: Int
+}
+
+func createFileNotify() ret FileNotify {
+  unsafe {
+    ret FileNotify { id: nativeOpen() }
+  }
+}
+
+# Whether the OS delivers notifications for this watcher. False means the
+# caller must poll (and its event loop must wake to do so).
+func fileNotifyActive(fileNotify: view FileNotify) ret Bool {
+  ret fileNotify.id >= 0
+}
+
+# Watch `path` (and its directory). A missing file is fine: its directory sees
+# it appear. Returns whether anything could be watched.
+func fileNotifyWatch(fileNotify: view FileNotify, path: view String) ret Bool {
+  if fileNotify.id < 0 {
+    ret false
+  }
+  unsafe {
+    ret nativeWatch(id: fileNotify.id, path: path)
+  }
+}
+
+# Stop watching every path, keeping the watcher (re-arm by watching again).
+func fileNotifyClear(fileNotify: view FileNotify) {
+  if fileNotify.id < 0 {
+    ret
+  }
+  unsafe {
+    nativeClear(id: fileNotify.id)
+  }
+}
+
+# Whether a watched file (or its directory) changed since the last call;
+# clears the flag.
+func fileNotifyTakeChanged(fileNotify: view FileNotify) ret Bool {
+  if fileNotify.id < 0 {
+    ret false
+  }
+  unsafe {
+    ret nativeTakeChanged(id: fileNotify.id)
+  }
+}
+
+# Release the watcher's handle (there are 64 per process).
+func closeFileNotify(fileNotify: mod FileNotify) {
+  if fileNotify.id < 0 {
+    ret
+  }
+  unsafe {
+    nativeClose(id: fileNotify.id)
+  }
+  fileNotify.id = -1
+}
