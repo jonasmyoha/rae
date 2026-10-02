@@ -229,9 +229,11 @@ Known risks, each addressed when measured, not before:
   batches). The port is single-threaded first; parallelism comes through
   `parallelLoop` once it runs on real threads (`docs/concurrency-model.md`),
   with results unchanged because the colouring, not the scheduling, fixes the
-  order. What the engine still lacks for that (a pool, real
-  `parallelLoop`, atomics or stage barriers) is the subject of the threading
-  and performance audit task, which comes before the solver is written.
+  order. What the engine still lacks for that, measured against Box3D at 1-8
+  workers, is `docs/physics-performance-plan.md`: threads are needed (no
+  single-threaded build, C included, meets the featured example's 4 ms on a
+  5 000-box pyramid), `Float4` is the margin, and P4 ports the step structure
+  parallel-ready (§8 there).
 
 ## 7. Phases (queue tasks)
 
