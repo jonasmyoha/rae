@@ -400,6 +400,7 @@ rae_Bool rae_ext_Sdl3_isKeyPressed(int64_t key) {
  * that path (empty => cancel) with no window shown; a RAE_SDL_HEADLESS_MS run
  * never opens a real dialog (it resolves to cancel). Only one dialog is in
  * flight at a time — a second request while one is open is ignored. */
+void rae_ext_EventLoop_wake(void);           /* runtime_gpu2d_platform.c */
 static SDL_Mutex* g_sdl_dialog_lock = NULL;   /* guards the fields below */
 static char* g_sdl_dialog_path = NULL;        /* chosen path (malloc'd), NULL = cancel/none */
 static bool g_sdl_dialog_ready = false;       /* a result (path or cancel) is waiting for poll */
@@ -419,6 +420,9 @@ static void rae_sdl_dialog_set_result(const char* path) {
     g_sdl_dialog_ready = true;
     g_sdl_dialog_open = false;
     if (m) SDL_UnlockMutex(m);
+    /* The app's loop may be blocked in its idle wait (lib/ui/EventLoop.rae):
+     * the result is news, so wake it, as a spawn'd worker's result does. */
+    rae_ext_EventLoop_wake();
 }
 
 static void SDLCALL rae_sdl_dialog_cb(void* userdata, const char* const* filelist, int filter) {

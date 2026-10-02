@@ -12,14 +12,19 @@
 #   2. Call `fileWatch.createFileWatcher(paths, enabled, intervalSec)` once after
 #      the paths are known. The snapshot records each file's mtime so
 #      the first check is quiet.
-#   3. Once per frame, call `fileWatch.checkForChanges(watcher, getTime())`. It is
-#      throttled by `intervalSec`, so calling every frame is cheap —
-#      most calls early-return.
+#   3. Once per frame, call `fileWatch.checkForChanges(watcher, getTime())`.
+#      It is throttled by `intervalSec`, so calling every frame is cheap —
+#      most calls early-return. Where the OS delivers file notifications
+#      (lib/FileNotify.rae) a notification also makes it look at once, and
+#      wakes a blocked event loop to do so: an idle app needs no timer.
 #   4. When it returns `true`, the caller does whatever reload makes
 #      sense: re-parse a JSON file, recompile, etc.
+#   5. An event loop asks `fileWatcherNeedsPolling` whether it must wake on a
+#      timer for this watcher (lib/ui/EventLoop.rae's `pollWatcher`): only
+#      when notifications are unavailable.
 #
-# Both Compiled (C backend) and Live (bytecode VM) targets call into
-# the same `fileModTime` native, so the watcher behaves identically.
+open FileNotify
+
 type WatchEntry {
   path: String
   # Epoch seconds — Float64 so a ~1.7e9 timestamp keeps sub-second
@@ -32,6 +37,7 @@ type FileWatcher {
   entries: List(WatchEntry)
   intervalSec: Float
   lastCheck: Float64
+  notify: FileNotify
 }
 
 # Take a snapshot of the current mtimes for every path. Subsequent
@@ -52,28 +58,50 @@ func createFileWatcher(
     }
     i = i + 1
   }
+  let notify: FileNotify = createFileNotify()
+  if enabled {
+    watchPaths(notify: notify, paths: paths)
+  }
   ret FileWatcher {
     enabled: enabled
     entries: entries
     intervalSec: intervalSec
-    lastCheck: 0.0 - intervalSec
+    lastCheck: -intervalSec
+    notify: notify
   }
 }
 
+func watchPaths(notify: view FileNotify, paths: view List(String)) {
+  loop var i: Int = 0, i < paths.length, ++i {
+    if let path: String = paths.copyAt(index: i) {
+      fileNotifyWatch(fileNotify: notify, path: path)
+    }
+  }
+}
+
+# Whether an event loop must wake on a timer so this watcher sees edits:
+# true only when it is on and the OS gives no notifications.
+func fileWatcherNeedsPolling(watcher: view FileWatcher) ret Bool {
+  ret watcher.enabled and fileNotifyActive(fileNotify: watcher.notify) is false
+}
+
 # Returns true if any watched file's mtime changed since the previous
-# poll. Throttled — calls within `intervalSec` of the last check are
-# free (return false). On `true`, the stored mtimes are refreshed so
-# the next call is quiet until the next on-disk edit.
+# check. Throttled — calls within `intervalSec` of the last check are free
+# (return false) unless an OS notification arrived since. On
+# `true`, the stored mtimes are refreshed (and the notifications re-armed,
+# since the file there now may be a new inode) so the next call is quiet
+# until the next on-disk edit.
 func checkForChanges(watcher: mod FileWatcher, now: view Float64) ret Bool {
+  if watcher.enabled is false {
+    ret false
+  }
+  let notified: Bool = fileNotifyTakeChanged(fileNotify: watcher.notify)
+  if notified is false and now - watcher.lastCheck < watcher.intervalSec {
+    ret false
+  }
+  watcher.lastCheck = now
+  var changed: Bool = false
   unsafe {
-    if watcher.enabled is false {
-      ret false
-    }
-    if now - watcher.lastCheck < watcher.intervalSec {
-      ret false
-    }
-    watcher.lastCheck = now
-    var changed: Bool = false
     var i: Int = 0
     loop i < watcher.entries.length {
       # Read via the raw buffer accessor: `List(T).get` returns `opt T`,
@@ -89,6 +117,14 @@ func checkForChanges(watcher: mod FileWatcher, now: view Float64) ret Bool {
       }
       i = i + 1
     }
-    ret changed
   }
+  if changed {
+    fileNotifyClear(fileNotify: watcher.notify)
+    loop var j: Int = 0, j < watcher.entries.length, ++j {
+      if let entry: view WatchEntry => watcher.entries.viewAt(index: j) {
+        fileNotifyWatch(fileNotify: watcher.notify, path: entry.path)
+      }
+    }
+  }
+  ret changed
 }

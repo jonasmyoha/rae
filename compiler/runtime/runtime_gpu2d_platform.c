@@ -343,9 +343,24 @@ static void rae_g2d_test_pointer_advance(void) {
     }
 }
 
+/* RAE_LOOP_TRACE=1 (diagnostic; inert unless set): one "[loop-wake] <epoch ms>"
+ * line on stderr per event poll, i.e. per main-loop iteration, so
+ * compiler/tools/idle-wakeups.sh can count how often an idle app's loop really
+ * runs. The process's context-switch count cannot tell: Metal, wgpu and the
+ * display link keep their own threads busy while the loop is blocked. */
+static int g_loop_trace = -1;
+static void rae_loop_trace_tick(void) {
+    if (g_loop_trace < 0) {
+        const char* e = getenv("RAE_LOOP_TRACE");
+        g_loop_trace = (e && e[0] && strcmp(e, "0") != 0) ? 1 : 0;
+    }
+    if (g_loop_trace) fprintf(stderr, "[loop-wake] %lld\n", (long long)rae_ext_nowMs());
+}
+
 rae_Bool rae_ext_Gpu2d_pollClose(void) {
     rae_g2d_test_pointer_advance();
     rae_mem_stats_live_tick();
+    rae_loop_trace_tick();
 #ifdef __EMSCRIPTEN__
     /* Browser WebGPU presents at requestAnimationFrame boundaries. Asyncify
      * lets the current Rae loop await that boundary without source changes. */

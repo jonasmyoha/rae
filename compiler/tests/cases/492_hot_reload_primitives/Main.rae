@@ -61,7 +61,7 @@ func main() {
       delete(path: sigPath)
     }
 
-    let w: ReloadSignalWatcher = { path: sigPath, lastMtime: 0.0 }
+    let w: ReloadSignalWatcher = createReloadSignalWatcherAt(path: sigPath)
 
     # Missing file -> None.
     let s1: ReloadSignal = pollReloadSignal(w: w)

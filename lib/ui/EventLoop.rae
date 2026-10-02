@@ -13,39 +13,67 @@
 # Deliberately dependency-free: the monitor-refresh helper that used to sit
 # beside this lives with its backend accessor instead, so lib/ui does not
 # have to know how a window reports its refresh rate.
-const watcherPollSec: Float = 0.05
+# How often an event loop wakes on a timer for a file watcher the OS cannot
+# notify about (lib/FileNotify.rae). Where notifications work no watcher
+# asks for this: the change itself wakes the loop.
+const watcherPollSec: Float = 1.0
+
+# A hidden window wakes at most this often, whatever it asks for: nothing it
+# does is seen until it is shown again.
+const hiddenMinWakeSec: Float = 1.0
 
 const idleCapSec: Float = 30.0
 
 # How long to block in waitEvents before waking on our own.
 #
+# `visible` is Gpu2d.renderableNow(): false while the window is hidden,
+# minimized or occluded (and never false headless). A hidden app draws
+# nothing, so an animation, a held button or a watcher poll is no reason to
+# wake; it sleeps until the OS shows the window again (an event, which ends
+# the wait) or its heartbeat is due, at most once a second. Animations driven
+# by elapsed time simply resume.
+#
 # `animating` MUST be true for every continuous motion source in the app —
 # a new animation that forgets to feed this flag silently degrades to the
-# watcher poll rate instead of failing loudly.
+# idle wait instead of failing loudly. Pass `frameSec: 0.0` with it for a
+# busy render loop (poll, paint as fast as the machine allows).
 #
-# `heartbeatSec > 0` requests a wake-up cadence while otherwise idle, for
-# an app that displays something time-derived (an FPS readout, a clock).
-# Pass 0 to sleep as long as possible.
+# `pollWatcher` is for a file watcher that must be polled because the OS
+# gives no notifications (FileWatch.fileWatcherNeedsPolling,
+# HotReload.reloadSignalNeedsPolling) — not for every watcher.
+#
+# `heartbeatSec > 0` is a DEADLINE: wake no later than this. Something that
+# changes periodically but slowly (a caret blink, a clock label, a debounced
+# write) passes the time until its NEXT change, not `animating` — wait for
+# the next blink, not the next frame. Pass 0 to sleep as long as possible.
 func nextWaitTimeoutSec(
+  visible: view Bool
   animating: view Bool
   mouseDown: view Bool
   pollWatcher: view Bool
   frameSec: view Float
   heartbeatSec: view Float
-) pub ret Float {
-  if animating {
-    ret frameSec
-  }
-  if mouseDown {
-    ret frameSec
-  }
-  if pollWatcher {
-    ret watcherPollSec
-  }
-  if heartbeatSec > 0.0 {
+) ret Float {
+  if visible is false {
+    if heartbeatSec <= 0.0 {
+      ret idleCapSec
+    }
+    if heartbeatSec < hiddenMinWakeSec {
+      ret hiddenMinWakeSec
+    }
     ret heartbeatSec
   }
-  ret idleCapSec
+  if animating or mouseDown {
+    ret frameSec
+  }
+  var timeout: Float = idleCapSec
+  if pollWatcher {
+    timeout = watcherPollSec
+  }
+  if heartbeatSec > 0.0 and heartbeatSec < timeout {
+    timeout = heartbeatSec
+  }
+  ret timeout
 }
 
 # Thread-safe waker (#950). Posts a user event to the window's queue so a

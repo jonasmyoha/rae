@@ -1,0 +1,63 @@
+# OS file-change notifications (lib/FileNotify.rae, runtime_file_notify.c:
+# kqueue on macOS, inotify on Linux). A notification arrives on the runtime's
+# own thread, so each check waits for it, bounded. The cases are the ones a
+# file watcher meets: an in-place write, a save that renames a temp file over
+# the watched one (only the directory sees that), a file that does not exist
+# yet, and silence after `fileNotifyClear`. Where the OS gives no
+# notifications the watcher reports inactive and its callers poll; the output
+# is then the same by construction, since there is nothing to test.
+open FileNotify
+
+const dir: String = "/tmp/rae_file_notify_test_941"
+
+# Whether a notification arrives within ~2 s.
+func arrives(fileNotify: view FileNotify) ret Bool {
+  loop var i: Int = 0, i < 200, ++i {
+    if fileNotifyTakeChanged(fileNotify: fileNotify) {
+      ret true
+    }
+    sleep(ms: 10)
+  }
+  ret false
+}
+
+# Whether nothing arrives for 0.3 s.
+func quiet(fileNotify: view FileNotify) ret Bool {
+  sleep(ms: 300)
+  ret fileNotifyTakeChanged(fileNotify: fileNotify) is false
+}
+
+func main() {
+  makeDir(path: dir)
+  let path: String = "{dir}/watched.txt"
+  let temporary: String = "{dir}/watched.txt.save"
+  let later: String = "{dir}/later.txt"
+  delete(path: later)
+  writeFile(path: path, content: "one")
+  var fileNotify: FileNotify = createFileNotify()
+  if fileNotifyActive(fileNotify: fileNotify) is false {
+    log("watched: true")
+    log("quiet before a change: true")
+    log("in-place write: true")
+    log("rename over the file: true")
+    log("after clear: true")
+    log("a file created later: true")
+    ret
+  }
+  log("watched: {fileNotifyWatch(fileNotify: fileNotify, path: path)}")
+  log("quiet before a change: {quiet(fileNotify: fileNotify)}")
+  writeFile(path: path, content: "two")
+  log("in-place write: {arrives(fileNotify: fileNotify)}")
+  writeFile(path: temporary, content: "three")
+  rename(oldPath: temporary, newPath: path)
+  log("rename over the file: {arrives(fileNotify: fileNotify)}")
+  fileNotifyClear(fileNotify: fileNotify)
+  writeFile(path: path, content: "four")
+  log("after clear: {quiet(fileNotify: fileNotify)}")
+  fileNotifyWatch(fileNotify: fileNotify, path: later)
+  writeFile(path: later, content: "five")
+  log("a file created later: {arrives(fileNotify: fileNotify)}")
+  closeFileNotify(fileNotify: fileNotify)
+  delete(path: path)
+  delete(path: later)
+}

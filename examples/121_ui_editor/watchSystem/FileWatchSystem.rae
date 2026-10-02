@@ -1,8 +1,11 @@
-# watchSystem — the passive watcher half of the viewer (design §3): every 250 ms,
-# while the window is visible (or the run is headless), stat the document's
-# watched files (scene, registered sub-scenes, theme); a changed mtime asks for
-# a reload. The poll is a timer, not a wake source, so the loop passes
-# `pollWatcher` to its wait (docs/ui-render-loop-performance.md): a blocking
+# watchSystem — the passive watcher half of the viewer (design §3): while the
+# window is visible (or the run is headless), stat the document's watched files
+# (scene, registered sub-scenes, theme); a changed mtime asks for a reload. The
+# OS says when to look (lib/FileNotify.rae): its notification wakes the blocked
+# event loop, so the idle editor sleeps until a file really changes. Every
+# 250 ms of frames that run anyway it also looks on its own, and where the OS
+# gives no notifications that poll is all there is — then the loop passes
+# `pollWatcher` to its wait (docs/ui-render-loop-performance.md), or a blocking
 # wait would only notice the edit on the next mouse wiggle.
 #
 # RAE_UI_EDITOR_TEST_REWRITE=<n>: the headless gate's hook. After n ms the app
@@ -11,6 +14,7 @@
 # screenshot.
 import Gpu2d
 open Sys
+open FileNotify
 
 const watchPollSec: Float64 = 0.25
 
@@ -20,10 +24,11 @@ type FileWatch {
   rewriteAtSec: Float64  # < 0 = no test rewrite
   rewriteDone: Bool
   changes: Int
+  notify: FileNotify
 }
 
 func createFileWatch(now: view Float64) ret FileWatch {
-  var rewriteAt: Float64 = 0.0 - 1.0
+  var rewriteAt: Float64 = -1.0
   let rewrite: String = getEnv(name: "RAE_UI_EDITOR_TEST_REWRITE")
   if rewrite.length() > 0 {
     rewriteAt = now + (rewrite.toInt().toFloat() / 1000.0) as Float64
@@ -34,25 +39,40 @@ func createFileWatch(now: view Float64) ret FileWatch {
     rewriteAtSec: rewriteAt
     rewriteDone: false
     changes: 0
+    notify: createFileNotify()
   }
 }
 
 # Take the current mtimes as the baseline (after every load, so the reload the
-# load itself caused is not seen again).
+# load itself caused is not seen again), and watch exactly these files: the
+# list changes with the document, and a file saved by renaming over it is a new
+# inode.
 func watchRememberMtimes(watch: mod FileWatch, paths: view List(String)) {
   watch.mtimes.clear()
+  fileNotifyClear(fileNotify: watch.notify)
   loop var i: Int = 0, i < paths.length, ++i {
     if let path: String = paths.copyAt(index: i) {
       watch.mtimes.add(value: fileModTime(path: path))
+      fileNotifyWatch(fileNotify: watch.notify, path: path)
     }
   }
 }
 
-# Whether the watcher should poll now: only when the frame could show the
-# result, at the poll interval.
+# Whether the loop's wait must wake on a timer for this watcher: only when the
+# OS gives no notifications.
+func fileWatchNeedsPolling(watch: view FileWatch) ret Bool {
+  ret fileNotifyActive(fileNotify: watch.notify) is false
+}
+
+# Whether the watcher should look now: only when the frame could show the
+# result (a notification while hidden waits for the window to come back), and
+# then on a notification or at the poll interval.
 func watchDue(watch: view FileWatch, now: view Float64) ret Bool {
   if Gpu2d.renderableNow() is false {
     ret false
+  }
+  if fileNotifyTakeChanged(fileNotify: watch.notify) {
+    ret true
   }
   ret now - watch.lastPollAt >= watchPollSec
 }

@@ -838,6 +838,7 @@ func runWalkerApp() ret Int {
     if Gpu2d.shouldRenderFrame(appNeedsRender: app.frame.needsRender) is false {
       # Park until the OS has something to say (shared policy, lib/ui/event_loop).
       Gpu2d.waitEvents(timeoutSec: nextWaitTimeoutSec(
+        visible: Gpu2d.renderableNow()
         animating: false
         mouseDown: false
         pollWatcher: false

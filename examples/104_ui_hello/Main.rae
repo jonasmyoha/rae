@@ -129,8 +129,10 @@ func main() ret Int {
 
     # Draw when something changed, when the OS woke us, and for the first frame
     # — a window is not presentable the instant it is created, and a compositor
-    # does not promise to keep a frame that was presented once.
-    if hadEvents or changed or wokeUp or renderedOnce is false {
+    # does not promise to keep a frame that was presented once. Never while the
+    # window is hidden: shouldRenderFrame folds that rule in.
+    let needsRender: Bool = hadEvents or changed or wokeUp or renderedOnce is false
+    if Gpu2d.shouldRenderFrame(appNeedsRender: needsRender) {
       Gpu2d.beginFrame(
         canvas: canvas
         r: 0.03
@@ -151,6 +153,7 @@ func main() ret Int {
       # Idle at ~0% CPU: block until the OS has something to say. The timeout is
       # the shared policy from lib/ui/eventLoop.rae.
       Gpu2d.waitEvents(timeoutSec: nextWaitTimeoutSec(
+        visible: Gpu2d.renderableNow()
         animating: false
         mouseDown: false
         pollWatcher: false
