@@ -202,7 +202,9 @@ Known risks, each addressed when measured, not before:
   batches). The port is single-threaded first; parallelism comes through
   `parallelLoop` once it runs on real threads (`docs/concurrency-model.md`),
   with results unchanged because the colouring, not the scheduling, fixes the
-  order.
+  order. What the engine still lacks for that (a pool, real
+  `parallelLoop`, atomics or stage barriers) is the subject of the threading
+  and performance audit task, which comes before the solver is written.
 
 ## 7. Phases (queue tasks)
 
@@ -231,8 +233,20 @@ C added.
   (`docs/physics-design.md` §5).
 - **P9 — performance**: the benchmark programs, profiling, the fixes of §6;
   then `parallelLoop` parallelism.
-- **P10 — demos**: the field demo and the vehicle example
-  (`docs/physics-design.md` §5.7, §7), windowed, on the visual gate.
+- **P10 — demos**: the featured example `examples/122_physics_playground`
+  (the field scenes: pyramid, dominoes, a bridge, the character mover, thrown
+  balls; a performance HUD; instanced rendering), a performance pass that
+  profiles it at stress scale against a frame budget, and the vehicle as one
+  of its scenes (`docs/physics-design.md` §5.7, §7), windowed, on the visual
+  gate.
+
+Engine work the phases depend on is queued with them (2026-10-02): a
+threading and performance audit before P1 that writes
+`docs/physics-performance-plan.md` (what the physics example needs from the
+engine, measured against Box3D's C build at 1-8 workers), a runtime TSan
+gate, a worker pool with `parallelLoop` on real threads, and two design
+questions for the maintainer — atomics and staged parallel work, and a
+`Float4` SIMD type.
 
 Not planned: recording/replay/snapshots, the external task scheduler hook.
 
