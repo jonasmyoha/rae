@@ -43,9 +43,7 @@ int64_t rae_ext_rae_f32_bits(float v){ uint32_t b; memcpy(&b, &v, 4); return (in
 
 /* Bit intrinsics over the 64-bit two's-complement representation of an Int.
  * leadingZeros/trailingZeros of 0 are defined as 64 (the builtins are UB on 0). */
-int64_t rae_ext_rae_popcount(int64_t x){ return (int64_t)__builtin_popcountll((unsigned long long)x); }
-int64_t rae_ext_rae_leading_zeros(int64_t x){ return x == 0 ? 64 : (int64_t)__builtin_clzll((unsigned long long)x); }
-int64_t rae_ext_rae_trailing_zeros(int64_t x){ return x == 0 ? 64 : (int64_t)__builtin_ctzll((unsigned long long)x); }
+/* popcount / leading_zeros / trailing_zeros are static inline in rae_runtime.h. */
 /* Debug-only bounds checking for rae_buf_get/set. Compiled in when the
  * binary is built with `-DRAE_DEBUG_BOUNDS`. Tracks (ptr -> count, elem_size)
  * in a small open-addressed hash; on every get/set the entry is looked up

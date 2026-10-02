@@ -100,9 +100,11 @@ one codebase.
   `b3ComputeCosSin` are ported verbatim; nothing in the step may call the C
   library's `sin`/`cos`/`atan2`. `sqrt` stays `sqrtf` (IEEE exact).
 - **Bits.** Word operators (`bitand`, `shl`, … — `docs/bitwise-operators.md`);
-  `ctz` needs a Rae `countTrailingZeros(UInt64)` (a compiler intrinsic over
-  `__builtin_ctzll`, or a Rae loop if the intrinsic is not wanted — decided in
-  task P0).
+  `ctz` is `trailingZeros(x: UInt64)` (lib/Math.rae, P0): the existing
+  `trailingZeros(x: Int)` family gained `UInt64`, `UInt32` and `Int32`
+  overloads, and the runtime defines all the bit intrinsics `static inline`
+  in `rae_runtime.h`, so each call is one CPU instruction. 0 answers the bit
+  width (64 or 32); Box3D never asks for 0.
 - **Asserts and validation.** `B3_ASSERT` → a Rae assert that logs the source
   line; `B3_VALIDATE` consistency checks → functions called from tests and
   debug builds only.
@@ -116,26 +118,38 @@ one codebase.
 
 ## 4. Determinism and the oracle
 
-**Build flag first.** Rae compiles to C and today passes no
-`-ffp-contract=off`. Clang on arm64 contracts `a * b + c` into a fused
-multiply-add by default, so the same Rae program already gives different
+**Build flag first (done in P0).** Clang on arm64 contracts `a * b + c`
+into a fused multiply-add by default, so the same Rae program gave different
 float results on Apple silicon and x86. Box3D's cross-platform determinism
-rests on that flag; the Rae build (native, `--emit-c` recipes, wasm) gets
-`-ffp-contract=off` for every program, with a fixture that fails if a
-contracted result appears. Cheap, and right for every Rae program, not only
-physics.
+rests on turning that off. Every Rae compile line now passes
+`-ffp-contract=off` (`rae run`/`build`, the emcc build, `rae init`'s
+Makefile, `run_examples.sh`, `wasm_build.sh`, the devtools recipes, the iOS
+project, the benchmarks), and `rae_runtime.h` carries
+`#pragma STDC FP_CONTRACT OFF` as the backstop for any build that does not
+(every Rae translation unit includes it first). Fixture
+`942_no_fma_contraction` fails if a fused result appears: built the old way
+it prints `false` for both the Float and the Float64 multiply-add.
 
 **Bit-exact differential testing.** With the flag off and the scalar path,
 the Rae port performs the same float operations in the same order as the C
 scalar build, so it should produce **the same bits**, not just close values.
 That turns "is the port right?" into a mechanical check:
 
-- `tools/box3d-oracle/` — a script that clones Box3D at the pinned commit into
-  a cache directory (outside the repository), builds it scalar
-  (`BOX3D_DISABLE_SIMD`, `-ffp-contract=off`, `workerCount = 1`) together with
-  a small C driver, and writes golden traces: per module (GJK distances,
-  manifolds, hull construction, tree queries) and per scene (body transforms
-  as hex floats every step).
+- `tools/box3d-oracle/oracle.sh` — clones Box3D at the pinned commit into
+  a cache directory outside the repository (`$RAE_BOX3D_CACHE`, default
+  `~/.cache/rae/box3d-oracle`), builds the library scalar
+  (`BOX3D_DISABLE_SIMD`, `-ffp-contract=off`, validation off), compiles each
+  driver in `tools/box3d-oracle/drivers/` against it and writes
+  `tools/box3d-oracle/goldens/<driver>.golden`: one line per call,
+  `<function> <inputs> -> <outputs>`, every float a C hex float (`%a`, exact;
+  `strtof` reads it back to the same bits). A driver that steps a world
+  creates it with `workerCount = 1`. The first golden (P0) is `math`: 2 483
+  calls over 49 functions — the deterministic `b3Atan2` / `b3ComputeCosSin`
+  over an edge grid and random angles, and the vector, quaternion,
+  transform, 3x3 matrix and segment functions over inputs that are multiples
+  of 1/256 (exact in binary32), reproduced byte for byte on a second run.
+  Later goldens: per module (GJK distances, manifolds, hull construction,
+  tree queries) and per scene (body transforms every step).
 - The goldens are committed as text. The test suite never builds C: a Rae
   fixture runs the same inputs and compares hex bits. The oracle only runs
   when a porting task adds a module or the pinned commit moves.
@@ -190,6 +204,19 @@ Known risks, each addressed when measured, not before:
   optional; the solver's inner loops iterate thousands of constraints per
   step. If the check shows up in profiles, the fix is a Rae-level unchecked
   indexed view for hot loops (a language/runtime task), not C.
+  **Measured (P0, 2026-10-02): no unchecked view is needed.**
+  - `benchmarks/list_access` (2026-10-01, small plain-data elements, the
+    scatter kernel): `if let` + `modAt` 1.20x checked C; `copyAtDefault` +
+    `set` 1.16x checked C since compiler 0.1.99 (3.9x before).
+  - `benchmarks/solver_struct` (solver-sized structs: 100 000 contact
+    constraints of 80 bytes, each reading and writing two 32-byte body states
+    at scattered indices, 20 passes, `modAt` for the constraint and
+    `copyAtDefault` / `set` for the bodies): Rae **0.98-1.02x plain C** and
+    **0.98-1.09x bounds-checked C** (best of five, two runs, M1 Max at load
+    ~8 from unrelated work), ~20 ms for 2 million constraint solves in each.
+    The checksums match bit for bit across Rae, C and checked C, with
+    `-ffp-contract=off` on all three. On structs this size the scattered
+    memory traffic dominates and the bounds check disappears in it.
 - **Struct copies.** Box3D passes small structs by value everywhere; the port
   uses `view` parameters for anything larger than a vector.
 - **SIMD.** Box3D's contact solver runs 4/8-wide on SSE2/NEON. The port
@@ -211,11 +238,11 @@ Known risks, each addressed when measured, not before:
 Each phase lands green: the full suite, its oracle fixtures bit-exact, and no
 C added.
 
-- **P0 — prerequisites.** `-ffp-contract=off` in every Rae build with a
-  fixture; `countTrailingZeros(UInt64)`; the oracle tooling
-  (`tools/box3d-oracle/`) with its first golden (the math module); a short
-  measurement of `List.modAt` in a tight loop versus a raw buffer, to know
-  early whether §6's unchecked access is needed.
+- **P0 — prerequisites (done 2026-10-02).** `-ffp-contract=off` in every
+  Rae build with a fixture; `trailingZeros(x: UInt64)` (and `UInt32`,
+  `Int32`) as an inline intrinsic; the oracle tooling (`tools/box3d-oracle/`)
+  with its first golden (the math module); the measurement of checked access
+  on solver-sized structs (§6: no unchecked view needed).
 - **P1 — math.** The math layer, bit-exact against the oracle.
 - **P2 — convex geometry and narrow phase.** AABB, sphere, capsule, hull
   (quickhull), GJK distance and shape cast, manifolds for convex pairs.
@@ -260,7 +287,7 @@ show every place the behaviour changed.
 ## 9. Open questions
 
 1. The 1.5× performance target (§6): acceptable, or tighter/looser?
-2. `countTrailingZeros`: a compiler intrinsic (one line of C in the runtime,
-   like the other math builtins) or a Rae loop? The intrinsic is recommended;
-   it is the only C line this plan adds.
+2. ~~`countTrailingZeros`: a compiler intrinsic or a Rae loop?~~ Settled in
+   P0: the intrinsic, under the existing name `trailingZeros` (overloads per
+   width), inline in `rae_runtime.h`.
 3. Recording/replay stays out unless netcode needs it — confirm.

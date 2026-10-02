@@ -468,7 +468,7 @@ export class ExampleRunner {
       TARGET_ID: target.id,
       TARGET_LABEL: target.label,
       // Optimization level for the compiled target's gcc step ({{OPT}}).
-      OPT: profile === "debug" ? "-O0 -g" : "-O2 -DNDEBUG"
+      OPT: profile === "debug" ? "-O0 -g -ffp-contract=off" : "-O2 -DNDEBUG -ffp-contract=off"
     };
     let tempDir: string | undefined;
     if (needsOutDir) {

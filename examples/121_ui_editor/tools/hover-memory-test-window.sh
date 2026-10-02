@@ -30,7 +30,7 @@ compiler/bin/rae build --target compiled --emit-c --project examples/121_ui_edit
   --out "$TMP/out.c" examples/121_ui_editor/Main.rae > "$TMP/emit.log" 2>&1 \
   || { echo "emit failed:"; tail -20 "$TMP/emit.log"; exit 1; }
 WGPU="${WGPU_NATIVE:-$HOME/.local/wgpu-native}"
-gcc -O2 -w -o "$TMP/app" "$TMP/out.c" "$TMP/rae_runtime.c" -I"$TMP" \
+gcc -O2 -ffp-contract=off -w -o "$TMP/app" "$TMP/out.c" "$TMP/rae_runtime.c" -I"$TMP" \
   -I/opt/homebrew/include -L/opt/homebrew/lib -DRAE_HAS_SDL3 -DRAE_HAS_WEBGPU \
   -I"$WGPU/include" -L"$WGPU/lib" -lwgpu_native -Wl,-rpath,"$WGPU/lib" \
   -framework Metal -framework QuartzCore -lSDL3 -framework Foundation \

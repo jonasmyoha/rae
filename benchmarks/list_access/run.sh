@@ -38,14 +38,14 @@ run_with_timeout 300 "$RAE_BIN" build --target compiled --profile release --emit
 # from the pre-SDL3 era, which both failed on a machine without raylib and
 # pulled a renderer into a List-indexing measurement.) The runtime's Objective-C
 # helpers are why Foundation is still required.
-run_with_timeout 300 cc -std=c11 -O2 -DNDEBUG \
+run_with_timeout 300 cc -std=c11 -O2 -DNDEBUG -ffp-contract=off \
   -include "$HERE/c/opaque_index.h" "$BUILD/rae_generated.c" \
   "$HERE/c/opaque_index.c" \
   "$BUILD/rae_runtime.c" \
   -I"$BUILD" \
   -framework Foundation -framework ImageIO -framework CoreGraphics \
   -o "$BUILD/rae_list_access"
-run_with_timeout 120 cc -std=c11 -O3 -DNDEBUG "$HERE/c/list_access.c" -o "$BUILD/c_list_access"
+run_with_timeout 120 cc -std=c11 -O3 -DNDEBUG -ffp-contract=off "$HERE/c/list_access.c" -o "$BUILD/c_list_access"
 run_with_timeout 180 rustc -C opt-level=3 -C debuginfo=0 "$HERE/rust/list_access.rs" \
   -o "$BUILD/rust_list_access"
 
