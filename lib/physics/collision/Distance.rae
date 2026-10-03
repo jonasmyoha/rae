@@ -1,0 +1,385 @@
+# GJK distance between two convex proxies (b3ShapeDistance, b3GetProxySupport,
+# b3GetPointSupport of Box3D's distance.c at 9f998c8). Box3D's operation
+# order is kept exactly; checked bit for bit against the oracle in fixture
+# 949.
+#
+# Box3D can also record every intermediate simplex for debug drawing (the
+# `simplexes` array argument); the engine never asks for it, so the port
+# leaves it out and `simplexCount` is always 0.
+open Vec3
+open Quat
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/MatrixMath
+open physics/math/TransformMath
+open physics/geometry/QueryTypes
+open physics/collision/Simplex
+
+const maxSimplexVertices: Int = 4
+
+const maxGjkIterations: Int = 32
+
+type DistanceInput {
+  proxyA: ShapeProxy
+  proxyB: ShapeProxy
+  # B in A's frame; the query runs in frame A.
+  transform: Transform
+  # Whether the proxy radii count.
+  useRadii: Bool
+}
+
+type DistanceOutput {
+  # The closest point on A, in A's frame.
+  pointA: Vec3
+  # The closest point on B, in A's frame.
+  pointB: Vec3
+  # A to B, in A's frame. Zero when the shapes overlap.
+  normal: Vec3
+  # Zero when the shapes overlap.
+  distance: Float
+  iterations: Int
+  simplexCount: Int
+}
+
+func emptyDistanceOutput() ret DistanceOutput {
+  ret DistanceOutput {
+    pointA: zeroVector()
+    pointB: zeroVector()
+    normal: zeroVector()
+    distance: 0.0
+    iterations: 0
+    simplexCount: 0
+  }
+}
+
+# b3GetPointSupport: the index of the point furthest along `axis`. The first
+# point is moved to the origin for precision with far-away points.
+func pointSupport(points: view List(Vec3), axis: view Vec3) ret Int {
+  let origin: Vec3 = points.copyAtDefault(index: 0)
+  var maxIndex: Int = 0
+  var maxProjection: Float = 0.0
+  loop var index: Int = 1, index < points.length, ++index {
+    let point: Vec3 = points.copyAtDefault(index: index)
+    let projection: Float = dot(left: axis, right: subtract(left: point, right: origin))
+    if projection > maxProjection {
+      maxIndex = index
+      maxProjection = projection
+    }
+  }
+  ret maxIndex
+}
+
+# b3GetProxySupport
+func proxySupport(proxy: view ShapeProxy, axis: view Vec3) ret Int {
+  ret pointSupport(points: proxy.points, axis: axis)
+}
+
+# The simplex vertex of support points `indexA` on A and `indexB` on B
+# (B through `rotation` and `translation` into A's frame).
+func makeSimplexVertex(
+  proxyA: view ShapeProxy
+  proxyB: view ShapeProxy
+  rotation: view Matrix3
+  translation: view Vec3
+  indexA: view Int
+  indexB: view Int
+) ret SimplexVertex {
+  let vertexA: Vec3 = proxyA.points.copyAtDefault(index: indexA)
+  let localVertexB: Vec3 = proxyB.points.copyAtDefault(index: indexB)
+  let vertexB: Vec3 = add(
+    left: multiply(matrix: rotation, vector: localVertexB)
+    right: translation
+  )
+  ret SimplexVertex {
+    supportA: vertexA
+    supportB: vertexB
+    minkowskiPoint: subtract(left: vertexB, right: vertexA)
+    weight: 0.0
+    indexA: indexA
+    indexB: indexB
+  }
+}
+
+# b3ShapeDistance: the closest points of two proxies, warm-started from and
+# written back to `cache`.
+func shapeDistance(input: view DistanceInput, cache: mod SimplexCache) ret DistanceOutput {
+  ret proxyDistance(
+    proxyA: input.proxyA
+    proxyB: input.proxyB
+    transform: input.transform
+    useRadii: input.useRadii
+    cache: cache
+  )
+}
+
+# b3ShapeDistance over proxies the caller already holds (no copy into a
+# DistanceInput). The shape cast and time of impact call this in their loops.
+func proxyDistance(
+  proxyA: view ShapeProxy
+  proxyB: view ShapeProxy
+  transform: view Transform
+  useRadii: view Bool
+  cache: mod SimplexCache
+) ret DistanceOutput {
+  # Matrices for faster math
+  let rotation: Matrix3 = matrixFromQuat(quat: transform.rotation)
+  let rotationTransposed: Matrix3 = transpose(matrix: rotation)
+
+  # The initial simplex from the cache
+  var simplex: Simplex = emptySimplex()
+  simplex.count = cache.count
+  loop var i: Int = 0, i < cache.count, ++i {
+    var vertex: SimplexVertex = makeSimplexVertex(
+      proxyA: proxyA
+      proxyB: proxyB
+      rotation: rotation
+      translation: transform.position
+      indexA: cacheIndexA(cache: cache, index: i)
+      indexB: cacheIndexB(cache: cache, index: i)
+    )
+    setSimplexVertex(simplex: simplex, index: i, vertex: vertex)
+  }
+
+  # Flush the simplex if its metric differs much from the cached one.
+  if simplex.count > 0 {
+    let metric1: Float = cache.metric
+    let metric2: Float = simplexMetric(simplex: simplex)
+    if 2.0 * metric1 < metric2 or metric2 < 0.5 * metric1 or metric2 < floatEpsilon {
+      simplex.count = 0
+    }
+  }
+
+  # An invalid or empty cache
+  if simplex.count is 0 {
+    simplex.count = 1
+    simplex.vertex1 = makeSimplexVertex(
+      proxyA: proxyA
+      proxyB: proxyB
+      rotation: rotation
+      translation: transform.position
+      indexA: 0
+      indexB: 0
+    )
+  }
+
+  var backup: Simplex = emptySimplex()
+  var output: DistanceOutput = emptyDistanceOutput()
+  var distanceSquared: Float = floatMax
+  var normal: Vec3 = zeroVector()
+
+  # Run GJK
+  var iteration: Int = 0
+  loop iteration < maxGjkIterations {
+    var solved: Bool = false
+    match simplex.count {
+      case 1 {
+        simplex.vertex1.weight = 1.0
+        solved = true
+      }
+      case 2 {
+        solved = solveSimplex2(simplex: simplex)
+      }
+      case 3 {
+        solved = solveSimplex3(simplex: simplex)
+      }
+      case 4 {
+        solved = solveSimplex4(simplex: simplex)
+      }
+      default {
+      }
+    }
+
+    if solved is false {
+      # No progress: rebuild the last simplex
+      simplex = backup
+      break
+    }
+
+    if simplex.count is maxSimplexVertices {
+      # Overlap
+      var localPointA: Vec3 = zeroVector()
+      var localPointB: Vec3 = zeroVector()
+      computeWitnessPoints(simplex: simplex, pointA: localPointA, pointB: localPointB)
+      output.pointA = localPointA
+      output.pointB = localPointB
+      output.normal = zeroVector()
+      output.distance = 0.0
+      output.iterations = iteration
+      ret output
+    }
+
+    # Assure distance progression
+    let oldDistanceSquared: Float = distanceSquared
+    let closestPoint: Vec3 = simplexClosestPoint(simplex: simplex)
+    distanceSquared = dot(left: closestPoint, right: closestPoint)
+    if distanceSquared >= oldDistanceSquared {
+      # No progress: rebuild the last simplex
+      simplex = backup
+      break
+    }
+
+    let searchDirection: Vec3 = simplexSearchDirection(simplex: simplex)
+    if lengthSquared(vector: searchDirection) < 1000.0 * floatMin {
+      # The origin is probably on a segment or triangle: overlap.
+      var localPointA: Vec3 = zeroVector()
+      var localPointB: Vec3 = zeroVector()
+      computeWitnessPoints(simplex: simplex, pointA: localPointA, pointB: localPointB)
+      output.pointA = localPointA
+      output.pointB = localPointB
+      output.normal = zeroVector()
+      output.distance = 0.0
+      output.iterations = iteration
+      ret output
+    }
+
+    normal = negate(vector: searchDirection)
+
+    # New support points
+    let indexA: Int = proxySupport(proxy: proxyA, axis: negate(vector: searchDirection))
+    let searchDirectionB: Vec3 = multiply(matrix: rotationTransposed, vector: searchDirection)
+    let indexB: Int = proxySupport(proxy: proxyB, axis: searchDirectionB)
+
+    # Save the simplex, then add the vertex; a repeated support pair is the
+    # main termination test.
+    backup = simplex
+    var duplicate: Bool = false
+    loop var i: Int = 0, i < simplex.count, ++i {
+      let vertex: SimplexVertex = simplexVertex(simplex: simplex, index: i)
+      if vertex.indexA is indexA and vertex.indexB is indexB {
+        duplicate = true
+        break
+      }
+    }
+    if duplicate {
+      break
+    }
+
+    let added: SimplexVertex = makeSimplexVertex(
+      proxyA: proxyA
+      proxyB: proxyB
+      rotation: rotation
+      translation: transform.position
+      indexA: indexA
+      indexB: indexB
+    )
+    setSimplexVertex(simplex: simplex, index: simplex.count, vertex: added)
+    simplex.count = simplex.count + 1
+    iteration = iteration + 1
+  }
+
+  # Witness points
+  var localPointA: Vec3 = zeroVector()
+  var localPointB: Vec3 = zeroVector()
+  computeWitnessPoints(simplex: simplex, pointA: localPointA, pointB: localPointB)
+  output.pointA = localPointA
+  output.pointB = localPointB
+  output.iterations = iteration
+
+  normal = normalize(vector: normal)
+  if isNormalized(vector: normal) is false {
+    # Treat as overlap
+    output.distance = 0.0
+    output.normal = zeroVector()
+    ret output
+  }
+
+  # Results stay in frame A
+  output.distance = distance(from: localPointA, to: localPointB)
+  output.normal = normal
+
+  if useRadii {
+    let radiusA: Float = proxyA.radius
+    let radiusB: Float = proxyB.radius
+    output.distance = maxFloat(left: 0.0, right: output.distance - radiusA - radiusB)
+    # Keep the closest points on the perimeter even if overlapped, so they move smoothly.
+    output.pointA = add(left: output.pointA, right: scale(scale: radiusA, vector: normal))
+    output.pointB = subtract(left: output.pointB, right: scale(scale: radiusB, vector: normal))
+  }
+
+  # The simplex is useful: cache it.
+  writeCache(cache: cache, simplex: simplex)
+  ret output
+}
+
+# The point of the simplex closest to the origin, from its weights.
+func simplexClosestPoint(simplex: view Simplex) ret Vec3 {
+  let first: SimplexVertex = simplex.vertex1
+  let second: SimplexVertex = simplex.vertex2
+  let third: SimplexVertex = simplex.vertex3
+  let fourth: SimplexVertex = simplex.vertex4
+  match simplex.count {
+    case 1 {
+      ret first.minkowskiPoint
+    }
+    case 2 {
+      ret blend2(
+        firstScale: first.weight
+        first: first.minkowskiPoint
+        secondScale: second.weight
+        second: second.minkowskiPoint
+      )
+    }
+    case 3 {
+      ret blend3(
+        firstScale: first.weight
+        first: first.minkowskiPoint
+        secondScale: second.weight
+        second: second.minkowskiPoint
+        thirdScale: third.weight
+        third: third.minkowskiPoint
+      )
+    }
+    case 4 {
+      ret add(
+        left: blend2(
+          firstScale: first.weight
+          first: first.minkowskiPoint
+          secondScale: second.weight
+          second: second.minkowskiPoint
+        )
+        right: blend2(
+          firstScale: third.weight
+          first: third.minkowskiPoint
+          secondScale: fourth.weight
+          second: fourth.minkowskiPoint
+        )
+      )
+    }
+    default {
+      ret zeroVector()
+    }
+  }
+}
+
+# The direction from the simplex toward the origin.
+func simplexSearchDirection(simplex: view Simplex) ret Vec3 {
+  match simplex.count {
+    case 1 {
+      # v = -A
+      ret negate(vector: simplex.vertex1.minkowskiPoint)
+    }
+    case 2 {
+      # v = (AB x AO) x AB
+      let pointA: Vec3 = simplex.vertex1.minkowskiPoint
+      let pointB: Vec3 = simplex.vertex2.minkowskiPoint
+      let ab: Vec3 = subtract(left: pointB, right: pointA)
+      ret cross(left: cross(left: ab, right: negate(vector: pointA)), right: ab)
+    }
+    case 3 {
+      # v = AB x AC or v = AC x AB
+      let pointA: Vec3 = simplex.vertex1.minkowskiPoint
+      let pointB: Vec3 = simplex.vertex2.minkowskiPoint
+      let pointC: Vec3 = simplex.vertex3.minkowskiPoint
+      let ab: Vec3 = subtract(left: pointB, right: pointA)
+      let ac: Vec3 = subtract(left: pointC, right: pointA)
+      let faceNormal: Vec3 = cross(left: ab, right: ac)
+      if dot(left: faceNormal, right: pointA) < 0.0 {
+        ret faceNormal
+      }
+      ret negate(vector: faceNormal)
+    }
+    default {
+      ret zeroVector()
+    }
+  }
+}

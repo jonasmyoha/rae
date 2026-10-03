@@ -1,0 +1,773 @@
+# Time of impact by conservative advancement and root finding on separating
+# axes (b3TimeOfImpact and its separation function, Box3D's distance.c at
+# 9f998c8). Box3D's operation order is kept exactly; checked bit for bit
+# against the oracle in fixture 949.
+open Vec3
+open Quat
+open physics/Constants
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/QuatMath
+open physics/math/TransformMath
+open physics/geometry/QueryTypes
+open physics/collision/Simplex
+open physics/collision/Distance
+open physics/collision/ShapeCast
+
+enum ToiState {
+  unknown
+  failed
+  overlapped
+  hit
+  separated
+}
+
+type ToiInput {
+  proxyA: ShapeProxy
+  proxyB: ShapeProxy
+  sweepA: Sweep
+  sweepB: Sweep
+  # The sweep interval is [0, maxFraction].
+  maxFraction: Float
+}
+
+type ToiOutput {
+  state: ToiState
+  # The hit point; a shared point when overlapped.
+  point: Vec3
+  # The hit normal; zero when overlapped.
+  normal: Vec3
+  # The sweep time of the collision; 0 when overlapped.
+  fraction: Float
+  # The final distance; 0 when overlapped.
+  distance: Float
+  distanceIterations: Int
+  pushBackIterations: Int
+  rootIterations: Int
+  # Box3D never sets it in this function; kept for the output's shape.
+  usedFallback: Bool
+}
+
+# Which feature pair the separating axis comes from (b3SeparationType).
+enum SeparationType {
+  unknown
+  vertices
+  edges
+  faceA
+  faceB
+}
+
+# A separating axis along the sweeps (b3SeparationFunction). The witnesses
+# mean different things per kind: a world axis (vertices), two local edges
+# (edges), or a local plane normal and point (faceA, faceB). Box3D keeps
+# pointers to the proxies in it; here the proxies are passed alongside.
+type SeparationFunction {
+  sweepA: Sweep
+  sweepB: Sweep
+  witness1: Vec3
+  witness2: Vec3
+  kind: SeparationType
+}
+
+func toiStateCode(state: view ToiState) ret Int {
+  match state {
+    case ToiState.unknown {
+      ret 0
+    }
+    case ToiState.failed {
+      ret 1
+    }
+    case ToiState.overlapped {
+      ret 2
+    }
+    case ToiState.hit {
+      ret 3
+    }
+    case ToiState.separated {
+      ret 4
+    }
+  }
+}
+
+# b3UniqueCount: how many of the first `count` (1-3) indices differ.
+func uniqueCount(
+  count: view Int
+  first: view Int
+  second: view Int
+  third: view Int
+) ret Int {
+  match count {
+    case 1 {
+      ret 1
+    }
+    case 2 {
+      if first is not second {
+        ret 2
+      }
+      ret 1
+    }
+    case 3 {
+      if first is not second and first is not third and second is not third {
+        # All different
+        ret 3
+      }
+      if first is second and first is third and second is third {
+        # All equal
+        ret 1
+      }
+      ret 2
+    }
+    default {
+      ret 0
+    }
+  }
+}
+
+# b3CheckFastEdges: does the cross product of two edges switch direction?
+func checkFastEdges(
+  transformA: view Transform
+  localEdgeA: view Vec3
+  transformB: view Transform
+  localEdgeB: view Vec3
+  axis0: view Vec3
+) ret Bool {
+  # The local witness axes keep the orientations right if an axis flipped.
+  let edgeA: Vec3 = rotateVector(quat: transformA.rotation, vector: localEdgeA)
+  let edgeB: Vec3 = rotateVector(quat: transformB.rotation, vector: localEdgeB)
+  let axis: Vec3 = cross(left: edgeA, right: edgeB)
+  ret dot(left: axis, right: axis0) < 0.0
+}
+
+# The edge/edge separation of the edges `vertexA1`-`vertexA2` on A and
+# `vertexB1`-`vertexB2` on B, or a world axis when they are near parallel or
+# their cross product flips over the sweep (the two edge cases of
+# b3MakeSeparationFunction).
+func edgeSeparation(
+  function: mod SeparationFunction
+  vertexA1: view Vec3
+  vertexA2: view Vec3
+  vertexB1: view Vec3
+  vertexB2: view Vec3
+  rotationA: view Quat
+  rotationB: view Quat
+  deltaPosition: view Vec3
+  worldNormal: view Vec3
+  toleranceSquared: view Float
+) {
+  let localEdgeA: Vec3 = normalize(vector: subtract(left: vertexA2, right: vertexA1))
+  let edgeA: Vec3 = rotateVector(quat: rotationA, vector: localEdgeA)
+  var localEdgeB: Vec3 = normalize(vector: subtract(left: vertexB2, right: vertexB1))
+  let edgeB: Vec3 = rotateVector(quat: rotationB, vector: localEdgeB)
+
+  var axis: Vec3 = cross(left: edgeA, right: edgeB)
+  let axisLengthSquared: Float = lengthSquared(vector: axis)
+
+  # Skip near parallel edges: |e1 x e2| = sin(alpha) * |e1| * |e2|
+  if axisLengthSquared < toleranceSquared {
+    # The axis is not safe to normalize: use the world axis.
+    function.kind = SeparationType.vertices
+    function.witness1 = worldNormal
+    ret
+  }
+
+  let delta: Vec3 = add(
+    left: subtract(
+      left: rotateVector(quat: rotationB, vector: vertexB1)
+      right: rotateVector(quat: rotationA, vector: vertexA1)
+    )
+    right: deltaPosition
+  )
+  if dot(left: delta, right: axis) < 0.0 {
+    # Make the axis point from A to B
+    axis = negate(vector: axis)
+    localEdgeB = negate(vector: localEdgeB)
+  }
+
+  # A possible sign flip of the edge cross product
+  let finalTransformA: Transform = finalSweepTransform(sweep: function.sweepA)
+  let finalTransformB: Transform = finalSweepTransform(sweep: function.sweepB)
+  let fastEdges: Bool = checkFastEdges(
+    transformA: finalTransformA
+    localEdgeA: localEdgeA
+    transformB: finalTransformB
+    localEdgeB: localEdgeB
+    axis0: axis
+  )
+  if fastEdges {
+    # Local edges are not safe: fall back to the initial world axis.
+    function.kind = SeparationType.vertices
+    function.witness1 = normalize(vector: axis)
+  } else {
+    # The edge cross product is safe; it converges faster than a fixed axis.
+    function.kind = SeparationType.edges
+    function.witness1 = localEdgeA
+    function.witness2 = localEdgeB
+  }
+}
+
+# b3MakeSeparationFunction: an axis from the simplex `cache` at time `time1`.
+func makeSeparationFunction(
+  cache: view SimplexCache
+  proxyA: view ShapeProxy
+  sweepA: view Sweep
+  proxyB: view ShapeProxy
+  sweepB: view Sweep
+  worldNormal: view Vec3
+  time1: view Float
+) ret SeparationFunction {
+  var function: SeparationFunction = {
+    sweepA: sweepA
+    sweepB: sweepB
+    witness1: zeroVector()
+    witness2: zeroVector()
+    kind: SeparationType.unknown
+  }
+
+  var indexA0: Int = cacheIndexA(cache: cache, index: 0)
+  var indexA1: Int = cacheIndexA(cache: cache, index: 1)
+  let indexA2: Int = cacheIndexA(cache: cache, index: 2)
+  var indexB0: Int = cacheIndexB(cache: cache, index: 0)
+  var indexB1: Int = cacheIndexB(cache: cache, index: 1)
+  let indexB2: Int = cacheIndexB(cache: cache, index: 2)
+
+  let uniqueCountA: Int = uniqueCount(
+    count: cache.count
+    first: indexA0
+    second: indexA1
+    third: indexA2
+  )
+  let uniqueCountB: Int = uniqueCount(
+    count: cache.count
+    first: indexB0
+    second: indexB1
+    third: indexB2
+  )
+
+  let transformA1: Transform = sweepTransform(sweep: sweepA, time: time1)
+  let transformB1: Transform = sweepTransform(sweep: sweepB, time: time1)
+  let rotationA: Quat = transformA1.rotation
+  let rotationB: Quat = transformB1.rotation
+
+  # Minimize round-off
+  let deltaPosition: Vec3 = subtract(left: transformB1.position, right: transformA1.position)
+
+  match cache.count {
+    case 1 {
+      # The witness is the world direction
+      function.kind = SeparationType.vertices
+      function.witness1 = worldNormal
+    }
+    case 2 {
+      if uniqueCountA is 2 and uniqueCountB is 2 {
+        edgeSeparation(
+          function: function
+          vertexA1: proxyA.points.copyAtDefault(index: indexA0)
+          vertexA2: proxyA.points.copyAtDefault(index: indexA1)
+          vertexB1: proxyB.points.copyAtDefault(index: indexB0)
+          vertexB2: proxyB.points.copyAtDefault(index: indexB1)
+          rotationA: rotationA
+          rotationB: rotationB
+          deltaPosition: deltaPosition
+          worldNormal: worldNormal
+          toleranceSquared: 0.05 * 0.05
+        )
+      } else {
+        # Vertex versus edge: the world axis witness
+        function.kind = SeparationType.vertices
+        function.witness1 = worldNormal
+      }
+    }
+    case 3 {
+      if uniqueCountA is 3 {
+        let vertexA1: Vec3 = proxyA.points.copyAtDefault(index: indexA0)
+        let vertexA2: Vec3 = proxyA.points.copyAtDefault(index: indexA1)
+        let vertexA3: Vec3 = proxyA.points.copyAtDefault(index: indexA2)
+        var localAxisA: Vec3 = cross(
+          left: subtract(left: vertexA2, right: vertexA1)
+          right: subtract(left: vertexA3, right: vertexA1)
+        )
+        localAxisA = normalize(vector: localAxisA)
+        let axisA: Vec3 = rotateVector(quat: rotationA, vector: localAxisA)
+        let localPointA: Vec3 = scale(
+          scale: 1.0 / 3.0
+          vector: add(left: add(left: vertexA1, right: vertexA2), right: vertexA3)
+        )
+        let localPointB: Vec3 = proxyB.points.copyAtDefault(index: indexB0)
+        let delta: Vec3 = add(
+          left: subtract(
+            left: rotateVector(quat: rotationB, vector: localPointB)
+            right: rotateVector(quat: rotationA, vector: localPointA)
+          )
+          right: deltaPosition
+        )
+        if dot(left: delta, right: axisA) < 0.0 {
+          # Make the axis point from A to B
+          localAxisA = negate(vector: localAxisA)
+        }
+        # The witness is the local plane of face A
+        function.kind = SeparationType.faceA
+        function.witness1 = localAxisA
+        function.witness2 = localPointA
+      } else if uniqueCountB is 3 {
+        let vertexB1: Vec3 = proxyB.points.copyAtDefault(index: indexB0)
+        let vertexB2: Vec3 = proxyB.points.copyAtDefault(index: indexB1)
+        let vertexB3: Vec3 = proxyB.points.copyAtDefault(index: indexB2)
+        var localAxisB: Vec3 = cross(
+          left: subtract(left: vertexB2, right: vertexB1)
+          right: subtract(left: vertexB3, right: vertexB1)
+        )
+        localAxisB = normalize(vector: localAxisB)
+        let axisB: Vec3 = rotateVector(quat: rotationB, vector: localAxisB)
+        let localPointA: Vec3 = proxyA.points.copyAtDefault(index: indexA0)
+        let localPointB: Vec3 = scale(
+          scale: 1.0 / 3.0
+          vector: add(left: add(left: vertexB1, right: vertexB2), right: vertexB3)
+        )
+        let delta: Vec3 = subtract(
+          left: subtract(
+            left: rotateVector(quat: rotationA, vector: localPointA)
+            right: rotateVector(quat: rotationB, vector: localPointB)
+          )
+          right: deltaPosition
+        )
+        if dot(left: delta, right: axisB) < 0.0 {
+          # Make the axis point from B to A
+          localAxisB = negate(vector: localAxisB)
+        }
+        # The witness is the local plane of face B
+        function.kind = SeparationType.faceB
+        function.witness1 = localAxisB
+        function.witness2 = localPointB
+      } else {
+        # Two unique indices on each side: make the first two unique.
+        if indexA0 is indexA1 {
+          indexA1 = indexA2
+        }
+        if indexB0 is indexB1 {
+          indexB1 = indexB2
+        }
+        edgeSeparation(
+          function: function
+          vertexA1: proxyA.points.copyAtDefault(index: indexA0)
+          vertexA2: proxyA.points.copyAtDefault(index: indexA1)
+          vertexB1: proxyB.points.copyAtDefault(index: indexB0)
+          vertexB2: proxyB.points.copyAtDefault(index: indexB1)
+          rotationA: rotationA
+          rotationB: rotationB
+          deltaPosition: deltaPosition
+          worldNormal: worldNormal
+          toleranceSquared: 0.005 * 0.005
+        )
+      }
+    }
+    default {
+    }
+  }
+  ret function
+}
+
+# b3FindMinSeparation: the deepest points along the axis at `time`, and
+# their separation. An index is -1 for a face witness.
+func findMinSeparation(
+  function: view SeparationFunction
+  proxyA: view ShapeProxy
+  proxyB: view ShapeProxy
+  indexA: mod Int
+  indexB: mod Int
+  time: view Float
+) ret Float {
+  let transformA: Transform = sweepTransform(sweep: function.sweepA, time: time)
+  let transformB: Transform = sweepTransform(sweep: function.sweepB, time: time)
+  match function.kind {
+    case SeparationType.vertices {
+      let axis: Vec3 = function.witness1
+      let localAxisA: Vec3 = inverseRotateVector(quat: transformA.rotation, vector: axis)
+      let localAxisB: Vec3 = inverseRotateVector(
+        quat: transformB.rotation
+        vector: negate(vector: axis)
+      )
+      indexA = pointSupport(points: proxyA.points, axis: localAxisA)
+      indexB = pointSupport(points: proxyB.points, axis: localAxisB)
+      let deltaPosition: Vec3 = subtract(left: transformB.position, right: transformA.position)
+      let localPointA: Vec3 = proxyA.points.copyAtDefault(index: indexA)
+      let localPointB: Vec3 = proxyB.points.copyAtDefault(index: indexB)
+      let delta: Vec3 = add(
+        left: subtract(
+          left: rotateVector(quat: transformB.rotation, vector: localPointB)
+          right: rotateVector(quat: transformA.rotation, vector: localPointA)
+        )
+        right: deltaPosition
+      )
+      ret dot(left: delta, right: axis)
+    }
+    case SeparationType.edges {
+      let edgeA: Vec3 = rotateVector(quat: transformA.rotation, vector: function.witness1)
+      let edgeB: Vec3 = rotateVector(quat: transformB.rotation, vector: function.witness2)
+      let axis: Vec3 = normalize(vector: cross(left: edgeA, right: edgeB))
+      let axisA: Vec3 = inverseRotateVector(quat: transformA.rotation, vector: axis)
+      indexA = pointSupport(points: proxyA.points, axis: axisA)
+      let axisB: Vec3 = inverseRotateVector(quat: transformB.rotation, vector: axis)
+      indexB = pointSupport(points: proxyB.points, axis: negate(vector: axisB))
+      let deltaPosition: Vec3 = subtract(left: transformB.position, right: transformA.position)
+      let localPointA: Vec3 = proxyA.points.copyAtDefault(index: indexA)
+      let localPointB: Vec3 = proxyB.points.copyAtDefault(index: indexB)
+      let delta: Vec3 = add(
+        left: subtract(
+          left: rotateVector(quat: transformB.rotation, vector: localPointB)
+          right: rotateVector(quat: transformA.rotation, vector: localPointA)
+        )
+        right: deltaPosition
+      )
+      ret dot(left: delta, right: axis)
+    }
+    case SeparationType.faceA {
+      let normal: Vec3 = rotateVector(quat: transformA.rotation, vector: function.witness1)
+      indexA = -1
+      let pointA: Vec3 = transformPoint(transform: transformA, point: function.witness2)
+      let axisB: Vec3 = inverseRotateVector(quat: transformB.rotation, vector: normal)
+      indexB = pointSupport(points: proxyB.points, axis: negate(vector: axisB))
+      let pointB: Vec3 = transformPoint(
+        transform: transformB
+        point: proxyB.points.copyAtDefault(index: indexB)
+      )
+      ret dot(left: subtract(left: pointB, right: pointA), right: normal)
+    }
+    case SeparationType.faceB {
+      let normal: Vec3 = rotateVector(quat: transformB.rotation, vector: function.witness1)
+      let axisA: Vec3 = inverseRotateVector(quat: transformA.rotation, vector: normal)
+      indexA = pointSupport(points: proxyA.points, axis: negate(vector: axisA))
+      let pointA: Vec3 = transformPoint(
+        transform: transformA
+        point: proxyA.points.copyAtDefault(index: indexA)
+      )
+      indexB = -1
+      let pointB: Vec3 = transformPoint(transform: transformB, point: function.witness2)
+      ret dot(left: subtract(left: pointA, right: pointB), right: normal)
+    }
+    case SeparationType.unknown {
+      ret 0.0
+    }
+  }
+}
+
+# b3EvaluateSeparation: the separation of the points `indexA`, `indexB`
+# along the axis at `time`.
+func evaluateSeparation(
+  function: view SeparationFunction
+  proxyA: view ShapeProxy
+  proxyB: view ShapeProxy
+  indexA: view Int
+  indexB: view Int
+  time: view Float
+) ret Float {
+  let transformA: Transform = sweepTransform(sweep: function.sweepA, time: time)
+  let transformB: Transform = sweepTransform(sweep: function.sweepB, time: time)
+  match function.kind {
+    case SeparationType.vertices {
+      let axis: Vec3 = function.witness1
+      let pointA: Vec3 = transformPoint(
+        transform: transformA
+        point: proxyA.points.copyAtDefault(index: indexA)
+      )
+      let pointB: Vec3 = transformPoint(
+        transform: transformB
+        point: proxyB.points.copyAtDefault(index: indexB)
+      )
+      ret dot(left: subtract(left: pointB, right: pointA), right: axis)
+    }
+    case SeparationType.edges {
+      let edgeA: Vec3 = rotateVector(quat: transformA.rotation, vector: function.witness1)
+      let edgeB: Vec3 = rotateVector(quat: transformB.rotation, vector: function.witness2)
+      let axis: Vec3 = normalize(vector: cross(left: edgeA, right: edgeB))
+      let pointA: Vec3 = transformPoint(
+        transform: transformA
+        point: proxyA.points.copyAtDefault(index: indexA)
+      )
+      let pointB: Vec3 = transformPoint(
+        transform: transformB
+        point: proxyB.points.copyAtDefault(index: indexB)
+      )
+      ret dot(left: subtract(left: pointB, right: pointA), right: axis)
+    }
+    case SeparationType.faceA {
+      let axis: Vec3 = rotateVector(quat: transformA.rotation, vector: function.witness1)
+      let pointA: Vec3 = transformPoint(transform: transformA, point: function.witness2)
+      let pointB: Vec3 = transformPoint(
+        transform: transformB
+        point: proxyB.points.copyAtDefault(index: indexB)
+      )
+      ret dot(left: subtract(left: pointB, right: pointA), right: axis)
+    }
+    case SeparationType.faceB {
+      let axis: Vec3 = rotateVector(quat: transformB.rotation, vector: function.witness1)
+      let pointA: Vec3 = transformPoint(
+        transform: transformA
+        point: proxyA.points.copyAtDefault(index: indexA)
+      )
+      let pointB: Vec3 = transformPoint(transform: transformB, point: function.witness2)
+      ret dot(left: subtract(left: pointA, right: pointB), right: axis)
+    }
+    case SeparationType.unknown {
+      ret 0.0
+    }
+  }
+}
+
+# b3ForceFixedAxis: turn an edge axis into a fixed world axis at `time`.
+func forceFixedAxis(function: mod SeparationFunction, time: view Float) {
+  let transformA: Transform = sweepTransform(sweep: function.sweepA, time: time)
+  let transformB: Transform = sweepTransform(sweep: function.sweepB, time: time)
+  let edgeA: Vec3 = rotateVector(quat: transformA.rotation, vector: function.witness1)
+  let edgeB: Vec3 = rotateVector(quat: transformB.rotation, vector: function.witness2)
+  let axis: Vec3 = normalize(vector: cross(left: edgeA, right: edgeB))
+  function.kind = SeparationType.vertices
+  function.witness1 = axis
+  function.witness2 = zeroVector()
+}
+
+# The averaged hit point of the witness points, back in the unshifted world.
+func averagedHitPoint(
+  worldPointA: view Vec3
+  worldPointB: view Vec3
+  radiusA: view Float
+  radiusB: view Float
+  worldNormal: view Vec3
+  origin: view Vec3
+) ret Vec3 {
+  let pointA: Vec3 = mulAdd(base: worldPointA, scale: radiusA, vector: worldNormal)
+  let pointB: Vec3 = mulAdd(base: worldPointB, scale: -radiusB, vector: worldNormal)
+  ret add(left: lerp(from: pointA, to: pointB, alpha: 0.5), right: origin)
+}
+
+# b3TimeOfImpact: when, within [0, maxFraction], the swept proxies first come
+# within the target distance (the linear slop, or the summed radii less it).
+func timeOfImpact(input: view ToiInput, lengthUnitsPerMeter: view Float) ret ToiOutput {
+  var output: ToiOutput = {
+    state: ToiState.unknown
+    point: zeroVector()
+    normal: zeroVector()
+    fraction: -1.0
+    distance: 0.0
+    distanceIterations: 0
+    pushBackIterations: 0
+    rootIterations: 0
+    usedFallback: false
+  }
+
+  # Shift to the origin
+  var sweepA: Sweep = input.sweepA
+  var sweepB: Sweep = input.sweepB
+  let origin: Vec3 = sweepA.center1
+  sweepA.center1 = zeroVector()
+  sweepA.center2 = subtract(left: sweepA.center2, right: origin)
+  sweepB.center1 = subtract(left: sweepB.center1, right: origin)
+  sweepB.center2 = subtract(left: sweepB.center2, right: origin)
+
+  let maxPushBackIterations: Int = input.proxyA.points.length + input.proxyB.points.length
+  let timeMax: Float = input.maxFraction
+
+  # Target distance and tolerance
+  let slop: Float = linearSlop(lengthUnitsPerMeter: lengthUnitsPerMeter)
+  let totalRadius: Float = input.proxyA.radius + input.proxyB.radius
+  let target: Float = maxFloat(left: slop, right: totalRadius - slop)
+  let tolerance: Float = 0.25 * slop
+
+  var time1: Float = 0.0
+  let maxIterations: Int = 25
+  var distanceIterations: Int = 0
+  var cache: SimplexCache = emptySimplexCache()
+
+  # The outer loop finds a new separating axis each round; it ends when an
+  # axis repeats (no progress).
+  loop true {
+    # The distance between the shapes, which also gives a separating axis.
+    let transformA: Transform = sweepTransform(sweep: sweepA, time: time1)
+    let transformB: Transform = sweepTransform(sweep: sweepB, time: time1)
+    let distanceOutput: DistanceOutput = proxyDistance(
+      proxyA: input.proxyA
+      proxyB: input.proxyB
+      transform: inverseMultiply(left: transformA, right: transformB)
+      useRadii: false
+      cache: cache
+    )
+    output.distance = distanceOutput.distance
+
+    # The query ran in frame A: back to the shifted world.
+    let worldNormal: Vec3 = rotateVector(quat: transformA.rotation, vector: distanceOutput.normal)
+    let worldPointA: Vec3 = transformPoint(transform: transformA, point: distanceOutput.pointA)
+    let worldPointB: Vec3 = transformPoint(transform: transformA, point: distanceOutput.pointB)
+
+    output.distanceIterations = output.distanceIterations + 1
+    distanceIterations = distanceIterations + 1
+
+    let hitPoint: Vec3 = averagedHitPoint(
+      worldPointA: worldPointA
+      worldPointB: worldPointB
+      radiusA: input.proxyA.radius
+      radiusB: input.proxyB.radius
+      worldNormal: worldNormal
+      origin: origin
+    )
+
+    # Overlapped shapes: give up on continuous collision.
+    if distanceOutput.distance <= 0.0 {
+      output.state = ToiState.overlapped
+      output.fraction = 0.0
+      output.point = hitPoint
+      output.normal = worldNormal
+      break
+    }
+
+    if distanceOutput.distance <= target + tolerance {
+      output.state = ToiState.hit
+      output.point = hitPoint
+      output.normal = worldNormal
+      output.fraction = time1
+      break
+    }
+
+    if distanceIterations is maxIterations {
+      # Progress too slow, as when a capsule rotates around a triangle vertex.
+      output.state = ToiState.failed
+      output.fraction = time1
+      output.point = hitPoint
+      output.normal = worldNormal
+      break
+    }
+
+    # The separating axis
+    var function: SeparationFunction = makeSeparationFunction(
+      cache: cache
+      proxyA: input.proxyA
+      sweepA: sweepA
+      proxyB: input.proxyB
+      sweepB: sweepB
+      worldNormal: worldNormal
+      time1: time1
+    )
+
+    # The time of impact on that axis, resolving the deepest point in turn.
+    var done: Bool = false
+    var time2: Float = timeMax
+    var pushBackIterations: Int = 0
+    loop true {
+      var indexA: Int = 0
+      var indexB: Int = 0
+      var separation2: Float = findMinSeparation(
+        function: function
+        proxyA: input.proxyA
+        proxyB: input.proxyB
+        indexA: indexA
+        indexB: indexB
+        time: time2
+      )
+
+      # Is the final configuration separated?
+      if separation2 - target > tolerance {
+        output.state = ToiState.separated
+        output.fraction = input.maxFraction
+        done = true
+        break
+      }
+
+      # Has the separation reached tolerance? Advance the sweeps.
+      if separation2 >= target - tolerance {
+        time1 = time2
+        break
+      }
+
+      # The initial separation of the witness points
+      var separation1: Float = evaluateSeparation(
+        function: function
+        proxyA: input.proxyA
+        proxyB: input.proxyB
+        indexA: indexA
+        indexB: indexB
+        time: time1
+      )
+
+      # Overlap: the root finder may have run out of iterations.
+      if separation1 < target - tolerance {
+        output.state = ToiState.failed
+        output.fraction = time1
+        done = true
+        break
+      }
+
+      # Reached tolerance: time1 is the time of impact (maybe 0).
+      if separation1 <= target + tolerance {
+        output.state = ToiState.hit
+        output.fraction = time1
+        done = true
+        break
+      }
+
+      # The 1D root of f(x) - target = 0
+      var rootIterationCount: Int = 0
+      let maxRootIterations: Int = 50
+      var bracket1: Float = time1
+      var bracket2: Float = time2
+      loop true {
+        # A mix of false position and bisection
+        var time: Float = 0.0
+        if (rootIterationCount bitand 1) is not 0 {
+          # False position for convergence
+          time = bracket1 + (target - separation1) * (bracket2 - bracket1) / (separation2 - separation1)
+        } else {
+          # Bisection for progress
+          time = 0.5 * (bracket1 + bracket2)
+        }
+        output.rootIterations = output.rootIterations + 1
+        rootIterationCount = rootIterationCount + 1
+
+        let separation: Float = evaluateSeparation(
+          function: function
+          proxyA: input.proxyA
+          proxyB: input.proxyB
+          indexA: indexA
+          indexB: indexB
+          time: time
+        )
+
+        if absFloat(value: separation - target) <= tolerance {
+          # time2 holds a tentative value for time1
+          time2 = time
+          break
+        }
+
+        # Keep bracketing the root
+        if separation > target {
+          bracket1 = time
+          separation1 = separation
+        } else {
+          bracket2 = time
+          separation2 = separation
+        }
+
+        if rootIterationCount is maxRootIterations {
+          break
+        }
+      }
+
+      # Restart the inner loop on a failing edge case.
+      if rootIterationCount is maxRootIterations - 1 and function.kind is SeparationType.edges {
+        rootIterationCount = 0
+        time2 = input.maxFraction
+        forceFixedAxis(function: function, time: time1)
+      }
+
+      output.pushBackIterations = output.pushBackIterations + 1
+      pushBackIterations = pushBackIterations + 1
+      if pushBackIterations is maxPushBackIterations {
+        break
+      }
+    }
+
+    if done {
+      output.point = hitPoint
+      output.normal = worldNormal
+      break
+    }
+  }
+  ret output
+}

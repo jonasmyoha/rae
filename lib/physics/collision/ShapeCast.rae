@@ -1,0 +1,168 @@
+# The shape cast by conservative advancement and the sweep of a moving body
+# (b3ShapeCast, b3GetSweepTransform of Box3D's distance.c at 9f998c8).
+# Box3D's operation order is kept exactly; checked bit for bit against the
+# oracle in fixture 949.
+#
+# Box3D reads the length scale from a global (b3GetLengthUnitsPerMeter); the
+# port has no globals, so the queries that need a tolerance take
+# `lengthUnitsPerMeter` (1 for meters).
+open Vec3
+open Quat
+open physics/Constants
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/QuatMath
+open physics/math/TransformMath
+open physics/geometry/QueryTypes
+open physics/collision/Simplex
+open physics/collision/Distance
+
+type ShapeCastPairInput {
+  proxyA: ShapeProxy
+  proxyB: ShapeProxy
+  # B in A's frame.
+  transform: Transform
+  # The translation of B, in A's frame.
+  translationB: Vec3
+  maxFraction: Float
+  # Lets shapes with a radius move slightly closer when already touching.
+  canEncroach: Bool
+}
+
+# The motion of a body over a step: its center of mass from c1 to c2 and
+# its rotation from q1 to q2 (b3Sweep).
+type Sweep {
+  localCenter: Vec3
+  center1: Vec3
+  center2: Vec3
+  rotation1: Quat
+  rotation2: Quat
+}
+
+# b3ShapeCast
+func shapeCast(input: view ShapeCastPairInput, lengthUnitsPerMeter: view Float) ret CastOutput {
+  ret proxyCast(
+    proxyA: input.proxyA
+    proxyB: input.proxyB
+    transform: input.transform
+    translationB: input.translationB
+    maxFraction: input.maxFraction
+    canEncroach: input.canEncroach
+    lengthUnitsPerMeter: lengthUnitsPerMeter
+  )
+}
+
+# b3ShapeCast over proxies the caller already holds.
+func proxyCast(
+  proxyA: view ShapeProxy
+  proxyB: view ShapeProxy
+  transform: view Transform
+  translationB: view Vec3
+  maxFraction: view Float
+  canEncroach: view Bool
+  lengthUnitsPerMeter: view Float
+) ret CastOutput {
+  # Tolerance
+  let slop: Float = linearSlop(lengthUnitsPerMeter: lengthUnitsPerMeter)
+  let totalRadius: Float = proxyA.radius + proxyB.radius
+  var target: Float = maxFloat(left: slop, right: totalRadius - slop)
+  let tolerance: Float = 0.25 * slop
+
+  var cache: SimplexCache = emptySimplexCache()
+  var alpha: Float = 0.0
+
+  # The whole cast runs in frame A, advancing the pose of B in float.
+  var relativeTransform: Transform = transform
+  let delta2: Vec3 = translationB
+  var output: CastOutput = emptyCastOutput()
+  output.triangleIndex = -1
+
+  let maxIterations: Int = 20
+  loop var iteration: Int = 0, iteration < maxIterations, ++iteration {
+    output.iterations = output.iterations + 1
+    let distanceOutput: DistanceOutput = proxyDistance(
+      proxyA: proxyA
+      proxyB: proxyB
+      transform: relativeTransform
+      useRadii: false
+      cache: cache
+    )
+
+    if distanceOutput.distance < target + tolerance {
+      if iteration is 0 {
+        if canEncroach and distanceOutput.distance > 2.0 * slop {
+          target = distanceOutput.distance - slop
+        } else {
+          # Initial overlap
+          output.hit = true
+          # A common point
+          let pointA: Vec3 = mulAdd(
+            base: distanceOutput.pointA
+            scale: proxyA.radius
+            vector: distanceOutput.normal
+          )
+          let pointB: Vec3 = mulAdd(
+            base: distanceOutput.pointB
+            scale: -proxyB.radius
+            vector: distanceOutput.normal
+          )
+          output.point = lerp(from: pointA, to: pointB, alpha: 0.5)
+          ret output
+        }
+      } else {
+        if distanceOutput.distance > 0.0 and isNormalized(vector: distanceOutput.normal) is false {
+          # A numerical problem, likely extreme input (Box3D logs the input here).
+          ret output
+        }
+        output.fraction = alpha
+        output.point = mulAdd(
+          base: distanceOutput.pointA
+          scale: proxyA.radius
+          vector: distanceOutput.normal
+        )
+        output.normal = distanceOutput.normal
+        output.hit = true
+        ret output
+      }
+    }
+
+    # Are the shapes approaching each other?
+    let denominator: Float = dot(left: delta2, right: distanceOutput.normal)
+    if denominator >= 0.0 {
+      # Miss
+      ret output
+    }
+
+    # Advance the sweep
+    alpha = alpha + (target - distanceOutput.distance) / denominator
+    if alpha >= maxFraction {
+      ret output
+    }
+    relativeTransform.position = mulAdd(base: transform.position, scale: alpha, vector: delta2)
+  }
+
+  # Failure
+  ret output
+}
+
+# b3GetSweepTransform: the body transform at `time` in [0, 1].
+func sweepTransform(sweep: view Sweep, time: view Float) ret Transform {
+  let rotation: Quat = nlerp(from: sweep.rotation1, to: sweep.rotation2, alpha: time)
+  let position: Vec3 = subtract(
+    left: lerp(from: sweep.center1, to: sweep.center2, alpha: time)
+    right: rotateVector(quat: rotation, vector: sweep.localCenter)
+  )
+  ret Transform { position: position, rotation: rotation }
+}
+
+# b3GetFinalSweepTransform
+func finalSweepTransform(sweep: view Sweep) ret Transform {
+  let rotation: Quat = sweep.rotation2
+  ret Transform {
+    position: subtract(
+      left: sweep.center2
+      right: rotateVector(quat: rotation, vector: sweep.localCenter)
+    )
+    rotation: rotation
+  }
+}

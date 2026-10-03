@@ -1,0 +1,592 @@
+# The GJK simplex of Box3D's distance.c at 9f998c8: its vertices, the cache
+# that warm-starts the next query, the barycentric coordinates, and the
+# solvers that reduce a simplex to the feature closest to the origin.
+# Box3D's operation order is kept exactly; checked bit for bit against the
+# oracle in fixture 949.
+open Vec3
+open physics/math/Scalar
+open physics/math/VectorMath
+
+# One vertex of the Minkowski difference B - A (b3SimplexVertex).
+type SimplexVertex {
+  # The support point on proxy A (wA).
+  supportA: Vec3
+  # The support point on proxy B (wB).
+  supportB: Vec3
+  # supportB - supportA (w).
+  minkowskiPoint: Vec3
+  # The barycentric weight of this vertex (a).
+  weight: Float
+  indexA: Int
+  indexB: Int
+}
+
+# Up to four vertices; `count` of them are in use (b3Simplex).
+type Simplex {
+  vertex1: SimplexVertex
+  vertex2: SimplexVertex
+  vertex3: SimplexVertex
+  vertex4: SimplexVertex
+  count: Int
+}
+
+# The simplex of the last query, by support indices, and its size
+# (b3SimplexCache). An empty cache (count 0) starts from scratch.
+type SimplexCache {
+  metric: Float
+  count: Int
+  indexA: Array(Int, cap: 4)
+  indexB: Array(Int, cap: 4)
+}
+
+# The barycentric coordinates of the origin on an edge, unnormalised.
+type EdgeWeights {
+  first: Float
+  second: Float
+  divisor: Float
+}
+
+# The barycentric coordinates of the origin on a triangle, unnormalised.
+type TriangleWeights {
+  first: Float
+  second: Float
+  third: Float
+  divisor: Float
+}
+
+# The barycentric coordinates of the origin in a tetrahedron, unnormalised.
+type TetrahedronWeights {
+  first: Float
+  second: Float
+  third: Float
+  fourth: Float
+  divisor: Float
+}
+
+func emptySimplexVertex() ret SimplexVertex {
+  ret SimplexVertex {
+    supportA: zeroVector()
+    supportB: zeroVector()
+    minkowskiPoint: zeroVector()
+    weight: 0.0
+    indexA: 0
+    indexB: 0
+  }
+}
+
+func emptySimplex() ret Simplex {
+  ret Simplex {
+    vertex1: emptySimplexVertex()
+    vertex2: emptySimplexVertex()
+    vertex3: emptySimplexVertex()
+    vertex4: emptySimplexVertex()
+    count: 0
+  }
+}
+
+func emptySimplexCache() ret SimplexCache {
+  ret SimplexCache { metric: 0.0, count: 0, indexA: Array(Int, cap: 4), indexB: Array(Int, cap: 4) }
+}
+
+# The simplex vertex at `index` (0-3), Box3D's `vertices[index]`.
+func simplexVertex(simplex: view Simplex, index: view Int) ret SimplexVertex {
+  match index {
+    case 0 {
+      ret simplex.vertex1
+    }
+    case 1 {
+      ret simplex.vertex2
+    }
+    case 2 {
+      ret simplex.vertex3
+    }
+    default {
+      ret simplex.vertex4
+    }
+  }
+}
+
+func setSimplexVertex(simplex: mod Simplex, index: view Int, vertex: view SimplexVertex) {
+  match index {
+    case 0 {
+      simplex.vertex1 = vertex
+    }
+    case 1 {
+      simplex.vertex2 = vertex
+    }
+    case 2 {
+      simplex.vertex3 = vertex
+    }
+    default {
+      simplex.vertex4 = vertex
+    }
+  }
+}
+
+func cacheIndexA(cache: view SimplexCache, index: view Int) ret Int {
+  ret cache.indexA.copyAtFallback(index: index, fallback: 0)
+}
+
+func cacheIndexB(cache: view SimplexCache, index: view Int) ret Int {
+  ret cache.indexB.copyAtFallback(index: index, fallback: 0)
+}
+
+# b3BarycentricCoordsEdge
+func edgeWeights(start: view Vec3, end: view Vec3) ret EdgeWeights {
+  let edge: Vec3 = subtract(left: end, right: start)
+  let divisor: Float = dot(left: edge, right: edge)
+  ret EdgeWeights {
+    first: dot(left: end, right: edge)
+    second: -dot(left: start, right: edge)
+    divisor: divisor
+  }
+}
+
+# b3BarycentricCoordsTri
+func triangleWeights(first: view Vec3, second: view Vec3, third: view Vec3) ret TriangleWeights {
+  let ab: Vec3 = subtract(left: second, right: first)
+  let ac: Vec3 = subtract(left: third, right: first)
+  let bCrossC: Vec3 = cross(left: second, right: third)
+  let cCrossA: Vec3 = cross(left: third, right: first)
+  let aCrossB: Vec3 = cross(left: first, right: second)
+  let abCrossAc: Vec3 = cross(left: ab, right: ac)
+  let divisor: Float = dot(left: abCrossAc, right: abCrossAc)
+  ret TriangleWeights {
+    first: dot(left: bCrossC, right: abCrossAc)
+    second: dot(left: cCrossA, right: abCrossAc)
+    third: dot(left: aCrossB, right: abCrossAc)
+    divisor: divisor
+  }
+}
+
+# b3BarycentricCoordsTet: the divisor is forced positive.
+func tetrahedronWeights(
+  first: view Vec3
+  second: view Vec3
+  third: view Vec3
+  fourth: view Vec3
+) ret TetrahedronWeights {
+  let ab: Vec3 = subtract(left: second, right: first)
+  let ac: Vec3 = subtract(left: third, right: first)
+  let ad: Vec3 = subtract(left: fourth, right: first)
+  let divisor: Float = scalarTripleProduct(first: ab, second: ac, third: ad)
+  var sign: Float = 1.0
+  if divisor < 0.0 {
+    sign = -1.0
+  }
+  ret TetrahedronWeights {
+    first: sign * scalarTripleProduct(first: second, second: third, third: fourth)
+    second: sign * scalarTripleProduct(first: first, second: fourth, third: third)
+    third: sign * scalarTripleProduct(first: first, second: second, third: fourth)
+    fourth: sign * scalarTripleProduct(first: first, second: third, third: second)
+    divisor: sign * divisor
+  }
+}
+
+# b3GetMetric: the length, area or volume of the simplex.
+func simplexMetric(simplex: view Simplex) ret Float {
+  match simplex.count {
+    case 1 {
+      ret 0.0
+    }
+    case 2 {
+      ret distance(from: simplex.vertex1.minkowskiPoint, to: simplex.vertex2.minkowskiPoint)
+    }
+    case 3 {
+      let pointA: Vec3 = simplex.vertex1.minkowskiPoint
+      let pointB: Vec3 = simplex.vertex2.minkowskiPoint
+      let pointC: Vec3 = simplex.vertex3.minkowskiPoint
+      ret length(
+        vector: cross(
+          left: subtract(left: pointB, right: pointA)
+          right: subtract(left: pointC, right: pointA)
+        )
+      ) / 2.0
+    }
+    case 4 {
+      let pointA: Vec3 = simplex.vertex1.minkowskiPoint
+      let pointB: Vec3 = simplex.vertex2.minkowskiPoint
+      let pointC: Vec3 = simplex.vertex3.minkowskiPoint
+      let pointD: Vec3 = simplex.vertex4.minkowskiPoint
+      ret scalarTripleProduct(
+        first: subtract(left: pointB, right: pointA)
+        second: subtract(left: pointC, right: pointA)
+        third: subtract(left: pointD, right: pointA)
+      ) / 6.0
+    }
+    default {
+      ret 0.0
+    }
+  }
+}
+
+# b3WriteCache
+func writeCache(cache: mod SimplexCache, simplex: view Simplex) {
+  cache.metric = simplexMetric(simplex: simplex)
+  cache.count = simplex.count
+  loop var i: Int = 0, i < simplex.count, ++i {
+    let vertex: SimplexVertex = simplexVertex(simplex: simplex, index: i)
+    cache.indexA.set(index: i, value: vertex.indexA)
+    cache.indexB.set(index: i, value: vertex.indexB)
+  }
+}
+
+# Reduce to the one vertex `vertex`, weight 1.
+func reduceToVertex(simplex: mod Simplex, vertex: view SimplexVertex) {
+  simplex.count = 1
+  simplex.vertex1 = vertex
+  simplex.vertex1.weight = 1.0
+}
+
+# Reduce to the edge `first`-`second` with the weights of `weights`. False
+# when the edge is degenerate.
+func reduceToEdge(
+  simplex: mod Simplex
+  first: view SimplexVertex
+  second: view SimplexVertex
+  weights: view EdgeWeights
+) ret Bool {
+  simplex.count = 2
+  simplex.vertex1 = first
+  simplex.vertex2 = second
+  let divisor: Float = weights.divisor
+  if divisor <= 0.0 {
+    ret false
+  }
+  simplex.vertex1.weight = weights.first / divisor
+  simplex.vertex2.weight = weights.second / divisor
+  ret true
+}
+
+# Reduce to the triangle `first`-`second`-`third` with the weights of
+# `weights`. False when the triangle is degenerate.
+func reduceToTriangle(
+  simplex: mod Simplex
+  first: view SimplexVertex
+  second: view SimplexVertex
+  third: view SimplexVertex
+  weights: view TriangleWeights
+) ret Bool {
+  simplex.count = 3
+  simplex.vertex1 = first
+  simplex.vertex2 = second
+  simplex.vertex3 = third
+  let divisor: Float = weights.divisor
+  if divisor <= 0.0 {
+    ret false
+  }
+  simplex.vertex1.weight = weights.first / divisor
+  simplex.vertex2.weight = weights.second / divisor
+  simplex.vertex3.weight = weights.third / divisor
+  ret true
+}
+
+# b3SolveSimplex2
+func solveSimplex2(simplex: mod Simplex) ret Bool {
+  let pointA: Vec3 = simplex.vertex1.minkowskiPoint
+  let pointB: Vec3 = simplex.vertex2.minkowskiPoint
+  let ab: Vec3 = subtract(left: pointB, right: pointA)
+  let divisor: Float = dot(left: ab, right: ab)
+  let weightA: Float = dot(left: pointB, right: ab)
+  let weightB: Float = -dot(left: pointA, right: ab)
+  # V(A)
+  if weightB <= 0.0 {
+    simplex.count = 1
+    simplex.vertex1.weight = 1.0
+    ret true
+  }
+  # V(B)
+  if weightA <= 0.0 {
+    simplex.count = 1
+    simplex.vertex1 = simplex.vertex2
+    simplex.vertex1.weight = 1.0
+    ret true
+  }
+  # Edge region
+  if divisor <= 0.0 {
+    ret false
+  }
+  let denominator: Float = 1.0 / divisor
+  simplex.vertex1.weight = denominator * weightA
+  simplex.vertex2.weight = denominator * weightB
+  ret true
+}
+
+# b3SolveSimplex3
+func solveSimplex3(simplex: mod Simplex) ret Bool {
+  let vertexA: SimplexVertex = simplex.vertex1
+  let vertexB: SimplexVertex = simplex.vertex2
+  let vertexC: SimplexVertex = simplex.vertex3
+  # Vertex regions
+  let weightsAb: EdgeWeights = edgeWeights(
+    start: vertexA.minkowskiPoint
+    end: vertexB.minkowskiPoint
+  )
+  let weightsBc: EdgeWeights = edgeWeights(
+    start: vertexB.minkowskiPoint
+    end: vertexC.minkowskiPoint
+  )
+  let weightsCa: EdgeWeights = edgeWeights(
+    start: vertexC.minkowskiPoint
+    end: vertexA.minkowskiPoint
+  )
+  if weightsAb.second <= 0.0 and weightsCa.first <= 0.0 {
+    reduceToVertex(simplex: simplex, vertex: vertexA)
+    ret true
+  }
+  if weightsBc.second <= 0.0 and weightsAb.first <= 0.0 {
+    reduceToVertex(simplex: simplex, vertex: vertexB)
+    ret true
+  }
+  if weightsCa.second <= 0.0 and weightsBc.first <= 0.0 {
+    reduceToVertex(simplex: simplex, vertex: vertexC)
+    ret true
+  }
+  # Edge regions
+  let weightsAbc: TriangleWeights = triangleWeights(
+    first: vertexA.minkowskiPoint
+    second: vertexB.minkowskiPoint
+    third: vertexC.minkowskiPoint
+  )
+  if weightsAbc.third <= 0.0 and weightsAb.first > 0.0 and weightsAb.second > 0.0 {
+    ret reduceToEdge(
+      simplex: simplex
+      first: vertexA
+      second: vertexB
+      weights: weightsAb
+    )
+  }
+  if weightsAbc.first <= 0.0 and weightsBc.first > 0.0 and weightsBc.second > 0.0 {
+    ret reduceToEdge(
+      simplex: simplex
+      first: vertexB
+      second: vertexC
+      weights: weightsBc
+    )
+  }
+  if weightsAbc.second <= 0.0 and weightsCa.first > 0.0 and weightsCa.second > 0.0 {
+    ret reduceToEdge(
+      simplex: simplex
+      first: vertexC
+      second: vertexA
+      weights: weightsCa
+    )
+  }
+  # Face region
+  let divisor: Float = weightsAbc.divisor
+  if divisor <= 0.0 {
+    ret false
+  }
+  simplex.vertex1.weight = weightsAbc.first / divisor
+  simplex.vertex2.weight = weightsAbc.second / divisor
+  simplex.vertex3.weight = weightsAbc.third / divisor
+  ret true
+}
+
+# b3SolveSimplex4
+func solveSimplex4(simplex: mod Simplex) ret Bool {
+  let vertexA: SimplexVertex = simplex.vertex1
+  let vertexB: SimplexVertex = simplex.vertex2
+  let vertexC: SimplexVertex = simplex.vertex3
+  let vertexD: SimplexVertex = simplex.vertex4
+  let pointA: Vec3 = vertexA.minkowskiPoint
+  let pointB: Vec3 = vertexB.minkowskiPoint
+  let pointC: Vec3 = vertexC.minkowskiPoint
+  let pointD: Vec3 = vertexD.minkowskiPoint
+  # Vertex regions
+  let weightsAb: EdgeWeights = edgeWeights(start: pointA, end: pointB)
+  let weightsAc: EdgeWeights = edgeWeights(start: pointA, end: pointC)
+  let weightsAd: EdgeWeights = edgeWeights(start: pointA, end: pointD)
+  let weightsBc: EdgeWeights = edgeWeights(start: pointB, end: pointC)
+  let weightsCd: EdgeWeights = edgeWeights(start: pointC, end: pointD)
+  let weightsDb: EdgeWeights = edgeWeights(start: pointD, end: pointB)
+  if weightsAb.second <= 0.0 and weightsAc.second <= 0.0 and weightsAd.second <= 0.0 {
+    reduceToVertex(simplex: simplex, vertex: vertexA)
+    ret true
+  }
+  if weightsAb.first <= 0.0 and weightsDb.first <= 0.0 and weightsBc.second <= 0.0 {
+    reduceToVertex(simplex: simplex, vertex: vertexB)
+    ret true
+  }
+  if weightsAc.first <= 0.0 and weightsBc.first <= 0.0 and weightsCd.second <= 0.0 {
+    reduceToVertex(simplex: simplex, vertex: vertexC)
+    ret true
+  }
+  if weightsAd.first <= 0.0 and weightsCd.first <= 0.0 and weightsDb.second <= 0.0 {
+    reduceToVertex(simplex: simplex, vertex: vertexD)
+    ret true
+  }
+  # Edge regions
+  let weightsAcb: TriangleWeights = triangleWeights(first: pointA, second: pointC, third: pointB)
+  let weightsAbd: TriangleWeights = triangleWeights(first: pointA, second: pointB, third: pointD)
+  let weightsAdc: TriangleWeights = triangleWeights(first: pointA, second: pointD, third: pointC)
+  let weightsBcd: TriangleWeights = triangleWeights(first: pointB, second: pointC, third: pointD)
+  if weightsAbd.third <= 0.0 and weightsAcb.second <= 0.0 and weightsAb.first > 0.0 and weightsAb.second > 0.0 {
+    ret reduceToEdge(
+      simplex: simplex
+      first: vertexA
+      second: vertexB
+      weights: weightsAb
+    )
+  }
+  if weightsAcb.third <= 0.0 and weightsAdc.second <= 0.0 and weightsAc.first > 0.0 and weightsAc.second > 0.0 {
+    ret reduceToEdge(
+      simplex: simplex
+      first: vertexA
+      second: vertexC
+      weights: weightsAc
+    )
+  }
+  if weightsAdc.third <= 0.0 and weightsAbd.second <= 0.0 and weightsAd.first > 0.0 and weightsAd.second > 0.0 {
+    ret reduceToEdge(
+      simplex: simplex
+      first: vertexA
+      second: vertexD
+      weights: weightsAd
+    )
+  }
+  if weightsAcb.first <= 0.0 and weightsBcd.third <= 0.0 and weightsBc.first > 0.0 and weightsBc.second > 0.0 {
+    ret reduceToEdge(
+      simplex: simplex
+      first: vertexB
+      second: vertexC
+      weights: weightsBc
+    )
+  }
+  if weightsAdc.first <= 0.0 and weightsBcd.first <= 0.0 and weightsCd.first > 0.0 and weightsCd.second > 0.0 {
+    ret reduceToEdge(
+      simplex: simplex
+      first: vertexC
+      second: vertexD
+      weights: weightsCd
+    )
+  }
+  if weightsAbd.first <= 0.0 and weightsBcd.second <= 0.0 and weightsDb.first > 0.0 and weightsDb.second > 0.0 {
+    ret reduceToEdge(
+      simplex: simplex
+      first: vertexD
+      second: vertexB
+      weights: weightsDb
+    )
+  }
+  # Face regions
+  let weightsAbcd: TetrahedronWeights = tetrahedronWeights(
+    first: pointA
+    second: pointB
+    third: pointC
+    fourth: pointD
+  )
+  if weightsAbcd.fourth < 0.0 and weightsAcb.first > 0.0 and weightsAcb.second > 0.0 and weightsAcb.third > 0.0 {
+    ret reduceToTriangle(
+      simplex: simplex
+      first: vertexA
+      second: vertexC
+      third: vertexB
+      weights: weightsAcb
+    )
+  }
+  if weightsAbcd.third < 0.0 and weightsAbd.first > 0.0 and weightsAbd.second > 0.0 and weightsAbd.third > 0.0 {
+    ret reduceToTriangle(
+      simplex: simplex
+      first: vertexA
+      second: vertexB
+      third: vertexD
+      weights: weightsAbd
+    )
+  }
+  if weightsAbcd.second < 0.0 and weightsAdc.first > 0.0 and weightsAdc.second > 0.0 and weightsAdc.third > 0.0 {
+    ret reduceToTriangle(
+      simplex: simplex
+      first: vertexA
+      second: vertexD
+      third: vertexC
+      weights: weightsAdc
+    )
+  }
+  if weightsAbcd.first < 0.0 and weightsBcd.first > 0.0 and weightsBcd.second > 0.0 and weightsBcd.third > 0.0 {
+    ret reduceToTriangle(
+      simplex: simplex
+      first: vertexB
+      second: vertexC
+      third: vertexD
+      weights: weightsBcd
+    )
+  }
+  # Inside the tetrahedron
+  let divisor: Float = weightsAbcd.divisor
+  if divisor <= 0.0 {
+    ret false
+  }
+  simplex.vertex1.weight = weightsAbcd.first / divisor
+  simplex.vertex2.weight = weightsAbcd.second / divisor
+  simplex.vertex3.weight = weightsAbcd.third / divisor
+  simplex.vertex4.weight = weightsAbcd.fourth / divisor
+  ret true
+}
+
+# b3ComputeWitnessPoints: the closest points on A (`pointA`) and B (`pointB`).
+func computeWitnessPoints(simplex: view Simplex, pointA: mod Vec3, pointB: mod Vec3) {
+  let first: SimplexVertex = simplex.vertex1
+  let second: SimplexVertex = simplex.vertex2
+  let third: SimplexVertex = simplex.vertex3
+  let fourth: SimplexVertex = simplex.vertex4
+  match simplex.count {
+    case 1 {
+      pointA = first.supportA
+      pointB = first.supportB
+    }
+    case 2 {
+      pointA = blend2(
+        firstScale: first.weight
+        first: first.supportA
+        secondScale: second.weight
+        second: second.supportA
+      )
+      pointB = blend2(
+        firstScale: first.weight
+        first: first.supportB
+        secondScale: second.weight
+        second: second.supportB
+      )
+    }
+    case 3 {
+      pointA = blend3(
+        firstScale: first.weight
+        first: first.supportA
+        secondScale: second.weight
+        second: second.supportA
+        thirdScale: third.weight
+        third: third.supportA
+      )
+      pointB = blend3(
+        firstScale: first.weight
+        first: first.supportB
+        secondScale: second.weight
+        second: second.supportB
+        thirdScale: third.weight
+        third: third.supportB
+      )
+    }
+    case 4 {
+      # Force identical points and zero distance
+      let sum: Vec3 = add(
+        left: blend2(
+          firstScale: first.weight
+          first: first.supportA
+          secondScale: second.weight
+          second: second.supportA
+        )
+        right: blend2(
+          firstScale: third.weight
+          first: third.supportA
+          secondScale: fourth.weight
+          second: fourth.supportA
+        )
+      )
+      pointA = sum
+      pointB = sum
+    }
+    default {
+    }
+  }
+}
