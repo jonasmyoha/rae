@@ -71,6 +71,12 @@ if [ -z "$TEST_NAME_FILTER" ] && [ -f "../stress/run.sh" ]; then
   if ! bash ../stress/run.sh; then STRESS_CHECK_FAILED=1; fi
   echo
 fi
+# The threaded fixtures under ThreadSanitizer (tools/tsan-check.sh), same place.
+TSAN_CHECK_FAILED=0
+if [ -z "$TEST_NAME_FILTER" ] && [ -f "tools/tsan-check.sh" ]; then
+  if ! bash tools/tsan-check.sh; then TSAN_CHECK_FAILED=1; fi
+  echo
+fi
 
 for TARGET in "${TARGETS[@]}"; do
   echo "Testing target: $TARGET"
@@ -542,6 +548,7 @@ fi
 if [ "$TREE_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$TERMS_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$STRESS_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
+if [ "$TSAN_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ $FAILED -gt 0 ]; then
   exit 1
 fi

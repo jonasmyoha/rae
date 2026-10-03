@@ -241,21 +241,32 @@ static const char* const g_rae_site_names[RAE_SITE__COUNT] = {
   "json_get_str", "json_get_obj", "json_extract", "unknown"
 };
 
-static int64_t g_mem_site_alloc_n[RAE_SITE__COUNT];
-static int64_t g_mem_site_alloc_b[RAE_SITE__COUNT];
-static int64_t g_mem_site_free_n[RAE_SITE__COUNT];
-static int64_t g_mem_site_free_b[RAE_SITE__COUNT];
+/* Thread safety: every counter below is bumped from whichever thread
+ * allocates or frees (a spawn'd worker allocates Strings and Lists like the
+ * main thread), so each is a C11 atomic, incremented with a RELAXED add
+ * (RAE_STAT_ADD): one instruction, no ordering, because a counter only has to
+ * be exact, not ordered against anything. Reading an _Atomic is an atomic
+ * load, so the readers need no change. The ptr -> site hash table below is
+ * not a counter; it is guarded by g_mem_hash_lock. g_mem_stats_enabled is set
+ * once by a constructor before any thread exists. Checked under
+ * -fsanitize=thread by compiler/tools/tsan-check.sh. */
+#define RAE_STAT_ADD(counter, n) atomic_fetch_add_explicit(&(counter), (n), memory_order_relaxed)
 
-static int64_t g_mem_buf_alloc_n;
-static int64_t g_mem_buf_alloc_b;
-static int64_t g_mem_buf_free_n;
-static int64_t g_mem_buf_free_b;
-static int64_t g_mem_buf_resize_n;
+static _Atomic int64_t g_mem_site_alloc_n[RAE_SITE__COUNT];
+static _Atomic int64_t g_mem_site_alloc_b[RAE_SITE__COUNT];
+static _Atomic int64_t g_mem_site_free_n[RAE_SITE__COUNT];
+static _Atomic int64_t g_mem_site_free_b[RAE_SITE__COUNT];
 
-static int64_t g_mem_pool_register_n;
-static int64_t g_mem_pool_remove_n;
-static int64_t g_mem_pool_flush_calls;
-static int64_t g_mem_pool_flush_freed;
+static _Atomic int64_t g_mem_buf_alloc_n;
+static _Atomic int64_t g_mem_buf_alloc_b;
+static _Atomic int64_t g_mem_buf_free_n;
+static _Atomic int64_t g_mem_buf_free_b;
+static _Atomic int64_t g_mem_buf_resize_n;
+
+static _Atomic int64_t g_mem_pool_register_n;
+static _Atomic int64_t g_mem_pool_remove_n;
+static _Atomic int64_t g_mem_pool_flush_calls;
+static _Atomic int64_t g_mem_pool_flush_freed;
 
 static int g_mem_stats_enabled = 0;
 
@@ -274,7 +285,7 @@ static int g_mem_stats_enabled = 0;
  * exactly the regression the deferred renderer's per-object path must not
  * have. `rae_ext_rae_mem_stats_outstanding` cannot see that; this can.
  */
-static int64_t g_mem_alloc_total_n;
+static _Atomic int64_t g_mem_alloc_total_n;
 
 /* Side hash table: ptr → site. Allocated only when mem-stats is on.
  * 4M slots sized for ~2M outstanding allocations (peak observed in
@@ -288,6 +299,8 @@ static void**   g_mem_hash_keys;   /* NULL = empty slot */
 static uint8_t* g_mem_hash_sites;  /* parallel array, valid when key != NULL */
 static int64_t  g_mem_hash_size;   /* current occupancy */
 static int64_t  g_mem_hash_full_drops; /* allocs we couldn't tag because table was full */
+/* Guards the table and the two fields above (the stats-only path). */
+static pthread_mutex_t g_mem_hash_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static int64_t rae_malloc_size_safe(void* p) {
   if (!p) return 0;
@@ -393,19 +406,23 @@ static inline void rae_mem_str_tag(void* ptr, int64_t bytes, uint8_t site) {
   /* Counted BEFORE the opt-in gate: see g_mem_alloc_total_n. Every String
    * body allocation in the runtime funnels through here, so this is a
    * complete count of Rae's string heap traffic. */
-  g_mem_alloc_total_n++;
+  RAE_STAT_ADD(g_mem_alloc_total_n, 1);
   if (!g_mem_stats_enabled) return;
-  g_mem_site_alloc_n[site]++;
-  g_mem_site_alloc_b[site] += rae_mem_block_bytes(ptr, bytes);
+  RAE_STAT_ADD(g_mem_site_alloc_n[site], 1);
+  RAE_STAT_ADD(g_mem_site_alloc_b[site], rae_mem_block_bytes(ptr, bytes));
+  RAE_LOCK(&g_mem_hash_lock);
   rae_mem_hash_insert(ptr, site);
+  RAE_UNLOCK(&g_mem_hash_lock);
 }
 
 static inline void rae_mem_str_untag(void* ptr, int64_t bytes_hint) {
   if (!g_mem_stats_enabled) return;
+  RAE_LOCK(&g_mem_hash_lock);
   uint8_t site = rae_mem_hash_remove(ptr);
-  g_mem_site_free_n[site]++;
+  RAE_UNLOCK(&g_mem_hash_lock);
+  RAE_STAT_ADD(g_mem_site_free_n[site], 1);
   /* Measured exactly as rae_mem_str_tag measured it (rae_mem_block_bytes). */
-  g_mem_site_free_b[site] += rae_mem_block_bytes(ptr, bytes_hint);
+  RAE_STAT_ADD(g_mem_site_free_b[site], rae_mem_block_bytes(ptr, bytes_hint));
 }
 
 static void rae_mem_stats_print(void) {
@@ -440,9 +457,12 @@ static void rae_mem_stats_print(void) {
   fprintf(stderr, "  [mem:pool              ] register=%lld remove=%lld flush_calls=%lld flush_freed=%lld\n",
     (long long)g_mem_pool_register_n, (long long)g_mem_pool_remove_n,
     (long long)g_mem_pool_flush_calls, (long long)g_mem_pool_flush_freed);
-  if (g_mem_hash_full_drops) {
+  RAE_LOCK(&g_mem_hash_lock);
+  int64_t full_drops = g_mem_hash_full_drops;
+  RAE_UNLOCK(&g_mem_hash_lock);
+  if (full_drops) {
     fprintf(stderr, "  [mem:hash              ] WARNING: %lld allocations dropped (table full) — per-site free counts under-report by this much\n",
-      (long long)g_mem_hash_full_drops);
+      (long long)full_drops);
   }
   fflush(stderr);
 }

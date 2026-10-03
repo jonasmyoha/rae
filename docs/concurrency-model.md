@@ -315,9 +315,39 @@ worker takes a stop channel and is joined at teardown), a truly parallel
 `parallelLoop` with disjointness checking, atomics, task failure status /
 propagation, `taskScope` cancel-on-error / non-escape enforcement, and
 threading the `mod`/`view`-aggregate shapes (they are correctly sequential).
-The `g_mem_*` accounting counters are still plain globals (a benign,
-stats-only race under threads). The staged plan for the rest is
-`docs/parallelism-first-plan.md`.
+The staged plan for the rest is `docs/parallelism-first-plan.md` (and, for
+what the physics port needs, `docs/physics-performance-plan.md`).
+
+**The runtime is thread-safe for what a worker can call (2026-10-02).** A
+spawned worker allocates and frees Strings and Lists, logs, reads the clock and
+files, and wakes the event loop, exactly like the main thread. The audit of
+every mutable static in the core runtime files found, and fixed:
+
+- the allocation counters — the always-on `rae_mem_alloc_total`, the
+  `RAE_MEM_STATS` per-site String counters, the buffer and String-pool counters
+  — are C11 `_Atomic`, bumped with a relaxed add (one instruction, no
+  ordering: a counter must be exact, not ordered);
+- the `RAE_MEM_STATS` pointer-to-site hash table, and the `RAE_DEBUG_BOUNDS`
+  buffer table, are guarded by a mutex (`RAE_LOCK`, a no-op in a WASM build
+  without threads);
+- the clock's lazily cached Mach timebase is read per call instead; the tick
+  counter is atomic;
+- the file-notification thread could mark a watcher changed AFTER
+  `fileNotifyClear`, from an event it had already taken from the kernel (found
+  by the gate below, whose slowdown widened the window); each kqueue
+  registration now carries a generation, and a stale event is dropped.
+
+Already safe: the String temp pool and the random state are `__thread`; the
+program arguments are written once before `main`; the file-notify and Spotify
+state have their own locks. Window, GPU, audio and file-dialog calls remain
+main-thread only (§3).
+
+**The gate:** `compiler/tools/tsan-check.sh` (`make tsan`, and one pre-suite
+case of every full suite run) builds every threaded fixture — 511, 512, 513,
+541, 646, 848, 941 — and 106_mobile_ui with its Spotify poller running, with
+`-fsanitize=thread`, runs them with `RAE_MEM_STATS=1`, and fails on any
+ThreadSanitizer report. Against the runtime before this audit it reports 23
+races in 512 and 58 in 848, all in the counters and the stats table.
 
 ---
 
@@ -361,8 +391,8 @@ open), step 5 is moot. The live successor of this list is
 3. **Implement Live `parallelLoop` sequentially** — establish the construct and
    its disjointness checks with the simplest possible engine.
 4. **Add C-backend task execution and real parallel loops** — thread pool,
-   `Task` runtime, channels, atomics, real `parallelLoop`; audit/fix the global
-   runtime state (`g_mem_*`) first.
+   `Task` runtime, channels, atomics, real `parallelLoop`; the global runtime
+   state was audited and made thread-safe first (2026-10-02, §5).
 5. **Reconsider a VM task scheduler** only when Live needs real interleaving.
 
 `Channel(T)`, `taskScope`, atomics, and `detach` slot in alongside steps 2–4 as
@@ -422,10 +452,9 @@ testable on its own.
   (`c_spawn_threadable` plus the sequential fallback for every unproven
   shape) prevent the race. ASan/UBSan runs of the spawn fixtures are the
   backstop.
-- **Global runtime state** (`g_mem_*`, interned pools, registry) must be
-  audited and made thread-safe before real `parallelLoop`; the String temp
-  pool is already `__thread`, the `g_mem_*` counters are still a stats-only
-  race.
+- **Global runtime state** was audited and made thread-safe (§5), and the
+  TSan gate keeps it so; a new mutable static in the runtime needs a lock, an
+  atomic, or `__thread`.
 - **`Task(T)` drop/lifetime** must integrate with cascade-drop / scope-exit
   dealloc (`docs/scope-exit-dealloc.md`): a dropped task joins, then its result
   slot is dropped.

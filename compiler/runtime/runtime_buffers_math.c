@@ -59,6 +59,8 @@ typedef struct {
 } RaeBufRecord;
 static RaeBufRecord g_buf_records[RAE_BR_CAP];
 static int g_buf_records_inited = 0;
+/* Buffers are allocated and freed on any thread: one lock for the table. */
+static pthread_mutex_t g_buf_records_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static size_t rae_buf_slot(void* ptr) {
   uintptr_t k = (uintptr_t)ptr;
@@ -121,7 +123,10 @@ static int rae_buf_record_lookup(void* ptr, int64_t* count_out, int64_t* elem_si
 static void rae_buf_check(const char* fn, void* buf, int64_t index, int64_t elem_size) {
   int64_t count = 0;
   int64_t recorded_elem = 0;
-  if (!rae_buf_record_lookup(buf, &count, &recorded_elem)) {
+  RAE_LOCK(&g_buf_records_lock);
+  int found = rae_buf_record_lookup(buf, &count, &recorded_elem);
+  RAE_UNLOCK(&g_buf_records_lock);
+  if (!found) {
     /* Not from rae_ext_rae_buf_alloc — skip. */
     return;
   }
@@ -141,8 +146,8 @@ static void rae_buf_check(const char* fn, void* buf, int64_t index, int64_t elem
   }
 }
 
-#define RAE_BR_REGISTER(ptr, count, elem_size) rae_buf_record_set((ptr), (count), (elem_size))
-#define RAE_BR_UNREGISTER(ptr)                 rae_buf_record_clear((ptr))
+#define RAE_BR_REGISTER(ptr, count, elem_size) do { RAE_LOCK(&g_buf_records_lock); rae_buf_record_set((ptr), (count), (elem_size)); RAE_UNLOCK(&g_buf_records_lock); } while (0)
+#define RAE_BR_UNREGISTER(ptr)                 do { RAE_LOCK(&g_buf_records_lock); rae_buf_record_clear((ptr)); RAE_UNLOCK(&g_buf_records_lock); } while (0)
 #define RAE_BR_CHECK(fn, buf, index, elem_size) rae_buf_check((fn), (buf), (index), (elem_size))
 #define RAE_BR_CHECK_ANY(fn, buf, index)        rae_buf_check((fn), (buf), (index), (int64_t)sizeof(RaeAny))
 
@@ -166,14 +171,14 @@ static inline int64_t rae_mem_buf_bytes(void* ptr, int64_t hint) {
 void* rae_ext_rae_buf_alloc(int64_t count, int64_t elem_size) {
   if (count <= 0) return NULL;
   void* p = calloc((size_t)count, (size_t)elem_size);
-  if (p) { g_mem_buf_alloc_n++; g_mem_buf_alloc_b += rae_mem_buf_bytes(p, count * elem_size); }
+  if (p) { RAE_STAT_ADD(g_mem_buf_alloc_n, 1); RAE_STAT_ADD(g_mem_buf_alloc_b, rae_mem_buf_bytes(p, count * elem_size)); }
   RAE_BR_REGISTER(p, count, elem_size);
   return p;
 }
 
 void rae_ext_rae_buf_free(void* buf) {
   if (buf) {
-    g_mem_buf_free_n++; g_mem_buf_free_b += rae_mem_buf_bytes(buf, 0);
+    RAE_STAT_ADD(g_mem_buf_free_n, 1); RAE_STAT_ADD(g_mem_buf_free_b, rae_mem_buf_bytes(buf, 0));
     RAE_BR_UNREGISTER(buf);
     free(buf);
   }
@@ -182,7 +187,7 @@ void rae_ext_rae_buf_free(void* buf) {
 void* rae_ext_rae_buf_resize(void* buf, int64_t new_count, int64_t elem_size) {
   if (new_count <= 0) {
     if (buf) {
-      g_mem_buf_free_n++; g_mem_buf_free_b += rae_mem_buf_bytes(buf, 0);
+      RAE_STAT_ADD(g_mem_buf_free_n, 1); RAE_STAT_ADD(g_mem_buf_free_b, rae_mem_buf_bytes(buf, 0));
       RAE_BR_UNREGISTER(buf);
       free(buf);
     }
@@ -195,9 +200,9 @@ void* rae_ext_rae_buf_resize(void* buf, int64_t new_count, int64_t elem_size) {
   int64_t old_bytes = buf ? rae_mem_buf_bytes(buf, 0) : 0;
   RAE_BR_UNREGISTER(buf);
   void* p = realloc(buf, (size_t)new_count * (size_t)elem_size);
-  if (buf) { g_mem_buf_free_n++; g_mem_buf_free_b += old_bytes; }
-  if (p)   { g_mem_buf_alloc_n++; g_mem_buf_alloc_b += rae_mem_buf_bytes(p, new_count * elem_size); }
-  g_mem_buf_resize_n++;
+  if (buf) { RAE_STAT_ADD(g_mem_buf_free_n, 1); RAE_STAT_ADD(g_mem_buf_free_b, old_bytes); }
+  if (p)   { RAE_STAT_ADD(g_mem_buf_alloc_n, 1); RAE_STAT_ADD(g_mem_buf_alloc_b, rae_mem_buf_bytes(p, new_count * elem_size)); }
+  RAE_STAT_ADD(g_mem_buf_resize_n, 1);
   RAE_BR_REGISTER(p, new_count, elem_size);
   return p;
 }

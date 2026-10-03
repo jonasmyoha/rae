@@ -33,6 +33,20 @@
 #include <pthread.h>
 #endif
 
+/* Shared counters touched from any thread (the RAE_MEM_STATS counters, the
+ * always-on allocation total) are C11 atomics; see runtime_core_memory.c. */
+#include <stdatomic.h>
+
+/* A mutex that exists only where threads do: a WASM build without threads
+ * has a single thread and needs no lock (the Channel runtime does the same). */
+#if !defined(__wasm__) || defined(RAE_WASM_THREADS)
+#define RAE_LOCK(m)   pthread_mutex_lock(m)
+#define RAE_UNLOCK(m) pthread_mutex_unlock(m)
+#else
+#define RAE_LOCK(m)   ((void)(m))
+#define RAE_UNLOCK(m) ((void)(m))
+#endif
+
 #if defined(__APPLE__) || defined(__linux__) || defined(__GLIBC__)
 #include <execinfo.h>
 #define RAE_HAVE_BACKTRACE 1
