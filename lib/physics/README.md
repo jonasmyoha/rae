@@ -67,3 +67,31 @@ the oracle (`tools/box3d-oracle/`).
 
 The check: `compiler/tests/cases/948_physics_math` runs every line of
 `tools/box3d-oracle/goldens/math.golden` (4 944 calls of 154 functions).
+
+## P2 — geometry and narrow phase (`geometry/`, `collision/`), in progress
+
+Box3D reads the length scale from a global (`b3GetLengthUnitsPerMeter`);
+the port has no globals, so every function that needs a tolerance takes
+`lengthUnitsPerMeter` (1 for meters). A `ShapeProxy` owns a copy of its
+points (a Rae struct cannot hold a view); `proxyDistance` / `proxyCast`
+take the proxies as views so the loops that call them never copy.
+
+| Box3D | Rae |
+|---|---|
+| `b3RayCastAABB` | `rayCastAabb` (math/AabbMath) |
+| `b3ComputeSphereMass` `b3ComputeSphereAABB` `b3ComputeSweptSphereAABB` | `computeSphereMass` `computeSphereAabb` `computeSweptSphereAabb` |
+| `b3OverlapSphere` `b3RayCastSphere` `b3RayCastHollowSphere` `b3ShapeCastSphere` | `overlapSphere` `rayCastSphere` `rayCastHollowSphere` `shapeCastSphere` |
+| `b3CollideMoverAndSphere` | `collideMoverAndSphere` |
+| `b3ComputeCapsuleMass` `b3ComputeCapsuleAABB` `b3ComputeSweptCapsuleAABB` | `computeCapsuleMass` `computeCapsuleAabb` `computeSweptCapsuleAabb` |
+| `b3OverlapCapsule` `b3RayCastCapsule` `b3ShapeCastCapsule` `b3CollideMoverAndCapsule` | `overlapCapsule` `rayCastCapsule` `shapeCastCapsule` `collideMoverAndCapsule` |
+| `b3IsValidRay` `b3MakeProxy` | `isValidRay` `makeProxy` (plus `sphereProxy`, `capsuleProxy`) |
+| `b3GetProxySupport` `b3GetPointSupport` | `proxySupport` `pointSupport` |
+| `b3ShapeDistance` | `shapeDistance` (`proxyDistance` over held proxies) |
+| `b3ShapeCast` | `shapeCast` (`proxyCast` over held proxies) |
+| `b3GetSweepTransform` `b3TimeOfImpact` | `sweepTransform` `timeOfImpact` |
+| `b3MakeFeaturePair` `b3FlipPair` `b3MakeFeatureId` | `makeFeaturePair` `flipPair` `makeFeatureId` |
+| `b3ClipPolygon` `b3ClipSegment` `b3ReduceManifoldPoints` | `clipPolygon` `clipSegment` `reduceManifoldPoints` |
+| `b3CollideSpheres` `b3CollideCapsuleAndSphere` `b3CollideCapsules` | `collideSpheres` `collideCapsuleAndSphere` `collideCapsules` |
+
+The checks: fixture 949 runs `goldens/geometry.golden` (2 345 calls of 22
+functions) and fixture 950 runs `goldens/manifold.golden` (832 calls of 8).
