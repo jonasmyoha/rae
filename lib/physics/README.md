@@ -201,5 +201,36 @@ bodies of every type and state, sphere, capsule and hull shapes, destroys,
 transforms, velocities, forces, impulses, mass data and damping, with
 Box3D's whole internal world state — id pools, bodies, solver sets,
 islands, shapes and the three broad-phase trees — dumped at checkpoints).
-Contacts and pair finding, the constraint graph, the solver and its stage
-dispatcher, sleep and island splitting, sensors and events are P4b-P4d.
+Contacts, the constraint graph, the solver and its stage dispatcher, sleep
+and island splitting, sensors and events are P4b-P4d.
+
+## P3b — broad-phase pair finding (`dynamics/BroadPhasePairs`)
+
+Box3D's pair finding is ported with its traversal and task structure: the
+moved sibling pairs of the dynamic tree collide their subtrees against each
+other, breadth-first seeds collide the dynamic tree against the static and
+kinematic trees, candidates are culled against the pair set and filtered in
+batches of 32, and the sorted new keys go to contact creation. The tasks
+run block by block as worker 0 (`dynamics/ParallelFor`, Box3D's block
+split), each gathering into its task context's pair keys, so threading them
+later changes only the block loops.
+
+| Box3D | Rae |
+|---|---|
+| `b3UpdateBroadPhasePairs` | `updateBroadPhasePairs` (returns the keys it handed to contact creation) |
+| `b3GatherMovedSiblings` `b3GatherCrossSeeds` | `gatherMovedSiblings` `gatherCrossSeeds` |
+| `b3SelfPairsTask` `b3CrossPairsTask` | `selfPairsTask` `crossPairsTask` |
+| `b3CollideCrossPairs` `b3VisitPair` `b3CollideProxyAndSubtree` `b3TestPair` | `collideCrossPairs` `visitPair` `collideProxyAndSubtree` `testNodePair` |
+| `b3AddCandidatePair` `b3FlushCandidatePairs` `b3ShouldCreatePair` | `addCandidatePair` `flushCandidatePairs` `shouldCreatePair` |
+| `b3ShouldBodiesCollide` | `shouldBodiesCollide` (`dynamics/WorldBodies`; the joint walk is P6) |
+| `b3ParallelFor`'s block split | `parallelForBlockSize` `parallelForBlockCount` … (`dynamics/ParallelFor`) |
+| `b3TaskContext` | `TaskContext` (`dynamics/World`; only the pair keys so far) |
+| `b3CreateContact` | `createContact` (`dynamics/Contact`; the pair registry and pair set only, the rest is P4b) |
+
+Not yet: compound pair emission (`b3EmitCompoundPairs`, with compounds in
+P5) and the custom filter callback (Rae has no function values; P8).
+
+The check: fixture 956 replays `goldens/pairs.golden` (245 operations: a
+world of static, kinematic and dynamic bodies packed to overlap, bodies
+moved between updates, the pair keys of every contact created in creation
+order, and the pair set's slot layout and the three trees at checkpoints).

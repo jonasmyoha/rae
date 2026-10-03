@@ -713,3 +713,14 @@ func setBodyGravityScale(world: mod PhysicsWorld, bodyId: view BodyId, gravitySc
   sim.gravityScale = gravityScale
   setBodySim(world: world, body: body, sim: sim)
 }
+
+# b3ShouldBodiesCollide: at least one body must be dynamic. Box3D then walks
+# the joints of the body with fewer joints, refusing the pair when a joint
+# joins the two bodies with collideConnected off; joints arrive in P6, and
+# until then no body has a joint, so the walk finds nothing.
+func shouldBodiesCollide(bodyA: view Body, bodyB: view Body) ret Bool {
+  if bodyA.bodyType is not BodyType.dynamicBody and bodyB.bodyType is not BodyType.dynamicBody {
+    ret false
+  }
+  ret true
+}

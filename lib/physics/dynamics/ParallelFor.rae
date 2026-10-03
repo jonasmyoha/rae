@@ -1,0 +1,37 @@
+# b3ParallelFor of Box3D's parallel_for.c at 9f998c8: how `itemCount` items
+# split into blocks. Rae has no function values, so a caller loops over the
+# blocks itself (`parallelForBlockCount`, then `parallelForBlockStart` and
+# `parallelForBlockEnd` of each) and runs its task on each, in order, as
+# worker 0: exactly what Box3D does with one worker. Threading it later
+# changes these loops, not the tasks.
+
+# Blocks per worker (Box3D's measured optimum)
+const blocksPerWorker: Int = 32
+
+# The block size of `itemCount` items at least `minRange` per block.
+func parallelForBlockSize(itemCount: view Int, minRange: view Int, workerCount: view Int) ret Int {
+  let maxBlockCount: Int = blocksPerWorker * workerCount
+  if itemCount <= minRange * maxBlockCount {
+    ret minRange
+  }
+  ret (itemCount + maxBlockCount - 1) / maxBlockCount
+}
+
+func parallelForBlockCount(itemCount: view Int, blockSize: view Int) ret Int {
+  if itemCount <= 0 {
+    ret 0
+  }
+  ret (itemCount + blockSize - 1) / blockSize
+}
+
+func parallelForBlockStart(blockIndex: view Int, blockSize: view Int) ret Int {
+  ret blockIndex * blockSize
+}
+
+func parallelForBlockEnd(blockIndex: view Int, blockSize: view Int, itemCount: view Int) ret Int {
+  let end: Int = blockIndex * blockSize + blockSize
+  if end > itemCount {
+    ret itemCount
+  }
+  ret end
+}

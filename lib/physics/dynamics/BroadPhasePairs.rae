@@ -1,0 +1,563 @@
+# Broad-phase pair finding (b3UpdateBroadPhasePairs and its helpers of
+# Box3D's broad_phase.c at 9f998c8): the dynamic tree is collided with
+# itself (from the sibling pairs with a moved node) and with the static and
+# kinematic trees (from breadth-first seeds), candidate pairs pass the pair
+# set and b3ShouldCreatePair in batches, and the new pair keys are sorted
+# and handed to contact creation. Box3D's traversal and task structure is
+# kept: the cross and self pair tasks run block by block as worker 0
+# (ParallelFor), each worker gathering into its task context's pair keys.
+# Checked bit for bit against the oracle in fixture 956.
+#
+# Not here yet: the custom filter callback (Rae has no function values; the
+# ECS layer, P8, decides its form) and compound shapes, which arrive with
+# their pair emission in P5 (Box3D's checkCompounds is false without them).
+open physics/Constants
+open physics/math/AabbMath
+open physics/broadPhase/DynamicTree
+open physics/broadPhase/DynamicTreeQuery
+open physics/broadPhase/DynamicTreeRebuild
+open physics/broadPhase/BroadPhase
+open physics/broadPhase/PairSet
+open physics/container/QuickSort
+open physics/collision/ShapePair
+open physics/dynamics/WorldTypes
+open physics/dynamics/Body
+open physics/dynamics/Shape
+open physics/dynamics/World
+open physics/dynamics/WorldBodies
+open physics/dynamics/Contact
+open physics/dynamics/ParallelFor
+
+# B3_CANDIDATE_BATCH
+const candidateBatch: Int = 32
+
+# B3_CROSS_SEED_COUNT (a power of two)
+const crossSeedCount: Int = 64
+
+const staticTree: Int = 0
+
+const kinematicTree: Int = 1
+
+const dynamicTree: Int = 2
+
+# b3CandidatePair: shape ids in increasing order
+type CandidatePair {
+  shapeIdA: Int
+  shapeIdB: Int
+}
+
+# b3IndexPair: two sibling pairs, one in each tree
+type IndexPair {
+  pairA: Int
+  pairB: Int
+}
+
+# b3NodePair: copies of a node of each tree
+type NodePair {
+  nodeA: TreeNode
+  nodeB: TreeNode
+}
+
+# b3PairContext: a task's candidate batch and the keys it found, plus the
+# traversal stacks Box3D keeps on the C stack.
+type PairContext {
+  batch: List(CandidatePair)
+  pairKeys: List(UInt64)
+  proxyStack: List(Int)
+  crossStack: List(IndexPair)
+}
+
+func createPairContext() ret PairContext {
+  ret PairContext {
+    batch: List.create(CandidatePair, cap: candidateBatch)
+    pairKeys: List.create(UInt64, cap: 64)
+    proxyStack: List.create(Int, cap: 64)
+    crossStack: List.create(IndexPair, cap: 64)
+  }
+}
+
+# b3GatherMovedSiblings: the sibling pairs (below the root) where either
+# sibling moved.
+func gatherMovedSiblings(tree: view DynamicTree, pairIndices: mod List(Int)) ret Int {
+  pairIndices.clear()
+  var pair: Int = 2
+  loop pair < tree.nodeEnd {
+    let flags: Int = treeNode(tree: tree, index: pair).flagIndex bitor treeNode(
+      tree: tree
+      index: pair + 1
+    ).flagIndex
+    if (flags bitand movedNode) is not 0 {
+      pairIndices.add(value: pair)
+    }
+    pair = pair + 2
+  }
+  ret pairIndices.length
+}
+
+# b3ShouldCreatePair: the shape pair gauntlet.
+func shouldCreatePair(world: view PhysicsWorld, shapeIdA: view Int, shapeIdB: view Int) ret Bool {
+  let shapeA: Shape = world.shapes.copyAtDefault(index: shapeIdA)
+  let shapeB: Shape = world.shapes.copyAtDefault(index: shapeIdB)
+  # Are the shapes on the same body?
+  if shapeA.bodyId is shapeB.bodyId {
+    ret false
+  }
+  # Sensors are handled elsewhere
+  if shapeA.sensorIndex is not -1 or shapeB.sensorIndex is not -1 {
+    ret false
+  }
+  if shouldShapesCollide(filterA: shapeA.filter, filterB: shapeB.filter) is false {
+    ret false
+  }
+  # Does a joint override collision?
+  let bodyA: Body = bodyAt(world: world, bodyId: shapeA.bodyId)
+  let bodyB: Body = bodyAt(world: world, bodyId: shapeB.bodyId)
+  ret shouldBodiesCollide(bodyA: bodyA, bodyB: bodyB)
+}
+
+# b3FlushCandidatePairs: cull the batch's pairs that already have a
+# contact, keep those that pass the gauntlet. (Box3D culls the whole batch,
+# then filters it; one pass keeps the same order.)
+func flushCandidatePairs(world: view PhysicsWorld, context: mod PairContext) {
+  loop let candidate: view CandidatePair in context.batch {
+    let key: UInt64 = shapePairKey(shape1: candidate.shapeIdA, shape2: candidate.shapeIdB, child: 0)
+    if pairSetContains(set: world.broadPhase.pairSet, key: key) is false {
+      if shouldCreatePair(world: world, shapeIdA: candidate.shapeIdA, shapeIdB: candidate.shapeIdB) {
+        # The pair passed the gauntlet. A new contact will be created.
+        context.pairKeys.add(value: key)
+      }
+    }
+  }
+  context.batch.clear()
+}
+
+# b3AddCandidatePair: in shape id order.
+func addCandidatePair(
+  world: view PhysicsWorld
+  context: mod PairContext
+  shapeIdA: view Int
+  shapeIdB: view Int
+) {
+  context.batch.add(
+    value: CandidatePair {
+      shapeIdA: minInt(left: shapeIdA, right: shapeIdB)
+      shapeIdB: maxInt(left: shapeIdA, right: shapeIdB)
+    }
+  )
+  if context.batch.length is candidateBatch {
+    flushCandidatePairs(world: world, context: context)
+  }
+}
+
+# b3TestPair: did either move, and if so do they overlap?
+func testNodePair(nodeA: view TreeNode, nodeB: view TreeNode) ret Bool {
+  if ((nodeA.flagIndex bitor nodeB.flagIndex) bitand movedNode) is 0 {
+    ret false
+  }
+  ret overlapNode(box: nodeA.aabb, node: nodeB)
+}
+
+# b3CollideProxyAndSubtree: a leaf against the subtree below sibling pair
+# `pair` of `tree`.
+func collideProxyAndSubtree(
+  world: view PhysicsWorld
+  context: mod PairContext
+  proxy: view TreeNode
+  tree: view DynamicTree
+  pair: view Int
+) {
+  let proxyMark: Int = proxy.flagIndex bitand movedNode
+  # A leaf's height field is its shape index
+  let shapeId: Int = proxy.height
+  context.proxyStack.clear()
+  context.proxyStack.add(value: pair)
+  loop context.proxyStack.length > 0 {
+    let top: Int = context.proxyStack.copyAtDefault(index: context.proxyStack.length - 1)
+    context.proxyStack.removeLast()
+    loop var i: Int = 0, i < 2, ++i {
+      let node: TreeNode = treeNode(tree: tree, index: top + i)
+      if ((node.flagIndex bitor proxyMark) bitand movedNode) is 0 {
+        continue
+      }
+      if overlapNode(box: proxy.aabb, node: node) is false {
+        continue
+      }
+      if isLeafNode(node: node) {
+        addCandidatePair(
+          world: world
+          context: context
+          shapeIdA: shapeId
+          shapeIdB: node.height
+        )
+      } else if context.proxyStack.length < treeStackSize {
+        context.proxyStack.add(value: leftChild(node: node))
+      }
+    }
+  }
+}
+
+# b3VisitPair: a node of tree A against a node of tree B.
+func visitPair(
+  world: view PhysicsWorld
+  context: mod PairContext
+  treeA: view DynamicTree
+  treeB: view DynamicTree
+  nodeA: view TreeNode
+  nodeB: view TreeNode
+) {
+  if testNodePair(nodeA: nodeA, nodeB: nodeB) is false {
+    ret
+  }
+  let leafA: Bool = isLeafNode(node: nodeA)
+  let leafB: Bool = isLeafNode(node: nodeB)
+  if leafA and leafB {
+    addCandidatePair(
+      world: world
+      context: context
+      shapeIdA: nodeA.height
+      shapeIdB: nodeB.height
+    )
+  } else if leafA {
+    collideProxyAndSubtree(
+      world: world
+      context: context
+      proxy: nodeA
+      tree: treeB
+      pair: leftChild(node: nodeB)
+    )
+  } else if leafB {
+    collideProxyAndSubtree(
+      world: world
+      context: context
+      proxy: nodeB
+      tree: treeA
+      pair: leftChild(node: nodeA)
+    )
+  } else if context.crossStack.length < treeStackSize {
+    context.crossStack.add(
+      value: IndexPair { pairA: leftChild(node: nodeA), pairB: leftChild(node: nodeB) }
+    )
+  }
+}
+
+# b3CollideCrossPairs: the subtree under `subtreeA` against the one under
+# `subtreeB`, possibly in the same tree. Only pairs across the two
+# subtrees, so self collision from sibling pairs makes no duplicates.
+func collideCrossPairs(
+  world: view PhysicsWorld
+  context: mod PairContext
+  treeA: view DynamicTree
+  treeB: view DynamicTree
+  subtreeA: view TreeNode
+  subtreeB: view TreeNode
+) {
+  context.crossStack.clear()
+  # Seed the stack.
+  visitPair(
+    world: world
+    context: context
+    treeA: treeA
+    treeB: treeB
+    nodeA: subtreeA
+    nodeB: subtreeB
+  )
+  loop context.crossStack.length > 0 {
+    let top: IndexPair = context.crossStack.copyAtDefault(index: context.crossStack.length - 1)
+    context.crossStack.removeLast()
+    loop var i: Int = 0, i < 2, ++i {
+      loop var j: Int = 0, j < 2, ++j {
+        let nodeA: TreeNode = treeNode(tree: treeA, index: top.pairA + i)
+        let nodeB: TreeNode = treeNode(tree: treeB, index: top.pairB + j)
+        visitPair(
+          world: world
+          context: context
+          treeA: treeA
+          treeB: treeB
+          nodeA: nodeA
+          nodeB: nodeB
+        )
+      }
+    }
+  }
+}
+
+# b3SelfPairsTask: moved sibling pairs `startIndex` to `endIndex` of the
+# dynamic tree, each pair's subtrees against each other.
+func selfPairsTask(
+  world: view PhysicsWorld
+  context: mod PairContext
+  siblingIndices: view List(Int)
+  startIndex: view Int
+  endIndex: view Int
+) {
+  if let tree: view DynamicTree => world.broadPhase.trees.viewAt(index: dynamicTree) {
+    loop var i: Int = startIndex, i < endIndex, ++i {
+      let nodeIndex: Int = siblingIndices.copyAtDefault(index: i)
+      let left: TreeNode = treeNode(tree: tree, index: nodeIndex)
+      let right: TreeNode = treeNode(tree: tree, index: nodeIndex + 1)
+      collideCrossPairs(
+        world: world
+        context: context
+        treeA: tree
+        treeB: tree
+        subtreeA: left
+        subtreeB: right
+      )
+    }
+  }
+  flushCandidatePairs(world: world, context: context)
+}
+
+# b3GatherCrossSeeds: a breadth-first search across two trees from their
+# roots until the queue would hold B3_CROSS_SEED_COUNT pairs; the pairs left
+# are the seeds of the cross pair tasks.
+func gatherCrossSeeds(
+  treeA: view DynamicTree
+  treeB: view DynamicTree
+  seeds: mod List(NodePair)
+) ret Int {
+  let queueSize: Int = 2 * crossSeedCount
+  let mask: Int = queueSize - 1
+  let rootA: TreeNode = treeNode(tree: treeA, index: rootNode)
+  let rootB: TreeNode = treeNode(tree: treeB, index: rootNode)
+  let queue: List(NodePair) = List.create(NodePair, cap: queueSize)
+  loop var i: Int = 0, i < queueSize, ++i {
+    queue.add(value: NodePair { nodeA: rootA, nodeB: rootB })
+  }
+  var head: Int = 0
+  var tail: Int = 0
+  if testNodePair(nodeA: rootA, nodeB: rootB) {
+    queue.set(index: tail bitand mask, value: NodePair { nodeA: rootA, nodeB: rootB })
+    tail = tail + 1
+  }
+  var seedCount: Int = 0
+  loop head < tail and seedCount + (tail - head) + 3 < crossSeedCount {
+    let pair: NodePair = queue.copyAtDefault(index: head bitand mask)
+    head = head + 1
+    if isLeafNode(node: pair.nodeA) or isLeafNode(node: pair.nodeB) {
+      seeds.add(value: pair)
+      seedCount = seedCount + 1
+      continue
+    }
+    let childA: Int = leftChild(node: pair.nodeA)
+    let childB: Int = leftChild(node: pair.nodeB)
+    # Nodes have two children each, so four combinations.
+    loop var i: Int = 0, i < 2, ++i {
+      loop var j: Int = 0, j < 2, ++j {
+        let nodeA: TreeNode = treeNode(tree: treeA, index: childA + i)
+        let nodeB: TreeNode = treeNode(tree: treeB, index: childB + j)
+        if testNodePair(nodeA: nodeA, nodeB: nodeB) {
+          queue.set(index: tail bitand mask, value: NodePair { nodeA: nodeA, nodeB: nodeB })
+          tail = tail + 1
+        }
+      }
+    }
+  }
+  loop head < tail {
+    seeds.add(value: queue.copyAtDefault(index: head bitand mask))
+    seedCount = seedCount + 1
+    head = head + 1
+  }
+  ret seedCount
+}
+
+# b3CrossPairsTask: seeds `startIndex` to `endIndex`. The static seeds come
+# first, then the kinematic ones; the batch is flushed between the two.
+func crossPairsTask(
+  world: view PhysicsWorld
+  context: mod PairContext
+  seeds: view List(NodePair)
+  staticSeedCount: view Int
+  startIndex: view Int
+  endIndex: view Int
+) {
+  if let dynamicNodes: view DynamicTree => world.broadPhase.trees.viewAt(index: dynamicTree) {
+    if let staticNodes: view DynamicTree => world.broadPhase.trees.viewAt(index: staticTree) {
+      let staticEnd: Int = minInt(left: endIndex, right: staticSeedCount)
+      loop var i: Int = startIndex, i < staticEnd, ++i {
+        let seed: NodePair = seeds.copyAtDefault(index: i)
+        collideCrossPairs(
+          world: world
+          context: context
+          treeA: dynamicNodes
+          treeB: staticNodes
+          subtreeA: seed.nodeA
+          subtreeB: seed.nodeB
+        )
+      }
+    }
+    flushCandidatePairs(world: world, context: context)
+    if let kinematicNodes: view DynamicTree => world.broadPhase.trees.viewAt(index: kinematicTree) {
+      loop var i: Int = maxInt(left: startIndex, right: staticSeedCount), i < endIndex, ++i {
+        let seed: NodePair = seeds.copyAtDefault(index: i)
+        collideCrossPairs(
+          world: world
+          context: context
+          treeA: dynamicNodes
+          treeB: kinematicNodes
+          subtreeA: seed.nodeA
+          subtreeB: seed.nodeB
+        )
+      }
+    }
+    flushCandidatePairs(world: world, context: context)
+  }
+}
+
+# The cross and self pair tasks over their blocks, as worker 0, into
+# `context` (b3ParallelFor of both tasks).
+func findPairs(world: view PhysicsWorld, context: mod PairContext) {
+  let siblingIndices: List(Int) = List.create(Int, cap: 16)
+  let seeds: List(NodePair) = List.create(NodePair, cap: 2 * crossSeedCount)
+  var dynamicMoveCount: Int = 0
+  var staticSeedCount: Int = 0
+  var kinematicSeedCount: Int = 0
+  if let tree: view DynamicTree => world.broadPhase.trees.viewAt(index: dynamicTree) {
+    # The sibling pairs of the dynamic body tree that have moved
+    dynamicMoveCount = gatherMovedSiblings(tree: tree, pairIndices: siblingIndices)
+    # Seeds for colliding against the static and kinematic trees
+    if let other: view DynamicTree => world.broadPhase.trees.viewAt(index: staticTree) {
+      staticSeedCount = gatherCrossSeeds(treeA: tree, treeB: other, seeds: seeds)
+    }
+    if let other: view DynamicTree => world.broadPhase.trees.viewAt(index: kinematicTree) {
+      kinematicSeedCount = gatherCrossSeeds(treeA: tree, treeB: other, seeds: seeds)
+    }
+  }
+  let crossMoveCount: Int = staticSeedCount + kinematicSeedCount
+
+  # The dynamic body tree against the static and kinematic trees
+  let crossBlockSize: Int = parallelForBlockSize(
+    itemCount: crossMoveCount
+    minRange: 1
+    workerCount: world.workerCount
+  )
+  let crossBlocks: Int = parallelForBlockCount(itemCount: crossMoveCount, blockSize: crossBlockSize)
+  loop var block: Int = 0, block < crossBlocks, ++block {
+    crossPairsTask(
+      world: world
+      context: context
+      seeds: seeds
+      staticSeedCount: staticSeedCount
+      startIndex: parallelForBlockStart(blockIndex: block, blockSize: crossBlockSize)
+      endIndex: parallelForBlockEnd(
+        blockIndex: block
+        blockSize: crossBlockSize
+        itemCount: crossMoveCount
+      )
+    )
+  }
+
+  # The dynamic body tree against itself
+  let selfBlockSize: Int = parallelForBlockSize(
+    itemCount: dynamicMoveCount
+    minRange: 64
+    workerCount: world.workerCount
+  )
+  let selfBlocks: Int = parallelForBlockCount(itemCount: dynamicMoveCount, blockSize: selfBlockSize)
+  loop var block: Int = 0, block < selfBlocks, ++block {
+    selfPairsTask(
+      world: world
+      context: context
+      siblingIndices: siblingIndices
+      startIndex: parallelForBlockStart(blockIndex: block, blockSize: selfBlockSize)
+      endIndex: parallelForBlockEnd(
+        blockIndex: block
+        blockSize: selfBlockSize
+        itemCount: dynamicMoveCount
+      )
+    )
+  }
+}
+
+# Whether a tree's root is marked moved (b3HasTreeMoved), and whether it
+# needs a rebuild (b3NeedsRebuild).
+func hasTreeMoved(world: view PhysicsWorld, treeIndex: view Int) ret Bool {
+  if let tree: view DynamicTree => world.broadPhase.trees.viewAt(index: treeIndex) {
+    ret isMovedNode(node: treeNode(tree: tree, index: rootNode))
+  }
+  ret false
+}
+
+func needsRebuild(world: view PhysicsWorld, treeIndex: view Int) ret Bool {
+  if let tree: view DynamicTree => world.broadPhase.trees.viewAt(index: treeIndex) {
+    ret isMovedNode(node: treeNode(tree: tree, index: rootNode)) or tree.dfsOrdered is false
+  }
+  ret false
+}
+
+# b3UpdateBroadPhasePairs: find the new shape pairs, rebuild the dynamic and
+# kinematic trees, and create a contact for each new pair in key order.
+# Returns the pair keys handed to contact creation, in that order.
+func updateBroadPhasePairs(world: mod PhysicsWorld) ret List(UInt64) {
+  let created: List(UInt64) = List.create(UInt64, cap: 16)
+  var needUpdate: Bool = hasTreeMoved(world: world, treeIndex: staticTree)
+  needUpdate = needUpdate or needsRebuild(world: world, treeIndex: kinematicTree)
+  needUpdate = needUpdate or needsRebuild(world: world, treeIndex: dynamicTree)
+  if needUpdate is false {
+    ret created
+  }
+
+  loop var i: Int = 0, i < world.taskContexts.length, ++i {
+    if let taskContext: mod TaskContext => world.taskContexts.modAt(index: i) {
+      taskContext.pairKeys.clear()
+    }
+  }
+
+  # Generate pairs by querying the dynamic body tree against itself and
+  # against the kinematic and static trees.
+  var context: PairContext = createPairContext()
+  findPairs(world: world, context: context)
+  if let taskContext: mod TaskContext => world.taskContexts.modAt(index: 0) {
+    # (An index loop: a view loop over List(UInt64) emits invalid C, #97861858.)
+    loop var i: Int = 0, i < context.pairKeys.length, ++i {
+      taskContext.pairKeys.add(value: context.pairKeys.copyAtDefault(index: i))
+    }
+  }
+
+  if let tree: mod DynamicTree => world.broadPhase.trees.modAt(index: staticTree) {
+    clearMoved(tree: tree)
+  }
+
+  # Update stale trees (b3EnqueueTreeUpdate: inline with one worker).
+  if let tree: mod DynamicTree => world.broadPhase.trees.modAt(index: dynamicTree) {
+    let dynamicLeaves: Int = rebuildTree(tree: tree, fullBuild: false)
+  }
+  if let tree: mod DynamicTree => world.broadPhase.trees.modAt(index: kinematicTree) {
+    let kinematicLeaves: Int = rebuildTree(tree: tree, fullBuild: false)
+  }
+
+  # Pairs arrive in a deterministic order, scrambled relative to body and
+  # shape order. Sorting them improves solver performance and makes contact
+  # order independent of tree structure.
+  let pairKeys: List(UInt64) = List.create(UInt64, cap: 16)
+  loop let taskContext: view TaskContext in world.taskContexts {
+    loop var i: Int = 0, i < taskContext.pairKeys.length, ++i {
+      pairKeys.add(value: taskContext.pairKeys.copyAtDefault(index: i))
+    }
+  }
+  quickSort(T: UInt64, values: pairKeys)
+
+  let shapeShift: UInt64 = (64 - shapePower) as UInt64
+  let secondShift: UInt64 = (64 - 2 * shapePower) as UInt64
+  let shapeBits: UInt64 = shapeMask() as UInt64
+  let childBits: UInt64 = childMask() as UInt64
+  loop var i: Int = 0, i < pairKeys.length, ++i {
+    let key: UInt64 = pairKeys.copyAtDefault(index: i)
+    # The traversal is cross subtree and the seeds are disjoint, so a
+    # duplicate key is a bug; skip it rather than add it twice.
+    if i > 0 and key is pairKeys.copyAtDefault(index: i - 1) {
+      continue
+    }
+    let shapeIdA: Int = ((key shr shapeShift) bitand shapeBits) as Int
+    let shapeIdB: Int = ((key shr secondShift) bitand shapeBits) as Int
+    let childIndex: Int = (key bitand childBits) as Int
+    createContact(
+      world: world
+      shapeIdA: shapeIdA
+      shapeIdB: shapeIdB
+      childIndex: childIndex
+    )
+    created.add(value: key)
+  }
+  ret created
+}

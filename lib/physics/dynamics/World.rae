@@ -18,6 +18,18 @@ open physics/dynamics/Shape
 open physics/dynamics/SolverSet
 open physics/dynamics/Island
 
+# One worker's scratch for a step (b3TaskContext of Box3D's
+# physics_world.h). A world has one per worker; single-threaded, one. Only
+# the broad phase's pair keys so far; the solver's parts join it in P4c.
+type TaskContext {
+  # The pair keys the worker's pair-finding tasks found
+  pairKeys: List(UInt64)
+}
+
+func createTaskContext() ret TaskContext {
+  ret TaskContext { pairKeys: List.create(UInt64, cap: 16) }
+}
+
 type PhysicsWorld {
   worldId: Int
   broadPhase: BroadPhase
@@ -53,6 +65,7 @@ type PhysicsWorld {
   enableContinuous: Bool
   enableSpeculative: Bool
   workerCount: Int
+  taskContexts: List(TaskContext)
   lengthUnitsPerMeter: Float
 }
 
@@ -91,7 +104,11 @@ func createWorld(def: view WorldDef) ret PhysicsWorld {
     enableContinuous: def.enableContinuous
     enableSpeculative: true
     workerCount: 1
+    taskContexts: List.create(TaskContext, cap: 1)
     lengthUnitsPerMeter: def.lengthUnitsPerMeter
+  }
+  loop var i: Int = 0, i < world.workerCount, ++i {
+    world.taskContexts.add(value: createTaskContext())
   }
   # The static, disabled and awake sets (ids 0, 1, 2)
   loop var i: Int = 0, i < 3, ++i {

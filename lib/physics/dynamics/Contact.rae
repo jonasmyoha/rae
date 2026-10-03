@@ -1,0 +1,37 @@
+# Contacts between shapes (Box3D's contact.c at 9f998c8). So far only the
+# part of b3CreateContact that the broad phase depends on: the pair registry
+# (no contact for an unsupported pair, the primary shape order) and the pair
+# set that records that a pair has a contact. The contact itself (its sim,
+# the body contact lists, the solver set it starts in) is P4b, which fills in
+# this function rather than replacing it.
+open physics/broadPhase/PairSet
+open physics/collision/ShapePair
+open physics/dynamics/Shape
+open physics/dynamics/World
+
+# b3CreateContact
+func createContact(
+  world: mod PhysicsWorld
+  shapeIdA: view Int
+  shapeIdB: view Int
+  childIndex: view Int
+) {
+  let typeA: ShapeType = world.shapes.copyAtDefault(index: shapeIdA).shapeType
+  let typeB: ShapeType = world.shapes.copyAtDefault(index: shapeIdB).shapeType
+  if isSupportedContactPair(typeA: typeA, typeB: typeB) is false {
+    # For example, no mesh against mesh
+    ret
+  }
+  if isPrimaryContactPair(typeA: typeA, typeB: typeB) is false {
+    createContact(
+      world: world
+      shapeIdA: shapeIdB
+      shapeIdB: shapeIdA
+      childIndex: childIndex
+    )
+    ret
+  }
+  # Add to the pair set for fast lookup
+  let pairKey: UInt64 = shapePairKey(shape1: shapeIdA, shape2: shapeIdB, child: childIndex)
+  let added: Bool = addPairKey(set: world.broadPhase.pairSet, key: pairKey)
+}
