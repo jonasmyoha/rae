@@ -1,0 +1,80 @@
+# Per-worker scratch, the deterministic way (docs/concurrency-model.md §5):
+# the parallelLoop index is a CHUNK, each chunk owns a contiguous slice of
+# the input and its own scratch slot, and the slots are merged in chunk
+# order. No new write rule — writing the element of one's own index is all it
+# uses — and even an order-dependent merge (concatenating, like Box3D's pair
+# keys and events) is byte-identical to the sequential loop, whatever the
+# number of workers or chunks.
+import Parallel
+
+# The "pairs" of element i: an odd-looking but fixed, order-sensitive
+# sequence, so a merge in the wrong order would show.
+func emitPairs(i: view Int, out: mod List(Int)) {
+  if i % 7 is 0 {
+    out.add(value: i * 1000 + i % 13)
+  }
+  if i % 11 is 3 {
+    out.add(value: -i)
+  }
+}
+
+# The idiom: `chunks` slots, chunk c covers [c * count / chunks,
+# (c + 1) * count / chunks), merged in chunk order.
+func chunkedPairs(count: view Int, chunks: view Int) ret List(Int) {
+  let scratch: List(List(Int)) = List.create(List(Int), cap: chunks)
+  loop var c: Int = 0, c < chunks, ++c {
+    scratch.add(value: List.create(Int, cap: 16))
+  }
+  parallelLoop var c: Int = 0, c < chunks, ++c {
+    if let buffer: mod List(Int) => scratch.modAt(index: c) {
+      let start: Int = c * count / chunks
+      let end: Int = (c + 1) * count / chunks
+      loop var i: Int = start, i < end, ++i {
+        emitPairs(i: i, out: buffer)
+      }
+    }
+  }
+  let merged: List(Int) = List.create(Int, cap: 64)
+  loop var c: Int = 0, c < chunks, ++c {
+    if let buffer: view List(Int) => scratch.viewAt(index: c) {
+      loop var k: Int = 0, k < buffer.length, ++k {
+        merged.add(value: buffer.copyAtDefault(index: k))
+      }
+    }
+  }
+  ret merged
+}
+
+# A fingerprint of the whole sequence: order, values and length.
+func fingerprint(values: view List(Int)) ret Int {
+  var hash: Int = values.length
+  loop var k: Int = 0, k < values.length, ++k {
+    hash = (hash * 1000003 + values.copyAtDefault(index: k)) % 2147483647
+  }
+  ret hash
+}
+
+func main() {
+  let count: Int = 100000
+  let sequential: List(Int) = List.create(Int, cap: 64)
+  loop var i: Int = 0, i < count, ++i {
+    emitPairs(i: i, out: sequential)
+  }
+  let expected: Int = fingerprint(values: sequential)
+  log("sequential: {sequential.length} pairs, fingerprint {expected}")
+
+  # The chunk count the pool would use at 1, 2, 4 and 8 workers (4 per
+  # worker), and the pool's own: every merge is the sequential sequence.
+  let workerCounts: List(Int) = { 1, 2, 4, 8 }
+  loop var w: Int = 0, w < workerCounts.length, ++w {
+    let workers: Int = workerCounts.copyAtDefault(index: w)
+    let merged: List(Int) = chunkedPairs(count: count, chunks: workers * 4)
+    log(
+      "{workers} workers ({workers * 4} chunks): {merged.length} pairs, identical: {fingerprint(
+        values: merged
+      ) is expected}"
+    )
+  }
+  let pool: List(Int) = chunkedPairs(count: count, chunks: Parallel.workerCount() * 4)
+  log("this pool: identical: {fingerprint(values: pool) is expected}")
+}
