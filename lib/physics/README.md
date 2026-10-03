@@ -143,3 +143,34 @@ The check: fixture 952 runs `goldens/hullmanifold.golden` (768 calls: the
 manifolds with their GJK and SAT caches carried across steps, and the
 separating axis test) through `collideConvexShapes`, and prints the pair
 registry.
+
+## P3 — broad-phase data structures (`broadPhase/`, `container/`)
+
+The dynamic tree's nodes, parents and proxies are Lists; the proxy pool
+keeps Box3D's capacity, because it decides the order proxy ids are handed
+out. Box3D's tree queries take a callback; Rae has no function values, so
+each query is an explicit traversal state: `next…` returns the next
+candidate proxy where Box3D would call back, and the casts and the closest
+query take the callback's value back with `report…`.
+
+| Box3D | Rae |
+|---|---|
+| `b3DynamicTree_Create` `_CreateProxy` (`b3CreateTreeProxyInternal`) `_DestroyProxy` | `createDynamicTree` `createTreeProxy` (`createTreeProxyMarked`) `destroyTreeProxy` |
+| `_MoveProxy` `_EnlargeProxy` `_SetCategoryBits` `_GetCategoryBits` `_GetUserData` `_GetAABB` | `moveTreeProxy` `enlargeTreeProxy` `setTreeCategoryBits` `treeCategoryBits` `treeUserData` `treeProxyAabb` |
+| `_GetHeight` `_GetAreaRatio` `_GetRootBounds` `_GetProxyCount` `_Validate` | `treeHeight` `treeAreaRatio` `treeRootBounds` `treeProxyCount` `isValidTree` |
+| `_Query` (callback) | `beginTreeQuery` + `nextTreeQueryProxy` |
+| `_RayCast` `_BoxCast` (callback) | `beginTreeRayCast` / `beginTreeBoxCast` + `nextTreeCastProxy` + `reportTreeCast` |
+| `_QueryClosest` (callback) | `beginTreeClosestQuery` + `nextTreeClosestProxy` + `reportTreeClosest` |
+| `_Rebuild` `_Refit` `_ClearMoved` `_GatherMovedProxies` | `rebuildTree` `refitTree` `clearMoved` `gatherMovedProxies` |
+| `_MarkProxyMovedSerial` `_MarkProxyMoved` | `markProxyMovedSerial` `markProxyMoved` |
+| `b3HashSet` `b3CreateSet` `b3AddKey` `b3RemoveKey` `b3ContainsKey` `b3ClearSet` | `PairSet` `createPairSet` `addPairKey` `removePairKey` `pairSetContains` `clearPairSet` |
+| `b3ShapePairKey` `b3KeyHash` | `shapePairKey` `keyHash` |
+| `b3BitSet` and its functions | `Bitset`, `createBitset` `setBitCountAndClear` `setBit` `setBitGrow` `clearBit` `getBit` `inPlaceUnion` `countSetBits` |
+| `b3IdPool` `b3AllocId` `b3FreeId` | `IdPool` `allocId` `freeId` |
+| `QSORT` (qsort.h) | `quickSort(T:)` over a List of an ordered type |
+
+The check: fixture 953 replays `goldens/broadphase.golden` (1 633
+operations: three scripted trees with full state dumps and every query
+kind, the pair set's slot layout, the bit sets, the id pool, quicksort).
+Pair finding (broad_phase.c) needs the world's shapes and filters and
+comes with P4.

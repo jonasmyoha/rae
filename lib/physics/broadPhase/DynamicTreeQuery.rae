@@ -1,0 +1,510 @@
+# The dynamic AABB tree of Box3D's dynamic_tree.c at 9f998c8, part 2: the
+# box query, the closest-point query, the ray cast and the box cast.
+# Box3D's operation order is kept exactly; checked bit for bit against the
+# oracle in fixture 953.
+#
+# Box3D calls a user callback for each candidate proxy. Rae has no function
+# values, so each query is an explicit traversal state: `next…` returns the
+# next candidate proxy (-1 when done) at exactly the point Box3D would call
+# back, and for the casts and the closest query the caller hands back what
+# the callback would have returned (`report…`), which clips the ray or
+# shrinks the search. Stopping early is just not calling `next…` again.
+open Vec3
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/AabbMath
+open physics/geometry/QueryTypes
+open physics/broadPhase/DynamicTree
+
+# A box sweep through the tree (b3BoxCastInput): `box` moved by
+# maxFraction * translation.
+type BoxCastInput {
+  box: Aabb
+  translation: Vec3
+  maxFraction: Float
+}
+
+# The state of a box query (b3DynamicTree_Query).
+type TreeQuery {
+  box: Aabb
+  maskBits: UInt64
+  requireAllBits: Bool
+  stack: List(Int)
+  pair: Int
+  # The next child (0, 1) of `pair` to test; 2 when the pair is done
+  child: Int
+  stats: TreeStats
+}
+
+# The state of a ray or box cast (b3DynamicTree_RayCast, BoxCast).
+type TreeCast {
+  # The ray start (for a box cast the box center), and its translation
+  start: Vec3
+  translation: Vec3
+  # A box cast's half extents, folded into each node; zero for a ray
+  extension: Vec3
+  # The cast box: for a box cast its start box
+  originBox: Aabb
+  isBoxCast: Bool
+  maxFraction: Float
+  # The bounds of the whole remaining cast
+  sweptBox: Aabb
+  maskBits: UInt64
+  requireAllBits: Bool
+  stack: List(Int)
+  # The children of the last popped pair that the cast touches, in visit order
+  hits: List(TreeNode)
+  hitIndex: Int
+  done: Bool
+  stats: TreeStats
+}
+
+# One entry of the closest query's stack (b3QueryClosestItem).
+type ClosestItem {
+  nodeIndex: Int
+  distanceSquared: Float
+}
+
+# The state of a closest-point query (b3DynamicTree_QueryClosest).
+type TreeClosestQuery {
+  point: Vec3
+  maskBits: UInt64
+  requireAllBits: Bool
+  # The squared distance to beat
+  minDistanceSquared: Float
+  stack: List(ClosestItem)
+  stats: TreeStats
+}
+
+# b3TestCategory
+func testCategory(
+  categoryBits: view UInt64
+  maskBits: view UInt64
+  requireAllBits: view Bool
+) ret Bool {
+  if requireAllBits {
+    ret (categoryBits bitand maskBits) is maskBits
+  }
+  ret (categoryBits bitand maskBits) is not 0
+}
+
+# b3OverlapNode (the scalar b3OverlapAABBV)
+func overlapNode(box: view Aabb, node: view TreeNode) ret Bool {
+  let other: Aabb = node.aabb
+  ret box.lowerBound.x <= other.upperBound.x and box.lowerBound.y <= other.upperBound.y and box.lowerBound.z <= other.upperBound.z and other.lowerBound.x <= box.upperBound.x and other.lowerBound.y <= box.upperBound.y and other.lowerBound.z <= box.upperBound.z
+}
+
+# b3TestBoundsRayOverlap (scalar): no edge axis of the box and the ray
+# separates them (Gino van den Bergen, p80).
+func testBoundsRayOverlap(
+  nodeMin: view Vec3
+  nodeMax: view Vec3
+  rayStart: view Vec3
+  rayDelta: view Vec3
+) ret Bool {
+  let nodeCenter: Vec3 = {
+    x: 0.5 * (nodeMin.x + nodeMax.x)
+    y: 0.5 * (nodeMin.y + nodeMax.y)
+    z: 0.5 * (nodeMin.z + nodeMax.z)
+  }
+  let nodeExtent: Vec3 = subtract(left: nodeMax, right: nodeCenter)
+  let start: Vec3 = subtract(left: rayStart, right: nodeCenter)
+  let separation: Vec3 = subtract(
+    left: abs(vector: cross(left: rayDelta, right: start))
+    right: modifiedCross(left: abs(vector: rayDelta), right: nodeExtent)
+  )
+  ret separation.x <= 0.0 and separation.y <= 0.0 and separation.z <= 0.0
+}
+
+func emptyTreeStats() ret TreeStats {
+  ret TreeStats { nodeVisits: 0, leafVisits: 0 }
+}
+
+# --- The box query ---
+
+# Start a query for the proxies whose boxes overlap `box` and whose
+# category passes the mask.
+func beginTreeQuery(
+  tree: view DynamicTree
+  box: view Aabb
+  maskBits: view UInt64
+  requireAllBits: view Bool
+) ret TreeQuery {
+  let stack: List(Int) = List.create(Int, cap: 32)
+  if tree.proxyCount > 0 {
+    stack.add(value: rootPair(tree: tree))
+  }
+  ret TreeQuery {
+    box: box
+    maskBits: maskBits
+    requireAllBits: requireAllBits
+    stack: stack
+    pair: 0
+    child: 2
+    stats: emptyTreeStats()
+  }
+}
+
+# The next proxy of the query, or -1 when it is done.
+func nextTreeQueryProxy(tree: view DynamicTree, query: mod TreeQuery) ret Int {
+  loop true {
+    if query.child >= 2 {
+      if query.stack.length is 0 {
+        ret -1
+      }
+      query.pair = query.stack.copyAtDefault(index: query.stack.length - 1)
+      query.stack.removeLast()
+      query.stats.nodeVisits = query.stats.nodeVisits + 1
+      query.child = 0
+    }
+    let node: TreeNode = treeNode(tree: tree, index: query.pair + query.child)
+    query.child = query.child + 1
+    if overlapNode(box: query.box, node: node) is false {
+      continue
+    }
+    if isLeafNode(node: node) {
+      let proxyId: Int = nodeProxyId(node: node)
+      if testCategory(
+        categoryBits: treeProxy(tree: tree, proxyId: proxyId).categoryBits
+        maskBits: query.maskBits
+        requireAllBits: query.requireAllBits
+      ) {
+        query.stats.leafVisits = query.stats.leafVisits + 1
+        ret proxyId
+      }
+    } else if query.stack.length < treeStackSize - 1 {
+      query.stack.add(value: leftChild(node: node))
+    }
+  }
+}
+
+# --- The ray and box casts ---
+
+# The box of a cast from `start` to start + maxFraction * translation.
+func raySegmentBox(start: view Vec3, translation: view Vec3, maxFraction: view Float) ret Aabb {
+  let finish: Vec3 = mulAdd(base: start, scale: maxFraction, vector: translation)
+  ret Aabb {
+    lowerBound: min(left: start, right: finish)
+    upperBound: max(left: start, right: finish)
+  }
+}
+
+# The swept box of a box cast at `maxFraction`.
+func boxSweepBox(originBox: view Aabb, translation: view Vec3, maxFraction: view Float) ret Aabb {
+  let travel: Vec3 = scale(scale: maxFraction, vector: translation)
+  ret Aabb {
+    lowerBound: min(
+      left: originBox.lowerBound
+      right: add(left: originBox.lowerBound, right: travel)
+    )
+    upperBound: max(
+      left: originBox.upperBound
+      right: add(left: originBox.upperBound, right: travel)
+    )
+  }
+}
+
+func beginCast(
+  tree: view DynamicTree
+  start: view Vec3
+  translation: view Vec3
+  extension: view Vec3
+  originBox: view Aabb
+  isBoxCast: view Bool
+  maxFraction: view Float
+  sweptBox: view Aabb
+  maskBits: view UInt64
+  requireAllBits: view Bool
+) ret TreeCast {
+  let stack: List(Int) = List.create(Int, cap: 32)
+  var done: Bool = true
+  if tree.proxyCount > 0 {
+    stack.add(value: rootPair(tree: tree))
+    done = false
+  }
+  ret TreeCast {
+    start: start
+    translation: translation
+    extension: extension
+    originBox: originBox
+    isBoxCast: isBoxCast
+    maxFraction: maxFraction
+    sweptBox: sweptBox
+    maskBits: maskBits
+    requireAllBits: requireAllBits
+    stack: stack
+    hits: List.create(TreeNode, cap: 2)
+    hitIndex: 0
+    done: done
+    stats: emptyTreeStats()
+  }
+}
+
+# Start a ray cast. The current fraction is `cast.maxFraction` (what Box3D
+# passes the callback as the input's maxFraction).
+func beginTreeRayCast(
+  tree: view DynamicTree
+  input: view RayCastInput
+  maskBits: view UInt64
+  requireAllBits: view Bool
+) ret TreeCast {
+  ret beginCast(
+    tree: tree
+    start: input.origin
+    translation: input.translation
+    extension: zeroVector()
+    originBox: Aabb { lowerBound: input.origin, upperBound: input.origin }
+    isBoxCast: false
+    maxFraction: input.maxFraction
+    sweptBox: raySegmentBox(
+      start: input.origin
+      translation: input.translation
+      maxFraction: input.maxFraction
+    )
+    maskBits: maskBits
+    requireAllBits: requireAllBits
+  )
+}
+
+# Start a box cast: the box swept through the tree, each node grown by the
+# box's half extents.
+func beginTreeBoxCast(
+  tree: view DynamicTree
+  input: view BoxCastInput
+  maskBits: view UInt64
+  requireAllBits: view Bool
+) ret TreeCast {
+  ret beginCast(
+    tree: tree
+    start: center(box: input.box)
+    translation: input.translation
+    extension: extents(box: input.box)
+    originBox: input.box
+    isBoxCast: true
+    maxFraction: input.maxFraction
+    sweptBox: boxSweepBox(
+      originBox: input.box
+      translation: input.translation
+      maxFraction: input.maxFraction
+    )
+    maskBits: maskBits
+    requireAllBits: requireAllBits
+  )
+}
+
+# The next proxy the cast touches, or -1 when it is done. Hand the callback
+# value back with reportTreeCast before asking for the next one.
+func nextTreeCastProxy(tree: view DynamicTree, cast: mod TreeCast) ret Int {
+  if cast.done {
+    ret -1
+  }
+  loop true {
+    if cast.hitIndex < cast.hits.length {
+      let hit: TreeNode = cast.hits.copyAtDefault(index: cast.hitIndex)
+      cast.hitIndex = cast.hitIndex + 1
+      if isLeafNode(node: hit) {
+        let proxyId: Int = nodeProxyId(node: hit)
+        if testCategory(
+          categoryBits: treeProxy(tree: tree, proxyId: proxyId).categoryBits
+          maskBits: cast.maskBits
+          requireAllBits: cast.requireAllBits
+        ) is false {
+          continue
+        }
+        cast.stats.leafVisits = cast.stats.leafVisits + 1
+        ret proxyId
+      }
+      if cast.stack.length < treeStackSize - 1 {
+        cast.stack.add(value: leftChild(node: hit))
+      }
+      continue
+    }
+    if cast.stack.length is 0 {
+      cast.done = true
+      ret -1
+    }
+    let pair: Int = cast.stack.copyAtDefault(index: cast.stack.length - 1)
+    cast.stack.removeLast()
+    cast.stats.nodeVisits = cast.stats.nodeVisits + 1
+
+    # Test both children before following either
+    cast.hits.clear()
+    cast.hitIndex = 0
+    loop var i: Int = 0, i < 2, ++i {
+      let node: TreeNode = treeNode(tree: tree, index: pair + i)
+      if overlapNode(box: cast.sweptBox, node: node) is false {
+        continue
+      }
+      let lower: Vec3 = subtract(left: node.aabb.lowerBound, right: cast.extension)
+      let upper: Vec3 = add(left: node.aabb.upperBound, right: cast.extension)
+      var nodeMin: Vec3 = node.aabb.lowerBound
+      var nodeMax: Vec3 = node.aabb.upperBound
+      if cast.isBoxCast {
+        # The box's half extents grow the node
+        nodeMin = lower
+        nodeMax = upper
+      }
+      if testBoundsRayOverlap(
+        nodeMin: nodeMin
+        nodeMax: nodeMax
+        rayStart: cast.start
+        rayDelta: cast.translation
+      ) is false {
+        continue
+      }
+      cast.hits.add(value: node)
+    }
+    if cast.hits.length is 2 {
+      let first: TreeNode = cast.hits.copyAtDefault(index: 0)
+      let second: TreeNode = cast.hits.copyAtDefault(index: 1)
+      if isLeafNode(node: first) is false and isLeafNode(node: second) is false {
+        # Push the closer one last
+        let distance1: Float = distanceSquared(from: center(box: first.aabb), to: cast.start)
+        let distance2: Float = distanceSquared(from: center(box: second.aabb), to: cast.start)
+        if distance1 < distance2 {
+          cast.hits.set(index: 0, value: second)
+          cast.hits.set(index: 1, value: first)
+        }
+      }
+    }
+  }
+}
+
+# The callback's value for the last proxy: 0 ends the cast, a fraction in
+# (0, maxFraction] (for a box cast (0, maxFraction)) clips it, anything
+# else (-1: skip the proxy) leaves it.
+func reportTreeCast(cast: mod TreeCast, value: view Float) {
+  if value is 0.0 {
+    cast.done = true
+    ret
+  }
+  if cast.isBoxCast {
+    if 0.0 < value and value < cast.maxFraction {
+      cast.maxFraction = value
+      cast.sweptBox = boxSweepBox(
+        originBox: cast.originBox
+        translation: cast.translation
+        maxFraction: value
+      )
+    }
+    ret
+  }
+  if 0.0 < value and value <= cast.maxFraction {
+    cast.maxFraction = value
+    cast.sweptBox = raySegmentBox(
+      start: cast.start
+      translation: cast.translation
+      maxFraction: value
+    )
+  }
+}
+
+# --- The closest query ---
+
+# b3DistanceToNodeSqr
+func distanceToNodeSquared(point: view Vec3, node: view TreeNode) ret Float {
+  let offset: Vec3 = subtract(
+    left: point
+    right: clamp(vector: point, lower: node.aabb.lowerBound, upper: node.aabb.upperBound)
+  )
+  ret dot(left: offset, right: offset)
+}
+
+# Push the two children of `pair`, the closer one last (popped first).
+func pushClosestPair(tree: view DynamicTree, query: mod TreeClosestQuery, pair: view Int) {
+  let item1: ClosestItem = {
+    nodeIndex: pair
+    distanceSquared: distanceToNodeSquared(
+      point: query.point
+      node: treeNode(tree: tree, index: pair)
+    )
+  }
+  let item2: ClosestItem = {
+    nodeIndex: pair + 1
+    distanceSquared: distanceToNodeSquared(
+      point: query.point
+      node: treeNode(tree: tree, index: pair + 1)
+    )
+  }
+  if item2.distanceSquared < item1.distanceSquared {
+    query.stack.add(value: item1)
+    query.stack.add(value: item2)
+  } else {
+    query.stack.add(value: item2)
+    query.stack.add(value: item1)
+  }
+}
+
+# Start a closest query from `point`, beating `minDistanceSquared`.
+func beginTreeClosestQuery(
+  tree: view DynamicTree
+  point: view Vec3
+  maskBits: view UInt64
+  requireAllBits: view Bool
+  minDistanceSquared: view Float
+) ret TreeClosestQuery {
+  var query: TreeClosestQuery = {
+    point: point
+    maskBits: maskBits
+    requireAllBits: requireAllBits
+    minDistanceSquared: minDistanceSquared
+    stack: List.create(ClosestItem, cap: 32)
+    stats: emptyTreeStats()
+  }
+  if tree.proxyCount is 0 {
+    ret query
+  }
+  let pair: Int = rootPair(tree: tree)
+  if pair is rootNode {
+    query.stack.add(
+      value: ClosestItem {
+        nodeIndex: pair
+        distanceSquared: distanceToNodeSquared(
+          point: point
+          node: treeNode(tree: tree, index: pair)
+        )
+      }
+    )
+  } else {
+    pushClosestPair(tree: tree, query: query, pair: pair)
+  }
+  ret query
+}
+
+# The next proxy that could be closer, or -1 when done. Report its squared
+# distance with reportTreeClosest.
+func nextTreeClosestProxy(tree: view DynamicTree, query: mod TreeClosestQuery) ret Int {
+  loop query.stack.length > 0 {
+    let item: ClosestItem = query.stack.copyAtDefault(index: query.stack.length - 1)
+    query.stack.removeLast()
+    let node: TreeNode = treeNode(tree: tree, index: item.nodeIndex)
+    query.stats.nodeVisits = query.stats.nodeVisits + 1
+    if item.distanceSquared >= query.minDistanceSquared {
+      continue
+    }
+    if isLeafNode(node: node) {
+      let proxyId: Int = nodeProxyId(node: node)
+      if testCategory(
+        categoryBits: treeProxy(tree: tree, proxyId: proxyId).categoryBits
+        maskBits: query.maskBits
+        requireAllBits: query.requireAllBits
+      ) is false {
+        continue
+      }
+      query.stats.leafVisits = query.stats.leafVisits + 1
+      ret proxyId
+    }
+    if query.stack.length + 2 > treeStackSize {
+      continue
+    }
+    pushClosestPair(tree: tree, query: query, pair: leftChild(node: node))
+  }
+  ret -1
+}
+
+# The callback's squared distance for the last proxy.
+func reportTreeClosest(query: mod TreeClosestQuery, distanceSquared: view Float) {
+  if distanceSquared < query.minDistanceSquared {
+    query.minDistanceSquared = distanceSquared
+  }
+}

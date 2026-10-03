@@ -1,0 +1,106 @@
+# A growable set of bits (b3BitSet of Box3D's bitset.h, bitset.c at
+# 9f998c8), in 64-bit blocks. `blockCapacity` is kept as Box3D keeps it:
+# it decides when the set reallocates (and is cleared).
+import Math
+
+type Bitset {
+  # blockCount blocks in use; past them, zero up to the capacity
+  bits: List(UInt64)
+  blockCapacity: Int
+  blockCount: Int
+}
+
+func zeroBlocks(count: view Int) ret List(UInt64) {
+  let bits: List(UInt64) = List.create(UInt64, cap: count)
+  loop var i: Int = 0, i < count, ++i {
+    bits.add(value: 0)
+  }
+  ret bits
+}
+
+# b3CreateBitSet: room for `bitCapacity` bits, none in use.
+func createBitset(bitCapacity: view Int) ret Bitset {
+  let blockCapacity: Int = (bitCapacity + 64 - 1) / 64
+  ret Bitset { bits: zeroBlocks(count: blockCapacity), blockCapacity: blockCapacity, blockCount: 0 }
+}
+
+# b3SetBitCountAndClear: `bitCount` bits in use, all clear (reallocating
+# with half again the room when it does not fit).
+func setBitCountAndClear(bitset: mod Bitset, bitCount: view Int) {
+  let blockCount: Int = (bitCount + 64 - 1) / 64
+  if bitset.blockCapacity < blockCount {
+    bitset = createBitset(bitCapacity: bitCount + (bitCount shr 1))
+  }
+  bitset.blockCount = blockCount
+  loop var i: Int = 0, i < blockCount, ++i {
+    bitset.bits.set(index: i, value: 0)
+  }
+}
+
+# b3GrowBitSet: `blockCount` blocks in use (more than now), keeping the bits.
+func growBitset(bitset: mod Bitset, blockCount: view Int) {
+  if blockCount > bitset.blockCapacity {
+    bitset.blockCapacity = blockCount + blockCount / 2
+    loop bitset.bits.length < bitset.blockCapacity {
+      bitset.bits.add(value: 0)
+    }
+  }
+  bitset.blockCount = blockCount
+}
+
+# b3SetBit (the block must be in use)
+func setBit(bitset: mod Bitset, bitIndex: view Int) {
+  let blockIndex: Int = bitIndex / 64
+  let block: UInt64 = bitset.bits.copyAtDefault(index: blockIndex)
+  bitset.bits.set(index: blockIndex, value: block bitor ((1 as UInt64) shl (bitIndex % 64)))
+}
+
+# b3SetBitGrow
+func setBitGrow(bitset: mod Bitset, bitIndex: view Int) {
+  let blockIndex: Int = bitIndex / 64
+  if blockIndex >= bitset.blockCount {
+    growBitset(bitset: bitset, blockCount: blockIndex + 1)
+  }
+  setBit(bitset: bitset, bitIndex: bitIndex)
+}
+
+# b3ClearBit
+func clearBit(bitset: mod Bitset, bitIndex: view Int) {
+  let blockIndex: Int = bitIndex / 64
+  if blockIndex >= bitset.blockCount {
+    ret
+  }
+  let block: UInt64 = bitset.bits.copyAtDefault(index: blockIndex)
+  bitset.bits.set(
+    index: blockIndex
+    value: block bitand (bitnot ((1 as UInt64) shl (bitIndex % 64)))
+  )
+}
+
+# b3GetBit
+func getBit(bitset: view Bitset, bitIndex: view Int) ret Bool {
+  let blockIndex: Int = bitIndex / 64
+  if blockIndex >= bitset.blockCount {
+    ret false
+  }
+  ret (bitset.bits.copyAtDefault(index: blockIndex) bitand ((1 as UInt64) shl (bitIndex % 64))) is not 0
+}
+
+# b3InPlaceUnion: setA |= setB (same block counts).
+func inPlaceUnion(setA: mod Bitset, setB: view Bitset) {
+  loop var i: Int = 0, i < setA.blockCount, ++i {
+    setA.bits.set(
+      index: i
+      value: setA.bits.copyAtDefault(index: i) bitor setB.bits.copyAtDefault(index: i)
+    )
+  }
+}
+
+# b3CountSetBits
+func countSetBits(bitset: view Bitset) ret Int {
+  var count: Int = 0
+  loop var i: Int = 0, i < bitset.blockCount, ++i {
+    count = count + Math.popcount(x: bitset.bits.copyAtDefault(index: i) as Int)
+  }
+  ret count
+}
