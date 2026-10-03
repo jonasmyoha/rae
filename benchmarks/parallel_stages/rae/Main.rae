@@ -1,0 +1,55 @@
+# benchmarks/parallel_stages: what a solver-shaped stage loop costs when each
+# stage is its own parallelLoop (docs/parallel-stages-design.md §4).
+#
+# A Box3D step on the 5 050-box pyramid runs ~220 stages (warm start, solve and
+# relax per graph colour, per substep), ~36 us of single-threaded work each.
+# Here: 220 stages of 32 blocks, each block a fixed amount of arithmetic
+# writing its own element. "staged" runs them as 220 back-to-back
+# parallelLoops (a barrier after each); "flat" runs the same 7 040 blocks as
+# ONE parallelLoop (no barriers). The difference, per stage, is what a
+# barrier costs.
+import Parallel
+
+const stageCount: Int = 220
+
+const blocksPerStage: Int = 32
+
+func blockWork(seed: view Int, rounds: view Int) ret Float {
+  var x: Float = (seed % 997) as Float * 0.001
+  loop var k: Int = 0, k < rounds, ++k {
+    x = x * 0.999 + 0.25
+  }
+  ret x
+}
+
+func main() {
+  let rounds: Int = "400".toInt()
+  let out: List(Float) = List.create(Float, cap: stageCount * blocksPerStage)
+  loop var i: Int = 0, i < stageCount * blocksPerStage, ++i {
+    out.add(value: 0.0)
+  }
+  var bestStaged: Int = 0
+  var bestFlat: Int = 0
+  loop var run: Int = 0, run < 7, ++run {
+    let stagedStart: Int = nowNs()
+    loop var stage: Int = 0, stage < stageCount, ++stage {
+      let base: Int = stage * blocksPerStage
+      parallelLoop var block: Int = base, block < base + blocksPerStage, ++block {
+        out.set(index: block, value: blockWork(seed: block, rounds: rounds))
+      }
+    }
+    let staged: Int = nowNs() - stagedStart
+    let flatStart: Int = nowNs()
+    parallelLoop var block: Int = 0, block < stageCount * blocksPerStage, ++block {
+      out.set(index: block, value: blockWork(seed: block, rounds: rounds))
+    }
+    let flat: Int = nowNs() - flatStart
+    if run is 0 or staged < bestStaged {
+      bestStaged = staged
+    }
+    if run is 0 or flat < bestFlat {
+      bestFlat = flat
+    }
+  }
+  log("RESULT,{Parallel.workerCount()},{bestStaged},{bestFlat}")
+}
