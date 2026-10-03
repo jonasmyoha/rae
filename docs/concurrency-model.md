@@ -310,9 +310,9 @@ its artwork workers post `ArtworkResult { serial, ok }` on a
 UI's `waitEvents` returns at once.
 
 **Not implemented:** `detach` (a fire-and-forget worker; today a persistent
-worker takes a stop channel and is joined at teardown), per-worker scratch
-and the guaranteed-concurrent mode of `parallelLoop` (proposal below),
-atomics, task failure status /
+worker takes a stop channel and is joined at teardown), the
+guaranteed-concurrent mode of `parallelLoop` (with the atomics-and-stages
+design, below), atomics, task failure status /
 propagation, `taskScope` cancel-on-error / non-escape enforcement, and
 threading the `mod`/`view`-aggregate shapes (they are correctly sequential).
 The staged plan for the rest is `docs/parallelism-first-plan.md` (and, for
@@ -412,25 +412,53 @@ identical at every worker count. A launch is microseconds, as the physics step
 needs (~10 parallel-for launches outside the solver, `docs/physics-performance-
 plan.md` §5).
 
-**Proposed, not implemented — per-worker scratch and the concurrent mode.**
-Two things the physics solver needs are new surface, so they wait for the
-maintainer:
+**Per-worker scratch is chunk scratch (decided 2026-10-03).** Box3D gives
+each worker its own bitsets, pair-key arrays and event lists and merges them
+after the parallel section. Rae does the same with no new rule: the
+parallelLoop index is a CHUNK, each chunk owns a contiguous slice of the
+input and the scratch slot of its own index, and the slots are merged in
+chunk order —
 
-- *Per-worker scratch.* Box3D gives each worker its own bitsets, pair-key
-  arrays and event lists, merged after the parallel section. Proposal: a
-  library function `Parallel.workerIndex()` (0 to `Parallel.workerCount() - 1`,
-  0 outside a parallel body), and one more write the checker allows: the slot
-  of the worker index in a shared List — `scratch.set(index:
-  Parallel.workerIndex(), ...)` / `scratch.modAt(index:
-  Parallel.workerIndex())`. The catch: WHICH iterations a worker runs depends on
-  scheduling, so the merge must not depend on order (OR-ing bitsets, summing
-  integers, sorting afterwards — what Box3D does) or the result changes run to
-  run. Where order matters, per-chunk partials over a chunk-index loop — the
-  pattern fixture 944 already uses — are deterministic with no new surface.
-- *The guaranteed-concurrent mode* (every worker running one iteration at
-  once, which spin barriers need): a library function cannot take a body
-  (Rae has no function values), so this is a construct, and it belongs to the
-  atomics-and-stages design (`docs/physics-performance-plan.md` §5 item 3).
+```rae
+let chunks: Int = Parallel.workerCount() * 4
+# scratch: List(PairBuffer), one pre-sized slot per chunk
+parallelLoop var c: Int = 0, c < chunks, ++c {
+  if let buffer: mod PairBuffer => scratch.modAt(index: c) {
+    let start: Int = c * count / chunks
+    let end: Int = (c + 1) * count / chunks
+    loop var i: Int = start, i < end, ++i {
+      # append what element i produces into buffer
+    }
+  }
+}
+# merge scratch[0 ..< chunks] in chunk order
+```
+
+Because each chunk covers a contiguous slice and the merge walks the chunks
+in order, the merged result is the sequential loop's, byte for byte, for any
+worker count and any chunk count — even for an order-dependent merge
+(concatenating pair keys or events), so no sort-afterwards step is needed for
+determinism; OR-merges and sums work the same. Memory stays at k ×
+workerCount slots, and k = 4 keeps the pool's dynamic load balancing. Fixture
+946 is this idiom: one order-sensitive sequence, merged at the chunk counts of
+1, 2, 4 and 8 workers and on the pool, identical to the sequential sequence
+every time (and at RAE_WORKERS=1/2/4/8, and under TSan).
+
+A `Parallel.workerIndex()` with a second write rule for its slot was
+considered and rejected: which iterations a worker runs depends on
+scheduling, so its merge is deterministic only if the user makes it
+order-independent — something the checker cannot verify — while
+worker-count determinism is a guarantee by construction
+(`docs/parallelism-first-plan.md` item 4). It would also be a write rule that
+only exists for parallel code. If the slice arithmetic keeps recurring, a
+library helper is welcome; a new checker rule is not.
+
+**The guaranteed-concurrent mode** (every worker running one iteration at
+once, which spin barriers need) is part of the atomics-and-stages design
+(`docs/physics-performance-plan.md` §5 item 3): it exists only to serve spin
+barriers, which need atomics, so it is designed and tested with them. Until
+then the solver is sequential and the parallelLoop rules above are the whole
+rule set.
 
 ---
 
@@ -453,7 +481,8 @@ compiled engine, and where it stands:
 - Atomics via C11 `<stdatomic.h>` — **not yet**.
 - `parallelLoop` = genuine parallel execution over disjoint shards — **done**
   (2026-10-03, §5): the worker pool, the counted form, the write rule checked
-  at compile time. Per-worker scratch and the concurrent mode are proposals.
+  at compile time; per-worker scratch is chunk scratch (§5). The concurrent
+  mode comes with the atomics-and-stages design.
 
 Scripting / hot-reload roles the VM once nominally filled are reassigned to
 native-hosted WASM modules (`docs/raepack-v2-and-packages.md`); a WASM thread

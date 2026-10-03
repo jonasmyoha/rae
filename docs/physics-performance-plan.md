@@ -111,7 +111,7 @@ runs `workerCount` threads.
 |---|---|---|
 | persistent worker threads (or a host task hook) | `spawn` = one new pthread per task, no pool | **needed**: a persistent pool |
 | parallel-for over a range, dynamic chunk claiming (pairs, collide, sensors, prepare/store, transforms) | `parallelLoop` parses and runs **sequentially** | **needed**: `parallelLoop` on the pool |
-| a worker index and per-worker scratch merged in worker order | none; §2b of the concurrency model allows writes only to the element of one's own index | **needed**: `workerIndex` in the loop and per-worker scratch slots |
+| per-worker scratch (bitsets, pair keys, events) merged after the section | chunk scratch: the loop index is a chunk with its own slot, merged in chunk order — deterministic for any merge (decided 2026-10-03, fixture 946) | none |
 | all workers resident across hundreds of stage barriers per step, spin-waiting | nothing; re-dispatching a pool task per stage would cost more than the stage | **needed**: a staged construct, or atomics plus a guaranteed-concurrent loop |
 | atomics: ~50 call sites of load / store / fetch-add / compare-exchange on 32- and 64-bit ints | no atomic type | **needed** (or hidden inside the staged construct) |
 | 4-wide floats (`b3FloatW`, NEON / SSE2 / wasm SIMD128) in the contact solver | no vector type | **margin**: `Float4` |
@@ -134,8 +134,10 @@ code the compiler outlines, as `parallelLoop`'s body is.
    other mutable static reachable from Rae code; a `make tsan` case. Small;
    blocks everything below.
 2. **A persistent worker pool, with `parallelLoop` on it.** *(Landed
-   2026-10-03 except per-worker scratch and the concurrent mode, which await
-   the maintainer: `docs/concurrency-model.md` §5. Launch 0.3-3.9 us back to
+   2026-10-03: `docs/concurrency-model.md` §5. Per-worker scratch is chunk
+   scratch — the loop index is a chunk with a contiguous slice and its own
+   slot, merged in chunk order, deterministic by construction (fixture 946);
+   no worker index. The concurrent mode moved to item 3. Launch 0.3-3.9 us back to
    back, 5-16 us from sleep; 3.8x at 4 workers, 6x at 8 on a compute kernel.)*
    - Workers = performance cores (`hw.perflevel0.physicalcpu` on macOS, 8
      here); the efficiency cores slow every spin barrier down to their pace.
