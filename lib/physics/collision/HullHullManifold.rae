@@ -1,0 +1,689 @@
+# The contact manifold of two hulls (b3CollideHulls and its contact
+# builders, Box3D's convex_manifold.c at 9f998c8): the separating axis test
+# picks a face or an edge pair, a face contact clips the incident face of
+# the other hull against the reference face, and the SAT cache lets the
+# next step try last step's feature first. Box3D's operation order is kept
+# exactly; checked bit for bit against the oracle in fixture 952.
+#
+# The manifold is in frame A, with B placed by `transformBtoA`.
+open Vec3
+open Quat
+open physics/Constants
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/QuatMath
+open physics/math/MatrixMath
+open physics/math/TransformMath
+open physics/math/SegmentMath
+open physics/math/PlaneMath
+open physics/geometry/Hull
+open physics/collision/Manifold
+open physics/collision/SeparatingAxis
+
+# b3BuildPolygon: face `incidentFace` of `hull`, placed by `transform`, as a
+# clip polygon with separations from `refPlane`.
+func buildPolygon(
+  out: mod List(ClipVertex)
+  transform: view Transform
+  hull: view Hull
+  incidentFace: view Int
+  refPlane: view Plane
+) {
+  out.clear()
+  let faceEdge: Int = hull.faces.copyAtDefault(index: incidentFace).edge
+  var edgeIndex: Int = faceEdge
+  let matrix: Matrix3 = matrixFromQuat(quat: transform.rotation)
+  loop true {
+    let edge: HullHalfEdge = hullEdge(hull: hull, index: edgeIndex)
+    let nextEdgeIndex: Int = edge.next
+    let next: HullHalfEdge = hullEdge(hull: hull, index: nextEdgeIndex)
+    let localPoint: Vec3 = hullPoint(hull: hull, index: next.origin)
+    let position: Vec3 = add(
+      left: multiply(matrix: matrix, vector: localPoint)
+      right: transform.position
+    )
+    out.add(value: ClipVertex {
+      position: position
+      separation: planeSeparation(plane: refPlane, point: position)
+      pair: makeFeaturePair(
+        owner1: featureShapeB
+        index1: edgeIndex
+        owner2: featureShapeB
+        index2: nextEdgeIndex
+      )
+    })
+    edgeIndex = nextEdgeIndex
+    if edgeIndex is faceEdge or out.length >= maxClipPoints {
+      break
+    }
+  }
+}
+
+# b3BuildFaceAContact: clip the incident face of B against the side planes
+# of the reference face `query.indexA` of A, keep the points in the
+# speculative region, reduce to four, and record the face in `cache`.
+func buildFaceAContact(
+  manifold: mod LocalManifold
+  hullA: view Hull
+  hullB: view Hull
+  transformBtoA: view Transform
+  query: view SeparatingAxis
+  cache: mod SatCache
+  lengthUnitsPerMeter: view Float
+) ret Bool {
+  # The reference face, and the incident face found from B's support vertex
+  let refFace: Int = query.indexA
+  let refPlane: Plane = hullPlane(hull: hullA, index: refFace)
+  let refNormalInB: Vec3 = inverseRotateVector(
+    quat: transformBtoA.rotation
+    vector: refPlane.normal
+  )
+  let incidentFace: Int = findIncidentFace(
+    hull: hullB
+    refNormal: refNormalInB
+    vertexIndex: query.indexB
+  )
+
+  # The incident face in frame A, clipped by each side plane in turn
+  var input: List(ClipVertex) = List.create(ClipVertex, cap: maxClipPoints)
+  var output: List(ClipVertex) = List.create(ClipVertex, cap: maxClipPoints)
+  buildPolygon(
+    out: input
+    transform: transformBtoA
+    hull: hullB
+    incidentFace: incidentFace
+    refPlane: refPlane
+  )
+  var pointCount: Int = input.length
+
+  let faceEdge: Int = hullA.faces.copyAtDefault(index: refFace).edge
+  var edgeIndex: Int = faceEdge
+  loop true {
+    let edge: HullHalfEdge = hullEdge(hull: hullA, index: edgeIndex)
+    let nextEdgeIndex: Int = edge.next
+    let next: HullHalfEdge = hullEdge(hull: hullA, index: nextEdgeIndex)
+    let vertex1: Vec3 = hullPoint(hull: hullA, index: edge.origin)
+    let vertex2: Vec3 = hullPoint(hull: hullA, index: next.origin)
+    let tangent: Vec3 = normalize(vector: subtract(left: vertex2, right: vertex1))
+    let binormal: Vec3 = cross(left: tangent, right: refPlane.normal)
+    let clipPlane: Plane = planeFromNormalAndPoint(normal: binormal, point: vertex1)
+    pointCount = clipPolygon(
+      out: output
+      polygon: input
+      clipPlane: clipPlane
+      edge: edgeIndex
+      refPlane: refPlane
+    )
+    let swapped: List(ClipVertex) = input
+    input = output
+    output = swapped
+    if pointCount < 3 {
+      cache = emptySatCache()
+      ret false
+    }
+    edgeIndex = nextEdgeIndex
+    if edgeIndex is faceEdge {
+      break
+    }
+  }
+  pointCount = minInt(left: pointCount, right: maxClipPoints)
+
+  let points: List(LocalManifoldPoint) = List.create(LocalManifoldPoint, cap: pointCount)
+  var minSeparation: Float = floatMax
+  manifold.normal = refPlane.normal
+  loop var i: Int = 0, i < pointCount, ++i {
+    let clipPoint: ClipVertex = input.copyAtDefault(index: i)
+    # The half-way point keeps points still when the reference face switches
+    # between A and B.
+    let point: Vec3 = mulSub(
+      base: clipPoint.position
+      scale: 0.5 * clipPoint.separation
+      vector: refPlane.normal
+    )
+    points.add(
+      value: LocalManifoldPoint {
+        point: point
+        separation: clipPoint.separation
+        pair: clipPoint.pair
+        triangleIndex: 0
+      }
+    )
+    minSeparation = minFloat(left: minSeparation, right: clipPoint.separation)
+  }
+
+  if minSeparation >= speculativeDistance(lengthUnitsPerMeter: lengthUnitsPerMeter) {
+    cache = emptySatCache()
+    ret false
+  }
+
+  reduceManifoldPoints(
+    manifold: manifold
+    points: points
+    count: pointCount
+    lengthUnitsPerMeter: lengthUnitsPerMeter
+  )
+
+  cache.separation = minSeparation
+  cache.kind = SeparatingFeature.faceAxisA
+  cache.indexA = query.indexA
+  cache.indexB = query.indexB
+  ret true
+}
+
+# b3BuildFaceBContact: the face contact with B's face as the reference, built
+# in B's frame with the roles swapped, then brought back to A's frame (the
+# normal flipped to point from A to B, the feature pairs flipped).
+func buildFaceBContact(
+  manifold: mod LocalManifold
+  hullA: view Hull
+  hullB: view Hull
+  transformBtoA: view Transform
+  query: view SeparatingAxis
+  cache: mod SatCache
+  lengthUnitsPerMeter: view Float
+) ret Bool {
+  let transformAtoB: Transform = invert(transform: transformBtoA)
+  let flippedQuery: SeparatingAxis = {
+    normal: negate(vector: query.normal)
+    separation: query.separation
+    indexA: query.indexB
+    indexB: query.indexA
+    kind: SeparatingFeature.faceAxisA
+  }
+  let touching: Bool = buildFaceAContact(
+    manifold: manifold
+    hullA: hullB
+    hullB: hullA
+    transformBtoA: transformAtoB
+    query: flippedQuery
+    cache: cache
+    lengthUnitsPerMeter: lengthUnitsPerMeter
+  )
+  if touching is false {
+    cache = emptySatCache()
+    ret false
+  }
+
+  # From frame B to frame A
+  let matrix: Matrix3 = matrixFromQuat(quat: transformBtoA.rotation)
+  manifold.normal = negate(vector: multiply(matrix: matrix, vector: manifold.normal))
+  loop var i: Int = 0, i < manifold.pointCount, ++i {
+    var point: LocalManifoldPoint = manifoldPoint(manifold: manifold, index: i)
+    point.point = add(
+      left: multiply(matrix: matrix, vector: point.point)
+      right: transformBtoA.position
+    )
+    point.pair = flipPair(pair: point.pair)
+    setManifoldPoint(manifold: manifold, index: i, point: point)
+  }
+
+  cache.kind = SeparatingFeature.faceAxisB
+  cache.indexA = query.indexA
+  cache.indexB = query.indexB
+  ret true
+}
+
+# b3BuildEdgeContact: one point between the edges `query.indexA` of A and
+# `query.indexB` of B, if their closest points are inside both.
+func buildEdgeContact(
+  manifold: mod LocalManifold
+  hullA: view Hull
+  hullB: view Hull
+  transformBtoA: view Transform
+  query: view SeparatingAxis
+  cache: mod SatCache
+) ret Bool {
+  let edgeA: HullHalfEdge = hullEdge(hull: hullA, index: query.indexA)
+  let twinA: HullHalfEdge = hullEdge(hull: hullA, index: edgeA.twin)
+  let startA: Vec3 = hullPoint(hull: hullA, index: edgeA.origin)
+  let endA: Vec3 = hullPoint(hull: hullA, index: twinA.origin)
+  let directionA: Vec3 = subtract(left: endA, right: startA)
+
+  let edgeB: HullHalfEdge = hullEdge(hull: hullB, index: query.indexB)
+  let twinB: HullHalfEdge = hullEdge(hull: hullB, index: edgeB.twin)
+  let startB: Vec3 = transformPoint(
+    transform: transformBtoA
+    point: hullPoint(hull: hullB, index: edgeB.origin)
+  )
+  let endB: Vec3 = transformPoint(
+    transform: transformBtoA
+    point: hullPoint(hull: hullB, index: twinB.origin)
+  )
+  let directionB: Vec3 = subtract(left: endB, right: startB)
+
+  let normal: Vec3 = query.normal
+  let result: SegmentDistanceResult = lineDistance(
+    point1: startA
+    direction1: directionA
+    point2: startB
+    direction2: directionB
+  )
+  if isWithinSegments(result: result) is false {
+    cache = emptySatCache()
+    ret false
+  }
+
+  # (A cached axis can slide off the end of an edge.)
+  let separation: Float = dot(
+    left: normal
+    right: subtract(left: result.point2, right: result.point1)
+  )
+  let point: Vec3 = scale(scale: 0.5, vector: add(left: result.point1, right: result.point2))
+  manifold.normal = normal
+  manifold.pointCount = 1
+  setManifoldPoint(
+    manifold: manifold
+    index: 0
+    point: LocalManifoldPoint {
+      point: point
+      separation: separation
+      pair: makeFeaturePair(
+        owner1: featureShapeA
+        index1: query.indexA
+        owner2: featureShapeB
+        index2: query.indexB
+      )
+      triangleIndex: 0
+    }
+  )
+
+  cache.separation = separation
+  cache.kind = SeparatingFeature.edgePairAxis
+  cache.indexA = query.indexA
+  cache.indexB = query.indexB
+  ret true
+}
+
+# Try last step's face of A. True when the cache settled the call.
+func tryCachedFaceA(
+  manifold: mod LocalManifold
+  hullA: view Hull
+  hullB: view Hull
+  transformBtoA: view Transform
+  cache: mod SatCache
+  lengthUnitsPerMeter: view Float
+) ret Bool {
+  let plane: Plane = hullPlane(hull: hullA, index: cache.indexA)
+  let searchDirectionInB: Vec3 = negate(
+    vector: inverseRotateVector(quat: transformBtoA.rotation, vector: plane.normal)
+  )
+  let vertexIndex: Int = findHullSupportVertex(hull: hullB, direction: searchDirectionInB)
+  let support: Vec3 = transformPoint(
+    transform: transformBtoA
+    point: hullPoint(hull: hullB, index: vertexIndex)
+  )
+  let separation: Float = planeSeparation(plane: plane, point: support)
+  if separation >= speculativeDistance(lengthUnitsPerMeter: lengthUnitsPerMeter) {
+    # Still separated
+    cache.hit = 1
+    ret true
+  }
+  # The face contact from the cached feature
+  let faceQuery: SeparatingAxis = {
+    normal: plane.normal
+    separation: 0.0
+    indexA: cache.indexA
+    indexB: vertexIndex
+    kind: SeparatingFeature.faceAxisA
+  }
+  var localCache: SatCache = emptySatCache()
+  let touching: Bool = buildFaceAContact(
+    manifold: manifold
+    hullA: hullA
+    hullB: hullB
+    transformBtoA: transformBtoA
+    query: faceQuery
+    cache: localCache
+    lengthUnitsPerMeter: lengthUnitsPerMeter
+  )
+  if touching and absFloat(value: cache.separation - localCache.separation) < linearSlop(
+    lengthUnitsPerMeter: lengthUnitsPerMeter
+  ) {
+    cache.hit = 1
+    ret true
+  }
+  ret false
+}
+
+# Try last step's face of B. True when the cache settled the call.
+func tryCachedFaceB(
+  manifold: mod LocalManifold
+  hullA: view Hull
+  hullB: view Hull
+  transformBtoA: view Transform
+  cache: mod SatCache
+  lengthUnitsPerMeter: view Float
+) ret Bool {
+  let plane: Plane = hullPlane(hull: hullB, index: cache.indexB)
+  let searchDirectionInA: Vec3 = negate(
+    vector: rotateVector(quat: transformBtoA.rotation, vector: plane.normal)
+  )
+  let vertexIndex: Int = findHullSupportVertex(hull: hullA, direction: searchDirectionInA)
+  let support: Vec3 = inverseTransformPoint(
+    transform: transformBtoA
+    point: hullPoint(hull: hullA, index: vertexIndex)
+  )
+  let separation: Float = planeSeparation(plane: plane, point: support)
+  if separation >= speculativeDistance(lengthUnitsPerMeter: lengthUnitsPerMeter) {
+    cache.hit = 1
+    ret true
+  }
+  let faceQuery: SeparatingAxis = {
+    normal: negate(vector: plane.normal)
+    separation: 0.0
+    indexA: vertexIndex
+    indexB: cache.indexB
+    kind: SeparatingFeature.faceAxisB
+  }
+  var localCache: SatCache = emptySatCache()
+  let touching: Bool = buildFaceBContact(
+    manifold: manifold
+    hullA: hullA
+    hullB: hullB
+    transformBtoA: transformBtoA
+    query: faceQuery
+    cache: localCache
+    lengthUnitsPerMeter: lengthUnitsPerMeter
+  )
+  if touching and absFloat(value: cache.separation - localCache.separation) < linearSlop(
+    lengthUnitsPerMeter: lengthUnitsPerMeter
+  ) {
+    cache.hit = 1
+    ret true
+  }
+  ret false
+}
+
+# Try last step's edge pair. True when the cache settled the call.
+func tryCachedEdgePair(
+  manifold: mod LocalManifold
+  hullA: view Hull
+  hullB: view Hull
+  transformBtoA: view Transform
+  cache: mod SatCache
+  lengthUnitsPerMeter: view Float
+) ret Bool {
+  let indexA: Int = cache.indexA
+  let edge1: HullHalfEdge = hullEdge(hull: hullA, index: indexA)
+  let twin1: HullHalfEdge = hullEdge(hull: hullA, index: indexA + 1)
+  let startA: Vec3 = hullPoint(hull: hullA, index: edge1.origin)
+  let endA: Vec3 = hullPoint(hull: hullA, index: twin1.origin)
+  let directionA: Vec3 = subtract(left: endA, right: startA)
+  let normalUA: Vec3 = hullPlane(hull: hullA, index: edge1.face).normal
+  let normalVA: Vec3 = hullPlane(hull: hullA, index: twin1.face).normal
+
+  let indexB: Int = cache.indexB
+  let edge2: HullHalfEdge = hullEdge(hull: hullB, index: indexB)
+  let twin2: HullHalfEdge = hullEdge(hull: hullB, index: indexB + 1)
+  let startB: Vec3 = transformPoint(
+    transform: transformBtoA
+    point: hullPoint(hull: hullB, index: edge2.origin)
+  )
+  let endB: Vec3 = transformPoint(
+    transform: transformBtoA
+    point: hullPoint(hull: hullB, index: twin2.origin)
+  )
+  let directionB: Vec3 = subtract(left: endB, right: startB)
+  let planeUB: Plane = hullPlane(hull: hullB, index: edge2.face)
+  let planeVB: Plane = hullPlane(hull: hullB, index: twin2.face)
+  let normalUB: Vec3 = rotateVector(quat: transformBtoA.rotation, vector: planeUB.normal)
+  let normalVB: Vec3 = rotateVector(quat: transformBtoA.rotation, vector: planeVB.normal)
+
+  # cross(v2, u2) == cross(-v2, -u2), so -e2 still works
+  let cba: Float = dot(left: normalUB, right: directionA)
+  let dba: Float = dot(left: normalVB, right: directionA)
+  let adc: Float = -dot(left: normalUA, right: directionB)
+  let bdc: Float = -dot(left: normalVA, right: directionB)
+  if cba * dba < 0.0 and adc * bdc < 0.0 and cba * bdc > 0.0 {
+    # Skip nearly parallel edges (noise-floor separations)
+    let squaredTolerance: Float = parallelEdgeTolerance * parallelEdgeTolerance
+    if maxFloat(left: cba * cba, right: dba * dba) >= squaredTolerance * lengthSquared(
+      vector: directionA
+    ) {
+      let fraction: Float = cba / (cba - dba)
+      var axis: Vec3 = lerp(from: normalUB, to: normalVB, alpha: fraction)
+      axis = normalize(vector: axis)
+      let separation: Float = dot(left: axis, right: subtract(left: endA, right: endB))
+      if separation > speculativeDistance(lengthUnitsPerMeter: lengthUnitsPerMeter) {
+        cache.hit = 1
+        ret true
+      }
+      # Rebuild the contact from last step's features
+      let edgeQuery: SeparatingAxis = {
+        normal: negate(vector: axis)
+        separation: 0.0
+        indexA: cache.indexA
+        indexB: cache.indexB
+        kind: SeparatingFeature.edgePairAxis
+      }
+      var localCache: SatCache = emptySatCache()
+      let touching: Bool = buildEdgeContact(
+        manifold: manifold
+        hullA: hullA
+        hullB: hullB
+        transformBtoA: transformBtoA
+        query: edgeQuery
+        cache: localCache
+      )
+      # This tolerance may matter a lot for performance in some benchmarks.
+      if touching and absFloat(value: cache.separation - localCache.separation) < linearSlop(
+        lengthUnitsPerMeter: lengthUnitsPerMeter
+      ) {
+        cache.hit = 1
+        ret true
+      }
+    }
+  }
+  ret false
+}
+
+# b3CollideHulls: up to four contact points between two hulls (a manifold
+# with fewer than four slots gets none). `cache` carries the separating
+# feature from step to step; `cache.hit` says whether it was reused.
+func collideHulls(
+  manifold: mod LocalManifold
+  hullA: view Hull
+  hullB: view Hull
+  transformBtoA: view Transform
+  cache: mod SatCache
+  lengthUnitsPerMeter: view Float
+) {
+  manifold.pointCount = 0
+  if manifoldCapacity(manifold: manifold) < 4 {
+    ret
+  }
+  let slop: Float = linearSlop(lengthUnitsPerMeter: lengthUnitsPerMeter)
+  cache.hit = 0
+
+  # Last step's feature first
+  match cache.kind {
+    case SeparatingFeature.invalidAxis {
+    }
+    case SeparatingFeature.backsideAxis {
+    }
+    case SeparatingFeature.closestPointsAxis {
+    }
+    case SeparatingFeature.faceAxisA {
+      if tryCachedFaceA(
+        manifold: manifold
+        hullA: hullA
+        hullB: hullB
+        transformBtoA: transformBtoA
+        cache: cache
+        lengthUnitsPerMeter: lengthUnitsPerMeter
+      ) {
+        ret
+      }
+    }
+    case SeparatingFeature.faceAxisB {
+      if tryCachedFaceB(
+        manifold: manifold
+        hullA: hullA
+        hullB: hullB
+        transformBtoA: transformBtoA
+        cache: cache
+        lengthUnitsPerMeter: lengthUnitsPerMeter
+      ) {
+        ret
+      }
+    }
+    case SeparatingFeature.edgePairAxis {
+      if tryCachedEdgePair(
+        manifold: manifold
+        hullA: hullA
+        hullB: hullB
+        transformBtoA: transformBtoA
+        cache: cache
+        lengthUnitsPerMeter: lengthUnitsPerMeter
+      ) {
+        ret
+      }
+    }
+    # The manual kinds force one feature, for testing.
+    case SeparatingFeature.manualFaceAxisA {
+      let query: AxisQuery = computeSeparatingAxis(
+        hullA: hullA
+        hullB: hullB
+        transformB: transformBtoA
+        earlyReturn: false
+        lengthUnitsPerMeter: lengthUnitsPerMeter
+      )
+      buildFaceAContact(
+        manifold: manifold
+        hullA: hullA
+        hullB: hullB
+        transformBtoA: transformBtoA
+        query: query.faceA
+        cache: cache
+        lengthUnitsPerMeter: lengthUnitsPerMeter
+      )
+      ret
+    }
+    case SeparatingFeature.manualFaceAxisB {
+      let query: AxisQuery = computeSeparatingAxis(
+        hullA: hullA
+        hullB: hullB
+        transformB: transformBtoA
+        earlyReturn: false
+        lengthUnitsPerMeter: lengthUnitsPerMeter
+      )
+      buildFaceBContact(
+        manifold: manifold
+        hullA: hullA
+        hullB: hullB
+        transformBtoA: transformBtoA
+        query: query.faceB
+        cache: cache
+        lengthUnitsPerMeter: lengthUnitsPerMeter
+      )
+      ret
+    }
+    case SeparatingFeature.manualEdgePairAxis {
+      let query: AxisQuery = computeSeparatingAxis(
+        hullA: hullA
+        hullB: hullB
+        transformB: transformBtoA
+        earlyReturn: false
+        lengthUnitsPerMeter: lengthUnitsPerMeter
+      )
+      if query.edge.indexA is not -1 {
+        buildEdgeContact(
+          manifold: manifold
+          hullA: hullA
+          hullB: hullB
+          transformBtoA: transformBtoA
+          query: query.edge
+          cache: cache
+        )
+      }
+      ret
+    }
+  }
+
+  manifold.pointCount = 0
+  cache = emptySatCache()
+
+  let axisQuery: AxisQuery = computeSeparatingAxis(
+    hullA: hullA
+    hullB: hullB
+    transformB: transformBtoA
+    earlyReturn: true
+    lengthUnitsPerMeter: lengthUnitsPerMeter
+  )
+
+  if axisQuery.separatedFeature is not SeparatingFeature.invalidAxis {
+    # A separating axis: remember it
+    cache.kind = axisQuery.separatedFeature
+    var separating: SeparatingAxis = axisQuery.edge
+    if axisQuery.separatedFeature is SeparatingFeature.faceAxisA {
+      separating = axisQuery.faceA
+    } else if axisQuery.separatedFeature is SeparatingFeature.faceAxisB {
+      separating = axisQuery.faceB
+    }
+    cache.separation = separating.separation
+    cache.indexA = separating.indexA
+    cache.indexB = separating.indexB
+    ret
+  }
+
+  if axisQuery.faceA.separation > axisQuery.faceB.separation {
+    buildFaceAContact(
+      manifold: manifold
+      hullA: hullA
+      hullB: hullB
+      transformBtoA: transformBtoA
+      query: axisQuery.faceA
+      cache: cache
+      lengthUnitsPerMeter: lengthUnitsPerMeter
+    )
+  } else {
+    buildFaceBContact(
+      manifold: manifold
+      hullA: hullA
+      hullB: hullB
+      transformBtoA: transformBtoA
+      query: axisQuery.faceB
+      cache: cache
+      lengthUnitsPerMeter: lengthUnitsPerMeter
+    )
+  }
+
+  let edgeQuery: SeparatingAxis = axisQuery.edge
+  if edgeQuery.indexA is -1 {
+    # No valid edge pairs (all edges parallel)
+    ret
+  }
+
+  let faceSeparationValue: Float = maxFloat(
+    left: axisQuery.faceA.separation
+    right: axisQuery.faceB.separation
+  )
+  let clipSeparation: Float = cache.separation
+  # The face contact can be empty when it is not the axis of maximum
+  # separation, or in narrow speculative cases; an edge contact then, or
+  # when the edge is clearly better.
+  if (manifold.pointCount is 0 and edgeQuery.separation > faceSeparationValue) or edgeQuery.separation > clipSeparation + slop {
+    var edgeManifold: LocalManifold = createLocalManifold(capacity: 1)
+    var edgeCache: SatCache = emptySatCache()
+    buildEdgeContact(
+      manifold: edgeManifold
+      hullA: hullA
+      hullB: hullB
+      transformBtoA: transformBtoA
+      query: edgeQuery
+      cache: edgeCache
+    )
+    # A vertex-vertex touch missed by SAT gives no edge point; the face
+    # contact may still have some.
+    if edgeManifold.pointCount is 1 {
+      manifold.normal = edgeManifold.normal
+      manifold.pointCount = 1
+      setManifoldPoint(
+        manifold: manifold
+        index: 0
+        point: manifoldPoint(manifold: edgeManifold, index: 0)
+      )
+      cache = edgeCache
+    }
+  }
+}
