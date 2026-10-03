@@ -295,7 +295,14 @@ static void rae_pcheck_new_launch(void) {
 #endif
 
 #define RAE_POOL_MAX 64
-#define RAE_POOL_SPIN 20000   /* relax iterations before sleeping (~tens of microseconds) */
+/* How long a worker spins after a job before it sleeps. A solver step runs a
+ * few hundred parallelLoops a few microseconds apart, and a worker that fell
+ * asleep between two of them costs a condition-variable wake-up (~5-15 us)
+ * on the next one — while its range of chunks waits to be stolen. 250 us of
+ * spinning covers the gaps of a step and costs an idle program nothing
+ * measurable: it happens once, after the last job. Measured in time, because
+ * a CPU relax instruction takes anywhere from one cycle to tens of them. */
+#define RAE_POOL_SPIN_NS 250000
 
 static struct {
   pthread_mutex_t lock;            /* guards sleeping workers and start-up */
@@ -304,7 +311,7 @@ static struct {
   int thread_count;                /* workers besides the launching thread */
   int started;
   _Atomic uint32_t generation;     /* bumped once per job */
-  _Atomic uint64_t claim;          /* (generation << 32) | next chunk index */
+  _Atomic int job_workers;         /* workers taking part (thread_count + 1) */
   _Atomic int64_t chunk_count;
   _Atomic int64_t chunks_done;
   _Atomic int sleeping;
@@ -317,6 +324,23 @@ static struct {
 } g_pool = { .lock = PTHREAD_MUTEX_INITIALIZER, .wake = PTHREAD_COND_INITIALIZER };
 
 static pthread_mutex_t g_pool_launch = PTHREAD_MUTEX_INITIALIZER;   /* one job at a time */
+
+/* Each worker owns a contiguous range of the job's chunks and its own claim
+ * word, (generation << 32) | next chunk index, on its own cache line (128
+ * bytes covers Apple's). A worker drains its range first, then steals from
+ * the others' — Box3D's solver does the same — so in the common case no two
+ * workers ever touch one cache line, where a single shared claim word made
+ * every claim a contended compare-exchange (4.7 us per launch at 8 workers,
+ * benchmarks/parallel_stages). */
+typedef struct {
+  _Atomic uint64_t claim;
+  char pad[128 - sizeof(uint64_t)];
+} RaePoolSlot;
+static RaePoolSlot g_pool_slots[RAE_POOL_MAX] __attribute__((aligned(128)));
+
+static inline int64_t rae_pool_range_start(int worker, int64_t chunk_count, int workers) {
+  return (int64_t)worker * chunk_count / workers;
+}
 
 static int rae_pool_default_workers(void) {
   const char* env = getenv("RAE_WORKERS");
@@ -336,23 +360,43 @@ static int rae_pool_default_workers(void) {
   return n > RAE_POOL_MAX ? RAE_POOL_MAX : n;
 }
 
-/* Run chunks of job `generation` until none is left (or a new job started). */
-static void rae_pool_run_chunks(uint32_t generation) {
+/* Claim and run chunks of job `generation` from one worker's range until it
+ * is empty (or a new job started); returns how many it ran. */
+static int64_t rae_pool_drain_slot(uint32_t generation, int slot, int64_t chunk_count, int workers) {
+  int64_t ran = 0;
+  int64_t end = rae_pool_range_start(slot + 1, chunk_count, workers);
   for (;;) {
-    uint64_t claim = atomic_load_explicit(&g_pool.claim, memory_order_acquire);
-    if ((uint32_t)(claim >> 32) != generation) return;
+    uint64_t claim = atomic_load_explicit(&g_pool_slots[slot].claim, memory_order_acquire);
+    if ((uint32_t)(claim >> 32) != generation) return ran;
     int64_t index = (int64_t)(uint32_t)claim;
-    if (index >= atomic_load_explicit(&g_pool.chunk_count, memory_order_relaxed)) return;
-    if (!atomic_compare_exchange_weak_explicit(&g_pool.claim, &claim, claim + 1,
+    if (index >= end) return ran;
+    if (!atomic_compare_exchange_weak_explicit(&g_pool_slots[slot].claim, &claim, claim + 1,
                                                memory_order_acq_rel, memory_order_relaxed)) continue;
     /* This chunk is ours, so the job cannot finish (nor its fields change)
-     * until it is counted done below. */
+     * until it is counted done. */
     int64_t first = g_pool.start + index * g_pool.chunk;
     int64_t last = first + g_pool.chunk;
     if (last > g_pool.end) last = g_pool.end;
     g_pool.body(g_pool.captures, first, last);
-    atomic_fetch_add_explicit(&g_pool.chunks_done, 1, memory_order_release);
+    ran++;
   }
+}
+
+/* Run chunks of job `generation`: this worker's own range, then steal from
+ * the others in order. Counts what it ran once, at the end. */
+static void rae_pool_run_chunks(uint32_t generation, int self) {
+  int64_t chunk_count = atomic_load_explicit(&g_pool.chunk_count, memory_order_relaxed);
+  int workers = atomic_load_explicit(&g_pool.job_workers, memory_order_relaxed);
+  if (workers < 1 || self >= workers) return;
+  int64_t ran = 0;
+  for (int k = 0; k < workers; k++) ran += rae_pool_drain_slot(generation, (self + k) % workers, chunk_count, workers);
+  if (ran) atomic_fetch_add_explicit(&g_pool.chunks_done, ran, memory_order_release);
+}
+
+static int64_t rae_pool_now_ns(void) {
+  struct timespec now;
+  clock_gettime(CLOCK_MONOTONIC, &now);
+  return (int64_t)now.tv_sec * 1000000000LL + now.tv_nsec;
 }
 
 static void* rae_pool_worker(void* arg) {
@@ -362,9 +406,11 @@ static void* rae_pool_worker(void* arg) {
   for (;;) {
     uint32_t generation;
     int spins = 0;
+    int64_t spin_until = rae_pool_now_ns() + RAE_POOL_SPIN_NS;
     while ((generation = atomic_load(&g_pool.generation)) == seen) {
       if (atomic_load(&g_pool.shutdown)) return NULL;
-      if (++spins < RAE_POOL_SPIN) { rae_cpu_relax(); continue; }
+      /* Read the clock only every 256 relaxes: it costs more than one. */
+      if ((++spins & 255) != 0 || rae_pool_now_ns() < spin_until) { rae_cpu_relax(); continue; }
       pthread_mutex_lock(&g_pool.lock);
       atomic_fetch_add(&g_pool.sleeping, 1);
       while (atomic_load(&g_pool.generation) == seen && !atomic_load(&g_pool.shutdown))
@@ -372,9 +418,10 @@ static void* rae_pool_worker(void* arg) {
       atomic_fetch_sub(&g_pool.sleeping, 1);
       pthread_mutex_unlock(&g_pool.lock);
       spins = 0;
+      spin_until = rae_pool_now_ns() + RAE_POOL_SPIN_NS;
     }
     seen = generation;
-    rae_pool_run_chunks(generation);
+    rae_pool_run_chunks(generation, g_pool_worker_index);
   }
 }
 
@@ -388,8 +435,13 @@ static void rae_pool_shutdown(void) {
   g_pool.thread_count = 0;
 }
 
-/* Start the pool once; returns the number of workers including the caller. */
+static _Atomic int g_pool_ready_count = 0;   /* workers incl. the caller, once started */
+
+/* Start the pool once; returns the number of workers including the caller.
+ * Every launch asks, so after the first the answer is one atomic load. */
 static int rae_pool_start(void) {
+  int ready = atomic_load_explicit(&g_pool_ready_count, memory_order_acquire);
+  if (ready) return ready;
   pthread_mutex_lock(&g_pool.lock);
   if (!g_pool.started) {
     g_pool.started = 1;
@@ -402,6 +454,7 @@ static int rae_pool_start(void) {
     atexit(rae_pool_shutdown);
   }
   int count = g_pool.thread_count + 1;
+  atomic_store_explicit(&g_pool_ready_count, count, memory_order_release);
   pthread_mutex_unlock(&g_pool.lock);
   return count;
 }
@@ -428,10 +481,22 @@ void rae_parallel_for(int64_t start, int64_t end, RaeParallelBody body, void* ca
   int64_t chunk = (total + target_chunks - 1) / target_chunks;
   if (chunk < 1) chunk = 1;
   int64_t chunk_count = (total + chunk - 1) / chunk;
+  if (chunk_count <= 1) {
+    /* One chunk: run it here; publishing would only add the join. */
+    pthread_mutex_unlock(&g_pool_launch);
+    g_pool_inside = 1;
+    body(captures, start, end);
+    g_pool_inside = 0;
+    return;
+  }
   uint32_t generation = atomic_load(&g_pool.generation) + 1;
-  /* Reset the claim word first: a worker still holding the old generation
+  /* Reset the claim words first: a worker still holding the old generation
    * now fails every compare-exchange, so it cannot see the new fields. */
-  atomic_store(&g_pool.claim, (uint64_t)generation << 32);
+  for (int w = 0; w < workers; w++)
+    atomic_store_explicit(&g_pool_slots[w].claim,
+                          ((uint64_t)generation << 32) | (uint64_t)rae_pool_range_start(w, chunk_count, workers),
+                          memory_order_relaxed);
+  atomic_store_explicit(&g_pool.job_workers, workers, memory_order_relaxed);
   g_pool.body = body;
   g_pool.captures = captures;
   g_pool.start = start;
@@ -446,11 +511,11 @@ void rae_parallel_for(int64_t start, int64_t end, RaeParallelBody body, void* ca
     pthread_mutex_unlock(&g_pool.lock);
   }
   g_pool_inside = 1;
-  rae_pool_run_chunks(generation);
+  rae_pool_run_chunks(generation, 0);
   g_pool_inside = 0;
   int spins = 0;
   while (atomic_load_explicit(&g_pool.chunks_done, memory_order_acquire) < chunk_count) {
-    if (++spins < RAE_POOL_SPIN) rae_cpu_relax();
+    if (++spins < (1 << 16)) rae_cpu_relax();
     else sched_yield();
   }
   pthread_mutex_unlock(&g_pool_launch);
