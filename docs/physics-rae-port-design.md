@@ -256,6 +256,14 @@ C added.
   `b3UnwindAngle` calls). Name mapping: `lib/physics/README.md`.
 - **P2 — convex geometry and narrow phase.** AABB, sphere, capsule, hull
   (quickhull), GJK distance and shape cast, manifolds for convex pairs.
+  **Landed 2026-10-03, bit-exact:** the AABB ray cast, spheres, capsules,
+  GJK distance (warm-started), the shape cast, sweeps and time of impact
+  (`lib/physics/geometry/`, `collision/Simplex|Distance|ShapeCast|TimeOfImpact`,
+  golden `geometry`, fixture 949); feature pairs, polygon and segment
+  clipping, the four-point reduction and the sphere/capsule pair manifolds
+  (`collision/Manifold|ConvexManifold`, golden `manifold`, fixture 950).
+  **Still to do** (queue): the hull (`hull.c`, quickhull) and the hull
+  manifolds with SAT plus the exhaustive shape-pair `match`.
 - **P3 — broad phase.** Dynamic tree (insert, remove, rebuild, queries,
   ray casts) and pair finding.
 - **P4 — the first world.** Bodies, shapes, contacts, solver sets, islands and
