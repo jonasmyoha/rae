@@ -11,3 +11,16 @@ func workerCount() ret Int {
     ret nativeWorkerCount()
   }
 }
+
+func nativeCheckWrites(enabled: Bool) unsafe extern("rae_ext_Parallel_checkWrites")
+
+# Check, while the program runs, that the writes an `unsafe { }` block makes
+# in a parallelLoop body are disjoint: two iterations of one parallelLoop
+# writing the same List element stop the program with both iteration numbers.
+# The same as running with RAE_PARALLEL_CHECK=1 (docs/parallel-stages-
+# design.md §3). Costs a table insert per such write; for tests.
+func checkWrites(enabled: view Bool) {
+  unsafe {
+    nativeCheckWrites(enabled: enabled)
+  }
+}
