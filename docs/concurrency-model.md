@@ -259,9 +259,8 @@ Everything below is the Compiled (C) backend; there is no other engine.
 `Task(T)` for a callee returning `T`; `Task(T)` is a builtin generic
 (`TYPE_TASK`) with one method, `get(): T`. `taskScope { … }` parses to a
 run-once `if` block flagged `is_task_scope` (`parser.c`); `parallelLoop`
-parses to a `loop` flagged `is_parallel`. Both flags are carried, formatted
-(`rae format`, fixture 813) and otherwise ignored by codegen — `taskScope`
-gets its semantics from join-on-drop, `parallelLoop` runs as a plain loop.
+parses to a `loop` flagged `is_parallel`. `taskScope` gets its semantics from
+join-on-drop; `parallelLoop` runs on the worker pool (below, 2026-10-03).
 
 **Runtime (`compiler/runtime/runtime_threads.c`, `rae_runtime.h`).**
 `Task(T)` lowers to `RaeTask*`: `{ pthread_t thread; void* result; int done;
@@ -311,8 +310,9 @@ its artwork workers post `ArtworkResult { serial, ok }` on a
 UI's `waitEvents` returns at once.
 
 **Not implemented:** `detach` (a fire-and-forget worker; today a persistent
-worker takes a stop channel and is joined at teardown), a truly parallel
-`parallelLoop` with disjointness checking, atomics, task failure status /
+worker takes a stop channel and is joined at teardown), per-worker scratch
+and the guaranteed-concurrent mode of `parallelLoop` (proposal below),
+atomics, task failure status /
 propagation, `taskScope` cancel-on-error / non-escape enforcement, and
 threading the `mod`/`view`-aggregate shapes (they are correctly sequential).
 The staged plan for the rest is `docs/parallelism-first-plan.md` (and, for
@@ -349,6 +349,89 @@ case of every full suite run) builds every threaded fixture — 511, 512, 513,
 ThreadSanitizer report. Against the runtime before this audit it reports 23
 races in 512 and 58 in 848, all in the counters and the stats table.
 
+### `parallelLoop` on the worker pool (2026-10-03)
+
+**The form.** `parallelLoop var i: Int = start, i < end, ++i { body }` — the
+counted loop (`i++` too). Any other shape (a condition loop, a collection or
+query loop) is a compile error naming this form: the runtime needs the range
+up front to cut it into chunks. `start` and `end` are evaluated once.
+
+**What an iteration may write** (§2b, checked in sema,
+`sema_check_parallel_loop`): its own locals, and the element of its own index
+in a shared List — `xs.set(index: i, value: v)`, `if let x: mod T =>
+xs.modAt(index: i)`, `xs[i] = v`. It may read anything in scope. The compiler
+rejects every other write two iterations could make to one place: assigning a
+shared variable or field, `++` on one, a call that takes a shared value as
+`mod` or `own` (including growing a shared List with `add`), a `mod` alias of
+a shared place, writing an element at any other index — and every way out of
+the outlined body (`ret`, a `break`/`continue` of the parallel loop itself).
+Fixture 945 shows each diagnostic. A nested `parallelLoop` follows the same
+rule with ITS index: a List local to the outer iteration is shared by the
+inner one (fixture 944).
+
+**The lowering** (`c_stmt.c emit_parallel_loop`). The body is outlined into
+a C function that runs iterations [first, end); the loop becomes one
+`rae_parallel_for(start, end, function, captures)` call, `captures` being the
+addresses of the enclosing locals the body names. The function re-declares
+each captured local under its own name and C type, so the body's C is exactly
+what it would be inline; it owns nothing, so nothing is dropped twice. Each
+call has its own String-pool mark (the pool is per thread).
+
+**The pool** (`runtime_threads.c`). Workers = performance cores
+(`hw.perflevel0.physicalcpu` on macOS, 8 on the M1 Max; efficiency cores would
+pace every join), the launching thread being one of them, started on the
+first parallelLoop, joined at exit. `RAE_WORKERS=n` sets the count;
+`RAE_WORKERS=1` runs every parallelLoop sequentially. One job at a time: the
+range is cut into about four chunks per worker, claimed through one atomic
+word that packs the job's generation with the next chunk index (a worker late
+from the previous job cannot claim a chunk of the next). After a job the
+workers spin for some tens of microseconds, then sleep on a condition
+variable — an idle program costs nothing (measured: 0.0% CPU, 8 threads
+asleep). A parallelLoop inside a parallel body, or one started while another
+thread's job runs, runs inline on its caller.
+
+**Determinism.** The results are those of the sequential loop for any worker
+count: no iteration can see another's writes. Fixture 944 (a million-element
+transform, per-chunk partial sums combined in chunk order, structs updated in
+place, Strings built per element, a nested loop) prints the same bytes at 1,
+2, 4 and 8 workers, leaks nothing, and runs clean under ThreadSanitizer (it is
+on the gate's list).
+
+**Measured** (`benchmarks/parallel_loop/run.sh`, M1 Max, load ~6 from other
+work, release build):
+
+| workers | launch, back to back | launch after 2 ms idle | compute kernel | speedup |
+|---|---|---|---|---|
+| 1 | 0.01 us | 0.65 us | 135 ms | 1.00x |
+| 2 | 0.27 us | 4.7 us | 68 ms | 1.98x |
+| 4 | 0.62 us | 7.8 us | 35 ms | 3.82x |
+| 8 | 3.9 us | 15.9 us | 22.6 ms | 5.96x |
+
+The compute kernel is 1 000 000 elements of 64 multiply-adds; its checksum is
+identical at every worker count. A launch is microseconds, as the physics step
+needs (~10 parallel-for launches outside the solver, `docs/physics-performance-
+plan.md` §5).
+
+**Proposed, not implemented — per-worker scratch and the concurrent mode.**
+Two things the physics solver needs are new surface, so they wait for the
+maintainer:
+
+- *Per-worker scratch.* Box3D gives each worker its own bitsets, pair-key
+  arrays and event lists, merged after the parallel section. Proposal: a
+  library function `Parallel.workerIndex()` (0 to `Parallel.workerCount() - 1`,
+  0 outside a parallel body), and one more write the checker allows: the slot
+  of the worker index in a shared List — `scratch.set(index:
+  Parallel.workerIndex(), ...)` / `scratch.modAt(index:
+  Parallel.workerIndex())`. The catch: WHICH iterations a worker runs depends on
+  scheduling, so the merge must not depend on order (OR-ing bitsets, summing
+  integers, sorting afterwards — what Box3D does) or the result changes run to
+  run. Where order matters, per-chunk partials over a chunk-index loop — the
+  pattern fixture 944 already uses — are deterministic with no new surface.
+- *The guaranteed-concurrent mode* (every worker running one iteration at
+  once, which spin barriers need): a library function cannot take a body
+  (Rae has no function values), so this is a construct, and it belongs to the
+  atomics-and-stages design (`docs/physics-performance-plan.md` §5 item 3).
+
 ---
 
 ## 6. Execution engine
@@ -359,16 +442,18 @@ removed in #957 — with it went the "Live runs sequentially first" staging and
 the Live↔Compiled observable-equivalence suite. What the design asked of the
 compiled engine, and where it stands:
 
-- Real OS threads over pthreads — **done** for the threadable shapes (§5);
-  there is no thread pool, one thread per task.
+- Real OS threads over pthreads — **done** for the threadable shapes (§5),
+  one thread per spawned task; a persistent worker pool runs `parallelLoop`
+  (§5).
 - `Task(T)` = heap struct with typed result slot — **done**; status
   (running/completed/failed) and a condition variable — **not yet** (join is
   `pthread_join`).
 - `Channel(T)` = mutex-guarded queue — **done** as MPSC over any value type
   (#969); the MPMC + condvar (blocking receive) form is **not yet**.
 - Atomics via C11 `<stdatomic.h>` — **not yet**.
-- `parallelLoop` = genuine parallel execution over disjoint shards — **not
-  yet** (sequential).
+- `parallelLoop` = genuine parallel execution over disjoint shards — **done**
+  (2026-10-03, §5): the worker pool, the counted form, the write rule checked
+  at compile time. Per-worker scratch and the concurrent mode are proposals.
 
 Scripting / hot-reload roles the VM once nominally filled are reassigned to
 native-hosted WASM modules (`docs/raepack-v2-and-packages.md`); a WASM thread

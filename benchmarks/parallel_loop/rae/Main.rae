@@ -1,0 +1,71 @@
+# benchmarks/parallel_loop: what a parallelLoop costs and what it buys
+# (docs/concurrency-model.md §5). Run by run.sh at several RAE_WORKERS values.
+#
+#   launch   — a parallelLoop with one trivial iteration per worker, started
+#              20 000 times back to back: the cost of one launch and join.
+#   cold     — the same launch after 2 ms idle, when the workers sleep.
+#   compute  — a pure-compute kernel, 1 000 000 elements of 64 multiply-adds
+#              each, as one parallelLoop: the speedup over one worker.
+import Parallel
+
+func kernel(seed: view Int) ret Float {
+  var x: Float = (seed % 1000) as Float * 0.001
+  loop var k: Int = 0, k < 64, ++k {
+    x = x * 0.999 + 0.25
+  }
+  ret x
+}
+
+func main() {
+  let workers: Int = Parallel.workerCount()
+  let marks: List(Int) = List.create(Int, cap: 64)
+  loop var i: Int = 0, i < 64, ++i {
+    marks.add(value: 0)
+  }
+  let launches: Int = 20000
+  let launchStart: Int = nowNs()
+  loop var round: Int = 0, round < launches, ++round {
+    parallelLoop var i: Int = 0, i < workers, ++i {
+      marks.set(index: i, value: round)
+    }
+  }
+  let launchNs: Int = (nowNs() - launchStart) / launches
+  log("RESULT,launch,{workers},{launchNs}")
+
+  # The same launch after the pool went to sleep (2 ms idle between
+  # launches): the cost a once-per-frame loop pays — a condition-variable
+  # wake-up instead of a spin.
+  let coldLaunches: Int = 200
+  var coldTotal: Int = 0
+  loop var round: Int = 0, round < coldLaunches, ++round {
+    sleep(ms: 2)
+    let start: Int = nowNs()
+    parallelLoop var i: Int = 0, i < workers, ++i {
+      marks.set(index: i, value: round)
+    }
+    coldTotal = coldTotal + (nowNs() - start)
+  }
+  log("RESULT,cold,{workers},{coldTotal / coldLaunches}")
+
+  let count: Int = 1000000
+  let out: List(Float) = List.create(Float, cap: count)
+  loop var i: Int = 0, i < count, ++i {
+    out.add(value: 0.0)
+  }
+  var best: Int = 0
+  loop var run: Int = 0, run < 5, ++run {
+    let start: Int = nowNs()
+    parallelLoop var i: Int = 0, i < count, ++i {
+      out.set(index: i, value: kernel(seed: i))
+    }
+    let elapsed: Int = nowNs() - start
+    if run is 0 or elapsed < best {
+      best = elapsed
+    }
+  }
+  var checksum: Float = 0.0
+  loop var i: Int = 0, i < count / 4096, ++i {
+    checksum = checksum + out.copyAtDefault(index: i * 4096)
+  }
+  log("RESULT,compute,{workers},{best},{(checksum * 1000.0).toInt()}")
+}

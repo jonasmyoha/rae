@@ -133,7 +133,10 @@ code the compiler outlines, as `parallelLoop`'s body is.
 1. **A thread-safe runtime and a TSan gate.** The `g_mem_*` counters and any
    other mutable static reachable from Rae code; a `make tsan` case. Small;
    blocks everything below.
-2. **A persistent worker pool, with `parallelLoop` on it.**
+2. **A persistent worker pool, with `parallelLoop` on it.** *(Landed
+   2026-10-03 except per-worker scratch and the concurrent mode, which await
+   the maintainer: `docs/concurrency-model.md` §5. Launch 0.3-3.9 us back to
+   back, 5-16 us from sleep; 3.8x at 4 workers, 6x at 8 on a compute kernel.)*
    - Workers = performance cores (`hw.perflevel0.physicalcpu` on macOS, 8
      here); the efficiency cores slow every spin barrier down to their pace.
      The calling thread participates.

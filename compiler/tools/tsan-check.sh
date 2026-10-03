@@ -25,9 +25,10 @@ TMP="$(mktemp -d -t rae_tsan_XXXXXX)"
 trap 'rm -rf "$TMP"' EXIT
 
 # Every fixture that starts a thread: spawn'd workers (one pthread each),
-# Channel producers, the file-notification thread.
+# Channel producers, the file-notification thread, the parallelLoop worker pool.
 CASES="511_spawn_raytracer_bands 512_spawn_string_workers 513_spawn_own_list_copy \
-541_channel_worker 646_list_of_tasks 848_channel_struct_payload 941_file_notify"
+541_channel_worker 646_list_of_tasks 848_channel_struct_payload 941_file_notify \
+944_parallel_loop_results"
 if [ -n "${RAE_TSAN_FILTER:-}" ]; then CASES="$RAE_TSAN_FILTER"; fi
 
 # The toolchain probe: a compiler without the TSan runtime cannot run this gate.
@@ -74,9 +75,12 @@ for name in $CASES; do
     echo "FAIL: tsan $name (exit $rc)"; tail -5 "$work/stderr" | sed 's/^/    /'
     failed=$((failed + 1)); continue
   fi
-  if [ -f "$dir/expected.txt" ] && ! diff -q <(grep -v '^@@RAE_' "$work/stdout") "$dir/expected.txt" >/dev/null; then
+  # Trailing blank lines differ between `rae run` (what expected.txt holds)
+  # and the bare binary; nothing else may.
+  trim() { grep -v '^@@RAE_' "$1" | perl -0pe 's/\n+\z/\n/'; }
+  if [ -f "$dir/expected.txt" ] && ! diff -q <(trim "$work/stdout") <(trim "$dir/expected.txt") >/dev/null; then
     echo "FAIL: tsan $name (output differs from expected.txt)"
-    diff <(grep -v '^@@RAE_' "$work/stdout") "$dir/expected.txt" | head -10 | sed 's/^/    /'
+    diff <(trim "$work/stdout") <(trim "$dir/expected.txt") | head -10 | sed 's/^/    /'
     failed=$((failed + 1)); continue
   fi
   passed=$((passed + 1))

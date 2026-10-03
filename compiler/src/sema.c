@@ -3733,6 +3733,368 @@ AstBlock* reflect_instantiate_body(CompilerContext* ctx, const AstModule* module
     return cloned;
 }
 
+// ===== parallelLoop: the shape it lowers from, and what an iteration may write
+//
+// docs/concurrency-model.md §2b: a parallelLoop's iterations run at the same
+// time on the worker pool (runtime_threads.c rae_parallel_for), so each may
+// READ anything in scope but WRITE only what no other iteration touches: its
+// own locals, and the element of its own index in a shared List
+// (`xs.set(index: i, value: v)`, `if let x: mod T => xs.modAt(index: i)`).
+// Anything else — assigning a shared variable or field, growing a shared List,
+// passing a shared value to a `mod` or `own` parameter, aliasing a shared
+// field as `mod` — would be a data race, so it is a compile-time error. The
+// body is outlined into its own C function, so `ret`, and a `break` /
+// `continue` that would leave the parallel loop, are errors too.
+
+typedef struct {
+    CompilerContext* ctx;
+    Str index;            // the loop variable
+    Str locals[512];      // every name the body declares
+    size_t local_count;
+    AstModule* module;
+    bool reported;        // one diagnostic per loop is enough
+} SemaParallelScope;
+
+static void sema_pl_collect_block(SemaParallelScope* scope, const AstBlock* block);
+
+static void sema_pl_add_local(SemaParallelScope* scope, Str name) {
+    if (name.len && scope->local_count < 512) scope->locals[scope->local_count++] = name;
+}
+
+static void sema_pl_collect_stmt(SemaParallelScope* scope, const AstStmt* s) {
+    for (; s; s = s->next) {
+        switch (s->kind) {
+            case AST_STMT_LET: sema_pl_add_local(scope, s->as.let_stmt.name); break;
+            case AST_STMT_DESTRUCT:
+                for (const AstDestructureBinding* b = s->as.destruct_stmt.bindings; b; b = b->next)
+                    sema_pl_add_local(scope, b->local_name);
+                break;
+            case AST_STMT_IF:
+                if (s->as.if_stmt.binding) sema_pl_collect_stmt(scope, s->as.if_stmt.binding);
+                sema_pl_collect_block(scope, s->as.if_stmt.then_block);
+                sema_pl_collect_block(scope, s->as.if_stmt.else_block);
+                break;
+            case AST_STMT_LOOP:
+                if (s->as.loop_stmt.init) sema_pl_collect_stmt(scope, s->as.loop_stmt.init);
+                for (const AstQueryLoopBinding* q = s->as.loop_stmt.query_bindings; q; q = q->next)
+                    sema_pl_add_local(scope, q->name);
+                sema_pl_collect_block(scope, s->as.loop_stmt.body);
+                break;
+            case AST_STMT_MATCH:
+                if (s->as.match_stmt.binding) sema_pl_collect_stmt(scope, s->as.match_stmt.binding);
+                for (const AstMatchCase* c = s->as.match_stmt.cases; c; c = c->next)
+                    sema_pl_collect_block(scope, c->block);
+                break;
+            case AST_STMT_DEFER: sema_pl_collect_block(scope, s->as.defer_stmt.block); break;
+            case AST_STMT_UNSAFE: sema_pl_collect_block(scope, s->as.unsafe_stmt.block); break;
+            default: break;
+        }
+        // Only the statement itself: the caller walks the list.
+        break;
+    }
+}
+
+static void sema_pl_collect_block(SemaParallelScope* scope, const AstBlock* block) {
+    if (!block) return;
+    for (const AstStmt* s = block->first; s; s = s->next) sema_pl_collect_stmt(scope, s);
+}
+
+static bool sema_pl_is_local(const SemaParallelScope* scope, Str name) {
+    for (size_t i = 0; i < scope->local_count; i++) if (str_eq(scope->locals[i], name)) return true;
+    return false;
+}
+
+// The variable a place expression starts from: `a`, `a.b`, `a[i].c`, `a.f(x)`.
+static Str sema_pl_root(const AstExpr* e) {
+    while (e) {
+        switch (e->kind) {
+            case AST_EXPR_IDENT: return e->as.ident;
+            case AST_EXPR_MEMBER: e = e->as.member.object; break;
+            case AST_EXPR_INDEX: e = e->as.index.target; break;
+            case AST_EXPR_METHOD_CALL: e = e->as.method_call.object; break;
+            case AST_EXPR_UNARY:
+                if (e->as.unary.op == AST_UNARY_VIEW || e->as.unary.op == AST_UNARY_MOD) { e = e->as.unary.operand; break; }
+                return (Str){0};
+            default: return (Str){0};
+        }
+    }
+    return (Str){0};
+}
+
+// Shared = declared outside the body (the loop variable counts as shared for
+// writes: every iteration's index is its own and must not change).
+static bool sema_pl_root_is_shared(const SemaParallelScope* scope, const AstExpr* e) {
+    Str root = sema_pl_root(e);
+    if (!root.len) return false;
+    if (str_eq(root, scope->index)) return true;
+    return !sema_pl_is_local(scope, root);
+}
+
+static bool sema_pl_is_index(const SemaParallelScope* scope, const AstExpr* e) {
+    return e && e->kind == AST_EXPR_IDENT && str_eq(e->as.ident, scope->index);
+}
+
+static void sema_pl_report(SemaParallelScope* scope, const AstExpr* at, size_t line, size_t column, const char* what, Str name) {
+    if (scope->reported) return;
+    scope->reported = true;
+    char buf[640];
+    snprintf(buf, sizeof buf,
+        "parallelLoop: %s '%.*s', which every iteration shares — an iteration may only write its own "
+        "locals and the element of its own index ('xs.set(index: %.*s, ...)', 'xs.modAt(index: %.*s)')",
+        what, (int)name.len, name.data, (int)scope->index.len, scope->index.data,
+        (int)scope->index.len, scope->index.data);
+    diag_error(sema_diag_file(scope->module), (int)(at ? at->line : line), (int)(at ? at->column : column), buf);
+    scope->module->had_error = true;
+}
+
+// `xs.set(index: i, ...)` / `xs.modAt(index: i)` with i the loop variable: the
+// one shared write an iteration may make. The index argument is matched by
+// name, whatever position it has.
+static bool sema_pl_is_own_element_access(const SemaParallelScope* scope, Str method, const AstCallArg* args) {
+    if (!str_eq_cstr(method, "set") && !str_eq_cstr(method, "modAt")) return false;
+    for (const AstCallArg* a = args; a; a = a->next) {
+        if (str_eq_cstr(a->name, "index")) return sema_pl_is_index(scope, a->value);
+    }
+    return false;
+}
+
+static void sema_pl_check_expr(SemaParallelScope* scope, const AstExpr* e);
+
+static bool sema_pl_is_type_param(const AstParam* p) {
+    return p && p->type && str_eq_cstr(get_base_type_name(p->type), "type");
+}
+
+// The name a receiver's type is declared under: `List` for a List(Int).
+static Str sema_pl_type_name(TypeInfo* t) {
+    while (t && t->kind == TYPE_REF) t = t->as.ref.base;
+    if (!t) return (Str){0};
+    if ((t->kind == TYPE_STRUCT || t->kind == TYPE_GENERIC_INST) && t->as.structure.decl) {
+        const AstDecl* d = t->as.structure.decl;
+        if (d->as.type_decl.generic_template) d = d->as.type_decl.generic_template;
+        return d->as.type_decl.name;
+    }
+    return t->name;
+}
+
+// A method call sema left unresolved (the generic List methods are bound by
+// the C backend): does a same-named function whose `this` is the receiver's
+// type take it as `mod`?
+static bool sema_pl_unresolved_method_mutates(SemaParallelScope* scope, const AstExpr* receiver, Str method) {
+    Str type_name = sema_pl_type_name(receiver ? receiver->resolved_type : NULL);
+    if (!type_name.len || !scope->ctx) return false;
+    for (size_t i = 0; i < scope->ctx->all_decl_count; i++) {
+        const AstDecl* d = scope->ctx->all_decls[i];
+        if (!d || d->kind != AST_DECL_FUNC || !str_eq(d->as.func_decl.name, method)) continue;
+        const AstParam* p = d->as.func_decl.params;
+        while (sema_pl_is_type_param(p)) p = p->next;
+        if (!p || !str_eq_cstr(p->name, "this") || !p->type) continue;
+        if (!str_eq(get_base_type_name(p->type), type_name)) continue;
+        if (p->type->is_mod) return true;
+    }
+    return false;
+}
+
+static void sema_pl_check_call(SemaParallelScope* scope, const AstExpr* e, const AstExpr* receiver,
+                               Str method, const AstCallArg* args) {
+    const AstFuncDecl* fd = (e->decl_link && e->decl_link->kind == AST_DECL_FUNC)
+        ? &e->decl_link->as.func_decl : NULL;
+    const AstParam* p = fd ? fd->params : NULL;
+    while (sema_pl_is_type_param(p)) p = p->next;   // `T: type` comes before `this`
+    // A method call's receiver is the `this` parameter, outside the args list.
+    if (receiver) {
+        bool mutates = p ? (p->type && p->type->is_mod)
+                         : sema_pl_unresolved_method_mutates(scope, receiver, method);
+        if (mutates && sema_pl_root_is_shared(scope, receiver)
+            && !sema_pl_is_own_element_access(scope, method, args)) {
+            sema_pl_report(scope, receiver, 0, 0, "the call mutates", sema_pl_root(receiver));
+        }
+        if (p) p = p->next;
+    }
+    bool first = true;
+    for (const AstCallArg* a = args; a; a = a->next, first = false) {
+        const AstTypeRef* pt = p ? p->type : NULL;
+        bool is_this = !receiver && first && p && str_eq_cstr(p->name, "this");
+        if (pt && (pt->is_mod || pt->is_own) && sema_pl_root_is_shared(scope, a->value)
+            && !(is_this && pt->is_mod && sema_pl_is_own_element_access(scope, method, a->next))) {
+            sema_pl_report(scope, a->value, 0, 0,
+                           pt->is_own ? "the call takes ownership of" : "the call mutates",
+                           sema_pl_root(a->value));
+        }
+        sema_pl_check_expr(scope, a->value);
+        if (p) p = p->next;
+    }
+}
+
+static void sema_pl_check_expr(SemaParallelScope* scope, const AstExpr* e) {
+    if (!e) return;
+    switch (e->kind) {
+        case AST_EXPR_METHOD_CALL:
+            sema_pl_check_expr(scope, e->as.method_call.object);
+            sema_pl_check_call(scope, e, e->as.method_call.object, e->as.method_call.method_name,
+                               e->as.method_call.args);
+            break;
+        case AST_EXPR_CALL: {
+            Str name = e->as.call.callee && e->as.call.callee->kind == AST_EXPR_IDENT
+                ? e->as.call.callee->as.ident : (Str){0};
+            sema_pl_check_call(scope, e, NULL, name, e->as.call.args);
+            break;
+        }
+        case AST_EXPR_UNARY:
+            if ((e->as.unary.op == AST_UNARY_PRE_INC || e->as.unary.op == AST_UNARY_PRE_DEC
+                 || e->as.unary.op == AST_UNARY_POST_INC || e->as.unary.op == AST_UNARY_POST_DEC)
+                && sema_pl_root_is_shared(scope, e->as.unary.operand)) {
+                sema_pl_report(scope, e, 0, 0, "the iteration changes", sema_pl_root(e->as.unary.operand));
+            }
+            if (e->as.unary.op == AST_UNARY_SPAWN) break;  // a spawn's arguments are copied or moved per spawn rules
+            sema_pl_check_expr(scope, e->as.unary.operand);
+            break;
+        case AST_EXPR_BINARY:
+            sema_pl_check_expr(scope, e->as.binary.lhs);
+            sema_pl_check_expr(scope, e->as.binary.rhs);
+            break;
+        case AST_EXPR_MEMBER: sema_pl_check_expr(scope, e->as.member.object); break;
+        case AST_EXPR_INDEX:
+            sema_pl_check_expr(scope, e->as.index.target);
+            sema_pl_check_expr(scope, e->as.index.index);
+            break;
+        case AST_EXPR_CAST: sema_pl_check_expr(scope, e->as.cast.operand); break;
+        default: break;
+    }
+}
+
+static void sema_pl_check_block(SemaParallelScope* scope, const AstBlock* block, int loop_depth);
+
+static void sema_pl_check_stmt(SemaParallelScope* scope, const AstStmt* s, int loop_depth) {
+    switch (s->kind) {
+        case AST_STMT_RET:
+            if (!scope->reported) {
+                scope->reported = true;
+                diag_error(sema_diag_file(scope->module), (int)s->line, (int)s->column,
+                           "parallelLoop: 'ret' cannot leave a parallelLoop body — its iterations run on other threads; compute into the element of the index instead");
+                scope->module->had_error = true;
+            }
+            break;
+        case AST_STMT_BREAK:
+        case AST_STMT_CONTINUE:
+            if (loop_depth == 0 && !scope->reported) {
+                scope->reported = true;
+                diag_error(sema_diag_file(scope->module), (int)s->line, (int)s->column,
+                           s->kind == AST_STMT_BREAK
+                           ? "parallelLoop: 'break' cannot stop a parallelLoop — its iterations run at the same time"
+                           : "parallelLoop: 'continue' is not available in a parallelLoop body — wrap the rest of the iteration in an 'if'");
+                scope->module->had_error = true;
+            }
+            break;
+        case AST_STMT_LET:
+            // A `mod` alias of a shared place is a write channel to it.
+            if (s->as.let_stmt.is_bind && s->as.let_stmt.type && s->as.let_stmt.type->is_mod
+                && s->as.let_stmt.value && sema_pl_root_is_shared(scope, s->as.let_stmt.value)) {
+                const AstExpr* v = s->as.let_stmt.value;
+                bool own_element = v->kind == AST_EXPR_METHOD_CALL
+                    && sema_pl_is_own_element_access(scope, v->as.method_call.method_name, v->as.method_call.args);
+                if (!own_element)
+                    sema_pl_report(scope, v, 0, 0, "the 'mod' binding aliases", sema_pl_root(v));
+            }
+            sema_pl_check_expr(scope, s->as.let_stmt.value);
+            break;
+        case AST_STMT_ASSIGN: {
+            const AstExpr* t = s->as.assign_stmt.target;
+            if (sema_pl_root_is_shared(scope, t)) {
+                // `xs[i] = v` / `xs[i].f = v`: the element of its own index.
+                const AstExpr* e = t;
+                bool own_element = false;
+                while (e && (e->kind == AST_EXPR_MEMBER || e->kind == AST_EXPR_INDEX)) {
+                    if (e->kind == AST_EXPR_INDEX) { own_element = sema_pl_is_index(scope, e->as.index.index); break; }
+                    e = e->as.member.object;
+                }
+                if (!own_element) sema_pl_report(scope, t, 0, 0, "the assignment writes", sema_pl_root(t));
+            }
+            sema_pl_check_expr(scope, t);
+            sema_pl_check_expr(scope, s->as.assign_stmt.value);
+            break;
+        }
+        case AST_STMT_EXPR: sema_pl_check_expr(scope, s->as.expr_stmt); break;
+        case AST_STMT_DESTRUCT: sema_pl_check_expr(scope, s->as.destruct_stmt.call); break;
+        case AST_STMT_IF:
+            if (s->as.if_stmt.binding) sema_pl_check_stmt(scope, s->as.if_stmt.binding, loop_depth);
+            sema_pl_check_expr(scope, s->as.if_stmt.condition);
+            sema_pl_check_block(scope, s->as.if_stmt.then_block, loop_depth);
+            sema_pl_check_block(scope, s->as.if_stmt.else_block, loop_depth);
+            break;
+        case AST_STMT_LOOP:
+            if (s->as.loop_stmt.query_bindings && sema_pl_root_is_shared(scope, s->as.loop_stmt.query_iterable)) {
+                for (const AstQueryLoopBinding* q = s->as.loop_stmt.query_bindings; q; q = q->next) {
+                    if (q->type && q->type->is_mod) {
+                        sema_pl_report(scope, s->as.loop_stmt.query_iterable, 0, 0,
+                                       "the 'mod' query loop writes", sema_pl_root(s->as.loop_stmt.query_iterable));
+                        break;
+                    }
+                }
+            }
+            if (s->as.loop_stmt.init) sema_pl_check_stmt(scope, s->as.loop_stmt.init, loop_depth);
+            sema_pl_check_expr(scope, s->as.loop_stmt.condition);
+            sema_pl_check_expr(scope, s->as.loop_stmt.increment);
+            sema_pl_check_block(scope, s->as.loop_stmt.body, loop_depth + 1);
+            break;
+        case AST_STMT_MATCH:
+            if (s->as.match_stmt.binding) sema_pl_check_stmt(scope, s->as.match_stmt.binding, loop_depth);
+            sema_pl_check_expr(scope, s->as.match_stmt.subject);
+            for (const AstMatchCase* c = s->as.match_stmt.cases; c; c = c->next)
+                sema_pl_check_block(scope, c->block, loop_depth);
+            break;
+        case AST_STMT_DEFER: sema_pl_check_block(scope, s->as.defer_stmt.block, loop_depth); break;
+        case AST_STMT_UNSAFE: sema_pl_check_block(scope, s->as.unsafe_stmt.block, loop_depth); break;
+        default: break;
+    }
+}
+
+static void sema_pl_check_block(SemaParallelScope* scope, const AstBlock* block, int loop_depth) {
+    if (!block) return;
+    for (const AstStmt* s = block->first; s; s = s->next) sema_pl_check_stmt(scope, s, loop_depth);
+}
+
+// The counted form the runtime splits into chunks:
+//   parallelLoop var i: Int = start, i < end, ++i { ... }
+// (`i++` too). Returns the loop variable,
+// or an empty Str after reporting why the loop has another shape.
+Str sema_parallel_loop_index(const AstStmt* loop) {
+    const AstStmt* init = loop->as.loop_stmt.init;
+    const AstExpr* cond = loop->as.loop_stmt.condition;
+    const AstExpr* inc = loop->as.loop_stmt.increment;
+    if (loop->as.loop_stmt.is_range || loop->as.loop_stmt.query_bindings) return (Str){0};
+    if (!init || init->kind != AST_STMT_LET || !init->as.let_stmt.is_var || !init->as.let_stmt.type
+        || !str_eq_cstr(get_base_type_name(init->as.let_stmt.type), "Int")) return (Str){0};
+    Str index = init->as.let_stmt.name;
+    if (!cond || cond->kind != AST_EXPR_BINARY || cond->as.binary.op != AST_BIN_LT
+        || !cond->as.binary.lhs || cond->as.binary.lhs->kind != AST_EXPR_IDENT
+        || !str_eq(cond->as.binary.lhs->as.ident, index)) return (Str){0};
+    if (!inc) return (Str){0};
+    bool step = false;
+    if (inc->kind == AST_EXPR_UNARY && (inc->as.unary.op == AST_UNARY_PRE_INC || inc->as.unary.op == AST_UNARY_POST_INC)
+        && inc->as.unary.operand && inc->as.unary.operand->kind == AST_EXPR_IDENT
+        && str_eq(inc->as.unary.operand->as.ident, index)) step = true;
+    if (!step) return (Str){0};
+    return index;
+}
+
+static void sema_check_parallel_loop(CompilerContext* ctx, AstModule* module, const AstStmt* loop) {
+    Str index = sema_parallel_loop_index(loop);
+    if (!index.len) {
+        diag_error(sema_diag_file(module), (int)loop->line, (int)loop->column,
+                   "parallelLoop runs its iterations on the worker pool, so it needs the counted form "
+                   "'parallelLoop var i: Int = start, i < end, ++i { ... }'");
+        module->had_error = true;
+        return;
+    }
+    static SemaParallelScope scope;  // 8 KB; sema is single-threaded
+    memset(&scope, 0, sizeof scope);
+    scope.ctx = ctx;
+    scope.index = index;
+    scope.module = module;
+    sema_pl_collect_block(&scope, loop->as.loop_stmt.body);
+    sema_pl_check_block(&scope, loop->as.loop_stmt.body, 0);
+}
+
 static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstStmt* stmt, TypeInfo* current_return_type) {
     // #772: a `loop ... in fields(value)` is compile-time field reflection, not
     // a runtime loop. Unroll it into `if true { ... }` here — BEFORE the switch
@@ -4230,6 +4592,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                  }
              }
              s_loop_depth--;
+             if (stmt->as.loop_stmt.is_parallel) sema_check_parallel_loop(ctx, module, stmt);
              symbol_table_pop_scope(symbols);
              break;
         }
