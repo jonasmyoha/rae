@@ -1,0 +1,115 @@
+# parallelLoop runs its iterations on the worker pool (runtime_threads.c
+# rae_parallel_for). An iteration may read anything in scope and write its own
+# locals and the element of its own index, so the results are those of the
+# sequential loop for any number of workers: the runner checks this output,
+# and compiler/tools/tsan-check.sh runs it under ThreadSanitizer.
+type Particle {
+  x: Float
+  velocity: Float
+}
+
+func step(particle: view Particle, deltaTime: view Float) ret Particle {
+  ret Particle { x: particle.x + particle.velocity * deltaTime, velocity: particle.velocity * 0.99 }
+}
+
+func main() {
+  let count: Int = 1000000
+
+  # A per-element transform over a million elements: element i from i alone.
+  let squares: List(Int) = List.create(Int, cap: count)
+  loop var i: Int = 0, i < count, ++i {
+    squares.add(value: 0)
+  }
+  parallelLoop var i: Int = 0, i < count, ++i {
+    squares.set(index: i, value: i * i % 1000003)
+  }
+  var check: Int = 0
+  loop var i: Int = 0, i < count, ++i {
+    check = (check * 31 + squares.copyAtDefault(index: i)) % 1000000007
+  }
+  log("transform checksum: {check}")
+
+  # A sum by per-chunk partials, combined in chunk order: the same total as
+  # the sequential sum, whatever the worker count.
+  let chunkCount: Int = 64
+  let chunkSize: Int = count / chunkCount
+  let partials: List(Int) = List.create(Int, cap: chunkCount)
+  loop var c: Int = 0, c < chunkCount, ++c {
+    partials.add(value: 0)
+  }
+  parallelLoop var c: Int = 0, c < chunkCount, ++c {
+    var sum: Int = 0
+    loop var k: Int = c * chunkSize, k < (c + 1) * chunkSize, ++k {
+      sum = sum + squares.copyAtDefault(index: k)
+    }
+    partials.set(index: c, value: sum)
+  }
+  var total: Int = 0
+  loop var c: Int = 0, c < chunkCount, ++c {
+    total = total + partials.copyAtDefault(index: c)
+  }
+  var sequential: Int = 0
+  loop var k: Int = 0, k < count, ++k {
+    sequential = sequential + squares.copyAtDefault(index: k)
+  }
+  log("chunked sum: {total}, sequential sum: {sequential}, equal: {total is sequential}")
+
+  # Structs updated in place through `modAt`, reading captured values.
+  let deltaTime: Float = 0.5
+  let particles: List(Particle) = List.create(Particle, cap: 1000)
+  loop var i: Int = 0, i < 1000, ++i {
+    particles.add(value: Particle { x: i as Float, velocity: 1.0 })
+  }
+  parallelLoop var i: Int = 0, i < 1000, ++i {
+    if let particle: mod Particle => particles.modAt(index: i) {
+      let next: Particle = step(particle: particle, deltaTime: deltaTime)
+      particle.x = next.x
+      particle.velocity = next.velocity
+    }
+  }
+  var xs: Float = 0.0
+  loop var i: Int = 0, i < 1000, ++i {
+    xs = xs + particles.copyAtDefault(index: i).x
+  }
+  log("particles: x sum {xs}")
+
+  # Strings made in the body (the temp pool is per thread) and stored as the
+  # element of the index.
+  let labels: List(String) = List.create(String, cap: 100)
+  loop var i: Int = 0, i < 100, ++i {
+    labels.add(value: "")
+  }
+  parallelLoop var i: Int = 0, i < 100, ++i {
+    labels.set(index: i, value: "item {i}: {i * 3}")
+  }
+  log("labels: {labels.copyAtDefault(index: 0)} / {labels.copyAtDefault(index: 99)}")
+
+  # A parallelLoop inside a parallel body runs inline on its worker. The
+  # inner loop writes the element of ITS index in a List local to the outer
+  # iteration.
+  let grid: List(Int) = List.create(Int, cap: 8)
+  loop var i: Int = 0, i < 8, ++i {
+    grid.add(value: 0)
+  }
+  parallelLoop var row: Int = 0, row < 8, ++row {
+    let cells: List(Int) = List.create(Int, cap: 8)
+    loop var k: Int = 0, k < 8, ++k {
+      cells.add(value: 0)
+    }
+    parallelLoop var column: Int = 0, column < 8, ++column {
+      cells.set(index: column, value: row * 8 + column)
+    }
+    var rowSum: Int = 0
+    loop var k: Int = 0, k < 8, ++k {
+      rowSum = rowSum + cells.copyAtDefault(index: k)
+    }
+    grid.set(index: row, value: rowSum)
+  }
+  log("grid row sums: {grid.copyAtDefault(index: 0)} {grid.copyAtDefault(index: 7)}")
+
+  # An empty range runs nothing.
+  parallelLoop var i: Int = 5, i < 5, ++i {
+    squares.set(index: i, value: -1)
+  }
+  log("empty range left element 5 at {squares.copyAtDefault(index: 5)}")
+}
