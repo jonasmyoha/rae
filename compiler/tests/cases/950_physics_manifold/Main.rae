@@ -1,0 +1,321 @@
+# The physics port's contact manifolds without hulls (P2: lib/physics/
+# collision/Manifold and ConvexManifold) against Box3D itself: every line of
+# tools/box3d-oracle/goldens/manifold.golden is one call of manifold.c or
+# convex_manifold.c with its inputs and outputs as exact hex floats, written
+# by Box3D's own C build. This runs the Rae port on the same inputs and
+# requires the SAME BITS (docs/physics-rae-port-design.md §4).
+import Vec3
+import Quat
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/TransformMath
+open physics/math/PlaneMath
+open physics/geometry/QueryTypes
+open physics/collision/Manifold
+open physics/collision/ConvexManifold
+
+# Reads the inputs of one golden line in order.
+type Reader {
+  values: List(Float)
+  next: Int
+}
+
+func readFloat(reader: mod Reader) ret Float {
+  let value: Float = reader.values.copyAtDefault(index: reader.next)
+  reader.next = reader.next + 1
+  ret value
+}
+
+func readInt(reader: mod Reader) ret Int {
+  ret readFloat(reader: reader).toInt()
+}
+
+func readVec(reader: mod Reader) ret Vec3 {
+  let x: Float = readFloat(reader: reader)
+  let y: Float = readFloat(reader: reader)
+  let z: Float = readFloat(reader: reader)
+  ret Vec3 { x: x, y: y, z: z }
+}
+
+func readTransform(reader: mod Reader) ret Transform {
+  let position: Vec3 = readVec(reader: reader)
+  let x: Float = readFloat(reader: reader)
+  let y: Float = readFloat(reader: reader)
+  let z: Float = readFloat(reader: reader)
+  let w: Float = readFloat(reader: reader)
+  ret Transform { position: position, rotation: Quat { x: x, y: y, z: z, w: w } }
+}
+
+func readSphere(reader: mod Reader) ret Sphere {
+  let center: Vec3 = readVec(reader: reader)
+  let radius: Float = readFloat(reader: reader)
+  ret Sphere { center: center, radius: radius }
+}
+
+func readCapsule(reader: mod Reader) ret Capsule {
+  let center1: Vec3 = readVec(reader: reader)
+  let center2: Vec3 = readVec(reader: reader)
+  let radius: Float = readFloat(reader: reader)
+  ret Capsule { center1: center1, center2: center2, radius: radius }
+}
+
+func readPlane(reader: mod Reader) ret Plane {
+  let normal: Vec3 = readVec(reader: reader)
+  let offset: Float = readFloat(reader: reader)
+  ret Plane { normal: normal, offset: offset }
+}
+
+func readPair(reader: mod Reader) ret FeaturePair {
+  let owner1: Int = readInt(reader: reader)
+  let index1: Int = readInt(reader: reader)
+  let owner2: Int = readInt(reader: reader)
+  let index2: Int = readInt(reader: reader)
+  ret makeFeaturePair(
+    owner1: owner1
+    index1: index1
+    owner2: owner2
+    index2: index2
+  )
+}
+
+func readClipVertex(reader: mod Reader) ret ClipVertex {
+  let position: Vec3 = readVec(reader: reader)
+  let separation: Float = readFloat(reader: reader)
+  let pair: FeaturePair = readPair(reader: reader)
+  ret ClipVertex { position: position, separation: separation, pair: pair }
+}
+
+func readManifoldPoint(reader: mod Reader) ret LocalManifoldPoint {
+  let point: Vec3 = readVec(reader: reader)
+  let separation: Float = readFloat(reader: reader)
+  let pair: FeaturePair = readPair(reader: reader)
+  let triangleIndex: Int = readInt(reader: reader)
+  ret LocalManifoldPoint {
+    point: point
+    separation: separation
+    pair: pair
+    triangleIndex: triangleIndex
+  }
+}
+
+func putFloat(out: mod List(Float), value: view Float) {
+  out.add(value: value)
+}
+
+func putInt(out: mod List(Float), value: view Int) {
+  out.add(value: value.toFloat())
+}
+
+func putVec(out: mod List(Float), vector: view Vec3) {
+  out.add(value: vector.x)
+  out.add(value: vector.y)
+  out.add(value: vector.z)
+}
+
+func putPair(out: mod List(Float), pair: view FeaturePair) {
+  putInt(out: out, value: pair.owner1)
+  putInt(out: out, value: pair.index1)
+  putInt(out: out, value: pair.owner2)
+  putInt(out: out, value: pair.index2)
+}
+
+func putClipVertex(out: mod List(Float), vertex: view ClipVertex) {
+  putVec(out: out, vector: vertex.position)
+  putFloat(out: out, value: vertex.separation)
+  putPair(out: out, pair: vertex.pair)
+}
+
+func putManifold(out: mod List(Float), manifold: view LocalManifold) {
+  putVec(out: out, vector: manifold.normal)
+  putInt(out: out, value: manifold.pointCount)
+  loop var i: Int = 0, i < manifold.pointCount, ++i {
+    let point: LocalManifoldPoint = manifoldPoint(manifold: manifold, index: i)
+    putVec(out: out, vector: point.point)
+    putFloat(out: out, value: point.separation)
+    putPair(out: out, pair: point.pair)
+    putInt(out: out, value: point.triangleIndex)
+  }
+}
+
+# False: not a function of this golden.
+func evaluate(name: view String, reader: mod Reader, out: mod List(Float)) ret Bool {
+  let units: Float = 1.0
+  if name is "b3FlipPair" {
+    putPair(out: out, pair: flipPair(pair: readPair(reader: reader)))
+  } else if name is "b3MakeFeatureId" {
+    putInt(out: out, value: makeFeatureId(pair: readPair(reader: reader)))
+  } else if name is "b3ClipPolygon" {
+    let count: Int = readInt(reader: reader)
+    let polygon: List(ClipVertex) = List.create(ClipVertex, cap: count)
+    loop var i: Int = 0, i < count, ++i {
+      polygon.add(value: readClipVertex(reader: reader))
+    }
+    let clipPlane: Plane = readPlane(reader: reader)
+    let edge: Int = readInt(reader: reader)
+    let refPlane: Plane = readPlane(reader: reader)
+    let clipped: List(ClipVertex) = List.create(ClipVertex, cap: maxClipPoints)
+    let outCount: Int = clipPolygon(
+      out: clipped
+      polygon: polygon
+      clipPlane: clipPlane
+      edge: edge
+      refPlane: refPlane
+    )
+    putInt(out: out, value: outCount)
+    loop let vertex: view ClipVertex in clipped {
+      putClipVertex(out: out, vertex: vertex)
+    }
+  } else if name is "b3ClipSegment" {
+    var first: ClipVertex = readClipVertex(reader: reader)
+    var second: ClipVertex = readClipVertex(reader: reader)
+    let plane: Plane = readPlane(reader: reader)
+    let count: Int = clipSegment(first: first, second: second, plane: plane)
+    putInt(out: out, value: count)
+    putClipVertex(out: out, vertex: first)
+    putClipVertex(out: out, vertex: second)
+  } else if name is "b3ReduceManifoldPoints" {
+    let capacity: Int = readInt(reader: reader)
+    var manifold: LocalManifold = createLocalManifold(capacity: capacity)
+    manifold.normal = readVec(reader: reader)
+    let count: Int = readInt(reader: reader)
+    let points: List(LocalManifoldPoint) = List.create(LocalManifoldPoint, cap: count)
+    loop var i: Int = 0, i < count, ++i {
+      points.add(value: readManifoldPoint(reader: reader))
+    }
+    reduceManifoldPoints(
+      manifold: manifold
+      points: points
+      count: count
+      lengthUnitsPerMeter: units
+    )
+    putManifold(out: out, manifold: manifold)
+  } else if name is "b3CollideSpheres" {
+    var manifold: LocalManifold = createLocalManifold(capacity: readInt(reader: reader))
+    let sphereA: Sphere = readSphere(reader: reader)
+    let sphereB: Sphere = readSphere(reader: reader)
+    collideSpheres(
+      manifold: manifold
+      sphereA: sphereA
+      sphereB: sphereB
+      transformBtoA: readTransform(reader: reader)
+    )
+    putManifold(out: out, manifold: manifold)
+  } else if name is "b3CollideCapsuleAndSphere" {
+    var manifold: LocalManifold = createLocalManifold(capacity: readInt(reader: reader))
+    let capsuleA: Capsule = readCapsule(reader: reader)
+    let sphereB: Sphere = readSphere(reader: reader)
+    collideCapsuleAndSphere(
+      manifold: manifold
+      capsuleA: capsuleA
+      sphereB: sphereB
+      transformBtoA: readTransform(reader: reader)
+    )
+    putManifold(out: out, manifold: manifold)
+  } else if name is "b3CollideCapsules" {
+    var manifold: LocalManifold = createLocalManifold(capacity: readInt(reader: reader))
+    let capsuleA: Capsule = readCapsule(reader: reader)
+    let capsuleB: Capsule = readCapsule(reader: reader)
+    let transform: Transform = readTransform(reader: reader)
+    collideCapsules(
+      manifold: manifold
+      capsuleA: capsuleA
+      capsuleB: capsuleB
+      transformBtoA: transform
+      lengthUnitsPerMeter: units
+    )
+    putManifold(out: out, manifold: manifold)
+  } else {
+    ret false
+  }
+  ret true
+}
+
+# The same bits: NaN matches NaN, and a zero matches only a zero of its sign.
+func sameBits(actual: view Float, expected: view Float) ret Bool {
+  if actual is not actual {
+    ret expected is not expected
+  }
+  if actual is not expected {
+    ret false
+  }
+  if actual is 0.0 {
+    ret 1.0 / actual is 1.0 / expected
+  }
+  ret true
+}
+
+func readGolden() ret String {
+  # The runner runs from compiler/, the TSan gate from the case's folder.
+  let candidates: List(String) = {
+    "../tools/box3d-oracle/goldens/manifold.golden"
+    "../../../tools/box3d-oracle/goldens/manifold.golden"
+    "tools/box3d-oracle/goldens/manifold.golden"
+  }
+  loop var i: Int = 0, i < candidates.length, ++i {
+    if let text: String = readFile(path: candidates.copyAtDefault(index: i)) {
+      ret text
+    }
+  }
+  ret ""
+}
+
+func main() {
+  let golden: String = readGolden()
+  let lines: List(String) = golden.split(sep: "\n")
+  var calls: Int = 0
+  var mismatches: Int = 0
+  var unknown: Int = 0
+  let names: List(String) = List.create(String, cap: 16)
+  loop var i: Int = 0, i < lines.length, ++i {
+    let line: String = lines.copyAtDefault(index: i)
+    if line.length() is 0 or line.startsWith(prefix: "#") {
+      continue
+    }
+    let tokens: List(String) = line.split(sep: " ")
+    let name: String = tokens.copyAtDefault(index: 0)
+    var reader: Reader = { values: List.create(Float, cap: 64), next: 0 }
+    let expected: List(Float) = List.create(Float, cap: 64)
+    var afterArrow: Bool = false
+    loop var j: Int = 1, j < tokens.length, ++j {
+      let token: String = tokens.copyAtDefault(index: j)
+      if token is "->" {
+        afterArrow = true
+      } else if afterArrow {
+        expected.add(value: token.toFloat())
+      } else {
+        reader.values.add(value: token.toFloat())
+      }
+    }
+    let actual: List(Float) = List.create(Float, cap: 64)
+    if evaluate(name: name, reader: reader, out: actual) is false {
+      unknown = unknown + 1
+      log("not ported: {name}")
+      continue
+    }
+    calls = calls + 1
+    if names.contains(value: name) is false {
+      names.add(value: name)
+    }
+    var same: Bool = actual.length is expected.length
+    loop var j: Int = 0, j < expected.length and same, ++j {
+      same = sameBits(
+        actual: actual.copyAtDefault(index: j)
+        expected: expected.copyAtDefault(index: j)
+      )
+    }
+    if same is false {
+      mismatches = mismatches + 1
+      if mismatches <= 10 {
+        log("MISMATCH line {i + 1}: {line}")
+        var got: String = "  got"
+        loop var j: Int = 0, j < actual.length, ++j {
+          got = "{got} {actual.copyAtDefault(index: j)}"
+        }
+        log(got)
+      }
+    }
+  }
+  log(
+    "manifold.golden: {calls} calls of {names.length} Box3D functions, {mismatches} not bit-exact, {unknown} not ported"
+  )
+}
