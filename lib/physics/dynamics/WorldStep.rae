@@ -1,0 +1,60 @@
+# Stepping a world (b3World_Step of Box3D's physics_world.c at 9f998c8):
+# find new pairs, update the contacts (the narrow phase), then solve the
+# constraints and finalize the bodies. Checked against the oracle in
+# fixture 958. Events, sensors (P4d) and the capacity statistics are not
+# here yet.
+open physics/math/Scalar
+open physics/dynamics/WorldTypes
+open physics/dynamics/World
+open physics/dynamics/BroadPhasePairs
+open physics/dynamics/Collide
+open physics/dynamics/StepContext
+open physics/dynamics/Solver
+
+# b3World_Step: advance the world by `timeStep` in `subStepCount` sub-steps.
+func stepWorld(world: mod PhysicsWorld, timeStep: view Float, subStepCount: view Int) {
+  world.locked = true
+
+  # Update the collision pairs and create contacts
+  let created: List(UInt64) = updateBroadPhasePairs(world: world)
+
+  var context: StepContext = createStepContext()
+  context.dt = timeStep
+  context.subStepCount = maxInt(left: 1, right: subStepCount)
+  if timeStep > 0.0 {
+    context.inverseDt = 1.0 / timeStep
+    context.h = timeStep / context.subStepCount.toFloat()
+    context.inverseH = context.subStepCount.toFloat() * context.inverseDt
+  } else {
+    context.inverseDt = 0.0
+    context.h = 0.0
+    context.inverseH = 0.0
+  }
+  world.inverseH = context.inverseH
+  world.inverseDt = context.inverseDt
+
+  # Hertz values get reduced for large time steps
+  let contactHertz: Float = minFloat(left: world.contactHertz, right: 0.125 * context.inverseH)
+  context.contactSoftness = makeSoft(
+    hertz: contactHertz
+    zeta: world.contactDampingRatio
+    h: context.h
+  )
+  context.staticSoftness = makeSoft(
+    hertz: 2.0 * contactHertz
+    zeta: 0.5 * world.contactDampingRatio
+    h: context.h
+  )
+  context.maxLinearVelocity = world.maxLinearSpeed
+  context.enableWarmStarting = world.enableWarmStarting
+
+  # The narrow phase: update the contacts
+  collide(world: world)
+
+  # Integrate velocities, solve the velocity constraints, integrate positions
+  if timeStep > 0.0 {
+    solve(world: world, context: context)
+  }
+
+  world.locked = false
+}

@@ -1,0 +1,889 @@
+# The wide convex contact solver, part 1 (b3GatherBodies, b3ScatterBodies,
+# b3PrepareContacts_Convex and b3StoreImpulses_Convex of Box3D's
+# contact_solver.c at 9f998c8, its scalar path): four convex contacts per
+# wide constraint, one per lane of a FloatWide. Warm starting and the solve
+# iterations are in ContactSolverWideSolve. Box3D's operation order is kept
+# exactly; checked against the oracle in fixture 958.
+open Vec3
+open Quat
+open physics/Constants
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/MatrixMath
+open physics/dynamics/WorldTypes
+open physics/dynamics/Body
+open physics/dynamics/Contact
+open physics/dynamics/ConstraintGraph
+open physics/dynamics/SolverSet
+open physics/dynamics/World
+open physics/dynamics/FloatWide
+open physics/dynamics/ContactConstraints
+open physics/dynamics/StepContext
+
+# Four bodies' solver states (b3BodyStateW)
+type BodyStateWide {
+  linearVelocity: Vec3Wide
+  angularVelocity: Vec3Wide
+  deltaPosition: Vec3Wide
+  deltaRotation: QuatWide
+}
+
+# The state of lane index `index` (sim index plus one, 0 for none).
+func laneState(states: view List(BodyState), index: view Int) ret BodyState {
+  if index is 0 {
+    ret identityBodyState()
+  }
+  ret states.copyAtDefault(index: index - 1)
+}
+
+# b3GatherBodies: the four lanes' states, the identity state for a static
+# body or an empty lane.
+func gatherBodies(
+  states: view List(BodyState)
+  indices: view Array(Int, cap: 4)
+) ret BodyStateWide {
+  let s1: BodyState = laneState(
+    states: states
+    index: indices.copyAtFallback(index: 0, fallback: 0)
+  )
+  let s2: BodyState = laneState(
+    states: states
+    index: indices.copyAtFallback(index: 1, fallback: 0)
+  )
+  let s3: BodyState = laneState(
+    states: states
+    index: indices.copyAtFallback(index: 2, fallback: 0)
+  )
+  let s4: BodyState = laneState(
+    states: states
+    index: indices.copyAtFallback(index: 3, fallback: 0)
+  )
+  ret BodyStateWide {
+    linearVelocity: Vec3Wide {
+      x: setWide(
+        x: s1.linearVelocity.x
+        y: s2.linearVelocity.x
+        z: s3.linearVelocity.x
+        w: s4.linearVelocity.x
+      )
+      y: setWide(
+        x: s1.linearVelocity.y
+        y: s2.linearVelocity.y
+        z: s3.linearVelocity.y
+        w: s4.linearVelocity.y
+      )
+      z: setWide(
+        x: s1.linearVelocity.z
+        y: s2.linearVelocity.z
+        z: s3.linearVelocity.z
+        w: s4.linearVelocity.z
+      )
+    }
+    angularVelocity: Vec3Wide {
+      x: setWide(
+        x: s1.angularVelocity.x
+        y: s2.angularVelocity.x
+        z: s3.angularVelocity.x
+        w: s4.angularVelocity.x
+      )
+      y: setWide(
+        x: s1.angularVelocity.y
+        y: s2.angularVelocity.y
+        z: s3.angularVelocity.y
+        w: s4.angularVelocity.y
+      )
+      z: setWide(
+        x: s1.angularVelocity.z
+        y: s2.angularVelocity.z
+        z: s3.angularVelocity.z
+        w: s4.angularVelocity.z
+      )
+    }
+    deltaPosition: Vec3Wide {
+      x: setWide(
+        x: s1.deltaPosition.x
+        y: s2.deltaPosition.x
+        z: s3.deltaPosition.x
+        w: s4.deltaPosition.x
+      )
+      y: setWide(
+        x: s1.deltaPosition.y
+        y: s2.deltaPosition.y
+        z: s3.deltaPosition.y
+        w: s4.deltaPosition.y
+      )
+      z: setWide(
+        x: s1.deltaPosition.z
+        y: s2.deltaPosition.z
+        z: s3.deltaPosition.z
+        w: s4.deltaPosition.z
+      )
+    }
+    deltaRotation: QuatWide {
+      vector: Vec3Wide {
+        x: setWide(
+          x: s1.deltaRotation.x
+          y: s2.deltaRotation.x
+          z: s3.deltaRotation.x
+          w: s4.deltaRotation.x
+        )
+        y: setWide(
+          x: s1.deltaRotation.y
+          y: s2.deltaRotation.y
+          z: s3.deltaRotation.y
+          w: s4.deltaRotation.y
+        )
+        z: setWide(
+          x: s1.deltaRotation.z
+          y: s2.deltaRotation.z
+          z: s3.deltaRotation.z
+          w: s4.deltaRotation.z
+        )
+      }
+      scalar: setWide(
+        x: s1.deltaRotation.w
+        y: s2.deltaRotation.w
+        z: s3.deltaRotation.w
+        w: s4.deltaRotation.w
+      )
+    }
+  }
+}
+
+# b3ScatterBodies: write the lanes' velocities back to dynamic bodies.
+func scatterBodies(
+  states: mod List(BodyState)
+  indices: view Array(Int, cap: 4)
+  body: view BodyStateWide
+) {
+  loop var lane: Int = 0, lane < 4, ++lane {
+    let index: Int = indices.copyAtFallback(index: lane, fallback: 0) - 1
+    if index is -1 {
+      continue
+    }
+    if let state: mod BodyState => states.modAt(index: index) {
+      if (state.flags bitand dynamicFlag) is not 0 {
+        state.linearVelocity = Vec3 {
+          x: laneOf(value: body.linearVelocity.x, lane: lane)
+          y: laneOf(value: body.linearVelocity.y, lane: lane)
+          z: laneOf(value: body.linearVelocity.z, lane: lane)
+        }
+        state.angularVelocity = Vec3 {
+          x: laneOf(value: body.angularVelocity.x, lane: lane)
+          y: laneOf(value: body.angularVelocity.y, lane: lane)
+          z: laneOf(value: body.angularVelocity.z, lane: lane)
+        }
+      }
+    }
+  }
+}
+
+# The per-lane inputs of b3PrepareContacts_Convex: zero for an empty lane.
+type PrepareLane {
+  contact: Contact
+  manifold: Manifold
+  simA: BodySim
+  simB: BodySim
+  hitEvents: Bool
+}
+
+# The lanes' inverse inertia as a symmetric wide matrix (b3GatherInvInertiaW)
+func gatherInvInertia(
+  first: view BodySim
+  second: view BodySim
+  third: view BodySim
+  fourth: view BodySim
+) ret SymMatrix3Wide {
+  let i0: Matrix3 = first.invInertiaWorld
+  let i1: Matrix3 = second.invInertiaWorld
+  let i2: Matrix3 = third.invInertiaWorld
+  let i3: Matrix3 = fourth.invInertiaWorld
+  ret SymMatrix3Wide {
+    cxx: setWide(
+      x: i0.columnX.x
+      y: i1.columnX.x
+      z: i2.columnX.x
+      w: i3.columnX.x
+    )
+    cxy: setWide(
+      x: i0.columnX.y
+      y: i1.columnX.y
+      z: i2.columnX.y
+      w: i3.columnX.y
+    )
+    cxz: setWide(
+      x: i0.columnX.z
+      y: i1.columnX.z
+      z: i2.columnX.z
+      w: i3.columnX.z
+    )
+    cyy: setWide(
+      x: i0.columnY.y
+      y: i1.columnY.y
+      z: i2.columnY.y
+      w: i3.columnY.y
+    )
+    cyz: setWide(
+      x: i0.columnY.z
+      y: i1.columnY.z
+      z: i2.columnY.z
+      w: i3.columnY.z
+    )
+    czz: setWide(
+      x: i0.columnZ.z
+      y: i1.columnZ.z
+      z: i2.columnZ.z
+      w: i3.columnZ.z
+    )
+  }
+}
+
+func lanePoint(lane: view PrepareLane, pointIndex: view Int) ret ManifoldPoint {
+  ret lane.manifold.points.copyAtFallback(index: pointIndex, fallback: zeroManifoldPoint())
+}
+
+# b3PrepareContacts_Convex: the wide constraints of flat range `block`.
+func prepareContactsWide(
+  world: mod PhysicsWorld
+  context: mod StepContext
+  block: view SolverBlock
+) {
+  let zero: FloatWide = zeroWide()
+  let one: FloatWide = splatWide(value: 1.0)
+  let two: FloatWide = splatWide(value: 2.0)
+  var warmStartScale: FloatWide = zero
+  if world.enableWarmStarting {
+    warmStartScale = one
+  }
+  let invTau: FloatWide = splatWide(
+    value: 1.0 / speculativeDistance(lengthUnitsPerMeter: world.lengthUnitsPerMeter)
+  )
+  let minFrictionWeightWide: FloatWide = splatWide(value: minFrictionWeight)
+  let minDeterminant: Float = 1000.0 * floatMin
+  let minDet: FloatWide = splatWide(value: minDeterminant)
+  var anyRestitution: Bool = false
+
+  let spans: List(PrepareSpan) = context.widePrepareSpans
+  var wideIndex: Int = block.startIndex
+  let endWideIndex: Int = block.startIndex + block.count
+  var slot: Int = spanSlotOf(spans: spans, index: wideIndex)
+  loop wideIndex < endWideIndex {
+    let span: PrepareSpan = spans.copyAtDefault(index: slot)
+    let colorWideEndIndex: Int = minInt(
+      left: spans.copyAtDefault(index: slot + 1).start
+      right: endWideIndex
+    )
+    loop wideIndex < colorWideEndIndex {
+      let localWideIndex: Int = wideIndex - span.start
+      var wide: ContactConstraintWide = zeroContactConstraintWide()
+      let lanes: List(PrepareLane) = List.create(PrepareLane, cap: 4)
+      var hitEventLanes: Int = 0
+      loop var lane: Int = 0, lane < 4, ++lane {
+        let contactIndex: Int = 4 * localWideIndex + lane
+        if contactIndex < span.count {
+          var contactId: Int = -1
+          if let color: view GraphColor => world.constraintGraph.colors.viewAt(
+            index: span.colorIndex
+          ) {
+            contactId = color.convexContacts.copyAtDefault(index: contactIndex)
+          }
+          let contact: Contact = world.contacts.copyAtDefault(index: contactId)
+          let manifold: Manifold = contact.manifolds.copyAtDefault(index: 0)
+          var indexA: Int = contact.encodedBodySimA
+          if indexA < 0 {
+            indexA = -1
+          }
+          var indexB: Int = contact.encodedBodySimB
+          if indexB < 0 {
+            indexB = -1
+          }
+          wide.indexA.set(index: lane, value: indexA + 1)
+          wide.indexB.set(index: lane, value: indexB + 1)
+          wide.pointCounts.set(index: lane, value: manifold.pointCount)
+          wide.contactIds.set(index: lane, value: contactId)
+          var simA: BodySim = zeroBodySim()
+          var simB: BodySim = zeroBodySim()
+          if let awake: view SolverSet => world.solverSets.viewAt(index: awakeSet) {
+            if indexA is not -1 {
+              simA = awake.bodySims.copyAtDefault(index: indexA)
+            }
+            if indexB is not -1 {
+              simB = awake.bodySims.copyAtDefault(index: indexB)
+            }
+          }
+          let hitEvents: Bool = (contact.flags bitand simEnableHitEvent) is not 0
+          if hitEvents {
+            hitEventLanes = hitEventLanes bitor (1 shl lane)
+          }
+          lanes.add(value: PrepareLane {
+            contact: contact
+            manifold: manifold
+            simA: simA
+            simB: simB
+            hitEvents: hitEvents
+          })
+        } else {
+          wide.indexA.set(index: lane, value: 0)
+          wide.indexB.set(index: lane, value: 0)
+          wide.pointCounts.set(index: lane, value: 0)
+          wide.contactIds.set(index: lane, value: -1)
+          lanes.add(value: PrepareLane {
+            contact: zeroContact()
+            manifold: zeroManifold()
+            simA: zeroBodySim()
+            simB: zeroBodySim()
+            hitEvents: false
+          })
+        }
+      }
+      let lane0: PrepareLane = lanes.copyAtDefault(index: 0)
+      let lane1: PrepareLane = lanes.copyAtDefault(index: 1)
+      let lane2: PrepareLane = lanes.copyAtDefault(index: 2)
+      let lane3: PrepareLane = lanes.copyAtDefault(index: 3)
+
+      let mA: FloatWide = setWide(
+        x: lane0.simA.invMass
+        y: lane1.simA.invMass
+        z: lane2.simA.invMass
+        w: lane3.simA.invMass
+      )
+      let mB: FloatWide = setWide(
+        x: lane0.simB.invMass
+        y: lane1.simB.invMass
+        z: lane2.simB.invMass
+        w: lane3.simB.invMass
+      )
+      let iA: SymMatrix3Wide = gatherInvInertia(
+        first: lane0.simA
+        second: lane1.simA
+        third: lane2.simA
+        fourth: lane3.simA
+      )
+      let iB: SymMatrix3Wide = gatherInvInertia(
+        first: lane0.simB
+        second: lane1.simB
+        third: lane2.simB
+        fourth: lane3.simB
+      )
+      wide.invMassA = mA
+      wide.invMassB = mB
+      wide.invIA = iA
+      wide.invIB = iB
+
+      wide.friction = setWide(
+        x: lane0.contact.friction
+        y: lane1.contact.friction
+        z: lane2.contact.friction
+        w: lane3.contact.friction
+      )
+      wide.rollingResistance = setWide(
+        x: lane0.contact.rollingResistance
+        y: lane1.contact.rollingResistance
+        z: lane2.contact.rollingResistance
+        w: lane3.contact.rollingResistance
+      )
+      wide.restitution = setWide(
+        x: lane0.contact.restitution
+        y: lane1.contact.restitution
+        z: lane2.contact.restitution
+        w: lane3.contact.restitution
+      )
+      let tangentVelocity: Vec3Wide = {
+        x: setWide(
+          x: lane0.contact.tangentVelocity.x
+          y: lane1.contact.tangentVelocity.x
+          z: lane2.contact.tangentVelocity.x
+          w: lane3.contact.tangentVelocity.x
+        )
+        y: setWide(
+          x: lane0.contact.tangentVelocity.y
+          y: lane1.contact.tangentVelocity.y
+          z: lane2.contact.tangentVelocity.y
+          w: lane3.contact.tangentVelocity.y
+        )
+        z: setWide(
+          x: lane0.contact.tangentVelocity.z
+          y: lane1.contact.tangentVelocity.z
+          z: lane2.contact.tangentVelocity.z
+          w: lane3.contact.tangentVelocity.z
+        )
+      }
+
+      let normal: Vec3Wide = {
+        x: setWide(
+          x: lane0.manifold.normal.x
+          y: lane1.manifold.normal.x
+          z: lane2.manifold.normal.x
+          w: lane3.manifold.normal.x
+        )
+        y: setWide(
+          x: lane0.manifold.normal.y
+          y: lane1.manifold.normal.y
+          z: lane2.manifold.normal.y
+          w: lane3.manifold.normal.y
+        )
+        z: setWide(
+          x: lane0.manifold.normal.z
+          y: lane1.manifold.normal.z
+          z: lane2.manifold.normal.z
+          w: lane3.manifold.normal.z
+        )
+      }
+      let twistImpulse: FloatWide = setWide(
+        x: lane0.manifold.twistImpulse
+        y: lane1.manifold.twistImpulse
+        z: lane2.manifold.twistImpulse
+        w: lane3.manifold.twistImpulse
+      )
+      let frictionImpulse: Vec3Wide = {
+        x: setWide(
+          x: lane0.manifold.frictionImpulse.x
+          y: lane1.manifold.frictionImpulse.x
+          z: lane2.manifold.frictionImpulse.x
+          w: lane3.manifold.frictionImpulse.x
+        )
+        y: setWide(
+          x: lane0.manifold.frictionImpulse.y
+          y: lane1.manifold.frictionImpulse.y
+          z: lane2.manifold.frictionImpulse.y
+          w: lane3.manifold.frictionImpulse.y
+        )
+        z: setWide(
+          x: lane0.manifold.frictionImpulse.z
+          y: lane1.manifold.frictionImpulse.z
+          z: lane2.manifold.frictionImpulse.z
+          w: lane3.manifold.frictionImpulse.z
+        )
+      }
+      let rollingImpulse: Vec3Wide = {
+        x: setWide(
+          x: lane0.manifold.rollingImpulse.x
+          y: lane1.manifold.rollingImpulse.x
+          z: lane2.manifold.rollingImpulse.x
+          w: lane3.manifold.rollingImpulse.x
+        )
+        y: setWide(
+          x: lane0.manifold.rollingImpulse.y
+          y: lane1.manifold.rollingImpulse.y
+          z: lane2.manifold.rollingImpulse.y
+          w: lane3.manifold.rollingImpulse.y
+        )
+        z: setWide(
+          x: lane0.manifold.rollingImpulse.z
+          y: lane1.manifold.rollingImpulse.z
+          z: lane2.manifold.rollingImpulse.z
+          w: lane3.manifold.rollingImpulse.z
+        )
+      }
+
+      let tangent1: Vec3Wide = perpWide(vector: normal, minLengthSquared: minDeterminant)
+      let tangent2: Vec3Wide = crossWide(left: tangent1, right: normal)
+      wide.normal = normal
+      wide.tangent1 = tangent1
+      wide.tangent2 = tangent2
+      wide.tangentVelocity1 = dotWide(left: tangentVelocity, right: tangent1)
+      wide.tangentVelocity2 = dotWide(left: tangentVelocity, right: tangent2)
+
+      let rollingMask: FloatWide = greaterThanWide(left: wide.rollingResistance, right: zero)
+      wide.twistImpulse = multiplyWide(left: warmStartScale, right: twistImpulse)
+      wide.rollingImpulse = Vec3Wide {
+        x: blendWide(
+          left: zero
+          right: multiplyWide(left: warmStartScale, right: rollingImpulse.x)
+          mask: rollingMask
+        )
+        y: blendWide(
+          left: zero
+          right: multiplyWide(left: warmStartScale, right: rollingImpulse.y)
+          mask: rollingMask
+        )
+        z: blendWide(
+          left: zero
+          right: multiplyWide(left: warmStartScale, right: rollingImpulse.z)
+          mask: rollingMask
+        )
+      }
+      wide.frictionImpulse = Vec2Wide {
+        x: multiplyWide(
+          left: warmStartScale
+          right: dotWide(left: frictionImpulse, right: tangent1)
+        )
+        y: multiplyWide(
+          left: warmStartScale
+          right: dotWide(left: frictionImpulse, right: tangent2)
+        )
+      }
+
+      let pointCountWide: FloatWide = setWide(
+        x: wide.pointCounts.copyAtFallback(index: 0, fallback: 0).toFloat()
+        y: wide.pointCounts.copyAtFallback(index: 1, fallback: 0).toFloat()
+        z: wide.pointCounts.copyAtFallback(index: 2, fallback: 0).toFloat()
+        w: wide.pointCounts.copyAtFallback(index: 3, fallback: 0).toFloat()
+      )
+      var centerA: Vec3Wide = zeroVectorWide()
+      var centerB: Vec3Wide = zeroVectorWide()
+      var totalFrictionWeight: FloatWide = zero
+
+      loop var pointIndex: Int = 0, pointIndex < maxManifoldPoints, ++pointIndex {
+        let pointMask: FloatWide = greaterThanWide(
+          left: pointCountWide
+          right: splatWide(value: pointIndex.toFloat())
+        )
+        let point0: ManifoldPoint = lanePoint(lane: lane0, pointIndex: pointIndex)
+        let point1: ManifoldPoint = lanePoint(lane: lane1, pointIndex: pointIndex)
+        let point2: ManifoldPoint = lanePoint(lane: lane2, pointIndex: pointIndex)
+        let point3: ManifoldPoint = lanePoint(lane: lane3, pointIndex: pointIndex)
+        let rA: Vec3Wide = {
+          x: blendWide(
+            left: zero
+            right: setWide(
+              x: point0.anchorA.x
+              y: point1.anchorA.x
+              z: point2.anchorA.x
+              w: point3.anchorA.x
+            )
+            mask: pointMask
+          )
+          y: blendWide(
+            left: zero
+            right: setWide(
+              x: point0.anchorA.y
+              y: point1.anchorA.y
+              z: point2.anchorA.y
+              w: point3.anchorA.y
+            )
+            mask: pointMask
+          )
+          z: blendWide(
+            left: zero
+            right: setWide(
+              x: point0.anchorA.z
+              y: point1.anchorA.z
+              z: point2.anchorA.z
+              w: point3.anchorA.z
+            )
+            mask: pointMask
+          )
+        }
+        let rB: Vec3Wide = {
+          x: blendWide(
+            left: zero
+            right: setWide(
+              x: point0.anchorB.x
+              y: point1.anchorB.x
+              z: point2.anchorB.x
+              w: point3.anchorB.x
+            )
+            mask: pointMask
+          )
+          y: blendWide(
+            left: zero
+            right: setWide(
+              x: point0.anchorB.y
+              y: point1.anchorB.y
+              z: point2.anchorB.y
+              w: point3.anchorB.y
+            )
+            mask: pointMask
+          )
+          z: blendWide(
+            left: zero
+            right: setWide(
+              x: point0.anchorB.z
+              y: point1.anchorB.z
+              z: point2.anchorB.z
+              w: point3.anchorB.z
+            )
+            mask: pointMask
+          )
+        }
+        let separation: FloatWide = blendWide(
+          left: zero
+          right: setWide(
+            x: point0.separation
+            y: point1.separation
+            z: point2.separation
+            w: point3.separation
+          )
+          mask: pointMask
+        )
+        let normalImpulse: FloatWide = blendWide(
+          left: zero
+          right: setWide(
+            x: point0.normalImpulse
+            y: point1.normalImpulse
+            z: point2.normalImpulse
+            w: point3.normalImpulse
+          )
+          mask: pointMask
+        )
+
+        # C0 friction center decay (see ContactSolver.prepareContactScalar)
+        var weight: FloatWide = minWide(
+          left: maxWide(
+            left: subtractWide(left: two, right: multiplyWide(left: separation, right: invTau))
+            right: minFrictionWeightWide
+          )
+          right: one
+        )
+        weight = blendWide(left: zero, right: weight, mask: pointMask)
+        centerA = mulAddVectorWide(base: centerA, scale: weight, vector: rA)
+        centerB = mulAddVectorWide(base: centerB, scale: weight, vector: rB)
+        totalFrictionWeight = addWide(left: totalFrictionWeight, right: weight)
+
+        let rnA: Vec3Wide = crossWide(left: rA, right: normal)
+        let rnB: Vec3Wide = crossWide(left: rB, right: normal)
+        var kNormal: FloatWide = addWide(left: mA, right: mB)
+        kNormal = addWide(
+          left: kNormal
+          right: dotWide(left: rnA, right: multiplySym3Wide(matrix: iA, vector: rnA))
+        )
+        kNormal = addWide(
+          left: kNormal
+          right: dotWide(left: rnB, right: multiplySym3Wide(matrix: iB, vector: rnB))
+        )
+        let valid: FloatWide = andWide(
+          left: greaterThanWide(left: kNormal, right: zero)
+          right: pointMask
+        )
+        wide.points.set(
+          index: pointIndex
+          value: ContactConstraintPointWide {
+            anchorA: rA
+            anchorB: rB
+            baseSeparation: subtractWide(
+              left: separation
+              right: dotWide(left: subtractVectorWide(left: rB, right: rA), right: normal)
+            )
+            normalImpulse: multiplyWide(left: warmStartScale, right: normalImpulse)
+            totalNormalImpulse: zero
+            normalMass: blendWide(
+              left: zero
+              right: divideWide(left: one, right: kNormal)
+              mask: valid
+            )
+            leverArm: zero
+            relativeVelocity: zero
+            restitutionImpulse: zero
+          }
+        )
+      }
+
+      let invWeight: FloatWide = blendWide(
+        left: zero
+        right: divideWide(left: one, right: totalFrictionWeight)
+        mask: greaterThanWide(left: totalFrictionWeight, right: zero)
+      )
+      centerA = scaleVectorWide(scale: invWeight, vector: centerA)
+      centerB = scaleVectorWide(scale: invWeight, vector: centerB)
+      wide.centerA = centerA
+      wide.centerB = centerB
+      loop var pointIndex: Int = 0, pointIndex < maxManifoldPoints, ++pointIndex {
+        let pointMask: FloatWide = greaterThanWide(
+          left: pointCountWide
+          right: splatWide(value: pointIndex.toFloat())
+        )
+        if let constraintPoint: mod ContactConstraintPointWide => wide.points.modAt(
+          index: pointIndex
+        ) {
+          let offset: Vec3Wide = subtractVectorWide(left: constraintPoint.anchorA, right: centerA)
+          constraintPoint.leverArm = blendWide(
+            left: zero
+            right: sqrtWide(value: dotWide(left: offset, right: offset))
+            mask: pointMask
+          )
+        }
+      }
+
+      let rtA1: Vec3Wide = crossWide(left: centerA, right: tangent1)
+      let rtA2: Vec3Wide = crossWide(left: centerA, right: tangent2)
+      let rtB1: Vec3Wide = crossWide(left: centerB, right: tangent1)
+      let rtB2: Vec3Wide = crossWide(left: centerB, right: tangent2)
+      let iArtA1: Vec3Wide = multiplySym3Wide(matrix: iA, vector: rtA1)
+      let iArtA2: Vec3Wide = multiplySym3Wide(matrix: iA, vector: rtA2)
+      let iBrtB1: Vec3Wide = multiplySym3Wide(matrix: iB, vector: rtB1)
+      let iBrtB2: Vec3Wide = multiplySym3Wide(matrix: iB, vector: rtB2)
+      let kxx: FloatWide = addWide(
+        left: addWide(left: addWide(left: mA, right: mB), right: dotWide(left: rtA1, right: iArtA1))
+        right: dotWide(left: rtB1, right: iBrtB1)
+      )
+      let kyy: FloatWide = addWide(
+        left: addWide(left: addWide(left: mA, right: mB), right: dotWide(left: rtA2, right: iArtA2))
+        right: dotWide(left: rtB2, right: iBrtB2)
+      )
+      let kxy: FloatWide = addWide(
+        left: dotWide(left: rtA1, right: iArtA2)
+        right: dotWide(left: rtB1, right: iBrtB2)
+      )
+      let determinant: FloatWide = subtractWide(
+        left: multiplyWide(left: kxx, right: kyy)
+        right: multiplyWide(left: kxy, right: kxy)
+      )
+      let validDeterminant: FloatWide = greaterThanWide(
+        left: absWide(value: determinant)
+        right: minDet
+      )
+      let invDet: FloatWide = blendWide(
+        left: zero
+        right: divideWide(left: one, right: determinant)
+        mask: validDeterminant
+      )
+      wide.tangentMass = SymMatrix2Wide {
+        cxx: multiplyWide(left: invDet, right: kyy)
+        cxy: negateWide(value: multiplyWide(left: invDet, right: kxy))
+        cyy: multiplyWide(left: invDet, right: kxx)
+      }
+
+      let invIAB: SymMatrix3Wide = addSym3Wide(left: iA, right: iB)
+      let kTwist: FloatWide = dotWide(
+        left: normal
+        right: multiplySym3Wide(matrix: invIAB, vector: normal)
+      )
+      wide.twistMass = blendWide(
+        left: zero
+        right: divideWide(left: one, right: kTwist)
+        mask: greaterThanWide(left: kTwist, right: zero)
+      )
+      if allZeroWide(value: wide.rollingResistance) is false {
+        wide.rollingMass = invertSym3Wide(matrix: invIAB, minDeterminant: minDeterminant)
+      } else {
+        wide.rollingMass = zeroSym3Wide()
+      }
+
+      # Only sample the contact point normal velocity if needed
+      let haveRestitution: Bool = anyTrueWide(
+        mask: greaterThanWide(left: wide.restitution, right: zero)
+      )
+      anyRestitution = anyRestitution or haveRestitution
+      if hitEventLanes is not 0 or haveRestitution {
+        prepareRelativeVelocities(
+          world: world
+          constraint: wide
+          normal: normal
+          hitEventLanes: hitEventLanes
+        )
+      }
+      context.wideConstraints.set(index: wideIndex, value: wide)
+      wideIndex = wideIndex + 1
+    }
+    # Advance to the next colour
+    slot = slot + 1
+  }
+  if anyRestitution {
+    context.anyRestitution = true
+  }
+}
+
+# The normal velocities at the points of a wide constraint, for restitution
+# and hit events (the tail of b3PrepareContacts_Convex).
+func prepareRelativeVelocities(
+  world: mod PhysicsWorld
+  constraint: mod ContactConstraintWide
+  normal: view Vec3Wide
+  hitEventLanes: view Int
+) {
+  var bodyA: BodyStateWide = zeroBodyStateWide()
+  var bodyB: BodyStateWide = zeroBodyStateWide()
+  if let awake: view SolverSet => world.solverSets.viewAt(index: awakeSet) {
+    bodyA = gatherBodies(states: awake.bodyStates, indices: constraint.indexA)
+    bodyB = gatherBodies(states: awake.bodyStates, indices: constraint.indexB)
+  }
+  loop var pointIndex: Int = 0, pointIndex < maxManifoldPoints, ++pointIndex {
+    var vn: FloatWide = zeroWide()
+    if let constraintPoint: mod ContactConstraintPointWide => constraint.points.modAt(
+      index: pointIndex
+    ) {
+      let vrA: Vec3Wide = addVectorWide(
+        left: bodyA.linearVelocity
+        right: crossWide(left: bodyA.angularVelocity, right: constraintPoint.anchorA)
+      )
+      let vrB: Vec3Wide = addVectorWide(
+        left: bodyB.linearVelocity
+        right: crossWide(left: bodyB.angularVelocity, right: constraintPoint.anchorB)
+      )
+      vn = dotWide(left: normal, right: subtractVectorWide(left: vrB, right: vrA))
+      constraintPoint.relativeVelocity = vn
+    }
+    if hitEventLanes is not 0 {
+      loop var lane: Int = 0, lane < 4, ++lane {
+        let laneHit: Bool = (hitEventLanes bitand (1 shl lane)) is not 0
+        if laneHit and pointIndex < constraint.pointCounts.copyAtFallback(index: lane, fallback: 0) {
+          let contactId: Int = constraint.contactIds.copyAtFallback(index: lane, fallback: -1)
+          if let contact: mod Contact => world.contacts.modAt(index: contactId) {
+            if let manifold: mod Manifold => contact.manifolds.modAt(index: 0) {
+              if let point: mod ManifoldPoint => manifold.points.modAt(index: pointIndex) {
+                point.normalVelocity = laneOf(value: vn, lane: lane)
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+func zeroBodyStateWide() ret BodyStateWide {
+  ret BodyStateWide {
+    linearVelocity: zeroVectorWide()
+    angularVelocity: zeroVectorWide()
+    deltaPosition: zeroVectorWide()
+    deltaRotation: QuatWide { vector: zeroVectorWide(), scalar: zeroWide() }
+  }
+}
+
+# b3StoreImpulses_Convex: each lane's impulses back into its contact's
+# manifold, for warm starting the next step. (Hit events: P4d.)
+func storeImpulsesWide(
+  world: mod PhysicsWorld
+  context: view StepContext
+  block: view SolverBlock
+) {
+  loop var wideIndex: Int = block.startIndex, wideIndex < block.startIndex + block.count, ++wideIndex {
+    let wide: ContactConstraintWide = context.wideConstraints.copyAtDefault(index: wideIndex)
+    loop var lane: Int = 0, lane < 4, ++lane {
+      let contactId: Int = wide.contactIds.copyAtFallback(index: lane, fallback: -1)
+      if contactId is -1 {
+        continue
+      }
+      let f1: Float = laneOf(value: wide.frictionImpulse.x, lane: lane)
+      let f2: Float = laneOf(value: wide.frictionImpulse.y, lane: lane)
+      if let contact: mod Contact => world.contacts.modAt(index: contactId) {
+        if let manifold: mod Manifold => contact.manifolds.modAt(index: 0) {
+          manifold.frictionImpulse = Vec3 {
+            x: f1 * laneOf(value: wide.tangent1.x, lane: lane) + f2 * laneOf(
+              value: wide.tangent2.x
+              lane: lane
+            )
+            y: f1 * laneOf(value: wide.tangent1.y, lane: lane) + f2 * laneOf(
+              value: wide.tangent2.y
+              lane: lane
+            )
+            z: f1 * laneOf(value: wide.tangent1.z, lane: lane) + f2 * laneOf(
+              value: wide.tangent2.z
+              lane: lane
+            )
+          }
+          manifold.twistImpulse = laneOf(value: wide.twistImpulse, lane: lane)
+          manifold.rollingImpulse = Vec3 {
+            x: laneOf(value: wide.rollingImpulse.x, lane: lane)
+            y: laneOf(value: wide.rollingImpulse.y, lane: lane)
+            z: laneOf(value: wide.rollingImpulse.z, lane: lane)
+          }
+          loop var pointIndex: Int = 0, pointIndex < manifold.pointCount, ++pointIndex {
+            if let constraintPoint: view ContactConstraintPointWide => wide.points.viewAt(
+              index: pointIndex
+            ) {
+              if let point: mod ManifoldPoint => manifold.points.modAt(index: pointIndex) {
+                point.normalImpulse = laneOf(value: constraintPoint.normalImpulse, lane: lane)
+                point.totalNormalImpulse = laneOf(
+                  value: constraintPoint.totalNormalImpulse
+                  lane: lane
+                )
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

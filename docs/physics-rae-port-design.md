@@ -309,6 +309,17 @@ C added.
   processing (`lib/physics/dynamics/Contact`, `ConstraintGraph`,
   `WorldGraph`, `WorldContacts`, `WorldIslands`, `Collide`; golden
   `contacts`, fixture 957).
+  **P4c landed 2026-10-04, bit-exact:** the step (`stepWorld`), the solver
+  with its stage list, blocks and sync indices, a single-threaded stage
+  dispatcher module (`StageDispatcher`), the wide contact solver on the
+  scalar path (a wide float is a struct of four Floats) and the scalar one
+  for the overflow colour, integration, body finalization and continuous
+  collision (`lib/physics/dynamics/WorldStep`, `Solver`, `FinalizeBodies`,
+  `StageDispatcher`, `StepContext`, `FloatWide`, `ContactConstraints`,
+  `ContactSolver`, `ContactSolverWide`, `ContactSolverWideSolve`,
+  `BodyIntegration`, `Continuous`; golden `scenes`, fixture 958: a falling
+  sphere, restitution, friction on a 20-degree slope and a 10-level pyramid,
+  600 steps each, sleep off).
 - **P5 — meshes, height fields, compounds** and their manifolds.
 - **P6 — joints**, one module per kind, each scene bit-exact.
 - **P7 — queries and the mover**: ray/shape casts, overlaps, the character

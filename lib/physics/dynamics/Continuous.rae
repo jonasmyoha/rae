@@ -1,0 +1,365 @@
+# Continuous collision of fast bodies (b3ContinuousQueryCallback and
+# b3SolveContinuous of Box3D's solver.c, b3MakeShapeProxy and the convex
+# path of b3ShapeTimeOfImpact of shape.c, b3MakeRelativeSweep of body.h, at
+# 9f998c8): a fast body is swept against the static tree (a bullet also
+# against the kinematic and dynamic trees) and moved back to its first time
+# of impact. Box3D's query callback becomes an explicit query loop. Sensor
+# hits (P4d), the pre-solve callback and custom filter (P8) and compound,
+# mesh and height-field targets (P5) are not here yet.
+open Vec3
+open Quat
+open physics/Constants
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/QuatMath
+open physics/math/TransformMath
+open physics/math/AabbMath
+open physics/geometry/QueryTypes
+open physics/geometry/Hull
+open physics/collision/ShapeCast
+open physics/collision/TimeOfImpact
+open physics/collision/ShapePair
+open physics/broadPhase/DynamicTree
+open physics/broadPhase/DynamicTreeQuery
+open physics/broadPhase/DynamicTreeRebuild
+open physics/broadPhase/BroadPhase
+open physics/dynamics/WorldTypes
+open physics/dynamics/Body
+open physics/dynamics/Shape
+open physics/dynamics/SolverSet
+open physics/dynamics/World
+open physics/dynamics/WorldBodies
+
+# b3MakeRelativeSweep: a body's sweep over the step relative to `base`.
+func makeRelativeSweep(sim: view BodySim, base: view Vec3) ret Sweep {
+  ret Sweep {
+    localCenter: sim.localCenter
+    center1: subtractPositions(left: sim.center0, right: base)
+    center2: subtractPositions(left: sim.center, right: base)
+    rotation1: sim.rotation0
+    rotation2: sim.transform.rotation
+  }
+}
+
+# b3MakeShapeProxy
+func makeShapeProxy(shape: view Shape, hulls: view List(Hull)) ret ShapeProxy {
+  if shape.shapeType is ShapeType.capsule {
+    let points: List(Vec3) = { shape.capsule.center1, shape.capsule.center2 }
+    ret makeProxy(points: points, radius: shape.capsule.radius)
+  }
+  if shape.shapeType is ShapeType.sphere {
+    let points: List(Vec3) = { shape.sphere.center }
+    ret makeProxy(points: points, radius: shape.sphere.radius)
+  }
+  if let hull: view Hull => hulls.viewAt(index: shape.hullIndex) {
+    ret makeProxy(points: hull.points, radius: 0.0)
+  }
+  let empty: List(Vec3) = List.create(Vec3, cap: 0)
+  ret makeProxy(points: empty, radius: 0.0)
+}
+
+# b3ShapeTimeOfImpact for two convex shapes
+func shapeTimeOfImpact(
+  shapeA: view Shape
+  shapeB: view Shape
+  hulls: view List(Hull)
+  sweepA: view Sweep
+  sweepB: view Sweep
+  maxFraction: view Float
+  lengthUnitsPerMeter: view Float
+) ret ToiOutput {
+  let input: ToiInput = {
+    proxyA: makeShapeProxy(shape: shapeA, hulls: hulls)
+    proxyB: makeShapeProxy(shape: shapeB, hulls: hulls)
+    sweepA: sweepA
+    sweepB: sweepB
+    maxFraction: maxFraction
+  }
+  ret timeOfImpact(input: input, lengthUnitsPerMeter: lengthUnitsPerMeter)
+}
+
+# b3ContinuousQueryCallback for one candidate shape: the earlier impact
+# fraction, if `shapeId` is hit sooner than `fraction`.
+func continuousCandidate(
+  world: view PhysicsWorld
+  fastShape: view Shape
+  fastSim: view BodySim
+  shapeId: view Int
+  sweep: view Sweep
+  base: view Vec3
+  fraction: view Float
+) ret Float {
+  # Skip the same shape and the same body
+  if shapeId is fastShape.id {
+    ret fraction
+  }
+  let shape: Shape = world.shapes.copyAtDefault(index: shapeId)
+  if shape.bodyId is fastShape.bodyId {
+    ret fraction
+  }
+  # Skip sensors unless both shapes want sensor events (sensor hits: P4d)
+  let isSensor: Bool = shape.sensorIndex is not -1
+  if isSensor {
+    ret fraction
+  }
+  # Skip filtered shapes
+  if shouldShapesCollide(filterA: fastShape.filter, filterB: shape.filter) is false {
+    ret fraction
+  }
+  let body: Body = bodyAt(world: world, bodyId: shape.bodyId)
+  let bodySim: BodySim = bodySimOf(world: world, body: body)
+  # Skip bullets
+  if (body.flags bitand isBulletFlag) is not 0 {
+    ret fraction
+  }
+  # Skip filtered bodies
+  let fastBody: Body = bodyAt(world: world, bodyId: fastSim.bodyId)
+  if shouldBodiesCollide(bodyA: fastBody, bodyB: body) is false {
+    ret fraction
+  }
+  let sweepA: Sweep = makeRelativeSweep(sim: bodySim, base: base)
+  # Time of impact versus the shape
+  let output: ToiOutput = shapeTimeOfImpact(
+    shapeA: shape
+    shapeB: fastShape
+    hulls: world.hulls
+    sweepA: sweepA
+    sweepB: sweep
+    maxFraction: fraction
+    lengthUnitsPerMeter: world.lengthUnitsPerMeter
+  )
+  if 0.0 < output.fraction and output.fraction < fraction {
+    ret output.fraction
+  }
+  ret fraction
+}
+
+# Query tree `treeIndex` for continuous collision candidates.
+func queryContinuous(
+  world: view PhysicsWorld
+  treeIndex: view Int
+  box: view Aabb
+  fastShape: view Shape
+  fastSim: view BodySim
+  sweep: view Sweep
+  base: view Vec3
+  fraction: view Float
+) ret Float {
+  var result: Float = fraction
+  if let tree: view DynamicTree => world.broadPhase.trees.viewAt(index: treeIndex) {
+    var query: TreeQuery = beginTreeQuery(
+      tree: tree
+      box: box
+      maskBits: allBits
+      requireAllBits: false
+    )
+    var proxyId: Int = nextTreeQueryProxy(tree: tree, query: query)
+    loop proxyId is not -1 {
+      let shapeId: Int = shapeIndexOf(userData: treeUserData(tree: tree, proxyId: proxyId))
+      result = continuousCandidate(
+        world: world
+        fastShape: fastShape
+        fastSim: fastSim
+        shapeId: shapeId
+        sweep: sweep
+        base: base
+        fraction: result
+      )
+      proxyId = nextTreeQueryProxy(tree: tree, query: query)
+    }
+  }
+  ret result
+}
+
+# Mark a shape's proxy moved with its new fat box (b3BroadPhase_MarkProxyMoved).
+func markShapeProxyMoved(world: mod PhysicsWorld, proxyKey: view Int, box: view Aabb) {
+  if let tree: mod DynamicTree => world.broadPhase.trees.modAt(index: proxyType(proxyKey: proxyKey)) {
+    markProxyMoved(tree: tree, proxyId: proxyId(proxyKey: proxyKey), box: box)
+  }
+}
+
+# The fat box of shape `shapeId` after `box` moved; a non-bullet marks its
+# proxy moved, a bullet asks for its bounds to be enlarged later. Returns
+# whether the bullet bounds need enlarging.
+func refreshFatBox(
+  world: mod PhysicsWorld
+  shapeId: view Int
+  box: view Aabb
+  isBullet: view Bool
+) ret Bool {
+  let fatBox: Aabb = world.fatAabbs.copyAtDefault(index: shapeId)
+  if contains(outer: fatBox, inner: box) {
+    ret false
+  }
+  let shape: Shape = world.shapes.copyAtDefault(index: shapeId)
+  let inflated: Aabb = inflate(box: box, extension: shape.aabbMargin)
+  world.fatAabbs.set(index: shapeId, value: inflated)
+  # Regular bodies mark the hierarchy moved; bullets are handled later
+  if isBullet {
+    ret true
+  }
+  markShapeProxyMoved(world: world, proxyKey: shape.proxyKey, box: inflated)
+  ret false
+}
+
+# b3SolveContinuous: continuous collision of awake sim `simIndex` against
+# static shapes (a bullet also against kinematic and dynamic ones).
+func solveContinuous(world: mod PhysicsWorld, simIndex: view Int, dt: view Float) {
+  var fastSim: BodySim = world.solverSets.copyAtDefault(index: awakeSet).bodySims.copyAtDefault(
+    index: simIndex
+  )
+  # Re-center the sweep on the fast body (float precision far from the origin)
+  let base: Vec3 = fastSim.center0
+  let sweep: Sweep = makeRelativeSweep(sim: fastSim, base: base)
+  let xf2: Transform = {
+    position: subtract(
+      left: sweep.center2
+      right: rotateVector(quat: sweep.rotation2, vector: sweep.localCenter)
+    )
+    rotation: sweep.rotation2
+  }
+  let fastBody: Body = bodyAt(world: world, bodyId: fastSim.bodyId)
+  var fraction: Float = 1.0
+  let isBullet: Bool = (fastSim.flags bitand isBulletFlag) is not 0
+
+  var shapeId: Int = fastBody.headShapeId
+  loop shapeId is not -1 {
+    var fastShape: Shape = world.shapes.copyAtDefault(index: shapeId)
+    let nextShapeId: Int = fastShape.nextShapeId
+    let box1: Aabb = fastShape.aabb
+    # xf2 is relative to the base, so translate the box back to world space
+    let box2: Aabb = offsetAabb(
+      localBox: computeShapeAabb(shape: fastShape, hulls: world.hulls, transform: xf2)
+      origin: base
+    )
+    # Stored to avoid computing it again when there is no impact
+    if let stored: mod Shape => world.shapes.modAt(index: shapeId) {
+      stored.aabb = box2
+    }
+    fastShape.aabb = box2
+    # No continuous collision for meshes or sensors
+    let skip: Bool = fastShape.shapeType is ShapeType.mesh or fastShape.shapeType is ShapeType.height or fastShape.sensorIndex is not -1
+    if skip is false {
+      let sweptBox: Aabb = union(first: box1, second: box2)
+      fraction = queryContinuous(
+        world: world
+        treeIndex: 0
+        box: sweptBox
+        fastShape: fastShape
+        fastSim: fastSim
+        sweep: sweep
+        base: base
+        fraction: fraction
+      )
+      if isBullet {
+        fraction = queryContinuous(
+          world: world
+          treeIndex: 1
+          box: sweptBox
+          fastShape: fastShape
+          fastSim: fastSim
+          sweep: sweep
+          base: base
+          fraction: fraction
+        )
+        fraction = queryContinuous(
+          world: world
+          treeIndex: 2
+          box: sweptBox
+          fastShape: fastShape
+          fastSim: fastSim
+          sweep: sweep
+          base: base
+          fraction: fraction
+        )
+      }
+    }
+    shapeId = nextShapeId
+  }
+
+  let speculative: Float = speculativeDistance(lengthUnitsPerMeter: world.lengthUnitsPerMeter)
+  var enlargeBullet: Bool = false
+  if fraction < 1.0 {
+    # The time of impact: back to world space by re-adding the base
+    let q: Quat = nlerp(from: sweep.rotation1, to: sweep.rotation2, alpha: fraction)
+    let c: Vec3 = lerp(from: sweep.center1, to: sweep.center2, alpha: fraction)
+    let origin: Vec3 = subtract(left: c, right: rotateVector(quat: q, vector: sweep.localCenter))
+    let transform: Transform = {
+      position: offsetPosition(position: base, delta: origin)
+      rotation: q
+    }
+    let center: Vec3 = offsetPosition(position: base, delta: c)
+    fastSim.transform = transform
+    fastSim.center = center
+    fastSim.rotation0 = q
+    fastSim.center0 = center
+    fastSim.flags = fastSim.flags bitor hadTimeOfImpactFlag
+
+    # The lost time loses gravity (other forces and torques are ignored)
+    if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
+      if let state: mod BodyState => awake.bodyStates.modAt(index: simIndex) {
+        let v: Vec3 = state.linearVelocity
+        let timeLoss: Float = (1.0 - fraction) * dt
+        var dv: Vec3 = scale(scale: -timeLoss * fastSim.gravityScale, vector: world.gravity)
+        if (state.flags bitand lockLinearX) is not 0 {
+          dv.x = 0.0
+        }
+        if (state.flags bitand lockLinearY) is not 0 {
+          dv.y = 0.0
+        }
+        if (state.flags bitand lockLinearZ) is not 0 {
+          dv.z = 0.0
+        }
+        state.linearVelocity = add(left: v, right: dv)
+      }
+    }
+    # The move event was written before the impact
+    if let event: mod BodyMoveEvent => world.bodyMoveEvents.modAt(index: simIndex) {
+      event.transform = transform
+    }
+
+    # The shapes' boxes at the interpolated transform
+    var nextId: Int = fastBody.headShapeId
+    loop nextId is not -1 {
+      let shape: Shape = world.shapes.copyAtDefault(index: nextId)
+      let box: Aabb = computeFatShapeAabb(
+        shape: shape
+        hulls: world.hulls
+        transform: transform
+        extra: speculative
+      )
+      if let stored: mod Shape => world.shapes.modAt(index: nextId) {
+        stored.aabb = box
+      }
+      enlargeBullet = refreshFatBox(
+        world: world
+        shapeId: nextId
+        box: box
+        isBullet: isBullet
+      ) or enlargeBullet
+      nextId = shape.nextShapeId
+    }
+  } else {
+    # No time of impact: advance the body
+    fastSim.rotation0 = fastSim.transform.rotation
+    fastSim.center0 = fastSim.center
+    var nextId: Int = fastBody.headShapeId
+    loop nextId is not -1 {
+      let shape: Shape = world.shapes.copyAtDefault(index: nextId)
+      # The shape's box is still valid from above
+      enlargeBullet = refreshFatBox(
+        world: world
+        shapeId: nextId
+        box: shape.aabb
+        isBullet: isBullet
+      ) or enlargeBullet
+      nextId = shape.nextShapeId
+    }
+  }
+  if enlargeBullet {
+    fastSim.flags = fastSim.flags bitor enlargeBulletBoundsFlag
+  }
+  if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
+    awake.bodySims.set(index: simIndex, value: fastSim)
+  }
+}

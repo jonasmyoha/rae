@@ -1,0 +1,803 @@
+# The constraint solver of a step (b3Solve, b3SolverTask's orchestration,
+# b3FinalizeBodiesTask and b3BulletBodyTask of Box3D's solver.c at 9f998c8):
+# setting up the colours' constraints and the stage list, running the
+# stages (StageDispatcher) for each sub-step, then finalizing the bodies,
+# continuous collision (FinalizeBodies), refitting the trees and island sleep. Box3D's
+# operation order is kept exactly; checked against the oracle in fixture
+# 958. Joints (P6), island splitting, hit, joint and sensor events (P4d)
+# are not here yet.
+import Math
+open Vec3
+open Quat
+open physics/Constants
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/QuatMath
+open physics/math/MatrixMath
+open physics/math/TransformMath
+open physics/math/AabbMath
+open physics/container/Bitset
+open physics/broadPhase/DynamicTree
+open physics/broadPhase/DynamicTreeRebuild
+open physics/broadPhase/BroadPhase
+open physics/dynamics/WorldTypes
+open physics/dynamics/Body
+open physics/dynamics/Shape
+open physics/dynamics/Contact
+open physics/dynamics/ConstraintGraph
+open physics/dynamics/SolverSet
+open physics/dynamics/Island
+open physics/dynamics/World
+open physics/dynamics/WorldIslands
+open physics/dynamics/ParallelFor
+open physics/dynamics/ContactConstraints
+open physics/dynamics/StepContext
+open physics/dynamics/StageDispatcher
+open physics/dynamics/Continuous
+open physics/dynamics/FinalizeBodies
+
+# ITERATIONS and RELAX_ITERATIONS of solver.c
+const solveIterations: Int = 1
+
+const relaxIterations: Int = 1
+
+# Each active colour's constraint counts and block dimensions.
+type ColorPlan {
+  colorIndex: Int
+  wideContactCount: Int
+  contactCount: Int
+  wideDim: BlockDim
+  contactDim: BlockDim
+  jointDim: BlockDim
+}
+
+# b3SolverTask for worker 0: the stage sequence of a step.
+func runSolverStages(world: mod PhysicsWorld, context: mod StepContext) {
+  let activeColorCount: Int = context.activeColorCount
+  var bodySyncIndex: Int = 1
+  var stageIndex: Int = 0
+
+  # Prepare joint constraints
+  var jointSyncIndex: Int = 1
+  executeMainStage(
+    world: world
+    context: context
+    stageIndex: stageIndex
+    syncBits: (jointSyncIndex shl 16) bitor stageIndex
+  )
+  stageIndex = stageIndex + 1
+  jointSyncIndex = jointSyncIndex + 1
+
+  # Prepare convex contact constraints
+  var convexSyncIndex: Int = 1
+  executeMainStage(
+    world: world
+    context: context
+    stageIndex: stageIndex
+    syncBits: (convexSyncIndex shl 16) bitor stageIndex
+  )
+  stageIndex = stageIndex + 1
+  convexSyncIndex = convexSyncIndex + 1
+
+  # Prepare mesh contact constraints
+  var meshSyncIndex: Int = 1
+  executeMainStage(
+    world: world
+    context: context
+    stageIndex: stageIndex
+    syncBits: (meshSyncIndex shl 16) bitor stageIndex
+  )
+  stageIndex = stageIndex + 1
+  meshSyncIndex = meshSyncIndex + 1
+
+  # Single-threaded overflow work: these constraints fit no graph colour
+  let overflowBlock: SolverBlock = overflowSolverBlock(world: world)
+  if overflowBlock.count > 0 {
+    prepareContactsScalar(world: world, context: context, block: overflowBlock)
+  }
+
+  var graphSyncIndex: Int = 1
+  loop var subStepIndex: Int = 0, subStepIndex < context.subStepCount, ++subStepIndex {
+    # The stage index restarts each sub-step; the sync bits still grow
+    var iterationStageIndex: Int = stageIndex
+
+    # Integrate velocities
+    executeMainStage(
+      world: world
+      context: context
+      stageIndex: iterationStageIndex
+      syncBits: (bodySyncIndex shl 16) bitor iterationStageIndex
+    )
+    iterationStageIndex = iterationStageIndex + 1
+    bodySyncIndex = bodySyncIndex + 1
+
+    # Warm start constraints
+    warmStartOverflow(world: world, context: context, block: overflowBlock)
+    loop var colorIndex: Int = 0, colorIndex < activeColorCount, ++colorIndex {
+      executeMainStage(
+        world: world
+        context: context
+        stageIndex: iterationStageIndex
+        syncBits: (graphSyncIndex shl 16) bitor iterationStageIndex
+      )
+      iterationStageIndex = iterationStageIndex + 1
+    }
+    graphSyncIndex = graphSyncIndex + 1
+
+    # Solve constraints; overflow constraints (usually dynamic against
+    # dynamic) have lower priority
+    loop var j: Int = 0, j < solveIterations, ++j {
+      pushOverflow(world: world, context: context, block: overflowBlock)
+      loop var colorIndex: Int = 0, colorIndex < activeColorCount, ++colorIndex {
+        executeMainStage(
+          world: world
+          context: context
+          stageIndex: iterationStageIndex
+          syncBits: (graphSyncIndex shl 16) bitor iterationStageIndex
+        )
+        iterationStageIndex = iterationStageIndex + 1
+      }
+      graphSyncIndex = graphSyncIndex + 1
+    }
+
+    # Integrate positions
+    executeMainStage(
+      world: world
+      context: context
+      stageIndex: iterationStageIndex
+      syncBits: (bodySyncIndex shl 16) bitor iterationStageIndex
+    )
+    iterationStageIndex = iterationStageIndex + 1
+    bodySyncIndex = bodySyncIndex + 1
+
+    # Relax constraints
+    loop var j: Int = 0, j < relaxIterations, ++j {
+      relaxOverflow(world: world, context: context, block: overflowBlock)
+      loop var colorIndex: Int = 0, colorIndex < activeColorCount, ++colorIndex {
+        executeMainStage(
+          world: world
+          context: context
+          stageIndex: iterationStageIndex
+          syncBits: (graphSyncIndex shl 16) bitor iterationStageIndex
+        )
+        iterationStageIndex = iterationStageIndex + 1
+      }
+      graphSyncIndex = graphSyncIndex + 1
+    }
+  }
+
+  # Advance past the sub-stepping stages
+  stageIndex = stageIndex + 1 + activeColorCount + solveIterations * activeColorCount + 1 + relaxIterations * activeColorCount
+
+  let restitutionIterations: Int = world.restitutionIterations
+  if restitutionIterations > 0 and context.anyRestitution {
+    loop var j: Int = 0, j < restitutionIterations, ++j {
+      restitutionOverflow(world: world, context: context, block: overflowBlock)
+      var iterationStageIndex: Int = stageIndex
+      loop var colorIndex: Int = 0, colorIndex < activeColorCount, ++colorIndex {
+        executeMainStage(
+          world: world
+          context: context
+          stageIndex: iterationStageIndex
+          syncBits: (graphSyncIndex shl 16) bitor iterationStageIndex
+        )
+        iterationStageIndex = iterationStageIndex + 1
+      }
+      graphSyncIndex = graphSyncIndex + 1
+    }
+  }
+  stageIndex = stageIndex + activeColorCount
+
+  # Store impulses
+  if overflowBlock.count > 0 {
+    storeImpulsesScalar(
+      contacts: world.contacts
+      constraints: context.overflowContactConstraints
+      manifolds: context.overflowManifoldConstraints
+      block: overflowBlock
+    )
+  }
+  executeMainStage(
+    world: world
+    context: context
+    stageIndex: stageIndex
+    syncBits: (convexSyncIndex shl 16) bitor stageIndex
+  )
+  stageIndex = stageIndex + 1
+  executeMainStage(
+    world: world
+    context: context
+    stageIndex: stageIndex
+    syncBits: (meshSyncIndex shl 16) bitor stageIndex
+  )
+  stageIndex = stageIndex + 1
+}
+
+# The block of every overflow contact (b3_overflowBlock)
+func overflowSolverBlock(world: view PhysicsWorld) ret SolverBlock {
+  var count: Int = 0
+  if let overflow: view GraphColor => world.constraintGraph.colors.viewAt(index: overflowIndex) {
+    count = overflow.contacts.length
+  }
+  ret SolverBlock {
+    startIndex: 0
+    count: count
+    blockType: SolverBlockType.overflowBlock
+    colorIndex: overflowIndex
+  }
+}
+
+# b3WarmStartContacts_Overflow
+func warmStartOverflow(world: mod PhysicsWorld, context: mod StepContext, block: view SolverBlock) {
+  if block.count is 0 {
+    ret
+  }
+  if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
+    warmStartContactsScalar(
+      states: awake.bodyStates
+      constraints: context.overflowContactConstraints
+      manifolds: context.overflowManifoldConstraints
+      first: 0
+      block: block
+    )
+  }
+}
+
+# b3PushContacts_Overflow
+func pushOverflow(world: mod PhysicsWorld, context: mod StepContext, block: view SolverBlock) {
+  if block.count is 0 {
+    ret
+  }
+  let contactSpeed: Float = world.contactSpeed
+  if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
+    pushContactsScalar(
+      states: awake.bodyStates
+      constraints: context.overflowContactConstraints
+      manifolds: context.overflowManifoldConstraints
+      first: 0
+      block: block
+      inverseH: context.inverseH
+      contactSpeed: contactSpeed
+    )
+  }
+}
+
+# b3SolveContacts_Overflow
+func relaxOverflow(world: mod PhysicsWorld, context: mod StepContext, block: view SolverBlock) {
+  if block.count is 0 {
+    ret
+  }
+  if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
+    solveContactsScalar(
+      states: awake.bodyStates
+      constraints: context.overflowContactConstraints
+      manifolds: context.overflowManifoldConstraints
+      first: 0
+      block: block
+      inverseH: context.inverseH
+    )
+  }
+}
+
+# b3ApplyRestitution_Overflow
+func restitutionOverflow(
+  world: mod PhysicsWorld
+  context: mod StepContext
+  block: view SolverBlock
+) {
+  if block.count is 0 {
+    ret
+  }
+  let threshold: Float = world.restitutionThreshold
+  let propagate: Bool = world.enableRestitutionPropagation
+  if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
+    applyRestitutionScalar(
+      states: awake.bodyStates
+      constraints: context.overflowContactConstraints
+      manifolds: context.overflowManifoldConstraints
+      first: 0
+      block: block
+      inverseH: context.inverseH
+      threshold: threshold
+      propagate: propagate
+    )
+  }
+}
+
+# b3Solve: solve the constraints of the awake bodies with graph colouring,
+# then finalize them.
+func solve(world: mod PhysicsWorld, context: mod StepContext) {
+  # Only steps that advance the simulation count
+  world.stepIndex = world.stepIndex + 1
+  let awakeBodyCount: Int = world.solverSets.copyAtDefault(index: awakeSet).bodySims.length
+  if awakeBodyCount is 0 {
+    ret
+  }
+  context.bulletBodies.clear()
+
+  # Prepare the move events
+  world.bodyMoveEvents.clear()
+  loop var i: Int = 0, i < awakeBodyCount, ++i {
+    world.bodyMoveEvents.add(
+      value: BodyMoveEvent {
+        transform: transformIdentity()
+        bodyId: BodyId { index1: 0, world0: 0, generation: 0 }
+        fellAsleep: false
+      }
+    )
+  }
+
+  let workerCount: Int = world.workerCount
+  # Four blocks per worker allow work stealing
+  let maxBlockCount: Int = 4 * workerCount
+  # Body blocks iterate over bodies directly
+  let bodyDim: BlockDim = computeBlockCount(
+    itemCount: awakeBodyCount
+    minSize: 32
+    maxBlockCount: maxBlockCount
+  )
+  let minContactsPerBlock: Int = 4
+  let minJointsPerBlock: Int = 4
+
+  # The active colours, in colour order, with their constraint counts
+  let plans: List(ColorPlan) = List.create(ColorPlan, cap: graphColorCount)
+  var wideContactCount: Int = 0
+  var contactCount: Int = 0
+  var manifoldCount: Int = 0
+  var graphBlockCount: Int = 0
+  loop var i: Int = 0, i < overflowIndex, ++i {
+    if let color: mod GraphColor => world.constraintGraph.colors.modAt(index: i) {
+      let colorConvexContactCount: Int = color.convexContacts.length
+      let colorContactCount: Int = color.contacts.length
+      if colorConvexContactCount + colorContactCount is 0 {
+        continue
+      }
+      # The ceiling of the wide constraint count
+      var colorWideCount: Int = 0
+      if colorConvexContactCount > 0 {
+        colorWideCount = ((colorConvexContactCount - 1) shr 2) + 1
+      }
+      wideContactCount = wideContactCount + colorWideCount
+      contactCount = contactCount + colorContactCount
+      # The manifold starts
+      loop var j: Int = 0, j < colorContactCount, ++j {
+        if let spec: mod ContactSpec => color.contacts.modAt(index: j) {
+          spec.manifoldStart = manifoldCount
+          manifoldCount = manifoldCount + spec.manifoldCount
+        }
+      }
+      let plan: ColorPlan = {
+        colorIndex: i
+        wideContactCount: colorWideCount
+        contactCount: colorContactCount
+        wideDim: computeBlockCount(
+          itemCount: colorWideCount
+          minSize: minContactsPerBlock
+          maxBlockCount: maxBlockCount
+        )
+        contactDim: computeBlockCount(
+          itemCount: colorContactCount
+          minSize: minContactsPerBlock
+          maxBlockCount: maxBlockCount
+        )
+        jointDim: computeBlockCount(
+          itemCount: 0
+          minSize: minJointsPerBlock
+          maxBlockCount: maxBlockCount
+        )
+      }
+      graphBlockCount = graphBlockCount + plan.wideDim.count + plan.contactDim.count + plan.jointDim.count
+      plans.add(value: plan)
+    }
+  }
+  let activeColorCount: Int = plans.length
+
+  # Prepare and store run as one flat range over every colour
+  let convexPrepareDim: BlockDim = computeBlockCount(
+    itemCount: wideContactCount
+    minSize: minContactsPerBlock
+    maxBlockCount: maxBlockCount
+  )
+  let meshPrepareDim: BlockDim = computeBlockCount(
+    itemCount: contactCount
+    minSize: minContactsPerBlock
+    maxBlockCount: maxBlockCount
+  )
+  let jointPrepareDim: BlockDim = computeBlockCount(
+    itemCount: 0
+    minSize: minJointsPerBlock
+    maxBlockCount: maxBlockCount
+  )
+
+  context.wideConstraints.clear()
+  loop var i: Int = 0, i < wideContactCount, ++i {
+    context.wideConstraints.add(value: zeroContactConstraintWide())
+  }
+  context.contactConstraints.clear()
+  loop var i: Int = 0, i < contactCount, ++i {
+    context.contactConstraints.add(value: zeroContactConstraint())
+  }
+  context.manifoldConstraints.clear()
+  loop var i: Int = 0, i < manifoldCount, ++i {
+    context.manifoldConstraints.add(value: zeroManifoldConstraint())
+  }
+
+  # The overflow colour's manifold starts and constraints
+  var overflowCount: Int = 0
+  var overflowManifoldCount: Int = 0
+  if let overflow: mod GraphColor => world.constraintGraph.colors.modAt(index: overflowIndex) {
+    overflowCount = overflow.contacts.length
+    loop var i: Int = 0, i < overflowCount, ++i {
+      if let spec: mod ContactSpec => overflow.contacts.modAt(index: i) {
+        spec.manifoldStart = overflowManifoldCount
+        overflowManifoldCount = overflowManifoldCount + spec.manifoldCount
+      }
+    }
+  }
+  context.overflowContactConstraints.clear()
+  loop var i: Int = 0, i < overflowCount, ++i {
+    context.overflowContactConstraints.add(value: zeroContactConstraint())
+  }
+  context.overflowManifoldConstraints.clear()
+  loop var i: Int = 0, i < overflowManifoldCount, ++i {
+    context.overflowManifoldConstraints.add(value: zeroManifoldConstraint())
+  }
+
+  # The span table of the flat prepare/store ranges, and each colour's
+  # slice of the constraint lists
+  context.widePrepareSpans.clear()
+  context.contactPrepareSpans.clear()
+  context.colorWideStarts.clear()
+  context.colorContactStarts.clear()
+  loop var i: Int = 0, i < graphColorCount, ++i {
+    context.colorWideStarts.add(value: 0)
+    context.colorContactStarts.add(value: 0)
+  }
+  var wideBase: Int = 0
+  var contactBase: Int = 0
+  loop let plan: view ColorPlan in plans {
+    let colorConvexCount: Int = world.constraintGraph.colors.copyAtDefault(index: plan.colorIndex).convexContacts.length
+    context.widePrepareSpans.add(
+      value: PrepareSpan { start: wideBase, count: colorConvexCount, colorIndex: plan.colorIndex }
+    )
+    context.colorWideStarts.set(index: plan.colorIndex, value: wideBase)
+    wideBase = wideBase + plan.wideContactCount
+    context.contactPrepareSpans.add(
+      value: PrepareSpan {
+        start: contactBase
+        count: plan.contactCount
+        colorIndex: plan.colorIndex
+      }
+    )
+    context.colorContactStarts.set(index: plan.colorIndex, value: contactBase)
+    contactBase = contactBase + plan.contactCount
+  }
+  # Sentinels
+  context.widePrepareSpans.add(
+    value: PrepareSpan { start: wideContactCount, count: 0, colorIndex: -1 }
+  )
+  context.contactPrepareSpans.add(
+    value: PrepareSpan { start: contactCount, count: 0, colorIndex: -1 }
+  )
+  context.wideContactCount = wideContactCount
+  context.overflowSpans.clear()
+  context.overflowSpans.add(
+    value: PrepareSpan { start: 0, count: overflowCount, colorIndex: overflowIndex }
+  )
+  context.overflowSpans.add(value: PrepareSpan { start: overflowCount, count: 0, colorIndex: -1 })
+
+  # (Island splitting: P4d. Without sleep no island is a split candidate.)
+
+  # The blocks: bodies, the flat prepare/store ranges, then each colour's
+  # joint, wide contact and contact blocks
+  context.syncBlocks.clear()
+  context.stages.clear()
+  let noColor: Int = 255
+  let bodyBlocks: Int = initBlocks(
+    context: context
+    dim: bodyDim
+    itemCount: awakeBodyCount
+    blockType: SolverBlockType.bodyBlock
+    colorIndex: noColor
+  )
+  let convexBlocks: Int = initBlocks(
+    context: context
+    dim: convexPrepareDim
+    itemCount: wideContactCount
+    blockType: SolverBlockType.wideContactBlock
+    colorIndex: noColor
+  )
+  let meshBlocks: Int = initBlocks(
+    context: context
+    dim: meshPrepareDim
+    itemCount: contactCount
+    blockType: SolverBlockType.contactBlock
+    colorIndex: noColor
+  )
+  let jointBlocks: Int = initBlocks(
+    context: context
+    dim: jointPrepareDim
+    itemCount: 0
+    blockType: SolverBlockType.jointBlock
+    colorIndex: noColor
+  )
+  let colorBlockStarts: List(Int) = List.create(Int, cap: graphColorCount)
+  let colorBlockCounts: List(Int) = List.create(Int, cap: graphColorCount)
+  loop let plan: view ColorPlan in plans {
+    colorBlockStarts.add(value: context.syncBlocks.length)
+    let jointStart: Int = initBlocks(
+      context: context
+      dim: plan.jointDim
+      itemCount: 0
+      blockType: SolverBlockType.graphJointBlock
+      colorIndex: plan.colorIndex
+    )
+    let wideStart: Int = initBlocks(
+      context: context
+      dim: plan.wideDim
+      itemCount: plan.wideContactCount
+      blockType: SolverBlockType.graphWideContactBlock
+      colorIndex: plan.colorIndex
+    )
+    let contactStart: Int = initBlocks(
+      context: context
+      dim: plan.contactDim
+      itemCount: plan.contactCount
+      blockType: SolverBlockType.graphContactBlock
+      colorIndex: plan.colorIndex
+    )
+    colorBlockCounts.add(value: plan.jointDim.count + plan.wideDim.count + plan.contactDim.count)
+  }
+
+  # The stage list
+  initStage(
+    context: context
+    stageType: SolverStageType.prepareJoints
+    blockStart: jointBlocks
+    blockCount: jointPrepareDim.count
+    colorIndex: noColor
+  )
+  initStage(
+    context: context
+    stageType: SolverStageType.prepareWideContacts
+    blockStart: convexBlocks
+    blockCount: convexPrepareDim.count
+    colorIndex: noColor
+  )
+  initStage(
+    context: context
+    stageType: SolverStageType.prepareContacts
+    blockStart: meshBlocks
+    blockCount: meshPrepareDim.count
+    colorIndex: noColor
+  )
+  initStage(
+    context: context
+    stageType: SolverStageType.integrateVelocities
+    blockStart: bodyBlocks
+    blockCount: bodyDim.count
+    colorIndex: noColor
+  )
+  initColorStages(
+    context: context
+    stageType: SolverStageType.warmStart
+    iterations: 1
+    plans: plans
+    starts: colorBlockStarts
+    counts: colorBlockCounts
+  )
+  initColorStages(
+    context: context
+    stageType: SolverStageType.solve
+    iterations: solveIterations
+    plans: plans
+    starts: colorBlockStarts
+    counts: colorBlockCounts
+  )
+  initStage(
+    context: context
+    stageType: SolverStageType.integratePositions
+    blockStart: bodyBlocks
+    blockCount: bodyDim.count
+    colorIndex: noColor
+  )
+  initColorStages(
+    context: context
+    stageType: SolverStageType.relax
+    iterations: relaxIterations
+    plans: plans
+    starts: colorBlockStarts
+    counts: colorBlockCounts
+  )
+  initColorStages(
+    context: context
+    stageType: SolverStageType.restitution
+    iterations: 1
+    plans: plans
+    starts: colorBlockStarts
+    counts: colorBlockCounts
+  )
+  initStage(
+    context: context
+    stageType: SolverStageType.storeWideImpulses
+    blockStart: convexBlocks
+    blockCount: convexPrepareDim.count
+    colorIndex: noColor
+  )
+  initStage(
+    context: context
+    stageType: SolverStageType.storeImpulses
+    blockStart: meshBlocks
+    blockCount: meshPrepareDim.count
+    colorIndex: noColor
+  )
+
+  context.activeColorCount = activeColorCount
+  context.workerCount = workerCount
+  context.syncBits = 0
+  context.anyRestitution = false
+
+  # Solve the constraints (worker 0 orchestrates)
+  runSolverStages(world: world, context: context)
+  world.splitIslandId = -1
+
+  # The island bits for body finalization
+  let awakeIslandCount: Int = world.solverSets.copyAtDefault(index: awakeSet).islandSims.length
+  loop var i: Int = 0, i < world.taskContexts.length, ++i {
+    if let taskContext: mod TaskContext => world.taskContexts.modAt(index: i) {
+      setBitCountAndClear(bitset: taskContext.awakeIslandBitSet, bitCount: awakeIslandCount)
+      taskContext.splitIslandId = -1
+      taskContext.splitSleepTime = 0.0
+    }
+  }
+
+  # Finalize the bodies, after the constraint solve and island splitting
+  let finalizeBlockSize: Int = parallelForBlockSize(
+    itemCount: awakeBodyCount
+    minRange: 16
+    workerCount: world.workerCount
+  )
+  let finalizeBlocks: Int = parallelForBlockCount(
+    itemCount: awakeBodyCount
+    blockSize: finalizeBlockSize
+  )
+  loop var block: Int = 0, block < finalizeBlocks, ++block {
+    finalizeBodies(
+      world: world
+      context: context
+      startIndex: parallelForBlockStart(blockIndex: block, blockSize: finalizeBlockSize)
+      endIndex: parallelForBlockEnd(
+        blockIndex: block
+        blockSize: finalizeBlockSize
+        itemCount: awakeBodyCount
+      )
+      workerIndex: 0
+    )
+  }
+
+  # (Joint events: P6. Hit events: P4d.)
+
+  # Refit the kinematic and dynamic trees
+  if let tree: mod DynamicTree => world.broadPhase.trees.modAt(index: 1) {
+    refitTree(tree: tree)
+  }
+  if let tree: mod DynamicTree => world.broadPhase.trees.modAt(index: 2) {
+    refitTree(tree: tree)
+  }
+
+  # Fast bullet bodies (a bullet may also be moving slowly)
+  let bulletBodyCount: Int = context.bulletBodies.length
+  if bulletBodyCount > 0 {
+    let bulletBlockSize: Int = parallelForBlockSize(
+      itemCount: bulletBodyCount
+      minRange: 8
+      workerCount: world.workerCount
+    )
+    let bulletBlocks: Int = parallelForBlockCount(
+      itemCount: bulletBodyCount
+      blockSize: bulletBlockSize
+    )
+    loop var block: Int = 0, block < bulletBlocks, ++block {
+      let start: Int = parallelForBlockStart(blockIndex: block, blockSize: bulletBlockSize)
+      let end: Int = parallelForBlockEnd(
+        blockIndex: block
+        blockSize: bulletBlockSize
+        itemCount: bulletBodyCount
+      )
+      loop var i: Int = start, i < end, ++i {
+        solveContinuous(
+          world: world
+          simIndex: context.bulletBodies.copyAtDefault(index: i)
+          dt: context.dt
+        )
+      }
+    }
+    # Serially enlarge the bullet shapes' proxies
+    loop var i: Int = 0, i < bulletBodyCount, ++i {
+      enlargeBulletProxies(world: world, simIndex: context.bulletBodies.copyAtDefault(index: i))
+    }
+  }
+  context.bulletBodies.clear()
+
+  # (Sensor hits: P4d.)
+
+  # Island sleep, last: it invalidates the body bits
+  if world.enableSleep {
+    sleepIslands(world: world)
+  }
+}
+
+func initColorStages(
+  context: mod StepContext
+  stageType: view SolverStageType
+  iterations: view Int
+  plans: view List(ColorPlan)
+  starts: view List(Int)
+  counts: view List(Int)
+) {
+  loop var j: Int = 0, j < iterations, ++j {
+    loop var i: Int = 0, i < plans.length, ++i {
+      initStage(
+        context: context
+        stageType: stageType
+        blockStart: starts.copyAtDefault(index: i)
+        blockCount: counts.copyAtDefault(index: i)
+        colorIndex: plans.copyAtDefault(index: i).colorIndex
+      )
+    }
+  }
+}
+
+# The bullet half of b3Solve: enlarge the proxies of a bullet whose bounds
+# grew.
+func enlargeBulletProxies(world: mod PhysicsWorld, simIndex: view Int) {
+  var sim: BodySim = world.solverSets.copyAtDefault(index: awakeSet).bodySims.copyAtDefault(
+    index: simIndex
+  )
+  if (sim.flags bitand enlargeBulletBoundsFlag) is 0 {
+    ret
+  }
+  sim.flags = sim.flags bitand (bitnot enlargeBulletBoundsFlag)
+  if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
+    awake.bodySims.set(index: simIndex, value: sim)
+  }
+  var shapeId: Int = bodyAt(world: world, bodyId: sim.bodyId).headShapeId
+  loop shapeId is not -1 {
+    let shape: Shape = world.shapes.copyAtDefault(index: shapeId)
+    let fatBox: Aabb = world.fatAabbs.copyAtDefault(index: shapeId)
+    if let tree: mod DynamicTree => world.broadPhase.trees.modAt(index: 2) {
+      let id: Int = proxyId(proxyKey: shape.proxyKey)
+      if contains(outer: treeProxyAabb(tree: tree, proxyId: id), inner: fatBox) is false {
+        enlargeTreeProxy(tree: tree, proxyId: id, box: fatBox)
+      }
+    }
+    shapeId = shape.nextShapeId
+  }
+}
+
+# The island sleep of b3Solve: pick the next island to split, then put to
+# sleep every awake island no body kept awake (in reverse: sleeping moves
+# islands out of the awake set).
+func sleepIslands(world: mod PhysicsWorld) {
+  var splitSleepTimer: Float = 0.0
+  loop var i: Int = 0, i < world.taskContexts.length, ++i {
+    let taskContext: TaskContext = world.taskContexts.copyAtDefault(index: i)
+    if taskContext.splitIslandId is not -1 and taskContext.splitSleepTime >= splitSleepTimer {
+      # Largest island id wins a tie
+      if taskContext.splitSleepTime is splitSleepTimer and taskContext.splitIslandId < world.splitIslandId {
+        continue
+      }
+      world.splitIslandId = taskContext.splitIslandId
+      splitSleepTimer = taskContext.splitSleepTime
+    }
+  }
+  let awakeIslands: Bitset = world.taskContexts.copyAtDefault(index: 0).awakeIslandBitSet
+  let islandSims: List(Int) = world.solverSets.copyAtDefault(index: awakeSet).islandSims
+  var islandIndex: Int = islandSims.length - 1
+  loop islandIndex >= 0 {
+    if getBit(bitset: awakeIslands, bitIndex: islandIndex) is false {
+      trySleepIsland(world: world, islandId: islandSims.copyAtDefault(index: islandIndex))
+    }
+    islandIndex = islandIndex - 1
+  }
+}
