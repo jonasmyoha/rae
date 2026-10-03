@@ -13,6 +13,7 @@ open physics/dynamics/WorldTypes
 open physics/dynamics/Body
 open physics/dynamics/Shape
 open physics/dynamics/World
+open physics/dynamics/Contact
 
 # b3SyncBodyFlags: copy the body's flags to its sim (keeping the sim-only
 # fast and time-of-impact flags) and state.
@@ -164,7 +165,16 @@ func updateBodyMassData(world: mod PhysicsWorld, bodyId: view Int) {
     localCenter: localCenter
   )
 
-  # (A cached contact manifold becomes invalid here: P4b.)
+  # When the center of mass changes, any cached contact manifold is invalid
+  var edgeKey: Int = body.headContactKey
+  loop edgeKey is not -1 {
+    let contactId: Int = edgeKey shr 1
+    let edgeIndex: Int = edgeKey bitand 1
+    if let contact: mod Contact => world.contacts.modAt(index: contactId) {
+      contact.flags = contact.flags bitand (bitnot relativeTransformValid)
+      edgeKey = contactEdge(contact: contact, edgeIndex: edgeIndex).nextKey
+    }
+  }
 
   # Fixed rotation
   if (sim.flags bitand fixedRotationFlags) is fixedRotationFlags {

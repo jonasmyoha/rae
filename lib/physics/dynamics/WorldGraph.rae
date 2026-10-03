@@ -1,0 +1,155 @@
+# Adding contacts to the constraint graph and removing them
+# (b3AddContactToGraph, b3RemoveContactFromGraph of Box3D's
+# constraint_graph.c at 9f998c8), with Box3D's colour assignment order.
+# Checked against the oracle in fixture 957. Joints: P6.
+open physics/Constants
+open physics/container/Bitset
+open physics/dynamics/WorldTypes
+open physics/dynamics/Body
+open physics/dynamics/Contact
+open physics/dynamics/ConstraintGraph
+open physics/dynamics/World
+
+# The colour for a constraint between bodies of types `typeA` and `typeB`
+# (the colour's body bits are set): dynamic-dynamic constraints take the
+# first free of the first colours, a constraint with one dynamic body the
+# last free from the end (higher priority); else the overflow.
+func assignContactColor(
+  world: mod PhysicsWorld
+  bodyIdA: view Int
+  bodyIdB: view Int
+  typeA: view BodyType
+  typeB: view BodyType
+) ret Int {
+  let dynamicA: Bool = typeA is BodyType.dynamicBody
+  let dynamicB: Bool = typeB is BodyType.dynamicBody
+  if dynamicA and dynamicB {
+    loop var i: Int = 0, i < dynamicColorCount, ++i {
+      if let color: mod GraphColor => world.constraintGraph.colors.modAt(index: i) {
+        if getBit(bitset: color.bodySet, bitIndex: bodyIdA) or getBit(
+          bitset: color.bodySet
+          bitIndex: bodyIdB
+        ) {
+          continue
+        }
+        setBitGrow(bitset: color.bodySet, bitIndex: bodyIdA)
+        setBitGrow(bitset: color.bodySet, bitIndex: bodyIdB)
+        ret i
+      }
+    }
+  } else if dynamicA or dynamicB {
+    var dynamicBodyId: Int = bodyIdA
+    if dynamicA is false {
+      dynamicBodyId = bodyIdB
+    }
+    var i: Int = overflowIndex - 1
+    loop i >= 1 {
+      if let color: mod GraphColor => world.constraintGraph.colors.modAt(index: i) {
+        if getBit(bitset: color.bodySet, bitIndex: dynamicBodyId) is false {
+          setBitGrow(bitset: color.bodySet, bitIndex: dynamicBodyId)
+          ret i
+        }
+      }
+      i = i - 1
+    }
+  }
+  ret overflowIndex
+}
+
+# b3AddContactToGraph: a contact that started touching (or woke up
+# touching) joins a colour.
+func addContactToGraph(world: mod PhysicsWorld, contactId: view Int) {
+  let contact: Contact = world.contacts.copyAtDefault(index: contactId)
+  let bodyIdA: Int = contact.edgeA.bodyId
+  let bodyIdB: Int = contact.edgeB.bodyId
+  let bodyA: Body = bodyAt(world: world, bodyId: bodyIdA)
+  let bodyB: Body = bodyAt(world: world, bodyId: bodyIdB)
+  let colorIndex: Int = assignContactColor(
+    world: world
+    bodyIdA: bodyIdA
+    bodyIdB: bodyIdB
+    typeA: bodyA.bodyType
+    typeB: bodyB.bodyType
+  )
+  let isScalar: Bool = (contact.flags bitand simMeshContact) is not 0 or colorIndex is overflowIndex
+  var localIndex: Int = 0
+  if let color: mod GraphColor => world.constraintGraph.colors.modAt(index: colorIndex) {
+    if isScalar {
+      localIndex = color.contacts.length
+      color.contacts.add(
+        value: ContactSpec {
+          contactId: contactId
+          manifoldStart: 0
+          manifoldCount: contact.manifolds.length
+        }
+      )
+    } else {
+      localIndex = color.convexContacts.length
+      color.convexContacts.add(value: contactId)
+    }
+  }
+  if let target: mod Contact => world.contacts.modAt(index: contactId) {
+    target.colorIndex = colorIndex
+    target.localIndex = localIndex
+    target.encodedBodySimA = encodeBodySimIndex(body: bodyA)
+    target.encodedBodySimB = encodeBodySimIndex(body: bodyB)
+  }
+}
+
+# Remove entry `localIndex` of a colour's list by moving the last one into
+# it; returns the contact id that moved, or -1.
+func removeSwapColorContact(
+  color: mod GraphColor
+  localIndex: view Int
+  scalarList: view Bool
+) ret Int {
+  if scalarList {
+    let lastIndex: Int = color.contacts.length - 1
+    var movedId: Int = -1
+    if localIndex is not lastIndex {
+      let moved: ContactSpec = color.contacts.copyAtDefault(index: lastIndex)
+      color.contacts.set(index: localIndex, value: moved)
+      movedId = moved.contactId
+    }
+    color.contacts.removeLast()
+    ret movedId
+  }
+  let lastIndex: Int = color.convexContacts.length - 1
+  var movedId: Int = -1
+  if localIndex is not lastIndex {
+    movedId = color.convexContacts.copyAtDefault(index: lastIndex)
+    color.convexContacts.set(index: localIndex, value: movedId)
+  }
+  color.convexContacts.removeLast()
+  ret movedId
+}
+
+# b3RemoveContactFromGraph
+func removeContactFromGraph(
+  world: mod PhysicsWorld
+  bodyIdA: view Int
+  bodyIdB: view Int
+  colorIndex: view Int
+  localIndex: view Int
+  meshContact: view Bool
+) {
+  var movedId: Int = -1
+  if let color: mod GraphColor => world.constraintGraph.colors.modAt(index: colorIndex) {
+    if colorIndex is not overflowIndex {
+      # This might clear a bit for a static body, which has no effect
+      clearBit(bitset: color.bodySet, bitIndex: bodyIdA)
+      clearBit(bitset: color.bodySet, bitIndex: bodyIdB)
+    }
+    movedId = removeSwapColorContact(
+      color: color
+      localIndex: localIndex
+      scalarList: meshContact or colorIndex is overflowIndex
+    )
+  }
+  if movedId is not -1 {
+    # Fix the index of the swapped contact
+    if let moved: mod Contact => world.contacts.modAt(index: movedId) {
+      moved.localIndex = localIndex
+    }
+  }
+}
