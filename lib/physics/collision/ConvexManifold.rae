@@ -1,0 +1,332 @@
+# Contact manifolds of convex shape pairs (Box3D's convex_manifold.c at
+# 9f998c8). This file has the pairs without a hull: sphere-sphere,
+# capsule-sphere and capsule-capsule. Box3D's operation order is kept
+# exactly; checked bit for bit against the oracle in fixture 950.
+#
+# Each manifold is in frame A, with B placed by `transformBtoA`.
+import Math
+open Vec3
+open physics/Constants
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/TransformMath
+open physics/math/SegmentMath
+open physics/math/PlaneMath
+open physics/geometry/QueryTypes
+open physics/collision/Manifold
+
+# A one-point manifold: `point` with `separation` along `normal`.
+func setSinglePoint(
+  manifold: mod LocalManifold
+  normal: view Vec3
+  point: view Vec3
+  separation: view Float
+) {
+  manifold.normal = normal
+  manifold.pointCount = 1
+  setManifoldPoint(
+    manifold: manifold
+    index: 0
+    point: LocalManifoldPoint {
+      point: point
+      separation: separation
+      pair: singleFeaturePair()
+      triangleIndex: 0
+    }
+  )
+}
+
+# b3CollideSpheres. Unlike the other pairs, a separated pair leaves the
+# manifold as it was (Box3D does not clear the point count here).
+func collideSpheres(
+  manifold: mod LocalManifold
+  sphereA: view Sphere
+  sphereB: view Sphere
+  transformBtoA: view Transform
+) {
+  if manifoldCapacity(manifold: manifold) is 0 {
+    ret
+  }
+  let center1: Vec3 = sphereA.center
+  let center2: Vec3 = transformPoint(transform: transformBtoA, point: sphereB.center)
+  let totalRadius: Float = sphereA.radius + sphereB.radius
+  let offset: Vec3 = subtract(left: center2, right: center1)
+  let distanceSquared: Float = lengthSquared(vector: offset)
+  if distanceSquared > totalRadius * totalRadius {
+    # A separating axis
+    ret
+  }
+
+  var normal: Vec3 = axisY()
+  let centerDistance: Float = Math.sqrt(x: distanceSquared)
+  if centerDistance * centerDistance > 1000.0 * floatMin {
+    normal = scale(scale: 1.0 / centerDistance, vector: offset)
+  }
+
+  # The contact at the midpoint: 0.5 * (((c1 + rA * n) + c2) - rB * n)
+  let point: Vec3 = scale(
+    scale: 0.5
+    vector: mulSub(
+      base: add(left: mulAdd(base: center1, scale: sphereA.radius, vector: normal), right: center2)
+      scale: sphereB.radius
+      vector: normal
+    )
+  )
+  setSinglePoint(
+    manifold: manifold
+    normal: normal
+    point: point
+    separation: centerDistance - totalRadius
+  )
+}
+
+# b3CollideCapsuleAndSphere
+func collideCapsuleAndSphere(
+  manifold: mod LocalManifold
+  capsuleA: view Capsule
+  sphereB: view Sphere
+  transformBtoA: view Transform
+) {
+  manifold.pointCount = 0
+  if manifoldCapacity(manifold: manifold) < 1 {
+    ret
+  }
+  let center: Vec3 = transformPoint(transform: transformBtoA, point: sphereB.center)
+  let totalRadius: Float = sphereB.radius + capsuleA.radius
+  let closestPoint: Vec3 = pointToSegmentDistance(
+    start: capsuleA.center1
+    end: capsuleA.center2
+    point: center
+  )
+  let offset: Vec3 = subtract(left: center, right: closestPoint)
+  let distanceSquared: Float = lengthSquared(vector: offset)
+  if distanceSquared > totalRadius * totalRadius {
+    # A separating axis
+    ret
+  }
+
+  var normal: Vec3 = axisY()
+  let centerDistance: Float = Math.sqrt(x: distanceSquared)
+  if centerDistance * centerDistance > 1000.0 * floatMin {
+    normal = scale(scale: 1.0 / centerDistance, vector: offset)
+  }
+
+  # The contact at the midpoint: 0.5 * (((center - rB * n) + closest) + rA * n)
+  let point: Vec3 = scale(
+    scale: 0.5
+    vector: mulAdd(
+      base: add(
+        left: mulSub(base: center, scale: sphereB.radius, vector: normal)
+        right: closestPoint
+      )
+      scale: capsuleA.radius
+      vector: normal
+    )
+  )
+  setSinglePoint(
+    manifold: manifold
+    normal: normal
+    point: point
+    separation: centerDistance - totalRadius
+  )
+}
+
+# b3CollideCapsules: two points when the capsules are nearly parallel and
+# their segments overlap along the axis, else one.
+func collideCapsules(
+  manifold: mod LocalManifold
+  capsuleA: view Capsule
+  capsuleB: view Capsule
+  transformBtoA: view Transform
+  lengthUnitsPerMeter: view Float
+) {
+  manifold.pointCount = 0
+  if manifoldCapacity(manifold: manifold) < 2 {
+    ret
+  }
+
+  let centerA1: Vec3 = capsuleA.center1
+  let centerA2: Vec3 = capsuleA.center2
+  let centerB1: Vec3 = transformPoint(transform: transformBtoA, point: capsuleB.center1)
+  let centerB2: Vec3 = transformPoint(transform: transformBtoA, point: capsuleB.center2)
+
+  let radius: Float = capsuleA.radius + capsuleB.radius
+  let maxDistance: Float = radius + speculativeDistance(lengthUnitsPerMeter: lengthUnitsPerMeter)
+
+  let result: SegmentDistanceResult = segmentDistance(
+    start1: centerA1
+    end1: centerA2
+    start2: centerB1
+    end2: centerB2
+  )
+  let offset: Vec3 = subtract(left: result.point2, right: result.point1)
+  let distanceSquared: Float = lengthSquared(vector: offset)
+  let slop: Float = linearSlop(lengthUnitsPerMeter: lengthUnitsPerMeter)
+  let minDistance: Float = 0.01 * slop
+  if distanceSquared > maxDistance * maxDistance or distanceSquared < minDistance * minDistance {
+    # A separating axis
+    ret
+  }
+
+  let minLength: Float = minCapsuleLength(lengthUnitsPerMeter: lengthUnitsPerMeter)
+  var lengthA: Float = 0.0
+  let edgeA: Vec3 = getLengthAndNormalize(
+    length: lengthA
+    vector: subtract(left: centerA2, right: centerA1)
+  )
+  if lengthA < minLength {
+    ret
+  }
+  var lengthB: Float = 0.0
+  let edgeB: Vec3 = getLengthAndNormalize(
+    length: lengthB
+    vector: subtract(left: centerB2, right: centerB1)
+  )
+  if lengthB < minLength {
+    ret
+  }
+
+  # Parallel edges: |eA x eB| = sin(alpha)
+  let alphaTolerance: Float = 0.05
+  let alphaToleranceSquared: Float = alphaTolerance * alphaTolerance
+  let axis: Vec3 = cross(left: edgeA, right: edgeB)
+
+  # Nearly parallel: try two contact points
+  if lengthSquared(vector: axis) < alphaToleranceSquared {
+    # The side planes of A
+    let sidePlane1: Plane = {
+      normal: negate(vector: edgeA)
+      offset: -dot(left: edgeA, right: capsuleA.center1)
+    }
+    let sidePlane2: Plane = { normal: edgeA, offset: dot(left: edgeA, right: capsuleA.center2) }
+
+    # The clip points of B
+    var vertexB1: ClipVertex = {
+      position: centerB1
+      separation: 0.0
+      pair: makeFeaturePair(
+        owner1: featureShapeA
+        index1: 0
+        owner2: featureShapeA
+        index2: 0
+      )
+    }
+    var vertexB2: ClipVertex = {
+      position: centerB2
+      separation: 0.0
+      pair: makeFeaturePair(
+        owner1: featureShapeA
+        index1: 1
+        owner2: featureShapeA
+        index2: 1
+      )
+    }
+
+    var pointCount: Int = clipSegment(first: vertexB1, second: vertexB2, plane: sidePlane1)
+    if pointCount is 2 {
+      pointCount = clipSegment(first: vertexB1, second: vertexB2, plane: sidePlane2)
+    }
+
+    if pointCount is 2 {
+      # The closest points on A to the clipped points of B
+      let closestPoint1: Vec3 = pointToSegmentDistance(
+        start: centerA1
+        end: centerA2
+        point: vertexB1.position
+      )
+      let closestPoint2: Vec3 = pointToSegmentDistance(
+        start: centerA1
+        end: centerA2
+        point: vertexB2.position
+      )
+      let distance1: Float = distance(from: closestPoint1, to: vertexB1.position)
+      let distance2: Float = distance(from: closestPoint2, to: vertexB2.position)
+      if distance1 <= radius and distance2 <= radius {
+        if distance1 < minDistance or distance2 < minDistance {
+          # Avoid a divide by zero
+          ret
+        }
+        let normal1: Vec3 = scale(
+          scale: 1.0 / distance1
+          vector: subtract(left: vertexB1.position, right: closestPoint1)
+        )
+        let normal2: Vec3 = scale(
+          scale: 1.0 / distance2
+          vector: subtract(left: vertexB2.position, right: closestPoint2)
+        )
+        let normal: Vec3 = normalize(vector: add(left: normal1, right: normal2))
+        let radiusA: Float = capsuleA.radius
+        let radiusB: Float = capsuleB.radius
+
+        # The contacts at the midpoints: 0.5 * (((vB + rA * nK) + cP) - rB * n)
+        let point1: Vec3 = scale(
+          scale: 0.5
+          vector: mulSub(
+            base: add(
+              left: mulAdd(base: vertexB1.position, scale: radiusA, vector: normal1)
+              right: closestPoint1
+            )
+            scale: radiusB
+            vector: normal
+          )
+        )
+        let point2: Vec3 = scale(
+          scale: 0.5
+          vector: mulSub(
+            base: add(
+              left: mulAdd(base: vertexB2.position, scale: radiusA, vector: normal2)
+              right: closestPoint2
+            )
+            scale: radiusB
+            vector: normal
+          )
+        )
+
+        manifold.normal = normal
+        manifold.pointCount = 2
+        setManifoldPoint(
+          manifold: manifold
+          index: 0
+          point: LocalManifoldPoint {
+            point: point1
+            separation: distance1 - radius
+            pair: vertexB1.pair
+            triangleIndex: 0
+          }
+        )
+        setManifoldPoint(
+          manifold: manifold
+          index: 1
+          point: LocalManifoldPoint {
+            point: point2
+            separation: distance2 - radius
+            pair: vertexB2.pair
+            triangleIndex: 0
+          }
+        )
+        ret
+      }
+    }
+  }
+
+  var separation: Float = 0.0
+  let normal: Vec3 = getLengthAndNormalize(length: separation, vector: offset)
+  # The contact at the midpoint: 0.5 * (((p1 + rA * n) + p2) - rB * n)
+  let point: Vec3 = scale(
+    scale: 0.5
+    vector: mulSub(
+      base: add(
+        left: mulAdd(base: result.point1, scale: capsuleA.radius, vector: normal)
+        right: result.point2
+      )
+      scale: capsuleB.radius
+      vector: normal
+    )
+  )
+  setSinglePoint(
+    manifold: manifold
+    normal: normal
+    point: point
+    separation: separation - radius
+  )
+}

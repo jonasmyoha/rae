@@ -1,0 +1,389 @@
+# Contact manifolds and the clipping they are built with (Box3D's manifold.h,
+# manifold.c and the shared helpers of convex_manifold.c at 9f998c8): feature
+# pairs, Sutherland-Hodgman polygon clipping, segment clipping, and the
+# reduction of a contact patch to four points. Box3D's operation order is
+# kept exactly; checked bit for bit against the oracle in fixture 950.
+open Vec3
+open physics/Constants
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/PlaneMath
+
+# B3_MAX_CLIP_POINTS
+const maxClipPoints: Int = 64
+
+# b3FeatureOwner: which shape a feature index belongs to.
+const featureShapeA: Int = 0
+
+const featureShapeB: Int = 1
+
+# The features a contact point came from: the incoming and outgoing edges
+# (owner and index) that clipped it (b3FeaturePair). It identifies the point
+# from step to step, so its impulse can be warm-started.
+type FeaturePair {
+  owner1: Int
+  index1: Int
+  owner2: Int
+  index2: Int
+}
+
+# One contact point, in frame A (b3LocalManifoldPoint).
+type LocalManifoldPoint {
+  point: Vec3
+  # Negative for overlap.
+  separation: Float
+  pair: FeaturePair
+  # The mesh or height-field triangle.
+  triangleIndex: Int
+}
+
+# The contact points of a shape pair, in frame A (b3LocalManifold). Box3D
+# writes into a caller's buffer of a given capacity; here the manifold owns
+# that buffer: `points` has one slot per point of capacity, `pointCount` of
+# them in use. The mesh fields of b3LocalManifold arrive with the triangle
+# manifolds.
+type LocalManifold {
+  normal: Vec3
+  points: List(LocalManifoldPoint)
+  pointCount: Int
+}
+
+# A polygon vertex being clipped (b3ClipVertex).
+type ClipVertex {
+  position: Vec3
+  separation: Float
+  pair: FeaturePair
+}
+
+# b3FeaturePair_single: the pair of a single-point contact (sphere-sphere,
+# sphere-capsule, sphere-triangle).
+func singleFeaturePair() ret FeaturePair {
+  ret FeaturePair { owner1: 0, index1: 0, owner2: 0, index2: 0 }
+}
+
+func emptyManifoldPoint() ret LocalManifoldPoint {
+  ret LocalManifoldPoint {
+    point: zeroVector()
+    separation: 0.0
+    pair: singleFeaturePair()
+    triangleIndex: 0
+  }
+}
+
+# A manifold with room for `capacity` points, none in use.
+func createLocalManifold(capacity: view Int) ret LocalManifold {
+  let points: List(LocalManifoldPoint) = List.create(LocalManifoldPoint, cap: capacity)
+  loop var i: Int = 0, i < capacity, ++i {
+    points.add(value: emptyManifoldPoint())
+  }
+  ret LocalManifold { normal: zeroVector(), points: points, pointCount: 0 }
+}
+
+# How many points the manifold has room for.
+func manifoldCapacity(manifold: view LocalManifold) ret Int {
+  ret manifold.points.length
+}
+
+func manifoldPoint(manifold: view LocalManifold, index: view Int) ret LocalManifoldPoint {
+  ret manifold.points.copyAtDefault(index: index)
+}
+
+func setManifoldPoint(
+  manifold: mod LocalManifold
+  index: view Int
+  point: view LocalManifoldPoint
+) {
+  manifold.points.set(index: index, value: point)
+}
+
+# b3MakeFeaturePair
+func makeFeaturePair(
+  owner1: view Int
+  index1: view Int
+  owner2: view Int
+  index2: view Int
+) ret FeaturePair {
+  ret FeaturePair { owner1: owner1, index1: index1, owner2: owner2, index2: index2 }
+}
+
+# b3FlipPair: the same pair seen from the other shape. It looks wrong, but it
+# makes choosing face A or face B as the reference give the same pair, so
+# the contact impulses persist through reference-face flip-flop.
+func flipPair(pair: view FeaturePair) ret FeaturePair {
+  ret FeaturePair {
+    owner1: 1 - pair.owner2
+    index1: pair.index2
+    owner2: 1 - pair.owner1
+    index2: pair.index1
+  }
+}
+
+# b3MakeFeatureId: the pair packed into one integer.
+func makeFeatureId(pair: view FeaturePair) ret Int {
+  ret (pair.owner1 shl 24) bitor (pair.index1 shl 16) bitor (pair.owner2 shl 8) bitor pair.index2
+}
+
+# b3ClipPolygon: Sutherland-Hodgman clipping of `polygon` (3 or more
+# vertices) against `clipPlane`, into `out`. A vertex created on the plane
+# takes `edge` (on shape A) as its clipped edge and its separation from
+# `refPlane`. Returns the clipped vertex count.
+func clipPolygon(
+  out: mod List(ClipVertex)
+  polygon: view List(ClipVertex)
+  clipPlane: view Plane
+  edge: view Int
+  refPlane: view Plane
+) ret Int {
+  out.clear()
+  let count: Int = polygon.length
+  var vertex1: ClipVertex = polygon.copyAtDefault(index: count - 1)
+  var distance1: Float = planeSeparation(plane: clipPlane, point: vertex1.position)
+  loop var index: Int = 0, index < count, ++index {
+    let vertex2: ClipVertex = polygon.copyAtDefault(index: index)
+    let distance2: Float = planeSeparation(plane: clipPlane, point: vertex2.position)
+    if distance1 <= 0.0 and distance2 <= 0.0 {
+      # Both behind the plane: keep vertex2
+      out.add(value: vertex2)
+    } else if distance1 <= 0.0 and distance2 > 0.0 {
+      # vertex1 behind, vertex2 in front: the intersection, with the
+      # clipping edge as its outgoing edge
+      let fraction: Float = distance1 / (distance1 - distance2)
+      let position: Vec3 = mulAdd(
+        base: vertex1.position
+        scale: fraction
+        vector: subtract(left: vertex2.position, right: vertex1.position)
+      )
+      var vertex: ClipVertex = {
+        position: position
+        separation: planeSeparation(plane: refPlane, point: position)
+        pair: vertex2.pair
+      }
+      vertex.pair.owner2 = featureShapeA
+      vertex.pair.index2 = edge
+      out.add(value: vertex)
+    } else if distance2 <= 0.0 and distance1 > 0.0 {
+      # vertex1 in front, vertex2 behind: the intersection, with the
+      # clipping edge as its incoming edge, then vertex2
+      let fraction: Float = distance1 / (distance1 - distance2)
+      let position: Vec3 = mulAdd(
+        base: vertex1.position
+        scale: fraction
+        vector: subtract(left: vertex2.position, right: vertex1.position)
+      )
+      var vertex: ClipVertex = {
+        position: position
+        separation: planeSeparation(plane: refPlane, point: position)
+        pair: vertex1.pair
+      }
+      vertex.pair.owner1 = featureShapeA
+      vertex.pair.index1 = edge
+      out.add(value: vertex)
+      out.add(value: vertex2)
+    }
+    # vertex2 starts the next edge
+    vertex1 = vertex2
+    distance1 = distance2
+  }
+  ret out.length
+}
+
+# b3ClipSegment: clip the segment `first`-`second` against `plane`, in
+# place; returns how many of the two slots hold the clipped segment. A point
+# created on the plane keeps the separation already in its slot, as in Box3D.
+func clipSegment(first: mod ClipVertex, second: mod ClipVertex, plane: view Plane) ret Int {
+  var vertexCount: Int = 0
+  let vertex1: ClipVertex = first
+  let vertex2: ClipVertex = second
+  let distance1: Float = planeSeparation(plane: plane, point: vertex1.position)
+  let distance2: Float = planeSeparation(plane: plane, point: vertex2.position)
+
+  # The points behind the plane
+  if distance1 <= 0.0 {
+    first = vertex1
+    vertexCount = vertexCount + 1
+  }
+  if distance2 <= 0.0 {
+    if vertexCount is 0 {
+      first = vertex2
+    } else {
+      second = vertex2
+    }
+    vertexCount = vertexCount + 1
+  }
+
+  # Points on different sides: the intersection of the edge and the plane
+  if distance1 * distance2 < 0.0 {
+    let fraction: Float = distance1 / (distance1 - distance2)
+    let position: Vec3 = add(
+      left: scale(scale: 1.0 - fraction, vector: vertex1.position)
+      right: scale(scale: fraction, vector: vertex2.position)
+    )
+    var pair: FeaturePair = vertex2.pair
+    if distance1 > 0.0 {
+      pair = vertex1.pair
+    }
+    if vertexCount is 0 {
+      first.position = position
+      first.pair = pair
+    } else {
+      second.position = position
+      second.pair = pair
+    }
+    vertexCount = vertexCount + 1
+  }
+  ret vertexCount
+}
+
+# Move the last of the first `count` points into slot `index` (Box3D's
+# `points[index] = points[count - 1]`).
+func removePoint(points: mod List(LocalManifoldPoint), index: view Int, count: view Int) {
+  points.set(index: index, value: points.copyAtDefault(index: count - 1))
+}
+
+# b3ReduceManifoldPoints (B3_MAX_MANIFOLD_POINTS = 4): pick at most four of
+# the first `count` points: the deepest touching extreme point, the farthest
+# from it, the largest triangle, then the most area added outside it. A 0.95
+# bias gives a pecking order so near-equal candidates do not flicker between
+# steps. Reorders `points`.
+func reduceManifoldPoints(
+  manifold: mod LocalManifold
+  points: mod List(LocalManifoldPoint)
+  count: view Int
+  lengthUnitsPerMeter: view Float
+) {
+  if manifoldCapacity(manifold: manifold) < 4 {
+    ret
+  }
+  var remaining: Int = count
+  if remaining <= 4 {
+    loop var i: Int = 0, i < remaining, ++i {
+      setManifoldPoint(manifold: manifold, index: i, point: points.copyAtDefault(index: i))
+    }
+    manifold.pointCount = remaining
+    ret
+  }
+
+  let normal: Vec3 = manifold.normal
+  let speculative: Float = speculativeDistance(lengthUnitsPerMeter: lengthUnitsPerMeter)
+  let toleranceSquared: Float = speculative * speculative
+  let bias: Float = 0.95
+
+  # Step 1: the extreme touching point
+  var bestIndex: Int = -1
+  var bestScore: Float = -floatMax
+  let searchDirection: Vec3 = arbitraryPerp(vector: normal)
+  loop var index: Int = 0, index < remaining, ++index {
+    let candidate: LocalManifoldPoint = points.copyAtDefault(index: index)
+    if candidate.separation > speculative {
+      continue
+    }
+    # The deeper the better
+    let score: Float = -candidate.separation + dot(left: searchDirection, right: candidate.point)
+    if bias * score > bestScore {
+      bestIndex = index
+      bestScore = score
+    }
+  }
+  if bestIndex is -1 {
+    manifold.pointCount = 0
+    ret
+  }
+  setManifoldPoint(manifold: manifold, index: 0, point: points.copyAtDefault(index: bestIndex))
+  manifold.pointCount = 1
+  removePoint(points: points, index: bestIndex, count: remaining)
+  remaining = remaining - 1
+  let pointA: Vec3 = manifoldPoint(manifold: manifold, index: 0).point
+
+  # Step 2: the farthest point in 2D
+  bestScore = 0.0
+  bestIndex = -1
+  loop var index: Int = 0, index < remaining, ++index {
+    let candidate: LocalManifoldPoint = points.copyAtDefault(index: index)
+    let offset: Vec3 = subtract(left: candidate.point, right: pointA)
+    let planar: Vec3 = mulSub(base: offset, scale: dot(left: offset, right: normal), vector: normal)
+    let planarDistanceSquared: Float = lengthSquared(vector: planar)
+    let depth: Float = maxFloat(left: 0.0, right: -candidate.separation)
+    let score: Float = planarDistanceSquared + 4.0 * depth * depth
+    if bias * score > bestScore {
+      bestScore = score
+      bestIndex = index
+    }
+  }
+  if bestScore < toleranceSquared {
+    ret
+  }
+  setManifoldPoint(manifold: manifold, index: 1, point: points.copyAtDefault(index: bestIndex))
+  manifold.pointCount = 2
+  removePoint(points: points, index: bestIndex, count: remaining)
+  remaining = remaining - 1
+  let pointB: Vec3 = manifoldPoint(manifold: manifold, index: 1).point
+
+  # Step 3: the point of the largest triangle
+  bestScore = toleranceSquared
+  bestIndex = -1
+  var bestSignedArea: Float = 0.0
+  let ba: Vec3 = subtract(left: pointB, right: pointA)
+  loop var index: Int = 0, index < remaining, ++index {
+    let candidate: Vec3 = points.copyAtDefault(index: index).point
+    let signedArea: Float = dot(
+      left: normal
+      right: cross(left: ba, right: subtract(left: candidate, right: pointA))
+    )
+    let score: Float = absFloat(value: signedArea)
+    if bias * score >= bestScore {
+      bestScore = score
+      bestIndex = index
+      bestSignedArea = signedArea
+    }
+  }
+  if bestIndex is -1 {
+    ret
+  }
+  setManifoldPoint(manifold: manifold, index: 2, point: points.copyAtDefault(index: bestIndex))
+  manifold.pointCount = 3
+  removePoint(points: points, index: bestIndex, count: remaining)
+  remaining = remaining - 1
+  let pointC: Vec3 = manifoldPoint(manifold: manifold, index: 2).point
+
+  # Step 4: the point that adds the most area outside the triangle
+  bestScore = toleranceSquared
+  bestIndex = -1
+  var sign: Float = 1.0
+  if bestSignedArea < 0.0 {
+    sign = -1.0
+  }
+  loop var index: Int = 0, index < remaining, ++index {
+    let candidate: Vec3 = points.copyAtDefault(index: index).point
+    let area1: Float = sign * dot(
+      left: normal
+      right: cross(left: subtract(left: candidate, right: pointA), right: ba)
+    )
+    let area2: Float = sign * dot(
+      left: normal
+      right: cross(
+        left: subtract(left: candidate, right: pointB)
+        right: subtract(left: pointC, right: pointB)
+      )
+    )
+    let area3: Float = sign * dot(
+      left: normal
+      right: cross(
+        left: subtract(left: candidate, right: pointC)
+        right: subtract(left: pointA, right: pointC)
+      )
+    )
+    let score: Float = maxFloat(left: area1, right: maxFloat(left: area2, right: area3))
+    if bias * score > bestScore {
+      bestScore = score
+      bestIndex = index
+    }
+  }
+  if bestIndex is not -1 {
+    setManifoldPoint(
+      manifold: manifold
+      index: manifold.pointCount
+      point: points.copyAtDefault(index: bestIndex)
+    )
+    manifold.pointCount = manifold.pointCount + 1
+  }
+}
