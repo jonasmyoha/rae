@@ -1,0 +1,184 @@
+# The set of shape pairs that have a contact (b3HashSet of Box3D's table.c
+# and table.h at 9f998c8): open addressing with linear probing over UInt64
+# keys, in place of Box3D's verstable-era C set. Box3D's probing, growth and
+# backward-shift removal are kept exactly, so a slot layout matches Box3D's
+# for the same operations (fixture 953 checks it).
+import Math
+open physics/Constants
+
+# One slot: an empty slot has hash 0 (key 0 is never stored).
+type SetItem {
+  key: UInt64
+  hash: Int
+}
+
+type PairSet {
+  # A power-of-two count of slots
+  items: List(SetItem)
+  count: Int
+}
+
+# B3_SHAPE_MASK, B3_CHILD_MASK
+func shapeMask() ret Int {
+  ret maxShapes - 1
+}
+
+func childMask() ret Int {
+  ret (1 shl childPower) - 1
+}
+
+# b3KeyHash: a 64-bit mix (the MurmurHash3 finalizer), truncated to 32 bits.
+func keyHash(key: view UInt64) ret Int {
+  var hashed: UInt64 = key
+  hashed = hashed bitxor (hashed shr 33)
+  hashed = hashed * 18397679294719823053
+  hashed = hashed bitxor (hashed shr 33)
+  hashed = hashed * 14181476777654086739
+  hashed = hashed bitxor (hashed shr 33)
+  ret (hashed bitand 4294967295) as Int
+}
+
+# b3ShapePairKey: the key of shapes `shape1`, `shape2` (in either order)
+# and compound child `child`: the smaller shape id in the top bits.
+func shapePairKey(shape1: view Int, shape2: view Int, child: view Int) ret UInt64 {
+  var low: Int = shape1
+  var high: Int = shape2
+  if (shape1 < shape2) is false {
+    low = shape2
+    high = shape1
+  }
+  let first: UInt64 = (shapeMask() bitand low) as UInt64
+  let second: UInt64 = (shapeMask() bitand high) as UInt64
+  let childBits: UInt64 = (childMask() bitand child) as UInt64
+  ret (first shl (64 - shapePower)) bitor (second shl (64 - 2 * shapePower)) bitor childBits
+}
+
+# b3RoundUpPowerOf2 (ctz.h)
+func roundUpPowerOf2(value: view Int) ret Int {
+  if value <= 1 {
+    ret 1
+  }
+  ret 1 shl (64 - Math.leadingZeros(x: value - 1))
+}
+
+func emptySlots(capacity: view Int) ret List(SetItem) {
+  let items: List(SetItem) = List.create(SetItem, cap: capacity)
+  loop var i: Int = 0, i < capacity, ++i {
+    items.add(value: SetItem { key: 0, hash: 0 })
+  }
+  ret items
+}
+
+# b3CreateSet: at least 16 slots, a power of two.
+func createPairSet(capacity: view Int) ret PairSet {
+  var slots: Int = 16
+  if capacity > 16 {
+    slots = roundUpPowerOf2(value: capacity)
+  }
+  ret PairSet { items: emptySlots(capacity: slots), count: 0 }
+}
+
+# b3ClearSet
+func clearPairSet(set: mod PairSet) {
+  set.count = 0
+  let capacity: Int = set.items.length
+  set.items = emptySlots(capacity: capacity)
+}
+
+func pairSetCapacity(set: view PairSet) ret Int {
+  ret set.items.length
+}
+
+# b3FindSlot: the slot holding `key`, or the empty slot it would go in.
+func findSlot(set: view PairSet, key: view UInt64, hash: view Int) ret Int {
+  let capacity: Int = set.items.length
+  var index: Int = hash bitand (capacity - 1)
+  loop true {
+    let item: SetItem = set.items.copyAtDefault(index: index)
+    if item.hash is 0 or item.key is key {
+      break
+    }
+    index = (index + 1) bitand (capacity - 1)
+  }
+  ret index
+}
+
+# b3AddKeyHaveCapacity
+func addKeyHaveCapacity(set: mod PairSet, key: view UInt64, hash: view Int) {
+  let index: Int = findSlot(set: set, key: key, hash: hash)
+  set.items.set(index: index, value: SetItem { key: key, hash: hash })
+  set.count = set.count + 1
+}
+
+# b3GrowTable: twice the slots, the items reinserted in slot order.
+func growPairSet(set: mod PairSet) {
+  let oldItems: List(SetItem) = set.items
+  set.count = 0
+  set.items = emptySlots(capacity: 2 * oldItems.length)
+  loop let item: view SetItem in oldItems {
+    if item.hash is 0 {
+      continue
+    }
+    addKeyHaveCapacity(set: set, key: item.key, hash: item.hash)
+  }
+}
+
+# b3ContainsKey
+func pairSetContains(set: view PairSet, key: view UInt64) ret Bool {
+  let hash: Int = keyHash(key: key)
+  let index: Int = findSlot(set: set, key: key, hash: hash)
+  ret set.items.copyAtDefault(index: index).key is key
+}
+
+# b3AddKey: true if the key was already there. Grows at half full.
+func addPairKey(set: mod PairSet, key: view UInt64) ret Bool {
+  let hash: Int = keyHash(key: key)
+  let index: Int = findSlot(set: set, key: key, hash: hash)
+  if set.items.copyAtDefault(index: index).hash is not 0 {
+    # Already in the set
+    ret true
+  }
+  if 2 * set.count >= set.items.length {
+    growPairSet(set: set)
+  }
+  addKeyHaveCapacity(set: set, key: key, hash: hash)
+  ret false
+}
+
+# b3RemoveKey: true if the key was there. The cluster after the freed slot
+# is shifted back so every key stays reachable from its home slot.
+func removePairKey(set: mod PairSet, key: view UInt64) ret Bool {
+  let hash: Int = keyHash(key: key)
+  var i: Int = findSlot(set: set, key: key, hash: hash)
+  if set.items.copyAtDefault(index: i).hash is 0 {
+    ret false
+  }
+  set.items.set(index: i, value: SetItem { key: 0, hash: 0 })
+  set.count = set.count - 1
+
+  var j: Int = i
+  let capacity: Int = set.items.length
+  loop true {
+    j = (j + 1) bitand (capacity - 1)
+    let item: SetItem = set.items.copyAtDefault(index: j)
+    if item.hash is 0 {
+      break
+    }
+    # The home slot of the item at j: does it lie cyclically in (i, j]?
+    let home: Int = item.hash bitand (capacity - 1)
+    if i <= j {
+      if i < home and home <= j {
+        continue
+      }
+    } else {
+      if i < home or home <= j {
+        continue
+      }
+    }
+    # Move j into i
+    set.items.set(index: i, value: item)
+    set.items.set(index: j, value: SetItem { key: 0, hash: 0 })
+    i = j
+  }
+  ret true
+}

@@ -1,0 +1,911 @@
+# The dynamic AABB tree of Box3D's dynamic_tree.c at 9f998c8, part 1: its
+# data, node and proxy allocation, insertion with greedy SAH sibling choice
+# and rotations, removal, moving and enlarging proxies. Queries are
+# DynamicTreeQuery.rae, the rebuild and the moved-node bookkeeping
+# DynamicTreeRebuild.rae. Box3D's operation order is kept exactly; checked
+# bit for bit against the oracle in fixture 953.
+#
+# Nodes come in sibling pairs at even indices; node 0 is the root and node
+# 1 is always empty. A node's `flagIndex` packs a leaf flag (bit 31), a
+# moved flag (bit 30) and the index of its child pair, or for a leaf its
+# proxy id (bits 0-29). Box3D keeps the node and proxy arrays as raw
+# allocations with capacities; here they are Lists that grow as needed,
+# except the proxy pool, whose capacity decides the order proxy ids are
+# handed out and is therefore kept exactly.
+import Math
+open Vec3
+open physics/Constants
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/AabbMath
+open physics/math/Validation
+
+# B3_MOVED_NODE, B3_LEAF_NODE, B3_NODE_INDEX_MASK, B3_EMPTY_NODE
+const movedNode: Int = 1073741824
+
+const leafNode: Int = 2147483648
+
+const nodeIndexMask: Int = 1073741823
+
+const emptyNode: Int = 3221225471
+
+const rootNode: Int = 0
+
+# B3_TREE_STACK_SIZE
+const treeStackSize: Int = 512
+
+# A tree node (b3TreeNode). `height` is the height of an internal node, and
+# for a leaf the shape index (the low 32 bits of the proxy's user data):
+# Box3D's union of the two.
+type TreeNode {
+  aabb: Aabb
+  flagIndex: Int
+  height: Int
+}
+
+# A proxy: the cold data of a leaf (b3TreeProxy). `node` is -1 for a free
+# proxy, whose `next` chains the free list.
+type TreeProxy {
+  userData: UInt64
+  categoryBits: UInt64
+  node: Int
+  next: Int
+}
+
+# Visit counts of a query (b3TreeStats).
+type TreeStats {
+  nodeVisits: Int
+  leafVisits: Int
+}
+
+type DynamicTree {
+  # The nodes; every allocated node is below nodeEnd.
+  nodes: List(TreeNode)
+  # The parent of each node; the free pair list is chained through it.
+  parents: List(Int)
+  # The proxy pool; its length is Box3D's proxy capacity.
+  proxies: List(TreeProxy)
+  nodeEnd: Int
+  # Free pairs below nodeEnd
+  pairFreeList: Int
+  proxyCount: Int
+  proxyFreeList: Int
+  # Rebuild scratch
+  swapNodes: List(TreeNode)
+  leafIndices: List(Int)
+  leafNodes: List(TreeNode)
+  leafCenters: List(Vec3)
+  # Children follow their parents (cache friendly, and the sweep refit
+  # needs it). Inserting can break it; a rebuild restores it.
+  dfsOrdered: Bool
+}
+
+# b3MakeEmptyNode
+func makeEmptyNode() ret TreeNode {
+  let inf: Float = Math.floatFromBits(bits: 2139095040)
+  ret TreeNode {
+    aabb: Aabb {
+      lowerBound: Vec3 { x: inf, y: inf, z: inf }
+      upperBound: Vec3 { x: -inf, y: -inf, z: -inf }
+    }
+    flagIndex: emptyNode
+    height: 0
+  }
+}
+
+func isLeafNode(node: view TreeNode) ret Bool {
+  ret (node.flagIndex bitand leafNode) is leafNode
+}
+
+func isMovedNode(node: view TreeNode) ret Bool {
+  ret (node.flagIndex bitand movedNode) is movedNode
+}
+
+func isEmptyTreeNode(node: view TreeNode) ret Bool {
+  ret node.flagIndex is emptyNode
+}
+
+# b3GetLeftChild: the first index of an internal node's child pair.
+func leftChild(node: view TreeNode) ret Int {
+  ret node.flagIndex bitand nodeIndexMask
+}
+
+# b3GetProxyId: the proxy of a leaf.
+func nodeProxyId(node: view TreeNode) ret Int {
+  ret node.flagIndex bitand nodeIndexMask
+}
+
+func treeNode(tree: view DynamicTree, index: view Int) ret TreeNode {
+  ret tree.nodes.copyAtDefault(index: index)
+}
+
+# The box of node `index` (a whole value, so it can be passed on directly).
+func nodeBox(tree: view DynamicTree, index: view Int) ret Aabb {
+  ret tree.nodes.copyAtDefault(index: index).aabb
+}
+
+func treeParent(tree: view DynamicTree, index: view Int) ret Int {
+  ret tree.parents.copyAtDefault(index: index)
+}
+
+func treeProxy(tree: view DynamicTree, proxyId: view Int) ret TreeProxy {
+  ret tree.proxies.copyAtDefault(index: proxyId)
+}
+
+# Write node `index`, growing the arrays when it is past their end.
+func setTreeNode(tree: mod DynamicTree, index: view Int, node: view TreeNode) {
+  loop tree.nodes.length <= index {
+    tree.nodes.add(value: makeEmptyNode())
+    tree.parents.add(value: 0)
+  }
+  tree.nodes.set(index: index, value: node)
+}
+
+func setTreeParent(tree: mod DynamicTree, index: view Int, parent: view Int) {
+  loop tree.parents.length <= index {
+    tree.nodes.add(value: makeEmptyNode())
+    tree.parents.add(value: 0)
+  }
+  tree.parents.set(index: index, value: parent)
+}
+
+func setProxyNode(tree: mod DynamicTree, proxyId: view Int, node: view Int) {
+  var proxy: TreeProxy = treeProxy(tree: tree, proxyId: proxyId)
+  proxy.node = node
+  tree.proxies.set(index: proxyId, value: proxy)
+}
+
+# b3GetRootPair: the pair a traversal starts from (the root itself when it
+# is a leaf).
+func rootPair(tree: view DynamicTree) ret Int {
+  let root: TreeNode = treeNode(tree: tree, index: rootNode)
+  if isLeafNode(node: root) {
+    ret rootNode
+  }
+  ret leftChild(node: root)
+}
+
+# b3Perimeter (aabb.h): the surface area heuristic's cost of a box.
+func perimeter(box: view Aabb) ret Float {
+  let wx: Float = box.upperBound.x - box.lowerBound.x
+  let wy: Float = box.upperBound.y - box.lowerBound.y
+  let wz: Float = box.upperBound.z - box.lowerBound.z
+  ret 2.0 * (wx * wz + wy * wx + wz * wy)
+}
+
+# b3EnlargeAABB (aabb.h): grow `box` to contain `other`; true if it changed.
+func enlargeAabb(box: mod Aabb, other: view Aabb) ret Bool {
+  var changed: Bool = false
+  if other.lowerBound.x < box.lowerBound.x {
+    box.lowerBound.x = other.lowerBound.x
+    changed = true
+  }
+  if other.lowerBound.y < box.lowerBound.y {
+    box.lowerBound.y = other.lowerBound.y
+    changed = true
+  }
+  if other.lowerBound.z < box.lowerBound.z {
+    box.lowerBound.z = other.lowerBound.z
+    changed = true
+  }
+  if box.upperBound.x < other.upperBound.x {
+    box.upperBound.x = other.upperBound.x
+    changed = true
+  }
+  if box.upperBound.y < other.upperBound.y {
+    box.upperBound.y = other.upperBound.y
+    changed = true
+  }
+  if box.upperBound.z < other.upperBound.z {
+    box.upperBound.z = other.upperBound.z
+    changed = true
+  }
+  ret changed
+}
+
+# A free proxy slot, its `next` chaining the free list.
+func freeProxySlot(next: view Int) ret TreeProxy {
+  ret TreeProxy { userData: 0, categoryBits: 0, node: -1, next: next }
+}
+
+# b3DynamicTree_Create: room for `proxyCapacity` proxies (at least 16).
+func createDynamicTree(proxyCapacity: view Int) ret DynamicTree {
+  let capacity: Int = maxInt(left: proxyCapacity, right: 16)
+  var tree: DynamicTree = {
+    nodes: List.create(TreeNode, cap: 2 * capacity)
+    parents: List.create(Int, cap: 2 * capacity)
+    proxies: List.create(TreeProxy, cap: capacity)
+    nodeEnd: 2
+    pairFreeList: -1
+    proxyCount: 0
+    proxyFreeList: 0
+    swapNodes: List.create(TreeNode, cap: 0)
+    leafIndices: List.create(Int, cap: 0)
+    leafNodes: List.create(TreeNode, cap: 0)
+    leafCenters: List.create(Vec3, cap: 0)
+    dfsOrdered: true
+  }
+  # The root and the empty node always exist
+  tree.nodes.add(value: makeEmptyNode())
+  tree.nodes.add(value: makeEmptyNode())
+  tree.parents.add(value: -1)
+  tree.parents.add(value: -1)
+  loop var i: Int = 0, i < capacity - 1, ++i {
+    tree.proxies.add(value: freeProxySlot(next: i + 1))
+  }
+  tree.proxies.add(value: freeProxySlot(next: -1))
+  ret tree
+}
+
+# b3AllocateSiblingPair: from the free pair list, else bumped at nodeEnd.
+func allocateSiblingPair(tree: mod DynamicTree) ret Int {
+  if tree.pairFreeList is not -1 {
+    let pair: Int = tree.pairFreeList
+    tree.pairFreeList = treeParent(tree: tree, index: pair)
+    ret pair
+  }
+  let pair: Int = tree.nodeEnd
+  tree.nodeEnd = tree.nodeEnd + 2
+  ret pair
+}
+
+# b3FreePair: empty both nodes and chain the pair on the free list.
+func freePair(tree: mod DynamicTree, pair: view Int) {
+  setTreeNode(tree: tree, index: pair, node: makeEmptyNode())
+  setTreeNode(tree: tree, index: pair + 1, node: makeEmptyNode())
+  setTreeParent(tree: tree, index: pair, parent: tree.pairFreeList)
+  setTreeParent(tree: tree, index: pair + 1, parent: -1)
+  tree.pairFreeList = pair
+}
+
+# b3AllocateProxy: from the free list, growing the pool by half when empty.
+func allocateProxy(tree: mod DynamicTree) ret Int {
+  if tree.proxyFreeList is -1 {
+    let oldCapacity: Int = tree.proxies.length
+    let newCapacity: Int = oldCapacity + maxInt(left: oldCapacity shr 1, right: 1)
+    loop var i: Int = oldCapacity, i < newCapacity - 1, ++i {
+      tree.proxies.add(value: freeProxySlot(next: i + 1))
+    }
+    tree.proxies.add(value: freeProxySlot(next: -1))
+    tree.proxyFreeList = oldCapacity
+  }
+  let proxyIndex: Int = tree.proxyFreeList
+  tree.proxyFreeList = treeProxy(tree: tree, proxyId: proxyIndex).next
+  tree.proxies.set(index: proxyIndex, value: freeProxySlot(next: -1))
+  tree.proxyCount = tree.proxyCount + 1
+  ret proxyIndex
+}
+
+# b3FreeProxy
+func freeProxy(tree: mod DynamicTree, proxyId: view Int) {
+  var proxy: TreeProxy = treeProxy(tree: tree, proxyId: proxyId)
+  proxy.node = -1
+  proxy.next = tree.proxyFreeList
+  tree.proxies.set(index: proxyId, value: proxy)
+  tree.proxyFreeList = proxyId
+  tree.proxyCount = tree.proxyCount - 1
+}
+
+# b3GetNodeHeight: 0 for a leaf.
+func nodeHeight(node: view TreeNode) ret Int {
+  if isLeafNode(node: node) {
+    ret 0
+  }
+  ret node.height
+}
+
+# b3MakeInternalNode: the parent of child pair `pair`: their union, moved
+# if either moved.
+func makeInternalNode(tree: view DynamicTree, pair: view Int) ret TreeNode {
+  let child1: TreeNode = treeNode(tree: tree, index: pair)
+  let child2: TreeNode = treeNode(tree: tree, index: pair + 1)
+  ret TreeNode {
+    aabb: union(first: child1.aabb, second: child2.aabb)
+    flagIndex: pair bitor ((child1.flagIndex bitor child2.flagIndex) bitand movedNode)
+    height: 1 + maxInt(left: nodeHeight(node: child1), right: nodeHeight(node: child2))
+  }
+}
+
+# The low 32 bits of user data as a signed 32-bit shape index.
+func shapeIndexOf(userData: view UInt64) ret Int {
+  let low: Int = (userData bitand 4294967295) as Int
+  if low >= 2147483648 {
+    ret low - 4294967296
+  }
+  ret low
+}
+
+# b3MakeLeafNode
+func makeLeafNode(
+  box: view Aabb
+  proxyId: view Int
+  userData: view UInt64
+  moved: view Bool
+) ret TreeNode {
+  var flags: Int = proxyId bitor leafNode
+  if moved {
+    flags = flags bitor movedNode
+  }
+  ret TreeNode { aabb: box, flagIndex: flags, height: shapeIndexOf(userData: userData) }
+}
+
+# b3LinkChildren: a node landed at `nodeIndex`, so point what hangs below
+# it back at it.
+func linkChildren(tree: mod DynamicTree, nodeIndex: view Int) {
+  let node: TreeNode = treeNode(tree: tree, index: nodeIndex)
+  if isLeafNode(node: node) {
+    setProxyNode(tree: tree, proxyId: nodeProxyId(node: node), node: nodeIndex)
+  } else {
+    let pair: Int = leftChild(node: node)
+    setTreeParent(tree: tree, index: pair, parent: nodeIndex)
+    setTreeParent(tree: tree, index: pair + 1, parent: nodeIndex)
+  }
+}
+
+# b3IsNodeOrdered: the sweep refit needs every child above its parent.
+func isNodeOrdered(tree: view DynamicTree, nodeIndex: view Int) ret Bool {
+  let node: TreeNode = treeNode(tree: tree, index: nodeIndex)
+  ret isLeafNode(node: node) or nodeIndex < leftChild(node: node)
+}
+
+# b3FindBestSibling: the greedy SAH choice of the node the new leaf `boxD`
+# pairs with, descending one path with lower bound costs, ties broken by
+# center distance.
+func findBestSibling(tree: view DynamicTree, boxD: view Aabb) ret Int {
+  let centerD: Vec3 = center(box: boxD)
+  let areaD: Float = perimeter(box: boxD)
+  var nodeIndex: Int = rootNode
+  if isLeafNode(node: treeNode(tree: tree, index: nodeIndex)) {
+    ret nodeIndex
+  }
+  let rootBox: Aabb = nodeBox(tree: tree, index: nodeIndex)
+  # The area of the current node, and of it inflated by D
+  var areaBase: Float = perimeter(box: rootBox)
+  var directCost: Float = perimeter(box: union(first: rootBox, second: boxD))
+  var inheritedCost: Float = 0.0
+  var bestSibling: Int = nodeIndex
+  var bestCost: Float = directCost
+
+  loop true {
+    let node: TreeNode = treeNode(tree: tree, index: nodeIndex)
+    let child1: Int = leftChild(node: node)
+    let child2: Int = child1 + 1
+
+    # A new parent for this node and the leaf
+    let cost: Float = directCost + inheritedCost
+    if cost < bestCost {
+      bestSibling = nodeIndex
+      bestCost = cost
+    }
+
+    # The inheritance cost the children see
+    inheritedCost = inheritedCost + (directCost - areaBase)
+
+    let node1: TreeNode = treeNode(tree: tree, index: child1)
+    let node2: TreeNode = treeNode(tree: tree, index: child2)
+    let leaf1: Bool = isLeafNode(node: node1)
+    let leaf2: Bool = isLeafNode(node: node2)
+
+    # Descending into child 1
+    var lowerCost1: Float = floatMax
+    let box1: Aabb = node1.aabb
+    let directCost1: Float = perimeter(box: union(first: box1, second: boxD))
+    var area1: Float = 0.0
+    if leaf1 {
+      let cost1: Float = directCost1 + inheritedCost
+      if cost1 < bestCost {
+        bestSibling = child1
+        bestCost = cost1
+      }
+    } else {
+      area1 = perimeter(box: box1)
+      # The lower bound of inserting under child 1: as its sibling, or below
+      # it with a new node of area D
+      lowerCost1 = inheritedCost + directCost1 + minFloat(left: areaD - area1, right: 0.0)
+    }
+
+    # Descending into child 2
+    var lowerCost2: Float = floatMax
+    let box2: Aabb = node2.aabb
+    let directCost2: Float = perimeter(box: union(first: box2, second: boxD))
+    var area2: Float = 0.0
+    if leaf2 {
+      let cost2: Float = directCost2 + inheritedCost
+      if cost2 < bestCost {
+        bestSibling = child2
+        bestCost = cost2
+      }
+    } else {
+      area2 = perimeter(box: box2)
+      lowerCost2 = inheritedCost + directCost2 + minFloat(left: areaD - area2, right: 0.0)
+    }
+
+    if leaf1 and leaf2 {
+      break
+    }
+    # Can the cost still go down?
+    if bestCost <= lowerCost1 and bestCost <= lowerCost2 {
+      break
+    }
+    if lowerCost1 is lowerCost2 and leaf1 is false {
+      # No clear choice (both children contain D): the closer center
+      let offset1: Vec3 = subtract(left: center(box: box1), right: centerD)
+      let offset2: Vec3 = subtract(left: center(box: box2), right: centerD)
+      lowerCost1 = lengthSquared(vector: offset1)
+      lowerCost2 = lengthSquared(vector: offset2)
+    }
+
+    # Descend
+    if lowerCost1 < lowerCost2 and leaf1 is false {
+      nodeIndex = child1
+      areaBase = area1
+      directCost = directCost1
+    } else {
+      nodeIndex = child2
+      areaBase = area2
+      directCost = directCost2
+    }
+  }
+  ret bestSibling
+}
+
+# b3SwapNodes: swap a child of A with a grandchild under the other child.
+func swapNodes(tree: mod DynamicTree, indexDown: view Int, indexUp: view Int) {
+  let down: TreeNode = treeNode(tree: tree, index: indexDown)
+  let up: TreeNode = treeNode(tree: tree, index: indexUp)
+  setTreeNode(tree: tree, index: indexDown, node: up)
+  setTreeNode(tree: tree, index: indexUp, node: down)
+  linkChildren(tree: tree, nodeIndex: indexDown)
+  linkChildren(tree: tree, nodeIndex: indexUp)
+  if isNodeOrdered(tree: tree, nodeIndex: indexDown) is false or isNodeOrdered(
+    tree: tree
+    nodeIndex: indexUp
+  ) is false {
+    tree.dfsOrdered = false
+  }
+  # The sibling of the node that went down holds a different subtree now
+  let indexC: Int = indexDown bitxor 1
+  let nodeC: TreeNode = treeNode(tree: tree, index: indexC)
+  setTreeNode(
+    tree: tree
+    index: indexC
+    node: makeInternalNode(tree: tree, pair: leftChild(node: nodeC))
+  )
+}
+
+# b3RotateNodes: the rotation under A = (B (D E), C (F G)) that most reduces
+# the area, if any.
+func rotateNodes(tree: mod DynamicTree, indexA: view Int) {
+  let nodeA: TreeNode = treeNode(tree: tree, index: indexA)
+  let indexB: Int = leftChild(node: nodeA)
+  let indexC: Int = indexB + 1
+  let nodeB: TreeNode = treeNode(tree: tree, index: indexB)
+  let nodeC: TreeNode = treeNode(tree: tree, index: indexC)
+  let leafB: Bool = isLeafNode(node: nodeB)
+  let leafC: Bool = isLeafNode(node: nodeC)
+  if leafB and leafC {
+    ret
+  }
+  var bestDown: Int = -1
+  var bestUp: Int = -1
+  var bestDelta: Float = 0.0
+
+  if leafC is false {
+    # Swap B with F or G
+    let indexF: Int = leftChild(node: nodeC)
+    let indexG: Int = indexF + 1
+    let areaC: Float = perimeter(box: nodeC.aabb)
+    # B <-> F then C (B G)
+    let deltaBf: Float = perimeter(
+      box: union(first: nodeB.aabb, second: nodeBox(tree: tree, index: indexG))
+    ) - areaC
+    if deltaBf < bestDelta {
+      bestDown = indexB
+      bestUp = indexF
+      bestDelta = deltaBf
+    }
+    # B <-> G then C (F B)
+    let deltaBg: Float = perimeter(
+      box: union(first: nodeB.aabb, second: nodeBox(tree: tree, index: indexF))
+    ) - areaC
+    if deltaBg < bestDelta {
+      bestDown = indexB
+      bestUp = indexG
+      bestDelta = deltaBg
+    }
+  }
+
+  if leafB is false {
+    # Swap C with D or E
+    let indexD: Int = leftChild(node: nodeB)
+    let indexE: Int = indexD + 1
+    let areaB: Float = perimeter(box: nodeB.aabb)
+    # C <-> D then B (C E)
+    let deltaCd: Float = perimeter(
+      box: union(first: nodeC.aabb, second: nodeBox(tree: tree, index: indexE))
+    ) - areaB
+    if deltaCd < bestDelta {
+      bestDown = indexC
+      bestUp = indexD
+      bestDelta = deltaCd
+    }
+    # C <-> E then B (D C)
+    let deltaCe: Float = perimeter(
+      box: union(first: nodeC.aabb, second: nodeBox(tree: tree, index: indexD))
+    ) - areaB
+    if deltaCe < bestDelta {
+      bestDown = indexC
+      bestUp = indexE
+      bestDelta = deltaCe
+    }
+  }
+
+  if bestDown is not -1 {
+    swapNodes(tree: tree, indexDown: bestDown, indexUp: bestUp)
+  }
+}
+
+# b3InsertLeaf: the sibling's slot becomes the new parent; the sibling and
+# the leaf go in a new pair below it. Then refit (and maybe rotate) up to
+# the root.
+func insertLeaf(
+  tree: mod DynamicTree
+  box: view Aabb
+  proxyId: view Int
+  moved: view Bool
+  shouldRotate: view Bool
+) {
+  let proxy: TreeProxy = treeProxy(tree: tree, proxyId: proxyId)
+  let leaf: TreeNode = makeLeafNode(
+    box: box
+    proxyId: proxyId
+    userData: proxy.userData
+    moved: moved
+  )
+  if isEmptyTreeNode(node: treeNode(tree: tree, index: rootNode)) {
+    setTreeNode(tree: tree, index: rootNode, node: leaf)
+    setProxyNode(tree: tree, proxyId: proxyId, node: rootNode)
+    ret
+  }
+
+  let sibling: Int = findBestSibling(tree: tree, boxD: box)
+  let pair: Int = allocateSiblingPair(tree: tree)
+  setTreeNode(tree: tree, index: pair, node: treeNode(tree: tree, index: sibling))
+  setTreeNode(tree: tree, index: pair + 1, node: leaf)
+  setTreeParent(tree: tree, index: pair, parent: sibling)
+  setTreeParent(tree: tree, index: pair + 1, parent: sibling)
+  linkChildren(tree: tree, nodeIndex: pair)
+  setProxyNode(tree: tree, proxyId: proxyId, node: pair + 1)
+
+  setTreeNode(tree: tree, index: sibling, node: makeInternalNode(tree: tree, pair: pair))
+  if isNodeOrdered(tree: tree, nodeIndex: sibling) is false or isNodeOrdered(
+    tree: tree
+    nodeIndex: pair
+  ) is false {
+    tree.dfsOrdered = false
+  }
+
+  # Refit the ancestors, the root included
+  var index: Int = sibling
+  loop index is not -1 {
+    if shouldRotate {
+      rotateNodes(tree: tree, indexA: index)
+    }
+    let node: TreeNode = treeNode(tree: tree, index: index)
+    setTreeNode(
+      tree: tree
+      index: index
+      node: makeInternalNode(tree: tree, pair: leftChild(node: node))
+    )
+    index = treeParent(tree: tree, index: index)
+  }
+}
+
+# b3RemoveLeaf: the sibling takes the parent's slot and the pair is freed.
+func removeLeaf(tree: mod DynamicTree, proxyId: view Int) {
+  let leaf: Int = treeProxy(tree: tree, proxyId: proxyId).node
+  if leaf is rootNode {
+    setTreeNode(tree: tree, index: rootNode, node: makeEmptyNode())
+    ret
+  }
+  let parent: Int = treeParent(tree: tree, index: leaf)
+  setTreeNode(tree: tree, index: parent, node: treeNode(tree: tree, index: leaf bitxor 1))
+  linkChildren(tree: tree, nodeIndex: parent)
+  freePair(tree: tree, pair: leaf bitand -2)
+
+  # The ancestors
+  var index: Int = treeParent(tree: tree, index: parent)
+  loop index is not -1 {
+    let node: TreeNode = treeNode(tree: tree, index: index)
+    setTreeNode(
+      tree: tree
+      index: index
+      node: makeInternalNode(tree: tree, pair: leftChild(node: node))
+    )
+    index = treeParent(tree: tree, index: index)
+  }
+}
+
+# b3CreateTreeProxyInternal: a leaf for `box`, optionally marked moved.
+func createTreeProxyMarked(
+  tree: mod DynamicTree
+  box: view Aabb
+  categoryBits: view UInt64
+  userData: view UInt64
+  markMoved: view Bool
+) ret Int {
+  let proxyId: Int = allocateProxy(tree: tree)
+  var proxy: TreeProxy = treeProxy(tree: tree, proxyId: proxyId)
+  proxy.categoryBits = categoryBits
+  proxy.userData = userData
+  tree.proxies.set(index: proxyId, value: proxy)
+  insertLeaf(
+    tree: tree
+    box: box
+    proxyId: proxyId
+    moved: markMoved
+    shouldRotate: true
+  )
+  ret proxyId
+}
+
+# b3DynamicTree_CreateProxy: a new leaf; returns the proxy id.
+func createTreeProxy(
+  tree: mod DynamicTree
+  box: view Aabb
+  categoryBits: view UInt64
+  userData: view UInt64
+) ret Int {
+  ret createTreeProxyMarked(
+    tree: tree
+    box: box
+    categoryBits: categoryBits
+    userData: userData
+    markMoved: false
+  )
+}
+
+# b3DynamicTree_DestroyProxy
+func destroyTreeProxy(tree: mod DynamicTree, proxyId: view Int) {
+  removeLeaf(tree: tree, proxyId: proxyId)
+  freeProxy(tree: tree, proxyId: proxyId)
+}
+
+# b3DynamicTree_MoveProxyInternal: reinsert with a new box (no rotations).
+func moveTreeProxyMarked(
+  tree: mod DynamicTree
+  proxyId: view Int
+  box: view Aabb
+  markMoved: view Bool
+) {
+  removeLeaf(tree: tree, proxyId: proxyId)
+  insertLeaf(
+    tree: tree
+    box: box
+    proxyId: proxyId
+    moved: markMoved
+    shouldRotate: false
+  )
+}
+
+# b3DynamicTree_MoveProxy
+func moveTreeProxy(tree: mod DynamicTree, proxyId: view Int, box: view Aabb) {
+  moveTreeProxyMarked(
+    tree: tree
+    proxyId: proxyId
+    box: box
+    markMoved: false
+  )
+}
+
+# Set the moved flag on node `index`.
+func markNodeMoved(tree: mod DynamicTree, index: view Int) {
+  var node: TreeNode = treeNode(tree: tree, index: index)
+  node.flagIndex = node.flagIndex bitor movedNode
+  tree.nodes.set(index: index, value: node)
+}
+
+# b3DynamicTree_EnlargeProxy: grow a leaf (which must not already contain
+# `box`) and its ancestors in place, marking them moved up to the root.
+func enlargeTreeProxy(tree: mod DynamicTree, proxyId: view Int, box: view Aabb) {
+  var index: Int = treeProxy(tree: tree, proxyId: proxyId).node
+  var leaf: TreeNode = treeNode(tree: tree, index: index)
+  leaf.aabb = box
+  leaf.flagIndex = leaf.flagIndex bitor movedNode
+  tree.nodes.set(index: index, value: leaf)
+
+  index = treeParent(tree: tree, index: index)
+  loop index is not -1 {
+    var node: TreeNode = treeNode(tree: tree, index: index)
+    let changed: Bool = enlargeAabb(box: node.aabb, other: box)
+    # Marked here so the root ends up marked by this loop or the next
+    node.flagIndex = node.flagIndex bitor movedNode
+    tree.nodes.set(index: index, value: node)
+    index = treeParent(tree: tree, index: index)
+    if changed is false {
+      break
+    }
+  }
+  # Mark up to the root
+  loop index is not -1 {
+    let node: TreeNode = treeNode(tree: tree, index: index)
+    if (node.flagIndex bitand movedNode) is not 0 {
+      # Marked by an earlier ascent
+      break
+    }
+    markNodeMoved(tree: tree, index: index)
+    index = treeParent(tree: tree, index: index)
+  }
+}
+
+# b3DynamicTree_SetCategoryBits
+func setTreeCategoryBits(tree: mod DynamicTree, proxyId: view Int, categoryBits: view UInt64) {
+  var proxy: TreeProxy = treeProxy(tree: tree, proxyId: proxyId)
+  proxy.categoryBits = categoryBits
+  tree.proxies.set(index: proxyId, value: proxy)
+}
+
+# b3DynamicTree_GetCategoryBits
+func treeCategoryBits(tree: view DynamicTree, proxyId: view Int) ret UInt64 {
+  ret treeProxy(tree: tree, proxyId: proxyId).categoryBits
+}
+
+# b3DynamicTree_GetUserData
+func treeUserData(tree: view DynamicTree, proxyId: view Int) ret UInt64 {
+  ret treeProxy(tree: tree, proxyId: proxyId).userData
+}
+
+# b3DynamicTree_GetAABB
+func treeProxyAabb(tree: view DynamicTree, proxyId: view Int) ret Aabb {
+  ret treeNode(tree: tree, index: treeProxy(tree: tree, proxyId: proxyId).node).aabb
+}
+
+# b3DynamicTree_GetProxyCount
+func treeProxyCount(tree: view DynamicTree) ret Int {
+  ret tree.proxyCount
+}
+
+# b3DynamicTree_GetHeight
+func treeHeight(tree: view DynamicTree) ret Int {
+  ret nodeHeight(node: treeNode(tree: tree, index: rootNode))
+}
+
+# b3DynamicTree_GetAreaRatio: the summed area of the non-root internal
+# nodes over the root's, the quality SAH minimises.
+func treeAreaRatio(tree: view DynamicTree) ret Float {
+  if tree.proxyCount is 0 {
+    ret 0.0
+  }
+  let rootArea: Float = perimeter(box: nodeBox(tree: tree, index: rootNode))
+  if rootArea <= 0.0 {
+    ret 0.0
+  }
+  # Free nodes and the empty node count as leaves.
+  var internalArea: Float = 0.0
+  loop var i: Int = 2, i < tree.nodeEnd, ++i {
+    let node: TreeNode = treeNode(tree: tree, index: i)
+    if isLeafNode(node: node) is false {
+      internalArea = internalArea + perimeter(box: node.aabb)
+    }
+  }
+  ret internalArea / rootArea
+}
+
+# b3DynamicTree_GetRootBounds
+func treeRootBounds(tree: view DynamicTree) ret Aabb {
+  if tree.proxyCount is 0 {
+    ret Aabb { lowerBound: zeroVector(), upperBound: zeroVector() }
+  }
+  ret nodeBox(tree: tree, index: rootNode)
+}
+
+# b3ValidateSubtree: the height of the subtree at `nodeIndex`, -1 if it is
+# inconsistent; counts its leaves.
+func validateSubtree(tree: view DynamicTree, nodeIndex: view Int, leafCount: mod Int) ret Int {
+  if nodeIndex < 0 or nodeIndex >= tree.nodeEnd {
+    ret -1
+  }
+  let node: TreeNode = treeNode(tree: tree, index: nodeIndex)
+  if isEmptyTreeNode(node: node) or isValidAabb(box: node.aabb) is false {
+    ret -1
+  }
+  if isLeafNode(node: node) {
+    let proxyId: Int = nodeProxyId(node: node)
+    if proxyId >= tree.proxies.length {
+      ret -1
+    }
+    let proxy: TreeProxy = treeProxy(tree: tree, proxyId: proxyId)
+    if proxy.node is not nodeIndex or shapeIndexOf(userData: proxy.userData) is not node.height {
+      ret -1
+    }
+    leafCount = leafCount + 1
+    ret 0
+  }
+  let pair: Int = leftChild(node: node)
+  if (pair bitand 1) is not 0 or pair < 2 or pair >= tree.nodeEnd {
+    ret -1
+  }
+  if treeParent(tree: tree, index: pair) is not nodeIndex or treeParent(tree: tree, index: pair + 1) is not nodeIndex {
+    ret -1
+  }
+  if tree.dfsOrdered and nodeIndex >= pair {
+    ret -1
+  }
+  let child1: TreeNode = treeNode(tree: tree, index: pair)
+  let child2: TreeNode = treeNode(tree: tree, index: pair + 1)
+  if contains(outer: node.aabb, inner: child1.aabb) is false or contains(
+    outer: node.aabb
+    inner: child2.aabb
+  ) is false {
+    ret -1
+  }
+  if isMovedNode(node: node) is not (isMovedNode(node: child1) or isMovedNode(node: child2)) {
+    ret -1
+  }
+  let height1: Int = validateSubtree(tree: tree, nodeIndex: pair, leafCount: leafCount)
+  let height2: Int = validateSubtree(tree: tree, nodeIndex: pair + 1, leafCount: leafCount)
+  if height1 < 0 or height2 < 0 {
+    ret -1
+  }
+  let height: Int = 1 + maxInt(left: height1, right: height2)
+  if node.height is not height {
+    ret -1
+  }
+  ret height
+}
+
+# b3DynamicTree_Validate as a check: the free lists, the node count, and
+# every node of the tree consistent.
+func isValidTree(tree: view DynamicTree) ret Bool {
+  if tree.nodeEnd < 2 or (tree.nodeEnd bitand 1) is not 0 {
+    ret false
+  }
+  if treeParent(tree: tree, index: rootNode) is not -1 or isEmptyTreeNode(
+    node: treeNode(tree: tree, index: 1)
+  ) is false {
+    ret false
+  }
+  var freePairCount: Int = 0
+  var pair: Int = tree.pairFreeList
+  loop pair is not -1 {
+    if (pair bitand 1) is not 0 or pair < 2 or pair >= tree.nodeEnd {
+      ret false
+    }
+    if isEmptyTreeNode(node: treeNode(tree: tree, index: pair)) is false or isEmptyTreeNode(
+      node: treeNode(tree: tree, index: pair + 1)
+    ) is false {
+      ret false
+    }
+    pair = treeParent(tree: tree, index: pair)
+    freePairCount = freePairCount + 1
+    if 2 * freePairCount >= tree.nodeEnd {
+      ret false
+    }
+  }
+  var freeProxyCount: Int = 0
+  var freeIndex: Int = tree.proxyFreeList
+  loop freeIndex is not -1 {
+    if freeIndex < 0 or freeIndex >= tree.proxies.length or treeProxy(
+      tree: tree
+      proxyId: freeIndex
+    ).node is not -1 {
+      ret false
+    }
+    freeIndex = treeProxy(tree: tree, proxyId: freeIndex).next
+    freeProxyCount = freeProxyCount + 1
+  }
+  if tree.proxyCount + freeProxyCount is not tree.proxies.length {
+    ret false
+  }
+  if tree.nodeEnd is not 2 * maxInt(left: tree.proxyCount, right: 1) + 2 * freePairCount {
+    ret false
+  }
+  if tree.proxyCount is 0 {
+    ret isEmptyTreeNode(node: treeNode(tree: tree, index: rootNode))
+  }
+  var leafCount: Int = 0
+  if validateSubtree(tree: tree, nodeIndex: rootNode, leafCount: leafCount) < 0 {
+    ret false
+  }
+  ret leafCount is tree.proxyCount
+}

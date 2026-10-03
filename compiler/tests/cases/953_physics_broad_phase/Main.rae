@@ -1,0 +1,556 @@
+# The physics port's broad-phase data structures (P3: lib/physics/broadPhase
+# and lib/physics/container) against Box3D itself:
+# tools/box3d-oracle/goldens/broadphase.golden is a script of operations on
+# Box3D's dynamic tree (insert, move, enlarge, destroy, mark moved, gather,
+# refit, rebuild, with the full tree state dumped at checkpoints and box,
+# ray, box-cast and closest queries in between), its pair hash set, bit
+# set, id pool and quicksort, each with Box3D's own results. This replays
+# the script on the Rae port and requires the SAME BITS for every value
+# (docs/physics-rae-port-design.md §4).
+import Math
+import Vec3
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/AabbMath
+open physics/geometry/QueryTypes
+open physics/broadPhase/DynamicTree
+open physics/broadPhase/DynamicTreeQuery
+open physics/broadPhase/DynamicTreeRebuild
+open physics/broadPhase/PairSet
+open physics/container/Bitset
+open physics/container/IdPool
+open physics/container/QuickSort
+
+# Reads the input tokens of one line in order.
+type Reader {
+  tokens: List(String)
+  next: Int
+}
+
+func readToken(reader: mod Reader) ret String {
+  let token: String = reader.tokens.copyAtDefault(index: reader.next)
+  reader.next = reader.next + 1
+  ret token
+}
+
+func readFloat(reader: mod Reader) ret Float {
+  ret readToken(reader: reader).toFloat()
+}
+
+func readInt(reader: mod Reader) ret Int {
+  ret readToken(reader: reader).toInt()
+}
+
+func readBool(reader: mod Reader) ret Bool {
+  ret readInt(reader: reader) is not 0
+}
+
+# A uint64 as its high and low 32 bits.
+func readU64(reader: mod Reader) ret UInt64 {
+  let high: UInt64 = readInt(reader: reader) as UInt64
+  let low: UInt64 = readInt(reader: reader) as UInt64
+  ret (high shl 32) bitor low
+}
+
+func readVec(reader: mod Reader) ret Vec3 {
+  let x: Float = readFloat(reader: reader)
+  let y: Float = readFloat(reader: reader)
+  let z: Float = readFloat(reader: reader)
+  ret Vec3 { x: x, y: y, z: z }
+}
+
+func readBox(reader: mod Reader) ret Aabb {
+  let lower: Vec3 = readVec(reader: reader)
+  let upper: Vec3 = readVec(reader: reader)
+  ret Aabb { lowerBound: lower, upperBound: upper }
+}
+
+# Outputs are compared as exact integers: a float by its bits.
+func putFloat(out: mod List(Int), value: view Float) {
+  out.add(value: Math.floatBits(value: value))
+}
+
+func putInt(out: mod List(Int), value: view Int) {
+  out.add(value: value)
+}
+
+func putBool(out: mod List(Int), value: view Bool) {
+  if value {
+    out.add(value: 1)
+  } else {
+    out.add(value: 0)
+  }
+}
+
+func putU64(out: mod List(Int), value: view UInt64) {
+  out.add(value: (value shr 32) as Int)
+  out.add(value: (value bitand 4294967295) as Int)
+}
+
+func putVec(out: mod List(Int), vector: view Vec3) {
+  putFloat(out: out, value: vector.x)
+  putFloat(out: out, value: vector.y)
+  putFloat(out: out, value: vector.z)
+}
+
+func putBox(out: mod List(Int), box: view Aabb) {
+  putVec(out: out, vector: box.lowerBound)
+  putVec(out: out, vector: box.upperBound)
+}
+
+func putStats(out: mod List(Int), stats: view TreeStats) {
+  putInt(out: out, value: stats.nodeVisits)
+  putInt(out: out, value: stats.leafVisits)
+}
+
+# An expected token as the integer it is compared with.
+func expectedValue(token: view String) ret Int {
+  if token.contains(substring: "x") or token.contains(substring: "inf") or token.contains(
+    substring: "nan"
+  ) {
+    ret Math.floatBits(value: token.toFloat())
+  }
+  ret token.toInt()
+}
+
+# Everything the script works on.
+type Scene {
+  tree: DynamicTree
+  pairs: PairSet
+  bits0: Bitset
+  bits1: Bitset
+  ids: IdPool
+}
+
+func putTreeState(out: mod List(Int), tree: view DynamicTree) {
+  putInt(out: out, value: tree.nodeEnd)
+  putInt(out: out, value: tree.pairFreeList)
+  putInt(out: out, value: tree.proxyCount)
+  putInt(out: out, value: tree.proxies.length)
+  putInt(out: out, value: tree.proxyFreeList)
+  putBool(out: out, value: tree.dfsOrdered)
+  putInt(out: out, value: treeHeight(tree: tree))
+  putFloat(out: out, value: treeAreaRatio(tree: tree))
+  putBox(out: out, box: treeRootBounds(tree: tree))
+  loop var i: Int = 0, i < tree.nodeEnd, ++i {
+    let node: TreeNode = treeNode(tree: tree, index: i)
+    putBox(out: out, box: node.aabb)
+    putInt(out: out, value: node.flagIndex)
+    putInt(out: out, value: node.height)
+  }
+  loop var i: Int = 0, i < tree.nodeEnd, ++i {
+    putInt(out: out, value: treeParent(tree: tree, index: i))
+  }
+  loop let proxy: view TreeProxy in tree.proxies {
+    putInt(out: out, value: proxy.node)
+    putInt(out: out, value: proxy.next)
+    putU64(out: out, value: proxy.categoryBits)
+    putU64(out: out, value: proxy.userData)
+  }
+}
+
+# The fixed ray callback: the proxy box (grown by `extension`) against the
+# current segment; -1 on a miss, else the entry fraction of the input.
+func rayCallbackValue(
+  tree: view DynamicTree
+  proxyId: view Int
+  start: view Vec3
+  translation: view Vec3
+  maxFraction: view Float
+  extension: view Vec3
+) ret Float {
+  var target: Aabb = treeProxyAabb(tree: tree, proxyId: proxyId)
+  target.lowerBound = subtract(left: target.lowerBound, right: extension)
+  target.upperBound = add(left: target.upperBound, right: extension)
+  let finish: Vec3 = mulAdd(base: start, scale: maxFraction, vector: translation)
+  var minFraction: Float = -1.0
+  var maxHit: Float = -1.0
+  if rayCastAabb(
+    box: target
+    point1: start
+    point2: finish
+    minFraction: minFraction
+    maxFraction: maxHit
+  ) {
+    ret minFraction * maxFraction
+  }
+  ret -1.0
+}
+
+func runCast(
+  out: mod List(Int)
+  tree: view DynamicTree
+  cast: mod TreeCast
+  extension: view Vec3
+) {
+  let records: List(Int) = List.create(Int, cap: 16)
+  var calls: Int = 0
+  loop true {
+    let proxyId: Int = nextTreeCastProxy(tree: tree, cast: cast)
+    if proxyId is -1 {
+      break
+    }
+    let passed: Float = cast.maxFraction
+    let value: Float = rayCallbackValue(
+      tree: tree
+      proxyId: proxyId
+      start: cast.start
+      translation: cast.translation
+      maxFraction: passed
+      extension: extension
+    )
+    putInt(out: records, value: proxyId)
+    putFloat(out: records, value: passed)
+    putFloat(out: records, value: value)
+    calls = calls + 1
+    reportTreeCast(cast: cast, value: value)
+  }
+  putStats(out: out, stats: cast.stats)
+  putInt(out: out, value: calls)
+  loop let record: view Int in records {
+    out.add(value: record)
+  }
+}
+
+# The tree operations. False: not one of them.
+func evaluateTree(
+  name: view String
+  reader: mod Reader
+  scene: mod Scene
+  out: mod List(Int)
+) ret Bool {
+  if name is "tree.create" {
+    scene.tree = createDynamicTree(proxyCapacity: readInt(reader: reader))
+  } else if name is "tree.proxy" {
+    let box: Aabb = readBox(reader: reader)
+    let category: UInt64 = readU64(reader: reader)
+    let userData: UInt64 = readU64(reader: reader)
+    let moved: Bool = readBool(reader: reader)
+    putInt(
+      out: out
+      value: createTreeProxyMarked(
+        tree: scene.tree
+        box: box
+        categoryBits: category
+        userData: userData
+        markMoved: moved
+      )
+    )
+  } else if name is "tree.move" {
+    let proxyId: Int = readInt(reader: reader)
+    moveTreeProxy(tree: scene.tree, proxyId: proxyId, box: readBox(reader: reader))
+  } else if name is "tree.enlarge" {
+    let proxyId: Int = readInt(reader: reader)
+    enlargeTreeProxy(tree: scene.tree, proxyId: proxyId, box: readBox(reader: reader))
+  } else if name is "tree.destroy" {
+    destroyTreeProxy(tree: scene.tree, proxyId: readInt(reader: reader))
+  } else if name is "tree.markMovedSerial" {
+    markProxyMovedSerial(tree: scene.tree, proxyId: readInt(reader: reader))
+  } else if name is "tree.markMoved" {
+    let proxyId: Int = readInt(reader: reader)
+    markProxyMoved(tree: scene.tree, proxyId: proxyId, box: readBox(reader: reader))
+  } else if name is "tree.gatherMoved" {
+    let ids: List(Int) = List.create(Int, cap: 64)
+    putInt(out: out, value: gatherMovedProxies(tree: scene.tree, proxyIds: ids))
+    loop let id: view Int in ids {
+      out.add(value: id)
+    }
+  } else if name is "tree.refit" {
+    refitTree(tree: scene.tree)
+  } else if name is "tree.rebuild" {
+    putInt(out: out, value: rebuildTree(tree: scene.tree, fullBuild: readBool(reader: reader)))
+  } else if name is "tree.clearMoved" {
+    clearMoved(tree: scene.tree)
+  } else if name is "tree.state" {
+    putTreeState(out: out, tree: scene.tree)
+  } else if name is "tree.query" {
+    let box: Aabb = readBox(reader: reader)
+    let mask: UInt64 = readU64(reader: reader)
+    let requireAll: Bool = readBool(reader: reader)
+    let stopAfter: Int = readInt(reader: reader)
+    var query: TreeQuery = beginTreeQuery(
+      tree: scene.tree
+      box: box
+      maskBits: mask
+      requireAllBits: requireAll
+    )
+    let ids: List(Int) = List.create(Int, cap: 16)
+    loop true {
+      let proxyId: Int = nextTreeQueryProxy(tree: scene.tree, query: query)
+      if proxyId is -1 {
+        break
+      }
+      ids.add(value: proxyId)
+      # The callback's "proceed": stop after `stopAfter` proxies
+      if stopAfter is not 0 and ids.length >= stopAfter {
+        break
+      }
+    }
+    putStats(out: out, stats: query.stats)
+    putInt(out: out, value: ids.length)
+    loop let id: view Int in ids {
+      out.add(value: id)
+    }
+  } else if name is "tree.raycast" {
+    let origin: Vec3 = readVec(reader: reader)
+    let translation: Vec3 = readVec(reader: reader)
+    let maxFraction: Float = readFloat(reader: reader)
+    let mask: UInt64 = readU64(reader: reader)
+    let requireAll: Bool = readBool(reader: reader)
+    let input: RayCastInput = { origin: origin, translation: translation, maxFraction: maxFraction }
+    var cast: TreeCast = beginTreeRayCast(
+      tree: scene.tree
+      input: input
+      maskBits: mask
+      requireAllBits: requireAll
+    )
+    runCast(
+      out: out
+      tree: scene.tree
+      cast: cast
+      extension: zeroVector()
+    )
+  } else if name is "tree.boxcast" {
+    let box: Aabb = readBox(reader: reader)
+    let translation: Vec3 = readVec(reader: reader)
+    let maxFraction: Float = readFloat(reader: reader)
+    let input: BoxCastInput = { box: box, translation: translation, maxFraction: maxFraction }
+    let allBits: UInt64 = 18446744073709551615
+    var cast: TreeCast = beginTreeBoxCast(
+      tree: scene.tree
+      input: input
+      maskBits: allBits
+      requireAllBits: false
+    )
+    runCast(
+      out: out
+      tree: scene.tree
+      cast: cast
+      extension: extents(box: box)
+    )
+  } else if name is "tree.closest" {
+    let point: Vec3 = readVec(reader: reader)
+    let mask: UInt64 = readU64(reader: reader)
+    let start: Float = readFloat(reader: reader)
+    var query: TreeClosestQuery = beginTreeClosestQuery(
+      tree: scene.tree
+      point: point
+      maskBits: mask
+      requireAllBits: false
+      minDistanceSquared: start
+    )
+    let records: List(Int) = List.create(Int, cap: 16)
+    var calls: Int = 0
+    loop true {
+      let proxyId: Int = nextTreeClosestProxy(tree: scene.tree, query: query)
+      if proxyId is -1 {
+        break
+      }
+      let passed: Float = query.minDistanceSquared
+      let distance: Float = distanceSquared(
+        from: point
+        to: center(box: treeProxyAabb(tree: scene.tree, proxyId: proxyId))
+      )
+      putInt(out: records, value: proxyId)
+      putFloat(out: records, value: passed)
+      putFloat(out: records, value: distance)
+      calls = calls + 1
+      reportTreeClosest(query: query, distanceSquared: distance)
+    }
+    putStats(out: out, stats: query.stats)
+    putFloat(out: out, value: query.minDistanceSquared)
+    putInt(out: out, value: calls)
+    loop let record: view Int in records {
+      out.add(value: record)
+    }
+  } else {
+    ret false
+  }
+  ret true
+}
+
+func putSetState(out: mod List(Int), set: view PairSet) {
+  putInt(out: out, value: set.items.length)
+  putInt(out: out, value: set.count)
+  loop let item: view SetItem in set.items {
+    putU64(out: out, value: item.key)
+    putInt(out: out, value: item.hash)
+  }
+}
+
+func putBitsState(out: mod List(Int), bitset: view Bitset) {
+  putInt(out: out, value: bitset.blockCapacity)
+  putInt(out: out, value: bitset.blockCount)
+  loop var i: Int = 0, i < bitset.blockCount, ++i {
+    putU64(out: out, value: bitset.bits.copyAtDefault(index: i))
+  }
+}
+
+# The containers. False: not one of them.
+func evaluateContainers(
+  name: view String
+  reader: mod Reader
+  scene: mod Scene
+  out: mod List(Int)
+) ret Bool {
+  if name is "set.create" {
+    scene.pairs = createPairSet(capacity: readInt(reader: reader))
+    putInt(out: out, value: pairSetCapacity(set: scene.pairs))
+  } else if name is "set.key" {
+    let shape1: Int = readInt(reader: reader)
+    let shape2: Int = readInt(reader: reader)
+    let child: Int = readInt(reader: reader)
+    putU64(out: out, value: shapePairKey(shape1: shape1, shape2: shape2, child: child))
+  } else if name is "set.hash" {
+    putInt(out: out, value: keyHash(key: readU64(reader: reader)))
+  } else if name is "set.add" {
+    putBool(out: out, value: addPairKey(set: scene.pairs, key: readU64(reader: reader)))
+  } else if name is "set.remove" {
+    putBool(out: out, value: removePairKey(set: scene.pairs, key: readU64(reader: reader)))
+  } else if name is "set.contains" {
+    putBool(out: out, value: pairSetContains(set: scene.pairs, key: readU64(reader: reader)))
+  } else if name is "set.clear" {
+    clearPairSet(set: scene.pairs)
+  } else if name is "set.state" {
+    putSetState(out: out, set: scene.pairs)
+  } else if name.startsWith(prefix: "bits.") and name is not "bits.union" {
+    let which: Int = readInt(reader: reader)
+    var bitset: Bitset = scene.bits0
+    if which is 1 {
+      bitset = scene.bits1
+    }
+    if name is "bits.create" {
+      bitset = createBitset(bitCapacity: readInt(reader: reader))
+    } else if name is "bits.setCountClear" {
+      setBitCountAndClear(bitset: bitset, bitCount: readInt(reader: reader))
+    } else if name is "bits.set" {
+      setBit(bitset: bitset, bitIndex: readInt(reader: reader))
+    } else if name is "bits.setGrow" {
+      setBitGrow(bitset: bitset, bitIndex: readInt(reader: reader))
+    } else if name is "bits.clear" {
+      clearBit(bitset: bitset, bitIndex: readInt(reader: reader))
+    } else if name is "bits.get" {
+      putBool(out: out, value: getBit(bitset: bitset, bitIndex: readInt(reader: reader)))
+    } else if name is "bits.count" {
+      putInt(out: out, value: countSetBits(bitset: bitset))
+    } else if name is "bits.state" {
+      putBitsState(out: out, bitset: bitset)
+    }
+    if which is 1 {
+      scene.bits1 = bitset
+    } else {
+      scene.bits0 = bitset
+    }
+  } else if name is "bits.union" {
+    inPlaceUnion(setA: scene.bits0, setB: scene.bits1)
+  } else if name is "ids.alloc" {
+    putInt(out: out, value: allocId(pool: scene.ids))
+  } else if name is "ids.free" {
+    freeId(pool: scene.ids, id: readInt(reader: reader))
+  } else if name is "ids.state" {
+    putInt(out: out, value: idCount(pool: scene.ids))
+    putInt(out: out, value: idCapacity(pool: scene.ids))
+  } else if name is "qsort" {
+    let count: Int = readInt(reader: reader)
+    let keys: List(UInt64) = List.create(UInt64, cap: count)
+    loop var i: Int = 0, i < count, ++i {
+      keys.add(value: readU64(reader: reader))
+    }
+    quickSort(T: UInt64, values: keys)
+    loop var i: Int = 0, i < keys.length, ++i {
+      putU64(out: out, value: keys.copyAtDefault(index: i))
+    }
+  } else {
+    ret false
+  }
+  ret true
+}
+
+func readGolden() ret String {
+  # The runner runs from compiler/, the TSan gate from the case's folder.
+  let candidates: List(String) = {
+    "../tools/box3d-oracle/goldens/broadphase.golden"
+    "../../../tools/box3d-oracle/goldens/broadphase.golden"
+    "tools/box3d-oracle/goldens/broadphase.golden"
+  }
+  loop var i: Int = 0, i < candidates.length, ++i {
+    if let text: String = readFile(path: candidates.copyAtDefault(index: i)) {
+      ret text
+    }
+  }
+  ret ""
+}
+
+func main() {
+  let golden: String = readGolden()
+  let lines: List(String) = golden.split(sep: "\n")
+  var scene: Scene = {
+    tree: createDynamicTree(proxyCapacity: 16)
+    pairs: createPairSet(capacity: 16)
+    bits0: createBitset(bitCapacity: 64)
+    bits1: createBitset(bitCapacity: 64)
+    ids: createIdPool()
+  }
+  var calls: Int = 0
+  var mismatches: Int = 0
+  var unknown: Int = 0
+  loop var i: Int = 0, i < lines.length, ++i {
+    let line: String = lines.copyAtDefault(index: i)
+    if line.length() is 0 or line.startsWith(prefix: "#") {
+      continue
+    }
+    let tokens: List(String) = line.split(sep: " ")
+    let name: String = tokens.copyAtDefault(index: 0)
+    var reader: Reader = { tokens: List.create(String, cap: 64), next: 0 }
+    let expected: List(Int) = List.create(Int, cap: 64)
+    var afterArrow: Bool = false
+    loop var j: Int = 1, j < tokens.length, ++j {
+      let token: String = tokens.copyAtDefault(index: j)
+      if token is "->" {
+        afterArrow = true
+      } else if afterArrow {
+        expected.add(value: expectedValue(token: token))
+      } else {
+        reader.tokens.add(value: token)
+      }
+    }
+    let actual: List(Int) = List.create(Int, cap: 64)
+    let known: Bool = evaluateTree(
+      name: name
+      reader: reader
+      scene: scene
+      out: actual
+    ) or evaluateContainers(
+      name: name
+      reader: reader
+      scene: scene
+      out: actual
+    )
+    if known is false {
+      unknown = unknown + 1
+      log("not ported: {name}")
+      continue
+    }
+    calls = calls + 1
+    var same: Bool = actual.length is expected.length
+    var firstDifference: Int = -1
+    loop var j: Int = 0, j < expected.length and same, ++j {
+      if actual.copyAtDefault(index: j) is not expected.copyAtDefault(index: j) {
+        same = false
+        firstDifference = j
+      }
+    }
+    if same is false {
+      mismatches = mismatches + 1
+      if mismatches <= 6 {
+        log(
+          "MISMATCH line {i + 1} ({name}): {actual.length} values, want {expected.length}; first difference at {firstDifference}: got {actual.copyAtDefault(
+            index: firstDifference
+          )}, want {expected.copyAtDefault(index: firstDifference)}"
+        )
+      }
+    }
+  }
+  log("broadphase.golden: {calls} operations, {mismatches} not bit-exact, {unknown} not ported")
+  log("tree valid at the end: {isValidTree(tree: scene.tree)}")
+}

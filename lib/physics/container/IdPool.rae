@@ -1,0 +1,44 @@
+# Recycled integer ids (b3IdPool of Box3D's id_pool.h, id_pool.c at
+# 9f998c8): freed ids come back last in, first out.
+type IdPool {
+  freeIds: List(Int)
+  nextIndex: Int
+}
+
+# b3CreateIdPool
+func createIdPool() ret IdPool {
+  ret IdPool { freeIds: List.create(Int, cap: 32), nextIndex: 0 }
+}
+
+# b3AllocId: the last freed id, else a new one.
+func allocId(pool: mod IdPool) ret Int {
+  if pool.freeIds.length > 0 {
+    let id: Int = pool.freeIds.copyAtDefault(index: pool.freeIds.length - 1)
+    pool.freeIds.removeLast()
+    ret id
+  }
+  let id: Int = pool.nextIndex
+  pool.nextIndex = pool.nextIndex + 1
+  ret id
+}
+
+# b3FreeId. (Box3D's shortcut for the last id compares with nextIndex
+# itself, which a valid id never equals, so every freed id is pushed; the
+# port keeps that.)
+func freeId(pool: mod IdPool, id: view Int) {
+  if id is pool.nextIndex {
+    pool.nextIndex = pool.nextIndex - 1
+    ret
+  }
+  pool.freeIds.add(value: id)
+}
+
+# b3GetIdCount: the ids in use.
+func idCount(pool: view IdPool) ret Int {
+  ret pool.nextIndex - pool.freeIds.length
+}
+
+# b3GetIdCapacity
+func idCapacity(pool: view IdPool) ret Int {
+  ret pool.nextIndex
+}
