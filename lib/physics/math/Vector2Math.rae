@@ -1,0 +1,127 @@
+# Box3D's internal 2D helpers (b3Vec2 / b3Matrix2 functions of
+# math_internal.h at 9f998c8) over lib/Vec2's Vec2. Box3D's operation order
+# is kept exactly; checked bit for bit against the oracle in fixture 948.
+open Vec2
+open Math
+open physics/math/Scalar
+
+type Matrix2 {
+  columnX: Vec2
+  columnY: Vec2
+}
+
+# b3Dot2
+func dot(left: view Vec2, right: view Vec2) ret Float {
+  ret left.x * right.x + left.y * right.y
+}
+
+# b3Length2
+func length(vector: view Vec2) ret Float {
+  ret sqrt(x: dot(left: vector, right: vector))
+}
+
+# b3LengthSquared2
+func lengthSquared(vector: view Vec2) ret Float {
+  ret dot(left: vector, right: vector)
+}
+
+# b3MinVec2 / b3MaxVec2
+func min(left: view Vec2, right: view Vec2) ret Vec2 {
+  ret Vec2 { x: minFloat(left: left.x, right: right.x), y: minFloat(left: left.y, right: right.y) }
+}
+
+func max(left: view Vec2, right: view Vec2) ret Vec2 {
+  ret Vec2 { x: maxFloat(left: left.x, right: right.x), y: maxFloat(left: left.y, right: right.y) }
+}
+
+# b3Add2 / b3Sub2 / b3Neg2
+func add(left: view Vec2, right: view Vec2) ret Vec2 {
+  ret Vec2 { x: left.x + right.x, y: left.y + right.y }
+}
+
+func subtract(left: view Vec2, right: view Vec2) ret Vec2 {
+  ret Vec2 { x: left.x - right.x, y: left.y - right.y }
+}
+
+func negate(vector: view Vec2) ret Vec2 {
+  ret Vec2 { x: -vector.x, y: -vector.y }
+}
+
+# b3MulSV2: scale * vector
+func scale(scale: view Float, vector: view Vec2) ret Vec2 {
+  ret Vec2 { x: scale * vector.x, y: scale * vector.y }
+}
+
+# b3MulAdd2 / b3MulSub2: base +- scale * vector
+func mulAdd(base: view Vec2, scale: view Float, vector: view Vec2) ret Vec2 {
+  ret Vec2 { x: base.x + scale * vector.x, y: base.y + scale * vector.y }
+}
+
+func mulSub(base: view Vec2, scale: view Float, vector: view Vec2) ret Vec2 {
+  ret Vec2 { x: base.x - scale * vector.x, y: base.y - scale * vector.y }
+}
+
+# b3Cross2: the z of the 3D cross product.
+func cross(left: view Vec2, right: view Vec2) ret Float {
+  ret left.x * right.y - left.y * right.x
+}
+
+# b3DistanceSquared2
+func distanceSquared(from: view Vec2, to: view Vec2) ret Float {
+  let deltaX: Float = to.x - from.x
+  let deltaY: Float = to.y - from.y
+  ret deltaX * deltaX + deltaY * deltaY
+}
+
+# b3MulMV2
+func multiply(matrix: view Matrix2, vector: view Vec2) ret Vec2 {
+  ret Vec2 {
+    x: matrix.columnX.x * vector.x + matrix.columnY.x * vector.y
+    y: matrix.columnX.y * vector.x + matrix.columnY.y * vector.y
+  }
+}
+
+# b3MulMM2
+func multiply(left: view Matrix2, right: view Matrix2) ret Matrix2 {
+  ret Matrix2 {
+    columnX: multiply(matrix: left, vector: right.columnX)
+    columnY: multiply(matrix: left, vector: right.columnY)
+  }
+}
+
+# b3Det2
+func determinant(matrix: view Matrix2) ret Float {
+  ret matrix.columnX.x * matrix.columnY.y - matrix.columnX.y * matrix.columnY.x
+}
+
+# b3Invert2: the zero matrix if singular.
+func invert(matrix: view Matrix2) ret Matrix2 {
+  let matrixDeterminant: Float = determinant(matrix: matrix)
+  if absFloat(value: matrixDeterminant) > 1000.0 * floatMin {
+    let inverseDeterminant: Float = 1.0 / matrixDeterminant
+    ret Matrix2 {
+      columnX: Vec2 {
+        x: inverseDeterminant * matrix.columnY.y
+        y: -inverseDeterminant * matrix.columnX.y
+      }
+      columnY: Vec2 {
+        x: -inverseDeterminant * matrix.columnY.x
+        y: inverseDeterminant * matrix.columnX.x
+      }
+    }
+  }
+  ret Matrix2 { columnX: Vec2 { x: 0.0, y: 0.0 }, columnY: Vec2 { x: 0.0, y: 0.0 } }
+}
+
+# b3Solve2: inverse(matrix) * vector, assuming positive semi-definite.
+func solve2(matrix: view Matrix2, vector: view Vec2) ret Vec2 {
+  let matrixDeterminant: Float = determinant(matrix: matrix)
+  if matrixDeterminant > 1000.0 * floatMin {
+    let inverseDeterminant: Float = 1.0 / matrixDeterminant
+    ret Vec2 {
+      x: inverseDeterminant * matrix.columnY.y * vector.x - inverseDeterminant * matrix.columnY.x * vector.y
+      y: -inverseDeterminant * matrix.columnX.y * vector.x + inverseDeterminant * matrix.columnX.x * vector.y
+    }
+  }
+  ret Vec2 { x: 0.0, y: 0.0 }
+}

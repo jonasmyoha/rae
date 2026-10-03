@@ -1,0 +1,152 @@
+# Box3D's axis-aligned boxes (b3AABB functions of math_functions.h and
+# math_internal.h at 9f998c8). Box3D's operation order is kept exactly;
+# checked bit for bit against the oracle in fixture 948.
+open Vec3
+open Quat
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/MatrixMath
+open physics/math/TransformMath
+
+type Aabb {
+  lowerBound: Vec3
+  upperBound: Vec3
+}
+
+# B3_BOUNDS3_EMPTY: a box every union grows from.
+func emptyBounds() ret Aabb {
+  ret Aabb {
+    lowerBound: Vec3 { x: floatMax, y: floatMax, z: floatMax }
+    upperBound: Vec3 { x: -floatMax, y: -floatMax, z: -floatMax }
+  }
+}
+
+# b3MakeAABB: the box of a point cloud, padded by `radius` (count > 0).
+func makeAabb(points: view List(Vec3), count: view Int, radius: view Float) ret Aabb {
+  let first: Vec3 = points.copyAtDefault(index: 0)
+  var box: Aabb = { lowerBound: first, upperBound: first }
+  loop var i: Int = 1, i < count, ++i {
+    let point: Vec3 = points.copyAtDefault(index: i)
+    box.lowerBound = min(left: box.lowerBound, right: point)
+    box.upperBound = max(left: box.upperBound, right: point)
+  }
+  let padding: Vec3 = { x: radius, y: radius, z: radius }
+  box.lowerBound = subtract(left: box.lowerBound, right: padding)
+  box.upperBound = add(left: box.upperBound, right: padding)
+  ret box
+}
+
+# b3OffsetAABB: a local box moved to a world origin (no rounding in single
+# precision).
+func offsetAabb(localBox: view Aabb, origin: view Pos) ret Aabb {
+  ret Aabb {
+    lowerBound: Vec3 {
+      x: roundDownFloat(value: origin.x + localBox.lowerBound.x)
+      y: roundDownFloat(value: origin.y + localBox.lowerBound.y)
+      z: roundDownFloat(value: origin.z + localBox.lowerBound.z)
+    }
+    upperBound: Vec3 {
+      x: roundUpFloat(value: origin.x + localBox.upperBound.x)
+      y: roundUpFloat(value: origin.y + localBox.upperBound.y)
+      z: roundUpFloat(value: origin.z + localBox.upperBound.z)
+    }
+  }
+}
+
+# b3AABB_Contains: does `outer` fully contain `inner`?
+func contains(outer: view Aabb, inner: view Aabb) ret Bool {
+  if outer.lowerBound.x > inner.lowerBound.x or inner.upperBound.x > outer.upperBound.x {
+    ret false
+  }
+  if outer.lowerBound.y > inner.lowerBound.y or inner.upperBound.y > outer.upperBound.y {
+    ret false
+  }
+  if outer.lowerBound.z > inner.lowerBound.z or inner.upperBound.z > outer.upperBound.z {
+    ret false
+  }
+  ret true
+}
+
+# b3AABB_Area: surface area.
+func area(box: view Aabb) ret Float {
+  let delta: Vec3 = subtract(left: box.upperBound, right: box.lowerBound)
+  ret 2.0 * (delta.x * delta.y + delta.y * delta.z + delta.z * delta.x)
+}
+
+# b3AABB_Center
+func center(box: view Aabb) ret Vec3 {
+  ret scale(scale: 0.5, vector: add(left: box.upperBound, right: box.lowerBound))
+}
+
+# b3AABB_Extents: half-widths.
+func extents(box: view Aabb) ret Vec3 {
+  ret scale(scale: 0.5, vector: subtract(left: box.upperBound, right: box.lowerBound))
+}
+
+# b3AABB_Union
+func union(first: view Aabb, second: view Aabb) ret Aabb {
+  ret Aabb {
+    lowerBound: min(left: first.lowerBound, right: second.lowerBound)
+    upperBound: max(left: first.upperBound, right: second.upperBound)
+  }
+}
+
+# b3AABB_Inflate: uniform padding.
+func inflate(box: view Aabb, extension: view Float) ret Aabb {
+  let padding: Vec3 = { x: extension, y: extension, z: extension }
+  ret Aabb {
+    lowerBound: subtract(left: box.lowerBound, right: padding)
+    upperBound: add(left: box.upperBound, right: padding)
+  }
+}
+
+# b3AABB_Overlaps
+func overlaps(first: view Aabb, second: view Aabb) ret Bool {
+  # No intersection if separated along one axis
+  if first.upperBound.x < second.lowerBound.x or first.lowerBound.x > second.upperBound.x {
+    ret false
+  }
+  if first.upperBound.y < second.lowerBound.y or first.lowerBound.y > second.upperBound.y {
+    ret false
+  }
+  if first.upperBound.z < second.lowerBound.z or first.lowerBound.z > second.upperBound.z {
+    ret false
+  }
+  # Overlapping on all axis means bounds are intersecting
+  ret true
+}
+
+# b3AABB_Transform: a box enclosing the transformed box.
+func transformAabb(transform: view Transform, box: view Aabb) ret Aabb {
+  let boxCenter: Vec3 = transformPoint(transform: transform, point: center(box: box))
+  let rotation: Matrix3 = matrixFromQuat(quat: transform.rotation)
+  let extent: Vec3 = multiply(matrix: abs(matrix: rotation), vector: extents(box: box))
+  ret Aabb {
+    lowerBound: subtract(left: boxCenter, right: extent)
+    upperBound: add(left: boxCenter, right: extent)
+  }
+}
+
+# b3ClosestPointToAABB
+func closestPointToAabb(point: view Vec3, box: view Aabb) ret Vec3 {
+  ret clamp(vector: point, lower: box.lowerBound, upper: box.upperBound)
+}
+
+# b3AABB_AddPoint
+func addPoint(box: view Aabb, point: view Vec3) ret Aabb {
+  ret Aabb {
+    lowerBound: min(left: box.lowerBound, right: point)
+    upperBound: max(left: box.upperBound, right: point)
+  }
+}
+
+# b3TransformInertia: an inertia about the body origin, from one about the
+# shape's center of mass at `transform`.
+func transformInertia(
+  transform: view Transform
+  centralInertia: view Matrix3
+  mass: view Float
+) ret Matrix3 {
+  let rotated: Matrix3 = rotateInertia(quat: transform.rotation, centralInertia: centralInertia)
+  ret add(left: rotated, right: steiner(mass: mass, origin: transform.position))
+}

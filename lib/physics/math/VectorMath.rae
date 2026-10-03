@@ -1,0 +1,352 @@
+# Box3D's 3D vector math (b3Vec3 functions of math_functions.h and
+# math_internal.h at 9f998c8) over lib/Vec3's Vec3 — the same layout as
+# b3Vec3. Box3D's operation order is kept exactly (docs/physics-rae-port-
+# design.md §3); checked bit for bit against the oracle in fixture 948.
+open Vec3
+open Math
+open physics/math/Scalar
+
+func zeroVector() ret Vec3 {
+  ret Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+}
+
+func oneVector() ret Vec3 {
+  ret Vec3 { x: 1.0, y: 1.0, z: 1.0 }
+}
+
+func axisX() ret Vec3 {
+  ret Vec3 { x: 1.0, y: 0.0, z: 0.0 }
+}
+
+func axisY() ret Vec3 {
+  ret Vec3 { x: 0.0, y: 1.0, z: 0.0 }
+}
+
+func axisZ() ret Vec3 {
+  ret Vec3 { x: 0.0, y: 0.0, z: 1.0 }
+}
+
+# b3Add
+func add(left: view Vec3, right: view Vec3) ret Vec3 {
+  ret Vec3 { x: left.x + right.x, y: left.y + right.y, z: left.z + right.z }
+}
+
+# b3Sub
+func subtract(left: view Vec3, right: view Vec3) ret Vec3 {
+  ret Vec3 { x: left.x - right.x, y: left.y - right.y, z: left.z - right.z }
+}
+
+# b3Mul: component-wise.
+func multiply(left: view Vec3, right: view Vec3) ret Vec3 {
+  ret Vec3 { x: left.x * right.x, y: left.y * right.y, z: left.z * right.z }
+}
+
+# b3Neg
+func negate(vector: view Vec3) ret Vec3 {
+  ret Vec3 { x: -vector.x, y: -vector.y, z: -vector.z }
+}
+
+# b3Dot
+func dot(left: view Vec3, right: view Vec3) ret Float {
+  ret left.x * right.x + left.y * right.y + left.z * right.z
+}
+
+# b3Length
+func length(vector: view Vec3) ret Float {
+  ret sqrt(x: dot(left: vector, right: vector))
+}
+
+# b3LengthSquared
+func lengthSquared(vector: view Vec3) ret Float {
+  ret vector.x * vector.x + vector.y * vector.y + vector.z * vector.z
+}
+
+# b3Distance
+func distance(from: view Vec3, to: view Vec3) ret Float {
+  let delta: Vec3 = { x: to.x - from.x, y: to.y - from.y, z: to.z - from.z }
+  ret length(vector: delta)
+}
+
+# b3DistanceSquared
+func distanceSquared(from: view Vec3, to: view Vec3) ret Float {
+  let delta: Vec3 = { x: to.x - from.x, y: to.y - from.y, z: to.z - from.z }
+  ret delta.x * delta.x + delta.y * delta.y + delta.z * delta.z
+}
+
+# b3Normalize: a zero vector if the input is very small.
+func normalize(vector: view Vec3) ret Vec3 {
+  let squaredLength: Float = vector.x * vector.x + vector.y * vector.y + vector.z * vector.z
+  if squaredLength > 1000.0 * floatMin {
+    let inverseLength: Float = 1.0 / sqrt(x: squaredLength)
+    ret Vec3 {
+      x: inverseLength * vector.x
+      y: inverseLength * vector.y
+      z: inverseLength * vector.z
+    }
+  }
+  ret Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+}
+
+# b3GetLengthAndNormalize: the unit vector, and its length in `length`.
+func getLengthAndNormalize(length: mod Float, vector: view Vec3) ret Vec3 {
+  let squaredLength: Float = vector.x * vector.x + vector.y * vector.y + vector.z * vector.z
+  if squaredLength > 1000.0 * floatMin {
+    length = sqrt(x: squaredLength)
+    let inverseLength: Float = 1.0 / length
+    ret Vec3 {
+      x: inverseLength * vector.x
+      y: inverseLength * vector.y
+      z: inverseLength * vector.z
+    }
+  }
+  length = 0.0
+  ret Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+}
+
+# b3Perp: a unit vector perpendicular to `vector`.
+func perp(vector: view Vec3) ret Vec3 {
+  # Suppose vector a has all equal components and is a unit vector: a = (s, s, s)
+  # Then 3*s*s = 1, s = sqrt(1/3) = 0.57735. This means that at least one component
+  # of a unit vector must be greater or equal to 0.57735.
+  var perpendicular: Vec3 = { x: 0.0, y: vector.z, z: -vector.y }
+  if vector.x < -0.5 or 0.5 < vector.x {
+    perpendicular = Vec3 { x: vector.y, y: -vector.x, z: 0.0 }
+  }
+  ret normalize(vector: perpendicular)
+}
+
+# b3IsNormalized
+func isNormalized(vector: view Vec3) ret Bool {
+  let squared: Float = dot(left: vector, right: vector)
+  ret absFloat(value: 1.0 - squared) < 100.0 * floatEpsilon
+}
+
+# b3MulAdd: base + scale * vector
+func mulAdd(base: view Vec3, scale: view Float, vector: view Vec3) ret Vec3 {
+  ret Vec3 {
+    x: base.x + scale * vector.x
+    y: base.y + scale * vector.y
+    z: base.z + scale * vector.z
+  }
+}
+
+# b3MulSub: base - scale * vector
+func mulSub(base: view Vec3, scale: view Float, vector: view Vec3) ret Vec3 {
+  ret Vec3 {
+    x: base.x - scale * vector.x
+    y: base.y - scale * vector.y
+    z: base.z - scale * vector.z
+  }
+}
+
+# b3MulSV: scale * vector
+func scale(scale: view Float, vector: view Vec3) ret Vec3 {
+  ret Vec3 { x: scale * vector.x, y: scale * vector.y, z: scale * vector.z }
+}
+
+# b3Cross
+func cross(left: view Vec3, right: view Vec3) ret Vec3 {
+  ret Vec3 {
+    x: left.y * right.z - left.z * right.y
+    y: left.z * right.x - left.x * right.z
+    z: left.x * right.y - left.y * right.x
+  }
+}
+
+# b3Lerp
+func lerp(from: view Vec3, to: view Vec3, alpha: view Float) ret Vec3 {
+  ret Vec3 {
+    x: (1.0 - alpha) * from.x + alpha * to.x
+    y: (1.0 - alpha) * from.y + alpha * to.y
+    z: (1.0 - alpha) * from.z + alpha * to.z
+  }
+}
+
+# b3Blend2: firstScale * first + secondScale * second
+func blend2(
+  firstScale: view Float
+  first: view Vec3
+  secondScale: view Float
+  second: view Vec3
+) ret Vec3 {
+  ret Vec3 {
+    x: firstScale * first.x + secondScale * second.x
+    y: firstScale * first.y + secondScale * second.y
+    z: firstScale * first.z + secondScale * second.z
+  }
+}
+
+# b3Blend3: firstScale * first + secondScale * second + thirdScale * third
+func blend3(
+  firstScale: view Float
+  first: view Vec3
+  secondScale: view Float
+  second: view Vec3
+  thirdScale: view Float
+  third: view Vec3
+) ret Vec3 {
+  ret Vec3 {
+    x: firstScale * first.x + secondScale * second.x + thirdScale * third.x
+    y: firstScale * first.y + secondScale * second.y + thirdScale * third.y
+    z: firstScale * first.z + secondScale * second.z + thirdScale * third.z
+  }
+}
+
+# b3Abs: component-wise.
+func abs(vector: view Vec3) ret Vec3 {
+  ret Vec3 {
+    x: absFloat(value: vector.x)
+    y: absFloat(value: vector.y)
+    z: absFloat(value: vector.z)
+  }
+}
+
+func signOf(value: view Float) ret Float {
+  if value >= 0.0 {
+    ret 1.0
+  }
+  ret -1.0
+}
+
+# b3Sign: component-wise -1 or 1 (1 for zero).
+func sign(vector: view Vec3) ret Vec3 {
+  ret Vec3 { x: signOf(value: vector.x), y: signOf(value: vector.y), z: signOf(value: vector.z) }
+}
+
+# b3Min: component-wise.
+func min(left: view Vec3, right: view Vec3) ret Vec3 {
+  ret Vec3 {
+    x: minFloat(left: left.x, right: right.x)
+    y: minFloat(left: left.y, right: right.y)
+    z: minFloat(left: left.z, right: right.z)
+  }
+}
+
+# b3Max: component-wise.
+func max(left: view Vec3, right: view Vec3) ret Vec3 {
+  ret Vec3 {
+    x: maxFloat(left: left.x, right: right.x)
+    y: maxFloat(left: left.y, right: right.y)
+    z: maxFloat(left: left.z, right: right.z)
+  }
+}
+
+# b3Clamp: component-wise.
+func clamp(vector: view Vec3, lower: view Vec3, upper: view Vec3) ret Vec3 {
+  ret Vec3 {
+    x: clampFloat(value: vector.x, lower: lower.x, upper: upper.x)
+    y: clampFloat(value: vector.y, lower: lower.y, upper: upper.y)
+    z: clampFloat(value: vector.z, lower: lower.z, upper: upper.z)
+  }
+}
+
+# b3SafeScale: keeps a (possibly negative) scale away from zero.
+func safeScale(scaleVector: view Vec3) ret Vec3 {
+  let absScale: Vec3 = abs(vector: scaleVector)
+  let smallest: Vec3 = { x: minScale, y: minScale, z: minScale }
+  ret multiply(left: sign(vector: scaleVector), right: max(left: absScale, right: smallest))
+}
+
+# b3ClampLength: `vector` shortened to at most maxLength.
+func clampLength(vector: view Vec3, maxLength: view Float) ret Vec3 {
+  let squaredLength: Float = lengthSquared(vector: vector)
+  if squaredLength <= maxLength * maxLength {
+    ret vector
+  }
+  let vectorLength: Float = sqrt(x: squaredLength)
+  ret scale(scale: maxLength / vectorLength, vector: vector)
+}
+
+# b3ArbitraryPerp: a unit vector perpendicular to the unit vector `vector`.
+func arbitraryPerp(vector: view Vec3) ret Vec3 {
+  # Suppose vector a has all equal components and is a unit vector: a = (s, s, s)
+  # Then 3*s*s = 1, s = sqrt(1/3) = 0.57735. This means that at least one component
+  # of a unit vector must be greater or equal to 0.57735.
+  var perpendicular: Vec3 = zeroVector()
+  if vector.x < -0.5 or 0.5 < vector.x {
+    # x is non-zero and it should not go into the x component
+    let first: Float = 0.67
+    let second: Float = -0.42
+    perpendicular = Vec3 {
+      x: first * vector.y + second * vector.z
+      y: -first * vector.x
+      z: -second * vector.x
+    }
+  } else if vector.y < -0.5 or 0.5 < vector.y {
+    # y is non-zero and it should not go into the y component
+    let first: Float = 0.67
+    let third: Float = -0.42
+    perpendicular = Vec3 {
+      x: first * vector.y
+      y: -first * vector.x + third * vector.z
+      z: -third * vector.y
+    }
+  } else {
+    # z is non-zero and it should not go into the z component
+    let first: Float = 0.67
+    let second: Float = -0.42
+    perpendicular = Vec3 {
+      x: first * vector.z
+      y: second * vector.z
+      z: -first * vector.x - second * vector.y
+    }
+  }
+  ret normalize(vector: perpendicular)
+}
+
+# b3ScalarTripleProduct: dot(first, cross(second, third)), Box3D's order.
+func scalarTripleProduct(first: view Vec3, second: view Vec3, third: view Vec3) ret Float {
+  let crossed: Vec3 = {
+    x: second.y * third.z - second.z * third.y
+    y: second.z * third.x - second.x * third.z
+    z: second.x * third.y - second.y * third.x
+  }
+  ret first.x * crossed.x + first.y * crossed.y + first.z * crossed.z
+}
+
+# b3GetByIndex: component 0, 1 or 2.
+func getByIndex(vector: view Vec3, index: view Int) ret Float {
+  if index is 0 {
+    ret vector.x
+  }
+  if index is 1 {
+    ret vector.y
+  }
+  ret vector.z
+}
+
+# b3MajorAxis / b3MaxElementIndex: the index of the largest component.
+func majorAxis(vector: view Vec3) ret Int {
+  if vector.x < vector.y {
+    if vector.y < vector.z {
+      ret 2
+    }
+    ret 1
+  }
+  if vector.x < vector.z {
+    ret 2
+  }
+  ret 0
+}
+
+func maxElementIndex(vector: view Vec3) ret Int {
+  ret majorAxis(vector: vector)
+}
+
+# b3MinElement / b3MaxElement
+func minElement(vector: view Vec3) ret Float {
+  ret minFloat(left: vector.x, right: minFloat(left: vector.y, right: vector.z))
+}
+
+func maxElement(vector: view Vec3) ret Float {
+  ret maxFloat(left: vector.x, right: maxFloat(left: vector.y, right: vector.z))
+}
+
+# b3ModifiedCross: cross with every minus a plus.
+func modifiedCross(left: view Vec3, right: view Vec3) ret Vec3 {
+  ret Vec3 {
+    x: left.y * right.z + left.z * right.y
+    y: left.z * right.x + left.x * right.z
+    z: left.x * right.y + left.y * right.x
+  }
+}

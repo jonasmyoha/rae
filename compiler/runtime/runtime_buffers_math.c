@@ -250,6 +250,9 @@ float rae_ext_Math_acos(float x) { return acosf(x); }
 float rae_ext_Math_atan(float x) { return atanf(x); }
 float rae_ext_Math_atan2(float y, float x) { return atan2f(y, x); }
 float rae_ext_Math_sqrt(float x) { return sqrtf(x); }
+/* IEEE remainder: x - n*y with n the nearest integer to x/y. Exact (no rounding), so
+ * deterministic on every platform — Box3D's b3UnwindAngle relies on it. */
+float rae_ext_Math_remainder(float x, float y) { return remainderf(x, y); }
 float rae_ext_Math_pow(float base, float exp) { return powf(base, exp); }
 float rae_ext_Math_exp(float x) { return expf(x); }
 float rae_ext_Math_math_log(float x) { return logf(x); }

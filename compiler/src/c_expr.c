@@ -416,7 +416,11 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
         else fprintf(out, "((int64_t)%.*sLL)", (int)expr->as.integer.len, expr->as.integer.data);
         break;
     }
-    case AST_EXPR_FLOAT: fprintf(out, "%.*s", (int)expr->as.floating.len, expr->as.floating.data); break;
+    case AST_EXPR_FLOAT:
+        // An f32-context literal (sema_mark_f32_literal) is a C float literal.
+        fprintf(out, "%.*s%s", (int)expr->as.floating.len, expr->as.floating.data,
+                expr->is_f32_literal ? "f" : "");
+        break;
     case AST_EXPR_BOOL: fprintf(out, "(bool)%s", expr->as.boolean ? "true" : "false"); break;
     case AST_EXPR_STRING: emit_string_literal(out, expr->as.string_lit); break;
     case AST_EXPR_CHAR: fprintf(out, "(uint32_t)%uU", (uint32_t)expr->as.char_value); break;

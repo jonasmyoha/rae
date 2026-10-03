@@ -1,0 +1,95 @@
+# Box3D's constants (include/box3d/constants.h at 9f998c8). Box3D scales its
+# length tolerances by a process-wide "length units per meter"; Rae has no
+# globals (AGENTS.md), so those are functions of it here, and the value lives
+# on the physics world. The rest are plain constants. Defaults are Box3D's
+# (lengthUnitsPerMeter 1.0, single precision).
+open physics/math/Scalar
+
+const maxWorkers: Int = 32
+
+const maxTasks: Int = 256
+
+const graphColorCount: Int = 24
+
+const contactManifoldCountBuckets: Int = 8
+
+const minFrictionWeight: Float = 0.0000000001
+
+const maxWorlds: Int = 128
+
+const contactRecycleAngularDistance: Float = 0.99240388
+
+const aabbMarginFraction: Float = 0.125
+
+const timeToSleep: Float = 0.5
+
+const maxRestitutionIterations: Int = 63
+
+const maxManifoldPoints: Int = 4
+
+const gyroscopicIterations: Int = 1
+
+const maxHullVertices: Int = 128
+
+const maxHullFaces: Int = 128
+
+const maxHullEdges: Int = 128
+
+const parallelEdgeTolerance: Float = 0.005
+
+const maxShapeCastPoints: Int = 128
+
+const shapePower: Int = 22
+
+const childPower: Int = 20
+
+const maxShapes: Int = 4194304
+
+const maxChildShapes: Int = 1048576
+
+const maxMeshContactTriangles: Int = 256
+
+# B3_HUGE: the world size bound.
+func huge(lengthUnitsPerMeter: view Float) ret Float {
+  ret 100000.0 * lengthUnitsPerMeter
+}
+
+# B3_LINEAR_SLOP: the collision and constraint tolerance.
+func linearSlop(lengthUnitsPerMeter: view Float) ret Float {
+  ret 0.005 * lengthUnitsPerMeter
+}
+
+# B3_MIN_CAPSULE_LENGTH
+func minCapsuleLength(lengthUnitsPerMeter: view Float) ret Float {
+  ret linearSlop(lengthUnitsPerMeter: lengthUnitsPerMeter)
+}
+
+# B3_OVERLAP_SLOP
+func overlapSlop(lengthUnitsPerMeter: view Float) ret Float {
+  ret 0.1 * linearSlop(lengthUnitsPerMeter: lengthUnitsPerMeter)
+}
+
+# B3_MAX_ROTATION: the largest rotation per step.
+func maxRotation() ret Float {
+  ret 0.25 * pi
+}
+
+# B3_SPECULATIVE_DISTANCE
+func speculativeDistance(lengthUnitsPerMeter: view Float) ret Float {
+  ret 4.0 * linearSlop(lengthUnitsPerMeter: lengthUnitsPerMeter)
+}
+
+# B3_MESH_REST_OFFSET
+func meshRestOffset(lengthUnitsPerMeter: view Float) ret Float {
+  ret 1.0 * linearSlop(lengthUnitsPerMeter: lengthUnitsPerMeter)
+}
+
+# B3_CONTACT_RECYCLE_DISTANCE
+func contactRecycleDistance(lengthUnitsPerMeter: view Float) ret Float {
+  ret 10.0 * linearSlop(lengthUnitsPerMeter: lengthUnitsPerMeter)
+}
+
+# B3_MAX_AABB_MARGIN
+func maxAabbMargin(lengthUnitsPerMeter: view Float) ret Float {
+  ret 0.05 * lengthUnitsPerMeter
+}
