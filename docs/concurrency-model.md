@@ -454,9 +454,11 @@ only exists for parallel code. If the slice arithmetic keeps recurring, a
 library helper is welcome; a new checker rule is not.
 
 **The guaranteed-concurrent mode** (every worker running one iteration at
-once, which spin barriers need) is part of the atomics-and-stages design
-(`docs/physics-performance-plan.md` §5 item 3): it exists only to serve spin
-barriers, which need atomics, so it is designed and tested with them. Until
+once, which spin barriers need) is part of the atomics-and-stages design,
+`docs/parallel-stages-design.md` (awaiting the maintainer). It recommends not
+needing it at all: a solver stage is a `parallelLoop` (1.4 µs per barrier at 4
+workers, measured), with `unsafe` vouching for the graph colouring's disjoint
+body writes. Until
 then the solver is sequential and the parallelLoop rules above are the whole
 rule set.
 
