@@ -1,0 +1,31 @@
+tests/cases/945_parallel_loop_rejects/Main.rae:19:5: parallelLoop: the assignment writes 'total', which every iteration shares — an iteration may only write its own locals and the element of its own index ('xs.set(index: i, ...)', 'xs.modAt(index: i)')
+    19 |     total = total + i
+       |     ^~~~
+tests/cases/945_parallel_loop_rejects/Main.rae:23:5: parallelLoop: the call mutates 'values', which every iteration shares — an iteration may only write its own locals and the element of its own index ('xs.set(index: i, ...)', 'xs.modAt(index: i)')
+    23 |     values.add(value: i)
+       |     ^~~~
+tests/cases/945_parallel_loop_rejects/Main.rae:27:5: parallelLoop: the call mutates 'values', which every iteration shares — an iteration may only write its own locals and the element of its own index ('xs.set(index: i, ...)', 'xs.modAt(index: i)')
+    27 |     values.set(index: 0, value: i)
+       |     ^~~~
+tests/cases/945_parallel_loop_rejects/Main.rae:31:42: parallelLoop: the 'mod' binding aliases 'values', which every iteration shares — an iteration may only write its own locals and the element of its own index ('xs.set(index: i, ...)', 'xs.modAt(index: i)')
+    31 |     if let first: mod Int => values.modAt(index: 0) {
+       |                                          ^~~~
+tests/cases/945_parallel_loop_rejects/Main.rae:37:19: parallelLoop: the call mutates 'counter', which every iteration shares — an iteration may only write its own locals and the element of its own index ('xs.set(index: i, ...)', 'xs.modAt(index: i)')
+    37 |     bump(counter: counter)
+       |                   ^~~~
+tests/cases/945_parallel_loop_rejects/Main.rae:41:13: parallelLoop: the assignment writes 'counter', which every iteration shares — an iteration may only write its own locals and the element of its own index ('xs.set(index: i, ...)', 'xs.modAt(index: i)')
+    41 |     counter.value = i
+       |             ^~~~
+tests/cases/945_parallel_loop_rejects/Main.rae:45:5: parallelLoop: the iteration changes 'total', which every iteration shares — an iteration may only write its own locals and the element of its own index ('xs.set(index: i, ...)', 'xs.modAt(index: i)')
+    45 |     ++total
+       |     ^~~~
+tests/cases/945_parallel_loop_rejects/Main.rae:49:5: parallelLoop: the assignment writes 'i', which every iteration shares — an iteration may only write its own locals and the element of its own index ('xs.set(index: i, ...)', 'xs.modAt(index: i)')
+    49 |     i = 3
+       |     ^~~~
+tests/cases/945_parallel_loop_rejects/Main.rae:54:7: parallelLoop: 'break' cannot stop a parallelLoop — its iterations run at the same time
+    54 |       break
+       |       ^~~~
+tests/cases/945_parallel_loop_rejects/Main.rae:58:3: parallelLoop runs its iterations on the worker pool, so it needs the counted form 'parallelLoop var i: Int = start, i < end, ++i { ... }'
+    58 |   parallelLoop total < 10 {
+       |   ^~~~
+

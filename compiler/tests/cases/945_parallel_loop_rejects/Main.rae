@@ -1,0 +1,62 @@
+# parallelLoop iterations run at the same time, so the compiler rejects every
+# write that two iterations could make to the same place (docs/concurrency-
+# model.md §2b), and every way of leaving the outlined body.
+type Counter {
+  value: Int
+}
+
+func bump(counter: mod Counter) {
+  counter.value = counter.value + 1
+}
+
+func main() {
+  let values: List(Int) = List.create(Int, cap: 8)
+  var total: Int = 0
+  var counter: Counter = { value: 0 }
+
+  # Assigning a shared variable.
+  parallelLoop var i: Int = 0, i < 8, ++i {
+    total = total + i
+  }
+  # Growing a shared List.
+  parallelLoop var i: Int = 0, i < 8, ++i {
+    values.add(value: i)
+  }
+  # Writing an element that is not the iteration's own.
+  parallelLoop var i: Int = 0, i < 8, ++i {
+    values.set(index: 0, value: i)
+  }
+  # A `mod` alias of another element.
+  parallelLoop var i: Int = 0, i < 8, ++i {
+    if let first: mod Int => values.modAt(index: 0) {
+      first = i
+    }
+  }
+  # Passing a shared value to a `mod` parameter.
+  parallelLoop var i: Int = 0, i < 8, ++i {
+    bump(counter: counter)
+  }
+  # Writing a shared struct's field.
+  parallelLoop var i: Int = 0, i < 8, ++i {
+    counter.value = i
+  }
+  # Changing a shared counter with ++.
+  parallelLoop var i: Int = 0, i < 8, ++i {
+    ++total
+  }
+  # Changing the loop variable.
+  parallelLoop var i: Int = 0, i < 8, ++i {
+    i = 3
+  }
+  # Leaving the body.
+  parallelLoop var i: Int = 0, i < 8, ++i {
+    if i is 3 {
+      break
+    }
+  }
+  # Not the counted form.
+  parallelLoop total < 10 {
+    log("{total}")
+  }
+  log("{total}")
+}

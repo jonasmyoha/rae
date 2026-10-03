@@ -669,7 +669,10 @@ static int count_ident_refs_stmt(const AstStmt* s, Str name) {
       return total;
     }
     case AST_STMT_IF:
-      return count_ident_refs_expr(s->as.if_stmt.condition, name) +
+      // The `if let` binding's value counts too: `if let x => list.modAt(...)`
+      // reads `list` there and nowhere else.
+      return count_ident_refs_stmt(s->as.if_stmt.binding, name) +
+             count_ident_refs_expr(s->as.if_stmt.condition, name) +
              count_ident_refs_block(s->as.if_stmt.then_block, name) +
              count_ident_refs_block(s->as.if_stmt.else_block, name);
     case AST_STMT_LOOP:
@@ -1375,7 +1378,111 @@ static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     return true;
 }
 
+Str sema_parallel_loop_index(const AstStmt* loop);   // sema.c
+
+// `parallelLoop var i: Int = start, i < end, ++i { body }` (docs/concurrency-
+// model.md §2b): the body is outlined into a C function that runs iterations
+// [first, end), and the loop becomes one rae_parallel_for call that hands the
+// worker pool that function and the ADDRESSES of every enclosing local the
+// body names. Inside the function each captured local is re-declared under
+// its own C name and C type, initialised from its address, so the body's C is
+// emitted exactly as it would be inline. Sharing is safe because sema
+// (sema_check_parallel_loop) only lets an iteration write its own locals and
+// the element of its own index; a List header copied this way still points at
+// the caller's storage, and the copies own nothing, so nothing drops them.
+// The function gets its own string-pool mark (the pool is per thread) and is
+// written after the enclosing function (flush_parallel_thunks).
+static bool emit_parallel_loop(CFuncContext* ctx, const AstStmt* stmt, Str index, FILE* out) {
+    CompilerContext* cc = ctx->compiler_ctx;
+    const AstStmt* init = stmt->as.loop_stmt.init;
+    const AstBlock* body = stmt->as.loop_stmt.body;
+    char* thunk_buf = NULL;
+    size_t thunk_len = 0;
+    FILE* thunk = open_memstream(&thunk_buf, &thunk_len);
+    if (!thunk) return false;
+    int id = cc->parallel_thunk_counter++;
+    char name[96];
+    snprintf(name, sizeof name, "__rae_parallel_body%d", id);
+
+    // The captures: the innermost visible local of each name the body uses.
+    size_t captured[256];
+    size_t capture_count = 0;
+    for (size_t k = ctx->local_count; k-- > 0;) {
+        Str local = ctx->locals[k];
+        if (str_eq(local, index)) continue;
+        bool shadowed = false;
+        for (size_t j = 0; j < capture_count; j++) if (str_eq(ctx->locals[captured[j]], local)) shadowed = true;
+        for (size_t j = k + 1; j < ctx->local_count && !shadowed; j++) if (str_eq(ctx->locals[j], local)) shadowed = true;
+        if (shadowed || !body || count_ident_refs_block(body, local) == 0) continue;
+        if (!ctx->local_type_refs[k] || capture_count >= 256) continue;
+        captured[capture_count++] = k;
+    }
+
+    fprintf(thunk, "void %s(void* __rae_parallel_captures, int64_t __rae_parallel_first, int64_t __rae_parallel_end) {\n", name);
+    fprintf(thunk, "  void** __rae_captures = (void**)__rae_parallel_captures;\n  (void)__rae_captures;\n");
+    for (size_t j = 0; j < capture_count; j++) {
+        size_t k = captured[j];
+        char* type_buf = NULL; size_t type_len = 0;
+        FILE* type_out = open_memstream(&type_buf, &type_len);
+        if (!type_out) { fclose(thunk); free(thunk_buf); return false; }
+        emit_type_ref_as_c_type(ctx, ctx->local_type_refs[k], type_out, false);
+        fclose(type_out);
+        fprintf(thunk, "  %s %.*s = *(%s*)__rae_captures[%zu];\n", type_buf,
+                (int)ctx->locals[k].len, ctx->locals[k].data, type_buf, j);
+        free(type_buf);
+    }
+    fprintf(thunk, "  int __rae_spm_func = rae_string_pool_mark();\n");
+    fprintf(thunk, "  for (int64_t %.*s = __rae_parallel_first; %.*s < __rae_parallel_end; ++%.*s) {\n",
+            (int)index.len, index.data, (int)index.len, index.data, (int)index.len, index.data);
+    size_t saved_locals = ctx->local_count;
+    if (ctx->local_count < 256) {
+        size_t slot = ctx->local_count++;
+        ctx->locals[slot] = index;
+        ctx->local_type_refs[slot] = init->as.let_stmt.type;
+        ctx->local_types[slot] = str_from_cstr("int64_t");
+        ctx->local_is_ptr[slot] = false;
+        ctx->local_is_mod[slot] = false;
+        ctx->local_moved[slot] = false;
+        ctx->local_drop_flag[slot] = false;
+        ctx->local_struct_owns_heap[slot] = false;
+    }
+    size_t body_locals = ctx->local_count;
+    if (ctx->loop_depth < 32) ctx->loop_body_local_start[ctx->loop_depth] = body_locals;
+    if (ctx->loop_depth < 32) ctx->loop_temps[ctx->loop_depth] = ctx->stmt_temps;
+    ctx->loop_depth++;
+    if (body) for (const AstStmt* s = body->first; s; s = s->next) emit_stmt(ctx, s, thunk);
+    ctx->loop_depth--;
+    emit_implicit_drops_for_body(ctx, thunk, body_locals);
+    ctx->local_count = saved_locals;
+    fprintf(thunk, "  }\n  rae_string_pool_flush(__rae_spm_func);\n}\n\n");
+    fclose(thunk);
+
+    if (!cc->parallel_thunks) cc->parallel_thunks = open_memstream(&cc->parallel_thunks_buf, &cc->parallel_thunks_len);
+    if (cc->parallel_thunks && thunk_buf) fputs(thunk_buf, cc->parallel_thunks);
+    free(thunk_buf);
+
+    fprintf(out, "  {\n    int64_t __rae_parallel_start%d = ", id);
+    emit_expr(ctx, init->as.let_stmt.value, out, PREC_LOWEST, false, false);
+    fprintf(out, ";\n    int64_t __rae_parallel_stop%d = ", id);
+    emit_expr(ctx, stmt->as.loop_stmt.condition->as.binary.rhs, out, PREC_LOWEST, false, false);
+    fprintf(out, ";\n    void* __rae_parallel_captures%d[%zu] = {", id, capture_count ? capture_count : 1);
+    if (!capture_count) fprintf(out, " 0");
+    for (size_t j = 0; j < capture_count; j++) {
+        Str local = ctx->locals[captured[j]];
+        fprintf(out, "%s (void*)&%.*s", j ? "," : "", (int)local.len, local.data);
+    }
+    fprintf(out, " };\n    void %s(void*, int64_t, int64_t);\n", name);
+    fprintf(out, "    rae_parallel_for(__rae_parallel_start%d, __rae_parallel_stop%d, %s, __rae_parallel_captures%d);\n  }\n",
+            id, id, name, id);
+    return true;
+}
+
 static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
+    if (stmt->as.loop_stmt.is_parallel) {
+        // Sema rejected any other shape, so a non-empty index is the norm.
+        Str index = sema_parallel_loop_index(stmt);
+        if (index.len && emit_parallel_loop(ctx, stmt, index, out)) return true;
+    }
     if (stmt->as.loop_stmt.is_range) {
         const AstStmt* binding = stmt->as.loop_stmt.init;
         const AstTypeRef* binding_type = binding ? binding->as.let_stmt.type : NULL;

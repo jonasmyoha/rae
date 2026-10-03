@@ -625,6 +625,14 @@ typedef struct CompilerContext {
     size_t shader_part_count;
     size_t shader_part_cap;
     bool shader_validation_warned;
+
+    // parallelLoop bodies (c_stmt.c emit_parallel_loop): each is outlined
+    // into its own C function, written here while the enclosing function's
+    // body is emitted and flushed right after that function's closing brace.
+    FILE* parallel_thunks;
+    char* parallel_thunks_buf;
+    size_t parallel_thunks_len;
+    int parallel_thunk_counter;
 } CompilerContext;
 
 void compiler_init(CompilerContext* ctx, Arena* ast_arena);

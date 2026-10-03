@@ -1970,6 +1970,19 @@ static bool global_init_is_deferred(const AstExpr* v) {
 // statement of the body may register a pool temporary (expr_may_pool): the
 // body is emitted into a buffer first, then written after the mark line, or
 // with its function-level flushes removed. `main` always keeps the pair.
+// The parallelLoop bodies outlined while the function just written was
+// emitted (c_stmt.c emit_parallel_loop) follow it: the function declared each
+// one at block scope where it calls rae_parallel_for.
+static void flush_parallel_thunks(CompilerContext* ctx, FILE* out) {
+  if (!ctx->parallel_thunks) return;
+  fclose(ctx->parallel_thunks);
+  if (ctx->parallel_thunks_buf && ctx->parallel_thunks_len) fputs(ctx->parallel_thunks_buf, out);
+  free(ctx->parallel_thunks_buf);
+  ctx->parallel_thunks = NULL;
+  ctx->parallel_thunks_buf = NULL;
+  ctx->parallel_thunks_len = 0;
+}
+
 static void write_function_body_with_pool(FILE* out, const char* body, bool keep_pool) {
   static const char* flush_text = "rae_string_pool_flush(__rae_spm_func);";
   if (keep_pool) {
@@ -2087,6 +2100,7 @@ bool emit_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* 
 
   if (is_main) fprintf(out, "  return 0;\n}\n\n");
   else fprintf(out, "}\n\n");
+  flush_parallel_thunks(ctx, out);
   return true;
 }
 
@@ -2291,7 +2305,9 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
     write_function_body_with_pool(out, body_buf ? body_buf : "", tctx.func_may_pool);
     free(body_buf);
   }
-  fprintf(out, "}\n\n"); return true;
+  fprintf(out, "}\n\n");
+  flush_parallel_thunks(ctx, out);
+  return true;
 }
 
 // True if an earlier decl in all_decls already defines a non-generic type with

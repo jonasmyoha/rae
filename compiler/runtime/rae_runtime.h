@@ -42,6 +42,11 @@ typedef struct {
 } RaeTask;
 
 RaeTask* rae_task_new(size_t result_size);
+/* parallelLoop (runtime_threads.c): run body(captures, first, end) over
+ * [start, end) in chunks on the worker pool, returning when all are done. */
+typedef void (*RaeParallelBody)(void* captures, int64_t first, int64_t end);
+void rae_parallel_for(int64_t start, int64_t end, RaeParallelBody body, void* captures);
+int64_t rae_ext_Parallel_workerCount(void);
 void* rae_task_await(RaeTask* t);   /* join once; returns the result buffer */
 void rae_task_drop(RaeTask* t);     /* join (if not joined) + free; scope-exit drop */
 
