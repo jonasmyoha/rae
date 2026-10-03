@@ -1,0 +1,275 @@
+# A shape attached to a body (b3Shape of Box3D's shape.h and the geometry
+# dispatch of shape.c at 9f998c8): its kind, its geometry, material, filter
+# and broad-phase proxy. Box3D keeps the geometry in a union; here the shape
+# carries a sphere, a capsule, and for a hull the index of its data in the
+# world's hull list (Box3D points into a shared hull database). Meshes, height
+# fields and compounds arrive in P5; their cases are inert until then.
+# Box3D's operation order is kept exactly; checked bit for bit against the
+# oracle in fixture 954.
+import Math
+open Vec3
+open physics/Constants
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/TransformMath
+open physics/math/AabbMath
+open physics/geometry/QueryTypes
+open physics/geometry/Sphere
+open physics/geometry/Capsule
+open physics/geometry/Hull
+open physics/collision/ShapePair
+open physics/dynamics/WorldTypes
+
+# B3_AABB_MARGIN_FRACTION
+const aabbMarginFraction: Float = 0.125
+
+type Shape {
+  # -1 for a free slot
+  id: Int
+  bodyId: Int
+  # The body's shape list
+  prevShapeId: Int
+  nextShapeId: Int
+  sensorIndex: Int
+  proxyKey: Int
+  shapeType: ShapeType
+  density: Float
+  explosionScale: Float
+  aabbMargin: Float
+  # The world box with the speculative margin
+  aabb: Aabb
+  localCentroid: Vec3
+  materialCount: Int
+  material: SurfaceMaterial
+  filter: Filter
+  flags: Int
+  generation: Int
+  # The geometry of the shape's kind
+  sphere: Sphere
+  capsule: Capsule
+  hullIndex: Int
+}
+
+func zeroShape() ret Shape {
+  ret Shape {
+    id: 0
+    bodyId: 0
+    prevShapeId: 0
+    nextShapeId: 0
+    sensorIndex: 0
+    proxyKey: 0
+    shapeType: ShapeType.capsule
+    density: 0.0
+    explosionScale: 0.0
+    aabbMargin: 0.0
+    aabb: Aabb { lowerBound: zeroVector(), upperBound: zeroVector() }
+    localCentroid: zeroVector()
+    materialCount: 0
+    material: SurfaceMaterial {
+      friction: 0.0
+      restitution: 0.0
+      rollingResistance: 0.0
+      tangentVelocity: zeroVector()
+      userMaterialId: 0
+      customColor: 0
+    }
+    filter: Filter { categoryBits: 0, maskBits: 0, groupIndex: 0 }
+    flags: 0
+    generation: 0
+    sphere: Sphere { center: zeroVector(), radius: 0.0 }
+    capsule: Capsule { center1: zeroVector(), center2: zeroVector(), radius: 0.0 }
+    hullIndex: -1
+  }
+}
+
+# b3ComputeShapeMargin: the extra room of a moving shape's fat box, an
+# eighth of its size, at most maxAabbMargin.
+func computeShapeMargin(
+  shape: view Shape
+  hulls: view List(Hull)
+  lengthUnitsPerMeter: view Float
+) ret Float {
+  let capMargin: Float = maxAabbMargin(lengthUnitsPerMeter: lengthUnitsPerMeter)
+  var margin: Float = 0.0
+  match shape.shapeType {
+    case ShapeType.sphere {
+      margin = shape.sphere.radius
+    }
+    case ShapeType.capsule {
+      margin = 0.5 * distance(from: shape.capsule.center2, to: shape.capsule.center1) + shape.capsule.radius
+    }
+    case ShapeType.hull {
+      if let hull: view Hull => hulls.viewAt(index: shape.hullIndex) {
+        var maxExtentSquared: Float = 0.0
+        loop let point: view Vec3 in hull.points {
+          let squared: Float = distanceSquared(from: point, to: hull.center)
+          maxExtentSquared = maxFloat(left: maxExtentSquared, right: squared)
+        }
+        margin = Math.sqrt(x: maxExtentSquared)
+      }
+    }
+    # Static-only shapes: never consumed, so the cap
+    case ShapeType.mesh {
+      ret capMargin
+    }
+    case ShapeType.height {
+      ret capMargin
+    }
+    case ShapeType.compound {
+      ret capMargin
+    }
+  }
+  ret minFloat(left: capMargin, right: aabbMarginFraction * margin)
+}
+
+# b3GetShapeCentroid
+func shapeCentroid(shape: view Shape, hulls: view List(Hull)) ret Vec3 {
+  match shape.shapeType {
+    case ShapeType.capsule {
+      ret lerp(from: shape.capsule.center1, to: shape.capsule.center2, alpha: 0.5)
+    }
+    case ShapeType.sphere {
+      ret shape.sphere.center
+    }
+    case ShapeType.hull {
+      if let hull: view Hull => hulls.viewAt(index: shape.hullIndex) {
+        ret hull.center
+      }
+      ret zeroVector()
+    }
+    case ShapeType.mesh {
+      ret zeroVector()
+    }
+    case ShapeType.height {
+      ret zeroVector()
+    }
+    case ShapeType.compound {
+      ret zeroVector()
+    }
+  }
+}
+
+# b3ComputeShapeAABB
+func computeShapeAabb(
+  shape: view Shape
+  hulls: view List(Hull)
+  transform: view Transform
+) ret Aabb {
+  match shape.shapeType {
+    case ShapeType.capsule {
+      ret computeCapsuleAabb(capsule: shape.capsule, transform: transform)
+    }
+    case ShapeType.sphere {
+      ret computeSphereAabb(sphere: shape.sphere, transform: transform)
+    }
+    case ShapeType.hull {
+      if let hull: view Hull => hulls.viewAt(index: shape.hullIndex) {
+        ret computeHullAabb(hull: hull, transform: transform)
+      }
+      ret Aabb { lowerBound: transform.position, upperBound: transform.position }
+    }
+    case ShapeType.mesh {
+      ret Aabb { lowerBound: transform.position, upperBound: transform.position }
+    }
+    case ShapeType.height {
+      ret Aabb { lowerBound: transform.position, upperBound: transform.position }
+    }
+    case ShapeType.compound {
+      ret Aabb { lowerBound: transform.position, upperBound: transform.position }
+    }
+  }
+}
+
+# b3ComputeFatShapeAABB (single precision): the box grown by `extra`.
+func computeFatShapeAabb(
+  shape: view Shape
+  hulls: view List(Hull)
+  transform: view Transform
+  extra: view Float
+) ret Aabb {
+  let grow: Vec3 = { x: extra, y: extra, z: extra }
+  var box: Aabb = computeShapeAabb(shape: shape, hulls: hulls, transform: transform)
+  box.lowerBound = subtract(left: box.lowerBound, right: grow)
+  box.upperBound = add(left: box.upperBound, right: grow)
+  ret box
+}
+
+# b3ComputeShapeMass
+func computeShapeMass(shape: view Shape, hulls: view List(Hull)) ret MassData {
+  match shape.shapeType {
+    case ShapeType.capsule {
+      ret computeCapsuleMass(capsule: shape.capsule, density: shape.density)
+    }
+    case ShapeType.sphere {
+      ret computeSphereMass(sphere: shape.sphere, density: shape.density)
+    }
+    case ShapeType.hull {
+      if let hull: view Hull => hulls.viewAt(index: shape.hullIndex) {
+        ret computeHullMass(hull: hull, density: shape.density)
+      }
+      ret zeroMassData()
+    }
+    case ShapeType.mesh {
+      ret zeroMassData()
+    }
+    case ShapeType.height {
+      ret zeroMassData()
+    }
+    case ShapeType.compound {
+      ret zeroMassData()
+    }
+  }
+}
+
+func zeroMassData() ret MassData {
+  ret MassData {
+    mass: 0.0
+    center: zeroVector()
+    inertia: Matrix3 { columnX: zeroVector(), columnY: zeroVector(), columnZ: zeroVector() }
+  }
+}
+
+# b3ComputeShapeExtent: the shape's inner radius and its box half extents
+# about `localCenter`.
+func computeShapeExtent(
+  shape: view Shape
+  hulls: view List(Hull)
+  localCenter: view Vec3
+) ret ShapeExtent {
+  match shape.shapeType {
+    case ShapeType.capsule {
+      let radius: Float = shape.capsule.radius
+      let center1: Vec3 = subtract(left: shape.capsule.center1, right: localCenter)
+      let center2: Vec3 = subtract(left: shape.capsule.center2, right: localCenter)
+      let grow: Vec3 = { x: radius, y: radius, z: radius }
+      ret ShapeExtent {
+        minExtent: radius
+        maxExtent: add(
+          left: max(left: abs(vector: center1), right: abs(vector: center2))
+          right: grow
+        )
+      }
+    }
+    case ShapeType.sphere {
+      let radius: Float = shape.sphere.radius
+      let offset: Vec3 = abs(vector: subtract(left: shape.sphere.center, right: localCenter))
+      let grow: Vec3 = { x: radius, y: radius, z: radius }
+      ret ShapeExtent { minExtent: radius, maxExtent: add(left: offset, right: grow) }
+    }
+    case ShapeType.hull {
+      if let hull: view Hull => hulls.viewAt(index: shape.hullIndex) {
+        ret computeHullExtent(hull: hull, origin: localCenter)
+      }
+      ret ShapeExtent { minExtent: 0.0, maxExtent: zeroVector() }
+    }
+    case ShapeType.mesh {
+      ret ShapeExtent { minExtent: 0.0, maxExtent: zeroVector() }
+    }
+    case ShapeType.height {
+      ret ShapeExtent { minExtent: 0.0, maxExtent: zeroVector() }
+    }
+    case ShapeType.compound {
+      ret ShapeExtent { minExtent: 0.0, maxExtent: zeroVector() }
+    }
+  }
+}

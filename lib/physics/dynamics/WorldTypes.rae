@@ -1,0 +1,305 @@
+# The public value types of a physics world (Box3D's types.h, id.h and the
+# defaults of types.c at 9f998c8): body, shape and world definitions,
+# surface materials, collision filters, ids, and the body/shape flag bits.
+# Box3D reads the length scale from a global; here it is a field of the world
+# definition (`lengthUnitsPerMeter`, 1 for meters) that the defaults take.
+open Vec3
+open Quat
+open physics/math/QuatMath
+
+# The body kinds (b3BodyType): static 0, kinematic 1, dynamic 2.
+enum BodyType { staticBody, kinematicBody, dynamicBody }
+
+# B3_DEFAULT_CATEGORY_BITS / B3_DEFAULT_MASK_BITS
+const allBits: UInt64 = 18446744073709551615
+
+# The solver sets every world has (b3SetType); sleeping sets follow.
+const staticSet: Int = 0
+
+const disabledSet: Int = 1
+
+const awakeSet: Int = 2
+
+const firstSleepingSet: Int = 3
+
+# b3BodyFlags
+const lockLinearX: Int = 1
+
+const lockLinearY: Int = 2
+
+const lockLinearZ: Int = 4
+
+const lockAngularX: Int = 8
+
+const lockAngularY: Int = 16
+
+const lockAngularZ: Int = 32
+
+const isFastFlag: Int = 64
+
+const isBulletFlag: Int = 128
+
+const isSpeedCappedFlag: Int = 256
+
+const hadTimeOfImpactFlag: Int = 512
+
+const allowFastRotationFlag: Int = 1024
+
+const enlargeBulletBoundsFlag: Int = 2048
+
+const dynamicFlag: Int = 4096
+
+const enableSleepFlag: Int = 8192
+
+const enableContactRecyclingFlag: Int = 16384
+
+const dirtyMassFlag: Int = 32768
+
+# b3_fixedRotation (all three angular locks) and b3_bodyTransientFlags
+const fixedRotationFlags: Int = 56
+
+const bodyTransientFlags: Int = 768
+
+# b3ShapeFlags
+const enableSensorEventsFlag: Int = 1
+
+const enableContactEventsFlag: Int = 2
+
+const enableCustomFilteringFlag: Int = 4
+
+const enableHitEventsFlag: Int = 8
+
+const enablePreSolveEventsFlag: Int = 16
+
+const enableSpeculativeFlag: Int = 64
+
+# Friction, bounce and surface data of a shape (b3SurfaceMaterial).
+type SurfaceMaterial {
+  friction: Float
+  restitution: Float
+  rollingResistance: Float
+  tangentVelocity: Vec3
+  userMaterialId: UInt64
+  customColor: Int
+}
+
+# Which shapes may touch (b3Filter): categories, the categories it accepts,
+# and a group (same positive group: always; same negative group: never).
+type Filter {
+  categoryBits: UInt64
+  maskBits: UInt64
+  groupIndex: Int
+}
+
+# Per-axis motion locks (b3MotionLocks).
+type MotionLocks {
+  linearX: Bool
+  linearY: Bool
+  linearZ: Bool
+  angularX: Bool
+  angularY: Bool
+  angularZ: Bool
+}
+
+# A body to create (b3BodyDef; the name and user data are not ported).
+type BodyDef {
+  bodyType: BodyType
+  position: Vec3
+  rotation: Quat
+  linearVelocity: Vec3
+  angularVelocity: Vec3
+  linearDamping: Float
+  angularDamping: Float
+  gravityScale: Float
+  sleepThreshold: Float
+  safetyFactor: Float
+  motionLocks: MotionLocks
+  enableSleep: Bool
+  isAwake: Bool
+  isBullet: Bool
+  isEnabled: Bool
+  allowFastRotation: Bool
+  enableContactRecycling: Bool
+}
+
+# A shape to create (b3ShapeDef; one material, no name or user data).
+type ShapeDef {
+  baseMaterial: SurfaceMaterial
+  density: Float
+  explosionScale: Float
+  filter: Filter
+  enableCustomFiltering: Bool
+  isSensor: Bool
+  enableSensorEvents: Bool
+  enableContactEvents: Bool
+  enableHitEvents: Bool
+  enablePreSolveEvents: Bool
+  invokeContactCreation: Bool
+  updateBodyMass: Bool
+  enableSpeculativeContact: Bool
+}
+
+# A world to create (b3WorldDef; the callbacks are not ported).
+type WorldDef {
+  gravity: Vec3
+  restitutionThreshold: Float
+  restitutionIterations: Int
+  enableRestitutionPropagation: Bool
+  hitEventThreshold: Float
+  contactHertz: Float
+  contactDampingRatio: Float
+  contactSpeed: Float
+  maximumLinearSpeed: Float
+  enableSleep: Bool
+  enableContinuous: Bool
+  workerCount: Int
+  lengthUnitsPerMeter: Float
+}
+
+# A body handle (b3BodyId): index + 1 (0 is null), world, generation.
+type BodyId {
+  index1: Int
+  world0: Int
+  generation: Int
+}
+
+# A shape handle (b3ShapeId)
+type ShapeId {
+  index1: Int
+  world0: Int
+  generation: Int
+}
+
+func nullBodyId() ret BodyId {
+  ret BodyId { index1: 0, world0: 0, generation: 0 }
+}
+
+func nullShapeId() ret ShapeId {
+  ret ShapeId { index1: 0, world0: 0, generation: 0 }
+}
+
+# The numbering of b3BodyType.
+func bodyTypeCode(bodyType: view BodyType) ret Int {
+  match bodyType {
+    case BodyType.staticBody {
+      ret 0
+    }
+    case BodyType.kinematicBody {
+      ret 1
+    }
+    case BodyType.dynamicBody {
+      ret 2
+    }
+  }
+}
+
+func bodyTypeFromCode(code: view Int) ret BodyType {
+  match code {
+    case 1 {
+      ret BodyType.kinematicBody
+    }
+    case 2 {
+      ret BodyType.dynamicBody
+    }
+    default {
+      ret BodyType.staticBody
+    }
+  }
+}
+
+# b3DefaultWorldDef
+func defaultWorldDef(lengthUnitsPerMeter: view Float) ret WorldDef {
+  ret WorldDef {
+    gravity: Vec3 { x: 0.0, y: -10.0, z: 0.0 }
+    restitutionThreshold: 1.0 * lengthUnitsPerMeter
+    restitutionIterations: 2
+    enableRestitutionPropagation: false
+    hitEventThreshold: 1.0 * lengthUnitsPerMeter
+    contactHertz: 30.0
+    contactDampingRatio: 10.0
+    contactSpeed: 3.0 * lengthUnitsPerMeter
+    maximumLinearSpeed: 400.0 * lengthUnitsPerMeter
+    enableSleep: true
+    enableContinuous: true
+    workerCount: 0
+    lengthUnitsPerMeter: lengthUnitsPerMeter
+  }
+}
+
+func noMotionLocks() ret MotionLocks {
+  ret MotionLocks {
+    linearX: false
+    linearY: false
+    linearZ: false
+    angularX: false
+    angularY: false
+    angularZ: false
+  }
+}
+
+# b3DefaultBodyDef
+func defaultBodyDef(lengthUnitsPerMeter: view Float) ret BodyDef {
+  ret BodyDef {
+    bodyType: BodyType.staticBody
+    position: Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+    rotation: quatIdentity()
+    linearVelocity: Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+    angularVelocity: Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+    linearDamping: 0.0
+    angularDamping: 0.0
+    gravityScale: 1.0
+    sleepThreshold: 0.05 * lengthUnitsPerMeter
+    safetyFactor: 0.5
+    motionLocks: noMotionLocks()
+    enableSleep: true
+    isAwake: true
+    isBullet: false
+    isEnabled: true
+    allowFastRotation: false
+    enableContactRecycling: true
+  }
+}
+
+# b3DefaultFilter
+func defaultFilter() ret Filter {
+  ret Filter { categoryBits: allBits, maskBits: allBits, groupIndex: 0 }
+}
+
+# b3DefaultSurfaceMaterial
+func defaultSurfaceMaterial() ret SurfaceMaterial {
+  ret SurfaceMaterial {
+    friction: 0.6
+    restitution: 0.0
+    rollingResistance: 0.0
+    tangentVelocity: Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+    userMaterialId: 0
+    customColor: 0
+  }
+}
+
+# b3DefaultShapeDef
+func defaultShapeDef(lengthUnitsPerMeter: view Float) ret ShapeDef {
+  ret ShapeDef {
+    baseMaterial: defaultSurfaceMaterial()
+    density: 1000.0 / (lengthUnitsPerMeter * lengthUnitsPerMeter * lengthUnitsPerMeter)
+    explosionScale: 1.0
+    filter: defaultFilter()
+    enableCustomFiltering: false
+    isSensor: false
+    enableSensorEvents: false
+    enableContactEvents: false
+    enableHitEvents: false
+    enablePreSolveEvents: false
+    invokeContactCreation: true
+    updateBodyMass: true
+    enableSpeculativeContact: true
+  }
+}
+
+# b3ShouldShapesCollide
+func shouldShapesCollide(filterA: view Filter, filterB: view Filter) ret Bool {
+  if filterA.groupIndex is filterB.groupIndex and filterA.groupIndex is not 0 {
+    ret filterA.groupIndex > 0
+  }
+  ret (filterA.maskBits bitand filterB.categoryBits) is not 0 and (filterA.categoryBits bitand filterB.maskBits) is not 0
+}

@@ -1,0 +1,307 @@
+# Creating and destroying shapes (b3CreateShapeInternal, b3CreateShape,
+# b3Create*Shape, b3DestroyShapeInternal, b3DestroyShape of Box3D's shape.c
+# at 9f998c8). Box3D's operation order is kept exactly; checked against the
+# oracle in fixture 954. A hull shape stores a copy of its hull in the
+# world's hull list (Box3D shares equal hulls through a database; that only
+# saves memory). Sensors arrive in P4d.
+open Vec3
+open physics/Constants
+open physics/math/VectorMath
+open physics/math/TransformMath
+open physics/math/AabbMath
+open physics/geometry/QueryTypes
+open physics/geometry/Hull
+open physics/geometry/HullCreate
+open physics/collision/ShapePair
+open physics/container/IdPool
+open physics/dynamics/WorldTypes
+open physics/dynamics/Body
+open physics/dynamics/Shape
+open physics/dynamics/World
+open physics/dynamics/ShapeProxy
+open physics/dynamics/BodyMass
+
+# The flag bits of a shape definition.
+func shapeFlagsOf(def: view ShapeDef) ret Int {
+  var flags: Int = 0
+  if def.enableSensorEvents {
+    flags = flags bitor enableSensorEventsFlag
+  }
+  if def.enableContactEvents {
+    flags = flags bitor enableContactEventsFlag
+  }
+  if def.enableCustomFiltering {
+    flags = flags bitor enableCustomFilteringFlag
+  }
+  if def.enableHitEvents {
+    flags = flags bitor enableHitEventsFlag
+  }
+  if def.enablePreSolveEvents {
+    flags = flags bitor enablePreSolveEventsFlag
+  }
+  if def.enableSpeculativeContact {
+    flags = flags bitor enableSpeculativeFlag
+  }
+  ret flags
+}
+
+# b3CreateShapeInternal for a shape whose geometry is already in `shape`.
+# Returns the shape id.
+func createShapeInternal(
+  world: mod PhysicsWorld
+  bodyId: view Int
+  bodyTransform: view Transform
+  def: view ShapeDef
+  geometry: view Shape
+  shapeId: view Int
+) ret Int {
+  let body: Body = bodyAt(world: world, bodyId: bodyId)
+  var shape: Shape = world.shapes.copyAtDefault(index: shapeId)
+  shape.shapeType = geometry.shapeType
+  shape.sphere = geometry.sphere
+  shape.capsule = geometry.capsule
+  shape.hullIndex = geometry.hullIndex
+  shape.id = shapeId
+  shape.bodyId = bodyId
+  shape.density = def.density
+  shape.explosionScale = def.explosionScale
+  shape.filter = def.filter
+  shape.flags = shapeFlagsOf(def: def)
+  shape.proxyKey = -1
+  shape.localCentroid = shapeCentroid(shape: shape, hulls: world.hulls)
+  shape.aabbMargin = computeShapeMargin(
+    shape: shape
+    hulls: world.hulls
+    lengthUnitsPerMeter: world.lengthUnitsPerMeter
+  )
+  shape.aabb = Aabb { lowerBound: zeroVector(), upperBound: zeroVector() }
+  shape.generation = shape.generation + 1
+  # The common case: one material, stored inline
+  shape.material = def.baseMaterial
+  shape.materialCount = 1
+  world.shapes.set(index: shapeId, value: shape)
+  world.fatAabbs.set(
+    index: shapeId
+    value: Aabb { lowerBound: zeroVector(), upperBound: zeroVector() }
+  )
+
+  if body.setIndex is not disabledSet {
+    let forcePairCreation: Bool = def.invokeContactCreation and shape.shapeType is not ShapeType.compound
+    createShapeProxy(
+      world: world
+      shapeId: shapeId
+      proxyBodyType: bodyTypeCode(bodyType: body.bodyType)
+      transform: bodyTransform
+      forcePairCreation: forcePairCreation
+    )
+  }
+
+  # The body's doubly linked shape list
+  if body.headShapeId is not -1 {
+    if let head: mod Shape => world.shapes.modAt(index: body.headShapeId) {
+      head.prevShapeId = shapeId
+    }
+  }
+  if let added: mod Shape => world.shapes.modAt(index: shapeId) {
+    added.prevShapeId = -1
+    added.nextShapeId = body.headShapeId
+    added.sensorIndex = -1
+  }
+  if let owner: mod Body => world.bodies.modAt(index: bodyId) {
+    owner.headShapeId = shapeId
+    owner.shapeCount = owner.shapeCount + 1
+  }
+  ret shapeId
+}
+
+# Take a shape slot (Box3D's id allocation in b3CreateShapeInternal).
+func allocateShapeSlot(world: mod PhysicsWorld) ret Int {
+  let shapeId: Int = allocId(pool: world.shapeIdPool)
+  if shapeId is world.shapes.length {
+    world.shapes.add(value: zeroShape())
+    world.fatAabbs.add(value: Aabb { lowerBound: zeroVector(), upperBound: zeroVector() })
+  }
+  ret shapeId
+}
+
+# b3CreateShape after the geometry is in place: create, then update the
+# body's mass or mark it dirty.
+func finishShape(
+  world: mod PhysicsWorld
+  bodyId: view BodyId
+  def: view ShapeDef
+  geometry: view Shape
+  shapeId: view Int
+) ret ShapeId {
+  let bodyIndex: Int = bodyIndexOf(bodyId: bodyId)
+  let bodyTransform: Transform = bodyTransformOf(
+    world: world
+    body: bodyAt(world: world, bodyId: bodyIndex)
+  )
+  createShapeInternal(
+    world: world
+    bodyId: bodyIndex
+    bodyTransform: bodyTransform
+    def: def
+    geometry: geometry
+    shapeId: shapeId
+  )
+  if def.updateBodyMass {
+    updateBodyMassData(world: world, bodyId: bodyIndex)
+  } else if (bodyAt(world: world, bodyId: bodyIndex).flags bitand dirtyMassFlag) is 0 {
+    if let body: mod Body => world.bodies.modAt(index: bodyIndex) {
+      body.flags = body.flags bitor dirtyMassFlag
+    }
+    syncBodyFlags(world: world, bodyId: bodyIndex)
+  }
+  let shape: Shape = world.shapes.copyAtDefault(index: shapeId)
+  ret ShapeId { index1: shapeId + 1, world0: bodyId.world0, generation: shape.generation }
+}
+
+# b3CreateSphereShape
+func createSphereShape(
+  world: mod PhysicsWorld
+  bodyId: view BodyId
+  def: view ShapeDef
+  sphere: view Sphere
+) ret ShapeId {
+  let shapeId: Int = allocateShapeSlot(world: world)
+  var geometry: Shape = zeroShape()
+  geometry.shapeType = ShapeType.sphere
+  geometry.sphere = sphere
+  ret finishShape(
+    world: world
+    bodyId: bodyId
+    def: def
+    geometry: geometry
+    shapeId: shapeId
+  )
+}
+
+# b3CreateCapsuleShape: a capsule shorter than the linear slop is a sphere.
+func createCapsuleShape(
+  world: mod PhysicsWorld
+  bodyId: view BodyId
+  def: view ShapeDef
+  capsule: view Capsule
+) ret ShapeId {
+  let slop: Float = linearSlop(lengthUnitsPerMeter: world.lengthUnitsPerMeter)
+  let lengthSquared: Float = distanceSquared(from: capsule.center1, to: capsule.center2)
+  if lengthSquared <= slop * slop {
+    let sphere: Sphere = {
+      center: lerp(from: capsule.center1, to: capsule.center2, alpha: 0.5)
+      radius: capsule.radius
+    }
+    ret createSphereShape(
+      world: world
+      bodyId: bodyId
+      def: def
+      sphere: sphere
+    )
+  }
+  let shapeId: Int = allocateShapeSlot(world: world)
+  var geometry: Shape = zeroShape()
+  geometry.shapeType = ShapeType.capsule
+  geometry.capsule = capsule
+  ret finishShape(
+    world: world
+    bodyId: bodyId
+    def: def
+    geometry: geometry
+    shapeId: shapeId
+  )
+}
+
+# b3CreateHullShape
+func createHullShape(
+  world: mod PhysicsWorld
+  bodyId: view BodyId
+  def: view ShapeDef
+  hull: view Hull
+) ret ShapeId {
+  let shapeId: Int = allocateShapeSlot(world: world)
+  var geometry: Shape = zeroShape()
+  geometry.shapeType = ShapeType.hull
+  geometry.hullIndex = world.hulls.length
+  world.hulls.add(value: hull)
+  ret finishShape(
+    world: world
+    bodyId: bodyId
+    def: def
+    geometry: geometry
+    shapeId: shapeId
+  )
+}
+
+# b3CreateTransformedHullShape: the hull scaled (non-uniform, mirroring) and
+# placed by `transform`. A null id if that gives a degenerate hull (the shape
+# slot is used up and freed, as in Box3D).
+func createTransformedHullShape(
+  world: mod PhysicsWorld
+  bodyId: view BodyId
+  def: view ShapeDef
+  hull: view Hull
+  transform: view Transform
+  scaleVector: view Vec3
+) ret ShapeId {
+  let shapeId: Int = allocateShapeSlot(world: world)
+  if let baked: Hull = cloneAndTransformHull(
+    original: hull
+    transform: transform
+    scaleVector: scaleVector
+  ) {
+    var geometry: Shape = zeroShape()
+    geometry.shapeType = ShapeType.hull
+    geometry.hullIndex = world.hulls.length
+    world.hulls.add(value: baked)
+    ret finishShape(
+      world: world
+      bodyId: bodyId
+      def: def
+      geometry: geometry
+      shapeId: shapeId
+    )
+  }
+  freeId(pool: world.shapeIdPool, id: shapeId)
+  if let shape: mod Shape => world.shapes.modAt(index: shapeId) {
+    shape.id = -1
+  }
+  ret nullShapeId()
+}
+
+# b3DestroyShapeInternal: unlink from the body, drop the proxy, free the id.
+# (Contacts and sensors of the shape: P4b, P4d.)
+func destroyShapeInternal(world: mod PhysicsWorld, shapeId: view Int, bodyId: view Int) {
+  let shape: Shape = world.shapes.copyAtDefault(index: shapeId)
+  if shape.prevShapeId is not -1 {
+    if let previous: mod Shape => world.shapes.modAt(index: shape.prevShapeId) {
+      previous.nextShapeId = shape.nextShapeId
+    }
+  }
+  if shape.nextShapeId is not -1 {
+    if let next: mod Shape => world.shapes.modAt(index: shape.nextShapeId) {
+      next.prevShapeId = shape.prevShapeId
+    }
+  }
+  if let body: mod Body => world.bodies.modAt(index: bodyId) {
+    if shapeId is body.headShapeId {
+      body.headShapeId = shape.nextShapeId
+    }
+    body.shapeCount = body.shapeCount - 1
+  }
+  destroyShapeProxy(world: world, shapeId: shapeId)
+  freeId(pool: world.shapeIdPool, id: shapeId)
+  if let freed: mod Shape => world.shapes.modAt(index: shapeId) {
+    freed.id = -1
+  }
+}
+
+# b3DestroyShape
+func destroyShape(world: mod PhysicsWorld, shapeId: view ShapeId, updateBodyMass: view Bool) {
+  let shapeIndex: Int = shapeId.index1 - 1
+  let bodyId: Int = world.shapes.copyAtDefault(index: shapeIndex).bodyId
+  destroyShapeInternal(world: world, shapeId: shapeIndex, bodyId: bodyId)
+  if updateBodyMass {
+    updateBodyMassData(world: world, bodyId: bodyId)
+  }
+}
