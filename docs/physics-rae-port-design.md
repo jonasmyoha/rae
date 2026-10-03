@@ -301,6 +301,14 @@ C added.
   islands; **P4c** the scalar wide solver and contact solver, the stage
   list and dispatcher, and the 600-step scenes; **P4d** sleep and island
   splitting, sensors, contact and sensor events.
+  **P4b landed 2026-10-04, bit-exact:** contacts (create, destroy, the
+  convex manifold update with impulse carry-over, contact recycling), the
+  constraint graph with Box3D's colour assignment and overflow, contact
+  islands (link, unlink, merge), the contact moves of waking and of
+  b3TrySleepIsland, and the narrow phase of the step with its state-change
+  processing (`lib/physics/dynamics/Contact`, `ConstraintGraph`,
+  `WorldGraph`, `WorldContacts`, `WorldIslands`, `Collide`; golden
+  `contacts`, fixture 957).
 - **P5 — meshes, height fields, compounds** and their manifolds.
 - **P6 — joints**, one module per kind, each scene bit-exact.
 - **P7 — queries and the mover**: ray/shape casts, overlaps, the character

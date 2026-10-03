@@ -1,0 +1,372 @@
+# The narrow phase of a step (b3CollideTask, b3Collide and the start of
+# b3World_Step of Box3D's physics_world.c at 9f998c8): every awake contact
+# updates its manifold (or is recycled when its bodies barely moved), then
+# the contacts whose touching state changed are processed serially in
+# contact id order: disjoint ones are destroyed, ones that started touching
+# link islands and join the constraint graph, ones that stopped leave them.
+# The collide task runs block by block as worker 0 (ParallelFor). Checked
+# against the oracle in fixture 957.
+#
+# Not here yet: the contact begin and end events (P4d); Box3D's narrow-phase
+# statistics (SAT calls, recycled counts, manifold histograms) are not kept.
+import Math
+open Vec3
+open Quat
+open physics/Constants
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/QuatMath
+open physics/math/MatrixMath
+open physics/math/TransformMath
+open physics/math/AabbMath
+open physics/geometry/Hull
+open physics/collision/Manifold
+open physics/container/Bitset
+open physics/dynamics/WorldTypes
+open physics/dynamics/Body
+open physics/dynamics/Shape
+open physics/dynamics/Contact
+open physics/dynamics/ConstraintGraph
+open physics/dynamics/SolverSet
+open physics/dynamics/World
+open physics/dynamics/WorldGraph
+open physics/dynamics/WorldIslands
+open physics/dynamics/WorldContacts
+open physics/dynamics/BroadPhasePairs
+open physics/dynamics/ParallelFor
+
+# b3ResolveContactBodySim: a contact body's sim from its encoded index.
+func resolveContactBodySim(
+  world: view PhysicsWorld
+  encodedIndex: view Int
+  bodyId: view Int
+) ret BodySim {
+  if encodedIndex >= 0 {
+    ret world.solverSets.copyAtDefault(index: awakeSet).bodySims.copyAtDefault(index: encodedIndex)
+  }
+  if isStaticSimIndex(encodedBodySimIndex: encodedIndex) {
+    ret world.solverSets.copyAtDefault(index: staticSet).bodySims.copyAtDefault(
+      index: -encodedIndex - 2
+    )
+  }
+  ret bodySimOf(world: world, body: bodyAt(world: world, bodyId: bodyId))
+}
+
+# Contact recycling: when neither body moved further (with its extent) than
+# the tolerance since the manifold was computed, keep the anchors and only
+# update the separations. True if recycled.
+func recycleContact(
+  contact: mod Contact
+  simA: view BodySim
+  simB: view BodySim
+  recycleTolerance: view Float
+) ret Bool {
+  let transformA: Transform = simA.transform
+  let transformB: Transform = simB.transform
+  # The scalar part of the relative rotation is the quaternion dot product;
+  # close to 1 for a small angle (squared: the double cover).
+  let angleA: Float = dot(left: transformA.rotation, right: contact.cachedRotationA)
+  let angleB: Float = dot(left: transformB.rotation, right: contact.cachedRotationB)
+  let angularDistance: Float = minFloat(left: angleA * angleA, right: angleB * angleB)
+
+  let relative: Transform = inverseMultiplyWorld(left: transformA, right: transformB)
+  let cached: Transform = contact.cachedRelativePose
+  var maxExtentA: Vec3 = simA.maxExtent
+  if isStaticSimIndex(encodedBodySimIndex: contact.encodedBodySimA) {
+    maxExtentA = zeroVector()
+  }
+  var maxExtentB: Vec3 = simB.maxExtent
+  if isStaticSimIndex(encodedBodySimIndex: contact.encodedBodySimB) {
+    maxExtentB = zeroVector()
+  }
+  let maxExtent: Vec3 = max(left: maxExtentA, right: maxExtentB)
+
+  # A variation of conservative advancement
+  let distSquared: Float = distanceSquared(from: relative.position, to: cached.position)
+  if angularDistance > contactRecycleAngularDistance and distSquared < recycleTolerance * recycleTolerance {
+    let distance: Float = Math.sqrt(x: distSquared)
+    let slack: Float = recycleTolerance - distance
+    let qr: Quat = inverseMultiply(left: cached.rotation, right: relative.rotation)
+    let arc: Vec3 = modifiedCross(left: abs(vector: quatVector(quat: qr)), right: maxExtent)
+    let arcSquared: Float = 4.0 * lengthSquared(vector: arc)
+    if arcSquared < slack * slack {
+      let deltaA: Quat = multiply(
+        left: transformA.rotation
+        right: conjugate(a: contact.cachedRotationA)
+      )
+      let deltaB: Quat = multiply(
+        left: transformB.rotation
+        right: conjugate(a: contact.cachedRotationB)
+      )
+      let matrixA: Matrix3 = matrixFromQuat(quat: deltaA)
+      let matrixB: Matrix3 = matrixFromQuat(quat: deltaB)
+      # Minimize round-off
+      let centerDelta: Vec3 = subtractPositions(left: simB.center, right: simA.center)
+      loop var m: Int = 0, m < contact.manifolds.length, ++m {
+        if let manifold: mod Manifold => contact.manifolds.modAt(index: m) {
+          let normal: Vec3 = manifold.normal
+          loop var p: Int = 0, p < manifold.pointCount, ++p {
+            if let point: mod ManifoldPoint => manifold.points.modAt(index: p) {
+              # Keep the anchors, update the separation (as sub-stepping)
+              let rA: Vec3 = multiply(matrix: matrixA, vector: point.anchorA)
+              let rB: Vec3 = multiply(matrix: matrixB, vector: point.anchorB)
+              let delta: Vec3 = add(left: centerDelta, right: subtract(left: rB, right: rA))
+              point.separation = point.baseSeparation + dot(left: delta, right: normal)
+              point.normalVelocity = 0.0
+              point.persisted = true
+            }
+          }
+        }
+      }
+      ret true
+    }
+  }
+  ret false
+}
+
+# b3CollideTask: contacts `startIndex` to `endIndex` of `contactIndices`.
+func collideTask(
+  world: mod PhysicsWorld
+  contactIndices: view List(Int)
+  startIndex: view Int
+  endIndex: view Int
+  workerIndex: view Int
+) {
+  let recycleDistance: Float = world.contactRecycleDistance
+  let recycleDistanceNonTouching: Float = minFloat(
+    left: recycleDistance
+    right: speculativeDistance(lengthUnitsPerMeter: world.lengthUnitsPerMeter)
+  )
+  loop var i: Int = startIndex, i < endIndex, ++i {
+    let contactId: Int = contactIndices.copyAtDefault(index: i)
+    # (Read through a view: a copy of a contact is a deep copy.)
+    var shapeIdA: Int = 0
+    var shapeIdB: Int = 0
+    var encodedA: Int = 0
+    var encodedB: Int = 0
+    var bodyIdA: Int = 0
+    var bodyIdB: Int = 0
+    if let contact: view Contact => world.contacts.viewAt(index: contactId) {
+      shapeIdA = contact.shapeIdA
+      shapeIdB = contact.shapeIdB
+      encodedA = contact.encodedBodySimA
+      encodedB = contact.encodedBodySimB
+      bodyIdA = contact.edgeA.bodyId
+      bodyIdB = contact.edgeB.bodyId
+    }
+
+    # Do the proxies still overlap?
+    let boxA: Aabb = world.fatAabbs.copyAtDefault(index: shapeIdA)
+    let boxB: Aabb = world.fatAabbs.copyAtDefault(index: shapeIdB)
+    if overlaps(first: boxA, second: boxB) is false {
+      # This contact will be destroyed
+      if let contact: mod Contact => world.contacts.modAt(index: contactId) {
+        contact.flags = contact.flags bitor simDisjoint
+        contact.flags = contact.flags bitand (bitnot simTouchingFlag)
+      }
+      if let taskContext: mod TaskContext => world.taskContexts.modAt(index: workerIndex) {
+        setBit(bitset: taskContext.contactStateBitSet, bitIndex: contactId)
+      }
+      continue
+    }
+
+    let shapeA: Shape = world.shapes.copyAtDefault(index: shapeIdA)
+    let shapeB: Shape = world.shapes.copyAtDefault(index: shapeIdB)
+    let simA: BodySim = resolveContactBodySim(world: world, encodedIndex: encodedA, bodyId: bodyIdA)
+    let simB: BodySim = resolveContactBodySim(world: world, encodedIndex: encodedB, bodyId: bodyIdB)
+    let transformA: Transform = simA.transform
+    let transformB: Transform = simB.transform
+    let isFast: Bool = ((simA.flags bitor simB.flags) bitand isFastFlag) is not 0
+    let lengthUnitsPerMeter: Float = world.lengthUnitsPerMeter
+
+    var touching: Bool = false
+    var wasTouching: Bool = false
+    var recycled: Bool = false
+    if let contact: mod Contact => world.contacts.modAt(index: contactId) {
+      wasTouching = (contact.flags bitand simTouchingFlag) is not 0
+      var recycleTolerance: Float = recycleDistanceNonTouching
+      if wasTouching {
+        recycleTolerance = recycleDistance
+      }
+      # Contact recycling. This is inspired by persistent contact manifolds
+      # (PhysX), but allows larger relative motion with one tuning value.
+      if isFast is false and recycleDistance > 0.0 and (contact.flags bitand relativeTransformValid) is not 0 and (contact.flags bitand contactRecycleFlag) is not 0 {
+        recycled = recycleContact(
+          contact: contact
+          simA: simA
+          simB: simB
+          recycleTolerance: recycleTolerance
+        )
+      }
+      if recycled is false {
+        # Caching for contact recycling
+        contact.cachedRotationA = transformA.rotation
+        contact.cachedRotationB = transformB.rotation
+        contact.cachedRelativePose = inverseMultiplyWorld(left: transformA, right: transformB)
+        contact.flags = contact.flags bitor relativeTransformValid
+        if let taskContext: mod TaskContext => world.taskContexts.modAt(index: workerIndex) {
+          # This updates solid contacts
+          touching = updateContact(
+            contact: contact
+            geometry: taskContext.localManifold
+            shapeA: shapeA
+            localCenterA: simA.localCenter
+            transformA: transformA
+            shapeB: shapeB
+            localCenterB: simB.localCenter
+            transformB: transformB
+            hulls: world.hulls
+            lengthUnitsPerMeter: lengthUnitsPerMeter
+          )
+        }
+        # (A mesh contact's spec update: P5.)
+        if touching {
+          # Cache the separations
+          loop var m: Int = 0, m < contact.manifolds.length, ++m {
+            if let manifold: mod Manifold => contact.manifolds.modAt(index: m) {
+              loop var p: Int = 0, p < manifold.pointCount, ++p {
+                if let point: mod ManifoldPoint => manifold.points.modAt(index: p) {
+                  point.baseSeparation = point.separation
+                }
+              }
+            }
+          }
+        }
+        # State changes that affect island connectivity and contact events
+        if touching and wasTouching is false {
+          contact.flags = contact.flags bitor simStartedTouching
+        } else if touching is false and wasTouching {
+          contact.flags = contact.flags bitor simStoppedTouching
+        }
+      }
+    }
+    if recycled is false and touching is not wasTouching {
+      if let taskContext: mod TaskContext => world.taskContexts.modAt(index: workerIndex) {
+        setBit(bitset: taskContext.contactStateBitSet, bitIndex: contactId)
+      }
+    }
+  }
+}
+
+# b3AddNonTouchingContact
+func addNonTouchingContact(world: mod PhysicsWorld, contactId: view Int) {
+  let localIndex: Int = addSetContact(world: world, setIndex: awakeSet, contactId: contactId)
+  if let contact: mod Contact => world.contacts.modAt(index: contactId) {
+    contact.colorIndex = -1
+    contact.localIndex = localIndex
+  }
+}
+
+# b3Collide: update every awake contact, then process the state changes.
+func collide(world: mod PhysicsWorld) {
+  # Gather the contacts of all the graph colours, then the awake
+  # non-touching ones, into one list
+  let contactIndices: List(Int) = List.create(Int, cap: 64)
+  loop let color: view GraphColor in world.constraintGraph.colors {
+    loop var j: Int = 0, j < color.convexContacts.length, ++j {
+      contactIndices.add(value: color.convexContacts.copyAtDefault(index: j))
+    }
+    loop var j: Int = 0, j < color.contacts.length, ++j {
+      contactIndices.add(value: color.contacts.copyAtDefault(index: j).contactId)
+    }
+  }
+  if let set: view SolverSet => world.solverSets.viewAt(index: awakeSet) {
+    loop var j: Int = 0, j < set.contactIndices.length, ++j {
+      contactIndices.add(value: set.contactIndices.copyAtDefault(index: j))
+    }
+  }
+  let contactCount: Int = contactIndices.length
+  if contactCount is 0 {
+    ret
+  }
+
+  # A bit per contact id: contacts move between lists as they change state
+  let contactIdCapacity: Int = world.contactIdPool.nextIndex
+  loop var i: Int = 0, i < world.taskContexts.length, ++i {
+    if let taskContext: mod TaskContext => world.taskContexts.modAt(index: i) {
+      setBitCountAndClear(bitset: taskContext.contactStateBitSet, bitCount: contactIdCapacity)
+    }
+  }
+
+  # A task should take at least 40us on a 4GHz CPU (10K cycles)
+  let blockSize: Int = parallelForBlockSize(
+    itemCount: contactCount
+    minRange: 20
+    workerCount: world.workerCount
+  )
+  let blockCount: Int = parallelForBlockCount(itemCount: contactCount, blockSize: blockSize)
+  loop var block: Int = 0, block < blockCount, ++block {
+    collideTask(
+      world: world
+      contactIndices: contactIndices
+      startIndex: parallelForBlockStart(blockIndex: block, blockSize: blockSize)
+      endIndex: parallelForBlockEnd(
+        blockIndex: block
+        blockSize: blockSize
+        itemCount: contactCount
+      )
+      workerIndex: 0
+    )
+  }
+
+  # Serially update the contact states: the workers' bits OR-ed together,
+  # in contact id order
+  var stateBits: Bitset = world.taskContexts.copyAtDefault(index: 0).contactStateBitSet
+  loop var i: Int = 1, i < world.taskContexts.length, ++i {
+    inPlaceUnion(
+      setA: stateBits
+      setB: world.taskContexts.copyAtDefault(index: i).contactStateBitSet
+    )
+  }
+  let bitCount: Int = stateBits.blockCount * 64
+  loop var contactId: Int = 0, contactId < bitCount, ++contactId {
+    if getBit(bitset: stateBits, bitIndex: contactId) is false {
+      continue
+    }
+    let flags: Int = contactFlags(world: world, contactId: contactId)
+    if (flags bitand simDisjoint) is not 0 {
+      # The bounding boxes no longer overlap
+      destroyContact(world: world, contactId: contactId, wakeBodies: false)
+    } else if (flags bitand simStartedTouching) is not 0 {
+      # (The begin touch event: P4d.)
+      # Link first: this wakes colliding bodies, so the body sims are in
+      # the right place.
+      if let contact: mod Contact => world.contacts.modAt(index: contactId) {
+        contact.flags = contact.flags bitand (bitnot simStartedTouching)
+        contact.flags = contact.flags bitor contactTouchingFlag
+      }
+      linkContact(world: world, contactId: contactId)
+      let oldLocalIndex: Int = contactLocalIndex(world: world, contactId: contactId)
+      addContactToGraph(world: world, contactId: contactId)
+      removeSetContact(world: world, setIndex: awakeSet, localIndex: oldLocalIndex)
+    } else if (flags bitand simStoppedTouching) is not 0 {
+      if let contact: mod Contact => world.contacts.modAt(index: contactId) {
+        contact.flags = contact.flags bitand (bitnot simStoppedTouching)
+        contact.flags = contact.flags bitand (bitnot contactTouchingFlag)
+      }
+      # (The end touch event: P4d.)
+      let contact: Contact = world.contacts.copyAtDefault(index: contactId)
+      let colorIndex: Int = contact.colorIndex
+      let localIndex: Int = contact.localIndex
+      unlinkContact(world: world, contactId: contactId)
+      addNonTouchingContact(world: world, contactId: contactId)
+      removeContactFromGraph(
+        world: world
+        bodyIdA: contact.edgeA.bodyId
+        bodyIdB: contact.edgeB.bodyId
+        colorIndex: colorIndex
+        localIndex: localIndex
+        meshContact: (contact.flags bitand simMeshContact) is not 0
+      )
+    }
+  }
+}
+
+# b3World_Step with a zero time step: find new pairs (creating contacts),
+# then the narrow phase. P4c adds the solver after it for a positive step.
+func collideWorld(world: mod PhysicsWorld) {
+  world.locked = true
+  let created: List(UInt64) = updateBroadPhasePairs(world: world)
+  collide(world: world)
+  world.locked = false
+}

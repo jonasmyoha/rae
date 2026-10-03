@@ -234,3 +234,37 @@ The check: fixture 956 replays `goldens/pairs.golden` (245 operations: a
 world of static, kinematic and dynamic bodies packed to overlap, bodies
 moved between updates, the pair keys of every contact created in creation
 order, and the pair set's slot layout and the three trees at checkpoints).
+
+## P4b — contacts, the constraint graph, contact islands (`dynamics/`)
+
+A contact is a value in the world's contact list, linked into both bodies'
+contact lists by keys (contact id times two plus the edge), exactly as in
+Box3D; a convex contact holds at most one manifold. The narrow phase runs
+block by block as worker 0, then processes the touching-state changes
+serially in contact id order.
+
+| Box3D | Rae |
+|---|---|
+| `b3Contact` `b3ContactEdge` `b3Manifold` `b3ManifoldPoint` `b3ContactFlags` | `Contact` `ContactEdge` `Manifold` `ManifoldPoint` the flag consts (`dynamics/Contact`) |
+| `b3CreateContact` `b3DestroyContact` | `createContact` `destroyContact` (`dynamics/WorldContacts`) |
+| `b3ComputeConvexManifold` `b3UpdateConvexContact` `b3UpdateContact` | `collideShapes` + `computeConvexManifold` `updateConvexContact` `updateContact` |
+| `b3ConstraintGraph` `b3GraphColor` `b3ContactSpec` `b3CreateGraph` | `ConstraintGraph` `GraphColor` `ContactSpec` `createGraph` (`dynamics/ConstraintGraph`) |
+| `b3AddContactToGraph` `b3RemoveContactFromGraph` | `addContactToGraph` (`assignContactColor`) `removeContactFromGraph` (`dynamics/WorldGraph`) |
+| `b3ContactLink` `b3MergeIslands` `b3LinkContact` `b3UnlinkContact` | `ContactLink` `mergeIslands` `linkContact` `unlinkContact` (`dynamics/WorldIslands`) |
+| `b3WakeSolverSet` `b3TrySleepIsland` | `wakeSolverSet` `trySleepIsland` (with their contact moves) |
+| `b3RefreshBodyContactIndices` | `refreshBodyContactIndices` (`dynamics/World`) |
+| `b3CollideTask` (with contact recycling) `b3Collide` | `collideTask` (`recycleContact`) `collide` (`dynamics/Collide`) |
+| `b3World_Step` with a zero time step | `collideWorld` |
+
+Destroying a shape or a body now destroys its contacts, and a mass update
+invalidates their cached recycling transforms. Not yet: contact events
+(P4d), the pre-solve and custom friction/restitution callbacks (Box3D's
+default mixing is used), compound and mesh contacts (P5), joints in the
+graph and islands (P6), island splitting (P4d).
+
+The check: fixture 957 replays `goldens/contacts.golden` (233 operations:
+zero-time-step collides of a world of touching bodies, small moves that
+recycle contacts, large moves that end them, wakes, islands put to sleep,
+re-massing, shape and body destroys; every contact with its manifold, the
+24 graph colours including overflow, the solver sets, the islands and the
+bodies' contact fields dumped at checkpoints).

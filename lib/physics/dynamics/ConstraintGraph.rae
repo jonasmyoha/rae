@@ -1,0 +1,60 @@
+# The constraint graph (b3ConstraintGraph and b3GraphColor of Box3D's
+# constraint_graph.h at 9f998c8): touching awake contacts are spread over
+# colours so that no two constraints of one colour share a dynamic body,
+# which lets a colour be solved in parallel. The last colour is the
+# overflow, for constraints that fit nowhere. Adding and removing contacts
+# is in WorldGraph; the solver's wide constraint arrays join a colour in
+# P4c, its joints in P6.
+open physics/Constants
+open physics/math/Scalar
+open physics/container/Bitset
+
+# B3_OVERFLOW_INDEX
+const overflowIndex: Int = graphColorCount - 1
+
+# B3_DYNAMIC_COLOR_COUNT: dynamic-dynamic constraints leave the last colours
+# to dynamic-static ones, which then get solved later (less push through).
+const dynamicColorCount: Int = graphColorCount - 4
+
+# A contact of a mesh or overflow colour (b3ContactSpec)
+type ContactSpec {
+  contactId: Int
+  manifoldStart: Int
+  manifoldCount: Int
+}
+
+type GraphColor {
+  # The bodies in the colour, by body id (empty on the overflow colour)
+  bodySet: Bitset
+  # Convex contacts, solved wide
+  convexContacts: List(Int)
+  # Mesh and overflow contacts, solved one by one
+  contacts: List(ContactSpec)
+}
+
+type ConstraintGraph {
+  # graphColorCount colours, the overflow last
+  colors: List(GraphColor)
+}
+
+# b3CreateGraph
+func createGraph(bodyCapacity: view Int) ret ConstraintGraph {
+  let capacity: Int = maxInt(left: bodyCapacity, right: 8)
+  let colors: List(GraphColor) = List.create(GraphColor, cap: graphColorCount)
+  loop var i: Int = 0, i < graphColorCount, ++i {
+    var bodySet: Bitset = createBitset(bitCapacity: 0)
+    # No bit set for the overflow colour
+    if i < overflowIndex {
+      bodySet = createBitset(bitCapacity: capacity)
+      setBitCountAndClear(bitset: bodySet, bitCount: capacity)
+    }
+    colors.add(
+      value: GraphColor {
+        bodySet: bodySet
+        convexContacts: List.create(Int, cap: 4)
+        contacts: List.create(ContactSpec, cap: 4)
+      }
+    )
+  }
+  ret ConstraintGraph { colors: colors }
+}

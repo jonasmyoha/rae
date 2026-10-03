@@ -1,6 +1,15 @@
 # A simulation island (b3Island of Box3D's island.h at 9f998c8): bodies that
 # are (or were) connected by constraints, which sleep and wake together. The
-# contact and joint links arrive with contacts (P4b) and joints (P6).
+# joint links arrive with joints (P6).
+
+# A touching contact of an island, with its two bodies, so splitting an
+# island never needs the contact itself (b3ContactLink).
+type ContactLink {
+  contactId: Int
+  bodyIdA: Int
+  bodyIdB: Int
+}
+
 type Island {
   setIndex: Int
   localIndex: Int
@@ -9,6 +18,8 @@ type Island {
   # Constraints removed since the last split, which makes it a split candidate
   constraintRemoveCount: Int
   bodies: List(Int)
+  # The touching contacts; they may connect to static bodies outside it
+  contacts: List(ContactLink)
 }
 
 func emptyIsland() ret Island {
@@ -18,5 +29,6 @@ func emptyIsland() ret Island {
     islandId: 0
     constraintRemoveCount: 0
     bodies: List.create(Int, cap: 0)
+    contacts: List.create(ContactLink, cap: 0)
   }
 }

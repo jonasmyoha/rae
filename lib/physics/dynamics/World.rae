@@ -2,8 +2,8 @@
 # physics_world.c at 9f998c8). Everything a world owns is a field of this
 # one value, passed `mod` to whatever changes it: Box3D's global world
 # registry, length scale and allocators become fields here, and there are no
-# globals (AGENTS.md). Contacts, the constraint graph, joints, sensors and
-# events join it in P4b-P4d and P6.
+# globals (AGENTS.md). The solver, joints, sensors and
+# events join it in P4c-P4d and P6.
 open Vec3
 open physics/Constants
 open physics/math/Scalar
@@ -17,17 +17,30 @@ open physics/dynamics/Body
 open physics/dynamics/Shape
 open physics/dynamics/SolverSet
 open physics/dynamics/Island
+open physics/dynamics/Contact
+open physics/dynamics/ConstraintGraph
+open physics/collision/Manifold
+open physics/container/Bitset
 
 # One worker's scratch for a step (b3TaskContext of Box3D's
-# physics_world.h). A world has one per worker; single-threaded, one. Only
-# the broad phase's pair keys so far; the solver's parts join it in P4c.
+# physics_world.h). A world has one per worker; single-threaded, one. The
+# solver's parts join it in P4c (Box3D's narrow-phase statistics counters
+# are not kept).
 type TaskContext {
   # The pair keys the worker's pair-finding tasks found
   pairKeys: List(UInt64)
+  # The contacts whose touching state changed in the narrow phase, by id
+  contactStateBitSet: Bitset
+  # The narrow phase's manifold buffer (Box3D's per-worker arena)
+  localManifold: LocalManifold
 }
 
 func createTaskContext() ret TaskContext {
-  ret TaskContext { pairKeys: List.create(UInt64, cap: 16) }
+  ret TaskContext {
+    pairKeys: List.create(UInt64, cap: 16)
+    contactStateBitSet: createBitset(bitCapacity: 1024)
+    localManifold: createLocalManifold(capacity: maxManifoldPoints)
+  }
 }
 
 type PhysicsWorld {
@@ -46,6 +59,8 @@ type PhysicsWorld {
   # The hull data of hull shapes (Box3D's hull database)
   hulls: List(Hull)
   contactIdPool: IdPool
+  contacts: List(Contact)
+  constraintGraph: ConstraintGraph
   jointIdPool: IdPool
   stepIndex: Int
   splitIslandId: Int
@@ -85,6 +100,8 @@ func createWorld(def: view WorldDef) ret PhysicsWorld {
     fatAabbs: List.create(Aabb, cap: 16)
     hulls: List.create(Hull, cap: 4)
     contactIdPool: createIdPool()
+    contacts: List.create(Contact, cap: 16)
+    constraintGraph: createGraph(bodyCapacity: 16)
     jointIdPool: createIdPool()
     stepIndex: 0
     splitIslandId: -1
@@ -193,4 +210,35 @@ func isShapeIdValid(world: view PhysicsWorld, shapeId: view ShapeId) ret Bool {
   }
   let shape: Shape = world.shapes.copyAtDefault(index: index)
   ret shape.id is not -1 and shape.generation is shapeId.generation
+}
+
+# b3RefreshBodyContactIndices: after a body's sim moved, the encoded sim
+# index its contacts hold.
+func refreshBodyContactIndices(world: mod PhysicsWorld, bodyId: view Int) {
+  let body: Body = bodyAt(world: world, bodyId: bodyId)
+  let encoded: Int = encodeBodySimIndex(body: body)
+  var contactKey: Int = body.headContactKey
+  loop contactKey is not -1 {
+    let edgeIndex: Int = contactKey bitand 1
+    let contactId: Int = contactKey shr 1
+    if let contact: mod Contact => world.contacts.modAt(index: contactId) {
+      contactKey = contactEdge(contact: contact, edgeIndex: edgeIndex).nextKey
+      setEncodedBodySim(contact: contact, edgeIndex: edgeIndex, encoded: encoded)
+    }
+  }
+}
+
+# A contact's flags and local index, read without copying the contact.
+func contactFlags(world: view PhysicsWorld, contactId: view Int) ret Int {
+  if let contact: view Contact => world.contacts.viewAt(index: contactId) {
+    ret contact.flags
+  }
+  ret 0
+}
+
+func contactLocalIndex(world: view PhysicsWorld, contactId: view Int) ret Int {
+  if let contact: view Contact => world.contacts.viewAt(index: contactId) {
+    ret contact.localIndex
+  }
+  ret -1
 }

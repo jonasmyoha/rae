@@ -1,0 +1,534 @@
+# Creating, destroying and updating contacts (b3CreateContact,
+# b3DestroyContact, b3ComputeConvexManifold, b3UpdateConvexContact and
+# b3UpdateContact of Box3D's contact.c at 9f998c8). Box3D's operation order
+# is kept exactly; checked against the oracle in fixture 957.
+#
+# Not here yet: contact events (P4d), the pre-solve and custom friction /
+# restitution callbacks (Rae has no function values; Box3D's defaults are
+# used: the geometric mean of the frictions, the larger restitution), and
+# compound and mesh contacts (P5).
+import Math
+open Vec3
+open Quat
+open physics/Constants
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/QuatMath
+open physics/math/MatrixMath
+open physics/math/TransformMath
+open physics/geometry/QueryTypes
+open physics/geometry/Hull
+open physics/collision/Manifold
+open physics/collision/ConvexManifold
+open physics/collision/HullManifold
+open physics/collision/HullHullManifold
+open physics/collision/ShapePair
+open physics/broadPhase/PairSet
+open physics/dynamics/WorldTypes
+open physics/dynamics/Body
+open physics/dynamics/Shape
+open physics/dynamics/Contact
+open physics/dynamics/World
+open physics/dynamics/WorldGraph
+open physics/dynamics/WorldIslands
+
+# The radius rolling resistance acts at, on contact creation: spheres and
+# capsules only.
+func creationRollingRadius(shape: view Shape) ret Float {
+  match shape.shapeType {
+    case ShapeType.sphere {
+      ret shape.sphere.radius
+    }
+    case ShapeType.capsule {
+      ret shape.capsule.radius
+    }
+    case ShapeType.hull {
+      ret 0.0
+    }
+    case ShapeType.mesh {
+      ret 0.0
+    }
+    case ShapeType.height {
+      ret 0.0
+    }
+    case ShapeType.compound {
+      ret 0.0
+    }
+  }
+}
+
+# b3CreateContact: a non-touching contact for shapes `shapeIdA` and
+# `shapeIdB` (put in the primary order), linked into both bodies' contact
+# lists, recorded in the pair set, in the awake set if either body is awake
+# and else the disabled set.
+func createContact(
+  world: mod PhysicsWorld
+  shapeIdA: view Int
+  shapeIdB: view Int
+  childIndex: view Int
+) {
+  let shapeA: Shape = world.shapes.copyAtDefault(index: shapeIdA)
+  let shapeB: Shape = world.shapes.copyAtDefault(index: shapeIdB)
+  if isSupportedContactPair(typeA: shapeA.shapeType, typeB: shapeB.shapeType) is false {
+    # For example, no mesh against mesh
+    ret
+  }
+  if isPrimaryContactPair(typeA: shapeA.shapeType, typeB: shapeB.shapeType) is false {
+    createContact(
+      world: world
+      shapeIdA: shapeIdB
+      shapeIdB: shapeIdA
+      childIndex: childIndex
+    )
+    ret
+  }
+  let bodyA: Body = bodyAt(world: world, bodyId: shapeA.bodyId)
+  let bodyB: Body = bodyAt(world: world, bodyId: shapeB.bodyId)
+
+  # Sleeping non-touching contacts live in the disabled set; if later found
+  # touching, the sleeping islands are linked and the contact moves.
+  var setIndex: Int = disabledSet
+  if bodyA.setIndex is awakeSet or bodyB.setIndex is awakeSet {
+    setIndex = awakeSet
+  }
+
+  let contactId: Int = allocId(pool: world.contactIdPool)
+  if contactId is world.contacts.length {
+    world.contacts.add(value: zeroContact())
+  }
+  var generation: Int = 0
+  if let slot: view Contact => world.contacts.viewAt(index: contactId) {
+    generation = slot.generation
+  }
+  var contact: Contact = zeroContact()
+  contact.contactId = contactId
+  contact.generation = generation + 1
+  contact.setIndex = setIndex
+  contact.colorIndex = -1
+  contact.localIndex = world.solverSets.copyAtDefault(index: setIndex).contactIndices.length
+  contact.islandId = -1
+  contact.islandIndex = -1
+  contact.shapeIdA = shapeIdA
+  contact.shapeIdB = shapeIdB
+  contact.childIndex = childIndex
+  contact.encodedBodySimA = encodeBodySimIndex(body: bodyA)
+  contact.encodedBodySimB = encodeBodySimIndex(body: bodyB)
+
+  # Both bodies must enable recycling
+  if (bodyA.flags bitand enableContactRecyclingFlag) is not 0 and (bodyB.flags bitand enableContactRecyclingFlag) is not 0 {
+    contact.flags = contact.flags bitor contactRecycleFlag
+  }
+  # (Mesh contacts: P5.)
+  # Is either body static?
+  if bodyA.bodyType is BodyType.staticBody or bodyB.bodyType is BodyType.staticBody {
+    contact.flags = contact.flags bitor contactStaticFlag
+  }
+  if ((shapeA.flags bitor shapeB.flags) bitand enableContactEventsFlag) is not 0 {
+    contact.flags = contact.flags bitor contactEnableContactEvents
+  }
+  if (shapeA.flags bitand enableSpeculativeFlag) is not 0 and (shapeB.flags bitand enableSpeculativeFlag) is not 0 {
+    contact.flags = contact.flags bitor enableSpeculativePoints
+  }
+
+  # Connect to body A
+  let keyA: Int = (contactId shl 1) bitor 0
+  contact.edgeA = ContactEdge { bodyId: shapeA.bodyId, prevKey: -1, nextKey: bodyA.headContactKey }
+  if bodyA.headContactKey is not -1 {
+    if let head: mod Contact => world.contacts.modAt(index: bodyA.headContactKey shr 1) {
+      setContactEdgePrev(contact: head, edgeIndex: bodyA.headContactKey bitand 1, prevKey: keyA)
+    }
+  }
+  if let owner: mod Body => world.bodies.modAt(index: shapeA.bodyId) {
+    owner.headContactKey = keyA
+    owner.contactCount = owner.contactCount + 1
+  }
+
+  # Connect to body B (read again: A and B may be the same list's neighbours)
+  let headB: Int = bodyAt(world: world, bodyId: shapeB.bodyId).headContactKey
+  let keyB: Int = (contactId shl 1) bitor 1
+  contact.edgeB = ContactEdge { bodyId: shapeB.bodyId, prevKey: -1, nextKey: headB }
+  if headB is not -1 {
+    if (headB shr 1) is contactId {
+      setContactEdgePrev(contact: contact, edgeIndex: headB bitand 1, prevKey: keyB)
+    } else if let head: mod Contact => world.contacts.modAt(index: headB shr 1) {
+      setContactEdgePrev(contact: head, edgeIndex: headB bitand 1, prevKey: keyB)
+    }
+  }
+  if let owner: mod Body => world.bodies.modAt(index: shapeB.bodyId) {
+    owner.headContactKey = keyB
+    owner.contactCount = owner.contactCount + 1
+  }
+
+  # Add to the pair set for fast lookup
+  let pairKey: UInt64 = shapePairKey(shape1: shapeIdA, shape2: shapeIdB, child: childIndex)
+  let added: Bool = addPairKey(set: world.broadPhase.pairSet, key: pairKey)
+
+  # Contacts are created non-touching. When found touching they link
+  # islands and move into the constraint graph.
+  if let set: mod SolverSet => world.solverSets.modAt(index: setIndex) {
+    set.contactIndices.add(value: contactId)
+  }
+
+  let maxRadius: Float = maxFloat(
+    left: creationRollingRadius(shape: shapeA)
+    right: creationRollingRadius(shape: shapeB)
+  )
+  # Assuming the rolling resistance does not change
+  contact.rollingResistance = maxFloat(
+    left: shapeA.material.rollingResistance
+    right: shapeB.material.rollingResistance
+  ) * maxRadius
+  if ((shapeA.flags bitor shapeB.flags) bitand enablePreSolveEventsFlag) is not 0 {
+    contact.flags = contact.flags bitor simEnablePreSolveEvents
+  }
+  world.contacts.set(index: contactId, value: contact)
+}
+
+# Unlink edge `edgeIndex` of a contact from its body's contact list.
+func unlinkContactEdge(world: mod PhysicsWorld, contactId: view Int, edgeIndex: view Int) {
+  var edge: ContactEdge = zeroContactEdge()
+  if let contact: view Contact => world.contacts.viewAt(index: contactId) {
+    edge = contactEdge(contact: contact, edgeIndex: edgeIndex)
+  }
+  if edge.prevKey is not -1 {
+    if let previous: mod Contact => world.contacts.modAt(index: edge.prevKey shr 1) {
+      setContactEdgeNext(contact: previous, edgeIndex: edge.prevKey bitand 1, nextKey: edge.nextKey)
+    }
+  }
+  if edge.nextKey is not -1 {
+    if let next: mod Contact => world.contacts.modAt(index: edge.nextKey shr 1) {
+      setContactEdgePrev(contact: next, edgeIndex: edge.nextKey bitand 1, prevKey: edge.prevKey)
+    }
+  }
+  let edgeKey: Int = (contactId shl 1) bitor edgeIndex
+  if let body: mod Body => world.bodies.modAt(index: edge.bodyId) {
+    if body.headContactKey is edgeKey {
+      body.headContactKey = edge.nextKey
+    }
+    body.contactCount = body.contactCount - 1
+  }
+}
+
+# b3DestroyContact: a contact is destroyed when the fat boxes stop
+# overlapping, or its shape or body is destroyed. A touching contact may
+# wake its bodies.
+func destroyContact(world: mod PhysicsWorld, contactId: view Int, wakeBodies: view Bool) {
+  let contact: Contact = world.contacts.copyAtDefault(index: contactId)
+  # Remove the pair from the set
+  let pairKey: UInt64 = shapePairKey(
+    shape1: contact.shapeIdA
+    shape2: contact.shapeIdB
+    child: contact.childIndex
+  )
+  let removed: Bool = removePairKey(set: world.broadPhase.pairSet, key: pairKey)
+  if let target: mod Contact => world.contacts.modAt(index: contactId) {
+    target.manifolds.clear()
+  }
+  let bodyIdA: Int = contact.edgeA.bodyId
+  let bodyIdB: Int = contact.edgeB.bodyId
+  let touching: Bool = (contact.flags bitand contactTouchingFlag) is not 0
+  # (The end touch event: P4d.)
+
+  unlinkContactEdge(world: world, contactId: contactId, edgeIndex: 0)
+  unlinkContactEdge(world: world, contactId: contactId, edgeIndex: 1)
+
+  # Remove the contact from the list that owns it
+  if contact.islandId is not -1 {
+    unlinkContact(world: world, contactId: contactId)
+  }
+  if contact.colorIndex is not -1 {
+    # An active constraint
+    removeContactFromGraph(
+      world: world
+      bodyIdA: bodyIdA
+      bodyIdB: bodyIdB
+      colorIndex: contact.colorIndex
+      localIndex: contact.localIndex
+      meshContact: (contact.flags bitand simMeshContact) is not 0
+    )
+  } else {
+    # Non-touching or asleep
+    removeSetContact(world: world, setIndex: contact.setIndex, localIndex: contact.localIndex)
+  }
+
+  # Free the contact and its id (the generation is kept)
+  if let freed: mod Contact => world.contacts.modAt(index: contactId) {
+    freed.contactId = -1
+    freed.setIndex = -1
+    freed.colorIndex = -1
+    freed.localIndex = -1
+  }
+  freeId(pool: world.contactIdPool, id: contactId)
+  if wakeBodies and touching {
+    let wokeA: Bool = wakeBody(world: world, bodyId: bodyIdA)
+    let wokeB: Bool = wakeBody(world: world, bodyId: bodyIdB)
+  }
+}
+
+# b3ComputeConvexManifold's dispatch: the local manifold of two convex
+# shapes into `manifold` (`cache` warm-starts the hull functions).
+func collideShapes(
+  manifold: mod LocalManifold
+  shapeA: view Shape
+  shapeB: view Shape
+  hulls: view List(Hull)
+  transformBtoA: view Transform
+  cache: mod ContactCache
+  lengthUnitsPerMeter: view Float
+) {
+  manifold.pointCount = 0
+  manifold.normal = zeroVector()
+  if shapeA.shapeType is ShapeType.sphere {
+    collideSpheres(
+      manifold: manifold
+      sphereA: shapeA.sphere
+      sphereB: shapeB.sphere
+      transformBtoA: transformBtoA
+    )
+  } else if shapeA.shapeType is ShapeType.capsule {
+    if shapeB.shapeType is ShapeType.sphere {
+      collideCapsuleAndSphere(
+        manifold: manifold
+        capsuleA: shapeA.capsule
+        sphereB: shapeB.sphere
+        transformBtoA: transformBtoA
+      )
+    } else {
+      collideCapsules(
+        manifold: manifold
+        capsuleA: shapeA.capsule
+        capsuleB: shapeB.capsule
+        transformBtoA: transformBtoA
+        lengthUnitsPerMeter: lengthUnitsPerMeter
+      )
+    }
+  } else if let hullA: view Hull => hulls.viewAt(index: shapeA.hullIndex) {
+    if shapeB.shapeType is ShapeType.sphere {
+      collideHullAndSphere(
+        manifold: manifold
+        hullA: hullA
+        sphereB: shapeB.sphere
+        transformBtoA: transformBtoA
+        cache: cache.simplexCache
+        lengthUnitsPerMeter: lengthUnitsPerMeter
+      )
+    } else if shapeB.shapeType is ShapeType.capsule {
+      collideHullAndCapsule(
+        manifold: manifold
+        hullA: hullA
+        capsuleB: shapeB.capsule
+        transformBtoA: transformBtoA
+        cache: cache.simplexCache
+        lengthUnitsPerMeter: lengthUnitsPerMeter
+      )
+    } else if let hullB: view Hull => hulls.viewAt(index: shapeB.hullIndex) {
+      collideHulls(
+        manifold: manifold
+        hullA: hullA
+        hullB: hullB
+        transformBtoA: transformBtoA
+        cache: cache.satCache
+        lengthUnitsPerMeter: lengthUnitsPerMeter
+      )
+    }
+  }
+}
+
+# b3ComputeConvexManifold: the contact's world-oriented manifold from the
+# local one, keeping the impulses of points whose feature persisted. False
+# (and no manifold) when not touching.
+func computeConvexManifold(
+  contact: mod Contact
+  geometry: mod LocalManifold
+  shapeA: view Shape
+  transformA: view Transform
+  shapeB: view Shape
+  transformB: view Transform
+  hulls: view List(Hull)
+  lengthUnitsPerMeter: view Float
+) ret Bool {
+  let transformBtoA: Transform = inverseMultiplyWorld(left: transformA, right: transformB)
+  collideShapes(
+    manifold: geometry
+    shapeA: shapeA
+    shapeB: shapeB
+    hulls: hulls
+    transformBtoA: transformBtoA
+    cache: contact.cache
+    lengthUnitsPerMeter: lengthUnitsPerMeter
+  )
+  if geometry.pointCount is 0 {
+    contact.manifolds.clear()
+    ret false
+  }
+
+  let oldPoints: List(ManifoldPoint) = List.create(ManifoldPoint, cap: maxManifoldPoints)
+  if contact.manifolds.length is 0 {
+    contact.manifolds.add(value: zeroManifold())
+  } else {
+    let old: Manifold = contact.manifolds.copyAtDefault(index: 0)
+    loop var i: Int = 0, i < old.pointCount, ++i {
+      oldPoints.add(value: old.points.copyAtDefault(index: i))
+    }
+  }
+
+  if let manifold: mod Manifold => contact.manifolds.modAt(index: 0) {
+    manifold.pointCount = geometry.pointCount
+    let matrixA: Matrix3 = matrixFromQuat(quat: transformA.rotation)
+    manifold.normal = multiply(matrix: matrixA, vector: geometry.normal)
+    let offset: Vec3 = subtractPositions(left: transformA.position, right: transformB.position)
+
+    # Contact points are computed in frame A
+    loop var i: Int = 0, i < geometry.pointCount, ++i {
+      let source: LocalManifoldPoint = manifoldPoint(manifold: geometry, index: i)
+      if let target: mod ManifoldPoint => manifold.points.modAt(index: i) {
+        target.anchorA = multiply(matrix: matrixA, vector: source.point)
+        target.anchorB = add(left: target.anchorA, right: offset)
+        target.separation = source.separation
+        target.featureId = makeFeatureId(pair: source.pair)
+        target.triangleIndex = -1
+        target.normalVelocity = 0.0
+      }
+    }
+
+    # Copy impulses from old points
+    loop var i: Int = 0, i < geometry.pointCount, ++i {
+      if let point: mod ManifoldPoint => manifold.points.modAt(index: i) {
+        point.totalNormalImpulse = 0.0
+        point.persisted = false
+        loop var j: Int = 0, j < oldPoints.length, ++j {
+          if let old: mod ManifoldPoint => oldPoints.modAt(index: j) {
+            if point.featureId is old.featureId {
+              point.normalImpulse = old.normalImpulse
+              point.persisted = true
+              # Claimed
+              old.featureId = -1
+              break
+            }
+          }
+        }
+        if point.persisted is false {
+          point.normalImpulse = 0.0
+        }
+      }
+    }
+  }
+  ret true
+}
+
+# The radius rolling resistance acts at, on an update: a hull's is a
+# quarter of its inner radius.
+func updateRollingRadius(shape: view Shape, hulls: view List(Hull)) ret Float {
+  if shape.shapeType is ShapeType.hull {
+    if let hull: view Hull => hulls.viewAt(index: shape.hullIndex) {
+      ret 0.25 * hull.innerRadius
+    }
+  }
+  ret creationRollingRadius(shape: shape)
+}
+
+# b3UpdateConvexContact: the manifold, then the mixed material values.
+func updateConvexContact(
+  contact: mod Contact
+  geometry: mod LocalManifold
+  shapeA: view Shape
+  transformA: view Transform
+  shapeB: view Shape
+  transformB: view Transform
+  hulls: view List(Hull)
+  lengthUnitsPerMeter: view Float
+) ret Bool {
+  let touching: Bool = computeConvexManifold(
+    contact: contact
+    geometry: geometry
+    shapeA: shapeA
+    transformA: transformA
+    shapeB: shapeB
+    transformB: transformB
+    hulls: hulls
+    lengthUnitsPerMeter: lengthUnitsPerMeter
+  )
+  if touching is false {
+    ret false
+  }
+  # (Flipping is for compound children: P5.)
+  let materialA: SurfaceMaterial = shapeA.material
+  let materialB: SurfaceMaterial = shapeB.material
+  # Kept updated in case the shapes' values change (Box3D's default
+  # friction and restitution callbacks)
+  contact.friction = Math.sqrt(x: materialA.friction * materialB.friction)
+  contact.restitution = maxFloat(left: materialA.restitution, right: materialB.restitution)
+  if materialA.rollingResistance > 0.0 or materialB.rollingResistance > 0.0 {
+    let maxRadius: Float = maxFloat(
+      left: updateRollingRadius(shape: shapeA, hulls: hulls)
+      right: updateRollingRadius(shape: shapeB, hulls: hulls)
+    )
+    contact.rollingResistance = maxFloat(
+      left: materialA.rollingResistance
+      right: materialB.rollingResistance
+    ) * maxRadius
+  } else {
+    contact.rollingResistance = 0.0
+  }
+  let tangentVelocityA: Vec3 = rotateVector(
+    quat: transformA.rotation
+    vector: materialA.tangentVelocity
+  )
+  let tangentVelocityB: Vec3 = rotateVector(
+    quat: transformB.rotation
+    vector: materialB.tangentVelocity
+  )
+  contact.tangentVelocity = subtract(left: tangentVelocityA, right: tangentVelocityB)
+  # (The pre-solve callback: P8.)
+  if ((shapeA.flags bitor shapeB.flags) bitand enableHitEventsFlag) is not 0 {
+    contact.flags = contact.flags bitor simEnableHitEvent
+  } else {
+    contact.flags = contact.flags bitand (bitnot simEnableHitEvent)
+  }
+  ret true
+}
+
+# b3UpdateContact: the manifold and touching state of a convex contact,
+# anchors relative to the body centers. (Compound and mesh contacts: P5.)
+func updateContact(
+  contact: mod Contact
+  geometry: mod LocalManifold
+  shapeA: view Shape
+  localCenterA: view Vec3
+  transformA: view Transform
+  shapeB: view Shape
+  localCenterB: view Vec3
+  transformB: view Transform
+  hulls: view List(Hull)
+  lengthUnitsPerMeter: view Float
+) ret Bool {
+  let touching: Bool = updateConvexContact(
+    contact: contact
+    geometry: geometry
+    shapeA: shapeA
+    transformA: transformA
+    shapeB: shapeB
+    transformB: transformB
+    hulls: hulls
+    lengthUnitsPerMeter: lengthUnitsPerMeter
+  )
+  if touching {
+    let centerA: Vec3 = rotateVector(quat: transformA.rotation, vector: localCenterA)
+    let centerB: Vec3 = rotateVector(quat: transformB.rotation, vector: localCenterB)
+    # Adjust the anchors to be relative to the centers of mass
+    loop var i: Int = 0, i < contact.manifolds.length, ++i {
+      if let manifold: mod Manifold => contact.manifolds.modAt(index: i) {
+        loop var j: Int = 0, j < manifold.pointCount, ++j {
+          if let point: mod ManifoldPoint => manifold.points.modAt(index: j) {
+            point.anchorA = subtract(left: point.anchorA, right: centerA)
+            point.anchorB = subtract(left: point.anchorB, right: centerB)
+          }
+        }
+      }
+    }
+    contact.flags = contact.flags bitor simTouchingFlag
+  } else {
+    contact.flags = contact.flags bitand (bitnot simTouchingFlag)
+  }
+  ret touching
+}
