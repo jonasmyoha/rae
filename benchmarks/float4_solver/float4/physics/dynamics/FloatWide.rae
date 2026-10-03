@@ -1,0 +1,722 @@
+# THE FLOAT4 PROTOTYPE (benchmarks/float4_solver, docs/float4-design.md):
+# this module shadows lib/physics/dynamics/FloatWide.rae for the benchmark's
+# float4 build. The types and the composite operations are the lib's; the
+# primitives are SIMD, implemented by c/float4_prototype.h (NEON, SSE2, or the
+# scalar fallback). A mask is a lane of all ones or all zeros, as on the
+# hardware, instead of the lib's 1.0 / 0.0; the solver only hands masks to
+# blend, and, or and anyTrue, so the results are the same bits.
+# Four-lane floats for the contact solver (b3FloatW and its operations, the
+# scalar path of Box3D's simd.h, and the wide vector, quaternion and matrix
+# helpers of contact_solver.c, at 9f998c8). A wide float is a struct of four
+# Floats; every operation works lane by lane in Box3D's scalar order, so the
+# solver is bit-exact against the scalar oracle. Masks are 0/1 lane values
+# as in Box3D's scalar path. A future Float4 SIMD type (docs/
+# physics-performance-plan.md §2) replaces this module, not the solver.
+import Math
+open Vec3
+open Quat
+
+func nativeZeroWide() unsafe extern("rae_f4_zero") ret FloatWide
+
+func nativeSplatWide(value: view Float) unsafe extern("rae_f4_splat") ret FloatWide
+
+func nativeSetWide(
+  x: view Float
+  y: view Float
+  z: view Float
+  w: view Float
+) unsafe extern("rae_f4_set") ret FloatWide
+
+func nativeLaneOf(value: view FloatWide, lane: view Int) unsafe extern("rae_f4_lane") ret Float
+
+func nativeNegateWide(value: view FloatWide) unsafe extern("rae_f4_negate") ret FloatWide
+
+func nativeAbsWide(value: view FloatWide) unsafe extern("rae_f4_abs") ret FloatWide
+
+func nativeAddWide(
+  left: view FloatWide
+  right: view FloatWide
+) unsafe extern("rae_f4_add") ret FloatWide
+
+func nativeSubtractWide(
+  left: view FloatWide
+  right: view FloatWide
+) unsafe extern("rae_f4_subtract") ret FloatWide
+
+func nativeMultiplyWide(
+  left: view FloatWide
+  right: view FloatWide
+) unsafe extern("rae_f4_multiply") ret FloatWide
+
+func nativeDivideWide(
+  left: view FloatWide
+  right: view FloatWide
+) unsafe extern("rae_f4_divide") ret FloatWide
+
+func nativeSqrtWide(value: view FloatWide) unsafe extern("rae_f4_sqrt") ret FloatWide
+
+func nativeMulAddWide(
+  base: view FloatWide
+  left: view FloatWide
+  right: view FloatWide
+) unsafe extern("rae_f4_mul_add") ret FloatWide
+
+func nativeMinWide(
+  left: view FloatWide
+  right: view FloatWide
+) unsafe extern("rae_f4_min") ret FloatWide
+
+func nativeMaxWide(
+  left: view FloatWide
+  right: view FloatWide
+) unsafe extern("rae_f4_max") ret FloatWide
+
+func nativeSymClampWide(
+  value: view FloatWide
+  limit: view FloatWide
+) unsafe extern("rae_f4_sym_clamp") ret FloatWide
+
+func nativeAndWide(
+  left: view FloatWide
+  right: view FloatWide
+) unsafe extern("rae_f4_and") ret FloatWide
+
+func nativeOrWide(
+  left: view FloatWide
+  right: view FloatWide
+) unsafe extern("rae_f4_or") ret FloatWide
+
+func nativeGreaterThanWide(
+  left: view FloatWide
+  right: view FloatWide
+) unsafe extern("rae_f4_greater") ret FloatWide
+
+func nativeLessThanWide(
+  left: view FloatWide
+  right: view FloatWide
+) unsafe extern("rae_f4_less") ret FloatWide
+
+func nativeAllZeroWide(value: view FloatWide) unsafe extern("rae_f4_all_zero") ret Bool
+
+func nativeAnyTrueWide(mask: view FloatWide) unsafe extern("rae_f4_any_true") ret Bool
+
+func nativeBlendWide(
+  left: view FloatWide
+  right: view FloatWide
+  mask: view FloatWide
+) unsafe extern("rae_f4_blend") ret FloatWide
+
+type FloatWide {
+  x: Float
+  y: Float
+  z: Float
+  w: Float
+}
+
+type Vec2Wide {
+  x: FloatWide
+  y: FloatWide
+}
+
+type Vec3Wide {
+  x: FloatWide
+  y: FloatWide
+  z: FloatWide
+}
+
+type QuatWide {
+  vector: Vec3Wide
+  scalar: FloatWide
+}
+
+# Symmetric 2x2 and 3x3 matrices: the upper triangle
+type SymMatrix2Wide {
+  cxx: FloatWide
+  cxy: FloatWide
+  cyy: FloatWide
+}
+
+type SymMatrix3Wide {
+  cxx: FloatWide
+  cxy: FloatWide
+  cxz: FloatWide
+  cyy: FloatWide
+  cyz: FloatWide
+  czz: FloatWide
+}
+
+type Matrix3Wide {
+  columnX: Vec3Wide
+  columnY: Vec3Wide
+  columnZ: Vec3Wide
+}
+
+func zeroWide() ret FloatWide {
+  unsafe {
+    ret nativeZeroWide()
+  }
+}
+
+func splatWide(value: view Float) ret FloatWide {
+  unsafe {
+    ret nativeSplatWide(value: value)
+  }
+}
+
+func setWide(
+  x: view Float
+  y: view Float
+  z: view Float
+  w: view Float
+) ret FloatWide {
+  unsafe {
+    ret nativeSetWide(
+      x: x
+      y: y
+      z: z
+      w: w
+    )
+  }
+}
+
+# Lane `lane` (0-3)
+func laneOf(value: view FloatWide, lane: view Int) ret Float {
+  unsafe {
+    ret nativeLaneOf(value: value, lane: lane)
+  }
+}
+
+func negateWide(value: view FloatWide) ret FloatWide {
+  unsafe {
+    ret nativeNegateWide(value: value)
+  }
+}
+
+func absLane(value: view Float) ret Float {
+  if value < 0.0 {
+    ret -value
+  }
+  ret value
+}
+
+func absWide(value: view FloatWide) ret FloatWide {
+  unsafe {
+    ret nativeAbsWide(value: value)
+  }
+}
+
+func addWide(left: view FloatWide, right: view FloatWide) ret FloatWide {
+  unsafe {
+    ret nativeAddWide(left: left, right: right)
+  }
+}
+
+func subtractWide(left: view FloatWide, right: view FloatWide) ret FloatWide {
+  unsafe {
+    ret nativeSubtractWide(left: left, right: right)
+  }
+}
+
+func multiplyWide(left: view FloatWide, right: view FloatWide) ret FloatWide {
+  unsafe {
+    ret nativeMultiplyWide(left: left, right: right)
+  }
+}
+
+func divideWide(left: view FloatWide, right: view FloatWide) ret FloatWide {
+  unsafe {
+    ret nativeDivideWide(left: left, right: right)
+  }
+}
+
+func sqrtWide(value: view FloatWide) ret FloatWide {
+  unsafe {
+    ret nativeSqrtWide(value: value)
+  }
+}
+
+# a + b * c (b3MulAddW)
+func mulAddWide(base: view FloatWide, left: view FloatWide, right: view FloatWide) ret FloatWide {
+  unsafe {
+    ret nativeMulAddWide(base: base, left: left, right: right)
+  }
+}
+
+func minLane(left: view Float, right: view Float) ret Float {
+  if left <= right {
+    ret left
+  }
+  ret right
+}
+
+func maxLane(left: view Float, right: view Float) ret Float {
+  if left >= right {
+    ret left
+  }
+  ret right
+}
+
+func minWide(left: view FloatWide, right: view FloatWide) ret FloatWide {
+  unsafe {
+    ret nativeMinWide(left: left, right: right)
+  }
+}
+
+func maxWide(left: view FloatWide, right: view FloatWide) ret FloatWide {
+  unsafe {
+    ret nativeMaxWide(left: left, right: right)
+  }
+}
+
+func symClampLane(value: view Float, limit: view Float) ret Float {
+  var result: Float = value
+  if (value <= limit) is false {
+    result = limit
+  }
+  if result <= -limit {
+    result = -limit
+  }
+  ret result
+}
+
+# Clamp `value` to [-limit, limit] (b3SymClampW)
+func symClampWide(value: view FloatWide, limit: view FloatWide) ret FloatWide {
+  unsafe {
+    ret nativeSymClampWide(value: value, limit: limit)
+  }
+}
+
+func maskLane(condition: view Bool) ret Float {
+  if condition {
+    ret 1.0
+  }
+  ret 0.0
+}
+
+func andWide(left: view FloatWide, right: view FloatWide) ret FloatWide {
+  unsafe {
+    ret nativeAndWide(left: left, right: right)
+  }
+}
+
+func orWide(left: view FloatWide, right: view FloatWide) ret FloatWide {
+  unsafe {
+    ret nativeOrWide(left: left, right: right)
+  }
+}
+
+func greaterThanWide(left: view FloatWide, right: view FloatWide) ret FloatWide {
+  unsafe {
+    ret nativeGreaterThanWide(left: left, right: right)
+  }
+}
+
+func lessThanWide(left: view FloatWide, right: view FloatWide) ret FloatWide {
+  unsafe {
+    ret nativeLessThanWide(left: left, right: right)
+  }
+}
+
+func allZeroWide(value: view FloatWide) ret Bool {
+  unsafe {
+    ret nativeAllZeroWide(value: value)
+  }
+}
+
+func anyTrueWide(mask: view FloatWide) ret Bool {
+  unsafe {
+    ret nativeAnyTrueWide(mask: mask)
+  }
+}
+
+func blendLane(left: view Float, right: view Float, mask: view Float) ret Float {
+  if mask is not 0.0 {
+    ret right
+  }
+  ret left
+}
+
+# Lane-wise `mask ? right : left` (b3BlendW)
+func blendWide(left: view FloatWide, right: view FloatWide, mask: view FloatWide) ret FloatWide {
+  unsafe {
+    ret nativeBlendWide(left: left, right: right, mask: mask)
+  }
+}
+
+# b3SoftMaskW: lanes where either body is static (index 0)
+func softMaskWide(indexA: view Array(Int, cap: 4), indexB: view Array(Int, cap: 4)) ret FloatWide {
+  let lanes: FloatWide = setWide(
+    x: maskLane(
+      condition: indexA.copyAtFallback(index: 0, fallback: 0) is 0 or indexB.copyAtFallback(
+        index: 0
+        fallback: 0
+      ) is 0
+    )
+    y: maskLane(
+      condition: indexA.copyAtFallback(index: 1, fallback: 0) is 0 or indexB.copyAtFallback(
+        index: 1
+        fallback: 0
+      ) is 0
+    )
+    z: maskLane(
+      condition: indexA.copyAtFallback(index: 2, fallback: 0) is 0 or indexB.copyAtFallback(
+        index: 2
+        fallback: 0
+      ) is 0
+    )
+    w: maskLane(
+      condition: indexA.copyAtFallback(index: 3, fallback: 0) is 0 or indexB.copyAtFallback(
+        index: 3
+        fallback: 0
+      ) is 0
+    )
+  )
+  ret greaterThanWide(left: lanes, right: zeroWide())
+}
+
+# --- Wide vectors ---
+func zeroVectorWide() ret Vec3Wide {
+  ret Vec3Wide { x: zeroWide(), y: zeroWide(), z: zeroWide() }
+}
+
+func splatVectorWide(vector: view Vec3) ret Vec3Wide {
+  ret Vec3Wide {
+    x: splatWide(value: vector.x)
+    y: splatWide(value: vector.y)
+    z: splatWide(value: vector.z)
+  }
+}
+
+# s * a (b3MulSVW)
+func scaleVectorWide(scale: view FloatWide, vector: view Vec3Wide) ret Vec3Wide {
+  ret Vec3Wide {
+    x: multiplyWide(left: scale, right: vector.x)
+    y: multiplyWide(left: scale, right: vector.y)
+    z: multiplyWide(left: scale, right: vector.z)
+  }
+}
+
+# a - s * b (b3MulSubSVW)
+func mulSubVectorWide(
+  base: view Vec3Wide
+  scale: view FloatWide
+  vector: view Vec3Wide
+) ret Vec3Wide {
+  ret Vec3Wide {
+    x: subtractWide(left: base.x, right: multiplyWide(left: scale, right: vector.x))
+    y: subtractWide(left: base.y, right: multiplyWide(left: scale, right: vector.y))
+    z: subtractWide(left: base.z, right: multiplyWide(left: scale, right: vector.z))
+  }
+}
+
+# a + s * b (b3MulAddSVW)
+func mulAddVectorWide(
+  base: view Vec3Wide
+  scale: view FloatWide
+  vector: view Vec3Wide
+) ret Vec3Wide {
+  ret Vec3Wide {
+    x: addWide(left: base.x, right: multiplyWide(left: scale, right: vector.x))
+    y: addWide(left: base.y, right: multiplyWide(left: scale, right: vector.y))
+    z: addWide(left: base.z, right: multiplyWide(left: scale, right: vector.z))
+  }
+}
+
+func subtractVectorWide(left: view Vec3Wide, right: view Vec3Wide) ret Vec3Wide {
+  ret Vec3Wide {
+    x: subtractWide(left: left.x, right: right.x)
+    y: subtractWide(left: left.y, right: right.y)
+    z: subtractWide(left: left.z, right: right.z)
+  }
+}
+
+func addVectorWide(left: view Vec3Wide, right: view Vec3Wide) ret Vec3Wide {
+  ret Vec3Wide {
+    x: addWide(left: left.x, right: right.x)
+    y: addWide(left: left.y, right: right.y)
+    z: addWide(left: left.z, right: right.z)
+  }
+}
+
+func dotWide(left: view Vec3Wide, right: view Vec3Wide) ret FloatWide {
+  ret addWide(
+    left: addWide(
+      left: multiplyWide(left: left.x, right: right.x)
+      right: multiplyWide(left: left.y, right: right.y)
+    )
+    right: multiplyWide(left: left.z, right: right.z)
+  )
+}
+
+func crossWide(left: view Vec3Wide, right: view Vec3Wide) ret Vec3Wide {
+  ret Vec3Wide {
+    x: subtractWide(
+      left: multiplyWide(left: left.y, right: right.z)
+      right: multiplyWide(left: left.z, right: right.y)
+    )
+    y: subtractWide(
+      left: multiplyWide(left: left.z, right: right.x)
+      right: multiplyWide(left: left.x, right: right.z)
+    )
+    z: subtractWide(
+      left: multiplyWide(left: left.x, right: right.y)
+      right: multiplyWide(left: left.y, right: right.x)
+    )
+  }
+}
+
+# a + b (b3AddV2W)
+func addVector2Wide(left: view Vec2Wide, right: view Vec2Wide) ret Vec2Wide {
+  ret Vec2Wide {
+    x: addWide(left: left.x, right: right.x)
+    y: addWide(left: left.y, right: right.y)
+  }
+}
+
+# m * a (b3MulMV2W)
+func multiplySym2Wide(matrix: view SymMatrix2Wide, vector: view Vec2Wide) ret Vec2Wide {
+  ret Vec2Wide {
+    x: addWide(
+      left: multiplyWide(left: matrix.cxx, right: vector.x)
+      right: multiplyWide(left: matrix.cxy, right: vector.y)
+    )
+    y: addWide(
+      left: multiplyWide(left: matrix.cxy, right: vector.x)
+      right: multiplyWide(left: matrix.cyy, right: vector.y)
+    )
+  }
+}
+
+# m * a (b3MulMVW)
+func multiplySym3Wide(matrix: view SymMatrix3Wide, vector: view Vec3Wide) ret Vec3Wide {
+  ret Vec3Wide {
+    x: addWide(
+      left: multiplyWide(left: matrix.cxx, right: vector.x)
+      right: addWide(
+        left: multiplyWide(left: matrix.cxy, right: vector.y)
+        right: multiplyWide(left: matrix.cxz, right: vector.z)
+      )
+    )
+    y: addWide(
+      left: multiplyWide(left: matrix.cxy, right: vector.x)
+      right: addWide(
+        left: multiplyWide(left: matrix.cyy, right: vector.y)
+        right: multiplyWide(left: matrix.cyz, right: vector.z)
+      )
+    )
+    z: addWide(
+      left: multiplyWide(left: matrix.cxz, right: vector.x)
+      right: addWide(
+        left: multiplyWide(left: matrix.cyz, right: vector.y)
+        right: multiplyWide(left: matrix.czz, right: vector.z)
+      )
+    )
+  }
+}
+
+# a - m * b (b3MulSubMVW)
+func mulSubSym3Wide(
+  base: view Vec3Wide
+  matrix: view SymMatrix3Wide
+  vector: view Vec3Wide
+) ret Vec3Wide {
+  let product: Vec3Wide = multiplySym3Wide(matrix: matrix, vector: vector)
+  ret subtractVectorWide(left: base, right: product)
+}
+
+# a + m * b (b3MulAddMVW)
+func mulAddSym3Wide(
+  base: view Vec3Wide
+  matrix: view SymMatrix3Wide
+  vector: view Vec3Wide
+) ret Vec3Wide {
+  let product: Vec3Wide = multiplySym3Wide(matrix: matrix, vector: vector)
+  ret addVectorWide(left: base, right: product)
+}
+
+# b3AddSymW
+func addSym3Wide(left: view SymMatrix3Wide, right: view SymMatrix3Wide) ret SymMatrix3Wide {
+  ret SymMatrix3Wide {
+    cxx: addWide(left: left.cxx, right: right.cxx)
+    cxy: addWide(left: left.cxy, right: right.cxy)
+    cxz: addWide(left: left.cxz, right: right.cxz)
+    cyy: addWide(left: left.cyy, right: right.cyy)
+    cyz: addWide(left: left.cyz, right: right.cyz)
+    czz: addWide(left: left.czz, right: right.czz)
+  }
+}
+
+func zeroSym3Wide() ret SymMatrix3Wide {
+  ret SymMatrix3Wide {
+    cxx: zeroWide()
+    cxy: zeroWide()
+    cxz: zeroWide()
+    cyy: zeroWide()
+    cyz: zeroWide()
+    czz: zeroWide()
+  }
+}
+
+# b3InvertSymW: zero where the determinant is (nearly) zero
+func invertSym3Wide(matrix: view SymMatrix3Wide, minDeterminant: view Float) ret SymMatrix3Wide {
+  let cxx: FloatWide = subtractWide(
+    left: multiplyWide(left: matrix.cyy, right: matrix.czz)
+    right: multiplyWide(left: matrix.cyz, right: matrix.cyz)
+  )
+  let cxy: FloatWide = subtractWide(
+    left: multiplyWide(left: matrix.cxz, right: matrix.cyz)
+    right: multiplyWide(left: matrix.cxy, right: matrix.czz)
+  )
+  let cxz: FloatWide = subtractWide(
+    left: multiplyWide(left: matrix.cxy, right: matrix.cyz)
+    right: multiplyWide(left: matrix.cxz, right: matrix.cyy)
+  )
+  let cyy: FloatWide = subtractWide(
+    left: multiplyWide(left: matrix.cxx, right: matrix.czz)
+    right: multiplyWide(left: matrix.cxz, right: matrix.cxz)
+  )
+  let cyz: FloatWide = subtractWide(
+    left: multiplyWide(left: matrix.cxy, right: matrix.cxz)
+    right: multiplyWide(left: matrix.cxx, right: matrix.cyz)
+  )
+  let czz: FloatWide = subtractWide(
+    left: multiplyWide(left: matrix.cxx, right: matrix.cyy)
+    right: multiplyWide(left: matrix.cxy, right: matrix.cxy)
+  )
+  let determinant: FloatWide = addWide(
+    left: multiplyWide(left: matrix.cxx, right: cxx)
+    right: addWide(
+      left: multiplyWide(left: matrix.cxy, right: cxy)
+      right: multiplyWide(left: matrix.cxz, right: cxz)
+    )
+  )
+  let valid: FloatWide = greaterThanWide(
+    left: absWide(value: determinant)
+    right: splatWide(value: minDeterminant)
+  )
+  let inverseDeterminant: FloatWide = blendWide(
+    left: zeroWide()
+    right: divideWide(left: splatWide(value: 1.0), right: determinant)
+    mask: valid
+  )
+  ret SymMatrix3Wide {
+    cxx: multiplyWide(left: inverseDeterminant, right: cxx)
+    cxy: multiplyWide(left: inverseDeterminant, right: cxy)
+    cxz: multiplyWide(left: inverseDeterminant, right: cxz)
+    cyy: multiplyWide(left: inverseDeterminant, right: cyy)
+    cyz: multiplyWide(left: inverseDeterminant, right: cyz)
+    czz: multiplyWide(left: inverseDeterminant, right: czz)
+  }
+}
+
+# b3PerpW: a unit vector perpendicular to `vector`
+func perpWide(vector: view Vec3Wide, minLengthSquared: view Float) ret Vec3Wide {
+  let zero: FloatWide = zeroWide()
+  let half: FloatWide = splatWide(value: 0.5)
+  let mask: FloatWide = orWide(
+    left: lessThanWide(left: vector.x, right: negateWide(value: half))
+    right: greaterThanWide(left: vector.x, right: half)
+  )
+  let perpendicular: Vec3Wide = {
+    x: blendWide(left: zero, right: vector.y, mask: mask)
+    y: blendWide(left: vector.z, right: negateWide(value: vector.x), mask: mask)
+    z: blendWide(left: negateWide(value: vector.y), right: zero, mask: mask)
+  }
+  let lengthSquared: FloatWide = dotWide(left: perpendicular, right: perpendicular)
+  let valid: FloatWide = greaterThanWide(
+    left: lengthSquared
+    right: splatWide(value: minLengthSquared)
+  )
+  let inverseLength: FloatWide = blendWide(
+    left: zero
+    right: divideWide(left: splatWide(value: 1.0), right: sqrtWide(value: lengthSquared))
+    mask: valid
+  )
+  ret scaleVectorWide(scale: inverseLength, vector: perpendicular)
+}
+
+# b3MakeMatrixFromQuatW
+func matrixFromQuatWide(quat: view QuatWide) ret Matrix3Wide {
+  let x2: FloatWide = addWide(left: quat.vector.x, right: quat.vector.x)
+  let y2: FloatWide = addWide(left: quat.vector.y, right: quat.vector.y)
+  let z2: FloatWide = addWide(left: quat.vector.z, right: quat.vector.z)
+  let xx2: FloatWide = multiplyWide(left: quat.vector.x, right: x2)
+  let yy2: FloatWide = multiplyWide(left: quat.vector.y, right: y2)
+  let zz2: FloatWide = multiplyWide(left: quat.vector.z, right: z2)
+  let xy2: FloatWide = multiplyWide(left: quat.vector.x, right: y2)
+  let xz2: FloatWide = multiplyWide(left: quat.vector.x, right: z2)
+  let yz2: FloatWide = multiplyWide(left: quat.vector.y, right: z2)
+  let xw2: FloatWide = multiplyWide(left: quat.scalar, right: x2)
+  let yw2: FloatWide = multiplyWide(left: quat.scalar, right: y2)
+  let zw2: FloatWide = multiplyWide(left: quat.scalar, right: z2)
+  let one: FloatWide = splatWide(value: 1.0)
+  ret Matrix3Wide {
+    columnX: Vec3Wide {
+      x: subtractWide(left: one, right: addWide(left: yy2, right: zz2))
+      y: addWide(left: xy2, right: zw2)
+      z: subtractWide(left: xz2, right: yw2)
+    }
+    columnY: Vec3Wide {
+      x: subtractWide(left: xy2, right: zw2)
+      y: subtractWide(left: one, right: addWide(left: xx2, right: zz2))
+      z: addWide(left: yz2, right: xw2)
+    }
+    columnZ: Vec3Wide {
+      x: addWide(left: xz2, right: yw2)
+      y: subtractWide(left: yz2, right: xw2)
+      z: subtractWide(left: one, right: addWide(left: xx2, right: yy2))
+    }
+  }
+}
+
+# b3MulM3VW
+func multiplyMatrixWide(matrix: view Matrix3Wide, vector: view Vec3Wide) ret Vec3Wide {
+  ret Vec3Wide {
+    x: addWide(
+      left: multiplyWide(left: matrix.columnX.x, right: vector.x)
+      right: addWide(
+        left: multiplyWide(left: matrix.columnY.x, right: vector.y)
+        right: multiplyWide(left: matrix.columnZ.x, right: vector.z)
+      )
+    )
+    y: addWide(
+      left: multiplyWide(left: matrix.columnX.y, right: vector.x)
+      right: addWide(
+        left: multiplyWide(left: matrix.columnY.y, right: vector.y)
+        right: multiplyWide(left: matrix.columnZ.y, right: vector.z)
+      )
+    )
+    z: addWide(
+      left: multiplyWide(left: matrix.columnX.z, right: vector.x)
+      right: addWide(
+        left: multiplyWide(left: matrix.columnY.z, right: vector.y)
+        right: multiplyWide(left: matrix.columnZ.z, right: vector.z)
+      )
+    )
+  }
+}
+
+# b3InvRotateVectorW
+func inverseRotateVectorWide(quat: view QuatWide, vector: view Vec3Wide) ret Vec3Wide {
+  let once: Vec3Wide = crossWide(left: quat.vector, right: vector)
+  let twice: Vec3Wide = {
+    x: addWide(left: once.x, right: once.x)
+    y: addWide(left: once.y, right: once.y)
+    z: addWide(left: once.z, right: once.z)
+  }
+  let crossed: Vec3Wide = crossWide(left: quat.vector, right: twice)
+  ret Vec3Wide {
+    x: addWide(
+      left: subtractWide(left: vector.x, right: multiplyWide(left: quat.scalar, right: twice.x))
+      right: crossed.x
+    )
+    y: addWide(
+      left: subtractWide(left: vector.y, right: multiplyWide(left: quat.scalar, right: twice.y))
+      right: crossed.y
+    )
+    z: addWide(
+      left: subtractWide(left: vector.z, right: multiplyWide(left: quat.scalar, right: twice.z))
+      right: crossed.z
+    )
+  }
+}
