@@ -6,7 +6,7 @@
  */
 
 int64_t rae_ext_nextTick(void) {
-  return ++g_tick_counter;
+  return atomic_fetch_add_explicit(&g_tick_counter, 1, memory_order_relaxed) + 1;
 }
 
 int64_t rae_ext_nowMs(void) {
@@ -17,8 +17,11 @@ int64_t rae_ext_nowMs(void) {
 
 int64_t rae_ext_nowNs(void) {
 #ifdef __APPLE__
-  static mach_timebase_info_data_t timebase;
-  if (timebase.denom == 0) mach_timebase_info(&timebase);
+  /* Read per call, not cached in a static: any thread may ask for the time,
+   * and a lazily filled static is a data race. mach_timebase_info only
+   * copies two constants. */
+  mach_timebase_info_data_t timebase;
+  mach_timebase_info(&timebase);
   return (int64_t)((mach_absolute_time() * timebase.numer) / timebase.denom);
 #else
   struct timespec ts;

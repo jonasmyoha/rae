@@ -53,6 +53,13 @@ static int g_fn_queue = -1;            /* the kqueue / inotify descriptor */
 static int g_fn_thread_started = 0;
 static unsigned char g_fn_used[RAE_FILE_NOTIFY_MAX];
 static unsigned char g_fn_changed[RAE_FILE_NOTIFY_MAX];
+/* Bumped by every clear (and reuse of the slot). A kqueue event carries the
+ * generation it was registered under; the thread may have taken an event of
+ * a registration that a clear has since dropped (it reads the kernel queue
+ * before it takes the lock), and that stale event must not mark the watcher
+ * changed. inotify needs no such guard: a dropped registration's watch
+ * descriptor is no longer in the table, so its events mark nothing. */
+static uint32_t g_fn_generation[RAE_FILE_NOTIFY_MAX];
 static RaeFileNotifyEntry* g_fn_entries = NULL;
 static int g_fn_entry_count = 0, g_fn_entry_cap = 0;
 
@@ -95,8 +102,11 @@ static void* rae_fn_thread(void* arg) {
         }
         pthread_mutex_lock(&g_fn_lock);
         for (int i = 0; i < n; i++) {
-            int watcher = (int)(intptr_t)evs[i].udata;
-            if (watcher >= 0 && watcher < RAE_FILE_NOTIFY_MAX && g_fn_used[watcher]) {
+            uintptr_t tag = (uintptr_t)evs[i].udata;
+            int watcher = (int)(tag & 0xff);
+            uint32_t generation = (uint32_t)(tag >> 8);
+            if (watcher < RAE_FILE_NOTIFY_MAX && g_fn_used[watcher]
+                && g_fn_generation[watcher] == generation) {
                 g_fn_changed[watcher] = 1;
                 marked = 1;
             }
@@ -150,7 +160,7 @@ static int rae_fn_add_path(int watcher, const char* path, int is_dir) {
     struct kevent change;
     EV_SET(&change, fd, EVFILT_VNODE, EV_ADD | EV_CLEAR,
            NOTE_WRITE | NOTE_EXTEND | NOTE_ATTRIB | NOTE_DELETE | NOTE_RENAME | NOTE_REVOKE,
-           0, (void*)(intptr_t)watcher);
+           0, (void*)(((uintptr_t)g_fn_generation[watcher] << 8) | (uintptr_t)watcher));
     if (kevent(g_fn_queue, &change, 1, NULL, 0, NULL) < 0) {
         close(fd);
         return 0;
@@ -207,6 +217,7 @@ static void rae_fn_clear(int watcher) {
         free(entry.path);
     }
     g_fn_entry_count = kept;
+    g_fn_generation[watcher] = (g_fn_generation[watcher] + 1) & 0xffffffu;
 }
 
 int64_t rae_ext_FileNotify_open(void) {

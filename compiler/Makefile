@@ -184,6 +184,11 @@ test-examples: build
 stress: build
 	@bash ../stress/run.sh
 
+# The threaded fixtures (and 106's workers) under ThreadSanitizer
+# (tools/tsan-check.sh); `make test` runs it as one pre-suite case too.
+tsan: build
+	@bash tools/tsan-check.sh
+
 smoke: build
 	@chmod +x tools/smoke.sh
 	@./tools/smoke.sh
