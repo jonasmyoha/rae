@@ -1,0 +1,891 @@
+# The quickhull builder of Box3D's hull.c at 9f998c8, part 1: its data, the
+# intrusive lists, allocation, and the initial tetrahedron. Part 2 (the
+# horizon, the cone, face merging, construction) is HullBuilderMerge.rae.
+# Box3D's operation order is kept exactly; checked bit for bit against the
+# oracle in fixture 951.
+#
+# Box3D links vertices, faces and half-edges with pointers into bump pools
+# and keeps intrusive doubly linked lists with sentinel heads. Here every
+# pointer is an index (-1 for NULL) and every record is a set of parallel
+# Lists, one per field:
+#
+# - Vertex nodes: the hull vertices AND the list heads they hang on share
+#   one index space (node 0 is the orphaned list head, node 1 the vertex
+#   list head, and each face owns a conflict-list head node), because a
+#   Box3D list links vertices and its sentinel head alike.
+# - Faces: face 0 is the sentinel head of the face list.
+# - Half-edges: the ring around a face (prev/next), twin, origin node, face.
+#
+# The free lists of faces and half-edges are kept, so slots are reused in
+# Box3D's order.
+open Vec3
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/AabbMath
+open physics/math/PlaneMath
+
+# B3_MARK_VISIBLE / B3_MARK_DELETE
+const markVisible: Int = 0
+
+const markDelete: Int = 1
+
+# B3_HULL_MAX_COUNT: the final hull is indexed with bytes in Box3D.
+const hullMaxCount: Int = 256
+
+# The vertex-node list heads
+const orphanedHead: Int = 0
+
+const vertexHead: Int = 1
+
+# The face-list sentinel
+const faceHead: Int = 0
+
+# One frame of the iterative horizon search (b3HorizonFrame).
+type HorizonFrame {
+  face: Int
+  # The edge that ends the ring walk
+  startEdge: Int
+  # The next edge to process
+  edge: Int
+  # False until the first edge of the ring is processed
+  started: Bool
+}
+
+# All working state of one hull build (b3HullBuilder).
+type HullBuilder {
+  tolerance: Float
+  minRadius: Float
+  minOutside: Float
+  interiorPoint: Vec3
+
+  # Vertex nodes (vertices and list heads)
+  nodePrev: List(Int)
+  nodeNext: List(Int)
+  nodeConflictFace: List(Int)
+  nodePosition: List(Vec3)
+  nodeFinalIndex: List(Int)
+  nodeReachable: List(Bool)
+
+  # Faces (face 0 is the face-list sentinel)
+  facePrev: List(Int)
+  faceNext: List(Int)
+  faceEdge: List(Int)
+  faceMark: List(Int)
+  faceArea: List(Float)
+  facePlane: List(Plane)
+  faceCentroid: List(Vec3)
+  faceMaxConflictDistance: List(Float)
+  faceMaxConflict: List(Int)
+  faceConflictHead: List(Int)
+  faceFinalIndex: List(Int)
+  faceFlipped: List(Bool)
+  faceFreeHead: Int
+
+  # Half-edges
+  edgePrev: List(Int)
+  edgeNext: List(Int)
+  edgeOrigin: List(Int)
+  edgeFace: List(Int)
+  edgeTwin: List(Int)
+  edgeFinalIndex: List(Int)
+  edgeFreeHead: Int
+
+  # Scratch
+  horizon: List(Int)
+  cone: List(Int)
+  mergedFaces: List(Int)
+  horizonStack: List(HorizonFrame)
+
+  # The counts of the finished hull
+  finalVertexCount: Int
+  finalHalfEdgeCount: Int
+  finalFaceCount: Int
+}
+
+# Append one vertex node (a vertex or a list head) with every field unset.
+func addNode(builder: mod HullBuilder, position: view Vec3) ret Int {
+  let node: Int = builder.nodePrev.length
+  builder.nodePrev.add(value: -1)
+  builder.nodeNext.add(value: -1)
+  builder.nodeConflictFace.add(value: -1)
+  builder.nodePosition.add(value: position)
+  builder.nodeFinalIndex.add(value: -1)
+  builder.nodeReachable.add(value: false)
+  ret node
+}
+
+# Append one face slot (and its conflict-list head node) with every field unset.
+func addFaceSlot(builder: mod HullBuilder, conflictHead: view Int) ret Int {
+  let face: Int = builder.facePrev.length
+  builder.facePrev.add(value: -1)
+  builder.faceNext.add(value: -1)
+  builder.faceEdge.add(value: -1)
+  builder.faceMark.add(value: markVisible)
+  builder.faceArea.add(value: 0.0)
+  builder.facePlane.add(value: Plane { normal: zeroVector(), offset: 0.0 })
+  builder.faceCentroid.add(value: zeroVector())
+  builder.faceMaxConflictDistance.add(value: 0.0)
+  builder.faceMaxConflict.add(value: -1)
+  builder.faceConflictHead.add(value: conflictHead)
+  builder.faceFinalIndex.add(value: -1)
+  builder.faceFlipped.add(value: false)
+  ret face
+}
+
+# b3HullBuilder_Init: an empty builder with the list heads in place.
+func createHullBuilder(pointCount: view Int) ret HullBuilder {
+  var builder: HullBuilder = {
+    tolerance: 0.0
+    minRadius: 0.0
+    minOutside: 0.0
+    interiorPoint: zeroVector()
+    nodePrev: List.create(Int, cap: pointCount + 8)
+    nodeNext: List.create(Int, cap: pointCount + 8)
+    nodeConflictFace: List.create(Int, cap: pointCount + 8)
+    nodePosition: List.create(Vec3, cap: pointCount + 8)
+    nodeFinalIndex: List.create(Int, cap: pointCount + 8)
+    nodeReachable: List.create(Bool, cap: pointCount + 8)
+    facePrev: List.create(Int, cap: 64)
+    faceNext: List.create(Int, cap: 64)
+    faceEdge: List.create(Int, cap: 64)
+    faceMark: List.create(Int, cap: 64)
+    faceArea: List.create(Float, cap: 64)
+    facePlane: List.create(Plane, cap: 64)
+    faceCentroid: List.create(Vec3, cap: 64)
+    faceMaxConflictDistance: List.create(Float, cap: 64)
+    faceMaxConflict: List.create(Int, cap: 64)
+    faceConflictHead: List.create(Int, cap: 64)
+    faceFinalIndex: List.create(Int, cap: 64)
+    faceFlipped: List.create(Bool, cap: 64)
+    faceFreeHead: -1
+    edgePrev: List.create(Int, cap: 192)
+    edgeNext: List.create(Int, cap: 192)
+    edgeOrigin: List.create(Int, cap: 192)
+    edgeFace: List.create(Int, cap: 192)
+    edgeTwin: List.create(Int, cap: 192)
+    edgeFinalIndex: List.create(Int, cap: 192)
+    edgeFreeHead: -1
+    horizon: List.create(Int, cap: 64)
+    cone: List.create(Int, cap: 64)
+    mergedFaces: List.create(Int, cap: 64)
+    horizonStack: List.create(HorizonFrame, cap: 64)
+    finalVertexCount: 0
+    finalHalfEdgeCount: 0
+    finalFaceCount: 0
+  }
+  let orphaned: Int = addNode(builder: builder, position: zeroVector())
+  let vertices: Int = addNode(builder: builder, position: zeroVector())
+  nodeListInit(builder: builder, head: orphaned)
+  nodeListInit(builder: builder, head: vertices)
+  let sentinel: Int = addFaceSlot(builder: builder, conflictHead: -1)
+  builder.facePrev.set(index: sentinel, value: sentinel)
+  builder.faceNext.set(index: sentinel, value: sentinel)
+  ret builder
+}
+
+# Field reads, named like Box3D's pointer chases.
+func edgeNextOf(builder: view HullBuilder, edge: view Int) ret Int {
+  ret builder.edgeNext.copyAtDefault(index: edge)
+}
+
+func edgePrevOf(builder: view HullBuilder, edge: view Int) ret Int {
+  ret builder.edgePrev.copyAtDefault(index: edge)
+}
+
+func edgeTwinOf(builder: view HullBuilder, edge: view Int) ret Int {
+  ret builder.edgeTwin.copyAtDefault(index: edge)
+}
+
+func edgeFaceOf(builder: view HullBuilder, edge: view Int) ret Int {
+  ret builder.edgeFace.copyAtDefault(index: edge)
+}
+
+func edgeOriginOf(builder: view HullBuilder, edge: view Int) ret Int {
+  ret builder.edgeOrigin.copyAtDefault(index: edge)
+}
+
+func faceEdgeOf(builder: view HullBuilder, face: view Int) ret Int {
+  ret builder.faceEdge.copyAtDefault(index: face)
+}
+
+func faceMarkOf(builder: view HullBuilder, face: view Int) ret Int {
+  ret builder.faceMark.copyAtDefault(index: face)
+}
+
+func facePlaneOf(builder: view HullBuilder, face: view Int) ret Plane {
+  ret builder.facePlane.copyAtDefault(index: face)
+}
+
+func nodePositionOf(builder: view HullBuilder, node: view Int) ret Vec3 {
+  ret builder.nodePosition.copyAtDefault(index: node)
+}
+
+func nodeNextOf(builder: view HullBuilder, node: view Int) ret Int {
+  ret builder.nodeNext.copyAtDefault(index: node)
+}
+
+# --- The vertex-node lists (b3QHList_* over b3QHVertex links) ---
+func nodeListInit(builder: mod HullBuilder, head: view Int) {
+  builder.nodePrev.set(index: head, value: head)
+  builder.nodeNext.set(index: head, value: head)
+}
+
+func nodeListContains(builder: view HullBuilder, node: view Int) ret Bool {
+  ret builder.nodePrev.copyAtDefault(index: node) is not -1 and builder.nodeNext.copyAtDefault(
+    index: node
+  ) is not -1
+}
+
+# Insert `node` before `where`.
+func nodeListInsert(builder: mod HullBuilder, node: view Int, where: view Int) {
+  let prev: Int = builder.nodePrev.copyAtDefault(index: where)
+  builder.nodePrev.set(index: node, value: prev)
+  builder.nodeNext.set(index: node, value: where)
+  builder.nodeNext.set(index: prev, value: node)
+  builder.nodePrev.set(index: where, value: node)
+}
+
+func nodeListRemove(builder: mod HullBuilder, node: view Int) {
+  let prev: Int = builder.nodePrev.copyAtDefault(index: node)
+  let next: Int = builder.nodeNext.copyAtDefault(index: node)
+  builder.nodeNext.set(index: prev, value: next)
+  builder.nodePrev.set(index: next, value: prev)
+  builder.nodePrev.set(index: node, value: -1)
+  builder.nodeNext.set(index: node, value: -1)
+}
+
+# b3QHList_PushBack: inserts before the head's prev, as Box3D does (so with
+# one element present the new node goes in front of it).
+func nodeListPushBack(builder: mod HullBuilder, head: view Int, node: view Int) {
+  nodeListInsert(builder: builder, node: node, where: builder.nodePrev.copyAtDefault(index: head))
+}
+
+# --- The face list ---
+func faceListContains(builder: view HullBuilder, face: view Int) ret Bool {
+  ret builder.facePrev.copyAtDefault(index: face) is not -1 and builder.faceNext.copyAtDefault(
+    index: face
+  ) is not -1
+}
+
+func faceListInsert(builder: mod HullBuilder, face: view Int, where: view Int) {
+  let prev: Int = builder.facePrev.copyAtDefault(index: where)
+  builder.facePrev.set(index: face, value: prev)
+  builder.faceNext.set(index: face, value: where)
+  builder.faceNext.set(index: prev, value: face)
+  builder.facePrev.set(index: where, value: face)
+}
+
+func faceListRemove(builder: mod HullBuilder, face: view Int) {
+  let prev: Int = builder.facePrev.copyAtDefault(index: face)
+  let next: Int = builder.faceNext.copyAtDefault(index: face)
+  builder.faceNext.set(index: prev, value: next)
+  builder.facePrev.set(index: next, value: prev)
+  builder.facePrev.set(index: face, value: -1)
+  builder.faceNext.set(index: face, value: -1)
+}
+
+func faceListPushBack(builder: mod HullBuilder, face: view Int) {
+  faceListInsert(
+    builder: builder
+    face: face
+    where: builder.facePrev.copyAtDefault(index: faceHead)
+  )
+}
+
+# --- Allocation ---
+
+# b3HullBuilder_NewVertex
+func newVertex(builder: mod HullBuilder, position: view Vec3) ret Int {
+  ret addNode(builder: builder, position: position)
+}
+
+# b3HullBuilder_NewEdge: from the free list, else a fresh slot.
+func newEdge(builder: mod HullBuilder) ret Int {
+  var edge: Int = -1
+  if builder.edgeFreeHead is not -1 {
+    edge = builder.edgeFreeHead
+    builder.edgeFreeHead = edgeNextOf(builder: builder, edge: edge)
+  } else {
+    edge = builder.edgePrev.length
+    builder.edgePrev.add(value: -1)
+    builder.edgeNext.add(value: -1)
+    builder.edgeOrigin.add(value: -1)
+    builder.edgeFace.add(value: -1)
+    builder.edgeTwin.add(value: -1)
+    builder.edgeFinalIndex.add(value: -1)
+  }
+  builder.edgeFinalIndex.set(index: edge, value: -1)
+  ret edge
+}
+
+# b3HullBuilder_RetireEdge
+func retireEdge(builder: mod HullBuilder, edge: view Int) {
+  builder.edgeNext.set(index: edge, value: builder.edgeFreeHead)
+  builder.edgeFreeHead = edge
+}
+
+# Link the three half-edges of a new triangle.
+func setTriangleEdge(
+  builder: mod HullBuilder
+  edge: view Int
+  prev: view Int
+  next: view Int
+  origin: view Int
+  face: view Int
+) {
+  builder.edgePrev.set(index: edge, value: prev)
+  builder.edgeNext.set(index: edge, value: next)
+  builder.edgeOrigin.set(index: edge, value: origin)
+  builder.edgeFace.set(index: edge, value: face)
+  builder.edgeTwin.set(index: edge, value: -1)
+}
+
+# b3HullBuilder_NewFace: the triangle `vertex1`-`vertex2`-`vertex3`.
+func newFace(
+  builder: mod HullBuilder
+  vertex1: view Int
+  vertex2: view Int
+  vertex3: view Int
+) ret Int {
+  var face: Int = -1
+  if builder.faceFreeHead is not -1 {
+    face = builder.faceFreeHead
+    # The link's next was the free-list pointer
+    builder.faceFreeHead = builder.faceNext.copyAtDefault(index: face)
+  } else {
+    let conflictHead: Int = addNode(builder: builder, position: zeroVector())
+    face = addFaceSlot(builder: builder, conflictHead: conflictHead)
+  }
+  builder.facePrev.set(index: face, value: -1)
+  builder.faceNext.set(index: face, value: -1)
+  builder.faceMaxConflict.set(index: face, value: -1)
+  builder.faceMaxConflictDistance.set(index: face, value: 0.0)
+  builder.faceFinalIndex.set(index: face, value: -1)
+
+  let edge1: Int = newEdge(builder: builder)
+  let edge2: Int = newEdge(builder: builder)
+  let edge3: Int = newEdge(builder: builder)
+
+  let point1: Vec3 = nodePositionOf(builder: builder, node: vertex1)
+  let point2: Vec3 = nodePositionOf(builder: builder, node: vertex2)
+  let point3: Vec3 = nodePositionOf(builder: builder, node: vertex3)
+
+  var normal: Vec3 = cross(
+    left: subtract(left: point2, right: point1)
+    right: subtract(left: point3, right: point1)
+  )
+  var normalLength: Float = 0.0
+  normal = getLengthAndNormalize(length: normalLength, vector: normal)
+  let plane: Plane = { normal: normal, offset: dot(left: normal, right: point1) }
+
+  builder.faceEdge.set(index: face, value: edge1)
+  builder.faceMark.set(index: face, value: markVisible)
+  builder.faceArea.set(index: face, value: 0.5 * normalLength)
+  builder.faceCentroid.set(
+    index: face
+    value: scale(
+      scale: 1.0 / 3.0
+      vector: add(left: point1, right: add(left: point2, right: point3))
+    )
+  )
+  builder.facePlane.set(index: face, value: plane)
+  builder.faceFlipped.set(
+    index: face
+    value: planeSeparation(plane: plane, point: builder.interiorPoint) > 0.0
+  )
+  nodeListInit(builder: builder, head: builder.faceConflictHead.copyAtDefault(index: face))
+
+  setTriangleEdge(
+    builder: builder
+    edge: edge1
+    prev: edge3
+    next: edge2
+    origin: vertex1
+    face: face
+  )
+  setTriangleEdge(
+    builder: builder
+    edge: edge2
+    prev: edge1
+    next: edge3
+    origin: vertex2
+    face: face
+  )
+  setTriangleEdge(
+    builder: builder
+    edge: edge3
+    prev: edge2
+    next: edge1
+    origin: vertex3
+    face: face
+  )
+  ret face
+}
+
+# b3HullBuilder_RetireFace: off the face list (if on it) and onto the free list.
+func retireFace(builder: mod HullBuilder, face: view Int) {
+  if faceListContains(builder: builder, face: face) {
+    faceListRemove(builder: builder, face: face)
+  }
+  builder.faceEdge.set(index: face, value: -1)
+  builder.faceNext.set(index: face, value: builder.faceFreeHead)
+  builder.faceFreeHead = face
+}
+
+# --- Geometry helpers ---
+
+# b3BuildBounds
+func buildBounds(points: view List(Vec3)) ret Aabb {
+  var bounds: Aabb = emptyBounds()
+  loop let point: view Vec3 in points {
+    bounds.lowerBound = min(left: bounds.lowerBound, right: point)
+    bounds.upperBound = max(left: bounds.upperBound, right: point)
+  }
+  ret bounds
+}
+
+# b3FindFarthestPointsAlongCardinalAxes: the extreme pair on the axis of the
+# widest spread, if wider than twice the tolerance (else -1, -1).
+func findFarthestPointsAlongCardinalAxes(
+  index1: mod Int
+  index2: mod Int
+  tolerance: view Float
+  points: view List(Vec3)
+) {
+  index1 = -1
+  index2 = -1
+  let first: Vec3 = points.copyAtDefault(index: 0)
+  var minPointX: Vec3 = first
+  var minPointY: Vec3 = first
+  var minPointZ: Vec3 = first
+  var maxPointX: Vec3 = first
+  var maxPointY: Vec3 = first
+  var maxPointZ: Vec3 = first
+  var minIndexX: Int = 0
+  var minIndexY: Int = 0
+  var minIndexZ: Int = 0
+  var maxIndexX: Int = 0
+  var maxIndexY: Int = 0
+  var maxIndexZ: Int = 0
+  loop var i: Int = 1, i < points.length, ++i {
+    let point: Vec3 = points.copyAtDefault(index: i)
+    if point.x < minPointX.x {
+      minPointX = point
+      minIndexX = i
+    } else if point.x > maxPointX.x {
+      maxPointX = point
+      maxIndexX = i
+    }
+    if point.y < minPointY.y {
+      minPointY = point
+      minIndexY = i
+    } else if point.y > maxPointY.y {
+      maxPointY = point
+      maxIndexY = i
+    }
+    if point.z < minPointZ.z {
+      minPointZ = point
+      minIndexZ = i
+    } else if point.z > maxPointZ.z {
+      maxPointZ = point
+      maxIndexZ = i
+    }
+  }
+  let spread: Vec3 = {
+    x: maxPointX.x - minPointX.x
+    y: maxPointY.y - minPointY.y
+    z: maxPointZ.z - minPointZ.z
+  }
+  let axis: Int = maxElementIndex(vector: spread)
+  if getByIndex(vector: spread, index: axis) > 2.0 * tolerance {
+    match axis {
+      case 0 {
+        index1 = minIndexX
+        index2 = maxIndexX
+      }
+      case 1 {
+        index1 = minIndexY
+        index2 = maxIndexY
+      }
+      default {
+        index1 = minIndexZ
+        index2 = maxIndexZ
+      }
+    }
+  }
+}
+
+# b3FindFarthestPointFromLine: the point farthest from the line through two
+# points, if farther than twice the tolerance (else -1).
+func findFarthestPointFromLine(
+  index1: view Int
+  index2: view Int
+  tolerance: view Float
+  points: view List(Vec3)
+) ret Int {
+  let pointA: Vec3 = points.copyAtDefault(index: index1)
+  let pointB: Vec3 = points.copyAtDefault(index: index2)
+  # |ap x ab|^2 / |ab|^2 is the squared distance from p to the line.
+  let ab: Vec3 = subtract(left: pointB, right: pointA)
+  let abLengthSquared: Float = dot(left: ab, right: ab)
+  let inverseAbLengthSquared: Float = 1.0 / abLengthSquared
+  var maxDistanceSquared: Float = 4.0 * tolerance * tolerance
+  var maxIndex: Int = -1
+  loop var i: Int = 0, i < points.length, ++i {
+    if i is index1 or i is index2 {
+      continue
+    }
+    let ap: Vec3 = subtract(left: points.copyAtDefault(index: i), right: pointA)
+    let apCrossAb: Vec3 = cross(left: ap, right: ab)
+    let distanceSquared: Float = dot(left: apCrossAb, right: apCrossAb) * inverseAbLengthSquared
+    if distanceSquared > maxDistanceSquared {
+      maxDistanceSquared = distanceSquared
+      maxIndex = i
+    }
+  }
+  ret maxIndex
+}
+
+# b3FindFarthestPointFromPlane: the point farthest from the plane through
+# three points, if farther than twice the tolerance (else -1).
+func findFarthestPointFromPlane(
+  index1: view Int
+  index2: view Int
+  index3: view Int
+  tolerance: view Float
+  points: view List(Vec3)
+) ret Int {
+  let plane: Plane = planeFromPoints(
+    point1: points.copyAtDefault(index: index1)
+    point2: points.copyAtDefault(index: index2)
+    point3: points.copyAtDefault(index: index3)
+  )
+  var maxDistance: Float = 2.0 * tolerance
+  var maxIndex: Int = -1
+  loop var i: Int = 0, i < points.length, ++i {
+    if i is index1 or i is index2 or i is index3 {
+      continue
+    }
+    let separation: Float = absFloat(
+      value: planeSeparation(plane: plane, point: points.copyAtDefault(index: i))
+    )
+    if separation > maxDistance {
+      maxDistance = separation
+      maxIndex = i
+    }
+  }
+  ret maxIndex
+}
+
+# The separation of the centroid of the face across `edge` from the plane
+# of the face of `edge`.
+func edgeFold(builder: view HullBuilder, edge: view Int) ret Float {
+  let face: Int = edgeFaceOf(builder: builder, edge: edge)
+  let twinFace: Int = edgeFaceOf(builder: builder, edge: edgeTwinOf(builder: builder, edge: edge))
+  ret planeSeparation(
+    plane: facePlaneOf(builder: builder, face: face)
+    point: builder.faceCentroid.copyAtDefault(index: twinFace)
+  )
+}
+
+# b3IsEdgeConvex
+func isEdgeConvex(builder: view HullBuilder, edge: view Int, tolerance: view Float) ret Bool {
+  ret edgeFold(builder: builder, edge: edge) < -tolerance
+}
+
+# b3IsEdgeConcave
+func isEdgeConcave(builder: view HullBuilder, edge: view Int, tolerance: view Float) ret Bool {
+  ret edgeFold(builder: builder, edge: edge) > tolerance
+}
+
+# b3VertexCountOfFace
+func vertexCountOfFace(builder: view HullBuilder, face: view Int) ret Int {
+  var count: Int = 0
+  let first: Int = faceEdgeOf(builder: builder, face: face)
+  var edge: Int = first
+  loop true {
+    count = count + 1
+    edge = edgeNextOf(builder: builder, edge: edge)
+    if edge is first {
+      break
+    }
+  }
+  ret count
+}
+
+# The `index`-th half-edge around `face` from its first.
+func faceEdgeAt(builder: view HullBuilder, face: view Int, index: view Int) ret Int {
+  var edge: Int = faceEdgeOf(builder: builder, face: face)
+  loop var i: Int = 0, i < index, ++i {
+    edge = edgeNextOf(builder: builder, edge: edge)
+  }
+  ret edge
+}
+
+# b3LinkFace: make the `index`-th edge of `face` and `twin` twins.
+func linkFace(
+  builder: mod HullBuilder
+  face: view Int
+  index: view Int
+  twin: view Int
+) {
+  let edge: Int = faceEdgeAt(builder: builder, face: face, index: index)
+  builder.edgeTwin.set(index: edge, value: twin)
+  builder.edgeTwin.set(index: twin, value: edge)
+}
+
+# b3LinkFaces: make the `index1`-th edge of `face1` and the `index2`-th edge
+# of `face2` twins.
+func linkFaces(
+  builder: mod HullBuilder
+  face1: view Int
+  index1: view Int
+  face2: view Int
+  index2: view Int
+) {
+  let edge1: Int = faceEdgeAt(builder: builder, face: face1, index: index1)
+  let edge2: Int = faceEdgeAt(builder: builder, face: face2, index: index2)
+  builder.edgeTwin.set(index: edge1, value: edge2)
+  builder.edgeTwin.set(index: edge2, value: edge1)
+}
+
+# b3NewellPlane: the plane, centroid and area of a polygon face by Newell's
+# method, about its first vertex to reduce round-off.
+func newellPlane(builder: mod HullBuilder, face: view Int) {
+  var count: Int = 0
+  var centroid: Vec3 = zeroVector()
+  var normal: Vec3 = zeroVector()
+  let first: Int = faceEdgeOf(builder: builder, face: face)
+  let origin: Vec3 = nodePositionOf(
+    builder: builder
+    node: edgeOriginOf(builder: builder, edge: first)
+  )
+  var edge: Int = first
+  loop true {
+    let twin: Int = edgeTwinOf(builder: builder, edge: edge)
+    let v1: Vec3 = subtract(
+      left: nodePositionOf(builder: builder, node: edgeOriginOf(builder: builder, edge: edge))
+      right: origin
+    )
+    let v2: Vec3 = subtract(
+      left: nodePositionOf(builder: builder, node: edgeOriginOf(builder: builder, edge: twin))
+      right: origin
+    )
+    count = count + 1
+    centroid = add(left: centroid, right: v1)
+    normal.x = normal.x + (v1.y - v2.y) * (v1.z + v2.z)
+    normal.y = normal.y + (v1.z - v2.z) * (v1.x + v2.x)
+    normal.z = normal.z + (v1.x - v2.x) * (v1.y + v2.y)
+    edge = edgeNextOf(builder: builder, edge: edge)
+    if edge is first {
+      break
+    }
+  }
+  centroid = scale(scale: 1.0 / count.toFloat(), vector: centroid)
+  centroid = add(left: centroid, right: origin)
+  let normalLength: Float = length(vector: normal)
+  normal = scale(scale: 1.0 / normalLength, vector: normal)
+  builder.faceCentroid.set(index: face, value: centroid)
+  builder.facePlane.set(
+    index: face
+    value: planeFromNormalAndPoint(normal: normal, point: centroid)
+  )
+  builder.faceArea.set(index: face, value: 0.5 * normalLength)
+}
+
+# b3HullBuilder_ComputeTolerance: from the extent of the points.
+func computeTolerance(builder: mod HullBuilder, points: view List(Vec3)) {
+  let bounds: Aabb = buildBounds(points: points)
+  let maxAbs: Vec3 = max(
+    left: abs(vector: bounds.lowerBound)
+    right: abs(vector: bounds.upperBound)
+  )
+  let maxSum: Float = maxAbs.x + maxAbs.y + maxAbs.z
+  let maxCoordinate: Float = maxFloat(
+    left: maxAbs.x
+    right: maxFloat(left: maxAbs.y, right: maxAbs.z)
+  )
+  let maxDistance: Float = minFloat(left: squareRootOfThree * maxCoordinate, right: maxSum)
+  let tolerance: Float = (3.0 * maxDistance * 1.01 + maxCoordinate) * floatEpsilon
+  builder.tolerance = tolerance
+  builder.minRadius = 4.0 * builder.tolerance
+  builder.minOutside = 2.0 * builder.minRadius
+}
+
+# Put the point `position` on the conflict list of the face it is farthest
+# outside of (by more than minOutside), searching every live face; points
+# inside every face are dropped.
+func assignInitialConflict(builder: mod HullBuilder, position: view Vec3) {
+  var maxDistance: Float = builder.minOutside
+  var maxFace: Int = -1
+  var face: Int = builder.faceNext.copyAtDefault(index: faceHead)
+  loop face is not faceHead {
+    let separation: Float = planeSeparation(
+      plane: facePlaneOf(builder: builder, face: face)
+      point: position
+    )
+    if separation > maxDistance {
+      maxDistance = separation
+      maxFace = face
+    }
+    face = builder.faceNext.copyAtDefault(index: face)
+  }
+  if maxFace is not -1 {
+    let vertex: Int = newVertex(builder: builder, position: position)
+    builder.nodeConflictFace.set(index: vertex, value: maxFace)
+    nodeListPushBack(
+      builder: builder
+      head: builder.faceConflictHead.copyAtDefault(index: maxFace)
+      node: vertex
+    )
+    if maxDistance > builder.faceMaxConflictDistance.copyAtDefault(index: maxFace) {
+      builder.faceMaxConflictDistance.set(index: maxFace, value: maxDistance)
+      builder.faceMaxConflict.set(index: maxFace, value: vertex)
+    }
+  }
+}
+
+# b3HullBuilder_BuildInitialHull: the tetrahedron of four extreme points,
+# every other point on the conflict list of the face it is farthest
+# outside. False for flat or degenerate input.
+func buildInitialHull(builder: mod HullBuilder, points: view List(Vec3)) ret Bool {
+  var index1: Int = -1
+  var index2: Int = -1
+  findFarthestPointsAlongCardinalAxes(
+    index1: index1
+    index2: index2
+    tolerance: builder.tolerance
+    points: points
+  )
+  if index1 < 0 or index2 < 0 {
+    ret false
+  }
+  var index3: Int = findFarthestPointFromLine(
+    index1: index1
+    index2: index2
+    tolerance: builder.tolerance
+    points: points
+  )
+  if index3 < 0 {
+    ret false
+  }
+  let index4: Int = findFarthestPointFromPlane(
+    index1: index1
+    index2: index2
+    index3: index3
+    tolerance: builder.tolerance
+    points: points
+  )
+  if index4 < 0 {
+    ret false
+  }
+
+  let point4: Vec3 = points.copyAtDefault(index: index4)
+  let v1: Vec3 = subtract(left: points.copyAtDefault(index: index1), right: point4)
+  let v2: Vec3 = subtract(left: points.copyAtDefault(index: index2), right: point4)
+  let v3: Vec3 = subtract(left: points.copyAtDefault(index: index3), right: point4)
+  if scalarTripleProduct(first: v1, second: v2, third: v3) < 0.0 {
+    let swapped: Int = index2
+    index2 = index3
+    index3 = swapped
+  }
+
+  let point1: Vec3 = points.copyAtDefault(index: index1)
+  let point2: Vec3 = points.copyAtDefault(index: index2)
+  let point3: Vec3 = points.copyAtDefault(index: index3)
+  var interior: Vec3 = zeroVector()
+  interior = add(left: interior, right: point1)
+  interior = add(left: interior, right: point2)
+  interior = add(left: interior, right: point3)
+  interior = add(left: interior, right: point4)
+  builder.interiorPoint = scale(scale: 0.25, vector: interior)
+
+  let vertex1: Int = newVertex(builder: builder, position: point1)
+  nodeListPushBack(builder: builder, head: vertexHead, node: vertex1)
+  let vertex2: Int = newVertex(builder: builder, position: point2)
+  nodeListPushBack(builder: builder, head: vertexHead, node: vertex2)
+  let vertex3: Int = newVertex(builder: builder, position: point3)
+  nodeListPushBack(builder: builder, head: vertexHead, node: vertex3)
+  let vertex4: Int = newVertex(builder: builder, position: point4)
+  nodeListPushBack(builder: builder, head: vertexHead, node: vertex4)
+
+  let face1: Int = newFace(
+    builder: builder
+    vertex1: vertex1
+    vertex2: vertex2
+    vertex3: vertex3
+  )
+  faceListPushBack(builder: builder, face: face1)
+  let face2: Int = newFace(
+    builder: builder
+    vertex1: vertex4
+    vertex2: vertex2
+    vertex3: vertex1
+  )
+  faceListPushBack(builder: builder, face: face2)
+  let face3: Int = newFace(
+    builder: builder
+    vertex1: vertex4
+    vertex2: vertex3
+    vertex3: vertex2
+  )
+  faceListPushBack(builder: builder, face: face3)
+  let face4: Int = newFace(
+    builder: builder
+    vertex1: vertex4
+    vertex2: vertex1
+    vertex3: vertex3
+  )
+  faceListPushBack(builder: builder, face: face4)
+
+  linkFaces(
+    builder: builder
+    face1: face1
+    index1: 0
+    face2: face2
+    index2: 1
+  )
+  linkFaces(
+    builder: builder
+    face1: face1
+    index1: 1
+    face2: face3
+    index2: 1
+  )
+  linkFaces(
+    builder: builder
+    face1: face1
+    index1: 2
+    face2: face4
+    index2: 1
+  )
+  linkFaces(
+    builder: builder
+    face1: face2
+    index1: 0
+    face2: face3
+    index2: 2
+  )
+  linkFaces(
+    builder: builder
+    face1: face3
+    index1: 0
+    face2: face4
+    index2: 2
+  )
+  linkFaces(
+    builder: builder
+    face1: face4
+    index1: 0
+    face2: face2
+    index2: 2
+  )
+
+  loop var index: Int = 0, index < points.length, ++index {
+    if index is index1 or index is index2 or index is index3 or index is index4 {
+      continue
+    }
+    assignInitialConflict(builder: builder, position: points.copyAtDefault(index: index))
+  }
+  ret true
+}

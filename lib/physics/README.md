@@ -95,3 +95,28 @@ take the proxies as views so the loops that call them never copy.
 
 The checks: fixture 949 runs `goldens/geometry.golden` (2 345 calls of 22
 functions) and fixture 950 runs `goldens/manifold.golden` (832 calls of 8).
+
+### P2c — hulls (`geometry/Hull*`, `BoxHull`, `Hull2d`)
+
+A hull (`Hull`) is a struct of Lists (vertices, points, half-edges, faces,
+planes) instead of Box3D's one block with offset-addressed arrays; the hash,
+version and SoA copies are not ported (the scalar support search needs no
+SoA). The quickhull builder links by index: its records are parallel Lists
+per field, `-1` is NULL, and the free lists reuse slots in Box3D's order.
+Builders that can fail return `opt Hull`.
+
+| Box3D | Rae |
+|---|---|
+| `b3CreateHull` `b3CreateCylinder` `b3CreateCone` `b3CreateRock` `b3CreateComplexHull` | `createHull` `createCylinder` `createCone` `createRock` `createComplexHull` |
+| `b3CloneAndTransformHull` `b3IsValidHull` | `cloneAndTransformHull` `isValidHull` |
+| `b3MakeBoxHull` `b3MakeCubeHull` `b3MakeOffsetBoxHull` `b3MakeTransformedBoxHull` | `makeBoxHull` `makeCubeHull` `makeOffsetBoxHull` `makeTransformedBoxHull` |
+| `b3ScaleBox` `b3MakeScaledBoxHull` | `scaleBox` `makeScaledBoxHull` |
+| `b3ComputeHullMass` `b3ComputeHullAABB` `b3ComputeSweptHullAABB` | `computeHullMass` `computeHullAabb` `computeSweptHullAabb` |
+| `b3OverlapHull` `b3RayCastHull` `b3ShapeCastHull` `b3CollideMoverAndHull` | `overlapHull` `rayCastHull` `shapeCastHull` `collideMoverAndHull` |
+| `b3FindHullSupportVertex` `b3FindHullSupportFace` `b3FindIncidentFace` | `findHullSupportVertex` `findHullSupportFace` `findIncidentFace` |
+| `b3ComputeHullExtent` `b3ComputeHullProjectedArea` | `computeHullExtent` `computeHullProjectedArea` |
+| `b3Hull2D` `b3SimplifyHull2D` (`b3Point2D`) | `hull2d` `simplifyHull2d` (`Point2d`) |
+
+The check: fixture 951 runs `goldens/hull.golden` (1 177 calls of 26
+functions, hulls from random, spherical, grid, duplicate-laden, flat and
+collinear point clouds) and checks every built hull with `isValidHull`.

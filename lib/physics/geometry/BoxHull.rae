@@ -1,0 +1,420 @@
+# Box hulls (b3MakeBoxHull and friends, b3ScaleBox of Box3D's hull.c at
+# 9f998c8): a box is a hull with a fixed topology, so it is built directly
+# rather than through quickhull. Box3D's operation order is kept exactly;
+# checked bit for bit against the oracle in fixture 951.
+open Vec3
+open Quat
+open physics/Constants
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/QuatMath
+open physics/math/MatrixMath
+open physics/math/TransformMath
+open physics/math/AabbMath
+open physics/math/PlaneMath
+open physics/geometry/Hull
+
+func boxEdge(
+  next: view Int
+  twin: view Int
+  origin: view Int
+  face: view Int
+) ret HullHalfEdge {
+  ret HullHalfEdge { next: next, twin: twin, origin: origin, face: face }
+}
+
+# s_boxHull's topology: the vertex edges, the 24 half-edges (next, twin,
+# origin, face) and the face edges.
+func addBoxTopology(hull: mod Hull) {
+  let vertexEdges: List(Int) = {
+    8
+    1
+    0
+    9
+    13
+    3
+    5
+    11
+  }
+  loop let edge: view Int in vertexEdges {
+    hull.vertices.add(value: HullVertex { edge: edge })
+  }
+  hull.edges.add(value: boxEdge(
+    next: 2
+    twin: 1
+    origin: 2
+    face: 0
+  ))
+  hull.edges.add(value: boxEdge(
+    next: 17
+    twin: 0
+    origin: 1
+    face: 5
+  ))
+  hull.edges.add(value: boxEdge(
+    next: 4
+    twin: 3
+    origin: 1
+    face: 0
+  ))
+  hull.edges.add(value: boxEdge(
+    next: 20
+    twin: 2
+    origin: 5
+    face: 3
+  ))
+  hull.edges.add(value: boxEdge(
+    next: 6
+    twin: 5
+    origin: 5
+    face: 0
+  ))
+  hull.edges.add(value: boxEdge(
+    next: 23
+    twin: 4
+    origin: 6
+    face: 4
+  ))
+  hull.edges.add(value: boxEdge(
+    next: 0
+    twin: 7
+    origin: 6
+    face: 0
+  ))
+  hull.edges.add(value: boxEdge(
+    next: 18
+    twin: 6
+    origin: 2
+    face: 2
+  ))
+  hull.edges.add(value: boxEdge(
+    next: 10
+    twin: 9
+    origin: 0
+    face: 1
+  ))
+  hull.edges.add(value: boxEdge(
+    next: 21
+    twin: 8
+    origin: 3
+    face: 5
+  ))
+  hull.edges.add(value: boxEdge(
+    next: 12
+    twin: 11
+    origin: 3
+    face: 1
+  ))
+  hull.edges.add(value: boxEdge(
+    next: 16
+    twin: 10
+    origin: 7
+    face: 2
+  ))
+  hull.edges.add(value: boxEdge(
+    next: 14
+    twin: 13
+    origin: 7
+    face: 1
+  ))
+  hull.edges.add(value: boxEdge(
+    next: 19
+    twin: 12
+    origin: 4
+    face: 4
+  ))
+  hull.edges.add(value: boxEdge(
+    next: 8
+    twin: 15
+    origin: 4
+    face: 1
+  ))
+  hull.edges.add(value: boxEdge(
+    next: 22
+    twin: 14
+    origin: 0
+    face: 3
+  ))
+  hull.edges.add(value: boxEdge(
+    next: 7
+    twin: 17
+    origin: 3
+    face: 2
+  ))
+  hull.edges.add(value: boxEdge(
+    next: 9
+    twin: 16
+    origin: 2
+    face: 5
+  ))
+  hull.edges.add(value: boxEdge(
+    next: 11
+    twin: 19
+    origin: 6
+    face: 2
+  ))
+  hull.edges.add(value: boxEdge(
+    next: 5
+    twin: 18
+    origin: 7
+    face: 4
+  ))
+  hull.edges.add(value: boxEdge(
+    next: 15
+    twin: 21
+    origin: 1
+    face: 3
+  ))
+  hull.edges.add(value: boxEdge(
+    next: 1
+    twin: 20
+    origin: 0
+    face: 5
+  ))
+  hull.edges.add(value: boxEdge(
+    next: 3
+    twin: 23
+    origin: 4
+    face: 3
+  ))
+  hull.edges.add(value: boxEdge(
+    next: 13
+    twin: 22
+    origin: 5
+    face: 4
+  ))
+  let faceEdges: List(Int) = {
+    0
+    8
+    16
+    20
+    19
+    21
+  }
+  loop let edge: view Int in faceEdges {
+    hull.faces.add(value: HullFace { edge: edge })
+  }
+}
+
+# b3MakeTransformedBoxHull: a box of half-widths `hx`, `hy`, `hz` (at least
+# 0.2 linear slop) placed by `transform`.
+func makeTransformedBoxHull(
+  hx: view Float
+  hy: view Float
+  hz: view Float
+  transform: view Transform
+  lengthUnitsPerMeter: view Float
+) ret Hull {
+  let minHalfWidth: Float = 0.2 * linearSlop(lengthUnitsPerMeter: lengthUnitsPerMeter)
+  let half: Vec3 = max(
+    left: Vec3 { x: minHalfWidth, y: minHalfWidth, z: minHalfWidth }
+    right: Vec3 { x: hx, y: hy, z: hz }
+  )
+  let lower: Vec3 = negate(vector: half)
+  let upper: Vec3 = half
+  let volume: Float = 8.0 * half.x * half.y * half.z
+  let inertia: Matrix3 = boxInertia(mass: volume, lower: negate(vector: half), upper: half)
+  var hull: Hull = {
+    aabb: transformAabb(
+      transform: transform
+      box: Aabb { lowerBound: negate(vector: half), upperBound: half }
+    )
+    surfaceArea: 8.0 * (half.x * half.y + half.x * half.z + half.y * half.z)
+    volume: volume
+    innerRadius: minFloat(left: half.x, right: minFloat(left: half.y, right: half.z))
+    center: transform.position
+    centralInertia: rotateInertia(quat: transform.rotation, centralInertia: inertia)
+    vertices: List.create(HullVertex, cap: 8)
+    points: List.create(Vec3, cap: 8)
+    edges: List.create(HullHalfEdge, cap: 24)
+    faces: List.create(HullFace, cap: 6)
+    planes: List.create(Plane, cap: 6)
+  }
+  addBoxTopology(hull: hull)
+
+  hull.planes.add(
+    value: transformPlane(
+      transform: transform
+      plane: planeFromNormalAndPoint(normal: negate(vector: axisX()), point: lower)
+    )
+  )
+  hull.planes.add(
+    value: transformPlane(
+      transform: transform
+      plane: planeFromNormalAndPoint(normal: axisX(), point: upper)
+    )
+  )
+  hull.planes.add(
+    value: transformPlane(
+      transform: transform
+      plane: planeFromNormalAndPoint(normal: negate(vector: axisY()), point: lower)
+    )
+  )
+  hull.planes.add(
+    value: transformPlane(
+      transform: transform
+      plane: planeFromNormalAndPoint(normal: axisY(), point: upper)
+    )
+  )
+  hull.planes.add(
+    value: transformPlane(
+      transform: transform
+      plane: planeFromNormalAndPoint(normal: negate(vector: axisZ()), point: lower)
+    )
+  )
+  hull.planes.add(
+    value: transformPlane(
+      transform: transform
+      plane: planeFromNormalAndPoint(normal: axisZ(), point: upper)
+    )
+  )
+
+  hull.points.add(
+    value: transformPoint(transform: transform, point: Vec3 { x: half.x, y: half.y, z: half.z })
+  )
+  hull.points.add(
+    value: transformPoint(transform: transform, point: Vec3 { x: -half.x, y: half.y, z: half.z })
+  )
+  hull.points.add(
+    value: transformPoint(transform: transform, point: Vec3 { x: -half.x, y: -half.y, z: half.z })
+  )
+  hull.points.add(
+    value: transformPoint(transform: transform, point: Vec3 { x: half.x, y: -half.y, z: half.z })
+  )
+  hull.points.add(
+    value: transformPoint(transform: transform, point: Vec3 { x: half.x, y: half.y, z: -half.z })
+  )
+  hull.points.add(
+    value: transformPoint(transform: transform, point: Vec3 { x: -half.x, y: half.y, z: -half.z })
+  )
+  hull.points.add(
+    value: transformPoint(transform: transform, point: Vec3 { x: -half.x, y: -half.y, z: -half.z })
+  )
+  hull.points.add(
+    value: transformPoint(transform: transform, point: Vec3 { x: half.x, y: -half.y, z: -half.z })
+  )
+  ret hull
+}
+
+# b3MakeBoxHull: a box about the origin.
+func makeBoxHull(
+  hx: view Float
+  hy: view Float
+  hz: view Float
+  lengthUnitsPerMeter: view Float
+) ret Hull {
+  ret makeTransformedBoxHull(
+    hx: hx
+    hy: hy
+    hz: hz
+    transform: transformIdentity()
+    lengthUnitsPerMeter: lengthUnitsPerMeter
+  )
+}
+
+# b3MakeCubeHull
+func makeCubeHull(halfWidth: view Float, lengthUnitsPerMeter: view Float) ret Hull {
+  ret makeBoxHull(
+    hx: halfWidth
+    hy: halfWidth
+    hz: halfWidth
+    lengthUnitsPerMeter: lengthUnitsPerMeter
+  )
+}
+
+# b3MakeOffsetBoxHull: a box centered at `offset`.
+func makeOffsetBoxHull(
+  hx: view Float
+  hy: view Float
+  hz: view Float
+  offset: view Vec3
+  lengthUnitsPerMeter: view Float
+) ret Hull {
+  let transform: Transform = { position: offset, rotation: quatIdentity() }
+  ret makeTransformedBoxHull(
+    hx: hx
+    hy: hy
+    hz: hz
+    transform: transform
+    lengthUnitsPerMeter: lengthUnitsPerMeter
+  )
+}
+
+# b3ScaleBox: fold a post scale (non-uniform, possibly mirroring) into the
+# half-widths and transform of a box; approximate under shear. Half-widths
+# stay at least `minHalfWidth`.
+func scaleBox(
+  halfWidths: mod Vec3
+  transform: mod Transform
+  postScale: view Vec3
+  minHalfWidth: view Float
+) {
+  var quat: Quat = transform.rotation
+  if postScale.x < 0.0 or postScale.y < 0.0 or postScale.z < 0.0 {
+    var matrix: Matrix3 = matrixFromQuat(quat: quat)
+    matrix.columnX.x = matrix.columnX.x * postScale.x
+    matrix.columnY.x = matrix.columnY.x * postScale.x
+    matrix.columnZ.x = matrix.columnZ.x * postScale.x
+    matrix.columnX.y = matrix.columnX.y * postScale.y
+    matrix.columnY.y = matrix.columnY.y * postScale.y
+    matrix.columnZ.y = matrix.columnZ.y * postScale.y
+    matrix.columnX.z = matrix.columnX.z * postScale.z
+    matrix.columnY.z = matrix.columnY.z * postScale.z
+    matrix.columnZ.z = matrix.columnZ.z * postScale.z
+    matrix.columnX = normalize(vector: matrix.columnX)
+    matrix.columnY = normalize(vector: matrix.columnY)
+    matrix.columnZ = normalize(vector: matrix.columnZ)
+    if postScale.x < 0.0 {
+      matrix.columnX = negate(vector: matrix.columnX)
+    }
+    if postScale.y < 0.0 {
+      matrix.columnY = negate(vector: matrix.columnY)
+    }
+    if postScale.z < 0.0 {
+      matrix.columnZ = negate(vector: matrix.columnZ)
+    }
+    quat = quatFromMatrix(matrix: matrix)
+  }
+
+  let absScale: Vec3 = abs(vector: postScale)
+  let half: Vec3 = halfWidths
+  let corner1: Vec3 = multiply(
+    left: absScale
+    right: rotateVector(quat: quat, vector: negate(vector: half))
+  )
+  let corner2: Vec3 = multiply(left: absScale, right: rotateVector(quat: quat, vector: half))
+  let localCorner1: Vec3 = inverseRotateVector(quat: quat, vector: corner1)
+  let localCorner2: Vec3 = inverseRotateVector(quat: quat, vector: corner2)
+  let lower: Vec3 = min(left: localCorner1, right: localCorner2)
+  let upper: Vec3 = max(left: localCorner1, right: localCorner2)
+  let scaledHalfWidth: Vec3 = scale(scale: 0.5, vector: subtract(left: upper, right: lower))
+  let limit: Vec3 = { x: minHalfWidth, y: minHalfWidth, z: minHalfWidth }
+  halfWidths = max(left: scaledHalfWidth, right: limit)
+  transform.position = multiply(left: postScale, right: transform.position)
+  transform.rotation = quat
+}
+
+# b3MakeScaledBoxHull: a box with a post scale folded in (see scaleBox),
+# half-widths at least four linear slops.
+func makeScaledBoxHull(
+  halfWidths: view Vec3
+  transform: view Transform
+  postScale: view Vec3
+  lengthUnitsPerMeter: view Float
+) ret Hull {
+  var half: Vec3 = halfWidths
+  var scaledTransform: Transform = transform
+  scaleBox(
+    halfWidths: half
+    transform: scaledTransform
+    postScale: postScale
+    minHalfWidth: 4.0 * linearSlop(lengthUnitsPerMeter: lengthUnitsPerMeter)
+  )
+  ret makeTransformedBoxHull(
+    hx: half.x
+    hy: half.y
+    hz: half.z
+    transform: scaledTransform
+    lengthUnitsPerMeter: lengthUnitsPerMeter
+  )
+}
