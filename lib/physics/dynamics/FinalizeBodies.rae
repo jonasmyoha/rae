@@ -1,0 +1,216 @@
+# Finalizing the awake bodies after the constraint solve
+# (b3FinalizeBodiesTask of Box3D's solver.c at 9f998c8): apply the position
+# deltas, measure sleepiness, run continuous collision for fast bodies,
+# update the world inertia and the shapes' boxes. Box3D's operation order is
+# kept exactly; checked against the oracle in fixture 958.
+import Math
+open Vec3
+open Quat
+open physics/Constants
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/QuatMath
+open physics/math/MatrixMath
+open physics/math/TransformMath
+open physics/math/AabbMath
+open physics/container/Bitset
+open physics/broadPhase/DynamicTree
+open physics/broadPhase/DynamicTreeRebuild
+open physics/broadPhase/BroadPhase
+open physics/dynamics/WorldTypes
+open physics/dynamics/Body
+open physics/dynamics/Shape
+open physics/dynamics/Contact
+open physics/dynamics/ConstraintGraph
+open physics/dynamics/SolverSet
+open physics/dynamics/Island
+open physics/dynamics/World
+open physics/dynamics/WorldIslands
+open physics/dynamics/ParallelFor
+open physics/dynamics/ContactConstraints
+open physics/dynamics/StepContext
+open physics/dynamics/Continuous
+
+# b3FinalizeBodiesTask for awake sims `startIndex` to `endIndex`: apply the
+# position deltas, measure sleepiness, run continuous collision for fast
+# bodies, update the world inertia and the shapes' boxes.
+func finalizeBodies(
+  world: mod PhysicsWorld
+  context: mod StepContext
+  startIndex: view Int
+  endIndex: view Int
+  workerIndex: view Int
+) {
+  let enableSleep: Bool = world.enableSleep
+  let enableContinuous: Bool = world.enableContinuous
+  let timeStep: Float = context.dt
+  let invTimeStep: Float = context.inverseDt
+  let speculative: Float = speculativeDistance(lengthUnitsPerMeter: world.lengthUnitsPerMeter)
+  loop var simIndex: Int = startIndex, simIndex < endIndex, ++simIndex {
+    var state: BodyState = world.solverSets.copyAtDefault(index: awakeSet).bodyStates.copyAtDefault(
+      index: simIndex
+    )
+    var sim: BodySim = world.solverSets.copyAtDefault(index: awakeSet).bodySims.copyAtDefault(
+      index: simIndex
+    )
+    let v: Vec3 = state.linearVelocity
+    let w: Vec3 = state.angularVelocity
+    let localOmega: Vec3 = inverseRotateVector(quat: sim.transform.rotation, vector: w)
+    let localDeltaRotation: Vec3 = inverseRotateVector(
+      quat: sim.transform.rotation
+      vector: quatVector(quat: state.deltaRotation)
+    )
+
+    sim.center = offsetPosition(position: sim.center, delta: state.deltaPosition)
+    sim.transform.rotation = normalize(
+      quat: multiply(left: state.deltaRotation, right: sim.transform.rotation)
+    )
+
+    # The velocity of the farthest point accounts for rotation
+    let velocityArc: Vec3 = modifiedCross(left: abs(vector: localOmega), right: sim.maxExtent)
+    let maxVelocity: Float = length(vector: v) + length(vector: velocityArc)
+    # Sleep sees position correction as well as true velocity: for small
+    # angles theta ~= 2 * length(sin(theta / 2) * axis)
+    let rotationArc: Vec3 = modifiedCross(
+      left: abs(vector: localDeltaRotation)
+      right: sim.maxExtent
+    )
+    let maxDeltaPosition: Float = length(vector: state.deltaPosition) + 2.0 * length(
+      vector: rotationArc
+    )
+    # Position correction matters less for sleep than true velocity
+    let positionSleepFactor: Float = 0.5
+    let sleepVelocity: Float = maxFloat(
+      left: maxVelocity
+      right: positionSleepFactor * invTimeStep * maxDeltaPosition
+    )
+
+    # Reset the state deltas
+    state.deltaPosition = zeroVector()
+    state.deltaRotation = quatIdentity()
+    sim.transform.position = offsetPosition(
+      position: sim.center
+      delta: negate(vector: rotateVector(quat: sim.transform.rotation, vector: sim.localCenter))
+    )
+
+    var body: Body = bodyAt(world: world, bodyId: sim.bodyId)
+    body.bodyMoveIndex = simIndex
+    body.sleepVelocity = sleepVelocity
+    world.bodyMoveEvents.set(
+      index: simIndex
+      value: BodyMoveEvent {
+        transform: sim.transform
+        bodyId: BodyId {
+          index1: sim.bodyId + 1
+          world0: world.worldId
+          generation: body.generation
+        }
+        fellAsleep: false
+      }
+    )
+
+    # Reset the applied force and torque
+    sim.force = zeroVector()
+    sim.torque = zeroVector()
+
+    # Clear the transient flags (fast, speed capped, had TOI)
+    body.flags = body.flags bitand (bitnot bodyTransientFlags)
+    sim.flags = sim.flags bitand (bitnot (isFastFlag bitor bodyTransientFlags))
+    # The body flag knows about speed capping (debug draw)
+    body.flags = body.flags bitor (state.flags bitand isSpeedCappedFlag)
+    state.flags = state.flags bitand (bitnot bodyTransientFlags)
+
+    var continuous: Bool = false
+    if enableSleep is false or (body.flags bitand enableSleepFlag) is 0 or sleepVelocity > body.sleepThreshold {
+      # The body is not sleepy
+      body.sleepTime = 0.0
+      let maxMotion: Float = maxFloat(left: maxDeltaPosition, right: maxVelocity * timeStep)
+      if body.bodyType is BodyType.dynamicBody and enableContinuous and maxMotion > body.safetyFactor * sim.minExtent {
+        # Used for debug draw and contact recycling
+        sim.flags = sim.flags bitor isFastFlag
+        # Bullets wait for the continuous stage; the order of the sweeps
+        # does not matter
+        if (sim.flags bitand isBulletFlag) is not 0 {
+          context.bulletBodies.add(value: simIndex)
+        } else {
+          continuous = true
+        }
+      } else {
+        # The body is safe to advance
+        sim.center0 = sim.center
+        sim.rotation0 = sim.transform.rotation
+      }
+    } else {
+      # The body is safe to advance and is falling asleep
+      sim.center0 = sim.center
+      sim.rotation0 = sim.transform.rotation
+      body.sleepTime = body.sleepTime + timeStep
+    }
+
+    world.bodies.set(index: sim.bodyId, value: body)
+    if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
+      awake.bodyStates.set(index: simIndex, value: state)
+      awake.bodySims.set(index: simIndex, value: sim)
+    }
+    if continuous {
+      solveContinuous(world: world, simIndex: simIndex, dt: timeStep)
+      sim = world.solverSets.copyAtDefault(index: awakeSet).bodySims.copyAtDefault(index: simIndex)
+    }
+
+    # The world space inverse inertia
+    let rotationMatrix: Matrix3 = matrixFromQuat(quat: sim.transform.rotation)
+    sim.invInertiaWorld = multiply(
+      left: multiply(left: rotationMatrix, right: sim.invInertiaLocal)
+      right: transpose(matrix: rotationMatrix)
+    )
+    if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
+      awake.bodySims.set(index: simIndex, value: sim)
+    }
+
+    # Any single body in an island can keep it awake
+    if let island: view Island => world.islands.viewAt(index: body.islandId) {
+      if body.sleepTime < timeToSleep {
+        # Keep the island awake
+        let islandIndex: Int = island.localIndex
+        if let taskContext: mod TaskContext => world.taskContexts.modAt(index: workerIndex) {
+          setBit(bitset: taskContext.awakeIslandBitSet, bitIndex: islandIndex)
+        }
+      } else if island.constraintRemoveCount > 0 {
+        # Sleepy, but the island needs splitting first: track the sleepiest
+        # candidate (ties broken by island id for determinism)
+        if let taskContext: mod TaskContext => world.taskContexts.modAt(index: workerIndex) {
+          if body.sleepTime > taskContext.splitSleepTime or (body.sleepTime is taskContext.splitSleepTime and body.islandId > taskContext.splitIslandId) {
+            taskContext.splitIslandId = body.islandId
+            taskContext.splitSleepTime = body.sleepTime
+          }
+        }
+      }
+    }
+
+    # The shapes' boxes (a fast body's came from continuous collision; a
+    # bullet's come later)
+    if (sim.flags bitand isFastFlag) is 0 {
+      let transform: Transform = sim.transform
+      var shapeId: Int = body.headShapeId
+      loop shapeId is not -1 {
+        let shape: Shape = world.shapes.copyAtDefault(index: shapeId)
+        let box: Aabb = computeFatShapeAabb(
+          shape: shape
+          hulls: world.hulls
+          transform: transform
+          extra: speculative
+        )
+        if let stored: mod Shape => world.shapes.modAt(index: shapeId) {
+          stored.aabb = box
+        }
+        let fatBox: Aabb = world.fatAabbs.copyAtDefault(index: shapeId)
+        if contains(outer: fatBox, inner: box) is false {
+          let inflated: Aabb = inflate(box: box, extension: shape.aabbMargin)
+          world.fatAabbs.set(index: shapeId, value: inflated)
+          markShapeProxyMoved(world: world, proxyKey: shape.proxyKey, box: inflated)
+        }
+        shapeId = shape.nextShapeId
+      }
+    }
+  }
+}

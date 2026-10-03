@@ -268,3 +268,42 @@ recycle contacts, large moves that end them, wakes, islands put to sleep,
 re-massing, shape and body destroys; every contact with its manifold, the
 24 graph colours including overflow, the solver sets, the islands and the
 bodies' contact fields dumped at checkpoints).
+
+## P4c — the solver, the stage dispatcher, stepping (`dynamics/`)
+
+`stepWorld` is `b3World_Step`: new pairs, the narrow phase, then the solver.
+The solver keeps Box3D's structure even single-threaded: constraints are
+spread over the graph colours, the work is a list of stages (prepare,
+integrate velocities, warm start, solve, integrate positions, relax,
+restitution, store) whose blocks share a pool, and the stage dispatcher
+(`dynamics/StageDispatcher`) is the one module that runs them — as worker 0,
+block by block, with the sync indices and completion counts as plain Ints
+behind `claimBlock` / `addCompletions` / `resetCompletions`. Threading the
+solver changes that module, not the solver tasks. Convex contacts are solved
+four at a time on the wide path, where a wide float is a struct of four
+Floats (`dynamics/FloatWide`, Box3D's scalar `b3FloatW`); the overflow colour
+(and later mesh contacts) use the scalar path.
+
+| Box3D | Rae |
+|---|---|
+| `b3World_Step` | `stepWorld` (`dynamics/WorldStep`) |
+| `b3Solve`, `b3SolverTask` (worker 0) | `solve`, `runSolverStages` (`dynamics/Solver`) |
+| `b3FinalizeBodiesTask` | `finalizeBodies` (`dynamics/FinalizeBodies`) |
+| `b3IntegrateVelocitiesTask` `b3IntegratePositionsTask` | `integrateVelocities` `integratePositions` (`dynamics/BodyIntegration`) |
+| `b3SolveContinuous` `b3ContinuousQueryCallback` `b3ShapeTimeOfImpact` `b3MakeShapeProxy` | `solveContinuous` `continuousCandidate` `shapeTimeOfImpact` `makeShapeProxy` (`dynamics/Continuous`) |
+| `b3StepContext` `b3SolverStage` `b3SyncBlock` `b3SolverBlock` `b3Softness` `b3MakeSoft` | `StepContext` `SolverStage` `SyncBlock` `SolverBlock` `Softness` `makeSoft` (`dynamics/StepContext`) |
+| `b3ComputeBlockCount` `b3InitBlocks` `b3InitStage` `b3ExecuteBlock` `b3ExecuteStage` `b3ExecuteMainStage` | `computeBlockCount` `initBlocks` `initStage` `executeBlock` `executeStage` `executeMainStage` (`dynamics/StageDispatcher`) |
+| `b3FloatW` and its operations, `b3Vec3W` `b3QuatW` `b3SymMatrix3W` … | `FloatWide` `Vec3Wide` `QuatWide` `SymMatrix3Wide` … (`dynamics/FloatWide`) |
+| `b3ContactConstraint` `b3ManifoldConstraint` `b3ContactConstraintWide` | `ContactConstraint` `ManifoldConstraint` `ContactConstraintWide` (`dynamics/ContactConstraints`) |
+| `b3*Contacts_Mesh` / `_Overflow` | `prepareContactsScalar` `warmStartContactsScalar` `pushContactsScalar` `solveContactsScalar` `applyRestitutionScalar` `storeImpulsesScalar` (`dynamics/ContactSolver`) |
+| `b3*Contacts_Convex` | `prepareContactsWide` `storeImpulsesWide` (`dynamics/ContactSolverWide`), `warmStartContactsWide` `pushContactsWide` `solveContactsWide` `applyRestitutionWide` (`dynamics/ContactSolverWideSolve`) |
+
+Not yet: island splitting and the sleep scenes, hit, sensor and joint
+events (P4d), joints in the stages (P6).
+
+The check: fixture 958 replays `goldens/scenes.golden` — four worlds stepped
+600 times each at 1/60 s with 4 sub-steps (sleep off): a sphere falling on a
+box, five spheres of restitution 0 to 1, four boxes of friction 0 to 0.6 on
+a 20-degree slope, a 10-level pyramid of 55 boxes; every step's hash of every
+body's transform and velocities and a full dump every 20 steps are
+bit-exact.

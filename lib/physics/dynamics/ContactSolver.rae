@@ -1,0 +1,872 @@
+# The scalar contact solver (b3PrepareContacts_Mesh, b3WarmStartContacts_Mesh,
+# b3PushContacts_Mesh, b3SolveContacts_Mesh, b3ApplyRestitution_Mesh and
+# b3StoreImpulses_Mesh of Box3D's contact_solver.c at 9f998c8): one contact
+# at a time, every manifold of it. Box3D uses it for mesh contacts (P5) and
+# for the overflow colour, whose constraints fit no graph colour. Box3D's
+# operation order is kept exactly; checked against the oracle in fixture 958.
+#
+# A colour's constraints are `constraints` from `first`; a constraint's
+# manifold constraints are `manifolds` from its `manifoldStart`.
+open Vec2
+open Vec3
+open Quat
+open physics/Constants
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/QuatMath
+open physics/math/MatrixMath
+open physics/math/Vector2Math
+open physics/dynamics/WorldTypes
+open physics/dynamics/Body
+open physics/dynamics/Contact
+open physics/dynamics/ConstraintGraph
+open physics/dynamics/SolverSet
+open physics/dynamics/World
+open physics/dynamics/ContactConstraints
+open physics/dynamics/StepContext
+
+# The state of awake sim `index`, or the identity state of a static body.
+func stateOrIdentity(states: view List(BodyState), index: view Int) ret BodyState {
+  if index is -1 {
+    ret identityBodyState()
+  }
+  ret states.copyAtDefault(index: index)
+}
+
+# Write back the velocities of a dynamic body.
+func storeVelocities(
+  states: mod List(BodyState)
+  index: view Int
+  linearVelocity: view Vec3
+  angularVelocity: view Vec3
+) {
+  if index is -1 {
+    ret
+  }
+  if let state: mod BodyState => states.modAt(index: index) {
+    if (state.flags bitand dynamicFlag) is not 0 {
+      state.linearVelocity = linearVelocity
+      state.angularVelocity = angularVelocity
+    }
+  }
+}
+
+# b3PrepareContacts_Mesh: the constraints of flat range `block` (or of the
+# overflow colour) from their contacts.
+func prepareContactsScalar(
+  world: mod PhysicsWorld
+  context: mod StepContext
+  block: view SolverBlock
+) {
+  let overflow: Bool = block.blockType is SolverBlockType.overflowBlock
+  var spans: List(PrepareSpan) = context.contactPrepareSpans
+  if overflow {
+    spans = context.overflowSpans
+  }
+  var warmStart: Float = 0.0
+  if world.enableWarmStarting {
+    warmStart = 1.0
+  }
+  var anyRestitution: Bool = false
+  # Used for friction center weighting
+  let invTau: Float = 1.0 / speculativeDistance(lengthUnitsPerMeter: world.lengthUnitsPerMeter)
+
+  var index: Int = block.startIndex
+  let endIndex: Int = block.startIndex + block.count
+  var slot: Int = spanSlotOf(spans: spans, index: index)
+  loop index < endIndex {
+    let span: PrepareSpan = spans.copyAtDefault(index: slot)
+    let colorEndIndex: Int = minInt(
+      left: spans.copyAtDefault(index: slot + 1).start
+      right: endIndex
+    )
+    loop index < colorEndIndex {
+      let localIndex: Int = index - span.start
+      var spec: ContactSpec = { contactId: -1, manifoldStart: 0, manifoldCount: 0 }
+      if let color: view GraphColor => world.constraintGraph.colors.viewAt(index: span.colorIndex) {
+        spec = color.contacts.copyAtDefault(index: localIndex)
+      }
+      prepareContactScalar(
+        world: world
+        context: context
+        overflow: overflow
+        constraintIndex: index
+        spec: spec
+        warmStart: warmStart
+        invTau: invTau
+        anyRestitution: anyRestitution
+      )
+      index = index + 1
+    }
+    # Advance to the next colour
+    slot = slot + 1
+  }
+  if anyRestitution {
+    context.anyRestitution = true
+  }
+}
+
+# One contact of b3PrepareContacts_Mesh.
+func prepareContactScalar(
+  world: mod PhysicsWorld
+  context: mod StepContext
+  overflow: view Bool
+  constraintIndex: view Int
+  spec: view ContactSpec
+  warmStart: view Float
+  invTau: view Float
+  anyRestitution: mod Bool
+) {
+  let contactId: Int = spec.contactId
+  var contactConstraint: ContactConstraint = zeroContactConstraint()
+  if let contact: mod Contact => world.contacts.modAt(index: contactId) {
+    if let awake: view SolverSet => world.solverSets.viewAt(index: awakeSet) {
+      var indexA: Int = contact.encodedBodySimA
+      if indexA < 0 {
+        indexA = -1
+      }
+      var indexB: Int = contact.encodedBodySimB
+      if indexB < 0 {
+        indexB = -1
+      }
+      var mA: Float = 0.0
+      var iA: Matrix3 = matrixZero()
+      if indexA is not -1 {
+        let simA: BodySim = awake.bodySims.copyAtDefault(index: indexA)
+        mA = simA.invMass
+        iA = simA.invInertiaWorld
+      }
+      var mB: Float = 0.0
+      var iB: Matrix3 = matrixZero()
+      if indexB is not -1 {
+        let simB: BodySim = awake.bodySims.copyAtDefault(index: indexB)
+        mB = simB.invMass
+        iB = simB.invInertiaWorld
+      }
+
+      let manifoldCount: Int = contact.manifolds.length
+      contactConstraint.contactId = contactId
+      contactConstraint.manifoldCount = manifoldCount
+      contactConstraint.indexA = indexA
+      contactConstraint.indexB = indexB
+      contactConstraint.invIA = iA
+      contactConstraint.invMassA = mA
+      contactConstraint.invIB = iB
+      contactConstraint.invMassB = mB
+      contactConstraint.rollingMass = invert(matrix: add(left: iA, right: iB))
+      contactConstraint.softness = context.contactSoftness
+      if (contact.flags bitand contactStaticFlag) is not 0 {
+        contactConstraint.softness = context.staticSoftness
+      }
+      contactConstraint.friction = contact.friction
+      contactConstraint.restitution = contact.restitution
+      contactConstraint.rollingResistance = contact.rollingResistance
+      contactConstraint.manifoldStart = spec.manifoldStart
+
+      # Only sample the contact point normal velocity if needed
+      let haveRestitution: Bool = contact.restitution > 0.0
+      let hitEvents: Bool = (contact.flags bitand simEnableHitEvent) is not 0
+      let sampleVelocity: Bool = haveRestitution or hitEvents
+      anyRestitution = anyRestitution or haveRestitution
+
+      var vA: Vec3 = zeroVector()
+      var wA: Vec3 = zeroVector()
+      var vB: Vec3 = zeroVector()
+      var wB: Vec3 = zeroVector()
+      if sampleVelocity {
+        if indexA is not -1 {
+          let stateA: BodyState = awake.bodyStates.copyAtDefault(index: indexA)
+          vA = stateA.linearVelocity
+          wA = stateA.angularVelocity
+        }
+        if indexB is not -1 {
+          let stateB: BodyState = awake.bodyStates.copyAtDefault(index: indexB)
+          vB = stateB.linearVelocity
+          wB = stateB.angularVelocity
+        }
+      }
+
+      loop var manifoldIndex: Int = 0, manifoldIndex < manifoldCount, ++manifoldIndex {
+        if let manifold: mod Manifold => contact.manifolds.modAt(index: manifoldIndex) {
+          var constraint: ManifoldConstraint = zeroManifoldConstraint()
+          let pointCount: Int = manifold.pointCount
+          let normal: Vec3 = manifold.normal
+          let tangent1: Vec3 = perp(vector: normal)
+          let tangent2: Vec3 = cross(left: tangent1, right: normal)
+          constraint.pointCount = pointCount
+          constraint.normal = normal
+          constraint.tangent1 = tangent1
+          constraint.tangent2 = tangent2
+          constraint.tangentVelocity1 = dot(left: contact.tangentVelocity, right: tangent1)
+          constraint.tangentVelocity2 = dot(left: contact.tangentVelocity, right: tangent2)
+
+          var centerA: Vec3 = zeroVector()
+          var centerB: Vec3 = zeroVector()
+          var totalFrictionWeight: Float = 0.0
+          loop var pointIndex: Int = 0, pointIndex < pointCount, ++pointIndex {
+            if let point: mod ManifoldPoint => manifold.points.modAt(index: pointIndex) {
+              var constraintPoint: ManifoldConstraintPoint = emptyConstraintPoint()
+              constraintPoint.anchorA = point.anchorA
+              constraintPoint.anchorB = point.anchorB
+              let separation: Float = point.separation
+              constraintPoint.baseSeparation = separation - dot(
+                left: subtract(left: constraintPoint.anchorB, right: constraintPoint.anchorA)
+                right: normal
+              )
+              constraintPoint.normalImpulse = warmStart * point.normalImpulse
+              constraintPoint.totalNormalImpulse = 0.0
+              constraintPoint.restitutionImpulse = 0.0
+              let rA: Vec3 = constraintPoint.anchorA
+              let rB: Vec3 = constraintPoint.anchorB
+              let rnA: Vec3 = cross(left: rA, right: normal)
+              let rnB: Vec3 = cross(left: rB, right: normal)
+              let kNormal: Float = mA + mB + dot(
+                left: rnA
+                right: multiply(matrix: iA, vector: rnA)
+              ) + dot(left: rnB, right: multiply(matrix: iB, vector: rnB))
+              constraintPoint.normalMass = 0.0
+              if kNormal > 0.0 {
+                constraintPoint.normalMass = 1.0 / kNormal
+              }
+              # Only compute the normal velocity terms if needed
+              if sampleVelocity {
+                let vrA: Vec3 = add(left: vA, right: cross(left: wA, right: rA))
+                let vrB: Vec3 = add(left: vB, right: cross(left: wB, right: rB))
+                let vn: Float = dot(left: normal, right: subtract(left: vrB, right: vrA))
+                constraintPoint.relativeVelocity = vn
+                point.normalVelocity = 0.0
+                if hitEvents {
+                  point.normalVelocity = vn
+                }
+              } else {
+                constraintPoint.relativeVelocity = 0.0
+                point.normalVelocity = 0.0
+              }
+              # C0 friction center decay: points far beyond the speculative
+              # distance should not move the friction center.
+              let weight: Float = clampFloat(
+                value: 2.0 - separation * invTau
+                lower: minFrictionWeight
+                upper: 1.0
+              )
+              centerA = mulAdd(base: centerA, scale: weight, vector: rA)
+              centerB = mulAdd(base: centerB, scale: weight, vector: rB)
+              totalFrictionWeight = totalFrictionWeight + weight
+              constraint.points.set(index: pointIndex, value: constraintPoint)
+            }
+          }
+          let invWeight: Float = 1.0 / totalFrictionWeight
+          centerA = scale(scale: invWeight, vector: centerA)
+          centerB = scale(scale: invWeight, vector: centerB)
+          constraint.centerA = centerA
+          constraint.centerB = centerB
+          loop var pointIndex: Int = 0, pointIndex < pointCount, ++pointIndex {
+            if let constraintPoint: mod ManifoldConstraintPoint => constraint.points.modAt(
+              index: pointIndex
+            ) {
+              constraintPoint.leverArm = distance(from: constraintPoint.anchorA, to: centerA)
+            }
+          }
+
+          let rtA1: Vec3 = cross(left: centerA, right: tangent1)
+          let rtA2: Vec3 = cross(left: centerA, right: tangent2)
+          let rtB1: Vec3 = cross(left: centerB, right: tangent1)
+          let rtB2: Vec3 = cross(left: centerB, right: tangent2)
+          let kxx: Float = mA + mB + dot(left: rtA1, right: multiply(matrix: iA, vector: rtA1)) + dot(
+            left: rtB1
+            right: multiply(matrix: iB, vector: rtB1)
+          )
+          let kyy: Float = mA + mB + dot(left: rtA2, right: multiply(matrix: iA, vector: rtA2)) + dot(
+            left: rtB2
+            right: multiply(matrix: iB, vector: rtB2)
+          )
+          let kxy: Float = dot(left: rtA1, right: multiply(matrix: iA, vector: rtA2)) + dot(
+            left: rtB1
+            right: multiply(matrix: iB, vector: rtB2)
+          )
+          let k: Matrix2 = { columnX: Vec2 { x: kxx, y: kxy }, columnY: Vec2 { x: kxy, y: kyy } }
+          constraint.tangentMass = invert(matrix: k)
+          constraint.frictionImpulse = Vec2 {
+            x: warmStart * dot(left: manifold.frictionImpulse, right: tangent1)
+            y: warmStart * dot(left: manifold.frictionImpulse, right: tangent2)
+          }
+
+          let kTwist: Float = dot(
+            left: normal
+            right: multiply(matrix: add(left: iA, right: iB), vector: normal)
+          )
+          constraint.twistMass = 0.0
+          if kTwist > 0.0 {
+            constraint.twistMass = 1.0 / kTwist
+          }
+          constraint.twistImpulse = warmStart * manifold.twistImpulse
+          constraint.rollingImpulse = scale(scale: warmStart, vector: manifold.rollingImpulse)
+          setManifoldConstraint(
+            context: context
+            overflow: overflow
+            index: spec.manifoldStart + manifoldIndex
+            constraint: constraint
+          )
+        }
+      }
+    }
+  }
+  if overflow {
+    context.overflowContactConstraints.set(index: constraintIndex, value: contactConstraint)
+  } else {
+    context.contactConstraints.set(index: constraintIndex, value: contactConstraint)
+  }
+}
+
+func emptyConstraintPoint() ret ManifoldConstraintPoint {
+  ret ManifoldConstraintPoint {
+    anchorA: zeroVector()
+    anchorB: zeroVector()
+    baseSeparation: 0.0
+    relativeVelocity: 0.0
+    normalImpulse: 0.0
+    totalNormalImpulse: 0.0
+    restitutionImpulse: 0.0
+    normalMass: 0.0
+    leverArm: 0.0
+  }
+}
+
+func setManifoldConstraint(
+  context: mod StepContext
+  overflow: view Bool
+  index: view Int
+  constraint: view ManifoldConstraint
+) {
+  if overflow {
+    context.overflowManifoldConstraints.set(index: index, value: constraint)
+  } else {
+    context.manifoldConstraints.set(index: index, value: constraint)
+  }
+}
+
+# b3WarmStartContacts_Mesh: constraints `first + block` of a colour.
+func warmStartContactsScalar(
+  states: mod List(BodyState)
+  constraints: view List(ContactConstraint)
+  manifolds: view List(ManifoldConstraint)
+  first: view Int
+  block: view SolverBlock
+) {
+  loop var i: Int = block.startIndex, i < block.startIndex + block.count, ++i {
+    let contactConstraint: ContactConstraint = constraints.copyAtDefault(index: first + i)
+    let stateA: BodyState = stateOrIdentity(states: states, index: contactConstraint.indexA)
+    let stateB: BodyState = stateOrIdentity(states: states, index: contactConstraint.indexB)
+    var vA: Vec3 = stateA.linearVelocity
+    var wA: Vec3 = stateA.angularVelocity
+    var vB: Vec3 = stateB.linearVelocity
+    var wB: Vec3 = stateB.angularVelocity
+    let mA: Float = contactConstraint.invMassA
+    let iA: Matrix3 = contactConstraint.invIA
+    let mB: Float = contactConstraint.invMassB
+    let iB: Matrix3 = contactConstraint.invIB
+    loop var manifoldIndex: Int = 0, manifoldIndex < contactConstraint.manifoldCount, ++manifoldIndex {
+      let constraint: ManifoldConstraint = manifolds.copyAtDefault(
+        index: contactConstraint.manifoldStart + manifoldIndex
+      )
+      # Normal impulses
+      let normal: Vec3 = constraint.normal
+      loop var j: Int = 0, j < constraint.pointCount, ++j {
+        let constraintPoint: ManifoldConstraintPoint = constraint.points.copyAtFallback(
+          index: j
+          fallback: emptyConstraintPoint()
+        )
+        let impulse: Vec3 = scale(scale: constraintPoint.normalImpulse, vector: normal)
+        wA = subtract(
+          left: wA
+          right: multiply(matrix: iA, vector: cross(left: constraintPoint.anchorA, right: impulse))
+        )
+        vA = mulSub(base: vA, scale: mA, vector: impulse)
+        wB = add(
+          left: wB
+          right: multiply(matrix: iB, vector: cross(left: constraintPoint.anchorB, right: impulse))
+        )
+        vB = mulAdd(base: vB, scale: mB, vector: impulse)
+      }
+      # Central friction
+      var friction: Vec3 = scale(scale: constraint.frictionImpulse.x, vector: constraint.tangent1)
+      friction = add(
+        left: friction
+        right: scale(scale: constraint.frictionImpulse.y, vector: constraint.tangent2)
+      )
+      wA = subtract(
+        left: wA
+        right: multiply(matrix: iA, vector: cross(left: constraint.centerA, right: friction))
+      )
+      vA = mulSub(base: vA, scale: mA, vector: friction)
+      wB = add(
+        left: wB
+        right: multiply(matrix: iB, vector: cross(left: constraint.centerB, right: friction))
+      )
+      vB = mulAdd(base: vB, scale: mB, vector: friction)
+      # Central twist friction
+      let twist: Vec3 = scale(scale: constraint.twistImpulse, vector: constraint.normal)
+      wA = subtract(left: wA, right: multiply(matrix: iA, vector: twist))
+      wB = add(left: wB, right: multiply(matrix: iB, vector: twist))
+      # Rolling resistance
+      let rolling: Vec3 = constraint.rollingImpulse
+      wA = subtract(left: wA, right: multiply(matrix: iA, vector: rolling))
+      wB = add(left: wB, right: multiply(matrix: iB, vector: rolling))
+    }
+    storeVelocities(
+      states: states
+      index: contactConstraint.indexA
+      linearVelocity: vA
+      angularVelocity: wA
+    )
+    storeVelocities(
+      states: states
+      index: contactConstraint.indexB
+      linearVelocity: vB
+      angularVelocity: wB
+    )
+  }
+}
+
+# The current separation of a point from the bodies' position deltas.
+func currentSeparation(
+  constraintPoint: view ManifoldConstraintPoint
+  normal: view Vec3
+  deltaPosition: view Vec3
+  deltaRotationA: view Quat
+  deltaRotationB: view Quat
+) ret Float {
+  let ds: Vec3 = add(
+    left: deltaPosition
+    right: subtract(
+      left: rotateVector(quat: deltaRotationB, vector: constraintPoint.anchorB)
+      right: rotateVector(quat: deltaRotationA, vector: constraintPoint.anchorA)
+    )
+  )
+  ret dot(left: ds, right: normal) + constraintPoint.baseSeparation
+}
+
+# b3PushContacts_Mesh: non-penetration with the soft bias; no friction, no
+# restitution.
+func pushContactsScalar(
+  states: mod List(BodyState)
+  constraints: view List(ContactConstraint)
+  manifolds: mod List(ManifoldConstraint)
+  first: view Int
+  block: view SolverBlock
+  inverseH: view Float
+  contactSpeed: view Float
+) {
+  loop var i: Int = block.startIndex, i < block.startIndex + block.count, ++i {
+    let contactConstraint: ContactConstraint = constraints.copyAtDefault(index: first + i)
+    let mA: Float = contactConstraint.invMassA
+    let iA: Matrix3 = contactConstraint.invIA
+    let mB: Float = contactConstraint.invMassB
+    let iB: Matrix3 = contactConstraint.invIB
+    let stateA: BodyState = stateOrIdentity(states: states, index: contactConstraint.indexA)
+    let stateB: BodyState = stateOrIdentity(states: states, index: contactConstraint.indexB)
+    var vA: Vec3 = stateA.linearVelocity
+    var wA: Vec3 = stateA.angularVelocity
+    var vB: Vec3 = stateB.linearVelocity
+    var wB: Vec3 = stateB.angularVelocity
+    let dp: Vec3 = subtract(left: stateB.deltaPosition, right: stateA.deltaPosition)
+    let softness: Softness = contactConstraint.softness
+    loop var j: Int = 0, j < contactConstraint.manifoldCount, ++j {
+      if let constraint: mod ManifoldConstraint => manifolds.modAt(
+        index: contactConstraint.manifoldStart + j
+      ) {
+        let normal: Vec3 = constraint.normal
+        loop var pointIndex: Int = 0, pointIndex < constraint.pointCount, ++pointIndex {
+          if let constraintPoint: mod ManifoldConstraintPoint => constraint.points.modAt(
+            index: pointIndex
+          ) {
+            let rA: Vec3 = constraintPoint.anchorA
+            let rB: Vec3 = constraintPoint.anchorB
+            let separation: Float = currentSeparation(
+              constraintPoint: constraintPoint
+              normal: normal
+              deltaPosition: dp
+              deltaRotationA: stateA.deltaRotation
+              deltaRotationB: stateB.deltaRotation
+            )
+            var velocityBias: Float = 0.0
+            var massScale: Float = 0.0
+            var impulseScale: Float = 0.0
+            if separation > 0.0 {
+              # Speculative bias is positive
+              velocityBias = separation * inverseH
+              massScale = 1.0
+              impulseScale = 0.0
+            } else {
+              # Overlap bias is negative
+              velocityBias = maxFloat(
+                left: softness.massScale * softness.biasRate * separation
+                right: -contactSpeed
+              )
+              massScale = softness.massScale
+              impulseScale = softness.impulseScale
+            }
+            # Relative normal velocity at the contact
+            let vrA: Vec3 = add(left: vA, right: cross(left: wA, right: rA))
+            let vrB: Vec3 = add(left: vB, right: cross(left: wB, right: rB))
+            let vn: Float = dot(left: subtract(left: vrB, right: vrA), right: normal)
+            # Incremental normal impulse, clamped accumulated
+            var deltaImpulse: Float = -constraintPoint.normalMass * (massScale * vn + velocityBias) - impulseScale * constraintPoint.normalImpulse
+            let newImpulse: Float = maxFloat(
+              left: constraintPoint.normalImpulse + deltaImpulse
+              right: 0.0
+            )
+            deltaImpulse = newImpulse - constraintPoint.normalImpulse
+            constraintPoint.normalImpulse = newImpulse
+            let impulse: Vec3 = scale(scale: deltaImpulse, vector: normal)
+            vA = mulSub(base: vA, scale: mA, vector: impulse)
+            wA = subtract(
+              left: wA
+              right: multiply(matrix: iA, vector: cross(left: rA, right: impulse))
+            )
+            vB = mulAdd(base: vB, scale: mB, vector: impulse)
+            wB = add(left: wB, right: multiply(matrix: iB, vector: cross(left: rB, right: impulse)))
+          }
+        }
+      }
+    }
+    storeVelocities(
+      states: states
+      index: contactConstraint.indexA
+      linearVelocity: vA
+      angularVelocity: wA
+    )
+    storeVelocities(
+      states: states
+      index: contactConstraint.indexB
+      linearVelocity: vB
+      angularVelocity: wB
+    )
+  }
+}
+
+# b3SolveContacts_Mesh: normal (no bias when overlapped), twist friction,
+# rolling resistance and friction.
+func solveContactsScalar(
+  states: mod List(BodyState)
+  constraints: view List(ContactConstraint)
+  manifolds: mod List(ManifoldConstraint)
+  first: view Int
+  block: view SolverBlock
+  inverseH: view Float
+) {
+  loop var i: Int = block.startIndex, i < block.startIndex + block.count, ++i {
+    let contactConstraint: ContactConstraint = constraints.copyAtDefault(index: first + i)
+    let mA: Float = contactConstraint.invMassA
+    let iA: Matrix3 = contactConstraint.invIA
+    let mB: Float = contactConstraint.invMassB
+    let iB: Matrix3 = contactConstraint.invIB
+    let stateA: BodyState = stateOrIdentity(states: states, index: contactConstraint.indexA)
+    let stateB: BodyState = stateOrIdentity(states: states, index: contactConstraint.indexB)
+    var vA: Vec3 = stateA.linearVelocity
+    var wA: Vec3 = stateA.angularVelocity
+    var vB: Vec3 = stateB.linearVelocity
+    var wB: Vec3 = stateB.angularVelocity
+    let dp: Vec3 = subtract(left: stateB.deltaPosition, right: stateA.deltaPosition)
+    let friction: Float = contactConstraint.friction
+    let rollingResistance: Float = contactConstraint.rollingResistance
+    loop var j: Int = 0, j < contactConstraint.manifoldCount, ++j {
+      if let constraint: mod ManifoldConstraint => manifolds.modAt(
+        index: contactConstraint.manifoldStart + j
+      ) {
+        let normal: Vec3 = constraint.normal
+        var totalNormalImpulse: Float = 0.0
+        var totalTwistLimit: Float = 0.0
+        loop var pointIndex: Int = 0, pointIndex < constraint.pointCount, ++pointIndex {
+          if let constraintPoint: mod ManifoldConstraintPoint => constraint.points.modAt(
+            index: pointIndex
+          ) {
+            let rA: Vec3 = constraintPoint.anchorA
+            let rB: Vec3 = constraintPoint.anchorB
+            let separation: Float = currentSeparation(
+              constraintPoint: constraintPoint
+              normal: normal
+              deltaPosition: dp
+              deltaRotationA: stateA.deltaRotation
+              deltaRotationB: stateB.deltaRotation
+            )
+            # Speculative bias, zero when overlapped
+            var velocityBias: Float = 0.0
+            if separation > 0.0 {
+              velocityBias = separation * inverseH
+            }
+            let vrA: Vec3 = add(left: vA, right: cross(left: wA, right: rA))
+            let vrB: Vec3 = add(left: vB, right: cross(left: wB, right: rB))
+            let vn: Float = dot(left: subtract(left: vrB, right: vrA), right: normal)
+            var deltaImpulse: Float = -constraintPoint.normalMass * (vn + velocityBias)
+            let newImpulse: Float = maxFloat(
+              left: constraintPoint.normalImpulse + deltaImpulse
+              right: 0.0
+            )
+            deltaImpulse = newImpulse - constraintPoint.normalImpulse
+            constraintPoint.normalImpulse = newImpulse
+            constraintPoint.totalNormalImpulse = constraintPoint.totalNormalImpulse + newImpulse
+            totalNormalImpulse = totalNormalImpulse + newImpulse
+            totalTwistLimit = totalTwistLimit + constraintPoint.leverArm * newImpulse
+            let impulse: Vec3 = scale(scale: deltaImpulse, vector: normal)
+            vA = mulSub(base: vA, scale: mA, vector: impulse)
+            wA = subtract(
+              left: wA
+              right: multiply(matrix: iA, vector: cross(left: rA, right: impulse))
+            )
+            vB = mulAdd(base: vB, scale: mB, vector: impulse)
+            wB = add(left: wB, right: multiply(matrix: iB, vector: cross(left: rB, right: impulse)))
+          }
+        }
+
+        # Central twist friction
+        let twistSpeed: Float = dot(left: constraint.normal, right: subtract(left: wB, right: wA))
+        let maxTwist: Float = friction * totalTwistLimit
+        var twistDelta: Float = -constraint.twistMass * twistSpeed
+        let oldTwist: Float = constraint.twistImpulse
+        constraint.twistImpulse = clampFloat(
+          value: oldTwist + twistDelta
+          lower: -maxTwist
+          upper: maxTwist
+        )
+        twistDelta = constraint.twistImpulse - oldTwist
+        wA = subtract(
+          left: wA
+          right: multiply(matrix: iA, vector: scale(scale: twistDelta, vector: constraint.normal))
+        )
+        wB = add(
+          left: wB
+          right: multiply(matrix: iB, vector: scale(scale: twistDelta, vector: constraint.normal))
+        )
+
+        # Rolling resistance
+        if rollingResistance > 0.0 {
+          var rollingDelta: Vec3 = negate(
+            vector: multiply(
+              matrix: contactConstraint.rollingMass
+              vector: subtract(left: wB, right: wA)
+            )
+          )
+          let oldRolling: Vec3 = constraint.rollingImpulse
+          constraint.rollingImpulse = add(left: oldRolling, right: rollingDelta)
+          let maxRolling: Float = rollingResistance * totalNormalImpulse
+          let magnitudeSquared: Float = dot(
+            left: constraint.rollingImpulse
+            right: constraint.rollingImpulse
+          )
+          if magnitudeSquared > maxRolling * maxRolling + floatEpsilon {
+            constraint.rollingImpulse = scale(
+              scale: maxRolling / Math.sqrt(x: magnitudeSquared)
+              vector: constraint.rollingImpulse
+            )
+          }
+          rollingDelta = subtract(left: constraint.rollingImpulse, right: oldRolling)
+          wA = subtract(left: wA, right: multiply(matrix: iA, vector: rollingDelta))
+          wB = add(left: wB, right: multiply(matrix: iB, vector: rollingDelta))
+        }
+
+        # Central friction
+        let tangent1: Vec3 = constraint.tangent1
+        let tangent2: Vec3 = constraint.tangent2
+        let rA: Vec3 = constraint.centerA
+        let rB: Vec3 = constraint.centerB
+        let vrA: Vec3 = add(left: vA, right: cross(left: wA, right: rA))
+        let vrB: Vec3 = add(left: vB, right: cross(left: wB, right: rB))
+        let vr: Vec3 = subtract(left: vrB, right: vrA)
+        let vt: Vec2 = {
+          x: dot(left: vr, right: tangent1) - constraint.tangentVelocity1
+          y: dot(left: vr, right: tangent2) - constraint.tangentVelocity2
+        }
+        let tm: Vec2 = multiply(matrix: constraint.tangentMass, vector: vt)
+        var frictionDelta: Vec2 = { x: -tm.x, y: -tm.y }
+        var newFriction: Vec2 = {
+          x: constraint.frictionImpulse.x + frictionDelta.x
+          y: constraint.frictionImpulse.y + frictionDelta.y
+        }
+        let maxFriction: Float = friction * totalNormalImpulse
+        let lengthSquared: Float = dot(left: newFriction, right: newFriction)
+        if lengthSquared > maxFriction * maxFriction {
+          let ratio: Float = maxFriction / Math.sqrt(x: lengthSquared)
+          newFriction.x = newFriction.x * ratio
+          newFriction.y = newFriction.y * ratio
+        }
+        frictionDelta = subtract(left: newFriction, right: constraint.frictionImpulse)
+        constraint.frictionImpulse = newFriction
+        let impulse: Vec3 = blend2(
+          firstScale: frictionDelta.x
+          first: tangent1
+          secondScale: frictionDelta.y
+          second: tangent2
+        )
+        vA = mulSub(base: vA, scale: mA, vector: impulse)
+        wA = subtract(
+          left: wA
+          right: multiply(matrix: iA, vector: cross(left: rA, right: impulse))
+        )
+        vB = mulAdd(base: vB, scale: mB, vector: impulse)
+        wB = add(left: wB, right: multiply(matrix: iB, vector: cross(left: rB, right: impulse)))
+      }
+    }
+    storeVelocities(
+      states: states
+      index: contactConstraint.indexA
+      linearVelocity: vA
+      angularVelocity: wA
+    )
+    storeVelocities(
+      states: states
+      index: contactConstraint.indexB
+      linearVelocity: vB
+      angularVelocity: wB
+    )
+  }
+}
+
+# b3ApplyRestitution_Mesh: Poisson kinetic restitution, which never adds
+# energy.
+func applyRestitutionScalar(
+  states: mod List(BodyState)
+  constraints: view List(ContactConstraint)
+  manifolds: mod List(ManifoldConstraint)
+  first: view Int
+  block: view SolverBlock
+  inverseH: view Float
+  threshold: view Float
+  propagate: view Bool
+) {
+  loop var i: Int = block.startIndex, i < block.startIndex + block.count, ++i {
+    let contactConstraint: ContactConstraint = constraints.copyAtDefault(index: first + i)
+    let restitution: Float = contactConstraint.restitution
+    if propagate is false and restitution is 0.0 {
+      continue
+    }
+    let mA: Float = contactConstraint.invMassA
+    let iA: Matrix3 = contactConstraint.invIA
+    let mB: Float = contactConstraint.invMassB
+    let iB: Matrix3 = contactConstraint.invIB
+    let stateA: BodyState = stateOrIdentity(states: states, index: contactConstraint.indexA)
+    let stateB: BodyState = stateOrIdentity(states: states, index: contactConstraint.indexB)
+    var vA: Vec3 = stateA.linearVelocity
+    var wA: Vec3 = stateA.angularVelocity
+    var vB: Vec3 = stateB.linearVelocity
+    var wB: Vec3 = stateB.angularVelocity
+    let dp: Vec3 = subtract(left: stateB.deltaPosition, right: stateA.deltaPosition)
+    loop var j: Int = 0, j < contactConstraint.manifoldCount, ++j {
+      if let constraint: mod ManifoldConstraint => manifolds.modAt(
+        index: contactConstraint.manifoldStart + j
+      ) {
+        let normal: Vec3 = constraint.normal
+        loop var pointIndex: Int = 0, pointIndex < constraint.pointCount, ++pointIndex {
+          if let constraintPoint: mod ManifoldConstraintPoint => constraint.points.modAt(
+            index: pointIndex
+          ) {
+            let rA: Vec3 = constraintPoint.anchorA
+            let rB: Vec3 = constraintPoint.anchorB
+            # The total normal impulse is 0 for speculative points
+            let compressionImpulse: Float = constraintPoint.totalNormalImpulse - constraintPoint.restitutionImpulse
+            let armed: Bool = restitution > 0.0 and constraintPoint.relativeVelocity < -threshold and compressionImpulse > 0.0
+            var velocityBias: Float = 0.0
+            if armed {
+              velocityBias = restitution * constraintPoint.relativeVelocity
+            } else {
+              let separation: Float = currentSeparation(
+                constraintPoint: constraintPoint
+                normal: normal
+                deltaPosition: dp
+                deltaRotationA: stateA.deltaRotation
+                deltaRotationB: stateB.deltaRotation
+              )
+              if separation > 0.0 {
+                velocityBias = separation * inverseH
+              }
+            }
+            let vrA: Vec3 = add(left: vA, right: cross(left: wA, right: rA))
+            let vrB: Vec3 = add(left: vB, right: cross(left: wB, right: rB))
+            let vn: Float = dot(left: subtract(left: vrB, right: vrA), right: normal)
+            var impulse: Float = -constraintPoint.normalMass * (vn + velocityBias)
+            let newImpulse: Float = maxFloat(
+              left: constraintPoint.normalImpulse + impulse
+              right: 0.0
+            )
+            impulse = newImpulse - constraintPoint.normalImpulse
+            let approachImpulse: Float = minFloat(
+              left: maxFloat(left: -constraintPoint.normalMass * vn, right: 0.0)
+              right: maxFloat(left: impulse, right: 0.0)
+            )
+            if armed {
+              # Poisson kinetic restitution guarantees no energy gain
+              let allowance: Float = restitution * (compressionImpulse + approachImpulse) - constraintPoint.restitutionImpulse
+              impulse = minFloat(
+                left: impulse
+                right: approachImpulse + maxFloat(left: allowance, right: 0.0)
+              )
+            }
+            constraintPoint.normalImpulse = constraintPoint.normalImpulse + impulse
+            constraintPoint.restitutionImpulse = constraintPoint.restitutionImpulse + (impulse - approachImpulse)
+            constraintPoint.totalNormalImpulse = constraintPoint.totalNormalImpulse + impulse
+            let push: Vec3 = scale(scale: impulse, vector: normal)
+            vA = mulSub(base: vA, scale: mA, vector: push)
+            wA = subtract(
+              left: wA
+              right: multiply(matrix: iA, vector: cross(left: rA, right: push))
+            )
+            vB = mulAdd(base: vB, scale: mB, vector: push)
+            wB = add(left: wB, right: multiply(matrix: iB, vector: cross(left: rB, right: push)))
+          }
+        }
+      }
+    }
+    storeVelocities(
+      states: states
+      index: contactConstraint.indexA
+      linearVelocity: vA
+      angularVelocity: wA
+    )
+    storeVelocities(
+      states: states
+      index: contactConstraint.indexB
+      linearVelocity: vB
+      angularVelocity: wB
+    )
+  }
+}
+
+# b3StoreImpulses_Mesh: the impulses back into the contacts' manifolds, for
+# warm starting the next step. (Hit events: P4d.)
+func storeImpulsesScalar(
+  contacts: mod List(Contact)
+  constraints: view List(ContactConstraint)
+  manifolds: view List(ManifoldConstraint)
+  block: view SolverBlock
+) {
+  loop var index: Int = block.startIndex, index < block.startIndex + block.count, ++index {
+    let contactConstraint: ContactConstraint = constraints.copyAtDefault(index: index)
+    if let contact: mod Contact => contacts.modAt(index: contactConstraint.contactId) {
+      loop var manifoldIndex: Int = 0, manifoldIndex < contactConstraint.manifoldCount, ++manifoldIndex {
+        let constraint: ManifoldConstraint = manifolds.copyAtDefault(
+          index: contactConstraint.manifoldStart + manifoldIndex
+        )
+        if let manifold: mod Manifold => contact.manifolds.modAt(index: manifoldIndex) {
+          manifold.twistImpulse = constraint.twistImpulse
+          manifold.frictionImpulse = blend2(
+            firstScale: constraint.frictionImpulse.x
+            first: constraint.tangent1
+            secondScale: constraint.frictionImpulse.y
+            second: constraint.tangent2
+          )
+          manifold.rollingImpulse = constraint.rollingImpulse
+          loop var pointIndex: Int = 0, pointIndex < constraint.pointCount, ++pointIndex {
+            let constraintPoint: ManifoldConstraintPoint = constraint.points.copyAtFallback(
+              index: pointIndex
+              fallback: emptyConstraintPoint()
+            )
+            if let point: mod ManifoldPoint => manifold.points.modAt(index: pointIndex) {
+              point.normalImpulse = constraintPoint.normalImpulse
+              point.totalNormalImpulse = constraintPoint.totalNormalImpulse
+            }
+          }
+        }
+      }
+    }
+  }
+}

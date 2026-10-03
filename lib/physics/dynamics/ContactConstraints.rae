@@ -1,0 +1,194 @@
+# The transient contact constraints of a step (b3ManifoldConstraintPoint,
+# b3ManifoldConstraint, b3ContactConstraint of Box3D's contact_solver.h and
+# b3ContactConstraintPointWide, b3ContactConstraintWide of contact_solver.c,
+# at 9f998c8). The scalar ones solve mesh and overflow contacts
+# (ContactSolver), the wide ones four convex contacts at a time
+# (ContactSolverWide). Box3D's pointers become indices: a contact
+# constraint's manifold constraints start at `manifoldStart` of its list, a
+# wide constraint names each lane's contact by id (-1 for an empty lane).
+open Vec2
+open Vec3
+open physics/math/VectorMath
+open physics/math/MatrixMath
+open physics/math/Vector2Math
+open physics/dynamics/FloatWide
+
+# Constraint softness (b3Softness)
+type Softness {
+  biasRate: Float
+  massScale: Float
+  impulseScale: Float
+}
+
+type ManifoldConstraintPoint {
+  anchorA: Vec3
+  anchorB: Vec3
+  baseSeparation: Float
+  relativeVelocity: Float
+  normalImpulse: Float
+  totalNormalImpulse: Float
+  restitutionImpulse: Float
+  normalMass: Float
+  leverArm: Float
+}
+
+type ManifoldConstraint {
+  points: Array(ManifoldConstraintPoint, cap: 4)
+  pointCount: Int
+  normal: Vec3
+  tangent1: Vec3
+  tangent2: Vec3
+  # Friction centers
+  centerA: Vec3
+  centerB: Vec3
+  twistMass: Float
+  twistImpulse: Float
+  tangentMass: Matrix2
+  frictionImpulse: Vec2
+  rollingImpulse: Vec3
+  tangentVelocity1: Float
+  tangentVelocity2: Float
+}
+
+type ContactConstraint {
+  # The first of its manifold constraints
+  manifoldStart: Int
+  contactId: Int
+  # Awake body sim indices, -1 for a static body
+  indexA: Int
+  indexB: Int
+  invMassA: Float
+  invMassB: Float
+  invIA: Matrix3
+  invIB: Matrix3
+  softness: Softness
+  rollingMass: Matrix3
+  friction: Float
+  restitution: Float
+  rollingResistance: Float
+  manifoldCount: Int
+}
+
+type ContactConstraintPointWide {
+  anchorA: Vec3Wide
+  anchorB: Vec3Wide
+  baseSeparation: FloatWide
+  normalImpulse: FloatWide
+  totalNormalImpulse: FloatWide
+  normalMass: FloatWide
+  leverArm: FloatWide
+  relativeVelocity: FloatWide
+  restitutionImpulse: FloatWide
+}
+
+# Four convex contacts, one per lane
+type ContactConstraintWide {
+  # Awake body sim indices plus one, 0 for a static body or an empty lane
+  indexA: Array(Int, cap: 4)
+  indexB: Array(Int, cap: 4)
+  pointCounts: Array(Int, cap: 4)
+  # The contact of each lane (Box3D keeps its manifold pointer), -1 if empty
+  contactIds: Array(Int, cap: 4)
+  invMassA: FloatWide
+  invMassB: FloatWide
+  invIA: SymMatrix3Wide
+  invIB: SymMatrix3Wide
+  normal: Vec3Wide
+  tangent1: Vec3Wide
+  tangent2: Vec3Wide
+  # Friction centers
+  centerA: Vec3Wide
+  centerB: Vec3Wide
+  twistMass: FloatWide
+  twistImpulse: FloatWide
+  tangentMass: SymMatrix2Wide
+  frictionImpulse: Vec2Wide
+  rollingMass: SymMatrix3Wide
+  rollingImpulse: Vec3Wide
+  friction: FloatWide
+  rollingResistance: FloatWide
+  tangentVelocity1: FloatWide
+  tangentVelocity2: FloatWide
+  restitution: FloatWide
+  points: Array(ContactConstraintPointWide, cap: 4)
+}
+
+func zeroManifoldConstraint() ret ManifoldConstraint {
+  ret ManifoldConstraint {
+    points: Array(ManifoldConstraintPoint, cap: 4)
+    pointCount: 0
+    normal: zeroVector()
+    tangent1: zeroVector()
+    tangent2: zeroVector()
+    centerA: zeroVector()
+    centerB: zeroVector()
+    twistMass: 0.0
+    twistImpulse: 0.0
+    tangentMass: Matrix2 { columnX: Vec2 { x: 0.0, y: 0.0 }, columnY: Vec2 { x: 0.0, y: 0.0 } }
+    frictionImpulse: Vec2 { x: 0.0, y: 0.0 }
+    rollingImpulse: zeroVector()
+    tangentVelocity1: 0.0
+    tangentVelocity2: 0.0
+  }
+}
+
+func zeroContactConstraint() ret ContactConstraint {
+  ret ContactConstraint {
+    manifoldStart: 0
+    contactId: -1
+    indexA: -1
+    indexB: -1
+    invMassA: 0.0
+    invMassB: 0.0
+    invIA: matrixZero()
+    invIB: matrixZero()
+    softness: Softness { biasRate: 0.0, massScale: 0.0, impulseScale: 0.0 }
+    rollingMass: matrixZero()
+    friction: 0.0
+    restitution: 0.0
+    rollingResistance: 0.0
+    manifoldCount: 0
+  }
+}
+
+func zeroContactConstraintWide() ret ContactConstraintWide {
+  ret ContactConstraintWide {
+    indexA: Array(Int, cap: 4)
+    indexB: Array(Int, cap: 4)
+    pointCounts: Array(Int, cap: 4)
+    contactIds: Array(Int, cap: 4)
+    invMassA: zeroWide()
+    invMassB: zeroWide()
+    invIA: zeroSym3Wide()
+    invIB: zeroSym3Wide()
+    normal: zeroVectorWide()
+    tangent1: zeroVectorWide()
+    tangent2: zeroVectorWide()
+    centerA: zeroVectorWide()
+    centerB: zeroVectorWide()
+    twistMass: zeroWide()
+    twistImpulse: zeroWide()
+    tangentMass: SymMatrix2Wide { cxx: zeroWide(), cxy: zeroWide(), cyy: zeroWide() }
+    frictionImpulse: Vec2Wide { x: zeroWide(), y: zeroWide() }
+    rollingMass: zeroSym3Wide()
+    rollingImpulse: zeroVectorWide()
+    friction: zeroWide()
+    rollingResistance: zeroWide()
+    tangentVelocity1: zeroWide()
+    tangentVelocity2: zeroWide()
+    restitution: zeroWide()
+    points: Array(ContactConstraintPointWide, cap: 4)
+  }
+}
+
+# The largest point count of a wide constraint's lanes
+func widePointCount(constraint: view ContactConstraintWide) ret Int {
+  var count: Int = 0
+  loop var lane: Int = 0, lane < 4, ++lane {
+    let lanePoints: Int = constraint.pointCounts.copyAtFallback(index: lane, fallback: 0)
+    if lanePoints > count {
+      count = lanePoints
+    }
+  }
+  ret count
+}
