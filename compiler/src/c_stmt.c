@@ -191,6 +191,23 @@ static bool c_expr_can_move_owned_payload(const AstExpr* expr) {
   }
 }
 
+// `ret x` of an owned struct local into an `opt` return: the ret already
+// marked x moved, so its scope-exit drop is skipped, and the payload must
+// take x's heap rather than a deep copy of it (the copy left the original
+// orphaned: one leaked hull per `ret hull` from an `opt Hull` function).
+// Only a local that owns its heap qualifies; an alias still deep-copies.
+static bool c_expr_is_moved_owned_local(const CFuncContext* ctx, const AstExpr* expr) {
+  if (!ctx || !expr || expr->kind != AST_EXPR_IDENT) return false;
+  for (int i = (int)ctx->local_count - 1; i >= 0; i--) {
+    if (!str_eq(ctx->locals[i], expr->as.ident)) continue;
+    const AstTypeRef* type = ctx->local_type_refs[i];
+    if (!type || type->is_view || type->is_mod || type->is_opt) return false;
+    if (ctx->local_is_ptr[i]) return false;
+    return ctx->local_moved[i] && ctx->local_struct_owns_heap[i];
+  }
+  return false;
+}
+
 static bool c_expr_is_extern_opt_string_call(const AstExpr* expr) {
   if (!expr || (expr->kind != AST_EXPR_CALL && expr->kind != AST_EXPR_METHOD_CALL)
       || !expr->decl_link) return false;
@@ -361,8 +378,9 @@ void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
     } else {
       bool needs_deep_agg = type_needs_deep_copy(ctx->compiler_ctx, ctx->module,
                                                  &payload, 0);
-      if (needs_deep_agg && (!c_expr_can_move_owned_payload(value)
-                             || c_opt_source_aliases(ctx, value))) {
+      bool moves_local = c_expr_is_moved_owned_local(ctx, value);
+      if (needs_deep_agg && !moves_local && (!c_expr_can_move_owned_payload(value)
+                                             || c_opt_source_aliases(ctx, value))) {
         const char* copy_name = rae_mangle_type_specialized(
             ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, &payload);
         fprintf(out, "rae_deep_copy_%s(&__opt%d.value, &(", copy_name, optn);

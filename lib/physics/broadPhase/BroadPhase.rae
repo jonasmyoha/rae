@@ -1,0 +1,116 @@
+# The broad phase's proxies (b3BroadPhase of Box3D's broad_phase.h and the
+# proxy functions of broad_phase.c at 9f998c8): one dynamic tree per body
+# type and the set of shape pairs that have a contact. A proxy key packs the
+# tree proxy id and the body type: (id << 2) | type. Pair finding
+# (b3UpdateBroadPhasePairs) comes with the contacts (P4b).
+open physics/math/AabbMath
+open physics/broadPhase/DynamicTree
+open physics/broadPhase/PairSet
+
+# b3_bodyTypeCount
+const bodyTypeCount: Int = 3
+
+type BroadPhase {
+  # Indexed by body type: static 0, kinematic 1, dynamic 2
+  trees: List(DynamicTree)
+  pairSet: PairSet
+}
+
+# B3_PROXY_TYPE
+func proxyType(proxyKey: view Int) ret Int {
+  ret proxyKey bitand 3
+}
+
+# B3_PROXY_ID
+func proxyId(proxyKey: view Int) ret Int {
+  ret proxyKey shr 2
+}
+
+# B3_PROXY_KEY
+func makeProxyKey(id: view Int, bodyType: view Int) ret Int {
+  ret (id shl 2) bitor bodyType
+}
+
+# b3CreateBroadPhase
+func createBroadPhase(
+  staticShapeCount: view Int
+  dynamicShapeCount: view Int
+  contactCount: view Int
+) ret BroadPhase {
+  let trees: List(DynamicTree) = List.create(DynamicTree, cap: bodyTypeCount)
+  trees.add(value: createDynamicTree(proxyCapacity: maxInt(left: 16, right: staticShapeCount)))
+  trees.add(value: createDynamicTree(proxyCapacity: 16))
+  trees.add(value: createDynamicTree(proxyCapacity: maxInt(left: 16, right: dynamicShapeCount)))
+  ret BroadPhase {
+    trees: trees
+    pairSet: createPairSet(capacity: maxInt(left: 32, right: 2 * contactCount))
+  }
+}
+
+# b3BroadPhase_CreateProxy: a proxy in the tree of `bodyType`. A non-static
+# proxy (or a forced one) is marked moved so it finds pairs next step.
+func createBroadPhaseProxy(
+  broadPhase: mod BroadPhase
+  bodyType: view Int
+  box: view Aabb
+  categoryBits: view UInt64
+  shapeIndex: view Int
+  forcePairCreation: view Bool
+) ret Int {
+  let mark: Bool = bodyType is not 0 or forcePairCreation
+  var id: Int = -1
+  if let tree: mod DynamicTree => broadPhase.trees.modAt(index: bodyType) {
+    id = createTreeProxyMarked(
+      tree: tree
+      box: box
+      categoryBits: categoryBits
+      userData: shapeIndex as UInt64
+      markMoved: mark
+    )
+  }
+  ret makeProxyKey(id: id, bodyType: bodyType)
+}
+
+# b3BroadPhase_DestroyProxy
+func destroyBroadPhaseProxy(broadPhase: mod BroadPhase, proxyKey: view Int) {
+  if let tree: mod DynamicTree => broadPhase.trees.modAt(index: proxyType(proxyKey: proxyKey)) {
+    destroyTreeProxy(tree: tree, proxyId: proxyId(proxyKey: proxyKey))
+  }
+}
+
+# b3BroadPhase_MoveProxy: reinsert with a new box, marked moved.
+func moveBroadPhaseProxy(broadPhase: mod BroadPhase, proxyKey: view Int, box: view Aabb) {
+  if let tree: mod DynamicTree => broadPhase.trees.modAt(index: proxyType(proxyKey: proxyKey)) {
+    moveTreeProxyMarked(
+      tree: tree
+      proxyId: proxyId(proxyKey: proxyKey)
+      box: box
+      markMoved: true
+    )
+  }
+}
+
+# b3BroadPhase_TestOverlap: do the fat boxes of two proxies overlap?
+func broadPhaseTestOverlap(
+  broadPhase: view BroadPhase
+  proxyKeyA: view Int
+  proxyKeyB: view Int
+) ret Bool {
+  var boxA: Aabb = emptyBounds()
+  var boxB: Aabb = emptyBounds()
+  if let treeA: view DynamicTree => broadPhase.trees.viewAt(index: proxyType(proxyKey: proxyKeyA)) {
+    boxA = treeProxyAabb(tree: treeA, proxyId: proxyId(proxyKey: proxyKeyA))
+  }
+  if let treeB: view DynamicTree => broadPhase.trees.viewAt(index: proxyType(proxyKey: proxyKeyB)) {
+    boxB = treeProxyAabb(tree: treeB, proxyId: proxyId(proxyKey: proxyKeyB))
+  }
+  ret overlaps(first: boxA, second: boxB)
+}
+
+# b3BroadPhase_GetShapeIndex
+func broadPhaseShapeIndex(broadPhase: view BroadPhase, proxyKey: view Int) ret Int {
+  if let tree: view DynamicTree => broadPhase.trees.viewAt(index: proxyType(proxyKey: proxyKey)) {
+    ret treeUserData(tree: tree, proxyId: proxyId(proxyKey: proxyKey)) as Int
+  }
+  ret -1
+}

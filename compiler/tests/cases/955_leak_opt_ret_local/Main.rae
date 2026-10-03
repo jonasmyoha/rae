@@ -1,0 +1,67 @@
+# `ret x` of an owned struct local from an `opt` function moves x into the
+# optional; it used to deep-copy x, and since the ret marks x moved its own
+# drop was skipped, so every call leaked x's heap (one leaked hull per
+# physics hull built, fixture 951). Covers a local built by a call and a
+# `var` copied from a view parameter (a local with a runtime drop flag).
+func rae_ext_rae_mem_stats_buf_outstanding() unsafe extern ret Int
+
+type Bag {
+  items: List(Int)
+  names: List(String)
+}
+
+func emptyBag() ret Bag {
+  ret Bag { items: List.create(Int, cap: 2), names: List.create(String, cap: 2) }
+}
+
+func makeBag(fail: view Bool) ret opt Bag {
+  var bag: Bag = emptyBag()
+  bag.items.add(value: 1)
+  bag.names.add(value: "one")
+  if fail {
+    ret none
+  }
+  ret bag
+}
+
+func reverseItems(bag: mod Bag) {
+  bag.items.add(value: 2)
+}
+
+func copyBag(original: view Bag, reverse: view Bool) ret opt Bag {
+  var bag: Bag = original
+  if reverse {
+    reverseItems(bag: bag)
+  }
+  if bag.items.length > 10 {
+    ret none
+  }
+  ret bag
+}
+
+func roundTrip() ret Int {
+  var total: Int = 0
+  if let bag: Bag = makeBag(fail: false) {
+    total = total + bag.items.length
+    if let copied: Bag = copyBag(original: bag, reverse: true) {
+      total = total + copied.items.length
+    }
+  }
+  if let missing: Bag = makeBag(fail: true) {
+    total = total + missing.items.length
+  }
+  ret total
+}
+
+func main() {
+  unsafe {
+    var total: Int = roundTrip()
+    let baseline: Int = rae_ext_rae_mem_stats_buf_outstanding()
+    loop var i: Int = 0, i < 1000, ++i {
+      total = total + roundTrip()
+    }
+    let growth: Int = rae_ext_rae_mem_stats_buf_outstanding() - baseline
+    log("total: {total}")
+    log("buffers leaked over 1000 round trips: {growth}")
+  }
+}

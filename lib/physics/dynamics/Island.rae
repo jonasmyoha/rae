@@ -1,0 +1,22 @@
+# A simulation island (b3Island of Box3D's island.h at 9f998c8): bodies that
+# are (or were) connected by constraints, which sleep and wake together. The
+# contact and joint links arrive with contacts (P4b) and joints (P6).
+type Island {
+  setIndex: Int
+  localIndex: Int
+  # -1 for a free slot
+  islandId: Int
+  # Constraints removed since the last split, which makes it a split candidate
+  constraintRemoveCount: Int
+  bodies: List(Int)
+}
+
+func emptyIsland() ret Island {
+  ret Island {
+    setIndex: 0
+    localIndex: 0
+    islandId: 0
+    constraintRemoveCount: 0
+    bodies: List.create(Int, cap: 0)
+  }
+}

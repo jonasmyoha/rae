@@ -1,0 +1,762 @@
+# The physics port's world, bodies and shapes (P4a: lib/physics/dynamics)
+# against Box3D itself: tools/box3d-oracle/goldens/world.golden is a script
+# of Box3D API calls (create bodies of every type and state, sphere, capsule
+# and hull shapes, destroy, set transforms and velocities, apply forces and
+# impulses, set mass data and damping) with Box3D's results and its whole
+# internal world state (id pools, bodies, solver sets, islands, shapes, the
+# three broad-phase trees) dumped at checkpoints. This replays the script on
+# the Rae port and requires the SAME BITS for every value
+# (docs/physics-rae-port-design.md §4).
+import Math
+import Vec3
+import Quat
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/MatrixMath
+open physics/math/TransformMath
+open physics/math/AabbMath
+open physics/geometry/QueryTypes
+open physics/geometry/Hull
+open physics/geometry/HullCreate
+open physics/geometry/BoxHull
+open physics/collision/ShapePair
+open physics/broadPhase/DynamicTree
+open physics/broadPhase/BroadPhase
+open physics/container/IdPool
+open physics/dynamics/WorldTypes
+open physics/dynamics/Body
+open physics/dynamics/Shape
+open physics/dynamics/SolverSet
+open physics/dynamics/Island
+open physics/dynamics/World
+open physics/dynamics/WorldBodies
+open physics/dynamics/WorldShapes
+
+# Reads the input tokens of one line in order.
+type Reader {
+  tokens: List(String)
+  next: Int
+}
+
+func readToken(reader: mod Reader) ret String {
+  let token: String = reader.tokens.copyAtDefault(index: reader.next)
+  reader.next = reader.next + 1
+  ret token
+}
+
+func readFloat(reader: mod Reader) ret Float {
+  ret readToken(reader: reader).toFloat()
+}
+
+func readInt(reader: mod Reader) ret Int {
+  ret readToken(reader: reader).toInt()
+}
+
+func readBool(reader: mod Reader) ret Bool {
+  ret readInt(reader: reader) is not 0
+}
+
+func readU64(reader: mod Reader) ret UInt64 {
+  let high: UInt64 = readInt(reader: reader) as UInt64
+  let low: UInt64 = readInt(reader: reader) as UInt64
+  ret (high shl 32) bitor low
+}
+
+func readVec(reader: mod Reader) ret Vec3 {
+  let x: Float = readFloat(reader: reader)
+  let y: Float = readFloat(reader: reader)
+  let z: Float = readFloat(reader: reader)
+  ret Vec3 { x: x, y: y, z: z }
+}
+
+func readQuat(reader: mod Reader) ret Quat {
+  let x: Float = readFloat(reader: reader)
+  let y: Float = readFloat(reader: reader)
+  let z: Float = readFloat(reader: reader)
+  let w: Float = readFloat(reader: reader)
+  ret Quat { x: x, y: y, z: z, w: w }
+}
+
+func readTransform(reader: mod Reader) ret Transform {
+  let position: Vec3 = readVec(reader: reader)
+  let rotation: Quat = readQuat(reader: reader)
+  ret Transform { position: position, rotation: rotation }
+}
+
+func readMatrix(reader: mod Reader) ret Matrix3 {
+  let columnX: Vec3 = readVec(reader: reader)
+  let columnY: Vec3 = readVec(reader: reader)
+  let columnZ: Vec3 = readVec(reader: reader)
+  ret Matrix3 { columnX: columnX, columnY: columnY, columnZ: columnZ }
+}
+
+func readBodyId(reader: mod Reader) ret BodyId {
+  let index: Int = readInt(reader: reader)
+  let generation: Int = readInt(reader: reader)
+  ret BodyId { index1: index + 1, world0: 0, generation: generation }
+}
+
+func readShapeId(reader: mod Reader) ret ShapeId {
+  let index: Int = readInt(reader: reader)
+  let generation: Int = readInt(reader: reader)
+  ret ShapeId { index1: index + 1, world0: 0, generation: generation }
+}
+
+func readMaterial(reader: mod Reader) ret SurfaceMaterial {
+  let friction: Float = readFloat(reader: reader)
+  let restitution: Float = readFloat(reader: reader)
+  let rolling: Float = readFloat(reader: reader)
+  let tangent: Vec3 = readVec(reader: reader)
+  let userMaterialId: UInt64 = readU64(reader: reader)
+  let color: Int = readInt(reader: reader)
+  ret SurfaceMaterial {
+    friction: friction
+    restitution: restitution
+    rollingResistance: rolling
+    tangentVelocity: tangent
+    userMaterialId: userMaterialId
+    customColor: color
+  }
+}
+
+func readShapeDef(reader: mod Reader) ret ShapeDef {
+  var def: ShapeDef = defaultShapeDef(lengthUnitsPerMeter: 1.0)
+  def.baseMaterial = readMaterial(reader: reader)
+  def.density = readFloat(reader: reader)
+  def.explosionScale = readFloat(reader: reader)
+  def.filter.categoryBits = readU64(reader: reader)
+  def.filter.maskBits = readU64(reader: reader)
+  def.filter.groupIndex = readInt(reader: reader)
+  def.enableSensorEvents = readBool(reader: reader)
+  def.enableContactEvents = readBool(reader: reader)
+  def.enableHitEvents = readBool(reader: reader)
+  def.enablePreSolveEvents = readBool(reader: reader)
+  def.enableCustomFiltering = readBool(reader: reader)
+  def.enableSpeculativeContact = readBool(reader: reader)
+  def.invokeContactCreation = readBool(reader: reader)
+  def.updateBodyMass = readBool(reader: reader)
+  ret def
+}
+
+func putFloat(out: mod List(Int), value: view Float) {
+  out.add(value: Math.floatBits(value: value))
+}
+
+func putInt(out: mod List(Int), value: view Int) {
+  out.add(value: value)
+}
+
+func putBool(out: mod List(Int), value: view Bool) {
+  if value {
+    out.add(value: 1)
+  } else {
+    out.add(value: 0)
+  }
+}
+
+func putU64(out: mod List(Int), value: view UInt64) {
+  out.add(value: (value shr 32) as Int)
+  out.add(value: (value bitand 4294967295) as Int)
+}
+
+func putVec(out: mod List(Int), vector: view Vec3) {
+  putFloat(out: out, value: vector.x)
+  putFloat(out: out, value: vector.y)
+  putFloat(out: out, value: vector.z)
+}
+
+func putQuat(out: mod List(Int), quat: view Quat) {
+  putFloat(out: out, value: quat.x)
+  putFloat(out: out, value: quat.y)
+  putFloat(out: out, value: quat.z)
+  putFloat(out: out, value: quat.w)
+}
+
+func putMatrix(out: mod List(Int), matrix: view Matrix3) {
+  putVec(out: out, vector: matrix.columnX)
+  putVec(out: out, vector: matrix.columnY)
+  putVec(out: out, vector: matrix.columnZ)
+}
+
+func putTransform(out: mod List(Int), transform: view Transform) {
+  putVec(out: out, vector: transform.position)
+  putQuat(out: out, quat: transform.rotation)
+}
+
+func putBox(out: mod List(Int), box: view Aabb) {
+  putVec(out: out, vector: box.lowerBound)
+  putVec(out: out, vector: box.upperBound)
+}
+
+func putBodyId(out: mod List(Int), bodyId: view BodyId) {
+  putInt(out: out, value: bodyId.index1 - 1)
+  putInt(out: out, value: bodyId.generation)
+}
+
+func putShapeId(out: mod List(Int), shapeId: view ShapeId) {
+  putInt(out: out, value: shapeId.index1 - 1)
+  putInt(out: out, value: shapeId.generation)
+}
+
+func expectedValue(token: view String) ret Int {
+  if token.contains(substring: "x") or token.contains(substring: "inf") or token.contains(
+    substring: "nan"
+  ) {
+    ret Math.floatBits(value: token.toFloat())
+  }
+  ret token.toInt()
+}
+
+# --- The world state, in the driver's dumpWorld order ---
+func putPool(out: mod List(Int), pool: view IdPool) {
+  putInt(out: out, value: pool.nextIndex)
+  putInt(out: out, value: pool.freeIds.length)
+  loop let id: view Int in pool.freeIds {
+    out.add(value: id)
+  }
+}
+
+func putTree(out: mod List(Int), tree: view DynamicTree) {
+  putInt(out: out, value: tree.nodeEnd)
+  putInt(out: out, value: tree.pairFreeList)
+  putInt(out: out, value: tree.proxyCount)
+  putInt(out: out, value: tree.proxies.length)
+  putInt(out: out, value: tree.proxyFreeList)
+  putBool(out: out, value: tree.dfsOrdered)
+  loop var i: Int = 0, i < tree.nodeEnd, ++i {
+    let node: TreeNode = treeNode(tree: tree, index: i)
+    putBox(out: out, box: node.aabb)
+    putInt(out: out, value: node.flagIndex)
+    putInt(out: out, value: node.height)
+  }
+  loop var i: Int = 0, i < tree.nodeEnd, ++i {
+    putInt(out: out, value: treeParent(tree: tree, index: i))
+  }
+  loop let proxy: view TreeProxy in tree.proxies {
+    putInt(out: out, value: proxy.node)
+    putInt(out: out, value: proxy.next)
+    putU64(out: out, value: proxy.categoryBits)
+    putU64(out: out, value: proxy.userData)
+  }
+}
+
+func putMaterial(out: mod List(Int), material: view SurfaceMaterial) {
+  putFloat(out: out, value: material.friction)
+  putFloat(out: out, value: material.restitution)
+  putFloat(out: out, value: material.rollingResistance)
+  putVec(out: out, vector: material.tangentVelocity)
+  putU64(out: out, value: material.userMaterialId)
+  putInt(out: out, value: material.customColor)
+}
+
+func putBody(out: mod List(Int), body: view Body) {
+  putInt(out: out, value: body.setIndex)
+  putInt(out: out, value: body.localIndex)
+  putInt(out: out, value: body.headContactKey)
+  putInt(out: out, value: body.contactCount)
+  putInt(out: out, value: body.headShapeId)
+  putInt(out: out, value: body.shapeCount)
+  putInt(out: out, value: body.headChainId)
+  putInt(out: out, value: body.headJointKey)
+  putInt(out: out, value: body.jointCount)
+  putInt(out: out, value: body.islandId)
+  putInt(out: out, value: body.islandIndex)
+  putFloat(out: out, value: body.sleepThreshold)
+  putFloat(out: out, value: body.sleepTime)
+  putFloat(out: out, value: body.sleepVelocity)
+  putFloat(out: out, value: body.safetyFactor)
+  putFloat(out: out, value: body.mass)
+  putMatrix(out: out, matrix: body.inertia)
+  putInt(out: out, value: body.bodyMoveIndex)
+  putInt(out: out, value: body.id)
+  putInt(out: out, value: body.flags)
+  putInt(out: out, value: bodyTypeCode(bodyType: body.bodyType))
+  putInt(out: out, value: body.generation)
+}
+
+func putSim(out: mod List(Int), sim: view BodySim) {
+  putTransform(out: out, transform: sim.transform)
+  putVec(out: out, vector: sim.center)
+  putInt(out: out, value: sim.flags)
+  putFloat(out: out, value: sim.minExtent)
+  putVec(out: out, vector: sim.maxExtent)
+  putQuat(out: out, quat: sim.rotation0)
+  putVec(out: out, vector: sim.center0)
+  putVec(out: out, vector: sim.localCenter)
+  putVec(out: out, vector: sim.force)
+  putVec(out: out, vector: sim.torque)
+  putFloat(out: out, value: sim.invMass)
+  putMatrix(out: out, matrix: sim.invInertiaLocal)
+  putMatrix(out: out, matrix: sim.invInertiaWorld)
+  putFloat(out: out, value: sim.linearDamping)
+  putFloat(out: out, value: sim.angularDamping)
+  putFloat(out: out, value: sim.gravityScale)
+  putInt(out: out, value: sim.bodyId)
+}
+
+func putState(out: mod List(Int), state: view BodyState) {
+  putVec(out: out, vector: state.linearVelocity)
+  putVec(out: out, vector: state.angularVelocity)
+  putVec(out: out, vector: state.deltaPosition)
+  putInt(out: out, value: state.flags)
+  putQuat(out: out, quat: state.deltaRotation)
+}
+
+func putShape(out: mod List(Int), world: view PhysicsWorld, shapeIndex: view Int) {
+  let shape: Shape = world.shapes.copyAtDefault(index: shapeIndex)
+  putInt(out: out, value: shape.id)
+  putInt(out: out, value: shape.bodyId)
+  putInt(out: out, value: shape.prevShapeId)
+  putInt(out: out, value: shape.nextShapeId)
+  putInt(out: out, value: shape.sensorIndex)
+  putInt(out: out, value: shape.proxyKey)
+  putInt(out: out, value: shapeTypeCode(shapeType: shape.shapeType))
+  putFloat(out: out, value: shape.density)
+  putFloat(out: out, value: shape.explosionScale)
+  putFloat(out: out, value: shape.aabbMargin)
+  putBox(out: out, box: shape.aabb)
+  putVec(out: out, vector: shape.localCentroid)
+  putInt(out: out, value: shape.materialCount)
+  putMaterial(out: out, material: shape.material)
+  putU64(out: out, value: shape.filter.categoryBits)
+  putU64(out: out, value: shape.filter.maskBits)
+  putInt(out: out, value: shape.filter.groupIndex)
+  putInt(out: out, value: shape.flags)
+  putInt(out: out, value: shape.generation)
+  putBox(out: out, box: world.fatAabbs.copyAtDefault(index: shapeIndex))
+  if shape.id < 0 {
+    ret
+  }
+  match shape.shapeType {
+    case ShapeType.sphere {
+      putVec(out: out, vector: shape.sphere.center)
+      putFloat(out: out, value: shape.sphere.radius)
+    }
+    case ShapeType.capsule {
+      putVec(out: out, vector: shape.capsule.center1)
+      putVec(out: out, vector: shape.capsule.center2)
+      putFloat(out: out, value: shape.capsule.radius)
+    }
+    case ShapeType.hull {
+      if let hull: view Hull => world.hulls.viewAt(index: shape.hullIndex) {
+        putInt(out: out, value: hull.points.length)
+        putVec(out: out, vector: hull.center)
+        putFloat(out: out, value: hull.volume)
+      }
+    }
+    case ShapeType.mesh {
+    }
+    case ShapeType.height {
+    }
+    case ShapeType.compound {
+    }
+  }
+}
+
+func putWorld(out: mod List(Int), world: view PhysicsWorld) {
+  putPool(out: out, pool: world.bodyIdPool)
+  putPool(out: out, pool: world.shapeIdPool)
+  putPool(out: out, pool: world.solverSetIdPool)
+  putPool(out: out, pool: world.islandIdPool)
+  putInt(out: out, value: world.bodies.length)
+  loop let body: view Body in world.bodies {
+    putBody(out: out, body: body)
+  }
+  putInt(out: out, value: world.solverSets.length)
+  loop let set: view SolverSet in world.solverSets {
+    putInt(out: out, value: set.setIndex)
+    putInt(out: out, value: set.bodySims.length)
+    loop let sim: view BodySim in set.bodySims {
+      putSim(out: out, sim: sim)
+    }
+    putInt(out: out, value: set.bodyStates.length)
+    loop let state: view BodyState in set.bodyStates {
+      putState(out: out, state: state)
+    }
+    putInt(out: out, value: set.islandSims.length)
+    loop let islandId: view Int in set.islandSims {
+      out.add(value: islandId)
+    }
+    putInt(out: out, value: set.contactIndices.length)
+  }
+  putInt(out: out, value: world.islands.length)
+  loop let island: view Island in world.islands {
+    putInt(out: out, value: island.setIndex)
+    putInt(out: out, value: island.localIndex)
+    putInt(out: out, value: island.islandId)
+    putInt(out: out, value: island.constraintRemoveCount)
+    putInt(out: out, value: island.bodies.length)
+    loop let bodyIndex: view Int in island.bodies {
+      out.add(value: bodyIndex)
+    }
+  }
+  putInt(out: out, value: world.shapes.length)
+  loop var i: Int = 0, i < world.shapes.length, ++i {
+    putShape(out: out, world: world, shapeIndex: i)
+  }
+  loop let tree: view DynamicTree in world.broadPhase.trees {
+    putTree(out: out, tree: tree)
+  }
+}
+
+# body.query: Box3D's body getters.
+func putBodyQuery(
+  out: mod List(Int)
+  world: view PhysicsWorld
+  bodyId: view BodyId
+  point: view Vec3
+) {
+  let body: Body = bodyAt(world: world, bodyId: bodyIndexOf(bodyId: bodyId))
+  let sim: BodySim = bodySimOf(world: world, body: body)
+  putTransform(out: out, transform: getBodyTransform(world: world, bodyId: bodyId))
+  putVec(out: out, vector: getBodyLocalPoint(world: world, bodyId: bodyId, worldPoint: point))
+  putVec(out: out, vector: getBodyWorldPoint(world: world, bodyId: bodyId, localPoint: point))
+  putVec(out: out, vector: getBodyLocalVector(world: world, bodyId: bodyId, worldVector: point))
+  putVec(out: out, vector: getBodyWorldVector(world: world, bodyId: bodyId, localVector: point))
+  putVec(out: out, vector: getBodyLinearVelocity(world: world, bodyId: bodyId))
+  putVec(out: out, vector: getBodyAngularVelocity(world: world, bodyId: bodyId))
+  putVec(
+    out: out
+    vector: getBodyLocalPointVelocity(world: world, bodyId: bodyId, localPoint: point)
+  )
+  putVec(
+    out: out
+    vector: getBodyWorldPointVelocity(world: world, bodyId: bodyId, worldPoint: point)
+  )
+  putFloat(out: out, value: body.mass)
+  putFloat(out: out, value: sim.invMass)
+  putVec(out: out, vector: sim.localCenter)
+  putVec(out: out, vector: sim.center)
+  putMatrix(out: out, matrix: body.inertia)
+  putMatrix(out: out, matrix: sim.invInertiaWorld)
+  putInt(out: out, value: bodyTypeCode(bodyType: body.bodyType))
+  putBool(out: out, value: body.setIndex is awakeSet)
+  putBool(out: out, value: body.setIndex is not disabledSet)
+  putFloat(out: out, value: sim.linearDamping)
+  putFloat(out: out, value: sim.angularDamping)
+  putFloat(out: out, value: sim.gravityScale)
+  putInt(out: out, value: body.shapeCount)
+}
+
+# A hull from its spec: 0 = a point cloud (128 vertices max), 1 = a box.
+func readHullSpec(reader: mod Reader) ret opt Hull {
+  let kind: Int = readInt(reader: reader)
+  if kind is 0 {
+    let count: Int = readInt(reader: reader)
+    let points: List(Vec3) = List.create(Vec3, cap: count)
+    loop var i: Int = 0, i < count, ++i {
+      points.add(value: readVec(reader: reader))
+    }
+    ret createHull(points: points, maxVertexCount: 128)
+  }
+  let hx: Float = readFloat(reader: reader)
+  let hy: Float = readFloat(reader: reader)
+  let hz: Float = readFloat(reader: reader)
+  let transform: Transform = readTransform(reader: reader)
+  ret makeTransformedBoxHull(
+    hx: hx
+    hy: hy
+    hz: hz
+    transform: transform
+    lengthUnitsPerMeter: 1.0
+  )
+}
+
+func evaluate(
+  name: view String
+  reader: mod Reader
+  world: mod PhysicsWorld
+  out: mod List(Int)
+) ret Bool {
+  if name is "world.create" {
+    var def: WorldDef = defaultWorldDef(lengthUnitsPerMeter: 1.0)
+    def.gravity = readVec(reader: reader)
+    world = createWorld(def: def)
+  } else if name is "world.state" {
+    putWorld(out: out, world: world)
+  } else if name is "body.create" {
+    var def: BodyDef = defaultBodyDef(lengthUnitsPerMeter: 1.0)
+    def.bodyType = bodyTypeFromCode(code: readInt(reader: reader))
+    def.position = readVec(reader: reader)
+    def.rotation = readQuat(reader: reader)
+    def.linearVelocity = readVec(reader: reader)
+    def.angularVelocity = readVec(reader: reader)
+    def.linearDamping = readFloat(reader: reader)
+    def.angularDamping = readFloat(reader: reader)
+    def.gravityScale = readFloat(reader: reader)
+    def.sleepThreshold = readFloat(reader: reader)
+    def.safetyFactor = readFloat(reader: reader)
+    let locks: Int = readInt(reader: reader)
+    def.motionLocks = MotionLocks {
+      linearX: (locks bitand 1) is not 0
+      linearY: (locks bitand 2) is not 0
+      linearZ: (locks bitand 4) is not 0
+      angularX: (locks bitand 8) is not 0
+      angularY: (locks bitand 16) is not 0
+      angularZ: (locks bitand 32) is not 0
+    }
+    def.enableSleep = readBool(reader: reader)
+    def.isAwake = readBool(reader: reader)
+    def.isBullet = readBool(reader: reader)
+    def.isEnabled = readBool(reader: reader)
+    def.allowFastRotation = readBool(reader: reader)
+    def.enableContactRecycling = readBool(reader: reader)
+    putBodyId(out: out, bodyId: createBody(world: world, def: def))
+  } else if name is "shape.sphere" {
+    let bodyId: BodyId = readBodyId(reader: reader)
+    let def: ShapeDef = readShapeDef(reader: reader)
+    let center: Vec3 = readVec(reader: reader)
+    let radius: Float = readFloat(reader: reader)
+    putShapeId(
+      out: out
+      shapeId: createSphereShape(
+        world: world
+        bodyId: bodyId
+        def: def
+        sphere: Sphere { center: center, radius: radius }
+      )
+    )
+  } else if name is "shape.capsule" {
+    let bodyId: BodyId = readBodyId(reader: reader)
+    let def: ShapeDef = readShapeDef(reader: reader)
+    let center1: Vec3 = readVec(reader: reader)
+    let center2: Vec3 = readVec(reader: reader)
+    let radius: Float = readFloat(reader: reader)
+    let capsule: Capsule = { center1: center1, center2: center2, radius: radius }
+    putShapeId(
+      out: out
+      shapeId: createCapsuleShape(
+        world: world
+        bodyId: bodyId
+        def: def
+        capsule: capsule
+      )
+    )
+  } else if name is "shape.hull" or name is "shape.transformedHull" {
+    let bodyId: BodyId = readBodyId(reader: reader)
+    let def: ShapeDef = readShapeDef(reader: reader)
+    if let hull: Hull = readHullSpec(reader: reader) {
+      if name is "shape.hull" {
+        putShapeId(
+          out: out
+          shapeId: createHullShape(
+            world: world
+            bodyId: bodyId
+            def: def
+            hull: hull
+          )
+        )
+      } else {
+        let transform: Transform = readTransform(reader: reader)
+        let scaleVector: Vec3 = readVec(reader: reader)
+        putShapeId(
+          out: out
+          shapeId: createTransformedHullShape(
+            world: world
+            bodyId: bodyId
+            def: def
+            hull: hull
+            transform: transform
+            scaleVector: scaleVector
+          )
+        )
+      }
+    }
+  } else if name is "shape.destroy" {
+    let shapeId: ShapeId = readShapeId(reader: reader)
+    destroyShape(world: world, shapeId: shapeId, updateBodyMass: readBool(reader: reader))
+  } else if name is "body.destroy" {
+    destroyBody(world: world, bodyId: readBodyId(reader: reader))
+  } else if name is "body.query" {
+    let bodyId: BodyId = readBodyId(reader: reader)
+    putBodyQuery(
+      out: out
+      world: world
+      bodyId: bodyId
+      point: readVec(reader: reader)
+    )
+  } else if name is "body.setTransform" {
+    let bodyId: BodyId = readBodyId(reader: reader)
+    let position: Vec3 = readVec(reader: reader)
+    setBodyTransform(
+      world: world
+      bodyId: bodyId
+      position: position
+      rotation: readQuat(reader: reader)
+    )
+  } else if name is "body.setLinearVelocity" {
+    let bodyId: BodyId = readBodyId(reader: reader)
+    setBodyLinearVelocity(world: world, bodyId: bodyId, velocity: readVec(reader: reader))
+  } else if name is "body.setAngularVelocity" {
+    let bodyId: BodyId = readBodyId(reader: reader)
+    setBodyAngularVelocity(world: world, bodyId: bodyId, velocity: readVec(reader: reader))
+  } else if name is "body.setTargetTransform" {
+    let bodyId: BodyId = readBodyId(reader: reader)
+    let target: Transform = readTransform(reader: reader)
+    let timeStep: Float = readFloat(reader: reader)
+    setBodyTargetTransform(
+      world: world
+      bodyId: bodyId
+      target: target
+      timeStep: timeStep
+      wake: readBool(reader: reader)
+    )
+  } else if name is "body.applyForce" {
+    let bodyId: BodyId = readBodyId(reader: reader)
+    let force: Vec3 = readVec(reader: reader)
+    let point: Vec3 = readVec(reader: reader)
+    applyBodyForce(
+      world: world
+      bodyId: bodyId
+      force: force
+      point: point
+      wake: readBool(reader: reader)
+    )
+  } else if name is "body.applyForceToCenter" {
+    let bodyId: BodyId = readBodyId(reader: reader)
+    let force: Vec3 = readVec(reader: reader)
+    applyBodyForceToCenter(
+      world: world
+      bodyId: bodyId
+      force: force
+      wake: readBool(reader: reader)
+    )
+  } else if name is "body.applyTorque" {
+    let bodyId: BodyId = readBodyId(reader: reader)
+    let torque: Vec3 = readVec(reader: reader)
+    applyBodyTorque(
+      world: world
+      bodyId: bodyId
+      torque: torque
+      wake: readBool(reader: reader)
+    )
+  } else if name is "body.applyLinearImpulse" {
+    let bodyId: BodyId = readBodyId(reader: reader)
+    let impulse: Vec3 = readVec(reader: reader)
+    let point: Vec3 = readVec(reader: reader)
+    applyBodyLinearImpulse(
+      world: world
+      bodyId: bodyId
+      impulse: impulse
+      point: point
+      wake: readBool(reader: reader)
+    )
+  } else if name is "body.applyLinearImpulseToCenter" {
+    let bodyId: BodyId = readBodyId(reader: reader)
+    let impulse: Vec3 = readVec(reader: reader)
+    applyBodyLinearImpulseToCenter(
+      world: world
+      bodyId: bodyId
+      impulse: impulse
+      wake: readBool(reader: reader)
+    )
+  } else if name is "body.applyAngularImpulse" {
+    let bodyId: BodyId = readBodyId(reader: reader)
+    let impulse: Vec3 = readVec(reader: reader)
+    applyBodyAngularImpulse(
+      world: world
+      bodyId: bodyId
+      impulse: impulse
+      wake: readBool(reader: reader)
+    )
+  } else if name is "body.setMassData" {
+    let bodyId: BodyId = readBodyId(reader: reader)
+    let mass: Float = readFloat(reader: reader)
+    let center: Vec3 = readVec(reader: reader)
+    let inertia: Matrix3 = readMatrix(reader: reader)
+    setBodyMassData(
+      world: world
+      bodyId: bodyId
+      massData: MassData { mass: mass, center: center, inertia: inertia }
+    )
+  } else if name is "body.applyMassFromShapes" {
+    applyBodyMassFromShapes(world: world, bodyId: readBodyId(reader: reader))
+  } else if name is "body.setDamping" {
+    let bodyId: BodyId = readBodyId(reader: reader)
+    let linear: Float = readFloat(reader: reader)
+    let angular: Float = readFloat(reader: reader)
+    let gravityScale: Float = readFloat(reader: reader)
+    setBodyLinearDamping(world: world, bodyId: bodyId, linearDamping: linear)
+    setBodyAngularDamping(world: world, bodyId: bodyId, angularDamping: angular)
+    setBodyGravityScale(world: world, bodyId: bodyId, gravityScale: gravityScale)
+  } else {
+    ret false
+  }
+  ret true
+}
+
+func readGolden() ret String {
+  # The runner runs from compiler/, the TSan gate from the case's folder.
+  let candidates: List(String) = {
+    "../tools/box3d-oracle/goldens/world.golden"
+    "../../../tools/box3d-oracle/goldens/world.golden"
+    "tools/box3d-oracle/goldens/world.golden"
+  }
+  loop var i: Int = 0, i < candidates.length, ++i {
+    if let text: String = readFile(path: candidates.copyAtDefault(index: i)) {
+      ret text
+    }
+  }
+  ret ""
+}
+
+func main() {
+  let golden: String = readGolden()
+  let lines: List(String) = golden.split(sep: "\n")
+  var world: PhysicsWorld = createWorld(def: defaultWorldDef(lengthUnitsPerMeter: 1.0))
+  var calls: Int = 0
+  var mismatches: Int = 0
+  var unknown: Int = 0
+  loop var i: Int = 0, i < lines.length, ++i {
+    let line: String = lines.copyAtDefault(index: i)
+    if line.length() is 0 or line.startsWith(prefix: "#") {
+      continue
+    }
+    let tokens: List(String) = line.split(sep: " ")
+    let name: String = tokens.copyAtDefault(index: 0)
+    var reader: Reader = { tokens: List.create(String, cap: 64), next: 0 }
+    let expected: List(Int) = List.create(Int, cap: 64)
+    var afterArrow: Bool = false
+    loop var j: Int = 1, j < tokens.length, ++j {
+      let token: String = tokens.copyAtDefault(index: j)
+      if token is "->" {
+        afterArrow = true
+      } else if afterArrow {
+        expected.add(value: expectedValue(token: token))
+      } else {
+        reader.tokens.add(value: token)
+      }
+    }
+    let actual: List(Int) = List.create(Int, cap: 64)
+    if evaluate(
+      name: name
+      reader: reader
+      world: world
+      out: actual
+    ) is false {
+      unknown = unknown + 1
+      log("not ported: {name}")
+      continue
+    }
+    calls = calls + 1
+    var same: Bool = actual.length is expected.length
+    var firstDifference: Int = -1
+    loop var j: Int = 0, j < expected.length and j < actual.length and firstDifference < 0, ++j {
+      if actual.copyAtDefault(index: j) is not expected.copyAtDefault(index: j) {
+        same = false
+        firstDifference = j
+      }
+    }
+    if same is false {
+      mismatches = mismatches + 1
+      if mismatches <= 6 {
+        log(
+          "MISMATCH line {i + 1} ({name}): {actual.length} values, want {expected.length}; first difference at {firstDifference}: got {actual.copyAtDefault(
+            index: firstDifference
+          )}, want {expected.copyAtDefault(index: firstDifference)}"
+        )
+      }
+    }
+  }
+  log("world.golden: {calls} operations, {mismatches} not bit-exact, {unknown} not ported")
+}

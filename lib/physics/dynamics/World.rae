@@ -1,0 +1,179 @@
+# The physics world (b3World of Box3D's physics_world.h and b3CreateWorld of
+# physics_world.c at 9f998c8). Everything a world owns is a field of this
+# one value, passed `mod` to whatever changes it: Box3D's global world
+# registry, length scale and allocators become fields here, and there are no
+# globals (AGENTS.md). Contacts, the constraint graph, joints, sensors and
+# events join it in P4b-P4d and P6.
+open Vec3
+open physics/Constants
+open physics/math/Scalar
+open physics/math/AabbMath
+open physics/math/TransformMath
+open physics/geometry/Hull
+open physics/broadPhase/BroadPhase
+open physics/container/IdPool
+open physics/dynamics/WorldTypes
+open physics/dynamics/Body
+open physics/dynamics/Shape
+open physics/dynamics/SolverSet
+open physics/dynamics/Island
+
+type PhysicsWorld {
+  worldId: Int
+  broadPhase: BroadPhase
+  bodyIdPool: IdPool
+  bodies: List(Body)
+  solverSetIdPool: IdPool
+  solverSets: List(SolverSet)
+  islandIdPool: IdPool
+  islands: List(Island)
+  shapeIdPool: IdPool
+  shapes: List(Shape)
+  # The fat box of each shape's broad-phase proxy, by shape id
+  fatAabbs: List(Aabb)
+  # The hull data of hull shapes (Box3D's hull database)
+  hulls: List(Hull)
+  contactIdPool: IdPool
+  jointIdPool: IdPool
+  stepIndex: Int
+  splitIslandId: Int
+  gravity: Vec3
+  hitEventThreshold: Float
+  restitutionThreshold: Float
+  restitutionIterations: Int
+  enableRestitutionPropagation: Bool
+  maxLinearSpeed: Float
+  contactSpeed: Float
+  contactHertz: Float
+  contactDampingRatio: Float
+  contactRecycleDistance: Float
+  enableSleep: Bool
+  locked: Bool
+  enableWarmStarting: Bool
+  enableContinuous: Bool
+  enableSpeculative: Bool
+  workerCount: Int
+  lengthUnitsPerMeter: Float
+}
+
+# b3CreateWorld: an empty world with its static, disabled and awake sets.
+func createWorld(def: view WorldDef) ret PhysicsWorld {
+  var world: PhysicsWorld = {
+    worldId: 0
+    broadPhase: createBroadPhase(staticShapeCount: 0, dynamicShapeCount: 0, contactCount: 0)
+    bodyIdPool: createIdPool()
+    bodies: List.create(Body, cap: 16)
+    solverSetIdPool: createIdPool()
+    solverSets: List.create(SolverSet, cap: 8)
+    islandIdPool: createIdPool()
+    islands: List.create(Island, cap: 16)
+    shapeIdPool: createIdPool()
+    shapes: List.create(Shape, cap: 16)
+    fatAabbs: List.create(Aabb, cap: 16)
+    hulls: List.create(Hull, cap: 4)
+    contactIdPool: createIdPool()
+    jointIdPool: createIdPool()
+    stepIndex: 0
+    splitIslandId: -1
+    gravity: def.gravity
+    hitEventThreshold: def.hitEventThreshold
+    restitutionThreshold: def.restitutionThreshold
+    restitutionIterations: clampInt(value: def.restitutionIterations, lower: 0, upper: 63)
+    enableRestitutionPropagation: def.enableRestitutionPropagation
+    maxLinearSpeed: def.maximumLinearSpeed
+    contactSpeed: def.contactSpeed
+    contactHertz: def.contactHertz
+    contactDampingRatio: def.contactDampingRatio
+    contactRecycleDistance: contactRecycleDistance(lengthUnitsPerMeter: def.lengthUnitsPerMeter)
+    enableSleep: def.enableSleep
+    locked: false
+    enableWarmStarting: true
+    enableContinuous: def.enableContinuous
+    enableSpeculative: true
+    workerCount: 1
+    lengthUnitsPerMeter: def.lengthUnitsPerMeter
+  }
+  # The static, disabled and awake sets (ids 0, 1, 2)
+  loop var i: Int = 0, i < 3, ++i {
+    let setIndex: Int = allocId(pool: world.solverSetIdPool)
+    world.solverSets.add(value: emptySolverSet(setIndex: setIndex))
+  }
+  ret world
+}
+
+# A copy of body `bodyId`.
+func bodyAt(world: view PhysicsWorld, bodyId: view Int) ret Body {
+  ret world.bodies.copyAtDefault(index: bodyId)
+}
+
+# A copy of the sim of `body`.
+func bodySimOf(world: view PhysicsWorld, body: view Body) ret BodySim {
+  if let set: view SolverSet => world.solverSets.viewAt(index: body.setIndex) {
+    ret set.bodySims.copyAtDefault(index: body.localIndex)
+  }
+  ret zeroBodySim()
+}
+
+# Write back the sim of `body`.
+func setBodySim(world: mod PhysicsWorld, body: view Body, sim: view BodySim) {
+  if let set: mod SolverSet => world.solverSets.modAt(index: body.setIndex) {
+    set.bodySims.set(index: body.localIndex, value: sim)
+  }
+}
+
+# b3GetBodyState: an awake body's state (others have none).
+func hasBodyState(body: view Body) ret Bool {
+  ret body.setIndex is awakeSet
+}
+
+func bodyStateOf(world: view PhysicsWorld, body: view Body) ret BodyState {
+  if let set: view SolverSet => world.solverSets.viewAt(index: awakeSet) {
+    ret set.bodyStates.copyAtDefault(index: body.localIndex)
+  }
+  ret identityBodyState()
+}
+
+func setBodyState(world: mod PhysicsWorld, body: view Body, state: view BodyState) {
+  if let set: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
+    set.bodyStates.set(index: body.localIndex, value: state)
+  }
+}
+
+# b3GetBodyTransform
+func bodyTransformOf(world: view PhysicsWorld, body: view Body) ret Transform {
+  ret bodySimOf(world: world, body: body).transform
+}
+
+# The body behind a handle (b3GetBodyFullId; the generation must match).
+func bodyIndexOf(bodyId: view BodyId) ret Int {
+  ret bodyId.index1 - 1
+}
+
+# b3MakeBodyId
+func makeBodyId(world: view PhysicsWorld, bodyIndex: view Int) ret BodyId {
+  ret BodyId {
+    index1: bodyIndex + 1
+    world0: world.worldId
+    generation: bodyAt(world: world, bodyId: bodyIndex).generation
+  }
+}
+
+# b3Body_IsValid
+func isBodyIdValid(world: view PhysicsWorld, bodyId: view BodyId) ret Bool {
+  let index: Int = bodyId.index1 - 1
+  if index < 0 or index >= world.bodies.length {
+    ret false
+  }
+  let body: Body = bodyAt(world: world, bodyId: index)
+  ret body.setIndex is not -1 and body.generation is bodyId.generation
+}
+
+# b3Shape_IsValid
+func isShapeIdValid(world: view PhysicsWorld, shapeId: view ShapeId) ret Bool {
+  let index: Int = shapeId.index1 - 1
+  if index < 0 or index >= world.shapes.length {
+    ret false
+  }
+  let shape: Shape = world.shapes.copyAtDefault(index: index)
+  ret shape.id is not -1 and shape.generation is shapeId.generation
+}

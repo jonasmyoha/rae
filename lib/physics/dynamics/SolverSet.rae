@@ -1,0 +1,27 @@
+# A solver set (b3SolverSet of Box3D's solver_set.h at 9f998c8): the static
+# set, the disabled set, the awake set and one set per sleeping island
+# group. A body lives in exactly one set, its sim (and, awake, its state) in
+# that set's arrays. Joint sims arrive with the joints (P6).
+open physics/dynamics/Body
+
+type SolverSet {
+  bodySims: List(BodySim)
+  bodyStates: List(BodyState)
+  # The contacts this set owns, by contact id
+  contactIndices: List(Int)
+  # The islands in this set, by island id (b3IslandSim)
+  islandSims: List(Int)
+  # -1 for a free set slot
+  setIndex: Int
+}
+
+# A zero initialized set (Box3D's `(b3SolverSet){ 0 }`).
+func emptySolverSet(setIndex: view Int) ret SolverSet {
+  ret SolverSet {
+    bodySims: List.create(BodySim, cap: 0)
+    bodyStates: List.create(BodyState, cap: 0)
+    contactIndices: List.create(Int, cap: 0)
+    islandSims: List.create(Int, cap: 0)
+    setIndex: setIndex
+  }
+}
