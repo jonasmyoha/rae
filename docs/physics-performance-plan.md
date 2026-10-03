@@ -150,11 +150,12 @@ code the compiler outlines, as `parallelLoop`'s body is.
    - A mode that runs exactly one iteration per worker with all of them live at
      once (the solver's spin barriers deadlock if one worker waits for a thread
      that has not started).
-3. **Staged parallel work for the solver** — the language-design question,
-   now designed in `docs/parallel-stages-design.md` (three options measured
-   against each other; recommended: a stage is a `parallelLoop`, no atomics,
-   `unsafe` for the colouring's disjoint writes). The text below is the
-   original framing. The
+3. **Staged parallel work for the solver** — decided and implemented
+   2026-10-03 (`docs/parallel-stages-design.md`): a stage is a
+   `parallelLoop`, with no atomics and no team construct; `unsafe` covers the
+   colouring's disjoint body writes, checked at run time by
+   `RAE_PARALLEL_CHECK`; the launch path is within ~1.0-1.4x of Box3D's own
+   spin barrier. The text below is the original framing. The
    recommended shape, because Rae has no function values and the port should
    stay close to Box3D: an `Atomic(Int)` / `Atomic(Int32)` library type over C11
    `stdatomic` (load, store, fetchAdd, compareExchange; never on floats), a

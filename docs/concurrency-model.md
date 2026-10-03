@@ -453,12 +453,21 @@ worker-count determinism is a guarantee by construction
 only exists for parallel code. If the slice arithmetic keeps recurring, a
 library helper is welcome; a new checker rule is not.
 
-**The guaranteed-concurrent mode** (every worker running one iteration at
-once, which spin barriers need) is part of the atomics-and-stages design,
-`docs/parallel-stages-design.md` (awaiting the maintainer). It recommends not
-needing it at all: a solver stage is a `parallelLoop` (1.4 µs per barrier at 4
-workers, measured), with `unsafe` vouching for the graph colouring's disjoint
-body writes. Until
+**Staged work: a stage is a `parallelLoop` (decided 2026-10-03,
+`docs/parallel-stages-design.md`).** No guaranteed-concurrent mode, no
+atomics, no barrier construct. A solver stage is a `parallelLoop` and the
+stage sequence an ordinary `loop`. The pool keeps its workers spinning across
+a step's stages, so a barrier costs about what Box3D's own spin barrier does
+(§9 of that document). `RAE_WORKERS=1` runs the stages in order, and nothing
+can deadlock.
+
+**`unsafe { }` in a parallel body** lifts the write rule for its statements.
+It is for writes that are disjoint by an argument the compiler cannot check —
+a graph colouring keeping a colour's constraints off each other's bodies. The
+programmer vouches for it, and the runtime checks it when asked:
+`RAE_PARALLEL_CHECK=1` (or `Parallel.checkWrites(enabled: true)`) stops the
+program when two iterations of one `parallelLoop` write the same List element
+inside `unsafe`, naming both (fixture 947). Until
 then the solver is sequential and the parallelLoop rules above are the whole
 rule set.
 

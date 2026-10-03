@@ -1,7 +1,7 @@
 # Staged parallel work for the physics solver — design
 
-Status: **design, awaiting the maintainer's choice** (2026-10-03). Nothing in
-this document is implemented. It answers `docs/physics-performance-plan.md`
+Status: **decided 2026-10-03: Option C, with `unsafe` for the colouring's
+disjoint writes — implemented** (§9 records what landed and the numbers). It answers `docs/physics-performance-plan.md`
 §5 item 3: how Rae runs Box3D's solver — a few hundred dependent stages per
 step — on the worker pool, and with which language surface. The worker pool
 and `parallelLoop` it builds on have landed (`docs/concurrency-model.md` §5).
@@ -326,3 +326,58 @@ become chunk scratch: per-chunk lists and flags merged in chunk order
 - **Option A:** not recommended. Its speed is the same as a well-implemented
   B, and it gives every Rae program unchecked atomics and deadlocking
   barriers.
+
+## 9. What landed (2026-10-03)
+
+The maintainer chose Option C, with `unsafe` for coloured writes. Both
+follow-ups are in.
+
+- **`unsafe` in a parallel body** (`sema.c`, `c_stmt.c`, `c_expr.c`,
+  `runtime_threads.c`):
+  - Inside `unsafe { }` in a `parallelLoop` body the write rule is lifted;
+    `ret` / `break` / `continue` stay rejected.
+  - Every List `set` / `modAt` there first calls
+    `rae_parallel_check_write(storage, index, iteration, name)`.
+  - With `RAE_PARALLEL_CHECK=1`, or `Parallel.checkWrites(enabled: true)`,
+    the runtime records which iteration of the current top-level
+    `parallelLoop` wrote each element. It stops the program on a second
+    writer: `rae: parallelLoop: iterations 3 and 5 both wrote parallel[7]
+    inside unsafe …`, exit 70, smaller iteration first, so the message does
+    not depend on scheduling. Checking off, the cost is one branch.
+  - Fixture 947: a greedy graph colouring of 200 contacts on 64 bodies,
+    solved one `parallelLoop` per colour with checking on, equals the
+    sequential solve bit for bit at 1, 2, 3 and 8 workers. Then a wrong
+    colouring is stopped.
+- **The launch path** (`runtime_threads.c`):
+  - Each worker owns a contiguous range of the job's chunks and its own
+    cache-line-padded claim word, draining its range before stealing from
+    the others (Box3D's affinity).
+  - Completions are counted once per worker per job.
+  - A one-chunk job runs inline.
+  - Workers spin 250 µs (by clock, not by iteration count) before sleeping,
+    so they stay awake across a step's stages.
+  - Starting the pool is one atomic load after the first launch.
+  - Back-to-back launch at 8 workers: 3.9 → 2.0 µs.
+
+**Barrier per stage, measured side by side with Box3D's own scheme**
+(`benchmarks/parallel_stages/run.sh` now runs `c/box3d_style.c` — leader
+publishes, helpers claim blocks by compare-and-swap from their own offset, one
+completion counter — on the same step, interleaved, so both see the same
+load). The machine was at load 5-11 from other work, so single numbers vary
+2x between runs. Three interleaved rounds:
+
+| | 4 workers | 8 workers |
+|---|---|---|
+| Box3D-style C | 0.55-1.34 µs | 1.65-3.37 µs |
+| Rae pool | 1.42-1.72 µs | 2.21-2.96 µs (one 9.4 µs outlier) |
+
+On this machine the absolute 1.5 µs target at 8 workers is out of reach for
+Box3D's scheme too. Measured against it, the Rae pool is usually within
+1.0-1.4x — the same order, with no spin loops in Rae code. A quiet machine
+should re-run `run.sh` to see both lower.
+
+Also seen: the Rae block of the same arithmetic takes 1.5 µs where C takes
+0.75 µs (the C reference's flat run is half of Rae's). That is code
+generation for the scalar loop, not threading — worth a look when the solver
+is ported.
+
