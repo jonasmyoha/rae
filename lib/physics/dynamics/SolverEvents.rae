@@ -1,0 +1,101 @@
+# The events a solve reports (the hit-event and sensor-hit passes of
+# Box3D's b3Solve, solver.c at 9f998c8): contacts flagged while storing
+# impulses become hit events (the fastest approaching point that took an
+# impulse), and sensors crossed during continuous collision get the hit for
+# their next overlap update. Checked against the oracle in fixture 959.
+open Vec3
+open physics/math/VectorMath
+open physics/math/TransformMath
+open physics/container/Bitset
+open physics/dynamics/WorldTypes
+open physics/dynamics/Body
+open physics/dynamics/Shape
+open physics/dynamics/Contact
+open physics/dynamics/World
+open physics/dynamics/Events
+open physics/dynamics/WorldContacts
+
+# A shape's user material for a hit (b3GetShapeUserMaterialId of a convex
+# shape: its only material)
+func shapeUserMaterialId(shape: view Shape) ret UInt64 {
+  if shape.materialCount is 0 {
+    ret 0
+  }
+  ret shape.material.userMaterialId
+}
+
+# The hit events of b3Solve, in contact id order.
+func reportHitEvents(world: mod PhysicsWorld) {
+  var anyHitEvents: Bool = false
+  loop let taskContext: view TaskContext in world.taskContexts {
+    if taskContext.hasHitEvents {
+      anyHitEvents = true
+    }
+  }
+  if anyHitEvents is false {
+    ret
+  }
+  var bits: Bitset = world.taskContexts.copyAtDefault(index: 0).hitEventBitSet
+  loop var i: Int = 1, i < world.taskContexts.length, ++i {
+    let taskContext: TaskContext = world.taskContexts.copyAtDefault(index: i)
+    if taskContext.hasHitEvents {
+      inPlaceUnion(setA: bits, setB: taskContext.hitEventBitSet)
+    }
+  }
+  let threshold: Float = world.hitEventThreshold
+  loop var contactId: Int = 0, contactId < bits.blockCount * 64, ++contactId {
+    if getBit(bitset: bits, bitIndex: contactId) is false {
+      continue
+    }
+    let contact: Contact = world.contacts.copyAtDefault(index: contactId)
+    let shapeA: Shape = world.shapes.copyAtDefault(index: contact.shapeIdA)
+    let shapeB: Shape = world.shapes.copyAtDefault(index: contact.shapeIdB)
+    let simA: BodySim = bodySimOf(world: world, body: bodyAt(world: world, bodyId: shapeA.bodyId))
+    let simB: BodySim = bodySimOf(world: world, body: bodyAt(world: world, bodyId: shapeB.bodyId))
+    let midCenter: Vec3 = lerpPosition(from: simA.center, to: simB.center, alpha: 0.5)
+    var event: ContactHitEvent = emptyContactHitEvent()
+    event.approachSpeed = threshold
+    var found: Bool = false
+    loop let manifold: view Manifold in contact.manifolds {
+      loop var pointIndex: Int = 0, pointIndex < manifold.pointCount, ++pointIndex {
+        let point: ManifoldPoint = manifold.points.copyAtFallback(
+          index: pointIndex
+          fallback: zeroManifoldPoint()
+        )
+        let approachSpeed: Float = -point.normalVelocity
+        # The total impulse rules out speculative points that did not collide
+        if approachSpeed > event.approachSpeed and point.totalNormalImpulse > 0.0 {
+          event.approachSpeed = approachSpeed
+          event.point = offsetPosition(
+            position: midCenter
+            delta: lerp(from: point.anchorA, to: point.anchorB, alpha: 0.5)
+          )
+          event.normal = manifold.normal
+          found = true
+        }
+      }
+    }
+    if found {
+      event.shapeIdA = makeShapeId(world: world, shapeIndex: shapeA.id)
+      event.shapeIdB = makeShapeId(world: world, shapeIndex: shapeB.id)
+      event.contactId = contactIdOf(world: world, contact: contact)
+      event.userMaterialIdA = shapeUserMaterialId(shape: shapeA)
+      event.userMaterialIdB = shapeUserMaterialId(shape: shapeB)
+      world.contactHitEvents.add(value: event)
+    }
+  }
+}
+
+# The sensor hits of continuous collision, onto their sensors.
+func reportSensorHits(world: mod PhysicsWorld) {
+  loop var i: Int = 0, i < world.taskContexts.length, ++i {
+    let hits: List(SensorHit) = world.taskContexts.copyAtDefault(index: i).sensorHits
+    loop let hit: view SensorHit in hits {
+      let sensorShape: Shape = world.shapes.copyAtDefault(index: hit.sensorId)
+      let visitor: Shape = world.shapes.copyAtDefault(index: hit.visitorId)
+      if let sensor: mod Sensor => world.sensors.modAt(index: sensorShape.sensorIndex) {
+        sensor.hits.add(value: Visitor { shapeId: hit.visitorId, generation: visitor.generation })
+      }
+    }
+  }
+}

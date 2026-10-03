@@ -21,6 +21,7 @@ open physics/dynamics/Contact
 open physics/dynamics/ConstraintGraph
 open physics/collision/Manifold
 open physics/container/Bitset
+open physics/dynamics/Events
 
 # One worker's scratch for a step (b3TaskContext of Box3D's
 # physics_world.h). A world has one per worker; single-threaded, one. The
@@ -38,6 +39,14 @@ type TaskContext {
   awakeIslandBitSet: Bitset
   splitIslandId: Int
   splitSleepTime: Float
+  # The contacts with a hit event candidate, by id
+  hitEventBitSet: Bitset
+  hasHitEvents: Bool
+  # Sensors crossed in continuous collision
+  sensorHits: List(SensorHit)
+  # The sensors whose overlaps changed, by sensor index (Box3D's sensor
+  # task context)
+  sensorEventBits: Bitset
 }
 
 # A body that moved in the last step (b3BodyMoveEvent)
@@ -55,6 +64,10 @@ func createTaskContext() ret TaskContext {
     awakeIslandBitSet: createBitset(bitCapacity: 256)
     splitIslandId: -1
     splitSleepTime: 0.0
+    hitEventBitSet: createBitset(bitCapacity: 1024)
+    hasHitEvents: false
+    sensorHits: List.create(SensorHit, cap: 4)
+    sensorEventBits: createBitset(bitCapacity: 128)
   }
 }
 
@@ -77,6 +90,17 @@ type PhysicsWorld {
   contacts: List(Contact)
   constraintGraph: ConstraintGraph
   bodyMoveEvents: List(BodyMoveEvent)
+  sensors: List(Sensor)
+  contactBeginEvents: List(ContactBeginTouchEvent)
+  contactHitEvents: List(ContactHitEvent)
+  sensorBeginEvents: List(SensorBeginTouchEvent)
+  # End events are double buffered: a step's list is read after it, while
+  # destroying things between steps adds to the next one's
+  contactEndEvents0: List(ContactEndTouchEvent)
+  contactEndEvents1: List(ContactEndTouchEvent)
+  sensorEndEvents0: List(SensorEndTouchEvent)
+  sensorEndEvents1: List(SensorEndTouchEvent)
+  endEventArrayIndex: Int
   inverseH: Float
   inverseDt: Float
   jointIdPool: IdPool
@@ -121,6 +145,15 @@ func createWorld(def: view WorldDef) ret PhysicsWorld {
     contacts: List.create(Contact, cap: 16)
     constraintGraph: createGraph(bodyCapacity: 16)
     bodyMoveEvents: List.create(BodyMoveEvent, cap: 16)
+    sensors: List.create(Sensor, cap: 4)
+    contactBeginEvents: List.create(ContactBeginTouchEvent, cap: 4)
+    contactHitEvents: List.create(ContactHitEvent, cap: 4)
+    sensorBeginEvents: List.create(SensorBeginTouchEvent, cap: 4)
+    contactEndEvents0: List.create(ContactEndTouchEvent, cap: 4)
+    contactEndEvents1: List.create(ContactEndTouchEvent, cap: 4)
+    sensorEndEvents0: List.create(SensorEndTouchEvent, cap: 4)
+    sensorEndEvents1: List.create(SensorEndTouchEvent, cap: 4)
+    endEventArrayIndex: 0
     inverseH: 0.0
     inverseDt: 0.0
     jointIdPool: createIdPool()
@@ -262,4 +295,30 @@ func contactLocalIndex(world: view PhysicsWorld, contactId: view Int) ret Int {
     ret contact.localIndex
   }
   ret -1
+}
+
+# Add an end event to the current end buffer.
+func pushContactEndEvent(world: mod PhysicsWorld, event: view ContactEndTouchEvent) {
+  if world.endEventArrayIndex is 0 {
+    world.contactEndEvents0.add(value: event)
+  } else {
+    world.contactEndEvents1.add(value: event)
+  }
+}
+
+func pushSensorEndEvent(world: mod PhysicsWorld, event: view SensorEndTouchEvent) {
+  if world.endEventArrayIndex is 0 {
+    world.sensorEndEvents0.add(value: event)
+  } else {
+    world.sensorEndEvents1.add(value: event)
+  }
+}
+
+# A shape's handle (b3ShapeId)
+func makeShapeId(world: view PhysicsWorld, shapeIndex: view Int) ret ShapeId {
+  ret ShapeId {
+    index1: shapeIndex + 1
+    world0: world.worldId
+    generation: world.shapes.copyAtDefault(index: shapeIndex).generation
+  }
 }

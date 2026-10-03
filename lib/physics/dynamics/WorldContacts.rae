@@ -3,7 +3,7 @@
 # b3UpdateContact of Box3D's contact.c at 9f998c8). Box3D's operation order
 # is kept exactly; checked against the oracle in fixture 957.
 #
-# Not here yet: contact events (P4d), the pre-solve and custom friction /
+# Not here yet: the pre-solve and custom friction /
 # restitution callbacks (Rae has no function values; Box3D's defaults are
 # used: the geometric mean of the frictions, the larger restitution), and
 # compound and mesh contacts (P5).
@@ -31,6 +31,7 @@ open physics/dynamics/Contact
 open physics/dynamics/World
 open physics/dynamics/WorldGraph
 open physics/dynamics/WorldIslands
+open physics/dynamics/Events
 
 # The radius rolling resistance acts at, on contact creation: spheres and
 # capsules only.
@@ -227,7 +228,10 @@ func destroyContact(world: mod PhysicsWorld, contactId: view Int, wakeBodies: vi
   let bodyIdA: Int = contact.edgeA.bodyId
   let bodyIdB: Int = contact.edgeB.bodyId
   let touching: Bool = (contact.flags bitand contactTouchingFlag) is not 0
-  # (The end touch event: P4d.)
+  # The end touch event
+  if touching and (contact.flags bitand contactEnableContactEvents) is not 0 {
+    pushContactEndEvent(world: world, event: contactEndEventOf(world: world, contact: contact))
+  }
 
   unlinkContactEdge(world: world, contactId: contactId, edgeIndex: 0)
   unlinkContactEdge(world: world, contactId: contactId, edgeIndex: 1)
@@ -531,4 +535,32 @@ func updateContact(
     contact.flags = contact.flags bitand (bitnot simTouchingFlag)
   }
   ret touching
+}
+
+# The handle of a contact (b3ContactId)
+func contactIdOf(world: view PhysicsWorld, contact: view Contact) ret ContactId {
+  ret ContactId {
+    index1: contact.contactId + 1
+    world0: world.worldId
+    generation: contact.generation
+  }
+}
+
+func contactBeginEventOf(
+  world: view PhysicsWorld
+  contact: view Contact
+) ret ContactBeginTouchEvent {
+  ret ContactBeginTouchEvent {
+    shapeIdA: makeShapeId(world: world, shapeIndex: contact.shapeIdA)
+    shapeIdB: makeShapeId(world: world, shapeIndex: contact.shapeIdB)
+    contactId: contactIdOf(world: world, contact: contact)
+  }
+}
+
+func contactEndEventOf(world: view PhysicsWorld, contact: view Contact) ret ContactEndTouchEvent {
+  ret ContactEndTouchEvent {
+    shapeIdA: makeShapeId(world: world, shapeIndex: contact.shapeIdA)
+    shapeIdB: makeShapeId(world: world, shapeIndex: contact.shapeIdB)
+    contactId: contactIdOf(world: world, contact: contact)
+  }
 }

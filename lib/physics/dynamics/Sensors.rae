@@ -1,0 +1,393 @@
+# Sensor shapes (b3OverlapSensor, b3SensorQueryCallback, b3SensorTask,
+# b3OverlapSensors and b3DestroySensor of Box3D's sensor.c at 9f998c8):
+# after each step every sensor collects the convex shapes overlapping it
+# (and those a fast body crossed), sorted by shape id, and the difference
+# from last step's overlaps becomes begin and end events. The query
+# callback is an explicit query loop; the sensors run block by block as
+# worker 0. Checked against the oracle in fixture 959. Compound, mesh and
+# height-field sensors arrive in P5; the custom filter callback in P8.
+open Vec3
+open physics/Constants
+open physics/math/TransformMath
+open physics/geometry/QueryTypes
+open physics/geometry/Sphere
+open physics/geometry/Capsule
+open physics/geometry/Hull
+open physics/collision/ShapePair
+open physics/container/Bitset
+open physics/broadPhase/DynamicTree
+open physics/broadPhase/DynamicTreeQuery
+open physics/dynamics/WorldTypes
+open physics/dynamics/Body
+open physics/dynamics/Shape
+open physics/dynamics/World
+open physics/dynamics/Events
+open physics/dynamics/ParallelFor
+
+# b3IsConvex
+func isConvexShape(shapeType: view ShapeType) ret Bool {
+  ret shapeType is ShapeType.sphere or shapeType is ShapeType.capsule or shapeType is ShapeType.hull
+}
+
+# b3OverlapSensor: does the visitor shape overlap the sensor shape?
+func overlapSensor(
+  world: view PhysicsWorld
+  sensorShape: view Shape
+  sensorTransform: view Transform
+  visitorShape: view Shape
+  visitorTransform: view Transform
+) ret Bool {
+  let proxy: ShapeProxy = makeShapeProxy(shape: visitorShape, hulls: world.hulls)
+  # The visitor in the frame of the sensor
+  let relativeTransform: Transform = inverseMultiply(left: sensorTransform, right: visitorTransform)
+  let localPoints: List(Vec3) = List.create(Vec3, cap: proxy.points.length)
+  var count: Int = proxy.points.length
+  if count > maxShapeCastPoints {
+    count = maxShapeCastPoints
+  }
+  loop var i: Int = 0, i < count, ++i {
+    localPoints.add(
+      value: transformPoint(
+        transform: relativeTransform
+        point: proxy.points.copyAtDefault(index: i)
+      )
+    )
+  }
+  let localProxy: ShapeProxy = { points: localPoints, radius: proxy.radius }
+  let identity: Transform = transformIdentity()
+  match sensorShape.shapeType {
+    case ShapeType.capsule {
+      ret overlapCapsule(
+        capsule: sensorShape.capsule
+        shapeTransform: identity
+        proxy: localProxy
+        lengthUnitsPerMeter: world.lengthUnitsPerMeter
+      )
+    }
+    case ShapeType.sphere {
+      ret overlapSphere(
+        sphere: sensorShape.sphere
+        shapeTransform: identity
+        proxy: localProxy
+        lengthUnitsPerMeter: world.lengthUnitsPerMeter
+      )
+    }
+    case ShapeType.hull {
+      if let hull: view Hull => world.hulls.viewAt(index: sensorShape.hullIndex) {
+        ret overlapHull(
+          hull: hull
+          shapeTransform: identity
+          proxy: localProxy
+          lengthUnitsPerMeter: world.lengthUnitsPerMeter
+        )
+      }
+      ret false
+    }
+    # (Compound, height-field and mesh sensors: P5.)
+    case ShapeType.compound {
+      ret false
+    }
+    case ShapeType.height {
+      ret false
+    }
+    case ShapeType.mesh {
+      ret false
+    }
+  }
+}
+
+# b3SensorQueryCallback: whether shape `shapeId` is a new overlap of the
+# sensor.
+func sensorVisits(
+  world: view PhysicsWorld
+  sensorShape: view Shape
+  sensorTransform: view Transform
+  shapeId: view Int
+) ret Bool {
+  if shapeId is sensorShape.id {
+    ret false
+  }
+  let otherShape: Shape = world.shapes.copyAtDefault(index: shapeId)
+  # Visitors must be convex and want sensor events
+  if isConvexShape(shapeType: otherShape.shapeType) is false {
+    ret false
+  }
+  if (otherShape.flags bitand enableSensorEventsFlag) is 0 {
+    ret false
+  }
+  # Skip shapes on the same body
+  if otherShape.bodyId is sensorShape.bodyId {
+    ret false
+  }
+  # Check the filter
+  if shouldShapesCollide(filterA: sensorShape.filter, filterB: otherShape.filter) is false {
+    ret false
+  }
+  let otherTransform: Transform = bodyTransformOf(
+    world: world
+    body: bodyAt(world: world, bodyId: otherShape.bodyId)
+  )
+  ret overlapSensor(
+    world: world
+    sensorShape: sensorShape
+    sensorTransform: sensorTransform
+    visitorShape: otherShape
+    visitorTransform: otherTransform
+  )
+}
+
+# Sort visitors by shape id (Box3D's qsort with b3CompareVisitors; the ids
+# are distinct up to duplicates, which are removed next).
+func sortVisitors(visitors: mod List(Visitor)) {
+  loop var i: Int = 1, i < visitors.length, ++i {
+    let item: Visitor = visitors.copyAtDefault(index: i)
+    var j: Int = i - 1
+    loop j >= 0 and visitors.copyAtDefault(index: j).shapeId > item.shapeId {
+      visitors.set(index: j + 1, value: visitors.copyAtDefault(index: j))
+      j = j - 1
+    }
+    visitors.set(index: j + 1, value: item)
+  }
+}
+
+# b3SensorTask for sensors `startIndex` to `endIndex`.
+func sensorTask(
+  world: mod PhysicsWorld
+  startIndex: view Int
+  endIndex: view Int
+  workerIndex: view Int
+) {
+  loop var sensorIndex: Int = startIndex, sensorIndex < endIndex, ++sensorIndex {
+    var sensor: Sensor = world.sensors.copyAtDefault(index: sensorIndex)
+    let sensorShape: Shape = world.shapes.copyAtDefault(index: sensor.shapeId)
+
+    # Swap the overlap lists; the new one starts with the continuous hits
+    let previous: List(Visitor) = sensor.overlaps2
+    sensor.overlaps2 = sensor.overlaps1
+    sensor.overlaps1 = previous
+    sensor.overlaps2.clear()
+    loop var i: Int = 0, i < sensor.hits.length, ++i {
+      sensor.overlaps2.add(value: sensor.hits.copyAtDefault(index: i))
+    }
+    sensor.hits.clear()
+
+    let body: Body = bodyAt(world: world, bodyId: sensorShape.bodyId)
+    var changed: Bool = false
+    if body.setIndex is disabledSet or (sensorShape.flags bitand enableSensorEventsFlag) is 0 {
+      # A disabled sensor drops all its overlaps
+      changed = sensor.overlaps1.length is not 0
+    } else {
+      let transform: Transform = bodyTransformOf(world: world, body: body)
+      let queryBounds: Aabb = sensorShape.aabb
+      # Query all trees
+      loop var treeIndex: Int = 0, treeIndex < 3, ++treeIndex {
+        if let tree: view DynamicTree => world.broadPhase.trees.viewAt(index: treeIndex) {
+          var query: TreeQuery = beginTreeQuery(
+            tree: tree
+            box: queryBounds
+            maskBits: sensorShape.filter.maskBits
+            requireAllBits: false
+          )
+          var proxyId: Int = nextTreeQueryProxy(tree: tree, query: query)
+          loop proxyId is not -1 {
+            let shapeId: Int = shapeIndexOf(userData: treeUserData(tree: tree, proxyId: proxyId))
+            if sensorVisits(
+              world: world
+              sensorShape: sensorShape
+              sensorTransform: transform
+              shapeId: shapeId
+            ) {
+              # Record the overlap
+              let generation: Int = world.shapes.copyAtDefault(index: shapeId).generation
+              sensor.overlaps2.add(value: Visitor { shapeId: shapeId, generation: generation })
+            }
+            proxyId = nextTreeQueryProxy(tree: tree, query: query)
+          }
+        }
+      }
+      # Sort the overlaps to find begin and end events
+      sortVisitors(visitors: sensor.overlaps2)
+      # Remove duplicates (possible from the continuous hits)
+      let unique: List(Visitor) = List.create(Visitor, cap: sensor.overlaps2.length)
+      loop var i: Int = 0, i < sensor.overlaps2.length, ++i {
+        let visitor: Visitor = sensor.overlaps2.copyAtDefault(index: i)
+        if unique.length is 0 or visitor.shapeId is not unique.copyAtDefault(
+          index: unique.length - 1
+        ).shapeId {
+          unique.add(value: visitor)
+        }
+      }
+      sensor.overlaps2 = unique
+      let count1: Int = sensor.overlaps1.length
+      let count2: Int = sensor.overlaps2.length
+      if count1 is not count2 {
+        # Something changed
+        changed = true
+      } else {
+        loop var i: Int = 0, i < count1, ++i {
+          let first: Visitor = sensor.overlaps1.copyAtDefault(index: i)
+          let second: Visitor = sensor.overlaps2.copyAtDefault(index: i)
+          if first.shapeId is not second.shapeId or first.generation is not second.generation {
+            changed = true
+            break
+          }
+        }
+      }
+    }
+    world.sensors.set(index: sensorIndex, value: sensor)
+    if changed {
+      if let taskContext: mod TaskContext => world.taskContexts.modAt(index: workerIndex) {
+        setBit(bitset: taskContext.sensorEventBits, bitIndex: sensorIndex)
+      }
+    }
+  }
+}
+
+func visitorShapeId(world: view PhysicsWorld, visitor: view Visitor) ret ShapeId {
+  ret ShapeId { index1: visitor.shapeId + 1, world0: world.worldId, generation: visitor.generation }
+}
+
+# b3OverlapSensors: update every sensor's overlaps, then publish the begin
+# and end events of the sensors that changed, in sensor order.
+func overlapSensors(world: mod PhysicsWorld) {
+  let sensorCount: Int = world.sensors.length
+  if sensorCount is 0 {
+    ret
+  }
+  loop var i: Int = 0, i < world.taskContexts.length, ++i {
+    if let taskContext: mod TaskContext => world.taskContexts.modAt(index: i) {
+      setBitCountAndClear(bitset: taskContext.sensorEventBits, bitCount: sensorCount)
+    }
+  }
+  let blockSize: Int = parallelForBlockSize(
+    itemCount: sensorCount
+    minRange: 16
+    workerCount: world.workerCount
+  )
+  let blockCount: Int = parallelForBlockCount(itemCount: sensorCount, blockSize: blockSize)
+  loop var block: Int = 0, block < blockCount, ++block {
+    sensorTask(
+      world: world
+      startIndex: parallelForBlockStart(blockIndex: block, blockSize: blockSize)
+      endIndex: parallelForBlockEnd(blockIndex: block, blockSize: blockSize, itemCount: sensorCount)
+      workerIndex: 0
+    )
+  }
+
+  var bits: Bitset = world.taskContexts.copyAtDefault(index: 0).sensorEventBits
+  loop var i: Int = 1, i < world.taskContexts.length, ++i {
+    inPlaceUnion(setA: bits, setB: world.taskContexts.copyAtDefault(index: i).sensorEventBits)
+  }
+  loop var sensorIndex: Int = 0, sensorIndex < bits.blockCount * 64, ++sensorIndex {
+    if getBit(bitset: bits, bitIndex: sensorIndex) is false {
+      continue
+    }
+    let sensor: Sensor = world.sensors.copyAtDefault(index: sensorIndex)
+    let sensorId: ShapeId = makeShapeId(world: world, shapeIndex: sensor.shapeId)
+    let count1: Int = sensor.overlaps1.length
+    let count2: Int = sensor.overlaps2.length
+    # overlaps1 holds overlaps that may end, overlaps2 ones that may begin
+    var index1: Int = 0
+    var index2: Int = 0
+    loop index1 < count1 and index2 < count2 {
+      let first: Visitor = sensor.overlaps1.copyAtDefault(index: index1)
+      let second: Visitor = sensor.overlaps2.copyAtDefault(index: index2)
+      if first.shapeId is second.shapeId {
+        if first.generation < second.generation {
+          # End
+          pushSensorEndEvent(
+            world: world
+            event: SensorEndTouchEvent {
+              sensorShapeId: sensorId
+              visitorShapeId: visitorShapeId(world: world, visitor: first)
+            }
+          )
+          index1 = index1 + 1
+        } else if first.generation > second.generation {
+          # Begin
+          world.sensorBeginEvents.add(
+            value: SensorBeginTouchEvent {
+              sensorShapeId: sensorId
+              visitorShapeId: visitorShapeId(world: world, visitor: second)
+            }
+          )
+          index2 = index2 + 1
+        } else {
+          # Persisted
+          index1 = index1 + 1
+          index2 = index2 + 1
+        }
+      } else if first.shapeId < second.shapeId {
+        pushSensorEndEvent(
+          world: world
+          event: SensorEndTouchEvent {
+            sensorShapeId: sensorId
+            visitorShapeId: visitorShapeId(world: world, visitor: first)
+          }
+        )
+        index1 = index1 + 1
+      } else {
+        world.sensorBeginEvents.add(
+          value: SensorBeginTouchEvent {
+            sensorShapeId: sensorId
+            visitorShapeId: visitorShapeId(world: world, visitor: second)
+          }
+        )
+        index2 = index2 + 1
+      }
+    }
+    loop index1 < count1 {
+      let first: Visitor = sensor.overlaps1.copyAtDefault(index: index1)
+      pushSensorEndEvent(
+        world: world
+        event: SensorEndTouchEvent {
+          sensorShapeId: sensorId
+          visitorShapeId: visitorShapeId(world: world, visitor: first)
+        }
+      )
+      index1 = index1 + 1
+    }
+    loop index2 < count2 {
+      let second: Visitor = sensor.overlaps2.copyAtDefault(index: index2)
+      world.sensorBeginEvents.add(
+        value: SensorBeginTouchEvent {
+          sensorShapeId: sensorId
+          visitorShapeId: visitorShapeId(world: world, visitor: second)
+        }
+      )
+      index2 = index2 + 1
+    }
+  }
+}
+
+# b3DestroySensor: end events for its overlaps, then remove it (the last
+# sensor fills its slot).
+func destroySensor(world: mod PhysicsWorld, shapeId: view Int) {
+  let sensorShape: Shape = world.shapes.copyAtDefault(index: shapeId)
+  let sensorIndex: Int = sensorShape.sensorIndex
+  let sensor: Sensor = world.sensors.copyAtDefault(index: sensorIndex)
+  let sensorId: ShapeId = {
+    index1: sensorShape.id + 1
+    world0: world.worldId
+    generation: sensorShape.generation
+  }
+  loop var i: Int = 0, i < sensor.overlaps2.length, ++i {
+    let visitor: Visitor = sensor.overlaps2.copyAtDefault(index: i)
+    pushSensorEndEvent(
+      world: world
+      event: SensorEndTouchEvent {
+        sensorShapeId: sensorId
+        visitorShapeId: visitorShapeId(world: world, visitor: visitor)
+      }
+    )
+  }
+  let lastIndex: Int = world.sensors.length - 1
+  if sensorIndex is not lastIndex {
+    let moved: Sensor = world.sensors.copyAtDefault(index: lastIndex)
+    world.sensors.set(index: sensorIndex, value: moved)
+    if let movedShape: mod Shape => world.shapes.modAt(index: moved.shapeId) {
+      movedShape.sensorIndex = sensorIndex
+    }
+  }
+  world.sensors.removeLast()
+}

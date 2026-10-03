@@ -4,8 +4,7 @@
 # stages (StageDispatcher) for each sub-step, then finalizing the bodies,
 # continuous collision (FinalizeBodies), refitting the trees and island sleep. Box3D's
 # operation order is kept exactly; checked against the oracle in fixture
-# 958. Joints (P6), island splitting, hit, joint and sensor events (P4d)
-# are not here yet.
+# 958 and 959. Joints and joint events are not here yet (P6).
 import Math
 open Vec3
 open Quat
@@ -35,6 +34,7 @@ open physics/dynamics/StepContext
 open physics/dynamics/StageDispatcher
 open physics/dynamics/Continuous
 open physics/dynamics/FinalizeBodies
+open physics/dynamics/SolverEvents
 
 # ITERATIONS and RELAX_ITERATIONS of solver.c
 const solveIterations: Int = 1
@@ -190,12 +190,16 @@ func runSolverStages(world: mod PhysicsWorld, context: mod StepContext) {
 
   # Store impulses
   if overflowBlock.count > 0 {
+    let hitContacts: List(Int) = List.create(Int, cap: 0)
     storeImpulsesScalar(
       contacts: world.contacts
       constraints: context.overflowContactConstraints
       manifolds: context.overflowManifoldConstraints
       block: overflowBlock
+      negHitThreshold: -world.hitEventThreshold
+      hitContacts: hitContacts
     )
+    flagHitContacts(world: world, hitContacts: hitContacts)
   }
   executeMainStage(
     world: world
@@ -486,7 +490,12 @@ func solve(world: mod PhysicsWorld, context: mod StepContext) {
   )
   context.overflowSpans.add(value: PrepareSpan { start: overflowCount, count: 0, colorIndex: -1 })
 
-  # (Island splitting: P4d. Without sleep no island is a split candidate.)
+  # Split an awake island (squeezed in here: a safe place for something
+  # that may be expensive; never in parallel with body finalization)
+  if world.splitIslandId is not -1 {
+    splitIsland(world: world, baseId: world.splitIslandId)
+    world.splitIslandId = -1
+  }
 
   # The blocks: bodies, the flat prepare/store ranges, then each colour's
   # joint, wide contact and contact blocks
@@ -638,6 +647,13 @@ func solve(world: mod PhysicsWorld, context: mod StepContext) {
   context.anyRestitution = false
 
   # Solve the constraints (worker 0 orchestrates)
+  let contactIdCapacity: Int = world.contactIdPool.nextIndex
+  loop var i: Int = 0, i < world.taskContexts.length, ++i {
+    if let taskContext: mod TaskContext => world.taskContexts.modAt(index: i) {
+      setBitCountAndClear(bitset: taskContext.hitEventBitSet, bitCount: contactIdCapacity)
+      taskContext.hasHitEvents = false
+    }
+  }
   runSolverStages(world: world, context: context)
   world.splitIslandId = -1
 
@@ -648,6 +664,7 @@ func solve(world: mod PhysicsWorld, context: mod StepContext) {
       setBitCountAndClear(bitset: taskContext.awakeIslandBitSet, bitCount: awakeIslandCount)
       taskContext.splitIslandId = -1
       taskContext.splitSleepTime = 0.0
+      taskContext.sensorHits.clear()
     }
   }
 
@@ -675,7 +692,8 @@ func solve(world: mod PhysicsWorld, context: mod StepContext) {
     )
   }
 
-  # (Joint events: P6. Hit events: P4d.)
+  # (Joint events: P6.)
+  reportHitEvents(world: world)
 
   # Refit the kinematic and dynamic trees
   if let tree: mod DynamicTree => world.broadPhase.trees.modAt(index: 1) {
@@ -719,7 +737,8 @@ func solve(world: mod PhysicsWorld, context: mod StepContext) {
   }
   context.bulletBodies.clear()
 
-  # (Sensor hits: P4d.)
+  # The sensor hits (bullets' included)
+  reportSensorHits(world: world)
 
   # Island sleep, last: it invalidates the body bits
   if world.enableSleep {

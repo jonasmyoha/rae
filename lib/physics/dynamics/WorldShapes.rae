@@ -3,7 +3,7 @@
 # at 9f998c8). Box3D's operation order is kept exactly; checked against the
 # oracle in fixture 954. A hull shape stores a copy of its hull in the
 # world's hull list (Box3D shares equal hulls through a database; that only
-# saves memory). Sensors arrive in P4d.
+# saves memory).
 open Vec3
 open physics/Constants
 open physics/math/VectorMath
@@ -22,6 +22,8 @@ open physics/dynamics/ShapeProxy
 open physics/dynamics/BodyMass
 open physics/dynamics/Contact
 open physics/dynamics/WorldContacts
+open physics/dynamics/Events
+open physics/dynamics/Sensors
 
 # The flag bits of a shape definition.
 func shapeFlagsOf(def: view ShapeDef) ret Int {
@@ -108,6 +110,12 @@ func createShapeInternal(
     added.prevShapeId = -1
     added.nextShapeId = body.headShapeId
     added.sensorIndex = -1
+    if def.isSensor {
+      added.sensorIndex = world.sensors.length
+    }
+  }
+  if def.isSensor {
+    world.sensors.add(value: createSensor(shapeId: shapeId))
   }
   if let owner: mod Body => world.bodies.modAt(index: bodyId) {
     owner.headShapeId = shapeId
@@ -272,7 +280,7 @@ func createTransformedHullShape(
 }
 
 # b3DestroyShapeInternal: unlink from the body, drop the proxy and the
-# shape's contacts, free the id. (Sensors: P4d.)
+# shape's contacts and its sensor, free the id.
 func destroyShapeInternal(
   world: mod PhysicsWorld
   shapeId: view Int
@@ -308,6 +316,10 @@ func destroyShapeInternal(
     if contact.shapeIdA is shapeId or contact.shapeIdB is shapeId {
       destroyContact(world: world, contactId: contactId, wakeBodies: wakeBodies)
     }
+  }
+
+  if world.shapes.copyAtDefault(index: shapeId).sensorIndex is not -1 {
+    destroySensor(world: world, shapeId: shapeId)
   }
 
   freeId(pool: world.shapeIdPool, id: shapeId)
