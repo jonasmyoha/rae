@@ -280,6 +280,13 @@ C added.
   `broadphase`, fixture 953). **Pair finding** (`b3UpdateBroadPhasePairs`:
   moved-sibling gathering, self and cross pair tasks, `b3ShouldCreatePair`'s
   filters) needs the world's shapes, so it is queued with P4.
+  **Pair finding landed 2026-10-04 (P3b), bit-exact:** the moved-sibling
+  self pairs, the cross-tree seeds and cross pairs, the batched pair-set cull
+  and b3ShouldCreatePair, the sorted keys feeding contact creation, run block
+  by block as worker 0 (`lib/physics/dynamics/BroadPhasePairs`,
+  `ParallelFor`; golden `pairs`, fixture 956). Still open: compound pair
+  emission (with compounds, P5), the custom filter callback (P8 decides its
+  form) and the joint check of b3ShouldBodiesCollide (P6).
 
 - **P4 — the first world.** Bodies, shapes, contacts, solver sets, islands and
   sleep, constraint graph, scalar contact solver, sensors and events; the
@@ -289,8 +296,8 @@ C added.
   setter, forces and impulses, waking), shapes (sphere, capsule, hull,
   transformed hull; proxies in the broad phase) and the broad phase's proxy
   layer (`lib/physics/dynamics/`, `broadPhase/BroadPhase`, golden `world`,
-  fixture 954). Split for the rest: **P4b** contacts, broad-phase pair
-  finding (the P3 remainder), the constraint graph and its colours, contact
+  fixture 954). Split for the rest: **P4b** contacts (pair finding is done,
+  P3b), the constraint graph and its colours, contact
   islands; **P4c** the scalar wide solver and contact solver, the stage
   list and dispatcher, and the 600-step scenes; **P4d** sleep and island
   splitting, sensors, contact and sensor events.
