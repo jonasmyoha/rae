@@ -1,0 +1,601 @@
+# The physics port's hulls (P2c: lib/physics/geometry/Hull*, BoxHull,
+# Hull2d) against Box3D itself: every line of tools/box3d-oracle/goldens/
+# hull.golden is one call of hull.c (quickhull construction, the generated
+# hulls, box hulls, cloning, mass and queries, the 2D hull) or
+# b3FindIncidentFace, with its inputs and outputs as exact hex floats,
+# written by Box3D's own C build. This runs the Rae port on the same inputs
+# and requires the SAME BITS (docs/physics-rae-port-design.md §4). Every
+# hull built must also pass isValidHull (Box3D's validating check, which
+# the oracle build compiles out).
+import Vec2
+import Vec3
+import Quat
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/TransformMath
+open physics/math/AabbMath
+open physics/math/PlaneMath
+open physics/geometry/QueryTypes
+open physics/geometry/Hull
+open physics/geometry/HullCreate
+open physics/geometry/BoxHull
+open physics/geometry/Hull2d
+
+# Reads the inputs of one golden line in order.
+type Reader {
+  values: List(Float)
+  next: Int
+}
+
+func readFloat(reader: mod Reader) ret Float {
+  let value: Float = reader.values.copyAtDefault(index: reader.next)
+  reader.next = reader.next + 1
+  ret value
+}
+
+func readInt(reader: mod Reader) ret Int {
+  ret readFloat(reader: reader).toInt()
+}
+
+func readBool(reader: mod Reader) ret Bool {
+  ret readFloat(reader: reader) is not 0.0
+}
+
+func readVec(reader: mod Reader) ret Vec3 {
+  let x: Float = readFloat(reader: reader)
+  let y: Float = readFloat(reader: reader)
+  let z: Float = readFloat(reader: reader)
+  ret Vec3 { x: x, y: y, z: z }
+}
+
+func readTransform(reader: mod Reader) ret Transform {
+  let position: Vec3 = readVec(reader: reader)
+  let x: Float = readFloat(reader: reader)
+  let y: Float = readFloat(reader: reader)
+  let z: Float = readFloat(reader: reader)
+  let w: Float = readFloat(reader: reader)
+  ret Transform { position: position, rotation: Quat { x: x, y: y, z: z, w: w } }
+}
+
+func readCapsule(reader: mod Reader) ret Capsule {
+  let center1: Vec3 = readVec(reader: reader)
+  let center2: Vec3 = readVec(reader: reader)
+  let radius: Float = readFloat(reader: reader)
+  ret Capsule { center1: center1, center2: center2, radius: radius }
+}
+
+func readProxy(reader: mod Reader) ret ShapeProxy {
+  let count: Int = readInt(reader: reader)
+  let points: List(Vec3) = List.create(Vec3, cap: count)
+  loop var i: Int = 0, i < count, ++i {
+    points.add(value: readVec(reader: reader))
+  }
+  let radius: Float = readFloat(reader: reader)
+  ret ShapeProxy { points: points, radius: radius }
+}
+
+func readPoints(reader: mod Reader, count: view Int) ret List(Vec3) {
+  let points: List(Vec3) = List.create(Vec3, cap: count)
+  loop var i: Int = 0, i < count, ++i {
+    points.add(value: readVec(reader: reader))
+  }
+  ret points
+}
+
+func readPoint2d(reader: mod Reader) ret Point2d {
+  let x: Float = readFloat(reader: reader)
+  let y: Float = readFloat(reader: reader)
+  let separation: Float = readFloat(reader: reader)
+  let originalIndex: Int = readInt(reader: reader)
+  ret Point2d { point: Vec2 { x: x, y: y }, separation: separation, originalIndex: originalIndex }
+}
+
+# A query's hull, from its spec: 0 = a point cloud, 1 = a transformed box.
+func readSpec(reader: mod Reader) ret opt Hull {
+  let kind: Int = readInt(reader: reader)
+  if kind is 0 {
+    let count: Int = readInt(reader: reader)
+    let maxVertexCount: Int = readInt(reader: reader)
+    let points: List(Vec3) = readPoints(reader: reader, count: count)
+    ret createHull(points: points, maxVertexCount: maxVertexCount)
+  }
+  let hx: Float = readFloat(reader: reader)
+  let hy: Float = readFloat(reader: reader)
+  let hz: Float = readFloat(reader: reader)
+  let transform: Transform = readTransform(reader: reader)
+  ret makeTransformedBoxHull(
+    hx: hx
+    hy: hy
+    hz: hz
+    transform: transform
+    lengthUnitsPerMeter: 1.0
+  )
+}
+
+func putFloat(out: mod List(Float), value: view Float) {
+  out.add(value: value)
+}
+
+func putInt(out: mod List(Float), value: view Int) {
+  out.add(value: value.toFloat())
+}
+
+func putBool(out: mod List(Float), value: view Bool) {
+  if value {
+    out.add(value: 1.0)
+  } else {
+    out.add(value: 0.0)
+  }
+}
+
+func putVec(out: mod List(Float), vector: view Vec3) {
+  out.add(value: vector.x)
+  out.add(value: vector.y)
+  out.add(value: vector.z)
+}
+
+func putQuat(out: mod List(Float), quat: view Quat) {
+  out.add(value: quat.x)
+  out.add(value: quat.y)
+  out.add(value: quat.z)
+  out.add(value: quat.w)
+}
+
+func putPlane(out: mod List(Float), plane: view Plane) {
+  putVec(out: out, vector: plane.normal)
+  putFloat(out: out, value: plane.offset)
+}
+
+func putBox(out: mod List(Float), box: view Aabb) {
+  putVec(out: out, vector: box.lowerBound)
+  putVec(out: out, vector: box.upperBound)
+}
+
+func putMatrix(out: mod List(Float), matrix: view Matrix3) {
+  putVec(out: out, vector: matrix.columnX)
+  putVec(out: out, vector: matrix.columnY)
+  putVec(out: out, vector: matrix.columnZ)
+}
+
+func putCast(out: mod List(Float), output: view CastOutput) {
+  putVec(out: out, vector: output.normal)
+  putVec(out: out, vector: output.point)
+  putFloat(out: out, value: output.fraction)
+  putInt(out: out, value: output.iterations)
+  putInt(out: out, value: output.triangleIndex)
+  putInt(out: out, value: output.childIndex)
+  putInt(out: out, value: output.materialIndex)
+  putBool(out: out, value: output.hit)
+}
+
+func putPoint2d(out: mod List(Float), point: view Point2d) {
+  putFloat(out: out, value: point.point.x)
+  putFloat(out: out, value: point.point.y)
+  putFloat(out: out, value: point.separation)
+  putInt(out: out, value: point.originalIndex)
+}
+
+# The counts of hulls that failed isValidHull.
+type Checks {
+  invalidHulls: Int
+}
+
+func putHull(out: mod List(Float), hull: view Hull, checks: mod Checks) {
+  if isValidHull(hull: hull) is false {
+    checks.invalidHulls = checks.invalidHulls + 1
+  }
+  putInt(out: out, value: hull.points.length)
+  putInt(out: out, value: hull.edges.length)
+  putInt(out: out, value: hull.faces.length)
+  loop var i: Int = 0, i < hull.points.length, ++i {
+    putVec(out: out, vector: hull.points.copyAtDefault(index: i))
+    putInt(out: out, value: hull.vertices.copyAtDefault(index: i).edge)
+  }
+  loop let edge: view HullHalfEdge in hull.edges {
+    putInt(out: out, value: edge.next)
+    putInt(out: out, value: edge.twin)
+    putInt(out: out, value: edge.origin)
+    putInt(out: out, value: edge.face)
+  }
+  loop var i: Int = 0, i < hull.faces.length, ++i {
+    putInt(out: out, value: hull.faces.copyAtDefault(index: i).edge)
+    putPlane(out: out, plane: hull.planes.copyAtDefault(index: i))
+  }
+  putBox(out: out, box: hull.aabb)
+  putFloat(out: out, value: hull.surfaceArea)
+  putFloat(out: out, value: hull.volume)
+  putFloat(out: out, value: hull.innerRadius)
+  putVec(out: out, vector: hull.center)
+  putMatrix(out: out, matrix: hull.centralInertia)
+}
+
+# Construction. False: not a function of this group.
+func evaluateConstruction(
+  name: view String
+  reader: mod Reader
+  out: mod List(Float)
+  checks: mod Checks
+) ret Bool {
+  let units: Float = 1.0
+  if name is "b3CreateHull" {
+    let count: Int = readInt(reader: reader)
+    let maxVertexCount: Int = readInt(reader: reader)
+    let points: List(Vec3) = readPoints(reader: reader, count: count)
+    if let hull: Hull = createHull(points: points, maxVertexCount: maxVertexCount) {
+      putHull(out: out, hull: hull, checks: checks)
+    } else {
+      putInt(out: out, value: 0)
+    }
+  } else if name is "b3CreateCylinder" {
+    let height: Float = readFloat(reader: reader)
+    let radius: Float = readFloat(reader: reader)
+    let yOffset: Float = readFloat(reader: reader)
+    let sides: Int = readInt(reader: reader)
+    if let hull: Hull = createCylinder(
+      height: height
+      radius: radius
+      yOffset: yOffset
+      sides: sides
+    ) {
+      putHull(out: out, hull: hull, checks: checks)
+    } else {
+      putInt(out: out, value: 0)
+    }
+  } else if name is "b3CreateCone" {
+    let height: Float = readFloat(reader: reader)
+    let radius1: Float = readFloat(reader: reader)
+    let radius2: Float = readFloat(reader: reader)
+    let slices: Int = readInt(reader: reader)
+    if let hull: Hull = createCone(
+      height: height
+      radius1: radius1
+      radius2: radius2
+      slices: slices
+    ) {
+      putHull(out: out, hull: hull, checks: checks)
+    } else {
+      putInt(out: out, value: 0)
+    }
+  } else if name is "b3CreateRock" {
+    if let hull: Hull = createRock(radius: readFloat(reader: reader)) {
+      putHull(out: out, hull: hull, checks: checks)
+    } else {
+      putInt(out: out, value: 0)
+    }
+  } else if name is "b3CreateComplexHull" {
+    if let hull: Hull = createComplexHull(radius: readFloat(reader: reader)) {
+      putHull(out: out, hull: hull, checks: checks)
+    } else {
+      putInt(out: out, value: 0)
+    }
+  } else if name is "b3MakeTransformedBoxHull" {
+    let hx: Float = readFloat(reader: reader)
+    let hy: Float = readFloat(reader: reader)
+    let hz: Float = readFloat(reader: reader)
+    let transform: Transform = readTransform(reader: reader)
+    putHull(
+      out: out
+      hull: makeTransformedBoxHull(
+        hx: hx
+        hy: hy
+        hz: hz
+        transform: transform
+        lengthUnitsPerMeter: units
+      )
+      checks: checks
+    )
+  } else if name is "b3MakeBoxHull" {
+    let hx: Float = readFloat(reader: reader)
+    let hy: Float = readFloat(reader: reader)
+    let hz: Float = readFloat(reader: reader)
+    putHull(
+      out: out
+      hull: makeBoxHull(
+        hx: hx
+        hy: hy
+        hz: hz
+        lengthUnitsPerMeter: units
+      )
+      checks: checks
+    )
+  } else if name is "b3MakeCubeHull" {
+    putHull(
+      out: out
+      hull: makeCubeHull(halfWidth: readFloat(reader: reader), lengthUnitsPerMeter: units)
+      checks: checks
+    )
+  } else if name is "b3MakeOffsetBoxHull" {
+    let hx: Float = readFloat(reader: reader)
+    let hy: Float = readFloat(reader: reader)
+    let hz: Float = readFloat(reader: reader)
+    let offset: Vec3 = readVec(reader: reader)
+    putHull(
+      out: out
+      hull: makeOffsetBoxHull(
+        hx: hx
+        hy: hy
+        hz: hz
+        offset: offset
+        lengthUnitsPerMeter: units
+      )
+      checks: checks
+    )
+  } else if name is "b3ScaleBox" {
+    var halfWidths: Vec3 = readVec(reader: reader)
+    var transform: Transform = readTransform(reader: reader)
+    let postScale: Vec3 = readVec(reader: reader)
+    let minHalfWidth: Float = readFloat(reader: reader)
+    scaleBox(
+      halfWidths: halfWidths
+      transform: transform
+      postScale: postScale
+      minHalfWidth: minHalfWidth
+    )
+    putVec(out: out, vector: halfWidths)
+    putVec(out: out, vector: transform.position)
+    putQuat(out: out, quat: transform.rotation)
+  } else if name is "b3MakeScaledBoxHull" {
+    let halfWidths: Vec3 = readVec(reader: reader)
+    let transform: Transform = readTransform(reader: reader)
+    let postScale: Vec3 = readVec(reader: reader)
+    putHull(
+      out: out
+      hull: makeScaledBoxHull(
+        halfWidths: halfWidths
+        transform: transform
+        postScale: postScale
+        lengthUnitsPerMeter: units
+      )
+      checks: checks
+    )
+  } else if name is "b3CloneAndTransformHull" {
+    if let original: Hull = readSpec(reader: reader) {
+      let transform: Transform = readTransform(reader: reader)
+      let scaleVector: Vec3 = readVec(reader: reader)
+      if let hull: Hull = cloneAndTransformHull(
+        original: original
+        transform: transform
+        scaleVector: scaleVector
+      ) {
+        putHull(out: out, hull: hull, checks: checks)
+      } else {
+        putInt(out: out, value: 0)
+      }
+    }
+  } else {
+    ret false
+  }
+  ret true
+}
+
+# Mass and queries on a hull built from a spec.
+func evaluateQuery(name: view String, reader: mod Reader, out: mod List(Float)) ret Bool {
+  let units: Float = 1.0
+  let known: List(String) = {
+    "b3ComputeHullMass"
+    "b3ComputeHullAABB"
+    "b3ComputeSweptHullAABB"
+    "b3OverlapHull"
+    "b3RayCastHull"
+    "b3ShapeCastHull"
+    "b3CollideMoverAndHull"
+    "b3FindHullSupportVertex"
+    "b3FindHullSupportFace"
+    "b3ComputeHullExtent"
+    "b3ComputeHullProjectedArea"
+    "b3FindIncidentFace"
+  }
+  if known.contains(value: name) is false {
+    ret false
+  }
+  if let hull: Hull = readSpec(reader: reader) {
+    if name is "b3ComputeHullMass" {
+      let massData: MassData = computeHullMass(hull: hull, density: readFloat(reader: reader))
+      putFloat(out: out, value: massData.mass)
+      putVec(out: out, vector: massData.center)
+      putMatrix(out: out, matrix: massData.inertia)
+    } else if name is "b3ComputeHullAABB" {
+      putBox(out: out, box: computeHullAabb(hull: hull, transform: readTransform(reader: reader)))
+    } else if name is "b3ComputeSweptHullAABB" {
+      let transform1: Transform = readTransform(reader: reader)
+      let transform2: Transform = readTransform(reader: reader)
+      putBox(
+        out: out
+        box: computeSweptHullAabb(hull: hull, transform1: transform1, transform2: transform2)
+      )
+    } else if name is "b3OverlapHull" {
+      let transform: Transform = readTransform(reader: reader)
+      let proxy: ShapeProxy = readProxy(reader: reader)
+      putBool(
+        out: out
+        value: overlapHull(
+          hull: hull
+          shapeTransform: transform
+          proxy: proxy
+          lengthUnitsPerMeter: units
+        )
+      )
+    } else if name is "b3RayCastHull" {
+      let origin: Vec3 = readVec(reader: reader)
+      let translation: Vec3 = readVec(reader: reader)
+      let maxFraction: Float = readFloat(reader: reader)
+      let ray: RayCastInput = { origin: origin, translation: translation, maxFraction: maxFraction }
+      putCast(out: out, output: rayCastHull(hull: hull, input: ray))
+    } else if name is "b3ShapeCastHull" {
+      let proxy: ShapeProxy = readProxy(reader: reader)
+      let translation: Vec3 = readVec(reader: reader)
+      let maxFraction: Float = readFloat(reader: reader)
+      let canEncroach: Bool = readBool(reader: reader)
+      let input: ShapeCastInput = {
+        proxy: proxy
+        translation: translation
+        maxFraction: maxFraction
+        canEncroach: canEncroach
+      }
+      putCast(out: out, output: shapeCastHull(hull: hull, input: input, lengthUnitsPerMeter: units))
+    } else if name is "b3CollideMoverAndHull" {
+      let mover: Capsule = readCapsule(reader: reader)
+      var result: PlaneResult = emptyPlaneResult()
+      let count: Int = collideMoverAndHull(result: result, hull: hull, mover: mover)
+      putInt(out: out, value: count)
+      putPlane(out: out, plane: result.plane)
+      putVec(out: out, vector: result.point)
+    } else if name is "b3FindHullSupportVertex" {
+      putInt(out: out, value: findHullSupportVertex(hull: hull, direction: readVec(reader: reader)))
+    } else if name is "b3FindHullSupportFace" {
+      putInt(out: out, value: findHullSupportFace(hull: hull, direction: readVec(reader: reader)))
+    } else if name is "b3ComputeHullExtent" {
+      let extent: ShapeExtent = computeHullExtent(hull: hull, origin: readVec(reader: reader))
+      putFloat(out: out, value: extent.minExtent)
+      putVec(out: out, vector: extent.maxExtent)
+    } else if name is "b3ComputeHullProjectedArea" {
+      putFloat(
+        out: out
+        value: computeHullProjectedArea(hull: hull, direction: readVec(reader: reader))
+      )
+    } else if name is "b3FindIncidentFace" {
+      let normal: Vec3 = readVec(reader: reader)
+      let vertexIndex: Int = readInt(reader: reader)
+      putInt(
+        out: out
+        value: findIncidentFace(hull: hull, refNormal: normal, vertexIndex: vertexIndex)
+      )
+    }
+  }
+  ret true
+}
+
+# The 2D hull and its simplification.
+func evaluate2d(name: view String, reader: mod Reader, out: mod List(Float)) ret Bool {
+  let units: Float = 1.0
+  if name is "b3Hull2D" {
+    let count: Int = readInt(reader: reader)
+    let points: List(Point2d) = List.create(Point2d, cap: count)
+    loop var i: Int = 0, i < count, ++i {
+      points.add(value: readPoint2d(reader: reader))
+    }
+    let hull: List(Point2d) = List.create(Point2d, cap: 2 * count)
+    let hullCount: Int = hull2d(points: points, hull: hull, lengthUnitsPerMeter: units)
+    putInt(out: out, value: hullCount)
+    loop let point: view Point2d in hull {
+      putPoint2d(out: out, point: point)
+    }
+  } else if name is "b3SimplifyHull2D" {
+    let count: Int = readInt(reader: reader)
+    let hull: List(Point2d) = List.create(Point2d, cap: count)
+    loop var i: Int = 0, i < count, ++i {
+      hull.add(value: readPoint2d(reader: reader))
+    }
+    let target: Int = readInt(reader: reader)
+    let simplified: Int = simplifyHull2d(hull: hull, target: target, lengthUnitsPerMeter: units)
+    putInt(out: out, value: simplified)
+    loop let point: view Point2d in hull {
+      putPoint2d(out: out, point: point)
+    }
+  } else {
+    ret false
+  }
+  ret true
+}
+
+# The same bits: NaN matches NaN, and a zero matches only a zero of its sign.
+func sameBits(actual: view Float, expected: view Float) ret Bool {
+  if actual is not actual {
+    ret expected is not expected
+  }
+  if actual is not expected {
+    ret false
+  }
+  if actual is 0.0 {
+    ret 1.0 / actual is 1.0 / expected
+  }
+  ret true
+}
+
+func readGolden() ret String {
+  # The runner runs from compiler/, the TSan gate from the case's folder.
+  let candidates: List(String) = {
+    "../tools/box3d-oracle/goldens/hull.golden"
+    "../../../tools/box3d-oracle/goldens/hull.golden"
+    "tools/box3d-oracle/goldens/hull.golden"
+  }
+  loop var i: Int = 0, i < candidates.length, ++i {
+    if let text: String = readFile(path: candidates.copyAtDefault(index: i)) {
+      ret text
+    }
+  }
+  ret ""
+}
+
+func main() {
+  let golden: String = readGolden()
+  let lines: List(String) = golden.split(sep: "\n")
+  var calls: Int = 0
+  var mismatches: Int = 0
+  var unknown: Int = 0
+  var checks: Checks = { invalidHulls: 0 }
+  let names: List(String) = List.create(String, cap: 32)
+  loop var i: Int = 0, i < lines.length, ++i {
+    let line: String = lines.copyAtDefault(index: i)
+    if line.length() is 0 or line.startsWith(prefix: "#") {
+      continue
+    }
+    let tokens: List(String) = line.split(sep: " ")
+    let name: String = tokens.copyAtDefault(index: 0)
+    var reader: Reader = { values: List.create(Float, cap: 256), next: 0 }
+    let expected: List(Float) = List.create(Float, cap: 256)
+    var afterArrow: Bool = false
+    loop var j: Int = 1, j < tokens.length, ++j {
+      let token: String = tokens.copyAtDefault(index: j)
+      if token is "->" {
+        afterArrow = true
+      } else if afterArrow {
+        expected.add(value: token.toFloat())
+      } else {
+        reader.values.add(value: token.toFloat())
+      }
+    }
+    let actual: List(Float) = List.create(Float, cap: 256)
+    let known: Bool = evaluateConstruction(
+      name: name
+      reader: reader
+      out: actual
+      checks: checks
+    ) or evaluateQuery(name: name, reader: reader, out: actual) or evaluate2d(
+      name: name
+      reader: reader
+      out: actual
+    )
+    if known is false {
+      unknown = unknown + 1
+      log("not ported: {name}")
+      continue
+    }
+    calls = calls + 1
+    if names.contains(value: name) is false {
+      names.add(value: name)
+    }
+    var same: Bool = actual.length is expected.length
+    loop var j: Int = 0, j < expected.length and same, ++j {
+      same = sameBits(
+        actual: actual.copyAtDefault(index: j)
+        expected: expected.copyAtDefault(index: j)
+      )
+    }
+    if same is false {
+      mismatches = mismatches + 1
+      if mismatches <= 6 {
+        log("MISMATCH line {i + 1}: {line.sub(start: 0, len: 300)}")
+        var got: String = "  got"
+        loop var j: Int = 0, j < actual.length and j < 40, ++j {
+          got = "{got} {actual.copyAtDefault(index: j)}"
+        }
+        log(got)
+      }
+    }
+  }
+  log(
+    "hull.golden: {calls} calls of {names.length} Box3D functions, {mismatches} not bit-exact, {unknown} not ported"
+  )
+  log("hulls failing isValidHull: {checks.invalidHulls}")
+}
