@@ -91,6 +91,27 @@ func remainder(x: copy Float, y: copy Float) ret Float {
   }
 }
 
+func nativeFloatBits(value: Float) unsafe extern("rae_ext_rae_f32_bits") ret Int
+
+# The IEEE-754 bit pattern of a Float, as an Int in [0, 2^32): sign bit 31,
+# exponent bits 23-30, mantissa bits 0-22. With floatFromBits, the exact
+# reinterpretation C does with memcpy (Box3D packs indices into the low
+# mantissa bits of its SAT support values).
+func floatBits(value: copy Float) ret Int {
+  unsafe {
+    ret nativeFloatBits(value: value)
+  }
+}
+
+func nativeFloatFromBits(bits: Int) unsafe extern("rae_ext_Math_floatFromBits") ret Float
+
+# The Float whose IEEE-754 bit pattern is the low 32 bits of `bits`.
+func floatFromBits(bits: copy Int) ret Float {
+  unsafe {
+    ret nativeFloatFromBits(bits: bits)
+  }
+}
+
 func nativePow(base: Float, exp: Float) unsafe extern("rae_ext_Math_pow") ret Float
 
 func pow(base: copy Float, exp: copy Float) ret Float {

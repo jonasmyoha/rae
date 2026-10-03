@@ -1,0 +1,577 @@
+# Contact manifolds of a hull against a sphere or a capsule (Box3D's
+# convex_manifold.c at 9f998c8): GJK for the shallow case, face and edge
+# queries for deep penetration. Box3D's operation order is kept exactly;
+# checked bit for bit against the oracle in fixture 952.
+#
+# Each manifold is in frame A (the hull), with B placed by `transformBtoA`.
+open Vec3
+open physics/Constants
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/TransformMath
+open physics/math/SegmentMath
+open physics/math/PlaneMath
+open physics/geometry/QueryTypes
+open physics/geometry/Hull
+open physics/collision/Simplex
+open physics/collision/Distance
+open physics/collision/Manifold
+open physics/collision/SeparatingAxis
+
+# B3_PARALLEL_EDGE_TOL squared
+func squaredParallelEdgeTolerance() ret Float {
+  ret parallelEdgeTolerance * parallelEdgeTolerance
+}
+
+# A one-point manifold with the single-contact feature pair.
+func setSingleHullPoint(
+  manifold: mod LocalManifold
+  normal: view Vec3
+  point: view Vec3
+  separation: view Float
+) {
+  manifold.normal = normal
+  manifold.pointCount = 1
+  setManifoldPoint(
+    manifold: manifold
+    index: 0
+    point: LocalManifoldPoint {
+      point: point
+      separation: separation
+      pair: singleFeaturePair()
+      triangleIndex: 0
+    }
+  )
+}
+
+# A two-point manifold from the clipped capsule segment.
+func setSegmentPoints(
+  manifold: mod LocalManifold
+  normal: view Vec3
+  first: view ClipVertex
+  second: view ClipVertex
+  point1: view Vec3
+  point2: view Vec3
+  separation1: view Float
+  separation2: view Float
+) {
+  manifold.normal = normal
+  manifold.pointCount = 2
+  setManifoldPoint(
+    manifold: manifold
+    index: 0
+    point: LocalManifoldPoint {
+      point: point1
+      separation: separation1
+      pair: first.pair
+      triangleIndex: 0
+    }
+  )
+  setManifoldPoint(
+    manifold: manifold
+    index: 1
+    point: LocalManifoldPoint {
+      point: point2
+      separation: separation2
+      pair: second.pair
+      triangleIndex: 0
+    }
+  )
+}
+
+# b3CollideHullAndSphere: GJK to the sphere center, or for deep penetration
+# the face plane the center is least inside. `cache` warm-starts GJK.
+func collideHullAndSphere(
+  manifold: mod LocalManifold
+  hullA: view Hull
+  sphereB: view Sphere
+  transformBtoA: view Transform
+  cache: mod SimplexCache
+  lengthUnitsPerMeter: view Float
+) {
+  manifold.pointCount = 0
+  if manifoldCapacity(manifold: manifold) is 0 {
+    ret
+  }
+  let center: Vec3 = transformPoint(transform: transformBtoA, point: sphereB.center)
+  let speculative: Float = speculativeDistance(lengthUnitsPerMeter: lengthUnitsPerMeter)
+
+  let centerPoints: List(Vec3) = List.create(Vec3, cap: 1)
+  centerPoints.add(value: center)
+  let radiusA: Float = 0.0
+  let radiusB: Float = sphereB.radius
+  let radius: Float = radiusA + radiusB
+  let output: DistanceOutput = proxyDistance(
+    proxyA: hullProxy(hull: hullA)
+    proxyB: ShapeProxy { points: centerPoints, radius: 0.0 }
+    transform: transformIdentity()
+    useRadii: false
+    cache: cache
+  )
+
+  if output.distance > radius + speculative {
+    # A separating axis
+    cache = emptySimplexCache()
+    ret
+  }
+
+  if output.distance > 100.0 * floatEpsilon {
+    # Shallow penetration
+    let normal: Vec3 = normalize(vector: subtract(left: output.pointB, right: output.pointA))
+    # The sphere center projected onto the hull, and the deepest point of the sphere
+    let pointA: Vec3 = mulAdd(
+      base: center
+      scale: radiusA - dot(left: subtract(left: center, right: output.pointA), right: normal)
+      vector: normal
+    )
+    let pointB: Vec3 = mulSub(base: center, scale: radiusB, vector: normal)
+    let point: Vec3 = lerp(from: pointA, to: pointB, alpha: 0.5)
+    setSingleHullPoint(
+      manifold: manifold
+      normal: normal
+      point: point
+      separation: output.distance - radius
+    )
+  } else {
+    # Deep penetration: the face the center is least deep behind
+    var bestIndex: Int = -1
+    var bestDistance: Float = -floatMax
+    loop var index: Int = 0, index < hullA.planes.length, ++index {
+      let separation: Float = planeSeparation(
+        plane: hullPlane(hull: hullA, index: index)
+        point: center
+      )
+      if separation > bestDistance {
+        bestIndex = index
+        bestDistance = separation
+      }
+    }
+    let normal: Vec3 = hullPlane(hull: hullA, index: bestIndex).normal
+    let pointA: Vec3 = mulAdd(
+      base: center
+      scale: radiusA - dot(left: subtract(left: center, right: output.pointA), right: normal)
+      vector: normal
+    )
+    let pointB: Vec3 = mulSub(base: center, scale: radiusB, vector: normal)
+    let point: Vec3 = lerp(from: pointA, to: pointB, alpha: 0.5)
+    setSingleHullPoint(
+      manifold: manifold
+      normal: normal
+      point: point
+      separation: bestDistance - radius
+    )
+  }
+}
+
+# b3ClipSegmentToHullFace: clip the segment against the side planes of face
+# `refFace`. Returns 2 if both points survive, else 0.
+func clipSegmentToHullFace(
+  first: mod ClipVertex
+  second: mod ClipVertex
+  hull: view Hull
+  refFace: view Int
+) ret Int {
+  let refPlane: Plane = hullPlane(hull: hull, index: refFace)
+  let faceEdge: Int = hull.faces.copyAtDefault(index: refFace).edge
+  var edgeIndex: Int = faceEdge
+  loop true {
+    let edge: HullHalfEdge = hullEdge(hull: hull, index: edgeIndex)
+    let nextEdgeIndex: Int = edge.next
+    let next: HullHalfEdge = hullEdge(hull: hull, index: nextEdgeIndex)
+    let vertex1: Vec3 = hullPoint(hull: hull, index: edge.origin)
+    let vertex2: Vec3 = hullPoint(hull: hull, index: next.origin)
+    let tangent: Vec3 = normalize(vector: subtract(left: vertex2, right: vertex1))
+    let binormal: Vec3 = cross(left: tangent, right: refPlane.normal)
+    let pointCount: Int = clipSegment(
+      first: first
+      second: second
+      plane: planeFromNormalAndPoint(normal: binormal, point: vertex1)
+    )
+    if pointCount < 2 {
+      ret 0
+    }
+    edgeIndex = nextEdgeIndex
+    if edgeIndex is faceEdge {
+      break
+    }
+  }
+  ret 2
+}
+
+# The capsule's segment in A's frame as clip vertices.
+func capsuleClipVertex(position: view Vec3, index: view Int) ret ClipVertex {
+  ret ClipVertex {
+    position: position
+    separation: 0.0
+    pair: makeFeaturePair(
+      owner1: featureShapeA
+      index1: index
+      owner2: featureShapeA
+      index2: index
+    )
+  }
+}
+
+# b3QueryFaceDirectionHullAndCapsule: the hull face the capsule's segment
+# is farthest in front of.
+func queryFaceDirectionHullAndCapsule(
+  hull: view Hull
+  capsule: view Capsule
+  capsuleTransform: view Transform
+) ret SeparatingAxis {
+  var maxFaceIndex: Int = -1
+  var maxVertexIndex: Int = -1
+  var maxFaceSeparation: Float = -floatMax
+  let capsulePoints: List(Vec3) = List.create(Vec3, cap: 2)
+  capsulePoints.add(value: transformPoint(transform: capsuleTransform, point: capsule.center1))
+  capsulePoints.add(value: transformPoint(transform: capsuleTransform, point: capsule.center2))
+  loop var faceIndex: Int = 0, faceIndex < hull.planes.length, ++faceIndex {
+    let plane: Plane = hullPlane(hull: hull, index: faceIndex)
+    let vertexIndex: Int = pointSupport(points: capsulePoints, axis: negate(vector: plane.normal))
+    let support: Vec3 = capsulePoints.copyAtDefault(index: vertexIndex)
+    let separation: Float = planeSeparation(plane: plane, point: support)
+    if separation > maxFaceSeparation {
+      maxVertexIndex = vertexIndex
+      maxFaceIndex = faceIndex
+      maxFaceSeparation = separation
+    }
+  }
+  ret SeparatingAxis {
+    normal: hullPlane(hull: hull, index: maxFaceIndex).normal
+    separation: maxFaceSeparation
+    indexA: maxFaceIndex
+    indexB: maxVertexIndex
+    kind: SeparatingFeature.invalidAxis
+  }
+}
+
+# b3QueryEdgeDirectionHullAndCapsule: the hull edge whose cross with the
+# capsule axis (on the Gauss map) separates most. indexA -1 if none.
+func queryEdgeDirectionHullAndCapsule(
+  hull: view Hull
+  capsule: view Capsule
+  capsuleTransform: view Transform
+) ret SeparatingAxis {
+  var maxNormal: Vec3 = zeroVector()
+  var maxSeparation: Float = -floatMax
+  var maxIndexA: Int = -1
+  var maxIndexB: Int = -1
+  # In the hull's frame
+  let pointA: Vec3 = transformPoint(transform: capsuleTransform, point: capsule.center1)
+  let endA: Vec3 = transformPoint(transform: capsuleTransform, point: capsule.center2)
+  let edgeA: Vec3 = subtract(left: endA, right: pointA)
+  let squaredTolerance: Float = squaredParallelEdgeTolerance()
+  var index: Int = 0
+  loop index < hull.edges.length {
+    let edge: HullHalfEdge = hullEdge(hull: hull, index: index)
+    let twin: HullHalfEdge = hullEdge(hull: hull, index: index + 1)
+    let pointB: Vec3 = hullPoint(hull: hull, index: twin.origin)
+    let normalU: Vec3 = hullPlane(hull: hull, index: edge.face).normal
+    let normalV: Vec3 = hullPlane(hull: hull, index: twin.face).normal
+    # An isolated edge (the capsule's) is a great circle on the Gauss map, so
+    # the arc test is a plane test.
+    let cba: Float = dot(left: normalU, right: edgeA)
+    let dba: Float = dot(left: normalV, right: edgeA)
+    if cba * dba < 0.0 {
+      # Skip nearly parallel edges (noise-floor separations)
+      if maxFloat(left: cba * cba, right: dba * dba) >= squaredTolerance * lengthSquared(
+        vector: edgeA
+      ) {
+        # The arc crossing is the edge pair axis; it points from B to A.
+        let fraction: Float = cba / (cba - dba)
+        var axis: Vec3 = lerp(from: normalU, to: normalV, alpha: fraction)
+        axis = normalize(vector: axis)
+        let separation: Float = dot(left: axis, right: subtract(left: endA, right: pointB))
+        if separation > maxSeparation {
+          maxNormal = axis
+          maxSeparation = separation
+          maxIndexA = 0
+          maxIndexB = index
+        }
+      }
+    }
+    index = index + 2
+  }
+  ret SeparatingAxis {
+    normal: maxNormal
+    separation: maxSeparation
+    indexA: maxIndexA
+    indexB: maxIndexB
+    kind: SeparatingFeature.invalidAxis
+  }
+}
+
+# b3BuildHullFaceAndCapsuleContact: two points from the capsule segment
+# clipped to the reference face of `query`, if either is within the
+# speculative distance.
+func buildHullFaceAndCapsuleContact(
+  manifold: mod LocalManifold
+  hullA: view Hull
+  capsuleB: view Capsule
+  transformBtoA: view Transform
+  query: view SeparatingAxis
+  lengthUnitsPerMeter: view Float
+) ret Bool {
+  let refFace: Int = query.indexA
+  let refPlane: Plane = hullPlane(hull: hullA, index: refFace)
+  var first: ClipVertex = capsuleClipVertex(
+    position: transformPoint(transform: transformBtoA, point: capsuleB.center1)
+    index: 0
+  )
+  var second: ClipVertex = capsuleClipVertex(
+    position: transformPoint(transform: transformBtoA, point: capsuleB.center2)
+    index: 1
+  )
+  if clipSegmentToHullFace(
+    first: first
+    second: second
+    hull: hullA
+    refFace: refFace
+  ) < 2 {
+    ret false
+  }
+  let distance1: Float = planeSeparation(plane: refPlane, point: first.position)
+  let distance2: Float = planeSeparation(plane: refPlane, point: second.position)
+  let speculative: Float = speculativeDistance(lengthUnitsPerMeter: lengthUnitsPerMeter)
+  if distance1 <= speculative or distance2 <= speculative {
+    let normal: Vec3 = refPlane.normal
+    let point1: Vec3 = mulSub(
+      base: first.position
+      scale: 0.5 * (distance1 + capsuleB.radius)
+      vector: normal
+    )
+    let point2: Vec3 = mulSub(
+      base: second.position
+      scale: 0.5 * (distance2 + capsuleB.radius)
+      vector: normal
+    )
+    setSegmentPoints(
+      manifold: manifold
+      normal: normal
+      first: first
+      second: second
+      point1: point1
+      point2: point2
+      separation1: distance1 - capsuleB.radius
+      separation2: distance2 - capsuleB.radius
+    )
+    ret true
+  }
+  ret false
+}
+
+# b3BuildHullAndCapsuleEdgeContact: one point between the hull edge and the
+# capsule axis of `query`, if their closest points are inside both.
+func buildHullAndCapsuleEdgeContact(
+  manifold: mod LocalManifold
+  hullA: view Hull
+  capsuleB: view Capsule
+  transformBtoA: view Transform
+  query: view SeparatingAxis
+) ret Bool {
+  if manifoldCapacity(manifold: manifold) < 1 {
+    ret false
+  }
+  let capsuleStart: Vec3 = transformPoint(transform: transformBtoA, point: capsuleB.center1)
+  let capsuleEnd: Vec3 = transformPoint(transform: transformBtoA, point: capsuleB.center2)
+  let capsuleEdge: Vec3 = subtract(left: capsuleEnd, right: capsuleStart)
+  let edge: HullHalfEdge = hullEdge(hull: hullA, index: query.indexB)
+  let twin: HullHalfEdge = hullEdge(hull: hullA, index: edge.twin)
+  let hullStart: Vec3 = hullPoint(hull: hullA, index: edge.origin)
+  let hullEnd: Vec3 = hullPoint(hull: hullA, index: twin.origin)
+  let hullEdgeVector: Vec3 = subtract(left: hullEnd, right: hullStart)
+  let normal: Vec3 = query.normal
+  let result: SegmentDistanceResult = lineDistance(
+    point1: hullStart
+    direction1: hullEdgeVector
+    point2: capsuleStart
+    direction2: capsuleEdge
+  )
+  if isWithinSegments(result: result) is false {
+    # The closest points are beyond the end points
+    ret false
+  }
+  let point: Vec3 = scale(
+    scale: 0.5
+    vector: add(
+      left: mulSub(base: result.point1, scale: capsuleB.radius, vector: normal)
+      right: result.point2
+    )
+  )
+  let separation: Float = dot(
+    left: normal
+    right: subtract(left: result.point2, right: result.point1)
+  )
+  manifold.normal = normal
+  manifold.pointCount = 1
+  setManifoldPoint(
+    manifold: manifold
+    index: 0
+    point: LocalManifoldPoint {
+      point: point
+      separation: separation - capsuleB.radius
+      pair: makeFeaturePair(
+        owner1: featureShapeA
+        index1: query.indexA
+        owner2: featureShapeB
+        index2: query.indexB
+      )
+      triangleIndex: 0
+    }
+  )
+  ret true
+}
+
+# b3CollideHullAndCapsule: GJK for the shallow case (two clipped points when
+# the closest-point direction is nearly a face normal, else one), the face
+# and edge queries for deep penetration. `cache` warm-starts GJK.
+func collideHullAndCapsule(
+  manifold: mod LocalManifold
+  hullA: view Hull
+  capsuleB: view Capsule
+  transformBtoA: view Transform
+  cache: mod SimplexCache
+  lengthUnitsPerMeter: view Float
+) {
+  manifold.pointCount = 0
+  if manifoldCapacity(manifold: manifold) < 2 {
+    ret
+  }
+  let segmentPoints: List(Vec3) = List.create(Vec3, cap: 2)
+  segmentPoints.add(value: capsuleB.center1)
+  segmentPoints.add(value: capsuleB.center2)
+  let output: DistanceOutput = proxyDistance(
+    proxyA: hullProxy(hull: hullA)
+    proxyB: ShapeProxy { points: segmentPoints, radius: 0.0 }
+    transform: transformBtoA
+    useRadii: false
+    cache: cache
+  )
+  let speculative: Float = speculativeDistance(lengthUnitsPerMeter: lengthUnitsPerMeter)
+  if output.distance > capsuleB.radius + speculative {
+    # A separating axis
+    cache = emptySimplexCache()
+    ret
+  }
+
+  if output.distance > 100.0 * floatEpsilon {
+    # Shallow penetration
+    let delta: Vec3 = output.normal
+    let refFace: Int = findHullSupportFace(hull: hullA, direction: delta)
+    let refPlane: Plane = hullPlane(hull: hullA, index: refFace)
+    # Two points if the closest-point direction is nearly the face normal
+    let tolerance: Float = 0.998
+    if absFloat(value: dot(left: refPlane.normal, right: delta)) > tolerance {
+      var first: ClipVertex = capsuleClipVertex(
+        position: transformPoint(transform: transformBtoA, point: capsuleB.center1)
+        index: 0
+      )
+      var second: ClipVertex = capsuleClipVertex(
+        position: transformPoint(transform: transformBtoA, point: capsuleB.center2)
+        index: 1
+      )
+      let pointCount: Int = clipSegmentToHullFace(
+        first: first
+        second: second
+        hull: hullA
+        refFace: refFace
+      )
+      if pointCount is 2 {
+        let distance1: Float = planeSeparation(plane: refPlane, point: first.position)
+        let distance2: Float = planeSeparation(plane: refPlane, point: second.position)
+        if distance1 <= capsuleB.radius + speculative or distance2 <= capsuleB.radius + speculative {
+          let normal: Vec3 = refPlane.normal
+          let point1: Vec3 = mulSub(
+            base: first.position
+            scale: 0.5 * (capsuleB.radius + distance1)
+            vector: normal
+          )
+          let point2: Vec3 = mulSub(
+            base: second.position
+            scale: 0.5 * (capsuleB.radius + distance2)
+            vector: normal
+          )
+          setSegmentPoints(
+            manifold: manifold
+            normal: normal
+            first: first
+            second: second
+            point1: point1
+            point2: point2
+            separation1: distance1 - capsuleB.radius
+            separation2: distance2 - capsuleB.radius
+          )
+          ret
+        }
+      }
+    }
+    # One point from the closest points
+    let point: Vec3 = scale(
+      scale: 0.5
+      vector: add(
+        left: mulSub(base: output.pointA, scale: capsuleB.radius, vector: delta)
+        right: output.pointB
+      )
+    )
+    setSingleHullPoint(
+      manifold: manifold
+      normal: delta
+      point: point
+      separation: output.distance - capsuleB.radius
+    )
+    ret
+  }
+
+  # Deep penetration
+  let faceQuery: SeparatingAxis = queryFaceDirectionHullAndCapsule(
+    hull: hullA
+    capsule: capsuleB
+    capsuleTransform: transformBtoA
+  )
+  if faceQuery.separation > capsuleB.radius {
+    ret
+  }
+  let edgeQuery: SeparatingAxis = queryEdgeDirectionHullAndCapsule(
+    hull: hullA
+    capsule: capsuleB
+    capsuleTransform: transformBtoA
+  )
+  if edgeQuery.separation > capsuleB.radius {
+    ret
+  }
+
+  # The face contact
+  var faceSeparationValue: Float = faceQuery.separation - capsuleB.radius
+  buildHullFaceAndCapsuleContact(
+    manifold: manifold
+    hullA: hullA
+    capsuleB: capsuleB
+    transformBtoA: transformBtoA
+    query: faceQuery
+    lengthUnitsPerMeter: lengthUnitsPerMeter
+  )
+  if manifold.pointCount is 2 {
+    # The clipped separation
+    faceSeparationValue = minFloat(
+      left: manifoldPoint(manifold: manifold, index: 0).separation
+      right: manifoldPoint(manifold: manifold, index: 1).separation
+    )
+  }
+
+  # A valid edge-edge axis?
+  if edgeQuery.indexA is -1 {
+    ret
+  }
+  # An edge contact when the face contact failed or the edge is clearly better
+  let slop: Float = linearSlop(lengthUnitsPerMeter: lengthUnitsPerMeter)
+  let edgeSeparation: Float = edgeQuery.separation - capsuleB.radius
+  if manifold.pointCount is 0 or edgeSeparation > faceSeparationValue + slop {
+    buildHullAndCapsuleEdgeContact(
+      manifold: manifold
+      hullA: hullA
+      capsuleB: capsuleB
+      transformBtoA: transformBtoA
+      query: edgeQuery
+    )
+  }
+}

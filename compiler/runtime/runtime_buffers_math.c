@@ -253,6 +253,9 @@ float rae_ext_Math_sqrt(float x) { return sqrtf(x); }
 /* IEEE remainder: x - n*y with n the nearest integer to x/y. Exact (no rounding), so
  * deterministic on every platform — Box3D's b3UnwindAngle relies on it. */
 float rae_ext_Math_remainder(float x, float y) { return remainderf(x, y); }
+/* The inverse of rae_ext_rae_f32_bits: the Float whose IEEE-754 bits are the
+   low 32 bits of `bits` (lib/Math floatFromBits). */
+float rae_ext_Math_floatFromBits(int64_t bits) { uint32_t low = (uint32_t)bits; float x; memcpy(&x, &low, sizeof x); return x; }
 float rae_ext_Math_pow(float base, float exp) { return powf(base, exp); }
 float rae_ext_Math_exp(float x) { return expf(x); }
 float rae_ext_Math_math_log(float x) { return logf(x); }
