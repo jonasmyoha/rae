@@ -288,12 +288,16 @@ func executeBlock(
       storeImpulsesWide(world: world, context: context, block: block)
     }
     case SolverStageType.storeImpulses {
+      let hitContacts: List(Int) = List.create(Int, cap: 0)
       storeImpulsesScalar(
         contacts: world.contacts
         constraints: context.contactConstraints
         manifolds: context.manifoldConstraints
         block: block
+        negHitThreshold: -world.hitEventThreshold
+        hitContacts: hitContacts
       )
+      flagHitContacts(world: world, hitContacts: hitContacts)
     }
   }
 }

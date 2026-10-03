@@ -320,6 +320,11 @@ C added.
   `BodyIntegration`, `Continuous`; golden `scenes`, fixture 958: a falling
   sphere, restitution, friction on a 20-degree slope and a 10-level pyramid,
   600 steps each, sleep off).
+  **P4d landed 2026-10-04, bit-exact:** sleep with island splitting, sensors
+  (overlaps, begin/end events, continuous sensor hits, destruction) and the
+  world's contact, hit, sensor and body events (`WorldIslands`, `Sensors`,
+  `SolverEvents`, `Events`, `WorldStep`; golden `events`, fixture 959). **P4
+  is complete**; joints are P6.
 - **P5 — meshes, height fields, compounds** and their manifolds.
 - **P6 — joints**, one module per kind, each scene bit-exact.
 - **P7 — queries and the mover**: ray/shape casts, overlaps, the character

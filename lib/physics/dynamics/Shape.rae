@@ -273,3 +273,20 @@ func computeShapeExtent(
     }
   }
 }
+
+# b3MakeShapeProxy
+func makeShapeProxy(shape: view Shape, hulls: view List(Hull)) ret ShapeProxy {
+  if shape.shapeType is ShapeType.capsule {
+    let points: List(Vec3) = { shape.capsule.center1, shape.capsule.center2 }
+    ret makeProxy(points: points, radius: shape.capsule.radius)
+  }
+  if shape.shapeType is ShapeType.sphere {
+    let points: List(Vec3) = { shape.sphere.center }
+    ret makeProxy(points: points, radius: shape.sphere.radius)
+  }
+  if let hull: view Hull => hulls.viewAt(index: shape.hullIndex) {
+    ret makeProxy(points: hull.points, radius: 0.0)
+  }
+  let empty: List(Vec3) = List.create(Vec3, cap: 0)
+  ret makeProxy(points: empty, radius: 0.0)
+}

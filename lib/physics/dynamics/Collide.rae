@@ -7,7 +7,7 @@
 # The collide task runs block by block as worker 0 (ParallelFor). Checked
 # against the oracle in fixture 957.
 #
-# Not here yet: the contact begin and end events (P4d); Box3D's narrow-phase
+# Box3D's narrow-phase
 # statistics (SAT calls, recycled counts, manifold histograms) are not kept.
 import Math
 open Vec3
@@ -32,6 +32,7 @@ open physics/dynamics/World
 open physics/dynamics/WorldGraph
 open physics/dynamics/WorldIslands
 open physics/dynamics/WorldContacts
+open physics/dynamics/Events
 open physics/dynamics/BroadPhasePairs
 open physics/dynamics/ParallelFor
 
@@ -328,7 +329,10 @@ func collide(world: mod PhysicsWorld) {
       # The bounding boxes no longer overlap
       destroyContact(world: world, contactId: contactId, wakeBodies: false)
     } else if (flags bitand simStartedTouching) is not 0 {
-      # (The begin touch event: P4d.)
+      if (flags bitand contactEnableContactEvents) is not 0 {
+        let contact: Contact = world.contacts.copyAtDefault(index: contactId)
+        world.contactBeginEvents.add(value: contactBeginEventOf(world: world, contact: contact))
+      }
       # Link first: this wakes colliding bodies, so the body sims are in
       # the right place.
       if let contact: mod Contact => world.contacts.modAt(index: contactId) {
@@ -344,8 +348,10 @@ func collide(world: mod PhysicsWorld) {
         contact.flags = contact.flags bitand (bitnot simStoppedTouching)
         contact.flags = contact.flags bitand (bitnot contactTouchingFlag)
       }
-      # (The end touch event: P4d.)
       let contact: Contact = world.contacts.copyAtDefault(index: contactId)
+      if (contact.flags bitand contactEnableContactEvents) is not 0 {
+        pushContactEndEvent(world: world, event: contactEndEventOf(world: world, contact: contact))
+      }
       let colorIndex: Int = contact.colorIndex
       let localIndex: Int = contact.localIndex
       unlinkContact(world: world, contactId: contactId)
