@@ -1,0 +1,272 @@
+# benchmarks/float4_solver: the physics port's wide convex contact kernels
+# (warmStartContactsWide, pushContactsWide, solveContactsWide of
+# lib/physics/dynamics/ContactSolverWideSolve) on synthetic constraints:
+# the same constraints and body states as c/harness.c, drawn from the same
+# integer generator in the same order, so every build must print the same
+# checksum. run.sh builds this program twice: against the lib's scalar
+# FloatWide (a struct of four Floats, lane by lane) and against
+# float4/physics/dynamics/FloatWide.rae, the Float4 prototype, whose
+# primitives are SIMD (c/float4_prototype.h).
+import Math
+open Vec3
+open Quat
+open physics/math/Scalar
+open physics/dynamics/Body
+open physics/dynamics/FloatWide
+open physics/dynamics/ContactConstraints
+open physics/dynamics/StepContext
+open physics/dynamics/ContactSolverWideSolve
+
+const wideCount: Int = 8192
+
+const bodyCount: Int = 16384
+
+const stepCount: Int = 30
+
+const subStepCount: Int = 4
+
+const dynamicFlag: Int = 4096
+
+# The generator: a 32-bit linear congruential sequence (c/harness.c)
+type Generator {
+  state: Int
+}
+
+func nextBits(generator: mod Generator) ret Int {
+  generator.state = (generator.state * 1664525 + 1013904223) bitand 4294967295
+  ret generator.state
+}
+
+# [0, 1) in steps of 1/65536: exact in a Float
+func unit(generator: mod Generator) ret Float {
+  ret ((nextBits(generator: generator) shr 8) bitand 65535).toFloat() / 65536.0
+}
+
+func signedUnit(generator: mod Generator) ret Float {
+  ret unit(generator: generator) * 2.0 - 1.0
+}
+
+func positive(generator: mod Generator, scale: view Float) ret Float {
+  ret unit(generator: generator) * scale + 0.0625
+}
+
+func widePositive(generator: mod Generator, scale: view Float) ret FloatWide {
+  let x: Float = positive(generator: generator, scale: scale)
+  let y: Float = positive(generator: generator, scale: scale)
+  let z: Float = positive(generator: generator, scale: scale)
+  let w: Float = positive(generator: generator, scale: scale)
+  ret setWide(
+    x: x
+    y: y
+    z: z
+    w: w
+  )
+}
+
+func wideSigned(generator: mod Generator, scale: view Float) ret FloatWide {
+  let x: Float = signedUnit(generator: generator) * scale
+  let y: Float = signedUnit(generator: generator) * scale
+  let z: Float = signedUnit(generator: generator) * scale
+  let w: Float = signedUnit(generator: generator) * scale
+  ret setWide(
+    x: x
+    y: y
+    z: z
+    w: w
+  )
+}
+
+func vectorSigned(generator: mod Generator, scale: view Float) ret Vec3Wide {
+  let x: FloatWide = wideSigned(generator: generator, scale: scale)
+  let y: FloatWide = wideSigned(generator: generator, scale: scale)
+  let z: FloatWide = wideSigned(generator: generator, scale: scale)
+  ret Vec3Wide { x: x, y: y, z: z }
+}
+
+func symPositive(generator: mod Generator, scale: view Float) ret SymMatrix3Wide {
+  let cxx: FloatWide = widePositive(generator: generator, scale: scale)
+  let cxy: FloatWide = widePositive(generator: generator, scale: scale)
+  let cxz: FloatWide = widePositive(generator: generator, scale: scale)
+  let cyy: FloatWide = widePositive(generator: generator, scale: scale)
+  let cyz: FloatWide = widePositive(generator: generator, scale: scale)
+  let czz: FloatWide = widePositive(generator: generator, scale: scale)
+  ret SymMatrix3Wide {
+    cxx: cxx
+    cxy: cxy
+    cxz: cxz
+    cyy: cyy
+    cyz: cyz
+    czz: czz
+  }
+}
+
+func makeStates(generator: mod Generator) ret List(BodyState) {
+  let states: List(BodyState) = List.create(BodyState, cap: bodyCount)
+  loop var i: Int = 0, i < bodyCount, ++i {
+    var state: BodyState = identityBodyState()
+    state.linearVelocity.x = signedUnit(generator: generator)
+    state.linearVelocity.y = signedUnit(generator: generator)
+    state.linearVelocity.z = signedUnit(generator: generator)
+    state.angularVelocity.x = signedUnit(generator: generator)
+    state.angularVelocity.y = signedUnit(generator: generator)
+    state.angularVelocity.z = signedUnit(generator: generator)
+    state.deltaPosition.x = signedUnit(generator: generator) * 0.0625
+    state.deltaPosition.y = signedUnit(generator: generator) * 0.0625
+    state.deltaPosition.z = signedUnit(generator: generator) * 0.0625
+    state.flags = dynamicFlag
+    state.deltaRotation.x = signedUnit(generator: generator) * 0.0625
+    state.deltaRotation.y = signedUnit(generator: generator) * 0.0625
+    state.deltaRotation.z = signedUnit(generator: generator) * 0.0625
+    state.deltaRotation.w = 1.0
+    states.add(value: state)
+  }
+  ret states
+}
+
+func makeConstraint(generator: mod Generator) ret ContactConstraintWide {
+  var constraint: ContactConstraintWide = zeroContactConstraintWide()
+  loop var lane: Int = 0, lane < 4, ++lane {
+    var indexA: Int = 0
+    if (nextBits(generator: generator) bitand 7) is not 0 {
+      indexA = 1 + nextBits(generator: generator) % bodyCount
+    }
+    constraint.indexA.set(index: lane, value: indexA)
+    constraint.indexB.set(index: lane, value: 1 + nextBits(generator: generator) % bodyCount)
+    constraint.pointCounts.set(index: lane, value: 1 + (nextBits(generator: generator) bitand 3))
+    constraint.contactIds.set(index: lane, value: -1)
+  }
+  constraint.invMassA = widePositive(generator: generator, scale: 1.0)
+  constraint.invMassB = widePositive(generator: generator, scale: 1.0)
+  constraint.invIA = symPositive(generator: generator, scale: 0.5)
+  constraint.invIB = symPositive(generator: generator, scale: 0.5)
+  constraint.normal = vectorSigned(generator: generator, scale: 1.0)
+  constraint.tangent1 = vectorSigned(generator: generator, scale: 1.0)
+  constraint.tangent2 = vectorSigned(generator: generator, scale: 1.0)
+  constraint.centerA = vectorSigned(generator: generator, scale: 0.5)
+  constraint.centerB = vectorSigned(generator: generator, scale: 0.5)
+  constraint.twistMass = widePositive(generator: generator, scale: 1.0)
+  constraint.twistImpulse = widePositive(generator: generator, scale: 0.125)
+  let tangentCxx: FloatWide = widePositive(generator: generator, scale: 1.0)
+  let tangentCxy: FloatWide = widePositive(generator: generator, scale: 0.25)
+  let tangentCyy: FloatWide = widePositive(generator: generator, scale: 1.0)
+  constraint.tangentMass = SymMatrix2Wide { cxx: tangentCxx, cxy: tangentCxy, cyy: tangentCyy }
+  let frictionX: FloatWide = wideSigned(generator: generator, scale: 0.125)
+  let frictionY: FloatWide = wideSigned(generator: generator, scale: 0.125)
+  constraint.frictionImpulse = Vec2Wide { x: frictionX, y: frictionY }
+  constraint.rollingMass = symPositive(generator: generator, scale: 0.5)
+  constraint.rollingImpulse = vectorSigned(generator: generator, scale: 0.0625)
+  constraint.friction = widePositive(generator: generator, scale: 0.5)
+  let rolling: List(Float) = List.create(Float, cap: 4)
+  loop var lane: Int = 0, lane < 4, ++lane {
+    if (nextBits(generator: generator) bitand 3) is 0 {
+      rolling.add(value: positive(generator: generator, scale: 0.125))
+    } else {
+      rolling.add(value: 0.0)
+    }
+  }
+  constraint.rollingResistance = setWide(
+    x: rolling.copyAtDefault(index: 0)
+    y: rolling.copyAtDefault(index: 1)
+    z: rolling.copyAtDefault(index: 2)
+    w: rolling.copyAtDefault(index: 3)
+  )
+  constraint.tangentVelocity1 = wideSigned(generator: generator, scale: 0.125)
+  constraint.tangentVelocity2 = wideSigned(generator: generator, scale: 0.125)
+  constraint.restitution = zeroWide()
+  loop var pointIndex: Int = 0, pointIndex < 4, ++pointIndex {
+    let anchorA: Vec3Wide = vectorSigned(generator: generator, scale: 0.5)
+    let anchorB: Vec3Wide = vectorSigned(generator: generator, scale: 0.5)
+    let baseSeparation: FloatWide = wideSigned(generator: generator, scale: 0.0625)
+    let normalImpulse: FloatWide = widePositive(generator: generator, scale: 0.125)
+    let normalMass: FloatWide = widePositive(generator: generator, scale: 1.0)
+    let leverArm: FloatWide = widePositive(generator: generator, scale: 0.5)
+    constraint.points.set(
+      index: pointIndex
+      value: ContactConstraintPointWide {
+        anchorA: anchorA
+        anchorB: anchorB
+        baseSeparation: baseSeparation
+        normalImpulse: normalImpulse
+        totalNormalImpulse: zeroWide()
+        normalMass: normalMass
+        leverArm: leverArm
+        relativeVelocity: zeroWide()
+        restitutionImpulse: zeroWide()
+      }
+    )
+  }
+  ret constraint
+}
+
+func main() {
+  var generator: Generator = { state: 2654435769 }
+  var states: List(BodyState) = makeStates(generator: generator)
+  var constraints: List(ContactConstraintWide) = List.create(ContactConstraintWide, cap: wideCount)
+  loop var i: Int = 0, i < wideCount, ++i {
+    constraints.add(value: makeConstraint(generator: generator))
+  }
+
+  var context: StepContext = createStepContext()
+  let h: Float = 1.0 / 240.0
+  context.h = h
+  context.inverseH = 240.0
+  context.contactSoftness = makeSoft(hertz: 30.0, zeta: 10.0, h: h)
+  context.staticSoftness = makeSoft(hertz: 60.0, zeta: 5.0, h: h)
+  let block: SolverBlock = {
+    startIndex: 0
+    count: wideCount
+    blockType: SolverBlockType.graphWideContactBlock
+    colorIndex: 0
+  }
+
+  let startNs: Int = nowNs()
+  loop var step: Int = 0, step < stepCount, ++step {
+    loop var sub: Int = 0, sub < subStepCount, ++sub {
+      warmStartContactsWide(
+        states: states
+        constraints: constraints
+        first: 0
+        block: block
+      )
+      pushContactsWide(
+        states: states
+        constraints: constraints
+        first: 0
+        block: block
+        context: context
+        contactSpeed: 3.0
+      )
+      solveContactsWide(
+        states: states
+        constraints: constraints
+        first: 0
+        block: block
+        inverseHValue: 240.0
+      )
+    }
+  }
+  let elapsed: Int = nowNs() - startNs
+
+  var hash: UInt64 = 14695981039346656037
+  let prime: UInt64 = 1099511628211
+  loop let state: view BodyState in states {
+    let values: List(Float) = {
+      state.linearVelocity.x
+      state.linearVelocity.y
+      state.linearVelocity.z
+      state.angularVelocity.x
+      state.angularVelocity.y
+      state.angularVelocity.z
+    }
+    loop var i: Int = 0, i < values.length, ++i {
+      let bits: UInt64 = (Math.floatBits(value: values.copyAtDefault(index: i)) bitand 4294967295) as UInt64
+      hash = (hash bitxor bits) * prime
+    }
+  }
+  log("RESULT,{benchName()},{elapsed},{hash}")
+}
+
+# The build this program is part of; float4/ shadows it
+func benchName() ret String {
+  ret "rae_scalar"
+}
