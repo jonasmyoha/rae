@@ -1,0 +1,95 @@
+# The events a world reports and the sensor data behind sensor events
+# (b3ContactBeginTouchEvent, b3ContactEndTouchEvent, b3ContactHitEvent,
+# b3SensorBeginTouchEvent, b3SensorEndTouchEvent, b3ContactId of Box3D's
+# types.h; b3Sensor, b3Visitor, b3SensorHit of sensor.h; at 9f998c8). The
+# world keeps the lists; Sensors fills the sensor ones.
+open Vec3
+open physics/math/VectorMath
+open physics/dynamics/WorldTypes
+
+# A contact handle (b3ContactId)
+type ContactId {
+  index1: Int
+  world0: Int
+  generation: Int
+}
+
+type ContactBeginTouchEvent {
+  shapeIdA: ShapeId
+  shapeIdB: ShapeId
+  contactId: ContactId
+}
+
+type ContactEndTouchEvent {
+  shapeIdA: ShapeId
+  shapeIdB: ShapeId
+  contactId: ContactId
+}
+
+# Two shapes hit faster than the world's hit event threshold
+type ContactHitEvent {
+  shapeIdA: ShapeId
+  shapeIdB: ShapeId
+  contactId: ContactId
+  # The mid-point between the surfaces at the start of the step
+  point: Vec3
+  # From shape A to shape B
+  normal: Vec3
+  approachSpeed: Float
+  userMaterialIdA: UInt64
+  userMaterialIdB: UInt64
+}
+
+type SensorBeginTouchEvent {
+  sensorShapeId: ShapeId
+  visitorShapeId: ShapeId
+}
+
+type SensorEndTouchEvent {
+  sensorShapeId: ShapeId
+  visitorShapeId: ShapeId
+}
+
+# A shape overlapping a sensor: its id and generation (b3Visitor)
+type Visitor {
+  shapeId: Int
+  generation: Int
+}
+
+# A sensor crossed by a fast body during continuous collision (b3SensorHit)
+type SensorHit {
+  sensorId: Int
+  visitorId: Int
+}
+
+# A sensor shape's overlaps: last step's, this step's, and the continuous
+# hits to add to the next (b3Sensor)
+type Sensor {
+  hits: List(Visitor)
+  overlaps1: List(Visitor)
+  overlaps2: List(Visitor)
+  shapeId: Int
+}
+
+func createSensor(shapeId: view Int) ret Sensor {
+  ret Sensor {
+    hits: List.create(Visitor, cap: 4)
+    overlaps1: List.create(Visitor, cap: 16)
+    overlaps2: List.create(Visitor, cap: 16)
+    shapeId: shapeId
+  }
+}
+
+func emptyContactHitEvent() ret ContactHitEvent {
+  let noShape: ShapeId = { index1: 0, world0: 0, generation: 0 }
+  ret ContactHitEvent {
+    shapeIdA: noShape
+    shapeIdB: noShape
+    contactId: ContactId { index1: 0, world0: 0, generation: 0 }
+    point: zeroVector()
+    normal: zeroVector()
+    approachSpeed: 0.0
+    userMaterialIdA: 0
+    userMaterialIdB: 0
+  }
+}

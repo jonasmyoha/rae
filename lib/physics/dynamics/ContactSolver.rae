@@ -22,6 +22,7 @@ open physics/dynamics/Contact
 open physics/dynamics/ConstraintGraph
 open physics/dynamics/SolverSet
 open physics/dynamics/World
+open physics/container/Bitset
 open physics/dynamics/ContactConstraints
 open physics/dynamics/StepContext
 
@@ -832,16 +833,21 @@ func applyRestitutionScalar(
 }
 
 # b3StoreImpulses_Mesh: the impulses back into the contacts' manifolds, for
-# warm starting the next step. (Hit events: P4d.)
+# warm starting the next step; `hitContacts` gets the contacts with a hit
+# event candidate.
 func storeImpulsesScalar(
   contacts: mod List(Contact)
   constraints: view List(ContactConstraint)
   manifolds: view List(ManifoldConstraint)
   block: view SolverBlock
+  negHitThreshold: view Float
+  hitContacts: mod List(Int)
 ) {
   loop var index: Int = block.startIndex, index < block.startIndex + block.count, ++index {
     let contactConstraint: ContactConstraint = constraints.copyAtDefault(index: index)
     if let contact: mod Contact => contacts.modAt(index: contactConstraint.contactId) {
+      let checkHitEvents: Bool = (contact.flags bitand simEnableHitEvent) is not 0
+      var flagged: Bool = false
       loop var manifoldIndex: Int = 0, manifoldIndex < contactConstraint.manifoldCount, ++manifoldIndex {
         let constraint: ManifoldConstraint = manifolds.copyAtDefault(
           index: contactConstraint.manifoldStart + manifoldIndex
@@ -863,10 +869,27 @@ func storeImpulsesScalar(
             if let point: mod ManifoldPoint => manifold.points.modAt(index: pointIndex) {
               point.normalImpulse = constraintPoint.normalImpulse
               point.totalNormalImpulse = constraintPoint.totalNormalImpulse
+              if checkHitEvents and flagged is false and point.normalVelocity < negHitThreshold and point.totalNormalImpulse > 0.0 {
+                hitContacts.add(value: contact.contactId)
+                flagged = true
+              }
             }
           }
         }
       }
     }
+  }
+}
+
+# Mark the contacts `storeImpulsesScalar` flagged as hit event candidates.
+func flagHitContacts(world: mod PhysicsWorld, hitContacts: view List(Int)) {
+  if hitContacts.length is 0 {
+    ret
+  }
+  if let taskContext: mod TaskContext => world.taskContexts.modAt(index: 0) {
+    loop var i: Int = 0, i < hitContacts.length, ++i {
+      setBit(bitset: taskContext.hitEventBitSet, bitIndex: hitContacts.copyAtDefault(index: i))
+    }
+    taskContext.hasHitEvents = true
   }
 }

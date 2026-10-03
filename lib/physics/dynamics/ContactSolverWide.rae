@@ -16,6 +16,7 @@ open physics/dynamics/Contact
 open physics/dynamics/ConstraintGraph
 open physics/dynamics/SolverSet
 open physics/dynamics/World
+open physics/container/Bitset
 open physics/dynamics/FloatWide
 open physics/dynamics/ContactConstraints
 open physics/dynamics/StepContext
@@ -832,12 +833,13 @@ func zeroBodyStateWide() ret BodyStateWide {
 }
 
 # b3StoreImpulses_Convex: each lane's impulses back into its contact's
-# manifold, for warm starting the next step. (Hit events: P4d.)
+# manifold, for warm starting the next step, flagging hit event candidates.
 func storeImpulsesWide(
   world: mod PhysicsWorld
   context: view StepContext
   block: view SolverBlock
 ) {
+  let negHitThreshold: Float = -world.hitEventThreshold
   loop var wideIndex: Int = block.startIndex, wideIndex < block.startIndex + block.count, ++wideIndex {
     let wide: ContactConstraintWide = context.wideConstraints.copyAtDefault(index: wideIndex)
     loop var lane: Int = 0, lane < 4, ++lane {
@@ -847,6 +849,7 @@ func storeImpulsesWide(
       }
       let f1: Float = laneOf(value: wide.frictionImpulse.x, lane: lane)
       let f2: Float = laneOf(value: wide.frictionImpulse.y, lane: lane)
+      var hit: Bool = false
       if let contact: mod Contact => world.contacts.modAt(index: contactId) {
         if let manifold: mod Manifold => contact.manifolds.modAt(index: 0) {
           manifold.frictionImpulse = Vec3 {
@@ -882,6 +885,25 @@ func storeImpulsesWide(
               }
             }
           }
+          if (contact.flags bitand simEnableHitEvent) is not 0 {
+            loop var k: Int = 0, k < manifold.pointCount, ++k {
+              let point: ManifoldPoint = manifold.points.copyAtFallback(
+                index: k
+                fallback: zeroManifoldPoint()
+              )
+              # The total impulse rules out speculative points
+              if point.normalVelocity < negHitThreshold and point.totalNormalImpulse > 0.0 {
+                hit = true
+                break
+              }
+            }
+          }
+        }
+      }
+      if hit {
+        if let taskContext: mod TaskContext => world.taskContexts.modAt(index: 0) {
+          setBit(bitset: taskContext.hitEventBitSet, bitIndex: contactId)
+          taskContext.hasHitEvents = true
         }
       }
     }

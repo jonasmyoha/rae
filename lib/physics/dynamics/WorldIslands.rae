@@ -3,8 +3,7 @@
 # b3DestroySolverSet, b3WakeSolverSet, b3TrySleepIsland of solver_set.c; the
 # island helpers of body.c, at 9f998c8). Box3D's order of array moves is kept
 # exactly; checked against the oracle in fixtures 954 and 957. Joints (their
-# links, moves and merged sleeping sets) arrive in P6, island splitting and
-# the body move events in P4d.
+# links, moves and merged sleeping sets) arrive in P6.
 open physics/container/IdPool
 open physics/container/Bitset
 open physics/dynamics/WorldTypes
@@ -389,7 +388,17 @@ func trySleepIsland(world: mod PhysicsWorld, islandId: view Int) {
   # Move the awake bodies to the sleeping set (this shuffles the awake set)
   loop var i: Int = 0, i < island.bodies.length, ++i {
     let bodyId: Int = island.bodies.copyAtDefault(index: i)
-    # (The body move event's fellAsleep flag: P4d.)
+    # The body move event says the body fell asleep (it may be forced
+    # asleep before it ever moved)
+    let moveIndex: Int = bodyAt(world: world, bodyId: bodyId).bodyMoveIndex
+    if moveIndex is not -1 {
+      if let event: mod BodyMoveEvent => world.bodyMoveEvents.modAt(index: moveIndex) {
+        event.fellAsleep = true
+      }
+      if let movedBody: mod Body => world.bodies.modAt(index: bodyId) {
+        movedBody.bodyMoveIndex = -1
+      }
+    }
     let awakeBodyIndex: Int = bodyAt(world: world, bodyId: bodyId).localIndex
     var sleepBodyIndex: Int = 0
     var movedBodyId: Int = -1
@@ -532,4 +541,167 @@ func trySleepIsland(world: mod PhysicsWorld, islandId: view Int) {
   if world.splitIslandId is islandId {
     world.splitIslandId = -1
   }
+}
+
+# b3IslandFindParent: the root of `node`, halving the path on the way.
+func findIslandRoot(parents: mod List(Int), node: view Int) ret Int {
+  var current: Int = node
+  loop parents.copyAtDefault(index: current) is not current {
+    let grandParent: Int = parents.copyAtDefault(index: parents.copyAtDefault(index: current))
+    parents.set(index: current, value: grandParent)
+    current = grandParent
+  }
+  ret current
+}
+
+# b3IslandUnion: connect the components of `node1` and `node2` by rank,
+# carrying their contact counts.
+func unionIslandNodes(
+  parents: mod List(Int)
+  ranks: mod List(Int)
+  contactCounts: mod List(Int)
+  node1: view Int
+  node2: view Int
+) {
+  let root1: Int = findIslandRoot(parents: parents, node: node1)
+  let root2: Int = findIslandRoot(parents: parents, node: node2)
+  if root1 is root2 {
+    ret
+  }
+  let rank1: Int = ranks.copyAtDefault(index: root1)
+  let rank2: Int = ranks.copyAtDefault(index: root2)
+  if rank1 < rank2 {
+    parents.set(index: root1, value: root2)
+    contactCounts.set(
+      index: root2
+      value: contactCounts.copyAtDefault(index: root2) + contactCounts.copyAtDefault(index: root1)
+    )
+  } else if rank1 > rank2 {
+    parents.set(index: root2, value: root1)
+    contactCounts.set(
+      index: root1
+      value: contactCounts.copyAtDefault(index: root1) + contactCounts.copyAtDefault(index: root2)
+    )
+  } else {
+    parents.set(index: root2, value: root1)
+    ranks.set(index: root1, value: rank1 + 1)
+    contactCounts.set(
+      index: root1
+      value: contactCounts.copyAtDefault(index: root1) + contactCounts.copyAtDefault(index: root2)
+    )
+  }
+}
+
+# b3SplitIsland: split island `baseId` into its connected components
+# (union-find over its contacts; static bodies connect nothing). The new
+# islands are created in the order of their first body, then the base
+# island is destroyed. (Joint links: P6.)
+func splitIsland(world: mod PhysicsWorld, baseId: view Int) {
+  let base: Island = world.islands.copyAtDefault(index: baseId)
+  let baseBodyCount: Int = base.bodies.length
+  let parents: List(Int) = List.create(Int, cap: baseBodyCount)
+  let ranks: List(Int) = List.create(Int, cap: baseBodyCount)
+  let contactCounts: List(Int) = List.create(Int, cap: baseBodyCount)
+  loop var i: Int = 0, i < baseBodyCount, ++i {
+    parents.add(value: i)
+    ranks.add(value: 0)
+    contactCounts.add(value: 0)
+  }
+
+  # Union over the contacts, counting them per component
+  loop let link: view ContactLink in base.contacts {
+    let islandIndexA: Int = bodyAt(world: world, bodyId: link.bodyIdA).islandIndex
+    let islandIndexB: Int = bodyAt(world: world, bodyId: link.bodyIdB).islandIndex
+    if islandIndexA is not -1 and islandIndexB is not -1 {
+      unionIslandNodes(
+        parents: parents
+        ranks: ranks
+        contactCounts: contactCounts
+        node1: islandIndexA
+        node2: islandIndexB
+      )
+      let root: Int = findIslandRoot(parents: parents, node: islandIndexA)
+      contactCounts.set(index: root, value: contactCounts.copyAtDefault(index: root) + 1)
+    } else {
+      var islandIndex: Int = islandIndexA
+      if islandIndexA is -1 {
+        islandIndex = islandIndexB
+      }
+      let root: Int = findIslandRoot(parents: parents, node: islandIndex)
+      contactCounts.set(index: root, value: contactCounts.copyAtDefault(index: root) + 1)
+    }
+  }
+
+  # Flatten the parents and count the components
+  var componentCount: Int = 0
+  loop var i: Int = 0, i < baseBodyCount, ++i {
+    let root: Int = findIslandRoot(parents: parents, node: i)
+    parents.set(index: i, value: root)
+    if root is i {
+      componentCount = componentCount + 1
+    }
+  }
+
+  # Still fully connected: no split needed
+  if componentCount is 1 {
+    if let island: mod Island => world.islands.modAt(index: baseId) {
+      island.constraintRemoveCount = 0
+    }
+    ret
+  }
+
+  # The new island of each root body, in body order
+  let rootMap: List(Int) = List.create(Int, cap: baseBodyCount)
+  loop var i: Int = 0, i < baseBodyCount, ++i {
+    rootMap.add(value: -1)
+  }
+  var islandCount: Int = 0
+  loop var i: Int = 0, i < baseBodyCount, ++i {
+    let rootIndex: Int = parents.copyAtDefault(index: i)
+    if rootMap.copyAtDefault(index: rootIndex) is -1 {
+      rootMap.set(index: rootIndex, value: islandCount)
+      islandCount = islandCount + 1
+    }
+  }
+  let islandIds: List(Int) = List.create(Int, cap: islandCount)
+  loop var i: Int = 0, i < islandCount, ++i {
+    islandIds.add(value: createIsland(world: world, setIndex: awakeSet))
+  }
+
+  # Assign the bodies to the new islands
+  loop var i: Int = 0, i < baseBodyCount, ++i {
+    let bodyId: Int = base.bodies.copyAtDefault(index: i)
+    let root: Int = findIslandRoot(parents: parents, node: i)
+    let newIslandId: Int = islandIds.copyAtDefault(index: rootMap.copyAtDefault(index: root))
+    var bodyIndex: Int = 0
+    if let island: mod Island => world.islands.modAt(index: newIslandId) {
+      bodyIndex = island.bodies.length
+      island.bodies.add(value: bodyId)
+    }
+    if let body: mod Body => world.bodies.modAt(index: bodyId) {
+      body.islandId = newIslandId
+      body.islandIndex = bodyIndex
+    }
+  }
+
+  # Assign the contacts to the island of their bodies (static bodies have
+  # no island)
+  loop let link: view ContactLink in base.contacts {
+    var targetIslandId: Int = bodyAt(world: world, bodyId: link.bodyIdA).islandId
+    if targetIslandId is -1 {
+      targetIslandId = bodyAt(world: world, bodyId: link.bodyIdB).islandId
+    }
+    var contactIndex: Int = 0
+    if let island: mod Island => world.islands.modAt(index: targetIslandId) {
+      contactIndex = island.contacts.length
+      island.contacts.add(value: link)
+    }
+    if let contact: mod Contact => world.contacts.modAt(index: link.contactId) {
+      contact.islandId = targetIslandId
+      contact.islandIndex = contactIndex
+    }
+  }
+
+  # Destroy the base island
+  destroyIsland(world: world, islandId: baseId)
 }

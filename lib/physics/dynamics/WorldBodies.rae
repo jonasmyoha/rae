@@ -23,6 +23,7 @@ open physics/dynamics/World
 open physics/dynamics/WorldIslands
 open physics/dynamics/Contact
 open physics/dynamics/WorldContacts
+open physics/dynamics/Sensors
 open physics/dynamics/ShapeProxy
 open physics/dynamics/BodyMass
 open physics/broadPhase/BroadPhase
@@ -162,7 +163,7 @@ func createBody(world: mod PhysicsWorld, def: view BodyDef) ret BodyId {
 # sim of the set fills the slot), an emptied sleeping set, and its id.
 func destroyBody(world: mod PhysicsWorld, bodyId: view BodyId) {
   let bodyIndex: Int = bodyIndexOf(bodyId: bodyId)
-  let body: Body = bodyAt(world: world, bodyId: bodyIndex)
+  var body: Body = bodyAt(world: world, bodyId: bodyIndex)
 
   # (Joints of the body: P6.)
 
@@ -178,9 +179,16 @@ func destroyBody(world: mod PhysicsWorld, bodyId: view BodyId) {
     destroyContact(world: world, contactId: contactId, wakeBodies: true)
   }
 
+  # Destroying a touching contact may have woken this very body, which moves
+  # it to the awake set: read it again
+  body = bodyAt(world: world, bodyId: bodyIndex)
+
   # The shapes and their proxies
   var shapeId: Int = body.headShapeId
   loop shapeId is not -1 {
+    if world.shapes.copyAtDefault(index: shapeId).sensorIndex is not -1 {
+      destroySensor(world: world, shapeId: shapeId)
+    }
     destroyShapeProxy(world: world, shapeId: shapeId)
     freeId(pool: world.shapeIdPool, id: shapeId)
     var next: Int = -1

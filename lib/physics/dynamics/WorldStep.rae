@@ -1,19 +1,27 @@
 # Stepping a world (b3World_Step of Box3D's physics_world.c at 9f998c8):
 # find new pairs, update the contacts (the narrow phase), then solve the
 # constraints and finalize the bodies. Checked against the oracle in
-# fixture 958. Events, sensors (P4d) and the capacity statistics are not
-# here yet.
+# fixtures 958 and 959. Box3D's capacity statistics are not kept.
 open physics/math/Scalar
 open physics/dynamics/WorldTypes
 open physics/dynamics/World
+open physics/dynamics/Events
 open physics/dynamics/BroadPhasePairs
 open physics/dynamics/Collide
 open physics/dynamics/StepContext
 open physics/dynamics/Solver
+open physics/dynamics/Sensors
 
 # b3World_Step: advance the world by `timeStep` in `subStepCount` sub-steps.
 func stepWorld(world: mod PhysicsWorld, timeStep: view Float, subStepCount: view Int) {
   world.locked = true
+
+  # Prepare to capture events; a caller must not see stale ones after an
+  # early return
+  world.bodyMoveEvents.clear()
+  world.sensorBeginEvents.clear()
+  world.contactBeginEvents.clear()
+  world.contactHitEvents.clear()
 
   # Update the collision pairs and create contacts
   let created: List(UInt64) = updateBroadPhasePairs(world: world)
@@ -56,5 +64,55 @@ func stepWorld(world: mod PhysicsWorld, timeStep: view Float, subStepCount: view
     solve(world: world, context: context)
   }
 
+  # Update the sensors
+  overlapSensors(world: world)
+
+  # Swap the end event buffers
+  world.endEventArrayIndex = 1 - world.endEventArrayIndex
+  if world.endEventArrayIndex is 0 {
+    world.sensorEndEvents0.clear()
+    world.contactEndEvents0.clear()
+  } else {
+    world.sensorEndEvents1.clear()
+    world.contactEndEvents1.clear()
+  }
   world.locked = false
+}
+
+# The events of the last step (b3World_GetContactEvents,
+# b3World_GetSensorEvents, b3World_GetBodyEvents): the end events come from
+# the buffer the step just finished with.
+type ContactEvents {
+  beginEvents: List(ContactBeginTouchEvent)
+  endEvents: List(ContactEndTouchEvent)
+  hitEvents: List(ContactHitEvent)
+}
+
+type SensorEvents {
+  beginEvents: List(SensorBeginTouchEvent)
+  endEvents: List(SensorEndTouchEvent)
+}
+
+func getContactEvents(world: view PhysicsWorld) ret ContactEvents {
+  var endEvents: List(ContactEndTouchEvent) = world.contactEndEvents1
+  if world.endEventArrayIndex is 1 {
+    endEvents = world.contactEndEvents0
+  }
+  ret ContactEvents {
+    beginEvents: world.contactBeginEvents
+    endEvents: endEvents
+    hitEvents: world.contactHitEvents
+  }
+}
+
+func getSensorEvents(world: view PhysicsWorld) ret SensorEvents {
+  var endEvents: List(SensorEndTouchEvent) = world.sensorEndEvents1
+  if world.endEventArrayIndex is 1 {
+    endEvents = world.sensorEndEvents0
+  }
+  ret SensorEvents { beginEvents: world.sensorBeginEvents, endEvents: endEvents }
+}
+
+func getBodyEvents(world: view PhysicsWorld) ret List(BodyMoveEvent) {
+  ret world.bodyMoveEvents
 }

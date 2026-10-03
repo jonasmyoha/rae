@@ -307,3 +307,30 @@ box, five spheres of restitution 0 to 1, four boxes of friction 0 to 0.6 on
 a 20-degree slope, a 10-level pyramid of 55 boxes; every step's hash of every
 body's transform and velocities and a full dump every 20 steps are
 bit-exact.
+
+## P4d — sleep, island splitting, sensors, events (`dynamics/`)
+
+Islands fall asleep when no body in them is moving (sleep timers in body
+finalization, `trySleepIsland`), wake when touched or pushed, and split when
+their contacts no longer connect them (`splitIsland`, union-find, run by the
+next solve). Sensor shapes keep the sorted list of convex shapes overlapping
+them; the change since the last step becomes begin and end events, and a
+fast body that crosses a sensor within a step is caught by continuous
+collision. The world collects the events of each step.
+
+| Box3D | Rae |
+|---|---|
+| `b3SplitIsland` `b3IslandFindParent` `b3IslandUnion` | `splitIsland` `findIslandRoot` `unionIslandNodes` (`dynamics/WorldIslands`) |
+| `b3Sensor` `b3Visitor` `b3SensorHit` | `Sensor` `Visitor` `SensorHit` (`dynamics/Events`) |
+| `b3OverlapSensors` `b3SensorTask` `b3OverlapSensor` `b3DestroySensor` | `overlapSensors` `sensorTask` `overlapSensor` `destroySensor` (`dynamics/Sensors`) |
+| `b3ContactBeginTouchEvent` `…EndTouchEvent` `…HitEvent` `b3Sensor…TouchEvent` `b3ContactId` | the same names without `b3` (`dynamics/Events`) |
+| `b3World_GetContactEvents` `_GetSensorEvents` `_GetBodyEvents` | `getContactEvents` `getSensorEvents` `getBodyEvents` (`dynamics/WorldStep`) |
+| the hit-event and sensor-hit passes of `b3Solve` | `reportHitEvents` `reportSensorHits` (`dynamics/SolverEvents`) |
+
+The check: fixture 959 replays `goldens/events.golden` — four worlds stepped
+600 times with sleep on: bodies falling asleep and woken by a velocity and by
+a dropped box, a knocked-apart stack whose island splits, spheres and a
+bullet crossing sensors (one sensor destroyed while overlapped), bouncing
+spheres with contact and hit events (one destroyed while touching); every
+step's body hash, awake body count, split island, island count and every
+event list are bit-exact.
