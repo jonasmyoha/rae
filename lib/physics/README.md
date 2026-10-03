@@ -120,3 +120,26 @@ Builders that can fail return `opt Hull`.
 The check: fixture 951 runs `goldens/hull.golden` (1 177 calls of 26
 functions, hulls from random, spherical, grid, duplicate-laden, flat and
 collinear point clouds) and checks every built hull with `isValidHull`.
+
+### P2d — hull manifolds and the shape-pair dispatch (`collision/`)
+
+The separating axis test is Box3D's scalar path (`B3_SIMD_NONE`), including
+the scalar emulation of its four-lane support search, which packs the vertex
+index into the low mantissa bits of the support value (`Math.floatBits` /
+`Math.floatFromBits` give the exact reinterpretation). Box3D's function-
+pointer registry of shape pairs is an exhaustive `match` on `ShapeType`.
+
+| Box3D | Rae |
+|---|---|
+| `b3CollideHullAndSphere` `b3CollideHullAndCapsule` `b3CollideHulls` | `collideHullAndSphere` `collideHullAndCapsule` `collideHulls` |
+| `b3ComputeSeparatingAxis` (`b3AxisQuery`, `b3SeparatingAxis`, `b3SeparatingFeature`) | `computeSeparatingAxis` (`AxisQuery`, `SeparatingAxis`, `SeparatingFeature`) |
+| `b3SATCache` `b3ContactCache` | `SatCache` `ContactCache` |
+| `b3BuildPolygon` `b3BuildFaceAContact` `b3BuildFaceBContact` `b3BuildEdgeContact` | `buildPolygon` `buildFaceAContact` `buildFaceBContact` `buildEdgeContact` |
+| `b3ClipSegmentToHullFace` `b3GetSupportWide` `b3TestEdgeCandidate` | `clipSegmentToHullFace` `supportWide` `testEdgeCandidate` |
+| `b3ShapeType`, `s_registers` (`b3AddType`) | `ShapeType`, `isPrimaryContactPair` / `isSupportedContactPair` |
+| `b3ComputeConvexManifold`'s dispatch | `collideConvexShapes` (over `ConvexShape`) |
+
+The check: fixture 952 runs `goldens/hullmanifold.golden` (768 calls: the
+manifolds with their GJK and SAT caches carried across steps, and the
+separating axis test) through `collideConvexShapes`, and prints the pair
+registry.

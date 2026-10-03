@@ -265,8 +265,11 @@ C added.
   The hull (`hull.c`: quickhull, generated and box hulls, cloning, mass,
   queries, the 2D hull; `geometry/Hull*|BoxHull|Hull2d`, golden `hull`,
   fixture 951) landed 2026-10-03, bit-exact, quickhull index-linked.
-  **Still to do** (queue): the hull manifolds with SAT plus the exhaustive
-  shape-pair `match` (P2d).
+  The hull manifolds (hull-sphere, hull-capsule, hull-hull with the scalar
+  SAT and its cache) and the shape-pair dispatch as an exhaustive `match`
+  (`collision/SeparatingAxis|HullManifold|HullHullManifold|ShapePair`,
+  golden `hullmanifold`, fixture 952) landed 2026-10-03, bit-exact. **P2 is
+  complete** for convex shapes; meshes, height fields and compounds are P5.
 - **P3 — broad phase.** Dynamic tree (insert, remove, rebuild, queries,
   ray casts) and pair finding.
 - **P4 — the first world.** Bodies, shapes, contacts, solver sets, islands and

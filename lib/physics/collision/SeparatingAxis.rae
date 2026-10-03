@@ -1,0 +1,647 @@
+# The separating axis test between two hulls (b3ComputeSeparatingAxis of
+# Box3D's convex_manifold.c at 9f998c8, after Cairn Overturf's improvements
+# to the separating axis test), its result types and the SAT cache. This is
+# Box3D's scalar path (B3_SIMD_NONE), including the scalar emulation of its
+# four-lane support search; Box3D's operation order is kept exactly, checked
+# bit for bit against the oracle in fixture 952.
+import Math
+open Vec3
+open physics/Constants
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/MatrixMath
+open physics/math/TransformMath
+open physics/math/AabbMath
+open physics/math/PlaneMath
+open physics/geometry/Hull
+
+# What a separating axis comes from (b3SeparatingFeature). The manual kinds
+# force a feature, for testing.
+enum SeparatingFeature {
+  invalidAxis
+  backsideAxis
+  faceAxisA
+  faceAxisB
+  edgePairAxis
+  closestPointsAxis
+  manualFaceAxisA
+  manualFaceAxisB
+  manualEdgePairAxis
+}
+
+# One candidate axis (b3SeparatingAxis). For a face of A: indexA is the
+# face, indexB the support vertex of B; a face of B the reverse; an edge
+# pair: the two half-edges.
+type SeparatingAxis {
+  normal: Vec3
+  separation: Float
+  indexA: Int
+  indexB: Int
+  kind: SeparatingFeature
+}
+
+# The best face of A, face of B and edge pair (b3AxisQuery), and which one
+# already separates the hulls (invalidAxis if none).
+type AxisQuery {
+  faceA: SeparatingAxis
+  faceB: SeparatingAxis
+  edge: SeparatingAxis
+  separatedFeature: SeparatingFeature
+}
+
+# The feature that separated or touched last step (b3SATCache), to try
+# first. `hit` is 1 when the last call reused it.
+type SatCache {
+  separation: Float
+  kind: SeparatingFeature
+  indexA: Int
+  indexB: Int
+  hit: Int
+}
+
+# B3_HULL_BIT_COUNT: the support search packs the vertex index into this
+# many low mantissa bits.
+const hullBitCount: Int = 7
+
+# B3_PARALLEL_TOL
+const parallelTolerance: Float = 0.0001
+
+func emptySatCache() ret SatCache {
+  ret SatCache {
+    separation: 0.0
+    kind: SeparatingFeature.invalidAxis
+    indexA: 0
+    indexB: 0
+    hit: 0
+  }
+}
+
+# The numbering of b3SeparatingFeature.
+func separatingFeatureCode(feature: view SeparatingFeature) ret Int {
+  match feature {
+    case SeparatingFeature.invalidAxis {
+      ret 0
+    }
+    case SeparatingFeature.backsideAxis {
+      ret 1
+    }
+    case SeparatingFeature.faceAxisA {
+      ret 2
+    }
+    case SeparatingFeature.faceAxisB {
+      ret 3
+    }
+    case SeparatingFeature.edgePairAxis {
+      ret 4
+    }
+    case SeparatingFeature.closestPointsAxis {
+      ret 5
+    }
+    case SeparatingFeature.manualFaceAxisA {
+      ret 6
+    }
+    case SeparatingFeature.manualFaceAxisB {
+      ret 7
+    }
+    case SeparatingFeature.manualEdgePairAxis {
+      ret 8
+    }
+  }
+}
+
+func separatingFeatureFromCode(code: view Int) ret SeparatingFeature {
+  match code {
+    case 1 {
+      ret SeparatingFeature.backsideAxis
+    }
+    case 2 {
+      ret SeparatingFeature.faceAxisA
+    }
+    case 3 {
+      ret SeparatingFeature.faceAxisB
+    }
+    case 4 {
+      ret SeparatingFeature.edgePairAxis
+    }
+    case 5 {
+      ret SeparatingFeature.closestPointsAxis
+    }
+    case 6 {
+      ret SeparatingFeature.manualFaceAxisA
+    }
+    case 7 {
+      ret SeparatingFeature.manualFaceAxisB
+    }
+    case 8 {
+      ret SeparatingFeature.manualEdgePairAxis
+    }
+    default {
+      ret SeparatingFeature.invalidAxis
+    }
+  }
+}
+
+# +infinity (INFINITY), from its bits.
+func infinity() ret Float {
+  ret Math.floatFromBits(bits: 2139095040)
+}
+
+func emptySeparatingAxis(kind: view SeparatingFeature) ret SeparatingAxis {
+  ret SeparatingAxis {
+    normal: zeroVector()
+    separation: -infinity()
+    indexA: -1
+    indexB: -1
+    kind: kind
+  }
+}
+
+# A hull vertex as Box3D's SoA arrays hold it: padded past the vertex count
+# with repeats of vertex 0.
+func soaPoint(hull: view Hull, index: view Int) ret Vec3 {
+  if index < hull.points.length {
+    ret hull.points.copyAtDefault(index: index)
+  }
+  ret hull.points.copyAtDefault(index: 0)
+}
+
+# A count rounded up to the four-lane width.
+func soaCount(count: view Int) ret Int {
+  ret (count + 3) bitand -4
+}
+
+# The support value with the vertex index in its low mantissa bits
+# (b3EmbedIndexW for one lane).
+func embedIndex(value: view Float, index: view Int) ret Float {
+  let mask: Int = (1 shl hullBitCount) - 1
+  let bits: Int = Math.floatBits(value: value)
+  ret Math.floatFromBits(bits: (bits bitand (4294967295 - mask)) bitor index)
+}
+
+# b3GetSupportWide: the vertex of `hull` furthest along `normal`, found by
+# minimising (bias - dot) with the index packed into the value, so the
+# smallest index wins a tie and padding never does. The bias keeps the
+# value positive. `support` gets the exact dot of the winner.
+func supportWide(
+  normal: view Vec3
+  hull: view Hull
+  bias: view Float
+  support: mod Float
+) ret Int {
+  let count: Int = soaCount(count: hull.points.length)
+  var lane0: Float = infinity()
+  var lane1: Float = infinity()
+  var lane2: Float = infinity()
+  var lane3: Float = infinity()
+  var i: Int = 0
+  loop i < count {
+    loop var lane: Int = 0, lane < 4, ++lane {
+      let point: Vec3 = soaPoint(hull: hull, index: i + lane)
+      let projection: Float = normal.x * point.x + normal.y * point.y + normal.z * point.z
+      let value: Float = embedIndex(value: bias - projection, index: i + lane)
+      # b3MinW: keep the running value unless the new one is smaller
+      match lane {
+        case 0 {
+          if lane0 <= value {
+          } else {
+            lane0 = value
+          }
+        }
+        case 1 {
+          if lane1 <= value {
+          } else {
+            lane1 = value
+          }
+        }
+        case 2 {
+          if lane2 <= value {
+          } else {
+            lane2 = value
+          }
+        }
+        default {
+          if lane3 <= value {
+          } else {
+            lane3 = value
+          }
+        }
+      }
+    }
+    i = i + 4
+  }
+  # b3MinIndexW: the horizontal minimum, then its index bits
+  var minimum: Float = lane0
+  if lane1 < minimum {
+    minimum = lane1
+  }
+  if lane2 < minimum {
+    minimum = lane2
+  }
+  if lane3 < minimum {
+    minimum = lane3
+  }
+  let vertexIndex: Int = Math.floatBits(value: minimum) bitand ((1 shl hullBitCount) - 1)
+  let point: Vec3 = soaPoint(hull: hull, index: vertexIndex)
+  support = normal.x * point.x + normal.y * point.y + normal.z * point.z
+  ret vertexIndex
+}
+
+# b3GetFaceSeparation: the separation of `hull` (whose vertices are seen
+# along `direction`) from a face plane at `planeSeparation`, with the
+# support vertex in `vertexIndex`. The bias is an upper bound of the dot
+# over the hull's box, a little enlarged.
+func faceSeparation(
+  direction: view Vec3
+  planeSeparation: view Float
+  hull: view Hull
+  center: view Vec3
+  extents: view Vec3
+  vertexIndex: mod Int
+) ret Float {
+  let bias: Float = dot(left: direction, right: center) + 1.0625 * dot(
+    left: abs(vector: direction)
+    right: extents
+  )
+  var support: Float = 0.0
+  vertexIndex = supportWide(
+    normal: direction
+    hull: hull
+    bias: bias
+    support: support
+  )
+  ret planeSeparation - support
+}
+
+# b3GetFaceDots: dot(normal, direction) for every face normal of `hull`.
+func faceDots(hull: view Hull, direction: view Vec3) ret List(Float) {
+  let dots: List(Float) = List.create(Float, cap: hull.planes.length)
+  loop let plane: view Plane in hull.planes {
+    let normal: Vec3 = plane.normal
+    dots.add(value: normal.x * direction.x + normal.y * direction.y + normal.z * direction.z)
+  }
+  ret dots
+}
+
+# b3TestEdgeCandidate: can an edge between faces with normal dots a1 and a2
+# (to the center offset) and normal cosine c beat `bound`? On the Gauss map
+# the edge is the arc between its face normals; this bounds the separation
+# over that arc. 1 for a candidate, else 0.
+func testEdgeCandidate(
+  a1: view Float
+  a2: view Float
+  c: view Float
+  bound: view Float
+) ret Int {
+  # s = sin(theta)^2, t = |projection of d|^2 * s (the law of cosines)
+  let s: Float = 1.0 - c * c
+  let t: Float = a1 * a1 + a2 * a2 - 2.0 * a1 * a2 * c
+  # Can either face normal beat the bound?
+  let exterior: Bool = maxFloat(left: a1, right: a2) >= bound
+  # Inside the arc, and the peak along it can beat the bound (or the normals
+  # are nearly parallel and the next stage decides)
+  let interior: Bool = a1 >= c * a2 and a2 >= c * a1 and (bound <= 0.0 or s < parallelTolerance or t >= bound * bound * s)
+  if exterior or interior {
+    ret 1
+  }
+  ret 0
+}
+
+# One face plane of a hull against the vertices of the other: the face
+# test of b3ComputeSeparatingAxis for face `faceIndex` of `faces`.
+# `fromAToFaces` takes a face normal into the frame of `vertices`.
+func faceSeparationOf(
+  plane: view Plane
+  direction: view Vec3
+  planeSeparation: view Float
+  vertices: view Hull
+  vertexIndex: mod Int
+) ret Float {
+  let center: Vec3 = center(box: vertices.aabb)
+  let halfExtents: Vec3 = extents(box: vertices.aabb)
+  ret faceSeparation(
+    direction: direction
+    planeSeparation: planeSeparation
+    hull: vertices
+    center: center
+    extents: halfExtents
+    vertexIndex: vertexIndex
+  )
+}
+
+# b3ComputeSeparatingAxis: the best face of A, face of B and edge pair with
+# B placed by `transformB` in A's frame. With `earlyReturn`, stops at the
+# first axis that separates by more than the speculative distance (and uses
+# bounds to skip axes that cannot win).
+func computeSeparatingAxis(
+  hullA: view Hull
+  hullB: view Hull
+  transformB: view Transform
+  earlyReturn: view Bool
+  lengthUnitsPerMeter: view Float
+) ret AxisQuery {
+  let rotation: Matrix3 = matrixFromQuat(quat: transformB.rotation)
+  let inverseRotation: Matrix3 = transpose(matrix: rotation)
+  let speculative: Float = speculativeDistance(lengthUnitsPerMeter: lengthUnitsPerMeter)
+  let slop: Float = linearSlop(lengthUnitsPerMeter: lengthUnitsPerMeter)
+
+  var result: AxisQuery = {
+    faceA: emptySeparatingAxis(kind: SeparatingFeature.faceAxisA)
+    faceB: emptySeparatingAxis(kind: SeparatingFeature.faceAxisB)
+    edge: emptySeparatingAxis(kind: SeparatingFeature.edgePairAxis)
+    separatedFeature: SeparatingFeature.invalidAxis
+  }
+
+  # No axis can separate by more than dot(axis, centerB - centerA) less the
+  # two inner radii: an upper bound that lets most axes be skipped.
+  let deltaCenter: Vec3 = subtract(
+    left: add(left: multiply(matrix: rotation, vector: hullB.center), right: transformB.position)
+    right: hullA.center
+  )
+  let centerDistance: Float = length(vector: deltaCenter)
+  let radius: Float = hullA.innerRadius + hullB.innerRadius
+  # Adjusted so the best axis is never skipped
+  let radiusBound: Float = radius - (slop + 0.001 * (centerDistance + radius))
+
+  # Faces of A against the vertices of B, seeded by the face most along the
+  # center offset.
+  let dotsA: List(Float) = faceDots(hull: hullA, direction: deltaCenter)
+  var seedIndexA: Int = 0
+  var maxDotA: Float = dotsA.copyAtDefault(index: 0)
+  loop var i: Int = 1, i < hullA.planes.length, ++i {
+    let faceDot: Float = dotsA.copyAtDefault(index: i)
+    if faceDot > maxDotA {
+      maxDotA = faceDot
+      seedIndexA = i
+    }
+  }
+  var floorA: Float = -infinity()
+  if earlyReturn {
+    let plane: Plane = hullA.planes.copyAtDefault(index: seedIndexA)
+    let direction: Vec3 = negate(vector: multiply(matrix: inverseRotation, vector: plane.normal))
+    let planeSeparation: Float = dot(left: plane.normal, right: transformB.position) - plane.offset
+    var vertexIndex: Int = 0
+    let separation: Float = faceSeparationOf(
+      plane: plane
+      direction: direction
+      planeSeparation: planeSeparation
+      vertices: hullB
+      vertexIndex: vertexIndex
+    )
+    floorA = minFloat(left: separation, right: speculative)
+  }
+  loop var i: Int = 0, i < hullA.planes.length, ++i {
+    # The bound offset makes sure the seed is evaluated.
+    if dotsA.copyAtDefault(index: i) - radiusBound < maxFloat(
+      left: floorA
+      right: result.faceA.separation
+    ) {
+      continue
+    }
+    let plane: Plane = hullA.planes.copyAtDefault(index: i)
+    let direction: Vec3 = negate(vector: multiply(matrix: inverseRotation, vector: plane.normal))
+    let planeSeparation: Float = dot(left: plane.normal, right: transformB.position) - plane.offset
+    var vertexIndex: Int = 0
+    let separation: Float = faceSeparationOf(
+      plane: plane
+      direction: direction
+      planeSeparation: planeSeparation
+      vertices: hullB
+      vertexIndex: vertexIndex
+    )
+    if separation > result.faceA.separation {
+      result.faceA.normal = plane.normal
+      result.faceA.separation = separation
+      result.faceA.indexA = i
+      result.faceA.indexB = vertexIndex
+      if separation > speculative and earlyReturn {
+        result.separatedFeature = SeparatingFeature.faceAxisA
+        ret result
+      }
+    }
+  }
+
+  # Faces of B against the vertices of A, seeded by the face most along the
+  # offset from B's center to A's.
+  let dotsB: List(Float) = faceDots(
+    hull: hullB
+    direction: negate(vector: multiply(matrix: inverseRotation, vector: deltaCenter))
+  )
+  var seedIndexB: Int = 0
+  var maxDotB: Float = dotsB.copyAtDefault(index: 0)
+  loop var i: Int = 1, i < hullB.planes.length, ++i {
+    let faceDot: Float = dotsB.copyAtDefault(index: i)
+    if faceDot > maxDotB {
+      maxDotB = faceDot
+      seedIndexB = i
+    }
+  }
+  var floorB: Float = -infinity()
+  if earlyReturn {
+    let plane: Plane = hullB.planes.copyAtDefault(index: seedIndexB)
+    let direction: Vec3 = negate(vector: multiply(matrix: rotation, vector: plane.normal))
+    let planeSeparation: Float = dot(left: direction, right: transformB.position) - plane.offset
+    var vertexIndex: Int = 0
+    let separation: Float = faceSeparationOf(
+      plane: plane
+      direction: direction
+      planeSeparation: planeSeparation
+      vertices: hullA
+      vertexIndex: vertexIndex
+    )
+    # Include the floor set by the faces of A
+    floorB = maxFloat(left: separation, right: result.faceA.separation)
+    floorB = minFloat(left: floorB, right: speculative)
+  }
+  loop var i: Int = 0, i < hullB.planes.length, ++i {
+    if dotsB.copyAtDefault(index: i) - radiusBound < maxFloat(
+      left: floorB
+      right: result.faceB.separation
+    ) {
+      continue
+    }
+    let plane: Plane = hullB.planes.copyAtDefault(index: i)
+    let direction: Vec3 = negate(vector: multiply(matrix: rotation, vector: plane.normal))
+    let planeSeparation: Float = dot(left: direction, right: transformB.position) - plane.offset
+    var vertexIndex: Int = 0
+    let separation: Float = faceSeparationOf(
+      plane: plane
+      direction: direction
+      planeSeparation: planeSeparation
+      vertices: hullA
+      vertexIndex: vertexIndex
+    )
+    if separation > result.faceB.separation {
+      result.faceB.normal = direction
+      result.faceB.separation = separation
+      result.faceB.indexA = vertexIndex
+      result.faceB.indexB = i
+      if separation > speculative and earlyReturn {
+        result.separatedFeature = SeparatingFeature.faceAxisB
+        ret result
+      }
+    }
+  }
+
+  # Edges that could beat the best face: dot(edgeNormal, deltaCenter) -
+  # radiusBound > best separation.
+  var edgeBound: Float = -infinity()
+  if earlyReturn {
+    edgeBound = maxFloat(left: result.faceA.separation, right: result.faceB.separation) + radiusBound
+  }
+  let edgeIndicesA: List(Int) = edgeCandidates(hull: hullA, dots: dotsA, bound: edgeBound)
+  let edgeIndicesB: List(Int) = edgeCandidates(hull: hullB, dots: dotsB, bound: edgeBound)
+  if edgeIndicesA.length is 0 or edgeIndicesB.length is 0 {
+    # No edge candidates
+    ret result
+  }
+  testEdgePairs(
+    result: result
+    hullA: hullA
+    hullB: hullB
+    edgeIndicesA: edgeIndicesA
+    edgeIndicesB: edgeIndicesB
+    rotation: rotation
+    translation: transformB.position
+    earlyReturn: earlyReturn
+    speculative: speculative
+    slop: slop
+  )
+  ret result
+}
+
+# The edges of `hull` (first half-edge of each twin pair) that pass
+# testEdgeCandidate, in order.
+func edgeCandidates(hull: view Hull, dots: view List(Float), bound: view Float) ret List(Int) {
+  let indices: List(Int) = List.create(Int, cap: hull.edges.length / 2)
+  var i: Int = 0
+  loop i < hull.edges.length {
+    let face1: Int = hullEdge(hull: hull, index: i).face
+    let face2: Int = hullEdge(hull: hull, index: i + 1).face
+    let normal1: Vec3 = hullPlane(hull: hull, index: face1).normal
+    let normal2: Vec3 = hullPlane(hull: hull, index: face2).normal
+    let cosine: Float = dot(left: normal1, right: normal2)
+    if testEdgeCandidate(
+      a1: dots.copyAtDefault(index: face1)
+      a2: dots.copyAtDefault(index: face2)
+      c: cosine
+      bound: bound
+    ) is 1 {
+      indices.add(value: i)
+    }
+    i = i + 2
+  }
+  ret indices
+}
+
+# The edge-pair phase of b3ComputeSeparatingAxis (the scalar B3_SIMD_NONE
+# loop): every candidate edge of B against every candidate edge of A, on
+# the Gauss map, with B's face normals and vertices negated into A's frame.
+func testEdgePairs(
+  result: mod AxisQuery
+  hullA: view Hull
+  hullB: view Hull
+  edgeIndicesA: view List(Int)
+  edgeIndicesB: view List(Int)
+  rotation: view Matrix3
+  translation: view Vec3
+  earlyReturn: view Bool
+  speculative: view Float
+  slop: view Float
+) {
+  # B's face normals and vertices in A's frame, negated
+  let normalsB: List(Vec3) = List.create(Vec3, cap: hullB.planes.length)
+  loop let plane: view Plane in hullB.planes {
+    normalsB.add(value: negate(vector: multiply(matrix: rotation, vector: plane.normal)))
+  }
+  let pointsB: List(Vec3) = List.create(Vec3, cap: hullB.points.length)
+  loop let point: view Vec3 in hullB.points {
+    pointsB.add(
+      value: negate(
+        vector: add(left: multiply(matrix: rotation, vector: point), right: translation)
+      )
+    )
+  }
+
+  # Per edge of A: its two face normals, its direction, its first vertex,
+  # and the parallel tolerance scaled by its length.
+  let edgeCount: Int = edgeIndicesA.length
+  let normals0: List(Vec3) = List.create(Vec3, cap: edgeCount)
+  let normals1: List(Vec3) = List.create(Vec3, cap: edgeCount)
+  let directions: List(Vec3) = List.create(Vec3, cap: edgeCount)
+  let starts: List(Vec3) = List.create(Vec3, cap: edgeCount)
+  let tolerances: List(Float) = List.create(Float, cap: edgeCount)
+  let squaredTolerance: Float = parallelEdgeTolerance * parallelEdgeTolerance
+  loop let edgeIndex: view Int in edgeIndicesA {
+    let edge: HullHalfEdge = hullEdge(hull: hullA, index: edgeIndex)
+    let twin: HullHalfEdge = hullEdge(hull: hullA, index: edgeIndex + 1)
+    normals0.add(value: hullPlane(hull: hullA, index: edge.face).normal)
+    normals1.add(value: hullPlane(hull: hullA, index: twin.face).normal)
+    let start: Vec3 = hullPoint(hull: hullA, index: edge.origin)
+    let finish: Vec3 = hullPoint(hull: hullA, index: twin.origin)
+    let direction: Vec3 = { x: finish.x - start.x, y: finish.y - start.y, z: finish.z - start.z }
+    directions.add(value: direction)
+    starts.add(value: start)
+    tolerances.add(
+      value: squaredTolerance * (direction.x * direction.x + direction.y * direction.y + direction.z * direction.z)
+    )
+  }
+
+  let epsilon: Float = -slop * slop
+  loop var j: Int = 0, j < edgeIndicesB.length, ++j {
+    let edgeIndexB: Int = edgeIndicesB.copyAtDefault(index: j)
+    let edge: HullHalfEdge = hullEdge(hull: hullB, index: edgeIndexB)
+    let twin: HullHalfEdge = hullEdge(hull: hullB, index: edgeIndexB + 1)
+    let normalC: Vec3 = normalsB.copyAtDefault(index: edge.face)
+    let normalD: Vec3 = normalsB.copyAtDefault(index: twin.face)
+    let startB: Vec3 = pointsB.copyAtDefault(index: edge.origin)
+    let finishB: Vec3 = pointsB.copyAtDefault(index: twin.origin)
+    let directionB: Vec3 = subtract(left: finishB, right: startB)
+
+    loop var i: Int = 0, i < edgeCount, ++i {
+      let directionA: Vec3 = directions.copyAtDefault(index: i)
+      # The Gauss map arcs cross: CBA * DBA < eps, ADC * BDC < eps, CBA * BDC < eps
+      let cba: Float = dot(left: normalC, right: directionA)
+      let dba: Float = dot(left: normalD, right: directionA)
+      if cba * dba >= epsilon {
+        continue
+      }
+      let normal0: Vec3 = normals0.copyAtDefault(index: i)
+      let normal1: Vec3 = normals1.copyAtDefault(index: i)
+      let adc: Float = dot(left: normal0, right: directionB)
+      let bdc: Float = dot(left: normal1, right: directionB)
+      if adc * bdc >= epsilon or cba * bdc >= epsilon {
+        continue
+      }
+      # Reject near parallel edges
+      let maxCd: Float = maxFloat(left: cba * cba, right: dba * dba)
+      if maxCd <= tolerances.copyAtDefault(index: i) {
+        continue
+      }
+      # normal = lerp(C, D, t), t = -CBA / (DBA - CBA)
+      let fraction: Float = -cba / (dba - cba)
+      var normal: Vec3 = mulAdd(
+        base: normalC
+        scale: fraction
+        vector: subtract(left: normalD, right: normalC)
+      )
+      let lengthSquaredOfNormal: Float = dot(left: normal, right: normal)
+      let inverseLength: Float = 1.0 / Math.sqrt(x: lengthSquaredOfNormal)
+      normal = scale(scale: inverseLength, vector: normal)
+      # separation = -dot(normal, av0 + bv0)
+      let separation: Float = -dot(
+        left: add(left: starts.copyAtDefault(index: i), right: startB)
+        right: normal
+      )
+      if separation > result.edge.separation {
+        result.edge.normal = normal
+        result.edge.separation = separation
+        result.edge.indexA = edgeIndicesA.copyAtDefault(index: i)
+        result.edge.indexB = edgeIndexB
+        if separation > speculative and earlyReturn {
+          result.separatedFeature = SeparatingFeature.edgePairAxis
+          ret
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,263 @@
+# Which manifold function a pair of shapes uses (contact.c of Box3D at
+# 9f998c8: the s_registers table and b3ComputeConvexManifold). Box3D keeps a
+# table of function pointers; here every dispatch is an exhaustive `match`
+# on ShapeType, so adding a shape kind fails to compile at each site that
+# must handle it (docs/physics-rae-port-design.md §3).
+open Vec3
+open physics/math/MatrixMath
+open physics/math/TransformMath
+open physics/math/AabbMath
+open physics/math/PlaneMath
+open physics/geometry/QueryTypes
+open physics/geometry/Hull
+open physics/geometry/HullCreate
+open physics/collision/Simplex
+open physics/collision/Manifold
+open physics/collision/ConvexManifold
+open physics/collision/HullManifold
+open physics/collision/SeparatingAxis
+open physics/collision/HullHullManifold
+
+# The shape kinds, in Box3D's order (b3ShapeType).
+enum ShapeType {
+  capsule
+  compound
+  height
+  hull
+  mesh
+  sphere
+}
+
+# A convex shape: the kind and that kind's geometry (the other two fields
+# are unused). Non-convex shapes (compound, height field, mesh) arrive with
+# their own manifolds in P5.
+type ConvexShape {
+  kind: ShapeType
+  sphere: Sphere
+  capsule: Capsule
+  hull: Hull
+}
+
+# The per-contact caches that warm-start the manifold functions
+# (b3ContactCache): GJK's simplex for hull-sphere and hull-capsule, the SAT
+# feature for hull-hull.
+type ContactCache {
+  simplexCache: SimplexCache
+  satCache: SatCache
+}
+
+func emptyContactCache() ret ContactCache {
+  ret ContactCache { simplexCache: emptySimplexCache(), satCache: emptySatCache() }
+}
+
+func sphereShape(sphere: view Sphere) ret ConvexShape {
+  ret ConvexShape {
+    kind: ShapeType.sphere
+    sphere: sphere
+    capsule: Capsule { center1: zeroVector(), center2: zeroVector(), radius: 0.0 }
+    hull: emptyHull()
+  }
+}
+
+func capsuleShape(capsule: view Capsule) ret ConvexShape {
+  ret ConvexShape {
+    kind: ShapeType.capsule
+    sphere: Sphere { center: zeroVector(), radius: 0.0 }
+    capsule: capsule
+    hull: emptyHull()
+  }
+}
+
+func hullShape(hull: view Hull) ret ConvexShape {
+  ret ConvexShape {
+    kind: ShapeType.hull
+    sphere: Sphere { center: zeroVector(), radius: 0.0 }
+    capsule: Capsule { center1: zeroVector(), center2: zeroVector(), radius: 0.0 }
+    hull: hull
+  }
+}
+
+# The numbering of b3ShapeType.
+func shapeTypeCode(shapeType: view ShapeType) ret Int {
+  match shapeType {
+    case ShapeType.capsule {
+      ret 0
+    }
+    case ShapeType.compound {
+      ret 1
+    }
+    case ShapeType.height {
+      ret 2
+    }
+    case ShapeType.hull {
+      ret 3
+    }
+    case ShapeType.mesh {
+      ret 4
+    }
+    case ShapeType.sphere {
+      ret 5
+    }
+  }
+}
+
+# A sphere, capsule or hull: what every shape kind but a sphere or capsule
+# collides against as the primary shape.
+func isSphereCapsuleOrHull(shapeType: view ShapeType) ret Bool {
+  match shapeType {
+    case ShapeType.sphere {
+      ret true
+    }
+    case ShapeType.capsule {
+      ret true
+    }
+    case ShapeType.hull {
+      ret true
+    }
+    case ShapeType.compound {
+      ret false
+    }
+    case ShapeType.height {
+      ret false
+    }
+    case ShapeType.mesh {
+      ret false
+    }
+  }
+}
+
+# Is (typeA, typeB) a registered pair with A as the primary shape (Box3D's
+# b3AddType calls)? The manifold of a pair is computed with the primary
+# shape as A.
+func isPrimaryContactPair(typeA: view ShapeType, typeB: view ShapeType) ret Bool {
+  match typeA {
+    case ShapeType.sphere {
+      ret typeB is ShapeType.sphere
+    }
+    case ShapeType.capsule {
+      ret typeB is ShapeType.sphere or typeB is ShapeType.capsule
+    }
+    case ShapeType.compound {
+      ret isSphereCapsuleOrHull(shapeType: typeB)
+    }
+    case ShapeType.hull {
+      ret isSphereCapsuleOrHull(shapeType: typeB)
+    }
+    case ShapeType.mesh {
+      ret isSphereCapsuleOrHull(shapeType: typeB)
+    }
+    case ShapeType.height {
+      ret isSphereCapsuleOrHull(shapeType: typeB)
+    }
+  }
+}
+
+# Can these two shape kinds touch (s_registers[a][b].supported)? Either
+# order of a registered pair is supported.
+func isSupportedContactPair(typeA: view ShapeType, typeB: view ShapeType) ret Bool {
+  ret isPrimaryContactPair(typeA: typeA, typeB: typeB) or isPrimaryContactPair(
+    typeA: typeB
+    typeB: typeA
+  )
+}
+
+# b3ComputeConvexManifold's dispatch: the manifold of two convex shapes,
+# A the primary shape (see isPrimaryContactPair), in A's frame. A pair that
+# is not a registered convex pair gets no points.
+func collideConvexShapes(
+  manifold: mod LocalManifold
+  shapeA: view ConvexShape
+  shapeB: view ConvexShape
+  transformBtoA: view Transform
+  cache: mod ContactCache
+  lengthUnitsPerMeter: view Float
+) {
+  match shapeA.kind {
+    case ShapeType.sphere {
+      if shapeB.kind is ShapeType.sphere {
+        collideSpheres(
+          manifold: manifold
+          sphereA: shapeA.sphere
+          sphereB: shapeB.sphere
+          transformBtoA: transformBtoA
+        )
+      }
+    }
+    case ShapeType.capsule {
+      match shapeB.kind {
+        case ShapeType.sphere {
+          collideCapsuleAndSphere(
+            manifold: manifold
+            capsuleA: shapeA.capsule
+            sphereB: shapeB.sphere
+            transformBtoA: transformBtoA
+          )
+        }
+        case ShapeType.capsule {
+          collideCapsules(
+            manifold: manifold
+            capsuleA: shapeA.capsule
+            capsuleB: shapeB.capsule
+            transformBtoA: transformBtoA
+            lengthUnitsPerMeter: lengthUnitsPerMeter
+          )
+        }
+        case ShapeType.hull {
+        }
+        case ShapeType.compound {
+        }
+        case ShapeType.height {
+        }
+        case ShapeType.mesh {
+        }
+      }
+    }
+    case ShapeType.hull {
+      match shapeB.kind {
+        case ShapeType.sphere {
+          collideHullAndSphere(
+            manifold: manifold
+            hullA: shapeA.hull
+            sphereB: shapeB.sphere
+            transformBtoA: transformBtoA
+            cache: cache.simplexCache
+            lengthUnitsPerMeter: lengthUnitsPerMeter
+          )
+        }
+        case ShapeType.capsule {
+          collideHullAndCapsule(
+            manifold: manifold
+            hullA: shapeA.hull
+            capsuleB: shapeB.capsule
+            transformBtoA: transformBtoA
+            cache: cache.simplexCache
+            lengthUnitsPerMeter: lengthUnitsPerMeter
+          )
+        }
+        case ShapeType.hull {
+          collideHulls(
+            manifold: manifold
+            hullA: shapeA.hull
+            hullB: shapeB.hull
+            transformBtoA: transformBtoA
+            cache: cache.satCache
+            lengthUnitsPerMeter: lengthUnitsPerMeter
+          )
+        }
+        case ShapeType.compound {
+        }
+        case ShapeType.height {
+        }
+        case ShapeType.mesh {
+        }
+      }
+    }
+    # The non-convex shapes have their own manifolds (P5).
+    case ShapeType.compound {
+    }
+    case ShapeType.height {
+    }
+    case ShapeType.mesh {
+    }
+  }
+}
