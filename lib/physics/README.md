@@ -174,3 +174,32 @@ operations: three scripted trees with full state dumps and every query
 kind, the pair set's slot layout, the bit sets, the id pool, quicksort).
 Pair finding (broad_phase.c) needs the world's shapes and filters and
 comes with P4.
+
+## P4a — the world, bodies and shapes (`dynamics/`, `broadPhase/BroadPhase`)
+
+Everything a world owns is a field of one `PhysicsWorld` value, passed `mod`
+to whatever changes it — Box3D's world registry, length scale and
+allocators included; there are no globals. Pointers between objects are
+ids into the world's Lists (-1 for none), exactly as Box3D's arrays are
+indexed. A hull shape keeps a copy of its hull in `world.hulls` (Box3D
+shares equal hulls through a database; that only saves memory).
+
+| Box3D | Rae |
+|---|---|
+| `b3World` `b3CreateWorld` | `PhysicsWorld` `createWorld` (`dynamics/World`) |
+| `b3Body` `b3BodySim` `b3BodyState` | `Body` `BodySim` `BodyState` (`dynamics/Body`) |
+| `b3SolverSet` `b3Island` | `SolverSet` `Island` (`dynamics/SolverSet`, `dynamics/Island`) |
+| `b3CreateIsland` `b3DestroyIsland` `b3WakeSolverSet` `b3WakeBody` | `createIsland` `destroyIsland` `wakeSolverSet` `wakeBody` (`dynamics/WorldIslands`) |
+| `b3CreateBody` `b3DestroyBody` `b3UpdateBodyMassData` | `createBody` `destroyBody` `updateBodyMassData` (`dynamics/WorldBodies`, `dynamics/BodyMass`) |
+| `b3Body_Get*` / `_Set*` / `_Apply*` | `getBody…` / `setBody…` / `applyBody…` |
+| `b3Shape` `b3CreateSphereShape` `…Capsule…` `…Hull…` `…TransformedHull…` `b3DestroyShape` | `Shape` `createSphereShape` `createCapsuleShape` `createHullShape` `createTransformedHullShape` `destroyShape` (`dynamics/Shape`, `dynamics/WorldShapes`) |
+| `b3CreateShapeProxy` `b3DestroyShapeProxy` | `createShapeProxy` `destroyShapeProxy` (`dynamics/ShapeProxy`) |
+| `b3BroadPhase` `b3BroadPhase_CreateProxy` `_DestroyProxy` `_MoveProxy` | `BroadPhase` `createBroadPhaseProxy` `destroyBroadPhaseProxy` `moveBroadPhaseProxy` |
+
+The check: fixture 954 replays `goldens/world.golden` (134 operations:
+bodies of every type and state, sphere, capsule and hull shapes, destroys,
+transforms, velocities, forces, impulses, mass data and damping, with
+Box3D's whole internal world state — id pools, bodies, solver sets,
+islands, shapes and the three broad-phase trees — dumped at checkpoints).
+Contacts and pair finding, the constraint graph, the solver and its stage
+dispatcher, sleep and island splitting, sensors and events are P4b-P4d.

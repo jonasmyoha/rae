@@ -1,0 +1,74 @@
+# A shape's boxes and broad-phase proxy (b3UpdateShapeAABBs,
+# b3CreateShapeProxy, b3DestroyShapeProxy of Box3D's shape.c at 9f998c8).
+open physics/Constants
+open physics/math/AabbMath
+open physics/math/TransformMath
+open physics/broadPhase/BroadPhase
+open physics/dynamics/WorldTypes
+open physics/dynamics/Shape
+open physics/dynamics/World
+
+# b3UpdateShapeAABBs: the shape's box with the speculative margin, and its
+# fat proxy box (a static proxy grows by the speculative distance, a moving
+# one by its own margin).
+func updateShapeAabbs(
+  world: mod PhysicsWorld
+  shapeId: view Int
+  transform: view Transform
+  proxyBodyType: view Int
+) {
+  let speculative: Float = speculativeDistance(lengthUnitsPerMeter: world.lengthUnitsPerMeter)
+  var shape: Shape = world.shapes.copyAtDefault(index: shapeId)
+  let box: Aabb = computeFatShapeAabb(
+    shape: shape
+    hulls: world.hulls
+    transform: transform
+    extra: speculative
+  )
+  shape.aabb = box
+  world.shapes.set(index: shapeId, value: shape)
+  var margin: Float = shape.aabbMargin
+  if proxyBodyType is 0 {
+    margin = speculative
+  }
+  world.fatAabbs.set(index: shapeId, value: inflate(box: box, extension: margin))
+}
+
+# b3CreateShapeProxy
+func createShapeProxy(
+  world: mod PhysicsWorld
+  shapeId: view Int
+  proxyBodyType: view Int
+  transform: view Transform
+  forcePairCreation: view Bool
+) {
+  updateShapeAabbs(
+    world: world
+    shapeId: shapeId
+    transform: transform
+    proxyBodyType: proxyBodyType
+  )
+  let shape: Shape = world.shapes.copyAtDefault(index: shapeId)
+  let proxyKey: Int = createBroadPhaseProxy(
+    broadPhase: world.broadPhase
+    bodyType: proxyBodyType
+    box: world.fatAabbs.copyAtDefault(index: shapeId)
+    categoryBits: shape.filter.categoryBits
+    shapeIndex: shapeId
+    forcePairCreation: forcePairCreation
+  )
+  if let stored: mod Shape => world.shapes.modAt(index: shapeId) {
+    stored.proxyKey = proxyKey
+  }
+}
+
+# b3DestroyShapeProxy
+func destroyShapeProxy(world: mod PhysicsWorld, shapeId: view Int) {
+  let proxyKey: Int = world.shapes.copyAtDefault(index: shapeId).proxyKey
+  if proxyKey is not -1 {
+    destroyBroadPhaseProxy(broadPhase: world.broadPhase, proxyKey: proxyKey)
+    if let shape: mod Shape => world.shapes.modAt(index: shapeId) {
+      shape.proxyKey = -1
+    }
+  }
+}

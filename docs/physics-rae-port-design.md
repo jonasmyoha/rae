@@ -284,6 +284,16 @@ C added.
 - **P4 — the first world.** Bodies, shapes, contacts, solver sets, islands and
   sleep, constraint graph, scalar contact solver, sensors and events; the
   falling sphere, restitution, friction and pyramid scenes bit-exact.
+  **P4a landed 2026-10-04, bit-exact:** the world with its id pools, solver
+  sets and islands, bodies (create, destroy, mass data, every getter and
+  setter, forces and impulses, waking), shapes (sphere, capsule, hull,
+  transformed hull; proxies in the broad phase) and the broad phase's proxy
+  layer (`lib/physics/dynamics/`, `broadPhase/BroadPhase`, golden `world`,
+  fixture 954). Split for the rest: **P4b** contacts, broad-phase pair
+  finding (the P3 remainder), the constraint graph and its colours, contact
+  islands; **P4c** the scalar wide solver and contact solver, the stage
+  list and dispatcher, and the 600-step scenes; **P4d** sleep and island
+  splitting, sensors, contact and sensor events.
 - **P5 — meshes, height fields, compounds** and their manifolds.
 - **P6 — joints**, one module per kind, each scene bit-exact.
 - **P7 — queries and the mover**: ray/shape casts, overlaps, the character

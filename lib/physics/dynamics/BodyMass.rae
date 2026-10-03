@@ -1,0 +1,177 @@
+# A body's flags and mass (b3SyncBodyFlags, b3UpdateBodyMassData of Box3D's
+# body.c at 9f998c8). Box3D's operation order is kept exactly; checked bit
+# for bit against the oracle in fixture 954.
+open Vec3
+open physics/Constants
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/MatrixMath
+open physics/math/TransformMath
+open physics/geometry/QueryTypes
+open physics/geometry/Hull
+open physics/dynamics/WorldTypes
+open physics/dynamics/Body
+open physics/dynamics/Shape
+open physics/dynamics/World
+
+# b3SyncBodyFlags: copy the body's flags to its sim (keeping the sim-only
+# fast and time-of-impact flags) and state.
+func syncBodyFlags(world: mod PhysicsWorld, bodyId: view Int) {
+  let body: Body = bodyAt(world: world, bodyId: bodyId)
+  var sim: BodySim = bodySimOf(world: world, body: body)
+  sim.flags = (sim.flags bitand (isFastFlag bitor hadTimeOfImpactFlag)) bitor (body.flags bitand (4294967295 - bodyTransientFlags))
+  setBodySim(world: world, body: body, sim: sim)
+  if hasBodyState(body: body) {
+    var state: BodyState = bodyStateOf(world: world, body: body)
+    state.flags = body.flags bitand (4294967295 - bodyTransientFlags)
+    setBodyState(world: world, body: body, state: state)
+  }
+}
+
+# The extents of the body's shapes about `localCenter`, into the sim.
+func accumulateExtents(
+  world: view PhysicsWorld
+  body: view Body
+  sim: mod BodySim
+  localCenter: view Vec3
+) {
+  var shapeId: Int = body.headShapeId
+  loop shapeId is not -1 {
+    let shape: Shape = world.shapes.copyAtDefault(index: shapeId)
+    let extent: ShapeExtent = computeShapeExtent(
+      shape: shape
+      hulls: world.hulls
+      localCenter: localCenter
+    )
+    sim.minExtent = minFloat(left: sim.minExtent, right: extent.minExtent)
+    sim.maxExtent = max(left: sim.maxExtent, right: extent.maxExtent)
+    shapeId = shape.nextShapeId
+  }
+}
+
+# b3UpdateBodyMassData: mass, center of mass, inertia and extents from the
+# body's shapes (each with its own density).
+func updateBodyMassData(world: mod PhysicsWorld, bodyId: view Int) {
+  # Mass is no longer dirty
+  if let dirty: mod Body => world.bodies.modAt(index: bodyId) {
+    dirty.flags = dirty.flags bitand (4294967295 - dirtyMassFlag)
+  }
+  syncBodyFlags(world: world, bodyId: bodyId)
+
+  var body: Body = bodyAt(world: world, bodyId: bodyId)
+  var sim: BodySim = bodySimOf(world: world, body: body)
+  body.mass = 0.0
+  body.inertia = matrixZero()
+  sim.invMass = 0.0
+  sim.invInertiaLocal = matrixZero()
+  sim.invInertiaWorld = matrixZero()
+  sim.localCenter = zeroVector()
+  sim.minExtent = huge(lengthUnitsPerMeter: world.lengthUnitsPerMeter)
+  sim.maxExtent = zeroVector()
+
+  if body.headShapeId is -1 {
+    world.bodies.set(index: bodyId, value: body)
+    setBodySim(world: world, body: body, sim: sim)
+    ret
+  }
+
+  # Static and kinematic bodies have no mass.
+  if body.bodyType is not BodyType.dynamicBody {
+    sim.center = sim.transform.position
+    sim.center0 = sim.center
+    # Kinematic bodies need extents to sleep.
+    if body.bodyType is BodyType.kinematicBody {
+      accumulateExtents(
+        world: world
+        body: body
+        sim: sim
+        localCenter: zeroVector()
+      )
+    }
+    world.bodies.set(index: bodyId, value: body)
+    setBodySim(world: world, body: body, sim: sim)
+    ret
+  }
+
+  # Accumulate the mass over the shapes
+  let masses: List(MassData) = List.create(MassData, cap: body.shapeCount)
+  var localCenter: Vec3 = zeroVector()
+  var shapeId: Int = body.headShapeId
+  loop shapeId is not -1 {
+    let shape: Shape = world.shapes.copyAtDefault(index: shapeId)
+    shapeId = shape.nextShapeId
+    if shape.density is 0.0 {
+      masses.add(value: zeroMassData())
+      continue
+    }
+    let massData: MassData = computeShapeMass(shape: shape, hulls: world.hulls)
+    body.mass = body.mass + massData.mass
+    localCenter = mulAdd(base: localCenter, scale: massData.mass, vector: massData.center)
+    masses.add(value: massData)
+  }
+
+  # The center of mass
+  if body.mass > 0.0 {
+    sim.invMass = 1.0 / body.mass
+    localCenter = scale(scale: sim.invMass, vector: localCenter)
+  }
+
+  # The inertia about the center of mass
+  loop let massData: view MassData in masses {
+    if massData.mass is 0.0 {
+      continue
+    }
+    let offset: Vec3 = subtract(left: localCenter, right: massData.center)
+    let inertia: Matrix3 = add(
+      left: massData.inertia
+      right: steiner(mass: massData.mass, origin: offset)
+    )
+    body.inertia = add(left: body.inertia, right: inertia)
+  }
+
+  let det: Float = determinant(matrix: body.inertia)
+  if det > 0.0 {
+    sim.invInertiaLocal = invertTransposed(matrix: body.inertia)
+    let rotationMatrix: Matrix3 = matrixFromQuat(quat: sim.transform.rotation)
+    sim.invInertiaWorld = multiply(
+      left: multiply(left: rotationMatrix, right: sim.invInertiaLocal)
+      right: transpose(matrix: rotationMatrix)
+    )
+  }
+
+  # Move the center of mass
+  let oldCenter: Vec3 = sim.center
+  sim.localCenter = localCenter
+  sim.center = transformWorldPoint(transform: sim.transform, point: sim.localCenter)
+  sim.center0 = sim.center
+
+  # The center of mass velocity
+  if hasBodyState(body: body) {
+    var state: BodyState = bodyStateOf(world: world, body: body)
+    let deltaLinear: Vec3 = cross(
+      left: state.angularVelocity
+      right: subtractPositions(left: sim.center, right: oldCenter)
+    )
+    state.linearVelocity = add(left: state.linearVelocity, right: deltaLinear)
+    setBodyState(world: world, body: body, state: state)
+  }
+
+  # The extents about the center of mass
+  accumulateExtents(
+    world: world
+    body: body
+    sim: sim
+    localCenter: localCenter
+  )
+
+  # (A cached contact manifold becomes invalid here: P4b.)
+
+  # Fixed rotation
+  if (sim.flags bitand fixedRotationFlags) is fixedRotationFlags {
+    body.inertia = matrixZero()
+    sim.invInertiaLocal = matrixZero()
+    sim.invInertiaWorld = matrixZero()
+  }
+  world.bodies.set(index: bodyId, value: body)
+  setBodySim(world: world, body: body, sim: sim)
+}

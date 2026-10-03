@@ -1,0 +1,715 @@
+# Creating and destroying bodies and the body API (b3CreateBody,
+# b3DestroyBody and the b3Body_* functions of Box3D's body.c at 9f998c8 that
+# do not involve contacts or joints). Box3D's operation order is kept
+# exactly; checked bit for bit against the oracle in fixture 954. Joints and
+# contacts attached to a destroyed body arrive with P4b and P6.
+open Vec3
+open Quat
+open physics/Constants
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/QuatMath
+open physics/math/MatrixMath
+open physics/math/TransformMath
+open physics/math/AabbMath
+open physics/geometry/QueryTypes
+open physics/container/IdPool
+open physics/dynamics/WorldTypes
+open physics/dynamics/Body
+open physics/dynamics/Shape
+open physics/dynamics/SolverSet
+open physics/dynamics/Island
+open physics/dynamics/World
+open physics/dynamics/WorldIslands
+open physics/dynamics/ShapeProxy
+open physics/dynamics/BodyMass
+open physics/broadPhase/BroadPhase
+
+# The lock flag bits of a definition.
+func lockFlagsOf(locks: view MotionLocks) ret Int {
+  var flags: Int = 0
+  if locks.linearX {
+    flags = flags bitor lockLinearX
+  }
+  if locks.linearY {
+    flags = flags bitor lockLinearY
+  }
+  if locks.linearZ {
+    flags = flags bitor lockLinearZ
+  }
+  if locks.angularX {
+    flags = flags bitor lockAngularX
+  }
+  if locks.angularY {
+    flags = flags bitor lockAngularY
+  }
+  if locks.angularZ {
+    flags = flags bitor lockAngularZ
+  }
+  ret flags
+}
+
+# b3CreateBody: the body goes in the disabled, static or awake set, or a new
+# sleeping set of its own; enabled moving bodies get an island.
+func createBody(world: mod PhysicsWorld, def: view BodyDef) ret BodyId {
+  let isAwake: Bool = (def.isAwake or def.enableSleep is false) and def.isEnabled
+  var setId: Int = awakeSet
+  if def.isEnabled is false {
+    setId = disabledSet
+  } else if def.bodyType is BodyType.staticBody {
+    setId = staticSet
+  } else if isAwake is false {
+    # A new set for a sleeping body in its own island
+    setId = allocId(pool: world.solverSetIdPool)
+    if setId is world.solverSets.length {
+      world.solverSets.add(value: emptySolverSet(setIndex: 0))
+    }
+    if let set: mod SolverSet => world.solverSets.modAt(index: setId) {
+      set.setIndex = setId
+    }
+  }
+
+  let bodyId: Int = allocId(pool: world.bodyIdPool)
+
+  var simFlags: Int = lockFlagsOf(locks: def.motionLocks)
+  if def.isBullet {
+    simFlags = simFlags bitor isBulletFlag
+  }
+  if def.allowFastRotation {
+    simFlags = simFlags bitor allowFastRotationFlag
+  }
+  if def.bodyType is BodyType.dynamicBody {
+    simFlags = simFlags bitor dynamicFlag
+  }
+  if def.enableSleep {
+    simFlags = simFlags bitor enableSleepFlag
+  }
+  if def.enableContactRecycling {
+    simFlags = simFlags bitor enableContactRecyclingFlag
+  }
+
+  var sim: BodySim = zeroBodySim()
+  sim.transform = Transform { position: def.position, rotation: def.rotation }
+  sim.center = def.position
+  sim.rotation0 = sim.transform.rotation
+  sim.center0 = sim.center
+  sim.localCenter = zeroVector()
+  sim.force = zeroVector()
+  sim.torque = zeroVector()
+  sim.invMass = 0.0
+  sim.invInertiaLocal = matrixZero()
+  sim.minExtent = huge(lengthUnitsPerMeter: world.lengthUnitsPerMeter)
+  sim.maxExtent = zeroVector()
+  sim.linearDamping = def.linearDamping
+  sim.angularDamping = def.angularDamping
+  sim.gravityScale = def.gravityScale
+  sim.bodyId = bodyId
+  sim.flags = simFlags
+
+  var localIndex: Int = 0
+  if let set: mod SolverSet => world.solverSets.modAt(index: setId) {
+    set.bodySims.add(value: sim)
+    localIndex = set.bodySims.length - 1
+    if setId is awakeSet {
+      set.bodyStates.add(value: BodyState {
+        linearVelocity: def.linearVelocity
+        angularVelocity: def.angularVelocity
+        deltaPosition: zeroVector()
+        flags: simFlags
+        deltaRotation: quatIdentity()
+      })
+    }
+  }
+
+  if bodyId is world.bodies.length {
+    world.bodies.add(value: zeroBody())
+  }
+  var body: Body = bodyAt(world: world, bodyId: bodyId)
+  body.setIndex = setId
+  body.localIndex = localIndex
+  body.generation = body.generation + 1
+  body.headShapeId = -1
+  body.shapeCount = 0
+  body.headChainId = -1
+  body.headContactKey = -1
+  body.contactCount = 0
+  body.headJointKey = -1
+  body.jointCount = 0
+  body.islandId = -1
+  body.islandIndex = -1
+  body.bodyMoveIndex = -1
+  body.id = bodyId
+  body.sleepThreshold = def.sleepThreshold
+  body.sleepTime = 0.0
+  body.sleepVelocity = 0.0
+  body.safetyFactor = def.safetyFactor
+  body.mass = 0.0
+  body.inertia = matrixZero()
+  body.bodyType = def.bodyType
+  body.flags = simFlags
+  world.bodies.set(index: bodyId, value: body)
+
+  # Enabled dynamic and kinematic bodies need an island
+  if setId >= awakeSet {
+    createIslandForBody(world: world, setIndex: setId, bodyId: bodyId)
+  }
+  ret BodyId { index1: bodyId + 1, world0: world.worldId, generation: body.generation }
+}
+
+# b3DestroyBody: its shapes and proxies, its island slot, its sim (the last
+# sim of the set fills the slot), an emptied sleeping set, and its id.
+func destroyBody(world: mod PhysicsWorld, bodyId: view BodyId) {
+  let bodyIndex: Int = bodyIndexOf(bodyId: bodyId)
+  let body: Body = bodyAt(world: world, bodyId: bodyIndex)
+
+  # (Joints and contacts of the body: P6, P4b.)
+
+  # The shapes and their proxies
+  var shapeId: Int = body.headShapeId
+  loop shapeId is not -1 {
+    destroyShapeProxy(world: world, shapeId: shapeId)
+    freeId(pool: world.shapeIdPool, id: shapeId)
+    var next: Int = -1
+    if let shape: mod Shape => world.shapes.modAt(index: shapeId) {
+      shape.id = -1
+      next = shape.nextShapeId
+    }
+    shapeId = next
+  }
+
+  removeBodyFromIsland(world: world, bodyId: bodyIndex)
+
+  # The sim, from the set that owns it
+  let setIndex: Int = body.setIndex
+  var movedIndex: Int = -1
+  var movedBodyId: Int = -1
+  var orphaned: Bool = false
+  if let set: mod SolverSet => world.solverSets.modAt(index: setIndex) {
+    let lastIndex: Int = set.bodySims.length - 1
+    if body.localIndex is not lastIndex {
+      movedIndex = lastIndex
+      let movedSim: BodySim = set.bodySims.copyAtDefault(index: lastIndex)
+      set.bodySims.set(index: body.localIndex, value: movedSim)
+      movedBodyId = movedSim.bodyId
+    }
+    set.bodySims.removeLast()
+    if setIndex is awakeSet {
+      let lastState: Int = set.bodyStates.length - 1
+      if body.localIndex is not lastState {
+        set.bodyStates.set(
+          index: body.localIndex
+          value: set.bodyStates.copyAtDefault(index: lastState)
+        )
+      }
+      set.bodyStates.removeLast()
+    } else if set.setIndex >= firstSleepingSet and set.bodySims.length is 0 {
+      orphaned = true
+    }
+  }
+  if movedBodyId is not -1 {
+    if let moved: mod Body => world.bodies.modAt(index: movedBodyId) {
+      moved.localIndex = body.localIndex
+    }
+    # (Its contacts' encoded sim indices: P4b.)
+  }
+  if orphaned {
+    destroySolverSet(world: world, setIndex: setIndex)
+  }
+
+  # Free the body and its id (the generation is kept)
+  freeId(pool: world.bodyIdPool, id: bodyIndex)
+  if let freed: mod Body => world.bodies.modAt(index: bodyIndex) {
+    freed.setIndex = -1
+    freed.localIndex = -1
+    freed.id = -1
+  }
+}
+
+# b3Body_GetTransform
+func getBodyTransform(world: view PhysicsWorld, bodyId: view BodyId) ret Transform {
+  ret bodyTransformOf(world: world, body: bodyAt(world: world, bodyId: bodyIndexOf(bodyId: bodyId)))
+}
+
+# b3Body_GetLocalPoint
+func getBodyLocalPoint(
+  world: view PhysicsWorld
+  bodyId: view BodyId
+  worldPoint: view Vec3
+) ret Vec3 {
+  ret inverseTransformWorldPoint(
+    transform: getBodyTransform(world: world, bodyId: bodyId)
+    position: worldPoint
+  )
+}
+
+# b3Body_GetWorldPoint
+func getBodyWorldPoint(
+  world: view PhysicsWorld
+  bodyId: view BodyId
+  localPoint: view Vec3
+) ret Vec3 {
+  ret transformWorldPoint(
+    transform: getBodyTransform(world: world, bodyId: bodyId)
+    point: localPoint
+  )
+}
+
+# b3Body_GetLocalVector
+func getBodyLocalVector(
+  world: view PhysicsWorld
+  bodyId: view BodyId
+  worldVector: view Vec3
+) ret Vec3 {
+  let transform: Transform = getBodyTransform(world: world, bodyId: bodyId)
+  ret inverseRotateVector(quat: transform.rotation, vector: worldVector)
+}
+
+# b3Body_GetWorldVector
+func getBodyWorldVector(
+  world: view PhysicsWorld
+  bodyId: view BodyId
+  localVector: view Vec3
+) ret Vec3 {
+  let transform: Transform = getBodyTransform(world: world, bodyId: bodyId)
+  ret rotateVector(quat: transform.rotation, vector: localVector)
+}
+
+# b3Body_SetTransform: move the body and its proxies (each only if its new
+# box leaves the old fat box).
+func setBodyTransform(
+  world: mod PhysicsWorld
+  bodyId: view BodyId
+  position: view Vec3
+  rotation: view Quat
+) {
+  let body: Body = bodyAt(world: world, bodyId: bodyIndexOf(bodyId: bodyId))
+  var sim: BodySim = bodySimOf(world: world, body: body)
+  sim.transform.position = position
+  sim.transform.rotation = rotation
+  sim.center = transformWorldPoint(transform: sim.transform, point: sim.localCenter)
+  let rotationMatrix: Matrix3 = matrixFromQuat(quat: sim.transform.rotation)
+  sim.invInertiaWorld = multiply(
+    left: multiply(left: rotationMatrix, right: sim.invInertiaLocal)
+    right: transpose(matrix: rotationMatrix)
+  )
+  sim.rotation0 = sim.transform.rotation
+  sim.center0 = sim.center
+  setBodySim(world: world, body: body, sim: sim)
+
+  let transform: Transform = sim.transform
+  let speculative: Float = speculativeDistance(lengthUnitsPerMeter: world.lengthUnitsPerMeter)
+  var shapeId: Int = body.headShapeId
+  loop shapeId is not -1 {
+    var shape: Shape = world.shapes.copyAtDefault(index: shapeId)
+    let box: Aabb = computeFatShapeAabb(
+      shape: shape
+      hulls: world.hulls
+      transform: transform
+      extra: speculative
+    )
+    shape.aabb = box
+    world.shapes.set(index: shapeId, value: shape)
+    if contains(outer: world.fatAabbs.copyAtDefault(index: shapeId), inner: box) is false {
+      let fatBox: Aabb = inflate(box: box, extension: shape.aabbMargin)
+      world.fatAabbs.set(index: shapeId, value: fatBox)
+      # The body could be disabled
+      if shape.proxyKey is not -1 {
+        moveBroadPhaseProxy(broadPhase: world.broadPhase, proxyKey: shape.proxyKey, box: fatBox)
+      }
+    }
+    shapeId = shape.nextShapeId
+  }
+}
+
+# b3Body_GetLinearVelocity
+func getBodyLinearVelocity(world: view PhysicsWorld, bodyId: view BodyId) ret Vec3 {
+  let body: Body = bodyAt(world: world, bodyId: bodyIndexOf(bodyId: bodyId))
+  if hasBodyState(body: body) {
+    ret bodyStateOf(world: world, body: body).linearVelocity
+  }
+  ret zeroVector()
+}
+
+# b3Body_GetAngularVelocity
+func getBodyAngularVelocity(world: view PhysicsWorld, bodyId: view BodyId) ret Vec3 {
+  let body: Body = bodyAt(world: world, bodyId: bodyIndexOf(bodyId: bodyId))
+  if hasBodyState(body: body) {
+    ret bodyStateOf(world: world, body: body).angularVelocity
+  }
+  ret zeroVector()
+}
+
+# b3Body_SetLinearVelocity: a non-zero velocity wakes the body.
+func setBodyLinearVelocity(world: mod PhysicsWorld, bodyId: view BodyId, velocity: view Vec3) {
+  let bodyIndex: Int = bodyIndexOf(bodyId: bodyId)
+  if bodyAt(world: world, bodyId: bodyIndex).bodyType is BodyType.staticBody {
+    ret
+  }
+  if lengthSquared(vector: velocity) > 0.0 {
+    wakeBody(world: world, bodyId: bodyIndex)
+  }
+  let body: Body = bodyAt(world: world, bodyId: bodyIndex)
+  if hasBodyState(body: body) is false {
+    ret
+  }
+  var state: BodyState = bodyStateOf(world: world, body: body)
+  state.linearVelocity = velocity
+  setBodyState(world: world, body: body, state: state)
+}
+
+# b3Body_SetAngularVelocity: locked axes are zeroed first, so they do not wake.
+func setBodyAngularVelocity(world: mod PhysicsWorld, bodyId: view BodyId, velocity: view Vec3) {
+  let bodyIndex: Int = bodyIndexOf(bodyId: bodyId)
+  let before: Body = bodyAt(world: world, bodyId: bodyIndex)
+  if before.bodyType is BodyType.staticBody {
+    ret
+  }
+  var locked: Vec3 = velocity
+  if (before.flags bitand lockAngularX) is not 0 {
+    locked.x = 0.0
+  }
+  if (before.flags bitand lockAngularY) is not 0 {
+    locked.y = 0.0
+  }
+  if (before.flags bitand lockAngularZ) is not 0 {
+    locked.z = 0.0
+  }
+  if lengthSquared(vector: locked) is not 0.0 {
+    wakeBody(world: world, bodyId: bodyIndex)
+  }
+  let body: Body = bodyAt(world: world, bodyId: bodyIndex)
+  if hasBodyState(body: body) is false {
+    ret
+  }
+  var state: BodyState = bodyStateOf(world: world, body: body)
+  state.angularVelocity = locked
+  setBodyState(world: world, body: body, state: state)
+}
+
+# b3Body_SetTargetTransform: the velocity that reaches `target` in `timeStep`.
+func setBodyTargetTransform(
+  world: mod PhysicsWorld
+  bodyId: view BodyId
+  target: view Transform
+  timeStep: view Float
+  wake: view Bool
+) {
+  let bodyIndex: Int = bodyIndexOf(bodyId: bodyId)
+  let before: Body = bodyAt(world: world, bodyId: bodyIndex)
+  if before.setIndex is disabledSet {
+    ret
+  }
+  if before.bodyType is BodyType.staticBody or timeStep <= 0.0 {
+    ret
+  }
+  if before.setIndex is not awakeSet and wake is false {
+    ret
+  }
+  let sim: BodySim = bodySimOf(world: world, body: before)
+  # The linear velocity, from the center difference
+  let center1: Vec3 = sim.center
+  let center2: Vec3 = transformWorldPoint(transform: target, point: sim.localCenter)
+  let invTimeStep: Float = 1.0 / timeStep
+  let linearVelocity: Vec3 = scale(
+    scale: invTimeStep
+    vector: subtractPositions(left: center2, right: center1)
+  )
+  # The angular velocity: w = 2 * (q2 - q1) * conjugate(q1) / dt, the shortest arc
+  let rotation1: Quat = sim.transform.rotation
+  var rotation2: Quat = target.rotation
+  if dot(left: rotation1, right: rotation2) < 0.0 {
+    rotation2 = negate(quat: rotation2)
+  }
+  let deltaRotation: Quat = quatFromParts(
+    vector: subtract(left: quatVector(quat: rotation2), right: quatVector(quat: rotation1))
+    scalar: rotation2.w - rotation1.w
+  )
+  let omega: Quat = multiply(left: deltaRotation, right: Quat.conjugate(a: rotation1))
+  let angularVelocity: Vec3 = scale(scale: 2.0 * invTimeStep, vector: quatVector(quat: omega))
+
+  # A sleeping body only wakes for a big enough movement
+  if before.setIndex is not awakeSet {
+    let maxVelocity: Float = length(vector: linearVelocity) + length(
+      vector: multiply(left: angularVelocity, right: sim.maxExtent)
+    )
+    if maxVelocity < before.sleepThreshold {
+      ret
+    }
+    wakeBody(world: world, bodyId: bodyIndex)
+  }
+  let body: Body = bodyAt(world: world, bodyId: bodyIndex)
+  var state: BodyState = bodyStateOf(world: world, body: body)
+  state.linearVelocity = linearVelocity
+  state.angularVelocity = angularVelocity
+  setBodyState(world: world, body: body, state: state)
+}
+
+# b3Body_GetLocalPointVelocity
+func getBodyLocalPointVelocity(
+  world: view PhysicsWorld
+  bodyId: view BodyId
+  localPoint: view Vec3
+) ret Vec3 {
+  let body: Body = bodyAt(world: world, bodyId: bodyIndexOf(bodyId: bodyId))
+  if hasBodyState(body: body) is false {
+    ret zeroVector()
+  }
+  let state: BodyState = bodyStateOf(world: world, body: body)
+  let sim: BodySim = bodySimOf(world: world, body: body)
+  let offset: Vec3 = rotateVector(
+    quat: sim.transform.rotation
+    vector: subtract(left: localPoint, right: sim.localCenter)
+  )
+  ret add(left: state.linearVelocity, right: cross(left: state.angularVelocity, right: offset))
+}
+
+# b3Body_GetWorldPointVelocity
+func getBodyWorldPointVelocity(
+  world: view PhysicsWorld
+  bodyId: view BodyId
+  worldPoint: view Vec3
+) ret Vec3 {
+  let body: Body = bodyAt(world: world, bodyId: bodyIndexOf(bodyId: bodyId))
+  if hasBodyState(body: body) is false {
+    ret zeroVector()
+  }
+  let state: BodyState = bodyStateOf(world: world, body: body)
+  let sim: BodySim = bodySimOf(world: world, body: body)
+  let offset: Vec3 = subtractPositions(left: worldPoint, right: sim.center)
+  ret add(left: state.linearVelocity, right: cross(left: state.angularVelocity, right: offset))
+}
+
+# Wake the body for a force or impulse if asked and it sleeps; true if it
+# is (then) awake.
+func wakeForImpulse(world: mod PhysicsWorld, bodyIndex: view Int, wake: view Bool) ret Bool {
+  if wake and bodyAt(world: world, bodyId: bodyIndex).setIndex >= firstSleepingSet {
+    wakeBody(world: world, bodyId: bodyIndex)
+  }
+  ret bodyAt(world: world, bodyId: bodyIndex).setIndex is awakeSet
+}
+
+# b3Body_ApplyForce
+func applyBodyForce(
+  world: mod PhysicsWorld
+  bodyId: view BodyId
+  force: view Vec3
+  point: view Vec3
+  wake: view Bool
+) {
+  let bodyIndex: Int = bodyIndexOf(bodyId: bodyId)
+  if wakeForImpulse(world: world, bodyIndex: bodyIndex, wake: wake) {
+    let body: Body = bodyAt(world: world, bodyId: bodyIndex)
+    var sim: BodySim = bodySimOf(world: world, body: body)
+    sim.force = add(left: sim.force, right: force)
+    sim.torque = add(
+      left: sim.torque
+      right: cross(left: subtractPositions(left: point, right: sim.center), right: force)
+    )
+    setBodySim(world: world, body: body, sim: sim)
+  }
+}
+
+# b3Body_ApplyForceToCenter
+func applyBodyForceToCenter(
+  world: mod PhysicsWorld
+  bodyId: view BodyId
+  force: view Vec3
+  wake: view Bool
+) {
+  let bodyIndex: Int = bodyIndexOf(bodyId: bodyId)
+  if wakeForImpulse(world: world, bodyIndex: bodyIndex, wake: wake) {
+    let body: Body = bodyAt(world: world, bodyId: bodyIndex)
+    var sim: BodySim = bodySimOf(world: world, body: body)
+    sim.force = add(left: sim.force, right: force)
+    setBodySim(world: world, body: body, sim: sim)
+  }
+}
+
+# b3Body_ApplyTorque
+func applyBodyTorque(
+  world: mod PhysicsWorld
+  bodyId: view BodyId
+  torque: view Vec3
+  wake: view Bool
+) {
+  let bodyIndex: Int = bodyIndexOf(bodyId: bodyId)
+  if wakeForImpulse(world: world, bodyIndex: bodyIndex, wake: wake) {
+    let body: Body = bodyAt(world: world, bodyId: bodyIndex)
+    var sim: BodySim = bodySimOf(world: world, body: body)
+    sim.torque = add(left: sim.torque, right: torque)
+    setBodySim(world: world, body: body, sim: sim)
+  }
+}
+
+# The linear velocity after an impulse, capped at the world's maximum speed.
+func cappedLinearVelocity(world: view PhysicsWorld, velocity: view Vec3) ret Vec3 {
+  let maxLinearSpeed: Float = world.maxLinearSpeed
+  if lengthSquared(vector: velocity) > maxLinearSpeed * maxLinearSpeed {
+    ret scale(scale: maxLinearSpeed, vector: normalize(vector: velocity))
+  }
+  ret velocity
+}
+
+# b3Body_ApplyLinearImpulse
+func applyBodyLinearImpulse(
+  world: mod PhysicsWorld
+  bodyId: view BodyId
+  impulse: view Vec3
+  point: view Vec3
+  wake: view Bool
+) {
+  let bodyIndex: Int = bodyIndexOf(bodyId: bodyId)
+  if wakeForImpulse(world: world, bodyIndex: bodyIndex, wake: wake) {
+    let body: Body = bodyAt(world: world, bodyId: bodyIndex)
+    var state: BodyState = bodyStateOf(world: world, body: body)
+    let sim: BodySim = bodySimOf(world: world, body: body)
+    state.linearVelocity = mulAdd(base: state.linearVelocity, scale: sim.invMass, vector: impulse)
+    state.linearVelocity = cappedLinearVelocity(world: world, velocity: state.linearVelocity)
+    let delta: Vec3 = multiply(
+      matrix: sim.invInertiaWorld
+      vector: cross(left: subtractPositions(left: point, right: sim.center), right: impulse)
+    )
+    state.angularVelocity = add(left: state.angularVelocity, right: delta)
+    setBodyState(world: world, body: body, state: state)
+  }
+}
+
+# b3Body_ApplyLinearImpulseToCenter
+func applyBodyLinearImpulseToCenter(
+  world: mod PhysicsWorld
+  bodyId: view BodyId
+  impulse: view Vec3
+  wake: view Bool
+) {
+  let bodyIndex: Int = bodyIndexOf(bodyId: bodyId)
+  if wakeForImpulse(world: world, bodyIndex: bodyIndex, wake: wake) {
+    let body: Body = bodyAt(world: world, bodyId: bodyIndex)
+    var state: BodyState = bodyStateOf(world: world, body: body)
+    let sim: BodySim = bodySimOf(world: world, body: body)
+    state.linearVelocity = mulAdd(base: state.linearVelocity, scale: sim.invMass, vector: impulse)
+    state.linearVelocity = cappedLinearVelocity(world: world, velocity: state.linearVelocity)
+    setBodyState(world: world, body: body, state: state)
+  }
+}
+
+# b3Body_ApplyAngularImpulse: through the local inverse inertia.
+func applyBodyAngularImpulse(
+  world: mod PhysicsWorld
+  bodyId: view BodyId
+  impulse: view Vec3
+  wake: view Bool
+) {
+  let bodyIndex: Int = bodyIndexOf(bodyId: bodyId)
+  if wakeForImpulse(world: world, bodyIndex: bodyIndex, wake: wake) {
+    let body: Body = bodyAt(world: world, bodyId: bodyIndex)
+    var state: BodyState = bodyStateOf(world: world, body: body)
+    let sim: BodySim = bodySimOf(world: world, body: body)
+    let localImpulse: Vec3 = inverseRotateVector(quat: sim.transform.rotation, vector: impulse)
+    let localDelta: Vec3 = multiply(matrix: sim.invInertiaLocal, vector: localImpulse)
+    state.angularVelocity = add(
+      left: state.angularVelocity
+      right: rotateVector(quat: sim.transform.rotation, vector: localDelta)
+    )
+    setBodyState(world: world, body: body, state: state)
+  }
+}
+
+# b3Body_SetMassData: override the mass from the shapes.
+func setBodyMassData(world: mod PhysicsWorld, bodyId: view BodyId, massData: view MassData) {
+  let bodyIndex: Int = bodyIndexOf(bodyId: bodyId)
+  if let dirty: mod Body => world.bodies.modAt(index: bodyIndex) {
+    dirty.flags = dirty.flags bitand (4294967295 - dirtyMassFlag)
+  }
+  syncBodyFlags(world: world, bodyId: bodyIndex)
+  var body: Body = bodyAt(world: world, bodyId: bodyIndex)
+  var sim: BodySim = bodySimOf(world: world, body: body)
+  body.mass = massData.mass
+  body.inertia = massData.inertia
+  sim.localCenter = massData.center
+  let oldCenter: Vec3 = sim.center
+  let center: Vec3 = transformWorldPoint(transform: sim.transform, point: massData.center)
+  sim.center = center
+  sim.center0 = center
+  sim.invMass = 0.0
+  if body.mass > 0.0 {
+    sim.invMass = 1.0 / body.mass
+  }
+  if hasBodyState(body: body) {
+    var state: BodyState = bodyStateOf(world: world, body: body)
+    let deltaLinear: Vec3 = cross(
+      left: state.angularVelocity
+      right: subtractPositions(left: sim.center, right: oldCenter)
+    )
+    state.linearVelocity = add(left: state.linearVelocity, right: deltaLinear)
+    setBodyState(world: world, body: body, state: state)
+  }
+  let det: Float = determinant(matrix: body.inertia)
+  if det > 0.0 {
+    sim.invInertiaLocal = invertTransposed(matrix: body.inertia)
+    let rotationMatrix: Matrix3 = matrixFromQuat(quat: sim.transform.rotation)
+    sim.invInertiaWorld = multiply(
+      left: multiply(left: rotationMatrix, right: sim.invInertiaLocal)
+      right: transpose(matrix: rotationMatrix)
+    )
+  } else {
+    sim.invInertiaLocal = matrixZero()
+    sim.invInertiaWorld = matrixZero()
+  }
+  if (sim.flags bitand fixedRotationFlags) is fixedRotationFlags {
+    body.inertia = matrixZero()
+    sim.invInertiaLocal = matrixZero()
+    sim.invInertiaWorld = matrixZero()
+  }
+  # The extents about the supplied center of mass
+  sim.minExtent = huge(lengthUnitsPerMeter: world.lengthUnitsPerMeter)
+  sim.maxExtent = zeroVector()
+  accumulateExtents(
+    world: world
+    body: body
+    sim: sim
+    localCenter: massData.center
+  )
+  world.bodies.set(index: bodyIndex, value: body)
+  setBodySim(world: world, body: body, sim: sim)
+}
+
+# b3Body_GetMassData
+func getBodyMassData(world: view PhysicsWorld, bodyId: view BodyId) ret MassData {
+  let body: Body = bodyAt(world: world, bodyId: bodyIndexOf(bodyId: bodyId))
+  ret MassData {
+    mass: body.mass
+    center: bodySimOf(world: world, body: body).localCenter
+    inertia: body.inertia
+  }
+}
+
+# b3Body_ApplyMassFromShapes
+func applyBodyMassFromShapes(world: mod PhysicsWorld, bodyId: view BodyId) {
+  updateBodyMassData(world: world, bodyId: bodyIndexOf(bodyId: bodyId))
+}
+
+# Set one body sim scalar through `update` (damping, gravity scale).
+func setBodyLinearDamping(world: mod PhysicsWorld, bodyId: view BodyId, linearDamping: view Float) {
+  let body: Body = bodyAt(world: world, bodyId: bodyIndexOf(bodyId: bodyId))
+  var sim: BodySim = bodySimOf(world: world, body: body)
+  sim.linearDamping = linearDamping
+  setBodySim(world: world, body: body, sim: sim)
+}
+
+func setBodyAngularDamping(
+  world: mod PhysicsWorld
+  bodyId: view BodyId
+  angularDamping: view Float
+) {
+  let body: Body = bodyAt(world: world, bodyId: bodyIndexOf(bodyId: bodyId))
+  var sim: BodySim = bodySimOf(world: world, body: body)
+  sim.angularDamping = angularDamping
+  setBodySim(world: world, body: body, sim: sim)
+}
+
+func setBodyGravityScale(world: mod PhysicsWorld, bodyId: view BodyId, gravityScale: view Float) {
+  let body: Body = bodyAt(world: world, bodyId: bodyIndexOf(bodyId: bodyId))
+  var sim: BodySim = bodySimOf(world: world, body: body)
+  sim.gravityScale = gravityScale
+  setBodySim(world: world, body: body, sim: sim)
+}

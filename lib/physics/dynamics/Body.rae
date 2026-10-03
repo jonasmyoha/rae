@@ -1,0 +1,153 @@
+# A rigid body's records (b3Body, b3BodySim, b3BodyState of Box3D's body.h at
+# 9f998c8). A body (indexed by its id) says where its data lives: the solver
+# set and the index in it. The set holds the body's simulation data (BodySim)
+# and, for the awake set, its velocity state (BodyState).
+open Vec3
+open Quat
+open physics/math/VectorMath
+open physics/math/QuatMath
+open physics/math/MatrixMath
+open physics/math/TransformMath
+open physics/dynamics/WorldTypes
+
+# The body record (b3Body; user data and name not ported).
+type Body {
+  setIndex: Int
+  localIndex: Int
+  # The contact list: key = (contactId << 1) | edge index
+  headContactKey: Int
+  contactCount: Int
+  headShapeId: Int
+  shapeCount: Int
+  headChainId: Int
+  # The joint list: key = (jointId << 1) | edge index
+  headJointKey: Int
+  jointCount: Int
+  islandId: Int
+  islandIndex: Int
+  sleepThreshold: Float
+  sleepTime: Float
+  sleepVelocity: Float
+  safetyFactor: Float
+  mass: Float
+  # About the center of mass
+  inertia: Matrix3
+  bodyMoveIndex: Int
+  # -1 for a free slot
+  id: Int
+  flags: Int
+  bodyType: BodyType
+  generation: Int
+}
+
+# The velocity state of an awake body (b3BodyState): what the solver
+# iterates on, in a compact layout.
+type BodyState {
+  linearVelocity: Vec3
+  angularVelocity: Vec3
+  # The solver's position and rotation deltas over the step
+  deltaPosition: Vec3
+  flags: Int
+  deltaRotation: Quat
+}
+
+# The simulation data of a body (b3BodySim).
+type BodySim {
+  # The body origin transform
+  transform: Transform
+  # The center of mass in the world
+  center: Vec3
+  flags: Int
+  minExtent: Float
+  maxExtent: Vec3
+  # The transform at the step start, for continuous collision
+  rotation0: Quat
+  center0: Vec3
+  # The center of mass relative to the body origin
+  localCenter: Vec3
+  force: Vec3
+  torque: Vec3
+  invMass: Float
+  invInertiaLocal: Matrix3
+  invInertiaWorld: Matrix3
+  linearDamping: Float
+  angularDamping: Float
+  gravityScale: Float
+  bodyId: Int
+}
+
+# A zeroed body record, for a new slot.
+func zeroBody() ret Body {
+  ret Body {
+    setIndex: 0
+    localIndex: 0
+    headContactKey: 0
+    contactCount: 0
+    headShapeId: 0
+    shapeCount: 0
+    headChainId: 0
+    headJointKey: 0
+    jointCount: 0
+    islandId: 0
+    islandIndex: 0
+    sleepThreshold: 0.0
+    sleepTime: 0.0
+    sleepVelocity: 0.0
+    safetyFactor: 0.0
+    mass: 0.0
+    inertia: matrixZero()
+    bodyMoveIndex: 0
+    id: 0
+    flags: 0
+    bodyType: BodyType.staticBody
+    generation: 0
+  }
+}
+
+# b3_identityBodyState: at rest.
+func identityBodyState() ret BodyState {
+  ret BodyState {
+    linearVelocity: zeroVector()
+    angularVelocity: zeroVector()
+    deltaPosition: zeroVector()
+    flags: 0
+    deltaRotation: quatIdentity()
+  }
+}
+
+func zeroBodySim() ret BodySim {
+  ret BodySim {
+    transform: Transform {
+      position: zeroVector()
+      rotation: Quat { x: 0.0, y: 0.0, z: 0.0, w: 0.0 }
+    }
+    center: zeroVector()
+    flags: 0
+    minExtent: 0.0
+    maxExtent: zeroVector()
+    rotation0: Quat { x: 0.0, y: 0.0, z: 0.0, w: 0.0 }
+    center0: zeroVector()
+    localCenter: zeroVector()
+    force: zeroVector()
+    torque: zeroVector()
+    invMass: 0.0
+    invInertiaLocal: matrixZero()
+    invInertiaWorld: matrixZero()
+    linearDamping: 0.0
+    angularDamping: 0.0
+    gravityScale: 0.0
+    bodyId: 0
+  }
+}
+
+# b3EncodeBodySimIndex: an awake body's local index, -(index + 2) for a
+# static body, -1 otherwise.
+func encodeBodySimIndex(body: view Body) ret Int {
+  if body.setIndex is awakeSet {
+    ret body.localIndex
+  }
+  if body.setIndex is staticSet {
+    ret -(body.localIndex + 2)
+  }
+  ret -1
+}

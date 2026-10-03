@@ -1,0 +1,157 @@
+# Islands and solver sets of a world (b3CreateIsland, b3DestroyIsland of
+# Box3D's island.c; b3DestroySolverSet, b3WakeSolverSet of solver_set.c; the
+# island helpers of body.c, at 9f998c8). Box3D's order of array moves is kept
+# exactly; checked against the oracle in fixture 954. Waking moves bodies and
+# islands here; moving a sleeping set's contacts and joints arrives with
+# contacts (P4b) and joints (P6).
+open physics/container/IdPool
+open physics/dynamics/WorldTypes
+open physics/dynamics/Body
+open physics/dynamics/SolverSet
+open physics/dynamics/Island
+open physics/dynamics/World
+
+# b3CreateIsland: a new empty island in set `setIndex`. Returns its id.
+func createIsland(world: mod PhysicsWorld, setIndex: view Int) ret Int {
+  let islandId: Int = allocId(pool: world.islandIdPool)
+  if islandId is world.islands.length {
+    world.islands.add(value: emptyIsland())
+  }
+  var localIndex: Int = 0
+  if let set: mod SolverSet => world.solverSets.modAt(index: setIndex) {
+    localIndex = set.islandSims.length
+    set.islandSims.add(value: islandId)
+  }
+  world.islands.set(
+    index: islandId
+    value: Island {
+      setIndex: setIndex
+      localIndex: localIndex
+      islandId: islandId
+      constraintRemoveCount: 0
+      bodies: List.create(Int, cap: 4)
+    }
+  )
+  ret islandId
+}
+
+# b3DestroyIsland: free an (empty) island, filling its slot in its set with
+# the set's last island.
+func destroyIsland(world: mod PhysicsWorld, islandId: view Int) {
+  if world.splitIslandId is islandId {
+    world.splitIslandId = -1
+  }
+  let island: Island = world.islands.copyAtDefault(index: islandId)
+  if let set: mod SolverSet => world.solverSets.modAt(index: island.setIndex) {
+    let localIndex: Int = island.localIndex
+    let lastIndex: Int = set.islandSims.length - 1
+    let movedIslandId: Int = set.islandSims.copyAtDefault(index: lastIndex)
+    set.islandSims.set(index: localIndex, value: movedIslandId)
+    if let moved: mod Island => world.islands.modAt(index: movedIslandId) {
+      moved.localIndex = localIndex
+    }
+    set.islandSims.removeLast()
+  }
+  if let freed: mod Island => world.islands.modAt(index: islandId) {
+    freed.bodies.clear()
+    freed.constraintRemoveCount = 0
+    freed.localIndex = -1
+    freed.islandId = -1
+    freed.setIndex = -1
+  }
+  freeId(pool: world.islandIdPool, id: islandId)
+}
+
+# b3CreateIslandForBody: an island of its own for a new body.
+func createIslandForBody(world: mod PhysicsWorld, setIndex: view Int, bodyId: view Int) {
+  let islandId: Int = createIsland(world: world, setIndex: setIndex)
+  if let island: mod Island => world.islands.modAt(index: islandId) {
+    island.bodies.add(value: bodyId)
+  }
+  if let body: mod Body => world.bodies.modAt(index: bodyId) {
+    body.islandId = islandId
+    body.islandIndex = 0
+  }
+}
+
+# b3RemoveBodyFromIsland: take the body out of its island (the island's last
+# body fills its slot), destroying the island when it empties.
+func removeBodyFromIsland(world: mod PhysicsWorld, bodyId: view Int) {
+  let body: Body = bodyAt(world: world, bodyId: bodyId)
+  if body.islandId is -1 {
+    ret
+  }
+  let islandId: Int = body.islandId
+  var remaining: Int = 0
+  if let island: mod Island => world.islands.modAt(index: islandId) {
+    let localIndex: Int = body.islandIndex
+    let movedBodyId: Int = island.bodies.copyAtDefault(index: island.bodies.length - 1)
+    island.bodies.set(index: localIndex, value: movedBodyId)
+    island.bodies.removeLast()
+    remaining = island.bodies.length
+    if let moved: mod Body => world.bodies.modAt(index: movedBodyId) {
+      moved.islandIndex = localIndex
+    }
+  }
+  if remaining is 0 {
+    destroyIsland(world: world, islandId: islandId)
+  }
+  if let removed: mod Body => world.bodies.modAt(index: bodyId) {
+    removed.islandId = -1
+    removed.islandIndex = -1
+  }
+}
+
+# b3DestroySolverSet: free a set slot.
+func destroySolverSet(world: mod PhysicsWorld, setIndex: view Int) {
+  world.solverSets.set(index: setIndex, value: emptySolverSet(setIndex: -1))
+  freeId(pool: world.solverSetIdPool, id: setIndex)
+}
+
+# b3WakeSolverSet: move a sleeping set's bodies (velocities reset to rest)
+# and islands to the awake set, then free it.
+func wakeSolverSet(world: mod PhysicsWorld, setIndex: view Int) {
+  let sleeping: SolverSet = world.solverSets.copyAtDefault(index: setIndex)
+  loop let sim: view BodySim in sleeping.bodySims {
+    var flags: Int = 0
+    var localIndex: Int = 0
+    if let awake: view SolverSet => world.solverSets.viewAt(index: awakeSet) {
+      localIndex = awake.bodySims.length
+    }
+    if let body: mod Body => world.bodies.modAt(index: sim.bodyId) {
+      body.setIndex = awakeSet
+      body.localIndex = localIndex
+      # Reset the sleep timer
+      body.sleepTime = 0.0
+      flags = body.flags
+    }
+    if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
+      awake.bodySims.add(value: sim)
+      var state: BodyState = identityBodyState()
+      state.flags = flags
+      awake.bodyStates.add(value: state)
+    }
+  }
+  loop let islandId: view Int in sleeping.islandSims {
+    var localIndex: Int = 0
+    if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
+      localIndex = awake.islandSims.length
+      awake.islandSims.add(value: islandId)
+    }
+    if let island: mod Island => world.islands.modAt(index: islandId) {
+      island.setIndex = awakeSet
+      island.localIndex = localIndex
+    }
+  }
+  destroySolverSet(world: world, setIndex: setIndex)
+}
+
+# b3WakeBody: wake the body's sleeping set; true if it was asleep.
+func wakeBody(world: mod PhysicsWorld, bodyId: view Int) ret Bool {
+  let setIndex: Int = bodyAt(world: world, bodyId: bodyId).setIndex
+  if setIndex >= firstSleepingSet {
+    wakeSolverSet(world: world, setIndex: setIndex)
+    ret true
+  }
+  ret false
+}
