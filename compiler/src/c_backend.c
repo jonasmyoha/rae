@@ -968,11 +968,10 @@ bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* ou
   return true;
 }
 
-bool emit_param_list(CFuncContext* ctx, const AstParam* params, FILE* out, bool is_extern) {
-  size_t index = 0;
-  for (const AstParam* p = params; p; p = p->next) {
-    if (index > 0) fprintf(out, ", ");
-    if (p->type) {
+// The C type a parameter is declared with (without its name). Also used by
+// emit_parallel_loop, which re-declares a captured parameter under its own
+// type inside the outlined parallelLoop body.
+void emit_param_c_type(CFuncContext* ctx, const AstParam* p, FILE* out, bool is_extern) {
         bool is_mod = p->type->is_mod, is_val = p->type->is_val, is_view = p->type->is_view;
         Str base = get_base_type_name(p->type);
         // Stage 6: `view`/`copy`/`own` on a numeric primitive lowers
@@ -989,7 +988,16 @@ bool emit_param_list(CFuncContext* ctx, const AstParam* params, FILE* out, bool 
         bool is_ptr = is_extern ? (is_mod || is_view) : (is_mod || is_view || (!is_val && !is_primitive_type(base)));
         if (is_view && !is_ptr && !str_eq_cstr(base, "String")) fprintf(out, "const ");
         CFuncContext p_ctx = *ctx; AstTypeRef p_type = *p->type; p_type.is_view = is_view; p_type.is_mod = is_mod;
-        emit_type_ref_as_c_type(&p_ctx, &p_type, out, false); fprintf(out, " %.*s", (int)p->name.len, p->name.data);
+        emit_type_ref_as_c_type(&p_ctx, &p_type, out, false);
+}
+
+bool emit_param_list(CFuncContext* ctx, const AstParam* params, FILE* out, bool is_extern) {
+  size_t index = 0;
+  for (const AstParam* p = params; p; p = p->next) {
+    if (index > 0) fprintf(out, ", ");
+    if (p->type) {
+        emit_param_c_type(ctx, p, out, is_extern);
+        fprintf(out, " %.*s", (int)p->name.len, p->name.data);
     }
     index++;
   }

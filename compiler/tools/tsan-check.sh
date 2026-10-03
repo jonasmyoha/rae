@@ -28,7 +28,7 @@ trap 'rm -rf "$TMP"' EXIT
 # Channel producers, the file-notification thread, the parallelLoop worker pool.
 CASES="511_spawn_raytracer_bands 512_spawn_string_workers 513_spawn_own_list_copy \
 541_channel_worker 646_list_of_tasks 848_channel_struct_payload 941_file_notify \
-944_parallel_loop_results"
+944_parallel_loop_results 946_parallel_chunk_scratch"
 if [ -n "${RAE_TSAN_FILTER:-}" ]; then CASES="$RAE_TSAN_FILTER"; fi
 
 # The toolchain probe: a compiler without the TSan runtime cannot run this gate.

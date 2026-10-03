@@ -1425,7 +1425,15 @@ static bool emit_parallel_loop(CFuncContext* ctx, const AstStmt* stmt, Str index
         char* type_buf = NULL; size_t type_len = 0;
         FILE* type_out = open_memstream(&type_buf, &type_len);
         if (!type_out) { fclose(thunk); free(thunk_buf); return false; }
-        emit_type_ref_as_c_type(ctx, ctx->local_type_refs[k], type_out, false);
+        // A parameter is declared as the parameter list declares it (a `view`
+        // of a number is the plain number there); any other local by its type.
+        const AstParam* param = NULL;
+        if (ctx->func_decl && k < ctx->func_first_let_idx) {
+            for (const AstParam* p = ctx->func_decl->params; p; p = p->next)
+                if (p->type && str_eq(p->name, ctx->locals[k])) param = p;
+        }
+        if (param) emit_param_c_type(ctx, param, type_out, false);
+        else emit_type_ref_as_c_type(ctx, ctx->local_type_refs[k], type_out, false);
         fclose(type_out);
         fprintf(thunk, "  %s %.*s = *(%s*)__rae_captures[%zu];\n", type_buf,
                 (int)ctx->locals[k].len, ctx->locals[k].data, type_buf, j);

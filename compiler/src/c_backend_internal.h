@@ -231,6 +231,7 @@ const char* rae_opt_type_name(CFuncContext* ctx, const AstTypeRef* opt_type);
 bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* out, bool skip_ptr);
 void emit_type_info_as_c_type(CFuncContext* ctx, TypeInfo* t, FILE* out);
 bool emit_param_list(CFuncContext* ctx, const AstParam* params, FILE* out, bool is_extern);
+void emit_param_c_type(CFuncContext* ctx, const AstParam* p, FILE* out, bool is_extern);
 
 /* True iff a spawned call to `f` can run on a real OS thread in the
  * compiled backend: f is a non-generic, non-extern user function whose
