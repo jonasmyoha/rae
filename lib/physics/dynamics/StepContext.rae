@@ -1,0 +1,163 @@
+# The context of one time step (b3StepContext, b3SolverStage, b3SyncBlock,
+# b3SolverBlock and b3MakeSoft of Box3D's solver.h at 9f998c8). The solver's
+# work is split into stages, each a range of blocks in `syncBlocks`; stages
+# that iterate (warm start, solve, relax, restitution) share their colour's
+# blocks, whose sync index grows each time a stage claims them. The sync
+# indices and completion counts are plain Ints read and written only by the
+# StageDispatcher's functions, which is the one place threading changes.
+import Math
+open physics/Constants
+open physics/dynamics/ContactConstraints
+
+# b3SolverStageType
+enum SolverStageType {
+  prepareJoints
+  prepareWideContacts
+  prepareContacts
+  integrateVelocities
+  warmStart
+  solve
+  integratePositions
+  relax
+  restitution
+  storeWideImpulses
+  storeImpulses
+}
+
+# b3SolverBlockType
+enum SolverBlockType {
+  bodyBlock
+  jointBlock
+  wideContactBlock
+  contactBlock
+  graphJointBlock
+  graphWideContactBlock
+  graphContactBlock
+  overflowBlock
+}
+
+# A unit of work: `count` items from `startIndex` (b3SolverBlock)
+type SolverBlock {
+  startIndex: Int
+  count: Int
+  blockType: SolverBlockType
+  # The graph colour, 255 for none
+  colorIndex: Int
+}
+
+# A block and its claim counter (b3SyncBlock)
+type SyncBlock {
+  block: SolverBlock
+  syncIndex: Int
+}
+
+# A stage: blocks `blockStart` to `blockStart + blockCount` of the pool
+type SolverStage {
+  stageType: SolverStageType
+  blockStart: Int
+  blockCount: Int
+  colorIndex: Int
+  completionCount: Int
+}
+
+# A slice of the flat prepare/store range belonging to one colour
+# (b3WidePrepareSpan, b3ContactPrepareSpan): its contacts are the colour's.
+type PrepareSpan {
+  start: Int
+  count: Int
+  colorIndex: Int
+}
+
+type StepContext {
+  dt: Float
+  inverseDt: Float
+  h: Float
+  inverseH: Float
+  subStepCount: Int
+  contactSoftness: Softness
+  staticSoftness: Softness
+  maxLinearVelocity: Float
+  enableWarmStarting: Bool
+  # The awake sims of fast bullet bodies, for continuous collision
+  bulletBodies: List(Int)
+  anyRestitution: Bool
+  # Convex contacts, four per wide constraint, colour by colour
+  wideConstraints: List(ContactConstraintWide)
+  widePrepareSpans: List(PrepareSpan)
+  wideContactCount: Int
+  # Mesh and overflow contacts
+  contactConstraints: List(ContactConstraint)
+  manifoldConstraints: List(ManifoldConstraint)
+  contactPrepareSpans: List(PrepareSpan)
+  overflowSpans: List(PrepareSpan)
+  overflowContactConstraints: List(ContactConstraint)
+  overflowManifoldConstraints: List(ManifoldConstraint)
+  # Where each graph colour's slice starts (Box3D's per-colour pointers)
+  colorWideStarts: List(Int)
+  colorContactStarts: List(Int)
+  activeColorCount: Int
+  workerCount: Int
+  stages: List(SolverStage)
+  syncBlocks: List(SyncBlock)
+  # sync index (16 bits) | stage index (16 bits)
+  syncBits: Int
+}
+
+func zeroSoftness() ret Softness {
+  ret Softness { biasRate: 0.0, massScale: 0.0, impulseScale: 0.0 }
+}
+
+# b3MakeSoft: the soft constraint coefficients of a spring of `hertz` and
+# damping ratio `zeta` at sub-step `h`.
+func makeSoft(hertz: view Float, zeta: view Float, h: view Float) ret Softness {
+  if hertz is 0.0 {
+    ret zeroSoftness()
+  }
+  let omega: Float = 2.0 * Math.pi * hertz
+  let a1: Float = 2.0 * zeta + h * omega
+  let a2: Float = h * omega * a1
+  let a3: Float = 1.0 / (1.0 + a2)
+  ret Softness { biasRate: omega / a1, massScale: a2 * a3, impulseScale: a3 }
+}
+
+func createStepContext() ret StepContext {
+  ret StepContext {
+    dt: 0.0
+    inverseDt: 0.0
+    h: 0.0
+    inverseH: 0.0
+    subStepCount: 1
+    contactSoftness: zeroSoftness()
+    staticSoftness: zeroSoftness()
+    maxLinearVelocity: 0.0
+    enableWarmStarting: true
+    bulletBodies: List.create(Int, cap: 4)
+    anyRestitution: false
+    wideConstraints: List.create(ContactConstraintWide, cap: 4)
+    widePrepareSpans: List.create(PrepareSpan, cap: graphColorCount + 1)
+    wideContactCount: 0
+    contactConstraints: List.create(ContactConstraint, cap: 4)
+    manifoldConstraints: List.create(ManifoldConstraint, cap: 4)
+    contactPrepareSpans: List.create(PrepareSpan, cap: graphColorCount + 1)
+    overflowSpans: List.create(PrepareSpan, cap: 2)
+    overflowContactConstraints: List.create(ContactConstraint, cap: 4)
+    overflowManifoldConstraints: List.create(ManifoldConstraint, cap: 4)
+    colorWideStarts: List.create(Int, cap: graphColorCount)
+    colorContactStarts: List.create(Int, cap: graphColorCount)
+    activeColorCount: 0
+    workerCount: 1
+    stages: List.create(SolverStage, cap: 16)
+    syncBlocks: List.create(SyncBlock, cap: 16)
+    syncBits: 0
+  }
+}
+
+# The span holding flat index `index` of `spans` (spans end in a sentinel
+# at the total count). A linear search, as in Box3D.
+func spanSlotOf(spans: view List(PrepareSpan), index: view Int) ret Int {
+  var slot: Int = 0
+  loop spans.copyAtDefault(index: slot + 1).start <= index {
+    slot = slot + 1
+  }
+  ret slot
+}

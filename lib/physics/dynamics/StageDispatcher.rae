@@ -1,0 +1,384 @@
+# Running the solver's stages (b3ComputeBlockCount, b3InitBlocks,
+# b3InitStage, b3ExecuteBlock, GetWorkerStartIndex, b3ExecuteStage and
+# b3ExecuteMainStage of Box3D's solver.c at 9f998c8; docs/
+# physics-performance-plan.md §8). This is the ONE module that knows how
+# stages are executed: the single-threaded version below runs a stage's
+# blocks in order as worker 0. The sync indices and completion counts are
+# plain Ints, read and written only by claimBlock, addCompletions and
+# resetCompletions; with threads they become atomics and the workers' spin
+# loop joins this module, while the solver tasks stay as they are.
+open Vec3
+open physics/Constants
+open physics/dynamics/WorldTypes
+open physics/dynamics/Body
+open physics/dynamics/SolverSet
+open physics/dynamics/World
+open physics/dynamics/ConstraintGraph
+open physics/dynamics/StepContext
+open physics/dynamics/BodyIntegration
+open physics/dynamics/ContactSolver
+open physics/dynamics/ContactSolverWide
+open physics/dynamics/ContactSolverWideSolve
+
+# b3BlockDim: items per block (all but the last) and the block count
+type BlockDim {
+  size: Int
+  count: Int
+}
+
+# b3ComputeBlockCount
+func computeBlockCount(
+  itemCount: view Int
+  minSize: view Int
+  maxBlockCount: view Int
+) ret BlockDim {
+  if itemCount is 0 {
+    ret BlockDim { size: 0, count: 0 }
+  }
+  var size: Int = minSize
+  if itemCount > minSize * maxBlockCount {
+    size = (itemCount + maxBlockCount - 1) / maxBlockCount
+  }
+  ret BlockDim { size: size, count: (itemCount + size - 1) / size }
+}
+
+# b3InitBlocks: `dim.count` blocks over `itemCount` items, appended to the
+# block pool with a zero sync index. Returns the first block's index.
+func initBlocks(
+  context: mod StepContext
+  dim: view BlockDim
+  itemCount: view Int
+  blockType: view SolverBlockType
+  colorIndex: view Int
+) ret Int {
+  let first: Int = context.syncBlocks.length
+  loop var i: Int = 0, i < dim.count, ++i {
+    var count: Int = dim.size
+    # The last block may not be full
+    if i is dim.count - 1 {
+      count = itemCount - (dim.count - 1) * dim.size
+    }
+    context.syncBlocks.add(
+      value: SyncBlock {
+        block: SolverBlock {
+          startIndex: i * dim.size
+          count: count
+          blockType: blockType
+          colorIndex: colorIndex
+        }
+        syncIndex: 0
+      }
+    )
+  }
+  ret first
+}
+
+# b3InitStage
+func initStage(
+  context: mod StepContext
+  stageType: view SolverStageType
+  blockStart: view Int
+  blockCount: view Int
+  colorIndex: view Int
+) {
+  context.stages.add(value: SolverStage {
+    stageType: stageType
+    blockStart: blockStart
+    blockCount: blockCount
+    colorIndex: colorIndex
+    completionCount: 0
+  })
+}
+
+# Claim block `blockIndex` of the pool for sync index `syncIndex` (Box3D's
+# compare-exchange of the block's sync index from `previousSyncIndex`).
+func claimBlock(
+  context: mod StepContext
+  blockIndex: view Int
+  previousSyncIndex: view Int
+  syncIndex: view Int
+) ret Bool {
+  if let syncBlock: mod SyncBlock => context.syncBlocks.modAt(index: blockIndex) {
+    if syncBlock.syncIndex is previousSyncIndex {
+      syncBlock.syncIndex = syncIndex
+      ret true
+    }
+  }
+  ret false
+}
+
+# Box3D's fetch-add of a stage's completion count.
+func addCompletions(context: mod StepContext, stageIndex: view Int, completed: view Int) {
+  if let stage: mod SolverStage => context.stages.modAt(index: stageIndex) {
+    stage.completionCount = stage.completionCount + completed
+  }
+}
+
+func resetCompletions(context: mod StepContext, stageIndex: view Int) {
+  if let stage: mod SolverStage => context.stages.modAt(index: stageIndex) {
+    stage.completionCount = 0
+  }
+}
+
+# GetWorkerStartIndex: a worker's first block, staggered so workers start
+# on different blocks; -1 if it has none.
+func workerStartIndex(workerIndex: view Int, blockCount: view Int, workerCount: view Int) ret Int {
+  if blockCount <= workerCount {
+    if workerIndex < blockCount {
+      ret workerIndex
+    }
+    ret -1
+  }
+  let blocksPerWorker: Int = blockCount / workerCount
+  let remainder: Int = blockCount - blocksPerWorker * workerCount
+  var extra: Int = remainder
+  if workerIndex < remainder {
+    extra = workerIndex
+  }
+  ret blocksPerWorker * workerIndex + extra
+}
+
+# b3ExecuteBlock: run one block of a stage.
+func executeBlock(
+  world: mod PhysicsWorld
+  context: mod StepContext
+  stageType: view SolverStageType
+  block: view SolverBlock
+) {
+  let wide: Bool = block.blockType is SolverBlockType.graphWideContactBlock
+  let joint: Bool = block.blockType is SolverBlockType.graphJointBlock
+  var first: Int = 0
+  if block.colorIndex >= 0 and block.colorIndex < context.colorWideStarts.length {
+    if wide {
+      first = context.colorWideStarts.copyAtDefault(index: block.colorIndex)
+    } else {
+      first = context.colorContactStarts.copyAtDefault(index: block.colorIndex)
+    }
+  }
+  match stageType {
+    case SolverStageType.prepareJoints {
+      # (Joints: P6.)
+    }
+    case SolverStageType.prepareWideContacts {
+      prepareContactsWide(world: world, context: context, block: block)
+    }
+    case SolverStageType.prepareContacts {
+      prepareContactsScalar(world: world, context: context, block: block)
+    }
+    case SolverStageType.integrateVelocities {
+      let gravity: Vec3 = world.gravity
+      if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
+        integrateVelocities(
+          sims: awake.bodySims
+          states: awake.bodyStates
+          block: block
+          gravity: gravity
+          h: context.h
+        )
+      }
+    }
+    case SolverStageType.warmStart {
+      if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
+        if wide {
+          warmStartContactsWide(
+            states: awake.bodyStates
+            constraints: context.wideConstraints
+            first: first
+            block: block
+          )
+        } else if joint is false {
+          warmStartContactsScalar(
+            states: awake.bodyStates
+            constraints: context.contactConstraints
+            manifolds: context.manifoldConstraints
+            first: first
+            block: block
+          )
+        }
+      }
+    }
+    case SolverStageType.solve {
+      let contactSpeed: Float = world.contactSpeed
+      if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
+        if wide {
+          pushContactsWide(
+            states: awake.bodyStates
+            constraints: context.wideConstraints
+            first: first
+            block: block
+            context: context
+            contactSpeed: contactSpeed
+          )
+        } else if joint is false {
+          pushContactsScalar(
+            states: awake.bodyStates
+            constraints: context.contactConstraints
+            manifolds: context.manifoldConstraints
+            first: first
+            block: block
+            inverseH: context.inverseH
+            contactSpeed: contactSpeed
+          )
+        }
+      }
+    }
+    case SolverStageType.integratePositions {
+      let maxAngularSpeed: Float = maxRotation() * context.inverseDt
+      if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
+        integratePositions(
+          states: awake.bodyStates
+          block: block
+          h: context.h
+          maxLinearSpeed: context.maxLinearVelocity
+          maxAngularSpeed: maxAngularSpeed
+        )
+      }
+    }
+    case SolverStageType.relax {
+      if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
+        if wide {
+          solveContactsWide(
+            states: awake.bodyStates
+            constraints: context.wideConstraints
+            first: first
+            block: block
+            inverseHValue: context.inverseH
+          )
+        } else if joint is false {
+          solveContactsScalar(
+            states: awake.bodyStates
+            constraints: context.contactConstraints
+            manifolds: context.manifoldConstraints
+            first: first
+            block: block
+            inverseH: context.inverseH
+          )
+        }
+      }
+    }
+    case SolverStageType.restitution {
+      let threshold: Float = world.restitutionThreshold
+      let propagate: Bool = world.enableRestitutionPropagation
+      if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
+        if wide {
+          applyRestitutionWide(
+            states: awake.bodyStates
+            constraints: context.wideConstraints
+            first: first
+            block: block
+            inverseHValue: context.inverseH
+            threshold: threshold
+            propagate: propagate
+          )
+        } else if block.blockType is SolverBlockType.graphContactBlock {
+          applyRestitutionScalar(
+            states: awake.bodyStates
+            constraints: context.contactConstraints
+            manifolds: context.manifoldConstraints
+            first: first
+            block: block
+            inverseH: context.inverseH
+            threshold: threshold
+            propagate: propagate
+          )
+        }
+      }
+    }
+    case SolverStageType.storeWideImpulses {
+      storeImpulsesWide(world: world, context: context, block: block)
+    }
+    case SolverStageType.storeImpulses {
+      storeImpulsesScalar(
+        contacts: world.contacts
+        constraints: context.contactConstraints
+        manifolds: context.manifoldConstraints
+        block: block
+      )
+    }
+  }
+}
+
+# b3ExecuteStage: worker `workerIndex` sweeps the stage's blocks from its
+# start block, claiming each one it can.
+func executeStage(
+  world: mod PhysicsWorld
+  context: mod StepContext
+  stageIndex: view Int
+  previousSyncIndex: view Int
+  syncIndex: view Int
+  workerIndex: view Int
+) {
+  let stage: SolverStage = context.stages.copyAtDefault(index: stageIndex)
+  let startIndex: Int = workerStartIndex(
+    workerIndex: workerIndex
+    blockCount: stage.blockCount
+    workerCount: context.workerCount
+  )
+  if startIndex is -1 {
+    ret
+  }
+  var completedCount: Int = 0
+  var blockIndex: Int = startIndex
+  loop var i: Int = 0, i < stage.blockCount, ++i {
+    if claimBlock(
+      context: context
+      blockIndex: stage.blockStart + blockIndex
+      previousSyncIndex: previousSyncIndex
+      syncIndex: syncIndex
+    ) {
+      let block: SolverBlock = context.syncBlocks.copyAtDefault(
+        index: stage.blockStart + blockIndex
+      ).block
+      executeBlock(
+        world: world
+        context: context
+        stageType: stage.stageType
+        block: block
+      )
+      completedCount = completedCount + 1
+    }
+    blockIndex = blockIndex + 1
+    if blockIndex >= stage.blockCount {
+      blockIndex = 0
+    }
+  }
+  addCompletions(context: context, stageIndex: stageIndex, completed: completedCount)
+}
+
+# b3ExecuteMainStage: run a stage on worker 0. A single block runs directly;
+# otherwise the sync bits are published for the (future) workers, the
+# blocks are swept, and the stage completes when every block is done.
+func executeMainStage(
+  world: mod PhysicsWorld
+  context: mod StepContext
+  stageIndex: view Int
+  syncBits: view Int
+) {
+  let stage: SolverStage = context.stages.copyAtDefault(index: stageIndex)
+  if stage.blockCount is 0 {
+    ret
+  }
+  if stage.blockCount is 1 {
+    let block: SolverBlock = context.syncBlocks.copyAtDefault(index: stage.blockStart).block
+    executeBlock(
+      world: world
+      context: context
+      stageType: stage.stageType
+      block: block
+    )
+    ret
+  }
+  context.syncBits = syncBits
+  let syncIndex: Int = (syncBits shr 16) bitand 65535
+  executeStage(
+    world: world
+    context: context
+    stageIndex: stageIndex
+    previousSyncIndex: syncIndex - 1
+    syncIndex: syncIndex
+    workerIndex: 0
+  )
+  # With one worker every block is done here; threaded, this waits for the
+  # workers' completions.
+  resetCompletions(context: context, stageIndex: stageIndex)
+}

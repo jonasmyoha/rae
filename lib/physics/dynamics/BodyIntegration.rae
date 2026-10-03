@@ -1,0 +1,165 @@
+# Integrating the awake bodies' velocities and positions over a sub-step
+# (b3IntegrateVelocitiesTask and b3IntegratePositionsTask of Box3D's
+# solver.c at 9f998c8). Box3D's operation order is kept exactly; checked
+# against the oracle in fixture 958.
+import Math
+open Vec3
+open Quat
+open physics/Constants
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/QuatMath
+open physics/math/MatrixMath
+open physics/dynamics/WorldTypes
+open physics/dynamics/Body
+open physics/dynamics/StepContext
+
+# b3IntegrateVelocitiesTask: gravity, applied forces, damping and the
+# gyroscopic torque for bodies `block`.
+func integrateVelocities(
+  sims: view List(BodySim)
+  states: mod List(BodyState)
+  block: view SolverBlock
+  gravity: view Vec3
+  h: view Float
+) {
+  loop var i: Int = block.startIndex, i < block.startIndex + block.count, ++i {
+    let sim: BodySim = sims.copyAtDefault(index: i)
+    if let state: mod BodyState => states.modAt(index: i) {
+      var v: Vec3 = state.linearVelocity
+      var w: Vec3 = state.angularVelocity
+
+      # Damping: the Pade approximation of exp(-c * dt), v2 = v1 / (1 + c * dt)
+      let linearDamping: Float = 1.0 / (1.0 + h * sim.linearDamping)
+      let angularDamping: Float = 1.0 / (1.0 + h * sim.angularDamping)
+
+      # Gravity scale is zero for kinematic bodies
+      var gravityScale: Float = 0.0
+      if sim.invMass > 0.0 {
+        gravityScale = sim.gravityScale
+      }
+      let linearVelocityDelta: Vec3 = blend2(
+        firstScale: h * sim.invMass
+        first: sim.force
+        secondScale: h * gravityScale
+        second: gravity
+      )
+      v = mulAdd(base: linearVelocityDelta, scale: linearDamping, vector: v)
+      let angularVelocityDelta: Vec3 = scale(
+        scale: h
+        vector: multiply(matrix: sim.invInertiaWorld, vector: sim.torque)
+      )
+      w = mulAdd(base: angularVelocityDelta, scale: angularDamping, vector: w)
+
+      # Gyroscopic torque: solve I * (w2 - w1) + h * cross(w2, I * w2) = 0
+      # with Newton-Raphson, in local coordinates (better for long, skinny
+      # bodies).
+      let q0: Quat = sim.transform.rotation
+      let q: Quat = multiply(left: state.deltaRotation, right: q0)
+      let inertiaLocal: Matrix3 = invert(matrix: sim.invInertiaLocal)
+      let omega1: Vec3 = inverseRotateVector(quat: q, vector: w)
+      var omega2: Vec3 = omega1
+      # The symmetric inertia tensor's 6 entries (column-major)
+      let i00: Float = inertiaLocal.columnX.x
+      let i01: Float = inertiaLocal.columnY.x
+      let i02: Float = inertiaLocal.columnZ.x
+      let i11: Float = inertiaLocal.columnY.y
+      let i12: Float = inertiaLocal.columnZ.y
+      let i22: Float = inertiaLocal.columnZ.z
+      loop var gyroIteration: Int = 0, gyroIteration < gyroscopicIterations, ++gyroIteration {
+        let w1: Float = omega2.x
+        let w2: Float = omega2.y
+        let w3: Float = omega2.z
+        # I * omega2, shared by the residual and the Jacobian
+        let iw1: Float = i00 * w1 + i01 * w2 + i02 * w3
+        let iw2: Float = i01 * w1 + i11 * w2 + i12 * w3
+        let iw3: Float = i02 * w1 + i12 * w2 + i22 * w3
+        # Residual: I * (omega2 - omega1) + h * cross(omega2, I * omega2)
+        let dw: Vec3 = subtract(left: omega2, right: omega1)
+        let residual: Vec3 = {
+          x: i00 * dw.x + i01 * dw.y + i02 * dw.z + h * (w2 * iw3 - w3 * iw2)
+          y: i01 * dw.x + i11 * dw.y + i12 * dw.z + h * (w3 * iw1 - w1 * iw3)
+          z: i02 * dw.x + i12 * dw.y + i22 * dw.z + h * (w1 * iw2 - w2 * iw1)
+        }
+        # Jacobian: I + h * (skew(omega2) * I - skew(I * omega2))
+        let jacobian: Matrix3 = {
+          columnX: Vec3 {
+            x: i00 + h * (w2 * i02 - w3 * i01)
+            y: i01 + h * (w3 * i00 - w1 * i02 - iw3)
+            z: i02 + h * (w1 * i01 - w2 * i00 + iw2)
+          }
+          columnY: Vec3 {
+            x: i01 + h * (w2 * i12 - w3 * i11 + iw3)
+            y: i11 + h * (w3 * i01 - w1 * i12)
+            z: i12 + h * (w1 * i11 - w2 * i01 - iw1)
+          }
+          columnZ: Vec3 {
+            x: i02 + h * (w2 * i22 - w3 * i12 - iw2)
+            y: i12 + h * (w3 * i02 - w1 * i22 + iw1)
+            z: i22 + h * (w1 * i12 - w2 * i02)
+          }
+        }
+        omega2 = subtract(left: omega2, right: solve3(matrix: jacobian, vector: residual))
+      }
+      w = rotateVector(quat: q, vector: omega2)
+
+      state.linearVelocity = v
+      state.angularVelocity = w
+    }
+  }
+}
+
+func lockedOrValue(flags: view Int, lock: view Int, value: view Float) ret Float {
+  if (flags bitand lock) is not 0 {
+    ret 0.0
+  }
+  ret value
+}
+
+# b3IntegratePositionsTask: motion locks, speed caps, then the position and
+# rotation deltas for bodies `block`.
+func integratePositions(
+  states: mod List(BodyState)
+  block: view SolverBlock
+  h: view Float
+  maxLinearSpeed: view Float
+  maxAngularSpeed: view Float
+) {
+  let maxLinearSpeedSquared: Float = maxLinearSpeed * maxLinearSpeed
+  let maxAngularSpeedSquared: Float = maxAngularSpeed * maxAngularSpeed
+  loop var i: Int = block.startIndex, i < block.startIndex + block.count, ++i {
+    if let state: mod BodyState => states.modAt(index: i) {
+      let flags: Int = state.flags
+      # Motion locks: constraints that come last
+      var v: Vec3 = {
+        x: lockedOrValue(flags: flags, lock: lockLinearX, value: state.linearVelocity.x)
+        y: lockedOrValue(flags: flags, lock: lockLinearY, value: state.linearVelocity.y)
+        z: lockedOrValue(flags: flags, lock: lockLinearZ, value: state.linearVelocity.z)
+      }
+      var w: Vec3 = {
+        x: lockedOrValue(flags: flags, lock: lockAngularX, value: state.angularVelocity.x)
+        y: lockedOrValue(flags: flags, lock: lockAngularY, value: state.angularVelocity.y)
+        z: lockedOrValue(flags: flags, lock: lockAngularZ, value: state.angularVelocity.z)
+      }
+      # Clamp to the max linear speed
+      if dot(left: v, right: v) > maxLinearSpeedSquared {
+        let ratio: Float = maxLinearSpeed / length(vector: v)
+        v = scale(scale: ratio, vector: v)
+        state.flags = state.flags bitor isSpeedCappedFlag
+      }
+      # Clamp to the max angular speed
+      if dot(left: w, right: w) > maxAngularSpeedSquared and (state.flags bitand allowFastRotationFlag) is 0 {
+        let ratio: Float = maxAngularSpeed / length(vector: w)
+        w = scale(scale: ratio, vector: w)
+        state.flags = state.flags bitor isSpeedCappedFlag
+      }
+      state.linearVelocity = v
+      state.angularVelocity = w
+      state.deltaPosition = mulAdd(base: state.deltaPosition, scale: h, vector: v)
+      state.deltaRotation = integrateRotation(
+        quat: state.deltaRotation
+        deltaRotation: scale(scale: h, vector: w)
+      )
+    }
+  }
+}
