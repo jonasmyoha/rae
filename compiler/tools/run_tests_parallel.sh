@@ -65,6 +65,13 @@ if [ -f ../stress/run.sh ]; then
   if bash ../stress/run.sh; then STRESS_CHECK=0; fi
   echo
 fi
+# The threaded fixtures under ThreadSanitizer (tools/tsan-check.sh): one more
+# pre-suite "case"; any TSan report fails it (SKIP without a TSan runtime).
+TSAN_CHECK=1
+if [ -f tools/tsan-check.sh ]; then
+  if bash tools/tsan-check.sh; then TSAN_CHECK=0; fi
+  echo
+fi
 echo "Running Rae tests (PARALLEL: $TOTAL cases, $JOBS jobs)..."
 echo
 START=$(date +%s)
@@ -95,6 +102,7 @@ done
 if [ "$TREE_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$TERMS_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$STRESS_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
+if [ "$TSAN_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 # #917: the format-CLI behavior checks (traversal, --check/--json, mtime,
 # permissions, atomic write, over-cap) — one extra "case" folded into the run.
 if [ -f tools/test-format-cli.sh ]; then

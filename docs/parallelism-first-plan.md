@@ -44,8 +44,8 @@ modest — with declared read/write sets in the schedule, the physics step is
   **compiles as a sequential loop**.
 - No `detach`. No disjointness checking.
 - Runtime globals: the string temp pool and RNG are `__thread`; the memory
-  counters `g_mem_*` are plain globals (0 atomics) but only counted under
-  `RAE_MEM_STATS=1` — a test-mode race, still an audit item.
+  counters are atomic and the stats tables locked since the 2026-10-02 audit
+  (`docs/concurrency-model.md` §5).
 - `lib/ecs/Schedule`: entries are a *name* + a caller-supplied read
   generation for `shouldRun`; **read/write sets are not declared**.
 - `lib/Profile.rae`: `zoneBegin`/`zoneEnd`/`counter`, timed captures to a
@@ -65,10 +65,10 @@ Everything below is prioritised by that table, not by intuition.
 
 ### Phase 1 — runtime foundation (compiler + runtime)
 
-1. **Thread-safety audit** of the runtime under real threads: `g_mem_*` →
-   atomics or per-thread counters merged at exit; any remaining process
-   globals (registries, interned pools). Gate: the four spawn fixtures pass
-   under TSan.
+1. **Thread-safety audit** of the runtime under real threads — **done
+   2026-10-02**: the counters are atomics, the stats tables are locked, and
+   `compiler/tools/tsan-check.sh` runs every threaded fixture plus 106's
+   workers under TSan as a pre-suite case (`docs/concurrency-model.md` §5).
 2. **Worker pool** in `runtime_threads.c`: `N = performance-core count`
    workers, a work queue, `rae_job_submit` / `rae_job_wait`. `spawn` keeps
    its thread-per-task semantics (long-lived workers, channels); pool jobs

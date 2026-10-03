@@ -721,6 +721,13 @@ a machine without the list it prints `SKIP` and passes. Standalone:
 the message) so a slip is refused before it becomes a commit. Refer to such
 a project as "game proto1" (or similar) instead.
 
+**TSan gate (docs/concurrency-model.md §5).** `compiler/tools/tsan-check.sh`
+(`make tsan`) builds every threaded fixture (and 106_mobile_ui with its
+Spotify poller) with `-fsanitize=thread` and fails on any ThreadSanitizer
+report; it runs as one pre-suite case of every full run. A new fixture that
+starts a thread goes on its CASES list. A new mutable static in the runtime
+needs a lock, an `_Atomic`, or `__thread` — the gate is what notices.
+
 **Stress cases (docs/stress-tests.md).** `stress/NN_name/` holds small
 foot-gun programs on two shelves: `handles` (Rae does the right thing) and
 `footgun` (Rae still gets it wrong — the case asserts the CURRENT bad
