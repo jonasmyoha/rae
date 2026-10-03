@@ -1,0 +1,133 @@
+# The value types of Box3D's geometric queries (b3ShapeProxy, b3RayCastInput,
+# b3ShapeCastInput, b3CastOutput, b3MassData, b3PlaneResult, b3Sphere,
+# b3Capsule of include/box3d/types.h and collision.h at 9f998c8), and
+# b3IsValidRay (math_functions.c).
+open Vec3
+open physics/Constants
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/MatrixMath
+open physics/math/PlaneMath
+open physics/math/Validation
+
+# A convex point cloud with a radius: what GJK and the shape cast see of a
+# shape. Box3D points at the shape's own vertices; a Rae struct cannot hold
+# a view, so the proxy owns a copy of them.
+type ShapeProxy {
+  points: List(Vec3)
+  radius: Float
+}
+
+# A sphere: a center and a radius.
+type Sphere {
+  center: Vec3
+  radius: Float
+}
+
+# A capsule: the segment between two hemisphere centers, swept by a radius.
+type Capsule {
+  center1: Vec3
+  center2: Vec3
+  radius: Float
+}
+
+# A ray from `origin` to origin + maxFraction * translation.
+type RayCastInput {
+  origin: Vec3
+  translation: Vec3
+  maxFraction: Float
+}
+
+# A shape (as a proxy) moved along `translation`.
+type ShapeCastInput {
+  proxy: ShapeProxy
+  translation: Vec3
+  maxFraction: Float
+  canEncroach: Bool
+}
+
+# The result of a ray or shape cast. The indices name the triangle, compound
+# child and material of mesh and compound hits.
+type CastOutput {
+  normal: Vec3
+  point: Vec3
+  fraction: Float
+  iterations: Int
+  triangleIndex: Int
+  childIndex: Int
+  materialIndex: Int
+  hit: Bool
+}
+
+# A shape's mass, center of mass and inertia about that center.
+type MassData {
+  mass: Float
+  center: Vec3
+  inertia: Matrix3
+}
+
+# A plane a character mover is pushed out along, and the closest point.
+type PlaneResult {
+  plane: Plane
+  point: Vec3
+  triangleIndex: Int
+  childIndex: Int
+  materialIndex: Int
+}
+
+# Box3D's `b3CastOutput output = { 0 }`.
+func emptyCastOutput() ret CastOutput {
+  ret CastOutput {
+    normal: zeroVector()
+    point: zeroVector()
+    fraction: 0.0
+    iterations: 0
+    triangleIndex: 0
+    childIndex: 0
+    materialIndex: 0
+    hit: false
+  }
+}
+
+func emptyPlaneResult() ret PlaneResult {
+  ret PlaneResult {
+    plane: Plane { normal: zeroVector(), offset: 0.0 }
+    point: zeroVector()
+    triangleIndex: 0
+    childIndex: 0
+    materialIndex: 0
+  }
+}
+
+# b3MakeProxy: a proxy over a copy of `points`.
+func makeProxy(points: view List(Vec3), radius: view Float) ret ShapeProxy {
+  let copied: List(Vec3) = List.create(Vec3, cap: points.length)
+  loop let point: view Vec3 in points {
+    copied.add(value: point)
+  }
+  ret ShapeProxy { points: copied, radius: radius }
+}
+
+# The one-point proxy of a sphere.
+func sphereProxy(sphere: view Sphere) ret ShapeProxy {
+  let points: List(Vec3) = List.create(Vec3, cap: 1)
+  points.add(value: sphere.center)
+  ret ShapeProxy { points: points, radius: sphere.radius }
+}
+
+# The two-point proxy of a capsule.
+func capsuleProxy(capsule: view Capsule) ret ShapeProxy {
+  let points: List(Vec3) = List.create(Vec3, cap: 2)
+  points.add(value: capsule.center1)
+  points.add(value: capsule.center2)
+  ret ShapeProxy { points: points, radius: capsule.radius }
+}
+
+# b3IsValidRay
+func isValidRay(input: view RayCastInput, lengthUnitsPerMeter: view Float) ret Bool {
+  ret isValidVec3(vector: input.origin) and isValidVec3(vector: input.translation) and isValidFloat(
+    value: input.maxFraction
+  ) and 0.0 <= input.maxFraction and input.maxFraction < huge(
+    lengthUnitsPerMeter: lengthUnitsPerMeter
+  )
+}

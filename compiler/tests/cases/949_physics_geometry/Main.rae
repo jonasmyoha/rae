@@ -1,0 +1,539 @@
+# The physics port's convex geometry and distance queries (P2: lib/physics/
+# geometry and lib/physics/collision) against Box3D itself: every line of
+# tools/box3d-oracle/goldens/geometry.golden is one call of aabb.c, sphere.c,
+# capsule.c or distance.c (GJK, shape cast, sweep, time of impact) with its
+# inputs and outputs as exact hex floats, written by Box3D's own C build.
+# This runs the Rae port on the same inputs and requires the SAME BITS
+# (docs/physics-rae-port-design.md §4).
+import Vec3
+import Quat
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/TransformMath
+open physics/math/AabbMath
+open physics/math/PlaneMath
+open physics/geometry/QueryTypes
+open physics/geometry/Sphere
+open physics/geometry/Capsule
+open physics/collision/Simplex
+open physics/collision/Distance
+open physics/collision/ShapeCast
+open physics/collision/TimeOfImpact
+
+# Reads the inputs of one golden line in order.
+type Reader {
+  values: List(Float)
+  next: Int
+}
+
+func readFloat(reader: mod Reader) ret Float {
+  let value: Float = reader.values.copyAtDefault(index: reader.next)
+  reader.next = reader.next + 1
+  ret value
+}
+
+func readInt(reader: mod Reader) ret Int {
+  ret readFloat(reader: reader).toInt()
+}
+
+func readBool(reader: mod Reader) ret Bool {
+  ret readFloat(reader: reader) is not 0.0
+}
+
+func readVec(reader: mod Reader) ret Vec3 {
+  let x: Float = readFloat(reader: reader)
+  let y: Float = readFloat(reader: reader)
+  let z: Float = readFloat(reader: reader)
+  ret Vec3 { x: x, y: y, z: z }
+}
+
+func readQuat(reader: mod Reader) ret Quat {
+  let x: Float = readFloat(reader: reader)
+  let y: Float = readFloat(reader: reader)
+  let z: Float = readFloat(reader: reader)
+  let w: Float = readFloat(reader: reader)
+  ret Quat { x: x, y: y, z: z, w: w }
+}
+
+func readTransform(reader: mod Reader) ret Transform {
+  let position: Vec3 = readVec(reader: reader)
+  let rotation: Quat = readQuat(reader: reader)
+  ret Transform { position: position, rotation: rotation }
+}
+
+func readBox(reader: mod Reader) ret Aabb {
+  let lower: Vec3 = readVec(reader: reader)
+  let upper: Vec3 = readVec(reader: reader)
+  ret Aabb { lowerBound: lower, upperBound: upper }
+}
+
+func readSphere(reader: mod Reader) ret Sphere {
+  let center: Vec3 = readVec(reader: reader)
+  let radius: Float = readFloat(reader: reader)
+  ret Sphere { center: center, radius: radius }
+}
+
+func readCapsule(reader: mod Reader) ret Capsule {
+  let center1: Vec3 = readVec(reader: reader)
+  let center2: Vec3 = readVec(reader: reader)
+  let radius: Float = readFloat(reader: reader)
+  ret Capsule { center1: center1, center2: center2, radius: radius }
+}
+
+func readProxy(reader: mod Reader) ret ShapeProxy {
+  let count: Int = readInt(reader: reader)
+  let points: List(Vec3) = List.create(Vec3, cap: count)
+  loop var i: Int = 0, i < count, ++i {
+    points.add(value: readVec(reader: reader))
+  }
+  let radius: Float = readFloat(reader: reader)
+  ret ShapeProxy { points: points, radius: radius }
+}
+
+func readRay(reader: mod Reader) ret RayCastInput {
+  let origin: Vec3 = readVec(reader: reader)
+  let translation: Vec3 = readVec(reader: reader)
+  let maxFraction: Float = readFloat(reader: reader)
+  ret RayCastInput { origin: origin, translation: translation, maxFraction: maxFraction }
+}
+
+func readSweep(reader: mod Reader) ret Sweep {
+  let localCenter: Vec3 = readVec(reader: reader)
+  let center1: Vec3 = readVec(reader: reader)
+  let center2: Vec3 = readVec(reader: reader)
+  let rotation1: Quat = readQuat(reader: reader)
+  let rotation2: Quat = readQuat(reader: reader)
+  ret Sweep {
+    localCenter: localCenter
+    center1: center1
+    center2: center2
+    rotation1: rotation1
+    rotation2: rotation2
+  }
+}
+
+func putFloat(out: mod List(Float), value: view Float) {
+  out.add(value: value)
+}
+
+func putInt(out: mod List(Float), value: view Int) {
+  out.add(value: value.toFloat())
+}
+
+func putBool(out: mod List(Float), value: view Bool) {
+  if value {
+    out.add(value: 1.0)
+  } else {
+    out.add(value: 0.0)
+  }
+}
+
+func putVec(out: mod List(Float), vector: view Vec3) {
+  out.add(value: vector.x)
+  out.add(value: vector.y)
+  out.add(value: vector.z)
+}
+
+func putQuat(out: mod List(Float), quat: view Quat) {
+  out.add(value: quat.x)
+  out.add(value: quat.y)
+  out.add(value: quat.z)
+  out.add(value: quat.w)
+}
+
+func putTransform(out: mod List(Float), transform: view Transform) {
+  putVec(out: out, vector: transform.position)
+  putQuat(out: out, quat: transform.rotation)
+}
+
+func putBox(out: mod List(Float), box: view Aabb) {
+  putVec(out: out, vector: box.lowerBound)
+  putVec(out: out, vector: box.upperBound)
+}
+
+func putMass(out: mod List(Float), massData: view MassData) {
+  putFloat(out: out, value: massData.mass)
+  putVec(out: out, vector: massData.center)
+  putVec(out: out, vector: massData.inertia.columnX)
+  putVec(out: out, vector: massData.inertia.columnY)
+  putVec(out: out, vector: massData.inertia.columnZ)
+}
+
+func putCast(out: mod List(Float), output: view CastOutput) {
+  putVec(out: out, vector: output.normal)
+  putVec(out: out, vector: output.point)
+  putFloat(out: out, value: output.fraction)
+  putInt(out: out, value: output.iterations)
+  putInt(out: out, value: output.triangleIndex)
+  putInt(out: out, value: output.childIndex)
+  putInt(out: out, value: output.materialIndex)
+  putBool(out: out, value: output.hit)
+}
+
+func putPlaneResult(out: mod List(Float), count: view Int, result: view PlaneResult) {
+  putInt(out: out, value: count)
+  putVec(out: out, vector: result.plane.normal)
+  putFloat(out: out, value: result.plane.offset)
+  putVec(out: out, vector: result.point)
+}
+
+func putDistance(out: mod List(Float), output: view DistanceOutput, cache: view SimplexCache) {
+  putVec(out: out, vector: output.pointA)
+  putVec(out: out, vector: output.pointB)
+  putVec(out: out, vector: output.normal)
+  putFloat(out: out, value: output.distance)
+  putInt(out: out, value: output.iterations)
+  putInt(out: out, value: output.simplexCount)
+  putFloat(out: out, value: cache.metric)
+  putInt(out: out, value: cache.count)
+  loop var i: Int = 0, i < 4, ++i {
+    putInt(out: out, value: cacheIndexA(cache: cache, index: i))
+  }
+  loop var i: Int = 0, i < 4, ++i {
+    putInt(out: out, value: cacheIndexB(cache: cache, index: i))
+  }
+}
+
+func putToi(out: mod List(Float), output: view ToiOutput) {
+  putInt(out: out, value: toiStateCode(state: output.state))
+  putVec(out: out, vector: output.point)
+  putVec(out: out, vector: output.normal)
+  putFloat(out: out, value: output.fraction)
+  putFloat(out: out, value: output.distance)
+  putInt(out: out, value: output.distanceIterations)
+  putInt(out: out, value: output.pushBackIterations)
+  putInt(out: out, value: output.rootIterations)
+  putBool(out: out, value: output.usedFallback)
+}
+
+# Bounds, spheres and capsules. False: not a function of this group.
+func evaluateShapes(name: view String, reader: mod Reader, out: mod List(Float)) ret Bool {
+  let units: Float = 1.0
+  if name is "b3RayCastAABB" {
+    let box: Aabb = readBox(reader: reader)
+    let point1: Vec3 = readVec(reader: reader)
+    let point2: Vec3 = readVec(reader: reader)
+    var minFraction: Float = -1.0
+    var maxFraction: Float = -1.0
+    let hit: Bool = rayCastAabb(
+      box: box
+      point1: point1
+      point2: point2
+      minFraction: minFraction
+      maxFraction: maxFraction
+    )
+    putBool(out: out, value: hit)
+    putFloat(out: out, value: minFraction)
+    putFloat(out: out, value: maxFraction)
+  } else if name is "b3ComputeSphereMass" {
+    let sphere: Sphere = readSphere(reader: reader)
+    putMass(
+      out: out
+      massData: computeSphereMass(sphere: sphere, density: readFloat(reader: reader))
+    )
+  } else if name is "b3ComputeSphereAABB" {
+    let sphere: Sphere = readSphere(reader: reader)
+    putBox(
+      out: out
+      box: computeSphereAabb(sphere: sphere, transform: readTransform(reader: reader))
+    )
+  } else if name is "b3ComputeSweptSphereAABB" {
+    let sphere: Sphere = readSphere(reader: reader)
+    let transform1: Transform = readTransform(reader: reader)
+    let transform2: Transform = readTransform(reader: reader)
+    putBox(
+      out: out
+      box: computeSweptSphereAabb(sphere: sphere, transform1: transform1, transform2: transform2)
+    )
+  } else if name is "b3OverlapSphere" {
+    let sphere: Sphere = readSphere(reader: reader)
+    let transform: Transform = readTransform(reader: reader)
+    let proxy: ShapeProxy = readProxy(reader: reader)
+    putBool(
+      out: out
+      value: overlapSphere(
+        sphere: sphere
+        shapeTransform: transform
+        proxy: proxy
+        lengthUnitsPerMeter: units
+      )
+    )
+  } else if name is "b3RayCastSphere" {
+    let sphere: Sphere = readSphere(reader: reader)
+    putCast(out: out, output: rayCastSphere(sphere: sphere, input: readRay(reader: reader)))
+  } else if name is "b3RayCastHollowSphere" {
+    let sphere: Sphere = readSphere(reader: reader)
+    putCast(out: out, output: rayCastHollowSphere(sphere: sphere, input: readRay(reader: reader)))
+  } else if name is "b3ShapeCastSphere" {
+    let sphere: Sphere = readSphere(reader: reader)
+    let input: ShapeCastInput = readShapeCastInput(reader: reader)
+    putCast(
+      out: out
+      output: shapeCastSphere(sphere: sphere, input: input, lengthUnitsPerMeter: units)
+    )
+  } else if name is "b3CollideMoverAndSphere" {
+    let sphere: Sphere = readSphere(reader: reader)
+    let mover: Capsule = readCapsule(reader: reader)
+    var result: PlaneResult = emptyPlaneResult()
+    let count: Int = collideMoverAndSphere(
+      result: result
+      sphere: sphere
+      mover: mover
+      lengthUnitsPerMeter: units
+    )
+    putPlaneResult(out: out, count: count, result: result)
+  } else if name is "b3ComputeCapsuleMass" {
+    let capsule: Capsule = readCapsule(reader: reader)
+    putMass(
+      out: out
+      massData: computeCapsuleMass(capsule: capsule, density: readFloat(reader: reader))
+    )
+  } else if name is "b3ComputeCapsuleAABB" {
+    let capsule: Capsule = readCapsule(reader: reader)
+    putBox(
+      out: out
+      box: computeCapsuleAabb(capsule: capsule, transform: readTransform(reader: reader))
+    )
+  } else if name is "b3ComputeSweptCapsuleAABB" {
+    let capsule: Capsule = readCapsule(reader: reader)
+    let transform1: Transform = readTransform(reader: reader)
+    let transform2: Transform = readTransform(reader: reader)
+    putBox(
+      out: out
+      box: computeSweptCapsuleAabb(capsule: capsule, transform1: transform1, transform2: transform2)
+    )
+  } else if name is "b3OverlapCapsule" {
+    let capsule: Capsule = readCapsule(reader: reader)
+    let transform: Transform = readTransform(reader: reader)
+    let proxy: ShapeProxy = readProxy(reader: reader)
+    putBool(
+      out: out
+      value: overlapCapsule(
+        capsule: capsule
+        shapeTransform: transform
+        proxy: proxy
+        lengthUnitsPerMeter: units
+      )
+    )
+  } else if name is "b3RayCastCapsule" {
+    let capsule: Capsule = readCapsule(reader: reader)
+    putCast(
+      out: out
+      output: rayCastCapsule(
+        capsule: capsule
+        input: readRay(reader: reader)
+        lengthUnitsPerMeter: units
+      )
+    )
+  } else if name is "b3ShapeCastCapsule" {
+    let capsule: Capsule = readCapsule(reader: reader)
+    let input: ShapeCastInput = readShapeCastInput(reader: reader)
+    putCast(
+      out: out
+      output: shapeCastCapsule(capsule: capsule, input: input, lengthUnitsPerMeter: units)
+    )
+  } else if name is "b3CollideMoverAndCapsule" {
+    let capsule: Capsule = readCapsule(reader: reader)
+    let mover: Capsule = readCapsule(reader: reader)
+    var result: PlaneResult = emptyPlaneResult()
+    let count: Int = collideMoverAndCapsule(
+      result: result
+      capsule: capsule
+      mover: mover
+      lengthUnitsPerMeter: units
+    )
+    putPlaneResult(out: out, count: count, result: result)
+  } else {
+    ret false
+  }
+  ret true
+}
+
+func readShapeCastInput(reader: mod Reader) ret ShapeCastInput {
+  let proxy: ShapeProxy = readProxy(reader: reader)
+  let translation: Vec3 = readVec(reader: reader)
+  let maxFraction: Float = readFloat(reader: reader)
+  let canEncroach: Bool = readBool(reader: reader)
+  ret ShapeCastInput {
+    proxy: proxy
+    translation: translation
+    maxFraction: maxFraction
+    canEncroach: canEncroach
+  }
+}
+
+# GJK, shape casts, sweeps and time of impact.
+func evaluateDistance(name: view String, reader: mod Reader, out: mod List(Float)) ret Bool {
+  let units: Float = 1.0
+  if name is "b3GetProxySupport" {
+    let proxy: ShapeProxy = readProxy(reader: reader)
+    putInt(out: out, value: proxySupport(proxy: proxy, axis: readVec(reader: reader)))
+  } else if name is "b3ShapeDistance" {
+    let proxyA: ShapeProxy = readProxy(reader: reader)
+    let proxyB: ShapeProxy = readProxy(reader: reader)
+    let transform: Transform = readTransform(reader: reader)
+    let useRadii: Bool = readBool(reader: reader)
+    let input: DistanceInput = {
+      proxyA: proxyA
+      proxyB: proxyB
+      transform: transform
+      useRadii: useRadii
+    }
+    var cache: SimplexCache = emptySimplexCache()
+    let output: DistanceOutput = shapeDistance(input: input, cache: cache)
+    putDistance(out: out, output: output, cache: cache)
+  } else if name is "b3ShapeDistanceWarm" {
+    let proxyA: ShapeProxy = readProxy(reader: reader)
+    let proxyB: ShapeProxy = readProxy(reader: reader)
+    let before: Transform = readTransform(reader: reader)
+    let after: Transform = readTransform(reader: reader)
+    let useRadii: Bool = readBool(reader: reader)
+    var cache: SimplexCache = emptySimplexCache()
+    let cold: DistanceOutput = proxyDistance(
+      proxyA: proxyA
+      proxyB: proxyB
+      transform: before
+      useRadii: useRadii
+      cache: cache
+    )
+    let warm: DistanceOutput = proxyDistance(
+      proxyA: proxyA
+      proxyB: proxyB
+      transform: after
+      useRadii: useRadii
+      cache: cache
+    )
+    putDistance(out: out, output: warm, cache: cache)
+  } else if name is "b3ShapeCast" {
+    let proxyA: ShapeProxy = readProxy(reader: reader)
+    let proxyB: ShapeProxy = readProxy(reader: reader)
+    let transform: Transform = readTransform(reader: reader)
+    let translationB: Vec3 = readVec(reader: reader)
+    let maxFraction: Float = readFloat(reader: reader)
+    let canEncroach: Bool = readBool(reader: reader)
+    let input: ShapeCastPairInput = {
+      proxyA: proxyA
+      proxyB: proxyB
+      transform: transform
+      translationB: translationB
+      maxFraction: maxFraction
+      canEncroach: canEncroach
+    }
+    putCast(out: out, output: shapeCast(input: input, lengthUnitsPerMeter: units))
+  } else if name is "b3GetSweepTransform" {
+    let sweep: Sweep = readSweep(reader: reader)
+    putTransform(out: out, transform: sweepTransform(sweep: sweep, time: readFloat(reader: reader)))
+  } else if name is "b3TimeOfImpact" {
+    let proxyA: ShapeProxy = readProxy(reader: reader)
+    let proxyB: ShapeProxy = readProxy(reader: reader)
+    let sweepA: Sweep = readSweep(reader: reader)
+    let sweepB: Sweep = readSweep(reader: reader)
+    let maxFraction: Float = readFloat(reader: reader)
+    let input: ToiInput = {
+      proxyA: proxyA
+      proxyB: proxyB
+      sweepA: sweepA
+      sweepB: sweepB
+      maxFraction: maxFraction
+    }
+    putToi(out: out, output: timeOfImpact(input: input, lengthUnitsPerMeter: units))
+  } else {
+    ret false
+  }
+  ret true
+}
+
+# The same bits: NaN matches NaN, and a zero matches only a zero of its sign.
+func sameBits(actual: view Float, expected: view Float) ret Bool {
+  if actual is not actual {
+    ret expected is not expected
+  }
+  if actual is not expected {
+    ret false
+  }
+  if actual is 0.0 {
+    ret 1.0 / actual is 1.0 / expected
+  }
+  ret true
+}
+
+func readGolden() ret String {
+  # The runner runs from compiler/, the TSan gate from the case's folder.
+  let candidates: List(String) = {
+    "../tools/box3d-oracle/goldens/geometry.golden"
+    "../../../tools/box3d-oracle/goldens/geometry.golden"
+    "tools/box3d-oracle/goldens/geometry.golden"
+  }
+  loop var i: Int = 0, i < candidates.length, ++i {
+    if let text: String = readFile(path: candidates.copyAtDefault(index: i)) {
+      ret text
+    }
+  }
+  ret ""
+}
+
+func main() {
+  let golden: String = readGolden()
+  let lines: List(String) = golden.split(sep: "\n")
+  var calls: Int = 0
+  var mismatches: Int = 0
+  var unknown: Int = 0
+  let names: List(String) = List.create(String, cap: 32)
+  loop var i: Int = 0, i < lines.length, ++i {
+    let line: String = lines.copyAtDefault(index: i)
+    if line.length() is 0 or line.startsWith(prefix: "#") {
+      continue
+    }
+    let tokens: List(String) = line.split(sep: " ")
+    let name: String = tokens.copyAtDefault(index: 0)
+    var reader: Reader = { values: List.create(Float, cap: 64), next: 0 }
+    let expected: List(Float) = List.create(Float, cap: 32)
+    var afterArrow: Bool = false
+    loop var j: Int = 1, j < tokens.length, ++j {
+      let token: String = tokens.copyAtDefault(index: j)
+      if token is "->" {
+        afterArrow = true
+      } else if afterArrow {
+        expected.add(value: token.toFloat())
+      } else {
+        reader.values.add(value: token.toFloat())
+      }
+    }
+    let actual: List(Float) = List.create(Float, cap: 32)
+    let known: Bool = evaluateShapes(name: name, reader: reader, out: actual) or evaluateDistance(
+      name: name
+      reader: reader
+      out: actual
+    )
+    if known is false {
+      unknown = unknown + 1
+      log("not ported: {name}")
+      continue
+    }
+    calls = calls + 1
+    if names.contains(value: name) is false {
+      names.add(value: name)
+    }
+    var same: Bool = actual.length is expected.length
+    loop var j: Int = 0, j < expected.length and same, ++j {
+      same = sameBits(
+        actual: actual.copyAtDefault(index: j)
+        expected: expected.copyAtDefault(index: j)
+      )
+    }
+    if same is false {
+      mismatches = mismatches + 1
+      if mismatches <= 10 {
+        log("MISMATCH line {i + 1}: {line}")
+        var got: String = "  got"
+        loop var j: Int = 0, j < actual.length, ++j {
+          got = "{got} {actual.copyAtDefault(index: j)}"
+        }
+        log(got)
+      }
+    }
+  }
+  log(
+    "geometry.golden: {calls} calls of {names.length} Box3D functions, {mismatches} not bit-exact, {unknown} not ported"
+  )
+}
