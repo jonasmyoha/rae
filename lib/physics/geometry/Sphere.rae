@@ -1,0 +1,243 @@
+# Spheres (Box3D's sphere.c at 9f998c8): mass, bounds, overlap, ray and
+# shape casts, and the character mover's push-out plane. Box3D's operation
+# order is kept exactly; checked bit for bit against the oracle in fixture
+# 949.
+open Vec3
+import Math
+open physics/Constants
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/MatrixMath
+open physics/math/TransformMath
+open physics/math/AabbMath
+open physics/math/SegmentMath
+open physics/math/PlaneMath
+open physics/geometry/QueryTypes
+open physics/collision/Simplex
+open physics/collision/Distance
+open physics/collision/ShapeCast
+
+# b3ComputeSphereMass
+func computeSphereMass(sphere: view Sphere, density: view Float) ret MassData {
+  let radius: Float = sphere.radius
+  let volume: Float = 4.0 / 3.0 * pi * radius * radius * radius
+  let mass: Float = volume * density
+  let inertiaDiagonal: Float = 0.4 * mass * radius * radius
+  ret MassData {
+    mass: mass
+    center: sphere.center
+    inertia: diagonalMatrix(x: inertiaDiagonal, y: inertiaDiagonal, z: inertiaDiagonal)
+  }
+}
+
+# b3ComputeSphereAABB
+func computeSphereAabb(sphere: view Sphere, transform: view Transform) ret Aabb {
+  let center: Vec3 = transformPoint(transform: transform, point: sphere.center)
+  let radius: Float = sphere.radius
+  let extent: Vec3 = { x: radius, y: radius, z: radius }
+  ret Aabb {
+    lowerBound: subtract(left: center, right: extent)
+    upperBound: add(left: center, right: extent)
+  }
+}
+
+# b3ComputeSweptSphereAABB: the box of the sphere at both transforms.
+func computeSweptSphereAabb(
+  sphere: view Sphere
+  transform1: view Transform
+  transform2: view Transform
+) ret Aabb {
+  let extent: Vec3 = { x: sphere.radius, y: sphere.radius, z: sphere.radius }
+  let center1: Vec3 = transformPoint(transform: transform1, point: sphere.center)
+  let center2: Vec3 = transformPoint(transform: transform2, point: sphere.center)
+  ret Aabb {
+    lowerBound: subtract(left: min(left: center1, right: center2), right: extent)
+    upperBound: add(left: max(left: center1, right: center2), right: extent)
+  }
+}
+
+# b3OverlapSphere: does the sphere at `shapeTransform` overlap the proxy?
+func overlapSphere(
+  sphere: view Sphere
+  shapeTransform: view Transform
+  proxy: view ShapeProxy
+  lengthUnitsPerMeter: view Float
+) ret Bool {
+  var cache: SimplexCache = emptySimplexCache()
+  let output: DistanceOutput = proxyDistance(
+    proxyA: sphereProxy(sphere: sphere)
+    proxyB: proxy
+    transform: inverseMultiply(left: shapeTransform, right: transformIdentity())
+    useRadii: true
+    cache: cache
+  )
+  ret output.distance < overlapSlop(lengthUnitsPerMeter: lengthUnitsPerMeter)
+}
+
+# b3RayCastSphere (Precision Improvements for Ray / Sphere Intersection, Ray
+# Tracing Gems 2019).
+func rayCastSphere(sphere: view Sphere, input: view RayCastInput) ret CastOutput {
+  var output: CastOutput = emptyCastOutput()
+  let center: Vec3 = sphere.center
+
+  # Shift the ray so the sphere center is the origin
+  let start: Vec3 = subtract(left: input.origin, right: center)
+  let radius: Float = sphere.radius
+  let radiusSquared: Float = radius * radius
+
+  var rayLength: Float = 0.0
+  let direction: Vec3 = getLengthAndNormalize(length: rayLength, vector: input.translation)
+  if rayLength is 0.0 {
+    # A zero length ray
+    if lengthSquared(vector: start) < radiusSquared {
+      # Initial overlap
+      output.point = input.origin
+      output.hit = true
+    }
+    ret output
+  }
+
+  # The closest point on the ray to the origin: dot(start + t * direction, direction) = 0
+  let closestFraction: Float = -dot(left: start, right: direction)
+  let closest: Vec3 = mulAdd(base: start, scale: closestFraction, vector: direction)
+  let closestSquared: Float = dot(left: closest, right: closest)
+  if closestSquared > radiusSquared {
+    # The closest point is outside the sphere
+    ret output
+  }
+
+  # Pythagoras
+  let halfChord: Float = Math.sqrt(x: radiusSquared - closestSquared)
+  let fraction: Float = closestFraction - halfChord
+  if fraction < 0.0 or input.maxFraction * rayLength < fraction {
+    # The intersection is outside the ray segment
+    if lengthSquared(vector: start) < radiusSquared {
+      # Initial overlap
+      output.point = input.origin
+      output.hit = true
+    }
+    ret output
+  }
+
+  let hitPoint: Vec3 = mulAdd(base: start, scale: fraction, vector: direction)
+  output.fraction = fraction / rayLength
+  if output.fraction > input.maxFraction {
+    # (Box3D logs both fractions here.)
+    output.fraction = input.maxFraction
+  }
+  output.normal = normalize(vector: hitPoint)
+  output.point = mulAdd(base: center, scale: sphere.radius, vector: output.normal)
+  output.hit = true
+  ret output
+}
+
+# b3RayCastHollowSphere: like rayCastSphere, but a ray from inside hits the
+# far wall. `maxFraction` is in length units here, as in Box3D.
+func rayCastHollowSphere(sphere: view Sphere, input: view RayCastInput) ret CastOutput {
+  let center: Vec3 = sphere.center
+  var output: CastOutput = emptyCastOutput()
+
+  # Shift the ray so the sphere center is the origin
+  let start: Vec3 = subtract(left: input.origin, right: center)
+  let direction: Vec3 = normalize(vector: input.translation)
+
+  # The closest point on the ray to the origin
+  let closestFraction: Float = -dot(left: start, right: direction)
+  let closest: Vec3 = mulAdd(base: start, scale: closestFraction, vector: direction)
+  let closestSquared: Float = dot(left: closest, right: closest)
+  let radius: Float = sphere.radius
+  let radiusSquared: Float = radius * radius
+  if closestSquared > radiusSquared {
+    ret output
+  }
+
+  # Pythagoras
+  let halfChord: Float = Math.sqrt(x: radiusSquared - closestSquared)
+  var fraction: Float = closestFraction - halfChord
+  if fraction < 0.0 {
+    fraction = closestFraction + halfChord
+  }
+  if fraction < 0.0 {
+    # Behind the ray
+    ret output
+  }
+  if fraction > input.maxFraction {
+    ret output
+  }
+
+  let hitPoint: Vec3 = mulAdd(base: start, scale: fraction, vector: direction)
+  output.fraction = fraction
+  output.normal = normalize(vector: hitPoint)
+  output.point = mulAdd(base: center, scale: sphere.radius, vector: output.normal)
+  output.hit = true
+  ret output
+}
+
+# b3ShapeCastSphere: cast a proxy against the sphere.
+func shapeCastSphere(
+  sphere: view Sphere
+  input: view ShapeCastInput
+  lengthUnitsPerMeter: view Float
+) ret CastOutput {
+  ret proxyCast(
+    proxyA: sphereProxy(sphere: sphere)
+    proxyB: input.proxy
+    transform: transformIdentity()
+    translationB: input.translation
+    maxFraction: input.maxFraction
+    canEncroach: input.canEncroach
+    lengthUnitsPerMeter: lengthUnitsPerMeter
+  )
+}
+
+# b3CollideMoverAndSphere: the plane that pushes the mover capsule out of the
+# sphere. Returns the number of planes (0 or 1) written to `result`.
+func collideMoverAndSphere(
+  result: mod PlaneResult
+  sphere: view Sphere
+  mover: view Capsule
+  lengthUnitsPerMeter: view Float
+) ret Int {
+  let totalRadius: Float = mover.radius + sphere.radius
+  let closest: Vec3 = pointToSegmentDistance(
+    start: mover.center1
+    end: mover.center2
+    point: sphere.center
+  )
+
+  # The normal points from the sphere toward the mover.
+  var separation: Float = 0.0
+  var normal: Vec3 = getLengthAndNormalize(
+    length: separation
+    vector: subtract(left: closest, right: sphere.center)
+  )
+  if separation > totalRadius {
+    ret 0
+  }
+
+  let slop: Float = linearSlop(lengthUnitsPerMeter: lengthUnitsPerMeter)
+  if separation < slop {
+    # Deep overlap: the mover axis passes through the sphere center. Push
+    # perpendicular to the mover axis.
+    var axisLength: Float = 0.0
+    let axis: Vec3 = getLengthAndNormalize(
+      length: axisLength
+      vector: subtract(left: mover.center2, right: mover.center1)
+    )
+    if axisLength > slop {
+      normal = perp(vector: axis)
+    } else {
+      normal = axisY()
+    }
+    separation = 0.0
+  }
+
+  result = PlaneResult {
+    plane: Plane { normal: normal, offset: totalRadius - separation }
+    point: sphere.center
+    triangleIndex: 0
+    childIndex: 0
+    materialIndex: 0
+  }
+  ret 1
+}

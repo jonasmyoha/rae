@@ -1,0 +1,358 @@
+# Capsules (Box3D's capsule.c at 9f998c8): mass, bounds, overlap, ray and
+# shape casts, and the character mover's push-out plane. Box3D's operation
+# order is kept exactly; checked bit for bit against the oracle in fixture
+# 949.
+open Vec3
+open Quat
+import Math
+open physics/Constants
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/QuatMath
+open physics/math/MatrixMath
+open physics/math/TransformMath
+open physics/math/AabbMath
+open physics/math/SegmentMath
+open physics/math/PlaneMath
+open physics/geometry/QueryTypes
+open physics/geometry/Sphere
+open physics/collision/Simplex
+open physics/collision/Distance
+open physics/collision/ShapeCast
+
+# b3ComputeCapsuleMass: a cylinder plus two hemispheres, the axis rotated
+# from +y onto the capsule's.
+func computeCapsuleMass(capsule: view Capsule, density: view Float) ret MassData {
+  let center1: Vec3 = capsule.center1
+  let center2: Vec3 = capsule.center2
+  let radius: Float = capsule.radius
+
+  # Cylinder
+  let cylinderHeight: Float = distance(from: center1, to: center2)
+  let cylinderVolume: Float = pi * radius * radius * cylinderHeight
+  let cylinderMass: Float = cylinderVolume * density
+
+  # Sphere
+  let sphereVolume: Float = (4.0 / 3.0) * pi * radius * radius * radius
+  let sphereMass: Float = sphereVolume * density
+
+  # Local accumulated inertia
+  var inertia: Matrix3 = add(
+    left: cylinderInertia(mass: cylinderMass, radius: radius, height: cylinderHeight)
+    right: sphereInertia(mass: sphereMass, radius: radius)
+  )
+  let steinerTerm: Float = 0.125 * sphereMass * (3.0 * radius + 2.0 * cylinderHeight) * cylinderHeight
+  inertia.columnX.x = inertia.columnX.x + steinerTerm
+  inertia.columnZ.z = inertia.columnZ.z + steinerTerm
+
+  # Align the capsule axis with the up axis
+  var rotation: Matrix3 = matrixIdentity()
+  if cylinderHeight * cylinderHeight > 1000.0 * floatMin {
+    let direction: Vec3 = normalize(vector: subtract(left: center2, right: center1))
+    let quat: Quat = quatBetweenUnitVectors(from: axisY(), to: direction)
+    rotation = matrixFromQuat(quat: quat)
+  }
+
+  ret MassData {
+    mass: sphereMass + cylinderMass
+    center: scale(scale: 0.5, vector: add(left: center1, right: center2))
+    # The central inertia, rotated into the shape frame
+    inertia: multiply(
+      left: rotation
+      right: multiply(left: inertia, right: transpose(matrix: rotation))
+    )
+  }
+}
+
+# b3ComputeCapsuleAABB
+func computeCapsuleAabb(capsule: view Capsule, transform: view Transform) ret Aabb {
+  let radius: Float = capsule.radius
+  let center1: Vec3 = transformPoint(transform: transform, point: capsule.center1)
+  let center2: Vec3 = transformPoint(transform: transform, point: capsule.center2)
+  let extent: Vec3 = { x: radius, y: radius, z: radius }
+  ret Aabb {
+    lowerBound: subtract(left: min(left: center1, right: center2), right: extent)
+    upperBound: add(left: max(left: center1, right: center2), right: extent)
+  }
+}
+
+# b3ComputeSweptCapsuleAABB: the box of the capsule at both transforms.
+func computeSweptCapsuleAabb(
+  capsule: view Capsule
+  transform1: view Transform
+  transform2: view Transform
+) ret Aabb {
+  let extent: Vec3 = { x: capsule.radius, y: capsule.radius, z: capsule.radius }
+  let start1: Vec3 = transformPoint(transform: transform1, point: capsule.center1)
+  let end1: Vec3 = transformPoint(transform: transform1, point: capsule.center2)
+  let start2: Vec3 = transformPoint(transform: transform2, point: capsule.center1)
+  let end2: Vec3 = transformPoint(transform: transform2, point: capsule.center2)
+  ret Aabb {
+    lowerBound: subtract(
+      left: min(left: min(left: start1, right: end1), right: min(left: start2, right: end2))
+      right: extent
+    )
+    upperBound: add(
+      left: max(left: max(left: start1, right: end1), right: max(left: start2, right: end2))
+      right: extent
+    )
+  }
+}
+
+# b3OverlapCapsule: does the capsule at `shapeTransform` overlap the proxy?
+func overlapCapsule(
+  capsule: view Capsule
+  shapeTransform: view Transform
+  proxy: view ShapeProxy
+  lengthUnitsPerMeter: view Float
+) ret Bool {
+  var cache: SimplexCache = emptySimplexCache()
+  let output: DistanceOutput = proxyDistance(
+    proxyA: capsuleProxy(capsule: capsule)
+    proxyB: proxy
+    transform: inverseMultiply(left: shapeTransform, right: transformIdentity())
+    useRadii: true
+    cache: cache
+  )
+  ret output.distance < overlapSlop(lengthUnitsPerMeter: lengthUnitsPerMeter)
+}
+
+# b3RayCastCapsule
+func rayCastCapsule(
+  capsule: view Capsule
+  input: view RayCastInput
+  lengthUnitsPerMeter: view Float
+) ret CastOutput {
+  let center1: Vec3 = capsule.center1
+  let center2: Vec3 = capsule.center2
+  let radius: Float = capsule.radius
+  var output: CastOutput = emptyCastOutput()
+  let segment: Vec3 = subtract(left: center2, right: center1)
+
+  # A short capsule is a sphere
+  let shortLength: Float = 0.01 * linearSlop(lengthUnitsPerMeter: lengthUnitsPerMeter)
+  let segmentLengthSquared: Float = lengthSquared(vector: segment)
+  if segmentLengthSquared < shortLength * shortLength {
+    let sphere: Sphere = {
+      center: scale(scale: 0.5, vector: add(left: capsule.center1, right: capsule.center2))
+      radius: capsule.radius
+    }
+    ret rayCastSphere(sphere: sphere, input: input)
+  }
+
+  # From the first center to the ray origin
+  let start: Vec3 = subtract(left: input.origin, right: center1)
+
+  # The capsule axis
+  let segmentLength: Float = Math.sqrt(x: segmentLengthSquared)
+  let axis: Vec3 = scale(scale: 1.0 / segmentLength, vector: segment)
+
+  # The ray origin projected onto the capsule axis
+  let originAlongAxis: Float = dot(left: start, right: axis)
+
+  # The closest point on the infinite axis, relative to center1
+  let onAxis: Vec3 = scale(scale: originAlongAxis, vector: axis)
+
+  # From that point to the ray origin, and its squared length
+  let fromAxis: Vec3 = subtract(left: start, right: onAxis)
+  let fromAxisSquared: Float = lengthSquared(vector: fromAxis)
+
+  # Is the ray origin inside the infinite cylinder?
+  if fromAxisSquared < radius * radius {
+    # The closest point on the bounded segment, relative to center1
+    let clampedAlongAxis: Float = clampFloat(
+      value: originAlongAxis
+      lower: 0.0
+      upper: segmentLength
+    )
+    let onSegment: Vec3 = scale(scale: clampedAlongAxis, vector: axis)
+    let fromSegment: Vec3 = subtract(left: start, right: onSegment)
+    let fromSegmentSquared: Float = lengthSquared(vector: fromSegment)
+
+    # Is the ray origin inside the capsule?
+    if fromSegmentSquared < radius * radius {
+      output.hit = true
+      output.point = input.origin
+      ret output
+    }
+
+    # The ray can hit an end cap.
+    let sphere: Sphere = { center: add(left: center1, right: onSegment), radius: radius }
+    ret rayCastSphere(sphere: sphere, input: input)
+  }
+
+  # The ray axis. A zero length ray that reaches here starts outside, so it
+  # misses (the convention of rayCastSphere).
+  let translation: Vec3 = input.translation
+  var rayLength: Float = 0.0
+  let rayAxis: Vec3 = getLengthAndNormalize(length: rayLength, vector: translation)
+  if rayLength is 0.0 {
+    ret output
+  }
+
+  # The ray end projected onto the capsule axis
+  let endAlongAxis: Float = originAlongAxis + input.maxFraction * dot(
+    left: translation
+    right: axis
+  )
+
+  # Does the projected ray fall outside the capsule?
+  if (originAlongAxis < -radius and endAlongAxis < -radius) or (segmentLength + radius < originAlongAxis and segmentLength + radius < endAlongAxis) {
+    ret output
+  }
+
+  # The closest points of the ray and the capsule segment (Real-Time
+  # Collision Detection 5.1.9), solved by Cramer's rule with the signs
+  # flipped for a positive determinant:
+  #   det = 1 - a12 * a12
+  #   t1 = (sa1 - a12 * sa2) / det
+  #   t2 = (a12 * sa1 - sa2) / det
+  let axis1: Vec3 = axis
+  let axis2: Vec3 = rayAxis
+  let axesDot: Float = dot(left: axis1, right: axis2)
+
+  # The ray distance to the near intersection with the infinite cylinder.
+  var rayDistance: Float = 0.0
+
+  let determinant: Float = 1.0 - axesDot * axesDot
+  if determinant < floatEpsilon {
+    # Ray and axis are parallel: ray against the circle of the cylinder seen
+    # along its axis. The parallel part subtracted gives a perpendicular.
+    let perpendicular: Vec3 = mulSub(base: axis2, scale: axesDot, vector: axis1)
+    let perpendicularSquared: Float = lengthSquared(vector: perpendicular)
+    let beta: Float = dot(left: fromAxis, right: perpendicular)
+    let gamma: Float = fromAxisSquared - radius * radius
+    let discriminant: Float = beta * beta - perpendicularSquared * gamma
+
+    # Casting away from the axis, or the gap never closes to the radius.
+    if beta >= 0.0 or discriminant < 0.0 {
+      ret output
+    }
+
+    # The near root in the form that avoids the (-beta - sqrt) cancellation.
+    rayDistance = gamma / (-beta + Math.sqrt(x: discriminant))
+  } else {
+    # The closest points of the infinite ray and the infinite axis
+    let inverseDeterminant: Float = 1.0 / determinant
+    let startDotAxis1: Float = originAlongAxis
+    let startDotAxis2: Float = dot(left: start, right: axis2)
+    let fraction1: Float = (startDotAxis1 - axesDot * startDotAxis2) * inverseDeterminant
+    let fraction2: Float = (axesDot * startDotAxis1 - startDotAxis2) * inverseDeterminant
+    let point1: Vec3 = scale(scale: fraction1, vector: axis1)
+    let point2: Vec3 = mulAdd(base: start, scale: fraction2, vector: axis2)
+
+    # From the closest point on the axis to the ray
+    let gap: Vec3 = subtract(left: point2, right: point1)
+    let gapSquared: Float = lengthSquared(vector: gap)
+    if gapSquared > radius * radius {
+      # The infinite ray passes outside the infinite cylinder.
+      ret output
+    }
+
+    # The infinite ray against the infinite cylinder, relative to the
+    # closest point to avoid round-off.
+    let halfChord: Float = Math.sqrt(x: (radius * radius - gapSquared) * inverseDeterminant)
+    rayDistance = fraction2 - halfChord
+  }
+
+  # Outside the ray?
+  if rayDistance < 0.0 or input.maxFraction * rayLength < rayDistance {
+    ret output
+  }
+
+  # The corresponding distance along the capsule axis
+  let capsuleDistance: Float = originAlongAxis + rayDistance * axesDot
+
+  # Beyond the center1 end?
+  if capsuleDistance < 0.0 {
+    let sphere: Sphere = { center: center1, radius: radius }
+    ret rayCastSphere(sphere: sphere, input: input)
+  }
+
+  # Beyond the center2 end?
+  if segmentLength < capsuleDistance {
+    let sphere: Sphere = { center: center2, radius: radius }
+    ret rayCastSphere(sphere: sphere, input: input)
+  }
+
+  # The hit on the side, relative to center1
+  let hitPoint: Vec3 = mulAdd(base: start, scale: rayDistance, vector: rayAxis)
+  var normal: Vec3 = mulSub(base: hitPoint, scale: capsuleDistance, vector: axis)
+  normal = normalize(vector: normal)
+
+  output.point = add(left: center1, right: hitPoint)
+  output.normal = normal
+  output.fraction = clampFloat(value: rayDistance / rayLength, lower: 0.0, upper: input.maxFraction)
+  output.hit = true
+  ret output
+}
+
+# b3ShapeCastCapsule: cast a proxy against the capsule.
+func shapeCastCapsule(
+  capsule: view Capsule
+  input: view ShapeCastInput
+  lengthUnitsPerMeter: view Float
+) ret CastOutput {
+  ret proxyCast(
+    proxyA: capsuleProxy(capsule: capsule)
+    proxyB: input.proxy
+    transform: transformIdentity()
+    translationB: input.translation
+    maxFraction: input.maxFraction
+    canEncroach: input.canEncroach
+    lengthUnitsPerMeter: lengthUnitsPerMeter
+  )
+}
+
+# b3CollideMoverAndCapsule: the plane that pushes the mover capsule out of
+# the capsule. Returns the number of planes (0 or 1) written to `result`.
+func collideMoverAndCapsule(
+  result: mod PlaneResult
+  capsule: view Capsule
+  mover: view Capsule
+  lengthUnitsPerMeter: view Float
+) ret Int {
+  let totalRadius: Float = mover.radius + capsule.radius
+  let approach: SegmentDistanceResult = segmentDistance(
+    start1: capsule.center1
+    end1: capsule.center2
+    start2: mover.center1
+    end2: mover.center2
+  )
+
+  # The normal points from the shape toward the mover.
+  var separation: Float = 0.0
+  var normal: Vec3 = getLengthAndNormalize(
+    length: separation
+    vector: subtract(left: approach.point2, right: approach.point1)
+  )
+  if separation > totalRadius {
+    ret 0
+  }
+
+  let slop: Float = linearSlop(lengthUnitsPerMeter: lengthUnitsPerMeter)
+  if separation < slop {
+    # Deep overlap: the core segments intersect. Any direction perpendicular
+    # to the mover axis.
+    var moverLength: Float = 0.0
+    let moverAxis: Vec3 = getLengthAndNormalize(
+      length: moverLength
+      vector: subtract(left: mover.center2, right: mover.center1)
+    )
+    if moverLength > slop {
+      normal = perp(vector: moverAxis)
+    } else {
+      normal = axisY()
+    }
+    separation = 0.0
+  }
+
+  result = PlaneResult {
+    plane: Plane { normal: normal, offset: totalRadius - separation }
+    point: approach.point1
+    triangleIndex: 0
+    childIndex: 0
+    materialIndex: 0
+  }
+  ret 1
+}

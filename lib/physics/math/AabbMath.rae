@@ -150,3 +150,101 @@ func transformInertia(
   let rotated: Matrix3 = rotateInertia(quat: transform.rotation, centralInertia: centralInertia)
   ret add(left: rotated, right: steiner(mass: mass, origin: transform.position))
 }
+
+# One slab of b3RayCastAABB: narrows [minDistance, maxDistance] to where the
+# ray is between `boxMin` and `boxMax` on one axis. False when it never is.
+func clipRayToSlab(
+  rayComponent: view Float
+  rayStart: view Float
+  boxMin: view Float
+  boxMax: view Float
+  minDistance: mod Float
+  maxDistance: mod Float
+) ret Bool {
+  if absFloat(value: rayComponent) < floatEpsilon {
+    # Parallel to the slab: is the origin within it?
+    if rayStart < boxMin or rayStart > boxMax {
+      ret false
+    }
+    ret true
+  }
+  var distance1: Float = (boxMin - rayStart) / rayComponent
+  var distance2: Float = (boxMax - rayStart) / rayComponent
+  if distance1 > distance2 {
+    let swapped: Float = distance1
+    distance1 = distance2
+    distance2 = swapped
+  }
+  minDistance = maxFloat(left: minDistance, right: distance1)
+  maxDistance = minFloat(left: maxDistance, right: distance2)
+  if minDistance > maxDistance {
+    ret false
+  }
+  ret true
+}
+
+# b3RayCastAABB (aabb.c): the fractions of the segment `point1`-`point2`
+# where it enters and leaves the box, by the slab method (Real-time
+# Collision Detection p179). False on a miss, leaving both untouched.
+func rayCastAabb(
+  box: view Aabb
+  point1: view Vec3
+  point2: view Vec3
+  minFraction: mod Float
+  maxFraction: mod Float
+) ret Bool {
+  let direction: Vec3 = subtract(left: point2, right: point1)
+  let rayLength: Float = length(vector: direction)
+
+  # A degenerate ray: is the point inside the box?
+  if rayLength < floatEpsilon {
+    if point1.x >= box.lowerBound.x and point1.x <= box.upperBound.x and point1.y >= box.lowerBound.y and point1.y <= box.upperBound.y and point1.z >= box.lowerBound.z and point1.z <= box.upperBound.z {
+      minFraction = 0.0
+      maxFraction = 0.0
+      ret true
+    }
+    ret false
+  }
+
+  let rayDirection: Vec3 = scale(scale: 1.0 / rayLength, vector: direction)
+  var minDistance: Float = 0.0
+  var maxDistance: Float = rayLength
+  if clipRayToSlab(
+    rayComponent: rayDirection.x
+    rayStart: point1.x
+    boxMin: box.lowerBound.x
+    boxMax: box.upperBound.x
+    minDistance: minDistance
+    maxDistance: maxDistance
+  ) is false {
+    ret false
+  }
+  if clipRayToSlab(
+    rayComponent: rayDirection.y
+    rayStart: point1.y
+    boxMin: box.lowerBound.y
+    boxMax: box.upperBound.y
+    minDistance: minDistance
+    maxDistance: maxDistance
+  ) is false {
+    ret false
+  }
+  if clipRayToSlab(
+    rayComponent: rayDirection.z
+    rayStart: point1.z
+    boxMin: box.lowerBound.z
+    boxMax: box.upperBound.z
+    minDistance: minDistance
+    maxDistance: maxDistance
+  ) is false {
+    ret false
+  }
+
+  # Behind the ray start?
+  if maxDistance < 0.0 {
+    ret false
+  }
+  minFraction = clampFloat(value: minDistance / rayLength, lower: 0.0, upper: 1.0)
+  maxFraction = clampFloat(value: maxDistance / rayLength, lower: 0.0, upper: 1.0)
+  ret true
+}
