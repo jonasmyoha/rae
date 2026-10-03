@@ -205,6 +205,11 @@ struct AstExpr {
   size_t line;
   size_t column;
   bool is_raw;
+  // A float literal whose value is used as a `Float` (f32): sema marks it
+  // (sema_mark_f32_literal) and the C backend writes it with an `f` suffix,
+  // so `0.5 * x` is f32 arithmetic like `0.5f * x` in C. Unmarked literals
+  // stay C doubles (Float64 contexts, and contexts sema cannot decide).
+  bool is_f32_literal;
   union {
     Str ident;
     Str integer;

@@ -1,0 +1,174 @@
+# Box3D's rigid transforms (b3Transform and the world-position functions of
+# math_functions.h at 9f998c8). This is Box3D's single-precision mode, the
+# one the oracle builds: a world position (b3Pos) IS a Vec3 and a world
+# transform (b3WorldTransform) IS a Transform, so every "narrowing" below is
+# exact. Box3D's operation order is kept exactly; checked bit for bit against
+# the oracle in fixture 948.
+open Vec3
+open Quat
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/QuatMath
+
+# A rigid transform: rotate, then translate (b3Transform's `p` and `q`).
+type Transform {
+  position: Vec3
+  rotation: Quat
+}
+
+alias Pos = Vec3
+
+alias WorldTransform = Transform
+
+func transformIdentity() ret Transform {
+  ret Transform { position: zeroVector(), rotation: quatIdentity() }
+}
+
+# b3MulTransforms: a point local to B, through A, to the world (B a child of A).
+func multiply(left: view Transform, right: view Transform) ret Transform {
+  ret Transform {
+    position: add(
+      left: rotateVector(quat: left.rotation, vector: right.position)
+      right: left.position
+    )
+    rotation: multiply(left: left.rotation, right: right.rotation)
+  }
+}
+
+# b3InvMulTransforms: a point local to B, into the frame of A.
+func inverseMultiply(left: view Transform, right: view Transform) ret Transform {
+  ret Transform {
+    position: inverseRotateVector(
+      quat: left.rotation
+      vector: subtract(left: right.position, right: left.position)
+    )
+    rotation: inverseMultiply(left: left.rotation, right: right.rotation)
+  }
+}
+
+# b3InvertTransform
+func invert(transform: view Transform) ret Transform {
+  ret Transform {
+    position: inverseRotateVector(
+      quat: transform.rotation
+      vector: negate(vector: transform.position)
+    )
+    rotation: conjugate(a: transform.rotation)
+  }
+}
+
+# b3TransformPoint
+func transformPoint(transform: view Transform, point: view Vec3) ret Vec3 {
+  let rotated: Vec3 = rotateVector(quat: transform.rotation, vector: point)
+  ret add(left: rotated, right: transform.position)
+}
+
+# b3InvTransformPoint
+func inverseTransformPoint(transform: view Transform, point: view Vec3) ret Vec3 {
+  ret inverseRotateVector(
+    quat: transform.rotation
+    vector: subtract(left: point, right: transform.position)
+  )
+}
+
+# b3ToPos / b3ToVec3: the same value in single precision.
+func toPos(vector: view Vec3) ret Pos {
+  ret Vec3 { x: vector.x, y: vector.y, z: vector.z }
+}
+
+func toVec3(position: view Pos) ret Vec3 {
+  ret Vec3 { x: position.x, y: position.y, z: position.z }
+}
+
+# b3RoundDownFloat / b3RoundUpFloat: a plain conversion in single precision.
+func roundDownFloat(value: view Float) ret Float {
+  ret value
+}
+
+func roundUpFloat(value: view Float) ret Float {
+  ret value
+}
+
+# b3SubPos: a - b, the precision boundary.
+func subtractPositions(left: view Pos, right: view Pos) ret Vec3 {
+  ret Vec3 { x: left.x - right.x, y: left.y - right.y, z: left.z - right.z }
+}
+
+# b3OffsetPos: position + delta
+func offsetPosition(position: view Pos, delta: view Vec3) ret Pos {
+  ret Vec3 { x: position.x + delta.x, y: position.y + delta.y, z: position.z + delta.z }
+}
+
+# b3LerpPosition
+func lerpPosition(from: view Pos, to: view Pos, alpha: view Float) ret Pos {
+  ret Vec3 {
+    x: (1.0 - alpha) * from.x + alpha * to.x
+    y: (1.0 - alpha) * from.y + alpha * to.y
+    z: (1.0 - alpha) * from.z + alpha * to.z
+  }
+}
+
+# b3TransformWorldPoint
+func transformWorldPoint(transform: view WorldTransform, point: view Vec3) ret Pos {
+  let rotated: Vec3 = rotateVector(quat: transform.rotation, vector: point)
+  ret Vec3 {
+    x: transform.position.x + rotated.x
+    y: transform.position.y + rotated.y
+    z: transform.position.z + rotated.z
+  }
+}
+
+# b3InvTransformWorldPoint
+func inverseTransformWorldPoint(transform: view WorldTransform, position: view Pos) ret Vec3 {
+  let delta: Vec3 = {
+    x: position.x - transform.position.x
+    y: position.y - transform.position.y
+    z: position.z - transform.position.z
+  }
+  ret inverseRotateVector(quat: transform.rotation, vector: delta)
+}
+
+# b3MulWorldTransforms
+func multiplyWorld(left: view WorldTransform, right: view Transform) ret WorldTransform {
+  let rotation: Quat = multiply(left: left.rotation, right: right.rotation)
+  let rotated: Vec3 = rotateVector(quat: left.rotation, vector: right.position)
+  ret Transform {
+    position: Vec3 {
+      x: left.position.x + rotated.x
+      y: left.position.y + rotated.y
+      z: left.position.z + rotated.z
+    }
+    rotation: rotation
+  }
+}
+
+# b3InvMulWorldTransforms: B in the frame of A (the narrow phase boundary).
+func inverseMultiplyWorld(left: view WorldTransform, right: view WorldTransform) ret Transform {
+  let rotation: Quat = inverseMultiply(left: left.rotation, right: right.rotation)
+  let delta: Vec3 = {
+    x: right.position.x - left.position.x
+    y: right.position.y - left.position.y
+    z: right.position.z - left.position.z
+  }
+  ret Transform {
+    position: inverseRotateVector(quat: left.rotation, vector: delta)
+    rotation: rotation
+  }
+}
+
+# b3ToRelativeTransform: a world transform in the frame of `base`.
+func toRelativeTransform(transform: view WorldTransform, base: view Pos) ret Transform {
+  ret Transform {
+    position: Vec3 {
+      x: transform.position.x - base.x
+      y: transform.position.y - base.y
+      z: transform.position.z - base.z
+    }
+    rotation: transform.rotation
+  }
+}
+
+# b3MakeWorldTransform
+func makeWorldTransform(transform: view Transform) ret WorldTransform {
+  ret Transform { position: toPos(vector: transform.position), rotation: transform.rotation }
+}

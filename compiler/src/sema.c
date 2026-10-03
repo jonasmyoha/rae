@@ -5381,8 +5381,51 @@ static void sema_check_object_literal_fields(TypeInfo* structType, AstObjectFiel
     }
 }
 
+// ===== Float literals in f32 arithmetic
+//
+// `Float` is f32, but a literal used to reach C as a double: `0.5 * x` with
+// `x: Float` computed in double and rounded at the end, so it differed from
+// `half * x` (`half: Float = 0.5`) and from Box3D's `0.5f * x`, and the
+// physics port could not be bit-exact (docs/physics-rae-port-design.md §4).
+// A literal is now marked f32 when its value is positively used as a Float —
+// the other operand of an arithmetic or comparison is an f32 value, or it is
+// assigned / passed / returned to a Float — and the backend writes it with an
+// `f` suffix. Anything else (a Float64 context, or one sema cannot decide)
+// stays a double literal, exactly as before.
+static void sema_mark_f32_literal(AstExpr* e) {
+    if (!e) return;
+    if (e->kind == AST_EXPR_FLOAT) { e->is_f32_literal = true; return; }
+    if (e->kind == AST_EXPR_UNARY && e->as.unary.op == AST_UNARY_NEG) { sema_mark_f32_literal(e->as.unary.operand); return; }
+    if (e->kind == AST_EXPR_BINARY) {
+        sema_mark_f32_literal(e->as.binary.lhs);
+        sema_mark_f32_literal(e->as.binary.rhs);
+    }
+}
+
+// Is this expression an f32 VALUE (not a literal)? A binary expression's
+// resolved type is its lhs's, so `0.5 * x64` reads as f32 by type; decide
+// structurally instead: no Float64 operand, and at least one non-literal f32.
+static bool sema_expr_is_f32_value(const AstExpr* e) {
+    if (!e || sema_is_numeric_literal(e)) return false;
+    if (e->kind == AST_EXPR_UNARY && e->as.unary.op == AST_UNARY_NEG) return sema_expr_is_f32_value(e->as.unary.operand);
+    if (e->kind == AST_EXPR_BINARY && e->as.binary.op >= AST_BIN_ADD && e->as.binary.op <= AST_BIN_MOD) {
+        const AstExpr* lhs = e->as.binary.lhs;
+        const AstExpr* rhs = e->as.binary.rhs;
+        bool lhs_ok = sema_is_numeric_literal(lhs) || sema_expr_is_f32_value(lhs);
+        bool rhs_ok = sema_is_numeric_literal(rhs) || sema_expr_is_f32_value(rhs);
+        return lhs_ok && rhs_ok;   /* not both literals: the guard above */
+    }
+    TypeInfo* t = sema_strip_ref(e->resolved_type);
+    return t && t->kind == TYPE_FLOAT;
+}
+
 static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr** expr_ptr) {
     if (!expected || !expr_ptr || !*expr_ptr) return;
+    {
+        TypeInfo* target = sema_strip_ref(expected);
+        if (target && target->kind == TYPE_FLOAT && sema_is_numeric_literal(*expr_ptr))
+            sema_mark_f32_literal(*expr_ptr);
+    }
     /* #778: a bare-brace struct literal (`{ ... }`) carries no type of its own —
      * its type is `expected` here. Validate its field names against it. Typed
      * literals (`Type { ... }`) are checked at AST_EXPR_OBJECT instead, so skip
@@ -5861,6 +5904,14 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
         case AST_EXPR_CHAR: expr->resolved_type = type_get_char(ctx->type_registry); break;
         case AST_EXPR_BINARY:
             sema_analyze_expr(ctx, module, symbols, expr->as.binary.lhs, true); sema_analyze_expr(ctx, module, symbols, expr->as.binary.rhs, true);
+            /* A literal next to an f32 value is f32 too (sema_mark_f32_literal). */
+            if ((expr->as.binary.op >= AST_BIN_ADD && expr->as.binary.op <= AST_BIN_MOD)
+                || (expr->as.binary.op >= AST_BIN_LT && expr->as.binary.op < AST_BIN_AND)) {
+                if (sema_is_numeric_literal(expr->as.binary.lhs) && sema_expr_is_f32_value(expr->as.binary.rhs))
+                    sema_mark_f32_literal(expr->as.binary.lhs);
+                if (sema_is_numeric_literal(expr->as.binary.rhs) && sema_expr_is_f32_value(expr->as.binary.lhs))
+                    sema_mark_f32_literal(expr->as.binary.rhs);
+            }
             /* A divisor that is a compile-time integer zero is an error here,
              * not a trap later: `x / 0`, `x % 0`, `x / (1 - 1)`, `x / zeroConst`
              * (docs/integer-semantics.md). A float zero is left to the
@@ -8181,7 +8232,20 @@ bool sema_analyze_module(CompilerContext* ctx, AstModule* module) {
                 t = d->resolved_type; break;
             case AST_DECL_FUNC: name = d->as.func_decl.name; break;
             case AST_DECL_ENUM: name = d->as.enum_decl.name; break;
-            case AST_DECL_GLOBAL_LET: name = d->as.let_decl.name; break;
+            case AST_DECL_GLOBAL_LET: {
+                name = d->as.let_decl.name;
+                /* A float constant's type is known here without any other
+                 * declaration, and it decides whether a literal beside it is
+                 * f32 arithmetic (`2.0 * pi`, sema_mark_f32_literal). Other
+                 * globals keep resolving where they did. */
+                const AstTypeRef* declared = d->as.let_decl.type;
+                Str base = declared ? get_base_type_name(declared) : (Str){0};
+                if (declared && !declared->is_opt && !declared->generic_args
+                    && (str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float32") || str_eq_cstr(base, "Float64")))
+                    t = str_eq_cstr(base, "Float64") ? type_get_float64(ctx->type_registry)
+                                                     : type_get_float(ctx->type_registry);
+                break;
+            }
             default: break;
         }
         if (name.len > 0) {

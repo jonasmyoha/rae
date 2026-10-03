@@ -1,0 +1,155 @@
+# Box3D's segment and line distances (math_functions.c at 9f998c8). Box3D's
+# operation order is kept exactly; checked bit for bit against the oracle in
+# fixture 948.
+open Vec3
+open physics/math/Scalar
+open physics/math/VectorMath
+
+# b3SegmentDistanceResult: the closest points and their fractions along each
+# segment (or line).
+type SegmentDistanceResult {
+  point1: Vec3
+  fraction1: Float
+  point2: Vec3
+  fraction2: Float
+}
+
+# b3PointToSegmentDistance: the point of segment start-end closest to `point`.
+func pointToSegmentDistance(start: view Vec3, end: view Vec3, point: view Vec3) ret Vec3 {
+  let segment: Vec3 = subtract(left: end, right: start)
+  let toPoint: Vec3 = subtract(left: point, right: start)
+  var alpha: Float = dot(left: segment, right: toPoint)
+  if alpha <= 0.0 {
+    # point projects outside [start, end] on the side of start
+    ret start
+  }
+  let denominator: Float = dot(left: segment, right: segment)
+  if alpha > denominator {
+    # point projects outside [start, end] on the side of end
+    ret end
+  }
+  # point projects inside [start, end]
+  alpha = alpha / denominator
+  ret mulAdd(base: start, scale: alpha, vector: segment)
+}
+
+# b3LineDistance: the closest points of two infinite lines point + t * direction.
+func lineDistance(
+  point1: view Vec3
+  direction1: view Vec3
+  point2: view Vec3
+  direction2: view Vec3
+) ret SegmentDistanceResult {
+  # Solve A*x = b
+  let a11: Float = dot(left: direction1, right: direction1)
+  let a12: Float = -dot(left: direction1, right: direction2)
+  let a21: Float = dot(left: direction2, right: direction1)
+  let a22: Float = -dot(left: direction2, right: direction2)
+  let offset: Vec3 = subtract(left: point1, right: point2)
+  let rhs1: Float = -dot(left: direction1, right: offset)
+  let rhs2: Float = -dot(left: direction2, right: offset)
+  let determinant: Float = a11 * a22 - a12 * a21
+  if determinant * determinant < 1000.0 * floatMin {
+    # Lines are parallel - project point2 onto line 1
+    let along1: Float = dot(left: subtract(left: point2, right: point1), right: direction1) / dot(
+      left: direction1
+      right: direction1
+    )
+    let along2: Float = 0.0
+    ret SegmentDistanceResult {
+      point1: mulAdd(base: point1, scale: along1, vector: direction1)
+      fraction1: along1
+      point2: mulAdd(base: point2, scale: along2, vector: direction2)
+      fraction2: along2
+    }
+  }
+  let along1: Float = (a22 * rhs1 - a12 * rhs2) / determinant
+  let along2: Float = (a11 * rhs2 - a21 * rhs1) / determinant
+  ret SegmentDistanceResult {
+    point1: mulAdd(base: point1, scale: along1, vector: direction1)
+    fraction1: along1
+    point2: mulAdd(base: point2, scale: along2, vector: direction2)
+    fraction2: along2
+  }
+}
+
+# b3SegmentDistance: the closest points of segments start1-end1 and
+# start2-end2 (Ericson, Real-Time Collision Detection 5.1.9; his a, b, c, e,
+# f are the squared lengths and dot products named below).
+func segmentDistance(
+  start1: view Vec3
+  end1: view Vec3
+  start2: view Vec3
+  end2: view Vec3
+) ret SegmentDistanceResult {
+  let direction1: Vec3 = subtract(left: end1, right: start1)
+  let direction2: Vec3 = subtract(left: end2, right: start2)
+  let offset: Vec3 = subtract(left: start1, right: start2)
+  let squaredLength1: Float = dot(left: direction1, right: direction1)
+  let directionsDot: Float = dot(left: direction1, right: direction2)
+  let offsetDot1: Float = dot(left: direction1, right: offset)
+  let squaredLength2: Float = dot(left: direction2, right: direction2)
+  let offsetDot2: Float = dot(left: direction2, right: offset)
+
+  # Check if one of the segments degenerates into a point
+  if squaredLength1 < 100.0 * floatEpsilon and squaredLength2 < 100.0 * floatEpsilon {
+    # Both segments degenerate into points
+    ret SegmentDistanceResult { point1: start1, fraction1: 0.0, point2: start2, fraction2: 0.0 }
+  }
+  if squaredLength1 < 100.0 * floatEpsilon {
+    # First segment degenerates into a point
+    let along2: Float = clampFloat(value: offsetDot2 / squaredLength2, lower: 0.0, upper: 1.0)
+    ret SegmentDistanceResult {
+      point1: start1
+      fraction1: 0.0
+      point2: mulAdd(base: start2, scale: along2, vector: direction2)
+      fraction2: along2
+    }
+  }
+  if squaredLength2 < 100.0 * floatEpsilon {
+    # Second segment degenerates into a point
+    let along1: Float = clampFloat(value: -offsetDot1 / squaredLength1, lower: 0.0, upper: 1.0)
+    ret SegmentDistanceResult {
+      point1: mulAdd(base: start1, scale: along1, vector: direction1)
+      fraction1: along1
+      point2: start2
+      fraction2: 0.0
+    }
+  }
+
+  # Non-degenerate case
+  let denominator: Float = squaredLength1 * squaredLength2 - directionsDot * directionsDot
+  var along1: Float = 0.0
+  if denominator > 1000.0 * floatMin {
+    along1 = clampFloat(
+      value: (directionsDot * offsetDot2 - offsetDot1 * squaredLength2) / denominator
+      lower: 0.0
+      upper: 1.0
+    )
+  }
+  var along2: Float = (directionsDot * along1 + offsetDot2) / squaredLength2
+
+  # Clamp lambda2 and recompute lambda1 if necessary
+  if along2 < 0.0 {
+    along1 = clampFloat(value: -offsetDot1 / squaredLength1, lower: 0.0, upper: 1.0)
+    along2 = 0.0
+  } else if along2 > 1.0 {
+    along1 = clampFloat(
+      value: (directionsDot - offsetDot1) / squaredLength1
+      lower: 0.0
+      upper: 1.0
+    )
+    along2 = 1.0
+  }
+  ret SegmentDistanceResult {
+    point1: mulAdd(base: start1, scale: along1, vector: direction1)
+    fraction1: along1
+    point2: mulAdd(base: start2, scale: along2, vector: direction2)
+    fraction2: along2
+  }
+}
+
+# b3IsWithinSegments: both fractions in [0, 1].
+func isWithinSegments(result: view SegmentDistanceResult) ret Bool {
+  ret 0.0 <= result.fraction1 and result.fraction1 <= 1.0 and 0.0 <= result.fraction2 and result.fraction2 <= 1.0
+}

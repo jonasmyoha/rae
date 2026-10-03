@@ -1,0 +1,69 @@
+# Box3D's planes (b3Plane functions of math_internal.h at 9f998c8):
+# separation = dot(normal, point) - offset. Box3D's operation order is kept
+# exactly; checked bit for bit against the oracle in fixture 948.
+open Vec3
+open physics/math/VectorMath
+open physics/math/QuatMath
+open physics/math/TransformMath
+
+type Plane {
+  normal: Vec3
+  offset: Float
+}
+
+# b3NormalizePlane
+func normalizePlane(plane: view Plane) ret Plane {
+  let inverseLength: Float = 1.0 / length(vector: plane.normal)
+  ret Plane {
+    normal: scale(scale: inverseLength, vector: plane.normal)
+    offset: inverseLength * plane.offset
+  }
+}
+
+# b3MakePlaneFromNormalAndPoint
+func planeFromNormalAndPoint(normal: view Vec3, point: view Vec3) ret Plane {
+  ret Plane { normal: normal, offset: dot(left: normal, right: point) }
+}
+
+# b3MakePlaneFromPoints: through three points, normal by the right-hand rule.
+func planeFromPoints(point1: view Vec3, point2: view Vec3, point3: view Vec3) ret Plane {
+  var normal: Vec3 = cross(
+    left: subtract(left: point2, right: point1)
+    right: subtract(left: point3, right: point1)
+  )
+  normal = normalize(vector: normal)
+  ret Plane { normal: normal, offset: dot(left: normal, right: point1) }
+}
+
+# b3MakeNormalFromPoints
+func normalFromPoints(point1: view Vec3, point2: view Vec3, point3: view Vec3) ret Vec3 {
+  let normal: Vec3 = cross(
+    left: subtract(left: point2, right: point1)
+    right: subtract(left: point3, right: point1)
+  )
+  ret normalize(vector: normal)
+}
+
+# b3TransformPlane: normal2 = q * normal1, offset2 = dot(normal2, p) + offset1
+func transformPlane(transform: view Transform, plane: view Plane) ret Plane {
+  let normal: Vec3 = rotateVector(quat: transform.rotation, vector: plane.normal)
+  ret Plane { normal: normal, offset: plane.offset + dot(left: normal, right: transform.position) }
+}
+
+# b3PlaneSeparation: signed separation of a point from a plane.
+func planeSeparation(plane: view Plane, point: view Vec3) ret Float {
+  ret dot(left: plane.normal, right: point) - plane.offset
+}
+
+# b3SignedVolume: negative if `point` is below triangle vertex1-vertex2-vertex3.
+func signedVolume(
+  vertex1: view Vec3
+  vertex2: view Vec3
+  vertex3: view Vec3
+  point: view Vec3
+) ret Float {
+  let edge1: Vec3 = subtract(left: vertex2, right: vertex1)
+  let edge2: Vec3 = subtract(left: vertex3, right: vertex1)
+  let normal: Vec3 = cross(left: edge1, right: edge2)
+  ret dot(left: normal, right: subtract(left: point, right: vertex1))
+}

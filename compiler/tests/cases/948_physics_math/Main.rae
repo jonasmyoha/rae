@@ -1,0 +1,919 @@
+# The physics port's math layer (lib/physics/math, P1) against Box3D itself:
+# every line of tools/box3d-oracle/goldens/math.golden is one call of a Box3D
+# math function with its inputs and outputs as exact hex floats, written by
+# Box3D's own C build (tools/box3d-oracle/oracle.sh). This runs the Rae port
+# of each function on the same inputs and requires the SAME BITS — not close
+# values (docs/physics-rae-port-design.md §4).
+import Vec2
+import Vec3
+import Quat
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/QuatMath
+open physics/math/MatrixMath
+open physics/math/TransformMath
+open physics/math/AabbMath
+open physics/math/SegmentMath
+open physics/math/PlaneMath
+open physics/math/Vector2Math
+open physics/math/Validation
+
+func at(values: view List(Float), index: view Int) ret Float {
+  ret values.copyAtDefault(index: index)
+}
+
+func vecAt(values: view List(Float), index: view Int) ret Vec3 {
+  ret Vec3 {
+    x: at(values: values, index: index)
+    y: at(values: values, index: index + 1)
+    z: at(values: values, index: index + 2)
+  }
+}
+
+func quatAt(values: view List(Float), index: view Int) ret Quat {
+  ret Quat {
+    x: at(values: values, index: index)
+    y: at(values: values, index: index + 1)
+    z: at(values: values, index: index + 2)
+    w: at(values: values, index: index + 3)
+  }
+}
+
+func matrixAt(values: view List(Float), index: view Int) ret Matrix3 {
+  ret Matrix3 {
+    columnX: vecAt(values: values, index: index)
+    columnY: vecAt(values: values, index: index + 3)
+    columnZ: vecAt(values: values, index: index + 6)
+  }
+}
+
+func transformAt(values: view List(Float), index: view Int) ret Transform {
+  ret Transform {
+    position: vecAt(values: values, index: index)
+    rotation: quatAt(values: values, index: index + 3)
+  }
+}
+
+func boxAt(values: view List(Float), index: view Int) ret Aabb {
+  ret Aabb {
+    lowerBound: vecAt(values: values, index: index)
+    upperBound: vecAt(values: values, index: index + 3)
+  }
+}
+
+func planeAt(values: view List(Float), index: view Int) ret Plane {
+  ret Plane {
+    normal: vecAt(values: values, index: index)
+    offset: at(values: values, index: index + 3)
+  }
+}
+
+func vec2At(values: view List(Float), index: view Int) ret Vec2 {
+  ret Vec2 { x: at(values: values, index: index), y: at(values: values, index: index + 1) }
+}
+
+func matrix2At(values: view List(Float), index: view Int) ret Matrix2 {
+  ret Matrix2 {
+    columnX: vec2At(values: values, index: index)
+    columnY: vec2At(values: values, index: index + 2)
+  }
+}
+
+func intAt(values: view List(Float), index: view Int) ret Int {
+  ret at(values: values, index: index).toInt()
+}
+
+func putFloat(out: mod List(Float), value: view Float) {
+  out.add(value: value)
+}
+
+func putInt(out: mod List(Float), value: view Int) {
+  out.add(value: value.toFloat())
+}
+
+func putBool(out: mod List(Float), value: view Bool) {
+  if value {
+    out.add(value: 1.0)
+  } else {
+    out.add(value: 0.0)
+  }
+}
+
+func putVec(out: mod List(Float), vector: view Vec3) {
+  out.add(value: vector.x)
+  out.add(value: vector.y)
+  out.add(value: vector.z)
+}
+
+func putQuat(out: mod List(Float), quat: view Quat) {
+  out.add(value: quat.x)
+  out.add(value: quat.y)
+  out.add(value: quat.z)
+  out.add(value: quat.w)
+}
+
+func putMatrix(out: mod List(Float), matrix: view Matrix3) {
+  putVec(out: out, vector: matrix.columnX)
+  putVec(out: out, vector: matrix.columnY)
+  putVec(out: out, vector: matrix.columnZ)
+}
+
+func putTransform(out: mod List(Float), transform: view Transform) {
+  putVec(out: out, vector: transform.position)
+  putQuat(out: out, quat: transform.rotation)
+}
+
+func putBox(out: mod List(Float), box: view Aabb) {
+  putVec(out: out, vector: box.lowerBound)
+  putVec(out: out, vector: box.upperBound)
+}
+
+func putPlane(out: mod List(Float), plane: view Plane) {
+  putVec(out: out, vector: plane.normal)
+  out.add(value: plane.offset)
+}
+
+func putVec2(out: mod List(Float), vector: view Vec2) {
+  out.add(value: vector.x)
+  out.add(value: vector.y)
+}
+
+func putMatrix2(out: mod List(Float), matrix: view Matrix2) {
+  putVec2(out: out, vector: matrix.columnX)
+  putVec2(out: out, vector: matrix.columnY)
+}
+
+func putSegment(out: mod List(Float), result: view SegmentDistanceResult) {
+  putVec(out: out, vector: result.point1)
+  out.add(value: result.fraction1)
+  putVec(out: out, vector: result.point2)
+  out.add(value: result.fraction2)
+}
+
+# Scalars and vectors. False: not a function of this group.
+func evaluateVectors(name: view String, input: view List(Float), out: mod List(Float)) ret Bool {
+  let first: Vec3 = vecAt(values: input, index: 0)
+  let second: Vec3 = vecAt(values: input, index: 3)
+  if name is "b3Atan2" {
+    putFloat(
+      out: out
+      value: deterministicAtan2(y: at(values: input, index: 0), x: at(values: input, index: 1))
+    )
+  } else if name is "b3ComputeCosSin" {
+    let cosSin: CosSin = computeCosSin(radians: at(values: input, index: 0))
+    putFloat(out: out, value: cosSin.cosine)
+    putFloat(out: out, value: cosSin.sine)
+  } else if name is "b3UnwindAngle" {
+    putFloat(out: out, value: unwindAngle(radians: at(values: input, index: 0)))
+  } else if name is "b3Sin" {
+    putFloat(out: out, value: deterministicSin(radians: at(values: input, index: 0)))
+  } else if name is "b3Cos" {
+    putFloat(out: out, value: deterministicCos(radians: at(values: input, index: 0)))
+  } else if name is "b3MinInt" {
+    putInt(
+      out: out
+      value: minInt(left: intAt(values: input, index: 0), right: intAt(values: input, index: 1))
+    )
+  } else if name is "b3MaxInt" {
+    putInt(
+      out: out
+      value: maxInt(left: intAt(values: input, index: 0), right: intAt(values: input, index: 1))
+    )
+  } else if name is "b3ClampInt" {
+    putInt(
+      out: out
+      value: clampInt(
+        value: intAt(values: input, index: 0)
+        lower: intAt(values: input, index: 1)
+        upper: intAt(values: input, index: 2)
+      )
+    )
+  } else if name is "b3AbsFloat" {
+    putFloat(out: out, value: absFloat(value: at(values: input, index: 0)))
+  } else if name is "b3MinFloat" {
+    putFloat(
+      out: out
+      value: minFloat(left: at(values: input, index: 0), right: at(values: input, index: 1))
+    )
+  } else if name is "b3MaxFloat" {
+    putFloat(
+      out: out
+      value: maxFloat(left: at(values: input, index: 0), right: at(values: input, index: 1))
+    )
+  } else if name is "b3ClampFloat" {
+    putFloat(
+      out: out
+      value: clampFloat(
+        value: at(values: input, index: 0)
+        lower: at(values: input, index: 1)
+        upper: at(values: input, index: 2)
+      )
+    )
+  } else if name is "b3LerpFloat" {
+    putFloat(
+      out: out
+      value: lerpFloat(
+        from: at(values: input, index: 0)
+        to: at(values: input, index: 1)
+        alpha: at(values: input, index: 2)
+      )
+    )
+  } else if name is "b3CeilingInt" {
+    putInt(
+      out: out
+      value: ceilingInt(
+        numerator: intAt(values: input, index: 0)
+        denominator: intAt(values: input, index: 1)
+      )
+    )
+  } else if name is "b3CeilingPow2" {
+    putInt(
+      out: out
+      value: ceilingPow2(
+        numerator: intAt(values: input, index: 0)
+        denominator: intAt(values: input, index: 1)
+        exponent: intAt(values: input, index: 2)
+      )
+    )
+  } else if name is "b3IsValidFloat" {
+    putBool(out: out, value: isValidFloat(value: at(values: input, index: 0)))
+  } else if name is "b3Add" {
+    putVec(out: out, vector: add(left: first, right: second))
+  } else if name is "b3Sub" {
+    putVec(out: out, vector: subtract(left: first, right: second))
+  } else if name is "b3Mul" {
+    putVec(out: out, vector: multiply(left: first, right: second))
+  } else if name is "b3Neg" {
+    putVec(out: out, vector: negate(vector: first))
+  } else if name is "b3Dot" {
+    putFloat(out: out, value: dot(left: first, right: second))
+  } else if name is "b3Length" {
+    putFloat(out: out, value: length(vector: first))
+  } else if name is "b3LengthSquared" {
+    putFloat(out: out, value: lengthSquared(vector: first))
+  } else if name is "b3Distance" {
+    putFloat(out: out, value: distance(from: first, to: second))
+  } else if name is "b3DistanceSquared" {
+    putFloat(out: out, value: distanceSquared(from: first, to: second))
+  } else if name is "b3Normalize" {
+    putVec(out: out, vector: normalize(vector: first))
+  } else if name is "b3GetLengthAndNormalize" {
+    var vectorLength: Float = 0.0
+    let unit: Vec3 = getLengthAndNormalize(length: vectorLength, vector: first)
+    putVec(out: out, vector: unit)
+    putFloat(out: out, value: vectorLength)
+  } else if name is "b3Perp" {
+    putVec(out: out, vector: perp(vector: first))
+  } else if name is "b3Cross" {
+    putVec(out: out, vector: cross(left: first, right: second))
+  } else if name is "b3Lerp" {
+    putVec(out: out, vector: lerp(from: first, to: second, alpha: at(values: input, index: 6)))
+  } else if name is "b3MulAdd" {
+    putVec(
+      out: out
+      vector: mulAdd(
+        base: first
+        scale: at(values: input, index: 3)
+        vector: vecAt(values: input, index: 4)
+      )
+    )
+  } else if name is "b3MulSub" {
+    putVec(
+      out: out
+      vector: mulSub(
+        base: first
+        scale: at(values: input, index: 3)
+        vector: vecAt(values: input, index: 4)
+      )
+    )
+  } else if name is "b3MulSV" {
+    putVec(
+      out: out
+      vector: scale(scale: at(values: input, index: 0), vector: vecAt(values: input, index: 1))
+    )
+  } else if name is "b3Abs" {
+    putVec(out: out, vector: abs(vector: first))
+  } else if name is "b3Min" {
+    putVec(out: out, vector: min(left: first, right: second))
+  } else if name is "b3Max" {
+    putVec(out: out, vector: max(left: first, right: second))
+  } else if name is "b3Clamp" {
+    putVec(
+      out: out
+      vector: clamp(vector: first, lower: second, upper: vecAt(values: input, index: 6))
+    )
+  } else if name is "b3Blend2" {
+    putVec(
+      out: out
+      vector: blend2(
+        firstScale: at(values: input, index: 0)
+        first: vecAt(values: input, index: 1)
+        secondScale: at(values: input, index: 4)
+        second: vecAt(values: input, index: 5)
+      )
+    )
+  } else if name is "b3Blend3" {
+    putVec(
+      out: out
+      vector: blend3(
+        firstScale: at(values: input, index: 0)
+        first: vecAt(values: input, index: 1)
+        secondScale: at(values: input, index: 4)
+        second: vecAt(values: input, index: 5)
+        thirdScale: at(values: input, index: 8)
+        third: vecAt(values: input, index: 9)
+      )
+    )
+  } else if name is "b3Sign" {
+    putVec(out: out, vector: sign(vector: first))
+  } else if name is "b3SafeScale" {
+    putVec(out: out, vector: safeScale(scaleVector: first))
+  } else if name is "b3IsNormalized" {
+    putBool(out: out, value: isNormalized(vector: first))
+  } else if name is "b3ClampLength" {
+    putVec(out: out, vector: clampLength(vector: first, maxLength: at(values: input, index: 3)))
+  } else if name is "b3ArbitraryPerp" {
+    putVec(out: out, vector: arbitraryPerp(vector: first))
+  } else if name is "b3ScalarTripleProduct" {
+    putFloat(
+      out: out
+      value: scalarTripleProduct(
+        first: first
+        second: second
+        third: vecAt(values: input, index: 6)
+      )
+    )
+  } else if name is "b3MajorAxis" {
+    putInt(out: out, value: majorAxis(vector: first))
+  } else if name is "b3MinElement" {
+    putFloat(out: out, value: minElement(vector: first))
+  } else if name is "b3MaxElement" {
+    putFloat(out: out, value: maxElement(vector: first))
+  } else if name is "b3ModifiedCross" {
+    putVec(out: out, vector: modifiedCross(left: first, right: second))
+  } else {
+    ret false
+  }
+  ret true
+}
+
+# Quaternions, transforms and matrices.
+func evaluateRotations(name: view String, input: view List(Float), out: mod List(Float)) ret Bool {
+  let firstQuat: Quat = quatAt(values: input, index: 0)
+  let secondQuat: Quat = quatAt(values: input, index: 4)
+  let firstMatrix: Matrix3 = matrixAt(values: input, index: 0)
+  let secondMatrix: Matrix3 = matrixAt(values: input, index: 9)
+  let firstTransform: Transform = transformAt(values: input, index: 0)
+  let secondTransform: Transform = transformAt(values: input, index: 7)
+  if name is "b3MakeQuatFromAxisAngle" {
+    putQuat(
+      out: out
+      quat: quatFromAxisAngle(
+        axis: vecAt(values: input, index: 0)
+        radians: at(values: input, index: 3)
+      )
+    )
+  } else if name is "b3RotateVector" {
+    putVec(out: out, vector: rotateVector(quat: firstQuat, vector: vecAt(values: input, index: 4)))
+  } else if name is "b3InvRotateVector" {
+    putVec(
+      out: out
+      vector: inverseRotateVector(quat: firstQuat, vector: vecAt(values: input, index: 4))
+    )
+  } else if name is "b3DotQuat" {
+    putFloat(out: out, value: dot(left: firstQuat, right: secondQuat))
+  } else if name is "b3MulQuat" {
+    putQuat(out: out, quat: multiply(left: firstQuat, right: secondQuat))
+  } else if name is "b3InvMulQuat" {
+    putQuat(out: out, quat: inverseMultiply(left: firstQuat, right: secondQuat))
+  } else if name is "b3Conjugate" {
+    putQuat(out: out, quat: Quat.conjugate(a: firstQuat))
+  } else if name is "b3NegateQuat" {
+    putQuat(out: out, quat: negate(quat: firstQuat))
+  } else if name is "b3NormalizeQuat" {
+    putQuat(out: out, quat: normalize(quat: firstQuat))
+  } else if name is "b3IsNormalizedQuat" {
+    putBool(out: out, value: isNormalized(quat: firstQuat))
+  } else if name is "b3GetAxisAngle" {
+    var radians: Float = 0.0
+    let axis: Vec3 = axisAngle(radians: radians, quat: firstQuat)
+    putVec(out: out, vector: axis)
+    putFloat(out: out, value: radians)
+  } else if name is "b3GetQuatAngle" {
+    putFloat(out: out, value: quatAngle(quat: firstQuat))
+  } else if name is "b3GetTwistAngle" {
+    putFloat(out: out, value: twistAngle(quat: firstQuat))
+  } else if name is "b3GetSwingAngle" {
+    putFloat(out: out, value: swingAngle(quat: firstQuat))
+  } else if name is "b3NLerp" {
+    putQuat(
+      out: out
+      quat: nlerp(from: firstQuat, to: secondQuat, alpha: at(values: input, index: 8))
+    )
+  } else if name is "b3ComputeQuatBetweenUnitVectors" {
+    putQuat(
+      out: out
+      quat: quatBetweenUnitVectors(
+        from: vecAt(values: input, index: 0)
+        to: vecAt(values: input, index: 3)
+      )
+    )
+  } else if name is "b3MakeQuatFromMatrix" {
+    putQuat(out: out, quat: quatFromMatrix(matrix: firstMatrix))
+  } else if name is "b3QuatFromExponentialMap" {
+    putQuat(out: out, quat: quatFromExponentialMap(vector: vecAt(values: input, index: 0)))
+  } else if name is "b3IntegrateRotation" {
+    putQuat(
+      out: out
+      quat: integrateRotation(quat: firstQuat, deltaRotation: vecAt(values: input, index: 4))
+    )
+  } else if name is "b3DeltaQuatToRotation" {
+    putVec(out: out, vector: deltaQuatToRotation(quat: firstQuat, target: secondQuat))
+  } else if name is "b3MulTransforms" {
+    putTransform(out: out, transform: multiply(left: firstTransform, right: secondTransform))
+  } else if name is "b3InvMulTransforms" {
+    putTransform(out: out, transform: inverseMultiply(left: firstTransform, right: secondTransform))
+  } else if name is "b3InvertTransform" {
+    putTransform(out: out, transform: invert(transform: firstTransform))
+  } else if name is "b3TransformPoint" {
+    putVec(
+      out: out
+      vector: transformPoint(transform: firstTransform, point: vecAt(values: input, index: 7))
+    )
+  } else if name is "b3InvTransformPoint" {
+    putVec(
+      out: out
+      vector: inverseTransformPoint(
+        transform: firstTransform
+        point: vecAt(values: input, index: 7)
+      )
+    )
+  } else if name is "b3MulWorldTransforms" {
+    putTransform(out: out, transform: multiplyWorld(left: firstTransform, right: secondTransform))
+  } else if name is "b3InvMulWorldTransforms" {
+    putTransform(
+      out: out
+      transform: inverseMultiplyWorld(left: firstTransform, right: secondTransform)
+    )
+  } else if name is "b3TransformWorldPoint" {
+    putVec(
+      out: out
+      vector: transformWorldPoint(transform: firstTransform, point: vecAt(values: input, index: 7))
+    )
+  } else if name is "b3InvTransformWorldPoint" {
+    putVec(
+      out: out
+      vector: inverseTransformWorldPoint(
+        transform: firstTransform
+        position: vecAt(values: input, index: 7)
+      )
+    )
+  } else if name is "b3ToRelativeTransform" {
+    putTransform(
+      out: out
+      transform: toRelativeTransform(
+        transform: firstTransform
+        base: vecAt(values: input, index: 7)
+      )
+    )
+  } else if name is "b3LerpPosition" {
+    putVec(
+      out: out
+      vector: lerpPosition(
+        from: vecAt(values: input, index: 0)
+        to: vecAt(values: input, index: 3)
+        alpha: at(values: input, index: 6)
+      )
+    )
+  } else if name is "b3SubPos" {
+    putVec(
+      out: out
+      vector: subtractPositions(
+        left: vecAt(values: input, index: 0)
+        right: vecAt(values: input, index: 3)
+      )
+    )
+  } else if name is "b3OffsetPos" {
+    putVec(
+      out: out
+      vector: offsetPosition(
+        position: vecAt(values: input, index: 0)
+        delta: vecAt(values: input, index: 3)
+      )
+    )
+  } else if name is "b3MulMV" {
+    putVec(out: out, vector: multiply(matrix: firstMatrix, vector: vecAt(values: input, index: 9)))
+  } else if name is "b3MulMM" {
+    putMatrix(out: out, matrix: multiply(left: firstMatrix, right: secondMatrix))
+  } else if name is "b3Transpose" {
+    putMatrix(out: out, matrix: transpose(matrix: firstMatrix))
+  } else if name is "b3Det" {
+    putFloat(out: out, value: determinant(matrix: firstMatrix))
+  } else if name is "b3InvertMatrix" {
+    putMatrix(out: out, matrix: invert(matrix: firstMatrix))
+  } else if name is "b3Steiner" {
+    putMatrix(
+      out: out
+      matrix: steiner(mass: at(values: input, index: 0), origin: vecAt(values: input, index: 1))
+    )
+  } else if name is "b3NegateMat3" {
+    putMatrix(out: out, matrix: negate(matrix: firstMatrix))
+  } else if name is "b3AddMM" {
+    putMatrix(out: out, matrix: add(left: firstMatrix, right: secondMatrix))
+  } else if name is "b3SubMM" {
+    putMatrix(out: out, matrix: subtract(left: firstMatrix, right: secondMatrix))
+  } else if name is "b3MulSM" {
+    putMatrix(
+      out: out
+      matrix: scale(scale: at(values: input, index: 0), matrix: matrixAt(values: input, index: 1))
+    )
+  } else if name is "b3Solve3" {
+    putVec(out: out, vector: solve3(matrix: firstMatrix, vector: vecAt(values: input, index: 9)))
+  } else if name is "b3InvertT" {
+    putMatrix(out: out, matrix: invertTransposed(matrix: firstMatrix))
+  } else if name is "b3AbsMatrix3" {
+    putMatrix(out: out, matrix: abs(matrix: firstMatrix))
+  } else if name is "b3MakeMatrixFromQuat" {
+    putMatrix(out: out, matrix: matrixFromQuat(quat: firstQuat))
+  } else if name is "b3MakeDiagonalMatrix" {
+    putMatrix(
+      out: out
+      matrix: diagonalMatrix(
+        x: at(values: input, index: 0)
+        y: at(values: input, index: 1)
+        z: at(values: input, index: 2)
+      )
+    )
+  } else if name is "b3Skew" {
+    putMatrix(out: out, matrix: skew(vector: vecAt(values: input, index: 0)))
+  } else if name is "b3SphereInertia" {
+    putMatrix(
+      out: out
+      matrix: sphereInertia(mass: at(values: input, index: 0), radius: at(values: input, index: 1))
+    )
+  } else if name is "b3CylinderInertia" {
+    putMatrix(
+      out: out
+      matrix: cylinderInertia(
+        mass: at(values: input, index: 0)
+        radius: at(values: input, index: 1)
+        height: at(values: input, index: 2)
+      )
+    )
+  } else if name is "b3BoxInertia" {
+    putMatrix(
+      out: out
+      matrix: boxInertia(
+        mass: at(values: input, index: 0)
+        lower: vecAt(values: input, index: 1)
+        upper: vecAt(values: input, index: 4)
+      )
+    )
+  } else if name is "b3RotateInertia" {
+    putMatrix(
+      out: out
+      matrix: rotateInertia(quat: firstQuat, centralInertia: matrixAt(values: input, index: 4))
+    )
+  } else if name is "b3TransformInertia" {
+    putMatrix(
+      out: out
+      matrix: transformInertia(
+        transform: firstTransform
+        centralInertia: matrixAt(values: input, index: 7)
+        mass: at(values: input, index: 16)
+      )
+    )
+  } else {
+    ret false
+  }
+  ret true
+}
+
+# Boxes, segments, planes, 2D and validity.
+func evaluateGeometry(name: view String, input: view List(Float), out: mod List(Float)) ret Bool {
+  let box: Aabb = boxAt(values: input, index: 0)
+  let other: Aabb = boxAt(values: input, index: 6)
+  let firstVec2: Vec2 = vec2At(values: input, index: 0)
+  let secondVec2: Vec2 = vec2At(values: input, index: 2)
+  if name is "b3MakeAABB" {
+    let points: List(Vec3) = List.create(Vec3, cap: 5)
+    loop var j: Int = 0, j < 5, ++j {
+      points.add(value: vecAt(values: input, index: j * 3))
+    }
+    putBox(out: out, box: makeAabb(points: points, count: 5, radius: at(values: input, index: 15)))
+  } else if name is "b3AABB_Contains" {
+    putBool(out: out, value: contains(outer: box, inner: other))
+  } else if name is "b3AABB_Area" {
+    putFloat(out: out, value: area(box: box))
+  } else if name is "b3AABB_Center" {
+    putVec(out: out, vector: center(box: box))
+  } else if name is "b3AABB_Extents" {
+    putVec(out: out, vector: extents(box: box))
+  } else if name is "b3AABB_Union" {
+    putBox(out: out, box: union(first: box, second: other))
+  } else if name is "b3AABB_Inflate" {
+    putBox(out: out, box: inflate(box: box, extension: at(values: input, index: 6)))
+  } else if name is "b3AABB_Overlaps" {
+    putBool(out: out, value: overlaps(first: box, second: other))
+  } else if name is "b3AABB_Transform" {
+    putBox(
+      out: out
+      box: transformAabb(
+        transform: transformAt(values: input, index: 0)
+        box: boxAt(values: input, index: 7)
+      )
+    )
+  } else if name is "b3ClosestPointToAABB" {
+    putVec(
+      out: out
+      vector: closestPointToAabb(
+        point: vecAt(values: input, index: 0)
+        box: boxAt(values: input, index: 3)
+      )
+    )
+  } else if name is "b3AABB_AddPoint" {
+    putBox(out: out, box: addPoint(box: box, point: vecAt(values: input, index: 6)))
+  } else if name is "b3OffsetAABB" {
+    putBox(out: out, box: offsetAabb(localBox: box, origin: vecAt(values: input, index: 6)))
+  } else if name is "b3PointToSegmentDistance" {
+    putVec(
+      out: out
+      vector: pointToSegmentDistance(
+        start: vecAt(values: input, index: 0)
+        end: vecAt(values: input, index: 3)
+        point: vecAt(values: input, index: 6)
+      )
+    )
+  } else if name is "b3SegmentDistance" {
+    putSegment(
+      out: out
+      result: segmentDistance(
+        start1: vecAt(values: input, index: 0)
+        end1: vecAt(values: input, index: 3)
+        start2: vecAt(values: input, index: 6)
+        end2: vecAt(values: input, index: 9)
+      )
+    )
+  } else if name is "b3LineDistance" {
+    putSegment(
+      out: out
+      result: lineDistance(
+        point1: vecAt(values: input, index: 0)
+        direction1: vecAt(values: input, index: 3)
+        point2: vecAt(values: input, index: 6)
+        direction2: vecAt(values: input, index: 9)
+      )
+    )
+  } else if name is "b3IsWithinSegments" {
+    let result: SegmentDistanceResult = {
+      point1: zeroVector()
+      fraction1: at(values: input, index: 0)
+      point2: zeroVector()
+      fraction2: at(values: input, index: 1)
+    }
+    putBool(out: out, value: isWithinSegments(result: result))
+  } else if name is "b3NormalizePlane" {
+    putPlane(out: out, plane: normalizePlane(plane: planeAt(values: input, index: 0)))
+  } else if name is "b3MakePlaneFromNormalAndPoint" {
+    putPlane(
+      out: out
+      plane: planeFromNormalAndPoint(
+        normal: vecAt(values: input, index: 0)
+        point: vecAt(values: input, index: 3)
+      )
+    )
+  } else if name is "b3MakePlaneFromPoints" {
+    putPlane(
+      out: out
+      plane: planeFromPoints(
+        point1: vecAt(values: input, index: 0)
+        point2: vecAt(values: input, index: 3)
+        point3: vecAt(values: input, index: 6)
+      )
+    )
+  } else if name is "b3MakeNormalFromPoints" {
+    putVec(
+      out: out
+      vector: normalFromPoints(
+        point1: vecAt(values: input, index: 0)
+        point2: vecAt(values: input, index: 3)
+        point3: vecAt(values: input, index: 6)
+      )
+    )
+  } else if name is "b3TransformPlane" {
+    putPlane(
+      out: out
+      plane: transformPlane(
+        transform: transformAt(values: input, index: 0)
+        plane: planeAt(values: input, index: 7)
+      )
+    )
+  } else if name is "b3PlaneSeparation" {
+    putFloat(
+      out: out
+      value: planeSeparation(
+        plane: planeAt(values: input, index: 0)
+        point: vecAt(values: input, index: 4)
+      )
+    )
+  } else if name is "b3SignedVolume" {
+    putFloat(
+      out: out
+      value: signedVolume(
+        vertex1: vecAt(values: input, index: 0)
+        vertex2: vecAt(values: input, index: 3)
+        vertex3: vecAt(values: input, index: 6)
+        point: vecAt(values: input, index: 9)
+      )
+    )
+  } else if name is "b3Dot2" {
+    putFloat(out: out, value: dot(left: firstVec2, right: secondVec2))
+  } else if name is "b3Length2" {
+    putFloat(out: out, value: length(vector: firstVec2))
+  } else if name is "b3LengthSquared2" {
+    putFloat(out: out, value: lengthSquared(vector: firstVec2))
+  } else if name is "b3MinVec2" {
+    putVec2(out: out, vector: min(left: firstVec2, right: secondVec2))
+  } else if name is "b3MaxVec2" {
+    putVec2(out: out, vector: max(left: firstVec2, right: secondVec2))
+  } else if name is "b3Add2" {
+    putVec2(out: out, vector: add(left: firstVec2, right: secondVec2))
+  } else if name is "b3Sub2" {
+    putVec2(out: out, vector: subtract(left: firstVec2, right: secondVec2))
+  } else if name is "b3Neg2" {
+    putVec2(out: out, vector: negate(vector: firstVec2))
+  } else if name is "b3MulSV2" {
+    putVec2(
+      out: out
+      vector: scale(scale: at(values: input, index: 0), vector: vec2At(values: input, index: 1))
+    )
+  } else if name is "b3MulAdd2" {
+    putVec2(
+      out: out
+      vector: mulAdd(
+        base: firstVec2
+        scale: at(values: input, index: 2)
+        vector: vec2At(values: input, index: 3)
+      )
+    )
+  } else if name is "b3MulSub2" {
+    putVec2(
+      out: out
+      vector: mulSub(
+        base: firstVec2
+        scale: at(values: input, index: 2)
+        vector: vec2At(values: input, index: 3)
+      )
+    )
+  } else if name is "b3Cross2" {
+    putFloat(out: out, value: cross(left: firstVec2, right: secondVec2))
+  } else if name is "b3DistanceSquared2" {
+    putFloat(out: out, value: distanceSquared(from: firstVec2, to: secondVec2))
+  } else if name is "b3MulMV2" {
+    putVec2(
+      out: out
+      vector: multiply(
+        matrix: matrix2At(values: input, index: 0)
+        vector: vec2At(values: input, index: 4)
+      )
+    )
+  } else if name is "b3MulMM2" {
+    putMatrix2(
+      out: out
+      matrix: multiply(
+        left: matrix2At(values: input, index: 0)
+        right: matrix2At(values: input, index: 4)
+      )
+    )
+  } else if name is "b3Det2" {
+    putFloat(out: out, value: determinant(matrix: matrix2At(values: input, index: 0)))
+  } else if name is "b3Invert2" {
+    putMatrix2(out: out, matrix: invert(matrix: matrix2At(values: input, index: 0)))
+  } else if name is "b3Solve2" {
+    putVec2(
+      out: out
+      vector: solve2(
+        matrix: matrix2At(values: input, index: 0)
+        vector: vec2At(values: input, index: 4)
+      )
+    )
+  } else if name is "b3IsValidVec3" {
+    putBool(out: out, value: isValidVec3(vector: vecAt(values: input, index: 0)))
+  } else if name is "b3IsValidQuat" {
+    putBool(out: out, value: isValidQuat(quat: quatAt(values: input, index: 0)))
+  } else if name is "b3IsValidTransform" {
+    putBool(out: out, value: isValidTransform(transform: transformAt(values: input, index: 0)))
+  } else if name is "b3IsValidMatrix3" {
+    putBool(out: out, value: isValidMatrix3(matrix: matrixAt(values: input, index: 0)))
+  } else if name is "b3IsValidAABB" {
+    putBool(out: out, value: isValidAabb(box: box))
+  } else if name is "b3IsBoundedAABB" {
+    putBool(out: out, value: isBoundedAabb(box: box, lengthUnitsPerMeter: 1.0))
+  } else if name is "b3IsSaneAABB" {
+    putBool(out: out, value: isSaneAabb(box: box, lengthUnitsPerMeter: 1.0))
+  } else if name is "b3IsValidPlane" {
+    putBool(out: out, value: isValidPlane(plane: planeAt(values: input, index: 0)))
+  } else if name is "b3IsValidPosition" {
+    putBool(out: out, value: isValidPosition(position: vecAt(values: input, index: 0)))
+  } else if name is "b3IsValidWorldTransform" {
+    putBool(out: out, value: isValidWorldTransform(transform: transformAt(values: input, index: 0)))
+  } else {
+    ret false
+  }
+  ret true
+}
+
+# The same bits: NaN matches NaN, and a zero matches only a zero of its sign.
+func sameBits(actual: view Float, expected: view Float) ret Bool {
+  if actual is not actual {
+    ret expected is not expected
+  }
+  if actual is not expected {
+    ret false
+  }
+  if actual is 0.0 {
+    ret 1.0 / actual is 1.0 / expected
+  }
+  ret true
+}
+
+func readGolden() ret String {
+  # The runner runs from compiler/, the TSan gate from the case's folder.
+  let candidates: List(String) = {
+    "../tools/box3d-oracle/goldens/math.golden"
+    "../../../tools/box3d-oracle/goldens/math.golden"
+    "tools/box3d-oracle/goldens/math.golden"
+  }
+  loop var i: Int = 0, i < candidates.length, ++i {
+    if let text: String = readFile(path: candidates.copyAtDefault(index: i)) {
+      ret text
+    }
+  }
+  ret ""
+}
+
+func main() {
+  let golden: String = readGolden()
+  let lines: List(String) = golden.split(sep: "\n")
+  var calls: Int = 0
+  var mismatches: Int = 0
+  var unknown: Int = 0
+  let names: List(String) = List.create(String, cap: 160)
+  loop var i: Int = 0, i < lines.length, ++i {
+    let line: String = lines.copyAtDefault(index: i)
+    if line.length() is 0 or line.startsWith(prefix: "#") {
+      continue
+    }
+    let tokens: List(String) = line.split(sep: " ")
+    let name: String = tokens.copyAtDefault(index: 0)
+    let input: List(Float) = List.create(Float, cap: 24)
+    let expected: List(Float) = List.create(Float, cap: 16)
+    var afterArrow: Bool = false
+    loop var j: Int = 1, j < tokens.length, ++j {
+      let token: String = tokens.copyAtDefault(index: j)
+      if token is "->" {
+        afterArrow = true
+      } else if afterArrow {
+        expected.add(value: token.toFloat())
+      } else {
+        input.add(value: token.toFloat())
+      }
+    }
+    let actual: List(Float) = List.create(Float, cap: 16)
+    let known: Bool = evaluateVectors(name: name, input: input, out: actual) or evaluateRotations(
+      name: name
+      input: input
+      out: actual
+    ) or evaluateGeometry(name: name, input: input, out: actual)
+    if known is false {
+      unknown = unknown + 1
+      log("not ported: {name}")
+      continue
+    }
+    calls = calls + 1
+    if names.contains(value: name) is false {
+      names.add(value: name)
+    }
+    var same: Bool = actual.length is expected.length
+    loop var j: Int = 0, j < expected.length and same, ++j {
+      same = sameBits(
+        actual: actual.copyAtDefault(index: j)
+        expected: expected.copyAtDefault(index: j)
+      )
+    }
+    if same is false {
+      mismatches = mismatches + 1
+      if mismatches <= 10 {
+        log("MISMATCH line {i + 1}: {line}")
+        var got: String = "  got"
+        loop var j: Int = 0, j < actual.length, ++j {
+          got = "{got} {actual.copyAtDefault(index: j)}"
+        }
+        log(got)
+      }
+    }
+  }
+  log(
+    "math.golden: {calls} calls of {names.length} Box3D functions, {mismatches} not bit-exact, {unknown} not ported"
+  )
+}

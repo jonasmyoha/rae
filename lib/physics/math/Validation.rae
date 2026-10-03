@@ -1,0 +1,90 @@
+# Box3D's validity checks (b3IsValid* of math_functions.c at 9f998c8): no NaN,
+# no infinity, unit quaternions and planes, ordered boxes. Called from tests
+# and debug checks, never in the step (docs/physics-rae-port-design.md §3).
+open Vec3
+open Quat
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/QuatMath
+open physics/math/MatrixMath
+open physics/math/TransformMath
+open physics/math/AabbMath
+open physics/math/PlaneMath
+open physics/Constants
+
+func isValidVec3(vector: view Vec3) ret Bool {
+  ret isValidFloat(value: vector.x) and isValidFloat(value: vector.y) and isValidFloat(
+    value: vector.z
+  )
+}
+
+func isValidQuat(quat: view Quat) ret Bool {
+  if isValidFloat(value: quat.x) is false or isValidFloat(value: quat.y) is false {
+    ret false
+  }
+  if isValidFloat(value: quat.z) is false or isValidFloat(value: quat.w) is false {
+    ret false
+  }
+  ret isNormalized(quat: quat)
+}
+
+func isValidTransform(transform: view Transform) ret Bool {
+  ret isValidVec3(vector: transform.position) and isValidQuat(quat: transform.rotation)
+}
+
+func isValidMatrix3(matrix: view Matrix3) ret Bool {
+  ret isValidVec3(vector: matrix.columnX) and isValidVec3(vector: matrix.columnY) and isValidVec3(
+    vector: matrix.columnZ
+  )
+}
+
+func isValidAabb(box: view Aabb) ret Bool {
+  if isValidVec3(vector: box.lowerBound) is false or isValidVec3(vector: box.upperBound) is false {
+    ret false
+  }
+  if box.lowerBound.x > box.upperBound.x or box.lowerBound.y > box.upperBound.y {
+    ret false
+  }
+  if box.lowerBound.z > box.upperBound.z {
+    ret false
+  }
+  ret true
+}
+
+# b3IsBoundedAABB: within B3_HUGE (Constants.huge) of the origin.
+func isBoundedAabb(box: view Aabb, lengthUnitsPerMeter: view Float) ret Bool {
+  let hugeBound: Float = huge(lengthUnitsPerMeter: lengthUnitsPerMeter)
+  if box.lowerBound.x < -hugeBound or box.lowerBound.y < -hugeBound or box.lowerBound.z < -hugeBound {
+    ret false
+  }
+  if box.upperBound.x > hugeBound or box.upperBound.y > hugeBound or box.upperBound.z > hugeBound {
+    ret false
+  }
+  ret true
+}
+
+# b3IsSaneAABB: valid and bounded.
+func isSaneAabb(box: view Aabb, lengthUnitsPerMeter: view Float) ret Bool {
+  if isValidAabb(box: box) is false {
+    ret false
+  }
+  ret isBoundedAabb(box: box, lengthUnitsPerMeter: lengthUnitsPerMeter)
+}
+
+func isValidPlane(plane: view Plane) ret Bool {
+  if isValidVec3(vector: plane.normal) is false {
+    ret false
+  }
+  if isNormalized(vector: plane.normal) is false {
+    ret false
+  }
+  ret isValidFloat(value: plane.offset)
+}
+
+func isValidPosition(position: view Pos) ret Bool {
+  ret isValidVec3(vector: position)
+}
+
+func isValidWorldTransform(transform: view WorldTransform) ret Bool {
+  ret isValidPosition(position: transform.position) and isValidQuat(quat: transform.rotation)
+}

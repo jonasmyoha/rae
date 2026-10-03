@@ -1,0 +1,208 @@
+# Box3D's scalar math (include/box3d/math_functions.h, src/math_functions.c,
+# src/math_internal.h at commit 9f998c8), ported to Rae for the physics engine
+# (docs/physics-rae-port-design.md §3). Every function performs Box3D's float
+# operations in Box3D's order, so its results equal the C build's bit for bit;
+# tests/cases/948_physics_math checks each against the oracle golden
+# (tools/box3d-oracle/goldens/math.golden). Float is f32, like Box3D's float.
+#
+# The trigonometry here is Box3D's own, hand-written for cross-platform
+# determinism; the physics step never calls the C library's sin/cos/atan2.
+import Math
+
+# The float limits Box3D takes from <float.h>: FLT_MIN (the smallest normal
+# float), FLT_EPSILON (2^-23) and FLT_MAX, written out in full because Rae
+# float literals have no exponent.
+const floatMin: Float = 0.0000000000000000000000000000000000000117549435082228750797
+
+const floatEpsilon: Float = 0.00000011920928955078125
+
+const floatMax: Float = 340282346638528859811704183484516925440.0
+
+const pi: Float = 3.14159265359
+
+const twoPi: Float = 6.283185307
+
+const piOverTwo: Float = 1.570796327
+
+const piOverFour: Float = 0.785398163
+
+const squareRootOfThree: Float = 1.732050808
+
+const degreesToRadians: Float = 0.01745329251
+
+const radiansToDegrees: Float = 57.2957795131
+
+const minScale: Float = 0.01
+
+# A cosine and sine pair (b3CosSin).
+type CosSin {
+  cosine: Float
+  sine: Float
+}
+
+func minInt(left: view Int, right: view Int) ret Int {
+  if left < right {
+    ret left
+  }
+  ret right
+}
+
+func maxInt(left: view Int, right: view Int) ret Int {
+  if left > right {
+    ret left
+  }
+  ret right
+}
+
+func clampInt(value: view Int, lower: view Int, upper: view Int) ret Int {
+  if value < lower {
+    ret lower
+  }
+  if upper < value {
+    ret upper
+  }
+  ret value
+}
+
+func absFloat(value: view Float) ret Float {
+  if value < 0.0 {
+    ret -value
+  }
+  ret value
+}
+
+func minFloat(left: view Float, right: view Float) ret Float {
+  if left < right {
+    ret left
+  }
+  ret right
+}
+
+func maxFloat(left: view Float, right: view Float) ret Float {
+  if left > right {
+    ret left
+  }
+  ret right
+}
+
+func clampFloat(value: view Float, lower: view Float, upper: view Float) ret Float {
+  if value < lower {
+    ret lower
+  }
+  if upper < value {
+    ret upper
+  }
+  ret value
+}
+
+func lerpFloat(from: view Float, to: view Float, alpha: view Float) ret Float {
+  ret (1.0 - alpha) * from + alpha * to
+}
+
+# b3Atan2: an arctangent in [-pi, pi], accurate to about 0.0023 degrees, the
+# same on every platform (the C library's atan2f is not).
+func deterministicAtan2(y: view Float, x: view Float) ret Float {
+  # Added check for (0,0) to match atan2f and avoid NaN
+  if x is 0.0 and y is 0.0 {
+    ret 0.0
+  }
+  let absX: Float = absFloat(value: x)
+  let absY: Float = absFloat(value: y)
+  let largest: Float = maxFloat(left: absY, right: absX)
+  let smallest: Float = minFloat(left: absY, right: absX)
+  let ratio: Float = smallest / largest
+
+  # Minimax polynomial approximation to atan(ratio) on [0,1]
+  let ratioSquared: Float = ratio * ratio
+  let ratioCubed: Float = ratioSquared * ratio
+  let ratioFourth: Float = ratioSquared * ratioSquared
+  var result: Float = 0.024840285 * ratioFourth + 0.18681418
+  let term: Float = -0.094097948 * ratioFourth - 0.33213072
+  result = result * ratioSquared + term
+  result = result * ratioCubed + ratio
+
+  # Map to full circle
+  if absY > absX {
+    result = 1.57079637 - result
+  }
+  if x < 0.0 {
+    result = 3.14159274 - result
+  }
+  if y < 0.0 {
+    result = -result
+  }
+  ret result
+}
+
+# b3UnwindAngle: any angle into [-pi, pi].
+func unwindAngle(radians: view Float) ret Float {
+  ret remainder(x: radians, y: 2.0 * pi)
+}
+
+# b3ComputeCosSin: Bhaskara I's approximation, normalised so cosine^2 +
+# sine^2 = 1. Deterministic on every platform.
+func computeCosSin(radians: view Float) ret CosSin {
+  let angle: Float = unwindAngle(radians: radians)
+  let piSquared: Float = pi * pi
+
+  # cosine needs angle in [-pi/2, pi/2]
+  var cosine: Float = 0.0
+  if angle < -0.5 * pi {
+    let shifted: Float = angle + pi
+    let shiftedSquared: Float = shifted * shifted
+    cosine = -(piSquared - 4.0 * shiftedSquared) / (piSquared + shiftedSquared)
+  } else if angle > 0.5 * pi {
+    let shifted: Float = angle - pi
+    let shiftedSquared: Float = shifted * shifted
+    cosine = -(piSquared - 4.0 * shiftedSquared) / (piSquared + shiftedSquared)
+  } else {
+    let angleSquared: Float = angle * angle
+    cosine = (piSquared - 4.0 * angleSquared) / (piSquared + angleSquared)
+  }
+
+  # sine needs angle in [0, pi]
+  var sine: Float = 0.0
+  if angle < 0.0 {
+    let shifted: Float = angle + pi
+    sine = -16.0 * shifted * (pi - shifted) / (5.0 * piSquared - 4.0 * shifted * (pi - shifted))
+  } else {
+    sine = 16.0 * angle * (pi - angle) / (5.0 * piSquared - 4.0 * angle * (pi - angle))
+  }
+
+  let magnitude: Float = sqrt(x: sine * sine + cosine * cosine)
+  var inverseMagnitude: Float = 0.0
+  if magnitude > 0.0 {
+    inverseMagnitude = 1.0 / magnitude
+  }
+  ret CosSin { cosine: cosine * inverseMagnitude, sine: sine * inverseMagnitude }
+}
+
+# b3Sin / b3Cos (deprecated upstream): one half of computeCosSin.
+func deterministicSin(radians: view Float) ret Float {
+  ret computeCosSin(radians: radians).sine
+}
+
+func deterministicCos(radians: view Float) ret Float {
+  ret computeCosSin(radians: radians).cosine
+}
+
+# b3CeilingInt: numerator / denominator rounded up (denominator > 0).
+func ceilingInt(numerator: view Int, denominator: view Int) ret Int {
+  ret (numerator + denominator - 1) / denominator
+}
+
+# b3CeilingPow2: the same with denominator = 2^exponent.
+func ceilingPow2(numerator: view Int, denominator: view Int, exponent: view Int) ret Int {
+  ret (numerator + denominator - 1) shr exponent
+}
+
+# b3IsValidFloat: neither NaN nor infinite.
+func isValidFloat(value: view Float) ret Bool {
+  if value is not value {
+    ret false
+  }
+  if value > floatMax or value < -floatMax {
+    ret false
+  }
+  ret true
+}

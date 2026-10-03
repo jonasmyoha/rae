@@ -1,0 +1,287 @@
+# Box3D's 3x3 matrix math (b3Matrix3 functions of math_functions.h,
+# math_functions.c and math_internal.h at 9f998c8). A Matrix3 is three
+# columns, as in Box3D (`cx`, `cy`, `cz` there). Box3D's operation order is
+# kept exactly; checked bit for bit against the oracle in fixture 948.
+open Vec3
+open Quat
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/QuatMath
+
+type Matrix3 {
+  columnX: Vec3
+  columnY: Vec3
+  columnZ: Vec3
+}
+
+func matrixZero() ret Matrix3 {
+  ret Matrix3 { columnX: zeroVector(), columnY: zeroVector(), columnZ: zeroVector() }
+}
+
+func matrixIdentity() ret Matrix3 {
+  ret Matrix3 { columnX: axisX(), columnY: axisY(), columnZ: axisZ() }
+}
+
+# b3Det
+func determinant(matrix: view Matrix3) ret Float {
+  ret dot(left: matrix.columnX, right: cross(left: matrix.columnY, right: matrix.columnZ))
+}
+
+# b3MulMV: matrix * column vector
+func multiply(matrix: view Matrix3, vector: view Vec3) ret Vec3 {
+  ret Vec3 {
+    x: matrix.columnX.x * vector.x + matrix.columnY.x * vector.y + matrix.columnZ.x * vector.z
+    y: matrix.columnX.y * vector.x + matrix.columnY.y * vector.y + matrix.columnZ.y * vector.z
+    z: matrix.columnX.z * vector.x + matrix.columnY.z * vector.y + matrix.columnZ.z * vector.z
+  }
+}
+
+# b3NegateMat3
+func negate(matrix: view Matrix3) ret Matrix3 {
+  ret Matrix3 {
+    columnX: negate(vector: matrix.columnX)
+    columnY: negate(vector: matrix.columnY)
+    columnZ: negate(vector: matrix.columnZ)
+  }
+}
+
+# b3AddMM
+func add(left: view Matrix3, right: view Matrix3) ret Matrix3 {
+  ret Matrix3 {
+    columnX: add(left: left.columnX, right: right.columnX)
+    columnY: add(left: left.columnY, right: right.columnY)
+    columnZ: add(left: left.columnZ, right: right.columnZ)
+  }
+}
+
+# b3SubMM
+func subtract(left: view Matrix3, right: view Matrix3) ret Matrix3 {
+  ret Matrix3 {
+    columnX: subtract(left: left.columnX, right: right.columnX)
+    columnY: subtract(left: left.columnY, right: right.columnY)
+    columnZ: subtract(left: left.columnZ, right: right.columnZ)
+  }
+}
+
+# b3MulSM: component-wise scale * matrix
+func scale(scale: view Float, matrix: view Matrix3) ret Matrix3 {
+  ret Matrix3 {
+    columnX: scale(scale: scale, vector: matrix.columnX)
+    columnY: scale(scale: scale, vector: matrix.columnY)
+    columnZ: scale(scale: scale, vector: matrix.columnZ)
+  }
+}
+
+# b3MulMM
+func multiply(left: view Matrix3, right: view Matrix3) ret Matrix3 {
+  ret Matrix3 {
+    columnX: multiply(matrix: left, vector: right.columnX)
+    columnY: multiply(matrix: left, vector: right.columnY)
+    columnZ: multiply(matrix: left, vector: right.columnZ)
+  }
+}
+
+# b3Transpose
+func transpose(matrix: view Matrix3) ret Matrix3 {
+  ret Matrix3 {
+    columnX: Vec3 { x: matrix.columnX.x, y: matrix.columnY.x, z: matrix.columnZ.x }
+    columnY: Vec3 { x: matrix.columnX.y, y: matrix.columnY.y, z: matrix.columnZ.y }
+    columnZ: Vec3 { x: matrix.columnX.z, y: matrix.columnY.z, z: matrix.columnZ.z }
+  }
+}
+
+# b3InvertMatrix: the zero matrix if singular.
+func invert(matrix: view Matrix3) ret Matrix3 {
+  let matrixDeterminant: Float = determinant(matrix: matrix)
+  if absFloat(value: matrixDeterminant) > 1000.0 * floatMin {
+    let inverseDeterminant: Float = 1.0 / matrixDeterminant
+    let out: Matrix3 = {
+      columnX: scale(
+        scale: inverseDeterminant
+        vector: cross(left: matrix.columnY, right: matrix.columnZ)
+      )
+      columnY: scale(
+        scale: inverseDeterminant
+        vector: cross(left: matrix.columnZ, right: matrix.columnX)
+      )
+      columnZ: scale(
+        scale: inverseDeterminant
+        vector: cross(left: matrix.columnX, right: matrix.columnY)
+      )
+    }
+    ret transpose(matrix: out)
+  }
+  ret matrixZero()
+}
+
+# b3Solve3: inverse(matrix) * vector, the zero vector if singular.
+func solve3(matrix: view Matrix3, vector: view Vec3) ret Vec3 {
+  let matrixDeterminant: Float = determinant(matrix: matrix)
+  if absFloat(value: matrixDeterminant) > 1000.0 * floatMin {
+    let inverseDeterminant: Float = 1.0 / matrixDeterminant
+    let rowX: Vec3 = cross(left: matrix.columnY, right: matrix.columnZ)
+    let rowY: Vec3 = cross(left: matrix.columnZ, right: matrix.columnX)
+    let rowZ: Vec3 = cross(left: matrix.columnX, right: matrix.columnY)
+    ret Vec3 {
+      x: inverseDeterminant * dot(left: rowX, right: vector)
+      y: inverseDeterminant * dot(left: rowY, right: vector)
+      z: inverseDeterminant * dot(left: rowZ, right: vector)
+    }
+  }
+  ret zeroVector()
+}
+
+# b3InvertT: the transposed inverse (the zero matrix if singular).
+func invertTransposed(matrix: view Matrix3) ret Matrix3 {
+  let matrixDeterminant: Float = determinant(matrix: matrix)
+  if absFloat(value: matrixDeterminant) > 1000.0 * floatMin {
+    let inverseDeterminant: Float = 1.0 / matrixDeterminant
+    ret Matrix3 {
+      columnX: scale(
+        scale: inverseDeterminant
+        vector: cross(left: matrix.columnY, right: matrix.columnZ)
+      )
+      columnY: scale(
+        scale: inverseDeterminant
+        vector: cross(left: matrix.columnZ, right: matrix.columnX)
+      )
+      columnZ: scale(
+        scale: inverseDeterminant
+        vector: cross(left: matrix.columnX, right: matrix.columnY)
+      )
+    }
+  }
+  ret matrixZero()
+}
+
+# b3AbsMatrix3: component-wise.
+func abs(matrix: view Matrix3) ret Matrix3 {
+  ret Matrix3 {
+    columnX: abs(vector: matrix.columnX)
+    columnY: abs(vector: matrix.columnY)
+    columnZ: abs(vector: matrix.columnZ)
+  }
+}
+
+# b3MakeMatrixFromQuat: the rotation matrix of a unit quaternion.
+func matrixFromQuat(quat: view Quat) ret Matrix3 {
+  let xx: Float = quat.x * quat.x
+  let yy: Float = quat.y * quat.y
+  let zz: Float = quat.z * quat.z
+  let xy: Float = quat.x * quat.y
+  let xz: Float = quat.x * quat.z
+  let xw: Float = quat.x * quat.w
+  let yz: Float = quat.y * quat.z
+  let yw: Float = quat.y * quat.w
+  let zw: Float = quat.z * quat.w
+  ret Matrix3 {
+    columnX: Vec3 { x: 1.0 - 2.0 * (yy + zz), y: 2.0 * (xy + zw), z: 2.0 * (xz - yw) }
+    columnY: Vec3 { x: 2.0 * (xy - zw), y: 1.0 - 2.0 * (xx + zz), z: 2.0 * (yz + xw) }
+    columnZ: Vec3 { x: 2.0 * (xz + yw), y: 2.0 * (yz - xw), z: 1.0 - 2.0 * (xx + yy) }
+  }
+}
+
+# b3MakeQuatFromMatrix: the unit quaternion of a rotation matrix.
+func quatFromMatrix(matrix: view Matrix3) ret Quat {
+  let column1: Vec3 = matrix.columnX
+  let column2: Vec3 = matrix.columnY
+  let column3: Vec3 = matrix.columnZ
+  var quat: Quat = quatIdentity()
+  let trace: Float = matrix.columnX.x + matrix.columnY.y + matrix.columnZ.z
+  if trace >= 0.0 {
+    quat = Quat {
+      x: column2.z - column3.y
+      y: column3.x - column1.z
+      z: column1.y - column2.x
+      w: trace + 1.0
+    }
+  } else if column1.x > column2.y and column1.x > column3.z {
+    quat = Quat {
+      x: column1.x - column2.y - column3.z + 1.0
+      y: column2.x + column1.y
+      z: column3.x + column1.z
+      w: column2.z - column3.y
+    }
+  } else if column2.y > column3.z {
+    quat = Quat {
+      x: column1.y + column2.x
+      y: column2.y - column3.z - column1.x + 1.0
+      z: column3.y + column2.z
+      w: column3.x - column1.z
+    }
+  } else {
+    quat = Quat {
+      x: column1.z + column3.x
+      y: column2.z + column3.y
+      z: column3.z - column1.x - column2.y + 1.0
+      w: column1.y - column2.x
+    }
+  }
+  # The algorithm is simplified and made more accurate by normalizing at the end
+  ret normalize(quat: quat)
+}
+
+# b3MakeDiagonalMatrix
+func diagonalMatrix(x: view Float, y: view Float, z: view Float) ret Matrix3 {
+  ret Matrix3 {
+    columnX: Vec3 { x: x, y: 0.0, z: 0.0 }
+    columnY: Vec3 { x: 0.0, y: y, z: 0.0 }
+    columnZ: Vec3 { x: 0.0, y: 0.0, z: z }
+  }
+}
+
+# b3Skew: the cross-product matrix of `vector`.
+func skew(vector: view Vec3) ret Matrix3 {
+  ret Matrix3 {
+    columnX: Vec3 { x: 0.0, y: vector.z, z: -vector.y }
+    columnY: Vec3 { x: -vector.z, y: 0.0, z: vector.x }
+    columnZ: Vec3 { x: vector.y, y: -vector.x, z: 0.0 }
+  }
+}
+
+# b3Steiner: the inertia of a point mass at `origin` (parallel axis theorem).
+func steiner(mass: view Float, origin: view Vec3) ret Matrix3 {
+  # Usage: Io = Ic + Is and Ic = Io - Is
+  let ixx: Float = mass * (origin.y * origin.y + origin.z * origin.z)
+  let iyy: Float = mass * (origin.x * origin.x + origin.z * origin.z)
+  let izz: Float = mass * (origin.x * origin.x + origin.y * origin.y)
+  let ixy: Float = -mass * origin.x * origin.y
+  let ixz: Float = -mass * origin.x * origin.z
+  let iyz: Float = -mass * origin.y * origin.z
+  ret Matrix3 {
+    columnX: Vec3 { x: ixx, y: ixy, z: ixz }
+    columnY: Vec3 { x: ixy, y: iyy, z: iyz }
+    columnZ: Vec3 { x: ixz, y: iyz, z: izz }
+  }
+}
+
+# b3SphereInertia
+func sphereInertia(mass: view Float, radius: view Float) ret Matrix3 {
+  let inertia: Float = 0.4 * mass * radius * radius
+  ret diagonalMatrix(x: inertia, y: inertia, z: inertia)
+}
+
+# b3CylinderInertia (axis along y)
+func cylinderInertia(mass: view Float, radius: view Float, height: view Float) ret Matrix3 {
+  let ixx: Float = mass * (3.0 * radius * radius + height * height) / 12.0
+  let iyy: Float = 0.5 * mass * radius * radius
+  ret diagonalMatrix(x: ixx, y: iyy, z: ixx)
+}
+
+# b3BoxInertia
+func boxInertia(mass: view Float, lower: view Vec3, upper: view Vec3) ret Matrix3 {
+  let delta: Vec3 = subtract(left: upper, right: lower)
+  let ixx: Float = mass * (delta.y * delta.y + delta.z * delta.z) / 12.0
+  let iyy: Float = mass * (delta.x * delta.x + delta.z * delta.z) / 12.0
+  let izz: Float = mass * (delta.x * delta.x + delta.y * delta.y) / 12.0
+  ret diagonalMatrix(x: ixx, y: iyy, z: izz)
+}
+
+# b3RotateInertia: R * I * R^T
+func rotateInertia(quat: view Quat, centralInertia: view Matrix3) ret Matrix3 {
+  let rotation: Matrix3 = matrixFromQuat(quat: quat)
+  ret multiply(
+    left: rotation
+    right: multiply(left: centralInertia, right: transpose(matrix: rotation))
+  )
+}
