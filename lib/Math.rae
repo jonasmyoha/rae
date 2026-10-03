@@ -81,6 +81,16 @@ func sqrt(x: copy Float) ret Float {
   }
 }
 
+func nativeRemainder(x: Float, y: Float) unsafe extern("rae_ext_Math_remainder") ret Float
+
+# The IEEE remainder of x / y: x - n * y, n the integer nearest x / y (C's
+# remainderf). Exact, so the same on every platform.
+func remainder(x: copy Float, y: copy Float) ret Float {
+  unsafe {
+    ret nativeRemainder(x: x, y: y)
+  }
+}
+
 func nativePow(base: Float, exp: Float) unsafe extern("rae_ext_Math_pow") ret Float
 
 func pow(base: copy Float, exp: copy Float) ret Float {

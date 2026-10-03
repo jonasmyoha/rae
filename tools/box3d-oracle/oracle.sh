@@ -52,7 +52,7 @@ fi
 for driver in "${DRIVERS[@]}"; do
   exe="$BUILD/oracle-$driver"
   cc -std=c17 -O2 -DNDEBUG -ffp-contract=off -DBOX3D_DISABLE_SIMD \
-    -DBOX3D_ORACLE_COMMIT="\"$BOX3D_COMMIT\"" -I"$SRC/include" \
+    -DBOX3D_ORACLE_COMMIT="\"$BOX3D_COMMIT\"" -I"$SRC/include" -I"$SRC/src" \
     "$HERE/drivers/$driver.c" "$LIB" -lm -lpthread -o "$exe"
   "$exe" > "$HERE/goldens/$driver.golden"
   echo "box3d-oracle: $driver -> tools/box3d-oracle/goldens/$driver.golden ($(wc -l < "$HERE/goldens/$driver.golden" | tr -d ' ') lines)"

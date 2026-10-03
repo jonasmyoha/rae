@@ -245,7 +245,15 @@ C added.
   `Int32`) as an inline intrinsic; the oracle tooling (`tools/box3d-oracle/`)
   with its first golden (the math module); the measurement of checked access
   on solver-sized structs (§6: no unchecked view needed).
-- **P1 — math.** The math layer, bit-exact against the oracle.
+- **P1 — math (done 2026-10-03).** The math layer, bit-exact against the
+  oracle: `lib/physics/math/` (scalars, vectors, quaternions, matrices and
+  inertia, transforms, AABBs, segments, planes, 2D) and `lib/physics/Constants.rae`;
+  the golden grew to every math function (154, 4 944 calls) and fixture 948
+  matches all of them bit for bit. Two compiler/stdlib pieces came with it: a
+  float literal in a `Float` (f32) expression is now emitted as an f32 literal
+  (`0.5f`), so `0.5 * x` is single-precision arithmetic as in C, not a double
+  round trip; and `remainder(x:y:)` in lib/Math (libm `remainderf`, what
+  `b3UnwindAngle` calls). Name mapping: `lib/physics/README.md`.
 - **P2 — convex geometry and narrow phase.** AABB, sphere, capsule, hull
   (quickhull), GJK distance and shape cast, manifolds for convex pairs.
 - **P3 — broad phase.** Dynamic tree (insert, remove, rebuild, queries,

@@ -1,0 +1,217 @@
+# Box3D's quaternion math (b3Quat functions of math_functions.h,
+# math_functions.c and math_internal.h at 9f998c8) over lib/Quat's Quat. Box3D
+# writes a quaternion as { v: b3Vec3, s: float }; lib/Quat has the same layout
+# as { x, y, z, w }, so `q.v` is (x, y, z) and `q.s` is w. Box3D's operation
+# order is kept exactly; checked bit for bit against the oracle in fixture
+# 948. conjugate (b3Conjugate) is lib/Quat's own: the same three negations.
+open Vec3
+open Quat
+open Math
+open physics/math/Scalar
+open physics/math/VectorMath
+
+# The vector part (q.v).
+func quatVector(quat: view Quat) ret Vec3 {
+  ret Vec3 { x: quat.x, y: quat.y, z: quat.z }
+}
+
+func quatFromParts(vector: view Vec3, scalar: view Float) ret Quat {
+  ret Quat { x: vector.x, y: vector.y, z: vector.z, w: scalar }
+}
+
+func quatIdentity() ret Quat {
+  ret Quat { x: 0.0, y: 0.0, z: 0.0, w: 1.0 }
+}
+
+# b3IsNormalizedQuat
+func isNormalized(quat: view Quat) ret Bool {
+  let squared: Float = quat.x * quat.x + quat.y * quat.y + quat.z * quat.z + quat.w * quat.w
+  ret 1.0 - 20.0 * floatEpsilon < squared and squared < 1.0 + 20.0 * floatEpsilon
+}
+
+# b3RotateVector: v + 2 * cross(q.v, cross(q.v, v) + q.s * v)
+func rotateVector(quat: view Quat, vector: view Vec3) ret Vec3 {
+  let axis: Vec3 = quatVector(quat: quat)
+  let first: Vec3 = cross(left: axis, right: vector)
+  let second: Vec3 = mulAdd(base: first, scale: quat.w, vector: vector)
+  let third: Vec3 = cross(left: axis, right: second)
+  ret mulAdd(base: vector, scale: 2.0, vector: third)
+}
+
+# b3InvRotateVector: v + 2 * cross(q.v, cross(q.v, v) - q.s * v)
+func inverseRotateVector(quat: view Quat, vector: view Vec3) ret Vec3 {
+  let axis: Vec3 = quatVector(quat: quat)
+  let first: Vec3 = cross(left: axis, right: vector)
+  let second: Vec3 = mulSub(base: first, scale: quat.w, vector: vector)
+  let third: Vec3 = cross(left: axis, right: second)
+  ret mulAdd(base: vector, scale: 2.0, vector: third)
+}
+
+# b3DotQuat
+func dot(left: view Quat, right: view Quat) ret Float {
+  ret left.x * right.x + left.y * right.y + left.z * right.z + left.w * right.w
+}
+
+# b3MulQuat
+func multiply(left: view Quat, right: view Quat) ret Quat {
+  let first: Vec3 = cross(left: quatVector(quat: left), right: quatVector(quat: right))
+  let second: Vec3 = mulAdd(base: first, scale: left.w, vector: quatVector(quat: right))
+  let third: Vec3 = mulAdd(base: second, scale: right.w, vector: quatVector(quat: left))
+  ret quatFromParts(
+    vector: third
+    scalar: left.w * right.w - dot(left: quatVector(quat: left), right: quatVector(quat: right))
+  )
+}
+
+# b3InvMulQuat: inverse(left) * right
+func inverseMultiply(left: view Quat, right: view Quat) ret Quat {
+  let first: Vec3 = cross(left: quatVector(quat: right), right: quatVector(quat: left))
+  let second: Vec3 = mulAdd(base: first, scale: left.w, vector: quatVector(quat: right))
+  let third: Vec3 = mulSub(base: second, scale: right.w, vector: quatVector(quat: left))
+  ret quatFromParts(
+    vector: third
+    scalar: left.w * right.w + dot(left: quatVector(quat: left), right: quatVector(quat: right))
+  )
+}
+
+# b3NegateQuat
+func negate(quat: view Quat) ret Quat {
+  ret Quat { x: -quat.x, y: -quat.y, z: -quat.z, w: -quat.w }
+}
+
+# b3NormalizeQuat: the identity if the input is very small.
+func normalize(quat: view Quat) ret Quat {
+  let squaredLength: Float = dot(left: quat, right: quat)
+  if squaredLength > 1000.0 * floatMin {
+    let inverseLength: Float = 1.0 / sqrt(x: squaredLength)
+    ret Quat {
+      x: inverseLength * quat.x
+      y: inverseLength * quat.y
+      z: inverseLength * quat.z
+      w: inverseLength * quat.w
+    }
+  }
+  ret quatIdentity()
+}
+
+# b3MakeQuatFromAxisAngle (axis a unit vector)
+func quatFromAxisAngle(axis: view Vec3, radians: view Float) ret Quat {
+  let cosSin: CosSin = computeCosSin(radians: 0.5 * radians)
+  ret Quat {
+    x: cosSin.sine * axis.x
+    y: cosSin.sine * axis.y
+    z: cosSin.sine * axis.z
+    w: cosSin.cosine
+  }
+}
+
+# b3GetAxisAngle: the axis, and the angle in `radians` (quat normalized).
+func axisAngle(radians: mod Float, quat: view Quat) ret Vec3 {
+  let vectorLength: Float = sqrt(x: quat.x * quat.x + quat.y * quat.y + quat.z * quat.z)
+  radians = 2.0 * deterministicAtan2(y: vectorLength, x: quat.w)
+  if vectorLength > 0.0 {
+    let inverseLength: Float = 1.0 / vectorLength
+    ret Vec3 { x: inverseLength * quat.x, y: inverseLength * quat.y, z: inverseLength * quat.z }
+  }
+  ret zeroVector()
+}
+
+# b3GetQuatAngle
+func quatAngle(quat: view Quat) ret Float {
+  let vectorLength: Float = sqrt(x: quat.x * quat.x + quat.y * quat.y + quat.z * quat.z)
+  ret 2.0 * deterministicAtan2(y: vectorLength, x: quat.w)
+}
+
+# b3GetTwistAngle: twist around the z-axis (revolute and twist limits).
+func twistAngle(quat: view Quat) ret Float {
+  # Account for polarity to keep the twist angle in range.
+  var twist: Float = 0.0
+  if quat.w < 0.0 {
+    twist = deterministicAtan2(y: -quat.z, x: -quat.w)
+  } else {
+    twist = deterministicAtan2(y: quat.z, x: quat.w)
+  }
+  twist = twist * 2.0
+  ret twist
+}
+
+# b3GetSwingAngle: the angle a cone limit sees.
+func swingAngle(quat: view Quat) ret Float {
+  # Polarity should not matter because all terms are squared.
+  let along: Float = sqrt(x: quat.z * quat.z + quat.w * quat.w)
+  let across: Float = sqrt(x: quat.x * quat.x + quat.y * quat.y)
+  ret 2.0 * deterministicAtan2(y: across, x: along)
+}
+
+# b3NLerp: linear interpolation, then normalized.
+func nlerp(from: view Quat, to: view Quat, alpha: view Float) ret Quat {
+  var start: Quat = from
+  if dot(left: from, right: to) < 0.0 {
+    start = Quat { x: -from.x, y: -from.y, z: -from.z, w: -from.w }
+  }
+  let vector: Vec3 = lerp(from: quatVector(quat: start), to: quatVector(quat: to), alpha: alpha)
+  let blended: Quat = quatFromParts(vector: vector, scalar: (1.0 - alpha) * start.w + alpha * to.w)
+  ret normalize(quat: blended)
+}
+
+# b3ComputeQuatBetweenUnitVectors: the rotation taking `from` to `to`.
+func quatBetweenUnitVectors(from: view Vec3, to: view Vec3) ret Quat {
+  var out: Quat = quatIdentity()
+  let middle: Vec3 = lerp(from: from, to: to, alpha: 0.5)
+  let tolerance: Float = 100.0 * floatEpsilon
+  if lengthSquared(vector: middle) > tolerance * tolerance {
+    out = quatFromParts(
+      vector: cross(left: from, right: middle)
+      scalar: dot(left: from, right: middle)
+    )
+  } else {
+    # Anti-parallel: Use a perpendicular vector
+    if absFloat(value: from.x) > 0.5 {
+      out = Quat { x: from.y, y: -from.x, z: 0.0, w: 0.0 }
+    } else {
+      out = Quat { x: 0.0, y: from.z, z: -from.y, w: 0.0 }
+    }
+  }
+  # The algorithm is simplified and made more accurate by normalizing at the end
+  ret normalize(quat: out)
+}
+
+# b3QuatFromExponentialMap (Grassia)
+func quatFromExponentialMap(vector: view Vec3) ret Quat {
+  let threshold: Float = 0.018581361
+  let angle: Float = length(vector: vector)
+  if angle < threshold {
+    # Taylor expansion
+    ret quatFromParts(
+      vector: scale(scale: 0.5 + angle * angle / 48.0, vector: vector)
+      scalar: deterministicCos(radians: 0.5 * angle)
+    )
+  }
+  ret quatFromAxisAngle(axis: scale(scale: 1.0 / angle, vector: vector), radians: angle)
+}
+
+# b3IntegrateRotation: q2 = q1 + 0.5 * omega * q1, normalized
+func integrateRotation(quat: view Quat, deltaRotation: view Vec3) ret Quat {
+  let half: Quat = quatFromParts(vector: scale(scale: 0.5, vector: deltaRotation), scalar: 0.0)
+  let product: Quat = multiply(left: half, right: quat)
+  let next: Quat = quatFromParts(
+    vector: add(left: quatVector(quat: quat), right: quatVector(quat: product))
+    scalar: product.w + quat.w
+  )
+  ret normalize(quat: next)
+}
+
+# b3DeltaQuatToRotation: pseudo angular velocity 2 * (target - q) * conj(q)
+func deltaQuatToRotation(quat: view Quat, target: view Quat) ret Vec3 {
+  var start: Quat = quat
+  if dot(left: quat, right: target) < 0.0 {
+    # Correct polarity
+    start = negate(quat: quat)
+  }
+  let difference: Quat = quatFromParts(
+    vector: subtract(left: quatVector(quat: target), right: quatVector(quat: start))
+    scalar: target.w - start.w
+  )
+  let product: Quat = multiply(left: difference, right: conjugate(a: start))
+  ret scale(scale: 2.0, vector: quatVector(quat: product))
+}
