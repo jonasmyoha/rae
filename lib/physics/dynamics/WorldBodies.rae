@@ -21,6 +21,8 @@ open physics/dynamics/SolverSet
 open physics/dynamics/Island
 open physics/dynamics/World
 open physics/dynamics/WorldIslands
+open physics/dynamics/Contact
+open physics/dynamics/WorldContacts
 open physics/dynamics/ShapeProxy
 open physics/dynamics/BodyMass
 open physics/broadPhase/BroadPhase
@@ -162,7 +164,19 @@ func destroyBody(world: mod PhysicsWorld, bodyId: view BodyId) {
   let bodyIndex: Int = bodyIndexOf(bodyId: bodyId)
   let body: Body = bodyAt(world: world, bodyId: bodyIndex)
 
-  # (Joints and contacts of the body: P6, P4b.)
+  # (Joints of the body: P6.)
+
+  # Destroy the contacts, waking the bodies they touch, even if this body
+  # is static
+  var edgeKey: Int = body.headContactKey
+  loop edgeKey is not -1 {
+    let contactId: Int = edgeKey shr 1
+    let edgeIndex: Int = edgeKey bitand 1
+    if let contact: view Contact => world.contacts.viewAt(index: contactId) {
+      edgeKey = contactEdge(contact: contact, edgeIndex: edgeIndex).nextKey
+    }
+    destroyContact(world: world, contactId: contactId, wakeBodies: true)
+  }
 
   # The shapes and their proxies
   var shapeId: Int = body.headShapeId
@@ -210,7 +224,7 @@ func destroyBody(world: mod PhysicsWorld, bodyId: view BodyId) {
     if let moved: mod Body => world.bodies.modAt(index: movedBodyId) {
       moved.localIndex = body.localIndex
     }
-    # (Its contacts' encoded sim indices: P4b.)
+    refreshBodyContactIndices(world: world, bodyId: movedBodyId)
   }
   if orphaned {
     destroySolverSet(world: world, setIndex: setIndex)

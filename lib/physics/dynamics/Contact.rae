@@ -1,37 +1,233 @@
-# Contacts between shapes (Box3D's contact.c at 9f998c8). So far only the
-# part of b3CreateContact that the broad phase depends on: the pair registry
-# (no contact for an unsupported pair, the primary shape order) and the pair
-# set that records that a pair has a contact. The contact itself (its sim,
-# the body contact lists, the solver set it starts in) is P4b, which fills in
-# this function rather than replacing it.
-open physics/broadPhase/PairSet
+# A contact between two shapes (b3Contact, b3ContactEdge, b3Manifold and
+# b3ManifoldPoint of Box3D's contact.h and types.h at 9f998c8). The functions
+# that create, destroy and update contacts are in WorldContacts; this module
+# is the data, so the world, the constraint graph and the islands can name it.
+open Vec3
+open Quat
+open physics/math/VectorMath
+open physics/math/QuatMath
+open physics/math/TransformMath
 open physics/collision/ShapePair
-open physics/dynamics/Shape
-open physics/dynamics/World
 
-# b3CreateContact
-func createContact(
-  world: mod PhysicsWorld
-  shapeIdA: view Int
-  shapeIdB: view Int
-  childIndex: view Int
-) {
-  let typeA: ShapeType = world.shapes.copyAtDefault(index: shapeIdA).shapeType
-  let typeB: ShapeType = world.shapes.copyAtDefault(index: shapeIdB).shapeType
-  if isSupportedContactPair(typeA: typeA, typeB: typeB) is false {
-    # For example, no mesh against mesh
-    ret
+# b3ContactFlags
+# The solid shapes are touching
+const contactTouchingFlag: Int = 1
+
+# The contact has a hit event
+const contactHitEventFlag: Int = 2
+
+# The contact wants contact events
+const contactEnableContactEvents: Int = 4
+
+# Between a dynamic and a static body
+const contactStaticFlag: Int = 8
+
+const contactRecycleFlag: Int = 16
+
+# The shapes are touching (narrow phase result)
+const simTouchingFlag: Int = 65536
+
+# The fat boxes no longer overlap
+const simDisjoint: Int = 131072
+
+const simStartedTouching: Int = 262144
+
+const simStoppedTouching: Int = 524288
+
+const simEnableHitEvent: Int = 1048576
+
+const simEnablePreSolveEvents: Int = 2097152
+
+# A mesh contact (P5)
+const simMeshContact: Int = 4194304
+
+# The relative transform is cached for contact recycling
+const relativeTransformValid: Int = 8388608
+
+const enableSpeculativePoints: Int = 16777216
+
+# One of a contact's two links in its bodies' contact lists. A contact key
+# is the contact id times two plus the edge index.
+type ContactEdge {
+  bodyId: Int
+  prevKey: Int
+  nextKey: Int
+}
+
+# A contact point in world orientation, anchors relative to the body
+# centers (b3ManifoldPoint).
+type ManifoldPoint {
+  anchorA: Vec3
+  anchorB: Vec3
+  # Negative for overlap
+  separation: Float
+  normalImpulse: Float
+  totalNormalImpulse: Float
+  normalVelocity: Float
+  # The separation when the manifold was computed (contact recycling)
+  baseSeparation: Float
+  # A uint32 in Box3D; -1 marks a claimed old point
+  featureId: Int
+  triangleIndex: Int
+  persisted: Bool
+}
+
+# b3Manifold: Box3D's fixed array of four points; `points` always has four
+# slots, `pointCount` of them in use.
+type Manifold {
+  points: List(ManifoldPoint)
+  normal: Vec3
+  twistImpulse: Float
+  frictionImpulse: Vec3
+  rollingImpulse: Vec3
+  pointCount: Int
+}
+
+type Contact {
+  # The solver set; -1 for a free slot
+  setIndex: Int
+  # The graph colour; -1 when not touching or asleep
+  colorIndex: Int
+  # The index in the set's contact list or the colour's contact list
+  localIndex: Int
+  edgeA: ContactEdge
+  edgeB: ContactEdge
+  shapeIdA: Int
+  shapeIdB: Int
+  childIndex: Int
+  # The island while touching, else -1
+  islandId: Int
+  islandIndex: Int
+  # -1 for a free slot
+  contactId: Int
+  encodedBodySimA: Int
+  encodedBodySimB: Int
+  flags: Int
+  # Box3D's manifold block; a convex contact has at most one
+  manifolds: List(Manifold)
+  # Contact recycling's cache
+  cachedRotationA: Quat
+  cachedRotationB: Quat
+  cachedRelativePose: Transform
+  friction: Float
+  # b3ConvexContact's cache (the mesh contact's triangle caches: P5)
+  cache: ContactCache
+  restitution: Float
+  rollingResistance: Float
+  tangentVelocity: Vec3
+  generation: Int
+}
+
+func zeroManifoldPoint() ret ManifoldPoint {
+  ret ManifoldPoint {
+    anchorA: zeroVector()
+    anchorB: zeroVector()
+    separation: 0.0
+    normalImpulse: 0.0
+    totalNormalImpulse: 0.0
+    normalVelocity: 0.0
+    baseSeparation: 0.0
+    featureId: 0
+    triangleIndex: 0
+    persisted: false
   }
-  if isPrimaryContactPair(typeA: typeA, typeB: typeB) is false {
-    createContact(
-      world: world
-      shapeIdA: shapeIdB
-      shapeIdB: shapeIdA
-      childIndex: childIndex
-    )
-    ret
+}
+
+# A manifold as Box3D's allocator hands it out: zeroed.
+func zeroManifold() ret Manifold {
+  let points: List(ManifoldPoint) = List.create(ManifoldPoint, cap: 4)
+  loop var i: Int = 0, i < 4, ++i {
+    points.add(value: zeroManifoldPoint())
   }
-  # Add to the pair set for fast lookup
-  let pairKey: UInt64 = shapePairKey(shape1: shapeIdA, shape2: shapeIdB, child: childIndex)
-  let added: Bool = addPairKey(set: world.broadPhase.pairSet, key: pairKey)
+  ret Manifold {
+    points: points
+    normal: zeroVector()
+    twistImpulse: 0.0
+    frictionImpulse: zeroVector()
+    rollingImpulse: zeroVector()
+    pointCount: 0
+  }
+}
+
+func zeroContactEdge() ret ContactEdge {
+  ret ContactEdge { bodyId: 0, prevKey: 0, nextKey: 0 }
+}
+
+func zeroQuat() ret Quat {
+  ret Quat { x: 0.0, y: 0.0, z: 0.0, w: 0.0 }
+}
+
+# `(b3Contact){ 0 }`
+func zeroContact() ret Contact {
+  ret Contact {
+    setIndex: 0
+    colorIndex: 0
+    localIndex: 0
+    edgeA: zeroContactEdge()
+    edgeB: zeroContactEdge()
+    shapeIdA: 0
+    shapeIdB: 0
+    childIndex: 0
+    islandId: 0
+    islandIndex: 0
+    contactId: 0
+    encodedBodySimA: 0
+    encodedBodySimB: 0
+    flags: 0
+    manifolds: List.create(Manifold, cap: 1)
+    cachedRotationA: zeroQuat()
+    cachedRotationB: zeroQuat()
+    cachedRelativePose: Transform { position: zeroVector(), rotation: zeroQuat() }
+    friction: 0.0
+    cache: emptyContactCache()
+    restitution: 0.0
+    rollingResistance: 0.0
+    tangentVelocity: zeroVector()
+    generation: 0
+  }
+}
+
+# `contact->edges[edgeIndex]`
+func contactEdge(contact: view Contact, edgeIndex: view Int) ret ContactEdge {
+  if edgeIndex is 0 {
+    ret contact.edgeA
+  }
+  ret contact.edgeB
+}
+
+func setContactEdgePrev(contact: mod Contact, edgeIndex: view Int, prevKey: view Int) {
+  if edgeIndex is 0 {
+    contact.edgeA.prevKey = prevKey
+  } else {
+    contact.edgeB.prevKey = prevKey
+  }
+}
+
+func setContactEdgeNext(contact: mod Contact, edgeIndex: view Int, nextKey: view Int) {
+  if edgeIndex is 0 {
+    contact.edgeA.nextKey = nextKey
+  } else {
+    contact.edgeB.nextKey = nextKey
+  }
+}
+
+func setEncodedBodySim(contact: mod Contact, edgeIndex: view Int, encoded: view Int) {
+  if edgeIndex is 0 {
+    contact.encodedBodySimA = encoded
+  } else {
+    contact.encodedBodySimB = encoded
+  }
+}
+
+# b3IsStaticSimIndex
+func isStaticSimIndex(encodedBodySimIndex: view Int) ret Bool {
+  ret encodedBodySimIndex < -1
+}
+
+# b3SleepBodySimIndex: an awake index becomes "look it up"; a static one stays.
+func sleepBodySimIndex(encodedBodySimIndex: view Int) ret Int {
+  if encodedBodySimIndex >= 0 {
+    ret -1
+  }
+  ret encodedBodySimIndex
 }

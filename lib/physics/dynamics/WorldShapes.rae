@@ -20,6 +20,8 @@ open physics/dynamics/Shape
 open physics/dynamics/World
 open physics/dynamics/ShapeProxy
 open physics/dynamics/BodyMass
+open physics/dynamics/Contact
+open physics/dynamics/WorldContacts
 
 # The flag bits of a shape definition.
 func shapeFlagsOf(def: view ShapeDef) ret Int {
@@ -269,9 +271,14 @@ func createTransformedHullShape(
   ret nullShapeId()
 }
 
-# b3DestroyShapeInternal: unlink from the body, drop the proxy, free the id.
-# (Contacts and sensors of the shape: P4b, P4d.)
-func destroyShapeInternal(world: mod PhysicsWorld, shapeId: view Int, bodyId: view Int) {
+# b3DestroyShapeInternal: unlink from the body, drop the proxy and the
+# shape's contacts, free the id. (Sensors: P4d.)
+func destroyShapeInternal(
+  world: mod PhysicsWorld
+  shapeId: view Int
+  bodyId: view Int
+  wakeBodies: view Bool
+) {
   let shape: Shape = world.shapes.copyAtDefault(index: shapeId)
   if shape.prevShapeId is not -1 {
     if let previous: mod Shape => world.shapes.modAt(index: shape.prevShapeId) {
@@ -290,6 +297,19 @@ func destroyShapeInternal(world: mod PhysicsWorld, shapeId: view Int, bodyId: vi
     body.shapeCount = body.shapeCount - 1
   }
   destroyShapeProxy(world: world, shapeId: shapeId)
+
+  # Destroy the contacts of the shape
+  var contactKey: Int = bodyAt(world: world, bodyId: bodyId).headContactKey
+  loop contactKey is not -1 {
+    let contactId: Int = contactKey shr 1
+    let edgeIndex: Int = contactKey bitand 1
+    let contact: Contact = world.contacts.copyAtDefault(index: contactId)
+    contactKey = contactEdge(contact: contact, edgeIndex: edgeIndex).nextKey
+    if contact.shapeIdA is shapeId or contact.shapeIdB is shapeId {
+      destroyContact(world: world, contactId: contactId, wakeBodies: wakeBodies)
+    }
+  }
+
   freeId(pool: world.shapeIdPool, id: shapeId)
   if let freed: mod Shape => world.shapes.modAt(index: shapeId) {
     freed.id = -1
@@ -300,7 +320,13 @@ func destroyShapeInternal(world: mod PhysicsWorld, shapeId: view Int, bodyId: vi
 func destroyShape(world: mod PhysicsWorld, shapeId: view ShapeId, updateBodyMass: view Bool) {
   let shapeIndex: Int = shapeId.index1 - 1
   let bodyId: Int = world.shapes.copyAtDefault(index: shapeIndex).bodyId
-  destroyShapeInternal(world: world, shapeId: shapeIndex, bodyId: bodyId)
+  # Wake the bodies: this might be a static body
+  destroyShapeInternal(
+    world: world
+    shapeId: shapeIndex
+    bodyId: bodyId
+    wakeBodies: true
+  )
   if updateBodyMass {
     updateBodyMassData(world: world, bodyId: bodyId)
   }
