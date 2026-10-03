@@ -262,8 +262,11 @@ C added.
   golden `geometry`, fixture 949); feature pairs, polygon and segment
   clipping, the four-point reduction and the sphere/capsule pair manifolds
   (`collision/Manifold|ConvexManifold`, golden `manifold`, fixture 950).
-  **Still to do** (queue): the hull (`hull.c`, quickhull) and the hull
-  manifolds with SAT plus the exhaustive shape-pair `match`.
+  The hull (`hull.c`: quickhull, generated and box hulls, cloning, mass,
+  queries, the 2D hull; `geometry/Hull*|BoxHull|Hull2d`, golden `hull`,
+  fixture 951) landed 2026-10-03, bit-exact, quickhull index-linked.
+  **Still to do** (queue): the hull manifolds with SAT plus the exhaustive
+  shape-pair `match` (P2d).
 - **P3 — broad phase.** Dynamic tree (insert, remove, rebuild, queries,
   ray casts) and pair finding.
 - **P4 — the first world.** Bodies, shapes, contacts, solver sets, islands and

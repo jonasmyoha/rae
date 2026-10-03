@@ -1,0 +1,604 @@
+# The quickhull builder of Box3D's hull.c at 9f998c8, part 2: the horizon,
+# the cone of new faces, face merging, conflict resolution and the whole
+# construction (part 1, the data and the initial tetrahedron, is
+# HullBuilder.rae). Box3D's operation order is kept exactly; checked bit for
+# bit against the oracle in fixture 951.
+open Vec3
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/PlaneMath
+open physics/geometry/HullBuilder
+
+# b3HullBuilder_RecacheConflicts: the farthest conflict of `face` after its
+# plane changed.
+func recacheConflicts(builder: mod HullBuilder, face: view Int) {
+  var maxVertex: Int = -1
+  var maxDistance: Float = builder.minOutside
+  let head: Int = builder.faceConflictHead.copyAtDefault(index: face)
+  let plane: Plane = facePlaneOf(builder: builder, face: face)
+  var node: Int = nodeNextOf(builder: builder, node: head)
+  loop node is not head {
+    let separation: Float = planeSeparation(
+      plane: plane
+      point: nodePositionOf(builder: builder, node: node)
+    )
+    if separation > maxDistance {
+      maxDistance = separation
+      maxVertex = node
+    }
+    node = nodeNextOf(builder: builder, node: node)
+  }
+  builder.faceMaxConflict.set(index: face, value: maxVertex)
+  builder.faceMaxConflictDistance.set(index: face, value: maxDistance)
+}
+
+# b3HullBuilder_NextConflictVertex: the farthest conflict of all, or -1.
+func nextConflictVertex(builder: view HullBuilder) ret Int {
+  var maxVertex: Int = -1
+  var maxDistance: Float = builder.minOutside
+  var face: Int = builder.faceNext.copyAtDefault(index: faceHead)
+  loop face is not faceHead {
+    let conflict: Int = builder.faceMaxConflict.copyAtDefault(index: face)
+    let conflictDistance: Float = builder.faceMaxConflictDistance.copyAtDefault(index: face)
+    if conflict is not -1 and conflictDistance > maxDistance {
+      maxDistance = conflictDistance
+      maxVertex = conflict
+    }
+    face = builder.faceNext.copyAtDefault(index: face)
+  }
+  ret maxVertex
+}
+
+# b3HullBuilder_DrainConflictList: move every conflict of `face` to the
+# orphaned list.
+func drainConflictList(builder: mod HullBuilder, face: view Int) {
+  let head: Int = builder.faceConflictHead.copyAtDefault(index: face)
+  var node: Int = nodeNextOf(builder: builder, node: head)
+  loop node is not head {
+    let orphan: Int = node
+    node = nodeNextOf(builder: builder, node: node)
+    builder.nodeConflictFace.set(index: orphan, value: -1)
+    nodeListRemove(builder: builder, node: orphan)
+    nodeListPushBack(builder: builder, head: orphanedHead, node: orphan)
+  }
+}
+
+# b3HullBuilder_EnterHorizonFace: mark `face` deleted, drain it, and push a
+# search frame for it. `entryEdge` is its edge back to the parent face, -1
+# for the seed.
+func enterHorizonFace(
+  builder: mod HullBuilder
+  face: view Int
+  entryEdge: view Int
+  top: view Int
+) {
+  builder.faceMark.set(index: face, value: markDelete)
+  drainConflictList(builder: builder, face: face)
+  var frame: HorizonFrame = { face: face, startEdge: -1, edge: -1, started: false }
+  if entryEdge is not -1 {
+    frame.startEdge = entryEdge
+    frame.edge = edgeNextOf(builder: builder, edge: entryEdge)
+  } else {
+    frame.startEdge = faceEdgeOf(builder: builder, face: face)
+    frame.edge = faceEdgeOf(builder: builder, face: face)
+  }
+  if top < builder.horizonStack.length {
+    builder.horizonStack.set(index: top, value: frame)
+  } else {
+    builder.horizonStack.add(value: frame)
+  }
+}
+
+# b3HullBuilder_BuildHorizon: depth-first from the face `seed` the apex
+# sees, delete every face the apex is above, and collect the horizon: the
+# edges of deleted faces whose twin face stays.
+func buildHorizon(builder: mod HullBuilder, apex: view Int, seed: view Int) {
+  let apexPosition: Vec3 = nodePositionOf(builder: builder, node: apex)
+  var top: Int = 0
+  enterHorizonFace(
+    builder: builder
+    face: seed
+    entryEdge: -1
+    top: top
+  )
+  top = top + 1
+  loop top > 0 {
+    var frame: HorizonFrame = builder.horizonStack.copyAtDefault(index: top - 1)
+    if frame.started and frame.edge is frame.startEdge {
+      top = top - 1
+      continue
+    }
+    frame.started = true
+    let edge: Int = frame.edge
+    let twin: Int = edgeTwinOf(builder: builder, edge: edge)
+    frame.edge = edgeNextOf(builder: builder, edge: edge)
+    builder.horizonStack.set(index: top - 1, value: frame)
+
+    let twinFace: Int = edgeFaceOf(builder: builder, edge: twin)
+    if faceMarkOf(builder: builder, face: twinFace) is not markVisible {
+      continue
+    }
+    let separation: Float = planeSeparation(
+      plane: facePlaneOf(builder: builder, face: twinFace)
+      point: apexPosition
+    )
+    if separation > builder.minRadius {
+      enterHorizonFace(
+        builder: builder
+        face: twinFace
+        entryEdge: twin
+        top: top
+      )
+      top = top + 1
+    } else {
+      builder.horizon.add(value: edge)
+    }
+  }
+}
+
+# b3HullBuilder_BuildCone: a triangle from the apex over every horizon edge,
+# linked to its neighbours.
+func buildCone(builder: mod HullBuilder, apex: view Int) {
+  loop var i: Int = 0, i < builder.horizon.length, ++i {
+    let edge: Int = builder.horizon.copyAtDefault(index: i)
+    let twin: Int = edgeTwinOf(builder: builder, edge: edge)
+    let face: Int = newFace(
+      builder: builder
+      vertex1: apex
+      vertex2: edgeOriginOf(builder: builder, edge: edge)
+      vertex3: edgeOriginOf(builder: builder, edge: twin)
+    )
+    builder.cone.add(value: face)
+    linkFace(
+      builder: builder
+      face: face
+      index: 1
+      twin: twin
+    )
+  }
+  var face1: Int = builder.cone.copyAtDefault(index: builder.cone.length - 1)
+  loop var i: Int = 0, i < builder.cone.length, ++i {
+    let face2: Int = builder.cone.copyAtDefault(index: i)
+    linkFaces(
+      builder: builder
+      face1: face1
+      index1: 2
+      face2: face2
+      index2: 0
+    )
+    face1 = face2
+  }
+}
+
+# b3HullBuilder_DestroyEdges: retire the ring range [begin, end).
+func destroyEdges(builder: mod HullBuilder, begin: view Int, end: view Int) {
+  var edge: Int = begin
+  loop edge is not end {
+    let next: Int = edgeNextOf(builder: builder, edge: edge)
+    retireEdge(builder: builder, edge: edge)
+    edge = next
+  }
+}
+
+# b3HullBuilder_ConnectEdges: join `prev` to `next` around their face. When
+# both border the same neighbour face the vertex between them is redundant:
+# it is dropped, and a neighbour triangle that would be left with two
+# vertices is deleted with it.
+func connectEdges(builder: mod HullBuilder, prev: view Int, next: view Int) {
+  let prevTwin: Int = edgeTwinOf(builder: builder, edge: prev)
+  let nextTwin: Int = edgeTwinOf(builder: builder, edge: next)
+  if edgeFaceOf(builder: builder, edge: prevTwin) is edgeFaceOf(builder: builder, edge: nextTwin) {
+    # next is redundant
+    let nextFace: Int = edgeFaceOf(builder: builder, edge: next)
+    if faceEdgeOf(builder: builder, face: nextFace) is next {
+      builder.faceEdge.set(index: nextFace, value: prev)
+    }
+
+    var twin: Int = -1
+    if vertexCountOfFace(builder: builder, face: edgeFaceOf(builder: builder, edge: prevTwin)) is 3 {
+      # The three half-edges of the dead triangle, before the rewire
+      let deadEdge0: Int = prevTwin
+      let deadEdge1: Int = nextTwin
+      let deadEdge2: Int = edgePrevOf(builder: builder, edge: nextTwin)
+
+      twin = edgeTwinOf(builder: builder, edge: deadEdge2)
+
+      let opposingFace: Int = edgeFaceOf(builder: builder, edge: prevTwin)
+      builder.faceMark.set(index: opposingFace, value: markDelete)
+      builder.mergedFaces.add(value: opposingFace)
+
+      let afterNext: Int = edgeNextOf(builder: builder, edge: next)
+      builder.edgeNext.set(index: prev, value: afterNext)
+      builder.edgePrev.set(index: afterNext, value: prev)
+
+      builder.edgeTwin.set(index: prev, value: twin)
+      builder.edgeTwin.set(index: twin, value: prev)
+
+      # Drop the redundant vertex
+      nodeListRemove(builder: builder, node: edgeOriginOf(builder: builder, edge: next))
+
+      retireEdge(builder: builder, edge: deadEdge0)
+      retireEdge(builder: builder, edge: deadEdge1)
+      retireEdge(builder: builder, edge: deadEdge2)
+    } else {
+      twin = nextTwin
+      let twinFace: Int = edgeFaceOf(builder: builder, edge: twin)
+      if faceEdgeOf(builder: builder, face: twinFace) is prevTwin {
+        builder.faceEdge.set(index: twinFace, value: twin)
+      }
+
+      let afterPrevTwin: Int = edgeNextOf(builder: builder, edge: prevTwin)
+      builder.edgeNext.set(index: twin, value: afterPrevTwin)
+      builder.edgePrev.set(index: afterPrevTwin, value: twin)
+      retireEdge(builder: builder, edge: prevTwin)
+
+      let afterNext: Int = edgeNextOf(builder: builder, edge: next)
+      builder.edgeNext.set(index: prev, value: afterNext)
+      builder.edgePrev.set(index: afterNext, value: prev)
+
+      builder.edgeTwin.set(index: prev, value: twin)
+      builder.edgeTwin.set(index: twin, value: prev)
+
+      # Drop the redundant vertex
+      nodeListRemove(builder: builder, node: edgeOriginOf(builder: builder, edge: next))
+    }
+
+    # The twin's face changed shape: its plane and farthest conflict
+    let twinFace: Int = edgeFaceOf(builder: builder, edge: twin)
+    newellPlane(builder: builder, face: twinFace)
+    recacheConflicts(builder: builder, face: twinFace)
+  } else {
+    builder.edgeNext.set(index: prev, value: next)
+    builder.edgePrev.set(index: next, value: prev)
+  }
+}
+
+# b3HullBuilder_AbsorbFaces: hand the conflicts of the merged-away faces to
+# `face` (or the orphaned list) and retire those faces.
+func absorbFaces(builder: mod HullBuilder, face: view Int) {
+  let plane: Plane = facePlaneOf(builder: builder, face: face)
+  let faceHeadNode: Int = builder.faceConflictHead.copyAtDefault(index: face)
+  loop var i: Int = 0, i < builder.mergedFaces.length, ++i {
+    let merged: Int = builder.mergedFaces.copyAtDefault(index: i)
+    let head: Int = builder.faceConflictHead.copyAtDefault(index: merged)
+    var node: Int = nodeNextOf(builder: builder, node: head)
+    loop node is not head {
+      let vertex: Int = node
+      node = nodeNextOf(builder: builder, node: node)
+      nodeListRemove(builder: builder, node: vertex)
+      let separation: Float = planeSeparation(
+        plane: plane
+        point: nodePositionOf(builder: builder, node: vertex)
+      )
+      if separation > builder.minOutside {
+        nodeListPushBack(builder: builder, head: faceHeadNode, node: vertex)
+        builder.nodeConflictFace.set(index: vertex, value: face)
+        if separation > builder.faceMaxConflictDistance.copyAtDefault(index: face) {
+          builder.faceMaxConflictDistance.set(index: face, value: separation)
+          builder.faceMaxConflict.set(index: face, value: vertex)
+        }
+      } else {
+        nodeListPushBack(builder: builder, head: orphanedHead, node: vertex)
+        builder.nodeConflictFace.set(index: vertex, value: -1)
+      }
+    }
+    retireFace(builder: builder, face: merged)
+  }
+}
+
+# b3HullBuilder_ConnectFaces: merge the face across `edge` into the face of
+# `edge`.
+func connectFaces(builder: mod HullBuilder, edge: view Int) {
+  let face: Int = edgeFaceOf(builder: builder, edge: edge)
+  let twin: Int = edgeTwinOf(builder: builder, edge: edge)
+  let twinFace: Int = edgeFaceOf(builder: builder, edge: twin)
+
+  var edgePrev: Int = edgePrevOf(builder: builder, edge: edge)
+  var edgeNext: Int = edgeNextOf(builder: builder, edge: edge)
+  var twinPrev: Int = edgePrevOf(builder: builder, edge: twin)
+  var twinNext: Int = edgeNextOf(builder: builder, edge: twin)
+
+  loop edgeFaceOf(builder: builder, edge: edgeTwinOf(builder: builder, edge: edgePrev)) is twinFace {
+    edgePrev = edgePrevOf(builder: builder, edge: edgePrev)
+    twinNext = edgeNextOf(builder: builder, edge: twinNext)
+  }
+  loop edgeFaceOf(builder: builder, edge: edgeTwinOf(builder: builder, edge: edgeNext)) is twinFace {
+    edgeNext = edgeNextOf(builder: builder, edge: edgeNext)
+    twinPrev = edgePrevOf(builder: builder, edge: twinPrev)
+  }
+
+  builder.faceEdge.set(index: face, value: edgePrev)
+
+  # Discard the opposing face
+  builder.mergedFaces.clear()
+  builder.mergedFaces.add(value: twinFace)
+  builder.faceMark.set(index: twinFace, value: markDelete)
+  builder.faceEdge.set(index: twinFace, value: -1)
+
+  let absorbedEnd: Int = edgeNextOf(builder: builder, edge: twinPrev)
+  var absorbed: Int = twinNext
+  loop absorbed is not absorbedEnd {
+    builder.edgeFace.set(index: absorbed, value: face)
+    absorbed = edgeNextOf(builder: builder, edge: absorbed)
+  }
+
+  destroyEdges(builder: builder, begin: edgeNextOf(builder: builder, edge: edgePrev), end: edgeNext)
+  destroyEdges(builder: builder, begin: edgeNextOf(builder: builder, edge: twinPrev), end: twinNext)
+
+  connectEdges(builder: builder, prev: edgePrev, next: twinNext)
+  connectEdges(builder: builder, prev: twinPrev, next: edgeNext)
+
+  newellPlane(builder: builder, face: face)
+  recacheConflicts(builder: builder, face: face)
+  absorbFaces(builder: builder, face: face)
+}
+
+# b3HullBuilder_MergeConcave: merge across the first concave edge of `face`.
+func mergeConcave(builder: mod HullBuilder, face: view Int) ret Bool {
+  let first: Int = faceEdgeOf(builder: builder, face: face)
+  var edge: Int = first
+  loop true {
+    let twin: Int = edgeTwinOf(builder: builder, edge: edge)
+    if isEdgeConcave(builder: builder, edge: edge, tolerance: builder.minRadius) or isEdgeConcave(
+      builder: builder
+      edge: twin
+      tolerance: builder.minRadius
+    ) {
+      connectFaces(builder: builder, edge: edge)
+      ret true
+    }
+    edge = edgeNextOf(builder: builder, edge: edge)
+    if edge is faceEdgeOf(builder: builder, face: face) {
+      break
+    }
+  }
+  ret false
+}
+
+# b3HullBuilder_MergeCoplanar: merge across the first edge of `face` that is
+# not clearly convex.
+func mergeCoplanar(builder: mod HullBuilder, face: view Int) ret Bool {
+  let first: Int = faceEdgeOf(builder: builder, face: face)
+  var edge: Int = first
+  loop true {
+    let twin: Int = edgeTwinOf(builder: builder, edge: edge)
+    if isEdgeConvex(builder: builder, edge: edge, tolerance: builder.minRadius) is false or isEdgeConvex(
+      builder: builder
+      edge: twin
+      tolerance: builder.minRadius
+    ) is false {
+      connectFaces(builder: builder, edge: edge)
+      ret true
+    }
+    edge = edgeNextOf(builder: builder, edge: edge)
+    if edge is faceEdgeOf(builder: builder, face: face) {
+      break
+    }
+  }
+  ret false
+}
+
+# b3HullBuilder_MergeFaces: fix the cone: flipped faces into their largest
+# neighbour, then concave edges, then coplanar ones.
+func mergeFaces(builder: mod HullBuilder) {
+  loop var i: Int = 0, i < builder.cone.length, ++i {
+    let face: Int = builder.cone.copyAtDefault(index: i)
+    if faceMarkOf(builder: builder, face: face) is markVisible and builder.faceFlipped.copyAtDefault(
+      index: face
+    ) {
+      builder.faceFlipped.set(index: face, value: false)
+      var bestArea: Float = 0.0
+      var bestEdge: Int = -1
+      let first: Int = faceEdgeOf(builder: builder, face: face)
+      var edge: Int = first
+      loop true {
+        let twinFace: Int = edgeFaceOf(
+          builder: builder
+          edge: edgeTwinOf(builder: builder, edge: edge)
+        )
+        let area: Float = builder.faceArea.copyAtDefault(index: twinFace)
+        if area > bestArea {
+          bestArea = area
+          bestEdge = edge
+        }
+        edge = edgeNextOf(builder: builder, edge: edge)
+        if edge is faceEdgeOf(builder: builder, face: face) {
+          break
+        }
+      }
+      connectFaces(builder: builder, edge: bestEdge)
+    }
+  }
+  loop var i: Int = 0, i < builder.cone.length, ++i {
+    let face: Int = builder.cone.copyAtDefault(index: i)
+    if faceMarkOf(builder: builder, face: face) is markVisible {
+      loop mergeConcave(builder: builder, face: face) {
+      }
+    }
+  }
+  loop var i: Int = 0, i < builder.cone.length, ++i {
+    let face: Int = builder.cone.copyAtDefault(index: i)
+    if faceMarkOf(builder: builder, face: face) is markVisible {
+      loop mergeCoplanar(builder: builder, face: face) {
+      }
+    }
+  }
+}
+
+# b3HullBuilder_ResolveVertices: each orphan goes to the live cone face it
+# is farthest outside of, or is dropped as interior.
+func resolveVertices(builder: mod HullBuilder) {
+  var node: Int = nodeNextOf(builder: builder, node: orphanedHead)
+  loop node is not orphanedHead {
+    let vertex: Int = node
+    node = nodeNextOf(builder: builder, node: node)
+    nodeListRemove(builder: builder, node: vertex)
+
+    let position: Vec3 = nodePositionOf(builder: builder, node: vertex)
+    var maxDistance: Float = builder.minOutside
+    var maxFace: Int = -1
+    loop var i: Int = 0, i < builder.cone.length, ++i {
+      let face: Int = builder.cone.copyAtDefault(index: i)
+      if faceMarkOf(builder: builder, face: face) is markVisible {
+        let separation: Float = planeSeparation(
+          plane: facePlaneOf(builder: builder, face: face)
+          point: position
+        )
+        if separation > maxDistance {
+          maxDistance = separation
+          maxFace = face
+        }
+      }
+    }
+    if maxFace is not -1 {
+      nodeListPushBack(
+        builder: builder
+        head: builder.faceConflictHead.copyAtDefault(index: maxFace)
+        node: vertex
+      )
+      builder.nodeConflictFace.set(index: vertex, value: maxFace)
+      if maxDistance > builder.faceMaxConflictDistance.copyAtDefault(index: maxFace) {
+        builder.faceMaxConflictDistance.set(index: maxFace, value: maxDistance)
+        builder.faceMaxConflict.set(index: maxFace, value: vertex)
+      }
+    }
+  }
+}
+
+# b3HullBuilder_ResolveFaces: splice the deleted faces out (retiring their
+# edges) and append the surviving cone faces.
+func resolveFaces(builder: mod HullBuilder) {
+  var face: Int = builder.faceNext.copyAtDefault(index: faceHead)
+  loop face is not faceHead {
+    let current: Int = face
+    face = builder.faceNext.copyAtDefault(index: face)
+    if faceMarkOf(builder: builder, face: current) is markDelete and faceListContains(
+      builder: builder
+      face: current
+    ) {
+      let start: Int = faceEdgeOf(builder: builder, face: current)
+      var edge: Int = start
+      loop true {
+        let next: Int = edgeNextOf(builder: builder, edge: edge)
+        retireEdge(builder: builder, edge: edge)
+        edge = next
+        if edge is start {
+          break
+        }
+      }
+      retireFace(builder: builder, face: current)
+    }
+  }
+  loop var i: Int = 0, i < builder.cone.length, ++i {
+    let coneFace: Int = builder.cone.copyAtDefault(index: i)
+    if faceMarkOf(builder: builder, face: coneFace) is markDelete {
+      continue
+    }
+    faceListPushBack(builder: builder, face: coneFace)
+  }
+}
+
+# b3HullBuilder_AddVertexToHull
+func addVertexToHull(builder: mod HullBuilder, vertex: view Int) {
+  let face: Int = builder.nodeConflictFace.copyAtDefault(index: vertex)
+  builder.nodeConflictFace.set(index: vertex, value: -1)
+  nodeListRemove(builder: builder, node: vertex)
+  nodeListPushBack(builder: builder, head: vertexHead, node: vertex)
+
+  builder.horizon.clear()
+  buildHorizon(builder: builder, apex: vertex, seed: face)
+  builder.cone.clear()
+  buildCone(builder: builder, apex: vertex)
+
+  mergeFaces(builder: builder)
+  resolveVertices(builder: builder)
+  resolveFaces(builder: builder)
+}
+
+# b3HullBuilder_CleanHull: drop the vertices no face uses, shift everything
+# back by `origin`, and count the result.
+func cleanHull(builder: mod HullBuilder, origin: view Vec3) {
+  var faceCount: Int = 0
+  var halfEdgeCount: Int = 0
+  var face: Int = builder.faceNext.copyAtDefault(index: faceHead)
+  loop face is not faceHead {
+    let first: Int = faceEdgeOf(builder: builder, face: face)
+    var edge: Int = first
+    loop true {
+      builder.nodeReachable.set(index: edgeOriginOf(builder: builder, edge: edge), value: true)
+      edge = edgeNextOf(builder: builder, edge: edge)
+      halfEdgeCount = halfEdgeCount + 1
+      if edge is first {
+        break
+      }
+    }
+    var plane: Plane = facePlaneOf(builder: builder, face: face)
+    plane.offset = plane.offset + dot(left: plane.normal, right: origin)
+    builder.facePlane.set(index: face, value: plane)
+    builder.faceCentroid.set(
+      index: face
+      value: add(left: builder.faceCentroid.copyAtDefault(index: face), right: origin)
+    )
+    faceCount = faceCount + 1
+    face = builder.faceNext.copyAtDefault(index: face)
+  }
+
+  var vertexCount: Int = 0
+  var node: Int = nodeNextOf(builder: builder, node: vertexHead)
+  loop node is not vertexHead {
+    let vertex: Int = node
+    node = nodeNextOf(builder: builder, node: node)
+    if builder.nodeReachable.copyAtDefault(index: vertex) is false {
+      nodeListRemove(builder: builder, node: vertex)
+    } else {
+      builder.nodePosition.set(
+        index: vertex
+        value: add(left: nodePositionOf(builder: builder, node: vertex), right: origin)
+      )
+      vertexCount = vertexCount + 1
+    }
+  }
+
+  builder.interiorPoint = add(left: builder.interiorPoint, right: origin)
+  builder.finalVertexCount = vertexCount
+  builder.finalHalfEdgeCount = halfEdgeCount
+  builder.finalFaceCount = faceCount
+}
+
+# b3HullBuilder_HasHull: Euler's formula holds and there are 4+ faces.
+func builderHasHull(builder: view HullBuilder) ret Bool {
+  let vertexCount: Int = builder.finalVertexCount
+  let edgeCount: Int = builder.finalHalfEdgeCount / 2
+  let faceCount: Int = builder.finalFaceCount
+  ret vertexCount - edgeCount + faceCount is 2 and faceCount >= 4
+}
+
+# b3HullBuilder_Construct: the whole build, about `origin` for precision,
+# adding at most `maxVertexCount` - 4 vertices after the tetrahedron.
+func constructHull(
+  builder: mod HullBuilder
+  points: view List(Vec3)
+  maxVertexCount: view Int
+  origin: view Vec3
+) ret Bool {
+  if points.length < 4 {
+    ret false
+  }
+  let shiftedPoints: List(Vec3) = List.create(Vec3, cap: points.length)
+  loop let point: view Vec3 in points {
+    shiftedPoints.add(value: subtract(left: point, right: origin))
+  }
+  computeTolerance(builder: builder, points: shiftedPoints)
+  if buildInitialHull(builder: builder, points: shiftedPoints) is false {
+    ret false
+  }
+  var budget: Int = clampInt(value: maxVertexCount - 4, lower: 0, upper: hullMaxCount - 4)
+  var vertex: Int = nextConflictVertex(builder: builder)
+  loop vertex is not -1 and budget > 0 {
+    addVertexToHull(builder: builder, vertex: vertex)
+    vertex = nextConflictVertex(builder: builder)
+    budget = budget - 1
+  }
+  cleanHull(builder: builder, origin: origin)
+  ret builderHasHull(builder: builder)
+}

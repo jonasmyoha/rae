@@ -1,0 +1,362 @@
+# Making hulls (Box3D's hull.c at 9f998c8): b3CreateHull from a point cloud
+# through the quickhull builder, the generated cylinder, cone, rock and
+# complex hulls, and b3CloneAndTransformHull. Box3D's operation order is
+# kept exactly; checked bit for bit against the oracle in fixture 951.
+import Math
+open Vec3
+open Quat
+open physics/Constants
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/QuatMath
+open physics/math/MatrixMath
+open physics/math/TransformMath
+open physics/math/AabbMath
+open physics/math/PlaneMath
+open physics/geometry/Hull
+open physics/geometry/HullBuilder
+open physics/geometry/HullBuilderMerge
+
+func emptyHull() ret Hull {
+  ret Hull {
+    aabb: Aabb { lowerBound: zeroVector(), upperBound: zeroVector() }
+    surfaceArea: 0.0
+    volume: 0.0
+    innerRadius: 0.0
+    center: zeroVector()
+    centralInertia: matrixZero()
+    vertices: List.create(HullVertex, cap: 8)
+    points: List.create(Vec3, cap: 8)
+    edges: List.create(HullHalfEdge, cap: 24)
+    faces: List.create(HullFace, cap: 6)
+    planes: List.create(Plane, cap: 6)
+  }
+}
+
+# b3CreateHull: the convex hull of `points` with at most `maxVertexCount`
+# vertices (clamped to 4..maxHullVertices). None for fewer than 4 points,
+# flat or degenerate input, or a hull over the vertex/face/edge limits.
+func createHull(points: view List(Vec3), maxVertexCount: view Int) ret opt Hull {
+  if points.length < 4 {
+    ret none
+  }
+  let origin: Vec3 = points.copyAtDefault(index: 0)
+  let clampedMaxCount: Int = clampInt(value: maxVertexCount, lower: 4, upper: maxHullVertices)
+  var builder: HullBuilder = createHullBuilder(pointCount: points.length)
+  if constructHull(
+    builder: builder
+    points: points
+    maxVertexCount: clampedMaxCount
+    origin: origin
+  ) is false {
+    ret none
+  }
+  if builder.finalVertexCount > maxHullVertices or builder.finalFaceCount > maxHullFaces {
+    ret none
+  }
+  if builder.finalHalfEdgeCount > 2 * maxHullEdges {
+    ret none
+  }
+
+  # Number the vertices, then the faces and half-edges, twins in pairs.
+  let finalVertices: List(Int) = List.create(Int, cap: builder.finalVertexCount)
+  var node: Int = nodeNextOf(builder: builder, node: vertexHead)
+  loop node is not vertexHead {
+    builder.nodeFinalIndex.set(index: node, value: finalVertices.length)
+    finalVertices.add(value: node)
+    node = nodeNextOf(builder: builder, node: node)
+  }
+  let finalFaces: List(Int) = List.create(Int, cap: builder.finalFaceCount)
+  let finalEdges: List(Int) = List.create(Int, cap: builder.finalHalfEdgeCount)
+  var face: Int = builder.faceNext.copyAtDefault(index: faceHead)
+  loop face is not faceHead {
+    builder.faceFinalIndex.set(index: face, value: finalFaces.length)
+    finalFaces.add(value: face)
+    let first: Int = faceEdgeOf(builder: builder, face: face)
+    var edge: Int = first
+    loop true {
+      if builder.edgeFinalIndex.copyAtDefault(index: edge) < 0 {
+        builder.edgeFinalIndex.set(index: edge, value: finalEdges.length)
+        finalEdges.add(value: edge)
+        let twin: Int = edgeTwinOf(builder: builder, edge: edge)
+        builder.edgeFinalIndex.set(index: twin, value: finalEdges.length)
+        finalEdges.add(value: twin)
+      }
+      edge = edgeNextOf(builder: builder, edge: edge)
+      if edge is first {
+        break
+      }
+    }
+    face = builder.faceNext.copyAtDefault(index: face)
+  }
+
+  var hull: Hull = emptyHull()
+  loop let vertexNode: view Int in finalVertices {
+    hull.vertices.add(value: HullVertex { edge: 0 })
+    hull.points.add(value: nodePositionOf(builder: builder, node: vertexNode))
+  }
+  loop var index: Int = 0, index < finalEdges.length, ++index {
+    let edge: Int = finalEdges.copyAtDefault(index: index)
+    let originIndex: Int = builder.nodeFinalIndex.copyAtDefault(
+      index: edgeOriginOf(builder: builder, edge: edge)
+    )
+    hull.edges.add(
+      value: HullHalfEdge {
+        next: builder.edgeFinalIndex.copyAtDefault(index: edgeNextOf(builder: builder, edge: edge))
+        twin: builder.edgeFinalIndex.copyAtDefault(index: edgeTwinOf(builder: builder, edge: edge))
+        origin: originIndex
+        face: builder.faceFinalIndex.copyAtDefault(index: edgeFaceOf(builder: builder, edge: edge))
+      }
+    )
+    hull.vertices.set(index: originIndex, value: HullVertex { edge: index })
+  }
+  loop let faceSlot: view Int in finalFaces {
+    hull.faces.add(
+      value: HullFace {
+        edge: builder.edgeFinalIndex.copyAtDefault(
+          index: faceEdgeOf(builder: builder, face: faceSlot)
+        )
+      }
+    )
+    hull.planes.add(value: facePlaneOf(builder: builder, face: faceSlot))
+  }
+
+  updateHullBounds(hull: hull)
+  if updateHullBulkProperties(hull: hull) is false {
+    ret none
+  }
+  ret hull
+}
+
+# The points of a ring of `sides` points at `lowerRadius` (height
+# `lowerHeight`) paired with a ring at `upperRadius` (`upperHeight`).
+func ringPoints(
+  sides: view Int
+  lowerRadius: view Float
+  lowerHeight: view Float
+  upperRadius: view Float
+  upperHeight: view Float
+) ret List(Vec3) {
+  let points: List(Vec3) = List.create(Vec3, cap: 2 * sides)
+  var alpha: Float = 0.0
+  let deltaAlpha: Float = 2.0 * pi / sides.toFloat()
+  loop var index: Int = 0, index < sides, ++index {
+    let sinAlpha: Float = deterministicSin(radians: alpha)
+    let cosAlpha: Float = deterministicCos(radians: alpha)
+    points.add(value: Vec3 { x: lowerRadius * cosAlpha, y: lowerHeight, z: lowerRadius * sinAlpha })
+    points.add(value: Vec3 { x: upperRadius * cosAlpha, y: upperHeight, z: upperRadius * sinAlpha })
+    alpha = alpha + deltaAlpha
+  }
+  ret points
+}
+
+# b3CreateCylinder: a `sides`-gon prism (3 to 32 sides) from y = yOffset up
+# `height`.
+func createCylinder(
+  height: view Float
+  radius: view Float
+  yOffset: view Float
+  sides: view Int
+) ret opt Hull {
+  let points: List(Vec3) = ringPoints(
+    sides: sides
+    lowerRadius: radius
+    lowerHeight: yOffset
+    upperRadius: radius
+    upperHeight: yOffset + height
+  )
+  ret createHull(points: points, maxVertexCount: points.length)
+}
+
+# b3CreateCone: a truncated cone of `slices` sides (4 to 32), radius1 at
+# y = 0 and radius2 at y = height.
+func createCone(
+  height: view Float
+  radius1: view Float
+  radius2: view Float
+  slices: view Int
+) ret opt Hull {
+  let points: List(Vec3) = ringPoints(
+    sides: slices
+    lowerRadius: radius1
+    lowerHeight: 0.0
+    upperRadius: radius2
+    upperHeight: height
+  )
+  ret createHull(points: points, maxVertexCount: points.length)
+}
+
+# b3CreateRock: the hull of ten points of a Fibonacci lattice on a sphere.
+func createRock(radius: view Float) ret opt Hull {
+  let pointCount: Int = 10
+  # The golden ratio
+  let phi: Float = (1.0 + Math.sqrt(x: 5.0)) / 2.0
+  let points: List(Vec3) = List.create(Vec3, cap: pointCount)
+  # The azimuthal angle
+  let theta: Float = 2.0 * pi / phi
+  var cosSin: CosSin = { cosine: 1.0, sine: 0.0 }
+  let deltaCosSin: CosSin = computeCosSin(radians: theta)
+  loop var i: Int = 0, i < pointCount, ++i {
+    let z: Float = 1.0 - (2.0 * i.toFloat() + 1.0) / pointCount.toFloat()
+    # The radius in the xy-plane
+    let radiusXy: Float = Math.sqrt(x: 1.0 - z * z)
+    points.add(
+      value: Vec3 {
+        x: radius * radiusXy * cosSin.cosine
+        y: radius * radiusXy * cosSin.sine
+        z: radius * z
+      }
+    )
+    let previous: CosSin = cosSin
+    cosSin.cosine = deltaCosSin.cosine * previous.cosine - deltaCosSin.sine * previous.sine
+    cosSin.sine = deltaCosSin.sine * previous.cosine + deltaCosSin.cosine * previous.sine
+  }
+  ret createHull(points: points, maxVertexCount: pointCount)
+}
+
+# PEEL's BasicRandom (b3NextComplexHullRandom): a 32-bit linear congruential
+# step.
+func nextComplexHullRandom(state: mod Int) ret Int {
+  state = (state * 2147001325 + 715136305) bitand 4294967295
+  ret state
+}
+
+func complexHullRandomFloat(state: mod Int) ret Float {
+  ret (nextComplexHullRandom(state: state) bitand 65535).toFloat() / 65535.0 - 0.5
+}
+
+func complexHullRandomDirection(state: mod Int) ret Vec3 {
+  var point: Vec3 = zeroVector()
+  loop true {
+    point.x = complexHullRandomFloat(state: state)
+    point.y = complexHullRandomFloat(state: state)
+    point.z = complexHullRandomFloat(state: state)
+    if dot(left: point, right: point) <= 0.25 {
+      break
+    }
+  }
+  ret normalize(vector: point)
+}
+
+# b3CreateComplexHull: the hull of 32 pseudo-random points on a sphere (the
+# convex pile hull of PEEL).
+func createComplexHull(radius: view Float) ret opt Hull {
+  let pointCount: Int = 32
+  let points: List(Vec3) = List.create(Vec3, cap: pointCount)
+  var state: Int = 42
+  loop var i: Int = 0, i < pointCount, ++i {
+    points.add(value: scale(scale: radius, vector: complexHullRandomDirection(state: state)))
+  }
+  ret createHull(points: points, maxVertexCount: pointCount)
+}
+
+# Reverse the winding of every face (for a mirroring scale).
+func reverseHullWinding(hull: mod Hull) {
+  loop var i: Int = 0, i < hull.faces.length, ++i {
+    let startEdgeIndex: Int = hull.faces.copyAtDefault(index: i).edge
+    var currentEdgeIndex: Int = startEdgeIndex
+    var prevEdgeIndex: Int = -1
+    loop true {
+      let edge: HullHalfEdge = hullEdge(hull: hull, index: currentEdgeIndex)
+      if edge.next is startEdgeIndex {
+        prevEdgeIndex = currentEdgeIndex
+        break
+      }
+      currentEdgeIndex = edge.next
+      if currentEdgeIndex is startEdgeIndex {
+        break
+      }
+    }
+    currentEdgeIndex = startEdgeIndex
+    loop true {
+      var edge: HullHalfEdge = hullEdge(hull: hull, index: currentEdgeIndex)
+      let nextIndex: Int = edge.next
+      edge.next = prevEdgeIndex
+      if currentEdgeIndex < edge.twin {
+        var twin: HullHalfEdge = hullEdge(hull: hull, index: edge.twin)
+        let origin: Int = edge.origin
+        edge.origin = twin.origin
+        twin.origin = origin
+        hull.edges.set(index: edge.twin, value: twin)
+      }
+      hull.edges.set(index: currentEdgeIndex, value: edge)
+      prevEdgeIndex = currentEdgeIndex
+      currentEdgeIndex = nextIndex
+      if currentEdgeIndex is startEdgeIndex {
+        break
+      }
+    }
+  }
+  loop var i: Int = 0, i < hull.vertices.length, ++i {
+    let vertex: HullVertex = hull.vertices.copyAtDefault(index: i)
+    hull.vertices.set(
+      index: i
+      value: HullVertex { edge: hullEdge(hull: hull, index: vertex.edge).twin }
+    )
+  }
+}
+
+# b3CloneAndTransformHull: a copy scaled (non-uniform and mirroring allowed;
+# zero components become safe), rotated and moved by `transform`. None if
+# the result is degenerate.
+func cloneAndTransformHull(
+  original: view Hull
+  transform: view Transform
+  scaleVector: view Vec3
+) ret opt Hull {
+  var hull: Hull = original
+  let safe: Vec3 = safeScale(scaleVector: scaleVector)
+  if safe.x * safe.y * safe.z < 0.0 {
+    reverseHullWinding(hull: hull)
+  }
+
+  let matrix: Matrix3 = matrixFromQuat(quat: transform.rotation)
+  loop var i: Int = 0, i < hull.points.length, ++i {
+    let point: Vec3 = hull.points.copyAtDefault(index: i)
+    hull.points.set(
+      index: i
+      value: add(
+        left: multiply(matrix: matrix, vector: multiply(left: safe, right: point))
+        right: transform.position
+      )
+    )
+  }
+
+  loop var i: Int = 0, i < hull.faces.length, ++i {
+    var count: Int = 0
+    var centroid: Vec3 = zeroVector()
+    var normal: Vec3 = zeroVector()
+    let startEdgeIndex: Int = hull.faces.copyAtDefault(index: i).edge
+    var currentEdgeIndex: Int = startEdgeIndex
+    let origin: Vec3 = hullPoint(
+      hull: hull
+      index: hullEdge(hull: hull, index: startEdgeIndex).origin
+    )
+    loop true {
+      let edge: HullHalfEdge = hullEdge(hull: hull, index: currentEdgeIndex)
+      let twin: HullHalfEdge = hullEdge(hull: hull, index: edge.twin)
+      let v1: Vec3 = subtract(left: hullPoint(hull: hull, index: edge.origin), right: origin)
+      let v2: Vec3 = subtract(left: hullPoint(hull: hull, index: twin.origin), right: origin)
+      count = count + 1
+      centroid = add(left: centroid, right: v1)
+      normal.x = normal.x + (v1.y - v2.y) * (v1.z + v2.z)
+      normal.y = normal.y + (v1.z - v2.z) * (v1.x + v2.x)
+      normal.z = normal.z + (v1.x - v2.x) * (v1.y + v2.y)
+      currentEdgeIndex = edge.next
+      if currentEdgeIndex is startEdgeIndex {
+        break
+      }
+    }
+    centroid = scale(scale: 1.0 / count.toFloat(), vector: centroid)
+    centroid = add(left: centroid, right: origin)
+    let area: Float = length(vector: normal)
+    normal = scale(scale: 1.0 / area, vector: normal)
+    hull.planes.set(index: i, value: planeFromNormalAndPoint(normal: normal, point: centroid))
+  }
+
+  updateHullBounds(hull: hull)
+  if updateHullBulkProperties(hull: hull) is false {
+    ret none
+  }
+  ret hull
+}

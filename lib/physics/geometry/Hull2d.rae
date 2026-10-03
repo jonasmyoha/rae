@@ -1,0 +1,195 @@
+# The 2D convex hull of a contact patch (b3Hull2D, b3SimplifyHull2D of
+# Box3D's hull.c at 9f998c8): Andrew's monotone chain over points projected
+# onto the contact plane, and the reduction to a target count by dropping
+# the vertices that add the least area. Box3D's operation order is kept
+# exactly; checked bit for bit against the oracle in fixture 951.
+open Vec2
+open physics/Constants
+open physics/math/Scalar
+open physics/math/Vector2Math
+
+# A projected contact point (b3Point2D).
+type Point2d {
+  point: Vec2
+  # The separation of the contact point it came from
+  separation: Float
+  # The index of the contact point it came from
+  originalIndex: Int
+}
+
+# b3Cross2D: cross(first - origin, second - origin), twice the signed area
+# of the triangle origin-first-second.
+func cross2d(origin: view Vec2, first: view Vec2, second: view Vec2) ret Float {
+  ret (first.x - origin.x) * (second.y - origin.y) - (first.y - origin.y) * (second.x - origin.x)
+}
+
+# b3SimplifyHull2D: drop the vertex of `hull` adding the least area until
+# the hull has at most `target` (3 or more) vertices and every vertex adds
+# more than a quarter slop squared. Returns the new count; `hull` is
+# shortened to it.
+func simplifyHull2d(
+  hull: mod List(Point2d)
+  target: view Int
+  lengthUnitsPerMeter: view Float
+) ret Int {
+  let count1: Int = hull.length
+  if count1 <= 3 {
+    ret count1
+  }
+  let slop: Float = linearSlop(lengthUnitsPerMeter: lengthUnitsPerMeter)
+  let areaTolerance: Float = 0.25 * slop * slop
+  var count2: Int = count1
+  loop true {
+    var minArea: Float = floatMax
+    var minIndex: Int = 0
+    loop var i: Int = 0, i < count2, ++i {
+      let prev: Int = (i + count2 - 1) % count2
+      let next: Int = (i + 1) % count2
+      let previousPoint: Point2d = hull.copyAtDefault(index: prev)
+      let currentPoint: Point2d = hull.copyAtDefault(index: i)
+      let nextPoint: Point2d = hull.copyAtDefault(index: next)
+      let area: Float = cross2d(
+        origin: previousPoint.point
+        first: currentPoint.point
+        second: nextPoint.point
+      )
+      if area + areaTolerance < minArea {
+        minArea = area
+        minIndex = i
+      }
+    }
+    if count2 <= 3 or (minArea > areaTolerance and count2 <= target) {
+      break
+    }
+    count2 = count2 - 1
+    hull.remove(index: minIndex)
+  }
+  ret count2
+}
+
+# b3Sort2D: insertion sort by x, then y.
+func sort2d(points: mod List(Point2d)) {
+  loop var i: Int = 1, i < points.length, ++i {
+    let base: Point2d = points.copyAtDefault(index: i)
+    var j: Int = i - 1
+    loop j >= 0 {
+      let candidate: Point2d = points.copyAtDefault(index: j)
+      if candidate.point.x > base.point.x or (candidate.point.x is base.point.x and candidate.point.y > base.point.y) {
+        points.set(index: j + 1, value: candidate)
+        j = j - 1
+      } else {
+        break
+      }
+    }
+    points.set(index: j + 1, value: base)
+  }
+}
+
+# b3Weld2D: merge sorted points closer than a quarter slop, keeping the
+# lowest original index. Returns the new count; `points` is shortened to it.
+func weld2d(points: mod List(Point2d), lengthUnitsPerMeter: view Float) ret Int {
+  let count1: Int = points.length
+  if count1 <= 1 {
+    ret count1
+  }
+  let weldDistance: Float = 0.25 * linearSlop(lengthUnitsPerMeter: lengthUnitsPerMeter)
+  let toleranceSquared: Float = weldDistance * weldDistance
+  var count2: Int = 1
+  var baseIndex: Int = 0
+  loop var i: Int = 1, i < count1, ++i {
+    let current: Point2d = points.copyAtDefault(index: i)
+    let base: Point2d = points.copyAtDefault(index: baseIndex)
+    let separationSquared: Float = distanceSquared(from: current.point, to: base.point)
+    if separationSquared < toleranceSquared {
+      if current.originalIndex < base.originalIndex {
+        points.set(index: baseIndex, value: current)
+      }
+    } else {
+      points.set(index: count2, value: current)
+      baseIndex = count2
+      count2 = count2 + 1
+    }
+  }
+  points.truncate(len: count2)
+  ret count2
+}
+
+# Write `point` at `index` of `hull`, growing it by one when `index` is its
+# length (Box3D's `hull[count] = point` into a 2n buffer).
+func putHullPoint(hull: mod List(Point2d), index: view Int, point: view Point2d) {
+  if index < hull.length {
+    hull.set(index: index, value: point)
+  } else {
+    hull.add(value: point)
+  }
+}
+
+# b3Hull2D: the convex hull of `points` (sorted and welded in place) into
+# `hull`, counter-clockwise. Returns the hull count; `hull` is shortened to
+# it.
+func hull2d(
+  points: mod List(Point2d)
+  hull: mod List(Point2d)
+  lengthUnitsPerMeter: view Float
+) ret Int {
+  hull.clear()
+  var count1: Int = points.length
+  if count1 <= 0 {
+    ret 0
+  }
+  if count1 is 1 {
+    hull.add(value: points.copyAtDefault(index: 0))
+    ret 1
+  }
+  sort2d(points: points)
+  count1 = weld2d(points: points, lengthUnitsPerMeter: lengthUnitsPerMeter)
+  if count1 is 1 {
+    hull.add(value: points.copyAtDefault(index: 0))
+    ret 1
+  }
+  if count1 is 2 {
+    hull.add(value: points.copyAtDefault(index: 0))
+    hull.add(value: points.copyAtDefault(index: 1))
+    ret 2
+  }
+
+  # The lower chain
+  var count2: Int = 0
+  loop var i: Int = 0, i < count1, ++i {
+    let point: Point2d = points.copyAtDefault(index: i)
+    loop count2 >= 2 {
+      let secondLast: Point2d = hull.copyAtDefault(index: count2 - 2)
+      let last: Point2d = hull.copyAtDefault(index: count2 - 1)
+      let area: Float = cross2d(origin: secondLast.point, first: last.point, second: point.point)
+      if area > 0.0 {
+        break
+      }
+      count2 = count2 - 1
+    }
+    putHullPoint(hull: hull, index: count2, point: point)
+    count2 = count2 + 1
+  }
+
+  # The upper chain
+  let lowerCount: Int = count2 + 1
+  var i: Int = count1 - 2
+  loop i >= 0 {
+    let point: Point2d = points.copyAtDefault(index: i)
+    loop count2 >= lowerCount {
+      let secondLast: Point2d = hull.copyAtDefault(index: count2 - 2)
+      let last: Point2d = hull.copyAtDefault(index: count2 - 1)
+      let area: Float = cross2d(origin: secondLast.point, first: last.point, second: point.point)
+      if area > 0.0 {
+        break
+      }
+      count2 = count2 - 1
+    }
+    putHullPoint(hull: hull, index: count2, point: point)
+    count2 = count2 + 1
+    i = i - 1
+  }
+
+  # The last point repeats the first
+  hull.truncate(len: count2 - 1)
+  ret count2 - 1
+}

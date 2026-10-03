@@ -1,0 +1,510 @@
+# Convex hulls (b3HullData of Box3D's types.h and the hull queries of hull.c
+# at 9f998c8, plus b3FindIncidentFace of manifold.c). Box3D's operation
+# order is kept exactly; checked bit for bit against the oracle in fixture
+# 951.
+#
+# Box3D lays a hull out as one block with its arrays hanging off the end,
+# addressed by byte offsets, plus a hash, a version and structure-of-arrays
+# copies of the points and normals for its SIMD support search. A Rae hull
+# is a struct of Lists; the scalar support search needs no SoA copies, and
+# the hash/version only serve Box3D's hull map, so they are not ported.
+import Math
+open Vec3
+open physics/Constants
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/MatrixMath
+open physics/math/TransformMath
+open physics/math/AabbMath
+open physics/math/PlaneMath
+open physics/geometry/QueryTypes
+open physics/collision/Simplex
+open physics/collision/Distance
+open physics/collision/ShapeCast
+
+# A hull vertex: a half-edge that starts at it (b3HullVertex).
+type HullVertex {
+  edge: Int
+}
+
+# A half-edge: the next edge around its face (counter-clockwise), its twin,
+# the vertex it starts at and the face to its left (b3HullHalfEdge). A
+# half-edge and its twin are stored next to each other (2i, 2i + 1).
+type HullHalfEdge {
+  next: Int
+  twin: Int
+  origin: Int
+  face: Int
+}
+
+# A hull face: any half-edge on it (b3HullFace). Faces are convex polygons.
+type HullFace {
+  edge: Int
+}
+
+# A convex hull (b3HullData). `points` and `vertices` are parallel, as are
+# `faces` and `planes`.
+type Hull {
+  # The local bounding box
+  aabb: Aabb
+  surfaceArea: Float
+  # The volume (b3HullData.volume)
+  volume: Float
+  # The radius of the largest sphere at the center
+  innerRadius: Float
+  # The local centroid
+  center: Vec3
+  # The inertia tensor about the centroid, for density 1
+  centralInertia: Matrix3
+  vertices: List(HullVertex)
+  points: List(Vec3)
+  edges: List(HullHalfEdge)
+  faces: List(HullFace)
+  planes: List(Plane)
+}
+
+# The extent of a shape about a point (b3ShapeExtent).
+type ShapeExtent {
+  minExtent: Float
+  maxExtent: Vec3
+}
+
+func hullVertexCount(hull: view Hull) ret Int {
+  ret hull.points.length
+}
+
+# The half-edge count (b3HullData.edgeCount: double the edge count).
+func hullEdgeCount(hull: view Hull) ret Int {
+  ret hull.edges.length
+}
+
+func hullFaceCount(hull: view Hull) ret Int {
+  ret hull.faces.length
+}
+
+func hullPoint(hull: view Hull, index: view Int) ret Vec3 {
+  ret hull.points.copyAtDefault(index: index)
+}
+
+func hullEdge(hull: view Hull, index: view Int) ret HullHalfEdge {
+  ret hull.edges.copyAtDefault(index: index)
+}
+
+func hullPlane(hull: view Hull, index: view Int) ret Plane {
+  ret hull.planes.copyAtDefault(index: index)
+}
+
+# The proxy of a hull: its points, radius 0.
+func hullProxy(hull: view Hull) ret ShapeProxy {
+  ret makeProxy(points: hull.points, radius: 0.0)
+}
+
+# b3UpdateHullBounds
+func updateHullBounds(hull: mod Hull) {
+  let first: Vec3 = hull.points.copyAtDefault(index: 0)
+  var bounds: Aabb = { lowerBound: first, upperBound: first }
+  loop var i: Int = 1, i < hull.points.length, ++i {
+    let point: Vec3 = hull.points.copyAtDefault(index: i)
+    bounds.lowerBound = min(left: bounds.lowerBound, right: point)
+    bounds.upperBound = max(left: bounds.upperBound, right: point)
+  }
+  hull.aabb = bounds
+}
+
+# b3UpdateHullBulkProperties: area, volume, centroid, inner radius and
+# central inertia, by summing the tetrahedra of a fan over each face (M.
+# Kallay, "Computing the Moment of Inertia of a Solid Defined by a Triangle
+# Mesh"). False for a degenerate hull.
+func updateHullBulkProperties(hull: mod Hull) ret Bool {
+  var area: Float = 0.0
+  var volume: Float = 0.0
+  var center: Vec3 = zeroVector()
+
+  # The first vertex as the origin reduces round-off
+  let origin: Vec3 = hull.points.copyAtDefault(index: 0)
+
+  var xx: Float = 0.0
+  var xy: Float = 0.0
+  var yy: Float = 0.0
+  var xz: Float = 0.0
+  var zz: Float = 0.0
+  var yz: Float = 0.0
+
+  let faceCount: Int = hull.faces.length
+  loop var faceIndex: Int = 0, faceIndex < faceCount, ++faceIndex {
+    let face: HullFace = hull.faces.copyAtDefault(index: faceIndex)
+    let edge1Index: Int = face.edge
+    let edge1: HullHalfEdge = hullEdge(hull: hull, index: edge1Index)
+    var edge2: HullHalfEdge = hullEdge(hull: hull, index: edge1.next)
+    var edge3Index: Int = edge2.next
+    let point1: Vec3 = hull.points.copyAtDefault(index: edge1.origin)
+    let v1: Vec3 = subtract(left: point1, right: origin)
+    loop true {
+      let edge3: HullHalfEdge = hullEdge(hull: hull, index: edge3Index)
+      let point2: Vec3 = hull.points.copyAtDefault(index: edge2.origin)
+      let point3: Vec3 = hull.points.copyAtDefault(index: edge3.origin)
+      let v2: Vec3 = subtract(left: point2, right: origin)
+      let v3: Vec3 = subtract(left: point3, right: origin)
+
+      area = area + length(
+        vector: cross(left: subtract(left: v2, right: v1), right: subtract(left: v3, right: v1))
+      )
+
+      let determinant: Float = scalarTripleProduct(first: v1, second: v2, third: v3)
+      volume = volume + determinant
+
+      let v4: Vec3 = add(left: v1, right: add(left: v2, right: v3))
+      center = add(left: center, right: scale(scale: determinant, vector: v4))
+
+      xx = xx + determinant * (v1.x * v1.x + v2.x * v2.x + v3.x * v3.x + v4.x * v4.x)
+      yy = yy + determinant * (v1.y * v1.y + v2.y * v2.y + v3.y * v3.y + v4.y * v4.y)
+      zz = zz + determinant * (v1.z * v1.z + v2.z * v2.z + v3.z * v3.z + v4.z * v4.z)
+      xy = xy + determinant * (v1.x * v1.y + v2.x * v2.y + v3.x * v3.y + v4.x * v4.y)
+      xz = xz + determinant * (v1.x * v1.z + v2.x * v2.z + v3.x * v3.z + v4.x * v4.z)
+      yz = yz + determinant * (v1.y * v1.z + v2.y * v2.z + v3.y * v3.z + v4.y * v4.z)
+
+      edge2 = edge3
+      edge3Index = edge3.next
+      if edge3Index is edge1Index {
+        break
+      }
+    }
+  }
+
+  var localCenter: Vec3 = zeroVector()
+  if volume > 0.0 {
+    localCenter = scale(scale: 0.25 / volume, vector: center)
+  }
+  center = add(left: localCenter, right: origin)
+
+  var radius: Float = floatMax
+  loop var faceIndex: Int = 0, faceIndex < faceCount, ++faceIndex {
+    let separation: Float = planeSeparation(
+      plane: hull.planes.copyAtDefault(index: faceIndex)
+      point: center
+    )
+    radius = minFloat(left: radius, right: -separation)
+  }
+
+  let inertia: Matrix3 = {
+    columnX: Vec3 { x: yy + zz, y: -xy, z: -xz }
+    columnY: Vec3 { x: -xy, y: xx + zz, z: -yz }
+    columnZ: Vec3 { x: -xz, y: -yz, z: xx + yy }
+  }
+  let mass: Float = volume / 6.0
+  var centralInertia: Matrix3 = scale(scale: 1.0 / 120.0, matrix: inertia)
+  centralInertia = subtract(left: centralInertia, right: steiner(mass: mass, origin: localCenter))
+
+  hull.center = center
+  hull.centralInertia = centralInertia
+  hull.volume = mass
+  hull.surfaceArea = 0.5 * area
+  hull.innerRadius = radius
+
+  if mass <= 0.0 or volume <= 0.0 or area <= 0.0 or radius <= 0.0 {
+    ret false
+  }
+  ret true
+}
+
+# b3IsValidHull (its validating form): the half-edge structure is
+# consistent, Euler's formula holds, every face is in front of the center,
+# and the volume, area and inner radius are positive.
+func isValidHull(hull: view Hull) ret Bool {
+  let vertexCount: Int = hull.points.length
+  let edgeCount: Int = hull.edges.length
+  let faceCount: Int = hull.faces.length
+  if vertexCount - edgeCount / 2 + faceCount is not 2 {
+    ret false
+  }
+  if hull.vertices.length is not vertexCount or hull.planes.length is not faceCount {
+    ret false
+  }
+  loop var index: Int = 0, index < vertexCount, ++index {
+    let vertex: HullVertex = hull.vertices.copyAtDefault(index: index)
+    if hullEdge(hull: hull, index: vertex.edge).origin is not index {
+      ret false
+    }
+  }
+  var pairIndex: Int = 0
+  loop pairIndex < edgeCount {
+    if hullEdge(hull: hull, index: pairIndex).twin is not pairIndex + 1 {
+      ret false
+    }
+    if hullEdge(hull: hull, index: pairIndex + 1).twin is not pairIndex {
+      ret false
+    }
+    pairIndex = pairIndex + 2
+  }
+  loop var faceIndex: Int = 0, faceIndex < faceCount, ++faceIndex {
+    let baseEdgeIndex: Int = hull.faces.copyAtDefault(index: faceIndex).edge
+    if planeSeparation(plane: hullPlane(hull: hull, index: faceIndex), point: hull.center) >= 0.0 {
+      ret false
+    }
+    var edgeIndex: Int = baseEdgeIndex
+    var steps: Int = 0
+    loop true {
+      let edge: HullHalfEdge = hullEdge(hull: hull, index: edgeIndex)
+      let next: HullHalfEdge = hullEdge(hull: hull, index: edge.next)
+      let twin: HullHalfEdge = hullEdge(hull: hull, index: edge.twin)
+      if edge.face is not faceIndex or twin.twin is not edgeIndex or next.origin is not twin.origin {
+        ret false
+      }
+      edgeIndex = edge.next
+      steps = steps + 1
+      if edgeIndex is baseEdgeIndex {
+        break
+      }
+      if steps > edgeCount {
+        # A ring that never closes
+        ret false
+      }
+    }
+  }
+  if hull.volume <= 0.0 or hull.surfaceArea <= 0.0 or hull.innerRadius <= 0.0 {
+    ret false
+  }
+  ret true
+}
+
+# b3FindHullSupportVertex: the vertex furthest along `direction`, the
+# lowest index on a tie (what Box3D's four-lane search returns).
+func findHullSupportVertex(hull: view Hull, direction: view Vec3) ret Int {
+  var bestIndex: Int = -1
+  var bestDot: Float = -floatMax
+  loop var index: Int = 0, index < hull.points.length, ++index {
+    let point: Vec3 = hull.points.copyAtDefault(index: index)
+    let projection: Float = direction.x * point.x + direction.y * point.y + direction.z * point.z
+    if projection > bestDot {
+      bestDot = projection
+      bestIndex = index
+    }
+  }
+  ret bestIndex
+}
+
+# b3FindHullSupportFace: the face whose normal is most along `direction`.
+func findHullSupportFace(hull: view Hull, direction: view Vec3) ret Int {
+  var bestIndex: Int = -1
+  var bestDot: Float = -floatMax
+  loop var index: Int = 0, index < hull.planes.length, ++index {
+    let plane: Plane = hull.planes.copyAtDefault(index: index)
+    let projection: Float = dot(left: plane.normal, right: direction)
+    if projection > bestDot {
+      bestDot = projection
+      bestIndex = index
+    }
+  }
+  ret bestIndex
+}
+
+# b3FindIncidentFace (manifold.c): of the faces at vertex `vertexIndex`, the
+# one most anti-parallel to `refNormal`: first the edge out of the vertex
+# most perpendicular to the normal, then the more anti-parallel of its two
+# faces.
+func findIncidentFace(hull: view Hull, refNormal: view Vec3, vertexIndex: view Int) ret Int {
+  var minEdgeIndex: Int = -1
+  var minEdgeProjection: Float = floatMax
+  let firstEdgeIndex: Int = hull.vertices.copyAtDefault(index: vertexIndex).edge
+  var edgeIndex: Int = firstEdgeIndex
+  let edgeOrigin: Vec3 = hullPoint(hull: hull, index: hullEdge(hull: hull, index: edgeIndex).origin)
+  loop true {
+    let edge: HullHalfEdge = hullEdge(hull: hull, index: edgeIndex)
+    let twin: HullHalfEdge = hullEdge(hull: hull, index: edge.twin)
+    let twinOrigin: Vec3 = hullPoint(hull: hull, index: twin.origin)
+    let axis: Vec3 = normalize(vector: subtract(left: twinOrigin, right: edgeOrigin))
+    let edgeProjection: Float = absFloat(value: dot(left: axis, right: refNormal))
+    if edgeProjection < minEdgeProjection {
+      minEdgeIndex = edgeIndex
+      minEdgeProjection = edgeProjection
+    }
+    edgeIndex = twin.next
+    if edgeIndex is firstEdgeIndex {
+      break
+    }
+  }
+  let minEdge: HullHalfEdge = hullEdge(hull: hull, index: minEdgeIndex)
+  let minFaceIndex1: Int = minEdge.face
+  let minFaceIndex2: Int = hullEdge(hull: hull, index: minEdge.twin).face
+  let normal1: Vec3 = hullPlane(hull: hull, index: minFaceIndex1).normal
+  let normal2: Vec3 = hullPlane(hull: hull, index: minFaceIndex2).normal
+  if dot(left: normal1, right: refNormal) < dot(left: normal2, right: refNormal) {
+    ret minFaceIndex1
+  }
+  ret minFaceIndex2
+}
+
+# b3ComputeHullMass
+func computeHullMass(hull: view Hull, density: view Float) ret MassData {
+  ret MassData {
+    mass: density * hull.volume
+    center: hull.center
+    inertia: scale(scale: density, matrix: hull.centralInertia)
+  }
+}
+
+# b3ComputeHullAABB
+func computeHullAabb(hull: view Hull, transform: view Transform) ret Aabb {
+  ret transformAabb(transform: transform, box: hull.aabb)
+}
+
+# b3ComputeSweptHullAABB
+func computeSweptHullAabb(
+  hull: view Hull
+  transform1: view Transform
+  transform2: view Transform
+) ret Aabb {
+  let box1: Aabb = transformAabb(transform: transform1, box: hull.aabb)
+  let box2: Aabb = transformAabb(transform: transform2, box: hull.aabb)
+  ret union(first: box1, second: box2)
+}
+
+# b3OverlapHull: does the hull at `shapeTransform` overlap the proxy?
+func overlapHull(
+  hull: view Hull
+  shapeTransform: view Transform
+  proxy: view ShapeProxy
+  lengthUnitsPerMeter: view Float
+) ret Bool {
+  var cache: SimplexCache = emptySimplexCache()
+  let output: DistanceOutput = proxyDistance(
+    proxyA: hullProxy(hull: hull)
+    proxyB: proxy
+    transform: inverseMultiply(left: shapeTransform, right: transformIdentity())
+    useRadii: true
+    cache: cache
+  )
+  ret output.distance < overlapSlop(lengthUnitsPerMeter: lengthUnitsPerMeter)
+}
+
+# b3RayCastHull: clip the ray against every face plane. A ray that starts
+# inside hits at its origin.
+func rayCastHull(hull: view Hull, input: view RayCastInput) ret CastOutput {
+  var output: CastOutput = emptyCastOutput()
+  var lower: Float = 0.0
+  var upper: Float = input.maxFraction
+  var bestFace: Int = -1
+  loop var faceIndex: Int = 0, faceIndex < hull.planes.length, ++faceIndex {
+    let plane: Plane = hull.planes.copyAtDefault(index: faceIndex)
+    let separation: Float = plane.offset - dot(left: plane.normal, right: input.origin)
+    let denominator: Float = dot(left: plane.normal, right: input.translation)
+    if denominator is 0.0 {
+      if separation < 0.0 {
+        ret output
+      }
+    } else {
+      let fraction: Float = separation / denominator
+      if denominator < 0.0 {
+        if fraction > lower {
+          bestFace = faceIndex
+          lower = fraction
+        }
+      } else {
+        if fraction < upper {
+          upper = fraction
+        }
+      }
+      if upper < lower {
+        ret output
+      }
+    }
+  }
+  if bestFace >= 0 {
+    output.point = add(left: input.origin, right: scale(scale: lower, vector: input.translation))
+    output.normal = hullPlane(hull: hull, index: bestFace).normal
+    output.fraction = lower
+    output.hit = true
+  } else {
+    output.point = input.origin
+    output.hit = true
+  }
+  ret output
+}
+
+# b3ShapeCastHull: cast a proxy against the hull.
+func shapeCastHull(
+  hull: view Hull
+  input: view ShapeCastInput
+  lengthUnitsPerMeter: view Float
+) ret CastOutput {
+  ret proxyCast(
+    proxyA: hullProxy(hull: hull)
+    proxyB: input.proxy
+    transform: transformIdentity()
+    translationB: input.translation
+    maxFraction: input.maxFraction
+    canEncroach: input.canEncroach
+    lengthUnitsPerMeter: lengthUnitsPerMeter
+  )
+}
+
+# b3CollideMoverAndHull: the plane that pushes the mover capsule out of the
+# hull. Deep overlap is not handled (a mesh could not handle it either).
+# Returns the number of planes (0 or 1) written to `result`.
+func collideMoverAndHull(result: mod PlaneResult, hull: view Hull, mover: view Capsule) ret Int {
+  var cache: SimplexCache = emptySimplexCache()
+  let output: DistanceOutput = proxyDistance(
+    proxyA: hullProxy(hull: hull)
+    proxyB: capsuleProxy(capsule: mover)
+    transform: transformIdentity()
+    useRadii: false
+    cache: cache
+  )
+  let totalRadius: Float = mover.radius
+  if output.distance is 0.0 {
+    ret 0
+  }
+  if output.distance <= totalRadius {
+    result = PlaneResult {
+      plane: Plane { normal: output.normal, offset: totalRadius - output.distance }
+      point: output.pointA
+      triangleIndex: 0
+      childIndex: 0
+      materialIndex: 0
+    }
+    ret 1
+  }
+  ret 0
+}
+
+# b3ComputeHullExtent
+func computeHullExtent(hull: view Hull, origin: view Vec3) ret ShapeExtent {
+  var extent: ShapeExtent = { minExtent: hull.innerRadius, maxExtent: zeroVector() }
+  loop let point: view Vec3 in hull.points {
+    extent.maxExtent = max(
+      left: extent.maxExtent
+      right: abs(vector: subtract(left: point, right: origin))
+    )
+  }
+  ret extent
+}
+
+# b3ComputeHullProjectedArea: the area of the hull's shadow along
+# `direction`, from the front-facing face fans.
+func computeHullProjectedArea(hull: view Hull, direction: view Vec3) ret Float {
+  var area: Float = 0.0
+  loop var i: Int = 0, i < hull.faces.length, ++i {
+    let baseEdge: Int = hull.faces.copyAtDefault(index: i).edge
+    var edge: HullHalfEdge = hullEdge(hull: hull, index: baseEdge)
+    let point1: Vec3 = hullPoint(hull: hull, index: edge.origin)
+    var edgeIndex: Int = edge.next
+    edge = hullEdge(hull: hull, index: edgeIndex)
+    var point2: Vec3 = hullPoint(hull: hull, index: edge.origin)
+    edgeIndex = edge.next
+    loop true {
+      edge = hullEdge(hull: hull, index: edgeIndex)
+      let point3: Vec3 = hullPoint(hull: hull, index: edge.origin)
+      let edge1: Vec3 = subtract(left: point2, right: point1)
+      let edge2: Vec3 = subtract(left: point3, right: point1)
+      let normal: Vec3 = cross(left: edge1, right: edge2)
+      let projected: Float = dot(left: normal, right: direction)
+      area = area + maxFloat(left: projected, right: 0.0)
+      point2 = point3
+      edgeIndex = edge.next
+      if edgeIndex is baseEdge {
+        break
+      }
+    }
+  }
+  ret 0.5 * area
+}
