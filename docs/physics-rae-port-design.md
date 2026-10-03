@@ -272,6 +272,15 @@ C added.
   complete** for convex shapes; meshes, height fields and compounds are P5.
 - **P3 — broad phase.** Dynamic tree (insert, remove, rebuild, queries,
   ray casts) and pair finding.
+  **Data structures landed 2026-10-04, bit-exact:** the dynamic tree (insert,
+  remove, move, enlarge, rotations, the median-split rebuild, refit, moved
+  flags, and the box, ray, box-cast and closest queries as explicit
+  traversal states instead of callbacks), the pair hash set, the bit set,
+  the id pool and qsort (`lib/physics/broadPhase/`, `container/`, golden
+  `broadphase`, fixture 953). **Pair finding** (`b3UpdateBroadPhasePairs`:
+  moved-sibling gathering, self and cross pair tasks, `b3ShouldCreatePair`'s
+  filters) needs the world's shapes, so it is queued with P4.
+
 - **P4 — the first world.** Bodies, shapes, contacts, solver sets, islands and
   sleep, constraint graph, scalar contact solver, sensors and events; the
   falling sphere, restitution, friction and pyramid scenes bit-exact.

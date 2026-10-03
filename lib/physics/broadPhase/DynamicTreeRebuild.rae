@@ -1,0 +1,566 @@
+# The dynamic AABB tree of Box3D's dynamic_tree.c at 9f998c8, part 3: the
+# rebuild (B3_TREE_HEURISTIC 0, the median split Box3D compiles), the moved
+# flags (mark, gather, clear) and the refit. Box3D's operation order is kept
+# exactly; checked bit for bit against the oracle in fixture 953.
+open Vec3
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/AabbMath
+open physics/broadPhase/DynamicTree
+
+# One subtree under construction (b3RebuildItem): where it is written, the
+# pair its children go in, and its range of build leaves split in two.
+type RebuildItem {
+  nodeIndex: Int
+  pair: Int
+  childCount: Int
+  startIndex: Int
+  splitIndex: Int
+  endIndex: Int
+}
+
+# A subtree being copied (b3CopyItem).
+type CopyItem {
+  oldPair: Int
+  newIndex: Int
+}
+
+# The parent of child pair `pair` in `nodes` (b3MakeInternalNode over any
+# node array).
+func internalNodeOf(nodes: view List(TreeNode), pair: view Int) ret TreeNode {
+  let child1: TreeNode = nodes.copyAtDefault(index: pair)
+  let child2: TreeNode = nodes.copyAtDefault(index: pair + 1)
+  ret TreeNode {
+    aabb: union(first: child1.aabb, second: child2.aabb)
+    flagIndex: pair bitor ((child1.flagIndex bitor child2.flagIndex) bitand movedNode)
+    height: 1 + maxInt(left: nodeHeight(node: child1), right: nodeHeight(node: child2))
+  }
+}
+
+# Write `node` at `index` of a node list, growing it as needed.
+func putNode(nodes: mod List(TreeNode), index: view Int, node: view TreeNode) {
+  loop nodes.length <= index {
+    nodes.add(value: makeEmptyNode())
+  }
+  nodes.set(index: index, value: node)
+}
+
+func putInt(values: mod List(Int), index: view Int, value: view Int) {
+  loop values.length <= index {
+    values.add(value: 0)
+  }
+  values.set(index: index, value: value)
+}
+
+func putVec(values: mod List(Vec3), index: view Int, value: view Vec3) {
+  loop values.length <= index {
+    values.add(value: zeroVector())
+  }
+  values.set(index: index, value: value)
+}
+
+# Swap entries `first` and `second` of the build leaf indices and centers.
+func swapBuildLeaves(
+  indices: mod List(Int)
+  centers: mod List(Vec3)
+  first: view Int
+  second: view Int
+) {
+  let index: Int = indices.copyAtDefault(index: first)
+  indices.set(index: first, value: indices.copyAtDefault(index: second))
+  indices.set(index: second, value: index)
+  let centerValue: Vec3 = centers.copyAtDefault(index: first)
+  centers.set(index: first, value: centers.copyAtDefault(index: second))
+  centers.set(index: second, value: centerValue)
+}
+
+# The center coordinate on `axis` (0 x, 1 y, 2 z).
+func centerOnAxis(centers: view List(Vec3), index: view Int, axis: view Int) ret Float {
+  ret getByIndex(vector: centers.copyAtDefault(index: index), index: axis)
+}
+
+# b3PartitionMid: split the `count` build leaves from `start` at the
+# middle of their centers' longest axis (Hoare partition). Returns the left
+# count.
+func partitionMid(
+  indices: mod List(Int)
+  centers: mod List(Vec3)
+  start: view Int
+  count: view Int
+) ret Int {
+  if count <= 2 {
+    ret count / 2
+  }
+  var lowerBound: Vec3 = centers.copyAtDefault(index: start)
+  var upperBound: Vec3 = lowerBound
+  loop var i: Int = 1, i < count, ++i {
+    let point: Vec3 = centers.copyAtDefault(index: start + i)
+    lowerBound = min(left: lowerBound, right: point)
+    upperBound = max(left: upperBound, right: point)
+  }
+  let extent: Vec3 = subtract(left: upperBound, right: lowerBound)
+  let middle: Vec3 = scale(scale: 0.5, vector: add(left: lowerBound, right: upperBound))
+
+  var axis: Int = 2
+  if extent.x >= extent.y and extent.x >= extent.z {
+    axis = 0
+  } else if extent.y >= extent.z {
+    axis = 1
+  }
+  let pivot: Float = getByIndex(vector: middle, index: axis)
+
+  var index1: Int = 0
+  var index2: Int = count
+  loop index1 < index2 {
+    loop index1 < index2 and centerOnAxis(centers: centers, index: start + index1, axis: axis) < pivot {
+      index1 = index1 + 1
+    }
+    loop index1 < index2 and centerOnAxis(centers: centers, index: start + index2 - 1, axis: axis) >= pivot {
+      index2 = index2 - 1
+    }
+    if index1 < index2 {
+      swapBuildLeaves(
+        indices: indices
+        centers: centers
+        first: start + index1
+        second: start + index2 - 1
+      )
+      index1 = index1 + 1
+      index2 = index2 - 1
+    }
+  }
+  if index1 > 0 and index1 < count {
+    ret index1
+  }
+  ret count / 2
+}
+
+# b3BumpPair: a fresh pair at nodeEnd under `parent`.
+func bumpPair(tree: mod DynamicTree, parent: view Int) ret Int {
+  let pair: Int = tree.nodeEnd
+  tree.nodeEnd = tree.nodeEnd + 2
+  setTreeParent(tree: tree, index: pair, parent: parent)
+  setTreeParent(tree: tree, index: pair + 1, parent: parent)
+  ret pair
+}
+
+# b3SetLeftChild
+func withLeftChild(node: view TreeNode, pair: view Int) ret TreeNode {
+  var result: TreeNode = node
+  result.flagIndex = (node.flagIndex bitand (4294967295 - nodeIndexMask)) bitor pair
+  ret result
+}
+
+# b3CopySubtree: copy a retained subtree from the old nodes into the new
+# array, depth first with the bump allocator.
+func copySubtree(tree: mod DynamicTree, root: view TreeNode, newIndex: view Int) {
+  if isLeafNode(node: root) {
+    putNode(nodes: tree.swapNodes, index: newIndex, node: root)
+    setProxyNode(tree: tree, proxyId: nodeProxyId(node: root), node: newIndex)
+    ret
+  }
+  let stack: List(CopyItem) = List.create(CopyItem, cap: 32)
+  var oldPair: Int = leftChild(node: root)
+  var newPair: Int = bumpPair(tree: tree, parent: newIndex)
+  # The subtree root, a left or a right sibling
+  putNode(nodes: tree.swapNodes, index: newIndex, node: withLeftChild(node: root, pair: newPair))
+
+  loop true {
+    # Copy the siblings
+    let left: TreeNode = treeNode(tree: tree, index: oldPair)
+    let right: TreeNode = treeNode(tree: tree, index: oldPair + 1)
+    putNode(nodes: tree.swapNodes, index: newPair, node: left)
+    putNode(nodes: tree.swapNodes, index: newPair + 1, node: right)
+
+    if isLeafNode(node: right) {
+      setProxyNode(tree: tree, proxyId: nodeProxyId(node: right), node: newPair + 1)
+    } else if stack.length < treeStackSize {
+      # The right sibling's children, for later
+      stack.add(value: CopyItem { oldPair: leftChild(node: right), newIndex: newPair + 1 })
+    }
+
+    if isLeafNode(node: left) is false {
+      # Descend the left subtree
+      let leftIndex: Int = newPair
+      oldPair = leftChild(node: left)
+      newPair = bumpPair(tree: tree, parent: leftIndex)
+      putNode(
+        nodes: tree.swapNodes
+        index: leftIndex
+        node: withLeftChild(node: left, pair: newPair)
+      )
+      continue
+    }
+
+    setProxyNode(tree: tree, proxyId: nodeProxyId(node: left), node: newPair)
+    if stack.length is 0 {
+      break
+    }
+
+    # A right subtree pushed earlier
+    let item: CopyItem = stack.copyAtDefault(index: stack.length - 1)
+    stack.removeLast()
+    oldPair = item.oldPair
+    newPair = bumpPair(tree: tree, parent: item.newIndex)
+    let parentNode: TreeNode = tree.swapNodes.copyAtDefault(index: item.newIndex)
+    putNode(
+      nodes: tree.swapNodes
+      index: item.newIndex
+      node: withLeftChild(node: parentNode, pair: newPair)
+    )
+  }
+}
+
+# b3PlaceLeaf: a build leaf is a proxy or a retained subtree.
+func placeLeaf(tree: mod DynamicTree, leaf: view TreeNode, newIndex: view Int) {
+  if isLeafNode(node: leaf) {
+    putNode(nodes: tree.swapNodes, index: newIndex, node: leaf)
+    setProxyNode(tree: tree, proxyId: nodeProxyId(node: leaf), node: newIndex)
+  } else {
+    copySubtree(tree: tree, root: leaf, newIndex: newIndex)
+  }
+}
+
+# b3BuildTree: a top-down median-split build of the `leafCount` build
+# leaves into swapNodes, in depth-first order.
+func buildTree(tree: mod DynamicTree, leafCount: view Int) {
+  tree.nodeEnd = 2
+  putNode(nodes: tree.swapNodes, index: rootNode + 1, node: makeEmptyNode())
+  setTreeParent(tree: tree, index: rootNode, parent: -1)
+  setTreeParent(tree: tree, index: rootNode + 1, parent: -1)
+
+  if leafCount is 1 {
+    let first: TreeNode = tree.leafNodes.copyAtDefault(
+      index: tree.leafIndices.copyAtDefault(index: 0)
+    )
+    placeLeaf(tree: tree, leaf: first, newIndex: rootNode)
+    ret
+  }
+
+  let stack: List(RebuildItem) = List.create(RebuildItem, cap: 32)
+  let rootPairIndex: Int = bumpPair(tree: tree, parent: rootNode)
+  stack.add(value: RebuildItem {
+    nodeIndex: rootNode
+    pair: rootPairIndex
+    childCount: -1
+    startIndex: 0
+    splitIndex: partitionMid(
+      indices: tree.leafIndices
+      centers: tree.leafCenters
+      start: 0
+      count: leafCount
+    )
+    endIndex: leafCount
+  })
+  var top: Int = 0
+
+  loop true {
+    var item: RebuildItem = stack.copyAtDefault(index: top)
+    item.childCount = item.childCount + 1
+    stack.set(index: top, value: item)
+
+    if item.childCount is 2 {
+      # Both children are written: finish the parent.
+      putNode(
+        nodes: tree.swapNodes
+        index: item.nodeIndex
+        node: internalNodeOf(nodes: tree.swapNodes, pair: item.pair)
+      )
+      if top is 0 {
+        break
+      }
+      top = top - 1
+      continue
+    }
+
+    let slot: Int = item.childCount
+    var startIndex: Int = item.splitIndex
+    var endIndex: Int = item.endIndex
+    if slot is 0 {
+      startIndex = item.startIndex
+      endIndex = item.splitIndex
+    }
+    let count: Int = endIndex - startIndex
+    let nodeIndex: Int = item.pair + slot
+    if count is 1 {
+      let leaf: TreeNode = tree.leafNodes.copyAtDefault(
+        index: tree.leafIndices.copyAtDefault(index: startIndex)
+      )
+      placeLeaf(tree: tree, leaf: leaf, newIndex: nodeIndex)
+      continue
+    }
+
+    top = top + 1
+    let pair: Int = bumpPair(tree: tree, parent: nodeIndex)
+    let split: Int = startIndex + partitionMid(
+      indices: tree.leafIndices
+      centers: tree.leafCenters
+      start: startIndex
+      count: count
+    )
+    let newItem: RebuildItem = {
+      nodeIndex: nodeIndex
+      pair: pair
+      childCount: -1
+      startIndex: startIndex
+      splitIndex: split
+      endIndex: endIndex
+    }
+    if top < stack.length {
+      stack.set(index: top, value: newItem)
+    } else {
+      stack.add(value: newItem)
+    }
+  }
+}
+
+# A build leaf: `node` with its moved flag cleared unless this is a full
+# build.
+func addBuildLeaf(
+  tree: mod DynamicTree
+  node: view TreeNode
+  leafCount: view Int
+  fullBuild: view Bool
+) {
+  var leaf: TreeNode = node
+  if fullBuild is false {
+    leaf.flagIndex = leaf.flagIndex bitand (4294967295 - movedNode)
+  }
+  putInt(values: tree.leafIndices, index: leafCount, value: leafCount)
+  putNode(nodes: tree.leafNodes, index: leafCount, node: leaf)
+  putVec(values: tree.leafCenters, index: leafCount, value: center(box: leaf.aabb))
+}
+
+# b3DynamicTree_Rebuild: rebuild the moved part of the tree (everything for
+# a full build), putting the whole tree in depth-first order. Unmoved
+# subtrees are kept as build leaves. Returns the build leaf count.
+func rebuildTree(tree: mod DynamicTree, fullBuild: view Bool) ret Int {
+  if tree.proxyCount is 0 {
+    ret 0
+  }
+  # An unordered tree is rebuilt even when nothing moved: the refit needs
+  # the order.
+  let root: TreeNode = treeNode(tree: tree, index: rootNode)
+  if fullBuild is false and isMovedNode(node: root) is false and tree.dfsOrdered {
+    ret 0
+  }
+
+  # The build leaves: a marked internal node is descended (and abandoned),
+  # anything else is a leaf, retained subtrees included.
+  var leafCount: Int = 0
+  let stack: List(Int) = List.create(Int, cap: 32)
+  if isLeafNode(node: root) is false and (fullBuild or isMovedNode(node: root)) {
+    stack.add(value: leftChild(node: root))
+  } else {
+    addBuildLeaf(
+      tree: tree
+      node: root
+      leafCount: 0
+      fullBuild: fullBuild
+    )
+    leafCount = 1
+  }
+  loop stack.length > 0 {
+    let pair: Int = stack.copyAtDefault(index: stack.length - 1)
+    stack.removeLast()
+    loop var i: Int = 0, i < 2, ++i {
+      let node: TreeNode = treeNode(tree: tree, index: pair + i)
+      if isLeafNode(node: node) is false and (fullBuild or isMovedNode(node: node)) {
+        stack.add(value: leftChild(node: node))
+        continue
+      }
+      addBuildLeaf(
+        tree: tree
+        node: node
+        leafCount: leafCount
+        fullBuild: fullBuild
+      )
+      leafCount = leafCount + 1
+    }
+  }
+
+  buildTree(tree: tree, leafCount: leafCount)
+
+  # The new array is the tree; the old one is the spare.
+  let previous: List(TreeNode) = tree.nodes
+  tree.nodes = tree.swapNodes
+  tree.swapNodes = previous
+  tree.pairFreeList = -1
+  tree.dfsOrdered = true
+  ret leafCount
+}
+
+# b3DynamicTree_MarkProxyMovedSerial: flag the leaf and its ancestors.
+func markProxyMovedSerial(tree: mod DynamicTree, proxyId: view Int) {
+  var index: Int = treeProxy(tree: tree, proxyId: proxyId).node
+  loop index is not -1 {
+    markNodeMoved(tree: tree, index: index)
+    index = treeParent(tree: tree, index: index)
+  }
+}
+
+# b3DynamicTree_MarkProxyMoved: set a leaf's new (larger) box and flag its
+# ancestors up to the first already flagged one. (Box3D does this with
+# atomics from the solver threads; the result is the same.)
+func markProxyMoved(tree: mod DynamicTree, proxyId: view Int, box: view Aabb) {
+  var index: Int = treeProxy(tree: tree, proxyId: proxyId).node
+  var leaf: TreeNode = treeNode(tree: tree, index: index)
+  leaf.aabb = box
+  leaf.flagIndex = leaf.flagIndex bitor movedNode
+  tree.nodes.set(index: index, value: leaf)
+  index = treeParent(tree: tree, index: index)
+  loop index is not -1 {
+    if isMovedNode(node: treeNode(tree: tree, index: index)) {
+      break
+    }
+    markNodeMoved(tree: tree, index: index)
+    index = treeParent(tree: tree, index: index)
+  }
+}
+
+# Clear the moved flag of node `index`.
+func clearNodeMoved(tree: mod DynamicTree, index: view Int) {
+  var node: TreeNode = treeNode(tree: tree, index: index)
+  node.flagIndex = node.flagIndex bitand (4294967295 - movedNode)
+  tree.nodes.set(index: index, value: node)
+}
+
+# b3DynamicTree_ClearMoved: clear every moved flag.
+func clearMoved(tree: mod DynamicTree) {
+  let root: TreeNode = treeNode(tree: tree, index: rootNode)
+  if isMovedNode(node: root) is false {
+    ret
+  }
+  clearNodeMoved(tree: tree, index: rootNode)
+  if isLeafNode(node: root) {
+    ret
+  }
+  let stack: List(Int) = List.create(Int, cap: 32)
+  stack.add(value: leftChild(node: root))
+  loop stack.length > 0 {
+    let pair: Int = stack.copyAtDefault(index: stack.length - 1)
+    stack.removeLast()
+    loop var i: Int = 0, i < 2, ++i {
+      let node: TreeNode = treeNode(tree: tree, index: pair + i)
+      if isMovedNode(node: node) {
+        clearNodeMoved(tree: tree, index: pair + i)
+        if isLeafNode(node: node) is false and stack.length < treeStackSize {
+          stack.add(value: leftChild(node: node))
+        }
+      }
+    }
+  }
+}
+
+# b3DynamicTree_GatherMovedProxies: the proxies of the moved leaves, in
+# traversal order, into `proxyIds` (cleared first). Returns the count.
+func gatherMovedProxies(tree: view DynamicTree, proxyIds: mod List(Int)) ret Int {
+  proxyIds.clear()
+  let root: TreeNode = treeNode(tree: tree, index: rootNode)
+  if isMovedNode(node: root) is false {
+    ret 0
+  }
+  if isLeafNode(node: root) {
+    proxyIds.add(value: nodeProxyId(node: root))
+    ret 1
+  }
+  let stack: List(Int) = List.create(Int, cap: 32)
+  stack.add(value: leftChild(node: root))
+  loop stack.length > 0 {
+    let pair: Int = stack.copyAtDefault(index: stack.length - 1)
+    stack.removeLast()
+    loop var i: Int = 0, i < 2, ++i {
+      let node: TreeNode = treeNode(tree: tree, index: pair + i)
+      if isMovedNode(node: node) is false {
+        continue
+      }
+      if isLeafNode(node: node) {
+        proxyIds.add(value: nodeProxyId(node: node))
+      } else if stack.length < treeStackSize {
+        stack.add(value: leftChild(node: node))
+      }
+    }
+  }
+  ret proxyIds.length
+}
+
+# b3RefitSubtree: the slow refit of an unordered tree (deferred unions on a
+# stack, a parent before its children).
+func refitSubtree(tree: mod DynamicTree, rootIndex: view Int) {
+  let root: TreeNode = treeNode(tree: tree, index: rootIndex)
+  if isLeafNode(node: root) or isMovedNode(node: root) is false {
+    ret
+  }
+  # A negative entry -1 - i is the deferred union of node i
+  let stack: List(Int) = List.create(Int, cap: 32)
+  stack.add(value: -1 - rootIndex)
+  stack.add(value: leftChild(node: root))
+  stack.add(value: leftChild(node: root) + 1)
+  loop stack.length > 0 {
+    let item: Int = stack.copyAtDefault(index: stack.length - 1)
+    stack.removeLast()
+    if item < 0 {
+      let index: Int = -1 - item
+      var node: TreeNode = treeNode(tree: tree, index: index)
+      let pair: Int = leftChild(node: node)
+      node.aabb = union(
+        first: nodeBox(tree: tree, index: pair)
+        second: nodeBox(tree: tree, index: pair + 1)
+      )
+      tree.nodes.set(index: index, value: node)
+      continue
+    }
+    let node: TreeNode = treeNode(tree: tree, index: item)
+    if isLeafNode(node: node) or isMovedNode(node: node) is false {
+      continue
+    }
+    if stack.length + 3 <= treeStackSize {
+      let pair: Int = leftChild(node: node)
+      stack.add(value: -1 - item)
+      stack.add(value: pair)
+      stack.add(value: pair + 1)
+    }
+  }
+}
+
+# b3DynamicTree_Refit: refit the boxes of the moved internal nodes, sweeping
+# the pairs from the highest index down (children come after parents in a
+# depth-first ordered tree).
+func refitTree(tree: mod DynamicTree) {
+  if isMovedNode(node: treeNode(tree: tree, index: rootNode)) is false {
+    ret
+  }
+  if tree.dfsOrdered is false {
+    refitSubtree(tree: tree, rootIndex: rootNode)
+    ret
+  }
+  var pair: Int = tree.nodeEnd - 2
+  loop pair >= 0 {
+    let node1: TreeNode = treeNode(tree: tree, index: pair)
+    let node2: TreeNode = treeNode(tree: tree, index: pair + 1)
+    let flags1: Int = node1.flagIndex
+    let flags2: Int = node2.flagIndex
+    if ((flags1 bitor flags2) bitand movedNode) is not 0 {
+      # Internal and moved?
+      if (flags1 bitand (leafNode bitor movedNode)) is movedNode {
+        let children: Int = flags1 bitand nodeIndexMask
+        var refit: TreeNode = node1
+        refit.aabb = union(
+          first: nodeBox(tree: tree, index: children)
+          second: nodeBox(tree: tree, index: children + 1)
+        )
+        tree.nodes.set(index: pair, value: refit)
+      }
+      if (flags2 bitand (leafNode bitor movedNode)) is movedNode {
+        let children: Int = flags2 bitand nodeIndexMask
+        var refit: TreeNode = node2
+        refit.aabb = union(
+          first: nodeBox(tree: tree, index: children)
+          second: nodeBox(tree: tree, index: children + 1)
+        )
+        tree.nodes.set(index: pair + 1, value: refit)
+      }
+    }
+    pair = pair - 2
+  }
+}

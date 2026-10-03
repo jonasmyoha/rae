@@ -1,0 +1,239 @@
+# Quicksort as Box3D uses it (qsort.h at 9f998c8, Alexey Tourbin's
+# [Sedgewick 1978] quicksort). The macro takes LESS and SWAP over indices;
+# here the values are a List of an ordered type and LESS is `<`. The exact
+# sequence of comparisons and swaps is kept, because the order it leaves
+# equal keys in is part of the simulation result.
+#
+# qsort.h is Copyright (c) 2013, 2017 Alexey Tourbin, under the MIT license
+# (the same terms as Box3D's, lib/physics/LICENSE-box3d.md).
+
+# Q_THRESH: below this size a subfile is insertion sorted.
+const quickSortThreshold: Int = 16
+
+# A pushed subfile [left, right].
+type SortRange {
+  left: Int
+  right: Int
+}
+
+func lessAt(
+  T: type
+  values: view List(T)
+  first: view Int
+  second: view Int
+) ret Bool {
+  ret values.copyAtDefault(index: first) < values.copyAtDefault(index: second)
+}
+
+func swapAt(
+  T: type
+  values: mod List(T)
+  first: view Int
+  second: view Int
+) {
+  let held: T = values.copyAtDefault(index: first)
+  values.set(index: first, value: values.copyAtDefault(index: second))
+  values.set(index: second, value: held)
+}
+
+# Q_SORT3: sort three elements in place.
+func sortThree(
+  T: type
+  values: mod List(T)
+  first: view Int
+  second: view Int
+  third: view Int
+) {
+  if lessAt(
+    T: T
+    values: values
+    first: second
+    second: first
+  ) {
+    if lessAt(
+      T: T
+      values: values
+      first: third
+      second: second
+    ) {
+      swapAt(
+        T: T
+        values: values
+        first: first
+        second: third
+      )
+    } else {
+      swapAt(
+        T: T
+        values: values
+        first: first
+        second: second
+      )
+      if lessAt(
+        T: T
+        values: values
+        first: third
+        second: second
+      ) {
+        swapAt(
+          T: T
+          values: values
+          first: second
+          second: third
+        )
+      }
+    }
+  } else if lessAt(
+    T: T
+    values: values
+    first: third
+    second: second
+  ) {
+    swapAt(
+      T: T
+      values: values
+      first: second
+      second: third
+    )
+    if lessAt(
+      T: T
+      values: values
+      first: second
+      second: first
+    ) {
+      swapAt(
+        T: T
+        values: values
+        first: first
+        second: second
+      )
+    }
+  }
+}
+
+# Q_INSERTION_SORT over [left, right].
+func insertionSort(
+  T: type
+  values: mod List(T)
+  left: view Int
+  right: view Int
+) {
+  loop var i: Int = left + 1, i <= right, ++i {
+    var j: Int = i
+    loop j > left and lessAt(
+      T: T
+      values: values
+      first: j
+      second: j - 1
+    ) {
+      swapAt(
+        T: T
+        values: values
+        first: j
+        second: j - 1
+      )
+      j = j - 1
+    }
+  }
+}
+
+# QSORT over all of `values`.
+func quickSort(T: type, values: mod List(T)) {
+  if values.length <= 1 {
+    ret
+  }
+  var left: Int = 0
+  var right: Int = values.length - 1
+  let stack: List(SortRange) = List.create(SortRange, cap: 48)
+  loop true {
+    if right - left + 1 >= quickSortThreshold {
+      # Q_PARTITION around the median of the second, middle and last items
+      let middle: Int = left + ((right - left) shr 1)
+      sortThree(
+        T: T
+        values: values
+        first: left + 1
+        second: middle
+        third: right
+      )
+      swapAt(
+        T: T
+        values: values
+        first: left
+        second: middle
+      )
+      var i: Int = left + 1
+      var j: Int = right
+      loop true {
+        i = i + 1
+        loop lessAt(
+          T: T
+          values: values
+          first: i
+          second: left
+        ) {
+          i = i + 1
+        }
+        j = j - 1
+        loop lessAt(
+          T: T
+          values: values
+          first: left
+          second: j
+        ) {
+          j = j - 1
+        }
+        if i >= j {
+          break
+        }
+        swapAt(
+          T: T
+          values: values
+          first: i
+          second: j
+        )
+      }
+      i = j + 1
+      swapAt(
+        T: T
+        values: values
+        first: left
+        second: j
+      )
+      j = j - 1
+      # Q_SUBFILES: the larger subfile is pushed, the smaller is next
+      var left1: Int = i
+      var right1: Int = right
+      var left2: Int = left
+      var right2: Int = j
+      if j - left >= right - i {
+        left1 = left
+        right1 = j
+        left2 = i
+        right2 = right
+      }
+      if left2 is right2 {
+        left = left1
+        right = right1
+      } else {
+        stack.add(value: SortRange { left: left1, right: right1 })
+        left = left2
+        right = right2
+      }
+    } else {
+      insertionSort(
+        T: T
+        values: values
+        left: left
+        right: right
+      )
+      if stack.length is 0 {
+        break
+      }
+      let range: SortRange = stack.copyAtDefault(index: stack.length - 1)
+      stack.removeLast()
+      left = range.left
+      right = range.right
+    }
+  }
+}
