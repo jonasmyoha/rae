@@ -99,6 +99,14 @@ typedef struct {
   // before each return. Set to (size_t)-1 when not inside a function
   // body emit.
   size_t func_first_let_idx;
+  // parallelLoop body emission (c_stmt.c emit_parallel_loop): the loop
+  // variable of the innermost parallel body, how deep we are in parallel
+  // bodies, and how deep in `unsafe` blocks inside one — where every List
+  // set/modAt first reports its element to rae_parallel_check_write.
+  Str parallel_index;
+  int parallel_depth;
+  int parallel_unsafe_depth;
+  const void* parallel_check_emitting;  // the call being wrapped (no re-wrap)
   // #798: the object literal currently being emitted AS the function's return
   // value (`ret Struct { … }`), or NULL. A bare owning-local field of THIS exact
   // literal is at its last use, so it MOVES into the field instead of being

@@ -213,6 +213,80 @@ static inline void rae_cpu_relax(void) {
 #endif
 }
 
+/* ----- RAE_PARALLEL_CHECK: are the `unsafe` writes really disjoint? ---------
+ *
+ * `unsafe { }` in a parallelLoop body lifts the compile-time write rule: the
+ * programmer vouches that no two iterations write the same element (a graph
+ * colouring's disjoint body writes, docs/parallel-stages-design.md §3). Every
+ * List set/modAt in such a block first calls rae_parallel_check_write. With
+ * checking on — RAE_PARALLEL_CHECK=1, or Parallel.checkWrites(enabled: true) —
+ * the runtime records which iteration of the current top-level parallelLoop
+ * wrote each (storage, index) and stops the program on a second writer,
+ * naming both iterations (smaller first, so the message does not depend on
+ * scheduling). Off, the call is one predictable branch. */
+static int g_pcheck_enabled = -1;            /* -1: environment not read yet */
+static _Atomic uint64_t g_pcheck_launch = 1; /* bumped per top-level launch while checking */
+
+typedef struct { const void* storage; int64_t index; int64_t iteration; uint64_t launch; } RaePcheckEntry;
+#define RAE_PCHECK_SIZE (1u << 18)
+static RaePcheckEntry* g_pcheck_table = NULL;
+static int g_pcheck_full_warned = 0;
+static pthread_mutex_t g_pcheck_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static int rae_pcheck_on(void) {
+  if (g_pcheck_enabled < 0) {
+    const char* e = getenv("RAE_PARALLEL_CHECK");
+    g_pcheck_enabled = (e && e[0] && strcmp(e, "0") != 0) ? 1 : 0;
+  }
+  return g_pcheck_enabled;
+}
+
+void rae_ext_Parallel_checkWrites(rae_Bool enabled) {
+  g_pcheck_enabled = enabled ? 1 : 0;
+}
+
+void rae_parallel_check_write(const void* storage, int64_t index, int64_t iteration, const char* name) {
+  if (!rae_pcheck_on() || !storage) return;
+  uint64_t launch = atomic_load(&g_pcheck_launch);
+  RAE_LOCK(&g_pcheck_lock);
+  if (!g_pcheck_table) g_pcheck_table = (RaePcheckEntry*)calloc(RAE_PCHECK_SIZE, sizeof(RaePcheckEntry));
+  if (!g_pcheck_table) { RAE_UNLOCK(&g_pcheck_lock); return; }
+  uint64_t h = (uint64_t)(uintptr_t)storage * 0x9E3779B97F4A7C15ull ^ (uint64_t)index * 0xC2B2AE3D27D4EB4Full;
+  for (uint32_t probe = 0; probe < 64; probe++) {
+    RaePcheckEntry* e = &g_pcheck_table[(h + probe) & (RAE_PCHECK_SIZE - 1)];
+    if (e->launch != launch) {           /* empty, or left from an earlier launch */
+      e->storage = storage; e->index = index; e->iteration = iteration; e->launch = launch;
+      RAE_UNLOCK(&g_pcheck_lock);
+      return;
+    }
+    if (e->storage == storage && e->index == index) {
+      if (e->iteration != iteration) {
+        int64_t first = e->iteration < iteration ? e->iteration : iteration;
+        int64_t second = e->iteration < iteration ? iteration : e->iteration;
+        fflush(stdout);
+        fprintf(stderr,
+          "rae: parallelLoop: iterations %lld and %lld both wrote %s[%lld] inside `unsafe` — "
+          "the writes are not disjoint (RAE_PARALLEL_CHECK)\n",
+          (long long)first, (long long)second, name ? name : "a List", (long long)index);
+        fflush(stderr);
+        _Exit(70);
+      }
+      RAE_UNLOCK(&g_pcheck_lock);
+      return;
+    }
+  }
+  if (!g_pcheck_full_warned) {
+    g_pcheck_full_warned = 1;
+    fprintf(stderr, "rae: RAE_PARALLEL_CHECK: table full, some writes of this launch are not checked\n");
+  }
+  RAE_UNLOCK(&g_pcheck_lock);
+}
+
+/* A top-level launch starts a new set of writes to compare. */
+static void rae_pcheck_new_launch(void) {
+  if (g_pcheck_enabled == 1) atomic_fetch_add(&g_pcheck_launch, 1);
+}
+
 #if !defined(__wasm__) || defined(RAE_WASM_THREADS)
 
 #include <sched.h>
@@ -339,6 +413,8 @@ int64_t rae_ext_Parallel_workerCount(void) {
 void rae_parallel_for(int64_t start, int64_t end, RaeParallelBody body, void* captures) {
   if (end <= start) return;
   if (g_pool_inside) { body(captures, start, end); return; }
+  rae_pcheck_on();
+  rae_pcheck_new_launch();
   int workers = rae_pool_start();
   int64_t total = end - start;
   if (workers <= 1 || total == 1 || pthread_mutex_trylock(&g_pool_launch) != 0) {
@@ -385,6 +461,8 @@ void rae_parallel_for(int64_t start, int64_t end, RaeParallelBody body, void* ca
 int64_t rae_ext_Parallel_workerCount(void) { return 1; }
 
 void rae_parallel_for(int64_t start, int64_t end, RaeParallelBody body, void* captures) {
+  rae_pcheck_on();
+  rae_pcheck_new_launch();
   if (end > start) body(captures, start, end);
 }
 
