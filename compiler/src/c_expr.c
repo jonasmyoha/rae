@@ -908,6 +908,33 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
             emit_to_string_expr(ctx, expr->as.method_call.object, out);
             break;
         }
+        // An `unsafe` List write in a parallel body (docs/parallel-stages-
+        // design.md §3): report the element first, then the write itself.
+        if (ctx->parallel_unsafe_depth > 0 && ctx->parallel_check_emitting != expr
+            && (str_eq_cstr(expr->as.method_call.method_name, "set")
+                || str_eq_cstr(expr->as.method_call.method_name, "modAt"))) {
+            const AstTypeRef* list_type = infer_expr_type_ref(ctx, expr->as.method_call.object);
+            const AstCallArg* index_arg = expr->as.method_call.args;
+            while (index_arg && !str_eq_cstr(index_arg->name, "index")) index_arg = index_arg->next;
+            if (list_type && str_eq_cstr(get_base_type_name(list_type), "List") && index_arg) {
+                const AstExpr* object = expr->as.method_call.object;
+                Str root = object->kind == AST_EXPR_IDENT ? object->as.ident : str_from_cstr("a List");
+                // A view/mod List is a pointer in C, a local List a struct.
+                bool list_is_ref = list_type->is_view || list_type->is_mod;
+                fprintf(out, "(rae_parallel_check_write((const void*)(");
+                emit_expr(ctx, object, out, PREC_LOWEST, false, false);
+                fprintf(out, ")%sdata, (int64_t)(", list_is_ref ? "->" : ".");
+                emit_expr(ctx, index_arg->value, out, PREC_LOWEST, false, false);
+                fprintf(out, "), (int64_t)(%.*s), \"%.*s\"), ", (int)ctx->parallel_index.len,
+                        ctx->parallel_index.data, (int)root.len, root.data);
+                const void* saved = ctx->parallel_check_emitting;
+                ctx->parallel_check_emitting = expr;
+                emit_expr(ctx, expr, out, PREC_LOWEST, false, false);
+                ctx->parallel_check_emitting = saved;
+                fprintf(out, ")");
+                break;
+            }
+        }
         if (emit_list_fast_access(ctx, expr, out)) break;
         // Built-in method: toJson() → rae_toJson_TYPE_(&object)
         if (str_eq_cstr(expr->as.method_call.method_name, "toJson") && !expr->as.method_call.args) {

@@ -47,6 +47,10 @@ RaeTask* rae_task_new(size_t result_size);
 typedef void (*RaeParallelBody)(void* captures, int64_t first, int64_t end);
 void rae_parallel_for(int64_t start, int64_t end, RaeParallelBody body, void* captures);
 int64_t rae_ext_Parallel_workerCount(void);
+/* RAE_PARALLEL_CHECK (runtime_threads.c): an `unsafe` List write in a
+ * parallelLoop body reports its element; two iterations writing one stop the
+ * program. */
+void rae_parallel_check_write(const void* storage, int64_t index, int64_t iteration, const char* name);
 void* rae_task_await(RaeTask* t);   /* join once; returns the result buffer */
 void rae_task_drop(RaeTask* t);     /* join (if not joined) + free; scope-exit drop */
 

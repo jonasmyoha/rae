@@ -59,7 +59,15 @@ static bool emit_list_if_let(CFuncContext* ctx, const AstStmt* stmt, FILE* out) 
   if (!list_is_ref) fprintf(out, ")");
   fprintf(out, ";\n    int64_t __rae_index%d = ", fast_id);
   emit_expr(ctx, index_arg->value, out, PREC_LOWEST, false, false);
-  fprintf(out, ";\n    if ((uint64_t)__rae_index%d < (uint64_t)__rae_list%d->length) {\n      ",
+  fprintf(out, ";\n");
+  if (modified && ctx->parallel_unsafe_depth > 0) {
+    // An `unsafe` write in a parallel body: report it (RAE_PARALLEL_CHECK).
+    Str root = call->as.method_call.object->kind == AST_EXPR_IDENT
+        ? call->as.method_call.object->as.ident : str_from_cstr("a List");
+    fprintf(out, "    rae_parallel_check_write((const void*)__rae_list%d->data, __rae_index%d, (int64_t)(%.*s), \"%.*s\");\n",
+            fast_id, fast_id, (int)ctx->parallel_index.len, ctx->parallel_index.data, (int)root.len, root.data);
+  }
+  fprintf(out, "    if ((uint64_t)__rae_index%d < (uint64_t)__rae_list%d->length) {\n      ",
           fast_id, fast_id);
 
   const AstTypeRef* element_type = binding->as.let_stmt.type;
@@ -1458,7 +1466,15 @@ static bool emit_parallel_loop(CFuncContext* ctx, const AstStmt* stmt, Str index
     if (ctx->loop_depth < 32) ctx->loop_body_local_start[ctx->loop_depth] = body_locals;
     if (ctx->loop_depth < 32) ctx->loop_temps[ctx->loop_depth] = ctx->stmt_temps;
     ctx->loop_depth++;
+    Str saved_index = ctx->parallel_index;
+    int saved_unsafe = ctx->parallel_unsafe_depth;
+    ctx->parallel_index = index;
+    ctx->parallel_depth++;
+    ctx->parallel_unsafe_depth = 0;   // an inner parallel body starts outside `unsafe`
     if (body) for (const AstStmt* s = body->first; s; s = s->next) emit_stmt(ctx, s, thunk);
+    ctx->parallel_depth--;
+    ctx->parallel_index = saved_index;
+    ctx->parallel_unsafe_depth = saved_unsafe;
     ctx->loop_depth--;
     emit_implicit_drops_for_body(ctx, thunk, body_locals);
     ctx->local_count = saved_locals;
@@ -3692,10 +3708,12 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
         case AST_STMT_UNSAFE: {
             size_t saved_locals = ctx->local_count;
             fprintf(out, "  { /* unsafe */\n");
+            if (ctx->parallel_depth > 0) ctx->parallel_unsafe_depth++;
             if (stmt->as.unsafe_stmt.block) {
                 for (AstStmt* inner = stmt->as.unsafe_stmt.block->first; inner; inner = inner->next)
                     emit_stmt(ctx, inner, out);
             }
+            if (ctx->parallel_depth > 0) ctx->parallel_unsafe_depth--;
             emit_implicit_drops_for_body(ctx, out, saved_locals);
             ctx->local_count = saved_locals;
             fprintf(out, "  }\n");

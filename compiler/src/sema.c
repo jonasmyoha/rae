@@ -3753,6 +3753,7 @@ typedef struct {
     size_t local_count;
     AstModule* module;
     bool reported;        // one diagnostic per loop is enough
+    int unsafe_depth;     // inside `unsafe { }`: the programmer vouches the writes are disjoint
 } SemaParallelScope;
 
 static void sema_pl_collect_block(SemaParallelScope* scope, const AstBlock* block);
@@ -3835,6 +3836,11 @@ static bool sema_pl_is_index(const SemaParallelScope* scope, const AstExpr* e) {
 }
 
 static void sema_pl_report(SemaParallelScope* scope, const AstExpr* at, size_t line, size_t column, const char* what, Str name) {
+    // `unsafe { }` in a parallel body lifts the write rule: the programmer
+    // vouches that no two iterations write the same element — a graph
+    // colouring's disjoint body writes (docs/parallel-stages-design.md §3).
+    // RAE_PARALLEL_CHECK=1 checks it at run time.
+    if (scope->unsafe_depth > 0) return;
     if (scope->reported) return;
     scope->reported = true;
     char buf[640];
@@ -4043,7 +4049,11 @@ static void sema_pl_check_stmt(SemaParallelScope* scope, const AstStmt* s, int l
                 sema_pl_check_block(scope, c->block, loop_depth);
             break;
         case AST_STMT_DEFER: sema_pl_check_block(scope, s->as.defer_stmt.block, loop_depth); break;
-        case AST_STMT_UNSAFE: sema_pl_check_block(scope, s->as.unsafe_stmt.block, loop_depth); break;
+        case AST_STMT_UNSAFE:
+            scope->unsafe_depth++;
+            sema_pl_check_block(scope, s->as.unsafe_stmt.block, loop_depth);
+            scope->unsafe_depth--;
+            break;
         default: break;
     }
 }
