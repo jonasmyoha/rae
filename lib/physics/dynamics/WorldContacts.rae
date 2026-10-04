@@ -3,10 +3,11 @@
 # b3UpdateContact of Box3D's contact.c at 9f998c8). Box3D's operation order
 # is kept exactly; checked against the oracle in fixture 957.
 #
-# Mesh and height-field contacts are MeshContact. Not here yet: the pre-solve and custom
+# Mesh and height-field contacts are MeshContact; a compound child is
+# collided as a temporary shape. Not here yet: the pre-solve and custom
 # friction / restitution callbacks (Rae has no function values; Box3D's
 # defaults are used: the geometric mean of the frictions, the larger
-# restitution), and compound contacts (P5d).
+# restitution).
 import Math
 open Vec3
 open Quat
@@ -20,6 +21,7 @@ open physics/geometry/QueryTypes
 open physics/geometry/Hull
 open physics/geometry/MeshQuery
 open physics/geometry/HeightField
+open physics/geometry/Compound
 open physics/collision/Manifold
 open physics/collision/ConvexManifold
 open physics/collision/HullManifold
@@ -125,7 +127,13 @@ func createContact(
   if shapeA.shapeType is ShapeType.mesh or shapeA.shapeType is ShapeType.height {
     contact.flags = contact.flags bitor simMeshContact
   }
-  # (A compound's mesh child: P5d.)
+  if shapeA.shapeType is ShapeType.compound {
+    if let compound: view CompoundData => world.compounds.viewAt(index: shapeA.compoundIndex) {
+      if getCompoundChild(compound: compound, childIndex: childIndex).shapeType is ShapeType.mesh {
+        contact.flags = contact.flags bitor simMeshContact
+      }
+    }
+  }
   # Is either body static?
   if bodyA.bodyType is BodyType.staticBody or bodyB.bodyType is BodyType.staticBody {
     contact.flags = contact.flags bitor contactStaticFlag
@@ -182,8 +190,8 @@ func createContact(
   )
   # Assuming the rolling resistance does not change
   contact.rollingResistance = maxFloat(
-    left: shapeA.material.rollingResistance
-    right: shapeB.material.rollingResistance
+    left: firstShapeMaterial(shape: shapeA).rollingResistance
+    right: firstShapeMaterial(shape: shapeB).rollingResistance
   ) * maxRadius
   if ((shapeA.flags bitor shapeB.flags) bitand enablePreSolveEventsFlag) is not 0 {
     contact.flags = contact.flags bitor simEnablePreSolveEvents
@@ -447,6 +455,7 @@ func updateConvexContact(
   shapeB: view Shape
   transformB: view Transform
   hulls: view List(Hull)
+  flip: view Bool
   lengthUnitsPerMeter: view Float
 ) ret Bool {
   let touching: Bool = computeConvexManifold(
@@ -462,7 +471,20 @@ func updateConvexContact(
   if touching is false {
     ret false
   }
-  # (Flipping is for compound children: P5.)
+  if flip {
+    # The feature ids are not flipped: they only need to match, and the
+    # flip is consistent
+    if let manifold: mod Manifold => contact.manifolds.modAt(index: 0) {
+      manifold.normal = negate(vector: manifold.normal)
+      loop var i: Int = 0, i < manifold.pointCount, ++i {
+        if let point: mod ManifoldPoint => manifold.points.modAt(index: i) {
+          let anchorA: Vec3 = point.anchorA
+          point.anchorA = point.anchorB
+          point.anchorB = anchorA
+        }
+      }
+    }
+  }
   let materialA: SurfaceMaterial = shapeA.material
   let materialB: SurfaceMaterial = shapeB.material
   # Kept updated in case the shapes' values change (Box3D's default
@@ -499,6 +521,179 @@ func updateConvexContact(
   ret true
 }
 
+# A mesh contact enables its hit event only while touching.
+func updateMeshHitFlag(
+  contact: mod Contact
+  touching: view Bool
+  shapeA: view Shape
+  shapeB: view Shape
+) {
+  if touching and ((shapeA.flags bitor shapeB.flags) bitand enableHitEventsFlag) is not 0 {
+    contact.flags = contact.flags bitor simEnableHitEvent
+  } else {
+    contact.flags = contact.flags bitand (bitnot simEnableHitEvent)
+  }
+}
+
+# The compound case of b3UpdateContact: child `contact.childIndex` as a
+# temporary shape (a copy of the compound with the child's geometry and, for
+# a convex child, its one material), collided as Box3D's order wants it (a
+# capsule or sphere against a hull, a sphere against a capsule, is flipped);
+# the anchors then move from the child origin to the compound origin.
+func updateCompoundContact(
+  contact: mod Contact
+  geometry: mod LocalManifold
+  meshManifold: mod LocalManifold
+  shapeA: view Shape
+  compound: view CompoundData
+  transformA: view Transform
+  shapeB: view Shape
+  transformB: view Transform
+  hulls: view List(Hull)
+  meshes: view List(Mesh)
+  heightFields: view List(HeightFieldData)
+  isFast: view Bool
+  lengthUnitsPerMeter: view Float
+) ret Bool {
+  let child: ChildShape = getCompoundChild(compound: compound, childIndex: contact.childIndex)
+  var childShape: Shape = shapeA
+  childShape.shapeType = child.shapeType
+  # Child material for non-meshes
+  if child.shapeType is not ShapeType.mesh {
+    childShape.material = shapeA.materials.copyAtDefault(
+      index: child.materialIndices.copyAtDefault(index: 0)
+    )
+    childShape.materials = List.create(SurfaceMaterial, cap: 0)
+    childShape.materialCount = 1
+  }
+  var touching: Bool = false
+  let childTransform: Transform = multiplyWorld(left: transformA, right: child.transform)
+  match child.shapeType {
+    case ShapeType.capsule {
+      childShape.capsule = child.capsule
+      touching = updateConvexChild(
+        contact: contact
+        geometry: geometry
+        childShape: childShape
+        childTransform: transformA
+        shapeB: shapeB
+        transformB: transformB
+        hulls: hulls
+        flip: shapeB.shapeType is ShapeType.hull
+        lengthUnitsPerMeter: lengthUnitsPerMeter
+      )
+    }
+    case ShapeType.hull {
+      childShape.hullIndex = shapeA.hullIndex + child.kindIndex
+      touching = updateConvexChild(
+        contact: contact
+        geometry: geometry
+        childShape: childShape
+        childTransform: childTransform
+        shapeB: shapeB
+        transformB: transformB
+        hulls: hulls
+        flip: false
+        lengthUnitsPerMeter: lengthUnitsPerMeter
+      )
+    }
+    case ShapeType.mesh {
+      childShape.meshIndex = shapeA.meshIndex + child.kindIndex
+      touching = computeMeshManifolds(
+        contact: contact
+        scratch: meshManifold
+        shapeA: childShape
+        meshes: meshes
+        heightFields: heightFields
+        materialMap: child.materialIndices
+        transformA: childTransform
+        shapeB: shapeB
+        hulls: hulls
+        transformB: transformB
+        isFast: isFast
+        lengthUnitsPerMeter: lengthUnitsPerMeter
+      )
+      updateMeshHitFlag(
+        contact: contact
+        touching: touching
+        shapeA: shapeA
+        shapeB: shapeB
+      )
+    }
+    case ShapeType.sphere {
+      childShape.sphere = child.sphere
+      touching = updateConvexChild(
+        contact: contact
+        geometry: geometry
+        childShape: childShape
+        childTransform: transformA
+        shapeB: shapeB
+        transformB: transformB
+        hulls: hulls
+        flip: shapeB.shapeType is ShapeType.capsule or shapeB.shapeType is ShapeType.hull
+        lengthUnitsPerMeter: lengthUnitsPerMeter
+      )
+    }
+    case ShapeType.compound {
+    }
+    case ShapeType.height {
+    }
+  }
+
+  # The anchor is relative to the child origin but oriented in world space:
+  # make it relative to the compound origin
+  let offset: Vec3 = rotateVector(quat: transformA.rotation, vector: child.transform.position)
+  loop var i: Int = 0, i < contact.manifolds.length, ++i {
+    if let manifold: mod Manifold => contact.manifolds.modAt(index: i) {
+      loop var j: Int = 0, j < manifold.pointCount, ++j {
+        if let point: mod ManifoldPoint => manifold.points.modAt(index: j) {
+          point.anchorA = add(left: point.anchorA, right: offset)
+        }
+      }
+    }
+  }
+  ret touching
+}
+
+# A convex compound child against shape B, in the primary order: flipped,
+# shape B goes first.
+func updateConvexChild(
+  contact: mod Contact
+  geometry: mod LocalManifold
+  childShape: view Shape
+  childTransform: view Transform
+  shapeB: view Shape
+  transformB: view Transform
+  hulls: view List(Hull)
+  flip: view Bool
+  lengthUnitsPerMeter: view Float
+) ret Bool {
+  if flip {
+    ret updateConvexContact(
+      contact: contact
+      geometry: geometry
+      shapeA: shapeB
+      transformA: transformB
+      shapeB: childShape
+      transformB: childTransform
+      hulls: hulls
+      flip: true
+      lengthUnitsPerMeter: lengthUnitsPerMeter
+    )
+  }
+  ret updateConvexContact(
+    contact: contact
+    geometry: geometry
+    shapeA: childShape
+    transformA: childTransform
+    shapeB: shapeB
+    transformB: transformB
+    hulls: hulls
+    flip: false
+    lengthUnitsPerMeter: lengthUnitsPerMeter
+  )
+}
+
 # b3UpdateContact: the manifold and touching state of a convex or mesh
 # contact, anchors relative to the body centers. (Compound contacts: P5d.)
 func updateContact(
@@ -514,17 +709,38 @@ func updateContact(
   hulls: view List(Hull)
   meshes: view List(Mesh)
   heightFields: view List(HeightFieldData)
+  compounds: view List(CompoundData)
   isFast: view Bool
   lengthUnitsPerMeter: view Float
 ) ret Bool {
   var touching: Bool = false
-  if shapeA.shapeType is ShapeType.mesh or shapeA.shapeType is ShapeType.height {
+  if shapeA.shapeType is ShapeType.compound {
+    if let compound: view CompoundData => compounds.viewAt(index: shapeA.compoundIndex) {
+      touching = updateCompoundContact(
+        contact: contact
+        geometry: geometry
+        meshManifold: meshManifold
+        shapeA: shapeA
+        compound: compound
+        transformA: transformA
+        shapeB: shapeB
+        transformB: transformB
+        hulls: hulls
+        meshes: meshes
+        heightFields: heightFields
+        isFast: isFast
+        lengthUnitsPerMeter: lengthUnitsPerMeter
+      )
+    }
+  } else if shapeA.shapeType is ShapeType.mesh or shapeA.shapeType is ShapeType.height {
+    let noMaterialMap: List(Int) = List.create(Int, cap: 0)
     touching = computeMeshManifolds(
       contact: contact
       scratch: meshManifold
       shapeA: shapeA
       meshes: meshes
       heightFields: heightFields
+      materialMap: noMaterialMap
       transformA: transformA
       shapeB: shapeB
       hulls: hulls
@@ -532,11 +748,12 @@ func updateContact(
       isFast: isFast
       lengthUnitsPerMeter: lengthUnitsPerMeter
     )
-    if touching and ((shapeA.flags bitor shapeB.flags) bitand enableHitEventsFlag) is not 0 {
-      contact.flags = contact.flags bitor simEnableHitEvent
-    } else {
-      contact.flags = contact.flags bitand (bitnot simEnableHitEvent)
-    }
+    updateMeshHitFlag(
+      contact: contact
+      touching: touching
+      shapeA: shapeA
+      shapeB: shapeB
+    )
   } else {
     touching = updateConvexContact(
       contact: contact
@@ -546,6 +763,7 @@ func updateContact(
       shapeB: shapeB
       transformB: transformB
       hulls: hulls
+      flip: false
       lengthUnitsPerMeter: lengthUnitsPerMeter
     )
   }

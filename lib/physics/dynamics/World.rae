@@ -13,6 +13,7 @@ open physics/geometry/Hull
 open physics/geometry/Mesh
 open physics/geometry/MeshQuery
 open physics/geometry/HeightField
+open physics/geometry/Compound
 open physics/broadPhase/BroadPhase
 open physics/container/IdPool
 open physics/dynamics/WorldTypes
@@ -98,6 +99,10 @@ type PhysicsWorld {
   # The data of height shapes (Box3D's shapes point at the caller's
   # b3HeightFieldData)
   heightFields: List(HeightFieldData)
+  # The data of compound shapes, and how many compound shapes exist (pair
+  # finding expands compounds only while there are any)
+  compounds: List(CompoundData)
+  compoundShapeCount: Int
   contactIdPool: IdPool
   contacts: List(Contact)
   constraintGraph: ConstraintGraph
@@ -155,6 +160,8 @@ func createWorld(def: view WorldDef) ret PhysicsWorld {
     hulls: List.create(Hull, cap: 4)
     meshes: List.create(Mesh, cap: 0)
     heightFields: List.create(HeightFieldData, cap: 0)
+    compounds: List.create(CompoundData, cap: 0)
+    compoundShapeCount: 0
     contactIdPool: createIdPool()
     contacts: List.create(Contact, cap: 16)
     constraintGraph: createGraph(bodyCapacity: 16)

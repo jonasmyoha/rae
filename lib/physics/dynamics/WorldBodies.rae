@@ -186,6 +186,9 @@ func destroyBody(world: mod PhysicsWorld, bodyId: view BodyId) {
   # The shapes and their proxies
   var shapeId: Int = body.headShapeId
   loop shapeId is not -1 {
+    if world.shapes.copyAtDefault(index: shapeId).shapeType is ShapeType.compound {
+      world.compoundShapeCount = world.compoundShapeCount - 1
+    }
     if world.shapes.copyAtDefault(index: shapeId).sensorIndex is not -1 {
       destroySensor(world: world, shapeId: shapeId)
     }
