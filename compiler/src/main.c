@@ -233,6 +233,10 @@ static void watch_channel_id(const char* project_root, const char* entry,
 static bool ensure_directory_p(const char* path);
 static bool ensure_directory_tree(const char* dir_path);
 static bool ensure_parent_directory(const char* file_path);
+/* `--float4-scalar`: compile lib/Float4 with its scalar definitions instead of
+ * NEON / SSE2 / wasm SIMD128 (-DRAE_FLOAT4_SCALAR, runtime_float4.h), so the
+ * bit-exactness fixture can run both lowerings. */
+static bool g_float4_scalar = false;
 static bool copy_runtime_assets(const char* dest_dir);
 typedef struct {
   WatchSources sources;
@@ -309,6 +313,11 @@ static bool parse_run_args(int argc, char** argv, RunOptions* opts) {
     if (strcmp(arg, "--check-format") == 0) {
       /* #919: refuse to rewrite non-canonical sources; fail with the list. */
       rae_preflight_set_mode(RAE_PREFLIGHT_CHECK);
+      i += 1;
+      continue;
+    }
+    if (strcmp(arg, "--float4-scalar") == 0) {
+      g_float4_scalar = true;
       i += 1;
       continue;
     }
@@ -461,6 +470,11 @@ static bool parse_build_args(int argc, char** argv, BuildOptions* opts) {
     if (strcmp(arg, "--check-format") == 0) {
       /* #919: refuse to rewrite non-canonical sources; fail with the list. */
       rae_preflight_set_mode(RAE_PREFLIGHT_CHECK);
+      i += 1;
+      continue;
+    }
+    if (strcmp(arg, "--float4-scalar") == 0) {
+      g_float4_scalar = true;
       i += 1;
       continue;
     }
@@ -2097,7 +2111,9 @@ static void print_usage(const char* prog) {
   fprintf(stderr, "                           RAE_TOOLCHAIN_CHECK=off skips the non-strict check),\n");
   fprintf(stderr, "                           --target compiled,\n");
   fprintf(stderr, "                           --profile <dev|release> (or --debug/--release;\n");
-  fprintf(stderr, "                           compiled target: dev=-O0 -g, release=-O2 -DNDEBUG)\n");
+  fprintf(stderr, "                           compiled target: dev=-O0 -g, release=-O2 -DNDEBUG),\n");
+  fprintf(stderr, "                           --float4-scalar (lib/Float4 on its scalar\n");
+  fprintf(stderr, "                           definitions instead of NEON/SSE2/wasm SIMD)\n");
   fprintf(stderr, "  pack <file>     Validate and summarize a .raepack file\n");
   fprintf(stderr, "                 (options: --json, --target <id>)\n");
   fprintf(stderr,
@@ -2584,8 +2600,8 @@ static bool gcc_link_c_to_binary(const char* entry_rae_file,
   const char* extra_cflags = getenv("RAE_EXTRA_CFLAGS");
   if (!extra_cflags) extra_cflags = "";
   char cmd[PATH_MAX * 4];
-  snprintf(cmd, sizeof(cmd), "gcc -std=c11 %s %s -w %s %s -I%s -I/opt/homebrew/include -L/opt/homebrew/lib -framework Foundation -framework ImageIO -framework CoreGraphics %s %s/rae_runtime.c%s -o %s",
-           opt_flags, extra_cflags, sdl3_flags, wgpu_flags, runtime_dir,
+  snprintf(cmd, sizeof(cmd), "gcc -std=c11 %s%s %s -w %s %s -I%s -I/opt/homebrew/include -L/opt/homebrew/lib -framework Foundation -framework ImageIO -framework CoreGraphics %s %s/rae_runtime.c%s -o %s",
+           opt_flags, g_float4_scalar ? " -DRAE_FLOAT4_SCALAR" : "", extra_cflags, sdl3_flags, wgpu_flags, runtime_dir,
            c_path, runtime_dir, extra_c_files, out_bin);
 
   long long cc_started_ms = rae_now_ms();
@@ -2695,6 +2711,7 @@ static bool emcc_link_c_to_web(const char* entry_rae_file,
    * the same portable libc surface used by native Compiled builds. */
   args[n++] = "-std=gnu11";
   args[n++] = "-ffp-contract=off";  /* same floats on every machine (rae_runtime.h) */
+  if (g_float4_scalar) args[n++] = "-DRAE_FLOAT4_SCALAR";
   if (profile == BUILD_PROFILE_DEV) {
     args[n++] = "-O0";
     args[n++] = "-gsource-map";

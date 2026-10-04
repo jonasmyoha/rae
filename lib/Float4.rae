@@ -1,0 +1,362 @@
+# Float4 — four Float lanes for SIMD code (docs/float4-design.md §0).
+#
+#   import Float4
+#   let lanes: Float4 = { x: 1.0, y: 2.0, z: 3.0, w: 4.0 }
+#   let half: Float4 = Float4.splat(value: 0.5)
+#   let scaled: Float4 = Float4.mulAdd(a: lanes, b: half, c: half)  # a * b + c
+#   let small: Mask4 = Float4.less(a: scaled, b: half)
+#   let clamped: Float4 = Float4.select(mask: small, ifTrue: half, ifFalse: scaled)
+#   if Float4.anyLane(mask: small) { ... }
+#
+# Lanes read like fields (`scaled.y`) and a Float4 is built with the typed
+# literal. There are no operators on Float4, only these named functions, so
+# what a line does is spelled out: `mulAdd` is a multiply then an add, never a
+# fused instruction. Every function lowers to inline code in the generated C
+# (compiler/runtime/runtime_float4.h): NEON on arm64, SSE2 on x86-64, wasm
+# SIMD128, or the scalar definition, which is also the reference: every
+# lowering produces the scalar definition's bits, and fixture
+# 967_float4_bit_exact checks it (also with `rae run --float4-scalar`).
+#
+# Mask4 is the result of a comparison: a lane is true when any of its bits is
+# set (a comparison sets all of them). It is a type of its own so a mask can
+# never be used as numbers; it is consumed by `select`, combined with `both`,
+# `either` and `invert`, and tested with `anyLane` and `allLanes` (`and`,
+# `or`, `not` and `any` are Rae keywords). Its four bit patterns are fields
+# only because Rae has no private fields.
+#
+# Not in the prelude: only SIMD kernels need it.
+type Float4 {
+  x: Float
+  y: Float
+  z: Float
+  w: Float
+}
+
+type Mask4 {
+  bitsX: UInt32
+  bitsY: UInt32
+  bitsZ: UInt32
+  bitsW: UInt32
+}
+
+func nativeSplat(value: Float) unsafe extern("rae_f4_splat") ret Float4
+
+func nativeAdd(a: view Float4, b: view Float4) unsafe extern("rae_f4_add") ret Float4
+
+func nativeSub(a: view Float4, b: view Float4) unsafe extern("rae_f4_sub") ret Float4
+
+func nativeMul(a: view Float4, b: view Float4) unsafe extern("rae_f4_mul") ret Float4
+
+func nativeDiv(a: view Float4, b: view Float4) unsafe extern("rae_f4_div") ret Float4
+
+func nativeMulAdd(
+  a: view Float4
+  b: view Float4
+  c: view Float4
+) unsafe extern("rae_f4_mul_add") ret Float4
+
+func nativeSqrt(value: view Float4) unsafe extern("rae_f4_sqrt") ret Float4
+
+func nativeNegate(value: view Float4) unsafe extern("rae_f4_negate") ret Float4
+
+func nativeAbs(value: view Float4) unsafe extern("rae_f4_abs") ret Float4
+
+func nativeMin(a: view Float4, b: view Float4) unsafe extern("rae_f4_min") ret Float4
+
+func nativeMax(a: view Float4, b: view Float4) unsafe extern("rae_f4_max") ret Float4
+
+func nativeClampSymmetric(
+  value: view Float4
+  limit: view Float4
+) unsafe extern("rae_f4_clamp_symmetric") ret Float4
+
+func nativeLess(a: view Float4, b: view Float4) unsafe extern("rae_f4_less") ret Mask4
+
+func nativeGreater(a: view Float4, b: view Float4) unsafe extern("rae_f4_greater") ret Mask4
+
+func nativeLessOrEqual(
+  a: view Float4
+  b: view Float4
+) unsafe extern("rae_f4_less_or_equal") ret Mask4
+
+func nativeGreaterOrEqual(
+  a: view Float4
+  b: view Float4
+) unsafe extern("rae_f4_greater_or_equal") ret Mask4
+
+func nativeEqual(a: view Float4, b: view Float4) unsafe extern("rae_f4_equal") ret Mask4
+
+func nativeSelect(
+  mask: view Mask4
+  ifTrue: view Float4
+  ifFalse: view Float4
+) unsafe extern("rae_f4_select") ret Float4
+
+func nativeBoth(a: view Mask4, b: view Mask4) unsafe extern("rae_m4_both") ret Mask4
+
+func nativeEither(a: view Mask4, b: view Mask4) unsafe extern("rae_m4_either") ret Mask4
+
+func nativeInvert(mask: view Mask4) unsafe extern("rae_m4_invert") ret Mask4
+
+func nativeAnyLane(mask: view Mask4) unsafe extern("rae_m4_any_lane") ret Bool
+
+func nativeAllLanes(mask: view Mask4) unsafe extern("rae_m4_all_lanes") ret Bool
+
+func nativeSum(value: view Float4) unsafe extern("rae_f4_sum") ret Float
+
+func nativeHorizontalMin(value: view Float4) unsafe extern("rae_f4_horizontal_min") ret Float
+
+func nativeHorizontalMax(value: view Float4) unsafe extern("rae_f4_horizontal_max") ret Float
+
+func nativeEmbedIndex(
+  value: view Float4
+  baseIndex: Int
+  bitCount: Int
+) unsafe extern("rae_f4_embed_index") ret Float4
+
+func nativeMinLaneIndex(
+  value: view Float4
+  bitCount: Int
+) unsafe extern("rae_f4_min_lane_index") ret Int
+
+func nativeLoad(data: Buffer(Float), index: Int) unsafe extern("rae_f4_load") ret Float4
+
+func nativeStore(data: Buffer(Float), index: Int, value: view Float4) unsafe extern("rae_f4_store")
+
+func nativeLowering() unsafe extern("rae_f4_lowering") ret Int
+
+# The lowering this program was compiled with: "neon", "sse2", "wasm" or
+# "scalar" (`rae run --float4-scalar` forces "scalar").
+func lowering() ret String {
+  var code: Int = 0
+  unsafe {
+    code = nativeLowering()
+  }
+  if code is 1 {
+    ret "neon"
+  }
+  if code is 2 {
+    ret "sse2"
+  }
+  if code is 3 {
+    ret "wasm"
+  }
+  ret "scalar"
+}
+
+# Every lane `value`.
+func splat(value: view Float) ret Float4 {
+  unsafe {
+    ret nativeSplat(value: value)
+  }
+}
+
+func add(a: view Float4, b: view Float4) ret Float4 {
+  unsafe {
+    ret nativeAdd(a: a, b: b)
+  }
+}
+
+func sub(a: view Float4, b: view Float4) ret Float4 {
+  unsafe {
+    ret nativeSub(a: a, b: b)
+  }
+}
+
+func mul(a: view Float4, b: view Float4) ret Float4 {
+  unsafe {
+    ret nativeMul(a: a, b: b)
+  }
+}
+
+func div(a: view Float4, b: view Float4) ret Float4 {
+  unsafe {
+    ret nativeDiv(a: a, b: b)
+  }
+}
+
+# a * b + c, rounded twice: a multiply, then an add (never a fused
+# multiply-add).
+func mulAdd(a: view Float4, b: view Float4, c: view Float4) ret Float4 {
+  unsafe {
+    ret nativeMulAdd(a: a, b: b, c: c)
+  }
+}
+
+# IEEE square root in every lane.
+func sqrt(value: view Float4) ret Float4 {
+  unsafe {
+    ret nativeSqrt(value: value)
+  }
+}
+
+# -value: flips each lane's sign bit.
+func negate(value: view Float4) ret Float4 {
+  unsafe {
+    ret nativeNegate(value: value)
+  }
+}
+
+# value < 0 ? -value : value (so -0 stays -0).
+func abs(value: view Float4) ret Float4 {
+  unsafe {
+    ret nativeAbs(value: value)
+  }
+}
+
+# a <= b ? a : b in every lane (so min(-0, 0) is -0, and a NaN in a gives b).
+func min(a: view Float4, b: view Float4) ret Float4 {
+  unsafe {
+    ret nativeMin(a: a, b: b)
+  }
+}
+
+# a >= b ? a : b in every lane.
+func max(a: view Float4, b: view Float4) ret Float4 {
+  unsafe {
+    ret nativeMax(a: a, b: b)
+  }
+}
+
+# value clamped to [-limit, limit]: r = value <= limit ? value : limit, then
+# r <= -limit ? -limit : r (Box3D's b3SymClampW).
+func clampSymmetric(value: view Float4, limit: view Float4) ret Float4 {
+  unsafe {
+    ret nativeClampSymmetric(value: value, limit: limit)
+  }
+}
+
+func less(a: view Float4, b: view Float4) ret Mask4 {
+  unsafe {
+    ret nativeLess(a: a, b: b)
+  }
+}
+
+func greater(a: view Float4, b: view Float4) ret Mask4 {
+  unsafe {
+    ret nativeGreater(a: a, b: b)
+  }
+}
+
+func lessOrEqual(a: view Float4, b: view Float4) ret Mask4 {
+  unsafe {
+    ret nativeLessOrEqual(a: a, b: b)
+  }
+}
+
+func greaterOrEqual(a: view Float4, b: view Float4) ret Mask4 {
+  unsafe {
+    ret nativeGreaterOrEqual(a: a, b: b)
+  }
+}
+
+# a == b in every lane: -0 equals 0, a NaN equals nothing.
+func equal(a: view Float4, b: view Float4) ret Mask4 {
+  unsafe {
+    ret nativeEqual(a: a, b: b)
+  }
+}
+
+# Bit by bit: each bit from ifTrue where the mask bit is set, else from
+# ifFalse (a comparison's lane picks the whole lane).
+func select(mask: view Mask4, ifTrue: view Float4, ifFalse: view Float4) ret Float4 {
+  unsafe {
+    ret nativeSelect(mask: mask, ifTrue: ifTrue, ifFalse: ifFalse)
+  }
+}
+
+# Lane and: true where both masks are.
+func both(a: view Mask4, b: view Mask4) ret Mask4 {
+  unsafe {
+    ret nativeBoth(a: a, b: b)
+  }
+}
+
+# Lane or: true where either mask is.
+func either(a: view Mask4, b: view Mask4) ret Mask4 {
+  unsafe {
+    ret nativeEither(a: a, b: b)
+  }
+}
+
+# Lane not.
+func invert(mask: view Mask4) ret Mask4 {
+  unsafe {
+    ret nativeInvert(mask: mask)
+  }
+}
+
+# Is any lane true?
+func anyLane(mask: view Mask4) ret Bool {
+  unsafe {
+    ret nativeAnyLane(mask: mask)
+  }
+}
+
+# Are all four lanes true?
+func allLanes(mask: view Mask4) ret Bool {
+  unsafe {
+    ret nativeAllLanes(mask: mask)
+  }
+}
+
+# ((x + y) + z) + w: a defined order, so the same bits everywhere.
+func sum(value: view Float4) ret Float {
+  unsafe {
+    ret nativeSum(value: value)
+  }
+}
+
+# min(min(min(x, y), z), w), with min(a, b) = a <= b ? a : b.
+func horizontalMin(value: view Float4) ret Float {
+  unsafe {
+    ret nativeHorizontalMin(value: value)
+  }
+}
+
+# max(max(max(x, y), z), w), with max(a, b) = a >= b ? a : b.
+func horizontalMax(value: view Float4) ret Float {
+  unsafe {
+    ret nativeHorizontalMax(value: value)
+  }
+}
+
+# Replaces the low `bitCount` mantissa bits of each lane with baseIndex + lane
+# (Box3D's b3EmbedIndexW). For a positive value the index then sorts with the
+# value, and a tie falls to the lower index: minLaneIndex reads it back.
+func embedIndex(value: view Float4, baseIndex: view Int, bitCount: view Int) ret Float4 {
+  unsafe {
+    ret nativeEmbedIndex(value: value, baseIndex: baseIndex, bitCount: bitCount)
+  }
+}
+
+# The low `bitCount` bits of the minimum lane, found in Box3D's scalar order
+# (m = x; m = y < m ? y : m; ...; b3MinIndexW): with embedIndex, the index of
+# the smallest value — the hull SAT's support search.
+func minLaneIndex(value: view Float4, bitCount: view Int) ret Int {
+  unsafe {
+    ret nativeMinLaneIndex(value: value, bitCount: bitCount)
+  }
+}
+
+# The four Floats from `index` on, or none unless index + 3 < from.length.
+func load(from: view List(Float), index: view Int) ret opt Float4 {
+  if index < 0 or index + 3 >= from.length {
+    ret none
+  }
+  unsafe {
+    ret nativeLoad(data: from.data, index: index)
+  }
+}
+
+# Writes the four lanes to `into` from `index` on. Out of range (unless
+# index + 3 < into.length) it is ignored with a warning, like List.set.
+func store(into: mod List(Float), index: view Int, value: view Float4) {
+  if index < 0 or index + 3 >= into.length {
+    runtimeWarning(message: "Float4.store: index {index} is out of range for length {into.length}")
+    ret
+  }
+  unsafe {
+    nativeStore(data: into.data, index: index, value: value)
+  }
+}

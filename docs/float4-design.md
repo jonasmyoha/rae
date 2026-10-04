@@ -42,6 +42,43 @@ bit-exact check against the scalar oracle kept as a **permanent fixture**, not
 only a benchmark assertion. `Vec4` is left alone; re-implementing it over
 Float4 is a separate ticket, to wait until a measurement asks for it.
 
+### 0.1 As implemented (2026-10-04)
+
+`lib/Float4.rae` (imported, not in the prelude) declares `type Float4 { x y z
+w: Float }` and `type Mask4` and the named functions; every function is an
+`unsafe extern("rae_f4_*")` native implemented as inline code in
+`compiler/runtime/runtime_float4.h` — NEON, SSE2, wasm SIMD128, and the scalar
+definitions as the fallback. The generated C includes that header only when a
+program uses Float4. `rae run --float4-scalar` (-DRAE_FLOAT4_SCALAR) forces the
+scalar path. Fixtures 967_float4_bit_exact (the SIMD lowering) and
+968_float4_bit_exact_scalar (the same program, scalar) check every function
+lane by lane against its scalar definition, bit for bit, over inputs that
+include -0, +-inf, NaNs with a sign and payload, denormals and the extremes,
+and masks with arbitrary bits. Verified on arm64 (NEON and scalar) and on wasm
+SIMD128 (emcc -msimd128, run in node: the same output); the SSE2 path compiles
+for x86-64 but was not run (no x86 machine or Rosetta here).
+
+Where it differs from the text above:
+
+- **Mask names.** `and`, `or`, `not` and `any` are Rae keywords, so the mask
+  functions are `both`, `either`, `invert`, `anyLane` and `allLanes`. Mask4's
+  four lanes are `UInt32` fields (`bitsX` ...) because Rae has no private
+  fields; nothing operates on them except these functions and `select`.
+- **A lane is true when any of its bits is set**, and `select`, `both`,
+  `either` and `invert` are bitwise in every lowering, so a hand-built Mask4
+  gives the same result on every path.
+- **`mulAdd(a:b:c:)` is `a * b + c`** (two roundings), the usual argument order
+  of a multiply-add.
+- **Two NaN inputs.** When two or more inputs of an arithmetic function are
+  NaN, which one the result carries is not fixed: IEEE 754 leaves it open, and
+  the C compiler may swap the operands of a commutative `x + y` even in plain
+  scalar code (the fixture's first run caught exactly that). The result is
+  then a quiet NaN equal to one of the NaN inputs; everything else is
+  bit-exact.
+- **Added:** `negate` (FloatWide needs it), `embedIndex` (the other half of
+  `minLaneIndex`, Box3D's b3EmbedIndexW) and `lowering()` (which path the
+  program was compiled with).
+
 ## 1. Why
 
 Box3D's NEON build is 1.35-1.5x faster than its scalar build on contact-heavy
