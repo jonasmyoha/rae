@@ -1,0 +1,79 @@
+# A `view`/`mod` loop binding over a List of a fixed-width integer
+# (`loop let key: view UInt64 in keys`). A reference to Int/Float/Bool/Char
+# is a `{ .ptr }` wrapper struct, but a reference to Int8..UInt64 is a plain
+# C pointer, and the binding was emitted as `uint64_t* key = { .ptr = ... }`,
+# which C rejects. It binds as `&element` now. The same mismatch broke every
+# `mod` of a fixed-width integer (a parameter, its call site, an assignment
+# through it, `if let … modAt`): each site assumed the wrapper.
+func bump(counter: mod UInt64) {
+  counter = counter + 1
+}
+
+func bumpTwice(counter: mod UInt64) {
+  bump(counter: counter)
+  bump(counter: counter)
+}
+
+func addTo(total: mod Int32, amount: view Int32) {
+  total = total + amount
+}
+
+func main() {
+  let wide: List(UInt64) = { 1, 2, 3 }
+  var wideSum: UInt64 = 0
+  loop let key: view UInt64 in wide {
+    wideSum = wideSum + key
+  }
+  log("UInt64 {wideSum}")
+
+  let signed32: List(Int32) = { -4, 10 }
+  var signed32Sum: Int32 = 0
+  loop let value: view Int32 in signed32 {
+    signed32Sum = signed32Sum + value
+  }
+  log("Int32 {signed32Sum}")
+
+  let unsigned32: List(UInt32) = { 7, 8 }
+  var unsigned32Sum: UInt32 = 0
+  loop let value: view UInt32 in unsigned32 {
+    unsigned32Sum = unsigned32Sum + value
+  }
+  log("UInt32 {unsigned32Sum as Int}")
+
+  let bytes: List(UInt8) = { 200, 50 }
+  var byteSum: Int = 0
+  loop let value: view UInt8 in bytes {
+    byteSum = byteSum + value as Int
+  }
+  log("UInt8 {byteSum}")
+
+  let small: List(Int16) = { -300, 1 }
+  var smallSum: Int16 = 0
+  loop let value: view Int16 in small {
+    smallSum = smallSum + value
+  }
+  log("Int16 {smallSum}")
+
+  # A mod binding writes through to the element.
+  let counters: List(UInt64) = { 10, 20 }
+  loop let counter: mod UInt64 in counters {
+    counter = counter + 1
+  }
+  log("mod UInt64 {counters.copyAtDefault(index: 0)} {counters.copyAtDefault(index: 1)}")
+
+  if let first: view UInt64 => wide.viewAt(index: 0) {
+    log("if let view UInt64 {first}")
+  }
+
+  var single: UInt64 = 5
+  bump(counter: single)
+  bumpTwice(counter: single)
+  log("mod UInt64 parameter {single}")
+  var total: Int32 = 1
+  addTo(total: total, amount: 41)
+  log("mod Int32 parameter {total}")
+  if let slot: mod UInt64 => counters.modAt(index: 1) {
+    slot = slot * 2
+  }
+  log("if let mod UInt64 {counters.copyAtDefault(index: 1)}")
+}

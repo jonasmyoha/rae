@@ -77,7 +77,7 @@ static bool emit_list_if_let(CFuncContext* ctx, const AstStmt* stmt, FILE* out) 
   value_type.is_mod = false;
   value_type.resolved_type = NULL;
   bool is_ref = element_type->is_view || element_type->is_mod;
-  bool primitive_ref = is_ref && is_primitive_type(get_base_type_name(element_type));
+  bool primitive_ref = is_ref && c_primitive_ref_has_wrapper(get_base_type_name(element_type));
   bool string_value = !is_ref && str_eq_cstr(get_base_type_name(element_type), "String");
   bool deep_value = !is_ref && !string_value
       && type_needs_deep_copy(ctx->compiler_ctx, ctx->module, &value_type, 0);
@@ -1708,7 +1708,7 @@ static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             fprintf(out, " = ");
             if (copy_string) fprintf(out, "rae_string_copy(");
             bool primitive_ref = binding_is_ref
-                && is_primitive_type(get_base_type_name(binding_type));
+                && c_primitive_ref_has_wrapper(get_base_type_name(binding_type));
             if (primitive_ref) fprintf(out, "{ .ptr = &");
             else if (binding_is_ref) fprintf(out, "&");
             fprintf(out, "__rae_collection%d%s[__rae_collection_index%d]",
@@ -2378,7 +2378,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                         }
                     }
                 }
-                if (is_primitive_type(base)) {
+                if (c_primitive_ref_has_wrapper(base)) {
                     // Check if the value is a function call returning a ref type
                     // (can't take address of rvalue — assign directly)
                     bool value_returns_ref = ref_bind_value_returns_ref(
@@ -2916,7 +2916,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 target_tr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
                                                  ctx->generic_args, target_tr);
             bool is_mod_ref = target_tr && target_tr->is_mod;
-            bool is_prim_mod_ref = is_mod_ref && is_primitive_type(get_base_type_name(target_tr));
+            bool is_prim_mod_ref = is_mod_ref && c_primitive_ref_has_wrapper(get_base_type_name(target_tr));
 
             if (is_prim_mod_ref && str_eq_cstr(get_base_type_name(target_tr), "String")) {
                 const AstExpr* rhs = stmt->as.assign_stmt.value;

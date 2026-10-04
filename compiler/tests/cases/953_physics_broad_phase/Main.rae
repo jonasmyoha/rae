@@ -457,8 +457,8 @@ func evaluateContainers(
       keys.add(value: readU64(reader: reader))
     }
     quickSort(T: UInt64, values: keys)
-    loop var i: Int = 0, i < keys.length, ++i {
-      putU64(out: out, value: keys.copyAtDefault(index: i))
+    loop let key: view UInt64 in keys {
+      putU64(out: out, value: key)
     }
   } else {
     ret false
