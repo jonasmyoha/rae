@@ -801,7 +801,7 @@ func enlargeBulletProxies(world: mod PhysicsWorld, simIndex: view Int) {
   }
   var shapeId: Int = bodyAt(world: world, bodyId: sim.bodyId).headShapeId
   loop shapeId is not -1 {
-    let shape: Shape = world.shapes.copyAtDefault(index: shapeId)
+    let shape: PhysicsShape = world.shapes.copyAtDefault(index: shapeId)
     let fatBox: Aabb = world.fatAabbs.copyAtDefault(index: shapeId)
     if let tree: mod DynamicTree => world.broadPhase.trees.modAt(index: 2) {
       let id: Int = proxyId(proxyKey: shape.proxyKey)

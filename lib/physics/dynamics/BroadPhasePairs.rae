@@ -102,8 +102,8 @@ func gatherMovedSiblings(tree: view DynamicTree, pairIndices: mod List(Int)) ret
 
 # b3ShouldCreatePair: the shape pair gauntlet.
 func shouldCreatePair(world: view PhysicsWorld, shapeIdA: view Int, shapeIdB: view Int) ret Bool {
-  let shapeA: Shape = world.shapes.copyAtDefault(index: shapeIdA)
-  let shapeB: Shape = world.shapes.copyAtDefault(index: shapeIdB)
+  let shapeA: PhysicsShape = world.shapes.copyAtDefault(index: shapeIdA)
+  let shapeB: PhysicsShape = world.shapes.copyAtDefault(index: shapeIdB)
   # Are the shapes on the same body?
   if shapeA.bodyId is shapeB.bodyId {
     ret false
@@ -130,7 +130,7 @@ func emitCompoundPairs(
   compoundShapeId: view Int
   otherShapeId: view Int
 ) {
-  let compoundShape: Shape = world.shapes.copyAtDefault(index: compoundShapeId)
+  let compoundShape: PhysicsShape = world.shapes.copyAtDefault(index: compoundShapeId)
   let otherProxyKey: Int = world.shapes.copyAtDefault(index: otherShapeId).proxyKey
   var otherBox: Aabb = { lowerBound: zeroVector(), upperBound: zeroVector() }
   if let tree: view DynamicTree => world.broadPhase.trees.viewAt(

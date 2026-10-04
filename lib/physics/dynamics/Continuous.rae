@@ -50,8 +50,8 @@ func makeRelativeSweep(sim: view BodySim, base: view Vec3) ret Sweep {
 # (TriangleTimeOfImpact).
 func shapeTimeOfImpact(
   world: view PhysicsWorld
-  shapeA: view Shape
-  shapeB: view Shape
+  shapeA: view PhysicsShape
+  shapeB: view PhysicsShape
   sweepA: view Sweep
   sweepB: view Sweep
   maxFraction: view Float
@@ -109,7 +109,7 @@ type ContinuousHits {
 # fraction, if `shapeId` is hit sooner than `fraction`.
 func continuousCandidate(
   world: view PhysicsWorld
-  fastShape: view Shape
+  fastShape: view PhysicsShape
   fastSim: view BodySim
   shapeId: view Int
   sweep: view Sweep
@@ -121,7 +121,7 @@ func continuousCandidate(
   if shapeId is fastShape.id {
     ret fraction
   }
-  let shape: Shape = world.shapes.copyAtDefault(index: shapeId)
+  let shape: PhysicsShape = world.shapes.copyAtDefault(index: shapeId)
   if shape.bodyId is fastShape.bodyId {
     ret fraction
   }
@@ -174,7 +174,7 @@ func queryContinuous(
   world: view PhysicsWorld
   treeIndex: view Int
   box: view Aabb
-  fastShape: view Shape
+  fastShape: view PhysicsShape
   fastSim: view BodySim
   sweep: view Sweep
   base: view Vec3
@@ -228,7 +228,7 @@ func refreshFatBox(
   if contains(outer: fatBox, inner: box) {
     ret false
   }
-  let shape: Shape = world.shapes.copyAtDefault(index: shapeId)
+  let shape: PhysicsShape = world.shapes.copyAtDefault(index: shapeId)
   let inflated: Aabb = inflate(box: box, extension: shape.aabbMargin)
   world.fatAabbs.set(index: shapeId, value: inflated)
   # Regular bodies mark the hierarchy moved; bullets are handled later
@@ -265,7 +265,7 @@ func solveContinuous(world: mod PhysicsWorld, simIndex: view Int, dt: view Float
 
   var shapeId: Int = fastBody.headShapeId
   loop shapeId is not -1 {
-    var fastShape: Shape = world.shapes.copyAtDefault(index: shapeId)
+    var fastShape: PhysicsShape = world.shapes.copyAtDefault(index: shapeId)
     let nextShapeId: Int = fastShape.nextShapeId
     let box1: Aabb = fastShape.aabb
     # xf2 is relative to the base, so translate the box back to world space
@@ -274,7 +274,7 @@ func solveContinuous(world: mod PhysicsWorld, simIndex: view Int, dt: view Float
       origin: base
     )
     # Stored to avoid computing it again when there is no impact
-    if let stored: mod Shape => world.shapes.modAt(index: shapeId) {
+    if let stored: mod PhysicsShape => world.shapes.modAt(index: shapeId) {
       stored.aabb = box2
     }
     fastShape.aabb = box2
@@ -365,14 +365,14 @@ func solveContinuous(world: mod PhysicsWorld, simIndex: view Int, dt: view Float
     # The shapes' boxes at the interpolated transform
     var nextId: Int = fastBody.headShapeId
     loop nextId is not -1 {
-      let shape: Shape = world.shapes.copyAtDefault(index: nextId)
+      let shape: PhysicsShape = world.shapes.copyAtDefault(index: nextId)
       let box: Aabb = computeFatShapeAabb(
         shape: shape
         hulls: world.hulls
         transform: transform
         extra: speculative
       )
-      if let stored: mod Shape => world.shapes.modAt(index: nextId) {
+      if let stored: mod PhysicsShape => world.shapes.modAt(index: nextId) {
         stored.aabb = box
       }
       enlargeBullet = refreshFatBox(
@@ -389,7 +389,7 @@ func solveContinuous(world: mod PhysicsWorld, simIndex: view Int, dt: view Float
     fastSim.center0 = fastSim.center
     var nextId: Int = fastBody.headShapeId
     loop nextId is not -1 {
-      let shape: Shape = world.shapes.copyAtDefault(index: nextId)
+      let shape: PhysicsShape = world.shapes.copyAtDefault(index: nextId)
       # The shape's box is still valid from above
       enlargeBullet = refreshFatBox(
         world: world

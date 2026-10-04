@@ -61,11 +61,11 @@ func createShapeInternal(
   bodyId: view Int
   bodyTransform: view Transform
   def: view ShapeDef
-  geometry: view Shape
+  geometry: view PhysicsShape
   shapeId: view Int
 ) ret Int {
   let body: Body = bodyAt(world: world, bodyId: bodyId)
-  var shape: Shape = world.shapes.copyAtDefault(index: shapeId)
+  var shape: PhysicsShape = world.shapes.copyAtDefault(index: shapeId)
   shape.shapeType = geometry.shapeType
   shape.sphere = geometry.sphere
   shape.capsule = geometry.capsule
@@ -118,11 +118,11 @@ func createShapeInternal(
 
   # The body's doubly linked shape list
   if body.headShapeId is not -1 {
-    if let head: mod Shape => world.shapes.modAt(index: body.headShapeId) {
+    if let head: mod PhysicsShape => world.shapes.modAt(index: body.headShapeId) {
       head.prevShapeId = shapeId
     }
   }
-  if let added: mod Shape => world.shapes.modAt(index: shapeId) {
+  if let added: mod PhysicsShape => world.shapes.modAt(index: shapeId) {
     added.prevShapeId = -1
     added.nextShapeId = body.headShapeId
     added.sensorIndex = -1
@@ -156,7 +156,7 @@ func finishShape(
   world: mod PhysicsWorld
   bodyId: view BodyId
   def: view ShapeDef
-  geometry: view Shape
+  geometry: view PhysicsShape
   shapeId: view Int
 ) ret ShapeId {
   let bodyIndex: Int = bodyIndexOf(bodyId: bodyId)
@@ -180,7 +180,7 @@ func finishShape(
     }
     syncBodyFlags(world: world, bodyId: bodyIndex)
   }
-  let shape: Shape = world.shapes.copyAtDefault(index: shapeId)
+  let shape: PhysicsShape = world.shapes.copyAtDefault(index: shapeId)
   ret ShapeId { index1: shapeId + 1, world0: bodyId.world0, generation: shape.generation }
 }
 
@@ -192,7 +192,7 @@ func createSphereShape(
   sphere: view Sphere
 ) ret ShapeId {
   let shapeId: Int = allocateShapeSlot(world: world)
-  var geometry: Shape = zeroShape()
+  var geometry: PhysicsShape = zeroShape()
   geometry.shapeType = ShapeType.sphere
   geometry.sphere = sphere
   ret finishShape(
@@ -226,7 +226,7 @@ func createCapsuleShape(
     )
   }
   let shapeId: Int = allocateShapeSlot(world: world)
-  var geometry: Shape = zeroShape()
+  var geometry: PhysicsShape = zeroShape()
   geometry.shapeType = ShapeType.capsule
   geometry.capsule = capsule
   ret finishShape(
@@ -246,7 +246,7 @@ func createHullShape(
   hull: view Hull
 ) ret ShapeId {
   let shapeId: Int = allocateShapeSlot(world: world)
-  var geometry: Shape = zeroShape()
+  var geometry: PhysicsShape = zeroShape()
   geometry.shapeType = ShapeType.hull
   geometry.hullIndex = world.hulls.length
   world.hulls.add(value: hull)
@@ -276,7 +276,7 @@ func createTransformedHullShape(
     transform: transform
     scaleVector: scaleVector
   ) {
-    var geometry: Shape = zeroShape()
+    var geometry: PhysicsShape = zeroShape()
     geometry.shapeType = ShapeType.hull
     geometry.hullIndex = world.hulls.length
     world.hulls.add(value: baked)
@@ -289,7 +289,7 @@ func createTransformedHullShape(
     )
   }
   freeId(pool: world.shapeIdPool, id: shapeId)
-  if let shape: mod Shape => world.shapes.modAt(index: shapeId) {
+  if let shape: mod PhysicsShape => world.shapes.modAt(index: shapeId) {
     shape.id = -1
   }
   ret nullShapeId()
@@ -301,14 +301,14 @@ func createMeshShape(
   world: mod PhysicsWorld
   bodyId: view BodyId
   def: view ShapeDef
-  mesh: view MeshData
+  mesh: view PhysicsMeshData
   scale: view Vec3
 ) ret ShapeId {
   let shapeId: Int = allocateShapeSlot(world: world)
   let meshScale: Vec3 = safeScale(scaleVector: scale)
   let scaledLower: Vec3 = multiply(left: meshScale, right: mesh.bounds.lowerBound)
   let scaledUpper: Vec3 = multiply(left: meshScale, right: mesh.bounds.upperBound)
-  var geometry: Shape = zeroShape()
+  var geometry: PhysicsShape = zeroShape()
   geometry.shapeType = ShapeType.mesh
   geometry.meshIndex = world.meshes.length
   geometry.localBounds = Aabb {
@@ -337,7 +337,7 @@ func createHeightFieldShape(
     ret nullShapeId()
   }
   let shapeId: Int = allocateShapeSlot(world: world)
-  var geometry: Shape = zeroShape()
+  var geometry: PhysicsShape = zeroShape()
   geometry.shapeType = ShapeType.height
   geometry.heightFieldIndex = world.heightFields.length
   geometry.localBounds = heightField.aabb
@@ -365,7 +365,7 @@ func createCompoundShape(
     ret nullShapeId()
   }
   let shapeId: Int = allocateShapeSlot(world: world)
-  var geometry: Shape = zeroShape()
+  var geometry: PhysicsShape = zeroShape()
   geometry.shapeType = ShapeType.compound
   geometry.compoundIndex = world.compounds.length
   geometry.hullIndex = world.hulls.length
@@ -397,14 +397,14 @@ func destroyShapeInternal(
   bodyId: view Int
   wakeBodies: view Bool
 ) {
-  let shape: Shape = world.shapes.copyAtDefault(index: shapeId)
+  let shape: PhysicsShape = world.shapes.copyAtDefault(index: shapeId)
   if shape.prevShapeId is not -1 {
-    if let previous: mod Shape => world.shapes.modAt(index: shape.prevShapeId) {
+    if let previous: mod PhysicsShape => world.shapes.modAt(index: shape.prevShapeId) {
       previous.nextShapeId = shape.nextShapeId
     }
   }
   if shape.nextShapeId is not -1 {
-    if let next: mod Shape => world.shapes.modAt(index: shape.nextShapeId) {
+    if let next: mod PhysicsShape => world.shapes.modAt(index: shape.nextShapeId) {
       next.prevShapeId = shape.prevShapeId
     }
   }
@@ -436,7 +436,7 @@ func destroyShapeInternal(
   }
 
   freeId(pool: world.shapeIdPool, id: shapeId)
-  if let freed: mod Shape => world.shapes.modAt(index: shapeId) {
+  if let freed: mod PhysicsShape => world.shapes.modAt(index: shapeId) {
     freed.id = -1
   }
 }

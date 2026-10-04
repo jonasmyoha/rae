@@ -104,7 +104,7 @@ func proxyShapeIndex(tree: view DynamicTree, proxyId: view Int) ret Int {
 # The transform of `shape`'s body relative to `origin`.
 func shapeRelativeTransform(
   world: view PhysicsWorld
-  shape: view Shape
+  shape: view PhysicsShape
   origin: view Pos
 ) ret Transform {
   let body: Body = bodyAt(world: world, bodyId: shape.bodyId)
@@ -130,7 +130,7 @@ func overlapAabb(
       var proxyId: Int = nextTreeQueryProxy(tree: tree, query: query)
       loop proxyId is not -1 {
         let shapeIndex: Int = proxyShapeIndex(tree: tree, proxyId: proxyId)
-        if let shape: view Shape => world.shapes.viewAt(index: shapeIndex) {
+        if let shape: view PhysicsShape => world.shapes.viewAt(index: shapeIndex) {
           if shouldQueryCollide(shapeFilter: shape.filter, queryFilter: filter) {
             shapeIds.add(value: makeShapeId(world: world, shapeIndex: shapeIndex))
           }
@@ -167,7 +167,7 @@ func overlapShapeProxy(
       var proxyId: Int = nextTreeQueryProxy(tree: tree, query: query)
       loop proxyId is not -1 {
         let shapeIndex: Int = proxyShapeIndex(tree: tree, proxyId: proxyId)
-        if let shape: view Shape => world.shapes.viewAt(index: shapeIndex) {
+        if let shape: view PhysicsShape => world.shapes.viewAt(index: shapeIndex) {
           if shouldQueryCollide(shapeFilter: shape.filter, queryFilter: filter) {
             # Re-centred on the query origin
             let transform: Transform = shapeRelativeTransform(
@@ -219,7 +219,7 @@ func collideMover(
       var proxyId: Int = nextTreeQueryProxy(tree: tree, query: query)
       loop proxyId is not -1 {
         let shapeIndex: Int = proxyShapeIndex(tree: tree, proxyId: proxyId)
-        if let shape: view Shape => world.shapes.viewAt(index: shapeIndex) {
+        if let shape: view PhysicsShape => world.shapes.viewAt(index: shapeIndex) {
           if shouldQueryCollide(shapeFilter: shape.filter, queryFilter: filter) {
             # Re-centred on the query origin: the mover and the planes are
             # origin relative
@@ -277,7 +277,7 @@ func castRayWith(
       loop proxyId is not -1 {
         var value: Float = cast.maxFraction
         let shapeIndex: Int = proxyShapeIndex(tree: tree, proxyId: proxyId)
-        if let shape: view Shape => world.shapes.viewAt(index: shapeIndex) {
+        if let shape: view PhysicsShape => world.shapes.viewAt(index: shapeIndex) {
           if shouldQueryCollide(shapeFilter: shape.filter, queryFilter: filter) {
             let transform: Transform = shapeRelativeTransform(
               world: world
@@ -431,7 +431,7 @@ func castShapeWith(
       loop proxyId is not -1 {
         var value: Float = cast.maxFraction
         let shapeIndex: Int = proxyShapeIndex(tree: tree, proxyId: proxyId)
-        if let shape: view Shape => world.shapes.viewAt(index: shapeIndex) {
+        if let shape: view PhysicsShape => world.shapes.viewAt(index: shapeIndex) {
           if shouldQueryCollide(shapeFilter: shape.filter, queryFilter: filter) {
             # Rebuilt from the origin relative input, taking only the
             # advancing fraction from the tree
@@ -569,7 +569,7 @@ func castMover(
       loop proxyId is not -1 {
         var value: Float = worldFraction
         let shapeIndex: Int = proxyShapeIndex(tree: tree, proxyId: proxyId)
-        if let shape: view Shape => world.shapes.viewAt(index: shapeIndex) {
+        if let shape: view PhysicsShape => world.shapes.viewAt(index: shapeIndex) {
           let shapeId: ShapeId = makeShapeId(world: world, shapeIndex: shapeIndex)
           if shouldQueryCollide(shapeFilter: shape.filter, queryFilter: filter) and isIgnored(
             shapeId: shapeId

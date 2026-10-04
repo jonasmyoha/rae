@@ -38,7 +38,7 @@ func accumulateExtents(
 ) {
   var shapeId: Int = body.headShapeId
   loop shapeId is not -1 {
-    let shape: Shape = world.shapes.copyAtDefault(index: shapeId)
+    let shape: PhysicsShape = world.shapes.copyAtDefault(index: shapeId)
     let extent: ShapeExtent = computeShapeExtent(
       shape: shape
       hulls: world.hulls
@@ -99,7 +99,7 @@ func updateBodyMassData(world: mod PhysicsWorld, bodyId: view Int) {
   var localCenter: Vec3 = zeroVector()
   var shapeId: Int = body.headShapeId
   loop shapeId is not -1 {
-    let shape: Shape = world.shapes.copyAtDefault(index: shapeId)
+    let shape: PhysicsShape = world.shapes.copyAtDefault(index: shapeId)
     shapeId = shape.nextShapeId
     if shape.density is 0.0 {
       masses.add(value: zeroMassData())

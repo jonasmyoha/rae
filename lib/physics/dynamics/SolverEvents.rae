@@ -17,7 +17,7 @@ open physics/dynamics/WorldContacts
 
 # A shape's user material for a hit (b3GetShapeUserMaterialId of a convex
 # shape: its only material)
-func shapeUserMaterialId(shape: view Shape) ret UInt64 {
+func shapeUserMaterialId(shape: view PhysicsShape) ret UInt64 {
   if shape.materialCount is 0 {
     ret 0
   }
@@ -48,8 +48,8 @@ func reportHitEvents(world: mod PhysicsWorld) {
       continue
     }
     let contact: Contact = world.contacts.copyAtDefault(index: contactId)
-    let shapeA: Shape = world.shapes.copyAtDefault(index: contact.shapeIdA)
-    let shapeB: Shape = world.shapes.copyAtDefault(index: contact.shapeIdB)
+    let shapeA: PhysicsShape = world.shapes.copyAtDefault(index: contact.shapeIdA)
+    let shapeB: PhysicsShape = world.shapes.copyAtDefault(index: contact.shapeIdB)
     let simA: BodySim = bodySimOf(world: world, body: bodyAt(world: world, bodyId: shapeA.bodyId))
     let simB: BodySim = bodySimOf(world: world, body: bodyAt(world: world, bodyId: shapeB.bodyId))
     let midCenter: Vec3 = lerpPosition(from: simA.center, to: simB.center, alpha: 0.5)
@@ -91,8 +91,8 @@ func reportSensorHits(world: mod PhysicsWorld) {
   loop var i: Int = 0, i < world.taskContexts.length, ++i {
     let hits: List(SensorHit) = world.taskContexts.copyAtDefault(index: i).sensorHits
     loop let hit: view SensorHit in hits {
-      let sensorShape: Shape = world.shapes.copyAtDefault(index: hit.sensorId)
-      let visitor: Shape = world.shapes.copyAtDefault(index: hit.visitorId)
+      let sensorShape: PhysicsShape = world.shapes.copyAtDefault(index: hit.sensorId)
+      let visitor: PhysicsShape = world.shapes.copyAtDefault(index: hit.visitorId)
       if let sensor: mod Sensor => world.sensors.modAt(index: sensorShape.sensorIndex) {
         sensor.hits.add(value: Visitor { shapeId: hit.visitorId, generation: visitor.generation })
       }
