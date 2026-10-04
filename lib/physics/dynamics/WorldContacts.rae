@@ -3,10 +3,10 @@
 # b3UpdateContact of Box3D's contact.c at 9f998c8). Box3D's operation order
 # is kept exactly; checked against the oracle in fixture 957.
 #
-# Not here yet: the pre-solve and custom friction /
-# restitution callbacks (Rae has no function values; Box3D's defaults are
-# used: the geometric mean of the frictions, the larger restitution), and
-# compound and mesh contacts (P5).
+# Mesh contacts are MeshContact. Not here yet: the pre-solve and custom
+# friction / restitution callbacks (Rae has no function values; Box3D's
+# defaults are used: the geometric mean of the frictions, the larger
+# restitution), and compound contacts (P5d).
 import Math
 open Vec3
 open Quat
@@ -18,6 +18,7 @@ open physics/math/MatrixMath
 open physics/math/TransformMath
 open physics/geometry/QueryTypes
 open physics/geometry/Hull
+open physics/geometry/MeshQuery
 open physics/collision/Manifold
 open physics/collision/ConvexManifold
 open physics/collision/HullManifold
@@ -28,6 +29,7 @@ open physics/dynamics/WorldTypes
 open physics/dynamics/Body
 open physics/dynamics/Shape
 open physics/dynamics/Contact
+open physics/dynamics/MeshContact
 open physics/dynamics/World
 open physics/dynamics/WorldGraph
 open physics/dynamics/WorldIslands
@@ -119,7 +121,10 @@ func createContact(
   if (bodyA.flags bitand enableContactRecyclingFlag) is not 0 and (bodyB.flags bitand enableContactRecyclingFlag) is not 0 {
     contact.flags = contact.flags bitor contactRecycleFlag
   }
-  # (Mesh contacts: P5.)
+  if shapeA.shapeType is ShapeType.mesh or shapeA.shapeType is ShapeType.height {
+    contact.flags = contact.flags bitor simMeshContact
+  }
+  # (A compound's mesh child: P5d.)
   # Is either body static?
   if bodyA.bodyType is BodyType.staticBody or bodyB.bodyType is BodyType.staticBody {
     contact.flags = contact.flags bitor contactStaticFlag
@@ -224,6 +229,7 @@ func destroyContact(world: mod PhysicsWorld, contactId: view Int, wakeBodies: vi
   let removed: Bool = removePairKey(set: world.broadPhase.pairSet, key: pairKey)
   if let target: mod Contact => world.contacts.modAt(index: contactId) {
     target.manifolds.clear()
+    target.triangleCache.clear()
   }
   let bodyIdA: Int = contact.edgeA.bodyId
   let bodyIdB: Int = contact.edgeB.bodyId
@@ -492,11 +498,12 @@ func updateConvexContact(
   ret true
 }
 
-# b3UpdateContact: the manifold and touching state of a convex contact,
-# anchors relative to the body centers. (Compound and mesh contacts: P5.)
+# b3UpdateContact: the manifold and touching state of a convex or mesh
+# contact, anchors relative to the body centers. (Compound contacts: P5d.)
 func updateContact(
   contact: mod Contact
   geometry: mod LocalManifold
+  meshManifold: mod LocalManifold
   shapeA: view Shape
   localCenterA: view Vec3
   transformA: view Transform
@@ -504,18 +511,43 @@ func updateContact(
   localCenterB: view Vec3
   transformB: view Transform
   hulls: view List(Hull)
+  meshes: view List(Mesh)
+  isFast: view Bool
   lengthUnitsPerMeter: view Float
 ) ret Bool {
-  let touching: Bool = updateConvexContact(
-    contact: contact
-    geometry: geometry
-    shapeA: shapeA
-    transformA: transformA
-    shapeB: shapeB
-    transformB: transformB
-    hulls: hulls
-    lengthUnitsPerMeter: lengthUnitsPerMeter
-  )
+  var touching: Bool = false
+  if shapeA.shapeType is ShapeType.mesh {
+    if let mesh: view Mesh => meshes.viewAt(index: shapeA.meshIndex) {
+      touching = computeMeshManifolds(
+        contact: contact
+        scratch: meshManifold
+        shapeA: shapeA
+        mesh: mesh
+        transformA: transformA
+        shapeB: shapeB
+        hulls: hulls
+        transformB: transformB
+        isFast: isFast
+        lengthUnitsPerMeter: lengthUnitsPerMeter
+      )
+    }
+    if touching and ((shapeA.flags bitor shapeB.flags) bitand enableHitEventsFlag) is not 0 {
+      contact.flags = contact.flags bitor simEnableHitEvent
+    } else {
+      contact.flags = contact.flags bitand (bitnot simEnableHitEvent)
+    }
+  } else {
+    touching = updateConvexContact(
+      contact: contact
+      geometry: geometry
+      shapeA: shapeA
+      transformA: transformA
+      shapeB: shapeB
+      transformB: transformB
+      hulls: hulls
+      lengthUnitsPerMeter: lengthUnitsPerMeter
+    )
+  }
   if touching {
     let centerA: Vec3 = rotateVector(quat: transformA.rotation, vector: localCenterA)
     let centerB: Vec3 = rotateVector(quat: transformB.rotation, vector: localCenterB)

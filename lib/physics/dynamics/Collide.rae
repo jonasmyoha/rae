@@ -183,6 +183,9 @@ func collideTask(
     var touching: Bool = false
     var wasTouching: Bool = false
     var recycled: Bool = false
+    var specColorIndex: Int = -1
+    var specLocalIndex: Int = -1
+    var specManifoldCount: Int = 0
     if let contact: mod Contact => world.contacts.modAt(index: contactId) {
       wasTouching = (contact.flags bitand simTouchingFlag) is not 0
       var recycleTolerance: Float = recycleDistanceNonTouching
@@ -210,6 +213,7 @@ func collideTask(
           touching = updateContact(
             contact: contact
             geometry: taskContext.localManifold
+            meshManifold: taskContext.meshManifold
             shapeA: shapeA
             localCenterA: simA.localCenter
             transformA: transformA
@@ -217,10 +221,17 @@ func collideTask(
             localCenterB: simB.localCenter
             transformB: transformB
             hulls: world.hulls
+            meshes: world.meshes
+            isFast: isFast
             lengthUnitsPerMeter: lengthUnitsPerMeter
           )
         }
-        # (A mesh contact's spec update: P5.)
+        # The mesh contact's spec follows its manifold count
+        if touching and wasTouching and (contact.flags bitand simMeshContact) is not 0 {
+          specColorIndex = contact.colorIndex
+          specLocalIndex = contact.localIndex
+          specManifoldCount = contact.manifolds.length
+        }
         if touching {
           # Cache the separations
           loop var m: Int = 0, m < contact.manifolds.length, ++m {
@@ -238,6 +249,13 @@ func collideTask(
           contact.flags = contact.flags bitor simStartedTouching
         } else if touching is false and wasTouching {
           contact.flags = contact.flags bitor simStoppedTouching
+        }
+      }
+    }
+    if specColorIndex is not -1 {
+      if let color: mod GraphColor => world.constraintGraph.colors.modAt(index: specColorIndex) {
+        if let spec: mod ContactSpec => color.contacts.modAt(index: specLocalIndex) {
+          spec.manifoldCount = specManifoldCount
         }
       }
     }

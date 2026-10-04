@@ -352,6 +352,16 @@ C added.
   `MeshQuery`; golden `mesh`, fixture 971). The mesh's byte-block layout
   and hash are not ported (a MeshData is a struct of lists). The mesh ray,
   shape and mover casts are P7.
+  **P5b2 landed 2026-10-04, bit-exact:** mesh_contact.c
+  (b3ComputeMeshManifolds: the cached triangle query, the per-triangle
+  sphere, capsule and hull manifolds, the ghost-collision reduction over the
+  found edges and vertices, clustering, b3CullPoints / b3ReduceCluster and
+  the impulse matching), the mesh shape (b3CreateMeshShape and its box,
+  centroid and extent cases; no mass) and the mesh cases of contact.c and
+  the narrow phase (`lib/physics/dynamics/MeshContact`, `MeshCluster`;
+  golden `meshscenes`, fixture 974). Not yet: the triangle time of impact of
+  continuous collision against a mesh (a fast body skips mesh targets) and
+  per-triangle materials (a mesh shape has one).
 - **P6 — joints**, one module per kind, each scene bit-exact.
 - **P7 — queries and the mover**: ray/shape casts, overlaps, the character
   loop (walls, steps, slopes).

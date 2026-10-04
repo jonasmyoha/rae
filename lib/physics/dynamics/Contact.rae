@@ -7,6 +7,7 @@ open Quat
 open physics/math/VectorMath
 open physics/math/QuatMath
 open physics/math/TransformMath
+open physics/math/AabbMath
 open physics/collision/ShapePair
 
 # b3ContactFlags
@@ -38,13 +39,20 @@ const simEnableHitEvent: Int = 1048576
 
 const simEnablePreSolveEvents: Int = 2097152
 
-# A mesh contact (P5)
+# A mesh contact (shape A is a mesh: MeshContact)
 const simMeshContact: Int = 4194304
 
 # The relative transform is cached for contact recycling
 const relativeTransformValid: Int = 8388608
 
 const enableSpeculativePoints: Int = 16777216
+
+# A mesh triangle a mesh contact found near its convex shape, with that
+# pair's warm-start cache (b3TriangleCache).
+type TriangleCache {
+  triangleIndex: Int
+  cache: ContactCache
+}
 
 # One of a contact's two links in its bodies' contact lists. A contact key
 # is the contact id times two plus the edge index.
@@ -110,8 +118,12 @@ type Contact {
   cachedRotationB: Quat
   cachedRelativePose: Transform
   friction: Float
-  # b3ConvexContact's cache (the mesh contact's triangle caches: P5)
+  # b3ConvexContact's cache
   cache: ContactCache
+  # b3MeshContact: the triangles near the convex shape, by ascending index,
+  # and the world box they were queried with (a mesh contact only)
+  triangleCache: List(TriangleCache)
+  queryBounds: Aabb
   restitution: Float
   rollingResistance: Float
   tangentVelocity: Vec3
@@ -180,6 +192,8 @@ func zeroContact() ret Contact {
     cachedRelativePose: Transform { position: zeroVector(), rotation: zeroQuat() }
     friction: 0.0
     cache: emptyContactCache()
+    triangleCache: List.create(TriangleCache, cap: 0)
+    queryBounds: Aabb { lowerBound: zeroVector(), upperBound: zeroVector() }
     restitution: 0.0
     rollingResistance: 0.0
     tangentVelocity: zeroVector()

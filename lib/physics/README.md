@@ -259,7 +259,7 @@ serially in contact id order.
 Destroying a shape or a body now destroys its contacts, and a mass update
 invalidates their cached recycling transforms. Not yet: contact events
 (P4d), the pre-solve and custom friction/restitution callbacks (Box3D's
-default mixing is used), compound and mesh contacts (P5), joints in the
+default mixing is used), compound contacts (P5d), joints in the
 graph and islands (P6), island splitting (P4d).
 
 The check: fixture 957 replays `goldens/contacts.golden` (233 operations:
@@ -334,3 +334,32 @@ bullet crossing sensors (one sensor destroyed while overlapped), bouncing
 spheres with contact and hit events (one destroyed while touching); every
 step's body hash, awake body count, split island, island count and every
 event list are bit-exact.
+
+## P5b2 — mesh contacts and the mesh shape (`dynamics/MeshContact`, `MeshCluster`)
+
+A mesh shape keeps its mesh and scale in the world's mesh list (Box3D points
+at the caller's mesh data) and its scaled bounds on the shape, so its box,
+centroid and extent need no mesh; it adds no mass. A contact whose shape A is
+a mesh is a mesh contact: it caches the triangles near shape B (queried again
+only when B's box leaves the grown query box, keeping each triangle's warm
+start cache), collides each triangle with B, drops the edge and vertex
+contacts that would be ghost collisions on inner edges, clusters the rest by
+normal, culls each cluster to four points and keeps the impulses of matching
+old manifolds. Its contact holds one manifold per cluster, solved by the
+scalar contact solver. Continuous collision against a mesh (Box3D's triangle
+time of impact) is not ported yet: a fast body skips mesh targets.
+
+| Box3D | Rae |
+|---|---|
+| `b3CreateMeshShape` and the mesh cases of `b3ComputeShapeAABB` `b3GetShapeCentroid` `b3ComputeShapeExtent` | `createMeshShape` (`dynamics/WorldShapes`), `meshAabb` `farthestPointOnAabb` (`dynamics/Shape`) |
+| `b3GetMeshTriangle` `b3Triangle` | `getMeshTriangle` `MeshTriangleData` (`geometry/MeshQuery`) |
+| `b3MeshContact` `b3TriangleCache` | `Contact.triangleCache` `queryBounds`, `TriangleCache` (`dynamics/Contact`) |
+| `b3ComputeMeshManifolds` `b3RefreshCache` | `computeMeshManifolds` `refreshCache` `buildMeshManifolds` (`dynamics/MeshContact`) |
+| `b3AddEdge` `b3FindEdge` `b3AddVertex` `b3CullPoints` `b3ReduceCluster` `b3Cluster` | `addEdge` `findEdge` `addVertex` `cullPoints` `reduceCluster` `MeshCluster`, `clusterManifolds` (`dynamics/MeshCluster`) |
+| `QSORT` with a struct SWAP | `quickSortWithCompanion` (`container/QuickSort`) |
+
+The check: fixture 974 replays `goldens/meshscenes.golden` — three worlds
+stepped 600 times: spheres, capsules and boxes rolling and sliding across a
+grid mesh; a platform and a box mesh on a grid with sleep on; a scaled,
+mirrored and tilted grid. Every step's body hash, and every 20 steps every
+body and every mesh contact's manifolds, are bit-exact.
