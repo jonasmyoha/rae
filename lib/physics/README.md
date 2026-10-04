@@ -417,7 +417,9 @@ Box3D's `b3Body_SetType` returns from that check with the world still
 locked (every later call on the world is then ignored); Rae returns without
 the lock. The checks: fixture 981 replays `goldens/compound.golden` (ten
 compounds: the material table, the tree, every child, AABBs and queries);
-fixture 982 replays `goldens/compoundscenes.golden` — two worlds stepped 600
+fixture 956 replays the compound world of `goldens/pairs.golden` (static
+compounds among a moving crowd, some refusing by filter: child pair keys and
+dropped batches); fixture 982 replays `goldens/compoundscenes.golden` — two worlds stepped 600
 times over a compound course (sleep off, then on) and the two refused type
 changes, every step's body hash and every 20 steps the bodies and mesh
 contacts, all bit-exact.
