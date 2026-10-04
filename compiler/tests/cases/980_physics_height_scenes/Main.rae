@@ -253,7 +253,10 @@ func putMeshContacts(out: mod List(Int), world: view PhysicsWorld) {
       putVec(out: out, vector: manifold.rollingImpulse)
       putInt(out: out, value: manifold.pointCount)
       loop var p: Int = 0, p < manifold.pointCount, ++p {
-        putPoint(out: out, point: manifold.points.copyAtDefault(index: p))
+        putPoint(
+          out: out
+          point: manifold.points.copyAtFallback(index: p, fallback: zeroManifoldPoint())
+        )
       }
     }
     putFloat(out: out, value: contact.friction)

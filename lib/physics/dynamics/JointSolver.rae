@@ -493,24 +493,32 @@ func solveJointsBlock(
     ret
   }
   loop var i: Int = block.startIndex, i < block.startIndex + block.count, ++i {
-    let sim: JointSim = colorJointSim(world: world, colorIndex: block.colorIndex, localIndex: i)
-    if sim.forceThreshold < floatMax or sim.torqueThreshold < floatMax {
-      var flagged: Bool = false
-      if let taskContext: view TaskContext => world.taskContexts.viewAt(index: 0) {
-        flagged = getBit(bitset: taskContext.jointStateBitSet, bitIndex: sim.jointId)
-      }
-      if flagged is false {
-        let reaction: JointReaction = jointReaction(
-          sim: sim
-          world: world
-          invTimeStep: context.inverseH
-        )
-        # A zero threshold reports every awake joint
-        if reaction.force >= sim.forceThreshold or reaction.torque >= sim.torqueThreshold {
-          if let taskContext: mod TaskContext => world.taskContexts.modAt(index: 0) {
-            setBit(bitset: taskContext.jointStateBitSet, bitIndex: sim.jointId)
+    # Read the joint through a view (a JointSim copy is large), then flag it
+    var report: Bool = false
+    var jointId: Int = -1
+    if let color: view GraphColor => world.constraintGraph.colors.viewAt(index: block.colorIndex) {
+      if let sim: view JointSim => color.jointSims.viewAt(index: i) {
+        if sim.forceThreshold < floatMax or sim.torqueThreshold < floatMax {
+          jointId = sim.jointId
+          var flagged: Bool = false
+          if let taskContext: view TaskContext => world.taskContexts.viewAt(index: 0) {
+            flagged = getBit(bitset: taskContext.jointStateBitSet, bitIndex: jointId)
+          }
+          if flagged is false {
+            let reaction: JointReaction = jointReaction(
+              sim: sim
+              world: world
+              invTimeStep: context.inverseH
+            )
+            # A zero threshold reports every awake joint
+            report = reaction.force >= sim.forceThreshold or reaction.torque >= sim.torqueThreshold
           }
         }
+      }
+    }
+    if report {
+      if let taskContext: mod TaskContext => world.taskContexts.modAt(index: 0) {
+        setBit(bitset: taskContext.jointStateBitSet, bitIndex: jointId)
       }
     }
   }

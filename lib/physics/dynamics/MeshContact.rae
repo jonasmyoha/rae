@@ -614,7 +614,7 @@ func computeMeshManifolds(
         meshes: meshes
         heightFields: heightFields
         materialMap: materialMap
-        triangleIndex: manifold.points.copyAtDefault(index: j).triangleIndex
+        triangleIndex: manifold.points.copyAtFallback(index: j, fallback: zeroManifoldPoint()).triangleIndex
       )
       friction = friction + Math.sqrt(x: materialA.friction * materialB.friction)
       restitution = restitution + maxFloat(

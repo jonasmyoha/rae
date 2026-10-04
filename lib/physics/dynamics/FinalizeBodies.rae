@@ -47,12 +47,8 @@ func finalizeBodies(
   let invTimeStep: Float = context.inverseDt
   let speculative: Float = speculativeDistance(lengthUnitsPerMeter: world.lengthUnitsPerMeter)
   loop var simIndex: Int = startIndex, simIndex < endIndex, ++simIndex {
-    var state: BodyState = world.solverSets.copyAtDefault(index: awakeSet).bodyStates.copyAtDefault(
-      index: simIndex
-    )
-    var sim: BodySim = world.solverSets.copyAtDefault(index: awakeSet).bodySims.copyAtDefault(
-      index: simIndex
-    )
+    var state: BodyState = setBodyStateAt(world: world, setIndex: awakeSet, localIndex: simIndex)
+    var sim: BodySim = setBodySimAt(world: world, setIndex: awakeSet, localIndex: simIndex)
     let v: Vec3 = state.linearVelocity
     let w: Vec3 = state.angularVelocity
     let localOmega: Vec3 = inverseRotateVector(quat: sim.transform.rotation, vector: w)
@@ -154,7 +150,7 @@ func finalizeBodies(
     }
     if continuous {
       solveContinuous(world: world, simIndex: simIndex, dt: timeStep)
-      sim = world.solverSets.copyAtDefault(index: awakeSet).bodySims.copyAtDefault(index: simIndex)
+      sim = setBodySimAt(world: world, setIndex: awakeSet, localIndex: simIndex)
     }
 
     # The world space inverse inertia

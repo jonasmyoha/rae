@@ -352,7 +352,10 @@ func putContactData(out: mod List(Int), data: view List(ContactData)) {
       putVec(out: out, vector: manifold.rollingImpulse)
       putInt(out: out, value: manifold.pointCount)
       loop var p: Int = 0, p < manifold.pointCount, ++p {
-        putPoint(out: out, point: manifold.points.copyAtDefault(index: p))
+        putPoint(
+          out: out
+          point: manifold.points.copyAtFallback(index: p, fallback: zeroManifoldPoint())
+        )
       }
     }
   }
