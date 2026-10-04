@@ -1,0 +1,60 @@
+# A list literal with no declared place to fill names its type, the way a
+# returned struct literal does (`ret Point { ... }`): `ret List(Point) { ... }`.
+# Rae does not infer it from the function's return type, so a bare
+# `ret { ... }` stays an error. The written type drives the lowering, nested
+# literals take its element type, String elements move into the list, and
+# nothing leaks.
+type Point {
+  x: Int
+  y: Int
+}
+
+func corners(size: view Int) ret List(Point) {
+  ret List(Point) { Point { x: 0, y: 0 }, Point { x: size, y: size } }
+}
+
+func rows() ret List(List(Point)) {
+  ret List(List(Point)) {
+    { Point { x: 1, y: 2 } }
+    {}
+    { Point { x: 3, y: 4 }, Point { x: 5, y: 6 } }
+  }
+}
+
+func names(count: view Int) ret List(String) {
+  let last: String = "last {count}"
+  ret List(String) { "first", "middle {count + 1}", last }
+}
+
+func wrap(T: type, value: view T) ret List(T) {
+  ret List(T) { value, value }
+}
+
+func sumX(points: view List(Point)) ret Int {
+  var total: Int = 0
+  loop let point: view Point in points {
+    total = total + point.x
+  }
+  ret total
+}
+
+func main() {
+  let square: List(Point) = corners(size: 3)
+  log("corners {square.length} sum {sumX(points: square)}")
+  let grid: List(List(Point)) = rows()
+  loop let row: view List(Point) in grid {
+    log("row {row.length} sum {sumX(points: row)}")
+  }
+  loop var i: Int = 0, i < 3, ++i {
+    let words: List(String) = names(count: i)
+    var joined: String = ""
+    loop let word: view String in words {
+      joined = "{joined}{word};"
+    }
+    log("names {joined}")
+  }
+  let argumentSum: Int = sumX(points: List(Point) { Point { x: 7, y: 0 }, Point { x: 8, y: 0 } })
+  log("argument {argumentSum}")
+  let pair: List(Int) = wrap(T: Int, value: 9)
+  log("generic {pair.length} {pair.copyAtDefault(index: 1)}")
+}
