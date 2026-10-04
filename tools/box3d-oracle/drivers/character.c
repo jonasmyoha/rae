@@ -15,8 +15,13 @@
  *             ground normal the ramp's
  *   push      walking into a dynamic box: pushes it
  *   jump      a standing jump, then a running one
+ *   mesh      on mesh ground (P7b): a grid-mesh floor, a 0.3 m box-mesh step
+ *             and a platform mesh whose sloped sides are the ramp, walked up
+ *             and stopped on top
+ *   terrain   across a wave height field
  *
- * The line formats are queries.c's for the world and bodies, plus
+ * The line formats are queries.c's for the world and bodies (and
+ * meshscenes.c's shape.mesh, compoundscenes.c's shape.heightField), plus
  *
  *   mover.create position(3) ->
  *   mover.step timeStep throttle(2) forward(3) right(3) jump clipVelocity ->
@@ -126,6 +131,49 @@ static b3Transform identityAt(float x, float y, float z) {
   return t;
 }
 
+
+static b3MeshData* g_meshes[8];
+static int g_meshCount;
+static b3HeightFieldData* g_fields[4];
+static int g_fieldCount;
+
+static void meshShape(b3BodyId body, b3MeshData* mesh, b3Vec3 scale) {
+  b3ShapeDef def = b3DefaultShapeDef();
+  g_meshes[g_meshCount++] = mesh;
+  b3ShapeId id = b3CreateMeshShape(body, &def, mesh, scale);
+  shapeRef(id); end();
+}
+
+static void gridMeshShape(b3BodyId body, int xCount, int zCount, float cellWidth) {
+  b3ShapeDef def = b3DefaultShapeDef();
+  b3Vec3 scale = { 1.0f, 1.0f, 1.0f };
+  name("shape.mesh"); bodyRef(body); defOut(&def); i(0); i(xCount); i(zCount); f(cellWidth); i(1); i(1); v3(scale); arrow();
+  meshShape(body, b3CreateGridMesh(xCount, zCount, cellWidth, 1, true), scale);
+}
+
+static void boxMeshShape(b3BodyId body, b3Vec3 center, b3Vec3 extent) {
+  b3ShapeDef def = b3DefaultShapeDef();
+  b3Vec3 scale = { 1.0f, 1.0f, 1.0f };
+  name("shape.mesh"); bodyRef(body); defOut(&def); i(1); v3(center); v3(extent); i(1); v3(scale); arrow();
+  meshShape(body, b3CreateBoxMesh(center, extent, true), scale);
+}
+
+static void platformMeshShape(b3BodyId body, b3Vec3 center, float height, float top, float bottom) {
+  b3ShapeDef def = b3DefaultShapeDef();
+  b3Vec3 scale = { 1.0f, 1.0f, 1.0f };
+  name("shape.mesh"); bodyRef(body); defOut(&def); i(2); v3(center); f(height); f(top); f(bottom); v3(scale); arrow();
+  meshShape(body, b3CreatePlatformMesh(center, height, top, bottom), scale);
+}
+
+static void waveShape(b3BodyId body, int rows, int columns, b3Vec3 scale, float rowFrequency, float columnFrequency) {
+  b3ShapeDef def = b3DefaultShapeDef();
+  b3HeightFieldData* field = b3CreateWave(rows, columns, scale, rowFrequency, columnFrequency, false);
+  g_fields[g_fieldCount++] = field;
+  name("shape.heightField"); bodyRef(body); defOut(&def); i(0); i(rows); i(columns); v3(scale); f(rowFrequency);
+  f(columnFrequency); i(0); arrow();
+  b3ShapeId id = b3CreateHeightFieldShape(body, &def, field);
+  shapeRef(id); end();
+}
 
 /* --- The mover (samples/mover.cpp) --- */
 
@@ -348,7 +396,7 @@ static void worldStep(void) {
   name("world.step"); f(1.0f / 60.0f); i(4); arrow(); u64(hash); end();
 }
 
-static void beginScene(b3Pos moverPosition) {
+static void beginSceneWith(b3Pos moverPosition, bool boxGround) {
   b3WorldDef worldDef = b3DefaultWorldDef();
   worldDef.gravity = (b3Vec3){ 0.0f, -10.0f, 0.0f };
   worldDef.workerCount = 1;
@@ -356,10 +404,16 @@ static void beginScene(b3Pos moverPosition) {
   g_world = b3GetWorldFromId(g_worldId);
   g_bodyCount = 0;
   name("world.scene"); v3(worldDef.gravity); i(worldDef.enableSleep); arrow(); end();
-  b3BodyId ground = makeBody(b3_staticBody, (b3Vec3){ 0.0f, -0.5f, 0.0f });
-  boxShapeAt(ground, b3DefaultShapeDef(), 20.0f, 0.5f, 20.0f, identityAt(0.0f, 0.0f, 0.0f));
+  if (boxGround) {
+    b3BodyId ground = makeBody(b3_staticBody, (b3Vec3){ 0.0f, -0.5f, 0.0f });
+    boxShapeAt(ground, b3DefaultShapeDef(), 20.0f, 0.5f, 20.0f, identityAt(0.0f, 0.0f, 0.0f));
+  }
   initializeMover(&g_mover, moverPosition);
   name("mover.create"); v3(moverPosition); arrow(); end();
+}
+
+static void beginScene(b3Pos moverPosition) {
+  beginSceneWith(moverPosition, true);
 }
 
 /* Walk with `throttle` along +x for `count` steps (stepping the world after
@@ -452,5 +506,33 @@ int main(void) {
     walk(180, go, alongX, 60, true);
   }
   b3DestroyWorld(g_worldId);
+
+  printf("# scene mesh\n");
+  beginSceneWith((b3Pos){ 0.0f, 1.4f, 0.0f }, false);
+  {
+    b3BodyId ground = makeBody(b3_staticBody, (b3Vec3){ -10.0f, 0.0f, -10.0f });
+    gridMeshShape(ground, 20, 20, 1.0f);
+    b3BodyId step = makeBody(b3_staticBody, (b3Vec3){ 0.0f, 0.0f, 0.0f });
+    boxMeshShape(step, (b3Vec3){ 2.5f, 0.15f, 0.0f }, (b3Vec3){ 0.75f, 0.15f, 2.0f });
+    b3BodyId platform = makeBody(b3_staticBody, (b3Vec3){ 0.0f, 0.0f, 0.0f });
+    platformMeshShape(platform, (b3Vec3){ 7.5f, 0.3f, 0.0f }, 1.0f, 3.0f, 7.0f);
+    walk(100, go, alongX, -1, true);
+    walk(140, stop, alongX, -1, true);
+  }
+  b3DestroyWorld(g_worldId);
+
+  printf("# scene terrain\n");
+  beginSceneWith((b3Pos){ 1.0f, 2.4f, 1.0f }, false);
+  {
+    b3BodyId field = makeBody(b3_staticBody, (b3Vec3){ 0.0f, 0.0f, 0.0f });
+    waveShape(field, 21, 21, (b3Vec3){ 1.0f, 0.8f, 1.0f }, 0.08f, 0.06f);
+    b3Vec3 diagonal = b3Normalize((b3Vec3){ 1.0f, 0.0f, 0.6f });
+    walk(150, go, diagonal, -1, true);
+    walk(90, stop, diagonal, -1, true);
+  }
+  b3DestroyWorld(g_worldId);
+
+  for (int k = 0; k < g_meshCount; k++) b3DestroyMesh(g_meshes[k]);
+  for (int k = 0; k < g_fieldCount; k++) b3DestroyHeightField(g_fields[k]);
   return 0;
 }

@@ -1,0 +1,439 @@
+# A compound's ray cast, shape cast, overlap and mover planes
+# (b3RayCastCompound, b3ShapeCastCompound, b3OverlapCompound and
+# b3CollideMoverAndCompound of Box3D's compound.c at 9f998c8): the compound's
+# child tree is walked in the compound's frame and each child's own query
+# runs in the child's frame; a hit carries its child index and the
+# compound material of the child's material. Box3D's operation order is kept
+# exactly; checked against the oracle in fixture 985.
+open Vec3
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/QuatMath
+open physics/math/TransformMath
+open physics/math/AabbMath
+open physics/geometry/QueryTypes
+open physics/geometry/Sphere
+open physics/geometry/Capsule
+open physics/geometry/Hull
+open physics/geometry/Mesh
+open physics/geometry/MeshQuery
+open physics/geometry/MeshCast
+open physics/geometry/Compound
+open physics/collision/ShapePair
+open physics/broadPhase/DynamicTree
+open physics/broadPhase/DynamicTreeQuery
+open physics/dynamics/WorldTypes
+
+# b3CompoundRayCastCallback's child cast: the ray in the child's frame, the
+# hit (with the compound material) back in the compound's.
+func rayCastChild(
+  compound: view CompoundData
+  childIndex: view Int
+  input: view RayCastInput
+  lengthUnitsPerMeter: view Float
+) ret CastOutput {
+  let child: ChildShape = getCompoundChild(compound: compound, childIndex: childIndex)
+  let localInput: RayCastInput = {
+    origin: inverseTransformPoint(transform: child.transform, point: input.origin)
+    translation: inverseRotateVector(quat: child.transform.rotation, vector: input.translation)
+    maxFraction: input.maxFraction
+  }
+  var output: CastOutput = emptyCastOutput()
+  match child.shapeType {
+    case ShapeType.capsule {
+      output = rayCastCapsule(
+        capsule: child.capsule
+        input: localInput
+        lengthUnitsPerMeter: lengthUnitsPerMeter
+      )
+      output.materialIndex = child.materialIndices.copyAtDefault(index: 0)
+    }
+    case ShapeType.hull {
+      if let compoundHull: view CompoundHull => compound.hulls.viewAt(index: child.kindIndex) {
+        output = rayCastHull(hull: compoundHull.hull, input: localInput)
+      }
+      output.materialIndex = child.materialIndices.copyAtDefault(index: 0)
+    }
+    case ShapeType.mesh {
+      if let compoundMesh: view CompoundMesh => compound.meshes.viewAt(index: child.kindIndex) {
+        output = rayCastMesh(mesh: compoundMesh.mesh, input: localInput)
+      }
+      output.materialIndex = child.materialIndices.copyAtDefault(index: output.materialIndex)
+    }
+    case ShapeType.sphere {
+      output = rayCastSphere(sphere: child.sphere, input: localInput)
+      output.materialIndex = child.materialIndices.copyAtDefault(index: 0)
+    }
+    case ShapeType.compound {
+    }
+    case ShapeType.height {
+    }
+  }
+  if output.hit {
+    output.point = transformPoint(transform: child.transform, point: output.point)
+    output.normal = rotateVector(quat: child.transform.rotation, vector: output.normal)
+    output.childIndex = childIndex
+  }
+  ret output
+}
+
+# b3RayCastCompound: the closest child hit (the last one the clipping tree
+# cast reports).
+func rayCastCompound(
+  compound: view CompoundData
+  input: view RayCastInput
+  lengthUnitsPerMeter: view Float
+) ret CastOutput {
+  var result: CastOutput = emptyCastOutput()
+  let tree: view DynamicTree => compound.tree
+  var cast: TreeCast = beginTreeRayCast(
+    tree: tree
+    input: input
+    maskBits: allBits
+    requireAllBits: false
+  )
+  var proxyId: Int = nextTreeCastProxy(tree: tree, cast: cast)
+  loop proxyId is not -1 {
+    let childIndex: Int = treeUserData(tree: tree, proxyId: proxyId) as Int
+    let childInput: RayCastInput = {
+      origin: input.origin
+      translation: input.translation
+      maxFraction: cast.maxFraction
+    }
+    let output: CastOutput = rayCastChild(
+      compound: compound
+      childIndex: childIndex
+      input: childInput
+      lengthUnitsPerMeter: lengthUnitsPerMeter
+    )
+    if output.hit {
+      result = output
+      reportTreeCast(cast: cast, value: output.fraction)
+    } else {
+      reportTreeCast(cast: cast, value: cast.maxFraction)
+    }
+    proxyId = nextTreeCastProxy(tree: tree, cast: cast)
+  }
+  ret result
+}
+
+# b3CompoundShapeCastCallback's child cast.
+func shapeCastChild(
+  compound: view CompoundData
+  childIndex: view Int
+  input: view ShapeCastInput
+  maxFraction: view Float
+  lengthUnitsPerMeter: view Float
+) ret CastOutput {
+  let child: ChildShape = getCompoundChild(compound: compound, childIndex: childIndex)
+  let localInput: ShapeCastInput = {
+    proxy: makeLocalProxy(proxy: input.proxy, transform: child.transform)
+    translation: inverseRotateVector(quat: child.transform.rotation, vector: input.translation)
+    maxFraction: maxFraction
+    canEncroach: input.canEncroach
+  }
+  var output: CastOutput = emptyCastOutput()
+  match child.shapeType {
+    case ShapeType.capsule {
+      output = shapeCastCapsule(
+        capsule: child.capsule
+        input: localInput
+        lengthUnitsPerMeter: lengthUnitsPerMeter
+      )
+      output.materialIndex = child.materialIndices.copyAtDefault(index: 0)
+    }
+    case ShapeType.hull {
+      if let compoundHull: view CompoundHull => compound.hulls.viewAt(index: child.kindIndex) {
+        output = shapeCastHull(
+          hull: compoundHull.hull
+          input: localInput
+          lengthUnitsPerMeter: lengthUnitsPerMeter
+        )
+      }
+      output.materialIndex = child.materialIndices.copyAtDefault(index: 0)
+    }
+    case ShapeType.mesh {
+      if let compoundMesh: view CompoundMesh => compound.meshes.viewAt(index: child.kindIndex) {
+        output = shapeCastMesh(
+          mesh: compoundMesh.mesh
+          input: localInput
+          lengthUnitsPerMeter: lengthUnitsPerMeter
+        )
+      }
+      output.materialIndex = child.materialIndices.copyAtDefault(index: output.materialIndex)
+    }
+    case ShapeType.sphere {
+      output = shapeCastSphere(
+        sphere: child.sphere
+        input: localInput
+        lengthUnitsPerMeter: lengthUnitsPerMeter
+      )
+      output.materialIndex = child.materialIndices.copyAtDefault(index: 0)
+    }
+    case ShapeType.compound {
+    }
+    case ShapeType.height {
+    }
+  }
+  if output.hit {
+    output.point = transformPoint(transform: child.transform, point: output.point)
+    output.normal = rotateVector(quat: child.transform.rotation, vector: output.normal)
+    output.childIndex = childIndex
+  }
+  ret output
+}
+
+# b3ShapeCastCompound: the closest child hit of the swept proxy.
+func shapeCastCompound(
+  compound: view CompoundData
+  input: view ShapeCastInput
+  lengthUnitsPerMeter: view Float
+) ret CastOutput {
+  var result: CastOutput = emptyCastOutput()
+  if input.proxy.points.length is 0 {
+    ret result
+  }
+  # The child tree is in the compound's frame: the proxy's box needs no
+  # origin offset
+  let box: Aabb = makeAabb(
+    points: input.proxy.points
+    count: input.proxy.points.length
+    radius: input.proxy.radius
+  )
+  let treeInput: BoxCastInput = {
+    box: box
+    translation: input.translation
+    maxFraction: input.maxFraction
+  }
+  let tree: view DynamicTree => compound.tree
+  var cast: TreeCast = beginTreeBoxCast(
+    tree: tree
+    input: treeInput
+    maskBits: allBits
+    requireAllBits: false
+  )
+  var proxyId: Int = nextTreeCastProxy(tree: tree, cast: cast)
+  loop proxyId is not -1 {
+    let childIndex: Int = treeUserData(tree: tree, proxyId: proxyId) as Int
+    let output: CastOutput = shapeCastChild(
+      compound: compound
+      childIndex: childIndex
+      input: input
+      maxFraction: cast.maxFraction
+      lengthUnitsPerMeter: lengthUnitsPerMeter
+    )
+    if output.hit {
+      result = output
+      reportTreeCast(cast: cast, value: output.fraction)
+    } else {
+      reportTreeCast(cast: cast, value: cast.maxFraction)
+    }
+    proxyId = nextTreeCastProxy(tree: tree, cast: cast)
+  }
+  ret result
+}
+
+# b3CompoundOverlapCallback's child test: `proxy` is in the compound's frame.
+func overlapChild(
+  compound: view CompoundData
+  childIndex: view Int
+  proxy: view ShapeProxy
+  lengthUnitsPerMeter: view Float
+) ret Bool {
+  let child: ChildShape = getCompoundChild(compound: compound, childIndex: childIndex)
+  match child.shapeType {
+    case ShapeType.capsule {
+      ret overlapCapsule(
+        capsule: child.capsule
+        shapeTransform: child.transform
+        proxy: proxy
+        lengthUnitsPerMeter: lengthUnitsPerMeter
+      )
+    }
+    case ShapeType.hull {
+      if let compoundHull: view CompoundHull => compound.hulls.viewAt(index: child.kindIndex) {
+        ret overlapHull(
+          hull: compoundHull.hull
+          shapeTransform: child.transform
+          proxy: proxy
+          lengthUnitsPerMeter: lengthUnitsPerMeter
+        )
+      }
+      ret false
+    }
+    case ShapeType.mesh {
+      if let compoundMesh: view CompoundMesh => compound.meshes.viewAt(index: child.kindIndex) {
+        ret overlapMesh(
+          mesh: compoundMesh.mesh
+          shapeTransform: child.transform
+          proxy: proxy
+          lengthUnitsPerMeter: lengthUnitsPerMeter
+        )
+      }
+      ret false
+    }
+    case ShapeType.sphere {
+      ret overlapSphere(
+        sphere: child.sphere
+        shapeTransform: child.transform
+        proxy: proxy
+        lengthUnitsPerMeter: lengthUnitsPerMeter
+      )
+    }
+    case ShapeType.compound {
+      ret false
+    }
+    case ShapeType.height {
+      ret false
+    }
+  }
+  ret false
+}
+
+# b3OverlapCompound: does `proxy` (in the frame of `shapeTransform`'s
+# parent) touch a child of the compound placed by `shapeTransform`?
+func overlapCompound(
+  compound: view CompoundData
+  shapeTransform: view Transform
+  proxy: view ShapeProxy
+  lengthUnitsPerMeter: view Float
+) ret Bool {
+  let localProxy: ShapeProxy = makeLocalProxy(proxy: proxy, transform: shapeTransform)
+  let box: Aabb = computeProxyAabb(proxy: localProxy)
+  let tree: view DynamicTree => compound.tree
+  var query: TreeQuery = beginTreeQuery(
+    tree: tree
+    box: box
+    maskBits: allBits
+    requireAllBits: false
+  )
+  var proxyId: Int = nextTreeQueryProxy(tree: tree, query: query)
+  loop proxyId is not -1 {
+    let childIndex: Int = treeUserData(tree: tree, proxyId: proxyId) as Int
+    if overlapChild(
+      compound: compound
+      childIndex: childIndex
+      proxy: localProxy
+      lengthUnitsPerMeter: lengthUnitsPerMeter
+    ) {
+      # Done
+      ret true
+    }
+    proxyId = nextTreeQueryProxy(tree: tree, query: query)
+  }
+  ret false
+}
+
+# b3CompoundMoverCallback: the child's planes, moved into the compound's
+# frame and given the child index and compound material.
+func collideMoverAndChild(
+  planes: mod List(PlaneResult)
+  capacity: view Int
+  compound: view CompoundData
+  childIndex: view Int
+  mover: view Capsule
+  lengthUnitsPerMeter: view Float
+) {
+  let child: ChildShape = getCompoundChild(compound: compound, childIndex: childIndex)
+  let localMover: Capsule = {
+    center1: inverseTransformPoint(transform: child.transform, point: mover.center1)
+    center2: inverseTransformPoint(transform: child.transform, point: mover.center2)
+    radius: mover.radius
+  }
+  let childPlanes: List(PlaneResult) = List.create(PlaneResult, cap: 1)
+  var result: PlaneResult = emptyPlaneResult()
+  match child.shapeType {
+    case ShapeType.capsule {
+      if collideMoverAndCapsule(
+        result: result
+        capsule: child.capsule
+        mover: localMover
+        lengthUnitsPerMeter: lengthUnitsPerMeter
+      ) > 0 {
+        childPlanes.add(value: result)
+      }
+    }
+    case ShapeType.hull {
+      if let compoundHull: view CompoundHull => compound.hulls.viewAt(index: child.kindIndex) {
+        if collideMoverAndHull(result: result, hull: compoundHull.hull, mover: localMover) > 0 {
+          childPlanes.add(value: result)
+        }
+      }
+    }
+    case ShapeType.mesh {
+      if let compoundMesh: view CompoundMesh => compound.meshes.viewAt(index: child.kindIndex) {
+        collideMoverAndMesh(
+          planes: childPlanes
+          capacity: capacity
+          mesh: compoundMesh.mesh
+          mover: localMover
+        )
+      }
+    }
+    case ShapeType.sphere {
+      if collideMoverAndSphere(
+        result: result
+        sphere: child.sphere
+        mover: localMover
+        lengthUnitsPerMeter: lengthUnitsPerMeter
+      ) > 0 {
+        childPlanes.add(value: result)
+      }
+    }
+    case ShapeType.compound {
+    }
+    case ShapeType.height {
+    }
+  }
+  # Back to the compound's frame
+  loop let childPlane: view PlaneResult in childPlanes {
+    var plane: PlaneResult = childPlane
+    plane.plane.normal = rotateVector(quat: child.transform.rotation, vector: plane.plane.normal)
+    plane.point = transformPoint(transform: child.transform, point: plane.point)
+    plane.childIndex = childIndex
+    plane.materialIndex = child.materialIndices.copyAtDefault(index: plane.materialIndex)
+    planes.add(value: plane)
+  }
+}
+
+# b3CollideMoverAndCompound: the planes of the children the capsule `mover`
+# touches, at most `capacity`.
+func collideMoverAndCompound(
+  planes: mod List(PlaneResult)
+  capacity: view Int
+  compound: view CompoundData
+  mover: view Capsule
+  lengthUnitsPerMeter: view Float
+) ret Int {
+  let radius: Vec3 = { x: mover.radius, y: mover.radius, z: mover.radius }
+  let box: Aabb = {
+    lowerBound: subtract(left: min(left: mover.center1, right: mover.center2), right: radius)
+    upperBound: add(left: max(left: mover.center1, right: mover.center2), right: radius)
+  }
+  let startCount: Int = planes.length
+  let tree: view DynamicTree => compound.tree
+  var query: TreeQuery = beginTreeQuery(
+    tree: tree
+    box: box
+    maskBits: allBits
+    requireAllBits: false
+  )
+  var proxyId: Int = nextTreeQueryProxy(tree: tree, query: query)
+  loop proxyId is not -1 {
+    let childIndex: Int = treeUserData(tree: tree, proxyId: proxyId) as Int
+    collideMoverAndChild(
+      planes: planes
+      capacity: capacity - (planes.length - startCount)
+      compound: compound
+      childIndex: childIndex
+      mover: mover
+      lengthUnitsPerMeter: lengthUnitsPerMeter
+    )
+    # Continue while there is room for more planes
+    if planes.length - startCount >= capacity {
+      break
+    }
+    proxyId = nextTreeQueryProxy(tree: tree, query: query)
+  }
+  ret planes.length - startCount
+}

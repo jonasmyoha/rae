@@ -1,0 +1,643 @@
+# A height field's ray cast, shape cast, overlap and mover planes
+# (b3RayCastHeightField, b3ShapeCastHeightField, b3OverlapHeightField and
+# b3CollideMoverAndHeightField of Box3D's height_field.c at 9f998c8). The
+# casts walk the grid cells along the sweep (a 2D DDA over the leading
+# corner of the cast's box) until no closer hit can follow; a ray is a
+# one-point proxy of radius 0 tested against the cells' two triangles
+# directly. Box3D's operation order is kept exactly; checked against the
+# oracle in fixture 985.
+open Vec3
+open physics/Constants
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/QuatMath
+open physics/math/TransformMath
+open physics/math/AabbMath
+open physics/math/PlaneMath
+open physics/geometry/QueryTypes
+open physics/geometry/Mesh
+open physics/geometry/MeshQuery
+open physics/geometry/MeshCast
+open physics/geometry/HeightField
+open physics/collision/ShapeCast
+import Math
+
+# floorf(value) as an int
+func floorToInt(value: view Float) ret Int {
+  ret Math.floor(x: value) as Int
+}
+
+# b3RayCastHeightField: a one-point shape cast.
+func rayCastHeightField(
+  heightField: view HeightFieldData
+  input: view RayCastInput
+  lengthUnitsPerMeter: view Float
+) ret CastOutput {
+  let points: List(Vec3) = List.create(Vec3, cap: 1)
+  points.add(value: input.origin)
+  let shapeInput: ShapeCastInput = {
+    proxy: ShapeProxy { points: points, radius: 0.0 }
+    translation: input.translation
+    maxFraction: input.maxFraction
+    canEncroach: false
+  }
+  ret shapeCastHeightField(
+    heightField: heightField
+    input: shapeInput
+    lengthUnitsPerMeter: lengthUnitsPerMeter
+  )
+}
+
+# The grid walk's state along one axis: the next crossing (a fraction of
+# the clamped sweep), the step between crossings and the cell step.
+type GridAxis {
+  deltaAlpha: Float
+  nextFraction: Float
+  delta: Int
+}
+
+func gridAxis(
+  cellStart: view Int
+  cellEnd: view Int
+  start: view Float
+  absDelta: view Float
+  cellSize: view Float
+) ret GridAxis {
+  if cellStart < cellEnd {
+    # Forward
+    ret GridAxis {
+      deltaAlpha: cellSize / absDelta
+      nextFraction: (cellSize * ((cellStart + 1) as Float) - start) / absDelta
+      delta: 1
+    }
+  }
+  if cellEnd < cellStart {
+    # Backward
+    ret GridAxis {
+      deltaAlpha: cellSize / absDelta
+      nextFraction: (start - cellSize * (cellStart as Float)) / absDelta
+      delta: -1
+    }
+  }
+  # The cast stays in one cell along this axis
+  ret GridAxis { deltaAlpha: 0.0, nextFraction: floatMax, delta: 0 }
+}
+
+# The cast against one triangle of a cell: a ray (`isRay`) or the shape
+# cast of the proxy, keeping a closer hit in `result`. A ray hit's normal
+# is cross(normalEnd1 - normalBase, normalEnd2 - normalBase), Box3D's corners.
+type HeightCastState {
+  result: CastOutput
+  bestFraction: Float
+}
+
+func castHeightTriangle(
+  state: mod HeightCastState
+  vertex1: view Vec3
+  vertex2: view Vec3
+  vertex3: view Vec3
+  normalBase: view Vec3
+  normalEnd1: view Vec3
+  normalEnd2: view Vec3
+  triangleIndex: view Int
+  materialIndex: view Int
+  input: view ShapeCastInput
+  shapeStart: view Vec3
+  isRay: view Bool
+  lengthUnitsPerMeter: view Float
+) {
+  if isRay {
+    let alpha: Float = intersectRayTriangle(
+      rayStart: shapeStart
+      rayDelta: input.translation
+      vertex1: vertex1
+      vertex2: vertex2
+      vertex3: vertex3
+    )
+    if alpha < state.bestFraction {
+      let edge1: Vec3 = subtract(left: normalEnd1, right: normalBase)
+      let edge2: Vec3 = subtract(left: normalEnd2, right: normalBase)
+      let normal: Vec3 = cross(left: edge1, right: edge2)
+      state.result.point = mulAdd(base: shapeStart, scale: alpha, vector: input.translation)
+      state.result.normal = normalize(vector: normal)
+      state.result.fraction = alpha
+      state.result.triangleIndex = triangleIndex
+      state.result.materialIndex = materialIndex
+      state.result.hit = true
+      state.bestFraction = alpha
+    }
+    ret
+  }
+  # The proxy's center must be in front of the triangle
+  if signedVolume(
+    v1: vertex1
+    v2: vertex2
+    v3: vertex3
+    p: shapeStart
+  ) < 0.0 {
+    ret
+  }
+  # The cast against the triangle, shifted to its first vertex
+  let origin: Vec3 = vertex1
+  let triangleVertices: List(Vec3) = List.create(Vec3, cap: 3)
+  triangleVertices.add(value: zeroVector())
+  triangleVertices.add(value: subtract(left: vertex2, right: origin))
+  triangleVertices.add(value: subtract(left: vertex3, right: origin))
+  let pairInput: ShapeCastPairInput = {
+    proxyA: ShapeProxy { points: triangleVertices, radius: 0.0 }
+    proxyB: input.proxy
+    transform: Transform { position: negate(vector: origin), rotation: quatIdentity() }
+    translationB: input.translation
+    maxFraction: state.bestFraction
+    canEncroach: input.canEncroach
+  }
+  let pairOutput: CastOutput = shapeCast(input: pairInput, lengthUnitsPerMeter: lengthUnitsPerMeter)
+  if pairOutput.hit {
+    state.bestFraction = pairOutput.fraction
+    state.result = pairOutput
+    state.result.point = add(left: state.result.point, right: origin)
+    state.result.triangleIndex = triangleIndex
+    state.result.materialIndex = materialIndex
+  }
+}
+
+# b3ShapeCastHeightField: the closest triangle the swept proxy hits.
+func shapeCastHeightField(
+  heightField: view HeightFieldData
+  input: view ShapeCastInput
+  lengthUnitsPerMeter: view Float
+) ret CastOutput {
+  let shapeBounds: Aabb = makeAabb(
+    points: input.proxy.points
+    count: input.proxy.points.length
+    radius: input.proxy.radius
+  )
+  let shapeTranslation: Vec3 = input.translation
+  let cellScale: Vec3 = heightField.scale
+
+  # The cast starts at the proxy's center
+  let shapeStart: Vec3 = center(box: shapeBounds)
+  let shapeDelta: Vec3 = scale(scale: input.maxFraction, vector: shapeTranslation)
+  let shapeEnd: Vec3 = add(left: shapeStart, right: shapeDelta)
+
+  var state: HeightCastState = { result: emptyCastOutput(), bestFraction: input.maxFraction }
+
+  let shapeExtents: Vec3 = extents(box: shapeBounds)
+  let marginValue: Float = maxAabbMargin(lengthUnitsPerMeter: lengthUnitsPerMeter)
+  let margin: Vec3 = { x: marginValue, y: marginValue, z: marginValue }
+  let combinedBounds: Aabb = {
+    lowerBound: subtract(
+      left: subtract(left: heightField.aabb.lowerBound, right: shapeExtents)
+      right: margin
+    )
+    upperBound: add(
+      left: add(left: heightField.aabb.upperBound, right: shapeExtents)
+      right: margin
+    )
+  }
+  var minFraction: Float = 0.0
+  var maxFraction: Float = 0.0
+  if rayCastAabb(
+    box: combinedBounds
+    point1: shapeStart
+    point2: shapeEnd
+    minFraction: minFraction
+    maxFraction: maxFraction
+  ) is false {
+    ret state.result
+  }
+
+  # The grid walk uses the clamped sweep; the triangle casts the unclamped
+  var clampedStart: Vec3 = mulAdd(base: shapeStart, scale: minFraction, vector: shapeDelta)
+  let clampedDelta: Vec3 = scale(scale: maxFraction - minFraction, vector: shapeDelta)
+  var clampedEnd: Vec3 = add(left: clampedStart, right: clampedDelta)
+
+  # The center sweep bounds the cells; the start moves to the box's
+  # leading corner to drive the walk
+  let centerStart: Vec3 = clampedStart
+  let centerEnd: Vec3 = clampedEnd
+  var signX: Float = -1.0
+  if shapeTranslation.x >= 0.0 {
+    clampedStart.x = clampedStart.x + shapeExtents.x
+    signX = 1.0
+  } else {
+    clampedStart.x = clampedStart.x - shapeExtents.x
+  }
+  var signZ: Float = -1.0
+  if shapeTranslation.z >= 0.0 {
+    clampedStart.z = clampedStart.z + shapeExtents.z
+    signZ = 1.0
+  } else {
+    clampedStart.z = clampedStart.z - shapeExtents.z
+  }
+  clampedEnd = add(left: clampedStart, right: clampedDelta)
+
+  # The row and column range of the cast
+  let columnStart: Int = floorToInt(value: clampedStart.x / cellScale.x)
+  let columnEnd: Int = floorToInt(value: clampedEnd.x / cellScale.x)
+  let rowStart: Int = floorToInt(value: clampedStart.z / cellScale.z)
+  let rowEnd: Int = floorToInt(value: clampedEnd.z / cellScale.z)
+  let absClampedDelta: Vec3 = abs(vector: clampedDelta)
+
+  var axisX: GridAxis = gridAxis(
+    cellStart: columnStart
+    cellEnd: columnEnd
+    start: clampedStart.x
+    absDelta: absClampedDelta.x
+    cellSize: cellScale.x
+  )
+  var axisZ: GridAxis = gridAxis(
+    cellStart: rowStart
+    cellEnd: rowEnd
+    start: clampedStart.z
+    absDelta: absClampedDelta.z
+    cellSize: cellScale.z
+  )
+
+  # The columns and rows of the projected starting box
+  var boxColumnHead: Int = columnStart
+  var boxRowHead: Int = rowStart
+  var boxColumnTail: Int = floorToInt(
+    value: (clampedStart.x - 2.0 * signX * shapeExtents.x) / cellScale.x
+  )
+  var boxRowTail: Int = floorToInt(
+    value: (clampedStart.z - 2.0 * signZ * shapeExtents.z) / cellScale.z
+  )
+
+  # The walk's fractions are of the clamped sweep; the hit's of the input's
+  # translation
+  let gridFractionScale: Float = input.maxFraction * (maxFraction - minFraction)
+  let gridFractionOffset: Float = input.maxFraction * minFraction
+
+  let rowCount: Int = heightField.rowCount
+  let columnCount: Int = heightField.columnCount
+  let castBounds: Aabb = {
+    lowerBound: subtract(left: min(left: centerStart, right: centerEnd), right: shapeExtents)
+    upperBound: add(left: max(left: centerStart, right: centerEnd), right: shapeExtents)
+  }
+  let isRay: Bool = input.proxy.points.length is 1 and input.proxy.radius is 0.0
+
+  loop true {
+    var column1: Int = boxColumnHead
+    var column2: Int = boxColumnTail
+    if boxColumnTail < boxColumnHead {
+      column1 = boxColumnTail
+      column2 = boxColumnHead
+    }
+    var row1: Int = boxRowHead
+    var row2: Int = boxRowTail
+    if boxRowTail < boxRowHead {
+      row1 = boxRowTail
+      row2 = boxRowHead
+    }
+
+    loop var row: Int = row1, row <= row2, ++row {
+      if row < 0 or rowCount - 1 <= row {
+        continue
+      }
+      loop var column: Int = column1, column <= column2, ++column {
+        if column < 0 or columnCount - 1 <= column {
+          continue
+        }
+        let cellIndex: Int = row * (columnCount - 1) + column
+        let materialIndex: Int = heightField.materialIndices.copyAtDefault(index: cellIndex)
+        if materialIndex is heightFieldHole {
+          continue
+        }
+        let corners: List(Vec3) = cellCorners(heightField: heightField, row: row, column: column)
+        let point11: Vec3 = corners.copyAtDefault(index: 0)
+        var point12: Vec3 = corners.copyAtDefault(index: 1)
+        var point21: Vec3 = corners.copyAtDefault(index: 2)
+        let point22: Vec3 = corners.copyAtDefault(index: 3)
+        if heightField.clockwise {
+          let swapped: Vec3 = point12
+          point12 = point21
+          point21 = swapped
+        }
+
+        # The cell's box (the x and z range are known, the heights not)
+        let bounds: Aabb = {
+          lowerBound: min(
+            left: min(left: point11, right: point12)
+            right: min(left: point21, right: point22)
+          )
+          upperBound: max(
+            left: max(left: point11, right: point12)
+            right: max(left: point21, right: point22)
+          )
+        }
+        if overlaps(first: castBounds, second: bounds) is false {
+          continue
+        }
+
+        let triangleIndex1: Int = 2 * cellIndex
+        if isRay {
+          castHeightTriangle(
+            state: state
+            vertex1: point11
+            vertex2: point21
+            vertex3: point12
+            normalBase: point11
+            normalEnd1: point21
+            normalEnd2: point12
+            triangleIndex: triangleIndex1
+            materialIndex: materialIndex
+            input: input
+            shapeStart: shapeStart
+            isRay: true
+            lengthUnitsPerMeter: lengthUnitsPerMeter
+          )
+          castHeightTriangle(
+            state: state
+            vertex1: point22
+            vertex2: point12
+            vertex3: point21
+            normalBase: point21
+            normalEnd1: point22
+            normalEnd2: point12
+            triangleIndex: triangleIndex1 + 1
+            materialIndex: materialIndex
+            input: input
+            shapeStart: shapeStart
+            isRay: true
+            lengthUnitsPerMeter: lengthUnitsPerMeter
+          )
+        } else {
+          castHeightTriangle(
+            state: state
+            vertex1: point11
+            vertex2: point21
+            vertex3: point12
+            normalBase: point11
+            normalEnd1: point21
+            normalEnd2: point12
+            triangleIndex: triangleIndex1
+            materialIndex: materialIndex
+            input: input
+            shapeStart: shapeStart
+            isRay: false
+            lengthUnitsPerMeter: lengthUnitsPerMeter
+          )
+          castHeightTriangle(
+            state: state
+            vertex1: point21
+            vertex2: point22
+            vertex3: point12
+            normalBase: point21
+            normalEnd1: point22
+            normalEnd2: point12
+            triangleIndex: triangleIndex1 + 1
+            materialIndex: materialIndex
+            input: input
+            shapeStart: shapeStart
+            isRay: false
+            lengthUnitsPerMeter: lengthUnitsPerMeter
+          )
+        }
+      }
+    }
+
+    # The crossings only grow, so the walk ends; compared in the input's
+    # fraction space
+    var inputFractionX: Float = floatMax
+    if axisX.nextFraction is not floatMax {
+      inputFractionX = gridFractionOffset + axisX.nextFraction * gridFractionScale
+    }
+    var inputFractionZ: Float = floatMax
+    if axisZ.nextFraction is not floatMax {
+      inputFractionZ = gridFractionOffset + axisZ.nextFraction * gridFractionScale
+    }
+    if inputFractionX > state.bestFraction and inputFractionZ > state.bestFraction {
+      break
+    }
+
+    # On to the next column or row
+    if axisX.nextFraction <= axisZ.nextFraction {
+      if boxColumnHead is columnEnd {
+        break
+      }
+      boxColumnHead = boxColumnHead + axisX.delta
+      boxColumnTail = boxColumnHead
+      if shapeExtents.z is 0.0 {
+        boxRowTail = boxRowHead
+      } else {
+        # The shape's rows at this crossing
+        let rowIntercept: Float = clampedStart.z + axisX.nextFraction * clampedDelta.z
+        boxRowTail = floorToInt(value: (rowIntercept - 2.0 * signZ * shapeExtents.z) / cellScale.z)
+      }
+      axisX.nextFraction = axisX.nextFraction + axisX.deltaAlpha
+    } else {
+      if boxRowHead is rowEnd {
+        break
+      }
+      boxRowHead = boxRowHead + axisZ.delta
+      boxRowTail = boxRowHead
+      if shapeExtents.x is 0.0 {
+        boxColumnTail = boxColumnHead
+      } else {
+        # The shape's columns at this crossing
+        let columnIntercept: Float = clampedStart.x + axisZ.nextFraction * clampedDelta.x
+        boxColumnTail = floorToInt(
+          value: (columnIntercept - 2.0 * signX * shapeExtents.x) / cellScale.x
+        )
+      }
+      axisZ.nextFraction = axisZ.nextFraction + axisZ.deltaAlpha
+    }
+  }
+  ret state.result
+}
+
+# b3OverlapHeightField: does `proxy` touch a triangle of the field placed by
+# `shapeTransform`? (Box3D's overlap does not swap the corners of a
+# clockwise field.)
+func overlapHeightField(
+  heightField: view HeightFieldData
+  shapeTransform: view Transform
+  proxy: view ShapeProxy
+  lengthUnitsPerMeter: view Float
+) ret Bool {
+  let localProxy: ShapeProxy = makeLocalProxy(proxy: proxy, transform: shapeTransform)
+  let box: Aabb = computeProxyAabb(proxy: localProxy)
+  let cellScale: Vec3 = heightField.scale
+  let minRow: Int = floorToInt(value: box.lowerBound.z / cellScale.z)
+  let maxRow: Int = floorToInt(value: box.upperBound.z / cellScale.z)
+  let minColumn: Int = floorToInt(value: box.lowerBound.x / cellScale.x)
+  let maxColumn: Int = floorToInt(value: box.upperBound.x / cellScale.x)
+  let boundsCenter: Vec3 = halfSum(left: box.lowerBound, right: box.upperBound)
+  let boundsExtent: Vec3 = subtract(left: box.upperBound, right: boundsCenter)
+  let tolerance: Float = 0.1 * linearSlop(lengthUnitsPerMeter: lengthUnitsPerMeter)
+
+  # Rows outside, columns inside: the triangle indices only grow
+  loop var row: Int = minRow, row <= maxRow, ++row {
+    if row < 0 or heightField.rowCount - 1 <= row {
+      continue
+    }
+    loop var column: Int = minColumn, column <= maxColumn, ++column {
+      if column < 0 or heightField.columnCount - 1 <= column {
+        continue
+      }
+      let cellIndex: Int = row * (heightField.columnCount - 1) + column
+      if heightField.materialIndices.copyAtDefault(index: cellIndex) is heightFieldHole {
+        continue
+      }
+      let corners: List(Vec3) = cellCorners(heightField: heightField, row: row, column: column)
+      let point11: Vec3 = corners.copyAtDefault(index: 0)
+      let point12: Vec3 = corners.copyAtDefault(index: 1)
+      let point21: Vec3 = corners.copyAtDefault(index: 2)
+      let point22: Vec3 = corners.copyAtDefault(index: 3)
+      if testBoundsTriangleOverlap(
+        nodeCenter: boundsCenter
+        nodeExtent: boundsExtent
+        vertex1: point11
+        vertex2: point21
+        vertex3: point12
+      ) {
+        let output: DistanceOutput = triangleDistance(
+          vertex1: point11
+          vertex2: point21
+          vertex3: point12
+          proxy: localProxy
+          useRadii: true
+        )
+        if output.distance < tolerance {
+          ret true
+        }
+      }
+      if testBoundsTriangleOverlap(
+        nodeCenter: boundsCenter
+        nodeExtent: boundsExtent
+        vertex1: point21
+        vertex2: point22
+        vertex3: point12
+      ) {
+        let output: DistanceOutput = triangleDistance(
+          vertex1: point22
+          vertex2: point12
+          vertex3: point21
+          proxy: localProxy
+          useRadii: true
+        )
+        if output.distance < tolerance {
+          ret true
+        }
+      }
+    }
+  }
+  ret false
+}
+
+# b3CollideMoverAndHeightField: the planes of the front-facing triangles
+# the capsule `mover` touches, at most `capacity`.
+func collideMoverAndHeightField(
+  planes: mod List(PlaneResult)
+  capacity: view Int
+  heightField: view HeightFieldData
+  mover: view Capsule
+) ret Int {
+  let segment: ShapeProxy = moverSegmentProxy(mover: mover)
+  let radius: Float = mover.radius
+  let moverCenter: Vec3 = lerp(from: mover.center1, to: mover.center2, alpha: 0.5)
+  let splatRadius: Vec3 = { x: radius, y: radius, z: radius }
+  let boundsMin: Vec3 = subtract(
+    left: minV(left: mover.center1, right: mover.center2)
+    right: splatRadius
+  )
+  let boundsMax: Vec3 = add(
+    left: maxV(left: mover.center1, right: mover.center2)
+    right: splatRadius
+  )
+  let boundsCenter: Vec3 = halfSum(left: boundsMin, right: boundsMax)
+  let boundsExtent: Vec3 = subtract(left: boundsMax, right: boundsCenter)
+
+  let cellScale: Vec3 = heightField.scale
+  let minRow: Int = floorToInt(value: boundsMin.z / cellScale.z)
+  let maxRow: Int = floorToInt(value: boundsMax.z / cellScale.z)
+  let minColumn: Int = floorToInt(value: boundsMin.x / cellScale.x)
+  let maxColumn: Int = floorToInt(value: boundsMax.x / cellScale.x)
+  let startCount: Int = planes.length
+
+  # Rows outside, columns inside: the triangle indices only grow
+  loop var row: Int = minRow, row <= maxRow, ++row {
+    if row < 0 or heightField.rowCount - 1 <= row {
+      continue
+    }
+    loop var column: Int = minColumn, column <= maxColumn, ++column {
+      if column < 0 or heightField.columnCount - 1 <= column {
+        continue
+      }
+      let cellIndex: Int = row * (heightField.columnCount - 1) + column
+      let material: Int = heightField.materialIndices.copyAtDefault(index: cellIndex)
+      if material is heightFieldHole {
+        continue
+      }
+      let corners: List(Vec3) = cellCorners(heightField: heightField, row: row, column: column)
+      let point11: Vec3 = corners.copyAtDefault(index: 0)
+      var point12: Vec3 = corners.copyAtDefault(index: 1)
+      var point21: Vec3 = corners.copyAtDefault(index: 2)
+      let point22: Vec3 = corners.copyAtDefault(index: 3)
+      if heightField.clockwise {
+        let swapped: Vec3 = point12
+        point12 = point21
+        point21 = swapped
+      }
+      if testBoundsTriangleOverlap(
+        nodeCenter: boundsCenter
+        nodeExtent: boundsExtent
+        vertex1: point11
+        vertex2: point21
+        vertex3: point12
+      ) {
+        # The front side only
+        if signedVolume(
+          v1: point11
+          v2: point21
+          v3: point12
+          p: moverCenter
+        ) >= 0.0 {
+          triangleMoverPlane(
+            planes: planes
+            vertex1: point11
+            vertex2: point21
+            vertex3: point12
+            segment: segment
+            mover: mover
+            triangleIndex: 2 * cellIndex
+            materialIndex: material
+          )
+          if planes.length - startCount is capacity {
+            ret capacity
+          }
+        }
+      }
+      if testBoundsTriangleOverlap(
+        nodeCenter: boundsCenter
+        nodeExtent: boundsExtent
+        vertex1: point21
+        vertex2: point22
+        vertex3: point12
+      ) {
+        if signedVolume(
+          v1: point22
+          v2: point12
+          v3: point21
+          p: moverCenter
+        ) >= 0.0 {
+          triangleMoverPlane(
+            planes: planes
+            vertex1: point22
+            vertex2: point12
+            vertex3: point21
+            segment: segment
+            mover: mover
+            triangleIndex: 2 * cellIndex + 1
+            materialIndex: material
+          )
+          if planes.length - startCount is capacity {
+            ret capacity
+          }
+        }
+      }
+    }
+  }
+  ret planes.length - startCount
+}

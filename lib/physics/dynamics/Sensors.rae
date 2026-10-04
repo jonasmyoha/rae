@@ -13,6 +13,13 @@ open physics/geometry/QueryTypes
 open physics/geometry/Sphere
 open physics/geometry/Capsule
 open physics/geometry/Hull
+open physics/geometry/Mesh
+open physics/geometry/MeshQuery
+open physics/geometry/MeshCast
+open physics/geometry/HeightField
+open physics/geometry/HeightFieldCast
+open physics/geometry/Compound
+open physics/geometry/CompoundQueries
 open physics/collision/ShapePair
 open physics/container/Bitset
 open physics/broadPhase/DynamicTree
@@ -83,15 +90,39 @@ func overlapSensor(
       }
       ret false
     }
-    # A compound is never a sensor; mesh and height-field sensors need the
-    # overlap tests of P7
     case ShapeType.compound {
+      if let compound: view CompoundData => world.compounds.viewAt(index: sensorShape.compoundIndex) {
+        ret overlapCompound(
+          compound: compound
+          shapeTransform: identity
+          proxy: localProxy
+          lengthUnitsPerMeter: world.lengthUnitsPerMeter
+        )
+      }
       ret false
     }
     case ShapeType.height {
+      if let heightField: view HeightFieldData => world.heightFields.viewAt(
+        index: sensorShape.heightFieldIndex
+      ) {
+        ret overlapHeightField(
+          heightField: heightField
+          shapeTransform: identity
+          proxy: localProxy
+          lengthUnitsPerMeter: world.lengthUnitsPerMeter
+        )
+      }
       ret false
     }
     case ShapeType.mesh {
+      if let mesh: view Mesh => world.meshes.viewAt(index: sensorShape.meshIndex) {
+        ret overlapMesh(
+          mesh: mesh
+          shapeTransform: identity
+          proxy: localProxy
+          lengthUnitsPerMeter: world.lengthUnitsPerMeter
+        )
+      }
       ret false
     }
   }

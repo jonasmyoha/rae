@@ -570,8 +570,7 @@ block (the capsule's bottom hovers 0.6 m up); a 1.0 m block stops it.
 | samples/mover.cpp `CharacterMover` | `CharacterMover` `solveMove` `jumpCharacter` (`character/CharacterMover`) |
 | `b3Body_GetType` `GetInverseMass` `GetWorldInverseRotationalInertia` `GetWorldCenter`, `b3Shape_GetBody` | `getBodyType` `getBodyInverseMass` `getBodyWorldInverseInertia` `getBodyWorldCenter` `getShapeBody` (`dynamics/WorldBodies`) |
 
-Not yet: the ray, shape and mover queries of meshes, height fields and
-compounds (P7b); they report no hit, no overlap and no planes.
+The mesh, height-field and compound queries landed with P7b, below.
 
 The checks: fixture 985 replays `goldens/queries.golden` — every query,
 under three filters, before and while a world of static, kinematic and
@@ -580,4 +579,35 @@ dynamic spheres, capsules and boxes steps. Fixture 986 replays
 along a wall, a 0.3 m curb and a 0.6 m block stepped, a 1.0 m block that
 stops it, standing grounded on a 20 degree ramp with its normal, pushing a
 box, jumping. All bit-exact.
+
+## P7b — mesh, height-field and compound queries (`geometry/MeshCast`, `HeightFieldCast`, `CompoundQueries`)
+
+A mesh's queries walk its BVH in the unscaled frame (the query scaled by
+the inverse scale; a mirroring scale swaps a triangle's winding) and test
+triangles in the scaled frame: the ray cast front to back with the scalar
+`b3IntersectRayTriangle`, the shape cast against each front-facing triangle
+shifted to its first vertex, the overlap by GJK distance, the mover planes
+from the front-facing triangles its segment is within a radius of. A
+height field's casts walk the grid cells along the sweep (a 2D DDA from the
+leading corner of the cast's box), its overlap and mover visit the cells
+under the query's box. A compound walks its child tree and runs each
+child's query in the child's frame, the hit carrying the child index and
+the compound material. Sensors use the mesh, height-field and compound
+overlaps too.
+
+| Box3D | Rae |
+|---|---|
+| `b3RayCastMesh` `b3ShapeCastMesh` `b3OverlapMesh` `b3CollideMoverAndMesh` | `rayCastMesh` `shapeCastMesh` `overlapMesh` `collideMoverAndMesh` (`geometry/MeshCast`) |
+| `b3IntersectRayTriangle` `b3MakeLocalProxy` `b3ComputeProxyAABB` | `intersectRayTriangle` `makeLocalProxy` `computeProxyAabb` (`geometry/MeshCast`) |
+| `b3RayCastHeightField` `b3ShapeCastHeightField` `b3OverlapHeightField` `b3CollideMoverAndHeightField` | `rayCastHeightField` `shapeCastHeightField` `overlapHeightField` `collideMoverAndHeightField` (`geometry/HeightFieldCast`) |
+| `b3RayCastCompound` `b3ShapeCastCompound` `b3OverlapCompound` `b3CollideMoverAndCompound` | `rayCastCompound` `shapeCastCompound` `overlapCompound` `collideMoverAndCompound` (`geometry/CompoundQueries`) |
+
+The checks: fixture 985's golden gains a world of surfaces (a grid mesh, a
+mirrored, scaled and tilted grid mesh, a wave height field with holes, a
+flat one, a compound of capsules, boxes, a box mesh and spheres with their
+own material ids) and runs the battery against each; fixture 986 gains the
+mover on mesh ground (a grid floor, a box-mesh step, a platform mesh's
+slopes, stopping grounded on a slope) and across a wave height field. All
+bit-exact. The mesh and height-field sensors have no oracle scene of their
+own.
 
