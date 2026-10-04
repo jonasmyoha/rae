@@ -183,7 +183,40 @@ checksum (FNV over all body velocities) — **bit-exact across all five**.
    `multiplySym3Wide`, `gatherBodies`, …) out of line, passing structs
    through memory; a higher inline threshold makes `rae_scalar` *faster than
    C scalar* (0.96x) and closes the Float4 gap to C SIMD from 1.43x to 1.15x.
-   This is independent of Float4 (queued separately, §8).
+   This is independent of Float4. **Done 2026-10-04: the release profile now
+   passes `-mllvm -inline-threshold=400`** (clang's default is 225; only when
+   `rae` itself was built by clang, since the flag is clang's). Measured on an
+   Apple M1 Max at load average ~4 (indicative):
+
+   | threshold | rae_scalar | / C scalar | rae_float4 | / C NEON |
+   |---|---|---|---|---|
+   | 225 (default) | 589.7 ms | 1.14x | 448.5 ms | 1.40x |
+   | 300 | 542.9 ms | 1.06x | 450.8 ms | 1.41x |
+   | **400** | 510.3 ms | 1.00x | 373.9 ms | 1.16x |
+   | 500 | 510.5 ms | 0.98x | 373.8 ms | 1.18x |
+   | 1000 | 502.2 ms | 0.97x | 373.9 ms | 1.17x |
+   | 3000 | 507.4 ms | 0.98x | 371.8 ms | 1.16x |
+
+   The cost, compiling the generated C of all 77 examples to objects (two at
+   a time) and summing:
+
+   | threshold | C compile time | code (`__TEXT`) |
+   |---|---|---|
+   | 225 | 102 s | 9.72 MB |
+   | **400** | 123 s (+20%) | 11.90 MB (+22%) |
+   | 500 | 131 s (+27%) | 12.38 MB (+27%) |
+   | 1000 | 157 s (+52%) | 14.44 MB (+49%) |
+   | 3000 | 203 s (+96%) | 18.97 MB (+95%) |
+
+   The largest, 121_ui_editor, compiles in 15.8 s at 225 and 32.5 s at 3000.
+   The runtime object (`rae_runtime.c`, compiled with every program) costs
+   +9% time and +9% code at 400. 400 is where the solver gain stops, so it is
+   the release default; everything above it is cost only. Forcing small
+   loop-free functions inline instead (`always_inline` on bodies of at most
+   6 or 12 statements) made the solver *slower* (622 ms): the threshold lets
+   clang weigh callers too. `RAE_EXTRA_CFLAGS` appends flags to the release C
+   compile, for measuring a flag across programs before it becomes a
+   default.
 4. **Scalar `Math.sqrt` was a runtime call** (`rae_ext_Math_sqrt`, an extern
    into the runtime object), visible in the scalar solver's profile. Done
    2026-10-04: the exactly specified scalar functions (sqrt, floor, ceil,
@@ -219,7 +252,6 @@ checksum (FNV over all body velocities) — **bit-exact across all five**.
   fixtures checking each operation's bits against the scalar definitions.
 - Make `lib/physics/dynamics/FloatWide.rae` a thin layer over Float4 (the
   solver does not change), then re-run fixtures 948-959 and this benchmark.
-- Independent of the surface, queued now: raise the release build's inline
-  threshold (or emit small functions `static inline`) after measuring the
-  whole suite; make `Math.sqrt` (and the other scalar math the solver uses)
-  an inline intrinsic.
+- Independent of the surface, both done 2026-10-04: the release build's
+  inline threshold is 400 (§6.3) and the exactly specified scalar math is
+  inline (§6.4).
