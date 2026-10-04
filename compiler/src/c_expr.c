@@ -165,7 +165,19 @@ static void emit_to_string_expr(CFuncContext* ctx, const AstExpr* operand, FILE*
         (void)payload_is_user_struct;
         {
             AstTypeRef payload = *tr; payload.is_opt = false; payload.next = NULL;
-            char inner[64]; snprintf(inner, sizeof inner, "__ostr%d.value", oid);
+            char inner[96];
+            // An `opt String` made by a call (`"{list.copyAt(index: 0)}"`)
+            // owns its String, and unlike a plain String return it is not in
+            // the statement's pool: register it there so the statement's
+            // flush frees it instead of leaking one String per format.
+            bool owned_call = (operand->kind == AST_EXPR_CALL
+                || operand->kind == AST_EXPR_METHOD_CALL)
+                && str_eq_cstr(base, "String");
+            if (owned_call) {
+                snprintf(inner, sizeof inner, "rae_string_pool_register_owned(__ostr%d.value)", oid);
+            } else {
+                snprintf(inner, sizeof inner, "__ostr%d.value", oid);
+            }
             rae_value_to_str_expr(ctx->compiler_ctx, ctx->module, &payload, inner, false, out);
         }
         fprintf(out, " : (rae_String){(uint8_t*)\"none\", 4}; }))");

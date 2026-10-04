@@ -582,6 +582,7 @@ rae_Char rae_ext_rae_io_read_char(void);
  * isolate which allocation class (string body, List/Map buffer, ...)
  * is leaking when residual RSS growth is small but linear. */
 void rae_ext_rae_mem_stats_dump(void);
+void rae_mem_stats_silence_exit_report(void);
 int64_t rae_ext_rae_mem_stats_outstanding(void);
 int64_t rae_ext_rae_mem_stats_unknown_frees(void); /* #761: untracked-free count */
 int64_t rae_ext_rae_mem_stats_buf_outstanding(void);

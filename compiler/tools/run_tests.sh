@@ -385,7 +385,14 @@ for TARGET in "${TARGETS[@]}"; do
             CMD_STDOUT=$("$BIN" "${CMD_RUN_ARGS[@]}" 2>&1 || true)
         elif [ $ENABLE_MEM_STATS -eq 1 ]; then
             CMD_RAW=$(RAE_MEM_STATS=1 "$BIN" "${CMD_RUN_ARGS[@]}" 2>&1 || true)
-            if [ $MEMCHECK -eq 1 ]; then
+            # Leak-check only a program that ran to its normal end: one that
+            # stops itself on purpose (a fatal report, exit code != 0) still
+            # holds its live World, which is not a leak. The driver's
+            # `@@RAE_APP_EXIT@@ ... code=N` line carries the program's code.
+            APP_EXIT_CODE=$(printf '%s\n' "$CMD_RAW" | sed -n 's/^@@RAE_APP_EXIT@@ .* code=\([0-9-]*\).*/\1/p' | tail -1)
+            if [ $MEMCHECK -eq 1 ] && [ "${APP_EXIT_CODE:-0}" = "0" ]; then
+                # The program's exit dump is the LAST block: the `rae` driver
+                # that ran it prints none (rae_mem_stats_silence_exit_report).
                 LEAK_STRINGS=$(printf '%s\n' "$CMD_RAW" | sed -n 's/^  \[mem:string:TOTAL *\].* outstanding=\([0-9-]*\).*/\1/p' | tail -1)
                 LEAK_BUFFERS=$(printf '%s\n' "$CMD_RAW" | sed -n 's/^  \[mem:buf *\].* outstanding=\([0-9-]*\).*/\1/p' | tail -1)
                 if [ "${LEAK_STRINGS:-0}" != "0" ] || [ "${LEAK_BUFFERS:-0}" != "0" ]; then

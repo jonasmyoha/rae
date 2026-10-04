@@ -101,21 +101,15 @@ func checkForChanges(watcher: mod FileWatcher, now: view Float64) ret Bool {
   }
   watcher.lastCheck = now
   var changed: Bool = false
-  unsafe {
-    var i: Int = 0
-    loop i < watcher.entries.length {
-      # Read via the raw buffer accessor: `List(T).get` returns `opt T`,
-      # which the C backend lowers to `RaeAny` and can't be re-typed back
-      # to a struct without a runtime tag check. The pattern matches
-      # `lib/ui/scene.rae:sceneNodeIndex`.
-      let entry: WatchEntry = rae_ext_rae_buf_get(buf: watcher.entries.data, index: i)
+  loop var i: Int = 0, i < watcher.entries.length, ++i {
+    # Update the mtime in place: rebuilding the entry copied its path and
+    # the raw buffer write over the old entry leaked the old one.
+    if let entry: mod WatchEntry => watcher.entries.modAt(index: i) {
       let mt: Float64 = fileModTime(path: entry.path)
       if mt is not entry.lastMtime {
-        let updated: WatchEntry = { path: entry.path, lastMtime: mt }
-        rae_ext_rae_buf_set(buf: watcher.entries.data, index: i, value: updated)
+        entry.lastMtime = mt
         changed = true
       }
-      i = i + 1
     }
   }
   if changed {

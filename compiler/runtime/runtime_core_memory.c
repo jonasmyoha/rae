@@ -486,6 +486,17 @@ static void rae_install_mem_stats(void) {
   }
 }
 
+/* The `rae` driver links this runtime too, so under RAE_MEM_STATS=1 the
+ * constructor above armed an exit report in the driver as well. Its counters
+ * are all zero (the program runs in a child process), and printing them
+ * AFTER the program's report made a reader that takes the last block — the
+ * test runner's leak check — see no leaks at all. The driver calls this
+ * first thing in main; the environment is untouched, so the program it runs
+ * still reports. */
+void rae_mem_stats_silence_exit_report(void) {
+  g_mem_stats_enabled = 0;
+}
+
 /* Exposed so Rae code can sample the counters mid-run (e.g. the
  * 98_mobile_ui stress loop can print stats at iter 5k / 50k / 100k
  * and compute outstanding-allocations slope per window). No-op when
