@@ -1,0 +1,876 @@
+# Triangle meshes (Box3D's mesh.c at 9f998c8, the creation half): b3MeshDef,
+# vertex welding, the bounding volume hierarchy (binned SAH, median and half
+# splits), the depth-first triangle order and the edge flags that tell
+# concave and flat edges apart. Box3D's operation order is kept exactly;
+# checked bit for bit against the oracle in fixture 971. The queries and
+# the generated meshes are MeshQuery.
+#
+# Box3D packs a mesh into one byte block (and hashes it); here a MeshData is
+# a struct of lists in the same order.
+import Math
+open Vec3
+open collections/IntMap
+open physics/Constants
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/AabbMath
+open physics/math/Validation
+
+# b3MeshEdgeFlags
+const concaveEdge1: Int = 1
+
+const concaveEdge2: Int = 2
+
+const concaveEdge3: Int = 4
+
+const inverseConcaveEdge1: Int = 16
+
+const inverseConcaveEdge2: Int = 32
+
+const inverseConcaveEdge3: Int = 64
+
+# B3_BIN_COUNT, B3_DESIRED_TRIANGLES_PER_LEAF, B3_LEAF_NODE,
+# B3_MAXIMUM_TRIANGLES_PER_LEAF, B3_MESH_STACK_SIZE
+const binCount: Int = 8
+
+const desiredTrianglesPerLeaf: Int = 4
+
+const leafNode: Int = 3
+
+const maximumTrianglesPerLeaf: Int = 8
+
+const meshStackSize: Int = 256
+
+# A mesh to create (b3MeshDef). An empty `materialIndices` means none.
+type MeshDef {
+  vertices: List(Vec3)
+  # 3 per triangle, counter-clockwise unless clockWiseWinding
+  indices: List(Int)
+  materialIndices: List(Int)
+  weldTolerance: Float
+  weldVertices: Bool
+  useMedianSplit: Bool
+  identifyEdges: Bool
+  clockWiseWinding: Bool
+}
+
+# A mesh triangle (b3MeshTriangle): three vertex indices.
+type MeshTriangle {
+  index1: Int
+  index2: Int
+  index3: Int
+}
+
+# A BVH node (b3MeshNode). An internal node has `kind` = its split axis (0-2)
+# and `count` = the offset of its right child (the left child follows it); a
+# leaf has `kind` = 3, `count` = its triangle count and `triangleOffset`.
+type MeshNode {
+  lowerBound: Vec3
+  upperBound: Vec3
+  kind: Int
+  count: Int
+  triangleOffset: Int
+}
+
+# A created mesh (b3MeshData).
+type MeshData {
+  bounds: Aabb
+  surfaceArea: Float
+  treeHeight: Int
+  degenerateCount: Int
+  nodes: List(MeshNode)
+  vertices: List(Vec3)
+  triangles: List(MeshTriangle)
+  materialIndices: List(Int)
+  materialCount: Int
+  # b3MeshEdgeFlags per triangle
+  flags: List(Int)
+}
+
+# A triangle being sorted into the tree (b3Primitive).
+type MeshPrimitive {
+  aabb: Aabb
+  center: Vec3
+  triangleIndex: Int
+}
+
+# A split of the primitives [index of the first right one] (b3Split); axis -1
+# when there is none.
+type MeshSplit {
+  leftBounds: Aabb
+  rightBounds: Aabb
+  axis: Int
+  index: Int
+}
+
+type MeshBucket {
+  count: Int
+  bounds: Aabb
+}
+
+# A node index and the height of its subtree.
+type MeshBuildResult {
+  index: Int
+  height: Int
+}
+
+func componentOf(vector: view Vec3, axis: view Int) ret Float {
+  if axis is 0 {
+    ret vector.x
+  }
+  if axis is 1 {
+    ret vector.y
+  }
+  ret vector.z
+}
+
+func isLeafNode(node: view MeshNode) ret Bool {
+  ret node.kind is leafNode
+}
+
+# The cell key of the welding hash: 64-bit, wrapping, as Box3D computes it.
+func weldCellKey(x: view Int, y: view Int, z: view Int) ret Int {
+  var key: UInt64 = 0
+  key = key bitxor (x as UInt64 + 2654435769 + (key shl 6) + (key shr 2))
+  key = key bitxor (y as UInt64 + 2654435769 + (key shl 6) + (key shr 2))
+  key = key bitxor (z as UInt64 + 2654435769 + (key shl 6) + (key shr 2))
+  ret key as Int
+}
+
+# A vertex in a welding cell's list (b3VertexNode).
+type WeldNode {
+  vertexIndex: Int
+  nextNodeIndex: Int
+}
+
+# b3SpatialHash_FindDuplicate: an earlier vertex within `tolerance` in this
+# or a neighbouring cell, else -1 (and the vertex joins its cell).
+func findDuplicateVertex(
+  vertices: view List(Vec3)
+  currentIndex: view Int
+  cellMap: mod IntMap(Int)
+  nodes: mod List(WeldNode)
+  tolerance: view Float
+) ret Int {
+  let vertex: Vec3 = vertices.copyAtDefault(index: currentIndex)
+  let cellSize: Float = 2.0 * tolerance
+  let baseX: Int = Math.floor(x: vertex.x / cellSize) as Int
+  let baseY: Int = Math.floor(x: vertex.y / cellSize) as Int
+  let baseZ: Int = Math.floor(x: vertex.z / cellSize) as Int
+
+  # The current cell and its 26 neighbours
+  loop var dx: Int = -1, dx <= 1, ++dx {
+    loop var dy: Int = -1, dy <= 1, ++dy {
+      loop var dz: Int = -1, dz <= 1, ++dz {
+        let key: Int = weldCellKey(x: baseX + dx, y: baseY + dy, z: baseZ + dz)
+        if let head: Int = cellMap.get(k: key) {
+          var nodeIndex: Int = head
+          loop nodeIndex is not -1 {
+            let node: WeldNode = nodes.copyAtDefault(index: nodeIndex)
+            let other: Vec3 = vertices.copyAtDefault(index: node.vertexIndex)
+            if absFloat(value: vertex.x - other.x) <= tolerance and absFloat(
+              value: vertex.y - other.y
+            ) <= tolerance and absFloat(value: vertex.z - other.z) <= tolerance {
+              ret node.vertexIndex
+            }
+            nodeIndex = node.nextNodeIndex
+          }
+        }
+      }
+    }
+  }
+
+  # No duplicate: the vertex joins its cell, at the head of its list
+  let currentKey: Int = weldCellKey(x: baseX, y: baseY, z: baseZ)
+  var next: Int = -1
+  if let head: Int = cellMap.get(k: currentKey) {
+    next = head
+  }
+  cellMap.set(k: currentKey, value: nodes.length)
+  nodes.add(value: WeldNode { vertexIndex: currentIndex, nextNodeIndex: next })
+  ret -1
+}
+
+# b3WeldVertices: the vertices with each group within `tolerance` of each
+# other as one, `indices` rewritten to them.
+func weldVertices(
+  vertices: view List(Vec3)
+  indices: mod List(Int)
+  tolerance: view Float
+) ret List(Vec3) {
+  let vertexCount: Int = vertices.length
+  var cellMap: IntMap(Int) = createIntMap(Int, cap: 2 * vertexCount + 8)
+  let nodes: List(WeldNode) = List.create(WeldNode, cap: vertexCount)
+  let mapping: List(Int) = List.create(Int, cap: vertexCount)
+  let unique: List(Vec3) = List.create(Vec3, cap: vertexCount)
+  loop var i: Int = 0, i < vertexCount, ++i {
+    let duplicateIndex: Int = findDuplicateVertex(
+      vertices: vertices
+      currentIndex: i
+      cellMap: cellMap
+      nodes: nodes
+      tolerance: tolerance
+    )
+    if duplicateIndex is -1 {
+      mapping.add(value: unique.length)
+      unique.add(value: vertices.copyAtDefault(index: i))
+    } else {
+      mapping.add(value: mapping.copyAtDefault(index: duplicateIndex))
+    }
+  }
+  loop var i: Int = 0, i < indices.length, ++i {
+    indices.set(index: i, value: mapping.copyAtDefault(index: indices.copyAtDefault(index: i)))
+  }
+  ret unique
+}
+
+func swapPrimitives(primitives: mod List(MeshPrimitive), first: view Int, second: view Int) {
+  let temporary: MeshPrimitive = primitives.copyAtDefault(index: first)
+  primitives.set(index: first, value: primitives.copyAtDefault(index: second))
+  primitives.set(index: second, value: temporary)
+}
+
+func boundsOfRange(
+  primitives: view List(MeshPrimitive)
+  start: view Int
+  count: view Int
+) ret Aabb {
+  var bounds: Aabb = emptyBounds()
+  loop var i: Int = 0, i < count, ++i {
+    bounds = union(first: bounds, second: primitives.copyAtDefault(index: start + i).aabb)
+  }
+  ret bounds
+}
+
+# b3SplitBinnedSah: the cheapest of the bucket splits on the three axes
+# (surface area heuristic), partitioning the range in place.
+func splitBinnedSah(
+  primitives: mod List(MeshPrimitive)
+  start: view Int
+  count: view Int
+  lengthUnitsPerMeter: view Float
+) ret MeshSplit {
+  var split: MeshSplit = {
+    leftBounds: emptyBounds()
+    rightBounds: emptyBounds()
+    axis: -1
+    index: -1
+  }
+
+  # The bounds of the primitive centers
+  let first: Vec3 = primitives.copyAtDefault(index: start).center
+  var bounds: Aabb = { lowerBound: first, upperBound: first }
+  loop var i: Int = 1, i < count, ++i {
+    bounds = addPoint(box: bounds, point: primitives.copyAtDefault(index: start + i).center)
+  }
+
+  var bestBucket: Int = -1
+  var bestCost: Float = floatMax
+  let slop: Float = linearSlop(lengthUnitsPerMeter: lengthUnitsPerMeter)
+  loop var axis: Int = 0, axis < 3, ++axis {
+    let extent: Vec3 = extents(box: bounds)
+    if componentOf(vector: extent, axis: axis) < slop {
+      continue
+    }
+
+    let buckets: List(MeshBucket) = List.create(MeshBucket, cap: binCount)
+    loop var i: Int = 0, i < binCount, ++i {
+      buckets.add(value: MeshBucket { count: 0, bounds: emptyBounds() })
+    }
+
+    # Fill the buckets
+    let lower: Float = componentOf(vector: bounds.lowerBound, axis: axis)
+    let factor: Float = 8.0 * (1.0 - floatEpsilon) / (componentOf(
+      vector: bounds.upperBound
+      axis: axis
+    ) - lower)
+    loop var i: Int = 0, i < count, ++i {
+      let primitive: MeshPrimitive = primitives.copyAtDefault(index: start + i)
+      let index: Int = (factor * (componentOf(vector: primitive.center, axis: axis) - lower)) as Int
+      if let bucket: mod MeshBucket => buckets.modAt(index: index) {
+        bucket.count = bucket.count + 1
+        bucket.bounds = union(first: bucket.bounds, second: primitive.aabb)
+      }
+    }
+
+    # Evaluate the splits
+    loop var i: Int = 0, i < binCount - 1, ++i {
+      var leftCount: Int = 0
+      var leftBounds: Aabb = emptyBounds()
+      loop var k: Int = 0, k <= i, ++k {
+        let bucket: MeshBucket = buckets.copyAtDefault(index: k)
+        leftCount = leftCount + bucket.count
+        leftBounds = union(first: leftBounds, second: bucket.bounds)
+      }
+      var rightCount: Int = 0
+      var rightBounds: Aabb = emptyBounds()
+      loop var k: Int = i + 1, k < binCount, ++k {
+        let bucket: MeshBucket = buckets.copyAtDefault(index: k)
+        rightCount = rightCount + bucket.count
+        rightBounds = union(first: rightBounds, second: bucket.bounds)
+      }
+      if leftCount > 0 and rightCount > 0 {
+        let cost: Float = leftCount.toFloat() * area(box: leftBounds) + rightCount.toFloat() * area(
+          box: rightBounds
+        )
+        if cost < bestCost {
+          bestBucket = i
+          bestCost = cost
+          split = MeshSplit {
+            leftBounds: leftBounds
+            rightBounds: rightBounds
+            axis: axis
+            index: leftCount
+          }
+        }
+      }
+    }
+  }
+
+  # Partition
+  if bestBucket >= 0 {
+    let axis: Int = split.axis
+    let lower: Float = componentOf(vector: bounds.lowerBound, axis: axis)
+    let factor: Float = 8.0 * (1.0 - floatEpsilon) / (componentOf(
+      vector: bounds.upperBound
+      axis: axis
+    ) - lower)
+    var splitIndex: Int = 0
+    loop var i: Int = 0, i < count, ++i {
+      let center: Vec3 = primitives.copyAtDefault(index: start + i).center
+      let index: Int = (factor * (componentOf(vector: center, axis: axis) - lower)) as Int
+      if index <= bestBucket {
+        swapPrimitives(primitives: primitives, first: start + i, second: start + splitIndex)
+        splitIndex = splitIndex + 1
+      }
+    }
+  }
+  ret split
+}
+
+# b3SplitHalf: in the middle, on the major axis of the bounds.
+func splitHalf(
+  primitives: view List(MeshPrimitive)
+  start: view Int
+  count: view Int
+) ret MeshSplit {
+  let splitIndex: Int = count / 2
+  let leftBounds: Aabb = boundsOfRange(primitives: primitives, start: start, count: splitIndex)
+  let rightBounds: Aabb = boundsOfRange(
+    primitives: primitives
+    start: start + splitIndex
+    count: count - splitIndex
+  )
+  let bounds: Aabb = union(first: leftBounds, second: rightBounds)
+  ret MeshSplit {
+    leftBounds: leftBounds
+    rightBounds: rightBounds
+    axis: majorAxis(vector: extents(box: bounds))
+    index: splitIndex
+  }
+}
+
+# The Hoare partition of the median split on one axis.
+func partitionMedian(
+  primitives: mod List(MeshPrimitive)
+  start: view Int
+  count: view Int
+  axis: view Int
+  pivot: view Float
+) ret Int {
+  var i1: Int = 0
+  var i2: Int = count
+  loop i1 < i2 {
+    loop i1 < i2 and componentOf(
+      vector: primitives.copyAtDefault(index: start + i1).center
+      axis: axis
+    ) < pivot {
+      i1 = i1 + 1
+    }
+    loop i1 < i2 and componentOf(
+      vector: primitives.copyAtDefault(index: start + i2 - 1).center
+      axis: axis
+    ) >= pivot {
+      i2 = i2 - 1
+    }
+    if i1 < i2 {
+      swapPrimitives(primitives: primitives, first: start + i1, second: start + i2 - 1)
+      i1 = i1 + 1
+      i2 = i2 - 1
+    }
+  }
+  ret i1
+}
+
+# b3SplitMedian: the longest axis of the centers, split at their middle.
+func splitMedian(
+  primitives: mod List(MeshPrimitive)
+  start: view Int
+  count: view Int
+) ret MeshSplit {
+  var lowerBound: Vec3 = primitives.copyAtDefault(index: start).center
+  var upperBound: Vec3 = lowerBound
+  loop var i: Int = 1, i < count, ++i {
+    let center: Vec3 = primitives.copyAtDefault(index: start + i).center
+    lowerBound = min(left: lowerBound, right: center)
+    upperBound = max(left: upperBound, right: center)
+  }
+  let d: Vec3 = subtract(left: upperBound, right: lowerBound)
+  let c: Vec3 = scale(scale: 0.5, vector: add(left: lowerBound, right: upperBound))
+
+  var axis: Int = 2
+  if d.x >= d.y and d.x >= d.z {
+    axis = 0
+  } else if d.y >= d.z {
+    axis = 1
+  }
+  var i1: Int = partitionMedian(
+    primitives: primitives
+    start: start
+    count: count
+    axis: axis
+    pivot: componentOf(vector: c, axis: axis)
+  )
+  if i1 is 0 or i1 is count - 1 {
+    # Failed to split
+    i1 = count / 2
+  }
+  ret MeshSplit {
+    leftBounds: boundsOfRange(primitives: primitives, start: start, count: i1)
+    rightBounds: boundsOfRange(primitives: primitives, start: start + i1, count: count - i1)
+    axis: axis
+    index: i1
+  }
+}
+
+func addLeafNode(
+  nodes: mod List(MeshNode)
+  bounds: view Aabb
+  count: view Int
+  offset: view Int
+) ret Int {
+  let index: Int = nodes.length
+  nodes.add(value: MeshNode {
+    lowerBound: bounds.lowerBound
+    upperBound: bounds.upperBound
+    kind: leafNode
+    count: count
+    triangleOffset: offset
+  })
+  ret index
+}
+
+# b3BuildRecursive: the subtree of primitives [start, start + count).
+func buildMeshNode(
+  nodes: mod List(MeshNode)
+  primitives: mod List(MeshPrimitive)
+  start: view Int
+  count: view Int
+  useMedianSplit: view Bool
+  lengthUnitsPerMeter: view Float
+) ret MeshBuildResult {
+  if count > desiredTrianglesPerLeaf {
+    var split: MeshSplit = {
+      leftBounds: emptyBounds()
+      rightBounds: emptyBounds()
+      axis: -1
+      index: -1
+    }
+    if useMedianSplit {
+      split = splitMedian(primitives: primitives, start: start, count: count)
+    } else {
+      split = splitBinnedSah(
+        primitives: primitives
+        start: start
+        count: count
+        lengthUnitsPerMeter: lengthUnitsPerMeter
+      )
+    }
+
+    if split.axis < 0 {
+      if count > maximumTrianglesPerLeaf {
+        # A less optimal split: more false positives
+        split = splitHalf(primitives: primitives, start: start, count: count)
+      } else {
+        # Only a few triangles left: a leaf (Box3D leaves the height at 0)
+        let bounds: Aabb = boundsOfRange(primitives: primitives, start: start, count: count)
+        ret MeshBuildResult {
+          index: addLeafNode(
+            nodes: nodes
+            bounds: bounds
+            count: count
+            offset: start
+          )
+          height: 0
+        }
+      }
+    }
+
+    # The node, then both children
+    let index: Int = nodes.length
+    nodes.add(value: MeshNode {
+      lowerBound: zeroVector()
+      upperBound: zeroVector()
+      kind: 0
+      count: 0
+      triangleOffset: 0
+    })
+    let left: MeshBuildResult = buildMeshNode(
+      nodes: nodes
+      primitives: primitives
+      start: start
+      count: split.index
+      useMedianSplit: useMedianSplit
+      lengthUnitsPerMeter: lengthUnitsPerMeter
+    )
+    let right: MeshBuildResult = buildMeshNode(
+      nodes: nodes
+      primitives: primitives
+      start: start + split.index
+      count: count - split.index
+      useMedianSplit: useMedianSplit
+      lengthUnitsPerMeter: lengthUnitsPerMeter
+    )
+    let aabb: Aabb = union(first: split.leftBounds, second: split.rightBounds)
+    if let node: mod MeshNode => nodes.modAt(index: index) {
+      node.kind = split.axis
+      node.count = right.index - index
+      node.lowerBound = aabb.lowerBound
+      node.upperBound = aabb.upperBound
+      node.triangleOffset = 0
+    }
+    ret MeshBuildResult { index: index, height: maxInt(left: left.height, right: right.height) + 1 }
+  }
+
+  let bounds: Aabb = boundsOfRange(primitives: primitives, start: start, count: count)
+  ret MeshBuildResult {
+    index: addLeafNode(
+      nodes: nodes
+      bounds: bounds
+      count: count
+      offset: start
+    )
+    height: 1
+  }
+}
+
+# b3SortMeshTriangles: the triangles (and materials) in depth-first leaf
+# order, each leaf's offset updated. False when the tree is too deep.
+func sortMeshTriangles(mesh: mod MeshData) ret Bool {
+  let triangles: List(MeshTriangle) = List.create(MeshTriangle, cap: mesh.triangles.length)
+  let materials: List(Int) = List.create(Int, cap: mesh.triangles.length)
+  var offset: Int = 0
+  let stack: List(Int) = List.create(Int, cap: meshStackSize)
+  stack.add(value: 0)
+  loop stack.length > 0 {
+    let nodeIndex: Int = stack.copyAtDefault(index: stack.length - 1)
+    stack.removeLast()
+    let node: MeshNode = mesh.nodes.copyAtDefault(index: nodeIndex)
+    if isLeafNode(node: node) is false {
+      if stack.length >= meshStackSize - 2 {
+        ret false
+      }
+      stack.add(value: nodeIndex + node.count)
+      stack.add(value: nodeIndex + 1)
+    } else {
+      loop var i: Int = 0, i < node.count, ++i {
+        let index: Int = node.triangleOffset + i
+        triangles.add(value: mesh.triangles.copyAtDefault(index: index))
+        materials.add(value: mesh.materialIndices.copyAtDefault(index: index))
+      }
+      if let stored: mod MeshNode => mesh.nodes.modAt(index: nodeIndex) {
+        stored.triangleOffset = offset
+      }
+      offset = offset + node.count
+    }
+  }
+  mesh.triangles = triangles
+  mesh.materialIndices = materials
+  ret true
+}
+
+# A triangle edge for the adjacency search (b3MeshEdge).
+type MeshEdge {
+  vertex1: Int
+  vertex2: Int
+  triangle1: Int
+  triangle2: Int
+  triangleCount: Int
+  # The edge's index in its triangle (0-2); 255 unset
+  triangleEdgeIndex1: Int
+  triangleEdgeIndex2: Int
+}
+
+func meshEdge(
+  first: view Int
+  second: view Int
+  triangle: view Int
+  edgeIndex: view Int
+) ret MeshEdge {
+  ret MeshEdge {
+    vertex1: minInt(left: first, right: second)
+    vertex2: maxInt(left: first, right: second)
+    triangle1: triangle
+    triangle2: -1
+    triangleCount: 1
+    triangleEdgeIndex1: edgeIndex
+    triangleEdgeIndex2: 255
+  }
+}
+
+func concaveFlag(edgeIndex: view Int) ret Int {
+  ret 1 shl edgeIndex
+}
+
+func inverseConcaveFlag(edgeIndex: view Int) ret Int {
+  ret 16 shl edgeIndex
+}
+
+# b3SignedVolume: negative when p is below the triangle v1-v2-v3.
+func signedVolume(
+  v1: view Vec3
+  v2: view Vec3
+  v3: view Vec3
+  p: view Vec3
+) ret Float {
+  let n: Vec3 = cross(left: subtract(left: v2, right: v1), right: subtract(left: v3, right: v1))
+  ret dot(left: n, right: subtract(left: p, right: v1))
+}
+
+func setTriangleFlag(flags: mod List(Int), triangle: view Int, flag: view Int) {
+  flags.set(index: triangle, value: flags.copyAtDefault(index: triangle) bitor flag)
+}
+
+# b3IdentifyEdges: each edge shared by two triangles is flagged concave
+# (the neighbour's far vertex above), inverse concave (below), or both when
+# the two faces are within 5 degrees of flat.
+func identifyMeshEdges(mesh: mod MeshData) {
+  let triangleCount: Int = mesh.triangles.length
+  let edges: List(MeshEdge) = List.create(MeshEdge, cap: 3 * triangleCount)
+  let normals: List(Vec3) = List.create(Vec3, cap: triangleCount)
+  loop var i: Int = 0, i < triangleCount, ++i {
+    let triangle: MeshTriangle = mesh.triangles.copyAtDefault(index: i)
+    edges.add(value: meshEdge(
+      first: triangle.index1
+      second: triangle.index2
+      triangle: i
+      edgeIndex: 0
+    ))
+    edges.add(value: meshEdge(
+      first: triangle.index2
+      second: triangle.index3
+      triangle: i
+      edgeIndex: 1
+    ))
+    edges.add(value: meshEdge(
+      first: triangle.index3
+      second: triangle.index1
+      triangle: i
+      edgeIndex: 2
+    ))
+    let v1: Vec3 = mesh.vertices.copyAtDefault(index: triangle.index1)
+    let v2: Vec3 = mesh.vertices.copyAtDefault(index: triangle.index2)
+    let v3: Vec3 = mesh.vertices.copyAtDefault(index: triangle.index3)
+    normals.add(
+      value: normalize(
+        vector: cross(left: subtract(left: v2, right: v1), right: subtract(left: v3, right: v1))
+      )
+    )
+  }
+
+  # The unique edges, each with the second triangle that shares it
+  var map: IntMap(Int) = createIntMap(Int, cap: 2 * edges.length + 8)
+  loop var i: Int = 0, i < edges.length, ++i {
+    let edge: MeshEdge = edges.copyAtDefault(index: i)
+    let key: Int = (edge.vertex1 shl 32) bitor edge.vertex2
+    if let otherIndex: Int = map.get(k: key) {
+      if let base: mod MeshEdge => edges.modAt(index: otherIndex) {
+        if base.triangleCount is 1 {
+          base.triangle2 = edge.triangle1
+          base.triangleEdgeIndex2 = edge.triangleEdgeIndex1
+        }
+        base.triangleCount = base.triangleCount + 1
+      }
+    } else {
+      map.set(k: key, value: i)
+    }
+  }
+
+  let cos5Degrees: Float = 0.9962
+  loop let edge: view MeshEdge in edges {
+    if edge.triangleCount is not 2 {
+      continue
+    }
+    let triangle1: MeshTriangle = mesh.triangles.copyAtDefault(index: edge.triangle1)
+    let triangle2: MeshTriangle = mesh.triangles.copyAtDefault(index: edge.triangle2)
+    var opposite: Int = triangle2.index2
+    if edge.triangleEdgeIndex2 is 0 {
+      opposite = triangle2.index3
+    } else if edge.triangleEdgeIndex2 is 1 {
+      opposite = triangle2.index1
+    }
+    let volume: Float = signedVolume(
+      v1: mesh.vertices.copyAtDefault(index: triangle1.index1)
+      v2: mesh.vertices.copyAtDefault(index: triangle1.index2)
+      v3: mesh.vertices.copyAtDefault(index: triangle1.index3)
+      p: mesh.vertices.copyAtDefault(index: opposite)
+    )
+    let cosAngle: Float = dot(
+      left: normals.copyAtDefault(index: edge.triangle1)
+      right: normals.copyAtDefault(index: edge.triangle2)
+    )
+    if volume > 0.0 or cosAngle > cos5Degrees {
+      setTriangleFlag(
+        flags: mesh.flags
+        triangle: edge.triangle1
+        flag: concaveFlag(edgeIndex: edge.triangleEdgeIndex1)
+      )
+      setTriangleFlag(
+        flags: mesh.flags
+        triangle: edge.triangle2
+        flag: concaveFlag(edgeIndex: edge.triangleEdgeIndex2)
+      )
+    }
+    if volume < 0.0 or cosAngle > cos5Degrees {
+      setTriangleFlag(
+        flags: mesh.flags
+        triangle: edge.triangle1
+        flag: inverseConcaveFlag(edgeIndex: edge.triangleEdgeIndex1)
+      )
+      setTriangleFlag(
+        flags: mesh.flags
+        triangle: edge.triangle2
+        flag: inverseConcaveFlag(edgeIndex: edge.triangleEdgeIndex2)
+      )
+    }
+  }
+}
+
+# b3CreateMesh: none for an invalid definition, an insane bounding box or a
+# tree too deep to sort. Degenerate triangles are dropped (and counted).
+func createMesh(def: view MeshDef, lengthUnitsPerMeter: view Float) ret opt MeshData {
+  let triangleCount: Int = def.indices.length / 3
+  if def.vertices.length < 3 or triangleCount <= 0 {
+    ret none
+  }
+
+  # Copies, for welding
+  var vertices: List(Vec3) = List.create(Vec3, cap: def.vertices.length)
+  loop let vertex: view Vec3 in def.vertices {
+    vertices.add(value: vertex)
+  }
+  var indices: List(Int) = List.create(Int, cap: def.indices.length)
+  loop let index: view Int in def.indices {
+    indices.add(value: index)
+  }
+  if def.weldVertices and def.weldTolerance > 0.0 {
+    vertices = weldVertices(vertices: vertices, indices: indices, tolerance: def.weldTolerance)
+  }
+
+  let primitives: List(MeshPrimitive) = List.create(MeshPrimitive, cap: triangleCount)
+  var degenerateCount: Int = 0
+  let slop: Float = linearSlop(lengthUnitsPerMeter: lengthUnitsPerMeter)
+  let minArea: Float = 0.01 * slop * slop
+  var surfaceArea: Float = 0.0
+  var materialCount: Int = 1
+  var meshBounds: Aabb = emptyBounds()
+  let hasMaterials: Bool = def.materialIndices.length > 0
+  loop var index: Int = 0, index < triangleCount, ++index {
+    let index1: Int = indices.copyAtDefault(index: 3 * index)
+    let index2: Int = indices.copyAtDefault(index: 3 * index + 1)
+    let index3: Int = indices.copyAtDefault(index: 3 * index + 2)
+    let vertex1: Vec3 = vertices.copyAtDefault(index: index1)
+    let vertex2: Vec3 = vertices.copyAtDefault(index: index2)
+    let vertex3: Vec3 = vertices.copyAtDefault(index: index3)
+    let normal: Vec3 = cross(
+      left: subtract(left: vertex2, right: vertex1)
+      right: subtract(left: vertex3, right: vertex1)
+    )
+    let triangleArea: Float = 0.5 * length(vector: normal)
+    if triangleArea < minArea {
+      if index1 is not index2 and index1 is not index3 and index2 is not index3 {
+        degenerateCount = degenerateCount + 1
+      }
+      continue
+    }
+    surfaceArea = surfaceArea + triangleArea
+    let box: Aabb = {
+      lowerBound: min(left: vertex1, right: min(left: vertex2, right: vertex3))
+      upperBound: max(left: vertex1, right: max(left: vertex2, right: vertex3))
+    }
+    primitives.add(
+      value: MeshPrimitive { aabb: box, center: center(box: box), triangleIndex: index }
+    )
+    if hasMaterials {
+      materialCount = maxInt(
+        left: materialCount
+        right: def.materialIndices.copyAtDefault(index: index) + 1
+      )
+    }
+    meshBounds = union(first: meshBounds, second: box)
+  }
+
+  if isSaneAabb(box: meshBounds, lengthUnitsPerMeter: lengthUnitsPerMeter) is false {
+    ret none
+  }
+
+  # The tree (this reorders the primitives)
+  let nodes: List(MeshNode) = List.create(MeshNode, cap: 2 * primitives.length)
+  let built: MeshBuildResult = buildMeshNode(
+    nodes: nodes
+    primitives: primitives
+    start: 0
+    count: primitives.length
+    useMedianSplit: def.useMedianSplit
+    lengthUnitsPerMeter: lengthUnitsPerMeter
+  )
+
+  let triangles: List(MeshTriangle) = List.create(MeshTriangle, cap: primitives.length)
+  let materials: List(Int) = List.create(Int, cap: primitives.length)
+  let flags: List(Int) = List.create(Int, cap: primitives.length)
+  loop let primitive: view MeshPrimitive in primitives {
+    var i2: Int = 3 * primitive.triangleIndex + 1
+    var i3: Int = 3 * primitive.triangleIndex + 2
+    if def.clockWiseWinding {
+      let swapped: Int = i2
+      i2 = i3
+      i3 = swapped
+    }
+    triangles.add(
+      value: MeshTriangle {
+        index1: indices.copyAtDefault(index: 3 * primitive.triangleIndex)
+        index2: indices.copyAtDefault(index: i2)
+        index3: indices.copyAtDefault(index: i3)
+      }
+    )
+    flags.add(value: 0)
+    if hasMaterials {
+      materials.add(value: def.materialIndices.copyAtDefault(index: primitive.triangleIndex))
+    } else {
+      materials.add(value: 0)
+    }
+  }
+
+  var mesh: MeshData = {
+    bounds: meshBounds
+    surfaceArea: surfaceArea
+    treeHeight: built.height
+    degenerateCount: degenerateCount
+    nodes: nodes
+    vertices: vertices
+    triangles: triangles
+    materialIndices: materials
+    materialCount: materialCount
+    flags: flags
+  }
+
+  # The triangles in depth-first order: casts and volume queries return
+  # sorted triangles
+  if sortMeshTriangles(mesh: mesh) is false {
+    ret none
+  }
+  if def.identifyEdges {
+    identifyMeshEdges(mesh: mesh)
+  }
+  ret mesh
+}
