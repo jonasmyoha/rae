@@ -1,0 +1,259 @@
+# The shape state changes an engine layer makes between steps (shape.c at
+# 9f998c8, Box3D's order kept): filter (with b3ResetProxy), friction,
+# restitution, density, surface material, the event flags, and the touching
+# contacts and sensor overlaps of a shape.
+open Vec3
+open physics/math/AabbMath
+open physics/dynamics/WorldTypes
+open physics/dynamics/Body
+open physics/dynamics/Shape
+open physics/dynamics/World
+open physics/dynamics/Contact
+open physics/dynamics/WorldContacts
+open physics/dynamics/ShapeProxy
+open physics/dynamics/BodyMass
+open physics/dynamics/Events
+open physics/dynamics/WorldBodyChanges
+open physics/broadPhase/BroadPhase
+
+func shapeIndexOf(shapeId: view ShapeId) ret Int {
+  ret shapeId.index1 - 1
+}
+
+# b3ResetProxy: destroy the shape's contacts, then update its AABBs and
+# reinsert (destroyProxy) or move its proxy.
+func resetShapeProxy(
+  world: mod PhysicsWorld
+  shapeId: view Int
+  wakeBodies: view Bool
+  destroyProxy: view Bool
+) {
+  let bodyId: Int = world.shapes.copyAtDefault(index: shapeId).bodyId
+
+  # Destroy all contacts of this shape
+  var contactKey: Int = bodyAt(world: world, bodyId: bodyId).headContactKey
+  loop contactKey is not -1 {
+    let contactId: Int = contactKey shr 1
+    let edgeIndex: Int = contactKey bitand 1
+    var ofThisShape: Bool = false
+    if let contact: view Contact => world.contacts.viewAt(index: contactId) {
+      contactKey = contactEdge(contact: contact, edgeIndex: edgeIndex).nextKey
+      ofThisShape = contact.shapeIdA is shapeId or contact.shapeIdB is shapeId
+    }
+    if ofThisShape {
+      destroyContact(world: world, contactId: contactId, wakeBodies: wakeBodies)
+    }
+  }
+
+  let body: Body = bodyAt(world: world, bodyId: bodyId)
+  let transform: Transform = bodyTransformOf(world: world, body: body)
+  let proxyKey: Int = world.shapes.copyAtDefault(index: shapeId).proxyKey
+  if proxyKey is not -1 {
+    let proxyBodyType: Int = proxyType(proxyKey: proxyKey)
+    updateShapeAabbs(
+      world: world
+      shapeId: shapeId
+      transform: transform
+      proxyBodyType: proxyBodyType
+    )
+    let fatBox: Aabb = world.fatAabbs.copyAtDefault(index: shapeId)
+    if destroyProxy {
+      destroyBroadPhaseProxy(broadPhase: world.broadPhase, proxyKey: proxyKey)
+      let newKey: Int = createBroadPhaseProxy(
+        broadPhase: world.broadPhase
+        bodyType: proxyBodyType
+        box: fatBox
+        categoryBits: world.shapes.copyAtDefault(index: shapeId).filter.categoryBits
+        shapeIndex: shapeId
+        forcePairCreation: true
+      )
+      if let shape: mod Shape => world.shapes.modAt(index: shapeId) {
+        shape.proxyKey = newKey
+      }
+    } else {
+      moveBroadPhaseProxy(broadPhase: world.broadPhase, proxyKey: proxyKey, box: fatBox)
+    }
+  } else {
+    updateShapeAabbs(
+      world: world
+      shapeId: shapeId
+      transform: transform
+      proxyBodyType: bodyTypeCode(bodyType: body.bodyType)
+    )
+  }
+}
+
+# b3Shape_SetFilter. Box3D compares the category bits AFTER storing the new
+# filter, so with invokeContacts the proxy is always destroyed and recreated;
+# kept as is. Sensor overlaps update on the next step.
+func setShapeFilter(
+  world: mod PhysicsWorld
+  shapeId: view ShapeId
+  filter: view Filter
+  invokeContacts: view Bool
+) {
+  let shapeIndex: Int = shapeIndexOf(shapeId: shapeId)
+  let current: Filter = world.shapes.copyAtDefault(index: shapeIndex).filter
+  if filter.maskBits is current.maskBits and filter.categoryBits is current.categoryBits and filter.groupIndex is current.groupIndex {
+    ret
+  }
+  if let shape: mod Shape => world.shapes.modAt(index: shapeIndex) {
+    shape.filter = filter
+  }
+  if invokeContacts {
+    # A filter change may destroy contacts, so wake the bodies
+    resetShapeProxy(
+      world: world
+      shapeId: shapeIndex
+      wakeBodies: true
+      destroyProxy: true
+    )
+  }
+}
+
+# b3Shape_SetDensity
+func setShapeDensity(
+  world: mod PhysicsWorld
+  shapeId: view ShapeId
+  density: view Float
+  updateBodyMass: view Bool
+) {
+  let shapeIndex: Int = shapeIndexOf(shapeId: shapeId)
+  if density is world.shapes.copyAtDefault(index: shapeIndex).density {
+    ret
+  }
+  var bodyId: Int = -1
+  if let shape: mod Shape => world.shapes.modAt(index: shapeIndex) {
+    shape.density = density
+    bodyId = shape.bodyId
+  }
+  if updateBodyMass {
+    updateBodyMassData(world: world, bodyId: bodyId)
+  }
+}
+
+# b3Shape_SetFriction
+func setShapeFriction(world: mod PhysicsWorld, shapeId: view ShapeId, friction: view Float) {
+  if let shape: mod Shape => world.shapes.modAt(index: shapeIndexOf(shapeId: shapeId)) {
+    shape.material.friction = friction
+  }
+}
+
+# b3Shape_SetRestitution
+func setShapeRestitution(world: mod PhysicsWorld, shapeId: view ShapeId, restitution: view Float) {
+  if let shape: mod Shape => world.shapes.modAt(index: shapeIndexOf(shapeId: shapeId)) {
+    shape.material.restitution = restitution
+  }
+}
+
+# b3Shape_SetSurfaceMaterial
+func setShapeSurfaceMaterial(
+  world: mod PhysicsWorld
+  shapeId: view ShapeId
+  material: view SurfaceMaterial
+) {
+  if let shape: mod Shape => world.shapes.modAt(index: shapeIndexOf(shapeId: shapeId)) {
+    shape.material = material
+  }
+}
+
+func setShapeFlag(
+  world: mod PhysicsWorld
+  shapeId: view ShapeId
+  flag: view Int
+  enabled: view Bool
+) {
+  if let shape: mod Shape => world.shapes.modAt(index: shapeIndexOf(shapeId: shapeId)) {
+    if enabled {
+      shape.flags = shape.flags bitor flag
+    } else {
+      shape.flags = shape.flags bitand (4294967295 - flag)
+    }
+  }
+}
+
+# b3Shape_EnableSensorEvents
+func enableShapeSensorEvents(world: mod PhysicsWorld, shapeId: view ShapeId, flag: view Bool) {
+  setShapeFlag(
+    world: world
+    shapeId: shapeId
+    flag: enableSensorEventsFlag
+    enabled: flag
+  )
+}
+
+# b3Shape_EnableContactEvents
+func enableShapeContactEvents(world: mod PhysicsWorld, shapeId: view ShapeId, flag: view Bool) {
+  setShapeFlag(
+    world: world
+    shapeId: shapeId
+    flag: enableContactEventsFlag
+    enabled: flag
+  )
+}
+
+# b3Shape_EnableHitEvents
+func enableShapeHitEvents(world: mod PhysicsWorld, shapeId: view ShapeId, flag: view Bool) {
+  setShapeFlag(
+    world: world
+    shapeId: shapeId
+    flag: enableHitEventsFlag
+    enabled: flag
+  )
+}
+
+# b3Shape_GetContactData: the shape's touching contacts, in its body's contact
+# list order, at most `capacity`; none for a sensor.
+func getShapeContactData(
+  world: view PhysicsWorld
+  shapeId: view ShapeId
+  capacity: view Int
+) ret List(ContactData) {
+  let result: List(ContactData) = List.create(ContactData, cap: 4)
+  let shapeIndex: Int = shapeIndexOf(shapeId: shapeId)
+  let shape: Shape = world.shapes.copyAtDefault(index: shapeIndex)
+  if shape.sensorIndex is not -1 {
+    ret result
+  }
+  var contactKey: Int = bodyAt(world: world, bodyId: shape.bodyId).headContactKey
+  loop contactKey is not -1 and result.length < capacity {
+    let contactId: Int = contactKey shr 1
+    let edgeIndex: Int = contactKey bitand 1
+    if let contact: view Contact => world.contacts.viewAt(index: contactId) {
+      let ofThisShape: Bool = contact.shapeIdA is shapeIndex or contact.shapeIdB is shapeIndex
+      if ofThisShape and (contact.flags bitand contactTouchingFlag) is not 0 {
+        result.add(value: contactDataOf(world: world, contact: contact))
+      }
+      contactKey = contactEdge(contact: contact, edgeIndex: edgeIndex).nextKey
+    }
+  }
+  ret result
+}
+
+# b3Shape_GetSensorData: the shapes overlapping a sensor shape (its current
+# overlap list), at most `capacity`; none for a shape that is no sensor.
+func getShapeSensorData(
+  world: view PhysicsWorld
+  shapeId: view ShapeId
+  capacity: view Int
+) ret List(ShapeId) {
+  let result: List(ShapeId) = List.create(ShapeId, cap: 4)
+  let sensorIndex: Int = world.shapes.copyAtDefault(index: shapeIndexOf(shapeId: shapeId)).sensorIndex
+  if sensorIndex is -1 {
+    ret result
+  }
+  if let sensor: view Sensor => world.sensors.viewAt(index: sensorIndex) {
+    loop let visitor: view Visitor in sensor.overlaps2 {
+      if result.length < capacity {
+        result.add(
+          value: ShapeId {
+            index1: visitor.shapeId + 1
+            world0: shapeId.world0
+            generation: visitor.generation
+          }
+        )
+      }
+    }
+  }
+  ret result
+}

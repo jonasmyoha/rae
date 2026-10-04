@@ -1,0 +1,82 @@
+# The world settings an engine layer changes between steps (physics_world.c
+# at 9f998c8): gravity, sleeping, continuous collision, contact tuning, the
+# restitution and hit-event thresholds, the speed cap and warm starting.
+open Vec3
+open physics/dynamics/WorldTypes
+open physics/dynamics/SolverSet
+open physics/dynamics/World
+open physics/dynamics/WorldIslands
+
+# b3ClampFloat(value, 0, FLT_MAX)
+func clampNonNegative(value: view Float) ret Float {
+  if value < 0.0 {
+    ret 0.0
+  }
+  if value > 340282346638528859811704183484516925440.0 {
+    ret 340282346638528859811704183484516925440.0
+  }
+  ret value
+}
+
+# b3World_SetGravity
+func setWorldGravity(world: mod PhysicsWorld, gravity: view Vec3) {
+  world.gravity = gravity
+}
+
+# b3World_EnableSleeping: turning sleep off wakes every sleeping set
+func enableWorldSleeping(world: mod PhysicsWorld, flag: view Bool) {
+  if flag is world.enableSleep {
+    ret
+  }
+  world.enableSleep = flag
+  if flag is false {
+    let setCount: Int = world.solverSets.length
+    loop var i: Int = firstSleepingSet, i < setCount, ++i {
+      if world.solverSets.copyAtDefault(index: i).bodySims.length > 0 {
+        wakeSolverSet(world: world, setIndex: i)
+      }
+    }
+  }
+}
+
+# b3World_EnableWarmStarting
+func enableWorldWarmStarting(world: mod PhysicsWorld, flag: view Bool) {
+  world.enableWarmStarting = flag
+}
+
+# b3World_EnableContinuous
+func enableWorldContinuous(world: mod PhysicsWorld, flag: view Bool) {
+  world.enableContinuous = flag
+}
+
+# b3World_SetRestitutionThreshold
+func setWorldRestitutionThreshold(world: mod PhysicsWorld, value: view Float) {
+  world.restitutionThreshold = clampNonNegative(value: value)
+}
+
+# b3World_SetHitEventThreshold
+func setWorldHitEventThreshold(world: mod PhysicsWorld, value: view Float) {
+  world.hitEventThreshold = clampNonNegative(value: value)
+}
+
+# b3World_SetContactTuning
+func setWorldContactTuning(
+  world: mod PhysicsWorld
+  hertz: view Float
+  dampingRatio: view Float
+  contactSpeed: view Float
+) {
+  world.contactHertz = clampNonNegative(value: hertz)
+  world.contactDampingRatio = clampNonNegative(value: dampingRatio)
+  world.contactSpeed = clampNonNegative(value: contactSpeed)
+}
+
+# b3World_SetMaximumLinearSpeed
+func setWorldMaximumLinearSpeed(world: mod PhysicsWorld, maximumLinearSpeed: view Float) {
+  world.maxLinearSpeed = maximumLinearSpeed
+}
+
+# b3World_GetAwakeBodyCount
+func getWorldAwakeBodyCount(world: view PhysicsWorld) ret Int {
+  ret world.solverSets.copyAtDefault(index: awakeSet).bodySims.length
+}
