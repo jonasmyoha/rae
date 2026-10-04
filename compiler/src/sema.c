@@ -8350,6 +8350,28 @@ static void sema_check_struct_field_borrows(CompilerContext* ctx, AstModule* mod
     }
 }
 
+/* A non-generic struct or enum declaration (a generic template or one of
+ * its specializations shares the template's name by design). */
+static bool sema_is_named_type_decl(const AstDecl* d) {
+    if (d->kind == AST_DECL_ENUM) return true;
+    if (d->kind != AST_DECL_TYPE) return false;
+    return !d->as.type_decl.specialization_args && !d->as.type_decl.generic_template;
+}
+
+static void sema_report_duplicate_type(AstModule* module, const AstDecl* first, const AstDecl* second, Str name) {
+    const char* firstFile = first->origin_file ? first->origin_file
+        : (module && module->file_path ? module->file_path : "<input>");
+    const char* secondFile = second->origin_file ? second->origin_file
+        : (module && module->file_path ? module->file_path : "<input>");
+    char message[1024];
+    snprintf(message, sizeof(message),
+        "type '%.*s' is declared twice: here and at %s:%zu:%zu — type names are program-wide, "
+        "so two modules of one program cannot declare the same type name; rename one of them",
+        (int)name.len, name.data, diag_simplify_path(firstFile), first->line, first->column);
+    diag_error(secondFile, (int)second->line, (int)second->column, message);
+    module->had_error = true;
+}
+
 bool sema_analyze_module(CompilerContext* ctx, AstModule* module) {
     sema_check_struct_field_borrows(ctx, module);
     desugar_typed_create_module(ctx, module);
@@ -8411,6 +8433,14 @@ bool sema_analyze_module(CompilerContext* ctx, AstModule* module) {
                 symbols.head = second->next;
                 second->next = existing->next;
                 existing->next = second;
+            } else if (existing->decl && existing->decl != d && sema_is_named_type_decl(existing->decl)
+                       && sema_is_named_type_decl(d)) {
+                // #36872332: type names are program-wide, so two modules that
+                // both declare `type X` (or `enum X`) cannot be loaded into one
+                // program — every `X` would silently mean the first one and
+                // the second module's own code would fail far away ("unknown
+                // field ... in literal of type 'X'"). Name both definitions.
+                sema_report_duplicate_type(module, existing->decl, d, name);
             } else {
                 // Already defined and not a function overload
             }
