@@ -1,0 +1,246 @@
+# A shape's geometric queries in a frame (b3RayCastShape, b3ShapeCastShape,
+# b3OverlapShape and b3CollideMover of Box3D's shape.c at 9f998c8): the
+# query moves into the shape's local frame, the kind's own query runs, and
+# the result moves back. The mesh, height-field and compound kinds have no
+# queries yet: they report no hit, no overlap and no planes. Checked against
+# the oracle in fixtures 985 and 986.
+open Vec3
+open Quat
+open physics/Constants
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/QuatMath
+open physics/math/TransformMath
+open physics/geometry/QueryTypes
+open physics/geometry/Sphere
+open physics/geometry/Capsule
+open physics/geometry/Hull
+open physics/collision/ShapePair
+open physics/dynamics/WorldTypes
+open physics/dynamics/Shape
+open physics/dynamics/World
+
+# b3RayCastShape: a ray (relative to the frame of `transform`) against
+# `shape` placed by `transform`.
+func rayCastShape(
+  world: view PhysicsWorld
+  shape: view Shape
+  transform: view Transform
+  input: view RayCastInput
+) ret CastOutput {
+  let localInput: RayCastInput = {
+    origin: inverseTransformPoint(transform: transform, point: input.origin)
+    translation: inverseRotateVector(quat: transform.rotation, vector: input.translation)
+    maxFraction: input.maxFraction
+  }
+  var output: CastOutput = emptyCastOutput()
+  match shape.shapeType {
+    case ShapeType.capsule {
+      output = rayCastCapsule(
+        capsule: shape.capsule
+        input: localInput
+        lengthUnitsPerMeter: world.lengthUnitsPerMeter
+      )
+    }
+    case ShapeType.compound {
+      ret output
+    }
+    case ShapeType.height {
+      ret output
+    }
+    case ShapeType.hull {
+      if let hull: view Hull => world.hulls.viewAt(index: shape.hullIndex) {
+        output = rayCastHull(hull: hull, input: localInput)
+      }
+    }
+    case ShapeType.mesh {
+      ret output
+    }
+    case ShapeType.sphere {
+      output = rayCastSphere(sphere: shape.sphere, input: localInput)
+    }
+  }
+  output.point = transformPoint(transform: transform, point: output.point)
+  output.normal = rotateVector(quat: transform.rotation, vector: output.normal)
+  ret output
+}
+
+# b3ShapeCastShape: a shape cast (relative to the frame of `transform`)
+# against `shape` placed by `transform`.
+func shapeCastShape(
+  world: view PhysicsWorld
+  shape: view Shape
+  transform: view Transform
+  input: view ShapeCastInput
+) ret CastOutput {
+  let count: Int = minInt(left: input.proxy.points.length, right: maxShapeCastPoints)
+  let localPoints: List(Vec3) = List.create(Vec3, cap: count)
+  loop var i: Int = 0, i < count, ++i {
+    localPoints.add(
+      value: inverseTransformPoint(
+        transform: transform
+        point: input.proxy.points.copyAtDefault(index: i)
+      )
+    )
+  }
+  let localInput: ShapeCastInput = {
+    proxy: ShapeProxy { points: localPoints, radius: input.proxy.radius }
+    translation: inverseRotateVector(quat: transform.rotation, vector: input.translation)
+    maxFraction: input.maxFraction
+    canEncroach: input.canEncroach
+  }
+  var output: CastOutput = emptyCastOutput()
+  match shape.shapeType {
+    case ShapeType.capsule {
+      output = shapeCastCapsule(
+        capsule: shape.capsule
+        input: localInput
+        lengthUnitsPerMeter: world.lengthUnitsPerMeter
+      )
+    }
+    case ShapeType.compound {
+      ret output
+    }
+    case ShapeType.height {
+      ret output
+    }
+    case ShapeType.hull {
+      if let hull: view Hull => world.hulls.viewAt(index: shape.hullIndex) {
+        output = shapeCastHull(
+          hull: hull
+          input: localInput
+          lengthUnitsPerMeter: world.lengthUnitsPerMeter
+        )
+      }
+    }
+    case ShapeType.mesh {
+      ret output
+    }
+    case ShapeType.sphere {
+      output = shapeCastSphere(
+        sphere: shape.sphere
+        input: localInput
+        lengthUnitsPerMeter: world.lengthUnitsPerMeter
+      )
+    }
+  }
+  output.point = transformPoint(transform: transform, point: output.point)
+  output.normal = rotateVector(quat: transform.rotation, vector: output.normal)
+  ret output
+}
+
+# b3OverlapShape: does `proxy` (in the frame of `transform`) overlap `shape`
+# placed by `transform`?
+func overlapShape(
+  world: view PhysicsWorld
+  shape: view Shape
+  transform: view Transform
+  proxy: view ShapeProxy
+) ret Bool {
+  match shape.shapeType {
+    case ShapeType.capsule {
+      ret overlapCapsule(
+        capsule: shape.capsule
+        shapeTransform: transform
+        proxy: proxy
+        lengthUnitsPerMeter: world.lengthUnitsPerMeter
+      )
+    }
+    case ShapeType.compound {
+      ret false
+    }
+    case ShapeType.height {
+      ret false
+    }
+    case ShapeType.hull {
+      if let hull: view Hull => world.hulls.viewAt(index: shape.hullIndex) {
+        ret overlapHull(
+          hull: hull
+          shapeTransform: transform
+          proxy: proxy
+          lengthUnitsPerMeter: world.lengthUnitsPerMeter
+        )
+      }
+      ret false
+    }
+    case ShapeType.mesh {
+      ret false
+    }
+    case ShapeType.sphere {
+      ret overlapSphere(
+        sphere: shape.sphere
+        shapeTransform: transform
+        proxy: proxy
+        lengthUnitsPerMeter: world.lengthUnitsPerMeter
+      )
+    }
+  }
+  ret false
+}
+
+# b3CollideMover: the planes pushing the capsule `mover` (in the frame of
+# `transform`) out of `shape` placed by `transform`, in that frame.
+func collideMoverShape(
+  world: view PhysicsWorld
+  shape: view Shape
+  transform: view Transform
+  mover: view Capsule
+) ret List(PlaneResult) {
+  let localMover: Capsule = {
+    center1: inverseTransformPoint(transform: transform, point: mover.center1)
+    center2: inverseTransformPoint(transform: transform, point: mover.center2)
+    radius: mover.radius
+  }
+  let planes: List(PlaneResult) = List.create(PlaneResult, cap: 1)
+  var result: PlaneResult = emptyPlaneResult()
+  var planeCount: Int = 0
+  match shape.shapeType {
+    case ShapeType.capsule {
+      planeCount = collideMoverAndCapsule(
+        result: result
+        capsule: shape.capsule
+        mover: localMover
+        lengthUnitsPerMeter: world.lengthUnitsPerMeter
+      )
+    }
+    case ShapeType.compound {
+    }
+    case ShapeType.height {
+    }
+    case ShapeType.hull {
+      if let hull: view Hull => world.hulls.viewAt(index: shape.hullIndex) {
+        planeCount = collideMoverAndHull(result: result, hull: hull, mover: localMover)
+      }
+    }
+    case ShapeType.mesh {
+    }
+    case ShapeType.sphere {
+      planeCount = collideMoverAndSphere(
+        result: result
+        sphere: shape.sphere
+        mover: localMover
+        lengthUnitsPerMeter: world.lengthUnitsPerMeter
+      )
+    }
+  }
+  if planeCount > 0 {
+    result.plane.normal = rotateVector(quat: transform.rotation, vector: result.plane.normal)
+    result.point = transformPoint(transform: transform, point: result.point)
+    result.materialIndex = clampInt(
+      value: result.materialIndex
+      lower: 0
+      upper: shape.materialCount - 1
+    )
+    planes.add(value: result)
+  }
+  ret planes
+}
+
+# The user material id of material `materialIndex` of `shape`
+# (b3GetShapeMaterials: a compound's own table, else the shape's one).
+func shapeUserMaterialId(shape: view Shape, materialIndex: view Int) ret UInt64 {
+  if shape.materials.length > 0 {
+    ret shape.materials.copyAtDefault(index: materialIndex).userMaterialId
+  }
+  ret shape.material.userMaterialId
+}
