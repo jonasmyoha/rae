@@ -1,0 +1,361 @@
+# A character mover: the loop of Box3D's samples/mover.cpp at 9f998c8
+# (CharacterMover::SolveMove and the jump of CharacterMover::Step) in Rae. A
+# capsule held above the ground by a "pogo" spring (a ray cast down from its
+# lower sphere) walks with friction and acceleration toward a throttle, and
+# moves by up to five rounds of: collide the capsule with the world
+# (b3World_CollideMover), push the target movement out of the planes
+# (b3SolvePlanes), and cast the capsule along what is left
+# (b3World_CastMover). It slides along walls, steps up what the pogo spring
+# can reach, stands on slopes and pushes dynamic bodies. The sample's
+# drawing and camera are left out; `groundNormal` (the pogo ray's hit
+# normal) is an addition. Checked against the same loop in C in fixture 986.
+open Vec2
+open Vec3
+open Quat
+open physics/Constants
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/QuatMath
+open physics/math/MatrixMath
+open physics/math/PlaneMath
+open physics/math/TransformMath
+open physics/geometry/QueryTypes
+open physics/collision/Mover
+open physics/dynamics/WorldTypes
+open physics/dynamics/World
+open physics/dynamics/WorldBodies
+open physics/dynamics/WorldQueries
+
+const planeCapacity: Int = 8
+
+const jumpSpeed: Float = 5.0
+
+const maxSpeed: Float = 6.0
+
+const minSpeed: Float = 0.01
+
+const stopSpeed: Float = 1.0
+
+const accelerate: Float = 30.0
+
+const friction: Float = 4.0
+
+const moverGravity: Float = 15.0
+
+# The mover's state between steps.
+type CharacterMover {
+  transform: WorldTransform
+  velocity: Vec3
+  capsule: Capsule
+  # The planes of the last collide, with the contact point and the shape of
+  # each (the sample's PlaneExtra)
+  planes: List(CollisionPlane)
+  planePoints: List(Vec3)
+  planeShapeIds: List(ShapeId)
+  totalIterations: Int
+  pogoVelocity: Float
+  onGround: Bool
+  sprint: Bool
+  groundNormal: Vec3
+}
+
+# CharacterMover::Initialize: standing at `position`.
+func createCharacterMover(position: view Pos) ret CharacterMover {
+  ret CharacterMover {
+    transform: WorldTransform { position: position, rotation: quatIdentity() }
+    velocity: zeroVector()
+    capsule: Capsule {
+      center1: Vec3 { x: 0.0, y: -0.5, z: 0.0 }
+      center2: Vec3 { x: 0.0, y: 0.5, z: 0.0 }
+      radius: 0.3
+    }
+    planes: List.create(CollisionPlane, cap: planeCapacity)
+    planePoints: List.create(Vec3, cap: planeCapacity)
+    planeShapeIds: List.create(ShapeId, cap: planeCapacity)
+    totalIterations: 0
+    pogoVelocity: 0.0
+    onGround: false
+    sprint: false
+    groundNormal: zeroVector()
+  }
+}
+
+# The jump of CharacterMover::Step: only from the ground.
+func jumpCharacter(mover: mod CharacterMover) {
+  if mover.onGround {
+    mover.velocity.y = jumpSpeed
+    mover.onGround = false
+  }
+}
+
+# The sample's PlaneResultFcn: keep the planes of the shapes the mover does
+# not ignore, up to the plane capacity (each pushing without limit and
+# clipping velocity).
+func gatherPlanes(
+  mover: mod CharacterMover
+  moverPlanes: view List(MoverPlane)
+  ignoreShapeIds: view List(ShapeId)
+) {
+  loop let moverPlane: view MoverPlane in moverPlanes {
+    if isIgnored(shapeId: moverPlane.shapeId, ignoreShapeIds: ignoreShapeIds) {
+      continue
+    }
+    if mover.planes.length >= planeCapacity {
+      continue
+    }
+    mover.planes.add(
+      value: CollisionPlane {
+        plane: moverPlane.result.plane
+        pushLimit: floatMax
+        push: 0.0
+        clipVelocity: true
+      }
+    )
+    mover.planePoints.add(
+      value: offsetPosition(position: mover.transform.position, delta: moverPlane.result.point)
+    )
+    mover.planeShapeIds.add(value: moverPlane.shapeId)
+  }
+}
+
+# The sample's 32-bit query filters: `{ 1, ~2u }` skips team 2 (the pogo
+# ray and the cast), `{ 1, ~0u }` collides with everything.
+func skipTeamFilter() ret QueryFilter {
+  ret QueryFilter { categoryBits: 1, maskBits: 4294967293, id: 1 }
+}
+
+func moverCollideFilter() ret QueryFilter {
+  ret QueryFilter { categoryBits: 1, maskBits: 4294967295, id: 1 }
+}
+
+# Friction, acceleration toward the throttle and the mover's own gravity
+# (the start of CharacterMover::SolveMove).
+func accelerateCharacter(
+  mover: mod CharacterMover
+  timeStep: view Float
+  forward: view Vec3
+  right: view Vec3
+  throttle: view Vec2
+) {
+  # Friction
+  let speed: Float = length(vector: mover.velocity)
+  if speed < minSpeed {
+    mover.velocity.x = 0.0
+    mover.velocity.z = 0.0
+  } else {
+    # Linear damping above stopSpeed and a fixed reduction below it
+    var control: Float = speed
+    if speed < stopSpeed {
+      control = stopSpeed
+    }
+    # Friction has units of 1/time
+    let drop: Float = control * friction * timeStep
+    let newSpeed: Float = maxFloat(left: 0.0, right: speed - drop)
+    let ratio: Float = newSpeed / speed
+    mover.velocity.x = mover.velocity.x * ratio
+    mover.velocity.z = mover.velocity.z * ratio
+  }
+
+  var speedLimit: Float = maxSpeed
+  if mover.sprint {
+    speedLimit = 1.5 * maxSpeed
+  }
+  let desiredVelocity: Vec3 = add(
+    left: scale(scale: speedLimit * throttle.x, vector: forward)
+    right: scale(scale: speedLimit * throttle.y, vector: right)
+  )
+  var desiredSpeed: Float = 0.0
+  let desiredDirection: Vec3 = getLengthAndNormalize(length: desiredSpeed, vector: desiredVelocity)
+  if desiredSpeed > speedLimit {
+    desiredSpeed = speedLimit
+  }
+
+  if mover.onGround {
+    mover.velocity.y = 0.0
+  }
+
+  # Accelerate
+  let currentSpeed: Float = dot(left: mover.velocity, right: desiredDirection)
+  let addSpeed: Float = desiredSpeed - currentSpeed
+  if addSpeed > 0.0 {
+    var accelerationSpeed: Float = accelerate * speedLimit * timeStep
+    if accelerationSpeed > addSpeed {
+      accelerationSpeed = addSpeed
+    }
+    mover.velocity = add(
+      left: mover.velocity
+      right: scale(scale: accelerationSpeed, vector: desiredDirection)
+    )
+  }
+
+  mover.velocity.y = mover.velocity.y - moverGravity * timeStep
+}
+
+# The pogo spring: a ray down from the lower sphere finds the ground, and a
+# soft spring (4 Hz, damping 0.7) holds the mover at three radii above it.
+func updatePogo(mover: mod CharacterMover, world: view PhysicsWorld, timeStep: view Float) {
+  let pogoRestLength: Float = 3.0 * mover.capsule.radius
+  let rayLength: Float = pogoRestLength + mover.capsule.radius
+  let rayOrigin: Pos = transformWorldPoint(transform: mover.transform, point: mover.capsule.center1)
+  let rayTranslation: Vec3 = scale(scale: -rayLength, vector: axisY())
+  let rayResult: RayResult = castRayClosest(
+    world: world
+    origin: rayOrigin
+    translation: rayTranslation
+    filter: skipTeamFilter()
+  )
+
+  # After gravity, the pogo is off while moving up: a jump is not pulled
+  # back to the ground
+  let suppressPogo: Bool = mover.velocity.y > 0.0
+  if rayResult.hit is false or suppressPogo {
+    mover.onGround = false
+    mover.pogoVelocity = 0.0
+    mover.groundNormal = zeroVector()
+  } else {
+    mover.onGround = true
+    mover.groundNormal = rayResult.normal
+    let pogoCurrentLength: Float = rayResult.fraction * rayLength
+    let zeta: Float = 0.7
+    let hertz: Float = 4.0
+    let omega: Float = 2.0 * pi * hertz
+    let omegaH: Float = omega * timeStep
+    mover.pogoVelocity = (mover.pogoVelocity - omega * omegaH * (pogoCurrentLength - pogoRestLength)) / (1.0 + 2.0 * zeta * omegaH + omegaH * omegaH)
+  }
+}
+
+# Push the dynamic bodies the mover touches: a one-sided impulse at each
+# contact point that stops the body moving into the mover.
+func pushBodies(mover: mod CharacterMover, world: mod PhysicsWorld) {
+  loop var i: Int = 0, i < mover.planes.length, ++i {
+    let bodyId: BodyId = getShapeBody(
+      world: world
+      shapeId: mover.planeShapeIds.copyAtDefault(index: i)
+    )
+    if getBodyType(world: world, bodyId: bodyId) is not BodyType.dynamicBody {
+      continue
+    }
+    let point: Pos = mover.planePoints.copyAtDefault(index: i)
+    let normal: Vec3 = negate(vector: mover.planes.copyAtDefault(index: i).plane.normal)
+
+    let invMassA: Float = 0.0
+    let invMassB: Float = getBodyInverseMass(world: world, bodyId: bodyId)
+    let invIB: Matrix3 = getBodyWorldInverseInertia(world: world, bodyId: bodyId)
+    let centerB: Pos = getBodyWorldCenter(world: world, bodyId: bodyId)
+    let rB: Vec3 = subtractPositions(left: point, right: centerB)
+
+    let rnB: Vec3 = cross(left: rB, right: normal)
+    let kNormal: Float = invMassA + invMassB + dot(
+      left: rnB
+      right: multiply(matrix: invIB, vector: rnB)
+    )
+    var normalMass: Float = 0.0
+    if kNormal > 0.0 {
+      normalMass = 1.0 / kNormal
+    }
+
+    let velocityB: Vec3 = getBodyLinearVelocity(world: world, bodyId: bodyId)
+    let omegaB: Vec3 = getBodyAngularVelocity(world: world, bodyId: bodyId)
+    let relativeVelocityB: Vec3 = add(left: velocityB, right: cross(left: omegaB, right: rB))
+    let normalSpeed: Float = dot(
+      left: subtract(left: relativeVelocityB, right: mover.velocity)
+      right: normal
+    )
+    let impulse: Float = maxFloat(left: -normalMass * normalSpeed, right: 0.0)
+
+    let linearImpulse: Vec3 = scale(scale: impulse, vector: normal)
+    mover.velocity = mulSub(base: mover.velocity, scale: invMassA, vector: linearImpulse)
+    applyBodyLinearImpulse(
+      world: world
+      bodyId: bodyId
+      impulse: linearImpulse
+      point: point
+      wake: true
+    )
+  }
+}
+
+# CharacterMover::SolveMove: one step of `timeStep` toward the throttle
+# (x along `forward`, y along `right`), ignoring the shapes in
+# `ignoreShapeIds`. With `clipVelocity` the velocity is clipped against the
+# planes that pushed; otherwise it is the step's position change.
+func solveMove(
+  mover: mod CharacterMover
+  world: mod PhysicsWorld
+  timeStep: view Float
+  forward: view Vec3
+  right: view Vec3
+  throttle: view Vec2
+  clipVelocity: view Bool
+  ignoreShapeIds: view List(ShapeId)
+) {
+  accelerateCharacter(
+    mover: mover
+    timeStep: timeStep
+    forward: forward
+    right: right
+    throttle: throttle
+  )
+  updatePogo(mover: mover, world: world, timeStep: timeStep)
+
+  let startPosition: Pos = mover.transform.position
+  let target: Pos = add(
+    left: add(left: mover.transform.position, right: scale(scale: timeStep, vector: mover.velocity))
+    right: scale(scale: timeStep * mover.pogoVelocity, vector: axisY())
+  )
+
+  mover.totalIterations = 0
+  let tolerance: Float = 0.01
+  loop var iteration: Int = 0, iteration < 5, ++iteration {
+    mover.planes.clear()
+    mover.planePoints.clear()
+    mover.planeShapeIds.clear()
+
+    let moverPlanes: List(MoverPlane) = List.create(MoverPlane, cap: planeCapacity)
+    collideMover(
+      world: world
+      origin: mover.transform.position
+      mover: mover.capsule
+      filter: moverCollideFilter()
+      planes: moverPlanes
+    )
+    gatherPlanes(mover: mover, moverPlanes: moverPlanes, ignoreShapeIds: ignoreShapeIds)
+
+    let targetDelta: Vec3 = subtractPositions(left: target, right: mover.transform.position)
+    let result: PlaneSolverResult = solvePlanes(
+      targetDelta: targetDelta
+      planes: mover.planes
+      lengthUnitsPerMeter: world.lengthUnitsPerMeter
+    )
+    mover.totalIterations = mover.totalIterations + result.iterationCount
+
+    var delta: Vec3 = result.delta
+    let fraction: Float = castMover(
+      world: world
+      origin: mover.transform.position
+      mover: mover.capsule
+      translation: delta
+      filter: skipTeamFilter()
+      ignoreShapeIds: ignoreShapeIds
+    )
+    delta = Vec3 { x: delta.x * fraction, y: delta.y * fraction, z: delta.z * fraction }
+    mover.transform.position = offsetPosition(position: mover.transform.position, delta: delta)
+    if lengthSquared(vector: delta) < tolerance * tolerance {
+      break
+    }
+  }
+
+  pushBodies(mover: mover, world: world)
+
+  if clipVelocity {
+    # The velocity clipper keeps the mover from picking up velocity from
+    # depenetration
+    mover.velocity = clipVector(vector: mover.velocity, planes: mover.planes)
+  } else if timeStep > 0.0 {
+    # The position change is more holistic in some cases
+    mover.velocity = scale(
+      scale: 1.0 / timeStep
+      vector: subtractPositions(left: mover.transform.position, right: startPosition)
+    )
+  }
+}

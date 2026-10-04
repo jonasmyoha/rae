@@ -422,7 +422,10 @@ Golden fixtures under `compiler/tests/cases/` (deterministic prints):
 - restitution: rebound height = e² × drop; friction: box holds on 20° at
   μ=0.5, slides at 0.2; projectile range `v²/g` at 45°;
 - character: slides along a wall, steps a 0.3 m curb, is blocked by 0.6 m,
-  reports `grounded` and slope normal on a 20° ramp;
+  reports `grounded` and slope normal on a 20° ramp; (as built in P7a on
+  Box3D's samples/mover.cpp loop, the pogo spring holds the capsule's bottom
+  0.6 m up, so it steps a 0.6 m block too and a 1.0 m block blocks it —
+  fixture 986);
 - revolute hurdle: pushed at the top, rotates to its limit and rests;
 - despawn safety: spawn/despawn 1000 bodies, recycled entity ids never touch
   a live body (mirrors the client's generation test);

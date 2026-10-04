@@ -409,6 +409,13 @@ C added.
   `parallel` and `weld` of golden `joints`, fixture 984). **P6 is complete.**
 - **P7 — queries and the mover**: ray/shape casts, overlaps, the character
   loop (walls, steps, slopes).
+  **P7a landed 2026-10-04, bit-exact:** the world queries (closest and
+  all-hit ray casts, shape casts, box and shape overlaps, mover collide and
+  cast; the shape dispatch for spheres, capsules and hulls), mover.c
+  (b3SolvePlanes, b3ClipVector) and the character loop of
+  samples/mover.cpp in Rae (`WorldQueries`, `ShapeQueries`, `Mover`,
+  `character/CharacterMover`; goldens `queries`, `character`, fixtures 985
+  and 986). **P7b** adds the mesh, height-field and compound queries.
 - **P8 — the ECS layer**: `PhysicsWorld`, `RigidBody`, `Collider`,
   `CharacterBody`, push/step/pull/event systems, spawn/despawn
   (`docs/physics-design.md` §5).
