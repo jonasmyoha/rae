@@ -1,0 +1,15 @@
+# #79509597: a bare module const is resolved by what the reading module can
+# see, not by which loaded module declared the name first. lib/WorldBiome and
+# lib/procgen/Texture both declare `matGrass` and `matRock`, with different
+# values (3/4 and 0/2). An `import` grants only qualified access; the `open`
+# decides a bare read. Before, the first module loaded won, so every line
+# below read the imported module's values.
+import WorldBiome
+open procgen/Texture
+
+func main() {
+  log("Main opens Texture: grass {matGrass} rock {matRock}")
+  log("biome/Reader opens WorldBiome: grass {biomeGrass()} rock {biomeRock()}")
+  log("const initializer in biome/Reader: {biomeGrassTimesTen}")
+  log("painter/Own declares its own: {paintedGrass()}")
+}
