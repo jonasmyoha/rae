@@ -370,6 +370,16 @@ C added.
   of mesh_contact.c (`lib/physics/geometry/HeightField`; goldens
   `heightfield`, `heightscenes`, fixtures 979 and 980). The byte-block
   layout and hash are not ported; the ray, shape and mover casts are P7.
+  **P5d landed 2026-10-04, bit-exact:** compound.c (b3CreateCompound with
+  the shared material table and the child tree, b3GetCompoundChild,
+  b3ComputeCompoundAABB, b3QueryCompound), the compound shape
+  (b3CreateBakedCompoundShape, static only; mass none, as Box3D), the
+  compound case of b3UpdateContact with b3UpdateConvexContact's flip, the
+  per-triangle materials of mesh contacts, the compound pair emission of
+  broad_phase.c (b3EmitCompoundPairs, checkCompounds) and b3Body_SetType's
+  refusal for compound and height bodies (`lib/physics/geometry/Compound`;
+  goldens `compound`, `compoundscenes`, fixtures 981 and 982). Not yet: the
+  compound time of impact (a fast body skips compound targets, with P5e).
 - **P6 — joints**, one module per kind, each scene bit-exact.
 - **P7 — queries and the mover**: ray/shape casts, overlaps, the character
   loop (walls, steps, slopes).

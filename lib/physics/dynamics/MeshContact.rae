@@ -102,6 +102,34 @@ func surfaceTriangle(
   }
 }
 
+# The surface material of triangle `triangleIndex` of shape A: the mesh
+# triangle's material index (through a compound mesh's `materialMap`) or the
+# height-field cell's, clamped to the shape's materials.
+func triangleMaterial(
+  shapeA: view Shape
+  meshes: view List(Mesh)
+  heightFields: view List(HeightFieldData)
+  materialMap: view List(Int)
+  triangleIndex: view Int
+) ret SurfaceMaterial {
+  var materialIndex: Int = 0
+  if shapeA.shapeType is ShapeType.height {
+    if let heightField: view HeightFieldData => heightFields.viewAt(index: shapeA.heightFieldIndex) {
+      materialIndex = heightField.materialIndices.copyAtDefault(index: triangleIndex shr 1)
+    }
+  } else if let mesh: view Mesh => meshes.viewAt(index: shapeA.meshIndex) {
+    materialIndex = mesh.data.materialIndices.copyAtDefault(index: triangleIndex)
+    if materialMap.length > 0 {
+      materialIndex = materialMap.copyAtDefault(index: materialIndex)
+    }
+  }
+  materialIndex = clampInt(value: materialIndex, lower: 0, upper: shapeA.materialCount - 1)
+  if shapeA.materials.length > 0 {
+    ret shapeA.materials.copyAtDefault(index: materialIndex)
+  }
+  ret shapeA.material
+}
+
 # b3RefreshCache: when the convex shape's box left the cached query box,
 # query the mesh or height field again with a grown box and keep the caches
 # of the triangles found again.
@@ -375,6 +403,7 @@ func computeMeshManifolds(
   shapeA: view Shape
   meshes: view List(Mesh)
   heightFields: view List(HeightFieldData)
+  materialMap: view List(Int)
   transformA: view Transform
   shapeB: view Shape
   hulls: view List(Hull)
@@ -571,16 +600,22 @@ func computeMeshManifolds(
     lengthUnitsPerMeter: lengthUnitsPerMeter
   )
 
-  # The mixed material values, one sample per contact point (Box3D's
-  # per-triangle materials; a mesh shape has one here)
-  let materialA: SurfaceMaterial = shapeA.material
-  let materialB: SurfaceMaterial = shapeB.material
+  # The mixed material values, one sample per contact point, each with its
+  # triangle's material
+  let materialB: SurfaceMaterial = firstShapeMaterial(shape: shapeB)
   var friction: Float = 0.0
   var restitution: Float = 0.0
   var sampleCount: Float = 0.0
   var tangentVelocityA: Vec3 = zeroVector()
   loop let manifold: view Manifold in contact.manifolds {
     loop var j: Int = 0, j < manifold.pointCount, ++j {
+      let materialA: SurfaceMaterial = triangleMaterial(
+        shapeA: shapeA
+        meshes: meshes
+        heightFields: heightFields
+        materialMap: materialMap
+        triangleIndex: manifold.points.copyAtDefault(index: j).triangleIndex
+      )
       friction = friction + Math.sqrt(x: materialA.friction * materialB.friction)
       restitution = restitution + maxFloat(
         left: materialA.restitution

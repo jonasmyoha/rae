@@ -389,3 +389,36 @@ triangle, AABBs and queries); fixture 980 replays
 wave field; a flat grid and a tilted wave with sleep on), every step's body
 hash and every 20 steps the bodies and the height-field contacts, all
 bit-exact.
+
+## P5d — compounds (`geometry/Compound`)
+
+A compound bakes many capsules, hulls, meshes and spheres into one static
+shape: a dynamic tree over the children (one proxy each, then a full
+rebuild) and a shared material table (equal materials, by their bytes, are
+stored once). A compound shape copies its child hulls and meshes into the
+world's lists and owns a copy of the material table. Pair finding expands a
+compound into one pair per child its partner's box overlaps (the static
+cross pass, while any compound exists); the contact collides that child as a
+temporary shape — a convex child with its one material, flipped where Box3D
+puts the other shape first, a mesh child through the mesh contact with the
+compound's material map — and moves the anchors to the compound origin.
+`setBodyType` will not move a body with a compound or height shape off the
+static type.
+
+| Box3D | Rae |
+|---|---|
+| `b3CompoundDef` `b3Compound*Def` `b3CompoundData` `b3ChildShape` | `CompoundDef` `Compound*Def` `CompoundData` `ChildShape` (`geometry/Compound`) |
+| `b3CreateCompound` `b3GetCompoundChild` `b3ComputeCompoundAABB` `b3QueryCompound` | `createCompound` `getCompoundChild` `computeCompoundAabb` `queryCompound` |
+| `b3CreateBakedCompoundShape`, `world->compoundShapeCount` | `createCompoundShape` (`dynamics/WorldShapes`), `compoundShapeCount` |
+| the compound case of `b3UpdateContact`, `b3UpdateConvexContact`'s flip | `updateCompoundContact` `updateConvexChild`, `flip` (`dynamics/WorldContacts`) |
+| `b3EmitCompoundPairs` `b3CompoundChildCallback`, `checkCompounds` | `emitCompoundPairs`, `PairContext.checkCompounds` (`dynamics/BroadPhasePairs`) |
+| per-point materials of `b3ComputeMeshManifolds` | `triangleMaterial` (`dynamics/MeshContact`) |
+
+Box3D's `b3Body_SetType` returns from that check with the world still
+locked (every later call on the world is then ignored); Rae returns without
+the lock. The checks: fixture 981 replays `goldens/compound.golden` (ten
+compounds: the material table, the tree, every child, AABBs and queries);
+fixture 982 replays `goldens/compoundscenes.golden` — two worlds stepped 600
+times over a compound course (sleep off, then on) and the two refused type
+changes, every step's body hash and every 20 steps the bodies and mesh
+contacts, all bit-exact.
