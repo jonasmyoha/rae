@@ -192,7 +192,7 @@ shares equal hulls through a database; that only saves memory).
 | `b3CreateIsland` `b3DestroyIsland` `b3WakeSolverSet` `b3WakeBody` | `createIsland` `destroyIsland` `wakeSolverSet` `wakeBody` (`dynamics/WorldIslands`) |
 | `b3CreateBody` `b3DestroyBody` `b3UpdateBodyMassData` | `createBody` `destroyBody` `updateBodyMassData` (`dynamics/WorldBodies`, `dynamics/BodyMass`) |
 | `b3Body_Get*` / `_Set*` / `_Apply*` | `getBody…` / `setBody…` / `applyBody…` |
-| `b3Shape` `b3CreateSphereShape` `…Capsule…` `…Hull…` `…TransformedHull…` `b3DestroyShape` | `Shape` `createSphereShape` `createCapsuleShape` `createHullShape` `createTransformedHullShape` `destroyShape` (`dynamics/Shape`, `dynamics/WorldShapes`) |
+| `b3Shape` `b3CreateSphereShape` `…Capsule…` `…Hull…` `…TransformedHull…` `b3DestroyShape` | `PhysicsShape` `createSphereShape` `createCapsuleShape` `createHullShape` `createTransformedHullShape` `destroyShape` (`dynamics/Shape`, `dynamics/WorldShapes`) |
 | `b3CreateShapeProxy` `b3DestroyShapeProxy` | `createShapeProxy` `destroyShapeProxy` (`dynamics/ShapeProxy`) |
 | `b3BroadPhase` `b3BroadPhase_CreateProxy` `_DestroyProxy` `_MoveProxy` | `BroadPhase` `createBroadPhaseProxy` `destroyBroadPhaseProxy` `moveBroadPhaseProxy` |
 
@@ -610,4 +610,32 @@ mover on mesh ground (a grid floor, a box-mesh step, a platform mesh's
 slopes, stopping grounded on a slope) and across a wave height field. All
 bit-exact. The mesh and height-field sensors have no oracle scene of their
 own.
+
+## P8 — the ECS layer (`ecs/Physics`, `PhysicsComponents`, `PhysicsSystems`, `PhysicsSpawn`, `PhysicsQueries`, `VenueMesh`)
+
+The port inside an ECS world (`docs/physics-design.md` §5): the `Physics`
+resource (the `PhysicsWorld`, a fixed step with a capped accumulator, the
+body and shape → entity maps that stand in for Box3D's user data, event
+queues with entity ids, the static venue body), the `RigidBody`, `Collider`
+and `CharacterBody` components, and the fixed step's systems in order —
+character, push (game-written `Transform3D`s, found by their mod stamps, to
+the bodies), step, pull (the body move events back to `Transform3D`;
+sleeping bodies cost nothing), events. `spawnRigidBody` / `add*Collider` /
+`despawnRigidBody` (the body destroyed before the entity's components are
+cleared), `addVenueMesh` from a render mesh, `addVenueBox`, and the queries
+with entities (`raycastClosest`, `spherecastClosest`, `overlapAabbEntities`,
+`overlapSphereEntities`).
+
+The character mover gained an up axis for it (`UpAxis.yUp` is the sample's,
+bit for bit; the ECS uses `zUp`, Rae's world). Two port types were renamed
+because Rae's type names are program-wide and these clashed with other
+libraries: `Shape` → `PhysicsShape` (lib/ui has a `Shape`) and `MeshData` →
+`PhysicsMeshData` (lib/Mesh3d has a `MeshData`).
+
+The checks: fixture 987 spawns and despawns 1000 bodies with recycled entity
+ids and checks after every round that every body, mapping and entity agree;
+fixture 988 steps two ECS worlds 600 times through the same uneven frame
+times (a venue mesh, a box stack, thrown balls, a kinematic platform moved
+by the game, a teleport, a Z-up character walking and jumping) and finds
+every transform identical.
 

@@ -91,7 +91,7 @@ type PhysicsWorld {
   islandIdPool: IdPool
   islands: List(Island)
   shapeIdPool: IdPool
-  shapes: List(Shape)
+  shapes: List(PhysicsShape)
   # The fat box of each shape's broad-phase proxy, by shape id
   fatAabbs: List(Aabb)
   # The hull data of hull shapes (Box3D's hull database)
@@ -161,7 +161,7 @@ func createWorld(def: view WorldDef) ret PhysicsWorld {
     islandIdPool: createIdPool()
     islands: List.create(Island, cap: 16)
     shapeIdPool: createIdPool()
-    shapes: List.create(Shape, cap: 16)
+    shapes: List.create(PhysicsShape, cap: 16)
     fatAabbs: List.create(Aabb, cap: 16)
     hulls: List.create(Hull, cap: 4)
     meshes: List.create(Mesh, cap: 0)
@@ -291,7 +291,7 @@ func isShapeIdValid(world: view PhysicsWorld, shapeId: view ShapeId) ret Bool {
   if index < 0 or index >= world.shapes.length {
     ret false
   }
-  let shape: Shape = world.shapes.copyAtDefault(index: index)
+  let shape: PhysicsShape = world.shapes.copyAtDefault(index: index)
   ret shape.id is not -1 and shape.generation is shapeId.generation
 }
 

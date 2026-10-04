@@ -18,7 +18,7 @@ func updateShapeAabbs(
   proxyBodyType: view Int
 ) {
   let speculative: Float = speculativeDistance(lengthUnitsPerMeter: world.lengthUnitsPerMeter)
-  var shape: Shape = world.shapes.copyAtDefault(index: shapeId)
+  var shape: PhysicsShape = world.shapes.copyAtDefault(index: shapeId)
   let box: Aabb = computeFatShapeAabb(
     shape: shape
     hulls: world.hulls
@@ -48,7 +48,7 @@ func createShapeProxy(
     transform: transform
     proxyBodyType: proxyBodyType
   )
-  let shape: Shape = world.shapes.copyAtDefault(index: shapeId)
+  let shape: PhysicsShape = world.shapes.copyAtDefault(index: shapeId)
   let proxyKey: Int = createBroadPhaseProxy(
     broadPhase: world.broadPhase
     bodyType: proxyBodyType
@@ -57,7 +57,7 @@ func createShapeProxy(
     shapeIndex: shapeId
     forcePairCreation: forcePairCreation
   )
-  if let stored: mod Shape => world.shapes.modAt(index: shapeId) {
+  if let stored: mod PhysicsShape => world.shapes.modAt(index: shapeId) {
     stored.proxyKey = proxyKey
   }
 }
@@ -67,7 +67,7 @@ func destroyShapeProxy(world: mod PhysicsWorld, shapeId: view Int) {
   let proxyKey: Int = world.shapes.copyAtDefault(index: shapeId).proxyKey
   if proxyKey is not -1 {
     destroyBroadPhaseProxy(broadPhase: world.broadPhase, proxyKey: proxyKey)
-    if let shape: mod Shape => world.shapes.modAt(index: shapeId) {
+    if let shape: mod PhysicsShape => world.shapes.modAt(index: shapeId) {
       shape.proxyKey = -1
     }
   }

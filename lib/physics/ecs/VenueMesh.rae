@@ -1,0 +1,27 @@
+# A static venue collider from a render mesh (docs/physics-design.md §5.5):
+# lib/Mesh3d's MeshData handed to PhysicsSpawn.addVenueTriangles. Its own
+# module because the physics geometry has a MeshData of its own.
+open Vec3
+open Mesh3d
+open physics/math/TransformMath
+open physics/dynamics/WorldTypes
+open physics/ecs/Physics
+open physics/ecs/PhysicsSpawn
+
+# The render mesh `mesh` placed by `transform` as a static venue collider;
+# none if it has no triangles.
+func addVenueMesh(
+  physics: mod Physics
+  mesh: view MeshData
+  transform: view Transform
+  def: view ShapeDef
+) ret opt ShapeId {
+  ret addVenueTriangles(
+    physics: physics
+    verts: mesh.verts
+    vertCount: mesh.vertCount
+    renderIndices: mesh.indices
+    transform: transform
+    def: def
+  )
+}

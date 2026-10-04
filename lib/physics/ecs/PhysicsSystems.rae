@@ -1,0 +1,271 @@
+# The physics systems of an ECS world, in the order of one fixed step
+# (docs/physics-design.md §5.3): the character system moves the characters,
+# the push system hands the game's pose changes to the bodies, the step
+# system steps the world, the pull system writes back the poses of the
+# bodies that moved (sleeping bodies cost nothing), and the event system
+# turns the step's contact, hit and sensor events into entity events. Each
+# takes only the tables it touches. physicsFixedStep runs them in that
+# order; physicsFrame runs the fixed steps a frame's time pays for.
+open Vec2
+open Vec3
+open Quat
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Event
+open ecs/Transform
+open physics/math/TransformMath
+open physics/dynamics/WorldTypes
+open physics/dynamics/World
+open physics/dynamics/WorldBodies
+open physics/dynamics/WorldStep
+open physics/dynamics/Events
+open physics/character/CharacterMover
+open physics/ecs/Physics
+open physics/ecs/PhysicsComponents
+
+# Set the position of `entityId`'s Transform3D (giving it one if missing).
+func setEntityPosition(
+  transforms: mod ComponentTable(Transform3D)
+  entityId: view EntityId
+  position: view Vec3
+) {
+  if componentHas(this: transforms, entityId: entityId) {
+    let transform: mod Transform3D => componentMod(this: transforms, entityId: entityId)
+    transform.position = position
+  } else {
+    var transform: Transform3D = createTransform3D()
+    transform.position = position
+    componentSet(this: transforms, entityId: entityId, data: transform)
+  }
+}
+
+# One character's fixed step: the jump request, then the mover; its new
+# position.
+func moveCharacter(
+  character: mod CharacterBody
+  physics: mod Physics
+  ignoreShapeIds: view List(ShapeId)
+) ret Vec3 {
+  if character.jump {
+    jumpCharacter(mover: character.mover)
+    character.jump = false
+  }
+  solveMove(
+    mover: character.mover
+    world: physics.world
+    timeStep: physics.fixedStep
+    forward: character.forward
+    right: character.right
+    throttle: character.throttle
+    clipVelocity: character.clipVelocity
+    ignoreShapeIds: ignoreShapeIds
+  )
+  character.grounded = character.mover.onGround
+  character.groundNormal = character.mover.groundNormal
+  ret character.mover.transform.position
+}
+
+# Move every character one fixed step (before the world steps, so the
+# bodies the step moves see the characters' new places): the jump request,
+# then CharacterMover's solveMove; the character's Transform3D takes the
+# mover's position.
+func characterSystem(
+  physics: mod Physics
+  characters: mod ComponentTable(CharacterBody)
+  transforms: mod ComponentTable(Transform3D)
+) {
+  let noIgnoredShapes: List(ShapeId) = List.create(ShapeId, cap: 0)
+  loop var i: Int = 0, i < componentCount(this: characters), ++i {
+    let entityId: EntityId = componentEntityAt(this: characters, i: i)
+    let position: Vec3 = moveCharacter(
+      character: componentMod(this: characters, entityId: entityId)
+      physics: physics
+      ignoreShapeIds: noIgnoredShapes
+    )
+    setEntityPosition(transforms: transforms, entityId: entityId, position: position)
+  }
+}
+
+# Hand the poses game code wrote since the last sync to the bodies: a
+# kinematic body is driven to its new pose over the fixed step (its
+# velocity set so it arrives, Box3D's target transform), any other body is
+# moved there. Untouched entities cost one stamp compare.
+func physicsPushSystem(
+  physics: mod Physics
+  rigidBodies: mod ComponentTable(RigidBody)
+  transforms: view ComponentTable(Transform3D)
+) {
+  loop var i: Int = 0, i < componentCount(this: rigidBodies), ++i {
+    let entityId: EntityId = componentEntityAt(this: rigidBodies, i: i)
+    let stamp: Int = componentModStamp(this: transforms, entityId: entityId)
+    if stamp is 0 {
+      continue
+    }
+    let rigidBody: RigidBody = componentCopyAtDefault(this: rigidBodies, i: i)
+    if stamp is rigidBody.syncedTransformStamp {
+      continue
+    }
+    let transform: view Transform3D => componentView(this: transforms, entityId: entityId)
+    if rigidBody.bodyType is BodyType.kinematicBody {
+      setBodyTargetTransform(
+        world: physics.world
+        bodyId: rigidBody.bodyId
+        target: Transform { position: transform.position, rotation: transform.rotation }
+        timeStep: physics.fixedStep
+        wake: true
+      )
+    } else {
+      setBodyTransform(
+        world: physics.world
+        bodyId: rigidBody.bodyId
+        position: transform.position
+        rotation: transform.rotation
+      )
+    }
+    let synced: mod RigidBody => componentMod(this: rigidBodies, entityId: entityId)
+    synced.syncedTransformStamp = stamp
+  }
+}
+
+# Step the world one fixed step.
+func physicsStepSystem(physics: mod Physics) {
+  stepWorld(world: physics.world, timeStep: physics.fixedStep, subStepCount: physics.subSteps)
+  physics.stepCount = physics.stepCount + 1
+}
+
+# Set the position and rotation of `entityId`'s Transform3D (its scale kept).
+func setEntityPose(
+  transforms: mod ComponentTable(Transform3D)
+  entityId: view EntityId
+  pose: view Transform
+) {
+  let transform: mod Transform3D => componentMod(this: transforms, entityId: entityId)
+  transform.position = pose.position
+  transform.rotation = pose.rotation
+}
+
+# Write back the poses of the bodies the step moved (Box3D's body move
+# events: a sleeping body is not reported, so it costs nothing), and record
+# the written stamp so the push system does not hand the pose back.
+func physicsPullSystem(
+  physics: view Physics
+  rigidBodies: mod ComponentTable(RigidBody)
+  transforms: mod ComponentTable(Transform3D)
+) {
+  loop let event: view BodyMoveEvent in physics.world.bodyMoveEvents {
+    let entityId: EntityId = entityOfBody(physics: physics, bodyId: event.bodyId)
+    if isNone(this: entityId) or componentHas(this: transforms, entityId: entityId) is false {
+      continue
+    }
+    setEntityPose(transforms: transforms, entityId: entityId, pose: event.transform)
+    if componentHas(this: rigidBodies, entityId: entityId) {
+      let stamp: Int = componentModStamp(this: transforms, entityId: entityId)
+      let rigidBody: mod RigidBody => componentMod(this: rigidBodies, entityId: entityId)
+      rigidBody.syncedTransformStamp = stamp
+    }
+  }
+}
+
+# Turn the step's contact begin/end, hit and sensor begin/end events into
+# entity events on the resource's queues (the venue's shapes report
+# noEntity). Physics never calls into the game: systems later in the
+# schedule read the queues.
+func physicsEventSystem(physics: mod Physics) {
+  let contacts: ContactEvents = getContactEvents(world: physics.world)
+  loop let event: view ContactBeginTouchEvent in contacts.beginEvents {
+    eventSend(
+      this: physics.contactBegan
+      value: PhysicsContactEvent {
+        entityIdA: entityOfShape(physics: physics, shapeId: event.shapeIdA)
+        entityIdB: entityOfShape(physics: physics, shapeId: event.shapeIdB)
+        shapeIdA: event.shapeIdA
+        shapeIdB: event.shapeIdB
+      }
+    )
+  }
+  loop let event: view ContactEndTouchEvent in contacts.endEvents {
+    eventSend(
+      this: physics.contactEnded
+      value: PhysicsContactEvent {
+        entityIdA: entityOfShape(physics: physics, shapeId: event.shapeIdA)
+        entityIdB: entityOfShape(physics: physics, shapeId: event.shapeIdB)
+        shapeIdA: event.shapeIdA
+        shapeIdB: event.shapeIdB
+      }
+    )
+  }
+  loop let event: view ContactHitEvent in contacts.hitEvents {
+    eventSend(
+      this: physics.hits
+      value: PhysicsHitEvent {
+        entityIdA: entityOfShape(physics: physics, shapeId: event.shapeIdA)
+        entityIdB: entityOfShape(physics: physics, shapeId: event.shapeIdB)
+        shapeIdA: event.shapeIdA
+        shapeIdB: event.shapeIdB
+        point: event.point
+        normal: event.normal
+        approachSpeed: event.approachSpeed
+        userMaterialIdA: event.userMaterialIdA
+        userMaterialIdB: event.userMaterialIdB
+      }
+    )
+  }
+  let sensors: SensorEvents = getSensorEvents(world: physics.world)
+  loop let event: view SensorBeginTouchEvent in sensors.beginEvents {
+    eventSend(
+      this: physics.sensorBegan
+      value: PhysicsSensorEvent {
+        sensorEntityId: entityOfShape(physics: physics, shapeId: event.sensorShapeId)
+        visitorEntityId: entityOfShape(physics: physics, shapeId: event.visitorShapeId)
+        sensorShapeId: event.sensorShapeId
+        visitorShapeId: event.visitorShapeId
+      }
+    )
+  }
+  loop let event: view SensorEndTouchEvent in sensors.endEvents {
+    eventSend(
+      this: physics.sensorEnded
+      value: PhysicsSensorEvent {
+        sensorEntityId: entityOfShape(physics: physics, shapeId: event.sensorShapeId)
+        visitorEntityId: entityOfShape(physics: physics, shapeId: event.visitorShapeId)
+        sensorShapeId: event.sensorShapeId
+        visitorShapeId: event.visitorShapeId
+      }
+    )
+  }
+}
+
+# One fixed step: character, push, step, pull, events.
+func physicsFixedStep(
+  physics: mod Physics
+  rigidBodies: mod ComponentTable(RigidBody)
+  characters: mod ComponentTable(CharacterBody)
+  transforms: mod ComponentTable(Transform3D)
+) {
+  characterSystem(physics: physics, characters: characters, transforms: transforms)
+  physicsPushSystem(physics: physics, rigidBodies: rigidBodies, transforms: transforms)
+  physicsStepSystem(physics: physics)
+  physicsPullSystem(physics: physics, rigidBodies: rigidBodies, transforms: transforms)
+  physicsEventSystem(physics: physics)
+}
+
+# A frame: the fixed steps `frameTime` pays for (capped), each a
+# physicsFixedStep. The number of steps taken.
+func physicsFrame(
+  physics: mod Physics
+  rigidBodies: mod ComponentTable(RigidBody)
+  characters: mod ComponentTable(CharacterBody)
+  transforms: mod ComponentTable(Transform3D)
+  frameTime: view Float
+) ret Int {
+  let steps: Int = consumeFixedSteps(physics: physics, frameTime: frameTime)
+  loop var i: Int = 0, i < steps, ++i {
+    physicsFixedStep(
+      physics: physics
+      rigidBodies: rigidBodies
+      characters: characters
+      transforms: transforms
+    )
+  }
+  ret steps
+}

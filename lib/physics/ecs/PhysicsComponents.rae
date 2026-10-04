@@ -1,0 +1,55 @@
+# The physics components of an ECS world (docs/physics-design.md §5.2). The
+# pose of an entity lives in its Transform3D (lib/ecs/Transform), the single
+# source of truth: the push system hands what game code wrote to the body,
+# the pull system writes back what the step moved.
+open Vec2
+open Vec3
+open ecs/Entity
+open physics/dynamics/WorldTypes
+open physics/character/CharacterMover
+
+# A simulated body: its handle, its kind, and the Transform3D stamp the
+# physics systems last synchronised (a newer stamp means game code moved the
+# entity, and the push system moves the body to match).
+type RigidBody {
+  bodyId: BodyId
+  bodyType: BodyType
+  syncedTransformStamp: Int
+}
+
+# The shapes on an entity's body (a body may carry several).
+type Collider {
+  shapeIds: List(ShapeId)
+}
+
+# A character: the mover of Box3D's sample (geometric, not a rigid body),
+# the input the game's movement system writes each fixed step, and what the
+# character system reports back.
+type CharacterBody {
+  mover: CharacterMover
+  # The input: the throttle (x forward, y right, each -1 to 1) along the
+  # given forward and right directions, a jump request (consumed by the
+  # system), and whether to clip the velocity against the planes
+  throttle: Vec2
+  forward: Vec3
+  right: Vec3
+  jump: Bool
+  clipVelocity: Bool
+  # The output: on the ground, and the ground's normal
+  grounded: Bool
+  groundNormal: Vec3
+}
+
+# A Z-up character standing at `position` (its capsule's center), facing +x.
+func createCharacterBody(position: view Vec3) ret CharacterBody {
+  ret CharacterBody {
+    mover: createCharacterMoverWithUp(position: position, up: UpAxis.zUp)
+    throttle: Vec2 { x: 0.0, y: 0.0 }
+    forward: Vec3 { x: 1.0, y: 0.0, z: 0.0 }
+    right: Vec3 { x: 0.0, y: -1.0, z: 0.0 }
+    jump: false
+    clipVelocity: true
+    grounded: false
+    groundNormal: Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+  }
+}

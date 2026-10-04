@@ -345,7 +345,7 @@ func readCompoundDef(reader: mod Reader) ret CompoundDef {
     loop var m: Int = 0, m < materialCount, ++m {
       materials.add(value: readMaterial(reader: reader))
     }
-    if let mesh: MeshData = createBoxMesh(
+    if let mesh: PhysicsMeshData = createBoxMesh(
       center: center
       extent: extent
       identifyEdges: true
@@ -377,7 +377,7 @@ func readCompoundDef(reader: mod Reader) ret CompoundDef {
 }
 
 # A mesh from its spec: 0 = a grid, 1 = a box mesh, 2 = a platform.
-func readMeshSpec(reader: mod Reader) ret opt MeshData {
+func readMeshSpec(reader: mod Reader) ret opt PhysicsMeshData {
   let kind: Int = readInt(reader: reader)
   if kind is 0 {
     let xCount: Int = readInt(reader: reader)
@@ -584,7 +584,7 @@ func evaluate(
   } else if name is "shape.mesh" {
     let bodyId: BodyId = readBodyId(reader: reader)
     let def: ShapeDef = readShapeDef(reader: reader)
-    if let mesh: MeshData = readMeshSpec(reader: reader) {
+    if let mesh: PhysicsMeshData = readMeshSpec(reader: reader) {
       let scale: Vec3 = readVec(reader: reader)
       putShapeId(
         out: out

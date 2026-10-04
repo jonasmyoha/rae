@@ -39,9 +39,9 @@ func isConvexShape(shapeType: view ShapeType) ret Bool {
 # b3OverlapSensor: does the visitor shape overlap the sensor shape?
 func overlapSensor(
   world: view PhysicsWorld
-  sensorShape: view Shape
+  sensorShape: view PhysicsShape
   sensorTransform: view Transform
-  visitorShape: view Shape
+  visitorShape: view PhysicsShape
   visitorTransform: view Transform
 ) ret Bool {
   let proxy: ShapeProxy = makeShapeProxy(shape: visitorShape, hulls: world.hulls)
@@ -132,14 +132,14 @@ func overlapSensor(
 # sensor.
 func sensorVisits(
   world: view PhysicsWorld
-  sensorShape: view Shape
+  sensorShape: view PhysicsShape
   sensorTransform: view Transform
   shapeId: view Int
 ) ret Bool {
   if shapeId is sensorShape.id {
     ret false
   }
-  let otherShape: Shape = world.shapes.copyAtDefault(index: shapeId)
+  let otherShape: PhysicsShape = world.shapes.copyAtDefault(index: shapeId)
   # Visitors must be convex and want sensor events
   if isConvexShape(shapeType: otherShape.shapeType) is false {
     ret false
@@ -191,7 +191,7 @@ func sensorTask(
 ) {
   loop var sensorIndex: Int = startIndex, sensorIndex < endIndex, ++sensorIndex {
     var sensor: Sensor = world.sensors.copyAtDefault(index: sensorIndex)
-    let sensorShape: Shape = world.shapes.copyAtDefault(index: sensor.shapeId)
+    let sensorShape: PhysicsShape = world.shapes.copyAtDefault(index: sensor.shapeId)
 
     # Swap the overlap lists; the new one starts with the continuous hits
     let previous: List(Visitor) = sensor.overlaps2
@@ -395,7 +395,7 @@ func overlapSensors(world: mod PhysicsWorld) {
 # b3DestroySensor: end events for its overlaps, then remove it (the last
 # sensor fills its slot).
 func destroySensor(world: mod PhysicsWorld, shapeId: view Int) {
-  let sensorShape: Shape = world.shapes.copyAtDefault(index: shapeId)
+  let sensorShape: PhysicsShape = world.shapes.copyAtDefault(index: shapeId)
   let sensorIndex: Int = sensorShape.sensorIndex
   let sensor: Sensor = world.sensors.copyAtDefault(index: sensorIndex)
   let sensorId: ShapeId = {
@@ -417,7 +417,7 @@ func destroySensor(world: mod PhysicsWorld, shapeId: view Int) {
   if sensorIndex is not lastIndex {
     let moved: Sensor = world.sensors.copyAtDefault(index: lastIndex)
     world.sensors.set(index: sensorIndex, value: moved)
-    if let movedShape: mod Shape => world.shapes.modAt(index: moved.shapeId) {
+    if let movedShape: mod PhysicsShape => world.shapes.modAt(index: moved.shapeId) {
       movedShape.sensorIndex = sensorIndex
     }
   }

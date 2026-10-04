@@ -14,7 +14,7 @@ open physics/geometry/Mesh
 # A mesh with a scale (b3Mesh). The scale may be non-uniform and have
 # negative components, but no component may be very small.
 type Mesh {
-  data: MeshData
+  data: PhysicsMeshData
   scale: Vec3
 }
 
@@ -41,7 +41,7 @@ type MeshTriangleData {
 
 # b3GetMeshTriangle
 func getMeshTriangle(mesh: view Mesh, triangleIndex: view Int) ret MeshTriangleData {
-  let data: view MeshData => mesh.data
+  let data: view PhysicsMeshData => mesh.data
   let triangle: MeshTriangle = data.triangles.copyAtDefault(index: triangleIndex)
   let triangleFlags: Int = data.flags.copyAtDefault(index: triangleIndex)
   let meshScale: Vec3 = mesh.scale
@@ -253,7 +253,7 @@ func queryMesh(mesh: view Mesh, bounds: view Aabb, capacity: view Int) ret List(
   let boundsCenter: Vec3 = multiply(left: half, right: add(left: boundsMin, right: boundsMax))
   let boundsExtent: Vec3 = subtract(left: boundsMax, right: boundsCenter)
 
-  let data: view MeshData => mesh.data
+  let data: view PhysicsMeshData => mesh.data
   let stack: List(Int) = List.create(Int, cap: meshStackSize)
   var nodeIndex: Int = 0
   loop true {
@@ -308,7 +308,11 @@ func queryMesh(mesh: view Mesh, bounds: view Aabb, capacity: view Int) ret List(
 }
 
 # b3ComputeMeshAABB
-func computeMeshAabb(data: view MeshData, transform: view Transform, scale: view Vec3) ret Aabb {
+func computeMeshAabb(
+  data: view PhysicsMeshData
+  transform: view Transform
+  scale: view Vec3
+) ret Aabb {
   let scaledLower: Vec3 = multiply(left: scale, right: data.bounds.lowerBound)
   let scaledUpper: Vec3 = multiply(left: scale, right: data.bounds.upperBound)
   let bounds: Aabb = {
@@ -318,7 +322,7 @@ func computeMeshAabb(data: view MeshData, transform: view Transform, scale: view
   ret transformAabb(transform: transform, box: bounds)
 }
 
-func nodeHeight(data: view MeshData, nodeIndex: view Int) ret Int {
+func nodeHeight(data: view PhysicsMeshData, nodeIndex: view Int) ret Int {
   let node: MeshNode = data.nodes.copyAtDefault(index: nodeIndex)
   if isLeafNode(node: node) {
     ret 0
@@ -329,7 +333,7 @@ func nodeHeight(data: view MeshData, nodeIndex: view Int) ret Int {
 }
 
 # b3GetHeight: the BVH height, recomputed from the nodes.
-func meshHeight(data: view MeshData) ret Int {
+func meshHeight(data: view PhysicsMeshData) ret Int {
   if data.nodes.length is 0 {
     ret 0
   }
@@ -358,7 +362,7 @@ func createGridMesh(
   materialCount: view Int
   identifyEdges: view Bool
   lengthUnitsPerMeter: view Float
-) ret opt MeshData {
+) ret opt PhysicsMeshData {
   var def: MeshDef = emptyMeshDef()
   let xWidth: Float = cellWidth * xCount.toFloat()
   let zWidth: Float = cellWidth * zCount.toFloat()
@@ -465,7 +469,7 @@ func createBoxMesh(
   extent: view Vec3
   identifyEdges: view Bool
   lengthUnitsPerMeter: view Float
-) ret opt MeshData {
+) ret opt PhysicsMeshData {
   var def: MeshDef = emptyMeshDef()
   def.vertices = boxCornerVertices(center: center, extent: extent)
   def.indices = outwardBoxIndices()
@@ -478,7 +482,7 @@ func createHollowBoxMesh(
   center: view Vec3
   extent: view Vec3
   lengthUnitsPerMeter: view Float
-) ret opt MeshData {
+) ret opt PhysicsMeshData {
   var def: MeshDef = emptyMeshDef()
   def.vertices = boxCornerVertices(center: center, extent: extent)
   let indices: List(Int) = {
@@ -532,7 +536,7 @@ func createPlatformMesh(
   topWidth: view Float
   bottomWidth: view Float
   lengthUnitsPerMeter: view Float
-) ret opt MeshData {
+) ret opt PhysicsMeshData {
   let hb: Float = 0.5 * bottomWidth
   let ht: Float = 0.5 * topWidth
   let hy: Float = 0.5 * height

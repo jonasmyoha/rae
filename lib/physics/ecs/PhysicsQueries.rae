@@ -1,0 +1,158 @@
+# The world queries of an ECS world, with entities (docs/physics-design.md
+# §5.4): thin wrappers over the port's world queries (dynamics/WorldQueries)
+# that answer with the entity of the shape hit (noEntity for the venue).
+# Read-only: callable from any system.
+open Vec3
+open ecs/Entity
+open physics/math/VectorMath
+open physics/math/AabbMath
+open physics/geometry/QueryTypes
+open physics/dynamics/WorldTypes
+open physics/dynamics/WorldQueries
+open physics/ecs/Physics
+
+# A query hit: the entity and shape, the point and normal, and the fraction
+# of the cast's translation.
+type PhysicsHit {
+  hit: Bool
+  entityId: EntityId
+  shapeId: ShapeId
+  point: Vec3
+  normal: Vec3
+  fraction: Float
+}
+
+func noPhysicsHit() ret PhysicsHit {
+  ret PhysicsHit {
+    hit: false
+    entityId: noEntity()
+    shapeId: ShapeId { index1: 0, world0: 0, generation: 0 }
+    point: zeroVector()
+    normal: zeroVector()
+    fraction: 1.0
+  }
+}
+
+# The closest shape along the ray from `origin` along `translation` (a ray
+# starting inside a shape ignores it).
+func raycastClosest(
+  physics: view Physics
+  origin: view Vec3
+  translation: view Vec3
+  filter: view QueryFilter
+) ret PhysicsHit {
+  let result: RayResult = castRayClosest(
+    world: physics.world
+    origin: origin
+    translation: translation
+    filter: filter
+  )
+  if result.hit is false {
+    ret noPhysicsHit()
+  }
+  ret PhysicsHit {
+    hit: true
+    entityId: entityOfShape(physics: physics, shapeId: result.shapeId)
+    shapeId: result.shapeId
+    point: result.point
+    normal: result.normal
+    fraction: result.fraction
+  }
+}
+
+# The first shape a sphere of `radius` at `origin` hits moving along
+# `translation`.
+func spherecastClosest(
+  physics: view Physics
+  origin: view Vec3
+  radius: view Float
+  translation: view Vec3
+  filter: view QueryFilter
+) ret PhysicsHit {
+  let points: List(Vec3) = List.create(Vec3, cap: 1)
+  points.add(value: zeroVector())
+  var castHit: CastHit = {
+    shapeId: ShapeId { index1: 0, world0: 0, generation: 0 }
+    point: zeroVector()
+    normal: zeroVector()
+    fraction: 0.0
+    userMaterialId: 0
+    triangleIndex: 0
+    childIndex: 0
+  }
+  if castShapeClosest(
+    world: physics.world
+    origin: origin
+    proxy: ShapeProxy { points: points, radius: radius }
+    translation: translation
+    filter: filter
+    hit: castHit
+  ) is false {
+    ret noPhysicsHit()
+  }
+  ret PhysicsHit {
+    hit: true
+    entityId: entityOfShape(physics: physics, shapeId: castHit.shapeId)
+    shapeId: castHit.shapeId
+    point: castHit.point
+    normal: castHit.normal
+    fraction: castHit.fraction
+  }
+}
+
+# The entities of `shapeIds`, each once, in the order first met.
+func shapeEntities(physics: view Physics, shapeIds: view List(ShapeId)) ret List(EntityId) {
+  let entityIds: List(EntityId) = List.create(EntityId, cap: shapeIds.length)
+  loop let shapeId: view ShapeId in shapeIds {
+    let entityId: EntityId = entityOfShape(physics: physics, shapeId: shapeId)
+    if isNone(this: entityId) {
+      continue
+    }
+    var seen: Bool = false
+    loop let known: view EntityId in entityIds {
+      if known is entityId {
+        seen = true
+      }
+    }
+    if seen is false {
+      entityIds.add(value: entityId)
+    }
+  }
+  ret entityIds
+}
+
+# The entities whose shapes' boxes overlap `box`.
+func overlapAabbEntities(
+  physics: view Physics
+  box: view Aabb
+  filter: view QueryFilter
+) ret List(EntityId) {
+  let shapeIds: List(ShapeId) = List.create(ShapeId, cap: 8)
+  overlapAabb(
+    world: physics.world
+    box: box
+    filter: filter
+    shapeIds: shapeIds
+  )
+  ret shapeEntities(physics: physics, shapeIds: shapeIds)
+}
+
+# The entities whose shapes overlap the sphere at `center` of `radius`.
+func overlapSphereEntities(
+  physics: view Physics
+  center: view Vec3
+  radius: view Float
+  filter: view QueryFilter
+) ret List(EntityId) {
+  let points: List(Vec3) = List.create(Vec3, cap: 1)
+  points.add(value: zeroVector())
+  let shapeIds: List(ShapeId) = List.create(ShapeId, cap: 8)
+  overlapShapeProxy(
+    world: physics.world
+    origin: center
+    proxy: ShapeProxy { points: points, radius: radius }
+    filter: filter
+    shapeIds: shapeIds
+  )
+  ret shapeEntities(physics: physics, shapeIds: shapeIds)
+}

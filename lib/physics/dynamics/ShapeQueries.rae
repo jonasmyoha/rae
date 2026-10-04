@@ -30,7 +30,7 @@ open physics/dynamics/World
 # `shape` placed by `transform`.
 func rayCastShape(
   world: view PhysicsWorld
-  shape: view Shape
+  shape: view PhysicsShape
   transform: view Transform
   input: view RayCastInput
 ) ret CastOutput {
@@ -91,7 +91,7 @@ func rayCastShape(
 # against `shape` placed by `transform`.
 func shapeCastShape(
   world: view PhysicsWorld
-  shape: view Shape
+  shape: view PhysicsShape
   transform: view Transform
   input: view ShapeCastInput
 ) ret CastOutput {
@@ -175,7 +175,7 @@ func shapeCastShape(
 # placed by `transform`?
 func overlapShape(
   world: view PhysicsWorld
-  shape: view Shape
+  shape: view PhysicsShape
   transform: view Transform
   proxy: view ShapeProxy
 ) ret Bool {
@@ -251,7 +251,7 @@ func overlapShape(
 # the 64 of Box3D's buffer).
 func collideMoverShape(
   world: view PhysicsWorld
-  shape: view Shape
+  shape: view PhysicsShape
   transform: view Transform
   mover: view Capsule
 ) ret List(PlaneResult) {
@@ -341,7 +341,7 @@ func collideMoverShape(
 
 # The user material id of material `materialIndex` of `shape`
 # (b3GetShapeMaterials: a compound's own table, else the shape's one).
-func shapeUserMaterialId(shape: view Shape, materialIndex: view Int) ret UInt64 {
+func shapeUserMaterialId(shape: view PhysicsShape, materialIndex: view Int) ret UInt64 {
   if shape.materials.length > 0 {
     ret shape.materials.copyAtDefault(index: materialIndex).userMaterialId
   }
