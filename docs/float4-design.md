@@ -147,8 +147,9 @@ and a set of functions, like `List`.
   struct of four floats and the scalar definitions — the lib's `FloatWide`
   semantics, which is also the reference every other lowering must match.
 - Each operation is a `static inline` function or macro in a runtime header
-  the generated C includes (as `c/float4_prototype.h` does in the
-  prototype), never a call into the separately compiled runtime.
+  the generated C includes (`compiler/runtime/runtime_float4.h`; the
+  prototype used `c/float4_prototype.h`, now removed), never a call into the
+  separately compiled runtime.
 - Lane reads (`v.y`) lower to a lane extract; the typed literal to a lane
   set; `+ - * /` to the vector instructions.
 
@@ -166,11 +167,45 @@ Every lowering produces the scalar definition's bits:
   definition keeps `-0`.
 - No approximate reciprocal or reciprocal square root.
 
-The prototype follows these rules (`benchmarks/float4_solver/c/
-float4_prototype.h`) and is bit-exact against the scalar path and against
-Box3D's own scalar and NEON builds (§5).
+The prototype followed these rules and was bit-exact against the scalar
+path and against Box3D's own scalar and NEON builds (§5);
+`runtime_float4.h` follows them too (§0.1).
 
-## 5. The prototype and its numbers
+## 5. The numbers
+
+### 5.1 lib/Float4 under FloatWide (2026-10-04)
+
+`lib/physics/dynamics/FloatWide.rae` is now a thin layer over lib/Float4
+(`alias FloatWide = Float4`; its masks are Mask4), so the solver runs on
+NEON / SSE2 with no change of its own, and fixtures 948-959 stay bit-exact
+on the SIMD and on the scalar lowering. `run.sh` builds
+`benchmarks/float4_solver/rae/Main.rae` from the lib as it is, twice: with
+the SIMD lowering (`rae_neon`) and forced onto the scalar definitions
+(`rae_scalar`, -DRAE_FLOAT4_SCALAR). The shadow copy of the solver modules
+and the prototype header are gone.
+
+Apple M1 Max, best of 5, load average 2.8-3.1 (below the script's
+threshold), every checksum identical:
+
+| build | release (inline threshold 400) | clang's default (225) |
+|---|---|---|
+| c_scalar | 509.8 ms | 523.8 ms |
+| c_simd (NEON) | 316.8 ms | 325.8 ms |
+| rae_scalar | 515.2 ms | 589.9 ms |
+| rae_neon | 368.0 ms | 449.2 ms |
+
+| ratio | release | clang's default |
+|---|---|---|
+| C: scalar / SIMD | 1.61x | 1.61x |
+| rae_scalar / c_scalar | 1.01x | 1.13x |
+| **rae_scalar / rae_neon** | **1.40x** | **1.31x** |
+| rae_neon / c_simd | 1.16x | 1.38x |
+
+So the lib reaches the prototype's numbers (§5.2): Float4 is worth 1.31x on
+its own and 1.40x with the release inline threshold (§6.3), and the Rae
+solver is at C speed in scalar and within 1.16x of Box3D's NEON build.
+
+### 5.2 The prototype (before lib/Float4)
 
 `benchmarks/float4_solver/run.sh` runs the wide convex contact kernels (warm
 start, push, relax; 8 192 wide constraints = 32 768 contacts over 16 384
@@ -180,7 +215,7 @@ bodies; 30 steps of 4 sub-steps) five ways on identical synthetic data:
   cache, `BOX3D_DISABLE_SIMD` and NEON;
 - `rae_scalar` — `lib/physics/dynamics/ContactSolverWideSolve` as it is;
 - `rae_float4` — the same solver modules over a copy of `FloatWide` whose
-  primitives are SIMD (`benchmarks/float4_solver/float4/`), lowered by the
+  primitives are SIMD (`benchmarks/float4_solver/float4/`, since removed), lowered by the
   prototype header — what the builtin would emit, written by hand;
 - `rae_float4_vector` — the same, with `FloatWide` retyped as a clang vector
   in the generated C.
@@ -289,6 +324,7 @@ checksum (FNV over all body velocities) — **bit-exact across all five**.
   fixtures checking each operation's bits against the scalar definitions.
 - Make `lib/physics/dynamics/FloatWide.rae` a thin layer over Float4 (the
   solver does not change), then re-run fixtures 948-959 and this benchmark.
+  Done 2026-10-04 (§5.1).
 - Independent of the surface, both done 2026-10-04: the release build's
   inline threshold is 400 (§6.3) and the exactly specified scalar math is
   inline (§6.4).

@@ -4,11 +4,10 @@
 #
 #   c_scalar     Box3D's contact_solver.c, BOX3D_DISABLE_SIMD
 #   c_simd       Box3D's contact_solver.c, NEON / SSE2
-#   rae_scalar   lib/physics/dynamics (FloatWide: a struct of four Floats)
-#   rae_float4   the same solver modules over the Float4 prototype: a copy
-#                of FloatWide whose primitives are SIMD (float4/, and
-#                c/float4_prototype.h force-included into the generated C)
-#   rae_float4_vector  the same, with FloatWide a vector type in the C
+#   rae_scalar   lib/physics/dynamics as it is, with lib/Float4 forced onto
+#                its scalar definitions (-DRAE_FLOAT4_SCALAR)
+#   rae_<simd>   the same program with lib/Float4's SIMD lowering
+#                (rae_neon on arm64, rae_sse2 on x86-64)
 #
 # Every build must print the same checksum (bit-exact with the scalar path).
 # Prints the best of five runs of each and the ratios. The Box3D builds come
@@ -48,42 +47,14 @@ for kind in scalar simd; do
     -I"$SRC/include" -I"$SRC/src" "$HERE/c/harness.c" "$lib" -lm -lpthread -o "$BUILD/c_$kind"
 done
 
-# The Rae builds
+# The Rae builds: one generated C file, compiled with and without the scalar
+# Float4 lowering.
 RAE="$RAE_ROOT/compiler/bin/rae"
 RAE_CFLAGS="-std=gnu11 -O2 -DNDEBUG -ffp-contract=off -mllvm -inline-threshold=400 ${RAE_BENCH_CFLAGS:-}"
 LINK="-framework Foundation -framework ImageIO -framework CoreGraphics"
-t 300 "$RAE" build --target compiled --profile release --emit-c --out "$BUILD/rae_scalar.c" "$HERE/rae/Main.rae" >/dev/null
-t 300 cc $RAE_CFLAGS "$BUILD/rae_scalar.c" "$BUILD/rae_runtime.c" -I"$BUILD" $LINK -o "$BUILD/rae_scalar"
-
-# The float4 project: the solver modules that name FloatWide, copied from
-# lib/ into a package of their own so they all compile against the
-# prototype's FloatWide and not the lib's.
-PROJECT="$BUILD/float4_project"
-rm -rf "$PROJECT"
-mkdir -p "$PROJECT/wide"
-for module in ContactConstraints StepContext ContactSolverWide ContactSolverWideSolve; do
-  cp "$RAE_ROOT/lib/physics/dynamics/$module.rae" "$PROJECT/wide/"
-done
-cp "$HERE/float4/physics/dynamics/FloatWide.rae" "$PROJECT/wide/"
-sed 's/ret "rae_scalar"/ret "rae_float4"/' "$HERE/rae/Main.rae" > "$PROJECT/Main.rae"
-# Inside the repository, module paths are relative to its root
-PACKAGE="${PROJECT#$RAE_ROOT/}/wide"
-for file in "$PROJECT"/wide/*.rae "$PROJECT/Main.rae"; do
-  sed -E "s#physics/dynamics/(FloatWide|ContactConstraints|StepContext|ContactSolverWide|ContactSolverWideSolve)\$#$PACKAGE/\\1#" \
-    "$file" > "$file.tmp" && mv "$file.tmp" "$file"
-done
-t 300 "$RAE" build --target compiled --profile release --emit-c --out "$BUILD/rae_float4.c" "$PROJECT/Main.rae" >/dev/null
-t 300 cc $RAE_CFLAGS -include "$HERE/c/float4_prototype.h" "$BUILD/rae_float4.c" "$BUILD/rae_runtime.c" \
-  -I"$BUILD" $LINK -o "$BUILD/rae_float4"
-
-# rae_float4_vector: the same generated C with FloatWide retyped as a clang
-# vector (ext_vector_type keeps the .x .y .z .w fields): what a builtin
-# Float4 would emit, so the values stay in vector registers between the
-# primitives instead of passing through a struct in memory.
-perl -0pe 's/typedef struct rae_FloatWide rae_FloatWide;/typedef float rae_FloatWide __attribute__((ext_vector_type(4)));/; s/struct rae_FloatWide \{\n  float x;\n  float y;\n  float z;\n  float w;\n\};\n//' \
-  "$BUILD/rae_float4.c" > "$BUILD/rae_float4_vector.c"
-t 300 cc $RAE_CFLAGS -include "$HERE/c/float4_prototype.h" "$BUILD/rae_float4_vector.c" "$BUILD/rae_runtime.c" \
-  -I"$BUILD" $LINK -o "$BUILD/rae_float4_vector"
+t 300 "$RAE" build --target compiled --profile release --emit-c --out "$BUILD/rae.c" "$HERE/rae/Main.rae" >/dev/null
+t 300 cc $RAE_CFLAGS -DRAE_FLOAT4_SCALAR "$BUILD/rae.c" "$BUILD/rae_runtime.c" -I"$BUILD" $LINK -o "$BUILD/rae_scalar"
+t 300 cc $RAE_CFLAGS "$BUILD/rae.c" "$BUILD/rae_runtime.c" -I"$BUILD" $LINK -o "$BUILD/rae_simd"
 
 best() {
   exe=$1; best_ns=""; line=""
@@ -97,17 +68,14 @@ best() {
 C_SCALAR=$(best "$BUILD/c_scalar")
 C_SIMD=$(best "$BUILD/c_simd")
 RAE_SCALAR=$(best "$BUILD/rae_scalar")
-RAE_FLOAT4=$(best "$BUILD/rae_float4")
-RAE_VECTOR=$(best "$BUILD/rae_float4_vector" | sed 's/^rae_float4 /rae_float4_vector /')
-for line in "$C_SCALAR" "$C_SIMD" "$RAE_SCALAR" "$RAE_FLOAT4" "$RAE_VECTOR"; do
-  echo "$line" | awk '{ printf "%-17s %8.1f ms  checksum %s\n", $1, $2 / 1e6, $3 }'
+RAE_SIMD=$(best "$BUILD/rae_simd")
+for line in "$C_SCALAR" "$C_SIMD" "$RAE_SCALAR" "$RAE_SIMD"; do
+  echo "$line" | awk '{ printf "%-12s %8.1f ms  checksum %s\n", $1, $2 / 1e6, $3 }'
 done
-echo "$C_SCALAR $C_SIMD $RAE_SCALAR $RAE_FLOAT4 $RAE_VECTOR" | awk '{
-  printf "checksums             %s\n", ($3 == $6 && $6 == $9 && $9 == $12 && $12 == $15) ? "match (bit-exact)" : "DIFFER";
-  printf "c_scalar / c_simd     %.2fx\n", $2 / $5;
-  printf "rae_scalar / c_scalar %.2fx\n", $8 / $2;
-  printf "rae_float4 / c_simd   %.2fx\n", $11 / $5;
-  printf "rae_scalar / rae_float4 %.2fx\n", $8 / $11;
-  printf "rae_float4_vector / c_simd %.2fx\n", $14 / $5;
-  printf "rae_scalar / rae_float4_vector %.2fx\n", $8 / $14;
+echo "$C_SCALAR $C_SIMD $RAE_SCALAR $RAE_SIMD" | awk '{
+  printf "checksums               %s\n", ($3 == $6 && $6 == $9 && $9 == $12) ? "match (bit-exact)" : "DIFFER";
+  printf "c_scalar / c_simd       %.2fx\n", $2 / $5;
+  printf "rae_scalar / c_scalar   %.2fx\n", $8 / $2;
+  printf "%s / c_simd      %.2fx\n", $10, $11 / $5;
+  printf "rae_scalar / %s  %.2fx\n", $10, $8 / $11;
 }'
