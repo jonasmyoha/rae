@@ -1,0 +1,396 @@
+# The body state changes an engine layer makes between steps (body.c and
+# solver_set.c at 9f998c8, Box3D's order kept): body type, enabling and
+# disabling, waking and sleeping, bullet, motion locks, sleep settings, and
+# the touching contacts of a body. The joint parts of b3Body_SetType,
+# b3Body_Disable, b3Body_Enable and b3TransferBody wait for joints (P6).
+open Vec3
+open physics/dynamics/WorldTypes
+open physics/dynamics/Body
+open physics/dynamics/Shape
+open physics/dynamics/SolverSet
+open physics/dynamics/Island
+open physics/dynamics/World
+open physics/dynamics/WorldIslands
+open physics/dynamics/Contact
+open physics/dynamics/WorldContacts
+open physics/dynamics/ShapeProxy
+open physics/dynamics/BodyMass
+open physics/dynamics/WorldBodies
+
+# A touching contact of a body or shape (b3ContactData).
+type ContactData {
+  contactId: ContactId
+  shapeIdA: ShapeId
+  shapeIdB: ShapeId
+  manifolds: List(Manifold)
+}
+
+# b3DestroyBodyContacts
+func destroyBodyContacts(world: mod PhysicsWorld, bodyId: view Int, wakeBodies: view Bool) {
+  var edgeKey: Int = bodyAt(world: world, bodyId: bodyId).headContactKey
+  loop edgeKey is not -1 {
+    let contactId: Int = edgeKey shr 1
+    let edgeIndex: Int = edgeKey bitand 1
+    if let contact: view Contact => world.contacts.viewAt(index: contactId) {
+      edgeKey = contactEdge(contact: contact, edgeIndex: edgeIndex).nextKey
+    }
+    destroyContact(world: world, contactId: contactId, wakeBodies: wakeBodies)
+  }
+}
+
+# b3TransferBody: move a body's sim (and state, to or from the awake set)
+# from its solver set to `targetIndex`. The body has no contacts.
+func transferBody(world: mod PhysicsWorld, targetIndex: view Int, bodyId: view Int) {
+  let body: Body = bodyAt(world: world, bodyId: bodyId)
+  let sourceIndex: Int = body.setIndex
+  if targetIndex is sourceIndex {
+    ret
+  }
+  let localIndex: Int = body.localIndex
+  var sim: BodySim = bodySimOf(world: world, body: body)
+
+  # Clear transient body flags
+  let bodyFlags: Int = body.flags bitand (4294967295 - bodyTransientFlags)
+  if let stored: mod Body => world.bodies.modAt(index: bodyId) {
+    stored.flags = bodyFlags
+  }
+  sim.flags = sim.flags bitand (4294967295 - (isFastFlag bitor bodyTransientFlags))
+
+  var targetLocalIndex: Int = 0
+  if let target: mod SolverSet => world.solverSets.modAt(index: targetIndex) {
+    targetLocalIndex = target.bodySims.length
+    target.bodySims.add(value: sim)
+  }
+
+  # Remove the sim from the set that owns it
+  var movedBodyId: Int = -1
+  if let source: mod SolverSet => world.solverSets.modAt(index: sourceIndex) {
+    let lastIndex: Int = source.bodySims.length - 1
+    if localIndex is not lastIndex {
+      let movedSim: BodySim = source.bodySims.copyAtDefault(index: lastIndex)
+      source.bodySims.set(index: localIndex, value: movedSim)
+      movedBodyId = movedSim.bodyId
+    }
+    source.bodySims.removeLast()
+  }
+  if movedBodyId is not -1 {
+    if let moved: mod Body => world.bodies.modAt(index: movedBodyId) {
+      moved.localIndex = localIndex
+    }
+    refreshBodyContactIndices(world: world, bodyId: movedBodyId)
+  }
+
+  if sourceIndex is awakeSet {
+    if let source: mod SolverSet => world.solverSets.modAt(index: sourceIndex) {
+      let lastState: Int = source.bodyStates.length - 1
+      if localIndex is not lastState {
+        source.bodyStates.set(
+          index: localIndex
+          value: source.bodyStates.copyAtDefault(index: lastState)
+        )
+      }
+      source.bodyStates.removeLast()
+    }
+  } else if targetIndex is awakeSet {
+    var state: BodyState = identityBodyState()
+    state.flags = bodyFlags
+    if let target: mod SolverSet => world.solverSets.modAt(index: targetIndex) {
+      target.bodyStates.add(value: state)
+    }
+  }
+
+  if let stored: mod Body => world.bodies.modAt(index: bodyId) {
+    stored.setIndex = targetIndex
+    stored.localIndex = targetLocalIndex
+  }
+}
+
+func setDynamicFlag(world: mod PhysicsWorld, bodyId: view Int, bodyType: view BodyType) {
+  if let body: mod Body => world.bodies.modAt(index: bodyId) {
+    body.bodyType = bodyType
+    if bodyType is BodyType.dynamicBody {
+      body.flags = body.flags bitor dynamicFlag
+    } else {
+      body.flags = body.flags bitand (4294967295 - dynamicFlag)
+    }
+  }
+}
+
+# b3Body_SetType
+func setBodyType(world: mod PhysicsWorld, bodyId: view BodyId, bodyType: view BodyType) {
+  let bodyIndex: Int = bodyIndexOf(bodyId: bodyId)
+  let originalType: BodyType = bodyAt(world: world, bodyId: bodyIndex).bodyType
+  if originalType is bodyType {
+    ret
+  }
+
+  # Disabled bodies don't change solver sets or islands when they change type
+  if bodyAt(world: world, bodyId: bodyIndex).setIndex is disabledSet {
+    setDynamicFlag(world: world, bodyId: bodyIndex, bodyType: bodyType)
+    syncBodyFlags(world: world, bodyId: bodyIndex)
+    updateBodyMassData(world: world, bodyId: bodyIndex)
+    ret
+  }
+
+  # Destroy all contacts but don't wake bodies (because we don't need to)
+  destroyBodyContacts(world: world, bodyId: bodyIndex, wakeBodies: false)
+
+  # Wake this body (does nothing if it is static); this wakes all the bodies
+  # in its sleeping solver set too
+  wakeBody(world: world, bodyId: bodyIndex)
+
+  # (Joints to the static set: P6.)
+
+  # Change the body type and transfer the body
+  setDynamicFlag(world: world, bodyId: bodyIndex, bodyType: bodyType)
+  var targetIndex: Int = awakeSet
+  if bodyType is BodyType.staticBody {
+    targetIndex = staticSet
+  }
+  transferBody(world: world, targetIndex: targetIndex, bodyId: bodyIndex)
+
+  # Island participation
+  if originalType is BodyType.staticBody {
+    createIslandForBody(world: world, setIndex: awakeSet, bodyId: bodyIndex)
+  } else if bodyType is BodyType.staticBody {
+    removeBodyFromIsland(world: world, bodyId: bodyIndex)
+  }
+
+  # (Joints back to their sets: P6.)
+
+  # Recreate the shape proxies in the broad-phase
+  let body: Body = bodyAt(world: world, bodyId: bodyIndex)
+  let transform: Transform = bodyTransformOf(world: world, body: body)
+  var shapeId: Int = body.headShapeId
+  loop shapeId is not -1 {
+    let nextShapeId: Int = world.shapes.copyAtDefault(index: shapeId).nextShapeId
+    destroyShapeProxy(world: world, shapeId: shapeId)
+    createShapeProxy(
+      world: world
+      shapeId: shapeId
+      proxyBodyType: bodyTypeCode(bodyType: bodyType)
+      transform: transform
+      forcePairCreation: true
+    )
+    shapeId = nextShapeId
+  }
+
+  # (Relink joints: P6.)
+
+  syncBodyFlags(world: world, bodyId: bodyIndex)
+
+  # The body type affects the mass
+  updateBodyMassData(world: world, bodyId: bodyIndex)
+}
+
+# b3Body_Disable
+func disableBody(world: mod PhysicsWorld, bodyId: view BodyId) {
+  let bodyIndex: Int = bodyIndexOf(bodyId: bodyId)
+  if bodyAt(world: world, bodyId: bodyIndex).setIndex is disabledSet {
+    ret
+  }
+
+  # Destroy contacts and wake the bodies touching this body, so nothing is
+  # left floating. Necessary even for static bodies.
+  destroyBodyContacts(world: world, bodyId: bodyIndex, wakeBodies: true)
+
+  # (Joints to the disabled set: P6.)
+
+  # Remove the shapes from the broad-phase
+  var shapeId: Int = bodyAt(world: world, bodyId: bodyIndex).headShapeId
+  loop shapeId is not -1 {
+    let nextShapeId: Int = world.shapes.copyAtDefault(index: shapeId).nextShapeId
+    destroyShapeProxy(world: world, shapeId: shapeId)
+    shapeId = nextShapeId
+  }
+
+  # Disabled bodies are not in an island; an island left empty is destroyed
+  removeBodyFromIsland(world: world, bodyId: bodyIndex)
+
+  transferBody(world: world, targetIndex: disabledSet, bodyId: bodyIndex)
+}
+
+# b3Body_Enable
+func enableBody(world: mod PhysicsWorld, bodyId: view BodyId) {
+  let bodyIndex: Int = bodyIndexOf(bodyId: bodyId)
+  let before: Body = bodyAt(world: world, bodyId: bodyIndex)
+  if before.setIndex is not disabledSet {
+    ret
+  }
+  var setIndex: Int = awakeSet
+  if before.bodyType is BodyType.staticBody {
+    setIndex = staticSet
+  }
+  transferBody(world: world, targetIndex: setIndex, bodyId: bodyIndex)
+
+  let body: Body = bodyAt(world: world, bodyId: bodyIndex)
+  let transform: Transform = bodyTransformOf(world: world, body: body)
+
+  # Add the shapes to the broad-phase
+  var shapeId: Int = body.headShapeId
+  loop shapeId is not -1 {
+    let nextShapeId: Int = world.shapes.copyAtDefault(index: shapeId).nextShapeId
+    createShapeProxy(
+      world: world
+      shapeId: shapeId
+      proxyBodyType: bodyTypeCode(bodyType: body.bodyType)
+      transform: transform
+      forcePairCreation: true
+    )
+    shapeId = nextShapeId
+  }
+
+  if setIndex is not staticSet {
+    createIslandForBody(world: world, setIndex: setIndex, bodyId: bodyIndex)
+  }
+
+  # (Joints back from the disabled set: P6.)
+}
+
+func isBodyEnabled(world: view PhysicsWorld, bodyId: view BodyId) ret Bool {
+  ret bodyAt(world: world, bodyId: bodyIndexOf(bodyId: bodyId)).setIndex is not disabledSet
+}
+
+# b3Body_SetAwake
+func setBodyAwake(world: mod PhysicsWorld, bodyId: view BodyId, awake: view Bool) {
+  let bodyIndex: Int = bodyIndexOf(bodyId: bodyId)
+  let body: Body = bodyAt(world: world, bodyId: bodyIndex)
+  if awake and body.setIndex >= firstSleepingSet {
+    wakeBody(world: world, bodyId: bodyIndex)
+  } else if awake is false and body.setIndex is awakeSet {
+    let removed: Int = world.islands.copyAtDefault(index: body.islandId).constraintRemoveCount
+    if removed > 0 {
+      # The island must split before it can sleep. This is expensive.
+      splitIsland(world: world, baseId: body.islandId)
+    }
+    trySleepIsland(world: world, islandId: body.islandId)
+  }
+}
+
+func isBodyAwake(world: view PhysicsWorld, bodyId: view BodyId) ret Bool {
+  ret bodyAt(world: world, bodyId: bodyIndexOf(bodyId: bodyId)).setIndex is awakeSet
+}
+
+# b3Body_SetSleepThreshold
+func setBodySleepThreshold(
+  world: mod PhysicsWorld
+  bodyId: view BodyId
+  sleepThreshold: view Float
+) {
+  if let body: mod Body => world.bodies.modAt(index: bodyIndexOf(bodyId: bodyId)) {
+    body.sleepThreshold = sleepThreshold
+  }
+}
+
+# b3Body_EnableSleep
+func enableBodySleep(world: mod PhysicsWorld, bodyId: view BodyId, enableSleep: view Bool) {
+  let bodyIndex: Int = bodyIndexOf(bodyId: bodyId)
+  let flags: Int = bodyAt(world: world, bodyId: bodyIndex).flags
+  let current: Bool = (flags bitand enableSleepFlag) is enableSleepFlag
+  if enableSleep is current {
+    ret
+  }
+  if let body: mod Body => world.bodies.modAt(index: bodyIndex) {
+    if enableSleep {
+      body.flags = body.flags bitor enableSleepFlag
+    } else {
+      body.flags = body.flags bitand (4294967295 - enableSleepFlag)
+    }
+  }
+  syncBodyFlags(world: world, bodyId: bodyIndex)
+  if enableSleep is false {
+    wakeBody(world: world, bodyId: bodyIndex)
+  }
+}
+
+# b3Body_SetBullet
+func setBodyBullet(world: mod PhysicsWorld, bodyId: view BodyId, flag: view Bool) {
+  let bodyIndex: Int = bodyIndexOf(bodyId: bodyId)
+  var newFlag: Int = 0
+  if flag {
+    newFlag = isBulletFlag
+  }
+  if (bodyAt(world: world, bodyId: bodyIndex).flags bitand isBulletFlag) is newFlag {
+    ret
+  }
+  if let body: mod Body => world.bodies.modAt(index: bodyIndex) {
+    body.flags = (body.flags bitand (4294967295 - isBulletFlag)) bitor newFlag
+  }
+  syncBodyFlags(world: world, bodyId: bodyIndex)
+}
+
+# b3Body_SetMotionLocks
+func setBodyMotionLocks(world: mod PhysicsWorld, bodyId: view BodyId, locks: view MotionLocks) {
+  let bodyIndex: Int = bodyIndexOf(bodyId: bodyId)
+  let newLocks: Int = lockFlagsOf(locks: locks)
+  let allLocks: Int = lockLinearX bitor lockLinearY bitor lockLinearZ bitor fixedRotationFlags
+  let flags: Int = bodyAt(world: world, bodyId: bodyIndex).flags
+  if (flags bitand allLocks) is newLocks {
+    ret
+  }
+  let fixedRotationBefore: Bool = (flags bitand fixedRotationFlags) is fixedRotationFlags
+  let fixedRotationAfter: Bool = (newLocks bitand fixedRotationFlags) is fixedRotationFlags
+  if let body: mod Body => world.bodies.modAt(index: bodyIndex) {
+    body.flags = (body.flags bitand (4294967295 - allLocks)) bitor newLocks
+  }
+  syncBodyFlags(world: world, bodyId: bodyIndex)
+
+  let body: Body = bodyAt(world: world, bodyId: bodyIndex)
+  if hasBodyState(body: body) {
+    var state: BodyState = bodyStateOf(world: world, body: body)
+    if locks.linearX {
+      state.linearVelocity.x = 0.0
+    }
+    if locks.linearY {
+      state.linearVelocity.y = 0.0
+    }
+    if locks.linearZ {
+      state.linearVelocity.z = 0.0
+    }
+    if locks.angularX {
+      state.angularVelocity.x = 0.0
+    }
+    if locks.angularY {
+      state.angularVelocity.y = 0.0
+    }
+    if locks.angularZ {
+      state.angularVelocity.z = 0.0
+    }
+    setBodyState(world: world, body: body, state: state)
+  }
+
+  if fixedRotationBefore is not fixedRotationAfter {
+    updateBodyMassData(world: world, bodyId: bodyIndex)
+  }
+}
+
+func contactDataOf(world: view PhysicsWorld, contact: view Contact) ret ContactData {
+  ret ContactData {
+    contactId: contactIdOf(world: world, contact: contact)
+    shapeIdA: makeShapeId(world: world, shapeIndex: contact.shapeIdA)
+    shapeIdB: makeShapeId(world: world, shapeIndex: contact.shapeIdB)
+    manifolds: contact.manifolds
+  }
+}
+
+# b3Body_GetContactData: the body's touching contacts, in its contact list
+# order, at most `capacity`.
+func getBodyContactData(
+  world: view PhysicsWorld
+  bodyId: view BodyId
+  capacity: view Int
+) ret List(ContactData) {
+  let result: List(ContactData) = List.create(ContactData, cap: 4)
+  var contactKey: Int = bodyAt(world: world, bodyId: bodyIndexOf(bodyId: bodyId)).headContactKey
+  loop contactKey is not -1 and result.length < capacity {
+    let contactId: Int = contactKey shr 1
+    let edgeIndex: Int = contactKey bitand 1
+    if let contact: view Contact => world.contacts.viewAt(index: contactId) {
+      if (contact.flags bitand contactTouchingFlag) is not 0 {
+        result.add(value: contactDataOf(world: world, contact: contact))
+      }
+      contactKey = contactEdge(contact: contact, edgeIndex: edgeIndex).nextKey
+    }
+  }
+  ret result
+}

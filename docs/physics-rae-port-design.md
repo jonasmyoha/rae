@@ -325,6 +325,14 @@ C added.
   world's contact, hit, sensor and body events (`WorldIslands`, `Sensors`,
   `SolverEvents`, `Events`, `WorldStep`; golden `events`, fixture 959). **P4
   is complete**; joints are P6.
+  **P4e landed 2026-10-04, bit-exact:** the API an engine layer calls
+  between steps: body type changes (b3TransferBody between solver sets,
+  contacts destroyed, proxies recreated, islands), disable/enable, set awake,
+  sleep enable and threshold, bullet, motion locks, body and shape contact
+  data, sensor overlaps, shape filter (b3ResetProxy), friction, restitution,
+  surface material, density, event flags, and every world setting
+  (`WorldBodyChanges`, `WorldShapeChanges`, `WorldSettings`; golden `api`,
+  fixture 969). The joint steps of these functions wait for P6.
 - **P5 — meshes, height fields, compounds** and their manifolds.
 - **P6 — joints**, one module per kind, each scene bit-exact.
 - **P7 — queries and the mover**: ray/shape casts, overlaps, the character
