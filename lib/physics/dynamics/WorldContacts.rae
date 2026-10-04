@@ -111,7 +111,7 @@ func createContact(
   contact.generation = generation + 1
   contact.setIndex = setIndex
   contact.colorIndex = -1
-  contact.localIndex = world.solverSets.copyAtDefault(index: setIndex).contactIndices.length
+  contact.localIndex = setContactCount(world: world, setIndex: setIndex)
   contact.islandId = -1
   contact.islandIndex = -1
   contact.shapeIdA = shapeIdA
@@ -387,7 +387,7 @@ func computeConvexManifold(
   } else {
     let old: Manifold = contact.manifolds.copyAtDefault(index: 0)
     loop var i: Int = 0, i < old.pointCount, ++i {
-      oldPoints.add(value: old.points.copyAtDefault(index: i))
+      oldPoints.add(value: old.points.copyAtFallback(index: i, fallback: zeroManifoldPoint()))
     }
   }
 

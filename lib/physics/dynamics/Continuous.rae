@@ -242,9 +242,7 @@ func refreshFatBox(
 # b3SolveContinuous: continuous collision of awake sim `simIndex` against
 # static shapes (a bullet also against kinematic and dynamic ones).
 func solveContinuous(world: mod PhysicsWorld, simIndex: view Int, dt: view Float) {
-  var fastSim: BodySim = world.solverSets.copyAtDefault(index: awakeSet).bodySims.copyAtDefault(
-    index: simIndex
-  )
+  var fastSim: BodySim = setBodySimAt(world: world, setIndex: awakeSet, localIndex: simIndex)
   # Re-center the sweep on the fast body (float precision far from the origin)
   let base: Vec3 = fastSim.center0
   let sweep: Sweep = makeRelativeSweep(sim: fastSim, base: base)

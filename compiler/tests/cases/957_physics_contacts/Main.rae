@@ -300,7 +300,10 @@ func putContact(out: mod List(Int), contact: view Contact) {
     putVec(out: out, vector: manifold.rollingImpulse)
     putInt(out: out, value: manifold.pointCount)
     loop var p: Int = 0, p < manifold.pointCount, ++p {
-      putPoint(out: out, point: manifold.points.copyAtDefault(index: p))
+      putPoint(
+        out: out
+        point: manifold.points.copyAtFallback(index: p, fallback: zeroManifoldPoint())
+      )
     }
   }
   putQuat(out: out, quat: contact.cachedRotationA)

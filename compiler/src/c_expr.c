@@ -1211,7 +1211,13 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
             }
             if (any && all_ref) use_arrow = true;
         }
+        /* The expected type belongs to the FIELD, not to the object: a
+         * generic call as the object (`points.copyAtFallback(...).x` passed
+         * as an Int argument) must not re-infer its T from that Int. */
+        bool member_saved_has_exp = ctx->has_expected_type;
+        ctx->has_expected_type = false;
         emit_expr(ctx, expr->as.member.object, out, PREC_CALL, true, false);
+        ctx->has_expected_type = member_saved_has_exp;
         Str fld = c_struct_field_c_name(expr->as.member.member, type_ref_is_c_struct(ctx, obj_tr));
         fprintf(out, "%s%.*s", use_arrow ? "->" : ".", (int)fld.len, fld.data);
         break;

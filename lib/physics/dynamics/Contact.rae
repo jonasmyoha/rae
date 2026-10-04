@@ -80,10 +80,10 @@ type ManifoldPoint {
   persisted: Bool
 }
 
-# b3Manifold: Box3D's fixed array of four points; `points` always has four
-# slots, `pointCount` of them in use.
+# b3Manifold: Box3D's fixed array of four points, `pointCount` of them in
+# use.
 type Manifold {
-  points: List(ManifoldPoint)
+  points: Array(ManifoldPoint, cap: 4)
   normal: Vec3
   twistImpulse: Float
   frictionImpulse: Vec3
@@ -147,12 +147,8 @@ func zeroManifoldPoint() ret ManifoldPoint {
 
 # A manifold as Box3D's allocator hands it out: zeroed.
 func zeroManifold() ret Manifold {
-  let points: List(ManifoldPoint) = List.create(ManifoldPoint, cap: 4)
-  loop var i: Int = 0, i < 4, ++i {
-    points.add(value: zeroManifoldPoint())
-  }
   ret Manifold {
-    points: points
+    points: Array(ManifoldPoint, cap: 4)
     normal: zeroVector()
     twistImpulse: 0.0
     frictionImpulse: zeroVector()

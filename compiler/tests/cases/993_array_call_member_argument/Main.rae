@@ -1,0 +1,26 @@
+# A generic Array call whose result's FIELD is passed as an argument:
+# `holder.points.copyAtFallback(...).x` as an Int parameter. The expected
+# type (Int) belongs to the field, so the call must still specialize on the
+# Array's element type; it used to re-infer T from the Int and emit a call to
+# a nonexistent `Array(Int, cap: 4)` wrapper.
+type Point {
+  x: Int
+  y: Float
+}
+
+type Holder {
+  points: Array(Point, cap: 4)
+}
+
+func show(index: view Int, scale: view Float) {
+  log("{index} {scale}")
+}
+
+func main() {
+  var holder: Holder = { points: Array(Point, cap: 4) }
+  holder.points.set(index: 1, value: Point { x: 7, y: 2.5 })
+  show(
+    index: holder.points.copyAtFallback(index: 1, fallback: Point { x: 0, y: 0.0 }).x
+    scale: holder.points.copyAtFallback(index: 9, fallback: Point { x: 0, y: 1.5 }).y
+  )
+}

@@ -43,12 +43,10 @@ func resolveContactBodySim(
   bodyId: view Int
 ) ret BodySim {
   if encodedIndex >= 0 {
-    ret world.solverSets.copyAtDefault(index: awakeSet).bodySims.copyAtDefault(index: encodedIndex)
+    ret setBodySimAt(world: world, setIndex: awakeSet, localIndex: encodedIndex)
   }
   if isStaticSimIndex(encodedBodySimIndex: encodedIndex) {
-    ret world.solverSets.copyAtDefault(index: staticSet).bodySims.copyAtDefault(
-      index: -encodedIndex - 2
-    )
+    ret setBodySimAt(world: world, setIndex: staticSet, localIndex: -encodedIndex - 2)
   }
   ret bodySimOf(world: world, body: bodyAt(world: world, bodyId: bodyId))
 }
@@ -171,8 +169,6 @@ func collideTask(
       continue
     }
 
-    let shapeA: PhysicsShape = world.shapes.copyAtDefault(index: shapeIdA)
-    let shapeB: PhysicsShape = world.shapes.copyAtDefault(index: shapeIdB)
     let simA: BodySim = resolveContactBodySim(world: world, encodedIndex: encodedA, bodyId: bodyIdA)
     let simB: BodySim = resolveContactBodySim(world: world, encodedIndex: encodedB, bodyId: bodyIdB)
     let transformA: Transform = simA.transform
@@ -209,24 +205,28 @@ func collideTask(
         contact.cachedRelativePose = inverseMultiplyWorld(left: transformA, right: transformB)
         contact.flags = contact.flags bitor relativeTransformValid
         if let taskContext: mod TaskContext => world.taskContexts.modAt(index: workerIndex) {
-          # This updates solid contacts
-          touching = updateContact(
-            contact: contact
-            geometry: taskContext.localManifold
-            meshManifold: taskContext.meshManifold
-            shapeA: shapeA
-            localCenterA: simA.localCenter
-            transformA: transformA
-            shapeB: shapeB
-            localCenterB: simB.localCenter
-            transformB: transformB
-            hulls: world.hulls
-            meshes: world.meshes
-            heightFields: world.heightFields
-            compounds: world.compounds
-            isFast: isFast
-            lengthUnitsPerMeter: lengthUnitsPerMeter
-          )
+          if let shapeA: view PhysicsShape => world.shapes.viewAt(index: shapeIdA) {
+            if let shapeB: view PhysicsShape => world.shapes.viewAt(index: shapeIdB) {
+              # This updates solid contacts
+              touching = updateContact(
+                contact: contact
+                geometry: taskContext.localManifold
+                meshManifold: taskContext.meshManifold
+                shapeA: shapeA
+                localCenterA: simA.localCenter
+                transformA: transformA
+                shapeB: shapeB
+                localCenterB: simB.localCenter
+                transformB: transformB
+                hulls: world.hulls
+                meshes: world.meshes
+                heightFields: world.heightFields
+                compounds: world.compounds
+                isFast: isFast
+                lengthUnitsPerMeter: lengthUnitsPerMeter
+              )
+            }
+          }
         }
         # The mesh contact's spec follows its manifold count
         if touching and wasTouching and (contact.flags bitand simMeshContact) is not 0 {

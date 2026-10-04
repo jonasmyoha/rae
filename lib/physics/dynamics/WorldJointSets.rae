@@ -96,9 +96,7 @@ func mergeSolverSets(world: mod PhysicsWorld, setId1: view Int, setId2: view Int
   var keepId: Int = setId1
   var mergeId: Int = setId2
   # Move the fewest bodies
-  if world.solverSets.copyAtDefault(index: setId1).bodySims.length < world.solverSets.copyAtDefault(
-    index: setId2
-  ).bodySims.length {
+  if setBodyCount(world: world, setIndex: setId1) < setBodyCount(world: world, setIndex: setId2) {
     keepId = setId2
     mergeId = setId1
   }

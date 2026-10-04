@@ -32,7 +32,7 @@ func enableWorldSleeping(world: mod PhysicsWorld, flag: view Bool) {
   if flag is false {
     let setCount: Int = world.solverSets.length
     loop var i: Int = firstSleepingSet, i < setCount, ++i {
-      if world.solverSets.copyAtDefault(index: i).bodySims.length > 0 {
+      if setBodyCount(world: world, setIndex: i) > 0 {
         wakeSolverSet(world: world, setIndex: i)
       }
     }
@@ -78,5 +78,5 @@ func setWorldMaximumLinearSpeed(world: mod PhysicsWorld, maximumLinearSpeed: vie
 
 # b3World_GetAwakeBodyCount
 func getWorldAwakeBodyCount(world: view PhysicsWorld) ret Int {
-  ret world.solverSets.copyAtDefault(index: awakeSet).bodySims.length
+  ret setBodyCount(world: world, setIndex: awakeSet)
 }

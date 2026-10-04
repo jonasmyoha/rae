@@ -52,86 +52,89 @@ func warmStartContactsWide(
   block: view SolverBlock
 ) {
   loop var i: Int = block.startIndex, i < block.startIndex + block.count, ++i {
-    let constraint: ContactConstraintWide = constraints.copyAtDefault(index: first + i)
-    var bodyA: BodyStateWide = gatherBodies(states: states, indices: constraint.indexA)
-    var bodyB: BodyStateWide = gatherBodies(states: states, indices: constraint.indexB)
-    let pointCount: Int = widePointCount(constraint: constraint)
-    let zero: FloatWide = zeroWide()
-    var totalNormalImpulse: FloatWide = zero
-    var momentA: Vec3Wide = zeroVectorWide()
-    var momentB: Vec3Wide = zeroVectorWide()
-    loop var j: Int = 0, j < pointCount, ++j {
-      if let constraintPoint: view ContactConstraintPointWide => constraint.points.viewAt(index: j) {
-        let normalImpulse: FloatWide = constraintPoint.normalImpulse
-        totalNormalImpulse = addWide(left: totalNormalImpulse, right: normalImpulse)
-        momentA = mulAddVectorWide(
-          base: momentA
-          scale: normalImpulse
-          vector: constraintPoint.anchorA
-        )
-        momentB = mulAddVectorWide(
-          base: momentB
-          scale: normalImpulse
-          vector: constraintPoint.anchorB
-        )
+    if let constraint: view ContactConstraintWide => constraints.viewAt(index: first + i) {
+      var bodyA: BodyStateWide = gatherBodies(states: states, indices: constraint.indexA)
+      var bodyB: BodyStateWide = gatherBodies(states: states, indices: constraint.indexB)
+      let pointCount: Int = widePointCount(constraint: constraint)
+      let zero: FloatWide = zeroWide()
+      var totalNormalImpulse: FloatWide = zero
+      var momentA: Vec3Wide = zeroVectorWide()
+      var momentB: Vec3Wide = zeroVectorWide()
+      loop var j: Int = 0, j < pointCount, ++j {
+        if let constraintPoint: view ContactConstraintPointWide => constraint.points.viewAt(
+          index: j
+        ) {
+          let normalImpulse: FloatWide = constraintPoint.normalImpulse
+          totalNormalImpulse = addWide(left: totalNormalImpulse, right: normalImpulse)
+          momentA = mulAddVectorWide(
+            base: momentA
+            scale: normalImpulse
+            vector: constraintPoint.anchorA
+          )
+          momentB = mulAddVectorWide(
+            base: momentB
+            scale: normalImpulse
+            vector: constraintPoint.anchorB
+          )
+        }
       }
-    }
-    let normal: Vec3Wide = constraint.normal
-    var frictionImpulse: Vec3Wide = scaleVectorWide(
-      scale: constraint.frictionImpulse.x
-      vector: constraint.tangent1
-    )
-    frictionImpulse = mulAddVectorWide(
-      base: frictionImpulse
-      scale: constraint.frictionImpulse.y
-      vector: constraint.tangent2
-    )
-    let linearImpulse: Vec3Wide = mulAddVectorWide(
-      base: frictionImpulse
-      scale: totalNormalImpulse
-      vector: normal
-    )
-    let twistImpulse: Vec3Wide = scaleVectorWide(scale: constraint.twistImpulse, vector: normal)
-    var angularImpulseA: Vec3Wide = addVectorWide(
-      left: addVectorWide(
-        left: crossWide(left: momentA, right: normal)
-        right: crossWide(left: constraint.centerA, right: frictionImpulse)
+      let normal: Vec3Wide = constraint.normal
+      var frictionImpulse: Vec3Wide = scaleVectorWide(
+        scale: constraint.frictionImpulse.x
+        vector: constraint.tangent1
       )
-      right: twistImpulse
-    )
-    var angularImpulseB: Vec3Wide = addVectorWide(
-      left: addVectorWide(
-        left: crossWide(left: momentB, right: normal)
-        right: crossWide(left: constraint.centerB, right: frictionImpulse)
+      frictionImpulse = mulAddVectorWide(
+        base: frictionImpulse
+        scale: constraint.frictionImpulse.y
+        vector: constraint.tangent2
       )
-      right: twistImpulse
-    )
-    if allZeroWide(value: constraint.rollingResistance) is false {
-      angularImpulseA = addVectorWide(left: angularImpulseA, right: constraint.rollingImpulse)
-      angularImpulseB = addVectorWide(left: angularImpulseB, right: constraint.rollingImpulse)
+      let linearImpulse: Vec3Wide = mulAddVectorWide(
+        base: frictionImpulse
+        scale: totalNormalImpulse
+        vector: normal
+      )
+      let twistImpulse: Vec3Wide = scaleVectorWide(scale: constraint.twistImpulse, vector: normal)
+      var angularImpulseA: Vec3Wide = addVectorWide(
+        left: addVectorWide(
+          left: crossWide(left: momentA, right: normal)
+          right: crossWide(left: constraint.centerA, right: frictionImpulse)
+        )
+        right: twistImpulse
+      )
+      var angularImpulseB: Vec3Wide = addVectorWide(
+        left: addVectorWide(
+          left: crossWide(left: momentB, right: normal)
+          right: crossWide(left: constraint.centerB, right: frictionImpulse)
+        )
+        right: twistImpulse
+      )
+      if allZeroWide(value: constraint.rollingResistance) is false {
+        angularImpulseA = addVectorWide(left: angularImpulseA, right: constraint.rollingImpulse)
+        angularImpulseB = addVectorWide(left: angularImpulseB, right: constraint.rollingImpulse)
+      }
+      bodyA.angularVelocity = mulSubSym3Wide(
+        base: bodyA.angularVelocity
+        matrix: constraint.invIA
+        vector: angularImpulseA
+      )
+      bodyA.linearVelocity = mulSubVectorWide(
+        base: bodyA.linearVelocity
+        scale: constraint.invMassA
+        vector: linearImpulse
+      )
+      bodyB.angularVelocity = mulAddSym3Wide(
+        base: bodyB.angularVelocity
+        matrix: constraint.invIB
+        vector: angularImpulseB
+      )
+      bodyB.linearVelocity = mulAddVectorWide(
+        base: bodyB.linearVelocity
+        scale: constraint.invMassB
+        vector: linearImpulse
+      )
+      scatterBodies(states: states, indices: constraint.indexA, body: bodyA)
+      scatterBodies(states: states, indices: constraint.indexB, body: bodyB)
     }
-    bodyA.angularVelocity = mulSubSym3Wide(
-      base: bodyA.angularVelocity
-      matrix: constraint.invIA
-      vector: angularImpulseA
-    )
-    bodyA.linearVelocity = mulSubVectorWide(
-      base: bodyA.linearVelocity
-      scale: constraint.invMassA
-      vector: linearImpulse
-    )
-    bodyB.angularVelocity = mulAddSym3Wide(
-      base: bodyB.angularVelocity
-      matrix: constraint.invIB
-      vector: angularImpulseB
-    )
-    bodyB.linearVelocity = mulAddVectorWide(
-      base: bodyB.linearVelocity
-      scale: constraint.invMassB
-      vector: linearImpulse
-    )
-    scatterBodies(states: states, indices: constraint.indexA, body: bodyA)
-    scatterBodies(states: states, indices: constraint.indexB, body: bodyB)
   }
 }
 

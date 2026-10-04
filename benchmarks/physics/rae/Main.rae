@@ -1,0 +1,278 @@
+# Box3D's benchmark scenes (benchmark/main.c and shared/benchmarks.c at
+# 9f998c8) on the Rae port: the large pyramid, many pyramids, the joint grid
+# and the convex pile, built exactly as Box3D builds them (Y-up, workerCount
+# 1), stepped at 60 Hz with 4 sub-steps for the scene's step count. Prints
+# one line per scene:
+#
+#   RESULT,<scene>,<ns per step>,<checksum>
+#
+# The checksum hashes every body's final position: an optimisation of the
+# port must not change it (the bit-exact fixtures guard the same thing).
+import Math
+import Sys
+open physics/math/TransformMath
+open physics/geometry/QueryTypes
+open physics/geometry/Hull
+open physics/geometry/HullCreate
+open physics/geometry/BoxHull
+open physics/dynamics/WorldTypes
+open physics/dynamics/World
+open physics/dynamics/WorldBodies
+open physics/dynamics/WorldShapes
+open physics/dynamics/WorldSettings
+open physics/dynamics/WorldStep
+open physics/dynamics/WorldJoints
+open physics/dynamics/JointDefs
+
+func benchWorld() ret PhysicsWorld {
+  var def: WorldDef = defaultWorldDef(lengthUnitsPerMeter: 1.0)
+  def.workerCount = 1
+  ret createWorld(def: def)
+}
+
+func addGround(world: mod PhysicsWorld, halfExtent: view Float) {
+  var bodyDef: BodyDef = defaultBodyDef(lengthUnitsPerMeter: 1.0)
+  bodyDef.position = Vec3 { x: 0.0, y: -1.0, z: 0.0 }
+  let groundId: BodyId = createBody(world: world, def: bodyDef)
+  let box: Hull = makeBoxHull(
+    hx: halfExtent
+    hy: 1.0
+    hz: halfExtent
+    lengthUnitsPerMeter: 1.0
+  )
+  createHullShape(
+    world: world
+    bodyId: groundId
+    def: defaultShapeDef(lengthUnitsPerMeter: 1.0)
+    hull: box
+  )
+}
+
+# CreateLargePyramid: a 100-box base, 5050 boxes.
+func createLargePyramid(world: mod PhysicsWorld, bodies: mod List(BodyId)) {
+  enableWorldSleeping(world: world, flag: false)
+  let baseCount: Int = 100
+  addGround(world: world, halfExtent: 400.0)
+  var bodyDef: BodyDef = defaultBodyDef(lengthUnitsPerMeter: 1.0)
+  bodyDef.bodyType = BodyType.dynamicBody
+  var shapeDef: ShapeDef = defaultShapeDef(lengthUnitsPerMeter: 1.0)
+  shapeDef.density = 100.0
+  let h: Float = 0.5
+  let box: Hull = makeBoxHull(
+    hx: h
+    hy: h
+    hz: h
+    lengthUnitsPerMeter: 1.0
+  )
+  let shift: Float = 1.0 * h
+  loop var i: Int = 0, i < baseCount, ++i {
+    let y: Float = (2.0 * (i as Float) + 1.0) * shift
+    loop var j: Int = i, j < baseCount, ++j {
+      let x: Float = ((i as Float) + 1.0) * shift + 2.0 * ((j - i) as Float) * shift - h * (baseCount as Float)
+      bodyDef.position = Vec3 { x: x, y: y, z: 0.0 }
+      let bodyId: BodyId = createBody(world: world, def: bodyDef)
+      createHullShape(
+        world: world
+        bodyId: bodyId
+        def: shapeDef
+        hull: box
+      )
+      bodies.add(value: bodyId)
+    }
+  }
+}
+
+func createSmallPyramid(
+  world: mod PhysicsWorld
+  bodies: mod List(BodyId)
+  baseCount: view Int
+  extent: view Float
+  centerX: view Float
+  baseZ: view Float
+) {
+  var bodyDef: BodyDef = defaultBodyDef(lengthUnitsPerMeter: 1.0)
+  bodyDef.bodyType = BodyType.dynamicBody
+  bodyDef.enableSleep = false
+  var shapeDef: ShapeDef = defaultShapeDef(lengthUnitsPerMeter: 1.0)
+  shapeDef.density = 100.0
+  let box: Hull = makeBoxHull(
+    hx: extent
+    hy: extent
+    hz: extent
+    lengthUnitsPerMeter: 1.0
+  )
+  loop var i: Int = 0, i < baseCount, ++i {
+    let y: Float = (2.0 * (i as Float) + 1.0) * extent
+    loop var j: Int = i, j < baseCount, ++j {
+      let x: Float = ((i as Float) + 1.0) * extent + 2.0 * ((j - i) as Float) * extent + centerX - 0.5
+      bodyDef.position = Vec3 { x: x, y: y, z: baseZ }
+      let bodyId: BodyId = createBody(world: world, def: bodyDef)
+      createHullShape(
+        world: world
+        bodyId: bodyId
+        def: shapeDef
+        hull: box
+      )
+      bodies.add(value: bodyId)
+    }
+  }
+}
+
+# CreateManyPyramids: 14 x 14 pyramids of 55 boxes.
+func createManyPyramids(world: mod PhysicsWorld, bodies: mod List(BodyId)) {
+  let baseCount: Int = 10
+  let extent: Float = 0.5
+  let rowCount: Int = 14
+  let columnCount: Int = 14
+  let groundExtent: Float = extent * (columnCount as Float) * ((baseCount as Float) + 1.0)
+  addGround(world: world, halfExtent: groundExtent)
+  let baseWidth: Float = 2.0 * extent * (baseCount as Float)
+  var baseZ: Float = -groundExtent + 2.0 * extent
+  let deltaZ: Float = 2.0 * (groundExtent - 2.0 * extent) / ((rowCount as Float) - 1.0)
+  loop var i: Int = 0, i < rowCount, ++i {
+    loop var j: Int = 0, j < columnCount, ++j {
+      let centerX: Float = -groundExtent + (j as Float) * (baseWidth + 2.0 * extent) + 2.0 * extent
+      createSmallPyramid(
+        world: world
+        bodies: bodies
+        baseCount: baseCount
+        extent: extent
+        centerX: centerX
+        baseZ: baseZ
+      )
+    }
+    baseZ = baseZ + deltaZ
+  }
+}
+
+# CreateJointGrid: 100 x 100 spheres on spherical joints, one row static.
+func createJointGrid(world: mod PhysicsWorld, bodies: mod List(BodyId)) {
+  enableWorldSleeping(world: world, flag: false)
+  let n: Int = 100
+  var shapeDef: ShapeDef = defaultShapeDef(lengthUnitsPerMeter: 1.0)
+  shapeDef.filter.categoryBits = 2
+  shapeDef.filter.maskBits = 4294967293
+  let sphere: Sphere = { center: Vec3 { x: 0.0, y: 0.0, z: 0.0 }, radius: 0.4 }
+  var jointDef: SphericalJointDef = defaultSphericalJointDef(lengthUnitsPerMeter: 1.0)
+  var bodyDef: BodyDef = defaultBodyDef(lengthUnitsPerMeter: 1.0)
+  bodyDef.enableSleep = false
+  let grid: List(BodyId) = List.create(BodyId, cap: n * n)
+  loop var k: Int = 0, k < n, ++k {
+    loop var i: Int = 0, i < n, ++i {
+      if i is 0 {
+        bodyDef.bodyType = BodyType.staticBody
+      } else {
+        bodyDef.bodyType = BodyType.dynamicBody
+      }
+      bodyDef.position = Vec3 { x: k as Float, y: -(i as Float), z: 0.0 }
+      let bodyId: BodyId = createBody(world: world, def: bodyDef)
+      createSphereShape(
+        world: world
+        bodyId: bodyId
+        def: shapeDef
+        sphere: sphere
+      )
+      let index: Int = grid.length
+      if i > 0 {
+        jointDef.base.bodyIdA = grid.copyAtDefault(index: index - 1)
+        jointDef.base.bodyIdB = bodyId
+        jointDef.base.localFrameA.position = Vec3 { x: 0.0, y: -0.5, z: 0.0 }
+        jointDef.base.localFrameB.position = Vec3 { x: 0.0, y: 0.5, z: 0.0 }
+        createSphericalJoint(world: world, def: jointDef)
+      }
+      if k > 0 {
+        jointDef.base.bodyIdA = grid.copyAtDefault(index: index - n)
+        jointDef.base.bodyIdB = bodyId
+        jointDef.base.localFrameA.position = Vec3 { x: 0.5, y: 0.0, z: 0.0 }
+        jointDef.base.localFrameB.position = Vec3 { x: -0.5, y: 0.0, z: 0.0 }
+        createSphericalJoint(world: world, def: jointDef)
+      }
+      grid.add(value: bodyId)
+      bodies.add(value: bodyId)
+    }
+  }
+}
+
+# CreateConvexPile: 8 x 8 x 80 complex hulls.
+func createConvexPile(world: mod PhysicsWorld, bodies: mod List(BodyId)) {
+  addGround(world: world, halfExtent: 250.0)
+  let countX: Int = 8
+  let countZ: Int = 8
+  let layers: Int = 80
+  let amplitude: Float = 2.0
+  let scatter: Float = 2.0 * amplitude
+  if let convex: Hull = createComplexHull(radius: amplitude) {
+    var bodyDef: BodyDef = defaultBodyDef(lengthUnitsPerMeter: 1.0)
+    bodyDef.bodyType = BodyType.dynamicBody
+    let shapeDef: ShapeDef = defaultShapeDef(lengthUnitsPerMeter: 1.0)
+    loop var layer: Int = 0, layer < layers, ++layer {
+      loop var z: Int = 0, z < countZ, ++z {
+        loop var x: Int = 0, x < countX, ++x {
+          let posX: Float = ((x as Float) - 0.5 * (countX as Float)) * scatter
+          let posZ: Float = ((z as Float) - 0.5 * (countZ as Float)) * scatter
+          let posY: Float = amplitude + 2.0 * amplitude * (layer as Float)
+          bodyDef.position = Vec3 { x: posX, y: posY, z: posZ }
+          let bodyId: BodyId = createBody(world: world, def: bodyDef)
+          createHullShape(
+            world: world
+            bodyId: bodyId
+            def: shapeDef
+            hull: convex
+          )
+          bodies.add(value: bodyId)
+        }
+      }
+    }
+  }
+}
+
+# FNV-1a over every body's position bits.
+func positionChecksum(world: view PhysicsWorld, bodies: view List(BodyId)) ret UInt64 {
+  var hash: UInt64 = 14695981039346656037
+  let prime: UInt64 = 1099511628211
+  loop let bodyId: view BodyId in bodies {
+    let position: Vec3 = getBodyTransform(world: world, bodyId: bodyId).position
+    let values: List(Float) = { position.x, position.y, position.z }
+    loop var i: Int = 0, i < values.length, ++i {
+      let bits: UInt64 = (Math.floatBits(value: values.copyAtDefault(index: i)) bitand 4294967295) as UInt64
+      hash = (hash bitxor bits) * prime
+    }
+  }
+  ret hash
+}
+
+func runScene(scene: view String) {
+  var world: PhysicsWorld = benchWorld()
+  let bodies: List(BodyId) = List.create(BodyId, cap: 16384)
+  var stepCount: Int = 0
+  if scene is "large_pyramid" {
+    createLargePyramid(world: world, bodies: bodies)
+    stepCount = 200
+  } else if scene is "many_pyramids" {
+    createManyPyramids(world: world, bodies: bodies)
+    stepCount = 100
+  } else if scene is "joint_grid" {
+    createJointGrid(world: world, bodies: bodies)
+    stepCount = 100
+  } else if scene is "convex_pile" {
+    createConvexPile(world: world, bodies: bodies)
+    stepCount = 500
+  } else {
+    log("unknown scene {scene}: large_pyramid, many_pyramids, joint_grid, convex_pile")
+    ret
+  }
+  let start: Int = nowNs()
+  loop var i: Int = 0, i < stepCount, ++i {
+    stepWorld(world: world, timeStep: 1.0 / 60.0, subStepCount: 4)
+  }
+  let elapsed: Int = nowNs() - start
+  log("RESULT,{scene},{elapsed / stepCount},{positionChecksum(world: world, bodies: bodies)}")
+}
+
+func main() {
+  if Sys.argCount() > 0 {
+    runScene(scene: Sys.argAt(index: 0))
+  } else {
+    runScene(scene: "large_pyramid")
+  }
+}
