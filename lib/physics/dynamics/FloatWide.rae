@@ -1,20 +1,18 @@
-# Four-lane floats for the contact solver (b3FloatW and its operations, the
-# scalar path of Box3D's simd.h, and the wide vector, quaternion and matrix
-# helpers of contact_solver.c, at 9f998c8). A wide float is a struct of four
-# Floats; every operation works lane by lane in Box3D's scalar order, so the
-# solver is bit-exact against the scalar oracle. Masks are 0/1 lane values
-# as in Box3D's scalar path. A future Float4 SIMD type (docs/
-# physics-performance-plan.md §2) replaces this module, not the solver.
+# Four-lane floats for the contact solver (b3FloatW and its operations of
+# Box3D's simd.h, and the wide vector, quaternion and matrix helpers of
+# contact_solver.c, at 9f998c8). A wide float is a lib/Float4 (docs/
+# float4-design.md): every primitive below is one Float4 function, lowered to
+# NEON / SSE2 / wasm SIMD128 or the scalar definition, with the same bits as
+# Box3D's scalar path (fixtures 967/968 check each function, 948-959 the
+# solver against the oracle). A mask is a Mask4 (all ones / all zeros per
+# lane), where Box3D's scalar path uses 1.0 / 0.0; masks only feed
+# blendWide, andWide, orWide and anyTrueWide, so the results are the same.
 import Math
+import Float4
 open Vec3
 open Quat
 
-type FloatWide {
-  x: Float
-  y: Float
-  z: Float
-  w: Float
-}
+alias FloatWide = Float4
 
 type Vec2Wide {
   x: FloatWide
@@ -55,11 +53,11 @@ type Matrix3Wide {
 }
 
 func zeroWide() ret FloatWide {
-  ret FloatWide { x: 0.0, y: 0.0, z: 0.0, w: 0.0 }
+  ret Float4.splat(value: 0.0)
 }
 
 func splatWide(value: view Float) ret FloatWide {
-  ret FloatWide { x: value, y: value, z: value, w: value }
+  ret Float4.splat(value: value)
 }
 
 func setWide(
@@ -84,229 +82,110 @@ func laneOf(value: view FloatWide, lane: view Int) ret Float {
 }
 
 func negateWide(value: view FloatWide) ret FloatWide {
-  ret FloatWide { x: -value.x, y: -value.y, z: -value.z, w: -value.w }
+  ret Float4.negate(value: value)
 }
 
-func absLane(value: view Float) ret Float {
-  if value < 0.0 {
-    ret -value
-  }
-  ret value
-}
-
+# value < 0 ? -value : value
 func absWide(value: view FloatWide) ret FloatWide {
-  ret FloatWide {
-    x: absLane(value: value.x)
-    y: absLane(value: value.y)
-    z: absLane(value: value.z)
-    w: absLane(value: value.w)
-  }
+  ret Float4.abs(value: value)
 }
 
 func addWide(left: view FloatWide, right: view FloatWide) ret FloatWide {
-  ret FloatWide {
-    x: left.x + right.x
-    y: left.y + right.y
-    z: left.z + right.z
-    w: left.w + right.w
-  }
+  ret Float4.add(a: left, b: right)
 }
 
 func subtractWide(left: view FloatWide, right: view FloatWide) ret FloatWide {
-  ret FloatWide {
-    x: left.x - right.x
-    y: left.y - right.y
-    z: left.z - right.z
-    w: left.w - right.w
-  }
+  ret Float4.sub(a: left, b: right)
 }
 
 func multiplyWide(left: view FloatWide, right: view FloatWide) ret FloatWide {
-  ret FloatWide {
-    x: left.x * right.x
-    y: left.y * right.y
-    z: left.z * right.z
-    w: left.w * right.w
-  }
+  ret Float4.mul(a: left, b: right)
 }
 
 func divideWide(left: view FloatWide, right: view FloatWide) ret FloatWide {
-  ret FloatWide {
-    x: left.x / right.x
-    y: left.y / right.y
-    z: left.z / right.z
-    w: left.w / right.w
-  }
+  ret Float4.div(a: left, b: right)
 }
 
 func sqrtWide(value: view FloatWide) ret FloatWide {
-  ret FloatWide {
-    x: Math.sqrt(x: value.x)
-    y: Math.sqrt(x: value.y)
-    z: Math.sqrt(x: value.z)
-    w: Math.sqrt(x: value.w)
-  }
+  ret Float4.sqrt(value: value)
 }
 
-# a + b * c (b3MulAddW)
+# a + b * c (b3MulAddW): left * right, then + base (an IEEE add is the same
+# either way round)
 func mulAddWide(base: view FloatWide, left: view FloatWide, right: view FloatWide) ret FloatWide {
-  ret FloatWide {
-    x: base.x + left.x * right.x
-    y: base.y + left.y * right.y
-    z: base.z + left.z * right.z
-    w: base.w + left.w * right.w
-  }
+  ret Float4.mulAdd(a: left, b: right, c: base)
 }
 
-func minLane(left: view Float, right: view Float) ret Float {
-  if left <= right {
-    ret left
-  }
-  ret right
-}
-
-func maxLane(left: view Float, right: view Float) ret Float {
-  if left >= right {
-    ret left
-  }
-  ret right
-}
-
+# left <= right ? left : right
 func minWide(left: view FloatWide, right: view FloatWide) ret FloatWide {
-  ret FloatWide {
-    x: minLane(left: left.x, right: right.x)
-    y: minLane(left: left.y, right: right.y)
-    z: minLane(left: left.z, right: right.z)
-    w: minLane(left: left.w, right: right.w)
-  }
+  ret Float4.min(a: left, b: right)
 }
 
+# left >= right ? left : right
 func maxWide(left: view FloatWide, right: view FloatWide) ret FloatWide {
-  ret FloatWide {
-    x: maxLane(left: left.x, right: right.x)
-    y: maxLane(left: left.y, right: right.y)
-    z: maxLane(left: left.z, right: right.z)
-    w: maxLane(left: left.w, right: right.w)
-  }
-}
-
-func symClampLane(value: view Float, limit: view Float) ret Float {
-  var result: Float = value
-  if (value <= limit) is false {
-    result = limit
-  }
-  if result <= -limit {
-    result = -limit
-  }
-  ret result
+  ret Float4.max(a: left, b: right)
 }
 
 # Clamp `value` to [-limit, limit] (b3SymClampW)
 func symClampWide(value: view FloatWide, limit: view FloatWide) ret FloatWide {
-  ret FloatWide {
-    x: symClampLane(value: value.x, limit: limit.x)
-    y: symClampLane(value: value.y, limit: limit.y)
-    z: symClampLane(value: value.z, limit: limit.z)
-    w: symClampLane(value: value.w, limit: limit.w)
-  }
+  ret Float4.clampSymmetric(value: value, limit: limit)
 }
 
-func maskLane(condition: view Bool) ret Float {
-  if condition {
-    ret 1.0
-  }
-  ret 0.0
+func andWide(left: view Mask4, right: view Mask4) ret Mask4 {
+  ret Float4.both(a: left, b: right)
 }
 
-func andWide(left: view FloatWide, right: view FloatWide) ret FloatWide {
-  ret FloatWide {
-    x: maskLane(condition: left.x is not 0.0 and right.x is not 0.0)
-    y: maskLane(condition: left.y is not 0.0 and right.y is not 0.0)
-    z: maskLane(condition: left.z is not 0.0 and right.z is not 0.0)
-    w: maskLane(condition: left.w is not 0.0 and right.w is not 0.0)
-  }
+func orWide(left: view Mask4, right: view Mask4) ret Mask4 {
+  ret Float4.either(a: left, b: right)
 }
 
-func orWide(left: view FloatWide, right: view FloatWide) ret FloatWide {
-  ret FloatWide {
-    x: maskLane(condition: left.x is not 0.0 or right.x is not 0.0)
-    y: maskLane(condition: left.y is not 0.0 or right.y is not 0.0)
-    z: maskLane(condition: left.z is not 0.0 or right.z is not 0.0)
-    w: maskLane(condition: left.w is not 0.0 or right.w is not 0.0)
-  }
+func greaterThanWide(left: view FloatWide, right: view FloatWide) ret Mask4 {
+  ret Float4.greater(a: left, b: right)
 }
 
-func greaterThanWide(left: view FloatWide, right: view FloatWide) ret FloatWide {
-  ret FloatWide {
-    x: maskLane(condition: left.x > right.x)
-    y: maskLane(condition: left.y > right.y)
-    z: maskLane(condition: left.z > right.z)
-    w: maskLane(condition: left.w > right.w)
-  }
+func lessThanWide(left: view FloatWide, right: view FloatWide) ret Mask4 {
+  ret Float4.less(a: left, b: right)
 }
 
-func lessThanWide(left: view FloatWide, right: view FloatWide) ret FloatWide {
-  ret FloatWide {
-    x: maskLane(condition: left.x < right.x)
-    y: maskLane(condition: left.y < right.y)
-    z: maskLane(condition: left.z < right.z)
-    w: maskLane(condition: left.w < right.w)
-  }
-}
-
+# Every lane == 0 (-0 counts)
 func allZeroWide(value: view FloatWide) ret Bool {
-  ret value.x is 0.0 and value.y is 0.0 and value.z is 0.0 and value.w is 0.0
+  ret Float4.allLanes(mask: Float4.equal(a: value, b: zeroWide()))
 }
 
-func anyTrueWide(mask: view FloatWide) ret Bool {
-  ret mask.x is not 0.0 or mask.y is not 0.0 or mask.z is not 0.0 or mask.w is not 0.0
-}
-
-func blendLane(left: view Float, right: view Float, mask: view Float) ret Float {
-  if mask is not 0.0 {
-    ret right
-  }
-  ret left
+func anyTrueWide(mask: view Mask4) ret Bool {
+  ret Float4.anyLane(mask: mask)
 }
 
 # Lane-wise `mask ? right : left` (b3BlendW)
-func blendWide(left: view FloatWide, right: view FloatWide, mask: view FloatWide) ret FloatWide {
-  ret FloatWide {
-    x: blendLane(left: left.x, right: right.x, mask: mask.x)
-    y: blendLane(left: left.y, right: right.y, mask: mask.y)
-    z: blendLane(left: left.z, right: right.z, mask: mask.z)
-    w: blendLane(left: left.w, right: right.w, mask: mask.w)
+func blendWide(left: view FloatWide, right: view FloatWide, mask: view Mask4) ret FloatWide {
+  ret Float4.select(mask: mask, ifTrue: right, ifFalse: left)
+}
+
+func maskBits(condition: view Bool) ret UInt32 {
+  if condition {
+    ret 0xFFFFFFFF
   }
+  ret 0
+}
+
+func isStaticLane(
+  indexA: view Array(Int, cap: 4)
+  indexB: view Array(Int, cap: 4)
+  lane: view Int
+) ret Bool {
+  ret indexA.copyAtFallback(index: lane, fallback: 0) is 0 or indexB.copyAtFallback(
+    index: lane
+    fallback: 0
+  ) is 0
 }
 
 # b3SoftMaskW: lanes where either body is static (index 0)
-func softMaskWide(indexA: view Array(Int, cap: 4), indexB: view Array(Int, cap: 4)) ret FloatWide {
-  ret FloatWide {
-    x: maskLane(
-      condition: indexA.copyAtFallback(index: 0, fallback: 0) is 0 or indexB.copyAtFallback(
-        index: 0
-        fallback: 0
-      ) is 0
-    )
-    y: maskLane(
-      condition: indexA.copyAtFallback(index: 1, fallback: 0) is 0 or indexB.copyAtFallback(
-        index: 1
-        fallback: 0
-      ) is 0
-    )
-    z: maskLane(
-      condition: indexA.copyAtFallback(index: 2, fallback: 0) is 0 or indexB.copyAtFallback(
-        index: 2
-        fallback: 0
-      ) is 0
-    )
-    w: maskLane(
-      condition: indexA.copyAtFallback(index: 3, fallback: 0) is 0 or indexB.copyAtFallback(
-        index: 3
-        fallback: 0
-      ) is 0
-    )
-  }
+func softMaskWide(indexA: view Array(Int, cap: 4), indexB: view Array(Int, cap: 4)) ret Mask4 {
+  let bitsX: UInt32 = maskBits(condition: isStaticLane(indexA: indexA, indexB: indexB, lane: 0))
+  let bitsY: UInt32 = maskBits(condition: isStaticLane(indexA: indexA, indexB: indexB, lane: 1))
+  let bitsZ: UInt32 = maskBits(condition: isStaticLane(indexA: indexA, indexB: indexB, lane: 2))
+  let bitsW: UInt32 = maskBits(condition: isStaticLane(indexA: indexA, indexB: indexB, lane: 3))
+  ret Mask4 { bitsX: bitsX, bitsY: bitsY, bitsZ: bitsZ, bitsW: bitsW }
 }
 
 # --- Wide vectors ---
@@ -525,7 +404,7 @@ func invertSym3Wide(matrix: view SymMatrix3Wide, minDeterminant: view Float) ret
       right: multiplyWide(left: matrix.cxz, right: cxz)
     )
   )
-  let valid: FloatWide = greaterThanWide(
+  let valid: Mask4 = greaterThanWide(
     left: absWide(value: determinant)
     right: splatWide(value: minDeterminant)
   )
@@ -548,7 +427,7 @@ func invertSym3Wide(matrix: view SymMatrix3Wide, minDeterminant: view Float) ret
 func perpWide(vector: view Vec3Wide, minLengthSquared: view Float) ret Vec3Wide {
   let zero: FloatWide = zeroWide()
   let half: FloatWide = splatWide(value: 0.5)
-  let mask: FloatWide = orWide(
+  let mask: Mask4 = orWide(
     left: lessThanWide(left: vector.x, right: negateWide(value: half))
     right: greaterThanWide(left: vector.x, right: half)
   )
@@ -558,10 +437,7 @@ func perpWide(vector: view Vec3Wide, minLengthSquared: view Float) ret Vec3Wide 
     z: blendWide(left: negateWide(value: vector.y), right: zero, mask: mask)
   }
   let lengthSquared: FloatWide = dotWide(left: perpendicular, right: perpendicular)
-  let valid: FloatWide = greaterThanWide(
-    left: lengthSquared
-    right: splatWide(value: minLengthSquared)
-  )
+  let valid: Mask4 = greaterThanWide(left: lengthSquared, right: splatWide(value: minLengthSquared))
   let inverseLength: FloatWide = blendWide(
     left: zero
     right: divideWide(left: splatWide(value: 1.0), right: sqrtWide(value: lengthSquared))

@@ -485,7 +485,7 @@ func prepareContactsWide(
       wide.tangentVelocity1 = dotWide(left: tangentVelocity, right: tangent1)
       wide.tangentVelocity2 = dotWide(left: tangentVelocity, right: tangent2)
 
-      let rollingMask: FloatWide = greaterThanWide(left: wide.rollingResistance, right: zero)
+      let rollingMask: Mask4 = greaterThanWide(left: wide.rollingResistance, right: zero)
       wide.twistImpulse = multiplyWide(left: warmStartScale, right: twistImpulse)
       wide.rollingImpulse = Vec3Wide {
         x: blendWide(
@@ -526,7 +526,7 @@ func prepareContactsWide(
       var totalFrictionWeight: FloatWide = zero
 
       loop var pointIndex: Int = 0, pointIndex < maxManifoldPoints, ++pointIndex {
-        let pointMask: FloatWide = greaterThanWide(
+        let pointMask: Mask4 = greaterThanWide(
           left: pointCountWide
           right: splatWide(value: pointIndex.toFloat())
         )
@@ -643,7 +643,7 @@ func prepareContactsWide(
           left: kNormal
           right: dotWide(left: rnB, right: multiplySym3Wide(matrix: iB, vector: rnB))
         )
-        let valid: FloatWide = andWide(
+        let valid: Mask4 = andWide(
           left: greaterThanWide(left: kNormal, right: zero)
           right: pointMask
         )
@@ -680,7 +680,7 @@ func prepareContactsWide(
       wide.centerA = centerA
       wide.centerB = centerB
       loop var pointIndex: Int = 0, pointIndex < maxManifoldPoints, ++pointIndex {
-        let pointMask: FloatWide = greaterThanWide(
+        let pointMask: Mask4 = greaterThanWide(
           left: pointCountWide
           right: splatWide(value: pointIndex.toFloat())
         )
@@ -720,7 +720,7 @@ func prepareContactsWide(
         left: multiplyWide(left: kxx, right: kyy)
         right: multiplyWide(left: kxy, right: kxy)
       )
-      let validDeterminant: FloatWide = greaterThanWide(
+      let validDeterminant: Mask4 = greaterThanWide(
         left: absWide(value: determinant)
         right: minDet
       )

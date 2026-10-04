@@ -202,7 +202,7 @@ func pushContactsWide(
       let pointCount: Int = widePointCount(constraint: constraint)
       var bodyA: BodyStateWide = gatherBodies(states: states, indices: constraint.indexA)
       var bodyB: BodyStateWide = gatherBodies(states: states, indices: constraint.indexB)
-      let softMask: FloatWide = softMaskWide(indexA: constraint.indexA, indexB: constraint.indexB)
+      let softMask: Mask4 = softMaskWide(indexA: constraint.indexA, indexB: constraint.indexB)
       let biasRate: FloatWide = blendWide(
         left: dynamicBiasRate
         right: staticBiasRate
@@ -240,7 +240,7 @@ func pushContactsWide(
             normalB: normalB
           )
           # Speculative bias when separated, else the soft constraint bias
-          let separated: FloatWide = greaterThanWide(left: separation, right: zeroWide())
+          let separated: Mask4 = greaterThanWide(left: separation, right: zeroWide())
           let specBias: FloatWide = multiplyWide(left: separation, right: inverseH)
           let overlapBias: FloatWide = maxWide(
             left: multiplyWide(left: biasRate, right: separation)
@@ -401,7 +401,7 @@ func solveContactsWide(
           left: constraint.rollingImpulse
           right: constraint.rollingImpulse
         )
-        let rollingMask: FloatWide = greaterThanWide(
+        let rollingMask: Mask4 = greaterThanWide(
           left: rollingLengthSquared
           right: mulAddWide(base: epsilon, left: maxRolling, right: maxRolling)
         )
@@ -507,7 +507,7 @@ func solveContactsWide(
         right: multiplyWide(left: newFriction.y, right: newFriction.y)
       )
       # The max impulse can be zero
-      let frictionMask: FloatWide = greaterThanWide(
+      let frictionMask: Mask4 = greaterThanWide(
         left: frictionLengthSquared
         right: multiplyWide(left: maxFriction, right: maxFriction)
       )
@@ -569,7 +569,7 @@ func applyRestitutionWide(
       let pointCount: Int = widePointCount(constraint: constraint)
       var bodyA: BodyStateWide = gatherBodies(states: states, indices: constraint.indexA)
       var bodyB: BodyStateWide = gatherBodies(states: states, indices: constraint.indexB)
-      let restitutionMask: FloatWide = greaterThanWide(left: constraint.restitution, right: zero)
+      let restitutionMask: Mask4 = greaterThanWide(left: constraint.restitution, right: zero)
       let dp: Vec3Wide = subtractVectorWide(left: bodyB.deltaPosition, right: bodyA.deltaPosition)
       let rotationA: Matrix3Wide = matrixFromQuatWide(quat: bodyA.deltaRotation)
       let rotationB: Matrix3Wide = matrixFromQuatWide(quat: bodyB.deltaRotation)
@@ -591,7 +591,7 @@ func applyRestitutionWide(
             left: constraintPoint.totalNormalImpulse
             right: constraintPoint.restitutionImpulse
           )
-          let armed: FloatWide = andWide(
+          let armed: Mask4 = andWide(
             left: andWide(
               left: restitutionMask
               right: lessThanWide(

@@ -3,11 +3,12 @@
 # lib/physics/dynamics/ContactSolverWideSolve) on synthetic constraints:
 # the same constraints and body states as c/harness.c, drawn from the same
 # integer generator in the same order, so every build must print the same
-# checksum. run.sh builds this program twice: against the lib's scalar
-# FloatWide (a struct of four Floats, lane by lane) and against
-# float4/physics/dynamics/FloatWide.rae, the Float4 prototype, whose
-# primitives are SIMD (c/float4_prototype.h).
+# checksum. run.sh builds this program twice from the lib as it is: once
+# with lib/Float4's SIMD lowering (NEON / SSE2) and once forced onto its
+# scalar definitions (-DRAE_FLOAT4_SCALAR); the build names itself after
+# the lowering it got.
 import Math
+import Float4
 open Vec3
 open Quat
 open physics/math/Scalar
@@ -263,10 +264,5 @@ func main() {
       hash = (hash bitxor bits) * prime
     }
   }
-  log("RESULT,{benchName()},{elapsed},{hash}")
-}
-
-# The build this program is part of; float4/ shadows it
-func benchName() ret String {
-  ret "rae_scalar"
+  log("RESULT,rae_{Float4.lowering()},{elapsed},{hash}")
 }
