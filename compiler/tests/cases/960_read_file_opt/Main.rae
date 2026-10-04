@@ -1,0 +1,58 @@
+# readFile returns `none` for a missing file and the file's text otherwise,
+# without leaking: the native read returns a plain String whose NULL data
+# means "missing", and wrapping it used to copy the native buffer (leaking
+# it on every read) and mark even a missing file present (an empty String).
+# The physics fixtures read their goldens with the loop below and leaked one
+# String each.
+func rae_ext_rae_mem_stats_outstanding() unsafe extern ret Int
+
+# The first candidate that exists (the runner runs from compiler/, the TSan
+# gate from the case's folder).
+func readFirst(candidates: view List(String)) ret String {
+  loop var i: Int = 0, i < candidates.length, ++i {
+    if let text: String = readFile(path: candidates.copyAtDefault(index: i)) {
+      ret text
+    }
+  }
+  ret ""
+}
+
+func describe(path: view String) ret String {
+  if let text: String = readFile(path: path) {
+    ret "present, length {text.length()}"
+  }
+  ret "none"
+}
+
+func main() {
+  let existingFirst: List(String) = {
+    "tests/cases/960_read_file_opt/data.txt"
+    "data.txt"
+    "/nonexistent/960"
+  }
+  let missingFirst: List(String) = {
+    "/nonexistent/960"
+    "tests/cases/960_read_file_opt/data.txt"
+    "data.txt"
+  }
+  let emptyCandidates: List(String) = { "tests/cases/960_read_file_opt/empty.txt", "empty.txt" }
+  log("missing file: {describe(path: "/nonexistent/960")}")
+  log("existing file first: {readFirst(candidates: existingFirst).length()} bytes")
+  log("missing file first: {readFirst(candidates: missingFirst).length()} bytes")
+  var emptyPath: String = "empty.txt"
+  if let probe: String = readFile(path: emptyCandidates.copyAtDefault(index: 0)) {
+    emptyPath = emptyCandidates.copyAtDefault(index: 0)
+  }
+  log("empty file: {describe(path: emptyPath)}")
+  unsafe {
+    let before: Int = rae_ext_rae_mem_stats_outstanding()
+    var total: Int = 0
+    loop var i: Int = 0, i < 100, ++i {
+      let first: String = readFirst(candidates: existingFirst)
+      let second: String = readFirst(candidates: missingFirst)
+      total = total + first.length() + second.length()
+    }
+    let leaked: Int = rae_ext_rae_mem_stats_outstanding() - before
+    log("200 reads: {total} bytes, {leaked} strings outstanding")
+  }
+}
