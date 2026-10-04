@@ -1,0 +1,319 @@
+# The physics port's height fields (P5c: lib/physics/geometry/HeightField)
+# against Box3D itself: every line of tools/box3d-oracle/goldens/
+# heightfield.golden is one call of height_field.c — b3CreateHeightField
+# (quantized heights, convexity flags, holes, both windings), b3CreateGrid
+# and b3CreateWave, then every triangle of the field
+# (b3GetHeightFieldTriangle, b3GetHeightFieldMaterial), its AABB under a
+# transform and b3QueryHeightField over a few boxes — with its inputs and
+# results as exact hex floats, written by Box3D's own C build. Every value
+# must have the SAME BITS (docs/physics-rae-port-design.md §4).
+import Vec3
+import Quat
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/TransformMath
+open physics/math/AabbMath
+open physics/geometry/Mesh
+open physics/geometry/MeshQuery
+open physics/geometry/HeightField
+
+type Reader {
+  values: List(Float)
+  next: Int
+}
+
+func readFloat(reader: mod Reader) ret Float {
+  let value: Float = reader.values.copyAtDefault(index: reader.next)
+  reader.next = reader.next + 1
+  ret value
+}
+
+func readInt(reader: mod Reader) ret Int {
+  ret readFloat(reader: reader).toInt()
+}
+
+func readVec(reader: mod Reader) ret Vec3 {
+  let x: Float = readFloat(reader: reader)
+  let y: Float = readFloat(reader: reader)
+  let z: Float = readFloat(reader: reader)
+  ret Vec3 { x: x, y: y, z: z }
+}
+
+func readTransform(reader: mod Reader) ret Transform {
+  let position: Vec3 = readVec(reader: reader)
+  let x: Float = readFloat(reader: reader)
+  let y: Float = readFloat(reader: reader)
+  let z: Float = readFloat(reader: reader)
+  let w: Float = readFloat(reader: reader)
+  ret Transform { position: position, rotation: Quat { x: x, y: y, z: z, w: w } }
+}
+
+func readBool(reader: mod Reader) ret Bool {
+  ret readInt(reader: reader) is not 0
+}
+
+func readBox(reader: mod Reader) ret Aabb {
+  let lowerBound: Vec3 = readVec(reader: reader)
+  let upperBound: Vec3 = readVec(reader: reader)
+  ret Aabb { lowerBound: lowerBound, upperBound: upperBound }
+}
+
+func putFloat(out: mod List(Float), value: view Float) {
+  out.add(value: value)
+}
+
+func putInt(out: mod List(Float), value: view Int) {
+  out.add(value: value.toFloat())
+}
+
+func putVec(out: mod List(Float), vector: view Vec3) {
+  out.add(value: vector.x)
+  out.add(value: vector.y)
+  out.add(value: vector.z)
+}
+
+func putBox(out: mod List(Float), box: view Aabb) {
+  putVec(out: out, vector: box.lowerBound)
+  putVec(out: out, vector: box.upperBound)
+}
+
+# The field the triangle, AABB and query lines apply to: the one built last.
+type FieldState {
+  field: opt HeightFieldData
+}
+
+func putField(out: mod List(Float), field: view HeightFieldData) {
+  putBox(out: out, box: field.aabb)
+  putFloat(out: out, value: field.minHeight)
+  putFloat(out: out, value: field.maxHeight)
+  putFloat(out: out, value: field.heightScale)
+  putVec(out: out, vector: field.scale)
+  putInt(out: out, value: field.columnCount)
+  putInt(out: out, value: field.rowCount)
+  if field.clockwise {
+    putInt(out: out, value: 1)
+  } else {
+    putInt(out: out, value: 0)
+  }
+  loop let height: view Int in field.heights {
+    putInt(out: out, value: height)
+  }
+  loop let material: view Int in field.materialIndices {
+    putInt(out: out, value: material)
+  }
+  loop let flag: view Int in field.flags {
+    putInt(out: out, value: flag)
+  }
+}
+
+func keepField(state: mod FieldState, out: mod List(Float), field: view HeightFieldData) {
+  putField(out: out, field: field)
+  state.field = field
+}
+
+func evaluate(
+  name: view String
+  reader: mod Reader
+  out: mod List(Float)
+  state: mod FieldState
+) ret Bool {
+  if name is "b3CreateHeightField" {
+    let columns: Int = readInt(reader: reader)
+    let rows: Int = readInt(reader: reader)
+    var def: HeightFieldDef = {
+      heights: List.create(Float, cap: columns * rows)
+      materialIndices: List.create(Int, cap: 0)
+      scale: Vec3 { x: 1.0, y: 1.0, z: 1.0 }
+      countX: columns
+      countZ: rows
+      globalMinimumHeight: 0.0
+      globalMaximumHeight: 0.0
+      clockwiseWinding: false
+    }
+    loop var k: Int = 0, k < columns * rows, ++k {
+      def.heights.add(value: readFloat(reader: reader))
+    }
+    if readBool(reader: reader) {
+      loop var k: Int = 0, k < (columns - 1) * (rows - 1), ++k {
+        def.materialIndices.add(value: readInt(reader: reader))
+      }
+    }
+    def.scale = readVec(reader: reader)
+    def.globalMinimumHeight = readFloat(reader: reader)
+    def.globalMaximumHeight = readFloat(reader: reader)
+    def.clockwiseWinding = readBool(reader: reader)
+    keepField(state: state, out: out, field: createHeightField(def: def, lengthUnitsPerMeter: 1.0))
+  } else if name is "b3CreateGrid" {
+    let rows: Int = readInt(reader: reader)
+    let columns: Int = readInt(reader: reader)
+    let scale: Vec3 = readVec(reader: reader)
+    let makeHoles: Bool = readBool(reader: reader)
+    keepField(
+      state: state
+      out: out
+      field: createHeightGrid(
+        rowCount: rows
+        columnCount: columns
+        scale: scale
+        makeHoles: makeHoles
+        lengthUnitsPerMeter: 1.0
+      )
+    )
+  } else if name is "b3CreateWave" {
+    let rows: Int = readInt(reader: reader)
+    let columns: Int = readInt(reader: reader)
+    let scale: Vec3 = readVec(reader: reader)
+    let rowFrequency: Float = readFloat(reader: reader)
+    let columnFrequency: Float = readFloat(reader: reader)
+    let makeHoles: Bool = readBool(reader: reader)
+    keepField(
+      state: state
+      out: out
+      field: createHeightWave(
+        rowCount: rows
+        columnCount: columns
+        scale: scale
+        rowFrequency: rowFrequency
+        columnFrequency: columnFrequency
+        makeHoles: makeHoles
+        lengthUnitsPerMeter: 1.0
+      )
+    )
+  } else if name is "heightField.triangle" {
+    let triangleIndex: Int = readInt(reader: reader)
+    if let field: view HeightFieldData => state.field {
+      let triangle: MeshTriangleData = getHeightFieldTriangle(
+        heightField: field
+        triangleIndex: triangleIndex
+      )
+      putVec(out: out, vector: triangle.vertex1)
+      putVec(out: out, vector: triangle.vertex2)
+      putVec(out: out, vector: triangle.vertex3)
+      putInt(out: out, value: triangle.index1)
+      putInt(out: out, value: triangle.index2)
+      putInt(out: out, value: triangle.index3)
+      putInt(out: out, value: triangle.flags)
+      putInt(
+        out: out
+        value: getHeightFieldMaterial(heightField: field, triangleIndex: triangleIndex)
+      )
+    }
+  } else if name is "heightField.aabb" {
+    let transform: Transform = readTransform(reader: reader)
+    if let field: view HeightFieldData => state.field {
+      putBox(out: out, box: computeHeightFieldAabb(heightField: field, transform: transform))
+    }
+  } else if name is "heightField.query" {
+    let bounds: Aabb = readBox(reader: reader)
+    if let field: view HeightFieldData => state.field {
+      let found: List(Int) = queryHeightField(heightField: field, bounds: bounds, capacity: 256)
+      putInt(out: out, value: found.length)
+      loop let triangleIndex: view Int in found {
+        putInt(out: out, value: triangleIndex)
+      }
+    }
+  } else {
+    ret false
+  }
+  ret true
+}
+
+func sameBits(actual: view Float, expected: view Float) ret Bool {
+  if actual is not actual {
+    ret expected is not expected
+  }
+  if actual is not expected {
+    ret false
+  }
+  if actual is 0.0 {
+    ret 1.0 / actual is 1.0 / expected
+  }
+  ret true
+}
+
+func readGolden() ret String {
+  # The runner runs from compiler/, the TSan gate from the case's folder.
+  let candidates: List(String) = {
+    "../tools/box3d-oracle/goldens/heightfield.golden"
+    "../../../tools/box3d-oracle/goldens/heightfield.golden"
+    "tools/box3d-oracle/goldens/heightfield.golden"
+  }
+  loop var i: Int = 0, i < candidates.length, ++i {
+    if let text: String = readFile(path: candidates.copyAtDefault(index: i)) {
+      ret text
+    }
+  }
+  ret ""
+}
+
+func main() {
+  let golden: String = readGolden()
+  let lines: List(String) = golden.split(sep: "\n")
+  var calls: Int = 0
+  var mismatches: Int = 0
+  var unknown: Int = 0
+  var state: FieldState = { field: none }
+  let names: List(String) = List.create(String, cap: 8)
+  loop var i: Int = 0, i < lines.length, ++i {
+    let line: String = lines.copyAtDefault(index: i)
+    if line.length() is 0 or line.startsWith(prefix: "#") {
+      continue
+    }
+    let tokens: List(String) = line.split(sep: " ")
+    let name: String = tokens.copyAtDefault(index: 0)
+    var reader: Reader = { values: List.create(Float, cap: 128), next: 0 }
+    let expected: List(Float) = List.create(Float, cap: 64)
+    var afterArrow: Bool = false
+    loop var j: Int = 1, j < tokens.length, ++j {
+      let token: String = tokens.copyAtDefault(index: j)
+      if token is "->" {
+        afterArrow = true
+      } else if afterArrow {
+        expected.add(value: token.toFloat())
+      } else {
+        reader.values.add(value: token.toFloat())
+      }
+    }
+    let actual: List(Float) = List.create(Float, cap: 64)
+    if evaluate(
+      name: name
+      reader: reader
+      out: actual
+      state: state
+    ) is false {
+      unknown = unknown + 1
+      log("not ported: {name}")
+      continue
+    }
+    calls = calls + 1
+    if names.contains(value: name) is false {
+      names.add(value: name)
+    }
+    var same: Bool = actual.length is expected.length
+    loop var j: Int = 0, j < expected.length and same, ++j {
+      same = sameBits(
+        actual: actual.copyAtDefault(index: j)
+        expected: expected.copyAtDefault(index: j)
+      )
+    }
+    if same is false {
+      mismatches = mismatches + 1
+      if mismatches <= 6 {
+        log("MISMATCH line {i + 1}: {line.sub(start: 0, len: 200)}")
+        var got: String = "  got"
+        loop var j: Int = 0, j < actual.length and j < 40, ++j {
+          got = "{got} {actual.copyAtDefault(index: j)}"
+        }
+        log(got)
+        var want: String = "  want"
+        loop var j: Int = 0, j < expected.length and j < 40, ++j {
+          want = "{want} {expected.copyAtDefault(index: j)}"
+        }
+        log(want)
+      }
+    }
+  }
+  log(
+    "heightfield.golden: {calls} calls of {names.length} Box3D functions, {mismatches} not bit-exact, {unknown} not ported"
+  )
+}

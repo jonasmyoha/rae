@@ -3,7 +3,7 @@
 # b3UpdateContact of Box3D's contact.c at 9f998c8). Box3D's operation order
 # is kept exactly; checked against the oracle in fixture 957.
 #
-# Mesh contacts are MeshContact. Not here yet: the pre-solve and custom
+# Mesh and height-field contacts are MeshContact. Not here yet: the pre-solve and custom
 # friction / restitution callbacks (Rae has no function values; Box3D's
 # defaults are used: the geometric mean of the frictions, the larger
 # restitution), and compound contacts (P5d).
@@ -19,6 +19,7 @@ open physics/math/TransformMath
 open physics/geometry/QueryTypes
 open physics/geometry/Hull
 open physics/geometry/MeshQuery
+open physics/geometry/HeightField
 open physics/collision/Manifold
 open physics/collision/ConvexManifold
 open physics/collision/HullManifold
@@ -512,25 +513,25 @@ func updateContact(
   transformB: view Transform
   hulls: view List(Hull)
   meshes: view List(Mesh)
+  heightFields: view List(HeightFieldData)
   isFast: view Bool
   lengthUnitsPerMeter: view Float
 ) ret Bool {
   var touching: Bool = false
-  if shapeA.shapeType is ShapeType.mesh {
-    if let mesh: view Mesh => meshes.viewAt(index: shapeA.meshIndex) {
-      touching = computeMeshManifolds(
-        contact: contact
-        scratch: meshManifold
-        shapeA: shapeA
-        mesh: mesh
-        transformA: transformA
-        shapeB: shapeB
-        hulls: hulls
-        transformB: transformB
-        isFast: isFast
-        lengthUnitsPerMeter: lengthUnitsPerMeter
-      )
-    }
+  if shapeA.shapeType is ShapeType.mesh or shapeA.shapeType is ShapeType.height {
+    touching = computeMeshManifolds(
+      contact: contact
+      scratch: meshManifold
+      shapeA: shapeA
+      meshes: meshes
+      heightFields: heightFields
+      transformA: transformA
+      shapeB: shapeB
+      hulls: hulls
+      transformB: transformB
+      isFast: isFast
+      lengthUnitsPerMeter: lengthUnitsPerMeter
+    )
     if touching and ((shapeA.flags bitor shapeB.flags) bitand enableHitEventsFlag) is not 0 {
       contact.flags = contact.flags bitor simEnableHitEvent
     } else {

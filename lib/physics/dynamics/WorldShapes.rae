@@ -15,6 +15,7 @@ open physics/geometry/Hull
 open physics/geometry/HullCreate
 open physics/geometry/Mesh
 open physics/geometry/MeshQuery
+open physics/geometry/HeightField
 open physics/collision/ShapePair
 open physics/container/IdPool
 open physics/dynamics/WorldTypes
@@ -69,7 +70,8 @@ func createShapeInternal(
   shape.capsule = geometry.capsule
   shape.hullIndex = geometry.hullIndex
   shape.meshIndex = geometry.meshIndex
-  shape.meshBounds = geometry.meshBounds
+  shape.heightFieldIndex = geometry.heightFieldIndex
+  shape.localBounds = geometry.localBounds
   shape.id = shapeId
   shape.bodyId = bodyId
   shape.density = def.density
@@ -300,11 +302,37 @@ func createMeshShape(
   var geometry: Shape = zeroShape()
   geometry.shapeType = ShapeType.mesh
   geometry.meshIndex = world.meshes.length
-  geometry.meshBounds = Aabb {
+  geometry.localBounds = Aabb {
     lowerBound: min(left: scaledLower, right: scaledUpper)
     upperBound: max(left: scaledLower, right: scaledUpper)
   }
   world.meshes.add(value: Mesh { data: mesh, scale: meshScale })
+  ret finishShape(
+    world: world
+    bodyId: bodyId
+    def: def
+    geometry: geometry
+    shapeId: shapeId
+  )
+}
+
+# b3CreateHeightFieldShape: a height field, on a static body only (a null
+# id otherwise, before any slot is taken, as Box3D's b3CreateShape).
+func createHeightFieldShape(
+  world: mod PhysicsWorld
+  bodyId: view BodyId
+  def: view ShapeDef
+  heightField: view HeightFieldData
+) ret ShapeId {
+  if bodyAt(world: world, bodyId: bodyIndexOf(bodyId: bodyId)).bodyType is not BodyType.staticBody {
+    ret nullShapeId()
+  }
+  let shapeId: Int = allocateShapeSlot(world: world)
+  var geometry: Shape = zeroShape()
+  geometry.shapeType = ShapeType.height
+  geometry.heightFieldIndex = world.heightFields.length
+  geometry.localBounds = heightField.aabb
+  world.heightFields.add(value: heightField)
   ret finishShape(
     world: world
     bodyId: bodyId

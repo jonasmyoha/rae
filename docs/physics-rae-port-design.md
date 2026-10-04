@@ -362,6 +362,14 @@ C added.
   golden `meshscenes`, fixture 974). Not yet: the triangle time of impact of
   continuous collision against a mesh (a fast body skips mesh targets) and
   per-triangle materials (a mesh shape has one).
+  **P5c landed 2026-10-04, bit-exact:** height_field.c (b3CreateHeightField
+  with the 16-bit quantization and the edge convexity flags, holes, both
+  windings, b3GetHeightFieldTriangle / Material, b3ComputeHeightFieldAABB,
+  b3QueryHeightField, b3CreateGrid, b3CreateWave), the height shape
+  (b3CreateHeightFieldShape, static bodies only) and the height-field cases
+  of mesh_contact.c (`lib/physics/geometry/HeightField`; goldens
+  `heightfield`, `heightscenes`, fixtures 979 and 980). The byte-block
+  layout and hash are not ported; the ray, shape and mover casts are P7.
 - **P6 — joints**, one module per kind, each scene bit-exact.
 - **P7 — queries and the mover**: ray/shape casts, overlaps, the character
   loop (walls, steps, slopes).

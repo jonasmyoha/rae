@@ -12,6 +12,7 @@ open physics/math/TransformMath
 open physics/geometry/Hull
 open physics/geometry/Mesh
 open physics/geometry/MeshQuery
+open physics/geometry/HeightField
 open physics/broadPhase/BroadPhase
 open physics/container/IdPool
 open physics/dynamics/WorldTypes
@@ -94,6 +95,9 @@ type PhysicsWorld {
   # The mesh data and scale of mesh shapes (Box3D's shapes point at the
   # caller's b3MeshData)
   meshes: List(Mesh)
+  # The data of height shapes (Box3D's shapes point at the caller's
+  # b3HeightFieldData)
+  heightFields: List(HeightFieldData)
   contactIdPool: IdPool
   contacts: List(Contact)
   constraintGraph: ConstraintGraph
@@ -150,6 +154,7 @@ func createWorld(def: view WorldDef) ret PhysicsWorld {
     fatAabbs: List.create(Aabb, cap: 16)
     hulls: List.create(Hull, cap: 4)
     meshes: List.create(Mesh, cap: 0)
+    heightFields: List.create(HeightFieldData, cap: 0)
     contactIdPool: createIdPool()
     contacts: List.create(Contact, cap: 16)
     constraintGraph: createGraph(bodyCapacity: 16)
