@@ -1,0 +1,72 @@
+# An argument of an overloaded call that is a generic method of the prelude
+# (`points.copyAtDefault(index: 0)`, from core/List). Its type was unknown
+# when the overload was chosen, and an unknown argument type matches
+# anything, so `multiply(matrix: m, vector: <that>)` picked the first
+# `multiply` whose other parameters fit: `multiply(left: Matrix3, right:
+# Matrix3)`, then failed on the argument names. The result type of such a
+# call is now known before overload resolution.
+open Vec3
+
+type Matrix3 {
+  columnX: Vec3
+  columnY: Vec3
+  columnZ: Vec3
+}
+
+type Proxy {
+  points: List(Vec3)
+}
+
+func multiply(left: view Matrix3, right: view Matrix3) ret Matrix3 {
+  ret Matrix3 {
+    columnX: multiply(matrix: left, vector: right.columnX)
+    columnY: multiply(matrix: left, vector: right.columnY)
+    columnZ: multiply(matrix: left, vector: right.columnZ)
+  }
+}
+
+func multiply(matrix: view Matrix3, vector: view Vec3) ret Vec3 {
+  ret Vec3 {
+    x: matrix.columnX.x * vector.x + matrix.columnY.x * vector.y + matrix.columnZ.x * vector.z
+    y: matrix.columnX.y * vector.x + matrix.columnY.y * vector.y + matrix.columnZ.y * vector.z
+    z: matrix.columnX.z * vector.x + matrix.columnY.z * vector.y + matrix.columnZ.z * vector.z
+  }
+}
+
+func add(left: view Vec3, right: view Vec3) ret Vec3 {
+  ret Vec3 { x: left.x + right.x, y: left.y + right.y, z: left.z + right.z }
+}
+
+func add(left: view Matrix3, right: view Matrix3) ret Matrix3 {
+  ret Matrix3 {
+    columnX: add(left: left.columnX, right: right.columnX)
+    columnY: add(left: left.columnY, right: right.columnY)
+    columnZ: add(left: left.columnZ, right: right.columnZ)
+  }
+}
+
+func describe(vector: view Vec3) ret String {
+  ret "{vector.x} {vector.y} {vector.z}"
+}
+
+func main() {
+  # Swaps x and y.
+  let rotation: Matrix3 = {
+    columnX: Vec3 { x: 0.0, y: 1.0, z: 0.0 }
+    columnY: Vec3 { x: 1.0, y: 0.0, z: 0.0 }
+    columnZ: Vec3 { x: 0.0, y: 0.0, z: 1.0 }
+  }
+  let translation: Vec3 = { x: 10.0, y: 20.0, z: 30.0 }
+  let points: List(Vec3) = { Vec3 { x: 1.0, y: 2.0, z: 3.0 } }
+  let proxy: Proxy = { points: points }
+  let rotated: Vec3 = multiply(matrix: rotation, vector: points.copyAtDefault(index: 0))
+  log("local list: {describe(vector: rotated)}")
+  let moved: Vec3 = add(
+    left: multiply(matrix: rotation, vector: proxy.points.copyAtDefault(index: 0))
+    right: translation
+  )
+  log("field list, nested: {describe(vector: moved)}")
+  let matrices: List(Matrix3) = { rotation }
+  let squared: Matrix3 = multiply(left: rotation, right: matrices.copyAtDefault(index: 0))
+  log("matrix overload: {describe(vector: squared.columnX)}")
+}
