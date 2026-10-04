@@ -17,6 +17,32 @@
 #include <stdlib.h>
 #include <string.h>
 
+// The source operand of a rae_deep_copy_<T>(dst, src) call: `&(expr)`, except
+// for an identifier bound to a `view`/`mod` List or Buffer, which lowers to a
+// raw T* already — `&(values)` would hand the helper the address of the
+// pointer (a `let source: List(Int) = values` of a `mod` parameter crashed).
+bool c_expr_is_pointer_list_ident(CFuncContext* ctx, const AstExpr* expr) {
+  if (!ctx || !expr || expr->kind != AST_EXPR_IDENT) return false;
+  for (int i = (int)ctx->local_count - 1; i >= 0; i--) {
+    if (!str_eq(ctx->locals[i], expr->as.ident)) continue;
+    const AstTypeRef* type = ctx->local_type_refs[i];
+    if (!type || !(type->is_view || type->is_mod)) return false;
+    Str base = get_base_type_name(type);
+    return str_eq_cstr(base, "List") || str_eq_cstr(base, "Buffer");
+  }
+  return false;
+}
+
+void emit_deep_copy_source(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
+  if (c_expr_is_pointer_list_ident(ctx, expr)) {
+    emit_expr(ctx, expr, out, PREC_LOWEST, false, true);
+    return;
+  }
+  fprintf(out, "&(");
+  emit_expr(ctx, expr, out, PREC_LOWEST, false, false);
+  fprintf(out, ")");
+}
+
 // File-local helpers.
 static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
@@ -415,9 +441,9 @@ void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
                                              || c_opt_source_aliases(ctx, value))) {
         const char* copy_name = rae_mangle_type_specialized(
             ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, &payload);
-        fprintf(out, "rae_deep_copy_%s(&__opt%d.value, &(", copy_name, optn);
-        emit_expr(ctx, value, out, PREC_LOWEST, false, false);
-        fprintf(out, ")); ");
+        fprintf(out, "rae_deep_copy_%s(&__opt%d.value, ", copy_name, optn);
+        emit_deep_copy_source(ctx, value, out);
+        fprintf(out, "); ");
       } else {
         fprintf(out, "__opt%d.value = ", optn);
         emit_expr(ctx, value, out, PREC_LOWEST, false, false);
@@ -2714,10 +2740,10 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                         ctx->compiler_ctx, ctx->generic_params,
                         ctx->generic_args, stmt->as.let_stmt.type);
                     int tmp_id = ctx->temp_counter++;
-                    fprintf(out, "(__extension__ ({ %s __dc%d; rae_deep_copy_%s(&__dc%d, &(",
+                    fprintf(out, "(__extension__ ({ %s __dc%d; rae_deep_copy_%s(&__dc%d, ",
                             tn_dc, tmp_id, tn_dc, tmp_id);
-                    emit_expr(ctx, stmt->as.let_stmt.value, out, PREC_LOWEST, false, false);
-                    fprintf(out, ")); __dc%d; }))", tmp_id);
+                    emit_deep_copy_source(ctx, stmt->as.let_stmt.value, out);
+                    fprintf(out, "); __dc%d; }))", tmp_id);
                     let_did_deep_copy = true;
                 } else {
                     if (wrap_str_take) fprintf(out, "rae_string_pool_take(");
@@ -2986,10 +3012,10 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     } else if (rhs_reads_location) {
                         const char* tn_dc = rae_mangle_type_specialized(
                             ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, &pointee);
-                        fprintf(out, "(__extension__ ({ %s __dc%d; rae_deep_copy_%s(&__dc%d, &(",
+                        fprintf(out, "(__extension__ ({ %s __dc%d; rae_deep_copy_%s(&__dc%d, ",
                                 tn_dc, tmpn, tn_dc, tmpn);
-                        emit_expr(ctx, rhs, out, PREC_LOWEST, false, false);
-                        fprintf(out, ")); __dc%d; }))", tmpn);
+                        emit_deep_copy_source(ctx, rhs, out);
+                        fprintf(out, "); __dc%d; }))", tmpn);
                     } else {
                         if (rhs->kind == AST_EXPR_OBJECT && !rhs->as.object_literal.type) {
                             fprintf(out, "(");
@@ -3112,9 +3138,9 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     if (hv_is_place) {
                         // A place copies (#882: through the type's `copy`); sema
                         // has already rejected it when the type has none.
-                        fprintf(out, "{ %s __asg%d; rae_deep_copy_%s(&__asg%d, &(", tn_hook, tmpn, tn_hook, tmpn);
-                        emit_expr(ctx, hv, out, PREC_LOWEST, false, false);
-                        fprintf(out, ")); ");
+                        fprintf(out, "{ %s __asg%d; rae_deep_copy_%s(&__asg%d, ", tn_hook, tmpn, tn_hook, tmpn);
+                        emit_deep_copy_source(ctx, hv, out);
+                        fprintf(out, "); ");
                     } else {
                         fprintf(out, "{ %s __asg%d = ", tn_hook, tmpn);
                         emit_expr(ctx, hv, out, PREC_LOWEST, false, false);
@@ -3279,13 +3305,19 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                         ctx->compiler_ctx, ctx->generic_params,
                         ctx->generic_args, target_tr);
                     int tmpn = ctx->temp_counter++;
-                    fprintf(out, "{ %s __asg%d; rae_deep_copy_%s(&__asg%d, &(",
+                    fprintf(out, "{ %s __asg%d; rae_deep_copy_%s(&__asg%d, ",
                             tn_dc, tmpn, tn_dc, tmpn);
-                    emit_expr(ctx, stmt->as.assign_stmt.value, out, PREC_LOWEST, false, false);
-                    fprintf(out, ")); %s* __asgp%d = &(", tn_dc, tmpn);
+                    emit_deep_copy_source(ctx, stmt->as.assign_stmt.value, out);
+                    fprintf(out, "); %s* __asgp%d = &(", tn_dc, tmpn);
                     emit_expr(ctx, stmt->as.assign_stmt.target, out, PREC_LOWEST, true, false);
-                    fprintf(out, "); rae_drop_struct_%s(__asgp%d); *__asgp%d = __asg%d; }",
-                            tn_dc, tmpn, tmpn, tmpn);
+                    fprintf(out, ");");
+                    // The drop of the old value by its type: a List has no
+                    // rae_drop_struct_<T> (assigning a `view List` parameter
+                    // to a List local named one that does not exist).
+                    char target_name[48];
+                    snprintf(target_name, sizeof target_name, "(*__asgp%d)", tmpn);
+                    emit_drop_for_value(ctx, out, target_tr, target_name, true);
+                    fprintf(out, " *__asgp%d = __asg%d; }", tmpn, tmpn);
                     ctx->has_expected_type = had_exp;
                     ctx->expected_type = saved_exp;
                 } else if (target_tr && !target_tr->is_view && !target_tr->is_mod
@@ -3329,10 +3361,10 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     if (arhs_reads_location) {
                         const char* tn_dc = rae_mangle_type_specialized(
                             ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, target_tr);
-                        fprintf(out, "(__extension__ ({ %s __dc%d; rae_deep_copy_%s(&__dc%d, &(",
+                        fprintf(out, "(__extension__ ({ %s __dc%d; rae_deep_copy_%s(&__dc%d, ",
                                 tn_dc, tmpn, tn_dc, tmpn);
-                        emit_expr(ctx, arhs, out, PREC_LOWEST, false, false);
-                        fprintf(out, ")); __dc%d; }))", tmpn);
+                        emit_deep_copy_source(ctx, arhs, out);
+                        fprintf(out, "); __dc%d; }))", tmpn);
                     } else {
                         if (arhs->kind == AST_EXPR_OBJECT && !arhs->as.object_literal.type) {
                             fprintf(out, "(");

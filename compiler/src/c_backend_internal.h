@@ -170,6 +170,8 @@ void emit_stmt_temp_drops_keep(CFuncContext* ctx, FILE* out);
 int register_stmt_temp(CFuncContext* ctx, const AstTypeRef* type, bool owns_heap);
 bool c_stmt_temp_value_owns(CFuncContext* ctx, const AstExpr* value);
 bool c_primitive_ref_has_wrapper(Str base);
+bool c_expr_is_pointer_list_ident(CFuncContext* ctx, const AstExpr* expr);
+void emit_deep_copy_source(CFuncContext* ctx, const AstExpr* expr, FILE* out);
 // Write the pending temporary drops now (before a `return`).
 void emit_stmt_temp_drops_now(CFuncContext* ctx, FILE* out);
 // Emit the drop of one owned value of `type` held in the C lvalue `cname`.

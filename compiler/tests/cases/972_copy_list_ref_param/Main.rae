@@ -1,0 +1,80 @@
+# Copying a `mod`/`view` List parameter into an owning local, field or
+# assignment. Such a parameter lowers to a raw pointer, and the deep copy
+# took its address (`rae_deep_copy(&dst, &(values))`), so the copy read the
+# pointer itself: `let source: List(Int) = values` crashed. Every copy below
+# must be an independent list, and nothing may leak.
+type Named {
+  name: String
+  weight: Int
+}
+
+type Holder {
+  items: List(Int)
+}
+
+func keepEven(values: mod List(Int)) {
+  let source: List(Int) = values
+  let kept: List(Int) = List.create(Int, cap: 4)
+  loop var i: Int = 0, i < source.length, ++i {
+    if i % 2 is 0 {
+      kept.add(value: source.copyAtDefault(index: i))
+    }
+  }
+  values = kept
+}
+
+func copyViewed(values: view List(Int)) ret Int {
+  let copied: List(Int) = values
+  copied.add(value: 100)
+  ret copied.length
+}
+
+func assignViewed(values: view List(Int)) ret Int {
+  var target: List(Int) = { 7 }
+  target = values
+  target.add(value: 1)
+  ret target.length
+}
+
+func holderOf(values: view List(Int)) ret Holder {
+  ret Holder { items: values }
+}
+
+func renameFirst(entries: mod List(Named)) ret String {
+  let snapshot: List(Named) = entries
+  if let first: mod Named => entries.modAt(index: 0) {
+    first.name = "changed"
+  }
+  ret snapshot.copyAtDefault(index: 0).name
+}
+
+func main() {
+  var values: List(Int) = {
+    1
+    2
+    3
+    4
+    5
+  }
+  keepEven(values: values)
+  log(
+    "mod copy then reassign: {values.length} [{values.copyAtDefault(index: 0)} {values.copyAtDefault(
+      index: 1
+    )} {values.copyAtDefault(index: 2)}]"
+  )
+
+  let viewed: List(Int) = { 4, 5, 6 }
+  log("view copy: {copyViewed(values: viewed)}, source still {viewed.length}")
+  log("assignment from a view: {assignViewed(values: viewed)}, source still {viewed.length}")
+  let holder: Holder = holderOf(values: viewed)
+  log("struct field from a view: {holder.items.length} {holder.items.copyAtDefault(index: 2)}")
+
+  var entries: List(Named) = List.create(Named, cap: 2)
+  entries.add(value: Named { name: "first", weight: 1 })
+  entries.add(value: Named { name: "second", weight: 2 })
+  log(
+    "heap elements: snapshot keeps {renameFirst(entries: entries)}, list has {entries.copyAtDefault(
+      index: 0
+    ).name}"
+  )
+}
