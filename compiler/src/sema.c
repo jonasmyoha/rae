@@ -7316,6 +7316,18 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
             expr->resolved_type = type_get_string(ctx->type_registry);
             break;
         }
+        case AST_EXPR_COLLECTION_LITERAL:
+            /* The elements are expressions like any other: a call in one must
+             * be resolved here, or the backend picks an overload by name alone
+             * (`{ add(left: multiply(matrix: m, vector: v), ...) }` lowered the
+             * inner call to the component-wise multiply). */
+            for (AstCollectionElement* el = expr->as.collection.elements; el; el = el->next)
+                if (el->value) sema_analyze_expr(ctx, module, symbols, el->value, true);
+            break;
+        case AST_EXPR_LIST:
+            for (AstExprList* item = expr->as.list; item; item = item->next)
+                if (item->value) sema_analyze_expr(ctx, module, symbols, item->value, true);
+            break;
         default: break;
     }
 

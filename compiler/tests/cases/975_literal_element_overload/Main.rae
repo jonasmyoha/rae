@@ -1,0 +1,45 @@
+# A call inside a collection literal element resolves its overload like any
+# other call. Sema never analysed literal elements, so the backend picked a
+# same-named function by name alone: `{ add(left: combine(scale: s, point: p),
+# right: q) }` ran the other `combine` (the two differ only in their argument
+# names) and built the wrong element.
+type Point {
+  x: Int
+  y: Int
+}
+
+func combine(left: view Point, right: view Point) ret Point {
+  ret Point { x: left.x + right.x, y: left.y + right.y }
+}
+
+func combine(scale: view Int, point: view Point) ret Point {
+  ret Point { x: scale * point.x, y: scale * point.y }
+}
+
+func label(point: view Point) ret String {
+  ret "({point.x}, {point.y})"
+}
+
+func label(prefix: view String, point: view Point) ret String {
+  ret "{prefix}{point.x}/{point.y}"
+}
+
+func main() {
+  let first: Point = { x: 1, y: 2 }
+  let second: Point = { x: 10, y: 20 }
+  let points: List(Point) = {
+    combine(left: combine(scale: 3, point: first), right: second)
+    combine(scale: 2, point: second)
+    combine(left: first, right: second)
+  }
+  loop let point: view Point in points {
+    log("point {point.x} {point.y}")
+  }
+  let labels: List(String) = {
+    label(prefix: "p=", point: first)
+    label(point: combine(scale: 5, point: second))
+  }
+  loop let text: view String in labels {
+    log("label {text}")
+  }
+}
