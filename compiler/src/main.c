@@ -4666,6 +4666,9 @@ static int cmd_tree(void) {
 }
 
 int main(int argc, char** argv) {
+  /* The program under `rae run` reports its own memory stats; the driver's
+   * would be an all-zero block printed after it. */
+  rae_mem_stats_silence_exit_report();
   if (argc < 2) {
     print_usage(argv[0]);
     return 1;
