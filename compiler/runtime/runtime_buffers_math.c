@@ -39,7 +39,6 @@ int64_t rae_ext_rae_float_to_int(float v){ return (int64_t)v; }
  * GpuArgs.pushF32 append an f32's exact bytes without a per-call 1-element
  * List(Float) + buf_copy — that scratch alloc was ~500k Buffer allocs / 18 s
  * in 114 (the dominant idle malloc traffic). */
-int64_t rae_ext_rae_f32_bits(float v){ uint32_t b; memcpy(&b, &v, 4); return (int64_t)b; }
 
 /* Bit intrinsics over the 64-bit two's-complement representation of an Int.
  * leadingZeros/trailingZeros of 0 are defined as 64 (the builtins are UB on 0). */
@@ -236,12 +235,9 @@ RaeAny rae_ext_rae_buf_get_any(void* buf, int64_t index) {
   return ((RaeAny*)buf)[index];
 }
 
-/* lib/math.rae declares these over `Float`, which is f32 (see
- * docs/primitive-types.md), so the C side takes and returns `float` and uses
- * the f-suffixed libm entry points. Computing in float rather than
- * round-tripping through double keeps the CPU result in the same
- * representation the GPU uses, which is the point of an f32 default.
- * Higher-precision variants belong on explicit Float64 APIs. */
+/* lib/Math's transcendental functions, out of line on purpose (see the
+ * comment at their declarations in rae_runtime.h); the exactly specified ones
+ * (sqrt, floor, ceil, round, remainder, the bit casts) are static inline there. */
 float rae_ext_Math_sin(float x) { return sinf(x); }
 float rae_ext_Math_cos(float x) { return cosf(x); }
 float rae_ext_Math_tan(float x) { return tanf(x); }
@@ -249,19 +245,9 @@ float rae_ext_Math_asin(float x) { return asinf(x); }
 float rae_ext_Math_acos(float x) { return acosf(x); }
 float rae_ext_Math_atan(float x) { return atanf(x); }
 float rae_ext_Math_atan2(float y, float x) { return atan2f(y, x); }
-float rae_ext_Math_sqrt(float x) { return sqrtf(x); }
-/* IEEE remainder: x - n*y with n the nearest integer to x/y. Exact (no rounding), so
- * deterministic on every platform — Box3D's b3UnwindAngle relies on it. */
-float rae_ext_Math_remainder(float x, float y) { return remainderf(x, y); }
-/* The inverse of rae_ext_rae_f32_bits: the Float whose IEEE-754 bits are the
-   low 32 bits of `bits` (lib/Math floatFromBits). */
-float rae_ext_Math_floatFromBits(int64_t bits) { uint32_t low = (uint32_t)bits; float x; memcpy(&x, &low, sizeof x); return x; }
 float rae_ext_Math_pow(float base, float exp) { return powf(base, exp); }
 float rae_ext_Math_exp(float x) { return expf(x); }
 float rae_ext_Math_math_log(float x) { return logf(x); }
-float rae_ext_Math_floor(float x) { return floorf(x); }
-float rae_ext_Math_ceil(float x) { return ceilf(x); }
-float rae_ext_Math_round(float x) { return roundf(x); }
 
 /* JSON helpers for C backend */
 static const char* rae_json_find_key(const char* json, int64_t json_len, const char* key) {

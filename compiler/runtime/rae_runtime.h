@@ -220,7 +220,8 @@ RAE_UNUSED static void rae_log_stream_RaeAny_(RaeAny v) { rae_ext_rae_log_stream
 /* Conversion Helpers */
 RAE_UNUSED float rae_ext_rae_int_to_float(int64_t v);
 RAE_UNUSED int64_t rae_ext_rae_float_to_int(float v);
-RAE_UNUSED int64_t rae_ext_rae_f32_bits(float v);
+/* A Float's IEEE-754 bits (lib/Math floatBits); inline like the Math functions. */
+static inline int64_t rae_ext_rae_f32_bits(float v) { uint32_t b; memcpy(&b, &v, 4); return (int64_t)b; }
 RAE_UNUSED static RaeAny rae_any_int(int64_t v) { return (RaeAny){.type = RAE_TYPE_INT64, .as.i = v}; }
 RAE_UNUSED static RaeAny rae_any_int32(int32_t v) { return (RaeAny){.type = RAE_TYPE_INT32, .as.i = v}; }
 RAE_UNUSED static RaeAny rae_any_uint64(uint64_t v) { return (RaeAny){.type = RAE_TYPE_UINT64, .as.i = (int64_t)v}; }
@@ -739,6 +740,23 @@ void rae_ext_rae_sleep(int64_t ms);
 rae_String rae_ext_Time_formatTimestamp(int64_t epoch_ms);
 rae_String rae_ext_Time_formatDate(int64_t epoch_ms);
 
+/* lib/Math.rae's scalar functions over `Float`, which is f32 (see
+ * docs/primitive-types.md): the C side takes and returns `float` and uses the
+ * f-suffixed libm entry points. Computing in float rather than round-tripping
+ * through double keeps the CPU result in the representation the GPU uses.
+ * Higher-precision variants belong on explicit Float64 APIs.
+ *
+ * The EXACTLY specified ones are static inline here, so a call in generated
+ * code inlines — sqrtf, floorf, ceilf and roundf become single instructions —
+ * instead of crossing into the separately compiled runtime
+ * (docs/float4-design.md §6.4: the solver's clamps and vector lengths). sqrtf
+ * is correctly rounded IEEE and the rest are exact, so a C compiler folding a
+ * constant argument gets the same bits as the instruction.
+ *
+ * The transcendental ones (sin ... log, pow) stay out of line in the runtime
+ * object on purpose: libm does not round them correctly, so a compiler that
+ * folded `sinf(constant)` with its own implementation (GCC uses MPFR) could
+ * produce different bits from the runtime's call. */
 float rae_ext_Math_sin(float x);
 float rae_ext_Math_cos(float x);
 float rae_ext_Math_tan(float x);
@@ -746,13 +764,22 @@ float rae_ext_Math_asin(float x);
 float rae_ext_Math_acos(float x);
 float rae_ext_Math_atan(float x);
 float rae_ext_Math_atan2(float y, float x);
-float rae_ext_Math_sqrt(float x);
-float rae_ext_Math_pow(float b, float e);
+float rae_ext_Math_pow(float base, float exp);
 float rae_ext_Math_exp(float x);
 float rae_ext_Math_math_log(float x);
-float rae_ext_Math_floor(float x);
-float rae_ext_Math_ceil(float x);
-float rae_ext_Math_round(float x);
+static inline float rae_ext_Math_sqrt(float x) { return sqrtf(x); }
+/* IEEE remainder: x - n*y with n the nearest integer to x/y. Exact (no
+ * rounding), so deterministic on every platform — Box3D's b3UnwindAngle
+ * relies on it. */
+static inline float rae_ext_Math_remainder(float x, float y) { return remainderf(x, y); }
+static inline float rae_ext_Math_floor(float x) { return floorf(x); }
+static inline float rae_ext_Math_ceil(float x) { return ceilf(x); }
+static inline float rae_ext_Math_round(float x) { return roundf(x); }
+/* The Float whose IEEE-754 bits are the low 32 bits of `bits` (lib/Math
+ * floatFromBits), the inverse of rae_ext_rae_f32_bits. */
+static inline float rae_ext_Math_floatFromBits(int64_t bits) {
+  uint32_t low = (uint32_t)bits; float x; memcpy(&x, &low, sizeof x); return x;
+}
 
 RaeAny rae_ext_json_get(const char* json, const char* field);
 
