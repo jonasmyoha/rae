@@ -1542,6 +1542,11 @@ const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
         /* A cast's type IS its target — this is what stops the backend
          * re-inferring the operand's (pre-conversion) type. */
         case AST_EXPR_CAST: return expr->as.cast.target;
+        /* A typed list literal (`List(Point) { ... }`, the spelling a `ret`
+         * needs) is its written type. */
+        case AST_EXPR_COLLECTION_LITERAL:
+            if (expr->as.collection.type) return expr->as.collection.type;
+            break;
         /* Indexing an Array(T, cap: N) yields T. Sema already recorded it;
          * surfacing it here is what lets the ordinary assignment path see a
          * String target and wrap the RHS in rae_string_pool_take, exactly as
