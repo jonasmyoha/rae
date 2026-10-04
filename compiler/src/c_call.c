@@ -1026,7 +1026,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 } else if (!(arg_tr && (arg_tr->is_view || arg_tr->is_mod))) {
                     if (view_is_value) {
                         // No wrap needed; emit the arg as a plain value.
-                    } else if (is_primitive_type(base) && !str_eq_cstr(base, "Buffer") && !str_eq_cstr(base, "Any")) needs_prim_wrap = true;
+                    } else if (is_primitive_type(base) && c_primitive_ref_has_wrapper(base_concrete)) needs_prim_wrap = true;
                     else if (!str_eq_cstr(base, "Buffer") && !str_eq_cstr(base, "Any")) needs_addr = true;
                 } else {
                     if (view_is_value) {
@@ -1088,6 +1088,10 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 fprintf(out, "(rae_Mod_String){ .ptr = &(");
                 emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
                 fprintf(out, ") }");
+                needs_prim_wrap = false;
+            } else if (use_hoisted_temp && !c_primitive_ref_has_wrapper(get_base_type_name(wrap_pt))) {
+                // A fixed-width integer reference is a plain pointer.
+                fprintf(out, "&__rae_pw_%d", wrap_base + wrap_idx[arg_index]);
                 needs_prim_wrap = false;
             } else if (use_hoisted_temp) {
                 fprintf(out, "(");

@@ -472,6 +472,11 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
             if (!str_eq_cstr(vb, "Buffer") && !str_eq_cstr(vb, "List") && !str_eq_cstr(vb, "Any") && !is_num_prim) {
                 is_struct_view = true;
             }
+            // `mod` of a fixed-width integer (UInt64, Int32, ...) has no
+            // `{ .ptr }` wrapper: it is a plain `T*`, read through `(*name)`.
+            if (is_num_prim && tr->is_mod && !c_primitive_ref_has_wrapper(vb_concrete)) {
+                is_struct_view = true;
+            }
         }
 
         // A `view`/`mod` LOCAL of numeric primitive type is a real reference,
@@ -556,7 +561,7 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
           if (otr && otr->is_opt && (otr->is_view || otr->is_mod)) {
               fprintf(out, "((bool)(");
               if (operand->kind == AST_EXPR_IDENT
-                  && is_primitive_type(get_base_type_name(otr))) {
+                  && c_primitive_ref_has_wrapper(get_base_type_name(otr))) {
                   fprintf(out, "%.*s.ptr", (int)operand->as.ident.len,
                           operand->as.ident.data);
               } else {
