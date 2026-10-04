@@ -1,0 +1,31 @@
+# A read off a List that a call returns: `grid.copyAtDefault(index: 0)` is a
+# fresh copy, an rvalue, so the next `.copyAtDefault(...)` cannot use the
+# element fast path, which takes the list's address (`&(copyAtDefault(...))`
+# is not C). The library call binds the copy to a temporary and drops it
+# after the statement, so nothing leaks, in a loop either.
+type Point {
+  x: Int
+  y: Int
+}
+
+func row() ret List(Point) {
+  let points: List(Point) = { Point { x: 7, y: 8 } }
+  ret points
+}
+
+func main() {
+  let nested: List(List(Point)) = { { Point { x: 1, y: 2 } }, {} }
+  log("{nested.copyAtDefault(index: 0).copyAtDefault(index: 0).x}")
+  log("{nested.copyAtDefault(index: 1).copyAtDefault(index: 0).y}")
+  log("{row().copyAtDefault(index: 0).y}")
+  let numbers: List(List(Int)) = { { 4, 5 } }
+  let picked: Int = numbers.copyAtDefault(index: 0).copyAtFallback(index: 9, fallback: -1)
+  log("{picked}")
+  var total: Int = 0
+  loop var i: Int = 0, i < 50, ++i {
+    total = total + nested.copyAtDefault(index: i % 2).copyAtDefault(index: 0).x + row().copyAtDefault(
+      index: 0
+    ).x
+  }
+  log("total {total}")
+}
