@@ -1,0 +1,484 @@
+# PERMANENT (docs/float4-design.md §0): every lib/Float4 function, lane by
+# lane, against its scalar definition written here in plain Float arithmetic,
+# compared BIT FOR BIT. The inputs include -0, +-inf, NaNs (with a sign and a
+# payload), denormals and the extremes; the masks include arbitrary bit
+# patterns, not only comparison results. This case runs the platform's SIMD
+# lowering (NEON / SSE2 / wasm SIMD128); 968_float4_bit_exact_scalar runs the
+# same program with `--float4-scalar`. Keep the two Main.rae files identical.
+import Math
+import Float4
+
+const valueCount: Int = 18
+
+func specialBits() ret List(Int) {
+  let bits: List(Int) = {
+    0x00000000
+    0x80000000
+    0x3F800000
+    0xBF800000
+    0x3FC00000
+    0xC0100000
+    0x7F800000
+    0xFF800000
+    0x7FC00000
+    0xFFC00001
+    0x00000001
+    0x80000001
+    0x007FFFFF
+    0x00800000
+    0x7F7FFFFF
+    0x40490FDB
+    0x3DCCCCCD
+    0xC2F6E979
+  }
+  ret bits
+}
+
+func valueAt(bits: view List(Int), index: view Int) ret Float {
+  ret Math.floatFromBits(bits: bits.copyAtDefault(index: index % valueCount))
+}
+
+# Four values starting at `first`, `stride` apart (wrapping).
+func quad(bits: view List(Int), first: view Int, stride: view Int) ret Float4 {
+  let x: Float = valueAt(bits: bits, index: first)
+  let y: Float = valueAt(bits: bits, index: first + stride)
+  let z: Float = valueAt(bits: bits, index: first + stride * 2)
+  let w: Float = valueAt(bits: bits, index: first + stride * 3)
+  ret Float4 { x: x, y: y, z: z, w: w }
+}
+
+func maskOf(bits: view List(Int), first: view Int) ret Mask4 {
+  let bitsX: UInt32 = bits.copyAtDefault(index: first % valueCount) as UInt32
+  let bitsY: UInt32 = bits.copyAtDefault(index: (first + 3) % valueCount) as UInt32
+  let bitsZ: UInt32 = bits.copyAtDefault(index: (first + 7) % valueCount) as UInt32
+  let bitsW: UInt32 = bits.copyAtDefault(index: (first + 13) % valueCount) as UInt32
+  ret Mask4 { bitsX: bitsX, bitsY: bitsY, bitsZ: bitsZ, bitsW: bitsW }
+}
+
+func lane(value: view Float4, index: view Int) ret Float {
+  if index is 0 {
+    ret value.x
+  }
+  if index is 1 {
+    ret value.y
+  }
+  if index is 2 {
+    ret value.z
+  }
+  ret value.w
+}
+
+func maskLane(mask: view Mask4, index: view Int) ret UInt32 {
+  if index is 0 {
+    ret mask.bitsX
+  }
+  if index is 1 {
+    ret mask.bitsY
+  }
+  if index is 2 {
+    ret mask.bitsZ
+  }
+  ret mask.bitsW
+}
+
+func bitsOf(value: view Float) ret Int {
+  ret Math.floatBits(value: value)
+}
+
+func maskBits(condition: view Bool) ret UInt32 {
+  if condition {
+    ret 0xFFFFFFFF
+  }
+  ret 0
+}
+
+# The scalar definitions.
+func scalarMin(a: view Float, b: view Float) ret Float {
+  if a <= b {
+    ret a
+  }
+  ret b
+}
+
+func scalarMax(a: view Float, b: view Float) ret Float {
+  if a >= b {
+    ret a
+  }
+  ret b
+}
+
+func scalarAbs(a: view Float) ret Float {
+  if a < 0.0 {
+    ret -a
+  }
+  ret a
+}
+
+func scalarClampSymmetric(value: view Float, limit: view Float) ret Float {
+  let clamped: Float = scalarMin(a: value, b: limit)
+  let negativeLimit: Float = -limit
+  if clamped <= negativeLimit {
+    ret negativeLimit
+  }
+  ret clamped
+}
+
+func scalarMulAdd(a: view Float, b: view Float, c: view Float) ret Float {
+  let product: Float = a * b
+  ret product + c
+}
+
+func scalarSelect(mask: view UInt32, ifTrue: view Float, ifFalse: view Float) ret Float {
+  let trueBits: UInt32 = bitsOf(value: ifTrue) as UInt32
+  let falseBits: UInt32 = bitsOf(value: ifFalse) as UInt32
+  let picked: UInt32 = (trueBits bitand mask) bitor (falseBits bitand (bitnot mask))
+  ret Math.floatFromBits(bits: picked as Int)
+}
+
+# One counter per function: lanes checked and lanes that differed.
+type Tally {
+  checked: Int
+  wrong: Int
+}
+
+func checkFloat(tally: mod Tally, actual: view Float, expected: view Float) {
+  tally.checked = tally.checked + 1
+  if bitsOf(value: actual) is not bitsOf(value: expected) {
+    tally.wrong = tally.wrong + 1
+  }
+}
+
+func isNan(value: view Float) ret Bool {
+  ret value is not value
+}
+
+# The one case IEEE 754 leaves open: when two or more inputs are NaN, which
+# one the result carries. The C compiler may swap the operands of a
+# commutative `x + y` / `x * y` even in plain scalar code, so neither the
+# reference nor the scalar lowering pins it down. There the result must be a
+# quiet NaN equal to one of the NaN inputs (quieted); everything else is
+# checked bit for bit.
+func checkArithmetic(
+  tally: mod Tally
+  actual: view Float
+  expected: view Float
+  inputs: view List(Float)
+) {
+  var nanInputs: Int = 0
+  loop let input: view Float in inputs {
+    if isNan(value: input) {
+      nanInputs = nanInputs + 1
+    }
+  }
+  if nanInputs < 2 {
+    checkFloat(tally: tally, actual: actual, expected: expected)
+    ret
+  }
+  tally.checked = tally.checked + 1
+  var matched: Bool = false
+  loop let input: view Float in inputs {
+    if isNan(value: input) and bitsOf(value: actual) is (bitsOf(value: input) bitor 0x00400000) {
+      matched = true
+    }
+  }
+  if not matched {
+    tally.wrong = tally.wrong + 1
+  }
+}
+
+func checkMask(tally: mod Tally, actual: view UInt32, expected: view UInt32) {
+  tally.checked = tally.checked + 1
+  if actual is not expected {
+    tally.wrong = tally.wrong + 1
+  }
+}
+
+func checkBool(tally: mod Tally, actual: view Bool, expected: view Bool) {
+  tally.checked = tally.checked + 1
+  if actual is not expected {
+    tally.wrong = tally.wrong + 1
+  }
+}
+
+func checkInt(tally: mod Tally, actual: view Int, expected: view Int) {
+  tally.checked = tally.checked + 1
+  if actual is not expected {
+    tally.wrong = tally.wrong + 1
+  }
+}
+
+func report(name: view String, tally: view Tally) {
+  if tally.wrong is 0 {
+    log("{name}: {tally.checked} bit-exact")
+  } else {
+    log("{name}: {tally.wrong} of {tally.checked} differ")
+  }
+}
+
+func newTally() ret Tally {
+  ret Tally { checked: 0, wrong: 0 }
+}
+
+func main() {
+  let bits: List(Int) = specialBits()
+  var addTally: Tally = newTally()
+  var subTally: Tally = newTally()
+  var mulTally: Tally = newTally()
+  var divTally: Tally = newTally()
+  var mulAddTally: Tally = newTally()
+  var sqrtTally: Tally = newTally()
+  var negateTally: Tally = newTally()
+  var absTally: Tally = newTally()
+  var minTally: Tally = newTally()
+  var maxTally: Tally = newTally()
+  var clampTally: Tally = newTally()
+  var compareTally: Tally = newTally()
+  var selectTally: Tally = newTally()
+  var maskTally: Tally = newTally()
+  var laneTestTally: Tally = newTally()
+  var horizontalTally: Tally = newTally()
+  var indexTally: Tally = newTally()
+  var splatTally: Tally = newTally()
+  loop var i: Int = 0, i < valueCount, ++i {
+    let splatted: Float4 = Float4.splat(value: valueAt(bits: bits, index: i))
+    loop var k: Int = 0, k < 4, ++k {
+      checkFloat(
+        tally: splatTally
+        actual: lane(value: splatted, index: k)
+        expected: valueAt(bits: bits, index: i)
+      )
+    }
+    loop var j: Int = 0, j < valueCount, ++j {
+      let a: Float4 = quad(bits: bits, first: i, stride: 1)
+      let b: Float4 = quad(bits: bits, first: j, stride: 5)
+      let c: Float4 = quad(bits: bits, first: i + j, stride: 7)
+      let sum: Float4 = Float4.add(a: a, b: b)
+      let difference: Float4 = Float4.sub(a: a, b: b)
+      let product: Float4 = Float4.mul(a: a, b: b)
+      let quotient: Float4 = Float4.div(a: a, b: b)
+      let fused: Float4 = Float4.mulAdd(a: a, b: b, c: c)
+      let root: Float4 = Float4.sqrt(value: a)
+      let negated: Float4 = Float4.negate(value: a)
+      let magnitude: Float4 = Float4.abs(value: a)
+      let smaller: Float4 = Float4.min(a: a, b: b)
+      let larger: Float4 = Float4.max(a: a, b: b)
+      let clamped: Float4 = Float4.clampSymmetric(value: a, limit: b)
+      let isLess: Mask4 = Float4.less(a: a, b: b)
+      let isGreater: Mask4 = Float4.greater(a: a, b: b)
+      let isLessOrEqual: Mask4 = Float4.lessOrEqual(a: a, b: b)
+      let isGreaterOrEqual: Mask4 = Float4.greaterOrEqual(a: a, b: b)
+      let isEqual: Mask4 = Float4.equal(a: a, b: b)
+      let anyBits: Mask4 = maskOf(bits: bits, first: i + j)
+      let otherBits: Mask4 = maskOf(bits: bits, first: j)
+      let pickedByCompare: Float4 = Float4.select(mask: isLess, ifTrue: a, ifFalse: b)
+      let pickedByBits: Float4 = Float4.select(mask: anyBits, ifTrue: a, ifFalse: b)
+      let bothMask: Mask4 = Float4.both(a: anyBits, b: otherBits)
+      let eitherMask: Mask4 = Float4.either(a: anyBits, b: otherBits)
+      let invertedMask: Mask4 = Float4.invert(mask: anyBits)
+      loop var k: Int = 0, k < 4, ++k {
+        let x: Float = lane(value: a, index: k)
+        let y: Float = lane(value: b, index: k)
+        let z: Float = lane(value: c, index: k)
+        let pair: List(Float) = { x, y }
+        let triple: List(Float) = { x, y, z }
+        checkArithmetic(
+          tally: addTally
+          actual: lane(value: sum, index: k)
+          expected: x + y
+          inputs: pair
+        )
+        checkArithmetic(
+          tally: subTally
+          actual: lane(value: difference, index: k)
+          expected: x - y
+          inputs: pair
+        )
+        checkArithmetic(
+          tally: mulTally
+          actual: lane(value: product, index: k)
+          expected: x * y
+          inputs: pair
+        )
+        checkArithmetic(
+          tally: divTally
+          actual: lane(value: quotient, index: k)
+          expected: x / y
+          inputs: pair
+        )
+        checkArithmetic(
+          tally: mulAddTally
+          actual: lane(value: fused, index: k)
+          expected: scalarMulAdd(a: x, b: y, c: z)
+          inputs: triple
+        )
+        checkFloat(tally: sqrtTally, actual: lane(value: root, index: k), expected: Math.sqrt(x: x))
+        checkFloat(tally: negateTally, actual: lane(value: negated, index: k), expected: -x)
+        checkFloat(
+          tally: absTally
+          actual: lane(value: magnitude, index: k)
+          expected: scalarAbs(a: x)
+        )
+        checkFloat(
+          tally: minTally
+          actual: lane(value: smaller, index: k)
+          expected: scalarMin(a: x, b: y)
+        )
+        checkFloat(
+          tally: maxTally
+          actual: lane(value: larger, index: k)
+          expected: scalarMax(a: x, b: y)
+        )
+        checkFloat(
+          tally: clampTally
+          actual: lane(value: clamped, index: k)
+          expected: scalarClampSymmetric(value: x, limit: y)
+        )
+        checkMask(
+          tally: compareTally
+          actual: maskLane(mask: isLess, index: k)
+          expected: maskBits(condition: x < y)
+        )
+        checkMask(
+          tally: compareTally
+          actual: maskLane(mask: isGreater, index: k)
+          expected: maskBits(condition: x > y)
+        )
+        checkMask(
+          tally: compareTally
+          actual: maskLane(mask: isLessOrEqual, index: k)
+          expected: maskBits(condition: x <= y)
+        )
+        checkMask(
+          tally: compareTally
+          actual: maskLane(mask: isGreaterOrEqual, index: k)
+          expected: maskBits(condition: x >= y)
+        )
+        checkMask(
+          tally: compareTally
+          actual: maskLane(mask: isEqual, index: k)
+          expected: maskBits(condition: x is y)
+        )
+        checkFloat(
+          tally: selectTally
+          actual: lane(value: pickedByCompare, index: k)
+          expected: scalarSelect(mask: maskLane(mask: isLess, index: k), ifTrue: x, ifFalse: y)
+        )
+        checkFloat(
+          tally: selectTally
+          actual: lane(value: pickedByBits, index: k)
+          expected: scalarSelect(mask: maskLane(mask: anyBits, index: k), ifTrue: x, ifFalse: y)
+        )
+        let maskA: UInt32 = maskLane(mask: anyBits, index: k)
+        let maskB: UInt32 = maskLane(mask: otherBits, index: k)
+        checkMask(
+          tally: maskTally
+          actual: maskLane(mask: bothMask, index: k)
+          expected: maskA bitand maskB
+        )
+        checkMask(
+          tally: maskTally
+          actual: maskLane(mask: eitherMask, index: k)
+          expected: maskA bitor maskB
+        )
+        checkMask(
+          tally: maskTally
+          actual: maskLane(mask: invertedMask, index: k)
+          expected: bitnot maskA
+        )
+      }
+      var anyExpected: Bool = false
+      var allExpected: Bool = true
+      loop var k: Int = 0, k < 4, ++k {
+        if maskLane(mask: anyBits, index: k) is not 0 {
+          anyExpected = true
+        } else {
+          allExpected = false
+        }
+      }
+      checkBool(tally: laneTestTally, actual: Float4.anyLane(mask: anyBits), expected: anyExpected)
+      checkBool(tally: laneTestTally, actual: Float4.allLanes(mask: anyBits), expected: allExpected)
+      checkFloat(
+        tally: horizontalTally
+        actual: Float4.sum(value: a)
+        expected: ((a.x + a.y) + a.z) + a.w
+      )
+      checkFloat(
+        tally: horizontalTally
+        actual: Float4.horizontalMin(value: a)
+        expected: scalarMin(a: scalarMin(a: scalarMin(a: a.x, b: a.y), b: a.z), b: a.w)
+      )
+      checkFloat(
+        tally: horizontalTally
+        actual: Float4.horizontalMax(value: a)
+        expected: scalarMax(a: scalarMax(a: scalarMax(a: a.x, b: a.y), b: a.z), b: a.w)
+      )
+      # embedIndex then minLaneIndex: the hull SAT's index-in-mantissa search.
+      let bitCount: Int = 2 + j % 6
+      let embedded: Float4 = Float4.embedIndex(value: magnitude, baseIndex: i, bitCount: bitCount)
+      let lowMask: Int = (1 shl bitCount) - 1
+      var smallest: Float = embedded.x
+      loop var k: Int = 0, k < 4, ++k {
+        let original: Int = bitsOf(value: lane(value: magnitude, index: k))
+        let expectedBits: Int = (original bitand (bitnot lowMask) bitand 0xFFFFFFFF) bitor (i + k)
+        checkInt(
+          tally: indexTally
+          actual: bitsOf(value: lane(value: embedded, index: k))
+          expected: expectedBits bitand 0xFFFFFFFF
+        )
+        if k > 0 and lane(value: embedded, index: k) < smallest {
+          smallest = lane(value: embedded, index: k)
+        }
+      }
+      checkInt(
+        tally: indexTally
+        actual: Float4.minLaneIndex(value: embedded, bitCount: bitCount)
+        expected: bitsOf(value: smallest) bitand lowMask
+      )
+    }
+  }
+  report(name: "splat", tally: splatTally)
+  report(name: "add", tally: addTally)
+  report(name: "sub", tally: subTally)
+  report(name: "mul", tally: mulTally)
+  report(name: "div", tally: divTally)
+  report(name: "mulAdd", tally: mulAddTally)
+  report(name: "sqrt", tally: sqrtTally)
+  report(name: "negate", tally: negateTally)
+  report(name: "abs", tally: absTally)
+  report(name: "min", tally: minTally)
+  report(name: "max", tally: maxTally)
+  report(name: "clampSymmetric", tally: clampTally)
+  report(name: "comparisons", tally: compareTally)
+  report(name: "select", tally: selectTally)
+  report(name: "both/either/invert", tally: maskTally)
+  report(name: "anyLane/allLanes", tally: laneTestTally)
+  report(name: "sum/horizontalMin/horizontalMax", tally: horizontalTally)
+  report(name: "embedIndex/minLaneIndex", tally: indexTally)
+
+  # load / store: in range, at the last valid index, and just past it.
+  let values: List(Float) = {
+    1.0
+    2.0
+    3.0
+    4.0
+    5.0
+    6.0
+  }
+  if let loaded: Float4 = Float4.load(from: values, index: 2) {
+    log("load index 2: {loaded.x} {loaded.y} {loaded.z} {loaded.w}")
+  }
+  log("load index 3 is none: {Float4.load(from: values, index: 3) is none}")
+  log("load index -1 is none: {Float4.load(from: values, index: -1) is none}")
+  let stored: List(Float) = {
+    0.0
+    0.0
+    0.0
+    0.0
+    0.0
+  }
+  Float4.store(into: stored, index: 1, value: quad(bits: bits, first: 2, stride: 1))
+  log("store index 1: {stored.copyAtDefault(index: 1)} {stored.copyAtDefault(index: 4)}")
+  Float4.store(into: stored, index: 2, value: Float4.splat(value: 9.0))
+  log("store index 2 left the list as it was: {stored.copyAtDefault(index: 4)}")
+  log("lowering is scalar: {Float4.lowering() is "scalar"}")
+}
