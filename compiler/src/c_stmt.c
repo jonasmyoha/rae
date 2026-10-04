@@ -579,6 +579,32 @@ static bool c_opt_source_aliases(CFuncContext* ctx, const AstExpr* value) {
   }
   return false;
 }
+// Does `value`, captured in a statement temporary, own what it holds? An
+// object literal does, and so does a call that returns a value it made (a
+// deep copy like copyAtDefault, any plain `ret T`): the temporary must get
+// the OWNING drop or that value's nested heap leaks (#75798611 — a Contact
+// whose manifolds own point lists leaked 2 buffers per temporary). Only the
+// buffer-get intrinsics (lowered to a place in the container's storage) and
+// a callee that returns an alias keep the alias drop, the rule a `let` of
+// the same call already follows.
+bool c_stmt_temp_value_owns(CFuncContext* ctx, const AstExpr* value) {
+  if (!value) return false;
+  if (value->kind == AST_EXPR_OBJECT) return true;
+  if (value->kind != AST_EXPR_CALL && value->kind != AST_EXPR_METHOD_CALL) return false;
+  if (value->kind == AST_EXPR_CALL) {
+    const AstExpr* callee = value->as.call.callee;
+    if (!callee || callee->kind != AST_EXPR_IDENT) return false;
+    Str cn = callee->as.ident;
+    if (str_eq_cstr(cn, "rae_ext_rae_buf_get") || str_eq_cstr(cn, "rae_ext___buf_get")
+        || str_eq_cstr(cn, "__buf_get")) return false;
+  }
+  if (value->decl_link && value->decl_link->kind == AST_DECL_FUNC
+      && value->decl_link->as.func_decl.body) {
+    AliasVisit av = {0};
+    return !func_returns_alias_v(ctx->compiler_ctx, &value->decl_link->as.func_decl, &av);
+  }
+  return !c_opt_source_aliases(ctx, value);
+}
 static bool stmt_block_returns_alias_v(CompilerContext* cctx, const AstStmt* first, AliasVisit* v) {
   for (const AstStmt* s = first; s; s = s->next) {
     if (s->kind == AST_STMT_RET) {
