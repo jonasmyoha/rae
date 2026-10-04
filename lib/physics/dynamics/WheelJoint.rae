@@ -1,0 +1,675 @@
+# The wheel joint (b3PrepareWheelJoint, b3WarmStartWheelJoint and
+# b3SolveWheelJoint of Box3D's wheel_joint.c at 9f998c8): body B is a wheel
+# spinning about its own z-axis, sliding along the x-axis of joint frame A
+# (the suspension: a spring and limits), with a spin motor and optional
+# steering about the suspension axis (a spring to a target angle and angle
+# limits). Box3D's operation order is kept exactly; checked against the
+# oracle in fixture 984.
+open Vec2
+open Vec3
+open Quat
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/Vector2Math
+open physics/math/QuatMath
+open physics/math/MatrixMath
+open physics/math/TransformMath
+open physics/dynamics/WorldTypes
+open physics/dynamics/Body
+open physics/dynamics/Joint
+open physics/dynamics/ContactConstraints
+open physics/dynamics/StepContext
+open physics/dynamics/RevoluteJoint
+open physics/dynamics/PrismaticJoint
+
+# The steering parameters of frames `matrixA` and `matrixB`: the cosine and
+# sine of the steering angle (ib = cz_b, ia = cz_a, ja = -cy_a) and the
+# steering axis.
+type SteeringFrame {
+  cosine: Float
+  sine: Float
+  axis: Vec3
+}
+
+func steeringFrame(matrixA: view Matrix3, matrixB: view Matrix3) ret SteeringFrame {
+  let cosine: Float = dot(left: matrixB.columnZ, right: matrixA.columnZ)
+  let sine: Float = -dot(left: matrixB.columnZ, right: matrixA.columnY)
+  var den: Float = cosine * cosine + sine * sine
+  if den > 0.0 {
+    den = 1.0 / den
+  } else {
+    den = 0.0
+  }
+  let axis: Vec3 = scale(
+    scale: den
+    vector: cross(
+      left: matrixB.columnZ
+      right: subtract(
+        left: scale(scale: -cosine, vector: matrixA.columnY)
+        right: scale(scale: sine, vector: matrixA.columnZ)
+      )
+    )
+  )
+  ret SteeringFrame { cosine: cosine, sine: sine, axis: axis }
+}
+
+# b3PrepareWheelJoint (the masses and frames are read from the bodies' sims
+# by the caller).
+func prepareWheelJoint(
+  base: mod JointSim
+  simA: view BodySim
+  simB: view BodySim
+  indexA: view Int
+  indexB: view Int
+  h: view Float
+  enableWarmStarting: view Bool
+) {
+  base.invMassA = simA.invMass
+  base.invMassB = simB.invMass
+  base.invIA = simA.invInertiaWorld
+  base.invIB = simB.invInertiaWorld
+  let invInertiaSum: Matrix3 = add(left: base.invIA, right: base.invIB)
+  base.fixedRotation = determinant(matrix: invInertiaSum) < 1000.0 * floatMin
+
+  var joint: WheelJointData = base.wheelJoint
+  joint.indexA = indexA
+  joint.indexB = indexB
+
+  # The joint frames with world rotations, relative to the centers of mass
+  joint.frameA.rotation = multiply(left: simA.transform.rotation, right: base.localFrameA.rotation)
+  joint.frameA.position = rotateVector(
+    quat: simA.transform.rotation
+    vector: subtract(left: base.localFrameA.position, right: simA.localCenter)
+  )
+  joint.frameB.rotation = multiply(left: simB.transform.rotation, right: base.localFrameB.rotation)
+  joint.frameB.position = rotateVector(
+    quat: simB.transform.rotation
+    vector: subtract(left: base.localFrameB.position, right: simB.localCenter)
+  )
+  # The initial center delta; incremental position updates are relative to it
+  joint.deltaCenter = subtractPositions(left: simB.center, right: simA.center)
+
+  let rA: Vec3 = joint.frameA.position
+  let rB: Vec3 = joint.frameB.position
+  let matrixA: Matrix3 = matrixFromQuat(quat: joint.frameA.rotation)
+  let matrixB: Matrix3 = matrixFromQuat(quat: joint.frameB.rotation)
+
+  let suspensionAxis: Vec3 = matrixA.columnX
+  let rAn: Vec3 = cross(left: rA, right: suspensionAxis)
+  let rBn: Vec3 = cross(left: rB, right: suspensionAxis)
+  let suspensionK: Float = base.invMassA + base.invMassB + dot(
+    left: rAn
+    right: multiply(matrix: base.invIA, vector: rAn)
+  ) + dot(left: rBn, right: multiply(matrix: base.invIB, vector: rBn))
+  joint.suspensionMass = 0.0
+  if suspensionK > 0.0 {
+    joint.suspensionMass = 1.0 / suspensionK
+  }
+
+  joint.suspensionSoftness = makeSoft(
+    hertz: joint.suspensionHertz
+    zeta: joint.suspensionDampingRatio
+    h: h
+  )
+  joint.steeringSoftness = makeSoft(
+    hertz: joint.steeringHertz
+    zeta: joint.steeringDampingRatio
+    h: h
+  )
+
+  # The spin axis is the z-axis of frame B
+  let spinAxis: Vec3 = matrixB.columnZ
+  let spinK: Float = dot(left: spinAxis, right: multiply(matrix: invInertiaSum, vector: spinAxis))
+  joint.spinMass = 0.0
+  if spinK > 0.0 {
+    joint.spinMass = 1.0 / spinK
+  }
+
+  # The steering: a twist about the x-axis
+  let steering: SteeringFrame = steeringFrame(matrixA: matrixA, matrixB: matrixB)
+  let steeringK: Float = dot(
+    left: steering.axis
+    right: multiply(matrix: invInertiaSum, vector: steering.axis)
+  )
+  joint.steeringMass = 0.0
+  if steeringK > 0.0 {
+    joint.steeringMass = 1.0 / steeringK
+  }
+
+  if enableWarmStarting is false {
+    joint.linearImpulse = Vec2 { x: 0.0, y: 0.0 }
+    joint.angularImpulse = Vec2 { x: 0.0, y: 0.0 }
+    joint.spinImpulse = 0.0
+    joint.suspensionSpringImpulse = 0.0
+    joint.lowerSuspensionImpulse = 0.0
+    joint.upperSuspensionImpulse = 0.0
+    joint.steeringSpringImpulse = 0.0
+    joint.lowerSteeringImpulse = 0.0
+    joint.upperSteeringImpulse = 0.0
+  }
+  base.wheelJoint = joint
+}
+
+# The joint rotations of the sub-step, B negated to keep the relative angle
+# in [-pi, pi].
+type WheelRotations {
+  quatA: Quat
+  quatB: Quat
+}
+
+func wheelRotations(
+  joint: view WheelJointData
+  stateA: view BodyState
+  stateB: view BodyState
+) ret WheelRotations {
+  let quatA: Quat = multiply(left: stateA.deltaRotation, right: joint.frameA.rotation)
+  var quatB: Quat = multiply(left: stateB.deltaRotation, right: joint.frameB.rotation)
+  if dot(left: quatA, right: quatB) < 0.0 {
+    quatB = negate(quat: quatB)
+  }
+  ret WheelRotations { quatA: quatA, quatB: quatB }
+}
+
+# b3WarmStartWheelJoint
+func warmStartWheelJoint(base: view JointSim, states: mod List(BodyState)) {
+  let joint: WheelJointData = base.wheelJoint
+  let stateA: BodyState = jointBodyState(states: states, index: joint.indexA)
+  let stateB: BodyState = jointBodyState(states: states, index: joint.indexB)
+
+  let rA: Vec3 = rotateVector(quat: stateA.deltaRotation, vector: joint.frameA.position)
+  let rB: Vec3 = rotateVector(quat: stateB.deltaRotation, vector: joint.frameB.position)
+  let d: Vec3 = add(
+    left: add(
+      left: subtract(left: stateB.deltaPosition, right: stateA.deltaPosition)
+      right: joint.deltaCenter
+    )
+    right: subtract(left: rB, right: rA)
+  )
+  let rotations: WheelRotations = wheelRotations(joint: joint, stateA: stateA, stateB: stateB)
+  let quatA: Quat = rotations.quatA
+  let quatB: Quat = rotations.quatB
+  let matrixA: Matrix3 = matrixFromQuat(quat: quatA)
+  let matrixB: Matrix3 = matrixFromQuat(quat: quatB)
+
+  let sAx: Vec3 = cross(left: add(left: d, right: rA), right: matrixA.columnX)
+  let sBx: Vec3 = cross(left: rB, right: matrixA.columnX)
+  let sAy: Vec3 = cross(left: add(left: d, right: rA), right: matrixA.columnY)
+  let sBy: Vec3 = cross(left: rB, right: matrixA.columnY)
+  let sAz: Vec3 = cross(left: add(left: d, right: rA), right: matrixA.columnZ)
+  let sBz: Vec3 = cross(left: rB, right: matrixA.columnZ)
+
+  let suspensionImpulse: Float = joint.suspensionSpringImpulse + joint.lowerSuspensionImpulse - joint.upperSuspensionImpulse
+  let linearImpulseY: Float = joint.linearImpulse.x
+  let linearImpulseZ: Float = joint.linearImpulse.y
+  let angularImpulseX: Float = joint.angularImpulse.x
+  let angularImpulseY: Float = joint.angularImpulse.y
+
+  let linearImpulse: Vec3 = blend3(
+    firstScale: suspensionImpulse
+    first: matrixA.columnX
+    secondScale: linearImpulseY
+    second: matrixA.columnY
+    thirdScale: linearImpulseZ
+    third: matrixA.columnZ
+  )
+  let angularImpulseA: Vec3 = blend3(
+    firstScale: suspensionImpulse
+    first: sAx
+    secondScale: linearImpulseY
+    second: sAy
+    thirdScale: linearImpulseZ
+    third: sAz
+  )
+  let angularImpulseB: Vec3 = blend3(
+    firstScale: suspensionImpulse
+    first: sBx
+    secondScale: linearImpulseY
+    second: sBy
+    thirdScale: linearImpulseZ
+    third: sBz
+  )
+  var angularImpulse: Vec3 = scale(scale: joint.spinImpulse, vector: matrixA.columnZ)
+  let spinAxis: Vec3 = matrixB.columnZ
+
+  if joint.enableSteering {
+    let steering: SteeringFrame = steeringFrame(matrixA: matrixA, matrixB: matrixB)
+    let perpAxis: Vec3 = cross(left: spinAxis, right: matrixA.columnX)
+    let steeringImpulse: Float = joint.steeringSpringImpulse + joint.lowerSteeringImpulse - joint.upperSteeringImpulse
+    angularImpulse = blend3(
+      firstScale: angularImpulseX
+      first: perpAxis
+      secondScale: joint.spinImpulse
+      second: spinAxis
+      thirdScale: steeringImpulse
+      third: steering.axis
+    )
+  } else {
+    let relative: Quat = inverseMultiply(left: quatA, right: quatB)
+    let perpAxisX: Vec3 = collinearAxis(frameRotation: quatA, relative: relative, axis: axisX())
+    let perpAxisY: Vec3 = collinearAxis(frameRotation: quatA, relative: relative, axis: axisY())
+    angularImpulse = add(
+      left: angularImpulse
+      right: blend3(
+        firstScale: angularImpulseX
+        first: perpAxisX
+        secondScale: angularImpulseY
+        second: perpAxisY
+        thirdScale: joint.spinImpulse
+        third: spinAxis
+      )
+    )
+  }
+
+  var velocities: JointVelocities = jointVelocities(stateA: stateA, stateB: stateB)
+  applyJointImpulse(
+    velocities: velocities
+    base: base
+    linear: linearImpulse
+    angularA: add(left: angularImpulseA, right: angularImpulse)
+    angularB: add(left: angularImpulseB, right: angularImpulse)
+  )
+  storeJointVelocities(
+    states: states
+    indexA: joint.indexA
+    indexB: joint.indexB
+    stateA: stateA
+    stateB: stateB
+    velocities: velocities
+  )
+}
+
+# The bias, mass scale and impulse scale of a limit with error `c`:
+# speculative while separated, soft when violated and biased.
+func limitSoftness(
+  base: view JointSim
+  c: view Float
+  inverseH: view Float
+  useBias: view Bool
+) ret Softness {
+  if c > 0.0 {
+    # Speculation
+    ret Softness { biasRate: c * inverseH, massScale: 1.0, impulseScale: 0.0 }
+  }
+  if useBias {
+    ret Softness {
+      biasRate: base.constraintSoftness.biasRate * c
+      massScale: base.constraintSoftness.massScale
+      impulseScale: base.constraintSoftness.impulseScale
+    }
+  }
+  ret Softness { biasRate: 0.0, massScale: 1.0, impulseScale: 0.0 }
+}
+
+# Apply an angular impulse `impulse` along `axis`: wA -= iA * (impulse *
+# axis), wB += iB * (impulse * axis).
+func applyAngularImpulse(
+  velocities: mod JointVelocities
+  base: view JointSim
+  impulse: view Float
+  axis: view Vec3
+) {
+  velocities.angularA = subtract(
+    left: velocities.angularA
+    right: multiply(matrix: base.invIA, vector: scale(scale: impulse, vector: axis))
+  )
+  velocities.angularB = add(
+    left: velocities.angularB
+    right: multiply(matrix: base.invIB, vector: scale(scale: impulse, vector: axis))
+  )
+}
+
+# The relative speed of the suspension: dot(axis, vB - vA) + dot(sBx, wB) -
+# dot(sAx, wA).
+func suspensionSpeed(
+  velocities: view JointVelocities
+  axis: view Vec3
+  sAx: view Vec3
+  sBx: view Vec3
+) ret Float {
+  ret dot(left: axis, right: subtract(left: velocities.linearB, right: velocities.linearA)) + dot(
+    left: sBx
+    right: velocities.angularB
+  ) - dot(left: sAx, right: velocities.angularA)
+}
+
+# b3SolveWheelJoint
+func solveWheelJoint(
+  base: mod JointSim
+  states: mod List(BodyState)
+  h: view Float
+  inverseH: view Float
+  useBias: view Bool
+) {
+  var joint: WheelJointData = base.wheelJoint
+  let stateA: BodyState = jointBodyState(states: states, index: joint.indexA)
+  let stateB: BodyState = jointBodyState(states: states, index: joint.indexB)
+  var velocities: JointVelocities = jointVelocities(stateA: stateA, stateB: stateB)
+  let fixedRotation: Bool = base.fixedRotation
+
+  # The current anchors
+  let rA: Vec3 = rotateVector(quat: stateA.deltaRotation, vector: joint.frameA.position)
+  let rB: Vec3 = rotateVector(quat: stateB.deltaRotation, vector: joint.frameB.position)
+  let rotations: WheelRotations = wheelRotations(joint: joint, stateA: stateA, stateB: stateB)
+  let quatA: Quat = rotations.quatA
+  let quatB: Quat = rotations.quatB
+  let relative: Quat = inverseMultiply(left: quatA, right: quatB)
+  let matrixA: Matrix3 = matrixFromQuat(quat: quatA)
+  let matrixB: Matrix3 = matrixFromQuat(quat: quatB)
+
+  let d: Vec3 = add(
+    left: add(
+      left: subtract(left: stateB.deltaPosition, right: stateA.deltaPosition)
+      right: joint.deltaCenter
+    )
+    right: subtract(left: rB, right: rA)
+  )
+  let sAx: Vec3 = cross(left: add(left: d, right: rA), right: matrixA.columnX)
+  let sBx: Vec3 = cross(left: rB, right: matrixA.columnX)
+  let translation: Float = dot(left: matrixA.columnX, right: d)
+  let steering: SteeringFrame = steeringFrame(matrixA: matrixA, matrixB: matrixB)
+  let steeringAxis: Vec3 = steering.axis
+
+  # The spin motor
+  if joint.enableSpinMotor and fixedRotation is false {
+    let spinAxis: Vec3 = matrixB.columnZ
+    let cdot: Float = dot(
+      left: subtract(left: velocities.angularB, right: velocities.angularA)
+      right: spinAxis
+    ) - joint.spinSpeed
+    let impulse: Float = -joint.spinMass * cdot
+    let oldImpulse: Float = joint.spinImpulse
+    let maxImpulse: Float = h * joint.maxSpinTorque
+    joint.spinImpulse = clampFloat(
+      value: joint.spinImpulse + impulse
+      lower: -maxImpulse
+      upper: maxImpulse
+    )
+    applyAngularImpulse(
+      velocities: velocities
+      base: base
+      impulse: joint.spinImpulse - oldImpulse
+      axis: spinAxis
+    )
+  }
+
+  # The suspension: a real spring, applied during relax too
+  if joint.enableSuspensionSpring {
+    let c: Float = translation
+    let bias: Float = joint.suspensionSoftness.biasRate * c
+    let massScale: Float = joint.suspensionSoftness.massScale
+    let impulseScale: Float = joint.suspensionSoftness.impulseScale
+    let cdot: Float = suspensionSpeed(
+      velocities: velocities
+      axis: matrixA.columnX
+      sAx: sAx
+      sBx: sBx
+    )
+    let impulse: Float = -massScale * joint.suspensionMass * (cdot + bias) - impulseScale * joint.suspensionSpringImpulse
+    joint.suspensionSpringImpulse = joint.suspensionSpringImpulse + impulse
+    applyJointImpulse(
+      velocities: velocities
+      base: base
+      linear: scale(scale: impulse, vector: matrixA.columnX)
+      angularA: scale(scale: impulse, vector: sAx)
+      angularB: scale(scale: impulse, vector: sBx)
+    )
+  }
+
+  # The steering
+  if joint.enableSteering and fixedRotation is false {
+    let steeringAngle: Float = deterministicAtan2(y: steering.sine, x: steering.cosine)
+
+    # A real spring, applied during relax too
+    let c: Float = steeringAngle - joint.targetSteeringAngle
+    let bias: Float = joint.steeringSoftness.biasRate * c
+    let massScale: Float = joint.steeringSoftness.massScale
+    let impulseScale: Float = joint.steeringSoftness.impulseScale
+    let cdot: Float = dot(
+      left: steeringAxis
+      right: subtract(left: velocities.angularB, right: velocities.angularA)
+    )
+    let oldImpulse: Float = joint.steeringSpringImpulse
+    let impulse: Float = -massScale * joint.steeringMass * (cdot + bias) - impulseScale * oldImpulse
+    let maxImpulse: Float = h * joint.maxSteeringTorque
+    joint.steeringSpringImpulse = clampFloat(
+      value: oldImpulse + impulse
+      lower: -maxImpulse
+      upper: maxImpulse
+    )
+    applyAngularImpulse(
+      velocities: velocities
+      base: base
+      impulse: joint.steeringSpringImpulse - oldImpulse
+      axis: steeringAxis
+    )
+
+    if joint.enableSteeringLimit {
+      # Lower limit
+      let lowerC: Float = steeringAngle - joint.lowerSteeringLimit
+      let lowerSoftness: Softness = limitSoftness(
+        base: base
+        c: lowerC
+        inverseH: inverseH
+        useBias: useBias
+      )
+      let lowerCdot: Float = dot(
+        left: steeringAxis
+        right: subtract(left: velocities.angularB, right: velocities.angularA)
+      )
+      let lowerOld: Float = joint.lowerSteeringImpulse
+      let lowerImpulse: Float = -lowerSoftness.massScale * joint.steeringMass * (lowerCdot + lowerSoftness.biasRate) - lowerSoftness.impulseScale * lowerOld
+      joint.lowerSteeringImpulse = maxFloat(left: lowerOld + lowerImpulse, right: 0.0)
+      applyAngularImpulse(
+        velocities: velocities
+        base: base
+        impulse: joint.lowerSteeringImpulse - lowerOld
+        axis: steeringAxis
+      )
+
+      # Upper limit (sign flipped on c, cdot and the applied impulse)
+      let upperC: Float = joint.upperSteeringLimit - steeringAngle
+      let upperSoftness: Softness = limitSoftness(
+        base: base
+        c: upperC
+        inverseH: inverseH
+        useBias: useBias
+      )
+      let upperCdot: Float = dot(
+        left: steeringAxis
+        right: subtract(left: velocities.angularA, right: velocities.angularB)
+      )
+      let upperOld: Float = joint.upperSteeringImpulse
+      let upperImpulse: Float = -upperSoftness.massScale * joint.steeringMass * (upperCdot + upperSoftness.biasRate) - upperSoftness.impulseScale * upperOld
+      joint.upperSteeringImpulse = maxFloat(left: upperOld + upperImpulse, right: 0.0)
+      let upperDelta: Float = joint.upperSteeringImpulse - upperOld
+      velocities.angularA = add(
+        left: velocities.angularA
+        right: multiply(matrix: base.invIA, vector: scale(scale: upperDelta, vector: steeringAxis))
+      )
+      velocities.angularB = subtract(
+        left: velocities.angularB
+        right: multiply(matrix: base.invIB, vector: scale(scale: upperDelta, vector: steeringAxis))
+      )
+    }
+  }
+
+  if joint.enableSuspensionLimit {
+    # Lower limit
+    let lowerC: Float = translation - joint.lowerSuspensionLimit
+    let lowerSoftness: Softness = limitSoftness(
+      base: base
+      c: lowerC
+      inverseH: inverseH
+      useBias: useBias
+    )
+    let lowerCdot: Float = suspensionSpeed(
+      velocities: velocities
+      axis: matrixA.columnX
+      sAx: sAx
+      sBx: sBx
+    )
+    let lowerImpulse: Float = -lowerSoftness.massScale * joint.suspensionMass * (lowerCdot + lowerSoftness.biasRate) - lowerSoftness.impulseScale * joint.lowerSuspensionImpulse
+    let lowerOld: Float = joint.lowerSuspensionImpulse
+    joint.lowerSuspensionImpulse = maxFloat(left: lowerOld + lowerImpulse, right: 0.0)
+    let lowerDelta: Float = joint.lowerSuspensionImpulse - lowerOld
+    applyJointImpulse(
+      velocities: velocities
+      base: base
+      linear: scale(scale: lowerDelta, vector: matrixA.columnX)
+      angularA: scale(scale: lowerDelta, vector: sAx)
+      angularB: scale(scale: lowerDelta, vector: sBx)
+    )
+
+    # Upper limit (sign flipped on c, cdot and the applied impulse)
+    let upperC: Float = joint.upperSuspensionLimit - translation
+    let upperSoftness: Softness = limitSoftness(
+      base: base
+      c: upperC
+      inverseH: inverseH
+      useBias: useBias
+    )
+    let upperCdot: Float = dot(
+      left: matrixA.columnX
+      right: subtract(left: velocities.linearA, right: velocities.linearB)
+    ) + dot(left: sAx, right: velocities.angularA) - dot(left: sBx, right: velocities.angularB)
+    let upperImpulse: Float = -upperSoftness.massScale * joint.suspensionMass * (upperCdot + upperSoftness.biasRate) - upperSoftness.impulseScale * joint.upperSuspensionImpulse
+    let upperOld: Float = joint.upperSuspensionImpulse
+    joint.upperSuspensionImpulse = maxFloat(left: upperOld + upperImpulse, right: 0.0)
+    let upperDelta: Float = joint.upperSuspensionImpulse - upperOld
+    let linearImpulse: Vec3 = scale(scale: upperDelta, vector: matrixA.columnX)
+    let angularImpulseA: Vec3 = scale(scale: upperDelta, vector: sAx)
+    let angularImpulseB: Vec3 = scale(scale: upperDelta, vector: sBx)
+    velocities.linearA = mulAdd(
+      base: velocities.linearA
+      scale: base.invMassA
+      vector: linearImpulse
+    )
+    velocities.angularA = add(
+      left: velocities.angularA
+      right: multiply(matrix: base.invIA, vector: angularImpulseA)
+    )
+    velocities.linearB = mulSub(
+      base: velocities.linearB
+      scale: base.invMassB
+      vector: linearImpulse
+    )
+    velocities.angularB = subtract(
+      left: velocities.angularB
+      right: multiply(matrix: base.invIB, vector: angularImpulseB)
+    )
+  }
+
+  # The collinearity constraint
+  if fixedRotation is false {
+    if joint.enableSteering {
+      var bias: Float = 0.0
+      var massScale: Float = 1.0
+      var impulseScale: Float = 0.0
+      if useBias {
+        let c: Float = dot(left: matrixA.columnX, right: matrixB.columnZ)
+        bias = base.constraintSoftness.biasRate * c
+        massScale = base.constraintSoftness.massScale
+        impulseScale = base.constraintSoftness.impulseScale
+      }
+      let axis: Vec3 = cross(left: matrixB.columnZ, right: matrixA.columnX)
+      let cdot: Float = dot(
+        left: subtract(left: velocities.angularB, right: velocities.angularA)
+        right: axis
+      )
+      let invInertiaSum: Matrix3 = add(left: base.invIA, right: base.invIB)
+      let k: Float = dot(left: axis, right: multiply(matrix: invInertiaSum, vector: axis))
+      var perpMass: Float = 0.0
+      if k > 0.0 {
+        perpMass = 1.0 / k
+      }
+      let deltaImpulse: Float = -massScale * perpMass * (cdot + bias) - impulseScale * joint.angularImpulse.x
+      joint.angularImpulse.x = joint.angularImpulse.x + deltaImpulse
+      velocities.angularA = mulSub(
+        base: velocities.angularA
+        scale: deltaImpulse
+        vector: multiply(matrix: base.invIA, vector: axis)
+      )
+      velocities.angularB = mulAdd(
+        base: velocities.angularB
+        scale: deltaImpulse
+        vector: multiply(matrix: base.invIB, vector: axis)
+      )
+    } else {
+      var bias: Vec2 = { x: 0.0, y: 0.0 }
+      var massScale: Float = 1.0
+      var impulseScale: Float = 0.0
+      if useBias {
+        let c: Vec2 = { x: relative.x, y: relative.y }
+        bias = scale(scale: base.constraintSoftness.biasRate, vector: c)
+        massScale = base.constraintSoftness.massScale
+        impulseScale = base.constraintSoftness.impulseScale
+      }
+      # The collinearity constraint as a 2-by-2
+      let perpAxisX: Vec3 = collinearAxis(frameRotation: quatA, relative: relative, axis: axisX())
+      let perpAxisY: Vec3 = collinearAxis(frameRotation: quatA, relative: relative, axis: axisY())
+      let invInertiaSum: Matrix3 = add(left: base.invIA, right: base.invIB)
+      let kxx: Float = dot(
+        left: perpAxisX
+        right: multiply(matrix: invInertiaSum, vector: perpAxisX)
+      )
+      let kyy: Float = dot(
+        left: perpAxisY
+        right: multiply(matrix: invInertiaSum, vector: perpAxisY)
+      )
+      let kxy: Float = dot(
+        left: perpAxisX
+        right: multiply(matrix: invInertiaSum, vector: perpAxisY)
+      )
+      let k: Matrix2 = { columnX: Vec2 { x: kxx, y: kxy }, columnY: Vec2 { x: kxy, y: kyy } }
+      let wRelative: Vec3 = subtract(left: velocities.angularB, right: velocities.angularA)
+      let cdot: Vec2 = {
+        x: dot(left: wRelative, right: perpAxisX)
+        y: dot(left: wRelative, right: perpAxisY)
+      }
+      let oldImpulse: Vec2 = joint.angularImpulse
+      let solution: Vec2 = solve2(matrix: k, vector: add(left: cdot, right: bias))
+      let deltaImpulse: Vec2 = subtract(
+        left: scale(scale: -massScale, vector: solution)
+        right: scale(scale: impulseScale, vector: oldImpulse)
+      )
+      joint.angularImpulse = add(left: oldImpulse, right: deltaImpulse)
+      let angularImpulse: Vec3 = blend2(
+        firstScale: deltaImpulse.x
+        first: perpAxisX
+        secondScale: deltaImpulse.y
+        second: perpAxisY
+      )
+      velocities.angularA = subtract(
+        left: velocities.angularA
+        right: multiply(matrix: base.invIA, vector: angularImpulse)
+      )
+      velocities.angularB = add(
+        left: velocities.angularB
+        right: multiply(matrix: base.invIB, vector: angularImpulse)
+      )
+    }
+  }
+
+  # The point-to-line constraint
+  joint.linearImpulse = solvePointToLine(
+    velocities: velocities
+    base: base
+    perpY: matrixA.columnY
+    perpZ: matrixA.columnZ
+    rA: rA
+    rB: rB
+    d: d
+    oldImpulse: joint.linearImpulse
+    useBias: useBias
+  )
+
+  base.wheelJoint = joint
+  storeJointVelocities(
+    states: states
+    indexA: joint.indexA
+    indexB: joint.indexB
+    stateA: stateA
+    stateB: stateB
+    velocities: velocities
+  )
+}

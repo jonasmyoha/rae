@@ -397,6 +397,11 @@ C added.
   `WorldJointSets`, `JointSolver`, `DistanceJoint`, `RevoluteJoint`; golden
   `joints`, fixture 984). Next: **P6b** prismatic and wheel, **P6c**
   spherical, motor, parallel and weld.
+  **P6b landed 2026-10-04, bit-exact:** the prismatic joint (spring, motor,
+  translation limits, locked rotation, point-to-line) and the wheel joint
+  (suspension spring and limits, spin motor, steering spring and limits)
+  (`PrismaticJoint`, `WheelJoint`; scenes `prismatic` and `car` of golden
+  `joints`, fixture 984).
 - **P7 — queries and the mover**: ray/shape casts, overlaps, the character
   loop (walls, steps, slopes).
 - **P8 — the ECS layer**: `PhysicsWorld`, `RigidBody`, `Collider`,

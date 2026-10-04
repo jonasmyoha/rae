@@ -1,0 +1,562 @@
+# The prismatic joint (b3PreparePrismaticJoint, b3WarmStartPrismaticJoint
+# and b3SolvePrismaticJoint of Box3D's prismatic_joint.c at 9f998c8): body B
+# slides along the x-axis of joint frame A, with an optional spring to a
+# target translation, a motor and translation limits; the rotation is locked
+# and the anchor held on the axis by a point-to-line constraint. Box3D's
+# operation order is kept exactly; checked against the oracle in fixture
+# 984.
+open Vec2
+open Vec3
+open Quat
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/Vector2Math
+open physics/math/QuatMath
+open physics/math/MatrixMath
+open physics/math/TransformMath
+open physics/dynamics/WorldTypes
+open physics/dynamics/Body
+open physics/dynamics/Joint
+open physics/dynamics/ContactConstraints
+open physics/dynamics/StepContext
+open physics/dynamics/RevoluteJoint
+
+# The two bodies' velocities while a joint is solved.
+type JointVelocities {
+  linearA: Vec3
+  angularA: Vec3
+  linearB: Vec3
+  angularB: Vec3
+}
+
+func jointVelocities(stateA: view BodyState, stateB: view BodyState) ret JointVelocities {
+  ret JointVelocities {
+    linearA: stateA.linearVelocity
+    angularA: stateA.angularVelocity
+    linearB: stateB.linearVelocity
+    angularB: stateB.angularVelocity
+  }
+}
+
+# Apply the linear impulse `linear` with the angular impulses `angularA` and
+# `angularB` (A takes the negative): vA -= mA * P, wA -= iA * LA,
+# vB += mB * P, wB += iB * LB.
+func applyJointImpulse(
+  velocities: mod JointVelocities
+  base: view JointSim
+  linear: view Vec3
+  angularA: view Vec3
+  angularB: view Vec3
+) {
+  velocities.linearA = mulSub(base: velocities.linearA, scale: base.invMassA, vector: linear)
+  velocities.angularA = subtract(
+    left: velocities.angularA
+    right: multiply(matrix: base.invIA, vector: angularA)
+  )
+  velocities.linearB = mulAdd(base: velocities.linearB, scale: base.invMassB, vector: linear)
+  velocities.angularB = add(
+    left: velocities.angularB
+    right: multiply(matrix: base.invIB, vector: angularB)
+  )
+}
+
+# vB + wB x rB - vA - wA x (rA + d): the relative velocity of the anchors.
+func anchorRelativeVelocity(
+  velocities: view JointVelocities
+  rA: view Vec3
+  rB: view Vec3
+  d: view Vec3
+) ret Vec3 {
+  ret subtract(
+    left: subtract(
+      left: add(left: velocities.linearB, right: cross(left: velocities.angularB, right: rB))
+      right: velocities.linearA
+    )
+    right: cross(left: velocities.angularA, right: add(left: rA, right: d))
+  )
+}
+
+func storeJointVelocities(
+  states: mod List(BodyState)
+  indexA: view Int
+  indexB: view Int
+  stateA: view BodyState
+  stateB: view BodyState
+  velocities: view JointVelocities
+) {
+  storeJointBodyVelocity(
+    states: states
+    index: indexA
+    flags: stateA.flags
+    linearVelocity: velocities.linearA
+    angularVelocity: velocities.angularA
+  )
+  storeJointBodyVelocity(
+    states: states
+    index: indexB
+    flags: stateB.flags
+    linearVelocity: velocities.linearB
+    angularVelocity: velocities.angularB
+  )
+}
+
+# b3PreparePrismaticJoint (the masses and frames are read from the bodies'
+# sims by the caller).
+func preparePrismaticJoint(
+  base: mod JointSim
+  simA: view BodySim
+  simB: view BodySim
+  indexA: view Int
+  indexB: view Int
+  h: view Float
+  enableWarmStarting: view Bool
+) {
+  base.invMassA = simA.invMass
+  base.invMassB = simB.invMass
+  base.invIA = simA.invInertiaWorld
+  base.invIB = simB.invInertiaWorld
+  let invInertiaSum: Matrix3 = add(left: base.invIA, right: base.invIB)
+  base.fixedRotation = determinant(matrix: invInertiaSum) < 1000.0 * floatMin
+
+  var joint: PrismaticJointData = base.prismaticJoint
+  joint.indexA = indexA
+  joint.indexB = indexB
+
+  # The joint frames with world rotations, relative to the centers of mass
+  joint.frameA.rotation = multiply(left: simA.transform.rotation, right: base.localFrameA.rotation)
+  joint.frameA.position = rotateVector(
+    quat: simA.transform.rotation
+    vector: subtract(left: base.localFrameA.position, right: simA.localCenter)
+  )
+  joint.frameB.rotation = multiply(left: simB.transform.rotation, right: base.localFrameB.rotation)
+  joint.frameB.position = rotateVector(
+    quat: simB.transform.rotation
+    vector: subtract(left: base.localFrameB.position, right: simB.localCenter)
+  )
+  joint.deltaCenter = subtractPositions(left: simB.center, right: simA.center)
+  joint.rotationMass = invert(matrix: invInertiaSum)
+
+  # The initial joint axes in world space
+  let matrixA: Matrix3 = matrixFromQuat(quat: joint.frameA.rotation)
+  joint.jointAxis = matrixA.columnX
+  joint.perpAxisY = matrixA.columnY
+  joint.perpAxisZ = matrixA.columnZ
+
+  joint.springSoftness = makeSoft(hertz: joint.hertz, zeta: joint.dampingRatio, h: h)
+  if enableWarmStarting is false {
+    joint.perpImpulse = Vec2 { x: 0.0, y: 0.0 }
+    joint.angularImpulse = zeroVector()
+    joint.motorImpulse = 0.0
+    joint.springImpulse = 0.0
+    joint.lowerImpulse = 0.0
+    joint.upperImpulse = 0.0
+  }
+  base.prismaticJoint = joint
+}
+
+# b3WarmStartPrismaticJoint
+func warmStartPrismaticJoint(base: view JointSim, states: mod List(BodyState)) {
+  let joint: PrismaticJointData = base.prismaticJoint
+  let stateA: BodyState = jointBodyState(states: states, index: joint.indexA)
+  let stateB: BodyState = jointBodyState(states: states, index: joint.indexB)
+
+  let rA: Vec3 = rotateVector(quat: stateA.deltaRotation, vector: joint.frameA.position)
+  let rB: Vec3 = rotateVector(quat: stateB.deltaRotation, vector: joint.frameB.position)
+  let d: Vec3 = add(
+    left: add(
+      left: subtract(left: stateB.deltaPosition, right: stateA.deltaPosition)
+      right: joint.deltaCenter
+    )
+    right: subtract(left: rB, right: rA)
+  )
+  let jointAxis: Vec3 = rotateVector(quat: stateA.deltaRotation, vector: joint.jointAxis)
+  let sAx: Vec3 = cross(left: add(left: rA, right: d), right: jointAxis)
+  let sBx: Vec3 = cross(left: rB, right: jointAxis)
+
+  let perpY: Vec3 = rotateVector(quat: stateA.deltaRotation, vector: joint.perpAxisY)
+  let perpZ: Vec3 = rotateVector(quat: stateA.deltaRotation, vector: joint.perpAxisZ)
+  let sAy: Vec3 = cross(left: add(left: rA, right: d), right: perpY)
+  let sBy: Vec3 = cross(left: rB, right: perpY)
+  let sAz: Vec3 = cross(left: add(left: rA, right: d), right: perpZ)
+  let sBz: Vec3 = cross(left: rB, right: perpZ)
+
+  let axialImpulse: Float = joint.springImpulse + joint.motorImpulse + joint.lowerImpulse - joint.upperImpulse
+  let perpImpulse: Vec2 = joint.perpImpulse
+
+  let linear: Vec3 = blend3(
+    firstScale: axialImpulse
+    first: jointAxis
+    secondScale: perpImpulse.x
+    second: perpY
+    thirdScale: perpImpulse.y
+    third: perpZ
+  )
+  let angularA: Vec3 = add(
+    left: blend3(
+      firstScale: axialImpulse
+      first: sAx
+      secondScale: perpImpulse.x
+      second: sAy
+      thirdScale: perpImpulse.y
+      third: sAz
+    )
+    right: joint.angularImpulse
+  )
+  let angularB: Vec3 = add(
+    left: blend3(
+      firstScale: axialImpulse
+      first: sBx
+      secondScale: perpImpulse.x
+      second: sBy
+      thirdScale: perpImpulse.y
+      third: sBz
+    )
+    right: joint.angularImpulse
+  )
+
+  var velocities: JointVelocities = jointVelocities(stateA: stateA, stateB: stateB)
+  applyJointImpulse(
+    velocities: velocities
+    base: base
+    linear: linear
+    angularA: angularA
+    angularB: angularB
+  )
+  storeJointVelocities(
+    states: states
+    indexA: joint.indexA
+    indexB: joint.indexB
+    stateA: stateA
+    stateB: stateB
+    velocities: velocities
+  )
+}
+
+# One side of a prismatic limit: the new accumulated impulse of a limit with
+# error `c` and relative speed `cdot` (speculative while separated).
+func prismaticLimitImpulse(
+  base: view JointSim
+  c: view Float
+  cdot: view Float
+  axialMass: view Float
+  oldImpulse: view Float
+  inverseH: view Float
+  useBias: view Bool
+) ret Float {
+  var bias: Float = 0.0
+  var massScale: Float = 1.0
+  var impulseScale: Float = 0.0
+  if c > 0.0 {
+    # Speculation
+    bias = c * inverseH
+  } else if useBias {
+    bias = base.constraintSoftness.biasRate * c
+    massScale = base.constraintSoftness.massScale
+    impulseScale = base.constraintSoftness.impulseScale
+  }
+  let deltaImpulse: Float = -massScale * axialMass * (cdot + bias) - impulseScale * oldImpulse
+  ret maxFloat(left: oldImpulse + deltaImpulse, right: 0.0)
+}
+
+# b3SolvePrismaticJoint
+func solvePrismaticJoint(
+  base: mod JointSim
+  states: mod List(BodyState)
+  h: view Float
+  inverseH: view Float
+  useBias: view Bool
+) {
+  let mA: Float = base.invMassA
+  let mB: Float = base.invMassB
+  let iA: Matrix3 = base.invIA
+  let iB: Matrix3 = base.invIB
+  var joint: PrismaticJointData = base.prismaticJoint
+  let stateA: BodyState = jointBodyState(states: states, index: joint.indexA)
+  let stateB: BodyState = jointBodyState(states: states, index: joint.indexB)
+  var velocities: JointVelocities = jointVelocities(stateA: stateA, stateB: stateB)
+
+  let fixedRotation: Bool = base.fixedRotation
+  let rA: Vec3 = rotateVector(quat: stateA.deltaRotation, vector: joint.frameA.position)
+  let rB: Vec3 = rotateVector(quat: stateB.deltaRotation, vector: joint.frameB.position)
+  let dcA: Vec3 = stateA.deltaPosition
+  let dcB: Vec3 = stateB.deltaPosition
+  let d: Vec3 = add(
+    left: add(left: subtract(left: dcB, right: dcA), right: joint.deltaCenter)
+    right: subtract(left: rB, right: rA)
+  )
+
+  let jointAxis: Vec3 = rotateVector(quat: stateA.deltaRotation, vector: joint.jointAxis)
+  let sAx: Vec3 = cross(left: add(left: rA, right: d), right: jointAxis)
+  let sBx: Vec3 = cross(left: rB, right: jointAxis)
+  let jointTranslation: Float = dot(left: d, right: jointAxis)
+  let targetTranslation: Float = joint.targetTranslation
+
+  # The axial effective mass must be fresh to avoid divergence when the joint
+  # is stressed
+  let ka: Float = mA + mB + dot(left: sAx, right: multiply(matrix: iA, vector: sAx)) + dot(
+    left: sBx
+    right: multiply(matrix: iB, vector: sBx)
+  )
+  var axialMass: Float = 0.0
+  if ka > 0.0 {
+    axialMass = 1.0 / ka
+  }
+
+  # The spring
+  if joint.enableSpring and fixedRotation is false {
+    let c: Float = jointTranslation - targetTranslation
+    let bias: Float = joint.springSoftness.biasRate * c
+    let massScale: Float = joint.springSoftness.massScale
+    let impulseScale: Float = joint.springSoftness.impulseScale
+    let relative: Vec3 = anchorRelativeVelocity(
+      velocities: velocities
+      rA: rA
+      rB: rB
+      d: d
+    )
+    let cdot: Float = dot(left: relative, right: jointAxis)
+    let deltaImpulse: Float = -massScale * axialMass * (cdot + bias) - impulseScale * joint.springImpulse
+    joint.springImpulse = joint.springImpulse + deltaImpulse
+    applyJointImpulse(
+      velocities: velocities
+      base: base
+      linear: scale(scale: deltaImpulse, vector: jointAxis)
+      angularA: scale(scale: deltaImpulse, vector: sAx)
+      angularB: scale(scale: deltaImpulse, vector: sBx)
+    )
+  }
+
+  # The motor
+  if joint.enableMotor and fixedRotation is false {
+    let relative: Vec3 = anchorRelativeVelocity(
+      velocities: velocities
+      rA: rA
+      rB: rB
+      d: d
+    )
+    let cdot: Float = dot(left: relative, right: jointAxis) - joint.motorSpeed
+    var deltaImpulse: Float = -axialMass * cdot
+    var newImpulse: Float = joint.motorImpulse + deltaImpulse
+    let maxImpulse: Float = joint.maxMotorForce * h
+    newImpulse = clampFloat(value: newImpulse, lower: -maxImpulse, upper: maxImpulse)
+    deltaImpulse = newImpulse - joint.motorImpulse
+    joint.motorImpulse = newImpulse
+    applyJointImpulse(
+      velocities: velocities
+      base: base
+      linear: scale(scale: deltaImpulse, vector: jointAxis)
+      angularA: scale(scale: deltaImpulse, vector: sAx)
+      angularB: scale(scale: deltaImpulse, vector: sBx)
+    )
+  }
+
+  # The translation limits
+  if joint.enableLimit and fixedRotation is false {
+    let speculativeDistance: Float = 0.25 * (joint.upperTranslation - joint.lowerTranslation)
+
+    # Lower limit
+    let lowerC: Float = jointTranslation - joint.lowerTranslation
+    if lowerC < speculativeDistance {
+      let relative: Vec3 = anchorRelativeVelocity(
+        velocities: velocities
+        rA: rA
+        rB: rB
+        d: d
+      )
+      let oldImpulse: Float = joint.lowerImpulse
+      joint.lowerImpulse = prismaticLimitImpulse(
+        base: base
+        c: lowerC
+        cdot: dot(left: relative, right: jointAxis)
+        axialMass: axialMass
+        oldImpulse: oldImpulse
+        inverseH: inverseH
+        useBias: useBias
+      )
+      let deltaImpulse: Float = joint.lowerImpulse - oldImpulse
+      applyJointImpulse(
+        velocities: velocities
+        base: base
+        linear: scale(scale: deltaImpulse, vector: jointAxis)
+        angularA: scale(scale: deltaImpulse, vector: sAx)
+        angularB: scale(scale: deltaImpulse, vector: sBx)
+      )
+    } else {
+      joint.lowerImpulse = 0.0
+    }
+
+    # Upper limit (sign flipped on cdot and on the applied impulse)
+    let upperC: Float = joint.upperTranslation - jointTranslation
+    if upperC < speculativeDistance {
+      let relative: Vec3 = anchorRelativeVelocity(
+        velocities: velocities
+        rA: rA
+        rB: rB
+        d: d
+      )
+      let oldImpulse: Float = joint.upperImpulse
+      joint.upperImpulse = prismaticLimitImpulse(
+        base: base
+        c: upperC
+        cdot: -dot(left: relative, right: jointAxis)
+        axialMass: axialMass
+        oldImpulse: oldImpulse
+        inverseH: inverseH
+        useBias: useBias
+      )
+      let negativeDeltaImpulse: Float = oldImpulse - joint.upperImpulse
+      applyJointImpulse(
+        velocities: velocities
+        base: base
+        linear: scale(scale: negativeDeltaImpulse, vector: jointAxis)
+        angularA: scale(scale: negativeDeltaImpulse, vector: sAx)
+        angularB: scale(scale: negativeDeltaImpulse, vector: sBx)
+      )
+    } else {
+      joint.upperImpulse = 0.0
+    }
+  }
+
+  # The rotation constraint
+  if fixedRotation is false {
+    var bias: Vec3 = zeroVector()
+    var massScale: Float = 1.0
+    var impulseScale: Float = 0.0
+    if useBias {
+      let quatA: Quat = multiply(left: stateA.deltaRotation, right: joint.frameA.rotation)
+      let quatB: Quat = multiply(left: stateB.deltaRotation, right: joint.frameB.rotation)
+      let relative: Quat = inverseMultiply(left: quatA, right: quatB)
+      let deltaRotation: Vec3 = deltaQuatToRotation(quat: relative, target: quatIdentity())
+      let c: Vec3 = negate(vector: rotateVector(quat: quatA, vector: deltaRotation))
+      bias = scale(scale: base.constraintSoftness.biasRate, vector: c)
+      massScale = base.constraintSoftness.massScale
+      impulseScale = base.constraintSoftness.impulseScale
+    }
+    let cdot: Vec3 = subtract(left: velocities.angularB, right: velocities.angularA)
+    let impulse: Vec3 = subtract(
+      left: scale(
+        scale: -massScale
+        vector: multiply(matrix: joint.rotationMass, vector: add(left: cdot, right: bias))
+      )
+      right: scale(scale: impulseScale, vector: joint.angularImpulse)
+    )
+    joint.angularImpulse = add(left: joint.angularImpulse, right: impulse)
+    velocities.angularA = subtract(
+      left: velocities.angularA
+      right: multiply(matrix: iA, vector: impulse)
+    )
+    velocities.angularB = add(
+      left: velocities.angularB
+      right: multiply(matrix: iB, vector: impulse)
+    )
+  }
+
+  # The point-to-line constraint
+  let perpY: Vec3 = rotateVector(quat: stateA.deltaRotation, vector: joint.perpAxisY)
+  let perpZ: Vec3 = rotateVector(quat: stateA.deltaRotation, vector: joint.perpAxisZ)
+  joint.perpImpulse = solvePointToLine(
+    velocities: velocities
+    base: base
+    perpY: perpY
+    perpZ: perpZ
+    rA: rA
+    rB: rB
+    d: d
+    oldImpulse: joint.perpImpulse
+    useBias: useBias
+  )
+
+  base.prismaticJoint = joint
+  storeJointVelocities(
+    states: states
+    indexA: joint.indexA
+    indexB: joint.indexB
+    stateA: stateA
+    stateB: stateB
+    velocities: velocities
+  )
+}
+
+# The point-to-line constraint of the prismatic and wheel joints: the anchor
+# of B held on the line through A's anchor along the joint axis, a 2-by-2
+# over the perpendicular axes `perpY` and `perpZ`. Returns the new
+# accumulated impulse.
+func solvePointToLine(
+  velocities: mod JointVelocities
+  base: view JointSim
+  perpY: view Vec3
+  perpZ: view Vec3
+  rA: view Vec3
+  rB: view Vec3
+  d: view Vec3
+  oldImpulse: view Vec2
+  useBias: view Bool
+) ret Vec2 {
+  let mA: Float = base.invMassA
+  let mB: Float = base.invMassB
+  let iA: Matrix3 = base.invIA
+  let iB: Matrix3 = base.invIB
+  var bias: Vec2 = { x: 0.0, y: 0.0 }
+  var massScale: Float = 1.0
+  var impulseScale: Float = 0.0
+  if useBias {
+    let c: Vec2 = { x: dot(left: perpY, right: d), y: dot(left: perpZ, right: d) }
+    bias = scale(scale: base.constraintSoftness.biasRate, vector: c)
+    massScale = base.constraintSoftness.massScale
+    impulseScale = base.constraintSoftness.impulseScale
+  }
+  let relative: Vec3 = anchorRelativeVelocity(
+    velocities: velocities
+    rA: rA
+    rB: rB
+    d: d
+  )
+  let cdot: Vec2 = { x: dot(left: perpY, right: relative), y: dot(left: perpZ, right: relative) }
+
+  let sAy: Vec3 = cross(left: add(left: rA, right: d), right: perpY)
+  let sBy: Vec3 = cross(left: rB, right: perpY)
+  let sAz: Vec3 = cross(left: add(left: rA, right: d), right: perpZ)
+  let sBz: Vec3 = cross(left: rB, right: perpZ)
+  let kyy: Float = mA + mB + dot(left: sAy, right: multiply(matrix: iA, vector: sAy)) + dot(
+    left: sBy
+    right: multiply(matrix: iB, vector: sBy)
+  )
+  let kyz: Float = dot(left: sAy, right: multiply(matrix: iA, vector: sAz)) + dot(
+    left: sBy
+    right: multiply(matrix: iB, vector: sBz)
+  )
+  let kzz: Float = mA + mB + dot(left: sAz, right: multiply(matrix: iA, vector: sAz)) + dot(
+    left: sBz
+    right: multiply(matrix: iB, vector: sBz)
+  )
+  let k: Matrix2 = { columnX: Vec2 { x: kyy, y: kyz }, columnY: Vec2 { x: kyz, y: kzz } }
+
+  let solution: Vec2 = solve2(matrix: k, vector: add(left: cdot, right: bias))
+  let deltaImpulse: Vec2 = subtract(
+    left: scale(scale: -massScale, vector: solution)
+    right: scale(scale: impulseScale, vector: oldImpulse)
+  )
+  applyJointImpulse(
+    velocities: velocities
+    base: base
+    linear: blend2(
+      firstScale: deltaImpulse.x
+      first: perpY
+      secondScale: deltaImpulse.y
+      second: perpZ
+    )
+    angularA: blend2(
+      firstScale: deltaImpulse.x
+      first: sAy
+      secondScale: deltaImpulse.y
+      second: sAz
+    )
+    angularB: blend2(
+      firstScale: deltaImpulse.x
+      first: sBy
+      secondScale: deltaImpulse.y
+      second: sBz
+    )
+  )
+  ret add(left: oldImpulse, right: deltaImpulse)
+}

@@ -1,14 +1,16 @@
-# The joints (P6a: lib/physics/dynamics/Joint, WorldJoints, WorldJointSets,
-# JointSolver, DistanceJoint, RevoluteJoint and the joint parts of the
-# islands, solver sets, graph, solver and body changes) against Box3D
-# itself: tools/box3d-oracle/goldens/joints.golden steps six worlds for 600
-# steps each (1/60 s, 4 sub-steps, sleep on): pendulums and a filter joint;
-# revolute limits, motor and spring; distance springs, limits, motor and a
-# rope; a chain bridge with joint event thresholds; a sleeping chain split
-# by destroying a joint; jointed bodies destroyed, disabled, enabled, retyped
-# and two sleeping sets merged by a new joint. Every step's body hash and
-# joint events, and every 20 steps a full body dump and every joint's sets,
-# colours, islands and impulses, must have the SAME BITS
+# The joints (P6a-P6b: lib/physics/dynamics/Joint, WorldJoints,
+# WorldJointSets, JointSolver, DistanceJoint, RevoluteJoint, PrismaticJoint,
+# WheelJoint and the joint parts of the islands, solver sets, graph, solver
+# and body changes) against Box3D itself: tools/box3d-oracle/goldens/
+# joints.golden steps eight worlds for 600 steps each (1/60 s, 4 sub-steps,
+# sleep on): pendulums and a filter joint; revolute limits, motor and spring;
+# distance springs, limits, motor and a rope; a chain bridge with joint
+# event thresholds; a sleeping chain split by destroying a joint; jointed
+# bodies destroyed, disabled, enabled, retyped and two sleeping sets merged
+# by a new joint; prismatic sliders, a motorised elevator and a telescope; a
+# car on wheel joints over a bump and a parked car. Every step's body hash
+# and joint events, and every 20 steps a full body dump and every joint's
+# sets, colours, islands and impulses, must have the SAME BITS
 # (docs/physics-rae-port-design.md §4).
 import Math
 import Vec3
@@ -241,6 +243,14 @@ func putJointId(out: mod List(Int), jointId: view JointId) {
   putInt(out: out, value: jointId.generation)
 }
 
+# The step's joint events: their count and ids.
+func putJointEvents(out: mod List(Int), world: view PhysicsWorld) {
+  putInt(out: out, value: world.jointEvents.length)
+  loop let event: view JointEvent in world.jointEvents {
+    putJointId(out: out, jointId: event.jointId)
+  }
+}
+
 # The driver's joints: every live joint in id order, its bookkeeping and
 # impulses, then each hashed body's set and island.
 func putJoints(out: mod List(Int), world: view PhysicsWorld, bodies: view List(BodyId)) {
@@ -281,6 +291,28 @@ func putJoints(out: mod List(Int), world: view PhysicsWorld, bodies: view List(B
       putFloat(out: out, value: revolute.motorImpulse)
       putFloat(out: out, value: revolute.lowerImpulse)
       putFloat(out: out, value: revolute.upperImpulse)
+    } else if joint.jointType is JointType.prismaticJoint {
+      let prismatic: PrismaticJointData = sim.prismaticJoint
+      putFloat(out: out, value: prismatic.perpImpulse.x)
+      putFloat(out: out, value: prismatic.perpImpulse.y)
+      putVec(out: out, vector: prismatic.angularImpulse)
+      putFloat(out: out, value: prismatic.springImpulse)
+      putFloat(out: out, value: prismatic.motorImpulse)
+      putFloat(out: out, value: prismatic.lowerImpulse)
+      putFloat(out: out, value: prismatic.upperImpulse)
+    } else if joint.jointType is JointType.wheelJoint {
+      let wheel: WheelJointData = sim.wheelJoint
+      putFloat(out: out, value: wheel.linearImpulse.x)
+      putFloat(out: out, value: wheel.linearImpulse.y)
+      putFloat(out: out, value: wheel.angularImpulse.x)
+      putFloat(out: out, value: wheel.angularImpulse.y)
+      putFloat(out: out, value: wheel.spinImpulse)
+      putFloat(out: out, value: wheel.suspensionSpringImpulse)
+      putFloat(out: out, value: wheel.lowerSuspensionImpulse)
+      putFloat(out: out, value: wheel.upperSuspensionImpulse)
+      putFloat(out: out, value: wheel.steeringSpringImpulse)
+      putFloat(out: out, value: wheel.lowerSteeringImpulse)
+      putFloat(out: out, value: wheel.upperSteeringImpulse)
     }
   }
   putInt(out: out, value: bodies.length)
@@ -483,6 +515,41 @@ func evaluate(
     def.maxMotorForce = readFloat(reader: reader)
     def.motorSpeed = readFloat(reader: reader)
     putJointId(out: out, jointId: createDistanceJoint(world: world, def: def))
+  } else if name is "joint.prismatic" {
+    var def: PrismaticJointDef = defaultPrismaticJointDef(lengthUnitsPerMeter: 1.0)
+    def.base = readJointDef(reader: reader)
+    def.enableSpring = readBool(reader: reader)
+    def.hertz = readFloat(reader: reader)
+    def.dampingRatio = readFloat(reader: reader)
+    def.targetTranslation = readFloat(reader: reader)
+    def.enableLimit = readBool(reader: reader)
+    def.lowerTranslation = readFloat(reader: reader)
+    def.upperTranslation = readFloat(reader: reader)
+    def.enableMotor = readBool(reader: reader)
+    def.maxMotorForce = readFloat(reader: reader)
+    def.motorSpeed = readFloat(reader: reader)
+    putJointId(out: out, jointId: createPrismaticJoint(world: world, def: def))
+  } else if name is "joint.wheel" {
+    var def: WheelJointDef = defaultWheelJointDef(lengthUnitsPerMeter: 1.0)
+    def.base = readJointDef(reader: reader)
+    def.enableSuspensionSpring = readBool(reader: reader)
+    def.suspensionHertz = readFloat(reader: reader)
+    def.suspensionDampingRatio = readFloat(reader: reader)
+    def.enableSuspensionLimit = readBool(reader: reader)
+    def.lowerSuspensionLimit = readFloat(reader: reader)
+    def.upperSuspensionLimit = readFloat(reader: reader)
+    def.enableSpinMotor = readBool(reader: reader)
+    def.maxSpinTorque = readFloat(reader: reader)
+    def.spinSpeed = readFloat(reader: reader)
+    def.enableSteering = readBool(reader: reader)
+    def.steeringHertz = readFloat(reader: reader)
+    def.steeringDampingRatio = readFloat(reader: reader)
+    def.targetSteeringAngle = readFloat(reader: reader)
+    def.maxSteeringTorque = readFloat(reader: reader)
+    def.enableSteeringLimit = readBool(reader: reader)
+    def.lowerSteeringLimit = readFloat(reader: reader)
+    def.upperSteeringLimit = readFloat(reader: reader)
+    putJointId(out: out, jointId: createWheelJoint(world: world, def: def))
   } else if name is "joint.filter" {
     let def: JointDef = readJointDef(reader: reader)
     putJointId(out: out, jointId: createFilterJoint(world: world, def: def))
@@ -510,11 +577,6 @@ func evaluate(
       bodyId: bodyId
       bodyType: bodyTypeFromCode(code: readInt(reader: reader))
     )
-  } else if name is "world.jointEvents" {
-    putInt(out: out, value: world.jointEvents.length)
-    loop let event: view JointEvent in world.jointEvents {
-      putJointId(out: out, jointId: event.jointId)
-    }
   } else if name is "world.joints" {
     putJoints(out: out, world: world, bodies: bodies)
   } else if name is "body.setTransform" {
@@ -537,6 +599,7 @@ func evaluate(
     let subSteps: Int = readInt(reader: reader)
     stepWorld(world: world, timeStep: timeStep, subStepCount: subSteps)
     putU64(out: out, value: hashBodies(world: world, bodies: bodies))
+    putJointEvents(out: out, world: world)
   } else if name is "world.bodies" {
     putInt(out: out, value: bodies.length)
     loop let bodyId: view BodyId in bodies {

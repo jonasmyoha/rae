@@ -471,9 +471,8 @@ reaches its threshold reports a joint event.
 | `b3PrepareJoint` `b3WarmStartJoint` `b3SolveJoint` `b3GetJointReaction`, the `_Overflow` and task variants | `prepareJoint` `warmStartJoint` `solveJoint` `jointReaction` and the block variants (`dynamics/JointSolver`) |
 | distance_joint.c, revolute_joint.c | `dynamics/DistanceJoint`, `dynamics/RevoluteJoint` |
 
-Not yet: the prismatic and wheel joints (P6b); the spherical, motor,
-parallel and weld joints (P6c). Their match arms are empty and they cannot
-be created.
+Not yet: the spherical, motor, parallel and weld joints (P6c). Their match
+arms are empty and they cannot be created.
 
 The check: fixture 984 replays `goldens/joints.golden` — six worlds, 600
 steps each with sleep on: pendulums and a filter joint, revolute limits,
@@ -483,3 +482,27 @@ jointed bodies destroyed, disabled, enabled, retyped and merged across two
 sleeping sets. Every step's body hash and joint events, and every 20 steps
 the bodies and every joint's set, colour, island and impulses, are
 bit-exact.
+
+## P6b — prismatic and wheel joints (`dynamics/PrismaticJoint`, `dynamics/WheelJoint`)
+
+A prismatic joint lets body B slide along the x-axis of joint frame A: a
+spring to a target translation, a motor and translation limits, the rotation
+locked and the anchor held on the axis (a point-to-line constraint). A wheel
+joint is a wheel spinning about its own z-axis on a suspension along frame
+A's x-axis: a suspension spring and limits, a spin motor, and optional
+steering about the suspension axis (a spring to a target angle with a
+torque limit, and angle limits). The two share the point-to-line solve.
+
+| Box3D | Rae |
+|---|---|
+| `b3PrismaticJoint` `b3PrismaticJointDef` `b3CreatePrismaticJoint` | `PrismaticJointData` `PrismaticJointDef` `createPrismaticJoint` |
+| `b3WheelJoint` `b3WheelJointDef` `b3CreateWheelJoint` | `WheelJointData` `WheelJointDef` `createWheelJoint` |
+| `b3PreparePrismaticJoint` `b3WarmStartPrismaticJoint` `b3SolvePrismaticJoint` | `preparePrismaticJoint` `warmStartPrismaticJoint` `solvePrismaticJoint` (`dynamics/PrismaticJoint`) |
+| `b3PrepareWheelJoint` `b3WarmStartWheelJoint` `b3SolveWheelJoint` | `prepareWheelJoint` `warmStartWheelJoint` `solveWheelJoint` (`dynamics/WheelJoint`) |
+
+The check: fixture 984's golden gains two worlds: a slider down a slope to
+its limit, a sprung slider, a motorised elevator lifting a box to its upper
+limit and a sprung, limited telescope between two dynamic bodies; a car on
+four wheel joints (rear spin motors, front steering with limits) driving
+over a bump, and a parked car settling to sleep. 600 steps each, bit-exact
+with every joint's impulses. The joint events now ride on each step's line.
