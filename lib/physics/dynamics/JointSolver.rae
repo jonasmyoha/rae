@@ -1,11 +1,14 @@
 # The joint solver's dispatch (b3PrepareJoint, b3WarmStartJoint,
 # b3SolveJoint, the *_Overflow functions and b3GetJointReaction of Box3D's
 # joint.c at 9f998c8): every stage switches on the joint's kind, an
-# exhaustive match. The kinds not ported yet (P6c) cannot be created, so
-# their arms are empty. Checked against the oracle in fixture 984.
+# exhaustive match (the filter joint's arms are empty: it has no
+# constraint). Checked against the oracle in fixture 984.
 open Vec3
+open Quat
 open physics/math/Scalar
 open physics/math/VectorMath
+open physics/math/QuatMath
+open physics/math/TransformMath
 open physics/dynamics/WorldTypes
 open physics/dynamics/Body
 open physics/dynamics/Joint
@@ -19,6 +22,10 @@ open physics/dynamics/RevoluteJoint
 open physics/dynamics/DistanceJoint
 open physics/dynamics/PrismaticJoint
 open physics/dynamics/WheelJoint
+open physics/dynamics/SphericalJoint
+open physics/dynamics/MotorJoint
+open physics/dynamics/ParallelJoint
+open physics/dynamics/WeldJoint
 
 # The sim of body `bodyId` wherever it lives, and its awake index (-1 when
 # not awake), for a joint's prepare.
@@ -51,6 +58,15 @@ func prepareJoint(base: mod JointSim, world: view PhysicsWorld, context: view St
   let bodyB: JointBody = jointBodyOf(world: world, bodyId: base.bodyIdB)
   match base.jointType {
     case JointType.parallelJoint {
+      prepareParallelJoint(
+        base: base
+        simA: bodyA.sim
+        simB: bodyB.sim
+        indexA: bodyA.awakeIndex
+        indexB: bodyB.awakeIndex
+        h: context.h
+        enableWarmStarting: context.enableWarmStarting
+      )
     }
     case JointType.distanceJoint {
       prepareDistanceJoint(
@@ -66,6 +82,15 @@ func prepareJoint(base: mod JointSim, world: view PhysicsWorld, context: view St
     case JointType.filterJoint {
     }
     case JointType.motorJoint {
+      prepareMotorJoint(
+        base: base
+        simA: bodyA.sim
+        simB: bodyB.sim
+        indexA: bodyA.awakeIndex
+        indexB: bodyB.awakeIndex
+        h: context.h
+        enableWarmStarting: context.enableWarmStarting
+      )
     }
     case JointType.prismaticJoint {
       preparePrismaticJoint(
@@ -90,8 +115,26 @@ func prepareJoint(base: mod JointSim, world: view PhysicsWorld, context: view St
       )
     }
     case JointType.sphericalJoint {
+      prepareSphericalJoint(
+        base: base
+        simA: bodyA.sim
+        simB: bodyB.sim
+        indexA: bodyA.awakeIndex
+        indexB: bodyB.awakeIndex
+        h: context.h
+        enableWarmStarting: context.enableWarmStarting
+      )
     }
     case JointType.weldJoint {
+      prepareWeldJoint(
+        base: base
+        simA: bodyA.sim
+        simB: bodyB.sim
+        indexA: bodyA.awakeIndex
+        indexB: bodyB.awakeIndex
+        h: context.h
+        enableWarmStarting: context.enableWarmStarting
+      )
     }
     case JointType.wheelJoint {
       prepareWheelJoint(
@@ -111,6 +154,7 @@ func prepareJoint(base: mod JointSim, world: view PhysicsWorld, context: view St
 func warmStartJoint(base: view JointSim, states: mod List(BodyState)) {
   match base.jointType {
     case JointType.parallelJoint {
+      warmStartParallelJoint(base: base, states: states)
     }
     case JointType.distanceJoint {
       warmStartDistanceJoint(base: base, states: states)
@@ -118,6 +162,7 @@ func warmStartJoint(base: view JointSim, states: mod List(BodyState)) {
     case JointType.filterJoint {
     }
     case JointType.motorJoint {
+      warmStartMotorJoint(base: base, states: states)
     }
     case JointType.prismaticJoint {
       warmStartPrismaticJoint(base: base, states: states)
@@ -126,8 +171,10 @@ func warmStartJoint(base: view JointSim, states: mod List(BodyState)) {
       warmStartRevoluteJoint(base: base, states: states)
     }
     case JointType.sphericalJoint {
+      warmStartSphericalJoint(base: base, states: states)
     }
     case JointType.weldJoint {
+      warmStartWeldJoint(base: base, states: states)
     }
     case JointType.wheelJoint {
       warmStartWheelJoint(base: base, states: states)
@@ -145,6 +192,7 @@ func solveJoint(
 ) {
   match base.jointType {
     case JointType.parallelJoint {
+      solveParallelJoint(base: base, states: states, h: h)
     }
     case JointType.distanceJoint {
       solveDistanceJoint(
@@ -158,6 +206,7 @@ func solveJoint(
     case JointType.filterJoint {
     }
     case JointType.motorJoint {
+      solveMotorJoint(base: base, states: states, h: h)
     }
     case JointType.prismaticJoint {
       solvePrismaticJoint(
@@ -178,8 +227,22 @@ func solveJoint(
       )
     }
     case JointType.sphericalJoint {
+      solveSphericalJoint(
+        base: base
+        states: states
+        h: h
+        inverseH: inverseH
+        useBias: useBias
+      )
     }
     case JointType.weldJoint {
+      solveWeldJoint(
+        base: base
+        states: states
+        h: h
+        inverseH: inverseH
+        useBias: useBias
+      )
     }
     case JointType.wheelJoint {
       solveWheelJoint(
@@ -199,11 +262,27 @@ type JointReaction {
   torque: Float
 }
 
-func jointReaction(sim: view JointSim, invTimeStep: view Float) ret JointReaction {
+# b3GetBodyTransform: body `bodyId`'s transform from the set it lives in.
+func bodyTransformOf(world: view PhysicsWorld, bodyId: view Int) ret Transform {
+  let body: Body = bodyAt(world: world, bodyId: bodyId)
+  if let set: view SolverSet => world.solverSets.viewAt(index: body.setIndex) {
+    ret set.bodySims.copyAtDefault(index: body.localIndex).transform
+  }
+  ret Transform { position: zeroVector(), rotation: quatIdentity() }
+}
+
+func jointReaction(
+  sim: view JointSim
+  world: view PhysicsWorld
+  invTimeStep: view Float
+) ret JointReaction {
   var linearImpulse: Float = 0.0
   var angularImpulse: Float = 0.0
   match sim.jointType {
     case JointType.parallelJoint {
+      let joint: ParallelJointData = sim.parallelJoint
+      let impulse: Vec3 = { x: joint.perpImpulse.x, y: joint.perpImpulse.y, z: 0.0 }
+      angularImpulse = length(vector: impulse)
     }
     case JointType.distanceJoint {
       let joint: DistanceJointData = sim.distanceJoint
@@ -214,6 +293,13 @@ func jointReaction(sim: view JointSim, invTimeStep: view Float) ret JointReactio
     case JointType.filterJoint {
     }
     case JointType.motorJoint {
+      let joint: MotorJointData = sim.motorJoint
+      linearImpulse = length(
+        vector: add(left: joint.linearVelocityImpulse, right: joint.linearSpringImpulse)
+      )
+      angularImpulse = length(
+        vector: add(left: joint.angularVelocityImpulse, right: joint.angularSpringImpulse)
+      )
     }
     case JointType.prismaticJoint {
       let joint: PrismaticJointData = sim.prismaticJoint
@@ -236,8 +322,29 @@ func jointReaction(sim: view JointSim, invTimeStep: view Float) ret JointReactio
       angularImpulse = length(vector: impulse)
     }
     case JointType.sphericalJoint {
+      let joint: SphericalJointData = sim.sphericalJoint
+      linearImpulse = length(vector: joint.linearImpulse)
+      let transformA: Transform = bodyTransformOf(world: world, bodyId: sim.bodyIdA)
+      let transformB: Transform = bodyTransformOf(world: world, bodyId: sim.bodyIdB)
+      let quatA: Quat = multiply(left: transformA.rotation, right: sim.localFrameA.rotation)
+      let quatB: Quat = multiply(left: transformB.rotation, right: sim.localFrameB.rotation)
+      # The cone axis is the z-axis of body A
+      let coneAxis: Vec3 = rotateVector(quat: quatA, vector: axisZ())
+      let twistAxis: Vec3 = rotateVector(quat: quatB, vector: axisZ())
+      let swingAxis: Vec3 = normalize(vector: cross(left: coneAxis, right: twistAxis))
+      var impulse: Vec3 = add(left: joint.springImpulse, right: joint.motorImpulse)
+      impulse = mulAdd(
+        base: impulse
+        scale: joint.lowerTwistImpulse - joint.upperTwistImpulse
+        vector: twistAxis
+      )
+      impulse = mulAdd(base: impulse, scale: joint.swingImpulse, vector: swingAxis)
+      angularImpulse = length(vector: impulse)
     }
     case JointType.weldJoint {
+      let joint: WeldJointData = sim.weldJoint
+      linearImpulse = length(vector: joint.linearImpulse)
+      angularImpulse = length(vector: joint.angularImpulse)
     }
     case JointType.wheelJoint {
       let joint: WheelJointData = sim.wheelJoint
@@ -250,6 +357,19 @@ func jointReaction(sim: view JointSim, invTimeStep: view Float) ret JointReactio
   ret JointReaction { force: linearImpulse * invTimeStep, torque: angularImpulse * invTimeStep }
 }
 
+# Joint sim `localIndex` of graph colour `colorIndex`, read through a view
+# (copying the colour would copy all of its lists).
+func colorJointSim(
+  world: view PhysicsWorld
+  colorIndex: view Int
+  localIndex: view Int
+) ret JointSim {
+  if let color: view GraphColor => world.constraintGraph.colors.viewAt(index: colorIndex) {
+    ret color.jointSims.copyAtDefault(index: localIndex)
+  }
+  ret zeroJointSim()
+}
+
 # b3PrepareJoints_Overflow
 func prepareJointsOverflow(world: mod PhysicsWorld, context: view StepContext) {
   var count: Int = 0
@@ -257,9 +377,7 @@ func prepareJointsOverflow(world: mod PhysicsWorld, context: view StepContext) {
     count = color.jointSims.length
   }
   loop var i: Int = 0, i < count, ++i {
-    var sim: JointSim = world.constraintGraph.colors.copyAtDefault(index: overflowIndex).jointSims.copyAtDefault(
-      index: i
-    )
+    var sim: JointSim = colorJointSim(world: world, colorIndex: overflowIndex, localIndex: i)
     prepareJoint(base: sim, world: world, context: context)
     if let color: mod GraphColor => world.constraintGraph.colors.modAt(index: overflowIndex) {
       color.jointSims.set(index: i, value: sim)
@@ -319,8 +437,10 @@ func prepareJointsBlock(
     )
     loop index < colorEndIndex {
       let localIndex: Int = index - span.start
-      var sim: JointSim = world.constraintGraph.colors.copyAtDefault(index: span.colorIndex).jointSims.copyAtDefault(
-        index: localIndex
+      var sim: JointSim = colorJointSim(
+        world: world
+        colorIndex: span.colorIndex
+        localIndex: localIndex
       )
       prepareJoint(base: sim, world: world, context: context)
       if let color: mod GraphColor => world.constraintGraph.colors.modAt(index: span.colorIndex) {
@@ -347,7 +467,10 @@ func warmStartJointsBlock(world: mod PhysicsWorld, block: view SolverBlock) {
 
 # b3SolveJointsTask: a block of a colour's joints; with the bias, an awake
 # joint whose force or torque reaches its threshold is flagged for a joint
-# event (worker 0's bits).
+# event (worker 0's bits). The threshold check runs after the block is
+# solved, so the reaction can read the world: a joint's impulses do not
+# change after its own solve, and the body transforms are only moved by
+# finalize, so the values are the ones Box3D checks right after each solve.
 func solveJointsBlock(
   world: mod PhysicsWorld
   context: view StepContext
@@ -356,26 +479,39 @@ func solveJointsBlock(
 ) {
   if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
     if let color: mod GraphColor => world.constraintGraph.colors.modAt(index: block.colorIndex) {
-      if let taskContext: mod TaskContext => world.taskContexts.modAt(index: 0) {
-        loop var i: Int = block.startIndex, i < block.startIndex + block.count, ++i {
-          if let sim: mod JointSim => color.jointSims.modAt(index: i) {
-            solveJoint(
-              base: sim
-              states: awake.bodyStates
-              h: context.h
-              inverseH: context.inverseH
-              useBias: useBias
-            )
-            if useBias and (sim.forceThreshold < floatMax or sim.torqueThreshold < floatMax) and getBit(
-              bitset: taskContext.jointStateBitSet
-              bitIndex: sim.jointId
-            ) is false {
-              let reaction: JointReaction = jointReaction(sim: sim, invTimeStep: context.inverseH)
-              # A zero threshold reports every awake joint
-              if reaction.force >= sim.forceThreshold or reaction.torque >= sim.torqueThreshold {
-                setBit(bitset: taskContext.jointStateBitSet, bitIndex: sim.jointId)
-              }
-            }
+      loop var i: Int = block.startIndex, i < block.startIndex + block.count, ++i {
+        if let sim: mod JointSim => color.jointSims.modAt(index: i) {
+          solveJoint(
+            base: sim
+            states: awake.bodyStates
+            h: context.h
+            inverseH: context.inverseH
+            useBias: useBias
+          )
+        }
+      }
+    }
+  }
+  if useBias is false {
+    ret
+  }
+  loop var i: Int = block.startIndex, i < block.startIndex + block.count, ++i {
+    let sim: JointSim = colorJointSim(world: world, colorIndex: block.colorIndex, localIndex: i)
+    if sim.forceThreshold < floatMax or sim.torqueThreshold < floatMax {
+      var flagged: Bool = false
+      if let taskContext: view TaskContext => world.taskContexts.viewAt(index: 0) {
+        flagged = getBit(bitset: taskContext.jointStateBitSet, bitIndex: sim.jointId)
+      }
+      if flagged is false {
+        let reaction: JointReaction = jointReaction(
+          sim: sim
+          world: world
+          invTimeStep: context.inverseH
+        )
+        # A zero threshold reports every awake joint
+        if reaction.force >= sim.forceThreshold or reaction.torque >= sim.torqueThreshold {
+          if let taskContext: mod TaskContext => world.taskContexts.modAt(index: 0) {
+            setBit(bitset: taskContext.jointStateBitSet, bitIndex: sim.jointId)
           }
         }
       }

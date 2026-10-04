@@ -1,6 +1,5 @@
-/* Box3D oracle driver: joints (docs/physics-rae-port-design.md §7 P6a-P6b:
- * joint.c, distance_joint.c, revolute_joint.c, prismatic_joint.c,
- * wheel_joint.c, the filter joint, the joint
+/* Box3D oracle driver: joints (docs/physics-rae-port-design.md §7 P6: joint.c,
+ * every joint kind's source, the joint
  * parts of island.c, solver_set.c, constraint_graph.c, solver.c and body.c),
  * stepped with b3World_Step (1/60 s, 4 sub-steps, workerCount 1), 600 steps
  * each, sleep on:
@@ -26,6 +25,16 @@
  *   car       a car on four wheel joints (suspension springs and limits,
  *             spin motors on the rear, steering with limits on the front)
  *             driving over a bump, and a parked car settling to sleep
+ *   spherical a ragdoll-like chain on spherical joints swinging into its
+ *             cone and twist limits (one joint with a torque threshold), a
+ *             sprung ball joint and a motorised one
+ *   motor     motor joints: a body pulled onto a target frame by springs
+ *             while spun by velocity control, a body driven along at a
+ *             set velocity, and one between two dynamic bodies
+ *   parallel  a tumbling body kept upright by a parallel joint (a keel), and
+ *             a parallel joint between two dynamic bodies on a rope
+ *   weld      a cantilevered beam of welded boxes, rigid and soft welds, with
+ *             a ball dropped on it
  *
  * The line formats are meshscenes.c's, plus
  *
@@ -43,6 +52,16 @@
  *               enableSteering steeringHertz steeringDampingRatio
  *               targetSteeringAngle maxSteeringTorque enableSteeringLimit
  *               lowerSteeringLimit upperSteeringLimit -> joint
+ *   joint.spherical base enableSpring hertz dampingRatio targetRotation(4)
+ *                   enableConeLimit coneAngle enableTwistLimit lowerTwistAngle
+ *                   upperTwistAngle enableMotor maxMotorTorque motorVelocity(3)
+ *                   -> joint
+ *   joint.motor base linearVelocity(3) maxVelocityForce angularVelocity(3)
+ *               maxVelocityTorque linearHertz linearDampingRatio maxSpringForce
+ *               angularHertz angularDampingRatio maxSpringTorque -> joint
+ *   joint.parallel base hertz dampingRatio maxTorque -> joint
+ *   joint.weld base linearHertz angularHertz linearDampingRatio
+ *              angularDampingRatio -> joint
  *   joint.filter base -> joint
  *   joint.destroy joint wakeAttached ->
  *   body.destroy body ->      body.disable body ->      body.enable body ->
@@ -66,8 +85,11 @@
  * motor; revolute: linear(3), perpendicular(2), spring, motor, lower,
  * upper; prismatic: perpendicular(2), angular(3), spring, motor, lower,
  * upper; wheel: linear(2), angular(2), spin, suspension spring, lower,
- * upper, steering spring, lower, upper), then each hashed body's set and
- * island.
+ * upper, steering spring, lower, upper; spherical: linear(3), spring(3),
+ * motor(3), lower twist, upper twist, swing; motor: linear velocity(3),
+ * angular velocity(3), linear spring(3), angular spring(3); parallel:
+ * perpendicular(2); weld: linear(3), angular(3)), then each hashed body's set
+ * and island.
  *
  * Compiled against the cached Box3D checkout by tools/box3d-oracle/oracle.sh,
  * never by a Rae build. */
@@ -235,6 +257,63 @@ static b3JointId wheel(b3WheelJointDef def) {
   return id;
 }
 
+static b3JointId spherical(b3SphericalJointDef def) {
+  b3JointId id = b3CreateSphericalJoint(g_worldId, &def);
+  name("joint.spherical"); baseOut(&def.base); i(def.enableSpring); f(def.hertz); f(def.dampingRatio);
+  q4(def.targetRotation); i(def.enableConeLimit); f(def.coneAngle); i(def.enableTwistLimit); f(def.lowerTwistAngle);
+  f(def.upperTwistAngle); i(def.enableMotor); f(def.maxMotorTorque); v3(def.motorVelocity); arrow(); jointRef(id); end();
+  return id;
+}
+
+static b3SphericalJointDef sphericalDef(b3BodyId bodyA, b3BodyId bodyB, b3Transform frameA, b3Transform frameB) {
+  b3SphericalJointDef def = b3DefaultSphericalJointDef();
+  def.base.bodyIdA = bodyA;
+  def.base.bodyIdB = bodyB;
+  def.base.localFrameA = frameA;
+  def.base.localFrameB = frameB;
+  return def;
+}
+
+static b3JointId motorJoint(b3MotorJointDef def) {
+  b3JointId id = b3CreateMotorJoint(g_worldId, &def);
+  name("joint.motor"); baseOut(&def.base); v3(def.linearVelocity); f(def.maxVelocityForce); v3(def.angularVelocity);
+  f(def.maxVelocityTorque); f(def.linearHertz); f(def.linearDampingRatio); f(def.maxSpringForce); f(def.angularHertz);
+  f(def.angularDampingRatio); f(def.maxSpringTorque); arrow(); jointRef(id); end();
+  return id;
+}
+
+static b3MotorJointDef motorDef(b3BodyId bodyA, b3BodyId bodyB, b3Transform frameA, b3Transform frameB) {
+  b3MotorJointDef def = b3DefaultMotorJointDef();
+  def.base.bodyIdA = bodyA;
+  def.base.bodyIdB = bodyB;
+  def.base.localFrameA = frameA;
+  def.base.localFrameB = frameB;
+  return def;
+}
+
+static b3JointId parallel(b3ParallelJointDef def) {
+  b3JointId id = b3CreateParallelJoint(g_worldId, &def);
+  name("joint.parallel"); baseOut(&def.base); f(def.hertz); f(def.dampingRatio); f(def.maxTorque); arrow(); jointRef(id);
+  end();
+  return id;
+}
+
+static b3JointId weld(b3WeldJointDef def) {
+  b3JointId id = b3CreateWeldJoint(g_worldId, &def);
+  name("joint.weld"); baseOut(&def.base); f(def.linearHertz); f(def.angularHertz); f(def.linearDampingRatio);
+  f(def.angularDampingRatio); arrow(); jointRef(id); end();
+  return id;
+}
+
+static b3WeldJointDef weldDef(b3BodyId bodyA, b3BodyId bodyB, b3Transform frameA, b3Transform frameB) {
+  b3WeldJointDef def = b3DefaultWeldJointDef();
+  def.base.bodyIdA = bodyA;
+  def.base.bodyIdB = bodyB;
+  def.base.localFrameA = frameA;
+  def.base.localFrameB = frameB;
+  return def;
+}
+
 static b3JointId filterJoint(b3BodyId bodyA, b3BodyId bodyB) {
   b3FilterJointDef def = b3DefaultFilterJointDef();
   def.base.bodyIdA = bodyA;
@@ -323,6 +402,19 @@ static void joints(void) {
       f(w->linearImpulse.x); f(w->linearImpulse.y); f(w->angularImpulse.x); f(w->angularImpulse.y); f(w->spinImpulse);
       f(w->suspensionSpringImpulse); f(w->lowerSuspensionImpulse); f(w->upperSuspensionImpulse);
       f(w->steeringSpringImpulse); f(w->lowerSteeringImpulse); f(w->upperSteeringImpulse);
+    } else if (joint->type == b3_sphericalJoint) {
+      b3SphericalJoint* sj = &sim->sphericalJoint;
+      v3(sj->linearImpulse); v3(sj->springImpulse); v3(sj->motorImpulse); f(sj->lowerTwistImpulse);
+      f(sj->upperTwistImpulse); f(sj->swingImpulse);
+    } else if (joint->type == b3_motorJoint) {
+      b3MotorJoint* m = &sim->motorJoint;
+      v3(m->linearVelocityImpulse); v3(m->angularVelocityImpulse); v3(m->linearSpringImpulse); v3(m->angularSpringImpulse);
+    } else if (joint->type == b3_parallelJoint) {
+      b3ParallelJoint* pj = &sim->parallelJoint;
+      f(pj->perpImpulse.x); f(pj->perpImpulse.y);
+    } else if (joint->type == b3_weldJoint) {
+      b3WeldJoint* wj = &sim->weldJoint;
+      v3(wj->linearImpulse); v3(wj->angularImpulse);
     }
   }
   i(g_bodyCount);
@@ -726,6 +818,188 @@ int main(void) {
     boxShape(bump, 0.4f, 0.12f, 3.0f);
     makeCar((b3Vec3){ -8.0f, 1.0f, 0.0f }, true);
     makeCar((b3Vec3){ 6.0f, 1.0f, 5.0f }, false);
+  }
+  endScene();
+
+  /* A ragdoll-like chain on spherical joints */
+  printf("# scene spherical\n");
+  beginScene();
+  {
+    b3BodyId ground = makeGround();
+    b3Vec3 alongX = { 1.0f, 0.0f, 0.0f };
+    /* Frames with z pointing down the chain (the cone and twist axis): the
+     * links lie along their x-axis, turned upright */
+    b3BodyId previous = ground;
+    b3Transform previousFrame = rotatedFrame(-4.0f, 8.5f, 0.0f, alongX, 1.5707963f);
+    for (int k = 0; k < 4; k++) {
+      b3BodyId link = makeMovingBody(b3_dynamicBody, (b3Vec3){ -4.0f, 7.4f - 1.2f * (float)k, 0.0f },
+                                     b3MakeQuatFromAxisAngle((b3Vec3){ 0.0f, 0.0f, 1.0f }, 1.5707963f),
+                                     (b3Vec3){ k % 2 == 0 ? 4.0f : -4.0f, 0.0f, k % 2 == 0 ? 2.0f : -2.0f },
+                                     (b3Vec3){ 0.0f, 2.0f, 0.0f });
+      capsuleShape(link, 0.4f, 0.15f);
+      b3SphericalJointDef def = sphericalDef(previous, link, previousFrame,
+                                             rotatedFrame(0.6f, 0.0f, 0.0f, (b3Vec3){ 0.0f, 1.0f, 0.0f }, -1.5707963f));
+      def.enableConeLimit = true;
+      def.coneAngle = 0.3f;
+      def.enableTwistLimit = true;
+      def.lowerTwistAngle = -0.3f;
+      def.upperTwistAngle = 0.3f;
+      if (k == 1) def.base.torqueThreshold = 20.0f;
+      spherical(def);
+      previous = link;
+      previousFrame = rotatedFrame(-0.6f, 0.0f, 0.0f, (b3Vec3){ 0.0f, 1.0f, 0.0f }, -1.5707963f);
+    }
+
+    /* A pendulum whose cone is tilted away from the vertical: gravity holds
+     * it against the cone's edge */
+    b3BodyId leaning = makeMovingBody(b3_dynamicBody, (b3Vec3){ -1.0f, 4.4f, 0.0f },
+                                      b3MakeQuatFromAxisAngle((b3Vec3){ 0.0f, 0.0f, 1.0f }, 1.5707963f), b3Vec3_zero,
+                                      b3Vec3_zero);
+    capsuleShape(leaning, 0.4f, 0.15f);
+    b3Transform tiltedCone = rotatedFrame(-1.0f, 5.5f, 0.0f, alongX, 1.5707963f);
+    tiltedCone.q = b3MulQuat(b3MakeQuatFromAxisAngle((b3Vec3){ 0.0f, 0.0f, 1.0f }, 0.6f), tiltedCone.q);
+    b3SphericalJointDef lean = sphericalDef(ground, leaning, tiltedCone,
+                                            rotatedFrame(0.6f, 0.0f, 0.0f, (b3Vec3){ 0.0f, 1.0f, 0.0f }, -1.5707963f));
+    lean.enableConeLimit = true;
+    lean.coneAngle = 0.2f;
+    spherical(lean);
+
+    /* A sprung ball joint pulled back to a tilted target */
+    b3BodyId sprung = makeMovingBody(b3_dynamicBody, (b3Vec3){ 2.0f, 5.0f, 0.0f }, b3Quat_identity, b3Vec3_zero,
+                                     (b3Vec3){ 1.0f, 0.0f, 2.0f });
+    boxShape(sprung, 0.5f, 0.1f, 0.3f);
+    b3SphericalJointDef springDef = sphericalDef(ground, sprung, frameAt(2.0f, 6.0f, 0.0f), frameAt(0.0f, 0.5f, 0.0f));
+    springDef.enableSpring = true;
+    springDef.hertz = 1.5f;
+    springDef.dampingRatio = 0.3f;
+    springDef.targetRotation = b3MakeQuatFromAxisAngle((b3Vec3){ 0.0f, 0.0f, 1.0f }, 0.4f);
+    spherical(springDef);
+
+    /* A motorised ball joint */
+    b3BodyId spun = makeBody(b3_dynamicBody, (b3Vec3){ 6.0f, 5.0f, 0.0f });
+    boxShape(spun, 0.6f, 0.1f, 0.2f);
+    b3SphericalJointDef motorised = sphericalDef(ground, spun, frameAt(6.0f, 6.0f, 0.0f), frameAt(0.0f, 0.5f, 0.0f));
+    motorised.enableMotor = true;
+    motorised.maxMotorTorque = 300.0f;
+    motorised.motorVelocity = (b3Vec3){ 0.0f, 2.0f, 0.5f };
+    spherical(motorised);
+  }
+  endScene();
+
+  /* Motor joints */
+  printf("# scene motor\n");
+  beginScene();
+  {
+    makeGround();
+    /* A joint to the ground would stop its body colliding with it */
+    b3BodyId anchor = makeBody(b3_staticBody, (b3Vec3){ 0.0f, 0.5f, 0.0f });
+
+    /* Pulled onto a target frame by the springs while spun */
+    b3BodyId pulled = makeBody(b3_dynamicBody, (b3Vec3){ -5.0f, 1.0f, 0.0f });
+    boxShape(pulled, 0.3f, 0.3f, 0.3f);
+    b3MotorJointDef pull = motorDef(anchor, pulled, frameAt(-3.0f, 2.5f, 1.0f), frameAt(0.0f, 0.0f, 0.0f));
+    pull.linearHertz = 1.5f;
+    pull.linearDampingRatio = 0.7f;
+    pull.maxSpringForce = 3000.0f;
+    pull.angularVelocity = (b3Vec3){ 0.0f, 1.5f, 0.0f };
+    pull.maxVelocityTorque = 200.0f;
+    motorJoint(pull);
+
+    /* Driven along at a set velocity, against friction */
+    b3BodyId driven = makeBody(b3_dynamicBody, (b3Vec3){ 0.0f, 0.3f, 3.0f });
+    boxShape(driven, 0.3f, 0.3f, 0.3f);
+    b3MotorJointDef drive = motorDef(anchor, driven, frameAt(0.0f, -0.2f, 3.0f), frameAt(0.0f, 0.0f, 0.0f));
+    drive.linearVelocity = (b3Vec3){ 1.0f, 0.0f, -0.5f };
+    drive.maxVelocityForce = 1500.0f;
+    drive.angularHertz = 2.0f;
+    drive.angularDampingRatio = 1.0f;
+    drive.maxSpringTorque = 500.0f;
+    motorJoint(drive);
+
+    /* Between two dynamic bodies */
+    b3BodyId leader = makeMovingBody(b3_dynamicBody, (b3Vec3){ 4.0f, 2.0f, -2.0f }, b3Quat_identity,
+                                     (b3Vec3){ 0.0f, 2.0f, 1.0f }, b3Vec3_zero);
+    sphereShape(leader, 0.4f);
+    b3BodyId follower = makeBody(b3_dynamicBody, (b3Vec3){ 6.0f, 2.0f, -2.0f });
+    boxShape(follower, 0.25f, 0.25f, 0.25f);
+    b3MotorJointDef follow = motorDef(leader, follower, frameAt(1.0f, 0.0f, 0.0f), frameAt(0.0f, 0.0f, 0.0f));
+    follow.linearHertz = 3.0f;
+    follow.linearDampingRatio = 0.5f;
+    follow.maxSpringForce = 1000.0f;
+    follow.angularHertz = 3.0f;
+    follow.angularDampingRatio = 0.5f;
+    follow.maxSpringTorque = 100.0f;
+    motorJoint(follow);
+  }
+  endScene();
+
+  /* Parallel joints */
+  printf("# scene parallel\n");
+  beginScene();
+  {
+    b3BodyId ground = makeGround();
+    /* A joint to the ground would stop its body colliding with it */
+    b3BodyId anchor = makeBody(b3_staticBody, (b3Vec3){ 0.0f, 0.5f, -6.0f });
+
+    /* A tumbling body kept upright by a keel */
+    b3BodyId keeled = makeMovingBody(b3_dynamicBody, (b3Vec3){ -3.0f, 3.0f, 0.0f },
+                                     b3MakeQuatFromAxisAngle((b3Vec3){ 1.0f, 0.0f, 0.0f }, 0.6f),
+                                     (b3Vec3){ 1.0f, 0.0f, 0.0f }, (b3Vec3){ 2.0f, 1.0f, 3.0f });
+    boxShape(keeled, 0.6f, 0.3f, 0.4f);
+    b3ParallelJointDef keel = b3DefaultParallelJointDef();
+    keel.base.bodyIdA = anchor;
+    keel.base.bodyIdB = keeled;
+    keel.hertz = 3.0f;
+    keel.dampingRatio = 0.5f;
+    parallel(keel);
+
+    /* Two bodies on a rope, kept parallel with a torque limit */
+    b3BodyId hanger = makeMovingBody(b3_dynamicBody, (b3Vec3){ 3.0f, 4.0f, 0.0f }, b3Quat_identity, b3Vec3_zero,
+                                     (b3Vec3){ 0.0f, 0.0f, 4.0f });
+    boxShape(hanger, 0.4f, 0.1f, 0.4f);
+    distance(distanceDef(ground, hanger, frameAt(3.0f, 6.5f, 0.0f), frameAt(0.0f, 0.0f, 0.0f), 2.0f));
+    b3BodyId partner = makeMovingBody(b3_dynamicBody, (b3Vec3){ 4.5f, 4.0f, 0.0f }, b3Quat_identity, b3Vec3_zero,
+                                      (b3Vec3){ 3.0f, 0.0f, 0.0f });
+    boxShape(partner, 0.3f, 0.3f, 0.1f);
+    distance(distanceDef(hanger, partner, frameAt(0.4f, 0.0f, 0.0f), frameAt(-0.3f, 0.0f, 0.0f), 1.0f));
+    b3ParallelJointDef pair = b3DefaultParallelJointDef();
+    pair.base.bodyIdA = hanger;
+    pair.base.bodyIdB = partner;
+    pair.hertz = 2.0f;
+    pair.dampingRatio = 0.2f;
+    pair.maxTorque = 30.0f;
+    parallel(pair);
+  }
+  endScene();
+
+  /* A welded beam */
+  printf("# scene weld\n");
+  beginScene();
+  {
+    b3BodyId ground = makeGround();
+    b3BodyId wall = makeBody(b3_staticBody, (b3Vec3){ -5.0f, 3.0f, 0.0f });
+    boxShape(wall, 0.2f, 1.0f, 1.0f);
+    b3BodyId previous = wall;
+    b3Transform previousFrame = frameAt(0.2f, 0.0f, 0.0f);
+    for (int k = 0; k < 5; k++) {
+      b3BodyId segment = makeBody(b3_dynamicBody, (b3Vec3){ -4.3f + (float)k, 3.0f, 0.0f });
+      boxShape(segment, 0.5f, 0.1f, 0.3f);
+      b3WeldJointDef def = weldDef(previous, segment, previousFrame, frameAt(-0.5f, 0.0f, 0.0f));
+      if (k >= 2) {
+        def.angularHertz = 4.0f;
+        def.angularDampingRatio = 0.3f;
+      }
+      if (k == 4) {
+        def.linearHertz = 8.0f;
+        def.linearDampingRatio = 0.5f;
+      }
+      weld(def);
+      previous = segment;
+      previousFrame = frameAt(0.5f, 0.0f, 0.0f);
+    }
+    b3BodyId ball = makeBody(b3_dynamicBody, (b3Vec3){ -1.6f, 5.0f, 0.1f });
+    sphereShape(ball, 0.3f);
+    (void)ground;
   }
   endScene();
 

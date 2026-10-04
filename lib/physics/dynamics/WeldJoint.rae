@@ -1,0 +1,222 @@
+# The weld joint (b3PrepareWeldJoint, b3WarmStartWeldJoint and
+# b3SolveWeldJoint of Box3D's weld_joint.c at 9f998c8): the two frames are
+# held together in position and rotation, each part rigid (hertz 0, the
+# joint's constraint softness) or soft (its own hertz and damping ratio).
+# Box3D's operation order is kept exactly; checked against the oracle in
+# fixture 984.
+open Vec3
+open Quat
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/QuatMath
+open physics/math/MatrixMath
+open physics/math/TransformMath
+open physics/dynamics/WorldTypes
+open physics/dynamics/Body
+open physics/dynamics/Joint
+open physics/dynamics/JointData
+open physics/dynamics/ContactConstraints
+open physics/dynamics/StepContext
+open physics/dynamics/RevoluteJoint
+open physics/dynamics/PrismaticJoint
+open physics/dynamics/SphericalJoint
+
+# b3PrepareWeldJoint (the masses and frames are read from the bodies' sims
+# by the caller).
+func prepareWeldJoint(
+  base: mod JointSim
+  simA: view BodySim
+  simB: view BodySim
+  indexA: view Int
+  indexB: view Int
+  h: view Float
+  enableWarmStarting: view Bool
+) {
+  base.invMassA = simA.invMass
+  base.invMassB = simB.invMass
+  base.invIA = simA.invInertiaWorld
+  base.invIB = simB.invInertiaWorld
+  let invInertiaSum: Matrix3 = add(left: base.invIA, right: base.invIB)
+  base.fixedRotation = determinant(matrix: invInertiaSum) < 1000.0 * floatMin
+
+  var joint: WeldJointData = base.weldJoint
+  joint.indexA = indexA
+  joint.indexB = indexB
+
+  # The joint frames with world rotations, relative to the centers of mass
+  joint.frameA.rotation = multiply(left: simA.transform.rotation, right: base.localFrameA.rotation)
+  joint.frameA.position = rotateVector(
+    quat: simA.transform.rotation
+    vector: subtract(left: base.localFrameA.position, right: simA.localCenter)
+  )
+  joint.frameB.rotation = multiply(left: simB.transform.rotation, right: base.localFrameB.rotation)
+  joint.frameB.position = rotateVector(
+    quat: simB.transform.rotation
+    vector: subtract(left: base.localFrameB.position, right: simB.localCenter)
+  )
+  joint.deltaCenter = subtractPositions(left: simB.center, right: simA.center)
+  joint.angularMass = invert(matrix: invInertiaSum)
+
+  if joint.linearHertz is 0.0 {
+    joint.linearSpring = base.constraintSoftness
+  } else {
+    joint.linearSpring = makeSoft(hertz: joint.linearHertz, zeta: joint.linearDampingRatio, h: h)
+  }
+  if joint.angularHertz is 0.0 {
+    joint.angularSpring = base.constraintSoftness
+  } else {
+    joint.angularSpring = makeSoft(hertz: joint.angularHertz, zeta: joint.angularDampingRatio, h: h)
+  }
+
+  if enableWarmStarting is false {
+    joint.linearImpulse = zeroVector()
+    joint.angularImpulse = zeroVector()
+  }
+  base.weldJoint = joint
+}
+
+# b3WarmStartWeldJoint
+func warmStartWeldJoint(base: view JointSim, states: mod List(BodyState)) {
+  let joint: WeldJointData = base.weldJoint
+  let stateA: BodyState = jointBodyState(states: states, index: joint.indexA)
+  let stateB: BodyState = jointBodyState(states: states, index: joint.indexB)
+  let rA: Vec3 = rotateVector(quat: stateA.deltaRotation, vector: joint.frameA.position)
+  let rB: Vec3 = rotateVector(quat: stateB.deltaRotation, vector: joint.frameB.position)
+
+  var velocities: JointVelocities = jointVelocities(stateA: stateA, stateB: stateB)
+  applyJointImpulse(
+    velocities: velocities
+    base: base
+    linear: joint.linearImpulse
+    angularA: add(left: cross(left: rA, right: joint.linearImpulse), right: joint.angularImpulse)
+    angularB: add(left: cross(left: rB, right: joint.linearImpulse), right: joint.angularImpulse)
+  )
+  storeJointVelocities(
+    states: states
+    indexA: joint.indexA
+    indexB: joint.indexB
+    stateA: stateA
+    stateB: stateB
+    velocities: velocities
+  )
+}
+
+# The rotation error of `relative` from the identity, in world space:
+# -rotate(quatA, deltaQuatToRotation(relative, identity)).
+func rotationError(quatA: view Quat, relative: view Quat) ret Vec3 {
+  let deltaRotation: Vec3 = deltaQuatToRotation(quat: relative, target: quatIdentity())
+  ret negate(vector: rotateVector(quat: quatA, vector: deltaRotation))
+}
+
+# b3SolveWeldJoint
+func solveWeldJoint(
+  base: mod JointSim
+  states: mod List(BodyState)
+  h: view Float
+  inverseH: view Float
+  useBias: view Bool
+) {
+  let iA: Matrix3 = base.invIA
+  let iB: Matrix3 = base.invIB
+  var joint: WeldJointData = base.weldJoint
+  let stateA: BodyState = jointBodyState(states: states, index: joint.indexA)
+  let stateB: BodyState = jointBodyState(states: states, index: joint.indexB)
+  var velocities: JointVelocities = jointVelocities(stateA: stateA, stateB: stateB)
+  let fixedRotation: Bool = base.fixedRotation
+
+  let quatA: Quat = multiply(left: stateA.deltaRotation, right: joint.frameA.rotation)
+  var quatB: Quat = multiply(left: stateB.deltaRotation, right: joint.frameB.rotation)
+  if dot(left: quatA, right: quatB) < 0.0 {
+    # This keeps the rotation angle in [-pi, pi]
+    quatB = negate(quat: quatB)
+  }
+  let relative: Quat = inverseMultiply(left: quatA, right: quatB)
+
+  # The angular constraint
+  if fixedRotation is false {
+    var bias: Vec3 = zeroVector()
+    var massScale: Float = 1.0
+    var impulseScale: Float = 0.0
+    if useBias or joint.angularHertz > 0.0 {
+      let c: Vec3 = rotationError(quatA: quatA, relative: relative)
+      bias = scale(scale: joint.angularSpring.biasRate, vector: c)
+      massScale = joint.angularSpring.massScale
+      impulseScale = joint.angularSpring.impulseScale
+    }
+    let cdot: Vec3 = subtract(left: velocities.angularB, right: velocities.angularA)
+    let impulse: Vec3 = mulSub(
+      base: scale(
+        scale: -massScale
+        vector: multiply(matrix: joint.angularMass, vector: add(left: cdot, right: bias))
+      )
+      scale: impulseScale
+      vector: joint.angularImpulse
+    )
+    joint.angularImpulse = add(left: joint.angularImpulse, right: impulse)
+    velocities.angularA = subtract(
+      left: velocities.angularA
+      right: multiply(matrix: iA, vector: impulse)
+    )
+    velocities.angularB = add(
+      left: velocities.angularB
+      right: multiply(matrix: iB, vector: impulse)
+    )
+  }
+
+  # The linear constraint
+  let rA: Vec3 = rotateVector(quat: stateA.deltaRotation, vector: joint.frameA.position)
+  let rB: Vec3 = rotateVector(quat: stateB.deltaRotation, vector: joint.frameB.position)
+  let cdot: Vec3 = pointVelocityDifference(velocities: velocities, rA: rA, rB: rB)
+  var bias: Vec3 = zeroVector()
+  var massScale: Float = 1.0
+  var impulseScale: Float = 0.0
+  if useBias or joint.linearHertz > 0.0 {
+    let dcA: Vec3 = stateA.deltaPosition
+    let dcB: Vec3 = stateB.deltaPosition
+    let separation: Vec3 = add(
+      left: add(left: subtract(left: dcB, right: dcA), right: subtract(left: rB, right: rA))
+      right: joint.deltaCenter
+    )
+    bias = scale(scale: joint.linearSpring.biasRate, vector: separation)
+    massScale = joint.linearSpring.massScale
+    impulseScale = joint.linearSpring.impulseScale
+  }
+  let k: Matrix3 = pointToPointMass(base: base, rA: rA, rB: rB)
+  let b: Vec3 = solve3(matrix: k, vector: add(left: cdot, right: bias))
+  let impulse: Vec3 = mulSub(
+    base: scale(scale: -massScale, vector: b)
+    scale: impulseScale
+    vector: joint.linearImpulse
+  )
+  joint.linearImpulse = add(left: joint.linearImpulse, right: impulse)
+  applyJointImpulse(
+    velocities: velocities
+    base: base
+    linear: impulse
+    angularA: cross(left: rA, right: impulse)
+    angularB: cross(left: rB, right: impulse)
+  )
+
+  base.weldJoint = joint
+  storeJointVelocities(
+    states: states
+    indexA: joint.indexA
+    indexB: joint.indexB
+    stateA: stateA
+    stateB: stateB
+    velocities: velocities
+  )
+}
+
+# (vB + wB x rB) - (vA + wA x rA): the relative velocity of the anchors as
+# the weld and motor joints group it.
+func pointVelocityDifference(
+  velocities: view JointVelocities
+  rA: view Vec3
+  rB: view Vec3
+) ret Vec3 {
+  ret subtract(
+    left: add(left: velocities.linearB, right: cross(left: velocities.angularB, right: rB))
+    right: add(left: velocities.linearA, right: cross(left: velocities.angularA, right: rA))
+  )
+}

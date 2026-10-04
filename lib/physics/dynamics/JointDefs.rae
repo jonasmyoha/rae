@@ -192,3 +192,109 @@ func defaultWheelJointDef(lengthUnitsPerMeter: view Float) ret WheelJointDef {
     upperSteeringLimit: 0.0
   }
 }
+
+# b3SphericalJointDef
+type SphericalJointDef {
+  base: JointDef
+  enableSpring: Bool
+  hertz: Float
+  dampingRatio: Float
+  targetRotation: Quat
+  enableConeLimit: Bool
+  coneAngle: Float
+  enableTwistLimit: Bool
+  lowerTwistAngle: Float
+  upperTwistAngle: Float
+  enableMotor: Bool
+  maxMotorTorque: Float
+  motorVelocity: Vec3
+}
+
+# b3DefaultSphericalJointDef
+func defaultSphericalJointDef(lengthUnitsPerMeter: view Float) ret SphericalJointDef {
+  ret SphericalJointDef {
+    base: defaultJointDef(lengthUnitsPerMeter: lengthUnitsPerMeter)
+    enableSpring: false
+    hertz: 0.0
+    dampingRatio: 0.0
+    targetRotation: quatIdentity()
+    enableConeLimit: false
+    coneAngle: 0.0
+    enableTwistLimit: false
+    lowerTwistAngle: 0.0
+    upperTwistAngle: 0.0
+    enableMotor: false
+    maxMotorTorque: 0.0
+    motorVelocity: zeroVector()
+  }
+}
+
+# b3MotorJointDef
+type MotorJointDef {
+  base: JointDef
+  linearVelocity: Vec3
+  maxVelocityForce: Float
+  angularVelocity: Vec3
+  maxVelocityTorque: Float
+  linearHertz: Float
+  linearDampingRatio: Float
+  maxSpringForce: Float
+  angularHertz: Float
+  angularDampingRatio: Float
+  maxSpringTorque: Float
+}
+
+# b3DefaultMotorJointDef
+func defaultMotorJointDef(lengthUnitsPerMeter: view Float) ret MotorJointDef {
+  ret MotorJointDef {
+    base: defaultJointDef(lengthUnitsPerMeter: lengthUnitsPerMeter)
+    linearVelocity: zeroVector()
+    maxVelocityForce: 0.0
+    angularVelocity: zeroVector()
+    maxVelocityTorque: 0.0
+    linearHertz: 0.0
+    linearDampingRatio: 0.0
+    maxSpringForce: 0.0
+    angularHertz: 0.0
+    angularDampingRatio: 0.0
+    maxSpringTorque: 0.0
+  }
+}
+
+# b3ParallelJointDef
+type ParallelJointDef {
+  base: JointDef
+  hertz: Float
+  dampingRatio: Float
+  maxTorque: Float
+}
+
+# b3DefaultParallelJointDef
+func defaultParallelJointDef(lengthUnitsPerMeter: view Float) ret ParallelJointDef {
+  ret ParallelJointDef {
+    base: defaultJointDef(lengthUnitsPerMeter: lengthUnitsPerMeter)
+    hertz: 1.0
+    dampingRatio: 1.0
+    maxTorque: floatMax
+  }
+}
+
+# b3WeldJointDef
+type WeldJointDef {
+  base: JointDef
+  linearHertz: Float
+  angularHertz: Float
+  linearDampingRatio: Float
+  angularDampingRatio: Float
+}
+
+# b3DefaultWeldJointDef
+func defaultWeldJointDef(lengthUnitsPerMeter: view Float) ret WeldJointDef {
+  ret WeldJointDef {
+    base: defaultJointDef(lengthUnitsPerMeter: lengthUnitsPerMeter)
+    linearHertz: 0.0
+    angularHertz: 0.0
+    linearDampingRatio: 0.0
+    angularDampingRatio: 0.0
+  }
+}

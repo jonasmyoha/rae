@@ -290,3 +290,195 @@ func zeroWheelJointData() ret WheelJointData {
     enableSteeringMotor: false
   }
 }
+
+# b3SphericalJoint
+type SphericalJointData {
+  linearImpulse: Vec3
+  springImpulse: Vec3
+  motorImpulse: Vec3
+  lowerTwistImpulse: Float
+  upperTwistImpulse: Float
+  swingImpulse: Float
+  hertz: Float
+  dampingRatio: Float
+  maxMotorTorque: Float
+  motorVelocity: Vec3
+  lowerTwistAngle: Float
+  upperTwistAngle: Float
+  coneAngle: Float
+  targetRotation: Quat
+  indexA: Int
+  indexB: Int
+  frameA: Transform
+  frameB: Transform
+  deltaCenter: Vec3
+  swingAxis: Vec3
+  twistJacobian: Vec3
+  rotationMass: Matrix3
+  swingMass: Float
+  twistMass: Float
+  springSoftness: Softness
+  enableSpring: Bool
+  enableMotor: Bool
+  enableConeLimit: Bool
+  enableTwistLimit: Bool
+}
+
+# `(b3SphericalJoint){ 0 }`
+func zeroSphericalJointData() ret SphericalJointData {
+  ret SphericalJointData {
+    linearImpulse: zeroVector()
+    springImpulse: zeroVector()
+    motorImpulse: zeroVector()
+    lowerTwistImpulse: 0.0
+    upperTwistImpulse: 0.0
+    swingImpulse: 0.0
+    hertz: 0.0
+    dampingRatio: 0.0
+    maxMotorTorque: 0.0
+    motorVelocity: zeroVector()
+    lowerTwistAngle: 0.0
+    upperTwistAngle: 0.0
+    coneAngle: 0.0
+    targetRotation: Quat { x: 0.0, y: 0.0, z: 0.0, w: 0.0 }
+    indexA: 0
+    indexB: 0
+    frameA: zeroTransform()
+    frameB: zeroTransform()
+    deltaCenter: zeroVector()
+    swingAxis: zeroVector()
+    twistJacobian: zeroVector()
+    rotationMass: matrixZero()
+    swingMass: 0.0
+    twistMass: 0.0
+    springSoftness: zeroSoftnessValue()
+    enableSpring: false
+    enableMotor: false
+    enableConeLimit: false
+    enableTwistLimit: false
+  }
+}
+
+# b3MotorJoint
+type MotorJointData {
+  linearVelocity: Vec3
+  angularVelocity: Vec3
+  maxVelocityForce: Float
+  maxVelocityTorque: Float
+  linearHertz: Float
+  linearDampingRatio: Float
+  maxSpringForce: Float
+  angularHertz: Float
+  angularDampingRatio: Float
+  maxSpringTorque: Float
+  linearVelocityImpulse: Vec3
+  angularVelocityImpulse: Vec3
+  linearSpringImpulse: Vec3
+  angularSpringImpulse: Vec3
+  linearSpring: Softness
+  angularSpring: Softness
+  indexA: Int
+  indexB: Int
+  frameA: Transform
+  frameB: Transform
+  deltaCenter: Vec3
+  angularMass: Matrix3
+}
+
+# `(b3MotorJoint){ 0 }`
+func zeroMotorJointData() ret MotorJointData {
+  ret MotorJointData {
+    linearVelocity: zeroVector()
+    angularVelocity: zeroVector()
+    maxVelocityForce: 0.0
+    maxVelocityTorque: 0.0
+    linearHertz: 0.0
+    linearDampingRatio: 0.0
+    maxSpringForce: 0.0
+    angularHertz: 0.0
+    angularDampingRatio: 0.0
+    maxSpringTorque: 0.0
+    linearVelocityImpulse: zeroVector()
+    angularVelocityImpulse: zeroVector()
+    linearSpringImpulse: zeroVector()
+    angularSpringImpulse: zeroVector()
+    linearSpring: zeroSoftnessValue()
+    angularSpring: zeroSoftnessValue()
+    indexA: 0
+    indexB: 0
+    frameA: zeroTransform()
+    frameB: zeroTransform()
+    deltaCenter: zeroVector()
+    angularMass: matrixZero()
+  }
+}
+
+# b3ParallelJoint
+type ParallelJointData {
+  hertz: Float
+  dampingRatio: Float
+  maxTorque: Float
+  perpImpulse: Vec2
+  perpAxisX: Vec3
+  perpAxisY: Vec3
+  quatA: Quat
+  quatB: Quat
+  indexA: Int
+  indexB: Int
+  softness: Softness
+}
+
+# `(b3ParallelJoint){ 0 }`
+func zeroParallelJointData() ret ParallelJointData {
+  ret ParallelJointData {
+    hertz: 0.0
+    dampingRatio: 0.0
+    maxTorque: 0.0
+    perpImpulse: Vec2 { x: 0.0, y: 0.0 }
+    perpAxisX: zeroVector()
+    perpAxisY: zeroVector()
+    quatA: Quat { x: 0.0, y: 0.0, z: 0.0, w: 0.0 }
+    quatB: Quat { x: 0.0, y: 0.0, z: 0.0, w: 0.0 }
+    indexA: 0
+    indexB: 0
+    softness: zeroSoftnessValue()
+  }
+}
+
+# b3WeldJoint
+type WeldJointData {
+  linearHertz: Float
+  linearDampingRatio: Float
+  angularHertz: Float
+  angularDampingRatio: Float
+  linearSpring: Softness
+  angularSpring: Softness
+  linearImpulse: Vec3
+  angularImpulse: Vec3
+  indexA: Int
+  indexB: Int
+  frameA: Transform
+  frameB: Transform
+  deltaCenter: Vec3
+  angularMass: Matrix3
+}
+
+# `(b3WeldJoint){ 0 }`
+func zeroWeldJointData() ret WeldJointData {
+  ret WeldJointData {
+    linearHertz: 0.0
+    linearDampingRatio: 0.0
+    angularHertz: 0.0
+    angularDampingRatio: 0.0
+    linearSpring: zeroSoftnessValue()
+    angularSpring: zeroSoftnessValue()
+    linearImpulse: zeroVector()
+    angularImpulse: zeroVector()
+    indexA: 0
+    indexB: 0
+    frameA: zeroTransform()
+    frameB: zeroTransform()
+    deltaCenter: zeroVector()
+    angularMass: matrixZero()
+  }
+}

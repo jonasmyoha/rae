@@ -402,6 +402,11 @@ C added.
   (suspension spring and limits, spin motor, steering spring and limits)
   (`PrismaticJoint`, `WheelJoint`; scenes `prismatic` and `car` of golden
   `joints`, fixture 984).
+  **P6c landed 2026-10-04, bit-exact:** the spherical joint (spring, motor,
+  cone and twist limits), the motor joint (spring and velocity control), the
+  parallel joint and the weld joint (rigid or soft) (`SphericalJoint`,
+  `MotorJoint`, `ParallelJoint`, `WeldJoint`; scenes `spherical`, `motor`,
+  `parallel` and `weld` of golden `joints`, fixture 984). **P6 is complete.**
 - **P7 — queries and the mover**: ray/shape casts, overlaps, the character
   loop (walls, steps, slopes).
 - **P8 — the ECS layer**: `PhysicsWorld`, `RigidBody`, `Collider`,

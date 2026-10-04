@@ -471,8 +471,7 @@ reaches its threshold reports a joint event.
 | `b3PrepareJoint` `b3WarmStartJoint` `b3SolveJoint` `b3GetJointReaction`, the `_Overflow` and task variants | `prepareJoint` `warmStartJoint` `solveJoint` `jointReaction` and the block variants (`dynamics/JointSolver`) |
 | distance_joint.c, revolute_joint.c | `dynamics/DistanceJoint`, `dynamics/RevoluteJoint` |
 
-Not yet: the spherical, motor, parallel and weld joints (P6c). Their match
-arms are empty and they cannot be created.
+The remaining kinds landed with P6b and P6c, below.
 
 The check: fixture 984 replays `goldens/joints.golden` — six worlds, 600
 steps each with sleep on: pendulums and a filter joint, revolute limits,
@@ -506,3 +505,36 @@ limit and a sprung, limited telescope between two dynamic bodies; a car on
 four wheel joints (rear spin motors, front steering with limits) driving
 over a bump, and a parked car settling to sleep. 600 steps each, bit-exact
 with every joint's impulses. The joint events now ride on each step's line.
+
+## P6c — spherical, motor, parallel and weld joints (`dynamics/SphericalJoint`, `MotorJoint`, `ParallelJoint`, `WeldJoint`)
+
+A spherical joint is a ball and socket: an optional spring to a target
+rotation, a motor driving the relative angular velocity, a cone limit on
+the swing of B's z-axis away from A's, and twist limits about it. A motor
+joint drives B relative to A: springs pull frame B onto frame A (each with a
+maximum force or torque) and velocity control aims at a target linear and
+angular velocity. A parallel joint is a soft keel keeping the two frames'
+z-axes parallel, with a maximum torque. A weld joint holds the frames
+together, each part rigid or soft (its own hertz and damping). Every kind
+now has its arms in the solver's match; only the filter joint's are empty.
+
+The joint records live in `dynamics/JointData` and the definitions in
+`dynamics/JointDefs`, beside the core in `dynamics/Joint`. The joint event
+check runs after a block's joints are solved, so a spherical joint's
+reaction can read the body transforms; the values are the ones Box3D checks.
+
+| Box3D | Rae |
+|---|---|
+| `b3SphericalJoint` `b3SphericalJointDef` `b3CreateSphericalJoint` | `SphericalJointData` `SphericalJointDef` `createSphericalJoint` |
+| `b3MotorJoint` `b3MotorJointDef` `b3CreateMotorJoint` | `MotorJointData` `MotorJointDef` `createMotorJoint` |
+| `b3ParallelJoint` `b3ParallelJointDef` `b3CreateParallelJoint` | `ParallelJointData` `ParallelJointDef` `createParallelJoint` |
+| `b3WeldJoint` `b3WeldJointDef` `b3CreateWeldJoint` | `WeldJointData` `WeldJointDef` `createWeldJoint` |
+| `b3Prepare*Joint` `b3WarmStart*Joint` `b3Solve*Joint` | `prepare*Joint` `warmStart*Joint` `solve*Joint` in each kind's module |
+| `b3GetBodyTransform` (in `b3GetJointReaction`) | `bodyTransformOf` (`dynamics/JointSolver`) |
+
+The check: fixture 984's golden gains four worlds: a spherical chain into
+its cone and twist limits (one joint with a torque threshold), a pendulum
+held against a tilted cone, a sprung and a motorised ball joint; motor
+joints pulling, driving and following; a keel and a parallel pair on a rope;
+a cantilevered beam of rigid and soft welds. 600 steps each, bit-exact with
+every joint's impulses.
