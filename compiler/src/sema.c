@@ -6830,6 +6830,57 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                             }
                         }
                     }
+                    // A generic method of the PRELUDE (core/List) is neither this
+                    // module's nor an import's decl, so the search above leaves
+                    // `points.copyAtDefault(index: 0)` untyped. The call stays
+                    // unbound (the backend resolves it, as before), but its
+                    // RESULT TYPE is computed from the specialised signature: an
+                    // overloaded call taking it as an argument
+                    // (`multiply(matrix: m, vector: <that>)`) otherwise matched
+                    // the first overload whose other parameters fit, since a
+                    // missing argument type matches anything.
+                    if (!best_decl && rec && !expr->resolved_type) {
+                        for (Symbol* curr = symbols->head; curr; curr = curr->next) {
+                            AstDecl* dd = curr->decl;
+                            if (!dd || dd->kind != AST_DECL_FUNC) continue;
+                            if (!str_eq(dd->as.func_decl.name, expr->as.method_call.method_name)) continue;
+                            if (dd->as.func_decl.specialization_args) continue;
+                            if (!sema_decl_opened(s_current_decl_origin, dd)) continue;
+                            AstFuncDecl* fd = &dd->as.func_decl;
+                            if (!fd->generic_params || !fd->returns) continue;
+                            if (!fd->params || !str_eq_cstr(fd->params->name, "this")) continue;
+                            // The receiver spelled as its template and arguments
+                            // (`List` + `Vec3`), not the mangled `List_Vec3` name
+                            // rec_tr carries (#1007).
+                            AstTypeRef* receiver_type = sema_type_ref_of(ctx, rec);
+                            AstTypeRef* ga = receiver_type
+                                ? infer_generic_args(ctx, fd, fd->params->type, receiver_type) : NULL;
+                            if (!ga || !sema_array_receiver_matches(fd->params->type, rec)) continue;
+                            // Nothing is specialised here (the backend still does
+                            // that): a bare `ret T` takes the inferred argument's
+                            // own TypeInfo.
+                            const AstTypeRef* returns = fd->returns->type;
+                            bool bare_param = !returns->is_opt && !returns->is_view && !returns->is_mod
+                                && !returns->generic_args && returns->parts && !returns->parts->next;
+                            TypeInfo* result = NULL;
+                            if (bare_param) {
+                                const AstTypeRef* arg = ga;
+                                for (const AstIdentifierPart* gp = fd->generic_params; gp && arg; gp = gp->next, arg = arg->next) {
+                                    if (str_eq(gp->text, returns->parts->text)) {
+                                        result = arg->resolved_type
+                                            ? arg->resolved_type
+                                            : sema_resolve_type_internal(ctx, module, symbols, (AstTypeRef*)arg);
+                                        break;
+                                    }
+                                }
+                            }
+                            // Other generic return shapes (`opt T`, `List(T)`)
+                            // stay untyped here, as before: re-resolving a
+                            // substituted clone can report a spurious unknown type.
+                            if (result) expr->resolved_type = result;
+                            break;
+                        }
+                    }
                     if (best_decl) {
                         AstFuncDecl* fd = &best_decl->as.func_decl;
                         if (fd->generic_params && rec) {
