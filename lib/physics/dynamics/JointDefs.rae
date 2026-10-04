@@ -1,0 +1,194 @@
+# The joint definitions (b3JointDef and the per-kind definitions of Box3D's
+# types.h at 9f998c8) and their defaults (joint.c): what a create function
+# takes.
+open Vec2
+open Vec3
+open Quat
+open physics/Constants
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/QuatMath
+open physics/math/MatrixMath
+open physics/math/TransformMath
+open physics/dynamics/WorldTypes
+open physics/dynamics/ContactConstraints
+
+# b3JointDef: what every joint kind's definition starts with.
+type JointDef {
+  bodyIdA: BodyId
+  bodyIdB: BodyId
+  localFrameA: Transform
+  localFrameB: Transform
+  forceThreshold: Float
+  torqueThreshold: Float
+  constraintHertz: Float
+  constraintDampingRatio: Float
+  drawScale: Float
+  collideConnected: Bool
+}
+
+# b3DistanceJointDef
+type DistanceJointDef {
+  base: JointDef
+  length: Float
+  enableSpring: Bool
+  lowerSpringForce: Float
+  upperSpringForce: Float
+  hertz: Float
+  dampingRatio: Float
+  enableLimit: Bool
+  minLength: Float
+  maxLength: Float
+  enableMotor: Bool
+  maxMotorForce: Float
+  motorSpeed: Float
+}
+
+# b3RevoluteJointDef
+type RevoluteJointDef {
+  base: JointDef
+  targetAngle: Float
+  enableSpring: Bool
+  hertz: Float
+  dampingRatio: Float
+  enableLimit: Bool
+  lowerAngle: Float
+  upperAngle: Float
+  enableMotor: Bool
+  maxMotorTorque: Float
+  motorSpeed: Float
+}
+
+# b3PrismaticJointDef
+type PrismaticJointDef {
+  base: JointDef
+  enableSpring: Bool
+  hertz: Float
+  dampingRatio: Float
+  targetTranslation: Float
+  enableLimit: Bool
+  lowerTranslation: Float
+  upperTranslation: Float
+  enableMotor: Bool
+  maxMotorForce: Float
+  motorSpeed: Float
+}
+
+# b3WheelJointDef
+type WheelJointDef {
+  base: JointDef
+  enableSuspensionSpring: Bool
+  suspensionHertz: Float
+  suspensionDampingRatio: Float
+  enableSuspensionLimit: Bool
+  lowerSuspensionLimit: Float
+  upperSuspensionLimit: Float
+  enableSpinMotor: Bool
+  maxSpinTorque: Float
+  spinSpeed: Float
+  enableSteering: Bool
+  steeringHertz: Float
+  steeringDampingRatio: Float
+  targetSteeringAngle: Float
+  maxSteeringTorque: Float
+  enableSteeringLimit: Bool
+  lowerSteeringLimit: Float
+  upperSteeringLimit: Float
+}
+
+func identityFrame() ret Transform {
+  ret Transform { position: zeroVector(), rotation: quatIdentity() }
+}
+
+# b3DefaultJointDef
+func defaultJointDef(lengthUnitsPerMeter: view Float) ret JointDef {
+  ret JointDef {
+    bodyIdA: BodyId { index1: 0, world0: 0, generation: 0 }
+    bodyIdB: BodyId { index1: 0, world0: 0, generation: 0 }
+    localFrameA: identityFrame()
+    localFrameB: identityFrame()
+    forceThreshold: floatMax
+    torqueThreshold: floatMax
+    constraintHertz: 60.0
+    constraintDampingRatio: 2.0
+    drawScale: lengthUnitsPerMeter
+    collideConnected: false
+  }
+}
+
+# b3DefaultDistanceJointDef
+func defaultDistanceJointDef(lengthUnitsPerMeter: view Float) ret DistanceJointDef {
+  ret DistanceJointDef {
+    base: defaultJointDef(lengthUnitsPerMeter: lengthUnitsPerMeter)
+    length: 1.0
+    enableSpring: false
+    lowerSpringForce: -floatMax
+    upperSpringForce: floatMax
+    hertz: 0.0
+    dampingRatio: 0.0
+    enableLimit: false
+    minLength: 0.0
+    maxLength: huge(lengthUnitsPerMeter: lengthUnitsPerMeter)
+    enableMotor: false
+    maxMotorForce: 0.0
+    motorSpeed: 0.0
+  }
+}
+
+# b3DefaultRevoluteJointDef
+func defaultRevoluteJointDef(lengthUnitsPerMeter: view Float) ret RevoluteJointDef {
+  ret RevoluteJointDef {
+    base: defaultJointDef(lengthUnitsPerMeter: lengthUnitsPerMeter)
+    targetAngle: 0.0
+    enableSpring: false
+    hertz: 0.0
+    dampingRatio: 0.0
+    enableLimit: false
+    lowerAngle: 0.0
+    upperAngle: 0.0
+    enableMotor: false
+    maxMotorTorque: 0.0
+    motorSpeed: 0.0
+  }
+}
+
+# b3DefaultPrismaticJointDef
+func defaultPrismaticJointDef(lengthUnitsPerMeter: view Float) ret PrismaticJointDef {
+  ret PrismaticJointDef {
+    base: defaultJointDef(lengthUnitsPerMeter: lengthUnitsPerMeter)
+    enableSpring: false
+    hertz: 0.0
+    dampingRatio: 0.0
+    targetTranslation: 0.0
+    enableLimit: false
+    lowerTranslation: 0.0
+    upperTranslation: 0.0
+    enableMotor: false
+    maxMotorForce: 0.0
+    motorSpeed: 0.0
+  }
+}
+
+# b3DefaultWheelJointDef
+func defaultWheelJointDef(lengthUnitsPerMeter: view Float) ret WheelJointDef {
+  ret WheelJointDef {
+    base: defaultJointDef(lengthUnitsPerMeter: lengthUnitsPerMeter)
+    enableSuspensionSpring: true
+    suspensionHertz: 1.0
+    suspensionDampingRatio: 0.7
+    enableSuspensionLimit: false
+    lowerSuspensionLimit: 0.0
+    upperSuspensionLimit: 0.0
+    enableSpinMotor: false
+    maxSpinTorque: 0.0
+    spinSpeed: 0.0
+    enableSteering: false
+    steeringHertz: 1.0
+    steeringDampingRatio: 0.7
+    targetSteeringAngle: 0.0
+    maxSteeringTorque: 0.0
+    enableSteeringLimit: false
+    lowerSteeringLimit: 0.0
+    upperSteeringLimit: 0.0
+  }
+}
