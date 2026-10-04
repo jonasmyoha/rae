@@ -378,6 +378,37 @@ func getBodyAngularVelocity(world: view PhysicsWorld, bodyId: view BodyId) ret V
   ret zeroVector()
 }
 
+# b3Body_GetType
+func getBodyType(world: view PhysicsWorld, bodyId: view BodyId) ret BodyType {
+  ret bodyAt(world: world, bodyId: bodyIndexOf(bodyId: bodyId)).bodyType
+}
+
+# b3Body_GetInverseMass
+func getBodyInverseMass(world: view PhysicsWorld, bodyId: view BodyId) ret Float {
+  let body: Body = bodyAt(world: world, bodyId: bodyIndexOf(bodyId: bodyId))
+  ret bodySimOf(world: world, body: body).invMass
+}
+
+# b3Body_GetWorldInverseRotationalInertia
+func getBodyWorldInverseInertia(world: view PhysicsWorld, bodyId: view BodyId) ret Matrix3 {
+  let body: Body = bodyAt(world: world, bodyId: bodyIndexOf(bodyId: bodyId))
+  ret bodySimOf(world: world, body: body).invInertiaWorld
+}
+
+# b3Body_GetWorldCenter
+func getBodyWorldCenter(world: view PhysicsWorld, bodyId: view BodyId) ret Pos {
+  let body: Body = bodyAt(world: world, bodyId: bodyIndexOf(bodyId: bodyId))
+  ret bodySimOf(world: world, body: body).center
+}
+
+# b3Shape_GetBody
+func getShapeBody(world: view PhysicsWorld, shapeId: view ShapeId) ret BodyId {
+  if let shape: view Shape => world.shapes.viewAt(index: shapeId.index1 - 1) {
+    ret makeBodyId(world: world, bodyIndex: shape.bodyId)
+  }
+  ret BodyId { index1: 0, world0: 0, generation: 0 }
+}
+
 # b3Body_SetLinearVelocity: a non-zero velocity wakes the body.
 func setBodyLinearVelocity(world: mod PhysicsWorld, bodyId: view BodyId, velocity: view Vec3) {
   let bodyIndex: Int = bodyIndexOf(bodyId: bodyId)

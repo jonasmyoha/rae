@@ -1,0 +1,622 @@
+# The world's queries (b3World_OverlapAABB, b3World_OverlapShape,
+# b3World_CollideMover, b3World_CastRay, b3World_CastRayClosest,
+# b3World_CastShape and b3World_CastMover of Box3D's physics_world.c at
+# 9f998c8): each walks the three broad-phase trees (static, kinematic,
+# dynamic), skips the shapes the query filter refuses and runs the shape's
+# own query relative to the query's origin. Box3D hands each hit to a user
+# callback; Rae has no function values, so each query here is one fixed
+# callback: the overlaps and the mover planes are collected, `castRay` and
+# `castShape` collect every hit (a callback returning 1), `castRayClosest`
+# is Box3D's closest-hit callback and `castShapeClosest` keeps the closest
+# hit (a callback returning the hit's fraction). Checked against the oracle
+# in fixture 985.
+open Vec3
+open physics/Constants
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/AabbMath
+open physics/math/TransformMath
+open physics/geometry/QueryTypes
+open physics/broadPhase/DynamicTree
+open physics/broadPhase/DynamicTreeQuery
+open physics/broadPhase/BroadPhase
+open physics/dynamics/WorldTypes
+open physics/dynamics/Body
+open physics/dynamics/Shape
+open physics/dynamics/World
+open physics/dynamics/ShapeQueries
+
+# b3QueryFilter: what a query hits. A shape is hit when its category is in
+# the query's mask and the query's category is in the shape's mask.
+type QueryFilter {
+  categoryBits: UInt64
+  maskBits: UInt64
+  id: UInt64
+}
+
+# b3DefaultQueryFilter
+func defaultQueryFilter() ret QueryFilter {
+  ret QueryFilter { categoryBits: allBits, maskBits: allBits, id: 0 }
+}
+
+# b3ShouldQueryCollide
+func shouldQueryCollide(shapeFilter: view Filter, queryFilter: view QueryFilter) ret Bool {
+  ret (shapeFilter.categoryBits bitand queryFilter.maskBits) is not 0 and (shapeFilter.maskBits bitand queryFilter.categoryBits) is not 0
+}
+
+# b3RayResult: the closest ray hit, and the tree visits it took.
+type RayResult {
+  shapeId: ShapeId
+  point: Pos
+  normal: Vec3
+  userMaterialId: UInt64
+  fraction: Float
+  triangleIndex: Int
+  childIndex: Int
+  nodeVisits: Int
+  leafVisits: Int
+  hit: Bool
+}
+
+# One hit of a ray or shape cast: what Box3D hands a b3CastResultFcn.
+type CastHit {
+  shapeId: ShapeId
+  point: Pos
+  normal: Vec3
+  fraction: Float
+  userMaterialId: UInt64
+  triangleIndex: Int
+  childIndex: Int
+}
+
+# One plane of a mover against a shape: what Box3D hands a
+# b3PlaneResultFcn, one plane at a time.
+type MoverPlane {
+  shapeId: ShapeId
+  result: PlaneResult
+}
+
+func emptyRayResult() ret RayResult {
+  ret RayResult {
+    shapeId: ShapeId { index1: 0, world0: 0, generation: 0 }
+    point: zeroVector()
+    normal: zeroVector()
+    userMaterialId: 0
+    fraction: 0.0
+    triangleIndex: 0
+    childIndex: 0
+    nodeVisits: 0
+    leafVisits: 0
+    hit: false
+  }
+}
+
+func addTreeStats(total: mod TreeStats, stats: view TreeStats) {
+  total.nodeVisits = total.nodeVisits + stats.nodeVisits
+  total.leafVisits = total.leafVisits + stats.leafVisits
+}
+
+# The shape behind a tree proxy, and its handle.
+func proxyShapeIndex(tree: view DynamicTree, proxyId: view Int) ret Int {
+  ret shapeIndexOf(userData: treeUserData(tree: tree, proxyId: proxyId))
+}
+
+# The transform of `shape`'s body relative to `origin`.
+func shapeRelativeTransform(
+  world: view PhysicsWorld
+  shape: view Shape
+  origin: view Pos
+) ret Transform {
+  let body: Body = bodyAt(world: world, bodyId: shape.bodyId)
+  ret toRelativeTransform(transform: bodyTransformOf(world: world, body: body), base: origin)
+}
+
+# b3World_OverlapAABB: the shapes whose tree boxes overlap `box`.
+func overlapAabb(
+  world: view PhysicsWorld
+  box: view Aabb
+  filter: view QueryFilter
+  shapeIds: mod List(ShapeId)
+) ret TreeStats {
+  var treeStats: TreeStats = emptyTreeStats()
+  loop var treeIndex: Int = 0, treeIndex < bodyTypeCount, ++treeIndex {
+    if let tree: view DynamicTree => world.broadPhase.trees.viewAt(index: treeIndex) {
+      var query: TreeQuery = beginTreeQuery(
+        tree: tree
+        box: box
+        maskBits: filter.maskBits
+        requireAllBits: false
+      )
+      var proxyId: Int = nextTreeQueryProxy(tree: tree, query: query)
+      loop proxyId is not -1 {
+        let shapeIndex: Int = proxyShapeIndex(tree: tree, proxyId: proxyId)
+        if let shape: view Shape => world.shapes.viewAt(index: shapeIndex) {
+          if shouldQueryCollide(shapeFilter: shape.filter, queryFilter: filter) {
+            shapeIds.add(value: makeShapeId(world: world, shapeIndex: shapeIndex))
+          }
+        }
+        proxyId = nextTreeQueryProxy(tree: tree, query: query)
+      }
+      addTreeStats(total: treeStats, stats: query.stats)
+    }
+  }
+  ret treeStats
+}
+
+# b3World_OverlapShape: the shapes `proxy` (relative to `origin`) overlaps.
+func overlapShapeProxy(
+  world: view PhysicsWorld
+  origin: view Pos
+  proxy: view ShapeProxy
+  filter: view QueryFilter
+  shapeIds: mod List(ShapeId)
+) ret TreeStats {
+  var treeStats: TreeStats = emptyTreeStats()
+  let box: Aabb = offsetAabb(
+    localBox: makeAabb(points: proxy.points, count: proxy.points.length, radius: proxy.radius)
+    origin: origin
+  )
+  loop var treeIndex: Int = 0, treeIndex < bodyTypeCount, ++treeIndex {
+    if let tree: view DynamicTree => world.broadPhase.trees.viewAt(index: treeIndex) {
+      var query: TreeQuery = beginTreeQuery(
+        tree: tree
+        box: box
+        maskBits: filter.maskBits
+        requireAllBits: false
+      )
+      var proxyId: Int = nextTreeQueryProxy(tree: tree, query: query)
+      loop proxyId is not -1 {
+        let shapeIndex: Int = proxyShapeIndex(tree: tree, proxyId: proxyId)
+        if let shape: view Shape => world.shapes.viewAt(index: shapeIndex) {
+          if shouldQueryCollide(shapeFilter: shape.filter, queryFilter: filter) {
+            # Re-centred on the query origin
+            let transform: Transform = shapeRelativeTransform(
+              world: world
+              shape: shape
+              origin: origin
+            )
+            if overlapShape(
+              world: world
+              shape: shape
+              transform: transform
+              proxy: proxy
+            ) {
+              shapeIds.add(value: makeShapeId(world: world, shapeIndex: shapeIndex))
+            }
+          }
+        }
+        proxyId = nextTreeQueryProxy(tree: tree, query: query)
+      }
+      addTreeStats(total: treeStats, stats: query.stats)
+    }
+  }
+  ret treeStats
+}
+
+# b3World_CollideMover: the planes pushing the capsule `mover` (relative to
+# `origin`) out of the shapes it overlaps, relative to `origin`.
+func collideMover(
+  world: view PhysicsWorld
+  origin: view Pos
+  mover: view Capsule
+  filter: view QueryFilter
+  planes: mod List(MoverPlane)
+) {
+  let radius: Vec3 = { x: mover.radius, y: mover.radius, z: mover.radius }
+  let relativeBox: Aabb = {
+    lowerBound: subtract(left: min(left: mover.center1, right: mover.center2), right: radius)
+    upperBound: add(left: max(left: mover.center1, right: mover.center2), right: radius)
+  }
+  let box: Aabb = offsetAabb(localBox: relativeBox, origin: origin)
+  loop var treeIndex: Int = 0, treeIndex < bodyTypeCount, ++treeIndex {
+    if let tree: view DynamicTree => world.broadPhase.trees.viewAt(index: treeIndex) {
+      var query: TreeQuery = beginTreeQuery(
+        tree: tree
+        box: box
+        maskBits: filter.maskBits
+        requireAllBits: false
+      )
+      var proxyId: Int = nextTreeQueryProxy(tree: tree, query: query)
+      loop proxyId is not -1 {
+        let shapeIndex: Int = proxyShapeIndex(tree: tree, proxyId: proxyId)
+        if let shape: view Shape => world.shapes.viewAt(index: shapeIndex) {
+          if shouldQueryCollide(shapeFilter: shape.filter, queryFilter: filter) {
+            # Re-centred on the query origin: the mover and the planes are
+            # origin relative
+            let transform: Transform = shapeRelativeTransform(
+              world: world
+              shape: shape
+              origin: origin
+            )
+            let results: List(PlaneResult) = collideMoverShape(
+              world: world
+              shape: shape
+              transform: transform
+              mover: mover
+            )
+            let shapeId: ShapeId = makeShapeId(world: world, shapeIndex: shapeIndex)
+            loop let result: view PlaneResult in results {
+              planes.add(value: MoverPlane { shapeId: shapeId, result: result })
+            }
+          }
+        }
+        proxyId = nextTreeQueryProxy(tree: tree, query: query)
+      }
+    }
+  }
+}
+
+# The ray cast of b3World_CastRay and b3World_CastRayClosest: `closest`
+# picks b3RayCastClosestFcn (keep the closest hit, ignoring a start inside
+# a shape), otherwise every hit is collected (a callback returning 1).
+func castRayWith(
+  world: view PhysicsWorld
+  origin: view Pos
+  translation: view Vec3
+  filter: view QueryFilter
+  closest: view Bool
+  hits: mod List(CastHit)
+  rayResult: mod RayResult
+) ret TreeStats {
+  var treeStats: TreeStats = emptyTreeStats()
+  var input: RayCastInput = {
+    origin: toVec3(position: origin)
+    translation: translation
+    maxFraction: 1.0
+  }
+  var worldFraction: Float = 1.0
+  loop var treeIndex: Int = 0, treeIndex < bodyTypeCount, ++treeIndex {
+    if let tree: view DynamicTree => world.broadPhase.trees.viewAt(index: treeIndex) {
+      var cast: TreeCast = beginTreeRayCast(
+        tree: tree
+        input: input
+        maskBits: filter.maskBits
+        requireAllBits: false
+      )
+      var proxyId: Int = nextTreeCastProxy(tree: tree, cast: cast)
+      loop proxyId is not -1 {
+        var value: Float = cast.maxFraction
+        let shapeIndex: Int = proxyShapeIndex(tree: tree, proxyId: proxyId)
+        if let shape: view Shape => world.shapes.viewAt(index: shapeIndex) {
+          if shouldQueryCollide(shapeFilter: shape.filter, queryFilter: filter) {
+            let transform: Transform = shapeRelativeTransform(
+              world: world
+              shape: shape
+              origin: origin
+            )
+            let localInput: RayCastInput = {
+              origin: zeroVector()
+              translation: translation
+              maxFraction: cast.maxFraction
+            }
+            let output: CastOutput = rayCastShape(
+              world: world
+              shape: shape
+              transform: transform
+              input: localInput
+            )
+            if output.hit {
+              let materialIndex: Int = clampInt(
+                value: output.materialIndex
+                lower: 0
+                upper: shape.materialCount - 1
+              )
+              let hit: CastHit = {
+                shapeId: makeShapeId(world: world, shapeIndex: shapeIndex)
+                point: offsetPosition(position: origin, delta: output.point)
+                normal: output.normal
+                fraction: output.fraction
+                userMaterialId: shapeUserMaterialId(shape: shape, materialIndex: materialIndex)
+                triangleIndex: output.triangleIndex
+                childIndex: output.childIndex
+              }
+              if closest {
+                if hit.fraction is 0.0 {
+                  # Ignore an initial overlap
+                  value = -1.0
+                } else {
+                  rayResult.shapeId = hit.shapeId
+                  rayResult.point = hit.point
+                  rayResult.normal = hit.normal
+                  rayResult.fraction = hit.fraction
+                  rayResult.userMaterialId = hit.userMaterialId
+                  rayResult.triangleIndex = hit.triangleIndex
+                  rayResult.childIndex = hit.childIndex
+                  rayResult.hit = true
+                  value = hit.fraction
+                }
+              } else {
+                hits.add(value: hit)
+                value = 1.0
+              }
+              # A value of -1 skips the shape
+              if 0.0 <= value and value <= 1.0 {
+                worldFraction = value
+              }
+            }
+          }
+        }
+        reportTreeCast(cast: cast, value: value)
+        proxyId = nextTreeCastProxy(tree: tree, cast: cast)
+      }
+      addTreeStats(total: treeStats, stats: cast.stats)
+    }
+    if worldFraction is 0.0 {
+      break
+    }
+    input.maxFraction = worldFraction
+  }
+  ret treeStats
+}
+
+# b3World_CastRay with a callback collecting every hit (returning 1): the
+# ray from `origin` along `translation`.
+func castRay(
+  world: view PhysicsWorld
+  origin: view Pos
+  translation: view Vec3
+  filter: view QueryFilter
+  hits: mod List(CastHit)
+) ret TreeStats {
+  var unused: RayResult = emptyRayResult()
+  ret castRayWith(
+    world: world
+    origin: origin
+    translation: translation
+    filter: filter
+    closest: false
+    hits: hits
+    rayResult: unused
+  )
+}
+
+# b3World_CastRayClosest: the closest hit of the ray from `origin` along
+# `translation`, ignoring shapes the ray starts inside.
+func castRayClosest(
+  world: view PhysicsWorld
+  origin: view Pos
+  translation: view Vec3
+  filter: view QueryFilter
+) ret RayResult {
+  var result: RayResult = emptyRayResult()
+  let unused: List(CastHit) = List.create(CastHit, cap: 1)
+  let stats: TreeStats = castRayWith(
+    world: world
+    origin: origin
+    translation: translation
+    filter: filter
+    closest: true
+    hits: unused
+    rayResult: result
+  )
+  result.nodeVisits = stats.nodeVisits
+  result.leafVisits = stats.leafVisits
+  ret result
+}
+
+# b3World_CastShape: `proxy` (relative to `origin`) swept along
+# `translation`. With `closest`, each hit clips the cast (a callback
+# returning the hit's fraction) and `hits` ends with the closest last;
+# otherwise every hit is collected (a callback returning 1).
+func castShapeWith(
+  world: view PhysicsWorld
+  origin: view Pos
+  proxy: view ShapeProxy
+  translation: view Vec3
+  filter: view QueryFilter
+  closest: view Bool
+  hits: mod List(CastHit)
+) ret TreeStats {
+  var treeStats: TreeStats = emptyTreeStats()
+  var worldFraction: Float = 1.0
+  let localBox: Aabb = makeAabb(
+    points: proxy.points
+    count: proxy.points.length
+    radius: proxy.radius
+  )
+  var treeInput: BoxCastInput = {
+    box: offsetAabb(localBox: localBox, origin: origin)
+    translation: translation
+    maxFraction: 1.0
+  }
+  loop var treeIndex: Int = 0, treeIndex < bodyTypeCount, ++treeIndex {
+    if let tree: view DynamicTree => world.broadPhase.trees.viewAt(index: treeIndex) {
+      var cast: TreeCast = beginTreeBoxCast(
+        tree: tree
+        input: treeInput
+        maskBits: filter.maskBits
+        requireAllBits: false
+      )
+      var proxyId: Int = nextTreeCastProxy(tree: tree, cast: cast)
+      loop proxyId is not -1 {
+        var value: Float = cast.maxFraction
+        let shapeIndex: Int = proxyShapeIndex(tree: tree, proxyId: proxyId)
+        if let shape: view Shape => world.shapes.viewAt(index: shapeIndex) {
+          if shouldQueryCollide(shapeFilter: shape.filter, queryFilter: filter) {
+            # Rebuilt from the origin relative input, taking only the
+            # advancing fraction from the tree
+            let localInput: ShapeCastInput = {
+              proxy: proxy
+              translation: translation
+              maxFraction: cast.maxFraction
+              canEncroach: false
+            }
+            let transform: Transform = shapeRelativeTransform(
+              world: world
+              shape: shape
+              origin: origin
+            )
+            let output: CastOutput = shapeCastShape(
+              world: world
+              shape: shape
+              transform: transform
+              input: localInput
+            )
+            if output.hit {
+              let materialIndex: Int = clampInt(
+                value: output.materialIndex
+                lower: 0
+                upper: shape.materialCount - 1
+              )
+              hits.add(value: CastHit {
+                shapeId: makeShapeId(world: world, shapeIndex: shapeIndex)
+                point: offsetPosition(position: origin, delta: output.point)
+                normal: output.normal
+                fraction: output.fraction
+                userMaterialId: shapeUserMaterialId(shape: shape, materialIndex: materialIndex)
+                triangleIndex: output.triangleIndex
+                childIndex: output.childIndex
+              })
+              value = 1.0
+              if closest {
+                value = output.fraction
+              }
+              if 0.0 <= value and value <= 1.0 {
+                worldFraction = value
+              }
+            }
+          }
+        }
+        reportTreeCast(cast: cast, value: value)
+        proxyId = nextTreeCastProxy(tree: tree, cast: cast)
+      }
+      addTreeStats(total: treeStats, stats: cast.stats)
+    }
+    if worldFraction is 0.0 {
+      break
+    }
+    treeInput.maxFraction = worldFraction
+  }
+  ret treeStats
+}
+
+# b3World_CastShape with a callback collecting every hit.
+func castShape(
+  world: view PhysicsWorld
+  origin: view Pos
+  proxy: view ShapeProxy
+  translation: view Vec3
+  filter: view QueryFilter
+  hits: mod List(CastHit)
+) ret TreeStats {
+  ret castShapeWith(
+    world: world
+    origin: origin
+    proxy: proxy
+    translation: translation
+    filter: filter
+    closest: false
+    hits: hits
+  )
+}
+
+# b3World_CastShape with a callback keeping the closest hit: the hit, if
+# any, in `hit`.
+func castShapeClosest(
+  world: view PhysicsWorld
+  origin: view Pos
+  proxy: view ShapeProxy
+  translation: view Vec3
+  filter: view QueryFilter
+  hit: mod CastHit
+) ret Bool {
+  let hits: List(CastHit) = List.create(CastHit, cap: 4)
+  castShapeWith(
+    world: world
+    origin: origin
+    proxy: proxy
+    translation: translation
+    filter: filter
+    closest: true
+    hits: hits
+  )
+  if hits.length is 0 {
+    ret false
+  }
+  hit = hits.copyAtDefault(index: hits.length - 1)
+  ret true
+}
+
+# b3World_CastMover: how far (a fraction of `translation`) the capsule
+# `mover` (relative to `origin`) moves before it hits a shape, ignoring the
+# shapes it starts touching and those in `ignoreShapeIds` (the sample's
+# b3MoverFilterFcn).
+func castMover(
+  world: view PhysicsWorld
+  origin: view Pos
+  mover: view Capsule
+  translation: view Vec3
+  filter: view QueryFilter
+  ignoreShapeIds: view List(ShapeId)
+) ret Float {
+  var worldFraction: Float = 1.0
+  let proxy: ShapeProxy = capsuleProxy(capsule: mover)
+  let localBox: Aabb = makeAabb(points: proxy.points, count: 2, radius: mover.radius)
+  var treeInput: BoxCastInput = {
+    box: offsetAabb(localBox: localBox, origin: origin)
+    translation: translation
+    maxFraction: 1.0
+  }
+  loop var treeIndex: Int = 0, treeIndex < bodyTypeCount, ++treeIndex {
+    if let tree: view DynamicTree => world.broadPhase.trees.viewAt(index: treeIndex) {
+      var cast: TreeCast = beginTreeBoxCast(
+        tree: tree
+        input: treeInput
+        maskBits: filter.maskBits
+        requireAllBits: false
+      )
+      var proxyId: Int = nextTreeCastProxy(tree: tree, cast: cast)
+      loop proxyId is not -1 {
+        var value: Float = worldFraction
+        let shapeIndex: Int = proxyShapeIndex(tree: tree, proxyId: proxyId)
+        if let shape: view Shape => world.shapes.viewAt(index: shapeIndex) {
+          let shapeId: ShapeId = makeShapeId(world: world, shapeIndex: shapeIndex)
+          if shouldQueryCollide(shapeFilter: shape.filter, queryFilter: filter) and isIgnored(
+            shapeId: shapeId
+            ignoreShapeIds: ignoreShapeIds
+          ) is false {
+            let localInput: ShapeCastInput = {
+              proxy: proxy
+              translation: translation
+              maxFraction: cast.maxFraction
+              canEncroach: mover.radius > 0.0
+            }
+            let transform: Transform = shapeRelativeTransform(
+              world: world
+              shape: shape
+              origin: origin
+            )
+            let output: CastOutput = shapeCastShape(
+              world: world
+              shape: shape
+              transform: transform
+              input: localInput
+            )
+            # Shapes the mover starts touching are ignored
+            if output.fraction is not 0.0 {
+              worldFraction = output.fraction
+              value = output.fraction
+            }
+          }
+        }
+        reportTreeCast(cast: cast, value: value)
+        proxyId = nextTreeCastProxy(tree: tree, cast: cast)
+      }
+    }
+    if worldFraction is 0.0 {
+      break
+    }
+    treeInput.maxFraction = worldFraction
+  }
+  ret worldFraction
+}
+
+# Is `shapeId` one of `ignoreShapeIds`?
+func isIgnored(shapeId: view ShapeId, ignoreShapeIds: view List(ShapeId)) ret Bool {
+  loop let ignored: view ShapeId in ignoreShapeIds {
+    if ignored.index1 is shapeId.index1 and ignored.world0 is shapeId.world0 and ignored.generation is shapeId.generation {
+      ret true
+    }
+  }
+  ret false
+}
