@@ -418,6 +418,63 @@ static Symbol* symbol_table_lookup(SymbolTable* table, Str name) {
     return NULL;
 }
 
+// #79509597: a bare module const/global read from `file`. There is one symbol
+// table for every loaded module, so the first symbol by that name could be a
+// global of a module that is only `import`ed here (lib/Math's `pi` read from a
+// module that opens physics/math/Scalar). The global is chosen by visibility:
+// one declared in this file wins; otherwise the one module that is visible
+// bare here; when several are, the explicitly `open`ed one; two explicitly
+// opened modules declaring the name are an error naming both. Returns NULL
+// when no visible global by that name exists (the caller keeps its old
+// behaviour). With a NULL module the ambiguity is not reported (const
+// folding; the read itself reports it).
+static Symbol* sema_resolve_bare_global(SymbolTable* symbols, Str name, const char* file,
+                                        AstModule* module, size_t line, size_t column) {
+    Symbol* visible[16]; size_t visible_count = 0;
+    for (Symbol* curr = symbols->head; curr; curr = curr->next) {
+        if (!str_eq(curr->name, name)) continue;
+        if (!curr->decl || curr->decl->kind != AST_DECL_GLOBAL_LET) continue;
+        if (file && curr->decl->origin_file && strcmp(file, curr->decl->origin_file) == 0) return curr;
+        if (!sema_decl_opened(file, curr->decl)) continue;
+        bool seen = false;
+        for (size_t i = 0; i < visible_count; i++) if (visible[i]->decl == curr->decl) seen = true;
+        if (!seen && visible_count < 16) visible[visible_count++] = curr;
+    }
+    if (visible_count == 0) return NULL;
+    if (visible_count == 1) return visible[0];
+    Symbol* opened[16]; size_t opened_count = 0;
+    for (size_t i = 0; i < visible_count; i++)
+        if (sema_file_declares_package(file, visible[i]->decl, /*require_open=*/true))
+            opened[opened_count++] = visible[i];
+    if (opened_count == 1) return opened[0];
+    Symbol** clash = opened_count >= 2 ? opened : visible;
+    const char* first = clash[0]->decl->module_name ? clash[0]->decl->module_name : clash[0]->decl->origin_file;
+    const char* second = clash[1]->decl->module_name ? clash[1]->decl->module_name : clash[1]->decl->origin_file;
+    // A qualified const is spelled with a top-level module's name
+    // (`WorldBiome.matGrass`); a module inside a package (`procgen/Texture`)
+    // has no qualified spelling for its consts, so then only "open one" helps.
+    const char* qualifier = NULL;
+    if (first && !strchr(first, '/')) qualifier = first;
+    else if (second && !strchr(second, '/')) qualifier = second;
+    char buf[512];
+    if (qualifier)
+        snprintf(buf, sizeof buf,
+                 "'%.*s' is ambiguous: it is declared in both '%s' and '%s', which are both open here; "
+                 "open only one of them, or qualify it (`%s.%.*s`)",
+                 (int)name.len, name.data, first ? first : "?", second ? second : "?",
+                 qualifier, (int)name.len, name.data);
+    else
+        snprintf(buf, sizeof buf,
+                 "'%.*s' is ambiguous: it is declared in both '%s' and '%s', which are both open here; "
+                 "open only one of them",
+                 (int)name.len, name.data, first ? first : "?", second ? second : "?");
+    if (module) {
+        diag_error(sema_diag_file(module), (int)line, (int)column, buf);
+        module->had_error = true;
+    }
+    return clash[0];
+}
+
 // ===== #881: destructors by name and shape (docs/constructors-and-destructors.md)
 //
 // `func drop(this: mod T)` in T's module is T's DESTRUCTOR; the backends run it
@@ -2343,6 +2400,11 @@ static void sema_analyze_decl_inner(CompilerContext* ctx, AstModule* module, Sym
             // `const` initializer to a literal (decls are analyzed in source
             // order, so a const may reference earlier consts).
             Symbol* gs = symbol_table_lookup(symbols, decl->as.let_decl.name);
+            // This declaration's own symbol: another module may declare a
+            // global of the same name, and that one is found first.
+            for (Symbol* own = gs; own; own = own->next) {
+                if (own->decl == decl) { gs = own; break; }
+            }
             if (gs) {
                 bool immut = !decl->as.let_decl.is_var;
                 gs->is_immutable = immut;
@@ -2471,6 +2533,10 @@ static ConstResult const_eval(SymbolTable* symbols, AstExpr* e) {
             return ok_nonnum;
         case AST_EXPR_IDENT: {
             Symbol* s = symbol_table_lookup(symbols, e->as.ident);
+            if (s && s->decl && s->decl->kind == AST_DECL_GLOBAL_LET) {
+                Symbol* global = sema_resolve_bare_global(symbols, e->as.ident, s_current_decl_origin, NULL, 0, 0);
+                if (global) s = global;
+            }
             if (!s || s->bind_kind != BIND_CONST) return fail;
             if (s->const_is_number) {
                 return (ConstResult){ .ok = true, .numeric = true, .is_float = s->const_is_float, .is_unsigned = s->const_is_unsigned, .d = s->const_d, .i = s->const_i };
@@ -5851,6 +5917,17 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
     switch (expr->kind) {
         case AST_EXPR_IDENT: {
             Symbol* sym = symbol_table_lookup(symbols, expr->as.ident);
+            if (sym && sym->decl && sym->decl->kind == AST_DECL_GLOBAL_LET) {
+                // A module global (not a local shadowing it): pick it by
+                // visibility, not by symbol-table order, and bind it so the
+                // backend emits that module's symbol.
+                Symbol* global = sema_resolve_bare_global(symbols, expr->as.ident, s_current_decl_origin,
+                                                          module, expr->line, expr->column);
+                if (global) {
+                    sym = global;
+                    expr->decl_link = global->decl;
+                }
+            }
             if (sym) {
                 // #970: a function name is not a VALUE (Rae has no first-class
                 // functions), so a bare `now` / `now.method()` / `now as T`
@@ -8303,6 +8380,16 @@ bool sema_analyze_module(CompilerContext* ctx, AstModule* module) {
             Symbol* existing = symbol_table_lookup(&symbols, name);
             if (!existing || (existing->decl && existing->decl->kind == AST_DECL_FUNC && d->kind == AST_DECL_FUNC)) {
                 symbol_table_define(&symbols, ctx->ast_arena, name, d, t, false);
+            } else if (existing->decl && existing->decl->kind == AST_DECL_GLOBAL_LET
+                       && d->kind == AST_DECL_GLOBAL_LET && existing->decl != d) {
+                // A second module's global of the same name gets its own
+                // symbol, placed after the first so a plain lookup still finds
+                // the first; a bare read picks between them by visibility
+                // (sema_resolve_bare_global).
+                Symbol* second = symbol_table_define(&symbols, ctx->ast_arena, name, d, t, false);
+                symbols.head = second->next;
+                second->next = existing->next;
+                existing->next = second;
             } else {
                 // Already defined and not a function overload
             }
